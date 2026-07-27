@@ -52,6 +52,7 @@ func newPreferredDeps(workbenches []config.Workbench, hasEntry bool, pickPath st
 }
 
 func TestSetPreferredWorkbench_WritesName(t *testing.T) {
+	t.Parallel()
 	rec := &preferredCall{}
 	var items []ui.Item
 	wbs := []config.Workbench{{Name: "gs-dev"}, {Name: "minimal"}}
@@ -69,6 +70,7 @@ func TestSetPreferredWorkbench_WritesName(t *testing.T) {
 }
 
 func TestSetPreferredWorkbench_WritesExplicitNone(t *testing.T) {
+	t.Parallel()
 	rec := &preferredCall{}
 	var items []ui.Item
 	wbs := []config.Workbench{{Name: "gs-dev"}}
@@ -83,6 +85,7 @@ func TestSetPreferredWorkbench_WritesExplicitNone(t *testing.T) {
 }
 
 func TestSetPreferredWorkbench_ResetClearsWhenEntryExists(t *testing.T) {
+	t.Parallel()
 	rec := &preferredCall{}
 	var items []ui.Item
 	wbs := []config.Workbench{{Name: "gs-dev"}}
@@ -100,6 +103,7 @@ func TestSetPreferredWorkbench_ResetClearsWhenEntryExists(t *testing.T) {
 }
 
 func TestSetPreferredWorkbench_ResetOfferedOnlyWithEntry(t *testing.T) {
+	t.Parallel()
 	wbs := []config.Workbench{{Name: "gs-dev"}}
 
 	// No entry: the reset item must be absent; the none item present.
@@ -129,6 +133,7 @@ func TestSetPreferredWorkbench_ResetOfferedOnlyWithEntry(t *testing.T) {
 }
 
 func TestSetPreferredWorkbench_EscLeavesPreferenceUntouched(t *testing.T) {
+	t.Parallel()
 	rec := &preferredCall{}
 	var items []ui.Item
 	wbs := []config.Workbench{{Name: "gs-dev"}}

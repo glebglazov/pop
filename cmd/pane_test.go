@@ -29,6 +29,7 @@ func withTmuxMod(t *testing.T, f *tmuxtest.Fake) {
 }
 
 func TestFindPaneWith(t *testing.T) {
+	t.Parallel()
 	// Arrange the agent window's panes as fake state; the module owns the
 	// list-panes construction, so the test asserts on state, not arg vectors.
 	mod := &tmuxtest.Fake{AgentWindows: map[string][]tmuxmod.AgentPane{
@@ -54,6 +55,7 @@ func TestFindPaneWith(t *testing.T) {
 }
 
 func TestRunPaneSendToPaneIDWith(t *testing.T) {
+	t.Parallel()
 	mod := &tmuxtest.Fake{}
 
 	if err := runPaneSendToPaneIDWith(mod, "%63", []string{"hello", "Enter"}); err != nil {
@@ -76,6 +78,7 @@ func TestRunPaneSendToPaneIDWith(t *testing.T) {
 }
 
 func TestHasAgentWindowWith(t *testing.T) {
+	t.Parallel()
 	t.Run("agent window exists", func(t *testing.T) {
 		mod := &tmuxtest.Fake{AgentWindows: map[string][]tmuxmod.AgentPane{
 			"project": {{Title: "server", ID: "%5"}},
@@ -94,6 +97,7 @@ func TestHasAgentWindowWith(t *testing.T) {
 }
 
 func TestIsPaneDeadWith(t *testing.T) {
+	t.Parallel()
 	t.Run("dead pane", func(t *testing.T) {
 		mod := &tmuxtest.Fake{DeadPanes: map[string]bool{"%5": true}}
 		if !isPaneDeadWith(mod, "%5") {
@@ -188,7 +192,7 @@ func newPaneInfoFake(paneInfo map[string]string) *tmuxtest.Fake {
 func setupStateFile(t *testing.T, paneID string, status monitor.PaneStatus) string {
 	t.Helper()
 	dir := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", dir)
+	setCmdLayerDeps(t, newTestCmdDeps(t, "", dir, ""))
 
 	stateDir := filepath.Join(dir, "pop")
 	if err := os.MkdirAll(stateDir, 0755); err != nil {
@@ -335,8 +339,9 @@ func tcpServerEnabledCfg() *config.Config {
 }
 
 func TestRunPaneSetStatusWith_IgnoresConfiguredSource(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", dir)
+	setCmdLayerDeps(t, newTestCmdDeps(t, "", dir, ""))
 
 	cfg := &config.Config{
 		PaneMonitoring: &config.PaneMonitoringConfig{
@@ -367,6 +372,7 @@ func TestRunPaneSetStatusWith_IgnoresConfiguredSource(t *testing.T) {
 	}
 }
 
+// ADR-0145: POP_MONITOR_ADDR exercises real process env — stays serial.
 func TestRunPaneSetStatusWith_SocketSuccessSkipsDirect(t *testing.T) {
 	var handlerCalled bool
 	addr := startMonitorTestServer(t, func(req monitor.Request) monitor.Response {
@@ -376,7 +382,7 @@ func TestRunPaneSetStatusWith_SocketSuccessSkipsDirect(t *testing.T) {
 	t.Setenv("POP_MONITOR_ADDR", addr)
 
 	dir := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", dir)
+	setCmdLayerDeps(t, newTestCmdDeps(t, "", dir, ""))
 
 	directWouldCallTmux := false
 	tmux := &tmuxtest.Fake{PaneInfoFunc: func(paneID string) (tmuxmod.PaneInfo, error) {
@@ -403,6 +409,7 @@ func TestRunPaneSetStatusWith_SocketSuccessSkipsDirect(t *testing.T) {
 	}
 }
 
+// ADR-0145: POP_MONITOR_ADDR exercises real process env — stays serial.
 func TestRunPaneSetStatusWith_SocketFailureFallsBackAndStartsDaemon(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -414,7 +421,7 @@ func TestRunPaneSetStatusWith_SocketFailureFallsBackAndStartsDaemon(t *testing.T
 	t.Setenv("POP_MONITOR_ADDR", addr)
 
 	dir := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", dir)
+	setCmdLayerDeps(t, newTestCmdDeps(t, "", dir, ""))
 
 	daemonStarted := make(chan struct{}, 1)
 	oldHook := paneOnSocketSendFailed
@@ -445,6 +452,7 @@ func TestRunPaneSetStatusWith_SocketFailureFallsBackAndStartsDaemon(t *testing.T
 // --- follow / unfollow ---
 
 func TestResolvePaneArg(t *testing.T) {
+	t.Parallel()
 	oldProject := paneProject
 	defer func() { paneProject = oldProject }()
 	paneProject = ""

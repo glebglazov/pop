@@ -58,6 +58,7 @@ func aboveMarkerRegion(t *testing.T, src string) string {
 // in the file's provenance header. A pin bump or an accidental edit to the
 // base region fails this test instead of requiring manual diffing.
 func TestOverlayBaseMatchesPin(t *testing.T) {
+	t.Parallel()
 	for srcPath, fixturePath := range overlayPinnedFiles {
 		t.Run(srcPath, func(t *testing.T) {
 			src, err := skillFiles.ReadFile(srcPath)

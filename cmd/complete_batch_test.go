@@ -1,5 +1,9 @@
 package cmd
 
+// Batch/agent cmd tests stay serial: they stub package-level
+// taskStdinInteractive / runTaskMultiSelect / taskConfigLoad hooks (ADR-0145).
+
+
 import (
 	"bytes"
 	"io"
@@ -40,12 +44,12 @@ func stubCompleteSelect(t *testing.T, res ui.MultiSelectResult, capture *[]ui.Mu
 }
 
 func TestCompleteTasksCmdNonInteractiveRejected(t *testing.T) {
-	setupRunTaskCmdFixture(t)
+	_, td := setupRunTaskCmdFixture(t)
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 	stubCompleteInteractive(t, false)
 
-	err := runTaskCompleteTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, strings.NewReader(""), "demo")
+	err := runTaskCompleteTasksWith(td, &bytes.Buffer{}, strings.NewReader(""), "demo")
 	if err == nil {
 		t.Fatal("whole-set target with no TTY should error")
 	}
@@ -59,7 +63,7 @@ func TestCompleteTasksCmdNonInteractiveRejected(t *testing.T) {
 }
 
 func TestCompleteTasksCmdConfirmAppliesBatch(t *testing.T) {
-	root := setupRunTaskCmdFixture(t)
+	root, td := setupRunTaskCmdFixture(t)
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 	stubCompleteInteractive(t, true)
@@ -68,7 +72,7 @@ func TestCompleteTasksCmdConfirmAppliesBatch(t *testing.T) {
 	stubCompleteSelect(t, ui.MultiSelectResult{Confirmed: true, Checked: []int{0}}, &items)
 
 	var stdout bytes.Buffer
-	if err := runTaskCompleteTasksWith(tasks.DefaultDeps(), &stdout, strings.NewReader(""), "demo"); err != nil {
+	if err := runTaskCompleteTasksWith(td, &stdout, strings.NewReader(""), "demo"); err != nil {
 		t.Fatalf("batch complete failed: %v", err)
 	}
 
@@ -79,7 +83,7 @@ func TestCompleteTasksCmdConfirmAppliesBatch(t *testing.T) {
 		t.Fatalf("missing batch transition line:\n%s", stdout.String())
 	}
 
-	data, err := os.ReadFile(filepath.Join(runTaskCmdDemoDir(t, root), "index.json"))
+	data, err := os.ReadFile(filepath.Join(runTaskCmdDemoDir(t, td, root), "index.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

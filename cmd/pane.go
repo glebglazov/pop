@@ -559,7 +559,7 @@ func runPaneSetStatusDirect(tmux tmuxmod.Tmux, cfg *config.Config, paneID, rawSt
 		debug.Log("[set-status] %s: invoked with %s (direct)", paneID, status)
 	}
 
-	store := monitor.NewStore(monitor.DefaultStatePath(), nil)
+	store := monitor.NewStore(cmdMonitorStatePath(), nil)
 	err := store.ReportStatus(tmux, monitor.ReportStatusInput{
 		PaneID:                paneID,
 		Status:                status,
@@ -1275,7 +1275,7 @@ var paneStatusCmd = &cobra.Command{
 // waits briefly so the same invocation reports an accurate, live result.
 func ensurePaneStatusDaemon(cfg *config.Config) {
 	if !cfg.PaneMonitoringTCPServer() {
-		if !monitor.IsDaemonRunning(monitor.DefaultPIDPath()) {
+		if !monitor.IsDaemonRunning(cmdMonitorPIDPath()) {
 			fmt.Fprintln(os.Stderr, "monitor daemon not running — starting…")
 			ensureMonitorDaemon()
 		}
@@ -1308,7 +1308,7 @@ func runPaneStatus(cmd *cobra.Command, args []string) error {
 	entries := state.PanesAll()
 
 	// Also load pop history for session_last_visit_at
-	hist, err := history.Load(history.DefaultHistoryPath())
+	hist, err := history.Load(cmdHistoryPath())
 	if err != nil {
 		debug.Error("pane status: load history: %v", err)
 	}
@@ -1419,7 +1419,7 @@ func runPaneSetFollowWith(tmux tmuxmod.Tmux, cfg *config.Config, arg string, fol
 // runPaneSetFollowDirect is the fallback path used when the daemon socket
 // is unavailable (cold start).
 func runPaneSetFollowDirect(tmux tmuxmod.Tmux, paneID string, follow bool) error {
-	store := monitor.NewStore(monitor.DefaultStatePath(), nil)
+	store := monitor.NewStore(cmdMonitorStatePath(), nil)
 	return store.SetFollowing(tmux, paneID, follow)
 }
 
@@ -1485,7 +1485,7 @@ func runPaneVisitWith(tmux tmuxmod.Tmux, cfg *config.Config, args []string) erro
 // runPaneVisitDirect is the fallback path when the daemon socket is
 // unavailable. Updates LastActiveAt only for already-tracked panes.
 func runPaneVisitDirect(paneID string) error {
-	store := monitor.DefaultStore()
+	store := monitor.NewStore(cmdMonitorStatePath(), nil)
 	return store.RecordVisit(paneID)
 }
 

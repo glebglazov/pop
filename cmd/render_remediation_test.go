@@ -9,6 +9,7 @@ import (
 // common-word skill names and protected regions must not be rewritten outside
 // cross-skill invocation contexts.
 func TestRewriteSkillReferencesNoCommonWordCorruption(t *testing.T) {
+	t.Parallel()
 	tree, err := renderComponent(ComponentTaskSkills, "claude", "pop-")
 	if err != nil {
 		t.Fatalf("renderComponent: %v", err)

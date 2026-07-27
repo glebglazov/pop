@@ -168,6 +168,7 @@ func doctorSuggestionByAgent(report *doctorAgentIntentReport, agent string) (doc
 }
 
 func TestDoctorReportsCanonicalCommandFamilies(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	d := readOnlyDoctorDeps(t, fs, true, true, true)
 	setDoctorIntent(d, "claude")
@@ -192,6 +193,7 @@ func TestDoctorReportsCanonicalCommandFamilies(t *testing.T) {
 }
 
 func TestDoctorNestedChecksAreCommandFamilyScopedAndActionable(t *testing.T) {
+	t.Parallel()
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
 	d.loadProjectConfig = func() (*config.Config, error) { return nil, os.ErrNotExist }
 	report, err := buildDoctorReport(d)
@@ -219,6 +221,7 @@ func TestDoctorNestedChecksAreCommandFamilyScopedAndActionable(t *testing.T) {
 }
 
 func TestDoctorDoesNotRenderPaneSkillConflictAsPrimaryIntegrateRow(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	conflictPath := filepath.Join(installerHome, ".claude", "skills", "tmux-pane")
 	fs.files[conflictPath] = []byte("my own skill")
@@ -250,6 +253,7 @@ func TestDoctorDoesNotRenderPaneSkillConflictAsPrimaryIntegrateRow(t *testing.T)
 }
 
 func TestDoctorDoesNotRenderStalePaneSkillAsPrimaryIntegrateRow(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	setup := fakeDeps(installerHome, fs, nil)
 	if err := installFileComponent(setup, installerHome, ComponentPaneSkill, "claude"); err != nil {
@@ -278,6 +282,7 @@ func TestDoctorDoesNotRenderStalePaneSkillAsPrimaryIntegrateRow(t *testing.T) {
 }
 
 func TestDoctorDerivesIntendedAgentsFromTaskConfiguration(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
@@ -299,6 +304,7 @@ func TestDoctorDerivesIntendedAgentsFromTaskConfiguration(t *testing.T) {
 }
 
 func TestDoctorDerivesIntendedAgentsFromInstalledPopArtifactsAndHooks(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	claudeStatusWired(fs)
 	if err := installFileComponent(fakeDeps(installerHome, fs, nil), installerHome, ComponentPaneSkill, "pi"); err != nil {
@@ -323,6 +329,7 @@ func TestDoctorDerivesIntendedAgentsFromInstalledPopArtifactsAndHooks(t *testing
 }
 
 func TestDoctorDerivesIntendedAgentsFromExplicitCommandContext(t *testing.T) {
+	t.Parallel()
 	intent, err := doctorDetectAgentIntent(fakeDeps(installerHome, newFakeFS(), nil), installerHome, func(string) (*config.Config, error) {
 		return nil, os.ErrNotExist
 	}, []string{"opencode"}, func(string) bool { return false })
@@ -339,6 +346,7 @@ func TestDoctorDerivesIntendedAgentsFromExplicitCommandContext(t *testing.T) {
 }
 
 func TestDoctorPathOnlyAgentsAreSuggestionsAndDoNotAffectReadiness(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	detectDeps := fakeDeps(installerHome, fs, nil)
 	intent, err := doctorDetectAgentIntent(detectDeps, installerHome, func(string) (*config.Config, error) {
@@ -377,6 +385,7 @@ func TestDoctorPathOnlyAgentsAreSuggestionsAndDoNotAffectReadiness(t *testing.T)
 }
 
 func TestDoctorPathOnlyConflictIsNotReportedWithoutIntent(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	conflictPath := filepath.Join(installerHome, ".claude", "skills", "tmux-pane")
 	fs.files[conflictPath] = []byte("user-owned skill")
@@ -402,6 +411,7 @@ func TestDoctorPathOnlyConflictIsNotReportedWithoutIntent(t *testing.T) {
 }
 
 func TestDoctorUsesAgentComponentStateOnlyAsSupportingEvidence(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	claudeStatusWired(fs)
 	d := readOnlyDoctorDeps(t, fs, true, true, true)
@@ -436,6 +446,7 @@ func TestDoctorUsesAgentComponentStateOnlyAsSupportingEvidence(t *testing.T) {
 }
 
 func TestDoctorHealthyCoreFamiliesRenderOK(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	claudeStatusWired(fs)
 	d := readOnlyDoctorDeps(t, fs, true, true, true)
@@ -461,6 +472,7 @@ func TestDoctorHealthyCoreFamiliesRenderOK(t *testing.T) {
 }
 
 func TestDoctorProjectReadinessReportsSelectableSourcesOK(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		paths    []config.ExpandedPath
@@ -517,6 +529,7 @@ func TestDoctorProjectReadinessReportsSelectableSourcesOK(t *testing.T) {
 }
 
 func TestDoctorProjectMissingConfigUsesFirstRunConfigurePath(t *testing.T) {
+	t.Parallel()
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
 	d.loadProjectConfig = func() (*config.Config, error) { return nil, os.ErrNotExist }
 
@@ -541,6 +554,7 @@ func TestDoctorProjectMissingConfigUsesFirstRunConfigurePath(t *testing.T) {
 }
 
 func TestDoctorProjectInvalidConfigBlocks(t *testing.T) {
+	t.Parallel()
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
 	d.loadProjectConfig = func() (*config.Config, error) { return nil, errors.New("invalid TOML") }
 
@@ -561,6 +575,7 @@ func TestDoctorProjectInvalidConfigBlocks(t *testing.T) {
 }
 
 func TestDoctorProjectNoConfiguredProjectsBlocks(t *testing.T) {
+	t.Parallel()
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
 	d.expandProjectConfig = func(*config.Config) ([]config.ExpandedPath, error) { return nil, nil }
 	d.expandProjects = func([]config.ExpandedPath) ([]project.ExpandedProject, []string) { return nil, nil }
@@ -583,6 +598,7 @@ func TestDoctorProjectNoConfiguredProjectsBlocks(t *testing.T) {
 }
 
 func TestDoctorProjectAllConfiguredExpansionFailuresBlock(t *testing.T) {
+	t.Parallel()
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
 	d.expandProjectConfig = func(*config.Config) ([]config.ExpandedPath, error) {
 		return []config.ExpandedPath{{Path: "/repo/app", Explicit: true}}, nil
@@ -609,6 +625,7 @@ func TestDoctorProjectAllConfiguredExpansionFailuresBlock(t *testing.T) {
 }
 
 func TestDoctorWayfinderReadinessOKWithZeroMaps(t *testing.T) {
+	t.Parallel()
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
 	d.scanWayfinderMaps = func() (int, error) { return 0, nil }
 
@@ -630,6 +647,7 @@ func TestDoctorWayfinderReadinessOKWithZeroMaps(t *testing.T) {
 }
 
 func TestDoctorWayfinderReadinessOKWithMapsPresent(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	d := readOnlyDoctorDeps(t, fs, true, true, true)
 	setDoctorIntent(d, "claude")
@@ -660,6 +678,7 @@ func TestDoctorWayfinderReadinessOKWithMapsPresent(t *testing.T) {
 }
 
 func TestDoctorWayfinderDegradedWhenMapsExistWithoutTaskSkills(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	d := readOnlyDoctorDeps(t, fs, true, true, true)
 	setDoctorIntent(d, "claude")
@@ -689,6 +708,7 @@ func TestDoctorWayfinderDegradedWhenMapsExistWithoutTaskSkills(t *testing.T) {
 }
 
 func TestDoctorWayfinderZeroMapsSkipsTaskSkillsCheck(t *testing.T) {
+	t.Parallel()
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
 	setDoctorIntent(d, "claude")
 	d.scanWayfinderMaps = func() (int, error) { return 0, nil }
@@ -710,6 +730,7 @@ func TestDoctorWayfinderZeroMapsSkipsTaskSkillsCheck(t *testing.T) {
 }
 
 func TestDoctorWayfinderPathOnlyAgentDoesNotDegradeTaskSkills(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	detectDeps := fakeDeps(installerHome, fs, nil)
 	intent, err := doctorDetectAgentIntent(detectDeps, installerHome, func(string) (*config.Config, error) {
@@ -741,6 +762,7 @@ func TestDoctorWayfinderPathOnlyAgentDoesNotDegradeTaskSkills(t *testing.T) {
 }
 
 func TestDoctorWayfinderReadinessBlocksOutsideGit(t *testing.T) {
+	t.Parallel()
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
 	d.detectRepoContext = func() (*project.RepoContext, error) { return nil, errors.New("not git") }
 
@@ -761,6 +783,7 @@ func TestDoctorWayfinderReadinessBlocksOutsideGit(t *testing.T) {
 }
 
 func TestDoctorWayfinderReadinessBlocksWhenStorageUnwritable(t *testing.T) {
+	t.Parallel()
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
 	d.taskStorageWritable = func() (string, error) {
 		return "", errors.New("write beneath workloads data dir /data/pop/workloads: permission denied")
@@ -784,6 +807,7 @@ func TestDoctorWayfinderReadinessBlocksWhenStorageUnwritable(t *testing.T) {
 }
 
 func TestDoctorWayfinderMapListingFailureBlocks(t *testing.T) {
+	t.Parallel()
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
 	d.scanWayfinderMaps = func() (int, error) {
 		return 0, errors.New("read wayfinder dir: permission denied")
@@ -803,6 +827,7 @@ func TestDoctorWayfinderMapListingFailureBlocks(t *testing.T) {
 }
 
 func TestDoctorWorktreeReadinessOKWithListedWorktrees(t *testing.T) {
+	t.Parallel()
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
 	d.detectRepoContext = func() (*project.RepoContext, error) {
 		return &project.RepoContext{GitRoot: "/repo/app", RepoName: "app"}, nil
@@ -825,6 +850,7 @@ func TestDoctorWorktreeReadinessOKWithListedWorktrees(t *testing.T) {
 }
 
 func TestDoctorWorktreeReadinessOKWithZeroLinkedWorktrees(t *testing.T) {
+	t.Parallel()
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
 	d.detectRepoContext = func() (*project.RepoContext, error) {
 		return &project.RepoContext{GitRoot: "/repo/app", RepoName: "app"}, nil
@@ -852,6 +878,7 @@ func TestDoctorWorktreeReadinessOKWithZeroLinkedWorktrees(t *testing.T) {
 }
 
 func TestDoctorWorktreeReadinessBlocksOutsideGit(t *testing.T) {
+	t.Parallel()
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
 	d.detectRepoContext = func() (*project.RepoContext, error) { return nil, errors.New("not git") }
 
@@ -872,6 +899,7 @@ func TestDoctorWorktreeReadinessBlocksOutsideGit(t *testing.T) {
 }
 
 func TestDoctorTaskHealthyStorageIsOK(t *testing.T) {
+	t.Parallel()
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
 
 	report, err := buildDoctorReport(d)
@@ -906,6 +934,7 @@ func TestDoctorTaskHealthyStorageIsOK(t *testing.T) {
 }
 
 func TestDoctorTaskStorageUnwritableBlocks(t *testing.T) {
+	t.Parallel()
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
 	d.taskStorageWritable = func() (string, error) {
 		return "", errors.New("write beneath workloads data dir /data/pop/workloads: permission denied")
@@ -932,6 +961,7 @@ func TestDoctorTaskStorageUnwritableBlocks(t *testing.T) {
 }
 
 func TestDoctorTaskLegacyTaskSetsAdviseMigrate(t *testing.T) {
+	t.Parallel()
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
 	d.legacyTaskSets = func() ([]string, error) {
 		return []string{"2026-01-01-old-set", "2026-02-02-other"}, nil
@@ -961,6 +991,7 @@ func TestDoctorTaskLegacyTaskSetsAdviseMigrate(t *testing.T) {
 }
 
 func TestDoctorTaskLegacyInspectionFailureIsNA(t *testing.T) {
+	t.Parallel()
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
 	d.legacyTaskSets = func() ([]string, error) {
 		return nil, errors.New("resolve worktree root: not a git repository")
@@ -987,6 +1018,7 @@ func TestDoctorTaskLegacyInspectionFailureIsNA(t *testing.T) {
 }
 
 func TestDoctorTaskOrphanStorageIsReportOnly(t *testing.T) {
+	t.Parallel()
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
 	d.orphanedTaskStorage = func() ([]tasks.OrphanedStorage, error) {
 		return []tasks.OrphanedStorage{
@@ -1022,6 +1054,7 @@ func TestDoctorTaskOrphanStorageIsReportOnly(t *testing.T) {
 }
 
 func TestDoctorTaskLegacyLayoutIsReportOnly(t *testing.T) {
+	t.Parallel()
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
 	d.legacyLayoutStorage = func() ([]string, error) {
 		return []string{"/data/pop/workloads/repo-abc123"}, nil
@@ -1049,6 +1082,7 @@ func TestDoctorTaskLegacyLayoutIsReportOnly(t *testing.T) {
 }
 
 func TestDoctorDaemonStoppedButStartableIsOKAndExitsZero(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	d := readOnlyDoctorDeps(t, fs, true, true, false)
 	out := &bytes.Buffer{}
@@ -1068,6 +1102,7 @@ func TestDoctorDaemonStoppedButStartableIsOKAndExitsZero(t *testing.T) {
 }
 
 func TestDoctorPaneBlocksWhenTmuxUnavailable(t *testing.T) {
+	t.Parallel()
 	d := readOnlyDoctorDeps(t, newFakeFS(), false, true, true)
 
 	report, err := buildDoctorReport(d)
@@ -1091,6 +1126,7 @@ func TestDoctorPaneBlocksWhenTmuxUnavailable(t *testing.T) {
 }
 
 func TestDoctorPaneOKWhenProjectTargetSessionAddressable(t *testing.T) {
+	t.Parallel()
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, false)
 	d.paneSessionAddressable = func() (string, error) {
 		return "target project sessions can be addressed with --project", nil
@@ -1117,6 +1153,7 @@ func TestDoctorPaneOKWhenProjectTargetSessionAddressable(t *testing.T) {
 }
 
 func TestDoctorPaneNotBlockedByStoppedUnstartableMonitorDaemon(t *testing.T) {
+	t.Parallel()
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, false)
 	d.monitorDaemonStartable = func() bool { return false }
 
@@ -1141,6 +1178,7 @@ func TestDoctorPaneNotBlockedByStoppedUnstartableMonitorDaemon(t *testing.T) {
 }
 
 func TestDoctorMonitorBlocksWhenStateUnreadable(t *testing.T) {
+	t.Parallel()
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
 	d.loadMonitorState = func() (*monitor.State, error) {
 		return nil, errors.New("permission denied")
@@ -1163,6 +1201,7 @@ func TestDoctorMonitorBlocksWhenStateUnreadable(t *testing.T) {
 }
 
 func TestDoctorMonitorDegradedWhenAutomaticTrackingQualityReduced(t *testing.T) {
+	t.Parallel()
 	d := readOnlyDoctorDeps(t, newFakeFS(), false, true, true)
 
 	report, err := buildDoctorReport(d)
@@ -1186,6 +1225,7 @@ func TestDoctorMonitorDegradedWhenAutomaticTrackingQualityReduced(t *testing.T) 
 }
 
 func TestDoctorMonitorPartialOnlyForMixedIntendedAgentStatusWiring(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		wiring     []doctorAgentStatusWiring
@@ -1255,6 +1295,7 @@ func TestDoctorMonitorPartialOnlyForMixedIntendedAgentStatusWiring(t *testing.T)
 }
 
 func TestRenderDoctorReportPinsRepresentativeFamilyOutput(t *testing.T) {
+	t.Parallel()
 	report := &doctorReport{update: release.Result{Current: "2026.6.0", Latest: "2026.6.0", State: release.StateCurrent}, families: []doctorFamilyReport{
 		familyReport("pop project", []doctorCheck{
 			{label: "config loads", status: doctorStatusOK, detail: "/cfg/config.toml"},
@@ -1295,6 +1336,7 @@ OK        pop integrate  ready
 }
 
 func TestDoctorUpdateHeaderStates(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		res  release.Result
@@ -1318,6 +1360,7 @@ func TestDoctorUpdateHeaderStates(t *testing.T) {
 // TestDoctorUpdateCheckNeverAffectsFamilyStatus asserts the four Update-check
 // states leave every family's status untouched (CONTEXT.md "Update notice").
 func TestDoctorUpdateCheckNeverAffectsFamilyStatus(t *testing.T) {
+	t.Parallel()
 	states := []release.Result{
 		{Current: "2026.6.0", Latest: "2026.6.1", State: release.StateOutdated},
 		{Current: "2026.6.0", Latest: "2026.6.0", State: release.StateCurrent},
@@ -1355,6 +1398,7 @@ func TestDoctorUpdateCheckNeverAffectsFamilyStatus(t *testing.T) {
 }
 
 func TestDoctorStatusAggregation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		checks     []doctorCheck

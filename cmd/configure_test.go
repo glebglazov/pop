@@ -50,6 +50,7 @@ func realFSDeps() *deps.MockFileSystem {
 }
 
 func TestRunConfigure_FreshConfig(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "pop", "config.toml")
 
@@ -95,6 +96,7 @@ func TestRunConfigure_FreshConfig(t *testing.T) {
 }
 
 func TestRunConfigure_ExistingConfig(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.toml")
 
@@ -152,6 +154,7 @@ func TestRunConfigure_ExistingConfig(t *testing.T) {
 }
 
 func TestRunConfigure_ExistingConfigDecline(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.toml")
 
@@ -188,6 +191,7 @@ func TestRunConfigure_ExistingConfigDecline(t *testing.T) {
 }
 
 func TestRunConfigure_MultiplePatterns(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "pop", "config.toml")
 
@@ -231,6 +235,7 @@ func TestRunConfigure_MultiplePatterns(t *testing.T) {
 }
 
 func TestRunConfigure_PickerCancelled(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.toml")
 
@@ -257,6 +262,7 @@ func TestRunConfigure_PickerCancelled(t *testing.T) {
 }
 
 func TestRunConfigure_WriteFails(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.toml")
 
@@ -286,6 +292,7 @@ func TestRunConfigure_WriteFails(t *testing.T) {
 }
 
 func TestRunConfigure_DisplayDepthInConfig(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "pop", "config.toml")
 
@@ -333,6 +340,7 @@ func TestRunConfigure_DisplayDepthInConfig(t *testing.T) {
 }
 
 func TestRunConfigure_DisplayDepthDefaultNotShown(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "pop", "config.toml")
 
@@ -360,6 +368,7 @@ func TestRunConfigure_DisplayDepthDefaultNotShown(t *testing.T) {
 }
 
 func TestConfirm(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		input    string

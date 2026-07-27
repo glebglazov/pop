@@ -10,6 +10,7 @@ import (
 // Doctor evidence reads), so a change here is a deliberate breaking change,
 // not a refactor.
 func TestCatalog_StableIdentifiers(t *testing.T) {
+	t.Parallel()
 	want := map[ComponentID]bool{
 		"status-wiring": true,
 		"pane-skills":   true,
@@ -50,6 +51,7 @@ func TestCatalog_StableIdentifiers(t *testing.T) {
 // TestCatalog_SupportMatrix asserts the per-agent support matrix: every agent
 // hosts all file-based skill components once its install path exists.
 func TestCatalog_SupportMatrix(t *testing.T) {
+	t.Parallel()
 	allAgents := []string{"claude", "codex", "pi", "opencode", "cursor"}
 
 	cases := []struct {
@@ -88,6 +90,7 @@ func TestCatalog_SupportMatrix(t *testing.T) {
 // TestCatalog_SupportMatrixIsCaseInsensitive guards the agent-name lowercasing
 // in supported, mirroring the integrate dispatcher's case handling.
 func TestCatalog_SupportMatrixIsCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	comp, ok := lookupComponent(ComponentStatusWiring)
 	if !ok {
 		t.Fatal("status-wiring component missing")
@@ -101,6 +104,7 @@ func TestCatalog_SupportMatrixIsCaseInsensitive(t *testing.T) {
 // installs the status-wiring component (hooks land) and nothing else from the
 // catalog is reachable as a default install.
 func TestCatalog_StatusWiringConsumedByIntegrate(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "claude"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -113,6 +117,7 @@ func TestCatalog_StatusWiringConsumedByIntegrate(t *testing.T) {
 // TestCatalog_TaskSkillsSources pins the task-skills embed catalog order.
 // Integrate outcome lines follow this sequence (ADR: Integrate outcome line).
 func TestCatalog_TaskSkillsSources(t *testing.T) {
+	t.Parallel()
 	comp, ok := lookupComponent(ComponentTaskSkills)
 	if !ok {
 		t.Fatal("task-skills component missing")

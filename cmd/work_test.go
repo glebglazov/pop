@@ -13,6 +13,7 @@ import (
 )
 
 func TestWorkCommandTree(t *testing.T) {
+	t.Parallel()
 	for _, path := range [][]string{{"work", "show-path"}, {"work", "dashboard"}} {
 		if _, _, err := rootCmd.Find(path); err != nil {
 			t.Fatalf("Find(%v): %v", path, err)
@@ -21,6 +22,7 @@ func TestWorkCommandTree(t *testing.T) {
 }
 
 func TestWorkHelpDescribesCrossConceptSurface(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	workCmd.SetOut(&buf)
 	workCmd.SetErr(&buf)
@@ -40,21 +42,17 @@ func TestWorkHelpDescribesCrossConceptSurface(t *testing.T) {
 }
 
 func TestWorkShowPathCreatesStorageRoot(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	dataHome := filepath.Join(root, "data")
-	commonDir := filepath.Join(root, "repo", ".git")
+	repoDir := filepath.Join(root, "repo")
+	commonDir := filepath.Join(repoDir, ".git")
 	if err := os.MkdirAll(commonDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("XDG_DATA_HOME", dataHome)
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(filepath.Join(root, "repo")); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
-
-	d := &tasks.Deps{
-		FS: deps.NewRealFileSystem(),
+	cd := newTestCmdDeps(t, repoDir, dataHome, "")
+	cd.Tasks = &tasks.Deps{
+		FS: cd.FS,
 		Git: &deps.MockGit{
 			CommandInDirFunc: func(dir string, args ...string) (string, error) {
 				if len(args) >= 2 && args[0] == "rev-parse" && args[1] == "--git-common-dir" {
@@ -65,6 +63,8 @@ func TestWorkShowPathCreatesStorageRoot(t *testing.T) {
 		},
 		Runner: tasks.RealCommandRunner{},
 	}
+	setCmdLayerDeps(t, cd)
+	d := cd.tasksDeps()
 
 	var workBuf bytes.Buffer
 	if err := runWorkShowPathWith(d, &workBuf); err != nil {
@@ -94,11 +94,12 @@ func TestWorkShowPathCreatesStorageRoot(t *testing.T) {
 }
 
 func TestWorkShowPathOutsideGitRepo(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	dataHome := filepath.Join(root, "data")
-	t.Setenv("XDG_DATA_HOME", dataHome)
-	d := &tasks.Deps{
-		FS: deps.NewRealFileSystem(),
+	cd := newTestCmdDeps(t, root, dataHome, "")
+	cd.Tasks = &tasks.Deps{
+		FS: cd.FS,
 		Git: &deps.MockGit{
 			CommandInDirFunc: func(dir string, args ...string) (string, error) {
 				return "", errors.New("fatal: not a git repository")
@@ -106,6 +107,8 @@ func TestWorkShowPathOutsideGitRepo(t *testing.T) {
 		},
 		Runner: tasks.RealCommandRunner{},
 	}
+	setCmdLayerDeps(t, cd)
+	d := cd.tasksDeps()
 
 	workErr := runWorkShowPathWith(d, &bytes.Buffer{})
 	tasksErr := runTaskShowPathWith(d, &bytes.Buffer{}, "")
@@ -125,6 +128,7 @@ func TestWorkShowPathOutsideGitRepo(t *testing.T) {
 }
 
 func TestWorkDashboardUsesWorkHandler(t *testing.T) {
+	t.Parallel()
 	got, _, err := rootCmd.Find([]string{"work", "dashboard"})
 	if err != nil {
 		t.Fatalf("Find([work dashboard]): %v", err)
@@ -138,6 +142,7 @@ func TestWorkDashboardUsesWorkHandler(t *testing.T) {
 }
 
 func TestQueueDashboardAliasIsHidden(t *testing.T) {
+	t.Parallel()
 	got, _, err := rootCmd.Find([]string{"queue", "dashboard"})
 	if err != nil {
 		t.Fatalf("Find([queue dashboard]): %v", err)

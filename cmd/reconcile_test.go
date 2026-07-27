@@ -46,6 +46,7 @@ func seedOldNamePaneSkill(fs *fakeFS, home, oldName string) (link string) {
 // --- fileComponentStaleResolved unit tests (the three divergence kinds) -------
 
 func TestStaleResolved_NameOnlyDivergence(t *testing.T) {
+	t.Parallel()
 	// Installed under an old name; the current render resolves to a different
 	// name. Stale by resolved-name divergence — content is never consulted.
 	fs := newFakeFS()
@@ -62,6 +63,7 @@ func TestStaleResolved_NameOnlyDivergence(t *testing.T) {
 }
 
 func TestStaleResolved_ContentOnlyDivergence(t *testing.T) {
+	t.Parallel()
 	// Names match; only the rendered bytes differ — the original staleness,
 	// preserved (criterion 3).
 	fs := newFakeFS()
@@ -90,6 +92,7 @@ func TestStaleResolved_ContentOnlyDivergence(t *testing.T) {
 }
 
 func TestStaleResolved_CombinedDivergence(t *testing.T) {
+	t.Parallel()
 	// Both the resolved name and the content differ — stale.
 	fs := newFakeFS()
 	seedOldNamePaneSkill(fs, "/h", "pop-pane")
@@ -108,6 +111,7 @@ func TestStaleResolved_CombinedDivergence(t *testing.T) {
 // --- installed-names probe is name-agnostic -----------------------------------
 
 func TestInstalledNames_FindsRenamedEntry(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	seedOldNamePaneSkill(fs, "/h", "pop-pane")
 	d := fakeDeps("/h", fs, io.Discard)
@@ -124,10 +128,11 @@ func TestInstalledNames_FindsRenamedEntry(t *testing.T) {
 // --- end-to-end refresh paths -------------------------------------------------
 
 func TestUpdateExisting_AppliesSkillPrefixChange(t *testing.T) {
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	// Criterion 1: a config-only skill_prefix change (pop- → bare) is applied by
 	// `pop integrate --update-existing` — the new bare name is linked and the old
 	// pop- entry pruned — even though no embedded source byte changed.
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 	seedFileComponent(t, fs, "/h", ComponentPaneSkill, "claude") // installs pop-tmux-pane
@@ -170,10 +175,11 @@ func TestUpdateExisting_AppliesSkillPrefixChange(t *testing.T) {
 }
 
 func TestEnsureIntegrations_MigratesBaseRename(t *testing.T) {
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	// Criterion 2: a binary release that renames the base (pane → tmux-pane)
 	// auto-migrates the installed entry on the next picker launch (the
 	// binary-revision-gated ensure path).
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 	oldLink := seedOldNamePaneSkill(fs, "/h", "pop-pane")
@@ -203,8 +209,9 @@ func TestEnsureIntegrations_MigratesBaseRename(t *testing.T) {
 }
 
 func TestUpdateStale_ContentOnlyChangeStillRefreshes(t *testing.T) {
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	// Criterion 3: a content-only change (names unchanged) still re-renders.
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 	seedFileComponent(t, fs, "/h", ComponentPaneSkill, "claude")
@@ -224,11 +231,12 @@ func TestUpdateStale_ContentOnlyChangeStillRefreshes(t *testing.T) {
 }
 
 func TestReconcile_SkipsUnownedConflictOnPrefixChange(t *testing.T) {
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	// Criterion 4: reconcile never removes an unowned entry. A prefix change to
 	// bare would resolve to `tmux-pane`, but a hand-written skill sits there —
 	// an unowned conflict. Refresh skips entirely: the user's skill is untouched
 	// and the old pop- entry is left in place (no link created, nothing pruned).
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 	seedFileComponent(t, fs, "/h", ComponentPaneSkill, "claude") // pop-tmux-pane

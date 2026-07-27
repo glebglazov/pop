@@ -23,6 +23,7 @@ func paneSkillPaths() (renderFile, linkDest, linkTarget string) {
 // TestInstallFileComponentInstall covers the clean install: the rendered tree
 // lands under the data dir and the agent location is a symlink into it.
 func TestInstallFileComponentInstall(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
@@ -54,6 +55,7 @@ func TestInstallFileComponentInstall(t *testing.T) {
 // TestInstallFileComponentIdempotent covers re-running: the symlink is rewritten
 // to the same target and nothing duplicates.
 func TestInstallFileComponentIdempotent(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
@@ -76,6 +78,7 @@ func TestInstallFileComponentIdempotent(t *testing.T) {
 // install (a real directory under the pop- name prefix) being replaced by a
 // symlink.
 func TestInstallFileComponentCopyToSymlinkMigration(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
@@ -104,6 +107,7 @@ func TestInstallFileComponentCopyToSymlinkMigration(t *testing.T) {
 // TestInstallFileComponentLegacyClaudeCommandRemoved covers the old slash
 // command being cleaned up by the new skill install path.
 func TestInstallFileComponentLegacyClaudeCommandRemoved(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
@@ -196,6 +200,7 @@ func paneSkillAgents() []paneSkillAgent {
 // agent location is a symlink into it (a skill directory for codex/pi/cursor, a
 // flat file for opencode).
 func TestInstallFileComponentInstallNewAgents(t *testing.T) {
+	t.Parallel()
 	for _, a := range paneSkillAgents() {
 		t.Run(a.name, func(t *testing.T) {
 			fs := newFakeFS()
@@ -222,6 +227,7 @@ func TestInstallFileComponentInstallNewAgents(t *testing.T) {
 // TestInstallFileComponentIdempotentNewAgents covers re-running for pi, cursor,
 // and opencode: a single symlink to the same target, nothing duplicated.
 func TestInstallFileComponentIdempotentNewAgents(t *testing.T) {
+	t.Parallel()
 	for _, a := range paneSkillAgents() {
 		t.Run(a.name, func(t *testing.T) {
 			fs := newFakeFS()
@@ -245,6 +251,7 @@ func TestInstallFileComponentIdempotentNewAgents(t *testing.T) {
 // TestInstallFileComponentMigrationNewAgents covers a pre-existing marker-owned
 // copy-mode install being replaced by a symlink.
 func TestInstallFileComponentMigrationNewAgents(t *testing.T) {
+	t.Parallel()
 	for _, a := range paneSkillAgents() {
 		t.Run(a.name, func(t *testing.T) {
 			fs := newFakeFS()
@@ -288,6 +295,7 @@ func TestInstallFileComponentMigrationNewAgents(t *testing.T) {
 // symlink target: an entry that is a symlink pointing OUTSIDE pop's render tree
 // is not owned by pop and is left untouched.
 func TestInstallFileComponentConflictSkipped(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
@@ -306,6 +314,7 @@ func TestInstallFileComponentConflictSkipped(t *testing.T) {
 
 // TestOwnership exercises the ownership predicate directly across its cases.
 func TestOwnership(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 	integrationsRoot := filepath.Join(installerHome, ".local", "share", "pop", "integrations")
@@ -357,6 +366,7 @@ func TestOwnership(t *testing.T) {
 // render-tree name yields both its canonical `pop-` form and the bare form, so
 // a hand-written skill under either name is caught.
 func TestConflictCandidates(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		prefix string
@@ -386,6 +396,7 @@ func TestConflictCandidates(t *testing.T) {
 // is skipped — never overwritten, never removed — and the report names the
 // conflicting path and states the resolution step.
 func TestInstallFileComponentConflictReportsPathAndResolution(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	out := &bytes.Buffer{}
 	d := fakeDeps(installerHome, fs, out)
@@ -430,6 +441,7 @@ func TestInstallFileComponentConflictReportsPathAndResolution(t *testing.T) {
 // pop- entry is a pop-owned copy-mode install, eligible for migration, not a
 // conflict).
 func TestInstallFileComponentConflictPrefixInsensitive(t *testing.T) {
+	t.Parallel()
 	_, linkDest, _ := paneSkillPaths()
 	agentDir := filepath.Dir(linkDest)
 	bareDest := filepath.Join(agentDir, "tmux-pane")
@@ -476,6 +488,7 @@ func TestInstallFileComponentConflictPrefixInsensitive(t *testing.T) {
 // task-skills component renders three skill directories for claude; a
 // non-pop entry at one of them must not block the other two.
 func TestInstallFileComponentPartialSetInstall(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	out := &bytes.Buffer{}
 	d := fakeDeps(installerHome, fs, out)
@@ -509,6 +522,7 @@ func TestInstallFileComponentPartialSetInstall(t *testing.T) {
 // never treated as a conflict: re-install rewrites it and refresh proceeds,
 // even with the bare-name location also pointing into pop's render tree.
 func TestInstallFileComponentOwnershipExemption(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	out := &bytes.Buffer{}
 	d := fakeDeps(installerHome, fs, out)
@@ -552,6 +566,7 @@ func hasLog(lines []string, substr string) bool {
 // TestInstallFileComponentDebugInstall asserts that a clean install emits debug
 // lines naming the component/agent and the link action taken.
 func TestInstallFileComponentDebugInstall(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 	logf, lines := captureLogf()
@@ -578,6 +593,7 @@ func TestInstallFileComponentDebugInstall(t *testing.T) {
 // TestInstallFileComponentDebugConflict asserts that a conflict emits a debug
 // line naming the conflicting path and stating it is not owned by pop.
 func TestInstallFileComponentDebugConflict(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 	logf, lines := captureLogf()
@@ -605,6 +621,7 @@ func TestInstallFileComponentDebugConflict(t *testing.T) {
 // TestRefreshFileComponentDebugNotInstalled asserts that refresh logs a
 // "not installed — adding" line and installs when the component is absent.
 func TestRefreshFileComponentDebugNotInstalled(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	logf, lines := captureLogf()
 	dry := func() *integrateDeps {
@@ -633,6 +650,7 @@ func TestRefreshFileComponentDebugNotInstalled(t *testing.T) {
 // TestRefreshFileComponentDebugCurrent asserts that refresh logs a
 // "current — no-op" line when the component is installed and up to date.
 func TestRefreshFileComponentDebugCurrent(t *testing.T) {
+	t.Parallel()
 	// First install the component for real so the render tree matches.
 	fs := newFakeFS()
 	realDeps := fakeDeps("/h", fs, nil)
@@ -664,6 +682,7 @@ func TestRefreshFileComponentDebugCurrent(t *testing.T) {
 // TestRefreshFileComponentDebugStale asserts that refresh logs "stale —
 // refreshing" and "refreshed" when the component is installed but outdated.
 func TestRefreshFileComponentDebugStale(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	// Install the component so the symlink is present (marks it as installed),
 	// then corrupt the render tree to make it stale.
@@ -705,6 +724,7 @@ func TestRefreshFileComponentDebugStale(t *testing.T) {
 // TestRefreshFileComponentDebugConflict asserts that refresh logs the conflict
 // path and reason when an unowned entry shadows pop's skill.
 func TestRefreshFileComponentDebugConflict(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	// Place a non-pop entry at the bare name to create a conflict.
 	conflict := filepath.Join("/h", ".claude", "skills", "tmux-pane")

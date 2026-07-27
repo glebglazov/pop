@@ -85,7 +85,7 @@ func loadMonitorStateWith(d *monitor.Deps) *monitor.State {
 // loadMonitorStateAlways loads the monitor state from disk regardless of daemon status.
 // Used by the dashboard which needs state even during daemon restarts.
 func loadMonitorStateAlways() *monitor.State {
-	statePath := monitor.DefaultStatePath()
+	statePath := cmdMonitorStatePath()
 	state, err := monitor.Load(statePath)
 	if err != nil {
 		debug.Error("loadMonitorStateAlways: %v", err)

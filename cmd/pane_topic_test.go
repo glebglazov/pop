@@ -1,5 +1,7 @@
 package cmd
 
+// TMUX_PANE env behavior tests in this file stay serial per ADR-0145.
+
 import (
 	"context"
 	"encoding/json"

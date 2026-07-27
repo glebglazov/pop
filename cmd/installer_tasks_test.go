@@ -58,6 +58,7 @@ var taskSkillNames = []string{"pop-grill-with-docs", "pop-grill-consolidate", "p
 // dir and the agent location receives a symlink per skill. grill-with-docs keeps
 // its companion documents so its internal references resolve.
 func TestInstallTaskSkillsAllAgents(t *testing.T) {
+	t.Parallel()
 	for _, a := range taskAgents() {
 		t.Run(a.name, func(t *testing.T) {
 			fs := newFakeFS()
@@ -105,6 +106,7 @@ func TestInstallTaskSkillsAllAgents(t *testing.T) {
 // TestInstallTaskSkillsIdempotent covers re-running: the same seven symlinks
 // to the same targets, nothing duplicated.
 func TestInstallTaskSkillsIdempotent(t *testing.T) {
+	t.Parallel()
 	for _, a := range taskAgents() {
 		t.Run(a.name, func(t *testing.T) {
 			fs := newFakeFS()
@@ -133,6 +135,7 @@ func TestInstallTaskSkillsIdempotent(t *testing.T) {
 // `pop integrate <agent> --task-skills` installs the core status wiring plus
 // the seven symlinked planning skills, with no prompting.
 func TestRunIntegrateTaskSkillsInstallsExactSet(t *testing.T) {
+	t.Parallel()
 	for _, a := range taskAgents() {
 		t.Run(a.name, func(t *testing.T) {
 			fs := newFakeFS()
@@ -166,6 +169,7 @@ func TestRunIntegrateTaskSkillsInstallsExactSet(t *testing.T) {
 // The old-name vocabulary differs from the new skill name, so it is not even a
 // conflict candidate — all seven current skills install and the leftover stays.
 func TestInstallTaskSkillsLeftoverOldNameNotBlocking(t *testing.T) {
+	t.Parallel()
 	for _, leftover := range []string{"to-issues", "pop-to-issues"} {
 		t.Run(leftover, func(t *testing.T) {
 			fs := newFakeFS()
@@ -207,6 +211,7 @@ func TestInstallTaskSkillsLeftoverOldNameNotBlocking(t *testing.T) {
 // set-subtraction prune path ADR-0063 built for the pane → tmux-pane rename,
 // exercised here for the skill this slice renames.
 func TestInstallTaskSkillsPrunesStaleToPRD(t *testing.T) {
+	t.Parallel()
 	for _, a := range taskAgents() {
 		t.Run(a.name, func(t *testing.T) {
 			fs := newFakeFS()

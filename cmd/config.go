@@ -125,14 +125,14 @@ func runConfigKeys(cmd *cobra.Command, args []string) error {
 
 func runConfigShow(cmd *cobra.Command, _ []string) error {
 	if configShowJSON {
-		out, err := config.EffectiveJSON(config.DefaultConfigPath(), currentRepoTrunk)
+		out, err := config.EffectiveJSON(config.DefaultConfigPathWith(cmdLayerDeps().configDeps()), currentRepoTrunk)
 		if err != nil {
 			return err
 		}
 		fmt.Fprintln(cmd.OutOrStdout(), out)
 		return nil
 	}
-	out, err := config.EffectiveTOML(config.DefaultConfigPath(), currentRepoTrunk)
+	out, err := config.EffectiveTOML(config.DefaultConfigPathWith(cmdLayerDeps().configDeps()), currentRepoTrunk)
 	if err != nil {
 		return err
 	}

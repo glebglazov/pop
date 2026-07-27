@@ -45,6 +45,7 @@ func newWorkbenchPreferDeps(checkout string, checkoutErr error, workbenches []co
 }
 
 func TestRunWorkbenchPrefer_SetsName(t *testing.T) {
+	t.Parallel()
 	rec := &preferredCall{}
 	wbs := []config.Workbench{{Name: "gs-dev"}, {Name: "minimal"}}
 	d := newWorkbenchPreferDeps("/repo/app", nil, wbs, "", rec)
@@ -61,6 +62,7 @@ func TestRunWorkbenchPrefer_SetsName(t *testing.T) {
 }
 
 func TestRunWorkbenchPrefer_BadNameErrorsWithoutWriting(t *testing.T) {
+	t.Parallel()
 	rec := &preferredCall{}
 	wbs := []config.Workbench{{Name: "gs-dev"}}
 	d := newWorkbenchPreferDeps("/repo/app", nil, wbs, "", rec)
@@ -75,6 +77,7 @@ func TestRunWorkbenchPrefer_BadNameErrorsWithoutWriting(t *testing.T) {
 }
 
 func TestRunWorkbenchPrefer_Clear(t *testing.T) {
+	t.Parallel()
 	rec := &preferredCall{}
 	d := newWorkbenchPreferDeps("/repo/app", nil, nil, "", rec)
 
@@ -90,6 +93,7 @@ func TestRunWorkbenchPrefer_Clear(t *testing.T) {
 }
 
 func TestRunWorkbenchPrefer_None(t *testing.T) {
+	t.Parallel()
 	rec := &preferredCall{}
 	d := newWorkbenchPreferDeps("/repo/app", nil, nil, "", rec)
 
@@ -105,6 +109,7 @@ func TestRunWorkbenchPrefer_None(t *testing.T) {
 }
 
 func TestRunWorkbenchPrefer_MutuallyExclusiveFlags(t *testing.T) {
+	t.Parallel()
 	rec := &preferredCall{}
 	d := newWorkbenchPreferDeps("/repo/app", nil, nil, "", rec)
 
@@ -117,6 +122,7 @@ func TestRunWorkbenchPrefer_MutuallyExclusiveFlags(t *testing.T) {
 }
 
 func TestRunWorkbenchPrefer_NameWithFlagRejected(t *testing.T) {
+	t.Parallel()
 	rec := &preferredCall{}
 	wbs := []config.Workbench{{Name: "gs-dev"}}
 	d := newWorkbenchPreferDeps("/repo/app", nil, wbs, "", rec)
@@ -130,6 +136,7 @@ func TestRunWorkbenchPrefer_NameWithFlagRejected(t *testing.T) {
 }
 
 func TestRunWorkbenchPrefer_NoArgsOpensPicker(t *testing.T) {
+	t.Parallel()
 	rec := &preferredCall{}
 	wbs := []config.Workbench{{Name: "gs-dev"}, {Name: "minimal"}}
 	d := newWorkbenchPreferDeps("/repo/app", nil, wbs, workbenchItemPathPrefix+"gs-dev", rec)
@@ -143,6 +150,7 @@ func TestRunWorkbenchPrefer_NoArgsOpensPicker(t *testing.T) {
 }
 
 func TestRunWorkbenchPrefer_CheckoutErrorAborts(t *testing.T) {
+	t.Parallel()
 	rec := &preferredCall{}
 	d := newWorkbenchPreferDeps("", errors.New("not in a git worktree"), nil, "", rec)
 
@@ -155,6 +163,7 @@ func TestRunWorkbenchPrefer_CheckoutErrorAborts(t *testing.T) {
 }
 
 func TestWorkbenchPreferNames_CompletionSource(t *testing.T) {
+	t.Parallel()
 	rec := &preferredCall{}
 	wbs := []config.Workbench{{Name: "gs-dev"}, {Name: "minimal"}}
 	d := newWorkbenchPreferDeps("/repo/app", nil, wbs, "", rec)
@@ -169,6 +178,7 @@ func TestWorkbenchPreferNames_CompletionSource(t *testing.T) {
 }
 
 func TestWorkbenchPreferNames_CheckoutErrorPropagates(t *testing.T) {
+	t.Parallel()
 	rec := &preferredCall{}
 	d := newWorkbenchPreferDeps("", errors.New("not in a git worktree"), nil, "", rec)
 

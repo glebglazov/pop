@@ -548,7 +548,8 @@ func integrationComponentForSkillAlias(alias string) (ComponentID, bool) {
 // components from the merged [integrations] skills list. Status wiring is
 // not included — callers always install it separately.
 var integrationBaselineLoader = func() ([]ComponentID, error) {
-	cfg, err := config.Load(config.DefaultConfigPath())
+	cd := cmdLayerDeps().configDeps()
+	cfg, err := config.LoadWith(cd, config.DefaultConfigPathWith(cd))
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
@@ -578,7 +579,7 @@ func positiveIntegrateFlagError(flag string) error {
 // removes the corresponding skill aliases from the runtime layer (ADR 0065).
 func applyIntegrateRuntimeConfig(bareIntegrate bool, explicitOptOuts map[ComponentID]bool) error {
 	if bareIntegrate {
-		return config.ClearRuntimeIntegrations()
+		return config.ClearRuntimeIntegrationsWith(cmdLayerDeps().configDeps())
 	}
 	if len(explicitOptOuts) == 0 {
 		return nil
@@ -591,7 +592,7 @@ func applyIntegrateRuntimeConfig(bareIntegrate bool, explicitOptOuts map[Compone
 		}
 		aliases = append(aliases, alias)
 	}
-	return config.RemoveRuntimeIntegrationSkills(aliases...)
+	return config.RemoveRuntimeIntegrationSkillsWith(cmdLayerDeps().configDeps(), aliases...)
 }
 
 func runIntegrate(cmd *cobra.Command, args []string) error {

@@ -1,5 +1,8 @@
 package cmd
 
+// Task verb tests stay serial: run*With reads package-level
+// taskProject/taskPath flags (ADR-0145).
+
 import (
 	"bytes"
 	"compress/gzip"
@@ -32,7 +35,7 @@ import (
 // should not "fix" it by re-adding e2e breadth — that shape is intentional.
 
 func TestTaskSetPriorityRefreshesTable(t *testing.T) {
-	root := t.TempDir()
+	root, _, td := setupCmdRepoTest(t)
 	taskProject = ""
 	taskPath = ""
 	taskDefPath = ""
@@ -42,9 +45,7 @@ func TestTaskSetPriorityRefreshesTable(t *testing.T) {
 		taskDefPath = ""
 	})
 
-	initGitRepoCmd(t, root)
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	tasksDir := cmdTasksDir(t, root)
+	tasksDir := cmdTasksDir(t, td, root)
 	taskDir := filepath.Join(tasksDir, "feature")
 	if err := os.MkdirAll(taskDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -57,18 +58,13 @@ func TestTaskSetPriorityRefreshesTable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.DefaultStatePath()); err != nil {
+	if _, err := tasks.RegisterWith(td, tasksDir, tasks.DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
 
 	var buf bytes.Buffer
-	if err := runTaskSetPriorityWith(tasks.DefaultDeps(), &buf, "feature", "7"); err != nil {
+	if err := runTaskSetPriorityWith(td, &buf, "feature", "7"); err != nil {
 		t.Fatalf("set-priority failed: %v", err)
 	}
 	out := buf.String()
@@ -81,28 +77,21 @@ func TestTaskSetPriorityRefreshesTable(t *testing.T) {
 }
 
 func TestTaskArchiveCommandsAndArchivedStatus(t *testing.T) {
-	root := t.TempDir()
+	root, _, td := setupCmdRepoTest(t)
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 
-	initGitRepoCmd(t, root)
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	tasksDir := cmdTasksDir(t, root)
+	tasksDir := cmdTasksDir(t, td, root)
 	writeTaskThoughts(t, tasksDir, "alpha")
 	writeTaskThoughts(t, tasksDir, "beta")
 
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+	if _, err := tasks.RegisterWith(td, tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
 		t.Fatal(err)
 	}
 
 	var archiveOut bytes.Buffer
-	if err := runTaskArchiveWith(tasks.DefaultDeps(), &archiveOut, "alpha"); err != nil {
+	if err := runTaskArchiveWith(td, &archiveOut, "alpha"); err != nil {
 		t.Fatalf("archive failed: %v", err)
 	}
 	if !strings.Contains(archiveOut.String(), "Archived task set alpha") {
@@ -111,7 +100,7 @@ func TestTaskArchiveCommandsAndArchivedStatus(t *testing.T) {
 
 	var defaultOut bytes.Buffer
 	taskStatusArchived = false
-	if err := runTaskStatusWith(tasks.DefaultDeps(), &defaultOut, ""); err != nil {
+	if err := runTaskStatusWith(td, &defaultOut, ""); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(defaultOut.String(), "alpha") || !strings.Contains(defaultOut.String(), "beta") {
@@ -123,7 +112,7 @@ func TestTaskArchiveCommandsAndArchivedStatus(t *testing.T) {
 
 	var archivedOut bytes.Buffer
 	taskStatusArchived = true
-	if err := runTaskStatusWith(tasks.DefaultDeps(), &archivedOut, ""); err != nil {
+	if err := runTaskStatusWith(td, &archivedOut, ""); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(archivedOut.String(), "alpha") || strings.Contains(archivedOut.String(), "beta") {
@@ -132,7 +121,7 @@ func TestTaskArchiveCommandsAndArchivedStatus(t *testing.T) {
 
 	taskStatusArchived = false
 	var unarchiveOut bytes.Buffer
-	if err := runTaskUnarchiveWith(tasks.DefaultDeps(), &unarchiveOut, "alpha"); err != nil {
+	if err := runTaskUnarchiveWith(td, &unarchiveOut, "alpha"); err != nil {
 		t.Fatalf("unarchive failed: %v", err)
 	}
 	if !strings.Contains(unarchiveOut.String(), "Unarchived task set alpha") {
@@ -145,20 +134,13 @@ func TestTaskArchiveCommandsAndArchivedStatus(t *testing.T) {
 // Worktree binding to the current checkout, visible in the store the moment the
 // set registers — no drain required.
 func TestTaskRegisterEagerBindsCurrentCheckoutAdopted(t *testing.T) {
-	root := t.TempDir()
+	root, _, td := setupCmdRepoTest(t)
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 
-	initGitRepoCmd(t, root)
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	tasksDir := cmdTasksDir(t, root)
+	tasksDir := cmdTasksDir(t, td, root)
 	writeTaskThoughts(t, tasksDir, "draft")
 
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
 	origLoad := taskConfigLoad
 	taskConfigLoad = func(string) (*config.Config, error) {
@@ -166,7 +148,6 @@ func TestTaskRegisterEagerBindsCurrentCheckoutAdopted(t *testing.T) {
 	}
 	t.Cleanup(func() { taskConfigLoad = origLoad })
 
-	td := tasks.DefaultDeps()
 	wantPath, err := tasks.ResolveRuntimePathWith(td, root, "")
 	if err != nil {
 		t.Fatalf("resolve runtime path: %v", err)
@@ -197,13 +178,11 @@ func TestTaskRegisterEagerBindsCurrentCheckoutAdopted(t *testing.T) {
 // still carrying the retired worktree/auto_drain keys registers as READY (never
 // MALFORMED) and emits a deprecation warning naming the ignored keys.
 func TestTaskRegisterWarnsOnDeprecatedManifestKeys(t *testing.T) {
-	root := t.TempDir()
+	root, _, td := setupCmdRepoTest(t)
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 
-	initGitRepoCmd(t, root)
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	tasksDir := cmdTasksDir(t, root)
+	tasksDir := cmdTasksDir(t, td, root)
 
 	// A legacy manifest carrying both retired set-level keys.
 	taskDir := filepath.Join(tasksDir, "legacy")
@@ -218,11 +197,6 @@ func TestTaskRegisterWarnsOnDeprecatedManifestKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
 	origLoad := taskConfigLoad
 	taskConfigLoad = func(string) (*config.Config, error) {
@@ -230,7 +204,6 @@ func TestTaskRegisterWarnsOnDeprecatedManifestKeys(t *testing.T) {
 	}
 	t.Cleanup(func() { taskConfigLoad = origLoad })
 
-	td := tasks.DefaultDeps()
 	var out bytes.Buffer
 	if err := runTaskRegisterWith(td, &out, ""); err != nil {
 		t.Fatalf("register failed: %v", err)
@@ -286,20 +259,13 @@ func registeredIntent(t *testing.T, td *tasks.Deps, root, setID string) *tasks.W
 // the current checkout — the worktree is provisioned lazily at first drain, so
 // nothing is bound the moment the set registers.
 func TestTaskRegisterManagedRecordsIntentNoEagerBinding(t *testing.T) {
-	root := t.TempDir()
+	root, _, td := setupCmdRepoTest(t)
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 
-	initGitRepoCmd(t, root)
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	tasksDir := cmdTasksDir(t, root)
+	tasksDir := cmdTasksDir(t, td, root)
 	writeTaskThoughts(t, tasksDir, "draft")
 
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
 	origLoad := taskConfigLoad
 	taskConfigLoad = func(string) (*config.Config, error) {
@@ -307,7 +273,6 @@ func TestTaskRegisterManagedRecordsIntentNoEagerBinding(t *testing.T) {
 	}
 	t.Cleanup(func() { taskConfigLoad = origLoad })
 
-	td := tasks.DefaultDeps()
 
 	taskRegisterManaged = true
 	var regOut bytes.Buffer
@@ -330,33 +295,26 @@ func TestTaskRegisterManagedRecordsIntentNoEagerBinding(t *testing.T) {
 }
 
 func TestTaskArchiveYesArchivesDoneOnly(t *testing.T) {
-	root := t.TempDir()
+	root, _, td := setupCmdRepoTest(t)
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 
-	initGitRepoCmd(t, root)
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	tasksDir := cmdTasksDir(t, root)
+	tasksDir := cmdTasksDir(t, td, root)
 	writeTaskThoughtsWithStatus(t, tasksDir, "done", "done")
 	writeTaskThoughtsWithStatus(t, tasksDir, "ready", "open")
-	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+	if _, err := tasks.RegisterWith(td, tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
 		t.Fatal(err)
 	}
 
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
 	var stdout bytes.Buffer
-	if err := runTaskArchiveSelectionWith(tasks.DefaultDeps(), &stdout, strings.NewReader(""), true); err != nil {
+	if err := runTaskArchiveSelectionWith(td, &stdout, strings.NewReader(""), true); err != nil {
 		t.Fatalf("--yes archive failed: %v", err)
 	}
 	if !strings.Contains(stdout.String(), "Archived task set done") {
 		t.Fatalf("missing done archive report:\n%s", stdout.String())
 	}
-	active, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir))
+	active, err := tasks.RefreshWith(td, tasksDir, tasks.StatePathFor(tasksDir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,27 +324,20 @@ func TestTaskArchiveYesArchivesDoneOnly(t *testing.T) {
 }
 
 func TestTaskArchiveYesNoDoneNoop(t *testing.T) {
-	root := t.TempDir()
+	root, _, td := setupCmdRepoTest(t)
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 
-	initGitRepoCmd(t, root)
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	tasksDir := cmdTasksDir(t, root)
+	tasksDir := cmdTasksDir(t, td, root)
 	writeTaskThoughtsWithStatus(t, tasksDir, "ready", "open")
-	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+	if _, err := tasks.RegisterWith(td, tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
 		t.Fatal(err)
 	}
 
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
 	before, _ := os.ReadFile(tasks.StatePathFor(tasksDir))
 	var stdout bytes.Buffer
-	if err := runTaskArchiveSelectionWith(tasks.DefaultDeps(), &stdout, strings.NewReader(""), true); err != nil {
+	if err := runTaskArchiveSelectionWith(td, &stdout, strings.NewReader(""), true); err != nil {
 		t.Fatalf("--yes zero done should be clean: %v", err)
 	}
 	if !strings.Contains(stdout.String(), "No done task sets to archive.") {
@@ -413,26 +364,19 @@ func cmdArchiveTestWorktree(t *testing.T, repo, branch string) string {
 }
 
 func TestTaskArchiveNoArgNonInteractiveRejected(t *testing.T) {
-	root := t.TempDir()
+	root, _, td := setupCmdRepoTest(t)
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 
-	initGitRepoCmd(t, root)
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	tasksDir := cmdTasksDir(t, root)
+	tasksDir := cmdTasksDir(t, td, root)
 	writeTaskThoughtsWithStatus(t, tasksDir, "done", "done")
-	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+	if _, err := tasks.RegisterWith(td, tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
 		t.Fatal(err)
 	}
 
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 	stubCompleteInteractive(t, false)
 
-	err := runTaskArchiveSelectionWith(tasks.DefaultDeps(), &bytes.Buffer{}, strings.NewReader(""), false)
+	err := runTaskArchiveSelectionWith(td, &bytes.Buffer{}, strings.NewReader(""), false)
 	if err == nil {
 		t.Fatal("no-arg non-interactive archive should error")
 	}
@@ -446,29 +390,22 @@ func TestTaskArchiveNoArgNonInteractiveRejected(t *testing.T) {
 }
 
 func TestTaskUnarchiveNoArgNonInteractiveRejected(t *testing.T) {
-	root := t.TempDir()
+	root, _, td := setupCmdRepoTest(t)
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 
-	initGitRepoCmd(t, root)
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	tasksDir := cmdTasksDir(t, root)
+	tasksDir := cmdTasksDir(t, td, root)
 	writeTaskThoughtsWithStatus(t, tasksDir, "demo", "open")
-	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+	if _, err := tasks.RegisterWith(td, tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tasks.ArchiveTaskSetWith(tasks.DefaultDeps(), nil, nil, tasks.ResolveInput{DefinitionOverride: tasksDir, CWD: root}, "demo"); err != nil {
+	if _, err := tasks.ArchiveTaskSetWith(td, nil, nil, tasks.ResolveInput{DefinitionOverride: tasksDir, CWD: root}, "demo"); err != nil {
 		t.Fatal(err)
 	}
 
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 	stubCompleteInteractive(t, false)
 
-	err := runTaskUnarchiveSelectionWith(tasks.DefaultDeps(), &bytes.Buffer{}, strings.NewReader(""))
+	err := runTaskUnarchiveSelectionWith(td, &bytes.Buffer{}, strings.NewReader(""))
 	if err == nil {
 		t.Fatal("no-arg non-interactive unarchive should error")
 	}
@@ -482,18 +419,18 @@ func TestTaskUnarchiveNoArgNonInteractiveRejected(t *testing.T) {
 }
 
 func TestTaskActionVerbsRejectArchivedTargets(t *testing.T) {
-	root := setupRunTaskCmdFixture(t)
+	root, td := setupRunTaskCmdFixture(t)
 	agent := writeRunTaskFakeAgent(t, root)
 
 	resetTaskFlags()
 	taskAgentCmd = agent
 	t.Cleanup(resetTaskFlags)
 
-	tasksDir := cmdTasksDir(t, root)
-	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+	tasksDir := cmdTasksDir(t, td, root)
+	if _, err := tasks.RegisterWith(td, tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tasks.ArchiveTaskSetWith(tasks.DefaultDeps(), nil, nil, tasks.ResolveInput{}, "demo"); err != nil {
+	if _, err := tasks.ArchiveTaskSetWith(td, nil, nil, tasks.ResolveInput{CWD: root}, "demo"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -502,31 +439,31 @@ func TestTaskActionVerbsRejectArchivedTargets(t *testing.T) {
 		run  func() error
 	}{
 		{"implement set", func() error {
-			return runTaskRunTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo", false, false)
+			return runTaskRunTasksWith(td, &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo", false, false)
 		}},
 		{"implement task", func() error {
-			return runTaskRunTaskWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo/01-a.md", false, false)
+			return runTaskRunTaskWith(td, &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo/01-a.md", false, false)
 		}},
 		{"open task", func() error {
-			return runTaskResetTaskWith(tasks.DefaultDeps(), &bytes.Buffer{}, "demo/01-a.md")
+			return runTaskResetTaskWith(td, &bytes.Buffer{}, "demo/01-a.md")
 		}},
 		{"open set", func() error {
-			return runTaskOpenTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, strings.NewReader(""), "demo")
+			return runTaskOpenTasksWith(td, &bytes.Buffer{}, strings.NewReader(""), "demo")
 		}},
 		{"complete task", func() error {
-			return runTaskCompleteTaskWith(tasks.DefaultDeps(), &bytes.Buffer{}, "demo/01-a.md")
+			return runTaskCompleteTaskWith(td, &bytes.Buffer{}, "demo/01-a.md")
 		}},
 		{"complete set", func() error {
-			return runTaskCompleteTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, strings.NewReader(""), "demo")
+			return runTaskCompleteTasksWith(td, &bytes.Buffer{}, strings.NewReader(""), "demo")
 		}},
 		{"skip task", func() error {
-			return runTaskSkipTaskWith(tasks.DefaultDeps(), &bytes.Buffer{}, "demo/01-a.md")
+			return runTaskSkipTaskWith(td, &bytes.Buffer{}, "demo/01-a.md")
 		}},
 		{"skip set", func() error {
-			return runTaskSkipTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, strings.NewReader(""), "demo")
+			return runTaskSkipTasksWith(td, &bytes.Buffer{}, strings.NewReader(""), "demo")
 		}},
 		{"set-priority", func() error {
-			return runTaskSetPriorityWith(tasks.DefaultDeps(), &bytes.Buffer{}, "demo", "4")
+			return runTaskSetPriorityWith(td, &bytes.Buffer{}, "demo", "4")
 		}},
 	}
 
@@ -545,23 +482,23 @@ func TestTaskActionVerbsRejectArchivedTargets(t *testing.T) {
 }
 
 func TestTaskSnapshotVerbsAcceptArchivedTargets(t *testing.T) {
-	root := setupRunTaskCmdFixture(t)
+	root, td := setupRunTaskCmdFixture(t)
 
 	resetTaskFlags()
 	taskExportOutput = filepath.Join(root, "archived-demo.tar.gz")
 	t.Cleanup(resetTaskFlags)
 
-	tasksDir := cmdTasksDir(t, root)
-	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+	tasksDir := cmdTasksDir(t, td, root)
+	if _, err := tasks.RegisterWith(td, tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tasks.ArchiveTaskSetWith(tasks.DefaultDeps(), nil, nil, tasks.ResolveInput{}, "demo"); err != nil {
+	if _, err := tasks.ArchiveTaskSetWith(td, nil, nil, tasks.ResolveInput{CWD: root}, "demo"); err != nil {
 		t.Fatal(err)
 	}
 
 	t.Run("show-path", func(t *testing.T) {
 		var buf bytes.Buffer
-		if err := runTaskShowPathWith(tasks.DefaultDeps(), &buf, "demo"); err != nil {
+		if err := runTaskShowPathWith(td, &buf, "demo"); err != nil {
 			t.Fatalf("show-path: %v", err)
 		}
 		if !strings.Contains(buf.String(), filepath.Join("tasks", "demo")) {
@@ -571,7 +508,7 @@ func TestTaskSnapshotVerbsAcceptArchivedTargets(t *testing.T) {
 
 	t.Run("export", func(t *testing.T) {
 		var buf bytes.Buffer
-		if err := runTaskExportWith(tasks.DefaultDeps(), &buf, []string{"demo"}); err != nil {
+		if err := runTaskExportWith(td, &buf, []string{"demo"}); err != nil {
 			t.Fatalf("export: %v", err)
 		}
 		if _, err := os.Stat(strings.TrimSpace(buf.String())); err != nil {
@@ -581,10 +518,10 @@ func TestTaskSnapshotVerbsAcceptArchivedTargets(t *testing.T) {
 }
 
 // cmdTasksDir resolves the Task storage tasks directory for a repository checkout.
-// XDG_DATA_HOME must already be set so the location is deterministic.
-func cmdTasksDir(t *testing.T, repoRoot string) string {
+// cmd-layer deps must already route XDG_DATA_HOME for deterministic resolution.
+func cmdTasksDir(t *testing.T, d *tasks.Deps, repoRoot string) string {
 	t.Helper()
-	id, err := tasks.ResolveRepositoryIdentity(tasks.DefaultDeps(), repoRoot)
+	id, err := tasks.ResolveRepositoryIdentity(d, repoRoot)
 	if err != nil {
 		t.Fatalf("resolve storage: %v", err)
 	}
@@ -627,12 +564,10 @@ func writeTaskThoughtsWithStatus(t *testing.T, tasksDir, stem, status string) {
 // as a config/registration-class error on the set (ADR-0059), without provisioning
 // or draining anything.
 func TestTaskStatusSurfacesUnsatisfiableWorktreeDirective(t *testing.T) {
-	root := t.TempDir()
-	initGitRepoCmd(t, root)
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	tasksDir := cmdTasksDir(t, root)
+	root, _, td := setupCmdRepoTest(t)
+	tasksDir := cmdTasksDir(t, td, root)
 	writeTaskThoughts(t, tasksDir, "demo")
-	d := tasks.DefaultDeps()
+	d := td
 	if _, err := tasks.RegisterWith(d, tasksDir, tasks.DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
@@ -658,11 +593,6 @@ func TestTaskStatusSurfacesUnsatisfiableWorktreeDirective(t *testing.T) {
 	taskDefPath = ""
 	t.Cleanup(resetTaskFlags)
 
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
 	var buf bytes.Buffer
 	if err := runTaskStatusWith(d, &buf, ""); err != nil {
@@ -678,13 +608,11 @@ func TestTaskStatusSurfacesUnsatisfiableWorktreeDirective(t *testing.T) {
 }
 
 func TestTaskStatusSetArgDrillsIn(t *testing.T) {
-	root := t.TempDir()
-	initGitRepoCmd(t, root)
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	tasksDir := cmdTasksDir(t, root)
+	root, _, td := setupCmdRepoTest(t)
+	tasksDir := cmdTasksDir(t, td, root)
 	writeTaskThoughts(t, tasksDir, "alpha")
 	writeTaskThoughts(t, tasksDir, "beta")
-	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.DefaultStatePath()); err != nil {
+	if _, err := tasks.RegisterWith(td, tasksDir, tasks.DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -693,14 +621,9 @@ func TestTaskStatusSetArgDrillsIn(t *testing.T) {
 	taskDefPath = ""
 	t.Cleanup(resetTaskFlags)
 
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
 	var buf bytes.Buffer
-	if err := runTaskStatusWith(tasks.DefaultDeps(), &buf, "alpha"); err != nil {
+	if err := runTaskStatusWith(td, &buf, "alpha"); err != nil {
 		t.Fatalf("drill-in should succeed: %v", err)
 	}
 	out := buf.String()
@@ -720,12 +643,10 @@ func TestTaskStatusSetArgDrillsIn(t *testing.T) {
 }
 
 func TestTaskStatusUnknownSetArgErrors(t *testing.T) {
-	root := t.TempDir()
-	initGitRepoCmd(t, root)
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	tasksDir := cmdTasksDir(t, root)
+	root, _, td := setupCmdRepoTest(t)
+	tasksDir := cmdTasksDir(t, td, root)
 	writeTaskThoughts(t, tasksDir, "alpha")
-	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.DefaultStatePath()); err != nil {
+	if _, err := tasks.RegisterWith(td, tasksDir, tasks.DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -734,13 +655,8 @@ func TestTaskStatusUnknownSetArgErrors(t *testing.T) {
 	taskDefPath = ""
 	t.Cleanup(resetTaskFlags)
 
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
-	err := runTaskStatusWith(tasks.DefaultDeps(), &bytes.Buffer{}, "nope")
+	err := runTaskStatusWith(td, &bytes.Buffer{}, "nope")
 	if err == nil {
 		t.Fatal("expected error for unknown set")
 	}
@@ -790,7 +706,7 @@ func TestHandleTaskExitMapsCodes(t *testing.T) {
 }
 
 func TestRunTaskCmdDeclinedIsSuccess(t *testing.T) {
-	root := setupRunTaskCmdFixture(t)
+	root, td := setupRunTaskCmdFixture(t)
 	agent := writeRunTaskFakeAgent(t, root)
 
 	taskProject = ""
@@ -802,7 +718,7 @@ func TestRunTaskCmdDeclinedIsSuccess(t *testing.T) {
 	t.Cleanup(resetTaskFlags)
 
 	var stdout bytes.Buffer
-	err := runTaskRunTaskWith(tasks.DefaultDeps(), &stdout, io.Discard, strings.NewReader("n\n"), "", false, false)
+	err := runTaskRunTaskWith(td, &stdout, io.Discard, strings.NewReader("n\n"), "", false, false)
 	if err != nil {
 		t.Fatalf("declined should succeed: %v", err)
 	}
@@ -813,7 +729,7 @@ func TestRunTaskCmdDeclinedIsSuccess(t *testing.T) {
 }
 
 func TestRunTasksCmdStartsWithoutAFKConsent(t *testing.T) {
-	root := setupRunTaskCmdFixture(t)
+	root, td := setupRunTaskCmdFixture(t)
 	agent := writeRunTaskFakeAgent(t, root)
 
 	resetTaskFlags()
@@ -821,7 +737,7 @@ func TestRunTasksCmdStartsWithoutAFKConsent(t *testing.T) {
 	t.Cleanup(resetTaskFlags)
 
 	var stdout bytes.Buffer
-	err := runTaskRunTasksWith(tasks.DefaultDeps(), &stdout, io.Discard, strings.NewReader("n\n"), "", false, false)
+	err := runTaskRunTasksWith(td, &stdout, io.Discard, strings.NewReader("n\n"), "", false, false)
 	if err != nil {
 		t.Fatalf("set drain should proceed without AFK consent: %v", err)
 	}
@@ -838,33 +754,33 @@ func TestRunTasksCmdStartsWithoutAFKConsent(t *testing.T) {
 }
 
 func TestRunTasksCmdRejectsRelativeTaskSetPath(t *testing.T) {
-	root := setupRunTaskCmdFixture(t)
+	root, td := setupRunTaskCmdFixture(t)
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 
-	err := runTaskRunTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), relTo(t, root, runTaskCmdDemoDir(t, root)), false, false)
+	err := runTaskRunTasksWith(td, &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), relTo(t, root, runTaskCmdDemoDir(t, td, root)), false, false)
 	if err == nil || !strings.Contains(err.Error(), "invalid target") || !strings.Contains(err.Error(), "valid: demo") {
 		t.Fatalf("relative Task set path error = %v", err)
 	}
 }
 
 func TestRunTaskCmdRejectsRelativeTaskPath(t *testing.T) {
-	root := setupRunTaskCmdFixture(t)
+	root, td := setupRunTaskCmdFixture(t)
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 
-	err := runTaskRunTaskWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), relTo(t, root, filepath.Join(runTaskCmdDemoDir(t, root), "01-a.md")), false, false)
+	err := runTaskRunTaskWith(td, &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), relTo(t, root, filepath.Join(runTaskCmdDemoDir(t, td, root), "01-a.md")), false, false)
 	if err == nil || !strings.Contains(err.Error(), "invalid target") || !strings.Contains(err.Error(), "valid: demo") {
 		t.Fatalf("relative task path error = %v", err)
 	}
 }
 
 func TestRunTaskCmdTargetsTaskSetRelativeFile(t *testing.T) {
-	root := setupRunTaskCmdFixture(t)
+	root, td := setupRunTaskCmdFixture(t)
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 
-	err := runTaskRunTaskWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo/01-a.md", false, false)
+	err := runTaskRunTaskWith(td, &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo/01-a.md", false, false)
 	if err != nil {
 		t.Fatalf("task-set-relative file failed: %v", err)
 	}
@@ -872,11 +788,11 @@ func TestRunTaskCmdTargetsTaskSetRelativeFile(t *testing.T) {
 }
 
 func TestRunTaskCmdTargetsTaskSetIdentifier(t *testing.T) {
-	root := setupRunTaskCmdFixture(t)
+	root, td := setupRunTaskCmdFixture(t)
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 
-	err := runTaskRunTaskWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo", false, false)
+	err := runTaskRunTaskWith(td, &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo", false, false)
 	if err != nil {
 		t.Fatalf("Task set identifier failed: %v", err)
 	}
@@ -884,21 +800,21 @@ func TestRunTaskCmdTargetsTaskSetIdentifier(t *testing.T) {
 }
 
 func TestRunTaskCmdRejectsInvalidTaskTargets(t *testing.T) {
-	root := setupRunTaskCmdFixture(t)
+	root, td := setupRunTaskCmdFixture(t)
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 
-	err := runTaskRunTaskWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "01-a", false, false)
+	err := runTaskRunTaskWith(td, &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "01-a", false, false)
 	if err == nil || !strings.Contains(err.Error(), "valid: demo") {
 		t.Fatalf("bare task ID error = %v", err)
 	}
 
-	err = runTaskRunTaskWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "01-a.md", false, false)
+	err = runTaskRunTaskWith(td, &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "01-a.md", false, false)
 	if err == nil || !strings.Contains(err.Error(), "bare filenames") {
 		t.Fatalf("bare filename error = %v", err)
 	}
 
-	err = runTaskRunTaskWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), filepath.Join(runTaskCmdDemoDir(t, root), "01-a.md"), false, false)
+	err = runTaskRunTaskWith(td, &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), filepath.Join(runTaskCmdDemoDir(t, td, root), "01-a.md"), false, false)
 	if err == nil || !strings.Contains(err.Error(), "absolute paths") {
 		t.Fatalf("absolute path error = %v", err)
 	}
@@ -954,18 +870,18 @@ func TestResetTaskCmdRequiresOnePositional(t *testing.T) {
 }
 
 func TestResetTaskCmdTargetsTaskSetRelativeFile(t *testing.T) {
-	root := setupRunTaskCmdFixture(t)
+	root, td := setupRunTaskCmdFixture(t)
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 
-	manifestPath := filepath.Join(runTaskCmdDemoDir(t, root), "index.json")
+	manifestPath := filepath.Join(runTaskCmdDemoDir(t, td, root), "index.json")
 	manifest := `{"tasks":[{"id":"01-a","file":"01-a.md","title":"A","type":"AFK","status":"failed","failed_after":2}]}`
 	if err := os.WriteFile(manifestPath, []byte(manifest), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	var stdout bytes.Buffer
-	if err := runTaskResetTaskWith(tasks.DefaultDeps(), &stdout, "demo/01-a.md"); err != nil {
+	if err := runTaskResetTaskWith(td, &stdout, "demo/01-a.md"); err != nil {
 		t.Fatalf("task-set-relative file failed: %v", err)
 	}
 	if !strings.Contains(stdout.String(), "Reset task demo/01-a to open") {
@@ -975,11 +891,11 @@ func TestResetTaskCmdTargetsTaskSetRelativeFile(t *testing.T) {
 }
 
 func TestResetTaskCmdRejectsBareIdentifier(t *testing.T) {
-	root := setupRunTaskCmdFixture(t)
+	root, td := setupRunTaskCmdFixture(t)
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 
-	err := runTaskResetTaskWith(tasks.DefaultDeps(), &bytes.Buffer{}, "demo")
+	err := runTaskResetTaskWith(td, &bytes.Buffer{}, "demo")
 	if err == nil || !strings.Contains(err.Error(), "<task-set>/<file>.md") {
 		t.Fatalf("bare identifier error = %v", err)
 	}
@@ -995,18 +911,18 @@ func TestCompleteTaskCmdRequiresOnePositional(t *testing.T) {
 }
 
 func TestCompleteTaskCmdTargetsTaskSetRelativeFile(t *testing.T) {
-	root := setupRunTaskCmdFixture(t)
+	root, td := setupRunTaskCmdFixture(t)
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 
 	var stdout bytes.Buffer
-	if err := runTaskCompleteTaskWith(tasks.DefaultDeps(), &stdout, "demo/01-a.md"); err != nil {
+	if err := runTaskCompleteTaskWith(td, &stdout, "demo/01-a.md"); err != nil {
 		t.Fatalf("task-set-relative file failed: %v", err)
 	}
 	if !strings.Contains(stdout.String(), "Completed task demo/01-a") {
 		t.Fatalf("missing canonical success output:\n%s", stdout.String())
 	}
-	manifestPath := filepath.Join(runTaskCmdDemoDir(t, root), "index.json")
+	manifestPath := filepath.Join(runTaskCmdDemoDir(t, td, root), "index.json")
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
 		t.Fatal(err)
@@ -1017,11 +933,11 @@ func TestCompleteTaskCmdTargetsTaskSetRelativeFile(t *testing.T) {
 }
 
 func TestRunTasksCmdRejectsTaskSetRelativeFile(t *testing.T) {
-	root := setupRunTaskCmdFixture(t)
+	root, td := setupRunTaskCmdFixture(t)
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 
-	err := runTaskRunTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo/01-a.md", false, false)
+	err := runTaskRunTasksWith(td, &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo/01-a.md", false, false)
 	if err == nil || !strings.Contains(err.Error(), "bare task set identifier") {
 		t.Fatalf("file reference error = %v", err)
 	}
@@ -1029,13 +945,13 @@ func TestRunTasksCmdRejectsTaskSetRelativeFile(t *testing.T) {
 }
 
 func TestRunTasksCmdTargetsTaskSetIdentifier(t *testing.T) {
-	root := setupRunTaskCmdFixture(t)
+	root, td := setupRunTaskCmdFixture(t)
 	agent := writeRunTaskFakeAgent(t, root)
 	resetTaskFlags()
 	taskAgentCmd = agent
 	t.Cleanup(resetTaskFlags)
 
-	err := runTaskRunTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo", false, false)
+	err := runTaskRunTasksWith(td, &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), "demo", false, false)
 	if err != nil {
 		t.Fatalf("Task set identifier failed: %v", err)
 	}
@@ -1043,11 +959,11 @@ func TestRunTasksCmdTargetsTaskSetIdentifier(t *testing.T) {
 }
 
 func TestRunTasksCmdRejectsAbsoluteTaskSetPath(t *testing.T) {
-	root := setupRunTaskCmdFixture(t)
+	root, td := setupRunTaskCmdFixture(t)
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 
-	err := runTaskRunTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), runTaskCmdDemoDir(t, root), false, false)
+	err := runTaskRunTasksWith(td, &bytes.Buffer{}, io.Discard, strings.NewReader("n\n"), runTaskCmdDemoDir(t, td, root), false, false)
 	if err == nil || !strings.Contains(err.Error(), "absolute paths") {
 		t.Fatalf("absolute path error = %v", err)
 	}
@@ -1121,14 +1037,14 @@ func TestTaskAllowDirtyFlagAcceptsOptionalStrategies(t *testing.T) {
 }
 
 func TestRunTaskCmdNonInteractiveFails(t *testing.T) {
-	root := setupRunTaskCmdFixture(t)
+	root, td := setupRunTaskCmdFixture(t)
 	agent := writeRunTaskFakeAgent(t, root)
 
 	resetTaskFlags()
 	taskAgentCmd = agent
 	t.Cleanup(resetTaskFlags)
 
-	err := runTaskRunTaskWith(tasks.DefaultDeps(), &bytes.Buffer{}, io.Discard, tasks.NonInteractiveReader{}, "", false, false)
+	err := runTaskRunTaskWith(td, &bytes.Buffer{}, io.Discard, tasks.NonInteractiveReader{}, "", false, false)
 	var ee *tasks.ExitError
 	if !errors.As(err, &ee) || ee.Code != tasks.ExitOperational {
 		t.Fatalf("err = %v", err)
@@ -1158,16 +1074,15 @@ func resetTaskFlags() {
 	taskStreamLast = false
 }
 
-func setupRunTaskCmdFixture(t *testing.T) string {
+func setupRunTaskCmdFixture(t *testing.T) (root string, td *tasks.Deps) {
 	t.Helper()
-	root := t.TempDir()
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+	root = t.TempDir()
+	cd := newTestCmdDeps(t, root, "", "")
+	setCmdLayerDeps(t, cd)
+	td = cd.tasksDeps()
 
 	cmd := exec.Command("git", "init")
+	cmd.Dir = root
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v\n%s", err, out)
 	}
@@ -1175,40 +1090,47 @@ func setupRunTaskCmdFixture(t *testing.T) string {
 		{"config", "user.email", "test@test"},
 		{"config", "user.name", "test"},
 	} {
-		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+		c := exec.Command("git", args...)
+		c.Dir = root
+		if out, err := c.CombinedOutput(); err != nil {
 			t.Fatal(err, string(out))
 		}
 	}
 	writeFileCmd(t, filepath.Join(root, ".gitignore"), ".agent/\n.xdg/\n")
 	writeFileCmd(t, filepath.Join(root, "README.md"), "# test\n")
-	if out, err := exec.Command("git", "add", "-A").CombinedOutput(); err != nil {
+	if out, err := exec.Command("git", "-C", root, "add", "-A").CombinedOutput(); err != nil {
 		t.Fatal(err, string(out))
 	}
-	if out, err := exec.Command("git", "commit", "-m", "init").CombinedOutput(); err != nil {
+	if out, err := exec.Command("git", "-C", root, "commit", "-m", "init").CombinedOutput(); err != nil {
 		t.Fatal(err, string(out))
 	}
 
-	xdgData := filepath.Join(root, ".xdg")
-	t.Setenv("XDG_DATA_HOME", xdgData)
 	xdgConfig := filepath.Join(root, ".xdg-config")
-	t.Setenv("XDG_CONFIG_HOME", xdgConfig)
+	cd.FS = cmdTestFS(filepath.Join(root, ".xdg"), xdgConfig)
 	configDir := filepath.Join(xdgConfig, "pop")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	writeFileCmd(t, filepath.Join(configDir, "config.toml"), "[tasks.verify]\nenabled = false\n")
-	tasksDir := cmdTasksDir(t, root)
+	cfgPath := filepath.Join(configDir, "config.toml")
+	origLoad := taskConfigLoad
+	taskConfigLoad = func(path string) (*config.Config, error) {
+		return config.Load(cfgPath)
+	}
+	t.Cleanup(func() { taskConfigLoad = origLoad })
+
+	tasksDir := cmdTasksDir(t, td, root)
 	writeTaskThoughts(t, tasksDir, "demo")
-	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.DefaultStatePath()); err != nil {
+	if _, err := tasks.RegisterWith(td, tasksDir, tasks.DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
-	return root
+	return root, td
 }
 
 // runTaskCmdDemoDir returns the storage directory of the fixture's "demo" Task set.
-func runTaskCmdDemoDir(t *testing.T, root string) string {
+func runTaskCmdDemoDir(t *testing.T, d *tasks.Deps, root string) string {
 	t.Helper()
-	return filepath.Join(cmdTasksDir(t, root), "demo")
+	return filepath.Join(cmdTasksDir(t, d, root), "demo")
 }
 
 // relTo returns a relative path from base to target, failing the test on error.
@@ -1324,8 +1246,7 @@ func TestVerifierSteeringFlagsRegistered(t *testing.T) {
 // for the work-SHA read and verdict key, mirroring `pop tasks implement`'s
 // override instead of resolving from the project root.
 func TestVerifyTaskRuntimePathFlagThreadsIntoResolveInput(t *testing.T) {
-	root := t.TempDir()
-	initGitRepoCmd(t, root)
+	root, _, td := setupCmdRepoTest(t)
 	wt := cmdArchiveTestWorktree(t, root, "verify-runtime-flag")
 
 	resetTaskFlags()
@@ -1340,7 +1261,7 @@ func TestVerifyTaskRuntimePathFlagThreadsIntoResolveInput(t *testing.T) {
 		t.Fatalf("ResolveInput.RuntimeOverride = %q, want %q", in.RuntimeOverride, wt)
 	}
 
-	d := tasks.DefaultDeps()
+	d := td
 	resolvedRuntime, err := tasks.ResolveRuntimePathWith(d, root, in.RuntimeOverride)
 	if err != nil {
 		t.Fatal(err)
@@ -1358,10 +1279,8 @@ func TestVerifyTaskRuntimePathFlagThreadsIntoResolveInput(t *testing.T) {
 }
 
 func TestTaskExportImportRoundtripCmd(t *testing.T) {
-	root := t.TempDir()
-	initGitRepoCmd(t, root)
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	tasksDir := cmdTasksDir(t, root)
+	root, cd, td := setupCmdRepoTest(t)
+	tasksDir := cmdTasksDir(t, td, root)
 	const setID = "2026-06-01-user-auth"
 	writeTaskThoughts(t, tasksDir, setID)
 
@@ -1372,18 +1291,9 @@ func TestTaskExportImportRoundtripCmd(t *testing.T) {
 	taskImportAs = ""
 	t.Cleanup(resetTaskFlags)
 
-	oldWd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
-
-	d := tasks.DefaultDeps()
+	setCmdLayerDeps(t, cd)
 	var exportBuf bytes.Buffer
-	if err := runTaskExportWith(d, &exportBuf, []string{setID}); err != nil {
+	if err := runTaskExportWith(td, &exportBuf, []string{setID}); err != nil {
 		t.Fatalf("export: %v", err)
 	}
 	archivePath := strings.TrimSpace(exportBuf.String())
@@ -1393,15 +1303,11 @@ func TestTaskExportImportRoundtripCmd(t *testing.T) {
 
 	dstRoot := t.TempDir()
 	initGitRepoCmd(t, dstRoot)
-	t.Setenv("XDG_DATA_HOME", filepath.Join(dstRoot, ".xdg"))
-	oldWd2, _ := os.Getwd()
-	if err := os.Chdir(dstRoot); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd2) })
+	cd2 := newTestCmdDeps(t, dstRoot, filepath.Join(dstRoot, ".xdg"), "")
+	setCmdLayerDeps(t, cd2)
 
 	var importBuf bytes.Buffer
-	if err := runTaskImportWith(d, &importBuf, archivePath); err != nil {
+	if err := runTaskImportWith(cd2.tasksDeps(), &importBuf, archivePath); err != nil {
 		t.Fatalf("import: %v", err)
 	}
 	importedPath := strings.TrimSpace(importBuf.String())
@@ -1455,20 +1361,13 @@ func writeStreamData(t *testing.T, dir, name string, agent string, attempt int, 
 
 // setupStreamCmdFixture creates a git repo with one registered task set
 // ("demo") and writes one attempt stream for the task, returning the root.
-func setupStreamCmdFixture(t *testing.T) string {
+func setupStreamCmdFixture(t *testing.T) (root string, td *tasks.Deps) {
 	t.Helper()
-	root := t.TempDir()
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+	root, _, td = setupCmdRepoTest(t)
 
-	initGitRepoCmd(t, root)
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	tasksDir := cmdTasksDir(t, root)
+	tasksDir := cmdTasksDir(t, td, root)
 	writeTaskThoughts(t, tasksDir, "demo")
-	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
+	if _, err := tasks.RegisterWith(td, tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1477,7 +1376,7 @@ func setupStreamCmdFixture(t *testing.T) string {
 	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
 	writeStreamData(t, streamDir, "attempt-001.jsonl.gz", "claude", 1, base, "completed", 60_000)
 
-	return root
+	return root, td
 }
 
 // TestTaskStreamNonTTYBypassesPager verifies that when stdout is not
@@ -1485,13 +1384,13 @@ func setupStreamCmdFixture(t *testing.T) string {
 // to the provided writer without passing through a pager, for both the
 // rendered path and the --raw path.
 func TestTaskStreamNonTTYBypassesPager(t *testing.T) {
-	setupStreamCmdFixture(t)
+	_, td := setupStreamCmdFixture(t)
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 
 	// Rendered output through a buffer (pipded path) — pager must not intervene.
 	var buf bytes.Buffer
-	if err := runTaskStreamWith(tasks.DefaultDeps(), &buf, "demo"); err != nil {
+	if err := runTaskStreamWith(td, &buf, "demo"); err != nil {
 		t.Fatalf("runTaskStreamWith: %v", err)
 	}
 	out := buf.String()
@@ -1510,14 +1409,14 @@ func TestTaskStreamNonTTYBypassesPager(t *testing.T) {
 }
 
 func TestTaskStreamRawNonTTYBypassesPager(t *testing.T) {
-	setupStreamCmdFixture(t)
+	_, td := setupStreamCmdFixture(t)
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 
 	// --raw output through a buffer (pipded path) — pager must not intervene.
 	taskStreamRaw = true
 	var buf bytes.Buffer
-	if err := runTaskStreamWith(tasks.DefaultDeps(), &buf, "demo"); err != nil {
+	if err := runTaskStreamWith(td, &buf, "demo"); err != nil {
 		t.Fatalf("runTaskStreamWith (--raw): %v", err)
 	}
 	out := buf.String()
@@ -1530,7 +1429,7 @@ func TestTaskStreamRawNonTTYBypassesPager(t *testing.T) {
 }
 
 func TestTaskStreamTTYPipesThroughPager(t *testing.T) {
-	setupStreamCmdFixture(t)
+	_, _ = setupStreamCmdFixture(t)
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 
@@ -1560,7 +1459,7 @@ func TestTaskStreamTTYPipesThroughPager(t *testing.T) {
 }
 
 func TestTaskStreamRawTTYPipesThroughPager(t *testing.T) {
-	setupStreamCmdFixture(t)
+	_, _ = setupStreamCmdFixture(t)
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 

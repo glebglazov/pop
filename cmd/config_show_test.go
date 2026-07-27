@@ -58,6 +58,7 @@ func realPath(t *testing.T, path string) string {
 // no trunk config: the resolver reports the git-derived main worktree as the
 // trunk and bare = false. Fully mocked git — no real repo.
 func TestResolveCurrentRepoTrunkNonBareDerived(t *testing.T) {
+	t.Parallel()
 	const repo = "/repo"
 	td := mockTrunkDeps(t, func(dir string, args ...string) (string, error) {
 		switch strings.Join(args, " ") {
@@ -89,6 +90,7 @@ func TestResolveCurrentRepoTrunkNonBareDerived(t *testing.T) {
 // config-declared trunk = true names one worktree: the resolver reports that
 // worktree as the trunk and bare = true. Fully mocked git — no real repo.
 func TestResolveCurrentRepoTrunkBareConfigOverride(t *testing.T) {
+	t.Parallel()
 	const (
 		bareDir = "/base/bare.git"
 		wt      = "/base/trunkwt"
@@ -134,6 +136,7 @@ func TestResolveCurrentRepoTrunkBareConfigOverride(t *testing.T) {
 // git fails the in-repo probe, so the resolver returns nil and the current-repo
 // section is omitted. Fully mocked git — no real repo.
 func TestResolveCurrentRepoTrunkOutsideRepo(t *testing.T) {
+	t.Parallel()
 	const dir = "/not/a/repo"
 	td := mockTrunkDeps(t, func(_ string, _ ...string) (string, error) {
 		// Outside a git repo every git invocation fails.
@@ -157,6 +160,7 @@ func boolPtrShow(b bool) *bool { return &b }
 // temp git repo so currentRepoTrunk resolves a genuine trunk, exercising the
 // same path pop config show --json takes in practice.
 func TestRunConfigShowJSONEmitsValidJSON(t *testing.T) {
+	t.Parallel()
 	xdgConfig := filepath.Join(t.TempDir(), "xdgconfig")
 	if err := os.MkdirAll(filepath.Join(xdgConfig, "pop"), 0o755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
@@ -164,8 +168,6 @@ func TestRunConfigShowJSONEmitsValidJSON(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(xdgConfig, "pop", "config.toml"), nil, 0o644); err != nil {
 		t.Fatalf("write config.toml: %v", err)
 	}
-	t.Setenv("XDG_CONFIG_HOME", xdgConfig)
-	t.Setenv("XDG_DATA_HOME", filepath.Join(t.TempDir(), "xdgdata"))
 
 	repo := t.TempDir()
 	runGitShow(t, repo, "init")
@@ -173,14 +175,8 @@ func TestRunConfigShowJSONEmitsValidJSON(t *testing.T) {
 	runGitShow(t, repo, "config", "user.name", "x")
 	runGitShow(t, repo, "commit", "--allow-empty", "-m", "init")
 
-	oldWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	if err := os.Chdir(repo); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
-	defer func() { _ = os.Chdir(oldWd) }()
+	cd := newTestCmdDeps(t, repo, filepath.Join(t.TempDir(), "xdgdata"), xdgConfig)
+	setCmdLayerDeps(t, cd)
 
 	oldJSON := configShowJSON
 	configShowJSON = true
@@ -227,6 +223,7 @@ func TestRunConfigShowJSONEmitsValidJSON(t *testing.T) {
 // TestConfigShowJSONFlagInHelp verifies --json is documented in `pop config
 // show --help`.
 func TestConfigShowJSONFlagInHelp(t *testing.T) {
+	t.Parallel()
 	f := configShowCmd.Flags().Lookup("json")
 	if f == nil {
 		t.Fatal("expected --json flag registered on config show")

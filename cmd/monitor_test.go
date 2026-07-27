@@ -18,6 +18,7 @@ import (
 )
 
 func TestBinaryNewerThanPIDWith(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	older := now.Add(-1 * time.Hour)
 	newer := now.Add(1 * time.Hour)
@@ -92,6 +93,7 @@ func TestBinaryNewerThanPIDWith(t *testing.T) {
 }
 
 func TestRunPaneMonitorStatusWith(t *testing.T) {
+	t.Parallel()
 	t.Run("shows running daemon with panes", func(t *testing.T) {
 		panes := map[string]*monitor.PaneEntry{
 			"%1": {
@@ -178,6 +180,7 @@ func TestRunPaneMonitorStatusWith(t *testing.T) {
 }
 
 func TestBuildMonitorHandler_DispatchesByCmd(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	statePath := dir + "/monitor.json"
 	emptyState := &monitor.State{Panes: map[string]*monitor.PaneEntry{}}
@@ -224,6 +227,7 @@ func TestBuildMonitorHandler_DispatchesByCmd(t *testing.T) {
 }
 
 func TestHandleSetFollowing(t *testing.T) {
+	t.Parallel()
 	t.Run("rejects request without pane_id", func(t *testing.T) {
 		statePath := setupEmptyState(t)
 		follow := true
@@ -255,6 +259,7 @@ func TestHandleSetFollowing(t *testing.T) {
 }
 
 func TestHandleVisit(t *testing.T) {
+	t.Parallel()
 	t.Run("rejects request without pane_id", func(t *testing.T) {
 		statePath := setupEmptyState(t)
 		resp := handleVisit(statePath, monitor.Request{Cmd: "visit"})
@@ -309,9 +314,10 @@ func seedMonitorStateDir(t *testing.T, panes map[string]*monitor.PaneEntry) (sta
 }
 
 func TestHandleSetStatus_IgnoresSourceBeforeStateWork(t *testing.T) {
+	t.Parallel()
 	statePath := setupEmptyState(t)
 	configDir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", configDir)
+	setCmdLayerDeps(t, newTestCmdDeps(t, "", "", configDir))
 	popDir := filepath.Join(configDir, "pop")
 	if err := os.MkdirAll(popDir, 0755); err != nil {
 		t.Fatal(err)
@@ -363,12 +369,13 @@ func assertPaneStatesMatch(t *testing.T, handlerState, directState *monitor.Stat
 }
 
 func TestSetStatus_HandlerAndDirectDelegation(t *testing.T) {
+	t.Parallel()
 	initial := map[string]*monitor.PaneEntry{
 		"%1": {PaneID: "%1", Session: "test", Status: monitor.StatusWorking},
 	}
 	handlerPath, _ := seedMonitorStateDir(t, clonePaneMap(initial))
 	directPath, dataHome := seedMonitorStateDir(t, clonePaneMap(initial))
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	setCmdLayerDeps(t, newTestCmdDeps(t, "", dataHome, t.TempDir()))
 
 	req := monitor.Request{Cmd: "set-status", PaneID: "%1", Status: "clear"}
 	tmux := &tmuxtest.Fake{}
@@ -378,7 +385,7 @@ func TestSetStatus_HandlerAndDirectDelegation(t *testing.T) {
 		t.Fatalf("handler error: %s", resp.Error)
 	}
 
-	t.Setenv("XDG_DATA_HOME", dataHome)
+	setCmdLayerDeps(t, newTestCmdDeps(t, "", dataHome, ""))
 	if err := runPaneSetStatusDirect(tmux, &config.Config{}, "%1", "clear", "", false, ""); err != nil {
 		t.Fatalf("direct error: %v", err)
 	}
@@ -387,6 +394,7 @@ func TestSetStatus_HandlerAndDirectDelegation(t *testing.T) {
 }
 
 func TestSetFollowing_HandlerAndDirectDelegation(t *testing.T) {
+	t.Parallel()
 	followTrue := true
 	initial := map[string]*monitor.PaneEntry{
 		"%3": {PaneID: "%3", Session: "proj-b", Status: monitor.StatusWorking},
@@ -406,7 +414,7 @@ func TestSetFollowing_HandlerAndDirectDelegation(t *testing.T) {
 		t.Fatalf("handler error: %s", resp.Error)
 	}
 
-	t.Setenv("XDG_DATA_HOME", dataHome)
+	setCmdLayerDeps(t, newTestCmdDeps(t, "", dataHome, ""))
 	if err := runPaneSetFollowDirect(tmux, "%3", true); err != nil {
 		t.Fatalf("direct error: %v", err)
 	}
@@ -415,6 +423,7 @@ func TestSetFollowing_HandlerAndDirectDelegation(t *testing.T) {
 }
 
 func TestVisit_HandlerAndDirectDelegation(t *testing.T) {
+	t.Parallel()
 	before := time.Now().Add(-1 * time.Hour)
 	initial := map[string]*monitor.PaneEntry{
 		"%3": {
@@ -434,7 +443,7 @@ func TestVisit_HandlerAndDirectDelegation(t *testing.T) {
 		t.Fatalf("handler error: %s", resp.Error)
 	}
 
-	t.Setenv("XDG_DATA_HOME", dataHome)
+	setCmdLayerDeps(t, newTestCmdDeps(t, "", dataHome, ""))
 	if err := runPaneVisitDirect("%3"); err != nil {
 		t.Fatalf("direct error: %v", err)
 	}
@@ -455,6 +464,7 @@ func clonePaneMap(in map[string]*monitor.PaneEntry) map[string]*monitor.PaneEntr
 }
 
 func TestUninstallTmuxAutoClearHooksWith(t *testing.T) {
+	t.Parallel()
 	// Two pop hooks and one unrelated ("echo other hook") are installed.
 	tmux := &tmuxtest.Fake{InstalledHooks: []tmuxmod.Hook{
 		{Index: "after-select-pane[0]", Command: `run-shell "pop pane set-status #{pane_id} read"`},

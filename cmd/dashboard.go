@@ -205,7 +205,7 @@ func handleDashboardSwitch(result ui.MonitorDashboardResult, dismissUnread bool)
 	if result.Selected == nil {
 		return ""
 	}
-	hist, err := history.Load(history.DefaultHistoryPath())
+	hist, err := history.Load(cmdHistoryPath())
 	if err != nil {
 		debug.Error("dashboard: load history: %v", err)
 	}
@@ -217,7 +217,7 @@ func handleDashboardSwitch(result ui.MonitorDashboardResult, dismissUnread bool)
 		debug.Error("dashboard: save history: %v", err)
 	}
 	if dismissUnread {
-		store := monitor.DefaultStore()
+		store := monitor.NewStore(cmdMonitorStatePath(), nil)
 		if err := store.DismissUnread(result.Selected.PaneID); err != nil {
 			debug.Error("dashboard dismiss-unread %s: %v", result.Selected.PaneID, err)
 		}
@@ -234,7 +234,7 @@ func saveDashboardFollowing(following bool) {
 		return
 	}
 	state.DashboardFollowing = following
-	if err := state.SaveWith(monitor.DefaultDeps()); err != nil {
+	if err := state.SaveWith(cmdLayerDeps().monitorDeps()); err != nil {
 		debug.Error("saveDashboardFollowing: save: %v", err)
 	}
 }
@@ -306,7 +306,7 @@ func buildDashboardPanesWithCursor(currentPaneID, currentPaneSession, cursorPosi
 	}
 
 	// Build per-session last-visit timestamps from pop history
-	hist, err := history.Load(history.DefaultHistoryPath())
+	hist, err := history.Load(cmdHistoryPath())
 	if err != nil {
 		debug.Error("buildDashboardPanes: load history: %v", err)
 	}

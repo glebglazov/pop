@@ -15,10 +15,10 @@ import (
 
 func integrateRuntimePath(t *testing.T) string {
 	t.Helper()
-	if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" {
+	if xdg := cmdLayerDeps().FileSystem().Getenv("XDG_DATA_HOME"); xdg != "" {
 		return filepath.Join(xdg, "pop", "config.runtime.toml")
 	}
-	t.Fatal("XDG_DATA_HOME must be set")
+	t.Fatal("cmd-layer XDG_DATA_HOME must be set")
 	return ""
 }
 
@@ -62,7 +62,8 @@ func readIntegrateRuntimeSkills(t *testing.T) []string {
 }
 
 func TestIntegrateRuntimeConfig_NoPaneSkill_WritesRuntimeAndRemovesArtifacts(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	fs := newFakeFS()
 	home := "/h"
 
@@ -98,7 +99,8 @@ func TestIntegrateRuntimeConfig_NoPaneSkill_WritesRuntimeAndRemovesArtifacts(t *
 }
 
 func TestIntegrateRuntimeConfig_NoTaskSkills_WritesRuntimeAndRemovesArtifacts(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	fs := newFakeFS()
 	home := "/h"
 
@@ -134,7 +136,8 @@ func TestIntegrateRuntimeConfig_NoTaskSkills_WritesRuntimeAndRemovesArtifacts(t 
 }
 
 func TestIntegrateRuntimeConfig_BareIntegrateClearsRuntime(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	writeIntegrateRuntimeFile(t, `
 [integrations]
 skills = ["tasks"]
@@ -150,13 +153,14 @@ skills = ["tasks"]
 }
 
 func TestIntegrateRuntimeConfig_UserConfigWinsAfterBareClear(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	dataDir := filepath.Join(root, "data")
 	configDir := filepath.Join(root, "config")
 	userPath := filepath.Join(configDir, "config.toml")
 	runtimePath := filepath.Join(dataDir, "pop", "config.runtime.toml")
 
-	t.Setenv("XDG_DATA_HOME", dataDir)
+	setCmdLayerDeps(t, newTestCmdDeps(t, "", dataDir, ""))
 	if err := os.MkdirAll(filepath.Dir(runtimePath), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +212,8 @@ skills = ["tasks"]
 }
 
 func TestIntegrateRuntimeConfig_VariadicNoFlagsOncePerInvocation(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 
 	optOuts := map[ComponentID]bool{
 		ComponentPaneSkill:  true,
@@ -232,7 +237,8 @@ func TestIntegrateRuntimeConfig_VariadicNoFlagsOncePerInvocation(t *testing.T) {
 }
 
 func TestIntegrateRuntimeConfig_NoPaneSkillFromExistingRuntime(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	writeIntegrateRuntimeFile(t, `
 [integrations]
 skills = ["tasks", "pane"]

@@ -15,6 +15,7 @@ import (
 )
 
 func TestIsStandaloneSession(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		item     ui.Item
@@ -53,6 +54,7 @@ func TestIsStandaloneSession(t *testing.T) {
 }
 
 func TestStandaloneSessionName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		item     ui.Item
@@ -86,6 +88,7 @@ func TestStandaloneSessionName(t *testing.T) {
 }
 
 func TestSessionHistoryPath(t *testing.T) {
+	t.Parallel()
 	hist := &history.History{
 		Entries: []history.Entry{
 			{Path: "/home/user/my.project", LastAccess: time.Now()},
@@ -132,6 +135,7 @@ func TestSessionHistoryPath(t *testing.T) {
 }
 
 func TestSessionHistoryPath_PartialMatch(t *testing.T) {
+	t.Parallel()
 	// When session name is "repo/worktree-name", the last component "worktree-name"
 	// should match a history entry whose sanitized base is "worktree-name"
 	hist := &history.History{
@@ -211,6 +215,7 @@ func mockMonitorDepsNotRunning() *monitor.Deps {
 }
 
 func TestLoadMonitorStateWith(t *testing.T) {
+	t.Parallel()
 	t.Run("returns state when daemon running", func(t *testing.T) {
 		d := mockMonitorDeps(map[string]*monitor.PaneEntry{
 			"%1": {PaneID: "%1", Session: "proj", Status: monitor.StatusWorking},
@@ -236,6 +241,7 @@ func TestLoadMonitorStateWith(t *testing.T) {
 }
 
 func TestMonitorAttentionSessionsWith(t *testing.T) {
+	t.Parallel()
 	t.Run("returns sessions needing attention", func(t *testing.T) {
 		d := mockMonitorDeps(map[string]*monitor.PaneEntry{
 			"%1": {PaneID: "%1", Session: "proj-a", Status: monitor.StatusUnread},
@@ -262,6 +268,7 @@ func TestMonitorAttentionSessionsWith(t *testing.T) {
 }
 
 func TestCurrentTmuxSessionWith(t *testing.T) {
+	t.Parallel()
 	t.Run("returns session name", func(t *testing.T) {
 		mod := &tmuxtest.Fake{CurrentSessionName: "my-session"}
 		result := currentTmuxSessionWith(mod)
@@ -280,6 +287,7 @@ func TestCurrentTmuxSessionWith(t *testing.T) {
 }
 
 func TestTmuxPaneCommandsWith(t *testing.T) {
+	t.Parallel()
 	mod := &tmuxtest.Fake{
 		PaneCommandMap: map[string]string{"%1": "zsh", "%2": "node", "%3": "vim"},
 	}
@@ -297,6 +305,7 @@ func TestTmuxPaneCommandsWith(t *testing.T) {
 }
 
 func TestCapturePanePreviewWith(t *testing.T) {
+	t.Parallel()
 	t.Run("returns pane content", func(t *testing.T) {
 		mod := &tmuxtest.Fake{
 			PreviewContent: map[string]string{"%5": "line 1\nline 2\nline 3"},
@@ -321,6 +330,7 @@ func TestCapturePanePreviewWith(t *testing.T) {
 }
 
 func TestKillTmuxSessionByNameWith(t *testing.T) {
+	t.Parallel()
 	mod := &tmuxtest.Fake{Live: map[string]string{"my-session": "/proj"}}
 
 	killTmuxSessionByNameWith(mod, "my-session")
@@ -333,6 +343,7 @@ func TestKillTmuxSessionByNameWith(t *testing.T) {
 }
 
 func TestSwitchToTmuxTargetWith_InTmux(t *testing.T) {
+	t.Parallel()
 	mod := &tmuxtest.Fake{Inside: true}
 
 	err := switchToTmuxTargetWith(mod, "target-session")
@@ -345,6 +356,7 @@ func TestSwitchToTmuxTargetWith_InTmux(t *testing.T) {
 }
 
 func TestSwitchToTmuxTargetAndZoomWith_InTmux(t *testing.T) {
+	t.Parallel()
 	t.Run("switches and zooms an unzoomed window", func(t *testing.T) {
 		mod := &tmuxtest.Fake{Inside: true}
 

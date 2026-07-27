@@ -10,6 +10,7 @@ import (
 )
 
 func TestDashboardCommandTree(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		path    []string
 		wantCmd *cobra.Command
@@ -40,6 +41,7 @@ func TestDashboardCommandTree(t *testing.T) {
 }
 
 func TestQueueBindWorktreeRemovedMovedToTasks(t *testing.T) {
+	t.Parallel()
 	cmd, args, err := rootCmd.Find([]string{"queue", "bind-worktree"})
 	if len(args) == 0 && cmd.CommandPath() == "pop queue bind-worktree" {
 		t.Fatalf("pop queue bind-worktree should not exist; it moved to pop tasks bind-worktree")
@@ -54,6 +56,7 @@ func TestQueueBindWorktreeRemovedMovedToTasks(t *testing.T) {
 }
 
 func TestQueueAbandonRemovedMovedToTasks(t *testing.T) {
+	t.Parallel()
 	cmd, args, err := rootCmd.Find([]string{"queue", "abandon"})
 	if len(args) == 0 && cmd.CommandPath() == "pop queue abandon" {
 		t.Fatalf("pop queue abandon should not exist; it moved to pop tasks unbind-worktree")
@@ -68,6 +71,7 @@ func TestQueueAbandonRemovedMovedToTasks(t *testing.T) {
 }
 
 func TestLegacyDashboardAliasIsHidden(t *testing.T) {
+	t.Parallel()
 	got, _, err := rootCmd.Find([]string{"dashboard"})
 	if err != nil {
 		t.Fatal(err)
@@ -104,6 +108,7 @@ func TestLegacyDashboardAliasIsHidden(t *testing.T) {
 }
 
 func TestLegacyPickerCompatibilityPaths(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		cmd     *cobra.Command
 		wantRun func(*cobra.Command, []string) error

@@ -9,6 +9,7 @@ import (
 // single skill-directory entry whose bytes are the embedded source with the
 // frontmatter name injected to match the directory.
 func TestRenderPaneSkillClaude(t *testing.T) {
+	t.Parallel()
 	tree, err := renderComponent(ComponentPaneSkill, "claude", "pop-")
 	if err != nil {
 		t.Fatalf("renderComponent: %v", err)
@@ -44,6 +45,7 @@ func TestRenderPaneSkillClaude(t *testing.T) {
 // agents that host skills as directories (codex, pi, cursor) — identical layout
 // to claude: a single `pop-tmux-pane/SKILL.md` entry with the frontmatter name injected.
 func TestRenderPaneSkillSkillDirAgents(t *testing.T) {
+	t.Parallel()
 	src, err := skillFiles.ReadFile("skills/pop/tmux-pane.md")
 	if err != nil {
 		t.Fatalf("read embedded source: %v", err)
@@ -78,6 +80,7 @@ func TestRenderPaneSkillSkillDirAgents(t *testing.T) {
 // verbatim — opencode has no skill-directory layout and requires no name
 // injection (the file name carries the identity).
 func TestRenderPaneSkillOpencode(t *testing.T) {
+	t.Parallel()
 	tree, err := renderComponent(ComponentPaneSkill, "opencode", "pop-")
 	if err != nil {
 		t.Fatalf("renderComponent(opencode): %v", err)
@@ -100,6 +103,7 @@ func TestRenderPaneSkillOpencode(t *testing.T) {
 
 // TestRenderCaseInsensitiveAgent confirms the agent name is normalized.
 func TestRenderCaseInsensitiveAgent(t *testing.T) {
+	t.Parallel()
 	tree, err := renderComponent(ComponentPaneSkill, "Claude", "pop-")
 	if err != nil {
 		t.Fatalf("renderComponent(Claude): %v", err)
@@ -112,6 +116,7 @@ func TestRenderCaseInsensitiveAgent(t *testing.T) {
 // TestRenderUnsupportedAgent confirms unsupported (agent, component) pairs error
 // rather than producing a degraded tree.
 func TestRenderUnsupportedAgent(t *testing.T) {
+	t.Parallel()
 	if _, err := renderComponent(ComponentPaneSkill, "bogus", "pop-"); err == nil {
 		t.Fatalf("expected error rendering pane skill for unknown agent")
 	}
@@ -120,6 +125,7 @@ func TestRenderUnsupportedAgent(t *testing.T) {
 // TestRenderNonFileComponent confirms the status-wiring component has no
 // file-based render.
 func TestRenderNonFileComponent(t *testing.T) {
+	t.Parallel()
 	if _, err := renderComponent(ComponentStatusWiring, "claude", "pop-"); err == nil {
 		t.Fatalf("expected error: status-wiring has no file-based render")
 	}
@@ -137,6 +143,7 @@ func keysOf(m map[string][]byte) []string {
 // idempotency: hyphenated names match whole identifiers only and re-render
 // does not double-prefix.
 func TestRewriteSkillReferencesWordBoundary(t *testing.T) {
+	t.Parallel()
 	baseNames := fileBasedSkillBaseNames()
 	const prefix = "pop-"
 

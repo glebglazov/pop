@@ -33,6 +33,7 @@ func opt(label, path string) workbenchOption {
 }
 
 func TestOrderWorkbenchOptions(t *testing.T) {
+	t.Parallel()
 	// Default candidate set in default order: <empty>, Workbenches, <reset>.
 	base := func() []workbenchOption {
 		return []workbenchOption{
@@ -102,6 +103,7 @@ func TestOrderWorkbenchOptions(t *testing.T) {
 // per-list candidate set (<empty> + Workbenches, never <reset>) and that order
 // front-loads through the shared rule.
 func TestPromptWorkbenchForCreate_CandidateSetAndOrder(t *testing.T) {
+	t.Parallel()
 	wbs := []config.Workbench{{Name: "minimal"}, {Name: "full-dev"}}
 	var seen []ui.Item
 	d := &ProjectDeps{
@@ -131,6 +133,7 @@ func TestPromptWorkbenchForCreate_CandidateSetAndOrder(t *testing.T) {
 // shared assembly and render the same sequence for the same inputs (same
 // Workbenches, same order, and a candidate set without <reset>).
 func TestBothListsShareOrdering(t *testing.T) {
+	t.Parallel()
 	wbs := []config.Workbench{{Name: "minimal"}, {Name: "full-dev"}}
 	order := []string{"full-dev"}
 
@@ -172,6 +175,7 @@ func TestBothListsShareOrdering(t *testing.T) {
 // TestPreferredPicker_ResetPresenceAndOrder asserts <reset> appears only when a
 // runtime entry exists and still obeys order placement (worked example).
 func TestPreferredPicker_ResetPresenceAndOrder(t *testing.T) {
+	t.Parallel()
 	wbs := []config.Workbench{{Name: "minimal"}, {Name: "full-dev"}}
 
 	// Entry exists → <reset> present; order=["minimal"] front-loads it.

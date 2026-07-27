@@ -25,6 +25,7 @@ var taskSkillDirs = map[string][]string{
 // grill-with-docs and prototype carrying companion documents with cross-skill
 // references rewritten alongside the body.
 func TestRenderTaskSkillsDirAgents(t *testing.T) {
+	t.Parallel()
 	baseNames := fileBasedSkillBaseNames()
 	for _, agent := range []string{"claude", "codex", "pi", "cursor", "opencode"} {
 		t.Run(agent, func(t *testing.T) {
@@ -83,6 +84,7 @@ func TestRenderTaskSkillsDirAgents(t *testing.T) {
 // body is the embedded source with cross-skill references rewritten and the
 // name injected — the body is not emitted verbatim like a companion file.
 func TestRenderTaskSkillsBodyMatchesInjectedSource(t *testing.T) {
+	t.Parallel()
 	tree, err := renderComponent(ComponentTaskSkills, "claude", "pop-")
 	if err != nil {
 		t.Fatalf("renderComponent: %v", err)
@@ -103,6 +105,7 @@ func TestRenderTaskSkillsBodyMatchesInjectedSource(t *testing.T) {
 // skills no longer assume an in-tree thoughts/ location and instead resolve
 // their write location via `pop tasks show-path` (ADR 0039, ADR 0013).
 func TestRenderTaskSkillsContentUsesShowPath(t *testing.T) {
+	t.Parallel()
 	tree, err := renderComponent(ComponentTaskSkills, "claude", "pop-")
 	if err != nil {
 		t.Fatalf("renderComponent: %v", err)
@@ -126,6 +129,7 @@ func TestRenderTaskSkillsContentUsesShowPath(t *testing.T) {
 // TestRenderTaskSkillsBodyRewritesCrossSkillReferences pins that rendered
 // bodies rewrite embedded base names to their resolved installed names.
 func TestRenderTaskSkillsBodyRewritesCrossSkillReferences(t *testing.T) {
+	t.Parallel()
 	tree, err := renderComponent(ComponentTaskSkills, "claude", "pop-")
 	if err != nil {
 		t.Fatalf("renderComponent: %v", err)
@@ -156,6 +160,7 @@ func TestRenderTaskSkillsBodyRewritesCrossSkillReferences(t *testing.T) {
 // bodies byte-identical to embedded sources apart from frontmatter injection
 // and the ownership marker.
 func TestRenderTaskSkillsBarePrefixNoBodyRewrite(t *testing.T) {
+	t.Parallel()
 	tree, err := renderComponent(ComponentTaskSkills, "claude", "")
 	if err != nil {
 		t.Fatalf("renderComponent: %v", err)
@@ -188,6 +193,7 @@ func TestRenderTaskSkillsBarePrefixNoBodyRewrite(t *testing.T) {
 // TestRenderTaskSkillsCustomPrefixRewritesReferences confirms a custom prefix
 // is applied consistently to frontmatter names and body references.
 func TestRenderTaskSkillsCustomPrefixRewritesReferences(t *testing.T) {
+	t.Parallel()
 	const prefix = "x-"
 	tree, err := renderComponent(ComponentTaskSkills, "claude", prefix)
 	if err != nil {

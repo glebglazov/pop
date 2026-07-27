@@ -18,6 +18,7 @@ func codexPaneSkillPaths() (renderFile, linkDest, linkTarget string) {
 // TestInstallCodexPaneSkill covers the clean codex pane-skill install: render
 // tree under the data dir and a symlink at ~/.codex/skills/pop-tmux-pane.
 func TestInstallCodexPaneSkill(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
@@ -37,6 +38,7 @@ func TestInstallCodexPaneSkill(t *testing.T) {
 // TestRefreshCodexPaneSkillStale updates codex skill artifacts when the render
 // tree drifts from the embedded source.
 func TestRefreshCodexPaneSkillStale(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	realDeps := fakeDeps(installerHome, fs, nil)
 	if err := installFileComponent(realDeps, installerHome, ComponentPaneSkill, "codex"); err != nil {
@@ -70,6 +72,7 @@ func TestRefreshCodexPaneSkillStale(t *testing.T) {
 // entry blocking pop's pane skill: integrate skips it and names
 // --overwrite-conflicts on the explicit path.
 func TestInstallCodexPaneSkillConflictSkipWithOverwriteHint(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	out := &bytes.Buffer{}
 	d := fakeDeps(installerHome, fs, out)

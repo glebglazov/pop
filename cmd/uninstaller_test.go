@@ -11,6 +11,7 @@ import (
 // TestRemoveFileComponentOwnedOnly: removing a file-based component deletes the
 // pop-owned symlink and its render-tree entries, and leaves nothing behind.
 func TestRemoveFileComponentOwnedOnly(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	out := &bytes.Buffer{}
 	d := fakeDeps(installerHome, fs, out)
@@ -43,6 +44,7 @@ func TestRemoveFileComponentOwnedOnly(t *testing.T) {
 // (here a foreign symlink at the canonical location) is left untouched and
 // reported, not deleted.
 func TestRemoveFileComponentLeavesNonOwned(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	out := &bytes.Buffer{}
 	d := fakeDeps(installerHome, fs, out)
@@ -64,6 +66,7 @@ func TestRemoveFileComponentLeavesNonOwned(t *testing.T) {
 // and cursor JSON formats: pop's hook entries are stripped while an unrelated
 // hook is preserved.
 func TestRemoveStatusWiringStripsPopHooksPreservesOthers(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		agent    string
 		path     string
@@ -130,6 +133,7 @@ func TestRemoveStatusWiringStripsPopHooksPreservesOthers(t *testing.T) {
 // TestRemoveStatusWiringDeletesExtensionFile covers pi and opencode: the
 // pop-owned status-sync extension file is removed.
 func TestRemoveStatusWiringDeletesExtensionFile(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		agent string
 		path  string
@@ -156,6 +160,7 @@ func TestRemoveStatusWiringDeletesExtensionFile(t *testing.T) {
 // TestRemoveStatusWiringNoHooksReportsNothing: stripping a settings file with no
 // pop hooks leaves it byte-identical and reports nothing-to-remove.
 func TestRemoveStatusWiringNoHooksReportsNothing(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	out := &bytes.Buffer{}
 	d := fakeDeps(installerHome, fs, out)
@@ -177,6 +182,7 @@ func TestRemoveStatusWiringNoHooksReportsNothing(t *testing.T) {
 // TestRunIntegrateRemoveSingleComponent: removing one named component touches
 // only that component and leaves the others installed.
 func TestRunIntegrateRemoveSingleComponent(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
@@ -206,6 +212,7 @@ func TestRunIntegrateRemoveSingleComponent(t *testing.T) {
 // TestRunIntegrateRemoveSeveralComponents: a multi-identifier remove removes
 // exactly the requested set.
 func TestRunIntegrateRemoveSeveralComponents(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
@@ -235,6 +242,7 @@ func TestRunIntegrateRemoveSeveralComponents(t *testing.T) {
 // TestRunIntegrateRemoveDefaultSet: with no identifiers, the full installed set
 // is removed.
 func TestRunIntegrateRemoveDefaultSet(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
@@ -260,6 +268,7 @@ func TestRunIntegrateRemoveDefaultSet(t *testing.T) {
 // TestRunIntegrateRemoveNothingInstalled: a default-set remove with nothing
 // installed reports nothing-to-remove and makes no change.
 func TestRunIntegrateRemoveNothingInstalled(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	out := &bytes.Buffer{}
 	d := fakeDeps(installerHome, fs, out)
@@ -278,6 +287,7 @@ func TestRunIntegrateRemoveNothingInstalled(t *testing.T) {
 // TestRunIntegrateRemoveUnknownComponent: an unknown component identifier
 // errors and removes nothing.
 func TestRunIntegrateRemoveUnknownComponent(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 

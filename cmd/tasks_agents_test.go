@@ -1,5 +1,9 @@
 package cmd
 
+// Batch/agent cmd tests stay serial: they stub package-level
+// taskStdinInteractive / runTaskMultiSelect / taskConfigLoad hooks (ADR-0145).
+
+
 import (
 	"bytes"
 	"errors"

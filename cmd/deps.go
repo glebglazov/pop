@@ -1,8 +1,17 @@
 package cmd
 
 import (
+	"bytes"
+	"runtime"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/monitor"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/queue"
 	"github.com/glebglazov/pop/routine"
@@ -30,9 +39,68 @@ type Deps struct {
 	Wayfinder *wayfinder.Deps
 }
 
+// cmdLayerDepsLocal holds per-goroutine test overrides so parallel cmd tests can
+// inject Dir and FS without racing on a package-global (ADR-0145).
+var cmdLayerDepsLocal sync.Map // uint64 → *Deps
+
+// cmdLayerDepsGroups maps a root test name to deps for t.Run subtests, which
+// execute on a different goroutine than the parent's setCmdLayerDeps call.
+var cmdLayerDepsGroups sync.Map // string → *Deps
+
+func goroutineID() uint64 {
+	b := make([]byte, 64)
+	b = b[:runtime.Stack(b, false)]
+	b = bytes.TrimPrefix(b, []byte("goroutine "))
+	if i := bytes.IndexByte(b, ' '); i >= 0 {
+		b = b[:i]
+	}
+	n, _ := strconv.ParseUint(string(b), 10, 64)
+	return n
+}
+
+func rootTestName(t *testing.T) string {
+	name := t.Name()
+	if i := strings.Index(name, "/"); i >= 0 {
+		return name[:i]
+	}
+	return name
+}
+
+// rootTestNameFromStack extracts the root TestXxx name from the call stack so
+// t.Run subtests can inherit cmd-layer deps registered on the parent test.
+func rootTestNameFromStack() string {
+	var pcs [32]uintptr
+	n := runtime.Callers(2, pcs[:])
+	frames := runtime.CallersFrames(pcs[:n])
+	for {
+		frame, more := frames.Next()
+		if idx := strings.LastIndex(frame.Function, ".Test"); idx >= 0 {
+			rest := frame.Function[idx+1:]
+			if dot := strings.Index(rest, "."); dot >= 0 {
+				return rest[:dot]
+			}
+			return rest
+		}
+		if !more {
+			break
+		}
+	}
+	return ""
+}
+
 // cmdLayerDeps is the production edge for verb entrypoints. Tests override it
-// to inject Dir and FS without mutating process-global state (ADR-0145).
-var cmdLayerDeps = DefaultDeps
+// per goroutine via setCmdLayerDeps without mutating process-global state.
+func cmdLayerDeps() *Deps {
+	if v, ok := cmdLayerDepsLocal.Load(goroutineID()); ok {
+		return v.(*Deps)
+	}
+	if root := rootTestNameFromStack(); root != "" {
+		if v, ok := cmdLayerDepsGroups.Load(root); ok {
+			return v.(*Deps)
+		}
+	}
+	return DefaultDeps()
+}
 
 // DefaultDeps returns cmd-layer dependencies wired to real implementations.
 func DefaultDeps() *Deps {
@@ -140,4 +208,32 @@ func (d *Deps) wayfinderDeps() *wayfinder.Deps {
 		}
 	}
 	return wd
+}
+
+func (d *Deps) monitorDeps() *monitor.Deps {
+	md := monitor.DefaultDeps()
+	if d != nil && d.FS != nil {
+		md.FS = d.FS
+	}
+	return md
+}
+
+func (d *Deps) historyDeps() *history.Deps {
+	hd := history.DefaultDeps()
+	if d != nil && d.FS != nil {
+		hd.FS = d.FS
+	}
+	return hd
+}
+
+func cmdMonitorStatePath() string {
+	return monitor.DefaultStatePathWith(cmdLayerDeps().monitorDeps())
+}
+
+func cmdMonitorPIDPath() string {
+	return monitor.DefaultPIDPathWith(cmdLayerDeps().monitorDeps())
+}
+
+func cmdHistoryPath() string {
+	return history.DefaultHistoryPathWith(cmdLayerDeps().historyDeps())
 }

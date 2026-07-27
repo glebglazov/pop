@@ -1,5 +1,9 @@
 package cmd
 
+// Batch/agent cmd tests stay serial: they stub package-level
+// taskStdinInteractive / runTaskMultiSelect / taskConfigLoad hooks (ADR-0145).
+
+
 import (
 	"bytes"
 	"os"
@@ -40,24 +44,24 @@ func writeSkipTaskThoughts(t *testing.T, tasksDir string) {
 	}
 }
 
-func setupSkipTaskCmdFixture(t *testing.T) string {
+func setupSkipTaskCmdFixture(t *testing.T) (root string, td *tasks.Deps) {
 	t.Helper()
-	root := setupRunTaskCmdFixture(t)
-	tasksDir := cmdTasksDir(t, root)
+	root, td = setupRunTaskCmdFixture(t)
+	tasksDir := cmdTasksDir(t, td, root)
 	writeSkipTaskThoughts(t, tasksDir)
-	if _, err := tasks.RefreshWith(tasks.DefaultDeps(), tasksDir, tasks.DefaultStatePath()); err != nil {
+	if _, err := tasks.RefreshWith(td, tasksDir, tasks.DefaultStatePath()); err != nil {
 		t.Fatal(err)
 	}
-	return root
+	return root, td
 }
 
 func TestSkipTasksCmdNonInteractiveRejected(t *testing.T) {
-	setupSkipTaskCmdFixture(t)
+	_, td := setupSkipTaskCmdFixture(t)
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 	stubCompleteInteractive(t, false)
 
-	err := runTaskSkipTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, strings.NewReader(""), "demo")
+	err := runTaskSkipTasksWith(td, &bytes.Buffer{}, strings.NewReader(""), "demo")
 	if err == nil {
 		t.Fatal("whole-set target with no TTY should error")
 	}
@@ -71,7 +75,7 @@ func TestSkipTasksCmdNonInteractiveRejected(t *testing.T) {
 }
 
 func TestSkipTasksCmdConfirmAppliesBatch(t *testing.T) {
-	root := setupSkipTaskCmdFixture(t)
+	root, td := setupSkipTaskCmdFixture(t)
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
 	stubCompleteInteractive(t, true)
@@ -80,7 +84,7 @@ func TestSkipTasksCmdConfirmAppliesBatch(t *testing.T) {
 	stubCompleteSelect(t, ui.MultiSelectResult{Confirmed: true, Checked: []int{0, 1}}, nil)
 
 	var stdout bytes.Buffer
-	if err := runTaskSkipTasksWith(tasks.DefaultDeps(), &stdout, strings.NewReader(""), "demo"); err != nil {
+	if err := runTaskSkipTasksWith(td, &stdout, strings.NewReader(""), "demo"); err != nil {
 		t.Fatalf("batch skip failed: %v", err)
 	}
 
@@ -92,7 +96,7 @@ func TestSkipTasksCmdConfirmAppliesBatch(t *testing.T) {
 		t.Fatalf("missing open→skipped transition line:\n%s", out)
 	}
 
-	data, err := os.ReadFile(filepath.Join(runTaskCmdDemoDir(t, root), "index.json"))
+	data, err := os.ReadFile(filepath.Join(runTaskCmdDemoDir(t, td, root), "index.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

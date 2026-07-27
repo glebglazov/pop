@@ -12,6 +12,7 @@ import (
 // carries the three per-operation sections and uses spec.md throughout — never
 // the legacy prd.md filename (ADR-0136).
 func TestWorkStoreDoc_EmbeddedContent(t *testing.T) {
+	t.Parallel()
 	body := string(workStoreDoc)
 	if len(body) == 0 {
 		t.Fatal("embedded work store doc is empty")
@@ -36,7 +37,7 @@ func TestWorkStoreDoc_EmbeddedContent(t *testing.T) {
 // TestSeedWorkStoreDoc_CreatesWhenAbsent covers the create-if-absent semantics:
 // an empty machine writes the embedded doc verbatim to the XDG config path.
 func TestSeedWorkStoreDoc_CreatesWhenAbsent(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Parallel()
 	fs := newFakeFS()
 	d := fakeDeps("/h", fs, io.Discard)
 
@@ -57,7 +58,7 @@ func TestSeedWorkStoreDoc_CreatesWhenAbsent(t *testing.T) {
 // semantics: a user-edited file is left byte-identical, even across repeated
 // seed calls (the machine-global override survives every refresh).
 func TestSeedWorkStoreDoc_NeverOverwritesEditedFile(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Parallel()
 	fs := newFakeFS()
 	path := filepath.Join("/h", ".config", "pop", "work-store.md")
 	edited := []byte("# my machine-global override\n")
@@ -77,9 +78,15 @@ func TestSeedWorkStoreDoc_NeverOverwritesEditedFile(t *testing.T) {
 // TestSeedWorkStoreDoc_RespectsXDGConfigHome resolves the doc under
 // $XDG_CONFIG_HOME/pop, not the home fallback, when the env var is set.
 func TestSeedWorkStoreDoc_RespectsXDGConfigHome(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", "/cfg")
+	t.Parallel()
 	fs := newFakeFS()
 	d := fakeDeps("/h", fs, io.Discard)
+	d.getenv = func(key string) string {
+		if key == "XDG_CONFIG_HOME" {
+			return "/cfg"
+		}
+		return ""
+	}
 
 	if err := seedWorkStoreDoc(d); err != nil {
 		t.Fatalf("seedWorkStoreDoc: %v", err)
@@ -97,8 +104,8 @@ func TestSeedWorkStoreDoc_RespectsXDGConfigHome(t *testing.T) {
 // refresh, is agent-agnostic, and is written once regardless of how many agents
 // are integrated.
 func TestRefresh_SeedsWorkStoreDocOnceAcrossAgents(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 	installViaFake(t, fs, "/h", "pi")
@@ -121,8 +128,8 @@ func TestRefresh_SeedsWorkStoreDocOnceAcrossAgents(t *testing.T) {
 // TestRefresh_LeavesEditedWorkStoreDocByteIdentical proves an edited doc survives
 // a subsequent refresh unchanged — user edits are the machine-global override.
 func TestRefresh_LeavesEditedWorkStoreDocByteIdentical(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 

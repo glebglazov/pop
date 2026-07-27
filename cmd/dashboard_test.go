@@ -26,8 +26,9 @@ import (
 // very first status update is clear — while plain zsh/fish/bash panes the
 // user merely navigates through stay out of the dashboard.
 func TestBuildDashboardPanes_OnlyAgenticPanes(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", dir)
+	setCmdLayerDeps(t, newTestCmdDeps(t, "", dir, ""))
 	stateDir := filepath.Join(dir, "pop")
 	if err := os.MkdirAll(stateDir, 0755); err != nil {
 		t.Fatal(err)
@@ -112,6 +113,7 @@ func TestBuildDashboardPanes_OnlyAgenticPanes(t *testing.T) {
 }
 
 func TestSessionLocalDashboardPanes(t *testing.T) {
+	t.Parallel()
 	panes := []ui.AttentionPane{
 		{PaneID: "%1", Session: "pop"},
 		{PaneID: "%2", Session: "pop"},
@@ -128,6 +130,7 @@ func TestSessionLocalDashboardPanes(t *testing.T) {
 }
 
 func TestPositionCurrentPane(t *testing.T) {
+	t.Parallel()
 	t.Run("untracked pane is injected at end", func(t *testing.T) {
 		// Scenario: monitored panes are pop (working) and vcdr (unread),
 		// current pane is "abc" which is not monitored.
@@ -242,6 +245,7 @@ func TestPositionCurrentPane(t *testing.T) {
 }
 
 func TestSortDashboardPanes(t *testing.T) {
+	t.Parallel()
 	panes := func() []ui.AttentionPane {
 		return []ui.AttentionPane{
 			{PaneID: "%1", Session: "alpha", Status: ui.AttentionWorking},
@@ -343,6 +347,7 @@ func TestSortDashboardPanes(t *testing.T) {
 }
 
 func TestDashboardInitialPaneID(t *testing.T) {
+	t.Parallel()
 	panes := []ui.AttentionPane{
 		{PaneID: "%1", Session: "idle-old", Status: ui.AttentionClear},
 		{PaneID: "%2", Session: "idle-new", Status: ui.AttentionClear},
@@ -403,6 +408,7 @@ func TestDashboardInitialPaneID(t *testing.T) {
 }
 
 func TestSessionAccessTime(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 
 	t.Run("nil history returns 0", func(t *testing.T) {
@@ -502,6 +508,7 @@ func TestSessionAccessTime(t *testing.T) {
 // project.SessionName, which spawns git subprocesses per entry. Scanning the
 // whole history must cost zero git calls regardless of entry count.
 func TestSessionAccessTimeTasksNoGitCalls(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	hist := &history.History{}
 	for i := 0; i < 20; i++ {
@@ -534,11 +541,12 @@ func TestSessionAccessTimeTasksNoGitCalls(t *testing.T) {
 // Both actions record the session in pop's history for recency tracking in
 // `pop project dashboard` (a separate store from monitor state).
 func TestHandleDashboardSwitch(t *testing.T) {
+	t.Parallel()
 	setup := func(t *testing.T) (statePath string, initialVisited time.Time) {
 		t.Helper()
 		dir := t.TempDir()
-		t.Setenv("XDG_DATA_HOME", dir)
-		t.Setenv("HOME", dir) // ensures history.DefaultHistoryPath stays inside tmp
+		// ADR-0145: XDG routed via cmd-layer deps; HOME kept for any legacy fallbacks.
+		setCmdLayerDeps(t, newTestCmdDeps(t, "", dir, ""))
 		stateDir := filepath.Join(dir, "pop")
 		if err := os.MkdirAll(stateDir, 0755); err != nil {
 			t.Fatal(err)

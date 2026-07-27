@@ -9,7 +9,6 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/queue"
-	"github.com/glebglazov/pop/tasks"
 )
 
 func writeQueueConfig(t *testing.T, body string) string {
@@ -22,6 +21,7 @@ func writeQueueConfig(t *testing.T, body string) string {
 }
 
 func TestRunQueueRunHonorsConfiguredPollInterval(t *testing.T) {
+	t.Parallel()
 	path := writeQueueConfig(t, `
 [queue]
 poll_interval = "2s"
@@ -54,6 +54,7 @@ poll_interval = "2s"
 // sets the single inclusion flag (queue.Deps.IncludeDone) the shared row layer
 // reads, and it defaults off (DONE hidden).
 func TestQueueReadSurfacesThreadIncludeDone(t *testing.T) {
+	t.Parallel()
 	path := writeQueueConfig(t, "")
 
 	oldCfgFile := cfgFile
@@ -73,9 +74,7 @@ func TestQueueReadSurfacesThreadIncludeDone(t *testing.T) {
 		workDashboardIncludeDone = oldDashInc
 	}()
 
-	// RenderStatus reads bindings off the snapshot's Tasks deps; point it at an
-	// empty temp data dir so the render path stays panic-free.
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	setCmdLayerDeps(t, newTestCmdDeps(t, "", t.TempDir(), ""))
 
 	cfgFile = path
 	queueConfigLoad = func(string) (*config.Config, error) { return &config.Config{}, nil }
@@ -83,7 +82,7 @@ func TestQueueReadSurfacesThreadIncludeDone(t *testing.T) {
 	var statusInclude, dashInclude bool
 	queueBuildStatus = func(d *queue.Deps, _ *config.Config) (queue.StatusSnapshot, error) {
 		statusInclude = d.IncludeDone
-		return queue.StatusSnapshot{Tasks: tasks.DefaultDeps()}, nil
+		return queue.StatusSnapshot{Tasks: cmdLayerDeps().tasksDeps()}, nil
 	}
 	// `pop queue status` renders the dashboard's rows as its table (ADR-0121), so
 	// it builds the dashboard too; stub it to an empty snapshot.
@@ -125,6 +124,7 @@ func TestQueueReadSurfacesThreadIncludeDone(t *testing.T) {
 // TestQueueReadSurfacesRegisterIncludeDoneFlag confirms both Queue read
 // surfaces expose the `--include-done` flag, defaulting off.
 func TestQueueReadSurfacesRegisterIncludeDoneFlag(t *testing.T) {
+	t.Parallel()
 	if f := queueStatusCmd.Flags().Lookup("include-done"); f == nil {
 		t.Fatal("queue status missing --include-done flag")
 	} else if f.DefValue != "false" {

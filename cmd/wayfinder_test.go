@@ -13,6 +13,7 @@ import (
 )
 
 func TestWayfinderCommandTree(t *testing.T) {
+	t.Parallel()
 	for _, path := range [][]string{
 		{"wayfinder", "status"},
 		{"wayfinder", "show"},
@@ -26,10 +27,12 @@ func TestWayfinderCommandTree(t *testing.T) {
 }
 
 func TestWayfinderShowRendersMap(t *testing.T) {
+	t.Parallel()
 	dataHome := "/data"
 	commonDir := "/repo/.git"
-	t.Setenv("XDG_DATA_HOME", dataHome)
-	id, err := tasks.IdentityFromCommonDir(&tasks.Deps{FS: deps.NewRealFileSystem()}, commonDir)
+	setCmdLayerDeps(t, newTestCmdDeps(t, "/mock/cwd", dataHome, ""))
+	fs := cmdTestFS(dataHome, "")
+	id, err := tasks.IdentityFromCommonDir(&tasks.Deps{FS: fs}, commonDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,10 +57,12 @@ func TestWayfinderShowRendersMap(t *testing.T) {
 }
 
 func TestWayfinderArchiveRoundTrip(t *testing.T) {
+	t.Parallel()
 	dataHome := "/data"
 	commonDir := "/repo/.git"
-	t.Setenv("XDG_DATA_HOME", dataHome)
-	id, err := tasks.IdentityFromCommonDir(&tasks.Deps{FS: deps.NewRealFileSystem()}, commonDir)
+	setCmdLayerDeps(t, newTestCmdDeps(t, "/mock/cwd", dataHome, ""))
+	fs := cmdTestFS(dataHome, "")
+	id, err := tasks.IdentityFromCommonDir(&tasks.Deps{FS: fs}, commonDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,6 +105,8 @@ func TestWayfinderArchiveRoundTrip(t *testing.T) {
 }
 
 func TestWayfinderShowUnknownMap(t *testing.T) {
+	t.Parallel()
+	setCmdLayerDeps(t, newTestCmdDeps(t, "/mock/cwd", "/data", ""))
 	d := wayfinderTestDepsForCmd(t, "/data", "/repo/.git", nil)
 	err := runWayfinderShowWith(d, &bytes.Buffer{}, "missing")
 	if err == nil {
@@ -111,6 +118,7 @@ func TestWayfinderShowUnknownMap(t *testing.T) {
 }
 
 func TestWayfinderStatusOutsideGitRepo(t *testing.T) {
+	t.Parallel()
 	d := &wayfinder.Deps{
 		FS: deps.NewRealFileSystem(),
 		Tasks: &tasks.Deps{
@@ -135,6 +143,8 @@ type errString string
 func (e errString) Error() string { return string(e) }
 
 func TestWayfinderStatusEmpty(t *testing.T) {
+	t.Parallel()
+	setCmdLayerDeps(t, newTestCmdDeps(t, "/mock/cwd", "/data", ""))
 	d := wayfinderTestDepsForCmd(t, "/data", "/repo/.git", nil)
 	var buf bytes.Buffer
 	if err := runWayfinderStatusWith(d, &buf, false); err != nil {
@@ -147,7 +157,6 @@ func TestWayfinderStatusEmpty(t *testing.T) {
 
 func wayfinderTestDepsForCmd(t *testing.T, dataHome, commonDir string, files map[string]string) *wayfinder.Deps {
 	t.Helper()
-	t.Setenv("XDG_DATA_HOME", dataHome)
 	fs := &deps.MockFileSystem{
 		GetwdFunc: func() (string, error) { return "/mock/cwd", nil },
 		GetenvFunc: func(key string) string {

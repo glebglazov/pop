@@ -25,6 +25,7 @@ func paneRenderRoot() string {
 // configured prefix (nil pointer) installs under the canonical `pop-` names —
 // byte-identical to pop's original behaviour (ADR 0063 criterion).
 func TestInstallFileComponentDefaultPrefixParity(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil) // skillPrefix nil → default "pop-"
 
@@ -51,6 +52,7 @@ func TestInstallFileComponentDefaultPrefixParity(t *testing.T) {
 // under its bare base name in the render tree and at the agent location, and
 // the injected frontmatter name is bare too. There is no `pop-` form anywhere.
 func TestInstallFileComponentBarePrefix(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	d := withPrefix(fakeDeps(installerHome, fs, nil), "")
 
@@ -89,6 +91,7 @@ func TestInstallFileComponentBarePrefix(t *testing.T) {
 // empty prefix. The new bare name is linked, and the old `pop-tmux-pane` pop-owned
 // symlink and its render-tree directory are pruned — no duplicate left behind.
 func TestInstallFileComponentPrefixChangeMigration(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	var logs []string
 	logfDeps := func() *integrateDeps {
@@ -145,6 +148,7 @@ func TestInstallFileComponentPrefixChangeMigration(t *testing.T) {
 // change must never remove an entry pop does not own, even when that entry's
 // name is absent from the freshly rendered set.
 func TestInstallFileComponentPruneNeverRemovesUnowned(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 
 	// Prior pop install under pop-.
@@ -185,6 +189,7 @@ func TestInstallFileComponentPruneNeverRemovesUnowned(t *testing.T) {
 // component's stale names never removes another component's valid links: the
 // scope is THIS component's render root, not the whole agent location.
 func TestInstallFileComponentPruneIsComponentScoped(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 
 	// Install both skill components under pop-.
@@ -220,6 +225,7 @@ func TestInstallFileComponentPruneIsComponentScoped(t *testing.T) {
 // old `pop-` name is pruned when the component is re-rendered under an empty
 // prefix, just like a stale symlink.
 func TestInstallFileComponentPrunesStaleMarkerOwned(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 
 	// A leftover copy-mode install under the pop- name: a real directory whose
@@ -251,6 +257,7 @@ func TestInstallFileComponentPrunesStaleMarkerOwned(t *testing.T) {
 // that bare name is the conflict — reported at the resolved name and skipped,
 // never overwritten. There is no pop- candidate to fall back on.
 func TestInstallFileComponentBarePrefixConflict(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	out := &bytes.Buffer{}
 	d := withPrefix(fakeDeps(installerHome, fs, out), "")

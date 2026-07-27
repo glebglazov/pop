@@ -15,6 +15,7 @@ func defaultIntegrationBaseline() []ComponentID {
 // TestRunIntegrateComponentsBareInstallsMergedBaseline: bare integrate installs
 // the core status wiring plus every component in the merged baseline.
 func TestRunIntegrateComponentsBareInstallsMergedBaseline(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
@@ -40,6 +41,7 @@ func TestRunIntegrateComponentsBareInstallsMergedBaseline(t *testing.T) {
 // TestRunIntegrateComponentsNonInteractiveBareSucceeds: a non-interactive bare
 // run installs the merged baseline without prompting.
 func TestRunIntegrateComponentsNonInteractiveBareSucceeds(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
@@ -60,6 +62,7 @@ func TestRunIntegrateComponentsNonInteractiveBareSucceeds(t *testing.T) {
 // TestRunIntegrateComponentsInteractiveBareNoWizard: bare interactive integrate
 // never runs the wizard — it installs the merged baseline with no prompts.
 func TestRunIntegrateComponentsInteractiveBareNoWizard(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 	// Empty stdin would decline every wizard prompt; bare integrate must not read it.
@@ -81,6 +84,7 @@ func TestRunIntegrateComponentsInteractiveBareNoWizard(t *testing.T) {
 
 // TestPositiveIntegrateFlagsHardError: --pane-skill and --task-skills are rejected.
 func TestPositiveIntegrateFlagsHardError(t *testing.T) {
+	t.Parallel()
 	prevPane := integratePaneSkill
 	prevTask := integrateTaskSkills
 	prevUpdate := integrateUpdateExisting
@@ -111,6 +115,7 @@ func TestPositiveIntegrateFlagsHardError(t *testing.T) {
 // TestRunIntegrateVariadicAgentsSameBaseline: variadic agents each receive the
 // same merged baseline in order.
 func TestRunIntegrateVariadicAgentsSameBaseline(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	home := "/h"
 	baseline := defaultIntegrationBaseline()
@@ -138,6 +143,7 @@ func TestRunIntegrateVariadicAgentsSameBaseline(t *testing.T) {
 // TestRunIntegrateComponentsPaneSkillNewAgents: baseline pane-skill installs the
 // symlinked pane-skill artifact for pi, cursor, and opencode.
 func TestRunIntegrateComponentsPaneSkillNewAgents(t *testing.T) {
+	t.Parallel()
 	for _, a := range paneSkillAgents() {
 		t.Run(a.name, func(t *testing.T) {
 			fs := newFakeFS()
@@ -156,6 +162,7 @@ func TestRunIntegrateComponentsPaneSkillNewAgents(t *testing.T) {
 // TestRunIntegrateComponentsCodexInstallsMergedBaseline: codex hosts every
 // baseline skill component — status wiring plus pane and task skills.
 func TestRunIntegrateComponentsCodexInstallsMergedBaseline(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
@@ -183,6 +190,7 @@ func TestRunIntegrateComponentsCodexInstallsMergedBaseline(t *testing.T) {
 // TestRunIntegrateComponentsOpencodeInstallsMergedBaseline: opencode hosts every
 // baseline skill component — status wiring plus pane and task skills.
 func TestRunIntegrateComponentsOpencodeInstallsMergedBaseline(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
@@ -209,6 +217,7 @@ func TestRunIntegrateComponentsOpencodeInstallsMergedBaseline(t *testing.T) {
 
 // TestRunIntegrateComponentsUnknownAgent: an unknown agent errors.
 func TestRunIntegrateComponentsUnknownAgent(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 	if err := runIntegrateComponents(d, "bogus", defaultIntegrationBaseline(), false, false, nil, false, false); err == nil {

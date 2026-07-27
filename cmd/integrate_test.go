@@ -153,10 +153,12 @@ func (f *fakeFS) readDirNames(dir string) ([]string, error) {
 	return out, nil
 }
 
-// fakeDeps wires a fakeFS into the integrateDeps shape.
+// fakeDeps wires a fakeFS into the integrateDeps shape. getenv defaults to empty
+// so XDG paths resolve through userHomeDir into the fake FS, not cmdLayerDeps.
 func fakeDeps(home string, fs *fakeFS, stdout io.Writer) *integrateDeps {
 	return &integrateDeps{
 		userHomeDir:  func() (string, error) { return home, nil },
+		getenv:       func(string) string { return "" },
 		readFile:     fs.readFile,
 		writeFile:    fs.writeFile,
 		mkdirAll:     fs.mkdirAll,
@@ -184,6 +186,7 @@ func sortedKeys(m map[string][]byte) []string {
 // ----- isPopHook / removePopHooks --------------------------------------------
 
 func TestIsPopHook(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		entry    interface{}
@@ -249,6 +252,7 @@ func TestIsPopHook(t *testing.T) {
 }
 
 func TestRemovePopHooks(t *testing.T) {
+	t.Parallel()
 	popHook := map[string]interface{}{
 		"hooks": []interface{}{
 			map[string]interface{}{"command": "pop pane set-status #{pane_id} read"},
@@ -284,6 +288,7 @@ func TestRemovePopHooks(t *testing.T) {
 // ----- injectFrontmatterName -------------------------------------------------
 
 func TestInjectFrontmatterName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		input   string
@@ -341,6 +346,7 @@ func TestInjectFrontmatterName(t *testing.T) {
 // ----- runIntegrateWith dispatcher -------------------------------------------
 
 func TestRunIntegrateWith_UnknownAgent(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "vscode")
 	if err == nil {
@@ -352,6 +358,7 @@ func TestRunIntegrateWith_UnknownAgent(t *testing.T) {
 }
 
 func TestRunIntegrateWith_AgentNameIsCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "Claude"); err != nil {
 		t.Errorf("expected case-insensitive agent matching, got error: %v", err)
@@ -361,6 +368,7 @@ func TestRunIntegrateWith_AgentNameIsCaseInsensitive(t *testing.T) {
 // ----- integrateClaude: directory structure ----------------------------------
 
 func TestIntegrateClaude_WritesOnlyStatusWiring(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "claude"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -383,6 +391,7 @@ func TestIntegrateClaude_WritesOnlyStatusWiring(t *testing.T) {
 }
 
 func TestIntegrateClaude_DoesNotWriteOutsideClaudeTree(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "claude"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -395,6 +404,7 @@ func TestIntegrateClaude_DoesNotWriteOutsideClaudeTree(t *testing.T) {
 }
 
 func TestIntegrateClaude_FreshSettings(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "claude"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -422,6 +432,7 @@ func TestIntegrateClaude_FreshSettings(t *testing.T) {
 }
 
 func TestIntegrateClaude_PreservesExistingHooks(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	settingsPath := filepath.Join("/h", ".claude", "settings.json")
 	existing := map[string]interface{}{
@@ -457,6 +468,7 @@ func TestIntegrateClaude_PreservesExistingHooks(t *testing.T) {
 }
 
 func TestIntegrateClaude_ReplacesOldPopHooks(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	settingsPath := filepath.Join("/h", ".claude", "settings.json")
 	existing := map[string]interface{}{
@@ -507,6 +519,7 @@ func TestIntegrateClaude_ReplacesOldPopHooks(t *testing.T) {
 }
 
 func TestIntegrateClaude_RemovesStaleEventKeys(t *testing.T) {
+	t.Parallel()
 	// A previously installed pop hook on an event we no longer manage
 	// (here: PostToolUse) should be cleaned up entirely on re-install,
 	// not left as a null/empty entry.
@@ -542,6 +555,7 @@ func TestIntegrateClaude_RemovesStaleEventKeys(t *testing.T) {
 }
 
 func TestIntegrateClaude_WriteError(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	settingsPath := filepath.Join("/h", ".claude", "settings.json")
 	fs.writeErr[settingsPath] = os.ErrPermission
@@ -599,6 +613,7 @@ func countContains(cmds []string, needle string) int {
 // The topic hook installs as a separate UserPromptSubmit entry alongside the
 // set-status working hook, with no extra opt-in (ADR 0023).
 func TestIntegrateClaude_InstallsTopicHook(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "claude"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -619,6 +634,7 @@ func TestIntegrateClaude_InstallsTopicHook(t *testing.T) {
 
 // Re-running integrate is idempotent: the topic hook is not duplicated.
 func TestIntegrateClaude_TopicHookIdempotent(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	for i := 0; i < 3; i++ {
 		if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "claude"); err != nil {
@@ -637,6 +653,7 @@ func TestIntegrateClaude_TopicHookIdempotent(t *testing.T) {
 // statusWiringInstalled and refresh detection see the topic hook as pop wiring,
 // and removal strips it cleanly alongside the rest of the status wiring.
 func TestIntegrateClaude_RemovesTopicHook(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	d := fakeDeps("/h", fs, io.Discard)
 	if err := runIntegrateWith(d, "claude"); err != nil {
@@ -672,6 +689,7 @@ func TestIntegrateClaude_RemovesTopicHook(t *testing.T) {
 // A binary change re-renders the topic hook through the refresh path: an
 // install missing the topic hook is detected as changed and re-installed.
 func TestIntegrateClaude_RefreshRendersTopicHook(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	settingsPath := filepath.Join("/h", ".claude", "settings.json")
 	// Simulate an older install that wired set-status but not the topic hook.
@@ -709,6 +727,7 @@ func TestIntegrateClaude_RefreshRendersTopicHook(t *testing.T) {
 }
 
 func TestIsPopHookCommand_Topic(t *testing.T) {
+	t.Parallel()
 	if !isPopHookCommand("pop pane set-topic --derive 2>/dev/null || true") {
 		t.Error("expected set-topic command to be recognised as a pop hook")
 	}
@@ -717,6 +736,7 @@ func TestIsPopHookCommand_Topic(t *testing.T) {
 // ----- integrateCodex: hooks.json -------------------------------------------
 
 func TestIntegrateCodex_WritesHooksJSON(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "codex"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -732,6 +752,7 @@ func TestIntegrateCodex_WritesHooksJSON(t *testing.T) {
 }
 
 func TestIntegrateCodex_FreshHooks(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "codex"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -759,6 +780,7 @@ func TestIntegrateCodex_FreshHooks(t *testing.T) {
 }
 
 func TestIntegrateCodex_PreservesExistingHooks(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	hooksPath := filepath.Join("/h", ".codex", "hooks.json")
 	existing := map[string]interface{}{
@@ -794,6 +816,7 @@ func TestIntegrateCodex_PreservesExistingHooks(t *testing.T) {
 }
 
 func TestIntegrateCodex_ReplacesOldPopHooks(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	hooksPath := filepath.Join("/h", ".codex", "hooks.json")
 	existing := map[string]interface{}{
@@ -844,6 +867,7 @@ func TestIntegrateCodex_ReplacesOldPopHooks(t *testing.T) {
 }
 
 func TestIntegrateCodex_DoesNotWriteOutsideCodexTree(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "codex"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -856,6 +880,7 @@ func TestIntegrateCodex_DoesNotWriteOutsideCodexTree(t *testing.T) {
 }
 
 func TestIntegrateCodex_WriteError(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	hooksPath := filepath.Join("/h", ".codex", "hooks.json")
 	fs.writeErr[hooksPath] = os.ErrPermission
@@ -913,6 +938,7 @@ func flatEventCommands(t *testing.T, fs *fakeFS, path, event string) []string {
 // The codex topic hook installs as a separate UserPromptSubmit entry alongside
 // set-status, labeled for codex's payload adapter (ADR 0023).
 func TestIntegrateCodex_InstallsTopicHook(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "codex"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -929,6 +955,7 @@ func TestIntegrateCodex_InstallsTopicHook(t *testing.T) {
 
 // Re-running integrate is idempotent: the codex topic hook is not duplicated.
 func TestIntegrateCodex_TopicHookIdempotent(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	for i := 0; i < 3; i++ {
 		if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "codex"); err != nil {
@@ -945,6 +972,7 @@ func TestIntegrateCodex_TopicHookIdempotent(t *testing.T) {
 // An older codex install missing the topic hook is detected as changed and the
 // topic hook is rendered through the refresh path; removal then strips it.
 func TestIntegrateCodex_RefreshRendersAndRemovesTopicHook(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	hooksPath := filepath.Join("/h", ".codex", "hooks.json")
 	existing := map[string]interface{}{
@@ -988,6 +1016,7 @@ func TestIntegrateCodex_RefreshRendersAndRemovesTopicHook(t *testing.T) {
 // ----- integratePi: directory structure --------------------------------------
 
 func TestIntegratePi_WritesExtensionAtCorrectPath(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "pi"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1007,6 +1036,7 @@ func TestIntegratePi_WritesExtensionAtCorrectPath(t *testing.T) {
 }
 
 func TestIntegratePi_WritesNoSkillFiles(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "pi"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1023,6 +1053,7 @@ func TestIntegratePi_WritesNoSkillFiles(t *testing.T) {
 }
 
 func TestIntegratePi_DoesNotWriteOutsidePiTree(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "pi"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1035,6 +1066,7 @@ func TestIntegratePi_DoesNotWriteOutsidePiTree(t *testing.T) {
 }
 
 func TestIntegratePi_ExtensionWriteError(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	extPath := filepath.Join("/h", ".pi", "agent", "extensions", "pop-status-sync.ts")
 	fs.writeErr[extPath] = errors.New("disk full")
@@ -1051,6 +1083,7 @@ func TestIntegratePi_ExtensionWriteError(t *testing.T) {
 // ----- integrateOpencode: directory structure --------------------------------
 
 func TestIntegrateOpencode_WritesPluginAtCorrectPath(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "opencode"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1070,6 +1103,7 @@ func TestIntegrateOpencode_WritesPluginAtCorrectPath(t *testing.T) {
 }
 
 func TestIntegrateOpencode_WritesNoSkillFiles(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "opencode"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1086,6 +1120,7 @@ func TestIntegrateOpencode_WritesNoSkillFiles(t *testing.T) {
 }
 
 func TestIntegrateOpencode_DoesNotWriteOutsideOpencodeTree(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "opencode"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1098,6 +1133,7 @@ func TestIntegrateOpencode_DoesNotWriteOutsideOpencodeTree(t *testing.T) {
 }
 
 func TestIntegrateOpencode_OverwritesPriorPlugin(t *testing.T) {
+	t.Parallel()
 	// Pre-seed a stale plugin file and verify it gets overwritten.
 	fs := newFakeFS()
 	pluginPath := filepath.Join("/h", ".config", "opencode", "plugins", "pop-status-sync.ts")
@@ -1113,6 +1149,7 @@ func TestIntegrateOpencode_OverwritesPriorPlugin(t *testing.T) {
 }
 
 func TestIntegrateOpencode_PluginWriteError(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	pluginPath := filepath.Join("/h", ".config", "opencode", "plugins", "pop-status-sync.ts")
 	fs.writeErr[pluginPath] = errors.New("disk full")
@@ -1127,6 +1164,7 @@ func TestIntegrateOpencode_PluginWriteError(t *testing.T) {
 }
 
 func TestIntegrateOpencode_AgentNameIsCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "OpEnCoDe"); err != nil {
 		t.Errorf("expected case-insensitive agent matching, got error: %v", err)
@@ -1136,6 +1174,7 @@ func TestIntegrateOpencode_AgentNameIsCaseInsensitive(t *testing.T) {
 // ----- integrateCursor: hooks.json + skills ----------------------------------
 
 func TestIntegrateCursor_WritesHooksJSON(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "cursor"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1151,6 +1190,7 @@ func TestIntegrateCursor_WritesHooksJSON(t *testing.T) {
 }
 
 func TestIntegrateCursor_FreshHooks(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "cursor"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1190,6 +1230,7 @@ func TestIntegrateCursor_FreshHooks(t *testing.T) {
 }
 
 func TestIntegrateCursor_PreservesExistingHooks(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	hooksPath := filepath.Join("/h", ".cursor", "hooks.json")
 	existing := map[string]interface{}{
@@ -1222,6 +1263,7 @@ func TestIntegrateCursor_PreservesExistingHooks(t *testing.T) {
 }
 
 func TestIntegrateCursor_ReplacesOldPopHooks(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	hooksPath := filepath.Join("/h", ".cursor", "hooks.json")
 	existing := map[string]interface{}{
@@ -1266,6 +1308,7 @@ func TestIntegrateCursor_ReplacesOldPopHooks(t *testing.T) {
 }
 
 func TestIntegrateCursor_DoesNotWriteOutsideCursorTree(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "cursor"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1278,6 +1321,7 @@ func TestIntegrateCursor_DoesNotWriteOutsideCursorTree(t *testing.T) {
 }
 
 func TestIntegrateCursor_WriteError(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	hooksPath := filepath.Join("/h", ".cursor", "hooks.json")
 	fs.writeErr[hooksPath] = os.ErrPermission
@@ -1289,6 +1333,7 @@ func TestIntegrateCursor_WriteError(t *testing.T) {
 }
 
 func TestIntegrateCursor_WritesNoSkillFiles(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "cursor"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1305,6 +1350,7 @@ func TestIntegrateCursor_WritesNoSkillFiles(t *testing.T) {
 }
 
 func TestIntegrateCursor_AgentNameIsCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "CuRsOr"); err != nil {
 		t.Errorf("expected case-insensitive agent matching, got error: %v", err)
@@ -1314,6 +1360,7 @@ func TestIntegrateCursor_AgentNameIsCaseInsensitive(t *testing.T) {
 // The cursor topic hook installs as a separate beforeSubmitPrompt entry
 // alongside set-status, labeled for cursor's payload adapter (ADR 0023).
 func TestIntegrateCursor_InstallsTopicHook(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "cursor"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1330,6 +1377,7 @@ func TestIntegrateCursor_InstallsTopicHook(t *testing.T) {
 
 // Re-running integrate is idempotent: the cursor topic hook is not duplicated.
 func TestIntegrateCursor_TopicHookIdempotent(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	for i := 0; i < 3; i++ {
 		if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "cursor"); err != nil {
@@ -1346,6 +1394,7 @@ func TestIntegrateCursor_TopicHookIdempotent(t *testing.T) {
 // An older cursor install missing the topic hook is detected as changed and the
 // topic hook is rendered through the refresh path; removal then strips it.
 func TestIntegrateCursor_RefreshRendersAndRemovesTopicHook(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	hooksPath := filepath.Join("/h", ".cursor", "hooks.json")
 	existing := map[string]interface{}{
@@ -1387,6 +1436,7 @@ func TestIntegrateCursor_RefreshRendersAndRemovesTopicHook(t *testing.T) {
 // status-sync wiring they install (ADR 0023). Removing the extension file (the
 // status-wiring removal path for these agents) takes the topic call with it.
 func TestExtensions_DeriveTopic(t *testing.T) {
+	t.Parallel()
 	if !bytes.Contains(piExtensionFile, []byte("set-topic --derive --label pi")) {
 		t.Error("pi extension missing topic derivation call")
 	}
@@ -1437,6 +1487,7 @@ func installViaFake(t *testing.T, fs *fakeFS, home, agent string) {
 }
 
 func TestDryRun_NoInstallation(t *testing.T) {
+	t.Parallel()
 	// Empty fake FS: no pop artifacts for any agent. Every dry-run should
 	// report neither installed nor changed.
 	for _, agent := range []string{"claude", "codex", "pi", "opencode", "cursor"} {
@@ -1461,6 +1512,7 @@ func TestDryRun_NoInstallation(t *testing.T) {
 }
 
 func TestDryRun_InstalledAndCurrent(t *testing.T) {
+	t.Parallel()
 	// Seed the FS with a real install, then dry-run against the same FS.
 	// Every agent should report installed=true, changed=false.
 	for _, agent := range []string{"claude", "codex", "pi", "opencode", "cursor"} {
@@ -1483,6 +1535,7 @@ func TestDryRun_InstalledAndCurrent(t *testing.T) {
 }
 
 func TestDryRun_InstalledAndStale(t *testing.T) {
+	t.Parallel()
 	// Seed a real install, then corrupt one file so the dry-run should
 	// detect stale content and report changed=true.
 	cases := []struct {
@@ -1546,6 +1599,7 @@ func TestDryRun_InstalledAndStale(t *testing.T) {
 }
 
 func TestDryRun_ClaudeSettingsNotRewrittenWhenHooksCurrent(t *testing.T) {
+	t.Parallel()
 	// After a real install, re-running in dry-run must report the settings
 	// file as installed but unchanged. This is the critical "no formatting
 	// churn" case for claude — the main reason the dry-run exists.
@@ -1572,6 +1626,7 @@ func TestDryRun_ClaudeSettingsNotRewrittenWhenHooksCurrent(t *testing.T) {
 }
 
 func TestDryRun_ClaudeInstalledDetectedViaSettingsHooks(t *testing.T) {
+	t.Parallel()
 	// Claude's settings.json is the only install target that cannot be
 	// detected by writeFile presence alone (it exists for every claude user).
 	// Verify the installClaudeHooks nudge correctly sets installed=true when
@@ -1592,8 +1647,8 @@ func TestDryRun_ClaudeInstalledDetectedViaSettingsHooks(t *testing.T) {
 
 // ----- ensureIntegrationsForRevisionWith -------------------------------------
 
-// seedState writes a state.json with the given revision into XDG_DATA_HOME.
-// The caller must have set XDG_DATA_HOME via t.Setenv before calling.
+// seedState writes a state.json with the given revision into the cmd-layer data dir.
+// The caller must have wired cmdLayerDeps via setupIntegrateCmdLayer before calling.
 func seedState(t *testing.T, rev string) {
 	t.Helper()
 	if err := saveAppState(&appState{BuildRevision: rev}); err != nil {
@@ -1620,8 +1675,26 @@ func fakeFactories(home string, fs *fakeFS) (dry, real func() *integrateDeps) {
 	return dry, real
 }
 
+// setupIntegrateCmdLayer routes app-state I/O through an isolated cmd-layer deps
+// seam (ADR-0145).
+func setupIntegrateCmdLayer(t *testing.T) {
+	t.Helper()
+	dataHome := t.TempDir()
+	configHome := filepath.Join(dataHome, "config")
+	popConfigDir := filepath.Join(configHome, "pop")
+	if err := os.MkdirAll(popConfigDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(popConfigDir, "config.toml"), []byte("projects = []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cd := newTestCmdDeps(t, "", dataHome, configHome)
+	setCmdLayerDeps(t, cd)
+}
+
 func TestEnsureIntegrations_SkipsOnDevBuild(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	fs := newFakeFS()
 	dry, real := fakeFactories("/h", fs)
 
@@ -1635,7 +1708,8 @@ func TestEnsureIntegrations_SkipsOnDevBuild(t *testing.T) {
 }
 
 func TestEnsureIntegrations_SkipsWhenRevisionMatches(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	seedState(t, "abc123")
 
 	calls := 0
@@ -1659,9 +1733,10 @@ func TestEnsureIntegrations_SkipsWhenRevisionMatches(t *testing.T) {
 }
 
 func TestEnsureIntegrations_SkipsUninstalledAgents(t *testing.T) {
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	// No agents installed: ensureIntegrations should do nothing, return no
 	// warnings, and stamp the new revision.
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	dry, real := fakeFactories("/h", fs)
 
@@ -1687,10 +1762,11 @@ func TestEnsureIntegrations_SkipsUninstalledAgents(t *testing.T) {
 }
 
 func TestEnsureIntegrations_UpdatesStaleAgent(t *testing.T) {
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	// Seed claude as installed-but-stale; pi and opencode uninstalled.
 	// ensureIntegrations should run the real install for claude only and
 	// stamp state.json.
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 
@@ -1723,10 +1799,11 @@ func TestEnsureIntegrations_UpdatesStaleAgent(t *testing.T) {
 }
 
 func TestEnsureIntegrations_RetriesOnFailure(t *testing.T) {
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	// Seed claude as installed-but-stale, then inject a write error for the
 	// real install. ensureIntegrations should return a warning and leave
 	// state.json unstamped so the next launch retries.
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 
@@ -1758,9 +1835,10 @@ func TestEnsureIntegrations_RetriesOnFailure(t *testing.T) {
 }
 
 func TestEnsureIntegrations_PartialFailureDoesNotStamp(t *testing.T) {
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	// Seed claude AND pi as installed-but-stale. Let claude update succeed
 	// but fail pi. state.json must not be stamped.
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 	installViaFake(t, fs, "/h", "pi")
@@ -1832,10 +1910,11 @@ func claudePaneLink(home string) string {
 }
 
 func TestEnsureIntegrations_RefreshesStaleFileComponent(t *testing.T) {
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	// Seed claude's pane skill as installed, then corrupt the rendered bytes so
 	// the component reads as stale. Refresh on a new revision should re-render
 	// it, record claude as updated, and stamp state.json.
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 	seedFileComponent(t, fs, "/h", ComponentPaneSkill, "claude")
@@ -1861,9 +1940,10 @@ func TestEnsureIntegrations_RefreshesStaleFileComponent(t *testing.T) {
 }
 
 func TestEnsureIntegrations_NeverAddsUninstalledFileComponent(t *testing.T) {
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	// Nothing installed for any agent. Refresh must add nothing — no render
 	// files, no symlinks — and still stamp the revision (a clean no-op pass).
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 
 	dry, real := fakeFactories("/h", fs)
@@ -1892,8 +1972,9 @@ func TestEnsureIntegrations_NeverAddsUninstalledFileComponent(t *testing.T) {
 }
 
 func TestUpdateExisting_AddsMissingBaselineComponent(t *testing.T) {
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	// Integrated agent missing a baseline-listed component gets it installed.
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 
@@ -1912,7 +1993,8 @@ func TestUpdateExisting_AddsMissingBaselineComponent(t *testing.T) {
 }
 
 func TestEnsureIntegrations_AddsMissingBaselineComponent(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 
@@ -1927,7 +2009,8 @@ func TestEnsureIntegrations_AddsMissingBaselineComponent(t *testing.T) {
 }
 
 func TestRefresh_SkipsOptedOutBaselineComponent(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	writeIntegrateRuntimeFile(t, `
 [integrations]
 skills = ["tasks"]
@@ -1948,7 +2031,8 @@ skills = ["tasks"]
 }
 
 func TestRefresh_SkipsConflictWithoutOverwrite(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 	conflictPath := filepath.Join("/h", ".claude", "skills", "tmux-pane")
@@ -1973,9 +2057,10 @@ func TestRefresh_SkipsConflictWithoutOverwrite(t *testing.T) {
 }
 
 func TestEnsureIntegrations_LeavesCurrentFileComponentUntouched(t *testing.T) {
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	// An installed-and-current file component must not be touched by refresh:
 	// no warnings, and the agent is not reported as updated.
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 	seedFileComponent(t, fs, "/h", ComponentPaneSkill, "claude")
@@ -1999,6 +2084,8 @@ func TestEnsureIntegrations_LeavesCurrentFileComponentUntouched(t *testing.T) {
 }
 
 func TestRefreshComponent_SkipsConflictSilently(t *testing.T) {
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	// An unowned entry shadowing pop's skill (the bare `pane` name) is an
 	// Integration conflict. Refresh must skip it silently — no update, no
 	// warning, and no symlink written over the user's entry.
@@ -2024,6 +2111,8 @@ func TestRefreshComponent_SkipsConflictSilently(t *testing.T) {
 // TestRefreshComponent_OpencodeTaskSkillsAddsMissing covers refresh installing
 // missing baseline-listed task skills for opencode once status wiring is present.
 func TestRefreshComponent_OpencodeTaskSkillsAddsMissing(t *testing.T) {
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "opencode")
 	dry, real := fakeFactories("/h", fs)
@@ -2050,6 +2139,8 @@ func TestRefreshComponent_OpencodeTaskSkillsAddsMissing(t *testing.T) {
 // TestRefreshComponent_TaskSkillsDryRunIncludesWayfinder: the integrate
 // staleness dry-run path reports pop-wayfinder when task-skills is missing it.
 func TestRefreshComponent_TaskSkillsDryRunIncludesWayfinder(t *testing.T) {
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 	dry, real := fakeFactories("/h", fs)
@@ -2066,6 +2157,8 @@ func TestRefreshComponent_TaskSkillsDryRunIncludesWayfinder(t *testing.T) {
 // TestRefreshComponent_TaskSkillsDryRunIncludesPrototype: the integrate
 // staleness dry-run path reports pop-prototype when task-skills is missing it.
 func TestRefreshComponent_TaskSkillsDryRunIncludesPrototype(t *testing.T) {
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 	dry, real := fakeFactories("/h", fs)
@@ -2082,6 +2175,8 @@ func TestRefreshComponent_TaskSkillsDryRunIncludesPrototype(t *testing.T) {
 // TestRefreshComponent_TaskSkillsDryRunIncludesResearch: the integrate
 // staleness dry-run path reports pop-research when task-skills is missing it.
 func TestRefreshComponent_TaskSkillsDryRunIncludesResearch(t *testing.T) {
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 	dry, real := fakeFactories("/h", fs)
@@ -2096,6 +2191,8 @@ func TestRefreshComponent_TaskSkillsDryRunIncludesResearch(t *testing.T) {
 }
 
 func TestRefreshComponent_SkipsUnknownComponentSilently(t *testing.T) {
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	fs := newFakeFS()
 	dry, real := fakeFactories("/h", fs)
 
@@ -2106,10 +2203,11 @@ func TestRefreshComponent_SkipsUnknownComponentSilently(t *testing.T) {
 }
 
 func TestEnsureIntegrations_MigratesCopyModeToSymlink(t *testing.T) {
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	// A pre-symlink copy-mode install (a real `pop-tmux-pane` directory at the agent
 	// location, no render tree under the data dir) is pop-owned but stale.
 	// Refresh must migrate it to a symlink into the freshly rendered tree.
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 
@@ -2143,10 +2241,11 @@ func TestEnsureIntegrations_MigratesCopyModeToSymlink(t *testing.T) {
 }
 
 func TestUpdateExisting_RefreshesFileComponentPerAgent(t *testing.T) {
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	// The packaging path refreshes file components too. Seed claude's pane skill
 	// stale; the update-existing run should print a per-component updated line
 	// for pane-skill and stamp the revision.
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 	seedFileComponent(t, fs, "/h", ComponentPaneSkill, "claude")
@@ -2171,7 +2270,8 @@ func TestUpdateExisting_RefreshesFileComponentPerAgent(t *testing.T) {
 // ----- appState load/save ----------------------------------------------------
 
 func TestAppState_LoadMissingReturnsEmpty(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	s := loadAppState()
 	if s == nil {
 		t.Fatal("loadAppState returned nil for missing file; want empty struct")
@@ -2182,8 +2282,9 @@ func TestAppState_LoadMissingReturnsEmpty(t *testing.T) {
 }
 
 func TestAppState_LoadCorruptReturnsEmpty(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", dir)
+	setCmdLayerDeps(t, newTestCmdDeps(t, "", dir, ""))
 	popDir := filepath.Join(dir, "pop")
 	if err := os.MkdirAll(popDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -2198,7 +2299,8 @@ func TestAppState_LoadCorruptReturnsEmpty(t *testing.T) {
 }
 
 func TestAppState_SaveThenLoadRoundTrip(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	if err := saveAppState(&appState{BuildRevision: "deadbeef"}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
@@ -2211,10 +2313,11 @@ func TestAppState_SaveThenLoadRoundTrip(t *testing.T) {
 // ----- runIntegrateUpdateExistingWith (pop integrate --update-existing) -----
 
 func TestUpdateExisting_SilentOnNoInstallations(t *testing.T) {
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	// No agents installed anywhere: opted-out outcomes are verbose-gated on
 	// the update-existing path, so default output is "nothing to do".
 	// state.json is stamped regardless (runtime fast-path can skip next launch).
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	dry, real := fakeFactories("/h", fs)
 
@@ -2235,11 +2338,12 @@ func TestUpdateExisting_SilentOnNoInstallations(t *testing.T) {
 }
 
 func TestUpdateExisting_PrintsLinePerUpdatedAgent(t *testing.T) {
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	// Seed claude + pi as installed-but-stale. Both should update; stdout
 	// should contain per-component "updated" lines for both (in agent order:
 	// claude before pi). codex and opencode aren't installed and must not
 	// appear as updated.
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 	installViaFake(t, fs, "/h", "pi")
@@ -2280,10 +2384,11 @@ func TestUpdateExisting_PrintsLinePerUpdatedAgent(t *testing.T) {
 }
 
 func TestUpdateExisting_SilentWhenInstalledAndCurrent(t *testing.T) {
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	// Seed claude at the exact embedded content. "already current" outcomes
 	// are verbose-gated on the update-existing path → default output is
 	// "nothing to do". state.json is stamped anyway.
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 	seedBaselineComponents(t, fs, "/h", "claude")
@@ -2302,11 +2407,12 @@ func TestUpdateExisting_SilentWhenInstalledAndCurrent(t *testing.T) {
 }
 
 func TestUpdateExisting_WritesWarningToStderrAndDoesNotStamp(t *testing.T) {
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	// Seed claude stale, inject a write failure on the target. The command
 	// should print "nothing to do" to stdout (nothing actually updated),
 	// print the warning to stderr, and NOT stamp state.json so the next
 	// runtime check retries.
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 	seedBaselineComponents(t, fs, "/h", "claude")
@@ -2340,9 +2446,10 @@ func TestUpdateExisting_WritesWarningToStderrAndDoesNotStamp(t *testing.T) {
 }
 
 func TestUpdateExisting_DevRevisionDoesNotStamp(t *testing.T) {
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	// A "dev" revision should never stamp state.json (matches the runtime
 	// behavior where dev builds are unreliable as staleness markers).
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	dry, real := fakeFactories("/h", fs)
 
@@ -2404,6 +2511,7 @@ func TestIntegrateCmd_WithoutFlagRequiresAtLeastOneArg(t *testing.T) {
 }
 
 func TestIntegrateCmd_MultiAgentInstall(t *testing.T) {
+	t.Parallel()
 	// Test that multiple agents can be installed via runIntegrateComponents
 	// called in sequence with the same flags applied uniformly to all.
 	// We use empty optins to simulate the case where no component flags
@@ -2440,6 +2548,7 @@ func TestIntegrateCmd_MultiAgentInstall(t *testing.T) {
 }
 
 func TestIntegrateCmd_MultiAgentWithUniformFlags(t *testing.T) {
+	t.Parallel()
 	// Test that component flags are applied uniformly across multiple agents.
 	// When pane-skill opt-in is requested, it should be installed for all agents.
 	fs := newFakeFS()
@@ -2465,6 +2574,7 @@ func TestIntegrateCmd_MultiAgentWithUniformFlags(t *testing.T) {
 }
 
 func TestIntegrateCmd_UnknownAgentIsRejected(t *testing.T) {
+	t.Parallel()
 	// Test that runIntegrateComponents rejects unknown agent names clearly.
 	fs := newFakeFS()
 
@@ -2507,6 +2617,7 @@ func TestIntegrateCmd_PartialAgentMixIsRejected(t *testing.T) {
 // TestExplicitInstall_OutputAdded: fresh install prints "added" for installed
 // components and "skipped (opted out)" for supported-but-not-requested ones.
 func TestExplicitInstall_OutputAdded(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	var out bytes.Buffer
 	d := fakeDeps(installerHome, fs, &out)
@@ -2529,6 +2640,7 @@ func TestExplicitInstall_OutputAdded(t *testing.T) {
 
 // TestExplicitInstall_OutputUpdated: re-running with stale content prints "updated".
 func TestExplicitInstall_OutputUpdated(t *testing.T) {
+	t.Parallel()
 	fs := newFakeFS()
 	settingsPath := filepath.Join(installerHome, ".claude", "settings.json")
 
@@ -2551,7 +2663,7 @@ func TestExplicitInstall_OutputUpdated(t *testing.T) {
 // TestExplicitInstall_OutputSkippedOptedOut: unsupported components produce no
 // line; supported-but-not-requested ones show "skipped (opted out)".
 func TestExplicitInstall_OutputSkippedOptedOut(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Parallel()
 	fs := newFakeFS()
 	var out bytes.Buffer
 	d := fakeDeps(installerHome, fs, &out)
@@ -2588,7 +2700,7 @@ func TestExplicitInstall_OutputSkippedOptedOut(t *testing.T) {
 // TestExplicitInstall_OutputSkippedConflict: a component with a conflict shows
 // "skipped (conflict at ...)" and is not installed.
 func TestExplicitInstall_OutputSkippedConflict(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Parallel()
 	fs := newFakeFS()
 	// Place a non-pop entry at the bare pane name to trigger a conflict.
 	conflictPath := filepath.Join(installerHome, ".claude", "skills", "tmux-pane")
@@ -2628,7 +2740,7 @@ func TestExplicitInstall_OutputSkippedConflict(t *testing.T) {
 // TestExplicitInstall_VerboseShowsAlreadyCurrent: without --verbose, "already
 // current" lines are suppressed; with --verbose, they appear.
 func TestExplicitInstall_VerboseShowsAlreadyCurrent(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Parallel()
 	fs := newFakeFS()
 	// First install to set up current content.
 	d0 := fakeDeps(installerHome, fs, io.Discard)
@@ -2663,7 +2775,8 @@ func TestExplicitInstall_VerboseShowsAlreadyCurrent(t *testing.T) {
 // (refresh never truly "adds" — it only refreshes stale installed ones, so
 // status-wiring changed is "updated").
 func TestUpdateExisting_OutputUpdated(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 
@@ -2689,7 +2802,8 @@ func TestUpdateExisting_OutputUpdated(t *testing.T) {
 // TestUpdateExisting_OutputSkippedOptedOut: baseline omissions appear as
 // "skipped (opted out)" only with --verbose on the update-existing path.
 func TestUpdateExisting_OutputSkippedOptedOut(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	writeIntegrateRuntimeFile(t, `
 [integrations]
 skills = ["tasks"]
@@ -2722,7 +2836,8 @@ skills = ["tasks"]
 // TestUpdateExisting_OutputSkippedConflict: a conflict on a file component
 // shows "skipped (conflict at ...)" by default on the update-existing path.
 func TestUpdateExisting_OutputSkippedConflict(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 	// Seed pane-skill as installed.
@@ -2751,7 +2866,8 @@ func TestUpdateExisting_OutputSkippedConflict(t *testing.T) {
 // TestUpdateExisting_VerboseShowsAlreadyCurrent: "already current" outcomes are
 // suppressed without --verbose and shown with --verbose.
 func TestUpdateExisting_VerboseShowsAlreadyCurrent(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 	seedBaselineComponents(t, fs, "/h", "claude")
@@ -2780,7 +2896,8 @@ func TestUpdateExisting_VerboseShowsAlreadyCurrent(t *testing.T) {
 // TestUpdateExisting_NothingToDoMessage: a fully up-to-date refresh with
 // nothing installed prints "nothing to do" rather than per-component rows.
 func TestUpdateExisting_NothingToDoMessage(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	fs := newFakeFS()
 	dry, real := fakeFactories("/h", fs)
 
@@ -2798,7 +2915,7 @@ func TestUpdateExisting_NothingToDoMessage(t *testing.T) {
 // TestOptOutRemoval_PaneSkill_RemovesInstalled: --no-pane-skill removes an
 // already-installed pop-owned pane skill and reports "removed (opted out)".
 func TestOptOutRemoval_PaneSkill_RemovesInstalled(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Parallel()
 	fs := newFakeFS()
 	home := "/h"
 
@@ -2832,7 +2949,7 @@ func TestOptOutRemoval_PaneSkill_RemovesInstalled(t *testing.T) {
 // TestOptOutRemoval_TaskSkills_RemovesInstalled: --no-task-skills removes an
 // already-installed pop-owned task-skills component and reports "removed (opted out)".
 func TestOptOutRemoval_TaskSkills_RemovesInstalled(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Parallel()
 	fs := newFakeFS()
 	home := "/h"
 
@@ -2872,7 +2989,7 @@ func TestOptOutRemoval_TaskSkills_RemovesInstalled(t *testing.T) {
 // component that is not installed reports "skipped (opted out)" — no removal
 // needed, but the opt-out is still recorded in the outcome.
 func TestOptOutRemoval_NotInstalled_SkipsOptedOut(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Parallel()
 	fs := newFakeFS()
 	home := "/h"
 
@@ -2896,7 +3013,7 @@ func TestOptOutRemoval_NotInstalled_SkipsOptedOut(t *testing.T) {
 // TestOptOutRemoval_LeavesUnownedUntouched: an unowned same-named entry is never
 // deleted when --no-pane-skill is passed.
 func TestOptOutRemoval_LeavesUnownedUntouched(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Parallel()
 	fs := newFakeFS()
 	home := "/h"
 
@@ -2920,7 +3037,7 @@ func TestOptOutRemoval_LeavesUnownedUntouched(t *testing.T) {
 // TestOptOutRemoval_NoPrompt: opt-out removal runs without any stdin interaction
 // (d.stdin is nil; a prompt would panic or fail).
 func TestOptOutRemoval_NoPrompt(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Parallel()
 	fs := newFakeFS()
 	home := "/h"
 	seedFileComponent(t, fs, home, ComponentPaneSkill, "claude")
@@ -2956,7 +3073,7 @@ func TestOptOutRemoval_NoPrompt(t *testing.T) {
 // TestOptOutRemoval_BareReAdds: after an explicit opt-out removal, bare
 // integrate clears runtime overrides and re-installs the merged baseline.
 func TestOptOutRemoval_BareReAdds(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Parallel()
 	fs := newFakeFS()
 	home := "/h"
 
@@ -3001,7 +3118,7 @@ func TestOptOutRemoval_BareReAdds(t *testing.T) {
 
 // TestOptOutRemoval_Cycle: full install→opt-out-removal→explicit-re-add cycle.
 func TestOptOutRemoval_Cycle(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Parallel()
 	fs := newFakeFS()
 	home := "/h"
 	link := claudePaneLink(home)
@@ -3044,7 +3161,8 @@ func TestOptOutRemoval_Cycle(t *testing.T) {
 // component. After an explicit opt-out removal, refresh must not try to re-add
 // or remove the component — it just sees it's not in the merged baseline.
 func TestRefresh_LeavesRemovedOptedOutInPlace(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Parallel()
+	setupIntegrateCmdLayer(t)
 	writeIntegrateRuntimeFile(t, `
 [integrations]
 skills = ["tasks"]
@@ -3097,7 +3215,6 @@ skills = ["tasks"]
 
 func overwriteConflictSetup(t *testing.T) (*fakeFS, string, string) {
 	t.Helper()
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	fs := newFakeFS()
 	home := "/h"
 	conflictPath := filepath.Join(home, ".claude", "skills", "tmux-pane")
@@ -3107,6 +3224,7 @@ func overwriteConflictSetup(t *testing.T) (*fakeFS, string, string) {
 }
 
 func TestOverwriteConflicts_PromptYes(t *testing.T) {
+	t.Parallel()
 	fs, home, conflictPath := overwriteConflictSetup(t)
 	var out bytes.Buffer
 	d := fakeDeps(home, fs, &out)
@@ -3136,6 +3254,7 @@ func TestOverwriteConflicts_PromptYes(t *testing.T) {
 }
 
 func TestOverwriteConflicts_PromptNo(t *testing.T) {
+	t.Parallel()
 	fs, home, conflictPath := overwriteConflictSetup(t)
 	var out bytes.Buffer
 	d := fakeDeps(home, fs, &out)
@@ -3165,6 +3284,7 @@ func TestOverwriteConflicts_PromptNo(t *testing.T) {
 }
 
 func TestOverwriteConflicts_AssumeYes(t *testing.T) {
+	t.Parallel()
 	fs, home, conflictPath := overwriteConflictSetup(t)
 	var out bytes.Buffer
 	d := fakeDeps(home, fs, &out)
@@ -3187,6 +3307,7 @@ func TestOverwriteConflicts_AssumeYes(t *testing.T) {
 }
 
 func TestOverwriteConflicts_NoTTYSkips(t *testing.T) {
+	t.Parallel()
 	fs, home, conflictPath := overwriteConflictSetup(t)
 	var out bytes.Buffer
 	d := fakeDeps(home, fs, &out)
@@ -3228,7 +3349,7 @@ func TestIntegrateCmd_OverwriteConflictsWithUpdateExistingIsError(t *testing.T) 
 }
 
 func TestOverwriteConflicts_MultiAgentUniform(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Parallel()
 	fs := newFakeFS()
 	home := "/h"
 
@@ -3259,7 +3380,7 @@ func TestOverwriteConflicts_MultiAgentUniform(t *testing.T) {
 }
 
 func TestOptOutRemoval_StillNoPromptWithOverwriteFlag(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Parallel()
 	fs := newFakeFS()
 	home := "/h"
 	seedFileComponent(t, fs, home, ComponentPaneSkill, "claude")

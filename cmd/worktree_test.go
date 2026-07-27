@@ -37,6 +37,7 @@ func countingGitDeps(t *testing.T) (gitCalls *int, restore func()) {
 }
 
 func TestBuildWorktreeItems(t *testing.T) {
+	t.Parallel()
 	t.Run("worktree with active session gets icon", func(t *testing.T) {
 		worktrees := []project.Worktree{
 			{Name: "feature", Path: "/repo/feature", Branch: "feature-branch"},
@@ -110,6 +111,7 @@ func TestBuildWorktreeItems(t *testing.T) {
 }
 
 func TestRemoveFromHistoryWith(t *testing.T) {
+	t.Parallel()
 	histJSON := `{"entries":[
 		{"path":"/repo/feature","last_access":"2026-06-01T10:00:00Z"},
 		{"path":"/repo/main","last_access":"2026-06-02T10:00:00Z"}
@@ -209,6 +211,7 @@ func workbenchRuntimeTestDeps(t *testing.T) (*config.Deps, string) {
 }
 
 func TestRemovePreferredWorkbenchWith(t *testing.T) {
+	t.Parallel()
 	t.Run("removes the deleted worktree's entry", func(t *testing.T) {
 		d, runtimePath := workbenchRuntimeTestDeps(t)
 		if err := config.SetRuntimePreferredWorkbenchWith(d, "/repo/feature", "gs-dev"); err != nil {
@@ -296,6 +299,7 @@ func newShapeDeps(pickOn bool, workbenches []config.Workbench, promptName string
 }
 
 func TestShapeWorktreeSession_PickAWorkbench(t *testing.T) {
+	t.Parallel()
 	wbs := []config.Workbench{{Name: "gs-dev"}, {Name: "minimal"}}
 	d, spy := newShapeDeps(true, wbs, "gs-dev", true)
 
@@ -327,6 +331,7 @@ func TestShapeWorktreeSession_PickAWorkbench(t *testing.T) {
 // workbench (ADR-0078) auto-applies silently, building the session and attaching
 // without a prompt, whether or not pick_on_create is on.
 func TestShapeWorktreeSession_PreferredAutoApplies(t *testing.T) {
+	t.Parallel()
 	for _, pickOn := range []bool{false, true} {
 		name := "pick_on_create_off"
 		if pickOn {
@@ -366,6 +371,7 @@ func TestShapeWorktreeSession_PreferredAutoApplies(t *testing.T) {
 // workbench (empty name + warning) never blocks: with pick_on_create off it
 // falls through to today's flat session.
 func TestShapeWorktreeSession_StalePreferredFallsThrough(t *testing.T) {
+	t.Parallel()
 	wbs := []config.Workbench{{Name: "gs-dev"}}
 	d, spy := newShapeDeps(false, wbs, "gs-dev", true)
 	d.ResolvePreferredWorkbench = func(cfg *config.Config, path string) (string, []string) {
@@ -385,6 +391,7 @@ func TestShapeWorktreeSession_StalePreferredFallsThrough(t *testing.T) {
 }
 
 func TestShapeWorktreeSession_NoWorkbenchFallsThrough(t *testing.T) {
+	t.Parallel()
 	wbs := []config.Workbench{{Name: "gs-dev"}}
 	// The "no workbench" sentinel: confirmed choice, empty name.
 	d, spy := newShapeDeps(true, wbs, "", true)
@@ -405,6 +412,7 @@ func TestShapeWorktreeSession_NoWorkbenchFallsThrough(t *testing.T) {
 }
 
 func TestShapeWorktreeSession_EscFallsThrough(t *testing.T) {
+	t.Parallel()
 	wbs := []config.Workbench{{Name: "gs-dev"}}
 	// Esc: not confirmed. The worktree already exists, so fall through to flat.
 	d, spy := newShapeDeps(true, wbs, "", false)
@@ -422,6 +430,7 @@ func TestShapeWorktreeSession_EscFallsThrough(t *testing.T) {
 }
 
 func TestShapeWorktreeSession_ToggleOffSkipsPrompt(t *testing.T) {
+	t.Parallel()
 	wbs := []config.Workbench{{Name: "gs-dev"}}
 	d, spy := newShapeDeps(false, wbs, "gs-dev", true)
 
@@ -441,6 +450,7 @@ func TestShapeWorktreeSession_ToggleOffSkipsPrompt(t *testing.T) {
 }
 
 func TestShapeWorktreeSession_EmptySetSkipsPrompt(t *testing.T) {
+	t.Parallel()
 	d, spy := newShapeDeps(true, nil, "", true)
 
 	if err := shapeWorktreeSession(d, &project.RepoContext{}, "/repo/feature"); err != nil {
@@ -463,6 +473,7 @@ func TestShapeWorktreeSession_EmptySetSkipsPrompt(t *testing.T) {
 // birth-time shaping the create flow uses (prompt + build + attach), not a flat
 // attach.
 func TestOpenWorktreeWithShaping_SessionAbsentShapes(t *testing.T) {
+	t.Parallel()
 	wbs := []config.Workbench{{Name: "gs-dev"}, {Name: "minimal"}}
 	d, spy := newShapeDeps(true, wbs, "gs-dev", true)
 	d.SessionExists = func(sessionName string) bool { return false }
@@ -489,6 +500,7 @@ func TestOpenWorktreeWithShaping_SessionAbsentShapes(t *testing.T) {
 // worktree whose session already exists attaches flat with no reshaping — the
 // config/prompt/build seams are never touched.
 func TestOpenWorktreeWithShaping_SessionPresentAttachesFlat(t *testing.T) {
+	t.Parallel()
 	wbs := []config.Workbench{{Name: "gs-dev"}, {Name: "minimal"}}
 	d, spy := newShapeDeps(true, wbs, "gs-dev", true)
 	d.SessionExists = func(sessionName string) bool { return true }
@@ -512,6 +524,7 @@ func TestOpenWorktreeWithShaping_SessionPresentAttachesFlat(t *testing.T) {
 }
 
 func TestWorktreeHelpHasNoPhantomCreateBinding(t *testing.T) {
+	t.Parallel()
 	// ctrl-n is cursor-down in the picker; a create binding never shipped.
 	// Guard against the stale help line returning.
 	if strings.Contains(worktreeDashboardCmd.Long, "ctrl-n") {
@@ -526,6 +539,7 @@ func TestWorktreeHelpHasNoPhantomCreateBinding(t *testing.T) {
 // inside the build loop. Building items for many worktrees must cost zero git
 // calls regardless of count.
 func TestBuildWorktreeItemsTasksNoGitCalls(t *testing.T) {
+	t.Parallel()
 	for _, ctx := range []*project.RepoContext{
 		{IsBare: true, RepoName: "myrepo"},
 		{IsBare: false},

@@ -25,6 +25,7 @@ func testItem(name, path string) ui.Item {
 }
 
 func TestLastNSegments(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		path     string
@@ -74,6 +75,7 @@ func TestLastNSegments(t *testing.T) {
 }
 
 func TestSanitizeSessionName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		input    string
@@ -132,6 +134,7 @@ func TestSanitizeSessionName(t *testing.T) {
 }
 
 func TestBuildSessionAwareItems(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 
 	t.Run("standalone sessions detected correctly", func(t *testing.T) {
@@ -310,6 +313,7 @@ func TestBuildSessionAwareItems(t *testing.T) {
 }
 
 func TestBuildSessionAwareItems_AttentionIndicator(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 
 	t.Run("attention overrides session icon for project", func(t *testing.T) {
@@ -385,6 +389,7 @@ func TestBuildSessionAwareItems_AttentionIndicator(t *testing.T) {
 }
 
 func TestSortByUnifiedRecency(t *testing.T) {
+	t.Parallel()
 	t.Run("mixed items sort correctly", func(t *testing.T) {
 		items := []ui.Item{
 			{Name: "no-history", Path: "/no-history"},
@@ -462,6 +467,7 @@ func TestSortByUnifiedRecency(t *testing.T) {
 }
 
 func TestSortBaseItemsByHistory(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 
 	t.Run("no duplicates after resort changes order", func(t *testing.T) {
@@ -569,6 +575,7 @@ func TestSortBaseItemsByHistory(t *testing.T) {
 }
 
 func TestOpenTmuxSessionWith(t *testing.T) {
+	t.Parallel()
 	t.Run("top-level project uses SessionName from path", func(t *testing.T) {
 		mod := &tmuxtest.Fake{Inside: true}
 
@@ -599,6 +606,7 @@ func TestOpenTmuxSessionWith(t *testing.T) {
 }
 
 func TestOpenTmuxWindowWith(t *testing.T) {
+	t.Parallel()
 	t.Run("selects existing window", func(t *testing.T) {
 		mod := &tmuxtest.Fake{
 			CurrentSessionName: "mysession",
@@ -735,6 +743,7 @@ func expandedNames(projects []project.ExpandedProject) []string {
 }
 
 func TestExpandProjectsWith_AllRegularSucceeds(t *testing.T) {
+	t.Parallel()
 	paths := []config.ExpandedPath{
 		{Path: "/home/user/proj-a", DisplayDepth: 1},
 		{Path: "/home/user/proj-b", DisplayDepth: 1},
@@ -755,6 +764,7 @@ func TestExpandProjectsWith_AllRegularSucceeds(t *testing.T) {
 }
 
 func TestExpandProjectsWith_BareRepoExpandsWorktrees(t *testing.T) {
+	t.Parallel()
 	paths := []config.ExpandedPath{
 		{Path: "/home/user/bare-proj", DisplayDepth: 1},
 	}
@@ -786,6 +796,7 @@ func TestExpandProjectsWith_BareRepoExpandsWorktrees(t *testing.T) {
 }
 
 func TestExpandProjectsWith_PartialFailureKeepsGoodProjects(t *testing.T) {
+	t.Parallel()
 	paths := []config.ExpandedPath{
 		{Path: "/home/user/good-a", DisplayDepth: 1},
 		{Path: "/home/user/broken-bare", DisplayDepth: 1},
@@ -815,6 +826,7 @@ func TestExpandProjectsWith_PartialFailureKeepsGoodProjects(t *testing.T) {
 }
 
 func TestExpandProjectsWith_AllFailedReturnsEmpty(t *testing.T) {
+	t.Parallel()
 	paths := []config.ExpandedPath{
 		{Path: "/home/user/broken-1", DisplayDepth: 1},
 		{Path: "/home/user/broken-2", DisplayDepth: 1},
@@ -835,6 +847,7 @@ func TestExpandProjectsWith_AllFailedReturnsEmpty(t *testing.T) {
 }
 
 func TestExpandProjectsWith_PanicIsCapturedAsFailure(t *testing.T) {
+	t.Parallel()
 	paths := []config.ExpandedPath{
 		{Path: "/home/user/exploding", DisplayDepth: 1},
 		{Path: "/home/user/fine", DisplayDepth: 1},
@@ -860,6 +873,7 @@ func TestExpandProjectsWith_PanicIsCapturedAsFailure(t *testing.T) {
 }
 
 func TestExpandProjectsWith_EmptyInput(t *testing.T) {
+	t.Parallel()
 	d := buildExpandDeps(nil)
 	expanded, failed := expandProjectsWith(d, nil)
 	if len(expanded) != 0 {
@@ -902,7 +916,7 @@ func scriptedPicker(fns ...func(items []ui.Item) ui.Result) func(items []ui.Item
 // testProjectDeps returns a ProjectDeps with no-op defaults safe for tests.
 // Callers should override only the fields their test cares about.
 //
-// History and cache paths are sandboxed via t.Setenv so tests do not touch
+// History and cache paths are sandboxed via cmd-layer deps so tests do not touch
 // the user's real history, config, or cache files. LoadConfig returns a
 // config pointing at a fresh t.TempDir, which cfg.ExpandProjects resolves
 // to exactly one item (not a bare repo, no worktrees) — enough for the
@@ -910,13 +924,8 @@ func scriptedPicker(fns ...func(items []ui.Item) ui.Result) func(items []ui.Item
 func testProjectDeps(t *testing.T) *ProjectDeps {
 	t.Helper()
 
-	// Sandbox XDG_* paths for defense in depth — any code that touches
-	// history.DefaultHistoryPath, monitor state, or glob cache will be
-	// redirected to a throwaway location.
 	xdg := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", xdg)
-	t.Setenv("XDG_CACHE_HOME", filepath.Join(xdg, "cache"))
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(xdg, "config"))
+	setCmdLayerDeps(t, newTestCmdDeps(t, "", xdg, filepath.Join(xdg, "config")))
 
 	// Default project directory — a real tmpdir so cfg.ExpandProjects
 	// produces exactly one entry. Tests that need more items can override
@@ -967,6 +976,7 @@ func testProjectDeps(t *testing.T) *ProjectDeps {
 }
 
 func TestRunProject_ActionConfirmRecordsHistory(t *testing.T) {
+	t.Parallel()
 	var openedItem *ui.Item
 	var hist *history.History
 
@@ -1016,6 +1026,7 @@ func TestRunProject_ActionConfirmRecordsHistory(t *testing.T) {
 }
 
 func TestRunProject_ActionKillSessionContinuesLoop(t *testing.T) {
+	t.Parallel()
 	var killedNames []string
 	var pickerCalls int
 	var selectedPath string
@@ -1059,6 +1070,7 @@ func TestRunProject_ActionKillSessionContinuesLoop(t *testing.T) {
 }
 
 func TestRunProject_ActionCancelExitsCleanly(t *testing.T) {
+	t.Parallel()
 	var pickerCalls int
 	openCalled := false
 
@@ -1088,6 +1100,7 @@ func TestRunProject_ActionCancelExitsCleanly(t *testing.T) {
 // with notice_enabled = false the UpdateNotice seam is never invoked (so no
 // background update fetch is scheduled), and it is invoked when enabled.
 func TestRunProject_UpdateNoticeKillSwitch(t *testing.T) {
+	t.Parallel()
 	disabled := false
 	enabled := true
 
@@ -1137,6 +1150,7 @@ func TestRunProject_UpdateNoticeKillSwitch(t *testing.T) {
 // (icon matching, exclusion filtering, etc.), causing 200+ subprocess
 // invocations on every open.
 func TestRunProject_NoGitCallsDuringPickerOpen(t *testing.T) {
+	t.Parallel()
 	gitCalls := 0
 	d := testProjectDeps(t)
 	d.Project.Git = &deps.MockGit{
@@ -1164,6 +1178,7 @@ func TestRunProject_NoGitCallsDuringPickerOpen(t *testing.T) {
 // no longer aborts), and the resulting finding must reach the picker's warning
 // banner through the cfg.Warnings path.
 func TestRunProject_StaleEffortKeyRendersWithBanner(t *testing.T) {
+	t.Parallel()
 	projectDir := t.TempDir()
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	body := fmt.Sprintf(`
@@ -1208,6 +1223,7 @@ extreme = [{ model = "opencode/claude-opus-4-8" }]
 // (it never resolves repo config), so the list still renders. The finding still
 // surfaces in the non-blocking warning banner (ADR 0054).
 func TestRunProject_ExecutionRenameRendersWithBanner(t *testing.T) {
+	t.Parallel()
 	projectDir := t.TempDir()
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	body := fmt.Sprintf(`
@@ -1249,6 +1265,7 @@ queue_base = true
 // default depth plus a warning: the picker still renders and the finding lands
 // in the banner (ADR 0054).
 func TestRunProject_InvalidDisplayDepthRendersWithBanner(t *testing.T) {
+	t.Parallel()
 	projectDir := t.TempDir()
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	body := fmt.Sprintf("projects = [{ path = %q, display_depth = \"two\" }]\n", projectDir)
@@ -1284,6 +1301,7 @@ func TestRunProject_InvalidDisplayDepthRendersWithBanner(t *testing.T) {
 // glob alongside one good entry renders the directories that resolved and warns
 // about the malformed pattern instead of aborting (ADR 0054).
 func TestRunProject_MalformedGlobRendersResolvedAndWarns(t *testing.T) {
+	t.Parallel()
 	base := t.TempDir()
 	if err := os.Mkdir(filepath.Join(base, "repo"), 0o755); err != nil {
 		t.Fatal(err)
@@ -1329,6 +1347,7 @@ func TestRunProject_MalformedGlobRendersResolvedAndWarns(t *testing.T) {
 // yields no usable directories keeps the existing clean hard-fail — there is
 // nothing to switch to (ADR 0054).
 func TestRunProject_ZeroUsableDirectoriesAborts(t *testing.T) {
+	t.Parallel()
 	base := t.TempDir()
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	// A single malformed glob resolves to nothing.
@@ -1353,6 +1372,7 @@ func TestRunProject_ZeroUsableDirectoriesAborts(t *testing.T) {
 // TestRunProject_UnparseableTOMLAborts asserts that unparseable TOML (class A)
 // still hard-fails the dashboard with a clear message (ADR 0054).
 func TestRunProject_UnparseableTOMLAborts(t *testing.T) {
+	t.Parallel()
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte("this is = not valid = toml\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -1398,6 +1418,7 @@ func projectDepsForWorkbenchPrompt(t *testing.T, workbenches []config.Workbench)
 // path is byte-for-byte today's behavior: one picker, flat session, and the
 // Workbench machinery is never consulted.
 func TestRunProject_WorkbenchPickDisabledNoPrompt(t *testing.T) {
+	t.Parallel()
 	d := testProjectDeps(t) // pick_on_create defaults false
 	resolveCalled := false
 	d.ResolveWorkbenches = func(cfg *config.Config, path string) []config.Workbench {
@@ -1436,6 +1457,7 @@ func TestRunProject_WorkbenchPickDisabledNoPrompt(t *testing.T) {
 // but no Workbenches resolving for the project, the prompt is skipped entirely
 // and a flat session is created.
 func TestRunProject_WorkbenchPickEmptySetSkipsPrompt(t *testing.T) {
+	t.Parallel()
 	d := projectDepsForWorkbenchPrompt(t, nil) // empty resolved set
 	openFlat := false
 	d.OpenSession = func(item *ui.Item) error { openFlat = true; return nil }
@@ -1466,6 +1488,7 @@ func TestRunProject_WorkbenchPickEmptySetSkipsPrompt(t *testing.T) {
 // and ≥1 Workbench, the second (quick-search) list shows "no workbench" first and
 // selecting a real Workbench routes to OpenSessionWithWorkbench (not the flat path).
 func TestRunProject_WorkbenchPickSelectsWorkbench(t *testing.T) {
+	t.Parallel()
 	d := projectDepsForWorkbenchPrompt(t, []config.Workbench{{Name: "gs-dev"}, {Name: "minimal"}})
 
 	openFlat := false
@@ -1517,6 +1540,7 @@ func TestRunProject_WorkbenchPickSelectsWorkbench(t *testing.T) {
 // TestRunProject_WorkbenchPickNoWorkbenchYieldsFlat asserts that choosing the
 // "no workbench" entry creates today's flat session.
 func TestRunProject_WorkbenchPickNoWorkbenchYieldsFlat(t *testing.T) {
+	t.Parallel()
 	d := projectDepsForWorkbenchPrompt(t, []config.Workbench{{Name: "gs-dev"}})
 
 	openFlat := false
@@ -1550,6 +1574,7 @@ func TestRunProject_WorkbenchPickNoWorkbenchYieldsFlat(t *testing.T) {
 // actual Switch (glossary gen 0038), and an abandoned selection never switched.
 // The loop returns to the project picker, which then cancels.
 func TestRunProject_WorkbenchPickEscLeavesHistoryUnchanged(t *testing.T) {
+	t.Parallel()
 	d := projectDepsForWorkbenchPrompt(t, []config.Workbench{{Name: "gs-dev"}})
 
 	var hist *history.History
@@ -1602,6 +1627,7 @@ func TestRunProject_WorkbenchPickEscLeavesHistoryUnchanged(t *testing.T) {
 // workbench (ADR-0078) auto-applies silently and suppresses the prompt whether
 // pick_on_create is off or on — one picker, straight to OpenSessionWithWorkbench.
 func TestRunProject_PreferredWorkbenchAutoApplies(t *testing.T) {
+	t.Parallel()
 	for _, pickOn := range []bool{false, true} {
 		name := "pick_on_create_off"
 		if pickOn {
@@ -1663,6 +1689,7 @@ func TestRunProject_PreferredWorkbenchAutoApplies(t *testing.T) {
 // that does not resolve (empty name + warning) never blocks the open: with
 // pick_on_create off it falls through to today's flat session.
 func TestRunProject_StalePreferredFallsThrough(t *testing.T) {
+	t.Parallel()
 	d := testProjectDeps(t) // pick_on_create defaults false
 	d.ResolvePreferredWorkbench = func(cfg *config.Config, path string) (string, []string) {
 		return "", []string{"preferred workbench \"ghost\" does not resolve; ignoring"}
@@ -1690,6 +1717,7 @@ func TestRunProject_StalePreferredFallsThrough(t *testing.T) {
 // TestRunProject_WorkbenchPickEscReturnsToProjectPicker asserts that Esc in the
 // Workbench list creates nothing and returns to the project picker.
 func TestRunProject_WorkbenchPickEscReturnsToProjectPicker(t *testing.T) {
+	t.Parallel()
 	d := projectDepsForWorkbenchPrompt(t, []config.Workbench{{Name: "gs-dev"}})
 
 	openFlat := false
@@ -1728,6 +1756,7 @@ func TestRunProject_WorkbenchPickEscReturnsToProjectPicker(t *testing.T) {
 // on selections that create a session: a project whose session is already live
 // skips the prompt and reattaches via the flat path.
 func TestRunProject_WorkbenchPickLiveSessionNoPrompt(t *testing.T) {
+	t.Parallel()
 	d := projectDepsForWorkbenchPrompt(t, []config.Workbench{{Name: "gs-dev"}})
 	d.HasSession = func(name string) bool { return true }
 
@@ -1768,6 +1797,7 @@ func TestRunProject_WorkbenchPickLiveSessionNoPrompt(t *testing.T) {
 // open-in-new-window action never triggers the Workbench prompt, even with the
 // toggle on.
 func TestRunProject_WorkbenchPickOpenWindowUnaffected(t *testing.T) {
+	t.Parallel()
 	d := projectDepsForWorkbenchPrompt(t, []config.Workbench{{Name: "gs-dev"}})
 
 	resolveCalled := false
@@ -1803,6 +1833,7 @@ func TestRunProject_WorkbenchPickOpenWindowUnaffected(t *testing.T) {
 // TestRunProject_WorkbenchPickStandaloneUnaffected asserts that selecting a
 // standalone session switches to it without any Workbench prompt.
 func TestRunProject_WorkbenchPickStandaloneUnaffected(t *testing.T) {
+	t.Parallel()
 	d := projectDepsForWorkbenchPrompt(t, []config.Workbench{{Name: "gs-dev"}})
 
 	resolveCalled := false
@@ -1864,6 +1895,7 @@ func managedFS(root string, layout map[string][]string, nonDirs map[string]bool)
 }
 
 func TestDiscoverManagedWorktreesWith_Discovery(t *testing.T) {
+	t.Parallel()
 	root := "/data/pop/queue/worktrees"
 	layout := map[string][]string{
 		"game_server-a1b2c3d4e5f6": {"2026-07-14-feature", "hotfix"},
@@ -1913,6 +1945,7 @@ func TestDiscoverManagedWorktreesWith_Discovery(t *testing.T) {
 // -<12 hex> short hash is stripped. A "." in the basename is sanitised in the
 // session name (matching the drain) but preserved in the display name.
 func TestDiscoverManagedWorktreesWith_NameAndSessionDerivation(t *testing.T) {
+	t.Parallel()
 	root := "/data/pop/queue/worktrees"
 	layout := map[string][]string{
 		"my-cool.repo-abcdef012345": {"wt"},
@@ -1933,6 +1966,7 @@ func TestDiscoverManagedWorktreesWith_NameAndSessionDerivation(t *testing.T) {
 }
 
 func TestDiscoverManagedWorktreesWith_EmptyRoot(t *testing.T) {
+	t.Parallel()
 	// ReadDir on the root errors (directory absent) — clean no-op, no error.
 	fs := &deps.MockFileSystem{
 		ReadDirFunc: func(path string) ([]os.DirEntry, error) {
@@ -1948,6 +1982,7 @@ func TestDiscoverManagedWorktreesWith_EmptyRoot(t *testing.T) {
 // A stray file at the root level, and a stray file inside a repoKey dir, are
 // both skipped — only directories become entries.
 func TestDiscoverManagedWorktreesWith_SkipsNonDirs(t *testing.T) {
+	t.Parallel()
 	root := "/data/pop/queue/worktrees"
 	layout := map[string][]string{
 		"repo-000000000000": {"realwt", "stray.txt"},
@@ -1965,6 +2000,7 @@ func TestDiscoverManagedWorktreesWith_SkipsNonDirs(t *testing.T) {
 }
 
 func TestRepoKeyBasename(t *testing.T) {
+	t.Parallel()
 	cases := []struct{ in, want string }{
 		{"game_server-a1b2c3d4e5f6", "game_server"},
 		{"my-cool-repo-abcdef012345", "my-cool-repo"},

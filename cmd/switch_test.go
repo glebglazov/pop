@@ -27,6 +27,7 @@ func mockSwitchDeps() (*SwitchDeps, *history.History, *tmuxtest.Fake) {
 }
 
 func TestRunProjectSwitch(t *testing.T) {
+	t.Parallel()
 	t.Run("records history and creates+switches session", func(t *testing.T) {
 		d, hist, fake := mockSwitchDeps()
 
@@ -125,6 +126,7 @@ func TestRunProjectSwitch(t *testing.T) {
 }
 
 func TestCanonicalDir(t *testing.T) {
+	t.Parallel()
 	t.Run("relative path joins cwd", func(t *testing.T) {
 		fs := &deps.MockFileSystem{
 			GetwdFunc: func() (string, error) { return "/home/user", nil },
@@ -182,6 +184,7 @@ func TestCanonicalDir(t *testing.T) {
 }
 
 func TestProjectSwitchCommandTree(t *testing.T) {
+	t.Parallel()
 	got, _, err := rootCmd.Find([]string{"project", "switch"})
 	if err != nil {
 		t.Fatal(err)

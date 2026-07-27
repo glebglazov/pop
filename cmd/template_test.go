@@ -13,6 +13,7 @@ import (
 )
 
 func TestTemplateCommandTree(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		path    []string
 		wantCmd any
@@ -46,6 +47,7 @@ func TestTemplateCommandTree(t *testing.T) {
 }
 
 func TestWorkbenchCmdIsVisibleLayoutCmdIsHidden(t *testing.T) {
+	t.Parallel()
 	if workbenchCmd.Hidden {
 		t.Fatal("workbench command should not be hidden")
 	}
@@ -55,6 +57,7 @@ func TestWorkbenchCmdIsVisibleLayoutCmdIsHidden(t *testing.T) {
 }
 
 func TestRunTemplateListWith(t *testing.T) {
+	t.Parallel()
 	cfg := &config.Config{
 		Workbenches: []config.Workbench{
 			{Name: "dev"},
@@ -123,6 +126,7 @@ func stampedPaneIdentities(f *tmuxtest.Fake) map[string]bool {
 }
 
 func TestRunTemplateApplyWith(t *testing.T) {
+	t.Parallel()
 	cfg := &config.Config{
 		Workbenches: []config.Workbench{{
 			Name: "dev",
@@ -175,6 +179,7 @@ func TestRunTemplateApplyWith(t *testing.T) {
 }
 
 func TestRunTemplateApplyWithUnknownName(t *testing.T) {
+	t.Parallel()
 	err := runTemplateApplyWith(templateRuntimeDeps{Tmux: &tmuxtest.Fake{}}, []config.Workbench{}, "missing")
 	if err == nil {
 		t.Fatal("expected error")
@@ -185,6 +190,7 @@ func TestRunTemplateApplyWithUnknownName(t *testing.T) {
 }
 
 func TestRunTemplateApplyWithTmuxFailure(t *testing.T) {
+	t.Parallel()
 	cfg := &config.Config{
 		Workbenches: []config.Workbench{{
 			Name: "dev",
@@ -216,6 +222,7 @@ func TestRunTemplateApplyWithTmuxFailure(t *testing.T) {
 }
 
 func TestRunTemplateApplyWithFlatWeightedSplits(t *testing.T) {
+	t.Parallel()
 	// A window with 3 columns weighted 1, 2, 3 over a 120-cell-wide window.
 	cfg := &config.Config{
 		Workbenches: []config.Workbench{{
@@ -264,6 +271,7 @@ func TestRunTemplateApplyWithFlatWeightedSplits(t *testing.T) {
 }
 
 func TestRunTemplateApplyWithColumnDirection(t *testing.T) {
+	t.Parallel()
 	// A rows container splits vertically (-v) and resizes height (-y).
 	cfg := &config.Config{
 		Workbenches: []config.Workbench{{
@@ -308,6 +316,7 @@ func TestRunTemplateApplyWithColumnDirection(t *testing.T) {
 }
 
 func TestRunTemplateApplyWithNestedContainers(t *testing.T) {
+	t.Parallel()
 	// Outer columns with 2 children; the first child is a rows container.
 	cfg := &config.Config{
 		Workbenches: []config.Workbench{{
@@ -349,6 +358,7 @@ func TestRunTemplateApplyWithNestedContainers(t *testing.T) {
 }
 
 func TestRunTemplateApplyWithDefaultWeight(t *testing.T) {
+	t.Parallel()
 	// Omitted weights default to 1 (equal split).
 	cfg := &config.Config{
 		Workbenches: []config.Workbench{{
@@ -383,6 +393,7 @@ func TestRunTemplateApplyWithDefaultWeight(t *testing.T) {
 }
 
 func TestRunTemplateApplyWithDeepNesting(t *testing.T) {
+	t.Parallel()
 	// 3 levels deep nesting: every leaf's command must be sent.
 	cfg := &config.Config{
 		Workbenches: []config.Workbench{{
@@ -431,6 +442,7 @@ func TestRunTemplateApplyWithDeepNesting(t *testing.T) {
 }
 
 func TestRunTemplateApplyWithMultipleWindows(t *testing.T) {
+	t.Parallel()
 	cfg := &config.Config{
 		Workbenches: []config.Workbench{{
 			Name: "dev",
@@ -471,6 +483,7 @@ func TestRunTemplateApplyWithMultipleWindows(t *testing.T) {
 }
 
 func TestRunTemplateApplyWithNoLiveWindowsCreatesFresh(t *testing.T) {
+	t.Parallel()
 	// A window carrying no @pop_wb_window stamp is not reported by
 	// LiveWorkbenchWindows (identity never lives in window_name, ADR-0075), so
 	// the target window is created fresh. Here no workbench windows are live.
@@ -504,6 +517,7 @@ func TestRunTemplateApplyWithNoLiveWindowsCreatesFresh(t *testing.T) {
 }
 
 func TestEffectiveCwdAndResolveCwd(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		sessionDir string
@@ -565,6 +579,7 @@ func TestEffectiveCwdAndResolveCwd(t *testing.T) {
 }
 
 func TestRunTemplateApplyWithCwdInheritanceAndOverride(t *testing.T) {
+	t.Parallel()
 	cfg := &config.Config{
 		Workbenches: []config.Workbench{{
 			Name: "cwd-test",
@@ -607,6 +622,7 @@ func TestRunTemplateApplyWithCwdInheritanceAndOverride(t *testing.T) {
 }
 
 func TestRunTemplateApplyWithCwdTildeAndAbsolute(t *testing.T) {
+	t.Parallel()
 	cfg := &config.Config{
 		Workbenches: []config.Workbench{{
 			Name: "cwd-test",
@@ -644,6 +660,7 @@ func TestRunTemplateApplyWithCwdTildeAndAbsolute(t *testing.T) {
 }
 
 func TestRunTemplateApplyWithFocusOverride(t *testing.T) {
+	t.Parallel()
 	cfg := &config.Config{
 		Workbenches: []config.Workbench{{
 			Name: "focus-test",
@@ -680,6 +697,7 @@ func TestRunTemplateApplyWithFocusOverride(t *testing.T) {
 }
 
 func TestRunTemplateApplyWithMultipleFocusWarning(t *testing.T) {
+	t.Parallel()
 	var warnings bytes.Buffer
 	cfg := &config.Config{
 		Workbenches: []config.Workbench{{
@@ -718,6 +736,7 @@ func TestRunTemplateApplyWithMultipleFocusWarning(t *testing.T) {
 }
 
 func TestRealizePaneTreeStampsNamedLeafSkipsUnnamed(t *testing.T) {
+	t.Parallel()
 	// Named leaf: identity is stamped.
 	f := &tmuxtest.Fake{}
 	named := &config.WorkbenchPaneSpec{Name: "server", Command: "go test ./..."}
@@ -762,6 +781,7 @@ func mergeFake(livePanes map[string]string, width, height int) *tmuxtest.Fake {
 }
 
 func TestRunTemplateApplyMergeSupersetAppend(t *testing.T) {
+	t.Parallel()
 	// Reference transition (ADR-0075): a live window shaped by `minimal`
 	// (rows: vim, claude) reapplied with `gs-dev` (those two rows plus a third
 	// row of three columns) keeps the live vim/claude panes and appends only
@@ -841,6 +861,7 @@ func TestRunTemplateApplyMergeSupersetAppend(t *testing.T) {
 }
 
 func TestRunTemplateApplyMergeMidRowColumnInsertion(t *testing.T) {
+	t.Parallel()
 	// A missing column inside an otherwise-live row is spliced in beside its
 	// live left sibling, in the correct position.
 	cfg := &config.Config{
@@ -890,6 +911,7 @@ func TestRunTemplateApplyMergeMidRowColumnInsertion(t *testing.T) {
 }
 
 func TestRunTemplateApplyMergeReproportionsSurvivors(t *testing.T) {
+	t.Parallel()
 	// Reapplying with new weights reproportions survivors without re-running or
 	// killing them.
 	cfg := &config.Config{
@@ -933,6 +955,7 @@ func TestRunTemplateApplyMergeReproportionsSurvivors(t *testing.T) {
 }
 
 func TestRunTemplateApplyMergeRecreatesUnnamedLeaf(t *testing.T) {
+	t.Parallel()
 	// Unnamed leaves are anonymous (ADR-0075 B1): with no identity they cannot
 	// be matched, so a reapply always (re)creates them — even when a named
 	// sibling survives.
@@ -981,6 +1004,7 @@ func TestRunTemplateApplyMergeRecreatesUnnamedLeaf(t *testing.T) {
 }
 
 func TestRunTemplateApplyBeforeApplyRunsBeforeWindowRealization(t *testing.T) {
+	t.Parallel()
 	cfg := &config.Config{
 		Workbenches: []config.Workbench{{
 			Name:        "dev",
@@ -1029,6 +1053,7 @@ func TestRunTemplateApplyBeforeApplyRunsBeforeWindowRealization(t *testing.T) {
 }
 
 func TestRunTemplateApplyBeforeApplyRunsOnReapplyOverLiveSession(t *testing.T) {
+	t.Parallel()
 	// Reapply over a live, pop-owned window (merge path) must still run
 	// before_apply on every apply.
 	cfg := &config.Config{
@@ -1074,6 +1099,7 @@ func TestRunTemplateApplyBeforeApplyRunsOnReapplyOverLiveSession(t *testing.T) {
 }
 
 func TestRunTemplateApplyBeforeApplyError(t *testing.T) {
+	t.Parallel()
 	// A failing before_apply command aborts the apply before any window is built.
 	cfg := &config.Config{
 		Workbenches: []config.Workbench{{
@@ -1114,6 +1140,7 @@ func TestRunTemplateApplyBeforeApplyError(t *testing.T) {
 }
 
 func TestCreateSessionFromWorkbenchRemovesStrayWindow(t *testing.T) {
+	t.Parallel()
 	cfg := &config.Config{
 		Workbenches: []config.Workbench{{
 			Name:        "dev",
@@ -1168,6 +1195,7 @@ func TestCreateSessionFromWorkbenchRemovesStrayWindow(t *testing.T) {
 }
 
 func TestCreateSessionFromWorkbenchInvalidTemplate(t *testing.T) {
+	t.Parallel()
 	// A Workbench with no windows is invalid; nothing should be created.
 	f := &tmuxtest.Fake{}
 	d := templateRuntimeDeps{

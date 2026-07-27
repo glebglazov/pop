@@ -12,6 +12,7 @@ import (
 )
 
 func TestRoutineCommandTree(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		path []string
 	}{
@@ -27,6 +28,7 @@ func TestRoutineCommandTree(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(strings.Join(tt.path, " "), func(t *testing.T) {
+			t.Parallel()
 			if _, _, err := rootCmd.Find(tt.path); err != nil {
 				t.Fatalf("Find(%v): %v", tt.path, err)
 			}
@@ -34,19 +36,21 @@ func TestRoutineCommandTree(t *testing.T) {
 	}
 }
 
-func TestRunRoutineNewAndList(t *testing.T) {
+func setupRoutineCmdTest(t *testing.T) {
+	t.Helper()
 	root := t.TempDir()
 	dataHome := filepath.Join(root, "data")
 	home := filepath.Join(root, "home")
 	if err := os.MkdirAll(home, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("XDG_DATA_HOME", dataHome)
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(home); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+	cd := newTestCmdDeps(t, home, dataHome, "")
+	setCmdLayerDeps(t, cd)
+}
+
+func TestRunRoutineNewAndList(t *testing.T) {
+	t.Parallel()
+	setupRoutineCmdTest(t)
 
 	oldNew := routineNew
 	oldList := routineList
@@ -58,13 +62,12 @@ func TestRunRoutineNewAndList(t *testing.T) {
 	}()
 	routineInteractive = func() bool { return false }
 	routineNew = func(id, scheduleRaw, cwd string) (*routine.AddResult, error) {
-		d := routine.DefaultDeps()
+		d := cmdLayerDeps().routineDeps()
 		d.IsInteractive = func() bool { return false }
 		return routine.AddWith(d, id, scheduleRaw, cwd)
 	}
 	routineList = func(out io.Writer) error {
-		d := routine.DefaultDeps()
-		return routine.ListWith(d, out)
+		return routine.ListWith(cmdLayerDeps().routineDeps(), out)
 	}
 
 	var newOut bytes.Buffer
@@ -97,18 +100,8 @@ func TestRunRoutineNewAndList(t *testing.T) {
 }
 
 func TestRunRoutineNewUnscheduledHint(t *testing.T) {
-	root := t.TempDir()
-	dataHome := filepath.Join(root, "data")
-	home := filepath.Join(root, "home")
-	if err := os.MkdirAll(home, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("XDG_DATA_HOME", dataHome)
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(home); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+	t.Parallel()
+	setupRoutineCmdTest(t)
 
 	oldNew := routineNew
 	oldInteractive := routineInteractive
@@ -120,7 +113,7 @@ func TestRunRoutineNewUnscheduledHint(t *testing.T) {
 	}()
 	routineInteractive = func() bool { return false }
 	routineNew = func(id, scheduleRaw, cwd string) (*routine.AddResult, error) {
-		d := routine.DefaultDeps()
+		d := cmdLayerDeps().routineDeps()
 		d.IsInteractive = func() bool { return false }
 		return routine.AddWith(d, id, scheduleRaw, cwd)
 	}
@@ -140,18 +133,8 @@ func TestRunRoutineNewUnscheduledHint(t *testing.T) {
 }
 
 func TestRunRoutinePauseResumeAndRuns(t *testing.T) {
-	root := t.TempDir()
-	dataHome := filepath.Join(root, "data")
-	home := filepath.Join(root, "home")
-	if err := os.MkdirAll(home, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("XDG_DATA_HOME", dataHome)
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(home); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+	t.Parallel()
+	setupRoutineCmdTest(t)
 
 	oldNew := routineNew
 	oldList := routineList
@@ -169,21 +152,22 @@ func TestRunRoutinePauseResumeAndRuns(t *testing.T) {
 	}()
 	routineInteractive = func() bool { return false }
 	routineNew = func(id, scheduleRaw, cwd string) (*routine.AddResult, error) {
-		d := routine.DefaultDeps()
+		d := cmdLayerDeps().routineDeps()
 		d.IsInteractive = func() bool { return false }
 		return routine.AddWith(d, id, scheduleRaw, cwd)
 	}
+	rd := func() *routine.Deps { return cmdLayerDeps().routineDeps() }
 	routineList = func(out io.Writer) error {
-		return routine.ListWith(routine.DefaultDeps(), out)
+		return routine.ListWith(rd(), out)
 	}
 	routinePause = func(id string) (*routine.PauseResult, error) {
-		return routine.PauseWith(routine.DefaultDeps(), id)
+		return routine.PauseWith(rd(), id)
 	}
 	routineResume = func(id string) (*routine.ResumeResult, error) {
-		return routine.ResumeWith(routine.DefaultDeps(), id)
+		return routine.ResumeWith(rd(), id)
 	}
 	routineRuns = func(id string, out io.Writer) error {
-		return routine.RunsWith(routine.DefaultDeps(), id, out)
+		return routine.RunsWith(rd(), id, out)
 	}
 
 	routineNewSchedule = "every 6h"
