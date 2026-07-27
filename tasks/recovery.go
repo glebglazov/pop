@@ -366,12 +366,13 @@ func WaitForRecovery(d *Deps, w *RecoveryWaiter, out *output) error {
 	defer signal.Stop(sigCh)
 
 	// Poll interval: check every 30 seconds, or every 5 seconds if reset is
-	// imminent (within 5 minutes).
+	// imminent (within 5 minutes). Both cadences come from Deps so tests can
+	// advance the loop without real waits; production keeps the 30s/5s values.
 	pollInterval := func() time.Duration {
 		if time.Until(w.ResetAt) < 5*time.Minute {
-			return 5 * time.Second
+			return d.recoveryPollImminentInterval()
 		}
-		return 30 * time.Second
+		return d.recoveryPollInterval()
 	}
 
 	ticker := time.NewTicker(pollInterval())
@@ -379,8 +380,9 @@ func WaitForRecovery(d *Deps, w *RecoveryWaiter, out *output) error {
 
 	// Fast check interval for detecting external deregistration. This is a
 	// silent store read only: it never prints and never drives the status line
-	// (ADR-0100 recovery-wait cadence).
-	fastCheckInterval := 2 * time.Second
+	// (ADR-0100 recovery-wait cadence). Sourced from Deps (default 2s) so tests
+	// can spin the loop quickly.
+	fastCheckInterval := d.recoveryFastCheckInterval()
 	fastTicker := time.NewTicker(fastCheckInterval)
 	defer fastTicker.Stop()
 
@@ -461,6 +463,50 @@ func WaitForRecovery(d *Deps, w *RecoveryWaiter, out *output) error {
 // recoveryHeartbeat is how often the post-cooldown block line reprints while
 // the blocking reason is unchanged, so a long-held gate still shows life.
 const recoveryHeartbeat = 60 * time.Second
+
+// Recovery-wait cadence defaults (ADR-0100, ADR-0144). These are the real
+// production intervals; DefaultDeps installs them on Deps, and the accessors
+// below fall back to them when a Deps built from a bare literal (tests) leaves
+// the interval unset. Tests that exercise the wait loop inject small values so
+// the loop advances without real wall-clock waits.
+const (
+	// defaultRecoveryFastCheckInterval is how often WaitForRecovery does a
+	// silent store read to detect external deregistration.
+	defaultRecoveryFastCheckInterval = 2 * time.Second
+	// defaultRecoveryPollInterval is the regular acquire-or-print poll cadence
+	// while the reset is still far off.
+	defaultRecoveryPollInterval = 30 * time.Second
+	// defaultRecoveryPollImminentInterval is the tighter poll cadence used once
+	// the reset is imminent (within 5 minutes).
+	defaultRecoveryPollImminentInterval = 5 * time.Second
+)
+
+// recoveryFastCheckInterval returns the silent-store-read cadence, honoring an
+// injected override and otherwise using the production default.
+func (d *Deps) recoveryFastCheckInterval() time.Duration {
+	if d != nil && d.RecoveryFastCheckInterval > 0 {
+		return d.RecoveryFastCheckInterval
+	}
+	return defaultRecoveryFastCheckInterval
+}
+
+// recoveryPollInterval returns the far-off poll cadence, honoring an injected
+// override and otherwise using the production default.
+func (d *Deps) recoveryPollInterval() time.Duration {
+	if d != nil && d.RecoveryPollInterval > 0 {
+		return d.RecoveryPollInterval
+	}
+	return defaultRecoveryPollInterval
+}
+
+// recoveryPollImminentInterval returns the imminent-reset poll cadence, honoring
+// an injected override and otherwise using the production default.
+func (d *Deps) recoveryPollImminentInterval() time.Duration {
+	if d != nil && d.RecoveryPollImminentInterval > 0 {
+		return d.RecoveryPollImminentInterval
+	}
+	return defaultRecoveryPollImminentInterval
+}
 
 // recoveryPrinter decides when the recovery wait loop emits a status line,
 // decoupling printing cadence from the poll/fast-check ticker cadence (ADR-0100).

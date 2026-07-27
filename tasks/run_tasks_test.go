@@ -2711,6 +2711,12 @@ func (e *runTaskSetFixture) deps() *Deps {
 		FS:     deps.NewRealFileSystem(),
 		Git:    deps.NewRealGit(),
 		Runner: RealCommandRunner{},
+		// Spin the recovery-wait loop fast so tests that park a drain and then
+		// deregister the waiter observe the exit in milliseconds rather than
+		// blocking on the real 2s fast-check / 5s-30s poll cadence.
+		RecoveryFastCheckInterval:    2 * time.Millisecond,
+		RecoveryPollInterval:         2 * time.Millisecond,
+		RecoveryPollImminentInterval: 2 * time.Millisecond,
 	}
 }
 

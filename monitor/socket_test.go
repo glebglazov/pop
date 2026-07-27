@@ -302,7 +302,9 @@ func TestSendRequest_Timeout(t *testing.T) {
 		if err != nil {
 			return
 		}
-		time.Sleep(10 * time.Second)
+		// Stay silent just past the client's 2s read deadline so it times out;
+		// no need for a long real sleep here.
+		time.Sleep(3 * time.Second)
 		conn.Close()
 	}()
 

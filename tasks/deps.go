@@ -4,6 +4,7 @@ import (
 	"io"
 	"os/exec"
 	"sync"
+	"time"
 
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/store"
@@ -41,6 +42,15 @@ type Deps struct {
 	ProcessStartToken func(pid int) (string, bool)
 	NoticeOut         io.Writer
 
+	// Recovery-wait cadence (WaitForRecovery, ADR-0100/ADR-0144). These are the
+	// one production time seam this package exposes: zero values fall back to
+	// the production defaults (see recovery.go), so real runs keep the 2s
+	// fast-check and 5s/30s poll intervals. Tests inject small values so the
+	// wait loop advances without real wall-clock waits.
+	RecoveryFastCheckInterval    time.Duration
+	RecoveryPollInterval         time.Duration
+	RecoveryPollImminentInterval time.Duration
+
 	// store is the lazily-opened, process-cached execution-state store handle
 	// holder. DefaultDeps pre-allocates it so production copies of Deps share one
 	// handle; a Deps built from a bare literal (tests) gets its holder lazily on
@@ -51,11 +61,14 @@ type Deps struct {
 // DefaultDeps returns dependencies using real implementations.
 func DefaultDeps() *Deps {
 	return &Deps{
-		FS:       deps.NewRealFileSystem(),
-		Git:      deps.NewRealGit(),
-		Runner:   RealCommandRunner{},
-		LookPath: exec.LookPath,
-		store:    &storeCache{},
+		FS:                           deps.NewRealFileSystem(),
+		Git:                          deps.NewRealGit(),
+		Runner:                       RealCommandRunner{},
+		LookPath:                     exec.LookPath,
+		RecoveryFastCheckInterval:    defaultRecoveryFastCheckInterval,
+		RecoveryPollInterval:         defaultRecoveryPollInterval,
+		RecoveryPollImminentInterval: defaultRecoveryPollImminentInterval,
+		store:                        &storeCache{},
 	}
 }
 

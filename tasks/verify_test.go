@@ -919,7 +919,10 @@ func TestRunConfiguredVerifierFallsThroughAfterRetryExhausted(t *testing.T) {
 
 func TestRunConfiguredVerifierTimeoutRetriesThenFallsThrough(t *testing.T) {
 	taskSetDir := t.TempDir()
-	runner := &slowVerifyRunner{delay: 2 * time.Second}
+	// The fake process only has to outlast the 50ms attempt deadline below so
+	// every attempt times out; a small hang keeps the four-attempt run fast
+	// instead of paying 2s of real sleep per call.
+	runner := &slowVerifyRunner{delay: 150 * time.Millisecond}
 	d := verifyRetryDeps(t, runner)
 
 	raw, err := runConfiguredVerifier(d, instantVerifyRetryConfig(2), verifierSelection{
