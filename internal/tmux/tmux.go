@@ -50,6 +50,59 @@ type Tmux interface {
 	GlobalHooks() ([]Hook, error)
 	// UninstallHook removes the global hook at an indexed selector ("event[N]").
 	UninstallHook(indexed string) error
+
+	// CurrentSession returns the session name of the client displaying the
+	// caller (display-message -p #S). An empty result means no session.
+	CurrentSession() (string, error)
+
+	// --- agentic panes: the shared "agent" window (glossary: Agentic pane) ---
+
+	// HasAgentWindow reports whether session owns the shared "agent" window.
+	HasAgentWindow(session string) bool
+	// AgentPanes lists the named panes in session's agent window (title + id).
+	AgentPanes(session string) ([]AgentPane, error)
+	// FindAgentPane resolves a pane id by title in session's agent window.
+	FindAgentPane(session, title string) (string, error)
+	// NewAgentWindow creates session's agent window rooted at dir and returns
+	// the new pane's id (glossary: Pane ID target).
+	NewAgentWindow(session, dir string) (string, error)
+	// SplitAgentPane splits a new pane into session's agent window rooted at
+	// dir and returns the new pane's id.
+	SplitAgentPane(session, dir string) (string, error)
+	// RetileAgentWindow re-tiles session's agent window (select-layout tiled).
+	RetileAgentWindow(session string) error
+
+	// --- pane-id primitives (glossary: Pane ID target) ---
+
+	// SetPaneTitle sets a pane's title (select-pane -T).
+	SetPaneTitle(paneID, title string) error
+	// SetRemainOnExit toggles a pane's remain-on-exit option.
+	SetRemainOnExit(paneID string, on bool) error
+	// SendKeys sends literal keys to a pane (send-keys); keys are not
+	// auto-terminated with Enter.
+	SendKeys(paneID string, keys ...string) error
+	// KillPane kills a pane.
+	KillPane(paneID string) error
+	// CapturePane captures a pane's content plus 50 lines of scrollback.
+	CapturePane(paneID string) (string, error)
+	// PaneDead reports whether a pane's process has exited. A lookup failure
+	// reports false.
+	PaneDead(paneID string) bool
+
+	// --- Topic (@pop_topic / @pop_topic_kind; glossary: Topic, Topic provenance) ---
+
+	// ReadTopic reads a pane's Topic, its provenance, and its owning session in
+	// one round-trip.
+	ReadTopic(paneID string) (TopicState, error)
+	// SetTopic writes a pane's Topic without touching its provenance.
+	SetTopic(paneID, topic string) error
+	// SetTopicWithKind writes a pane's Topic and its provenance together.
+	SetTopicWithKind(paneID, topic, kind string) error
+	// ClearTopic clears a pane's Topic and provenance.
+	ClearTopic(paneID string) error
+	// PaneTopics maps every pane id carrying a non-empty Topic to its Topic
+	// text, across all sessions.
+	PaneTopics() (map[string]string, error)
 }
 
 // realTmux implements Tmux against the tmux binary via the runner seam.

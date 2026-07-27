@@ -76,7 +76,7 @@ func newTopicDerivationDispatcher() *topicDerivationDispatcher {
 		hasNote: defaultPaneHasNote,
 		run:     runTopicRecipe,
 		write: func(paneID, topic, kind string) error {
-			return setPaneTopicWithKind(defaultTmux, paneID, topic, kind)
+			return setPaneTopicWithKind(defaultTmuxMod, paneID, topic, kind)
 		},
 	}
 }

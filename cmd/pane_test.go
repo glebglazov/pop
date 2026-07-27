@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/config"
-	"github.com/glebglazov/pop/internal/deps"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 	"github.com/glebglazov/pop/monitor"
@@ -30,17 +29,14 @@ func withTmuxMod(t *testing.T, f *tmuxtest.Fake) {
 }
 
 func TestFindPaneWith(t *testing.T) {
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			if args[0] == "list-panes" {
-				return "server|%5\ndb|%6\nlogs|%7", nil
-			}
-			return "", nil
-		},
-	}
+	// Arrange the agent window's panes as fake state; the module owns the
+	// list-panes construction, so the test asserts on state, not arg vectors.
+	mod := &tmuxtest.Fake{AgentWindows: map[string][]tmuxmod.AgentPane{
+		"project": {{Title: "server", ID: "%5"}, {Title: "db", ID: "%6"}, {Title: "logs", ID: "%7"}},
+	}}
 
 	t.Run("finds existing pane", func(t *testing.T) {
-		paneID, err := findPaneWith(tmux, "project", "db")
+		paneID, err := findPaneWith(mod, "project", "db")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -50,7 +46,7 @@ func TestFindPaneWith(t *testing.T) {
 	})
 
 	t.Run("returns error for missing pane", func(t *testing.T) {
-		_, err := findPaneWith(tmux, "project", "nonexistent")
+		_, err := findPaneWith(mod, "project", "nonexistent")
 		if err == nil {
 			t.Error("expected error for missing pane")
 		}
@@ -58,107 +54,66 @@ func TestFindPaneWith(t *testing.T) {
 }
 
 func TestRunPaneSendToPaneIDWith(t *testing.T) {
-	var calls [][]string
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			calls = append(calls, append([]string(nil), args...))
-			return "", nil
-		},
-	}
+	mod := &tmuxtest.Fake{}
 
-	if err := runPaneSendToPaneIDWith(tmux, "%63", []string{"hello", "Enter"}); err != nil {
+	if err := runPaneSendToPaneIDWith(mod, "%63", []string{"hello", "Enter"}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(calls) != 1 {
-		t.Fatalf("got %d calls, want 1", len(calls))
+	sent := mod.SentKeys["%63"]
+	if len(sent) != 1 {
+		t.Fatalf("send-keys calls for %%63 = %v, want 1", sent)
 	}
-	want := []string{"send-keys", "-t", "%63", "hello", "Enter"}
-	if got := strings.Join(calls[0], "\x00"); got != strings.Join(want, "\x00") {
-		t.Errorf("tmux args = %v, want %v", calls[0], want)
+	want := []string{"hello", "Enter"}
+	if strings.Join(sent[0], "\x00") != strings.Join(want, "\x00") {
+		t.Errorf("keys sent = %v, want %v", sent[0], want)
 	}
 
 	t.Run("requires keys", func(t *testing.T) {
-		if err := runPaneSendToPaneIDWith(tmux, "%63", nil); err == nil {
+		if err := runPaneSendToPaneIDWith(mod, "%63", nil); err == nil {
 			t.Fatal("expected error")
 		}
 	})
 }
 
 func TestHasAgentWindowWith(t *testing.T) {
-	tests := []struct {
-		name     string
-		output   string
-		expected bool
-	}{
-		{
-			name:     "agent window exists",
-			output:   "main\nagent\nlogs",
-			expected: true,
-		},
-		{
-			name:     "no agent window",
-			output:   "main\nlogs",
-			expected: false,
-		},
-		{
-			name:     "empty output",
-			output:   "",
-			expected: false,
-		},
-	}
+	t.Run("agent window exists", func(t *testing.T) {
+		mod := &tmuxtest.Fake{AgentWindows: map[string][]tmuxmod.AgentPane{
+			"project": {{Title: "server", ID: "%5"}},
+		}}
+		if !hasAgentWindowWith(mod, "project") {
+			t.Error("expected agent window to exist")
+		}
+	})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tmux := &deps.MockTmux{
-				CommandFunc: func(args ...string) (string, error) {
-					return tt.output, nil
-				},
-			}
-			result := hasAgentWindowWith(tmux, "project")
-			if result != tt.expected {
-				t.Errorf("got %v, want %v", result, tt.expected)
-			}
-		})
-	}
+	t.Run("no agent window", func(t *testing.T) {
+		mod := &tmuxtest.Fake{}
+		if hasAgentWindowWith(mod, "project") {
+			t.Error("expected no agent window")
+		}
+	})
 }
 
 func TestIsPaneDeadWith(t *testing.T) {
-	tests := []struct {
-		name     string
-		output   string
-		err      error
-		expected bool
-	}{
-		{
-			name:     "dead pane",
-			output:   "1",
-			expected: true,
-		},
-		{
-			name:     "alive pane",
-			output:   "0",
-			expected: false,
-		},
-		{
-			name:     "error returns false",
-			err:      fmt.Errorf("pane not found"),
-			expected: false,
-		},
-	}
+	t.Run("dead pane", func(t *testing.T) {
+		mod := &tmuxtest.Fake{DeadPanes: map[string]bool{"%5": true}}
+		if !isPaneDeadWith(mod, "%5") {
+			t.Error("expected pane to report dead")
+		}
+	})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tmux := &deps.MockTmux{
-				CommandFunc: func(args ...string) (string, error) {
-					return tt.output, tt.err
-				},
-			}
-			result := isPaneDeadWith(tmux, "%5")
-			if result != tt.expected {
-				t.Errorf("got %v, want %v", result, tt.expected)
-			}
-		})
-	}
+	t.Run("alive pane", func(t *testing.T) {
+		mod := &tmuxtest.Fake{DeadPanes: map[string]bool{"%5": false}}
+		if isPaneDeadWith(mod, "%5") {
+			t.Error("expected pane to report alive")
+		}
+	})
+
+	t.Run("unknown pane reports false", func(t *testing.T) {
+		mod := &tmuxtest.Fake{}
+		if isPaneDeadWith(mod, "%5") {
+			t.Error("expected unknown pane to report alive")
+		}
+	})
 }
 
 func TestResolveSessionWith_WithProject(t *testing.T) {
@@ -170,7 +125,7 @@ func TestResolveSessionWith_WithProject(t *testing.T) {
 	mod := &tmuxtest.Fake{}
 	withTmuxMod(t, mod)
 
-	session, err := resolveSessionWith(&deps.MockTmux{})
+	session, err := resolveSessionWith(mod)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -192,7 +147,7 @@ func TestResolveSessionWith_ExistingSession(t *testing.T) {
 	mod := &tmuxtest.Fake{Live: map[string]string{want: paneProject}}
 	withTmuxMod(t, mod)
 
-	session, err := resolveSessionWith(&deps.MockTmux{})
+	session, err := resolveSessionWith(mod)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -206,13 +161,9 @@ func TestResolveSessionWith_NoProjectNotInTmux(t *testing.T) {
 	defer func() { paneProject = oldProject }()
 	paneProject = ""
 
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			return "", fmt.Errorf("not in tmux")
-		},
-	}
+	mod := &tmuxtest.Fake{CurrentSessionErr: fmt.Errorf("not in tmux")}
 
-	_, err := resolveSessionWith(tmux)
+	_, err := resolveSessionWith(mod)
 	if err == nil {
 		t.Error("expected error when not in tmux and no --project")
 	}
@@ -270,143 +221,97 @@ func TestRunPaneCreateWith(t *testing.T) {
 	oldProject := paneProject
 	defer func() { paneProject = oldProject }()
 	paneProject = "/home/user/project"
-	// resolveSessionWith's --project path creates the session via the tmux
-	// module; keep it in-memory so the test never shells out to tmux.
-	withTmuxMod(t, &tmuxtest.Fake{})
+	session := project.SessionName(paneProject)
+
+	// findAgentPane returns the fake's current panes for the target session.
+	panes := func(mod *tmuxtest.Fake) []tmuxmod.AgentPane { return mod.AgentWindows[session] }
 
 	t.Run("returns existing alive pane", func(t *testing.T) {
-		var cmds []string
-		tmux := &deps.MockTmux{
-			CommandFunc: func(args ...string) (string, error) {
-				cmds = append(cmds, args[0])
-				switch args[0] {
-				case "has-session":
-					return "", nil
-				case "list-panes":
-					return "mypane|%5", nil
-				case "display-message":
-					return "0", nil // not dead
-				}
-				return "", nil
-			},
-		}
+		mod := &tmuxtest.Fake{AgentWindows: map[string][]tmuxmod.AgentPane{
+			session: {{Title: "mypane", ID: "%5"}},
+		}}
+		withTmuxMod(t, mod)
 
-		err := runPaneCreateWith(tmux, "mypane", "echo hi")
-		if err != nil {
+		if err := runPaneCreateWith(mod, "mypane", "echo hi"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		// Should NOT have created a window or split
-		for _, c := range cmds {
-			if c == "new-window" || c == "split-window" {
-				t.Errorf("should not call %s for alive pane", c)
-			}
+		// The alive pane is returned untouched: no new pane, no keys sent.
+		if got := panes(mod); len(got) != 1 || got[0].ID != "%5" {
+			t.Errorf("agent panes = %v, want the single alive pane %%5", got)
+		}
+		if len(mod.SentKeys) != 0 {
+			t.Errorf("expected no send-keys for an alive pane, got %v", mod.SentKeys)
 		}
 	})
 
 	t.Run("kills dead pane and recreates with new-window", func(t *testing.T) {
-		var killed, created bool
-		tmux := &deps.MockTmux{
-			CommandFunc: func(args ...string) (string, error) {
-				switch args[0] {
-				case "has-session":
-					return "", nil
-				case "list-panes":
-					if killed {
-						return "", fmt.Errorf("no agent window")
-					}
-					return "mypane|%5", nil
-				case "display-message":
-					return "1", nil // dead pane
-				case "kill-pane":
-					killed = true
-					return "", nil
-				case "list-windows":
-					return "main", nil // no agent window
-				case "new-window":
-					created = true
-					return "%10", nil
-				case "select-pane":
-					return "", nil
-				}
-				return "", nil
-			},
+		mod := &tmuxtest.Fake{
+			AgentWindows: map[string][]tmuxmod.AgentPane{session: {{Title: "mypane", ID: "%5"}}},
+			DeadPanes:    map[string]bool{"%5": true},
 		}
+		withTmuxMod(t, mod)
 
-		err := runPaneCreateWith(tmux, "mypane", "echo hi")
-		if err != nil {
+		if err := runPaneCreateWith(mod, "mypane", "echo hi"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !killed {
-			t.Error("expected dead pane to be killed")
+		got := panes(mod)
+		if len(got) != 1 {
+			t.Fatalf("agent panes = %v, want exactly one fresh pane", got)
 		}
-		if !created {
-			t.Error("expected new-window to be called")
+		if got[0].ID == "%5" {
+			t.Error("expected the dead pane %5 to be replaced by a fresh one")
+		}
+		if got[0].Title != "mypane" {
+			t.Errorf("fresh pane title = %q, want mypane", got[0].Title)
+		}
+		if !mod.RemainOnExit[got[0].ID] {
+			t.Error("expected remain-on-exit set on the fresh pane")
+		}
+		sent := mod.SentKeys[got[0].ID]
+		if len(sent) != 1 || strings.Join(sent[0], "\x00") != strings.Join([]string{"echo hi", "Enter"}, "\x00") {
+			t.Errorf("keys sent = %v, want the command then Enter", sent)
 		}
 	})
 
 	t.Run("uses split-window when agent window exists", func(t *testing.T) {
-		var splitCalled, tiledCalled bool
-		tmux := &deps.MockTmux{
-			CommandFunc: func(args ...string) (string, error) {
-				switch args[0] {
-				case "has-session":
-					return "", nil
-				case "list-panes":
-					return "", fmt.Errorf("no agent window") // pane not found
-				case "list-windows":
-					return "main\nagent", nil // agent window exists
-				case "split-window":
-					splitCalled = true
-					return "%10", nil
-				case "select-layout":
-					tiledCalled = true
-					return "", nil
-				case "select-pane":
-					return "", nil
-				}
-				return "", nil
-			},
-		}
+		// A different pane already occupies the agent window, so mypane is
+		// absent but the window exists → split path.
+		mod := &tmuxtest.Fake{AgentWindows: map[string][]tmuxmod.AgentPane{
+			session: {{Title: "other", ID: "%9"}},
+		}}
+		withTmuxMod(t, mod)
 
-		err := runPaneCreateWith(tmux, "mypane", "echo hi")
-		if err != nil {
+		if err := runPaneCreateWith(mod, "mypane", "echo hi"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !splitCalled {
-			t.Error("expected split-window to be called")
+		got := panes(mod)
+		if len(got) != 2 {
+			t.Fatalf("agent panes = %v, want the existing pane plus a split", got)
 		}
-		if !tiledCalled {
-			t.Error("expected select-layout tiled to be called")
+		found := false
+		for _, p := range got {
+			if p.Title == "mypane" {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("expected a new pane titled mypane after the split")
+		}
+		if len(mod.Retiled) == 0 || mod.Retiled[len(mod.Retiled)-1] != session {
+			t.Errorf("expected the agent window to be re-tiled, retiled = %v", mod.Retiled)
 		}
 	})
 
 	t.Run("uses new-window when no agent window", func(t *testing.T) {
-		var newWindowCalled bool
-		tmux := &deps.MockTmux{
-			CommandFunc: func(args ...string) (string, error) {
-				switch args[0] {
-				case "has-session":
-					return "", nil
-				case "list-panes":
-					return "", fmt.Errorf("no pane") // not found
-				case "list-windows":
-					return "main", nil // no agent window
-				case "new-window":
-					newWindowCalled = true
-					return "%10", nil
-				case "select-pane":
-					return "", nil
-				}
-				return "", nil
-			},
-		}
+		mod := &tmuxtest.Fake{}
+		withTmuxMod(t, mod)
 
-		err := runPaneCreateWith(tmux, "mypane", "echo hi")
-		if err != nil {
+		if err := runPaneCreateWith(mod, "mypane", "echo hi"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !newWindowCalled {
-			t.Error("expected new-window to be called")
+		got := panes(mod)
+		if len(got) != 1 || got[0].Title != "mypane" {
+			t.Errorf("agent panes = %v, want a single new-window pane titled mypane", got)
 		}
 	})
 }
@@ -540,15 +445,13 @@ func TestRunPaneSetStatusWith_SocketFailureFallsBackAndStartsDaemon(t *testing.T
 // --- follow / unfollow ---
 
 func TestResolvePaneArg(t *testing.T) {
+	oldProject := paneProject
+	defer func() { paneProject = oldProject }()
+	paneProject = ""
+
 	t.Run("returns pane_id verbatim when prefixed with %", func(t *testing.T) {
-		// Should not call into tmux at all.
-		tmux := &deps.MockTmux{
-			CommandFunc: func(args ...string) (string, error) {
-				t.Errorf("unexpected tmux call for raw pane_id: %v", args)
-				return "", nil
-			},
-		}
-		got, err := resolvePaneArg(tmux, "%42")
+		mod := &tmuxtest.Fake{}
+		got, err := resolvePaneArg(mod, "%42")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -558,20 +461,13 @@ func TestResolvePaneArg(t *testing.T) {
 	})
 
 	t.Run("resolves name via findPane in current session", func(t *testing.T) {
-		tmux := &deps.MockTmux{
-			CommandFunc: func(args ...string) (string, error) {
-				// resolveSessionWith → currentTmuxSessionWith calls
-				// `display-message -p #S` to get the current session.
-				if args[0] == "display-message" && len(args) >= 3 && args[1] == "-p" && args[2] == "#S" {
-					return "session-x", nil
-				}
-				if args[0] == "list-panes" {
-					return "myagent|%5\nother|%6", nil
-				}
-				return "", nil
+		mod := &tmuxtest.Fake{
+			CurrentSessionName: "session-x",
+			AgentWindows: map[string][]tmuxmod.AgentPane{
+				"session-x": {{Title: "myagent", ID: "%5"}, {Title: "other", ID: "%6"}},
 			},
 		}
-		got, err := resolvePaneArg(tmux, "myagent")
+		got, err := resolvePaneArg(mod, "myagent")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

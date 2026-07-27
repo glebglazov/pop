@@ -9,7 +9,8 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/config"
-	"github.com/glebglazov/pop/internal/deps"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
+	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 	"github.com/glebglazov/pop/monitor"
 )
 
@@ -98,78 +99,52 @@ func TestPaneTopicDerived(t *testing.T) {
 	}
 }
 
-// TestSetPaneTopicOption verifies the Topic is written to the @pop_topic
-// per-pane user-option via set-option -p, and that an empty topic (--clear)
-// empties the option rather than touching monitor state.
+// TestSetPaneTopicOption verifies the Topic write round-trips through the
+// module's Topic verbs (asserted as pane state on the fake), and that --clear
+// empties both the Topic and its provenance rather than touching monitor state.
 func TestSetPaneTopicOption(t *testing.T) {
-	t.Run("writes topic to @pop_topic", func(t *testing.T) {
-		var got []string
-		tmux := &deps.MockTmux{CommandFunc: func(args ...string) (string, error) {
-			got = args
-			return "", nil
-		}}
-		if err := setPaneTopicOption(tmux, "%7", "auth refactor"); err != nil {
+	t.Run("writes topic", func(t *testing.T) {
+		mod := &tmuxtest.Fake{}
+		if err := setPaneTopicOption(mod, "%7", "auth refactor"); err != nil {
 			t.Fatal(err)
 		}
-		want := []string{"set-option", "-p", "-t", "%7", "@pop_topic", "auth refactor"}
-		if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
-			t.Errorf("tmux args = %v, want %v", got, want)
+		if got := mod.Topics["%7"].Topic; got != "auth refactor" {
+			t.Errorf("pane %%7 topic = %q, want %q", got, "auth refactor")
 		}
 	})
 
-	t.Run("clear empties @pop_topic and @pop_topic_kind", func(t *testing.T) {
-		var calls [][]string
-		tmux := &deps.MockTmux{CommandFunc: func(args ...string) (string, error) {
-			calls = append(calls, args)
-			return "", nil
+	t.Run("clear empties topic and provenance", func(t *testing.T) {
+		mod := &tmuxtest.Fake{Topics: map[string]tmuxmod.TopicState{
+			"%7": {Topic: "auth refactor", Kind: config.TopicKindSeed},
 		}}
-		if err := clearPaneTopic(tmux, "%7"); err != nil {
+		if err := clearPaneTopic(mod, "%7"); err != nil {
 			t.Fatal(err)
 		}
-		want := [][]string{
-			{"set-option", "-p", "-t", "%7", "@pop_topic", ""},
-			{"set-option", "-p", "-t", "%7", "@pop_topic_kind", ""},
-		}
-		if len(calls) != 2 {
-			t.Fatalf("tmux calls = %v, want 2", calls)
-		}
-		for i, w := range want {
-			if strings.Join(calls[i], "\x00") != strings.Join(w, "\x00") {
-				t.Errorf("call[%d] = %v, want %v", i, calls[i], w)
-			}
+		if st := mod.Topics["%7"]; st.Topic != "" || st.Kind != "" {
+			t.Errorf("after clear pane %%7 = %+v, want empty topic and kind", st)
 		}
 	})
 
 	t.Run("no pane id is a no-op", func(t *testing.T) {
-		tmux := &deps.MockTmux{CommandFunc: func(args ...string) (string, error) {
-			t.Errorf("tmux must not be called without a pane id: %v", args)
-			return "", nil
-		}}
-		if err := setPaneTopicOption(tmux, "", "topic"); err != nil {
+		mod := &tmuxtest.Fake{}
+		if err := setPaneTopicOption(mod, "", "topic"); err != nil {
 			t.Fatal(err)
+		}
+		if len(mod.Topics) != 0 {
+			t.Errorf("expected no topic write without a pane id, got %v", mod.Topics)
 		}
 	})
 }
 
 // TestSetPaneTopicWithKind verifies derived Topics write provenance alongside
-// the slug.
+// the slug, round-tripping through the stateful fake.
 func TestSetPaneTopicWithKind(t *testing.T) {
-	var calls [][]string
-	tmux := &deps.MockTmux{CommandFunc: func(args ...string) (string, error) {
-		calls = append(calls, args)
-		return "", nil
-	}}
-	if err := setPaneTopicWithKind(tmux, "%7", "auth-refactor", config.TopicKindSeed); err != nil {
+	mod := &tmuxtest.Fake{}
+	if err := setPaneTopicWithKind(mod, "%7", "auth-refactor", config.TopicKindSeed); err != nil {
 		t.Fatal(err)
 	}
-	want := [][]string{
-		{"set-option", "-p", "-t", "%7", "@pop_topic", "auth-refactor"},
-		{"set-option", "-p", "-t", "%7", "@pop_topic_kind", "seed"},
-	}
-	for i, w := range want {
-		if strings.Join(calls[i], "\x00") != strings.Join(w, "\x00") {
-			t.Errorf("call[%d] = %v, want %v", i, calls[i], w)
-		}
+	if st := mod.Topics["%7"]; st.Topic != "auth-refactor" || st.Kind != config.TopicKindSeed {
+		t.Errorf("pane %%7 = %+v, want {auth-refactor seed}", st)
 	}
 }
 
@@ -179,87 +154,53 @@ func TestSetPaneTopicWithKind(t *testing.T) {
 // option so the first task in a whole-set drain wins and a pane outside tmux or
 // an unsluggable Title is a no-op.
 func TestPreSeedTopicFromTitle(t *testing.T) {
-	t.Run("seeds @pop_topic from the slugified Title", func(t *testing.T) {
+	t.Run("seeds the Topic from the slugified Title", func(t *testing.T) {
 		t.Setenv("TMUX_PANE", "%7")
-		var wrote [][]string
-		tmux := &deps.MockTmux{CommandFunc: func(args ...string) (string, error) {
-			switch args[0] {
-			case "display-message":
-				return "proj-x\t\n", nil
-			case "set-option":
-				wrote = append(wrote, args)
-				return "", nil
-			}
-			t.Fatalf("unexpected tmux call: %v", args)
-			return "", nil
-		}}
-		preSeedTopicFromTitle(tmux, 5)("Drain pre-seeds Topic from task Title")
-		want := [][]string{
-			{"set-option", "-p", "-t", "%7", "@pop_topic", "drain-pre-seeds-topic-from"},
-			{"set-option", "-p", "-t", "%7", "@pop_topic_kind", "final"},
-		}
-		if len(wrote) != 2 {
-			t.Fatalf("set-option calls = %v, want 2", wrote)
-		}
-		for i, w := range want {
-			if strings.Join(wrote[i], "\x00") != strings.Join(w, "\x00") {
-				t.Errorf("call[%d] = %v, want %v", i, wrote[i], w)
-			}
+		mod := &tmuxtest.Fake{Topics: map[string]tmuxmod.TopicState{"%7": {Session: "proj-x"}}}
+		preSeedTopicFromTitle(mod, 5)("Drain pre-seeds Topic from task Title")
+		if st := mod.Topics["%7"]; st.Topic != "drain-pre-seeds-topic-from" || st.Kind != config.TopicKindFinal {
+			t.Errorf("pane %%7 = %+v, want {drain-pre-seeds-topic-from final}", st)
 		}
 	})
 
 	t.Run("uses the same format as recipe-derived Topics", func(t *testing.T) {
 		t.Setenv("TMUX_PANE", "%7")
-		var seeded string
-		tmux := &deps.MockTmux{CommandFunc: func(args ...string) (string, error) {
-			if args[0] == "display-message" {
-				return "proj-x\t\n", nil
-			}
-			if args[0] == "set-option" && len(args) >= 2 && args[len(args)-2] == "@pop_topic" {
-				seeded = args[len(args)-1]
-			}
-			return "", nil
-		}}
+		mod := &tmuxtest.Fake{Topics: map[string]tmuxmod.TopicState{"%7": {Session: "proj-x"}}}
 		title := "Refactor the Auth Layer!"
-		preSeedTopicFromTitle(tmux, 5)(title)
+		preSeedTopicFromTitle(mod, 5)(title)
 		// The pre-seed and the derive path normalize through the one slugifyTopic.
-		if want := slugifyTopic(title, 5); seeded != want {
-			t.Errorf("pre-seeded slug = %q, want slugifyTopic output %q", seeded, want)
+		if want := slugifyTopic(title, 5); mod.Topics["%7"].Topic != want {
+			t.Errorf("pre-seeded slug = %q, want slugifyTopic output %q", mod.Topics["%7"].Topic, want)
 		}
 	})
 
-	t.Run("no-op when @pop_topic is already set (first task wins)", func(t *testing.T) {
+	t.Run("no-op when a Topic is already set (first task wins)", func(t *testing.T) {
 		t.Setenv("TMUX_PANE", "%7")
-		tmux := &deps.MockTmux{CommandFunc: func(args ...string) (string, error) {
-			switch args[0] {
-			case "display-message":
-				return "proj-x\tearlier-topic\n", nil // pane already carries a Topic
-			case "set-option":
-				t.Errorf("must not re-seed a pane that already has a Topic: %v", args)
-			}
-			return "", nil
+		mod := &tmuxtest.Fake{Topics: map[string]tmuxmod.TopicState{
+			"%7": {Session: "proj-x", Topic: "earlier-topic"},
 		}}
-		preSeedTopicFromTitle(tmux, 5)("A Later Task Title")
+		preSeedTopicFromTitle(mod, 5)("A Later Task Title")
+		if got := mod.Topics["%7"].Topic; got != "earlier-topic" {
+			t.Errorf("pane %%7 topic = %q, want the earlier topic untouched", got)
+		}
 	})
 
 	t.Run("no-op outside tmux", func(t *testing.T) {
 		t.Setenv("TMUX_PANE", "")
-		tmux := &deps.MockTmux{CommandFunc: func(args ...string) (string, error) {
-			t.Errorf("tmux must not be touched without a pane: %v", args)
-			return "", nil
-		}}
-		preSeedTopicFromTitle(tmux, 5)("Some Title")
+		mod := &tmuxtest.Fake{}
+		preSeedTopicFromTitle(mod, 5)("Some Title")
+		if len(mod.Topics) != 0 {
+			t.Errorf("expected no topic write outside tmux, got %v", mod.Topics)
+		}
 	})
 
 	t.Run("unsluggable Title is a no-op", func(t *testing.T) {
 		t.Setenv("TMUX_PANE", "%7")
-		tmux := &deps.MockTmux{CommandFunc: func(args ...string) (string, error) {
-			if args[0] == "set-option" {
-				t.Errorf("punctuation-only Title must not write a Topic: %v", args)
-			}
-			return "proj-x\t\n", nil
-		}}
-		preSeedTopicFromTitle(tmux, 5)("!?-.,")
+		mod := &tmuxtest.Fake{Topics: map[string]tmuxmod.TopicState{"%7": {Session: "proj-x"}}}
+		preSeedTopicFromTitle(mod, 5)("!?-.,")
+		if got := mod.Topics["%7"].Topic; got != "" {
+			t.Errorf("punctuation-only Title wrote a Topic %q, want none", got)
+		}
 	})
 }
 
@@ -281,53 +222,46 @@ func TestDeriveTopic_SkipsPreSeededPane(t *testing.T) {
 	}
 }
 
-// TestTopicStateLookup confirms the derive path reads @pop_topic, @pop_topic_kind,
-// and the session name off the pane via tmux.
+// TestTopicStateLookup confirms the derive path reads the pane's Topic, its
+// provenance, and the session name off the pane through the module's ReadTopic
+// verb, round-tripping through the stateful fake.
 func TestTopicStateLookup(t *testing.T) {
 	t.Run("reads topic, kind, and session", func(t *testing.T) {
-		tmux := &deps.MockTmux{CommandFunc: func(args ...string) (string, error) {
-			if args[0] != "display-message" || args[len(args)-1] != "#{session_name}\t#{@pop_topic}\t#{@pop_topic_kind}" {
-				t.Fatalf("unexpected tmux call: %v", args)
-			}
-			return "proj-x\tauth refactor\tseed\n", nil
+		mod := &tmuxtest.Fake{Topics: map[string]tmuxmod.TopicState{
+			"%7": {Session: "proj-x", Topic: "auth refactor", Kind: "seed"},
 		}}
-		topic, kind, session := readPaneTopicState(tmux, "%7")
+		topic, kind, session := readPaneTopicState(mod, "%7")
 		if topic != "auth refactor" || kind != "seed" || session != "proj-x" {
 			t.Errorf("got topic=%q kind=%q session=%q", topic, kind, session)
 		}
 	})
 
 	t.Run("empty options yield empties", func(t *testing.T) {
-		tmux := &deps.MockTmux{CommandFunc: func(...string) (string, error) {
-			return "proj-x\t\n", nil
-		}}
-		topic, kind, session := readPaneTopicState(tmux, "%7")
+		mod := &tmuxtest.Fake{Topics: map[string]tmuxmod.TopicState{"%7": {Session: "proj-x"}}}
+		topic, kind, session := readPaneTopicState(mod, "%7")
 		if topic != "" || kind != "" || session != "proj-x" {
 			t.Errorf("got topic=%q kind=%q session=%q", topic, kind, session)
 		}
 	})
 
 	t.Run("tmux error yields empties", func(t *testing.T) {
-		tmux := &deps.MockTmux{CommandFunc: func(...string) (string, error) {
-			return "", fmt.Errorf("no such pane")
-		}}
-		if topic, kind, session := readPaneTopicState(tmux, "%9"); topic != "" || kind != "" || session != "" {
+		mod := &tmuxtest.Fake{} // pane %9 absent → ReadTopic errors
+		if topic, kind, session := readPaneTopicState(mod, "%9"); topic != "" || kind != "" || session != "" {
 			t.Errorf("got topic=%q kind=%q session=%q, want empties", topic, kind, session)
 		}
 	})
 }
 
-// TestTmuxPaneTopics confirms the dashboard reads each pane's Topic from
-// @pop_topic via list-panes, keeping Topics with spaces intact and omitting
+// TestTmuxPaneTopics confirms the dashboard reads each pane's Topic through the
+// module's PaneTopics verb, keeping Topics with spaces intact and omitting
 // panes with no Topic.
 func TestTmuxPaneTopics(t *testing.T) {
-	tmux := &deps.MockTmux{CommandFunc: func(args ...string) (string, error) {
-		if args[0] != "list-panes" || args[len(args)-1] != "#{pane_id}\t#{@pop_topic}" {
-			t.Fatalf("unexpected tmux call: %v", args)
-		}
-		return "%1\tauth refactor\n%2\t\n%3\twrite the tests\n", nil
+	mod := &tmuxtest.Fake{Topics: map[string]tmuxmod.TopicState{
+		"%1": {Topic: "auth refactor"},
+		"%2": {Topic: ""},
+		"%3": {Topic: "write the tests"},
 	}}
-	topics := tmuxPaneTopicsWith(tmux)
+	topics := tmuxPaneTopicsWith(mod)
 	if topics["%1"] != "auth refactor" {
 		t.Errorf("%%1 topic = %q", topics["%1"])
 	}

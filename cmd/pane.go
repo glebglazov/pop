@@ -17,7 +17,6 @@ import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/history"
-	"github.com/glebglazov/pop/internal/deps"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/monitor"
 	"github.com/glebglazov/pop/project"
@@ -69,22 +68,19 @@ func init() {
 // If --project is set, derives session name from path and ensures session exists.
 // Otherwise uses the current tmux session.
 func resolveSession() (string, error) {
-	return resolveSessionWith(defaultTmux)
+	return resolveSessionWith(defaultTmuxMod)
 }
 
-func resolveSessionWith(tmux deps.Tmux) (string, error) {
+func resolveSessionWith(tmux tmuxmod.Tmux) (string, error) {
 	if paneProject != "" {
 		name := project.SessionName(paneProject)
-		// Session creation runs through the tmux module (ADR-0142); the
-		// current-session lookup below still uses the deps.Tmux Command seam
-		// until pane's tmux calls migrate.
-		if err := tmuxmod.Ensure(defaultTmuxMod, name, paneProject); err != nil {
+		if err := tmuxmod.Ensure(tmux, name, paneProject); err != nil {
 			return "", err
 		}
 		return name, nil
 	}
-	session := currentTmuxSessionWith(tmux)
-	if session == "" {
+	session, err := tmux.CurrentSession()
+	if err != nil || session == "" {
 		return "", fmt.Errorf("not inside a tmux session (use --project to target one)")
 	}
 	return session, nil
@@ -93,52 +89,29 @@ func resolveSessionWith(tmux deps.Tmux) (string, error) {
 // findPane finds a pane by title in the given session's "agent" window.
 // Returns the pane_id (e.g., "%5") or error if not found.
 func findPane(session, name string) (string, error) {
-	return findPaneWith(defaultTmux, session, name)
+	return findPaneWith(defaultTmuxMod, session, name)
 }
 
-func findPaneWith(tmux deps.Tmux, session, name string) (string, error) {
-	out, err := tmux.Command("list-panes", "-t", session+":agent", "-F", "#{pane_title}|#{pane_id}")
-	if err != nil {
-		return "", fmt.Errorf("no agent window in session %q", session)
-	}
-	for _, line := range strings.Split(out, "\n") {
-		parts := strings.SplitN(line, "|", 2)
-		if len(parts) == 2 && parts[0] == name {
-			return parts[1], nil
-		}
-	}
-	return "", fmt.Errorf("pane %q not found in session %q", name, session)
+func findPaneWith(tmux tmuxmod.Tmux, session, name string) (string, error) {
+	return tmux.FindAgentPane(session, name)
 }
 
 // hasAgentWindow checks if the "agent" window exists in the given session.
 func hasAgentWindow(session string) bool {
-	return hasAgentWindowWith(defaultTmux, session)
+	return hasAgentWindowWith(defaultTmuxMod, session)
 }
 
-func hasAgentWindowWith(tmux deps.Tmux, session string) bool {
-	out, err := tmux.Command("list-windows", "-t", session, "-F", "#{window_name}")
-	if err != nil {
-		debug.Error("hasAgentWindow %s: %v", session, err)
-	}
-	for _, w := range strings.Split(out, "\n") {
-		if w == "agent" {
-			return true
-		}
-	}
-	return false
+func hasAgentWindowWith(tmux tmuxmod.Tmux, session string) bool {
+	return tmux.HasAgentWindow(session)
 }
 
 // isPaneDead checks if a pane's process has exited.
 func isPaneDead(paneID string) bool {
-	return isPaneDeadWith(defaultTmux, paneID)
+	return isPaneDeadWith(defaultTmuxMod, paneID)
 }
 
-func isPaneDeadWith(tmux deps.Tmux, paneID string) bool {
-	out, err := tmux.Command("display-message", "-t", paneID, "-p", "#{pane_dead}")
-	if err != nil {
-		return false
-	}
-	return out == "1"
+func isPaneDeadWith(tmux tmuxmod.Tmux, paneID string) bool {
+	return tmux.PaneDead(paneID)
 }
 
 // --- create ---
@@ -167,10 +140,10 @@ initializes.`,
 }
 
 func runPaneCreate(cmd *cobra.Command, args []string) error {
-	return runPaneCreateWith(defaultTmux, args[0], args[1])
+	return runPaneCreateWith(defaultTmuxMod, args[0], args[1])
 }
 
-func runPaneCreateWith(tmux deps.Tmux, name, command string) error {
+func runPaneCreateWith(tmux tmuxmod.Tmux, name, command string) error {
 	session, err := resolveSessionWith(tmux)
 	if err != nil {
 		return err
@@ -193,7 +166,7 @@ func runPaneCreateWith(tmux deps.Tmux, name, command string) error {
 			fmt.Println(existingID)
 			return nil
 		}
-		if _, err := tmux.Command("kill-pane", "-t", existingID); err != nil {
+		if err := tmux.KillPane(existingID); err != nil {
 			debug.Error("pane create: kill dead pane %s: %v", existingID, err)
 		}
 	}
@@ -203,31 +176,29 @@ func runPaneCreateWith(tmux deps.Tmux, name, command string) error {
 	// other hooks so environment variables are loaded before the command.
 	var paneID string
 	if !hasAgentWindowWith(tmux, session) {
-		out, err := tmux.Command("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", session, "-n", "agent", "-c", dir)
+		paneID, err = tmux.NewAgentWindow(session, dir)
 		if err != nil {
-			return fmt.Errorf("failed to create agent window: %w", err)
+			return err
 		}
-		paneID = out
 	} else {
-		out, err := tmux.Command("split-window", "-d", "-P", "-F", "#{pane_id}", "-t", session+":agent", "-c", dir)
+		paneID, err = tmux.SplitAgentPane(session, dir)
 		if err != nil {
-			return fmt.Errorf("failed to create pane: %w", err)
+			return err
 		}
-		paneID = out
-		if _, err := tmux.Command("select-layout", "-t", session+":agent", "tiled"); err != nil {
+		if err := tmux.RetileAgentWindow(session); err != nil {
 			debug.Error("pane create: select-layout: %v", err)
 		}
 	}
 
-	if _, err := tmux.Command("select-pane", "-t", paneID, "-T", name); err != nil {
+	if err := tmux.SetPaneTitle(paneID, name); err != nil {
 		return fmt.Errorf("failed to set pane title: %w", err)
 	}
-	if _, err := tmux.Command("set-option", "-p", "-t", paneID, "remain-on-exit", "on"); err != nil {
+	if err := tmux.SetRemainOnExit(paneID, true); err != nil {
 		debug.Error("pane create: set remain-on-exit %s: %v", paneID, err)
 	}
 
 	// Send the command to the shell after it has initialized
-	if _, err := tmux.Command("send-keys", "-t", paneID, command, "Enter"); err != nil {
+	if err := tmux.SendKeys(paneID, command, "Enter"); err != nil {
 		debug.Error("pane create: send-keys %s: %v", paneID, err)
 	}
 
@@ -252,10 +223,10 @@ rebalance the remaining panes.`,
 }
 
 func runPaneKill(cmd *cobra.Command, args []string) error {
-	return runPaneKillWith(defaultTmux, args[0])
+	return runPaneKillWith(defaultTmuxMod, args[0])
 }
 
-func runPaneKillWith(tmux deps.Tmux, name string) error {
+func runPaneKillWith(tmux tmuxmod.Tmux, name string) error {
 	session, err := resolveSessionWith(tmux)
 	if err != nil {
 		return err
@@ -266,12 +237,12 @@ func runPaneKillWith(tmux deps.Tmux, name string) error {
 		return err
 	}
 
-	if _, err := tmux.Command("kill-pane", "-t", paneID); err != nil {
+	if err := tmux.KillPane(paneID); err != nil {
 		return fmt.Errorf("failed to kill pane %q: %w", name, err)
 	}
 
 	// Re-tile remaining panes if agent window still exists
-	if _, err := tmux.Command("select-layout", "-t", session+":agent", "tiled"); err != nil {
+	if err := tmux.RetileAgentWindow(session); err != nil {
 		debug.Error("pane kill: select-layout: %v", err)
 	}
 
@@ -333,21 +304,23 @@ Uses tmux list-panes with #{pane_title} and #{pane_id} format variables.`,
 }
 
 func runPaneList(cmd *cobra.Command, args []string) error {
-	return runPaneListWith(defaultTmux)
+	return runPaneListWith(defaultTmuxMod)
 }
 
-func runPaneListWith(tmux deps.Tmux) error {
+func runPaneListWith(tmux tmuxmod.Tmux) error {
 	session, err := resolveSessionWith(tmux)
 	if err != nil {
 		return err
 	}
 
-	out, err := tmux.Command("list-panes", "-t", session+":agent", "-F", "#{pane_title}\t#{pane_id}")
+	panes, err := tmux.AgentPanes(session)
 	if err != nil {
-		return fmt.Errorf("no agent window in session %q", session)
+		return err
 	}
 
-	fmt.Println(out)
+	for _, p := range panes {
+		fmt.Printf("%s\t%s\n", p.Title, p.ID)
+	}
 	return nil
 }
 
@@ -381,19 +354,19 @@ PPage (page up), F1-F12, C-<key> (ctrl), M-<key> (alt).`,
 
 func runPaneSend(cmd *cobra.Command, args []string) error {
 	if paneSendPaneID != "" {
-		return runPaneSendToPaneIDWith(defaultTmux, paneSendPaneID, args)
+		return runPaneSendToPaneIDWith(defaultTmuxMod, paneSendPaneID, args)
 	}
 	if len(args) < 2 {
 		return fmt.Errorf("requires a pane name and at least one key")
 	}
-	return runPaneSendWith(defaultTmux, args[0], args[1:])
+	return runPaneSendWith(defaultTmuxMod, args[0], args[1:])
 }
 
 func init() {
 	paneSendCmd.Flags().StringVar(&paneSendPaneID, "pane-id", "", "Target an explicit tmux pane ID instead of a named pane")
 }
 
-func runPaneSendWith(tmux deps.Tmux, name string, keys []string) error {
+func runPaneSendWith(tmux tmuxmod.Tmux, name string, keys []string) error {
 	session, err := resolveSessionWith(tmux)
 	if err != nil {
 		return err
@@ -404,22 +377,20 @@ func runPaneSendWith(tmux deps.Tmux, name string, keys []string) error {
 		return err
 	}
 
-	tmuxArgs := append([]string{"send-keys", "-t", paneID}, keys...)
-	if _, err := tmux.Command(tmuxArgs...); err != nil {
+	if err := tmux.SendKeys(paneID, keys...); err != nil {
 		return fmt.Errorf("failed to send keys to pane %q: %w", name, err)
 	}
 	return nil
 }
 
-func runPaneSendToPaneIDWith(tmux deps.Tmux, paneID string, keys []string) error {
+func runPaneSendToPaneIDWith(tmux tmuxmod.Tmux, paneID string, keys []string) error {
 	if paneID == "" {
 		return fmt.Errorf("--pane-id requires a pane ID")
 	}
 	if len(keys) == 0 {
 		return fmt.Errorf("--pane-id requires at least one key")
 	}
-	tmuxArgs := append([]string{"send-keys", "-t", paneID}, keys...)
-	if _, err := tmux.Command(tmuxArgs...); err != nil {
+	if err := tmux.SendKeys(paneID, keys...); err != nil {
 		return fmt.Errorf("failed to send keys to pane ID %q: %w", paneID, err)
 	}
 	return nil
@@ -444,10 +415,10 @@ Uses tmux capture-pane with -S -50 (scrollback).`,
 }
 
 func runPaneCapture(cmd *cobra.Command, args []string) error {
-	return runPaneCaptureWith(defaultTmux, args[0])
+	return runPaneCaptureWith(defaultTmuxMod, args[0])
 }
 
-func runPaneCaptureWith(tmux deps.Tmux, name string) error {
+func runPaneCaptureWith(tmux tmuxmod.Tmux, name string) error {
 	session, err := resolveSessionWith(tmux)
 	if err != nil {
 		return err
@@ -458,7 +429,7 @@ func runPaneCaptureWith(tmux deps.Tmux, name string) error {
 		return err
 	}
 
-	out, err := tmux.Command("capture-pane", "-p", "-S", "-50", "-t", paneID)
+	out, err := tmux.CapturePane(paneID)
 	if err != nil {
 		return fmt.Errorf("failed to capture pane %q: %w", name, err)
 	}
@@ -611,9 +582,9 @@ var paneSetTopicCmd = &cobra.Command{
 	Long: `Set the topic of a tmux pane — a short, machine-set phrase
 describing what the pane's conversation is about.
 
-The topic is stored as the per-pane tmux user-option @pop_topic (set via
-'set-option -p', readable as '#{@pop_topic}' from any tmux format), which is
-its single source of truth (ADR 0058). It is not kept in monitor state.
+The topic is stored as a per-pane tmux user-option (owned by pop's tmux
+module), which is its single source of truth (ADR 0058). It is not kept in
+monitor state.
 
 If pane_id is omitted, uses $TMUX_PANE from the environment. A leading
 pane_id is recognised by its '%' prefix; everything after it is the topic
@@ -631,13 +602,13 @@ Topic derivation is an ordered pipeline of typed steps configured as
 agent-CLI Topic recipe → a final Topic). A bare string entry is sugar for
 { type = "agent", command = "<string>" }. When topic_agents is unset, the
 default is a single truncate step with set_if = "empty" (today's truncation
-behaviour). Each step carries a set_if guard checked against @pop_topic_kind
-(empty | empty_or_seed | always): empty runs only when no provenance is set;
+behaviour). Each step carries a set_if guard checked against the pane's Topic
+provenance (empty | empty_or_seed | always): empty runs only when no provenance is set;
 empty_or_seed runs on an unset or seed Topic; always re-derives every prompt.
 A final Topic is never overwritten by empty or empty_or_seed steps.
 
 Provenance (seed | final) lives in a second per-pane tmux user-option
-@pop_topic_kind alongside @pop_topic — the slug stays a pure display value
+alongside the Topic — the slug stays a pure display value
 (ADR 0058). Truncate steps run synchronously in the hook and write the seed,
 so the prompt submit returns immediately. The agent-step chain is then
 enqueued on the pop monitor daemon and runs on the daemon, not in the hook;
@@ -686,16 +657,16 @@ func runPaneSetTopic(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if clear {
-		return clearPaneTopic(defaultTmux, paneID)
+		return clearPaneTopic(defaultTmuxMod, paneID)
 	}
-	return setPaneTopicOption(defaultTmux, paneID, topic)
+	return setPaneTopicOption(defaultTmuxMod, paneID, topic)
 }
 
 // runPaneSetTopicDerive is the `set-topic --derive` hook path (ADR 0068). It
 // runs the truncate steps synchronously (writing the seed so the prompt submit
 // never blocks) and then enqueues the agent-step chain on the pop daemon —
 // the agent steps run on the daemon, not in the hook, so the hook returns
-// immediately after the seed. The daemon upgrades @pop_topic_kind to final
+// immediately after the seed. The daemon upgrades the Topic provenance to final
 // when an agent step lands, with per-pane single-flight so a fast typist can't
 // pile up overlapping model calls.
 //
@@ -708,7 +679,7 @@ func runPaneSetTopicDerive(r io.Reader, args []string, cfg *config.Config, label
 		cfg = &config.Config{}
 	}
 	job, enqueue := deriveTopicSeedWith(r, args, cfg, label, defaultTopicStateLookup, defaultPaneHasNote, func(paneID, topic, kind string) error {
-		return setPaneTopicWithKind(defaultTmux, paneID, topic, kind)
+		return setPaneTopicWithKind(defaultTmuxMod, paneID, topic, kind)
 	})
 	if !enqueue {
 		// Missing/unparseable payload, empty prompt, no eligible agent step, or
@@ -758,12 +729,12 @@ func enqueueTopicDerivationForeground(parent context.Context, job topicDeriveJob
 		cfg = &config.Config{}
 	}
 	runTopicAgentDerivationWith(parent, job, cfg, defaultTopicStateLookup, defaultPaneHasNote, runTopicRecipe, func(paneID, topic, kind string) error {
-		return setPaneTopicWithKind(defaultTmux, paneID, topic, kind)
+		return setPaneTopicWithKind(defaultTmuxMod, paneID, topic, kind)
 	})
 }
 
-// topicStateLookup returns the pane's current Topic (@pop_topic), its provenance
-// (@pop_topic_kind), and its session name for the recipe payload.
+// topicStateLookup returns the pane's current Topic, its provenance, and its
+// session name for the recipe payload.
 type topicStateLookup func(paneID string) (prevTopic, topicKind, session string)
 
 // paneNoteLookup reports whether the pane carries a user-authored Note in
@@ -791,7 +762,7 @@ type topicRecipePayload struct {
 
 // deriveTopicWith is the injectable core of the derive path. It walks the
 // configured topic_agents pipeline (ADR 0068): each step is gated by set_if
-// against @pop_topic_kind, truncate steps write a seed synchronously, and agent
+// against the Topic provenance, truncate steps write a seed synchronously, and agent
 // steps (skipped when the pane has a Note) shell out to curated CLIs and write a
 // final Topic. Steps may run in one hook invocation — e.g. a truncate seed
 // followed by an agent upgrade when both set_if guards match. There is no
@@ -1083,31 +1054,23 @@ func promptOnlyTopicPayload(data []byte) (prompt, transcriptPath string, err err
 // defaultTopicStateLookup reads a pane's current Topic, provenance, and session
 // from tmux using the production tmux dependency.
 func defaultTopicStateLookup(paneID string) (prevTopic, topicKind, session string) {
-	return readPaneTopicState(defaultTmux, paneID)
+	return readPaneTopicState(defaultTmuxMod, paneID)
 }
 
-// readPaneTopicState reads @pop_topic, @pop_topic_kind, and the session name off
-// a pane in one tmux call. A read error or a pane that can't be found yields
-// empties, so a fresh (or gone) pane derives.
-func readPaneTopicState(tmux deps.Tmux, paneID string) (prevTopic, topicKind, session string) {
+// readPaneTopicState reads the pane's Topic, its provenance, and the session
+// name off a pane in one tmux round-trip (via the module's ReadTopic verb). A
+// read error or a pane that can't be found yields empties, so a fresh (or gone)
+// pane derives.
+func readPaneTopicState(tmux tmuxmod.Tmux, paneID string) (prevTopic, topicKind, session string) {
 	if paneID == "" {
 		return "", "", ""
 	}
-	out, err := tmux.Command("display-message", "-p", "-t", paneID, "#{session_name}\t#{@pop_topic}\t#{@pop_topic_kind}")
+	st, err := tmux.ReadTopic(paneID)
 	if err != nil {
 		debug.Error("pane set-topic --derive: read topic state: %v", err)
 		return "", "", ""
 	}
-	line := strings.TrimRight(out, "\n")
-	parts := strings.SplitN(line, "\t", 3)
-	session = parts[0]
-	if len(parts) >= 2 {
-		prevTopic = parts[1]
-	}
-	if len(parts) == 3 {
-		topicKind = parts[2]
-	}
-	return prevTopic, topicKind, session
+	return st.Topic, st.Kind, st.Session
 }
 
 // defaultPaneHasNote always reports false: the per-pane Note is retired, so
@@ -1226,55 +1189,47 @@ func parseSetTopicArgs(clear bool, args []string) (paneID, topic string, err err
 	return paneID, strings.Join(rest, " "), nil
 }
 
-// setPaneTopicOption writes (or clears) a pane's Topic to @pop_topic without
-// changing @pop_topic_kind. Prefer setPaneTopicWithKind for derived Topics.
-func setPaneTopicOption(tmux deps.Tmux, paneID, topic string) error {
+// setPaneTopicOption writes (or clears) a pane's Topic without changing its
+// provenance. Prefer setPaneTopicWithKind for derived Topics.
+func setPaneTopicOption(tmux tmuxmod.Tmux, paneID, topic string) error {
 	debug.Init()
 	defer debug.Close()
 
 	if paneID == "" {
 		return nil
 	}
-	if _, err := tmux.Command("set-option", "-p", "-t", paneID, "@pop_topic", topic); err != nil {
-		debug.Error("pane set-topic: set @pop_topic on %s: %v", paneID, err)
+	if err := tmux.SetTopic(paneID, topic); err != nil {
+		debug.Error("pane set-topic: set topic on %s: %v", paneID, err)
 		return err
 	}
 	return nil
 }
 
-// setPaneTopicWithKind writes @pop_topic and @pop_topic_kind (ADR 0068).
-func setPaneTopicWithKind(tmux deps.Tmux, paneID, topic, kind string) error {
+// setPaneTopicWithKind writes a pane's Topic and its provenance (ADR 0068).
+func setPaneTopicWithKind(tmux tmuxmod.Tmux, paneID, topic, kind string) error {
 	debug.Init()
 	defer debug.Close()
 
 	if paneID == "" {
 		return nil
 	}
-	if _, err := tmux.Command("set-option", "-p", "-t", paneID, "@pop_topic", topic); err != nil {
-		debug.Error("pane set-topic: set @pop_topic on %s: %v", paneID, err)
-		return err
-	}
-	if _, err := tmux.Command("set-option", "-p", "-t", paneID, "@pop_topic_kind", kind); err != nil {
-		debug.Error("pane set-topic: set @pop_topic_kind on %s: %v", paneID, err)
+	if err := tmux.SetTopicWithKind(paneID, topic, kind); err != nil {
+		debug.Error("pane set-topic: set topic on %s: %v", paneID, err)
 		return err
 	}
 	return nil
 }
 
-// clearPaneTopic clears @pop_topic and @pop_topic_kind on a pane.
-func clearPaneTopic(tmux deps.Tmux, paneID string) error {
+// clearPaneTopic clears a pane's Topic and provenance.
+func clearPaneTopic(tmux tmuxmod.Tmux, paneID string) error {
 	debug.Init()
 	defer debug.Close()
 
 	if paneID == "" {
 		return nil
 	}
-	if _, err := tmux.Command("set-option", "-p", "-t", paneID, "@pop_topic", ""); err != nil {
-		debug.Error("pane set-topic --clear: set @pop_topic on %s: %v", paneID, err)
-		return err
-	}
-	if _, err := tmux.Command("set-option", "-p", "-t", paneID, "@pop_topic_kind", ""); err != nil {
-		debug.Error("pane set-topic --clear: set @pop_topic_kind on %s: %v", paneID, err)
+	if err := tmux.ClearTopic(paneID); err != nil {
+		debug.Error("pane set-topic --clear: clear topic on %s: %v", paneID, err)
 		return err
 	}
 	return nil
@@ -1283,14 +1238,14 @@ func clearPaneTopic(tmux deps.Tmux, paneID string) error {
 // preSeedTopicFromTitle returns the drain pre-seed hook (ADR 0058): at drain
 // spawn pop slugifies the task Title into the canonical Topic format (the same
 // slugifyTopic normalizer recipe-derived Topics use — ADR 0057) and writes it to
-// the current pane's @pop_topic with @pop_topic_kind = final. A pane that
+// the current pane's Topic with final provenance. A pane that
 // already carries a Topic is never re-seeded.
 //
 // It guards on the existing option so the first task in a whole-set drain wins
 // (matching the derive pipeline's final-topic guard) and a later task never
 // clobbers it; an empty/punctuation-only Title that slugs to "" is left
 // untouched. A pane outside tmux ($TMUX_PANE unset) is a silent no-op.
-func preSeedTopicFromTitle(tmux deps.Tmux, maxWords int) func(taskTitle string) {
+func preSeedTopicFromTitle(tmux tmuxmod.Tmux, maxWords int) func(taskTitle string) {
 	return func(taskTitle string) {
 		paneID := os.Getenv("TMUX_PANE")
 		if paneID == "" {
@@ -1427,10 +1382,10 @@ func runPaneSetFollow(arg string, follow bool) error {
 	if cfg == nil {
 		cfg = &config.Config{}
 	}
-	return runPaneSetFollowWith(defaultTmux, cfg, arg, follow)
+	return runPaneSetFollowWith(defaultTmuxMod, cfg, arg, follow)
 }
 
-func runPaneSetFollowWith(tmux deps.Tmux, cfg *config.Config, arg string, follow bool) error {
+func runPaneSetFollowWith(tmux tmuxmod.Tmux, cfg *config.Config, arg string, follow bool) error {
 	debug.Init()
 	defer debug.Close()
 
@@ -1459,7 +1414,7 @@ func runPaneSetFollowWith(tmux deps.Tmux, cfg *config.Config, arg string, follow
 		paneOnSocketSendFailed()
 	}
 
-	return runPaneSetFollowDirect(defaultTmuxMod, paneID, follow)
+	return runPaneSetFollowDirect(tmux, paneID, follow)
 }
 
 // runPaneSetFollowDirect is the fallback path used when the daemon socket
@@ -1492,10 +1447,10 @@ func runPaneVisit(cmd *cobra.Command, args []string) error {
 	if cfg == nil {
 		cfg = &config.Config{}
 	}
-	return runPaneVisitWith(defaultTmux, cfg, args)
+	return runPaneVisitWith(defaultTmuxMod, cfg, args)
 }
 
-func runPaneVisitWith(tmux deps.Tmux, cfg *config.Config, args []string) error {
+func runPaneVisitWith(tmux tmuxmod.Tmux, cfg *config.Config, args []string) error {
 	debug.Init()
 	defer debug.Close()
 
@@ -1539,7 +1494,7 @@ func runPaneVisitDirect(paneID string) error {
 // look up in the current/--project session's agent window. Mirrors the
 // kill/send/capture pattern but admits raw pane IDs for use from scripts
 // that already know them.
-func resolvePaneArg(tmux deps.Tmux, arg string) (string, error) {
+func resolvePaneArg(tmux tmuxmod.Tmux, arg string) (string, error) {
 	if strings.HasPrefix(arg, "%") {
 		return arg, nil
 	}

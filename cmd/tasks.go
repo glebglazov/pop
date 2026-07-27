@@ -813,7 +813,7 @@ func taskPreSeedTopic() func(taskTitle string) {
 	if cfg, err := taskConfigLoad(config.DefaultConfigPath()); err == nil && cfg != nil {
 		maxWords = cfg.PaneMonitoringTopicWords()
 	}
-	return preSeedTopicFromTitle(defaultTmux, maxWords)
+	return preSeedTopicFromTitle(defaultTmuxMod, maxWords)
 }
 
 func runTaskRunTaskWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader, taskPath string, agentExplicit, maxTriesExplicit bool) error {

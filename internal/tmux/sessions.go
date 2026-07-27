@@ -15,6 +15,13 @@ func (t *realTmux) Sessions() ([]SessionActivity, error) {
 	return parseSessions(out), nil
 }
 
+// CurrentSession returns the session name of the client displaying the caller.
+// A tmux error (e.g. not inside a session) surfaces so the caller can treat it
+// as "no session".
+func (t *realTmux) CurrentSession() (string, error) {
+	return t.run.output("display-message", "-p", "#S")
+}
+
 // parseSessions turns tmux's list-sessions output into typed structs. Lines
 // are "name\tactivity"; the tab delimiter keeps session names containing
 // spaces (e.g. a disambiguated "rails (work)") intact.
