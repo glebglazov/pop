@@ -1287,7 +1287,7 @@ func TestTaskExportImportRoundtripCmd(t *testing.T) {
 	taskProject = ""
 	taskPath = ""
 	taskDefPath = ""
-	taskExportOutput = ""
+	taskExportOutput = filepath.Join(root, setID+".tar.gz")
 	taskImportAs = ""
 	t.Cleanup(resetTaskFlags)
 

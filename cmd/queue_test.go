@@ -1,5 +1,7 @@
 package cmd
 
+// Queue tests that stub cfgFile or queue package globals stay serial (ADR-0145).
+
 import (
 	"io"
 	"os"
@@ -21,7 +23,6 @@ func writeQueueConfig(t *testing.T, body string) string {
 }
 
 func TestRunQueueRunHonorsConfiguredPollInterval(t *testing.T) {
-	t.Parallel()
 	path := writeQueueConfig(t, `
 [queue]
 poll_interval = "2s"
@@ -54,7 +55,6 @@ poll_interval = "2s"
 // sets the single inclusion flag (queue.Deps.IncludeDone) the shared row layer
 // reads, and it defaults off (DONE hidden).
 func TestQueueReadSurfacesThreadIncludeDone(t *testing.T) {
-	t.Parallel()
 	path := writeQueueConfig(t, "")
 
 	oldCfgFile := cfgFile

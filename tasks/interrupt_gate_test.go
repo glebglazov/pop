@@ -186,6 +186,7 @@ func TestInterruptGateForceQuitOnSecondSignal(t *testing.T) {
 
 	var gotCode int
 	var called bool
+	// ADR-0145: interruptGateExit stub is process-global — stays serial.
 	orig := interruptGateExit
 	interruptGateExit = func(code int) { called = true; gotCode = code }
 	defer func() { interruptGateExit = orig }()

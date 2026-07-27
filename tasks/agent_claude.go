@@ -283,8 +283,9 @@ func parseQuotaWeekday(text string) (time.Weekday, bool) {
 }
 
 func nextQuotaLocalTime(now time.Time, hour, minute int) time.Time {
-	localNow := now.In(time.Local)
-	reset := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), hour, minute, 0, 0, time.Local)
+	loc := now.Location()
+	localNow := now.In(loc)
+	reset := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), hour, minute, 0, 0, loc)
 	if !reset.After(localNow) {
 		reset = reset.Add(24 * time.Hour)
 	}
@@ -295,8 +296,9 @@ func nextQuotaLocalTime(now time.Time, hour, minute int) time.Time {
 }
 
 func nextQuotaWeekdayTime(now time.Time, weekday time.Weekday, hour, minute int) time.Time {
-	localNow := now.In(time.Local)
-	reset := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), hour, minute, 0, 0, time.Local)
+	loc := now.Location()
+	localNow := now.In(loc)
+	reset := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), hour, minute, 0, 0, loc)
 	days := (int(weekday) - int(localNow.Weekday()) + 7) % 7
 	reset = reset.AddDate(0, 0, days)
 	if !reset.After(localNow) {
