@@ -122,3 +122,54 @@ func TestVerifyFailedGateYesSkipsPrompt(t *testing.T) {
 		t.Fatalf("--yes must not render the gate menu:\n%s", out.String())
 	}
 }
+
+// TestVerifyFailedGateAgentAssistanceAdvisory: choosing Agent assistance (menu "3")
+// launches attended assistance, then re-shows the gate menu without changing the
+// stored verdict or manifest — advisory only, matching the interrupt gate shape.
+func TestVerifyFailedGateAgentAssistanceAdvisory(t *testing.T) {
+	d, m := setupDrainVerifyFixture(t, stubGit("shaGATE\n", "", ""), doneAFKSet(), nil)
+	seedVerdict(t, d, store.VerifyVerdict{Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaGATE", Verdict: "NEEDS-HUMAN", Findings: "the retry looks flaky"})
+
+	runner := &configurableHITLAssistanceRunner{t: t}
+	d.Runner = runner
+
+	var out bytes.Buffer
+	in := strings.NewReader("3\n0\n")
+	handled, err := handleInteractiveVerifyFailedGate(gateEnv{d: d, out: &out, in: in, agentPreset: "claude", runtimePath: "/rt", taskSetID: "demo"}, "/repo/.git", m, "shaGATE", "the retry looks flaky")
+	if err != nil {
+		t.Fatalf("handleInteractiveVerifyFailedGate: %v", err)
+	}
+	if handled {
+		t.Fatalf("advisory assistance must return handled=false so the set stays Verify-failed")
+	}
+
+	outStr := out.String()
+	for _, want := range []string{
+		"1. Accept (record a human-authored PASS)",
+		"2. Remediate (spawn a fix task)",
+		"3. Agent assistance",
+		"4. Open a shell in the checkout",
+		"0. Exit",
+		"Starting Verify-failed assistance:",
+	} {
+		if !strings.Contains(outStr, want) {
+			t.Fatalf("gate menu missing %q:\n%s", want, outStr)
+		}
+	}
+	if strings.Contains(outStr, "Re-verify") {
+		t.Fatalf("verify-fail gate must not offer re-verify:\n%s", outStr)
+	}
+	if runner.attendedCalls != 1 || runner.runCalls != 0 {
+		t.Fatalf("runner calls: attended=%d run=%d, want attended only", runner.attendedCalls, runner.runCalls)
+	}
+	if len(runner.args) != 1 || !strings.Contains(runner.args[0], "You are assisting a human at a Verify-failed gate") {
+		t.Fatalf("assistance prompt = %v", runner.args)
+	}
+	if strings.Count(outStr, "Choose [0]:") < 2 {
+		t.Fatalf("assistance did not re-show the gate menu:\n%s", outStr)
+	}
+	// Verdict untouched — assistance is advisory.
+	if stored := readStoredVerdict(t, d, "/repo/.git", "demo", "shaGATE"); stored == nil || stored.Verdict != "NEEDS-HUMAN" {
+		t.Fatalf("assistance must not change verdict, got %+v", stored)
+	}
+}

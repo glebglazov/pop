@@ -191,6 +191,73 @@ func BuildFailedAssistancePrompt(d *Deps, taskSetID string, m *Manifest, failed 
 	return b.String()
 }
 
+// BuildVerifyFailedAssistancePrompt generates the attended-agent prompt shown when
+// a Task set stops at the Verify-fail gate. The agent reads the recorded Verifier
+// findings and the accumulated work diff under judgment so the human can decide
+// whether to Accept, Remediate, or exit — it does not disposition the set.
+func BuildVerifyFailedAssistancePrompt(d *Deps, taskSetID string, m *Manifest, workSHA, findings, runtimePath string) string {
+	if d == nil {
+		d = defaultDeps
+	}
+	if d.FS == nil {
+		d.FS = DefaultDeps().FS
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "You are assisting a human at a Verify-failed gate for a Pop task set.\n\n")
+	fmt.Fprintf(&b, "Task set: %s\n", taskSetID)
+	fmt.Fprintf(&b, "Task set path: %s\n", m.Dir)
+	if workSHA != "" {
+		fmt.Fprintf(&b, "Work SHA: %s\n", workSHA)
+	}
+	if runtimePath != "" {
+		fmt.Fprintf(&b, "Runtime checkout: %s\n", runtimePath)
+	}
+	fmt.Fprintf(&b, "\n")
+
+	fmt.Fprintf(&b, "Allowed outcomes at this gate:\n")
+	fmt.Fprintf(&b, "- accept: the human records a human-authored PASS verdict with an optional note.\n")
+	fmt.Fprintf(&b, "- remediate: the human spawns a Remediation task carrying the findings and an optional note.\n")
+	fmt.Fprintf(&b, "- exit without changing task state: leave the set Verify-failed and make no disposition.\n")
+	fmt.Fprintf(&b, "Re-running the Verifier is not offered here — it is a separate force action, not a response to findings.\n")
+	fmt.Fprintf(&b, "You are advisory only: help the human understand the findings and diff, but do not Accept, Remediate, or change task state yourself.\n\n")
+
+	if trimmed := strings.TrimSpace(findings); trimmed != "" {
+		fmt.Fprintf(&b, "Recorded Verifier findings:\n%s\n\n", trimmed)
+	} else {
+		fmt.Fprintf(&b, "Recorded Verifier findings: none were recorded for this verdict.\n\n")
+	}
+
+	diff := verifyWorkDiff(d, runtimePath, taskSetID)
+	fmt.Fprintf(&b, "Accumulated work diff")
+	if workSHA != "" {
+		fmt.Fprintf(&b, " (at %s)", workSHA)
+	}
+	fmt.Fprintf(&b, "\n")
+	if strings.TrimSpace(diff) == "" {
+		fmt.Fprintf(&b, "(no committed changes for this set)\n\n")
+	} else {
+		fmt.Fprintf(&b, "```diff\n%s\n```\n\n", diff)
+	}
+
+	fmt.Fprintf(&b, "Task set context:\n")
+	for _, task := range m.Tasks {
+		fmt.Fprintf(&b, "- %s [%s %s]", task.ID, task.Type, task.Status)
+		if task.Title != "" {
+			fmt.Fprintf(&b, " %s", task.Title)
+		}
+		fmt.Fprintf(&b, " (%s)", filepath.Join(m.Dir, task.File))
+		if len(task.BlockedBy) > 0 {
+			fmt.Fprintf(&b, "; blocked_by: %s", strings.Join(task.BlockedBy, ", "))
+		}
+		fmt.Fprintf(&b, "\n")
+	}
+	fmt.Fprintf(&b, "\n")
+
+	fmt.Fprintf(&b, "Help the human decide which allowed outcome fits the findings and diff. Do not record a verdict or spawn remediation unless the human explicitly chooses that outcome.\n")
+	return b.String()
+}
+
 // BuildInterruptAssistancePrompt generates the attended-agent prompt shown when a
 // live AFK attempt is interrupted (SIGINT) and the drain lands on the interrupt
 // gate (ADR-0119). The agent is loaded with the interrupted task and surrounding

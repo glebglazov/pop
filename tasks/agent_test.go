@@ -1200,6 +1200,74 @@ func TestBuildFailedAssistancePromptWithoutRecordedReason(t *testing.T) {
 	}
 }
 
+func TestBuildVerifyFailedAssistancePromptIncludesFindingsAndDiff(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "tasks", "demo")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	m := &Manifest{
+		Stem: "demo",
+		Dir:  dir,
+		Tasks: []Task{
+			{ID: "01-a", File: "01-a.md", Title: "Build storage", Type: "AFK", Status: "done"},
+		},
+	}
+
+	git := stubGit("shaHEAD\n", "shaHEAD\nshaEARLY\n", "diff --git a/foo.go\n+added line\n")
+	d := realFSDeps()
+	d.Git = git
+
+	prompt := BuildVerifyFailedAssistancePrompt(d, "demo", m, "shaHEAD", "the retry looks flaky", "/runtime")
+	for _, want := range []string{
+		"Task set: demo",
+		"Task set path: " + dir,
+		"Work SHA: shaHEAD",
+		"Runtime checkout: /runtime",
+		"Recorded Verifier findings:",
+		"the retry looks flaky",
+		"Accumulated work diff (at shaHEAD)",
+		"added line",
+		"- 01-a [AFK done] Build storage",
+		"accept:",
+		"remediate:",
+		"Re-running the Verifier is not offered",
+		"advisory only",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("missing %q in prompt:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestBuildVerifyFailedAssistancePromptWithoutFindingsOrDiff(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "tasks", "demo")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	m := &Manifest{
+		Stem: "demo",
+		Dir:  dir,
+		Tasks: []Task{
+			{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+		},
+	}
+
+	d := realFSDeps()
+	d.Git = stubGit("", "", "")
+
+	prompt := BuildVerifyFailedAssistancePrompt(d, "demo", m, "", "", "")
+	if !strings.Contains(prompt, "none were recorded for this verdict") {
+		t.Fatalf("missing findings fallback:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "(no committed changes for this set)") {
+		t.Fatalf("missing empty diff fallback:\n%s", prompt)
+	}
+}
+
 func writePromptTestFile(t *testing.T, path, data string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {

@@ -489,6 +489,7 @@ const (
 	verifyFailedGateExit verifyFailedGateAction = iota
 	verifyFailedGateAccept
 	verifyFailedGateRemediate
+	verifyFailedGateAssist
 	verifyFailedGateShell
 )
 
@@ -509,6 +510,8 @@ func handleInteractiveVerifyFailedGate(env gateEnv, repo string, m *Manifest, wo
 	out := env.out
 	in := env.in
 	reader := env.reader
+	agentPreset := env.agentPreset
+	agentCmd := env.agentCmd
 	runtimePath := env.runtimePath
 	taskSetID := env.taskSetID
 	if env.yes || !canPrompt(in) || m == nil {
@@ -521,8 +524,14 @@ func handleInteractiveVerifyFailedGate(env gateEnv, repo string, m *Manifest, wo
 		reader = bufio.NewReader(in)
 	}
 
+	prompt := BuildVerifyFailedAssistancePrompt(d, taskSetID, m, workSHA, findings, runtimePath)
+	invocation, err := ResolveAgentAssistanceInvocation(agentPreset, agentCmd, prompt, runtimePath)
+	if err != nil {
+		return false, exitErr(ExitSetup, "%v", err)
+	}
+
 	for {
-		action, err := promptVerifyFailedGateAction(out, d, runtimePath, reader, taskSetID, findings)
+		action, err := promptVerifyFailedGateAction(out, d, runtimePath, reader, taskSetID, findings, invocation)
 		if err != nil {
 			return true, err
 		}
@@ -559,6 +568,17 @@ func handleInteractiveVerifyFailedGate(env gateEnv, repo string, m *Manifest, wo
 				return true, err
 			}
 			return true, nil
+		case verifyFailedGateAssist:
+			fmt.Fprintf(outputFor(out), "Starting Verify-failed assistance: %s\n", invocation.Display)
+			exitCode, err := runAttendedAssistanceCommand(d, in, runtimePath, out, invocation)
+			if err != nil {
+				fmt.Fprintf(outputFor(out), "Could not start Verify-failed assistance: %v\n", err)
+				continue
+			}
+			if exitCode != 0 {
+				fmt.Fprintf(outputFor(out), "Verify-failed assistance exited with status %d.\n", exitCode)
+			}
+			// Advisory only: no verdict or manifest change — loop back to the gate menu.
 		case verifyFailedGateShell:
 			if err := spawnRuntimeShell(d, in, runtimePath, out); err != nil {
 				fmt.Fprintf(outputFor(out), "Could not start shell: %v\n", err)
@@ -570,7 +590,7 @@ func handleInteractiveVerifyFailedGate(env gateEnv, repo string, m *Manifest, wo
 	}
 }
 
-func promptVerifyFailedGateAction(out io.Writer, d *Deps, runtimePath string, reader *bufio.Reader, taskSetID, findings string) (verifyFailedGateAction, error) {
+func promptVerifyFailedGateAction(out io.Writer, d *Deps, runtimePath string, reader *bufio.Reader, taskSetID, findings string, invocation *AgentAssistanceInvocation) (verifyFailedGateAction, error) {
 	display := outputFor(out)
 	fmt.Fprintln(display)
 	renderBlockedWaiterCount(display, d, runtimePath)
@@ -578,7 +598,14 @@ func promptVerifyFailedGateAction(out io.Writer, d *Deps, runtimePath string, re
 	renderVerifyGateFindings(display, findings)
 	fmt.Fprintln(display, "  1. Accept (record a human-authored PASS)")
 	fmt.Fprintln(display, "  2. Remediate (spawn a fix task)")
-	fmt.Fprintln(display, "  3. Open a shell in the checkout")
+	fmt.Fprintln(display, "  3. Agent assistance")
+	if invocation != nil {
+		fmt.Fprintf(display, "     %s\n", invocation.Display)
+		if invocation.Detail != "" {
+			fmt.Fprintf(display, "     %s\n", invocation.Detail)
+		}
+	}
+	fmt.Fprintln(display, "  4. Open a shell in the checkout")
 	fmt.Fprintln(display, "  0. Exit")
 	fmt.Fprintf(display, "%s", display.styled(ansiCyan, "Choose [0]: "))
 
@@ -592,12 +619,14 @@ func promptVerifyFailedGateAction(out io.Writer, d *Deps, runtimePath string, re
 	case "2":
 		return verifyFailedGateRemediate, nil
 	case "3":
+		return verifyFailedGateAssist, nil
+	case "4":
 		return verifyFailedGateShell, nil
 	case "", "0", "q", "quit", "exit":
 		return verifyFailedGateExit, nil
 	default:
-		fmt.Fprintln(display, "Choose 1, 2, 3, or 0.")
-		return promptVerifyFailedGateAction(out, d, runtimePath, reader, taskSetID, findings)
+		fmt.Fprintln(display, "Choose 1, 2, 3, 4, or 0.")
+		return promptVerifyFailedGateAction(out, d, runtimePath, reader, taskSetID, findings, invocation)
 	}
 }
 
