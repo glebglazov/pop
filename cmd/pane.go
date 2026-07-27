@@ -261,8 +261,7 @@ this to check whether a pane is running:
 
   pop pane find server && echo "running" || echo "not found"
 
-Uses tmux list-panes with #{pane_title} to match panes by name in the
-agent window.`,
+Matches panes by title in the agent window.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runPaneFind,
 }
@@ -298,7 +297,7 @@ Example output:
   db	%6
   logs	%7
 
-Uses tmux list-panes with #{pane_title} and #{pane_id} format variables.`,
+Lists each pane's title alongside its tmux pane id.`,
 	Args: cobra.NoArgs,
 	RunE: runPaneList,
 }

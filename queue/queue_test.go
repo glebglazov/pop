@@ -820,17 +820,17 @@ func (rt *recordingTmux) NewSession(name, dir string) error {
 }
 
 func (rt *recordingTmux) WindowExists(session, name string) (bool, error) {
-	rt.record("list-windows", "-t", session, "-F", "#{window_name}")
+	rt.record("list-windows", "-t", session)
 	return rt.windowNames[name], nil
 }
 
 func (rt *recordingTmux) NewWindow(session, name, dir string) (string, error) {
-	rt.record("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", session, "-n", name, "-c", dir)
+	rt.record("new-window", "-d", "-P", "-t", session, "-n", name, "-c", dir)
 	return "%3", nil
 }
 
 func (rt *recordingTmux) SplitWindow(session, name, dir string) (string, error) {
-	rt.record("split-window", "-d", "-P", "-F", "#{pane_id}", "-t", session+":"+name, "-c", dir)
+	rt.record("split-window", "-d", "-P", "-t", session+":"+name, "-c", dir)
 	if rt.splitErr != nil {
 		return "", rt.splitErr
 	}
@@ -843,17 +843,17 @@ func (rt *recordingTmux) RetileWindow(session, name string) error {
 }
 
 func (rt *recordingTmux) WindowPanes(session, name string) ([]string, error) {
-	rt.record("list-panes", "-t", session+":"+name, "-F", "#{pane_id}")
+	rt.record("list-panes", "-t", session+":"+name)
 	return recorderPaneIDs(rt.paneList), nil
 }
 
 func (rt *recordingTmux) FindTaggedPane(session string, _ tmuxmod.PaneTag, value string) (string, error) {
-	rt.record("list-panes", "-t", session+":"+drainWindowName, "-F", "#{pane-tag}\t#{pane_id}")
+	rt.record("list-panes", "-t", session+":"+drainWindowName)
 	return recorderTaggedPane(rt.paneList, value), nil
 }
 
 func (rt *recordingTmux) TagPane(paneID string, _ tmuxmod.PaneTag, value string) error {
-	rt.record("set-option", "-p", "-t", paneID, "#{pane-tag}", value)
+	rt.record("set-option", "-p", "-t", paneID, value)
 	return nil
 }
 
