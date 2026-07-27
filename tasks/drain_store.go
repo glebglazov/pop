@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/store"
+	"github.com/glebglazov/pop/store/storetest"
 )
 
 // drainStoreFile is pop's single machine-global execution-state database. It
@@ -83,6 +84,14 @@ func (d *Deps) Store(createIfMissing bool) (*store.Store, bool, error) {
 			return nil, false, nil
 		}
 		return nil, false, err
+	}
+	if testing.Testing() {
+		// Under go test, hundreds of fixtures each open a first-touch store at a
+		// fresh temp path; seeding a pre-migrated copy here (a no-op if a file
+		// already sits at path) turns their migration cost into a version check
+		// (ADR-0144). Production opens never call testing.Testing() true, so real
+		// stores always run the genuine forward migration.
+		_ = storetest.WriteTemplate(path)
 	}
 	s, err := store.Open(path, drainLiveness(d))
 	if err != nil {
