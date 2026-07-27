@@ -232,10 +232,11 @@ const (
 )
 
 type dashboardBindEntry struct {
-	Label  string
-	Path   string
-	Branch string
-	Create bool
+	Label   string
+	Path    string
+	Branch  string
+	Create  bool
+	Managed bool
 }
 
 type dashboardBindModal struct {
@@ -1643,6 +1644,10 @@ func (m QueueDashboard) confirmBindModal() (tea.Model, tea.Cmd) {
 		if !ok {
 			return m, nil
 		}
+		if entry.Managed {
+			m.bind.loading = true
+			return m, m.bindManagedWorktree(m.bind.row)
+		}
 		if entry.Create {
 			m.bind.loading = true
 			return m, m.loadBindRefs(m.bind.row)
@@ -1943,6 +1948,13 @@ func (m QueueDashboard) loadBindRefs(row DashboardRow) tea.Cmd {
 func (m QueueDashboard) adoptBindWorktree(row DashboardRow, checkoutPath string) tea.Cmd {
 	return func() tea.Msg {
 		_, err := AdoptWorktree(m.d, m.cfg, row.SetRef, checkoutPath)
+		return dashboardBindMsg{err: err}
+	}
+}
+
+func (m QueueDashboard) bindManagedWorktree(row DashboardRow) tea.Cmd {
+	return func() tea.Msg {
+		_, err := BindManagedWorktree(m.d, m.cfg, row.SetRef)
 		return dashboardBindMsg{err: err}
 	}
 }

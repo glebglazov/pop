@@ -227,7 +227,10 @@ func UnbindWorktree(d *Deps, cfg *config.Config, ref SetRef) (AbandonResult, err
 
 // BindWorktreeEntries returns the inline bind picker entries for the
 // highlighted dashboard row: every existing worktree in the row's repository,
-// followed by the pop-native creation entry.
+// followed by the managed-intent entry and the pop-native creation entry. The
+// managed entry is not gated on trunk resolution — unlike the Drain target
+// picker it provisions nothing now; the intent is lazy and the trunk is only
+// needed at the next Queue drain.
 func BindWorktreeEntries(d *Deps, cfg *config.Config, ref SetRef) ([]dashboardBindEntry, error) {
 	scans, _, err := dashboardBindContext(d, cfg, ref)
 	if err != nil {
@@ -246,6 +249,7 @@ func BindWorktreeEntries(d *Deps, cfg *config.Config, ref SetRef) ([]dashboardBi
 		}
 		entries = append(entries, dashboardBindEntry{Label: label, Path: wt.Path, Branch: wt.Branch})
 	}
+	entries = append(entries, dashboardBindEntry{Label: "＋ Managed worktree (provision at next Queue drain)", Managed: true})
 	entries = append(entries, dashboardBindEntry{Label: "＋ Create new worktree", Create: true})
 	return entries, nil
 }
@@ -275,6 +279,23 @@ func AdoptWorktree(d *Deps, cfg *config.Config, ref SetRef, checkoutPath string)
 		return BindWorktreeResult{}, err
 	}
 	return BindWorktree(d, cfg, ref.SetID, checkoutPath, BindWorktreeOptions{Force: true, ProjectName: ref.ProjectName}, io.Discard)
+}
+
+// BindManagedWorktree records a lazy managed worktree intent for ref.SetID —
+// the interactive twin of `bind-worktree --managed`. Nothing is adopted or
+// provisioned now; the set's next Queue drain forks a pop-owned worktree from
+// the Trunk. The dashboard action is deliberate, so a set already bound
+// elsewhere is re-pointed without a second prompt (Force), dropping the old
+// binding forget-only — exactly like AdoptWorktree.
+func BindManagedWorktree(d *Deps, cfg *config.Config, ref SetRef) (BindWorktreeResult, error) {
+	if err := refuseDashboardBindWhileLocked(d, ref); err != nil {
+		return BindWorktreeResult{}, err
+	}
+	scans, _, err := dashboardBindContext(d, cfg, ref)
+	if err != nil {
+		return BindWorktreeResult{}, err
+	}
+	return BindWorktree(d, cfg, ref.SetID, scans[0].ProjectPath, BindWorktreeOptions{Managed: true, Force: true, ProjectName: ref.ProjectName}, io.Discard)
 }
 
 type DashboardCreateWorktreeResult struct {

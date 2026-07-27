@@ -1955,6 +1955,113 @@ func TestDashboardBindPickerListsAndAdoptsExistingWorktree(t *testing.T) {
 	}
 }
 
+func dashboardManagedIntent(t *testing.T, d *Deps, repo, setID string) *tasks.WorktreeDirective {
+	t.Helper()
+	id, err := tasks.ResolveRepositoryIdentity(d.Tasks, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defPath, err := tasks.CanonicalDefinitionPathWith(d.Tasks, id.TasksDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent, err := tasks.RegisteredWorktreeIntent(d.Tasks, defPath, setID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return intent
+}
+
+// TestDashboardBindPickerManagedEntryRecordsIntent covers acceptance criteria
+// 1-3 of 06-dashboard-bind-picker-managed-entry: the bind picker offers a
+// managed entry between the adoptable worktrees and the create entry; picking
+// it on an unbound set records a managed intent and writes no binding; on a
+// bound set it re-points without a second prompt, dropping the old binding
+// forget-only (the checkout stays on disk).
+func TestDashboardBindPickerManagedEntryRecordsIntent(t *testing.T) {
+	repo, setID, _ := setupSupervisorSpawnRepo(t, "bind-managed", []spawnTestTask{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	wt := filepath.Join(t.TempDir(), "adopted")
+	runGit(t, repo, "worktree", "add", "-b", "adopted-branch", wt, "HEAD")
+	d, cfg, row, _ := dashboardLaunchFixture(t, repo, setID)
+
+	entries, err := BindWorktreeEntries(d, cfg, row.SetRef)
+	if err != nil {
+		t.Fatalf("BindWorktreeEntries: %v", err)
+	}
+	if n := len(entries); n < 3 || !entries[n-2].Managed || !entries[n-1].Create {
+		t.Fatalf("entries = %+v, want managed entry before the create entry", entries)
+	}
+
+	if _, err := BindManagedWorktree(d, cfg, row.SetRef); err != nil {
+		t.Fatalf("BindManagedWorktree on unbound set: %v", err)
+	}
+	repoKey, err := resolveRepoKey(d, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := loadBindingStore(t, d.Tasks)[setScopedKey(repoKey, setID)]; ok {
+		t.Fatalf("binding written for unbound managed bind, want intent only")
+	}
+	if intent := dashboardManagedIntent(t, d, repo, setID); intent == nil || !intent.Managed {
+		t.Fatalf("intent = %+v, want Managed:true", intent)
+	}
+
+	if _, err := AdoptWorktree(d, cfg, row.SetRef, wt); err != nil {
+		t.Fatalf("AdoptWorktree: %v", err)
+	}
+	if _, err := BindManagedWorktree(d, cfg, row.SetRef); err != nil {
+		t.Fatalf("BindManagedWorktree on bound set should re-point without prompt: %v", err)
+	}
+	if _, ok := loadBindingStore(t, d.Tasks)[setScopedKey(repoKey, setID)]; ok {
+		t.Fatalf("old binding kept after managed re-point, want dropped forget-only")
+	}
+	if _, err := os.Stat(wt); err != nil {
+		t.Fatalf("old checkout %s should stay on disk: %v", wt, err)
+	}
+	if intent := dashboardManagedIntent(t, d, repo, setID); intent == nil || !intent.Managed {
+		t.Fatalf("intent after re-point = %+v, want Managed:true", intent)
+	}
+}
+
+// TestDashboardBindManagedRefusesLiveLock covers acceptance criterion 4: the
+// managed bind refuses while the set's own drain holds the runtime lock, and
+// the existing binding survives untouched.
+func TestDashboardBindManagedRefusesLiveLock(t *testing.T) {
+	repo, setID, _ := setupSupervisorSpawnRepo(t, "bind-managed-locked", []spawnTestTask{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	locked := filepath.Join(t.TempDir(), "locked")
+	runGit(t, repo, "worktree", "add", "-b", "locked-branch", locked, "HEAD")
+	d, cfg, row, _ := dashboardLaunchFixture(t, repo, setID)
+	repoKey, err := resolveRepoKey(d, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row.RepoKey = repoKey
+	row.RuntimePath = locked
+	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
+		setScopedKey(repoKey, setID): {RuntimePath: locked, Branch: "locked-branch", Project: "pop", Provisioned: false},
+	})
+	d.ReadLock = func(runtimePath string) *tasks.RuntimeLockStatus {
+		if runtimePath == locked {
+			lock := liveLock(runtimePath)
+			lock.Metadata.SetID = setID
+			return lock
+		}
+		return idleLock(runtimePath)
+	}
+
+	_, err = BindManagedWorktree(d, cfg, row.SetRef)
+	if err == nil || !strings.Contains(err.Error(), "currently executing") {
+		t.Fatalf("BindManagedWorktree err = %v, want live-lock refusal", err)
+	}
+	if got := loadBindingStore(t, d.Tasks)[setScopedKey(repoKey, setID)].RuntimePath; got != locked {
+		t.Fatalf("binding runtime = %q, want unchanged %q", got, locked)
+	}
+}
+
 // staticGitGuard wraps a real git and fails the test if the dashboard build ever
 // forks one of the static-path commands — identity (`rev-parse`), integration
 // target (`worktree list`), or branch (`branch --show-current`). Those facts are
