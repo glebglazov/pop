@@ -19,11 +19,25 @@ const (
 	OccupantWaiter   = "waiter"
 )
 
+// ProcessOwner identifies the mutating process for checkout-quiescence: a live
+// Checkout gate hold owned by this PID and start token does not block the
+// mutation — the human at the gate is who the hold exists to protect. Ownership
+// requires both fields to match; a recycled PID with a different token does not
+// grant the exemption.
+type ProcessOwner struct {
+	PID       int
+	ProcStart string
+}
+
+func (o ProcessOwner) owns(pid int, procStart string) bool {
+	return o.PID == pid && o.ProcStart == procStart
+}
+
 // CheckoutOccupant names what holds a runtime checkout when an out-of-band
 // mutation is refused: a live running drain, a live Recovery waiter (quota
-// recovery — a process that will resume), or a live Checkout gate hold. Since
-// carries the drain's start / the waiter's or hold's registration time so the
-// caller's error can say how long the occupant has held the checkout.
+// recovery — a process that will resume), or a live foreign Checkout gate hold.
+// Since carries the drain's start / the waiter's or hold's registration time so
+// the caller's error can say how long the occupant has held the checkout.
 //
 // NextInTurn is meaningful only for OccupantWaiter: it reports whether the
 // waiting set is first under Recovery turn ordering for its checkout — true when
@@ -47,9 +61,10 @@ type Execer interface {
 }
 
 // MutateIfCheckoutQuiescent enforces ADR-0104: it runs mutate only when the
-// runtime checkout is quiescent — no live running drain and no live Checkout
-// gate hold on runtimePath — refusing with ErrCheckoutBusy (and the naming
-// occupant) otherwise. The quiescence check and the mutation share ONE
+// runtime checkout is quiescent — no live running drain and no live foreign
+// Checkout gate hold on runtimePath — refusing with ErrCheckoutBusy (and the
+// naming occupant) otherwise. A gate hold owned by mutator (PID plus start
+// token) does not occupy the checkout. The quiescence check and the mutation share ONE
 // transaction opened with BEGIN IMMEDIATE, so the write lock is held across both:
 // a concurrent StartDrain cannot commit a running row between the check and the
 // mutation, and a drain that became live is seen by the check. This is the
@@ -66,6 +81,7 @@ type Execer interface {
 // before the next statement (the rows-close constraint).
 func (s *Store) MutateIfCheckoutQuiescent(
 	runtimePath string,
+	mutator ProcessOwner,
 	mutate func(ctx context.Context, ex Execer) error,
 ) (*CheckoutOccupant, error) {
 	if runtimePath == "" {
@@ -210,7 +226,7 @@ func (s *Store) MutateIfCheckoutQuiescent(
 	if err != nil && err != sql.ErrNoRows {
 		return nil, err
 	}
-	if err == nil && s.alive(holdPID, holdProc.String) {
+	if err == nil && s.alive(holdPID, holdProc.String) && !mutator.owns(holdPID, holdProc.String) {
 		return &CheckoutOccupant{Kind: OccupantGateHold, SetID: holdSet, PID: holdPID, Since: parseTime(holdReg.String)}, ErrCheckoutBusy
 	}
 

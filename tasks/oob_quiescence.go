@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"errors"
+	"os"
 	"time"
 
 	"github.com/glebglazov/pop/store"
@@ -10,13 +11,16 @@ import (
 
 // mutateWithCheckoutQuiescence runs mutate through the store's atomic quiescence
 // gate (ADR-0104): the mutation commits only when the runtime checkout carries no
-// live drain and no live Checkout gate hold, with the check and the write in one
-// transaction so a concurrent BeginDrain cannot interleave. Liveness uses the
-// same PID+start-token standard as drains, so a dead-owner drain row or orphan
-// gate hold does not block. A refusal is translated into a clear, occupant-naming
-// error.
-func mutateWithCheckoutQuiescence(s *store.Store, runtimePath string, mutate func(ctx context.Context, ex store.Execer) error) error {
-	occ, err := s.MutateIfCheckoutQuiescent(runtimePath, mutate)
+// live drain and no live foreign Checkout gate hold, with the check and the write
+// in one transaction so a concurrent BeginDrain cannot interleave. A gate hold
+// owned by this process (PID plus start token) does not block — the human at the
+// verify-fail gate is who the hold protects. Liveness uses the same PID+start-token
+// standard as drains, so a dead-owner drain row or orphan gate hold does not block.
+// A refusal is translated into a clear, occupant-naming error.
+func mutateWithCheckoutQuiescence(d *Deps, s *store.Store, runtimePath string, mutate func(ctx context.Context, ex store.Execer) error) error {
+	pid := os.Getpid()
+	procStart, _ := procStartToken(d, pid)
+	occ, err := s.MutateIfCheckoutQuiescent(runtimePath, store.ProcessOwner{PID: pid, ProcStart: procStart}, mutate)
 	if err != nil {
 		if errors.Is(err, store.ErrCheckoutBusy) {
 			return checkoutBusyErr(occ)

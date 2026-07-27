@@ -34,7 +34,7 @@ func acceptVerdict(setID string) VerifyVerdict {
 
 func TestMutateIfCheckoutQuiescentWritesWhenIdle(t *testing.T) {
 	s := openTestStore(t)
-	occ, err := s.MutateIfCheckoutQuiescent("/rt", func(ctx context.Context, ex Execer) error {
+	occ, err := s.MutateIfCheckoutQuiescent("/rt", ProcessOwner{}, func(ctx context.Context, ex Execer) error {
 		return PutVerifyVerdictExec(ctx, ex, acceptVerdict("s"))
 	})
 	if err != nil {
@@ -58,7 +58,7 @@ func TestMutateIfCheckoutQuiescentRefusedByLiveDrain(t *testing.T) {
 		t.Fatalf("StartDrain: %v", err)
 	}
 	ran := false
-	occ, err := s.MutateIfCheckoutQuiescent("/rt", func(ctx context.Context, ex Execer) error {
+	occ, err := s.MutateIfCheckoutQuiescent("/rt", ProcessOwner{}, func(ctx context.Context, ex Execer) error {
 		ran = true
 		return PutVerifyVerdictExec(ctx, ex, acceptVerdict("busyset"))
 	})
@@ -81,7 +81,7 @@ func TestMutateIfCheckoutQuiescentRefusedByLiveGateHold(t *testing.T) {
 	if err := s.PutCheckoutGateHold(CheckoutGateHold{RuntimePath: "/rt", SetID: "gated", PID: 200, ProcStart: "h1"}); err != nil {
 		t.Fatalf("PutCheckoutGateHold: %v", err)
 	}
-	occ, err := s.MutateIfCheckoutQuiescent("/rt", func(ctx context.Context, ex Execer) error {
+	occ, err := s.MutateIfCheckoutQuiescent("/rt", ProcessOwner{PID: 999, ProcStart: "caller"}, func(ctx context.Context, ex Execer) error {
 		return PutVerifyVerdictExec(ctx, ex, acceptVerdict("gated"))
 	})
 	if !errors.Is(err, ErrCheckoutBusy) {
@@ -89,6 +89,41 @@ func TestMutateIfCheckoutQuiescentRefusedByLiveGateHold(t *testing.T) {
 	}
 	if occ == nil || occ.Kind != OccupantGateHold || occ.SetID != "gated" || occ.PID != 200 {
 		t.Fatalf("occupant = %+v, want gate hold gated/200", occ)
+	}
+}
+
+func TestMutateIfCheckoutQuiescentProceedsPastOwnGateHold(t *testing.T) {
+	s := openTestStore(t, holdAliveByToken([2]string{"200", "h1"}))
+	if err := s.PutCheckoutGateHold(CheckoutGateHold{RuntimePath: "/rt", SetID: "gated", PID: 200, ProcStart: "h1"}); err != nil {
+		t.Fatalf("PutCheckoutGateHold: %v", err)
+	}
+	occ, err := s.MutateIfCheckoutQuiescent("/rt", ProcessOwner{PID: 200, ProcStart: "h1"}, func(ctx context.Context, ex Execer) error {
+		return PutVerifyVerdictExec(ctx, ex, acceptVerdict("gated"))
+	})
+	if err != nil || occ != nil {
+		t.Fatalf("own gate hold must not block: occ=%+v err=%v", occ, err)
+	}
+	if v, _ := s.GetVerifyVerdict("r", "gated", "sha1"); v == nil {
+		t.Fatal("verdict should be committed past own gate hold")
+	}
+}
+
+func TestMutateIfCheckoutQuiescentReusedPIDDoesNotExemptOwnHold(t *testing.T) {
+	// PID 200 is alive under both tokens (modelling a liveness predicate that
+	// cannot distinguish reuse). The hold row records h1; the mutator presents h2.
+	// Exemption requires both fields to match — token mismatch must still refuse.
+	s := openTestStore(t, holdAliveByToken([2]string{"200", "h1"}, [2]string{"200", "h2"}))
+	if err := s.PutCheckoutGateHold(CheckoutGateHold{RuntimePath: "/rt", SetID: "gated", PID: 200, ProcStart: "h1"}); err != nil {
+		t.Fatalf("PutCheckoutGateHold: %v", err)
+	}
+	occ, err := s.MutateIfCheckoutQuiescent("/rt", ProcessOwner{PID: 200, ProcStart: "h2"}, func(ctx context.Context, ex Execer) error {
+		return PutVerifyVerdictExec(ctx, ex, acceptVerdict("gated"))
+	})
+	if !errors.Is(err, ErrCheckoutBusy) {
+		t.Fatalf("err = %v, want ErrCheckoutBusy", err)
+	}
+	if occ == nil || occ.Kind != OccupantGateHold || occ.SetID != "gated" {
+		t.Fatalf("foreign hold at recycled PID must still refuse: %+v", occ)
 	}
 }
 
@@ -101,7 +136,7 @@ func TestMutateIfCheckoutQuiescentRefusedByLiveWaiter(t *testing.T) {
 		t.Fatalf("PutRecoveryWaiter: %v", err)
 	}
 	ran := false
-	occ, err := s.MutateIfCheckoutQuiescent("/rt", func(ctx context.Context, ex Execer) error {
+	occ, err := s.MutateIfCheckoutQuiescent("/rt", ProcessOwner{}, func(ctx context.Context, ex Execer) error {
 		ran = true
 		return PutVerifyVerdictExec(ctx, ex, acceptVerdict("waiting"))
 	})
@@ -131,7 +166,7 @@ func TestMutateIfCheckoutQuiescentIgnoresDeadWaiter(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("PutRecoveryWaiter: %v", err)
 	}
-	occ, err := s.MutateIfCheckoutQuiescent("/rt", func(ctx context.Context, ex Execer) error {
+	occ, err := s.MutateIfCheckoutQuiescent("/rt", ProcessOwner{}, func(ctx context.Context, ex Execer) error {
 		return PutVerifyVerdictExec(ctx, ex, acceptVerdict("waiting"))
 	})
 	if err != nil || occ != nil {
@@ -157,7 +192,7 @@ func TestMutateIfCheckoutQuiescentWaiterQueuedBehindTurn(t *testing.T) {
 		"/rt", "ahead", time.Now().UTC().Format(timeLayout)); err != nil {
 		t.Fatalf("seed recovery turn: %v", err)
 	}
-	occ, err := s.MutateIfCheckoutQuiescent("/rt", func(ctx context.Context, ex Execer) error {
+	occ, err := s.MutateIfCheckoutQuiescent("/rt", ProcessOwner{}, func(ctx context.Context, ex Execer) error {
 		return PutVerifyVerdictExec(ctx, ex, acceptVerdict("waiting"))
 	})
 	if !errors.Is(err, ErrCheckoutBusy) {
@@ -177,7 +212,7 @@ func TestMutateIfCheckoutQuiescentIgnoresDeadDrain(t *testing.T) {
 	if _, err := s.StartDrain(Drain{Repo: "r", SetID: "s", RuntimePath: "/rt", PID: 100, ProcStart: "t1", StartedAt: time.Now()}); err != nil {
 		t.Fatalf("StartDrain: %v", err)
 	}
-	occ, err := s.MutateIfCheckoutQuiescent("/rt", func(ctx context.Context, ex Execer) error {
+	occ, err := s.MutateIfCheckoutQuiescent("/rt", ProcessOwner{}, func(ctx context.Context, ex Execer) error {
 		return PutVerifyVerdictExec(ctx, ex, acceptVerdict("s"))
 	})
 	if err != nil || occ != nil {
@@ -194,7 +229,7 @@ func TestMutateIfCheckoutQuiescentDetectsReusedDrainPID(t *testing.T) {
 	if _, err := s.StartDrain(Drain{Repo: "r", SetID: "s", RuntimePath: "/rt", PID: 100, ProcStart: "t1", StartedAt: time.Now()}); err != nil {
 		t.Fatalf("StartDrain: %v", err)
 	}
-	occ, err := s.MutateIfCheckoutQuiescent("/rt", func(ctx context.Context, ex Execer) error {
+	occ, err := s.MutateIfCheckoutQuiescent("/rt", ProcessOwner{}, func(ctx context.Context, ex Execer) error {
 		return PutVerifyVerdictExec(ctx, ex, acceptVerdict("s"))
 	})
 	if err != nil || occ != nil {
@@ -208,7 +243,7 @@ func TestMutateIfCheckoutQuiescentIgnoresDeadGateHold(t *testing.T) {
 	if err := s.PutCheckoutGateHold(CheckoutGateHold{RuntimePath: "/rt", SetID: "gated", PID: 200, ProcStart: "h1"}); err != nil {
 		t.Fatalf("PutCheckoutGateHold: %v", err)
 	}
-	occ, err := s.MutateIfCheckoutQuiescent("/rt", func(ctx context.Context, ex Execer) error {
+	occ, err := s.MutateIfCheckoutQuiescent("/rt", ProcessOwner{}, func(ctx context.Context, ex Execer) error {
 		return PutVerifyVerdictExec(ctx, ex, acceptVerdict("gated"))
 	})
 	if err != nil || occ != nil {
@@ -219,7 +254,7 @@ func TestMutateIfCheckoutQuiescentIgnoresDeadGateHold(t *testing.T) {
 func TestMutateIfCheckoutQuiescentRollsBackOnMutateError(t *testing.T) {
 	s := openTestStore(t)
 	boom := errors.New("boom")
-	occ, err := s.MutateIfCheckoutQuiescent("/rt", func(ctx context.Context, ex Execer) error {
+	occ, err := s.MutateIfCheckoutQuiescent("/rt", ProcessOwner{}, func(ctx context.Context, ex Execer) error {
 		// Write, then fail: the transaction must roll back so nothing persists.
 		if e := PutVerifyVerdictExec(ctx, ex, acceptVerdict("s")); e != nil {
 			return e
@@ -263,7 +298,7 @@ func TestMutateIfCheckoutQuiescentBlocksConcurrentStartDrain(t *testing.T) {
 		drainDone <- e
 	}()
 
-	occ, err := s.MutateIfCheckoutQuiescent("/rt", func(ctx context.Context, ex Execer) error {
+	occ, err := s.MutateIfCheckoutQuiescent("/rt", ProcessOwner{}, func(ctx context.Context, ex Execer) error {
 		close(inWindow)
 		// The competing StartDrain is now racing for the write lock we hold; it
 		// must not commit while we are inside the transaction.

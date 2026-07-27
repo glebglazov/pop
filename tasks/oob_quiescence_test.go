@@ -262,6 +262,47 @@ func TestAcceptProceedsPastDeadDrain(t *testing.T) {
 	}
 }
 
+// TestAcceptProceedsPastOwnGateHold: Accept at the verify-fail gate proceeds while
+// this process's own non-claiming gate hold is registered — the hold exists to keep
+// other actors out, not the human sitting at the gate.
+func TestAcceptProceedsPastOwnGateHold(t *testing.T) {
+	d, defPath := setupVerifyFixture(t, stubGit("shaACC\n", "", ""))
+	pid := os.Getpid()
+	token := "gate-owner"
+	seedGateHold(t, d, "/rt", "demo", pid, token)
+	aliveSeam(d, pid, token)
+
+	if _, err := verifyResolvedSet(d, nil, verifyCoreOptions{
+		Repo: "/repo/.git", DefPath: defPath, RuntimePath: "/rt", SetID: "demo",
+		Output: &bytes.Buffer{}, Accept: true, AcceptNote: "human ok",
+	}); err != nil {
+		t.Fatalf("accept past own gate hold: %v", err)
+	}
+	if stored := readStoredVerdict(t, d, "/repo/.git", "demo", "shaACC"); stored == nil {
+		t.Fatal("human PASS should be committed past own gate hold")
+	}
+}
+
+// TestRemediateProceedsPastOwnGateHold: Remediate at the verify-fail gate spawns
+// its task while this process's own gate hold is registered.
+func TestRemediateProceedsPastOwnGateHold(t *testing.T) {
+	d, defPath := setupVerifyFixture(t, stubGit("shaR\n", "", ""))
+	pid := os.Getpid()
+	token := "gate-owner"
+	seedGateHold(t, d, "/rt", "demo", pid, token)
+	aliveSeam(d, pid, token)
+
+	if _, err := verifyResolvedSet(d, nil, verifyCoreOptions{
+		Repo: "/repo/.git", DefPath: defPath, RuntimePath: "/rt", SetID: "demo",
+		Output: &bytes.Buffer{}, Remediate: true, RemediateNote: "fix it",
+	}); err != nil {
+		t.Fatalf("remediate past own gate hold: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(defPath, "demo", "02-remediation.md")); os.IsNotExist(statErr) {
+		t.Fatalf("remediation task should be written past own gate hold")
+	}
+}
+
 // TestAcceptProceedsPastDeadGateHold: an orphan (dead-owner) gate hold does not
 // block the mutation.
 func TestAcceptProceedsPastDeadGateHold(t *testing.T) {
