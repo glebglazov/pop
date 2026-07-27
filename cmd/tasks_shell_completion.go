@@ -38,6 +38,7 @@ func registerTaskShellCompletions() {
 	taskAutoDrainCmd.ValidArgsFunction = completeTaskAutoDrainArgs
 	taskImplementCmd.ValidArgsFunction = completeTaskImplementArgs
 	taskVerifyCmd.ValidArgsFunction = completeTaskStatusArgs
+	taskAssistCmd.ValidArgsFunction = completeTaskStatusArgs
 	taskResetTaskCmd.ValidArgsFunction = completeTaskTaskFileArgs
 	taskCompleteTaskCmd.ValidArgsFunction = completeTaskTaskFileArgs
 	taskSkipTaskCmd.ValidArgsFunction = completeTaskTaskFileArgs

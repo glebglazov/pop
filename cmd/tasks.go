@@ -115,6 +115,13 @@ var taskVerifyCmd = &cobra.Command{
 	RunE:  runTaskVerify,
 }
 
+var taskAssistCmd = &cobra.Command{
+	Use:   "assist TASK_SET",
+	Short: "Open an Assist session on a task set at its current status (no drain, no Verifier)",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runTaskAssist,
+}
+
 var taskResetTaskCmd = &cobra.Command{
 	Use:   "open [TASK_SET | TASK_SET/FILE.md]",
 	Short: "Reset failed, skipped, or done tasks back to open: one targeted task, or pick a set's tasks interactively",
@@ -228,6 +235,7 @@ func init() {
 	taskCmd.AddCommand(taskAutoDrainCmd)
 	taskCmd.AddCommand(taskImplementCmd)
 	taskCmd.AddCommand(taskVerifyCmd)
+	taskCmd.AddCommand(taskAssistCmd)
 	taskCmd.AddCommand(taskResetTaskCmd)
 	taskCmd.AddCommand(taskCompleteTaskCmd)
 	taskCmd.AddCommand(taskSkipTaskCmd)
@@ -273,6 +281,10 @@ func init() {
 	taskVerifyCmd.Flags().StringVar(&taskVerifyEffort, "effort", "", "Verifier model-strength tier: light, standard, or heavy (default heavy)")
 	taskVerifyCmd.Flags().StringVar(&taskVerifyAccept, "accept", "", "Accept a non-PASS verdict: record a human-authored PASS at the current work SHA carrying this note (skips the Verifier); the note feeds forward as context into later verifier prompts")
 	taskVerifyCmd.Flags().StringVar(&taskVerifyRemediate, "remediate", "", "Remediate a non-PASS verdict: spawn a Remediation task from the set's findings carrying this note (skips the Verifier), even from NEEDS-HUMAN or past the remediation depth cap; the Drain then picks it up")
+
+	taskAssistCmd.Flags().StringVar(&taskRuntimePath, "task-runtime-path", "", "Git checkout root for task execution (normalized to checkout root)")
+	taskAssistCmd.Flags().StringArrayVar(&taskAgentPresets, "agent", nil, "Agent preset for attended assistance (claude, opencode, cursor, codex, pi), optionally followed by extra agent args")
+	taskAssistCmd.Flags().StringVar(&taskAgentCmd, "agent-cmd", "", "Trusted shell prefix; generated prompt passed as final positional argument")
 
 	taskExportCmd.Flags().StringVarP(&taskExportOutput, "output", "o", "", "Output archive path (default: <task-set-id>.tar.gz in the current directory)")
 	taskImportCmd.Flags().StringVar(&taskImportAs, "as", "", "Install under a different task set identifier")
@@ -744,6 +756,28 @@ func runTaskVerify(cmd *cobra.Command, args []string) error {
 	return runTaskVerifyWith(cmdLayerDeps().tasksDeps(), os.Stdout, args[0],
 		cmd.Flags().Changed("accept"), taskVerifyAccept,
 		cmd.Flags().Changed("remediate"), taskVerifyRemediate)
+}
+
+func runTaskAssist(cmd *cobra.Command, args []string) error {
+	return runTaskAssistWith(cmdLayerDeps().tasksDeps(), os.Stdout, os.Stdin, args[0])
+}
+
+func runTaskAssistWith(d *tasks.Deps, w io.Writer, stdin io.Reader, taskSetID string) error {
+	resolveInput, err := bindingFirstVerifyResolveInput(d, taskSetID)
+	if err != nil {
+		return fmt.Errorf("tasks assist: %w", err)
+	}
+	if err := tasks.AssistTaskSetWith(d, taskProjectDeps(), taskConfigLoad, tasks.AssistOptions{
+		ResolveInput: resolveInput,
+		TaskSetID:    taskSetID,
+		AgentPreset:  selectedTaskAgentPreset(),
+		AgentCmd:     taskAgentCmd,
+		Output:       w,
+		Input:        stdin,
+	}); err != nil {
+		return fmt.Errorf("tasks assist: %w", err)
+	}
+	return nil
 }
 
 func runTaskVerifyWith(d *tasks.Deps, w io.Writer, taskSetID string, accept bool, acceptNote string, remediate bool, remediateNote string) error {

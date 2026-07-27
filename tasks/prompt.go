@@ -430,6 +430,89 @@ type progressRecord struct {
 	Summary   string
 }
 
+// BuildAssistPrompt generates the attended-agent prompt for an Assist session's
+// agent assistance. It describes the whole set — identity, storage path, derived
+// status, manifest listing (status/type/effort/blockers), binding and runtime
+// path, recent progress, latest findings, the task contract, and allowed
+// operations — without inlining task bodies (the agent reads those from Task
+// storage).
+func BuildAssistPrompt(d *Deps, taskSetID string, m *Manifest, status TaskSetStatus, runtimePath, findings string) string {
+	if d == nil {
+		d = defaultDeps
+	}
+	if d.FS == nil {
+		d.FS = DefaultDeps().FS
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "You are assisting a human in an Assist session for a Pop task set.\n\n")
+	fmt.Fprintf(&b, "Task set: %s\n", taskSetID)
+	fmt.Fprintf(&b, "Task set path: %s\n", m.Dir)
+	fmt.Fprintf(&b, "Derived status: %s\n", status)
+	if runtimePath != "" {
+		fmt.Fprintf(&b, "Worktree binding / Runtime path (Binding-first): %s\n", runtimePath)
+	}
+	fmt.Fprintf(&b, "\n")
+
+	fmt.Fprintf(&b, "Manifest listing (task bodies are NOT inlined — read them from Task storage):\n")
+	for _, task := range m.Tasks {
+		fmt.Fprintf(&b, "- %s [%s %s effort=%s]", task.ID, task.Type, task.Status, task.Effort)
+		if task.Title != "" {
+			fmt.Fprintf(&b, " %s", task.Title)
+		}
+		fmt.Fprintf(&b, " (%s)", filepath.Join(m.Dir, task.File))
+		if len(task.BlockedBy) > 0 {
+			fmt.Fprintf(&b, "; blocked_by: %s", strings.Join(task.BlockedBy, ", "))
+		}
+		fmt.Fprintf(&b, "\n")
+	}
+	fmt.Fprintf(&b, "\n")
+
+	if trimmed := strings.TrimSpace(findings); trimmed != "" {
+		fmt.Fprintf(&b, "Latest Verify verdict findings:\n%s\n\n", trimmed)
+	}
+
+	fmt.Fprintf(&b, "Recent progress:\n")
+	progressPath := filepath.Join(m.Dir, "progress.txt")
+	if data, err := d.FS.ReadFile(progressPath); err == nil {
+		records := parseProgressRecords(string(data))
+		if len(records) == 0 {
+			fmt.Fprintf(&b, "- (progress.txt is empty)\n\n")
+		} else {
+			start := 0
+			if len(records) > 8 {
+				start = len(records) - 8
+			}
+			for _, rec := range records[start:] {
+				fmt.Fprintf(&b, "- %s [%s] %s\n", rec.Timestamp, rec.File, rec.Outcome)
+				for _, line := range strings.Split(rec.Summary, "\n") {
+					if strings.TrimSpace(line) == "" {
+						continue
+					}
+					fmt.Fprintf(&b, "  %s\n", line)
+				}
+			}
+			fmt.Fprintf(&b, "\n")
+		}
+	} else {
+		fmt.Fprintf(&b, "- No progress.txt is available yet.\n\n")
+	}
+
+	fmt.Fprintf(&b, "Task contract to respect:\n")
+	fmt.Fprintf(&b, "- Each task file has \"What to build\" and \"## Acceptance criteria\" checkboxes.\n")
+	fmt.Fprintf(&b, "- Do not modify index.json's task list shape carelessly; keep id/file/title/type/status/effort/blocked_by coherent.\n")
+	fmt.Fprintf(&b, "- Do not make git commits — the human owns commits and drain assessment.\n")
+	fmt.Fprintf(&b, "- Do not start a Drain and do not run the Verifier.\n\n")
+
+	fmt.Fprintf(&b, "Operations you may perform (by editing Task storage / the checkout):\n")
+	fmt.Fprintf(&b, "- Inspect task bodies and the runtime checkout to advise the human.\n")
+	fmt.Fprintf(&b, "- Add, remove, reorder, or re-effort tasks by editing index.json and task files under the Task set path.\n")
+	fmt.Fprintf(&b, "- Edit implementation under the runtime checkout when the human asks.\n")
+	fmt.Fprintf(&b, "- Do not mark tasks complete/skipped/open yourself unless the human explicitly asks; gate dispositions stay human choices.\n")
+	fmt.Fprintf(&b, "- Do not invoke `pop tasks implement` or `pop tasks verify` (those start a Drain or the Verifier).\n")
+	return b.String()
+}
+
 func parseProgressRecords(data string) []progressRecord {
 	var records []progressRecord
 	for _, block := range strings.Split(data, "\n---\n") {
