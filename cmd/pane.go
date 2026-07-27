@@ -153,7 +153,7 @@ func runPaneCreateWith(tmux tmuxmod.Tmux, name, command string) error {
 	// allowing direnv and other shell hooks to initialize naturally.
 	dir := paneProject
 	if dir == "" {
-		dir, err = os.Getwd()
+		dir, err = cmdLayerDeps().DirOrGetwd()
 		if err != nil {
 			return fmt.Errorf("failed to get working directory: %w", err)
 		}

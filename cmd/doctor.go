@@ -75,7 +75,7 @@ func defaultDoctorDeps() *doctorDeps {
 			return cfg.ExpandProjects()
 		},
 		expandProjects: func(paths []config.ExpandedPath) ([]project.ExpandedProject, []string) {
-			return expandProjectsWith(project.DefaultDeps(), paths)
+			return expandProjectsWith(cmdLayerDeps().projectDeps(), paths)
 		},
 		projectSessionActivity: historyTmuxSessionActivity,
 		detectRepoContext:      project.DetectRepoContext,
@@ -109,19 +109,23 @@ func defaultDoctorDeps() *doctorDeps {
 		},
 		explicitAgentContext:     func() []string { return nil },
 		agentExecutableAvailable: doctorAgentExecutableAvailable,
-		taskStorageWritable:      func() (string, error) { return tasks.ProbeStorageWritable(tasks.DefaultDeps()) },
+		taskStorageWritable: func() (string, error) { return tasks.ProbeStorageWritable(cmdLayerDeps().tasksDeps()) },
 		scanWayfinderMaps: func() (int, error) {
-			maps, err := wayfinder.ScanMaps(wayfinder.DefaultDeps(), "")
+			maps, err := wayfinder.ScanMaps(cmdLayerDeps().wayfinderDeps(), cmdLayerDeps().WorkDir())
 			if err != nil {
 				return 0, err
 			}
 			return len(maps), nil
 		},
-		legacyTaskSets: func() ([]string, error) { return tasks.LegacyTaskSetIDs(tasks.DefaultDeps(), "") },
-		orphanedTaskStorage: func() ([]tasks.OrphanedStorage, error) {
-			return tasks.FindOrphanedStorage(tasks.DefaultDeps())
+		legacyTaskSets: func() ([]string, error) {
+			return tasks.LegacyTaskSetIDs(cmdLayerDeps().tasksDeps(), cmdLayerDeps().WorkDir())
 		},
-		legacyLayoutStorage: func() ([]string, error) { return tasks.LegacyLayoutStorageDirs(tasks.DefaultDeps()) },
+		orphanedTaskStorage: func() ([]tasks.OrphanedStorage, error) {
+			return tasks.FindOrphanedStorage(cmdLayerDeps().tasksDeps())
+		},
+		legacyLayoutStorage: func() ([]string, error) {
+			return tasks.LegacyLayoutStorageDirs(cmdLayerDeps().tasksDeps())
+		},
 		updateCheck:         func() release.Result { return release.Check(buildVersion()) },
 	}
 }

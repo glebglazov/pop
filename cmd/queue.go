@@ -111,7 +111,7 @@ func runQueueRun(cmd *cobra.Command, args []string) error {
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
 
-	err = queueRun(queue.DefaultDeps(), resolved.PollInterval, os.Stdout, sigCh)
+	err = queueRun(cmdLayerDeps().queueDeps(), resolved.PollInterval, os.Stdout, sigCh)
 	if err != nil {
 		var exitErr *tasks.ExitError
 		if errors.As(err, &exitErr) {
@@ -134,7 +134,7 @@ func runQueueStatus(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	d := queue.DefaultDeps()
+	d := cmdLayerDeps().queueDeps()
 	d.LoadConfig = queueConfigLoad
 	d.IncludeDone = queueStatusIncludeDone
 	snap, err := queueBuildStatus(d, cfg)
@@ -153,7 +153,7 @@ func runQueueStatus(cmd *cobra.Command, args []string) error {
 }
 
 func runQueueLog(cmd *cobra.Command, args []string) error {
-	events, err := queue.BuildLog(tasks.DefaultDeps())
+	events, err := queue.BuildLog(cmdLayerDeps().tasksDeps())
 	if err != nil {
 		return err
 	}

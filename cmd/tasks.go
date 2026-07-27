@@ -284,6 +284,7 @@ func taskResolveInput() tasks.ResolveInput {
 		Path:               taskPath,
 		DefinitionOverride: taskDefPath,
 		RuntimeOverride:    taskRuntimePath,
+		CWD:                cmdLayerDeps().WorkDir(),
 	}
 }
 
@@ -292,7 +293,7 @@ func runTaskStatus(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 {
 		taskSetID = args[0]
 	}
-	return runTaskStatusWith(tasks.DefaultDeps(), os.Stdout, taskSetID)
+	return runTaskStatusWith(cmdLayerDeps().tasksDeps(), os.Stdout, taskSetID)
 }
 
 func runTaskRegister(cmd *cobra.Command, args []string) error {
@@ -300,7 +301,7 @@ func runTaskRegister(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 {
 		taskSetID = args[0]
 	}
-	return runTaskRegisterWith(tasks.DefaultDeps(), os.Stdout, taskSetID)
+	return runTaskRegisterWith(cmdLayerDeps().tasksDeps(), os.Stdout, taskSetID)
 }
 
 // runTaskRegisterWith is the sole entry point that registers discovered task
@@ -523,9 +524,9 @@ func attachWorktreeDirectiveErrors(d *tasks.Deps, checkout string, rows []tasks.
 
 func runTaskArchive(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 {
-		return runTaskArchiveWith(tasks.DefaultDeps(), os.Stdout, args[0])
+		return runTaskArchiveWith(cmdLayerDeps().tasksDeps(), os.Stdout, args[0])
 	}
-	return runTaskArchiveSelectionWith(tasks.DefaultDeps(), os.Stdout, os.Stdin, taskRunYes)
+	return runTaskArchiveSelectionWith(cmdLayerDeps().tasksDeps(), os.Stdout, os.Stdin, taskRunYes)
 }
 
 func runTaskArchiveWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
@@ -633,9 +634,9 @@ func archiveSetRowLabel(r tasks.ArchiveSetSelectionRow) string {
 
 func runTaskUnarchive(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 {
-		return runTaskUnarchiveWith(tasks.DefaultDeps(), os.Stdout, args[0])
+		return runTaskUnarchiveWith(cmdLayerDeps().tasksDeps(), os.Stdout, args[0])
 	}
-	return runTaskUnarchiveSelectionWith(tasks.DefaultDeps(), os.Stdout, os.Stdin)
+	return runTaskUnarchiveSelectionWith(cmdLayerDeps().tasksDeps(), os.Stdout, os.Stdin)
 }
 
 func runTaskUnarchiveWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
@@ -700,7 +701,7 @@ func runTaskUnarchiveSelectionWith(d *tasks.Deps, w io.Writer, stdin io.Reader) 
 }
 
 func runTaskSetPriority(cmd *cobra.Command, args []string) error {
-	return runTaskSetPriorityWith(tasks.DefaultDeps(), os.Stdout, args[0], args[1])
+	return runTaskSetPriorityWith(cmdLayerDeps().tasksDeps(), os.Stdout, args[0], args[1])
 }
 
 func runTaskSetPriorityWith(d *tasks.Deps, w io.Writer, taskSetID, priorityArg string) error {
@@ -721,7 +722,7 @@ func runTaskSetPriorityWith(d *tasks.Deps, w io.Writer, taskSetID, priorityArg s
 }
 
 func runTaskAutoDrain(cmd *cobra.Command, args []string) error {
-	return runTaskAutoDrainWith(tasks.DefaultDeps(), os.Stdout, args[0], !taskAutoDrainOff)
+	return runTaskAutoDrainWith(cmdLayerDeps().tasksDeps(), os.Stdout, args[0], !taskAutoDrainOff)
 }
 
 func runTaskAutoDrainWith(d *tasks.Deps, w io.Writer, taskSetID string, enabled bool) error {
@@ -737,7 +738,7 @@ func runTaskAutoDrainWith(d *tasks.Deps, w io.Writer, taskSetID string, enabled 
 }
 
 func runTaskVerify(cmd *cobra.Command, args []string) error {
-	return runTaskVerifyWith(tasks.DefaultDeps(), os.Stdout, args[0],
+	return runTaskVerifyWith(cmdLayerDeps().tasksDeps(), os.Stdout, args[0],
 		cmd.Flags().Changed("accept"), taskVerifyAccept,
 		cmd.Flags().Changed("remediate"), taskVerifyRemediate)
 }
@@ -783,9 +784,9 @@ func runTaskImplement(cmd *cobra.Command, args []string) {
 	maxTriesExplicit := cmd.Flags().Changed("max-tries")
 	var err error
 	if isTaskFileTarget(target) {
-		err = runTaskRunTaskWith(tasks.DefaultDeps(), os.Stdout, os.Stderr, os.Stdin, target, agentExplicit, maxTriesExplicit)
+		err = runTaskRunTaskWith(cmdLayerDeps().tasksDeps(), os.Stdout, os.Stderr, os.Stdin, target, agentExplicit, maxTriesExplicit)
 	} else {
-		err = runTaskRunTasksWith(tasks.DefaultDeps(), os.Stdout, os.Stderr, os.Stdin, target, agentExplicit, maxTriesExplicit)
+		err = runTaskRunTasksWith(cmdLayerDeps().tasksDeps(), os.Stdout, os.Stderr, os.Stdin, target, agentExplicit, maxTriesExplicit)
 	}
 	handleTaskExit(err)
 }
@@ -912,10 +913,10 @@ func runTaskResetTask(cmd *cobra.Command, args []string) {
 	var err error
 	if isTaskFileTarget(target) {
 		// A <task-set>/<file>.md reference reopens exactly one task, no prompt.
-		err = runTaskResetTaskWith(tasks.DefaultDeps(), os.Stdout, target)
+		err = runTaskResetTaskWith(cmdLayerDeps().tasksDeps(), os.Stdout, target)
 	} else {
 		// A whole-set target opens the interactive Multi-task selection.
-		err = runTaskOpenTasksWith(tasks.DefaultDeps(), os.Stdout, os.Stdin, target)
+		err = runTaskOpenTasksWith(cmdLayerDeps().tasksDeps(), os.Stdout, os.Stdin, target)
 	}
 	handleTaskExit(err)
 }
@@ -994,10 +995,10 @@ func runTaskCompleteTask(cmd *cobra.Command, args []string) {
 	var err error
 	if isTaskFileTarget(target) {
 		// A <task-set>/<file>.md reference moves exactly one task, no prompt.
-		err = runTaskCompleteTaskWith(tasks.DefaultDeps(), os.Stdout, target)
+		err = runTaskCompleteTaskWith(cmdLayerDeps().tasksDeps(), os.Stdout, target)
 	} else {
 		// A whole-set target opens the interactive Multi-task selection.
-		err = runTaskCompleteTasksWith(tasks.DefaultDeps(), os.Stdout, os.Stdin, target)
+		err = runTaskCompleteTasksWith(cmdLayerDeps().tasksDeps(), os.Stdout, os.Stdin, target)
 	}
 	handleTaskExit(err)
 }
@@ -1143,10 +1144,10 @@ func runTaskSkipTask(cmd *cobra.Command, args []string) {
 	var err error
 	if isTaskFileTarget(target) {
 		// A <task-set>/<file>.md reference defers exactly one task, no prompt.
-		err = runTaskSkipTaskWith(tasks.DefaultDeps(), os.Stdout, target)
+		err = runTaskSkipTaskWith(cmdLayerDeps().tasksDeps(), os.Stdout, target)
 	} else {
 		// A whole-set target opens the interactive Multi-task selection.
-		err = runTaskSkipTasksWith(tasks.DefaultDeps(), os.Stdout, os.Stdin, target)
+		err = runTaskSkipTasksWith(cmdLayerDeps().tasksDeps(), os.Stdout, os.Stdin, target)
 	}
 	handleTaskExit(err)
 }
@@ -1224,14 +1225,14 @@ func runTaskStream(cmd *cobra.Command, args []string) {
 	if taskStdoutInteractive() {
 		pw, done, err := taskOpenPager()
 		if err == nil {
-			err = runTaskStreamWith(tasks.DefaultDeps(), pw, args[0])
+			err = runTaskStreamWith(cmdLayerDeps().tasksDeps(), pw, args[0])
 			_ = done() // pager exit is best-effort (e.g. `q` to quit is fine)
 			handleTaskExit(err)
 			return
 		}
 		// Pager startup failure is not fatal — fall through to direct output.
 	}
-	err := runTaskStreamWith(tasks.DefaultDeps(), os.Stdout, args[0])
+	err := runTaskStreamWith(cmdLayerDeps().tasksDeps(), os.Stdout, args[0])
 	handleTaskExit(err)
 }
 
@@ -1260,12 +1261,12 @@ func runTaskShowPath(cmd *cobra.Command, args []string) {
 	if len(args) > 0 {
 		taskSetID = args[0]
 	}
-	err := runTaskShowPathWith(tasks.DefaultDeps(), os.Stdout, taskSetID)
+	err := runTaskShowPathWith(cmdLayerDeps().tasksDeps(), os.Stdout, taskSetID)
 	handleTaskExit(err)
 }
 
 func runTaskShowPathWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
-	result, err := tasks.ShowPath(d, "", taskSetID)
+	result, err := tasks.ShowPath(d, cmdLayerDeps().WorkDir(), taskSetID)
 	if err != nil {
 		return err
 	}
@@ -1274,7 +1275,7 @@ func runTaskShowPathWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 }
 
 func runTaskExport(cmd *cobra.Command, args []string) {
-	err := runTaskExportWith(tasks.DefaultDeps(), os.Stdout, args)
+	err := runTaskExportWith(cmdLayerDeps().tasksDeps(), os.Stdout, args)
 	handleTaskExit(err)
 }
 
@@ -1292,7 +1293,7 @@ func runTaskExportWith(d *tasks.Deps, w io.Writer, taskSetIDs []string) error {
 }
 
 func runTaskImport(cmd *cobra.Command, args []string) {
-	err := runTaskImportWith(tasks.DefaultDeps(), os.Stdout, args[0])
+	err := runTaskImportWith(cmdLayerDeps().tasksDeps(), os.Stdout, args[0])
 	handleTaskExit(err)
 }
 
@@ -1312,12 +1313,12 @@ func runTaskImportWith(d *tasks.Deps, w io.Writer, archivePath string) error {
 }
 
 func runTaskMigrate(cmd *cobra.Command, args []string) {
-	err := runTaskMigrateWith(tasks.DefaultDeps(), os.Stdout)
+	err := runTaskMigrateWith(cmdLayerDeps().tasksDeps(), os.Stdout)
 	handleTaskExit(err)
 }
 
 func runTaskMigrateWith(d *tasks.Deps, w io.Writer) error {
-	result, err := tasks.Migrate(d, "")
+	result, err := tasks.Migrate(d, cmdLayerDeps().WorkDir())
 	if err != nil {
 		return err
 	}
@@ -1326,7 +1327,7 @@ func runTaskMigrateWith(d *tasks.Deps, w io.Writer) error {
 }
 
 func runTaskAgents(cmd *cobra.Command, args []string) error {
-	return runTaskAgentsWith(tasks.DefaultDeps(), os.Stdout)
+	return runTaskAgentsWith(cmdLayerDeps().tasksDeps(), os.Stdout)
 }
 
 func runTaskAgentsWith(d *tasks.Deps, w io.Writer) error {
@@ -1399,11 +1400,11 @@ func runTaskBindWorktree(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	cwd, err := os.Getwd()
+	cwd, err := cmdLayerDeps().DirOrGetwd()
 	if err != nil {
 		return fmt.Errorf("determine working directory: %w", err)
 	}
-	d := queue.DefaultDeps()
+	d := cmdLayerDeps().queueDeps()
 	d.LoadConfig = taskConfigLoad
 	_, err = queue.BindWorktree(d, cfg, args[0], cwd, queue.BindWorktreeOptions{Force: taskBindWorktreeForce, Managed: taskBindWorktreeManaged}, os.Stdout)
 	return err
@@ -1418,12 +1419,12 @@ func runTaskUnbindWorktree(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	d := queue.DefaultDeps()
+	d := cmdLayerDeps().queueDeps()
 	d.LoadConfig = taskConfigLoad
 	_, err = queue.AbandonWithOptions(d, cfg, args[0], os.Stdout, queue.AbandonOptions{Yes: taskUnbindWorktreeYes, In: os.Stdin})
 	return err
 }
 
 func taskProjectDeps() *project.Deps {
-	return project.DefaultDeps()
+	return cmdLayerDeps().projectDeps()
 }

@@ -58,12 +58,12 @@ func init() {
 }
 
 func runWayfinderStatus(cmd *cobra.Command, args []string) {
-	err := runWayfinderStatusWith(wayfinder.DefaultDeps(), os.Stdout, wayfinderStatusAll)
+	err := runWayfinderStatusWith(cmdLayerDeps().wayfinderDeps(), os.Stdout, wayfinderStatusAll)
 	handleTaskExit(err)
 }
 
 func runWayfinderStatusWith(d *wayfinder.Deps, w io.Writer, includeAll bool) error {
-	snap, err := wayfinder.BuildStatus(d, "", includeAll)
+	snap, err := wayfinder.BuildStatus(d, cmdLayerDeps().WorkDir(), includeAll)
 	if err != nil {
 		return err
 	}
@@ -71,21 +71,21 @@ func runWayfinderStatusWith(d *wayfinder.Deps, w io.Writer, includeAll bool) err
 }
 
 func runWayfinderShow(cmd *cobra.Command, args []string) {
-	err := runWayfinderShowWith(wayfinder.DefaultDeps(), os.Stdout, args[0])
+	err := runWayfinderShowWith(cmdLayerDeps().wayfinderDeps(), os.Stdout, args[0])
 	handleTaskExit(err)
 }
 
 func runWayfinderShowWith(d *wayfinder.Deps, w io.Writer, mapID string) error {
-	return wayfinder.ShowWith(d, w, "", mapID)
+	return wayfinder.ShowWith(d, w, cmdLayerDeps().WorkDir(), mapID)
 }
 
 func runWayfinderArchive(cmd *cobra.Command, args []string) {
-	err := runWayfinderArchiveWith(wayfinder.DefaultDeps(), os.Stdout, args[0])
+	err := runWayfinderArchiveWith(cmdLayerDeps().wayfinderDeps(), os.Stdout, args[0])
 	handleTaskExit(err)
 }
 
 func runWayfinderArchiveWith(d *wayfinder.Deps, w io.Writer, mapID string) error {
-	result, err := wayfinder.ArchiveMap(d, "", mapID)
+	result, err := wayfinder.ArchiveMap(d, cmdLayerDeps().WorkDir(), mapID)
 	if err != nil {
 		return err
 	}
@@ -94,12 +94,12 @@ func runWayfinderArchiveWith(d *wayfinder.Deps, w io.Writer, mapID string) error
 }
 
 func runWayfinderUnarchive(cmd *cobra.Command, args []string) {
-	err := runWayfinderUnarchiveWith(wayfinder.DefaultDeps(), os.Stdout, args[0])
+	err := runWayfinderUnarchiveWith(cmdLayerDeps().wayfinderDeps(), os.Stdout, args[0])
 	handleTaskExit(err)
 }
 
 func runWayfinderUnarchiveWith(d *wayfinder.Deps, w io.Writer, mapID string) error {
-	result, err := wayfinder.UnarchiveMap(d, "", mapID)
+	result, err := wayfinder.UnarchiveMap(d, cmdLayerDeps().WorkDir(), mapID)
 	if err != nil {
 		return err
 	}

@@ -152,7 +152,7 @@ func init() {
 func runRoutineNew(cmd *cobra.Command, args []string) error {
 	agentsSet := cmd.Flags().Changed("agent")
 	effortSet := cmd.Flags().Changed("effort")
-	res, err := routineNew(args[0], routineNewSchedule, "")
+	res, err := routineNew(args[0], routineNewSchedule, cmdLayerDeps().WorkDir())
 	if err != nil {
 		return err
 	}
@@ -272,7 +272,7 @@ func runRoutineHandoff(cmd *cobra.Command, args []string) error {
 }
 
 func runRoutineDashboard(cmd *cobra.Command, args []string) error {
-	return routineDashboard(routine.DefaultDeps())
+	return routineDashboard(cmdLayerDeps().routineDeps())
 }
 
 func runRoutineMigrateManifests(cmd *cobra.Command, args []string) error {

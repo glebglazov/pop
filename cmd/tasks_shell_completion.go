@@ -11,8 +11,8 @@ import (
 )
 
 var (
-	taskCompletionDeps        = func() *tasks.Deps { return tasks.DefaultDeps() }
-	taskCompletionProjectDeps = func() *project.Deps { return project.DefaultDeps() }
+	taskCompletionDeps        = func() *tasks.Deps { return cmdLayerDeps().tasksDeps() }
+	taskCompletionProjectDeps = func() *project.Deps { return cmdLayerDeps().projectDeps() }
 	taskCompletionConfigLoad  = func(path string) (*config.Config, error) { return config.Load(path) }
 )
 
@@ -255,6 +255,7 @@ func completionInputFromCmd(cmd *cobra.Command) tasks.CompletionInput {
 		ProjectName:        lookupTaskFlag(cmd, "project"),
 		Path:               lookupTaskFlag(cmd, "path"),
 		DefinitionOverride: lookupTaskFlag(cmd, "task-definition-path"),
+		CWD:                cmdLayerDeps().WorkDir(),
 	}
 }
 

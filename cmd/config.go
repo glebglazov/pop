@@ -145,11 +145,11 @@ func runConfigShow(cmd *cobra.Command, _ []string) error {
 // CurrentTrunkFunc wired into the effective-config mirror. Outside any git repo
 // it returns (nil, nil) so the current-repo section is omitted.
 func currentRepoTrunk(cfg *config.Config) (*config.ResolvedTrunk, error) {
-	cwd, err := os.Getwd()
+	cwd, err := cmdLayerDeps().DirOrGetwd()
 	if err != nil {
 		return nil, nil
 	}
-	return resolveCurrentRepoTrunk(tasks.DefaultDeps(), cfg, cwd)
+	return resolveCurrentRepoTrunk(cmdLayerDeps().tasksDeps(), cfg, cwd)
 }
 
 // resolveCurrentRepoTrunk resolves the current repo's effective Trunk worktree

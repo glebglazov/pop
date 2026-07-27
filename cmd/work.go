@@ -7,7 +7,6 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
-	"github.com/glebglazov/pop/queue"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/spf13/cobra"
 )
@@ -49,12 +48,12 @@ func init() {
 }
 
 func runWorkShowPath(cmd *cobra.Command, args []string) {
-	err := runWorkShowPathWith(tasks.DefaultDeps(), os.Stdout)
+	err := runWorkShowPathWith(cmdLayerDeps().tasksDeps(), os.Stdout)
 	handleTaskExit(err)
 }
 
 func runWorkShowPathWith(d *tasks.Deps, w io.Writer) error {
-	result, err := tasks.ShowStorageRoot(d, "")
+	result, err := tasks.ShowStorageRoot(d, cmdLayerDeps().WorkDir())
 	if err != nil {
 		return err
 	}
@@ -71,7 +70,7 @@ func runWorkDashboard(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	d := queue.DefaultDeps()
+	d := cmdLayerDeps().queueDeps()
 	d.LoadConfig = queueConfigLoad
 	d.IncludeDone = workDashboardIncludeDone
 	checkout, err := queueRunDashboard(d, cfg)
@@ -91,7 +90,7 @@ func runWorkDashboard(cmd *cobra.Command, args []string) error {
 	// otherwise print the path instead of switching. The dashboard has already
 	// quit here — the only sensible action is to attach, never echo the path.
 	switchSession = true
-	ctx, err := project.DetectRepoContextFromPathWith(project.DefaultDeps(), checkout)
+	ctx, err := project.DetectRepoContextFromPathWith(cmdLayerDeps().projectDeps(), checkout)
 	if err != nil {
 		return err
 	}

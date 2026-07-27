@@ -117,6 +117,9 @@ func reportOverwriteDestroyed(out io.Writer, conflictPath string) {
 // (e.g. "there are pop hooks inside settings.json") may set `installed`
 // directly, guarded by `d.DryRun`. See installClaudeHooks for an example.
 type integrateDeps struct {
+	// getenv resolves XDG_DATA_HOME / XDG_CONFIG_HOME for cmd-local paths
+	// (ADR-0145). Nil falls back to the cmd-layer FS seam.
+	getenv      func(string) string
 	userHomeDir func() (string, error)
 	readFile    func(string) ([]byte, error)
 	writeFile   func(string, []byte, os.FileMode) error
@@ -185,7 +188,6 @@ func defaultIntegrateDeps() *integrateDeps {
 		stdout:      os.Stdout,
 		logf:        debug.Log,
 		stdin:       os.Stdin,
-		dataDir:     popDataDir,
 		symlink:     os.Symlink,
 		readlink:    os.Readlink,
 		lstatMode: func(p string) (os.FileMode, error) {
@@ -197,8 +199,17 @@ func defaultIntegrateDeps() *integrateDeps {
 		},
 		readDirNames: osReadDirNames,
 	}
+	d.getenv = func(key string) string { return cmdLayerDeps().FileSystem().Getenv(key) }
+	d.dataDir = func() (string, error) { return popDataDirWith(d) }
 	d.skillsPrefix = loadSkillsPrefix()
 	return d
+}
+
+func integrateGetenv(d *integrateDeps, key string) string {
+	if d != nil && d.getenv != nil {
+		return d.getenv(key)
+	}
+	return cmdLayerDeps().FileSystem().Getenv(key)
 }
 
 // osReadDirNames lists the immediate entry names under dir, sorted. A missing
@@ -237,13 +248,14 @@ func (d *integrateDeps) resolveSkillsPrefix() string {
 	return *d.skillsPrefix
 }
 
-// popDataDir returns pop's data directory root, respecting XDG_DATA_HOME.
-// File-based integration artifacts live under <dataDir>/integrations/.
-func popDataDir() (string, error) {
-	if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" {
+// popDataDirWith returns pop's data directory root, respecting XDG_DATA_HOME
+// through the integrate deps seam. File-based integration artifacts live under
+// <dataDir>/integrations/.
+func popDataDirWith(d *integrateDeps) (string, error) {
+	if xdg := integrateGetenv(d, "XDG_DATA_HOME"); xdg != "" {
 		return filepath.Join(xdg, "pop"), nil
 	}
-	home, err := os.UserHomeDir()
+	home, err := d.userHomeDir()
 	if err != nil {
 		return "", err
 	}
@@ -254,7 +266,7 @@ func popDataDir() (string, error) {
 // ${XDG_CONFIG_HOME:-~/.config}/pop/work-store.md (ADR-0136). The home fallback
 // resolves through the deps so tests can redirect it into a fake filesystem.
 func workStoreDocPath(d *integrateDeps) (string, error) {
-	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+	if xdg := integrateGetenv(d, "XDG_CONFIG_HOME"); xdg != "" {
 		return filepath.Join(xdg, "pop", "work-store.md"), nil
 	}
 	home, err := d.userHomeDir()
@@ -1176,16 +1188,17 @@ type appState struct {
 	BuildRevision string `json:"build_revision"`
 }
 
-// defaultStatePath returns the path to state.json, respecting XDG_DATA_HOME.
-// Mirrors the pattern used by history.DefaultHistoryPath and
-// monitor.DefaultStatePath.
-func defaultStatePath() string {
-	if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" {
+// appStatePath returns the path to state.json, respecting XDG_DATA_HOME through
+// the cmd-layer FS seam. Mirrors the pattern used by history.DefaultHistoryPath
+// and monitor.DefaultStatePath.
+func appStatePath(cd *Deps) string {
+	fs := cd.FileSystem()
+	if xdg := fs.Getenv("XDG_DATA_HOME"); xdg != "" {
 		return filepath.Join(xdg, "pop", "state.json")
 	}
-	home, err := os.UserHomeDir()
+	home, err := fs.UserHomeDir()
 	if err != nil {
-		debug.Error("defaultStatePath: UserHomeDir: %v", err)
+		debug.Error("appStatePath: UserHomeDir: %v", err)
 		return filepath.Join(".local", "share", "pop", "state.json")
 	}
 	return filepath.Join(home, ".local", "share", "pop", "state.json")
@@ -1194,7 +1207,7 @@ func defaultStatePath() string {
 // loadAppState reads state.json. A missing or corrupt file is treated as an
 // empty state, so the auto-updater re-checks everything on the next launch.
 func loadAppState() *appState {
-	path := defaultStatePath()
+	path := appStatePath(cmdLayerDeps())
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -1212,7 +1225,7 @@ func loadAppState() *appState {
 
 // saveAppState writes state.json, creating parent directories as needed.
 func saveAppState(s *appState) error {
-	path := defaultStatePath()
+	path := appStatePath(cmdLayerDeps())
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
