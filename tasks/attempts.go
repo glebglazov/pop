@@ -176,7 +176,7 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 			delay := attemptRetryDelay(retryDelays, attempt)
 			if delay <= 0 {
 				display.line(ansiYellow, "↻ Retrying with preserved changes...")
-			} else if waitRetryDelay(out, delay) {
+			} else if waitRetryDelay(d, out, delay) {
 				return nil, taskExitErr(sel, ExitInterrupted, "interrupted")
 			}
 			continue

@@ -783,6 +783,9 @@ func TestRunTaskBookkeepingOrder(t *testing.T) {
 type execFixture struct {
 	root     string
 	tasksDir string
+	// d, when set, is the per-test Deps from newTestDeps (parallel-safe
+	// isolation). Nil means the legacy t.Setenv fixture path.
+	d *Deps
 }
 
 // demoDir returns the storage directory of the fixture's "demo" Task set.
@@ -834,11 +837,38 @@ func setupExecutorFixture(t *testing.T, interactive bool) *execFixture {
 	return &execFixture{root: root, tasksDir: tasksDir}
 }
 
+// setupExecutorFixtureIsolated is the parallel-safe executor fixture: store
+// isolation rides newTestDeps (no t.Setenv). Prefer this for newly migrated
+// families (ADR-0145).
+func setupExecutorFixtureIsolated(t *testing.T) *execFixture {
+	t.Helper()
+	d := newTestDeps(t)
+	root := t.TempDir()
+	initExecutorGitRepo(t, root)
+	id, err := ResolveRepositoryIdentity(d, root)
+	if err != nil {
+		t.Fatalf("resolve storage: %v", err)
+	}
+	tasksDir := id.TasksDir
+	setupManifest(t, tasksDir, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	if _, err := RegisterWith(d, tasksDir, DefaultStatePathWith(d)); err != nil {
+		t.Fatal(err)
+	}
+	return &execFixture{root: root, tasksDir: tasksDir, d: d}
+}
+
 func (e *execFixture) deps() *Deps {
+	if e.d != nil {
+		cp := *e.d
+		return &cp
+	}
 	return &Deps{
-		FS:     deps.NewRealFileSystem(),
-		Git:    deps.NewRealGit(),
-		Runner: fakeAwareRunner{},
+		FS:             deps.NewRealFileSystem(),
+		Git:            deps.NewRealGit(),
+		Runner:         fakeAwareRunner{},
+		RetryDelayWait: testRetryDelayWaitHook,
 	}
 }
 

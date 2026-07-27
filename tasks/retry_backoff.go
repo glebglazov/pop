@@ -63,12 +63,9 @@ func defaultRetryWaiter() retryWaiter {
 	return retryWaiter{now: time.Now, sleep: time.Sleep}
 }
 
-// retryDelayWaitHook, when set by tests, replaces waitAttemptRetryDelay.
-var retryDelayWaitHook func(out io.Writer, delay time.Duration, waiter retryWaiter) bool
-
-func waitRetryDelay(out io.Writer, delay time.Duration) bool {
-	if retryDelayWaitHook != nil {
-		return retryDelayWaitHook(out, delay, defaultRetryWaiter())
+func waitRetryDelay(d *Deps, out io.Writer, delay time.Duration) bool {
+	if d != nil && d.RetryDelayWait != nil {
+		return d.RetryDelayWait(out, delay)
 	}
 	return waitAttemptRetryDelay(out, delay, defaultRetryWaiter())
 }

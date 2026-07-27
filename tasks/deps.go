@@ -51,6 +51,11 @@ type Deps struct {
 	RecoveryPollInterval         time.Duration
 	RecoveryPollImminentInterval time.Duration
 
+	// RetryDelayWait, when set, replaces the real attempt-retry countdown sleep
+	// (waitAttemptRetryDelay). Nil keeps production behaviour. Tests inject a
+	// no-sleep hook so retries advance without wall-clock waits (ADR-0145).
+	RetryDelayWait func(out io.Writer, delay time.Duration) bool
+
 	// store is the lazily-opened, process-cached execution-state store handle
 	// holder. DefaultDeps pre-allocates it so production copies of Deps share one
 	// handle; a Deps built from a bare literal (tests) gets its holder lazily on

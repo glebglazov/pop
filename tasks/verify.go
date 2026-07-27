@@ -822,7 +822,7 @@ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, t
 					if out != nil {
 						outputFor(out).line(ansiYellow, "↻ Retrying with preserved changes...")
 					}
-				} else if waitRetryDelay(out, delay) {
+				} else if waitRetryDelay(d, out, delay) {
 					return "", exitErr(ExitInterrupted, "interrupted")
 				}
 				continue

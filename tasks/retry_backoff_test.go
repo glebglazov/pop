@@ -12,6 +12,7 @@ import (
 )
 
 func TestAttemptRetryDelay(t *testing.T) {
+	t.Parallel()
 	delays := []time.Duration{time.Minute, 5 * time.Minute, 15 * time.Minute}
 	tests := []struct {
 		failedAttempt int
@@ -33,6 +34,7 @@ func TestAttemptRetryDelay(t *testing.T) {
 }
 
 func TestResolveImplementMaxTries(t *testing.T) {
+	t.Parallel()
 	five := 5
 	ten := 10
 	cfg := &config.Config{Task: &config.TasksConfig{
@@ -58,6 +60,7 @@ func TestResolveImplementMaxTries(t *testing.T) {
 }
 
 func TestResolveVerifyMaxTries(t *testing.T) {
+	t.Parallel()
 	root := 4
 	verify := 6
 	cfg := &config.Config{Task: &config.TasksConfig{
@@ -76,6 +79,7 @@ func TestResolveVerifyMaxTries(t *testing.T) {
 }
 
 func TestResolveAttemptRetryDelaysFromConfig(t *testing.T) {
+	t.Parallel()
 	got, err := resolveAttemptRetryDelays(&config.Config{Task: &config.TasksConfig{
 		AttemptRetryDelays: []string{},
 	}})
@@ -97,6 +101,7 @@ func TestResolveAttemptRetryDelaysFromConfig(t *testing.T) {
 }
 
 func TestWaitAttemptRetryDelayCompletes(t *testing.T) {
+	t.Parallel()
 	var slept atomic.Int64
 	now := time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC)
 	waiter := retryWaiter{
@@ -119,16 +124,17 @@ func TestWaitAttemptRetryDelayCompletes(t *testing.T) {
 }
 
 func TestRunTaskInterruptedDuringRetryWait(t *testing.T) {
-	env := setupExecutorFixture(t, false)
+	t.Parallel()
+	env := setupExecutorFixtureIsolated(t)
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{
 		checkTask:    true,
 		skipSentinel: true,
 	})
 
-	retryDelayWaitHook = func(out io.Writer, delay time.Duration, _ retryWaiter) bool {
+	d := env.deps()
+	d.RetryDelayWait = func(out io.Writer, delay time.Duration) bool {
 		return true
 	}
-	t.Cleanup(func() { retryDelayWaitHook = testRetryDelayWaitHook })
 
 	loadConfig := func(string) (*config.Config, error) {
 		return &config.Config{Task: &config.TasksConfig{
@@ -140,13 +146,14 @@ func TestRunTaskInterruptedDuringRetryWait(t *testing.T) {
 	opts.MaxTries = 2
 	opts.Output = io.Discard
 
-	_, err := RunTaskWith(env.deps(), nil, loadConfig, opts)
+	_, err := RunTaskWith(d, nil, loadConfig, opts)
 	assertExitCode(t, err, ExitInterrupted)
 	assertTaskOpen(t, env, "01-a")
 }
 
 func TestRunTaskInstantRetriesWithEmptyDelayList(t *testing.T) {
-	env := setupExecutorFixture(t, false)
+	t.Parallel()
+	env := setupExecutorFixtureIsolated(t)
 	agent := writeAttemptAgent(t, env.root, []attemptScript{
 		{checkTask: true, skipSentinel: true},
 		{checkTask: true, summary: "done on retry"},
@@ -182,7 +189,8 @@ func TestRunTaskInstantRetriesWithEmptyDelayList(t *testing.T) {
 }
 
 func TestRunTaskConfigMaxTriesWithoutExplicitFlag(t *testing.T) {
-	env := setupExecutorFixture(t, false)
+	t.Parallel()
+	env := setupExecutorFixtureIsolated(t)
 	var calls int32
 	runner := &countingRunner{t: t, calls: &calls, exitCode: 1}
 	d := env.deps()
