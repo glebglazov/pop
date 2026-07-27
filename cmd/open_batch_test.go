@@ -11,6 +11,11 @@ import (
 	"github.com/glebglazov/pop/ui"
 )
 
+// Smoke layer only (ADR-0144): one happy-path test proves the confirm→apply→
+// persist wiring, plus the cmd-only non-interactive guard. The three-way-split
+// eligibility, cancel, and empty-selection breadth lives at the tasks domain
+// twin (tasks/reset_batch_test.go).
+
 // writeOpenTaskThoughts writes a demo set with a mix of statuses so the `open`
 // three-way split (checkable / locked-at-target / inert) is exercised.
 func writeOpenTaskThoughts(t *testing.T, tasksDir string) {
@@ -46,25 +51,6 @@ func setupOpenTaskCmdFixture(t *testing.T) string {
 	return root
 }
 
-func TestOpenDispatchByTargetShape(t *testing.T) {
-	// open shares implement's shape dispatch (ADR 0020): a ".md" reference is
-	// the single-task path; bare <set> and the <set>/ synonym open the
-	// Multi-task selection.
-	cases := []struct {
-		target   string
-		wantFile bool
-	}{
-		{"demo", false},
-		{"demo/", false},
-		{"demo/01-a.md", true},
-	}
-	for _, c := range cases {
-		if got := isTaskFileTarget(c.target); got != c.wantFile {
-			t.Errorf("isTaskFileTarget(%q) = %v, want %v", c.target, got, c.wantFile)
-		}
-	}
-}
-
 func TestOpenTasksCmdNonInteractiveRejected(t *testing.T) {
 	setupOpenTaskCmdFixture(t)
 	resetTaskFlags()
@@ -81,33 +67,6 @@ func TestOpenTasksCmdNonInteractiveRejected(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "demo/<file>.md") {
 		t.Fatalf("err should point at the file-reference form: %v", err)
-	}
-}
-
-func TestOpenTasksCmdEligibilityAndLockRendering(t *testing.T) {
-	setupOpenTaskCmdFixture(t)
-	resetTaskFlags()
-	t.Cleanup(resetTaskFlags)
-	stubCompleteInteractive(t, true)
-
-	var items []ui.MultiSelectItem
-	// Cancel so nothing is written; we only inspect the offered rows.
-	stubCompleteSelect(t, ui.MultiSelectResult{Confirmed: false}, &items)
-
-	if err := runTaskOpenTasksWith(tasks.DefaultDeps(), &bytes.Buffer{}, strings.NewReader(""), "demo"); err != nil {
-		t.Fatalf("open selection load failed: %v", err)
-	}
-
-	if len(items) != 4 {
-		t.Fatalf("items = %d, want 4", len(items))
-	}
-	// Failed/Skipped/Done all checkable (ADR-0053).
-	if items[0].Locked || items[1].Locked || items[3].Locked {
-		t.Fatalf("failed/skipped/done rows should be checkable: %+v %+v %+v", items[0], items[1], items[3])
-	}
-	// Open is the only locked-at-target row, with a mark.
-	if !items[2].Locked || items[2].LockedMark == "" {
-		t.Fatalf("open row should be locked-at-target with a mark: %+v", items[2])
 	}
 }
 
@@ -140,49 +99,5 @@ func TestOpenTasksCmdConfirmAppliesBatch(t *testing.T) {
 	// Both reopened; the prior failed/skipped statuses are gone.
 	if strings.Contains(string(data), `"failed"`) || strings.Contains(string(data), `"skipped"`) {
 		t.Fatalf("reopened tasks should no longer be failed/skipped:\n%s", data)
-	}
-}
-
-func TestOpenTasksCmdCancelNoWrites(t *testing.T) {
-	root := setupOpenTaskCmdFixture(t)
-	resetTaskFlags()
-	t.Cleanup(resetTaskFlags)
-	stubCompleteInteractive(t, true)
-	stubCompleteSelect(t, ui.MultiSelectResult{Confirmed: false}, nil)
-
-	before, _ := os.ReadFile(filepath.Join(runTaskCmdDemoDir(t, root), "index.json"))
-
-	var stdout bytes.Buffer
-	if err := runTaskOpenTasksWith(tasks.DefaultDeps(), &stdout, strings.NewReader(""), "demo"); err != nil {
-		t.Fatalf("cancel should be a clean exit: %v", err)
-	}
-	if stdout.Len() != 0 {
-		t.Fatalf("cancel should render nothing, got:\n%s", stdout.String())
-	}
-	after, _ := os.ReadFile(filepath.Join(runTaskCmdDemoDir(t, root), "index.json"))
-	if string(before) != string(after) {
-		t.Fatalf("cancel must not write:\nbefore:%s\nafter:%s", before, after)
-	}
-}
-
-func TestOpenTasksCmdEmptySelectionNoop(t *testing.T) {
-	root := setupOpenTaskCmdFixture(t)
-	resetTaskFlags()
-	t.Cleanup(resetTaskFlags)
-	stubCompleteInteractive(t, true)
-	stubCompleteSelect(t, ui.MultiSelectResult{Confirmed: true, Checked: nil}, nil)
-
-	before, _ := os.ReadFile(filepath.Join(runTaskCmdDemoDir(t, root), "index.json"))
-
-	var stdout bytes.Buffer
-	if err := runTaskOpenTasksWith(tasks.DefaultDeps(), &stdout, strings.NewReader(""), "demo"); err != nil {
-		t.Fatalf("empty selection should be a clean no-op: %v", err)
-	}
-	if stdout.Len() != 0 {
-		t.Fatalf("empty selection should render nothing, got:\n%s", stdout.String())
-	}
-	after, _ := os.ReadFile(filepath.Join(runTaskCmdDemoDir(t, root), "index.json"))
-	if string(before) != string(after) {
-		t.Fatalf("empty selection must not write:\nbefore:%s\nafter:%s", before, after)
 	}
 }

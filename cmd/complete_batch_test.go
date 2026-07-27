@@ -12,6 +12,12 @@ import (
 	"github.com/glebglazov/pop/ui"
 )
 
+// Smoke layer only (ADR-0144): one happy-path test proves the confirm→apply→
+// persist wiring, plus the cmd-only non-interactive guard. The eligibility,
+// cancel, and empty-selection breadth lives at the tasks domain twin
+// (tasks/complete_batch_test.go). The stubCompleteInteractive/stubCompleteSelect
+// helpers below are shared with the skip and open batch smoke tests.
+
 // stubCompleteInteractive forces the interactive-terminal check for the test.
 func stubCompleteInteractive(t *testing.T, interactive bool) {
 	t.Helper()
@@ -31,25 +37,6 @@ func stubCompleteSelect(t *testing.T, res ui.MultiSelectResult, capture *[]ui.Mu
 		return res, nil
 	}
 	t.Cleanup(func() { runTaskMultiSelect = prev })
-}
-
-func TestCompleteDispatchByTargetShape(t *testing.T) {
-	// complete shares implement's shape dispatch (ADR 0020): a ".md" reference
-	// is the single-task path; bare <set> and the <set>/ synonym open the
-	// Multi-task selection.
-	cases := []struct {
-		target   string
-		wantFile bool
-	}{
-		{"demo", false},
-		{"demo/", false},
-		{"demo/01-a.md", true},
-	}
-	for _, c := range cases {
-		if got := isTaskFileTarget(c.target); got != c.wantFile {
-			t.Errorf("isTaskFileTarget(%q) = %v, want %v", c.target, got, c.wantFile)
-		}
-	}
 }
 
 func TestCompleteTasksCmdNonInteractiveRejected(t *testing.T) {
@@ -98,45 +85,5 @@ func TestCompleteTasksCmdConfirmAppliesBatch(t *testing.T) {
 	}
 	if !strings.Contains(string(data), `"status": "done"`) {
 		t.Fatalf("task not marked done:\n%s", data)
-	}
-}
-
-func TestCompleteTasksCmdCancelNoWrites(t *testing.T) {
-	root := setupRunTaskCmdFixture(t)
-	resetTaskFlags()
-	t.Cleanup(resetTaskFlags)
-	stubCompleteInteractive(t, true)
-	stubCompleteSelect(t, ui.MultiSelectResult{Confirmed: false}, nil)
-
-	var stdout bytes.Buffer
-	if err := runTaskCompleteTasksWith(tasks.DefaultDeps(), &stdout, strings.NewReader(""), "demo"); err != nil {
-		t.Fatalf("cancel should be a clean exit: %v", err)
-	}
-	if stdout.Len() != 0 {
-		t.Fatalf("cancel should render nothing, got:\n%s", stdout.String())
-	}
-	data, _ := os.ReadFile(filepath.Join(runTaskCmdDemoDir(t, root), "index.json"))
-	if strings.Contains(string(data), `"status": "done"`) {
-		t.Fatalf("cancel must not write:\n%s", data)
-	}
-}
-
-func TestCompleteTasksCmdEmptySelectionNoop(t *testing.T) {
-	root := setupRunTaskCmdFixture(t)
-	resetTaskFlags()
-	t.Cleanup(resetTaskFlags)
-	stubCompleteInteractive(t, true)
-	stubCompleteSelect(t, ui.MultiSelectResult{Confirmed: true, Checked: nil}, nil)
-
-	var stdout bytes.Buffer
-	if err := runTaskCompleteTasksWith(tasks.DefaultDeps(), &stdout, strings.NewReader(""), "demo"); err != nil {
-		t.Fatalf("empty selection should be a clean no-op: %v", err)
-	}
-	if stdout.Len() != 0 {
-		t.Fatalf("empty selection should render nothing, got:\n%s", stdout.String())
-	}
-	data, _ := os.ReadFile(filepath.Join(runTaskCmdDemoDir(t, root), "index.json"))
-	if strings.Contains(string(data), `"status": "done"`) {
-		t.Fatalf("empty selection must not write:\n%s", data)
 	}
 }
