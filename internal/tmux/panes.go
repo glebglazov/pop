@@ -41,6 +41,30 @@ func (t *realTmux) IsActivePane(paneID string) bool {
 	return out == "1 1 1"
 }
 
+// PaneCommands maps every live pane id to its current foreground command
+// across all sessions.
+func (t *realTmux) PaneCommands() (map[string]string, error) {
+	out, err := t.run.output("list-panes", "-a", "-F", "#{pane_id} #{pane_current_command}")
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]string)
+	for _, line := range strings.Split(out, "\n") {
+		parts := strings.SplitN(line, " ", 2)
+		if len(parts) == 2 {
+			result[parts[0]] = parts[1]
+		}
+	}
+	return result, nil
+}
+
+// CapturePreview captures a pane's visible content plus 50 lines of scrollback
+// with escape sequences preserved (capture-pane -e), for coloured preview
+// display. It differs from CapturePane, which strips ANSI codes.
+func (t *realTmux) CapturePreview(paneID string) (string, error) {
+	return t.run.output("capture-pane", "-p", "-e", "-S", "-50", "-t", paneID)
+}
+
 // LivePanes lists the pane ids that exist across every session (a liveness
 // poll). An error means liveness could not be determined — callers must not
 // treat it as "no panes alive".

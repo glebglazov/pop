@@ -84,6 +84,49 @@ func TestIsActivePane(t *testing.T) {
 	}
 }
 
+func TestPaneCommandsBuildsArgsAndParses(t *testing.T) {
+	r := &recordingRunner{out: "%1 zsh\n%2 node\n%3 vim"}
+	tm := &realTmux{run: r}
+
+	commands, err := tm.PaneCommands()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	wantArgs := [][]string{{"list-panes", "-a", "-F", "#{pane_id} #{pane_current_command}"}}
+	if !reflect.DeepEqual(r.calls, wantArgs) {
+		t.Fatalf("args = %v, want %v", r.calls, wantArgs)
+	}
+	want := map[string]string{"%1": "zsh", "%2": "node", "%3": "vim"}
+	if !reflect.DeepEqual(commands, want) {
+		t.Fatalf("commands = %v, want %v", commands, want)
+	}
+}
+
+func TestPaneCommandsPropagatesRunnerError(t *testing.T) {
+	tm := &realTmux{run: &recordingRunner{err: fmt.Errorf("no server")}}
+	if _, err := tm.PaneCommands(); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestCapturePreviewBuildsArgs(t *testing.T) {
+	r := &recordingRunner{out: "line 1\nline 2"}
+	tm := &realTmux{run: r}
+
+	out, err := tm.CapturePreview("%5")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// -e preserves escape sequences for coloured preview (vs CapturePane).
+	wantArgs := [][]string{{"capture-pane", "-p", "-e", "-S", "-50", "-t", "%5"}}
+	if !reflect.DeepEqual(r.calls, wantArgs) {
+		t.Fatalf("args = %v, want %v", r.calls, wantArgs)
+	}
+	if out != "line 1\nline 2" {
+		t.Fatalf("out = %q", out)
+	}
+}
+
 func TestLivePanesBuildsArgsAndParses(t *testing.T) {
 	r := &recordingRunner{out: "%1\n%2\n%3"}
 	tm := &realTmux{run: r}

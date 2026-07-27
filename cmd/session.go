@@ -29,11 +29,11 @@ const (
 )
 
 func currentTmuxSession() string {
-	return currentTmuxSessionWith(defaultTmux)
+	return currentTmuxSessionWith(defaultTmuxMod)
 }
 
-func currentTmuxSessionWith(tmux deps.Tmux) string {
-	out, err := tmux.Command("display-message", "-p", "#S")
+func currentTmuxSessionWith(mod tmuxmod.Tmux) string {
+	out, err := mod.CurrentSession()
 	if err != nil {
 		debug.Error("currentTmuxSession: %v", err)
 		return ""
@@ -60,27 +60,11 @@ func switchToTmuxTargetWith(mod tmuxmod.Tmux, target string) error {
 
 // switchToTmuxTargetAndZoom switches to a tmux pane and zooms it
 func switchToTmuxTargetAndZoom(target string) error {
-	return switchToTmuxTargetAndZoomWith(defaultTmux, defaultTmuxMod, target)
+	return switchToTmuxTargetAndZoomWith(defaultTmuxMod, target)
 }
 
-func switchToTmuxTargetAndZoomWith(tmux deps.Tmux, mod tmuxmod.Tmux, target string) error {
-	if mod.InTmux() {
-		// Single tmux invocation: switch to pane and zoom it if not already zoomed
-		_, err := tmux.Command(
-			"switch-client", "-t", target, ";",
-			"if-shell", "-F", "#{!=:#{window_zoomed_flag},1}",
-			"resize-pane -Z",
-		)
-		return err
-	}
-	// Outside tmux: zoom before attaching since attach takes over stdio
-	if _, err := tmux.Command(
-		"if-shell", "-t", target, "-F", "#{!=:#{window_zoomed_flag},1}",
-		"resize-pane -Z",
-	); err != nil {
-		debug.Error("switchToTmuxTargetAndZoom: pre-attach zoom: %v", err)
-	}
-	return tmuxmod.SwitchTarget(mod, target)
+func switchToTmuxTargetAndZoomWith(mod tmuxmod.Tmux, target string) error {
+	return tmuxmod.SwitchAndZoom(mod, target)
 }
 
 // loadMonitorState returns the monitor state if the daemon is running, or nil otherwise
@@ -130,22 +114,15 @@ func monitorAttentionSessionsWith(d *monitor.Deps) map[string]bool {
 
 // tmuxPaneCommands returns a map of pane ID → current command for all panes
 func tmuxPaneCommands() map[string]string {
-	return tmuxPaneCommandsWith(defaultTmux)
+	return tmuxPaneCommandsWith(defaultTmuxMod)
 }
 
-func tmuxPaneCommandsWith(tmux deps.Tmux) map[string]string {
-	out, err := tmux.Command("list-panes", "-a", "-F", "#{pane_id} #{pane_current_command}")
+func tmuxPaneCommandsWith(mod tmuxmod.Tmux) map[string]string {
+	commands, err := mod.PaneCommands()
 	if err != nil {
 		return nil
 	}
-	result := make(map[string]string)
-	for _, line := range strings.Split(out, "\n") {
-		parts := strings.SplitN(line, " ", 2)
-		if len(parts) == 2 {
-			result[parts[0]] = parts[1]
-		}
-	}
-	return result
+	return commands
 }
 
 // tmuxPaneTopics returns a map of pane ID → Topic for all panes. The Topic is
@@ -204,11 +181,11 @@ func historyEntrySessionName(path string) string {
 }
 
 func capturePanePreview(paneID string) string {
-	return capturePanePreviewWith(defaultTmux, paneID)
+	return capturePanePreviewWith(defaultTmuxMod, paneID)
 }
 
-func capturePanePreviewWith(tmux deps.Tmux, paneID string) string {
-	out, err := tmux.Command("capture-pane", "-p", "-e", "-S", "-50", "-t", paneID)
+func capturePanePreviewWith(mod tmuxmod.Tmux, paneID string) string {
+	out, err := mod.CapturePreview(paneID)
 	if err != nil {
 		debug.Error("capturePanePreview %s: %v", paneID, err)
 		return ""

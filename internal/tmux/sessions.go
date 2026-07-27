@@ -22,6 +22,13 @@ func (t *realTmux) CurrentSession() (string, error) {
 	return t.run.output("display-message", "-p", "#S")
 }
 
+// CurrentPane returns the pane id of the active pane in the client displaying
+// the caller. A tmux error (e.g. no attached client) surfaces so the caller
+// can treat it as "no pane".
+func (t *realTmux) CurrentPane() (string, error) {
+	return t.run.output("display-message", "-p", "#{pane_id}")
+}
+
 // parseSessions turns tmux's list-sessions output into typed structs. Lines
 // are "name\tactivity"; the tab delimiter keeps session names containing
 // spaces (e.g. a disambiguated "rails (work)") intact.

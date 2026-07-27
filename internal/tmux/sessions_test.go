@@ -51,6 +51,23 @@ func TestSessionsPropagatesRunnerError(t *testing.T) {
 	}
 }
 
+func TestCurrentPaneBuildsArgs(t *testing.T) {
+	r := &recordingRunner{out: "%7"}
+	tm := &realTmux{run: r}
+
+	pane, err := tm.CurrentPane()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	wantArgs := [][]string{{"display-message", "-p", "#{pane_id}"}}
+	if !reflect.DeepEqual(r.calls, wantArgs) {
+		t.Fatalf("args = %v, want %v", r.calls, wantArgs)
+	}
+	if pane != "%7" {
+		t.Fatalf("pane = %q, want %%7", pane)
+	}
+}
+
 func TestSessionsSkipsMalformedLines(t *testing.T) {
 	tm := &realTmux{run: &recordingRunner{out: "good\t100\nnotabhere\nother\t200"}}
 

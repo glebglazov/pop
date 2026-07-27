@@ -163,8 +163,8 @@ func runTemplateApplyWith(d templateRuntimeDeps, templates []config.Workbench, n
 		return fmt.Errorf("session template %q: %w", name, err)
 	}
 
-	session := currentTmuxSessionWith(d.Tmux)
-	if session == "" {
+	session, err := d.Tmux.Command("display-message", "-p", "#S")
+	if err != nil || session == "" {
 		return fmt.Errorf("not inside a tmux session")
 	}
 	dir, err := d.Getwd()

@@ -174,7 +174,7 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 			if paneID == "" {
 				return fmt.Errorf("yank target pane not set — pass --yank-target or run inside tmux")
 			}
-			return yankPathToPaneWith(defaultTmux, paneID, result.Selected.Path)
+			return yankPathToPaneWith(defaultTmuxMod, paneID, result.Selected.Path)
 
 		case ui.ActionUserDefinedCommand:
 			if result.UserDefinedCommand != nil && result.Selected != nil {

@@ -54,6 +54,27 @@ type Fake struct {
 	CurrentSessionName string
 	CurrentSessionErr  error
 
+	// CurrentPaneID / CurrentPaneErr drive CurrentPane.
+	CurrentPaneID  string
+	CurrentPaneErr error
+
+	// PaneCommandMap is the pane id -> current command map returned by
+	// PaneCommands.
+	PaneCommandMap map[string]string
+	// PreviewContent is the text CapturePreview returns per pane id.
+	PreviewContent map[string]string
+	// CapturePreviewFunc, when set, replaces CapturePreview entirely — used to
+	// inject failures.
+	CapturePreviewFunc func(paneID string) (string, error)
+
+	// Zoomed maps a switch target to whether its window is currently zoomed.
+	// WindowZoomed reads it; ZoomPane toggles it, so an already-zoomed target
+	// left alone by SwitchAndZoom stays zoomed.
+	Zoomed map[string]bool
+	// SelectedWindows records "session:window" targets SelectWindow selected,
+	// in order.
+	SelectedWindows []string
+
 	// AgentWindows maps a session name to its agent-window panes in order. The
 	// agent-window verbs (HasAgentWindow, AgentPanes, FindAgentPane,
 	// NewAgentWindow, SplitAgentPane, RetileAgentWindow, KillPane) read and
@@ -212,6 +233,36 @@ func (f *Fake) CurrentSession() (string, error) {
 		return "", f.CurrentSessionErr
 	}
 	return f.CurrentSessionName, nil
+}
+
+func (f *Fake) CurrentPane() (string, error) {
+	if f.CurrentPaneErr != nil {
+		return "", f.CurrentPaneErr
+	}
+	return f.CurrentPaneID, nil
+}
+
+func (f *Fake) PaneCommands() (map[string]string, error) {
+	return f.PaneCommandMap, nil
+}
+
+func (f *Fake) CapturePreview(paneID string) (string, error) {
+	if f.CapturePreviewFunc != nil {
+		return f.CapturePreviewFunc(paneID)
+	}
+	return f.PreviewContent[paneID], nil
+}
+
+func (f *Fake) WindowZoomed(target string) (bool, error) {
+	return f.Zoomed[target], nil
+}
+
+func (f *Fake) ZoomPane(target string) error {
+	if f.Zoomed == nil {
+		f.Zoomed = map[string]bool{}
+	}
+	f.Zoomed[target] = !f.Zoomed[target]
+	return nil
 }
 
 // --- agentic panes ---
@@ -429,6 +480,11 @@ func (f *Fake) WindowPanes(session, name string) ([]string, error) {
 
 func (f *Fake) SelectPane(paneID string) error {
 	f.Selected = append(f.Selected, paneID)
+	return nil
+}
+
+func (f *Fake) SelectWindow(session, name string) error {
+	f.SelectedWindows = append(f.SelectedWindows, session+":"+name)
 	return nil
 }
 

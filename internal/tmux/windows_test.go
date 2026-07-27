@@ -107,6 +107,19 @@ func TestSelectPaneBuildsArgs(t *testing.T) {
 	}
 }
 
+func TestSelectWindowBuildsArgs(t *testing.T) {
+	r := &recordingRunner{}
+	tm := &realTmux{run: r}
+
+	if err := tm.SelectWindow("mysession", "myproject"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	wantArgs := [][]string{{"select-window", "-t", "mysession:myproject"}}
+	if !reflect.DeepEqual(r.calls, wantArgs) {
+		t.Fatalf("args = %v, want %v", r.calls, wantArgs)
+	}
+}
+
 func TestWindowExistsPropagatesRunnerError(t *testing.T) {
 	tm := &realTmux{run: &recordingRunner{err: fmt.Errorf("no server")}}
 	if _, err := tm.WindowExists("proj", "w"); err == nil {

@@ -54,6 +54,24 @@ type Tmux interface {
 	// CurrentSession returns the session name of the client displaying the
 	// caller (display-message -p #S). An empty result means no session.
 	CurrentSession() (string, error)
+	// CurrentPane returns the pane id of the active pane in the client
+	// displaying the caller (display-message -p #{pane_id}). An error means no
+	// pane (e.g. no attached client).
+	CurrentPane() (string, error)
+
+	// PaneCommands maps every live pane id to its current foreground command,
+	// across all sessions (list-panes -a).
+	PaneCommands() (map[string]string, error)
+	// CapturePreview captures a pane's visible content plus 50 lines of
+	// scrollback with escape sequences preserved (capture-pane -e), for
+	// coloured preview display. It differs from CapturePane, which strips them.
+	CapturePreview(paneID string) (string, error)
+
+	// WindowZoomed reports whether target's window is currently zoomed
+	// (#{window_zoomed_flag}).
+	WindowZoomed(target string) (bool, error)
+	// ZoomPane toggles the zoom state of target's window (resize-pane -Z).
+	ZoomPane(target string) error
 
 	// --- generic windows / panes (spawn composites: EnsureWindow, EnsureTaggedPane) ---
 
@@ -71,6 +89,8 @@ type Tmux interface {
 	WindowPanes(session, name string) ([]string, error)
 	// SelectPane makes paneID the active pane in its window.
 	SelectPane(paneID string) error
+	// SelectWindow makes session's window name the current window.
+	SelectWindow(session, name string) error
 
 	// --- tagged panes (@pop_routine / @pop_set; the shared drain window) ---
 

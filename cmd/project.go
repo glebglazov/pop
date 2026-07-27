@@ -166,27 +166,32 @@ func DefaultProjectDeps() *ProjectDeps {
 		SessionActivity:   history.TmuxSessionActivity,
 		AttentionSessions: monitorAttentionSessions,
 
-		// Session-lifecycle side effects run through the tmux module (ADR-0142);
-		// the deps.Tmux the picker threads is ignored by these adapters, which
-		// use the module handle. Command-based verbs (OpenWindow, SendCDToPane,
-		// YankPathToPane) still take deps.Tmux until their migration.
+		// Tmux side effects run through the tmux module (ADR-0142); the deps.Tmux
+		// the picker threads is ignored by these adapters, which use the module
+		// handle.
 		OpenSession: func(_ deps.Tmux, item *ui.Item) error {
 			return openTmuxSessionWith(defaultTmuxMod, item)
 		},
 		OpenSessionWithWorkbench: func(tmux deps.Tmux, item *ui.Item, workbenchName string) error {
 			return openTmuxSessionWithWorkbenchWith(tmux, defaultTmuxMod, item, workbenchName)
 		},
-		OpenWindow: openTmuxWindowWith,
+		OpenWindow: func(_ deps.Tmux, item *ui.Item) error {
+			return openTmuxWindowWith(defaultTmuxMod, item)
+		},
 		KillSession: func(_ deps.Tmux, name string) {
 			killTmuxSessionWith(defaultTmuxMod, name)
 		},
-		SendCDToPane:   sendCDToPaneWith,
-		YankPathToPane: yankPathToPaneWith,
+		SendCDToPane: func(_ deps.Tmux, paneID, path string) error {
+			return sendCDToPaneWith(defaultTmuxMod, paneID, path)
+		},
+		YankPathToPane: func(_ deps.Tmux, paneID, path string) error {
+			return yankPathToPaneWith(defaultTmuxMod, paneID, path)
+		},
 		SwitchToTarget: func(_ deps.Tmux, target string) error {
 			return switchToTmuxTargetWith(defaultTmuxMod, target)
 		},
-		SwitchAndZoom: func(tmux deps.Tmux, target string) error {
-			return switchToTmuxTargetAndZoomWith(tmux, defaultTmuxMod, target)
+		SwitchAndZoom: func(_ deps.Tmux, target string) error {
+			return switchToTmuxTargetAndZoomWith(defaultTmuxMod, target)
 		},
 		RunCustomCommand:         executeProjectCustomCommand,
 		EnsureSystemState:        ensureSystemState,
@@ -208,7 +213,7 @@ func DefaultProjectDeps() *ProjectDeps {
 		},
 
 		InTmux:         func() bool { return os.Getenv("TMUX") != "" },
-		CurrentSession: currentTmuxSessionWith,
+		CurrentSession: func(_ deps.Tmux) string { return currentTmuxSessionWith(defaultTmuxMod) },
 	}
 }
 
@@ -791,31 +796,31 @@ func openTmuxSessionWithWorkbenchWith(tmux deps.Tmux, mod tmuxmod.Tmux, item *ui
 }
 
 func openTmuxWindow(item *ui.Item) error {
-	return openTmuxWindowWith(defaultTmux, item)
+	return openTmuxWindowWith(defaultTmuxMod, item)
 }
 
-func openTmuxWindowWith(tmux deps.Tmux, item *ui.Item) error {
+func openTmuxWindowWith(mod tmuxmod.Tmux, item *ui.Item) error {
 	windowName := sanitizeSessionName(item.Name)
 
-	session, err := tmux.Command("display-message", "-p", "#S")
+	session, err := mod.CurrentSession()
 	if err != nil {
 		return fmt.Errorf("failed to get current tmux session: %w", err)
 	}
 
-	listOut, err := tmux.Command("list-windows", "-t", session, "-F", "#{window_name}")
+	exists, err := mod.WindowExists(session, windowName)
 	if err != nil {
 		return fmt.Errorf("failed to list tmux windows: %w", err)
 	}
-
-	for _, name := range strings.Split(listOut, "\n") {
-		if name == windowName {
-			_, err := tmux.Command("select-window", "-t", session+":"+windowName)
-			return err
-		}
+	if exists {
+		return mod.SelectWindow(session, windowName)
 	}
 
-	_, err = tmux.Command("new-window", "-t", session, "-n", windowName, "-c", item.Path)
-	return err
+	// Create the window (detached, so NewWindow does not steal focus) then
+	// select it — the same end state as an attached new-window.
+	if _, err := mod.NewWindow(session, windowName, item.Path); err != nil {
+		return err
+	}
+	return mod.SelectWindow(session, windowName)
 }
 
 func sanitizeSessionName(name string) string {
@@ -856,17 +861,15 @@ func executeProjectCustomCommand(command string, item *ui.Item) {
 }
 
 func sendCDToPane(paneID, path string) error {
-	return sendCDToPaneWith(defaultTmux, paneID, path)
+	return sendCDToPaneWith(defaultTmuxMod, paneID, path)
 }
 
-func sendCDToPaneWith(tmux deps.Tmux, paneID, path string) error {
-	_, err := tmux.Command("send-keys", "-t", paneID, fmt.Sprintf("cd %q && clear", path), "Enter")
-	return err
+func sendCDToPaneWith(mod tmuxmod.Tmux, paneID, path string) error {
+	return mod.SendKeys(paneID, fmt.Sprintf("cd %q && clear", path), "Enter")
 }
 
-func yankPathToPaneWith(tmux deps.Tmux, paneID, path string) error {
-	_, err := tmux.Command("send-keys", "-t", paneID, path)
-	return err
+func yankPathToPaneWith(mod tmuxmod.Tmux, paneID, path string) error {
+	return mod.SendKeys(paneID, path)
 }
 
 // discoverManagedWorktreesWith walks the pop-managed worktrees root with

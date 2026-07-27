@@ -600,94 +600,57 @@ func TestOpenTmuxSessionWith(t *testing.T) {
 
 func TestOpenTmuxWindowWith(t *testing.T) {
 	t.Run("selects existing window", func(t *testing.T) {
-		var selectedWindow string
-		tmux := &deps.MockTmux{
-			CommandFunc: func(args ...string) (string, error) {
-				switch args[0] {
-				case "display-message":
-					return "mysession", nil
-				case "list-windows":
-					return "main\nmyproject\nlogs", nil
-				case "select-window":
-					selectedWindow = args[2]
-					return "", nil
-				}
-				return "", nil
+		mod := &tmuxtest.Fake{
+			CurrentSessionName: "mysession",
+			Windows: map[string]map[string][]string{
+				"mysession": {"main": {"%1"}, "myproject": {"%2"}, "logs": {"%3"}},
 			},
 		}
 
 		item := &ui.Item{Name: "myproject", Path: "/home/user/myproject"}
-		err := openTmuxWindowWith(tmux, item)
-		if err != nil {
+		if err := openTmuxWindowWith(mod, item); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if selectedWindow != "mysession:myproject" {
-			t.Errorf("selected window = %q, want %q", selectedWindow, "mysession:myproject")
+		if len(mod.SelectedWindows) != 1 || mod.SelectedWindows[0] != "mysession:myproject" {
+			t.Errorf("selected windows = %v, want [mysession:myproject]", mod.SelectedWindows)
 		}
 	})
 
 	t.Run("creates new window when not found", func(t *testing.T) {
-		var newWindowName, newWindowDir string
-		tmux := &deps.MockTmux{
-			CommandFunc: func(args ...string) (string, error) {
-				switch args[0] {
-				case "display-message":
-					return "mysession", nil
-				case "list-windows":
-					return "main\nlogs", nil // no "myproject"
-				case "new-window":
-					for i, a := range args {
-						if a == "-n" && i+1 < len(args) {
-							newWindowName = args[i+1]
-						}
-						if a == "-c" && i+1 < len(args) {
-							newWindowDir = args[i+1]
-						}
-					}
-					return "", nil
-				}
-				return "", nil
+		mod := &tmuxtest.Fake{
+			CurrentSessionName: "mysession",
+			Windows: map[string]map[string][]string{
+				"mysession": {"main": {"%1"}, "logs": {"%3"}}, // no "myproject"
 			},
 		}
 
 		item := &ui.Item{Name: "myproject", Path: "/home/user/myproject"}
-		err := openTmuxWindowWith(tmux, item)
-		if err != nil {
+		if err := openTmuxWindowWith(mod, item); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if newWindowName != "myproject" {
-			t.Errorf("window name = %q, want %q", newWindowName, "myproject")
+		if _, ok := mod.Windows["mysession"]["myproject"]; !ok {
+			t.Errorf("window myproject not created; windows = %v", mod.Windows["mysession"])
 		}
-		if newWindowDir != "/home/user/myproject" {
-			t.Errorf("window dir = %q, want %q", newWindowDir, "/home/user/myproject")
+		if len(mod.SelectedWindows) != 1 || mod.SelectedWindows[0] != "mysession:myproject" {
+			t.Errorf("selected windows = %v, want [mysession:myproject]", mod.SelectedWindows)
 		}
 	})
 
 	t.Run("sanitizes window name with dots", func(t *testing.T) {
-		var selectedWindow string
-		tmux := &deps.MockTmux{
-			CommandFunc: func(args ...string) (string, error) {
-				switch args[0] {
-				case "display-message":
-					return "mysession", nil
-				case "list-windows":
-					return "my_project", nil // sanitized name exists
-				case "select-window":
-					selectedWindow = args[2]
-					return "", nil
-				}
-				return "", nil
+		mod := &tmuxtest.Fake{
+			CurrentSessionName: "mysession",
+			Windows: map[string]map[string][]string{
+				"mysession": {"my_project": {"%2"}}, // sanitized name exists
 			},
 		}
 
 		item := &ui.Item{Name: "my.project", Path: "/home/user/my.project"}
-		err := openTmuxWindowWith(tmux, item)
-		if err != nil {
+		if err := openTmuxWindowWith(mod, item); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		// Name should be sanitized: dots → underscores
-		if selectedWindow != "mysession:my_project" {
-			t.Errorf("selected window = %q, want %q", selectedWindow, "mysession:my_project")
+		if len(mod.SelectedWindows) != 1 || mod.SelectedWindows[0] != "mysession:my_project" {
+			t.Errorf("selected windows = %v, want [mysession:my_project]", mod.SelectedWindows)
 		}
 	})
 }

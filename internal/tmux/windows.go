@@ -86,6 +86,12 @@ func (t *realTmux) SelectPane(paneID string) error {
 	return err
 }
 
+// SelectWindow makes session's window name the current window.
+func (t *realTmux) SelectWindow(session, name string) error {
+	_, err := t.run.output("select-window", "-t", windowTarget(session, name))
+	return err
+}
+
 // EnsureWindow ensures session (created detached at dir when absent) owns a
 // window named name, returning that window's target pane id and whether the
 // window was freshly created. Callers that run one command per named window

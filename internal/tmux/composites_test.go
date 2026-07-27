@@ -200,3 +200,52 @@ func TestFocusPaneSelectsThenSwitches(t *testing.T) {
 		t.Errorf("Switched = %v, want [%%5]", f.Switched)
 	}
 }
+
+// SwitchAndZoom preserves the zoom-only-if-not-zoomed behaviour and the
+// switch-vs-attach + zoom-order policy across the tmux boundary.
+
+func TestSwitchAndZoomInsideZoomsUnzoomedWindow(t *testing.T) {
+	f := &tmuxtest.Fake{Inside: true}
+
+	if err := tmux.SwitchAndZoom(f, "%5"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(f.Switched) != 1 || f.Switched[0] != "%5" {
+		t.Errorf("Switched = %v, want [%%5]", f.Switched)
+	}
+	if !f.Zoomed["%5"] {
+		t.Error("target window not zoomed")
+	}
+}
+
+func TestSwitchAndZoomLeavesZoomedWindowMaximized(t *testing.T) {
+	f := &tmuxtest.Fake{Inside: true, Zoomed: map[string]bool{"%5": true}}
+
+	if err := tmux.SwitchAndZoom(f, "%5"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(f.Switched) != 1 || f.Switched[0] != "%5" {
+		t.Errorf("Switched = %v, want [%%5]", f.Switched)
+	}
+	// An already-zoomed window must not be toggled back to a split layout.
+	if !f.Zoomed["%5"] {
+		t.Error("already-zoomed window was toggled off")
+	}
+}
+
+func TestSwitchAndZoomOutsideZoomsBeforeAttach(t *testing.T) {
+	f := &tmuxtest.Fake{Inside: false}
+
+	if err := tmux.SwitchAndZoom(f, "work"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(f.Attached) != 1 || f.Attached[0] != "work" {
+		t.Errorf("Attached = %v, want [work]", f.Attached)
+	}
+	if len(f.Switched) != 0 {
+		t.Errorf("Switched = %v, want none outside tmux", f.Switched)
+	}
+	if !f.Zoomed["work"] {
+		t.Error("target window not zoomed before attach")
+	}
+}

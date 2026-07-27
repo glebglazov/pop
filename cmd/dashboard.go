@@ -69,7 +69,7 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 	var currentPaneID, currentPaneSession string
 	if dashboardPick || cursorPosition == config.DashboardCursorCurrentRegistered || cursorPosition == config.DashboardCursorCurrentAny {
 		var err error
-		currentPaneID, err = defaultTmux.Command("display-message", "-p", "#{pane_id}")
+		currentPaneID, err = defaultTmuxMod.CurrentPane()
 		if err != nil {
 			if dashboardPick {
 				return fmt.Errorf("cannot determine current tmux session")

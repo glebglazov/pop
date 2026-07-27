@@ -263,27 +263,16 @@ func TestMonitorAttentionSessionsWith(t *testing.T) {
 
 func TestCurrentTmuxSessionWith(t *testing.T) {
 	t.Run("returns session name", func(t *testing.T) {
-		tmux := &deps.MockTmux{
-			CommandFunc: func(args ...string) (string, error) {
-				if args[0] == "display-message" {
-					return "my-session", nil
-				}
-				return "", nil
-			},
-		}
-		result := currentTmuxSessionWith(tmux)
+		mod := &tmuxtest.Fake{CurrentSessionName: "my-session"}
+		result := currentTmuxSessionWith(mod)
 		if result != "my-session" {
 			t.Errorf("got %q, want %q", result, "my-session")
 		}
 	})
 
 	t.Run("returns empty on error", func(t *testing.T) {
-		tmux := &deps.MockTmux{
-			CommandFunc: func(args ...string) (string, error) {
-				return "", fmt.Errorf("not in tmux")
-			},
-		}
-		result := currentTmuxSessionWith(tmux)
+		mod := &tmuxtest.Fake{CurrentSessionErr: fmt.Errorf("not in tmux")}
+		result := currentTmuxSessionWith(mod)
 		if result != "" {
 			t.Errorf("got %q, want empty", result)
 		}
@@ -291,16 +280,11 @@ func TestCurrentTmuxSessionWith(t *testing.T) {
 }
 
 func TestTmuxPaneCommandsWith(t *testing.T) {
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			if args[0] == "list-panes" {
-				return "%1 zsh\n%2 node\n%3 vim", nil
-			}
-			return "", nil
-		},
+	mod := &tmuxtest.Fake{
+		PaneCommandMap: map[string]string{"%1": "zsh", "%2": "node", "%3": "vim"},
 	}
 
-	result := tmuxPaneCommandsWith(tmux)
+	result := tmuxPaneCommandsWith(mod)
 	if len(result) != 3 {
 		t.Fatalf("got %d entries, want 3", len(result))
 	}
@@ -314,27 +298,22 @@ func TestTmuxPaneCommandsWith(t *testing.T) {
 
 func TestCapturePanePreviewWith(t *testing.T) {
 	t.Run("returns pane content", func(t *testing.T) {
-		tmux := &deps.MockTmux{
-			CommandFunc: func(args ...string) (string, error) {
-				if args[0] == "capture-pane" {
-					return "line 1\nline 2\nline 3", nil
-				}
-				return "", nil
-			},
+		mod := &tmuxtest.Fake{
+			PreviewContent: map[string]string{"%5": "line 1\nline 2\nline 3"},
 		}
-		result := capturePanePreviewWith(tmux, "%5")
+		result := capturePanePreviewWith(mod, "%5")
 		if result != "line 1\nline 2\nline 3" {
 			t.Errorf("got %q", result)
 		}
 	})
 
 	t.Run("returns empty on error", func(t *testing.T) {
-		tmux := &deps.MockTmux{
-			CommandFunc: func(args ...string) (string, error) {
+		mod := &tmuxtest.Fake{
+			CapturePreviewFunc: func(string) (string, error) {
 				return "", fmt.Errorf("pane not found")
 			},
 		}
-		result := capturePanePreviewWith(tmux, "%99")
+		result := capturePanePreviewWith(mod, "%99")
 		if result != "" {
 			t.Errorf("got %q, want empty", result)
 		}
@@ -366,35 +345,33 @@ func TestSwitchToTmuxTargetWith_InTmux(t *testing.T) {
 }
 
 func TestSwitchToTmuxTargetAndZoomWith_InTmux(t *testing.T) {
-	mod := &tmuxtest.Fake{Inside: true}
+	t.Run("switches and zooms an unzoomed window", func(t *testing.T) {
+		mod := &tmuxtest.Fake{Inside: true}
 
-	var gotArgs []string
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			gotArgs = args
-			return "", nil
-		},
-	}
-
-	err := switchToTmuxTargetAndZoomWith(tmux, mod, "%5")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(mod.Switched) != 0 {
-		t.Error("SwitchClient path used — expected single chained Command with switch-client and zoom")
-	}
-
-	expected := []string{
-		"switch-client", "-t", "%5", ";",
-		"if-shell", "-F", "#{!=:#{window_zoomed_flag},1}",
-		"resize-pane -Z",
-	}
-	if len(gotArgs) != len(expected) {
-		t.Fatalf("expected args %v, got %v", expected, gotArgs)
-	}
-	for i := range expected {
-		if gotArgs[i] != expected[i] {
-			t.Errorf("arg[%d]: got %q, want %q", i, gotArgs[i], expected[i])
+		if err := switchToTmuxTargetAndZoomWith(mod, "%5"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
 		}
-	}
+		if len(mod.Switched) != 1 || mod.Switched[0] != "%5" {
+			t.Errorf("switched = %v, want [%%5]", mod.Switched)
+		}
+		if !mod.Zoomed["%5"] {
+			t.Error("target window not zoomed")
+		}
+	})
+
+	t.Run("leaves an already-zoomed window maximized", func(t *testing.T) {
+		mod := &tmuxtest.Fake{Inside: true, Zoomed: map[string]bool{"%5": true}}
+
+		if err := switchToTmuxTargetAndZoomWith(mod, "%5"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(mod.Switched) != 1 || mod.Switched[0] != "%5" {
+			t.Errorf("switched = %v, want [%%5]", mod.Switched)
+		}
+		// zoom-only-if-not-zoomed: an already-zoomed window is never toggled
+		// back to a split layout.
+		if !mod.Zoomed["%5"] {
+			t.Error("already-zoomed window was toggled off")
+		}
+	})
 }
