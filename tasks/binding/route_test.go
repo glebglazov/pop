@@ -16,8 +16,7 @@ import (
 
 func routeTestDeps(t *testing.T) *tasks.Deps {
 	t.Helper()
-	t.Setenv("XDG_DATA_HOME", filepath.Join(t.TempDir(), "xdg"))
-	return &tasks.Deps{FS: deps.NewRealFileSystem(), Git: deps.NewRealGit()}
+	return isolatedTasksDeps(t)
 }
 
 func seedBinding(t *testing.T, td *tasks.Deps, checkoutPath, setID string, b Binding) {
@@ -32,6 +31,7 @@ func seedBinding(t *testing.T, td *tasks.Deps, checkoutPath, setID string, b Bin
 }
 
 func TestRouteDrainCheckoutExistingBindingWins(t *testing.T) {
+	t.Parallel()
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "feature")
@@ -55,6 +55,7 @@ func TestRouteDrainCheckoutExistingBindingWins(t *testing.T) {
 // drain with no flags resolves to the current checkout and never provisions a
 // managed worktree — routing has no `git worktree add` path (ADR-0052).
 func TestRouteDrainCheckoutUnboundUsesCurrentCheckout(t *testing.T) {
+	t.Parallel()
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 	worktreeAddCalls := 0
@@ -94,6 +95,7 @@ func TestRouteDrainCheckoutUnboundUsesCurrentCheckout(t *testing.T) {
 // no-directive foreground drain persists a default (adopted, never-delete) Worktree
 // binding to the current checkout, recording its path and branch (ADR-0062).
 func TestRouteDrainCheckoutNoDirectiveForegroundBindsCurrentCheckout(t *testing.T) {
+	t.Parallel()
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "feature")
@@ -147,6 +149,7 @@ func TestRouteDrainCheckoutNoDirectiveForegroundBindsCurrentCheckout(t *testing.
 // ADR-0062. The Queue resolves the integration target (non-bare: main worktree)
 // before calling routing and feeds it as CurrentCheckout.
 func TestRouteDrainCheckoutNoDirectiveQueueBindsIntegrationTarget(t *testing.T) {
+	t.Parallel()
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 	addCalls := countingGit(t, td)
@@ -191,6 +194,7 @@ func TestRouteDrainCheckoutNoDirectiveQueueBindsIntegrationTarget(t *testing.T) 
 // foreground drain from a different checkout re-points the binding to the current
 // checkout rather than resuming the first bound worktree (ADR-0072).
 func TestRouteDrainCheckoutNoDirectiveSecondDrainRebindsForeground(t *testing.T) {
+	t.Parallel()
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 	first := addLinkedWorktree(t, repo, "first")
@@ -237,6 +241,7 @@ func TestRouteDrainCheckoutNoDirectiveSecondDrainRebindsForeground(t *testing.T)
 // operator binding is resumed on a Queue spawn and the no-directive default never
 // overwrites it (ADR-0062: bind/override consulted first).
 func TestRouteDrainCheckoutOperatorBindingWinsOverDefault(t *testing.T) {
+	t.Parallel()
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 	bound := addLinkedWorktree(t, repo, "operator")
@@ -260,6 +265,7 @@ func TestRouteDrainCheckoutOperatorBindingWinsOverDefault(t *testing.T) {
 // override resolves to that checkout with no default binding persisted (ADR-0062
 // precedence: override before the default step).
 func TestRouteDrainCheckoutOverrideWinsOverDefault(t *testing.T) {
+	t.Parallel()
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 	override := addLinkedWorktree(t, repo, "override")
@@ -371,6 +377,7 @@ func countingGit(t *testing.T, td *tasks.Deps) *int {
 // foreground implement ignores the directive (see
 // TestRouteDrainCheckoutManagedDirectiveForegroundIgnored).
 func TestRouteDrainCheckoutManagedDirectiveProvisions(t *testing.T) {
+	t.Parallel()
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 	seedManagedIntent(t, td, repo, "managed-set")
@@ -435,6 +442,7 @@ func TestRouteDrainCheckoutManagedDirectiveProvisions(t *testing.T) {
 // entirely (ADR-0072): it provisions no worktree and instead records a default
 // (adopted) binding to the current checkout, draining there.
 func TestRouteDrainCheckoutManagedDirectiveForegroundIgnored(t *testing.T) {
+	t.Parallel()
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "feature")
@@ -477,6 +485,7 @@ func TestRouteDrainCheckoutManagedDirectiveForegroundIgnored(t *testing.T) {
 // of the same set resumes the binding the first drain recorded — the directive is
 // consulted only when unbound, so no second worktree is provisioned (ADR-0059).
 func TestRouteDrainCheckoutManagedDirectiveSecondDrainResumes(t *testing.T) {
+	t.Parallel()
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 	seedManagedIntent(t, td, repo, "managed-set")
@@ -514,6 +523,7 @@ func TestRouteDrainCheckoutManagedDirectiveSecondDrainResumes(t *testing.T) {
 // the bound checkout and never consults the directive, so no managed worktree is
 // provisioned.
 func TestRouteDrainCheckoutBindingWinsOverManagedDirective(t *testing.T) {
+	t.Parallel()
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "feature")
@@ -543,6 +553,7 @@ func TestRouteDrainCheckoutBindingWinsOverManagedDirective(t *testing.T) {
 // runtime-path override is honored before the directive is even read: routing
 // resolves the override and provisions nothing (ADR-0059 precedence).
 func TestRouteDrainCheckoutOverrideWinsOverManagedDirective(t *testing.T) {
+	t.Parallel()
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "override-target")
@@ -574,6 +585,7 @@ func TestRouteDrainCheckoutOverrideWinsOverManagedDirective(t *testing.T) {
 // entirely (ADR-0072): it adopts no named worktree and instead records a default
 // binding to the current checkout, draining there.
 func TestRouteDrainCheckoutNamedDirectiveForegroundIgnored(t *testing.T) {
+	t.Parallel()
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 	addNamedWorktree(t, repo, "feature-x", "feature-x")
@@ -609,6 +621,7 @@ func TestRouteDrainCheckoutNamedDirectiveForegroundIgnored(t *testing.T) {
 // binding shadows the `name` directive on a Queue spawn: routing resumes the
 // bound checkout and never consults the directive.
 func TestRouteDrainCheckoutBindingWinsOverNamedDirective(t *testing.T) {
+	t.Parallel()
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 	addNamedWorktree(t, repo, "feature-x", "feature-x")
@@ -633,6 +646,7 @@ func TestRouteDrainCheckoutBindingWinsOverNamedDirective(t *testing.T) {
 // TestRouteDrainCheckoutOverrideWinsOverNamedDirective asserts an explicit
 // runtime-path override is honored before the `name` directive is read.
 func TestRouteDrainCheckoutOverrideWinsOverNamedDirective(t *testing.T) {
+	t.Parallel()
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 	addNamedWorktree(t, repo, "feature-x", "feature-x")
@@ -656,6 +670,7 @@ func TestRouteDrainCheckoutOverrideWinsOverNamedDirective(t *testing.T) {
 }
 
 func TestResolveTrunkPathUsesConfigOverride(t *testing.T) {
+	t.Parallel()
 	td := routeTestDeps(t)
 	main := initAdoptRepo(t)
 	base := addLinkedWorktree(t, main, "exec-base")
@@ -701,6 +716,7 @@ func initBareWithWorktree(t *testing.T, name string) string {
 // bare repo with no resolvable Trunk worktree is reported as the
 // ErrNoResolvableTrunk config-class error — read-only, no provisioning (ADR-0059).
 func TestProbeWorktreeDirectiveManagedNoTrunk(t *testing.T) {
+	t.Parallel()
 	td := routeTestDeps(t)
 	wt := initBareWithWorktree(t, "wt-managed")
 	calls := countingGit(t, td)
@@ -718,6 +734,7 @@ func TestProbeWorktreeDirectiveManagedNoTrunk(t *testing.T) {
 // TestProbeWorktreeDirectiveManagedSatisfiable asserts a `managed` directive over
 // a normal repo (a resolvable git main worktree) probes clean.
 func TestProbeWorktreeDirectiveManagedSatisfiable(t *testing.T) {
+	t.Parallel()
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 	seedManagedIntent(t, td, repo, "managed-set")
@@ -731,6 +748,7 @@ func TestProbeWorktreeDirectiveManagedSatisfiable(t *testing.T) {
 // worktree that does not exist on this machine is reported as
 // ErrNamedWorktreeNotFound.
 func TestProbeWorktreeDirectiveNamedAbsent(t *testing.T) {
+	t.Parallel()
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 	calls := countingGit(t, td)
@@ -749,6 +767,7 @@ func TestProbeWorktreeDirectiveNamedAbsent(t *testing.T) {
 // worktree exists on this machine probes clean — resolving the environment (here,
 // creating the named worktree) lets the next drain proceed (ADR-0059).
 func TestProbeWorktreeDirectiveNamedPresent(t *testing.T) {
+	t.Parallel()
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 	addNamedWorktree(t, repo, "feature-x", "feature-x")
@@ -762,6 +781,7 @@ func TestProbeWorktreeDirectiveNamedPresent(t *testing.T) {
 // TestProbeWorktreeDirectiveNoIntent asserts a set with no worktree directive
 // probes clean (the no-directive default drains in the current checkout).
 func TestProbeWorktreeDirectiveNoIntent(t *testing.T) {
+	t.Parallel()
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 
@@ -775,6 +795,7 @@ func TestProbeWorktreeDirectiveNoIntent(t *testing.T) {
 // that the directive was satisfied on a prior drain, and later drains resume
 // there (ADR-0059).
 func TestProbeWorktreeDirectiveBoundSatisfied(t *testing.T) {
+	t.Parallel()
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "feature")
@@ -792,6 +813,7 @@ func boolPtr(v bool) *bool { return &v }
 // adopted binding at a different checkout is silently re-pointed to the current
 // checkout; the old worktree stays on disk (ADR-0072).
 func TestRouteDrainCheckoutForegroundRebindsAdoptedSilently(t *testing.T) {
+	t.Parallel()
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 	oldWT := addLinkedWorktree(t, repo, "old-bound")
@@ -827,6 +849,7 @@ func TestRouteDrainCheckoutForegroundRebindsAdoptedSilently(t *testing.T) {
 // the managed rebind prompt tears down the old managed worktree and rebinds to
 // current (ADR-0072).
 func TestRouteDrainCheckoutForegroundManagedRebindConfirmDeletes(t *testing.T) {
+	t.Parallel()
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 	currentWT := addLinkedWorktree(t, repo, "current")
@@ -869,6 +892,7 @@ func TestRouteDrainCheckoutForegroundManagedRebindConfirmDeletes(t *testing.T) {
 // TestRouteDrainCheckoutForegroundManagedRebindDeclineAborts asserts declining
 // the managed rebind prompt leaves the binding at the old managed checkout.
 func TestRouteDrainCheckoutForegroundManagedRebindDeclineAborts(t *testing.T) {
+	t.Parallel()
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 	currentWT := addLinkedWorktree(t, repo, "current")
@@ -902,6 +926,7 @@ func TestRouteDrainCheckoutForegroundManagedRebindDeclineAborts(t *testing.T) {
 // implement refuses to rebind while the bound checkout holds a live Runtime
 // execution lock.
 func TestRouteDrainCheckoutForegroundRebindRefusesLiveLock(t *testing.T) {
+	t.Parallel()
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 	oldWT := addLinkedWorktree(t, repo, "locked")

@@ -155,27 +155,28 @@ func TestRunTaskSetAppliesDirtyStrategyOnceBeforeDrain(t *testing.T) {
 }
 
 func TestRunTaskSetTargetedTaskSet(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
 	initExecutorGitRepo(t, root)
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	tasksDir := storageTasksDir(t, root)
+	tasksDir := storageTasksDir(t, d, root)
 	setupManifest(t, tasksDir, "high", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 	setupManifest(t, tasksDir, "low", []Task{
 		{ID: "01-x", File: "01-x.md", Title: "X", Type: "AFK", Status: "open"},
 	})
-	refresh, err := RegisterWith(DefaultDeps(), tasksDir, DefaultStatePath())
+	refresh, err := RegisterWith(d, tasksDir, DefaultStatePathWith(d))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := SetPriorityWith(DefaultDeps(), nil, nil, ResolveInput{CWD: root}, "low", 99); err != nil {
+	if _, err := SetPriorityWith(d, nil, nil, ResolveInput{CWD: root}, "low", 99); err != nil {
 		t.Fatal(err)
 	}
 	_ = refresh
 
 	agent := writeFakeAgent(t, root, fakeAgentConfig{checkTask: true, summary: "targeted"})
-	env := &runTaskSetFixture{root: root, tasksDir: tasksDir}
+	env := &runTaskSetFixture{root: root, tasksDir: tasksDir, d: d}
 	opts := env.runTaskSetOpts(true, agent, nil)
 	opts.TaskSetOverride = "high"
 
@@ -190,10 +191,10 @@ func TestRunTaskSetTargetedTaskSet(t *testing.T) {
 
 func setupTwoSetHumanBlockedFixture(t *testing.T) (*runTaskSetFixture, string) {
 	t.Helper()
+	d := newTestDeps(t)
 	root := t.TempDir()
 	initExecutorGitRepo(t, root)
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	tasksDir := storageTasksDir(t, root)
+	tasksDir := storageTasksDir(t, d, root)
 	// target is Human-blocked: only an open HITL task gates the set.
 	setupManifest(t, tasksDir, "target", []Task{
 		{ID: "01-hitl", File: "01-hitl.md", Title: "Review", Type: "HITL", Status: "open"},
@@ -202,29 +203,29 @@ func setupTwoSetHumanBlockedFixture(t *testing.T) (*runTaskSetFixture, string) {
 	setupManifest(t, tasksDir, "ready", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
-	if _, err := RegisterWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
+	if _, err := RegisterWith(d, tasksDir, DefaultStatePathWith(d)); err != nil {
 		t.Fatal(err)
 	}
 	agent := writeFakeAgent(t, root, fakeAgentConfig{checkTask: true, summary: "ready done"})
-	return &runTaskSetFixture{root: root, tasksDir: tasksDir}, agent
+	return &runTaskSetFixture{root: root, tasksDir: tasksDir, d: d}, agent
 }
 
 func setupSoleHumanBlockedFixture(t *testing.T) (*runTaskSetFixture, string) {
 	t.Helper()
+	d := newTestDeps(t)
 	root := t.TempDir()
 	initExecutorGitRepo(t, root)
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	tasksDir := storageTasksDir(t, root)
+	tasksDir := storageTasksDir(t, d, root)
 	// solo is the only set and is Human-blocked: an open HITL task gates it and no
 	// Ready Task set exists anywhere, so bare drain must fall back to its HITL gate.
 	setupManifest(t, tasksDir, "solo", []Task{
 		{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open"},
 	})
-	if _, err := RegisterWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
+	if _, err := RegisterWith(d, tasksDir, DefaultStatePathWith(d)); err != nil {
 		t.Fatal(err)
 	}
 	agent := writeFakeAgent(t, root, fakeAgentConfig{checkTask: true, summary: "done"})
-	return &runTaskSetFixture{root: root, tasksDir: tasksDir}, agent
+	return &runTaskSetFixture{root: root, tasksDir: tasksDir, d: d}, agent
 }
 
 func TestRunTaskSetBareDrainFallsBackToSoleHITLGate(t *testing.T) {
@@ -426,27 +427,29 @@ func TestRunTaskSetRegistersGateHoldAtHITLGate(t *testing.T) {
 // Set A at the Failed gate on checkout R blocks set B's recovery waiter on R
 // from acquiring a turn until A clears the gate.
 func TestRunTaskSetFailedGateBlocksRecoveryTurnOnSameCheckout(t *testing.T) {
+	// ADR-0145: installClaudeQuotaAgent stubs PATH — stays serial deliberately.
+	d := newTestDeps(t)
 	root := t.TempDir()
 	initExecutorGitRepo(t, root)
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	tasksDir := storageTasksDir(t, root)
+	tasksDir := storageTasksDir(t, d, root)
 	setupManifest(t, tasksDir, "set-a", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed", FailedAfter: intPtr(3)},
 	})
 	setupManifest(t, tasksDir, "set-b", []Task{
 		{ID: "01-b", File: "01-b.md", Title: "B", Type: "AFK", Status: "open"},
 	})
-	if _, err := RegisterWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
+	if _, err := RegisterWith(d, tasksDir, DefaultStatePathWith(d)); err != nil {
 		t.Fatal(err)
 	}
 	installClaudeQuotaAgent(t, root)
 	agent := writeFakeAgent(t, root, fakeAgentConfig{summary: "unused"})
 
-	d := &Deps{
-		FS:     deps.NewRealFileSystem(),
-		Git:    deps.NewRealGit(),
-		Runner: fakeAwareRunner{},
-	}
+	d.Git = deps.NewRealGit()
+	d.Runner = fakeAwareRunner{}
+	d.RecoveryFastCheckInterval = 2 * time.Millisecond
+	d.RecoveryPollInterval = 2 * time.Millisecond
+	d.RecoveryPollImminentInterval = 2 * time.Millisecond
+	d.RetryDelayWait = testRetryDelayWaitHook
 	runtimePath, err := ResolveRuntimePathWith(d, root, "")
 	if err != nil {
 		t.Fatal(err)
@@ -981,7 +984,7 @@ func TestRunTaskSetInteractiveHITLGateDefaultGetsAgentAssistance(t *testing.T) {
 		{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open"},
 	})
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "first done"})
-	runner := &hitlAssistanceRunner{t: t, tasksDir: env.tasksDir}
+	runner := &hitlAssistanceRunner{t: t, tasksDir: env.tasksDir, d: env.deps()}
 	d := env.deps()
 	d.Runner = runner
 
@@ -1441,25 +1444,26 @@ func TestRunTaskSetOperationalStopOnCommitFailure(t *testing.T) {
 }
 
 func TestRunTaskSetDoesNotContinueIntoAnotherTaskSet(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
 	initExecutorGitRepo(t, root)
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	tasksDir := storageTasksDir(t, root)
+	tasksDir := storageTasksDir(t, d, root)
 	setupManifest(t, tasksDir, "one", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 	setupManifest(t, tasksDir, "two", []Task{
 		{ID: "01-x", File: "01-x.md", Title: "X", Type: "AFK", Status: "open"},
 	})
-	if _, err := RegisterWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
+	if _, err := RegisterWith(d, tasksDir, DefaultStatePathWith(d)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := SetPriorityWith(DefaultDeps(), nil, nil, ResolveInput{CWD: root}, "two", 10); err != nil {
+	if _, err := SetPriorityWith(d, nil, nil, ResolveInput{CWD: root}, "two", 10); err != nil {
 		t.Fatal(err)
 	}
 
 	agent := writeFakeAgent(t, root, fakeAgentConfig{checkTask: true, summary: "one only"})
-	env := &runTaskSetFixture{root: root, tasksDir: tasksDir}
+	env := &runTaskSetFixture{root: root, tasksDir: tasksDir, d: d}
 	result, err := RunTaskSetWith(env.deps(), nil, nil, env.runTaskSetOpts(true, agent, nil))
 	if err != nil {
 		t.Fatal(err)
@@ -2321,6 +2325,7 @@ printf 'SUMMARY_START\nclaude done\nSUMMARY_END\nTASK_COMPLETE\n'
 
 func installAgentShim(t *testing.T, root, name, script string) string {
 	t.Helper()
+	// ADR-0145: PATH stub — callers stay serial deliberately.
 	dir := filepath.Join(root, ".agent-bin")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -2396,7 +2401,7 @@ func TestRunTaskSetClearsAutoDrainOnDone(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
-	if _, err := ToggleAutoDrainWith(env.deps(), env.tasksDir, DefaultStatePath(), "demo"); err != nil {
+	if _, err := ToggleAutoDrainWith(env.deps(), env.tasksDir, DefaultStatePathWith(env.deps()), "demo"); err != nil {
 		t.Fatal(err)
 	}
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "done"})
@@ -2410,7 +2415,7 @@ func TestRunTaskSetClearsAutoDrainOnDone(t *testing.T) {
 		t.Fatalf("result = %#v, want TaskSetDone", result)
 	}
 
-	state, err := LoadGlobalState(DefaultStatePath())
+	state, err := LoadGlobalStateWith(env.deps(), DefaultStatePathWith(env.deps()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2446,7 +2451,7 @@ func TestRunTaskSetClearsAutoDrainOnAwaitingApproval(t *testing.T) {
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 		{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open"},
 	})
-	if _, err := ToggleAutoDrainWith(env.deps(), env.tasksDir, DefaultStatePath(), "demo"); err != nil {
+	if _, err := ToggleAutoDrainWith(env.deps(), env.tasksDir, DefaultStatePathWith(env.deps()), "demo"); err != nil {
 		t.Fatal(err)
 	}
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "first done"})
@@ -2458,7 +2463,7 @@ func TestRunTaskSetClearsAutoDrainOnAwaitingApproval(t *testing.T) {
 		t.Fatalf("result = %#v, want TaskSetAwaitingApproval", result)
 	}
 
-	state, err := LoadGlobalState(DefaultStatePath())
+	state, err := LoadGlobalStateWith(env.deps(), DefaultStatePathWith(env.deps()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2500,7 +2505,7 @@ func TestRunTaskSetDoesNotClearAutoDrainOnBlocked(t *testing.T) {
 		{ID: "01-hitl", File: "01-hitl.md", Title: "Review", Type: "HITL", Status: "open"},
 		{ID: "02-a", File: "02-a.md", Title: "A", Type: "AFK", Status: "open", BlockedBy: []string{"01-hitl"}},
 	})
-	if _, err := ToggleAutoDrainWith(env.deps(), env.tasksDir, DefaultStatePath(), "demo"); err != nil {
+	if _, err := ToggleAutoDrainWith(env.deps(), env.tasksDir, DefaultStatePathWith(env.deps()), "demo"); err != nil {
 		t.Fatal(err)
 	}
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "should-not-run"})
@@ -2509,7 +2514,7 @@ func TestRunTaskSetDoesNotClearAutoDrainOnBlocked(t *testing.T) {
 	_, err := RunTaskSetWith(env.deps(), nil, nil, env.runTaskSetOpts(true, agent, &buf))
 	assertExitCode(t, err, ExitNoRunnable)
 
-	state, err := LoadGlobalState(DefaultStatePath())
+	state, err := LoadGlobalStateWith(env.deps(), DefaultStatePathWith(env.deps()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2695,22 +2700,27 @@ func TestRunTaskSetInvokesBindCheckoutAfterBackstop(t *testing.T) {
 type runTaskSetFixture struct {
 	root     string
 	tasksDir string
+	d        *Deps
 }
 
 func setupRunTaskSetFixture(t *testing.T, stem string, tasks []Task) *runTaskSetFixture {
 	t.Helper()
+	d := newTestDeps(t)
 	root := t.TempDir()
 	initExecutorGitRepo(t, root)
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	tasksDir := storageTasksDir(t, root)
+	tasksDir := storageTasksDir(t, d, root)
 	setupManifest(t, tasksDir, stem, tasks)
-	if _, err := RegisterWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
+	if _, err := RegisterWith(d, tasksDir, DefaultStatePathWith(d)); err != nil {
 		t.Fatal(err)
 	}
-	return &runTaskSetFixture{root: root, tasksDir: tasksDir}
+	return &runTaskSetFixture{root: root, tasksDir: tasksDir, d: d}
 }
 
 func (e *runTaskSetFixture) deps() *Deps {
+	if e.d != nil {
+		cp := *e.d
+		return &cp
+	}
 	return &Deps{
 		FS:     deps.NewRealFileSystem(),
 		Git:    deps.NewRealGit(),
@@ -2726,7 +2736,7 @@ func (e *runTaskSetFixture) deps() *Deps {
 }
 
 func (e *runTaskSetFixture) execFixture() *execFixture {
-	return &execFixture{root: e.root, tasksDir: e.tasksDir}
+	return &execFixture{root: e.root, tasksDir: e.tasksDir, d: e.d}
 }
 
 func (e *runTaskSetFixture) runTaskSetOpts(yes bool, agentCmd string, out io.Writer) RunTaskSetOptions {
@@ -2782,6 +2792,7 @@ func (r *blockingGateReader) Read(p []byte) (int, error) {
 type hitlAssistanceRunner struct {
 	t        *testing.T
 	tasksDir string
+	d        *Deps
 	calls    int
 	name     string
 	args     []string
@@ -2791,13 +2802,13 @@ func (r *hitlAssistanceRunner) Run(ctx context.Context, dir string, stdout, stde
 	r.calls++
 	r.name = name
 	r.args = append([]string{}, args...)
-	m := LoadManifest(DefaultDeps(), "demo", filepath.Join(r.tasksDir, "demo", "index.json"))
+	m := LoadManifest(r.d, "demo", filepath.Join(r.tasksDir, "demo", "index.json"))
 	for i := range m.Tasks {
 		if m.Tasks[i].ID == "02-hitl" {
 			m.Tasks[i].Status = "done"
 		}
 	}
-	if err := WriteManifestAtomic(DefaultDeps(), m); err != nil {
+	if err := WriteManifestAtomic(r.d, m); err != nil {
 		r.t.Fatal(err)
 	}
 	fmt.Fprintln(stdout, "assistance complete")

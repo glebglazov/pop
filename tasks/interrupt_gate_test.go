@@ -17,7 +17,7 @@ import (
 // same value the queue's `Ready && AutoDrain` eligibility predicate reads.
 func drainSetAutoDrain(t *testing.T, run *implementRun, setID string) bool {
 	t.Helper()
-	state, err := LoadGlobalState(run.statePath)
+	state, err := LoadGlobalStateWith(run.d, run.statePath)
 	if err != nil {
 		t.Fatalf("LoadGlobalState: %v", err)
 	}

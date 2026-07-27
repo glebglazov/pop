@@ -20,14 +20,14 @@ import (
 // manifest directly rather than re-discovering it.
 func setupDrainVerifyFixture(t *testing.T, git *deps.MockGit, tasks []Task, setKeys map[string]any) (*Deps, *Manifest) {
 	t.Helper()
+	d := newTestDeps(t)
 	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
 	taskDir := filepath.Join(root, "tasks", "demo")
 	for _, task := range tasks {
 		writeTaskMD(t, taskDir, task.File, "## Acceptance criteria\n\n- [ ] ok\n")
 	}
 	writeManifestWithSetKeys(t, taskDir, tasks, setKeys)
-	d := &Deps{FS: deps.NewRealFileSystem(), Git: git}
+	d.Git = git
 	m := LoadManifest(d, "demo", filepath.Join(taskDir, "index.json"))
 	if !m.Valid {
 		t.Fatalf("manifest invalid: %v", m.Errors)
@@ -76,6 +76,7 @@ func terminalHITLSet() []Task {
 // any status are omitted from the judged criteria — an agent cannot judge a
 // human sign-off, and a not-yet-run task is not an unmet criterion.
 func TestBuildVerifierPromptScopesToDoneAFK(t *testing.T) {
+	t.Parallel()
 	mixed := []Task{
 		{ID: "01-afk-done", File: "01-afk-done.md", Title: "Done AFK", Type: "AFK", Status: "done"},
 		{ID: "02-afk-open", File: "02-afk-open.md", Title: "Open AFK", Type: "AFK", Status: "open"},
@@ -99,6 +100,7 @@ func TestBuildVerifierPromptScopesToDoneAFK(t *testing.T) {
 // TestDrainVerifyPhasePassReachesDone: a PASS verdict on a pure-AFK exhausted
 // set lets the drain reach DONE, and the verdict is recorded at the work SHA.
 func TestDrainVerifyPhasePassReachesDone(t *testing.T) {
+	t.Parallel()
 	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), doneAFKSet(), nil)
 	called := false
 	status, verdict, err := drainVerifyPhase(d, nil, verifyCoreOptions{
@@ -125,6 +127,7 @@ func TestDrainVerifyPhasePassReachesDone(t *testing.T) {
 // TestDrainVerifyPhasePassReachesAwaitingApproval: a PASS verdict on a set whose
 // only remaining work is a terminal HITL approval keeps it at AWAITING-APPROVAL.
 func TestDrainVerifyPhasePassReachesAwaitingApproval(t *testing.T) {
+	t.Parallel()
 	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), terminalHITLSet(), nil)
 	if base := DeriveStatus(m); base != StatusAwaitingApproval {
 		t.Fatalf("fixture base status = %q, want AWAITING-APPROVAL", base)
@@ -144,6 +147,7 @@ func TestDrainVerifyPhasePassReachesAwaitingApproval(t *testing.T) {
 // TestDrainVerifyPhaseNonPassParks: a FIXABLE or NEEDS-HUMAN verdict resolves to
 // VERIFY-FAILED, parking the set, with the findings carried through.
 func TestDrainVerifyPhaseNonPassParks(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name    string
 		raw     string
@@ -178,6 +182,7 @@ func TestDrainVerifyPhaseNonPassParks(t *testing.T) {
 // current work SHA is reused, so the Verifier is not re-invoked — a re-drain at
 // unchanged work does not loop.
 func TestDrainVerifyPhaseReusesCachedVerdict(t *testing.T) {
+	t.Parallel()
 	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), doneAFKSet(), nil)
 	seedVerdict(t, d, store.VerifyVerdict{Repo: "/repo/.git", SetID: "demo", WorkSHA: "sha1", Verdict: "PASS"})
 	status, verdict, err := drainVerifyPhase(d, nil, verifyCoreOptions{
@@ -199,6 +204,7 @@ func TestDrainVerifyPhaseReusesCachedVerdict(t *testing.T) {
 // different (stale) work SHA does not immunize the set, so the Verifier runs
 // and records a fresh verdict at the current SHA.
 func TestDrainVerifyPhaseStaleNonPassReRuns(t *testing.T) {
+	t.Parallel()
 	d, m := setupDrainVerifyFixture(t, stubGit("shaNEW\n", "", ""), doneAFKSet(), nil)
 	seedVerdict(t, d, store.VerifyVerdict{Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaOLD", Verdict: "NEEDS-HUMAN", Findings: "stale"})
 	called := false
@@ -224,6 +230,7 @@ func TestDrainVerifyPhaseStaleNonPassReRuns(t *testing.T) {
 // older work SHA immunizes the set (ADR-0096), so the drain reuses it without
 // re-invoking the Verifier even though HEAD has moved on.
 func TestDrainVerifyPhaseImmunizingPassAtOldSHANoRun(t *testing.T) {
+	t.Parallel()
 	d, m := setupDrainVerifyFixture(t, stubGit("shaNEW\n", "", ""), doneAFKSet(), nil)
 	seedVerdict(t, d, store.VerifyVerdict{Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaOLD", Verdict: "PASS"})
 	status, verdict, err := drainVerifyPhase(d, nil, verifyCoreOptions{
@@ -249,6 +256,7 @@ func TestDrainVerifyPhaseImmunizingPassAtOldSHANoRun(t *testing.T) {
 // verdicts for a set (e.g., on reopen/remediation, ADR-0096) removes the
 // immunizing PASS, so the next terminal drain re-invokes the Verifier.
 func TestDrainVerifyPhaseAfterInvalidationRunsAgain(t *testing.T) {
+	t.Parallel()
 	d, m := setupDrainVerifyFixture(t, stubGit("shaNEW\n", "", ""), doneAFKSet(), nil)
 	seedVerdict(t, d, store.VerifyVerdict{Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaOLD", Verdict: "PASS"})
 
@@ -280,6 +288,7 @@ func TestDrainVerifyPhaseAfterInvalidationRunsAgain(t *testing.T) {
 // TestDrainVerifyPhaseNonTerminalPassthrough: a status outside the terminal zone
 // is returned unchanged with no verdict and no Verifier call.
 func TestDrainVerifyPhaseNonTerminalPassthrough(t *testing.T) {
+	t.Parallel()
 	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), doneAFKSet(), nil)
 	status, verdict, err := drainVerifyPhase(d, nil, verifyCoreOptions{
 		Repo: "/repo/.git", RuntimePath: "/rt", SetID: "demo", Output: &bytes.Buffer{},
@@ -297,6 +306,7 @@ func TestDrainVerifyPhaseNonTerminalPassthrough(t *testing.T) {
 }
 
 func TestManifestVerifyOptedOut(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		setKeys map[string]any
@@ -326,19 +336,19 @@ func verifyEnabledConfig() *config.Config {
 // set-level manifest keys (e.g. {"verify": false}).
 func setupRunTaskSetFixtureWithKeys(t *testing.T, stem string, tasks []Task, setKeys map[string]any) *runTaskSetFixture {
 	t.Helper()
+	d := newTestDeps(t)
 	root := t.TempDir()
 	initExecutorGitRepo(t, root)
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	tasksDir := storageTasksDir(t, root)
+	tasksDir := storageTasksDir(t, d, root)
 	taskDir := filepath.Join(tasksDir, stem)
 	for _, task := range tasks {
 		writeTaskMD(t, taskDir, task.File, "## Acceptance criteria\n\n- [ ] ok\n")
 	}
 	writeManifestWithSetKeys(t, taskDir, tasks, setKeys)
-	if _, err := RegisterWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
+	if _, err := RegisterWith(d, tasksDir, DefaultStatePathWith(d)); err != nil {
 		t.Fatal(err)
 	}
-	return &runTaskSetFixture{root: root, tasksDir: tasksDir}
+	return &runTaskSetFixture{root: root, tasksDir: tasksDir, d: d}
 }
 
 // runtimeHead resolves the drain's runtime checkout, its repository identity,
@@ -364,6 +374,7 @@ func runtimeHead(t *testing.T, d *Deps, root string) (repo, runtimePath, head st
 // default), a fully-drained pure-AFK set reaches DONE without any Verifier —
 // exactly as before the feature (criterion: disabled → DONE).
 func TestRunTaskSetDisabledVerificationReachesDone(t *testing.T) {
+	t.Parallel()
 	env := setupRunTaskSetFixture(t, "demo", openAFKSet())
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "done"})
 	var buf bytes.Buffer
@@ -383,6 +394,7 @@ func TestRunTaskSetDisabledVerificationReachesDone(t *testing.T) {
 // opting out via "verify": false, the drain skips verification and reaches DONE
 // on AFK-exhaustion (no Verifier is invoked).
 func TestRunTaskSetVerifyOptOutReachesDone(t *testing.T) {
+	t.Parallel()
 	env := setupRunTaskSetFixtureWithKeys(t, "demo", openAFKSet(), map[string]any{"verify": false})
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "done"})
 	var buf bytes.Buffer
@@ -406,6 +418,7 @@ func TestRunTaskSetVerifyOptOutReachesDone(t *testing.T) {
 // DONE. Cache reuse at unchanged work is exercised at the drainVerifyPhase level
 // (TestDrainVerifyPhaseReusesCachedVerdict).
 func TestRunTaskSetVerifyPassReachesDone(t *testing.T) {
+	t.Parallel()
 	env := setupRunTaskSetFixture(t, "demo", openAFKSet())
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "done"})
 	d := env.deps()
@@ -431,6 +444,7 @@ func TestRunTaskSetVerifyPassReachesDone(t *testing.T) {
 // open AFK task carries no reusable verdict); a NEEDS-HUMAN verdict parks the
 // set cleanly as VERIFY-FAILED (ExitNoRunnable, no crash).
 func TestRunTaskSetVerifyNeedsHumanParks(t *testing.T) {
+	t.Parallel()
 	env := setupRunTaskSetFixture(t, "demo", openAFKSet())
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "done"})
 	d := env.deps()
@@ -473,6 +487,7 @@ func TestRunTaskSetVerifyNeedsHumanParks(t *testing.T) {
 // still open (BeginDrain) — the concurrent-connection write the live drain makes.
 // It confirms WAL + busy_timeout let the write land rather than deadlock.
 func TestDrainVerifyPhaseWritesWhileDrainHeld(t *testing.T) {
+	t.Parallel()
 	env := setupRunTaskSetFixture(t, "demo", doneAFKSet())
 	d := env.deps()
 	d.ProcessAlive = func(pid int) bool { return pid == os.Getpid() }
@@ -506,6 +521,7 @@ func TestDrainVerifyPhaseWritesWhileDrainHeld(t *testing.T) {
 // the Verifier again against the current work (bypassing the SHA cache) before
 // returning to the menu (ADR-0012).
 func TestRunTaskSetHITLGateOffersReverify(t *testing.T) {
+	t.Parallel()
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 		{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open"},
@@ -547,6 +563,7 @@ func TestRunTaskSetHITLGateOffersReverify(t *testing.T) {
 // and control returns to the gate menu (still offering Re-verify), so a human
 // can keep iterating without a fresh drain (ADR-0012).
 func TestRunTaskSetHITLGateReverifyRefreshesLabel(t *testing.T) {
+	t.Parallel()
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 		{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open"},
@@ -594,6 +611,7 @@ func TestRunTaskSetHITLGateReverifyRefreshesLabel(t *testing.T) {
 // HITL gate menu omits the Re-verify option entirely — the force-verify path is
 // gated by the same config opt-in as the rest of the feature (ADR-0086).
 func TestRunTaskSetHITLGateHidesReverifyWhenDisabled(t *testing.T) {
+	t.Parallel()
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 		{ID: "02-hitl", File: "02-hitl.md", Title: "Review", Type: "HITL", Status: "open"},
@@ -620,6 +638,7 @@ func TestRunTaskSetHITLGateHidesReverifyWhenDisabled(t *testing.T) {
 // NEEDS-HUMAN if it is ever shown the HITL task, so the set reaching the gate is
 // a direct consequence of the prompt being scoped to done AFK work only.
 func TestRunTaskSetOpenHITLScopedVerifyReachesGate(t *testing.T) {
+	t.Parallel()
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 		{ID: "02-hitl", File: "02-hitl.md", Title: "Sign off", Type: "HITL", Status: "open"},
@@ -661,6 +680,7 @@ func TestRunTaskSetOpenHITLScopedVerifyReachesGate(t *testing.T) {
 }
 
 func TestVerifyEnabledGate(t *testing.T) {
+	t.Parallel()
 	if verifyEnabled(nil) {
 		t.Fatal("nil config should be disabled")
 	}
@@ -679,6 +699,7 @@ func TestVerifyEnabledGate(t *testing.T) {
 // quota-paused, the phase returns a quota pause error without persisting a
 // NEEDS-HUMAN verdict.
 func TestDrainVerifyPhaseQuotaPausePropagates(t *testing.T) {
+	t.Parallel()
 	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), doneAFKSet(), nil)
 	_, _, err := drainVerifyPhase(d, nil, verifyCoreOptions{
 		Repo: "/repo/.git", RuntimePath: "/rt", SetID: "demo", Output: &bytes.Buffer{},
@@ -712,6 +733,7 @@ func TestDrainVerifyPhaseQuotaPausePropagates(t *testing.T) {
 // enters recovery wait; after the cooldown elapses the drain re-enters at verify
 // only and can complete without re-running finished tasks.
 func TestRunTaskSetVerifyQuotaPauseRecoversAndCompletes(t *testing.T) {
+	t.Parallel()
 	env := setupRunTaskSetFixture(t, "demo", openAFKSet())
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{checkTask: true, summary: "done"})
 	d := env.deps()
@@ -768,6 +790,7 @@ func twoDoneAFKSet() []Task {
 // stale PASS, so the enlarged set is re-verified at the new work SHA rather than
 // coasting on ADR-0096 idempotency (ADR-0101).
 func TestDrainVerifyPhaseScopeGrowthInvalidatesStalePass(t *testing.T) {
+	t.Parallel()
 	d, m := setupDrainVerifyFixture(t, stubGit("shaNEW\n", "", ""), twoDoneAFKSet(), nil)
 	// The PASS was recorded when the set had a single AFK task (scope 1).
 	seedVerdict(t, d, store.VerifyVerdict{Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaOLD", Verdict: "PASS", Scope: 1})
@@ -802,6 +825,7 @@ func TestDrainVerifyPhaseScopeGrowthInvalidatesStalePass(t *testing.T) {
 // PASS, so the Verifier is not re-invoked — ADR-0096 is not regressed by the
 // scope-growth check (ADR-0101).
 func TestDrainVerifyPhaseUnchangedScopeStillImmunizes(t *testing.T) {
+	t.Parallel()
 	d, m := setupDrainVerifyFixture(t, stubGit("shaNEW\n", "", ""), twoDoneAFKSet(), nil)
 	// The PASS was recorded at the same scope the set still has (2 AFK tasks).
 	seedVerdict(t, d, store.VerifyVerdict{Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaOLD", Verdict: "PASS", Scope: 2})
@@ -826,6 +850,7 @@ func TestDrainVerifyPhaseUnchangedScopeStillImmunizes(t *testing.T) {
 // read reuses it and the set derives verified without re-invoking the Verifier —
 // exactly as an agent PASS does.
 func TestDrainVerifyPhaseAcceptedPassDerivesVerified(t *testing.T) {
+	t.Parallel()
 	d, m := setupDrainVerifyFixture(t, stubGit("shaACC\n", "", ""), doneAFKSet(), nil)
 	seedVerdict(t, d, store.VerifyVerdict{
 		Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaACC", Verdict: "PASS",
@@ -854,6 +879,7 @@ func TestDrainVerifyPhaseAcceptedPassDerivesVerified(t *testing.T) {
 // into that fresh Verifier prompt as context (ADR-0103), so the known non-issue
 // is not re-flagged while a real regression could still fail.
 func TestDrainVerifyPhaseScopeGrowthInvalidatesAcceptedPassAndForwardFeedsNote(t *testing.T) {
+	t.Parallel()
 	d, m := setupDrainVerifyFixture(t, stubGit("shaNEW\n", "", ""), twoDoneAFKSet(), nil)
 	// A human accepted the set when it held a single AFK task (scope 1).
 	seedVerdict(t, d, store.VerifyVerdict{

@@ -29,9 +29,9 @@ func seedIntentState(t *testing.T, d *Deps, defPath string, sets []RegisteredTas
 }
 
 func TestSetTaskSetPriorityReturnsPriorAndPersists(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
-	d := DefaultDeps()
 	defPath := root + "/tasks"
 	canon, statePath := seedIntentState(t, d, defPath, []RegisteredTaskSet{{ID: "demo", Priority: 3}})
 
@@ -53,9 +53,9 @@ func TestSetTaskSetPriorityReturnsPriorAndPersists(t *testing.T) {
 }
 
 func TestSetTaskSetPriorityUnknownID(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
-	d := DefaultDeps()
 	defPath := root + "/tasks"
 	seedIntentState(t, d, defPath, []RegisteredTaskSet{{ID: "demo", Priority: 3}})
 
@@ -69,9 +69,9 @@ func TestSetTaskSetPriorityUnknownID(t *testing.T) {
 }
 
 func TestSetTaskSetPriorityNotRegistered(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
-	d := DefaultDeps()
 	defPath := root + "/tasks"
 	// No state seeded: the definition path has no registered sets at all.
 
@@ -85,9 +85,9 @@ func TestSetTaskSetPriorityNotRegistered(t *testing.T) {
 }
 
 func TestSetTaskSetArchivedBatchAllOrNothing(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
-	d := DefaultDeps()
 	defPath := root + "/tasks"
 	canon, statePath := seedIntentState(t, d, defPath, []RegisteredTaskSet{
 		{ID: "one"},
@@ -109,9 +109,9 @@ func TestSetTaskSetArchivedBatchAllOrNothing(t *testing.T) {
 }
 
 func TestSetTaskSetArchivedUnknownIDFailsWholeBatch(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
-	d := DefaultDeps()
 	defPath := root + "/tasks"
 	canon, _ := seedIntentState(t, d, defPath, []RegisteredTaskSet{
 		{ID: "one"},
@@ -133,9 +133,9 @@ func TestSetTaskSetArchivedUnknownIDFailsWholeBatch(t *testing.T) {
 }
 
 func TestSetTaskSetArchivedEmptyWritesNothing(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
-	d := DefaultDeps()
 	defPath := root + "/tasks"
 	canon, _ := seedIntentState(t, d, defPath, []RegisteredTaskSet{{ID: "one"}})
 	before := registeredTaskSetsFor(t, d, canon)
@@ -150,9 +150,9 @@ func TestSetTaskSetArchivedEmptyWritesNothing(t *testing.T) {
 }
 
 func TestSetTaskSetArchivedNotRegistered(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
-	d := DefaultDeps()
 	defPath := root + "/tasks"
 
 	err := SetTaskSetArchived(d, defPath, []string{"demo"}, true)
@@ -165,9 +165,9 @@ func TestSetTaskSetArchivedNotRegistered(t *testing.T) {
 }
 
 func TestToggleTaskSetAutoDrainFlipsAndPersists(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
-	d := DefaultDeps()
 	defPath := root + "/tasks"
 	canon, statePath := seedIntentState(t, d, defPath, []RegisteredTaskSet{{ID: "demo", AutoDrain: false}})
 
@@ -196,9 +196,9 @@ func TestToggleTaskSetAutoDrainFlipsAndPersists(t *testing.T) {
 }
 
 func TestToggleTaskSetAutoDrainUnknownID(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
-	d := DefaultDeps()
 	defPath := root + "/tasks"
 	seedIntentState(t, d, defPath, []RegisteredTaskSet{{ID: "demo"}})
 
@@ -212,9 +212,9 @@ func TestToggleTaskSetAutoDrainUnknownID(t *testing.T) {
 }
 
 func TestToggleTaskSetAutoDrainNotRegistered(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
-	d := DefaultDeps()
 	defPath := root + "/tasks"
 
 	_, err := ToggleTaskSetAutoDrain(d, defPath, "demo")
@@ -227,9 +227,9 @@ func TestToggleTaskSetAutoDrainNotRegistered(t *testing.T) {
 }
 
 func TestSetTaskSetAutoDrainSetsAndPersists(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
-	d := DefaultDeps()
 	defPath := root + "/tasks"
 	canon, statePath := seedIntentState(t, d, defPath, []RegisteredTaskSet{{ID: "demo", AutoDrain: false}})
 
@@ -251,9 +251,9 @@ func TestSetTaskSetAutoDrainSetsAndPersists(t *testing.T) {
 }
 
 func TestSetTaskSetAutoDrainIdempotentNoOp(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
-	d := DefaultDeps()
 	defPath := root + "/tasks"
 	canon, statePath := seedIntentState(t, d, defPath, []RegisteredTaskSet{{ID: "demo", AutoDrain: true}})
 	before := registeredTaskSetsFor(t, d, canon)
@@ -295,9 +295,9 @@ func TestSetTaskSetAutoDrainIdempotentNoOp(t *testing.T) {
 }
 
 func TestSetTaskSetAutoDrainUnknownID(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
-	d := DefaultDeps()
 	defPath := root + "/tasks"
 	seedIntentState(t, d, defPath, []RegisteredTaskSet{{ID: "demo"}})
 

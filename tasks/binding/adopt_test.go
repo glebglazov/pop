@@ -16,8 +16,7 @@ import (
 // binding store writes into the test sandbox.
 func bindingTestDeps(t *testing.T) *tasks.Deps {
 	t.Helper()
-	t.Setenv("XDG_DATA_HOME", filepath.Join(t.TempDir(), "xdg"))
-	return &tasks.Deps{FS: deps.NewRealFileSystem(), Git: deps.NewRealGit()}
+	return isolatedTasksDeps(t)
 }
 
 func adoptRunGit(t *testing.T, dir string, args ...string) {
@@ -97,6 +96,7 @@ func (g *recordingGit) ran(sub ...string) bool {
 // TestAdoptCurrentCheckoutWorktreeLocus: running implement inside a worktree
 // records a never-delete (Provisioned=false) adopted binding for that checkout.
 func TestAdoptCurrentCheckoutWorktreeLocus(t *testing.T) {
+	t.Parallel()
 	td := bindingTestDeps(t)
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "feature")
@@ -137,6 +137,7 @@ func TestAdoptCurrentCheckoutWorktreeLocus(t *testing.T) {
 // TestAdoptCurrentCheckoutTrunkLocus: running implement in trunk records no
 // worktree binding, leaving the set non-integrateable.
 func TestAdoptCurrentCheckoutTrunkLocus(t *testing.T) {
+	t.Parallel()
 	td := bindingTestDeps(t)
 	repo := initAdoptRepo(t)
 
@@ -162,6 +163,7 @@ func TestAdoptCurrentCheckoutTrunkLocus(t *testing.T) {
 // TestAdoptCurrentCheckoutNeverRunsWorktreeAdd: adoption must never provision —
 // it never invokes `git worktree add` under any path.
 func TestAdoptCurrentCheckoutNeverRunsWorktreeAdd(t *testing.T) {
+	t.Parallel()
 	td := bindingTestDeps(t)
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "feature")
@@ -181,6 +183,7 @@ func TestAdoptCurrentCheckoutNeverRunsWorktreeAdd(t *testing.T) {
 // the Queue into a provisioned (managed) worktree must never overwrite the
 // Queue's binding — teardown ownership stays intact.
 func TestAdoptCurrentCheckoutDoesNotClobberManagedBinding(t *testing.T) {
+	t.Parallel()
 	td := bindingTestDeps(t)
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "feature")
@@ -216,6 +219,7 @@ func TestAdoptCurrentCheckoutDoesNotClobberManagedBinding(t *testing.T) {
 // TestAdoptCurrentCheckoutShapeMatchesBindWorktree: an implement-adopted binding
 // is identical in shape to a bind-worktree adoption — both are Adopt() records.
 func TestAdoptCurrentCheckoutShapeMatchesBindWorktree(t *testing.T) {
+	t.Parallel()
 	td := bindingTestDeps(t)
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "feature")

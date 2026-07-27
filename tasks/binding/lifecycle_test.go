@@ -17,9 +17,7 @@ import (
 
 func lifecycleTestDeps(t *testing.T) *tasks.Deps {
 	t.Helper()
-	dir := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", dir)
-	return &tasks.Deps{FS: routeTestDeps(t).FS, Git: routeTestDeps(t).Git}
+	return isolatedTasksDeps(t)
 }
 
 func seedLifecycleBinding(t *testing.T, td *tasks.Deps, repoPath, setID string, b Binding) string {
@@ -45,6 +43,7 @@ func loadLifecycleBindings(t *testing.T, td *tasks.Deps) map[string]Binding {
 }
 
 func TestUnbindAdoptedRetainsCheckout(t *testing.T) {
+	t.Parallel()
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "adopted-branch")
 	td := lifecycleTestDeps(t)
@@ -79,6 +78,7 @@ func TestUnbindAdoptedRetainsCheckout(t *testing.T) {
 }
 
 func TestUnbindProvisionedRetainsCheckout(t *testing.T) {
+	t.Parallel()
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "provisioned-branch")
 	td := lifecycleTestDeps(t)
@@ -116,6 +116,7 @@ func TestUnbindProvisionedRetainsCheckout(t *testing.T) {
 }
 
 func TestTeardownManagedWorktreeRemovesCheckoutAndBranch(t *testing.T) {
+	t.Parallel()
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "managed-teardown")
 	td := lifecycleTestDeps(t)
@@ -139,6 +140,7 @@ func TestTeardownManagedWorktreeRemovesCheckoutAndBranch(t *testing.T) {
 }
 
 func TestBindWorktreeCreatesAdoptedBinding(t *testing.T) {
+	t.Parallel()
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "my-branch")
 	td := lifecycleTestDeps(t)
@@ -174,6 +176,7 @@ func TestBindWorktreeCreatesAdoptedBinding(t *testing.T) {
 // per-project git fan-out is never invoked (ADR-0060). The project deps carry a
 // spy git that fails the test if touched.
 func TestBindWorktreeProjectNameSkipsDetect(t *testing.T) {
+	t.Parallel()
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "explicit-branch")
 	td := lifecycleTestDeps(t)
@@ -212,6 +215,7 @@ func TestBindWorktreeProjectNameSkipsDetect(t *testing.T) {
 // TestBindWorktreeEmptyProjectNameFallsBack verifies the cwd-based path (empty
 // ProjectName) still resolves the label via DetectProject.
 func TestBindWorktreeEmptyProjectNameFallsBack(t *testing.T) {
+	t.Parallel()
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "fallback-branch")
 	td := lifecycleTestDeps(t)
@@ -237,6 +241,7 @@ func TestBindWorktreeEmptyProjectNameFallsBack(t *testing.T) {
 }
 
 func TestBindWorktreeRefusesAlreadyBoundWithoutForce(t *testing.T) {
+	t.Parallel()
 	repo := initAdoptRepo(t)
 	wt1 := addLinkedWorktree(t, repo, "branch-1")
 	wt2 := addLinkedWorktree(t, repo, "branch-2")
@@ -284,6 +289,7 @@ func TestBindWorktreeRefusesAlreadyBoundWithoutForce(t *testing.T) {
 }
 
 func TestBindWorktreeRefusesWhileLocked(t *testing.T) {
+	t.Parallel()
 	repo := initAdoptRepo(t)
 	wt1 := addLinkedWorktree(t, repo, "branch-locked")
 	wt2 := addLinkedWorktree(t, repo, "branch-new")
@@ -317,6 +323,7 @@ func lockedBySet(setID string) func(string) *tasks.RuntimeLockStatus {
 // TestBindWorktreeSucceedsWhileOtherSetLocked: N sets can share one checkout
 // (ADR-0115/0116); an unrelated set's drain must not block re-pointing set-A.
 func TestBindWorktreeSucceedsWhileOtherSetLocked(t *testing.T) {
+	t.Parallel()
 	repo := initAdoptRepo(t)
 	wt1 := addLinkedWorktree(t, repo, "branch-shared")
 	wt2 := addLinkedWorktree(t, repo, "branch-new")
@@ -340,6 +347,7 @@ func TestBindWorktreeSucceedsWhileOtherSetLocked(t *testing.T) {
 // TestBindWorktreeRefusesWhileSameSetLocked: the refusal remains when set-A
 // itself holds the live runtime execution lock.
 func TestBindWorktreeRefusesWhileSameSetLocked(t *testing.T) {
+	t.Parallel()
 	repo := initAdoptRepo(t)
 	wt1 := addLinkedWorktree(t, repo, "branch-self")
 	wt2 := addLinkedWorktree(t, repo, "branch-self-new")
@@ -360,6 +368,7 @@ func TestBindWorktreeRefusesWhileSameSetLocked(t *testing.T) {
 // TestUnbindSucceedsWhileOtherSetLocked: unbinding set-A only deletes set-A's
 // binding row; an unrelated set-B drain on the shared checkout is untouched.
 func TestUnbindSucceedsWhileOtherSetLocked(t *testing.T) {
+	t.Parallel()
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "set-shared")
 	td := lifecycleTestDeps(t)
@@ -382,6 +391,7 @@ func TestUnbindSucceedsWhileOtherSetLocked(t *testing.T) {
 // TestUnbindRefusesWhileSameSetLocked: the refusal remains when set-A itself
 // holds the live runtime execution lock.
 func TestUnbindRefusesWhileSameSetLocked(t *testing.T) {
+	t.Parallel()
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "set-self")
 	td := lifecycleTestDeps(t)
@@ -403,6 +413,7 @@ func TestUnbindRefusesWhileSameSetLocked(t *testing.T) {
 }
 
 func TestUnbindRefusesWhileBusy(t *testing.T) {
+	t.Parallel()
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "set-busy")
 	td := lifecycleTestDeps(t)
@@ -428,6 +439,7 @@ func TestUnbindRefusesWhileBusy(t *testing.T) {
 }
 
 func TestUnbindNoopWhenUnbound(t *testing.T) {
+	t.Parallel()
 	td := lifecycleTestDeps(t)
 	hooks := LifecycleHooks{
 		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus {
@@ -446,6 +458,7 @@ func TestUnbindNoopWhenUnbound(t *testing.T) {
 }
 
 func TestUnbindNeedsConfirmUnlessYes(t *testing.T) {
+	t.Parallel()
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "set-done")
 	td := lifecycleTestDeps(t)
@@ -526,6 +539,7 @@ func managedIntentRecorded(t *testing.T, td *tasks.Deps, defPath, setID string) 
 // bind-worktree --managed on an unbound set records a managed intent and adopts
 // no checkout, leaving provisioning to the next Queue drain.
 func TestBindWorktreeManagedRecordsIntentOnUnboundSet(t *testing.T) {
+	t.Parallel()
 	repo := initAdoptRepo(t)
 	td := lifecycleTestDeps(t)
 	defPath := seedRegisteredSet(t, td, repo, "set-m")
@@ -557,6 +571,7 @@ func TestBindWorktreeManagedRecordsIntentOnUnboundSet(t *testing.T) {
 // acceptance criterion 2: --managed on a bound set refuses without --force,
 // leaving the binding and the (absent) intent untouched.
 func TestBindWorktreeManagedRefusesBoundWithoutForce(t *testing.T) {
+	t.Parallel()
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "bound-branch")
 	td := lifecycleTestDeps(t)
@@ -584,6 +599,7 @@ func TestBindWorktreeManagedRefusesBoundWithoutForce(t *testing.T) {
 // of acceptance criterion 2: with --force it drops the old binding forget-only
 // (the checkout and branch stay on disk) and records the managed intent.
 func TestBindWorktreeManagedForceDropsBindingRetainsCheckout(t *testing.T) {
+	t.Parallel()
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "bound-branch")
 	td := lifecycleTestDeps(t)
@@ -608,9 +624,8 @@ func TestBindWorktreeManagedForceDropsBindingRetainsCheckout(t *testing.T) {
 	if _, err := os.Stat(wt); err != nil {
 		t.Fatalf("old checkout must be retained on disk: %v", err)
 	}
-	// Use td.Git rather than runGitOutput here: the latter's routeTestDeps helper
-	// re-runs t.Setenv(XDG_DATA_HOME, ...) to a fresh empty dir, which would hide
-	// the just-written managed intent from the read below.
+	// Use td.Git rather than runGitOutput here: a fresh isolatedTasksDeps call
+	// would use a different store dir and hide the just-written managed intent.
 	if branch, err := td.Git.CommandInDir(repo, "branch", "--list", "bound-branch"); err != nil || strings.TrimSpace(branch) == "" {
 		t.Fatalf("old branch should still exist after forget-only drop (err=%v)", err)
 	}
@@ -623,6 +638,7 @@ func TestBindWorktreeManagedForceDropsBindingRetainsCheckout(t *testing.T) {
 // 3: an unrelated set's drain holding the old checkout's runtime lock does not
 // block the managed re-point (same-set-only guard, slice 02).
 func TestBindWorktreeManagedSucceedsWhileOtherSetLocked(t *testing.T) {
+	t.Parallel()
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "shared-branch")
 	td := lifecycleTestDeps(t)
@@ -650,6 +666,7 @@ func TestBindWorktreeManagedSucceedsWhileOtherSetLocked(t *testing.T) {
 // TestBindWorktreeManagedRefusesWhileSameSetLocked: the set's own live runtime
 // lock still refuses the re-point.
 func TestBindWorktreeManagedRefusesWhileSameSetLocked(t *testing.T) {
+	t.Parallel()
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "self-branch")
 	td := lifecycleTestDeps(t)

@@ -4,24 +4,20 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/glebglazov/pop/internal/deps"
 )
 
 func setupCustomTaskFixture(t *testing.T, tasks []Task) *execFixture {
 	t.Helper()
-	root := t.TempDir()
-	initExecutorGitRepo(t, root)
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	tasksDir := storageTasksDir(t, root)
-	setupManifest(t, tasksDir, "demo", tasks)
-	if _, err := RegisterWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
+	env := setupExecutorFixtureIsolated(t)
+	setupManifest(t, env.tasksDir, "demo", tasks)
+	if _, err := RegisterWith(env.deps(), env.tasksDir, DefaultStatePathWith(env.deps())); err != nil {
 		t.Fatal(err)
 	}
-	return &execFixture{root: root, tasksDir: tasksDir}
+	return env
 }
 
 func TestCompleteTaskOpenToDone(t *testing.T) {
+	t.Parallel()
 	env := setupExecutorFixture(t, false)
 
 	result, err := CompleteTaskWith(env.deps(), nil, nil, CompleteTaskOptions{
@@ -39,6 +35,7 @@ func TestCompleteTaskOpenToDone(t *testing.T) {
 }
 
 func TestCompleteTaskHITLOpenToDone(t *testing.T) {
+	t.Parallel()
 	env := setupCustomTaskFixture(t, []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "HITL", Status: "open"},
 	})
@@ -55,6 +52,7 @@ func TestCompleteTaskHITLOpenToDone(t *testing.T) {
 }
 
 func TestCompleteTaskFailedToDone(t *testing.T) {
+	t.Parallel()
 	env := setupFailedTaskFixture(t)
 
 	_, err := CompleteTaskWith(env.deps(), nil, nil, CompleteTaskOptions{
@@ -69,6 +67,7 @@ func TestCompleteTaskFailedToDone(t *testing.T) {
 }
 
 func TestCompleteTaskSkippedToDone(t *testing.T) {
+	t.Parallel()
 	env := setupCustomTaskFixture(t, []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "HITL", Status: "skipped"},
 	})
@@ -85,6 +84,7 @@ func TestCompleteTaskSkippedToDone(t *testing.T) {
 }
 
 func TestCompleteTaskSkippedBlockedByUndoneRejected(t *testing.T) {
+	t.Parallel()
 	env := setupCustomTaskFixture(t, []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "HITL", Status: "skipped", BlockedBy: []string{"01-a"}},
@@ -101,6 +101,7 @@ func TestCompleteTaskSkippedBlockedByUndoneRejected(t *testing.T) {
 }
 
 func TestCompleteTaskAlreadyDoneRejected(t *testing.T) {
+	t.Parallel()
 	env := setupCustomTaskFixture(t, []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
 	})
@@ -116,6 +117,7 @@ func TestCompleteTaskAlreadyDoneRejected(t *testing.T) {
 }
 
 func TestCompleteTaskBlockedByUndoneRejected(t *testing.T) {
+	t.Parallel()
 	env := setupCustomTaskFixture(t, []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open", BlockedBy: []string{"01-a"}},
@@ -133,6 +135,7 @@ func TestCompleteTaskBlockedByUndoneRejected(t *testing.T) {
 }
 
 func TestCompleteTaskBlockedByDoneAllowed(t *testing.T) {
+	t.Parallel()
 	env := setupCustomTaskFixture(t, []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open", BlockedBy: []string{"01-a"}},
@@ -149,6 +152,7 @@ func TestCompleteTaskBlockedByDoneAllowed(t *testing.T) {
 }
 
 func TestCompleteTaskRejectsBareIdentifier(t *testing.T) {
+	t.Parallel()
 	env := setupExecutorFixture(t, false)
 
 	_, err := CompleteTaskWith(env.deps(), nil, nil, CompleteTaskOptions{
@@ -159,6 +163,7 @@ func TestCompleteTaskRejectsBareIdentifier(t *testing.T) {
 }
 
 func TestCompleteTaskRejectsAbsolutePath(t *testing.T) {
+	t.Parallel()
 	env := setupExecutorFixture(t, false)
 
 	_, err := CompleteTaskWith(env.deps(), nil, nil, CompleteTaskOptions{
@@ -169,6 +174,7 @@ func TestCompleteTaskRejectsAbsolutePath(t *testing.T) {
 }
 
 func TestCompleteTaskRejectsBareFilename(t *testing.T) {
+	t.Parallel()
 	env := setupExecutorFixture(t, false)
 
 	_, err := CompleteTaskWith(env.deps(), nil, nil, CompleteTaskOptions{
@@ -179,6 +185,7 @@ func TestCompleteTaskRejectsBareFilename(t *testing.T) {
 }
 
 func TestCompleteTaskAcceptsTaskSetRelativeFile(t *testing.T) {
+	t.Parallel()
 	env := setupExecutorFixture(t, false)
 
 	_, err := CompleteTaskWith(env.deps(), nil, nil, CompleteTaskOptions{
@@ -192,6 +199,7 @@ func TestCompleteTaskAcceptsTaskSetRelativeFile(t *testing.T) {
 }
 
 func TestCompleteTaskDoesNotStageChanges(t *testing.T) {
+	t.Parallel()
 	env := setupExecutorFixture(t, false)
 	writeFile(t, filepath.Join(env.root, "impl.txt"), "human work\n")
 
@@ -213,13 +221,14 @@ func TestCompleteTaskDoesNotStageChanges(t *testing.T) {
 }
 
 func TestCompleteTaskProgressBeforeManifest(t *testing.T) {
+	t.Parallel()
 	env := setupExecutorFixture(t, false)
 	order := &writeOrderTracker{}
+	d := env.deps()
 	fs := &atomicBlockingFS{
-		FileSystem: deps.NewRealFileSystem(),
+		FileSystem: d.FS,
 		tracker:    order,
 	}
-	d := env.deps()
 	d.FS = fs
 
 	_, err := CompleteTaskWith(d, nil, nil, CompleteTaskOptions{
@@ -235,12 +244,13 @@ func TestCompleteTaskProgressBeforeManifest(t *testing.T) {
 }
 
 func TestCompleteTaskManifestFailureManualRepair(t *testing.T) {
+	t.Parallel()
 	env := setupExecutorFixture(t, false)
+	d := env.deps()
 	fs := &atomicBlockingFS{
-		FileSystem:        deps.NewRealFileSystem(),
+		FileSystem:        d.FS,
 		failManifestWrite: true,
 	}
-	d := env.deps()
 	d.FS = fs
 
 	_, err := CompleteTaskWith(d, nil, nil, CompleteTaskOptions{

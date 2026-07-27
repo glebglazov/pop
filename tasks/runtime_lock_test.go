@@ -38,22 +38,19 @@ func latestTerminalDrain(t *testing.T, d *Deps, runtimePath string) *store.Drain
 // store is real-disk-only, so these tests use the real filesystem and git.
 func drainTestRepo(t *testing.T) (*Deps, string) {
 	t.Helper()
+	d := newTestDeps(t)
 	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
 	repo := filepath.Join(root, "checkout")
 	if err := os.MkdirAll(repo, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	initExecutorGitRepo(t, repo)
-	d := &Deps{
-		FS:           deps.NewRealFileSystem(),
-		Git:          deps.NewRealGit(),
-		ProcessAlive: func(pid int) bool { return pid == os.Getpid() },
-	}
+	d.ProcessAlive = func(pid int) bool { return pid == os.Getpid() }
 	return d, repo
 }
 
 func TestReadRuntimeLockStatusIdleWhenNoDrain(t *testing.T) {
+	t.Parallel()
 	d, repo := drainTestRepo(t)
 	status := ReadRuntimeLockStatus(d, repo)
 	if status.Locked || status.Malformed || status.Metadata != nil {
@@ -62,6 +59,7 @@ func TestReadRuntimeLockStatusIdleWhenNoDrain(t *testing.T) {
 }
 
 func TestAcquireRuntimeLockForSetShowsLiveDrain(t *testing.T) {
+	t.Parallel()
 	d, repo := drainTestRepo(t)
 	lock, err := AcquireRuntimeLockForSet(d, repo, "demo", &bytes.Buffer{})
 	if err != nil {
@@ -79,6 +77,7 @@ func TestAcquireRuntimeLockForSetShowsLiveDrain(t *testing.T) {
 }
 
 func TestAcquireRuntimeLockForSetReleaseClearsLive(t *testing.T) {
+	t.Parallel()
 	d, repo := drainTestRepo(t)
 	lock, err := AcquireRuntimeLockForSet(d, repo, "demo", &bytes.Buffer{})
 	if err != nil {
@@ -101,6 +100,7 @@ func TestAcquireRuntimeLockForSetReleaseClearsLive(t *testing.T) {
 }
 
 func TestBeginDrainRefusesConcurrentSameSet(t *testing.T) {
+	t.Parallel()
 	d, repo := drainTestRepo(t)
 	first, err := AcquireRuntimeLockForSet(d, repo, "demo", &bytes.Buffer{})
 	if err != nil {
@@ -116,6 +116,7 @@ func TestBeginDrainRefusesConcurrentSameSet(t *testing.T) {
 }
 
 func TestBeginDrainRefusesConcurrentSameCheckoutDifferentSet(t *testing.T) {
+	t.Parallel()
 	d, repo := drainTestRepo(t)
 	first, err := AcquireRuntimeLockForSet(d, repo, "set-a", &bytes.Buffer{})
 	if err != nil {
@@ -129,9 +130,10 @@ func TestBeginDrainRefusesConcurrentSameCheckoutDifferentSet(t *testing.T) {
 }
 
 func TestBeginDrainStaleRunningDoesNotBlock(t *testing.T) {
-	_, repo := drainTestRepo(t)
+	t.Parallel()
+	d, repo := drainTestRepo(t)
 	// First drain owned by a dead PID; its running row is stale.
-	dead := &Deps{FS: deps.NewRealFileSystem(), Git: deps.NewRealGit(), ProcessAlive: func(int) bool { return false }}
+	dead := &Deps{FS: d.FS, Git: deps.NewRealGit(), ProcessAlive: func(int) bool { return false }}
 	stale, err := AcquireRuntimeLockForSet(dead, repo, "demo", &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("seed stale drain: %v", err)
@@ -139,7 +141,7 @@ func TestBeginDrainStaleRunningDoesNotBlock(t *testing.T) {
 	t.Cleanup(func() { _ = stale.Release() })
 
 	// A fresh start over the dead-PID row succeeds.
-	live := &Deps{FS: deps.NewRealFileSystem(), Git: deps.NewRealGit(), ProcessAlive: func(int) bool { return false }}
+	live := &Deps{FS: d.FS, Git: deps.NewRealGit(), ProcessAlive: func(int) bool { return false }}
 	h, err := BeginDrain(live, repo, "demo", &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("start over stale row: %v", err)
@@ -148,6 +150,7 @@ func TestBeginDrainStaleRunningDoesNotBlock(t *testing.T) {
 }
 
 func TestAcquireRuntimeLockPathScopedNoopWhenIdle(t *testing.T) {
+	t.Parallel()
 	d, repo := drainTestRepo(t)
 	lock, err := AcquireRuntimeLock(d, repo, &bytes.Buffer{})
 	if err != nil {
@@ -163,6 +166,7 @@ func TestAcquireRuntimeLockPathScopedNoopWhenIdle(t *testing.T) {
 }
 
 func TestAcquireRuntimeLockPathScopedRefusesWhileDrainLive(t *testing.T) {
+	t.Parallel()
 	d, repo := drainTestRepo(t)
 	drain, err := AcquireRuntimeLockForSet(d, repo, "demo", &bytes.Buffer{})
 	if err != nil {
@@ -178,9 +182,11 @@ func TestAcquireRuntimeLockPathScopedRefusesWhileDrainLive(t *testing.T) {
 }
 
 func TestDistinctReposDrainConcurrently(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
+	d.Git = deps.NewRealGit()
+	d.ProcessAlive = func(pid int) bool { return pid == os.Getpid() }
 	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	d := &Deps{FS: deps.NewRealFileSystem(), Git: deps.NewRealGit(), ProcessAlive: func(pid int) bool { return pid == os.Getpid() }}
 
 	repoA := filepath.Join(root, "a")
 	repoB := filepath.Join(root, "b")
@@ -211,6 +217,7 @@ func TestDistinctReposDrainConcurrently(t *testing.T) {
 }
 
 func TestRenderRuntimeLockStatus(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	renderRuntimeLock(&buf, &RuntimeLockStatus{
 		RuntimePath: "/tmp/runtime",

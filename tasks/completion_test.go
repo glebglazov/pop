@@ -278,7 +278,7 @@ func TestCompletionDoesNotPersistTaskState(t *testing.T) {
 	root := t.TempDir()
 	initGitRepo(t, root)
 	t.Setenv("XDG_DATA_HOME", root)
-	tasksDir := storageTasksDir(t, root)
+	tasksDir := storageTasksDir(t, DefaultDeps(), root)
 	writeCompletionTaskSet(t, tasksDir, "existing")
 	writeCompletionTaskSet(t, tasksDir, "new-prd")
 
@@ -366,7 +366,7 @@ func setupCompletionRepo(t *testing.T, root string) string {
 	t.Helper()
 	initGitRepo(t, root)
 	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	return storageTasksDir(t, root)
+	return storageTasksDir(t, DefaultDeps(), root)
 }
 
 // writeCompletionTaskSet creates a minimal valid Task set (no PRD pairing required).

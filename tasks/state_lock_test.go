@@ -16,6 +16,7 @@ import (
 )
 
 func TestStateLockPathUsesXDGData(t *testing.T) {
+	t.Parallel()
 	d := &Deps{FS: &deps.MockFileSystem{
 		GetenvFunc: func(key string) string {
 			if key == "XDG_DATA_HOME" {
@@ -32,9 +33,8 @@ func TestStateLockPathUsesXDGData(t *testing.T) {
 }
 
 func TestAcquireReleaseStateLock(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
-	d := &Deps{FS: deps.NewRealFileSystem()}
+	t.Parallel()
+	d := newTestDeps(t)
 
 	lock, err := acquireStateLock(d, &bytes.Buffer{}, false)
 	if err != nil {
@@ -64,12 +64,9 @@ func TestAcquireReleaseStateLock(t *testing.T) {
 }
 
 func TestStateLockRefusesLiveConcurrentUpdate(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
-	d := &Deps{
-		FS:           deps.NewRealFileSystem(),
-		ProcessAlive: func(pid int) bool { return pid == os.Getpid() },
-	}
+	t.Parallel()
+	d := newTestDeps(t)
+	d.ProcessAlive = func(pid int) bool { return pid == os.Getpid() }
 
 	first, err := acquireStateLock(d, &bytes.Buffer{}, false)
 	if err != nil {
@@ -84,12 +81,9 @@ func TestStateLockRefusesLiveConcurrentUpdate(t *testing.T) {
 }
 
 func TestStateLockRecoversStaleLock(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
-	d := &Deps{
-		FS:           deps.NewRealFileSystem(),
-		ProcessAlive: func(int) bool { return false },
-	}
+	t.Parallel()
+	d := newTestDeps(t)
+	d.ProcessAlive = func(int) bool { return false }
 
 	lockPath := StateLockPathWith(d)
 	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
@@ -116,9 +110,8 @@ func TestStateLockRecoversStaleLock(t *testing.T) {
 }
 
 func TestStateLockRecoversMalformedLock(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
-	d := &Deps{FS: deps.NewRealFileSystem()}
+	t.Parallel()
+	d := newTestDeps(t)
 
 	lockPath := StateLockPathWith(d)
 	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
@@ -140,10 +133,10 @@ func TestStateLockRecoversMalformedLock(t *testing.T) {
 }
 
 func TestUpdateGlobalStateRemovesLockAfterWrite(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
 	statePath := filepath.Join(root, "pop", "workloads-state.json")
-	d := DefaultDeps()
 
 	err := UpdateGlobalStateWith(d, statePath, func(state *GlobalState) error {
 		state.Entry("/project/a").TaskSets = append(state.Entry("/project/a").TaskSets, RegisteredTaskSet{ID: "a", Priority: 0})
@@ -158,7 +151,7 @@ func TestUpdateGlobalStateRemovesLockAfterWrite(t *testing.T) {
 		t.Fatalf("lock file still present: %v", err)
 	}
 
-	state, err := LoadGlobalState(statePath)
+	state, err := LoadGlobalStateWith(d, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,10 +161,10 @@ func TestUpdateGlobalStateRemovesLockAfterWrite(t *testing.T) {
 }
 
 func TestUpdateGlobalStateMergePreservesOtherProjects(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
 	statePath := filepath.Join(root, "state.json")
-	d := DefaultDeps()
 
 	initial := &GlobalState{
 		Version: StateVersion,
@@ -192,7 +185,7 @@ func TestUpdateGlobalStateMergePreservesOtherProjects(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	state, err := LoadGlobalState(statePath)
+	state, err := LoadGlobalStateWith(d, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,9 +200,8 @@ func TestUpdateGlobalStateMergePreservesOtherProjects(t *testing.T) {
 }
 
 func TestMigrateLegacyStateRefusesCorruptState(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
-	d := DefaultDeps()
+	t.Parallel()
+	d := newTestDeps(t)
 	// A surviving per-repo state.json with an unsupported version is surfaced by
 	// the fold run on first load, not silently dropped.
 	legacyPath := StatePathFor(filepath.Join(t.TempDir(), "tasks"))
@@ -238,9 +230,8 @@ func TestMigrateLegacyStateRefusesCorruptState(t *testing.T) {
 }
 
 func TestMigrateLegacyStateRefusesMalformedState(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
-	d := DefaultDeps()
+	t.Parallel()
+	d := newTestDeps(t)
 	legacyPath := StatePathFor(filepath.Join(t.TempDir(), "tasks"))
 	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -259,10 +250,10 @@ func TestMigrateLegacyStateRefusesMalformedState(t *testing.T) {
 }
 
 func TestConcurrentDistinctProjectUpdates(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
 	statePath := filepath.Join(root, "pop", "workloads-state.json")
-	d := DefaultDeps()
 
 	defA := filepath.Join(root, "project-a")
 	defB := filepath.Join(root, "project-b")
@@ -273,11 +264,11 @@ func TestConcurrentDistinctProjectUpdates(t *testing.T) {
 		{ID: "01-b", File: "01-b.md", Title: "B", Type: "AFK", Status: "open"},
 	})
 
-	canonA, err := CanonicalDefinitionPath(defA)
+	canonA, err := CanonicalDefinitionPathWith(d, defA)
 	if err != nil {
 		t.Fatal(err)
 	}
-	canonB, err := CanonicalDefinitionPath(defB)
+	canonB, err := CanonicalDefinitionPathWith(d, defB)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +300,7 @@ func TestConcurrentDistinctProjectUpdates(t *testing.T) {
 		}
 	}
 
-	state, err := LoadGlobalState(statePath)
+	state, err := LoadGlobalStateWith(d, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,8 +313,9 @@ func TestConcurrentDistinctProjectUpdates(t *testing.T) {
 }
 
 func TestRefreshConcurrentRegistrationAndPriority(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
 
 	defA := filepath.Join(root, "project-a")
 	defB := filepath.Join(root, "project-b")
@@ -334,12 +326,11 @@ func TestRefreshConcurrentRegistrationAndPriority(t *testing.T) {
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 
-	d := DefaultDeps()
-	canonA, err := CanonicalDefinitionPath(defA)
+	canonA, err := CanonicalDefinitionPathWith(d, defA)
 	if err != nil {
 		t.Fatal(err)
 	}
-	canonB, err := CanonicalDefinitionPath(defB)
+	canonB, err := CanonicalDefinitionPathWith(d, defB)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -379,7 +370,7 @@ func TestRefreshConcurrentRegistrationAndPriority(t *testing.T) {
 		}
 	}
 
-	state, err := LoadGlobalState(statePath)
+	state, err := LoadGlobalStateWith(d, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,10 +383,10 @@ func TestRefreshConcurrentRegistrationAndPriority(t *testing.T) {
 }
 
 func TestRefreshEmptyInspectionDoesNotCreateStateOrLock(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
-	statePath := DefaultStatePath()
-	d := DefaultDeps()
+	statePath := DefaultStatePathWith(d)
 
 	result, err := RefreshWith(d, root, statePath)
 	if err != nil {
@@ -413,18 +404,17 @@ func TestRefreshEmptyInspectionDoesNotCreateStateOrLock(t *testing.T) {
 }
 
 func TestRefreshReadOnlyDoesNotRewriteExistingState(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
 	setupManifest(t, root, "existing", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 	statePath := filepath.Join(root, "state.json")
-	canon, err := CanonicalDefinitionPath(root)
+	canon, err := CanonicalDefinitionPathWith(d, root)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	d := DefaultDeps()
 	seed := &GlobalState{
 		Version: StateVersion,
 		Tasks: map[string]*TaskEntry{

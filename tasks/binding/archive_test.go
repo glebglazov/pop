@@ -15,8 +15,7 @@ import (
 
 func archiveTestDeps(t *testing.T) *tasks.Deps {
 	t.Helper()
-	t.Setenv("XDG_DATA_HOME", filepath.Join(t.TempDir(), "xdg"))
-	return &tasks.Deps{FS: deps.NewRealFileSystem(), Git: deps.NewRealGit()}
+	return isolatedTasksDeps(t)
 }
 
 func archiveTestRepo(t *testing.T) string {
@@ -58,6 +57,7 @@ func seedArchiveBinding(t *testing.T, td *tasks.Deps, repo, setID string, b Bind
 }
 
 func TestPrepareManagedWorktreesForArchiveConfirmDeletesWorktree(t *testing.T) {
+	t.Parallel()
 	repo := archiveTestRepo(t)
 	wt := archiveTestWorktree(t, repo, "managed-branch")
 	td := archiveTestDeps(t)
@@ -90,6 +90,7 @@ func TestPrepareManagedWorktreesForArchiveConfirmDeletesWorktree(t *testing.T) {
 }
 
 func TestPrepareManagedWorktreesForArchiveDeclineAborts(t *testing.T) {
+	t.Parallel()
 	repo := archiveTestRepo(t)
 	wt := archiveTestWorktree(t, repo, "managed-branch")
 	td := archiveTestDeps(t)
@@ -120,6 +121,7 @@ func TestPrepareManagedWorktreesForArchiveDeclineAborts(t *testing.T) {
 }
 
 func TestPrepareManagedWorktreesForArchiveYesSkipsPrompt(t *testing.T) {
+	t.Parallel()
 	repo := archiveTestRepo(t)
 	wt := archiveTestWorktree(t, repo, "managed-branch")
 	td := archiveTestDeps(t)
@@ -143,6 +145,7 @@ func TestPrepareManagedWorktreesForArchiveYesSkipsPrompt(t *testing.T) {
 }
 
 func TestPrepareManagedWorktreesForArchiveSkipsAdoptedAndUnbound(t *testing.T) {
+	t.Parallel()
 	repo := archiveTestRepo(t)
 	wt := archiveTestWorktree(t, repo, "adopted-branch")
 	td := archiveTestDeps(t)

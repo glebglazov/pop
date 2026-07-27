@@ -182,7 +182,7 @@ func TestVerifyFailGateRegistersNonClaimingHold(t *testing.T) {
 		result:      &RunTaskSetResult{TaskSetID: "demo"},
 	}
 
-	refresh, err := RefreshWith(d, env.tasksDir, DefaultStatePath())
+	refresh, err := RefreshWith(d, env.tasksDir, DefaultStatePathWith(d))
 	if err != nil {
 		t.Fatalf("RefreshWith: %v", err)
 	}

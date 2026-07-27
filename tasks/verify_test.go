@@ -17,6 +17,7 @@ import (
 )
 
 func TestParseVerdict(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		raw          string
@@ -56,6 +57,7 @@ func TestParseVerdict(t *testing.T) {
 }
 
 func TestParseVerdictMalformedIncludesRawForHuman(t *testing.T) {
+	t.Parallel()
 	raw := "I think it is basically fine."
 	v, findings := ParseVerdict(raw)
 	if v != VerdictNeedsHuman {
@@ -71,13 +73,14 @@ func TestParseVerdictMalformedIncludesRawForHuman(t *testing.T) {
 // developer's real store.
 func setupVerifyFixture(t *testing.T, git *deps.MockGit) (*Deps, string) {
 	t.Helper()
+	d := newTestDeps(t)
 	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
 	defPath := filepath.Join(root, "tasks")
 	setupManifest(t, defPath, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
 	})
-	return &Deps{FS: deps.NewRealFileSystem(), Git: git}, defPath
+	d.Git = git
+	return d, defPath
 }
 
 // stubGit answers only the git commands the verify core issues, without touching
@@ -111,6 +114,7 @@ func readStoredVerdict(t *testing.T, d *Deps, repo, setID, sha string) *store.Ve
 }
 
 func TestVerifyResolvedSetRunsPrintsAndPersists(t *testing.T) {
+	t.Parallel()
 	d, defPath := setupVerifyFixture(t, stubGit("abc123abc123\n", "", ""))
 	var out bytes.Buffer
 	var gotPrompt string
@@ -154,6 +158,7 @@ func TestVerifyResolvedSetRunsPrintsAndPersists(t *testing.T) {
 }
 
 func TestVerifyResolvedSetForceOverwritesForSHA(t *testing.T) {
+	t.Parallel()
 	d, defPath := setupVerifyFixture(t, stubGit("shaX\n", "", ""))
 	run := func(output string) {
 		if _, err := verifyResolvedSet(d, nil, verifyCoreOptions{
@@ -177,6 +182,7 @@ func TestVerifyResolvedSetForceOverwritesForSHA(t *testing.T) {
 // path always invokes the Verifier, even when a PASS verdict is already cached
 // at the current HEAD, and overwrites it with the new result (ADR-0096).
 func TestVerifyResolvedSetForceRunsDespiteCachedPass(t *testing.T) {
+	t.Parallel()
 	d, defPath := setupVerifyFixture(t, stubGit("shaX\n", "", ""))
 	seedVerdict(t, d, store.VerifyVerdict{Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaX", Verdict: "PASS"})
 
@@ -205,6 +211,7 @@ func TestVerifyResolvedSetForceRunsDespiteCachedPass(t *testing.T) {
 }
 
 func TestVerifyResolvedSetMalformedResponseParksNeedsHuman(t *testing.T) {
+	t.Parallel()
 	d, defPath := setupVerifyFixture(t, stubGit("sha1\n", "", ""))
 	res, err := verifyResolvedSet(d, nil, verifyCoreOptions{
 		Repo: "/repo/.git", DefPath: defPath, RuntimePath: "/rt", SetID: "demo",
@@ -227,6 +234,7 @@ func TestVerifyResolvedSetMalformedResponseParksNeedsHuman(t *testing.T) {
 }
 
 func TestVerifyResolvedSetIncludesWorkDiffInPrompt(t *testing.T) {
+	t.Parallel()
 	d, defPath := setupVerifyFixture(t, stubGit("sha1\n", "commitHash1\n", "DIFF-BODY-MARKER"))
 	var gotPrompt string
 	if _, err := verifyResolvedSet(d, nil, verifyCoreOptions{
@@ -245,6 +253,7 @@ func TestVerifyResolvedSetIncludesWorkDiffInPrompt(t *testing.T) {
 }
 
 func TestVerifyResolvedSetIncludesSpecInPromptWhenPresent(t *testing.T) {
+	t.Parallel()
 	d, defPath := setupVerifyFixture(t, stubGit("sha1\n", "", ""))
 	specPath := filepath.Join(defPath, "demo", "spec.md")
 	if err := os.WriteFile(specPath, []byte("SPEC-BODY-MARKER\n"), 0o644); err != nil {
@@ -270,6 +279,7 @@ func TestVerifyResolvedSetIncludesSpecInPromptWhenPresent(t *testing.T) {
 }
 
 func TestVerifyResolvedSetOmitsSpecSectionWhenAbsent(t *testing.T) {
+	t.Parallel()
 	d, defPath := setupVerifyFixture(t, stubGit("sha1\n", "", ""))
 	var gotPrompt string
 	if _, err := verifyResolvedSet(d, nil, verifyCoreOptions{
@@ -288,6 +298,7 @@ func TestVerifyResolvedSetOmitsSpecSectionWhenAbsent(t *testing.T) {
 }
 
 func TestVerifyResolvedSetTreatsLegacyPRDAsSpecLess(t *testing.T) {
+	t.Parallel()
 	d, defPath := setupVerifyFixture(t, stubGit("sha1\n", "", ""))
 	legacyPath := filepath.Join(defPath, "demo", "prd.md")
 	if err := os.WriteFile(legacyPath, []byte("LEGACY-PRD-BODY-MARKER\n"), 0o644); err != nil {
@@ -310,6 +321,7 @@ func TestVerifyResolvedSetTreatsLegacyPRDAsSpecLess(t *testing.T) {
 }
 
 func TestReadSpecAbsentIsNotError(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	m := &Manifest{Dir: root}
 	d := &Deps{FS: deps.NewRealFileSystem()}
@@ -319,6 +331,7 @@ func TestReadSpecAbsentIsNotError(t *testing.T) {
 }
 
 func TestReadSpecPresentReturnsContent(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "spec.md"), []byte("  hello spec  \n"), 0o644); err != nil {
 		t.Fatalf("write spec.md: %v", err)
@@ -332,6 +345,7 @@ func TestReadSpecPresentReturnsContent(t *testing.T) {
 }
 
 func TestReadSpecDoesNotFallBackToLegacyPRD(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "prd.md"), []byte("legacy prd\n"), 0o644); err != nil {
 		t.Fatalf("write prd.md: %v", err)
@@ -344,6 +358,7 @@ func TestReadSpecDoesNotFallBackToLegacyPRD(t *testing.T) {
 }
 
 func TestVerifyResolvedSetUnknownSet(t *testing.T) {
+	t.Parallel()
 	d, defPath := setupVerifyFixture(t, stubGit("sha1\n", "", ""))
 	_, err := verifyResolvedSet(d, nil, verifyCoreOptions{
 		Repo: "/repo/.git", DefPath: defPath, RuntimePath: "/rt", SetID: "nope",
@@ -359,6 +374,7 @@ func TestVerifyResolvedSetUnknownSet(t *testing.T) {
 }
 
 func TestCommitSubjectPrefixMatchesCommitSubject(t *testing.T) {
+	t.Parallel()
 	setID := "2026-07-04-demo"
 	prefix := commitSubjectPrefix(setID)
 	subject := CommitSubject(setID, "01-a")
@@ -368,6 +384,7 @@ func TestCommitSubjectPrefixMatchesCommitSubject(t *testing.T) {
 }
 
 func TestFormatVerifyCommand(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		setID  string
@@ -439,6 +456,7 @@ func (r *scriptedVerifyRunner) Start(ctx context.Context, dir string, stdout, st
 }
 
 func TestRunConfiguredVerifierPersistsMultiAgentFallback(t *testing.T) {
+	t.Parallel()
 	taskSetDir := t.TempDir()
 	runner := &scriptedVerifyRunner{
 		scripts: []string{
@@ -500,6 +518,7 @@ func TestRunConfiguredVerifierPersistsMultiAgentFallback(t *testing.T) {
 }
 
 func TestRunConfiguredVerifierUnparseableOutputPersistsWithNeedsHumanVerdict(t *testing.T) {
+	t.Parallel()
 	taskSetDir := t.TempDir()
 	runner := &scriptedVerifyRunner{
 		scripts: []string{
@@ -537,6 +556,7 @@ func TestRunConfiguredVerifierUnparseableOutputPersistsWithNeedsHumanVerdict(t *
 }
 
 func TestVerifyResolvedSetCacheHitWritesNoRun(t *testing.T) {
+	t.Parallel()
 	d, defPath := setupVerifyFixture(t, stubGit("sha1\n", "", ""))
 	// Seed a cached verdict at sha1.
 	s, err := openDrainStore(d)
@@ -582,6 +602,7 @@ func TestVerifyResolvedSetCacheHitWritesNoRun(t *testing.T) {
 // flagged human-authored, carrying the note and the set's AFK scope — so status
 // derivation flips the set to verified with no change to ResolveVerifiedStatus.
 func TestVerifyResolvedSetAcceptWritesHumanAuthoredPass(t *testing.T) {
+	t.Parallel()
 	d, defPath := setupVerifyFixture(t, stubGit("shaACC\n", "", ""))
 	var out bytes.Buffer
 	res, err := verifyResolvedSet(d, nil, verifyCoreOptions{
@@ -618,6 +639,7 @@ func TestVerifyResolvedSetAcceptWritesHumanAuthoredPass(t *testing.T) {
 // non-PASS verdict already recorded at the current SHA (PASS idempotency on the
 // (repo, set, work_sha) key), so the human override wins.
 func TestVerifyResolvedSetAcceptOverridesNonPassAtSameSHA(t *testing.T) {
+	t.Parallel()
 	d, defPath := setupVerifyFixture(t, stubGit("shaX\n", "", ""))
 	seedVerdict(t, d, store.VerifyVerdict{Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaX", Verdict: "NEEDS-HUMAN", Findings: "needs a human decision"})
 
@@ -638,11 +660,12 @@ func TestVerifyResolvedSetAcceptOverridesNonPassAtSameSHA(t *testing.T) {
 // exercise the human over-cap path).
 func setupVerifyFixtureTasks(t *testing.T, git *deps.MockGit, tasks []Task) (*Deps, string) {
 	t.Helper()
+	d := newTestDeps(t)
 	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
 	defPath := filepath.Join(root, "tasks")
 	setupManifest(t, defPath, "demo", tasks)
-	return &Deps{FS: deps.NewRealFileSystem(), Git: git}, defPath
+	d.Git = git
+	return d, defPath
 }
 
 // TestVerifyResolvedSetRemediateFromNeedsHumanSpawnsTask: `pop tasks verify <set>
@@ -651,6 +674,7 @@ func setupVerifyFixtureTasks(t *testing.T, git *deps.MockGit, tasks []Task) (*De
 // human note, and invalidates the set's cached verdicts (ADR-0103). The Verifier
 // is not run.
 func TestVerifyResolvedSetRemediateFromNeedsHumanSpawnsTask(t *testing.T) {
+	t.Parallel()
 	d, defPath := setupVerifyFixture(t, stubGit("shaNH\n", "", ""))
 	// The auto path parks a NEEDS-HUMAN; a human authorises a remediation instead.
 	seedVerdict(t, d, store.VerifyVerdict{Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaNH", Verdict: "NEEDS-HUMAN", Findings: "the retry policy needs a human call"})
@@ -707,6 +731,7 @@ func TestVerifyResolvedSetRemediateFromNeedsHumanSpawnsTask(t *testing.T) {
 // spawned task is human-origin, so the derived depth resets to zero and the auto
 // budget is re-enabled (ADR-0105): the human push does not itself count.
 func TestVerifyResolvedSetRemediateOverCapSpawnsTask(t *testing.T) {
+	t.Parallel()
 	// The set already carries DefaultMaxRemediationDepth auto remediation tasks:
 	// the auto FIXABLE-under-cap path would spawn nothing.
 	d, defPath := setupVerifyFixtureTasks(t, stubGit("shaCap\n", "", ""), remediationSet(DefaultMaxRemediationDepth))
@@ -758,6 +783,7 @@ func TestVerifyResolvedSetRemediateOverCapSpawnsTask(t *testing.T) {
 // is folded into the Verifier prompt as context (ADR-0103), explicitly framed as
 // non-suppressing; an empty note adds no such section.
 func TestBuildVerifierPromptForwardFeedsAcceptedNote(t *testing.T) {
+	t.Parallel()
 	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), doneAFKSet(), nil)
 
 	withNote := buildVerifierPrompt(d, m, "sha1", "", "the retry cap is deliberate")
@@ -778,6 +804,7 @@ func TestBuildVerifierPromptForwardFeedsAcceptedNote(t *testing.T) {
 }
 
 func TestRunConfiguredVerifierAllAgentsQuotaPausedReturnsQuotaPause(t *testing.T) {
+	t.Parallel()
 	taskSetDir := t.TempDir()
 	runner := &scriptedVerifyRunner{
 		scripts: []string{
@@ -837,6 +864,7 @@ func instantVerifyRetryConfig(maxTries int) *config.Config {
 }
 
 func TestRunConfiguredVerifierDoesNotRetryCleanNeedsHuman(t *testing.T) {
+	t.Parallel()
 	taskSetDir := t.TempDir()
 	runner := &scriptedVerifyRunner{
 		scripts: []string{
@@ -860,6 +888,7 @@ func TestRunConfiguredVerifierDoesNotRetryCleanNeedsHuman(t *testing.T) {
 }
 
 func TestRunConfiguredVerifierRetriesUnparseableWithDelayNotice(t *testing.T) {
+	t.Parallel()
 	taskSetDir := t.TempDir()
 	runner := &scriptedVerifyRunner{
 		scripts: []string{
@@ -888,6 +917,7 @@ func TestRunConfiguredVerifierRetriesUnparseableWithDelayNotice(t *testing.T) {
 }
 
 func TestRunConfiguredVerifierFallsThroughAfterRetryExhausted(t *testing.T) {
+	t.Parallel()
 	taskSetDir := t.TempDir()
 	runner := &scriptedVerifyRunner{
 		scripts: []string{
@@ -918,6 +948,7 @@ func TestRunConfiguredVerifierFallsThroughAfterRetryExhausted(t *testing.T) {
 }
 
 func TestRunConfiguredVerifierTimeoutRetriesThenFallsThrough(t *testing.T) {
+	t.Parallel()
 	taskSetDir := t.TempDir()
 	// The fake process only has to outlast the 50ms attempt deadline below so
 	// every attempt times out; a small hang keeps the four-attempt run fast
@@ -942,6 +973,7 @@ func TestRunConfiguredVerifierTimeoutRetriesThenFallsThrough(t *testing.T) {
 }
 
 func TestRunConfiguredVerifierTimeoutRetriesThenParses(t *testing.T) {
+	t.Parallel()
 	taskSetDir := t.TempDir()
 	// First attempt hangs past the deadline (timeout); the retry returns a
 	// clean PASS, proving a verify timeout is retry-eligible and consumes a slot.
@@ -966,6 +998,7 @@ func TestRunConfiguredVerifierTimeoutRetriesThenParses(t *testing.T) {
 }
 
 func TestRunConfiguredVerifierUsesVerifyMaxTriesOverride(t *testing.T) {
+	t.Parallel()
 	taskSetDir := t.TempDir()
 	runner := &scriptedVerifyRunner{
 		scripts: []string{

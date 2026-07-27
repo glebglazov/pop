@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/glebglazov/pop/internal/deps"
 )
 
 func assertOpenTaskStatus(t *testing.T, env *execFixture, taskID string, want TaskStatus) {
@@ -20,6 +18,7 @@ func assertOpenTaskStatus(t *testing.T, env *execFixture, taskID string, want Ta
 }
 
 func TestBuildOpenSelectionThreeWaySplit(t *testing.T) {
+	t.Parallel()
 	m := &Manifest{Tasks: []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed"},
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "skipped"},
@@ -42,6 +41,7 @@ func TestBuildOpenSelectionThreeWaySplit(t *testing.T) {
 }
 
 func TestOpenTasksBatchApply(t *testing.T) {
+	t.Parallel()
 	failedAfter := 3
 	env := setupCustomTaskFixture(t, []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed", FailedAfter: &failedAfter},
@@ -90,13 +90,14 @@ func TestOpenTasksBatchApply(t *testing.T) {
 }
 
 func TestOpenTasksOneManifestWriteAfterAllProgress(t *testing.T) {
+	t.Parallel()
 	env := setupCustomTaskFixture(t, []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed"},
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "skipped"},
 	})
 	order := &writeOrderTracker{}
 	d := env.deps()
-	d.FS = &atomicBlockingFS{FileSystem: deps.NewRealFileSystem(), tracker: order}
+	d.FS = &atomicBlockingFS{FileSystem: d.FS, tracker: order}
 
 	_, err := OpenTasksWith(d, nil, nil, OpenTasksOptions{
 		ResolveInput:    ResolveInput{CWD: env.root},
@@ -125,6 +126,7 @@ func TestOpenTasksOneManifestWriteAfterAllProgress(t *testing.T) {
 }
 
 func TestOpenTasksAlreadyOpenRejected(t *testing.T) {
+	t.Parallel()
 	env := setupCustomTaskFixture(t, []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
@@ -141,6 +143,7 @@ func TestOpenTasksAlreadyOpenRejected(t *testing.T) {
 }
 
 func TestOpenTasksDoneReopensInBatch(t *testing.T) {
+	t.Parallel()
 	// A Done task reopens like Failed/Skipped — it is the inverse of complete
 	// (ADR-0053). Mixing Failed and Done in one batch reopens both.
 	env := setupCustomTaskFixture(t, []Task{
@@ -167,6 +170,7 @@ func TestOpenTasksDoneReopensInBatch(t *testing.T) {
 }
 
 func TestOpenTasksEmptySelectionNoop(t *testing.T) {
+	t.Parallel()
 	env := setupCustomTaskFixture(t, []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed"},
 	})
@@ -189,6 +193,7 @@ func TestOpenTasksEmptySelectionNoop(t *testing.T) {
 }
 
 func TestOpenTasksTrailingSlashTarget(t *testing.T) {
+	t.Parallel()
 	env := setupCustomTaskFixture(t, []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "skipped"},
 	})

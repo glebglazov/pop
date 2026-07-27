@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
-
-	"github.com/glebglazov/pop/internal/deps"
 )
 
 // writeLegacyStateFile hand-writes a retired per-repository state.json at
@@ -32,8 +30,8 @@ func writeLegacyStateFile(t *testing.T, statePath string, tasks map[string]*Task
 // every registration's priority, archived, and auto-drain bit exactly and keeps
 // registration order, then retires the file (the data must not be lost).
 func TestMigrateLegacyStateFilePreservesBitsAndOrder(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	d := &Deps{FS: deps.NewRealFileSystem()}
+	t.Parallel()
+	d := newTestDeps(t)
 	defPath := filepath.Join(t.TempDir(), "alpha", "tasks")
 	statePath := StatePathFor(defPath)
 	writeLegacyStateFile(t, statePath, map[string]*TaskEntry{
@@ -74,8 +72,8 @@ func TestMigrateLegacyStateFilePreservesBitsAndOrder(t *testing.T) {
 // TestMigrateLegacyStateFileStoreWins verifies a (def, set) already in the store
 // is not clobbered by a stale entry left in a surviving state.json.
 func TestMigrateLegacyStateFileStoreWins(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	d := &Deps{FS: deps.NewRealFileSystem()}
+	t.Parallel()
+	d := newTestDeps(t)
 	defPath := filepath.Join(t.TempDir(), "beta", "tasks")
 	statePath := StatePathFor(defPath)
 
@@ -104,15 +102,14 @@ func TestMigrateLegacyStateFileStoreWins(t *testing.T) {
 // directly. The retired auto_drain manifest key is ignored, so the row registers
 // with auto-drain off (ADR-0115).
 func TestRegisterWritesIntoStoreTable(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
 	taskDir := filepath.Join(root, "tbl-set")
 	writeTaskMD(t, taskDir, "01-a.md", "## Acceptance criteria\n\n- [ ] ok\n")
 	writeManifestWithSetKeys(t, taskDir, []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	}, map[string]any{"auto_drain": true})
-
-	d := DefaultDeps()
 	result, err := RegisterWith(d, root, StatePathFor(root))
 	if err != nil {
 		t.Fatal(err)

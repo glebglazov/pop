@@ -5,11 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/glebglazov/pop/internal/deps"
 )
 
 func TestBuildSkipSelectionThreeWaySplit(t *testing.T) {
+	t.Parallel()
 	m := &Manifest{Tasks: []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "skipped"},
@@ -39,6 +38,7 @@ func TestBuildSkipSelectionThreeWaySplit(t *testing.T) {
 }
 
 func TestSkipTasksBatchApply(t *testing.T) {
+	t.Parallel()
 	env := setupCustomTaskFixture(t, []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "HITL", Status: "open"},
@@ -78,13 +78,14 @@ func TestSkipTasksBatchApply(t *testing.T) {
 }
 
 func TestSkipTasksOneManifestWriteAfterAllProgress(t *testing.T) {
+	t.Parallel()
 	env := setupCustomTaskFixture(t, []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open"},
 	})
 	order := &writeOrderTracker{}
 	d := env.deps()
-	d.FS = &atomicBlockingFS{FileSystem: deps.NewRealFileSystem(), tracker: order}
+	d.FS = &atomicBlockingFS{FileSystem: d.FS, tracker: order}
 
 	_, err := SkipTasksWith(d, nil, nil, SkipTasksOptions{
 		ResolveInput:    ResolveInput{CWD: env.root},
@@ -113,6 +114,7 @@ func TestSkipTasksOneManifestWriteAfterAllProgress(t *testing.T) {
 }
 
 func TestSkipTasksAlreadySkippedRejected(t *testing.T) {
+	t.Parallel()
 	env := setupCustomTaskFixture(t, []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "skipped"},
 	})
@@ -129,6 +131,7 @@ func TestSkipTasksAlreadySkippedRejected(t *testing.T) {
 }
 
 func TestSkipTasksDoneRejectedBeforeAnyWrite(t *testing.T) {
+	t.Parallel()
 	env := setupCustomTaskFixture(t, []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "done"},
@@ -152,6 +155,7 @@ func TestSkipTasksDoneRejectedBeforeAnyWrite(t *testing.T) {
 }
 
 func TestSkipTasksEmptySelectionNoop(t *testing.T) {
+	t.Parallel()
 	env := setupCustomTaskFixture(t, []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
@@ -174,6 +178,7 @@ func TestSkipTasksEmptySelectionNoop(t *testing.T) {
 }
 
 func TestSkipTasksTrailingSlashTarget(t *testing.T) {
+	t.Parallel()
 	env := setupCustomTaskFixture(t, []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})

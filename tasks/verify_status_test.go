@@ -2,7 +2,6 @@ package tasks
 
 import (
 	"io"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +16,7 @@ func verdictPtr(v Verdict) *Verdict { return &v }
 // TestDeriveStatusWithVerdictDisabled locks the default: with verification off,
 // the verdict is ignored entirely and status derives from the manifest alone.
 func TestDeriveStatusWithVerdictDisabled(t *testing.T) {
+	t.Parallel()
 	pureAFKDone := []Task{
 		{ID: "01-a", Type: "AFK", Status: "done"},
 		{ID: "02-b", Type: "AFK", Status: "done"},
@@ -51,6 +51,7 @@ func TestDeriveStatusWithVerdictDisabled(t *testing.T) {
 // verdict only decides the terminal zone (AFK work complete); every other
 // manifest status is untouched, including BLOCKED.
 func TestDeriveStatusWithVerdictEnabled(t *testing.T) {
+	t.Parallel()
 	pureAFKDone := []Task{
 		{ID: "01-a", Type: "AFK", Status: "done"},
 		{ID: "02-b", Type: "AFK", Status: "done"},
@@ -122,9 +123,9 @@ func verifyStatusGit(commonDir, head string) *deps.MockGit {
 // deps whose git reports the given common dir and HEAD.
 func setupVerifyStatusDeps(t *testing.T, commonDir, head string) *Deps {
 	t.Helper()
-	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	return &Deps{FS: deps.NewRealFileSystem(), Git: verifyStatusGit(commonDir, head)}
+	d := newTestDeps(t)
+	d.Git = verifyStatusGit(commonDir, head)
+	return d
 }
 
 func putStatusVerdict(t *testing.T, d *Deps, repo, setID, sha, verdict, findings string) {
@@ -161,6 +162,7 @@ func rowStatus(result *RefreshResult, id string) TaskSetStatus {
 }
 
 func TestApplyVerifyVerdictsDisabledIsNoOp(t *testing.T) {
+	t.Parallel()
 	d := setupVerifyStatusDeps(t, "/repo/.git\n", "shaCUR\n")
 	putStatusVerdict(t, d, "/repo/.git", "demo", "shaCUR", "NEEDS-HUMAN", "bad")
 
@@ -174,6 +176,7 @@ func TestApplyVerifyVerdictsDisabledIsNoOp(t *testing.T) {
 }
 
 func TestApplyVerifyVerdictsEnabledGatesOnVerdict(t *testing.T) {
+	t.Parallel()
 	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
 
 	cases := []struct {
@@ -229,6 +232,7 @@ func TestApplyVerifyVerdictsEnabledGatesOnVerdict(t *testing.T) {
 // a NEEDS-HUMAN verdict at the current SHA that would otherwise force
 // VERIFY-FAILED / NEEDS-VERIFY.
 func TestApplyVerifyVerdictsSkipsArchivedView(t *testing.T) {
+	t.Parallel()
 	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
 	d := setupVerifyStatusDeps(t, "/repo/.git\n", "shaCUR\n")
 	putStatusVerdict(t, d, "/repo/.git", "demo", "shaCUR", "NEEDS-HUMAN", "would fail if graded")
@@ -246,9 +250,8 @@ func TestApplyVerifyVerdictsSkipsArchivedView(t *testing.T) {
 // path: sets sharing one checkout resolve its repo identity and HEAD once, not
 // per row, and a non-terminal row forks no git at all.
 func TestApplyVerifyVerdictsMemoizesCheckoutResolution(t *testing.T) {
+	t.Parallel()
 	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
-	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
 	var commonDirCalls, headCalls int
 	git := &deps.MockGit{CommandInDirFunc: func(dir string, args ...string) (string, error) {
 		switch {
@@ -261,7 +264,8 @@ func TestApplyVerifyVerdictsMemoizesCheckoutResolution(t *testing.T) {
 		}
 		return "", nil
 	}}
-	d := &Deps{FS: deps.NewRealFileSystem(), Git: git}
+	d := newTestDeps(t)
+	d.Git = git
 
 	doneM := &Manifest{Valid: true, Stem: "d", Tasks: []Task{{ID: "01", File: "01.md", Type: "AFK", Status: "done"}}}
 	readyM := &Manifest{Valid: true, Stem: "r", Tasks: []Task{{ID: "01", File: "01.md", Type: "AFK", Status: "open"}}}
@@ -296,6 +300,7 @@ func TestApplyVerifyVerdictsMemoizesCheckoutResolution(t *testing.T) {
 }
 
 func TestApplyVerifyVerdictsWithPerSetRuntime(t *testing.T) {
+	t.Parallel()
 	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
 	d := setupVerifyStatusDeps(t, "/repo/.git\n", "shaCUR\n")
 	putStatusVerdict(t, d, "/repo/.git", "bound", "shaCUR", "NEEDS-HUMAN", "bound set failed")
@@ -320,6 +325,7 @@ func TestApplyVerifyVerdictsWithPerSetRuntime(t *testing.T) {
 // a missing row (no manifest) and a ready row must be untouched even with the
 // feature enabled, so re-derivation never corrupts a MISSING set into MALFORMED.
 func TestApplyVerifyVerdictsLeavesNonTerminalRows(t *testing.T) {
+	t.Parallel()
 	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
 	d := setupVerifyStatusDeps(t, "/repo/.git\n", "shaCUR\n")
 
@@ -345,6 +351,7 @@ func TestApplyVerifyVerdictsLeavesNonTerminalRows(t *testing.T) {
 // row carries the Verifier findings and that a formerly-Done set moves out of
 // the Done group, and that `pop tasks status` renders the new label.
 func TestApplyVerifyVerdictsSurfacesFindingsAndReorders(t *testing.T) {
+	t.Parallel()
 	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
 	d := setupVerifyStatusDeps(t, "/repo/.git\n", "shaCUR\n")
 	putStatusVerdict(t, d, "/repo/.git", "demo", "shaCUR", "NEEDS-HUMAN", "the API contract drifted\nsecond line")
@@ -373,6 +380,7 @@ func TestApplyVerifyVerdictsSurfacesFindingsAndReorders(t *testing.T) {
 // whose HEAD differs from the PASS verdict's work SHA carries VerifiedAtSHA,
 // and that fresh PASS, non-PASS, and non-immunized rows leave it empty.
 func TestApplyVerifyVerdictsSetsVerifiedAtSHA(t *testing.T) {
+	t.Parallel()
 	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
 
 	cases := []struct {
@@ -413,6 +421,7 @@ func TestApplyVerifyVerdictsSetsVerifiedAtSHA(t *testing.T) {
 // TestApplyVerifyVerdictsAwaitingApprovalVerifiedAtSHA confirms an
 // AWAITING-APPROVAL set immunized at a different SHA also carries VerifiedAtSHA.
 func TestApplyVerifyVerdictsAwaitingApprovalVerifiedAtSHA(t *testing.T) {
+	t.Parallel()
 	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
 	d := setupVerifyStatusDeps(t, "/repo/.git\n", "shaCUR\n")
 	putStatusVerdict(t, d, "/repo/.git", "demo", "shaOLD", "PASS", "")
@@ -440,6 +449,7 @@ func TestApplyVerifyVerdictsAwaitingApprovalVerifiedAtSHA(t *testing.T) {
 // suffix appears in the Details column for immunized DONE and AWAITING-APPROVAL
 // rows, and is absent for NEEDS-VERIFY / VERIFY-FAILED rows.
 func TestRenderVerifiedAtSHASuffix(t *testing.T) {
+	t.Parallel()
 	plainOut := outputFor(io.Discard)
 
 	done := Row{ID: "done", Status: StatusDone, Progress: "1/1 done", VerifiedAtSHA: "abcdef1234567890"}

@@ -45,18 +45,18 @@ func pathEqual(t *testing.T, want, got string) {
 }
 
 func TestResolveByExactProjectName(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
 	projectDir := filepath.Join(root, "my-app")
 	if err := os.MkdirAll(projectDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	initGitRepo(t, projectDir)
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
 
 	cfg := &config.Config{
 		Projects: []config.ProjectEntry{{Path: projectDir}},
 	}
-	d := DefaultDeps()
 	pd := project.DefaultDeps()
 
 	resolved, err := ResolvePathsWith(d, pd, func(string) (*config.Config, error) {
@@ -67,7 +67,7 @@ func TestResolveByExactProjectName(t *testing.T) {
 	}
 	pathEqual(t, projectDir, resolved.ProjectPath)
 	// The definition path is now the repository's Task storage tasks dir, not the project tree.
-	pathEqual(t, storageTasksDir(t, projectDir), resolved.DefinitionPath)
+	pathEqual(t, storageTasksDir(t, d, projectDir), resolved.DefinitionPath)
 }
 
 func TestResolveRejectsAmbiguousProjectName(t *testing.T) {
@@ -199,10 +199,11 @@ func TestDefinitionOverridePreservesExactDirectory(t *testing.T) {
 }
 
 func TestSetPrioritySignedAndStableTies(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
 	initGitRepo(t, root)
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	tasksDir := storageTasksDir(t, root)
+	tasksDir := storageTasksDir(t, d, root)
 	setupManifest(t, tasksDir, "a", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
@@ -210,8 +211,8 @@ func TestSetPrioritySignedAndStableTies(t *testing.T) {
 		{ID: "01-b", File: "01-b.md", Title: "B", Type: "AFK", Status: "open"},
 	})
 
-	statePath := DefaultStatePath()
-	canon, err := CanonicalDefinitionPath(tasksDir)
+	statePath := DefaultStatePathWith(d)
+	canon, err := CanonicalDefinitionPathWith(d, tasksDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,11 +224,10 @@ func TestSetPrioritySignedAndStableTies(t *testing.T) {
 		}}},
 		path: statePath,
 	}
-	if err := state.Save(); err != nil {
+	if err := state.SaveWith(d); err != nil {
 		t.Fatal(err)
 	}
 
-	d := DefaultDeps()
 	input := ResolveInput{CWD: root}
 
 	result, err := SetPriorityWith(d, project.DefaultDeps(), func(string) (*config.Config, error) {
@@ -252,19 +252,19 @@ func TestSetPrioritySignedAndStableTies(t *testing.T) {
 }
 
 func TestSetPriorityRejectsInvalidTaskSetIdentifier(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
 	initGitRepo(t, root)
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	tasksDir := storageTasksDir(t, root)
+	tasksDir := storageTasksDir(t, d, root)
 	setupManifest(t, tasksDir, "feature", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 
-	if _, err := RegisterWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
+	if _, err := RegisterWith(d, tasksDir, DefaultStatePathWith(d)); err != nil {
 		t.Fatal(err)
 	}
 
-	d := DefaultDeps()
 	input := ResolveInput{CWD: root}
 
 	for _, id := range []string{"feature.md", "Feature", "feat", "feature-framework"} {
@@ -334,25 +334,25 @@ func TestRefreshMarksNextPickInRender(t *testing.T) {
 }
 
 func TestDefinitionOverrideUsesCanonicalPathAsStateKey(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
 	defRoot := filepath.Join(root, "planning")
 	setupManifest(t, defRoot, "x", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 
-	d := DefaultDeps()
-	result, err := RegisterWith(d, defRoot, DefaultStatePath())
+	result, err := RegisterWith(d, defRoot, DefaultStatePathWith(d))
 	if err != nil {
 		t.Fatal(err)
 	}
 	pathEqual(t, defRoot, result.DefinitionPath)
 
-	state, err := LoadGlobalState(DefaultStatePath())
+	state, err := LoadGlobalStateWith(d, DefaultStatePathWith(d))
 	if err != nil {
 		t.Fatal(err)
 	}
-	canon, _ := CanonicalDefinitionPath(defRoot)
+	canon, _ := CanonicalDefinitionPathWith(d, defRoot)
 	if state.Tasks[canon] == nil {
 		t.Fatalf("state keys = %#v", state.Tasks)
 	}

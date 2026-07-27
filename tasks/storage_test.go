@@ -15,9 +15,8 @@ import (
 // reports a fixed common directory regardless of the directory queried.
 func storageDeps(t *testing.T, dataHome, commonDir string) *Deps {
 	t.Helper()
-	t.Setenv("XDG_DATA_HOME", dataHome)
 	return &Deps{
-		FS: deps.NewRealFileSystem(),
+		FS: testFSWithDataHome(dataHome),
 		Git: &deps.MockGit{
 			CommandInDirFunc: func(dir string, args ...string) (string, error) {
 				if len(args) >= 2 && args[0] == "rev-parse" && args[1] == "--git-common-dir" {
@@ -40,6 +39,7 @@ func canonical(t *testing.T, path string) string {
 }
 
 func TestShowPathCreatesStorageAndMarker(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	dataHome := filepath.Join(root, "data")
 	commonDir := filepath.Join(root, "repo", ".git")
@@ -87,6 +87,7 @@ func TestShowPathCreatesStorageAndMarker(t *testing.T) {
 }
 
 func TestShowStorageRootCreatesStorageAndMarker(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	dataHome := filepath.Join(root, "data")
 	commonDir := filepath.Join(root, "repo", ".git")
@@ -139,6 +140,7 @@ func TestShowStorageRootCreatesStorageAndMarker(t *testing.T) {
 }
 
 func TestShowPathIdempotent(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	dataHome := filepath.Join(root, "data")
 	commonDir := filepath.Join(root, "repo", ".git")
@@ -174,6 +176,7 @@ func TestShowPathIdempotent(t *testing.T) {
 }
 
 func TestAllWorktreesResolveSameStorage(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	dataHome := filepath.Join(root, "data")
 	commonDir := filepath.Join(root, "repo", ".bare")
@@ -204,6 +207,7 @@ func TestAllWorktreesResolveSameStorage(t *testing.T) {
 }
 
 func TestShowPathBareTaskSet(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	dataHome := filepath.Join(root, "data")
 	commonDir := filepath.Join(root, "repo", ".git")
@@ -232,6 +236,7 @@ func TestShowPathBareTaskSet(t *testing.T) {
 }
 
 func TestShowPathUnknownTaskSetListsValid(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	dataHome := filepath.Join(root, "data")
 	commonDir := filepath.Join(root, "repo", ".git")
@@ -264,6 +269,7 @@ func TestShowPathUnknownTaskSetListsValid(t *testing.T) {
 }
 
 func TestShowPathUnknownTaskSetEmptyStorage(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	dataHome := filepath.Join(root, "data")
 	commonDir := filepath.Join(root, "repo", ".git")
@@ -282,11 +288,11 @@ func TestShowPathUnknownTaskSetEmptyStorage(t *testing.T) {
 }
 
 func TestShowPathOutsideGitRepo(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	dataHome := filepath.Join(root, "data")
-	t.Setenv("XDG_DATA_HOME", dataHome)
 	d := &Deps{
-		FS: deps.NewRealFileSystem(),
+		FS: testFSWithDataHome(dataHome),
 		Git: &deps.MockGit{
 			CommandInDirFunc: func(dir string, args ...string) (string, error) {
 				return "", errors.New("fatal: not a git repository")
@@ -318,6 +324,7 @@ func TestShowPathOutsideGitRepo(t *testing.T) {
 }
 
 func TestListStoredTaskSetIDsReadOnly(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	dataHome := filepath.Join(root, "data")
 	commonDir := filepath.Join(root, "repo", ".git")
@@ -366,12 +373,12 @@ func TestListStoredTaskSetIDsReadOnly(t *testing.T) {
 }
 
 func TestRespectsHomeFallbackWithoutXDG(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	commonDir := filepath.Join(root, "repo", ".git")
 	if err := os.MkdirAll(commonDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("XDG_DATA_HOME", "")
 	home := filepath.Join(root, "home")
 	if err := os.MkdirAll(home, 0o755); err != nil {
 		t.Fatal(err)

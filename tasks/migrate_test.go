@@ -7,8 +7,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-
-	"github.com/glebglazov/pop/internal/deps"
 )
 
 // recordingGit reports a fixed common directory and toplevel while recording every
@@ -57,11 +55,10 @@ func newMigrateEnv(t *testing.T) *migrateEnv {
 	if err := os.MkdirAll(commonDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("XDG_DATA_HOME", dataHome)
 
 	git := &recordingGit{commonDir: commonDir, toplevel: worktree}
 	d := &Deps{
-		FS:     deps.NewRealFileSystem(),
+		FS:     testFSWithDataHome(dataHome),
 		Git:    git,
 		Runner: fakeAwareRunner{},
 	}
@@ -150,6 +147,7 @@ func (e *migrateEnv) loadRepoState(t *testing.T) *GlobalState {
 }
 
 func TestMigrateMovesSetsAndRekeysState(t *testing.T) {
+	t.Parallel()
 	e := newMigrateEnv(t)
 	e.writeLegacySet(t, "set-a")
 	e.writeLegacySet(t, "set-b")
@@ -206,6 +204,7 @@ func TestMigrateMovesSetsAndRekeysState(t *testing.T) {
 }
 
 func TestMigrateCollisionSkips(t *testing.T) {
+	t.Parallel()
 	e := newMigrateEnv(t)
 	e.writeLegacySet(t, "set-a")
 	e.writeLegacySet(t, "set-collide")
@@ -257,6 +256,7 @@ func TestMigrateCollisionSkips(t *testing.T) {
 }
 
 func TestMigrateRemovesEmptyThoughts(t *testing.T) {
+	t.Parallel()
 	e := newMigrateEnv(t)
 	e.writeLegacySet(t, "set-a")
 
@@ -273,6 +273,7 @@ func TestMigrateRemovesEmptyThoughts(t *testing.T) {
 }
 
 func TestMigrateKeepsNonEmptyThoughts(t *testing.T) {
+	t.Parallel()
 	e := newMigrateEnv(t)
 	e.writeLegacySet(t, "set-a")
 	// A sibling note under thoughts/ must keep the directory alive.
@@ -297,6 +298,7 @@ func TestMigrateKeepsNonEmptyThoughts(t *testing.T) {
 }
 
 func TestMigrateNoOp(t *testing.T) {
+	t.Parallel()
 	e := newMigrateEnv(t)
 
 	result, err := Migrate(e.deps, e.worktree)
@@ -321,6 +323,7 @@ func TestMigrateNoOp(t *testing.T) {
 }
 
 func TestMigrateNeverTouchesGitConfigOrIgnore(t *testing.T) {
+	t.Parallel()
 	e := newMigrateEnv(t)
 	e.writeLegacySet(t, "set-a")
 

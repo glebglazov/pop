@@ -11,6 +11,7 @@ import (
 )
 
 func TestAgentCooldownPathUsesXDGData(t *testing.T) {
+	t.Parallel()
 	d := &Deps{FS: &deps.MockFileSystem{
 		GetenvFunc: func(key string) string {
 			if key == "XDG_DATA_HOME" {
@@ -27,9 +28,8 @@ func TestAgentCooldownPathUsesXDGData(t *testing.T) {
 }
 
 func TestAgentCooldownConcurrentUpdates(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", root)
-	d := &Deps{FS: deps.NewRealFileSystem()}
+	t.Parallel()
+	d := newTestDeps(t)
 
 	const writers = 10
 	var wg sync.WaitGroup
@@ -69,6 +69,7 @@ func TestAgentCooldownConcurrentUpdates(t *testing.T) {
 }
 
 func TestAgentQuotaCooldownUntilPolicyInTasks(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
 	fallback := 30 * time.Minute
 

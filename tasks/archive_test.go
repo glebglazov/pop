@@ -319,19 +319,19 @@ func TestLoadUnarchiveSetSelectionListsArchivedOnlyUncheckedFromRegistration(t *
 }
 
 func TestArchiveTaskSetsBatchArchivesAll(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	setupManifest(t, root, "done", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
 	})
 	setupManifest(t, root, "ready", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
-	if _, err := RegisterWith(DefaultDeps(), root, StatePathFor(root)); err != nil {
+	if _, err := RegisterWith(d, root, StatePathFor(root)); err != nil {
 		t.Fatal(err)
 	}
 
-	d := DefaultDeps()
 	result, err := ArchiveTaskSetsWith(d, nil, nil, ArchiveTaskSetsOptions{
 		ResolveInput: ResolveInput{DefinitionOverride: root, CWD: root},
 		TaskSetIDs:   []string{"done", "ready"},
@@ -342,11 +342,11 @@ func TestArchiveTaskSetsBatchArchivesAll(t *testing.T) {
 	if got := strings.Join(result.TaskSetIDs, ","); got != "done,ready" {
 		t.Fatalf("archived ids = %s", got)
 	}
-	state, err := LoadGlobalState(StatePathFor(root))
+	state, err := LoadGlobalStateWith(d, StatePathFor(root))
 	if err != nil {
 		t.Fatal(err)
 	}
-	canon, _ := CanonicalDefinitionPath(root)
+	canon, _ := CanonicalDefinitionPathWith(d, root)
 	for _, id := range []string{"done", "ready"} {
 		if !taskSetArchived(state, canon, id) {
 			t.Fatalf("%s not archived: %#v", id, state.Tasks[canon].TaskSets)
@@ -355,24 +355,24 @@ func TestArchiveTaskSetsBatchArchivesAll(t *testing.T) {
 }
 
 func TestUnarchiveTaskSetsRestoresSelection(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	setupManifest(t, root, "one", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 	setupManifest(t, root, "two", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
-	if _, err := RegisterWith(DefaultDeps(), root, StatePathFor(root)); err != nil {
+	if _, err := RegisterWith(d, root, StatePathFor(root)); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"one", "two"} {
-		if _, err := ArchiveTaskSetWith(DefaultDeps(), nil, nil, ResolveInput{DefinitionOverride: root, CWD: root}, id); err != nil {
+		if _, err := ArchiveTaskSetWith(d, nil, nil, ResolveInput{DefinitionOverride: root, CWD: root}, id); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	d := DefaultDeps()
 	result, err := UnarchiveTaskSetsWith(d, nil, nil, UnarchiveTaskSetsOptions{
 		ResolveInput: ResolveInput{DefinitionOverride: root, CWD: root},
 		TaskSetIDs:   []string{"one", "two"},
@@ -396,18 +396,18 @@ func TestUnarchiveTaskSetsRestoresSelection(t *testing.T) {
 	if selected == "" {
 		t.Fatalf("auto-selection did not see restored rows: %#v", result.Refresh.Rows)
 	}
-	completions, err := CompleteTaskSetIDsWith(DefaultDeps(), nil, nil, CompletionInput{DefinitionOverride: root}, "")
+	completions, err := CompleteTaskSetIDsWith(d, nil, nil, CompletionInput{DefinitionOverride: root}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Join(completions, ",") != "one,two" {
 		t.Fatalf("completion ids = %v, want restored sets", completions)
 	}
-	state, err := LoadGlobalState(StatePathFor(root))
+	state, err := LoadGlobalStateWith(d, StatePathFor(root))
 	if err != nil {
 		t.Fatal(err)
 	}
-	canon, _ := CanonicalDefinitionPath(root)
+	canon, _ := CanonicalDefinitionPathWith(d, root)
 	for _, id := range []string{"one", "two"} {
 		if taskSetArchived(state, canon, id) {
 			t.Fatalf("%s still archived: %#v", id, state.Tasks[canon].TaskSets)

@@ -5,11 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/glebglazov/pop/internal/deps"
 )
 
 func TestBuildCompleteSelectionLocksDone(t *testing.T) {
+	t.Parallel()
 	m := &Manifest{Tasks: []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open"},
@@ -32,6 +31,7 @@ func TestBuildCompleteSelectionLocksDone(t *testing.T) {
 }
 
 func TestCompleteTasksTopologicalApply(t *testing.T) {
+	t.Parallel()
 	env := setupCustomTaskFixture(t, []Task{
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open", BlockedBy: []string{"01-a"}},
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
@@ -70,13 +70,14 @@ func TestCompleteTasksTopologicalApply(t *testing.T) {
 }
 
 func TestCompleteTasksOneManifestWriteAfterAllProgress(t *testing.T) {
+	t.Parallel()
 	env := setupCustomTaskFixture(t, []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open", BlockedBy: []string{"01-a"}},
 	})
 	order := &writeOrderTracker{}
 	d := env.deps()
-	d.FS = &atomicBlockingFS{FileSystem: deps.NewRealFileSystem(), tracker: order}
+	d.FS = &atomicBlockingFS{FileSystem: d.FS, tracker: order}
 
 	_, err := CompleteTasksWith(d, nil, nil, CompleteTasksOptions{
 		ResolveInput:    ResolveInput{CWD: env.root},
@@ -105,6 +106,7 @@ func TestCompleteTasksOneManifestWriteAfterAllProgress(t *testing.T) {
 }
 
 func TestCompleteTasksBlockerRejectionNamesOffender(t *testing.T) {
+	t.Parallel()
 	env := setupCustomTaskFixture(t, []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open", BlockedBy: []string{"01-a"}},
@@ -129,6 +131,7 @@ func TestCompleteTasksBlockerRejectionNamesOffender(t *testing.T) {
 }
 
 func TestCompleteTasksSkippedBlockerSatisfies(t *testing.T) {
+	t.Parallel()
 	env := setupCustomTaskFixture(t, []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "HITL", Status: "skipped"},
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open", BlockedBy: []string{"01-a"}},
@@ -146,6 +149,7 @@ func TestCompleteTasksSkippedBlockerSatisfies(t *testing.T) {
 }
 
 func TestCompleteTasksAlreadyDoneRejected(t *testing.T) {
+	t.Parallel()
 	env := setupCustomTaskFixture(t, []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
 	})
@@ -162,6 +166,7 @@ func TestCompleteTasksAlreadyDoneRejected(t *testing.T) {
 }
 
 func TestCompleteTasksEmptySelectionNoop(t *testing.T) {
+	t.Parallel()
 	env := setupCustomTaskFixture(t, []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
@@ -184,6 +189,7 @@ func TestCompleteTasksEmptySelectionNoop(t *testing.T) {
 }
 
 func TestCompleteTasksTrailingSlashTarget(t *testing.T) {
+	t.Parallel()
 	env := setupCustomTaskFixture(t, []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})

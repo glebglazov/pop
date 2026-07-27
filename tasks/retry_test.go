@@ -118,6 +118,7 @@ func TestRunTaskConfigurableMaxTries(t *testing.T) {
 
 func installClaudeQuotaAgent(t *testing.T, root string) string {
 	t.Helper()
+	// ADR-0145: PATH stub — callers stay serial deliberately.
 	dir := filepath.Join(root, ".agent-bin")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -307,11 +308,11 @@ func TestRunTaskBookkeepingFailureManualRepair(t *testing.T) {
 		summary:   "done but bookkeeping fails",
 	})
 
+	d := env.deps()
 	fs := &atomicBlockingFS{
-		FileSystem:        deps.NewRealFileSystem(),
+		FileSystem:        d.FS,
 		failManifestWrite: true,
 	}
-	d := env.deps()
 	d.FS = fs
 
 	_, err := RunTaskWith(d, nil, nil, env.runOpts(true, agent))
@@ -399,11 +400,11 @@ func TestResetTaskDoneToOpen(t *testing.T) {
 func TestResetTaskProgressBeforeManifest(t *testing.T) {
 	env := setupFailedTaskFixture(t)
 	order := &writeOrderTracker{}
+	d := env.deps()
 	fs := &atomicBlockingFS{
-		FileSystem: deps.NewRealFileSystem(),
+		FileSystem: d.FS,
 		tracker:    order,
 	}
-	d := env.deps()
 	d.FS = fs
 
 	_, err := ResetTaskWith(d, nil, nil, ResetTaskOptions{
@@ -420,11 +421,11 @@ func TestResetTaskProgressBeforeManifest(t *testing.T) {
 
 func TestResetTaskFailureManualRepair(t *testing.T) {
 	env := setupFailedTaskFixture(t)
+	d := env.deps()
 	fs := &atomicBlockingFS{
-		FileSystem:        deps.NewRealFileSystem(),
+		FileSystem:        d.FS,
 		failManifestWrite: true,
 	}
-	d := env.deps()
 	d.FS = fs
 
 	_, err := ResetTaskWith(d, nil, nil, ResetTaskOptions{
@@ -594,11 +595,12 @@ func writeProcessGroupAgent(t *testing.T, root string, delay time.Duration) stri
 func setupFailedTaskFixture(t *testing.T) *execFixture {
 	t.Helper()
 	env := setupExecutorFixture(t, false)
-	m := LoadManifest(DefaultDeps(), "demo", env.demoManifest())
+	d := env.deps()
+	m := LoadManifest(d, "demo", env.demoManifest())
 	failedAfter := 2
 	m.Tasks[0].Status = "failed"
 	m.Tasks[0].FailedAfter = &failedAfter
-	if err := WriteManifestAtomic(DefaultDeps(), m); err != nil {
+	if err := WriteManifestAtomic(d, m); err != nil {
 		t.Fatal(err)
 	}
 	return env

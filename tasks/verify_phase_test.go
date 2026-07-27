@@ -42,7 +42,7 @@ func newVerifyPhaseRun(t *testing.T, verify func(string) (string, error)) (*impl
 		result:      &RunTaskSetResult{TaskSetID: "demo"},
 	}
 
-	refresh, err := RefreshWith(d, env.tasksDir, DefaultStatePath())
+	refresh, err := RefreshWith(d, env.tasksDir, DefaultStatePathWith(d))
 	if err != nil {
 		t.Fatalf("RefreshWith: %v", err)
 	}

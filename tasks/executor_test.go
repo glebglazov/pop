@@ -71,7 +71,7 @@ func TestRunTaskTargetsEligibleTaskPath(t *testing.T) {
 	setupManifest(t, env.tasksDir, "target", []Task{
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open"},
 	})
-	if _, err := RegisterWith(DefaultDeps(), env.tasksDir, DefaultStatePath()); err != nil {
+	if _, err := RegisterWith(env.deps(), env.tasksDir, DefaultStatePathWith(env.deps())); err != nil {
 		t.Fatal(err)
 	}
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{
@@ -163,6 +163,7 @@ func TestRunTaskNonInteractiveRefusal(t *testing.T) {
 }
 
 func TestRunTaskPiWeeklyQuotaPause(t *testing.T) {
+	// ADR-0145: PATH stub — stays serial deliberately.
 	env := setupExecutorFixture(t, false)
 	quotaLine := "429 Weekly usage limit reached. Resets in 9hr 4min. To continue using this model now, enable usage from your available balance."
 	writeFakePiAgent(t, env.root, quotaLine)
@@ -197,6 +198,7 @@ func TestRunTaskPiWeeklyQuotaPause(t *testing.T) {
 }
 
 func TestRunTaskPiQuotaPause(t *testing.T) {
+	// ADR-0145: PATH stub — stays serial deliberately.
 	env := setupExecutorFixture(t, false)
 	quotaLine := "429 5-hour usage limit reached. Resets in 7min. Upgrade to continue."
 	writeFakePiAgent(t, env.root, quotaLine)
@@ -580,6 +582,8 @@ func TestRunTaskDirtyCheckpointFailureDoesNotInvokeAgent(t *testing.T) {
 }
 
 func TestRunTaskSeparateRuntimePath(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
 	defRoot := filepath.Join(root, "definition")
 	runtimeRoot := filepath.Join(root, "runtime")
@@ -592,12 +596,11 @@ func TestRunTaskSeparateRuntimePath(t *testing.T) {
 	initExecutorGitRepo(t, defRoot)
 	initExecutorGitRepo(t, runtimeRoot)
 
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	tasksDir := storageTasksDir(t, defRoot)
+	tasksDir := storageTasksDir(t, d, defRoot)
 	setupManifest(t, tasksDir, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
-	if _, err := RegisterWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
+	if _, err := RegisterWith(d, tasksDir, DefaultStatePathWith(d)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -608,7 +611,7 @@ func TestRunTaskSeparateRuntimePath(t *testing.T) {
 		summary:    "runtime work",
 	})
 
-	env := &execFixture{root: defRoot, tasksDir: tasksDir}
+	env := &execFixture{root: defRoot, tasksDir: tasksDir, d: d}
 	opts := RunTaskOptions{
 		ResolveInput: ResolveInput{
 			CWD:             defRoot,
@@ -802,9 +805,9 @@ func (e *execFixture) demoTaskRef(_ *testing.T, file string) string {
 
 // storageTasksDir resolves the Task storage tasks directory for a repository checkout.
 // XDG_DATA_HOME must already be set so the storage location is deterministic.
-func storageTasksDir(t *testing.T, repoRoot string) string {
+func storageTasksDir(t *testing.T, d *Deps, repoRoot string) string {
 	t.Helper()
-	id, err := ResolveRepositoryIdentity(DefaultDeps(), repoRoot)
+	id, err := ResolveRepositoryIdentity(d, repoRoot)
 	if err != nil {
 		t.Fatalf("resolve storage: %v", err)
 	}
@@ -823,18 +826,8 @@ type fakeAgentConfig struct {
 
 func setupExecutorFixture(t *testing.T, interactive bool) *execFixture {
 	t.Helper()
-	root := t.TempDir()
-	initExecutorGitRepo(t, root)
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	tasksDir := storageTasksDir(t, root)
-	setupManifest(t, tasksDir, "demo", []Task{
-		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
-	})
-	if _, err := RegisterWith(DefaultDeps(), tasksDir, DefaultStatePath()); err != nil {
-		t.Fatal(err)
-	}
 	_ = interactive
-	return &execFixture{root: root, tasksDir: tasksDir}
+	return setupExecutorFixtureIsolated(t)
 }
 
 // setupExecutorFixtureIsolated is the parallel-safe executor fixture: store
@@ -967,7 +960,7 @@ func realGitInDir(dir string, args ...string) (string, error) {
 
 func assertTaskDone(t *testing.T, env *execFixture, taskID string) {
 	t.Helper()
-	m := LoadManifest(DefaultDeps(), "demo", env.demoManifest())
+	m := LoadManifest(env.deps(), "demo", env.demoManifest())
 	for _, task := range m.Tasks {
 		if task.ID == taskID && task.Status != "done" {
 			t.Fatalf("task %s status = %q", taskID, task.Status)
@@ -977,7 +970,7 @@ func assertTaskDone(t *testing.T, env *execFixture, taskID string) {
 
 func assertTaskOpen(t *testing.T, env *execFixture, taskID string) {
 	t.Helper()
-	m := LoadManifest(DefaultDeps(), "demo", env.demoManifest())
+	m := LoadManifest(env.deps(), "demo", env.demoManifest())
 	for _, task := range m.Tasks {
 		if task.ID == taskID && task.Status != "open" {
 			t.Fatalf("task %s status = %q, want open", taskID, task.Status)
@@ -987,7 +980,7 @@ func assertTaskOpen(t *testing.T, env *execFixture, taskID string) {
 
 func assertTaskSkipped(t *testing.T, env *execFixture, taskID string) {
 	t.Helper()
-	m := LoadManifest(DefaultDeps(), "demo", env.demoManifest())
+	m := LoadManifest(env.deps(), "demo", env.demoManifest())
 	for _, task := range m.Tasks {
 		if task.ID == taskID && task.Status != "skipped" {
 			t.Fatalf("task %s status = %q, want skipped", taskID, task.Status)
@@ -997,7 +990,7 @@ func assertTaskSkipped(t *testing.T, env *execFixture, taskID string) {
 
 func assertTaskFailed(t *testing.T, env *execFixture, taskID string, failedAfter int) {
 	t.Helper()
-	m := LoadManifest(DefaultDeps(), "demo", env.demoManifest())
+	m := LoadManifest(env.deps(), "demo", env.demoManifest())
 	for _, task := range m.Tasks {
 		if task.ID != taskID {
 			continue

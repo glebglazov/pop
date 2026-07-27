@@ -36,11 +36,11 @@ func gitForbidden(t *testing.T) deps.Git {
 }
 
 func TestReconcileDrainsDeadPIDBecomesCrashed(t *testing.T) {
-	_, repo := seedRunningDrain(t, "seed-token")
+	seed, repo := seedRunningDrain(t, "seed-token")
 
 	// The owning process is gone: ProcessAlive false. Reconcile forks no git.
 	dead := &Deps{
-		FS:           deps.NewRealFileSystem(),
+		FS:           seed.FS,
 		Git:          gitForbidden(t),
 		ProcessAlive: func(int) bool { return false },
 	}
@@ -65,11 +65,11 @@ func TestReconcileDrainsDeadPIDBecomesCrashed(t *testing.T) {
 }
 
 func TestReconcileDrainsLiveDrainUntouched(t *testing.T) {
-	_, repo := seedRunningDrain(t, "seed-token")
+	seed, repo := seedRunningDrain(t, "seed-token")
 
 	// Same PID, same start token → genuinely the live drain. Never crash it.
 	live := &Deps{
-		FS:                deps.NewRealFileSystem(),
+		FS:                seed.FS,
 		Git:               gitForbidden(t),
 		ProcessAlive:      func(pid int) bool { return pid == os.Getpid() },
 		ProcessStartToken: func(int) (string, bool) { return "seed-token", true },
@@ -87,13 +87,13 @@ func TestReconcileDrainsLiveDrainUntouched(t *testing.T) {
 }
 
 func TestReconcileDrainsReusedPIDBecomesCrashed(t *testing.T) {
-	_, repo := seedRunningDrain(t, "seed-token")
+	seed, repo := seedRunningDrain(t, "seed-token")
 
 	// The PID is alive again, but it now belongs to a different process: its
 	// start token differs from the one recorded for the drain. A reused PID must
 	// not be mistaken for the live drain.
 	reused := &Deps{
-		FS:                deps.NewRealFileSystem(),
+		FS:                seed.FS,
 		Git:               gitForbidden(t),
 		ProcessAlive:      func(pid int) bool { return pid == os.Getpid() },
 		ProcessStartToken: func(int) (string, bool) { return "different-token", true },
@@ -118,10 +118,10 @@ func TestReconcileDrainsReusedPIDBecomesCrashed(t *testing.T) {
 // fallback: when the live process's start token cannot be read, an alive PID is
 // trusted rather than crashed, so a genuinely-running drain is never lost.
 func TestReconcileDrainsUnverifiableTokenKeepsLiveDrain(t *testing.T) {
-	_, repo := seedRunningDrain(t, "seed-token")
+	seed, repo := seedRunningDrain(t, "seed-token")
 
 	unverifiable := &Deps{
-		FS:                deps.NewRealFileSystem(),
+		FS:                seed.FS,
 		Git:               gitForbidden(t),
 		ProcessAlive:      func(pid int) bool { return pid == os.Getpid() },
 		ProcessStartToken: func(int) (string, bool) { return "", false },

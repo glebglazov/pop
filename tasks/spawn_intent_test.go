@@ -67,7 +67,7 @@ func TestReconcileDrainsSweepsDeadOwnerSpawnIntent(t *testing.T) {
 	// The recording process is gone. ReconcileDrains sweeps the intent alongside
 	// crashed drains and dead gate holds.
 	dead := &Deps{
-		FS:           deps.NewRealFileSystem(),
+		FS:           d.FS,
 		Git:          deps.NewRealGit(),
 		ProcessAlive: func(int) bool { return false },
 	}
@@ -92,13 +92,12 @@ func TestPendingSpawnsIgnoresDeadOwner(t *testing.T) {
 	}
 	commonDir := repoCommonDirForTest(t, d, repo)
 	reader := &Deps{
-		FS:           deps.NewRealFileSystem(),
+		FS:           d.FS,
 		Git:          deps.NewRealGit(),
 		ProcessAlive: func(int) bool { return false },
 	}
-	// PendingSpawns resolves the store path from the reader's real-FS data dir,
-	// which matches the recorder's: drainTestRepo pins XDG_DATA_HOME for the test
-	// process.
+	// PendingSpawns resolves the store path from the reader's FS, which shares
+	// the recorder's isolated data dir from drainTestRepo.
 	pending, err := PendingSpawns(reader, commonDir)
 	if err != nil {
 		t.Fatalf("PendingSpawns: %v", err)

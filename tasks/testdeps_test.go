@@ -9,6 +9,31 @@ import (
 	"github.com/glebglazov/pop/internal/deps"
 )
 
+// testFSWithDataHome builds a MockFileSystem that routes XDG_DATA_HOME to
+// dataHome and delegates other operations to the real filesystem (ADR-0145).
+func testFSWithDataHome(dataHome string) deps.FileSystem {
+	real := deps.NewRealFileSystem()
+	return &deps.MockFileSystem{
+		GetenvFunc: func(key string) string {
+			if key == "XDG_DATA_HOME" {
+				return dataHome
+			}
+			return ""
+		},
+		GetwdFunc:        real.Getwd,
+		UserHomeDirFunc:  func() (string, error) { return filepath.Join(dataHome, "home"), nil },
+		StatFunc:         real.Stat,
+		ReadDirFunc:      real.ReadDir,
+		ReadFileFunc:     real.ReadFile,
+		WriteFileFunc:    real.WriteFile,
+		MkdirAllFunc:     real.MkdirAll,
+		RenameFunc:       real.Rename,
+		RemoveAllFunc:    real.RemoveAll,
+		DirFSFunc:        real.DirFS,
+		EvalSymlinksFunc: real.EvalSymlinks,
+	}
+}
+
 // newTestDeps builds a per-test Deps whose fake FileSystem maps XDG_DATA_HOME
 // to an isolated t.TempDir(), with the fake agent runner, fast recovery
 // cadence, and no-sleep retry wait pre-wired (ADR-0145). Isolation rides the
@@ -19,27 +44,8 @@ import (
 func newTestDeps(t *testing.T) *Deps {
 	t.Helper()
 	dir := t.TempDir()
-	real := deps.NewRealFileSystem()
 	d := &Deps{
-		FS: &deps.MockFileSystem{
-			GetenvFunc: func(key string) string {
-				if key == "XDG_DATA_HOME" {
-					return dir
-				}
-				return ""
-			},
-			GetwdFunc:        real.Getwd,
-			UserHomeDirFunc:  func() (string, error) { return filepath.Join(dir, "home"), nil },
-			StatFunc:         real.Stat,
-			ReadDirFunc:      real.ReadDir,
-			ReadFileFunc:     real.ReadFile,
-			WriteFileFunc:    real.WriteFile,
-			MkdirAllFunc:     real.MkdirAll,
-			RenameFunc:       real.Rename,
-			RemoveAllFunc:    real.RemoveAll,
-			DirFSFunc:        real.DirFS,
-			EvalSymlinksFunc: real.EvalSymlinks,
-		},
+		FS: testFSWithDataHome(dir),
 		Git:                          deps.NewRealGit(),
 		Runner:                       fakeAwareRunner{},
 		LookPath:                     exec.LookPath,
