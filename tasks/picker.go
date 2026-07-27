@@ -7,7 +7,6 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
-	"github.com/glebglazov/pop/ui"
 )
 
 // ListPickerProjects expands configured project paths into picker-visible entries.
@@ -53,7 +52,7 @@ func expandConfiguredPaths(pd *project.Deps, paths []config.ExpandedPath) ([]pro
 				results <- expandResult{index: idx, path: ep.Path, projects: projects, err: expandErr}
 			}()
 
-			displayName := ui.LastNSegments(ep.Path, ep.DisplayDepth)
+			displayName := lastNSegments(ep.Path, ep.DisplayDepth)
 			projectName := filepath.Base(ep.Path)
 
 			if project.HasWorktreesWith(pd, ep.Path) {
@@ -102,4 +101,25 @@ func expandConfiguredPaths(pd *project.Deps, paths []config.ExpandedPath) ([]pro
 		expanded = append(expanded, resultsByIndex[i]...)
 	}
 	return expanded, failedNames
+}
+
+// lastNSegments returns the trailing n path segments joined with "/", the picker
+// display-name helper. It is a pure filepath helper inlined here (rather than
+// borrowed from ui) so the tasks package — and everything that consumes it,
+// including the lipgloss-free work data core (ADR-0143) — imports no TUI layer.
+func lastNSegments(path string, n int) string {
+	if n <= 1 {
+		return filepath.Base(path)
+	}
+	result := filepath.Base(path)
+	dir := filepath.Dir(path)
+	for i := 1; i < n; i++ {
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		result = filepath.Base(dir) + "/" + result
+		dir = parent
+	}
+	return result
 }

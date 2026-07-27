@@ -254,120 +254,6 @@ func TestDashboardShowRuleFiltering(t *testing.T) {
 	}
 }
 
-func TestDashboardSortOrder(t *testing.T) {
-	rows := []DashboardRow{
-		{Project: "zeta", SetRef: SetRef{SetID: "2026-01-01-old"}},
-		{Project: "alpha", SetRef: SetRef{SetID: "2026-01-01-old"}},
-		{Project: "alpha", SetRef: SetRef{SetID: "2026-06-18-new"}},
-	}
-	sortDashboardRows(rows)
-	got := []string{rows[0].Project + "/" + rows[0].SetID, rows[1].Project + "/" + rows[1].SetID, rows[2].Project + "/" + rows[2].SetID}
-	want := []string{"alpha/2026-06-18-new", "alpha/2026-01-01-old", "zeta/2026-01-01-old"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("order = %v, want %v", got, want)
-	}
-}
-
-// TestDashboardTieredSortOrder drives the full Queue surface order (ADR-0121)
-// across a mixed fixture that exercises every membership tier and the status
-// scheme. Tier precedence is running → auto-drain → orphaned → the rest; the
-// orphaned + auto-drain set lands in the auto-drain tier; within the rest tier
-// the status scheme floats the IN PROGRESS band, then the READY band (both
-// cross-project), then every remaining status per-project by the explicit
-// status order; SetID descending is the tiebreak throughout.
-func TestDashboardTieredSortOrder(t *testing.T) {
-	rows := []DashboardRow{
-		// Rest tier, rest band — alphabetically-early project with a needs-you status.
-		{Project: "alpha", SetRef: SetRef{SetID: "2026-02-01-blk", RawStatus: tasks.StatusBlocked}},
-		// Rest tier, READY band — floats above alpha's BLOCKED even though bravo sorts later.
-		{Project: "bravo", SetRef: SetRef{SetID: "2026-02-02-rdy", RawStatus: tasks.StatusReady}},
-		{Project: "alpha", SetRef: SetRef{SetID: "2026-02-03-rdy", RawStatus: tasks.StatusReady}},
-		// Rest tier, IN PROGRESS band (started READY) — floats above the READY band.
-		{Project: "bravo", Started: true, SetRef: SetRef{SetID: "2026-02-04-inp", RawStatus: tasks.StatusReady}},
-		// Rest tier, rest band — DONE and AWAITING-APPROVAL, project-first then status order.
-		{Project: "bravo", SetRef: SetRef{SetID: "2026-02-05-done", RawStatus: tasks.StatusDone}},
-		{Project: "charlie", SetRef: SetRef{SetID: "2026-02-06-aa", RawStatus: tasks.StatusAwaitingApproval}},
-		// Orphaned tier.
-		{Project: "zoo", SetRef: SetRef{SetID: "2026-04-01-orph", RawStatus: tasks.StatusReady, Orphaned: true}},
-		// Auto-drain tier — the orphaned+auto-drain set belongs here, not orphaned.
-		{Project: "kilo", SetRef: SetRef{SetID: "2026-05-01-ad", RawStatus: tasks.StatusReady, AutoDrain: true}},
-		{Project: "kilo", SetRef: SetRef{SetID: "2026-05-02-ado", RawStatus: tasks.StatusReady, AutoDrain: true, Orphaned: true}},
-		// Running tier — highest precedence even over an auto-drain BLOCKED set.
-		{Project: "delta", SetRef: SetRef{SetID: "2026-06-01-run", RawStatus: tasks.StatusBlocked, AutoDrain: true, LiveDrain: true}},
-	}
-	sortDashboardRows(rows)
-	got := make([]string, len(rows))
-	for i, r := range rows {
-		got[i] = r.Project + "/" + r.SetID
-	}
-	want := []string{
-		// Tier 1: running (floats above the whole status scheme, BLOCKED and all).
-		"delta/2026-06-01-run",
-		// Tier 2: auto-drain, SetID descending.
-		"kilo/2026-05-02-ado",
-		"kilo/2026-05-01-ad",
-		// Tier 3: orphaned.
-		"zoo/2026-04-01-orph",
-		// Tier 4: the rest, status scheme.
-		"bravo/2026-02-04-inp",  // IN PROGRESS band (started READY) floats first
-		"alpha/2026-02-03-rdy",  // READY band, cross-project: alpha before bravo
-		"bravo/2026-02-02-rdy",  // READY band
-		"alpha/2026-02-01-blk",  // rest band, project-first: alpha BLOCKED
-		"bravo/2026-02-05-done", // rest band: bravo DONE
-		"charlie/2026-02-06-aa", // rest band: charlie AWAITING-APPROVAL
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("order = %v, want %v", got, want)
-	}
-}
-
-// TestDashboardReadyBandInterleavesProjects proves the READY band reads
-// cross-project (ADR-0121): every READY row floats above the rest band
-// regardless of project, rather than each project's rows clustering together.
-func TestDashboardReadyBandInterleavesProjects(t *testing.T) {
-	rows := []DashboardRow{
-		{Project: "alpha", SetRef: SetRef{SetID: "2026-01-01-blk", RawStatus: tasks.StatusBlocked}},
-		{Project: "bravo", SetRef: SetRef{SetID: "2026-01-02-rdy", RawStatus: tasks.StatusReady}},
-		{Project: "alpha", SetRef: SetRef{SetID: "2026-01-03-rdy", RawStatus: tasks.StatusReady}},
-		{Project: "bravo", SetRef: SetRef{SetID: "2026-01-04-blk", RawStatus: tasks.StatusBlocked}},
-	}
-	sortDashboardRows(rows)
-	got := make([]string, len(rows))
-	for i, r := range rows {
-		got[i] = r.Project + "/" + r.SetID
-	}
-	// READY band (cross-project, Project asc) first, then the rest band. If the
-	// order were project-grouped it would read alpha/rdy, alpha/blk, bravo/rdy,
-	// bravo/blk instead.
-	want := []string{
-		"alpha/2026-01-03-rdy",
-		"bravo/2026-01-02-rdy",
-		"alpha/2026-01-01-blk",
-		"bravo/2026-01-04-blk",
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("order = %v, want %v", got, want)
-	}
-}
-
-// TestDashboardBandKeysOnDisplayedLabel proves a row's band is keyed on its
-// displayed label, not its raw status (ADR-0121): a started READY set renders
-// as IN PROGRESS and sorts in the IN PROGRESS band, floating above a plain
-// READY set even though both carry raw status READY and the IN PROGRESS row's
-// project sorts later alphabetically.
-func TestDashboardBandKeysOnDisplayedLabel(t *testing.T) {
-	rows := []DashboardRow{
-		{Project: "alpha", SetRef: SetRef{SetID: "2026-01-01-rdy", RawStatus: tasks.StatusReady}},
-		{Project: "zeta", Started: true, SetRef: SetRef{SetID: "2026-01-02-inp", RawStatus: tasks.StatusReady}},
-	}
-	sortDashboardRows(rows)
-	got := []string{rows[0].Project + "/" + rows[0].SetID, rows[1].Project + "/" + rows[1].SetID}
-	want := []string{"zeta/2026-01-02-inp", "alpha/2026-01-01-rdy"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("order = %v, want %v", got, want)
-	}
-}
-
 // TestRenderStatusMirrorsDashboardRows proves `pop queue status` renders the
 // same rows in the same order as the Work dashboard (ADR-0121): both key on one
 // row builder (dashboardRowsForStatic) and one comparator (sortDashboardRows),
@@ -464,8 +350,8 @@ func TestRenderStatusMirrorsDashboardRows(t *testing.T) {
 func TestRenderStatusTableColumnsAndIndicator(t *testing.T) {
 	td := queueDataDeps(t)
 	rows := []DashboardRow{
-		{Project: "alpha", Started: true, SetRef: SetRef{SetID: "2026-03-01-inp", RawStatus: tasks.StatusReady, LiveDrain: true}, destKind: dashboardDestManagedDirective},
-		{Project: "bravo", SetRef: SetRef{SetID: "2026-03-02-blk", RawStatus: tasks.StatusBlocked}, destKind: dashboardDestNeedsBind},
+		{Project: "alpha", Started: true, SetRef: SetRef{SetID: "2026-03-01-inp", RawStatus: tasks.StatusReady, LiveDrain: true}, DestKind: dashboardDestManagedDirective},
+		{Project: "bravo", SetRef: SetRef{SetID: "2026-03-02-blk", RawStatus: tasks.StatusBlocked}, DestKind: dashboardDestNeedsBind},
 	}
 	sortDashboardRows(rows)
 
@@ -540,13 +426,13 @@ func TestDashboardColumnDerivation(t *testing.T) {
 	for _, row := range got {
 		byID[row.SetID] = row
 	}
-	if !strings.HasPrefix(dashboardStatusCell(byID["done"]), "DONE") || byID["done"].Worktree != "done-branch" || byID["done"].destKind != dashboardDestDoneManagedBound {
+	if !strings.HasPrefix(dashboardStatusCell(byID["done"]), "DONE") || byID["done"].Worktree != "done-branch" || byID["done"].DestKind != dashboardDestDoneManagedBound {
 		t.Fatalf("done row = %+v", byID["done"])
 	}
-	if !strings.HasPrefix(dashboardStatusCell(byID["ready"]), "READY") || byID["ready"].Worktree != dashboardDestLabelNeedsBind || byID["ready"].destKind != dashboardDestNeedsBind {
+	if !strings.HasPrefix(dashboardStatusCell(byID["ready"]), "READY") || byID["ready"].Worktree != dashboardDestLabelNeedsBind || byID["ready"].DestKind != dashboardDestNeedsBind {
 		t.Fatalf("ready row = %+v", byID["ready"])
 	}
-	if byID["bound"].Worktree != "bound-branch" || byID["bound"].destKind != dashboardDestBound {
+	if byID["bound"].Worktree != "bound-branch" || byID["bound"].DestKind != dashboardDestBound {
 		t.Fatalf("bound row = %+v", byID["bound"])
 	}
 }
@@ -559,7 +445,7 @@ func TestDashboardNoBaseWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].Worktree != dashboardDestLabelNeedsBind || got[0].destKind != dashboardDestNeedsBind {
+	if len(got) != 1 || got[0].Worktree != dashboardDestLabelNeedsBind || got[0].DestKind != dashboardDestNeedsBind {
 		t.Fatalf("rows = %+v, want needs bind", got)
 	}
 }
@@ -699,7 +585,7 @@ func TestDashboardAutoDrainBadgeAndToggle(t *testing.T) {
 			return &tasks.AutoDrainResult{TaskSetID: setID, AutoDrain: true}, nil
 		},
 	}
-	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{Project: "pop", Worktree: "/repo/main (main)", cursorKey: "pop\x00plain", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "plain", DefPath: "/repo/tasks", StatePath: "/repo/state.json"}}}})
+	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{Project: "pop", Worktree: "/repo/main (main)", CursorKey: "pop\x00plain", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "plain", DefPath: "/repo/tasks", StatePath: "/repo/state.json"}}}})
 	// Auto-drain now lives behind the action menu: open with `a`, toggle with `a`.
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
@@ -738,7 +624,7 @@ func TestDashboardAutoDrainToggleReflectsInRowAndCount(t *testing.T) {
 		},
 	}
 	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
-		{Project: "pop", Worktree: "main", cursorKey: "pop\x00plain", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "plain", DefPath: "/repo/tasks", StatePath: "/repo/state.json"}},
+		{Project: "pop", Worktree: "main", CursorKey: "pop\x00plain", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "plain", DefPath: "/repo/tasks", StatePath: "/repo/state.json"}},
 	}})
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 20})
 	m = updated.(QueueDashboard)
@@ -810,7 +696,7 @@ func TestDashboardAutoDrainWaitingMarkerAndCount(t *testing.T) {
 }
 
 func TestDashboardBKeyOpensBindModal(t *testing.T) {
-	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{Project: "pop", Worktree: "/repo/main (main)", cursorKey: "pop\x00set-bind", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-bind", DefPath: "/repo/tasks", StatePath: "/repo/state.json"}}}})
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{Project: "pop", Worktree: "/repo/main (main)", CursorKey: "pop\x00set-bind", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-bind", DefPath: "/repo/tasks", StatePath: "/repo/state.json"}}}})
 	// Bind now lives behind the action menu: open with `a`, then `b`.
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
@@ -832,7 +718,7 @@ func TestDashboardBKeyOpensBindModal(t *testing.T) {
 
 func TestDashboardActionMenuOpenAndClose(t *testing.T) {
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
-		{Project: "pop", cursorKey: "pop\x00set", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set", RuntimePath: "/repo/wt"}},
+		{Project: "pop", CursorKey: "pop\x00set", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set", RuntimePath: "/repo/wt"}},
 	}})
 	m.width = 120
 	m.height = 20
@@ -870,7 +756,7 @@ func TestDashboardActionMenuOpenAndClose(t *testing.T) {
 
 func TestDashboardFormerDirectKeysInertAtTopLevel(t *testing.T) {
 	for _, key := range []string{"i", "I", "b", "U", "p", "P", "O", "d"} {
-		m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{Project: "pop", Worktree: "/repo/wt (main)", cursorKey: "pop\x00set", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set", DefPath: "/repo/tasks", StatePath: "/repo/state.json", RuntimePath: "/repo/wt", Bound: true, Parked: true}}}})
+		m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{Project: "pop", Worktree: "/repo/wt (main)", CursorKey: "pop\x00set", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set", DefPath: "/repo/tasks", StatePath: "/repo/state.json", RuntimePath: "/repo/wt", Bound: true, Parked: true}}}})
 		updated, cmd := m.Update(tea.KeyPressMsg{Code: []rune(key)[0], Text: key})
 		got := updated.(QueueDashboard)
 		if cmd != nil {
@@ -925,7 +811,7 @@ func TestDashboardActionMenuContextFiltering(t *testing.T) {
 
 func TestDashboardActionMenuVerbDispatch(t *testing.T) {
 	newModel := func() QueueDashboard {
-		return newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{Project: "pop", Worktree: "/repo/wt (main)", cursorKey: "pop\x00set", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set", DefPath: "/repo/tasks", StatePath: "/repo/state.json", RuntimePath: "/repo/wt", Bound: true}}}})
+		return newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{Project: "pop", Worktree: "/repo/wt (main)", CursorKey: "pop\x00set", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set", DefPath: "/repo/tasks", StatePath: "/repo/state.json", RuntimePath: "/repo/wt", Bound: true}}}})
 	}
 
 	// Letter path: `a` then `U` opens the unbind confirm and closes the menu.
@@ -981,7 +867,7 @@ func TestDashboardActionMenuArchiveDispatch(t *testing.T) {
 		},
 	}
 	// A DONE, bound row: archive is offered regardless of status.
-	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{Project: "pop", Worktree: "/repo/wt (main)", cursorKey: "pop\x00set", SetRef: SetRef{RawStatus: tasks.StatusDone, SetID: "set", DefPath: "/repo/tasks", StatePath: "/repo/state.json", RuntimePath: "/repo/wt", Bound: true}}}})
+	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{Project: "pop", Worktree: "/repo/wt (main)", CursorKey: "pop\x00set", SetRef: SetRef{RawStatus: tasks.StatusDone, SetID: "set", DefPath: "/repo/tasks", StatePath: "/repo/state.json", RuntimePath: "/repo/wt", Bound: true}}}})
 
 	// Archive lives behind the action menu: open with `a`, archive with `A`.
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
@@ -1061,7 +947,7 @@ func TestDashboardArchiveRetainsBinding(t *testing.T) {
 	})
 
 	d := &Deps{Tasks: td}
-	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{Project: "proj", cursorKey: "proj\x00set-1", SetRef: SetRef{RawStatus: tasks.StatusDone, SetID: "set-1", DefPath: tasksDir, StatePath: statePath, RuntimePath: "/repo/wt", Bound: true}}}})
+	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{Project: "proj", CursorKey: "proj\x00set-1", SetRef: SetRef{RawStatus: tasks.StatusDone, SetID: "set-1", DefPath: tasksDir, StatePath: statePath, RuntimePath: "/repo/wt", Bound: true}}}})
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
@@ -1130,7 +1016,7 @@ func TestDashboardActionMenuAnchorsBelowAndFlipsAbove(t *testing.T) {
 	rows := make([]DashboardRow, 20)
 	for i := range rows {
 		id := fmt.Sprintf("set-%02d", i)
-		rows[i] = DashboardRow{Project: "pop", cursorKey: "pop\x00" + id, SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: id}}
+		rows[i] = DashboardRow{Project: "pop", CursorKey: "pop\x00" + id, SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: id}}
 	}
 
 	// Cursor at the top: the menu caption sits below the cursor row.
@@ -1175,8 +1061,8 @@ func cursorRowLine(view, setID string) int {
 
 func TestDashboardStatusKeysOpenDetailViewAndClosePreservesCursor(t *testing.T) {
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
-		{Project: "pop", cursorKey: "pop\x00first", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "first"}},
-		{Project: "pop", cursorKey: "pop\x00second", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "second"}},
+		{Project: "pop", CursorKey: "pop\x00first", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "first"}},
+		{Project: "pop", CursorKey: "pop\x00second", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "second"}},
 	}})
 	m.list.SetCursor(1)
 
@@ -1206,7 +1092,7 @@ func TestDashboardStatusKeysOpenDetailViewAndClosePreservesCursor(t *testing.T) 
 
 	// Exit via esc also works.
 	m2 := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
-		{Project: "pop", cursorKey: "pop\x00alpha", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "alpha"}},
+		{Project: "pop", CursorKey: "pop\x00alpha", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "alpha"}},
 	}})
 	updated, _ = m2.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
 	updated, cmd = updated.(QueueDashboard).Update(tea.KeyPressMsg{Code: tea.KeyEscape})
@@ -1222,7 +1108,7 @@ func TestDashboardStatusKeysOpenDetailViewAndClosePreservesCursor(t *testing.T) 
 	} {
 		t.Run(tc.name+" opens detail", func(t *testing.T) {
 			m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
-				{Project: "pop", cursorKey: "pop\x00target", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "target"}},
+				{Project: "pop", CursorKey: "pop\x00target", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "target"}},
 			}})
 			updated, cmd := m.Update(tc.msg)
 			got := updated.(QueueDashboard)
@@ -1240,7 +1126,7 @@ func TestDashboardCtrlGOpensBoundCheckout(t *testing.T) {
 	// Bound row: Ctrl-g surfaces its checkout path and quits so the command layer
 	// can run the workbench-aware open after the TUI exits (task 02).
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
-		{Project: "pop", cursorKey: "pop\x00set", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set", RuntimePath: "/repo/wt", Bound: true}},
+		{Project: "pop", CursorKey: "pop\x00set", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set", RuntimePath: "/repo/wt", Bound: true}},
 	}})
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
@@ -1263,7 +1149,7 @@ func TestDashboardCtrlGUnboundRowShowsStatusAndDoesNotQuit(t *testing.T) {
 	// Unbound row (no RuntimePath): Ctrl-g shows an inline status message and keeps
 	// the dashboard running — no quit, no surfaced checkout (task 02).
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
-		{Project: "pop", cursorKey: "pop\x00unbound", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "unbound"}},
+		{Project: "pop", CursorKey: "pop\x00unbound", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "unbound"}},
 	}})
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
@@ -1281,8 +1167,8 @@ func TestDashboardCtrlGUnboundRowShowsStatusAndDoesNotQuit(t *testing.T) {
 
 func TestDashboardViewUsesTaskTableHeaderAndBottomShortcutLegend(t *testing.T) {
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
-		{Project: "pop", Worktree: "main", cursorKey: "pop\x00set", SetRef: SetRef{SetID: "set", RawStatus: tasks.StatusReady, AutoDrain: true, LiveDrain: true}},
-		{Project: "pop", Worktree: "main", cursorKey: "pop\x00done", SetRef: SetRef{SetID: "done", RawStatus: tasks.StatusDone}},
+		{Project: "pop", Worktree: "main", CursorKey: "pop\x00set", SetRef: SetRef{SetID: "set", RawStatus: tasks.StatusReady, AutoDrain: true, LiveDrain: true}},
+		{Project: "pop", Worktree: "main", CursorKey: "pop\x00done", SetRef: SetRef{SetID: "done", RawStatus: tasks.StatusDone}},
 	}})
 	m.width = 120
 	m.height = 8
@@ -1322,7 +1208,7 @@ func TestDashboardTableClampsToBodyHeight(t *testing.T) {
 	rows := make([]DashboardRow, 40)
 	for i := range rows {
 		id := fmt.Sprintf("set-%02d", i)
-		rows[i] = DashboardRow{Project: "pop", cursorKey: "pop\x00" + id, SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: id}}
+		rows[i] = DashboardRow{Project: "pop", CursorKey: "pop\x00" + id, SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: id}}
 	}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 10})
@@ -1345,7 +1231,7 @@ func TestDashboardTableFitsTerminalWidth(t *testing.T) {
 		Project:       "very-long-project-name-here",
 		VerifiedAtSHA: "abcdef123456",
 		Worktree:      "feature/super-long-branch-name-for-testing",
-		cursorKey:     "pop\x00set1",
+		CursorKey:     "pop\x00set1",
 		SetRef: SetRef{
 			SetID:       "set1",
 			RawStatus:   tasks.StatusAwaitingApproval,
@@ -1446,7 +1332,7 @@ func TestDashboardTwoLineRowLine1ShowsIndicatorProjectSetIDWorktree(t *testing.T
 		Project:   "pop",
 		Worktree:  "main",
 		SetRef:    SetRef{SetID: "2026-07-05-queue-dashboard-two-line", RawStatus: tasks.StatusReady, LiveDrain: true},
-		cursorKey: "pop\x00set",
+		CursorKey: "pop\x00set",
 	}
 	widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths([]DashboardRow{row}), 120)
 	line1 := dashboardTwoLineRowLine1(row, widths)
@@ -1509,7 +1395,7 @@ func TestDashboardTwoLineRowsFitTerminalWidth(t *testing.T) {
 				Project:   "pop",
 				Worktree:  "main",
 				SetRef:    SetRef{SetID: tc.setID, RawStatus: tasks.StatusReady},
-				cursorKey: "pop\x00" + tc.setID,
+				CursorKey: "pop\x00" + tc.setID,
 			}
 			m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{row}})
 			updated, _ := m.Update(tea.WindowSizeMsg{Width: tc.termW, Height: 20})
@@ -1532,7 +1418,7 @@ func TestDashboardTwoLineSingleLineLayoutUnchanged(t *testing.T) {
 		Project:   "pop",
 		Worktree:  "main",
 		SetRef:    SetRef{SetID: "set1", RawStatus: tasks.StatusReady},
-		cursorKey: "pop\x00set1",
+		CursorKey: "pop\x00set1",
 	}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{row}})
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 20})
@@ -1578,34 +1464,14 @@ func TestDashboardLiveIndicator(t *testing.T) {
 	}
 }
 
-// TestDashboardLiveIndicatorAcrossStatuses confirms the indicator is driven by
-// LiveDrain regardless of STATUS (ADR-0111): an AWAITING-APPROVAL row with a live
-// paused agent carries the ● and keeps its own status label unrefined.
-func TestDashboardLiveIndicatorAcrossStatuses(t *testing.T) {
-	for _, status := range []tasks.TaskSetStatus{
-		tasks.StatusReady, tasks.StatusAwaitingApproval, tasks.StatusNeedsVerify, tasks.StatusBlocked,
-	} {
-		row := DashboardRow{SetRef: SetRef{RawStatus: status, LiveDrain: true}}
-		if got := dashboardLiveIndicator(row, false); got != dashboardLiveDrainGlyph {
-			t.Fatalf("status %s live indicator = %q, want %q", status, got, dashboardLiveDrainGlyph)
-		}
-		// The indicator never rewrites the status label (only READY refines).
-		if status != tasks.StatusReady {
-			if got := dashboardStatusLabel(row); got != string(status) {
-				t.Fatalf("status %s label = %q, want unchanged (indicator does not refine)", status, got)
-			}
-		}
-	}
-}
-
 // TestDashboardSingleLineDropsDrainColumnKeepsIndicator pins the retired DRAIN
 // column and the trailing indicator on the single-line layout (ADR-0111): the
 // header carries no DRAIN, the column order is PROJECT/TASK SET/STATUS/WORKTREE/
 // indicator, and a live row carries the ● glyph.
 func TestDashboardSingleLineDropsDrainColumnKeepsIndicator(t *testing.T) {
 	rows := []DashboardRow{
-		{Project: "pop", Worktree: "main", cursorKey: "pop\x00live", SetRef: SetRef{SetID: "live", RawStatus: tasks.StatusReady, LiveDrain: true}},
-		{Project: "pop", Worktree: "main", cursorKey: "pop\x00idle", SetRef: SetRef{SetID: "idle", RawStatus: tasks.StatusDone}},
+		{Project: "pop", Worktree: "main", CursorKey: "pop\x00live", SetRef: SetRef{SetID: "live", RawStatus: tasks.StatusReady, LiveDrain: true}},
+		{Project: "pop", Worktree: "main", CursorKey: "pop\x00idle", SetRef: SetRef{SetID: "idle", RawStatus: tasks.StatusDone}},
 	}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 20})
@@ -1650,7 +1516,7 @@ func TestDashboardSingleLineDropsDrainColumnKeepsIndicator(t *testing.T) {
 // (ADR-0111): the ● still appears in a live row's rendered cells.
 func TestDashboardNarrowPaneKeepsIndicator(t *testing.T) {
 	rows := []DashboardRow{
-		{Project: "a-really-long-project-name", Worktree: "some-long-branch", cursorKey: "a\x00live",
+		{Project: "a-really-long-project-name", Worktree: "some-long-branch", CursorKey: "a\x00live",
 			SetRef: SetRef{SetID: "live", RawStatus: tasks.StatusReady, LiveDrain: true}},
 	}
 	natural := dashboardColumnWidths(rows)
@@ -1670,7 +1536,7 @@ func TestDashboardDetailViewOmitsTitleAndUsesBottomShortcutLegend(t *testing.T) 
 		Tasks: []tasks.Task{{ID: "01-a", File: "01-a.md", Title: "First", Type: "AFK", Status: "open"}},
 	}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
-		{Project: "pop", cursorKey: "pop\x00set-normal", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-normal"}},
+		{Project: "pop", CursorKey: "pop\x00set-normal", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-normal"}},
 	}})
 	m.width = 120
 	m.height = 8
@@ -1707,7 +1573,7 @@ func TestDashboardDetailViewClampsToBodyHeight(t *testing.T) {
 	}
 	manifest := &tasks.Manifest{Valid: true, Tasks: manifestTasks}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
-		{Project: "pop", cursorKey: "pop\x00set-long", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-long"}},
+		{Project: "pop", CursorKey: "pop\x00set-long", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-long"}},
 	}})
 	m.width = 120
 	m.height = 10
@@ -1803,35 +1669,6 @@ func TestDashboardStatusBucketColorOnlyBaseToken(t *testing.T) {
 	}
 }
 
-// TestDashboardLiveDrainRefinesReadyToInProgress covers ADR-0111's live-drain
-// trigger for the STATUS label: a READY set held by a live drain reads "IN
-// PROGRESS" even with zero done tasks; a started READY set (≥1 done, no live
-// drain) still reads "IN PROGRESS"; an idle READY set stays "READY"; and a live
-// drain coinciding with a non-READY status leaves that status' label untouched —
-// needs-you outranks liveness.
-func TestDashboardLiveDrainRefinesReadyToInProgress(t *testing.T) {
-	liveReady := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady, LiveDrain: true}}
-	if got := dashboardStatusLabel(liveReady); got != "IN PROGRESS" {
-		t.Errorf("live READY label = %q, want IN PROGRESS", got)
-	}
-	startedReady := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady}, Started: true}
-	if got := dashboardStatusLabel(startedReady); got != "IN PROGRESS" {
-		t.Errorf("started READY label = %q, want IN PROGRESS", got)
-	}
-	idleReady := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady}}
-	if got := dashboardStatusLabel(idleReady); got != string(tasks.StatusReady) {
-		t.Errorf("idle READY label = %q, want READY", got)
-	}
-	// The refinement is READY-only: a live drain on a non-READY set keeps its
-	// real label.
-	for _, status := range []tasks.TaskSetStatus{tasks.StatusAwaitingApproval, tasks.StatusNeedsVerify, tasks.StatusBlocked} {
-		row := DashboardRow{SetRef: SetRef{RawStatus: status, LiveDrain: true}}
-		if got := dashboardStatusLabel(row); got != string(status) {
-			t.Errorf("live %s label = %q, want %s (needs-you outranks liveness)", status, got, status)
-		}
-	}
-}
-
 // TestDashboardSummaryRunningCountsLiveDrainsOnly confirms the header "N running"
 // tally counts live-drain rows only (ADR-0111): a parked or config-error row is
 // not live-drained, so it no longer inflates the count as it did when the tally
@@ -1878,7 +1715,7 @@ func TestDashboardTableRendersVerifiedAtSHA(t *testing.T) {
 		Project:       "pop",
 		VerifiedAtSHA: "abcdef1234567890",
 		Worktree:      "main",
-		cursorKey:     "pop\x00set",
+		CursorKey:     "pop\x00set",
 		SetRef:        SetRef{SetID: "set", RawStatus: tasks.StatusDone},
 	}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{row}})
@@ -1940,7 +1777,7 @@ func TestDashboardBindModalClampsToBodyHeight(t *testing.T) {
 		entries[i] = dashboardBindEntry{Label: fmt.Sprintf("wt-%02d", i)}
 	}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
-		{Project: "pop", cursorKey: "pop\x00set-bind", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-bind"}},
+		{Project: "pop", CursorKey: "pop\x00set-bind", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-bind"}},
 	}})
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 12})
 	m = updated.(QueueDashboard)
@@ -1961,7 +1798,7 @@ func TestDashboardDrainModalClampsToBodyHeight(t *testing.T) {
 		entries[i] = dashboardDrainEntry{Label: fmt.Sprintf("target-%02d", i)}
 	}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
-		{Project: "pop", cursorKey: "pop\x00set-drain", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-drain"}},
+		{Project: "pop", CursorKey: "pop\x00set-drain", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-drain"}},
 	}})
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 12})
 	m = updated.(QueueDashboard)
@@ -1985,7 +1822,7 @@ func dashboardTestLineIndex(lines []string, needle string) int {
 
 func TestDashboardQAndSAreUnbound(t *testing.T) {
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
-		{Project: "pop", cursorKey: "pop\x00set", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set"}},
+		{Project: "pop", CursorKey: "pop\x00set", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set"}},
 	}})
 	got := m
 	for _, key := range []string{"q", "s"} {
@@ -2028,7 +1865,7 @@ func TestDashboardDetailViewPeekTaskText(t *testing.T) {
 		Tasks: []tasks.Task{{ID: "01-a", File: "01-a.md", Type: "AFK", Status: "open"}},
 	}
 	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
-		{Project: "pop", cursorKey: "pop\x00set-peek", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-peek"}},
+		{Project: "pop", CursorKey: "pop\x00set-peek", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-peek"}},
 	}})
 	d0 := newDetailView(m.snap.Rows[0])
 	d0.syncManifest(manifest, nil)
@@ -2065,7 +1902,7 @@ func TestDashboardDetailViewPeekTaskText(t *testing.T) {
 	}
 
 	m2 := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
-		{Project: "pop", cursorKey: "pop\x00set-peek", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-peek"}},
+		{Project: "pop", CursorKey: "pop\x00set-peek", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-peek"}},
 	}})
 	d2 := newDetailView(m2.snap.Rows[0])
 	d2.syncManifest(manifest, nil)
@@ -2082,7 +1919,7 @@ func TestDashboardDetailViewPeekTaskText(t *testing.T) {
 
 func TestDashboardTaskTextPeekScrolls(t *testing.T) {
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
-		{Project: "pop", cursorKey: "pop\x00set-scroll", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-scroll"}},
+		{Project: "pop", CursorKey: "pop\x00set-scroll", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-scroll"}},
 	}})
 	m.height = 8
 	m.width = 80
@@ -2139,9 +1976,9 @@ func TestDashboardTaskTextPeekScrolls(t *testing.T) {
 
 func TestDashboardTopLevelVimNavigation(t *testing.T) {
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
-		{Project: "pop", cursorKey: "pop\x00first", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "first"}},
-		{Project: "pop", cursorKey: "pop\x00second", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "second"}},
-		{Project: "pop", cursorKey: "pop\x00third", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "third"}},
+		{Project: "pop", CursorKey: "pop\x00first", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "first"}},
+		{Project: "pop", CursorKey: "pop\x00second", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "second"}},
+		{Project: "pop", CursorKey: "pop\x00third", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "third"}},
 	}})
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'G', Text: "G"})
@@ -2169,17 +2006,17 @@ func TestDashboardTopLevelVimNavigation(t *testing.T) {
 
 func TestDashboardReloadPreservesCursorByKey(t *testing.T) {
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
-		{Project: "pop", cursorKey: "pop\x00a", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "a"}},
-		{Project: "pop", cursorKey: "pop\x00b", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "b"}},
-		{Project: "pop", cursorKey: "pop\x00c", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "c"}},
+		{Project: "pop", CursorKey: "pop\x00a", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "a"}},
+		{Project: "pop", CursorKey: "pop\x00b", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "b"}},
+		{Project: "pop", CursorKey: "pop\x00c", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "c"}},
 	}})
 	m.list.SetCursor(2) // on "c"
 
 	// A tick reload delivers the same sets reordered; the cursor must follow "c".
 	reordered := []DashboardRow{
-		{Project: "pop", cursorKey: "pop\x00c", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "c"}},
-		{Project: "pop", cursorKey: "pop\x00a", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "a"}},
-		{Project: "pop", cursorKey: "pop\x00b", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "b"}},
+		{Project: "pop", CursorKey: "pop\x00c", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "c"}},
+		{Project: "pop", CursorKey: "pop\x00a", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "a"}},
+		{Project: "pop", CursorKey: "pop\x00b", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "b"}},
 	}
 	updated, _ := m.Update(dashboardRowsMsg{snap: DashboardSnapshot{Rows: reordered}})
 	got := updated.(QueueDashboard)
@@ -2198,7 +2035,7 @@ func TestDashboardDetailViewRendersTaskList(t *testing.T) {
 	}
 	taskRow := &tasks.Row{ID: "set-normal", Status: tasks.StatusReady, Progress: "1/2 done, 1 open"}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
-		{Project: "pop", cursorKey: "pop\x00set-normal", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-normal"}},
+		{Project: "pop", CursorKey: "pop\x00set-normal", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-normal"}},
 	}})
 	m.width = 120
 	m.height = 20
@@ -2264,7 +2101,7 @@ func TestDashboardDetailViewVimNavigation(t *testing.T) {
 		},
 	}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
-		{Project: "pop", cursorKey: "pop\x00set-nav", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-nav"}},
+		{Project: "pop", CursorKey: "pop\x00set-nav", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-nav"}},
 	}})
 	d := newDetailView(m.snap.Rows[0])
 	d.syncManifest(manifest, nil)
@@ -2750,10 +2587,10 @@ func TestDashboardBranchColumnSources(t *testing.T) {
 	for _, row := range got {
 		byID[row.SetID] = row
 	}
-	if byID["bound"].Worktree != "bound-branch" || byID["bound"].destKind != dashboardDestBound {
+	if byID["bound"].Worktree != "bound-branch" || byID["bound"].DestKind != dashboardDestBound {
 		t.Fatalf("bound worktree = %+v, want binding-row branch", byID["bound"])
 	}
-	if byID["unbound"].Worktree != dashboardDestLabelNeedsBind || byID["unbound"].destKind != dashboardDestNeedsBind {
+	if byID["unbound"].Worktree != dashboardDestLabelNeedsBind || byID["unbound"].DestKind != dashboardDestNeedsBind {
 		t.Fatalf("unbound worktree = %+v, want needs bind", byID["unbound"])
 	}
 }
@@ -2800,7 +2637,7 @@ func TestDashboardManagedDirectiveDestColumn(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("rows = %+v, want one managed-directive row", got)
 	}
-	if got[0].Worktree != dashboardDestLabelManagedWt || got[0].destKind != dashboardDestManagedDirective {
+	if got[0].Worktree != dashboardDestLabelManagedWt || got[0].DestKind != dashboardDestManagedDirective {
 		t.Fatalf("managed row = %+v, want [managed wt] badge", got[0])
 	}
 	var rendered strings.Builder
@@ -2817,7 +2654,7 @@ func TestDashboardManagedDirectiveDestColumn(t *testing.T) {
 // TestDashboardDoneHiddenUniformly pins the ADR-0121 uniform DONE hide: a DONE
 // set is omitted by default whether its Worktree binding is adopted or managed
 // (the old managed-worktree carve-out is retired). Done inclusion reveals both,
-// and the managed one still carries its clean-up destKind.
+// and the managed one still carries its clean-up DestKind.
 func TestDashboardDoneHiddenUniformly(t *testing.T) {
 	rows := []tasks.Row{
 		{ID: "done-adopted", Status: tasks.StatusDone},
@@ -2872,7 +2709,7 @@ func TestDashboardDoneHiddenUniformly(t *testing.T) {
 	}
 	if row, ok := byID["done-managed"]; !ok {
 		t.Fatal("managed Done binding should be revealed with include-done")
-	} else if row.destKind != dashboardDestDoneManagedBound || row.Worktree != "managed-branch" {
+	} else if row.DestKind != dashboardDestDoneManagedBound || row.Worktree != "managed-branch" {
 		t.Fatalf("done-managed row = %+v", row)
 	}
 }
@@ -3020,7 +2857,7 @@ func TestDashboardBindRefusesLiveLock(t *testing.T) {
 }
 
 func TestDashboardUKeyRequiresInlineConfirmBeforeUnbind(t *testing.T) {
-	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{Project: "pop", Worktree: "/repo/bound (branch)", cursorKey: "pop\x00set-unbind", SetRef: SetRef{RawStatus: tasks.StatusFailed, SetID: "set-unbind", DefPath: "/repo/tasks", StatePath: "/repo/state.json", Bound: true}}}})
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{Project: "pop", Worktree: "/repo/bound (branch)", CursorKey: "pop\x00set-unbind", SetRef: SetRef{RawStatus: tasks.StatusFailed, SetID: "set-unbind", DefPath: "/repo/tasks", StatePath: "/repo/state.json", Bound: true}}}})
 
 	// Unbind now lives behind the action menu: open with `a`, then `U`.
 	openMenu := func(model QueueDashboard) QueueDashboard {
@@ -3301,9 +3138,9 @@ func assertDashboardPaneMapping(t *testing.T, d *Deps, repo, setID, paneID, sour
 
 func filterTestModel() QueueDashboard {
 	rows := []DashboardRow{
-		{Project: "alpha", cursorKey: "alpha\x00set-one", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-one"}},
-		{Project: "beta", cursorKey: "beta\x00set-two", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-two"}},
-		{Project: "gamma", cursorKey: "gamma\x00feature", SetRef: SetRef{RawStatus: tasks.StatusFailed, SetID: "feature"}},
+		{Project: "alpha", CursorKey: "alpha\x00set-one", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-one"}},
+		{Project: "beta", CursorKey: "beta\x00set-two", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-two"}},
+		{Project: "gamma", CursorKey: "gamma\x00feature", SetRef: SetRef{RawStatus: tasks.StatusFailed, SetID: "feature"}},
 	}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
 	m.list.SetCursor(2)
@@ -3315,8 +3152,8 @@ func filterTestModel() QueueDashboard {
 // hide the DONE set — the state the filter menu's Show-done toggle flips.
 func filterMenuTestModel() QueueDashboard {
 	rows := []DashboardRow{
-		{Project: "alpha", cursorKey: "alpha\x00set-one", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-one"}},
-		{Project: "beta", cursorKey: "beta\x00set-two", SetRef: SetRef{RawStatus: tasks.StatusFailed, SetID: "set-two"}},
+		{Project: "alpha", CursorKey: "alpha\x00set-one", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-one"}},
+		{Project: "beta", CursorKey: "beta\x00set-two", SetRef: SetRef{RawStatus: tasks.StatusFailed, SetID: "set-two"}},
 	}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
 	m.width = 120
@@ -3326,7 +3163,7 @@ func filterMenuTestModel() QueueDashboard {
 
 // doneRow is the DONE task set the reload delivers once Show-done is toggled on.
 func doneRow() DashboardRow {
-	return DashboardRow{Project: "gamma", cursorKey: "gamma\x00done-set", SetRef: SetRef{RawStatus: tasks.StatusDone, SetID: "done-set"}}
+	return DashboardRow{Project: "gamma", CursorKey: "gamma\x00done-set", SetRef: SetRef{RawStatus: tasks.StatusDone, SetID: "done-set"}}
 }
 
 func TestDashboardFilterMenuOpenAndClose(t *testing.T) {
@@ -3402,8 +3239,8 @@ func TestDashboardFilterMenuShowDoneTogglesLive(t *testing.T) {
 	// DONE set and re-sorts (proven by task 02's BuildDashboard tests). The
 	// rebuilt rows flow into the view.
 	updated, _ = m.Update(dashboardRowsMsg{snap: DashboardSnapshot{Rows: []DashboardRow{
-		{Project: "alpha", cursorKey: "alpha\x00set-one", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-one"}},
-		{Project: "beta", cursorKey: "beta\x00set-two", SetRef: SetRef{RawStatus: tasks.StatusFailed, SetID: "set-two"}},
+		{Project: "alpha", CursorKey: "alpha\x00set-one", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-one"}},
+		{Project: "beta", CursorKey: "beta\x00set-two", SetRef: SetRef{RawStatus: tasks.StatusFailed, SetID: "set-two"}},
 		doneRow(),
 	}}})
 	m = updated.(QueueDashboard)
@@ -3425,8 +3262,8 @@ func TestDashboardFilterMenuShowDoneTogglesLive(t *testing.T) {
 		t.Fatalf("checkbox should render unchecked after toggle-off:\n%s", m.View().Content)
 	}
 	updated, _ = m.Update(dashboardRowsMsg{snap: DashboardSnapshot{Rows: []DashboardRow{
-		{Project: "alpha", cursorKey: "alpha\x00set-one", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-one"}},
-		{Project: "beta", cursorKey: "beta\x00set-two", SetRef: SetRef{RawStatus: tasks.StatusFailed, SetID: "set-two"}},
+		{Project: "alpha", CursorKey: "alpha\x00set-one", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-one"}},
+		{Project: "beta", CursorKey: "beta\x00set-two", SetRef: SetRef{RawStatus: tasks.StatusFailed, SetID: "set-two"}},
 	}}})
 	m = updated.(QueueDashboard)
 	if len(m.snap.Rows) != 2 {
@@ -3455,7 +3292,7 @@ func TestDashboardFilterMenuEnterTogglesHighlighted(t *testing.T) {
 func TestDashboardFilterMenuSeedsFromIncludeDone(t *testing.T) {
 	// `--include-done` seeds IncludeDone true at launch; the menu opens checked.
 	m := newQueueDashboard(&Deps{IncludeDone: true}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
-		{Project: "alpha", cursorKey: "alpha\x00set-one", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-one"}},
+		{Project: "alpha", CursorKey: "alpha\x00set-one", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-one"}},
 	}})
 	m.width = 120
 	m.height = 20
@@ -3489,9 +3326,9 @@ func TestDashboardFilterMenuIndependentOfSlash(t *testing.T) {
 	// A rebuild triggered while the fuzzy query is active (as the Show-done toggle
 	// would trigger) re-applies the query rather than dropping it.
 	updated, _ = m.Update(dashboardRowsMsg{snap: DashboardSnapshot{Rows: []DashboardRow{
-		{Project: "alpha", cursorKey: "alpha\x00set-one", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-one"}},
-		{Project: "beta", cursorKey: "beta\x00set-two", SetRef: SetRef{RawStatus: tasks.StatusFailed, SetID: "set-two"}},
-		{Project: "gamma", cursorKey: "gamma\x00feature", SetRef: SetRef{RawStatus: tasks.StatusFailed, SetID: "feature"}},
+		{Project: "alpha", CursorKey: "alpha\x00set-one", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-one"}},
+		{Project: "beta", CursorKey: "beta\x00set-two", SetRef: SetRef{RawStatus: tasks.StatusFailed, SetID: "set-two"}},
+		{Project: "gamma", CursorKey: "gamma\x00feature", SetRef: SetRef{RawStatus: tasks.StatusFailed, SetID: "feature"}},
 	}}})
 	m = updated.(QueueDashboard)
 	if !m.filterMode {
@@ -3649,7 +3486,7 @@ func TestDashboardFilterMode_BareActionsInertInFilterMode(t *testing.T) {
 		},
 	}
 	rows := []DashboardRow{
-		{Project: "alpha", cursorKey: "alpha\x00set-one", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-one", DefPath: "/def", StatePath: "/state"}},
+		{Project: "alpha", CursorKey: "alpha\x00set-one", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-one", DefPath: "/def", StatePath: "/state"}},
 	}
 	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Rows: rows})
 	m.list.SetCursor(0)
@@ -3708,9 +3545,9 @@ func TestDashboardFilterMode_ReloadPreservesFilter(t *testing.T) {
 
 	// Simulate a reload with new rows that still include alpha
 	newRows := []DashboardRow{
-		{Project: "alpha", cursorKey: "alpha\x00set-one", SetRef: SetRef{RawStatus: tasks.StatusBlocked, SetID: "set-one"}},
-		{Project: "beta", cursorKey: "beta\x00set-two", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-two"}},
-		{Project: "delta", cursorKey: "delta\x00alpha-task", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "alpha-task"}},
+		{Project: "alpha", CursorKey: "alpha\x00set-one", SetRef: SetRef{RawStatus: tasks.StatusBlocked, SetID: "set-one"}},
+		{Project: "beta", CursorKey: "beta\x00set-two", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-two"}},
+		{Project: "delta", CursorKey: "delta\x00alpha-task", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "alpha-task"}},
 	}
 	updated, _ = m.Update(dashboardRowsMsg{snap: DashboardSnapshot{Rows: newRows}})
 	got := updated.(QueueDashboard)
@@ -4052,7 +3889,7 @@ func TestDetailViewActionsHintRendered(t *testing.T) {
 		Tasks: []tasks.Task{{ID: "01-a", File: "01-a.md", Status: "open", Type: "AFK", Title: "A"}},
 	}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
-		{Project: "pop", cursorKey: "pop\x00set-render", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-render"}},
+		{Project: "pop", CursorKey: "pop\x00set-render", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-render"}},
 	}})
 	m.width = 80
 	m.height = 12
@@ -4614,8 +4451,8 @@ func TestQueueDashboardHelpFooterHint(t *testing.T) {
 func TestDashboardMainViewTwoLineIntegration(t *testing.T) {
 	longID := strings.Repeat("a", 37)
 	rows := []DashboardRow{
-		{Project: "pop", Worktree: "main", cursorKey: "pop\x00" + longID, SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: longID}},
-		{Project: "pop", Worktree: "main", cursorKey: "pop\x00bbb", SetRef: SetRef{RawStatus: tasks.StatusDone, SetID: "bbb"}},
+		{Project: "pop", Worktree: "main", CursorKey: "pop\x00" + longID, SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: longID}},
+		{Project: "pop", Worktree: "main", CursorKey: "pop\x00bbb", SetRef: SetRef{RawStatus: tasks.StatusDone, SetID: "bbb"}},
 	}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
@@ -4678,7 +4515,7 @@ func TestDashboardTwoLineCursorMovesByLogicalRow(t *testing.T) {
 	rows := make([]DashboardRow, 5)
 	for i := range rows {
 		id := fmt.Sprintf("%s-%d", longID, i)
-		rows[i] = DashboardRow{Project: "pop", cursorKey: "pop\x00" + id, SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: id}}
+		rows[i] = DashboardRow{Project: "pop", CursorKey: "pop\x00" + id, SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: id}}
 	}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 20})
@@ -4728,7 +4565,7 @@ func TestDashboardTwoLineClampsToBodyHeight(t *testing.T) {
 	rows := make([]DashboardRow, 40)
 	for i := range rows {
 		id := fmt.Sprintf("%s-%02d", longID, i)
-		rows[i] = DashboardRow{Project: "pop", cursorKey: "pop\x00" + id, SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: id}}
+		rows[i] = DashboardRow{Project: "pop", CursorKey: "pop\x00" + id, SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: id}}
 	}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
 	// Height at the two-line floor (16): roomy enough for two-line mode, still
@@ -4771,8 +4608,8 @@ func TestDashboardTwoLineClampsToBodyHeight(t *testing.T) {
 func TestDashboardShortPaneCollapsesToSingleLine(t *testing.T) {
 	longID := strings.Repeat("a", 37)
 	rows := []DashboardRow{
-		{Project: "pop", Worktree: "main", cursorKey: "pop\x00" + longID, SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: longID}},
-		{Project: "pop", Worktree: "main", cursorKey: "pop\x00bbb", SetRef: SetRef{RawStatus: tasks.StatusDone, SetID: "bbb"}},
+		{Project: "pop", Worktree: "main", CursorKey: "pop\x00" + longID, SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: longID}},
+		{Project: "pop", Worktree: "main", CursorKey: "pop\x00bbb", SetRef: SetRef{RawStatus: tasks.StatusDone, SetID: "bbb"}},
 	}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
 	// A wide pane (width >= 120) with a long id would force two-line mode were the
@@ -4818,8 +4655,8 @@ func TestDashboardShortPaneCollapsesToSingleLine(t *testing.T) {
 func TestDashboardMenuTwoLineOverlay(t *testing.T) {
 	longID := strings.Repeat("a", 37)
 	rows := []DashboardRow{
-		{Project: "pop", Worktree: "main", cursorKey: "pop\x00" + longID, SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: longID}},
-		{Project: "pop", Worktree: "main", cursorKey: "pop\x00bbb", SetRef: SetRef{RawStatus: tasks.StatusDone, SetID: "bbb"}},
+		{Project: "pop", Worktree: "main", CursorKey: "pop\x00" + longID, SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: longID}},
+		{Project: "pop", Worktree: "main", CursorKey: "pop\x00bbb", SetRef: SetRef{RawStatus: tasks.StatusDone, SetID: "bbb"}},
 	}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -4866,7 +4703,7 @@ func TestDashboardMenuTwoLineOverlay(t *testing.T) {
 func TestDashboardBindModalTwoLineOverlay(t *testing.T) {
 	longID := strings.Repeat("a", 37)
 	rows := []DashboardRow{
-		{Project: "pop", Worktree: "main", cursorKey: "pop\x00" + longID, SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: longID}},
+		{Project: "pop", Worktree: "main", CursorKey: "pop\x00" + longID, SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: longID}},
 	}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
@@ -4916,7 +4753,7 @@ func TestDashboardBindModalTwoLineOverlay(t *testing.T) {
 func TestDashboardDrainModalTwoLineOverlay(t *testing.T) {
 	longID := strings.Repeat("a", 37)
 	rows := []DashboardRow{
-		{Project: "pop", Worktree: "main", cursorKey: "pop\x00" + longID, SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: longID}},
+		{Project: "pop", Worktree: "main", CursorKey: "pop\x00" + longID, SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: longID}},
 	}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
@@ -4960,8 +4797,8 @@ func TestDashboardDrainModalTwoLineOverlay(t *testing.T) {
 func TestDashboardFilterReevaluatesTwoLineMode(t *testing.T) {
 	longID := strings.Repeat("a", 37)
 	rows := []DashboardRow{
-		{Project: "pop", Worktree: "main", cursorKey: "pop\x00short", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "short"}},
-		{Project: "pop", Worktree: "main", cursorKey: "pop\x00" + longID, SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: longID}},
+		{Project: "pop", Worktree: "main", CursorKey: "pop\x00short", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "short"}},
+		{Project: "pop", Worktree: "main", CursorKey: "pop\x00" + longID, SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: longID}},
 	}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
 	// Width at the forced-fit threshold (120): only the long set id, not width,
@@ -5257,9 +5094,9 @@ func TestDashboardMapRowsMixedAndFiltered(t *testing.T) {
 			"Type: research\nStatus: open\n\n# Q\n",
 		filepath.Join(activeMap, "issues", "02-blocked.md"): "" +
 			"Type: research\nStatus: open\nBlocked by: 01\n\n# Q\n",
-		filepath.Join(doneMap, "map.md"):                   "Status: done\n\n## Destination\nDone\n",
-		filepath.Join(abandonedMap, "map.md"):              "Status: abandoned\n\n## Destination\nNope\n",
-		filepath.Join(archivedMap, "map.md"):               "Status: active\n\n## Destination\nHidden\n",
+		filepath.Join(doneMap, "map.md"):                    "Status: done\n\n## Destination\nDone\n",
+		filepath.Join(abandonedMap, "map.md"):               "Status: abandoned\n\n## Destination\nNope\n",
+		filepath.Join(archivedMap, "map.md"):                "Status: active\n\n## Destination\nHidden\n",
 		filepath.Join(storageDir, "wayfinder-archive.json"): `{"archived":["2026-07-04-archived"]}`,
 	}
 
@@ -5352,11 +5189,11 @@ func TestDashboardMapRowsInterleaveByProject(t *testing.T) {
 
 func TestDashboardMapRowQueueVerbsInert(t *testing.T) {
 	mapRow := DashboardRow{
-		Project: "pop", IsMap: true, cursorKey: "pop\x00map\x00demo",
+		Project: "pop", IsMap: true, CursorKey: "pop\x00map\x00demo",
 		SetRef: SetRef{SetID: "demo"}, MapOpen: 1, MapFrontier: 1,
 	}
 	setRow := DashboardRow{
-		Project: "pop", cursorKey: "pop\x00set",
+		Project: "pop", CursorKey: "pop\x00set",
 		SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set", DefPath: "/repo/tasks", StatePath: "/repo/state.json"},
 	}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{mapRow, setRow}})
@@ -5442,9 +5279,9 @@ func newMapDetailDashboard(t *testing.T) (QueueDashboard, *Deps) {
 	d := dashboardTestDeps(t, nil, nil)
 	withWayfinderMaps(t, d, storageDir, files)
 	mapRow := DashboardRow{
-		Project: "pop",
-		IsMap:   true,
-		cursorKey: "pop\x00map\x00" + "2026-07-01-active",
+		Project:   "pop",
+		IsMap:     true,
+		CursorKey: "pop\x00map\x00" + "2026-07-01-active",
 		SetRef: SetRef{
 			SetID:   "2026-07-01-active",
 			DefPath: tasksDir,

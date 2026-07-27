@@ -19,95 +19,35 @@ import (
 	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/ui"
 	"github.com/glebglazov/pop/wayfinder"
+	"github.com/glebglazov/pop/work"
 )
 
 const dashboardPollInterval = 2 * time.Second
 
-// SetRef holds the resolved, fork-free coordinates of one registered Task set
-// that the Queue write-path acts on, plus the per-build derived facts the
-// write-path branches on. Nothing re-resolves these; they are carried,
-// honoring the fork-free build (ADR-0060).
-type SetRef struct {
-	DefPath, StatePath, SetID string
-	RepoKey, RepoCommonDir    string
-	ProjectPath, RuntimePath  string
-	// ProjectName is the pre-resolved project label (dashboardRepoStatic.projectName),
-	// carried so the adopt path can skip DetectProject's per-project git fan-out
-	// (ADR-0060).
-	ProjectName string
-	// Parked is true when the set's repeated abnormal terminals have parked it
-	// (derived from Drain history); unpark writes a park-clear event (ADR-0055).
-	// Bound is true when the set holds a Worktree binding with a non-blank
-	// runtime path — the dedicated-checkout fact the action menu gates unbind
-	// on. Derived per-build from the binding snapshot (no git fork), mirroring
-	// dashboardSetBound.
-	// Orphaned is true when the set's Worktree binding points at a checkout
-	// that no longer exists on disk. Like Picked-up, it is a derived per-build
-	// fact (a cheap filesystem stat, never a git fork), not a persisted
-	// status, and is orthogonal to Task-set status — a set of any status may
-	// be orphaned. A set with no binding can never be orphaned.
-	Parked, Bound, Orphaned bool
-	AutoDrain               bool
-	// ConfigError is the message for a config-class defect that keeps the set
-	// from routing to an integration target — a bare repo with no declared trunk
-	// or an unsatisfiable worktree directive (ADR-0059/0060). Non-blank only when
-	// the set is neither live-drained nor parked, preserving the mutual exclusion
-	// the retired single-string DRAIN cell enforced. Rendered as the plain
-	// ` · config error: <msg>` STATUS suffix (ADR-0111).
-	ConfigError string
-	// RawStatus is the underlying derived Task-set status, kept for counts and
-	// comparisons so display relabels never leak into logic.
-	RawStatus tasks.TaskSetStatus
-	// DoneStillManagedBound is true when a Done set still holds a
-	// pop-provisioned (managed) Worktree binding. The dashboard keeps such a
-	// row visible as a clean-up reminder until archived or unbound (ADR-0070).
-	DoneStillManagedBound bool
-	// PaneID is the tmux pane recorded for a live drain of this set, empty if
-	// none was recorded. It is the fact PreviewDrain branches on.
-	PaneID string
-	// LiveDrain is true when a live (PID-alive) Runtime execution lock holds
-	// this set's checkout — the structured fact that replaced the retired DRAIN
-	// column (ADR-0111). It lights the trailing ● live-drain indicator across every
-	// status, and drives Sort's running tier, the header "N running" count, the
-	// auto-drain suffix silencing (ADR-0108), and the READY→IN PROGRESS
-	// refinement. Derived per-build from the live-drain snapshot, never a git fork.
-	LiveDrain bool
-}
+// The Work dashboard's row model and pure derivation live in the top-level work
+// package (ADR-0143); queue keeps these aliases so its row building, TUI model,
+// and static status render read one set of types. The exports drop the Dashboard
+// prefix on the way into work (work.Row / work.Snapshot / work.SetRef); the
+// aliases preserve queue's local vocabulary and its exported surface
+// (queue.DashboardRow / DashboardSnapshot / SetRef) for consumers like
+// dashboardshell and cmd.
+type (
+	SetRef            = work.SetRef
+	DashboardRow      = work.Row
+	DashboardSnapshot = work.Snapshot
+)
 
-// DashboardRow is one read-only Work dashboard table row.
-type DashboardRow struct {
-	SetRef
+// dashboardDestKind and its constants alias work's destination-kind fact (the
+// style-selection input the queue-side WORKTREE wrappers read); work owns the
+// enum so both the styled and unstyled destination cells key on one definition.
+type dashboardDestKind = work.DestKind
 
-	Project string
-	// Started mirrors tasks.Row.Started: a started READY set renders as
-	// "IN PROGRESS". It is a presentational input to the render-time STATUS
-	// composition (dashboardStatusCell), never a schedulability fact — logic keys
-	// on RawStatus.
-	Started bool
-	// VerifiedAtSHA mirrors tasks.Row.VerifiedAtSHA: the short SHA of the
-	// immunizing PASS verdict, rendered as a yellow "verified @ <sha>" suffix when
-	// non-empty. It is carried on the row so the STATUS cell is composed at render
-	// time from live fields instead of a pre-baked string (ADR-0108).
-	VerifiedAtSHA string
-	Worktree      string
-
-	// IsMap marks a Wayfinder Map row (ADR-0130). Map rows reuse SetID for the
-	// map id and leave Worktree blank; queue verbs (a/b/U) are inert on them.
-	IsMap bool
-	// MapOpen and MapFrontier are ticket tallies for map-row STATUS cells
-	// (`WAYFINDING · N open / M frontier`). Zero on Task-set rows.
-	MapOpen, MapFrontier int
-
-	cursorKey string
-	// destKind selects how the destination column is styled; Worktree holds the
-	// plain label (branch name, "[managed wt]", or "needs bind").
-	destKind dashboardDestKind
-}
-
-// DashboardSnapshot is the data model for `pop work dashboard`.
-type DashboardSnapshot struct {
-	Rows []DashboardRow
-}
+const (
+	dashboardDestBound            = work.DestBound
+	dashboardDestManagedDirective = work.DestManagedDirective
+	dashboardDestNeedsBind        = work.DestNeedsBind
+	dashboardDestDoneManagedBound = work.DestDoneManagedBound
+)
 
 // dashboardRepoStatic holds one repo group's static resolution: the repository
 // coordinates and integration target, all derived fork-free from the repo.json
@@ -486,123 +426,13 @@ func pathWithinOrEqual(p, base string) bool {
 	return p == base || strings.HasPrefix(p, base+string(filepath.Separator))
 }
 
-// Work dashboard membership tiers, in precedence order. A row lands in the
-// first tier it qualifies for, so an orphaned + auto-drain set sorts under the
-// auto-drain tier (auto-drain is checked before orphaned).
-const (
-	dashboardTierRunning   = iota // live drain holds the checkout (Picked-up)
-	dashboardTierAutoDrain        // auto-drain enabled
-	dashboardTierOrphaned         // Worktree binding points at a missing checkout
-	dashboardTierRest             // everything else
-)
-
-// dashboardSortTier returns a row's membership tier (see the dashboardTier*
-// constants). The order of these checks encodes the precedence: a row that is
-// both orphaned and auto-drain qualifies for the auto-drain tier first.
-func dashboardSortTier(r DashboardRow) int {
-	switch {
-	case r.LiveDrain:
-		return dashboardTierRunning
-	case r.AutoDrain:
-		return dashboardTierAutoDrain
-	case r.Orphaned:
-		return dashboardTierOrphaned
-	default:
-		return dashboardTierRest
-	}
-}
-
-// Queue surface status bands (ADR-0121). A row's band is keyed on its DISPLAYED
-// label, not its raw status: an IN PROGRESS row (a started or live-drained READY
-// set) sorts in the IN PROGRESS band even though its raw status is READY. The
-// IN PROGRESS and READY bands float running/ready work across projects; every
-// other status reads per-project in dashboardBandRest.
-const (
-	dashboardBandInProgress = iota // displayed label "IN PROGRESS"
-	dashboardBandReady             // displayed label "READY"
-	dashboardBandRest              // every other displayed status
-)
-
-// dashboardStatusBand returns a row's status band, keyed on its displayed label
-// so the READY→IN PROGRESS refinement (dashboardStatusLabel) lands in the
-// IN PROGRESS band rather than the READY band.
-func dashboardStatusBand(r DashboardRow) int {
-	switch dashboardStatusLabel(r) {
-	case "IN PROGRESS":
-		return dashboardBandInProgress
-	case string(tasks.StatusReady):
-		return dashboardBandReady
-	default:
-		return dashboardBandRest
-	}
-}
-
-// dashboardStatusOrder is the explicit intra-project ordering for the
-// dashboardBandRest band (ADR-0121): the "needs-you" statuses first, then the
-// problem bucket, then the shelved/terminal statuses, then the structural
-// defects. MISSING and MALFORMED share the last rank.
-func dashboardStatusOrder(s tasks.TaskSetStatus) int {
-	switch s {
-	case tasks.StatusAwaitingApproval:
-		return 0
-	case tasks.StatusNeedsVerify:
-		return 1
-	case tasks.StatusVerifyFailed:
-		return 2
-	case tasks.StatusFailed:
-		return 3
-	case tasks.StatusBlocked:
-		return 4
-	case tasks.StatusDeferred:
-		return 5
-	case tasks.StatusDone:
-		return 6
-	case tasks.StatusMissing, tasks.StatusMalformed:
-		return 7
-	default:
-		return 8
-	}
-}
-
-// queueRowLess is the shared Queue surface comparator (ADR-0121), the single
-// source of the total order both `pop work dashboard` and `pop queue status`
-// read. Rows float by membership tier (live-drain → auto-drain → orphaned),
-// then fall through to the status scheme: the IN PROGRESS and READY bands read
-// cross-project (Project asc, then SetID desc), and every remaining status
-// reads per-project (Project asc, then the explicit status order, then SetID
-// desc). Bands key on the displayed label, so a started or live-drained READY
-// set sorts as IN PROGRESS even though its raw status is READY. The membership
-// tiers float above the whole status scheme — an auto-drain BLOCKED set
-// outranks a plain IN PROGRESS set — and fall through to the same band/status/
-// SetID tiebreak within a tier.
-func queueRowLess(a, b DashboardRow) bool {
-	if ta, tb := dashboardSortTier(a), dashboardSortTier(b); ta != tb {
-		return ta < tb
-	}
-	ba, bb := dashboardStatusBand(a), dashboardStatusBand(b)
-	if ba != bb {
-		return ba < bb
-	}
-	if a.Project != b.Project {
-		return a.Project < b.Project
-	}
-	// The explicit status order breaks ties only within dashboardBandRest; the
-	// IN PROGRESS and READY bands are single-status, so they go straight to the
-	// SetID tiebreak after project name.
-	if ba == dashboardBandRest {
-		if ra, rb := dashboardStatusOrder(a.RawStatus), dashboardStatusOrder(b.RawStatus); ra != rb {
-			return ra < rb
-		}
-	}
-	return a.SetID > b.SetID
-}
-
-// sortDashboardRows applies the shared Queue surface order (queueRowLess) to a
-// dashboard build's rows.
+// sortDashboardRows applies the shared Queue surface order to a dashboard
+// build's rows. The comparator — the ADR-0121 membership tiers, status bands,
+// intra-project status order, and SetID tiebreak — lives in the work data core
+// (ADR-0143); this is the queue-side seam both BuildDashboard and the static
+// status render key on.
 func sortDashboardRows(rows []DashboardRow) {
-	sort.SliceStable(rows, func(i, j int) bool {
-		return queueRowLess(rows[i], rows[j])
-	})
+	work.SortRows(rows)
 }
 
 // dashboardRowsForStatic renders one repo group's rows from a fully resolved
@@ -650,7 +480,7 @@ func dashboardRowsFromStatic(d *Deps, cfg *config.Config, snap *dashboardSnapsho
 		bound := hasBinding && strings.TrimSpace(bnd.RuntimePath) != ""
 		doneStillManagedBound := taskRow.Status == tasks.StatusDone && bound && bnd.Provisioned
 		orphaned := dashboardOrphaned(d, bnd, hasBinding)
-		if !dashboardShowRow(taskRow, d.IncludeDone) {
+		if !work.ShowRow(taskRow, d.IncludeDone) {
 			continue
 		}
 		wt := dashboardWorktree(d, snap, intents, st.repoKey, taskRow.ID, taskRow.Status, bnd, bound)
@@ -710,8 +540,8 @@ func dashboardRowsFromStatic(d *Deps, cfg *config.Config, snap *dashboardSnapsho
 			Started:       taskRow.Started,
 			VerifiedAtSHA: taskRow.VerifiedAtSHA,
 			Worktree:      wt.label,
-			cursorKey:     st.projectName + "\x00" + taskRow.ID,
-			destKind:      wt.destKind,
+			CursorKey:     st.projectName + "\x00" + taskRow.ID,
+			DestKind:      wt.DestKind,
 		})
 	}
 	mapRows, err := dashboardMapRowsFromStatic(d, st)
@@ -759,7 +589,7 @@ func dashboardMapRowsFromStatic(d *Deps, st dashboardRepoStatic) ([]DashboardRow
 			IsMap:       true,
 			MapOpen:     counts.Open,
 			MapFrontier: frontier,
-			cursorKey:   st.projectName + "\x00map\x00" + m.ID,
+			CursorKey:   st.projectName + "\x00map\x00" + m.ID,
 		})
 	}
 	return rows, nil
@@ -775,14 +605,6 @@ func dashboardMapVisible(m wayfinder.Map) bool {
 	return m.Status == wayfinder.MapActive
 }
 
-// dashboardShowRow is the shared Done-inclusion row filter (ADR-0121). Every
-// non-DONE set always shows; a DONE set shows only when Done inclusion is on.
-// The filter is uniform — a DONE set holding a managed Worktree binding is no
-// longer carved out (teardown stays gated at Archive).
-func dashboardShowRow(row tasks.Row, includeDone bool) bool {
-	return includeDone || row.Status != tasks.StatusDone
-}
-
 // staticProjectPath returns the repo group's representative checkout, the path
 // every bind/drain sub-action runs git against. It is empty only for a bare
 // repo with no resolvable representative, in which case bind falls back to a
@@ -794,82 +616,53 @@ func staticProjectPath(st dashboardRepoStatic) string {
 	return st.rep.ProjectPath
 }
 
-// dashboardStatusLabel reproduces tasks.StatusLabel from a dashboard row's live
-// fields, extending the READY refinement with the live-drain trigger (ADR-0111):
-// a READY set shows "IN PROGRESS" when it is started (≥1 done) OR held by a live
-// drain; every other row shows its raw status. The refinement is READY-only — a
-// live drain coinciding with a non-READY status leaves that label untouched
-// (needs-you outranks liveness). It reads RawStatus/Started/LiveDrain so the
-// label is recomposed on each render pass rather than baked in at row-build time.
-// Map rows always show "WAYFINDING" (ADR-0130).
+// dashboardStatusLabel is the queue-side thin alias over work.StatusLabel
+// (ADR-0143): the display label a row's STATUS cell and its status band both key
+// on, with the READY→IN PROGRESS refinement applied (ADR-0111).
 func dashboardStatusLabel(row DashboardRow) string {
-	if row.IsMap {
-		return "WAYFINDING"
-	}
-	if row.RawStatus == tasks.StatusReady && (row.Started || row.LiveDrain) {
-		return "IN PROGRESS"
-	}
-	return tasks.StatusLabel(tasks.Row{Status: row.RawStatus, Started: row.Started})
+	return work.StatusLabel(row)
 }
 
-// dashboardStatusCell composes a row's STATUS cell from its live fields — the
-// single source of truth every render path and the header count read (ADR-0108).
-// It returns the plain, un-styled text: the display label followed by the
-// verified-at, auto-drain and orphaned suffixes in that fixed order. Column
-// width-fitting measures this plain form, so no ANSI leaks into column math;
-// dashboardStatusCellStyled layers styling for the rendered output. Because the
-// cell is derived from the row on each View pass, any action that mutates a row
-// field (the auto-drain toggle, a drain kick) updates the cell and the header
-// count together on the same render.
+// dashboardStatusCell is the plain (un-styled) STATUS cell — the queue-side thin
+// alias over work.StatusCell (ADR-0108/0143). Column width-fitting and the static
+// status render measure this ANSI-free form; dashboardStatusCellStyled layers
+// per-token styling for the TUI below.
 func dashboardStatusCell(row DashboardRow) string {
-	return dashboardComposeStatus(row, false)
+	return work.StatusCell(row)
 }
 
-// dashboardStatusCellStyled is dashboardStatusCell with the immunized
-// "verified @ <sha>" token rendered yellow for display (same ANSI as pop tasks
-// status Details). The styling is layered only here so width measurement stays
-// ANSI-free.
+// dashboardStatusCellStyled is dashboardStatusCell with per-token styling for the
+// TUI: the base label carries its semantic bucket colour and the immunized
+// "verified @ <sha>" token renders yellow, while the auto-drain, orphaned,
+// parked, and config-error suffixes stay plain. It is the queue-side styled
+// wrapper over work's unstyled composition (ADR-0143) — styling is layered only
+// here so work.StatusCell (the width-measured form) stays ANSI-free — and it
+// reproduces work.StatusCell's token order so the two forms differ only by ANSI.
+// Map rows colour the WAYFINDING label and keep the tally plain (ADR-0130).
 func dashboardStatusCellStyled(row DashboardRow) string {
-	return dashboardComposeStatus(row, true)
-}
-
-// dashboardComposeStatus assembles the STATUS cell from live row fields. When
-// styled, the verified-at token carries ANSI yellow; the auto-drain, orphaned,
-// parked, and config-error suffixes are always plain text. Map rows render
-// `WAYFINDING · N open / M frontier` and skip set-only suffixes (ADR-0130).
-func dashboardComposeStatus(row DashboardRow, styled bool) string {
 	if row.IsMap {
 		label := "WAYFINDING"
-		if styled {
-			if st, ok := dashboardStatusBucketStyle[label]; ok {
-				label = st.Render(label)
-			}
-		}
-		return fmt.Sprintf("%s · %d open / %d frontier", label, row.MapOpen, row.MapFrontier)
-	}
-	label := dashboardStatusLabel(row)
-	if styled {
 		if st, ok := dashboardStatusBucketStyle[label]; ok {
 			label = st.Render(label)
 		}
+		return fmt.Sprintf("%s · %d open / %d frontier", label, row.MapOpen, row.MapFrontier)
+	}
+	label := work.StatusLabel(row)
+	if st, ok := dashboardStatusBucketStyle[label]; ok {
+		label = st.Render(label)
 	}
 	if row.VerifiedAtSHA != "" {
-		verified := "verified @ " + row.VerifiedAtSHA
-		if styled {
-			verified = dashboardVerifiedAtStyle.Render(verified)
-		}
-		label += " · " + verified
+		label += " · " + dashboardVerifiedAtStyle.Render("verified @ "+row.VerifiedAtSHA)
 	}
-	if dashboardAutoDrainWaiting(row) {
+	if work.AutoDrainWaiting(row) {
 		label += " · auto-drain"
 	}
 	if row.Orphaned {
 		label += " · orphaned"
 	}
-	// Parked and config-error relocated off the DRAIN string onto the STATUS cell
-	// (ADR-0111). Both are uncoloured plain text, so they never leak ANSI into the
-	// width-measured (unstyled) form; they trail the auto-drain/orphaned suffixes
-	// in a fixed order.
+	// Parked and config-error ride the STATUS cell (ADR-0111) as uncoloured plain
+	// text, trailing the auto-drain/orphaned suffixes in the same fixed order
+	// work.StatusCell uses.
 	if row.Parked {
 		label += " · parked"
 	}
@@ -879,26 +672,12 @@ func dashboardComposeStatus(row DashboardRow, styled bool) string {
 	return label
 }
 
-// dashboardAutoDrainWaiting reports whether a set's auto-drain consent should
-// surface as "waiting to be picked up" — the single predicate the per-row
-// marker and the header tally both read (ADR-0108). A consented set counts and
-// shows the marker only while it is not Picked-up; once a live drain holds the
-// checkout (row.LiveDrain) the IN-PROGRESS refinement already signals the
-// activity, so the marker is silenced and the set drops out of the "still needs
-// picking up" count. The persisted consent bit is untouched — this is
-// display-only.
+// dashboardAutoDrainWaiting is the queue-side thin alias over work.AutoDrainWaiting
+// (ADR-0108): the display predicate the per-row auto-drain marker and the header
+// tally both read.
 func dashboardAutoDrainWaiting(row DashboardRow) bool {
-	return row.AutoDrain && !row.LiveDrain
+	return work.AutoDrainWaiting(row)
 }
-
-type dashboardDestKind int
-
-const (
-	dashboardDestBound dashboardDestKind = iota
-	dashboardDestManagedDirective
-	dashboardDestNeedsBind
-	dashboardDestDoneManagedBound
-)
 
 // dashboardManagedWtStyle colors the [managed wt] destination badge.
 var dashboardManagedWtStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
@@ -906,9 +685,9 @@ var dashboardManagedWtStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("39"
 // dashboardLiveDrainGlyph is the stable, single-frame stand-in for the live-drain
 // indicator, used for column-width math: a spinner frame whose display width
 // matches every other frame so the layout never shifts as the animation advances
-// (ADR-0111). The animated indicator borrows the Monitor's working dots wholesale
-// — same colour, shape and motion.
-var dashboardLiveDrainGlyph = ui.SpinnerFrames[0]
+// (ADR-0111). It aliases work.LiveDrainGlyph — the plain live indicator's fixed
+// stand-in — which mirrors ui.SpinnerFrames[0], the first animated frame.
+const dashboardLiveDrainGlyph = work.LiveDrainGlyph
 
 // dashboardSpinnerFrame is the current working-spinner frame, advanced by the
 // Update loop while any row holds a live drain. It is process-global render
@@ -925,11 +704,12 @@ var dashboardSpinnerFrame int
 // shape — so a live agent reads identically across both dashboards.
 var dashboardLiveDrainStyle = lipgloss.NewStyle().Foreground(ui.ColorWorkingSpinner)
 
-// dashboardLiveIndicator returns the trailing indicator cell: the animated
-// working spinner (ui.SpinnerFrames in the house working colour) when a live drain
-// holds the checkout, blank otherwise. When styled the current frame is shown; the
-// plain form returns the fixed-width stand-in so no ANSI reaches column math and
-// the measured width stays constant across frames.
+// dashboardLiveIndicator returns the trailing indicator cell for the TUI: the
+// animated working spinner (ui.SpinnerFrames in the house working colour) when a
+// live drain holds the checkout, blank otherwise. It is the queue-side styled
+// wrapper (ADR-0143): the styled path shows the current frame; the plain path
+// defers to work.LiveIndicator so the fixed-width stand-in keeps ANSI out of
+// column math and the measured width constant across frames.
 func dashboardLiveIndicator(row DashboardRow, styled bool) string {
 	if !row.LiveDrain {
 		return ""
@@ -938,7 +718,7 @@ func dashboardLiveIndicator(row DashboardRow, styled bool) string {
 		frame := ui.SpinnerFrames[dashboardSpinnerFrame%len(ui.SpinnerFrames)]
 		return dashboardLiveDrainStyle.Render(frame)
 	}
-	return dashboardLiveDrainGlyph
+	return work.LiveIndicator(row)
 }
 
 // dashboardVerifiedAtStyle colors the immunized "verified @ <shortSHA>" suffix
@@ -948,7 +728,7 @@ var dashboardVerifiedAtStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("3"
 // dashboardStatusBucketStyle maps a base status label to its semantic bucket
 // color. Only the base label token is colored here; the verified@/auto-drain/
 // orphaned suffixes keep their own styling, so this is applied to the label
-// before suffixes are appended in dashboardComposeStatus. The map is keyed by
+// before suffixes are appended in dashboardStatusCellStyled. The map is keyed by
 // the display label, so "IN PROGRESS" (the started-READY refinement) shares
 // READY's blue bucket.
 //
@@ -982,12 +762,14 @@ var dashboardStatusBucketStyle = map[string]lipgloss.Style{
 type dashboardWorktreeView struct {
 	label       string
 	runtimePath string
-	destKind    dashboardDestKind
+	DestKind    dashboardDestKind
 }
 
+// The destination-column plain labels alias work's (ADR-0143) so the styled
+// wrapper (renderDashboardDest) and the row-build fallbacks key on one definition.
 const (
-	dashboardDestLabelManagedWt = "[managed wt]"
-	dashboardDestLabelNeedsBind = "needs bind"
+	dashboardDestLabelManagedWt = work.DestLabelManagedWt
+	dashboardDestLabelNeedsBind = work.DestLabelNeedsBind
 )
 
 // dashboardWorktreeIntents loads seeded worktree directives for one definition
@@ -1030,13 +812,13 @@ func dashboardWorktree(d *Deps, snap *dashboardSnapshot, intents map[string]*tas
 		if status == tasks.StatusDone && bnd.Provisioned {
 			kind = dashboardDestDoneManagedBound
 		}
-		return dashboardWorktreeView{label: branch, runtimePath: bnd.RuntimePath, destKind: kind}
+		return dashboardWorktreeView{label: branch, runtimePath: bnd.RuntimePath, DestKind: kind}
 	}
 	intent := intents[setID]
 	if intent != nil && intent.Managed {
-		return dashboardWorktreeView{label: dashboardDestLabelManagedWt, destKind: dashboardDestManagedDirective}
+		return dashboardWorktreeView{label: dashboardDestLabelManagedWt, DestKind: dashboardDestManagedDirective}
 	}
-	return dashboardWorktreeView{label: dashboardDestLabelNeedsBind, destKind: dashboardDestNeedsBind}
+	return dashboardWorktreeView{label: dashboardDestLabelNeedsBind, DestKind: dashboardDestNeedsBind}
 }
 
 // formatDashboardBranch normalizes a branch name for the destination column.
@@ -1657,7 +1439,7 @@ func TestDashboardRow(project, setID string, ref SetRef) DashboardRow {
 	}
 	return DashboardRow{
 		Project:   project,
-		cursorKey: project + "\x00" + ref.SetID,
+		CursorKey: project + "\x00" + ref.SetID,
 		SetRef:    ref,
 	}
 }
@@ -1675,7 +1457,7 @@ func newQueueDashboard(d *Deps, cfg *config.Config, snap DashboardSnapshot) Queu
 	cols.syncNatural(snap.Rows)
 	var list *ui.List[DashboardRow]
 	list = ui.NewList(snap.Rows, ui.Opts[DashboardRow]{
-		Key:    func(r DashboardRow) string { return r.cursorKey },
+		Key:    func(r DashboardRow) string { return r.CursorKey },
 		Anchor: ui.AnchorTop,
 		Cell: func(r DashboardRow, rs ui.RowState) string {
 			budget := dashboardListCellBudget(cols.width)
@@ -1878,7 +1660,7 @@ func dashboardTwoLineRowValuesLine1(row DashboardRow) []string {
 	return []string{
 		row.Project,
 		row.SetID,
-		renderDashboardDest(row.destKind, row.Worktree),
+		renderDashboardDest(row.DestKind, row.Worktree),
 		dashboardLiveIndicator(row, true),
 	}
 }
@@ -1993,7 +1775,7 @@ func (m QueueDashboard) dashboardChromeLines() int {
 }
 
 // syncListRows feeds the current filtered rows to the List (re-anchoring the
-// cursor by cursorKey) and recomputes the column widths over them.
+// cursor by CursorKey) and recomputes the column widths over them.
 func (m QueueDashboard) syncListRows() {
 	m.list.ReplaceItems(m.snap.Rows)
 	m.cols.syncNatural(m.snap.Rows)
@@ -2203,7 +1985,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncListRows()
 			if m.detail != nil {
 				for _, row := range m.snap.Rows {
-					if row.cursorKey == m.detail.row.cursorKey {
+					if row.CursorKey == m.detail.row.CursorKey {
 						m.detail.row = row
 						break
 					}
@@ -2236,7 +2018,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.reload()
 		}
 		for i := range m.snap.Rows {
-			if m.snap.Rows[i].cursorKey == msg.key {
+			if m.snap.Rows[i].CursorKey == msg.key {
 				m.snap.Rows[i].AutoDrain = msg.autoDrain
 				break
 			}
@@ -2534,7 +2316,7 @@ func (m QueueDashboard) dispatchMenuAction(action dashboardMenuAction, row Dashb
 			return m, nil
 		}
 		for i := range m.snap.Rows {
-			if m.snap.Rows[i].cursorKey == row.cursorKey {
+			if m.snap.Rows[i].CursorKey == row.CursorKey {
 				m.snap.Rows[i].AutoDrain = !m.snap.Rows[i].AutoDrain
 				break
 			}
@@ -2952,9 +2734,9 @@ func (m QueueDashboard) toggleAutoDrain(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
 		result, err := m.d.toggleAutoDrain(row.DefPath, row.StatePath, row.SetID)
 		if err != nil {
-			return dashboardToggleMsg{key: row.cursorKey, err: err}
+			return dashboardToggleMsg{key: row.CursorKey, err: err}
 		}
-		return dashboardToggleMsg{key: row.cursorKey, autoDrain: result.AutoDrain}
+		return dashboardToggleMsg{key: row.CursorKey, autoDrain: result.AutoDrain}
 	}
 }
 
@@ -4463,7 +4245,7 @@ func dashboardRowValues(row DashboardRow) []string {
 		row.Project,
 		row.SetID,
 		dashboardStatusCellStyled(row),
-		renderDashboardDest(row.destKind, row.Worktree),
+		renderDashboardDest(row.DestKind, row.Worktree),
 		dashboardLiveIndicator(row, true),
 	}
 }
@@ -4475,9 +4257,9 @@ func dashboardRowNaturalValues(row DashboardRow) []string {
 	return []string{
 		row.Project,
 		row.SetID,
-		dashboardStatusCell(row),
-		renderDashboardDest(row.destKind, row.Worktree),
-		dashboardLiveIndicator(row, false),
+		work.StatusCell(row),
+		renderDashboardDest(row.DestKind, row.Worktree),
+		work.LiveIndicator(row),
 	}
 }
 

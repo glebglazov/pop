@@ -9,6 +9,7 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/work"
 )
 
 // PickedUpSet is a live in-flight drain derived from a runtime lock.
@@ -196,24 +197,9 @@ func statusRowValues(row DashboardRow) []string {
 	return []string{
 		row.Project,
 		row.SetID,
-		dashboardStatusCell(row),
-		statusDestLabel(row.destKind, row.Worktree),
-		dashboardLiveIndicator(row, false),
-	}
-}
-
-// statusDestLabel returns the plain WORKTREE cell for the status table, the
-// un-styled counterpart of renderDashboardDest.
-func statusDestLabel(kind dashboardDestKind, label string) string {
-	switch kind {
-	case dashboardDestManagedDirective:
-		return dashboardDestLabelManagedWt
-	case dashboardDestNeedsBind:
-		return dashboardDestLabelNeedsBind
-	case dashboardDestDoneManagedBound:
-		return "[managed wt " + label + "]"
-	default:
-		return label
+		work.StatusCell(row),
+		work.WorktreeLabel(row.DestKind, row.Worktree),
+		work.LiveIndicator(row),
 	}
 }
 

@@ -211,7 +211,7 @@ func TestDashboardIKeyUnboundOpensPicker(t *testing.T) {
 		t.Fatal(err)
 	}
 	row.RepoKey = repoKey
-	row.cursorKey = "pop\x00" + setID
+	row.CursorKey = "pop\x00" + setID
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
 	// Drain now lives behind the action menu: open with `a`, then `i`.
