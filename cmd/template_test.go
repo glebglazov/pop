@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/glebglazov/pop/config"
-	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 )
 
 func TestTemplateCommandTree(t *testing.T) {
@@ -71,6 +71,57 @@ func TestRunTemplateListWith(t *testing.T) {
 	}
 }
 
+// --- fake-state assertion helpers (ADR-0142): consumer tests arrange in-memory
+// state and assert on that state; argument arrays live only in module tests.
+
+// sentCommandSet collects the first key (the command) of every SendKeys call
+// across all panes.
+func sentCommandSet(f *tmuxtest.Fake) map[string]bool {
+	sent := map[string]bool{}
+	for _, calls := range f.SentKeys {
+		for _, keys := range calls {
+			if len(keys) > 0 {
+				sent[keys[0]] = true
+			}
+		}
+	}
+	return sent
+}
+
+// sentToPane reports whether any keys were sent to a specific pane.
+func sentToPane(f *tmuxtest.Fake, paneID string) bool {
+	return len(f.SentKeys[paneID]) > 0
+}
+
+// hasSplitOff reports whether a pane was split off target along the given axis.
+func hasSplitOff(f *tmuxtest.Fake, target string, horizontal bool) bool {
+	for _, s := range f.SplitPanes {
+		if s.Target == target && s.Horizontal == horizontal {
+			return true
+		}
+	}
+	return false
+}
+
+// hasSplitInDir reports whether any split placed a pane rooted at dir.
+func hasSplitInDir(f *tmuxtest.Fake, dir string) bool {
+	for _, s := range f.SplitPanes {
+		if s.Dir == dir {
+			return true
+		}
+	}
+	return false
+}
+
+// stampedPaneIdentities returns the set of @pop_pane identities stamped.
+func stampedPaneIdentities(f *tmuxtest.Fake) map[string]bool {
+	set := map[string]bool{}
+	for _, id := range f.PaneIdentity {
+		set[id] = true
+	}
+	return set
+}
+
 func TestRunTemplateApplyWith(t *testing.T) {
 	cfg := &config.Config{
 		Workbenches: []config.Workbench{{
@@ -81,22 +132,9 @@ func TestRunTemplateApplyWith(t *testing.T) {
 			}},
 		}},
 	}
-	var calls [][]string
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			calls = append(calls, append([]string(nil), args...))
-			switch args[0] {
-			case "display-message":
-				return "current-session", nil
-			case "new-window":
-				return "%42", nil
-			default:
-				return "", nil
-			}
-		},
-	}
+	f := &tmuxtest.Fake{CurrentSessionName: "current-session"}
 	d := templateRuntimeDeps{
-		Tmux:        tmux,
+		Tmux:        f,
 		Getwd:       func() (string, error) { return "/repo/checkout", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 		ErrOut:      io.Discard,
@@ -106,25 +144,38 @@ func TestRunTemplateApplyWith(t *testing.T) {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
-	want := [][]string{
-		{"display-message", "-p", "#S"},
-		{"list-windows", "-t", "current-session", "-F", "#{@pop_wb_window}\t#{window_id}"},
-		{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "current-session:", "-n", "work", "-c", "/repo/checkout"},
-		{"set-option", "-w", "-t", "current-session:work", "@pop_wb_window", "work"},
-		{"set-option", "-w", "-t", "current-session:work", "automatic-rename", "off"},
-		{"select-pane", "-t", "%42", "-T", "server"},
-		{"set-option", "-p", "-t", "%42", "@pop_pane", "server"},
-		{"send-keys", "-t", "%42", "go test ./...", "Enter"},
-		{"select-window", "-t", "current-session:work"},
-		{"select-pane", "-t", "%42"},
+	// The window is created fresh, rooted at the session dir, and stamped with
+	// pop-owned identity (never window_name) with auto-rename disabled.
+	if got := f.WindowCwd["current-session:work"]; got != "/repo/checkout" {
+		t.Errorf("window cwd = %q, want /repo/checkout", got)
 	}
-	if !reflect.DeepEqual(calls, want) {
-		t.Fatalf("tmux calls = %#v, want %#v", calls, want)
+	if got := f.WBWindowIdentity["current-session:work"]; got != "work" {
+		t.Errorf("@pop_wb_window = %q, want work", got)
+	}
+	if !reflect.DeepEqual(f.AutoRenameOff, []string{"current-session:work"}) {
+		t.Errorf("automatic-rename disabled for %v, want [current-session:work]", f.AutoRenameOff)
+	}
+	// The window's initial pane is titled, stamped, and runs its command.
+	if got := f.PaneTitles["%100"]; got != "server" {
+		t.Errorf("pane title = %q, want server", got)
+	}
+	if got := f.PaneIdentity["%100"]; got != "server" {
+		t.Errorf("@pop_pane = %q, want server", got)
+	}
+	if !sentToPane(f, "%100") || !sentCommandSet(f)["go test ./..."] {
+		t.Errorf("expected %%100 to run %q", "go test ./...")
+	}
+	// With no explicit focus, the first window's first pane is activated.
+	if !reflect.DeepEqual(f.SelectedWindowTargets, []string{"current-session:work"}) {
+		t.Errorf("selected windows = %v, want [current-session:work]", f.SelectedWindowTargets)
+	}
+	if !reflect.DeepEqual(f.Selected, []string{"%100"}) {
+		t.Errorf("selected panes = %v, want [%%100]", f.Selected)
 	}
 }
 
 func TestRunTemplateApplyWithUnknownName(t *testing.T) {
-	err := runTemplateApplyWith(templateRuntimeDeps{Tmux: &deps.MockTmux{}}, []config.Workbench{}, "missing")
+	err := runTemplateApplyWith(templateRuntimeDeps{Tmux: &tmuxtest.Fake{}}, []config.Workbench{}, "missing")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -143,19 +194,14 @@ func TestRunTemplateApplyWithTmuxFailure(t *testing.T) {
 			}},
 		}},
 	}
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			if args[0] == "display-message" {
-				return "current-session", nil
-			}
-			if args[0] == "new-window" {
-				return "", fmt.Errorf("tmux refused")
-			}
-			return "", nil
+	f := &tmuxtest.Fake{
+		CurrentSessionName: "current-session",
+		NewWindowFunc: func(session, name, dir string) (string, error) {
+			return "", fmt.Errorf("tmux refused")
 		},
 	}
 	d := templateRuntimeDeps{
-		Tmux:        tmux,
+		Tmux:        f,
 		Getwd:       func() (string, error) { return "/repo/checkout", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
@@ -170,7 +216,7 @@ func TestRunTemplateApplyWithTmuxFailure(t *testing.T) {
 }
 
 func TestRunTemplateApplyWithFlatWeightedSplits(t *testing.T) {
-	// Test: window with 3 panes in a row with weights 1, 2, 3
+	// A window with 3 columns weighted 1, 2, 3 over a 120-cell-wide window.
 	cfg := &config.Config{
 		Workbenches: []config.Workbench{{
 			Name: "weighted",
@@ -187,32 +233,9 @@ func TestRunTemplateApplyWithFlatWeightedSplits(t *testing.T) {
 			}},
 		}},
 	}
-	var calls [][]string
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			calls = append(calls, append([]string(nil), args...))
-			switch args[0] {
-			case "display-message":
-				if args[len(args)-1] == "#{window_width}" {
-					return "120", nil
-				}
-				if args[len(args)-1] == "#{window_height}" {
-					return "40", nil
-				}
-				return "current-session", nil
-			case "new-window":
-				return "%0", nil
-			case "split-window":
-				// Return incrementing pane IDs
-				paneNum := len(calls)
-				return fmt.Sprintf("%%%d", paneNum), nil
-			default:
-				return "", nil
-			}
-		},
-	}
+	f := &tmuxtest.Fake{CurrentSessionName: "current-session", WindowW: 120, WindowH: 40}
 	d := templateRuntimeDeps{
-		Tmux:        tmux,
+		Tmux:        f,
 		Getwd:       func() (string, error) { return "/repo", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
@@ -221,38 +244,27 @@ func TestRunTemplateApplyWithFlatWeightedSplits(t *testing.T) {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
-	// Verify split-window calls used -h flag (row = side-by-side)
-	splitCount := 0
-	for _, call := range calls {
-		if call[0] == "split-window" {
-			splitCount++
-			if call[1] != "-h" {
-				t.Errorf("split-window call %v should use -h for row direction", call)
-			}
+	// Two splits (3 columns), all horizontal (-h) for a columns container.
+	if len(f.SplitPanes) != 2 {
+		t.Fatalf("expected 2 splits, got %d", len(f.SplitPanes))
+	}
+	for _, s := range f.SplitPanes {
+		if !s.Horizontal {
+			t.Errorf("columns container split should be horizontal (-h), got %+v", s)
 		}
 	}
-	if splitCount != 2 {
-		t.Errorf("expected 2 split-window calls, got %d", splitCount)
+	// Columns resize width (-x), never height (-y), to weighted cell sizes.
+	if len(f.ResizedHeight) != 0 {
+		t.Errorf("columns container must not resize height, got %v", f.ResizedHeight)
 	}
-
-	// Verify resize-pane calls
-	resizeCount := 0
-	for _, call := range calls {
-		if call[0] == "resize-pane" {
-			resizeCount++
-			// Should use -x flag for row direction
-			if call[3] != "-x" {
-				t.Errorf("resize-pane call %v should use -x for row direction", call)
-			}
-		}
-	}
-	if resizeCount != 3 {
-		t.Errorf("expected 3 resize-pane calls, got %d", resizeCount)
+	want := map[string]int{"%100": 20, "%101": 40, "%102": 60}
+	if !reflect.DeepEqual(f.ResizedWidth, want) {
+		t.Errorf("resized widths = %v, want %v", f.ResizedWidth, want)
 	}
 }
 
 func TestRunTemplateApplyWithColumnDirection(t *testing.T) {
-	// Test: column direction uses -v for splits and -y for resize
+	// A rows container splits vertically (-v) and resizes height (-y).
 	cfg := &config.Config{
 		Workbenches: []config.Workbench{{
 			Name: "stacked",
@@ -268,30 +280,9 @@ func TestRunTemplateApplyWithColumnDirection(t *testing.T) {
 			}},
 		}},
 	}
-	var calls [][]string
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			calls = append(calls, append([]string(nil), args...))
-			switch args[0] {
-			case "display-message":
-				if args[len(args)-1] == "#{window_width}" {
-					return "120", nil
-				}
-				if args[len(args)-1] == "#{window_height}" {
-					return "40", nil
-				}
-				return "current-session", nil
-			case "new-window":
-				return "%0", nil
-			case "split-window":
-				return "%1", nil
-			default:
-				return "", nil
-			}
-		},
-	}
+	f := &tmuxtest.Fake{CurrentSessionName: "current-session", WindowW: 120, WindowH: 40}
 	d := templateRuntimeDeps{
-		Tmux:        tmux,
+		Tmux:        f,
 		Getwd:       func() (string, error) { return "/repo", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
@@ -300,37 +291,24 @@ func TestRunTemplateApplyWithColumnDirection(t *testing.T) {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
-	// Verify split-window used -v flag (column = stacked)
-	foundSplit := false
-	for _, call := range calls {
-		if call[0] == "split-window" {
-			foundSplit = true
-			if call[1] != "-v" {
-				t.Errorf("split-window call %v should use -v for column direction", call)
-			}
+	if len(f.SplitPanes) == 0 {
+		t.Fatal("expected at least one split")
+	}
+	for _, s := range f.SplitPanes {
+		if s.Horizontal {
+			t.Errorf("rows container split should be vertical (-v), got %+v", s)
 		}
 	}
-	if !foundSplit {
-		t.Error("expected at least one split-window call")
+	if len(f.ResizedHeight) == 0 {
+		t.Error("rows container must resize height (-y)")
 	}
-
-	// Verify resize-pane used -y flag for column direction
-	foundResize := false
-	for _, call := range calls {
-		if call[0] == "resize-pane" {
-			foundResize = true
-			if call[3] != "-y" {
-				t.Errorf("resize-pane call %v should use -y for column direction", call)
-			}
-		}
-	}
-	if !foundResize {
-		t.Error("expected at least one resize-pane call")
+	if len(f.ResizedWidth) != 0 {
+		t.Errorf("rows container must not resize width, got %v", f.ResizedWidth)
 	}
 }
 
 func TestRunTemplateApplyWithNestedContainers(t *testing.T) {
-	// Test: nested containers - outer row with 2 children, first child is a column container
+	// Outer columns with 2 children; the first child is a rows container.
 	cfg := &config.Config{
 		Workbenches: []config.Workbench{{
 			Name: "nested",
@@ -353,31 +331,9 @@ func TestRunTemplateApplyWithNestedContainers(t *testing.T) {
 			}},
 		}},
 	}
-	var calls [][]string
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			calls = append(calls, append([]string(nil), args...))
-			switch args[0] {
-			case "display-message":
-				if args[len(args)-1] == "#{window_width}" {
-					return "120", nil
-				}
-				if args[len(args)-1] == "#{window_height}" {
-					return "40", nil
-				}
-				return "current-session", nil
-			case "new-window":
-				return "%0", nil
-			case "split-window":
-				paneNum := len(calls)
-				return fmt.Sprintf("%%%d", paneNum), nil
-			default:
-				return "", nil
-			}
-		},
-	}
+	f := &tmuxtest.Fake{CurrentSessionName: "current-session", WindowW: 120, WindowH: 40}
 	d := templateRuntimeDeps{
-		Tmux:        tmux,
+		Tmux:        f,
 		Getwd:       func() (string, error) { return "/repo", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
@@ -386,92 +342,14 @@ func TestRunTemplateApplyWithNestedContainers(t *testing.T) {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
-	// Should have split-window calls for both outer and inner containers
-	splitCount := 0
-	for _, call := range calls {
-		if call[0] == "split-window" {
-			splitCount++
-		}
-	}
-	// Outer container splits once (2 children), inner container splits once (2 children)
-	if splitCount < 2 {
-		t.Errorf("expected at least 2 split-window calls for nested containers, got %d", splitCount)
+	// Outer container splits once (2 children), inner container splits once.
+	if len(f.SplitPanes) < 2 {
+		t.Errorf("expected at least 2 splits for nested containers, got %d", len(f.SplitPanes))
 	}
 }
 
 func TestRunTemplateApplyWithDefaultWeight(t *testing.T) {
-	// Test: omitted weight defaults to 1 (equal split)
-	cfg := &config.Config{
-		Workbenches: []config.Workbench{{
-			Name: "equal",
-			Windows: []config.WorkbenchWindow{{
-				Name: "work",
-				Layout: &config.WorkbenchPaneSpec{
-					Children: "columns",
-					Panes: []config.WorkbenchPaneSpec{
-						{Name: "left", Command: "echo left"},   // weight omitted = 1
-						{Name: "right", Command: "echo right"}, // weight omitted = 1
-					},
-				},
-			}},
-		}},
-	}
-	var calls [][]string
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			calls = append(calls, append([]string(nil), args...))
-			switch args[0] {
-			case "display-message":
-				if args[len(args)-1] == "#{window_width}" {
-					return "100", nil
-				}
-				if args[len(args)-1] == "#{window_height}" {
-					return "50", nil
-				}
-				return "current-session", nil
-			case "new-window":
-				return "%0", nil
-			case "split-window":
-				return "%1", nil
-			default:
-				return "", nil
-			}
-		},
-	}
-	d := templateRuntimeDeps{
-		Tmux:        tmux,
-		Getwd:       func() (string, error) { return "/repo", nil },
-		UserHomeDir: func() (string, error) { return "/home/user", nil },
-	}
-
-	if err := runTemplateApplyWith(d, cfg.Workbenches, "equal"); err != nil {
-		t.Fatalf("runTemplateApplyWith() error: %v", err)
-	}
-
-	// Verify resize-pane calls with equal sizes (50 each for 100 width)
-	resizeCalls := []int{}
-	for _, call := range calls {
-		if call[0] == "resize-pane" && call[3] == "-x" {
-			var size int
-			fmt.Sscanf(call[4], "%d", &size)
-			resizeCalls = append(resizeCalls, size)
-		}
-	}
-	if len(resizeCalls) != 2 {
-		t.Fatalf("expected 2 resize-pane calls, got %d", len(resizeCalls))
-	}
-	// Both should be 50 (equal split of 100)
-	if resizeCalls[0] != 50 || resizeCalls[1] != 50 {
-		t.Errorf("expected equal sizes [50, 50], got %v", resizeCalls)
-	}
-}
-
-func TestResizePanesByWeightTargetsBuiltWindow(t *testing.T) {
-	// Regression: resizePanesByWeight must read the dimensions of the window
-	// actually being built — by targeting one of its panes with -t — not the
-	// current client's window (an untargeted display-message). Otherwise a
-	// detached session (born 80x24 from new-session -d) is sized against a
-	// mismatched client window and tmux clamps to a lopsided split.
+	// Omitted weights default to 1 (equal split).
 	cfg := &config.Config{
 		Workbenches: []config.Workbench{{
 			Name: "equal",
@@ -487,30 +365,9 @@ func TestResizePanesByWeightTargetsBuiltWindow(t *testing.T) {
 			}},
 		}},
 	}
-	var calls [][]string
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			calls = append(calls, append([]string(nil), args...))
-			switch args[0] {
-			case "display-message":
-				if args[len(args)-1] == "#{window_width}" {
-					return "100", nil
-				}
-				if args[len(args)-1] == "#{window_height}" {
-					return "50", nil
-				}
-				return "current-session", nil
-			case "new-window":
-				return "%0", nil
-			case "split-window":
-				return "%1", nil
-			default:
-				return "", nil
-			}
-		},
-	}
+	f := &tmuxtest.Fake{CurrentSessionName: "current-session", WindowW: 100, WindowH: 50}
 	d := templateRuntimeDeps{
-		Tmux:        tmux,
+		Tmux:        f,
 		Getwd:       func() (string, error) { return "/repo", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
@@ -519,29 +376,14 @@ func TestResizePanesByWeightTargetsBuiltWindow(t *testing.T) {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
-	// Every dimension query must target the container pane ("%0") of the window
-	// being built, never be untargeted.
-	dimQueries := 0
-	for _, call := range calls {
-		if call[0] != "display-message" {
-			continue
-		}
-		last := call[len(call)-1]
-		if last != "#{window_width}" && last != "#{window_height}" {
-			continue
-		}
-		dimQueries++
-		if len(call) < 3 || call[1] != "-t" || call[2] != "%0" {
-			t.Errorf("dimension query %v must target the built window's pane via -t %%0", call)
-		}
-	}
-	if dimQueries != 2 {
-		t.Fatalf("expected 2 targeted dimension queries (width+height), got %d", dimQueries)
+	want := map[string]int{"%100": 50, "%101": 50}
+	if !reflect.DeepEqual(f.ResizedWidth, want) {
+		t.Errorf("resized widths = %v, want equal split %v", f.ResizedWidth, want)
 	}
 }
 
 func TestRunTemplateApplyWithDeepNesting(t *testing.T) {
-	// Test: 3 levels deep nesting
+	// 3 levels deep nesting: every leaf's command must be sent.
 	cfg := &config.Config{
 		Workbenches: []config.Workbench{{
 			Name: "deep",
@@ -569,31 +411,9 @@ func TestRunTemplateApplyWithDeepNesting(t *testing.T) {
 			}},
 		}},
 	}
-	var calls [][]string
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			calls = append(calls, append([]string(nil), args...))
-			switch args[0] {
-			case "display-message":
-				if args[len(args)-1] == "#{window_width}" {
-					return "120", nil
-				}
-				if args[len(args)-1] == "#{window_height}" {
-					return "40", nil
-				}
-				return "current-session", nil
-			case "new-window":
-				return "%0", nil
-			case "split-window":
-				paneNum := len(calls)
-				return fmt.Sprintf("%%%d", paneNum), nil
-			default:
-				return "", nil
-			}
-		},
-	}
+	f := &tmuxtest.Fake{CurrentSessionName: "current-session", WindowW: 120, WindowH: 40}
 	d := templateRuntimeDeps{
-		Tmux:        tmux,
+		Tmux:        f,
 		Getwd:       func() (string, error) { return "/repo", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
@@ -602,17 +422,11 @@ func TestRunTemplateApplyWithDeepNesting(t *testing.T) {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
-	// Should successfully create all panes at all nesting levels
-	// Count send-keys calls (one per leaf pane)
-	sendKeysCount := 0
-	for _, call := range calls {
-		if call[0] == "send-keys" {
-			sendKeysCount++
+	sent := sentCommandSet(f)
+	for _, cmd := range []string{"echo dl", "echo dr", "echo bottom", "echo right"} {
+		if !sent[cmd] {
+			t.Errorf("expected leaf command %q to run", cmd)
 		}
-	}
-	// 4 leaf panes: deep-left, deep-right, bottom, right
-	if sendKeysCount != 4 {
-		t.Errorf("expected 4 send-keys calls for 4 leaf panes, got %d", sendKeysCount)
 	}
 }
 
@@ -626,27 +440,9 @@ func TestRunTemplateApplyWithMultipleWindows(t *testing.T) {
 			},
 		}},
 	}
-	var calls [][]string
-	newWindowCount := 0
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			calls = append(calls, append([]string(nil), args...))
-			switch args[0] {
-			case "display-message":
-				return "current-session", nil
-			case "list-windows":
-				return "", nil
-			case "new-window":
-				id := fmt.Sprintf("%%%d", newWindowCount)
-				newWindowCount++
-				return id, nil
-			default:
-				return "", nil
-			}
-		},
-	}
+	f := &tmuxtest.Fake{CurrentSessionName: "current-session"}
 	d := templateRuntimeDeps{
-		Tmux:        tmux,
+		Tmux:        f,
 		Getwd:       func() (string, error) { return "/repo/checkout", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 		ErrOut:      io.Discard,
@@ -656,33 +452,28 @@ func TestRunTemplateApplyWithMultipleWindows(t *testing.T) {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
-	want := [][]string{
-		{"display-message", "-p", "#S"},
-		{"list-windows", "-t", "current-session", "-F", "#{@pop_wb_window}\t#{window_id}"},
-		{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "current-session:", "-n", "work", "-c", "/repo/checkout"},
-		{"set-option", "-w", "-t", "current-session:work", "@pop_wb_window", "work"},
-		{"set-option", "-w", "-t", "current-session:work", "automatic-rename", "off"},
-		{"select-pane", "-t", "%0", "-T", "server"},
-		{"set-option", "-p", "-t", "%0", "@pop_pane", "server"},
-		{"send-keys", "-t", "%0", "go test ./...", "Enter"},
-		{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "current-session:", "-n", "logs", "-c", "/repo/checkout"},
-		{"set-option", "-w", "-t", "current-session:logs", "@pop_wb_window", "logs"},
-		{"set-option", "-w", "-t", "current-session:logs", "automatic-rename", "off"},
-		{"select-pane", "-t", "%1", "-T", "tail"},
-		{"set-option", "-p", "-t", "%1", "@pop_pane", "tail"},
-		{"send-keys", "-t", "%1", "tail -f app.log", "Enter"},
-		{"select-window", "-t", "current-session:work"},
-		{"select-pane", "-t", "%0"},
+	// Both windows are stamped and their panes run their commands (work=%100,
+	// logs=%101 in fresh-mint order).
+	if f.WBWindowIdentity["current-session:work"] != "work" || f.WBWindowIdentity["current-session:logs"] != "logs" {
+		t.Errorf("window identities = %v, want work + logs stamped", f.WBWindowIdentity)
 	}
-	if !reflect.DeepEqual(calls, want) {
-		t.Fatalf("tmux calls = %#v, want %#v", calls, want)
+	sent := sentCommandSet(f)
+	if !sent["go test ./..."] || !sent["tail -f app.log"] {
+		t.Errorf("both windows must run their commands, sent = %v", sent)
+	}
+	// Focus defaults to the first window's first pane.
+	if !reflect.DeepEqual(f.SelectedWindowTargets, []string{"current-session:work"}) {
+		t.Errorf("selected windows = %v, want [current-session:work]", f.SelectedWindowTargets)
+	}
+	if !reflect.DeepEqual(f.Selected, []string{"%100"}) {
+		t.Errorf("selected panes = %v, want [%%100]", f.Selected)
 	}
 }
 
-func TestRunTemplateApplyWithUnstampedWindowCreatesFresh(t *testing.T) {
-	// A live window whose display name happens to equal a target window but
-	// which carries no @pop_wb_window stamp is NOT matched (identity never lives
-	// in window_name, ADR-0075): the target window is created fresh.
+func TestRunTemplateApplyWithNoLiveWindowsCreatesFresh(t *testing.T) {
+	// A window carrying no @pop_wb_window stamp is not reported by
+	// LiveWorkbenchWindows (identity never lives in window_name, ADR-0075), so
+	// the target window is created fresh. Here no workbench windows are live.
 	cfg := &config.Config{
 		Workbenches: []config.Workbench{{
 			Name: "dev",
@@ -691,26 +482,9 @@ func TestRunTemplateApplyWithUnstampedWindowCreatesFresh(t *testing.T) {
 			},
 		}},
 	}
-	var calls [][]string
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			calls = append(calls, append([]string(nil), args...))
-			switch args[0] {
-			case "display-message":
-				return "current-session", nil
-			case "list-windows":
-				// One live window with display name "work" but no stamp:
-				// empty @pop_wb_window field before the tab.
-				return "\t@5\n", nil
-			case "new-window":
-				return "%0", nil
-			default:
-				return "", nil
-			}
-		},
-	}
+	f := &tmuxtest.Fake{CurrentSessionName: "current-session"}
 	d := templateRuntimeDeps{
-		Tmux:        tmux,
+		Tmux:        f,
 		Getwd:       func() (string, error) { return "/repo/checkout", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 		ErrOut:      io.Discard,
@@ -720,21 +494,12 @@ func TestRunTemplateApplyWithUnstampedWindowCreatesFresh(t *testing.T) {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
-	// The window is built fresh (no merge, no list-panes inspection).
-	want := [][]string{
-		{"display-message", "-p", "#S"},
-		{"list-windows", "-t", "current-session", "-F", "#{@pop_wb_window}\t#{window_id}"},
-		{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "current-session:", "-n", "work", "-c", "/repo/checkout"},
-		{"set-option", "-w", "-t", "current-session:work", "@pop_wb_window", "work"},
-		{"set-option", "-w", "-t", "current-session:work", "automatic-rename", "off"},
-		{"select-pane", "-t", "%0", "-T", "server"},
-		{"set-option", "-p", "-t", "%0", "@pop_pane", "server"},
-		{"send-keys", "-t", "%0", "go test ./...", "Enter"},
-		{"select-window", "-t", "current-session:work"},
-		{"select-pane", "-t", "%0"},
+	// Built fresh (no merge): window stamped, no panes inspected for identity.
+	if f.WBWindowIdentity["current-session:work"] != "work" {
+		t.Errorf("window should be created fresh and stamped, got %v", f.WBWindowIdentity)
 	}
-	if !reflect.DeepEqual(calls, want) {
-		t.Fatalf("tmux calls = %#v, want %#v", calls, want)
+	if f.PaneIdentity["%100"] != "server" {
+		t.Errorf("fresh pane should be stamped server, got %v", f.PaneIdentity)
 	}
 }
 
@@ -816,26 +581,9 @@ func TestRunTemplateApplyWithCwdInheritanceAndOverride(t *testing.T) {
 			}},
 		}},
 	}
-	var calls [][]string
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			calls = append(calls, append([]string(nil), args...))
-			switch args[0] {
-			case "display-message":
-				return "current-session", nil
-			case "list-windows":
-				return "", nil
-			case "new-window":
-				return "%0", nil
-			case "split-window":
-				return "%1", nil
-			default:
-				return "", nil
-			}
-		},
-	}
+	f := &tmuxtest.Fake{CurrentSessionName: "current-session"}
 	d := templateRuntimeDeps{
-		Tmux:        tmux,
+		Tmux:        f,
 		Getwd:       func() (string, error) { return "/repo", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
@@ -844,15 +592,17 @@ func TestRunTemplateApplyWithCwdInheritanceAndOverride(t *testing.T) {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
-	// The window should be created in the container's cwd.
-	assertContainsCall(t, calls, []string{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "current-session:", "-n", "work", "-c", "/repo/backend"})
-	// The override pane should be split into its own cwd.
-	assertContainsCall(t, calls, []string{"split-window", "-v", "-t", "%0", "-p", "50", "-P", "-F", "#{pane_id}", "-c", "/repo/api"})
-	// No respawn-pane is needed because the first child inherits.
-	for _, call := range calls {
-		if call[0] == "respawn-pane" {
-			t.Fatalf("unexpected respawn-pane call: %v", call)
-		}
+	// The window is created in the container's cwd.
+	if got := f.WindowCwd["current-session:work"]; got != "/repo/backend" {
+		t.Errorf("window cwd = %q, want /repo/backend", got)
+	}
+	// The override pane is split into its own cwd.
+	if !hasSplitInDir(f, "/repo/api") {
+		t.Errorf("expected a split rooted at /repo/api, splits = %+v", f.SplitPanes)
+	}
+	// No respawn: the first child inherits the container cwd.
+	if len(f.Respawned) != 0 {
+		t.Errorf("unexpected respawn: %v", f.Respawned)
 	}
 }
 
@@ -872,26 +622,9 @@ func TestRunTemplateApplyWithCwdTildeAndAbsolute(t *testing.T) {
 			}},
 		}},
 	}
-	var calls [][]string
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			calls = append(calls, append([]string(nil), args...))
-			switch args[0] {
-			case "display-message":
-				return "current-session", nil
-			case "list-windows":
-				return "", nil
-			case "new-window":
-				return "%0", nil
-			case "split-window":
-				return "%1", nil
-			default:
-				return "", nil
-			}
-		},
-	}
+	f := &tmuxtest.Fake{CurrentSessionName: "current-session"}
 	d := templateRuntimeDeps{
-		Tmux:        tmux,
+		Tmux:        f,
 		Getwd:       func() (string, error) { return "/repo", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
@@ -900,8 +633,14 @@ func TestRunTemplateApplyWithCwdTildeAndAbsolute(t *testing.T) {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
-	assertContainsCall(t, calls, []string{"respawn-pane", "-c", "/home/user/docs", "-t", "%0", "-k"})
-	assertContainsCall(t, calls, []string{"split-window", "-v", "-t", "%0", "-p", "50", "-P", "-F", "#{pane_id}", "-c", "/tmp"})
+	// The first child overrides the container cwd, so its container pane is
+	// respawned in ~/docs; the second is split into /tmp.
+	if got := f.Respawned["%100"]; got != "/home/user/docs" {
+		t.Errorf("respawn cwd = %q, want /home/user/docs", got)
+	}
+	if !hasSplitInDir(f, "/tmp") {
+		t.Errorf("expected a split rooted at /tmp, splits = %+v", f.SplitPanes)
+	}
 }
 
 func TestRunTemplateApplyWithFocusOverride(t *testing.T) {
@@ -920,26 +659,9 @@ func TestRunTemplateApplyWithFocusOverride(t *testing.T) {
 			}},
 		}},
 	}
-	var calls [][]string
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			calls = append(calls, append([]string(nil), args...))
-			switch args[0] {
-			case "display-message":
-				return "current-session", nil
-			case "list-windows":
-				return "", nil
-			case "new-window":
-				return "%0", nil
-			case "split-window":
-				return "%1", nil
-			default:
-				return "", nil
-			}
-		},
-	}
+	f := &tmuxtest.Fake{CurrentSessionName: "current-session", WindowW: 100, WindowH: 50}
 	d := templateRuntimeDeps{
-		Tmux:        tmux,
+		Tmux:        f,
 		Getwd:       func() (string, error) { return "/repo", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 	}
@@ -948,11 +670,13 @@ func TestRunTemplateApplyWithFocusOverride(t *testing.T) {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
-	// The focused pane should be the second one.
-	assertContainsCall(t, calls, []string{"select-window", "-t", "current-session:work"})
-	assertContainsCall(t, calls, []string{"select-pane", "-t", "%1"})
-	// The first leaf pane should not be selected.
-	assertNotFollowedBy(t, calls, []string{"select-window", "-t", "current-session:work"}, []string{"select-pane", "-t", "%0"})
+	// left=%100 (window pane), right=%101 (split) is focused.
+	if !reflect.DeepEqual(f.SelectedWindowTargets, []string{"current-session:work"}) {
+		t.Errorf("selected windows = %v, want [current-session:work]", f.SelectedWindowTargets)
+	}
+	if !reflect.DeepEqual(f.Selected, []string{"%101"}) {
+		t.Errorf("selected panes = %v, want the focused pane [%%101]", f.Selected)
+	}
 }
 
 func TestRunTemplateApplyWithMultipleFocusWarning(t *testing.T) {
@@ -972,26 +696,9 @@ func TestRunTemplateApplyWithMultipleFocusWarning(t *testing.T) {
 			}},
 		}},
 	}
-	var calls [][]string
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			calls = append(calls, append([]string(nil), args...))
-			switch args[0] {
-			case "display-message":
-				return "current-session", nil
-			case "list-windows":
-				return "", nil
-			case "new-window":
-				return "%0", nil
-			case "split-window":
-				return "%1", nil
-			default:
-				return "", nil
-			}
-		},
-	}
+	f := &tmuxtest.Fake{CurrentSessionName: "current-session", WindowW: 100, WindowH: 50}
 	d := templateRuntimeDeps{
-		Tmux:        tmux,
+		Tmux:        f,
 		Getwd:       func() (string, error) { return "/repo", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 		ErrOut:      &warnings,
@@ -1001,94 +708,57 @@ func TestRunTemplateApplyWithMultipleFocusWarning(t *testing.T) {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
-	warnStr := warnings.String()
-	if !strings.Contains(warnStr, "multiple panes requested focus") {
-		t.Fatalf("expected multiple-focus warning, got %q", warnStr)
+	if !strings.Contains(warnings.String(), "multiple panes requested focus") {
+		t.Fatalf("expected multiple-focus warning, got %q", warnings.String())
 	}
-	// First focus wins: the initial pane (%0) is focused, not the split pane.
-	assertContainsCall(t, calls, []string{"select-pane", "-t", "%0"})
-	assertNotContainsCall(t, calls, []string{"select-pane", "-t", "%1"})
+	// First focus wins: the initial pane (%100) is focused, not the split (%101).
+	if !reflect.DeepEqual(f.Selected, []string{"%100"}) {
+		t.Errorf("selected panes = %v, want first focus [%%100]", f.Selected)
+	}
 }
 
 func TestRealizePaneTreeStampsNamedLeafSkipsUnnamed(t *testing.T) {
-	var calls [][]string
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			calls = append(calls, append([]string(nil), args...))
-			return "", nil
-		},
-	}
-
 	// Named leaf: identity is stamped.
-	calls = nil
+	f := &tmuxtest.Fake{}
 	named := &config.WorkbenchPaneSpec{Name: "server", Command: "go test ./..."}
-	if _, err := realizePaneTree(tmux, named, "%7", "/repo", "/repo", "/home/user"); err != nil {
+	if _, err := realizePaneTree(f, named, "%7", "/repo", "/repo", "/home/user"); err != nil {
 		t.Fatalf("realizePaneTree(named) error: %v", err)
 	}
-	assertContainsCall(t, calls, []string{"select-pane", "-t", "%7", "-T", "server"})
-	assertContainsCall(t, calls, []string{"set-option", "-p", "-t", "%7", "@pop_pane", "server"})
+	if f.PaneTitles["%7"] != "server" {
+		t.Errorf("title = %q, want server", f.PaneTitles["%7"])
+	}
+	if f.PaneIdentity["%7"] != "server" {
+		t.Errorf("@pop_pane = %q, want server", f.PaneIdentity["%7"])
+	}
 
 	// Unnamed leaf: no @pop_pane stamp.
-	calls = nil
+	f = &tmuxtest.Fake{}
 	unnamed := &config.WorkbenchPaneSpec{Command: "htop"}
-	if _, err := realizePaneTree(tmux, unnamed, "%8", "/repo", "/repo", "/home/user"); err != nil {
+	if _, err := realizePaneTree(f, unnamed, "%8", "/repo", "/repo", "/home/user"); err != nil {
 		t.Fatalf("realizePaneTree(unnamed) error: %v", err)
 	}
-	for _, call := range calls {
-		if len(call) >= 5 && call[0] == "set-option" && call[1] == "-p" && call[4] == "@pop_pane" {
-			t.Fatalf("unnamed leaf must not be stamped with @pop_pane, got %v", call)
-		}
+	if _, ok := f.PaneIdentity["%8"]; ok {
+		t.Fatalf("unnamed leaf must not be stamped with @pop_pane, got %q", f.PaneIdentity["%8"])
 	}
 }
 
-// mergeMockTmux returns a MockTmux for merge tests: it reports the live window
-// `dev` (id @1) carrying the given @pop_pane→pane_id panes, fixed window
-// dimensions, and deterministic split-window ids starting at %10.
-func mergeMockTmux(calls *[][]string, livePanes, width, height string) *deps.MockTmux {
-	splitN := 0
-	return &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			*calls = append(*calls, append([]string(nil), args...))
-			switch args[0] {
-			case "display-message":
-				switch args[len(args)-1] {
-				case "#{window_width}":
-					return width, nil
-				case "#{window_height}":
-					return height, nil
-				}
-				return "current-session", nil
-			case "list-windows":
-				return "dev\t@1\n", nil
-			case "list-panes":
-				return livePanes, nil
-			case "split-window":
-				splitN++
-				return fmt.Sprintf("%%%d", 9+splitN), nil
-			default:
-				return "", nil
-			}
-		},
-	}
-}
-
-func sentCommands(calls [][]string) map[string]bool {
-	sent := make(map[string]bool)
-	for _, call := range calls {
-		if call[0] == "send-keys" && len(call) >= 4 {
-			sent[call[3]] = true
+// mergeFake returns a Fake arranged with a live pop-owned window `dev` (id @1)
+// carrying the given @pop_pane→pane_id panes, plus fixed window dimensions.
+func mergeFake(livePanes map[string]string, width, height int) *tmuxtest.Fake {
+	fallback := ""
+	for _, id := range livePanes {
+		if fallback == "" || id < fallback {
+			fallback = id
 		}
 	}
-	return sent
-}
-
-func sentToPane(calls [][]string, paneID string) bool {
-	for _, call := range calls {
-		if call[0] == "send-keys" && len(call) >= 3 && call[2] == paneID {
-			return true
-		}
+	return &tmuxtest.Fake{
+		CurrentSessionName: "current-session",
+		WindowW:            width,
+		WindowH:            height,
+		LiveWBWindows:      map[string]map[string]string{"current-session": {"dev": "@1"}},
+		LiveWBPanes:        map[string]map[string]string{"@1": livePanes},
+		LiveWBFallback:     map[string]string{"@1": fallback},
 	}
-	return false
 }
 
 func TestRunTemplateApplyMergeSupersetAppend(t *testing.T) {
@@ -1119,10 +789,9 @@ func TestRunTemplateApplyMergeSupersetAppend(t *testing.T) {
 			}},
 		}},
 	}
-	var calls [][]string
-	tmux := mergeMockTmux(&calls, "vim\t%1\nclaude\t%2\n", "200", "60")
+	f := mergeFake(map[string]string{"vim": "%1", "claude": "%2"}, 200, 60)
 	d := templateRuntimeDeps{
-		Tmux:        tmux,
+		Tmux:        f,
 		Getwd:       func() (string, error) { return "/repo", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 		ErrOut:      io.Discard,
@@ -1132,25 +801,24 @@ func TestRunTemplateApplyMergeSupersetAppend(t *testing.T) {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
-	// Live vim/claude panes survive: their commands are never re-sent (process
-	// intact) and they are never respawned or killed.
-	if sentToPane(calls, "%1") {
-		t.Error("vim pane %1 should be left untouched, but a command was sent to it")
+	// Live vim/claude survive: commands never re-sent, never respawned.
+	if sentToPane(f, "%1") {
+		t.Error("vim pane %1 should be left untouched")
 	}
-	if sentToPane(calls, "%2") {
-		t.Error("claude pane %2 should be left untouched, but a command was sent to it")
+	if sentToPane(f, "%2") {
+		t.Error("claude pane %2 should be left untouched")
 	}
-	for _, call := range calls {
-		if call[0] == "respawn-pane" || call[0] == "kill-pane" {
-			t.Fatalf("merge must never respawn or kill panes, got %v", call)
-		}
+	if len(f.Respawned) != 0 {
+		t.Errorf("merge must never respawn panes, got %v", f.Respawned)
 	}
 
-	// The third row is appended by splitting -v off the live claude pane (%2).
-	assertContainsCall(t, calls, []string{"split-window", "-v", "-t", "%2", "-P", "-F", "#{pane_id}", "-c", "/repo"})
+	// The third row is appended by splitting -v (rows) off the live claude pane.
+	if !hasSplitOff(f, "%2", false) {
+		t.Errorf("expected the third row appended off %%2 vertically, splits = %+v", f.SplitPanes)
+	}
 
-	// Only the third row's three panes are built (commands sent + identity stamped).
-	sent := sentCommands(calls)
+	// Only the third row's panes are built and stamped.
+	sent := sentCommandSet(f)
 	for _, cmd := range []string{"echo build", "echo services", "echo vite"} {
 		if !sent[cmd] {
 			t.Errorf("expected the appended row to run %q", cmd)
@@ -1159,22 +827,17 @@ func TestRunTemplateApplyMergeSupersetAppend(t *testing.T) {
 	if sent["vim"] || sent["claude"] {
 		t.Error("survivor commands must not be re-run on reapply")
 	}
+	stamped := stampedPaneIdentities(f)
 	for _, name := range []string{"build", "services", "vite"} {
-		found := false
-		for _, call := range calls {
-			if call[0] == "set-option" && len(call) >= 6 && call[1] == "-p" && call[4] == "@pop_pane" && call[5] == name {
-				found = true
-			}
-		}
-		if !found {
+		if !stamped[name] {
 			t.Errorf("appended pane %q should be stamped with @pop_pane", name)
 		}
 	}
 
-	// Survivors are reproportioned to the target weights (three equal rows of a
-	// 60-cell window = 20 cells each); no pane is killed.
-	assertContainsCall(t, calls, []string{"resize-pane", "-t", "%1", "-y", "20"})
-	assertContainsCall(t, calls, []string{"resize-pane", "-t", "%2", "-y", "20"})
+	// Survivors reproportioned to three equal rows of a 60-cell window = 20 each.
+	if f.ResizedHeight["%1"] != 20 || f.ResizedHeight["%2"] != 20 {
+		t.Errorf("survivors should be reproportioned to 20 cells, got %v", f.ResizedHeight)
+	}
 }
 
 func TestRunTemplateApplyMergeMidRowColumnInsertion(t *testing.T) {
@@ -1196,11 +859,10 @@ func TestRunTemplateApplyMergeMidRowColumnInsertion(t *testing.T) {
 			}},
 		}},
 	}
-	var calls [][]string
 	// middle is missing; left=%1, right=%2 are live.
-	tmux := mergeMockTmux(&calls, "left\t%1\nright\t%2\n", "90", "30")
+	f := mergeFake(map[string]string{"left": "%1", "right": "%2"}, 90, 30)
 	d := templateRuntimeDeps{
-		Tmux:        tmux,
+		Tmux:        f,
 		Getwd:       func() (string, error) { return "/repo", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 		ErrOut:      io.Discard,
@@ -1212,23 +874,24 @@ func TestRunTemplateApplyMergeMidRowColumnInsertion(t *testing.T) {
 
 	// middle is inserted by splitting -h off the live left pane (%1), so it
 	// lands between left and right rather than after right.
-	assertContainsCall(t, calls, []string{"split-window", "-h", "-t", "%1", "-P", "-F", "#{pane_id}", "-c", "/repo"})
-
-	sent := sentCommands(calls)
+	if !hasSplitOff(f, "%1", true) {
+		t.Errorf("expected middle spliced off %%1 horizontally, splits = %+v", f.SplitPanes)
+	}
+	sent := sentCommandSet(f)
 	if !sent["echo middle"] {
 		t.Error("the missing middle column should be created")
 	}
 	if sent["echo left"] || sent["echo right"] {
 		t.Error("live left/right columns must not be re-run")
 	}
-	if sentToPane(calls, "%1") || sentToPane(calls, "%2") {
+	if sentToPane(f, "%1") || sentToPane(f, "%2") {
 		t.Error("live columns must be left untouched")
 	}
 }
 
 func TestRunTemplateApplyMergeReproportionsSurvivors(t *testing.T) {
-	// Reapplying with new weights reproportions the surviving panes without
-	// re-running or killing them.
+	// Reapplying with new weights reproportions survivors without re-running or
+	// killing them.
 	cfg := &config.Config{
 		Workbenches: []config.Workbench{{
 			Name: "grow",
@@ -1244,10 +907,9 @@ func TestRunTemplateApplyMergeReproportionsSurvivors(t *testing.T) {
 			}},
 		}},
 	}
-	var calls [][]string
-	tmux := mergeMockTmux(&calls, "vim\t%1\nclaude\t%2\n", "100", "80")
+	f := mergeFake(map[string]string{"vim": "%1", "claude": "%2"}, 100, 80)
 	d := templateRuntimeDeps{
-		Tmux:        tmux,
+		Tmux:        f,
 		Getwd:       func() (string, error) { return "/repo", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 		ErrOut:      io.Discard,
@@ -1257,19 +919,17 @@ func TestRunTemplateApplyMergeReproportionsSurvivors(t *testing.T) {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
-	// No panes are added (both survive) and none are re-run.
-	for _, call := range calls {
-		if call[0] == "split-window" {
-			t.Fatalf("no split expected when all panes survive, got %v", call)
-		}
-		if call[0] == "send-keys" {
-			t.Fatalf("survivors must not be re-run, got %v", call)
-		}
+	// No panes added (both survive) and none re-run.
+	if len(f.SplitPanes) != 0 {
+		t.Fatalf("no split expected when all panes survive, got %+v", f.SplitPanes)
 	}
-
+	if len(f.SentKeys) != 0 {
+		t.Fatalf("survivors must not be re-run, got %v", f.SentKeys)
+	}
 	// vim weight 3 / claude weight 1 over an 80-cell window → 60 / 20 cells.
-	assertContainsCall(t, calls, []string{"resize-pane", "-t", "%1", "-y", "60"})
-	assertContainsCall(t, calls, []string{"resize-pane", "-t", "%2", "-y", "20"})
+	if f.ResizedHeight["%1"] != 60 || f.ResizedHeight["%2"] != 20 {
+		t.Errorf("reproportion = %v, want %%1:60 %%2:20", f.ResizedHeight)
+	}
 }
 
 func TestRunTemplateApplyMergeRecreatesUnnamedLeaf(t *testing.T) {
@@ -1291,10 +951,9 @@ func TestRunTemplateApplyMergeRecreatesUnnamedLeaf(t *testing.T) {
 			}},
 		}},
 	}
-	var calls [][]string
-	tmux := mergeMockTmux(&calls, "vim\t%1\n", "100", "40")
+	f := mergeFake(map[string]string{"vim": "%1"}, 100, 40)
 	d := templateRuntimeDeps{
-		Tmux:        tmux,
+		Tmux:        f,
 		Getwd:       func() (string, error) { return "/repo", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 		ErrOut:      io.Discard,
@@ -1304,20 +963,20 @@ func TestRunTemplateApplyMergeRecreatesUnnamedLeaf(t *testing.T) {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
-	// The unnamed leaf is appended (split off the live vim pane) and its
-	// command run; vim itself is untouched.
-	assertContainsCall(t, calls, []string{"split-window", "-v", "-t", "%1", "-P", "-F", "#{pane_id}", "-c", "/repo"})
-	if !sentCommands(calls)["htop"] {
+	// The unnamed leaf is appended (split -v off the live vim pane) and run;
+	// vim itself is untouched.
+	if !hasSplitOff(f, "%1", false) {
+		t.Errorf("expected the unnamed leaf appended off %%1 vertically, splits = %+v", f.SplitPanes)
+	}
+	if !sentCommandSet(f)["htop"] {
 		t.Error("unnamed leaf should be recreated on reapply")
 	}
-	if sentToPane(calls, "%1") {
+	if sentToPane(f, "%1") {
 		t.Error("live vim pane must be left untouched")
 	}
-	// The recreated unnamed leaf is never stamped with @pop_pane.
-	for _, call := range calls {
-		if call[0] == "set-option" && len(call) >= 5 && call[1] == "-p" && call[4] == "@pop_pane" {
-			t.Fatalf("unnamed leaf must not be stamped, got %v", call)
-		}
+	// The recreated unnamed leaf (%100) is never stamped with @pop_pane.
+	if _, ok := f.PaneIdentity["%100"]; ok {
+		t.Fatalf("unnamed leaf must not be stamped, got %q", f.PaneIdentity["%100"])
 	}
 }
 
@@ -1333,27 +992,17 @@ func TestRunTemplateApplyBeforeApplyRunsBeforeWindowRealization(t *testing.T) {
 		}},
 	}
 
-	// A combined log records before_apply commands and the tmux call that first
-	// realizes a window, so ordering can be asserted.
+	// A combined log records before_apply commands and the first window
+	// realization, so ordering can be asserted.
 	var combined []string
 	var beforeApplyDirs []string
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			if args[0] == "new-window" {
-				combined = append(combined, "tmux:new-window")
-			}
-			switch args[0] {
-			case "display-message":
-				return "current-session", nil
-			case "new-window":
-				return "%0", nil
-			default:
-				return "", nil
-			}
-		},
+	f := &tmuxtest.Fake{CurrentSessionName: "current-session"}
+	f.NewWindowFunc = func(session, name, dir string) (string, error) {
+		combined = append(combined, "tmux:new-window")
+		return "%0", nil
 	}
 	d := templateRuntimeDeps{
-		Tmux:        tmux,
+		Tmux:        f,
 		Getwd:       func() (string, error) { return "/repo/checkout", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 		ErrOut:      io.Discard,
@@ -1372,8 +1021,6 @@ func TestRunTemplateApplyBeforeApplyRunsBeforeWindowRealization(t *testing.T) {
 	if !reflect.DeepEqual(combined, want) {
 		t.Fatalf("order = %v, want %v (commands must run, in order, before any window is realized)", combined, want)
 	}
-
-	// cwd is the session directory for every before_apply command.
 	for _, dir := range beforeApplyDirs {
 		if dir != "/repo/checkout" {
 			t.Fatalf("before_apply cwd = %q, want the session directory %q", dir, "/repo/checkout")
@@ -1400,12 +1047,11 @@ func TestRunTemplateApplyBeforeApplyRunsOnReapplyOverLiveSession(t *testing.T) {
 			}},
 		}},
 	}
-	var calls [][]string
 	// Both target panes are already live: a pure reapply with no new windows.
-	tmux := mergeMockTmux(&calls, "vim\t%1\nclaude\t%2\n", "100", "40")
+	f := mergeFake(map[string]string{"vim": "%1", "claude": "%2"}, 100, 40)
 	var ran []string
 	d := templateRuntimeDeps{
-		Tmux:        tmux,
+		Tmux:        f,
 		Getwd:       func() (string, error) { return "/repo", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 		ErrOut:      io.Discard,
@@ -1439,18 +1085,14 @@ func TestRunTemplateApplyBeforeApplyError(t *testing.T) {
 			}},
 		}},
 	}
-	var calls [][]string
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			calls = append(calls, append([]string(nil), args...))
-			if args[0] == "display-message" {
-				return "current-session", nil
-			}
-			return "", nil
-		},
+	windowCreated := false
+	f := &tmuxtest.Fake{CurrentSessionName: "current-session"}
+	f.NewWindowFunc = func(session, name, dir string) (string, error) {
+		windowCreated = true
+		return "%0", nil
 	}
 	d := templateRuntimeDeps{
-		Tmux:        tmux,
+		Tmux:        f,
 		Getwd:       func() (string, error) { return "/repo", nil },
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 		ErrOut:      io.Discard,
@@ -1466,10 +1108,8 @@ func TestRunTemplateApplyBeforeApplyError(t *testing.T) {
 	if !strings.Contains(err.Error(), "before_apply[0]") {
 		t.Fatalf("error = %q, want before_apply context", err.Error())
 	}
-	for _, call := range calls {
-		if call[0] == "new-window" {
-			t.Fatal("no window should be realized after a before_apply failure")
-		}
+	if windowCreated {
+		t.Fatal("no window should be realized after a before_apply failure")
 	}
 }
 
@@ -1485,27 +1125,15 @@ func TestCreateSessionFromWorkbenchRemovesStrayWindow(t *testing.T) {
 		}},
 	}
 
-	var calls [][]string
 	var beforeApplyRan bool
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			calls = append(calls, append([]string(nil), args...))
-			switch args[0] {
-			case "new-session":
-				return "@0", nil // the stray initial window id
-			case "list-windows":
-				// A brand-new session carries no @pop_wb_window stamp, so the
-				// merge probe finds nothing and every window is created fresh.
-				return "", nil
-			case "new-window":
-				return "%1", nil
-			default:
-				return "", nil
-			}
-		},
+	var scaffoldDir string
+	f := &tmuxtest.Fake{}
+	f.NewScaffoldSessionFunc = func(name, dir string) (string, error) {
+		scaffoldDir = dir
+		return "@0", nil // the stray initial window id
 	}
 	d := templateRuntimeDeps{
-		Tmux:        tmux,
+		Tmux:        f,
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 		ErrOut:      io.Discard,
 		RunBeforeApply: func(command, dir string) error {
@@ -1522,40 +1150,28 @@ func TestCreateSessionFromWorkbenchRemovesStrayWindow(t *testing.T) {
 		t.Fatalf("createSessionFromWorkbench() error: %v", err)
 	}
 
-	// The session is created detached first, capturing the stray window id.
-	want0 := []string{"new-session", "-d", "-s", "mysess", "-c", "/repo/checkout", "-P", "-F", "#{window_id}"}
-	if !reflect.DeepEqual(calls[0], want0) {
-		t.Fatalf("first call = %v, want %v", calls[0], want0)
+	// The session is created detached first at the session dir.
+	if scaffoldDir != "/repo/checkout" {
+		t.Errorf("scaffold session dir = %q, want /repo/checkout", scaffoldDir)
 	}
-
 	if !beforeApplyRan {
 		t.Error("before_apply must run on the create path (run-every-apply)")
 	}
-
-	// The Workbench window is realized fresh (no live match), then stamped.
-	assertContainsCall(t, calls, []string{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "mysess:", "-n", "work", "-c", "/repo/checkout"})
-	assertContainsCall(t, calls, []string{"set-option", "-w", "-t", "mysess:work", "@pop_wb_window", "work"})
-
-	// The stray shell window is removed last, so the session is exactly the
-	// Workbench with no junk window.
-	last := calls[len(calls)-1]
-	wantLast := []string{"kill-window", "-t", "@0"}
-	if !reflect.DeepEqual(last, wantLast) {
-		t.Fatalf("last call = %v, want %v (stray window must be killed last)", last, wantLast)
+	// The Workbench window is realized fresh (no live match) and stamped.
+	if f.WBWindowIdentity["mysess:work"] != "work" {
+		t.Errorf("window should be created fresh and stamped, got %v", f.WBWindowIdentity)
+	}
+	// The stray shell window is removed, so the session is exactly the Workbench.
+	if !reflect.DeepEqual(f.KilledWindows, []string{"@0"}) {
+		t.Fatalf("killed windows = %v, want the stray [@0]", f.KilledWindows)
 	}
 }
 
 func TestCreateSessionFromWorkbenchInvalidTemplate(t *testing.T) {
 	// A Workbench with no windows is invalid; nothing should be created.
-	var calls [][]string
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			calls = append(calls, append([]string(nil), args...))
-			return "", nil
-		},
-	}
+	f := &tmuxtest.Fake{}
 	d := templateRuntimeDeps{
-		Tmux:        tmux,
+		Tmux:        f,
 		UserHomeDir: func() (string, error) { return "/home/user", nil },
 		ErrOut:      io.Discard,
 	}
@@ -1563,35 +1179,7 @@ func TestCreateSessionFromWorkbenchInvalidTemplate(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for a Workbench with no windows")
 	}
-	if len(calls) != 0 {
-		t.Fatalf("no tmux calls expected for an invalid Workbench, got %v", calls)
-	}
-}
-
-func assertContainsCall(t *testing.T, calls [][]string, want []string) {
-	t.Helper()
-	for _, call := range calls {
-		if reflect.DeepEqual(call, want) {
-			return
-		}
-	}
-	t.Fatalf("expected call %v not found in %v", want, calls)
-}
-
-func assertNotContainsCall(t *testing.T, calls [][]string, want []string) {
-	t.Helper()
-	for _, call := range calls {
-		if reflect.DeepEqual(call, want) {
-			t.Fatalf("unexpected call %v found in %v", want, calls)
-		}
-	}
-}
-
-func assertNotFollowedBy(t *testing.T, calls [][]string, first, second []string) {
-	t.Helper()
-	for i := 0; i < len(calls)-1; i++ {
-		if reflect.DeepEqual(calls[i], first) && reflect.DeepEqual(calls[i+1], second) {
-			t.Fatalf("call %v was unexpectedly followed by %v", first, second)
-		}
+	if len(f.ScaffoldSessions) != 0 || len(f.WBWindowIdentity) != 0 || len(f.KilledWindows) != 0 {
+		t.Fatalf("no tmux side effects expected for an invalid Workbench")
 	}
 }

@@ -114,16 +114,63 @@ type Fake struct {
 	Selected []string
 	// WindowRetiled records "session:window" retiled by RetileWindow, in order.
 	WindowRetiled []string
+	// WindowCwd records the creation directory of each window NewWindow makes,
+	// keyed by "session:window".
+	WindowCwd map[string]string
+
+	// --- workbench layout (@pop_wb_window / @pop_pane) ---
+
+	// LiveWBWindows is arranged input for LiveWorkbenchWindows: session ->
+	// (@pop_wb_window identity -> window id). Merge tests arrange it.
+	LiveWBWindows map[string]map[string]string
+	// LiveWBPanes is arranged input for LivePaneIdentities: window ref ->
+	// (@pop_pane identity -> pane id).
+	LiveWBPanes map[string]map[string]string
+	// LiveWBFallback is arranged input for LivePaneIdentities' fallback anchor:
+	// window ref -> first pane id.
+	LiveWBFallback map[string]string
+	// WindowW / WindowH are the dimensions WindowSize reports for every target
+	// (a test builds one window). Zero values default to tmux's 80x24.
+	WindowW int
+	WindowH int
+
+	// WBWindowIdentity records StampWorkbenchWindow: window target -> identity.
+	WBWindowIdentity map[string]string
+	// AutoRenameOff records window targets whose automatic-rename was disabled.
+	AutoRenameOff []string
+	// PaneIdentity records StampPane: pane id -> @pop_pane identity.
+	PaneIdentity map[string]string
+	// PaneTitles records SetPaneTitle: pane id -> title.
+	PaneTitles map[string]string
+	// Respawned records RespawnPane: pane id -> new working directory.
+	Respawned map[string]string
+	// ResizedWidth / ResizedHeight record ResizePane by axis: pane id -> size.
+	ResizedWidth  map[string]int
+	ResizedHeight map[string]int
+	// KilledWindows records KillWindow targets, in order.
+	KilledWindows []string
+	// ScaffoldSessions records NewScaffoldSession: session name -> dir.
+	ScaffoldSessions map[string]string
+	// SelectedWindowTargets records SelectWindowTarget targets, in order.
+	SelectedWindowTargets []string
+	// SplitPanes records SplitPane specs, in order.
+	SplitPanes []tmux.SplitSpec
 
 	// Failure-injection overrides. When set, each replaces its verb entirely.
-	NewSessionFunc    func(name, dir string) error
-	SwitchClientFunc  func(target string) error
-	AttachSessionFunc func(target string) error
-	KillSessionFunc   func(name string) error
-	PaneInfoFunc      func(paneID string) (tmux.PaneInfo, error)
-	LivePanesFunc     func() ([]string, error)
-	NewWindowFunc     func(session, name, dir string) (string, error)
-	SplitWindowFunc   func(session, name, dir string) (string, error)
+	NewSessionFunc         func(name, dir string) error
+	SwitchClientFunc       func(target string) error
+	AttachSessionFunc      func(target string) error
+	KillSessionFunc        func(name string) error
+	PaneInfoFunc           func(paneID string) (tmux.PaneInfo, error)
+	LivePanesFunc          func() ([]string, error)
+	NewWindowFunc          func(session, name, dir string) (string, error)
+	SplitWindowFunc        func(session, name, dir string) (string, error)
+	NewScaffoldSessionFunc func(name, dir string) (string, error)
+	SplitPaneFunc          func(spec tmux.SplitSpec) (string, error)
+
+	// nextWindowNum seeds generated window ids for scaffold sessions ("@200",
+	// "@201", …), high enough not to collide with test-arranged ids.
+	nextWindowNum int
 }
 
 var _ tmux.Tmux = (*Fake)(nil)
@@ -323,6 +370,10 @@ func (f *Fake) RetileAgentWindow(session string) error {
 // --- pane-id primitives ---
 
 func (f *Fake) SetPaneTitle(paneID, title string) error {
+	if f.PaneTitles == nil {
+		f.PaneTitles = map[string]string{}
+	}
+	f.PaneTitles[paneID] = title
 	for session, panes := range f.AgentWindows {
 		for i := range panes {
 			if panes[i].ID == paneID {
@@ -450,6 +501,10 @@ func (f *Fake) NewWindow(session, name, dir string) (string, error) {
 	}
 	id := f.newPaneID()
 	f.addWindowPane(session, name, id)
+	if f.WindowCwd == nil {
+		f.WindowCwd = map[string]string{}
+	}
+	f.WindowCwd[session+":"+name] = dir
 	return id, nil
 }
 
@@ -510,4 +565,120 @@ func (f *Fake) FindTaggedPane(session string, tag tmux.PaneTag, value string) (s
 		}
 	}
 	return "", nil
+}
+
+// --- workbench layout ---
+
+// newWindowID mints a fresh window id for a scaffold session.
+func (f *Fake) newWindowID() string {
+	if f.nextWindowNum == 0 {
+		f.nextWindowNum = 200
+	}
+	id := fmt.Sprintf("@%d", f.nextWindowNum)
+	f.nextWindowNum++
+	return id
+}
+
+func (f *Fake) NewScaffoldSession(name, dir string) (string, error) {
+	if f.NewScaffoldSessionFunc != nil {
+		return f.NewScaffoldSessionFunc(name, dir)
+	}
+	if f.ScaffoldSessions == nil {
+		f.ScaffoldSessions = map[string]string{}
+	}
+	f.ScaffoldSessions[name] = dir
+	if f.Live == nil {
+		f.Live = map[string]string{}
+	}
+	f.Live[name] = dir
+	return f.newWindowID(), nil
+}
+
+func (f *Fake) LiveWorkbenchWindows(session string) (map[string]string, error) {
+	result := make(map[string]string)
+	for k, v := range f.LiveWBWindows[session] {
+		result[k] = v
+	}
+	return result, nil
+}
+
+func (f *Fake) LivePaneIdentities(windowRef string) (map[string]string, string, error) {
+	result := make(map[string]string)
+	for k, v := range f.LiveWBPanes[windowRef] {
+		result[k] = v
+	}
+	return result, f.LiveWBFallback[windowRef], nil
+}
+
+func (f *Fake) StampWorkbenchWindow(windowTarget, identity string) error {
+	if f.WBWindowIdentity == nil {
+		f.WBWindowIdentity = map[string]string{}
+	}
+	f.WBWindowIdentity[windowTarget] = identity
+	return nil
+}
+
+func (f *Fake) DisableAutomaticRename(windowTarget string) error {
+	f.AutoRenameOff = append(f.AutoRenameOff, windowTarget)
+	return nil
+}
+
+func (f *Fake) StampPane(paneID, identity string) error {
+	if f.PaneIdentity == nil {
+		f.PaneIdentity = map[string]string{}
+	}
+	f.PaneIdentity[paneID] = identity
+	return nil
+}
+
+func (f *Fake) WindowSize(target string) (int, int, error) {
+	w, h := f.WindowW, f.WindowH
+	if w == 0 {
+		w = 80
+	}
+	if h == 0 {
+		h = 24
+	}
+	return w, h, nil
+}
+
+func (f *Fake) ResizePane(paneID string, horizontal bool, size int) error {
+	if horizontal {
+		if f.ResizedWidth == nil {
+			f.ResizedWidth = map[string]int{}
+		}
+		f.ResizedWidth[paneID] = size
+	} else {
+		if f.ResizedHeight == nil {
+			f.ResizedHeight = map[string]int{}
+		}
+		f.ResizedHeight[paneID] = size
+	}
+	return nil
+}
+
+func (f *Fake) RespawnPane(paneID, dir string) error {
+	if f.Respawned == nil {
+		f.Respawned = map[string]string{}
+	}
+	f.Respawned[paneID] = dir
+	return nil
+}
+
+func (f *Fake) SplitPane(spec tmux.SplitSpec) (string, error) {
+	if f.SplitPaneFunc != nil {
+		return f.SplitPaneFunc(spec)
+	}
+	f.SplitPanes = append(f.SplitPanes, spec)
+	return f.newPaneID(), nil
+}
+
+func (f *Fake) KillWindow(target string) error {
+	f.KilledWindows = append(f.KilledWindows, target)
+	return nil
+}
+
+func (f *Fake) SelectWindowTarget(target string) error {
+	f.SelectedWindowTargets = append(f.SelectedWindowTargets, target)
+	return nil
 }

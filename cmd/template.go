@@ -9,12 +9,12 @@ import (
 	"strings"
 
 	"github.com/glebglazov/pop/config"
-	"github.com/glebglazov/pop/internal/deps"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/spf13/cobra"
 )
 
 type templateRuntimeDeps struct {
-	Tmux        deps.Tmux
+	Tmux        tmuxmod.Tmux
 	LoadConfig  func() (*config.Config, error)
 	Getwd       func() (string, error)
 	UserHomeDir func() (string, error)
@@ -27,7 +27,7 @@ type templateRuntimeDeps struct {
 
 func defaultTemplateRuntimeDeps() templateRuntimeDeps {
 	return templateRuntimeDeps{
-		Tmux: defaultTmux,
+		Tmux: defaultTmuxMod,
 		LoadConfig: func() (*config.Config, error) {
 			path := cfgFile
 			if path == "" {
@@ -163,7 +163,7 @@ func runTemplateApplyWith(d templateRuntimeDeps, templates []config.Workbench, n
 		return fmt.Errorf("session template %q: %w", name, err)
 	}
 
-	session, err := d.Tmux.Command("display-message", "-p", "#S")
+	session, err := d.Tmux.CurrentSession()
 	if err != nil || session == "" {
 		return fmt.Errorf("not inside a tmux session")
 	}
@@ -202,7 +202,7 @@ func applyWorkbench(d templateRuntimeDeps, tmpl config.Workbench, session, dir s
 	// Match target windows to live windows by pop-owned identity (ADR-0075),
 	// never by the clobberable window_name. A matched window is merged into; an
 	// unmatched one is created fresh.
-	liveWindows, err := liveWorkbenchWindows(d.Tmux, session)
+	liveWindows, err := d.Tmux.LiveWorkbenchWindows(session)
 	if err != nil {
 		return fmt.Errorf("failed to list existing windows: %w", err)
 	}
@@ -225,7 +225,7 @@ func applyWorkbench(d templateRuntimeDeps, tmpl config.Workbench, session, dir s
 			// Matched a live pop-owned window: recurse and merge instead of
 			// skipping (ADR-0075), growing it without killing running panes.
 			windowRef = liveRef
-			liveNames, fallbackAnchor, err := livePaneIdentities(d.Tmux, liveRef)
+			liveNames, fallbackAnchor, err := d.Tmux.LivePaneIdentities(liveRef)
 			if err != nil {
 				return fmt.Errorf("failed to inspect live window %q: %w", window.Name, err)
 			}
@@ -239,7 +239,7 @@ func applyWorkbench(d templateRuntimeDeps, tmpl config.Workbench, session, dir s
 			windowRef = session + ":" + window.Name
 
 			// Create the window with the initial pane
-			paneID, err := d.Tmux.Command("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", session+":", "-n", window.Name, "-c", rootCwd)
+			paneID, err := d.Tmux.NewWindow(session, window.Name, rootCwd)
 			if err != nil {
 				return fmt.Errorf("failed to create template window %q: %w", window.Name, err)
 			}
@@ -247,10 +247,10 @@ func applyWorkbench(d templateRuntimeDeps, tmpl config.Workbench, session, dir s
 			// Stamp pop-owned window identity (ADR-0075): record the spec name in a
 			// user option that survives auto-rename, and disable auto-rename so the
 			// display name stays stable for humans.
-			if _, err := d.Tmux.Command("set-option", "-w", "-t", windowRef, "@pop_wb_window", window.Name); err != nil {
+			if err := d.Tmux.StampWorkbenchWindow(windowRef, window.Name); err != nil {
 				return fmt.Errorf("failed to stamp window identity for %q: %w", window.Name, err)
 			}
-			if _, err := d.Tmux.Command("set-option", "-w", "-t", windowRef, "automatic-rename", "off"); err != nil {
+			if err := d.Tmux.DisableAutomaticRename(windowRef); err != nil {
 				return fmt.Errorf("failed to disable automatic-rename for window %q: %w", window.Name, err)
 			}
 
@@ -278,17 +278,17 @@ func applyWorkbench(d templateRuntimeDeps, tmpl config.Workbench, session, dir s
 	}
 	if len(focusTargets) > 0 {
 		target := focusTargets[0]
-		if _, err := d.Tmux.Command("select-window", "-t", target.windowRef); err != nil {
+		if err := d.Tmux.SelectWindowTarget(target.windowRef); err != nil {
 			return fmt.Errorf("failed to select window %q: %w", target.windowRef, err)
 		}
-		if _, err := d.Tmux.Command("select-pane", "-t", target.paneID); err != nil {
+		if err := d.Tmux.SelectPane(target.paneID); err != nil {
 			return fmt.Errorf("failed to select pane %q: %w", target.paneID, err)
 		}
 	} else if firstWindowRef != "" {
-		if _, err := d.Tmux.Command("select-window", "-t", firstWindowRef); err != nil {
+		if err := d.Tmux.SelectWindowTarget(firstWindowRef); err != nil {
 			return fmt.Errorf("failed to select window %q: %w", firstWindowRef, err)
 		}
-		if _, err := d.Tmux.Command("select-pane", "-t", firstWindowLeaf); err != nil {
+		if err := d.Tmux.SelectPane(firstWindowLeaf); err != nil {
 			return fmt.Errorf("failed to select pane %q: %w", firstWindowLeaf, err)
 		}
 	}
@@ -308,18 +308,18 @@ func createSessionFromWorkbench(d templateRuntimeDeps, tmpl config.Workbench, se
 
 	// Create the detached session and capture its initial (stray) window id.
 	// Every Workbench window is created fresh — the stray window carries no
-	// @pop_wb_window stamp, so the merge walk never matches it — leaving the
-	// stray to be killed once the Workbench is realized.
-	strayWindow, err := d.Tmux.Command("new-session", "-d", "-s", sessionName, "-c", path, "-P", "-F", "#{window_id}")
+	// pop-owned window identity, so the merge walk never matches it — leaving
+	// the stray to be killed once the Workbench is realized.
+	strayWindow, err := d.Tmux.NewScaffoldSession(sessionName, path)
 	if err != nil {
-		return fmt.Errorf("failed to create session %q: %w", sessionName, err)
+		return err
 	}
 
 	if err := applyWorkbench(d, tmpl, sessionName, path); err != nil {
 		return err
 	}
 
-	if _, err := d.Tmux.Command("kill-window", "-t", strayWindow); err != nil {
+	if err := d.Tmux.KillWindow(strayWindow); err != nil {
 		return fmt.Errorf("failed to remove stray shell window: %w", err)
 	}
 	return nil
@@ -337,7 +337,7 @@ type mergeResult struct {
 // mergeWindow merges a target window's layout into a live, pop-owned window
 // (ADR-0075). It is the entry point that decides whether the window root is a
 // single leaf or a container.
-func mergeWindow(tmux deps.Tmux, layout *config.WorkbenchPaneSpec, liveNames map[string]string, fallbackAnchor, sessionDir, rootCwd, homeDir string) (mergeResult, error) {
+func mergeWindow(tmux tmuxmod.Tmux, layout *config.WorkbenchPaneSpec, liveNames map[string]string, fallbackAnchor, sessionDir, rootCwd, homeDir string) (mergeResult, error) {
 	if len(layout.Panes) == 0 {
 		if id := liveNames[layout.Name]; id != "" {
 			// The sole pane survived: leave its process intact.
@@ -361,7 +361,7 @@ func mergeWindow(tmux deps.Tmux, layout *config.WorkbenchPaneSpec, liveNames map
 // mergePaneTree merges a present-live subtree. A matched leaf is left untouched
 // (its process survives); a present container recurses. Wholly-missing subtrees
 // are never routed here — their container parent builds them fresh.
-func mergePaneTree(tmux deps.Tmux, pane *config.WorkbenchPaneSpec, liveNames map[string]string, sessionDir, parentCwd, homeDir string) (mergeResult, error) {
+func mergePaneTree(tmux tmuxmod.Tmux, pane *config.WorkbenchPaneSpec, liveNames map[string]string, sessionDir, parentCwd, homeDir string) (mergeResult, error) {
 	if len(pane.Panes) == 0 {
 		id := liveNames[pane.Name]
 		res := mergeResult{anchor: id, leafIDs: []string{id}}
@@ -380,7 +380,7 @@ func mergePaneTree(tmux deps.Tmux, pane *config.WorkbenchPaneSpec, liveNames map
 // container is reproportioned to the target weights, which may resize (never
 // kill) surviving panes. fallbackAnchor seeds the split when the container has no
 // live children at all (only reachable at a matched window root).
-func mergeContainer(tmux deps.Tmux, children []config.WorkbenchPaneSpec, direction string, liveNames map[string]string, fallbackAnchor, sessionDir, parentCwd, homeDir string) (mergeResult, error) {
+func mergeContainer(tmux tmuxmod.Tmux, children []config.WorkbenchPaneSpec, direction string, liveNames map[string]string, fallbackAnchor, sessionDir, parentCwd, homeDir string) (mergeResult, error) {
 	n := len(children)
 	if n == 0 {
 		return mergeResult{}, nil
@@ -418,17 +418,18 @@ func mergeContainer(tmux deps.Tmux, children []config.WorkbenchPaneSpec, directi
 		// Missing child: splice it in beside its live siblings, preserving
 		// target order. Split forward off the last placed sibling; if none
 		// precedes it, split before the next live sibling (-b).
-		var splitArgs []string
+		spec := tmuxmod.SplitSpec{Horizontal: splitFlag == "-h", Dir: childCwd}
 		if lastAnchor != "" {
-			splitArgs = []string{"split-window", splitFlag, "-t", lastAnchor, "-P", "-F", "#{pane_id}", "-c", childCwd}
+			spec.Target = lastAnchor
 		} else {
 			anchor := nextLiveAnchor(children, present, liveNames, i)
 			if anchor == "" {
 				anchor = fallbackAnchor
 			}
-			splitArgs = []string{"split-window", splitFlag, "-b", "-t", anchor, "-P", "-F", "#{pane_id}", "-c", childCwd}
+			spec.Target = anchor
+			spec.Before = true
 		}
-		newPaneID, err := tmux.Command(splitArgs...)
+		newPaneID, err := tmux.SplitPane(spec)
 		if err != nil {
 			return mergeResult{}, fmt.Errorf("failed to split for pane %q: %w", children[i].Name, err)
 		}
@@ -497,21 +498,21 @@ type paneTreeResult struct {
 // it sets the title and sends the command. If it's a container, it creates
 // child panes via splits and recursively realizes them. parentCwd is the
 // already-resolved effective working directory inherited from ancestors.
-func realizePaneTree(tmux deps.Tmux, pane *config.WorkbenchPaneSpec, paneID, sessionDir, parentCwd, homeDir string) (paneTreeResult, error) {
+func realizePaneTree(tmux tmuxmod.Tmux, pane *config.WorkbenchPaneSpec, paneID, sessionDir, parentCwd, homeDir string) (paneTreeResult, error) {
 	if len(pane.Panes) == 0 {
 		// Leaf node: set title and send command
-		if _, err := tmux.Command("select-pane", "-t", paneID, "-T", pane.Name); err != nil {
+		if err := tmux.SetPaneTitle(paneID, pane.Name); err != nil {
 			return paneTreeResult{}, fmt.Errorf("failed to set pane title %q: %w", pane.Name, err)
 		}
 		// Stamp pop-owned pane identity (ADR-0075/ADR-0058) on named leaves so a
-		// later reapply can match this pane via #{@pop_pane} regardless of how its
+		// later reapply can match this pane by identity regardless of how its
 		// display title gets clobbered. Unnamed leaves are anonymous (B1) — no stamp.
 		if pane.Name != "" {
-			if _, err := tmux.Command("set-option", "-p", "-t", paneID, "@pop_pane", pane.Name); err != nil {
+			if err := tmux.StampPane(paneID, pane.Name); err != nil {
 				return paneTreeResult{}, fmt.Errorf("failed to stamp pane identity %q: %w", pane.Name, err)
 			}
 		}
-		if _, err := tmux.Command("send-keys", "-t", paneID, pane.Command, "Enter"); err != nil {
+		if err := tmux.SendKeys(paneID, pane.Command, "Enter"); err != nil {
 			return paneTreeResult{}, fmt.Errorf("failed to send pane command %q: %w", pane.Command, err)
 		}
 		result := paneTreeResult{leafIDs: []string{paneID}}
@@ -529,7 +530,7 @@ func realizePaneTree(tmux deps.Tmux, pane *config.WorkbenchPaneSpec, paneID, ses
 // It splits the container pane N-1 times to create N child panes, then resizes
 // them according to their weights. parentCwd is the already-resolved effective
 // working directory for this container.
-func realizeContainer(tmux deps.Tmux, containerPaneID string, children []config.WorkbenchPaneSpec, direction, sessionDir, parentCwd, homeDir string) (paneTreeResult, error) {
+func realizeContainer(tmux tmuxmod.Tmux, containerPaneID string, children []config.WorkbenchPaneSpec, direction, sessionDir, parentCwd, homeDir string) (paneTreeResult, error) {
 	n := len(children)
 	if n == 0 {
 		return paneTreeResult{}, nil
@@ -538,7 +539,7 @@ func realizeContainer(tmux deps.Tmux, containerPaneID string, children []config.
 		// Single child: reuse the container pane
 		childCwd := effectiveCwd(sessionDir, parentCwd, children[0].Cwd, homeDir)
 		if children[0].Cwd != "" {
-			if _, err := tmux.Command("respawn-pane", "-c", childCwd, "-t", containerPaneID, "-k"); err != nil {
+			if err := tmux.RespawnPane(containerPaneID, childCwd); err != nil {
 				return paneTreeResult{}, fmt.Errorf("failed to set pane directory to %q: %w", childCwd, err)
 			}
 		}
@@ -550,7 +551,7 @@ func realizeContainer(tmux deps.Tmux, containerPaneID string, children []config.
 	// before it is reused.
 	child0Cwd := effectiveCwd(sessionDir, parentCwd, children[0].Cwd, homeDir)
 	if children[0].Cwd != "" {
-		if _, err := tmux.Command("respawn-pane", "-c", child0Cwd, "-t", containerPaneID, "-k"); err != nil {
+		if err := tmux.RespawnPane(containerPaneID, child0Cwd); err != nil {
 			return paneTreeResult{}, fmt.Errorf("failed to set pane directory to %q: %w", child0Cwd, err)
 		}
 	}
@@ -597,7 +598,12 @@ func realizeContainer(tmux deps.Tmux, containerPaneID string, children []config.
 
 		percentage := (remainingWeight * 100) / previousRemaining
 
-		newPaneID, err := tmux.Command("split-window", splitFlag, "-t", lastPaneID, "-p", fmt.Sprintf("%d", percentage), "-P", "-F", "#{pane_id}", "-c", childCwd)
+		newPaneID, err := tmux.SplitPane(tmuxmod.SplitSpec{
+			Target:     lastPaneID,
+			Horizontal: splitFlag == "-h",
+			Percent:    percentage,
+			Dir:        childCwd,
+		})
 		if err != nil {
 			return paneTreeResult{}, fmt.Errorf("failed to split pane: %w", err)
 		}
@@ -634,23 +640,15 @@ func realizeContainer(tmux deps.Tmux, containerPaneID string, children []config.
 // 80x24) differs from the window the panes actually occupy — the resize math
 // would then size panes against the wrong window and tmux would clamp to a
 // lopsided split that survives the attach rescale as a skewed layout.
-func resizePanesByWeight(tmux deps.Tmux, paneIDs []string, children []config.WorkbenchPaneSpec, direction string) error {
+func resizePanesByWeight(tmux tmuxmod.Tmux, paneIDs []string, children []config.WorkbenchPaneSpec, direction string) error {
 	// Read dimensions of the specific window being built by targeting one of its
 	// panes, so the build-time split and this resize agree on one window.
 	target := paneIDs[0]
 
-	widthStr, err := tmux.Command("display-message", "-t", target, "-p", "#{window_width}")
+	width, height, err := tmux.WindowSize(target)
 	if err != nil {
-		return fmt.Errorf("failed to get window width: %w", err)
+		return fmt.Errorf("failed to get window size: %w", err)
 	}
-	heightStr, err := tmux.Command("display-message", "-t", target, "-p", "#{window_height}")
-	if err != nil {
-		return fmt.Errorf("failed to get window height: %w", err)
-	}
-
-	var width, height int
-	fmt.Sscanf(widthStr, "%d", &width)
-	fmt.Sscanf(heightStr, "%d", &height)
 
 	// Calculate total weight
 	totalWeight := 0
@@ -662,15 +660,12 @@ func resizePanesByWeight(tmux deps.Tmux, paneIDs []string, children []config.Wor
 		totalWeight += weight
 	}
 
-	// Determine which dimension to resize
-	var totalSize int
-	var resizeFlag string
-	if direction == "columns" {
+	// Determine which dimension to resize: width (-x) for columns, height (-y)
+	// for rows.
+	horizontal := direction == "columns"
+	totalSize := height
+	if horizontal {
 		totalSize = width
-		resizeFlag = "-x"
-	} else {
-		totalSize = height
-		resizeFlag = "-y"
 	}
 
 	// Resize each pane to its target size
@@ -681,8 +676,7 @@ func resizePanesByWeight(tmux deps.Tmux, paneIDs []string, children []config.Wor
 		}
 		targetSize := (totalSize * weight) / totalWeight
 
-		_, err := tmux.Command("resize-pane", "-t", paneID, resizeFlag, fmt.Sprintf("%d", targetSize))
-		if err != nil {
+		if err := tmux.ResizePane(paneID, horizontal, targetSize); err != nil {
 			return fmt.Errorf("failed to resize pane %s: %w", paneID, err)
 		}
 	}
@@ -718,61 +712,6 @@ func validateWorkbench(tmpl config.Workbench) error {
 		}
 	}
 	return nil
-}
-
-// liveWorkbenchWindows maps each pop-stamped window's @pop_wb_window identity to
-// its tmux window id within the session. Windows lacking the stamp (anything not
-// born of a Workbench apply) are skipped — identity never lives in the
-// clobberable window_name (ADR-0075).
-func liveWorkbenchWindows(tmux deps.Tmux, session string) (map[string]string, error) {
-	out, err := tmux.Command("list-windows", "-t", session, "-F", "#{@pop_wb_window}\t#{window_id}")
-	if err != nil {
-		return nil, err
-	}
-	windows := make(map[string]string)
-	for _, line := range strings.Split(out, "\n") {
-		if line == "" {
-			continue
-		}
-		parts := strings.SplitN(line, "\t", 2)
-		if len(parts) != 2 || parts[0] == "" {
-			continue
-		}
-		if _, ok := windows[parts[0]]; !ok {
-			windows[parts[0]] = parts[1]
-		}
-	}
-	return windows, nil
-}
-
-// livePaneIdentities maps the @pop_pane identity of each stamped pane in a window
-// to its tmux pane id, and returns the window's first pane id as a fallback
-// anchor for the rare matched-window-with-no-recognizable-panes case.
-func livePaneIdentities(tmux deps.Tmux, windowRef string) (map[string]string, string, error) {
-	out, err := tmux.Command("list-panes", "-t", windowRef, "-F", "#{@pop_pane}\t#{pane_id}")
-	if err != nil {
-		return nil, "", err
-	}
-	names := make(map[string]string)
-	fallback := ""
-	for _, line := range strings.Split(out, "\n") {
-		if line == "" {
-			continue
-		}
-		parts := strings.SplitN(line, "\t", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		if fallback == "" {
-			fallback = parts[1]
-		}
-		if parts[0] != "" {
-			if _, ok := names[parts[0]]; !ok {
-				names[parts[0]] = parts[1]
-			}
-		}
-	}
-	return names, fallback, nil
 }
 
 // effectiveCwd returns the working directory for a pane given its raw cwd

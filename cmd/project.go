@@ -172,8 +172,8 @@ func DefaultProjectDeps() *ProjectDeps {
 		OpenSession: func(_ deps.Tmux, item *ui.Item) error {
 			return openTmuxSessionWith(defaultTmuxMod, item)
 		},
-		OpenSessionWithWorkbench: func(tmux deps.Tmux, item *ui.Item, workbenchName string) error {
-			return openTmuxSessionWithWorkbenchWith(tmux, defaultTmuxMod, item, workbenchName)
+		OpenSessionWithWorkbench: func(_ deps.Tmux, item *ui.Item, workbenchName string) error {
+			return openTmuxSessionWithWorkbenchWith(defaultTmuxMod, item, workbenchName)
 		},
 		OpenWindow: func(_ deps.Tmux, item *ui.Item) error {
 			return openTmuxWindowWith(defaultTmuxMod, item)
@@ -774,9 +774,9 @@ func promptWorkbenchForCreate(d *ProjectDeps, order []string, workbenches []conf
 // exactly the named Workbench (stray shell window removed) and attaches to it.
 // It is the production implementation of ProjectDeps.OpenSessionWithWorkbench
 // (ADR-0075 picker create-path).
-func openTmuxSessionWithWorkbenchWith(tmux deps.Tmux, mod tmuxmod.Tmux, item *ui.Item, workbenchName string) error {
+func openTmuxSessionWithWorkbenchWith(mod tmuxmod.Tmux, item *ui.Item, workbenchName string) error {
 	td := defaultTemplateRuntimeDeps()
-	td.Tmux = tmux
+	td.Tmux = mod
 	cfg, err := td.LoadConfig()
 	if err != nil {
 		return err

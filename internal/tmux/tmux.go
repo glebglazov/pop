@@ -148,6 +148,37 @@ type Tmux interface {
 	// PaneTopics maps every pane id carrying a non-empty Topic to its Topic
 	// text, across all sessions.
 	PaneTopics() (map[string]string, error)
+
+	// --- workbench layout (@pop_wb_window / @pop_pane; the merge/realize engine lives in cmd) ---
+
+	// NewScaffoldSession creates a brand-new detached session named name rooted
+	// at dir and returns the id of the stray initial window tmux births.
+	NewScaffoldSession(name, dir string) (string, error)
+	// LiveWorkbenchWindows maps each pop-stamped window's @pop_wb_window
+	// identity to its window id within session (unstamped windows are skipped).
+	LiveWorkbenchWindows(session string) (map[string]string, error)
+	// LivePaneIdentities maps each stamped pane's @pop_pane identity to its
+	// pane id within windowRef, plus the window's first pane id as a fallback.
+	LivePaneIdentities(windowRef string) (map[string]string, string, error)
+	// StampWorkbenchWindow records identity as windowTarget's @pop_wb_window.
+	StampWorkbenchWindow(windowTarget, identity string) error
+	// DisableAutomaticRename turns off automatic-rename for windowTarget.
+	DisableAutomaticRename(windowTarget string) error
+	// StampPane records identity as a pane's @pop_pane.
+	StampPane(paneID, identity string) error
+	// WindowSize reads the width and height in cells of the window owning target.
+	WindowSize(target string) (width, height int, err error)
+	// ResizePane resizes a pane to an exact cell size along one axis: width
+	// (-x) when horizontal is true, height (-y) otherwise.
+	ResizePane(paneID string, horizontal bool, size int) error
+	// RespawnPane restarts a pane's shell with a new working directory.
+	RespawnPane(paneID, dir string) error
+	// SplitPane splits a new pane off spec.Target per spec and returns its id.
+	SplitPane(spec SplitSpec) (string, error)
+	// KillWindow kills the window at target.
+	KillWindow(target string) error
+	// SelectWindowTarget makes an arbitrary window target the current window.
+	SelectWindowTarget(target string) error
 }
 
 // realTmux implements Tmux against the tmux binary via the runner seam.
