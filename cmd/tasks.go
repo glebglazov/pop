@@ -343,13 +343,14 @@ func runTaskRegisterWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 		applyRegisterAutoDrain(d, resolved.DefinitionPath, result.NewRegistrationIDs, w)
 	}
 
-	// Resolve the runtime checkout once (see runTaskStatusWith): it feeds the
-	// SHA-gated Verify-verdict pass and the overview's runtime-lock/checkout
-	// badges. Register prints status exactly like `pop tasks status`.
+	// Resolve the runtime checkout once (see runTaskStatusWith): Binding-first
+	// per-set resolution feeds the SHA-gated Verify-verdict pass (ADR-0146);
+	// the overview's runtime-lock/checkout badges still describe the current
+	// checkout. Register prints status exactly like `pop tasks status`.
 	runtimePath, runtimeErr := tasks.ResolveRuntimePathWith(d, resolved.ProjectPath, taskRuntimePath)
 	if runtimeErr == nil {
 		cfg, _ := taskConfigLoad(config.DefaultConfigPath())
-		tasks.ApplyVerifyVerdicts(d, result, cfg, runtimePath)
+		applyBindingFirstVerifyVerdicts(d, result, cfg, runtimePath)
 		// Eagerly bind the current checkout to each newly-registered set
 		// (ADR-0115): the binding is materialized and visible the moment the set
 		// registers, with no drain required. --managed skips this: those sets carry
@@ -464,13 +465,15 @@ func runTaskStatusWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 		return fmt.Errorf("tasks status: %w", err)
 	}
 
-	// Resolve the runtime checkout once: it feeds the SHA-gated Verify-verdict
-	// pass (ADR-0086) that gates status derivation for both the overview and the
-	// per-set drill-in, plus the overview's runtime-lock and checkout badges.
+	// Binding-first per-set resolution (ADR-0146) feeds the SHA-gated Verify
+	// verdict pass so a bound set derives status at its Worktree binding — the
+	// same checkout the Queue dashboard and `pop queue status` use — rather than
+	// the invoking cwd. Overview runtime-lock and checkout badges still describe
+	// the current checkout.
 	runtimePath, runtimeErr := tasks.ResolveRuntimePathWith(d, resolved.ProjectPath, taskRuntimePath)
 	if runtimeErr == nil {
 		cfg, _ := taskConfigLoad(config.DefaultConfigPath())
-		tasks.ApplyVerifyVerdicts(d, result, cfg, runtimePath)
+		applyBindingFirstVerifyVerdicts(d, result, cfg, runtimePath)
 	}
 
 	// A set argument drills into that one set's per-task breakdown; absent, the
@@ -757,8 +760,12 @@ func runTaskVerifyWith(d *tasks.Deps, w io.Writer, taskSetID string, accept bool
 	if remediate {
 		note = remediateNote
 	}
+	resolveInput, err := bindingFirstVerifyResolveInput(d, taskSetID)
+	if err != nil {
+		return fmt.Errorf("tasks verify: %w", err)
+	}
 	if _, err := tasks.VerifyTaskSetWith(d, taskProjectDeps(), taskConfigLoad, tasks.VerifyOptions{
-		ResolveInput: taskResolveInput(),
+		ResolveInput: resolveInput,
 		TaskSetID:    taskSetID,
 		Agents:       append([]string(nil), taskVerifyAgents...),
 		Effort:       taskVerifyEffort,
@@ -771,6 +778,35 @@ func runTaskVerifyWith(d *tasks.Deps, w io.Writer, taskSetID string, accept bool
 		return fmt.Errorf("tasks verify: %w", err)
 	}
 	return nil
+}
+
+// bindingFirstVerifyResolveInput pins verify's RuntimeOverride through
+// Binding-first runtime resolution (ADR-0146) so accept / remediate / re-run
+// all act at the set's Worktree binding when bound — not the invoking cwd.
+// An explicit --task-runtime-path still wins.
+func bindingFirstVerifyResolveInput(d *tasks.Deps, taskSetID string) (tasks.ResolveInput, error) {
+	in := taskResolveInput()
+	resolved, err := tasks.ResolvePathsWith(d, taskProjectDeps(), taskConfigLoad, in)
+	if err != nil {
+		return in, err
+	}
+	runtime, err := binding.ResolveCommandRuntime(d, resolved.ProjectPath, taskSetID, in.RuntimeOverride)
+	if err != nil {
+		return in, err
+	}
+	in.RuntimeOverride = runtime
+	return in, nil
+}
+
+// applyBindingFirstVerifyVerdicts re-derives status through Binding-first
+// per-set runtime resolution (ADR-0146), matching the Queue dashboard.
+func applyBindingFirstVerifyVerdicts(d *tasks.Deps, result *tasks.RefreshResult, cfg *config.Config, currentCheckout string) {
+	resolver, _, err := binding.CommandRuntimeResolver(d, currentCheckout)
+	if err != nil {
+		tasks.ApplyVerifyVerdicts(d, result, cfg, currentCheckout)
+		return
+	}
+	tasks.ApplyVerifyVerdictsWith(d, result, cfg, resolver)
 }
 
 func runTaskImplement(cmd *cobra.Command, args []string) {

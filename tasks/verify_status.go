@@ -21,9 +21,11 @@ func verifyEnabled(cfg *config.Config) bool {
 // the active sets. It is a no-op when the feature is disabled — status then
 // derives from the manifest alone, exactly as before.
 //
-// Every row shares one runtime checkout — the cwd checkout `pop tasks status`
-// resolves. Call ApplyVerifyVerdictsWith when each set may drain in its own
-// checkout (the Work dashboard, queue scan).
+// Every row shares one runtime checkout — the unbound fallback (typically the
+// current checkout). Call ApplyVerifyVerdictsWith when each set may drain in
+// its own checkout (Binding-first resolution via binding.CommandRuntimeResolver,
+// the Work dashboard, queue scan) so a bound set derives status at its
+// Worktree binding (ADR-0146).
 //
 // The verdict lookup first checks the current work SHA. A PASS verdict at HEAD
 // lets the terminal status stand; any non-PASS verdict at HEAD forces

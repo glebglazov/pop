@@ -1243,8 +1243,9 @@ func TestVerifierSteeringFlagsRegistered(t *testing.T) {
 
 // TestVerifyTaskRuntimePathFlagThreadsIntoResolveInput asserts that
 // `pop tasks verify --task-runtime-path <checkout>` pins the runtime path used
-// for the work-SHA read and verdict key, mirroring `pop tasks implement`'s
-// override instead of resolving from the project root.
+// for the work-SHA read and verdict key via Binding-first resolution (ADR-0146),
+// mirroring `pop tasks implement`'s override instead of resolving from the
+// project root.
 func TestVerifyTaskRuntimePathFlagThreadsIntoResolveInput(t *testing.T) {
 	root, _, td := setupCmdRepoTest(t)
 	wt := cmdArchiveTestWorktree(t, root, "verify-runtime-flag")
@@ -1256,25 +1257,68 @@ func TestVerifyTaskRuntimePathFlagThreadsIntoResolveInput(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	in := taskResolveInput()
-	if in.RuntimeOverride != wt {
-		t.Fatalf("ResolveInput.RuntimeOverride = %q, want %q", in.RuntimeOverride, wt)
+	in, err := bindingFirstVerifyResolveInput(td, "any-set")
+	if err != nil {
+		t.Fatalf("bindingFirstVerifyResolveInput: %v", err)
+	}
+	wantRuntime, err := tasks.ResolveRuntimePathWith(td, wt, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in.RuntimeOverride != wantRuntime {
+		t.Fatalf("ResolveInput.RuntimeOverride = %q, want worktree %q (project root %q must not win)", in.RuntimeOverride, wantRuntime, root)
+	}
+}
+
+// TestBindingFirstVerifyResolveInputBoundSetPinsBinding asserts that
+// `pop tasks verify` without --task-runtime-path resolves a bound set to its
+// Worktree binding even when invoked from the trunk checkout (ADR-0146).
+func TestBindingFirstVerifyResolveInputBoundSetPinsBinding(t *testing.T) {
+	root, _, td := setupCmdRepoTest(t)
+	wt := cmdArchiveTestWorktree(t, root, "verify-binding-first")
+
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	id, err := tasks.ResolveRepositoryIdentity(td, root)
+	if err != nil {
+		t.Fatalf("identity: %v", err)
+	}
+	if err := binding.Put(td, binding.Key(id, "bound-set"), binding.Adopt(wt, "verify-binding-first", "")); err != nil {
+		t.Fatalf("seed binding: %v", err)
 	}
 
-	d := td
-	resolvedRuntime, err := tasks.ResolveRuntimePathWith(d, root, in.RuntimeOverride)
+	in, err := bindingFirstVerifyResolveInput(td, "bound-set")
+	if err != nil {
+		t.Fatalf("bindingFirstVerifyResolveInput: %v", err)
+	}
+	wantRuntime, err := tasks.ResolveRuntimePathWith(td, wt, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantRuntime, err := tasks.ResolveRuntimePathWith(d, wt, "")
+	if in.RuntimeOverride != wantRuntime {
+		t.Fatalf("ResolveInput.RuntimeOverride = %q, want binding %q", in.RuntimeOverride, wantRuntime)
+	}
+}
+
+// TestBindingFirstVerifyResolveInputUnboundUsesCheckout asserts an unbound set
+// still resolves to the current checkout (ADR-0146).
+func TestBindingFirstVerifyResolveInputUnboundUsesCheckout(t *testing.T) {
+	root, _, td := setupCmdRepoTest(t)
+
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	in, err := bindingFirstVerifyResolveInput(td, "unbound-set")
+	if err != nil {
+		t.Fatalf("bindingFirstVerifyResolveInput: %v", err)
+	}
+	wantRuntime, err := tasks.ResolveRuntimePathWith(td, root, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolvedRuntime != wantRuntime {
-		t.Fatalf("resolved runtime path = %q, want worktree %q (project root %q must not win)", resolvedRuntime, wantRuntime, root)
-	}
-	if resolvedRuntime == root {
-		t.Fatalf("resolved runtime path fell back to project root %q, override was ignored", root)
+	if in.RuntimeOverride != wantRuntime {
+		t.Fatalf("ResolveInput.RuntimeOverride = %q, want current checkout %q", in.RuntimeOverride, wantRuntime)
 	}
 }
 

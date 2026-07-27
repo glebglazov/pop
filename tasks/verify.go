@@ -168,6 +168,11 @@ func VerifyTaskSet(opts VerifyOptions) (*VerifyResult, error) {
 // it to the Drain store keyed by (set, work SHA), and prints it. It always
 // re-runs the Verifier and overwrites the verdict for the current SHA (force);
 // it never reads a cached verdict.
+//
+// Set-scoped callers pin the checkout via ResolveInput.RuntimeOverride —
+// `pop tasks verify` resolves that override through Binding-first runtime
+// resolution (ADR-0146) so accept / remediate / re-run act at the set's
+// Worktree binding when bound.
 func VerifyTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts VerifyOptions) (*VerifyResult, error) {
 	resolved, err := ResolvePathsWith(d, pd, loadConfig, opts.ResolveInput)
 	if err != nil {
