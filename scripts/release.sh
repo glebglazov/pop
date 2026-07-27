@@ -26,6 +26,9 @@ if [ -n "$prev" ] && git diff --quiet "$prev" HEAD; then
 fi
 echo "Previous release: ${prev:-<none>}" >&2
 
+echo "Running race tests..." >&2
+make test-race
+
 # Non-zero-padded month (ADR-0002): v2026.6.R, not v2026.06.R.
 base="v$(date -u +%Y).$(date -u +%-m)"
 

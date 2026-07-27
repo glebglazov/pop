@@ -24,6 +24,9 @@ install-dev:
 test:
 	go test ./...
 
+test-race:
+	go test -race -shuffle=on ./...
+
 live-agent-smoke:
 	@if [ -z "$(AGENTS)" ]; then \
 		echo 'usage: make live-agent-smoke AGENTS="codex claude"'; \
@@ -31,4 +34,4 @@ live-agent-smoke:
 	fi
 	scripts/live-agent-smoke.sh $(AGENTS)
 
-.PHONY: build install install-dev test live-agent-smoke
+.PHONY: build install install-dev test test-race live-agent-smoke
