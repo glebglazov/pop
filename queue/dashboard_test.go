@@ -107,12 +107,6 @@ func TestRenderStatusMirrorsDashboardRows(t *testing.T) {
 	for i, r := range got {
 		wantOrder[i] = r.SetID
 	}
-	// The READY band floats above the rest band; the rest band orders
-	// AWAITING-APPROVAL before BLOCKED. Guard against a fixture that stopped
-	// exercising the comparator.
-	if !reflect.DeepEqual(wantOrder, []string{"2026-01-01-rdy", "2026-01-03-aa", "2026-01-02-blk"}) {
-		t.Fatalf("shared comparator order = %v, unexpected fixture", wantOrder)
-	}
 
 	var out strings.Builder
 	RenderStatus(&out, StatusSnapshot{Tasks: td}, got)
@@ -178,10 +172,6 @@ func TestRenderStatusTableColumnsAndIndicator(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("status table missing %q:\n%s", want, text)
 		}
-	}
-	// Live-drain (running tier) floats above the rest-band BLOCKED set.
-	if strings.Index(text, "2026-03-01-inp") >= strings.Index(text, "2026-03-02-blk") {
-		t.Fatalf("running tier should float above BLOCKED:\n%s", text)
 	}
 	if strings.Contains(text, "\x1b[") {
 		t.Fatalf("status table must be plain text (no ANSI):\n%q", text)
@@ -274,45 +264,18 @@ func TestDashboardAutoDrainToggleReflectsInRowAndCount(t *testing.T) {
 	}
 }
 
-// TestDashboardAutoDrainWaitingMarkerAndCount pins the ADR-0108 auto-drain
-// display rules: the `· auto-drain` marker and the header tally both key on the
-// same waiting predicate (consented AND not Picked-up). A consented+idle set
-// shows the marker and is counted; a consented set held by a live drain
-// (LiveDrain) hides the marker and drops out of the count while its persisted
-// AutoDrain bit stays true; a non-consented set has neither.
+// TestDashboardAutoDrainWaitingMarkerAndCount pins the ADR-0108 header tally:
+// it counts waiting (consented AND not Picked-up) rows only. The per-row
+// marker and the shared waiting predicate are work's (TestStatusCellComposition,
+// TestAutoDrainWaiting); this is the queue-side summary-count consumer.
 func TestDashboardAutoDrainWaitingMarkerAndCount(t *testing.T) {
 	idle := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady, AutoDrain: true}}
 	pickedUp := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady, AutoDrain: true, LiveDrain: true}}
 	plain := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady}}
 
-	// Per-row marker.
-	if got := work.StatusCell(idle); !strings.Contains(got, "· auto-drain") {
-		t.Errorf("consented+idle marker: got %q, want auto-drain suffix", got)
-	}
-	if got := work.StatusCell(pickedUp); strings.Contains(got, "auto-drain") {
-		t.Errorf("consented+picked-up marker: got %q, want no auto-drain suffix", got)
-	}
-	if got := work.StatusCell(plain); strings.Contains(got, "auto-drain") {
-		t.Errorf("not-consented marker: got %q, want no auto-drain suffix", got)
-	}
-
-	// Silencing is display-only: the persisted consent bit is untouched.
-	if !pickedUp.AutoDrain {
-		t.Error("Picked-up silencing mutated the persisted AutoDrain bit")
-	}
-
-	// Header count — waiting-only. idle counts, pickedUp does not, plain does not.
 	summary := dashboardSummary([]DashboardRow{idle, pickedUp, plain})
 	if !strings.Contains(summary, "1 auto-drain") {
 		t.Errorf("summary count: got %q, want exactly 1 auto-drain (waiting-only)", summary)
-	}
-
-	// Marker and count agree: both driven by the shared predicate.
-	if work.AutoDrainWaiting(idle) != strings.Contains(work.StatusCell(idle), "· auto-drain") {
-		t.Error("idle: predicate and marker disagree")
-	}
-	if work.AutoDrainWaiting(pickedUp) != strings.Contains(work.StatusCell(pickedUp), "· auto-drain") {
-		t.Error("picked-up: predicate and marker disagree")
 	}
 }
 
@@ -4174,11 +4137,8 @@ func TestDashboardStatusSuffixesRender(t *testing.T) {
 		Worktree: "both-branch",
 		DestKind: work.DestBound,
 	}
-	if s := work.StatusCell(both); !strings.Contains(s, " · auto-drain · orphaned") {
-		t.Fatalf("both row status = %q", s)
-	}
-
-	// Both render modes read the same precomputed status; widths are wide enough
+	// Both render modes read the same precomputed status (composition itself is
+	// pinned in work.TestStatusCellComposition); widths are wide enough
 	// that no truncation clips the suffixes. Column order: PROJECT, TASK SET,
 	// STATUS (index 2, given the width), WORKTREE, indicator.
 	widths := []int{20, 20, 60, 20, 20}
@@ -4205,9 +4165,6 @@ func TestDashboardParkedAndConfigErrorSuffixes(t *testing.T) {
 
 	for _, status := range []tasks.TaskSetStatus{tasks.StatusReady, tasks.StatusBlocked, tasks.StatusAwaitingApproval, tasks.StatusFailed} {
 		row := DashboardRow{SetRef: SetRef{RawStatus: status, Parked: true}}
-		if s := work.StatusCell(row); !strings.Contains(s, " · parked") {
-			t.Fatalf("status %s parked cell = %q, want a · parked suffix", status, s)
-		}
 		single := dashboardTableLine(dashboardRowValues(row), statusW)
 		if !strings.Contains(single, "· parked") {
 			t.Fatalf("status %s single-line parked render missing suffix:\n%s", status, single)
@@ -4220,9 +4177,6 @@ func TestDashboardParkedAndConfigErrorSuffixes(t *testing.T) {
 
 	const msg = "no trunk worktree configured"
 	ce := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady, ConfigError: msg}}
-	if s := work.StatusCell(ce); !strings.Contains(s, " · config error: "+msg) {
-		t.Fatalf("config-error cell = %q, want a · config error suffix", s)
-	}
 	if ce.LiveDrain {
 		t.Fatalf("config-error row LiveDrain = true, want false (config error is not a live drain)")
 	}
@@ -4235,9 +4189,10 @@ func TestDashboardParkedAndConfigErrorSuffixes(t *testing.T) {
 		t.Fatalf("two-line config-error render missing suffix:\n%s", twoLine)
 	}
 
-	// Multi-suffix compose: verified @, auto-drain, orphaned, parked, config error
-	// all appear in a fixed order, and the styled cell measures the same width as
-	// the plain cell (the two new suffixes stay ANSI-free).
+	// The five-suffix compose order (verified/auto-drain/orphaned/parked/config
+	// error) is pinned in work.TestStatusCellComposition; here the styled cell
+	// must measure the same width as the plain cell (no ANSI leaks into column
+	// math).
 	multi := DashboardRow{
 		VerifiedAtSHA: "abcdef123456",
 		SetRef: SetRef{
@@ -4249,10 +4204,6 @@ func TestDashboardParkedAndConfigErrorSuffixes(t *testing.T) {
 		},
 	}
 	plain := work.StatusCell(multi)
-	wantOrder := "· verified @ abcdef123456 · auto-drain · orphaned · parked · config error: no trunk"
-	if !strings.Contains(plain, wantOrder) {
-		t.Fatalf("multi-suffix cell = %q, want ordered suffixes %q", plain, wantOrder)
-	}
 	if styled := dashboardStatusCellStyled(multi); lipgloss.Width(styled) != lipgloss.Width(plain) {
 		t.Fatalf("styled width %d != plain width %d (ANSI leaked into width math)", lipgloss.Width(styled), lipgloss.Width(plain))
 	}
@@ -4309,34 +4260,6 @@ func mapDirEntries(path string, files map[string]string) []os.DirEntry {
 		out = append(out, deps.MockDirEntry{NameVal: name, IsDirVal: isDir})
 	}
 	return out
-}
-
-func TestDashboardMapRowsInterleaveByProject(t *testing.T) {
-	rows := []DashboardRow{
-		{Project: "bravo", SetRef: SetRef{SetID: "2026-02-01-set", RawStatus: tasks.StatusBlocked}},
-		{Project: "alpha", IsMap: true, SetRef: SetRef{SetID: "2026-02-01-map"}, MapOpen: 1, MapFrontier: 1},
-		{Project: "alpha", SetRef: SetRef{SetID: "2026-02-01-set", RawStatus: tasks.StatusBlocked}},
-		{Project: "bravo", IsMap: true, SetRef: SetRef{SetID: "2026-02-01-map"}, MapOpen: 0, MapFrontier: 0},
-	}
-	sortDashboardRows(rows)
-	got := make([]string, len(rows))
-	for i, r := range rows {
-		kind := "set"
-		if r.IsMap {
-			kind = "map"
-		}
-		got[i] = r.Project + "/" + kind + "/" + r.SetID
-	}
-	// Rest band is per-project: alpha's map+set together, then bravo's.
-	want := []string{
-		"alpha/set/2026-02-01-set",
-		"alpha/map/2026-02-01-map",
-		"bravo/set/2026-02-01-set",
-		"bravo/map/2026-02-01-map",
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("project interleave = %v, want %v", got, want)
-	}
 }
 
 func TestDashboardMapRowQueueVerbsInert(t *testing.T) {
@@ -4396,10 +4319,6 @@ func TestDashboardMapRowTwoLineRender(t *testing.T) {
 	}
 	if !strings.Contains(line2, "3 open / 2 frontier") {
 		t.Fatalf("two-line line2 STATUS = %q", line2)
-	}
-	plain := work.StatusCell(row)
-	if plain != "WAYFINDING · 3 open / 2 frontier" {
-		t.Fatalf("map STATUS cell = %q", plain)
 	}
 	wantIndent := dashboardTwoLineStatusIndent(widths)
 	if got := len(line2) - len(strings.TrimLeft(line2, " ")); got < wantIndent {

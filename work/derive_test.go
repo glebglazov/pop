@@ -128,6 +128,37 @@ func TestReadyBandInterleavesProjects(t *testing.T) {
 	}
 }
 
+// TestMapAndSetRowsInterleaveByProject proves the rest band groups per-project
+// (ADR-0121/0130) across mixed map and task-set rows: a project's map and set
+// rows sort together before the next project's, rather than all sets floating
+// ahead of all maps.
+func TestMapAndSetRowsInterleaveByProject(t *testing.T) {
+	rows := []Row{
+		{Project: "bravo", SetRef: SetRef{SetID: "2026-02-01-set", RawStatus: tasks.StatusBlocked}},
+		{Project: "alpha", IsMap: true, SetRef: SetRef{SetID: "2026-02-01-map"}, MapOpen: 1, MapFrontier: 1},
+		{Project: "alpha", SetRef: SetRef{SetID: "2026-02-01-set", RawStatus: tasks.StatusBlocked}},
+		{Project: "bravo", IsMap: true, SetRef: SetRef{SetID: "2026-02-01-map"}, MapOpen: 0, MapFrontier: 0},
+	}
+	SortRows(rows)
+	got := make([]string, len(rows))
+	for i, r := range rows {
+		kind := "set"
+		if r.IsMap {
+			kind = "map"
+		}
+		got[i] = r.Project + "/" + kind + "/" + r.SetID
+	}
+	want := []string{
+		"alpha/set/2026-02-01-set",
+		"alpha/map/2026-02-01-map",
+		"bravo/set/2026-02-01-set",
+		"bravo/map/2026-02-01-map",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("project interleave = %v, want %v", got, want)
+	}
+}
+
 // TestBandKeysOnDisplayedLabel proves a row's band is keyed on its displayed
 // label, not its raw status (ADR-0121): a started READY set renders as IN
 // PROGRESS and sorts in the IN PROGRESS band, floating above a plain READY set
@@ -207,7 +238,15 @@ func TestStatusCellComposition(t *testing.T) {
 		{"verified", Row{VerifiedAtSHA: "abc123", SetRef: SetRef{RawStatus: tasks.StatusAwaitingApproval}}, "AWAITING-APPROVAL · verified @ abc123"},
 		{"auto-drain waiting", Row{SetRef: SetRef{RawStatus: tasks.StatusReady, AutoDrain: true}}, "READY · auto-drain"},
 		{"auto-drain silenced by live drain", Row{SetRef: SetRef{RawStatus: tasks.StatusReady, AutoDrain: true, LiveDrain: true}}, "IN PROGRESS"},
+		{"auto-drain then orphaned", Row{SetRef: SetRef{RawStatus: tasks.StatusBlocked, AutoDrain: true, Orphaned: true}}, "BLOCKED · auto-drain · orphaned"},
+		{"parked alone", Row{SetRef: SetRef{RawStatus: tasks.StatusBlocked, Parked: true}}, "BLOCKED · parked"},
+		{"config error alone", Row{SetRef: SetRef{RawStatus: tasks.StatusReady, ConfigError: "no trunk worktree configured"}}, "READY · config error: no trunk worktree configured"},
 		{"orphaned then parked then config", Row{SetRef: SetRef{RawStatus: tasks.StatusBlocked, Orphaned: true, Parked: true, ConfigError: "no trunk"}}, "BLOCKED · orphaned · parked · config error: no trunk"},
+		{
+			"full suffix order",
+			Row{VerifiedAtSHA: "abcdef123456", SetRef: SetRef{RawStatus: tasks.StatusReady, AutoDrain: true, Orphaned: true, Parked: true, ConfigError: "no trunk"}},
+			"READY · verified @ abcdef123456 · auto-drain · orphaned · parked · config error: no trunk",
+		},
 		{"map row", Row{IsMap: true, MapOpen: 3, MapFrontier: 1}, "WAYFINDING · 3 open / 1 frontier"},
 	}
 	for _, c := range cases {
