@@ -15,48 +15,40 @@ import (
 func setupImplementFixture(t *testing.T) (root string, d *Deps) {
 	t.Helper()
 	root = t.TempDir()
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
-
-	cmd := exec.Command("git", "init")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v\n%s", err, out)
-	}
 	for _, args := range [][]string{
+		{"init"},
 		{"config", "user.email", "test@test"},
 		{"config", "user.name", "test"},
 	} {
-		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
-			t.Fatal(err, string(out))
+		if out, err := runImplementGit(root, args...); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
 	writeImplementFile(t, filepath.Join(root, ".gitignore"), ".agent/\n.xdg/\n")
 	writeImplementFile(t, filepath.Join(root, "README.md"), "# test\n")
-	if out, err := exec.Command("git", "add", "-A").CombinedOutput(); err != nil {
-		t.Fatal(err, string(out))
+	if out, err := runImplementGit(root, "add", "-A"); err != nil {
+		t.Fatal(err, out)
 	}
-	if out, err := exec.Command("git", "commit", "-m", "init").CombinedOutput(); err != nil {
-		t.Fatal(err, string(out))
+	if out, err := runImplementGit(root, "commit", "-m", "init"); err != nil {
+		t.Fatal(err, out)
 	}
 
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	tasksDir := implementTasksDir(t, root)
+	td := isolatedTasksDeps(t)
+	tasksDir := implementTasksDir(t, td, root)
 	writeImplementThoughts(t, tasksDir, "demo")
-	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.DefaultStatePath()); err != nil {
+	if _, err := tasks.RegisterWith(td, tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
 		t.Fatal(err)
 	}
 
 	d = DefaultDeps()
+	d.Tasks = td
 	d.StdinInteractive = func(io.Reader) bool { return false }
 	return root, d
 }
 
-func implementTasksDir(t *testing.T, repoRoot string) string {
+func implementTasksDir(t *testing.T, td *tasks.Deps, repoRoot string) string {
 	t.Helper()
-	id, err := tasks.ResolveRepositoryIdentity(tasks.DefaultDeps(), repoRoot)
+	id, err := tasks.ResolveRepositoryIdentity(td, repoRoot)
 	if err != nil {
 		t.Fatalf("resolve storage: %v", err)
 	}
@@ -94,9 +86,10 @@ func writeImplementFile(t *testing.T, path, content string) {
 // persists a default (adopted) Worktree binding to that current checkout so later
 // drains resume there (ADR-0062).
 func TestResolveTaskSetRuntimeUnboundBindsCurrentCheckout(t *testing.T) {
+	t.Parallel()
 	root, d := setupImplementFixture(t)
 
-	resolved, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{}, "demo", false)
+	resolved, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root}, "demo", false)
 	if err != nil {
 		t.Fatalf("resolve runtime: %v", err)
 	}
@@ -134,9 +127,10 @@ func TestResolveTaskSetRuntimeUnboundBindsCurrentCheckout(t *testing.T) {
 // forks a managed worktree off the current checkout, records a provisioned
 // binding, and points the drain at the new checkout (ADR-0072).
 func TestResolveTaskSetRuntimeInWorktreeProvisionsAndBinds(t *testing.T) {
+	t.Parallel()
 	root, d := setupImplementFixture(t)
 
-	resolved, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{}, "demo", true)
+	resolved, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root}, "demo", true)
 	if err != nil {
 		t.Fatalf("resolve runtime: %v", err)
 	}
@@ -206,10 +200,11 @@ func seedManagedIntentImplement(t *testing.T, d *Deps, repoRoot, setID string) {
 // (adopted) binding to the current checkout instead, draining there. A second
 // drain resumes that binding.
 func TestResolveTaskSetRuntimeManagedDirectiveForegroundIgnored(t *testing.T) {
+	t.Parallel()
 	root, d := setupImplementFixture(t)
 	seedManagedIntentImplement(t, d, root, "demo")
 
-	resolved, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{}, "demo", false)
+	resolved, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root}, "demo", false)
 	if err != nil {
 		t.Fatalf("resolve runtime: %v", err)
 	}
@@ -242,7 +237,7 @@ func TestResolveTaskSetRuntimeManagedDirectiveForegroundIgnored(t *testing.T) {
 	}
 
 	// A second drain resumes the same default binding.
-	resumed, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{}, "demo", false)
+	resumed, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root}, "demo", false)
 	if err != nil {
 		t.Fatalf("second resolve runtime: %v", err)
 	}
@@ -255,6 +250,7 @@ func TestResolveTaskSetRuntimeManagedDirectiveForegroundIgnored(t *testing.T) {
 // pre-existing binding at a different checkout is silently re-bound to the
 // current checkout on foreground implement; the directive is ignored (ADR-0072).
 func TestResolveTaskSetRuntimeManagedDirectiveYieldsToExistingBinding(t *testing.T) {
+	t.Parallel()
 	root, d := setupImplementFixture(t)
 	seedManagedIntentImplement(t, d, root, "demo")
 
@@ -270,7 +266,7 @@ func TestResolveTaskSetRuntimeManagedDirectiveYieldsToExistingBinding(t *testing
 		t.Fatal(err)
 	}
 
-	resolved, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{}, "demo", false)
+	resolved, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root}, "demo", false)
 	if err != nil {
 		t.Fatalf("resolve runtime: %v", err)
 	}
@@ -298,6 +294,7 @@ func TestResolveTaskSetRuntimeManagedDirectiveYieldsToExistingBinding(t *testing
 // TestResolveTaskSetRuntimeInWorktreeRejectsBoundSet asserts --in-worktree on an
 // already-bound set is rejected with guidance to unbind first — a binding wins.
 func TestResolveTaskSetRuntimeInWorktreeRejectsBoundSet(t *testing.T) {
+	t.Parallel()
 	root, d := setupImplementFixture(t)
 	wt := filepath.Join(t.TempDir(), "existing-wt")
 	if out, err := exec.Command("git", "-C", root, "worktree", "add", "-b", "feature", wt, "HEAD").CombinedOutput(); err != nil {
@@ -311,7 +308,7 @@ func TestResolveTaskSetRuntimeInWorktreeRejectsBoundSet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = ResolveTaskSetRuntime(d, tasks.ResolveInput{}, "demo", true)
+	_, err = ResolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root}, "demo", true)
 	if err == nil || !strings.Contains(err.Error(), "already bound") || !strings.Contains(err.Error(), "unbind-worktree") {
 		t.Fatalf("err = %v, want already-bound rejection with unbind guidance", err)
 	}
@@ -321,7 +318,7 @@ func TestResolveTaskSetRuntimeInWorktreeRejectsBoundSet(t *testing.T) {
 // --in-worktree provisions a managed worktree whose branch starts at the
 // current checkout's HEAD, not the Trunk worktree's (ADR-0072).
 func TestResolveTaskSetRuntimeInWorktreeForksFromCurrentCheckoutHEAD(t *testing.T) {
-	oldWd, _ := os.Getwd()
+	t.Parallel()
 	parent := t.TempDir()
 
 	trunkRoot := filepath.Join(parent, "repo")
@@ -370,22 +367,18 @@ func TestResolveTaskSetRuntimeInWorktreeForksFromCurrentCheckoutHEAD(t *testing.
 		t.Fatalf("test setup: feature HEAD %q must differ from trunk HEAD %q", currentHead, trunkHead)
 	}
 
-	if err := os.Chdir(featureWT); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
-	t.Setenv("XDG_DATA_HOME", filepath.Join(parent, ".xdg"))
-
-	tasksDir := implementTasksDir(t, featureWT)
+	td := isolatedTasksDeps(t)
+	tasksDir := implementTasksDir(t, td, featureWT)
 	writeImplementThoughts(t, tasksDir, "demo")
-	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.DefaultStatePath()); err != nil {
+	if _, err := tasks.RegisterWith(td, tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
 		t.Fatal(err)
 	}
 
 	d := DefaultDeps()
+	d.Tasks = td
 	d.StdinInteractive = func(io.Reader) bool { return false }
 
-	resolved, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{}, "demo", true)
+	resolved, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{CWD: featureWT}, "demo", true)
 	if err != nil {
 		t.Fatalf("resolve runtime: %v", err)
 	}
@@ -423,7 +416,7 @@ func TestResolveTaskSetRuntimeInWorktreeForksFromCurrentCheckoutHEAD(t *testing.
 // checkout's HEAD — trunk is only required for Queue managed provisioning
 // (ADR-0072).
 func TestResolveTaskSetRuntimeInWorktreeWorksWithoutTrunk(t *testing.T) {
-	oldWd, _ := os.Getwd()
+	t.Parallel()
 	parent := t.TempDir()
 
 	src := filepath.Join(parent, "src")
@@ -455,22 +448,18 @@ func TestResolveTaskSetRuntimeInWorktreeWorksWithoutTrunk(t *testing.T) {
 		t.Fatalf("worktree add: %v\n%s", err, out)
 	}
 
-	if err := os.Chdir(wt); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
-	t.Setenv("XDG_DATA_HOME", filepath.Join(parent, ".xdg"))
-
-	tasksDir := implementTasksDir(t, wt)
+	td := isolatedTasksDeps(t)
+	tasksDir := implementTasksDir(t, td, wt)
 	writeImplementThoughts(t, tasksDir, "demo")
-	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), tasksDir, tasks.DefaultStatePath()); err != nil {
+	if _, err := tasks.RegisterWith(td, tasksDir, tasks.StatePathFor(tasksDir)); err != nil {
 		t.Fatal(err)
 	}
 
 	d := DefaultDeps()
+	d.Tasks = td
 	d.StdinInteractive = func(io.Reader) bool { return false }
 
-	_, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{}, "demo", true)
+	_, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{CWD: wt}, "demo", true)
 	if err != nil {
 		t.Fatalf("resolve runtime: %v", err)
 	}
@@ -507,20 +496,22 @@ func runImplementGit(dir string, args ...string) (string, error) {
 }
 
 func TestResolveTaskSetRuntimeRejectsRelativeTaskSetPath(t *testing.T) {
+	t.Parallel()
 	root, d := setupImplementFixture(t)
-	demoDir := filepath.Join(implementTasksDir(t, root), "demo")
+	demoDir := filepath.Join(implementTasksDir(t, d.tasksDeps(), root), "demo")
 	rel, err := filepath.Rel(root, demoDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = ResolveTaskSetRuntime(d, tasks.ResolveInput{}, rel, false)
+	_, err = ResolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root}, rel, false)
 	if err == nil || !strings.Contains(err.Error(), "invalid target") || !strings.Contains(err.Error(), "valid: demo") {
 		t.Fatalf("relative task set path error = %v", err)
 	}
 }
 
 func TestResolveTaskSetRuntimeUsesExistingBinding(t *testing.T) {
+	t.Parallel()
 	root, d := setupImplementFixture(t)
 	wt := filepath.Join(t.TempDir(), "existing-wt")
 	if out, err := exec.Command("git", "-C", root, "worktree", "add", "-b", "feature", wt, "HEAD").CombinedOutput(); err != nil {
@@ -535,13 +526,7 @@ func TestResolveTaskSetRuntimeUsesExistingBinding(t *testing.T) {
 	}
 
 	// Implement from the same checkout the set is bound to resumes there.
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(wt); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
-
-	resolved, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{}, "demo", false)
+	resolved, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{CWD: wt}, "demo", false)
 	if err != nil {
 		t.Fatalf("resolve runtime: %v", err)
 	}

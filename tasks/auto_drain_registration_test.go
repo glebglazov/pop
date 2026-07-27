@@ -12,6 +12,8 @@ import (
 // longer seeds Task state (ADR-0115): the set registers successfully with
 // auto-drain off, and no "(auto-drain)" suffix is shown.
 func TestRegisterIgnoresAutoDrainManifestKey(t *testing.T) {
+	d := newTestDeps(t)
+	t.Parallel()
 	root := t.TempDir()
 	taskDir := filepath.Join(root, "auto-set")
 	writeTaskMD(t, taskDir, "01-a.md", "## Acceptance criteria\n\n- [ ] ok\n")
@@ -20,7 +22,7 @@ func TestRegisterIgnoresAutoDrainManifestKey(t *testing.T) {
 	}, map[string]any{"auto_drain": true})
 	statePath := filepath.Join(root, "state.json")
 
-	result, err := RegisterWith(DefaultDeps(), root, statePath)
+	result, err := RegisterWith(d, root, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +36,7 @@ func TestRegisterIgnoresAutoDrainManifestKey(t *testing.T) {
 		t.Fatalf("row MALFORMED for a legacy auto_drain key: %#v", result.Rows[0])
 	}
 
-	state, err := LoadGlobalState(statePath)
+	state, err := LoadGlobalStateWith(d, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,6 +49,8 @@ func TestRegisterIgnoresAutoDrainManifestKey(t *testing.T) {
 // TestRegisterMalformedAutoDrainNeverMalformed asserts a non-boolean auto_drain
 // value is ignored, not treated as a MALFORMED manifest (ADR-0115).
 func TestRegisterMalformedAutoDrainNeverMalformed(t *testing.T) {
+	d := newTestDeps(t)
+	t.Parallel()
 	root := t.TempDir()
 	taskDir := filepath.Join(root, "bad-set")
 	writeTaskMD(t, taskDir, "01-a.md", "## Acceptance criteria\n\n- [ ] ok\n")
@@ -55,7 +59,7 @@ func TestRegisterMalformedAutoDrainNeverMalformed(t *testing.T) {
 	}, map[string]any{"auto_drain": "yes"})
 	statePath := filepath.Join(root, "state.json")
 
-	result, err := RegisterWith(DefaultDeps(), root, statePath)
+	result, err := RegisterWith(d, root, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,13 +74,15 @@ func TestRegisterMalformedAutoDrainNeverMalformed(t *testing.T) {
 // TestRegisterAutoDrainOffWhenAbsent asserts a set with no auto_drain key
 // registers with auto-drain off.
 func TestRegisterAutoDrainOffWhenAbsent(t *testing.T) {
+	d := newTestDeps(t)
+	t.Parallel()
 	root := t.TempDir()
 	setupManifest(t, root, "plain-set", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 	statePath := filepath.Join(root, "state.json")
 
-	result, err := RegisterWith(DefaultDeps(), root, statePath)
+	result, err := RegisterWith(d, root, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,6 +98,8 @@ func TestRegisterAutoDrainOffWhenAbsent(t *testing.T) {
 // a dashboard toggle stands, and a manifest still carrying auto_drain never
 // resyncs it on a later refresh (the key is ignored, ADR-0115).
 func TestAutoDrainToggleSurvivesManifestKey(t *testing.T) {
+	d := newTestDeps(t)
+	t.Parallel()
 	root := filepath.Join(t.TempDir(), "tasks")
 	taskDir := filepath.Join(root, "toggle-set")
 	writeTaskMD(t, taskDir, "01-a.md", "## Acceptance criteria\n\n- [ ] ok\n")
@@ -100,11 +108,11 @@ func TestAutoDrainToggleSurvivesManifestKey(t *testing.T) {
 	}, map[string]any{"auto_drain": false})
 	statePath := StatePathFor(root)
 
-	if _, err := RegisterWith(DefaultDeps(), root, statePath); err != nil {
+	if _, err := RegisterWith(d, root, statePath); err != nil {
 		t.Fatal(err)
 	}
 	// Toggle on via the CLI seam (registered off, since the manifest key is ignored).
-	if _, err := ToggleAutoDrainWith(DefaultDeps(), root, statePath, "toggle-set"); err != nil {
+	if _, err := ToggleAutoDrainWith(d, root, statePath, "toggle-set"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -114,7 +122,7 @@ func TestAutoDrainToggleSurvivesManifestKey(t *testing.T) {
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	}, map[string]any{"auto_drain": false})
 
-	result, err := RefreshWith(DefaultDeps(), root, statePath)
+	result, err := RefreshWith(d, root, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,8 +137,9 @@ func TestAutoDrainToggleSurvivesManifestKey(t *testing.T) {
 // TestImportIgnoresAutoDrainManifestKey asserts importing a set whose manifest
 // carries auto_drain does not seed auto-drain (ADR-0115).
 func TestImportIgnoresAutoDrainManifestKey(t *testing.T) {
-	src := newTransferEnv(t)
+	t.Parallel()
 	const setID = "2026-06-01-import-drain"
+	src := newTransferEnv(t)
 	src.writeSet(t, setID, func(dir string) {
 		manifest := `{"tasks":[{"id":"01-a","file":"01-a.md","title":"A","type":"AFK","status":"open"}],"auto_drain":true}`
 		if err := os.WriteFile(filepath.Join(dir, "index.json"), []byte(manifest), 0o644); err != nil {

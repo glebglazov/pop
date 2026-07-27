@@ -146,6 +146,7 @@ func TestRunConfiguredVerifierAllMissingYieldsEmpty(t *testing.T) {
 // verdict text. It uses a real fake `claude` binary on a controlled PATH so the
 // missing-binary fall-through is exercised end-to-end through the real spawn.
 func TestRunConfiguredVerifierFallsThroughMissingBinary(t *testing.T) {
+	// ADR-0145: PATH stub — stays serial deliberately.
 	binDir := t.TempDir()
 	fake := filepath.Join(binDir, "claude")
 	script := "#!/bin/sh\nprintf '%s\\n' '{\"type\":\"result\",\"result\":\"VERDICT: PASS\"}'\n"

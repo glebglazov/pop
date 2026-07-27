@@ -464,12 +464,10 @@ func TestRunConfiguredVerifierPersistsMultiAgentFallback(t *testing.T) {
 			`{"type":"system","subtype":"init"}` + "\n" + `{"type":"result","subtype":"success","result":"VERDICT: PASS\nFINDINGS:\n"}`,
 		},
 	}
-	d := &Deps{
-		FS:       deps.NewRealFileSystem(),
-		Git:      stubGit("sha1\n", "", ""),
-		LookPath: func(string) (string, error) { return "/bin/claude", nil },
-		Runner:   runner,
-	}
+	d := newTestDeps(t)
+	d.Git = stubGit("sha1\n", "", "")
+	d.LookPath = func(string) (string, error) { return "/bin/claude", nil }
+	d.Runner = runner
 
 	var out bytes.Buffer
 	raw, err := runConfiguredVerifier(d, nil, verifierSelection{
@@ -527,12 +525,10 @@ func TestRunConfiguredVerifierUnparseableOutputPersistsWithNeedsHumanVerdict(t *
 			`{"type":"system","subtype":"init"}` + "\n" + `{"type":"result","subtype":"success","result":"I think it looks okay"}`,
 		},
 	}
-	d := &Deps{
-		FS:       deps.NewRealFileSystem(),
-		Git:      stubGit("sha1\n", "", ""),
-		LookPath: func(string) (string, error) { return "/bin/claude", nil },
-		Runner:   runner,
-	}
+	d := newTestDeps(t)
+	d.Git = stubGit("sha1\n", "", "")
+	d.LookPath = func(string) (string, error) { return "/bin/claude", nil }
+	d.Runner = runner
 
 	var out bytes.Buffer
 	raw, err := runConfiguredVerifier(d, nil, verifierSelection{
@@ -811,12 +807,10 @@ func TestRunConfiguredVerifierAllAgentsQuotaPausedReturnsQuotaPause(t *testing.T
 			`{"type":"system","subtype":"init"}` + "\n" + `{"type":"error","message":"You've hit your usage limit. try again at 11:59 PM."}`,
 		},
 	}
-	d := &Deps{
-		FS:       deps.NewRealFileSystem(),
-		Git:      stubGit("sha1\n", "", ""),
-		LookPath: func(string) (string, error) { return "/bin/codex", nil },
-		Runner:   runner,
-	}
+	d := newTestDeps(t)
+	d.Git = stubGit("sha1\n", "", "")
+	d.LookPath = func(string) (string, error) { return "/bin/codex", nil }
+	d.Runner = runner
 
 	_, err := runConfiguredVerifier(d, nil, verifierSelection{
 		Agents: []string{"codex"}, Effort: "heavy",

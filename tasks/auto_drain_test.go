@@ -7,12 +7,14 @@ import (
 )
 
 func TestToggleAutoDrainRoundTripStateOnly(t *testing.T) {
+	d := newTestDeps(t)
+	t.Parallel()
 	root := filepath.Join(t.TempDir(), "tasks")
 	setupManifest(t, root, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 	statePath := StatePathFor(root)
-	if _, err := RegisterWith(DefaultDeps(), root, statePath); err != nil {
+	if _, err := RegisterWith(d, root, statePath); err != nil {
 		t.Fatal(err)
 	}
 
@@ -22,22 +24,22 @@ func TestToggleAutoDrainRoundTripStateOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	on, err := ToggleAutoDrainWith(DefaultDeps(), root, statePath, "demo")
+	on, err := ToggleAutoDrainWith(d, root, statePath, "demo")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !on.AutoDrain {
 		t.Fatalf("first toggle AutoDrain = false, want true")
 	}
-	state, err := LoadGlobalState(statePath)
+	state, err := LoadGlobalStateWith(d, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	canon, _ := CanonicalDefinitionPath(root)
+	canon, _ := CanonicalDefinitionPathWith(d, root)
 	if !state.Tasks[canon].TaskSets[0].AutoDrain {
 		t.Fatalf("state did not persist auto_drain=true: %#v", state.Tasks[canon].TaskSets[0])
 	}
-	refresh, err := RefreshWith(DefaultDeps(), root, statePath)
+	refresh, err := RefreshWith(d, root, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +57,7 @@ func TestToggleAutoDrainRoundTripStateOnly(t *testing.T) {
 		t.Fatalf("toggle mutated manifest:\nbefore=%s\nafter=%s", beforeManifest, afterManifest)
 	}
 
-	off, err := ToggleAutoDrainWith(DefaultDeps(), root, statePath, "demo")
+	off, err := ToggleAutoDrainWith(d, root, statePath, "demo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,33 +67,35 @@ func TestToggleAutoDrainRoundTripStateOnly(t *testing.T) {
 }
 
 func TestAutoDrainAndArchiveAreIndependent(t *testing.T) {
+	d := newTestDeps(t)
+	t.Parallel()
 	root := filepath.Join(t.TempDir(), "tasks")
 	setupManifest(t, root, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 	statePath := StatePathFor(root)
-	if _, err := RegisterWith(DefaultDeps(), root, statePath); err != nil {
+	if _, err := RegisterWith(d, root, statePath); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ToggleAutoDrainWith(DefaultDeps(), root, statePath, "demo"); err != nil {
+	if _, err := ToggleAutoDrainWith(d, root, statePath, "demo"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ArchiveTaskSetWith(DefaultDeps(), nil, nil, ResolveInput{DefinitionOverride: root, CWD: root}, "demo"); err != nil {
+	if _, err := ArchiveTaskSetWith(d, nil, nil, ResolveInput{DefinitionOverride: root, CWD: root}, "demo"); err != nil {
 		t.Fatal(err)
 	}
-	state, err := LoadGlobalState(statePath)
+	state, err := LoadGlobalStateWith(d, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	canon, _ := CanonicalDefinitionPath(root)
+	canon, _ := CanonicalDefinitionPathWith(d, root)
 	got := state.Tasks[canon].TaskSets[0]
 	if !got.AutoDrain || !got.Archived {
 		t.Fatalf("archive changed auto-drain independence: %#v", got)
 	}
-	if _, err := ToggleAutoDrainWith(DefaultDeps(), root, statePath, "demo"); err != nil {
+	if _, err := ToggleAutoDrainWith(d, root, statePath, "demo"); err != nil {
 		t.Fatal(err)
 	}
-	state, err = LoadGlobalState(statePath)
+	state, err = LoadGlobalStateWith(d, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}

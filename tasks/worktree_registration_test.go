@@ -10,6 +10,8 @@ import (
 // directive in the manifest is no longer read as a registration seed (ADR-0115):
 // the set registers with a nil intent.
 func TestRegisterIgnoresManagedWorktreeManifestKey(t *testing.T) {
+	d := newTestDeps(t)
+	t.Parallel()
 	root := t.TempDir()
 	taskDir := filepath.Join(root, "managed-set")
 	writeTaskMD(t, taskDir, "01-a.md", "## Acceptance criteria\n\n- [ ] ok\n")
@@ -18,7 +20,7 @@ func TestRegisterIgnoresManagedWorktreeManifestKey(t *testing.T) {
 	}, map[string]any{"worktree": map[string]any{"managed": true}})
 	statePath := filepath.Join(root, "state.json")
 
-	result, err := RegisterWith(DefaultDeps(), root, statePath)
+	result, err := RegisterWith(d, root, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +28,7 @@ func TestRegisterIgnoresManagedWorktreeManifestKey(t *testing.T) {
 		t.Fatalf("rows = %#v, want a non-MALFORMED registration", result.Rows)
 	}
 
-	state, err := LoadGlobalState(statePath)
+	state, err := LoadGlobalStateWith(d, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,6 +44,8 @@ func TestRegisterIgnoresManagedWorktreeManifestKey(t *testing.T) {
 // TestRegisterIgnoresNamedWorktreeManifestKey verifies a named worktree directive
 // in the manifest is no longer read as a registration seed (ADR-0115).
 func TestRegisterIgnoresNamedWorktreeManifestKey(t *testing.T) {
+	d := newTestDeps(t)
+	t.Parallel()
 	root := t.TempDir()
 	taskDir := filepath.Join(root, "named-set")
 	writeTaskMD(t, taskDir, "01-a.md", "## Acceptance criteria\n\n- [ ] ok\n")
@@ -50,11 +54,11 @@ func TestRegisterIgnoresNamedWorktreeManifestKey(t *testing.T) {
 	}, map[string]any{"worktree": map[string]any{"name": "feature-wt"}})
 	statePath := filepath.Join(root, "state.json")
 
-	result, err := RegisterWith(DefaultDeps(), root, statePath)
+	result, err := RegisterWith(d, root, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	st, err := LoadGlobalState(statePath)
+	st, err := LoadGlobalStateWith(d, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,13 +70,15 @@ func TestRegisterIgnoresNamedWorktreeManifestKey(t *testing.T) {
 // TestDiscoverySeedsNoWorktreeWhenAbsent verifies a set with no directive
 // persists a nil (none) intent and registers as today.
 func TestDiscoverySeedsNoWorktreeWhenAbsent(t *testing.T) {
+	d := newTestDeps(t)
+	t.Parallel()
 	root := t.TempDir()
 	setupManifest(t, root, "plain-wt-set", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 	statePath := filepath.Join(root, "state.json")
 
-	result, err := RegisterWith(DefaultDeps(), root, statePath)
+	result, err := RegisterWith(d, root, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +86,7 @@ func TestDiscoverySeedsNoWorktreeWhenAbsent(t *testing.T) {
 		t.Fatalf("new regs = %v", result.NewRegistrations)
 	}
 
-	state, err := LoadGlobalState(statePath)
+	state, err := LoadGlobalStateWith(d, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,13 +99,15 @@ func TestDiscoverySeedsNoWorktreeWhenAbsent(t *testing.T) {
 // worktree key after registration leaves the persisted intent unchanged: the
 // directive is a one-time registration seed.
 func TestWorktreeIntentNoResyncAfterManifestEdit(t *testing.T) {
+	d := newTestDeps(t)
+	t.Parallel()
 	root := t.TempDir()
 	setupManifest(t, root, "wt-edit-set", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 	statePath := filepath.Join(root, "state.json")
 
-	if _, err := RegisterWith(DefaultDeps(), root, statePath); err != nil {
+	if _, err := RegisterWith(d, root, statePath); err != nil {
 		t.Fatal(err)
 	}
 
@@ -109,7 +117,7 @@ func TestWorktreeIntentNoResyncAfterManifestEdit(t *testing.T) {
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	}, map[string]any{"worktree": map[string]any{"managed": true}})
 
-	result, err := RefreshWith(DefaultDeps(), root, statePath)
+	result, err := RefreshWith(d, root, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +125,7 @@ func TestWorktreeIntentNoResyncAfterManifestEdit(t *testing.T) {
 		t.Fatalf("unexpected re-registration: %v", result.NewRegistrations)
 	}
 
-	state, err := LoadGlobalState(statePath)
+	state, err := LoadGlobalStateWith(d, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +137,8 @@ func TestWorktreeIntentNoResyncAfterManifestEdit(t *testing.T) {
 // TestWorktreeIntentRoundTripsAcrossLoadSave verifies the seeded intent survives
 // a save/load cycle through the store for all three states.
 func TestWorktreeIntentRoundTripsAcrossLoadSave(t *testing.T) {
-	d := DefaultDeps()
+	t.Parallel()
+	d := newTestDeps(t)
 	defPath := filepath.Join(t.TempDir(), "rt", "tasks")
 	statePath := StatePathFor(defPath)
 

@@ -465,13 +465,15 @@ func TestSelectTaskSkipsFailedTaskSetInAutomaticSelection(t *testing.T) {
 }
 
 func TestFailedRowMultipleResetHints(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
 	setupManifest(t, root, "failed-prd", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "failed"},
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "failed"},
 	})
 
-	result, err := RegisterWith(DefaultDeps(), root, filepath.Join(root, "state.json"))
+	result, err := RegisterWith(d, root, filepath.Join(root, "state.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

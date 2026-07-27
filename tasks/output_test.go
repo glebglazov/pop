@@ -25,6 +25,7 @@ func TestStyledTableUsesSemanticColor(t *testing.T) {
 }
 
 func TestColorEnabledHonorsNoColor(t *testing.T) {
+	// ADR-0145: NO_COLOR reads os.Getenv directly — stays serial deliberately.
 	t.Setenv("NO_COLOR", "1")
 	if colorEnabled(true) {
 		t.Fatal("color enabled with NO_COLOR set")

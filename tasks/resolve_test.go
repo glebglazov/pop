@@ -295,6 +295,8 @@ func TestMarkNextPickSkipsNonRunnableHigherPriority(t *testing.T) {
 }
 
 func TestRefreshMarksNextPickInRender(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
 	setupManifest(t, root, "blocked", []Task{
 		{ID: "01-hitl", File: "01-hitl.md", Title: "H", Type: "HITL", Status: "open"},
@@ -304,7 +306,7 @@ func TestRefreshMarksNextPickInRender(t *testing.T) {
 	})
 
 	statePath := filepath.Join(root, "state.json")
-	canon, err := CanonicalDefinitionPath(root)
+	canon, err := CanonicalDefinitionPathWith(d, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,11 +318,11 @@ func TestRefreshMarksNextPickInRender(t *testing.T) {
 		}}},
 		path: statePath,
 	}
-	if err := state.Save(); err != nil {
+	if err := state.SaveWith(d); err != nil {
 		t.Fatal(err)
 	}
 
-	result, err := RefreshWith(DefaultDeps(), root, statePath)
+	result, err := RefreshWith(d, root, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}

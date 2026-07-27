@@ -11,6 +11,7 @@ import (
 )
 
 func TestRegisteredTaskSetArchivedDefaultsFalseOnExistingState(t *testing.T) {
+	t.Parallel()
 	d := &Deps{FS: deps.NewRealFileSystem()}
 	statePath := filepath.Join(t.TempDir(), "state.json")
 	raw := `{"version":1,"workloads":{"/tmp/tasks":{"issue_sets":[{"id":"demo","priority":3}]}}}`
@@ -31,6 +32,8 @@ func TestRegisteredTaskSetArchivedDefaultsFalseOnExistingState(t *testing.T) {
 }
 
 func TestArchiveRoundTripStateOnlyAndStatusViews(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
 	setupManifest(t, root, "active", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
@@ -39,7 +42,7 @@ func TestArchiveRoundTripStateOnlyAndStatusViews(t *testing.T) {
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
 	})
 	statePath := StatePathFor(root)
-	if _, err := RegisterWith(DefaultDeps(), root, statePath); err != nil {
+	if _, err := RegisterWith(d, root, statePath); err != nil {
 		t.Fatal(err)
 	}
 
@@ -49,15 +52,15 @@ func TestArchiveRoundTripStateOnlyAndStatusViews(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := ArchiveTaskSetWith(DefaultDeps(), nil, nil, ResolveInput{DefinitionOverride: root, CWD: root}, "filed"); err != nil {
+	if _, err := ArchiveTaskSetWith(d, nil, nil, ResolveInput{DefinitionOverride: root, CWD: root}, "filed"); err != nil {
 		t.Fatal(err)
 	}
 
-	state, err := LoadGlobalState(statePath)
+	state, err := LoadGlobalStateWith(d, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	canon, _ := CanonicalDefinitionPath(root)
+	canon, _ := CanonicalDefinitionPathWith(d, root)
 	idx := state.RegisteredIDs(canon)["filed"]
 	if !state.Tasks[canon].TaskSets[idx].Archived {
 		t.Fatalf("filed was not archived: %#v", state.Tasks[canon].TaskSets)
@@ -73,7 +76,7 @@ func TestArchiveRoundTripStateOnlyAndStatusViews(t *testing.T) {
 		t.Fatalf("archive mutated manifest:\nbefore=%s\nafter=%s", beforeManifest, afterManifest)
 	}
 
-	active, err := RefreshWith(DefaultDeps(), root, statePath)
+	active, err := RefreshWith(d, root, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +92,7 @@ func TestArchiveRoundTripStateOnlyAndStatusViews(t *testing.T) {
 		t.Fatalf("missing archive footer:\n%s", activeOut.String())
 	}
 
-	archived, err := RefreshArchivedWith(DefaultDeps(), root, statePath)
+	archived, err := RefreshArchivedWith(d, root, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,10 +105,10 @@ func TestArchiveRoundTripStateOnlyAndStatusViews(t *testing.T) {
 		t.Fatalf("archived view should not print hidden footer:\n%s", archivedOut.String())
 	}
 
-	if _, err := UnarchiveTaskSetWith(DefaultDeps(), nil, nil, ResolveInput{DefinitionOverride: root, CWD: root}, "filed"); err != nil {
+	if _, err := UnarchiveTaskSetWith(d, nil, nil, ResolveInput{DefinitionOverride: root, CWD: root}, "filed"); err != nil {
 		t.Fatal(err)
 	}
-	unarchived, err := RefreshWith(DefaultDeps(), root, statePath)
+	unarchived, err := RefreshWith(d, root, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,9 +123,11 @@ func TestArchiveRoundTripStateOnlyAndStatusViews(t *testing.T) {
 }
 
 func TestArchiveResolvesMissingRegisteredSet(t *testing.T) {
+	d := newTestDeps(t)
+	t.Parallel()
 	root := t.TempDir()
 	statePath := StatePathFor(root)
-	canon, err := CanonicalDefinitionPath(root)
+	canon, err := CanonicalDefinitionPathWith(d, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,14 +136,14 @@ func TestArchiveResolvesMissingRegisteredSet(t *testing.T) {
 		Tasks:   map[string]*TaskEntry{canon: {TaskSets: []RegisteredTaskSet{{ID: "missing", Priority: 0}}}},
 		path:    statePath,
 	}
-	if err := state.Save(); err != nil {
+	if err := state.SaveWith(d); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := ArchiveTaskSetWith(DefaultDeps(), nil, nil, ResolveInput{DefinitionOverride: root, CWD: root}, "missing"); err != nil {
+	if _, err := ArchiveTaskSetWith(d, nil, nil, ResolveInput{DefinitionOverride: root, CWD: root}, "missing"); err != nil {
 		t.Fatal(err)
 	}
-	archived, err := RefreshArchivedWith(DefaultDeps(), root, statePath)
+	archived, err := RefreshArchivedWith(d, root, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,6 +153,8 @@ func TestArchiveResolvesMissingRegisteredSet(t *testing.T) {
 }
 
 func TestArchivedSetIsNotAutoSelected(t *testing.T) {
+	d := newTestDeps(t)
+	t.Parallel()
 	root := t.TempDir()
 	setupManifest(t, root, "filed-high", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
@@ -156,7 +163,7 @@ func TestArchivedSetIsNotAutoSelected(t *testing.T) {
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 	statePath := StatePathFor(root)
-	canon, err := CanonicalDefinitionPath(root)
+	canon, err := CanonicalDefinitionPathWith(d, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,11 +175,11 @@ func TestArchivedSetIsNotAutoSelected(t *testing.T) {
 		}}},
 		path: statePath,
 	}
-	if err := state.Save(); err != nil {
+	if err := state.SaveWith(d); err != nil {
 		t.Fatal(err)
 	}
 
-	refresh, err := RefreshWith(DefaultDeps(), root, statePath)
+	refresh, err := RefreshWith(d, root, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,6 +196,8 @@ func TestArchivedSetIsNotAutoSelected(t *testing.T) {
 }
 
 func TestBuildArchiveSetSelectionPrechecksDoneOnly(t *testing.T) {
+	d := newTestDeps(t)
+	t.Parallel()
 	root := t.TempDir()
 	setupManifest(t, root, "done", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
@@ -214,14 +223,14 @@ func TestBuildArchiveSetSelectionPrechecksDoneOnly(t *testing.T) {
 	}
 
 	statePath := StatePathFor(root)
-	if _, err := RegisterWith(DefaultDeps(), root, statePath); err != nil {
+	if _, err := RegisterWith(d, root, statePath); err != nil {
 		t.Fatal(err)
 	}
-	canon, err := CanonicalDefinitionPath(root)
+	canon, err := CanonicalDefinitionPathWith(d, root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = UpdateGlobalStateWith(DefaultDeps(), statePath, func(state *GlobalState) error {
+	err = UpdateGlobalStateWith(d, statePath, func(state *GlobalState) error {
 		state.Entry(canon).TaskSets = append(state.Entry(canon).TaskSets, RegisteredTaskSet{ID: "missing"})
 		return nil
 	})
@@ -229,7 +238,7 @@ func TestBuildArchiveSetSelectionPrechecksDoneOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	refresh, err := RefreshWith(DefaultDeps(), root, statePath)
+	refresh, err := RefreshWith(d, root, statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,6 +273,8 @@ func TestBuildArchiveSetSelectionPrechecksDoneOnly(t *testing.T) {
 }
 
 func TestLoadUnarchiveSetSelectionListsArchivedOnlyUncheckedFromRegistration(t *testing.T) {
+	d := newTestDeps(t)
+	t.Parallel()
 	root := t.TempDir()
 	setupManifest(t, root, "archived-present", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
@@ -272,14 +283,14 @@ func TestLoadUnarchiveSetSelectionListsArchivedOnlyUncheckedFromRegistration(t *
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 	statePath := StatePathFor(root)
-	if _, err := RegisterWith(DefaultDeps(), root, statePath); err != nil {
+	if _, err := RegisterWith(d, root, statePath); err != nil {
 		t.Fatal(err)
 	}
-	canon, err := CanonicalDefinitionPath(root)
+	canon, err := CanonicalDefinitionPathWith(d, root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = UpdateGlobalStateWith(DefaultDeps(), statePath, func(state *GlobalState) error {
+	err = UpdateGlobalStateWith(d, statePath, func(state *GlobalState) error {
 		entry := state.Entry(canon)
 		for i := range entry.TaskSets {
 			if entry.TaskSets[i].ID == "archived-present" {
@@ -293,7 +304,7 @@ func TestLoadUnarchiveSetSelectionListsArchivedOnlyUncheckedFromRegistration(t *
 		t.Fatal(err)
 	}
 
-	ctx, err := LoadUnarchiveSetSelectionWith(DefaultDeps(), nil, nil, ResolveInput{DefinitionOverride: root, CWD: root})
+	ctx, err := LoadUnarchiveSetSelectionWith(d, nil, nil, ResolveInput{DefinitionOverride: root, CWD: root})
 	if err != nil {
 		t.Fatal(err)
 	}

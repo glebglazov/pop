@@ -459,6 +459,7 @@ func TestListTaskRunsMergesNewAndLegacyLayouts(t *testing.T) {
 // assessment while still finishing normally.
 func installClaudeStreamAgent(t *testing.T, root string, tick bool) {
 	t.Helper()
+	// ADR-0145: PATH stub — callers stay serial deliberately.
 	dir := filepath.Join(root, ".agent-bin")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -632,6 +633,7 @@ func TestRunTaskPlainOutputWritesNoStream(t *testing.T) {
 // trapTerm it ignores SIGTERM so only SIGKILL escalation ends it.
 func installClaudeHangingAgent(t *testing.T, root string, trapTerm bool) {
 	t.Helper()
+	// ADR-0145: PATH stub — callers stay serial deliberately.
 	dir := filepath.Join(root, ".agent-bin")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)

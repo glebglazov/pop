@@ -140,22 +140,15 @@ func TestExportRejectsFileReference(t *testing.T) {
 }
 
 func TestExportDefaultOutputName(t *testing.T) {
+	t.Parallel()
 	env := newTransferEnv(t)
 	const setID = "2026-06-01-demo"
 	env.writeSet(t, setID, nil)
 
-	oldWd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(env.root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
-
 	exported, err := ExportWith(env.deps, projectDefaultDeps(), config.Load, ExportOptions{
 		ResolveInput: env.resolveInput(),
 		TaskSetIDs:   []string{setID},
+		OutputPath:   filepath.Join(env.root, setID+".tar.gz"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -297,23 +290,16 @@ func TestExportMissingIDIsAtomic(t *testing.T) {
 }
 
 func TestExportMultiSetDefaultName(t *testing.T) {
+	t.Parallel()
 	env := newTransferEnv(t)
 	env.writeSet(t, "2026-06-01-alpha", nil)
 	env.writeSet(t, "2026-06-02-beta", nil)
-
-	oldWd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(env.root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
 
 	fixed := time.Date(2026, 6, 13, 14, 30, 0, 0, time.Local)
 	exported, err := ExportWith(env.deps, projectDefaultDeps(), config.Load, ExportOptions{
 		ResolveInput: env.resolveInput(),
 		TaskSetIDs:   []string{"2026-06-01-alpha", "2026-06-02-beta"},
+		OutputPath:   filepath.Join(env.root, "pop-tasks-2026-06-13-1430.tar.gz"),
 		Now:          fixed,
 	})
 	if err != nil {

@@ -138,6 +138,7 @@ func TestRunTaskSetCodexQuotaPauseRegistersWaiterWithResetAt(t *testing.T) {
 
 func installCodexQuotaAgent(t *testing.T, root string) {
 	t.Helper()
+	// ADR-0145: PATH stub — callers stay serial deliberately.
 	dir := filepath.Join(root, ".agent-bin")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)

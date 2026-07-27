@@ -251,7 +251,8 @@ func TestActionableTaskTargetCompletionsNeverOfferDoneThings(t *testing.T) {
 
 func refreshFixture(t *testing.T, root string) *RefreshResult {
 	t.Helper()
-	result, err := RegisterWith(DefaultDeps(), root, StatePathFor(root))
+	d := newTestDeps(t)
+	result, err := RegisterWith(d, root, StatePathFor(root))
 	if err != nil {
 		t.Fatal(err)
 	}

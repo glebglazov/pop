@@ -27,19 +27,18 @@ func registeredTaskSetsFor(t *testing.T, d *Deps, defPath string) []RegisteredTa
 	return entry.TaskSets
 }
 
+func completionCWD(root string) CompletionInput {
+	return CompletionInput{CWD: root}
+}
+
 func TestCompleteTaskSetIDsFromDiscovery(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
-	tasksDir := setupCompletionRepo(t, root)
+	tasksDir, d := setupCompletionRepo(t, root)
 	writeCompletionTaskSet(t, tasksDir, "alpha")
 	writeCompletionTaskSet(t, tasksDir, "beta")
 
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
-
-	stems, err := CompleteTaskSetIDs(CompletionInput{}, "")
+	stems, err := CompleteTaskSetIDsWith(d, project.DefaultDeps(), config.Load, completionCWD(root), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,20 +48,15 @@ func TestCompleteTaskSetIDsFromDiscovery(t *testing.T) {
 }
 
 func TestCompleteTaskTargetsOffersIdentifiersAndSetRelativeFiles(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
-	tasksDir := setupCompletionRepo(t, root)
+	tasksDir, d := setupCompletionRepo(t, root)
 	writeCompletionFixture(t, tasksDir, "feature", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "done"},
 	})
 
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
-
-	ids, err := CompleteTaskTargets(CompletionInput{}, "")
+	ids, err := CompleteTaskTargetsWith(d, project.DefaultDeps(), config.Load, completionCWD(root), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +64,7 @@ func TestCompleteTaskTargetsOffersIdentifiersAndSetRelativeFiles(t *testing.T) {
 		t.Fatalf("identifiers = %#v", ids)
 	}
 
-	files, err := CompleteTaskTargets(CompletionInput{}, "feature/")
+	files, err := CompleteTaskTargetsWith(d, project.DefaultDeps(), config.Load, completionCWD(root), "feature/")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,8 +74,9 @@ func TestCompleteTaskTargetsOffersIdentifiersAndSetRelativeFiles(t *testing.T) {
 }
 
 func TestCompleteActionableTaskTargetsOmitsDoneSetsAndTasks(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
-	tasksDir := setupCompletionRepo(t, root)
+	tasksDir, d := setupCompletionRepo(t, root)
 	writeCompletionFixture(t, tasksDir, "archived", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
 	})
@@ -90,13 +85,7 @@ func TestCompleteActionableTaskTargetsOmitsDoneSetsAndTasks(t *testing.T) {
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "done"},
 	})
 
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
-
-	ids, err := CompleteActionableTaskTargets(CompletionInput{}, "")
+	ids, err := CompleteActionableTaskTargetsWith(d, project.DefaultDeps(), config.Load, completionCWD(root), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +93,7 @@ func TestCompleteActionableTaskTargetsOmitsDoneSetsAndTasks(t *testing.T) {
 		t.Fatalf("identifiers = %#v", ids)
 	}
 
-	files, err := CompleteActionableTaskTargets(CompletionInput{}, "feature/")
+	files, err := CompleteActionableTaskTargetsWith(d, project.DefaultDeps(), config.Load, completionCWD(root), "feature/")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +102,7 @@ func TestCompleteActionableTaskTargetsOmitsDoneSetsAndTasks(t *testing.T) {
 	}
 
 	// The unfiltered variant (stream) still offers the Done set and done task.
-	all, err := CompleteTaskTargets(CompletionInput{}, "")
+	all, err := CompleteTaskTargetsWith(d, project.DefaultDeps(), config.Load, completionCWD(root), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,8 +112,9 @@ func TestCompleteActionableTaskTargetsOmitsDoneSetsAndTasks(t *testing.T) {
 }
 
 func TestCompletionsFilterArchivedTaskSets(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
-	tasksDir := setupCompletionRepo(t, root)
+	tasksDir, d := setupCompletionRepo(t, root)
 	writeCompletionFixture(t, tasksDir, "active", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
@@ -132,20 +122,14 @@ func TestCompletionsFilterArchivedTaskSets(t *testing.T) {
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(root); err != nil {
+	if _, err := RegisterWith(d, tasksDir, StatePathFor(tasksDir)); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
-
-	if _, err := RegisterWith(DefaultDeps(), tasksDir, StatePathFor(tasksDir)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ArchiveTaskSetWith(DefaultDeps(), nil, nil, ResolveInput{}, "archived"); err != nil {
+	if _, err := ArchiveTaskSetWith(d, nil, nil, ResolveInput{CWD: root}, "archived"); err != nil {
 		t.Fatal(err)
 	}
 
-	ids, err := CompleteTaskSetIDs(CompletionInput{}, "")
+	ids, err := CompleteTaskSetIDsWith(d, project.DefaultDeps(), config.Load, completionCWD(root), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +137,7 @@ func TestCompletionsFilterArchivedTaskSets(t *testing.T) {
 		t.Fatalf("active ids = %#v", ids)
 	}
 
-	targets, err := CompleteTaskTargets(CompletionInput{}, "")
+	targets, err := CompleteTaskTargetsWith(d, project.DefaultDeps(), config.Load, completionCWD(root), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +145,7 @@ func TestCompletionsFilterArchivedTaskSets(t *testing.T) {
 		t.Fatalf("snapshot targets = %#v", targets)
 	}
 
-	actionable, err := CompleteActionableTaskTargets(CompletionInput{}, "")
+	actionable, err := CompleteActionableTaskTargetsWith(d, project.DefaultDeps(), config.Load, completionCWD(root), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +153,7 @@ func TestCompletionsFilterArchivedTaskSets(t *testing.T) {
 		t.Fatalf("actionable targets = %#v", actionable)
 	}
 
-	archived, err := CompleteArchivedTaskSetIDs(CompletionInput{}, "")
+	archived, err := CompleteArchivedTaskSetIDsWith(d, project.DefaultDeps(), config.Load, completionCWD(root), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,19 +163,14 @@ func TestCompletionsFilterArchivedTaskSets(t *testing.T) {
 }
 
 func TestCompleteExportTaskSetIDsOrdersNewestFirst(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
-	tasksDir := setupCompletionRepo(t, root)
+	tasksDir, d := setupCompletionRepo(t, root)
 	writeCompletionTaskSet(t, tasksDir, "2026-06-01-alpha")
 	writeCompletionTaskSet(t, tasksDir, "2026-06-15-beta")
 	writeCompletionTaskSet(t, tasksDir, "2026-07-01-gamma")
 
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
-
-	ids, err := CompleteExportTaskSetIDs(CompletionInput{}, nil, "")
+	ids, err := CompleteExportTaskSetIDsWith(d, project.DefaultDeps(), config.Load, completionCWD(root), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,19 +180,14 @@ func TestCompleteExportTaskSetIDsOrdersNewestFirst(t *testing.T) {
 }
 
 func TestCompleteExportTaskSetIDsExcludesAlreadyChosen(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
-	tasksDir := setupCompletionRepo(t, root)
+	tasksDir, d := setupCompletionRepo(t, root)
 	writeCompletionTaskSet(t, tasksDir, "2026-06-01-alpha")
 	writeCompletionTaskSet(t, tasksDir, "2026-06-15-beta")
 	writeCompletionTaskSet(t, tasksDir, "2026-07-01-gamma")
 
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
-
-	ids, err := CompleteExportTaskSetIDs(CompletionInput{}, []string{"2026-07-01-gamma", "2026-06-01-alpha"}, "")
+	ids, err := CompleteExportTaskSetIDsWith(d, project.DefaultDeps(), config.Load, completionCWD(root), []string{"2026-07-01-gamma", "2026-06-01-alpha"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,25 +197,20 @@ func TestCompleteExportTaskSetIDsExcludesAlreadyChosen(t *testing.T) {
 }
 
 func TestCompleteExportTaskSetIDsOmitsArchived(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
-	tasksDir := setupCompletionRepo(t, root)
+	tasksDir, d := setupCompletionRepo(t, root)
 	writeCompletionTaskSet(t, tasksDir, "2026-06-01-active")
 	writeCompletionTaskSet(t, tasksDir, "2026-07-01-archived")
 
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(root); err != nil {
+	if _, err := RegisterWith(d, tasksDir, StatePathFor(tasksDir)); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
-
-	if _, err := RegisterWith(DefaultDeps(), tasksDir, StatePathFor(tasksDir)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ArchiveTaskSetWith(DefaultDeps(), nil, nil, ResolveInput{}, "2026-07-01-archived"); err != nil {
+	if _, err := ArchiveTaskSetWith(d, nil, nil, ResolveInput{CWD: root}, "2026-07-01-archived"); err != nil {
 		t.Fatal(err)
 	}
 
-	ids, err := CompleteExportTaskSetIDs(CompletionInput{}, nil, "")
+	ids, err := CompleteExportTaskSetIDsWith(d, project.DefaultDeps(), config.Load, completionCWD(root), nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,6 +220,7 @@ func TestCompleteExportTaskSetIDsOmitsArchived(t *testing.T) {
 }
 
 func TestCompleteProjectNamesUsesPickerVisibleNames(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	projectDir := filepath.Join(root, "svc")
 	if err := os.MkdirAll(projectDir, 0o755); err != nil {
@@ -275,20 +245,21 @@ func TestCompleteProjectNamesUsesPickerVisibleNames(t *testing.T) {
 }
 
 func TestCompletionDoesNotPersistTaskState(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	initGitRepo(t, root)
-	t.Setenv("XDG_DATA_HOME", root)
-	tasksDir := storageTasksDir(t, DefaultDeps(), root)
+	d := newTestDeps(t)
+	tasksDir := storageTasksDir(t, d, root)
 	writeCompletionTaskSet(t, tasksDir, "existing")
 	writeCompletionTaskSet(t, tasksDir, "new-prd")
 
-	statePath := filepath.Join(root, "state.json")
+	dataHome := popDataDirWith(d)
+	statePath := filepath.Join(dataHome, "state.json")
 	canon, err := CanonicalDefinitionPath(tasksDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	d := DefaultDeps()
 	seed := &GlobalState{
 		Version: StateVersion,
 		Tasks: map[string]*TaskEntry{
@@ -301,16 +272,10 @@ func TestCompletionDoesNotPersistTaskState(t *testing.T) {
 	}
 	before := registeredTaskSetsFor(t, d, canon)
 
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
-
 	var notices bytes.Buffer
 	d.NoticeOut = &notices
 
-	stems, err := CompleteTaskSetIDsWith(d, project.DefaultDeps(), config.Load, CompletionInput{}, "")
+	stems, err := CompleteTaskSetIDsWith(d, project.DefaultDeps(), config.Load, completionCWD(root), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,7 +287,7 @@ func TestCompletionDoesNotPersistTaskState(t *testing.T) {
 	if !reflect.DeepEqual(after, before) {
 		t.Fatalf("state mutated:\nbefore=%#v\nafter=%#v", before, after)
 	}
-	if _, err := os.Stat(filepath.Join(root, "pop", "workloads-state.json")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dataHome, "pop", "workloads-state.json")); !os.IsNotExist(err) {
 		t.Fatal("expected no default state file write")
 	}
 	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
@@ -337,21 +302,16 @@ func TestCompletionUnreadableDiscoveryReturnsEmptyWithoutError(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("chmod tests unreliable as root")
 	}
+	t.Parallel()
 	root := t.TempDir()
-	tasksDir := setupCompletionRepo(t, root)
+	tasksDir, d := setupCompletionRepo(t, root)
 	writeCompletionTaskSet(t, tasksDir, "a")
 	if err := os.Chmod(tasksDir, 0o000); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(tasksDir, 0o755) })
 
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
-
-	stems, err := CompleteTaskSetIDs(CompletionInput{}, "")
+	stems, err := CompleteTaskSetIDsWith(d, project.DefaultDeps(), config.Load, completionCWD(root), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -360,13 +320,13 @@ func TestCompletionUnreadableDiscoveryReturnsEmptyWithoutError(t *testing.T) {
 	}
 }
 
-// setupCompletionRepo initializes a git repo at root, points XDG at it, and
+// setupCompletionRepo initializes a git repo at root with isolated Deps and
 // returns the repository's Task storage tasks directory.
-func setupCompletionRepo(t *testing.T, root string) string {
+func setupCompletionRepo(t *testing.T, root string) (string, *Deps) {
 	t.Helper()
 	initGitRepo(t, root)
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, ".xdg"))
-	return storageTasksDir(t, DefaultDeps(), root)
+	d := newTestDeps(t)
+	return storageTasksDir(t, d, root), d
 }
 
 // writeCompletionTaskSet creates a minimal valid Task set (no PRD pairing required).
@@ -393,11 +353,13 @@ func writeCompletionFixture(t *testing.T, tasksDir, stem string, tasks []Task) {
 }
 
 func TestCompleteTaskSetIDsUsesDefinitionOverride(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
 	root := t.TempDir()
 	defDir := filepath.Join(root, "planning")
 	writeCompletionTaskSet(t, defDir, "planned")
 
-	stems, err := CompleteTaskSetIDs(CompletionInput{
+	stems, err := CompleteTaskSetIDsWith(d, project.DefaultDeps(), config.Load, CompletionInput{
 		Path:               root,
 		DefinitionOverride: defDir,
 	}, "")
@@ -410,8 +372,9 @@ func TestCompleteTaskSetIDsUsesDefinitionOverride(t *testing.T) {
 }
 
 func TestCompleteTaskTargetsScopedToSelectedTaskSet(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
-	tasksDir := setupCompletionRepo(t, root)
+	tasksDir, d := setupCompletionRepo(t, root)
 	writeCompletionFixture(t, tasksDir, "one", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
@@ -419,13 +382,7 @@ func TestCompleteTaskTargetsScopedToSelectedTaskSet(t *testing.T) {
 		{ID: "99-z", File: "99-z.md", Title: "Z", Type: "AFK", Status: "open"},
 	})
 
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
-
-	files, err := CompleteTaskTargets(CompletionInput{}, "two/")
+	files, err := CompleteTaskTargetsWith(d, project.DefaultDeps(), config.Load, completionCWD(root), "two/")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -435,6 +392,7 @@ func TestCompleteTaskTargetsScopedToSelectedTaskSet(t *testing.T) {
 }
 
 func TestCompleteProjectNamesMissingConfigIsEmpty(t *testing.T) {
+	t.Parallel()
 	names, err := CompleteProjectNamesWith(DefaultDeps(), project.DefaultDeps(), func(string) (*config.Config, error) {
 		return nil, os.ErrNotExist
 	})
@@ -447,20 +405,15 @@ func TestCompleteProjectNamesMissingConfigIsEmpty(t *testing.T) {
 }
 
 func TestCompletionNeverWritesProgress(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
-	tasksDir := setupCompletionRepo(t, root)
+	tasksDir, d := setupCompletionRepo(t, root)
 	writeCompletionFixture(t, tasksDir, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
-
-	_, _ = CompleteTaskSetIDs(CompletionInput{}, "")
-	_, _ = CompleteTaskTargets(CompletionInput{}, "demo/")
+	_, _ = CompleteTaskSetIDsWith(d, project.DefaultDeps(), config.Load, completionCWD(root), "")
+	_, _ = CompleteTaskTargetsWith(d, project.DefaultDeps(), config.Load, completionCWD(root), "demo/")
 
 	progressPath := filepath.Join(tasksDir, "demo", "progress.txt")
 	if _, err := os.Stat(progressPath); !os.IsNotExist(err) {
@@ -469,39 +422,29 @@ func TestCompletionNeverWritesProgress(t *testing.T) {
 }
 
 func TestCompleteTaskSetIDsDoesNotRegisterInStateFile(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
-	tasksDir := setupCompletionRepo(t, root)
+	tasksDir, d := setupCompletionRepo(t, root)
 	writeCompletionTaskSet(t, tasksDir, "fresh")
 
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(root); err != nil {
+	if _, err := CompleteTaskSetIDsWith(d, project.DefaultDeps(), config.Load, completionCWD(root), ""); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
-
-	if _, err := CompleteTaskSetIDs(CompletionInput{}, ""); err != nil {
-		t.Fatal(err)
-	}
-	statePath := DefaultStatePath()
+	statePath := DefaultStatePathWith(d)
 	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
 		t.Fatalf("expected no state file at %s", statePath)
 	}
 }
 
 func TestCompleteTaskSetIDsSorted(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
-	tasksDir := setupCompletionRepo(t, root)
+	tasksDir, d := setupCompletionRepo(t, root)
 	for _, stem := range []string{"charlie", "alpha", "bravo"} {
 		writeCompletionTaskSet(t, tasksDir, stem)
 	}
 
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
-
-	stems, err := CompleteTaskSetIDs(CompletionInput{}, "")
+	stems, err := CompleteTaskSetIDsWith(d, project.DefaultDeps(), config.Load, completionCWD(root), "")
 	if err != nil {
 		t.Fatal(err)
 	}
