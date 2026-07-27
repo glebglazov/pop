@@ -33,6 +33,23 @@ type Tmux interface {
 	KillSession(name string) error
 	// InTmux reports whether the caller is running inside a tmux client.
 	InTmux() bool
+
+	// PaneInfo reads a pane's session name and current foreground command.
+	PaneInfo(paneID string) (PaneInfo, error)
+	// PaneSession resolves just the session name owning a pane.
+	PaneSession(paneID string) (string, error)
+	// IsActivePane reports whether the pane is the attended pane (pane active
+	// + window active + session attached). Lookup failure reports false.
+	IsActivePane(paneID string) bool
+	// LivePanes lists every live pane id across all sessions (liveness poll).
+	LivePanes() ([]string, error)
+
+	// InstallHook appends a global tmux hook for event.
+	InstallHook(event, command string) error
+	// GlobalHooks reads the installed global hooks, parsed into typed entries.
+	GlobalHooks() ([]Hook, error)
+	// UninstallHook removes the global hook at an indexed selector ("event[N]").
+	UninstallHook(indexed string) error
 }
 
 // realTmux implements Tmux against the tmux binary via the runner seam.

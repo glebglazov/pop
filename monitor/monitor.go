@@ -13,6 +13,7 @@ import (
 
 	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/internal/deps"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 )
 
 // PaneStatus represents the detected state of a monitored pane
@@ -80,14 +81,14 @@ type State struct {
 // Deps holds external dependencies for the monitor package
 type Deps struct {
 	FS   deps.FileSystem
-	Tmux deps.Tmux
+	Tmux tmuxmod.Tmux
 }
 
 // DefaultDeps returns dependencies using real implementations
 func DefaultDeps() *Deps {
 	return &Deps{
 		FS:   deps.NewRealFileSystem(),
-		Tmux: deps.NewRealTmux(),
+		Tmux: tmuxmod.New(),
 	}
 }
 

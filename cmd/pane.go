@@ -523,10 +523,10 @@ func runPaneSetStatus(cmd *cobra.Command, args []string) error {
 	source, _ := cmd.Flags().GetString("source")
 	noRegister, _ := cmd.Flags().GetBool("no-register")
 	label, _ := cmd.Flags().GetString("label")
-	return runPaneSetStatusWith(defaultTmux, cfg, source, noRegister, label, args)
+	return runPaneSetStatusWith(defaultTmuxMod, cfg, source, noRegister, label, args)
 }
 
-func runPaneSetStatusWith(tmux deps.Tmux, cfg *config.Config, source string, noRegister bool, label string, args []string) error {
+func runPaneSetStatusWith(tmux tmuxmod.Tmux, cfg *config.Config, source string, noRegister bool, label string, args []string) error {
 	debug.Init()
 	defer debug.Close()
 
@@ -582,7 +582,7 @@ func runPaneSetStatusWith(tmux deps.Tmux, cfg *config.Config, source string, noR
 
 // runPaneSetStatusDirect is the fallback path used when the daemon socket
 // is unavailable (cold start).
-func runPaneSetStatusDirect(tmux deps.Tmux, cfg *config.Config, paneID, rawStatus, source string, noRegister bool, label string) error {
+func runPaneSetStatusDirect(tmux tmuxmod.Tmux, cfg *config.Config, paneID, rawStatus, source string, noRegister bool, label string) error {
 	status := monitor.NormalizeStatus(rawStatus)
 
 	if status != monitor.StatusClear {
@@ -1459,12 +1459,12 @@ func runPaneSetFollowWith(tmux deps.Tmux, cfg *config.Config, arg string, follow
 		paneOnSocketSendFailed()
 	}
 
-	return runPaneSetFollowDirect(tmux, paneID, follow)
+	return runPaneSetFollowDirect(defaultTmuxMod, paneID, follow)
 }
 
 // runPaneSetFollowDirect is the fallback path used when the daemon socket
 // is unavailable (cold start).
-func runPaneSetFollowDirect(tmux deps.Tmux, paneID string, follow bool) error {
+func runPaneSetFollowDirect(tmux tmuxmod.Tmux, paneID string, follow bool) error {
 	store := monitor.NewStore(monitor.DefaultStatePath(), nil)
 	return store.SetFollowing(tmux, paneID, follow)
 }

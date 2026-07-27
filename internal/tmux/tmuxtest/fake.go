@@ -5,7 +5,11 @@
 // failures. The fake grows one verb at a time alongside the module.
 package tmuxtest
 
-import "github.com/glebglazov/pop/internal/tmux"
+import (
+	"fmt"
+
+	"github.com/glebglazov/pop/internal/tmux"
+)
 
 // Fake is an in-memory tmux.Tmux.
 type Fake struct {
@@ -31,11 +35,27 @@ type Fake struct {
 	Attached []string
 	Killed   []string
 
+	// PaneInfos maps pane id -> its session/command. PaneInfo and PaneSession
+	// read it; an absent pane yields an error (matching tmux for a dead pane).
+	PaneInfos map[string]tmux.PaneInfo
+
+	// ActivePanes marks which panes IsActivePane reports as the attended pane.
+	ActivePanes map[string]bool
+
+	// LivePaneIDs is the set of pane ids returned by LivePanes.
+	LivePaneIDs []string
+
+	// InstalledHooks is the global-hook state: InstallHook appends, GlobalHooks
+	// reads, UninstallHook removes by Index. Tests arrange and assert on it.
+	InstalledHooks []tmux.Hook
+
 	// Failure-injection overrides. When set, each replaces its verb entirely.
 	NewSessionFunc    func(name, dir string) error
 	SwitchClientFunc  func(target string) error
 	AttachSessionFunc func(target string) error
 	KillSessionFunc   func(name string) error
+	PaneInfoFunc      func(paneID string) (tmux.PaneInfo, error)
+	LivePanesFunc     func() ([]string, error)
 }
 
 var _ tmux.Tmux = (*Fake)(nil)
@@ -89,3 +109,53 @@ func (f *Fake) KillSession(name string) error {
 }
 
 func (f *Fake) InTmux() bool { return f.Inside }
+
+func (f *Fake) PaneInfo(paneID string) (tmux.PaneInfo, error) {
+	if f.PaneInfoFunc != nil {
+		return f.PaneInfoFunc(paneID)
+	}
+	info, ok := f.PaneInfos[paneID]
+	if !ok {
+		return tmux.PaneInfo{}, fmt.Errorf("pane not found: %s", paneID)
+	}
+	return info, nil
+}
+
+func (f *Fake) PaneSession(paneID string) (string, error) {
+	info, err := f.PaneInfo(paneID)
+	if err != nil {
+		return "", err
+	}
+	return info.Session, nil
+}
+
+func (f *Fake) IsActivePane(paneID string) bool {
+	return f.ActivePanes[paneID]
+}
+
+func (f *Fake) LivePanes() ([]string, error) {
+	if f.LivePanesFunc != nil {
+		return f.LivePanesFunc()
+	}
+	return f.LivePaneIDs, nil
+}
+
+func (f *Fake) InstallHook(event, command string) error {
+	f.InstalledHooks = append(f.InstalledHooks, tmux.Hook{Index: event, Command: command})
+	return nil
+}
+
+func (f *Fake) GlobalHooks() ([]tmux.Hook, error) {
+	return f.InstalledHooks, nil
+}
+
+func (f *Fake) UninstallHook(indexed string) error {
+	kept := f.InstalledHooks[:0]
+	for _, h := range f.InstalledHooks {
+		if h.Index != indexed {
+			kept = append(kept, h)
+		}
+	}
+	f.InstalledHooks = kept
+	return nil
+}

@@ -12,6 +12,8 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
+	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 	"github.com/glebglazov/pop/monitor"
 )
 
@@ -175,25 +177,6 @@ func TestRunPaneMonitorStatusWith(t *testing.T) {
 	})
 }
 
-func TestTmuxPaneSessionWith(t *testing.T) {
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			if args[0] == "display-message" {
-				return "project-a", nil
-			}
-			return "", nil
-		},
-	}
-
-	session, err := tmuxPaneSessionWith(tmux, "%1")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if session != "project-a" {
-		t.Errorf("got %q, want %q", session, "project-a")
-	}
-}
-
 func TestBuildMonitorHandler_DispatchesByCmd(t *testing.T) {
 	dir := t.TempDir()
 	statePath := dir + "/monitor.json"
@@ -203,7 +186,7 @@ func TestBuildMonitorHandler_DispatchesByCmd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	handler := buildMonitorHandler(&deps.MockTmux{}, statePath)
+	handler := buildMonitorHandler(&tmuxtest.Fake{}, statePath)
 
 	t.Run("unknown command returns error", func(t *testing.T) {
 		resp := handler(monitor.Request{Cmd: "definitely-not-a-real-command", PaneID: "%1"})
@@ -244,7 +227,7 @@ func TestHandleSetFollowing(t *testing.T) {
 	t.Run("rejects request without pane_id", func(t *testing.T) {
 		statePath := setupEmptyState(t)
 		follow := true
-		resp := handleSetFollowing(&deps.MockTmux{}, statePath, monitor.Request{
+		resp := handleSetFollowing(&tmuxtest.Fake{}, statePath, monitor.Request{
 			Cmd:       "set-following",
 			Following: &follow,
 		})
@@ -258,7 +241,7 @@ func TestHandleSetFollowing(t *testing.T) {
 
 	t.Run("rejects request with nil following", func(t *testing.T) {
 		statePath := setupEmptyState(t)
-		resp := handleSetFollowing(&deps.MockTmux{}, statePath, monitor.Request{
+		resp := handleSetFollowing(&tmuxtest.Fake{}, statePath, monitor.Request{
 			Cmd:    "set-following",
 			PaneID: "%1",
 		})
@@ -339,12 +322,10 @@ func TestHandleSetStatus_IgnoresSourceBeforeStateWork(t *testing.T) {
 	}
 
 	tmuxCalled := false
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			tmuxCalled = true
-			return "", nil
-		},
-	}
+	tmux := &tmuxtest.Fake{PaneInfoFunc: func(paneID string) (tmuxmod.PaneInfo, error) {
+		tmuxCalled = true
+		return tmuxmod.PaneInfo{}, nil
+	}}
 
 	resp := handleSetStatus(tmux, statePath, monitor.Request{
 		Cmd:    "set-status",
@@ -390,7 +371,7 @@ func TestSetStatus_HandlerAndDirectDelegation(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
 	req := monitor.Request{Cmd: "set-status", PaneID: "%1", Status: "clear"}
-	tmux := &deps.MockTmux{}
+	tmux := &tmuxtest.Fake{}
 
 	resp := handleSetStatus(tmux, handlerPath, req)
 	if !resp.OK {
@@ -418,7 +399,7 @@ func TestSetFollowing_HandlerAndDirectDelegation(t *testing.T) {
 		PaneID:    "%3",
 		Following: &followTrue,
 	}
-	tmux := &deps.MockTmux{}
+	tmux := &tmuxtest.Fake{}
 
 	resp := handleSetFollowing(tmux, handlerPath, req)
 	if !resp.OK {
@@ -474,28 +455,20 @@ func clonePaneMap(in map[string]*monitor.PaneEntry) map[string]*monitor.PaneEntr
 }
 
 func TestUninstallTmuxAutoClearHooksWith(t *testing.T) {
-	var removedHooks []string
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			if args[0] == "show-hooks" {
-				return "after-select-pane[0] run-shell \"pop pane set-status #{pane_id} read\"\n" +
-					"after-select-pane[1] run-shell \"echo other hook\"\n" +
-					"session-window-changed[0] run-shell \"pop monitor check\"\n", nil
-			}
-			if args[0] == "set-hook" && args[1] == "-gu" {
-				removedHooks = append(removedHooks, args[2])
-			}
-			return "", nil
-		},
-	}
+	// Two pop hooks and one unrelated ("echo other hook") are installed.
+	tmux := &tmuxtest.Fake{InstalledHooks: []tmuxmod.Hook{
+		{Index: "after-select-pane[0]", Command: `run-shell "pop pane set-status #{pane_id} read"`},
+		{Index: "after-select-pane[1]", Command: `run-shell "echo other hook"`},
+		{Index: "session-window-changed[0]", Command: `run-shell "pop monitor check"`},
+	}}
 
 	uninstallTmuxAutoClearHooksWith(tmux)
 
-	if len(removedHooks) != 2 {
-		t.Fatalf("removed %d hooks, want 2", len(removedHooks))
+	// Only the unrelated hook must survive.
+	if len(tmux.InstalledHooks) != 1 {
+		t.Fatalf("remaining hooks = %d, want 1: %+v", len(tmux.InstalledHooks), tmux.InstalledHooks)
 	}
-	// Should remove the pop hooks but not "echo other hook"
-	if removedHooks[0] != "after-select-pane[0]" && removedHooks[0] != "session-window-changed[0]" {
-		t.Errorf("unexpected removed hook: %q", removedHooks[0])
+	if tmux.InstalledHooks[0].Index != "after-select-pane[1]" {
+		t.Errorf("survivor = %q, want after-select-pane[1]", tmux.InstalledHooks[0].Index)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 )
 
 func TestDefaultStatePathWith(t *testing.T) {
@@ -663,11 +664,11 @@ func TestPollOnce_NilLivePanesPreservesPanes(t *testing.T) {
 			},
 			MkdirAllFunc: func(string, os.FileMode) error { return nil },
 		},
-		// Simulate tmux failure through the seam: Command returns an error,
+		// Simulate tmux failure through the seam: LivePanes returns an error,
 		// which liveTmuxPanes maps to nil so the poll loop skips pruning.
-		Tmux: &deps.MockTmux{
-			CommandFunc: func(args ...string) (string, error) {
-				return "", fmt.Errorf("tmux unavailable")
+		Tmux: &tmuxtest.Fake{
+			LivePanesFunc: func() ([]string, error) {
+				return nil, fmt.Errorf("tmux unavailable")
 			},
 		},
 	}
@@ -725,13 +726,9 @@ func TestPollOnce_DeadPanesRemoved(t *testing.T) {
 			},
 			MkdirAllFunc: func(string, os.FileMode) error { return nil },
 		},
-		// Only %1 is alive; %2 and %3 are dead. list-panes returns just %1
+		// Only %1 is alive; %2 and %3 are dead. LivePanes returns just %1
 		// through the seam.
-		Tmux: &deps.MockTmux{
-			CommandFunc: func(args ...string) (string, error) {
-				return "%1", nil
-			},
-		},
+		Tmux: &tmuxtest.Fake{LivePaneIDs: []string{"%1"}},
 	}
 
 	pollOnce(d, "/test/monitor.json")

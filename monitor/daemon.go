@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/debug"
-	"github.com/glebglazov/pop/internal/deps"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 )
 
 const pollInterval = 5 * time.Second
@@ -117,17 +117,15 @@ func pollOnce(d *Deps, statePath string) {
 // On tmux failure it returns nil (not an empty set) so the poll loop can
 // distinguish "couldn't determine liveness" from "no panes alive" and skip
 // pruning — guarding against a tmux hiccup deregistering every pane.
-func liveTmuxPanes(tmux deps.Tmux) map[string]bool {
-	out, err := tmux.Command("list-panes", "-a", "-F", "#{pane_id}")
+func liveTmuxPanes(tmux tmuxmod.Tmux) map[string]bool {
+	ids, err := tmux.LivePanes()
 	if err != nil {
 		debug.Error("liveTmuxPanes: %v", err)
 		return nil
 	}
-	panes := make(map[string]bool)
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		if line != "" {
-			panes[line] = true
-		}
+	panes := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		panes[id] = true
 	}
 	return panes
 }

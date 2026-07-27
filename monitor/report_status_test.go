@@ -2,38 +2,27 @@ package monitor
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/internal/tmux"
+	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 )
 
-func reportStatusMockTmux(paneInfo map[string]string, activePanes map[string]bool) *deps.MockTmux {
-	return &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			if len(args) >= 5 && args[0] == "display-message" && args[1] == "-t" {
-				paneID := args[2]
-				format := args[4]
-				switch format {
-				case "#{session_name}\t#{pane_current_command}":
-					info, ok := paneInfo[paneID]
-					if !ok {
-						return "", fmt.Errorf("pane not found: %s", paneID)
-					}
-					return info, nil
-				case "#{pane_active} #{window_active} #{session_attached}":
-					if activePanes[paneID] {
-						return "1 1 1", nil
-					}
-					return "0 0 0", nil
-				}
-			}
-			return "", nil
-		},
+// reportStatusFake builds a stateful tmux fake. paneInfo maps pane ID ->
+// "session\tcommand"; activePanes marks which panes are the attended pane.
+func reportStatusFake(paneInfo map[string]string, activePanes map[string]bool) *tmuxtest.Fake {
+	infos := map[string]tmux.PaneInfo{}
+	for id, raw := range paneInfo {
+		parts := strings.SplitN(raw, "\t", 2)
+		if len(parts) == 2 {
+			infos[id] = tmux.PaneInfo{Session: parts[0], Command: parts[1]}
+		}
 	}
+	return &tmuxtest.Fake{PaneInfos: infos, ActivePanes: activePanes}
 }
 
 func setupReportStatusState(t *testing.T, panes map[string]*PaneEntry) (string, *Store) {
@@ -65,7 +54,7 @@ func loadReportStatusState(t *testing.T, path string) *State {
 
 func TestStore_ReportStatus_AutoRegistration(t *testing.T) {
 	statePath, store := setupReportStatusState(t, nil)
-	tmux := reportStatusMockTmux(map[string]string{
+	tmux := reportStatusFake(map[string]string{
 		"%7": "test-session\tclaude",
 	}, nil)
 
@@ -95,7 +84,7 @@ func TestStore_ReportStatus_AutoRegistration(t *testing.T) {
 
 func TestStore_ReportStatus_NoRegisterSuppression(t *testing.T) {
 	statePath, store := setupReportStatusState(t, nil)
-	tmux := reportStatusMockTmux(map[string]string{
+	tmux := reportStatusFake(map[string]string{
 		"%1": "some-session\tzsh",
 	}, nil)
 
@@ -118,7 +107,7 @@ func TestStore_ReportStatus_NoRegisterStillUpdatesTracked(t *testing.T) {
 	statePath, store := setupReportStatusState(t, map[string]*PaneEntry{
 		"%3": {PaneID: "%3", Session: "proj", Status: StatusWorking},
 	})
-	tmux := reportStatusMockTmux(nil, nil)
+	tmux := reportStatusFake(nil, nil)
 
 	err := store.ReportStatus(tmux, ReportStatusInput{
 		PaneID:     "%3",
@@ -140,7 +129,7 @@ func TestStore_ReportStatus_DismissUnreadInActivePane(t *testing.T) {
 		statePath, store := setupReportStatusState(t, map[string]*PaneEntry{
 			"%1": {PaneID: "%1", Session: "test", Status: StatusWorking},
 		})
-		tmux := reportStatusMockTmux(nil, map[string]bool{"%1": true})
+		tmux := reportStatusFake(nil, map[string]bool{"%1": true})
 
 		err := store.ReportStatus(tmux, ReportStatusInput{
 			PaneID:                "%1",
@@ -161,7 +150,7 @@ func TestStore_ReportStatus_DismissUnreadInActivePane(t *testing.T) {
 		statePath, store := setupReportStatusState(t, map[string]*PaneEntry{
 			"%1": {PaneID: "%1", Session: "test", Status: StatusWorking},
 		})
-		tmux := reportStatusMockTmux(nil, map[string]bool{"%1": true})
+		tmux := reportStatusFake(nil, map[string]bool{"%1": true})
 
 		err := store.ReportStatus(tmux, ReportStatusInput{
 			PaneID:                "%1",
@@ -182,7 +171,7 @@ func TestStore_ReportStatus_DismissUnreadInActivePane(t *testing.T) {
 		statePath, store := setupReportStatusState(t, map[string]*PaneEntry{
 			"%1": {PaneID: "%1", Session: "test", Status: StatusWorking},
 		})
-		tmux := reportStatusMockTmux(nil, map[string]bool{"%1": false})
+		tmux := reportStatusFake(nil, map[string]bool{"%1": false})
 
 		err := store.ReportStatus(tmux, ReportStatusInput{
 			PaneID:                "%1",
@@ -210,7 +199,7 @@ func TestStore_ReportStatus_StatusNoOp(t *testing.T) {
 			UpdatedAt: before,
 		},
 	})
-	tmux := reportStatusMockTmux(nil, nil)
+	tmux := reportStatusFake(nil, nil)
 
 	origData, err := os.ReadFile(statePath)
 	if err != nil {
@@ -244,7 +233,7 @@ func TestStore_ReportStatus_VisitOnClear(t *testing.T) {
 			LastActiveAt: before,
 		},
 	})
-	tmux := reportStatusMockTmux(nil, nil)
+	tmux := reportStatusFake(nil, nil)
 
 	err := store.ReportStatus(tmux, ReportStatusInput{
 		PaneID: "%1",
@@ -274,7 +263,7 @@ func TestStore_ReportStatus_ClearAlreadyClearUpdatesVisit(t *testing.T) {
 			LastActiveAt: before,
 		},
 	})
-	tmux := reportStatusMockTmux(nil, nil)
+	tmux := reportStatusFake(nil, nil)
 
 	err := store.ReportStatus(tmux, ReportStatusInput{
 		PaneID: "%1",
@@ -292,7 +281,7 @@ func TestStore_ReportStatus_ClearAlreadyClearUpdatesVisit(t *testing.T) {
 
 func TestStore_ReportStatus_AppliesLabel(t *testing.T) {
 	statePath, store := setupReportStatusState(t, nil)
-	tmux := reportStatusMockTmux(map[string]string{
+	tmux := reportStatusFake(map[string]string{
 		"%9": "proj-x\tnode",
 	}, nil)
 
@@ -315,7 +304,7 @@ func TestStore_ReportStatus_LegacyAliasViaNormalize(t *testing.T) {
 	statePath, store := setupReportStatusState(t, map[string]*PaneEntry{
 		"%1": {PaneID: "%1", Session: "test", Status: StatusWorking},
 	})
-	tmux := reportStatusMockTmux(nil, nil)
+	tmux := reportStatusFake(nil, nil)
 
 	err := store.ReportStatus(tmux, ReportStatusInput{
 		PaneID: "%1",
@@ -335,7 +324,7 @@ func TestStore_ReportStatus_ReadAliasViaNormalize(t *testing.T) {
 	statePath, store := setupReportStatusState(t, map[string]*PaneEntry{
 		"%5": {PaneID: "%5", Session: "test", Status: StatusWorking},
 	})
-	tmux := reportStatusMockTmux(map[string]string{
+	tmux := reportStatusFake(map[string]string{
 		"%6": "test-session\tzsh",
 	}, nil)
 
@@ -368,11 +357,8 @@ func TestStore_ReportStatus_ReadAliasViaNormalize(t *testing.T) {
 
 func TestStore_ReportStatus_TmuxLookupFailureIsNoOp(t *testing.T) {
 	statePath, store := setupReportStatusState(t, nil)
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			return "", fmt.Errorf("pane not found")
-		},
-	}
+	// %99 is absent from the fake, so PaneInfo errors — auto-register is a no-op.
+	tmux := reportStatusFake(nil, nil)
 
 	err := store.ReportStatus(tmux, ReportStatusInput{
 		PaneID: "%99",
@@ -390,7 +376,7 @@ func TestStore_ReportStatus_TmuxLookupFailureIsNoOp(t *testing.T) {
 
 func TestStore_ReportStatus_MultipleAgentPanesAutoRegister(t *testing.T) {
 	statePath, store := setupReportStatusState(t, nil)
-	tmux := reportStatusMockTmux(map[string]string{
+	tmux := reportStatusFake(map[string]string{
 		"%20": "proj-a\topencode",
 		"%21": "proj-b\tclaude",
 		"%22": "proj-c\tpi",

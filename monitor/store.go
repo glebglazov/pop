@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/debug"
-	"github.com/glebglazov/pop/internal/deps"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 )
 
 // ReportStatusInput carries a pane status report and resolved policy values.
@@ -171,7 +171,7 @@ func (s *Store) upsert(
 // time when clearing; downgrade Unread to Clear when the pane is active and
 // DismissUnreadInActive is true; no-op when the reported status already matches
 // (but still save if visit time was updated).
-func (s *Store) ReportStatus(tmux deps.Tmux, in ReportStatusInput) error {
+func (s *Store) ReportStatus(tmux tmuxmod.Tmux, in ReportStatusInput) error {
 	status := in.Status
 
 	return s.upsert(in.PaneID,
@@ -179,12 +179,13 @@ func (s *Store) ReportStatus(tmux deps.Tmux, in ReportStatusInput) error {
 			if in.NoRegister {
 				return nil, false
 			}
-			session, cmdName, err := TmuxPaneInfo(tmux, in.PaneID)
+			info, err := tmux.PaneInfo(in.PaneID)
 			if err != nil {
 				debug.Error("[set-status] %s: failed to look up pane info, skipping: %v", in.PaneID, err)
 				return nil, false
 			}
-			debug.Log("[set-status] %s: auto-registering in session=%s (cmd=%s) with status=%s", in.PaneID, session, cmdName, status)
+			session := info.Session
+			debug.Log("[set-status] %s: auto-registering in session=%s (cmd=%s) with status=%s", in.PaneID, session, info.Command, status)
 			now := time.Now()
 			entry := &PaneEntry{
 				PaneID:       in.PaneID,
@@ -206,7 +207,7 @@ func (s *Store) ReportStatus(tmux deps.Tmux, in ReportStatusInput) error {
 			}
 
 			effectiveStatus := status
-			if in.DismissUnreadInActive && status == StatusUnread && IsActiveTmuxPane(tmux, in.PaneID) {
+			if in.DismissUnreadInActive && status == StatusUnread && tmux.IsActivePane(in.PaneID) {
 				debug.Log("[set-status] %s: unread on active pane — downgrading to clear", in.PaneID)
 				effectiveStatus = StatusClear
 			}
@@ -232,18 +233,19 @@ func applyLabel(entry *PaneEntry, label string) {
 // SetFollowing applies the following transition rule: auto-register an
 // untracked pane only when following (never when unfollowing); no-op when
 // the following value already matches; update timestamp on change.
-func (s *Store) SetFollowing(tmux deps.Tmux, paneID string, follow bool) error {
+func (s *Store) SetFollowing(tmux tmuxmod.Tmux, paneID string, follow bool) error {
 	var registerErr error
 	err := s.upsert(paneID,
 		func() (*PaneEntry, bool) {
 			if !follow {
 				return nil, false
 			}
-			session, _, err := TmuxPaneInfo(tmux, paneID)
+			info, err := tmux.PaneInfo(paneID)
 			if err != nil {
 				registerErr = fmt.Errorf("look up pane: %w", err)
 				return nil, false
 			}
+			session := info.Session
 			debug.Log("[set-following] %s: auto-registering in session=%s with following=true", paneID, session)
 			now := time.Now()
 			return &PaneEntry{

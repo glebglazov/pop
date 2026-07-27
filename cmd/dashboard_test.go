@@ -11,7 +11,8 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/history"
-	"github.com/glebglazov/pop/internal/deps"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
+	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 	"github.com/glebglazov/pop/monitor"
 	"github.com/glebglazov/pop/ui"
 )
@@ -38,42 +39,23 @@ func TestBuildDashboardPanes_OnlyAgenticPanes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Mock tmux knows each pane's session and foreground command.
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			if len(args) >= 5 && args[0] == "display-message" && args[1] == "-t" {
-				paneID := args[2]
-				format := args[4]
-				paneInfo := map[string]string{
-					"%10": "proj-a\tzsh",      // plain shell
-					"%11": "proj-a\tfish",     // plain shell
-					"%12": "proj-b\tbash",     // plain shell
-					"%13": "proj-b\t-zsh",     // login shell
-					"%20": "proj-c\topencode", // agent (housekeeping clear)
-					"%7":  "proj-d\tclaude",   // agent (claim via working)
-					"%8":  "proj-e\tpi",       // agent (claim via unread)
-				}
-				info, ok := paneInfo[paneID]
-				if !ok {
-					return "", os.ErrNotExist
-				}
-				switch format {
-				case "#{session_name}\t#{pane_current_command}":
-					return info, nil
-				case "#{session_name}":
-					parts := strings.SplitN(info, "\t", 2)
-					return parts[0], nil
-				case "#{pane_active} #{window_active} #{session_attached}":
-					return "0 0 0", nil
-				}
-			}
-			// list-panes for tmuxPaneCommands in dashboard build
-			if len(args) >= 1 && args[0] == "list-panes" {
-				return "", nil
-			}
-			return "", nil
-		},
+	// Stateful tmux fake knows each pane's session and foreground command.
+	// All panes are inactive (no dismiss downgrade).
+	paneInfo := map[string]string{
+		"%10": "proj-a\tzsh",      // plain shell
+		"%11": "proj-a\tfish",     // plain shell
+		"%12": "proj-b\tbash",     // plain shell
+		"%13": "proj-b\t-zsh",     // login shell
+		"%20": "proj-c\topencode", // agent (housekeeping clear)
+		"%7":  "proj-d\tclaude",   // agent (claim via working)
+		"%8":  "proj-e\tpi",       // agent (claim via unread)
 	}
+	infos := map[string]tmuxmod.PaneInfo{}
+	for id, raw := range paneInfo {
+		parts := strings.SplitN(raw, "\t", 2)
+		infos[id] = tmuxmod.PaneInfo{Session: parts[0], Command: parts[1]}
+	}
+	tmux := &tmuxtest.Fake{PaneInfos: infos}
 	cfg := &config.Config{}
 
 	// 1. User navigates through 4 plain-shell panes. The tmux-global

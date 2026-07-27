@@ -77,7 +77,7 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 			debug.Error("dashboard: get current pane ID: %v", err)
 		}
 		if currentPaneID != "" {
-			currentPaneSession, err = tmuxPaneSessionWith(defaultTmux, currentPaneID)
+			currentPaneSession, err = defaultTmuxMod.PaneSession(currentPaneID)
 			if err != nil {
 				if dashboardPick {
 					return fmt.Errorf("cannot determine current tmux session")

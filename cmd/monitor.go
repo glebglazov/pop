@@ -14,6 +14,7 @@ import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/internal/deps"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/monitor"
 	"github.com/spf13/cobra"
 )
@@ -22,15 +23,6 @@ func init() {
 	paneCmd.AddCommand(paneMonitorStartCmd)
 	paneCmd.AddCommand(paneMonitorStopCmd)
 	paneCmd.AddCommand(paneMonitorStatusCmd)
-}
-
-// tmuxPaneSession returns the session name for a given pane ID
-func tmuxPaneSession(paneID string) (string, error) {
-	return tmuxPaneSessionWith(defaultTmux, paneID)
-}
-
-func tmuxPaneSessionWith(tmux deps.Tmux, paneID string) (string, error) {
-	return tmux.Command("display-message", "-t", paneID, "-p", "#{session_name}")
 }
 
 // --- monitor-start ---
@@ -83,7 +75,7 @@ func runPaneMonitorStart(cmd *cobra.Command, args []string) error {
 
 	installTmuxAutoClearHooks()
 
-	handler := buildMonitorHandler(defaultTmux, statePath)
+	handler := buildMonitorHandler(defaultTmuxMod, statePath)
 	err := monitor.RunDaemon(statePath, pidPath, addr, handler)
 	if errors.Is(err, monitor.ErrAddrInUse) {
 		// Handshake above found no pop daemon, yet the bind failed: a non-pop
@@ -101,7 +93,7 @@ func runPaneMonitorStart(cmd *cobra.Command, args []string) error {
 // compatibility with older clients. The "derive-topic" command shares a
 // single per-handler topicDerivationDispatcher so agent-step derivations are
 // single-flight per pane across requests (ADR 0068).
-func buildMonitorHandler(tmux deps.Tmux, statePath string) monitor.RequestHandler {
+func buildMonitorHandler(tmux tmuxmod.Tmux, statePath string) monitor.RequestHandler {
 	topicDispatcher := newTopicDerivationDispatcher()
 	return func(req monitor.Request) monitor.Response {
 		// NB: no per-request debug.Init/Close here. Execute() already opened the
@@ -180,7 +172,7 @@ func handleShutdown() monitor.Response {
 
 // handleSetStatus applies the set-status business logic. Extracted from
 // buildMonitorHandler so each command is independently testable.
-func handleSetStatus(tmux deps.Tmux, statePath string, req monitor.Request) monitor.Response {
+func handleSetStatus(tmux tmuxmod.Tmux, statePath string, req monitor.Request) monitor.Response {
 	cfg, err := config.Load(config.DefaultConfigPath())
 	if err != nil {
 		debug.Error("handler set-status: load config: %v", err)
@@ -217,7 +209,7 @@ func handleSetStatus(tmux deps.Tmux, statePath string, req monitor.Request) moni
 }
 
 // handleSetFollowing toggles a pane's Following flag via the monitor Store.
-func handleSetFollowing(tmux deps.Tmux, statePath string, req monitor.Request) monitor.Response {
+func handleSetFollowing(tmux tmuxmod.Tmux, statePath string, req monitor.Request) monitor.Response {
 	if req.PaneID == "" {
 		return monitor.Response{OK: false, Error: "missing pane_id"}
 	}
@@ -250,43 +242,45 @@ func handleVisit(statePath string, req monitor.Request) monitor.Response {
 
 // installTmuxAutoClearHooks removes any existing pop hooks and installs current ones.
 func installTmuxAutoClearHooks() {
-	installTmuxAutoClearHooksWith(defaultTmux)
+	installTmuxAutoClearHooksWith(defaultTmuxMod)
 }
 
-func installTmuxAutoClearHooksWith(tmux deps.Tmux) {
+func installTmuxAutoClearHooksWith(tmux tmuxmod.Tmux) {
 	uninstallTmuxAutoClearHooksWith(tmux)
 	for event, hookCmd := range tmuxAutoClearHooks {
-		if _, err := tmux.Command("set-hook", "-ga", event, hookCmd); err != nil {
+		if err := tmux.InstallHook(event, hookCmd); err != nil {
 			debug.Error("installTmuxAutoClearHooks: set-hook %s: %v", event, err)
 		}
 	}
 }
 
 // uninstallTmuxAutoClearHooks removes all pop-related tmux hooks,
-// leaving other hooks intact. Parses indexed entries like "event[0] cmd".
+// leaving other hooks intact.
 func uninstallTmuxAutoClearHooks() {
-	uninstallTmuxAutoClearHooksWith(defaultTmux)
+	uninstallTmuxAutoClearHooksWith(defaultTmuxMod)
 }
 
-func uninstallTmuxAutoClearHooksWith(tmux deps.Tmux) {
-	out, err := tmux.Command("show-hooks", "-g")
+func uninstallTmuxAutoClearHooksWith(tmux tmuxmod.Tmux) {
+	hooks, err := tmux.GlobalHooks()
 	if err != nil {
 		debug.Error("uninstallTmuxAutoClearHooks: show-hooks: %v", err)
 	}
-	for _, line := range strings.Split(out, "\n") {
-		if !strings.Contains(line, "pop pane set-status") && !strings.Contains(line, "pop pane visit") && !strings.Contains(line, "pop monitor") {
+	for _, h := range hooks {
+		if !isPopAutoClearHook(h.Command) {
 			continue
 		}
-		// Line format: "event[N] command..."
-		bracketEnd := strings.Index(line, "]")
-		if bracketEnd == -1 {
-			continue
-		}
-		indexed := line[:bracketEnd+1]
-		if _, err := tmux.Command("set-hook", "-gu", indexed); err != nil {
-			debug.Error("uninstallTmuxAutoClearHooks: unset %s: %v", indexed, err)
+		if err := tmux.UninstallHook(h.Index); err != nil {
+			debug.Error("uninstallTmuxAutoClearHooks: unset %s: %v", h.Index, err)
 		}
 	}
+}
+
+// isPopAutoClearHook reports whether a hook command is one pop installed, so
+// uninstall leaves unrelated hooks intact.
+func isPopAutoClearHook(command string) bool {
+	return strings.Contains(command, "pop pane set-status") ||
+		strings.Contains(command, "pop pane visit") ||
+		strings.Contains(command, "pop monitor")
 }
 
 // ensureSystemState runs the startup side-effects shared by the interactive

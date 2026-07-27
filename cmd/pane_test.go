@@ -12,6 +12,7 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 	"github.com/glebglazov/pop/monitor"
 	"github.com/glebglazov/pop/project"
@@ -217,36 +218,20 @@ func TestResolveSessionWith_NoProjectNotInTmux(t *testing.T) {
 	}
 }
 
-// newPaneInfoMockTmux builds a MockTmux that responds to the tmux
-// display-message calls made by auto-registration in runPaneSetStatusWith.
-// paneInfo maps pane ID → "session\tpane_current_command"; unknown panes
-// return an error (matching tmux's behavior for non-existent panes).
-func newPaneInfoMockTmux(paneInfo map[string]string) *deps.MockTmux {
-	return &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			if len(args) >= 5 && args[0] == "display-message" && args[1] == "-t" {
-				paneID := args[2]
-				// Format string argument comes after -p.
-				format := args[4]
-				info, ok := paneInfo[paneID]
-				if !ok {
-					return "", fmt.Errorf("pane not found: %s", paneID)
-				}
-				switch format {
-				case "#{session_name}\t#{pane_current_command}":
-					return info, nil
-				case "#{session_name}":
-					// Caller only wants the session; strip the command.
-					parts := strings.SplitN(info, "\t", 2)
-					return parts[0], nil
-				case "#{pane_active} #{window_active} #{session_attached}":
-					// Inactive by default — no dismiss downgrade.
-					return "0 0 0", nil
-				}
-			}
-			return "", nil
-		},
+// newPaneInfoFake builds a stateful tmux fake that knows each pane's info,
+// as auto-registration in runPaneSetStatusWith needs. paneInfo maps pane ID →
+// "session\tpane_current_command"; unknown panes yield a PaneInfo error
+// (matching tmux's behavior for non-existent panes). Panes are inactive by
+// default (no dismiss downgrade).
+func newPaneInfoFake(paneInfo map[string]string) *tmuxtest.Fake {
+	infos := map[string]tmuxmod.PaneInfo{}
+	for id, raw := range paneInfo {
+		parts := strings.SplitN(raw, "\t", 2)
+		if len(parts) == 2 {
+			infos[id] = tmuxmod.PaneInfo{Session: parts[0], Command: parts[1]}
+		}
 	}
+	return &tmuxtest.Fake{PaneInfos: infos}
 }
 
 func setupStateFile(t *testing.T, paneID string, status monitor.PaneStatus) string {
@@ -456,12 +441,10 @@ func TestRunPaneSetStatusWith_IgnoresConfiguredSource(t *testing.T) {
 	}
 
 	tmuxCalled := false
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			tmuxCalled = true
-			return "", nil
-		},
-	}
+	tmux := &tmuxtest.Fake{PaneInfoFunc: func(paneID string) (tmuxmod.PaneInfo, error) {
+		tmuxCalled = true
+		return tmuxmod.PaneInfo{}, nil
+	}}
 
 	if err := runPaneSetStatusWith(tmux, cfg, "tmux-global", false, "", []string{"%1", "working"}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -491,12 +474,10 @@ func TestRunPaneSetStatusWith_SocketSuccessSkipsDirect(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", dir)
 
 	directWouldCallTmux := false
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			directWouldCallTmux = true
-			return "", fmt.Errorf("direct path should not run")
-		},
-	}
+	tmux := &tmuxtest.Fake{PaneInfoFunc: func(paneID string) (tmuxmod.PaneInfo, error) {
+		directWouldCallTmux = true
+		return tmuxmod.PaneInfo{}, fmt.Errorf("direct path should not run")
+	}}
 
 	if err := runPaneSetStatusWith(tmux, tcpServerEnabledCfg(), "", false, "", []string{"%7", "working"}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -535,7 +516,7 @@ func TestRunPaneSetStatusWith_SocketFailureFallsBackAndStartsDaemon(t *testing.T
 	paneOnSocketSendFailed = func() { daemonStarted <- struct{}{} }
 	t.Cleanup(func() { paneOnSocketSendFailed = oldHook })
 
-	tmux := newPaneInfoMockTmux(map[string]string{"%7": "sess\tcmd"})
+	tmux := newPaneInfoFake(map[string]string{"%7": "sess\tcmd"})
 	if err := runPaneSetStatusWith(tmux, tcpServerEnabledCfg(), "", false, "", []string{"%7", "working"}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

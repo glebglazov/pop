@@ -2,31 +2,27 @@ package monitor
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/internal/tmux"
+	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 )
 
-func setFollowingMockTmux(paneInfo map[string]string) *deps.MockTmux {
-	return &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			if len(args) >= 5 && args[0] == "display-message" && args[1] == "-t" {
-				paneID := args[2]
-				if args[4] == "#{session_name}\t#{pane_current_command}" {
-					info, ok := paneInfo[paneID]
-					if !ok {
-						return "", fmt.Errorf("pane not found: %s", paneID)
-					}
-					return info, nil
-				}
-			}
-			return "", nil
-		},
+// setFollowingFake builds a stateful tmux fake. paneInfo maps pane ID ->
+// "session\tcommand"; an absent pane yields a PaneInfo error.
+func setFollowingFake(paneInfo map[string]string) *tmuxtest.Fake {
+	infos := map[string]tmux.PaneInfo{}
+	for id, raw := range paneInfo {
+		parts := strings.SplitN(raw, "\t", 2)
+		if len(parts) == 2 {
+			infos[id] = tmux.PaneInfo{Session: parts[0], Command: parts[1]}
+		}
 	}
+	return &tmuxtest.Fake{PaneInfos: infos}
 }
 
 func setupSetFollowingState(t *testing.T, panes map[string]*PaneEntry) (string, *Store) {
@@ -58,7 +54,7 @@ func loadSetFollowingState(t *testing.T, path string) *State {
 
 func TestStore_SetFollowing_AutoRegisterOnFollow(t *testing.T) {
 	statePath, store := setupSetFollowingState(t, nil)
-	tmux := setFollowingMockTmux(map[string]string{
+	tmux := setFollowingFake(map[string]string{
 		"%8": "proj-x\tclaude",
 	})
 
@@ -90,14 +86,13 @@ func TestStore_SetFollowing_AutoRegisterOnFollow(t *testing.T) {
 
 func TestStore_SetFollowing_UnfollowOnUntrackedIsNoOp(t *testing.T) {
 	statePath, store := setupSetFollowingState(t, nil)
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			t.Errorf("unexpected tmux call: %v", args)
-			return "", nil
-		},
-	}
+	// Unfollowing an untracked pane must not look the pane up at all.
+	fake := &tmuxtest.Fake{PaneInfoFunc: func(paneID string) (tmux.PaneInfo, error) {
+		t.Errorf("unexpected pane lookup for %s", paneID)
+		return tmux.PaneInfo{}, nil
+	}}
 
-	err := store.SetFollowing(tmux, "%9", false)
+	err := store.SetFollowing(fake, "%9", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -119,7 +114,7 @@ func TestStore_SetFollowing_FollowingNoOp(t *testing.T) {
 			UpdatedAt: before,
 		},
 	})
-	tmux := setFollowingMockTmux(nil)
+	tmux := setFollowingFake(nil)
 
 	origData, err := os.ReadFile(statePath)
 	if err != nil {
@@ -148,7 +143,7 @@ func TestStore_SetFollowing_FollowTrackedPanePreservesStatus(t *testing.T) {
 			Status:  StatusWorking,
 		},
 	})
-	tmux := setFollowingMockTmux(nil)
+	tmux := setFollowingFake(nil)
 
 	err := store.SetFollowing(tmux, "%3", true)
 	if err != nil {
@@ -176,7 +171,7 @@ func TestStore_SetFollowing_UpdatesTimestampOnChange(t *testing.T) {
 			UpdatedAt: before,
 		},
 	})
-	tmux := setFollowingMockTmux(nil)
+	tmux := setFollowingFake(nil)
 
 	err := store.SetFollowing(tmux, "%5", true)
 	if err != nil {
@@ -191,11 +186,8 @@ func TestStore_SetFollowing_UpdatesTimestampOnChange(t *testing.T) {
 
 func TestStore_SetFollowing_TmuxLookupFailureReturnsError(t *testing.T) {
 	_, store := setupSetFollowingState(t, nil)
-	tmux := &deps.MockTmux{
-		CommandFunc: func(args ...string) (string, error) {
-			return "", fmt.Errorf("pane not found")
-		},
-	}
+	// %99 is absent from the fake, so PaneInfo returns an error.
+	tmux := setFollowingFake(nil)
 
 	err := store.SetFollowing(tmux, "%99", true)
 	if err == nil {
