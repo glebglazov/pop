@@ -4574,3 +4574,64 @@ func TestStyledDetailMapTicketLineFrontierVsDim(t *testing.T) {
 		t.Fatalf("claimed line not dimmed: %q", claimedStyled)
 	}
 }
+
+// TestDashboardActionErrorSticky covers the sticky row-verb error (task
+// 04-sticky-dashboard-errors): a refused action's message survives the periodic
+// reload tick, is replaced by a newer error, and is cleared by the next keypress.
+func TestDashboardActionErrorSticky(t *testing.T) {
+	row := TestDashboardRow("proj", "set-1", SetRef{SetID: "set-1", RuntimePath: "/repo/wt", Bound: true})
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m.width, m.height = 120, 40
+
+	// A refused unbind surfaces its full message.
+	const refusal = "runtime checkout is locked for another set"
+	updated, _ := m.Update(dashboardAbandonMsg{err: errors.New(refusal)})
+	got := updated.(QueueDashboard)
+	if got.actionErr == nil || got.actionErr.Error() != refusal {
+		t.Fatalf("action error = %v, want %q", got.actionErr, refusal)
+	}
+	if view := got.View().Content; !strings.Contains(view, refusal) {
+		t.Fatalf("view missing error message; got:\n%s", view)
+	}
+
+	// A background reload tick (its dashboardRowsMsg result, err nil) must not
+	// clear the sticky action error.
+	updated, _ = got.Update(dashboardRowsMsg{snap: DashboardSnapshot{Rows: []DashboardRow{row}}})
+	got = updated.(QueueDashboard)
+	if got.actionErr == nil || got.actionErr.Error() != refusal {
+		t.Fatalf("reload cleared sticky action error: %v", got.actionErr)
+	}
+	if view := got.View().Content; !strings.Contains(view, refusal) {
+		t.Fatalf("view lost error after reload; got:\n%s", view)
+	}
+
+	// A newer action error replaces the message.
+	const newer = "no drain target available for set-1"
+	updated, _ = got.Update(dashboardArchiveMsg{err: errors.New(newer)})
+	got = updated.(QueueDashboard)
+	if got.actionErr == nil || got.actionErr.Error() != newer {
+		t.Fatalf("newer error did not replace: %v", got.actionErr)
+	}
+
+	// The next keypress (a deliberate interaction) clears it.
+	updated, _ = got.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	got = updated.(QueueDashboard)
+	if got.actionErr != nil {
+		t.Fatalf("keypress did not clear action error: %v", got.actionErr)
+	}
+}
+
+// TestDashboardActionErrorLongMessageReadable verifies a long refusal is rendered
+// intact (no column-math truncation into meaninglessness).
+func TestDashboardActionErrorLongMessageReadable(t *testing.T) {
+	row := TestDashboardRow("proj", "set-1", SetRef{SetID: "set-1", RuntimePath: "/repo/wt", Bound: true})
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m.width, m.height = 80, 40
+
+	long := "runtime checkout /some/very/long/path/to/a/worktree is locked for another set and cannot be released without --force"
+	updated, _ := m.Update(dashboardDrainMsg{err: errors.New(long)})
+	got := updated.(QueueDashboard)
+	if view := got.View().Content; !strings.Contains(view, long) {
+		t.Fatalf("long error message truncated in view; got:\n%s", view)
+	}
+}

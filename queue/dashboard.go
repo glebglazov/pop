@@ -658,6 +658,12 @@ type QueueDashboard struct {
 	list      *ui.List[DashboardRow]
 	cols      *dashboardColumns
 	err       error
+	// actionErr holds the error from a row verb (unbind, drain, bind, auto-drain
+	// toggle, …). Unlike err — the refresh error, which each reload re-evaluates —
+	// actionErr is sticky: the periodic reload never touches it, so a refused
+	// action stays readable until the operator's next keypress clears it or a
+	// newer action result replaces it.
+	actionErr error
 	width     int
 	height    int
 	bind      *dashboardBindModal
@@ -800,6 +806,10 @@ func (m QueueDashboard) hasLiveDrain() bool {
 func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Any keypress is a deliberate interaction, so it clears the sticky action
+		// error. A keypress that triggers a fresh verb repopulates actionErr when
+		// that verb's result message arrives.
+		m.actionErr = nil
 		if kpm, ok := msg.(tea.KeyPressMsg); ok {
 			if ui.ToggleHelp(&m.showHelp, kpm) {
 				return m, nil
@@ -972,7 +982,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case dashboardToggleMsg:
 		if msg.err != nil {
-			m.err = msg.err
+			m.actionErr = msg.err
 			return m, m.reload()
 		}
 		for i := range m.snap.Rows {
@@ -985,7 +995,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dashboardDrainMsg:
 		m.drainPick = nil
 		if msg.err != nil {
-			m.err = msg.err
+			m.actionErr = msg.err
 		}
 		return m, m.reload()
 	case dashboardWayfinderMsg:
@@ -993,41 +1003,40 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if errors.Is(msg.err, wayfinder.ErrEmptyFrontier) {
 				m.statusMsg = dashboardWayfinderEmptyFrontierMessage()
 			} else {
-				m.err = msg.err
+				m.actionErr = msg.err
 			}
 			return m, nil
 		}
 		m.statusMsg = fmt.Sprintf("spawned wayfinder session for %s ticket %s", msg.mapID, msg.ticketID)
-		m.err = nil
 		return m, m.reload()
 	case dashboardUnparkMsg:
 		if msg.err != nil {
-			m.err = msg.err
+			m.actionErr = msg.err
 		} else {
 			m.statusMsg = fmt.Sprintf("%s unparked", msg.setID)
 		}
 		return m, m.reload()
 	case dashboardArchiveMsg:
 		if msg.err != nil {
-			m.err = msg.err
+			m.actionErr = msg.err
 		} else {
 			m.statusMsg = fmt.Sprintf("%s archived", msg.setID)
 		}
 		return m, m.reload()
 	case dashboardDrainListMsg:
 		if msg.err != nil {
-			m.err = msg.err
+			m.actionErr = msg.err
 			return m, nil
 		}
 		if len(msg.entries) == 0 {
-			m.err = fmt.Errorf("no drain target available for %s", msg.row.SetID)
+			m.actionErr = fmt.Errorf("no drain target available for %s", msg.row.SetID)
 			return m, nil
 		}
 		m.drainPick = newDashboardDrainModal(msg.row, msg.entries)
 		return m, nil
 	case dashboardPreviewMsg:
 		if msg.err != nil {
-			m.err = msg.err
+			m.actionErr = msg.err
 			return m, nil
 		}
 		// Preview switched the tmux client to the drain's working pane; the
@@ -1036,7 +1045,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case dashboardBindListMsg:
 		if msg.err != nil {
-			m.err = msg.err
+			m.actionErr = msg.err
 			m.bind = nil
 			return m, nil
 		}
@@ -1046,7 +1055,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.err != nil {
-			m.err = msg.err
+			m.actionErr = msg.err
 			m.bind = nil
 			return m, nil
 		}
@@ -1055,7 +1064,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.bind.loading = false
 	case dashboardBindMsg:
 		if msg.err != nil {
-			m.err = msg.err
+			m.actionErr = msg.err
 			m.bind = nil
 			return m, m.reload()
 		}
@@ -1063,7 +1072,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.reload()
 	case dashboardAbandonMsg:
 		if msg.err != nil {
-			m.err = msg.err
+			m.actionErr = msg.err
 			m.abandon = nil
 			return m, m.reload()
 		}
@@ -2278,10 +2287,22 @@ func (m QueueDashboard) View() tea.View {
 // (Warnings), the transient statusMsg (Status), and the footer hint (Hints). The
 // same Frame drives both the body-height budget and the render, so the reserved
 // line count can never drift from what is drawn (ADR-0079).
+// dashboardActionErrorLine formats a sticky row-verb error for display. It keeps
+// the full message (no column-math truncation): the ⚠ warning region and the
+// menu/modal bodies render it un-clipped, so a long refusal wraps in the
+// terminal rather than being cut into meaninglessness — the informative head is
+// always visible.
+func dashboardActionErrorLine(err error) string {
+	return fmt.Sprintf("action failed: %v", err)
+}
+
 func (m QueueDashboard) frameSpec() ui.Frame {
 	var warnings []string
 	if m.err != nil {
 		warnings = append(warnings, fmt.Sprintf("refresh error: %v", m.err))
+	}
+	if m.actionErr != nil {
+		warnings = append(warnings, dashboardActionErrorLine(m.actionErr))
 	}
 	header := ""
 	if len(m.snap.Rows) > 0 {
@@ -2355,6 +2376,9 @@ func (m QueueDashboard) viewWithMenu() string {
 	if m.err != nil {
 		fmt.Fprintf(&body, "refresh error: %v\n", m.err)
 	}
+	if m.actionErr != nil {
+		fmt.Fprintf(&body, "%s\n", dashboardActionErrorLine(m.actionErr))
+	}
 	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.snap.Rows))
 	fmt.Fprintln(&body)
 	renderDashboardTableWithMenu(&body, m.snap.Rows, m.list.Cursor(), m.width, m.height, m.menu)
@@ -2373,6 +2397,9 @@ func (m QueueDashboard) viewWithFilterMenu() string {
 	var body strings.Builder
 	if m.err != nil {
 		fmt.Fprintf(&body, "refresh error: %v\n", m.err)
+	}
+	if m.actionErr != nil {
+		fmt.Fprintf(&body, "%s\n", dashboardActionErrorLine(m.actionErr))
 	}
 	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.snap.Rows))
 	fmt.Fprintln(&body)
@@ -2417,6 +2444,9 @@ func (m QueueDashboard) viewWithModal() string {
 	var body strings.Builder
 	if m.err != nil {
 		fmt.Fprintf(&body, "refresh error: %v\n", m.err)
+	}
+	if m.actionErr != nil {
+		fmt.Fprintf(&body, "%s\n", dashboardActionErrorLine(m.actionErr))
 	}
 	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.snap.Rows))
 	fmt.Fprintln(&body)
