@@ -177,6 +177,12 @@ entirely, never write `docs/agents/triage-labels.md`, and omit the
 upstream Section B and its label vocabulary are kept above only so upstream
 drift stays diffable — treat them as dead text here.
 
+Consequently this skill folder ships **no `triage-labels.md` seed template** —
+its omission is deliberate, not the missing-companion bug that 02 caught. The
+`./triage-labels.md` link in the verbatim region above is dead by design: with
+Section B negated the template is unreachable, so unlike `domain.md` and the
+three `issue-tracker-*.md` seeds it is intentionally not embedded.
+
 ## Never scaffold `.pop/`
 
 Do not create a `.pop/` directory or any file under it. Pop's per-repo files

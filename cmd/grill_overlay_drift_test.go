@@ -6,14 +6,20 @@ import (
 	"testing"
 )
 
-// grillOverlayPinnedFiles maps each marked-overlay source (in skillFiles) to
-// the vendored domain-modeling fixture its above-marker region must stay
-// byte-identical to. Per ADR-0112, drift review reduces to diffing this
-// region against the pinned domain-modeling@391a2701 source; this test makes
-// that diff mechanical instead of archaeological.
-var grillOverlayPinnedFiles = map[string]string{
-	"skills/pop/grill-with-docs/CONTEXT-FORMAT.md": "testdata/domain-modeling-pin/CONTEXT-FORMAT.md",
-	"skills/pop/grill-with-docs/ADR-FORMAT.md":     "testdata/domain-modeling-pin/ADR-FORMAT.md",
+// overlayPinnedFiles maps each marked-overlay source (in skillFiles) to the
+// vendored upstream fixture its above-marker region must stay byte-identical
+// to. Per ADR-0112/ADR-0136, drift review reduces to diffing this region
+// against the pinned upstream source; this test makes that diff mechanical
+// instead of archaeological. It covers both the grill-with-docs companions
+// (pinned to domain-modeling@391a2701) and the setup-matt-pocock-skills seed
+// templates (pinned to mattpocock/skills@ed37663).
+var overlayPinnedFiles = map[string]string{
+	"skills/pop/grill-with-docs/CONTEXT-FORMAT.md":                "testdata/domain-modeling-pin/CONTEXT-FORMAT.md",
+	"skills/pop/grill-with-docs/ADR-FORMAT.md":                    "testdata/domain-modeling-pin/ADR-FORMAT.md",
+	"skills/pop/setup-matt-pocock-skills/domain.md":               "testdata/setup-skill-pin/domain.md",
+	"skills/pop/setup-matt-pocock-skills/issue-tracker-github.md": "testdata/setup-skill-pin/issue-tracker-github.md",
+	"skills/pop/setup-matt-pocock-skills/issue-tracker-gitlab.md": "testdata/setup-skill-pin/issue-tracker-gitlab.md",
+	"skills/pop/setup-matt-pocock-skills/issue-tracker-local.md":  "testdata/setup-skill-pin/issue-tracker-local.md",
 }
 
 // aboveMarkerRegion strips the provenance header comment and returns the
@@ -46,13 +52,13 @@ func aboveMarkerRegion(t *testing.T, src string) string {
 	return src[start:lineStart]
 }
 
-// TestGrillOverlayBaseMatchesPin operationalizes ADR-0112: it extracts the
+// TestOverlayBaseMatchesPin operationalizes ADR-0112: it extracts the
 // above-"POP OVERLAY"-marker region of each overlaid skill doc and asserts it
-// is byte-identical to the vendored domain-modeling base at the pinned ref
-// recorded in the file's provenance header. A pin bump or an accidental edit
-// to the base region fails this test instead of requiring manual diffing.
-func TestGrillOverlayBaseMatchesPin(t *testing.T) {
-	for srcPath, fixturePath := range grillOverlayPinnedFiles {
+// is byte-identical to the vendored upstream base at the pinned ref recorded
+// in the file's provenance header. A pin bump or an accidental edit to the
+// base region fails this test instead of requiring manual diffing.
+func TestOverlayBaseMatchesPin(t *testing.T) {
+	for srcPath, fixturePath := range overlayPinnedFiles {
 		t.Run(srcPath, func(t *testing.T) {
 			src, err := skillFiles.ReadFile(srcPath)
 			if err != nil {
@@ -65,7 +71,7 @@ func TestGrillOverlayBaseMatchesPin(t *testing.T) {
 
 			got := aboveMarkerRegion(t, string(src))
 			if got != string(want) {
-				t.Fatalf("%s above-marker region drifted from pinned domain-modeling base %s:\n got: %q\nwant: %q", srcPath, fixturePath, got, string(want))
+				t.Fatalf("%s above-marker region drifted from pinned upstream base %s:\n got: %q\nwant: %q", srcPath, fixturePath, got, string(want))
 			}
 		})
 	}

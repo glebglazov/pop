@@ -87,8 +87,9 @@ func TestInstallTaskSkillsAllAgents(t *testing.T) {
 			// grill-with-docs and prototype companions ride alongside their bodies
 			// in the render tree so their relative references resolve.
 			for skill, companions := range map[string][]string{
-				"pop-grill-with-docs": {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
-				"pop-prototype":       {"LOGIC.md", "UI.md"},
+				"pop-grill-with-docs":          {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
+				"pop-prototype":                {"LOGIC.md", "UI.md"},
+				"pop-setup-matt-pocock-skills": {"domain.md", "issue-tracker-github.md", "issue-tracker-gitlab.md", "issue-tracker-local.md"},
 			} {
 				for _, c := range companions {
 					p := filepath.Join(a.renderDir, skill, c)

@@ -16,7 +16,7 @@ var taskSkillDirs = map[string][]string{
 	"pop-wayfinder":                {},
 	"pop-prototype":                {"LOGIC.md", "UI.md"},
 	"pop-research":                 {},
-	"pop-setup-matt-pocock-skills": {},
+	"pop-setup-matt-pocock-skills": {"domain.md", "issue-tracker-github.md", "issue-tracker-gitlab.md", "issue-tracker-local.md"},
 }
 
 // TestRenderTaskSkillsDirAgents pins the task-skills rendered tree for
