@@ -30,3 +30,16 @@ A cold `make test` takes ~260s of wall time, dominated by `tasks` (~200-260s), `
 - `queue/dashboard_test.go` keeps only TUI-specific assertions; derivation assertions live solely in `work/` per ADR-0143.
 - The intra-`tasks` verify-cache triple coverage (verify/drain-verify/invalidate files) is noted but out of scope for the deletion pass.
 - No glossary changes: test-suite layering is architecture, not domain language.
+
+## Addendum: measured result (slices 01-06 landed)
+
+Cold `-count=1` timings, measured isolated per package (`go test -count=1 ./<pkg>/...`, 12-core machine) to match how each slice reported its own win, plus one cold `go test -count=1 ./...` for the real `make test` total:
+
+| Package | Baseline (ADR context) | After slices 01-06 | Note |
+|---|---|---|---|
+| `tasks` (+binding/completion/implement) | ~200-260s | 93.7s / 15.6s / 0.6s / 28.2s | matches slice 04's final 91.6s within noise |
+| `cmd` | ~60-90s | 52.1s | matches slice 05's final 52.08s |
+| `queue` | ~30-45s | 29.0s | matches slice 06's final 29.6s |
+| **cold `make test` total** (`go test -count=1 ./...`) | ~260s | **103.2s** | wall time, packages run concurrently; `tasks` is still the critical path |
+
+Result: cold total dropped ~260s → ~103s, a ~60% cut, in line with the ADR's "~260s → roughly 50-80s" projection but landing above the top of that range — `tasks` alone is still 93.7s isolated (99.6s when measured inside the full concurrent `./...` run, where CPU contention across the 12 cores adds ~5-10% to every package's elapsed time versus running it alone). The remaining gap to the ADR's stated 50-80s band, and further to the <15s parallelism target, is exactly the deferred `t.Parallel()` work: today `tasks` runs its ~1,500+ tests serially inside one process, so package-level concurrency alone (already exploited by `go test ./...`) can't shrink its own wall time further. No package regressed against its pre-slice-01 baseline.
