@@ -5,6 +5,7 @@ import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/queue"
 	"github.com/glebglazov/pop/routine"
+	"github.com/glebglazov/pop/work"
 )
 
 // View selects which dashboard the shared shell shows.
@@ -18,11 +19,11 @@ const (
 // Shell is the shared TUI hosting the Queue and Routine dashboards as sibling
 // views toggled with v.
 type Shell struct {
-	active View
-	queue  queue.QueueDashboard
+	active  View
+	queue   queue.QueueDashboard
 	routine routine.RoutineDashboard
-	width  int
-	height int
+	width   int
+	height  int
 }
 
 // RunFromQueue opens the shell on the Work dashboard. It returns the bound
@@ -77,7 +78,7 @@ func newShell(start View, qd *queue.Deps, cfg *config.Config, rd *routine.Deps) 
 			return Shell{}, err
 		}
 	}
-	qSnap, err := queue.BuildDashboard(qd, cfg)
+	qSnap, err := work.BuildSnapshot(qd.WorkDeps(), cfg)
 	if err != nil {
 		return Shell{}, err
 	}

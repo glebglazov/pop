@@ -15,9 +15,9 @@ import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
-	"github.com/glebglazov/pop/store"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/wayfinder"
+	"github.com/glebglazov/pop/work"
 )
 
 func mkdirDrainStoreDir(t *testing.T, td *tasks.Deps) {
@@ -86,212 +86,22 @@ func dashboardTestDeps(t *testing.T, rows []tasks.Row, locks map[string]*tasks.R
 	}
 }
 
-// staticForScan builds the dashboardRepoStatic that the (removed) git-forking
-// resolveRepoStatic used to produce for a synthetic single-scan repo group. The
-// static side is now derived fork-free from markers (ADR-0060), so these tests
-// express the integration target (rep) and its branch directly rather than
-// mocking `git worktree list` / `git branch --show-current`. A bare repo has no
-// integration target: rep is nil.
-func staticForScan(scan projectScan, repBranch string, bare bool) dashboardRepoStatic {
-	var rep *projectScan
-	if !bare {
-		s := scan
-		rep = &s
-	}
-	storageDir := ""
-	if scan.DefinitionPath != "" {
-		storageDir = filepath.Dir(scan.DefinitionPath)
-	}
-	return dashboardRepoStatic{
-		defPath:       scan.DefinitionPath,
-		statePath:     tasks.StatePathFor(scan.DefinitionPath),
-		storageDir:    storageDir,
-		repoKey:       scan.RepoKey,
-		repoCommonDir: scan.RepoCommonDir,
-		projectName:   scan.Name,
-		rep:           rep,
-		repBranch:     repBranch,
-		bare:          bare,
-	}
-}
-
-// TestDashboardRowsVerifyFailedStatus confirms the dashboard applies the same
-// SHA-gated Verify overlay as `pop tasks status`, not manifest status alone.
-func TestDashboardRowsVerifyFailedStatus(t *testing.T) {
-	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
-	doneManifest := &tasks.Manifest{
-		Valid: true,
-		Tasks: []tasks.Task{{ID: "01-a", File: "01-a.md", Type: "AFK", Status: "done"}},
-	}
-	rows := []tasks.Row{{ID: "demo", Status: tasks.StatusDone}}
-	td := queueDataDeps(t)
-	d := dashboardTestDeps(t, rows, nil)
-	d.Tasks = td
-	d.Refresh = func(string) (*tasks.RefreshResult, error) {
-		return &tasks.RefreshResult{
-			Rows:      rows,
-			Manifests: map[string]*tasks.Manifest{"demo": doneManifest},
-		}, nil
-	}
-	d.Tasks.Git = &deps.MockGit{CommandInDirFunc: func(dir string, args ...string) (string, error) {
-		switch {
-		case len(args) >= 2 && args[0] == "rev-parse" && args[1] == "--git-common-dir":
-			return "/repo/.git", nil
-		case len(args) >= 2 && args[0] == "rev-parse" && args[1] == "HEAD":
-			return "shaCUR", nil
-		}
-		return "", nil
-	}}
-	mkdirDrainStoreDir(t, td)
-	s, err := store.Open(tasks.DrainStorePathWith(td), func(int, string) bool { return true })
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
-	}
-	if err := s.PutVerifyVerdict(store.VerifyVerdict{
-		Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaCUR", Verdict: "NEEDS-HUMAN", Findings: "criterion drift",
-	}); err != nil {
-		t.Fatalf("PutVerifyVerdict: %v", err)
-	}
-	_ = s.Close()
-
-	scan := projectScan{
-		Name:           "pop",
-		ProjectPath:    "/repo/main",
-		DefinitionPath: "/def",
-		RepoKey:        "repo-key",
-		RepoCommonDir:  "/repo/.git",
-	}
-	got, err := dashboardRowsForStatic(d, enabled, staticForScan(scan, "main", false))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("rows = %+v, want one", got)
-	}
-	if got[0].RawStatus != tasks.StatusVerifyFailed {
-		t.Fatalf("RawStatus = %q, want VERIFY-FAILED", got[0].RawStatus)
-	}
-	if dashboardStatusCell(got[0]) != "VERIFY-FAILED" {
-		t.Fatalf("Status = %q, want VERIFY-FAILED", dashboardStatusCell(got[0]))
-	}
-}
-
-func TestDashboardShowRuleFiltering(t *testing.T) {
-	rows := []tasks.Row{
-		{ID: "ready", Status: tasks.StatusReady, AutoDrain: true},
-		{ID: "failed", Status: tasks.StatusFailed},
-		{ID: "blocked", Status: tasks.StatusBlocked},
-		{ID: "deferred", Status: tasks.StatusDeferred},
-		{ID: "missing", Status: tasks.StatusMissing},
-		{ID: "malformed", Status: tasks.StatusMalformed},
-		{ID: "done-integrating", Status: tasks.StatusDone},
-		{ID: "done-concluded", Status: tasks.StatusDone},
-	}
-	d := dashboardTestDeps(t, rows, nil)
-	dataHome := t.TempDir()
-	real := deps.NewRealFileSystem()
-	origFS := d.Tasks.FS.(*deps.MockFileSystem)
-	d.Tasks.FS = &deps.MockFileSystem{
-		GetenvFunc: func(key string) string {
-			if key == "XDG_DATA_HOME" {
-				return dataHome
-			}
-			return origFS.GetenvFunc(key)
-		},
-		EvalSymlinksFunc: origFS.EvalSymlinksFunc,
-		ReadFileFunc:     real.ReadFile,
-		WriteFileFunc:    real.WriteFile,
-		MkdirAllFunc:     real.MkdirAll,
-		RenameFunc:       real.Rename,
-		StatFunc:         origFS.StatFunc,
-	}
-	// Done inclusion (ADR-0121): DONE sets are hidden uniformly by default, even
-	// one that still holds a managed (pop-provisioned) Worktree binding — the old
-	// teardown-reminder carve-out is retired. done-integrating carries a managed
-	// binding, done-concluded none; both stay hidden unless Done inclusion is on.
-	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
-		setScopedKey("repo-key", "done-integrating"): {RuntimePath: "/repo/done", Branch: "done-branch", Provisioned: true},
-	})
-	scan := projectScan{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: "/def", RepoKey: "repo-key"}
-
-	got, err := dashboardRowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var ids []string
-	for _, row := range got {
-		ids = append(ids, row.SetID)
-	}
-	want := []string{"ready", "failed", "blocked", "deferred", "missing", "malformed"}
-	if !reflect.DeepEqual(ids, want) {
-		t.Fatalf("default ids = %v, want %v (both DONE sets hidden)", ids, want)
-	}
-
-	// With Done inclusion on, both DONE sets — including the managed-bound one —
-	// are revealed, and each still renders as DONE.
-	d.IncludeDone = true
-	got, err = dashboardRowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false))
-	if err != nil {
-		t.Fatal(err)
-	}
-	ids = nil
-	byID := map[string]DashboardRow{}
-	for _, row := range got {
-		ids = append(ids, row.SetID)
-		byID[row.SetID] = row
-	}
-	wantInclude := []string{"ready", "failed", "blocked", "deferred", "missing", "malformed", "done-integrating", "done-concluded"}
-	if !reflect.DeepEqual(ids, wantInclude) {
-		t.Fatalf("include-done ids = %v, want %v", ids, wantInclude)
-	}
-	for _, id := range []string{"done-integrating", "done-concluded"} {
-		if got := byID[id]; !strings.HasPrefix(dashboardStatusCell(got), "DONE") {
-			t.Fatalf("%s row = %+v, want DONE", id, got)
-		}
-	}
-	if !byID["done-integrating"].DoneStillManagedBound {
-		t.Fatalf("done-integrating should record DoneStillManagedBound")
-	}
-}
-
 // TestRenderStatusMirrorsDashboardRows proves `pop queue status` renders the
-// same rows in the same order as the Work dashboard (ADR-0121): both key on one
-// row builder (dashboardRowsForStatic) and one comparator (sortDashboardRows),
-// so the static status table's TASK SET order equals the sorted dashboard rows'
-// order, under the Summary headline and without any retired inventory section.
+// same rows in the same order as the Work dashboard (ADR-0121): both consume the
+// one comparator (work.SortRows / sortDashboardRows) over the one row set, so the
+// static status table's TASK SET order equals the sorted dashboard rows' order,
+// under the Summary headline and without any retired inventory section. The row
+// derivation itself lives in work's tests now (ADR-0143); here the rows are the
+// build's output, fed to the same sort and the status render.
 func TestRenderStatusMirrorsDashboardRows(t *testing.T) {
-	rows := []tasks.Row{
-		{ID: "2026-01-01-rdy", Status: tasks.StatusReady},
-		{ID: "2026-01-02-blk", Status: tasks.StatusBlocked},
-		{ID: "2026-01-03-aa", Status: tasks.StatusAwaitingApproval},
+	td := queueDataDeps(t)
+	got := []DashboardRow{
+		{Project: "pop", SetRef: SetRef{SetID: "2026-01-01-rdy", RawStatus: tasks.StatusReady}, DestKind: dashboardDestNeedsBind},
+		{Project: "pop", SetRef: SetRef{SetID: "2026-01-02-blk", RawStatus: tasks.StatusBlocked}, DestKind: dashboardDestNeedsBind},
+		{Project: "pop", SetRef: SetRef{SetID: "2026-01-03-aa", RawStatus: tasks.StatusAwaitingApproval}, DestKind: dashboardDestNeedsBind},
 	}
-	d := dashboardTestDeps(t, rows, nil)
-	dataHome := t.TempDir()
-	real := deps.NewRealFileSystem()
-	origFS := d.Tasks.FS.(*deps.MockFileSystem)
-	d.Tasks.FS = &deps.MockFileSystem{
-		GetenvFunc: func(key string) string {
-			if key == "XDG_DATA_HOME" {
-				return dataHome
-			}
-			return ""
-		},
-		EvalSymlinksFunc: origFS.EvalSymlinksFunc,
-		ReadFileFunc:     real.ReadFile,
-		WriteFileFunc:    real.WriteFile,
-		MkdirAllFunc:     real.MkdirAll,
-		RenameFunc:       real.Rename,
-		StatFunc:         origFS.StatFunc,
-	}
-	scan := projectScan{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: "/def", RepoKey: "repo-key"}
-
-	// The shared row builder produces one repo group's rows; the shared comparator
-	// orders the full set exactly as BuildDashboard does. The status table must
-	// render these same rows in this same order.
-	got, err := dashboardRowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false))
-	if err != nil {
-		t.Fatal(err)
-	}
+	// The shared comparator orders the full set exactly as the build does. The
+	// status table must render these same rows in this same order.
 	sortDashboardRows(got)
 	wantOrder := make([]string, len(got))
 	for i, r := range got {
@@ -305,7 +115,7 @@ func TestRenderStatusMirrorsDashboardRows(t *testing.T) {
 	}
 
 	var out strings.Builder
-	RenderStatus(&out, StatusSnapshot{Tasks: d.Tasks}, got)
+	RenderStatus(&out, StatusSnapshot{Tasks: td}, got)
 	text := out.String()
 
 	if !strings.Contains(text, "Summary:") {
@@ -375,195 +185,6 @@ func TestRenderStatusTableColumnsAndIndicator(t *testing.T) {
 	}
 	if strings.Contains(text, "\x1b[") {
 		t.Fatalf("status table must be plain text (no ANSI):\n%q", text)
-	}
-}
-
-func TestDashboardColumnDerivation(t *testing.T) {
-	rows := []tasks.Row{
-		{ID: "done", Status: tasks.StatusDone},
-		{ID: "ready", Status: tasks.StatusReady, AutoDrain: true},
-		{ID: "bound", Status: tasks.StatusBlocked},
-	}
-	d := dashboardTestDeps(t, rows, nil)
-	dataHome := t.TempDir()
-	real := deps.NewRealFileSystem()
-	origFS := d.Tasks.FS.(*deps.MockFileSystem)
-	d.Tasks.FS = &deps.MockFileSystem{
-		GetenvFunc: func(key string) string {
-			if key == "XDG_DATA_HOME" {
-				return dataHome
-			}
-			return ""
-		},
-		EvalSymlinksFunc: origFS.EvalSymlinksFunc,
-		ReadFileFunc: func(path string) ([]byte, error) {
-			if origFS.ReadFileFunc != nil {
-				if data, err := origFS.ReadFileFunc(path); err == nil || !errors.Is(err, os.ErrNotExist) {
-					return data, err
-				}
-			}
-			return real.ReadFile(path)
-		},
-		WriteFileFunc: real.WriteFile,
-		MkdirAllFunc:  real.MkdirAll,
-		RenameFunc:    real.Rename,
-		StatFunc:      origFS.StatFunc,
-	}
-	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
-		setScopedKey("repo-key", "done"):  {RuntimePath: "/repo/done", Branch: "done-branch", Provisioned: true},
-		setScopedKey("repo-key", "bound"): {RuntimePath: "/repo/bound", Branch: "bound-branch"},
-	})
-	scan := projectScan{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: "/def", RepoKey: "repo-key"}
-
-	// Reveal the DONE row so its column derivation stays under test (ADR-0121
-	// hides DONE by default).
-	d.IncludeDone = true
-	got, err := dashboardRowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false))
-	if err != nil {
-		t.Fatal(err)
-	}
-	byID := map[string]DashboardRow{}
-	for _, row := range got {
-		byID[row.SetID] = row
-	}
-	if !strings.HasPrefix(dashboardStatusCell(byID["done"]), "DONE") || byID["done"].Worktree != "done-branch" || byID["done"].DestKind != dashboardDestDoneManagedBound {
-		t.Fatalf("done row = %+v", byID["done"])
-	}
-	if !strings.HasPrefix(dashboardStatusCell(byID["ready"]), "READY") || byID["ready"].Worktree != dashboardDestLabelNeedsBind || byID["ready"].DestKind != dashboardDestNeedsBind {
-		t.Fatalf("ready row = %+v", byID["ready"])
-	}
-	if byID["bound"].Worktree != "bound-branch" || byID["bound"].DestKind != dashboardDestBound {
-		t.Fatalf("bound row = %+v", byID["bound"])
-	}
-}
-
-func TestDashboardNoBaseWorktree(t *testing.T) {
-	d := dashboardTestDeps(t, []tasks.Row{{ID: "missing", Status: tasks.StatusMissing}}, nil)
-	scan := projectScan{Name: "bare", ProjectPath: "/repo/bare.git", RuntimePath: "/repo/bare.git", DefinitionPath: "/def", RepoKey: "bare-key"}
-
-	got, err := dashboardRowsForStatic(d, &config.Config{}, staticForScan(scan, "", true))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 1 || got[0].Worktree != dashboardDestLabelNeedsBind || got[0].DestKind != dashboardDestNeedsBind {
-		t.Fatalf("rows = %+v, want needs bind", got)
-	}
-}
-
-func TestDashboardPickedUpIndicator(t *testing.T) {
-	d := dashboardTestDeps(t, []tasks.Row{
-		{ID: "ready", Status: tasks.StatusReady, AutoDrain: true},
-		{ID: "other", Status: tasks.StatusReady, AutoDrain: true},
-	}, nil)
-	// The drain column is served from the per-build snapshot's live-drain map
-	// (one RunningDrains read), so the live drain is injected through the
-	// LiveDrains seam rather than a per-row runtime-lock open.
-	d.LiveDrains = func() ([]tasks.RunningDrain, error) {
-		return []tasks.RunningDrain{
-			{RuntimePath: "/repo/bound", SetID: "ready", PID: 123},
-		}, nil
-	}
-	dataHome := t.TempDir()
-	real := deps.NewRealFileSystem()
-	origFS := d.Tasks.FS.(*deps.MockFileSystem)
-	d.Tasks.FS = &deps.MockFileSystem{
-		GetenvFunc: func(key string) string {
-			if key == "XDG_DATA_HOME" {
-				return dataHome
-			}
-			return ""
-		},
-		EvalSymlinksFunc: origFS.EvalSymlinksFunc,
-		ReadFileFunc:     real.ReadFile,
-		WriteFileFunc:    real.WriteFile,
-		MkdirAllFunc:     real.MkdirAll,
-		RenameFunc:       real.Rename,
-		StatFunc:         origFS.StatFunc,
-	}
-	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
-		setScopedKey("repo-key", "ready"): {RuntimePath: "/repo/bound", Branch: "ready-branch"},
-	})
-	scan := projectScan{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: "/def", RepoKey: "repo-key"}
-
-	got, err := dashboardRowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false))
-	if err != nil {
-		t.Fatal(err)
-	}
-	byID := map[string]DashboardRow{}
-	for _, row := range got {
-		byID[row.SetID] = row
-	}
-	if !byID["ready"].LiveDrain {
-		t.Fatalf("ready LiveDrain = false, want true (held by a live drain)")
-	}
-	if byID["other"].LiveDrain {
-		t.Fatalf("other LiveDrain = true, want false")
-	}
-}
-
-// TestDashboardOrphanedIndicator covers the three orphaned-detection cases: a
-// set whose bound checkout is missing on disk is orphaned; a set whose bound
-// checkout still stats present is not; and a set with no binding can never be
-// orphaned. Detection is a filesystem stat only — the mocked Git would error on
-// any command, so this also asserts the build adds no git subprocess.
-func TestDashboardOrphanedIndicator(t *testing.T) {
-	rows := []tasks.Row{
-		{ID: "present", Status: tasks.StatusBlocked},
-		{ID: "missing", Status: tasks.StatusBlocked},
-		{ID: "unbound", Status: tasks.StatusBlocked},
-	}
-	d := dashboardTestDeps(t, rows, nil)
-	dataHome := t.TempDir()
-	real := deps.NewRealFileSystem()
-	origFS := d.Tasks.FS.(*deps.MockFileSystem)
-	const presentPath = "/repo/present"
-	d.Tasks.FS = &deps.MockFileSystem{
-		GetenvFunc: func(key string) string {
-			if key == "XDG_DATA_HOME" {
-				return dataHome
-			}
-			return ""
-		},
-		EvalSymlinksFunc: origFS.EvalSymlinksFunc,
-		ReadFileFunc:     real.ReadFile,
-		WriteFileFunc:    real.WriteFile,
-		MkdirAllFunc:     real.MkdirAll,
-		RenameFunc:       real.Rename,
-		StatFunc: func(path string) (os.FileInfo, error) {
-			if path == presentPath {
-				return deps.MockFileInfo{NameVal: "present", IsDirVal: true}, nil
-			}
-			return nil, os.ErrNotExist
-		},
-	}
-	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
-		setScopedKey("repo-key", "present"): {RuntimePath: presentPath, Branch: "present-branch"},
-		setScopedKey("repo-key", "missing"): {RuntimePath: "/repo/gone", Branch: "missing-branch"},
-	})
-	scan := projectScan{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: "/def", RepoKey: "repo-key"}
-
-	got, err := dashboardRowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false))
-	if err != nil {
-		t.Fatal(err)
-	}
-	byID := map[string]DashboardRow{}
-	for _, row := range got {
-		byID[row.SetID] = row
-	}
-	if !byID["missing"].Orphaned {
-		t.Fatalf("missing set should be orphaned: %+v", byID["missing"])
-	}
-	if byID["present"].Orphaned {
-		t.Fatalf("present set should not be orphaned: %+v", byID["present"])
-	}
-	if byID["unbound"].Orphaned {
-		t.Fatalf("unbound set should not be orphaned: %+v", byID["unbound"])
-	}
-	// The orphaned set must render its status suffix; the present/unbound sets must not.
-	var rendered strings.Builder
-	renderDashboardTable(&rendered, []DashboardRow{byID["missing"]}, 0, 120, 20)
-	if !strings.Contains(rendered.String(), "· orphaned") {
-		t.Fatalf("orphaned suffix missing from row render:\n%s", rendered.String())
 	}
 }
 
@@ -2289,9 +1910,9 @@ func TestDashboardShowsUnsatisfiableWorktreeDirective(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	snap, err := BuildDashboard(d, cfg)
+	snap, err := work.BuildSnapshot(d.WorkDeps(), cfg)
 	if err != nil {
-		t.Fatalf("BuildDashboard: %v", err)
+		t.Fatalf("BuildSnapshot: %v", err)
 	}
 	var row *DashboardRow
 	for i := range snap.Rows {
@@ -2362,9 +1983,9 @@ func TestDashboardBindPickerListsAndAdoptsExistingWorktree(t *testing.T) {
 	if binding.RuntimePath != wt2 || binding.Provisioned {
 		t.Fatalf("binding = %+v, want adopted %s", binding, wt2)
 	}
-	snap, err := BuildDashboard(d, cfg)
+	snap, err := work.BuildSnapshot(d.WorkDeps(), cfg)
 	if err != nil {
-		t.Fatalf("BuildDashboard: %v", err)
+		t.Fatalf("BuildSnapshot: %v", err)
 	}
 	if len(snap.Rows) == 0 || snap.Rows[0].Worktree != "existing-two" {
 		t.Fatalf("dashboard rows = %+v, want worktree column updated", snap.Rows)
@@ -2418,7 +2039,7 @@ func TestDashboardBuildForksNoStaticGit(t *testing.T) {
 	d.Tasks.Git = guard
 	d.Project.Git = guard
 
-	snap, err := BuildDashboard(d, cfg)
+	snap, err := work.BuildSnapshot(d.WorkDeps(), cfg)
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -2427,357 +2048,6 @@ func TestDashboardBuildForksNoStaticGit(t *testing.T) {
 	}
 	if strings.TrimSpace(snap.Rows[0].Worktree) == "" {
 		t.Fatalf("branch/worktree column empty; HEAD-file branch resolution failed: %+v", snap.Rows[0])
-	}
-}
-
-func dashboardBoolPtr(b bool) *bool { return &b }
-
-// TestDashboardIntegrationTargetDerivedForkFree covers ADR-0060's integration
-// target rules without forking git (a guard git fails the test on any static
-// command): a non-bare repo's target is the main worktree (parent of the common
-// dir) and needs no config; a bare repo's target is its config trunk; and a bare
-// repo without a declared trunk surfaces a config-class error instead of forking
-// or crashing.
-func TestDashboardIntegrationTargetDerivedForkFree(t *testing.T) {
-	dataHome := t.TempDir()
-	mkDeps := func() *Deps {
-		fs := &deps.MockFileSystem{
-			GetenvFunc: func(k string) string {
-				if k == "XDG_DATA_HOME" {
-					return dataHome
-				}
-				return ""
-			},
-			EvalSymlinksFunc: func(p string) (string, error) { return p, nil },
-			StatFunc:         func(string) (os.FileInfo, error) { return nil, os.ErrNotExist },
-			ReadFileFunc:     func(string) ([]byte, error) { return nil, os.ErrNotExist },
-			UserHomeDirFunc:  func() (string, error) { return dataHome, nil },
-		}
-		guard := &staticGitGuard{t: t, inner: &deps.MockGit{
-			CommandInDirFunc: func(_ string, args ...string) (string, error) {
-				return "", errors.New("unexpected git: " + strings.Join(args, " "))
-			},
-		}}
-		return &Deps{Tasks: &tasks.Deps{FS: fs, Git: guard}, Project: &project.Deps{FS: fs, Git: guard}}
-	}
-
-	t.Run("non-bare resolves target with no config", func(t *testing.T) {
-		d := mkDeps()
-		scans := []projectScan{{Name: "repo", ProjectPath: "/repo", RuntimePath: "/repo"}}
-		st, err := dashboardRepoStaticFromMarker(d, &config.Config{}, "/repo/.git", scans)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if st.bare || st.configErr != "" || st.rep == nil || st.rep.ProjectPath != "/repo" {
-			t.Fatalf("non-bare static = %+v rep = %+v", st, st.rep)
-		}
-	})
-
-	t.Run("bare uses config trunk", func(t *testing.T) {
-		d := mkDeps()
-		cfg := &config.Config{Repo: map[string]config.RepoOverrideConfig{
-			"/repo/main": {Trunk: dashboardBoolPtr(true)},
-		}}
-		scans := []projectScan{
-			{Name: "repo/feat", ProjectPath: "/repo/feat", RuntimePath: "/repo/feat"},
-			{Name: "repo/main", ProjectPath: "/repo/main", RuntimePath: "/repo/main"},
-		}
-		st, err := dashboardRepoStaticFromMarker(d, cfg, "/repo/.bare", scans)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if st.configErr != "" || st.rep == nil || st.rep.ProjectPath != "/repo/main" {
-			t.Fatalf("bare+trunk static = %+v rep = %+v", st, st.rep)
-		}
-	})
-
-	t.Run("bare without trunk surfaces config error", func(t *testing.T) {
-		d := mkDeps()
-		scans := []projectScan{{Name: "repo/feat", ProjectPath: "/repo/feat", RuntimePath: "/repo/feat"}}
-		st, err := dashboardRepoStaticFromMarker(d, &config.Config{}, "/repo/.bare", scans)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if st.rep != nil || !st.bare || st.configErr == "" {
-			t.Fatalf("bare-no-trunk static = %+v rep = %+v", st, st.rep)
-		}
-	})
-}
-
-// TestDashboardBareWithoutTrunkRendersConfigError covers the rendered half of
-// ADR-0060's bare-without-trunk rule: an unbound set in such a repo shows a
-// config-class error as a STATUS suffix and needs bind for its worktree,
-// derived fork-free from the static (no git probe).
-func TestDashboardBareWithoutTrunkRendersConfigError(t *testing.T) {
-	d := dashboardTestDeps(t, []tasks.Row{{ID: "ready", Status: tasks.StatusReady, AutoDrain: true}}, nil)
-	d.LiveDrains = func() ([]tasks.RunningDrain, error) { return nil, nil }
-	st := dashboardRepoStatic{
-		defPath:     "/def",
-		statePath:   tasks.StatePathFor("/def"),
-		repoKey:     "bare-key",
-		projectName: "bare",
-		rep:         nil,
-		bare:        true,
-		configErr:   repoScanReason,
-	}
-	got, err := dashboardRowsForStatic(d, &config.Config{}, st)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("rows = %+v, want one", got)
-	}
-	if got[0].LiveDrain {
-		t.Fatalf("row LiveDrain = true, want false (config error row is not a live drain)")
-	}
-	if got[0].Worktree != dashboardDestLabelNeedsBind {
-		t.Fatalf("row = %+v, want worktree %q", got[0], dashboardDestLabelNeedsBind)
-	}
-	wantSuffix := "· config error: " + repoScanReason
-	if status := dashboardStatusCell(got[0]); !strings.Contains(status, wantSuffix) {
-		t.Fatalf("status = %q, want config error suffix %q", status, wantSuffix)
-	}
-}
-
-// TestDashboardBranchColumnSources covers ADR-0070/0072 destination rules: a bound
-// set shows its binding-row branch plainly; an unbound set with no directive shows
-// needs bind.
-func TestDashboardBranchColumnSources(t *testing.T) {
-	d := dashboardTestDeps(t, []tasks.Row{
-		{ID: "bound", Status: tasks.StatusBlocked},
-		{ID: "unbound", Status: tasks.StatusReady, AutoDrain: true},
-	}, nil)
-	d.LiveDrains = func() ([]tasks.RunningDrain, error) { return nil, nil }
-	dataHome := t.TempDir()
-	real := deps.NewRealFileSystem()
-	origFS := d.Tasks.FS.(*deps.MockFileSystem)
-	d.Tasks.FS = &deps.MockFileSystem{
-		GetenvFunc: func(key string) string {
-			if key == "XDG_DATA_HOME" {
-				return dataHome
-			}
-			return ""
-		},
-		EvalSymlinksFunc: origFS.EvalSymlinksFunc,
-		ReadFileFunc:     real.ReadFile,
-		WriteFileFunc:    real.WriteFile,
-		MkdirAllFunc:     real.MkdirAll,
-		RenameFunc:       real.Rename,
-		StatFunc:         origFS.StatFunc,
-	}
-	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
-		setScopedKey("repo-key", "bound"): {RuntimePath: "/repo/bound", Branch: "bound-branch"},
-	})
-
-	// "unbound" reads the integration target's branch carried on the static.
-	st := dashboardRepoStatic{
-		defPath:     "/def",
-		statePath:   tasks.StatePathFor("/def"),
-		repoKey:     "repo-key",
-		projectName: "pop",
-		rep:         &projectScan{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main"},
-		repBranch:   "trunk-branch",
-		bare:        false,
-	}
-	got, err := dashboardRowsForStatic(d, &config.Config{}, st)
-	if err != nil {
-		t.Fatal(err)
-	}
-	byID := map[string]DashboardRow{}
-	for _, row := range got {
-		byID[row.SetID] = row
-	}
-	if byID["bound"].Worktree != "bound-branch" || byID["bound"].DestKind != dashboardDestBound {
-		t.Fatalf("bound worktree = %+v, want binding-row branch", byID["bound"])
-	}
-	if byID["unbound"].Worktree != dashboardDestLabelNeedsBind || byID["unbound"].DestKind != dashboardDestNeedsBind {
-		t.Fatalf("unbound worktree = %+v, want needs bind", byID["unbound"])
-	}
-}
-
-func TestDashboardManagedDirectiveDestColumn(t *testing.T) {
-	rows := []tasks.Row{
-		{ID: "managed", Status: tasks.StatusReady, AutoDrain: true},
-	}
-	d := dashboardTestDeps(t, rows, nil)
-	dataHome := t.TempDir()
-	real := deps.NewRealFileSystem()
-	origFS := d.Tasks.FS.(*deps.MockFileSystem)
-	d.Tasks.FS = &deps.MockFileSystem{
-		GetenvFunc: func(key string) string {
-			if key == "XDG_DATA_HOME" {
-				return dataHome
-			}
-			return ""
-		},
-		EvalSymlinksFunc: origFS.EvalSymlinksFunc,
-		ReadFileFunc:     real.ReadFile,
-		WriteFileFunc:    real.WriteFile,
-		MkdirAllFunc:     real.MkdirAll,
-		RenameFunc:       real.Rename,
-		StatFunc:         origFS.StatFunc,
-	}
-	defPath := "/def"
-	if err := tasks.UpdateGlobalStateWith(d.Tasks, tasks.StatePathFor(defPath), func(s *tasks.GlobalState) error {
-		s.Tasks[defPath] = &tasks.TaskEntry{
-			TaskSets: []tasks.RegisteredTaskSet{
-				{ID: "managed", WorktreeIntent: &tasks.WorktreeDirective{Managed: true}},
-			},
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	scan := projectScan{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: defPath, RepoKey: "repo-key"}
-
-	got, err := dashboardRowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("rows = %+v, want one managed-directive row", got)
-	}
-	if got[0].Worktree != dashboardDestLabelManagedWt || got[0].DestKind != dashboardDestManagedDirective {
-		t.Fatalf("managed row = %+v, want [managed wt] badge", got[0])
-	}
-	var rendered strings.Builder
-	renderDashboardTable(&rendered, got, 0, 0, 20)
-	out := rendered.String()
-	if !strings.Contains(out, "[managed wt]") {
-		t.Fatalf("render missing [managed wt] badge:\n%s", out)
-	}
-	if strings.Contains(out, "↳") {
-		t.Fatalf("render must not contain worktree marker glyph:\n%s", out)
-	}
-}
-
-// TestDashboardDoneHiddenUniformly pins the ADR-0121 uniform DONE hide: a DONE
-// set is omitted by default whether its Worktree binding is adopted or managed
-// (the old managed-worktree carve-out is retired). Done inclusion reveals both,
-// and the managed one still carries its clean-up DestKind.
-func TestDashboardDoneHiddenUniformly(t *testing.T) {
-	rows := []tasks.Row{
-		{ID: "done-adopted", Status: tasks.StatusDone},
-		{ID: "done-managed", Status: tasks.StatusDone},
-	}
-	d := dashboardTestDeps(t, rows, nil)
-	dataHome := t.TempDir()
-	real := deps.NewRealFileSystem()
-	origFS := d.Tasks.FS.(*deps.MockFileSystem)
-	d.Tasks.FS = &deps.MockFileSystem{
-		GetenvFunc: func(key string) string {
-			if key == "XDG_DATA_HOME" {
-				return dataHome
-			}
-			return ""
-		},
-		EvalSymlinksFunc: origFS.EvalSymlinksFunc,
-		ReadFileFunc:     real.ReadFile,
-		WriteFileFunc:    real.WriteFile,
-		MkdirAllFunc:     real.MkdirAll,
-		RenameFunc:       real.Rename,
-		StatFunc:         origFS.StatFunc,
-	}
-	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
-		setScopedKey("repo-key", "done-adopted"): {RuntimePath: "/repo/adopted", Branch: "adopted-branch"},
-		setScopedKey("repo-key", "done-managed"): {RuntimePath: "/repo/managed", Branch: "managed-branch", Provisioned: true},
-	})
-	scan := projectScan{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: "/def", RepoKey: "repo-key"}
-
-	got, err := dashboardRowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 0 {
-		t.Fatalf("default rows = %+v, want both DONE sets hidden", got)
-	}
-
-	// Done inclusion reveals both DONE sets regardless of binding kind.
-	d.IncludeDone = true
-	got, err = dashboardRowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false))
-	if err != nil {
-		t.Fatal(err)
-	}
-	byID := map[string]DashboardRow{}
-	for _, row := range got {
-		byID[row.SetID] = row
-	}
-	if row, ok := byID["done-adopted"]; !ok {
-		t.Fatal("adopted Done binding should be revealed with include-done")
-	} else if row.Worktree != "adopted-branch" {
-		t.Fatalf("done-adopted row = %+v", row)
-	}
-	if row, ok := byID["done-managed"]; !ok {
-		t.Fatal("managed Done binding should be revealed with include-done")
-	} else if row.DestKind != dashboardDestDoneManagedBound || row.Worktree != "managed-branch" {
-		t.Fatalf("done-managed row = %+v", row)
-	}
-}
-
-func TestDashboardNeedsBindRenderedDim(t *testing.T) {
-	d := dashboardTestDeps(t, []tasks.Row{{ID: "plain", Status: tasks.StatusReady}}, nil)
-	scan := projectScan{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: "/def", RepoKey: "repo-key"}
-	got, err := dashboardRowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var rendered strings.Builder
-	renderDashboardTable(&rendered, got, 0, 0, 20)
-	if !strings.Contains(rendered.String(), "needs bind") {
-		t.Fatalf("render missing needs bind:\n%s", rendered.String())
-	}
-}
-
-// TestHeadBranchFromCheckout covers ADR-0060's fork-free branch read: a main
-// worktree's branch is parsed from <checkout>/.git/HEAD, a linked worktree's via
-// its `.git` gitdir pointer, a detached HEAD yields "" (the branch is omitted),
-// and the common-dir fallback applies when there is no `.git` entry.
-func TestHeadBranchFromCheckout(t *testing.T) {
-	files := map[string]string{
-		"/main/.git/HEAD":              "ref: refs/heads/trunk\n",
-		"/wt/.git":                     "gitdir: /repo/.git/worktrees/wt\n",
-		"/repo/.git/worktrees/wt/HEAD": "ref: refs/heads/feature\n",
-		"/detached/.git/HEAD":          "a1b2c3d4e5f6\n",
-		"/common-only/.git/HEAD":       "ref: refs/heads/from-common\n",
-	}
-	dirs := map[string]bool{"/main/.git": true, "/detached/.git": true}
-	fs := &deps.MockFileSystem{
-		StatFunc: func(p string) (os.FileInfo, error) {
-			if dirs[p] {
-				return deps.MockFileInfo{NameVal: filepath.Base(p), IsDirVal: true}, nil
-			}
-			if _, ok := files[p]; ok {
-				return deps.MockFileInfo{NameVal: filepath.Base(p)}, nil
-			}
-			return nil, os.ErrNotExist
-		},
-		ReadFileFunc: func(p string) ([]byte, error) {
-			if data, ok := files[p]; ok {
-				return []byte(data), nil
-			}
-			return nil, os.ErrNotExist
-		},
-	}
-	td := &tasks.Deps{FS: fs}
-
-	cases := []struct {
-		name      string
-		checkout  string
-		commonDir string
-		want      string
-	}{
-		{"main worktree", "/main", "/main/.git", "trunk"},
-		{"linked worktree", "/wt", "/repo/.git", "feature"},
-		{"detached", "/detached", "/detached/.git", ""},
-		{"common-dir fallback", "/common-only", "/common-only/.git", "from-common"},
-		{"missing", "/nope", "", ""},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := headBranchFromCheckout(td, tc.checkout, tc.commonDir); got != tc.want {
-				t.Fatalf("headBranchFromCheckout(%q, %q) = %q, want %q", tc.checkout, tc.commonDir, got, tc.want)
-			}
-		})
 	}
 }
 
@@ -4887,64 +4157,24 @@ func TestDashboardStatusAppendsAutoDrain(t *testing.T) {
 	}
 }
 
-// TestDashboardStatusSuffixesRender drives the fork-free build so a bound-but-
-// missing checkout appends ` · orphaned` at the row-assembly site, an auto-drain
-// row appends ` · auto-drain`, and a row that is both shows them ordered
-// `... · auto-drain · orphaned` — surfaced in both single-line and two-line
-// render modes off the one precomputed status string.
+// TestDashboardStatusSuffixesRender pins that the STATUS cell's ` · auto-drain ·
+// orphaned` suffixes (composed by the work data core, ADR-0143) survive intact
+// through both the single-line and two-line render modes off the one precomputed
+// status string. The suffix derivation itself is proven in work's tests; this is
+// the queue-side render half.
 func TestDashboardStatusSuffixesRender(t *testing.T) {
-	rows := []tasks.Row{
-		{ID: "ad", Status: tasks.StatusBlocked, AutoDrain: true},
-		{ID: "orph", Status: tasks.StatusBlocked},
-		{ID: "both", Status: tasks.StatusBlocked, AutoDrain: true},
-	}
-	d := dashboardTestDeps(t, rows, nil)
-	dataHome := t.TempDir()
-	real := deps.NewRealFileSystem()
-	origFS := d.Tasks.FS.(*deps.MockFileSystem)
-	const presentPath = "/repo/present"
-	d.Tasks.FS = &deps.MockFileSystem{
-		GetenvFunc: func(key string) string {
-			if key == "XDG_DATA_HOME" {
-				return dataHome
-			}
-			return ""
+	both := DashboardRow{
+		Project: "pop",
+		SetRef: SetRef{
+			SetID:     "both",
+			RawStatus: tasks.StatusBlocked,
+			AutoDrain: true,
+			Orphaned:  true,
 		},
-		EvalSymlinksFunc: origFS.EvalSymlinksFunc,
-		ReadFileFunc:     real.ReadFile,
-		WriteFileFunc:    real.WriteFile,
-		MkdirAllFunc:     real.MkdirAll,
-		RenameFunc:       real.Rename,
-		StatFunc: func(path string) (os.FileInfo, error) {
-			if path == presentPath {
-				return deps.MockFileInfo{NameVal: "present", IsDirVal: true}, nil
-			}
-			return nil, os.ErrNotExist
-		},
+		Worktree: "both-branch",
+		DestKind: dashboardDestBound,
 	}
-	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
-		setScopedKey("repo-key", "ad"):   {RuntimePath: presentPath, Branch: "ad-branch"},
-		setScopedKey("repo-key", "orph"): {RuntimePath: "/repo/gone", Branch: "orph-branch"},
-		setScopedKey("repo-key", "both"): {RuntimePath: "/repo/gone2", Branch: "both-branch"},
-	})
-	scan := projectScan{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: "/def", RepoKey: "repo-key"}
-
-	got, err := dashboardRowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false))
-	if err != nil {
-		t.Fatal(err)
-	}
-	byID := map[string]DashboardRow{}
-	for _, row := range got {
-		byID[row.SetID] = row
-	}
-
-	if s := dashboardStatusCell(byID["ad"]); !strings.Contains(s, " · auto-drain") || strings.Contains(s, "orphaned") {
-		t.Fatalf("auto-drain row status = %q", s)
-	}
-	if s := dashboardStatusCell(byID["orph"]); !strings.Contains(s, " · orphaned") || strings.Contains(s, "auto-drain") {
-		t.Fatalf("orphaned row status = %q", s)
-	}
-	if s := dashboardStatusCell(byID["both"]); !strings.Contains(s, " · auto-drain · orphaned") {
+	if s := dashboardStatusCell(both); !strings.Contains(s, " · auto-drain · orphaned") {
 		t.Fatalf("both row status = %q", s)
 	}
 
@@ -4952,11 +4182,11 @@ func TestDashboardStatusSuffixesRender(t *testing.T) {
 	// that no truncation clips the suffixes. Column order: PROJECT, TASK SET,
 	// STATUS (index 2, given the width), WORKTREE, indicator.
 	widths := []int{20, 20, 60, 20, 20}
-	single := dashboardTableLine(dashboardRowValues(byID["both"]), widths)
+	single := dashboardTableLine(dashboardRowValues(both), widths)
 	if !strings.Contains(single, "· auto-drain · orphaned") {
 		t.Fatalf("single-line render missing suffixes:\n%s", single)
 	}
-	twoLine := dashboardTwoLineRowLine2(byID["both"], []int{10, 10, 10, 10})
+	twoLine := dashboardTwoLineRowLine2(both, []int{10, 10, 10, 10})
 	if !strings.Contains(twoLine, "· auto-drain · orphaned") {
 		t.Fatalf("two-line render missing suffixes:\n%s", twoLine)
 	}
@@ -5079,84 +4309,6 @@ func mapDirEntries(path string, files map[string]string) []os.DirEntry {
 		out = append(out, deps.MockDirEntry{NameVal: name, IsDirVal: isDir})
 	}
 	return out
-}
-
-func TestDashboardMapRowsMixedAndFiltered(t *testing.T) {
-	storageDir := "/data/repos/repo-aaaa"
-	tasksDir := filepath.Join(storageDir, "tasks")
-	activeMap := filepath.Join(storageDir, "wayfinder", "2026-07-01-active")
-	doneMap := filepath.Join(storageDir, "wayfinder", "2026-07-02-done")
-	abandonedMap := filepath.Join(storageDir, "wayfinder", "2026-07-03-abandoned")
-	archivedMap := filepath.Join(storageDir, "wayfinder", "2026-07-04-archived")
-	files := map[string]string{
-		filepath.Join(activeMap, "map.md"): "Status: active\n\n## Destination\nShip it\n",
-		filepath.Join(activeMap, "issues", "01-research.md"): "" +
-			"Type: research\nStatus: open\n\n# Q\n",
-		filepath.Join(activeMap, "issues", "02-blocked.md"): "" +
-			"Type: research\nStatus: open\nBlocked by: 01\n\n# Q\n",
-		filepath.Join(doneMap, "map.md"):                    "Status: done\n\n## Destination\nDone\n",
-		filepath.Join(abandonedMap, "map.md"):               "Status: abandoned\n\n## Destination\nNope\n",
-		filepath.Join(archivedMap, "map.md"):                "Status: active\n\n## Destination\nHidden\n",
-		filepath.Join(storageDir, "wayfinder-archive.json"): `{"archived":["2026-07-04-archived"]}`,
-	}
-
-	rows := []tasks.Row{
-		{ID: "2026-07-01-set-a", Status: tasks.StatusBlocked},
-		{ID: "2026-07-01-set-b", Status: tasks.StatusReady},
-	}
-	d := dashboardTestDeps(t, rows, nil)
-	withWayfinderMaps(t, d, storageDir, files)
-
-	scan := projectScan{
-		Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main",
-		DefinitionPath: tasksDir, RepoKey: "repo-key",
-	}
-	got, err := dashboardRowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false))
-	if err != nil {
-		t.Fatal(err)
-	}
-	sortDashboardRows(got)
-
-	var ids []string
-	byID := map[string]DashboardRow{}
-	for _, r := range got {
-		ids = append(ids, r.SetID)
-		byID[r.SetID] = r
-	}
-	// Active map appears; done/abandoned/archived do not.
-	if !slices.Contains(ids, "2026-07-01-active") {
-		t.Fatalf("missing active map row; got %v", ids)
-	}
-	for _, hidden := range []string{"2026-07-02-done", "2026-07-03-abandoned", "2026-07-04-archived"} {
-		if slices.Contains(ids, hidden) {
-			t.Fatalf("hidden map %q still present: %v", hidden, ids)
-		}
-	}
-	// Both task sets present alongside the map.
-	if !slices.Contains(ids, "2026-07-01-set-a") || !slices.Contains(ids, "2026-07-01-set-b") {
-		t.Fatalf("missing task-set rows; got %v", ids)
-	}
-
-	mapRow := byID["2026-07-01-active"]
-	if !mapRow.IsMap {
-		t.Fatal("active map row IsMap = false")
-	}
-	if mapRow.Project != "pop" {
-		t.Fatalf("map PROJECT = %q, want pop", mapRow.Project)
-	}
-	if mapRow.Worktree != "" {
-		t.Fatalf("map WORKTREE = %q, want blank", mapRow.Worktree)
-	}
-	wantStatus := "WAYFINDING · 2 open / 1 frontier"
-	if got := dashboardStatusCell(mapRow); got != wantStatus {
-		t.Fatalf("map STATUS = %q, want %q", got, wantStatus)
-	}
-
-	// READY floats above rest; within the rest band the project groups map + blocked.
-	wantOrder := []string{"2026-07-01-set-b", "2026-07-01-set-a", "2026-07-01-active"}
-	if !reflect.DeepEqual(ids, wantOrder) {
-		t.Fatalf("interleave order = %v, want %v", ids, wantOrder)
-	}
 }
 
 func TestDashboardMapRowsInterleaveByProject(t *testing.T) {

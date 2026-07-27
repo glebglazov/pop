@@ -9,6 +9,7 @@ import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/work"
 )
 
 // TestScanReconcilesBeforeReading guards that the daemon tick and
@@ -53,11 +54,11 @@ func TestBuildDashboardReconcilesBeforeReading(t *testing.T) {
 		Reconcile:  func() (int, error) { reconciled++; return 0, nil },
 	}
 
-	if _, err := BuildDashboard(d, cfg); err != nil {
-		t.Fatalf("BuildDashboard: %v", err)
+	if _, err := work.BuildSnapshot(d.WorkDeps(), cfg); err != nil {
+		t.Fatalf("BuildSnapshot: %v", err)
 	}
 	if reconciled != 1 {
-		t.Fatalf("reconcile ran %d times during BuildDashboard, want 1", reconciled)
+		t.Fatalf("reconcile ran %d times during BuildSnapshot, want 1", reconciled)
 	}
 }
 
@@ -113,8 +114,8 @@ func TestBuildDashboardSurfacesReconcileErrorButContinues(t *testing.T) {
 		ReconcileOut: &out,
 	}
 
-	if _, err := BuildDashboard(d, cfg); err != nil {
-		t.Fatalf("BuildDashboard: %v, want reconcile failure to not fail the build", err)
+	if _, err := work.BuildSnapshot(d.WorkDeps(), cfg); err != nil {
+		t.Fatalf("BuildSnapshot: %v, want reconcile failure to not fail the build", err)
 	}
 	if !strings.Contains(out.String(), reconcileErr.Error()) {
 		t.Fatalf("ReconcileOut = %q, want it to mention %q", out.String(), reconcileErr.Error())

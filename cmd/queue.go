@@ -11,6 +11,7 @@ import (
 	"github.com/glebglazov/pop/dashboardshell"
 	"github.com/glebglazov/pop/queue"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/work"
 	"github.com/spf13/cobra"
 )
 
@@ -78,11 +79,16 @@ func init() {
 }
 
 var (
-	queueConfigLoad     = config.Load
-	queueRun            = queue.Run
-	queueBuildStatus    = queue.BuildStatus
-	queueBuildDashboard = queue.BuildDashboard
-	queueRunDashboard   = dashboardshell.RunFromQueue
+	queueConfigLoad  = config.Load
+	queueRun         = queue.Run
+	queueBuildStatus = queue.BuildStatus
+	// queueBuildDashboard builds the Work dashboard rows through the work data
+	// core (ADR-0143): the command surface is a consumer of work.BuildSnapshot, so
+	// `pop queue status` renders the same rows the dashboard derives.
+	queueBuildDashboard = func(d *queue.Deps, cfg *config.Config) (queue.DashboardSnapshot, error) {
+		return work.BuildSnapshot(d.WorkDeps(), cfg)
+	}
+	queueRunDashboard = dashboardshell.RunFromQueue
 )
 
 const queueLogLimit = 50

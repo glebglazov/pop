@@ -49,258 +49,6 @@ const (
 	dashboardDestDoneManagedBound = work.DestDoneManagedBound
 )
 
-// dashboardRepoStatic holds one repo group's static resolution: the repository
-// coordinates and integration target, all derived fork-free from the repo.json
-// marker's common directory and config (ADR-0060). The dashboard recomputes only
-// the volatile overlay (task statuses, locks, daemon state) per poll.
-type dashboardRepoStatic struct {
-	defPath       string
-	statePath     string
-	storageDir    string
-	repoKey       string
-	repoCommonDir string
-	projectName   string
-	rep           *projectScan
-	repBranch     string
-	bare          bool
-	// configErr is non-empty when the repository cannot resolve an integration
-	// target from config — a bare repo with no declared trunk (ADR-0060/0059). Its
-	// sets render this as a config-class error rather than forking git.
-	configErr string
-}
-
-// dashboardSnapshot is a single point-in-time read of pop.db taken once per
-// dashboard build. Each rendered row used to reopen pop.db several times
-// (bindings thrice, the drain lock once) every poll; the per-row overlay now
-// consults these in-memory maps instead, so the whole view is one consistent
-// snapshot and the store is opened a bounded number of times per build, not per
-// row. It holds every binding keyed by scoped key, the live (PID-alive) running
-// drains keyed by runtime path, and the recorded drain panes keyed by scoped key.
-type dashboardSnapshot struct {
-	bindings   map[string]WorktreeBinding
-	liveDrains map[string]tasks.RunningDrain
-	drainPanes map[string]tasks.DrainPane
-}
-
-// newDashboardSnapshot reads the volatile per-build store state once: AllBindings,
-// the live running drains (RunningDrains filtered to PID-alive in memory), and the
-// recorded drain panes. It is the single point at which a build touches pop.db for
-// the overlay.
-func newDashboardSnapshot(d *Deps) (*dashboardSnapshot, error) {
-	snap := &dashboardSnapshot{
-		bindings:   map[string]WorktreeBinding{},
-		liveDrains: map[string]tasks.RunningDrain{},
-		drainPanes: map[string]tasks.DrainPane{},
-	}
-	if d == nil || d.Tasks == nil {
-		return snap, nil
-	}
-	bindings, err := binding.AllBindings(d.Tasks)
-	if err != nil {
-		return nil, err
-	}
-	for k, b := range bindings {
-		snap.bindings[k] = b
-	}
-	drains, err := d.liveDrains()
-	if err != nil {
-		return nil, err
-	}
-	for _, dr := range drains {
-		snap.liveDrains[dr.RuntimePath] = dr
-	}
-	panes, err := tasks.AllDrainPanes(d.Tasks)
-	if err != nil {
-		return nil, err
-	}
-	for k, p := range panes {
-		snap.drainPanes[k] = p
-	}
-	return snap, nil
-}
-
-// bindingFor returns the snapshot binding for (repoKey, setID), the
-// snapshot-backed equivalent of bindingForSet.
-func (s *dashboardSnapshot) bindingFor(repoKey, setID string) (WorktreeBinding, bool) {
-	b, ok := s.bindings[setScopedKey(repoKey, setID)]
-	return b, ok
-}
-
-// BuildDashboard derives the Work dashboard rows from registered projects and
-// on-disk task/queue state. It is read-only except for the same refresh
-// auto-registration behavior used by `pop queue status`.
-//
-// The static side — repository identity, integration target, and branch — is
-// derived fork-free from each repo's repo.json marker and config (ADR-0060), so
-// a build forks no git for those coordinates; only mergeability (SHA-gated, in
-// reconcile) remains a git cost, and only for repos with task storage.
-func BuildDashboard(d *Deps, cfg *config.Config) (DashboardSnapshot, error) {
-	if d == nil {
-		d = DefaultDeps()
-	}
-	if d.Tasks == nil {
-		d.Tasks = tasks.DefaultDeps()
-	}
-	if d.Project == nil {
-		d.Project = project.DefaultDeps()
-	}
-	// Reconcile-then-read: heal dead-PID running Drains into crashed before the
-	// volatile overlay below reads locks from them (ADR-0055). A foreground drain
-	// that crashed is healed by whoever next opens the dashboard.
-	d.reconcile()
-	projects, err := tasks.ListPickerProjectsWith(d.Project, cfg)
-	if err != nil {
-		return DashboardSnapshot{}, err
-	}
-
-	// Resolve each renderable repo group's static coordinates fork-free from its
-	// marker plus config. The dashboard can only ever render task sets, which live
-	// in per-repo Task storage, so only repositories with a storage marker that
-	// also intersect config contribute statics (ADR-0042 intersection). Identity,
-	// integration target, and branch all derive from the marker's common directory
-	// and config — no `rev-parse`, no `worktree list`, no `branch --show-current`.
-	statics, err := dashboardRepoStatics(d, cfg, projects)
-	if err != nil {
-		return DashboardSnapshot{}, err
-	}
-	if len(statics) == 0 {
-		return DashboardSnapshot{}, nil
-	}
-
-	// Volatile overlay: task statuses, locks, and daemon-state-derived columns
-	// are re-read every poll so the view stays live, but these are cheap file
-	// and store reads — the static side above forks no git to begin with.
-	var delays []time.Duration
-	if qcfg, qerr := resolvedQueueConfig(cfg); qerr == nil {
-		delays = qcfg.CrashRetryDelays
-	}
-	now := d.now().UTC()
-	// One pop.db read per build, not per row: every row's binding, mergeability,
-	// and live-drain lookup is served from this snapshot.
-	snap, err := newDashboardSnapshot(d)
-	if err != nil {
-		return DashboardSnapshot{}, err
-	}
-	var rows []DashboardRow
-	for _, st := range statics {
-		groupRows, err := dashboardRowsFromStatic(d, cfg, snap, delays, now, st)
-		if err != nil {
-			return DashboardSnapshot{}, err
-		}
-		rows = append(rows, groupRows...)
-	}
-	sortDashboardRows(rows)
-	return DashboardSnapshot{Rows: rows}, nil
-}
-
-// dashboardRepoStatics resolves every renderable repo group's static coordinates
-// fork-free (ADR-0060). It iterates the repositories that have a Task storage
-// marker on disk — the only repos that can contribute rows — and, for each,
-// pairs it with the config projects whose checkout nests under (or contains) its
-// working-tree root. A repository with no matching config project is dropped
-// (ADR-0042's config intersection). Identity, paths, integration target, and
-// branch are all derived from the marker's common directory plus config: no git.
-func dashboardRepoStatics(d *Deps, cfg *config.Config, projects []project.ExpandedProject) ([]dashboardRepoStatic, error) {
-	// Work dashboard discovery includes wayfinder-only storage (ADR-0130); the
-	// Queue keeps ListTaskStorageRepos so Maps stay invisible to scheduling.
-	repos, err := tasks.ListWorkStorageRepos(d.Tasks)
-	if err != nil {
-		return nil, err
-	}
-	if len(repos) == 0 {
-		return nil, nil
-	}
-
-	// Canonicalize each candidate project path once (cheap symlink eval, never a
-	// git fork) for path-nesting comparison against each repo's root.
-	type candidate struct {
-		p     project.ExpandedProject
-		canon string
-	}
-	cands := make([]candidate, 0, len(projects))
-	for _, p := range projects {
-		canon, err := canonicalCheckoutPath(d.Tasks, p.Path)
-		if err != nil {
-			canon = p.Path
-		}
-		cands = append(cands, candidate{p: p, canon: canon})
-	}
-
-	statics := make([]dashboardRepoStatic, 0, len(repos))
-	for _, repo := range repos {
-		root := storageRepoRoot(d.Tasks, repo.RepositoryPath)
-		var scans []projectScan
-		for _, c := range cands {
-			if pathWithinOrEqual(c.canon, root) || pathWithinOrEqual(root, c.canon) {
-				// SessionName is left unset: deriving it forks `git rev-parse` and the
-				// build path never reads it (rendered rows carry no session, and
-				// bind/drain sub-actions recompute it from the row's project path).
-				scans = append(scans, projectScan{
-					Name:         c.p.Name,
-					ProjectLabel: c.p.ProjectLabel,
-					ProjectPath:  c.canon,
-					RuntimePath:  c.canon,
-				})
-			}
-		}
-		if len(scans) == 0 {
-			// Registered storage but not in config: dropped by the intersection.
-			continue
-		}
-		st, err := dashboardRepoStaticFromMarker(d, cfg, repo.RepositoryPath, scans)
-		if err != nil {
-			return nil, err
-		}
-		statics = append(statics, st)
-	}
-	return statics, nil
-}
-
-// dashboardRepoStaticFromMarker derives one repo group's static coordinates from
-// its marker's common directory and config, forking no git (ADR-0060): identity
-// and paths come from identityFromCommonDir (sha256 + path ops), the integration
-// target from dashboardRepresentative (config trunk or, for a non-bare repo, the
-// parent of the common directory), and the branch from a HEAD file read. A bare
-// repo with no declared trunk carries a config-class error on configErr instead.
-func dashboardRepoStaticFromMarker(d *Deps, cfg *config.Config, commonDir string, scans []projectScan) (dashboardRepoStatic, error) {
-	id, err := tasks.IdentityFromCommonDir(d.Tasks, commonDir)
-	if err != nil {
-		return dashboardRepoStatic{}, err
-	}
-	defPath, err := tasks.CanonicalDefinitionPathWith(d.Tasks, id.TasksDir)
-	if err != nil {
-		return dashboardRepoStatic{}, err
-	}
-
-	rep, bare, err := dashboardRepresentative(d, cfg, id.CommonDir, scans)
-	if err != nil {
-		return dashboardRepoStatic{}, err
-	}
-	repBranch := ""
-	configErr := ""
-	switch {
-	case rep != nil:
-		repBranch = headBranchFromCheckout(d.Tasks, rep.ProjectPath, id.CommonDir)
-	case bare:
-		// Bare repo with no declared trunk: there is no integration target to fork
-		// for. Surface a config-class error on its sets (ADR-0060/0059).
-		configErr = repoScanReason
-	}
-
-	return dashboardRepoStatic{
-		defPath:       defPath,
-		statePath:     tasks.StatePathFor(defPath),
-		storageDir:    id.StorageDir,
-		repoKey:       repoIdentityKey(id),
-		repoCommonDir: id.CommonDir,
-		projectName:   repoName(scans, rep),
-		rep:           rep,
-		repBranch:     repBranch,
-		bare:          bare,
-		configErr:     configErr,
-	}, nil
-}
-
 // dashboardRepresentative resolves a repo group's integration target without
 // forking git (ADR-0060): a per-checkout `trunk = true` override wins (bare or
 // not), else a non-bare repo's target is the main worktree — the parent of the
@@ -364,47 +112,6 @@ func dashboardScanForCheckout(d *Deps, scans []projectScan, checkoutPath string)
 	}
 }
 
-// headBranchFromCheckout reads a checkout's current branch from its HEAD file —
-// no `git branch --show-current` (ADR-0060). It resolves the checkout's git
-// directory (a `.git` directory for a main worktree, or the `gitdir:` pointer in
-// a linked worktree's `.git` file), falling back to commonDir, then parses
-// `ref: refs/heads/<branch>`. A detached HEAD or any read failure yields "".
-func headBranchFromCheckout(d *tasks.Deps, checkout, commonDir string) string {
-	gitDir := ""
-	if strings.TrimSpace(checkout) != "" {
-		dotGit := filepath.Join(checkout, ".git")
-		if info, err := d.FS.Stat(dotGit); err == nil {
-			if info.IsDir() {
-				gitDir = dotGit
-			} else if data, rerr := d.FS.ReadFile(dotGit); rerr == nil {
-				line := strings.TrimSpace(string(data))
-				if p := strings.TrimPrefix(line, "gitdir:"); p != line {
-					p = strings.TrimSpace(p)
-					if !filepath.IsAbs(p) {
-						p = filepath.Join(checkout, p)
-					}
-					gitDir = filepath.Clean(p)
-				}
-			}
-		}
-	}
-	if gitDir == "" {
-		gitDir = commonDir
-	}
-	if strings.TrimSpace(gitDir) == "" {
-		return ""
-	}
-	data, err := d.FS.ReadFile(filepath.Join(gitDir, "HEAD"))
-	if err != nil {
-		return ""
-	}
-	head := strings.TrimSpace(string(data))
-	if ref := strings.TrimPrefix(head, "ref: refs/heads/"); ref != head {
-		return strings.TrimSpace(ref)
-	}
-	return ""
-}
-
 // storageRepoRoot derives a repository's working-tree root from the canonical
 // git common directory recorded in its marker: a normal repo's common dir is
 // `<root>/.git` and a bare-with-worktrees layout's is `<root>/.bare`, so the
@@ -435,185 +142,28 @@ func sortDashboardRows(rows []DashboardRow) {
 	work.SortRows(rows)
 }
 
-// dashboardRowsForStatic renders one repo group's rows from a fully resolved
-// static plus the current volatile overlay (statuses, locks, daemon state),
-// taking the single per-build store snapshot. It is the seam tests use to drive
-// dashboardRowsFromStatic with a hand-built static, mirroring what BuildDashboard
-// does per group after deriving statics fork-free from markers.
-func dashboardRowsForStatic(d *Deps, cfg *config.Config, st dashboardRepoStatic) ([]DashboardRow, error) {
-	var delays []time.Duration
-	if qcfg, qerr := resolvedQueueConfig(cfg); qerr == nil {
-		delays = qcfg.CrashRetryDelays
+// WorkDeps projects the supervisor's Deps onto the Work data core's Deps
+// (ADR-0143): queue is a consumer of work, so it forwards the store handle, the
+// config loader, the Done-inclusion flag, and every build seam the dashboard
+// tests inject, letting work.BuildSnapshot derive the same rows the removed
+// queue-side builder did. The borrow is by pointer — work never closes the
+// process-cached store handle it reaches through Tasks (ADR-0140).
+func (d *Deps) WorkDeps() *work.Deps {
+	if d == nil {
+		return work.DefaultDeps()
 	}
-	snap, err := newDashboardSnapshot(d)
-	if err != nil {
-		return nil, err
+	return &work.Deps{
+		Tasks:          d.Tasks,
+		Project:        d.Project,
+		LoadConfig:     d.LoadConfig,
+		IncludeDone:    d.IncludeDone,
+		Refresh:        d.Refresh,
+		LiveDrains:     d.LiveDrains,
+		Reconcile:      d.Reconcile,
+		ReconcileOut:   d.ReconcileOut,
+		Now:            d.Now,
+		ProbeDirective: d.ProbeDirective,
 	}
-	return dashboardRowsFromStatic(d, cfg, snap, delays, d.now().UTC(), st)
-}
-
-// dashboardRowsFromStatic builds a repo group's rows from its static resolution
-// plus the current volatile state: task statuses (refresh), runtime locks, and
-// daemon-state columns. It forks no git — the static side is marker/config
-// derived (ADR-0060) and this overlay is cheap file/store reads.
-func dashboardRowsFromStatic(d *Deps, cfg *config.Config, snap *dashboardSnapshot, delays []time.Duration, now time.Time, st dashboardRepoStatic) ([]DashboardRow, error) {
-	refresh, err := d.refresh(st.defPath)
-	if err != nil {
-		return nil, err
-	}
-	if cfg == nil && d.LoadConfig != nil {
-		cfg, _ = d.LoadConfig(config.DefaultConfigPath())
-	}
-	tasks.ApplyVerifyVerdictsWith(d.Tasks, refresh, cfg, func(setID string) string {
-		return binding.RuntimeForSet(snap.bindings, st.repoKey, setID, staticProjectPath(st))
-	})
-	intents := dashboardWorktreeIntents(d, st.defPath)
-	backoff := d.setBackoffLookup(st.repoCommonDir, delays, now)
-	var rows []DashboardRow
-	for _, taskRow := range refresh.Rows {
-		// Done sets are hidden uniformly unless Done inclusion is on (ADR-0121):
-		// the old carve-out that kept a DONE set visible while it still held a
-		// managed (pop-provisioned) Worktree binding is retired — teardown stays
-		// gated at Archive. DoneStillManagedBound is still recorded on the row so a
-		// revealed (`--include-done`) DONE row can be labelled/styled from the fact.
-		bnd, hasBinding := snap.bindingFor(st.repoKey, taskRow.ID)
-		bound := hasBinding && strings.TrimSpace(bnd.RuntimePath) != ""
-		doneStillManagedBound := taskRow.Status == tasks.StatusDone && bound && bnd.Provisioned
-		orphaned := dashboardOrphaned(d, bnd, hasBinding)
-		if !work.ShowRow(taskRow, d.IncludeDone) {
-			continue
-		}
-		wt := dashboardWorktree(d, snap, intents, st.repoKey, taskRow.ID, taskRow.Status, bnd, bound)
-		parked := false
-		if backoff != nil {
-			parked, _ = backoff(taskRow.ID)
-		}
-		liveDrain := dashboardLiveDrain(snap, st.repoKey, taskRow.ID, wt.runtimePath)
-		// A live drain lights the trailing ● indicator (ADR-0111); parked and
-		// config-error ride the STATUS cell as ` · parked` / ` · config error: <msg>`
-		// suffixes. The mutual exclusion the retired single-string DRAIN cell
-		// enforced is preserved by gating the config-error probe on a set that is
-		// neither live-drained nor parked.
-		configErr := ""
-		if !liveDrain && !parked {
-			if st.configErr != "" && !hasBinding {
-				// Bare repo with no declared trunk: an unbound set has no integration
-				// target to route to (ADR-0060). Surface the config-class error derived
-				// fork-free during static resolution, never a git probe. A bound set is
-				// still drainable via its binding, so it is left untouched.
-				configErr = st.configErr
-			} else if taskRow.Status == tasks.StatusReady {
-				// An unsatisfiable worktree directive is a static config defect, not a
-				// runtime crash (ADR-0059): show it on the set so the operator fixes the
-				// environment. Read the registration intent first (a store read, no git);
-				// only a set that actually carries a directive pays the read-only probe
-				// (which forks git to resolve the trunk/worktree), so the no-directive
-				// common path — and the dashboard's cached rebuild — forks no git.
-				if intent, _ := tasks.RegisteredWorktreeIntent(d.Tasks, st.defPath, taskRow.ID); intent != nil {
-					if msg := d.probeDirective(staticProjectPath(st), taskRow.ID); msg != "" {
-						configErr = msg
-					}
-				}
-			}
-		}
-		rows = append(rows, DashboardRow{
-			SetRef: SetRef{
-				SetID:                 taskRow.ID,
-				RawStatus:             taskRow.Status,
-				AutoDrain:             taskRow.AutoDrain,
-				DefPath:               st.defPath,
-				StatePath:             st.statePath,
-				RepoKey:               st.repoKey,
-				RepoCommonDir:         st.repoCommonDir,
-				ProjectPath:           staticProjectPath(st),
-				ProjectName:           st.projectName,
-				RuntimePath:           wt.runtimePath,
-				DoneStillManagedBound: doneStillManagedBound,
-				Parked:                parked,
-				ConfigError:           configErr,
-				Orphaned:              orphaned,
-				Bound:                 bound,
-				PaneID:                dashboardPaneID(snap, st.repoKey, taskRow.ID),
-				LiveDrain:             liveDrain,
-			},
-			Project:       st.projectName,
-			Started:       taskRow.Started,
-			VerifiedAtSHA: taskRow.VerifiedAtSHA,
-			Worktree:      wt.label,
-			CursorKey:     st.projectName + "\x00" + taskRow.ID,
-			DestKind:      wt.DestKind,
-		})
-	}
-	mapRows, err := dashboardMapRowsFromStatic(d, st)
-	if err != nil {
-		return nil, err
-	}
-	rows = append(rows, mapRows...)
-	return rows, nil
-}
-
-// dashboardMapRowsFromStatic walks one repo's wayfinder/ maps and returns
-// Work dashboard rows for active, non-archived maps (ADR-0130). Done,
-// abandoned, archived, and malformed maps are hidden.
-func dashboardMapRowsFromStatic(d *Deps, st dashboardRepoStatic) ([]DashboardRow, error) {
-	storageDir := st.storageDir
-	if storageDir == "" && st.defPath != "" {
-		storageDir = filepath.Dir(st.defPath)
-	}
-	if storageDir == "" {
-		return nil, nil
-	}
-	wd := &wayfinder.Deps{FS: d.Tasks.FS, Tasks: d.Tasks}
-	maps, err := wayfinder.ScanMapsInStorage(wd, storageDir)
-	if err != nil {
-		return nil, err
-	}
-	var rows []DashboardRow
-	for _, m := range maps {
-		if !dashboardMapVisible(m) {
-			continue
-		}
-		counts := wayfinder.CountTickets(m.Tickets)
-		frontier := len(wayfinder.Frontier(m.Tickets))
-		rows = append(rows, DashboardRow{
-			SetRef: SetRef{
-				SetID:         m.ID,
-				DefPath:       st.defPath,
-				StatePath:     st.statePath,
-				RepoKey:       st.repoKey,
-				RepoCommonDir: st.repoCommonDir,
-				ProjectPath:   staticProjectPath(st),
-				ProjectName:   st.projectName,
-			},
-			Project:     st.projectName,
-			IsMap:       true,
-			MapOpen:     counts.Open,
-			MapFrontier: frontier,
-			CursorKey:   st.projectName + "\x00map\x00" + m.ID,
-		})
-	}
-	return rows, nil
-}
-
-// dashboardMapVisible reports whether a Map should appear on the Work dashboard:
-// active and not archived. Done, abandoned, archived, and malformed maps are
-// hidden (ADR-0130).
-func dashboardMapVisible(m wayfinder.Map) bool {
-	if m.Archived || m.Malformed {
-		return false
-	}
-	return m.Status == wayfinder.MapActive
-}
-
-// staticProjectPath returns the repo group's representative checkout, the path
-// every bind/drain sub-action runs git against. It is empty only for a bare
-// repo with no resolvable representative, in which case bind falls back to a
-// full project scan.
-func staticProjectPath(st dashboardRepoStatic) string {
-	if st.rep == nil {
-		return ""
-	}
-	return st.rep.ProjectPath
 }
 
 // dashboardStatusLabel is the queue-side thin alias over work.StatusLabel
@@ -759,76 +309,12 @@ var dashboardStatusBucketStyle = map[string]lipgloss.Style{
 	string(tasks.StatusDeferred):         lipgloss.NewStyle().Faint(true),
 }
 
-type dashboardWorktreeView struct {
-	label       string
-	runtimePath string
-	DestKind    dashboardDestKind
-}
-
 // The destination-column plain labels alias work's (ADR-0143) so the styled
 // wrapper (renderDashboardDest) and the row-build fallbacks key on one definition.
 const (
 	dashboardDestLabelManagedWt = work.DestLabelManagedWt
 	dashboardDestLabelNeedsBind = work.DestLabelNeedsBind
 )
-
-// dashboardWorktreeIntents loads seeded worktree directives for one definition
-// path in a single store read, keyed by set ID. The per-row destination column
-// consults this map instead of reopening the store for each unbound row.
-func dashboardWorktreeIntents(d *Deps, defPath string) map[string]*tasks.WorktreeDirective {
-	intents := map[string]*tasks.WorktreeDirective{}
-	if d == nil || d.Tasks == nil {
-		return intents
-	}
-	state, err := tasks.LoadGlobalStateWith(d.Tasks, tasks.StatePathFor(defPath))
-	if err != nil {
-		return intents
-	}
-	entry := state.Tasks[defPath]
-	if entry == nil {
-		return intents
-	}
-	for _, set := range entry.TaskSets {
-		if set.WorktreeIntent != nil {
-			intents[set.ID] = set.WorktreeIntent
-		}
-	}
-	return intents
-}
-
-// dashboardWorktree resolves the destination column per ADR-0070/0072: a bound
-// set shows its branch plainly; an unbound set with a managed directive shows a
-// [managed wt] badge (the Queue will provision on drain); an unbound set with no
-// directive shows dim needs bind (the Queue will not drain it). A Done set that
-// still holds a managed binding shows [managed wt <branch>] as a clean-up reminder.
-func dashboardWorktree(d *Deps, snap *dashboardSnapshot, intents map[string]*tasks.WorktreeDirective, repoKey, setID string, status tasks.TaskSetStatus, bnd WorktreeBinding, bound bool) dashboardWorktreeView {
-	if bound {
-		branch := bnd.Branch
-		if branch == "" {
-			branch = headBranchFromCheckout(d.Tasks, bnd.RuntimePath, "")
-		}
-		branch = formatDashboardBranch(branch)
-		kind := dashboardDestBound
-		if status == tasks.StatusDone && bnd.Provisioned {
-			kind = dashboardDestDoneManagedBound
-		}
-		return dashboardWorktreeView{label: branch, runtimePath: bnd.RuntimePath, DestKind: kind}
-	}
-	intent := intents[setID]
-	if intent != nil && intent.Managed {
-		return dashboardWorktreeView{label: dashboardDestLabelManagedWt, DestKind: dashboardDestManagedDirective}
-	}
-	return dashboardWorktreeView{label: dashboardDestLabelNeedsBind, DestKind: dashboardDestNeedsBind}
-}
-
-// formatDashboardBranch normalizes a branch name for the destination column.
-func formatDashboardBranch(branch string) string {
-	branch = strings.TrimSpace(branch)
-	if branch == "" {
-		return "detached"
-	}
-	return branch
-}
 
 // renderDashboardDest applies destination-column styling to the plain label.
 func renderDashboardDest(kind dashboardDestKind, label string) string {
@@ -842,61 +328,6 @@ func renderDashboardDest(kind dashboardDestKind, label string) string {
 	default:
 		return label
 	}
-}
-
-// dashboardLiveDrain reports whether a live (PID-alive) drain holds the set's
-// checkout, reading the per-build snapshot's live-drain map (one RunningDrains
-// read plus in-memory PID-liveness) instead of reopening the runtime lock per
-// row. The snapshot keys live drains by runtime path; a drain at the set's
-// checkout (or its bound checkout) whose SetID matches is the same fact
-// ReadRuntimeLockStatus derived per row before. It is the structured boolean
-// the sort tier, header count, auto-drain silencing, and IN-PROGRESS refinement
-// all key on (ADR-0111).
-func dashboardLiveDrain(snap *dashboardSnapshot, repoKey, setID, runtimePath string) bool {
-	paths := map[string]bool{}
-	if runtimePath != "" {
-		paths[runtimePath] = true
-	}
-	if b, ok := snap.bindingFor(repoKey, setID); ok && b.RuntimePath != "" {
-		paths[b.RuntimePath] = true
-	}
-	for path := range paths {
-		if dr, ok := snap.liveDrains[path]; ok && dr.SetID == setID {
-			return true
-		}
-	}
-	return false
-}
-
-// dashboardOrphaned reports whether a set's Worktree binding points at a
-// checkout that no longer exists on disk. Detection is a single cheap
-// filesystem stat of the binding's runtime path — never a git subprocess — so
-// the fork-free dashboard build stays fork-free. A set with no binding (or one
-// with a blank runtime path) can never be orphaned; a binding whose runtime
-// path still stats present is not orphaned.
-func dashboardOrphaned(d *Deps, bnd WorktreeBinding, hasBinding bool) bool {
-	if !hasBinding {
-		return false
-	}
-	path := strings.TrimSpace(bnd.RuntimePath)
-	if path == "" {
-		return false
-	}
-	if d == nil || d.Tasks == nil || d.Tasks.FS == nil {
-		return false
-	}
-	_, err := d.Tasks.FS.Stat(path)
-	return err != nil
-}
-
-func dashboardPaneID(snap *dashboardSnapshot, repoKey, setID string) string {
-	if snap == nil || snap.drainPanes == nil {
-		return ""
-	}
-	if pane, ok := snap.drainPanes[setScopedKey(repoKey, setID)]; ok {
-		return pane.PaneID
-	}
-	return ""
 }
 
 type dashboardTickMsg struct{}
@@ -1254,18 +685,18 @@ func newTaskMenu(task tasks.Task, items []taskMenuItem, inPeek bool) *taskMenu {
 // Task-set rows use list keyed by task ID; Map rows use ticketList keyed by
 // ticket ID. ReplaceItems re-anchors the cursor by key on refresh (ADR-0079).
 type detailView struct {
-	row      DashboardRow
-	manifest *tasks.Manifest
-	taskRow  *tasks.Row
-	list     *ui.List[tasks.Task]
-	cols     *detailColumns
-	wfMap    *wayfinder.Map
+	row        DashboardRow
+	manifest   *tasks.Manifest
+	taskRow    *tasks.Row
+	list       *ui.List[tasks.Task]
+	cols       *detailColumns
+	wfMap      *wayfinder.Map
 	ticketList *ui.List[wayfinder.Ticket]
 	ticketCols *detailTicketColumns
 	frontier   map[string]bool
-	loading  bool
-	err      error
-	peek     *taskTextPeek
+	loading    bool
+	err        error
+	peek       *taskTextPeek
 	// statusMsg is a transient one-line message shown above the hint bar.
 	// Set to a hint on invalid transition; set to confirmation on success.
 	statusMsg string
@@ -2704,7 +2135,7 @@ func (m QueueDashboard) confirmBindModal() (tea.Model, tea.Cmd) {
 
 func (m QueueDashboard) reload() tea.Cmd {
 	return func() tea.Msg {
-		snap, err := BuildDashboard(m.d, m.cfg)
+		snap, err := work.BuildSnapshot(m.d.WorkDeps(), m.cfg)
 		return dashboardRowsMsg{snap: snap, err: err}
 	}
 }
@@ -2870,11 +2301,10 @@ func (m QueueDashboard) loadDetail(row DashboardRow) tea.Cmd {
 		if err != nil {
 			return dashboardDetailMsg{dashRow: row, err: err}
 		}
-		snap, _ := newDashboardSnapshot(d)
-		var bindings map[string]WorktreeBinding
-		if snap != nil {
-			bindings = snap.bindings
-		}
+		// The detail overlay needs only the per-set binding for the verify-verdict
+		// runtime resolution; read the bindings directly (the same if-exists borrow
+		// the snapshot build takes) rather than reopening the whole snapshot.
+		bindings, _ := binding.AllBindings(d.Tasks)
 		var cfg *config.Config
 		if d.LoadConfig != nil {
 			cfg, _ = d.LoadConfig(config.DefaultConfigPath())
@@ -4303,7 +3733,7 @@ func padDashboardCell(s string, width int) string {
 // quit for any other reason), leaving the workbench-aware open to the command
 // layer (task 02).
 func RunDashboard(d *Deps, cfg *config.Config) (string, error) {
-	snap, err := BuildDashboard(d, cfg)
+	snap, err := work.BuildSnapshot(d.WorkDeps(), cfg)
 	if err != nil {
 		return "", err
 	}
