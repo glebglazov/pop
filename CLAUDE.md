@@ -29,6 +29,8 @@ go test ./history
 - **history/** - JSON-based project access tracking for recency sorting
 - **ui/** - Bubbletea-based fuzzy picker TUI
 - **internal/deps/** - Interfaces and implementations for external dependencies (git, filesystem, tmux)
+- **work/** - The Work dashboard's data core (ADR-0143): snapshot building, row/`Snapshot`/`SetRef` types, the ADR-0121 sort comparator, and unstyled cell composition. Pure — no bubbletea/lipgloss.
+- **queue/** - `pop queue` supervisor, and the Work dashboard's TUI consumer of `work`: the Bubbletea model (`dashboard.go`), the static `pop queue status` render (`status.go`), and the render-shared layer both use — styled wrappers, style maps, column/layout math, table-line and header rendering (`render.go`).
 
 ### Testing Approach
 

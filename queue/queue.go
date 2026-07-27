@@ -4,6 +4,13 @@
 // serialization falls out of the Drain's transactional mutual exclusion in the
 // global store for free (ADR-0055), so the supervisor never coordinates within a
 // project, it only ensures at most one drain per idle project.
+//
+// queue also hosts the Work dashboard's TUI (dashboard.go) and its static
+// `pop queue status` render (status.go); both consume the top-level work
+// package, the dashboard's pure data core (ADR-0143). queue owns the styled
+// wrappers, style maps, and column/layout math the work package's rows are
+// rendered through (render.go) — the render-shared layer between the two
+// render surfaces.
 package queue
 
 import (

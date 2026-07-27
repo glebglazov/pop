@@ -96,9 +96,9 @@ func dashboardTestDeps(t *testing.T, rows []tasks.Row, locks map[string]*tasks.R
 func TestRenderStatusMirrorsDashboardRows(t *testing.T) {
 	td := queueDataDeps(t)
 	got := []DashboardRow{
-		{Project: "pop", SetRef: SetRef{SetID: "2026-01-01-rdy", RawStatus: tasks.StatusReady}, DestKind: dashboardDestNeedsBind},
-		{Project: "pop", SetRef: SetRef{SetID: "2026-01-02-blk", RawStatus: tasks.StatusBlocked}, DestKind: dashboardDestNeedsBind},
-		{Project: "pop", SetRef: SetRef{SetID: "2026-01-03-aa", RawStatus: tasks.StatusAwaitingApproval}, DestKind: dashboardDestNeedsBind},
+		{Project: "pop", SetRef: SetRef{SetID: "2026-01-01-rdy", RawStatus: tasks.StatusReady}, DestKind: work.DestNeedsBind},
+		{Project: "pop", SetRef: SetRef{SetID: "2026-01-02-blk", RawStatus: tasks.StatusBlocked}, DestKind: work.DestNeedsBind},
+		{Project: "pop", SetRef: SetRef{SetID: "2026-01-03-aa", RawStatus: tasks.StatusAwaitingApproval}, DestKind: work.DestNeedsBind},
 	}
 	// The shared comparator orders the full set exactly as the build does. The
 	// status table must render these same rows in this same order.
@@ -160,8 +160,8 @@ func TestRenderStatusMirrorsDashboardRows(t *testing.T) {
 func TestRenderStatusTableColumnsAndIndicator(t *testing.T) {
 	td := queueDataDeps(t)
 	rows := []DashboardRow{
-		{Project: "alpha", Started: true, SetRef: SetRef{SetID: "2026-03-01-inp", RawStatus: tasks.StatusReady, LiveDrain: true}, DestKind: dashboardDestManagedDirective},
-		{Project: "bravo", SetRef: SetRef{SetID: "2026-03-02-blk", RawStatus: tasks.StatusBlocked}, DestKind: dashboardDestNeedsBind},
+		{Project: "alpha", Started: true, SetRef: SetRef{SetID: "2026-03-01-inp", RawStatus: tasks.StatusReady, LiveDrain: true}, DestKind: work.DestManagedDirective},
+		{Project: "bravo", SetRef: SetRef{SetID: "2026-03-02-blk", RawStatus: tasks.StatusBlocked}, DestKind: work.DestNeedsBind},
 	}
 	sortDashboardRows(rows)
 
@@ -170,10 +170,10 @@ func TestRenderStatusTableColumnsAndIndicator(t *testing.T) {
 	text := out.String()
 
 	for _, want := range []string{
-		"IN PROGRESS",           // live-drained READY → IN PROGRESS
-		dashboardLiveDrainGlyph, // trailing live-drain indicator
-		dashboardDestLabelManagedWt,
-		dashboardDestLabelNeedsBind,
+		"IN PROGRESS",       // live-drained READY → IN PROGRESS
+		work.LiveDrainGlyph, // trailing live-drain indicator
+		work.DestLabelManagedWt,
+		work.DestLabelNeedsBind,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("status table missing %q:\n%s", want, text)
@@ -286,13 +286,13 @@ func TestDashboardAutoDrainWaitingMarkerAndCount(t *testing.T) {
 	plain := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady}}
 
 	// Per-row marker.
-	if got := dashboardStatusCell(idle); !strings.Contains(got, "· auto-drain") {
+	if got := work.StatusCell(idle); !strings.Contains(got, "· auto-drain") {
 		t.Errorf("consented+idle marker: got %q, want auto-drain suffix", got)
 	}
-	if got := dashboardStatusCell(pickedUp); strings.Contains(got, "auto-drain") {
+	if got := work.StatusCell(pickedUp); strings.Contains(got, "auto-drain") {
 		t.Errorf("consented+picked-up marker: got %q, want no auto-drain suffix", got)
 	}
-	if got := dashboardStatusCell(plain); strings.Contains(got, "auto-drain") {
+	if got := work.StatusCell(plain); strings.Contains(got, "auto-drain") {
 		t.Errorf("not-consented marker: got %q, want no auto-drain suffix", got)
 	}
 
@@ -308,10 +308,10 @@ func TestDashboardAutoDrainWaitingMarkerAndCount(t *testing.T) {
 	}
 
 	// Marker and count agree: both driven by the shared predicate.
-	if dashboardAutoDrainWaiting(idle) != strings.Contains(dashboardStatusCell(idle), "· auto-drain") {
+	if work.AutoDrainWaiting(idle) != strings.Contains(work.StatusCell(idle), "· auto-drain") {
 		t.Error("idle: predicate and marker disagree")
 	}
-	if dashboardAutoDrainWaiting(pickedUp) != strings.Contains(dashboardStatusCell(pickedUp), "· auto-drain") {
+	if work.AutoDrainWaiting(pickedUp) != strings.Contains(work.StatusCell(pickedUp), "· auto-drain") {
 		t.Error("picked-up: predicate and marker disagree")
 	}
 }
@@ -960,7 +960,7 @@ func TestDashboardTwoLineRowLine1ShowsIndicatorProjectSetIDWorktree(t *testing.T
 
 	// Line 1 carries PROJECT, TASK SET, WORKTREE and the trailing live-drain
 	// indicator; STATUS lives on line 2. A live drain lights the ● (ADR-0111).
-	for _, want := range []string{dashboardLiveDrainGlyph, "pop", row.SetID, "main"} {
+	for _, want := range []string{work.LiveDrainGlyph, "pop", row.SetID, "main"} {
 		if !strings.Contains(line1, want) {
 			t.Fatalf("two-line row line 1 missing expected value %q: %q", want, line1)
 		}
@@ -1070,12 +1070,12 @@ func TestDashboardLiveIndicator(t *testing.T) {
 	}
 
 	plain := dashboardLiveIndicator(live, false)
-	if plain != dashboardLiveDrainGlyph {
-		t.Fatalf("live indicator (plain) = %q, want %q", plain, dashboardLiveDrainGlyph)
+	if plain != work.LiveDrainGlyph {
+		t.Fatalf("live indicator (plain) = %q, want %q", plain, work.LiveDrainGlyph)
 	}
 	styled := dashboardLiveIndicator(live, true)
-	if !strings.Contains(styled, dashboardLiveDrainGlyph) {
-		t.Fatalf("live indicator (styled) = %q, want it to contain %q", styled, dashboardLiveDrainGlyph)
+	if !strings.Contains(styled, work.LiveDrainGlyph) {
+		t.Fatalf("live indicator (styled) = %q, want it to contain %q", styled, work.LiveDrainGlyph)
 	}
 	if styled == plain {
 		t.Fatalf("styled indicator = %q, want ANSI styling distinct from the plain glyph", styled)
@@ -1120,14 +1120,14 @@ func TestDashboardSingleLineDropsDrainColumnKeepsIndicator(t *testing.T) {
 	if liveIdx < 0 {
 		t.Fatalf("live row missing from view:\n%s", view)
 	}
-	if !strings.Contains(lines[liveIdx], dashboardLiveDrainGlyph) {
+	if !strings.Contains(lines[liveIdx], work.LiveDrainGlyph) {
 		t.Fatalf("live row missing ● indicator: %q", lines[liveIdx])
 	}
 	doneIdx := dashboardTestLineIndex(lines, "idle")
 	if doneIdx < 0 {
 		t.Fatalf("idle row missing from view:\n%s", view)
 	}
-	if strings.Contains(lines[doneIdx], dashboardLiveDrainGlyph) {
+	if strings.Contains(lines[doneIdx], work.LiveDrainGlyph) {
 		t.Fatalf("idle row must not show the ● indicator: %q", lines[doneIdx])
 	}
 }
@@ -1146,7 +1146,7 @@ func TestDashboardNarrowPaneKeepsIndicator(t *testing.T) {
 		t.Fatalf("indicator column width = %d, want >= 1 (never dropped)", fitted[dashboardColIndicator])
 	}
 	line := dashboardTableLine(dashboardRowValues(rows[0]), fitted)
-	if !strings.Contains(line, dashboardLiveDrainGlyph) {
+	if !strings.Contains(line, work.LiveDrainGlyph) {
 		t.Fatalf("narrow-pane live row missing ● indicator: %q", line)
 	}
 }
@@ -1258,13 +1258,13 @@ func TestDashboardStatusBucketColors(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			row := DashboardRow{SetRef: SetRef{RawStatus: c.status}, Started: c.started}
 			styled := dashboardStatusCellStyled(row)
-			label := dashboardStatusLabel(row)
+			label := work.StatusLabel(row)
 			// The bucket ANSI must wrap the base label token.
 			if !strings.Contains(styled, c.ansi+label) {
 				t.Fatalf("styled label = %q, want bucket %q on %q", styled, c.ansi, label)
 			}
 			// Width measurement stays plain: no ANSI in the un-styled cell.
-			if plain := dashboardStatusCell(row); strings.Contains(plain, "\x1b[") {
+			if plain := work.StatusCell(row); strings.Contains(plain, "\x1b[") {
 				t.Fatalf("plain cell should carry no ANSI: %q", plain)
 			}
 		})
@@ -1926,7 +1926,7 @@ func TestDashboardShowsUnsatisfiableWorktreeDirective(t *testing.T) {
 	if row.LiveDrain {
 		t.Fatalf("LiveDrain = true, want false (config error row is not a live drain)")
 	}
-	status := dashboardStatusCell(*row)
+	status := work.StatusCell(*row)
 	if !strings.Contains(status, "· config error:") || !strings.Contains(status, "no worktree of that name") {
 		t.Fatalf("status = %q, want a config error suffix for the unsatisfiable named directive", status)
 	}
@@ -4172,9 +4172,9 @@ func TestDashboardStatusSuffixesRender(t *testing.T) {
 			Orphaned:  true,
 		},
 		Worktree: "both-branch",
-		DestKind: dashboardDestBound,
+		DestKind: work.DestBound,
 	}
-	if s := dashboardStatusCell(both); !strings.Contains(s, " · auto-drain · orphaned") {
+	if s := work.StatusCell(both); !strings.Contains(s, " · auto-drain · orphaned") {
 		t.Fatalf("both row status = %q", s)
 	}
 
@@ -4205,7 +4205,7 @@ func TestDashboardParkedAndConfigErrorSuffixes(t *testing.T) {
 
 	for _, status := range []tasks.TaskSetStatus{tasks.StatusReady, tasks.StatusBlocked, tasks.StatusAwaitingApproval, tasks.StatusFailed} {
 		row := DashboardRow{SetRef: SetRef{RawStatus: status, Parked: true}}
-		if s := dashboardStatusCell(row); !strings.Contains(s, " · parked") {
+		if s := work.StatusCell(row); !strings.Contains(s, " · parked") {
 			t.Fatalf("status %s parked cell = %q, want a · parked suffix", status, s)
 		}
 		single := dashboardTableLine(dashboardRowValues(row), statusW)
@@ -4220,7 +4220,7 @@ func TestDashboardParkedAndConfigErrorSuffixes(t *testing.T) {
 
 	const msg = "no trunk worktree configured"
 	ce := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady, ConfigError: msg}}
-	if s := dashboardStatusCell(ce); !strings.Contains(s, " · config error: "+msg) {
+	if s := work.StatusCell(ce); !strings.Contains(s, " · config error: "+msg) {
 		t.Fatalf("config-error cell = %q, want a · config error suffix", s)
 	}
 	if ce.LiveDrain {
@@ -4248,7 +4248,7 @@ func TestDashboardParkedAndConfigErrorSuffixes(t *testing.T) {
 			ConfigError: "no trunk",
 		},
 	}
-	plain := dashboardStatusCell(multi)
+	plain := work.StatusCell(multi)
 	wantOrder := "· verified @ abcdef123456 · auto-drain · orphaned · parked · config error: no trunk"
 	if !strings.Contains(plain, wantOrder) {
 		t.Fatalf("multi-suffix cell = %q, want ordered suffixes %q", plain, wantOrder)
@@ -4391,13 +4391,13 @@ func TestDashboardMapRowTwoLineRender(t *testing.T) {
 		t.Fatalf("two-line line1 missing project/map id: %q", line1)
 	}
 	// WORKTREE blank: line1 should not carry needs-bind.
-	if strings.Contains(line1, dashboardDestLabelNeedsBind) {
+	if strings.Contains(line1, work.DestLabelNeedsBind) {
 		t.Fatalf("two-line line1 shows needs bind for map: %q", line1)
 	}
 	if !strings.Contains(line2, "3 open / 2 frontier") {
 		t.Fatalf("two-line line2 STATUS = %q", line2)
 	}
-	plain := dashboardStatusCell(row)
+	plain := work.StatusCell(row)
 	if plain != "WAYFINDING · 3 open / 2 frontier" {
 		t.Fatalf("map STATUS cell = %q", plain)
 	}
