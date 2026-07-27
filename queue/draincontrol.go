@@ -99,21 +99,12 @@ func LaunchDrain(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult,
 		if err := validateBoundWorktree(d, scans[0].ProjectPath, b); err != nil {
 			return DashboardDrainResult{}, fmt.Errorf("bound worktree for %s is invalid (%v); repair git state or run `pop tasks unbind-worktree`", ref.SetID, err)
 		}
-		worktreeReady, configErr := readRepoConfig(d, scans[0].ProjectPath)
-		if configErr != "" {
-			worktreeReady = false
-		}
-		sessionName := project.SessionNameWith(d.Project, b.RuntimePath)
-		if worktreeReady && rep != nil {
-			sessionName = rep.SessionName
-		}
-		dec.WorktreeReady = worktreeReady
 		dec.scan = projectScan{
 			Name:           dec.Project,
 			ProjectPath:    b.RuntimePath,
 			DefinitionPath: scans[0].DefinitionPath,
 			RuntimePath:    b.RuntimePath,
-			SessionName:    sessionName,
+			SessionName:    project.SessionNameWith(d.Project, b.RuntimePath),
 			RepoKey:        repoKey,
 		}
 	} else {
@@ -123,14 +114,12 @@ func LaunchDrain(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult,
 			}
 			return DashboardDrainResult{}, fmt.Errorf("no Trunk worktree configured; set trunk = true in a global [repo.\"<path>\"] block")
 		}
+		// An unbound row drains inline at the representative (the trunk) and records
+		// no binding. Provisioning a managed worktree or adopting an existing one is
+		// the Drain target picker's job (LaunchDrainTarget), which binds before this
+		// runs; by the time LaunchDrain is reached the set is either already bound
+		// (handled above) or an explicit inline trunk drain.
 		dec.scan = *rep
-		dec.WorktreeReady, _ = readRepoConfig(d, rep.ProjectPath)
-		if dec.WorktreeReady {
-			dec = prepareWorktreeDrain(d, io.Discard, dec)
-			if !dec.Actionable() {
-				return DashboardDrainResult{}, fmt.Errorf("%s", dec.Reason)
-			}
-		}
 	}
 
 	spawn, err := SpawnWithResult(d, dec)

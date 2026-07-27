@@ -275,9 +275,9 @@ func filterRunningElsewhere(decisions []Decision, runningElsewhere map[string]bo
 
 // applyBindingRouting routes an actionable drain to its per-set Worktree
 // binding when one exists, making the binding the universal drain router
-// (ADR-0035) — consulted for any repo. WorktreeReady decisions are left for
-// prepareWorktreeDrain, which reuses the binding while preserving the project
-// session.
+// (ADR-0035) — consulted for any repo. This is the decision-time projection (it
+// also marks the drain busy when the bound checkout is locked); the spawn-time
+// router (prepareWorktreeDrain → RouteDrainCheckout) resumes the same binding.
 func applyBindingRouting(d *Deps, scans []projectScan, decisions []Decision) {
 	bindings, err := binding.AllBindings(d.Tasks)
 	if err != nil || len(bindings) == 0 {
@@ -289,7 +289,7 @@ func applyBindingRouting(d *Deps, scans []projectScan, decisions []Decision) {
 	}
 	for i := range decisions {
 		dec := &decisions[i]
-		if !dec.Actionable() || dec.WorktreeReady {
+		if !dec.Actionable() {
 			continue
 		}
 		b, ok := bindings[setScopedKey(repoKey, dec.TaskSetID)]
@@ -313,11 +313,9 @@ func applyBindingRouting(d *Deps, scans []projectScan, decisions []Decision) {
 // reported (a single skip decision), never scheduled.
 func decideBareWithoutBase(d *Deps, cfg *config.Config, scans []projectScan, name string, delays []time.Duration, recoveryWaiters map[string]tasks.RecoveryWaiter, now time.Time, runningElsewhere map[string]bool) []Decision {
 	base := scans[0]
-	worktreeReady, configErr := readRepoConfig(d, base.ProjectPath)
 	skel := Decision{
 		Project:            name,
-		WorktreeReady:      worktreeReady,
-		ProjectConfigError: configErr,
+		ProjectConfigError: repoConfigError(d, base.ProjectPath),
 		scan:               projectScan{Name: name, ProjectPath: base.ProjectPath, DefinitionPath: base.DefinitionPath},
 	}
 

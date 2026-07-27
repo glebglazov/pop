@@ -347,7 +347,6 @@ type Decision struct {
 	TaskSetID          string // the drain to spawn; empty when nothing is actionable
 	Reason             string // why no drain was spawned (busy, no-ready-set, error)
 	WaitUntil          time.Time
-	WorktreeReady      bool
 	ProjectConfigError string
 	// AwaitingApprovalSetID is the first Task-set in AWAITING-APPROVAL state (AFK
 	// done, terminal HITL gate awaits human sign-off). Empty when the project has
@@ -365,6 +364,12 @@ type Decision struct {
 	Err        error
 	scan       projectScan
 	lockStatus *tasks.RuntimeLockStatus
+	// pinRuntimePath is set once a drain has been routed to a definite checkout
+	// (prepareWorktreeDrain → RouteDrainCheckout): the spawn then pins the inner
+	// implement to that checkout with --task-runtime-path so a reused pane can
+	// never re-resolve to its stale cwd (e.g. the trunk). It stays false for an
+	// inline representative drain, which resolves via the pane's own cwd.
+	pinRuntimePath bool
 }
 
 // applyDeferral projects a readiness SpawnDeferral onto a Decision: it records
@@ -394,10 +399,10 @@ func (d *Deps) now() time.Time {
 // Repository identity into one scheduling unit (ADR-0035), derives each repo's
 // actionable drain(s), and returns the Decisions for this scan. A repository is
 // scheduled at most once per Ready set regardless of how many worktrees it
-// expands into. Non-worktree-ready repos still return at most one actionable
-// Decision; worktree-ready repos may return one busy Decision per live worktree
-// drain plus one actionable Decision per Ready set not already running. It
-// performs no tmux side effects.
+// expands into. Drain routing runs unconditionally (ADR-0070/0072): a repo may
+// return one busy Decision per live worktree drain plus one actionable Decision
+// per queue-drainable Ready set not already running, each routed to its own
+// checkout. It performs no tmux side effects.
 func Scan(d *Deps, cfg *config.Config) ([]Decision, error) {
 	// Reconcile-then-read: heal dead-PID running Drains into crashed before the
 	// lock/outcome reads below project from them (ADR-0055). This covers
@@ -676,13 +681,14 @@ func decideProject(d *Deps, scan projectScan, now time.Time) Decision {
 }
 
 // decideProjectDispatches reads runtime locks and Ready sets for one project.
-// One live checkout lock makes the project busy; otherwise the
-// highest-priority Ready set is selected. A project with an explicit
-// WorktreeReady Decision keeps live worktree drains as per-checkout busy
-// Decisions but may still dispatch other Ready sets into fresh worktrees.
+// Live worktree drains surface as per-checkout busy Decisions; a v1 in-place lock
+// on the representative makes the project busy. Otherwise every queue-drainable
+// Ready set not already running is dispatched, each to its own checkout — drain
+// routing runs unconditionally (ADR-0070/0072), with per-checkout busy accounting
+// rather than repo-wide serialization.
 func decideProjectDispatches(d *Deps, scan projectScan, delays []time.Duration, recoveryWaiters map[string]tasks.RecoveryWaiter, now time.Time) []Decision {
 	dec := Decision{Project: scan.Name, scan: scan}
-	dec.WorktreeReady, dec.ProjectConfigError = readRepoConfig(d, scan.ProjectPath)
+	dec.ProjectConfigError = repoConfigError(d, scan.ProjectPath)
 
 	var decisions []Decision
 	runningSets := map[string]bool{}
@@ -700,26 +706,24 @@ func decideProjectDispatches(d *Deps, scan projectScan, delays []time.Duration, 
 			runningSets[id] = true
 		}
 	}
-	if dec.WorktreeReady {
-		openSpawns, err := liveOpenSpawns(d, scan)
-		if err != nil {
-			dec.Err = err
-			dec.Reason = "drain store"
-			return []Decision{dec}
+	openSpawns, err := liveOpenSpawns(d, scan)
+	if err != nil {
+		dec.Err = err
+		dec.Reason = "drain store"
+		return []Decision{dec}
+	}
+	for _, open := range openSpawns {
+		if open.Lock == nil || !open.Lock.Locked {
+			continue
 		}
-		for _, open := range openSpawns {
-			if open.Lock == nil || !open.Lock.Locked {
-				continue
-			}
-			busy := dec
-			busy.Busy = true
-			busy.Reason = "busy"
-			busy.TaskSetID = open.SetID
-			busy.lockStatus = open.Lock
-			busy.scan.RuntimePath = open.RuntimePath
-			decisions = append(decisions, busy)
-			runningSets[open.SetID] = true
-		}
+		busy := dec
+		busy.Busy = true
+		busy.Reason = "busy"
+		busy.TaskSetID = open.SetID
+		busy.lockStatus = open.Lock
+		busy.scan.RuntimePath = open.RuntimePath
+		decisions = append(decisions, busy)
+		runningSets[open.SetID] = true
 	}
 
 	lock := d.readLock(scan.RuntimePath)
@@ -730,7 +734,7 @@ func decideProjectDispatches(d *Deps, scan projectScan, delays []time.Duration, 
 	// in-place lock here would both double-count the live drain and short-circuit
 	// dispatch of the repo's other Ready sets into fresh worktrees, so fall
 	// through to the dispatch logic instead.
-	adoptedSpawn := dec.WorktreeReady && lock != nil && lock.Metadata != nil && runningSets[lock.Metadata.SetID]
+	adoptedSpawn := lock != nil && lock.Metadata != nil && runningSets[lock.Metadata.SetID]
 	if lock != nil && lock.Locked && !adoptedSpawn {
 		dec.Busy = true
 		dec.Reason = "busy"
@@ -782,9 +786,6 @@ func decideProjectDispatches(d *Deps, scan projectScan, delays []time.Duration, 
 			dec.Reason = "no ready set"
 		}
 		return appendOrOnly(decisions, dec)
-	}
-	if !dec.WorktreeReady && len(ids) > 1 {
-		ids = ids[:1]
 	}
 	for _, id := range ids {
 		if runningSets[id] {
@@ -924,12 +925,16 @@ func liveOpenSpawns(d *Deps, scan projectScan) ([]liveOpenSpawn, error) {
 	return out, nil
 }
 
-func readRepoConfig(d *Deps, repoRoot string) (bool, string) {
-	_, err := loadRepoConfig(d, repoRoot)
-	if err != nil {
-		return false, err.Error()
+// repoConfigError returns the non-empty error string when a repo's
+// .pop/config.toml fails to load (including the `worktree_ready was removed`
+// migration tripwire), else "". It surfaces the config-class defect on the
+// Decision without gating any routing — the drain router runs unconditionally
+// (ADR-0070/0072).
+func repoConfigError(d *Deps, repoRoot string) string {
+	if _, err := loadRepoConfig(d, repoRoot); err != nil {
+		return err.Error()
 	}
-	return false, ""
+	return ""
 }
 
 func loadRepoConfig(d *Deps, repoRoot string) (config.RepoConfig, error) {
@@ -1200,7 +1205,9 @@ func SpawnWithResult(d *Deps, dec Decision) (SpawnResult, error) {
 		return SpawnResult{}, fmt.Errorf("record spawn intent: %w", err)
 	}
 	command := fmt.Sprintf("pop tasks implement %s", shellQuote(dec.TaskSetID))
-	if dec.WorktreeReady && dec.scan.RuntimePath != "" {
+	// Pin implement to the routed checkout so a bound or managed drain runs where
+	// routing sent it instead of silently adopting the pane's cwd (the trunk).
+	if dec.pinRuntimePath && dec.scan.RuntimePath != "" {
 		command += " --task-runtime-path " + shellQuote(dec.scan.RuntimePath)
 	}
 	paneID, err := tmuxmod.EnsureTaggedPane(d.Tmux, tmuxmod.TagSet, dec.scan.SessionName, dec.scan.ProjectPath, dec.TaskSetID, command)

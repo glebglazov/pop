@@ -445,7 +445,7 @@ func RenderRunBaseline(out io.Writer, view RunView) {
 		fmt.Fprintln(out, "  none")
 	} else {
 		for _, q := range view.Queued {
-			projectLabel := projectLabelWithWorktree(repoLabelOrProject(q.RepoLabel, q.Project), q.RuntimePath, q.ReadySet, q.WorktreeReady, q.ProjectConfigError)
+			projectLabel := projectLabelWithWorktree(repoLabelOrProject(q.RepoLabel, q.Project), q.RuntimePath, q.ReadySet, q.ProjectConfigError)
 			fmt.Fprintf(out, "  %s: waiting ready set %s\n", projectLabel, q.ReadySet)
 		}
 	}
@@ -514,7 +514,7 @@ func formatRunningLine(p PickedUpSet) string {
 	if setID == "" {
 		setID = "(unknown set)"
 	}
-	projectLabel := projectLabelWithWorktree(repoLabelOrProject(p.RepoLabel, p.Project), p.RuntimePath, setID, p.WorktreeReady, p.ProjectConfigError)
+	projectLabel := projectLabelWithWorktree(repoLabelOrProject(p.RepoLabel, p.Project), p.RuntimePath, setID, p.ProjectConfigError)
 	started := ""
 	if !p.StartedAt.IsZero() {
 		started = " since " + p.StartedAt.UTC().Format(time.RFC3339)
@@ -736,7 +736,7 @@ func DiffRunView(prev *RunView, curr RunView) []string {
 		if setID == "" {
 			setID = "(unknown set)"
 		}
-		label := projectLabelWithWorktree(repoLabelOrProject(p.RepoLabel, p.Project), p.RuntimePath, setID, p.WorktreeReady, p.ProjectConfigError)
+		label := projectLabelWithWorktree(repoLabelOrProject(p.RepoLabel, p.Project), p.RuntimePath, setID, p.ProjectConfigError)
 		lines = append(lines, fmt.Sprintf("queue: %s: spawned drain for %s", label, setID))
 	}
 
@@ -746,7 +746,7 @@ func DiffRunView(prev *RunView, curr RunView) []string {
 		if _, ok := prevQueued[key]; ok {
 			continue
 		}
-		label := projectLabelWithWorktree(repoLabelOrProject(q.RepoLabel, q.Project), q.RuntimePath, q.ReadySet, q.WorktreeReady, q.ProjectConfigError)
+		label := projectLabelWithWorktree(repoLabelOrProject(q.RepoLabel, q.Project), q.RuntimePath, q.ReadySet, q.ProjectConfigError)
 		lines = append(lines, fmt.Sprintf("queue: %s: ready set %s", label, q.ReadySet))
 	}
 
@@ -891,8 +891,8 @@ func worktreeSuffix(runtimePath, setID string) string {
 // projectLabelWithWorktree returns the project/repo label with annotations and
 // an adopted-worktree suffix when the bound checkout basename differs from the
 // set identifier.
-func projectLabelWithWorktree(project, runtimePath, setID string, worktreeReady bool, configError string) string {
-	return statusProjectLabel(project+worktreeSuffix(runtimePath, setID), worktreeReady, configError)
+func projectLabelWithWorktree(project, runtimePath, setID string, configError string) string {
+	return statusProjectLabel(project+worktreeSuffix(runtimePath, setID), configError)
 }
 
 // repoLabelOrProject returns the repository-identity label when present,

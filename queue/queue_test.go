@@ -271,7 +271,7 @@ func TestDecideProjectNoReadySet(t *testing.T) {
 	}
 }
 
-func TestDecideProjectWorktreeReadyCausesConfigError(t *testing.T) {
+func TestDecideProjectRetiredConfigKeyCausesConfigError(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, ".pop"), 0o755); err != nil {
 		t.Fatal(err)
@@ -292,9 +292,6 @@ func TestDecideProjectWorktreeReadyCausesConfigError(t *testing.T) {
 
 	dec := decideProject(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, time.Now())
 
-	if dec.WorktreeReady {
-		t.Fatalf("WorktreeReady must always be false from config, got %+v", dec)
-	}
 	if dec.ProjectConfigError == "" {
 		t.Fatalf("worktree_ready in .pop/config.toml must cause ProjectConfigError, got empty: %+v", dec)
 	}
@@ -324,9 +321,6 @@ func TestDecideProjectMalformedRepoConfigReportsAndDegrades(t *testing.T) {
 
 	dec := decideProject(d, projectScan{Name: "proj", ProjectPath: root, RuntimePath: root, DefinitionPath: root}, time.Now())
 
-	if dec.WorktreeReady {
-		t.Fatalf("malformed .pop/config.toml must degrade to not worktree-ready: %+v", dec)
-	}
 	if !strings.Contains(dec.ProjectConfigError, ".pop/config.toml") {
 		t.Fatalf("ProjectConfigError = %q, want .pop/config.toml parse error", dec.ProjectConfigError)
 	}
@@ -566,7 +560,7 @@ func TestScanTreatsDrainAtHITLGateRuntimeLockAsBusy(t *testing.T) {
 	}
 }
 
-func TestDecideProjectDispatchesKeepsSingleInPlaceDrain(t *testing.T) {
+func TestDecideProjectDispatchesReportsEachUnboundSetNeedsBind(t *testing.T) {
 	d := &Deps{
 		Tasks:    queueTestTasksDeps(t, true),
 		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus { return idleLock(runtimePath) },
@@ -580,11 +574,17 @@ func TestDecideProjectDispatchesKeepsSingleInPlaceDrain(t *testing.T) {
 
 	decisions := decideProjectDispatches(d, projectScan{Name: "proj", RuntimePath: "/co", DefinitionPath: "/def"}, nil, nil, time.Now())
 
-	// Non-worktree-ready still collapses to a single set (the highest priority),
-	// but unbound and directive-free it is surfaced as needs-bind rather than
-	// dispatched in-place (ADR-0070/0072) — never a multi-set fan-out.
-	if len(decisions) != 1 || decisions[0].Actionable() || decisions[0].Reason != needsBindReason || decisions[0].BlockedSetID != "top" {
-		t.Fatalf("non-worktree-ready dispatches = %+v, want one needs-bind skip for top", decisions)
+	// Routing runs per set with no single-dispatch truncation (ADR-0070/0072):
+	// every Ready set is evaluated, and each unbound, directive-free set surfaces
+	// as its own needs-bind fault rather than being dispatched in-place.
+	if len(decisions) != 2 {
+		t.Fatalf("dispatches = %+v, want one needs-bind skip per unbound set", decisions)
+	}
+	for i, want := range []string{"top", "next"} {
+		dec := decisions[i]
+		if dec.Actionable() || dec.Reason != needsBindReason || dec.BlockedSetID != want {
+			t.Fatalf("decision[%d] = %+v, want needs-bind skip for %s", i, dec, want)
+		}
 	}
 }
 
@@ -970,99 +970,6 @@ func TestProvisionWorktreeAddsFreshBranchFromHead(t *testing.T) {
 	}
 }
 
-// TestPrepareWorktreeDrainUnboundStaysOnRepresentativeCheckout asserts an
-// unbound worktree-ready drain keeps the originating project session and stays
-// on the representative checkout: routing no longer provisions, so the runtime
-// path is not redirected to a managed worktree (ADR-0052). The "must not
-// provision" sentinel ensures a `git worktree add` would surface as an error.
-func TestPrepareWorktreeDrainUnboundStaysOnRepresentativeCheckout(t *testing.T) {
-	now := time.Date(2026, 6, 14, 9, 8, 7, 0, time.UTC)
-	d := worktreeProvisionDeps(t, now, fmt.Errorf("must not provision"))
-	dec := actionableDecision()
-	dec.WorktreeReady = true
-	dec.scan.RuntimePath = "/repo"
-	dec.scan.ProjectPath = "/repo"
-
-	got := prepareWorktreeDrain(d, &bytes.Buffer{}, dec)
-
-	if got.scan.RuntimePath != "/repo" || got.scan.ProjectPath != "/repo" {
-		t.Fatalf("unbound drain must stay on representative checkout, got %+v", got.scan)
-	}
-	if got.scan.SessionName != dec.scan.SessionName {
-		t.Fatalf("SessionName = %q, want originating project session %q", got.scan.SessionName, dec.scan.SessionName)
-	}
-}
-
-func TestPrepareWorktreeDrainNonReadyStaysInPlace(t *testing.T) {
-	d := worktreeProvisionDeps(t, time.Date(2026, 6, 14, 9, 8, 7, 0, time.UTC), fmt.Errorf("must not provision"))
-	dec := actionableDecision()
-	dec.WorktreeReady = false
-	dec.scan.RuntimePath = "/repo"
-	dec.scan.ProjectPath = "/repo"
-
-	got := prepareWorktreeDrain(d, &bytes.Buffer{}, dec)
-
-	if got.scan.RuntimePath != "/repo" || got.scan.ProjectPath != "/repo" {
-		t.Fatalf("non-worktree-ready project must stay in-place, got %+v", got.scan)
-	}
-}
-
-// TestPrepareWorktreeDrainUnboundSetsSerializeOnRepresentative asserts that two
-// unbound auto-drain sets in one repo both route to the single representative
-// checkout — no `git worktree add` runs — so they queue on that checkout's
-// Runtime execution lock instead of fanning into separate worktrees (ADR-0052).
-func TestPrepareWorktreeDrainUnboundSetsSerializeOnRepresentative(t *testing.T) {
-	xdg := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", xdg)
-	now := time.Date(2026, 6, 14, 9, 8, 7, 0, time.UTC)
-	worktreeAddCalls := 0
-	real := deps.NewRealFileSystem()
-	gitMock := func(dir string, args ...string) (string, error) {
-		if reflect.DeepEqual(args, []string{"rev-parse", "--git-common-dir"}) {
-			return filepath.Join("/repo", ".git"), nil
-		}
-		if len(args) >= 2 && args[0] == "worktree" && args[1] == "add" {
-			worktreeAddCalls++
-		}
-		return "", nil
-	}
-	d := &Deps{
-		Tasks: &tasks.Deps{
-			FS: &deps.MockFileSystem{
-				GetenvFunc:       func(key string) string { return xdg },
-				EvalSymlinksFunc: func(path string) (string, error) { return path, nil },
-				MkdirAllFunc:     real.MkdirAll,
-				WriteFileFunc:    real.WriteFile,
-				ReadFileFunc:     real.ReadFile,
-				RenameFunc:       real.Rename,
-				StatFunc:         real.Stat,
-			},
-			Git: &deps.MockGit{CommandInDirFunc: gitMock},
-		},
-		Now: func() time.Time { return now },
-	}
-
-	var routed []Decision
-	for _, setID := range []string{"2026-06-14-alpha", "2026-06-14-beta"} {
-		dec := actionableDecision()
-		dec.TaskSetID = setID
-		dec.WorktreeReady = true
-		dec.scan.RuntimePath = "/repo"
-		dec.scan.ProjectPath = "/repo"
-		routed = append(routed, prepareWorktreeDrain(d, &bytes.Buffer{}, dec))
-	}
-
-	if worktreeAddCalls != 0 {
-		t.Fatalf("git worktree add calls = %d, want 0 — unbound sets must not provision separate worktrees", worktreeAddCalls)
-	}
-	if routed[0].scan.RuntimePath != "/repo" || routed[1].scan.RuntimePath != "/repo" {
-		t.Fatalf("both unbound sets must land on the representative checkout /repo, got %q and %q", routed[0].scan.RuntimePath, routed[1].scan.RuntimePath)
-	}
-	if routed[0].scan.RuntimePath != routed[1].scan.RuntimePath {
-		t.Fatalf("unbound sets routed to different checkouts (%q != %q); expected one shared checkout to serialize on", routed[0].scan.RuntimePath, routed[1].scan.RuntimePath)
-	}
-}
-
 func TestPrepareWorktreeDrainReusesBindingWithoutWorktreeAdd(t *testing.T) {
 	xdg := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", xdg)
@@ -1114,7 +1021,6 @@ func TestPrepareWorktreeDrainReusesBindingWithoutWorktreeAdd(t *testing.T) {
 	})
 
 	dec := actionableDecision()
-	dec.WorktreeReady = true
 	dec.scan.RuntimePath = "/repo"
 	dec.scan.ProjectPath = "/repo"
 
@@ -1163,7 +1069,6 @@ func TestPrepareWorktreeDrainRefusesInvalidBinding(t *testing.T) {
 	})
 
 	dec := actionableDecision()
-	dec.WorktreeReady = true
 	dec.scan.RuntimePath = "/repo"
 	dec.scan.ProjectPath = "/repo"
 	var out bytes.Buffer
@@ -1237,7 +1142,7 @@ func TestSpawnCreatesQueueWindowWhenAbsent(t *testing.T) {
 func TestSpawnWorktreeDrainPassesRuntimeOverrideAndUsesWorktreeDir(t *testing.T) {
 	f := &tmuxtest.Fake{}
 	dec := actionableDecision()
-	dec.WorktreeReady = true
+	dec.pinRuntimePath = true
 	dec.scan.ProjectPath = "/pop/worktrees/repo/set"
 	dec.scan.RuntimePath = "/pop/worktrees/repo/set"
 	d := &Deps{Tmux: f}

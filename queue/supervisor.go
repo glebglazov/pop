@@ -77,21 +77,28 @@ func tick(d *Deps, out io.Writer, runOut *runOutputState) {
 		fmt.Fprintf(out, "queue: status: %v\n", err)
 	}
 
-	inPlaceFallbackSpawned := map[string]bool{}
+	// Per-checkout dispatch (ADR-0070/0072): each drain routes to its own
+	// checkout, so several of a repo's Ready sets dispatch in one tick. Two drains
+	// routed to the *same* checkout in one tick would race two implements into it,
+	// so the first wins and the rest defer to a later tick — distinct bound and
+	// freshly provisioned managed worktrees each dispatch.
+	spawnedCheckouts := map[string]bool{}
 	var spawned []PickedUpSet
 	for _, dec := range decisions {
 		switch {
 		case dec.Err != nil:
 		case dec.Actionable():
 			repoLabel := repoLabelFromScan(dec.scan)
-			originalRuntimePath := dec.scan.RuntimePath
 			dec = prepareWorktreeDrain(d, out, dec)
-			if dec.WorktreeReady && dec.scan.RuntimePath == originalRuntimePath {
-				if inPlaceFallbackSpawned[repoLabel] {
-					fmt.Fprintf(out, "queue: %s: skip in-place fallback for %s; another set already fell back this tick\n", repoLabel, dec.TaskSetID)
+			if !dec.Actionable() {
+				continue // routing refused (invalid binding, provision failure); already reported.
+			}
+			if path := dec.scan.RuntimePath; path != "" {
+				if spawnedCheckouts[path] {
+					fmt.Fprintf(out, "queue: %s: skip %s; another set already dispatched to %s this tick\n", repoLabel, dec.TaskSetID, path)
 					continue
 				}
-				inPlaceFallbackSpawned[repoLabel] = true
+				spawnedCheckouts[path] = true
 			}
 			spawn, err := SpawnWithResult(d, dec)
 			if err != nil {
@@ -101,9 +108,9 @@ func tick(d *Deps, out io.Writer, runOut *runOutputState) {
 			if err := recordDrainPane(d, dec, spawn.PaneID, "supervisor"); err != nil {
 				fmt.Fprintf(out, "queue: %s: record drain pane %s: %v\n", repoLabel, dec.TaskSetID, err)
 			}
-			label := statusProjectLabel(repoLabel, dec.WorktreeReady, dec.ProjectConfigError)
+			label := statusProjectLabel(repoLabel, dec.ProjectConfigError)
 			fmt.Fprintf(out, "queue: %s: spawned drain for %s\n", label, dec.TaskSetID)
-			spawned = append(spawned, PickedUpSet{Project: dec.Project, RepoLabel: repoLabel, SetID: dec.TaskSetID, WorktreeReady: dec.WorktreeReady, ProjectConfigError: dec.ProjectConfigError})
+			spawned = append(spawned, PickedUpSet{Project: dec.Project, RepoLabel: repoLabel, SetID: dec.TaskSetID, ProjectConfigError: dec.ProjectConfigError})
 		}
 	}
 
@@ -121,13 +128,14 @@ func tick(d *Deps, out io.Writer, runOut *runOutputState) {
 	tickRoutines(d, out)
 }
 
-// prepareWorktreeDrain routes a worktree-ready actionable drain to its checkout.
-// A bound set resumes at its bound worktree; an unbound set stays on the
-// representative checkout — routing never provisions, so the repo's unbound
-// Ready sets all land on one checkout and serialize on its runtime execution
-// lock instead of fanning into separate worktrees (ADR-0052).
+// prepareWorktreeDrain routes an actionable drain to its checkout (ADR-0070/0072).
+// Routing runs unconditionally: a bound set resumes at its bound worktree, and an
+// unbound set carrying a managed intent provisions a worktree forked from the
+// Trunk worktree and binds it — the one place routing provisions. Unbound sets
+// with no intent never reach here: the queue-drainable check faults them before
+// dispatch, so routing has no in-place fallback to invent a checkout.
 func prepareWorktreeDrain(d *Deps, out io.Writer, dec Decision) Decision {
-	if !dec.Actionable() || !dec.WorktreeReady {
+	if !dec.Actionable() {
 		return dec
 	}
 	var cfg *config.Config
@@ -157,6 +165,7 @@ func prepareWorktreeDrain(d *Deps, out io.Writer, dec Decision) Decision {
 	}
 	dec.scan.ProjectPath = route.RuntimePath
 	dec.scan.RuntimePath = route.RuntimePath
+	dec.pinRuntimePath = true
 	return dec
 }
 

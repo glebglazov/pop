@@ -60,10 +60,9 @@ func TestRenderStatusFromLocksAndState(t *testing.T) {
 			},
 		},
 		{
-			Project:       "waiting",
-			TaskSetID:     "set-ready",
-			Reason:        "ready",
-			WorktreeReady: true,
+			Project:   "waiting",
+			TaskSetID: "set-ready",
+			Reason:    "ready",
 		},
 		{
 			Project:            "idle",

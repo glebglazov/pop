@@ -251,14 +251,13 @@ func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult
 	}
 
 	// 4. Otherwise the first no-directive drain persists a default Worktree binding
-	// to the checkout it resolved and resumes there on later drains (ADR-0062),
-	// rather than running transiently. Foreground binds to the current checkout;
-	// the Queue feeds the repo's integration target as the current checkout, so
-	// both bind to currentRuntime — the difference is which checkout the caller
-	// chose, not what routing re-derives. The binding is adopted (Provisioned=false,
-	// never torn down): routing chose the checkout but never created it, and the
-	// integration target especially must never be removed. It records the branch
-	// too, so the dashboard reads execution checkout and branch from the table.
+	// to the current checkout and resumes there on later drains (ADR-0062), rather
+	// than running transiently. In practice only a foreground implement reaches this
+	// step: the Queue faults an unbound, no-intent set as needs-bind before dispatch
+	// (ADR-0070/0072), so it never routes here to land on the trunk. The binding is
+	// adopted (Provisioned=false, never torn down): routing chose the checkout but
+	// never created it, so it must never be removed. It records the branch too, so
+	// the dashboard reads execution checkout and branch from the table.
 	b := Adopt(currentRuntime, CurrentBranch(req.TD, currentRuntime), DetectProject(req.PD, req.TD, req.Config, repoID))
 	if err := Put(req.TD, key, b); err != nil {
 		return RouteDrainCheckoutResult{}, err

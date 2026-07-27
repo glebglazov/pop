@@ -20,7 +20,6 @@ type PickedUpSet struct {
 	RuntimePath        string
 	PID                int
 	StartedAt          time.Time
-	WorktreeReady      bool
 	ProjectConfigError string
 }
 
@@ -43,7 +42,6 @@ type IdleProject struct {
 	// (ADR-0106) carried through from the Decision. The run view classifies and
 	// renders blocked rows from it rather than re-matching Reason strings.
 	Deferral           SpawnDeferral
-	WorktreeReady      bool
 	ProjectConfigError string
 	// RuntimePath is the bound checkout for the set represented by this idle
 	// project, when one exists. It is used to surface an adopted-worktree suffix
@@ -109,7 +107,7 @@ func statusFromDecisions(d *Deps, decisions []Decision) (StatusSnapshot, error) 
 		repoLabel := repoLabelFromScan(dec.scan)
 		if dec.Busy {
 			lock := dec.lockStatus
-			picked := PickedUpSet{Project: dec.Project, RepoLabel: repoLabel, WorktreeReady: dec.WorktreeReady, ProjectConfigError: dec.ProjectConfigError}
+			picked := PickedUpSet{Project: dec.Project, RepoLabel: repoLabel, ProjectConfigError: dec.ProjectConfigError}
 			if lock != nil {
 				picked.RuntimePath = lock.RuntimePath
 				if lock.Metadata != nil {
@@ -123,14 +121,14 @@ func statusFromDecisions(d *Deps, decisions []Decision) (StatusSnapshot, error) 
 			continue
 		}
 		if dec.Err != nil {
-			snap.Idle = append(snap.Idle, IdleProject{Project: dec.Project, RepoLabel: repoLabel, Waiting: "error", Reason: dec.Err.Error(), WorktreeReady: dec.WorktreeReady, ProjectConfigError: dec.ProjectConfigError})
+			snap.Idle = append(snap.Idle, IdleProject{Project: dec.Project, RepoLabel: repoLabel, Waiting: "error", Reason: dec.Err.Error(), ProjectConfigError: dec.ProjectConfigError})
 			continue
 		}
 		if dec.TaskSetID == "" && dec.Reason == repoScanReason {
 			snap.Skipped = append(snap.Skipped, SkippedRepo{Project: dec.Project, RepoLabel: repoLabel, Reason: dec.Reason})
 			continue
 		}
-		idle := IdleProject{Project: dec.Project, RepoLabel: repoLabel, Reason: dec.Reason, WorktreeReady: dec.WorktreeReady, ProjectConfigError: dec.ProjectConfigError, AwaitingApprovalSetID: dec.AwaitingApprovalSetID, BlockedSetID: dec.BlockedSetID, WaitUntil: dec.WaitUntil, Deferral: dec.Deferral}
+		idle := IdleProject{Project: dec.Project, RepoLabel: repoLabel, Reason: dec.Reason, ProjectConfigError: dec.ProjectConfigError, AwaitingApprovalSetID: dec.AwaitingApprovalSetID, BlockedSetID: dec.BlockedSetID, WaitUntil: dec.WaitUntil, Deferral: dec.Deferral}
 		if dec.TaskSetID != "" {
 			idle.Waiting = "ready"
 			idle.ReadySet = dec.TaskSetID
@@ -230,11 +228,8 @@ func repoLabelFromScan(scan projectScan) string {
 	return scan.Name
 }
 
-func statusProjectLabel(project string, worktreeReady bool, configError string) string {
+func statusProjectLabel(project string, configError string) string {
 	label := project
-	if worktreeReady {
-		label += " [worktree-ready]"
-	}
 	if configError != "" {
 		label += " [.pop/config.toml error: " + configError + "]"
 	}
