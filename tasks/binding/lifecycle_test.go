@@ -305,6 +305,103 @@ func TestBindWorktreeRefusesWhileLocked(t *testing.T) {
 	}
 }
 
+func lockedBySet(setID string) func(string) *tasks.RuntimeLockStatus {
+	return func(runtimePath string) *tasks.RuntimeLockStatus {
+		return &tasks.RuntimeLockStatus{
+			Locked:   true,
+			Metadata: &tasks.RuntimeLockMetadata{RuntimePath: runtimePath, SetID: setID},
+		}
+	}
+}
+
+// TestBindWorktreeSucceedsWhileOtherSetLocked: N sets can share one checkout
+// (ADR-0115/0116); an unrelated set's drain must not block re-pointing set-A.
+func TestBindWorktreeSucceedsWhileOtherSetLocked(t *testing.T) {
+	repo := initAdoptRepo(t)
+	wt1 := addLinkedWorktree(t, repo, "branch-shared")
+	wt2 := addLinkedWorktree(t, repo, "branch-new")
+	td := lifecycleTestDeps(t)
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+
+	if _, err := BindWorktree(td, nil, cfg, "set-A", wt1, BindWorktreeOptions{}, LifecycleHooks{}, io.Discard); err != nil {
+		t.Fatalf("initial bind: %v", err)
+	}
+
+	hooks := LifecycleHooks{ReadLock: lockedBySet("set-B")}
+	got, err := BindWorktree(td, nil, cfg, "set-A", wt2, BindWorktreeOptions{Force: true}, hooks, io.Discard)
+	if err != nil {
+		t.Fatalf("bind while other set locked: %v", err)
+	}
+	if !got.Replaced {
+		t.Fatalf("got.Replaced = false, want true (re-point)")
+	}
+}
+
+// TestBindWorktreeRefusesWhileSameSetLocked: the refusal remains when set-A
+// itself holds the live runtime execution lock.
+func TestBindWorktreeRefusesWhileSameSetLocked(t *testing.T) {
+	repo := initAdoptRepo(t)
+	wt1 := addLinkedWorktree(t, repo, "branch-self")
+	wt2 := addLinkedWorktree(t, repo, "branch-self-new")
+	td := lifecycleTestDeps(t)
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+
+	if _, err := BindWorktree(td, nil, cfg, "set-A", wt1, BindWorktreeOptions{}, LifecycleHooks{}, io.Discard); err != nil {
+		t.Fatalf("initial bind: %v", err)
+	}
+
+	hooks := LifecycleHooks{ReadLock: lockedBySet("set-A")}
+	_, err := BindWorktree(td, nil, cfg, "set-A", wt2, BindWorktreeOptions{Force: true}, hooks, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "currently executing") {
+		t.Fatalf("err = %v, want currently-executing refusal", err)
+	}
+}
+
+// TestUnbindSucceedsWhileOtherSetLocked: unbinding set-A only deletes set-A's
+// binding row; an unrelated set-B drain on the shared checkout is untouched.
+func TestUnbindSucceedsWhileOtherSetLocked(t *testing.T) {
+	repo := initAdoptRepo(t)
+	wt := addLinkedWorktree(t, repo, "set-shared")
+	td := lifecycleTestDeps(t)
+	seedLifecycleBinding(t, td, repo, "set-A", Binding{
+		RuntimePath: wt,
+		Branch:      "set-shared",
+		Project:     filepath.Base(repo),
+	})
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+
+	hooks := LifecycleHooks{ReadLock: lockedBySet("set-B")}
+	if _, err := UnbindWorktree(td, nil, cfg, "set-A", UnbindWorktreeOptions{Yes: true, In: tasks.NonInteractiveReader{}}, hooks, io.Discard); err != nil {
+		t.Fatalf("unbind while other set locked: %v", err)
+	}
+	if len(loadLifecycleBindings(t, td)) != 0 {
+		t.Fatalf("binding should be released")
+	}
+}
+
+// TestUnbindRefusesWhileSameSetLocked: the refusal remains when set-A itself
+// holds the live runtime execution lock.
+func TestUnbindRefusesWhileSameSetLocked(t *testing.T) {
+	repo := initAdoptRepo(t)
+	wt := addLinkedWorktree(t, repo, "set-self")
+	td := lifecycleTestDeps(t)
+	seedLifecycleBinding(t, td, repo, "set-A", Binding{
+		RuntimePath: wt,
+		Branch:      "set-self",
+		Project:     filepath.Base(repo),
+	})
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+
+	hooks := LifecycleHooks{ReadLock: lockedBySet("set-A")}
+	_, err := UnbindWorktree(td, nil, cfg, "set-A", UnbindWorktreeOptions{Yes: true, In: tasks.NonInteractiveReader{}}, hooks, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "currently executing") {
+		t.Fatalf("err = %v, want currently-executing refusal", err)
+	}
+	if len(loadLifecycleBindings(t, td)) != 1 {
+		t.Fatalf("binding should be retained while set-A executes")
+	}
+}
+
 func TestUnbindRefusesWhileBusy(t *testing.T) {
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "set-busy")

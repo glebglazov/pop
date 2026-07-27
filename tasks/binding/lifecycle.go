@@ -67,6 +67,18 @@ func readRuntimeLock(hooks LifecycleHooks, runtimePath string) *tasks.RuntimeLoc
 	return nil
 }
 
+// lockedByAnotherSet reports whether a live runtime lock is attributable to a
+// set other than setID. N sets can share one checkout (ADR-0115/0116), so an
+// unrelated set's drain must not block retargeting or releasing setID's binding
+// — only setID's own live lock refuses the verb. A locked status with no
+// attributable owner is treated as setID's own hold (the conservative default),
+// keeping the "currently executing" refusal.
+func lockedByAnotherSet(lock *tasks.RuntimeLockStatus, setID string) bool {
+	return lock != nil && lock.Locked &&
+		lock.Metadata != nil && lock.Metadata.SetID != "" &&
+		lock.Metadata.SetID != setID
+}
+
 // BindWorktree creates an adopted (Provisioned=false) binding for (repo
 // identity, setID) pointing to checkoutPath. Run from inside the checkout;
 // pass os.Getwd() as checkoutPath. It refuses to re-point a set already bound
@@ -110,10 +122,7 @@ func BindWorktree(td *tasks.Deps, pd *project.Deps, cfg *config.Config, setID, c
 	var replaced bool
 	if ok {
 		lock := readRuntimeLock(hooks, existing.RuntimePath)
-		if lock != nil && lock.Locked {
-			if lock.Metadata != nil && lock.Metadata.SetID != "" && lock.Metadata.SetID != setID {
-				return BindWorktreeResult{}, fmt.Errorf("refusing bind-worktree: %s runtime checkout is locked for another set (%s)", setID, lock.Metadata.SetID)
-			}
+		if lock != nil && lock.Locked && !lockedByAnotherSet(lock, setID) {
 			return BindWorktreeResult{}, fmt.Errorf("refusing bind-worktree: %s is currently executing", setID)
 		}
 		existingCanon, _ := canonicalCheckoutPath(td, existing.RuntimePath)
@@ -209,10 +218,7 @@ func unbindResolvedBinding(td *tasks.Deps, pd *project.Deps, cfg *config.Config,
 	}
 
 	lock := readRuntimeLock(hooks, wt.RuntimePath)
-	if lock != nil && lock.Locked {
-		if lock.Metadata != nil && lock.Metadata.SetID != "" && lock.Metadata.SetID != setID {
-			return UnbindWorktreeResult{}, fmt.Errorf("%s runtime checkout is locked for another set (%s); refusing unbind", setID, lock.Metadata.SetID)
-		}
+	if lock != nil && lock.Locked && !lockedByAnotherSet(lock, setID) {
 		return UnbindWorktreeResult{}, fmt.Errorf("%s is currently executing; refusing unbind", setID)
 	}
 
