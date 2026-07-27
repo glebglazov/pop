@@ -838,7 +838,7 @@ func (e *execFixture) deps() *Deps {
 	return &Deps{
 		FS:     deps.NewRealFileSystem(),
 		Git:    deps.NewRealGit(),
-		Runner: RealCommandRunner{},
+		Runner: fakeAwareRunner{},
 	}
 }
 
@@ -850,7 +850,11 @@ func (e *execFixture) runOpts(yes bool, agentCmd string) RunTaskOptions {
 	}
 }
 
-func writeFakeAgent(t *testing.T, root string, cfg fakeAgentConfig) string {
+// writeRealShimAgent installs a real #!/bin/sh agent shim and returns its path.
+// It is the pre-ADR-0144 writeFakeAgent, kept for the named real-subprocess
+// smoke set (see realShimSmokeSet); the default writeFakeAgent now returns an
+// in-process fake token instead of spawning a shell.
+func writeRealShimAgent(t *testing.T, root string, cfg fakeAgentConfig) string {
 	t.Helper()
 	path := filepath.Join(root, ".agent", "fake-agent.sh")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -906,15 +910,20 @@ func writeFakePiAgent(t *testing.T, root, quotaLine string) string {
 	return path
 }
 
+// initExecutorGitRepo lays down a runtime checkout: an initialized git repo
+// with a test identity, gitignore, and a README committed as the initial
+// revision. The repo is invariant, so it is built once and copied per test
+// (ADR-0144) rather than re-running five git subprocesses each time; the drain
+// still runs real git against the copy for the operations under exercise.
 func initExecutorGitRepo(t *testing.T, root string) {
 	t.Helper()
-	runGit(t, root, "init")
-	runGit(t, root, "config", "user.email", "test@test")
-	runGit(t, root, "config", "user.name", "test")
-	writeFile(t, filepath.Join(root, ".gitignore"), "thoughts/\n.agent/\n.xdg/\n")
-	writeFile(t, filepath.Join(root, "README.md"), "# test\n")
-	runGit(t, root, "add", "-A")
-	runGit(t, root, "commit", "-m", "init")
+	tmpl, err := gitTemplatePath()
+	if err != nil {
+		t.Fatalf("build git template: %v", err)
+	}
+	if err := copyTemplateTree(tmpl, root); err != nil {
+		t.Fatalf("copy git template: %v", err)
+	}
 }
 
 func realGitInDir(dir string, args ...string) (string, error) {

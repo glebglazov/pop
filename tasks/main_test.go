@@ -32,5 +32,8 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	retryDelayWaitHook = nil
 	_ = os.RemoveAll(dir)
+	if gitTemplateDir != "" {
+		_ = os.RemoveAll(gitTemplateDir)
+	}
 	os.Exit(code)
 }

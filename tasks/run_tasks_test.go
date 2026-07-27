@@ -22,7 +22,8 @@ func TestRunTaskSetDrainsMultipleAFKTasksInOrder(t *testing.T) {
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open"},
 	})
-	agent := writeFakeAgent(t, env.root, fakeAgentConfig{
+	// Real-subprocess smoke: spawn + stream pumping (see realShimSmokeSet).
+	agent := writeRealShimAgent(t, env.root, fakeAgentConfig{
 		changeFile: "impl.txt",
 		changeData: "x\n",
 		checkTask:  true,
@@ -444,7 +445,7 @@ func TestRunTaskSetFailedGateBlocksRecoveryTurnOnSameCheckout(t *testing.T) {
 	d := &Deps{
 		FS:     deps.NewRealFileSystem(),
 		Git:    deps.NewRealGit(),
-		Runner: RealCommandRunner{},
+		Runner: fakeAwareRunner{},
 	}
 	runtimePath, err := ResolveRuntimePathWith(d, root, "")
 	if err != nil {
@@ -1303,7 +1304,8 @@ func TestRunTaskSetFailedTaskStopsDrain(t *testing.T) {
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open"},
 	})
-	agent := writeSequentialFakeAgent(t, env.root, []fakeAgentStep{
+	// Real-subprocess smoke: non-zero exit (see realShimSmokeSet).
+	agent := writeSequentialRealShimAgent(t, env.root, []fakeAgentStep{
 		{summary: "ok"},
 		{exitCode: 1},
 	})
@@ -1394,7 +1396,9 @@ func TestRunTaskSetTimeoutPropagation(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
-	agent := writeFakeAgent(t, env.root, fakeAgentConfig{
+	// Real-subprocess smoke: timeout kill (see realShimSmokeSet). The fake never
+	// hangs, so exercising the SIGKILL-on-timeout path needs a real shim.
+	agent := writeRealShimAgent(t, env.root, fakeAgentConfig{
 		summary:  "slow",
 		sleepFor: 200 * time.Millisecond,
 	})
@@ -2710,7 +2714,7 @@ func (e *runTaskSetFixture) deps() *Deps {
 	return &Deps{
 		FS:     deps.NewRealFileSystem(),
 		Git:    deps.NewRealGit(),
-		Runner: RealCommandRunner{},
+		Runner: fakeAwareRunner{},
 		// Spin the recovery-wait loop fast so tests that park a drain and then
 		// deregister the waiter observe the exit in milliseconds rather than
 		// blocking on the real 2s fast-check / 5s-30s poll cadence.
@@ -2800,7 +2804,7 @@ func (r *hitlAssistanceRunner) Run(ctx context.Context, dir string, stdout, stde
 }
 
 func (r *hitlAssistanceRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
-	return RealCommandRunner{}.Start(ctx, dir, stdout, stderr, name, args...)
+	return fakeAwareRunner{}.Start(ctx, dir, stdout, stderr, name, args...)
 }
 
 type configurableHITLAssistanceRunner struct {
@@ -2840,7 +2844,7 @@ func (r *configurableHITLAssistanceRunner) run(name string, args ...string) (int
 }
 
 func (r *configurableHITLAssistanceRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
-	return RealCommandRunner{}.Start(ctx, dir, stdout, stderr, name, args...)
+	return fakeAwareRunner{}.Start(ctx, dir, stdout, stderr, name, args...)
 }
 
 func setTaskStatus(t *testing.T, tasksDir, taskID string, status TaskStatus, failedAfter *int) {
@@ -2859,7 +2863,11 @@ func setTaskStatus(t *testing.T, tasksDir, taskID string, status TaskStatus, fai
 	t.Fatalf("task %s not found", taskID)
 }
 
-func writeSequentialFakeAgent(t *testing.T, root string, steps []fakeAgentStep) string {
+// writeSequentialRealShimAgent installs a real #!/bin/sh agent shim scripted
+// over a sequence of attempts. It is the pre-ADR-0144 writeSequentialFakeAgent,
+// kept for the named real-subprocess smoke set (see realShimSmokeSet); the
+// default writeSequentialFakeAgent now returns an in-process fake token.
+func writeSequentialRealShimAgent(t *testing.T, root string, steps []fakeAgentStep) string {
 	t.Helper()
 	path := filepath.Join(root, ".agent", "seq-agent.sh")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -2904,7 +2912,7 @@ type shellSpawnRunner struct {
 }
 
 func (r *shellSpawnRunner) Run(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (int, error) {
-	return RealCommandRunner{}.Run(ctx, dir, stdout, stderr, name, args...)
+	return fakeAwareRunner{}.Run(ctx, dir, stdout, stderr, name, args...)
 }
 
 func (r *shellSpawnRunner) RunAttended(ctx context.Context, dir string, stdin io.Reader, stdout, stderr io.Writer, name string, args ...string) (int, error) {
@@ -2915,5 +2923,5 @@ func (r *shellSpawnRunner) RunAttended(ctx context.Context, dir string, stdin io
 }
 
 func (r *shellSpawnRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
-	return RealCommandRunner{}.Start(ctx, dir, stdout, stderr, name, args...)
+	return fakeAwareRunner{}.Start(ctx, dir, stdout, stderr, name, args...)
 }
