@@ -1,9 +1,11 @@
 ---
-status: accepted
+status: superseded by ADR-0148
 supersedes: [ADR-0030, ADR-0051]
 ---
 
 # Worktree-set integration is removed; merging is the human's own concern
+
+> **Superseded by [ADR-0148](0148-fold-lands-a-finished-set-and-releases-its-checkout.md):** merging returns as a single explicit verb, `pop tasks fold <set>`, filling the hole this ADR names — the Done-set clean-up reminder that never had a verb behind it. This ADR's actual objection is upheld, not reversed: fold keeps no backlog, computes no mergeability verdict, and adds no status suffix, so no background second source of truth returns. ADR-0148 carries forward the retirement of the Integration target in both roles, and `pop integrate <agent>` keeps its unrelated name.
 
 > **Relates:** amends [ADR-0052](0052-drain-checkout-is-chosen-not-auto-provisioned.md) and [ADR-0062](0062-no-directive-drain-persists-a-default-binding.md) (the Integration-target fallback they relied on is gone). Does **not** touch `pop integrate <agent>` (ADR-0010/0011/0064/0065) — that is the unrelated monitor-setup feature that keeps the word "integrate".
 
