@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/glebglazov/pop/config"
-	"github.com/glebglazov/pop/internal/deps"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
@@ -145,8 +145,8 @@ func LaunchDrain(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult,
 
 // LaunchVerify spawns a Verifier pane on the dashboard row's set (ADR-0123). It
 // is the lighter counterpart to LaunchDrain: it runs `pop tasks verify <set>`
-// pinned to the row's runtime path through the same `spawnDrain` helper (so the
-// pane inherits the `@pop_set` pane-per-set tagging), but records neither a
+// pinned to the row's runtime path through the same EnsureTaggedPane composite
+// (so the pane inherits the module's per-set pane tagging), but records neither a
 // Runtime execution lock, a spawn intent, nor a DrainPane — verify is not a
 // drain, so the `●` live-drain indicator must stay dark and `p` must not reach
 // this pane. An empty runtime path omits the flag and lets `pop tasks verify`
@@ -170,8 +170,8 @@ func LaunchVerify(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult
 	}
 	// The pane spawns into the checkout the verdict must judge: the row's runtime
 	// path when it resolves to one (a bound worktree or trunk), else the project
-	// root. spawnDrain reuses this set's existing @pop_set pane, so verify lands
-	// in the same session the set's drain would.
+	// root. EnsureTaggedPane reuses this set's existing tagged pane, so verify
+	// lands in the same session the set's drain would.
 	base := strings.TrimSpace(ref.RuntimePath)
 	if base == "" {
 		base = scans[0].ProjectPath
@@ -181,7 +181,7 @@ func LaunchVerify(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult
 		command += " --task-runtime-path " + shellQuote(ref.RuntimePath)
 	}
 	session := project.SessionNameWith(d.Project, base)
-	paneID, err := spawnDrain(d.Tmux, session, base, ref.SetID, command)
+	paneID, err := tmuxmod.EnsureTaggedPane(d.Tmux, tmuxmod.TagSet, session, base, ref.SetID, command)
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
@@ -219,13 +219,9 @@ func PreviewDrain(d *Deps, ref SetRef) error {
 		d = DefaultDeps()
 	}
 	if d.Tmux == nil {
-		d.Tmux = deps.NewRealTmux()
+		d.Tmux = tmuxmod.New()
 	}
-	if _, err := d.Tmux.Command("select-pane", "-t", ref.PaneID); err != nil {
-		return err
-	}
-	_, err := d.Tmux.Command("switch-client", "-t", ref.PaneID)
-	return err
+	return tmuxmod.FocusPane(d.Tmux, ref.PaneID)
 }
 
 // UnbindWorktree releases the highlighted set's worktree binding

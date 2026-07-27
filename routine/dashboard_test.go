@@ -12,6 +12,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
+	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 	"github.com/glebglazov/pop/store"
 	"github.com/glebglazov/pop/tasks"
 )
@@ -63,39 +65,111 @@ func routineDashboardDeps(t *testing.T) (*Deps, string) {
 	return d, home
 }
 
+// recordingTmux is a command-recording tmux.Tmux for the routine tests that
+// only need a placeholder tmux or assert on which subcommands ran. It embeds
+// the shared stateful fake for the verbs it does not override, and replays the
+// old session-agnostic seeded behaviour (windowNames + paneList) so the many
+// non-spawn tests keep working unchanged. Dedicated spawn tests use a plain
+// tmuxtest.Fake and assert on pane state instead.
 type recordingTmux struct {
-	deps.MockTmux
-	commands [][]string
-	paneList string
+	*tmuxtest.Fake
+	commands    [][]string
+	hasSession  bool
+	windowNames map[string]bool
+	paneList    string
 }
 
 func newRecordingTmux(hasSession bool, listOut string) *recordingTmux {
-	rt := &recordingTmux{}
-	rt.HasSessionFunc = func(name string) bool { return hasSession }
-	rt.NewSessionFunc = func(name, dir string) error {
-		rt.commands = append(rt.commands, []string{"new-session", name, dir})
-		return nil
-	}
-	rt.CommandFunc = func(args ...string) (string, error) {
-		rt.commands = append(rt.commands, append([]string(nil), args...))
-		if len(args) > 0 && args[0] == "list-windows" {
-			return listOut, nil
+	rt := &recordingTmux{Fake: &tmuxtest.Fake{}, hasSession: hasSession, windowNames: map[string]bool{}}
+	for _, w := range strings.Split(listOut, "\n") {
+		if w != "" {
+			rt.windowNames[w] = true
 		}
-		if len(args) > 0 && args[0] == "list-panes" {
-			if rt.paneList != "" {
-				return rt.paneList, nil
-			}
-			return "", nil
-		}
-		if len(args) > 0 && args[0] == "new-window" {
-			return "%42", nil
-		}
-		if len(args) > 0 && args[0] == "split-window" {
-			return "%43", nil
-		}
-		return "", nil
 	}
 	return rt
+}
+
+func (rt *recordingTmux) record(args ...string) { rt.commands = append(rt.commands, args) }
+
+func (rt *recordingTmux) HasSession(string) bool { return rt.hasSession }
+
+func (rt *recordingTmux) NewSession(name, dir string) error {
+	rt.record("new-session", name, dir)
+	return nil
+}
+
+func (rt *recordingTmux) WindowExists(session, name string) (bool, error) {
+	rt.record("list-windows", "-t", session, "-F", "#{window_name}")
+	return rt.windowNames[name], nil
+}
+
+func (rt *recordingTmux) NewWindow(session, name, dir string) (string, error) {
+	rt.record("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", session, "-n", name, "-c", dir)
+	return "%42", nil
+}
+
+func (rt *recordingTmux) SplitWindow(session, name, dir string) (string, error) {
+	rt.record("split-window", "-d", "-P", "-F", "#{pane_id}", "-t", session+":"+name, "-c", dir)
+	return "%43", nil
+}
+
+func (rt *recordingTmux) RetileWindow(session, name string) error {
+	rt.record("select-layout", "-t", session+":"+name, "tiled")
+	return nil
+}
+
+func (rt *recordingTmux) WindowPanes(session, name string) ([]string, error) {
+	rt.record("list-panes", "-t", session+":"+name, "-F", "#{pane_id}")
+	return recorderPaneIDs(rt.paneList), nil
+}
+
+func (rt *recordingTmux) FindTaggedPane(session string, _ tmuxmod.PaneTag, value string) (string, error) {
+	rt.record("list-panes", "-t", session+":pop-queue", "-F", "#{pane-tag}\t#{pane_id}")
+	return recorderTaggedPane(rt.paneList, value), nil
+}
+
+func (rt *recordingTmux) TagPane(paneID string, _ tmuxmod.PaneTag, value string) error {
+	rt.record("set-option", "-p", "-t", paneID, "#{pane-tag}", value)
+	return nil
+}
+
+func (rt *recordingTmux) SelectPane(paneID string) error {
+	rt.record("select-pane", "-t", paneID)
+	return nil
+}
+
+func (rt *recordingTmux) SwitchClient(target string) error {
+	rt.record("switch-client", "-t", target)
+	return nil
+}
+
+func (rt *recordingTmux) SendKeys(paneID string, keys ...string) error {
+	rt.record(append([]string{"send-keys", "-t", paneID}, keys...)...)
+	return nil
+}
+
+func recorderPaneIDs(list string) []string {
+	var ids []string
+	for _, line := range strings.Split(list, "\n") {
+		if id := strings.TrimSpace(line); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func recorderTaggedPane(list, value string) string {
+	for _, line := range strings.Split(list, "\n") {
+		line = strings.TrimSpace(line)
+		idx := strings.LastIndex(line, " %")
+		if idx < 0 {
+			continue
+		}
+		if strings.TrimSpace(line[:idx]) == value {
+			return strings.TrimSpace(line[idx+1:])
+		}
+	}
+	return ""
 }
 
 func (rt *recordingTmux) findCommand(verb string) ([]string, bool) {

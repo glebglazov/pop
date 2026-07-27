@@ -7,6 +7,7 @@ package tmuxtest
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/glebglazov/pop/internal/tmux"
 )
@@ -77,6 +78,22 @@ type Fake struct {
 	// SetTopic, SetTopicWithKind, ClearTopic, PaneTopics) read and mutate it.
 	Topics map[string]tmux.TopicState
 
+	// Windows models generic (non-agent) windows: session -> window name ->
+	// ordered pane ids. The window/pane spawn verbs (WindowExists, NewWindow,
+	// SplitWindow, WindowPanes, RetileWindow) and the tagged-pane composite read
+	// and mutate it; tests arrange and assert on it.
+	Windows map[string]map[string][]string
+	// PaneTagValues maps a pane id to its @pop_* tag values keyed by PaneTag.
+	// TagPane writes it, FindTaggedPane reads it.
+	PaneTagValues map[string]map[tmux.PaneTag]string
+	// SentCommands records SendKeys calls joined with spaces per pane id (a
+	// spawned command is sent as "<command> Enter"), in order.
+	SentCommands map[string][]string
+	// Selected records the panes SelectPane targeted, in order.
+	Selected []string
+	// WindowRetiled records "session:window" retiled by RetileWindow, in order.
+	WindowRetiled []string
+
 	// Failure-injection overrides. When set, each replaces its verb entirely.
 	NewSessionFunc    func(name, dir string) error
 	SwitchClientFunc  func(target string) error
@@ -84,6 +101,8 @@ type Fake struct {
 	KillSessionFunc   func(name string) error
 	PaneInfoFunc      func(paneID string) (tmux.PaneInfo, error)
 	LivePanesFunc     func() ([]string, error)
+	NewWindowFunc     func(session, name, dir string) (string, error)
+	SplitWindowFunc   func(session, name, dir string) (string, error)
 }
 
 var _ tmux.Tmux = (*Fake)(nil)
@@ -277,6 +296,10 @@ func (f *Fake) SendKeys(paneID string, keys ...string) error {
 		f.SentKeys = map[string][][]string{}
 	}
 	f.SentKeys[paneID] = append(f.SentKeys[paneID], append([]string(nil), keys...))
+	if f.SentCommands == nil {
+		f.SentCommands = map[string][]string{}
+	}
+	f.SentCommands[paneID] = append(f.SentCommands[paneID], strings.Join(keys, " "))
 	return nil
 }
 
@@ -348,4 +371,87 @@ func (f *Fake) PaneTopics() (map[string]string, error) {
 		}
 	}
 	return result, nil
+}
+
+// --- generic windows / panes ---
+
+func (f *Fake) WindowExists(session, name string) (bool, error) {
+	if f.Windows[session] == nil {
+		return false, nil
+	}
+	_, ok := f.Windows[session][name]
+	return ok, nil
+}
+
+func (f *Fake) addWindowPane(session, name, id string) {
+	if f.Windows == nil {
+		f.Windows = map[string]map[string][]string{}
+	}
+	if f.Windows[session] == nil {
+		f.Windows[session] = map[string][]string{}
+	}
+	f.Windows[session][name] = append(f.Windows[session][name], id)
+}
+
+func (f *Fake) NewWindow(session, name, dir string) (string, error) {
+	if f.NewWindowFunc != nil {
+		return f.NewWindowFunc(session, name, dir)
+	}
+	id := f.newPaneID()
+	f.addWindowPane(session, name, id)
+	return id, nil
+}
+
+func (f *Fake) SplitWindow(session, name, dir string) (string, error) {
+	if f.SplitWindowFunc != nil {
+		return f.SplitWindowFunc(session, name, dir)
+	}
+	id := f.newPaneID()
+	f.addWindowPane(session, name, id)
+	return id, nil
+}
+
+func (f *Fake) RetileWindow(session, name string) error {
+	f.WindowRetiled = append(f.WindowRetiled, session+":"+name)
+	return nil
+}
+
+func (f *Fake) WindowPanes(session, name string) ([]string, error) {
+	if f.Windows[session] == nil {
+		return nil, fmt.Errorf("no window %s:%s", session, name)
+	}
+	panes, ok := f.Windows[session][name]
+	if !ok {
+		return nil, fmt.Errorf("no window %s:%s", session, name)
+	}
+	return panes, nil
+}
+
+func (f *Fake) SelectPane(paneID string) error {
+	f.Selected = append(f.Selected, paneID)
+	return nil
+}
+
+// --- tagged panes ---
+
+func (f *Fake) TagPane(paneID string, tag tmux.PaneTag, value string) error {
+	if f.PaneTagValues == nil {
+		f.PaneTagValues = map[string]map[tmux.PaneTag]string{}
+	}
+	if f.PaneTagValues[paneID] == nil {
+		f.PaneTagValues[paneID] = map[tmux.PaneTag]string{}
+	}
+	f.PaneTagValues[paneID][tag] = value
+	return nil
+}
+
+func (f *Fake) FindTaggedPane(session string, tag tmux.PaneTag, value string) (string, error) {
+	for _, panes := range f.Windows[session] {
+		for _, id := range panes {
+			if f.PaneTagValues[id] != nil && f.PaneTagValues[id][tag] == value {
+				return id, nil
+			}
+		}
+	}
+	return "", nil
 }

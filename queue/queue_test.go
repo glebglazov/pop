@@ -12,6 +12,8 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
+	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
@@ -784,33 +786,114 @@ func queueTestTasksDeps(t *testing.T, allFound bool) *tasks.Deps {
 	return d
 }
 
-// recordingTmux captures tmux invocations so spawn behavior can be asserted.
+// recordingTmux captures tmux subcommands so spawn behaviour can be asserted by
+// the non-spawn tests that only need a placeholder tmux. It embeds the shared
+// stateful fake for the verbs it does not override and replays the old
+// session-agnostic seeded behaviour (windowNames + paneList). Dedicated spawn
+// tests use a plain tmuxtest.Fake and assert on pane state instead.
 type recordingTmux struct {
-	deps.MockTmux
-	commands [][]string
+	*tmuxtest.Fake
+	commands    [][]string
+	hasSession  bool
+	windowNames map[string]bool
+	paneList    string
+	splitErr    error
 }
 
 func newRecordingTmux(hasSession bool, windowNames string) *recordingTmux {
-	rt := &recordingTmux{}
-	rt.HasSessionFunc = func(name string) bool { return hasSession }
-	rt.NewSessionFunc = func(name, dir string) error {
-		rt.commands = append(rt.commands, []string{"new-session", name, dir})
-		return nil
-	}
-	rt.CommandFunc = func(args ...string) (string, error) {
-		rt.commands = append(rt.commands, args)
-		if len(args) > 0 && args[0] == "list-windows" {
-			return windowNames, nil
+	rt := &recordingTmux{Fake: &tmuxtest.Fake{}, hasSession: hasSession, windowNames: map[string]bool{}}
+	for _, w := range strings.Split(windowNames, "\n") {
+		if w != "" {
+			rt.windowNames[w] = true
 		}
-		if len(args) > 0 && args[0] == "new-window" {
-			return "%3", nil
-		}
-		if len(args) > 0 && args[0] == "split-window" {
-			return "%7", nil
-		}
-		return "", nil
 	}
 	return rt
+}
+
+func (rt *recordingTmux) record(args ...string) { rt.commands = append(rt.commands, args) }
+
+func (rt *recordingTmux) HasSession(string) bool { return rt.hasSession }
+
+func (rt *recordingTmux) NewSession(name, dir string) error {
+	rt.record("new-session", name, dir)
+	return nil
+}
+
+func (rt *recordingTmux) WindowExists(session, name string) (bool, error) {
+	rt.record("list-windows", "-t", session, "-F", "#{window_name}")
+	return rt.windowNames[name], nil
+}
+
+func (rt *recordingTmux) NewWindow(session, name, dir string) (string, error) {
+	rt.record("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", session, "-n", name, "-c", dir)
+	return "%3", nil
+}
+
+func (rt *recordingTmux) SplitWindow(session, name, dir string) (string, error) {
+	rt.record("split-window", "-d", "-P", "-F", "#{pane_id}", "-t", session+":"+name, "-c", dir)
+	if rt.splitErr != nil {
+		return "", rt.splitErr
+	}
+	return "%7", nil
+}
+
+func (rt *recordingTmux) RetileWindow(session, name string) error {
+	rt.record("select-layout", "-t", session+":"+name, "tiled")
+	return nil
+}
+
+func (rt *recordingTmux) WindowPanes(session, name string) ([]string, error) {
+	rt.record("list-panes", "-t", session+":"+name, "-F", "#{pane_id}")
+	return recorderPaneIDs(rt.paneList), nil
+}
+
+func (rt *recordingTmux) FindTaggedPane(session string, _ tmuxmod.PaneTag, value string) (string, error) {
+	rt.record("list-panes", "-t", session+":"+drainWindowName, "-F", "#{pane-tag}\t#{pane_id}")
+	return recorderTaggedPane(rt.paneList, value), nil
+}
+
+func (rt *recordingTmux) TagPane(paneID string, _ tmuxmod.PaneTag, value string) error {
+	rt.record("set-option", "-p", "-t", paneID, "#{pane-tag}", value)
+	return nil
+}
+
+func (rt *recordingTmux) SelectPane(paneID string) error {
+	rt.record("select-pane", "-t", paneID)
+	return nil
+}
+
+func (rt *recordingTmux) SwitchClient(target string) error {
+	rt.record("switch-client", "-t", target)
+	return nil
+}
+
+func (rt *recordingTmux) SendKeys(paneID string, keys ...string) error {
+	rt.record(append([]string{"send-keys", "-t", paneID}, keys...)...)
+	return nil
+}
+
+func recorderPaneIDs(list string) []string {
+	var ids []string
+	for _, line := range strings.Split(list, "\n") {
+		if id := strings.TrimSpace(line); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func recorderTaggedPane(list, value string) string {
+	for _, line := range strings.Split(list, "\n") {
+		line = strings.TrimSpace(line)
+		idx := strings.LastIndex(line, " %")
+		if idx < 0 {
+			continue
+		}
+		if strings.TrimSpace(line[:idx]) == value {
+			return strings.TrimSpace(line[idx+1:])
+		}
+	}
+	return ""
 }
 
 func (rt *recordingTmux) findCommand(verb string) ([]string, bool) {
@@ -1098,239 +1181,172 @@ func TestPrepareWorktreeDrainRefusesInvalidBinding(t *testing.T) {
 	}
 }
 
+// The drain-spawn tests drive the tmux.EnsureTaggedPane composite through a
+// plain stateful fake and assert on the resulting pane state — the window the
+// pane lives in, its @pop_set tag, and the command sent — rather than on tmux
+// argument arrays (ADR-0142).
+
+// soleDrainPane returns the single pane in session's drain window, failing when
+// the count is not one.
+func soleDrainPane(t *testing.T, f *tmuxtest.Fake, session string) string {
+	t.Helper()
+	panes := f.Windows[session][drainWindowName]
+	if len(panes) != 1 {
+		t.Fatalf("drain window %s:%s panes = %v, want exactly one", session, drainWindowName, panes)
+	}
+	return panes[0]
+}
+
+func assertFakeTagged(t *testing.T, f *tmuxtest.Fake, pane, setID string) {
+	t.Helper()
+	if got := f.PaneTagValues[pane][tmuxmod.TagSet]; got != setID {
+		t.Fatalf("pane %s @pop_set = %q, want %q", pane, got, setID)
+	}
+}
+
+func assertFakeSentImplement(t *testing.T, f *tmuxtest.Fake, pane, setID string) {
+	t.Helper()
+	joined := strings.Join(f.SentCommands[pane], " || ")
+	if !strings.Contains(joined, "pop tasks implement "+setID) {
+		t.Fatalf("pane %s sent %q, want plain `pop tasks implement %s`", pane, joined, setID)
+	}
+	if strings.Contains(joined, "--yes") || strings.Contains(joined, "--agent") {
+		t.Fatalf("queue spawn must not inject --yes/--agent flags: %q", joined)
+	}
+}
+
 func TestSpawnCreatesQueueWindowWhenAbsent(t *testing.T) {
-	rt := newRecordingTmux(false, "0")
-	d := &Deps{Tmux: rt}
+	f := &tmuxtest.Fake{}
+	d := &Deps{Tmux: f}
 
 	if err := Spawn(d, actionableDecision()); err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
 
-	if _, ok := rt.findCommand("new-session"); !ok {
-		t.Fatal("expected a detached session to be created when absent")
+	if f.Live["proj-session"] != "/checkout" {
+		t.Fatalf("Live[proj-session] = %q, want /checkout (detached session created)", f.Live["proj-session"])
 	}
-	newWindow, ok := rt.findCommand("new-window")
-	if !ok {
-		t.Fatal("expected pop-queue window to be created when absent")
+	pane := soleDrainPane(t, f, "proj-session")
+	assertFakeTagged(t, f, pane, "2026-06-14-queue")
+	assertFakeSentImplement(t, f, pane, "2026-06-14-queue")
+	if len(f.WindowRetiled) != 0 {
+		t.Fatalf("a fresh single-pane drain window must not be retiled, got %v", f.WindowRetiled)
 	}
-	if !argsContain(newWindow, "-t", "proj-session") || !argsContain(newWindow, "-n", drainWindowName) {
-		t.Fatalf("new-window must create %q in project session: %v", drainWindowName, newWindow)
-	}
-	if !argsContain(newWindow, "-c", "/checkout") {
-		t.Fatalf("new-window must start in %q: %v", "/checkout", newWindow)
-	}
-	assertReusesFreshPane(t, rt, "%3")
-	assertPaneTagged(t, rt, "%3", "2026-06-14-queue")
-	assertSendKeys(t, rt)
 }
 
 func TestSpawnWorktreeDrainPassesRuntimeOverrideAndUsesWorktreeDir(t *testing.T) {
-	rt := newRecordingTmux(false, "main")
+	f := &tmuxtest.Fake{}
 	dec := actionableDecision()
 	dec.WorktreeReady = true
 	dec.scan.ProjectPath = "/pop/worktrees/repo/set"
 	dec.scan.RuntimePath = "/pop/worktrees/repo/set"
-	d := &Deps{Tmux: rt}
+	d := &Deps{Tmux: f}
 
 	if err := Spawn(d, dec); err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
 
-	newSession, ok := rt.findCommand("new-session")
-	if !ok {
-		t.Fatal("expected originating project session to be created when absent")
+	// The originating project session hosts the drain, rooted at the worktree
+	// checkout — never a worktree-derived session name.
+	if f.Live["proj-session"] != "/pop/worktrees/repo/set" {
+		t.Fatalf("Live[proj-session] = %q, want worktree cwd", f.Live["proj-session"])
 	}
-	if !reflect.DeepEqual(newSession, []string{"new-session", "proj-session", "/pop/worktrees/repo/set"}) {
-		t.Fatalf("new-session = %v, want project session created with worktree cwd", newSession)
-	}
-	assertReusesFreshPane(t, rt, "%3")
-	assertPaneTagged(t, rt, "%3", "2026-06-14-queue")
-	newWindow, ok := rt.findCommand("new-window")
-	if !ok {
-		t.Fatal("expected a queue window to host the drain pane")
-	}
-	if argsContain(newWindow, "-t", "set:"+drainWindowName) || argsContain(newWindow, "-t", "repo/set:"+drainWindowName) {
-		t.Fatalf("new-window must not target a worktree-derived session: %v", newWindow)
-	}
-	if !argsContain(newWindow, "-c", "/pop/worktrees/repo/set") {
-		t.Fatalf("new-window must start in worktree dir: %v", newWindow)
-	}
-	sendKeys, ok := rt.findCommand("send-keys")
-	if !ok {
-		t.Fatal("expected drain command")
-	}
-	joined := strings.Join(sendKeys, " ")
+	pane := soleDrainPane(t, f, "proj-session")
+	assertFakeTagged(t, f, pane, "2026-06-14-queue")
+	joined := strings.Join(f.SentCommands[pane], " || ")
 	if !strings.Contains(joined, "--task-runtime-path /pop/worktrees/repo/set") {
-		t.Fatalf("send-keys must pass runtime override: %v", sendKeys)
+		t.Fatalf("drain command %q must pass the runtime override", joined)
 	}
 }
 
 func TestSpawnReusesQueueWindowWhenSessionExists(t *testing.T) {
-	rt := newRecordingTmux(true, "main\n"+drainWindowName)
-	d := &Deps{Tmux: rt}
+	// Session and drain window already exist, with an untagged sibling pane: the
+	// spawn splits and tags a fresh pane and retiles rather than creating either.
+	f := &tmuxtest.Fake{
+		Live:    map[string]string{"proj-session": "/checkout"},
+		Windows: map[string]map[string][]string{"proj-session": {drainWindowName: {"%1"}}},
+	}
+	d := &Deps{Tmux: f}
 
 	if err := Spawn(d, actionableDecision()); err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
 
-	if _, ok := rt.findCommand("new-session"); ok {
-		t.Fatal("must not create a session that already exists")
+	panes := f.Windows["proj-session"][drainWindowName]
+	if len(panes) != 2 {
+		t.Fatalf("drain window panes = %v, want the sibling plus one split pane", panes)
 	}
-	if _, ok := rt.findCommand("new-window"); ok {
-		t.Fatal("must not create a new window when pop-queue already exists")
+	newPane := panes[1]
+	assertFakeTagged(t, f, newPane, "2026-06-14-queue")
+	assertFakeSentImplement(t, f, newPane, "2026-06-14-queue")
+	if want := "proj-session:" + drainWindowName; len(f.WindowRetiled) != 1 || f.WindowRetiled[0] != want {
+		t.Fatalf("WindowRetiled = %v, want [%s] (split window retiled)", f.WindowRetiled, want)
 	}
-	assertSplitIntoWindow(t, rt, "proj-session:"+drainWindowName, "/checkout")
-	assertPaneTagged(t, rt, "%7", "2026-06-14-queue")
-	assertSendKeys(t, rt)
 }
 
 func TestSpawnDoesNotTargetLowestIndexWindow(t *testing.T) {
-	rt := newRecordingTmux(true, "0\n1")
-	d := &Deps{Tmux: rt}
+	// Sibling numeric windows exist but no drain window: the spawn creates the
+	// named pop-queue window rather than landing in an existing numeric window.
+	f := &tmuxtest.Fake{
+		Live:    map[string]string{"proj-session": "/checkout"},
+		Windows: map[string]map[string][]string{"proj-session": {"0": {"%1"}, "1": {"%2"}}},
+	}
+	d := &Deps{Tmux: f}
 
 	if err := Spawn(d, actionableDecision()); err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
 
-	if _, ok := rt.findCommand("new-window"); !ok {
-		t.Fatal("expected pop-queue window to be created instead of targeting an existing numeric window")
+	pane := soleDrainPane(t, f, "proj-session")
+	assertFakeTagged(t, f, pane, "2026-06-14-queue")
+	assertFakeSentImplement(t, f, pane, "2026-06-14-queue")
+	if len(f.WindowRetiled) != 0 {
+		t.Fatalf("a fresh single-pane drain window must not be retiled, got %v", f.WindowRetiled)
 	}
-	assertReusesFreshPane(t, rt, "%3")
-	assertPaneTagged(t, rt, "%3", "2026-06-14-queue")
-	assertSendKeys(t, rt)
 }
 
 func TestSpawnReusesExistingPaneForSameSet(t *testing.T) {
-	rt := newRecordingTmux(true, drainWindowName)
-	listPanesCalls := 0
-	rt.CommandFunc = func(args ...string) (string, error) {
-		rt.commands = append(rt.commands, args)
-		switch args[0] {
-		case "list-windows":
-			return drainWindowName, nil
-		case "list-panes":
-			listPanesCalls++
-			if listPanesCalls == 1 {
-				return "", nil
-			}
-			return "2026-06-14-queue %7", nil
-		case "split-window":
-			return "%7", nil
-		default:
-			return "", nil
-		}
-	}
-	d := &Deps{Tmux: rt}
+	// A second spawn for the same set reuses the already-tagged pane: no second
+	// pane is split, no re-tag, and the command is sent into the same pane twice.
+	f := &tmuxtest.Fake{}
+	d := &Deps{Tmux: f}
 
 	if err := Spawn(d, actionableDecision()); err != nil {
 		t.Fatalf("first Spawn: %v", err)
 	}
+	pane := soleDrainPane(t, f, "proj-session")
+
 	if err := Spawn(d, actionableDecision()); err != nil {
 		t.Fatalf("second Spawn: %v", err)
 	}
 
-	if got := rt.countCommand("list-panes"); got != 2 {
-		t.Fatalf("list-panes calls = %d, want 2", got)
+	if got := soleDrainPane(t, f, "proj-session"); got != pane {
+		t.Fatalf("second spawn used pane %q, want the reused pane %q (no new split)", got, pane)
 	}
-	if got := rt.countCommand("split-window"); got != 1 {
-		t.Fatalf("split-window calls = %d, want only first spawn to split; commands=%v", got, rt.commands)
+	if got := f.SentCommands[pane]; len(got) != 2 {
+		t.Fatalf("pane %s received %d commands, want 2 (one per spawn)", pane, len(got))
 	}
-	if got := rt.countCommand("set-option"); got != 1 {
-		t.Fatalf("set-option calls = %d, want only first spawn to tag; commands=%v", got, rt.commands)
-	}
-	sendKeys := commandsWithVerb(rt, "send-keys")
-	if len(sendKeys) != 2 {
-		t.Fatalf("send-keys calls = %d, want 2; commands=%v", len(sendKeys), rt.commands)
-	}
-	for _, send := range sendKeys {
-		if !argsContain(send, "-t", "%7") {
-			t.Fatalf("send-keys must target existing tagged pane %%7: %v", send)
-		}
-	}
-}
-
-func TestResolveDrainWindowTargetCreatesQueueWindowWhenAbsent(t *testing.T) {
-	rt := newRecordingTmux(true, "main")
-	target, freshPaneID, err := resolveDrainWindowTarget(rt, "pop", "/checkout")
-	if err != nil {
-		t.Fatalf("resolveDrainWindowTarget: %v", err)
-	}
-	if target != "pop:"+drainWindowName {
-		t.Fatalf("target = %q, want pop:%s", target, drainWindowName)
-	}
-	if freshPaneID != "%3" {
-		t.Fatalf("freshPaneID = %q, want %%3 (initial pane of created window)", freshPaneID)
-	}
-	newWindow, ok := rt.findCommand("new-window")
-	if !ok {
-		t.Fatal("expected new-window when queue window is absent")
-	}
-	if !argsContain(newWindow, "-t", "pop") || !argsContain(newWindow, "-n", drainWindowName) {
-		t.Fatalf("new-window must create %q in session pop: %v", drainWindowName, newWindow)
-	}
-	if !argsContain(newWindow, "-c", "/checkout") {
-		t.Fatalf("new-window must start in %q: %v", "/checkout", newWindow)
-	}
-	// -a (insert after current window) collides with an occupied next index in a
-	// live interactive session; the window is targeted by name, so it must not be
-	// passed.
-	for _, a := range newWindow {
-		if a == "-a" {
-			t.Fatalf("new-window must not pass -a (index collision in live session): %v", newWindow)
-		}
-	}
-}
-
-func TestResolveDrainWindowTargetReusesQueueWindowWhenPresent(t *testing.T) {
-	rt := newRecordingTmux(true, "0\n"+drainWindowName)
-	target, freshPaneID, err := resolveDrainWindowTarget(rt, "pop", "/checkout")
-	if err != nil {
-		t.Fatalf("resolveDrainWindowTarget: %v", err)
-	}
-	if target != "pop:"+drainWindowName {
-		t.Fatalf("target = %q, want pop:%s", target, drainWindowName)
-	}
-	if freshPaneID != "" {
-		t.Fatalf("freshPaneID = %q, want empty when window already present", freshPaneID)
-	}
-	if _, ok := rt.findCommand("new-window"); ok {
-		t.Fatal("must not create a window when pop-queue is present")
+	if len(f.WindowRetiled) != 0 {
+		t.Fatalf("reusing a pane must not split or retile, got retiles %v", f.WindowRetiled)
 	}
 }
 
 func TestSpawnNonActionableNoOp(t *testing.T) {
-	rt := newRecordingTmux(false, "")
-	d := &Deps{Tmux: rt}
+	f := &tmuxtest.Fake{}
+	d := &Deps{Tmux: f}
 
 	if err := Spawn(d, Decision{Project: "busy", Busy: true}); err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
-	if len(rt.commands) != 0 {
-		t.Fatalf("non-actionable decision must touch tmux 0 times, got %v", rt.commands)
+	if len(f.Live) != 0 || len(f.Windows) != 0 || len(f.SentCommands) != 0 {
+		t.Fatalf("non-actionable decision must not touch tmux: live=%v windows=%v sent=%v", f.Live, f.Windows, f.SentCommands)
 	}
 }
 
-func assertSplitIntoWindow(t *testing.T, rt *recordingTmux, windowTarget, dir string) {
-	t.Helper()
-	splitWindow, ok := rt.findCommand("split-window")
-	if !ok {
-		t.Fatal("expected a new pane to be split into the drain window")
-	}
-	if !argsContain(splitWindow, "-t", windowTarget) {
-		t.Fatalf("split-window must target %q: %v", windowTarget, splitWindow)
-	}
-	if !argsContain(splitWindow, "-c", dir) {
-		t.Fatalf("split-window must start in %q: %v", dir, splitWindow)
-	}
-	layout, ok := rt.findCommand("select-layout")
-	if !ok {
-		t.Fatal("expected the drain window to be retiled after split")
-	}
-	if !argsContain(layout, "-t", windowTarget) {
-		t.Fatalf("select-layout must target %q: %v", windowTarget, layout)
-	}
-}
-
+// assertReusesFreshPane checks the supervisor spawn reused a freshly created
+// single-pane drain window (no split, no retile) and sent the drain command
+// into it. Still recorder-based because the supervisor tick tests assert on the
+// recorded subcommands.
 func assertReusesFreshPane(t *testing.T, rt *recordingTmux, paneID string) {
 	t.Helper()
 	if _, ok := rt.findCommand("split-window"); ok {
@@ -1346,45 +1362,6 @@ func assertReusesFreshPane(t *testing.T, rt *recordingTmux, paneID string) {
 	if !argsContain(sendKeys, "-t", paneID) {
 		t.Fatalf("send-keys must target reused pane %s: %v", paneID, sendKeys)
 	}
-}
-
-func assertPaneTagged(t *testing.T, rt *recordingTmux, paneID, setID string) {
-	t.Helper()
-	setOption, ok := rt.findCommand("set-option")
-	if !ok {
-		t.Fatal("expected the drain pane to be tagged with @pop_set")
-	}
-	if !reflect.DeepEqual(setOption, []string{"set-option", "-p", "-t", paneID, "@pop_set", setID}) {
-		t.Fatalf("set-option = %v, want pane-scoped @pop_set tag for %s", setOption, setID)
-	}
-}
-
-func assertSendKeys(t *testing.T, rt *recordingTmux) {
-	t.Helper()
-	sendKeys, ok := rt.findCommand("send-keys")
-	if !ok {
-		t.Fatal("expected the drain command to be sent into the pane")
-	}
-	joined := strings.Join(sendKeys, " ")
-	if strings.Contains(joined, "--yes") {
-		t.Fatalf("send-keys must not pass --yes for queue spawns: %v", sendKeys)
-	}
-	if strings.Contains(joined, "--default-agent") || strings.Contains(joined, "--agent") {
-		t.Fatalf("send-keys must not inject agent flags: %v", sendKeys)
-	}
-	if !strings.Contains(joined, "pop tasks implement 2026-06-14-queue") {
-		t.Fatalf("send-keys must run plain `pop tasks implement <set>`: %v", sendKeys)
-	}
-}
-
-func commandsWithVerb(rt *recordingTmux, verb string) [][]string {
-	var commands [][]string
-	for _, c := range rt.commands {
-		if len(c) > 0 && c[0] == verb {
-			commands = append(commands, c)
-		}
-	}
-	return commands
 }
 
 func argsContain(args []string, want ...string) bool {

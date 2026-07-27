@@ -69,3 +69,12 @@ func Attach(t Tmux, name, dir string) error {
 	}
 	return SwitchTarget(t, name)
 }
+
+// FocusPane selects paneID and switches the attached client to it — the
+// "jump to this pane" action shared by the dashboard/preview verbs.
+func FocusPane(t Tmux, paneID string) error {
+	if err := t.SelectPane(paneID); err != nil {
+		return err
+	}
+	return t.SwitchClient(paneID)
+}

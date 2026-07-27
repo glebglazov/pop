@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/internal/deps"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
 )
@@ -24,7 +25,7 @@ type Deps struct {
 	Stdout        io.Writer
 	LoadConfig    LoadConfigFunc
 	Tasks         *tasks.Deps
-	Tmux          deps.Tmux
+	Tmux          tmuxmod.Tmux
 	Project       *project.Deps
 	AttemptTimeout time.Duration
 	PID           func() int

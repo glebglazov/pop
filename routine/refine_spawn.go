@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/glebglazov/pop/internal/deps"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 )
 
 // RefinePaneWith spawns the whole refinement loop (`pop routine edit <id>`) into
@@ -67,60 +67,16 @@ func refineCLICommand(exe, routineID, refineAgent string) string {
 
 // spawnRefineWindow creates the repo/routines session when absent and lands the
 // refine command in a window named after the Routine id. Existing windows are
-// switched to with no send-keys.
-func spawnRefineWindow(tmux deps.Tmux, session, dir, windowName, command string) error {
-	if !tmux.HasSession(session) {
-		if err := tmux.NewSession(session, dir); err != nil {
-			return fmt.Errorf("create session %q: %w", session, err)
-		}
-	}
-
-	windowTarget := session + ":" + windowName
-	out, err := tmux.Command("list-windows", "-t", session, "-F", "#{window_name}")
+// switched to with no send-keys — never typing into a live gate or agent.
+func spawnRefineWindow(tmux tmuxmod.Tmux, session, dir, windowName, command string) error {
+	paneID, created, err := tmuxmod.EnsureWindow(tmux, session, windowName, dir)
 	if err != nil {
-		return fmt.Errorf("list windows in %q: %w", session, err)
+		return err
 	}
-	windowExists := false
-	for _, line := range splitLines(out) {
-		if line == windowName {
-			windowExists = true
-			break
-		}
+	if !created {
+		return tmuxmod.FocusPane(tmux, paneID)
 	}
-
-	if windowExists {
-		paneOut, err := tmux.Command("list-panes", "-t", windowTarget, "-F", "#{pane_id}")
-		if err != nil {
-			return fmt.Errorf("list panes in %q: %w", windowTarget, err)
-		}
-		paneID := ""
-		for _, line := range splitLines(paneOut) {
-			if id := strings.TrimSpace(line); id != "" {
-				paneID = id
-				break
-			}
-		}
-		if paneID == "" {
-			return fmt.Errorf("window %q has no pane", windowTarget)
-		}
-		if _, err := tmux.Command("select-pane", "-t", paneID); err != nil {
-			return fmt.Errorf("select refine pane: %w", err)
-		}
-		if _, err := tmux.Command("switch-client", "-t", paneID); err != nil {
-			return fmt.Errorf("switch to refine window: %w", err)
-		}
-		return nil
-	}
-
-	out, err = tmux.Command("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", session, "-n", windowName, "-c", dir)
-	if err != nil {
-		return fmt.Errorf("create refine window in %q: %w", session, err)
-	}
-	paneID := strings.TrimSpace(out)
-	if paneID == "" {
-		return fmt.Errorf("create refine window in %q: tmux returned no pane id", session)
-	}
-	if _, err := tmux.Command("send-keys", "-t", paneID, command, "Enter"); err != nil {
+	if err := tmux.SendKeys(paneID, command, "Enter"); err != nil {
 		return fmt.Errorf("send refine command: %w", err)
 	}
 	return nil

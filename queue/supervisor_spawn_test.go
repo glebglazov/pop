@@ -196,17 +196,11 @@ func TestSupervisorTickReportsSpawnFailure(t *testing.T) {
 
 	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
 	td := queueTestTasksDeps(t, true)
-	rt := newRecordingTmux(false, "0")
-	rt.CommandFunc = func(args ...string) (string, error) {
-		rt.commands = append(rt.commands, args)
-		if len(args) > 0 && args[0] == "list-windows" {
-			return drainWindowName, nil
-		}
-		if len(args) > 0 && args[0] == "split-window" {
-			return "", errors.New("tmux refused pane")
-		}
-		return "", nil
-	}
+	// The drain window already exists (session present) with an untagged pane, so
+	// the spawn takes the split path — and the split is made to fail.
+	rt := newRecordingTmux(true, drainWindowName)
+	rt.paneList = "%1"
+	rt.splitErr = errors.New("tmux refused pane")
 	d := &Deps{
 		Tasks:      td,
 		Project:    project.DefaultDeps(),
@@ -218,7 +212,7 @@ func TestSupervisorTickReportsSpawnFailure(t *testing.T) {
 	var out bytes.Buffer
 	tick(d, &out, newRunOutputState())
 
-	if !strings.Contains(out.String(), "spawn "+setID+": create drain pane: tmux refused pane") {
+	if !strings.Contains(out.String(), "spawn "+setID+":") || !strings.Contains(out.String(), "tmux refused pane") {
 		t.Fatalf("supervisor output missing spawn failure:\n%s", out.String())
 	}
 }

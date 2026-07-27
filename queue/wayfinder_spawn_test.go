@@ -8,11 +8,12 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/wayfinder"
 )
 
-func wayfinderSpawnFixture(t *testing.T) (*Deps, *config.Config, DashboardRow, *recordingTmux, string) {
+func wayfinderSpawnFixture(t *testing.T) (*Deps, *config.Config, DashboardRow, *tmuxtest.Fake, string) {
 	t.Helper()
 	storageDir := filepath.Join(t.TempDir(), "repos", "repo-wayfinder-spawn")
 	activeMap := filepath.Join(storageDir, "wayfinder", "2026-07-01-active")
@@ -27,9 +28,9 @@ func wayfinderSpawnFixture(t *testing.T) (*Deps, *config.Config, DashboardRow, *
 	withWayfinderMaps(t, d, storageDir, files)
 	repo := "/repo/checkout"
 	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
-	rt := newRecordingTmux(false, "0")
+	f := &tmuxtest.Fake{}
 	d.Project = project.DefaultDeps()
-	d.Tmux = rt
+	d.Tmux = f
 	row := DashboardRow{
 		IsMap:   true,
 		Project: "pop",
@@ -42,11 +43,30 @@ func wayfinderSpawnFixture(t *testing.T) (*Deps, *config.Config, DashboardRow, *
 		MapOpen:     2,
 		MapFrontier: 1,
 	}
-	return d, cfg, row, rt, storageDir
+	return d, cfg, row, f, storageDir
+}
+
+const wayfinderMapID = "2026-07-01-active"
+
+// wayfinderPaneCommand returns the command sent into the pane of the window
+// named after the map, across whichever session hosts it.
+func wayfinderPaneCommand(f *tmuxtest.Fake) (string, bool) {
+	for _, windows := range f.Windows {
+		panes, ok := windows[wayfinderMapID]
+		if !ok || len(panes) == 0 {
+			continue
+		}
+		cmds := f.SentCommands[panes[0]]
+		if len(cmds) == 0 {
+			return "", false
+		}
+		return strings.Join(cmds, " "), true
+	}
+	return "", false
 }
 
 func TestLaunchWayfinderSessionTargetsNextFrontier(t *testing.T) {
-	d, cfg, row, rt, _ := wayfinderSpawnFixture(t)
+	d, cfg, row, f, _ := wayfinderSpawnFixture(t)
 	result, err := LaunchWayfinderSession(d, cfg, row, "")
 	if err != nil {
 		t.Fatalf("LaunchWayfinderSession: %v", err)
@@ -54,9 +74,9 @@ func TestLaunchWayfinderSessionTargetsNextFrontier(t *testing.T) {
 	if result.TicketID != "01" {
 		t.Fatalf("TicketID = %q, want 01", result.TicketID)
 	}
-	cmd, ok := extractWayfinderSpawnCommand(rt)
+	cmd, ok := wayfinderPaneCommand(f)
 	if !ok {
-		t.Fatal("expected send-keys with wayfinder command")
+		t.Fatal("expected the wayfinder command to be sent into the map pane")
 	}
 	if !strings.Contains(cmd, "/pop-wayfinder work 2026-07-01-active 01") {
 		t.Fatalf("spawn command = %q, want work-mode invocation with map and ticket", cmd)
@@ -67,7 +87,7 @@ func TestLaunchWayfinderSessionTargetsNextFrontier(t *testing.T) {
 }
 
 func TestLaunchWayfinderSessionTargetsExplicitTicket(t *testing.T) {
-	d, cfg, row, rt, storageDir := wayfinderSpawnFixture(t)
+	d, cfg, row, f, storageDir := wayfinderSpawnFixture(t)
 	files := map[string]string{
 		filepath.Join(storageDir, "repo.json"):               `{"common_dir":"/repo/.git"}`,
 		filepath.Join(storageDir, "wayfinder", "2026-07-01-active", "map.md"): "Status: active\n\n## Destination\nShip it\n",
@@ -82,47 +102,47 @@ func TestLaunchWayfinderSessionTargetsExplicitTicket(t *testing.T) {
 	if result.TicketID != "02" {
 		t.Fatalf("TicketID = %q, want 02", result.TicketID)
 	}
-	cmd, ok := extractWayfinderSpawnCommand(rt)
+	cmd, ok := wayfinderPaneCommand(f)
 	if !ok || !strings.Contains(cmd, " 02") {
 		t.Fatalf("spawn command = %q, want explicit ticket 02", cmd)
 	}
 }
 
 func TestLaunchWayfinderSessionWindowNamedAfterMap(t *testing.T) {
-	d, cfg, row, rt, _ := wayfinderSpawnFixture(t)
+	d, cfg, row, f, _ := wayfinderSpawnFixture(t)
 	if _, err := LaunchWayfinderSession(d, cfg, row, ""); err != nil {
 		t.Fatalf("LaunchWayfinderSession: %v", err)
 	}
-	newWindow, ok := rt.findCommand("new-window")
-	if !ok {
-		t.Fatal("expected new-window for map-named window")
-	}
-	if !containsArg(newWindow, "-n", "2026-07-01-active") {
-		t.Fatalf("new-window = %v, want -n 2026-07-01-active", newWindow)
-	}
-	for _, c := range rt.commands {
-		if len(c) > 0 && c[0] == "new-window" && containsArg(c, "-n", drainWindowName) {
-			t.Fatalf("must not create %q window, got %v", drainWindowName, c)
+	var found bool
+	for _, windows := range f.Windows {
+		if _, ok := windows[wayfinderMapID]; ok {
+			found = true
 		}
+		if _, ok := windows[drainWindowName]; ok {
+			t.Fatalf("must not create the %q drain window, windows=%v", drainWindowName, windows)
+		}
+	}
+	if !found {
+		t.Fatalf("expected a window named after the map %q, windows=%v", wayfinderMapID, f.Windows)
 	}
 }
 
 func TestLaunchWayfinderSessionCreatesDetachedSession(t *testing.T) {
-	d, cfg, row, rt, _ := wayfinderSpawnFixture(t)
+	d, cfg, row, f, _ := wayfinderSpawnFixture(t)
 	if _, err := LaunchWayfinderSession(d, cfg, row, ""); err != nil {
 		t.Fatalf("LaunchWayfinderSession: %v", err)
 	}
-	newSession, ok := rt.findCommand("new-session")
-	if !ok {
-		t.Fatal("expected detached session creation when absent")
+	var gotCWD string
+	for _, dir := range f.Live {
+		gotCWD = dir
 	}
-	if len(newSession) < 3 || newSession[2] != row.ProjectPath {
-		t.Fatalf("new-session = %v, want cwd %q", newSession, row.ProjectPath)
+	if gotCWD != row.ProjectPath {
+		t.Fatalf("detached session cwd = %q, want %q", gotCWD, row.ProjectPath)
 	}
 }
 
 func TestLaunchWayfinderSessionEmptyFrontier(t *testing.T) {
-	d, cfg, row, rt, storageDir := wayfinderSpawnFixture(t)
+	d, cfg, row, f, storageDir := wayfinderSpawnFixture(t)
 	files := map[string]string{
 		filepath.Join(storageDir, "wayfinder", "2026-07-01-active", "issues/01-frontier.md"): "Type: research\nStatus: open\nBlocked by: 99\n\n## Question\nA\n",
 	}
@@ -131,13 +151,13 @@ func TestLaunchWayfinderSessionEmptyFrontier(t *testing.T) {
 	if !errors.Is(err, wayfinder.ErrEmptyFrontier) {
 		t.Fatalf("err = %v, want ErrEmptyFrontier", err)
 	}
-	if _, ok := extractWayfinderSpawnCommand(rt); ok {
+	if _, ok := wayfinderPaneCommand(f); ok {
 		t.Fatal("empty frontier must not spawn")
 	}
 }
 
 func TestDashboardMapRowISpawnsNextFrontier(t *testing.T) {
-	d, cfg, row, rt, _ := wayfinderSpawnFixture(t)
+	d, cfg, row, f, _ := wayfinderSpawnFixture(t)
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
 	if cmd == nil {
@@ -159,7 +179,7 @@ func TestDashboardMapRowISpawnsNextFrontier(t *testing.T) {
 	if got.statusMsg == "" {
 		t.Fatal("expected spawn status message")
 	}
-	if _, ok := extractWayfinderSpawnCommand(rt); !ok {
+	if _, ok := wayfinderPaneCommand(f); !ok {
 		t.Fatal("expected tmux spawn")
 	}
 }
@@ -183,30 +203,4 @@ func TestDashboardMapRowIEmptyFrontierMessage(t *testing.T) {
 	if got.statusMsg != dashboardWayfinderEmptyFrontierMessage() {
 		t.Fatalf("statusMsg = %q, want empty-frontier explanation", got.statusMsg)
 	}
-}
-
-func extractWayfinderSpawnCommand(rt *recordingTmux) (string, bool) {
-	sendKeys, ok := rt.findCommand("send-keys")
-	if !ok {
-		return "", false
-	}
-	for _, arg := range sendKeys {
-		if strings.Contains(arg, "/pop-wayfinder work") || strings.Contains(arg, "/wayfinder work") {
-			return arg, true
-		}
-	}
-	joined := strings.Join(sendKeys, " ")
-	if strings.Contains(joined, "wayfinder work") {
-		return joined, true
-	}
-	return "", false
-}
-
-func containsArg(args []string, flag, value string) bool {
-	for i := 0; i+1 < len(args); i++ {
-		if args[i] == flag && args[i+1] == value {
-			return true
-		}
-	}
-	return false
 }

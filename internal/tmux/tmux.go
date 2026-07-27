@@ -55,6 +55,31 @@ type Tmux interface {
 	// caller (display-message -p #S). An empty result means no session.
 	CurrentSession() (string, error)
 
+	// --- generic windows / panes (spawn composites: EnsureWindow, EnsureTaggedPane) ---
+
+	// WindowExists reports whether session owns a window named name.
+	WindowExists(session, name string) (bool, error)
+	// NewWindow creates a detached window named name in session rooted at dir
+	// and returns its initial pane's id.
+	NewWindow(session, name, dir string) (string, error)
+	// SplitWindow splits a new pane into session's window name rooted at dir
+	// and returns the new pane's id.
+	SplitWindow(session, name, dir string) (string, error)
+	// RetileWindow re-tiles session's window name (select-layout tiled).
+	RetileWindow(session, name string) error
+	// WindowPanes lists the pane ids in session's window name.
+	WindowPanes(session, name string) ([]string, error)
+	// SelectPane makes paneID the active pane in its window.
+	SelectPane(paneID string) error
+
+	// --- tagged panes (@pop_routine / @pop_set; the shared drain window) ---
+
+	// TagPane sets a pane's @pop_* tag (selected by PaneTag) to value.
+	TagPane(paneID string, tag PaneTag, value string) error
+	// FindTaggedPane returns the pane in session's drain window tagged
+	// tag=value, or "" when none (an absent window included).
+	FindTaggedPane(session string, tag PaneTag, value string) (string, error)
+
 	// --- agentic panes: the shared "agent" window (glossary: Agentic pane) ---
 
 	// HasAgentWindow reports whether session owns the shared "agent" window.

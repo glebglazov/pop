@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/glebglazov/pop/config"
-	"github.com/glebglazov/pop/internal/deps"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/wayfinder"
@@ -33,7 +33,7 @@ func LaunchWayfinderSession(d *Deps, cfg *config.Config, row DashboardRow, ticke
 		d.Project = project.DefaultDeps()
 	}
 	if d.Tmux == nil {
-		d.Tmux = deps.NewRealTmux()
+		d.Tmux = tmuxmod.New()
 	}
 	if !row.IsMap {
 		return WayfinderSpawnResult{}, fmt.Errorf("not a wayfinder map row")
@@ -91,53 +91,15 @@ func LaunchWayfinderSession(d *Deps, cfg *config.Config, row DashboardRow, ticke
 }
 
 // spawnWayfinderWindow creates the repo session when absent and lands command in
-// a window named after the map. It never uses the pop-queue drain window.
-func spawnWayfinderWindow(tmux deps.Tmux, session, dir, windowName, command string) (string, error) {
-	if !tmux.HasSession(session) {
-		if err := tmux.NewSession(session, dir); err != nil {
-			return "", fmt.Errorf("create session %q: %w", session, err)
-		}
-	}
-
-	windowTarget := session + ":" + windowName
-	out, err := tmux.Command("list-windows", "-t", session, "-F", "#{window_name}")
+// a window named after the map. It never uses the pop-queue drain window: an
+// existing map window has its single pane reused (the command is re-sent), a
+// missing one is created.
+func spawnWayfinderWindow(tmux tmuxmod.Tmux, session, dir, windowName, command string) (string, error) {
+	paneID, _, err := tmuxmod.EnsureWindow(tmux, session, windowName, dir)
 	if err != nil {
-		return "", fmt.Errorf("list windows in %q: %w", session, err)
+		return "", err
 	}
-	var paneID string
-	windowExists := false
-	for _, line := range splitLines(out) {
-		if line == windowName {
-			windowExists = true
-			break
-		}
-	}
-	if windowExists {
-		paneOut, err := tmux.Command("list-panes", "-t", windowTarget, "-F", "#{pane_id}")
-		if err != nil {
-			return "", fmt.Errorf("list panes in %q: %w", windowTarget, err)
-		}
-		for _, line := range splitLines(paneOut) {
-			if id := strings.TrimSpace(line); id != "" {
-				paneID = id
-				break
-			}
-		}
-		if paneID == "" {
-			return "", fmt.Errorf("window %q has no pane", windowTarget)
-		}
-	} else {
-		out, err = tmux.Command("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", session, "-n", windowName, "-c", dir)
-		if err != nil {
-			return "", fmt.Errorf("create wayfinder window in %q: %w", session, err)
-		}
-		paneID = strings.TrimSpace(out)
-		if paneID == "" {
-			return "", fmt.Errorf("create wayfinder window in %q: tmux returned no pane id", session)
-		}
-	}
-
-	if _, err := tmux.Command("send-keys", "-t", paneID, command, "Enter"); err != nil {
+	if err := tmux.SendKeys(paneID, command, "Enter"); err != nil {
 		return "", fmt.Errorf("send wayfinder command: %w", err)
 	}
 	return paneID, nil
