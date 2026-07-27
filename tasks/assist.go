@@ -64,53 +64,18 @@ func AssistTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 		return exitErr(ExitSetup, "assisting a task set needs an interactive terminal; headless equivalents: `pop tasks verify %s --accept/--remediate`, `pop tasks complete`/`skip`/`open`, or `pop tasks implement`", setID)
 	}
 
+	runtimePath, manifestPath, err := ValidateAssistLaunch(d, pd, loadConfig, opts)
+	if err != nil {
+		return err
+	}
+
 	resolved, err := ResolvePathsWith(d, pd, loadConfig, opts.ResolveInput)
 	if err != nil {
 		return err
 	}
 	statePath := StatePathFor(resolved.DefinitionPath)
-
-	if err := RejectArchivedTaskSet(d, statePath, resolved.DefinitionPath, setID); err != nil {
-		return err
-	}
-
-	// Callers pin Binding-first resolution via ResolveInput.RuntimeOverride
-	// (ADR-0146) — the same seam `pop tasks verify` uses — so this package
-	// never imports tasks/binding.
-	runtimePath, err := ResolveRuntimePathWith(d, resolved.ProjectPath, opts.ResolveInput.RuntimeOverride)
-	if err != nil {
-		return err
-	}
-
-	currentID, err := ResolveRepositoryIdentity(d, resolved.ProjectPath)
-	if err != nil {
-		return err
-	}
 	runtimeID, err := ResolveRepositoryIdentity(d, runtimePath)
 	if err != nil {
-		return err
-	}
-	if currentID.CommonDir != runtimeID.CommonDir {
-		return exitErr(ExitSetup, "task set %q belongs to a different repository than the current checkout (%s vs %s); run assist from a checkout of the set's repository",
-			setID, currentID.CommonDir, runtimeID.CommonDir)
-	}
-
-	disc, err := DiscoverWith(d, resolved.DefinitionPath)
-	if err != nil {
-		return exitErr(ExitOperational, "discover task sets: %v", err)
-	}
-	manifestPath, ok := disc.Manifests[setID]
-	if !ok {
-		// Registered-but-gone sets surface as MISSING on refresh.
-		if refresh, rerr := RefreshWith(d, resolved.DefinitionPath, statePath); rerr == nil {
-			if row := FindRow(refresh, setID); row != nil && row.Status == StatusMissing {
-				return exitErr(ExitSetup, "task set %q is missing (registered but not on disk)", setID)
-			}
-		}
-		return exitErr(ExitSetup, "unknown task set %q", setID)
-	}
-
-	if err := refuseAssistWhileDrainLive(d, setID); err != nil {
 		return err
 	}
 
@@ -220,6 +185,71 @@ func AssistTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 			return err
 		}
 	}
+}
+
+// ValidateAssistLaunch checks preconditions for opening an Assist session without
+// requiring an interactive terminal. It returns the binding-first runtime checkout
+// and manifest path the session would use. It applies the same refusals as
+// AssistTaskSetWith except the interactive-terminal requirement.
+func ValidateAssistLaunch(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts AssistOptions) (runtimePath, manifestPath string, err error) {
+	if d == nil {
+		d = defaultDeps
+	}
+	setID := strings.TrimSpace(opts.TaskSetID)
+	if setID == "" {
+		return "", "", exitErr(ExitSetup, "a task set identifier is required")
+	}
+
+	resolved, err := ResolvePathsWith(d, pd, loadConfig, opts.ResolveInput)
+	if err != nil {
+		return "", "", err
+	}
+	statePath := StatePathFor(resolved.DefinitionPath)
+
+	if err := RejectArchivedTaskSet(d, statePath, resolved.DefinitionPath, setID); err != nil {
+		return "", "", err
+	}
+
+	// Callers pin Binding-first resolution via ResolveInput.RuntimeOverride
+	// (ADR-0146) — the same seam `pop tasks verify` uses — so this package
+	// never imports tasks/binding.
+	runtimePath, err = ResolveRuntimePathWith(d, resolved.ProjectPath, opts.ResolveInput.RuntimeOverride)
+	if err != nil {
+		return "", "", err
+	}
+
+	currentID, err := ResolveRepositoryIdentity(d, resolved.ProjectPath)
+	if err != nil {
+		return "", "", err
+	}
+	runtimeID, err := ResolveRepositoryIdentity(d, runtimePath)
+	if err != nil {
+		return "", "", err
+	}
+	if currentID.CommonDir != runtimeID.CommonDir {
+		return "", "", exitErr(ExitSetup, "task set %q belongs to a different repository than the current checkout (%s vs %s); run assist from a checkout of the set's repository",
+			setID, currentID.CommonDir, runtimeID.CommonDir)
+	}
+
+	disc, err := DiscoverWith(d, resolved.DefinitionPath)
+	if err != nil {
+		return "", "", exitErr(ExitOperational, "discover task sets: %v", err)
+	}
+	manifestPath, ok := disc.Manifests[setID]
+	if !ok {
+		// Registered-but-gone sets surface as MISSING on refresh.
+		if refresh, rerr := RefreshWith(d, resolved.DefinitionPath, statePath); rerr == nil {
+			if row := FindRow(refresh, setID); row != nil && row.Status == StatusMissing {
+				return "", "", exitErr(ExitSetup, "task set %q is missing (registered but not on disk)", setID)
+			}
+		}
+		return "", "", exitErr(ExitSetup, "unknown task set %q", setID)
+	}
+
+	if err := refuseAssistWhileDrainLive(d, setID); err != nil {
+		return "", "", err
+	}
+	return runtimePath, manifestPath, nil
 }
 
 // refuseAssistWhileDrainLive refuses when the named set has a live running Drain.

@@ -183,6 +183,9 @@ type dashboardArchiveMsg struct {
 type dashboardPreviewMsg struct {
 	err error
 }
+type dashboardAssistMsg struct {
+	err error
+}
 type dashboardDetailMsg struct {
 	dashRow  DashboardRow
 	manifest *tasks.Manifest
@@ -339,6 +342,7 @@ const (
 	menuActionUnbind
 	menuActionAutoDrain
 	menuActionPreview
+	menuActionAssist
 	menuActionUnpark
 	menuActionShell
 	menuActionArchive
@@ -389,6 +393,7 @@ func dashboardMenuItems(row DashboardRow) []dashboardMenuItem {
 		items = append(items, dashboardMenuItem{key: "a", label: "auto-drain", action: menuActionAutoDrain})
 	}
 	items = append(items, dashboardMenuItem{key: "p", label: "preview", action: menuActionPreview})
+	items = append(items, dashboardMenuItem{key: "s", label: "assist", action: menuActionAssist})
 	if row.Parked {
 		items = append(items, dashboardMenuItem{key: "P", label: "unpark", action: menuActionUnpark})
 	}
@@ -1044,6 +1049,14 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// dashboard has handed off attention, so close it rather than leaving it
 		// stranded behind the pane the operator now looks at.
 		return m, tea.Quit
+	case dashboardAssistMsg:
+		if msg.err != nil {
+			m.actionErr = msg.err
+			return m, nil
+		}
+		// Assist focused the operator in the session pane; close the dashboard
+		// the same way preview does after handing off attention.
+		return m, tea.Quit
 	case dashboardBindListMsg:
 		if msg.err != nil {
 			m.actionErr = msg.err
@@ -1293,11 +1306,21 @@ func (m QueueDashboard) dispatchMenuAction(action dashboardMenuAction, row Dashb
 		return m, m.toggleAutoDrain(row)
 	case menuActionPreview:
 		if strings.TrimSpace(row.PaneID) == "" {
-			m.statusMsg = "no working pane to preview"
-			return m, nil
+			paneID, err := assistPaneID(m.d, row.SetRef)
+			if err != nil {
+				m.actionErr = err
+				return m, nil
+			}
+			if paneID == "" {
+				m.statusMsg = "no working pane to preview"
+				return m, nil
+			}
 		}
 		m.statusMsg = ""
 		return m, m.previewDrain(row)
+	case menuActionAssist:
+		m.statusMsg = ""
+		return m, m.launchAssist(row)
 	case menuActionUnpark:
 		if !row.Parked {
 			m.statusMsg = "task set is not parked"
@@ -1826,6 +1849,13 @@ func (m QueueDashboard) previewDrain(row DashboardRow) tea.Cmd {
 	}
 }
 
+func (m QueueDashboard) launchAssist(row DashboardRow) tea.Cmd {
+	return func() tea.Msg {
+		err := LaunchAssist(m.d, m.cfg, row.SetRef)
+		return dashboardAssistMsg{err: err}
+	}
+}
+
 func (m QueueDashboard) loadDetail(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
 		d := m.d
@@ -2160,6 +2190,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "U", Desc: "unbind worktree"},
 			{Key: "a", Desc: "toggle auto-drain"},
 			{Key: "p", Desc: "preview drain"},
+			{Key: "s", Desc: "assist"},
 			{Key: "P", Desc: "unpark"},
 			{Key: "O", Desc: "shell"},
 			{Key: "A", Desc: "archive"},

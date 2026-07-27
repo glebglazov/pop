@@ -12,6 +12,7 @@ func TestTagPaneBuildsArgsPerTag(t *testing.T) {
 	}{
 		{TagRoutine, "@pop_routine"},
 		{TagSet, "@pop_set"},
+		{TagAssist, "@pop_assist"},
 	}
 	for _, tt := range tests {
 		r := &recordingRunner{}

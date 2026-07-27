@@ -199,18 +199,132 @@ func dashboardScansForDefinition(d *Deps, cfg *config.Config, defPath string) ([
 }
 
 // PreviewDrain switches the active tmux client to the pane associated
-// with the highlighted row. Rows without a recorded pane intentionally no-op.
+// with the highlighted row. Rows without a recorded drain pane fall back to
+// an Assist session pane tagged for the set when one exists.
 func PreviewDrain(d *Deps, ref SetRef) error {
-	if strings.TrimSpace(ref.PaneID) == "" {
-		return nil
+	if strings.TrimSpace(ref.PaneID) != "" {
+		if d == nil {
+			d = DefaultDeps()
+		}
+		if d.Tmux == nil {
+			d.Tmux = tmuxmod.New()
+		}
+		return tmuxmod.FocusPane(d.Tmux, ref.PaneID)
 	}
+	paneID, err := assistPaneID(d, ref)
+	if err != nil || paneID == "" {
+		return err
+	}
+	if d.Tmux == nil {
+		d.Tmux = tmuxmod.New()
+	}
+	return tmuxmod.FocusPane(d.Tmux, paneID)
+}
+
+// LaunchAssist opens or focuses an Assist session pane for the dashboard row's
+// set in the project's pop-queue window. A pane already tagged for the set is
+// focused without spawning a twin; otherwise a fresh pane runs
+// `pop tasks assist` pinned to the row's binding-first runtime checkout.
+func LaunchAssist(d *Deps, cfg *config.Config, ref SetRef) error {
+	if d == nil {
+		d = DefaultDeps()
+	}
+	if d.Tasks == nil {
+		d.Tasks = tasks.DefaultDeps()
+	}
+	if d.Project == nil {
+		d.Project = project.DefaultDeps()
+	}
+	if d.Tmux == nil {
+		d.Tmux = tmuxmod.New()
+	}
+	scans, err := dashboardScansForDefinition(d, cfg, ref.DefPath)
+	if err != nil {
+		return err
+	}
+	if len(scans) == 0 {
+		return fmt.Errorf("task set %s is no longer in a registered queue project", ref.SetID)
+	}
+	projectPath := scans[0].ProjectPath
+	if strings.TrimSpace(ref.ProjectPath) != "" {
+		projectPath = ref.ProjectPath
+	}
+	runtimeOverride := strings.TrimSpace(ref.RuntimePath)
+	if runtimeOverride == "" {
+		var resolveErr error
+		runtimeOverride, resolveErr = binding.ResolveCommandRuntime(d.Tasks, projectPath, ref.SetID, "")
+		if resolveErr != nil {
+			return resolveErr
+		}
+	}
+	loadConfig := config.Load
+	if d.LoadConfig != nil {
+		loadConfig = d.LoadConfig
+	}
+	runtimePath, _, err := tasks.ValidateAssistLaunch(d.Tasks, d.Project, loadConfig, tasks.AssistOptions{
+		ResolveInput: tasks.ResolveInput{
+			CWD:             projectPath,
+			RuntimeOverride: runtimeOverride,
+		},
+		TaskSetID: ref.SetID,
+	})
+	if err != nil {
+		return err
+	}
+
+	base := strings.TrimSpace(runtimePath)
+	if base == "" {
+		base = projectPath
+	}
+	session := project.SessionNameWith(d.Project, base)
+
+	if paneID, err := assistPaneIDAt(d, base, ref.SetID); err != nil {
+		return err
+	} else if paneID != "" {
+		return tmuxmod.FocusPane(d.Tmux, paneID)
+	}
+
+	command := fmt.Sprintf("pop tasks assist %s", shellQuote(ref.SetID))
+	if strings.TrimSpace(runtimePath) != "" {
+		command += " --task-runtime-path " + shellQuote(runtimePath)
+	}
+	paneID, err := tmuxmod.EnsureTaggedPane(d.Tmux, tmuxmod.TagAssist, session, base, ref.SetID, command)
+	if err != nil {
+		return err
+	}
+	return d.Tmux.SetPaneTitle(paneID, assistPaneTitle(ref.SetID))
+}
+
+func assistPaneTitle(setID string) string {
+	return setID + "-assist"
+}
+
+func assistPaneID(d *Deps, ref SetRef) (string, error) {
+	base := strings.TrimSpace(ref.RuntimePath)
+	if base == "" {
+		base = strings.TrimSpace(ref.ProjectPath)
+	}
+	if base == "" {
+		return "", nil
+	}
+	return assistPaneIDAt(d, base, ref.SetID)
+}
+
+func assistPaneIDAt(d *Deps, base, setID string) (string, error) {
 	if d == nil {
 		d = DefaultDeps()
 	}
 	if d.Tmux == nil {
 		d.Tmux = tmuxmod.New()
 	}
-	return tmuxmod.FocusPane(d.Tmux, ref.PaneID)
+	if strings.TrimSpace(base) == "" || strings.TrimSpace(setID) == "" {
+		return "", nil
+	}
+	if d.Project == nil {
+		d.Project = project.DefaultDeps()
+	}
+	session := project.SessionNameWith(d.Project, base)
+	return d.Tmux.FindTaggedPane(session, tmuxmod.TagAssist, setID)
 }
 
 // UnbindWorktree releases the highlighted set's worktree binding

@@ -852,9 +852,9 @@ func (rt *recordingTmux) FindTaggedPane(session string, _ tmuxmod.PaneTag, value
 	return recorderTaggedPane(rt.paneList, value), nil
 }
 
-func (rt *recordingTmux) TagPane(paneID string, _ tmuxmod.PaneTag, value string) error {
+func (rt *recordingTmux) TagPane(paneID string, tag tmuxmod.PaneTag, value string) error {
 	rt.record("set-option", "-p", "-t", paneID, value)
-	return nil
+	return rt.Fake.TagPane(paneID, tag, value)
 }
 
 func (rt *recordingTmux) SelectPane(paneID string) error {
