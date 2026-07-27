@@ -26,6 +26,12 @@ type BindWorktreeOptions struct {
 	// name fork-free (the dashboard, ADR-0060) supply it; cwd-based callers
 	// leave it empty to fall back to DetectProject.
 	ProjectName string
+	// Managed switches from adopting checkoutPath to recording a managed worktree
+	// intent on the set (the same intent `register --managed` seeds). No checkout
+	// is adopted and nothing is provisioned here; the next unbound Queue drain
+	// forks a pop-owned worktree from the Trunk. checkoutPath is still resolved to
+	// the repository identity, but any of the repo's checkouts will do.
+	Managed bool
 }
 
 // BindWorktreeResult describes the outcome of adopting an existing checkout.
@@ -103,6 +109,10 @@ func BindWorktree(td *tasks.Deps, pd *project.Deps, cfg *config.Config, setID, c
 		pd = project.DefaultDeps()
 	}
 
+	if opts.Managed {
+		return bindWorktreeManaged(td, setID, checkoutPath, opts, hooks, out)
+	}
+
 	branch, err := resolveRuntimeBranch(td, checkoutPath)
 	if err != nil {
 		return BindWorktreeResult{}, fmt.Errorf("resolve branch in %s: %w", checkoutPath, err)
@@ -148,6 +158,54 @@ func BindWorktree(td *tasks.Deps, pd *project.Deps, cfg *config.Config, setID, c
 	}
 	fmt.Fprintf(out, "Bound %s to %s (branch %s)\n", setID, checkoutPath, branch)
 	return BindWorktreeResult{SetID: setID, RuntimePath: checkoutPath, Branch: branch, Replaced: replaced}, nil
+}
+
+// bindWorktreeManaged records a managed worktree intent on setID instead of
+// adopting a checkout (opts.Managed). It resolves checkoutPath only to the
+// repository identity — any of the repo's checkouts is fine — then drops any
+// existing binding forget-only and writes the intent. A set already bound
+// elsewhere refuses without opts.Force, mirroring the adopt re-point rule; the
+// set's own live runtime lock always refuses (same-set-only guard, ADR-0116).
+// Provisioning stays lazy: the next unbound Queue drain forks the managed
+// worktree from the Trunk, exactly as for a `register --managed` set.
+func bindWorktreeManaged(td *tasks.Deps, setID, checkoutPath string, opts BindWorktreeOptions, hooks LifecycleHooks, out io.Writer) (BindWorktreeResult, error) {
+	id, err := tasks.ResolveRepositoryIdentity(td, checkoutPath)
+	if err != nil {
+		return BindWorktreeResult{}, fmt.Errorf("resolve repository identity: %w", err)
+	}
+	defPath, err := tasks.CanonicalDefinitionPathWith(td, id.TasksDir)
+	if err != nil {
+		return BindWorktreeResult{}, err
+	}
+	key := Key(id, setID)
+
+	existing, ok, err := Lookup(td, key)
+	if err != nil {
+		return BindWorktreeResult{}, err
+	}
+
+	var replaced bool
+	if ok {
+		lock := readRuntimeLock(hooks, existing.RuntimePath)
+		if lock != nil && lock.Locked && !lockedByAnotherSet(lock, setID) {
+			return BindWorktreeResult{}, fmt.Errorf("refusing bind-worktree: %s is currently executing", setID)
+		}
+		if !opts.Force {
+			return BindWorktreeResult{}, fmt.Errorf("%s is already bound to %s; use --force to re-point to a managed worktree", setID, existing.RuntimePath)
+		}
+		// Forget-only: the old checkout and branch stay on disk (worktree teardown
+		// belongs to Archive); only the association is dropped.
+		if err := Delete(td, key); err != nil {
+			return BindWorktreeResult{}, err
+		}
+		replaced = true
+	}
+
+	if err := tasks.SetTaskSetManagedIntent(td, defPath, setID); err != nil {
+		return BindWorktreeResult{}, err
+	}
+	fmt.Fprintf(out, "Recorded managed worktree intent for %s (provisioned lazily at next Queue drain)\n", setID)
+	return BindWorktreeResult{SetID: setID, Replaced: replaced}, nil
 }
 
 // UnbindWorktree releases a set's worktree binding without integrating.

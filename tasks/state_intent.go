@@ -87,6 +87,31 @@ func ToggleTaskSetAutoDrain(d *Deps, defPath, taskSetID string) (next bool, err 
 	return next, nil
 }
 
+// SetTaskSetManagedIntent records a managed worktree intent on one registered
+// task set. It is the sole post-register write of the worktree directive,
+// relaxing the "seeded once at first registration" rule (ADR-0059) for exactly
+// this path: `pop tasks bind-worktree --managed`. The intent is what
+// `register --managed` seeds, so the set's next unbound Queue drain provisions a
+// pop-owned worktree forked from the Trunk. An in-lock find-miss is a race guard
+// reported as "unknown task set".
+func SetTaskSetManagedIntent(d *Deps, defPath, taskSetID string) error {
+	canon, err := CanonicalDefinitionPathWith(d, defPath)
+	if err != nil {
+		return err
+	}
+	statePath := StatePathFor(canon)
+
+	return UpdateGlobalStateWith(d, statePath, func(state *GlobalState) error {
+		entry := state.Tasks[canon]
+		idx, _, err := findRegisteredTaskSet(entry, taskSetID)
+		if err != nil {
+			return err
+		}
+		entry.TaskSets[idx].WorktreeIntent = &WorktreeDirective{Managed: true}
+		return nil
+	})
+}
+
 // SetTaskSetAutoDrain sets one registered task set's auto-drain flag to the
 // requested value and reports whether the value changed. Setting the bit to its
 // current value is a clean no-op under the existing state lock.
