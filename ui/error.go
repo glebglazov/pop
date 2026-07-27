@@ -4,13 +4,17 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 )
+
+// defaultTmuxMod is the production tmux module handle used by
+// CopyToClipboard's inside-tmux path (ADR-0142).
+var defaultTmuxMod tmuxmod.Tmux = tmuxmod.New()
 
 // errorModel is the Bubbletea model for the dedicated error screen.
 type errorModel struct {
@@ -158,10 +162,15 @@ func ShowError(err error, trace string) {
 // CopyToClipboard copies text to the system clipboard.
 // Prefers `tmux load-buffer` when inside tmux, falls back to OSC 52 otherwise.
 func CopyToClipboard(text string) error {
+	return CopyToClipboardWith(defaultTmuxMod, text)
+}
+
+// CopyToClipboardWith is CopyToClipboard with an injectable tmux module
+// handle, so tests can assert against the tmuxtest fake instead of a real
+// tmux server.
+func CopyToClipboardWith(mod tmuxmod.Tmux, text string) error {
 	if os.Getenv("TMUX") != "" {
-		cmd := exec.Command("tmux", "load-buffer", "-w", "-")
-		cmd.Stdin = strings.NewReader(text)
-		if err := cmd.Run(); err == nil {
+		if err := mod.LoadBuffer(text); err == nil {
 			return nil
 		}
 		// Fall through to OSC 52 if tmux load-buffer failed.

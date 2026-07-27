@@ -76,7 +76,6 @@ func init() {
 // See docs/rfc-select-deps.md for rationale.
 type ProjectDeps struct {
 	// Core dependencies
-	Tmux    deps.Tmux
 	Project *project.Deps
 
 	// Data loading
@@ -95,18 +94,18 @@ type ProjectDeps struct {
 	SessionActivity   func() map[string]int64
 	AttentionSessions func() map[string]bool
 
-	// Side effects (take deps.Tmux as first arg to match *With signatures)
-	OpenSession func(tmux deps.Tmux, item *ui.Item) error
+	// Side effects
+	OpenSession func(item *ui.Item) error
 	// OpenSessionWithWorkbench creates a session that is exactly the named
 	// Workbench (stray shell window removed) and attaches to it. Used by the
 	// picker create-path when [workbench] pick_on_create is on (ADR-0075).
-	OpenSessionWithWorkbench func(tmux deps.Tmux, item *ui.Item, workbenchName string) error
-	OpenWindow               func(tmux deps.Tmux, item *ui.Item) error
-	KillSession              func(tmux deps.Tmux, name string)
-	SendCDToPane             func(tmux deps.Tmux, paneID, path string) error
-	YankPathToPane           func(tmux deps.Tmux, paneID, path string) error
-	SwitchToTarget           func(tmux deps.Tmux, target string) error
-	SwitchAndZoom            func(tmux deps.Tmux, target string) error
+	OpenSessionWithWorkbench func(item *ui.Item, workbenchName string) error
+	OpenWindow               func(item *ui.Item) error
+	KillSession              func(name string)
+	SendCDToPane             func(paneID, path string) error
+	YankPathToPane           func(paneID, path string) error
+	SwitchToTarget           func(target string) error
+	SwitchAndZoom            func(target string) error
 	RunCustomCommand         func(command string, item *ui.Item)
 	// EnsureSystemState synchronously runs integration checks and kicks off
 	// the monitor daemon in a goroutine. Returns warnings for the picker.
@@ -131,7 +130,11 @@ type ProjectDeps struct {
 
 	// Environment
 	InTmux         func() bool
-	CurrentSession func(tmux deps.Tmux) string
+	CurrentSession func() string
+	// HasSession reports whether a tmux session with the given name is live.
+	// Used to gate the Workbench/Preferred-workbench prompts to brand-new
+	// sessions only.
+	HasSession func(name string) bool
 
 	// CLI flags (populated by cobra handler before calling RunProject)
 	TMuxCDPane string
@@ -142,7 +145,6 @@ type ProjectDeps struct {
 // DefaultProjectDeps returns ProjectDeps wired to real production implementations.
 func DefaultProjectDeps() *ProjectDeps {
 	return &ProjectDeps{
-		Tmux:    defaultTmux,
 		Project: project.DefaultDeps(),
 
 		LoadConfig: func() (*config.Config, error) {
@@ -166,31 +168,29 @@ func DefaultProjectDeps() *ProjectDeps {
 		SessionActivity:   history.TmuxSessionActivity,
 		AttentionSessions: monitorAttentionSessions,
 
-		// Tmux side effects run through the tmux module (ADR-0142); the deps.Tmux
-		// the picker threads is ignored by these adapters, which use the module
-		// handle.
-		OpenSession: func(_ deps.Tmux, item *ui.Item) error {
+		// Tmux side effects run through the tmux module (ADR-0142).
+		OpenSession: func(item *ui.Item) error {
 			return openTmuxSessionWith(defaultTmuxMod, item)
 		},
-		OpenSessionWithWorkbench: func(_ deps.Tmux, item *ui.Item, workbenchName string) error {
+		OpenSessionWithWorkbench: func(item *ui.Item, workbenchName string) error {
 			return openTmuxSessionWithWorkbenchWith(defaultTmuxMod, item, workbenchName)
 		},
-		OpenWindow: func(_ deps.Tmux, item *ui.Item) error {
+		OpenWindow: func(item *ui.Item) error {
 			return openTmuxWindowWith(defaultTmuxMod, item)
 		},
-		KillSession: func(_ deps.Tmux, name string) {
+		KillSession: func(name string) {
 			killTmuxSessionWith(defaultTmuxMod, name)
 		},
-		SendCDToPane: func(_ deps.Tmux, paneID, path string) error {
+		SendCDToPane: func(paneID, path string) error {
 			return sendCDToPaneWith(defaultTmuxMod, paneID, path)
 		},
-		YankPathToPane: func(_ deps.Tmux, paneID, path string) error {
+		YankPathToPane: func(paneID, path string) error {
 			return yankPathToPaneWith(defaultTmuxMod, paneID, path)
 		},
-		SwitchToTarget: func(_ deps.Tmux, target string) error {
+		SwitchToTarget: func(target string) error {
 			return switchToTmuxTargetWith(defaultTmuxMod, target)
 		},
-		SwitchAndZoom: func(_ deps.Tmux, target string) error {
+		SwitchAndZoom: func(target string) error {
 			return switchToTmuxTargetAndZoomWith(defaultTmuxMod, target)
 		},
 		RunCustomCommand:         executeProjectCustomCommand,
@@ -213,7 +213,8 @@ func DefaultProjectDeps() *ProjectDeps {
 		},
 
 		InTmux:         func() bool { return os.Getenv("TMUX") != "" },
-		CurrentSession: func(_ deps.Tmux) string { return currentTmuxSessionWith(defaultTmuxMod) },
+		CurrentSession: func() string { return currentTmuxSessionWith(defaultTmuxMod) },
+		HasSession:     func(name string) bool { return defaultTmuxMod.HasSession(name) },
 	}
 }
 
@@ -295,7 +296,7 @@ func RunProject(d *ProjectDeps) error {
 	// Get current tmux session name for optional exclusion
 	var excludedSessionNames map[string]bool
 	if cfg.ShouldExcludeCurrentSession() {
-		if currentSession := d.CurrentSession(d.Tmux); currentSession != "" {
+		if currentSession := d.CurrentSession(); currentSession != "" {
 			excludedSessionNames = map[string]bool{currentSession: true}
 		}
 	}
@@ -436,7 +437,7 @@ func RunProject(d *ProjectDeps) error {
 				return nil
 			}
 			if isStandaloneSession(*result.Selected) {
-				return d.SwitchToTarget(d.Tmux, standaloneSessionName(*result.Selected))
+				return d.SwitchToTarget(standaloneSessionName(*result.Selected))
 			}
 			// History records an actual Switch (glossary gen 0038): a selection
 			// abandoned at the Workbench prompt (Esc) leaves no entry. So the
@@ -455,28 +456,28 @@ func RunProject(d *ProjectDeps) error {
 			}
 			if d.TMuxCDPane != "" {
 				recordSwitch()
-				return d.SendCDToPane(d.Tmux, d.TMuxCDPane, result.Selected.Path)
+				return d.SendCDToPane(d.TMuxCDPane, result.Selected.Path)
 			}
 			// Preferred workbench (ADR-0078): a resolved per-checkout default
 			// auto-applies silently and suppresses the prompt regardless of
 			// pick_on_create. A stale name resolves to "" with a warning and
 			// falls through to today's behavior. Fires only when this selection
 			// creates a brand-new session.
-			if !d.Tmux.HasSession(result.Selected.SessionName) {
+			if !d.HasSession(result.Selected.SessionName) {
 				preferred, warns := d.ResolvePreferredWorkbench(cfg, result.Selected.Path)
 				for _, w := range warns {
 					debug.Error("project: %s", w)
 				}
 				if preferred != "" {
 					recordSwitch()
-					return d.OpenSessionWithWorkbench(d.Tmux, result.Selected, preferred)
+					return d.OpenSessionWithWorkbench(result.Selected, preferred)
 				}
 			}
 			// Picker-time Workbench selection (ADR-0075), opt-in via
 			// [workbench] pick_on_create. Fires only when this selection
 			// creates a brand-new session and at least one Workbench resolves
 			// for the project path; otherwise the create-path is unchanged.
-			if cfg.WorkbenchPickOnCreate() && !d.Tmux.HasSession(result.Selected.SessionName) {
+			if cfg.WorkbenchPickOnCreate() && !d.HasSession(result.Selected.SessionName) {
 				workbenches := d.ResolveWorkbenches(cfg, result.Selected.Path)
 				if len(workbenches) > 0 {
 					name, confirmed, err := promptWorkbenchForCreate(d, cfg.WorkbenchOrder(), workbenches)
@@ -492,13 +493,13 @@ func RunProject(d *ProjectDeps) error {
 					}
 					if name != "" {
 						recordSwitch()
-						return d.OpenSessionWithWorkbench(d.Tmux, result.Selected, name)
+						return d.OpenSessionWithWorkbench(result.Selected, name)
 					}
 					// "no workbench": fall through to today's flat session.
 				}
 			}
 			recordSwitch()
-			return d.OpenSession(d.Tmux, result.Selected)
+			return d.OpenSession(result.Selected)
 
 		case ui.ActionOpenWindow:
 			if result.Selected == nil || isStandaloneSession(*result.Selected) {
@@ -510,7 +511,7 @@ func RunProject(d *ProjectDeps) error {
 					debug.Error("project: save history: %v", err)
 				}
 			}
-			return d.OpenWindow(d.Tmux, result.Selected)
+			return d.OpenWindow(result.Selected)
 
 		case ui.ActionYankPath:
 			if result.Selected == nil {
@@ -523,15 +524,15 @@ func RunProject(d *ProjectDeps) error {
 			if paneID == "" {
 				return fmt.Errorf("yank target pane not set — pass --yank-target or run inside tmux")
 			}
-			return d.YankPathToPane(d.Tmux, paneID, result.Selected.Path)
+			return d.YankPathToPane(paneID, result.Selected.Path)
 
 		case ui.ActionKillSession:
 			if result.Selected != nil {
 				restoreCursorIdx = result.CursorIndex
 				if isStandaloneSession(*result.Selected) {
-					d.KillSession(d.Tmux, standaloneSessionName(*result.Selected))
+					d.KillSession(standaloneSessionName(*result.Selected))
 				} else {
-					d.KillSession(d.Tmux, result.Selected.SessionName)
+					d.KillSession(result.Selected.SessionName)
 				}
 			}
 			// Continue loop — session state refreshes automatically

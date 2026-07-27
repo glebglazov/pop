@@ -924,7 +924,7 @@ func testProjectDeps(t *testing.T) *ProjectDeps {
 	projectDir := t.TempDir()
 
 	return &ProjectDeps{
-		Tmux: &deps.MockTmux{},
+		HasSession: func(name string) bool { return false },
 		Project: &project.Deps{
 			Git: &deps.MockGit{},
 			FS:  &deps.MockFileSystem{},
@@ -947,13 +947,13 @@ func testProjectDeps(t *testing.T) *ProjectDeps {
 		SessionActivity:   func() map[string]int64 { return nil },
 		AttentionSessions: func() map[string]bool { return nil },
 
-		OpenSession:              func(tmux deps.Tmux, item *ui.Item) error { return nil },
-		OpenSessionWithWorkbench: func(tmux deps.Tmux, item *ui.Item, workbenchName string) error { return nil },
-		OpenWindow:               func(tmux deps.Tmux, item *ui.Item) error { return nil },
-		KillSession:              func(tmux deps.Tmux, name string) {},
-		SendCDToPane:             func(tmux deps.Tmux, paneID, path string) error { return nil },
-		SwitchToTarget:           func(tmux deps.Tmux, target string) error { return nil },
-		SwitchAndZoom:            func(tmux deps.Tmux, target string) error { return nil },
+		OpenSession:              func(item *ui.Item) error { return nil },
+		OpenSessionWithWorkbench: func(item *ui.Item, workbenchName string) error { return nil },
+		OpenWindow:               func(item *ui.Item) error { return nil },
+		KillSession:              func(name string) {},
+		SendCDToPane:             func(paneID, path string) error { return nil },
+		SwitchToTarget:           func(target string) error { return nil },
+		SwitchAndZoom:            func(target string) error { return nil },
 		RunCustomCommand:         func(command string, item *ui.Item) {},
 		EnsureSystemState:        func() []string { return nil },
 		RunConfigure:             func() error { return nil },
@@ -962,7 +962,7 @@ func testProjectDeps(t *testing.T) *ProjectDeps {
 		ResolvePreferredWorkbench: func(cfg *config.Config, path string) (string, []string) { return "", nil },
 
 		InTmux:         func() bool { return false },
-		CurrentSession: func(tmux deps.Tmux) string { return "" },
+		CurrentSession: func() string { return "" },
 	}
 }
 
@@ -986,7 +986,7 @@ func TestRunProject_ActionConfirmRecordsHistory(t *testing.T) {
 			CursorIndex: 0,
 		}
 	})
-	d.OpenSession = func(tmux deps.Tmux, item *ui.Item) error {
+	d.OpenSession = func(item *ui.Item) error {
 		openedItem = item
 		return nil
 	}
@@ -1038,7 +1038,7 @@ func TestRunProject_ActionKillSessionContinuesLoop(t *testing.T) {
 			return ui.Result{}, nil
 		}
 	}
-	d.KillSession = func(tmux deps.Tmux, name string) {
+	d.KillSession = func(name string) {
 		killedNames = append(killedNames, name)
 	}
 
@@ -1067,7 +1067,7 @@ func TestRunProject_ActionCancelExitsCleanly(t *testing.T) {
 		pickerCalls++
 		return ui.Result{Action: ui.ActionCancel}, nil
 	}
-	d.OpenSession = func(tmux deps.Tmux, item *ui.Item) error {
+	d.OpenSession = func(item *ui.Item) error {
 		openCalled = true
 		return nil
 	}
@@ -1405,9 +1405,9 @@ func TestRunProject_WorkbenchPickDisabledNoPrompt(t *testing.T) {
 		return []config.Workbench{{Name: "dev"}}
 	}
 	openFlat := false
-	d.OpenSession = func(tmux deps.Tmux, item *ui.Item) error { openFlat = true; return nil }
+	d.OpenSession = func(item *ui.Item) error { openFlat = true; return nil }
 	openWB := false
-	d.OpenSessionWithWorkbench = func(tmux deps.Tmux, item *ui.Item, name string) error { openWB = true; return nil }
+	d.OpenSessionWithWorkbench = func(item *ui.Item, name string) error { openWB = true; return nil }
 
 	calls := 0
 	d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
@@ -1438,9 +1438,9 @@ func TestRunProject_WorkbenchPickDisabledNoPrompt(t *testing.T) {
 func TestRunProject_WorkbenchPickEmptySetSkipsPrompt(t *testing.T) {
 	d := projectDepsForWorkbenchPrompt(t, nil) // empty resolved set
 	openFlat := false
-	d.OpenSession = func(tmux deps.Tmux, item *ui.Item) error { openFlat = true; return nil }
+	d.OpenSession = func(item *ui.Item) error { openFlat = true; return nil }
 	openWB := false
-	d.OpenSessionWithWorkbench = func(tmux deps.Tmux, item *ui.Item, name string) error { openWB = true; return nil }
+	d.OpenSessionWithWorkbench = func(item *ui.Item, name string) error { openWB = true; return nil }
 
 	calls := 0
 	d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
@@ -1469,10 +1469,10 @@ func TestRunProject_WorkbenchPickSelectsWorkbench(t *testing.T) {
 	d := projectDepsForWorkbenchPrompt(t, []config.Workbench{{Name: "gs-dev"}, {Name: "minimal"}})
 
 	openFlat := false
-	d.OpenSession = func(tmux deps.Tmux, item *ui.Item) error { openFlat = true; return nil }
+	d.OpenSession = func(item *ui.Item) error { openFlat = true; return nil }
 	var gotName string
 	openWB := false
-	d.OpenSessionWithWorkbench = func(tmux deps.Tmux, item *ui.Item, name string) error {
+	d.OpenSessionWithWorkbench = func(item *ui.Item, name string) error {
 		openWB = true
 		gotName = name
 		return nil
@@ -1520,9 +1520,9 @@ func TestRunProject_WorkbenchPickNoWorkbenchYieldsFlat(t *testing.T) {
 	d := projectDepsForWorkbenchPrompt(t, []config.Workbench{{Name: "gs-dev"}})
 
 	openFlat := false
-	d.OpenSession = func(tmux deps.Tmux, item *ui.Item) error { openFlat = true; return nil }
+	d.OpenSession = func(item *ui.Item) error { openFlat = true; return nil }
 	openWB := false
-	d.OpenSessionWithWorkbench = func(tmux deps.Tmux, item *ui.Item, name string) error { openWB = true; return nil }
+	d.OpenSessionWithWorkbench = func(item *ui.Item, name string) error { openWB = true; return nil }
 
 	calls := 0
 	d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
@@ -1561,9 +1561,9 @@ func TestRunProject_WorkbenchPickEscLeavesHistoryUnchanged(t *testing.T) {
 	}
 
 	openFlat := false
-	d.OpenSession = func(tmux deps.Tmux, item *ui.Item) error { openFlat = true; return nil }
+	d.OpenSession = func(item *ui.Item) error { openFlat = true; return nil }
 	openWB := false
-	d.OpenSessionWithWorkbench = func(tmux deps.Tmux, item *ui.Item, name string) error { openWB = true; return nil }
+	d.OpenSessionWithWorkbench = func(item *ui.Item, name string) error { openWB = true; return nil }
 
 	calls := 0
 	d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
@@ -1625,10 +1625,10 @@ func TestRunProject_PreferredWorkbenchAutoApplies(t *testing.T) {
 			}
 
 			openFlat := false
-			d.OpenSession = func(tmux deps.Tmux, item *ui.Item) error { openFlat = true; return nil }
+			d.OpenSession = func(item *ui.Item) error { openFlat = true; return nil }
 			var gotName string
 			openWB := false
-			d.OpenSessionWithWorkbench = func(tmux deps.Tmux, item *ui.Item, n string) error {
+			d.OpenSessionWithWorkbench = func(item *ui.Item, n string) error {
 				openWB = true
 				gotName = n
 				return nil
@@ -1668,9 +1668,9 @@ func TestRunProject_StalePreferredFallsThrough(t *testing.T) {
 		return "", []string{"preferred workbench \"ghost\" does not resolve; ignoring"}
 	}
 	openFlat := false
-	d.OpenSession = func(tmux deps.Tmux, item *ui.Item) error { openFlat = true; return nil }
+	d.OpenSession = func(item *ui.Item) error { openFlat = true; return nil }
 	openWB := false
-	d.OpenSessionWithWorkbench = func(tmux deps.Tmux, item *ui.Item, n string) error { openWB = true; return nil }
+	d.OpenSessionWithWorkbench = func(item *ui.Item, n string) error { openWB = true; return nil }
 
 	d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
 		return ui.Result{Action: ui.ActionConfirm, Selected: &items[0]}, nil
@@ -1693,9 +1693,9 @@ func TestRunProject_WorkbenchPickEscReturnsToProjectPicker(t *testing.T) {
 	d := projectDepsForWorkbenchPrompt(t, []config.Workbench{{Name: "gs-dev"}})
 
 	openFlat := false
-	d.OpenSession = func(tmux deps.Tmux, item *ui.Item) error { openFlat = true; return nil }
+	d.OpenSession = func(item *ui.Item) error { openFlat = true; return nil }
 	openWB := false
-	d.OpenSessionWithWorkbench = func(tmux deps.Tmux, item *ui.Item, name string) error { openWB = true; return nil }
+	d.OpenSessionWithWorkbench = func(item *ui.Item, name string) error { openWB = true; return nil }
 
 	calls := 0
 	d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
@@ -1729,7 +1729,7 @@ func TestRunProject_WorkbenchPickEscReturnsToProjectPicker(t *testing.T) {
 // skips the prompt and reattaches via the flat path.
 func TestRunProject_WorkbenchPickLiveSessionNoPrompt(t *testing.T) {
 	d := projectDepsForWorkbenchPrompt(t, []config.Workbench{{Name: "gs-dev"}})
-	d.Tmux = &deps.MockTmux{HasSessionFunc: func(name string) bool { return true }}
+	d.HasSession = func(name string) bool { return true }
 
 	resolveCalled := false
 	d.ResolveWorkbenches = func(cfg *config.Config, path string) []config.Workbench {
@@ -1737,9 +1737,9 @@ func TestRunProject_WorkbenchPickLiveSessionNoPrompt(t *testing.T) {
 		return []config.Workbench{{Name: "gs-dev"}}
 	}
 	openFlat := false
-	d.OpenSession = func(tmux deps.Tmux, item *ui.Item) error { openFlat = true; return nil }
+	d.OpenSession = func(item *ui.Item) error { openFlat = true; return nil }
 	openWB := false
-	d.OpenSessionWithWorkbench = func(tmux deps.Tmux, item *ui.Item, name string) error { openWB = true; return nil }
+	d.OpenSessionWithWorkbench = func(item *ui.Item, name string) error { openWB = true; return nil }
 
 	calls := 0
 	d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
@@ -1776,9 +1776,9 @@ func TestRunProject_WorkbenchPickOpenWindowUnaffected(t *testing.T) {
 		return []config.Workbench{{Name: "gs-dev"}}
 	}
 	openWindow := false
-	d.OpenWindow = func(tmux deps.Tmux, item *ui.Item) error { openWindow = true; return nil }
+	d.OpenWindow = func(item *ui.Item) error { openWindow = true; return nil }
 	openWB := false
-	d.OpenSessionWithWorkbench = func(tmux deps.Tmux, item *ui.Item, name string) error { openWB = true; return nil }
+	d.OpenSessionWithWorkbench = func(item *ui.Item, name string) error { openWB = true; return nil }
 
 	calls := 0
 	d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
@@ -1811,9 +1811,9 @@ func TestRunProject_WorkbenchPickStandaloneUnaffected(t *testing.T) {
 		return []config.Workbench{{Name: "gs-dev"}}
 	}
 	var switched string
-	d.SwitchToTarget = func(tmux deps.Tmux, target string) error { switched = target; return nil }
+	d.SwitchToTarget = func(target string) error { switched = target; return nil }
 	openWB := false
-	d.OpenSessionWithWorkbench = func(tmux deps.Tmux, item *ui.Item, name string) error { openWB = true; return nil }
+	d.OpenSessionWithWorkbench = func(item *ui.Item, name string) error { openWB = true; return nil }
 
 	d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
 		return ui.Result{

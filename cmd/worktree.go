@@ -397,7 +397,7 @@ func defaultWorktreeShapeDeps() *worktreeShapeDeps {
 			return createSessionFromWorkbench(defaultTemplateRuntimeDeps(), tmpl, sessionName, path)
 		},
 		SessionName:   project.SessionName,
-		SessionExists: func(sessionName string) bool { return defaultTmux.HasSession(sessionName) },
+		SessionExists: func(sessionName string) bool { return defaultTmuxMod.HasSession(sessionName) },
 		RecordHistory: recordWorktreeHistory,
 		Attach:        func(sessionName string) error { return switchToTmuxTargetWith(defaultTmuxMod, sessionName) },
 		Flat:          handleWorktreeSelect,

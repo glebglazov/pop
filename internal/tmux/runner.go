@@ -20,6 +20,11 @@ type runner interface {
 	// interactive client (attach-session) takes over the terminal. It maps a
 	// non-zero exit into an error carrying tmux's stderr.
 	attach(args ...string) error
+	// input runs tmux with args, writing text to the subprocess's stdin —
+	// for verbs that stream data into tmux rather than reading it out (e.g.
+	// load-buffer). It maps a non-zero exit into an error carrying tmux's
+	// stderr.
+	input(text string, args ...string) error
 }
 
 // execRunner is the real adapter: it shells out to the tmux binary.
@@ -40,6 +45,17 @@ func (execRunner) attach(args ...string) error {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = io.MultiWriter(os.Stderr, &stderr)
+	if err := cmd.Run(); err != nil {
+		return commandError(err, stderr.Bytes())
+	}
+	return nil
+}
+
+func (execRunner) input(text string, args ...string) error {
+	cmd := exec.Command("tmux", args...)
+	cmd.Stdin = strings.NewReader(text)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		return commandError(err, stderr.Bytes())
 	}

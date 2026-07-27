@@ -156,6 +156,12 @@ type Fake struct {
 	// SplitPanes records SplitPane specs, in order.
 	SplitPanes []tmux.SplitSpec
 
+	// ClipboardBuffer records the last text LoadBuffer wrote.
+	ClipboardBuffer string
+	// LoadBufferFunc, when set, replaces LoadBuffer entirely — used to inject
+	// failures (e.g. no tmux server).
+	LoadBufferFunc func(text string) error
+
 	// Failure-injection overrides. When set, each replaces its verb entirely.
 	NewSessionFunc         func(name, dir string) error
 	SwitchClientFunc       func(target string) error
@@ -680,5 +686,13 @@ func (f *Fake) KillWindow(target string) error {
 
 func (f *Fake) SelectWindowTarget(target string) error {
 	f.SelectedWindowTargets = append(f.SelectedWindowTargets, target)
+	return nil
+}
+
+func (f *Fake) LoadBuffer(text string) error {
+	if f.LoadBufferFunc != nil {
+		return f.LoadBufferFunc(text)
+	}
+	f.ClipboardBuffer = text
 	return nil
 }

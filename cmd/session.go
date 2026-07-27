@@ -7,18 +7,14 @@ import (
 
 	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/history"
-	"github.com/glebglazov/pop/internal/deps"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/monitor"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/ui"
 )
 
-var defaultTmux deps.Tmux = deps.NewRealTmux()
-
-// defaultTmuxMod is the production tmux module handle used by session-lifecycle
-// verbs (create/attach/switch/kill). Command-based tmux calls still go through
-// defaultTmux until their packages migrate (ADR-0142).
+// defaultTmuxMod is the production tmux module handle used by all tmux
+// side effects in cmd (ADR-0142).
 var defaultTmuxMod tmuxmod.Tmux = tmuxmod.New()
 
 const (

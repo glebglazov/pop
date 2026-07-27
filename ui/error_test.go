@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 )
 
 func TestErrorModelClipboardPayload(t *testing.T) {
@@ -203,6 +204,50 @@ func TestErrorModelViewShowsCopyFailure(t *testing.T) {
 	plain := StripANSI(fmt.Sprint(m.View()))
 	if !strings.Contains(plain, "Copy failed: no tty") {
 		t.Errorf("view should show copy failure reason:\n%s", plain)
+	}
+}
+
+func TestCopyToClipboardWithLoadsTmuxBufferInsideTmux(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux-1000/default,1234,0")
+
+	fake := &tmuxtest.Fake{}
+	if err := CopyToClipboardWith(fake, "boom\n\nstack trace"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fake.ClipboardBuffer != "boom\n\nstack trace" {
+		t.Errorf("ClipboardBuffer = %q, want %q", fake.ClipboardBuffer, "boom\n\nstack trace")
+	}
+}
+
+func TestCopyToClipboardWithFallsBackOutsideTmux(t *testing.T) {
+	t.Setenv("TMUX", "")
+
+	fake := &tmuxtest.Fake{
+		LoadBufferFunc: func(text string) error {
+			t.Fatal("LoadBuffer should not be called outside tmux")
+			return nil
+		},
+	}
+	// osc52Copy writes to /dev/tty, falling back to stderr — either way it
+	// should not error, and LoadBuffer must never be reached.
+	if err := CopyToClipboardWith(fake, "boom"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCopyToClipboardWithFallsBackWhenLoadBufferFails(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux-1000/default,1234,0")
+
+	fake := &tmuxtest.Fake{
+		LoadBufferFunc: func(text string) error {
+			return errors.New("no tmux server")
+		},
+	}
+	if err := CopyToClipboardWith(fake, "boom"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fake.ClipboardBuffer != "" {
+		t.Errorf("ClipboardBuffer should stay empty on LoadBuffer failure, got %q", fake.ClipboardBuffer)
 	}
 }
 

@@ -7,8 +7,16 @@ package tmux
 type recordingRunner struct {
 	calls       [][]string
 	attachCalls [][]string
+	inputCalls  []inputCall
 	out         string
 	err         error
+}
+
+// inputCall records one input() invocation: the text streamed to tmux's
+// stdin alongside its argument vector.
+type inputCall struct {
+	text string
+	args []string
 }
 
 func (r *recordingRunner) output(args ...string) (string, error) {
@@ -18,5 +26,10 @@ func (r *recordingRunner) output(args ...string) (string, error) {
 
 func (r *recordingRunner) attach(args ...string) error {
 	r.attachCalls = append(r.attachCalls, args)
+	return r.err
+}
+
+func (r *recordingRunner) input(text string, args ...string) error {
+	r.inputCalls = append(r.inputCalls, inputCall{text: text, args: args})
 	return r.err
 }

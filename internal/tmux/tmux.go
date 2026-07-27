@@ -179,6 +179,10 @@ type Tmux interface {
 	KillWindow(target string) error
 	// SelectWindowTarget makes an arbitrary window target the current window.
 	SelectWindowTarget(target string) error
+
+	// LoadBuffer writes text into tmux's paste buffer (load-buffer -w -), for
+	// ui's clipboard-copy fallback when running inside tmux.
+	LoadBuffer(text string) error
 }
 
 // realTmux implements Tmux against the tmux binary via the runner seam.
