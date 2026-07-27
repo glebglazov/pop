@@ -1881,7 +1881,7 @@ func (m QueueDashboard) loadDetail(row DashboardRow) tea.Cmd {
 			cfg, _ = d.LoadConfig(config.DefaultConfigPath())
 		}
 		tasks.ApplyVerifyVerdictsWith(d.Tasks, refresh, cfg, func(setID string) string {
-			return binding.RuntimeForSet(bindings, row.RepoKey, setID, row.ProjectPath)
+			return binding.RuntimeForSet(bindings, row.RepoKey, setID)
 		})
 		taskRow := tasks.FindRow(refresh, row.SetID)
 		manifest := refresh.Manifests[row.SetID]

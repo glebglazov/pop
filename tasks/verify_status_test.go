@@ -321,6 +321,26 @@ func TestApplyVerifyVerdictsWithPerSetRuntime(t *testing.T) {
 	}
 }
 
+// TestApplyVerifyVerdictsWithUnplacedSkipsTrunkHEAD: an empty per-set runtime
+// (unplaced) must leave the terminal status alone — never overlay a trunk HEAD
+// verdict (ADR-0147).
+func TestApplyVerifyVerdictsWithUnplacedSkipsTrunkHEAD(t *testing.T) {
+	t.Parallel()
+	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
+	d := setupVerifyStatusDeps(t, "/repo/.git\n", "shaCUR\n")
+	putStatusVerdict(t, d, "/repo/.git", "unplaced", "shaCUR", "NEEDS-HUMAN", "trunk-only")
+
+	result := doneResult()
+	result.Rows[0].ID = "unplaced"
+	result.Manifests["unplaced"] = result.Manifests["demo"]
+	delete(result.Manifests, "demo")
+
+	ApplyVerifyVerdictsWith(d, result, enabled, func(string) string { return "" })
+	if got := rowStatus(result, "unplaced"); got != StatusDone {
+		t.Fatalf("unplaced status = %q, want DONE (no trunk HEAD overlay)", got)
+	}
+}
+
 // TestApplyVerifyVerdictsLeavesNonTerminalRows guards the terminal-zone gate:
 // a missing row (no manifest) and a ready row must be untouched even with the
 // feature enabled, so re-derivation never corrupts a MISSING set into MALFORMED.

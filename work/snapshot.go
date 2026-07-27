@@ -595,7 +595,7 @@ func rowsFromStatic(d *Deps, cfg *config.Config, snap *snapshot, delays []time.D
 		cfg, _ = d.LoadConfig(config.DefaultConfigPath())
 	}
 	tasks.ApplyVerifyVerdictsWith(d.Tasks, refresh, cfg, func(setID string) string {
-		return binding.RuntimeForSet(snap.bindings, st.repoKey, setID, staticProjectPath(st))
+		return binding.RuntimeForSet(snap.bindings, st.repoKey, setID)
 	})
 	intents := worktreeIntents(d, st.defPath)
 	backoff := d.setBackoffLookup(st.repoCommonDir, delays, now)

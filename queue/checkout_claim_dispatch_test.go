@@ -106,6 +106,64 @@ func TestSelectReadySetOwnClaimStillDefers(t *testing.T) {
 	}
 }
 
+// TestUnplacedSetNotClaimDeferredBehindTrunkDrain drives the ADR-0147 deadlock:
+// a live drain claims the trunk while an unbound (unplaced) Ready set would
+// historically resolve its claim target to that same trunk and defer forever.
+// Binding-to-runtime-path now returns no checkout for the unplaced set, so the
+// claim gate does not defer it on account of the trunk's claim.
+func TestUnplacedSetNotClaimDeferredBehindTrunkDrain(t *testing.T) {
+	const trunk = "/repo/main"
+	td := queueTestTasksDeps(t, true)
+	td.ProcessAlive = func(pid int) bool { return pid == 4242 }
+	td.ProcessStartToken = func(pid int) (string, bool) {
+		if pid == 4242 {
+			return "live-tok", true
+		}
+		return "", false
+	}
+	d := &Deps{Tasks: td}
+
+	s, ok, err := td.Store(true)
+	if err != nil || !ok {
+		t.Fatalf("Store: ok=%v err=%v", ok, err)
+	}
+	if _, err := s.StartDrain(store.Drain{
+		Repo:        "/repo/.git",
+		SetID:       "trunk-drain",
+		RuntimePath: trunk,
+		PID:         4242,
+		ProcStart:   "live-tok",
+		StartedAt:   time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("StartDrain on trunk: %v", err)
+	}
+
+	// No binding for the unplaced set — RuntimeForSet must not fall back to trunk.
+	claimFor := d.checkoutClaimLookup(nil, "repo-key")
+	if claim := claimFor("unplaced"); claim != nil {
+		t.Fatalf("unplaced claim = %+v, want nil (no checkout to claim-gate)", claim)
+	}
+	// Bound set on the trunk still sees the live drain claim.
+	bound := map[string]WorktreeBinding{
+		setScopedKey("repo-key", "bound-on-trunk"): {RuntimePath: trunk},
+	}
+	boundClaim := d.checkoutClaimLookup(bound, "repo-key")
+	if claim := boundClaim("bound-on-trunk"); claim == nil || claim.Kind != store.ClaimRunningDrain || claim.SetID != "trunk-drain" {
+		t.Fatalf("bound-on-trunk claim = %+v, want trunk-drain running claim", claim)
+	}
+
+	refresh := &tasks.RefreshResult{Rows: []tasks.Row{
+		{ID: "unplaced", Status: tasks.StatusReady, AutoDrain: true, Priority: 100, RegIndex: 0},
+	}}
+	ids, deferral, okSel := selectReadySets(refresh, nil, nil, claimFor)
+	if !okSel || len(ids) != 1 || ids[0] != "unplaced" {
+		t.Fatalf("unplaced should dispatch past trunk claim, got ids=%v ok=%v deferral=%+v", ids, okSel, deferral)
+	}
+	if deferral.Deferred() {
+		t.Fatalf("unplaced must not be claim-deferred, got %+v", deferral)
+	}
+}
+
 // TestCheckoutClaimDeferralRendersReason: the claim deferral surfaces through
 // the run/status view's blocked bucket with the holding set named and the
 // checkout_claim kind (criterion 5).

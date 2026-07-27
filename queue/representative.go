@@ -338,7 +338,7 @@ func decideBareWithoutBase(d *Deps, cfg *config.Config, scans []projectScan, nam
 	}
 
 	backoff := d.setBackoffLookup(scanRepoCommonDir(d, base), delays, now)
-	claimFor := d.checkoutClaimLookup(bindings, repoKey, base.ProjectPath)
+	claimFor := d.checkoutClaimLookup(bindings, repoKey)
 	ids, deferral, ok := selectReadySets(refresh, backoff, recoveryWaiters, claimFor)
 	if !ok {
 		if deferral.Deferred() {

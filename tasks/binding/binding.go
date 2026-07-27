@@ -55,15 +55,17 @@ func Key(id *tasks.RepositoryIdentity, setID string) string {
 
 // RuntimeForSet returns the checkout whose HEAD gates work for setID within a
 // repository: its Worktree binding path when bound (a row present with a
-// non-blank RuntimePath), else the repository's representative checkout. It is
-// the sole home for the bound-checkout-else-representative resolution rule
-// (ADR-0118 bullet 5) — every caller that needs "the checkout whose HEAD gates
-// this set" resolves it here rather than re-deriving the fallback.
-func RuntimeForSet(bindings map[string]Binding, repoKey, setID, representative string) string {
+// non-blank RuntimePath), else the empty string — no checkout (ADR-0147). An
+// unplaced set must never silently inherit the repository's representative
+// (trunk); every consumer of this resolution handles the empty path explicitly
+// (claim gate, verdict resolution, Work dashboard, work snapshot). It is the
+// sole home for the binding-to-runtime-path rule — every caller that needs
+// "the checkout whose HEAD gates this set" resolves it here.
+func RuntimeForSet(bindings map[string]Binding, repoKey, setID string) string {
 	if b, ok := bindings[ScopedKey(repoKey, setID)]; ok && strings.TrimSpace(b.RuntimePath) != "" {
 		return b.RuntimePath
 	}
-	return representative
+	return ""
 }
 
 // SetIDFromKey extracts the Task set identifier from a scoped store key built

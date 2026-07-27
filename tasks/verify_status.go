@@ -25,7 +25,8 @@ func verifyEnabled(cfg *config.Config) bool {
 // current checkout). Call ApplyVerifyVerdictsWith when each set may drain in
 // its own checkout (Binding-first resolution via binding.CommandRuntimeResolver,
 // the Work dashboard, queue scan) so a bound set derives status at its
-// Worktree binding (ADR-0146).
+// Worktree binding (ADR-0146) and an unplaced set skips verdict overlay
+// entirely (ADR-0147).
 //
 // The verdict lookup first checks the current work SHA. A PASS verdict at HEAD
 // lets the terminal status stand; any non-PASS verdict at HEAD forces
@@ -41,8 +42,10 @@ func ApplyVerifyVerdicts(d *Deps, result *RefreshResult, cfg *config.Config, run
 
 // ApplyVerifyVerdictsWith is ApplyVerifyVerdicts with a per-set runtime checkout
 // resolver. runtimeForSet returns the checkout whose HEAD gates Verify verdict
-// lookup for that set — typically its Worktree binding path when bound, else
-// the repo's representative checkout.
+// lookup for that set — its Worktree binding path when bound, else empty for an
+// unplaced set (ADR-0147). An empty path skips verdict overlay entirely so an
+// unplaced set keeps its manifest-derived status rather than inheriting a
+// foreign (trunk) HEAD.
 //
 // The pass is also a no-op on an archived view (result.ShowArchived): an
 // Archived Task set is outside the verification loop (ADR-0026), so
@@ -64,10 +67,9 @@ func ApplyVerifyVerdictsWith(d *Deps, result *RefreshResult, cfg *config.Config,
 	}
 
 	// Resolving a checkout's repo identity and HEAD each forks git, and sets
-	// that share a checkout (the common case: every unbound set resolves the
-	// repo's representative path) resolve the identical pair. Memoize per
-	// runtimePath so a dashboard with N terminal sets on one checkout forks git
-	// twice, not 2N times.
+	// that share a checkout resolve the identical pair. Memoize per runtimePath
+	// so a dashboard with N terminal sets on one checkout forks git twice, not
+	// 2N times.
 	type checkoutInfo struct {
 		repo    string
 		workSHA string
@@ -100,7 +102,13 @@ func ApplyVerifyVerdictsWith(d *Deps, result *RefreshResult, cfg *config.Config,
 			row.VerifiedAtSHA = ""
 			continue
 		}
-		info := resolveCheckout(runtimeForSet(row.ID))
+		runtimePath := runtimeForSet(row.ID)
+		if runtimePath == "" {
+			// Unplaced: no checkout to gate on (ADR-0147). Leave manifest status.
+			row.VerifiedAtSHA = ""
+			continue
+		}
+		info := resolveCheckout(runtimePath)
 		var current *store.VerifyVerdict
 		var latestPass *store.VerifyVerdict
 		if s != nil && info.repo != "" && info.workSHA != "" {

@@ -60,8 +60,11 @@ func CommandRuntimeResolver(td *tasks.Deps, currentCheckout string) (func(setID 
 		return nil, "", err
 	}
 	return func(setID string) string {
-		path := RuntimeForSet(bindings, repoKey, setID, current)
-		if path == current {
+		path := RuntimeForSet(bindings, repoKey, setID)
+		if path == "" {
+			// ADR-0146: set-scoped CLI commands fall back to the current checkout
+			// when unbound. RuntimeForSet itself never invents a checkout
+			// (ADR-0147); this fallback is the command-surface law only.
 			return current
 		}
 		normalized, err := tasks.ResolveRuntimePathWith(td, path, "")

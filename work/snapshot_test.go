@@ -138,7 +138,8 @@ func staticForScan(scan scanFixture, repBranch string, bare bool) repoStatic {
 }
 
 // TestBuildRowsVerifyFailedStatus confirms the build applies the same SHA-gated
-// Verify overlay as `pop tasks status`, not manifest status alone.
+// Verify overlay as `pop tasks status`, not manifest status alone — for a bound
+// set whose Worktree binding is the checkout whose HEAD gates the verdict.
 func TestBuildRowsVerifyFailedStatus(t *testing.T) {
 	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
 	doneManifest := &tasks.Manifest{
@@ -165,6 +166,10 @@ func TestBuildRowsVerifyFailedStatus(t *testing.T) {
 		return "", nil
 	}}
 	mkdirDrainStoreDir(t, td)
+	runtime := t.TempDir()
+	seedBindingStore(t, td, map[string]binding.Binding{
+		binding.ScopedKey("repo-key", "demo"): {RuntimePath: runtime, Branch: "main"},
+	})
 	s, err := store.Open(tasks.DrainStorePathWith(td), func(int, string) bool { return true })
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
@@ -193,8 +198,75 @@ func TestBuildRowsVerifyFailedStatus(t *testing.T) {
 	if got[0].RawStatus != tasks.StatusVerifyFailed {
 		t.Fatalf("RawStatus = %q, want VERIFY-FAILED", got[0].RawStatus)
 	}
-	if StatusCell(got[0]) != "VERIFY-FAILED" {
-		t.Fatalf("Status = %q, want VERIFY-FAILED", StatusCell(got[0]))
+	if cell := StatusCell(got[0]); !strings.HasPrefix(cell, "VERIFY-FAILED") {
+		t.Fatalf("Status = %q, want VERIFY-FAILED prefix", cell)
+	}
+}
+
+// TestBuildRowsUnplacedSkipsTrunkVerdict confirms an unbound Done set keeps its
+// manifest status and empty RuntimePath — a trunk HEAD verdict must not stand in
+// for an unplaced set (ADR-0147).
+func TestBuildRowsUnplacedSkipsTrunkVerdict(t *testing.T) {
+	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
+	doneManifest := &tasks.Manifest{
+		Valid: true,
+		Tasks: []tasks.Task{{ID: "01-a", File: "01-a.md", Type: "AFK", Status: "done"}},
+	}
+	rows := []tasks.Row{{ID: "unplaced", Status: tasks.StatusDone}}
+	td := workDataDeps(t)
+	d := testDeps(t, rows)
+	d.IncludeDone = true
+	d.Tasks = td
+	d.Refresh = func(string) (*tasks.RefreshResult, error) {
+		return &tasks.RefreshResult{
+			Rows:      rows,
+			Manifests: map[string]*tasks.Manifest{"unplaced": doneManifest},
+		}, nil
+	}
+	d.Tasks.Git = &deps.MockGit{CommandInDirFunc: func(dir string, args ...string) (string, error) {
+		switch {
+		case len(args) >= 2 && args[0] == "rev-parse" && args[1] == "--git-common-dir":
+			return "/repo/.git", nil
+		case len(args) >= 2 && args[0] == "rev-parse" && args[1] == "HEAD":
+			return "shaCUR", nil
+		}
+		return "", nil
+	}}
+	mkdirDrainStoreDir(t, td)
+	s, err := store.Open(tasks.DrainStorePathWith(td), func(int, string) bool { return true })
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	if err := s.PutVerifyVerdict(store.VerifyVerdict{
+		Repo: "/repo/.git", SetID: "unplaced", WorkSHA: "shaCUR", Verdict: "NEEDS-HUMAN", Findings: "trunk-only",
+	}); err != nil {
+		t.Fatalf("PutVerifyVerdict: %v", err)
+	}
+	_ = s.Close()
+
+	scan := scanFixture{
+		Name:           "pop",
+		ProjectPath:    "/repo/main",
+		DefinitionPath: "/def",
+		RepoKey:        "repo-key",
+		RepoCommonDir:  "/repo/.git",
+	}
+	got, err := rowsForStatic(d, enabled, staticForScan(scan, "main", false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("rows = %+v, want one", got)
+	}
+	row := got[0]
+	if row.Bound || row.RuntimePath != "" {
+		t.Fatalf("unplaced row Bound=%v RuntimePath=%q, want unbound with no checkout", row.Bound, row.RuntimePath)
+	}
+	if row.DestKind != DestNeedsBind || row.Worktree != DestLabelNeedsBind {
+		t.Fatalf("unplaced dest = kind=%v label=%q, want needs-bind", row.DestKind, row.Worktree)
+	}
+	if row.RawStatus != tasks.StatusDone {
+		t.Fatalf("RawStatus = %q, want DONE (trunk verdict must not overlay an unplaced set)", row.RawStatus)
 	}
 }
 

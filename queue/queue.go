@@ -770,11 +770,11 @@ func decideProjectDispatches(d *Deps, scan projectScan, delays []time.Duration, 
 		cfg, _ = d.LoadConfig(config.DefaultConfigPath())
 	}
 	tasks.ApplyVerifyVerdictsWith(d.Tasks, refresh, cfg, func(setID string) string {
-		return binding.RuntimeForSet(bindings, repoKey, setID, scan.ProjectPath)
+		return binding.RuntimeForSet(bindings, repoKey, setID)
 	})
 
 	backoff := d.setBackoffLookup(scanRepoCommonDir(d, scan), delays, now)
-	claimFor := d.checkoutClaimLookup(bindings, repoKey, scan.ProjectPath)
+	claimFor := d.checkoutClaimLookup(bindings, repoKey)
 	ids, deferral, ok := selectReadySets(refresh, backoff, recoveryWaiters, claimFor)
 	if !ok {
 		if deferral.Deferred() {
@@ -966,23 +966,25 @@ type setBackoffFunc func(setID string) (parked bool, until time.Time)
 
 // checkoutClaimFunc reports the live Checkout claim on a Ready set's bound
 // checkout, or nil when nothing claims it (ADR-0135). Deriving it needs the
-// set→checkout resolution (bindings + representative), so the caller builds the
-// closure and selectReadySets consults it per candidate. A nil func (tests,
-// callers without a store) means "no checkout claim".
+// set→checkout resolution (bindings only — an unplaced set has no checkout to
+// claim-gate, ADR-0147), so the caller builds the closure and selectReadySets
+// consults it per candidate. A nil func (tests, callers without a store) means
+// "no checkout claim".
 type checkoutClaimFunc func(setID string) *store.CheckoutClaim
 
 // checkoutClaimLookup builds the per-set Checkout-claim probe used during
 // dispatch: it resolves each set's bound checkout (its Worktree binding path,
-// else the repository's representative) and reads the live claim on it. A read
+// or none when unplaced — ADR-0147) and reads the live claim on it. An unplaced
+// set yields no claim, so a drain holding the trunk does not defer it. A read
 // error or missing store degrades to "no claim", never blocking dispatch on a
 // transient store problem — the transactional BeginDrain chokepoint still
 // refuses a genuine double-spawn.
-func (d *Deps) checkoutClaimLookup(bindings map[string]WorktreeBinding, repoKey, representative string) checkoutClaimFunc {
+func (d *Deps) checkoutClaimLookup(bindings map[string]WorktreeBinding, repoKey string) checkoutClaimFunc {
 	if d == nil || d.Tasks == nil {
 		return nil
 	}
 	return func(setID string) *store.CheckoutClaim {
-		runtimePath := binding.RuntimeForSet(bindings, repoKey, setID, representative)
+		runtimePath := binding.RuntimeForSet(bindings, repoKey, setID)
 		if strings.TrimSpace(runtimePath) == "" {
 			return nil
 		}

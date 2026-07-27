@@ -33,6 +33,28 @@ func writeLegacyBindingsFile(t *testing.T, d *tasks.Deps, bindings map[string]le
 	}
 }
 
+// TestRuntimeForSetBoundAndUnplaced locks ADR-0147: a bound set resolves to its
+// Worktree binding path; an unplaced set resolves to no checkout — never the
+// repository's representative (trunk).
+func TestRuntimeForSetBoundAndUnplaced(t *testing.T) {
+	bindings := map[string]Binding{
+		ScopedKey("repo-abc", "bound"): {RuntimePath: "/wt/bound"},
+		ScopedKey("repo-abc", "blank"): {RuntimePath: "  "},
+	}
+	if got := RuntimeForSet(bindings, "repo-abc", "bound"); got != "/wt/bound" {
+		t.Fatalf("bound = %q, want /wt/bound", got)
+	}
+	if got := RuntimeForSet(bindings, "repo-abc", "missing"); got != "" {
+		t.Fatalf("missing = %q, want empty (no trunk fallback)", got)
+	}
+	if got := RuntimeForSet(bindings, "repo-abc", "blank"); got != "" {
+		t.Fatalf("blank-path binding = %q, want empty", got)
+	}
+	if got := RuntimeForSet(nil, "repo-abc", "any"); got != "" {
+		t.Fatalf("nil bindings = %q, want empty", got)
+	}
+}
+
 // TestMigrateLegacyBindingsFile verifies a surviving bindings.json is folded
 // into the store with every binding's provisioned bit preserved, and the file
 // is retired afterwards (the data must not be lost).

@@ -384,7 +384,7 @@ A Task storage directory whose recorded repository path no longer exists. Doctor
 _Avoid_: Missing Task set, stale registration
 
 **Runtime path**:
-The git checkout from which task execution starts. It defaults to the selected project's path and may be overridden for a command. For a **Worktree set**, pop resolves it from the set's **Worktree binding** when one exists; otherwise the project's trunk checkout. Pop resolves it to the checkout root and uses that root for the agent working directory, dirty-tree preflight, staging, commits, and the Runtime execution lock. Task artifacts remain in the separate **Task storage**.
+The git checkout from which task execution starts. It defaults to the selected project's path and may be overridden for a command. For a **Task set**, pop resolves it from the set's **Worktree binding** — and *only* from the binding: a set with no binding resolves to **no checkout at all** rather than falling back to the trunk, so a set that has not been placed is reported as unplaced instead of silently acting on the repository's shared checkout. Pop resolves it to the checkout root and uses that root for the agent working directory, dirty-tree preflight, staging, commits, and the **Runtime execution lock**. Task artifacts remain in the separate **Task storage**.
 _Avoid_: Workload runtime path, task storage, shared git root
 
 **Worktree set**:
