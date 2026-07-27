@@ -1038,7 +1038,11 @@ func (r *timeoutThenScriptRunner) Start(ctx context.Context, dir string, stdout,
 	proc := &ManagedProcess{done: make(chan waitResult, 1)}
 	if r.calls <= r.timeoutBefore {
 		go func() {
-			time.Sleep(2 * time.Second)
+			// Only outlast the caller's deadline (50ms in the sole caller) so the
+			// attempt times out; the timeout path cannot SIGKILL this in-process
+			// fake, so waitForDone pays this hang in full — keep it small (mirrors
+			// slowVerifyRunner's 150ms) instead of a multi-second real sleep.
+			time.Sleep(150 * time.Millisecond)
 			proc.done <- waitResult{exitCode: 0}
 		}()
 		return proc, nil

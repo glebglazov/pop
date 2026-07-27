@@ -51,15 +51,50 @@ import (
 //     the normalizer.
 //
 // The other structured-stream and agent-fallback tests (installClaudeStreamAgent,
-// installAgentShim, installClaudeQuotaAgent) also stay on the real path for the
-// same reason: they exercise real stream pumping and quota-signal parsing, not
-// plain drain orchestration.
+// installClaudeHangingAgent, installAgentShim, installClaudeQuotaAgent) also stay
+// on the real path for the same reason: they exercise real stream pumping, real
+// SIGKILL escalation of a hanging agent, and quota-signal parsing — not plain
+// drain orchestration. The hanging shims sleep in 50ms ticks until killed, so a
+// short attempt deadline (not a multi-second sleep) bounds their cost.
+//
+// Slice 03 (ADR-0144) extends the naming to the remaining real-subprocess
+// surfaces outside the drain family, each of which genuinely depends on real OS
+// semantics the in-process fake cannot reproduce:
+//
+//   - attended exec / tty foreground handover: TestRunAttendedNonTerminalStdinPlainExec
+//     and TestRunAttendedTTYNotStdinFd drive RealCommandRunner.RunAttended over a
+//     real `true` binary — the whole point is the process-group/tty behavior.
+//   - verify fall-through spawn: TestRunConfiguredVerifierFallsThroughMissingBinary
+//     spawns a real `claude` on a controlled PATH so the missing-binary skip is
+//     exercised end-to-end through a real spawn.
+//   - timeout kill (retry pacing): TestRunTaskTimeoutRetriesInstantlyThenFailsAtCap,
+//     TestRunTaskTimeoutSharesRetryBudget, TestRunTaskTimeoutCarriesContinueDigestForward,
+//     and TestRunTaskTimeoutKillsProcessGroup hang a real agent past a short
+//     deadline; the timeout path SIGKILLs the real process group and waits on the
+//     real proc, which the never-hanging fake cannot drive.
+//   - signal handling: TestRunTaskSignalLeavesTaskOpen, TestRunTaskSignalReleasesRuntimeLock,
+//     and TestRunTaskSetInterruptionPropagation SIGTERM the live drain while a real
+//     agent is running; the fake never installs a real process to interrupt.
+//
+// These pace themselves on short (sub-second) deadlines or a start-sentinel
+// signal, not on the shims' nominal multi-second sleeps, so they no longer cost
+// real seconds even though they spawn.
 var realShimSmokeSet = []string{
 	"TestRunTaskSetDrainsMultipleAFKTasksInOrder",
 	"TestRunTaskStructuredAttemptWritesStream",
 	"TestRunTaskSetTimeoutPropagation",
 	"TestRunTaskSetFailedTaskStopsDrain",
 	"TestRunTaskSetClaudeQuotaPauseRegistersRecoveryWaiter",
+	"TestRunAttendedNonTerminalStdinPlainExec",
+	"TestRunAttendedTTYNotStdinFd",
+	"TestRunConfiguredVerifierFallsThroughMissingBinary",
+	"TestRunTaskTimeoutRetriesInstantlyThenFailsAtCap",
+	"TestRunTaskTimeoutSharesRetryBudget",
+	"TestRunTaskTimeoutCarriesContinueDigestForward",
+	"TestRunTaskTimeoutKillsProcessGroup",
+	"TestRunTaskSignalLeavesTaskOpen",
+	"TestRunTaskSignalReleasesRuntimeLock",
+	"TestRunTaskSetInterruptionPropagation",
 }
 
 const fakeAgentTokenPrefix = "__pop_fake_agent_"
@@ -69,9 +104,10 @@ const fakeAgentTokenPrefix = "__pop_fake_agent_"
 // test runs these package tests serially (t.Parallel is deferred per ADR-0144),
 // and each behavior is driven by a single drain at a time.
 type fakeAgentBehavior struct {
-	cfg   fakeAgentConfig // used when steps == nil
-	steps []fakeAgentStep // non-nil for the sequential agent
-	calls int             // advances across attempts for the sequential agent
+	cfg      fakeAgentConfig // used when steps == nil && attempts == nil
+	steps    []fakeAgentStep // non-nil for the sequential agent
+	attempts []attemptScript // non-nil for the per-attempt scripted agent
+	calls    int             // advances across attempts for the scripted agents
 }
 
 var (
@@ -154,6 +190,36 @@ func (fakeAwareRunner) RunAttended(ctx context.Context, dir string, stdin io.Rea
 // byte for byte.
 func (b *fakeAgentBehavior) play(dir string, stdout io.Writer, prompt string) int {
 	taskPath := parseFakeAgentTaskPath(prompt)
+
+	if b.attempts != nil {
+		// Mirror writeRealShimAttemptAgent's case body for the current attempt:
+		// advance the counter first (so a would-be timeout kill still records the
+		// attempt as started), then replay the step's side effects and output. An
+		// out-of-range attempt reproduces the shim's `*)` fallthrough.
+		n := b.calls
+		b.calls++
+		if n >= len(b.attempts) {
+			fmt.Fprintln(stdout, "unexpected attempt")
+			return 2
+		}
+		s := b.attempts[n]
+		if s.changeFile != "" {
+			appendFakeAgentChange(dir, s.changeFile, s.changeData)
+		}
+		if s.checkTask {
+			tickTaskFile(taskPath)
+		}
+		summary := s.summary
+		if summary == "" {
+			summary = "attempt complete"
+		}
+		if s.skipSentinel {
+			fmt.Fprintln(stdout, "incomplete")
+		} else {
+			fmt.Fprintf(stdout, "SUMMARY_START\n%s\nSUMMARY_END\nTASK_COMPLETE\n", summary)
+		}
+		return 0
+	}
 
 	if b.steps != nil {
 		// The sequential shim ticks the task unconditionally, then plays the
@@ -246,4 +312,21 @@ func writeFakeAgent(t *testing.T, _ string, cfg fakeAgentConfig) string {
 func writeSequentialFakeAgent(t *testing.T, _ string, steps []fakeAgentStep) string {
 	t.Helper()
 	return registerFakeAgent(t, &fakeAgentBehavior{steps: append([]fakeAgentStep(nil), steps...)})
+}
+
+// writeAttemptAgent registers an in-process fake (ADR-0144) that replays a
+// per-attempt attemptScript sequence, reproducing writeRealShimAttemptAgent's
+// observable effects (change-file append, conditional checkbox tick, summary /
+// "incomplete" output, exit 0, and the out-of-range "unexpected attempt"
+// fallthrough) without spawning a shell. A script that needs the agent to hang
+// (sleep > 0, for a timeout kill) cannot be faked — those tests keep the real
+// shim via writeRealShimAttemptAgent and live in realShimSmokeSet.
+func writeAttemptAgent(t *testing.T, _ string, scripts []attemptScript) string {
+	t.Helper()
+	for i, s := range scripts {
+		if s.sleep > 0 {
+			t.Fatalf("attempt %d sets sleep=%s; the in-process fake never hangs — use writeRealShimAttemptAgent", i+1, s.sleep)
+		}
+	}
+	return registerFakeAgent(t, &fakeAgentBehavior{attempts: append([]attemptScript(nil), scripts...)})
 }

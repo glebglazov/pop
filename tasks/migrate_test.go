@@ -63,7 +63,7 @@ func newMigrateEnv(t *testing.T) *migrateEnv {
 	d := &Deps{
 		FS:     deps.NewRealFileSystem(),
 		Git:    git,
-		Runner: RealCommandRunner{},
+		Runner: fakeAwareRunner{},
 	}
 	return &migrateEnv{root: root, worktree: worktree, dataHome: dataHome, git: git, deps: d}
 }

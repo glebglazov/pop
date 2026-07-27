@@ -132,12 +132,13 @@ func TestRunTaskMalformedOverridesFailsDrainHard(t *testing.T) {
 	d := &Deps{
 		FS:     deps.NewRealFileSystem(),
 		Git:    deps.NewRealGit(),
-		Runner: RealCommandRunner{},
+		Runner: fakeAwareRunner{},
 	}
 	opts := RunTaskOptions{
 		ResolveInput: ResolveInput{CWD: t.TempDir()},
 		// Non-empty AgentCmd skips agent-output resolution, isolating the
-		// override-resolution failure.
+		// override-resolution failure. The drain fails at override resolution
+		// before any agent runs, so the runner is never invoked.
 		AgentCmd: "true",
 		Yes:      true,
 	}

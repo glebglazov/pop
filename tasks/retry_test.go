@@ -182,7 +182,10 @@ func TestRunTaskTimeoutRetriesInstantlyThenFailsAtCap(t *testing.T) {
 // timeout counts as one attempt, so the task Fails at the default cap of 3.
 func TestRunTaskTimeoutSharesRetryBudget(t *testing.T) {
 	env := setupExecutorFixture(t, false)
-	agent := writeAttemptAgent(t, env.root, []attemptScript{
+	// Real-subprocess smoke: timeout kill in retry pacing (see realShimSmokeSet).
+	// Attempt 1 hangs on a real `sleep` so the deadline SIGKILLs it; the
+	// never-hanging in-process fake cannot drive this.
+	agent := writeRealShimAttemptAgent(t, env.root, []attemptScript{
 		{sleep: 3 * time.Second}, // attempt 1: times out
 		{changeFile: "impl.txt", changeData: "a\n", checkTask: true, skipSentinel: true}, // attempt 2: assessment failure
 		{changeFile: "impl.txt", changeData: "b\n", checkTask: true, skipSentinel: true}, // attempt 3: assessment failure → Failed
@@ -485,7 +488,12 @@ type attemptScript struct {
 	sleep        time.Duration
 }
 
-func writeAttemptAgent(t *testing.T, root string, scripts []attemptScript) string {
+// writeRealShimAttemptAgent installs a real #!/bin/sh agent scripted over a
+// sequence of attempts. It is the pre-ADR-0144 writeAttemptAgent, kept for the
+// named real-subprocess smoke set (see realShimSmokeSet) — specifically the
+// timeout-kill test whose attempt hangs on a real `sleep`. Orchestration-only
+// callers use the in-process writeAttemptAgent instead.
+func writeRealShimAttemptAgent(t *testing.T, root string, scripts []attemptScript) string {
 	t.Helper()
 	path := filepath.Join(root, ".agent", "attempt-agent.sh")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

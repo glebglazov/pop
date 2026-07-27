@@ -156,6 +156,8 @@ func TestRunConfiguredVerifierFallsThroughMissingBinary(t *testing.T) {
 	t.Setenv("PATH", binDir)
 
 	taskSetDir := t.TempDir()
+	// Real-subprocess smoke: verify fall-through spawns the fake claude on PATH
+	// (see realShimSmokeSet).
 	d := &Deps{FS: deps.NewRealFileSystem(), Runner: RealCommandRunner{}, LookPath: exec.LookPath}
 	out, err := runConfiguredVerifier(d, nil, verifierSelection{
 		Agents: []string{"cursor", "claude"}, Effort: "heavy",

@@ -26,7 +26,7 @@ func storageDeps(t *testing.T, dataHome, commonDir string) *Deps {
 				return "", nil
 			},
 		},
-		Runner: RealCommandRunner{},
+		Runner: fakeAwareRunner{},
 	}
 }
 
@@ -292,7 +292,7 @@ func TestShowPathOutsideGitRepo(t *testing.T) {
 				return "", errors.New("fatal: not a git repository")
 			},
 		},
-		Runner: RealCommandRunner{},
+		Runner: fakeAwareRunner{},
 	}
 
 	_, err := ShowPath(d, root, "")

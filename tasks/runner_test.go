@@ -6,6 +6,11 @@ import (
 	"testing"
 )
 
+// The two tests below drive RealCommandRunner.RunAttended directly over a real
+// `true` binary: they exercise the tty/process-group foreground handover that
+// only exists on the real path, so they stay in realShimSmokeSet (ADR-0144)
+// rather than routing through the in-process fake.
+
 // TestRunAttendedNonTerminalStdinPlainExec checks that a non-tty stdin skips
 // foreground process-group handover and execs plainly without error.
 func TestRunAttendedNonTerminalStdinPlainExec(t *testing.T) {
