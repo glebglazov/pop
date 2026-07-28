@@ -290,7 +290,7 @@ func TestDoctorDerivesIntendedAgentsFromTaskConfiguration(t *testing.T) {
 		}}}, nil
 	}, nil, func(string) bool { return false })
 	if err != nil {
-		t.Fatalf("doctorDetectAgentIntent: %v", err)
+		t.Fatalf("DetectAgentIntent: %v", err)
 	}
 	got, ok := doctorIntentByAgent(intent, "cursor")
 	if !ok {
@@ -313,7 +313,7 @@ func TestDoctorDerivesIntendedAgentsFromInstalledPopArtifactsAndHooks(t *testing
 		return nil, os.ErrNotExist
 	}, nil, func(string) bool { return false })
 	if err != nil {
-		t.Fatalf("doctorDetectAgentIntent: %v", err)
+		t.Fatalf("DetectAgentIntent: %v", err)
 	}
 	for _, agent := range []string{"claude", "pi"} {
 		got, ok := doctorIntentByAgent(intent, agent)
@@ -332,7 +332,7 @@ func TestDoctorDerivesIntendedAgentsFromExplicitCommandContext(t *testing.T) {
 		return nil, os.ErrNotExist
 	}, []string{"opencode"}, func(string) bool { return false })
 	if err != nil {
-		t.Fatalf("doctorDetectAgentIntent: %v", err)
+		t.Fatalf("DetectAgentIntent: %v", err)
 	}
 	got, ok := doctorIntentByAgent(intent, "opencode")
 	if !ok {
@@ -340,6 +340,132 @@ func TestDoctorDerivesIntendedAgentsFromExplicitCommandContext(t *testing.T) {
 	}
 	if !stringSliceContains(got.Sources, "explicit command context") {
 		t.Fatalf("intent sources = %v, want explicit command context", got.Sources)
+	}
+}
+
+func TestDoctorComponentStateStatusWiringInstalled(t *testing.T) {
+	t.Parallel()
+	fs := newFakeFS()
+	claudeStatusWired(fs)
+	d := fakeDeps(installerHome, fs, nil)
+
+	state, err := integrate.ComponentState(d, installerHome, integrate.ComponentStatusWiring, "claude")
+	if err != nil {
+		t.Fatalf("ComponentState: %v", err)
+	}
+	if state.Kind != integrate.StateInstalledCurrent {
+		t.Fatalf("state = %v, want installed-current", state)
+	}
+}
+
+func TestDoctorComponentStateStatusWiringMissing(t *testing.T) {
+	t.Parallel()
+	d := fakeDeps(installerHome, newFakeFS(), nil)
+
+	state, err := integrate.ComponentState(d, installerHome, integrate.ComponentStatusWiring, "claude")
+	if err != nil {
+		t.Fatalf("ComponentState: %v", err)
+	}
+	if state.Kind != integrate.StateNotInstalled {
+		t.Fatalf("state = %v, want not-installed", state)
+	}
+}
+
+func TestDoctorComponentStateFileComponentInstalled(t *testing.T) {
+	t.Parallel()
+	fs := newFakeFS()
+	d := fakeDeps(installerHome, fs, nil)
+	if err := integrate.InstallFileComponent(d, installerHome, integrate.ComponentPaneSkill, "claude"); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+
+	state, err := integrate.ComponentState(d, installerHome, integrate.ComponentPaneSkill, "claude")
+	if err != nil {
+		t.Fatalf("ComponentState: %v", err)
+	}
+	if state.Kind != integrate.StateInstalledCurrent {
+		t.Fatalf("state = %v, want installed-current", state)
+	}
+}
+
+func TestDoctorComponentStateFileComponentStale(t *testing.T) {
+	t.Parallel()
+	fs := newFakeFS()
+	d := fakeDeps(installerHome, fs, nil)
+	if err := integrate.InstallFileComponent(d, installerHome, integrate.ComponentPaneSkill, "claude"); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	renderFile, _, _ := paneSkillPaths()
+	fs.files[renderFile] = []byte("drifted content not matching the embedded source")
+
+	state, err := integrate.ComponentState(d, installerHome, integrate.ComponentPaneSkill, "claude")
+	if err != nil {
+		t.Fatalf("ComponentState: %v", err)
+	}
+	if state.Kind != integrate.StateStale {
+		t.Fatalf("state = %v, want stale", state)
+	}
+}
+
+func TestDoctorComponentStateFileComponentConflict(t *testing.T) {
+	t.Parallel()
+	fs := newFakeFS()
+	conflictPath := filepath.Join(installerHome, ".claude", "skills", "pop-tmux-pane")
+	fs.files[conflictPath] = []byte("user-owned skill")
+	d := fakeDeps(installerHome, fs, nil)
+
+	state, err := integrate.ComponentState(d, installerHome, integrate.ComponentPaneSkill, "claude")
+	if err != nil {
+		t.Fatalf("ComponentState: %v", err)
+	}
+	if state.Kind != integrate.StateConflict {
+		t.Fatalf("state = %v, want conflict", state)
+	}
+	if state.ConflictPath != conflictPath {
+		t.Fatalf("ConflictPath = %q, want %q", state.ConflictPath, conflictPath)
+	}
+}
+
+func TestDoctorIntendedAgentComponentStates(t *testing.T) {
+	t.Parallel()
+	fs := newFakeFS()
+	claudeStatusWired(fs)
+	d := fakeDeps(installerHome, fs, nil)
+	intent := &integrate.AgentIntentReport{
+		Intended: []integrate.AgentIntent{
+			{Agent: "claude"},
+			{Agent: "codex"},
+		},
+	}
+
+	states, err := integrate.IntendedAgentComponentStates(d, installerHome, intent, integrate.ComponentStatusWiring)
+	if err != nil {
+		t.Fatalf("IntendedAgentComponentStates: %v", err)
+	}
+	if len(states) != 2 {
+		t.Fatalf("states len = %d, want 2", len(states))
+	}
+	if states[0].Agent != "claude" || states[0].State.Kind != integrate.StateInstalledCurrent {
+		t.Fatalf("claude state = %+v, want installed-current", states[0])
+	}
+	if states[1].Agent != "codex" || states[1].State.Kind != integrate.StateNotInstalled {
+		t.Fatalf("codex state = %+v, want not-installed", states[1])
+	}
+}
+
+func TestDoctorExportedAgentAndComponentListings(t *testing.T) {
+	t.Parallel()
+	if len(integrate.Agents) == 0 {
+		t.Fatal("Agents listing is empty")
+	}
+	components := integrate.Components()
+	if len(components) == 0 {
+		t.Fatal("Components listing is empty")
+	}
+	for _, id := range components {
+		if _, ok := integrate.LookupComponent(id); !ok {
+			t.Fatalf("Components() returned unknown id %q", id)
+		}
 	}
 }
 
@@ -351,7 +477,7 @@ func TestDoctorPathOnlyAgentsAreSuggestionsAndDoNotAffectReadiness(t *testing.T)
 		return nil, os.ErrNotExist
 	}, nil, func(agent string) bool { return agent == "codex" })
 	if err != nil {
-		t.Fatalf("doctorDetectAgentIntent: %v", err)
+		t.Fatalf("DetectAgentIntent: %v", err)
 	}
 	if _, ok := doctorIntentByAgent(intent, "codex"); ok {
 		t.Fatalf("PATH-only codex should not be intended: %+v", intent)
@@ -391,7 +517,7 @@ func TestDoctorPathOnlyConflictIsNotReportedWithoutIntent(t *testing.T) {
 		return nil, os.ErrNotExist
 	}, nil, func(agent string) bool { return agent == "claude" })
 	if err != nil {
-		t.Fatalf("doctorDetectAgentIntent: %v", err)
+		t.Fatalf("DetectAgentIntent: %v", err)
 	}
 	d := readOnlyDoctorDeps(t, fs, true, true, true)
 	d.agentIntent = func() (*doctorAgentIntentReport, error) { return intent, nil }
@@ -735,7 +861,7 @@ func TestDoctorWayfinderPathOnlyAgentDoesNotDegradeTaskSkills(t *testing.T) {
 		return nil, os.ErrNotExist
 	}, nil, func(agent string) bool { return agent == "codex" })
 	if err != nil {
-		t.Fatalf("doctorDetectAgentIntent: %v", err)
+		t.Fatalf("DetectAgentIntent: %v", err)
 	}
 
 	d := readOnlyDoctorDeps(t, fs, true, true, true)
@@ -1232,48 +1358,48 @@ func TestDoctorMonitorPartialOnlyForMixedIntendedAgentStatusWiring(t *testing.T)
 		{
 			name: "all intended agents wired",
 			wiring: []doctorAgentStatusWiring{
-				{agent: "claude", state: integrate.ComponentStateInfo{Kind: integrate.StateInstalledCurrent}},
-				{agent: "codex", state: integrate.ComponentStateInfo{Kind: integrate.StateInstalledCurrent}},
+				{Agent: "claude", State: integrate.ComponentStateInfo{Kind: integrate.StateInstalledCurrent}},
+				{Agent: "codex", State: integrate.ComponentStateInfo{Kind: integrate.StateInstalledCurrent}},
 			},
 			wantStatus: doctorStatusOK,
 		},
 		{
 			name: "no intended agents wired",
 			wiring: []doctorAgentStatusWiring{
-				{agent: "claude", state: integrate.ComponentStateInfo{Kind: integrate.StateNotInstalled}},
-				{agent: "codex", state: integrate.ComponentStateInfo{Kind: integrate.StateNotInstalled}},
+				{Agent: "claude", State: integrate.ComponentStateInfo{Kind: integrate.StateNotInstalled}},
+				{Agent: "codex", State: integrate.ComponentStateInfo{Kind: integrate.StateNotInstalled}},
 			},
 			wantStatus: doctorStatusDegraded,
 		},
 		{
 			name: "mixed intended agents",
 			wiring: []doctorAgentStatusWiring{
-				{agent: "claude", state: integrate.ComponentStateInfo{Kind: integrate.StateInstalledCurrent}},
-				{agent: "codex", state: integrate.ComponentStateInfo{Kind: integrate.StateNotInstalled}},
+				{Agent: "claude", State: integrate.ComponentStateInfo{Kind: integrate.StateInstalledCurrent}},
+				{Agent: "codex", State: integrate.ComponentStateInfo{Kind: integrate.StateNotInstalled}},
 			},
 			wantStatus: doctorStatusPartial,
 		},
 		{
 			name: "mixed intended agents with stale wiring",
 			wiring: []doctorAgentStatusWiring{
-				{agent: "claude", state: integrate.ComponentStateInfo{Kind: integrate.StateInstalledCurrent}},
-				{agent: "codex", state: integrate.ComponentStateInfo{Kind: integrate.StateStale}},
+				{Agent: "claude", State: integrate.ComponentStateInfo{Kind: integrate.StateInstalledCurrent}},
+				{Agent: "codex", State: integrate.ComponentStateInfo{Kind: integrate.StateStale}},
 			},
 			wantStatus: doctorStatusPartial,
 		},
 		{
 			name: "mixed intended agents with conflicting wiring",
 			wiring: []doctorAgentStatusWiring{
-				{agent: "claude", state: integrate.ComponentStateInfo{Kind: integrate.StateInstalledCurrent}},
-				{agent: "codex", state: integrate.ComponentStateInfo{Kind: integrate.StateConflict, ConflictPath: "/home/me/.codex/hooks.json"}},
+				{Agent: "claude", State: integrate.ComponentStateInfo{Kind: integrate.StateInstalledCurrent}},
+				{Agent: "codex", State: integrate.ComponentStateInfo{Kind: integrate.StateConflict, ConflictPath: "/home/me/.codex/hooks.json"}},
 			},
 			wantStatus: doctorStatusPartial,
 		},
 		{
 			name: "no usable intended agents because wiring conflicts",
 			wiring: []doctorAgentStatusWiring{
-				{agent: "claude", state: integrate.ComponentStateInfo{Kind: integrate.StateConflict, ConflictPath: "/home/me/.claude/settings.json"}},
-				{agent: "codex", state: integrate.ComponentStateInfo{Kind: integrate.StateConflict, ConflictPath: "/home/me/.codex/hooks.json"}},
+				{Agent: "claude", State: integrate.ComponentStateInfo{Kind: integrate.StateConflict, ConflictPath: "/home/me/.claude/settings.json"}},
+				{Agent: "codex", State: integrate.ComponentStateInfo{Kind: integrate.StateConflict, ConflictPath: "/home/me/.codex/hooks.json"}},
 			},
 			wantStatus: doctorStatusDegraded,
 		},

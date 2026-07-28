@@ -248,6 +248,28 @@ type AgentIntentReport struct {
 	Suggestions []AgentSuggestion
 }
 
+// AgentComponentState pairs an agent name with its computed component state.
+type AgentComponentState struct {
+	Agent string
+	State ComponentStateInfo
+}
+
+// IntendedAgentComponentStates returns component state for each agent in intent.
+func IntendedAgentComponentStates(d *Deps, home string, intent *AgentIntentReport, id ComponentID) ([]AgentComponentState, error) {
+	if intent == nil {
+		return nil, nil
+	}
+	var out []AgentComponentState
+	for _, intended := range intent.Intended {
+		state, err := ComponentState(d, home, id, intended.Agent)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, AgentComponentState{Agent: intended.Agent, State: state})
+	}
+	return out, nil
+}
+
 // ComponentState computes a component's state for an agent.
 func ComponentState(d *Deps, home string, id ComponentID, agent string) (ComponentStateInfo, error) {
 	comp, ok := LookupComponent(id)
@@ -326,8 +348,8 @@ func DetectAgentIntent(d *Deps, home string, loadConfig func(string) (*config.Co
 	MergeExplicitAgentContext(report, explicit)
 
 	for _, agent := range Agents {
-		for _, comp := range catalog {
-			state, err := ComponentState(d, home, comp.id, agent)
+		for _, compID := range Components() {
+			state, err := ComponentState(d, home, compID, agent)
 			if err != nil {
 				return nil, err
 			}

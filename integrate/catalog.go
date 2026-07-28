@@ -112,6 +112,15 @@ func LookupComponent(id ComponentID) (Component, bool) {
 	return Component{}, false
 }
 
+// Components returns the supported integration component IDs in catalog order.
+func Components() []ComponentID {
+	ids := make([]ComponentID, len(catalog))
+	for i, c := range catalog {
+		ids[i] = c.id
+	}
+	return ids
+}
+
 // installStatusWiring applies the status-wiring component for an agent via
 // that agent's integration profile. Behavior is byte-identical to the previous
 // per-agent integrate functions; only the skill installs that used to sit
