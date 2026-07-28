@@ -1,4 +1,4 @@
-package cmd
+package integrate
 
 import (
 	"bytes"
@@ -48,11 +48,11 @@ func TestRefreshCodexPaneSkillStale(t *testing.T) {
 	renderFile, linkDest, linkTarget := codexPaneSkillPaths()
 	fs.files[renderFile] = []byte("stale skill body")
 
-	dry := func() *integrateDeps { return withDryRun(fakeDeps(installerHome, fs, nil)) }
-	real := func() *integrateDeps { return fakeDeps(installerHome, fs, nil) }
+	dry := func() *Deps { return WithDryRun(fakeDeps(installerHome, fs, nil)) }
+	real := func() *Deps { return fakeDeps(installerHome, fs, nil) }
 
 	outcomes, warning := refreshFileComponent(dry, real, "codex", ComponentPaneSkill)
-	if !integrateOutcomesInclude(outcomes, "pop-tmux-pane", "updated") {
+	if !OutcomesInclude(outcomes, "pop-tmux-pane", "updated") {
 		t.Fatalf("expected pop-tmux-pane updated outcome, got outcomes=%v warning=%q", outcomes, warning)
 	}
 	if warning != "" {

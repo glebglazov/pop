@@ -1,4 +1,4 @@
-package cmd
+package integrate
 
 import (
 	"fmt"
@@ -24,7 +24,7 @@ import (
 // prefix must reach the render-tree names, the agent-location link names, and
 // conflict detection, so it is resolved once by the caller and threaded in.
 func renderComponent(id ComponentID, agent, prefix string) (map[string][]byte, error) {
-	comp, ok := lookupComponent(id)
+	comp, ok := LookupComponent(id)
 	if !ok {
 		return nil, fmt.Errorf("unknown component %q", id)
 	}
@@ -50,7 +50,7 @@ func renderComponent(id ComponentID, agent, prefix string) (map[string][]byte, e
 //     documents — a multi-file skill named `<prefix><base>`. The companion
 //     files ride alongside the skill body so the body's relative references
 //     resolve (grill-with-docs and its two format documents).
-func renderSkillComponent(comp integrationComponent, agent, prefix string) (map[string][]byte, error) {
+func renderSkillComponent(comp Component, agent, prefix string) (map[string][]byte, error) {
 	baseNames := fileBasedSkillBaseNames()
 	tree := make(map[string][]byte, len(comp.sources))
 	for _, src := range comp.sources {
@@ -147,7 +147,7 @@ func renderSkillFile(agent, skillName, content string) (rel, rendered string, er
 func fileBasedSkillBaseNames() []string {
 	seen := make(map[string]struct{})
 	var names []string
-	for _, c := range integrationCatalog {
+	for _, c := range catalog {
 		for _, src := range c.sources {
 			base := skillBaseNameFromSource(src)
 			if _, ok := seen[base]; ok {

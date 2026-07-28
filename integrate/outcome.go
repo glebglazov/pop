@@ -1,4 +1,4 @@
-package cmd
+package integrate
 
 import (
 	"fmt"
@@ -11,15 +11,15 @@ import (
 
 const statusWiringOutcomeName = "status-wiring"
 
-// integrateOutcome records one integrate stdout line: agent, resolved skill name
+// Outcome records one integrate stdout line: agent, resolved skill name
 // (or status-wiring for hooks), and what happened.
-type integrateOutcome struct {
+type Outcome struct {
 	Agent string
 	Skill string
 	Label string
 }
 
-func (o integrateOutcome) verboseOnly(updateExistingPath bool) bool {
+func (o Outcome) verboseOnly(updateExistingPath bool) bool {
 	switch o.Label {
 	case "already current":
 		return true
@@ -30,7 +30,7 @@ func (o integrateOutcome) verboseOnly(updateExistingPath bool) bool {
 	}
 }
 
-func printIntegrateOutcomes(out io.Writer, outcomes []integrateOutcome, verbose, explicitPath bool) {
+func PrintOutcomes(out io.Writer, outcomes []Outcome, verbose, explicitPath bool) {
 	if out == nil {
 		return
 	}
@@ -47,8 +47,8 @@ func printIntegrateOutcomes(out io.Writer, outcomes []integrateOutcome, verbose,
 	}
 }
 
-func statusWiringOutcome(agent, label string) integrateOutcome {
-	return integrateOutcome{Agent: agent, Skill: statusWiringOutcomeName, Label: label}
+func statusWiringOutcome(agent, label string) Outcome {
+	return Outcome{Agent: agent, Skill: statusWiringOutcomeName, Label: label}
 }
 
 func installLabel(isNew, isUpdate bool) string {
@@ -89,7 +89,7 @@ func symlinkUnderRenderRoot(target string, renderRoots []string) bool {
 }
 
 func embedBasesForComponent(id ComponentID) ([]string, error) {
-	comp, ok := lookupComponent(id)
+	comp, ok := LookupComponent(id)
 	if !ok {
 		return nil, fmt.Errorf("unknown component %q", id)
 	}
@@ -159,57 +159,57 @@ func fileComponentOutcomesInCatalogOrder(
 	preConflict map[string]string,
 	postConflict map[string]string,
 	overwritten map[string]string,
-) []integrateOutcome {
+) []Outcome {
 	bases, err := embedBasesForComponent(id)
 	if err != nil {
 		return nil
 	}
-	var outcomes []integrateOutcome
+	var outcomes []Outcome
 	for _, base := range bases {
 		current := prefix + base
 		for _, staleName := range prunedNamesForEmbedBase(base, pruned) {
-			outcomes = append(outcomes, integrateOutcome{
+			outcomes = append(outcomes, Outcome{
 				Agent: agent, Skill: staleName, Label: "removed (stale)",
 			})
 		}
 		if path, ok := preConflict[current]; ok {
-			outcomes = append(outcomes, integrateOutcome{
+			outcomes = append(outcomes, Outcome{
 				Agent: agent, Skill: current, Label: conflictSkipLabel(agent, path),
 			})
 			continue
 		}
 		if path, ok := overwritten[current]; ok {
-			outcomes = append(outcomes, integrateOutcome{
+			outcomes = append(outcomes, Outcome{
 				Agent: agent, Skill: current,
 				Label: "overwritten (not owned by pop at " + path + ")",
 			})
 			continue
 		}
 		if path, ok := postConflict[current]; ok {
-			outcomes = append(outcomes, integrateOutcome{
+			outcomes = append(outcomes, Outcome{
 				Agent: agent, Skill: current, Label: conflictSkipLabel(agent, path),
 			})
 			continue
 		}
 		label := installLabel(!installedBefore[current], installedBefore[current] && staleBefore)
-		outcomes = append(outcomes, integrateOutcome{Agent: agent, Skill: current, Label: label})
+		outcomes = append(outcomes, Outcome{Agent: agent, Skill: current, Label: label})
 	}
 	return outcomes
 }
 
-func optOutSkipOutcomes(d *integrateDeps, agent string, id ComponentID) ([]integrateOutcome, error) {
+func optOutSkipOutcomes(d *Deps, agent string, id ComponentID) ([]Outcome, error) {
 	names, err := orderedResolvedSkills(id, agent, d.resolveSkillsPrefix())
 	if err != nil {
 		return nil, err
 	}
-	outcomes := make([]integrateOutcome, len(names))
+	outcomes := make([]Outcome, len(names))
 	for i, name := range names {
-		outcomes[i] = integrateOutcome{Agent: agent, Skill: name, Label: "skipped (opted out)"}
+		outcomes[i] = Outcome{Agent: agent, Skill: name, Label: "skipped (opted out)"}
 	}
 	return outcomes, nil
 }
 
-func optOutRemoveOutcomes(d *integrateDeps, home, agent string, id ComponentID) ([]integrateOutcome, error) {
+func optOutRemoveOutcomes(d *Deps, home, agent string, id ComponentID) ([]Outcome, error) {
 	prefix := d.resolveSkillsPrefix()
 	names, err := orderedResolvedSkills(id, agent, prefix)
 	if err != nil {
@@ -226,18 +226,18 @@ func optOutRemoveOutcomes(d *integrateDeps, home, agent string, id ComponentID) 
 			return nil, err
 		}
 	}
-	outcomes := make([]integrateOutcome, len(names))
+	outcomes := make([]Outcome, len(names))
 	for i, name := range names {
 		label := "skipped (opted out)"
 		if installedBefore[name] {
 			label = "removed (opted out)"
 		}
-		outcomes[i] = integrateOutcome{Agent: agent, Skill: name, Label: label}
+		outcomes[i] = Outcome{Agent: agent, Skill: name, Label: label}
 	}
 	return outcomes, nil
 }
 
-func preInstallSkillConflicts(d *integrateDeps, home, agent string, id ComponentID, prefix string) (map[string]string, error) {
+func preInstallSkillConflicts(d *Deps, home, agent string, id ComponentID, prefix string) (map[string]string, error) {
 	tree, err := renderComponent(id, agent, prefix)
 	if err != nil {
 		return nil, err
@@ -270,7 +270,7 @@ func preInstallSkillConflicts(d *integrateDeps, home, agent string, id Component
 	return conflicts, nil
 }
 
-func integrateOutcomeLabel(outcomes []integrateOutcome, skill string) (string, bool) {
+func OutcomeLabel(outcomes []Outcome, skill string) (string, bool) {
 	for _, o := range outcomes {
 		if o.Skill == skill {
 			return o.Label, true
@@ -279,8 +279,8 @@ func integrateOutcomeLabel(outcomes []integrateOutcome, skill string) (string, b
 	return "", false
 }
 
-func integrateOutcomesInclude(outcomes []integrateOutcome, skill, label string) bool {
-	got, ok := integrateOutcomeLabel(outcomes, skill)
+func OutcomesInclude(outcomes []Outcome, skill, label string) bool {
+	got, ok := OutcomeLabel(outcomes, skill)
 	return ok && got == label
 }
 

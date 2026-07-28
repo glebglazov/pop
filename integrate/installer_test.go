@@ -1,4 +1,4 @@
-package cmd
+package integrate
 
 import (
 	"bytes"
@@ -624,15 +624,15 @@ func TestRefreshFileComponentDebugNotInstalled(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
 	logf, lines := captureLogf()
-	dry := func() *integrateDeps {
-		d := withDryRun(fakeDeps("/h", fs, nil))
+	dry := func() *Deps {
+		d := WithDryRun(fakeDeps("/h", fs, nil))
 		d.logf = logf
 		return d
 	}
-	real := func() *integrateDeps { return fakeDeps("/h", fs, nil) }
+	real := func() *Deps { return fakeDeps("/h", fs, nil) }
 
 	outcomes, warning := refreshFileComponent(dry, real, "claude", ComponentPaneSkill)
-	if !integrateOutcomesInclude(outcomes, "pop-tmux-pane", "added") {
+	if !OutcomesInclude(outcomes, "pop-tmux-pane", "added") {
 		t.Errorf("expected pop-tmux-pane added outcome, got outcomes=%v warning=%q", outcomes, warning)
 	}
 	if warning != "" {
@@ -659,12 +659,12 @@ func TestRefreshFileComponentDebugCurrent(t *testing.T) {
 	}
 
 	logf, lines := captureLogf()
-	dry := func() *integrateDeps {
-		d := withDryRun(fakeDeps("/h", fs, nil))
+	dry := func() *Deps {
+		d := WithDryRun(fakeDeps("/h", fs, nil))
 		d.logf = logf
 		return d
 	}
-	real := func() *integrateDeps { return fakeDeps("/h", fs, nil) }
+	real := func() *Deps { return fakeDeps("/h", fs, nil) }
 
 	outcomes, warning := refreshFileComponent(dry, real, "claude", ComponentPaneSkill)
 	for _, o := range outcomes {
@@ -698,15 +698,15 @@ func TestRefreshFileComponentDebugStale(t *testing.T) {
 	}
 
 	logf, lines := captureLogf()
-	dry := func() *integrateDeps {
-		d := withDryRun(fakeDeps("/h", fs, nil))
+	dry := func() *Deps {
+		d := WithDryRun(fakeDeps("/h", fs, nil))
 		d.logf = logf
 		return d
 	}
-	real := func() *integrateDeps { return fakeDeps("/h", fs, nil) }
+	real := func() *Deps { return fakeDeps("/h", fs, nil) }
 
 	outcomes, warning := refreshFileComponent(dry, real, "claude", ComponentPaneSkill)
-	if !integrateOutcomesInclude(outcomes, "pop-tmux-pane", "updated") {
+	if !OutcomesInclude(outcomes, "pop-tmux-pane", "updated") {
 		t.Errorf("expected pop-tmux-pane updated, got outcomes=%v", outcomes)
 	}
 	if warning != "" {
@@ -731,12 +731,12 @@ func TestRefreshFileComponentDebugConflict(t *testing.T) {
 	fs.dirs[conflict] = true
 
 	logf, lines := captureLogf()
-	dry := func() *integrateDeps {
-		d := withDryRun(fakeDeps("/h", fs, nil))
+	dry := func() *Deps {
+		d := WithDryRun(fakeDeps("/h", fs, nil))
 		d.logf = logf
 		return d
 	}
-	real := func() *integrateDeps { return fakeDeps("/h", fs, nil) }
+	real := func() *Deps { return fakeDeps("/h", fs, nil) }
 
 	outcomes, warning := refreshFileComponent(dry, real, "claude", ComponentPaneSkill)
 	for _, o := range outcomes {

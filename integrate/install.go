@@ -1,4 +1,4 @@
-package cmd
+package integrate
 
 import (
 	"fmt"
@@ -19,7 +19,7 @@ import (
 // is rewritten), an existing marker-owned copy-mode artifact is migrated to a
 // symlink by the same wipe-and-rewrite path, and entries left under a previous
 // skills_prefix are pruned (ADR 0063).
-func installFileComponent(d *integrateDeps, home string, id ComponentID, agent string) error {
+func installFileComponent(d *Deps, home string, id ComponentID, agent string) error {
 	agent = strings.ToLower(agent)
 	prefix := d.resolveSkillsPrefix()
 
@@ -153,7 +153,7 @@ func installFileComponent(d *integrateDeps, home string, id ComponentID, agent s
 // pop-owned entry left at the agent location that this component no longer
 // renders is stale — it was installed under a different skills_prefix — and is
 // removed.
-func pruneStaleAgentEntries(d *integrateDeps, agentDir, renderRoot string, id ComponentID, agent string, keep map[string]bool, prefix string) error {
+func pruneStaleAgentEntries(d *Deps, agentDir, renderRoot string, id ComponentID, agent string, keep map[string]bool, prefix string) error {
 	if d.readDirNames == nil {
 		return nil
 	}
@@ -209,7 +209,7 @@ func componentPossibleNames(id ComponentID, agent string, prefixes ...string) ma
 	return names
 }
 
-func componentOwnsAgentEntry(d *integrateDeps, name, dest string, mode os.FileMode, renderRoots []string, possible map[string]bool) bool {
+func componentOwnsAgentEntry(d *Deps, name, dest string, mode os.FileMode, renderRoots []string, possible map[string]bool) bool {
 	switch {
 	case mode&os.ModeSymlink != 0:
 		target, err := d.readlink(dest)
@@ -229,7 +229,7 @@ func componentOwnsAgentEntry(d *integrateDeps, name, dest string, mode os.FileMo
 
 // fileComponentInstalledNames returns pop-owned agent-location entry names for
 // this component, regardless of prefix or base name (ADR 0063).
-func fileComponentInstalledNames(d *integrateDeps, home string, id ComponentID, agent string) (map[string]bool, error) {
+func fileComponentInstalledNames(d *Deps, home string, id ComponentID, agent string) (map[string]bool, error) {
 	agent = strings.ToLower(agent)
 	dataDir, err := d.dataDir()
 	if err != nil {
@@ -266,7 +266,7 @@ func fileComponentInstalledNames(d *integrateDeps, home string, id ComponentID, 
 	return out, nil
 }
 
-func ownership(d *integrateDeps, dest, integrationsRoot string) (exists, owned bool, err error) {
+func ownership(d *Deps, dest, integrationsRoot string) (exists, owned bool, err error) {
 	mode, err := d.lstatMode(dest)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -293,7 +293,7 @@ func ownership(d *integrateDeps, dest, integrationsRoot string) (exists, owned b
 	return true, ownedByMarker(d, dest, mode), nil
 }
 
-func ownedByMarker(d *integrateDeps, dest string, mode os.FileMode) bool {
+func ownedByMarker(d *Deps, dest string, mode os.FileMode) bool {
 	target := dest
 	if mode.IsDir() {
 		target = filepath.Join(dest, "SKILL.md")
@@ -312,7 +312,7 @@ func ownedByMarker(d *integrateDeps, dest string, mode os.FileMode) bool {
 	return owned
 }
 
-func skillConflict(d *integrateDeps, agentDir, name, integrationsRoot, prefix string) (conflictPath string, conflict bool, err error) {
+func skillConflict(d *Deps, agentDir, name, integrationsRoot, prefix string) (conflictPath string, conflict bool, err error) {
 	for _, cand := range conflictCandidates(name, prefix) {
 		p := filepath.Join(agentDir, cand)
 		exists, owned, err := ownership(d, p, integrationsRoot)
@@ -326,7 +326,7 @@ func skillConflict(d *integrateDeps, agentDir, name, integrationsRoot, prefix st
 	return "", false, nil
 }
 
-func resolveConflictOverwrite(d *integrateDeps, conflictPath string) (bool, error) {
+func resolveConflictOverwrite(d *Deps, conflictPath string) (bool, error) {
 	if d.assumeYes {
 		return true, nil
 	}
@@ -371,6 +371,11 @@ func legacyArtifacts(home, agent string, id ComponentID) []string {
 		return []string{filepath.Join(home, ".claude", "commands", "pop", "pane.md")}
 	}
 	return nil
+}
+
+// InstallFileComponent installs a single file-based component for tests and tooling.
+func InstallFileComponent(d *Deps, home string, id ComponentID, agent string) error {
+	return installFileComponent(d, home, id, agent)
 }
 
 func firstSegment(rel string) string {

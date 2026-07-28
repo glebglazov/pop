@@ -1,4 +1,4 @@
-package cmd
+package integrate
 
 import (
 	"bytes"
@@ -11,7 +11,7 @@ import (
 // withPrefix returns deps that resolve skill names under the given prefix. An
 // empty string is a valid, explicit "bare names" choice — distinct from a nil
 // pointer (the unset default `pop-`).
-func withPrefix(d *integrateDeps, prefix string) *integrateDeps {
+func withPrefix(d *Deps, prefix string) *Deps {
 	d.skillsPrefix = &prefix
 	return d
 }
@@ -94,7 +94,7 @@ func TestInstallFileComponentPrefixChangeMigration(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
 	var logs []string
-	logfDeps := func() *integrateDeps {
+	logfDeps := func() *Deps {
 		d := fakeDeps(installerHome, fs, nil)
 		d.logf = func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }
 		return d

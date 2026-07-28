@@ -1,4 +1,4 @@
-package cmd
+package integrate
 
 import (
 	"io"
@@ -18,7 +18,7 @@ func TestCatalog_StableIdentifiers(t *testing.T) {
 	}
 
 	got := map[ComponentID]bool{}
-	for _, c := range integrationCatalog {
+	for _, c := range catalog {
 		if got[c.id] {
 			t.Errorf("duplicate component id %q in catalog", c.id)
 		}
@@ -74,7 +74,7 @@ func TestCatalog_SupportMatrix(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(string(tc.id), func(t *testing.T) {
-			comp, ok := lookupComponent(tc.id)
+			comp, ok := LookupComponent(tc.id)
 			if !ok {
 				t.Fatalf("component %q not found in catalog", tc.id)
 			}
@@ -91,7 +91,7 @@ func TestCatalog_SupportMatrix(t *testing.T) {
 // in supported, mirroring the integrate dispatcher's case handling.
 func TestCatalog_SupportMatrixIsCaseInsensitive(t *testing.T) {
 	t.Parallel()
-	comp, ok := lookupComponent(ComponentStatusWiring)
+	comp, ok := LookupComponent(ComponentStatusWiring)
 	if !ok {
 		t.Fatal("status-wiring component missing")
 	}
@@ -106,7 +106,7 @@ func TestCatalog_SupportMatrixIsCaseInsensitive(t *testing.T) {
 func TestCatalog_StatusWiringConsumedByIntegrate(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
-	if err := runIntegrateWith(fakeDeps("/h", fs, io.Discard), "claude"); err != nil {
+	if err := RunWith(fakeDeps("/h", fs, io.Discard), "claude"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if _, ok := fs.files["/h/.claude/settings.json"]; !ok {
@@ -118,7 +118,7 @@ func TestCatalog_StatusWiringConsumedByIntegrate(t *testing.T) {
 // Integrate outcome lines follow this sequence (ADR: Integrate outcome line).
 func TestCatalog_TaskSkillsSources(t *testing.T) {
 	t.Parallel()
-	comp, ok := lookupComponent(ComponentTaskSkills)
+	comp, ok := LookupComponent(ComponentTaskSkills)
 	if !ok {
 		t.Fatal("task-skills component missing")
 	}

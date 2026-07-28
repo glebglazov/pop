@@ -13,6 +13,7 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/debug"
+	"github.com/glebglazov/pop/integrate"
 	"github.com/glebglazov/pop/internal/deps"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/monitor"
@@ -295,7 +296,7 @@ func isPopAutoClearHook(command string) bool {
 // warnings slot. The function is called from the main goroutine; it should
 // not be wrapped in `go`.
 func ensureSystemState() []string {
-	warnings := ensureIntegrations()
+	warnings := integrate.EnsureIntegrations(buildRevision(), cmdLayerDeps().configDeps())
 	go ensureMonitorDaemon()
 	return warnings
 }

@@ -1,4 +1,4 @@
-package cmd
+package integrate
 
 import (
 	"bytes"
@@ -105,13 +105,13 @@ func TestSeedWorkStoreDoc_RespectsXDGConfigHome(t *testing.T) {
 // are integrated.
 func TestRefresh_SeedsWorkStoreDocOnceAcrossAgents(t *testing.T) {
 	t.Parallel()
-	setupIntegrateCmdLayer(t)
+	setupIntegrateConfigLayer(t)
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 	installViaFake(t, fs, "/h", "pi")
 
 	dry, real := fakeFactories("/h", fs)
-	if warnings := ensureIntegrationsForRevisionWith("rev-seed1", dry, real); warnings != nil {
+	if warnings := EnsureIntegrationsForRevisionWith("rev-seed1", testConfigDeps(t), dry, real); warnings != nil {
 		t.Fatalf("unexpected warnings: %v", warnings)
 	}
 
@@ -129,7 +129,7 @@ func TestRefresh_SeedsWorkStoreDocOnceAcrossAgents(t *testing.T) {
 // a subsequent refresh unchanged — user edits are the machine-global override.
 func TestRefresh_LeavesEditedWorkStoreDocByteIdentical(t *testing.T) {
 	t.Parallel()
-	setupIntegrateCmdLayer(t)
+	setupIntegrateConfigLayer(t)
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 
@@ -138,7 +138,7 @@ func TestRefresh_LeavesEditedWorkStoreDocByteIdentical(t *testing.T) {
 	fs.files[path] = append([]byte{}, edited...)
 
 	dry, real := fakeFactories("/h", fs)
-	if warnings := ensureIntegrationsForRevisionWith("rev-seed2", dry, real); warnings != nil {
+	if warnings := EnsureIntegrationsForRevisionWith("rev-seed2", testConfigDeps(t), dry, real); warnings != nil {
 		t.Fatalf("unexpected warnings: %v", warnings)
 	}
 

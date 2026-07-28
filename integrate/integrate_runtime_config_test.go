@@ -1,4 +1,4 @@
-package cmd
+package integrate
 
 import (
 	"bytes"
@@ -12,15 +12,6 @@ import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
 )
-
-func integrateRuntimePath(t *testing.T) string {
-	t.Helper()
-	if xdg := cmdLayerDeps().FileSystem().Getenv("XDG_DATA_HOME"); xdg != "" {
-		return filepath.Join(xdg, "pop", "config.runtime.toml")
-	}
-	t.Fatal("cmd-layer XDG_DATA_HOME must be set")
-	return ""
-}
 
 func writeIntegrateRuntimeFile(t *testing.T, body string) {
 	t.Helper()
@@ -63,7 +54,7 @@ func readIntegrateRuntimeSkills(t *testing.T) []string {
 
 func TestIntegrateRuntimeConfig_NoPaneSkill_WritesRuntimeAndRemovesArtifacts(t *testing.T) {
 	t.Parallel()
-	setupIntegrateCmdLayer(t)
+	setupIntegrateConfigLayer(t)
 	fs := newFakeFS()
 	home := "/h"
 
@@ -71,8 +62,8 @@ func TestIntegrateRuntimeConfig_NoPaneSkill_WritesRuntimeAndRemovesArtifacts(t *
 	link := claudePaneLink(home)
 
 	optOuts := map[ComponentID]bool{ComponentPaneSkill: true}
-	if err := applyIntegrateRuntimeConfig(false, optOuts); err != nil {
-		t.Fatalf("applyIntegrateRuntimeConfig: %v", err)
+	if err := ApplyRuntimeConfig(testConfigDeps(t), false, optOuts); err != nil {
+		t.Fatalf("ApplyRuntimeConfig: %v", err)
 	}
 
 	skills := readIntegrateRuntimeSkills(t)
@@ -83,12 +74,12 @@ func TestIntegrateRuntimeConfig_NoPaneSkill_WritesRuntimeAndRemovesArtifacts(t *
 
 	var out bytes.Buffer
 	d := fakeDeps(home, fs, &out)
-	baseline, err := integrationBaselineLoader()
+	baseline, err := BaselineLoader(testConfigDeps(t))
 	if err != nil {
-		t.Fatalf("integrationBaselineLoader: %v", err)
+		t.Fatalf("BaselineLoader: %v", err)
 	}
-	if err := runIntegrateComponents(d, "claude", baseline, false, false, optOuts, false, false); err != nil {
-		t.Fatalf("runIntegrateComponents: %v", err)
+	if err := RunComponents(d, "claude", baseline, false, false, optOuts, false, false); err != nil {
+		t.Fatalf("RunComponents: %v", err)
 	}
 	if _, ok := fs.symlinks[link]; ok {
 		t.Fatalf("pane-skill symlink still present at %s", link)
@@ -100,7 +91,7 @@ func TestIntegrateRuntimeConfig_NoPaneSkill_WritesRuntimeAndRemovesArtifacts(t *
 
 func TestIntegrateRuntimeConfig_NoTaskSkills_WritesRuntimeAndRemovesArtifacts(t *testing.T) {
 	t.Parallel()
-	setupIntegrateCmdLayer(t)
+	setupIntegrateConfigLayer(t)
 	fs := newFakeFS()
 	home := "/h"
 
@@ -108,8 +99,8 @@ func TestIntegrateRuntimeConfig_NoTaskSkills_WritesRuntimeAndRemovesArtifacts(t 
 	linksBefore := len(fs.symlinks)
 
 	optOuts := map[ComponentID]bool{ComponentTaskSkills: true}
-	if err := applyIntegrateRuntimeConfig(false, optOuts); err != nil {
-		t.Fatalf("applyIntegrateRuntimeConfig: %v", err)
+	if err := ApplyRuntimeConfig(testConfigDeps(t), false, optOuts); err != nil {
+		t.Fatalf("ApplyRuntimeConfig: %v", err)
 	}
 
 	skills := readIntegrateRuntimeSkills(t)
@@ -120,12 +111,12 @@ func TestIntegrateRuntimeConfig_NoTaskSkills_WritesRuntimeAndRemovesArtifacts(t 
 
 	var out bytes.Buffer
 	d := fakeDeps(home, fs, &out)
-	baseline, err := integrationBaselineLoader()
+	baseline, err := BaselineLoader(testConfigDeps(t))
 	if err != nil {
-		t.Fatalf("integrationBaselineLoader: %v", err)
+		t.Fatalf("BaselineLoader: %v", err)
 	}
-	if err := runIntegrateComponents(d, "claude", baseline, false, false, optOuts, false, false); err != nil {
-		t.Fatalf("runIntegrateComponents: %v", err)
+	if err := RunComponents(d, "claude", baseline, false, false, optOuts, false, false); err != nil {
+		t.Fatalf("RunComponents: %v", err)
 	}
 	if len(fs.symlinks) >= linksBefore {
 		t.Fatalf("expected task-skills symlinks removed, count still %d", len(fs.symlinks))
@@ -137,14 +128,14 @@ func TestIntegrateRuntimeConfig_NoTaskSkills_WritesRuntimeAndRemovesArtifacts(t 
 
 func TestIntegrateRuntimeConfig_BareIntegrateClearsRuntime(t *testing.T) {
 	t.Parallel()
-	setupIntegrateCmdLayer(t)
+	setupIntegrateConfigLayer(t)
 	writeIntegrateRuntimeFile(t, `
 [integrations]
 skills = ["tasks"]
 `)
 
-	if err := applyIntegrateRuntimeConfig(true, nil); err != nil {
-		t.Fatalf("applyIntegrateRuntimeConfig: %v", err)
+	if err := ApplyRuntimeConfig(testConfigDeps(t), true, nil); err != nil {
+		t.Fatalf("ApplyRuntimeConfig: %v", err)
 	}
 	if _, err := os.Stat(integrateRuntimePath(t)); !os.IsNotExist(err) {
 		data, _ := os.ReadFile(integrateRuntimePath(t))
@@ -157,10 +148,9 @@ func TestIntegrateRuntimeConfig_UserConfigWinsAfterBareClear(t *testing.T) {
 	root := t.TempDir()
 	dataDir := filepath.Join(root, "data")
 	configDir := filepath.Join(root, "config")
-	userPath := filepath.Join(configDir, "config.toml")
+	userPath := filepath.Join(configDir, "pop", "config.toml")
 	runtimePath := filepath.Join(dataDir, "pop", "config.runtime.toml")
 
-	setCmdLayerDeps(t, newTestCmdDeps(t, "", dataDir, ""))
 	if err := os.MkdirAll(filepath.Dir(runtimePath), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +160,7 @@ skills = ["pane"]
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(userPath, []byte(`
@@ -182,14 +172,18 @@ skills = ["tasks"]
 		t.Fatal(err)
 	}
 
-	if err := applyIntegrateRuntimeConfig(true, nil); err != nil {
-		t.Fatalf("applyIntegrateRuntimeConfig: %v", err)
+	cd := &config.Deps{FS: testFS(dataDir, configDir)}
+	if err := ApplyRuntimeConfig(cd, true, nil); err != nil {
+		t.Fatalf("ApplyRuntimeConfig: %v", err)
 	}
 
 	d := &config.Deps{FS: &deps.MockFileSystem{
 		GetenvFunc: func(key string) string {
 			if key == "XDG_DATA_HOME" {
 				return dataDir
+			}
+			if key == "XDG_CONFIG_HOME" {
+				return configDir
 			}
 			return ""
 		},
@@ -213,14 +207,14 @@ skills = ["tasks"]
 
 func TestIntegrateRuntimeConfig_VariadicNoFlagsOncePerInvocation(t *testing.T) {
 	t.Parallel()
-	setupIntegrateCmdLayer(t)
+	setupIntegrateConfigLayer(t)
 
 	optOuts := map[ComponentID]bool{
 		ComponentPaneSkill:  true,
 		ComponentTaskSkills: true,
 	}
-	if err := applyIntegrateRuntimeConfig(false, optOuts); err != nil {
-		t.Fatalf("first applyIntegrateRuntimeConfig: %v", err)
+	if err := ApplyRuntimeConfig(testConfigDeps(t), false, optOuts); err != nil {
+		t.Fatalf("first ApplyRuntimeConfig: %v", err)
 	}
 	data, err := os.ReadFile(integrateRuntimePath(t))
 	if err != nil {
@@ -231,14 +225,14 @@ func TestIntegrateRuntimeConfig_VariadicNoFlagsOncePerInvocation(t *testing.T) {
 	}
 
 	// Second call is a no-op on an already-empty runtime skills list.
-	if err := applyIntegrateRuntimeConfig(false, optOuts); err != nil {
-		t.Fatalf("second applyIntegrateRuntimeConfig: %v", err)
+	if err := ApplyRuntimeConfig(testConfigDeps(t), false, optOuts); err != nil {
+		t.Fatalf("second ApplyRuntimeConfig: %v", err)
 	}
 }
 
 func TestIntegrateRuntimeConfig_NoPaneSkillFromExistingRuntime(t *testing.T) {
 	t.Parallel()
-	setupIntegrateCmdLayer(t)
+	setupIntegrateConfigLayer(t)
 	writeIntegrateRuntimeFile(t, `
 [integrations]
 skills = ["tasks", "pane"]
@@ -248,8 +242,8 @@ enabled = true
 `)
 
 	optOuts := map[ComponentID]bool{ComponentPaneSkill: true}
-	if err := applyIntegrateRuntimeConfig(false, optOuts); err != nil {
-		t.Fatalf("applyIntegrateRuntimeConfig: %v", err)
+	if err := ApplyRuntimeConfig(testConfigDeps(t), false, optOuts); err != nil {
+		t.Fatalf("ApplyRuntimeConfig: %v", err)
 	}
 
 	data, err := os.ReadFile(integrateRuntimePath(t))

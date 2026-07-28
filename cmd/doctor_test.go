@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/integrate"
 	"github.com/glebglazov/pop/monitor"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/release"
@@ -22,12 +23,9 @@ import (
 func readOnlyDoctorDeps(t *testing.T, fs *fakeFS, tmux, cfgOK, daemon bool) *doctorDeps {
 	t.Helper()
 	base := fakeDeps(installerHome, fs, nil)
-	base.writeFile = func(string, []byte, os.FileMode) error { t.Fatalf("doctor wrote a file"); return nil }
-	base.mkdirAll = func(string, os.FileMode) error { t.Fatalf("doctor created a directory"); return nil }
-	base.removeAll = func(string) error { t.Fatalf("doctor removed a path"); return nil }
-	base.symlink = func(string, string) error { t.Fatalf("doctor created a symlink"); return nil }
+	integrate.GuardReadOnly(t, base)
 	return &doctorDeps{
-		integrate:     base,
+		integrate: base,
 		tmuxAvailable: func() bool { return tmux },
 		loadProjectConfig: func() (*config.Config, error) {
 			if cfgOK {
@@ -77,7 +75,7 @@ func setDoctorIntent(d *doctorDeps, agents ...string) {
 	d.agentIntent = func() (*doctorAgentIntentReport, error) {
 		report := &doctorAgentIntentReport{}
 		for _, agent := range agents {
-			report.intended = append(report.intended, doctorAgentIntent{agent: agent, sources: []string{"test intent"}})
+			report.Intended = append(report.Intended, doctorAgentIntent{Agent: agent, Sources: []string{"test intent"}})
 		}
 		return report, nil
 	}
@@ -150,8 +148,8 @@ func wayfinderCheck(t *testing.T, report *doctorReport, label string) doctorChec
 }
 
 func doctorIntentByAgent(report *doctorAgentIntentReport, agent string) (doctorAgentIntent, bool) {
-	for _, intent := range report.intended {
-		if intent.agent == agent {
+	for _, intent := range report.Intended {
+		if intent.Agent == agent {
 			return intent, true
 		}
 	}
@@ -159,8 +157,8 @@ func doctorIntentByAgent(report *doctorAgentIntentReport, agent string) (doctorA
 }
 
 func doctorSuggestionByAgent(report *doctorAgentIntentReport, agent string) (doctorAgentSuggestion, bool) {
-	for _, suggestion := range report.suggestions {
-		if suggestion.agent == agent {
+	for _, suggestion := range report.Suggestions {
+		if suggestion.Agent == agent {
 			return suggestion, true
 		}
 	}
@@ -256,7 +254,7 @@ func TestDoctorDoesNotRenderStalePaneSkillAsPrimaryIntegrateRow(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
 	setup := fakeDeps(installerHome, fs, nil)
-	if err := installFileComponent(setup, installerHome, ComponentPaneSkill, "claude"); err != nil {
+	if err := integrate.InstallFileComponent(setup, installerHome, integrate.ComponentPaneSkill, "claude"); err != nil {
 		t.Fatalf("pre-install: %v", err)
 	}
 	renderFile, _, _ := paneSkillPaths()
@@ -286,7 +284,7 @@ func TestDoctorDerivesIntendedAgentsFromTaskConfiguration(t *testing.T) {
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
-	intent, err := doctorDetectAgentIntent(d, installerHome, func(string) (*config.Config, error) {
+	intent, err := integrate.DetectAgentIntent(d, installerHome, func(string) (*config.Config, error) {
 		return &config.Config{Task: &config.TasksConfig{Presets: map[string]config.TaskAgentConfig{
 			"cursor": {Output: "text"},
 		}}}, nil
@@ -298,8 +296,8 @@ func TestDoctorDerivesIntendedAgentsFromTaskConfiguration(t *testing.T) {
 	if !ok {
 		t.Fatalf("configured task agent was not intended: %+v", intent)
 	}
-	if !stringSliceContains(got.sources, "task config") {
-		t.Fatalf("intent sources = %v, want task config", got.sources)
+	if !stringSliceContains(got.Sources, "task config") {
+		t.Fatalf("intent sources = %v, want task config", got.Sources)
 	}
 }
 
@@ -307,11 +305,11 @@ func TestDoctorDerivesIntendedAgentsFromInstalledPopArtifactsAndHooks(t *testing
 	t.Parallel()
 	fs := newFakeFS()
 	claudeStatusWired(fs)
-	if err := installFileComponent(fakeDeps(installerHome, fs, nil), installerHome, ComponentPaneSkill, "pi"); err != nil {
+	if err := integrate.InstallFileComponent(fakeDeps(installerHome, fs, nil), installerHome, integrate.ComponentPaneSkill, "pi"); err != nil {
 		t.Fatalf("install pi pane skill: %v", err)
 	}
 
-	intent, err := doctorDetectAgentIntent(fakeDeps(installerHome, fs, nil), installerHome, func(string) (*config.Config, error) {
+	intent, err := integrate.DetectAgentIntent(fakeDeps(installerHome, fs, nil), installerHome, func(string) (*config.Config, error) {
 		return nil, os.ErrNotExist
 	}, nil, func(string) bool { return false })
 	if err != nil {
@@ -322,15 +320,15 @@ func TestDoctorDerivesIntendedAgentsFromInstalledPopArtifactsAndHooks(t *testing
 		if !ok {
 			t.Fatalf("%s was not intended from Pop artifacts/hooks: %+v", agent, intent)
 		}
-		if !stringSliceContains(got.sources, "pop-owned integration artifacts") {
-			t.Fatalf("%s sources = %v, want pop-owned integration artifacts", agent, got.sources)
+		if !stringSliceContains(got.Sources, "pop-owned integration artifacts") {
+			t.Fatalf("%s sources = %v, want pop-owned integration artifacts", agent, got.Sources)
 		}
 	}
 }
 
 func TestDoctorDerivesIntendedAgentsFromExplicitCommandContext(t *testing.T) {
 	t.Parallel()
-	intent, err := doctorDetectAgentIntent(fakeDeps(installerHome, newFakeFS(), nil), installerHome, func(string) (*config.Config, error) {
+	intent, err := integrate.DetectAgentIntent(fakeDeps(installerHome, newFakeFS(), nil), installerHome, func(string) (*config.Config, error) {
 		return nil, os.ErrNotExist
 	}, []string{"opencode"}, func(string) bool { return false })
 	if err != nil {
@@ -340,8 +338,8 @@ func TestDoctorDerivesIntendedAgentsFromExplicitCommandContext(t *testing.T) {
 	if !ok {
 		t.Fatalf("explicit command context agent was not intended: %+v", intent)
 	}
-	if !stringSliceContains(got.sources, "explicit command context") {
-		t.Fatalf("intent sources = %v, want explicit command context", got.sources)
+	if !stringSliceContains(got.Sources, "explicit command context") {
+		t.Fatalf("intent sources = %v, want explicit command context", got.Sources)
 	}
 }
 
@@ -349,7 +347,7 @@ func TestDoctorPathOnlyAgentsAreSuggestionsAndDoNotAffectReadiness(t *testing.T)
 	t.Parallel()
 	fs := newFakeFS()
 	detectDeps := fakeDeps(installerHome, fs, nil)
-	intent, err := doctorDetectAgentIntent(detectDeps, installerHome, func(string) (*config.Config, error) {
+	intent, err := integrate.DetectAgentIntent(detectDeps, installerHome, func(string) (*config.Config, error) {
 		return nil, os.ErrNotExist
 	}, nil, func(agent string) bool { return agent == "codex" })
 	if err != nil {
@@ -389,7 +387,7 @@ func TestDoctorPathOnlyConflictIsNotReportedWithoutIntent(t *testing.T) {
 	fs := newFakeFS()
 	conflictPath := filepath.Join(installerHome, ".claude", "skills", "tmux-pane")
 	fs.files[conflictPath] = []byte("user-owned skill")
-	intent, err := doctorDetectAgentIntent(fakeDeps(installerHome, fs, nil), installerHome, func(string) (*config.Config, error) {
+	intent, err := integrate.DetectAgentIntent(fakeDeps(installerHome, fs, nil), installerHome, func(string) (*config.Config, error) {
 		return nil, os.ErrNotExist
 	}, nil, func(agent string) bool { return agent == "claude" })
 	if err != nil {
@@ -651,7 +649,7 @@ func TestDoctorWayfinderReadinessOKWithMapsPresent(t *testing.T) {
 	fs := newFakeFS()
 	d := readOnlyDoctorDeps(t, fs, true, true, true)
 	setDoctorIntent(d, "claude")
-	if err := installFileComponent(fakeDeps(installerHome, fs, nil), installerHome, ComponentTaskSkills, "claude"); err != nil {
+	if err := integrate.InstallFileComponent(fakeDeps(installerHome, fs, nil), installerHome, integrate.ComponentTaskSkills, "claude"); err != nil {
 		t.Fatalf("install task-skills: %v", err)
 	}
 	d.scanWayfinderMaps = func() (int, error) { return 2, nil }
@@ -733,7 +731,7 @@ func TestDoctorWayfinderPathOnlyAgentDoesNotDegradeTaskSkills(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
 	detectDeps := fakeDeps(installerHome, fs, nil)
-	intent, err := doctorDetectAgentIntent(detectDeps, installerHome, func(string) (*config.Config, error) {
+	intent, err := integrate.DetectAgentIntent(detectDeps, installerHome, func(string) (*config.Config, error) {
 		return nil, os.ErrNotExist
 	}, nil, func(agent string) bool { return agent == "codex" })
 	if err != nil {
@@ -1234,48 +1232,48 @@ func TestDoctorMonitorPartialOnlyForMixedIntendedAgentStatusWiring(t *testing.T)
 		{
 			name: "all intended agents wired",
 			wiring: []doctorAgentStatusWiring{
-				{agent: "claude", state: componentStateInfo{kind: stateInstalledCurrent}},
-				{agent: "codex", state: componentStateInfo{kind: stateInstalledCurrent}},
+				{agent: "claude", state: integrate.ComponentStateInfo{Kind: integrate.StateInstalledCurrent}},
+				{agent: "codex", state: integrate.ComponentStateInfo{Kind: integrate.StateInstalledCurrent}},
 			},
 			wantStatus: doctorStatusOK,
 		},
 		{
 			name: "no intended agents wired",
 			wiring: []doctorAgentStatusWiring{
-				{agent: "claude", state: componentStateInfo{kind: stateNotInstalled}},
-				{agent: "codex", state: componentStateInfo{kind: stateNotInstalled}},
+				{agent: "claude", state: integrate.ComponentStateInfo{Kind: integrate.StateNotInstalled}},
+				{agent: "codex", state: integrate.ComponentStateInfo{Kind: integrate.StateNotInstalled}},
 			},
 			wantStatus: doctorStatusDegraded,
 		},
 		{
 			name: "mixed intended agents",
 			wiring: []doctorAgentStatusWiring{
-				{agent: "claude", state: componentStateInfo{kind: stateInstalledCurrent}},
-				{agent: "codex", state: componentStateInfo{kind: stateNotInstalled}},
+				{agent: "claude", state: integrate.ComponentStateInfo{Kind: integrate.StateInstalledCurrent}},
+				{agent: "codex", state: integrate.ComponentStateInfo{Kind: integrate.StateNotInstalled}},
 			},
 			wantStatus: doctorStatusPartial,
 		},
 		{
 			name: "mixed intended agents with stale wiring",
 			wiring: []doctorAgentStatusWiring{
-				{agent: "claude", state: componentStateInfo{kind: stateInstalledCurrent}},
-				{agent: "codex", state: componentStateInfo{kind: stateStale}},
+				{agent: "claude", state: integrate.ComponentStateInfo{Kind: integrate.StateInstalledCurrent}},
+				{agent: "codex", state: integrate.ComponentStateInfo{Kind: integrate.StateStale}},
 			},
 			wantStatus: doctorStatusPartial,
 		},
 		{
 			name: "mixed intended agents with conflicting wiring",
 			wiring: []doctorAgentStatusWiring{
-				{agent: "claude", state: componentStateInfo{kind: stateInstalledCurrent}},
-				{agent: "codex", state: componentStateInfo{kind: stateConflict, conflictPath: "/home/me/.codex/hooks.json"}},
+				{agent: "claude", state: integrate.ComponentStateInfo{Kind: integrate.StateInstalledCurrent}},
+				{agent: "codex", state: integrate.ComponentStateInfo{Kind: integrate.StateConflict, ConflictPath: "/home/me/.codex/hooks.json"}},
 			},
 			wantStatus: doctorStatusPartial,
 		},
 		{
 			name: "no usable intended agents because wiring conflicts",
 			wiring: []doctorAgentStatusWiring{
-				{agent: "claude", state: componentStateInfo{kind: stateConflict, conflictPath: "/home/me/.claude/settings.json"}},
-				{agent: "codex", state: componentStateInfo{kind: stateConflict, conflictPath: "/home/me/.codex/hooks.json"}},
+				{agent: "claude", state: integrate.ComponentStateInfo{Kind: integrate.StateConflict, ConflictPath: "/home/me/.claude/settings.json"}},
+				{agent: "codex", state: integrate.ComponentStateInfo{Kind: integrate.StateConflict, ConflictPath: "/home/me/.codex/hooks.json"}},
 			},
 			wantStatus: doctorStatusDegraded,
 		},

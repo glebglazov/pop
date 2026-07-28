@@ -1,4 +1,4 @@
-package cmd
+package integrate
 
 import (
 	"bytes"
@@ -187,14 +187,14 @@ func TestRunIntegrateRemoveSingleComponent(t *testing.T) {
 	d := fakeDeps(installerHome, fs, nil)
 
 	// Install status wiring + pane skill.
-	if err := runIntegrateComponents(d, "claude", []ComponentID{ComponentPaneSkill}, false, false, nil, false, false); err != nil {
+	if err := RunComponents(d, "claude", []ComponentID{ComponentPaneSkill}, false, false, nil, false, false); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	settings := filepath.Join(installerHome, ".claude", "settings.json")
 	_, linkDest, _ := paneSkillPaths()
 
 	// Remove only the pane skill.
-	if err := runIntegrateRemoveComponents(d, "claude", []ComponentID{ComponentPaneSkill}); err != nil {
+	if err := RunRemoveComponents(d, "claude", []ComponentID{ComponentPaneSkill}); err != nil {
 		t.Fatalf("remove pane-skill: %v", err)
 	}
 
@@ -216,12 +216,12 @@ func TestRunIntegrateRemoveSeveralComponents(t *testing.T) {
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
-	if err := runIntegrateComponents(d, "claude",
+	if err := RunComponents(d, "claude",
 		[]ComponentID{ComponentPaneSkill, ComponentTaskSkills}, false, false, nil, false, false); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
-	if err := runIntegrateRemoveComponents(d, "claude",
+	if err := RunRemoveComponents(d, "claude",
 		[]ComponentID{ComponentStatusWiring, ComponentPaneSkill}); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
@@ -246,12 +246,12 @@ func TestRunIntegrateRemoveDefaultSet(t *testing.T) {
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
-	if err := runIntegrateComponents(d, "claude",
+	if err := RunComponents(d, "claude",
 		[]ComponentID{ComponentPaneSkill, ComponentTaskSkills}, false, false, nil, false, false); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
-	if err := runIntegrateRemoveComponents(d, "claude", nil); err != nil {
+	if err := RunRemoveComponents(d, "claude", nil); err != nil {
 		t.Fatalf("remove default set: %v", err)
 	}
 
@@ -273,7 +273,7 @@ func TestRunIntegrateRemoveNothingInstalled(t *testing.T) {
 	out := &bytes.Buffer{}
 	d := fakeDeps(installerHome, fs, out)
 
-	if err := runIntegrateRemoveComponents(d, "claude", nil); err != nil {
+	if err := RunRemoveComponents(d, "claude", nil); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
 	if len(fs.files) != 0 || len(fs.symlinks) != 0 {
@@ -291,7 +291,7 @@ func TestRunIntegrateRemoveUnknownComponent(t *testing.T) {
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
-	err := runIntegrateRemoveComponents(d, "opencode", []ComponentID{"bogus"})
+	err := RunRemoveComponents(d, "opencode", []ComponentID{"bogus"})
 	if err == nil || !strings.Contains(err.Error(), "unknown component") {
 		t.Fatalf("expected unknown-component error, got: %v", err)
 	}

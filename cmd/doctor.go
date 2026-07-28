@@ -10,6 +10,7 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/history"
+	"github.com/glebglazov/pop/integrate"
 	"github.com/glebglazov/pop/monitor"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/release"
@@ -35,7 +36,7 @@ import (
 // tests can compose healthy and unhealthy machines without a real tmux,
 // config file, or daemon.
 type doctorDeps struct {
-	integrate                 *integrateDeps
+	integrate                 *integrate.Deps
 	tmuxAvailable             func() bool
 	loadProjectConfig         func() (*config.Config, error)
 	projectConfigureAvailable func() bool
@@ -48,7 +49,7 @@ type doctorDeps struct {
 	monitorDaemonStartable    func() bool
 	loadMonitorState          func() (*monitor.State, error)
 	paneSessionAddressable    func() (string, error)
-	agentIntent               func() (*doctorAgentIntentReport, error)
+	agentIntent               func() (*integrate.AgentIntentReport, error)
 	explicitAgentContext      func() []string
 	agentExecutableAvailable  func(string) bool
 	taskStorageWritable       func() (string, error)
@@ -61,7 +62,7 @@ type doctorDeps struct {
 
 func defaultDoctorDeps() *doctorDeps {
 	return &doctorDeps{
-		integrate: defaultIntegrateDeps(),
+		integrate: integrate.DefaultDeps(),
 		tmuxAvailable: func() bool {
 			_, err := exec.LookPath("tmux")
 			return err == nil
@@ -100,12 +101,12 @@ func defaultDoctorDeps() *doctorDeps {
 			return monitor.Load(monitor.DefaultStatePath())
 		},
 		paneSessionAddressable: defaultPaneSessionAddressable,
-		agentIntent: func() (*doctorAgentIntentReport, error) {
+		agentIntent: func() (*integrate.AgentIntentReport, error) {
 			home, err := os.UserHomeDir()
 			if err != nil {
 				return nil, err
 			}
-			return doctorDetectAgentIntent(defaultIntegrateDeps(), home, config.Load, nil, doctorAgentExecutableAvailable)
+			return integrate.DetectAgentIntent(integrate.DefaultDeps(), home, config.Load, nil, doctorAgentExecutableAvailable)
 		},
 		explicitAgentContext:     func() []string { return nil },
 		agentExecutableAvailable: doctorAgentExecutableAvailable,
@@ -166,24 +167,13 @@ type doctorReport struct {
 
 type doctorAgentStatusWiring struct {
 	agent  string
-	state  componentStateInfo
+	state  integrate.ComponentStateInfo
 	detail string
 }
 
-type doctorAgentIntent struct {
-	agent   string
-	sources []string
-}
-
-type doctorAgentSuggestion struct {
-	agent  string
-	reason string
-}
-
-type doctorAgentIntentReport struct {
-	intended    []doctorAgentIntent
-	suggestions []doctorAgentSuggestion
-}
+type doctorAgentIntentReport = integrate.AgentIntentReport
+type doctorAgentIntent = integrate.AgentIntent
+type doctorAgentSuggestion = integrate.AgentSuggestion
 
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
@@ -240,7 +230,7 @@ func buildDoctorReport(d *doctorDeps) (*doctorReport, error) {
 	if err != nil {
 		return nil, err
 	}
-	doctorMergeExplicitAgentContext(intent, d.explicitAgentContext())
+	integrate.MergeExplicitAgentContext(intent, d.explicitAgentContext())
 	report := &doctorReport{
 		families: []doctorFamilyReport{
 			familyReport("pop project", doctorProjectChecks(d)),
@@ -684,12 +674,12 @@ func doctorIntendedAgentStatusWiringCheck(wiring []doctorAgentStatusWiring) (doc
 
 	var ok, needsAttention []string
 	for _, w := range wiring {
-		switch w.state.kind {
-		case stateInstalledCurrent:
+		switch w.state.Kind {
+		case integrate.StateInstalledCurrent:
 			ok = append(ok, w.agent)
-		case stateConflict:
+		case integrate.StateConflict:
 			needsAttention = append(needsAttention, w.agent+" (conflicting)")
-		case stateStale:
+		case integrate.StateStale:
 			needsAttention = append(needsAttention, w.agent+" (stale)")
 		default:
 			needsAttention = append(needsAttention, w.agent+" (missing)")
@@ -730,16 +720,16 @@ func doctorIntendedAgentTaskSkillsCheck(wiring []doctorAgentStatusWiring) (docto
 	var installed, needsAttention []string
 	var firstActionAgent string
 	for _, w := range wiring {
-		if w.state.kind == stateNotSupported {
+		if w.state.Kind == integrate.StateNotSupported {
 			continue
 		}
 		if firstActionAgent == "" {
 			firstActionAgent = w.agent
 		}
-		switch w.state.kind {
-		case stateInstalledCurrent, stateStale:
+		switch w.state.Kind {
+		case integrate.StateInstalledCurrent, integrate.StateStale:
 			installed = append(installed, w.agent)
-		case stateConflict:
+		case integrate.StateConflict:
 			needsAttention = append(needsAttention, w.agent+" (conflicting)")
 		default:
 			needsAttention = append(needsAttention, w.agent+" (missing)")
@@ -764,23 +754,23 @@ func doctorIntendedAgentTaskSkillsCheck(wiring []doctorAgentStatusWiring) (docto
 		detail: detail,
 	}
 	if firstActionAgent != "" {
-		check.nextAction = integrateInvocation(firstActionAgent, ComponentTaskSkills)
+		check.nextAction = integrateInvocation(firstActionAgent, integrate.ComponentTaskSkills)
 	}
 	return check, true
 }
 
-func doctorIntendedAgentTaskSkills(d *integrateDeps, intent *doctorAgentIntentReport) ([]doctorAgentStatusWiring, error) {
+func doctorIntendedAgentTaskSkills(d *integrate.Deps, intent *doctorAgentIntentReport) ([]doctorAgentStatusWiring, error) {
 	if intent == nil {
 		return nil, nil
 	}
-	home, err := d.userHomeDir()
+	home, err := d.UserHomeDir()
 	if err != nil {
 		return nil, err
 	}
 	var out []doctorAgentStatusWiring
-	for _, intended := range intent.intended {
-		agent := intended.agent
-		state, err := doctorComponentState(d, home, ComponentTaskSkills, agent)
+	for _, intended := range intent.Intended {
+		agent := intended.Agent
+		state, err := integrate.ComponentState(d, home, integrate.ComponentTaskSkills, agent)
 		if err != nil {
 			return nil, err
 		}
@@ -789,126 +779,21 @@ func doctorIntendedAgentTaskSkills(d *integrateDeps, intent *doctorAgentIntentRe
 	return out, nil
 }
 
-func doctorIntendedAgentStatusWiring(d *integrateDeps, intent *doctorAgentIntentReport) ([]doctorAgentStatusWiring, error) {
-	home, err := d.userHomeDir()
+func doctorIntendedAgentStatusWiring(d *integrate.Deps, intent *doctorAgentIntentReport) ([]doctorAgentStatusWiring, error) {
+	home, err := d.UserHomeDir()
 	if err != nil {
 		return nil, err
 	}
 	var out []doctorAgentStatusWiring
-	for _, intended := range intent.intended {
-		agent := intended.agent
-		state, err := doctorComponentState(d, home, ComponentStatusWiring, agent)
+	for _, intended := range intent.Intended {
+		agent := intended.Agent
+		state, err := integrate.ComponentState(d, home, integrate.ComponentStatusWiring, agent)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, doctorAgentStatusWiring{agent: agent, state: state})
 	}
 	return out, nil
-}
-
-func doctorDetectAgentIntent(d *integrateDeps, home string, loadConfig func(string) (*config.Config, error), explicit []string, executableAvailable func(string) bool) (*doctorAgentIntentReport, error) {
-	report := &doctorAgentIntentReport{}
-	intentByAgent := map[string]int{}
-	addIntent := func(agent, source string) {
-		agent = strings.ToLower(agent)
-		if !knownIntegrationAgent(agent) {
-			return
-		}
-		idx, ok := intentByAgent[agent]
-		if !ok {
-			report.intended = append(report.intended, doctorAgentIntent{agent: agent})
-			idx = len(report.intended) - 1
-			intentByAgent[agent] = idx
-		}
-		if source != "" && !stringSliceContains(report.intended[idx].sources, source) {
-			report.intended[idx].sources = append(report.intended[idx].sources, source)
-		}
-	}
-
-	if loadConfig != nil {
-		cfg, err := loadConfig(config.DefaultConfigPath())
-		if err != nil {
-			if !errors.Is(err, os.ErrNotExist) {
-				return nil, fmt.Errorf("load task config for agent intent: %w", err)
-			}
-		} else if cfg != nil && cfg.Task != nil {
-			for agent := range cfg.Task.Presets {
-				addIntent(agent, "task config")
-			}
-		}
-	}
-
-	doctorMergeExplicitAgentContext(report, explicit)
-
-	for _, agent := range integrationAgents {
-		for _, comp := range integrationCatalog {
-			state, err := doctorComponentState(d, home, comp.id, agent)
-			if err != nil {
-				return nil, err
-			}
-			switch state.kind {
-			case stateInstalledCurrent, stateStale:
-				addIntent(agent, "pop-owned integration artifacts")
-			}
-		}
-	}
-
-	for _, agent := range integrationAgents {
-		if _, ok := intentByAgent[agent]; ok {
-			continue
-		}
-		if executableAvailable != nil && executableAvailable(agent) {
-			report.suggestions = append(report.suggestions, doctorAgentSuggestion{
-				agent:  agent,
-				reason: "agent executable is available on PATH but no Pop intent was detected",
-			})
-		}
-	}
-
-	return report, nil
-}
-
-func doctorMergeExplicitAgentContext(report *doctorAgentIntentReport, agents []string) {
-	if report == nil {
-		return
-	}
-	intentByAgent := map[string]int{}
-	for i := range report.intended {
-		intentByAgent[report.intended[i].agent] = i
-	}
-	for _, agent := range agents {
-		agent = strings.ToLower(agent)
-		if !knownIntegrationAgent(agent) {
-			continue
-		}
-		idx, ok := intentByAgent[agent]
-		if !ok {
-			report.intended = append(report.intended, doctorAgentIntent{agent: agent})
-			idx = len(report.intended) - 1
-			intentByAgent[agent] = idx
-		}
-		if !stringSliceContains(report.intended[idx].sources, "explicit command context") {
-			report.intended[idx].sources = append(report.intended[idx].sources, "explicit command context")
-		}
-	}
-}
-
-func knownIntegrationAgent(agent string) bool {
-	for _, candidate := range integrationAgents {
-		if candidate == strings.ToLower(agent) {
-			return true
-		}
-	}
-	return false
-}
-
-func stringSliceContains(items []string, item string) bool {
-	for _, existing := range items {
-		if existing == item {
-			return true
-		}
-	}
-	return false
 }
 
 var doctorAgentExecutables = map[string]string{
@@ -929,7 +814,7 @@ func doctorAgentExecutableAvailable(agent string) bool {
 }
 
 func doctorIntegrateIntentChecks(intent *doctorAgentIntentReport) []doctorCheck {
-	if intent == nil || len(intent.intended) == 0 {
+	if intent == nil || len(intent.Intended) == 0 {
 		return []doctorCheck{{
 			label:  "intended agent setup repair path",
 			status: doctorStatusOK,
@@ -937,12 +822,12 @@ func doctorIntegrateIntentChecks(intent *doctorAgentIntentReport) []doctorCheck 
 		}}
 	}
 	var agents []string
-	for _, intended := range intent.intended {
-		source := strings.Join(intended.sources, ", ")
+	for _, intended := range intent.Intended {
+		source := strings.Join(intended.Sources, ", ")
 		if source == "" {
 			source = "detected intent"
 		}
-		agents = append(agents, fmt.Sprintf("%s (%s)", intended.agent, source))
+		agents = append(agents, fmt.Sprintf("%s (%s)", intended.Agent, source))
 	}
 	return []doctorCheck{{
 		label:  "intended agent setup repair path",
@@ -956,12 +841,12 @@ func doctorIntegrateSuggestionChecks(intent *doctorAgentIntentReport) []doctorCh
 		return nil
 	}
 	var checks []doctorCheck
-	for _, suggestion := range intent.suggestions {
+	for _, suggestion := range intent.Suggestions {
 		checks = append(checks, doctorCheck{
-			label:      fmt.Sprintf("%s available agent suggestion", suggestion.agent),
+			label:      fmt.Sprintf("%s available agent suggestion", suggestion.Agent),
 			status:     doctorStatusNA,
-			detail:     suggestion.reason,
-			nextAction: integrateInvocation(suggestion.agent, ComponentStatusWiring),
+			detail:     suggestion.Reason,
+			nextAction: integrateInvocation(suggestion.Agent, integrate.ComponentStatusWiring),
 		})
 	}
 	return checks
@@ -1032,53 +917,18 @@ func doctorStatusReason(check doctorCheck) string {
 	return fmt.Sprintf("%s is %s", check.label, check.status)
 }
 
-// doctorComponentState computes a component's state for an agent by composing
-// the existing check seams — it owns no state logic. File-based components
-// (the pane skill, the task planning skills) defer entirely to
-// wizardFileComponentState (catalog support + conflict + installed + stale).
-// The status wiring has no render tree, so its state is the binary
-// installed/not-installed signal from its own seam (statusWiringInstalled).
-func doctorComponentState(d *integrateDeps, home string, id ComponentID, agent string) (componentStateInfo, error) {
-	comp, ok := lookupComponent(id)
-	if !ok {
-		return componentStateInfo{}, fmt.Errorf("unknown component %q", id)
-	}
-	if !comp.supported(agent) {
-		return componentStateInfo{kind: stateNotSupported}, nil
-	}
-	switch id {
-	case ComponentStatusWiring:
-		installed, err := statusWiringInstalled(d, home, agent)
-		if err != nil {
-			return componentStateInfo{}, err
-		}
-		return installedState(installed), nil
-	default:
-		return wizardFileComponentState(d, home, id, agent)
-	}
-}
-
-// installedState maps a plain installed bool onto the shared state enum. These
-// seams report only presence, not staleness, so present means installed-current.
-func installedState(installed bool) componentStateInfo {
-	if installed {
-		return componentStateInfo{kind: stateInstalledCurrent}
-	}
-	return componentStateInfo{kind: stateNotInstalled}
-}
-
 // doctorComponentFlag maps a component to the `pop integrate` flag that selects
 // it non-interactively. The status wiring has no flag — it is the core
 // component a bare `pop integrate <agent>` installs.
-var doctorComponentFlag = map[ComponentID]string{
-	ComponentStatusWiring: "",
-	ComponentPaneSkill:    "--no-pane-skills",
-	ComponentTaskSkills:   "--task-skills",
+var doctorComponentFlag = map[integrate.ComponentID]string{
+	integrate.ComponentStatusWiring: "",
+	integrate.ComponentPaneSkill:    "--no-pane-skills",
+	integrate.ComponentTaskSkills:   "--task-skills",
 }
 
 // integrateInvocation builds the copy-paste integrate command that installs the
 // given component for the agent.
-func integrateInvocation(agent string, id ComponentID) string {
+func integrateInvocation(agent string, id integrate.ComponentID) string {
 	if flag := doctorComponentFlag[id]; flag != "" {
 		return fmt.Sprintf("pop integrate %s %s", agent, flag)
 	}

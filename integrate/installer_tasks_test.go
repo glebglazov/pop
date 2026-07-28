@@ -1,4 +1,4 @@
-package cmd
+package integrate
 
 import (
 	"fmt"
@@ -141,8 +141,8 @@ func TestRunIntegrateTaskSkillsInstallsExactSet(t *testing.T) {
 			fs := newFakeFS()
 			d := fakeDeps(installerHome, fs, nil)
 
-			if err := runIntegrateComponents(d, a.name, []ComponentID{ComponentTaskSkills}, false, false, nil, false, false); err != nil {
-				t.Fatalf("runIntegrateComponents(%s): %v", a.name, err)
+			if err := RunComponents(d, a.name, []ComponentID{ComponentTaskSkills}, false, false, nil, false, false); err != nil {
+				t.Fatalf("RunComponents(%s): %v", a.name, err)
 			}
 
 			// Core status wiring landed.

@@ -1,4 +1,4 @@
-package cmd
+package integrate
 
 import (
 	"fmt"
@@ -39,19 +39,20 @@ const (
 // components leave install nil and go through the link installer, driven by
 // their sources. ComponentStatusWiring is the sole component the bare integrate
 // path installs; the rest are explicit opt-ins.
-type integrationComponent struct {
+type Component struct {
 	id       ComponentID
 	supports map[string]bool
-	// sources lists embedded source paths (within skillFiles) this component
-	// renders from. Empty for components whose sources are not file-based
-	// (status wiring) or not yet embedded (task skills).
-	sources []string
-	install func(d *integrateDeps, home, agent string) error
+	sources  []string
+	install  func(d *Deps, home, agent string) error
 }
 
-// supported reports whether the component can be hosted by the given agent.
-func (c integrationComponent) supported(agent string) bool {
+func (c Component) supported(agent string) bool {
 	return c.supports[strings.ToLower(agent)]
+}
+
+// AgentSupported reports whether the component can be hosted by the given agent.
+func (c Component) AgentSupported(agent string) bool {
+	return c.supported(agent)
 }
 
 // agentSet builds a support-matrix set from a list of agent names.
@@ -72,7 +73,7 @@ func agentSet(agents ...string) map[string]bool {
 // task planning skills as skill directories under ~/.config/opencode/skills/.
 // Unsupported pairs are reported as not-supported rather than receiving a
 // degraded install. See ADR 0010.
-var integrationCatalog = []integrationComponent{
+var catalog = []Component{
 	{
 		id:       ComponentStatusWiring,
 		supports: agentSet("claude", "codex", "pi", "opencode", "cursor"),
@@ -102,21 +103,21 @@ var integrationCatalog = []integrationComponent{
 	},
 }
 
-// lookupComponent returns the catalog entry for the given identifier.
-func lookupComponent(id ComponentID) (integrationComponent, bool) {
-	for _, c := range integrationCatalog {
+// LookupComponent returns the catalog entry for the given identifier.
+func LookupComponent(id ComponentID) (Component, bool) {
+	for _, c := range catalog {
 		if c.id == id {
 			return c, true
 		}
 	}
-	return integrationComponent{}, false
+	return Component{}, false
 }
 
 // installStatusWiring applies the status-wiring component for an agent by
 // dispatching to that agent's hook merge or extension install. Behavior is
 // byte-identical to the previous per-agent integrate functions; only the
 // skill installs that used to sit alongside them are gone.
-func installStatusWiring(d *integrateDeps, home, agent string) error {
+func installStatusWiring(d *Deps, home, agent string) error {
 	switch strings.ToLower(agent) {
 	case "claude":
 		return installClaudeHooks(d, home)

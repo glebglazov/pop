@@ -1,4 +1,4 @@
-package cmd
+package integrate
 
 import (
 	"bytes"
@@ -18,7 +18,7 @@ import (
 //   - File-based skill components delete only pop-owned symlinks and their
 //     render-tree entries; a same-named entry pop does not own is left
 //     untouched and reported.
-func removeComponent(d *integrateDeps, home string, id ComponentID, agent string) error {
+func removeComponent(d *Deps, home string, id ComponentID, agent string) error {
 	switch id {
 	case ComponentStatusWiring:
 		return removeStatusWiring(d, home, agent)
@@ -33,7 +33,7 @@ func removeComponent(d *integrateDeps, home string, id ComponentID, agent string
 // the installer uses (ADR 0011) — a symlink resolving into pop's render tree,
 // or a copy-mode entry with the `pop-owned: true` marker. A same-named entry
 // pop does not own is never deleted; it is left in place and reported.
-func removeFileComponent(d *integrateDeps, home string, id ComponentID, agent string) error {
+func removeFileComponent(d *Deps, home string, id ComponentID, agent string) error {
 	agent = strings.ToLower(agent)
 
 	dataDir, err := d.dataDir()
@@ -87,7 +87,7 @@ func removeFileComponent(d *integrateDeps, home string, id ComponentID, agent st
 // dispatching to that agent's hook-strip or extension-file removal. Hook
 // stripping reuses the installer's idempotent pop-hook detection so unrelated
 // hooks are preserved.
-func removeStatusWiring(d *integrateDeps, home, agent string) error {
+func removeStatusWiring(d *Deps, home, agent string) error {
 	switch strings.ToLower(agent) {
 	case "claude":
 		return stripJSONHooks(d, filepath.Join(home, ".claude", "settings.json"), removePopHooks)
@@ -109,7 +109,7 @@ func removeStatusWiring(d *integrateDeps, home, agent string) error {
 // agent-format-specific filter (removePopHooks for the nested claude/codex
 // format, removeCursorPopHooks for the flat cursor format). A missing file or a
 // file with no pop hooks is reported as nothing-to-remove and left unchanged.
-func stripJSONHooks(d *integrateDeps, settingsPath string, strip func([]interface{}) []interface{}) error {
+func stripJSONHooks(d *Deps, settingsPath string, strip func([]interface{}) []interface{}) error {
 	data, err := d.readFile(settingsPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -171,7 +171,7 @@ func stripJSONHooks(d *integrateDeps, settingsPath string, strip func([]interfac
 // opencode). The file is wholly pop's — it carries no user content — so
 // removal is unconditional when present. A missing file is reported as
 // nothing-to-remove.
-func removeExtensionFile(d *integrateDeps, path string) error {
+func removeExtensionFile(d *Deps, path string) error {
 	if _, err := d.lstatMode(path); err != nil {
 		if os.IsNotExist(err) {
 			if d.stdout != nil {
@@ -194,8 +194,8 @@ func removeExtensionFile(d *integrateDeps, path string) error {
 // installed for an agent. It backs the default removal set: `pop integrate
 // remove <agent>` with no component identifiers removes exactly the components
 // reported installed here. An unsupported component is never installed.
-func componentInstalled(d *integrateDeps, home string, id ComponentID, agent string) (bool, error) {
-	comp, ok := lookupComponent(id)
+func componentInstalled(d *Deps, home string, id ComponentID, agent string) (bool, error) {
+	comp, ok := LookupComponent(id)
 	if !ok {
 		return false, fmt.Errorf("unknown component %q", id)
 	}
@@ -213,7 +213,7 @@ func componentInstalled(d *integrateDeps, home string, id ComponentID, agent str
 // statusWiringInstalled reports whether pop's status wiring is present for an
 // agent: a pop hook in the JSON settings (claude/codex/cursor) or the
 // status-sync extension file (pi/opencode).
-func statusWiringInstalled(d *integrateDeps, home, agent string) (bool, error) {
+func statusWiringInstalled(d *Deps, home, agent string) (bool, error) {
 	switch strings.ToLower(agent) {
 	case "claude":
 		return jsonHasPopHooks(d, filepath.Join(home, ".claude", "settings.json"), isPopHook)
@@ -232,7 +232,7 @@ func statusWiringInstalled(d *integrateDeps, home, agent string) (bool, error) {
 
 // jsonHasPopHooks reports whether any hook entry in the JSON settings file is a
 // pop hook, per the given format-specific predicate.
-func jsonHasPopHooks(d *integrateDeps, settingsPath string, isPop func(interface{}) bool) (bool, error) {
+func jsonHasPopHooks(d *Deps, settingsPath string, isPop func(interface{}) bool) (bool, error) {
 	data, err := d.readFile(settingsPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -261,7 +261,7 @@ func jsonHasPopHooks(d *integrateDeps, settingsPath string, isPop func(interface
 
 // fileExists reports whether an entry exists at path (via lstat, not following
 // symlinks).
-func fileExists(d *integrateDeps, path string) (bool, error) {
+func fileExists(d *Deps, path string) (bool, error) {
 	if _, err := d.lstatMode(path); err != nil {
 		if os.IsNotExist(err) {
 			return false, nil
@@ -273,7 +273,7 @@ func fileExists(d *integrateDeps, path string) (bool, error) {
 
 // fileComponentInstalled reports whether any pop-owned artifact for a
 // file-based component is present at the agent's location.
-func fileComponentInstalled(d *integrateDeps, home string, id ComponentID, agent string) (bool, error) {
+func fileComponentInstalled(d *Deps, home string, id ComponentID, agent string) (bool, error) {
 	names, err := fileComponentInstalledNames(d, home, id, agent)
 	if err != nil {
 		return false, err
@@ -281,15 +281,15 @@ func fileComponentInstalled(d *integrateDeps, home string, id ComponentID, agent
 	return len(names) > 0, nil
 }
 
-// runIntegrateRemoveComponents is the entry point for `pop integrate remove
+// RunRemoveComponents is the entry point for `pop integrate remove
 // <agent> [component...]`. With no component identifiers it removes every
 // component currently installed for the agent; with identifiers it removes
 // exactly that set. Only pop-owned artifacts are ever deleted, so removal can
 // never destroy the user's own files (ADR 0011).
-func runIntegrateRemoveComponents(d *integrateDeps, agent string, ids []ComponentID) error {
+func RunRemoveComponents(d *Deps, agent string, ids []ComponentID) error {
 	agent = strings.ToLower(agent)
 
-	core, ok := lookupComponent(ComponentStatusWiring)
+	core, ok := LookupComponent(ComponentStatusWiring)
 	if !ok {
 		return fmt.Errorf("status-wiring component missing from catalog")
 	}
@@ -307,7 +307,7 @@ func runIntegrateRemoveComponents(d *integrateDeps, agent string, ids []Componen
 	if len(ids) == 0 {
 		// Default set: every component currently installed for this agent, in
 		// catalog order.
-		for _, c := range integrationCatalog {
+		for _, c := range catalog {
 			inst, err := componentInstalled(d, home, c.id, agent)
 			if err != nil {
 				return err
@@ -326,7 +326,7 @@ func runIntegrateRemoveComponents(d *integrateDeps, agent string, ids []Componen
 		// Explicit set: validate each identifier is a known component the agent
 		// can host before touching anything.
 		for _, id := range ids {
-			comp, ok := lookupComponent(id)
+			comp, ok := LookupComponent(id)
 			if !ok {
 				return fmt.Errorf("unknown component %q", id)
 			}

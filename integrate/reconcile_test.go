@@ -1,4 +1,4 @@
-package cmd
+package integrate
 
 import (
 	"bytes"
@@ -11,8 +11,8 @@ import (
 // reconcileFactories builds dry/real deps factories over a shared fake FS for
 // the reconcile refresh paths, optionally pinning a resolved skill_prefix and
 // capturing debug logs. A nil prefix uses the default (`pop-`).
-func reconcileFactories(home string, fs *fakeFS, prefix *string, logs *[]string) (dry, real func() *integrateDeps) {
-	mk := func() *integrateDeps {
+func reconcileFactories(home string, fs *fakeFS, prefix *string, logs *[]string) (dry, real func() *Deps) {
+	mk := func() *Deps {
 		d := fakeDeps(home, fs, io.Discard)
 		if prefix != nil {
 			d.skillsPrefix = prefix
@@ -22,8 +22,8 @@ func reconcileFactories(home string, fs *fakeFS, prefix *string, logs *[]string)
 		}
 		return d
 	}
-	dry = func() *integrateDeps { return withDryRun(mk()) }
-	real = func() *integrateDeps { return mk() }
+	dry = func() *Deps { return WithDryRun(mk()) }
+	real = func() *Deps { return mk() }
 	return dry, real
 }
 
@@ -129,7 +129,7 @@ func TestInstalledNames_FindsRenamedEntry(t *testing.T) {
 
 func TestUpdateExisting_AppliesSkillPrefixChange(t *testing.T) {
 	t.Parallel()
-	setupIntegrateCmdLayer(t)
+	setupIntegrateConfigLayer(t)
 	// Criterion 1: a config-only skill_prefix change (pop- → bare) is applied by
 	// `pop integrate --update-existing` — the new bare name is linked and the old
 	// pop- entry pruned — even though no embedded source byte changed.
@@ -147,8 +147,8 @@ func TestUpdateExisting_AppliesSkillPrefixChange(t *testing.T) {
 	dry, real := reconcileFactories("/h", fs, &bare, &logs)
 
 	var out, errb bytes.Buffer
-	if err := runIntegrateUpdateExistingWith("rev-prefix", dry, real, &out, &errb, false); err != nil {
-		t.Fatalf("runIntegrateUpdateExistingWith: %v", err)
+	if err := RunUpdateExistingWith("rev-prefix", testConfigDeps(t), dry, real, &out, &errb, false); err != nil {
+		t.Fatalf("RunUpdateExistingWith: %v", err)
 	}
 
 	bareLink := filepath.Join("/h", ".claude", "skills", "tmux-pane")
@@ -176,7 +176,7 @@ func TestUpdateExisting_AppliesSkillPrefixChange(t *testing.T) {
 
 func TestEnsureIntegrations_MigratesBaseRename(t *testing.T) {
 	t.Parallel()
-	setupIntegrateCmdLayer(t)
+	setupIntegrateConfigLayer(t)
 	// Criterion 2: a binary release that renames the base (pane → tmux-pane)
 	// auto-migrates the installed entry on the next picker launch (the
 	// binary-revision-gated ensure path).
@@ -187,7 +187,7 @@ func TestEnsureIntegrations_MigratesBaseRename(t *testing.T) {
 	var logs []string
 	dry, real := reconcileFactories("/h", fs, nil, &logs) // default pop- → renders pop-tmux-pane
 
-	warnings := ensureIntegrationsForRevisionWith("rev-rename", dry, real)
+	warnings := EnsureIntegrationsForRevisionWith("rev-rename", testConfigDeps(t), dry, real)
 	if warnings != nil {
 		t.Fatalf("expected no warnings, got %v", warnings)
 	}
@@ -210,7 +210,7 @@ func TestEnsureIntegrations_MigratesBaseRename(t *testing.T) {
 
 func TestUpdateStale_ContentOnlyChangeStillRefreshes(t *testing.T) {
 	t.Parallel()
-	setupIntegrateCmdLayer(t)
+	setupIntegrateConfigLayer(t)
 	// Criterion 3: a content-only change (names unchanged) still re-renders.
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
@@ -221,7 +221,7 @@ func TestUpdateStale_ContentOnlyChangeStillRefreshes(t *testing.T) {
 	fs.files[renderFile] = []byte("stale skill body")
 
 	dry, real := reconcileFactories("/h", fs, nil, nil)
-	result := updateStaleIntegrations(dry, real)
+	result := updateStaleIntegrations(testConfigDeps(t), dry, real)
 	if len(result.Warnings) != 0 {
 		t.Fatalf("expected no warnings, got %v", result.Warnings)
 	}
@@ -232,7 +232,7 @@ func TestUpdateStale_ContentOnlyChangeStillRefreshes(t *testing.T) {
 
 func TestReconcile_SkipsUnownedConflictOnPrefixChange(t *testing.T) {
 	t.Parallel()
-	setupIntegrateCmdLayer(t)
+	setupIntegrateConfigLayer(t)
 	// Criterion 4: reconcile never removes an unowned entry. A prefix change to
 	// bare would resolve to `tmux-pane`, but a hand-written skill sits there —
 	// an unowned conflict. Refresh skips entirely: the user's skill is untouched
@@ -252,7 +252,7 @@ func TestReconcile_SkipsUnownedConflictOnPrefixChange(t *testing.T) {
 
 	bare := ""
 	dry, real := reconcileFactories("/h", fs, &bare, nil)
-	result := updateStaleIntegrations(dry, real)
+	result := updateStaleIntegrations(testConfigDeps(t), dry, real)
 
 	// The unowned entry is never touched.
 	if string(fs.files[userFile]) != "hand-written skill" {
