@@ -52,7 +52,7 @@ func TestCatalog_StableIdentifiers(t *testing.T) {
 // hosts all file-based skill components once its install path exists.
 func TestCatalog_SupportMatrix(t *testing.T) {
 	t.Parallel()
-	allAgents := []string{"claude", "codex", "pi", "opencode", "cursor"}
+	allAgents := append([]string(nil), Agents...)
 
 	cases := []struct {
 		id        ComponentID

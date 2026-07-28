@@ -87,7 +87,7 @@ func Install(d *Deps, req Request) (Report, error) {
 		return Report{}, fmt.Errorf("status-wiring component missing from catalog")
 	}
 	if !core.supported(agent) {
-		return Report{}, fmt.Errorf("unknown agent %q (expected: claude, codex, pi, opencode, cursor)", agent)
+		return Report{}, unknownAgentError(agent)
 	}
 
 	home, err := r.deps.userHomeDir()

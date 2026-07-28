@@ -80,11 +80,6 @@ func saveAppState(d *Deps, s *appState) error {
 
 // ----- Auto-update integrations ---------------------------------------------
 
-// Agents is the hardcoded list of agents that EnsureIntegrations
-// checks on each startup. Small enough that a registry is overkill; changes
-// here must also update the integrateCmd ValidArgs list.
-var Agents = []string{"claude", "codex", "pi", "opencode", "cursor"}
-
 // EnsureIntegrations checks whether installed integration components are stale
 // against the currently running binary's VCS revision and reconciles them to
 // the merged Integration baseline. Returns warnings to surface in the picker

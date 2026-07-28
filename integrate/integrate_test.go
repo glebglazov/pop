@@ -1658,7 +1658,7 @@ func TestDryRun_ClaudeInstalledDetectedViaSettingsHooks(t *testing.T) {
 	t.Parallel()
 	// Claude's settings.json is the only install target that cannot be
 	// detected by writeFile presence alone (it exists for every claude user).
-	// Verify the installClaudeHooks nudge correctly sets installed=true when
+	// Verify the JSON-hook dry-run nudge correctly sets installed=true when
 	// existing pop hooks are found. settings.json is the sole status-wiring
 	// artifact now that skills are off the default path.
 	fs := newFakeFS()

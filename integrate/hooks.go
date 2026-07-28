@@ -37,15 +37,11 @@ var popHooks = []hookSpec{
 	{"Notification", "pop pane set-status unread 2>/dev/null || true"},
 }
 
-// installClaudeHooks merges pop's hook entries into ~/.claude/settings.json,
-// preserving any unrelated existing hooks. Old pop hooks are removed first
-// (matched via isPopHook) so re-running the command is idempotent.
-func installClaudeHooks(r *run, home string) error {
-	settingsPath := filepath.Join(home, ".claude", "settings.json")
-	return installJSONHooks(r, settingsPath, popHooks)
-}
-
-func installJSONHooks(r *run, settingsPath string, hooksToInstall []hookSpec) error {
+// installJSONHooks merges pop's hook entries into a JSON settings/hooks file,
+// preserving unrelated hooks. Old pop hooks are stripped first via dialect.IsPop
+// so re-running is idempotent. Nested versus flat entry shapes come from the
+// HookDialect on the agent's profile — not from agent-name branching here.
+func installJSONHooks(r *run, settingsPath string, hooksToInstall []hookSpec, dialect HookDialect) error {
 	d := r.deps
 	settings := make(map[string]interface{})
 	data, err := d.readFile(settingsPath)
@@ -63,17 +59,23 @@ func installJSONHooks(r *run, settingsPath string, hooksToInstall []hookSpec) er
 		settings["hooks"] = hooks
 	}
 
+	if dialect.EnsureVersion {
+		if _, ok := settings["version"]; !ok {
+			settings["version"] = 1
+		}
+	}
+
 	// Strip any previously installed pop hooks before adding the current set.
 	for event, val := range hooks {
 		eventHooks, ok := val.([]interface{})
 		if !ok {
 			continue
 		}
-		cleaned := removePopHooks(eventHooks)
-		// Dry-run "installed" detection for claude: settings.json exists for
-		// every claude user, so file-presence is not a reliable signal that
-		// pop is installed. Finding any existing pop hooks is — they could
-		// only have gotten there via a prior `pop integrate claude` run.
+		cleaned := removeHooksMatching(eventHooks, dialect.IsPop)
+		// Dry-run "installed" detection for JSON-hook agents: the settings file
+		// often exists for reasons unrelated to pop, so file-presence is not a
+		// reliable signal. Finding any existing pop hooks is — they could only
+		// have gotten there via a prior integrate run.
 		if r.dryRun && len(cleaned) < len(eventHooks) {
 			r.installed = true
 		}
@@ -85,14 +87,7 @@ func installJSONHooks(r *run, settingsPath string, hooksToInstall []hookSpec) er
 	}
 
 	for _, h := range hooksToInstall {
-		hookEntry := map[string]interface{}{
-			"hooks": []interface{}{
-				map[string]interface{}{
-					"type":    "command",
-					"command": h.command,
-				},
-			},
-		}
+		hookEntry := dialect.Wrap(h.command)
 		eventHooks, _ := hooks[h.event].([]interface{})
 		eventHooks = append(eventHooks, hookEntry)
 		hooks[h.event] = eventHooks
@@ -135,27 +130,19 @@ var codexPopHooks = []hookSpec{
 	{"Stop", "pop pane set-status unread 2>/dev/null || true"},
 }
 
-func installCodexHooks(r *run, home string) error {
-	hooksPath := filepath.Join(home, ".codex", "hooks.json")
-	return installJSONHooks(r, hooksPath, codexPopHooks)
-}
-
-// ----- Pi integration --------------------------------------------------------
-
-// installPiExtension writes the embedded pi extension TypeScript file. Pi
-// auto-discovers any *.ts file under ~/.pi/agent/extensions/ at startup.
-func installPiExtension(r *run, home string) error {
+// installExtensionFile writes a pop-owned status-sync extension/plugin file
+// (pi, opencode). The path, content, and stdout label come from the agent's
+// profile — file-drop agents differ only in that profile data.
+func installExtensionFile(r *run, path string, content []byte, installedLabel string) error {
 	d := r.deps
-	extDir := filepath.Join(home, ".pi", "agent", "extensions")
-	if err := d.mkdirAll(extDir, 0o755); err != nil {
-		return fmt.Errorf("failed to create %s: %w", extDir, err)
+	if err := d.mkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("failed to create %s: %w", filepath.Dir(path), err)
 	}
-	extPath := filepath.Join(extDir, "pop-status-sync.ts")
-	if err := d.writeFile(extPath, piExtensionFile, 0o644); err != nil {
-		return fmt.Errorf("failed to write %s: %w", extPath, err)
+	if err := d.writeFile(path, content, 0o644); err != nil {
+		return fmt.Errorf("failed to write %s: %w", path, err)
 	}
 	if d.stdout != nil {
-		fmt.Fprintf(d.stdout, "Installed pi extension at %s\n", extPath)
+		fmt.Fprintf(d.stdout, "Installed %s at %s\n", installedLabel, path)
 	}
 	return nil
 }
@@ -244,36 +231,11 @@ func frontmatterHasOwnershipMarker(content string) bool {
 	return false
 }
 
-// ----- Opencode integration --------------------------------------------------
-
-// installOpencodePlugin writes the embedded opencode plugin TypeScript file.
-// Opencode auto-discovers any *.ts file under ~/.config/opencode/plugins/ at startup.
-func installOpencodePlugin(r *run, home string) error {
-	d := r.deps
-	pluginDir := filepath.Join(home, ".config", "opencode", "plugins")
-	if err := d.mkdirAll(pluginDir, 0o755); err != nil {
-		return fmt.Errorf("failed to create %s: %w", pluginDir, err)
-	}
-	pluginPath := filepath.Join(pluginDir, "pop-status-sync.ts")
-	if err := d.writeFile(pluginPath, opencodeExtensionFile, 0o644); err != nil {
-		return fmt.Errorf("failed to write %s: %w", pluginPath, err)
-	}
-	if d.stdout != nil {
-		fmt.Fprintf(d.stdout, "Installed opencode plugin at %s\n", pluginPath)
-	}
-	return nil
-}
-
 // ----- Cursor integration ----------------------------------------------------
-
-type cursorHookSpec struct {
-	event   string
-	command string
-}
 
 // cursorPopHooks defines the hook commands installed into Cursor's hooks.json.
 // Event names follow the Cursor CLI hooks schema (camelCase).
-var cursorPopHooks = []cursorHookSpec{
+var cursorPopHooks = []hookSpec{
 	{"sessionStart", "pop pane set-status clear --label cursor 2>/dev/null || true"},
 	{"sessionStart", "pop pane set-topic --clear 2>/dev/null || true"},
 	{"beforeSubmitPrompt", "pop pane set-status working --label cursor 2>/dev/null || true"},
@@ -286,92 +248,23 @@ var cursorPopHooks = []cursorHookSpec{
 	{"stop", "pop pane set-status unread --label cursor 2>/dev/null || true"},
 }
 
-// installCursorHooks merges pop's hook entries into ~/.cursor/hooks.json,
-// preserving any unrelated existing hooks. Old pop hooks are removed first
-// (matched via isCursorPopHook) so re-running the command is idempotent.
-func installCursorHooks(r *run, home string) error {
-	d := r.deps
-	hooksPath := filepath.Join(home, ".cursor", "hooks.json")
-
-	settings := make(map[string]interface{})
-	data, err := d.readFile(hooksPath)
-	if err == nil {
-		if err := json.Unmarshal(data, &settings); err != nil {
-			return fmt.Errorf("failed to parse %s: %w", hooksPath, err)
-		}
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("failed to read %s: %w", hooksPath, err)
-	}
-
-	hooks, _ := settings["hooks"].(map[string]interface{})
-	if hooks == nil {
-		hooks = make(map[string]interface{})
-		settings["hooks"] = hooks
-	}
-
-	if _, ok := settings["version"]; !ok {
-		settings["version"] = 1
-	}
-
-	for event, val := range hooks {
-		eventHooks, ok := val.([]interface{})
-		if !ok {
-			continue
-		}
-		cleaned := removeCursorPopHooks(eventHooks)
-		if r.dryRun && len(cleaned) < len(eventHooks) {
-			r.installed = true
-		}
-		if len(cleaned) == 0 {
-			delete(hooks, event)
-		} else {
-			hooks[event] = cleaned
-		}
-	}
-
-	for _, h := range cursorPopHooks {
-		hookEntry := map[string]interface{}{
-			"command": h.command,
-		}
-		eventHooks, _ := hooks[h.event].([]interface{})
-		eventHooks = append(eventHooks, hookEntry)
-		hooks[h.event] = eventHooks
-	}
-
-	if err := d.mkdirAll(filepath.Dir(hooksPath), 0o755); err != nil {
-		return fmt.Errorf("failed to create directory: %w", err)
-	}
-
-	buf := &bytes.Buffer{}
-	enc := json.NewEncoder(buf)
-	enc.SetIndent("", "  ")
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(settings); err != nil {
-		return fmt.Errorf("failed to serialize hooks: %w", err)
-	}
-
-	if err := d.writeFile(hooksPath, buf.Bytes(), 0o644); err != nil {
-		return fmt.Errorf("failed to write %s: %w", hooksPath, err)
-	}
-
-	if d.stdout != nil {
-		fmt.Fprintf(d.stdout, "Installed %d hook(s) in %s\n", len(cursorPopHooks), hooksPath)
-	}
-	return nil
-}
-
 // ----- Shared helpers --------------------------------------------------------
 
-// removePopHooks filters out hook entries whose commands look like pop
-// monitoring commands. Used to deduplicate when re-installing.
-func removePopHooks(entries []interface{}) []interface{} {
+// removeHooksMatching filters out hook entries for which isPop returns true.
+func removeHooksMatching(entries []interface{}, isPop func(interface{}) bool) []interface{} {
 	var result []interface{}
 	for _, entry := range entries {
-		if !isPopHook(entry) {
+		if !isPop(entry) {
 			result = append(result, entry)
 		}
 	}
 	return result
+}
+
+// removePopHooks filters out nested-format (claude/codex) pop hook entries.
+// Kept for unit tests that exercise the nested predicate directly.
+func removePopHooks(entries []interface{}) []interface{} {
+	return removeHooksMatching(entries, isPopHook)
 }
 
 // isPopHook returns true if any command in the hook entry references one of
@@ -392,18 +285,6 @@ func isPopHook(entry interface{}) bool {
 		}
 	}
 	return false
-}
-
-// removeCursorPopHooks filters out Cursor-format hook entries whose commands
-// look like pop monitoring commands.
-func removeCursorPopHooks(entries []interface{}) []interface{} {
-	var result []interface{}
-	for _, entry := range entries {
-		if !isCursorPopHook(entry) {
-			result = append(result, entry)
-		}
-	}
-	return result
 }
 
 // isCursorPopHook returns true if a Cursor-format hook entry references one

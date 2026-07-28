@@ -1,7 +1,6 @@
 package integrate
 
 import (
-	"fmt"
 	"strings"
 )
 
@@ -76,17 +75,17 @@ func agentSet(agents ...string) map[string]bool {
 var catalog = []Component{
 	{
 		id:       ComponentStatusWiring,
-		supports: agentSet("claude", "codex", "pi", "opencode", "cursor"),
+		supports: allRegisteredAgents(),
 		install:  installStatusWiring,
 	},
 	{
 		id:       ComponentPaneSkill,
-		supports: agentSet("claude", "codex", "pi", "cursor", "opencode"),
+		supports: allRegisteredAgents(),
 		sources:  []string{"skills/pop/tmux-pane.md"},
 	},
 	{
 		id:       ComponentTaskSkills,
-		supports: agentSet("claude", "codex", "pi", "cursor", "opencode"),
+		supports: allRegisteredAgents(),
 		// Each source is a skill directory (SKILL.md plus any companion
 		// documents). grill-with-docs ships two companion format files that
 		// must ride alongside its body so its relative references resolve.
@@ -113,23 +112,14 @@ func LookupComponent(id ComponentID) (Component, bool) {
 	return Component{}, false
 }
 
-// installStatusWiring applies the status-wiring component for an agent by
-// dispatching to that agent's hook merge or extension install. Behavior is
-// byte-identical to the previous per-agent integrate functions; only the
-// skill installs that used to sit alongside them are gone.
+// installStatusWiring applies the status-wiring component for an agent via
+// that agent's integration profile. Behavior is byte-identical to the previous
+// per-agent integrate functions; only the skill installs that used to sit
+// alongside them are gone.
 func installStatusWiring(r *run, home, agent string) error {
-	switch strings.ToLower(agent) {
-	case "claude":
-		return installClaudeHooks(r, home)
-	case "codex":
-		return installCodexHooks(r, home)
-	case "pi":
-		return installPiExtension(r, home)
-	case "opencode":
-		return installOpencodePlugin(r, home)
-	case "cursor":
-		return installCursorHooks(r, home)
-	default:
-		return fmt.Errorf("unknown agent %q (expected: claude, codex, pi, opencode, cursor)", agent)
+	p, ok := LookupProfile(agent)
+	if !ok {
+		return unknownAgentError(agent)
 	}
+	return p.InstallStatusWiring(r, home)
 }

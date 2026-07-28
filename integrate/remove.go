@@ -83,33 +83,21 @@ func removeFileComponent(d *Deps, home string, id ComponentID, agent string) err
 	return nil
 }
 
-// removeStatusWiring removes the status-wiring component for an agent by
-// dispatching to that agent's hook-strip or extension-file removal. Hook
-// stripping reuses the installer's idempotent pop-hook detection so unrelated
-// hooks are preserved.
+// removeStatusWiring removes the status-wiring component for an agent via
+// that agent's integration profile (JSON-hook strip or extension-file delete).
 func removeStatusWiring(d *Deps, home, agent string) error {
-	switch strings.ToLower(agent) {
-	case "claude":
-		return stripJSONHooks(d, filepath.Join(home, ".claude", "settings.json"), removePopHooks)
-	case "codex":
-		return stripJSONHooks(d, filepath.Join(home, ".codex", "hooks.json"), removePopHooks)
-	case "cursor":
-		return stripJSONHooks(d, filepath.Join(home, ".cursor", "hooks.json"), removeCursorPopHooks)
-	case "pi":
-		return removeExtensionFile(d, filepath.Join(home, ".pi", "agent", "extensions", "pop-status-sync.ts"))
-	case "opencode":
-		return removeExtensionFile(d, filepath.Join(home, ".config", "opencode", "plugins", "pop-status-sync.ts"))
-	default:
-		return fmt.Errorf("unknown agent %q (expected: claude, codex, pi, opencode, cursor)", agent)
+	p, ok := LookupProfile(agent)
+	if !ok {
+		return unknownAgentError(agent)
 	}
+	return p.RemoveStatusWiring(d, home)
 }
 
 // stripJSONHooks removes pop's hook entries from a JSON settings file, leaving
-// every other key and every unrelated hook in place. The strip function is the
-// agent-format-specific filter (removePopHooks for the nested claude/codex
-// format, removeCursorPopHooks for the flat cursor format). A missing file or a
+// every other key and every unrelated hook in place. The dialect's IsPop
+// predicate is the format-specific filter (nested vs flat). A missing file or a
 // file with no pop hooks is reported as nothing-to-remove and left unchanged.
-func stripJSONHooks(d *Deps, settingsPath string, strip func([]interface{}) []interface{}) error {
+func stripJSONHooks(d *Deps, settingsPath string, dialect HookDialect) error {
 	data, err := d.readFile(settingsPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -133,7 +121,7 @@ func stripJSONHooks(d *Deps, settingsPath string, strip func([]interface{}) []in
 		if !ok {
 			continue
 		}
-		cleaned := strip(eventHooks)
+		cleaned := removeHooksMatching(eventHooks, dialect.IsPop)
 		if len(cleaned) < len(eventHooks) {
 			removedAny = true
 		}
@@ -211,23 +199,13 @@ func componentInstalled(d *Deps, home string, id ComponentID, agent string) (boo
 }
 
 // statusWiringInstalled reports whether pop's status wiring is present for an
-// agent: a pop hook in the JSON settings (claude/codex/cursor) or the
-// status-sync extension file (pi/opencode).
+// agent, via that agent's integration profile.
 func statusWiringInstalled(d *Deps, home, agent string) (bool, error) {
-	switch strings.ToLower(agent) {
-	case "claude":
-		return jsonHasPopHooks(d, filepath.Join(home, ".claude", "settings.json"), isPopHook)
-	case "codex":
-		return jsonHasPopHooks(d, filepath.Join(home, ".codex", "hooks.json"), isPopHook)
-	case "cursor":
-		return jsonHasPopHooks(d, filepath.Join(home, ".cursor", "hooks.json"), isCursorPopHook)
-	case "pi":
-		return fileExists(d, filepath.Join(home, ".pi", "agent", "extensions", "pop-status-sync.ts"))
-	case "opencode":
-		return fileExists(d, filepath.Join(home, ".config", "opencode", "plugins", "pop-status-sync.ts"))
-	default:
+	p, ok := LookupProfile(agent)
+	if !ok {
 		return false, nil
 	}
+	return p.DetectStatusWiring(d, home)
 }
 
 // jsonHasPopHooks reports whether any hook entry in the JSON settings file is a
@@ -298,7 +276,7 @@ func Remove(d *Deps, req Request) (Report, error) {
 	// The status-wiring support set is exactly the known agents, so this
 	// doubles as the unknown-agent guard.
 	if !core.supported(agent) {
-		return Report{}, fmt.Errorf("unknown agent %q (expected: claude, codex, pi, opencode, cursor)", agent)
+		return Report{}, unknownAgentError(agent)
 	}
 
 	home, err := d.userHomeDir()

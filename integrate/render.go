@@ -90,9 +90,7 @@ func renderSingleFileSkill(tree map[string][]byte, agent, prefix, src string, ba
 // so relative references in the skill body resolve.
 func renderMultiFileSkill(tree map[string][]byte, agent, prefix, dir string, baseNames []string) error {
 	skillName := prefix + path.Base(dir)
-	switch agent {
-	case "claude", "codex", "pi", "cursor", "opencode":
-	default:
+	if _, ok := LookupProfile(agent); !ok {
 		return fmt.Errorf("agent %q cannot host multi-file skill %q (no skill-directory layout)", agent, skillName)
 	}
 	entries, err := fs.ReadDir(skillFiles, dir)
@@ -120,21 +118,24 @@ func renderMultiFileSkill(tree map[string][]byte, agent, prefix, dir string, bas
 // renderSkillFile returns the relative path and rendered bytes for a single
 // skill under the given agent's layout.
 //
-// claude, codex, pi, and cursor host skills as directories: `<skillName>/SKILL.md`
-// with the frontmatter `name` injected so the body matches the directory name.
-//
-// opencode hosts skills as a flat single file `<skillName>.md` — it has no
-// skill-directory layout, so the name is not injected (the file name itself
-// carries the identity), but the ownership marker still is.
+// Directory-layout agents host skills as `<skillName>/SKILL.md` with the
+// frontmatter `name` injected so the body matches the directory name.
+// Flat-file agents (opencode) host skills as `<skillName>.md` — the file name
+// itself carries the identity, so the name is not injected, but the ownership
+// marker still is.
 //
 // Every rendered skill carries the name-independent `pop-owned: true` marker so
 // ownership is decided by the marker rather than the skill name (ADR 0011,
-// ADR 0063).
+// ADR 0063). Layout is profile data on the Agent integration profile.
 func renderSkillFile(agent, skillName, content string) (rel, rendered string, err error) {
-	switch agent {
-	case "claude", "codex", "pi", "cursor":
+	p, ok := LookupProfile(agent)
+	if !ok {
+		return "", "", fmt.Errorf("agent %q has no skill render layout", agent)
+	}
+	switch p.SkillLayout {
+	case SkillLayoutDirectory:
 		return skillName + "/SKILL.md", injectOwnershipMarker(injectFrontmatterName(content, skillName)), nil
-	case "opencode":
+	case SkillLayoutFlatFile:
 		return skillName + ".md", injectOwnershipMarker(content), nil
 	default:
 		return "", "", fmt.Errorf("agent %q has no skill render layout", agent)

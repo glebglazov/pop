@@ -84,7 +84,7 @@ after copying a new binary into place.`,
 		}
 		return nil
 	},
-	ValidArgs: []string{"claude", "codex", "pi", "opencode", "cursor"},
+	ValidArgs: integrate.Agents,
 	RunE:      runIntegrate,
 }
 
@@ -108,7 +108,7 @@ not own is left untouched and reported.`,
 		}
 		return nil
 	},
-	ValidArgs: []string{"claude", "codex", "pi", "opencode", "cursor"},
+	ValidArgs: integrate.Agents,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var ids []integrate.ComponentID
 		for _, a := range args[1:] {
@@ -183,7 +183,7 @@ func runIntegrate(cmd *cobra.Command, args []string) error {
 	for _, agent := range args {
 		agent = strings.ToLower(agent)
 		if !core.AgentSupported(agent) {
-			return fmt.Errorf("unknown agent %q (expected: claude, codex, pi, opencode, cursor)", agent)
+			return fmt.Errorf("unknown agent %q (expected: %s)", agent, strings.Join(integrate.Agents, ", "))
 		}
 	}
 

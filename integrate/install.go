@@ -349,30 +349,19 @@ func conflictCandidates(name, prefix string) []string {
 }
 
 func agentSkillDir(home, agent string, id ComponentID) (string, error) {
-	switch strings.ToLower(agent) {
-	case "claude":
-		return filepath.Join(home, ".claude", "skills"), nil
-	case "codex":
-		return filepath.Join(home, ".codex", "skills"), nil
-	case "pi":
-		return filepath.Join(home, ".pi", "agent", "skills"), nil
-	case "cursor":
-		return filepath.Join(home, ".cursor", "skills"), nil
-	case "opencode":
-		if id == ComponentPaneSkill {
-			return filepath.Join(home, ".config", "opencode", "agent"), nil
-		}
-		return filepath.Join(home, ".config", "opencode", "skills"), nil
-	default:
+	p, ok := LookupProfile(agent)
+	if !ok {
 		return "", fmt.Errorf("agent %q has no skill location", agent)
 	}
+	return p.SkillDir(home, id), nil
 }
 
 func legacyArtifacts(home, agent string, id ComponentID) []string {
-	if strings.ToLower(agent) == "claude" && id == ComponentPaneSkill {
-		return []string{filepath.Join(home, ".claude", "commands", "pop", "pane.md")}
+	p, ok := LookupProfile(agent)
+	if !ok {
+		return nil
 	}
-	return nil
+	return p.LegacyArtifacts(home, id)
 }
 
 // InstallFileComponent installs a single file-based component for tests and tooling.
