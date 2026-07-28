@@ -153,10 +153,10 @@ GitHub / GitLab / Local markdown / Other:
 
 When the user picks pop, **write NO repo `docs/agents/issue-tracker.md` by
 default.** An absent repo doc is the signal: the planning skills fall back to
-the machine-global pop doc seeded at
-`${XDG_CONFIG_HOME:-~/.config}/pop/work-store.md`, so each machine resolves its
-own store. Do not synthesize a repo tracker doc from a template — there is no
-pop tracker template, and a committed doc would override the machine fallback
+pop's Shipped asset at
+`${XDG_DATA_HOME:-~/.local/share}/pop/work-store.md`, so each machine resolves
+its own store. Do not synthesize a repo tracker doc from a template — there is
+no pop tracker template, and a committed doc would override the Shipped asset
 for everyone.
 
 Offer, as a **one-line option only**, committing a repo doc to pin the choice
@@ -164,7 +164,8 @@ for the whole team:
 
 > Want to pin pop as the tracker for everyone who clones this repo? I can
 > commit a one-line `docs/agents/issue-tracker.md` that names pop; otherwise I
-> leave it absent and each machine uses its own `pop/work-store.md`.
+> leave it absent and each machine uses its own Shipped asset at
+> `${XDG_DATA_HOME:-~/.local/share}/pop/work-store.md`.
 
 Only write the repo doc if the user says yes. Silence means leave it absent.
 

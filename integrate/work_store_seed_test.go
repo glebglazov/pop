@@ -3,6 +3,7 @@ package integrate
 import (
 	"bytes"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -32,11 +33,21 @@ func TestWorkStoreDoc_EmbeddedContent(t *testing.T) {
 	if strings.Contains(body, "prd.md") {
 		t.Error("embedded doc must not use the legacy prd.md filename")
 	}
+	if strings.Contains(body, "XDG_CONFIG_HOME") {
+		t.Error("embedded doc must not reference the legacy config-dir path")
+	}
+	if !strings.Contains(body, "XDG_DATA_HOME") {
+		t.Error("embedded doc must name the data-dir Shipped-asset path")
+	}
 }
 
-// TestSeedWorkStoreDoc_CreatesWhenAbsent covers the create-if-absent semantics:
-// an empty machine writes the embedded doc verbatim to the XDG config path.
-func TestSeedWorkStoreDoc_CreatesWhenAbsent(t *testing.T) {
+func workStoreDataPath(home string) string {
+	return filepath.Join(home, ".local", "share", "pop", "work-store.md")
+}
+
+// TestSeedWorkStoreDoc_WritesWhenAbsent covers the write-if-different semantics:
+// an empty machine writes the embedded doc verbatim to the data-dir path.
+func TestSeedWorkStoreDoc_WritesWhenAbsent(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
 	d := fakeDeps("/h", fs, io.Discard)
@@ -44,25 +55,24 @@ func TestSeedWorkStoreDoc_CreatesWhenAbsent(t *testing.T) {
 	if err := seedWorkStoreDoc(d); err != nil {
 		t.Fatalf("seedWorkStoreDoc: %v", err)
 	}
-	want := filepath.Join("/h", ".config", "pop", "work-store.md")
+	want := workStoreDataPath("/h")
 	got, ok := fs.files[want]
 	if !ok {
-		t.Fatalf("expected seeded doc at %s, files: %v", want, sortedKeys(fs.files))
+		t.Fatalf("expected doc at %s, files: %v", want, sortedKeys(fs.files))
 	}
 	if !bytes.Equal(got, workStoreDoc) {
-		t.Error("seeded doc bytes differ from the embedded doc")
+		t.Error("written doc bytes differ from the embedded doc")
 	}
 }
 
-// TestSeedWorkStoreDoc_NeverOverwritesEditedFile covers the never-overwrite
-// semantics: a user-edited file is left byte-identical, even across repeated
-// seed calls (the machine-global override survives every refresh).
-func TestSeedWorkStoreDoc_NeverOverwritesEditedFile(t *testing.T) {
+// TestSeedWorkStoreDoc_RewritesWhenDifferent covers the rewrite semantics: a
+// stale on-disk copy is replaced with the embedded bytes on every seed call.
+func TestSeedWorkStoreDoc_RewritesWhenDifferent(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
-	path := filepath.Join("/h", ".config", "pop", "work-store.md")
-	edited := []byte("# my machine-global override\n")
-	fs.files[path] = append([]byte{}, edited...)
+	path := workStoreDataPath("/h")
+	stale := []byte("# stale copy\n")
+	fs.files[path] = append([]byte{}, stale...)
 
 	d := fakeDeps("/h", fs, io.Discard)
 	for i := 0; i < 3; i++ {
@@ -70,40 +80,67 @@ func TestSeedWorkStoreDoc_NeverOverwritesEditedFile(t *testing.T) {
 			t.Fatalf("seedWorkStoreDoc (pass %d): %v", i, err)
 		}
 	}
-	if !bytes.Equal(fs.files[path], edited) {
-		t.Errorf("edited doc was not left byte-identical: %q", fs.files[path])
+	if !bytes.Equal(fs.files[path], workStoreDoc) {
+		t.Errorf("stale doc was not rewritten to embedded bytes: %q", fs.files[path])
 	}
 }
 
-// TestSeedWorkStoreDoc_RespectsXDGConfigHome resolves the doc under
-// $XDG_CONFIG_HOME/pop, not the home fallback, when the env var is set.
-func TestSeedWorkStoreDoc_RespectsXDGConfigHome(t *testing.T) {
+// TestSeedWorkStoreDoc_SkipsWriteWhenMatching proves a refresh with matching
+// bytes performs no write — the file map entry is left untouched.
+func TestSeedWorkStoreDoc_SkipsWriteWhenMatching(t *testing.T) {
+	t.Parallel()
+	fs := newFakeFS()
+	path := workStoreDataPath("/h")
+	// Pre-seed with embedded bytes; a write would be observable via a counter.
+	fs.files[path] = append([]byte{}, workStoreDoc...)
+	var writes int
+
+	d := fakeDeps("/h", fs, io.Discard)
+	d.writeFile = func(p string, data []byte, mode os.FileMode) error {
+		writes++
+		return fs.WriteFile(p, data, mode)
+	}
+
+	for i := 0; i < 3; i++ {
+		if err := seedWorkStoreDoc(d); err != nil {
+			t.Fatalf("seedWorkStoreDoc (pass %d): %v", i, err)
+		}
+	}
+	if writes != 0 {
+		t.Errorf("expected no writes when bytes already match, got %d", writes)
+	}
+}
+
+// TestSeedWorkStoreDoc_RespectsXDGDataHome resolves the doc under
+// $XDG_DATA_HOME/pop, not the home fallback, when the env var is set.
+func TestSeedWorkStoreDoc_RespectsXDGDataHome(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
 	d := fakeDeps("/h", fs, io.Discard)
 	d.getenv = func(key string) string {
-		if key == "XDG_CONFIG_HOME" {
-			return "/cfg"
+		if key == "XDG_DATA_HOME" {
+			return "/data"
 		}
 		return ""
 	}
+	d.dataDir = func() (string, error) { return filepath.Join("/data", "pop"), nil }
 
 	if err := seedWorkStoreDoc(d); err != nil {
 		t.Fatalf("seedWorkStoreDoc: %v", err)
 	}
-	want := filepath.Join("/cfg", "pop", "work-store.md")
+	want := filepath.Join("/data", "pop", "work-store.md")
 	if _, ok := fs.files[want]; !ok {
-		t.Fatalf("expected seeded doc at %s, files: %v", want, sortedKeys(fs.files))
+		t.Fatalf("expected doc at %s, files: %v", want, sortedKeys(fs.files))
 	}
-	if _, ok := fs.files[filepath.Join("/h", ".config", "pop", "work-store.md")]; ok {
-		t.Error("doc must not be seeded under the home fallback when XDG_CONFIG_HOME is set")
+	if _, ok := fs.files[workStoreDataPath("/h")]; ok {
+		t.Error("doc must not be written under the home fallback when XDG_DATA_HOME is set")
 	}
 }
 
-// TestRefresh_SeedsWorkStoreDocOnceAcrossAgents proves the seed rides Integration
-// refresh, is agent-agnostic, and is written once regardless of how many agents
-// are integrated.
-func TestRefresh_SeedsWorkStoreDocOnceAcrossAgents(t *testing.T) {
+// TestRefresh_WritesWorkStoreDocOnceAcrossAgents proves the Shipped asset rides
+// Integration refresh, is agent-agnostic, and is written once regardless of how
+// many agents are integrated.
+func TestRefresh_WritesWorkStoreDocOnceAcrossAgents(t *testing.T) {
 	t.Parallel()
 	setupIntegrateConfigLayer(t)
 	fs := newFakeFS()
@@ -115,34 +152,68 @@ func TestRefresh_SeedsWorkStoreDocOnceAcrossAgents(t *testing.T) {
 		t.Fatalf("unexpected warnings: %v", warnings)
 	}
 
-	path := filepath.Join("/h", ".config", "pop", "work-store.md")
+	path := workStoreDataPath("/h")
 	got, ok := fs.files[path]
 	if !ok {
-		t.Fatalf("refresh did not seed the Work store doc at %s", path)
+		t.Fatalf("refresh did not write the Work store doc at %s", path)
 	}
 	if !bytes.Equal(got, workStoreDoc) {
-		t.Error("seeded doc bytes differ from the embedded doc")
+		t.Error("written doc bytes differ from the embedded doc")
 	}
 }
 
-// TestRefresh_LeavesEditedWorkStoreDocByteIdentical proves an edited doc survives
-// a subsequent refresh unchanged — user edits are the machine-global override.
-func TestRefresh_LeavesEditedWorkStoreDocByteIdentical(t *testing.T) {
+// TestRefresh_RewritesStaleWorkStoreDoc proves refresh rewrites a stale on-disk
+// copy to match the embedded Shipped asset.
+func TestRefresh_RewritesStaleWorkStoreDoc(t *testing.T) {
 	t.Parallel()
 	setupIntegrateConfigLayer(t)
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 
-	path := filepath.Join("/h", ".config", "pop", "work-store.md")
-	edited := []byte("# hand-edited override\n\nconsult pop docs.\n")
-	fs.files[path] = append([]byte{}, edited...)
+	path := workStoreDataPath("/h")
+	stale := []byte("# hand-edited stale copy\n\nconsult pop docs.\n")
+	fs.files[path] = append([]byte{}, stale...)
 
 	_, real := fakeFactories("/h", fs)
 	if warnings := ensureForRevisionWith("rev-seed2", testConfigDeps(t), real); warnings != nil {
 		t.Fatalf("unexpected warnings: %v", warnings)
 	}
 
-	if !bytes.Equal(fs.files[path], edited) {
-		t.Errorf("refresh overwrote an edited Work store doc: %q", fs.files[path])
+	if !bytes.Equal(fs.files[path], workStoreDoc) {
+		t.Errorf("refresh did not rewrite stale Work store doc: %q", fs.files[path])
+	}
+}
+
+// TestRefresh_SkipsWriteWhenWorkStoreDocMatches proves refresh leaves a
+// byte-identical on-disk copy untouched.
+func TestRefresh_SkipsWriteWhenWorkStoreDocMatches(t *testing.T) {
+	t.Parallel()
+	setupIntegrateConfigLayer(t)
+	fs := newFakeFS()
+	installViaFake(t, fs, "/h", "claude")
+
+	path := workStoreDataPath("/h")
+	fs.files[path] = append([]byte{}, workStoreDoc...)
+	var workStoreWrites int
+
+	_, baseReal := fakeFactories("/h", fs)
+	real := func() *Deps {
+		d := baseReal()
+		origWrite := d.writeFile
+		d.writeFile = func(p string, data []byte, mode os.FileMode) error {
+			if p == path {
+				workStoreWrites++
+			}
+			return origWrite(p, data, mode)
+		}
+		return d
+	}
+
+	if warnings := ensureForRevisionWith("rev-seed3", testConfigDeps(t), real); warnings != nil {
+		t.Fatalf("unexpected warnings: %v", warnings)
+	}
+
+	if workStoreWrites != 0 {
+		t.Errorf("refresh wrote work-store.md when bytes already matched, got %d writes", workStoreWrites)
 	}
 }

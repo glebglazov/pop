@@ -161,8 +161,8 @@ Ignore upstream's "run `/setup-matt-pocock-skills`" line and its default
 local-markdown tracker. Resolve the Work store two-layer instead:
 
 1. If the repo has `docs/agents/issue-tracker.md`, that store wins.
-2. Otherwise read the machine-global pop doc at
-   `${XDG_CONFIG_HOME:-~/.config}/pop/work-store.md`.
+2. Otherwise read pop's Shipped asset at
+   `${XDG_DATA_HOME:-~/.local/share}/pop/work-store.md`.
 
 Resolve this repository's Task-storage root once per session with
 `pop work show-path`; the doc lays maps out under a `wayfinder/` sibling of that

@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Issues, specs, and task sets live in pop's per-machine Work store. No repo
 tracker doc by design — each machine resolves its own store via
-`${XDG_CONFIG_HOME:-~/.config}/pop/work-store.md`.
+`${XDG_DATA_HOME:-~/.local/share}/pop/work-store.md`.
 
 ### Domain docs
 

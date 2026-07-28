@@ -7,10 +7,10 @@ the per-operation sections below; nothing here refers back into a skill body.
 
 Resolution is two-layer. A repo-level `docs/agents/issue-tracker.md` (the upstream
 tracker-doc convention) wins when present. Absent that, skills read *this* file,
-the machine-global pop default at `${XDG_CONFIG_HOME:-~/.config}/pop/work-store.md`.
-pop seeds it create-if-absent on every Integration refresh and **never overwrites**
-it — so anything you edit below is your machine-global override and survives every
-future refresh.
+pop's Shipped asset at `${XDG_DATA_HOME:-~/.local/share}/pop/work-store.md`.
+pop rewrites it on every Integration refresh whenever its bytes differ from the
+embedded copy — so to change publish behaviour, write the repo doc at
+`docs/agents/issue-tracker.md`.
 
 All paths resolve through one command. Run it once per session:
 

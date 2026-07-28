@@ -1,6 +1,7 @@
 package integrate
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"path/filepath"
@@ -184,32 +185,31 @@ func popDataDirWith(d *Deps) (string, error) {
 	return filepath.Join(home, ".local", "share", "pop"), nil
 }
 
-// workStoreDocPath returns the machine-global pop Work store doc path,
-// ${XDG_CONFIG_HOME:-~/.config}/pop/work-store.md (ADR-0136). The home fallback
-// resolves through the deps so tests can redirect it into a fake filesystem.
+// workStoreDocPath returns the pop Work store doc Shipped-asset path at
+// ${XDG_DATA_HOME:-~/.local/share}/pop/work-store.md (ADR-0150). Resolution
+// goes through the deps data-dir seam so tests can redirect it into a fake FS.
 func workStoreDocPath(d *Deps) (string, error) {
-	if xdg := getenv(d, "XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, "pop", "work-store.md"), nil
-	}
-	home, err := d.userHomeDir()
+	dataDir, err := d.dataDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".config", "pop", "work-store.md"), nil
+	return filepath.Join(dataDir, "work-store.md"), nil
 }
 
-// seedWorkStoreDoc writes the embedded pop Work store doc to its machine-global
-// path create-if-absent, and never overwrites an existing (possibly user-edited)
-// file — the doc is config, and a user's edits are the machine-global override
-// (ADR-0136). Agent-agnostic: callers invoke it once per Integration refresh,
-// not once per agent.
+// seedWorkStoreDoc writes the embedded pop Work store doc to its Shipped-asset
+// path whenever on-disk bytes differ from the embedded copy (ADR-0150). A
+// matching file is left untouched. Agent-agnostic: callers invoke it once per
+// Integration refresh, not once per agent.
 func seedWorkStoreDoc(d *Deps) error {
 	path, err := workStoreDocPath(d)
 	if err != nil {
 		return err
 	}
-	if _, err := d.readFile(path); err == nil {
-		return nil // already present — user edits are the override, never overwrite
+	existing, err := d.readFile(path)
+	if err == nil {
+		if bytes.Equal(existing, workStoreDoc) {
+			return nil
+		}
 	} else if !os.IsNotExist(err) {
 		return err
 	}

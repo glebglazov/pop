@@ -103,8 +103,8 @@ publish mechanics (publish to the tracker, apply the `ready-for-agent` label).
 Resolve the Work store two-layer instead:
 
 1. If the repo has `docs/agents/issue-tracker.md`, that store wins.
-2. Otherwise read the machine-global pop doc at
-   `${XDG_CONFIG_HOME:-~/.config}/pop/work-store.md`.
+2. Otherwise read pop's Shipped asset at
+   `${XDG_DATA_HOME:-~/.local/share}/pop/work-store.md`.
 
 Publish the spec per the resolved doc's **"Publishing a spec"** section. That
 section owns every publish mechanic — the co-located `spec.md` path, the
