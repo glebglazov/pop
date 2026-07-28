@@ -13,50 +13,41 @@ import (
 
 const managedRegisterNoTrunkMsg = "no Trunk worktree configured; re-run with --trunk <path> to name one"
 
-// resolveManagedRegisterTrunk resolves the Trunk worktree for a managed register.
-// When trunkFlag is non-empty it is normalized, persisted to global config as
-// trunk = true on a [repo."<path>"] block, and returned; cfg is reloaded when
-// persistence succeeds. When trunkFlag is empty the trunk is resolved from cfg
-// and checkoutPath; a bare repo with no configured trunk refuses with an error
+// resolveManagedTrunk resolves the Trunk worktree for a managed register or
+// bind-worktree. When trunkFlag is non-empty it is normalized, persisted to
+// config.runtime.toml as trunk = true on the checkout path (ADR-0150), and
+// returned. When trunkFlag is empty the trunk is resolved from cfg and
+// checkoutPath; a bare repo with no configured trunk refuses with an error
 // naming --trunk.
-func resolveManagedRegisterTrunk(td *tasks.Deps, cfg *config.Config, configPath, checkoutPath, trunkFlag string) (trunkPath string, outCfg *config.Config, err error) {
+func resolveManagedTrunk(td *tasks.Deps, cfg *config.Config, checkoutPath, trunkFlag string) (trunkPath string, err error) {
+	cd := cmdLayerDeps().configDeps()
 	trunkFlag = strings.TrimSpace(trunkFlag)
 	if trunkFlag != "" {
 		trunkPath, err = tasks.NormalizeProjectPathWith(td, trunkFlag)
 		if err != nil {
-			return "", cfg, fmt.Errorf("normalize --trunk path: %w", err)
+			return "", fmt.Errorf("normalize --trunk path: %w", err)
 		}
 		same, err := sameRepositoryCheckout(td, checkoutPath, trunkPath)
 		if err != nil {
-			return "", cfg, err
+			return "", err
 		}
 		if !same {
-			return "", cfg, fmt.Errorf("--trunk %q is not a checkout of this repository", trunkPath)
+			return "", fmt.Errorf("--trunk %q is not a checkout of this repository", trunkPath)
 		}
-		if err := config.PersistRepoTrunkWith(cmdLayerDeps().configDeps(), configPath, trunkPath); err != nil {
-			return "", cfg, fmt.Errorf("persist trunk to config: %w", err)
+		if err := config.SetRuntimeRepoTrunkWith(cd, trunkPath); err != nil {
+			return "", fmt.Errorf("persist trunk to runtime config: %w", err)
 		}
-		if cfg == nil {
-			cfg = &config.Config{}
-		}
-		if cfg.Repo == nil {
-			cfg.Repo = make(map[string]config.RepoOverrideConfig)
-		}
-		block := cfg.Repo[trunkPath]
-		trunk := true
-		block.Trunk = &trunk
-		cfg.Repo[trunkPath] = block
-		return trunkPath, cfg, nil
+		return trunkPath, nil
 	}
 
-	path, bare, err := binding.ResolveTrunkPath(td, cfg, checkoutPath)
+	path, bare, err := binding.ResolveTrunkPathWith(cd, td, cfg, checkoutPath)
 	if err != nil {
-		return "", cfg, err
+		return "", err
 	}
 	if bare || strings.TrimSpace(path) == "" {
-		return "", cfg, fmt.Errorf("%s", managedRegisterNoTrunkMsg)
+		return "", fmt.Errorf("%s", managedRegisterNoTrunkMsg)
 	}
-	return path, cfg, nil
+	return path, nil
 }
 
 func sameRepositoryCheckout(td *tasks.Deps, a, b string) (bool, error) {
@@ -78,12 +69,14 @@ func eagerProvisionManagedNewRegistrations(td *tasks.Deps, pd *project.Deps, cfg
 	if len(newSetIDs) == 0 {
 		return nil
 	}
+	cd := cmdLayerDeps().configDeps()
 	now := time.Now()
 	var done []binding.ManagedProvision
 	for _, setID := range newSetIDs {
 		b, err := binding.ProvisionManagedBinding(binding.ProvisionManagedBindingRequest{
 			TD:           td,
 			PD:           pd,
+			ConfigDeps:   cd,
 			Config:       cfg,
 			TrunkPath:    trunkPath,
 			CheckoutPath: checkoutPath,

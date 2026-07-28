@@ -1972,19 +1972,19 @@ func dashboardManagedIntent(t *testing.T, d *Deps, repo, setID string) *tasks.Wo
 	return intent
 }
 
-// TestDashboardBindPickerManagedEntryRecordsIntent covers acceptance criteria
-// 1-3 of 06-dashboard-bind-picker-managed-entry: the bind picker offers a
-// managed entry between the adoptable worktrees and the create entry; picking
-// it on an unbound set records a managed intent and writes no binding; on a
-// bound set it re-points without a second prompt, dropping the old binding
-// forget-only (the checkout stays on disk).
+// TestDashboardBindPickerManagedEntryRecordsIntent covers the bind picker managed
+// entry: picking it on an unbound set provisions a managed worktree eagerly
+// (ADR-0147); on a bound adopted set it re-points without a second prompt,
+// dropping the old binding forget-only before provisioning the new checkout.
 func TestDashboardBindPickerManagedEntryRecordsIntent(t *testing.T) {
 	repo, setID, _ := setupSupervisorSpawnRepo(t, "bind-managed", []spawnTestTask{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
-	wt := filepath.Join(t.TempDir(), "adopted")
-	runGit(t, repo, "worktree", "add", "-b", "adopted-branch", wt, "HEAD")
 	d, cfg, row, _ := dashboardLaunchFixture(t, repo, setID)
+	repoKey, err := resolveRepoKey(d, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	entries, err := BindWorktreeEntries(d, cfg, row.SetRef)
 	if err != nil {
@@ -1994,34 +1994,61 @@ func TestDashboardBindPickerManagedEntryRecordsIntent(t *testing.T) {
 		t.Fatalf("entries = %+v, want managed entry before the create entry", entries)
 	}
 
-	if _, err := BindManagedWorktree(d, cfg, row.SetRef); err != nil {
+	got, err := BindManagedWorktree(d, cfg, row.SetRef)
+	if err != nil {
 		t.Fatalf("BindManagedWorktree on unbound set: %v", err)
 	}
-	repoKey, err := resolveRepoKey(d, repo)
+	b, ok := loadBindingStore(t, d.Tasks)[setScopedKey(repoKey, setID)]
+	if !ok || !b.Provisioned {
+		t.Fatalf("binding = ok=%v %+v, want provisioned managed binding", ok, b)
+	}
+	if got.RuntimePath == "" || got.RuntimePath != b.RuntimePath {
+		t.Fatalf("result runtime %q binding %q, want matching provisioned checkout", got.RuntimePath, b.RuntimePath)
+	}
+	if intent := dashboardManagedIntent(t, d, repo, setID); intent != nil {
+		t.Fatalf("intent = %+v, want no managed intent after eager provision", intent)
+	}
+
+	wt := filepath.Join(t.TempDir(), "adopted")
+	runGit(t, repo, "worktree", "add", "-b", "adopted-branch", wt, "HEAD")
+	setID2 := "bind-managed-repoint"
+	id, err := tasks.ResolveRepositoryIdentity(tasks.DefaultDeps(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := loadBindingStore(t, d.Tasks)[setScopedKey(repoKey, setID)]; ok {
-		t.Fatalf("binding written for unbound managed bind, want intent only")
+	setDir := filepath.Join(id.TasksDir, setID2)
+	writeSpawnTaskMD(t, setDir, "01-b.md")
+	writeSpawnManifest(t, setDir, []spawnTestTask{
+		{ID: "01-b", File: "01-b.md", Title: "B", Type: "AFK", Status: "open"},
+	})
+	statePath := tasks.StatePathFor(id.TasksDir)
+	if _, err := tasks.RegisterWith(tasks.DefaultDeps(), id.TasksDir, statePath); err != nil {
+		t.Fatal(err)
 	}
-	if intent := dashboardManagedIntent(t, d, repo, setID); intent == nil || !intent.Managed {
-		t.Fatalf("intent = %+v, want Managed:true", intent)
-	}
-
-	if _, err := AdoptWorktree(d, cfg, row.SetRef, wt); err != nil {
+	d2, cfg2, row2, _ := dashboardLaunchFixture(t, repo, setID2)
+	if _, err := AdoptWorktree(d2, cfg2, row2.SetRef, wt); err != nil {
 		t.Fatalf("AdoptWorktree: %v", err)
 	}
-	if _, err := BindManagedWorktree(d, cfg, row.SetRef); err != nil {
+	got, err = BindManagedWorktree(d2, cfg2, row2.SetRef)
+	if err != nil {
 		t.Fatalf("BindManagedWorktree on bound set should re-point without prompt: %v", err)
 	}
-	if _, ok := loadBindingStore(t, d.Tasks)[setScopedKey(repoKey, setID)]; ok {
-		t.Fatalf("old binding kept after managed re-point, want dropped forget-only")
+	repoKey2, err := resolveRepoKey(d2, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, ok = loadBindingStore(t, d2.Tasks)[setScopedKey(repoKey2, setID2)]
+	if !ok || !b.Provisioned {
+		t.Fatalf("binding after re-point = ok=%v %+v, want new provisioned binding", ok, b)
+	}
+	if b.RuntimePath == wt {
+		t.Fatalf("binding still at adopted checkout %q, want new managed worktree", wt)
 	}
 	if _, err := os.Stat(wt); err != nil {
 		t.Fatalf("old checkout %s should stay on disk: %v", wt, err)
 	}
-	if intent := dashboardManagedIntent(t, d, repo, setID); intent == nil || !intent.Managed {
-		t.Fatalf("intent after re-point = %+v, want Managed:true", intent)
+	if intent := dashboardManagedIntent(t, d2, repo, setID2); intent != nil {
+		t.Fatalf("intent after re-point = %+v, want no managed intent", intent)
 	}
 }
 

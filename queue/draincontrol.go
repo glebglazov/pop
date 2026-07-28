@@ -395,12 +395,11 @@ func AdoptWorktree(d *Deps, cfg *config.Config, ref SetRef, checkoutPath string)
 	return BindWorktree(d, cfg, ref.SetID, checkoutPath, BindWorktreeOptions{Force: true, ProjectName: ref.ProjectName}, io.Discard)
 }
 
-// BindManagedWorktree records a lazy managed worktree intent for ref.SetID —
-// the interactive twin of `bind-worktree --managed`. Nothing is adopted or
-// provisioned now; the set's next Queue drain forks a pop-owned worktree from
-// the Trunk. The dashboard action is deliberate, so a set already bound
-// elsewhere is re-pointed without a second prompt (Force), dropping the old
-// binding forget-only — exactly like AdoptWorktree.
+// BindManagedWorktree provisions a managed worktree for ref.SetID eagerly —
+// the interactive twin of `bind-worktree --managed` (ADR-0147). The dashboard
+// action is deliberate, so a set already bound elsewhere is re-pointed without
+// a second prompt (Force), dropping the old binding forget-only before
+// provisioning the new checkout — exactly like AdoptWorktree.
 func BindManagedWorktree(d *Deps, cfg *config.Config, ref SetRef) (BindWorktreeResult, error) {
 	if err := refuseDashboardBindWhileLocked(d, ref); err != nil {
 		return BindWorktreeResult{}, err

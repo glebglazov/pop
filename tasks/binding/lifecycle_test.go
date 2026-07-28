@@ -535,14 +535,14 @@ func managedIntentRecorded(t *testing.T, td *tasks.Deps, defPath, setID string) 
 	return intent != nil && intent.Managed
 }
 
-// TestBindWorktreeManagedRecordsIntentOnUnboundSet covers acceptance criterion 1:
-// bind-worktree --managed on an unbound set records a managed intent and adopts
-// no checkout, leaving provisioning to the next Queue drain.
-func TestBindWorktreeManagedRecordsIntentOnUnboundSet(t *testing.T) {
+// TestBindWorktreeManagedProvisionsOnUnboundSet covers acceptance criterion 1:
+// bind-worktree --managed on an unbound set provisions a managed worktree and
+// records a provisioned binding before returning.
+func TestBindWorktreeManagedProvisionsOnUnboundSet(t *testing.T) {
 	t.Parallel()
 	repo := initAdoptRepo(t)
 	td := lifecycleTestDeps(t)
-	defPath := seedRegisteredSet(t, td, repo, "set-m")
+	_ = seedRegisteredSet(t, td, repo, "set-m")
 	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
 
 	var out bytes.Buffer
@@ -553,29 +553,44 @@ func TestBindWorktreeManagedRecordsIntentOnUnboundSet(t *testing.T) {
 	if got.Replaced {
 		t.Fatalf("got.Replaced = true, want false for an unbound set")
 	}
-	if got.RuntimePath != "" {
-		t.Fatalf("got.RuntimePath = %q, want empty (no checkout adopted)", got.RuntimePath)
+	if got.RuntimePath == "" {
+		t.Fatalf("got.RuntimePath empty, want provisioned managed checkout")
 	}
-	if n := len(loadLifecycleBindings(t, td)); n != 0 {
-		t.Fatalf("bindings = %d, want none (managed intent provisions lazily)", n)
+	if got.Branch == "" {
+		t.Fatalf("got.Branch empty, want provisioned branch")
 	}
-	if !managedIntentRecorded(t, td, defPath, "set-m") {
-		t.Fatalf("managed intent was not recorded for set-m")
+	bindings := loadLifecycleBindings(t, td)
+	if len(bindings) != 1 {
+		t.Fatalf("bindings = %d, want one provisioned binding", len(bindings))
+	}
+	var binding Binding
+	for _, b := range bindings {
+		binding = b
+	}
+	if !binding.Provisioned {
+		t.Fatalf("binding = %+v, want Provisioned=true", binding)
+	}
+	managedRoot := ManagedWorktreesRoot(td)
+	if !strings.HasPrefix(got.RuntimePath, managedRoot+string(filepath.Separator)) {
+		t.Fatalf("runtime %q must live under managed root %q", got.RuntimePath, managedRoot)
+	}
+	if _, err := os.Stat(got.RuntimePath); err != nil {
+		t.Fatalf("managed worktree missing on disk: %v", err)
 	}
 	if !strings.Contains(out.String(), "managed") {
-		t.Fatalf("output = %q, want mention of managed intent", out.String())
+		t.Fatalf("output = %q, want mention of managed provisioning", out.String())
 	}
 }
 
 // TestBindWorktreeManagedRefusesBoundWithoutForce covers the first half of
 // acceptance criterion 2: --managed on a bound set refuses without --force,
-// leaving the binding and the (absent) intent untouched.
+// leaving the binding untouched.
 func TestBindWorktreeManagedRefusesBoundWithoutForce(t *testing.T) {
 	t.Parallel()
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "bound-branch")
 	td := lifecycleTestDeps(t)
-	defPath := seedRegisteredSet(t, td, repo, "set-m")
+	seedRegisteredSet(t, td, repo, "set-m")
 	seedLifecycleBinding(t, td, repo, "set-m", Binding{
 		RuntimePath: wt,
 		Branch:      "bound-branch",
@@ -590,20 +605,17 @@ func TestBindWorktreeManagedRefusesBoundWithoutForce(t *testing.T) {
 	if n := len(loadLifecycleBindings(t, td)); n != 1 {
 		t.Fatalf("bindings = %d, want the original binding retained", n)
 	}
-	if managedIntentRecorded(t, td, defPath, "set-m") {
-		t.Fatalf("intent must not be recorded on a refused bind")
-	}
 }
 
 // TestBindWorktreeManagedForceDropsBindingRetainsCheckout covers the second half
 // of acceptance criterion 2: with --force it drops the old binding forget-only
-// (the checkout and branch stay on disk) and records the managed intent.
+// (the checkout and branch stay on disk) and provisions a new managed worktree.
 func TestBindWorktreeManagedForceDropsBindingRetainsCheckout(t *testing.T) {
 	t.Parallel()
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "bound-branch")
 	td := lifecycleTestDeps(t)
-	defPath := seedRegisteredSet(t, td, repo, "set-m")
+	seedRegisteredSet(t, td, repo, "set-m")
 	seedLifecycleBinding(t, td, repo, "set-m", Binding{
 		RuntimePath: wt,
 		Branch:      "bound-branch",
@@ -618,19 +630,27 @@ func TestBindWorktreeManagedForceDropsBindingRetainsCheckout(t *testing.T) {
 	if !got.Replaced {
 		t.Fatalf("got.Replaced = false, want true")
 	}
-	if n := len(loadLifecycleBindings(t, td)); n != 0 {
-		t.Fatalf("bindings = %d, want the old binding dropped", n)
+	if got.RuntimePath == "" || got.RuntimePath == wt {
+		t.Fatalf("got.RuntimePath = %q, want a new managed checkout", got.RuntimePath)
+	}
+	bindings := loadLifecycleBindings(t, td)
+	if len(bindings) != 1 {
+		t.Fatalf("bindings = %d, want one provisioned binding", len(bindings))
+	}
+	var binding Binding
+	for _, b := range bindings {
+		binding = b
+	}
+	if !binding.Provisioned {
+		t.Fatalf("binding = %+v, want Provisioned=true", binding)
 	}
 	if _, err := os.Stat(wt); err != nil {
 		t.Fatalf("old checkout must be retained on disk: %v", err)
 	}
 	// Use td.Git rather than runGitOutput here: a fresh isolatedTasksDeps call
-	// would use a different store dir and hide the just-written managed intent.
+	// would use a different store dir and hide the just-written binding.
 	if branch, err := td.Git.CommandInDir(repo, "branch", "--list", "bound-branch"); err != nil || strings.TrimSpace(branch) == "" {
 		t.Fatalf("old branch should still exist after forget-only drop (err=%v)", err)
-	}
-	if !managedIntentRecorded(t, td, defPath, "set-m") {
-		t.Fatalf("managed intent was not recorded after forced re-point")
 	}
 }
 
@@ -642,7 +662,7 @@ func TestBindWorktreeManagedSucceedsWhileOtherSetLocked(t *testing.T) {
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "shared-branch")
 	td := lifecycleTestDeps(t)
-	defPath := seedRegisteredSet(t, td, repo, "set-A")
+	_ = seedRegisteredSet(t, td, repo, "set-A")
 	seedLifecycleBinding(t, td, repo, "set-A", Binding{
 		RuntimePath: wt,
 		Branch:      "shared-branch",
@@ -658,8 +678,8 @@ func TestBindWorktreeManagedSucceedsWhileOtherSetLocked(t *testing.T) {
 	if !got.Replaced {
 		t.Fatalf("got.Replaced = false, want true")
 	}
-	if !managedIntentRecorded(t, td, defPath, "set-A") {
-		t.Fatalf("managed intent was not recorded")
+	if got.RuntimePath == "" {
+		t.Fatalf("got.RuntimePath empty, want provisioned managed checkout")
 	}
 }
 
@@ -670,7 +690,7 @@ func TestBindWorktreeManagedRefusesWhileSameSetLocked(t *testing.T) {
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "self-branch")
 	td := lifecycleTestDeps(t)
-	defPath := seedRegisteredSet(t, td, repo, "set-A")
+	_ = seedRegisteredSet(t, td, repo, "set-A")
 	seedLifecycleBinding(t, td, repo, "set-A", Binding{
 		RuntimePath: wt,
 		Branch:      "self-branch",
@@ -683,8 +703,8 @@ func TestBindWorktreeManagedRefusesWhileSameSetLocked(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "currently executing") {
 		t.Fatalf("err = %v, want currently-executing refusal", err)
 	}
-	if managedIntentRecorded(t, td, defPath, "set-A") {
-		t.Fatalf("intent must not be recorded while the set executes")
+	if n := len(loadLifecycleBindings(t, td)); n != 1 {
+		t.Fatalf("bindings = %d, want original binding retained", n)
 	}
 }
 

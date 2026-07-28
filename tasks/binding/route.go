@@ -387,13 +387,24 @@ func resolveNamedWorktree(td *tasks.Deps, checkout, name string) (project.Worktr
 	return project.Worktree{}, fmt.Errorf("%w: %q", ErrNamedWorktreeNotFound, name)
 }
 
-// ResolveTrunkPath resolves the repository checkout used as the Trunk worktree:
-// explicit trunk = true override, then the git main worktree for non-bare
-// repositories. Returns (path, false, nil) on success; (_, true, nil) when the
-// repo is bare with no trunk override (caller must refuse and name a trunk).
+// ResolveTrunkPath resolves the repository checkout used as the Trunk worktree.
+// See ResolveTrunkPathWith.
 func ResolveTrunkPath(td *tasks.Deps, cfg *config.Config, checkoutPath string) (path string, bare bool, err error) {
+	return ResolveTrunkPathWith(config.DefaultDeps(), td, cfg, checkoutPath)
+}
+
+// ResolveTrunkPathWith resolves the Trunk worktree using cd for runtime-tier
+// reads (layer 5: config.runtime.toml[<checkout-path>], never layer 6).
+// Precedence: hand-authored [repo."<path>"] trunk = true (layers 1–4 via cfg),
+// then runtime layer 5, then the git main worktree for non-bare repositories.
+// Returns (path, false, nil) on success; (_, true, nil) when the repo is bare
+// with no trunk override (caller must refuse and name a trunk).
+func ResolveTrunkPathWith(cd *config.Deps, td *tasks.Deps, cfg *config.Config, checkoutPath string) (path string, bare bool, err error) {
 	if td == nil {
 		return "", false, fmt.Errorf("missing task dependencies")
+	}
+	if cd == nil {
+		cd = config.DefaultDeps()
 	}
 	repoKey, err := repoKeyFromCheckout(td, checkoutPath)
 	if err != nil {
@@ -415,6 +426,23 @@ func ResolveTrunkPath(td *tasks.Deps, cfg *config.Config, checkoutPath string) (
 			if candidateKey == repoKey {
 				return candidate, false, nil
 			}
+		}
+	}
+	runtimePaths, err := config.RuntimeRepoTrunkPathsWith(cd)
+	if err != nil {
+		return "", false, err
+	}
+	for _, rawKey := range runtimePaths {
+		candidate, err := tasks.NormalizeProjectPathWith(td, rawKey)
+		if err != nil {
+			continue
+		}
+		candidateKey, err := repoKeyFromCheckout(td, candidate)
+		if err != nil {
+			continue
+		}
+		if candidateKey == repoKey {
+			return candidate, false, nil
 		}
 	}
 	mainPath, bare, err := GitMainWorktree(td, checkoutPath)

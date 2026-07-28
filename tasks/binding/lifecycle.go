@@ -26,12 +26,13 @@ type BindWorktreeOptions struct {
 	// name fork-free (the dashboard, ADR-0060) supply it; cwd-based callers
 	// leave it empty to fall back to DetectProject.
 	ProjectName string
-	// Managed switches from adopting checkoutPath to recording a managed worktree
-	// intent on the set (the same intent `register --managed` seeds). No checkout
-	// is adopted and nothing is provisioned here; the next unbound Queue drain
-	// forks a pop-owned worktree from the Trunk. checkoutPath is still resolved to
-	// the repository identity, but any of the repo's checkouts will do.
+	// Managed switches from adopting checkoutPath to provisioning a managed
+	// worktree from the Trunk and recording a provisioned binding (the same
+	// seam as `register --managed`, ADR-0147). checkoutPath is still resolved to
+	// the repository identity; TrunkPath, when non-empty, is the fork base
+	// (already resolved and optionally persisted by the caller).
 	Managed bool
+	TrunkPath string
 }
 
 // BindWorktreeResult describes the outcome of adopting an existing checkout.
@@ -110,7 +111,7 @@ func BindWorktree(td *tasks.Deps, pd *project.Deps, cfg *config.Config, setID, c
 	}
 
 	if opts.Managed {
-		return bindWorktreeManaged(td, setID, checkoutPath, opts, hooks, out)
+		return bindWorktreeManaged(td, pd, cfg, setID, checkoutPath, opts, hooks, out)
 	}
 
 	branch, err := resolveRuntimeBranch(td, checkoutPath)
@@ -160,22 +161,16 @@ func BindWorktree(td *tasks.Deps, pd *project.Deps, cfg *config.Config, setID, c
 	return BindWorktreeResult{SetID: setID, RuntimePath: checkoutPath, Branch: branch, Replaced: replaced}, nil
 }
 
-// bindWorktreeManaged records a managed worktree intent on setID instead of
-// adopting a checkout (opts.Managed). It resolves checkoutPath only to the
-// repository identity — any of the repo's checkouts is fine — then drops any
-// existing binding forget-only and writes the intent. A set already bound
-// elsewhere refuses without opts.Force, mirroring the adopt re-point rule; the
-// set's own live runtime lock always refuses (same-set-only guard, ADR-0116).
-// Provisioning stays lazy: the next unbound Queue drain forks the managed
-// worktree from the Trunk, exactly as for a `register --managed` set.
-func bindWorktreeManaged(td *tasks.Deps, setID, checkoutPath string, opts BindWorktreeOptions, hooks LifecycleHooks, out io.Writer) (BindWorktreeResult, error) {
+// bindWorktreeManaged provisions a managed worktree for setID from the Trunk
+// (opts.Managed) and records a provisioned binding before returning — the same
+// eager seam as `register --managed` (ADR-0147). It resolves checkoutPath only
+// to the repository identity; any of the repo's checkouts is fine. A set already
+// bound elsewhere refuses without opts.Force; with --force the old binding is
+// dropped forget-only before provisioning the new checkout.
+func bindWorktreeManaged(td *tasks.Deps, pd *project.Deps, cfg *config.Config, setID, checkoutPath string, opts BindWorktreeOptions, hooks LifecycleHooks, out io.Writer) (BindWorktreeResult, error) {
 	id, err := tasks.ResolveRepositoryIdentity(td, checkoutPath)
 	if err != nil {
 		return BindWorktreeResult{}, fmt.Errorf("resolve repository identity: %w", err)
-	}
-	defPath, err := tasks.CanonicalDefinitionPathWith(td, id.TasksDir)
-	if err != nil {
-		return BindWorktreeResult{}, err
 	}
 	key := Key(id, setID)
 
@@ -201,11 +196,19 @@ func bindWorktreeManaged(td *tasks.Deps, setID, checkoutPath string, opts BindWo
 		replaced = true
 	}
 
-	if err := tasks.SetTaskSetManagedIntent(td, defPath, setID); err != nil {
+	b, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
+		TD:           td,
+		PD:           pd,
+		Config:       cfg,
+		TrunkPath:    opts.TrunkPath,
+		CheckoutPath: checkoutPath,
+		SetID:        setID,
+	})
+	if err != nil {
 		return BindWorktreeResult{}, err
 	}
-	fmt.Fprintf(out, "Recorded managed worktree intent for %s (provisioned lazily at next Queue drain)\n", setID)
-	return BindWorktreeResult{SetID: setID, Replaced: replaced}, nil
+	fmt.Fprintf(out, "Provisioned managed worktree for %s at %s (branch %s)\n", setID, b.RuntimePath, b.Branch)
+	return BindWorktreeResult{SetID: setID, RuntimePath: b.RuntimePath, Branch: b.Branch, Replaced: replaced}, nil
 }
 
 // UnbindWorktree releases a set's worktree binding without integrating.

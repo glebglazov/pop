@@ -347,8 +347,8 @@ func TestTaskRegisterManagedRefusesWithoutTrunk(t *testing.T) {
 }
 
 // TestTaskRegisterManagedTrunkFlagPersists asserts --trunk satisfies a bare
-// repo, persists trunk = true to config, and a later managed register needs no
-// flag.
+// repo, persists trunk = true to config.runtime.toml, and a later managed
+// register needs no flag.
 func TestTaskRegisterManagedTrunkFlagPersists(t *testing.T) {
 	seed := t.TempDir()
 	initGitRepoWithCommitCmd(t, seed)
@@ -369,6 +369,7 @@ func TestTaskRegisterManagedTrunkFlagPersists(t *testing.T) {
 	resetTaskFlags()
 
 	cfgPath := filepath.Join(xdg, "pop", "config.toml")
+	runtimePath := filepath.Join(xdg, "pop", "config.runtime.toml")
 	tasksDir := cmdTasksDir(t, td, wt)
 
 	writeTaskThoughts(t, tasksDir, "first")
@@ -385,6 +386,11 @@ func TestTaskRegisterManagedTrunkFlagPersists(t *testing.T) {
 	}
 	t.Cleanup(func() { taskConfigLoad = origLoad })
 
+	userCfgBody := "# user config\nprojects = [{ path = \"/bare\" }]\n"
+	if err := os.WriteFile(cfgPath, []byte(userCfgBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	taskRegisterManaged = true
 	taskRegisterTrunk = wt
 	if err := runTaskRegisterWith(td, io.Discard, ""); err != nil {
@@ -394,8 +400,15 @@ func TestTaskRegisterManagedTrunkFlagPersists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read config: %v", err)
 	}
-	if !strings.Contains(string(cfgData), "trunk = true") {
-		t.Fatalf("config missing trunk = true:\n%s", cfgData)
+	if string(cfgData) != userCfgBody {
+		t.Fatalf("user config.toml changed:\n%s", cfgData)
+	}
+	runtimeData, err := os.ReadFile(runtimePath)
+	if err != nil {
+		t.Fatalf("read runtime config: %v", err)
+	}
+	if !strings.Contains(string(runtimeData), "trunk = true") {
+		t.Fatalf("runtime config missing trunk = true:\n%s", runtimeData)
 	}
 
 	writeTaskThoughts(t, tasksDir, "second")
@@ -1185,6 +1198,9 @@ func resetTaskFlags() {
 	taskRegisterManaged = false
 	taskRegisterTrunk = ""
 	taskRegisterAutoDrain = false
+	taskBindWorktreeForce = false
+	taskBindWorktreeManaged = false
+	taskBindWorktreeTrunk = ""
 	taskAgentPreset = ""
 	taskAgentPresets = nil
 	taskAgentCmd = ""

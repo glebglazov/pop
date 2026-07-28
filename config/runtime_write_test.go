@@ -378,3 +378,28 @@ count = 2
 		t.Fatalf("future section corrupted: %#v", future)
 	}
 }
+
+func TestSetRuntimeRepoTrunkPersistsAndLists(t *testing.T) {
+	d, runtimePath := runtimeTestDeps(t)
+	checkout := filepath.Join(t.TempDir(), "repo", "main")
+	if err := os.MkdirAll(checkout, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetRuntimeRepoTrunkWith(d, checkout); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	paths, err := RuntimeRepoTrunkPathsWith(d)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(paths) != 1 || paths[0] != checkout {
+		t.Fatalf("paths = %v, want [%s]", paths, checkout)
+	}
+	data, err := os.ReadFile(runtimePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "trunk = true") {
+		t.Fatalf("missing trunk = true:\n%s", data)
+	}
+}

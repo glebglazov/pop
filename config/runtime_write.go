@@ -288,3 +288,69 @@ func RuntimeIntegrationsSkillsWith(d *Deps) ([]string, bool, error) {
 	skills := integrationSkillsFromDocument(doc)
 	return skills, true, nil
 }
+
+// SetRuntimeRepoTrunk records checkoutPath as the Trunk worktree for its
+// repository in config.runtime.toml (ADR-0150). The path is stored as a
+// top-level table keyed by the exact checkout path with trunk = true.
+func SetRuntimeRepoTrunk(checkoutPath string) error {
+	return SetRuntimeRepoTrunkWith(defaultDeps, checkoutPath)
+}
+
+// SetRuntimeRepoTrunkWith is the injectable variant.
+func SetRuntimeRepoTrunkWith(d *Deps, checkoutPath string) error {
+	doc, _, err := loadRuntimeDocument(d)
+	if err != nil {
+		return err
+	}
+	setRuntimeRepoTrunk(doc, checkoutPath)
+	return saveRuntimeDocument(d, doc)
+}
+
+// RuntimeRepoTrunkPaths returns every checkout path marked trunk = true in
+// config.runtime.toml. Used when resolving the Trunk worktree from the runtime
+// tier (layer 5 only — never the trunk-anchored layer 6).
+func RuntimeRepoTrunkPaths() ([]string, error) {
+	return RuntimeRepoTrunkPathsWith(defaultDeps)
+}
+
+// RuntimeRepoTrunkPathsWith is the injectable variant.
+func RuntimeRepoTrunkPathsWith(d *Deps) ([]string, error) {
+	doc, _, err := loadRuntimeDocument(d)
+	if err != nil {
+		return nil, err
+	}
+	return runtimeRepoTrunkPaths(doc), nil
+}
+
+func setRuntimeRepoTrunk(doc map[string]any, checkoutPath string) {
+	block, ok := doc[checkoutPath].(map[string]any)
+	if !ok || block == nil {
+		block = map[string]any{}
+		doc[checkoutPath] = block
+	}
+	block["trunk"] = true
+}
+
+var runtimeDocumentReservedKeys = map[string]bool{
+	"integrations": true,
+	"workbench":    true,
+}
+
+func runtimeRepoTrunkPaths(doc map[string]any) []string {
+	var paths []string
+	for key, val := range doc {
+		if runtimeDocumentReservedKeys[key] {
+			continue
+		}
+		block, ok := val.(map[string]any)
+		if !ok || block == nil {
+			continue
+		}
+		trunk, ok := block["trunk"].(bool)
+		if !ok || !trunk {
+			continue
+		}
+		paths = append(paths, key)
+	}
+	return paths
+}

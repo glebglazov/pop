@@ -15,6 +15,7 @@ import (
 type ProvisionManagedBindingRequest struct {
 	TD           *tasks.Deps
 	PD           *project.Deps
+	ConfigDeps   *config.Deps
 	Config       *config.Config
 	TrunkPath    string // when empty, resolved from CheckoutPath + Config
 	CheckoutPath string
@@ -48,8 +49,12 @@ func ProvisionManagedBinding(req ProvisionManagedBindingRequest) (Binding, error
 
 	trunkPath := strings.TrimSpace(req.TrunkPath)
 	if trunkPath == "" {
+		cd := req.ConfigDeps
+		if cd == nil {
+			cd = config.DefaultDeps()
+		}
 		var bare bool
-		trunkPath, bare, err = ResolveTrunkPath(req.TD, req.Config, checkoutPath)
+		trunkPath, bare, err = ResolveTrunkPathWith(cd, req.TD, req.Config, checkoutPath)
 		if err != nil {
 			return Binding{}, err
 		}

@@ -49,6 +49,7 @@ var (
 	taskRegisterAutoDrain     bool
 	taskBindWorktreeForce     bool
 	taskBindWorktreeManaged   bool
+	taskBindWorktreeTrunk     string
 	taskUnbindWorktreeYes     bool
 	taskStreamFull            bool
 	taskStreamRaw             bool
@@ -198,7 +199,7 @@ var taskAgentsCmd = &cobra.Command{
 
 var taskBindWorktreeCmd = &cobra.Command{
 	Use:   "bind-worktree <set>",
-	Short: "Adopt the current checkout (or, with --managed, a lazy managed worktree) as a set's drain target",
+	Short: "Adopt the current checkout (or, with --managed, a managed worktree) as a set's drain target",
 	Long: `Set a task set's drain target.
 
 Default mode adopts the current checkout: run from inside the target checkout
@@ -206,12 +207,13 @@ and pop drains the named set there, keeping the directory on abandon — only th
 binding is forgotten. Use --force to re-point a set that is already bound
 elsewhere.
 
---managed records a managed worktree intent instead — the same intent
-` + "`register --managed`" + ` seeds. Nothing is adopted or provisioned now; the set's
-next Queue drain forks a pop-owned worktree from the Trunk and drains there. It
-does not need to run from any particular checkout, only inside the repo. A set
+--managed forks a pop-owned worktree from the Trunk worktree and records a
+provisioned binding before returning — the same eager provisioning as
+` + "`register --managed`" + `. It does not need to run from any particular
+checkout, only inside the repo. A bare repo with no configured Trunk worktree
+requires --trunk <path> on first use (persisted to config.runtime.toml). A set
 already bound elsewhere still requires --force, which drops the old binding
-forget-only (the old checkout is retained) before recording the intent.`,
+forget-only (the old checkout is retained) before provisioning the new one.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runTaskBindWorktree,
 }
@@ -227,7 +229,7 @@ func init() {
 	rootCmd.AddCommand(taskCmd)
 	taskCmd.AddCommand(taskStatusCmd)
 	taskRegisterCmd.Flags().BoolVar(&taskRegisterManaged, "managed", false, "Provision a pop-managed worktree forked from the Trunk worktree and bind each newly registered set before returning")
-	taskRegisterCmd.Flags().StringVar(&taskRegisterTrunk, "trunk", "", "Mark <path> as this repository's Trunk worktree in config (required for bare repos on first managed register)")
+	taskRegisterCmd.Flags().StringVar(&taskRegisterTrunk, "trunk", "", "Mark <path> as this repository's Trunk worktree in config.runtime.toml (required for bare repos on first managed register or bind-worktree)")
 	taskRegisterCmd.Flags().BoolVar(&taskRegisterAutoDrain, "auto-drain", false, "Enable the auto-drain consent bit on each newly registered set (default off); `pop tasks auto-drain` and the dashboard `a` toggle remain authoritative afterward")
 	taskCmd.AddCommand(taskRegisterCmd)
 	taskCmd.AddCommand(taskArchiveCmd)
@@ -252,7 +254,8 @@ func init() {
 	taskCmd.AddCommand(taskMigrateCmd)
 	taskCmd.AddCommand(taskAgentsCmd)
 	taskBindWorktreeCmd.Flags().BoolVar(&taskBindWorktreeForce, "force", false, "Re-point a set already bound elsewhere")
-	taskBindWorktreeCmd.Flags().BoolVar(&taskBindWorktreeManaged, "managed", false, "Record a lazy managed worktree intent instead of adopting the current checkout: pop provisions its own worktree at the next Queue drain")
+	taskBindWorktreeCmd.Flags().BoolVar(&taskBindWorktreeManaged, "managed", false, "Provision a pop-managed worktree forked from the Trunk worktree and bind the set before returning")
+	taskBindWorktreeCmd.Flags().StringVar(&taskBindWorktreeTrunk, "trunk", "", "Mark <path> as this repository's Trunk worktree in config.runtime.toml (required for bare repos on first managed bind-worktree)")
 	taskCmd.AddCommand(taskBindWorktreeCmd)
 	taskUnbindWorktreeCmd.Flags().BoolVar(&taskUnbindWorktreeYes, "yes", false, "Skip confirmation prompt")
 	taskCmd.AddCommand(taskUnbindWorktreeCmd)
@@ -342,7 +345,7 @@ func runTaskRegisterWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 			return fmt.Errorf("tasks register: %w", cfgErr)
 		}
 		var trunkErr error
-		trunkPath, cfg, trunkErr = resolveManagedRegisterTrunk(d, cfg, taskConfigPath(), runtimePath, taskRegisterTrunk)
+		trunkPath, trunkErr = resolveManagedTrunk(d, cfg, runtimePath, taskRegisterTrunk)
 		if trunkErr != nil {
 			return fmt.Errorf("tasks register: %w", trunkErr)
 		}
@@ -1502,7 +1505,18 @@ func runTaskBindWorktree(cmd *cobra.Command, args []string) error {
 	}
 	d := cmdLayerDeps().queueDeps()
 	d.LoadConfig = taskConfigLoad
-	_, err = queue.BindWorktree(d, cfg, args[0], cwd, queue.BindWorktreeOptions{Force: taskBindWorktreeForce, Managed: taskBindWorktreeManaged}, os.Stdout)
+	opts := queue.BindWorktreeOptions{
+		Force:   taskBindWorktreeForce,
+		Managed: taskBindWorktreeManaged,
+	}
+	if taskBindWorktreeManaged {
+		trunkPath, err := resolveManagedTrunk(d.Tasks, cfg, cwd, taskBindWorktreeTrunk)
+		if err != nil {
+			return fmt.Errorf("tasks bind-worktree: %w", err)
+		}
+		opts.TrunkPath = trunkPath
+	}
+	_, err = queue.BindWorktree(d, cfg, args[0], cwd, opts, os.Stdout)
 	return err
 }
 

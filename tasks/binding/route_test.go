@@ -696,6 +696,96 @@ func TestResolveTrunkPathUsesConfigOverride(t *testing.T) {
 	}
 }
 
+func TestResolveTrunkPathUsesRuntimeLayer5(t *testing.T) {
+	t.Parallel()
+	td := routeTestDeps(t)
+	main := initAdoptRepo(t)
+	base := addLinkedWorktree(t, main, "runtime-trunk")
+	root := t.TempDir()
+	dataDir := filepath.Join(root, "data")
+	d := &config.Deps{FS: &deps.MockFileSystem{
+		GetenvFunc: func(key string) string {
+			if key == "XDG_DATA_HOME" {
+				return dataDir
+			}
+			return ""
+		},
+		UserHomeDirFunc: func() (string, error) { return filepath.Join(root, "home"), nil },
+		ReadFileFunc:    os.ReadFile,
+		WriteFileFunc:   os.WriteFile,
+		MkdirAllFunc:    os.MkdirAll,
+		RenameFunc:      os.Rename,
+		RemoveAllFunc:   os.RemoveAll,
+		StatFunc:        os.Stat,
+	}}
+	if err := config.SetRuntimeRepoTrunkWith(d, base); err != nil {
+		t.Fatalf("set runtime trunk: %v", err)
+	}
+	path, bare, err := ResolveTrunkPathWith(d, td, nil, main)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	want, err := filepath.EvalSymlinks(base)
+	if err != nil {
+		want = base
+	}
+	gotPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		gotPath = path
+	}
+	if bare || gotPath != want {
+		t.Fatalf("path = %q bare = %v, want %q false", gotPath, bare, want)
+	}
+}
+
+func TestResolveTrunkPathHandAuthoredOverridesRuntime(t *testing.T) {
+	t.Parallel()
+	td := routeTestDeps(t)
+	main := initAdoptRepo(t)
+	hand := addLinkedWorktree(t, main, "hand-trunk")
+	runtime := addLinkedWorktree(t, main, "runtime-trunk")
+	root := t.TempDir()
+	dataDir := filepath.Join(root, "data")
+	d := &config.Deps{FS: &deps.MockFileSystem{
+		GetenvFunc: func(key string) string {
+			if key == "XDG_DATA_HOME" {
+				return dataDir
+			}
+			return ""
+		},
+		UserHomeDirFunc: func() (string, error) { return filepath.Join(root, "home"), nil },
+		ReadFileFunc:    os.ReadFile,
+		WriteFileFunc:   os.WriteFile,
+		MkdirAllFunc:    os.MkdirAll,
+		RenameFunc:      os.Rename,
+		RemoveAllFunc:   os.RemoveAll,
+		StatFunc:        os.Stat,
+	}}
+	if err := config.SetRuntimeRepoTrunkWith(d, runtime); err != nil {
+		t.Fatalf("set runtime trunk: %v", err)
+	}
+	cfg := &config.Config{
+		Repo: map[string]config.RepoOverrideConfig{
+			hand: {Trunk: boolPtr(true)},
+		},
+	}
+	path, bare, err := ResolveTrunkPathWith(d, td, cfg, main)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	want, err := filepath.EvalSymlinks(hand)
+	if err != nil {
+		want = hand
+	}
+	gotPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		gotPath = path
+	}
+	if bare || gotPath != want {
+		t.Fatalf("path = %q bare = %v, want hand-authored %q false", gotPath, bare, want)
+	}
+}
+
 // initBareWithWorktree creates a bare repository (no working tree) with one
 // linked worktree and returns the worktree path. A `managed` directive resolved
 // from this worktree finds no Trunk worktree to fork from — bare with no
