@@ -54,65 +54,15 @@ func Fold(td *tasks.Deps, pd *project.Deps, cfg *config.Config, setID string, op
 		opts.In = os.Stdin
 	}
 
-	key, b, ok, err := FindBySetID(td, setID)
+	ctx, err := preflightFold(td, cfg, setID)
 	if err != nil {
 		return FoldResult{}, err
 	}
-	if !ok {
-		return FoldResult{}, fmt.Errorf("fold refused: %s has no worktree binding", setID)
-	}
-	runtimePath := strings.TrimSpace(b.RuntimePath)
-	if runtimePath == "" {
-		return FoldResult{}, fmt.Errorf("fold refused: %s has no worktree binding", setID)
-	}
-
-	trunkPath, bare, err := ResolveTrunkPath(td, cfg, runtimePath)
-	if err != nil {
-		return FoldResult{}, fmt.Errorf("fold refused: resolve trunk: %w", err)
-	}
-	if bare || strings.TrimSpace(trunkPath) == "" {
-		return FoldResult{}, fmt.Errorf("fold refused: repository has no resolvable Trunk worktree")
-	}
-
-	if same, err := sameCheckout(td, runtimePath, trunkPath); err != nil {
-		return FoldResult{}, err
-	} else if same {
-		return FoldResult{}, fmt.Errorf("fold refused: %s is bound to the Trunk worktree itself; nothing to fold", setID)
-	}
-
-	if err := requireSetDone(td, cfg, setID, runtimePath); err != nil {
-		return FoldResult{}, err
-	}
-
-	if dirty, err := worktreeIsDirty(td, runtimePath); err != nil {
-		return FoldResult{}, fmt.Errorf("fold refused: check set worktree: %w", err)
-	} else if dirty {
-		return FoldResult{}, fmt.Errorf("fold refused: set worktree is dirty (%s)", runtimePath)
-	}
-	if dirty, err := worktreeIsDirty(td, trunkPath); err != nil {
-		return FoldResult{}, fmt.Errorf("fold refused: check trunk: %w", err)
-	} else if dirty {
-		return FoldResult{}, fmt.Errorf("fold refused: Trunk worktree is dirty (%s)", trunkPath)
-	}
-
-	if err := refuseLiveClaim(td, "set worktree", runtimePath); err != nil {
-		return FoldResult{}, err
-	}
-	if err := refuseLiveClaim(td, "Trunk worktree", trunkPath); err != nil {
-		return FoldResult{}, err
-	}
-
-	branch := strings.TrimSpace(b.Branch)
-	if branch == "" {
-		branch = CurrentBranch(td, runtimePath)
-	}
-	if branch == "" {
-		return FoldResult{}, fmt.Errorf("fold refused: set worktree %s is detached", runtimePath)
-	}
-	trunkBranch := CurrentBranch(td, trunkPath)
-	if trunkBranch == "" {
-		return FoldResult{}, fmt.Errorf("fold refused: Trunk worktree %s is detached", trunkPath)
-	}
+	b := ctx.binding
+	runtimePath := ctx.runtimePath
+	trunkPath := ctx.trunkPath
+	branch := ctx.branch
+	trunkBranch := ctx.trunkBranch
 
 	manifest := loadFoldManifest(td, setID, runtimePath)
 	if err := foldMergeAndFastForward(td, cfg, opts, out, foldMergeContext{
@@ -128,7 +78,7 @@ func Fold(td *tasks.Deps, pd *project.Deps, cfg *config.Config, setID string, op
 
 	fmt.Fprintf(out, "Folded %s: trunk fast-forwarded onto %s\n", setID, branch)
 
-	if err := Delete(td, key); err != nil {
+	if err := Delete(td, ctx.key); err != nil {
 		return FoldResult{}, fmt.Errorf("fold: release binding: %w", err)
 	}
 	fmt.Fprintf(out, "Released worktree binding for %s\n", setID)
@@ -144,6 +94,102 @@ func Fold(td *tasks.Deps, pd *project.Deps, cfg *config.Config, setID string, op
 		Branch:      branch,
 		TrunkPath:   trunkPath,
 		TornDown:    tornDown,
+	}, nil
+}
+
+type foldPreflightContext struct {
+	key         string
+	binding     Binding
+	runtimePath     string
+	trunkPath       string
+	branch          string
+	trunkBranch     string
+}
+
+// PreflightFold applies the same precondition checks as Fold without merging or
+// releasing the binding. Dashboard and CLI surfaces use it to refuse early with
+// the same messages Fold would return.
+func PreflightFold(td *tasks.Deps, cfg *config.Config, setID string) error {
+	_, err := preflightFold(td, cfg, setID)
+	return err
+}
+
+func preflightFold(td *tasks.Deps, cfg *config.Config, setID string) (foldPreflightContext, error) {
+	setID = strings.TrimSpace(setID)
+	if setID == "" {
+		return foldPreflightContext{}, fmt.Errorf("set id is required")
+	}
+	if td == nil {
+		td = tasks.DefaultDeps()
+	}
+
+	key, b, ok, err := FindBySetID(td, setID)
+	if err != nil {
+		return foldPreflightContext{}, err
+	}
+	if !ok {
+		return foldPreflightContext{}, fmt.Errorf("fold refused: %s has no worktree binding", setID)
+	}
+	runtimePath := strings.TrimSpace(b.RuntimePath)
+	if runtimePath == "" {
+		return foldPreflightContext{}, fmt.Errorf("fold refused: %s has no worktree binding", setID)
+	}
+
+	trunkPath, bare, err := ResolveTrunkPath(td, cfg, runtimePath)
+	if err != nil {
+		return foldPreflightContext{}, fmt.Errorf("fold refused: resolve trunk: %w", err)
+	}
+	if bare || strings.TrimSpace(trunkPath) == "" {
+		return foldPreflightContext{}, fmt.Errorf("fold refused: repository has no resolvable Trunk worktree")
+	}
+
+	if same, err := sameCheckout(td, runtimePath, trunkPath); err != nil {
+		return foldPreflightContext{}, err
+	} else if same {
+		return foldPreflightContext{}, fmt.Errorf("fold refused: %s is bound to the Trunk worktree itself; nothing to fold", setID)
+	}
+
+	if err := requireSetDone(td, cfg, setID, runtimePath); err != nil {
+		return foldPreflightContext{}, err
+	}
+
+	if dirty, err := worktreeIsDirty(td, runtimePath); err != nil {
+		return foldPreflightContext{}, fmt.Errorf("fold refused: check set worktree: %w", err)
+	} else if dirty {
+		return foldPreflightContext{}, fmt.Errorf("fold refused: set worktree is dirty (%s)", runtimePath)
+	}
+	if dirty, err := worktreeIsDirty(td, trunkPath); err != nil {
+		return foldPreflightContext{}, fmt.Errorf("fold refused: check trunk: %w", err)
+	} else if dirty {
+		return foldPreflightContext{}, fmt.Errorf("fold refused: Trunk worktree is dirty (%s)", trunkPath)
+	}
+
+	if err := refuseLiveClaim(td, "set worktree", runtimePath); err != nil {
+		return foldPreflightContext{}, err
+	}
+	if err := refuseLiveClaim(td, "Trunk worktree", trunkPath); err != nil {
+		return foldPreflightContext{}, err
+	}
+
+	branch := strings.TrimSpace(b.Branch)
+	if branch == "" {
+		branch = CurrentBranch(td, runtimePath)
+	}
+	if branch == "" {
+		return foldPreflightContext{}, fmt.Errorf("fold refused: set worktree %s is detached", runtimePath)
+	}
+	trunkBranch := CurrentBranch(td, trunkPath)
+	if trunkBranch == "" {
+		return foldPreflightContext{}, fmt.Errorf("fold refused: Trunk worktree %s is detached", trunkPath)
+	}
+
+	return foldPreflightContext{
+		key:         key,
+		binding:     b,
+		runtimePath: runtimePath,
+		trunkPath:   trunkPath,
+		branch:      branch,
+		trunkBranch: trunkBranch,
 	}, nil
 }
 

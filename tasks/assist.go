@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -299,6 +300,7 @@ const (
 	genericAssistExit genericAssistAction = iota
 	genericAssistAgent
 	genericAssistShell
+	genericAssistFold
 )
 
 // handleGenericAssistMenu is the Assist session menu for Ready / Done / Deferred
@@ -326,9 +328,10 @@ func handleGenericAssistMenu(env gateEnv, m *Manifest, status TaskSetStatus, fin
 	if err != nil {
 		return false, exitErr(ExitSetup, "%v", err)
 	}
+	offerFold := assistFoldEligible(d, taskSetID, status)
 
 	for {
-		action, err := promptGenericAssistAction(out, reader, taskSetID, status, invocation)
+		action, err := promptGenericAssistAction(out, reader, taskSetID, status, invocation, offerFold)
 		if err != nil {
 			return false, err
 		}
@@ -359,13 +362,19 @@ func handleGenericAssistMenu(env gateEnv, m *Manifest, status TaskSetStatus, fin
 			if err := spawnRuntimeShell(d, in, runtimePath, out); err != nil {
 				fmt.Fprintf(outputFor(out), "Could not start shell: %v\n", err)
 			}
+		case genericAssistFold:
+			if err := runAssistFold(in, out, taskSetID, runtimePath); err != nil {
+				fmt.Fprintf(outputFor(out), "Fold failed: %v\n", err)
+				continue
+			}
+			return false, nil
 		case genericAssistExit:
 			return false, nil
 		}
 	}
 }
 
-func promptGenericAssistAction(out io.Writer, reader *bufio.Reader, taskSetID string, status TaskSetStatus, invocation *AgentAssistanceInvocation) (genericAssistAction, error) {
+func promptGenericAssistAction(out io.Writer, reader *bufio.Reader, taskSetID string, status TaskSetStatus, invocation *AgentAssistanceInvocation, offerFold bool) (genericAssistAction, error) {
 	display := outputFor(out)
 	fmt.Fprintln(display)
 	display.line(ansiCyan, "Assist: %s is %s.", taskSetID, status)
@@ -377,6 +386,9 @@ func promptGenericAssistAction(out io.Writer, reader *bufio.Reader, taskSetID st
 		}
 	}
 	fmt.Fprintln(display, "  2. Open a shell in the checkout")
+	if offerFold {
+		fmt.Fprintln(display, "  3. Fold branch back into Trunk and release checkout")
+	}
 	fmt.Fprintln(display, "  0. Exit")
 	fmt.Fprintf(display, "%s", display.styled(ansiCyan, "Choose [1]: "))
 
@@ -389,10 +401,60 @@ func promptGenericAssistAction(out io.Writer, reader *bufio.Reader, taskSetID st
 		return genericAssistAgent, nil
 	case "2":
 		return genericAssistShell, nil
+	case "3":
+		if !offerFold {
+			fmt.Fprintln(display, "Choose 1, 2, or 0.")
+			return promptGenericAssistAction(out, reader, taskSetID, status, invocation, offerFold)
+		}
+		return genericAssistFold, nil
 	case "0", "q", "quit", "exit":
 		return genericAssistExit, nil
 	default:
-		fmt.Fprintln(display, "Choose 1, 2, or 0.")
-		return promptGenericAssistAction(out, reader, taskSetID, status, invocation)
+		if offerFold {
+			fmt.Fprintln(display, "Choose 1, 2, 3, or 0.")
+		} else {
+			fmt.Fprintln(display, "Choose 1, 2, or 0.")
+		}
+		return promptGenericAssistAction(out, reader, taskSetID, status, invocation, offerFold)
 	}
+}
+
+func assistFoldEligible(d *Deps, setID string, status TaskSetStatus) bool {
+	return status == StatusDone && stillHasWorktreeBinding(d, setID)
+}
+
+func stillHasWorktreeBinding(d *Deps, setID string) bool {
+	if d == nil {
+		return false
+	}
+	s, ok, err := d.Store(false)
+	if err != nil || !ok {
+		return false
+	}
+	all, err := s.AllBindings()
+	if err != nil {
+		return false
+	}
+	for key, b := range all {
+		parts := strings.Split(key, "\x00")
+		if len(parts) != 2 || parts[1] != setID {
+			continue
+		}
+		if strings.TrimSpace(b.RuntimePath) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func runAssistFold(in io.Reader, out io.Writer, taskSetID, runtimePath string) error {
+	cmd := exec.Command("pop", "tasks", "fold", taskSetID)
+	if wd := strings.TrimSpace(runtimePath); wd != "" {
+		cmd.Dir = wd
+	}
+	cmd.Stdin = in
+	display := outputFor(out)
+	cmd.Stdout = display
+	cmd.Stderr = display
+	return cmd.Run()
 }

@@ -168,6 +168,71 @@ func TestAssistSessionRefusesLiveDrain(t *testing.T) {
 	}
 }
 
+// TestAssistGenericMenuOffersFoldForDoneBoundSet: the generic assist menu offers
+// Fold when the set is DONE and still holds a Worktree binding.
+func TestAssistGenericMenuOffersFoldForDoneBoundSet(t *testing.T) {
+	d, defPath, root := setupAssistFixture(t, doneAFKSet())
+	s, _, err := d.Store(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutBinding(store.Binding{
+		ScopedKey:   "repo\x00demo",
+		RuntimePath: root,
+		Branch:      "demo",
+		Project:     "demo",
+	}); err != nil {
+		t.Fatalf("PutBinding: %v", err)
+	}
+	runtime, err := ResolveRuntimePathWith(d, root, root)
+	if err != nil {
+		t.Fatalf("ResolveRuntimePathWith: %v", err)
+	}
+
+	var out bytes.Buffer
+	err = AssistTaskSetWith(d, &project.Deps{Git: d.Git, FS: d.FS}, func(string) (*config.Config, error) {
+		return &config.Config{}, nil
+	}, AssistOptions{
+		ResolveInput: ResolveInput{CWD: root, DefinitionOverride: defPath, RuntimeOverride: runtime},
+		TaskSetID:    "demo",
+		AgentPreset:  "claude",
+		Output:       &out,
+		Input:        strings.NewReader("0\n"),
+	})
+	if err != nil {
+		t.Fatalf("AssistTaskSetWith: %v", err)
+	}
+	if !strings.Contains(out.String(), "Assist session: demo [DONE]") {
+		t.Fatalf("expected generic DONE menu:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "3. Fold branch back into Trunk and release checkout") {
+		t.Fatalf("DONE bound menu missing fold:\n%s", out.String())
+	}
+}
+
+// TestAssistGenericMenuOmitsFoldWhenUnbound: Fold is not offered without a binding.
+func TestAssistGenericMenuOmitsFoldWhenUnbound(t *testing.T) {
+	d, defPath, root := setupAssistFixture(t, doneAFKSet())
+	runtime, err := ResolveRuntimePathWith(d, root, root)
+	if err != nil {
+		t.Fatalf("ResolveRuntimePathWith: %v", err)
+	}
+
+	var out bytes.Buffer
+	err = AssistTaskSetWith(d, &project.Deps{Git: d.Git, FS: d.FS}, loadConfigVerifyEnabled, AssistOptions{
+		ResolveInput: ResolveInput{CWD: root, DefinitionOverride: defPath, RuntimeOverride: runtime},
+		TaskSetID:    "demo",
+		Output:       &out,
+		Input:        strings.NewReader("0\n"),
+	})
+	if err != nil {
+		t.Fatalf("AssistTaskSetWith: %v", err)
+	}
+	if strings.Contains(out.String(), "Fold branch back into Trunk") {
+		t.Fatalf("unbound DONE menu should not offer fold:\n%s", out.String())
+	}
+}
+
 // TestAssistSessionRefusesNonInteractive: assist refuses without a TTY and names
 // the headless equivalents.
 func TestAssistSessionRefusesNonInteractive(t *testing.T) {

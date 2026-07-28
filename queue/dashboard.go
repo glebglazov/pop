@@ -186,6 +186,10 @@ type dashboardPreviewMsg struct {
 type dashboardAssistMsg struct {
 	err error
 }
+type dashboardFoldMsg struct {
+	setID string
+	err   error
+}
 type dashboardDetailMsg struct {
 	dashRow  DashboardRow
 	manifest *tasks.Manifest
@@ -343,6 +347,7 @@ const (
 	menuActionAutoDrain
 	menuActionPreview
 	menuActionAssist
+	menuActionFold
 	menuActionUnpark
 	menuActionShell
 	menuActionArchive
@@ -394,6 +399,9 @@ func dashboardMenuItems(row DashboardRow) []dashboardMenuItem {
 	}
 	items = append(items, dashboardMenuItem{key: "p", label: "preview", action: menuActionPreview})
 	items = append(items, dashboardMenuItem{key: "s", label: "assist", action: menuActionAssist})
+	if dashboardFoldEligible(row) {
+		items = append(items, dashboardMenuItem{key: "f", label: "fold", action: menuActionFold})
+	}
 	if row.Parked {
 		items = append(items, dashboardMenuItem{key: "P", label: "unpark", action: menuActionUnpark})
 	}
@@ -411,6 +419,12 @@ func dashboardVerifyEligible(row DashboardRow) bool {
 		return false
 	}
 	return row.RawStatus == tasks.StatusNeedsVerify || row.RawStatus == tasks.StatusVerifyFailed
+}
+
+// dashboardFoldEligible reports whether the fold verb applies to row: a DONE set
+// that still holds a Worktree binding (ADR-0148).
+func dashboardFoldEligible(row DashboardRow) bool {
+	return row.Bound && row.RawStatus == tasks.StatusDone
 }
 
 // newDashboardMenu opens the action overlay on row, wrapping its verbs in a
@@ -1057,6 +1071,13 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Assist focused the operator in the session pane; close the dashboard
 		// the same way preview does after handing off attention.
 		return m, tea.Quit
+	case dashboardFoldMsg:
+		if msg.err != nil {
+			m.actionErr = msg.err
+			return m, nil
+		}
+		m.statusMsg = fmt.Sprintf("%s folded", msg.setID)
+		return m, m.reload()
 	case dashboardBindListMsg:
 		if msg.err != nil {
 			m.actionErr = msg.err
@@ -1321,6 +1342,16 @@ func (m QueueDashboard) dispatchMenuAction(action dashboardMenuAction, row Dashb
 	case menuActionAssist:
 		m.statusMsg = ""
 		return m, m.launchAssist(row)
+	case menuActionFold:
+		if !dashboardFoldEligible(row) {
+			return m, nil
+		}
+		if err := PreflightFold(m.d, m.cfg, row.SetRef); err != nil {
+			m.actionErr = err
+			return m, nil
+		}
+		m.statusMsg = ""
+		return m, m.launchFold(row)
 	case menuActionUnpark:
 		if !row.Parked {
 			m.statusMsg = "task set is not parked"
@@ -1856,6 +1887,21 @@ func (m QueueDashboard) launchAssist(row DashboardRow) tea.Cmd {
 	}
 }
 
+func (m QueueDashboard) launchFold(row DashboardRow) tea.Cmd {
+	if m.d != nil && m.d.FoldSet != nil {
+		return func() tea.Msg {
+			_, err := m.d.FoldSet(row.SetRef, io.Discard, FoldOptions{In: os.Stdin})
+			return dashboardFoldMsg{setID: row.SetID, err: err}
+		}
+	}
+	stderr := &strings.Builder{}
+	cmd := foldExecCommand(row)
+	cmd.Stderr = stderr
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		return dashboardFoldMsg{setID: row.SetID, err: foldExecError(stderr.String(), err)}
+	})
+}
+
 func (m QueueDashboard) loadDetail(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
 		d := m.d
@@ -2191,6 +2237,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "a", Desc: "toggle auto-drain"},
 			{Key: "p", Desc: "preview drain"},
 			{Key: "s", Desc: "assist"},
+			{Key: "f", Desc: "fold"},
 			{Key: "P", Desc: "unpark"},
 			{Key: "O", Desc: "shell"},
 			{Key: "A", Desc: "archive"},
