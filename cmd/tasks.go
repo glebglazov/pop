@@ -51,6 +51,7 @@ var (
 	taskBindWorktreeManaged   bool
 	taskBindWorktreeTrunk     string
 	taskUnbindWorktreeYes     bool
+	taskFoldYes               bool
 	taskStreamFull            bool
 	taskStreamRaw             bool
 	taskStreamLast            bool
@@ -225,6 +226,25 @@ var taskUnbindWorktreeCmd = &cobra.Command{
 	RunE:  runTaskUnbindWorktree,
 }
 
+var taskFoldCmd = &cobra.Command{
+	Use:   "fold <set>",
+	Short: "Fold a finished set's branch into the Trunk worktree and release its checkout",
+	Long: `Fold a DONE task set's work back into the Trunk worktree and release its
+checkout (ADR-0148).
+
+Fold merges trunk into the set's branch inside the set's own checkout, then
+advances trunk by fast-forward only — trunk is never left mid-merge. On success
+it releases the Worktree binding and applies reference-counted managed-worktree
+teardown (confirm-gated; --yes skips only that confirmation). It does not push
+and does not archive the set.
+
+Refuses when the set is not DONE (or is NEEDS-VERIFY under enabled verification),
+either worktree is dirty, either carries a live claim, or the set is bound to
+the Trunk worktree itself.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runTaskFold,
+}
+
 func init() {
 	rootCmd.AddCommand(taskCmd)
 	taskCmd.AddCommand(taskStatusCmd)
@@ -260,6 +280,8 @@ func init() {
 	taskCmd.AddCommand(taskBindWorktreeCmd)
 	taskUnbindWorktreeCmd.Flags().BoolVar(&taskUnbindWorktreeYes, "yes", false, "Skip confirmation prompt")
 	taskCmd.AddCommand(taskUnbindWorktreeCmd)
+	taskFoldCmd.Flags().BoolVarP(&taskFoldYes, "yes", "y", false, "Skip managed-worktree delete confirmation after fold")
+	taskCmd.AddCommand(taskFoldCmd)
 
 	taskCmd.PersistentFlags().StringVar(&taskProject, "project", "", "Select project by exact picker-visible name")
 	taskCmd.PersistentFlags().StringVar(&taskPath, "path", "", "Select project by path (normalized to git checkout root)")
@@ -1536,6 +1558,30 @@ func runTaskUnbindWorktree(cmd *cobra.Command, args []string) error {
 	d.LoadConfig = taskConfigLoad
 	_, err = queue.AbandonWithOptions(d, cfg, args[0], os.Stdout, queue.AbandonOptions{Yes: taskUnbindWorktreeYes, In: os.Stdin})
 	return err
+}
+
+func runTaskFold(cmd *cobra.Command, args []string) error {
+	cfgPath := cfgFile
+	if cfgPath == "" {
+		cfgPath = config.DefaultConfigPath()
+	}
+	cfg, err := taskConfigLoad(cfgPath)
+	if err != nil {
+		return err
+	}
+	_, err = binding.Fold(
+		cmdLayerDeps().tasksDeps(),
+		taskProjectDeps(),
+		cfg,
+		args[0],
+		binding.FoldOptions{Yes: taskFoldYes, In: os.Stdin},
+		binding.LifecycleHooks{},
+		os.Stdout,
+	)
+	if err != nil {
+		return fmt.Errorf("tasks fold: %w", err)
+	}
+	return nil
 }
 
 func taskProjectDeps() *project.Deps {

@@ -22,6 +22,7 @@ func TestDashboardCommandTree(t *testing.T) {
 		{path: []string{"worktree", "dashboard"}, wantCmd: worktreeDashboardCmd, wantRun: runWorktree},
 		{path: []string{"tasks", "bind-worktree"}, wantCmd: taskBindWorktreeCmd, wantRun: runTaskBindWorktree},
 		{path: []string{"tasks", "unbind-worktree"}, wantCmd: taskUnbindWorktreeCmd, wantRun: runTaskUnbindWorktree},
+		{path: []string{"tasks", "fold"}, wantCmd: taskFoldCmd, wantRun: runTaskFold},
 	}
 
 	for _, tt := range tests {

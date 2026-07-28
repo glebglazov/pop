@@ -49,7 +49,7 @@ func setupRoutineCmdTest(t *testing.T) {
 }
 
 func TestRunRoutineNewAndList(t *testing.T) {
-	t.Parallel()
+	// Serial: mutates package-level routineNew / routineNewSchedule hooks.
 	setupRoutineCmdTest(t)
 
 	oldNew := routineNew
@@ -100,7 +100,7 @@ func TestRunRoutineNewAndList(t *testing.T) {
 }
 
 func TestRunRoutineNewUnscheduledHint(t *testing.T) {
-	t.Parallel()
+	// Serial: mutates package-level routineNew / routineNewSchedule hooks.
 	setupRoutineCmdTest(t)
 
 	oldNew := routineNew
@@ -133,7 +133,7 @@ func TestRunRoutineNewUnscheduledHint(t *testing.T) {
 }
 
 func TestRunRoutinePauseResumeAndRuns(t *testing.T) {
-	t.Parallel()
+	// Serial: mutates package-level routineNew / routineNewSchedule hooks.
 	setupRoutineCmdTest(t)
 
 	oldNew := routineNew
