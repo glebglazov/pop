@@ -37,6 +37,9 @@ type RunTaskSetOptions struct {
 	// resolved set id, project path, and runtime checkout path; a non-nil error
 	// aborts the drain.
 	BindCheckout func(setID, projectPath, runtimePath string) error
+	// RefreshManagedCheckout, when set, runs before BindCheckout to fast-forward
+	// a commitless provisioned managed worktree onto current trunk (ADR-0147).
+	RefreshManagedCheckout func(setID, projectPath, runtimePath string) error
 	// PreSeedTopic, when set, pre-seeds the pane's Topic from each task's Title
 	// at drain spawn (ADR-0058). It is invoked once per task before that task's
 	// first agent prompt, but guards on the existing @pop_topic, so the first

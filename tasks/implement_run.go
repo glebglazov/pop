@@ -196,6 +196,15 @@ func (r *implementRun) setup() error {
 	d := r.d
 	opts := r.opts
 
+	// A provisioned managed worktree forked at register time may lag trunk by
+	// the time its first task runs; fast-forward commitless branches onto current
+	// trunk before any work begins (ADR-0147).
+	if opts.RefreshManagedCheckout != nil {
+		if err := opts.RefreshManagedCheckout(r.taskSetID, r.resolved.ProjectPath, r.runtimePath); err != nil {
+			return exitErr(ExitSetup, "refresh managed checkout: %v", err)
+		}
+	}
+
 	// Adopt this checkout into the binding model before draining (ADR-0036): a
 	// worktree-locus run records a never-delete adopted binding so the set is
 	// integrateable even if the drain later fails; a trunk-locus run records

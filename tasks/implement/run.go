@@ -84,7 +84,8 @@ func RunWholeSetWith(d *Deps, opts WholeSetOptions) (*tasks.RunTaskSetResult, er
 		ConfirmIn:       opts.ConfirmIn,
 		ConfirmOut:      opts.ConfirmOut,
 		Output:          opts.Output,
-		BindCheckout:    bindCheckout(d),
+		BindCheckout:           bindCheckout(d),
+		RefreshManagedCheckout: refreshManagedCheckout(d),
 		PreSeedTopic:    opts.PreSeedTopic,
 	})
 	if err != nil {
@@ -208,5 +209,20 @@ func bindCheckout(d *Deps) func(setID, projectPath, runtimePath string) error {
 		cfg, _ := d.loadConfig(config.DefaultConfigPath())
 		_, err := binding.AdoptCurrentCheckout(d.tasksDeps(), d.projectDeps(), cfg, projectPath, runtimePath, setID)
 		return err
+	}
+}
+
+// refreshManagedCheckout fast-forwards a commitless provisioned managed
+// worktree onto current trunk before the drain's first task (ADR-0147).
+func refreshManagedCheckout(d *Deps) func(setID, projectPath, runtimePath string) error {
+	return func(setID, projectPath, runtimePath string) error {
+		td := d.tasksDeps()
+		cfg, _ := d.loadConfig(config.DefaultConfigPath())
+		_, b, ok, err := binding.GetForSet(td, projectPath, setID)
+		if err != nil || !ok {
+			return err
+		}
+		_ = binding.RefreshCommitlessManagedBranch(td, cfg, projectPath, b)
+		return nil
 	}
 }
