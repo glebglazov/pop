@@ -281,6 +281,8 @@ func init() {
 	taskUnbindWorktreeCmd.Flags().BoolVar(&taskUnbindWorktreeYes, "yes", false, "Skip confirmation prompt")
 	taskCmd.AddCommand(taskUnbindWorktreeCmd)
 	taskFoldCmd.Flags().BoolVarP(&taskFoldYes, "yes", "y", false, "Skip managed-worktree delete confirmation after fold")
+	taskFoldCmd.Flags().StringArrayVar(&taskAgentPresets, "agent", nil, "Agent preset for fold-conflict assistance (claude, opencode, cursor, codex, pi), optionally followed by extra agent args")
+	taskFoldCmd.Flags().StringVar(&taskAgentCmd, "agent-cmd", "", "Trusted shell prefix for fold-conflict assistance; generated prompt passed as final positional argument")
 	taskCmd.AddCommand(taskFoldCmd)
 
 	taskCmd.PersistentFlags().StringVar(&taskProject, "project", "", "Select project by exact picker-visible name")
@@ -1574,7 +1576,12 @@ func runTaskFold(cmd *cobra.Command, args []string) error {
 		taskProjectDeps(),
 		cfg,
 		args[0],
-		binding.FoldOptions{Yes: taskFoldYes, In: os.Stdin},
+		binding.FoldOptions{
+			Yes:         taskFoldYes,
+			In:          os.Stdin,
+			AgentPreset: selectedTaskAgentPreset(),
+			AgentCmd:    taskAgentCmd,
+		},
 		binding.LifecycleHooks{},
 		os.Stdout,
 	)

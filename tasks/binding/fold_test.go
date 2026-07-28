@@ -2,11 +2,13 @@ package binding
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -172,11 +174,107 @@ func TestFoldConflictAbortsWithTrunkUnchanged(t *testing.T) {
 	if mergeInProgress(td, repo) {
 		t.Fatal("trunk must not be mid-merge")
 	}
-	if mergeInProgress(td, b.RuntimePath) {
-		t.Fatal("set worktree must not be left mid-merge after abort")
+	if !mergeInProgress(td, b.RuntimePath) {
+		t.Fatal("set worktree must be left mid-merge for the human to resolve")
 	}
 	if _, _, ok, _ := FindBySetID(td, "set-conflict"); !ok {
 		t.Fatal("binding must remain after refused fold")
+	}
+}
+
+// foldConflictResolverRunner completes an in-progress merge when fold conflict
+// assistance runs the attended agent hook.
+type foldConflictResolverRunner struct {
+	setPath string
+}
+
+func (r *foldConflictResolverRunner) Run(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (int, error) {
+	return 0, nil
+}
+
+func (r *foldConflictResolverRunner) RunAttended(ctx context.Context, dir string, stdin io.Reader, stdout, stderr io.Writer, name string, args ...string) (int, error) {
+	clash := filepath.Join(r.setPath, "clash.txt")
+	if err := os.WriteFile(clash, []byte("resolved\n"), 0o644); err != nil {
+		return 1, err
+	}
+	if err := exec.Command("git", "-C", r.setPath, "add", "clash.txt").Run(); err != nil {
+		return 1, err
+	}
+	if err := exec.Command("git", "-C", r.setPath, "commit", "--no-edit").Run(); err != nil {
+		return 1, err
+	}
+	return 0, nil
+}
+
+func (r *foldConflictResolverRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*tasks.ManagedProcess, error) {
+	return tasks.RealCommandRunner{}.Start(ctx, dir, stdout, stderr, name, args...)
+}
+
+func TestFoldConflictOffersAssistanceAndCompletesOnResolve(t *testing.T) {
+	t.Parallel()
+	repo := initAdoptRepo(t)
+	td := lifecycleTestDeps(t)
+	seedDoneTaskSet(t, td, repo, "set-resolve")
+	b, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
+		TD: td, CheckoutPath: repo, SetID: "set-resolve",
+	})
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	writeFileCommit(t, b.RuntimePath, "clash.txt", "from-set\n", "set clash")
+	writeFileCommit(t, repo, "clash.txt", "from-trunk\n", "trunk clash")
+
+	td.Runner = &foldConflictResolverRunner{setPath: b.RuntimePath}
+
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+	var out bytes.Buffer
+	got, err := Fold(td, nil, cfg, "set-resolve", FoldOptions{
+		Yes: true,
+		In:  strings.NewReader("\n"),
+	}, LifecycleHooks{}, &out)
+	if err != nil {
+		t.Fatalf("fold after assistance: %v\n%s", err, out.String())
+	}
+	if !got.TornDown {
+		t.Fatalf("TornDown = %v, want true", got.TornDown)
+	}
+	if !strings.Contains(out.String(), "Fold conflict") {
+		t.Fatalf("output should offer fold conflict assistance:\n%s", out.String())
+	}
+	if _, err := os.Stat(filepath.Join(repo, "clash.txt")); err != nil {
+		t.Fatalf("trunk must carry merged file: %v", err)
+	}
+	if _, _, ok, _ := FindBySetID(td, "set-resolve"); ok {
+		t.Fatal("binding should be released after successful fold")
+	}
+}
+
+func TestFoldConflictInteractiveDeclineLeavesMergeInProgress(t *testing.T) {
+	t.Parallel()
+	repo := initAdoptRepo(t)
+	td := lifecycleTestDeps(t)
+	seedDoneTaskSet(t, td, repo, "set-decline")
+	b, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
+		TD: td, CheckoutPath: repo, SetID: "set-decline",
+	})
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	writeFileCommit(t, b.RuntimePath, "clash.txt", "from-set\n", "set clash")
+	writeFileCommit(t, repo, "clash.txt", "from-trunk\n", "trunk clash")
+	trunkBefore := strings.TrimSpace(runGitOutput(t, repo, "rev-parse", "HEAD"))
+
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+	_, err = Fold(td, nil, cfg, "set-decline", FoldOptions{In: strings.NewReader("0\n")}, LifecycleHooks{}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "conflict") {
+		t.Fatalf("err = %v, want conflict refusal", err)
+	}
+	trunkAfter := strings.TrimSpace(runGitOutput(t, repo, "rev-parse", "HEAD"))
+	if trunkAfter != trunkBefore {
+		t.Fatalf("trunk moved: before=%s after=%s", trunkBefore, trunkAfter)
+	}
+	if !mergeInProgress(td, b.RuntimePath) {
+		t.Fatal("set worktree must remain mid-merge after declining assistance")
 	}
 }
 

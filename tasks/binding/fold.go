@@ -16,6 +16,10 @@ import (
 type FoldOptions struct {
 	Yes bool
 	In  io.Reader
+	// AgentPreset / AgentCmd select the attended fold-conflict assistance
+	// adapter when a merge conflict offers an interactive session.
+	AgentPreset string
+	AgentCmd    string
 }
 
 // FoldResult describes a successful fold.
@@ -110,7 +114,15 @@ func Fold(td *tasks.Deps, pd *project.Deps, cfg *config.Config, setID string, op
 		return FoldResult{}, fmt.Errorf("fold refused: Trunk worktree %s is detached", trunkPath)
 	}
 
-	if err := foldMergeAndFastForward(td, runtimePath, trunkPath, branch, trunkBranch); err != nil {
+	manifest := loadFoldManifest(td, setID, runtimePath)
+	if err := foldMergeAndFastForward(td, cfg, opts, out, foldMergeContext{
+		setID:       setID,
+		manifest:    manifest,
+		setPath:     runtimePath,
+		trunkPath:   trunkPath,
+		setBranch:   branch,
+		trunkBranch: trunkBranch,
+	}); err != nil {
 		return FoldResult{}, err
 	}
 
@@ -194,22 +206,51 @@ func refuseLiveClaim(td *tasks.Deps, label, path string) error {
 	return fmt.Errorf("fold refused: %s has a live claim (%s)", label, reason)
 }
 
+type foldMergeContext struct {
+	setID       string
+	manifest    *tasks.Manifest
+	setPath     string
+	trunkPath   string
+	setBranch   string
+	trunkBranch string
+}
+
+func loadFoldManifest(td *tasks.Deps, setID, runtimePath string) *tasks.Manifest {
+	id, err := tasks.ResolveRepositoryIdentity(td, runtimePath)
+	if err != nil {
+		return nil
+	}
+	defPath, err := tasks.CanonicalDefinitionPathWith(td, id.TasksDir)
+	if err != nil {
+		return nil
+	}
+	disc, err := tasks.DiscoverWith(td, defPath)
+	if err != nil {
+		return nil
+	}
+	manifestPath, ok := disc.Manifests[setID]
+	if !ok {
+		return nil
+	}
+	return tasks.LoadManifest(td, setID, manifestPath)
+}
+
 // foldMergeAndFastForward merges trunk into the set branch inside the set
 // checkout, then fast-forwards trunk onto that branch. If trunk moves between
 // the merge and the fast-forward, it redoes the merge once and then refuses.
-func foldMergeAndFastForward(td *tasks.Deps, setPath, trunkPath, setBranch, trunkBranch string) error {
+func foldMergeAndFastForward(td *tasks.Deps, cfg *config.Config, opts FoldOptions, out io.Writer, ctx foldMergeContext) error {
 	const maxAttempts = 2
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		trunkBefore, err := revParseHEAD(td, trunkPath)
+		trunkBefore, err := revParseHEAD(td, ctx.trunkPath)
 		if err != nil {
 			return fmt.Errorf("fold refused: read trunk HEAD: %w", err)
 		}
 
-		if err := mergeTrunkIntoSet(td, setPath, trunkBranch); err != nil {
+		if err := mergeTrunkIntoSet(td, cfg, opts, out, ctx); err != nil {
 			return err
 		}
 
-		trunkAfterMerge, err := revParseHEAD(td, trunkPath)
+		trunkAfterMerge, err := revParseHEAD(td, ctx.trunkPath)
 		if err != nil {
 			return fmt.Errorf("fold refused: read trunk HEAD: %w", err)
 		}
@@ -220,8 +261,8 @@ func foldMergeAndFastForward(td *tasks.Deps, setPath, trunkPath, setBranch, trun
 			return errTrunkMovedDuringFold
 		}
 
-		if err := fastForwardTrunk(td, trunkPath, setBranch); err != nil {
-			trunkNow, readErr := revParseHEAD(td, trunkPath)
+		if err := fastForwardTrunk(td, ctx.trunkPath, ctx.setBranch); err != nil {
+			trunkNow, readErr := revParseHEAD(td, ctx.trunkPath)
 			if readErr != nil {
 				return fmt.Errorf("fold refused: read trunk HEAD: %w", readErr)
 			}
@@ -231,7 +272,7 @@ func foldMergeAndFastForward(td *tasks.Deps, setPath, trunkPath, setBranch, trun
 				}
 				return errTrunkMovedDuringFold
 			}
-			return fmt.Errorf("fold refused: could not fast-forward trunk onto %s: %w", setBranch, err)
+			return fmt.Errorf("fold refused: could not fast-forward trunk onto %s: %w", ctx.setBranch, err)
 		}
 		return nil
 	}
@@ -240,16 +281,28 @@ func foldMergeAndFastForward(td *tasks.Deps, setPath, trunkPath, setBranch, trun
 
 var errTrunkMovedDuringFold = fmt.Errorf("fold refused: Trunk worktree moved during fold; redo once already attempted — resolve manually and retry")
 
-func mergeTrunkIntoSet(td *tasks.Deps, setPath, trunkBranch string) error {
-	msg := fmt.Sprintf("pop fold: bring trunk (%s) into set branch", trunkBranch)
-	_, err := td.Git.CommandInDir(setPath, "merge", "--no-edit", "-m", msg, trunkBranch)
+func mergeTrunkIntoSet(td *tasks.Deps, cfg *config.Config, opts FoldOptions, out io.Writer, ctx foldMergeContext) error {
+	msg := fmt.Sprintf("pop fold: bring trunk (%s) into set branch", ctx.trunkBranch)
+	_, err := td.Git.CommandInDir(ctx.setPath, "merge", "--no-edit", "-m", msg, ctx.trunkBranch)
 	if err == nil {
 		return nil
 	}
-	if mergeInProgress(td, setPath) {
-		_, _ = td.Git.CommandInDir(setPath, "merge", "--abort")
+	if !mergeInProgress(td, ctx.setPath) {
+		return fmt.Errorf("fold refused: merge trunk into set branch failed (trunk unchanged): %w", err)
 	}
-	return fmt.Errorf("fold refused: conflict bringing trunk into the set's branch (trunk unchanged): %w", err)
+	return tasks.HandleFoldMergeConflict(td, cfg, tasks.FoldConflictContext{
+		SetID:       ctx.setID,
+		Manifest:    ctx.manifest,
+		RuntimePath: ctx.setPath,
+		SetBranch:   ctx.setBranch,
+		TrunkBranch: ctx.trunkBranch,
+		TrunkPath:   ctx.trunkPath,
+	}, tasks.FoldConflictAssistanceOptions{
+		AgentPreset: opts.AgentPreset,
+		AgentCmd:    opts.AgentCmd,
+		In:          opts.In,
+		Out:         out,
+	})
 }
 
 func fastForwardTrunk(td *tasks.Deps, trunkPath, setBranch string) error {
