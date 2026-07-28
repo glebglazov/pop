@@ -169,10 +169,22 @@ func parseStringSlice(v interface{}) ([]string, error) {
 	return out, nil
 }
 
-// UnmarshalTOML decodes topic_agents as a mixed string-or-table array.
+// UnmarshalTOML decodes topic_agents as a mixed string-or-table array. The
+// decoder hands back []interface{} for a mixed or inline-table array but
+// []map[string]interface{} for the all-tables case — which is what
+// [[pane_monitoring.topic_agents]] blocks and any config pop re-serializes
+// itself produce — so both shapes are normalized here.
 func (ts *TopicSteps) UnmarshalTOML(v interface{}) error {
-	arr, ok := v.([]interface{})
-	if !ok {
+	var arr []interface{}
+	switch val := v.(type) {
+	case []interface{}:
+		arr = val
+	case []map[string]interface{}:
+		arr = make([]interface{}, 0, len(val))
+		for _, item := range val {
+			arr = append(arr, item)
+		}
+	default:
 		return fmt.Errorf("topic_agents must be an array, got %T", v)
 	}
 	steps := make(TopicSteps, 0, len(arr))

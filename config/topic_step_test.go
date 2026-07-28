@@ -53,6 +53,33 @@ topic_agents = [
 		}
 	})
 
+	t.Run("array of tables parses", func(t *testing.T) {
+		var cfg struct {
+			Steps TopicSteps `toml:"topic_agents"`
+		}
+		raw := `
+[[topic_agents]]
+type = "truncate"
+set_if = "empty"
+
+[[topic_agents]]
+type = "agent"
+command = "ollama:gemma4:e4b"
+set_if = "empty_or_seed"
+timeout = 60
+`
+		if _, err := toml.Decode(raw, &cfg); err != nil {
+			t.Fatal(err)
+		}
+		want := []TopicStep{
+			{Type: TopicStepTruncate, SetIf: TopicSetIfEmpty},
+			{Type: TopicStepAgent, Command: "ollama:gemma4:e4b", SetIf: TopicSetIfEmptyOrSeed, Timeout: 60},
+		}
+		if !reflect.DeepEqual([]TopicStep(cfg.Steps), want) {
+			t.Errorf("steps = %+v, want %+v", cfg.Steps, want)
+		}
+	})
+
 	t.Run("mixed string and table", func(t *testing.T) {
 		var cfg struct {
 			Steps TopicSteps `toml:"topic_agents"`
