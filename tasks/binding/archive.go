@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
@@ -22,9 +23,16 @@ type ArchiveConfirmOptions struct {
 	Out io.Writer
 }
 
+type archiveCheckoutGroup struct {
+	runtimePath string
+	binding     Binding
+	keys        []string
+}
+
 // PrepareManagedWorktreesForArchive confirms (unless opts.Yes) and tears down
-// every managed binding among setIDs before archive metadata is written.
-// Declining any prompt aborts the whole batch with ErrArchiveCancelled.
+// every managed checkout among setIDs whose reference count hits zero before
+// archive metadata is written. Declining any prompt aborts the whole batch with
+// ErrArchiveCancelled.
 func PrepareManagedWorktreesForArchive(td *tasks.Deps, pd *project.Deps, cfg *config.Config, setIDs []string, opts ArchiveConfirmOptions) error {
 	if len(setIDs) == 0 {
 		return nil
@@ -39,16 +47,43 @@ func PrepareManagedWorktreesForArchive(td *tasks.Deps, pd *project.Deps, cfg *co
 	if out == nil {
 		out = io.Discard
 	}
-	hooks := LifecycleHooks{}
+
+	excludeKeys := make(map[string]bool)
+	groups := make(map[string]*archiveCheckoutGroup)
 	for _, setID := range setIDs {
 		key, b, ok, err := FindBySetID(td, setID)
 		if err != nil {
 			return err
 		}
-		if !ok || !b.Provisioned {
+		if !ok || strings.TrimSpace(b.RuntimePath) == "" {
 			continue
 		}
-		confirmed, err := ConfirmManagedWorktreeDelete(opts.In, out, opts.Yes, b.RuntimePath)
+		excludeKeys[key] = true
+		canon, err := canonicalCheckoutPath(td, b.RuntimePath)
+		if err != nil {
+			return err
+		}
+		g, ok := groups[canon]
+		if !ok {
+			g = &archiveCheckoutGroup{
+				runtimePath: b.RuntimePath,
+				binding:     b,
+			}
+			groups[canon] = g
+		}
+		g.keys = append(g.keys, key)
+	}
+
+	hooks := LifecycleHooks{}
+	for _, g := range groups {
+		should, err := shouldOfferManagedCheckoutTeardown(td, g.runtimePath, excludeKeys)
+		if err != nil {
+			return err
+		}
+		if !should {
+			continue
+		}
+		confirmed, err := ConfirmManagedWorktreeDelete(opts.In, out, opts.Yes, g.runtimePath)
 		if err != nil {
 			return err
 		}
@@ -56,8 +91,13 @@ func PrepareManagedWorktreesForArchive(td *tasks.Deps, pd *project.Deps, cfg *co
 			fmt.Fprintln(out, "Archive cancelled")
 			return ErrArchiveCancelled
 		}
-		if err := TeardownAndReleaseManagedBinding(td, pd, cfg, key, b, hooks); err != nil {
+		if err := TeardownManagedWorktree(td, pd, cfg, g.binding, hooks); err != nil {
 			return err
+		}
+		for _, key := range g.keys {
+			if err := Delete(td, key); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

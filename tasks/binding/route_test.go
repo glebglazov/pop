@@ -30,6 +30,16 @@ func seedBinding(t *testing.T, td *tasks.Deps, checkoutPath, setID string, b Bin
 	}
 }
 
+func seedManagedBindingAtRoot(t *testing.T, td *tasks.Deps, repo, setID string) Binding {
+	t.Helper()
+	b, err := ProvisionWorktree(td, ManagedWorktreesRoot(td), repo, setID, time.Now())
+	if err != nil {
+		t.Fatalf("provision managed worktree: %v", err)
+	}
+	seedBinding(t, td, repo, setID, b)
+	return b
+}
+
 func TestRouteDrainCheckoutExistingBindingWins(t *testing.T) {
 	t.Parallel()
 	td := routeTestDeps(t)
@@ -943,12 +953,7 @@ func TestRouteDrainCheckoutForegroundManagedRebindConfirmDeletes(t *testing.T) {
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 	currentWT := addLinkedWorktree(t, repo, "current")
-	managedWT := addLinkedWorktree(t, repo, "managed-old")
-	seedBinding(t, td, repo, "set-m", Binding{
-		RuntimePath: managedWT,
-		Branch:      "managed-old",
-		Provisioned: true,
-	})
+	managed := seedManagedBindingAtRoot(t, td, repo, "set-m")
 
 	got, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
 		TD:              td,
@@ -967,10 +972,10 @@ func TestRouteDrainCheckoutForegroundManagedRebindConfirmDeletes(t *testing.T) {
 	if !got.Rebound || got.RuntimePath != currentRuntime {
 		t.Fatalf("result = %+v, want rebind to %q", got, currentRuntime)
 	}
-	if _, err := os.Stat(managedWT); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(managed.RuntimePath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("managed worktree should be deleted, stat err = %v", err)
 	}
-	if branch := runRouteGitOutput(t, repo, "branch", "--list", "managed-old"); strings.TrimSpace(branch) != "" {
+	if branch := runRouteGitOutput(t, repo, "branch", "--list", managed.Branch); strings.TrimSpace(branch) != "" {
 		t.Fatalf("managed branch should be deleted, still have %q", branch)
 	}
 	_, b, ok, err := GetForSet(td, currentWT, "set-m")
@@ -979,36 +984,39 @@ func TestRouteDrainCheckoutForegroundManagedRebindConfirmDeletes(t *testing.T) {
 	}
 }
 
-// TestRouteDrainCheckoutForegroundManagedRebindDeclineAborts asserts declining
-// the managed rebind prompt leaves the binding at the old managed checkout.
-func TestRouteDrainCheckoutForegroundManagedRebindDeclineAborts(t *testing.T) {
+// TestRouteDrainCheckoutForegroundManagedRebindDeclineCompletesRebind asserts
+// declining the managed rebind prompt completes the rebind and retains the old
+// managed checkout on disk.
+func TestRouteDrainCheckoutForegroundManagedRebindDeclineCompletesRebind(t *testing.T) {
 	t.Parallel()
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 	currentWT := addLinkedWorktree(t, repo, "current")
-	managedWT := addLinkedWorktree(t, repo, "managed-old")
-	seedBinding(t, td, repo, "set-m", Binding{
-		RuntimePath: managedWT,
-		Branch:      "managed-old",
-		Provisioned: true,
-	})
+	managed := seedManagedBindingAtRoot(t, td, repo, "set-m")
 
-	_, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
+	got, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
 		TD:              td,
 		CurrentCheckout: currentWT,
 		SetID:           "set-m",
 		Trigger:         TriggerImplementForeground,
 		ConfirmIn:       strings.NewReader("n\n"),
 	})
-	if !errors.Is(err, ErrForegroundRebindDeclined) {
-		t.Fatalf("route err = %v, want ErrForegroundRebindDeclined", err)
+	if err != nil {
+		t.Fatalf("route err = %v, want successful rebind", err)
 	}
-	if _, err := os.Stat(managedWT); err != nil {
+	currentRuntime, err := tasks.ResolveRuntimePathWith(td, currentWT, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Rebound || got.RuntimePath != currentRuntime {
+		t.Fatalf("result = %+v, want rebind to %q", got, currentRuntime)
+	}
+	if _, err := os.Stat(managed.RuntimePath); err != nil {
 		t.Fatalf("managed worktree must remain after decline: %v", err)
 	}
-	_, b, ok, err := GetForSet(td, repo, "set-m")
-	if err != nil || !ok || b.RuntimePath != managedWT || !b.Provisioned {
-		t.Fatalf("binding = %+v ok=%v, want unchanged managed binding at %q", b, ok, managedWT)
+	_, b, ok, err := GetForSet(td, currentWT, "set-m")
+	if err != nil || !ok || b.RuntimePath != currentRuntime || b.Provisioned {
+		t.Fatalf("binding = %+v ok=%v, want adopted rebind at %q", b, ok, currentRuntime)
 	}
 }
 

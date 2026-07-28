@@ -91,9 +91,6 @@ var (
 	// refuses rather than silently draining in place. Surfacing it as a visible
 	// config-class error on the set is a later slice.
 	ErrNamedWorktreeNotFound = errors.New("named worktree directive: no worktree of that name on this machine")
-	// ErrForegroundRebindDeclined reports that the operator declined to delete an
-	// idle managed worktree when rebinding a set to the current checkout.
-	ErrForegroundRebindDeclined = errors.New("foreground rebind cancelled")
 )
 
 // RouteDrainCheckout resolves which checkout a set drain runs in, honoring the
@@ -184,20 +181,24 @@ func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult
 			}
 			return RouteDrainCheckoutResult{}, fmt.Errorf("refusing implement: %s is currently executing", setID)
 		}
-		if existing.Provisioned {
-			confirmOut := req.ConfirmOut
-			if confirmOut == nil {
-				confirmOut = io.Discard
-			}
-			confirmed, err := ConfirmForegroundManagedRebind(req.ConfirmIn, confirmOut, req.Yes, existing.RuntimePath)
+		confirmOut := req.ConfirmOut
+		if confirmOut == nil {
+			confirmOut = io.Discard
+		}
+		shouldTeardown, err := shouldOfferManagedCheckoutTeardown(req.TD, existing.RuntimePath, map[string]bool{key: true})
+		if err != nil {
+			return RouteDrainCheckoutResult{}, err
+		}
+		if shouldTeardown {
+			confirmed, err := confirmManagedWorktreeDelete(req.ConfirmIn, confirmOut, req.Yes, existing.RuntimePath,
+				"non-interactive implement requires --yes to delete managed worktree when rebinding")
 			if err != nil {
 				return RouteDrainCheckoutResult{}, err
 			}
-			if !confirmed {
-				return RouteDrainCheckoutResult{}, ErrForegroundRebindDeclined
-			}
-			if err := TeardownManagedWorktree(req.TD, req.PD, req.Config, existing, req.Hooks); err != nil {
-				return RouteDrainCheckoutResult{}, err
+			if confirmed {
+				if err := TeardownManagedWorktree(req.TD, req.PD, req.Config, existing, req.Hooks); err != nil {
+					return RouteDrainCheckoutResult{}, err
+				}
 			}
 		}
 		b := Adopt(currentRuntime, CurrentBranch(req.TD, currentRuntime), DetectProject(req.PD, req.TD, req.Config, repoID))

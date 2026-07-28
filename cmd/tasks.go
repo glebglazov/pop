@@ -254,6 +254,7 @@ func init() {
 	taskCmd.AddCommand(taskMigrateCmd)
 	taskCmd.AddCommand(taskAgentsCmd)
 	taskBindWorktreeCmd.Flags().BoolVar(&taskBindWorktreeForce, "force", false, "Re-point a set already bound elsewhere")
+	taskBindWorktreeCmd.Flags().BoolVarP(&taskRunYes, "yes", "y", false, "Skip managed-worktree delete confirmation when rebinding")
 	taskBindWorktreeCmd.Flags().BoolVar(&taskBindWorktreeManaged, "managed", false, "Provision a pop-managed worktree forked from the Trunk worktree and bind the set before returning")
 	taskBindWorktreeCmd.Flags().StringVar(&taskBindWorktreeTrunk, "trunk", "", "Mark <path> as this repository's Trunk worktree in config.runtime.toml (required for bare repos on first managed bind-worktree)")
 	taskCmd.AddCommand(taskBindWorktreeCmd)
@@ -1508,6 +1509,8 @@ func runTaskBindWorktree(cmd *cobra.Command, args []string) error {
 	opts := queue.BindWorktreeOptions{
 		Force:   taskBindWorktreeForce,
 		Managed: taskBindWorktreeManaged,
+		Yes:     taskRunYes,
+		In:      os.Stdin,
 	}
 	if taskBindWorktreeManaged {
 		trunkPath, err := resolveManagedTrunk(d.Tasks, cfg, cwd, taskBindWorktreeTrunk)

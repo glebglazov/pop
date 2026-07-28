@@ -16,11 +16,11 @@ const unbindConfirmPrompt = "Abandon binding for %s? This forgets the associatio
 
 const managedWorktreeDeletePrompt = "delete managed worktree at %s? [y/N]: "
 
-const foregroundManagedRebindPrompt = "rebind to current and DELETE managed worktree %s? [y/N]: "
-
 // BindWorktreeOptions controls bind-worktree behaviour.
 type BindWorktreeOptions struct {
 	Force bool
+	Yes   bool
+	In    io.Reader
 	// ProjectName, when non-empty, is used verbatim as the binding's Project
 	// label and skips DetectProject entirely. Callers that already resolved the
 	// name fork-free (the dashboard, ADR-0060) supply it; cwd-based callers
@@ -143,6 +143,10 @@ func BindWorktree(td *tasks.Deps, pd *project.Deps, cfg *config.Config, setID, c
 				return BindWorktreeResult{}, fmt.Errorf("%s is already bound to %s; use --force to re-point", setID, existing.RuntimePath)
 			}
 			replaced = true
+			if err := maybeTeardownReboundCheckout(td, pd, cfg, existing, key, opts.Yes, opts.In, out,
+				"non-interactive bind-worktree requires --yes to delete managed worktree when rebinding", hooks); err != nil {
+				return BindWorktreeResult{}, err
+			}
 		}
 	}
 
@@ -188,8 +192,10 @@ func bindWorktreeManaged(td *tasks.Deps, pd *project.Deps, cfg *config.Config, s
 		if !opts.Force {
 			return BindWorktreeResult{}, fmt.Errorf("%s is already bound to %s; use --force to re-point to a managed worktree", setID, existing.RuntimePath)
 		}
-		// Forget-only: the old checkout and branch stay on disk (worktree teardown
-		// belongs to Archive); only the association is dropped.
+		if err := maybeTeardownReboundCheckout(td, pd, cfg, existing, key, opts.Yes, opts.In, out,
+			"non-interactive bind-worktree requires --yes to delete managed worktree when rebinding", hooks); err != nil {
+			return BindWorktreeResult{}, err
+		}
 		if err := Delete(td, key); err != nil {
 			return BindWorktreeResult{}, err
 		}
@@ -325,18 +331,14 @@ func TeardownAndReleaseManagedBinding(td *tasks.Deps, pd *project.Deps, cfg *con
 }
 
 // ConfirmManagedWorktreeDelete prompts to delete a managed worktree before
-// archive. yes skips the prompt; a declined answer returns (false, nil).
+// archive or rebind. yes skips the prompt; a declined answer returns (false, nil).
 func ConfirmManagedWorktreeDelete(in io.Reader, out io.Writer, yes bool, runtimePath string) (bool, error) {
-	prompt := fmt.Sprintf(managedWorktreeDeletePrompt, runtimePath)
-	return confirmYesNo(in, out, yes, prompt, "non-interactive archive requires --yes")
+	return confirmManagedWorktreeDelete(in, out, yes, runtimePath, "non-interactive archive requires --yes")
 }
 
-// ConfirmForegroundManagedRebind prompts before tearing down an idle managed
-// binding so a foreground implement can rebind the set to the current checkout.
-// yes skips the prompt; a declined answer returns (false, nil).
-func ConfirmForegroundManagedRebind(in io.Reader, out io.Writer, yes bool, runtimePath string) (bool, error) {
-	prompt := fmt.Sprintf(foregroundManagedRebindPrompt, runtimePath)
-	return confirmYesNo(in, out, yes, prompt, "non-interactive implement requires --yes to delete managed worktree when rebinding")
+func confirmManagedWorktreeDelete(in io.Reader, out io.Writer, yes bool, runtimePath, nonInteractiveErr string) (bool, error) {
+	prompt := fmt.Sprintf(managedWorktreeDeletePrompt, runtimePath)
+	return confirmYesNo(in, out, yes, prompt, nonInteractiveErr)
 }
 
 // TeardownManagedWorktree removes a managed binding's checkout and branch.
