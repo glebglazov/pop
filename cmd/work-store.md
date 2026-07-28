@@ -223,8 +223,10 @@ Semantics:
 
 - Plain `register` eagerly binds the set to the **current** checkout the moment it
   registers — visible immediately, not deferred.
-- `--managed` records a managed-worktree intent instead; its isolated worktree is
-  forked from the Trunk worktree and provisioned lazily at the first Queue drain.
+- `--managed` provisions immediately instead: it forks an isolated worktree from
+  the Trunk worktree and binds the set to it the moment it registers. A repo with
+  no resolvable trunk refuses the registration; `--trunk <path>` names one (needed
+  once per bare repo).
 - `--auto-drain` lets the Queue daemon drain the set unattended. Only the literal
   keywords enable it — there is no "here and now" phrasing.
 - `managed auto-drain` → `pop tasks register --managed --auto-drain <task-set-name>`,
