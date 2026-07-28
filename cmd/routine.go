@@ -17,42 +17,45 @@ Routines are directory-bound schedules that fire agent runs over time.
 Author one with pop routine new from any directory (git-backed or not).`,
 }
 
-var routineNewSchedule string
-var routineNewRefineAgent string
-var routineNewAgents []string
-var routineNewEffort string
-var routineEditSchedule string
-var routineEditRefineAgent string
-var routineEditAgents []string
-var routineEditEffort string
-var (
-	routineNew              = routine.Add
-	routineEdit             = routine.Edit
-	routineConfigureRuntime = routine.ConfigureRuntime
-	routineUpdateRuntime    = routine.UpdateRuntime
-	routineRefine           = routine.Refine
-	routineInteractive      = routine.Interactive
-	routineList             = routine.List
-	routineFire             = routine.Fire
-	routinePause            = routine.Pause
-	routineResume           = routine.Resume
-	routineRuns             = routine.Runs
-	routineHandoff          = routine.Handoff
-	routineDashboard        = dashboardshell.RunFromRoutine
-	routineMigrateManifests = routine.MigrateManifests
-)
-
-var routineNewCmd = &cobra.Command{
-	Use:   "new <id>",
-	Short: "Scaffold a new routine from the current directory",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runRoutineNew,
+// routineNewOpts holds one invocation's flag values. Each command constructor
+// binds its own struct, so parallel tests never share flag state.
+type routineNewOpts struct {
+	schedule    string
+	agents      []string
+	effort      string
+	refineAgent string
 }
 
-var routineEditCmd = &cobra.Command{
-	Use:   "edit <id>",
-	Short: "Edit a routine's prompt or schedule",
-	Long: `Edit a routine's prompt or schedule.
+type routineEditOpts struct {
+	schedule    string
+	agents      []string
+	effort      string
+	refineAgent string
+}
+
+func newRoutineNewCmd() *cobra.Command {
+	o := &routineNewOpts{}
+	cmd := &cobra.Command{
+		Use:   "new <id>",
+		Short: "Scaffold a new routine from the current directory",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoutineNew(cmd, args, o)
+		},
+	}
+	cmd.Flags().StringVar(&o.schedule, "schedule", "", "routine schedule (optional; omit for a manual-fire-only routine): "+routine.ScheduleGrammar)
+	cmd.Flags().StringArrayVar(&o.agents, "agent", nil, "runtime agent preset for scheduled runs; repeat to define an ordered fallback list")
+	cmd.Flags().StringVar(&o.effort, "effort", "", "runtime model-strength tier: light, standard, or heavy (default standard)")
+	cmd.Flags().StringVar(&o.refineAgent, "refine-agent", "", "override the agent preset for the Routine refinement session")
+	return cmd
+}
+
+func newRoutineEditCmd() *cobra.Command {
+	o := &routineEditOpts{}
+	cmd := &cobra.Command{
+		Use:   "edit <id>",
+		Short: "Edit a routine's prompt or schedule",
+		Long: `Edit a routine's prompt or schedule.
 
 Plain invocation drops into the Routine refinement session — a numbered menu to
 fire test runs, view reports, edit the prompt, edit the schedule, and resume the
@@ -60,99 +63,116 @@ routine (interactive TTY only). With --schedule "<expr>" it rewrites the manifes
 schedule directly and opens no session. --agent (repeatable) and --effort are
 also direct writes; editing runtime config pauses the routine (reason changed).
 The bound directory and id are fixed at creation.`,
-	Args: cobra.ExactArgs(1),
-	RunE: runRoutineEdit,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoutineEdit(cmd, args, o)
+		},
+	}
+	cmd.Flags().StringVar(&o.schedule, "schedule", "", "new routine schedule: "+routine.ScheduleGrammar+"; skips the editor")
+	cmd.Flags().StringArrayVar(&o.agents, "agent", nil, "set the runtime agent preset list for scheduled runs; repeat for an ordered fallback list (direct write, pauses the routine)")
+	cmd.Flags().StringVar(&o.effort, "effort", "", "set the runtime model-strength tier: light, standard, or heavy (direct write, pauses the routine)")
+	cmd.Flags().StringVar(&o.refineAgent, "refine-agent", "", "override the agent preset for the Routine refinement session")
+	return cmd
 }
 
-var routineListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List configured routines",
-	Args:  cobra.NoArgs,
-	RunE:  runRoutineList,
+func newRoutineListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List configured routines",
+		Args:  cobra.NoArgs,
+		RunE:  runRoutineList,
+	}
 }
 
-var routineFireCmd = &cobra.Command{
-	Use:   "fire <id>",
-	Short: "Run a routine immediately in the foreground",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runRoutineFire,
+func newRoutineFireCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "fire <id>",
+		Short: "Run a routine immediately in the foreground",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runRoutineFire,
+	}
 }
 
-var routinePauseCmd = &cobra.Command{
-	Use:   "pause <id>",
-	Short: "Suspend scheduled firing for a routine",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runRoutinePause,
+func newRoutinePauseCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "pause <id>",
+		Short: "Suspend scheduled firing for a routine",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runRoutinePause,
+	}
 }
 
-var routineResumeCmd = &cobra.Command{
-	Use:   "resume <id>",
-	Short: "Resume scheduled firing for a paused routine",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runRoutineResume,
+func newRoutineResumeCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "resume <id>",
+		Short: "Resume scheduled firing for a paused routine",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runRoutineResume,
+	}
 }
 
-var routineRunsCmd = &cobra.Command{
-	Use:   "runs <id>",
-	Short: "List a routine's run history",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runRoutineRuns,
+func newRoutineRunsCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "runs <id>",
+		Short: "List a routine's run history",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runRoutineRuns,
+	}
 }
 
-var routineHandoffCmd = &cobra.Command{
-	Use:   "handoff <id>",
-	Short: "Print a continuation prompt assembled from a routine's artifacts",
-	Long: `Print a continuation prompt for a fresh agent session, assembled from a
+func newRoutineHandoffCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "handoff <id>",
+		Short: "Print a continuation prompt assembled from a routine's artifacts",
+		Long: `Print a continuation prompt for a fresh agent session, assembled from a
 routine's artifacts (its prompt, latest run report, memory directory, and bound
 directory). The prompt bakes in no task of its own — pipe it into another agent
 and follow up with the task you want done, e.g. "fix all the bugs this routine
 found".`,
-	Args: cobra.ExactArgs(1),
-	RunE: runRoutineHandoff,
+		Args: cobra.ExactArgs(1),
+		RunE: runRoutineHandoff,
+	}
 }
 
-var routineDashboardCmd = &cobra.Command{
-	Use:   "dashboard",
-	Short: "Open the interactive routines dashboard",
-	Args:  cobra.NoArgs,
-	RunE:  runRoutineDashboard,
+func newRoutineDashboardCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "dashboard",
+		Short: "Open the interactive routines dashboard",
+		Args:  cobra.NoArgs,
+		RunE:  runRoutineDashboard,
+	}
 }
 
-var routineMigrateManifestsCmd = &cobra.Command{
-	Use:    "migrate-manifests",
-	Short:  "One-shot migration of legacy manifest.json routines to frontmatter + state.json",
-	Long:   "Migrates every routine still carrying a legacy manifest.json (pre-ADR-0139) to the split format: schedule/agents/effort move into prompt.md frontmatter and machine state moves into state.json. Idempotent — already-migrated routines are left untouched — and conservative — a directory it cannot parse is reported and skipped. Meant to be run once by the machine owner.",
-	Hidden: true,
-	Args:   cobra.NoArgs,
-	RunE:   runRoutineMigrateManifests,
+func newRoutineMigrateManifestsCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:    "migrate-manifests",
+		Short:  "One-shot migration of legacy manifest.json routines to frontmatter + state.json",
+		Long:   "Migrates every routine still carrying a legacy manifest.json (pre-ADR-0139) to the split format: schedule/agents/effort move into prompt.md frontmatter and machine state moves into state.json. Idempotent — already-migrated routines are left untouched — and conservative — a directory it cannot parse is reported and skipped. Meant to be run once by the machine owner.",
+		Hidden: true,
+		Args:   cobra.NoArgs,
+		RunE:   runRoutineMigrateManifests,
+	}
 }
 
 func init() {
 	rootCmd.AddCommand(routineCmd)
-	routineCmd.AddCommand(routineNewCmd)
-	routineCmd.AddCommand(routineEditCmd)
-	routineCmd.AddCommand(routineListCmd)
-	routineCmd.AddCommand(routineFireCmd)
-	routineCmd.AddCommand(routinePauseCmd)
-	routineCmd.AddCommand(routineResumeCmd)
-	routineCmd.AddCommand(routineRunsCmd)
-	routineCmd.AddCommand(routineHandoffCmd)
-	routineCmd.AddCommand(routineDashboardCmd)
-	routineCmd.AddCommand(routineMigrateManifestsCmd)
-	routineNewCmd.Flags().StringVar(&routineNewSchedule, "schedule", "", "routine schedule (optional; omit for a manual-fire-only routine): "+routine.ScheduleGrammar)
-	routineNewCmd.Flags().StringArrayVar(&routineNewAgents, "agent", nil, "runtime agent preset for scheduled runs; repeat to define an ordered fallback list")
-	routineNewCmd.Flags().StringVar(&routineNewEffort, "effort", "", "runtime model-strength tier: light, standard, or heavy (default standard)")
-	routineNewCmd.Flags().StringVar(&routineNewRefineAgent, "refine-agent", "", "override the agent preset for the Routine refinement session")
-	routineEditCmd.Flags().StringVar(&routineEditSchedule, "schedule", "", "new routine schedule: "+routine.ScheduleGrammar+"; skips the editor")
-	routineEditCmd.Flags().StringArrayVar(&routineEditAgents, "agent", nil, "set the runtime agent preset list for scheduled runs; repeat for an ordered fallback list (direct write, pauses the routine)")
-	routineEditCmd.Flags().StringVar(&routineEditEffort, "effort", "", "set the runtime model-strength tier: light, standard, or heavy (direct write, pauses the routine)")
-	routineEditCmd.Flags().StringVar(&routineEditRefineAgent, "refine-agent", "", "override the agent preset for the Routine refinement session")
+	routineCmd.AddCommand(newRoutineNewCmd())
+	routineCmd.AddCommand(newRoutineEditCmd())
+	routineCmd.AddCommand(newRoutineListCmd())
+	routineCmd.AddCommand(newRoutineFireCmd())
+	routineCmd.AddCommand(newRoutinePauseCmd())
+	routineCmd.AddCommand(newRoutineResumeCmd())
+	routineCmd.AddCommand(newRoutineRunsCmd())
+	routineCmd.AddCommand(newRoutineHandoffCmd())
+	routineCmd.AddCommand(newRoutineDashboardCmd())
+	routineCmd.AddCommand(newRoutineMigrateManifestsCmd())
 }
 
-func runRoutineNew(cmd *cobra.Command, args []string) error {
+func runRoutineNew(cmd *cobra.Command, args []string, o *routineNewOpts) error {
+	d := cmdLayerDeps().routineDeps()
 	agentsSet := cmd.Flags().Changed("agent")
 	effortSet := cmd.Flags().Changed("effort")
-	res, err := routineNew(args[0], routineNewSchedule, cmdLayerDeps().WorkDir())
+	res, err := routine.AddWith(d, args[0], o.schedule, cmdLayerDeps().WorkDir())
 	if err != nil {
 		return err
 	}
@@ -163,14 +183,14 @@ func runRoutineNew(cmd *cobra.Command, args []string) error {
 	// Runtime agents/effort, when supplied, are direct validated writes onto the
 	// freshly-scaffolded (created-paused) routine — no refinement gate involved.
 	if agentsSet || effortSet {
-		if _, err := routineConfigureRuntime(res.ID, routineNewAgents, agentsSet, routineNewEffort, effortSet); err != nil {
+		if _, err := routine.ConfigureRuntimeWith(d, res.ID, o.agents, agentsSet, o.effort, effortSet); err != nil {
 			return err
 		}
 	}
 	// On a TTY, drop straight into the refinement session; a non-interactive new
 	// just scaffolds paused and prints how to iterate manually.
-	if routineInteractive() {
-		return routineRefine(res.ID, routineNewRefineAgent)
+	if routine.InteractiveWith(d) {
+		return routine.RefineWith(d, res.ID, o.refineAgent)
 	}
 	fmt.Fprintf(out, "\nRoutine created paused. Iterate on its prompt, fire it manually with\n")
 	fmt.Fprintf(out, "  pop routine fire %s\nuntil you are happy with the result, then arm it with\n", res.ID)
@@ -182,7 +202,8 @@ func runRoutineNew(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runRoutineEdit(cmd *cobra.Command, args []string) error {
+func runRoutineEdit(cmd *cobra.Command, args []string, o *routineEditOpts) error {
+	d := cmdLayerDeps().routineDeps()
 	scheduleSet := cmd.Flags().Changed("schedule")
 	agentsSet := cmd.Flags().Changed("agent")
 	effortSet := cmd.Flags().Changed("effort")
@@ -190,7 +211,7 @@ func runRoutineEdit(cmd *cobra.Command, args []string) error {
 	if scheduleSet || agentsSet || effortSet {
 		out := cmd.OutOrStdout()
 		if scheduleSet {
-			res, err := routineEdit(args[0], routineEditSchedule, true)
+			res, err := routine.EditWith(d, args[0], o.schedule, true)
 			if err != nil {
 				return err
 			}
@@ -204,7 +225,7 @@ func runRoutineEdit(cmd *cobra.Command, args []string) error {
 		// Editing runtime agents/effort is run-affecting: it pauses the routine
 		// with reason `changed`.
 		if agentsSet || effortSet {
-			res, err := routineUpdateRuntime(args[0], routineEditAgents, agentsSet, routineEditEffort, effortSet)
+			res, err := routine.UpdateRuntimeWith(d, args[0], o.agents, agentsSet, o.effort, effortSet)
 			if err != nil {
 				return err
 			}
@@ -220,15 +241,15 @@ func runRoutineEdit(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	// Bare edit opens the refinement session.
-	return routineRefine(args[0], routineEditRefineAgent)
+	return routine.RefineWith(d, args[0], o.refineAgent)
 }
 
 func runRoutineList(cmd *cobra.Command, args []string) error {
-	return routineList(cmd.OutOrStdout())
+	return routine.ListWith(cmdLayerDeps().routineDeps(), cmd.OutOrStdout())
 }
 
 func runRoutineFire(cmd *cobra.Command, args []string) error {
-	res, err := routineFire(args[0])
+	res, err := routine.FireWith(cmdLayerDeps().routineDeps(), args[0])
 	if err != nil {
 		return err
 	}
@@ -238,7 +259,7 @@ func runRoutineFire(cmd *cobra.Command, args []string) error {
 }
 
 func runRoutinePause(cmd *cobra.Command, args []string) error {
-	res, err := routinePause(args[0])
+	res, err := routine.PauseWith(cmdLayerDeps().routineDeps(), args[0])
 	if err != nil {
 		return err
 	}
@@ -251,7 +272,7 @@ func runRoutinePause(cmd *cobra.Command, args []string) error {
 }
 
 func runRoutineResume(cmd *cobra.Command, args []string) error {
-	res, err := routineResume(args[0])
+	res, err := routine.ResumeWith(cmdLayerDeps().routineDeps(), args[0])
 	if err != nil {
 		return err
 	}
@@ -264,17 +285,17 @@ func runRoutineResume(cmd *cobra.Command, args []string) error {
 }
 
 func runRoutineRuns(cmd *cobra.Command, args []string) error {
-	return routineRuns(args[0], cmd.OutOrStdout())
+	return routine.RunsWith(cmdLayerDeps().routineDeps(), args[0], cmd.OutOrStdout())
 }
 
 func runRoutineHandoff(cmd *cobra.Command, args []string) error {
-	return routineHandoff(args[0], cmd.OutOrStdout())
+	return routine.HandoffWith(cmdLayerDeps().routineDeps(), args[0], cmd.OutOrStdout())
 }
 
 func runRoutineDashboard(cmd *cobra.Command, args []string) error {
-	return routineDashboard(cmdLayerDeps().routineDeps())
+	return dashboardshell.RunFromRoutine(cmdLayerDeps().routineDeps())
 }
 
 func runRoutineMigrateManifests(cmd *cobra.Command, args []string) error {
-	return routineMigrateManifests(cmd.OutOrStdout())
+	return routine.MigrateManifestsWith(cmdLayerDeps().routineDeps(), cmd.OutOrStdout())
 }

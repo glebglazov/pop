@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/glebglazov/pop/routine"
+	"github.com/spf13/cobra"
 )
 
 func TestRoutineCommandTree(t *testing.T) {
@@ -48,33 +48,24 @@ func setupRoutineCmdTest(t *testing.T) {
 	setCmdLayerDeps(t, cd)
 }
 
+// runRoutineCmd drives one routine subcommand through cobra with a fresh
+// command instance, so flag state and output buffers stay per-test.
+func runRoutineCmd(t *testing.T, cmd *cobra.Command, out io.Writer, args ...string) error {
+	t.Helper()
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs(args)
+	return cmd.Execute()
+}
+
 func TestRunRoutineNewAndList(t *testing.T) {
 	// Serial: mutates package-level routineNew / routineNewSchedule hooks.
 	setupRoutineCmdTest(t)
 
-	oldNew := routineNew
-	oldList := routineList
-	oldInteractive := routineInteractive
-	defer func() {
-		routineNew = oldNew
-		routineList = oldList
-		routineInteractive = oldInteractive
-	}()
-	routineInteractive = func() bool { return false }
-	routineNew = func(id, scheduleRaw, cwd string) (*routine.AddResult, error) {
-		d := cmdLayerDeps().routineDeps()
-		d.IsInteractive = func() bool { return false }
-		return routine.AddWith(d, id, scheduleRaw, cwd)
-	}
-	routineList = func(out io.Writer) error {
-		return routine.ListWith(cmdLayerDeps().routineDeps(), out)
-	}
-
 	var newOut bytes.Buffer
-	routineNewCmd.SetOut(&newOut)
-	routineNewCmd.SetErr(&newOut)
-	routineNewSchedule = "every 6h"
-	if err := runRoutineNew(routineNewCmd, []string{"home-routine"}); err != nil {
+	if err := runRoutineCmd(t, newRoutineNewCmd(), &newOut, "home-routine", "--schedule", "every 6h"); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(newOut.String(), "Created routine") {
@@ -87,8 +78,7 @@ func TestRunRoutineNewAndList(t *testing.T) {
 	}
 
 	var listOut bytes.Buffer
-	routineListCmd.SetOut(&listOut)
-	if err := runRoutineList(routineListCmd, nil); err != nil {
+	if err := runRoutineCmd(t, newRoutineListCmd(), &listOut); err != nil {
 		t.Fatal(err)
 	}
 	text := listOut.String()
@@ -103,26 +93,8 @@ func TestRunRoutineNewUnscheduledHint(t *testing.T) {
 	// Serial: mutates package-level routineNew / routineNewSchedule hooks.
 	setupRoutineCmdTest(t)
 
-	oldNew := routineNew
-	oldInteractive := routineInteractive
-	oldSchedule := routineNewSchedule
-	defer func() {
-		routineNew = oldNew
-		routineInteractive = oldInteractive
-		routineNewSchedule = oldSchedule
-	}()
-	routineInteractive = func() bool { return false }
-	routineNew = func(id, scheduleRaw, cwd string) (*routine.AddResult, error) {
-		d := cmdLayerDeps().routineDeps()
-		d.IsInteractive = func() bool { return false }
-		return routine.AddWith(d, id, scheduleRaw, cwd)
-	}
-
 	var newOut bytes.Buffer
-	routineNewCmd.SetOut(&newOut)
-	routineNewCmd.SetErr(&newOut)
-	routineNewSchedule = ""
-	if err := runRoutineNew(routineNewCmd, []string{"unscheduled-routine"}); err != nil {
+	if err := runRoutineCmd(t, newRoutineNewCmd(), &newOut, "unscheduled-routine"); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"Schedule: manual", "No schedule was set", "pop routine edit unscheduled-routine --schedule"} {
@@ -136,53 +108,16 @@ func TestRunRoutinePauseResumeAndRuns(t *testing.T) {
 	// Serial: mutates package-level routineNew / routineNewSchedule hooks.
 	setupRoutineCmdTest(t)
 
-	oldNew := routineNew
-	oldList := routineList
-	oldPause := routinePause
-	oldResume := routineResume
-	oldRuns := routineRuns
-	oldInteractive := routineInteractive
-	defer func() {
-		routineNew = oldNew
-		routineList = oldList
-		routinePause = oldPause
-		routineResume = oldResume
-		routineRuns = oldRuns
-		routineInteractive = oldInteractive
-	}()
-	routineInteractive = func() bool { return false }
-	routineNew = func(id, scheduleRaw, cwd string) (*routine.AddResult, error) {
-		d := cmdLayerDeps().routineDeps()
-		d.IsInteractive = func() bool { return false }
-		return routine.AddWith(d, id, scheduleRaw, cwd)
-	}
-	rd := func() *routine.Deps { return cmdLayerDeps().routineDeps() }
-	routineList = func(out io.Writer) error {
-		return routine.ListWith(rd(), out)
-	}
-	routinePause = func(id string) (*routine.PauseResult, error) {
-		return routine.PauseWith(rd(), id)
-	}
-	routineResume = func(id string) (*routine.ResumeResult, error) {
-		return routine.ResumeWith(rd(), id)
-	}
-	routineRuns = func(id string, out io.Writer) error {
-		return routine.RunsWith(rd(), id, out)
-	}
-
-	routineNewSchedule = "every 6h"
-	if err := runRoutineNew(routineNewCmd, []string{"cli-routine"}); err != nil {
+	if err := runRoutineCmd(t, newRoutineNewCmd(), io.Discard, "cli-routine", "--schedule", "every 6h"); err != nil {
 		t.Fatal(err)
 	}
 	// Routines are created paused; arm it so the pause/resume cycle starts unpaused.
-	routineResumeCmd.SetOut(io.Discard)
-	if err := runRoutineResume(routineResumeCmd, []string{"cli-routine"}); err != nil {
+	if err := runRoutineCmd(t, newRoutineResumeCmd(), io.Discard, "cli-routine"); err != nil {
 		t.Fatal(err)
 	}
 
 	var pauseOut bytes.Buffer
-	routinePauseCmd.SetOut(&pauseOut)
-	if err := runRoutinePause(routinePauseCmd, []string{"cli-routine"}); err != nil {
+	if err := runRoutineCmd(t, newRoutinePauseCmd(), &pauseOut, "cli-routine"); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(pauseOut.String(), "Paused routine") {
@@ -190,8 +125,7 @@ func TestRunRoutinePauseResumeAndRuns(t *testing.T) {
 	}
 
 	var listOut bytes.Buffer
-	routineListCmd.SetOut(&listOut)
-	if err := runRoutineList(routineListCmd, nil); err != nil {
+	if err := runRoutineCmd(t, newRoutineListCmd(), &listOut); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(listOut.String(), "yes") {
@@ -199,7 +133,7 @@ func TestRunRoutinePauseResumeAndRuns(t *testing.T) {
 	}
 
 	pauseOut.Reset()
-	if err := runRoutinePause(routinePauseCmd, []string{"cli-routine"}); err != nil {
+	if err := runRoutineCmd(t, newRoutinePauseCmd(), &pauseOut, "cli-routine"); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(pauseOut.String(), "already paused") {
@@ -207,8 +141,7 @@ func TestRunRoutinePauseResumeAndRuns(t *testing.T) {
 	}
 
 	var resumeOut bytes.Buffer
-	routineResumeCmd.SetOut(&resumeOut)
-	if err := runRoutineResume(routineResumeCmd, []string{"cli-routine"}); err != nil {
+	if err := runRoutineCmd(t, newRoutineResumeCmd(), &resumeOut, "cli-routine"); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(resumeOut.String(), "Resumed routine") {
@@ -216,7 +149,7 @@ func TestRunRoutinePauseResumeAndRuns(t *testing.T) {
 	}
 
 	resumeOut.Reset()
-	if err := runRoutineResume(routineResumeCmd, []string{"cli-routine"}); err != nil {
+	if err := runRoutineCmd(t, newRoutineResumeCmd(), &resumeOut, "cli-routine"); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(resumeOut.String(), "not paused") {
@@ -224,15 +157,14 @@ func TestRunRoutinePauseResumeAndRuns(t *testing.T) {
 	}
 
 	var runsOut bytes.Buffer
-	routineRunsCmd.SetOut(&runsOut)
-	if err := runRoutineRuns(routineRunsCmd, []string{"cli-routine"}); err != nil {
+	if err := runRoutineCmd(t, newRoutineRunsCmd(), &runsOut, "cli-routine"); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(runsOut.String(), "No runs yet") {
 		t.Fatalf("runs output = %q", runsOut.String())
 	}
 
-	if err := runRoutinePause(routinePauseCmd, []string{"unknown-id"}); err == nil {
+	if err := runRoutineCmd(t, newRoutinePauseCmd(), io.Discard, "unknown-id"); err == nil {
 		t.Fatal("expected unknown pause error")
 	}
 }

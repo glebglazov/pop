@@ -143,3 +143,13 @@ func defaultIsInteractive() bool {
 func Interactive() bool {
 	return defaultIsInteractive()
 }
+
+// InteractiveWith answers the same question through the deps seam. A Deps with
+// no IsInteractive wired is non-interactive, matching how every other verb in
+// this package reads the seam.
+func InteractiveWith(d *Deps) bool {
+	if d == nil || d.IsInteractive == nil {
+		return false
+	}
+	return d.IsInteractive()
+}
