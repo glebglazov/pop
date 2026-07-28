@@ -1674,7 +1674,7 @@ func TestDryRun_ClaudeInstalledDetectedViaSettingsHooks(t *testing.T) {
 	}
 }
 
-// ----- EnsureIntegrationsForRevisionWith -------------------------------------
+// ----- ensureForRevisionWith -------------------------------------
 
 // seedState writes a state.json with the given revision into the cmd-layer data dir.
 // The caller must have wired cmdLayerDeps via setupIntegrateCmdLayer before calling.
@@ -1713,7 +1713,7 @@ func TestEnsureIntegrations_SkipsOnDevBuild(t *testing.T) {
 	fs := newFakeFS()
 	_, real := fakeFactories("/h", fs)
 
-	warnings := EnsureIntegrationsForRevisionWith("dev", testConfigDeps(t), real)
+	warnings := ensureForRevisionWith("dev", testConfigDeps(t), real)
 	if warnings != nil {
 		t.Errorf("expected nil warnings for dev build, got %v", warnings)
 	}
@@ -1734,7 +1734,7 @@ func TestEnsureIntegrations_SkipsWhenRevisionMatches(t *testing.T) {
 		return fakeDeps("/h", fs, io.Discard)
 	}
 
-	warnings := EnsureIntegrationsForRevisionWith("abc123", testConfigDeps(t), factory)
+	warnings := ensureForRevisionWith("abc123", testConfigDeps(t), factory)
 	if warnings != nil {
 		t.Errorf("expected nil warnings, got %v", warnings)
 	}
@@ -1746,12 +1746,12 @@ func TestEnsureIntegrations_SkipsWhenRevisionMatches(t *testing.T) {
 func TestEnsureIntegrations_SkipsUninstalledAgents(t *testing.T) {
 	t.Parallel()
 	setupIntegrateConfigLayer(t)
-	// No agents installed: EnsureIntegrations should do nothing, return no
+	// No agents installed: EnsureForRevision should do nothing, return no
 	// warnings, and stamp the new revision.
 	fs := newFakeFS()
 	_, real := fakeFactories("/h", fs)
 
-	warnings := EnsureIntegrationsForRevisionWith("rev1", testConfigDeps(t), real)
+	warnings := ensureForRevisionWith("rev1", testConfigDeps(t), real)
 	if warnings != nil {
 		t.Errorf("expected nil warnings for no-install case, got %v", warnings)
 	}
@@ -1776,7 +1776,7 @@ func TestEnsureIntegrations_UpdatesStaleAgent(t *testing.T) {
 	t.Parallel()
 	setupIntegrateConfigLayer(t)
 	// Seed claude as installed-but-stale; pi and opencode uninstalled.
-	// EnsureIntegrations should run the real install for claude only and
+	// EnsureForRevision should run the real install for claude only and
 	// stamp state.json.
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
@@ -1792,7 +1792,7 @@ func TestEnsureIntegrations_UpdatesStaleAgent(t *testing.T) {
 
 	_, real := fakeFactories("/h", fs)
 
-	warnings := EnsureIntegrationsForRevisionWith("rev2", testConfigDeps(t), real)
+	warnings := ensureForRevisionWith("rev2", testConfigDeps(t), real)
 	if warnings != nil {
 		t.Errorf("expected no warnings on successful update, got %v", warnings)
 	}
@@ -1813,7 +1813,7 @@ func TestEnsureIntegrations_RetriesOnFailure(t *testing.T) {
 	t.Parallel()
 	setupIntegrateConfigLayer(t)
 	// Seed claude as installed-but-stale, then inject a write error for the
-	// real install. EnsureIntegrations should return a warning and leave
+	// real install. EnsureForRevision should return a warning and leave
 	// state.json unstamped so the next launch retries.
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
@@ -1825,7 +1825,7 @@ func TestEnsureIntegrations_RetriesOnFailure(t *testing.T) {
 	fs.writeErr[stalePath] = errors.New("simulated write failure")
 
 	_, real := fakeFactories("/h", fs)
-	warnings := EnsureIntegrationsForRevisionWith("rev3", testConfigDeps(t), real)
+	warnings := ensureForRevisionWith("rev3", testConfigDeps(t), real)
 
 	if len(warnings) == 0 {
 		t.Fatal("expected a warning for claude update failure")
@@ -1864,7 +1864,7 @@ func TestEnsureIntegrations_PartialFailureDoesNotStamp(t *testing.T) {
 	fs.writeErr[piExtPath] = errors.New("pi write failure")
 
 	_, real := fakeFactories("/h", fs)
-	warnings := EnsureIntegrationsForRevisionWith("rev4", testConfigDeps(t), real)
+	warnings := ensureForRevisionWith("rev4", testConfigDeps(t), real)
 
 	// claude should have updated cleanly.
 	if !bytes.Contains(fs.files[clauseStale], []byte("pop pane set-status clear")) {
@@ -1938,7 +1938,7 @@ func TestEnsureIntegrations_RefreshesStaleFileComponent(t *testing.T) {
 	fs.files[renderFile] = []byte("stale skill body")
 
 	_, real := fakeFactories("/h", fs)
-	warnings := EnsureIntegrationsForRevisionWith("rev-fc1", testConfigDeps(t), real)
+	warnings := ensureForRevisionWith("rev-fc1", testConfigDeps(t), real)
 	if warnings != nil {
 		t.Errorf("expected no warnings on successful file-component refresh, got %v", warnings)
 	}
@@ -1958,7 +1958,7 @@ func TestEnsureIntegrations_NeverAddsUninstalledFileComponent(t *testing.T) {
 	fs := newFakeFS()
 
 	_, real := fakeFactories("/h", fs)
-	warnings := EnsureIntegrationsForRevisionWith("rev-fc2", testConfigDeps(t), real)
+	warnings := ensureForRevisionWith("rev-fc2", testConfigDeps(t), real)
 	if warnings != nil {
 		t.Errorf("expected no warnings, got %v", warnings)
 	}
@@ -2010,7 +2010,7 @@ func TestEnsureIntegrations_AddsMissingBaselineComponent(t *testing.T) {
 	installViaFake(t, fs, "/h", "claude")
 
 	_, real := fakeFactories("/h", fs)
-	warnings := EnsureIntegrationsForRevisionWith("rev-add2", testConfigDeps(t), real)
+	warnings := ensureForRevisionWith("rev-add2", testConfigDeps(t), real)
 	if warnings != nil {
 		t.Errorf("expected no warnings, got %v", warnings)
 	}
@@ -2229,7 +2229,7 @@ func TestEnsureIntegrations_MigratesCopyModeToSymlink(t *testing.T) {
 	fs.files[copyFile] = []byte(injectOwnershipMarker("---\nname: pop-tmux-pane\n---\nold copy-mode body"))
 
 	_, real := fakeFactories("/h", fs)
-	warnings := EnsureIntegrationsForRevisionWith("rev-fc3", testConfigDeps(t), real)
+	warnings := ensureForRevisionWith("rev-fc3", testConfigDeps(t), real)
 	if warnings != nil {
 		t.Errorf("expected no warnings on migration, got %v", warnings)
 	}

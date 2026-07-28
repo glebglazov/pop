@@ -111,7 +111,7 @@ func TestRefresh_SeedsWorkStoreDocOnceAcrossAgents(t *testing.T) {
 	installViaFake(t, fs, "/h", "pi")
 
 	_, real := fakeFactories("/h", fs)
-	if warnings := EnsureIntegrationsForRevisionWith("rev-seed1", testConfigDeps(t), real); warnings != nil {
+	if warnings := ensureForRevisionWith("rev-seed1", testConfigDeps(t), real); warnings != nil {
 		t.Fatalf("unexpected warnings: %v", warnings)
 	}
 
@@ -138,7 +138,7 @@ func TestRefresh_LeavesEditedWorkStoreDocByteIdentical(t *testing.T) {
 	fs.files[path] = append([]byte{}, edited...)
 
 	_, real := fakeFactories("/h", fs)
-	if warnings := EnsureIntegrationsForRevisionWith("rev-seed2", testConfigDeps(t), real); warnings != nil {
+	if warnings := ensureForRevisionWith("rev-seed2", testConfigDeps(t), real); warnings != nil {
 		t.Fatalf("unexpected warnings: %v", warnings)
 	}
 

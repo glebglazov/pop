@@ -16,7 +16,7 @@ import (
 // Currently used only as a staleness marker for auto-updating integrations.
 type appState struct {
 	// BuildRevision is the vcs.revision of the binary that last successfully
-	// ran EnsureIntegrations. An empty value means no check has run yet.
+	// ran EnsureForRevision. An empty value means no check has run yet.
 	BuildRevision string `json:"build_revision"`
 }
 
@@ -80,12 +80,14 @@ func saveAppState(d *Deps, s *appState) error {
 
 // ----- Auto-update integrations ---------------------------------------------
 
-// EnsureIntegrations checks whether installed integration components are stale
-// against the currently running binary's VCS revision and reconciles them to
-// the merged Integration baseline. Returns warnings to surface in the picker
-// for any failures.
-func EnsureIntegrations(rev string, cd *config.Deps) []string {
-	return EnsureIntegrationsForRevisionWith(rev, cd, DefaultDeps)
+// EnsureForRevision is the revision-gated Integration refresh entry point.
+// The caller supplies the binary revision (cmd injects buildRevision());
+// integrate never derives it. When the recorded revision differs, installed
+// integration components are reconciled to the merged baseline and the Work
+// store doc is seeded; when it matches, refresh is skipped. Returns warnings
+// to surface in the picker for any failures.
+func EnsureForRevision(rev string, cd *config.Deps) []string {
+	return ensureForRevisionWith(rev, cd, DefaultDeps)
 }
 
 // integrationUpdateResult reports what updateStaleIntegrations did during
@@ -104,7 +106,7 @@ type integrationUpdateResult struct {
 //
 // The function does not read or write state.json, does not gate on the
 // binary revision, and does not emit output. Callers layer those behaviors
-// on top (see EnsureIntegrationsForRevisionWith and RunUpdateExistingWith).
+// on top (see ensureForRevisionWith and RunUpdateExistingWith).
 func updateStaleIntegrations(cd *config.Deps, newDeps func() *Deps) integrationUpdateResult {
 	if err := seedWorkStoreDoc(newDeps()); err != nil {
 		debug.Error("updateStaleIntegrations: seed work store doc: %v", err)
@@ -344,10 +346,6 @@ func stampRevisionIfSuccess(rev string, d *Deps, result integrationUpdateResult)
 	}
 }
 
-func EnsureIntegrationsForRevision(rev string, cd *config.Deps) []string {
-	return EnsureIntegrationsForRevisionWith(rev, cd, DefaultDeps)
-}
-
 func stateDepsFromConfig(cd *config.Deps, base *Deps) *Deps {
 	if cd == nil || cd.FS == nil || base == nil {
 		return base
@@ -370,7 +368,7 @@ func stateDepsFromConfig(cd *config.Deps, base *Deps) *Deps {
 	return &d
 }
 
-func EnsureIntegrationsForRevisionWith(rev string, cd *config.Deps, newDeps func() *Deps) []string {
+func ensureForRevisionWith(rev string, cd *config.Deps, newDeps func() *Deps) []string {
 	if rev == "dev" {
 		return nil
 	}

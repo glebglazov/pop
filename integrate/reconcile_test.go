@@ -187,7 +187,7 @@ func TestEnsureIntegrations_MigratesBaseRename(t *testing.T) {
 	var logs []string
 	_, real := reconcileFactories("/h", fs, nil, &logs) // default pop- → renders pop-tmux-pane
 
-	warnings := EnsureIntegrationsForRevisionWith("rev-rename", testConfigDeps(t), real)
+	warnings := ensureForRevisionWith("rev-rename", testConfigDeps(t), real)
 	if warnings != nil {
 		t.Fatalf("expected no warnings, got %v", warnings)
 	}

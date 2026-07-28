@@ -296,7 +296,7 @@ func isPopAutoClearHook(command string) bool {
 // warnings slot. The function is called from the main goroutine; it should
 // not be wrapped in `go`.
 func ensureSystemState() []string {
-	warnings := integrate.EnsureIntegrations(buildRevision(), cmdLayerDeps().configDeps())
+	warnings := integrate.EnsureForRevision(buildRevision(), cmdLayerDeps().configDeps())
 	go ensureMonitorDaemon()
 	return warnings
 }
