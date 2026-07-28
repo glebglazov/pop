@@ -108,8 +108,14 @@ type integrationUpdateResult struct {
 // binary revision, and does not emit output. Callers layer those behaviors
 // on top (see ensureForRevisionWith and RunUpdateExistingWith).
 func updateStaleIntegrations(cd *config.Deps, newDeps func() *Deps) integrationUpdateResult {
-	if err := seedWorkStoreDoc(newDeps()); err != nil {
+	d := newDeps()
+	if err := seedWorkStoreDoc(d); err != nil {
 		debug.Error("updateStaleIntegrations: seed work store doc: %v", err)
+	}
+
+	var result integrationUpdateResult
+	if o := removeLegacyWorkStoreDoc(d); o != nil {
+		result.Outcomes = append(result.Outcomes, *o)
 	}
 
 	baseline, err := BaselineLoader(cd)
@@ -120,8 +126,6 @@ func updateStaleIntegrations(cd *config.Deps, newDeps func() *Deps) integrationU
 		}
 	}
 	baselineSet := baselineComponentSet(baseline)
-
-	var result integrationUpdateResult
 
 	for _, agent := range Agents {
 		integrated, err := agentIntegratedViaStatusWiring(newDeps, agent)

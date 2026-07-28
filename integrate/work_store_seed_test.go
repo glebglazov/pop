@@ -45,6 +45,126 @@ func workStoreDataPath(home string) string {
 	return filepath.Join(home, ".local", "share", "pop", "work-store.md")
 }
 
+func workStoreLegacyConfigPath(home string) string {
+	return filepath.Join(home, ".config", "pop", "work-store.md")
+}
+
+// TestRemoveLegacyWorkStoreDoc covers present / absent / unwritable removal of
+// the pre-ADR-0150 config-dir Work store doc.
+func TestRemoveLegacyWorkStoreDoc(t *testing.T) {
+	t.Parallel()
+
+	t.Run("present", func(t *testing.T) {
+		t.Parallel()
+		fs := newFakeFS()
+		path := workStoreLegacyConfigPath("/h")
+		fs.files[path] = []byte("# legacy config-dir copy\n")
+
+		outcome := removeLegacyWorkStoreDoc(fakeDeps("/h", fs, io.Discard))
+		if outcome == nil {
+			t.Fatal("expected removal outcome when legacy doc is present")
+		}
+		if outcome.Skill != path {
+			t.Errorf("outcome path = %q, want %q", outcome.Skill, path)
+		}
+		if outcome.Label != "removed" {
+			t.Errorf("outcome label = %q, want removed", outcome.Label)
+		}
+		if _, ok := fs.files[path]; ok {
+			t.Errorf("legacy doc still present at %s", path)
+		}
+	})
+
+	t.Run("absent", func(t *testing.T) {
+		t.Parallel()
+		fs := newFakeFS()
+		if outcome := removeLegacyWorkStoreDoc(fakeDeps("/h", fs, io.Discard)); outcome != nil {
+			t.Errorf("expected no outcome when legacy doc is absent, got %+v", outcome)
+		}
+	})
+
+	t.Run("unwritable", func(t *testing.T) {
+		t.Parallel()
+		fs := newFakeFS()
+		path := workStoreLegacyConfigPath("/h")
+		fs.files[path] = []byte("# legacy config-dir copy\n")
+		fs.removeErr[path] = os.ErrPermission
+
+		if outcome := removeLegacyWorkStoreDoc(fakeDeps("/h", fs, io.Discard)); outcome != nil {
+			t.Errorf("expected no outcome when removal fails, got %+v", outcome)
+		}
+		if _, ok := fs.files[path]; !ok {
+			t.Error("legacy doc must remain when removal fails")
+		}
+	})
+}
+
+// TestRefresh_LegacyWorkStoreDocRemoval proves Integration refresh deletes the
+// config-dir copy when present, stays silent when absent, and does not fail when
+// removal is blocked.
+func TestRefresh_LegacyWorkStoreDocRemoval(t *testing.T) {
+	t.Parallel()
+
+	t.Run("present", func(t *testing.T) {
+		t.Parallel()
+		setupIntegrateConfigLayer(t)
+		fs := newFakeFS()
+		legacyPath := workStoreLegacyConfigPath("/h")
+		fs.files[legacyPath] = []byte("# legacy config-dir copy\n")
+
+		_, real := fakeFactories("/h", fs)
+		var stdout strings.Builder
+		if err := RunUpdateExistingWith("rev-legacy1", testConfigDeps(t), real, &stdout, io.Discard, false); err != nil {
+			t.Fatalf("RunUpdateExistingWith: %v", err)
+		}
+		if _, ok := fs.files[legacyPath]; ok {
+			t.Errorf("refresh did not delete legacy doc at %s", legacyPath)
+		}
+		got := stdout.String()
+		if !strings.Contains(got, legacyPath) || !strings.Contains(got, "removed") {
+			t.Errorf("expected removal outcome naming %s, got %q", legacyPath, got)
+		}
+	})
+
+	t.Run("absent", func(t *testing.T) {
+		t.Parallel()
+		setupIntegrateConfigLayer(t)
+		fs := newFakeFS()
+		legacyPath := workStoreLegacyConfigPath("/h")
+
+		_, real := fakeFactories("/h", fs)
+		result := updateStaleIntegrations(testConfigDeps(t), real)
+		for _, o := range result.Outcomes {
+			if o.Skill == legacyPath || strings.Contains(o.Label, "removed") && strings.Contains(o.Skill, "work-store.md") {
+				t.Errorf("refresh must not emit a removal outcome when legacy doc is absent, got %+v", o)
+			}
+		}
+	})
+
+	t.Run("unwritable", func(t *testing.T) {
+		t.Parallel()
+		setupIntegrateConfigLayer(t)
+		fs := newFakeFS()
+		legacyPath := workStoreLegacyConfigPath("/h")
+		fs.files[legacyPath] = []byte("# legacy config-dir copy\n")
+		fs.removeErr[legacyPath] = os.ErrPermission
+
+		_, real := fakeFactories("/h", fs)
+		if warnings := ensureForRevisionWith("rev-legacy2", testConfigDeps(t), real); len(warnings) != 0 {
+			t.Fatalf("refresh must not fail on removal error, got warnings: %v", warnings)
+		}
+		if _, ok := fs.files[legacyPath]; !ok {
+			t.Error("legacy doc must remain when removal is blocked")
+		}
+		result := updateStaleIntegrations(testConfigDeps(t), real)
+		for _, o := range result.Outcomes {
+			if o.Skill == legacyPath {
+				t.Errorf("expected no removal outcome when delete fails, got %+v", o)
+			}
+		}
+	})
+}
+
 // TestSeedWorkStoreDoc_WritesWhenAbsent covers the write-if-different semantics:
 // an empty machine writes the embedded doc verbatim to the data-dir path.
 func TestSeedWorkStoreDoc_WritesWhenAbsent(t *testing.T) {

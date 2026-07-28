@@ -196,6 +196,54 @@ func workStoreDocPath(d *Deps) (string, error) {
 	return filepath.Join(dataDir, "work-store.md"), nil
 }
 
+// popConfigDirWith returns pop's config directory root, respecting
+// XDG_CONFIG_HOME through the integrate deps seam.
+func popConfigDirWith(d *Deps) (string, error) {
+	if xdg := getenv(d, "XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "pop"), nil
+	}
+	home, err := d.userHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config", "pop"), nil
+}
+
+// legacyWorkStoreDocPath returns the pre-ADR-0150 Work store doc path at
+// ${XDG_CONFIG_HOME:-~/.config}/pop/work-store.md. Nothing reads this file
+// anymore; Integration refresh deletes it unconditionally when present.
+func legacyWorkStoreDocPath(d *Deps) (string, error) {
+	configDir, err := popConfigDirWith(d)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(configDir, "work-store.md"), nil
+}
+
+// removeLegacyWorkStoreDoc deletes the config-dir Work store doc when present,
+// unconditionally and without byte comparison (ADR-0150). Returns one Integrate
+// outcome naming the removed path, or nil when the file is absent or removal
+// fails — refresh callers must not treat a removal failure as fatal.
+func removeLegacyWorkStoreDoc(d *Deps) *Outcome {
+	path, err := legacyWorkStoreDocPath(d)
+	if err != nil {
+		debug.Error("removeLegacyWorkStoreDoc: path: %v", err)
+		return nil
+	}
+	if _, err := d.readFile(path); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		debug.Error("removeLegacyWorkStoreDoc: read %s: %v", path, err)
+		return nil
+	}
+	if err := d.removeAll(path); err != nil {
+		debug.Error("removeLegacyWorkStoreDoc: remove %s: %v", path, err)
+		return nil
+	}
+	return &Outcome{Skill: path, Label: "removed"}
+}
+
 // seedWorkStoreDoc writes the embedded pop Work store doc to its Shipped-asset
 // path whenever on-disk bytes differ from the embedded copy (ADR-0150). A
 // matching file is left untouched. Agent-agnostic: callers invoke it once per
