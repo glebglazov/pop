@@ -55,6 +55,19 @@ func setupSupervisorRepoSets(t *testing.T, sets []setSpec, managed bool) string 
 	if _, err := register(dd, tasksDir, statePath); err != nil {
 		t.Fatal(err)
 	}
+	if managed {
+		cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+		for _, s := range sets {
+			if _, err := binding.ProvisionManagedBinding(binding.ProvisionManagedBindingRequest{
+				TD:           dd,
+				Config:       cfg,
+				CheckoutPath: repo,
+				SetID:        s.stem,
+			}); err != nil {
+				t.Fatalf("provision managed %s: %v", s.stem, err)
+			}
+		}
+	}
 	for _, s := range sets {
 		if _, err := tasks.ToggleAutoDrainWith(dd, tasksDir, statePath, s.stem); err != nil {
 			t.Fatal(err)
@@ -106,8 +119,8 @@ func TestSupervisorManagedIntentProvisionsWorktreeAndDrainsThere(t *testing.T) {
 	setID := "managed-set"
 	repo := setupSupervisorRepoSets(t, []setSpec{{stem: setID, tasks: oneTask()}}, true)
 	d, rt := supervisorDeps(t, repo)
-	// Deliberately left unbound: the managed intent — not an operator bind — must
-	// drive the one-time provisioning.
+	// Provisioned eagerly at register (ADR-0147): the binding must already exist
+	// before the supervisor tick — not created lazily at drain time.
 
 	var out bytes.Buffer
 	tick(d, &out, newRunOutputState())
@@ -118,7 +131,7 @@ func TestSupervisorManagedIntentProvisionsWorktreeAndDrainsThere(t *testing.T) {
 	}
 	b, ok := loadBindingStore(t, d.Tasks)[setScopedKey(repoKey, setID)]
 	if !ok {
-		t.Fatalf("managed intent must provision and bind a worktree; got no binding for %s", setID)
+		t.Fatalf("managed register must bind a worktree before drain; got no binding for %s", setID)
 	}
 	if !b.Provisioned {
 		t.Fatalf("binding must be Provisioned (managed), got adopted: %+v", b)

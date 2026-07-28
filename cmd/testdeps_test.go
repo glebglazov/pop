@@ -96,7 +96,7 @@ func setCmdLayerDeps(t *testing.T, d *Deps) {
 func setupCmdRepoTest(t *testing.T) (root string, cd *Deps, td *tasks.Deps) {
 	t.Helper()
 	root = t.TempDir()
-	initGitRepoCmd(t, root)
+	initGitRepoWithCommitCmd(t, root)
 	cd = newTestCmdDeps(t, root, filepath.Join(root, ".xdg"), "")
 	setCmdLayerDeps(t, cd)
 	return root, cd, cd.tasksDeps()

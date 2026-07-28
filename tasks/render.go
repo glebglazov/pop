@@ -65,14 +65,11 @@ func RegisterWith(d *Deps, defPath, statePath string) (*RefreshResult, error) {
 	return refreshWith(d, defPath, statePath, true, false, false)
 }
 
-// RegisterManagedWith registers like RegisterWith but records a managed
-// worktree intent on each newly-registered set (ADR-0115): rather than
-// eagerly adopting the current checkout, the set's worktree is provisioned
-// lazily — a pop-owned worktree forked from the Trunk worktree — at its first
-// Queue drain. The register command skips the eager-adopt step for managed
-// registrations.
+// RegisterManagedWith registers newly discovered sets like RegisterWith. Managed
+// worktrees are provisioned eagerly by the register command (ADR-0147); this
+// helper exists for tests and callers that provision bindings separately.
 func RegisterManagedWith(d *Deps, defPath, statePath string) (*RefreshResult, error) {
-	return refreshWith(d, defPath, statePath, true, true, false)
+	return refreshWith(d, defPath, statePath, true, false, false)
 }
 
 func refreshWith(d *Deps, defPath, statePath string, register, managed, showArchived bool) (*RefreshResult, error) {

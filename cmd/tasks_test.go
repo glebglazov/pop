@@ -254,11 +254,10 @@ func registeredIntent(t *testing.T, td *tasks.Deps, root, setID string) *tasks.W
 	return intent
 }
 
-// TestTaskRegisterManagedRecordsIntentNoEagerBinding covers ADR-0115 slice 03:
-// `register --managed` records a managed worktree intent and does NOT eager-bind
-// the current checkout — the worktree is provisioned lazily at first drain, so
-// nothing is bound the moment the set registers.
-func TestTaskRegisterManagedRecordsIntentNoEagerBinding(t *testing.T) {
+// TestTaskRegisterManagedProvisionsEagerBinding covers ADR-0147: `register
+// --managed` forks a managed worktree from the Trunk worktree and records a
+// provisioned binding before returning — the set is drainable immediately.
+func TestTaskRegisterManagedProvisionsEagerBinding(t *testing.T) {
 	root, _, td := setupCmdRepoTest(t)
 	resetTaskFlags()
 	t.Cleanup(resetTaskFlags)
@@ -266,13 +265,11 @@ func TestTaskRegisterManagedRecordsIntentNoEagerBinding(t *testing.T) {
 	tasksDir := cmdTasksDir(t, td, root)
 	writeTaskThoughts(t, tasksDir, "draft")
 
-
 	origLoad := taskConfigLoad
 	taskConfigLoad = func(string) (*config.Config, error) {
 		return &config.Config{Projects: []config.ProjectEntry{{Path: root}}}, nil
 	}
 	t.Cleanup(func() { taskConfigLoad = origLoad })
-
 
 	taskRegisterManaged = true
 	var regOut bytes.Buffer
@@ -280,17 +277,134 @@ func TestTaskRegisterManagedRecordsIntentNoEagerBinding(t *testing.T) {
 		t.Fatalf("register --managed failed: %v", err)
 	}
 
-	// No eager binding: nothing is bound the moment a managed set registers.
-	if _, _, bound, err := binding.FindBySetID(td, "draft"); err != nil {
+	_, b, ok, err := binding.FindBySetID(td, "draft")
+	if err != nil {
 		t.Fatalf("find binding: %v", err)
-	} else if bound {
-		t.Fatalf("register --managed created an eager binding, want none:\n%s", regOut.String())
+	}
+	if !ok || !b.Provisioned {
+		t.Fatalf("register --managed must record a provisioned binding, got ok=%v binding=%+v\n%s", ok, b, regOut.String())
+	}
+	managedRoot := binding.ManagedWorktreesRoot(td)
+	if !strings.HasPrefix(b.RuntimePath, managedRoot+string(filepath.Separator)) {
+		t.Fatalf("binding runtime %q must live under managed root %q", b.RuntimePath, managedRoot)
+	}
+	if _, err := os.Stat(b.RuntimePath); err != nil {
+		t.Fatalf("managed worktree missing on disk: %v", err)
+	}
+	if intent := registeredIntent(t, td, root, "draft"); intent != nil {
+		t.Fatalf("register --managed must not record a managed intent, got %+v", intent)
+	}
+}
+
+// TestTaskRegisterManagedRefusesWithoutTrunk asserts a bare repo with no
+// configured trunk refuses managed register with an error naming --trunk.
+func TestTaskRegisterManagedRefusesWithoutTrunk(t *testing.T) {
+	seed := t.TempDir()
+	initGitRepoWithCommitCmd(t, seed)
+	bare := filepath.Join(t.TempDir(), "bare.git")
+	if out, err := exec.Command("git", "clone", "--bare", seed, bare).CombinedOutput(); err != nil {
+		t.Fatalf("clone --bare: %v\n%s", err, out)
+	}
+	wt := filepath.Join(t.TempDir(), "wt")
+	if out, err := exec.Command("git", "-C", bare, "worktree", "add", wt, "main").CombinedOutput(); err != nil {
+		t.Fatalf("worktree add: %v\n%s", err, out)
 	}
 
-	// The managed intent is recorded, so routing provisions lazily at first drain.
-	intent := registeredIntent(t, td, root, "draft")
-	if intent == nil || !intent.Managed {
-		t.Fatalf("register --managed did not record a managed intent, got %+v", intent)
+	xdg := filepath.Join(t.TempDir(), "xdg")
+	cd := newTestCmdDeps(t, wt, xdg, xdg)
+	setCmdLayerDeps(t, cd)
+	td := cd.tasksDeps()
+	t.Cleanup(resetTaskFlags)
+	resetTaskFlags()
+
+	tasksDir := cmdTasksDir(t, td, wt)
+	writeTaskThoughts(t, tasksDir, "bare-set")
+
+	origLoad := taskConfigLoad
+	taskConfigLoad = func(string) (*config.Config, error) {
+		return &config.Config{Projects: []config.ProjectEntry{{Path: bare}}}, nil
+	}
+	t.Cleanup(func() { taskConfigLoad = origLoad })
+
+	taskRegisterManaged = true
+	err := runTaskRegisterWith(td, io.Discard, "")
+	if err == nil || !strings.Contains(err.Error(), "--trunk") {
+		t.Fatalf("register --managed without trunk = %v, want error naming --trunk", err)
+	}
+	if _, _, bound, _ := binding.FindBySetID(td, "bare-set"); bound {
+		t.Fatal("register must not leave a binding when trunk is missing")
+	}
+	state, err := tasks.RefreshWith(td, tasksDir, tasks.StatePathFor(tasksDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range state.Rows {
+		if row.ID == "bare-set" {
+			t.Fatal("register must not leave a registered set when trunk is missing")
+		}
+	}
+	_ = tasksDir
+}
+
+// TestTaskRegisterManagedTrunkFlagPersists asserts --trunk satisfies a bare
+// repo, persists trunk = true to config, and a later managed register needs no
+// flag.
+func TestTaskRegisterManagedTrunkFlagPersists(t *testing.T) {
+	seed := t.TempDir()
+	initGitRepoWithCommitCmd(t, seed)
+	bare := filepath.Join(t.TempDir(), "bare.git")
+	if out, err := exec.Command("git", "clone", "--bare", seed, bare).CombinedOutput(); err != nil {
+		t.Fatalf("clone --bare: %v\n%s", err, out)
+	}
+	wt := filepath.Join(t.TempDir(), "wt")
+	if out, err := exec.Command("git", "-C", bare, "worktree", "add", wt, "main").CombinedOutput(); err != nil {
+		t.Fatalf("worktree add: %v\n%s", err, out)
+	}
+
+	xdg := filepath.Join(t.TempDir(), "xdg")
+	cd := newTestCmdDeps(t, wt, xdg, xdg)
+	setCmdLayerDeps(t, cd)
+	td := cd.tasksDeps()
+	t.Cleanup(resetTaskFlags)
+	resetTaskFlags()
+
+	cfgPath := filepath.Join(xdg, "pop", "config.toml")
+	tasksDir := cmdTasksDir(t, td, wt)
+
+	writeTaskThoughts(t, tasksDir, "first")
+	origLoad := taskConfigLoad
+	taskConfigLoad = func(path string) (*config.Config, error) {
+		cfg, err := config.LoadWith(cd.Config, path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return &config.Config{Projects: []config.ProjectEntry{{Path: bare}}}, nil
+			}
+			return nil, err
+		}
+		return cfg, nil
+	}
+	t.Cleanup(func() { taskConfigLoad = origLoad })
+
+	taskRegisterManaged = true
+	taskRegisterTrunk = wt
+	if err := runTaskRegisterWith(td, io.Discard, ""); err != nil {
+		t.Fatalf("first managed register with --trunk: %v", err)
+	}
+	cfgData, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if !strings.Contains(string(cfgData), "trunk = true") {
+		t.Fatalf("config missing trunk = true:\n%s", cfgData)
+	}
+
+	writeTaskThoughts(t, tasksDir, "second")
+	taskRegisterTrunk = ""
+	if err := runTaskRegisterWith(td, io.Discard, ""); err != nil {
+		t.Fatalf("second managed register without --trunk: %v", err)
+	}
+	if _, _, ok, err := binding.FindBySetID(td, "second"); err != nil || !ok {
+		t.Fatalf("second set binding: ok=%v err=%v", ok, err)
 	}
 }
 
@@ -685,6 +799,16 @@ func initGitRepoCmd(t *testing.T, root string) {
 	}
 }
 
+func initGitRepoWithCommitCmd(t *testing.T, root string) {
+	t.Helper()
+	initGitRepoCmd(t, root)
+	c := exec.Command("git", "commit", "--allow-empty", "-m", "base")
+	c.Dir = root
+	if out, err := c.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+}
+
 func TestHandleTaskExitMapsCodes(t *testing.T) {
 	tests := []struct {
 		err  error
@@ -1059,6 +1183,7 @@ func resetTaskFlags() {
 	taskRuntimePath = ""
 	taskStatusArchived = false
 	taskRegisterManaged = false
+	taskRegisterTrunk = ""
 	taskRegisterAutoDrain = false
 	taskAgentPreset = ""
 	taskAgentPresets = nil

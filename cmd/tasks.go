@@ -45,6 +45,7 @@ var (
 	taskStatusArchived        bool
 	taskAutoDrainOff          bool
 	taskRegisterManaged       bool
+	taskRegisterTrunk         string
 	taskRegisterAutoDrain     bool
 	taskBindWorktreeForce     bool
 	taskBindWorktreeManaged   bool
@@ -225,7 +226,8 @@ var taskUnbindWorktreeCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(taskCmd)
 	taskCmd.AddCommand(taskStatusCmd)
-	taskRegisterCmd.Flags().BoolVar(&taskRegisterManaged, "managed", false, "Record a managed worktree intent instead of adopting the current checkout: pop provisions its own isolated worktree lazily at first Queue drain")
+	taskRegisterCmd.Flags().BoolVar(&taskRegisterManaged, "managed", false, "Provision a pop-managed worktree forked from the Trunk worktree and bind each newly registered set before returning")
+	taskRegisterCmd.Flags().StringVar(&taskRegisterTrunk, "trunk", "", "Mark <path> as this repository's Trunk worktree in config (required for bare repos on first managed register)")
 	taskRegisterCmd.Flags().BoolVar(&taskRegisterAutoDrain, "auto-drain", false, "Enable the auto-drain consent bit on each newly registered set (default off); `pop tasks auto-drain` and the dashboard `a` toggle remain authoritative afterward")
 	taskCmd.AddCommand(taskRegisterCmd)
 	taskCmd.AddCommand(taskArchiveCmd)
@@ -328,17 +330,34 @@ func runTaskRegisterWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 		return fmt.Errorf("tasks register: %w", err)
 	}
 
-	// --managed records a managed worktree intent on each new set instead of
-	// eagerly adopting the current checkout (ADR-0115): the worktree is
-	// provisioned lazily at first Queue drain, so the eager-adopt step below is
-	// skipped for managed registrations.
-	register := tasks.RegisterWith
+	runtimePath, runtimeErr := tasks.ResolveRuntimePathWith(d, resolved.ProjectPath, taskRuntimePath)
+	cfg, cfgErr := taskConfigLoad(taskConfigPath())
+
+	var trunkPath string
 	if taskRegisterManaged {
-		register = tasks.RegisterManagedWith
+		if runtimeErr != nil {
+			return fmt.Errorf("tasks register: %w", runtimeErr)
+		}
+		if cfgErr != nil {
+			return fmt.Errorf("tasks register: %w", cfgErr)
+		}
+		var trunkErr error
+		trunkPath, cfg, trunkErr = resolveManagedRegisterTrunk(d, cfg, taskConfigPath(), runtimePath, taskRegisterTrunk)
+		if trunkErr != nil {
+			return fmt.Errorf("tasks register: %w", trunkErr)
+		}
 	}
-	result, err := register(d, resolved.DefinitionPath, tasks.StatePathFor(resolved.DefinitionPath))
+
+	result, err := tasks.RegisterWith(d, resolved.DefinitionPath, tasks.StatePathFor(resolved.DefinitionPath))
 	if err != nil {
 		return fmt.Errorf("tasks register: %w", err)
+	}
+
+	if taskRegisterManaged && len(result.NewRegistrationIDs) > 0 {
+		if err := eagerProvisionManagedNewRegistrations(d, taskProjectDeps(), cfg, trunkPath, runtimePath, result.NewRegistrationIDs); err != nil {
+			_ = tasks.RemoveRegisteredTaskSets(d, result.DefinitionPath, result.NewRegistrationIDs)
+			return fmt.Errorf("tasks register: %w", err)
+		}
 	}
 
 	// Retired manifest keys (worktree/auto_drain) still register successfully but
@@ -359,14 +378,15 @@ func runTaskRegisterWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 	// per-set resolution feeds the SHA-gated Verify-verdict pass (ADR-0146);
 	// the overview's runtime-lock/checkout badges still describe the current
 	// checkout. Register prints status exactly like `pop tasks status`.
-	runtimePath, runtimeErr := tasks.ResolveRuntimePathWith(d, resolved.ProjectPath, taskRuntimePath)
 	if runtimeErr == nil {
-		cfg, _ := taskConfigLoad(config.DefaultConfigPath())
+		if cfg == nil {
+			cfg, _ = taskConfigLoad(taskConfigPath())
+		}
 		applyBindingFirstVerifyVerdicts(d, result, cfg, runtimePath)
 		// Eagerly bind the current checkout to each newly-registered set
 		// (ADR-0115): the binding is materialized and visible the moment the set
-		// registers, with no drain required. --managed skips this: those sets carry
-		// a managed intent and provision their own worktree lazily at first drain.
+		// registers, with no drain required. --managed provisions its own
+		// worktree from the Trunk worktree instead (ADR-0147).
 		if !taskRegisterManaged {
 			eagerBindNewRegistrations(d, cfg, runtimePath, result.NewRegistrationIDs, w)
 		}
@@ -459,6 +479,12 @@ func warnDeprecatedManifestKeys(w io.Writer, result *tasks.RefreshResult) {
 
 var taskConfigLoad = func(path string) (*config.Config, error) {
 	return config.Load(path)
+}
+
+// taskConfigPath returns the global config.toml path using cmd-layer deps so
+// tests with isolated XDG_CONFIG_HOME route consistently.
+func taskConfigPath() string {
+	return config.DefaultConfigPathWith(cmdLayerDeps().configDeps())
 }
 
 func runTaskStatusWith(d *tasks.Deps, w io.Writer, taskSetID string) error {

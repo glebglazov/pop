@@ -238,7 +238,14 @@ func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult
 			return RouteDrainCheckoutResult{}, err
 		}
 		if intent != nil && intent.Managed {
-			b, err := provisionManagedWorktree(req, checkout, setID, key)
+			b, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
+				TD:           req.TD,
+				PD:           req.PD,
+				Config:       req.Config,
+				CheckoutPath: checkout,
+				SetID:          setID,
+				Now:            req.Now,
+			})
 			if err != nil {
 				return RouteDrainCheckoutResult{}, err
 			}
@@ -346,28 +353,15 @@ func ProbeWorktreeDirective(td *tasks.Deps, pd *project.Deps, cfg *config.Config
 // repo with no resolvable trunk yields ErrNoResolvableTrunk; routing never
 // falls back in place.
 func provisionManagedWorktree(req RouteDrainCheckoutRequest, checkout, setID, key string) (Binding, error) {
-	trunkPath, bare, err := ResolveTrunkPath(req.TD, req.Config, checkout)
-	if err != nil {
-		return Binding{}, err
-	}
-	if bare || strings.TrimSpace(trunkPath) == "" {
-		return Binding{}, fmt.Errorf("%w for %s", ErrNoResolvableTrunk, setID)
-	}
-	now := req.Now
-	if now.IsZero() {
-		now = time.Now()
-	}
-	b, err := ProvisionWorktree(req.TD, ManagedWorktreesRoot(req.TD), trunkPath, setID, now)
-	if err != nil {
-		return Binding{}, err
-	}
-	if id, err := tasks.ResolveRepositoryIdentity(req.TD, trunkPath); err == nil {
-		b.Project = DetectProject(req.PD, req.TD, req.Config, id)
-	}
-	if err := Put(req.TD, key, b); err != nil {
-		return Binding{}, err
-	}
-	return b, nil
+	_ = key
+	return ProvisionManagedBinding(ProvisionManagedBindingRequest{
+		TD:           req.TD,
+		PD:           req.PD,
+		Config:       req.Config,
+		CheckoutPath: checkout,
+		SetID:        setID,
+		Now:          req.Now,
+	})
 }
 
 // resolveNamedWorktree returns the worktree of checkout's repository whose
