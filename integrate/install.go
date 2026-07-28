@@ -19,7 +19,8 @@ import (
 // is rewritten), an existing marker-owned copy-mode artifact is migrated to a
 // symlink by the same wipe-and-rewrite path, and entries left under a previous
 // skills_prefix are pruned (ADR 0063).
-func installFileComponent(d *Deps, home string, id ComponentID, agent string) error {
+func installFileComponent(r *run, home string, id ComponentID, agent string) error {
+	d := r.deps
 	agent = strings.ToLower(agent)
 	prefix := d.resolveSkillsPrefix()
 
@@ -44,7 +45,7 @@ func installFileComponent(d *Deps, home string, id ComponentID, agent string) er
 		d.logf("installFileComponent: agent=%s id=%s prefix=%q agentDir=%s renderRoot=%s", agent, id, prefix, agentDir, renderRoot)
 	}
 
-	d.prunedStale = nil
+	r.prunedStale = nil
 
 	for _, p := range legacyArtifacts(home, agent, id) {
 		if d.logf != nil {
@@ -99,8 +100,8 @@ func installFileComponent(d *Deps, home string, id ComponentID, agent string) er
 			return fmt.Errorf("failed to check ownership of %s: %w", dest, err)
 		}
 		if conflict {
-			if d.overwriteConflicts {
-				overwrite, err := resolveConflictOverwrite(d, conflictPath)
+			if r.overwriteConflicts {
+				overwrite, err := resolveConflictOverwrite(r, conflictPath)
 				if err != nil {
 					return fmt.Errorf("failed to resolve conflict at %s: %w", conflictPath, err)
 				}
@@ -113,14 +114,14 @@ func installFileComponent(d *Deps, home string, id ComponentID, agent string) er
 				if err := d.removeAll(conflictPath); err != nil {
 					return fmt.Errorf("failed to remove unowned entry %s: %w", conflictPath, err)
 				}
-				d.overwrotePaths = append(d.overwrotePaths, conflictPath)
+				r.overwrotePaths = append(r.overwrotePaths, conflictPath)
 				reportOverwriteDestroyed(d.stdout, conflictPath)
 			} else {
 				if d.logf != nil {
 					d.logf("installFileComponent: skipping %s — conflict at %s (not owned by pop)", name, conflictPath)
 				}
-				if d.stdout != nil && d.agentName != "" {
-					fmt.Fprintf(d.stdout, "  skipped %s: %s exists and is not owned by pop — run 'pop integrate %s --overwrite-conflicts' to replace it\n", name, conflictPath, d.agentName)
+				if d.stdout != nil && r.agentName != "" {
+					fmt.Fprintf(d.stdout, "  skipped %s: %s exists and is not owned by pop — run 'pop integrate %s --overwrite-conflicts' to replace it\n", name, conflictPath, r.agentName)
 				} else if d.stdout != nil {
 					fmt.Fprintf(d.stdout, "  skipped %s: %s exists and is not owned by pop — remove it and re-run integrate to install pop's version\n", name, conflictPath)
 				}
@@ -141,7 +142,7 @@ func installFileComponent(d *Deps, home string, id ComponentID, agent string) er
 		}
 	}
 
-	if err := pruneStaleAgentEntries(d, agentDir, renderRoot, id, agent, topLevel, prefix); err != nil {
+	if err := pruneStaleAgentEntries(r, agentDir, renderRoot, id, agent, topLevel, prefix); err != nil {
 		return err
 	}
 
@@ -153,7 +154,8 @@ func installFileComponent(d *Deps, home string, id ComponentID, agent string) er
 // pop-owned entry left at the agent location that this component no longer
 // renders is stale — it was installed under a different skills_prefix — and is
 // removed.
-func pruneStaleAgentEntries(d *Deps, agentDir, renderRoot string, id ComponentID, agent string, keep map[string]bool, prefix string) error {
+func pruneStaleAgentEntries(r *run, agentDir, renderRoot string, id ComponentID, agent string, keep map[string]bool, prefix string) error {
+	d := r.deps
 	if d.readDirNames == nil {
 		return nil
 	}
@@ -190,7 +192,7 @@ func pruneStaleAgentEntries(d *Deps, agentDir, renderRoot string, id ComponentID
 		if err := d.removeAll(dest); err != nil {
 			return fmt.Errorf("failed to remove stale entry %s: %w", dest, err)
 		}
-		d.prunedStale = append(d.prunedStale, name)
+		r.prunedStale = append(r.prunedStale, name)
 	}
 	return nil
 }
@@ -326,12 +328,12 @@ func skillConflict(d *Deps, agentDir, name, integrationsRoot, prefix string) (co
 	return "", false, nil
 }
 
-func resolveConflictOverwrite(d *Deps, conflictPath string) (bool, error) {
-	if d.assumeYes {
+func resolveConflictOverwrite(r *run, conflictPath string) (bool, error) {
+	if r.assumeYes {
 		return true, nil
 	}
-	if d.interactive {
-		return promptOverwriteConflict(d.stdin, d.stdout, conflictPath)
+	if r.deps.ConfirmOverwrite != nil {
+		return r.deps.ConfirmOverwrite(conflictPath), nil
 	}
 	return false, nil
 }
@@ -375,7 +377,7 @@ func legacyArtifacts(home, agent string, id ComponentID) []string {
 
 // InstallFileComponent installs a single file-based component for tests and tooling.
 func InstallFileComponent(d *Deps, home string, id ComponentID, agent string) error {
-	return installFileComponent(d, home, id, agent)
+	return installFileComponent(newRun(d, Request{Agent: agent}), home, id, agent)
 }
 
 func firstSegment(rel string) string {

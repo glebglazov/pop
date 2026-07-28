@@ -90,7 +90,7 @@ var Agents = []string{"claude", "codex", "pi", "opencode", "cursor"}
 // the merged Integration baseline. Returns warnings to surface in the picker
 // for any failures.
 func EnsureIntegrations(rev string, cd *config.Deps) []string {
-	return EnsureIntegrationsForRevisionWith(rev, cd, DryRunDeps, DefaultDeps)
+	return EnsureIntegrationsForRevisionWith(rev, cd, DefaultDeps)
 }
 
 // integrationUpdateResult reports what updateStaleIntegrations did during
@@ -110,8 +110,8 @@ type integrationUpdateResult struct {
 // The function does not read or write state.json, does not gate on the
 // binary revision, and does not emit output. Callers layer those behaviors
 // on top (see EnsureIntegrationsForRevisionWith and RunUpdateExistingWith).
-func updateStaleIntegrations(cd *config.Deps, newDry, newReal func() *Deps) integrationUpdateResult {
-	if err := seedWorkStoreDoc(newReal()); err != nil {
+func updateStaleIntegrations(cd *config.Deps, newDeps func() *Deps) integrationUpdateResult {
+	if err := seedWorkStoreDoc(newDeps()); err != nil {
 		debug.Error("updateStaleIntegrations: seed work store doc: %v", err)
 	}
 
@@ -127,7 +127,7 @@ func updateStaleIntegrations(cd *config.Deps, newDry, newReal func() *Deps) inte
 	var result integrationUpdateResult
 
 	for _, agent := range Agents {
-		integrated, err := agentIntegratedViaStatusWiring(newDry, agent)
+		integrated, err := agentIntegratedViaStatusWiring(newDeps, agent)
 		if err != nil {
 			debug.Error("updateStaleIntegrations: integrated check %s: %v", agent, err)
 			continue
@@ -138,7 +138,7 @@ func updateStaleIntegrations(cd *config.Deps, newDry, newReal func() *Deps) inte
 
 		agentUpdated := false
 		for _, comp := range catalog {
-			compOutcomes, warning := refreshComponent(newDry, newReal, agent, comp.id, baselineSet)
+			compOutcomes, warning := refreshComponent(newDeps, agent, comp.id, baselineSet)
 			if warning != "" {
 				result.Warnings = append(result.Warnings, warning)
 			}
@@ -169,12 +169,12 @@ func baselineComponentSet(baseline []ComponentID) map[ComponentID]bool {
 
 // agentIntegratedViaStatusWiring reports whether an agent has pop status wiring
 // installed. Refresh only reconciles agents that are already integrated.
-func agentIntegratedViaStatusWiring(newDry func() *Deps, agent string) (bool, error) {
-	dryDeps := newDry()
-	if err := RunWith(dryDeps, agent); err != nil {
+func agentIntegratedViaStatusWiring(newDeps func() *Deps, agent string) (bool, error) {
+	report, err := Install(newDeps(), Request{Agent: agent, DryRun: true, CoreOnly: true})
+	if err != nil {
 		return false, err
 	}
-	return dryDeps.installed, nil
+	return report.Installed, nil
 }
 
 // refreshComponent reconciles a single (agent, component) pair against the
@@ -182,7 +182,7 @@ func agentIntegratedViaStatusWiring(newDry func() *Deps, agent string) (bool, er
 // A component not supported by the agent is skipped silently (nil outcome, no
 // warning). Callers must only invoke this for agents already integrated via
 // status wiring.
-func refreshComponent(newDry, newReal func() *Deps, agent string, id ComponentID, baselineSet map[ComponentID]bool) ([]Outcome, string) {
+func refreshComponent(newDeps func() *Deps, agent string, id ComponentID, baselineSet map[ComponentID]bool) ([]Outcome, string) {
 	comp, ok := LookupComponent(id)
 	if !ok {
 		return nil, ""
@@ -192,21 +192,21 @@ func refreshComponent(newDry, newReal func() *Deps, agent string, id ComponentID
 	}
 	switch id {
 	case ComponentStatusWiring:
-		outcome, warning := refreshStatusWiring(newDry, newReal, agent)
+		outcome, warning := refreshStatusWiring(newDeps, agent)
 		if outcome == nil {
 			return nil, warning
 		}
 		return []Outcome{*outcome}, warning
 	default:
 		if !baselineSet[id] {
-			outcomes, err := optOutSkipOutcomes(newReal(), agent, id)
+			outcomes, err := optOutSkipOutcomes(newDeps(), agent, id)
 			if err != nil {
 				debug.Error("refreshComponent: opt-out outcomes %s/%s: %v", agent, id, err)
 				return nil, ""
 			}
 			return outcomes, ""
 		}
-		return refreshFileComponent(newDry, newReal, agent, id)
+		return refreshFileComponent(newDeps, agent, id)
 	}
 }
 
@@ -214,26 +214,26 @@ func refreshComponent(newDry, newReal func() *Deps, agent string, id ComponentID
 // agent. It dry-runs the install to learn changed state and, only when stale,
 // performs the real install. Warnings are returned solely for an agent
 // demonstrably installed but failing to check or update.
-func refreshStatusWiring(newDry, newReal func() *Deps, agent string) (*Outcome, string) {
-	dryDeps := newDry()
-	if err := RunWith(dryDeps, agent); err != nil {
+func refreshStatusWiring(newDeps func() *Deps, agent string) (*Outcome, string) {
+	report, err := Install(newDeps(), Request{Agent: agent, DryRun: true, CoreOnly: true})
+	if err != nil {
 		debug.Error("refreshStatusWiring: dry-run %s: %v", agent, err)
-		if dryDeps.installed {
+		if report.Installed {
 			return nil, fmt.Sprintf("failed to check %s integration: %v", agent, err)
 		}
 		return nil, ""
 	}
-	if !dryDeps.installed {
+	if !report.Installed {
 		return nil, ""
 	}
-	if !dryDeps.changed {
+	if !report.Changed {
 		o := statusWiringOutcome(agent, "already current")
 		return &o, ""
 	}
 
-	realDeps := newReal()
+	realDeps := newDeps()
 	realDeps.stdout = nil
-	if err := RunWith(realDeps, agent); err != nil {
+	if _, err := Install(realDeps, Request{Agent: agent, CoreOnly: true}); err != nil {
 		debug.Error("refreshStatusWiring: update %s: %v", agent, err)
 		return nil, fmt.Sprintf("failed to update %s integration (see pop.log)", agent)
 	}
@@ -243,7 +243,7 @@ func refreshStatusWiring(newDry, newReal func() *Deps, agent string) (*Outcome, 
 
 // refreshFileComponent reconciles a baseline-listed file-based skill component
 // for an integrated agent. It inspects the link installer's render tree and
-// the agent-location symlinks (through the read-only dry-run deps) to decide:
+// the agent-location symlinks to decide:
 //
 //   - conflict (an unowned entry shadows pop's) → "skipped (conflict)";
 //   - not installed → install and report "added";
@@ -253,8 +253,8 @@ func refreshStatusWiring(newDry, newReal func() *Deps, agent string) (*Outcome, 
 //
 // Warnings follow the status-wiring contract: only an installed component that
 // fails its staleness check or its re-install warns; everything else is silent.
-func refreshFileComponent(newDry, newReal func() *Deps, agent string, id ComponentID) ([]Outcome, string) {
-	checkDeps := newDry()
+func refreshFileComponent(newDeps func() *Deps, agent string, id ComponentID) ([]Outcome, string) {
+	checkDeps := newDeps()
 	home, err := checkDeps.userHomeDir()
 	if err != nil {
 		debug.Error("refreshFileComponent: home %s/%s: %v", agent, id, err)
@@ -282,14 +282,15 @@ func refreshFileComponent(newDry, newReal func() *Deps, agent string, id Compone
 		if checkDeps.logf != nil {
 			checkDeps.logf("refreshFileComponent: %s/%s not installed — adding", agent, id)
 		}
-		realDeps := newReal()
+		realDeps := newDeps()
 		realDeps.stdout = nil
-		if err := installFileComponent(realDeps, home, id, agent); err != nil {
+		r := newRun(realDeps, Request{Agent: agent})
+		if err := installFileComponent(r, home, id, agent); err != nil {
 			debug.Error("refreshFileComponent: add %s/%s: %v", agent, id, err)
 			return nil, fmt.Sprintf("failed to add %s %s integration (see pop.log)", agent, id)
 		}
 		return fileComponentOutcomesInCatalogOrder(
-			agent, id, prefix, nil, true, realDeps.prunedStale, preConflict, nil, nil,
+			agent, id, prefix, nil, true, r.prunedStale, preConflict, nil, nil,
 		), ""
 	}
 
@@ -310,9 +311,10 @@ func refreshFileComponent(newDry, newReal func() *Deps, agent string, id Compone
 	if checkDeps.logf != nil {
 		checkDeps.logf("refreshFileComponent: %s/%s stale — refreshing", agent, id)
 	}
-	realDeps := newReal()
+	realDeps := newDeps()
 	realDeps.stdout = nil
-	if err := installFileComponent(realDeps, home, id, agent); err != nil {
+	r := newRun(realDeps, Request{Agent: agent})
+	if err := installFileComponent(r, home, id, agent); err != nil {
 		debug.Error("refreshFileComponent: update %s/%s: %v", agent, id, err)
 		return nil, fmt.Sprintf("failed to update %s %s integration (see pop.log)", agent, id)
 	}
@@ -324,7 +326,7 @@ func refreshFileComponent(newDry, newReal func() *Deps, agent string, id Compone
 		debug.Error("refreshFileComponent: post conflict check %s/%s: %v", agent, id, err)
 	}
 	return fileComponentOutcomesInCatalogOrder(
-		agent, id, prefix, installedBefore, true, realDeps.prunedStale,
+		agent, id, prefix, installedBefore, true, r.prunedStale,
 		nil, postConflict, nil,
 	), ""
 }
@@ -348,7 +350,7 @@ func stampRevisionIfSuccess(rev string, d *Deps, result integrationUpdateResult)
 }
 
 func EnsureIntegrationsForRevision(rev string, cd *config.Deps) []string {
-	return EnsureIntegrationsForRevisionWith(rev, cd, DryRunDeps, DefaultDeps)
+	return EnsureIntegrationsForRevisionWith(rev, cd, DefaultDeps)
 }
 
 func stateDepsFromConfig(cd *config.Deps, base *Deps) *Deps {
@@ -373,7 +375,7 @@ func stateDepsFromConfig(cd *config.Deps, base *Deps) *Deps {
 	return &d
 }
 
-func EnsureIntegrationsForRevisionWith(rev string, cd *config.Deps, newDry, newReal func() *Deps) []string {
+func EnsureIntegrationsForRevisionWith(rev string, cd *config.Deps, newDeps func() *Deps) []string {
 	if rev == "dev" {
 		return nil
 	}
@@ -383,7 +385,7 @@ func EnsureIntegrationsForRevisionWith(rev string, cd *config.Deps, newDry, newR
 		return nil
 	}
 
-	result := updateStaleIntegrations(cd, newDry, newReal)
+	result := updateStaleIntegrations(cd, newDeps)
 	stampRevisionIfSuccess(rev, stateDeps, result)
 	return result.Warnings
 }

@@ -22,7 +22,7 @@ func reconcileFactories(home string, fs *fakeFS, prefix *string, logs *[]string)
 		}
 		return d
 	}
-	dry = func() *Deps { return WithDryRun(mk()) }
+	dry = func() *Deps { return mk() }
 	real = func() *Deps { return mk() }
 	return dry, real
 }
@@ -144,10 +144,10 @@ func TestUpdateExisting_AppliesSkillPrefixChange(t *testing.T) {
 
 	bare := ""
 	var logs []string
-	dry, real := reconcileFactories("/h", fs, &bare, &logs)
+	_, real := reconcileFactories("/h", fs, &bare, &logs)
 
 	var out, errb bytes.Buffer
-	if err := RunUpdateExistingWith("rev-prefix", testConfigDeps(t), dry, real, &out, &errb, false); err != nil {
+	if err := RunUpdateExistingWith("rev-prefix", testConfigDeps(t), real, &out, &errb, false); err != nil {
 		t.Fatalf("RunUpdateExistingWith: %v", err)
 	}
 
@@ -185,9 +185,9 @@ func TestEnsureIntegrations_MigratesBaseRename(t *testing.T) {
 	oldLink := seedOldNamePaneSkill(fs, "/h", "pop-pane")
 
 	var logs []string
-	dry, real := reconcileFactories("/h", fs, nil, &logs) // default pop- → renders pop-tmux-pane
+	_, real := reconcileFactories("/h", fs, nil, &logs) // default pop- → renders pop-tmux-pane
 
-	warnings := EnsureIntegrationsForRevisionWith("rev-rename", testConfigDeps(t), dry, real)
+	warnings := EnsureIntegrationsForRevisionWith("rev-rename", testConfigDeps(t), real)
 	if warnings != nil {
 		t.Fatalf("expected no warnings, got %v", warnings)
 	}
@@ -220,8 +220,8 @@ func TestUpdateStale_ContentOnlyChangeStillRefreshes(t *testing.T) {
 	want := append([]byte{}, fs.files[renderFile]...)
 	fs.files[renderFile] = []byte("stale skill body")
 
-	dry, real := reconcileFactories("/h", fs, nil, nil)
-	result := updateStaleIntegrations(testConfigDeps(t), dry, real)
+	_, real := reconcileFactories("/h", fs, nil, nil)
+	result := updateStaleIntegrations(testConfigDeps(t), real)
 	if len(result.Warnings) != 0 {
 		t.Fatalf("expected no warnings, got %v", result.Warnings)
 	}
@@ -251,8 +251,8 @@ func TestReconcile_SkipsUnownedConflictOnPrefixChange(t *testing.T) {
 	fs.files[userFile] = []byte("hand-written skill")
 
 	bare := ""
-	dry, real := reconcileFactories("/h", fs, &bare, nil)
-	result := updateStaleIntegrations(testConfigDeps(t), dry, real)
+	_, real := reconcileFactories("/h", fs, &bare, nil)
+	result := updateStaleIntegrations(testConfigDeps(t), real)
 
 	// The unowned entry is never touched.
 	if string(fs.files[userFile]) != "hand-written skill" {

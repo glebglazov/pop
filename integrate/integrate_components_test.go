@@ -3,7 +3,6 @@ package integrate
 import (
 	"io"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -19,7 +18,7 @@ func TestRunIntegrateComponentsBareInstallsMergedBaseline(t *testing.T) {
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
-	err := RunComponents(d, "claude", defaultIntegrationBaseline(), false, false, nil, false, false)
+	_, err := installReq(d, fullReq("claude", defaultIntegrationBaseline(), nil, false, false, false))
 	if err != nil {
 		t.Fatalf("RunComponents: %v", err)
 	}
@@ -45,7 +44,7 @@ func TestRunIntegrateComponentsNonInteractiveBareSucceeds(t *testing.T) {
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
-	err := RunComponents(d, "claude", defaultIntegrationBaseline(), false, false, nil, false, false)
+	_, err := installReq(d, fullReq("claude", defaultIntegrationBaseline(), nil, false, false, false))
 	if err != nil {
 		t.Fatalf("expected non-interactive bare integrate to succeed, got: %v", err)
 	}
@@ -65,10 +64,9 @@ func TestRunIntegrateComponentsInteractiveBareNoWizard(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
-	// Empty stdin would decline every wizard prompt; bare integrate must not read it.
-	d.stdin = strings.NewReader("")
+	// ConfirmOverwrite left nil — bare integrate must not prompt.
 
-	err := RunComponents(d, "claude", defaultIntegrationBaseline(), true, false, nil, false, false)
+	_, err := installReq(d, fullReq("claude", defaultIntegrationBaseline(), nil, false, false, false))
 	if err != nil {
 		t.Fatalf("RunComponents: %v", err)
 	}
@@ -91,7 +89,7 @@ func TestRunIntegrateVariadicAgentsSameBaseline(t *testing.T) {
 	baseline := defaultIntegrationBaseline()
 
 	for _, agent := range []string{"claude", "pi"} {
-		if err := RunComponents(fakeDeps(home, fs, io.Discard), agent, baseline, false, false, nil, false, false); err != nil {
+		if _, err := installReq(fakeDeps(home, fs, io.Discard), fullReq(agent, baseline, nil, false, false, false)); err != nil {
 			t.Fatalf("RunComponents(%s): %v", agent, err)
 		}
 	}
@@ -119,7 +117,7 @@ func TestRunIntegrateComponentsPaneSkillNewAgents(t *testing.T) {
 			fs := newFakeFS()
 			d := fakeDeps(installerHome, fs, nil)
 
-			if err := RunComponents(d, a.name, []ComponentID{ComponentPaneSkill}, false, false, nil, false, false); err != nil {
+			if _, err := installReq(d, fullReq(a.name, []ComponentID{ComponentPaneSkill}, nil, false, false, false)); err != nil {
 				t.Fatalf("RunComponents(%s): %v", a.name, err)
 			}
 			if fs.symlinks[a.linkDest] != a.linkTarget {
@@ -136,7 +134,7 @@ func TestRunIntegrateComponentsCodexInstallsMergedBaseline(t *testing.T) {
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
-	err := RunComponents(d, "codex", defaultIntegrationBaseline(), false, false, nil, false, false)
+	_, err := installReq(d, fullReq("codex", defaultIntegrationBaseline(), nil, false, false, false))
 	if err != nil {
 		t.Fatalf("RunComponents: %v", err)
 	}
@@ -164,7 +162,7 @@ func TestRunIntegrateComponentsOpencodeInstallsMergedBaseline(t *testing.T) {
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
-	err := RunComponents(d, "opencode", defaultIntegrationBaseline(), false, false, nil, false, false)
+	_, err := installReq(d, fullReq("opencode", defaultIntegrationBaseline(), nil, false, false, false))
 	if err != nil {
 		t.Fatalf("RunComponents: %v", err)
 	}
@@ -190,7 +188,7 @@ func TestRunIntegrateComponentsUnknownAgent(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
-	if err := RunComponents(d, "bogus", defaultIntegrationBaseline(), false, false, nil, false, false); err == nil {
+	if _, err := installReq(d, fullReq("bogus", defaultIntegrationBaseline(), nil, false, false, false)); err == nil {
 		t.Fatalf("expected error for unknown agent")
 	}
 }

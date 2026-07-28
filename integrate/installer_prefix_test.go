@@ -29,7 +29,7 @@ func TestInstallFileComponentDefaultPrefixParity(t *testing.T) {
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil) // skillPrefix nil → default "pop-"
 
-	if err := installFileComponent(d, installerHome, ComponentPaneSkill, "claude"); err != nil {
+	if err := installFileComponent(fileRun(d, "claude"), installerHome, ComponentPaneSkill, "claude"); err != nil {
 		t.Fatalf("installFileComponent: %v", err)
 	}
 
@@ -56,7 +56,7 @@ func TestInstallFileComponentBarePrefix(t *testing.T) {
 	fs := newFakeFS()
 	d := withPrefix(fakeDeps(installerHome, fs, nil), "")
 
-	if err := installFileComponent(d, installerHome, ComponentPaneSkill, "claude"); err != nil {
+	if err := installFileComponent(fileRun(d, "claude"), installerHome, ComponentPaneSkill, "claude"); err != nil {
 		t.Fatalf("installFileComponent: %v", err)
 	}
 
@@ -101,7 +101,7 @@ func TestInstallFileComponentPrefixChangeMigration(t *testing.T) {
 	}
 
 	// First install under the default pop- prefix.
-	if err := installFileComponent(logfDeps(), installerHome, ComponentPaneSkill, "claude"); err != nil {
+	if err := installFileComponent(fileRun(logfDeps(), "claude"), installerHome, ComponentPaneSkill, "claude"); err != nil {
 		t.Fatalf("first install: %v", err)
 	}
 	_, popLink, popTarget := paneSkillPaths()
@@ -111,7 +111,7 @@ func TestInstallFileComponentPrefixChangeMigration(t *testing.T) {
 
 	// Re-integrate with an empty prefix.
 	logs = nil
-	if err := installFileComponent(withPrefix(logfDeps(), ""), installerHome, ComponentPaneSkill, "claude"); err != nil {
+	if err := installFileComponent(fileRun(withPrefix(logfDeps(), ""), "claude"), installerHome, ComponentPaneSkill, "claude"); err != nil {
 		t.Fatalf("re-integrate bare: %v", err)
 	}
 
@@ -152,7 +152,7 @@ func TestInstallFileComponentPruneNeverRemovesUnowned(t *testing.T) {
 	fs := newFakeFS()
 
 	// Prior pop install under pop-.
-	if err := installFileComponent(fakeDeps(installerHome, fs, nil), installerHome, ComponentPaneSkill, "claude"); err != nil {
+	if err := installFileComponent(fileRun(fakeDeps(installerHome, fs, nil), "claude"), installerHome, ComponentPaneSkill, "claude"); err != nil {
 		t.Fatalf("first install: %v", err)
 	}
 
@@ -165,7 +165,7 @@ func TestInstallFileComponentPruneNeverRemovesUnowned(t *testing.T) {
 	foreignLink := filepath.Join(installerHome, ".claude", "skills", "other")
 	fs.symlinks[foreignLink] = "/elsewhere/other"
 
-	if err := installFileComponent(withPrefix(fakeDeps(installerHome, fs, nil), ""), installerHome, ComponentPaneSkill, "claude"); err != nil {
+	if err := installFileComponent(fileRun(withPrefix(fakeDeps(installerHome, fs, nil), ""), "claude"), installerHome, ComponentPaneSkill, "claude"); err != nil {
 		t.Fatalf("re-integrate bare: %v", err)
 	}
 
@@ -193,10 +193,10 @@ func TestInstallFileComponentPruneIsComponentScoped(t *testing.T) {
 	fs := newFakeFS()
 
 	// Install both skill components under pop-.
-	if err := installFileComponent(fakeDeps(installerHome, fs, nil), installerHome, ComponentPaneSkill, "claude"); err != nil {
+	if err := installFileComponent(fileRun(fakeDeps(installerHome, fs, nil), "claude"), installerHome, ComponentPaneSkill, "claude"); err != nil {
 		t.Fatalf("install pane-skill: %v", err)
 	}
-	if err := installFileComponent(fakeDeps(installerHome, fs, nil), installerHome, ComponentTaskSkills, "claude"); err != nil {
+	if err := installFileComponent(fileRun(fakeDeps(installerHome, fs, nil), "claude"), installerHome, ComponentTaskSkills, "claude"); err != nil {
 		t.Fatalf("install task-skills: %v", err)
 	}
 	grillLink := filepath.Join(installerHome, ".claude", "skills", "pop-grill-with-docs")
@@ -205,7 +205,7 @@ func TestInstallFileComponentPruneIsComponentScoped(t *testing.T) {
 	}
 
 	// Re-integrate ONLY pane-skill with an empty prefix.
-	if err := installFileComponent(withPrefix(fakeDeps(installerHome, fs, nil), ""), installerHome, ComponentPaneSkill, "claude"); err != nil {
+	if err := installFileComponent(fileRun(withPrefix(fakeDeps(installerHome, fs, nil), ""), "claude"), installerHome, ComponentPaneSkill, "claude"); err != nil {
 		t.Fatalf("re-integrate pane-skill bare: %v", err)
 	}
 
@@ -234,7 +234,7 @@ func TestInstallFileComponentPrunesStaleMarkerOwned(t *testing.T) {
 	fs.dirs[staleDir] = true
 	fs.files[filepath.Join(staleDir, "SKILL.md")] = []byte("---\npop-owned: true\nname: pop-tmux-pane\n---\nold copy body")
 
-	if err := installFileComponent(withPrefix(fakeDeps(installerHome, fs, nil), ""), installerHome, ComponentPaneSkill, "claude"); err != nil {
+	if err := installFileComponent(fileRun(withPrefix(fakeDeps(installerHome, fs, nil), ""), "claude"), installerHome, ComponentPaneSkill, "claude"); err != nil {
 		t.Fatalf("installFileComponent: %v", err)
 	}
 
@@ -267,7 +267,7 @@ func TestInstallFileComponentBarePrefixConflict(t *testing.T) {
 	userFile := filepath.Join(bareDest, "SKILL.md")
 	fs.files[userFile] = []byte("hand-written skill")
 
-	if err := installFileComponent(d, installerHome, ComponentPaneSkill, "claude"); err != nil {
+	if err := installFileComponent(fileRun(d, "claude"), installerHome, ComponentPaneSkill, "claude"); err != nil {
 		t.Fatalf("installFileComponent: %v", err)
 	}
 

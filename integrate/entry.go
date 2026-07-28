@@ -6,53 +6,59 @@ import (
 	"strings"
 )
 
-func installComponentCollectOutcomes(d *Deps, home, agent string, comp Component) ([]Outcome, error) {
+func installComponentCollectOutcomes(r *run, home, agent string, comp Component) ([]Outcome, error) {
 	id := comp.id
 
 	if comp.install != nil {
-		dryD := WithDryRun(d)
-		if err := comp.install(dryD, home, agent); err != nil {
+		probe := newRun(r.deps, Request{Agent: agent, DryRun: true, CoreOnly: true})
+		if err := comp.install(probe, home, agent); err != nil {
 			return nil, err
 		}
-		quietD := *d
-		quietD.stdout = nil
-		if err := comp.install(&quietD, home, agent); err != nil {
+		quiet := *r
+		quietDeps := *r.deps
+		quietDeps.stdout = nil
+		quiet.deps = &quietDeps
+		if err := comp.install(&quiet, home, agent); err != nil {
 			return nil, err
 		}
-		label := installLabel(!dryD.installed, dryD.installed && dryD.changed)
+		label := installLabel(!probe.installed, probe.installed && probe.changed)
 		return []Outcome{statusWiringOutcome(agent, label)}, nil
 	}
 
-	prefix := d.resolveSkillsPrefix()
+	prefix := r.deps.resolveSkillsPrefix()
 
-	installedBefore, err := fileComponentInstalledNames(d, home, id, agent)
+	installedBefore, err := fileComponentInstalledNames(r.deps, home, id, agent)
 	if err != nil {
 		return nil, fmt.Errorf("installed check for %s/%s: %w", agent, id, err)
 	}
 	staleBefore := true
 	if len(installedBefore) > 0 {
-		if staleBefore, err = fileComponentStaleResolved(d, home, id, agent, installedBefore); err != nil {
+		if staleBefore, err = fileComponentStaleResolved(r.deps, home, id, agent, installedBefore); err != nil {
 			return nil, fmt.Errorf("stale check for %s/%s: %w", agent, id, err)
 		}
 	}
 
-	installD := *d
-	installD.agentName = agent
-	if !d.overwriteConflicts {
-		installD.stdout = nil
+	installR := *r
+	installR.agentName = agent
+	if !r.overwriteConflicts {
+		quietDeps := *r.deps
+		quietDeps.stdout = nil
+		installR.deps = &quietDeps
 	}
-	if err := installFileComponent(&installD, home, id, agent); err != nil {
+	if err := installFileComponent(&installR, home, id, agent); err != nil {
 		return nil, err
 	}
+	r.overwrotePaths = append(r.overwrotePaths, installR.overwrotePaths...)
+	r.prunedStale = append(r.prunedStale, installR.prunedStale...)
 
-	overwritten := overwrittenSkillPaths(prefix, id, agent, installD.overwrotePaths)
-	postConflict, err := preInstallSkillConflicts(&installD, home, agent, id, prefix)
+	overwritten := overwrittenSkillPaths(prefix, id, agent, installR.overwrotePaths)
+	postConflict, err := preInstallSkillConflicts(installR.deps, home, agent, id, prefix)
 	if err != nil {
 		return nil, fmt.Errorf("conflict check for %s/%s: %w", agent, id, err)
 	}
 
 	return fileComponentOutcomesInCatalogOrder(
-		agent, id, prefix, installedBefore, staleBefore, installD.prunedStale,
+		agent, id, prefix, installedBefore, staleBefore, installR.prunedStale,
 		nil, postConflict, overwritten,
 	), nil
 }
@@ -68,29 +74,36 @@ func reportOverwriteDestroyed(out io.Writer, conflictPath string) {
 	fmt.Fprintf(out, "  OVERWRITE: destroyed %s (not owned by pop — no backup kept)\n", conflictPath)
 }
 
-// RunComponents is the entry point for `pop integrate <agent>`.
-func RunComponents(d *Deps, agent string, baseline []ComponentID, interactive bool, verbose bool, explicitOptOuts map[ComponentID]bool, overwriteConflicts, assumeYes bool) error {
-	agent = strings.ToLower(agent)
-	d.overwriteConflicts = overwriteConflicts
-	d.assumeYes = assumeYes
-	d.interactive = interactive
-	d.agentName = agent
+// Install applies integration components for req.Agent according to Request
+// intent and returns what changed. Outcome lines are returned on Report for
+// the caller to render; Install does not print them.
+func Install(d *Deps, req Request) (Report, error) {
+	agent := strings.ToLower(req.Agent)
+	r := newRun(d, req)
+	r.agentName = agent
 
 	core, ok := LookupComponent(ComponentStatusWiring)
 	if !ok {
-		return fmt.Errorf("status-wiring component missing from catalog")
+		return Report{}, fmt.Errorf("status-wiring component missing from catalog")
 	}
 	if !core.supported(agent) {
-		return fmt.Errorf("unknown agent %q (expected: claude, codex, pi, opencode, cursor)", agent)
+		return Report{}, fmt.Errorf("unknown agent %q (expected: claude, codex, pi, opencode, cursor)", agent)
 	}
 
-	home, err := d.userHomeDir()
+	home, err := r.deps.userHomeDir()
 	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
+		return Report{}, fmt.Errorf("failed to get home directory: %w", err)
+	}
+
+	if req.CoreOnly {
+		if err := core.install(r, home, agent); err != nil {
+			return r.toReport(nil), err
+		}
+		return r.toReport(nil), nil
 	}
 
 	installSet := map[ComponentID]bool{ComponentStatusWiring: true}
-	for _, id := range baseline {
+	for _, id := range req.Components {
 		installSet[id] = true
 	}
 
@@ -100,50 +113,30 @@ func RunComponents(d *Deps, agent string, baseline []ComponentID, interactive bo
 			continue
 		}
 		if installSet[comp.id] {
-			compOutcomes, err := installComponentCollectOutcomes(d, home, agent, comp)
+			compOutcomes, err := installComponentCollectOutcomes(r, home, agent, comp)
 			if err != nil {
-				return err
+				return r.toReport(outcomes), err
 			}
 			outcomes = append(outcomes, compOutcomes...)
-		} else if explicitOptOuts[comp.id] {
-			compOutcomes, err := optOutRemoveOutcomes(d, home, agent, comp.id)
+		} else if req.ExplicitOptOuts[comp.id] {
+			compOutcomes, err := optOutRemoveOutcomes(r.deps, home, agent, comp.id)
 			if err != nil {
-				return err
+				return r.toReport(outcomes), err
 			}
 			outcomes = append(outcomes, compOutcomes...)
 		} else if comp.id != ComponentStatusWiring {
-			compOutcomes, err := optOutSkipOutcomes(d, agent, comp.id)
+			compOutcomes, err := optOutSkipOutcomes(r.deps, agent, comp.id)
 			if err != nil {
-				return err
+				return r.toReport(outcomes), err
 			}
 			outcomes = append(outcomes, compOutcomes...)
 		}
 	}
 
-	PrintOutcomes(d.stdout, outcomes, verbose, true)
-	return nil
+	return r.toReport(outcomes), nil
 }
 
 // RemoveOptOutCollectOutcome is retained for tests that call it directly.
 func RemoveOptOutCollectOutcome(d *Deps, home, agent string, id ComponentID) ([]Outcome, error) {
 	return optOutRemoveOutcomes(d, home, agent, id)
-}
-
-// RunWith installs the status-wiring component for the given agent.
-func RunWith(d *Deps, agent string) error {
-	agent = strings.ToLower(agent)
-
-	comp, ok := LookupComponent(ComponentStatusWiring)
-	if !ok {
-		return fmt.Errorf("status-wiring component missing from catalog")
-	}
-	if !comp.supported(agent) {
-		return fmt.Errorf("unknown agent %q (expected: claude, codex, pi, opencode, cursor)", agent)
-	}
-
-	home, err := d.userHomeDir()
-	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
-	}
-	return comp.install(d, home, agent)
 }

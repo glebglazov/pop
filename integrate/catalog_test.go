@@ -106,7 +106,7 @@ func TestCatalog_SupportMatrixIsCaseInsensitive(t *testing.T) {
 func TestCatalog_StatusWiringConsumedByIntegrate(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
-	if err := RunWith(fakeDeps("/h", fs, io.Discard), "claude"); err != nil {
+	if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("claude")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if _, ok := fs.files["/h/.claude/settings.json"]; !ok {

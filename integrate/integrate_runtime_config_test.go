@@ -78,7 +78,7 @@ func TestIntegrateRuntimeConfig_NoPaneSkill_WritesRuntimeAndRemovesArtifacts(t *
 	if err != nil {
 		t.Fatalf("BaselineLoader: %v", err)
 	}
-	if err := RunComponents(d, "claude", baseline, false, false, optOuts, false, false); err != nil {
+	if _, err := installReq(d, fullReq("claude", baseline, optOuts, false, false, false)); err != nil {
 		t.Fatalf("RunComponents: %v", err)
 	}
 	if _, ok := fs.symlinks[link]; ok {
@@ -115,7 +115,7 @@ func TestIntegrateRuntimeConfig_NoTaskSkills_WritesRuntimeAndRemovesArtifacts(t 
 	if err != nil {
 		t.Fatalf("BaselineLoader: %v", err)
 	}
-	if err := RunComponents(d, "claude", baseline, false, false, optOuts, false, false); err != nil {
+	if _, err := installReq(d, fullReq("claude", baseline, optOuts, false, false, false)); err != nil {
 		t.Fatalf("RunComponents: %v", err)
 	}
 	if len(fs.symlinks) >= linksBefore {

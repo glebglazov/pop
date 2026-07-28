@@ -1,7 +1,6 @@
 package integrate
 
 import (
-	"bytes"
 	"io"
 	"os"
 	"path/filepath"
@@ -11,6 +10,9 @@ import (
 	"github.com/glebglazov/pop/debug"
 )
 
+// Deps holds injection closures only: filesystem, IO, symlink, and config
+// seams, plus the overwrite-confirmation callback. Per-invocation mode flags
+// and run outcomes live on Request / Report.
 type Deps struct {
 	// getenv resolves XDG_DATA_HOME / XDG_CONFIG_HOME for cmd-local paths
 	// (ADR-0145). Nil falls back to the cmd-layer FS seam.
@@ -25,11 +27,6 @@ type Deps struct {
 	// logf emits a debug log line. Production wires debug.Log; tests can
 	// override to capture what was logged without needing POP_LOG set.
 	logf func(string, ...any)
-
-	// stdin is the wizard's prompt input. Production uses os.Stdin; tests
-	// supply a scripted reader. Nil disables prompting (declines every step),
-	// which keeps the dry-run/refresh deps inert.
-	stdin io.Reader
 
 	// File-based component installer (link installer, ADR 0011). dataDir
 	// resolves pop's data directory root (the parent of integrations/);
@@ -50,27 +47,10 @@ type Deps struct {
 	// string) is used verbatim, so skills_prefix = "" installs bare base names.
 	skillsPrefix *string
 
-	// Dry-run mode: set DryRun=true to turn writeFile into a comparator.
-	// `installed` and `changed` are output fields filled in during the run.
-	DryRun    bool
-	changed   bool
-	installed bool
-
-	// Explicit-install conflict overwrite (ADR 0011): when overwriteConflicts is
-	// true, unowned entries may be destroyed after per-item confirmation
-	// (assumeYes or interactive prompt). Refresh never sets these fields.
-	overwriteConflicts bool
-	assumeYes          bool
-	interactive        bool
-	agentName          string
-
-	// overwrotePaths records agent-location paths hard-deleted during an
-	// overwrite-conflicts run; used for outcome labelling.
-	overwrotePaths []string
-
-	// prunedStale records resolved install names removed during the latest
-	// file-based install; drives removed (stale) outcome lines.
-	prunedStale []string
+	// ConfirmOverwrite is the overwrite-confirmation seam for unowned
+	// conflict paths. cmd wires a TTY prompt; tests supply a scripted
+	// callback. Nil declines every confirmation.
+	ConfirmOverwrite func(path string) bool
 }
 
 func DefaultDeps() *Deps {
@@ -82,7 +62,6 @@ func DefaultDeps() *Deps {
 		removeAll:   os.RemoveAll,
 		stdout:      os.Stdout,
 		logf:        debug.Log,
-		stdin:       os.Stdin,
 		symlink:     os.Symlink,
 		readlink:    os.Readlink,
 		lstatMode: func(p string) (os.FileMode, error) {
@@ -239,62 +218,3 @@ func seedWorkStoreDoc(d *Deps) error {
 	}
 	return d.writeFile(path, workStoreDoc, 0o644)
 }
-
-// DryRunDeps returns an Deps that reports what would change
-// on disk without performing any writes. See the Deps doc for the
-// semantics of `installed` and `changed`.
-func DryRunDeps() *Deps {
-	return WithDryRun(DefaultDeps())
-}
-
-// WithDryRun wraps a base Deps with dry-run behavior. It is exposed
-// as a separate function so tests can layer dry-run on top of a fake FS
-// without touching the real filesystem.
-func WithDryRun(base *Deps) *Deps {
-	d := &Deps{
-		userHomeDir:  base.userHomeDir,
-		readFile:     base.readFile,
-		dataDir:      base.dataDir,
-		logf:         base.logf,
-		skillsPrefix: base.skillsPrefix,
-		readDirNames: base.readDirNames,
-		DryRun:       true,
-	}
-	// File-component refresh inspects the link installer's render tree and the
-	// agent-location symlinks to decide installed/stale/conflict, so the dry-run
-	// deps pass through the base's read-only link seams (readlink, lstatMode,
-	// dataDir is already copied above). symlink is the sole write op on this
-	// path and stays a no-op — checks never create links, and any real refresh
-	// runs through the separate real deps.
-	d.symlink = func(string, string) error { return nil }
-	d.readlink = base.readlink
-	d.lstatMode = base.lstatMode
-	// writeFile compares the proposed bytes against what's on disk.
-	// Existing file → installed; different content → changed.
-	// Missing file → neither (creating new files on an agent that isn't
-	// installed yet is not an "update"; the auto-updater should skip).
-	d.writeFile = func(path string, data []byte, _ os.FileMode) error {
-		existing, err := d.readFile(path)
-		if err == nil {
-			d.installed = true
-			if !bytes.Equal(existing, data) {
-				d.changed = true
-			}
-		}
-		return nil
-	}
-	// mkdirAll is a no-op in dry-run; directory creation is not a meaningful
-	// change signal on its own (the file write inside catches the real state).
-	d.mkdirAll = func(string, os.FileMode) error { return nil }
-	// removeAll is a no-op in dry-run. We intentionally do not probe the
-	// target with os.Stat here so the dry-run path stays injectable by
-	// tests (which swap readFile/writeFile on a fake FS but do not stub
-	// os.Stat). In practice, installed/changed detection relies on the
-	// writeFile comparator — every install step that removes a directory
-	// is followed by writes into that directory, which provide the signal.
-	d.removeAll = func(string) error { return nil }
-	// Suppress output from install functions during dry-run.
-	d.stdout = nil
-	return d
-}
-

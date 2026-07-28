@@ -27,7 +27,7 @@ func TestInstallFileComponentInstall(t *testing.T) {
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
-	if err := installFileComponent(d, installerHome, ComponentPaneSkill, "claude"); err != nil {
+	if err := installFileComponent(fileRun(d, "claude"), installerHome, ComponentPaneSkill, "claude"); err != nil {
 		t.Fatalf("installFileComponent: %v", err)
 	}
 
@@ -60,7 +60,7 @@ func TestInstallFileComponentIdempotent(t *testing.T) {
 	d := fakeDeps(installerHome, fs, nil)
 
 	for i := 0; i < 2; i++ {
-		if err := installFileComponent(d, installerHome, ComponentPaneSkill, "claude"); err != nil {
+		if err := installFileComponent(fileRun(d, "claude"), installerHome, ComponentPaneSkill, "claude"); err != nil {
 			t.Fatalf("install pass %d: %v", i, err)
 		}
 	}
@@ -89,7 +89,7 @@ func TestInstallFileComponentCopyToSymlinkMigration(t *testing.T) {
 	copyFile := filepath.Join(linkDest, "SKILL.md")
 	fs.files[copyFile] = []byte(injectOwnershipMarker("---\nname: pop-tmux-pane\n---\nold copy-mode body"))
 
-	if err := installFileComponent(d, installerHome, ComponentPaneSkill, "claude"); err != nil {
+	if err := installFileComponent(fileRun(d, "claude"), installerHome, ComponentPaneSkill, "claude"); err != nil {
 		t.Fatalf("installFileComponent: %v", err)
 	}
 
@@ -114,7 +114,7 @@ func TestInstallFileComponentLegacyClaudeCommandRemoved(t *testing.T) {
 	legacy := filepath.Join(installerHome, ".claude", "commands", "pop", "pane.md")
 	fs.files[legacy] = []byte("legacy command body")
 
-	if err := installFileComponent(d, installerHome, ComponentPaneSkill, "claude"); err != nil {
+	if err := installFileComponent(fileRun(d, "claude"), installerHome, ComponentPaneSkill, "claude"); err != nil {
 		t.Fatalf("installFileComponent: %v", err)
 	}
 
@@ -206,7 +206,7 @@ func TestInstallFileComponentInstallNewAgents(t *testing.T) {
 			fs := newFakeFS()
 			d := fakeDeps(installerHome, fs, nil)
 
-			if err := installFileComponent(d, installerHome, ComponentPaneSkill, a.name); err != nil {
+			if err := installFileComponent(fileRun(d, a.name), installerHome, ComponentPaneSkill, a.name); err != nil {
 				t.Fatalf("installFileComponent(%s): %v", a.name, err)
 			}
 
@@ -234,7 +234,7 @@ func TestInstallFileComponentIdempotentNewAgents(t *testing.T) {
 			d := fakeDeps(installerHome, fs, nil)
 
 			for i := 0; i < 2; i++ {
-				if err := installFileComponent(d, installerHome, ComponentPaneSkill, a.name); err != nil {
+				if err := installFileComponent(fileRun(d, a.name), installerHome, ComponentPaneSkill, a.name); err != nil {
 					t.Fatalf("install pass %d (%s): %v", i, a.name, err)
 				}
 			}
@@ -266,7 +266,7 @@ func TestInstallFileComponentMigrationNewAgents(t *testing.T) {
 				fs.files[a.legacyFile] = []byte(markerBody)
 			}
 
-			if err := installFileComponent(d, installerHome, ComponentPaneSkill, a.name); err != nil {
+			if err := installFileComponent(fileRun(d, a.name), installerHome, ComponentPaneSkill, a.name); err != nil {
 				t.Fatalf("installFileComponent(%s): %v", a.name, err)
 			}
 
@@ -303,7 +303,7 @@ func TestInstallFileComponentConflictSkipped(t *testing.T) {
 	foreign := "/somewhere/else/pop-tmux-pane"
 	fs.symlinks[linkDest] = foreign
 
-	if err := installFileComponent(d, installerHome, ComponentPaneSkill, "claude"); err != nil {
+	if err := installFileComponent(fileRun(d, "claude"), installerHome, ComponentPaneSkill, "claude"); err != nil {
 		t.Fatalf("installFileComponent: %v", err)
 	}
 
@@ -409,7 +409,7 @@ func TestInstallFileComponentConflictReportsPathAndResolution(t *testing.T) {
 	userFile := filepath.Join(bareDest, "SKILL.md")
 	fs.files[userFile] = []byte("hand-written skill")
 
-	if err := installFileComponent(d, installerHome, ComponentPaneSkill, "claude"); err != nil {
+	if err := installFileComponent(fileRun(d, "claude"), installerHome, ComponentPaneSkill, "claude"); err != nil {
 		t.Fatalf("installFileComponent: %v", err)
 	}
 
@@ -429,7 +429,7 @@ func TestInstallFileComponentConflictReportsPathAndResolution(t *testing.T) {
 	if !strings.Contains(report, bareDest) {
 		t.Fatalf("report does not name the conflicting path %q: %q", bareDest, report)
 	}
-	if !strings.Contains(report, "not owned by pop") || !strings.Contains(report, "re-run integrate") {
+	if !strings.Contains(report, "not owned by pop") || !strings.Contains(report, "--overwrite-conflicts") {
 		t.Fatalf("report does not state the resolution step: %q", report)
 	}
 }
@@ -468,7 +468,7 @@ func TestInstallFileComponentConflictPrefixInsensitive(t *testing.T) {
 
 			conflict := tc.setup(fs)
 
-			if err := installFileComponent(d, installerHome, ComponentPaneSkill, "claude"); err != nil {
+			if err := installFileComponent(fileRun(d, "claude"), installerHome, ComponentPaneSkill, "claude"); err != nil {
 				t.Fatalf("installFileComponent: %v", err)
 			}
 
@@ -500,7 +500,7 @@ func TestInstallFileComponentPartialSetInstall(t *testing.T) {
 	fs.dirs[bareConflict] = true
 	fs.files[filepath.Join(bareConflict, "SKILL.md")] = []byte("mine")
 
-	if err := installFileComponent(d, installerHome, ComponentTaskSkills, "claude"); err != nil {
+	if err := installFileComponent(fileRun(d, "claude"), installerHome, ComponentTaskSkills, "claude"); err != nil {
 		t.Fatalf("installFileComponent: %v", err)
 	}
 
@@ -531,7 +531,7 @@ func TestInstallFileComponentOwnershipExemption(t *testing.T) {
 	// Pre-existing pop-owned symlink at the canonical location.
 	fs.symlinks[linkDest] = linkTarget
 
-	if err := installFileComponent(d, installerHome, ComponentPaneSkill, "claude"); err != nil {
+	if err := installFileComponent(fileRun(d, "claude"), installerHome, ComponentPaneSkill, "claude"); err != nil {
 		t.Fatalf("installFileComponent: %v", err)
 	}
 
@@ -572,7 +572,7 @@ func TestInstallFileComponentDebugInstall(t *testing.T) {
 	logf, lines := captureLogf()
 	d.logf = logf
 
-	if err := installFileComponent(d, installerHome, ComponentPaneSkill, "claude"); err != nil {
+	if err := installFileComponent(fileRun(d, "claude"), installerHome, ComponentPaneSkill, "claude"); err != nil {
 		t.Fatalf("installFileComponent: %v", err)
 	}
 
@@ -605,7 +605,7 @@ func TestInstallFileComponentDebugConflict(t *testing.T) {
 	fs.dirs[bareDest] = true
 	fs.files[filepath.Join(bareDest, "SKILL.md")] = []byte("mine")
 
-	if err := installFileComponent(d, installerHome, ComponentPaneSkill, "claude"); err != nil {
+	if err := installFileComponent(fileRun(d, "claude"), installerHome, ComponentPaneSkill, "claude"); err != nil {
 		t.Fatalf("installFileComponent: %v", err)
 	}
 
@@ -624,14 +624,13 @@ func TestRefreshFileComponentDebugNotInstalled(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
 	logf, lines := captureLogf()
-	dry := func() *Deps {
-		d := WithDryRun(fakeDeps("/h", fs, nil))
+	real := func() *Deps {
+		d := fakeDeps("/h", fs, nil)
 		d.logf = logf
 		return d
 	}
-	real := func() *Deps { return fakeDeps("/h", fs, nil) }
 
-	outcomes, warning := refreshFileComponent(dry, real, "claude", ComponentPaneSkill)
+	outcomes, warning := refreshFileComponent(real, "claude", ComponentPaneSkill)
 	if !OutcomesInclude(outcomes, "pop-tmux-pane", "added") {
 		t.Errorf("expected pop-tmux-pane added outcome, got outcomes=%v warning=%q", outcomes, warning)
 	}
@@ -654,19 +653,18 @@ func TestRefreshFileComponentDebugCurrent(t *testing.T) {
 	// First install the component for real so the render tree matches.
 	fs := newFakeFS()
 	realDeps := fakeDeps("/h", fs, nil)
-	if err := installFileComponent(realDeps, "/h", ComponentPaneSkill, "claude"); err != nil {
+	if err := installFileComponent(fileRun(realDeps, "claude"), "/h", ComponentPaneSkill, "claude"); err != nil {
 		t.Fatalf("setup install: %v", err)
 	}
 
 	logf, lines := captureLogf()
-	dry := func() *Deps {
-		d := WithDryRun(fakeDeps("/h", fs, nil))
+	real := func() *Deps {
+		d := fakeDeps("/h", fs, nil)
 		d.logf = logf
 		return d
 	}
-	real := func() *Deps { return fakeDeps("/h", fs, nil) }
 
-	outcomes, warning := refreshFileComponent(dry, real, "claude", ComponentPaneSkill)
+	outcomes, warning := refreshFileComponent(real, "claude", ComponentPaneSkill)
 	for _, o := range outcomes {
 		if o.Label == "updated" || o.Label == "added" {
 			t.Errorf("expected no update/warning, got outcomes=%v warning=%q", outcomes, warning)
@@ -687,7 +685,7 @@ func TestRefreshFileComponentDebugStale(t *testing.T) {
 	// Install the component so the symlink is present (marks it as installed),
 	// then corrupt the render tree to make it stale.
 	realDeps := fakeDeps("/h", fs, nil)
-	if err := installFileComponent(realDeps, "/h", ComponentPaneSkill, "claude"); err != nil {
+	if err := installFileComponent(fileRun(realDeps, "claude"), "/h", ComponentPaneSkill, "claude"); err != nil {
 		t.Fatalf("setup install: %v", err)
 	}
 	renderRoot := filepath.Join("/h", ".local", "share", "pop", "integrations", "claude", "pane-skills")
@@ -698,14 +696,13 @@ func TestRefreshFileComponentDebugStale(t *testing.T) {
 	}
 
 	logf, lines := captureLogf()
-	dry := func() *Deps {
-		d := WithDryRun(fakeDeps("/h", fs, nil))
+	real := func() *Deps {
+		d := fakeDeps("/h", fs, nil)
 		d.logf = logf
 		return d
 	}
-	real := func() *Deps { return fakeDeps("/h", fs, nil) }
 
-	outcomes, warning := refreshFileComponent(dry, real, "claude", ComponentPaneSkill)
+	outcomes, warning := refreshFileComponent(real, "claude", ComponentPaneSkill)
 	if !OutcomesInclude(outcomes, "pop-tmux-pane", "updated") {
 		t.Errorf("expected pop-tmux-pane updated, got outcomes=%v", outcomes)
 	}
@@ -731,14 +728,13 @@ func TestRefreshFileComponentDebugConflict(t *testing.T) {
 	fs.dirs[conflict] = true
 
 	logf, lines := captureLogf()
-	dry := func() *Deps {
-		d := WithDryRun(fakeDeps("/h", fs, nil))
+	real := func() *Deps {
+		d := fakeDeps("/h", fs, nil)
 		d.logf = logf
 		return d
 	}
-	real := func() *Deps { return fakeDeps("/h", fs, nil) }
 
-	outcomes, warning := refreshFileComponent(dry, real, "claude", ComponentPaneSkill)
+	outcomes, warning := refreshFileComponent(real, "claude", ComponentPaneSkill)
 	for _, o := range outcomes {
 		if o.Label == "updated" || o.Label == "added" {
 			t.Errorf("expected no update/warning on conflict, got outcomes=%v warning=%q", outcomes, warning)

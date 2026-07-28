@@ -22,7 +22,7 @@ func TestInstallCodexPaneSkill(t *testing.T) {
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
-	if err := installFileComponent(d, installerHome, ComponentPaneSkill, "codex"); err != nil {
+	if err := installFileComponent(fileRun(d, "codex"), installerHome, ComponentPaneSkill, "codex"); err != nil {
 		t.Fatalf("installFileComponent: %v", err)
 	}
 
@@ -41,17 +41,16 @@ func TestRefreshCodexPaneSkillStale(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
 	realDeps := fakeDeps(installerHome, fs, nil)
-	if err := installFileComponent(realDeps, installerHome, ComponentPaneSkill, "codex"); err != nil {
+	if err := installFileComponent(fileRun(realDeps, "codex"), installerHome, ComponentPaneSkill, "codex"); err != nil {
 		t.Fatalf("setup install: %v", err)
 	}
 
 	renderFile, linkDest, linkTarget := codexPaneSkillPaths()
 	fs.files[renderFile] = []byte("stale skill body")
 
-	dry := func() *Deps { return WithDryRun(fakeDeps(installerHome, fs, nil)) }
 	real := func() *Deps { return fakeDeps(installerHome, fs, nil) }
 
-	outcomes, warning := refreshFileComponent(dry, real, "codex", ComponentPaneSkill)
+	outcomes, warning := refreshFileComponent(real, "codex", ComponentPaneSkill)
 	if !OutcomesInclude(outcomes, "pop-tmux-pane", "updated") {
 		t.Fatalf("expected pop-tmux-pane updated outcome, got outcomes=%v warning=%q", outcomes, warning)
 	}
@@ -76,14 +75,13 @@ func TestInstallCodexPaneSkillConflictSkipWithOverwriteHint(t *testing.T) {
 	fs := newFakeFS()
 	out := &bytes.Buffer{}
 	d := fakeDeps(installerHome, fs, out)
-	d.agentName = "codex"
 
 	skillsDir := filepath.Join(installerHome, ".codex", "skills")
 	conflictPath := filepath.Join(skillsDir, "tmux-pane")
 	fs.dirs[conflictPath] = true
 	fs.files[filepath.Join(conflictPath, "SKILL.md")] = []byte("mine")
 
-	if err := installFileComponent(d, installerHome, ComponentPaneSkill, "codex"); err != nil {
+	if err := installFileComponent(fileRun(d, "codex"), installerHome, ComponentPaneSkill, "codex"); err != nil {
 		t.Fatalf("installFileComponent: %v", err)
 	}
 

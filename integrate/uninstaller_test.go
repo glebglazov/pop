@@ -17,7 +17,7 @@ func TestRemoveFileComponentOwnedOnly(t *testing.T) {
 	d := fakeDeps(installerHome, fs, out)
 
 	// Install first, then remove.
-	if err := installFileComponent(d, installerHome, ComponentPaneSkill, "claude"); err != nil {
+	if err := installFileComponent(fileRun(d, "claude"), installerHome, ComponentPaneSkill, "claude"); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	renderFile, linkDest, _ := paneSkillPaths()
@@ -187,14 +187,14 @@ func TestRunIntegrateRemoveSingleComponent(t *testing.T) {
 	d := fakeDeps(installerHome, fs, nil)
 
 	// Install status wiring + pane skill.
-	if err := RunComponents(d, "claude", []ComponentID{ComponentPaneSkill}, false, false, nil, false, false); err != nil {
+	if _, err := installReq(d, fullReq("claude", []ComponentID{ComponentPaneSkill}, nil, false, false, false)); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	settings := filepath.Join(installerHome, ".claude", "settings.json")
 	_, linkDest, _ := paneSkillPaths()
 
 	// Remove only the pane skill.
-	if err := RunRemoveComponents(d, "claude", []ComponentID{ComponentPaneSkill}); err != nil {
+	if _, err := Remove(d, Request{Agent: "claude", RemoveComponents: []ComponentID{ComponentPaneSkill}}); err != nil {
 		t.Fatalf("remove pane-skill: %v", err)
 	}
 
@@ -216,13 +216,11 @@ func TestRunIntegrateRemoveSeveralComponents(t *testing.T) {
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
-	if err := RunComponents(d, "claude",
-		[]ComponentID{ComponentPaneSkill, ComponentTaskSkills}, false, false, nil, false, false); err != nil {
+	if _, err := installReq(d, fullReq("claude", []ComponentID{ComponentPaneSkill, ComponentTaskSkills}, nil, false, false, false)); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
-	if err := RunRemoveComponents(d, "claude",
-		[]ComponentID{ComponentStatusWiring, ComponentPaneSkill}); err != nil {
+	if _, err := Remove(d, Request{Agent: "claude", RemoveComponents: []ComponentID{ComponentStatusWiring, ComponentPaneSkill}}); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
 
@@ -246,12 +244,11 @@ func TestRunIntegrateRemoveDefaultSet(t *testing.T) {
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
-	if err := RunComponents(d, "claude",
-		[]ComponentID{ComponentPaneSkill, ComponentTaskSkills}, false, false, nil, false, false); err != nil {
+	if _, err := installReq(d, fullReq("claude", []ComponentID{ComponentPaneSkill, ComponentTaskSkills}, nil, false, false, false)); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
-	if err := RunRemoveComponents(d, "claude", nil); err != nil {
+	if _, err := Remove(d, Request{Agent: "claude", RemoveComponents: nil}); err != nil {
 		t.Fatalf("remove default set: %v", err)
 	}
 
@@ -273,7 +270,7 @@ func TestRunIntegrateRemoveNothingInstalled(t *testing.T) {
 	out := &bytes.Buffer{}
 	d := fakeDeps(installerHome, fs, out)
 
-	if err := RunRemoveComponents(d, "claude", nil); err != nil {
+	if _, err := Remove(d, Request{Agent: "claude", RemoveComponents: nil}); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
 	if len(fs.files) != 0 || len(fs.symlinks) != 0 {
@@ -291,7 +288,7 @@ func TestRunIntegrateRemoveUnknownComponent(t *testing.T) {
 	fs := newFakeFS()
 	d := fakeDeps(installerHome, fs, nil)
 
-	err := RunRemoveComponents(d, "opencode", []ComponentID{"bogus"})
+	_, err := Remove(d, Request{Agent: "opencode", RemoveComponents: []ComponentID{"bogus"}})
 	if err == nil || !strings.Contains(err.Error(), "unknown component") {
 		t.Fatalf("expected unknown-component error, got: %v", err)
 	}

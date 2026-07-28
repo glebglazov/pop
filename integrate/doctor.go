@@ -200,10 +200,16 @@ func promptYesNo(in *bufio.Reader, out io.Writer, prompt string) (bool, error) {
 	return answer == "y" || answer == "yes", nil
 }
 
-// promptOverwriteConflict asks whether to destroy an unowned entry blocking an
-// integration install. Default is No (empty/Enter declines).
-func promptOverwriteConflict(in io.Reader, out io.Writer, conflictPath string) (bool, error) {
+// PromptOverwriteConflict asks whether to destroy an unowned entry blocking an
+// integration install. Default is No (empty/Enter declines). Exported so cmd
+// can wire it into Deps.ConfirmOverwrite for TTY prompts.
+func PromptOverwriteConflict(in io.Reader, out io.Writer, conflictPath string) (bool, error) {
 	return promptYesNo(bufio.NewReader(stdinOrEmpty(in)), out, fmt.Sprintf("Overwrite %s? It is not owned by pop", conflictPath))
+}
+
+// promptOverwriteConflict is the unexported alias retained for in-package callers.
+func promptOverwriteConflict(in io.Reader, out io.Writer, conflictPath string) (bool, error) {
+	return PromptOverwriteConflict(in, out, conflictPath)
 }
 
 // stdinOrEmpty returns r, or an always-EOF reader when r is nil, so the wizard

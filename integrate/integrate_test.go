@@ -12,6 +12,41 @@ import (
 	"testing"
 )
 
+
+// installReq runs Install and prints outcome lines to d.stdout — mirrors the
+// former RunComponents side effect so stdout assertions stay stable.
+func installReq(d *Deps, req Request) (Report, error) {
+	report, err := Install(d, req)
+	if err != nil {
+		return report, err
+	}
+	PrintOutcomes(d.stdout, report.Outcomes, req.Verbose, !req.UpdateExisting)
+	return report, nil
+}
+
+func coreReq(agent string) Request {
+	return Request{Agent: agent, CoreOnly: true}
+}
+
+func dryCoreReq(agent string) Request {
+	return Request{Agent: agent, CoreOnly: true, DryRun: true}
+}
+
+func fullReq(agent string, components []ComponentID, optOuts map[ComponentID]bool, overwrite, assumeYes, verbose bool) Request {
+	return Request{
+		Agent:              agent,
+		Components:         components,
+		ExplicitOptOuts:    optOuts,
+		OverwriteConflicts: overwrite,
+		AssumeYes:          assumeYes,
+		Verbose:            verbose,
+	}
+}
+
+func fileRun(d *Deps, agent string) *run {
+	return newRun(d, Request{Agent: agent})
+}
+
 // staleClaudeSettings is a settings.json body carrying an old-style pop hook.
 // The pop marker makes the dry-run report the agent as installed; the bytes
 // differ from the current serialization so it is also reported as stale. Used
@@ -345,7 +380,7 @@ func TestInjectFrontmatterName(t *testing.T) {
 func TestRunIntegrateWith_UnknownAgent(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
-	err := RunWith(fakeDeps("/h", fs, io.Discard), "vscode")
+	_, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("vscode"))
 	if err == nil {
 		t.Fatal("expected error for unknown agent")
 	}
@@ -357,7 +392,7 @@ func TestRunIntegrateWith_UnknownAgent(t *testing.T) {
 func TestRunIntegrateWith_AgentNameIsCaseInsensitive(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
-	if err := RunWith(fakeDeps("/h", fs, io.Discard), "Claude"); err != nil {
+	if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("Claude")); err != nil {
 		t.Errorf("expected case-insensitive agent matching, got error: %v", err)
 	}
 }
@@ -367,7 +402,7 @@ func TestRunIntegrateWith_AgentNameIsCaseInsensitive(t *testing.T) {
 func TestIntegrateClaude_WritesOnlyStatusWiring(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
-	if err := RunWith(fakeDeps("/h", fs, io.Discard), "claude"); err != nil {
+	if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("claude")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -390,7 +425,7 @@ func TestIntegrateClaude_WritesOnlyStatusWiring(t *testing.T) {
 func TestIntegrateClaude_DoesNotWriteOutsideClaudeTree(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
-	if err := RunWith(fakeDeps("/h", fs, io.Discard), "claude"); err != nil {
+	if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("claude")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	for path := range fs.files {
@@ -403,7 +438,7 @@ func TestIntegrateClaude_DoesNotWriteOutsideClaudeTree(t *testing.T) {
 func TestIntegrateClaude_FreshSettings(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
-	if err := RunWith(fakeDeps("/h", fs, io.Discard), "claude"); err != nil {
+	if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("claude")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -447,7 +482,7 @@ func TestIntegrateClaude_PreservesExistingHooks(t *testing.T) {
 	raw, _ := json.Marshal(existing)
 	fs.files[settingsPath] = raw
 
-	if err := RunWith(fakeDeps("/h", fs, io.Discard), "claude"); err != nil {
+	if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("claude")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -490,7 +525,7 @@ func TestIntegrateClaude_ReplacesOldPopHooks(t *testing.T) {
 	raw, _ := json.Marshal(existing)
 	fs.files[settingsPath] = raw
 
-	if err := RunWith(fakeDeps("/h", fs, io.Discard), "claude"); err != nil {
+	if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("claude")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -539,7 +574,7 @@ func TestIntegrateClaude_RemovesStaleEventKeys(t *testing.T) {
 	raw, _ := json.Marshal(existing)
 	fs.files[settingsPath] = raw
 
-	if err := RunWith(fakeDeps("/h", fs, io.Discard), "claude"); err != nil {
+	if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("claude")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -557,7 +592,7 @@ func TestIntegrateClaude_WriteError(t *testing.T) {
 	settingsPath := filepath.Join("/h", ".claude", "settings.json")
 	fs.writeErr[settingsPath] = os.ErrPermission
 
-	err := RunWith(fakeDeps("/h", fs, io.Discard), "claude")
+	_, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("claude"))
 	if err == nil {
 		t.Fatal("expected error from settings write failure")
 	}
@@ -612,7 +647,7 @@ func countContains(cmds []string, needle string) int {
 func TestIntegrateClaude_InstallsTopicHook(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
-	if err := RunWith(fakeDeps("/h", fs, io.Discard), "claude"); err != nil {
+	if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("claude")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -634,7 +669,7 @@ func TestIntegrateClaude_TopicHookIdempotent(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
 	for i := 0; i < 3; i++ {
-		if err := RunWith(fakeDeps("/h", fs, io.Discard), "claude"); err != nil {
+		if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("claude")); err != nil {
 			t.Fatalf("run %d: unexpected error: %v", i, err)
 		}
 	}
@@ -653,7 +688,7 @@ func TestIntegrateClaude_RemovesTopicHook(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
 	d := fakeDeps("/h", fs, io.Discard)
-	if err := RunWith(d, "claude"); err != nil {
+	if _, err := Install(d, coreReq("claude")); err != nil {
 		t.Fatalf("install: unexpected error: %v", err)
 	}
 
@@ -708,9 +743,8 @@ func TestIntegrateClaude_RefreshRendersTopicHook(t *testing.T) {
 	fs.files[settingsPath] = raw
 
 	newReal := func() *Deps { return fakeDeps("/h", fs, io.Discard) }
-	newDry := func() *Deps { return WithDryRun(fakeDeps("/h", fs, io.Discard)) }
 
-	outcome, warning := refreshStatusWiring(newDry, newReal, "claude")
+	outcome, warning := refreshStatusWiring(newReal, "claude")
 	if warning != "" {
 		t.Fatalf("unexpected warning: %s", warning)
 	}
@@ -735,7 +769,7 @@ func TestIsPopHookCommand_Topic(t *testing.T) {
 func TestIntegrateCodex_WritesHooksJSON(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
-	if err := RunWith(fakeDeps("/h", fs, io.Discard), "codex"); err != nil {
+	if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("codex")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -751,7 +785,7 @@ func TestIntegrateCodex_WritesHooksJSON(t *testing.T) {
 func TestIntegrateCodex_FreshHooks(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
-	if err := RunWith(fakeDeps("/h", fs, io.Discard), "codex"); err != nil {
+	if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("codex")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -795,7 +829,7 @@ func TestIntegrateCodex_PreservesExistingHooks(t *testing.T) {
 	raw, _ := json.Marshal(existing)
 	fs.files[hooksPath] = raw
 
-	if err := RunWith(fakeDeps("/h", fs, io.Discard), "codex"); err != nil {
+	if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("codex")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -838,7 +872,7 @@ func TestIntegrateCodex_ReplacesOldPopHooks(t *testing.T) {
 	raw, _ := json.Marshal(existing)
 	fs.files[hooksPath] = raw
 
-	if err := RunWith(fakeDeps("/h", fs, io.Discard), "codex"); err != nil {
+	if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("codex")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -866,7 +900,7 @@ func TestIntegrateCodex_ReplacesOldPopHooks(t *testing.T) {
 func TestIntegrateCodex_DoesNotWriteOutsideCodexTree(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
-	if err := RunWith(fakeDeps("/h", fs, io.Discard), "codex"); err != nil {
+	if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("codex")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	for path := range fs.files {
@@ -882,7 +916,7 @@ func TestIntegrateCodex_WriteError(t *testing.T) {
 	hooksPath := filepath.Join("/h", ".codex", "hooks.json")
 	fs.writeErr[hooksPath] = os.ErrPermission
 
-	err := RunWith(fakeDeps("/h", fs, io.Discard), "codex")
+	_, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("codex"))
 	if err == nil {
 		t.Fatal("expected error from hooks write failure")
 	}
@@ -937,7 +971,7 @@ func flatEventCommands(t *testing.T, fs *fakeFS, path, event string) []string {
 func TestIntegrateCodex_InstallsTopicHook(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
-	if err := RunWith(fakeDeps("/h", fs, io.Discard), "codex"); err != nil {
+	if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("codex")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	hooksPath := filepath.Join("/h", ".codex", "hooks.json")
@@ -955,7 +989,7 @@ func TestIntegrateCodex_TopicHookIdempotent(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
 	for i := 0; i < 3; i++ {
-		if err := RunWith(fakeDeps("/h", fs, io.Discard), "codex"); err != nil {
+		if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("codex")); err != nil {
 			t.Fatalf("run %d: unexpected error: %v", i, err)
 		}
 	}
@@ -987,9 +1021,8 @@ func TestIntegrateCodex_RefreshRendersAndRemovesTopicHook(t *testing.T) {
 	fs.files[hooksPath] = raw
 
 	newReal := func() *Deps { return fakeDeps("/h", fs, io.Discard) }
-	newDry := func() *Deps { return WithDryRun(fakeDeps("/h", fs, io.Discard)) }
 
-	outcome, warning := refreshStatusWiring(newDry, newReal, "codex")
+	outcome, warning := refreshStatusWiring(newReal, "codex")
 	if warning != "" {
 		t.Fatalf("unexpected warning: %s", warning)
 	}
@@ -1015,7 +1048,7 @@ func TestIntegrateCodex_RefreshRendersAndRemovesTopicHook(t *testing.T) {
 func TestIntegratePi_WritesExtensionAtCorrectPath(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
-	if err := RunWith(fakeDeps("/h", fs, io.Discard), "pi"); err != nil {
+	if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("pi")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -1035,7 +1068,7 @@ func TestIntegratePi_WritesExtensionAtCorrectPath(t *testing.T) {
 func TestIntegratePi_WritesNoSkillFiles(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
-	if err := RunWith(fakeDeps("/h", fs, io.Discard), "pi"); err != nil {
+	if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("pi")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -1052,7 +1085,7 @@ func TestIntegratePi_WritesNoSkillFiles(t *testing.T) {
 func TestIntegratePi_DoesNotWriteOutsidePiTree(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
-	if err := RunWith(fakeDeps("/h", fs, io.Discard), "pi"); err != nil {
+	if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("pi")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	for path := range fs.files {
@@ -1068,7 +1101,7 @@ func TestIntegratePi_ExtensionWriteError(t *testing.T) {
 	extPath := filepath.Join("/h", ".pi", "agent", "extensions", "pop-status-sync.ts")
 	fs.writeErr[extPath] = errors.New("disk full")
 
-	err := RunWith(fakeDeps("/h", fs, io.Discard), "pi")
+	_, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("pi"))
 	if err == nil {
 		t.Fatal("expected error from extension write failure")
 	}
@@ -1082,7 +1115,7 @@ func TestIntegratePi_ExtensionWriteError(t *testing.T) {
 func TestIntegrateOpencode_WritesPluginAtCorrectPath(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
-	if err := RunWith(fakeDeps("/h", fs, io.Discard), "opencode"); err != nil {
+	if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("opencode")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -1102,7 +1135,7 @@ func TestIntegrateOpencode_WritesPluginAtCorrectPath(t *testing.T) {
 func TestIntegrateOpencode_WritesNoSkillFiles(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
-	if err := RunWith(fakeDeps("/h", fs, io.Discard), "opencode"); err != nil {
+	if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("opencode")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -1119,7 +1152,7 @@ func TestIntegrateOpencode_WritesNoSkillFiles(t *testing.T) {
 func TestIntegrateOpencode_DoesNotWriteOutsideOpencodeTree(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
-	if err := RunWith(fakeDeps("/h", fs, io.Discard), "opencode"); err != nil {
+	if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("opencode")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	for path := range fs.files {
@@ -1136,7 +1169,7 @@ func TestIntegrateOpencode_OverwritesPriorPlugin(t *testing.T) {
 	pluginPath := filepath.Join("/h", ".config", "opencode", "plugins", "pop-status-sync.ts")
 	fs.files[pluginPath] = []byte("old plugin content")
 
-	if err := RunWith(fakeDeps("/h", fs, io.Discard), "opencode"); err != nil {
+	if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("opencode")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -1151,7 +1184,7 @@ func TestIntegrateOpencode_PluginWriteError(t *testing.T) {
 	pluginPath := filepath.Join("/h", ".config", "opencode", "plugins", "pop-status-sync.ts")
 	fs.writeErr[pluginPath] = errors.New("disk full")
 
-	err := RunWith(fakeDeps("/h", fs, io.Discard), "opencode")
+	_, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("opencode"))
 	if err == nil {
 		t.Fatal("expected error from plugin write failure")
 	}
@@ -1163,7 +1196,7 @@ func TestIntegrateOpencode_PluginWriteError(t *testing.T) {
 func TestIntegrateOpencode_AgentNameIsCaseInsensitive(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
-	if err := RunWith(fakeDeps("/h", fs, io.Discard), "OpEnCoDe"); err != nil {
+	if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("OpEnCoDe")); err != nil {
 		t.Errorf("expected case-insensitive agent matching, got error: %v", err)
 	}
 }
@@ -1173,7 +1206,7 @@ func TestIntegrateOpencode_AgentNameIsCaseInsensitive(t *testing.T) {
 func TestIntegrateCursor_WritesHooksJSON(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
-	if err := RunWith(fakeDeps("/h", fs, io.Discard), "cursor"); err != nil {
+	if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("cursor")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -1189,7 +1222,7 @@ func TestIntegrateCursor_WritesHooksJSON(t *testing.T) {
 func TestIntegrateCursor_FreshHooks(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
-	if err := RunWith(fakeDeps("/h", fs, io.Discard), "cursor"); err != nil {
+	if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("cursor")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -1242,7 +1275,7 @@ func TestIntegrateCursor_PreservesExistingHooks(t *testing.T) {
 	raw, _ := json.Marshal(existing)
 	fs.files[hooksPath] = raw
 
-	if err := RunWith(fakeDeps("/h", fs, io.Discard), "cursor"); err != nil {
+	if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("cursor")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -1279,7 +1312,7 @@ func TestIntegrateCursor_ReplacesOldPopHooks(t *testing.T) {
 	raw, _ := json.Marshal(existing)
 	fs.files[hooksPath] = raw
 
-	if err := RunWith(fakeDeps("/h", fs, io.Discard), "cursor"); err != nil {
+	if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("cursor")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -1307,7 +1340,7 @@ func TestIntegrateCursor_ReplacesOldPopHooks(t *testing.T) {
 func TestIntegrateCursor_DoesNotWriteOutsideCursorTree(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
-	if err := RunWith(fakeDeps("/h", fs, io.Discard), "cursor"); err != nil {
+	if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("cursor")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	for path := range fs.files {
@@ -1323,7 +1356,7 @@ func TestIntegrateCursor_WriteError(t *testing.T) {
 	hooksPath := filepath.Join("/h", ".cursor", "hooks.json")
 	fs.writeErr[hooksPath] = os.ErrPermission
 
-	err := RunWith(fakeDeps("/h", fs, io.Discard), "cursor")
+	_, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("cursor"))
 	if err == nil {
 		t.Fatal("expected error from hooks write failure")
 	}
@@ -1332,7 +1365,7 @@ func TestIntegrateCursor_WriteError(t *testing.T) {
 func TestIntegrateCursor_WritesNoSkillFiles(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
-	if err := RunWith(fakeDeps("/h", fs, io.Discard), "cursor"); err != nil {
+	if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("cursor")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -1349,7 +1382,7 @@ func TestIntegrateCursor_WritesNoSkillFiles(t *testing.T) {
 func TestIntegrateCursor_AgentNameIsCaseInsensitive(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
-	if err := RunWith(fakeDeps("/h", fs, io.Discard), "CuRsOr"); err != nil {
+	if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("CuRsOr")); err != nil {
 		t.Errorf("expected case-insensitive agent matching, got error: %v", err)
 	}
 }
@@ -1359,7 +1392,7 @@ func TestIntegrateCursor_AgentNameIsCaseInsensitive(t *testing.T) {
 func TestIntegrateCursor_InstallsTopicHook(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
-	if err := RunWith(fakeDeps("/h", fs, io.Discard), "cursor"); err != nil {
+	if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("cursor")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	hooksPath := filepath.Join("/h", ".cursor", "hooks.json")
@@ -1377,7 +1410,7 @@ func TestIntegrateCursor_TopicHookIdempotent(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
 	for i := 0; i < 3; i++ {
-		if err := RunWith(fakeDeps("/h", fs, io.Discard), "cursor"); err != nil {
+		if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq("cursor")); err != nil {
 			t.Fatalf("run %d: unexpected error: %v", i, err)
 		}
 	}
@@ -1406,9 +1439,8 @@ func TestIntegrateCursor_RefreshRendersAndRemovesTopicHook(t *testing.T) {
 	fs.files[hooksPath] = raw
 
 	newReal := func() *Deps { return fakeDeps("/h", fs, io.Discard) }
-	newDry := func() *Deps { return WithDryRun(fakeDeps("/h", fs, io.Discard)) }
 
-	outcome, warning := refreshStatusWiring(newDry, newReal, "cursor")
+	outcome, warning := refreshStatusWiring(newReal, "cursor")
 	if warning != "" {
 		t.Fatalf("unexpected warning: %s", warning)
 	}
@@ -1457,7 +1489,7 @@ func TestExtensions_DeriveTopic(t *testing.T) {
 		{"opencode", filepath.Join("/h", ".config", "opencode", "plugins", "pop-status-sync.ts")},
 	} {
 		fs := newFakeFS()
-		if err := RunWith(fakeDeps("/h", fs, io.Discard), tc.agent); err != nil {
+		if _, err := Install(fakeDeps("/h", fs, io.Discard), coreReq(tc.agent)); err != nil {
 			t.Fatalf("%s install: %v", tc.agent, err)
 		}
 		if !bytes.Contains(fs.files[tc.path], []byte("set-topic --derive")) {
@@ -1478,7 +1510,7 @@ func TestExtensions_DeriveTopic(t *testing.T) {
 // dry-run tests to seed "what an installed agent looks like on disk".
 func installViaFake(t *testing.T, fs *fakeFS, home, agent string) {
 	t.Helper()
-	if err := RunWith(fakeDeps(home, fs, io.Discard), agent); err != nil {
+	if _, err := Install(fakeDeps(home, fs, io.Discard), coreReq(agent)); err != nil {
 		t.Fatalf("seed install %s: %v", agent, err)
 	}
 }
@@ -1490,14 +1522,14 @@ func TestDryRun_NoInstallation(t *testing.T) {
 	for _, agent := range []string{"claude", "codex", "pi", "opencode", "cursor"} {
 		t.Run(agent, func(t *testing.T) {
 			fs := newFakeFS()
-			d := WithDryRun(fakeDeps("/h", fs, io.Discard))
-			if err := RunWith(d, agent); err != nil {
+			report, err := Install(fakeDeps("/h", fs, io.Discard), dryCoreReq(agent))
+			if err != nil {
 				t.Fatalf("dry-run: %v", err)
 			}
-			if d.installed {
+			if report.Installed {
 				t.Errorf("expected installed=false on empty FS")
 			}
-			if d.changed {
+			if report.Changed {
 				t.Errorf("expected changed=false on empty FS")
 			}
 			// Dry-run must not have mutated the fake FS.
@@ -1517,14 +1549,14 @@ func TestDryRun_InstalledAndCurrent(t *testing.T) {
 			fs := newFakeFS()
 			installViaFake(t, fs, "/h", agent)
 
-			d := WithDryRun(fakeDeps("/h", fs, io.Discard))
-			if err := RunWith(d, agent); err != nil {
+			report, err := Install(fakeDeps("/h", fs, io.Discard), dryCoreReq(agent))
+			if err != nil {
 				t.Fatalf("dry-run: %v", err)
 			}
-			if !d.installed {
+			if !report.Installed {
 				t.Errorf("expected installed=true after seed install")
 			}
-			if d.changed {
+			if report.Changed {
 				t.Errorf("expected changed=false when bytes match embedded content")
 			}
 		})
@@ -1581,14 +1613,14 @@ func TestDryRun_InstalledAndStale(t *testing.T) {
 				fs.files[fullPath] = []byte("stale bytes that differ from embedded content")
 			}
 
-			d := WithDryRun(fakeDeps("/h", fs, io.Discard))
-			if err := RunWith(d, tc.agent); err != nil {
+			report, err := Install(fakeDeps("/h", fs, io.Discard), dryCoreReq(tc.agent))
+			if err != nil {
 				t.Fatalf("dry-run: %v", err)
 			}
-			if !d.installed {
+			if !report.Installed {
 				t.Errorf("expected installed=true after seed install")
 			}
-			if !d.changed {
+			if !report.Changed {
 				t.Errorf("expected changed=true when %s has stale bytes", tc.stalePath)
 			}
 		})
@@ -1606,15 +1638,15 @@ func TestDryRun_ClaudeSettingsNotRewrittenWhenHooksCurrent(t *testing.T) {
 	settingsPath := filepath.Join("/h", ".claude", "settings.json")
 	before := append([]byte{}, fs.files[settingsPath]...)
 
-	d := WithDryRun(fakeDeps("/h", fs, io.Discard))
-	if err := RunWith(d, "claude"); err != nil {
-		t.Fatalf("dry-run claude: %v", err)
+	report, err := Install(fakeDeps("/h", fs, io.Discard), dryCoreReq("claude"))
+			if err != nil {
+				t.Fatalf("dry-run: %v", err)
 	}
 
-	if !d.installed {
+	if !report.Installed {
 		t.Error("expected installed=true (settings.json contains pop hooks)")
 	}
-	if d.changed {
+	if report.Changed {
 		t.Error("expected changed=false when hooks are already current")
 	}
 	if !bytes.Equal(before, fs.files[settingsPath]) {
@@ -1632,12 +1664,12 @@ func TestDryRun_ClaudeInstalledDetectedViaSettingsHooks(t *testing.T) {
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 
-	d := WithDryRun(fakeDeps("/h", fs, io.Discard))
-	if err := RunWith(d, "claude"); err != nil {
-		t.Fatalf("dry-run claude: %v", err)
+	report, err := Install(fakeDeps("/h", fs, io.Discard), dryCoreReq("claude"))
+			if err != nil {
+				t.Fatalf("dry-run: %v", err)
 	}
 
-	if !d.installed {
+	if !report.Installed {
 		t.Error("expected installed=true detected via pop hooks in settings.json")
 	}
 }
@@ -1666,7 +1698,7 @@ func readStateRevision(t *testing.T) string {
 // that share a single fake FS at the given home directory.
 func fakeFactories(home string, fs *fakeFS) (dry, real func() *Deps) {
 	dry = func() *Deps {
-		return WithDryRun(fakeDeps(home, fs, io.Discard))
+		return fakeDeps(home, fs, io.Discard)
 	}
 	real = func() *Deps {
 		return fakeDeps(home, fs, io.Discard)
@@ -1679,9 +1711,9 @@ func TestEnsureIntegrations_SkipsOnDevBuild(t *testing.T) {
 	t.Parallel()
 	setupIntegrateConfigLayer(t)
 	fs := newFakeFS()
-	dry, real := fakeFactories("/h", fs)
+	_, real := fakeFactories("/h", fs)
 
-	warnings := EnsureIntegrationsForRevisionWith("dev", testConfigDeps(t), dry, real)
+	warnings := EnsureIntegrationsForRevisionWith("dev", testConfigDeps(t), real)
 	if warnings != nil {
 		t.Errorf("expected nil warnings for dev build, got %v", warnings)
 	}
@@ -1697,21 +1729,17 @@ func TestEnsureIntegrations_SkipsWhenRevisionMatches(t *testing.T) {
 
 	calls := 0
 	fs := newFakeFS()
-	dry := func() *Deps {
+	factory := func() *Deps {
 		calls++
-		return WithDryRun(fakeDeps("/h", fs, io.Discard))
-	}
-	real := func() *Deps {
-		t.Fatal("real deps factory must not be called when revision matches")
-		return nil
+		return fakeDeps("/h", fs, io.Discard)
 	}
 
-	warnings := EnsureIntegrationsForRevisionWith("abc123", testConfigDeps(t), dry, real)
+	warnings := EnsureIntegrationsForRevisionWith("abc123", testConfigDeps(t), factory)
 	if warnings != nil {
 		t.Errorf("expected nil warnings, got %v", warnings)
 	}
 	if calls != 0 {
-		t.Errorf("expected 0 dry-run calls when revision matches, got %d", calls)
+		t.Errorf("expected 0 deps factory calls when revision matches, got %d", calls)
 	}
 }
 
@@ -1721,9 +1749,9 @@ func TestEnsureIntegrations_SkipsUninstalledAgents(t *testing.T) {
 	// No agents installed: EnsureIntegrations should do nothing, return no
 	// warnings, and stamp the new revision.
 	fs := newFakeFS()
-	dry, real := fakeFactories("/h", fs)
+	_, real := fakeFactories("/h", fs)
 
-	warnings := EnsureIntegrationsForRevisionWith("rev1", testConfigDeps(t), dry, real)
+	warnings := EnsureIntegrationsForRevisionWith("rev1", testConfigDeps(t), real)
 	if warnings != nil {
 		t.Errorf("expected nil warnings for no-install case, got %v", warnings)
 	}
@@ -1762,9 +1790,9 @@ func TestEnsureIntegrations_UpdatesStaleAgent(t *testing.T) {
 	}
 	fs.files[stalePath] = []byte(staleClaudeSettings)
 
-	dry, real := fakeFactories("/h", fs)
+	_, real := fakeFactories("/h", fs)
 
-	warnings := EnsureIntegrationsForRevisionWith("rev2", testConfigDeps(t), dry, real)
+	warnings := EnsureIntegrationsForRevisionWith("rev2", testConfigDeps(t), real)
 	if warnings != nil {
 		t.Errorf("expected no warnings on successful update, got %v", warnings)
 	}
@@ -1796,8 +1824,8 @@ func TestEnsureIntegrations_RetriesOnFailure(t *testing.T) {
 	// Inject a write error on the file we're about to update.
 	fs.writeErr[stalePath] = errors.New("simulated write failure")
 
-	dry, real := fakeFactories("/h", fs)
-	warnings := EnsureIntegrationsForRevisionWith("rev3", testConfigDeps(t), dry, real)
+	_, real := fakeFactories("/h", fs)
+	warnings := EnsureIntegrationsForRevisionWith("rev3", testConfigDeps(t), real)
 
 	if len(warnings) == 0 {
 		t.Fatal("expected a warning for claude update failure")
@@ -1835,8 +1863,8 @@ func TestEnsureIntegrations_PartialFailureDoesNotStamp(t *testing.T) {
 	fs.files[piExtPath] = []byte("STALE PI EXT")
 	fs.writeErr[piExtPath] = errors.New("pi write failure")
 
-	dry, real := fakeFactories("/h", fs)
-	warnings := EnsureIntegrationsForRevisionWith("rev4", testConfigDeps(t), dry, real)
+	_, real := fakeFactories("/h", fs)
+	warnings := EnsureIntegrationsForRevisionWith("rev4", testConfigDeps(t), real)
 
 	// claude should have updated cleanly.
 	if !bytes.Contains(fs.files[clauseStale], []byte("pop pane set-status clear")) {
@@ -1868,7 +1896,7 @@ func TestEnsureIntegrations_PartialFailureDoesNotStamp(t *testing.T) {
 // fake FS so refresh tests start from an installed-and-current state.
 func seedFileComponent(t *testing.T, fs *fakeFS, home string, id ComponentID, agent string) {
 	t.Helper()
-	if err := installFileComponent(fakeDeps(home, fs, io.Discard), home, id, agent); err != nil {
+	if err := installFileComponent(fileRun(fakeDeps(home, fs, io.Discard), agent), home, id, agent); err != nil {
 		t.Fatalf("seed install %s/%s: %v", agent, id, err)
 	}
 }
@@ -1909,8 +1937,8 @@ func TestEnsureIntegrations_RefreshesStaleFileComponent(t *testing.T) {
 	}
 	fs.files[renderFile] = []byte("stale skill body")
 
-	dry, real := fakeFactories("/h", fs)
-	warnings := EnsureIntegrationsForRevisionWith("rev-fc1", testConfigDeps(t), dry, real)
+	_, real := fakeFactories("/h", fs)
+	warnings := EnsureIntegrationsForRevisionWith("rev-fc1", testConfigDeps(t), real)
 	if warnings != nil {
 		t.Errorf("expected no warnings on successful file-component refresh, got %v", warnings)
 	}
@@ -1929,8 +1957,8 @@ func TestEnsureIntegrations_NeverAddsUninstalledFileComponent(t *testing.T) {
 	// files, no symlinks — and still stamp the revision (a clean no-op pass).
 	fs := newFakeFS()
 
-	dry, real := fakeFactories("/h", fs)
-	warnings := EnsureIntegrationsForRevisionWith("rev-fc2", testConfigDeps(t), dry, real)
+	_, real := fakeFactories("/h", fs)
+	warnings := EnsureIntegrationsForRevisionWith("rev-fc2", testConfigDeps(t), real)
 	if warnings != nil {
 		t.Errorf("expected no warnings, got %v", warnings)
 	}
@@ -1961,9 +1989,9 @@ func TestUpdateExisting_AddsMissingBaselineComponent(t *testing.T) {
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 
-	dry, real := fakeFactories("/h", fs)
+	_, real := fakeFactories("/h", fs)
 	var stdout bytes.Buffer
-	if err := RunUpdateExistingWith("rev-add1", testConfigDeps(t), dry, real, &stdout, io.Discard, false); err != nil {
+	if err := RunUpdateExistingWith("rev-add1", testConfigDeps(t), real, &stdout, io.Discard, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	link := claudePaneLink("/h")
@@ -1981,8 +2009,8 @@ func TestEnsureIntegrations_AddsMissingBaselineComponent(t *testing.T) {
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 
-	dry, real := fakeFactories("/h", fs)
-	warnings := EnsureIntegrationsForRevisionWith("rev-add2", testConfigDeps(t), dry, real)
+	_, real := fakeFactories("/h", fs)
+	warnings := EnsureIntegrationsForRevisionWith("rev-add2", testConfigDeps(t), real)
 	if warnings != nil {
 		t.Errorf("expected no warnings, got %v", warnings)
 	}
@@ -2001,8 +2029,8 @@ skills = ["tasks"]
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 
-	dry, real := fakeFactories("/h", fs)
-	result := updateStaleIntegrations(testConfigDeps(t), dry, real)
+	_, real := fakeFactories("/h", fs)
+	result := updateStaleIntegrations(testConfigDeps(t), real)
 	if _, ok := fs.symlinks[claudePaneLink("/h")]; ok {
 		t.Fatal("refresh must not install pane-skill omitted from merged baseline")
 	}
@@ -2022,8 +2050,8 @@ func TestRefresh_SkipsConflictWithoutOverwrite(t *testing.T) {
 	fs.dirs[conflictPath] = true
 	delete(fs.symlinks, claudePaneLink("/h"))
 
-	dry, real := fakeFactories("/h", fs)
-	result := updateStaleIntegrations(testConfigDeps(t), dry, real)
+	_, real := fakeFactories("/h", fs)
+	result := updateStaleIntegrations(testConfigDeps(t), real)
 	if _, ok := fs.symlinks[claudePaneLink("/h")]; ok {
 		t.Fatal("refresh must not install over an Integration conflict")
 	}
@@ -2052,8 +2080,8 @@ func TestEnsureIntegrations_LeavesCurrentFileComponentUntouched(t *testing.T) {
 	link := claudePaneLink("/h")
 	targetBefore := fs.symlinks[link]
 
-	dry, real := fakeFactories("/h", fs)
-	result := updateStaleIntegrations(testConfigDeps(t), dry, real)
+	_, real := fakeFactories("/h", fs)
+	result := updateStaleIntegrations(testConfigDeps(t), real)
 	if len(result.Warnings) != 0 {
 		t.Errorf("expected no warnings for current component, got %v", result.Warnings)
 	}
@@ -2077,8 +2105,8 @@ func TestRefreshComponent_SkipsConflictSilently(t *testing.T) {
 	conflict := filepath.Join("/h", ".claude", "skills", "tmux-pane")
 	fs.dirs[conflict] = true
 
-	dry, real := fakeFactories("/h", fs)
-	outcomes, warning := refreshComponent(dry, real, "claude", ComponentPaneSkill, baselineComponentSet(defaultIntegrationBaseline()))
+	_, real := fakeFactories("/h", fs)
+	outcomes, warning := refreshComponent(real, "claude", ComponentPaneSkill, baselineComponentSet(defaultIntegrationBaseline()))
 	for _, o := range outcomes {
 		if o.Label == "updated" || o.Label == "added" {
 			t.Errorf("expected no update on conflict, got %v", outcomes)
@@ -2099,9 +2127,9 @@ func TestRefreshComponent_OpencodeTaskSkillsAddsMissing(t *testing.T) {
 	setupIntegrateConfigLayer(t)
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "opencode")
-	dry, real := fakeFactories("/h", fs)
+	_, real := fakeFactories("/h", fs)
 
-	outcomes, warning := refreshComponent(dry, real, "opencode", ComponentTaskSkills, baselineComponentSet(defaultIntegrationBaseline()))
+	outcomes, warning := refreshComponent(real, "opencode", ComponentTaskSkills, baselineComponentSet(defaultIntegrationBaseline()))
 	if warning != "" {
 		t.Fatalf("unexpected warning: %q", warning)
 	}
@@ -2127,9 +2155,9 @@ func TestRefreshComponent_TaskSkillsDryRunIncludesWayfinder(t *testing.T) {
 	setupIntegrateConfigLayer(t)
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
-	dry, real := fakeFactories("/h", fs)
+	_, real := fakeFactories("/h", fs)
 
-	outcomes, warning := refreshComponent(dry, real, "claude", ComponentTaskSkills, baselineComponentSet(defaultIntegrationBaseline()))
+	outcomes, warning := refreshComponent(real, "claude", ComponentTaskSkills, baselineComponentSet(defaultIntegrationBaseline()))
 	if warning != "" {
 		t.Fatalf("unexpected warning: %q", warning)
 	}
@@ -2145,9 +2173,9 @@ func TestRefreshComponent_TaskSkillsDryRunIncludesPrototype(t *testing.T) {
 	setupIntegrateConfigLayer(t)
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
-	dry, real := fakeFactories("/h", fs)
+	_, real := fakeFactories("/h", fs)
 
-	outcomes, warning := refreshComponent(dry, real, "claude", ComponentTaskSkills, baselineComponentSet(defaultIntegrationBaseline()))
+	outcomes, warning := refreshComponent(real, "claude", ComponentTaskSkills, baselineComponentSet(defaultIntegrationBaseline()))
 	if warning != "" {
 		t.Fatalf("unexpected warning: %q", warning)
 	}
@@ -2163,9 +2191,9 @@ func TestRefreshComponent_TaskSkillsDryRunIncludesResearch(t *testing.T) {
 	setupIntegrateConfigLayer(t)
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
-	dry, real := fakeFactories("/h", fs)
+	_, real := fakeFactories("/h", fs)
 
-	outcomes, warning := refreshComponent(dry, real, "claude", ComponentTaskSkills, baselineComponentSet(defaultIntegrationBaseline()))
+	outcomes, warning := refreshComponent(real, "claude", ComponentTaskSkills, baselineComponentSet(defaultIntegrationBaseline()))
 	if warning != "" {
 		t.Fatalf("unexpected warning: %q", warning)
 	}
@@ -2178,9 +2206,9 @@ func TestRefreshComponent_SkipsUnknownComponentSilently(t *testing.T) {
 	t.Parallel()
 	setupIntegrateConfigLayer(t)
 	fs := newFakeFS()
-	dry, real := fakeFactories("/h", fs)
+	_, real := fakeFactories("/h", fs)
 
-	outcomes, warning := refreshComponent(dry, real, "opencode", ComponentID("bogus"), baselineComponentSet(defaultIntegrationBaseline()))
+	outcomes, warning := refreshComponent(real, "opencode", ComponentID("bogus"), baselineComponentSet(defaultIntegrationBaseline()))
 	if len(outcomes) != 0 || warning != "" {
 		t.Errorf("unknown component: expected no outcomes and no warning, got outcomes=%v warning=%q", outcomes, warning)
 	}
@@ -2200,8 +2228,8 @@ func TestEnsureIntegrations_MigratesCopyModeToSymlink(t *testing.T) {
 	copyFile := filepath.Join(link, "SKILL.md")
 	fs.files[copyFile] = []byte(injectOwnershipMarker("---\nname: pop-tmux-pane\n---\nold copy-mode body"))
 
-	dry, real := fakeFactories("/h", fs)
-	warnings := EnsureIntegrationsForRevisionWith("rev-fc3", testConfigDeps(t), dry, real)
+	_, real := fakeFactories("/h", fs)
+	warnings := EnsureIntegrationsForRevisionWith("rev-fc3", testConfigDeps(t), real)
 	if warnings != nil {
 		t.Errorf("expected no warnings on migration, got %v", warnings)
 	}
@@ -2235,9 +2263,9 @@ func TestUpdateExisting_RefreshesFileComponentPerAgent(t *testing.T) {
 	seedFileComponent(t, fs, "/h", ComponentPaneSkill, "claude")
 	fs.files[claudePaneRenderFile("/h")] = []byte("stale skill body")
 
-	dry, real := fakeFactories("/h", fs)
+	_, real := fakeFactories("/h", fs)
 	var stdout, stderr bytes.Buffer
-	if err := RunUpdateExistingWith("rev-fc4", testConfigDeps(t), dry, real, &stdout, &stderr, false); err != nil {
+	if err := RunUpdateExistingWith("rev-fc4", testConfigDeps(t), real, &stdout, &stderr, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !strings.Contains(stdout.String(), "claude") || !strings.Contains(stdout.String(), "pop-tmux-pane") || !strings.Contains(stdout.String(), "updated") {
@@ -2307,10 +2335,10 @@ func TestUpdateExisting_SilentOnNoInstallations(t *testing.T) {
 	// the update-existing path, so default output is "nothing to do".
 	// state.json is stamped regardless (runtime fast-path can skip next launch).
 	fs := newFakeFS()
-	dry, real := fakeFactories("/h", fs)
+	_, real := fakeFactories("/h", fs)
 
 	var stdout, stderr bytes.Buffer
-	err := RunUpdateExistingWith("rev1", testConfigDeps(t), dry, real, &stdout, &stderr, false)
+	err := RunUpdateExistingWith("rev1", testConfigDeps(t), real, &stdout, &stderr, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2342,10 +2370,10 @@ func TestUpdateExisting_PrintsLinePerUpdatedAgent(t *testing.T) {
 	piStale := filepath.Join("/h", ".pi", "agent", "extensions", "pop-status-sync.ts")
 	fs.files[piStale] = []byte("STALE pi")
 
-	dry, real := fakeFactories("/h", fs)
+	_, real := fakeFactories("/h", fs)
 
 	var stdout, stderr bytes.Buffer
-	if err := RunUpdateExistingWith("rev2", testConfigDeps(t), dry, real, &stdout, &stderr, false); err != nil {
+	if err := RunUpdateExistingWith("rev2", testConfigDeps(t), real, &stdout, &stderr, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -2381,9 +2409,9 @@ func TestUpdateExisting_SilentWhenInstalledAndCurrent(t *testing.T) {
 	installViaFake(t, fs, "/h", "claude")
 	seedBaselineComponents(t, fs, "/h", "claude")
 
-	dry, real := fakeFactories("/h", fs)
+	_, real := fakeFactories("/h", fs)
 	var stdout, stderr bytes.Buffer
-	if err := RunUpdateExistingWith("rev3", testConfigDeps(t), dry, real, &stdout, &stderr, false); err != nil {
+	if err := RunUpdateExistingWith("rev3", testConfigDeps(t), real, &stdout, &stderr, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := stdout.String(); got != "nothing to do\n" {
@@ -2409,9 +2437,9 @@ func TestUpdateExisting_WritesWarningToStderrAndDoesNotStamp(t *testing.T) {
 	fs.files[stalePath] = []byte(staleClaudeSettings)
 	fs.writeErr[stalePath] = errors.New("simulated failure")
 
-	dry, real := fakeFactories("/h", fs)
+	_, real := fakeFactories("/h", fs)
 	var stdout, stderr bytes.Buffer
-	err := RunUpdateExistingWith("rev4", testConfigDeps(t), dry, real, &stdout, &stderr, false)
+	err := RunUpdateExistingWith("rev4", testConfigDeps(t), real, &stdout, &stderr, false)
 	if err != nil {
 		t.Fatalf("expected nil error (non-fatal), got %v", err)
 	}
@@ -2439,10 +2467,10 @@ func TestUpdateExisting_DevRevisionDoesNotStamp(t *testing.T) {
 	// A "dev" revision should never stamp state.json (matches the runtime
 	// behavior where dev builds are unreliable as staleness markers).
 	fs := newFakeFS()
-	dry, real := fakeFactories("/h", fs)
+	_, real := fakeFactories("/h", fs)
 
 	var stdout, stderr bytes.Buffer
-	if err := RunUpdateExistingWith("dev", testConfigDeps(t), dry, real, &stdout, &stderr, false); err != nil {
+	if err := RunUpdateExistingWith("dev", testConfigDeps(t), real, &stdout, &stderr, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := readStateRevision(t); got != "" {
@@ -2466,11 +2494,11 @@ func TestIntegrateCmd_MultiAgentInstall(t *testing.T) {
 	// so we use non-empty optins just to test multi-agent behavior.
 	optins := []ComponentID{ComponentPaneSkill}
 
-	if err := RunComponents(fakeDeps("/h", fs, &out), "claude", optins, false, false, nil, false, false); err != nil {
+	if _, err := installReq(fakeDeps("/h", fs, &out), fullReq("claude", optins, nil, false, false, false)); err != nil {
 		t.Fatalf("claude install: %v", err)
 	}
 
-	if err := RunComponents(fakeDeps("/h", fs, &out), "pi", optins, false, false, nil, false, false); err != nil {
+	if _, err := installReq(fakeDeps("/h", fs, &out), fullReq("pi", optins, nil, false, false, false)); err != nil {
 		t.Fatalf("pi install: %v", err)
 	}
 
@@ -2495,12 +2523,12 @@ func TestIntegrateCmd_MultiAgentWithUniformFlags(t *testing.T) {
 	optins := []ComponentID{ComponentPaneSkill}
 
 	// Install claude with pane skill.
-	if err := RunComponents(fakeDeps("/h", fs, io.Discard), "claude", optins, false, false, nil, false, false); err != nil {
+	if _, err := installReq(fakeDeps("/h", fs, io.Discard), fullReq("claude", optins, nil, false, false, false)); err != nil {
 		t.Fatalf("claude install: %v", err)
 	}
 
 	// Install pi with same flags (pane skill).
-	if err := RunComponents(fakeDeps("/h", fs, io.Discard), "pi", optins, false, false, nil, false, false); err != nil {
+	if _, err := installReq(fakeDeps("/h", fs, io.Discard), fullReq("pi", optins, nil, false, false, false)); err != nil {
 		t.Fatalf("pi install: %v", err)
 	}
 
@@ -2519,7 +2547,7 @@ func TestIntegrateCmd_UnknownAgentIsRejected(t *testing.T) {
 	fs := newFakeFS()
 
 	// Unknown agent should produce an error.
-	err := RunComponents(fakeDeps("/h", fs, io.Discard), "vscode", []ComponentID{}, false, false, nil, false, false)
+	_, err := installReq(fakeDeps("/h", fs, io.Discard), fullReq("vscode", []ComponentID{}, nil, false, false, false))
 	if err == nil {
 		t.Fatal("expected error for unknown agent vscode")
 	}
@@ -2542,7 +2570,7 @@ func TestExplicitInstall_OutputAdded(t *testing.T) {
 	d := fakeDeps(installerHome, fs, &out)
 
 	// Install only status-wiring (no opt-in flags).
-	if err := RunComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, nil, false, false); err != nil {
+	if _, err := installReq(d, fullReq("claude", []ComponentID{ComponentStatusWiring}, nil, false, false, false)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -2569,7 +2597,7 @@ func TestExplicitInstall_OutputUpdated(t *testing.T) {
 	var out bytes.Buffer
 	d := fakeDeps(installerHome, fs, &out)
 
-	if err := RunComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, nil, false, false); err != nil {
+	if _, err := installReq(d, fullReq("claude", []ComponentID{ComponentStatusWiring}, nil, false, false, false)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -2588,7 +2616,7 @@ func TestExplicitInstall_OutputSkippedOptedOut(t *testing.T) {
 	d := fakeDeps(installerHome, fs, &out)
 
 	// codex supports pane-skill and task-skills — not selecting them shows opted-out.
-	if err := RunComponents(d, "codex", []ComponentID{ComponentStatusWiring}, false, false, nil, false, false); err != nil {
+	if _, err := installReq(d, fullReq("codex", []ComponentID{ComponentStatusWiring}, nil, false, false, false)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -2607,7 +2635,7 @@ func TestExplicitInstall_OutputSkippedOptedOut(t *testing.T) {
 	out.Reset()
 	fs2 := newFakeFS()
 	d2 := fakeDeps(installerHome, fs2, &out)
-	if err := RunComponents(d2, "claude", []ComponentID{ComponentStatusWiring}, false, false, nil, false, false); err != nil {
+	if _, err := installReq(d2, fullReq("claude", []ComponentID{ComponentStatusWiring}, nil, false, false, false)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got2 := out.String()
@@ -2628,7 +2656,7 @@ func TestExplicitInstall_OutputSkippedConflict(t *testing.T) {
 	var out bytes.Buffer
 	d := fakeDeps(installerHome, fs, &out)
 
-	if err := RunComponents(d, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, false, nil, false, false); err != nil {
+	if _, err := installReq(d, fullReq("claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, nil, false, false, false)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -2663,14 +2691,14 @@ func TestExplicitInstall_VerboseShowsAlreadyCurrent(t *testing.T) {
 	fs := newFakeFS()
 	// First install to set up current content.
 	d0 := fakeDeps(installerHome, fs, io.Discard)
-	if err := RunComponents(d0, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, false, nil, false, false); err != nil {
+	if _, err := installReq(d0, fullReq("claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, nil, false, false, false)); err != nil {
 		t.Fatalf("first install: %v", err)
 	}
 
 	// Re-run without verbose: "already current" should be suppressed → "nothing to do" or opted-out lines only.
 	var outNoVerbose bytes.Buffer
 	d1 := fakeDeps(installerHome, fs, &outNoVerbose)
-	if err := RunComponents(d1, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, false, nil, false, false); err != nil {
+	if _, err := installReq(d1, fullReq("claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, nil, false, false, false)); err != nil {
 		t.Fatalf("re-run no verbose: %v", err)
 	}
 	if strings.Contains(outNoVerbose.String(), "already current") {
@@ -2680,7 +2708,7 @@ func TestExplicitInstall_VerboseShowsAlreadyCurrent(t *testing.T) {
 	// Re-run with verbose: "already current" should appear for both components.
 	var outVerbose bytes.Buffer
 	d2 := fakeDeps(installerHome, fs, &outVerbose)
-	if err := RunComponents(d2, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, true, nil, false, false); err != nil {
+	if _, err := installReq(d2, fullReq("claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, nil, false, false, true)); err != nil {
 		t.Fatalf("re-run verbose: %v", err)
 	}
 	if !strings.Contains(outVerbose.String(), "already current") {
@@ -2703,9 +2731,9 @@ func TestUpdateExisting_OutputUpdated(t *testing.T) {
 	stalePath := filepath.Join("/h", ".claude", "settings.json")
 	fs.files[stalePath] = []byte(staleClaudeSettings)
 
-	dry, real := fakeFactories("/h", fs)
+	_, real := fakeFactories("/h", fs)
 	var stdout, stderr bytes.Buffer
-	if err := RunUpdateExistingWith("rev-out1", testConfigDeps(t), dry, real, &stdout, &stderr, false); err != nil {
+	if err := RunUpdateExistingWith("rev-out1", testConfigDeps(t), real, &stdout, &stderr, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -2730,11 +2758,11 @@ skills = ["tasks"]
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 	seedFileComponent(t, fs, "/h", ComponentTaskSkills, "claude")
-	dry, real := fakeFactories("/h", fs)
+	_, real := fakeFactories("/h", fs)
 
 	// Without verbose: opted-out outcomes are suppressed → "nothing to do".
 	var stdoutNoVerbose bytes.Buffer
-	if err := RunUpdateExistingWith("rev-out2", testConfigDeps(t), dry, real, &stdoutNoVerbose, io.Discard, false); err != nil {
+	if err := RunUpdateExistingWith("rev-out2", testConfigDeps(t), real, &stdoutNoVerbose, io.Discard, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := stdoutNoVerbose.String(); got != "nothing to do\n" {
@@ -2743,7 +2771,7 @@ skills = ["tasks"]
 
 	// With verbose: opted-out outcomes appear for baseline omissions.
 	var stdoutVerbose bytes.Buffer
-	if err := RunUpdateExistingWith("rev-out2", testConfigDeps(t), dry, real, &stdoutVerbose, io.Discard, true); err != nil {
+	if err := RunUpdateExistingWith("rev-out2", testConfigDeps(t), real, &stdoutVerbose, io.Discard, true); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got := stdoutVerbose.String()
@@ -2767,9 +2795,9 @@ func TestUpdateExisting_OutputSkippedConflict(t *testing.T) {
 	// Remove the pop-owned symlink so ownership check sees the conflict first.
 	delete(fs.symlinks, claudePaneLink("/h"))
 
-	dry, real := fakeFactories("/h", fs)
+	_, real := fakeFactories("/h", fs)
 	var stdout bytes.Buffer
-	if err := RunUpdateExistingWith("rev-out3", testConfigDeps(t), dry, real, &stdout, io.Discard, false); err != nil {
+	if err := RunUpdateExistingWith("rev-out3", testConfigDeps(t), real, &stdout, io.Discard, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -2791,11 +2819,11 @@ func TestUpdateExisting_VerboseShowsAlreadyCurrent(t *testing.T) {
 	installViaFake(t, fs, "/h", "claude")
 	seedBaselineComponents(t, fs, "/h", "claude")
 
-	dry, real := fakeFactories("/h", fs)
+	_, real := fakeFactories("/h", fs)
 
 	// Without verbose: "already current" is suppressed → "nothing to do".
 	var stdoutNoVerbose bytes.Buffer
-	if err := RunUpdateExistingWith("rev-out4", testConfigDeps(t), dry, real, &stdoutNoVerbose, io.Discard, false); err != nil {
+	if err := RunUpdateExistingWith("rev-out4", testConfigDeps(t), real, &stdoutNoVerbose, io.Discard, false); err != nil {
 		t.Fatalf("without verbose: %v", err)
 	}
 	if got := stdoutNoVerbose.String(); got != "nothing to do\n" {
@@ -2804,7 +2832,7 @@ func TestUpdateExisting_VerboseShowsAlreadyCurrent(t *testing.T) {
 
 	// With verbose: "already current" lines appear.
 	var stdoutVerbose bytes.Buffer
-	if err := RunUpdateExistingWith("rev-out4", testConfigDeps(t), dry, real, &stdoutVerbose, io.Discard, true); err != nil {
+	if err := RunUpdateExistingWith("rev-out4", testConfigDeps(t), real, &stdoutVerbose, io.Discard, true); err != nil {
 		t.Fatalf("with verbose: %v", err)
 	}
 	if !strings.Contains(stdoutVerbose.String(), "already current") {
@@ -2818,10 +2846,10 @@ func TestUpdateExisting_NothingToDoMessage(t *testing.T) {
 	t.Parallel()
 	setupIntegrateConfigLayer(t)
 	fs := newFakeFS()
-	dry, real := fakeFactories("/h", fs)
+	_, real := fakeFactories("/h", fs)
 
 	var stdout bytes.Buffer
-	if err := RunUpdateExistingWith("rev-out5", testConfigDeps(t), dry, real, &stdout, io.Discard, false); err != nil {
+	if err := RunUpdateExistingWith("rev-out5", testConfigDeps(t), real, &stdout, io.Discard, false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := stdout.String(); got != "nothing to do\n" {
@@ -2849,7 +2877,7 @@ func TestOptOutRemoval_PaneSkill_RemovesInstalled(t *testing.T) {
 	var out bytes.Buffer
 	d := fakeDeps(home, fs, &out)
 	optOuts := map[ComponentID]bool{ComponentPaneSkill: true}
-	if err := RunComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts, false, false); err != nil {
+	if _, err := installReq(d, fullReq("claude", []ComponentID{ComponentStatusWiring}, optOuts, false, false, false)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -2889,7 +2917,7 @@ func TestOptOutRemoval_TaskSkills_RemovesInstalled(t *testing.T) {
 	var out bytes.Buffer
 	d := fakeDeps(home, fs, &out)
 	optOuts := map[ComponentID]bool{ComponentTaskSkills: true}
-	if err := RunComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts, false, false); err != nil {
+	if _, err := installReq(d, fullReq("claude", []ComponentID{ComponentStatusWiring}, optOuts, false, false, false)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -2915,7 +2943,7 @@ func TestOptOutRemoval_NotInstalled_SkipsOptedOut(t *testing.T) {
 	var out bytes.Buffer
 	d := fakeDeps(home, fs, &out)
 	optOuts := map[ComponentID]bool{ComponentPaneSkill: true}
-	if err := RunComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts, false, false); err != nil {
+	if _, err := installReq(d, fullReq("claude", []ComponentID{ComponentStatusWiring}, optOuts, false, false, false)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -2943,7 +2971,7 @@ func TestOptOutRemoval_LeavesUnownedUntouched(t *testing.T) {
 	var out bytes.Buffer
 	d := fakeDeps(home, fs, &out)
 	optOuts := map[ComponentID]bool{ComponentPaneSkill: true}
-	if err := RunComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts, false, false); err != nil {
+	if _, err := installReq(d, fullReq("claude", []ComponentID{ComponentStatusWiring}, optOuts, false, false, false)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -2975,11 +3003,10 @@ func TestOptOutRemoval_NoPrompt(t *testing.T) {
 		readlink:     fs.readlink,
 		lstatMode:    fs.lstatMode,
 		readDirNames: fs.readDirNames,
-		stdin:        nil, // no stdin → any prompt read would return EOF (decline), but removal must not need it
 	}
 
 	optOuts := map[ComponentID]bool{ComponentPaneSkill: true}
-	if err := RunComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts, false, false); err != nil {
+	if _, err := installReq(d, fullReq("claude", []ComponentID{ComponentStatusWiring}, optOuts, false, false, false)); err != nil {
 		t.Fatalf("opt-out removal must succeed with nil stdin (no prompt): %v", err)
 	}
 
@@ -3010,7 +3037,7 @@ func TestOptOutRemoval_BareReAdds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BaselineLoader: %v", err)
 	}
-	if err := RunComponents(d, "claude", baseline, false, false, optOuts, false, false); err != nil {
+	if _, err := installReq(d, fullReq("claude", baseline, optOuts, false, false, false)); err != nil {
 		t.Fatalf("opt-out: %v", err)
 	}
 	if _, ok := fs.symlinks[link]; ok {
@@ -3026,7 +3053,7 @@ func TestOptOutRemoval_BareReAdds(t *testing.T) {
 		t.Fatalf("BaselineLoader after bare clear: %v", err)
 	}
 	d2 := fakeDeps(home, fs, io.Discard)
-	if err := RunComponents(d2, "claude", baseline, true, false, nil, false, false); err != nil {
+	if _, err := installReq(d2, fullReq("claude", baseline, nil, false, false, false)); err != nil {
 		t.Fatalf("bare re-run: %v", err)
 	}
 
@@ -3044,7 +3071,7 @@ func TestOptOutRemoval_Cycle(t *testing.T) {
 
 	// Step 1: install pane-skill.
 	d := fakeDeps(home, fs, io.Discard)
-	if err := RunComponents(d, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, false, nil, false, false); err != nil {
+	if _, err := installReq(d, fullReq("claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, nil, false, false, false)); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	if _, ok := fs.symlinks[link]; !ok {
@@ -3055,7 +3082,7 @@ func TestOptOutRemoval_Cycle(t *testing.T) {
 	var out bytes.Buffer
 	d2 := fakeDeps(home, fs, &out)
 	optOuts := map[ComponentID]bool{ComponentPaneSkill: true}
-	if err := RunComponents(d2, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts, false, false); err != nil {
+	if _, err := installReq(d2, fullReq("claude", []ComponentID{ComponentStatusWiring}, optOuts, false, false, false)); err != nil {
 		t.Fatalf("opt-out: %v", err)
 	}
 	if _, ok := fs.symlinks[link]; ok {
@@ -3067,7 +3094,7 @@ func TestOptOutRemoval_Cycle(t *testing.T) {
 
 	// Step 3: bare re-add.
 	d3 := fakeDeps(home, fs, io.Discard)
-	if err := RunComponents(d3, "claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, false, false, nil, false, false); err != nil {
+	if _, err := installReq(d3, fullReq("claude", []ComponentID{ComponentStatusWiring, ComponentPaneSkill}, nil, false, false, false)); err != nil {
 		t.Fatalf("re-add: %v", err)
 	}
 	if _, ok := fs.symlinks[link]; !ok {
@@ -3097,7 +3124,7 @@ skills = ["tasks"]
 	link := claudePaneLink(home)
 	d := fakeDeps(home, fs, io.Discard)
 	optOuts := map[ComponentID]bool{ComponentPaneSkill: true}
-	if err := RunComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts, false, false); err != nil {
+	if _, err := installReq(d, fullReq("claude", []ComponentID{ComponentStatusWiring}, optOuts, false, false, false)); err != nil {
 		t.Fatalf("opt-out: %v", err)
 	}
 	if _, ok := fs.symlinks[link]; ok {
@@ -3111,8 +3138,8 @@ skills = ["tasks"]
 	}
 
 	// Run the refresh path.
-	dry, real := fakeFactories(home, fs)
-	result := updateStaleIntegrations(testConfigDeps(t), dry, real)
+	_, real := fakeFactories(home, fs)
+	result := updateStaleIntegrations(testConfigDeps(t), real)
 	if len(result.Warnings) != 0 {
 		t.Errorf("unexpected warnings from refresh: %v", result.Warnings)
 	}
@@ -3147,10 +3174,13 @@ func TestOverwriteConflicts_PromptYes(t *testing.T) {
 	fs, home, conflictPath := overwriteConflictSetup(t)
 	var out bytes.Buffer
 	d := fakeDeps(home, fs, &out)
-	d.stdin = strings.NewReader("y\n")
+	d.ConfirmOverwrite = func(path string) bool {
+		ok, err := promptOverwriteConflict(strings.NewReader("y\n"), d.stdout, path)
+		return err == nil && ok
+	}
 
 	optins := []ComponentID{ComponentStatusWiring, ComponentPaneSkill}
-	if err := RunComponents(d, "claude", optins, true, false, nil, true, false); err != nil {
+	if _, err := installReq(d, fullReq("claude", optins, nil, true, false, false)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -3177,10 +3207,13 @@ func TestOverwriteConflicts_PromptNo(t *testing.T) {
 	fs, home, conflictPath := overwriteConflictSetup(t)
 	var out bytes.Buffer
 	d := fakeDeps(home, fs, &out)
-	d.stdin = strings.NewReader("\n")
+	d.ConfirmOverwrite = func(path string) bool {
+		ok, err := promptOverwriteConflict(strings.NewReader("\n"), d.stdout, path)
+		return err == nil && ok
+	}
 
 	optins := []ComponentID{ComponentStatusWiring, ComponentPaneSkill}
-	if err := RunComponents(d, "claude", optins, true, false, nil, true, false); err != nil {
+	if _, err := installReq(d, fullReq("claude", optins, nil, true, false, false)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -3209,7 +3242,7 @@ func TestOverwriteConflicts_AssumeYes(t *testing.T) {
 	d := fakeDeps(home, fs, &out)
 
 	optins := []ComponentID{ComponentStatusWiring, ComponentPaneSkill}
-	if err := RunComponents(d, "claude", optins, false, false, nil, true, true); err != nil {
+	if _, err := installReq(d, fullReq("claude", optins, nil, true, true, false)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -3232,7 +3265,7 @@ func TestOverwriteConflicts_NoTTYSkips(t *testing.T) {
 	d := fakeDeps(home, fs, &out)
 
 	optins := []ComponentID{ComponentStatusWiring, ComponentPaneSkill}
-	if err := RunComponents(d, "claude", optins, false, false, nil, true, false); err != nil {
+	if _, err := installReq(d, fullReq("claude", optins, nil, true, false, false)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -3261,7 +3294,7 @@ func TestOverwriteConflicts_MultiAgentUniform(t *testing.T) {
 	optins := []ComponentID{ComponentStatusWiring, ComponentPaneSkill}
 	for _, agent := range []string{"claude", "pi"} {
 		d := fakeDeps(home, fs, io.Discard)
-		if err := RunComponents(d, agent, optins, false, false, nil, true, true); err != nil {
+		if _, err := installReq(d, fullReq(agent, optins, nil, true, true, false)); err != nil {
 			t.Fatalf("%s install: %v", agent, err)
 		}
 	}
@@ -3286,9 +3319,8 @@ func TestOptOutRemoval_StillNoPromptWithOverwriteFlag(t *testing.T) {
 	seedFileComponent(t, fs, home, ComponentPaneSkill, "claude")
 
 	d := fakeDeps(home, fs, io.Discard)
-	d.stdin = nil
 	optOuts := map[ComponentID]bool{ComponentPaneSkill: true}
-	if err := RunComponents(d, "claude", []ComponentID{ComponentStatusWiring}, false, false, optOuts, true, true); err != nil {
+	if _, err := installReq(d, fullReq("claude", []ComponentID{ComponentStatusWiring}, optOuts, true, true, false)); err != nil {
 		t.Fatalf("opt-out removal must succeed: %v", err)
 	}
 	if _, ok := fs.symlinks[claudePaneLink(home)]; ok {

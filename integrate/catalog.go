@@ -43,7 +43,7 @@ type Component struct {
 	id       ComponentID
 	supports map[string]bool
 	sources  []string
-	install  func(d *Deps, home, agent string) error
+	install  func(r *run, home, agent string) error
 }
 
 func (c Component) supported(agent string) bool {
@@ -117,18 +117,18 @@ func LookupComponent(id ComponentID) (Component, bool) {
 // dispatching to that agent's hook merge or extension install. Behavior is
 // byte-identical to the previous per-agent integrate functions; only the
 // skill installs that used to sit alongside them are gone.
-func installStatusWiring(d *Deps, home, agent string) error {
+func installStatusWiring(r *run, home, agent string) error {
 	switch strings.ToLower(agent) {
 	case "claude":
-		return installClaudeHooks(d, home)
+		return installClaudeHooks(r, home)
 	case "codex":
-		return installCodexHooks(d, home)
+		return installCodexHooks(r, home)
 	case "pi":
-		return installPiExtension(d, home)
+		return installPiExtension(r, home)
 	case "opencode":
-		return installOpencodePlugin(d, home)
+		return installOpencodePlugin(r, home)
 	case "cursor":
-		return installCursorHooks(d, home)
+		return installCursorHooks(r, home)
 	default:
 		return fmt.Errorf("unknown agent %q (expected: claude, codex, pi, opencode, cursor)", agent)
 	}

@@ -40,12 +40,13 @@ var popHooks = []hookSpec{
 // installClaudeHooks merges pop's hook entries into ~/.claude/settings.json,
 // preserving any unrelated existing hooks. Old pop hooks are removed first
 // (matched via isPopHook) so re-running the command is idempotent.
-func installClaudeHooks(d *Deps, home string) error {
+func installClaudeHooks(r *run, home string) error {
 	settingsPath := filepath.Join(home, ".claude", "settings.json")
-	return installJSONHooks(d, settingsPath, popHooks)
+	return installJSONHooks(r, settingsPath, popHooks)
 }
 
-func installJSONHooks(d *Deps, settingsPath string, hooksToInstall []hookSpec) error {
+func installJSONHooks(r *run, settingsPath string, hooksToInstall []hookSpec) error {
+	d := r.deps
 	settings := make(map[string]interface{})
 	data, err := d.readFile(settingsPath)
 	if err == nil {
@@ -73,8 +74,8 @@ func installJSONHooks(d *Deps, settingsPath string, hooksToInstall []hookSpec) e
 		// every claude user, so file-presence is not a reliable signal that
 		// pop is installed. Finding any existing pop hooks is — they could
 		// only have gotten there via a prior `pop integrate claude` run.
-		if d.DryRun && len(cleaned) < len(eventHooks) {
-			d.installed = true
+		if r.dryRun && len(cleaned) < len(eventHooks) {
+			r.installed = true
 		}
 		if len(cleaned) == 0 {
 			delete(hooks, event)
@@ -134,16 +135,17 @@ var codexPopHooks = []hookSpec{
 	{"Stop", "pop pane set-status unread 2>/dev/null || true"},
 }
 
-func installCodexHooks(d *Deps, home string) error {
+func installCodexHooks(r *run, home string) error {
 	hooksPath := filepath.Join(home, ".codex", "hooks.json")
-	return installJSONHooks(d, hooksPath, codexPopHooks)
+	return installJSONHooks(r, hooksPath, codexPopHooks)
 }
 
 // ----- Pi integration --------------------------------------------------------
 
 // installPiExtension writes the embedded pi extension TypeScript file. Pi
 // auto-discovers any *.ts file under ~/.pi/agent/extensions/ at startup.
-func installPiExtension(d *Deps, home string) error {
+func installPiExtension(r *run, home string) error {
+	d := r.deps
 	extDir := filepath.Join(home, ".pi", "agent", "extensions")
 	if err := d.mkdirAll(extDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create %s: %w", extDir, err)
@@ -246,7 +248,8 @@ func frontmatterHasOwnershipMarker(content string) bool {
 
 // installOpencodePlugin writes the embedded opencode plugin TypeScript file.
 // Opencode auto-discovers any *.ts file under ~/.config/opencode/plugins/ at startup.
-func installOpencodePlugin(d *Deps, home string) error {
+func installOpencodePlugin(r *run, home string) error {
+	d := r.deps
 	pluginDir := filepath.Join(home, ".config", "opencode", "plugins")
 	if err := d.mkdirAll(pluginDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create %s: %w", pluginDir, err)
@@ -286,7 +289,8 @@ var cursorPopHooks = []cursorHookSpec{
 // installCursorHooks merges pop's hook entries into ~/.cursor/hooks.json,
 // preserving any unrelated existing hooks. Old pop hooks are removed first
 // (matched via isCursorPopHook) so re-running the command is idempotent.
-func installCursorHooks(d *Deps, home string) error {
+func installCursorHooks(r *run, home string) error {
+	d := r.deps
 	hooksPath := filepath.Join(home, ".cursor", "hooks.json")
 
 	settings := make(map[string]interface{})
@@ -315,8 +319,8 @@ func installCursorHooks(d *Deps, home string) error {
 			continue
 		}
 		cleaned := removeCursorPopHooks(eventHooks)
-		if d.DryRun && len(cleaned) < len(eventHooks) {
-			d.installed = true
+		if r.dryRun && len(cleaned) < len(eventHooks) {
+			r.installed = true
 		}
 		if len(cleaned) == 0 {
 			delete(hooks, event)

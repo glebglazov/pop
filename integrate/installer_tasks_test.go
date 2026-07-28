@@ -64,7 +64,7 @@ func TestInstallTaskSkillsAllAgents(t *testing.T) {
 			fs := newFakeFS()
 			d := fakeDeps(installerHome, fs, nil)
 
-			if err := installFileComponent(d, installerHome, ComponentTaskSkills, a.name); err != nil {
+			if err := installFileComponent(fileRun(d, a.name), installerHome, ComponentTaskSkills, a.name); err != nil {
 				t.Fatalf("installFileComponent(%s): %v", a.name, err)
 			}
 
@@ -113,7 +113,7 @@ func TestInstallTaskSkillsIdempotent(t *testing.T) {
 			d := fakeDeps(installerHome, fs, nil)
 
 			for i := 0; i < 2; i++ {
-				if err := installFileComponent(d, installerHome, ComponentTaskSkills, a.name); err != nil {
+				if err := installFileComponent(fileRun(d, a.name), installerHome, ComponentTaskSkills, a.name); err != nil {
 					t.Fatalf("install pass %d (%s): %v", i, a.name, err)
 				}
 			}
@@ -141,7 +141,7 @@ func TestRunIntegrateTaskSkillsInstallsExactSet(t *testing.T) {
 			fs := newFakeFS()
 			d := fakeDeps(installerHome, fs, nil)
 
-			if err := RunComponents(d, a.name, []ComponentID{ComponentTaskSkills}, false, false, nil, false, false); err != nil {
+			if _, err := installReq(d, fullReq(a.name, []ComponentID{ComponentTaskSkills}, nil, false, false, false)); err != nil {
 				t.Fatalf("RunComponents(%s): %v", a.name, err)
 			}
 
@@ -181,7 +181,7 @@ func TestInstallTaskSkillsLeftoverOldNameNotBlocking(t *testing.T) {
 			fs.dirs[oldDir] = true
 			fs.files[oldBody] = []byte("legacy user skill")
 
-			if err := installFileComponent(d, installerHome, ComponentTaskSkills, "claude"); err != nil {
+			if err := installFileComponent(fileRun(d, "claude"), installerHome, ComponentTaskSkills, "claude"); err != nil {
 				t.Fatalf("installFileComponent: %v", err)
 			}
 
@@ -230,7 +230,7 @@ func TestInstallTaskSkillsPrunesStaleToPRD(t *testing.T) {
 				logs = append(logs, fmt.Sprintf(format, args...))
 			}
 
-			if err := installFileComponent(d, installerHome, ComponentTaskSkills, a.name); err != nil {
+			if err := installFileComponent(fileRun(d, a.name), installerHome, ComponentTaskSkills, a.name); err != nil {
 				t.Fatalf("installFileComponent(%s): %v", a.name, err)
 			}
 

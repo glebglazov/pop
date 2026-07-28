@@ -114,7 +114,12 @@ not own is left untouched and reported.`,
 		for _, a := range args[1:] {
 			ids = append(ids, integrate.ComponentID(a))
 		}
-		return integrate.RunRemoveComponents(integrate.DefaultDeps(), args[0], ids)
+		d := integrate.DefaultDeps()
+		_, err := integrate.Remove(d, integrate.Request{
+			Agent:            args[0],
+			RemoveComponents: ids,
+		})
+		return err
 	},
 }
 
@@ -195,9 +200,24 @@ func runIntegrate(cmd *cobra.Command, args []string) error {
 
 	for _, agent := range args {
 		d := integrate.DefaultDeps()
-		if err := integrate.RunComponents(d, agent, baseline, stdinIsInteractive(), integrateVerbose, explicitOptOuts, integrateOverwriteConflicts, integrateYes); err != nil {
+		if stdinIsInteractive() {
+			d.ConfirmOverwrite = func(path string) bool {
+				ok, err := integrate.PromptOverwriteConflict(os.Stdin, os.Stdout, path)
+				return err == nil && ok
+			}
+		}
+		report, err := integrate.Install(d, integrate.Request{
+			Agent:              agent,
+			Components:         baseline,
+			ExplicitOptOuts:    explicitOptOuts,
+			OverwriteConflicts: integrateOverwriteConflicts,
+			AssumeYes:          integrateYes,
+			Verbose:            integrateVerbose,
+		})
+		if err != nil {
 			return err
 		}
+		integrate.PrintOutcomes(os.Stdout, report.Outcomes, integrateVerbose, true)
 	}
 	return nil
 }
@@ -214,7 +234,6 @@ func runIntegrateUpdateExisting() error {
 	err := integrate.RunUpdateExistingWith(
 		buildRevision(),
 		cmdLayerDeps().configDeps(),
-		integrate.DryRunDeps,
 		integrate.DefaultDeps,
 		os.Stdout,
 		os.Stderr,

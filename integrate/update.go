@@ -10,11 +10,11 @@ import (
 func RunUpdateExistingWith(
 	rev string,
 	cd *config.Deps,
-	newDry, newReal func() *Deps,
+	newDeps func() *Deps,
 	stdout, stderr io.Writer,
 	verbose bool,
 ) error {
-	result := updateStaleIntegrations(cd, newDry, newReal)
+	result := updateStaleIntegrations(cd, newDeps)
 
 	PrintOutcomes(stdout, result.Outcomes, verbose, false)
 
@@ -22,6 +22,6 @@ func RunUpdateExistingWith(
 		fmt.Fprintf(stderr, "⚠ %s\n", w)
 	}
 
-	stampRevisionIfSuccess(rev, stateDepsFromConfig(cd, newReal()), result)
+	stampRevisionIfSuccess(rev, stateDepsFromConfig(cd, newDeps()), result)
 	return nil
 }

@@ -281,27 +281,29 @@ func fileComponentInstalled(d *Deps, home string, id ComponentID, agent string) 
 	return len(names) > 0, nil
 }
 
-// RunRemoveComponents is the entry point for `pop integrate remove
-// <agent> [component...]`. With no component identifiers it removes every
-// component currently installed for the agent; with identifiers it removes
-// exactly that set. Only pop-owned artifacts are ever deleted, so removal can
-// never destroy the user's own files (ADR 0011).
-func RunRemoveComponents(d *Deps, agent string, ids []ComponentID) error {
-	agent = strings.ToLower(agent)
+// Remove is the entry point for `pop integrate remove <agent> [component...]`.
+// With no RemoveComponents it removes every component currently installed for
+// the agent; with identifiers it removes exactly that set. Only pop-owned
+// artifacts are ever deleted, so removal can never destroy the user's own
+// files (ADR 0011). Operational messages are written to d.stdout; the Report
+// carries run-result fields for callers that need them.
+func Remove(d *Deps, req Request) (Report, error) {
+	agent := strings.ToLower(req.Agent)
+	ids := append([]ComponentID(nil), req.RemoveComponents...)
 
 	core, ok := LookupComponent(ComponentStatusWiring)
 	if !ok {
-		return fmt.Errorf("status-wiring component missing from catalog")
+		return Report{}, fmt.Errorf("status-wiring component missing from catalog")
 	}
 	// The status-wiring support set is exactly the known agents, so this
 	// doubles as the unknown-agent guard.
 	if !core.supported(agent) {
-		return fmt.Errorf("unknown agent %q (expected: claude, codex, pi, opencode, cursor)", agent)
+		return Report{}, fmt.Errorf("unknown agent %q (expected: claude, codex, pi, opencode, cursor)", agent)
 	}
 
 	home, err := d.userHomeDir()
 	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
+		return Report{}, fmt.Errorf("failed to get home directory: %w", err)
 	}
 
 	if len(ids) == 0 {
@@ -310,7 +312,7 @@ func RunRemoveComponents(d *Deps, agent string, ids []ComponentID) error {
 		for _, c := range catalog {
 			inst, err := componentInstalled(d, home, c.id, agent)
 			if err != nil {
-				return err
+				return Report{}, err
 			}
 			if inst {
 				ids = append(ids, c.id)
@@ -320,7 +322,7 @@ func RunRemoveComponents(d *Deps, agent string, ids []ComponentID) error {
 			if d.stdout != nil {
 				fmt.Fprintf(d.stdout, "no pop components installed for %s — nothing to remove\n", agent)
 			}
-			return nil
+			return Report{}, nil
 		}
 	} else {
 		// Explicit set: validate each identifier is a known component the agent
@@ -328,18 +330,18 @@ func RunRemoveComponents(d *Deps, agent string, ids []ComponentID) error {
 		for _, id := range ids {
 			comp, ok := LookupComponent(id)
 			if !ok {
-				return fmt.Errorf("unknown component %q", id)
+				return Report{}, fmt.Errorf("unknown component %q", id)
 			}
 			if !comp.supported(agent) {
-				return fmt.Errorf("component %q is not supported for agent %q", id, agent)
+				return Report{}, fmt.Errorf("component %q is not supported for agent %q", id, agent)
 			}
 		}
 	}
 
 	for _, id := range ids {
 		if err := removeComponent(d, home, id, agent); err != nil {
-			return err
+			return Report{}, err
 		}
 	}
-	return nil
+	return Report{}, nil
 }
