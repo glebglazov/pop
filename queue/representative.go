@@ -298,7 +298,6 @@ func applyBindingRouting(d *Deps, scans []projectScan, decisions []Decision) {
 		}
 		dec.scan.ProjectPath = b.RuntimePath
 		dec.scan.RuntimePath = b.RuntimePath
-		dec.scan.SessionName = project.SessionNameWith(d.Project, b.RuntimePath)
 		if lock := d.readLock(b.RuntimePath); lock != nil && lock.Locked {
 			dec.Busy = true
 			dec.Reason = "busy"

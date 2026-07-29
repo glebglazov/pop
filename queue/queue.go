@@ -468,12 +468,20 @@ func Scan(d *Deps, cfg *config.Config) ([]Decision, error) {
 			// The fork-free static path leaves the representative's spawn session
 			// name unset (deriving it forks git). Fill it only for a drain about to
 			// be dispatched — never for the idle full-fleet listing — so a created
-			// and registered Ready set stays dispatchable. A binding-routed drain
-			// already carries its own session.
+			// and registered Ready set stays dispatchable. Derive the session from
+			// the integration-target checkout, not a binding-routed worktree cwd.
 			for j := range decs {
-				if decs[j].Actionable() && decs[j].scan.SessionName == "" && decs[j].scan.ProjectPath != "" {
-					decs[j].scan.SessionName = project.SessionNameWith(d.Project, decs[j].scan.ProjectPath)
+				if !decs[j].Actionable() || decs[j].scan.SessionName != "" {
+					continue
 				}
+				projectPath := decs[j].scan.ProjectPath
+				if g.rep != nil && strings.TrimSpace(g.rep.ProjectPath) != "" {
+					projectPath = g.rep.ProjectPath
+				}
+				if projectPath == "" {
+					continue
+				}
+				decs[j].scan.SessionName = project.SessionNameWith(d.Project, projectPath)
 			}
 			groupDecisions[idx] = decs
 		}(i)

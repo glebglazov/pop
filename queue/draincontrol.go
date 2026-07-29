@@ -64,6 +64,43 @@ type DashboardDrainResult struct {
 	RuntimePath string
 }
 
+// dashboardSetPaneCoords resolves the tmux session and working directory for a
+// Task-set pane opened from the dashboard. The pane lives in the project's
+// session (the integration-target checkout), with cwd at checkout — matching
+// supervisor-spawned drains.
+func dashboardSetPaneCoords(d *Deps, cfg *config.Config, scans []projectScan, ref SetRef, checkout string) (session, dir string, err error) {
+	if d == nil {
+		d = DefaultDeps()
+	}
+	if d.Project == nil {
+		d.Project = project.DefaultDeps()
+	}
+	dir = strings.TrimSpace(checkout)
+	if dir == "" {
+		dir = strings.TrimSpace(ref.RuntimePath)
+	}
+	if dir == "" && len(scans) > 0 {
+		dir = strings.TrimSpace(scans[0].ProjectPath)
+	}
+	projectPath := strings.TrimSpace(ref.ProjectPath)
+	if projectPath == "" && len(scans) > 0 {
+		projectPath = strings.TrimSpace(scans[0].ProjectPath)
+	}
+	if projectPath == "" {
+		rep, _, repErr := resolveRepresentative(d, cfg, scans)
+		if repErr != nil {
+			return "", "", repErr
+		}
+		if rep != nil {
+			projectPath = strings.TrimSpace(rep.ProjectPath)
+		}
+	}
+	if projectPath == "" {
+		projectPath = dir
+	}
+	return project.SessionNameWith(d.Project, projectPath), dir, nil
+}
+
 // LaunchDrain manually launches the highlighted dashboard row through
 // the same Queue provisioning and tmux spawn path used by the supervisor.
 func LaunchDrain(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult, error) {
@@ -99,12 +136,16 @@ func LaunchDrain(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult,
 		if err := validateBoundWorktree(d, scans[0].ProjectPath, b); err != nil {
 			return DashboardDrainResult{}, fmt.Errorf("bound worktree for %s is invalid (%v); repair git state or run `pop tasks unbind-worktree`", ref.SetID, err)
 		}
+		session, checkout, err := dashboardSetPaneCoords(d, cfg, scans, ref, b.RuntimePath)
+		if err != nil {
+			return DashboardDrainResult{}, err
+		}
 		dec.scan = projectScan{
 			Name:           dec.Project,
-			ProjectPath:    b.RuntimePath,
+			ProjectPath:    checkout,
 			DefinitionPath: scans[0].DefinitionPath,
 			RuntimePath:    b.RuntimePath,
-			SessionName:    project.SessionNameWith(d.Project, b.RuntimePath),
+			SessionName:    session,
 			RepoKey:        repoKey,
 		}
 	} else {
@@ -165,16 +206,15 @@ func LaunchVerify(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult
 	// path when it resolves to one (a bound worktree or trunk), else the project
 	// root. EnsureTaggedPane reuses this set's existing tagged pane, so verify
 	// lands in the same session the set's drain would.
-	base := strings.TrimSpace(ref.RuntimePath)
-	if base == "" {
-		base = scans[0].ProjectPath
+	session, checkout, err := dashboardSetPaneCoords(d, cfg, scans, ref, ref.RuntimePath)
+	if err != nil {
+		return DashboardDrainResult{}, err
 	}
 	command := fmt.Sprintf("pop tasks verify %s", shellQuote(ref.SetID))
 	if strings.TrimSpace(ref.RuntimePath) != "" {
 		command += " --task-runtime-path " + shellQuote(ref.RuntimePath)
 	}
-	session := project.SessionNameWith(d.Project, base)
-	paneID, err := tmuxmod.EnsureTaggedPane(d.Tmux, tmuxmod.TagSet, session, base, ref.SetID, command)
+	paneID, err := tmuxmod.EnsureTaggedPane(d.Tmux, tmuxmod.TagSet, session, checkout, ref.SetID, command)
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
@@ -276,13 +316,12 @@ func LaunchAssist(d *Deps, cfg *config.Config, ref SetRef) error {
 		return err
 	}
 
-	base := strings.TrimSpace(runtimePath)
-	if base == "" {
-		base = projectPath
+	session, checkout, err := dashboardSetPaneCoords(d, cfg, scans, ref, runtimePath)
+	if err != nil {
+		return err
 	}
-	session := project.SessionNameWith(d.Project, base)
 
-	if paneID, err := assistPaneIDAt(d, base, ref.SetID); err != nil {
+	if paneID, err := assistPaneIDAt(d, session, ref.SetID); err != nil {
 		return err
 	} else if paneID != "" {
 		return tmuxmod.FocusPane(d.Tmux, paneID)
@@ -292,7 +331,7 @@ func LaunchAssist(d *Deps, cfg *config.Config, ref SetRef) error {
 	if strings.TrimSpace(runtimePath) != "" {
 		command += " --task-runtime-path " + shellQuote(runtimePath)
 	}
-	paneID, err := tmuxmod.EnsureTaggedPane(d.Tmux, tmuxmod.TagAssist, session, base, ref.SetID, command)
+	paneID, err := tmuxmod.EnsureTaggedPane(d.Tmux, tmuxmod.TagAssist, session, checkout, ref.SetID, command)
 	if err != nil {
 		return err
 	}
@@ -304,30 +343,33 @@ func assistPaneTitle(setID string) string {
 }
 
 func assistPaneID(d *Deps, ref SetRef) (string, error) {
-	base := strings.TrimSpace(ref.RuntimePath)
-	if base == "" {
-		base = strings.TrimSpace(ref.ProjectPath)
+	if d == nil {
+		d = DefaultDeps()
 	}
-	if base == "" {
+	if d.Project == nil {
+		d.Project = project.DefaultDeps()
+	}
+	projectPath := strings.TrimSpace(ref.ProjectPath)
+	if projectPath == "" {
+		projectPath = strings.TrimSpace(ref.RuntimePath)
+	}
+	if projectPath == "" || strings.TrimSpace(ref.SetID) == "" {
 		return "", nil
 	}
-	return assistPaneIDAt(d, base, ref.SetID)
+	session := project.SessionNameWith(d.Project, projectPath)
+	return assistPaneIDAt(d, session, ref.SetID)
 }
 
-func assistPaneIDAt(d *Deps, base, setID string) (string, error) {
+func assistPaneIDAt(d *Deps, session, setID string) (string, error) {
 	if d == nil {
 		d = DefaultDeps()
 	}
 	if d.Tmux == nil {
 		d.Tmux = tmuxmod.New()
 	}
-	if strings.TrimSpace(base) == "" || strings.TrimSpace(setID) == "" {
+	if strings.TrimSpace(session) == "" || strings.TrimSpace(setID) == "" {
 		return "", nil
 	}
-	if d.Project == nil {
-		d.Project = project.DefaultDeps()
-	}
-	session := project.SessionNameWith(d.Project, base)
 	return d.Tmux.FindTaggedPane(session, tmuxmod.TagAssist, setID)
 }
 

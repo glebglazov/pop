@@ -106,6 +106,72 @@ func TestDashboardLaunchAssistSpawnsTaggedPane(t *testing.T) {
 	}
 }
 
+// TestDashboardLaunchAssistBoundCheckoutUsesProjectSession asserts assist panes
+// for a bound non-trunk checkout open in the project's session with the binding
+// as cwd — never a worktree-derived session.
+func TestDashboardLaunchAssistBoundCheckoutUsesProjectSession(t *testing.T) {
+	repo, setID, _ := setupSupervisorSpawnRepo(t, "assist-bound", []spawnTestTask{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	bound := filepath.Join(t.TempDir(), "assist-bound-wt")
+	runGit(t, repo, "worktree", "add", "--detach", bound, "HEAD")
+	d, cfg, row, rt := dashboardLaunchFixture(t, repo, setID)
+	repoKey, err := resolveRepoKey(d, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
+		setScopedKey(repoKey, setID): {RuntimePath: bound, Branch: "assist-bound", Project: "pop", Provisioned: false},
+	})
+	row.RuntimePath = bound
+	row.ProjectPath = repo
+
+	if err := LaunchAssist(d, cfg, row.SetRef); err != nil {
+		t.Fatalf("LaunchAssist: %v", err)
+	}
+	assertSetPaneProjectSessionAndCheckout(t, rt, repo, bound)
+}
+
+// TestDashboardPreviewAssistFindsBoundCheckoutPane asserts preview still focuses
+// an assist pane after it was opened in the project session at a bound checkout.
+func TestDashboardPreviewAssistFindsBoundCheckoutPane(t *testing.T) {
+	repo, setID, _ := setupSupervisorSpawnRepo(t, "assist-preview", []spawnTestTask{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	bound := filepath.Join(t.TempDir(), "assist-preview-wt")
+	runGit(t, repo, "worktree", "add", "--detach", bound, "HEAD")
+	d, cfg, row, rt := dashboardLaunchFixture(t, repo, setID)
+	repoKey, err := resolveRepoKey(d, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
+		setScopedKey(repoKey, setID): {RuntimePath: bound, Branch: "assist-preview", Project: "pop", Provisioned: false},
+	})
+	row.RuntimePath = bound
+	row.ProjectPath = repo
+
+	if err := LaunchAssist(d, cfg, row.SetRef); err != nil {
+		t.Fatalf("LaunchAssist: %v", err)
+	}
+	if pane := rt.Fake.PaneTagValues["%3"][tmuxmod.TagAssist]; pane != setID {
+		t.Fatalf("@pop_assist = %q, want %q", pane, setID)
+	}
+	rt.paneList = setID + " %3"
+
+	if err := PreviewDrain(d, SetRef{SetID: setID, ProjectPath: repo, RuntimePath: bound}); err != nil {
+		t.Fatalf("PreviewDrain: %v", err)
+	}
+	if !rt.findSwitched("%3") {
+		t.Fatalf("preview must focus assist pane, commands=%v", rt.commands)
+	}
+	if paneID, err := assistPaneID(d, SetRef{SetID: setID, ProjectPath: repo, RuntimePath: bound}); err != nil {
+		t.Fatal(err)
+	} else if paneID != "%3" {
+		t.Fatalf("assistPaneID = %q, want %%3 in project session", paneID)
+	}
+}
+
 // TestDashboardLaunchAssistReusesPane asserts a second LaunchAssist on a set
 // with a live assist pane focuses it instead of splitting again.
 func TestDashboardLaunchAssistReusesPane(t *testing.T) {

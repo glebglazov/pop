@@ -1,9 +1,11 @@
 package queue
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -120,6 +122,82 @@ func TestDashboardVerifyLaunchOmitsFlagWithoutRuntimePath(t *testing.T) {
 	}
 
 	assertVerifyRecordsNothing(t, d, repo)
+}
+
+// TestDashboardLaunchVerifyBoundCheckoutUsesProjectSession asserts verify panes
+// for a bound non-trunk checkout open in the project's session with the binding
+// as cwd — never a worktree-derived session.
+func TestDashboardLaunchVerifyBoundCheckoutUsesProjectSession(t *testing.T) {
+	repo, setID, _ := setupSupervisorSpawnRepo(t, "verify-bound", []spawnTestTask{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	bound := filepath.Join(t.TempDir(), "verify-bound-wt")
+	runGit(t, repo, "worktree", "add", "--detach", bound, "HEAD")
+	d, cfg, row, rt := dashboardLaunchFixture(t, repo, setID)
+	repoKey, err := resolveRepoKey(d, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
+		setScopedKey(repoKey, setID): {RuntimePath: bound, Branch: "verify-bound", Project: "pop", Provisioned: false},
+	})
+	row.RuntimePath = bound
+	row.ProjectPath = repo
+	row.RawStatus = tasks.StatusNeedsVerify
+
+	if _, err := LaunchVerify(d, cfg, row.SetRef); err != nil {
+		t.Fatalf("LaunchVerify: %v", err)
+	}
+	assertSetPaneProjectSessionAndCheckout(t, rt, repo, bound)
+	assertVerifyRecordsNothing(t, d, repo)
+}
+
+func assertSetPaneProjectSessionAndCheckout(t *testing.T, rt *recordingTmux, repo, checkout string) {
+	t.Helper()
+	wantSession := project.SessionNameWith(project.DefaultDeps(), repo)
+	newSession, ok := rt.findCommand("new-session")
+	if !ok {
+		t.Fatalf("expected project session creation; commands=%v", rt.commands)
+	}
+	if len(newSession) != 3 || newSession[1] != wantSession {
+		t.Fatalf("new-session = %v, want session %q", newSession, wantSession)
+	}
+	if got := newSession[2]; canonPath(t, got) != canonPath(t, checkout) {
+		t.Fatalf("new-session cwd = %q, want checkout %q", got, checkout)
+	}
+	worktreeSession := project.SessionNameWith(project.DefaultDeps(), checkout)
+	if worktreeSession != wantSession && newSession[1] == worktreeSession {
+		t.Fatalf("must not target worktree-derived session %q", worktreeSession)
+	}
+	newWindow, ok := rt.findCommand("new-window")
+	if !ok {
+		t.Fatalf("expected pop-queue window; commands=%v", rt.commands)
+	}
+	cwd := newWindowCwd(newWindow)
+	if cwd == "" {
+		t.Fatalf("new-window missing -c cwd: %v", newWindow)
+	}
+	if canonPath(t, cwd) != canonPath(t, checkout) {
+		t.Fatalf("new-window cwd = %q, want checkout %q", cwd, checkout)
+	}
+}
+
+func newWindowCwd(args []string) string {
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == "-c" {
+			return args[i+1]
+		}
+	}
+	return ""
+}
+
+func canonPath(t *testing.T, path string) string {
+	t.Helper()
+	got, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return filepath.Clean(path)
+	}
+	return got
 }
 
 // assertVerifyRecordsNothing checks the verify spawn left no drain lock, spawn
