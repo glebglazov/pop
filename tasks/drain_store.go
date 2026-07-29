@@ -325,8 +325,7 @@ func drainTerminal(declined bool, unavail *AgentUnavailability, verifyFailed boo
 		if th, ok := unavail.TimeHealing(); ok {
 			return store.StateQuotaPaused, unavail.Preset, pinned, th.ResetAt, true
 		}
-		// Human-healing unavailability is a clean finished stop (ADR-0153);
-		// unreachable while quota pause is the only kind.
+		// Human-healing unavailability is a clean finished stop (ADR-0153).
 	}
 	if isInterrupted(err) {
 		return store.StateInterrupted, "", false, time.Time{}, true

@@ -62,8 +62,11 @@ type RunTaskResult struct {
 	// PausePreset names the agent preset whose quota ran out, when QuotaPaused.
 	PausePreset  string
 	PauseResetAt time.Time
-	CommitSHA    string
-	AgentSummary string
+	// UnavailablePresets lists every preset that was human-healing unavailable
+	// when the agent fallback list is fully exhausted (ADR-0153).
+	UnavailablePresets []AgentUnavailability
+	CommitSHA          string
+	AgentSummary       string
 }
 
 // RunTask executes one task task through an agent.

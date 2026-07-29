@@ -2079,6 +2079,146 @@ printf 'SUMMARY_START\nclaude done\nSUMMARY_END\nTASK_COMPLETE\n'
 	assertTaskDone(t, env.execFixture(), "01-a")
 }
 
+func TestRunTaskSetAllAgentsHumanHealingUnavailableExitsSetup(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	authLine := "Error: Authentication required. Please run 'agent login' first, or set CURSOR_API_KEY environment variable."
+	installAgentShim(t, env.root, "cursor-agent", fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' %q
+exit 1
+`, authLine))
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(true, "", &buf)
+	opts.AgentPresets = []string{"cursor", "codex"}
+	opts.AgentExplicit = true
+	opts.MaxTries = 3
+
+	d := env.deps()
+	realLookPath := exec.LookPath
+	d.LookPath = func(file string) (string, error) {
+		if file == "codex" {
+			return "", exec.ErrNotFound
+		}
+		return realLookPath(file)
+	}
+
+	done := make(chan struct{})
+	var result *RunTaskSetResult
+	var runErr error
+	go func() {
+		defer close(done)
+		result, runErr = RunTaskSetWith(d, nil, nil, opts)
+	}()
+
+	time.Sleep(500 * time.Millisecond)
+	if waiter, err := GetRecoveryWaiter(d, "demo"); err != nil {
+		t.Fatalf("get recovery waiter: %v", err)
+	} else if waiter != nil {
+		t.Fatalf("recovery waiter registered on human-healing exhaustion: %#v", waiter)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("run did not finish")
+	}
+
+	assertExitCode(t, runErr, ExitSetup)
+	if result == nil {
+		t.Fatal("expected result on exhaustion exit")
+	}
+	errText := runErr.Error()
+	if !strings.Contains(errText, "cursor:") || !strings.Contains(errText, authLine) {
+		t.Fatalf("error missing cursor diagnostic: %q", errText)
+	}
+	if !strings.Contains(errText, "codex:") || !strings.Contains(errText, "binary not found on PATH") {
+		t.Fatalf("error missing codex missing-binary diagnostic: %q", errText)
+	}
+
+	assertTaskOpen(t, env.execFixture(), "01-a")
+	m := LoadManifest(env.deps(), "demo", env.execFixture().demoManifest())
+	for _, task := range m.Tasks {
+		if task.ID == "01-a" && task.FailedAfter != nil {
+			t.Fatalf("task 01-a failed_after = %v, want nil", task.FailedAfter)
+		}
+	}
+	progressPath := filepath.Join(env.tasksDir, "demo", "progress.txt")
+	if progress, err := os.ReadFile(progressPath); err == nil {
+		if strings.Contains(string(progress), "FAILED") {
+			t.Fatalf("progress.txt must not record FAILED:\n%s", progress)
+		}
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("read progress.txt: %v", err)
+	}
+
+	rec := latestTerminalDrain(t, d, result.RuntimePath)
+	if rec == nil {
+		t.Fatal("no terminal drain recorded")
+	}
+	if rec.State != store.StateFinished {
+		t.Fatalf("state = %q, want finished", rec.State)
+	}
+	if rec.State == store.StateCrashed {
+		t.Fatal("human-healing exhaustion must not record crashed terminal")
+	}
+}
+
+func TestRunTaskSetMixedQuotaAndHumanHealingParksOnQuota(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	authLine := "Error: Authentication required. Please run 'agent login' first."
+	installAgentShim(t, env.root, "cursor-agent", fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' %q
+exit 1
+`, authLine))
+	installAgentShim(t, env.root, "claude", `#!/bin/sh
+printf '%s\n' '{"type":"result","subtype":"error_during_execution","result":"You'\''ve hit your weekly limit · resets Mon 12:00am"}'
+`)
+
+	opts := env.runTaskSetOpts(true, "", io.Discard)
+	opts.AgentPresets = []string{"cursor", "claude"}
+	opts.AgentExplicit = true
+	opts.MaxTries = 1
+
+	d := env.deps()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = RunTaskSetWith(d, nil, nil, opts)
+	}()
+
+	var waiter *RecoveryWaiter
+	for i := 0; i < 20; i++ {
+		time.Sleep(100 * time.Millisecond)
+		var err error
+		waiter, err = GetRecoveryWaiter(d, "demo")
+		if err != nil {
+			t.Fatalf("get recovery waiter: %v", err)
+		}
+		if waiter != nil {
+			break
+		}
+	}
+	if waiter == nil {
+		t.Fatal("recovery waiter not registered for mixed quota+human list")
+	}
+	if waiter.Preset != "claude" {
+		t.Fatalf("waiter preset = %q, want claude", waiter.Preset)
+	}
+	assertTaskOpen(t, env.execFixture(), "01-a")
+	if err := DeregisterRecoveryWaiter(d, "demo"); err != nil {
+		t.Fatalf("deregister recovery waiter: %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("goroutine did not exit after waiter deregistration")
+	}
+}
+
 func TestRunTaskSetAgentFallbackDoesNotAdvanceOnPlainFailure(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},

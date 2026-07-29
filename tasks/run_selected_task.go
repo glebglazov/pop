@@ -135,9 +135,14 @@ func (r *implementRun) runSelectedTask(currentRefresh *RefreshResult, sel *Selec
 		u := taskResult.Unavailability
 		th, ok := u.TimeHealing()
 		if !ok {
-			// Human-healing cannot enter Agent quota recovery wait (ADR-0153).
-			// Later slices exit setup here; unreachable while quota is the only kind.
-			return runTaskReturn, result, exitErr(ExitOperational, "human-healing unavailability cannot enter quota recovery wait")
+			// Every configured preset is human-healing unavailable: exit setup with
+			// each preset's provider diagnostic; never enter recovery wait (ADR-0153).
+			presets := taskResult.UnavailablePresets
+			if len(presets) == 0 {
+				presets = []AgentUnavailability{*u}
+			}
+			result.Unavailability = &presets[0]
+			return runTaskReturn, result, taskExitErr(sel, ExitSetup, "%s", formatHumanHealingExhaustionMessage(presets))
 		}
 		// Quota recovery wait (ADR-0100): instead of exiting with ExitQuotaPaused,
 		// park the drain, register a recovery waiter, and poll until the preset's

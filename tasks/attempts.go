@@ -245,7 +245,7 @@ func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath s
 	if len(unavailableResults) == 0 {
 		return nil, taskExitErr(sel, ExitOperational, "no agent attempts were run")
 	}
-	return earliestTimeHealingUnavailability(unavailableResults), nil
+	return resolveAgentFallbackUnavailable(sel, unavailableResults), nil
 }
 
 func unavailabilityResult(sel *Selection, u AgentUnavailability) *RunTaskResult {
@@ -262,6 +262,35 @@ func unavailabilityResult(sel *Selection, u AgentUnavailability) *RunTaskResult 
 		}
 	}
 	return result
+}
+
+func resolveAgentFallbackUnavailable(sel *Selection, results []*RunTaskResult) *RunTaskResult {
+	if len(results) == 0 {
+		return nil
+	}
+	if best := earliestTimeHealingUnavailability(results); best != nil {
+		if _, ok := best.Unavailability.TimeHealing(); ok {
+			return best
+		}
+	}
+	var presets []AgentUnavailability
+	for _, result := range results {
+		if result == nil || result.Unavailability == nil {
+			continue
+		}
+		presets = append(presets, *result.Unavailability)
+	}
+	if len(presets) == 0 {
+		for _, result := range results {
+			if result != nil {
+				return result
+			}
+		}
+		return nil
+	}
+	out := unavailabilityResult(sel, presets[0])
+	out.UnavailablePresets = presets
+	return out
 }
 
 func earliestTimeHealingUnavailability(results []*RunTaskResult) *RunTaskResult {
@@ -291,8 +320,6 @@ func earliestTimeHealingUnavailability(results []*RunTaskResult) *RunTaskResult 
 	if best != nil {
 		return best
 	}
-	// No time-healing verdict in the list: return the first result as-is
-	// (later slices handle all-human-healing exhaustion).
 	for _, result := range results {
 		if result != nil {
 			return result

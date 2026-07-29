@@ -1,6 +1,10 @@
 package tasks
 
-import "time"
+import (
+	"fmt"
+	"strings"
+	"time"
+)
 
 // AgentUnavailabilityKind identifies which flavour of Agent unavailability this is.
 type AgentUnavailabilityKind string
@@ -115,4 +119,18 @@ func (u AgentUnavailability) WithResetAt(resetAt time.Time) AgentUnavailability 
 		u.Recovery = TimeHealingRecovery{ResetAt: resetAt}
 	}
 	return u
+}
+
+// formatHumanHealingExhaustionMessage names each exhausted preset and quotes the
+// provider diagnostic for an all-human-healing agent fallback exhaustion (ADR-0153).
+func formatHumanHealingExhaustionMessage(presets []AgentUnavailability) string {
+	if len(presets) == 0 {
+		return "all configured agents unavailable"
+	}
+	var b strings.Builder
+	b.WriteString("all configured agents unavailable:")
+	for _, u := range presets {
+		fmt.Fprintf(&b, "\n  %s: %q", u.Preset, u.Reason)
+	}
+	return b.String()
 }

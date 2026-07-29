@@ -224,6 +224,15 @@ func TestDrainTerminal(t *testing.T) {
 			wantExecuted: true,
 		},
 		{
+			name: "human-healing exhaustion is a finished process",
+			unavail: func() *AgentUnavailability {
+				u := NewAuthFailureUnavailability("cursor", "Authentication required")
+				return &u
+			}(),
+			wantTerminal: store.StateFinished,
+			wantExecuted: true,
+		},
+		{
 			name:         "done is a finished process",
 			wantTerminal: store.StateFinished,
 			wantExecuted: true,
