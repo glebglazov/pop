@@ -7,7 +7,6 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 
 	"github.com/glebglazov/pop/store"
 )
@@ -273,7 +272,7 @@ func TestImplementRunInterruptGateContinueReacquiresLock(t *testing.T) {
 	// The park recorded a clean finished terminal; finalize the resumed segment
 	// cleanly and confirm no interrupted terminal was ever stamped.
 	runtimePath := run.runtimePath
-	finalizeDrain(run.drain, false, false, false, "", false, time.Time{}, nil)
+	finalizeDrain(run.drain, false, nil, false, false, nil)
 	run.drain = nil
 	if rec := latestTerminalDrain(t, run.d, runtimePath); rec == nil || rec.State == store.StateInterrupted {
 		t.Fatalf("Continue must record no interrupted terminal, got %#v", rec)
@@ -304,7 +303,7 @@ func TestImplementRunInterruptGateExitRecordsInterruptedTerminal(t *testing.T) {
 	// Mirror runSelectedTask returning the interrupt error, whose finalize stamps
 	// the terminal.
 	runtimePath := run.runtimePath
-	finalizeDrain(run.drain, false, false, false, "", false, time.Time{}, taskExitErr(sel, ExitInterrupted, "interrupted"))
+	finalizeDrain(run.drain, false, nil, false, false, taskExitErr(sel, ExitInterrupted, "interrupted"))
 	run.drain = nil
 	rec := latestTerminalDrain(t, run.d, runtimePath)
 	if rec == nil || rec.State != store.StateInterrupted {
@@ -335,7 +334,7 @@ func TestImplementRunInterruptGateYesKeepsLockHeld(t *testing.T) {
 	}
 
 	runtimePath := run.runtimePath
-	finalizeDrain(run.drain, false, false, false, "", false, time.Time{}, taskExitErr(sel, ExitInterrupted, "interrupted"))
+	finalizeDrain(run.drain, false, nil, false, false, taskExitErr(sel, ExitInterrupted, "interrupted"))
 	run.drain = nil
 	rec := latestTerminalDrain(t, run.d, runtimePath)
 	if rec == nil || rec.State != store.StateInterrupted {
@@ -413,7 +412,7 @@ func TestImplementRunInterruptRevivesAutoDrainOnContinue(t *testing.T) {
 
 	// Clean up the live Drain the Continue re-acquired.
 	if run.drain != nil {
-		finalizeDrain(run.drain, false, false, false, "", false, time.Time{}, nil)
+		finalizeDrain(run.drain, false, nil, false, false, nil)
 		run.drain = nil
 	}
 }
@@ -444,7 +443,7 @@ func TestImplementRunInterruptContinueLeavesOffBitOff(t *testing.T) {
 	}
 
 	if run.drain != nil {
-		finalizeDrain(run.drain, false, false, false, "", false, time.Time{}, nil)
+		finalizeDrain(run.drain, false, nil, false, false, nil)
 		run.drain = nil
 	}
 }

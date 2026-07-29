@@ -131,7 +131,14 @@ func (r *implementRun) runSelectedTask(currentRefresh *RefreshResult, sel *Selec
 		}
 		return runTaskReturn, result, execErr
 	}
-	if taskResult.QuotaPaused {
+	if taskResult.Unavailability != nil {
+		u := taskResult.Unavailability
+		th, ok := u.TimeHealing()
+		if !ok {
+			// Human-healing cannot enter Agent quota recovery wait (ADR-0153).
+			// Later slices exit setup here; unreachable while quota is the only kind.
+			return runTaskReturn, result, exitErr(ExitOperational, "human-healing unavailability cannot enter quota recovery wait")
+		}
 		// Quota recovery wait (ADR-0100): instead of exiting with ExitQuotaPaused,
 		// park the drain, register a recovery waiter, and poll until the preset's
 		// cooldown elapses and a recovery turn is acquired. Both foreground and
@@ -140,15 +147,16 @@ func (r *implementRun) runSelectedTask(currentRefresh *RefreshResult, sel *Selec
 		if row := findRow(currentRefresh, taskSetID); row != nil {
 			priority = row.Priority
 		}
-		regFailed, waitErr := ParkAndWaitForQuotaRecovery(d, &r.drain, taskSetID, taskResult.PausePreset, taskResult.PauseResetAt, runtimePath, priority, out, r.ensureDrain)
+		regFailed, waitErr := ParkAndWaitForQuotaRecovery(d, &r.drain, taskSetID, u.Preset, th, runtimePath, priority, out, r.ensureDrain)
 		if waitErr != nil {
 			return runTaskReturn, result, waitErr
 		}
 		if regFailed {
+			result.Unavailability = u
 			result.QuotaPaused = true
-			result.PauseReason = taskResult.PauseReason
-			result.PausePreset = taskResult.PausePreset
-			result.PauseResetAt = taskResult.PauseResetAt
+			result.PauseReason = u.Reason
+			result.PausePreset = u.Preset
+			result.PauseResetAt = th.ResetAt
 			result.Refresh = currentRefresh
 			printTaskSetSummary(out, result)
 			return runTaskReturn, result, nil

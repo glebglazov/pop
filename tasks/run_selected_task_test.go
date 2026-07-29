@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"testing"
-	"time"
 )
 
 // newRunSelectedTaskRun builds an implementRun wired to a real store-backed
@@ -153,7 +152,7 @@ func runFromFixture(t *testing.T, env *runTaskSetFixture, agentCmd string, opts 
 	}
 	t.Cleanup(func() {
 		if run.drain != nil {
-			finalizeDrain(run.drain, false, false, false, "", false, time.Time{}, nil)
+			finalizeDrain(run.drain, false, nil, false, false, nil)
 		}
 	})
 	if err := run.setup(); err != nil {

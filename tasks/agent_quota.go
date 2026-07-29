@@ -25,10 +25,10 @@ var (
 )
 
 // opencodeGoQuotaPauseReason scans the raw agent capture line-by-line and
-// returns an AgentQuotaPause when any line contains an opencode-go quota
-// signal. The full matching line becomes the pause reason so downstream reset
-// parsing can inspect provider-specific phrasing.
-func opencodeGoQuotaPauseReason(raw string) *AgentQuotaPause {
+// returns a quota-pause Agent unavailability when any line contains an
+// opencode-go quota signal. The full matching line becomes the reason so
+// downstream reset parsing can inspect provider-specific phrasing.
+func opencodeGoQuotaPauseReason(raw string) *AgentUnavailability {
 	scanner := bufio.NewScanner(strings.NewReader(raw))
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	for scanner.Scan() {
@@ -37,7 +37,7 @@ func opencodeGoQuotaPauseReason(raw string) *AgentQuotaPause {
 			continue
 		}
 		if opencodeGoQuotaSignalInLine(line) {
-			return &AgentQuotaPause{Reason: line}
+			return DetectedQuotaPause(line)
 		}
 	}
 	return nil

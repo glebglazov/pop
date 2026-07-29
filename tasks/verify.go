@@ -788,16 +788,19 @@ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, t
 			}
 			normalized := invocation.NormalizeOutput(raw)
 			// Quota fall-through: a paused agent renders no verdict, so try the next.
-			if normalized.QuotaPause != nil {
+			if normalized.Unavailability != nil {
 				_ = persistVerifyRun(d, errOut, taskSetDir, setID, workSHA, outcome.stream, invocation.AgentPreset(), invocation.RequestedAgent, try, streamOutcomeQuotaPaused, "", exitCode, "")
-				pause := *normalized.QuotaPause
-				resetAt := agentQuotaResetAt(preset, pause.Reason, time.Now())
-				until := agentQuotaCooldownUntil(resetAt, time.Now(), quotaRetryAfter)
-				_ = updateAgentCooldown(d, preset, until)
+				u := normalized.Unavailability.WithPreset(preset)
+				resetAt := time.Time{}
+				if _, ok := u.TimeHealing(); ok {
+					resetAt = agentQuotaResetAt(preset, u.Reason, time.Now())
+					until := agentQuotaCooldownUntil(resetAt, time.Now(), quotaRetryAfter)
+					_ = updateAgentCooldown(d, preset, until)
+				}
 				quotaPauses = append(quotaPauses, VerifyQuotaPause{
 					Preset:  preset,
 					ResetAt: resetAt,
-					Reason:  pause.Reason,
+					Reason:  u.Reason,
 				})
 				if out != nil {
 					outputFor(out).line(ansiDim, "   Verifier agent %s quota-paused; trying next", preset)

@@ -50,10 +50,13 @@ type RunTaskOptions struct {
 
 // RunTaskResult is the outcome of a successful or declined run-task.
 type RunTaskResult struct {
-	Selection   *Selection
-	Refresh     *RefreshResult
-	Declined    bool
-	NoOp        bool
+	Selection      *Selection
+	Refresh        *RefreshResult
+	Declined       bool
+	NoOp           bool
+	Unavailability *AgentUnavailability
+	// QuotaPaused and friends mirror a quota-pause Unavailability for callers
+	// that assert the observable pause fields rather than the verdict type.
 	QuotaPaused bool
 	PauseReason string
 	// PausePreset names the agent preset whose quota ran out, when QuotaPaused.
@@ -199,18 +202,14 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 	}
 	defer func() {
 		var (
-			declined    bool
-			quotaPaused bool
-			preset      string
-			resetAt     time.Time
+			declined bool
+			unavail  *AgentUnavailability
 		)
 		if result != nil {
 			declined = result.Declined
-			quotaPaused = result.QuotaPaused
-			preset = result.PausePreset
-			resetAt = result.PauseResetAt
+			unavail = result.Unavailability
 		}
-		finalizeDrain(drain, declined, quotaPaused, false, preset, false, resetAt, err)
+		finalizeDrain(drain, declined, unavail, false, false, err)
 	}()
 
 	// Adopt this checkout into the binding model (ADR-0036): worktree-locus runs

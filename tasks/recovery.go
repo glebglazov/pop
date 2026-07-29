@@ -113,16 +113,20 @@ func GetCheckoutGateHold(d *Deps, runtimePath string) (*CheckoutGateHold, error)
 // (registrationFailed, err): when registrationFailed is true the caller should
 // fall back to the legacy quota-paused exit; err is non-nil on wait/interrupt
 // failures or when ensureDrain refuses.
+//
+// recovery is TimeHealingRecovery by construction: a human-healing verdict
+// cannot be passed here (ADR-0153).
 func ParkAndWaitForQuotaRecovery(
 	d *Deps,
 	drain **DrainHandle,
 	setID, preset string,
-	resetAt time.Time,
+	recovery TimeHealingRecovery,
 	runtimePath string,
 	priority int,
 	out io.Writer,
 	ensureDrain func() error,
 ) (registrationFailed bool, err error) {
+	resetAt := recovery.ResetAt
 	if resetAt.IsZero() {
 		cooldowns, readErr := readAgentCooldowns(d)
 		if readErr == nil {

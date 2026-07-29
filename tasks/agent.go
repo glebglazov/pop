@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/glebglazov/pop/config"
 )
@@ -68,16 +67,8 @@ func (i *AgentInvocation) AgentPreset() string {
 
 // AgentResult is the provider-neutral result of normalizing one invocation.
 type AgentResult struct {
-	Output     string
-	QuotaPause *AgentQuotaPause
-}
-
-// AgentQuotaPause reports that execution stopped because the agent allowance ran out.
-type AgentQuotaPause struct {
-	Reason string
-	// ResetAt is the agent-reported absolute reset instant. A zero value means
-	// unknown / unparseable; queue supervision must use its fixed fallback.
-	ResetAt time.Time
+	Output         string
+	Unavailability *AgentUnavailability
 }
 
 // AgentHeadlessRequest describes one unattended issue-attempt invocation.
@@ -854,7 +845,7 @@ func normalizeAgentOutput(format AgentOutputFormat, raw string) AgentResult {
 	default:
 		return AgentResult{Output: raw}
 	}
-	if result.Output == "" && result.QuotaPause == nil {
+	if result.Output == "" && result.Unavailability == nil {
 		result.Output = raw
 	}
 	return result
@@ -882,8 +873,8 @@ func renderAgentOutput(w io.Writer, format AgentOutputFormat, raw string) {
 		return
 	}
 	normalized := normalizeAgentOutput(format, raw)
-	if normalized.QuotaPause != nil {
-		fmt.Fprintln(w, normalized.QuotaPause.Reason)
+	if normalized.Unavailability != nil {
+		fmt.Fprintln(w, normalized.Unavailability.Reason)
 		return
 	}
 	if normalized.Output != "" {

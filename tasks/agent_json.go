@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-func normalizeResultStreamJSON(raw string, quotaReason func(string) *AgentQuotaPause) AgentResult {
+func normalizeResultStreamJSON(raw string, quotaReason func(string) *AgentUnavailability) AgentResult {
 	var assistantText []string
 	var resultText string
 	scanAgentJSONLines(raw, nil, func(line []byte) bool {
@@ -40,7 +40,7 @@ func normalizeResultStreamJSON(raw string, quotaReason func(string) *AgentQuotaP
 	})
 	if quotaReason != nil {
 		if pause := quotaReason(resultText); pause != nil {
-			return AgentResult{QuotaPause: pause}
+			return AgentResult{Unavailability: pause}
 		}
 	}
 	if resultText != "" {

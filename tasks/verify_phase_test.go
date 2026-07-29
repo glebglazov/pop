@@ -27,7 +27,7 @@ func newVerifyPhaseRun(t *testing.T, verify func(string) (string, error)) (*impl
 	if err != nil {
 		t.Fatalf("BeginDrain: %v", err)
 	}
-	t.Cleanup(func() { finalizeDrain(handle, false, false, false, "", false, time.Time{}, nil) })
+	t.Cleanup(func() { finalizeDrain(handle, false, nil, false, false, nil) })
 
 	run := &implementRun{
 		d:           d,

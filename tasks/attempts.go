@@ -135,19 +135,15 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 			return nil, taskExitErr(sel, ExitOperational, "agent execution: %v", outcome.runErr)
 		}
 		agentResult := invocation.NormalizeOutput(agentOut)
-		if agentResult.QuotaPause != nil {
-			pause := *agentResult.QuotaPause
-			pause.ResetAt = agentQuotaResetAt(invocation.AgentPreset(), pause.Reason, time.Now())
+		if agentResult.Unavailability != nil {
+			u := agentResult.Unavailability.WithPreset(invocation.AgentPreset())
+			if _, ok := u.TimeHealing(); ok {
+				u = u.WithResetAt(agentQuotaResetAt(u.Preset, u.Reason, time.Now()))
+			}
 			persist(outcome.stream, attempt, streamOutcomeQuotaPaused, "", outcome.exitCode)
 			display.line(ansiYellow, "Paused: agent quota exhausted for %s/%s", sel.TaskSetID, sel.TaskID)
-			display.line(ansiYellow, "  %s", pause.Reason)
-			return &RunTaskResult{
-				Selection:    sel,
-				QuotaPaused:  true,
-				PauseReason:  pause.Reason,
-				PausePreset:  invocation.AgentPreset(),
-				PauseResetAt: pause.ResetAt,
-			}, nil
+			display.line(ansiYellow, "  %s", u.Reason)
+			return unavailabilityResult(sel, u), nil
 		}
 
 		taskData, err := d.FS.ReadFile(sel.TaskPath)
@@ -199,20 +195,15 @@ func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath s
 	}
 	activeCooldowns := activeAgentCooldowns(cooldowns, time.Now())
 	specs := nonEmptyAgentSpecs(agentSpecs, DefaultAgentPreset)
-	var quotaResults []*RunTaskResult
+	var unavailableResults []*RunTaskResult
 	for i, agentSpec := range specs {
 		preset, err := AgentPresetName(agentSpec)
 		if err != nil {
 			return nil, taskExitErr(sel, ExitSetup, "%v", err)
 		}
 		if until, cooling := activeCooldowns[preset]; cooling {
-			quotaResults = append(quotaResults, &RunTaskResult{
-				Selection:    sel,
-				QuotaPaused:  true,
-				PauseReason:  fmt.Sprintf("agent quota cooldown until %s", until.UTC().Format(time.RFC3339)),
-				PausePreset:  preset,
-				PauseResetAt: until,
-			})
+			u := NewQuotaPauseUnavailability(preset, fmt.Sprintf("agent quota cooldown until %s", until.UTC().Format(time.RFC3339)), until)
+			unavailableResults = append(unavailableResults, unavailabilityResult(sel, u))
 			continue
 		}
 		buildInvocation, err := buildForAgent(agentSpec)
@@ -220,43 +211,79 @@ func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath s
 			return nil, taskExitErr(sel, ExitSetup, "%v", err)
 		}
 		result, execErr := executeTaskAttempts(d, sel, runtimePath, out, errOut, basePrompt, buildInvocation, maxTries, timeout, commitOverrides, retryDelays)
-		if execErr != nil || result == nil || !result.QuotaPaused {
+		if execErr != nil || result == nil || result.Unavailability == nil {
 			return result, execErr
 		}
-		until := agentQuotaCooldownUntil(result.PauseResetAt, time.Now(), agentQuotaRetryAfter)
-		if err := updateAgentCooldown(d, result.PausePreset, until); err != nil {
-			return nil, taskExitErr(sel, ExitOperational, "%v", err)
+		u := *result.Unavailability
+		if th, ok := u.TimeHealing(); ok {
+			until := agentQuotaCooldownUntil(th.ResetAt, time.Now(), agentQuotaRetryAfter)
+			if err := updateAgentCooldown(d, u.Preset, until); err != nil {
+				return nil, taskExitErr(sel, ExitOperational, "%v", err)
+			}
+			activeCooldowns[u.Preset] = until
+			if i+1 < len(specs) && out != nil && u.Kind == UnavailabilityQuotaPause {
+				outputFor(out).line(ansiDim, "   Agent %s quota-paused; trying next", u.Preset)
+			}
 		}
-		activeCooldowns[result.PausePreset] = until
-		quotaResults = append(quotaResults, result)
-		if i+1 < len(specs) && out != nil {
-			outputFor(out).line(ansiDim, "   Agent %s quota-paused; trying next", result.PausePreset)
-		}
+		unavailableResults = append(unavailableResults, result)
 	}
-	if len(quotaResults) == 0 {
+	if len(unavailableResults) == 0 {
 		return nil, taskExitErr(sel, ExitOperational, "no agent attempts were run")
 	}
-	return earliestQuotaPauseResult(quotaResults), nil
+	return earliestTimeHealingUnavailability(unavailableResults), nil
 }
 
-func earliestQuotaPauseResult(results []*RunTaskResult) *RunTaskResult {
+func unavailabilityResult(sel *Selection, u AgentUnavailability) *RunTaskResult {
+	result := &RunTaskResult{
+		Selection:      sel,
+		Unavailability: &u,
+	}
+	if u.Kind == UnavailabilityQuotaPause {
+		result.QuotaPaused = true
+		result.PauseReason = u.Reason
+		result.PausePreset = u.Preset
+		if th, ok := u.TimeHealing(); ok {
+			result.PauseResetAt = th.ResetAt
+		}
+	}
+	return result
+}
+
+func earliestTimeHealingUnavailability(results []*RunTaskResult) *RunTaskResult {
 	var best *RunTaskResult
+	var bestReset time.Time
 	for _, result := range results {
-		if result == nil {
+		if result == nil || result.Unavailability == nil {
+			continue
+		}
+		th, ok := result.Unavailability.TimeHealing()
+		if !ok {
 			continue
 		}
 		if best == nil {
 			best = result
+			bestReset = th.ResetAt
 			continue
 		}
-		if result.PauseResetAt.IsZero() {
+		if th.ResetAt.IsZero() {
 			continue
 		}
-		if best.PauseResetAt.IsZero() || result.PauseResetAt.Before(best.PauseResetAt) {
+		if bestReset.IsZero() || th.ResetAt.Before(bestReset) {
 			best = result
+			bestReset = th.ResetAt
 		}
 	}
-	return best
+	if best != nil {
+		return best
+	}
+	// No time-healing verdict in the list: return the first result as-is
+	// (later slices handle all-human-healing exhaustion).
+	for _, result := range results {
+		if result != nil {
+			return result
+		}
+	}
+	return nil
 }
 
 func assessAttempt(agentOut string, exitCode int, taskData []byte) (Assessment, string) {
@@ -466,7 +493,7 @@ func runAgentAttempt(d *Deps, runtimePath string, liveOut io.Writer, timeout tim
 	// Formats rendered live already streamed to liveOut; only the silently
 	// captured formats still need the post-hoc dump.
 	if invocation.OutputFormat != AgentOutputPlain && liveWriter == nil {
-		if normalized := invocation.NormalizeOutput(raw); normalized.QuotaPause == nil {
+		if normalized := invocation.NormalizeOutput(raw); normalized.Unavailability == nil {
 			invocation.RenderOutput(liveOut, raw)
 		}
 	}

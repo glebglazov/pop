@@ -84,11 +84,14 @@ func (r *implementRun) verifyPhase(currentRefresh *RefreshResult, row *Row) (ver
 			if row := findRow(currentRefresh, taskSetID); row != nil {
 				priority = row.Priority
 			}
-			regFailed, waitErr := ParkAndWaitForQuotaRecovery(d, &r.drain, taskSetID, qp.Preset, qp.ResetAt, runtimePath, priority, out, r.ensureDrain)
+			u := NewQuotaPauseUnavailability(qp.Preset, qp.Reason, qp.ResetAt)
+			th, _ := u.TimeHealing()
+			regFailed, waitErr := ParkAndWaitForQuotaRecovery(d, &r.drain, taskSetID, u.Preset, th, runtimePath, priority, out, r.ensureDrain)
 			if waitErr != nil {
 				return verifyReturn, waitErr
 			}
 			if regFailed {
+				result.Unavailability = &u
 				result.QuotaPaused = true
 				result.PauseReason = qp.Reason
 				result.PausePreset = qp.Preset
