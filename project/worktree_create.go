@@ -1,9 +1,21 @@
 package project
 
 import (
+	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 )
+
+// ErrBranchCheckedOutElsewhere is the sentinel wrapped into the refusal
+// AddWorktreeNamedWith returns when the requested name reuses a local branch
+// that is already checked out in another worktree (most commonly: accepting
+// the create flow's suggested name, unchanged, for a base ref that is also
+// the branch checked out in the worktree the picker was opened from). Git
+// itself refuses this with a bare "fatal: '<branch>' is already used by
+// worktree at '<path>'"; this sentinel lets callers surface a reason instead
+// of that raw message.
+var ErrBranchCheckedOutElsewhere = errors.New("branch already checked out in another worktree")
 
 // Branch is a git ref offered in the worktree-create branch picker. Ref is the
 // git-facing name — a local short name ("main", "feature/x") or a remote short
@@ -132,6 +144,9 @@ func AddWorktreeNamedWith(d *Deps, ctx *RepoContext, selection Branch, dir strin
 
 	var err error
 	if LocalBranchExistsWith(d, ctx, dir) {
+		if elsewhere, checkErr := branchCheckedOutPathWith(d, ctx, dir); checkErr == nil && elsewhere != "" {
+			return "", fmt.Errorf("%w: %q is checked out at %s; type a different name to fork a new branch", ErrBranchCheckedOutElsewhere, dir, elsewhere)
+		}
 		_, err = d.Git.CommandInDir(ctx.GitRoot, "worktree", "add", path, dir)
 	} else {
 		_, err = d.Git.CommandInDir(ctx.GitRoot, "worktree", "add", "-b", dir, path, selection.Ref)
@@ -140,4 +155,22 @@ func AddWorktreeNamedWith(d *Deps, ctx *RepoContext, selection Branch, dir strin
 		return "", err
 	}
 	return path, nil
+}
+
+// branchCheckedOutPathWith returns the path of the repo's existing worktree
+// that has branch checked out, or "" if none does. A check-list failure is
+// not itself fatal here — the caller falls through to the git command that
+// would have run anyway, so a transient listing error never blocks a create
+// that might otherwise succeed.
+func branchCheckedOutPathWith(d *Deps, ctx *RepoContext, branch string) (string, error) {
+	worktrees, err := ListWorktreesWith(d, ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, wt := range worktrees {
+		if wt.Branch == branch {
+			return wt.Path, nil
+		}
+	}
+	return "", nil
 }

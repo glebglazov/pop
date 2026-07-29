@@ -1,6 +1,7 @@
 package project
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -250,6 +251,89 @@ func TestAddWorktreeWith(t *testing.T) {
 				t.Errorf("git args = %v, want %v", addArgs, tt.wantAddArgs)
 			}
 		})
+	}
+}
+
+// TestAddWorktreeNamedRefusesDefaultNameWhenBaseBranchCheckedOutElsewhere pins
+// the ADR-0152 create-flow regression: pressing Enter twice (accept the
+// base-ref picker's default, then the name prompt's suggested default) forks
+// off the base branch and reuses its own name for the new worktree. When that
+// base is the branch already checked out in another worktree (the common
+// case — the trunk's own branch), `git worktree add` refuses outright.
+// Reproduced against real git: `fatal: 'master' is already used by worktree
+// at '<path>'`. This test pins the friendly refusal AddWorktreeNamedWith now
+// returns instead of letting that raw fatal reach the human.
+func TestAddWorktreeNamedRefusesDefaultNameWhenBaseBranchCheckedOutElsewhere(t *testing.T) {
+	selection := Branch{Ref: "master"}
+	_, defaultDir := DeriveWorktreeName(selection.Ref, selection.IsRemote)
+	if defaultDir != "master" {
+		t.Fatalf("sanity: defaultDir = %q, want %q", defaultDir, "master")
+	}
+
+	ctx := &RepoContext{GitRoot: "/repo", RepoName: "repo", IsBare: true}
+	d := &Deps{
+		Git: &deps.MockGit{
+			CommandInDirFunc: func(dir string, args ...string) (string, error) {
+				switch {
+				case len(args) > 0 && args[0] == "show-ref":
+					return "", nil // "master" already exists locally — it's the base itself
+				case len(args) > 1 && args[0] == "worktree" && args[1] == "list":
+					return "worktree /repo\nbranch refs/heads/master\n\n", nil
+				case len(args) > 1 && args[0] == "worktree" && args[1] == "add":
+					t.Fatalf("git worktree add must not run once the branch is known checked out elsewhere")
+				}
+				return "", nil
+			},
+		},
+	}
+
+	_, err := AddWorktreeNamedWith(d, ctx, selection, defaultDir)
+	if err == nil {
+		t.Fatal("expected a refusal, got nil error")
+	}
+	if !errors.Is(err, ErrBranchCheckedOutElsewhere) {
+		t.Fatalf("error = %v, want wrapping ErrBranchCheckedOutElsewhere", err)
+	}
+	if strings.Contains(err.Error(), "fatal:") {
+		t.Fatalf("error leaked a raw git message: %v", err)
+	}
+	if !strings.Contains(err.Error(), "/repo") {
+		t.Fatalf("error should name where the branch is already checked out: %v", err)
+	}
+}
+
+// TestAddWorktreeNamedFreshNameUnaffectedByCheckedOutOtherBranch confirms the
+// ordinary path — typing a fresh name unrelated to any checked-out branch —
+// is untouched by the new check: no local branch matches, so
+// LocalBranchExistsWith is false and the check never runs.
+func TestAddWorktreeNamedFreshNameUnaffectedByCheckedOutOtherBranch(t *testing.T) {
+	var addArgs []string
+	d := &Deps{
+		Git: &deps.MockGit{
+			CommandInDirFunc: func(dir string, args ...string) (string, error) {
+				switch {
+				case len(args) > 0 && args[0] == "show-ref":
+					return "", fmt.Errorf("not found") // no local branch named "feature-x"
+				case len(args) > 1 && args[0] == "worktree" && args[1] == "list":
+					t.Fatalf("checked-out lookup must not run for a fresh, non-colliding name")
+				case len(args) > 0 && args[0] == "worktree":
+					addArgs = args
+				}
+				return "", nil
+			},
+		},
+	}
+	ctx := &RepoContext{GitRoot: "/repo", RepoName: "repo", IsBare: true}
+	path, err := AddWorktreeNamedWith(d, ctx, Branch{Ref: "master"}, "feature-x")
+	if err != nil {
+		t.Fatalf("AddWorktreeNamedWith() error: %v", err)
+	}
+	if path != "/repo/feature-x" {
+		t.Errorf("path = %q, want %q", path, "/repo/feature-x")
+	}
+	want := []string{"worktree", "add", "-b", "feature-x", "/repo/feature-x", "master"}
+	if !reflect.DeepEqual(addArgs, want) {
+		t.Errorf("git args = %v, want %v", addArgs, want)
 	}
 }
 
