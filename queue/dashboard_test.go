@@ -367,7 +367,7 @@ func TestDashboardActionMenuContextFiltering(t *testing.T) {
 
 	// A plain ready set: only the unconditional verbs plus auto-drain (non-orphaned).
 	plain := keysFor(DashboardRow{SetRef: SetRef{SetID: "plain", RuntimePath: "/wt"}})
-	if want := []string{"i", "b", "a", "p", "s", "O", "A"}; !reflect.DeepEqual(plain, want) {
+	if want := []string{"i", "b", "a", "p", "s", "O", "A", "y"}; !reflect.DeepEqual(plain, want) {
 		t.Fatalf("plain row verbs = %v, want %v", plain, want)
 	}
 
@@ -3641,7 +3641,7 @@ func TestQueueDashboardHelpContent(t *testing.T) {
 		for _, e := range entries {
 			found[e.Key] = true
 		}
-		required := []string{"j/k", "gg", "G", "l/enter", "a", "/", "h/esc"}
+		required := []string{"j/k", "gg", "G", "l/enter", "y", "a", "/", "h/esc"}
 		for _, key := range required {
 			if !found[key] {
 				t.Errorf("main list help missing key: %s", key)
@@ -4413,17 +4413,20 @@ func TestDashboardMapRowQueueVerbsInert(t *testing.T) {
 	m.width, m.height = 120, 40
 	m.list.SetCursor(0)
 
-	if items := dashboardMenuItems(mapRow); len(items) != 0 {
-		t.Fatalf("map menu items = %v, want empty", items)
+	items := dashboardMenuItems(mapRow)
+	if len(items) != 1 || items[0].key != "y" || items[0].label != "copy name" {
+		t.Fatalf("map menu items = %v, want copy name on y only", items)
 	}
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
-	if got.menu != nil {
-		t.Fatal("a on map row opened action menu")
+	if got.menu == nil {
+		t.Fatal("a on map row did not open action menu")
 	}
 
 	// Former direct bind/unbind keys stay inert at top level on map rows too.
 	for _, key := range []string{"b", "U"} {
+		updated, _ = got.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+		got = updated.(QueueDashboard)
 		updated, _ = got.Update(tea.KeyPressMsg{Code: []rune(key)[0], Text: key})
 		got = updated.(QueueDashboard)
 		if got.bind != nil || got.abandon != nil || got.menu != nil {

@@ -351,6 +351,7 @@ const (
 	menuActionUnpark
 	menuActionShell
 	menuActionArchive
+	menuActionCopyName
 )
 
 // dashboardMenuItem is one verb in the action menu overlay: the flat shortcut
@@ -374,11 +375,13 @@ type dashboardMenu struct {
 // NEEDS-VERIFY / VERIFY-FAILED rows with no live drain, unbind only for bound
 // rows, auto-drain only for non-orphaned rows, and unpark only for parked rows.
 // Drain, bind, preview, the runtime shell, and archive apply to every Task-set
-// row regardless of status. Map rows have no queue verbs (ADR-0130): a/b/U and
-// the rest of the action menu are inert.
+// row regardless of status. Map rows carry only copy name — queue verbs
+// (drain/bind/…) stay inert on them (ADR-0130).
 func dashboardMenuItems(row DashboardRow) []dashboardMenuItem {
 	if row.IsMap {
-		return nil
+		return []dashboardMenuItem{
+			{key: "y", label: "copy name", action: menuActionCopyName},
+		}
 	}
 	items := []dashboardMenuItem{
 		{key: "i", label: "drain", action: menuActionDrain},
@@ -407,6 +410,7 @@ func dashboardMenuItems(row DashboardRow) []dashboardMenuItem {
 	}
 	items = append(items, dashboardMenuItem{key: "O", label: "shell", action: menuActionShell})
 	items = append(items, dashboardMenuItem{key: "A", label: "archive", action: menuActionArchive})
+	items = append(items, dashboardMenuItem{key: "y", label: "copy name", action: menuActionCopyName})
 	return items
 }
 
@@ -704,6 +708,36 @@ type QueueDashboard struct {
 	// the program and the command layer runs the workbench-aware open after the
 	// TUI exits (task 02).
 	openCheckout string
+
+	// copyFunc performs the clipboard write for the `y` copy-name verb. Injected
+	// so tests can avoid touching the real tmux / /dev/tty. Defaults to
+	// ui.CopyToClipboard.
+	copyFunc func(string) error
+}
+
+// clipboardCopy returns the model's copy function, defaulting to
+// ui.CopyToClipboard.
+func (m QueueDashboard) clipboardCopy() func(string) error {
+	if m.copyFunc != nil {
+		return m.copyFunc
+	}
+	return ui.CopyToClipboard
+}
+
+// rowCopyNamePayload is the bare identifier the copy-name verb writes for a
+// dashboard row: the task-set directory name or the Wayfinder map id.
+func rowCopyNamePayload(row DashboardRow) string {
+	return row.SetID
+}
+
+// copyRowName copies the cursored row's identifier via Clipboard copy and
+// returns a transient status message naming what was copied, or the error.
+func (m QueueDashboard) copyRowName(row DashboardRow) string {
+	name := rowCopyNamePayload(row)
+	if err := m.clipboardCopy()(name); err != nil {
+		return fmt.Sprintf("copy failed: %v", err)
+	}
+	return fmt.Sprintf("copied %s", name)
 }
 
 // TestDashboardRow builds a minimal dashboard row for tests outside the queue
@@ -910,9 +944,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !ok {
 				return m, nil
 			}
-			// Queue verbs are inert on Map rows (ADR-0130): do not open the
-			// action menu.
-			if row.IsMap {
+			if len(dashboardMenuItems(row)) == 0 {
 				return m, nil
 			}
 			m.menu = newDashboardMenu(row)
@@ -942,6 +974,13 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = nil
 			m.detail = newDetailView(row)
 			return m, m.loadDetail(row)
+		case "y":
+			row, ok := m.list.Selected()
+			if !ok {
+				return m, nil
+			}
+			m.statusMsg = m.copyRowName(row)
+			return m, nil
 		}
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -1375,6 +1414,9 @@ func (m QueueDashboard) dispatchMenuAction(action dashboardMenuAction, row Dashb
 	case menuActionArchive:
 		m.statusMsg = ""
 		return m, m.archiveSet(row)
+	case menuActionCopyName:
+		m.statusMsg = m.copyRowName(row)
+		return m, nil
 	}
 	return m, nil
 }
@@ -2241,6 +2283,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "P", Desc: "unpark"},
 			{Key: "O", Desc: "shell"},
 			{Key: "A", Desc: "archive"},
+			{Key: "y", Desc: "copy name"},
 			{Key: "j/k", Desc: "navigate"},
 			{Key: "enter", Desc: "run action"},
 			{Key: "esc", Desc: "close menu"},
@@ -2303,6 +2346,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "gg", Desc: "first row"},
 			{Key: "G", Desc: "last row"},
 			{Key: "l/enter", Desc: "open detail"},
+			{Key: "y", Desc: "copy name"},
 			{Key: "a", Desc: "action menu"},
 			{Key: "ctrl+g", Desc: "open worktree"},
 			{Key: "/", Desc: "filter"},
@@ -2424,7 +2468,7 @@ func (m QueueDashboard) mainHint() string {
 	if m.filterMode {
 		return "esc clear filter · j/k navigate · v routines · C-h help"
 	}
-	return "j/k move · gg/G top/bottom · l/enter status · a actions · / filter · f filters · v routines · C-h help · h/esc quit"
+	return "j/k move · gg/G top/bottom · l/enter status · y copy name · a actions · / filter · f filters · v routines · C-h help · h/esc quit"
 }
 
 // mainBody renders the table body (a blank line, the column header, the
