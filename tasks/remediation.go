@@ -191,6 +191,40 @@ func spawnRemediationTask(d *Deps, m *Manifest, repo, workSHA, findings, humanNo
 	return id, nil
 }
 
+// hitlBlockedBySnapshot captures a HITL task's blocked_by before remediation
+// wiring, so a failed manifest write can roll the edges back.
+type hitlBlockedBySnapshot struct {
+	idx       int
+	blockedBy []string
+}
+
+// wireRemediationIntoOpenHITLGates appends remediationID to blocked_by of every
+// open HITL task in the set (ADR-0155). Done and Skipped gates are left
+// untouched. Returns snapshots for rollback on manifest-write failure.
+func wireRemediationIntoOpenHITLGates(m *Manifest, remediationID string) []hitlBlockedBySnapshot {
+	if m == nil || remediationID == "" {
+		return nil
+	}
+	var snap []hitlBlockedBySnapshot
+	for i := range m.Tasks {
+		if m.Tasks[i].Status != TaskOpen || m.Tasks[i].Type != "HITL" {
+			continue
+		}
+		snap = append(snap, hitlBlockedBySnapshot{
+			idx:       i,
+			blockedBy: append([]string(nil), m.Tasks[i].BlockedBy...),
+		})
+		m.Tasks[i].BlockedBy = append(m.Tasks[i].BlockedBy, remediationID)
+	}
+	return snap
+}
+
+func restoreHITLGatesBlockedBy(m *Manifest, snap []hitlBlockedBySnapshot) {
+	for _, s := range snap {
+		m.Tasks[s.idx].BlockedBy = s.blockedBy
+	}
+}
+
 // writeRemediationTask writes the Remediation task's markdown body and appends
 // it to the manifest, returning the new task id. It performs only the filesystem
 // half of spawning — the caller invalidates the set's cached verdicts. The human
@@ -218,10 +252,13 @@ func writeRemediationTask(d *Deps, m *Manifest, workSHA, findings, humanNote, or
 		BlockedBy: []string{},
 		Origin:    origin,
 	})
+	hitlSnap := wireRemediationIntoOpenHITLGates(m, id)
 	if err := WriteManifestAtomic(d, m); err != nil {
-		// Roll the orphan markdown back so markdown and index.json stay in sync.
+		// Roll the orphan markdown and dependency edges back so markdown and
+		// index.json stay in sync.
 		_ = d.FS.RemoveAll(mdPath)
 		m.Tasks = m.Tasks[:len(m.Tasks)-1]
+		restoreHITLGatesBlockedBy(m, hitlSnap)
 		return "", exitErr(ExitOperational, "append remediation task to manifest: %v", err)
 	}
 	return id, nil

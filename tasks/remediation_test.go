@@ -423,3 +423,189 @@ func TestRunTaskSetRemediationDepthCapParks(t *testing.T) {
 		t.Fatalf("outcome = %q, want %q", rec.State, store.StateVerifyFailed)
 	}
 }
+
+// hitlGateRemediationSet is a set with open, done, and skipped HITL tasks for
+// exercising remediation wiring into gate blocked_by lists (ADR-0155).
+func hitlGateRemediationSet() []Task {
+	return []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "done"},
+		{ID: "03-mid-gate", File: "03-mid-gate.md", Title: "Mid gate", Type: "HITL", Status: "open", BlockedBy: []string{"01-a"}},
+		{ID: "04-approval", File: "04-approval.md", Title: "Sign off", Type: "HITL", Status: "open", BlockedBy: []string{"02-b"}},
+		{ID: "05-hitl-done", File: "05-hitl-done.md", Title: "Done gate", Type: "HITL", Status: "done"},
+		{ID: "06-hitl-skipped", File: "06-hitl-skipped.md", Title: "Skipped gate", Type: "HITL", Status: "skipped"},
+	}
+}
+
+func assertHITLBlockedBy(t *testing.T, m *Manifest, taskID string, want []string) {
+	t.Helper()
+	for _, tk := range m.Tasks {
+		if tk.ID == taskID {
+			if len(tk.BlockedBy) != len(want) {
+				t.Fatalf("task %q blocked_by = %v, want %v", taskID, tk.BlockedBy, want)
+			}
+			for i, b := range want {
+				if tk.BlockedBy[i] != b {
+					t.Fatalf("task %q blocked_by = %v, want %v", taskID, tk.BlockedBy, want)
+				}
+			}
+			return
+		}
+	}
+	t.Fatalf("task %q not found in manifest", taskID)
+}
+
+// TestSpawnRemediationWiresOpenHITLGatesAuto: an auto-origin remediation spawn
+// appends its id to blocked_by of every open HITL task; done and skipped gates
+// are left untouched (ADR-0155).
+func TestSpawnRemediationWiresOpenHITLGatesAuto(t *testing.T) {
+	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), hitlGateRemediationSet(), nil)
+
+	id, err := spawnRemediationTask(d, m, "", "sha1", "finding", "", RemediationOriginAuto)
+	if err != nil {
+		t.Fatalf("spawnRemediationTask: %v", err)
+	}
+	if id != "07-remediation" {
+		t.Fatalf("id = %q, want 07-remediation", id)
+	}
+
+	reloaded := LoadManifest(d, "demo", m.Path)
+	if !reloaded.Valid {
+		t.Fatalf("reloaded manifest invalid: %v", reloaded.Errors)
+	}
+	assertHITLBlockedBy(t, reloaded, "03-mid-gate", []string{"01-a", id})
+	assertHITLBlockedBy(t, reloaded, "04-approval", []string{"02-b", id})
+	assertHITLBlockedBy(t, reloaded, "05-hitl-done", nil)
+	assertHITLBlockedBy(t, reloaded, "06-hitl-skipped", nil)
+}
+
+// TestSpawnRemediationWiresOpenHITLGatesHuman: a human-origin Remediate spawn
+// wires open HITL gates the same way as the auto path (ADR-0155).
+func TestSpawnRemediationWiresOpenHITLGatesHuman(t *testing.T) {
+	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), hitlGateRemediationSet(), nil)
+
+	id, err := writeRemediationTask(d, m, "sha1", "finding", "please fix", RemediationOriginHuman)
+	if err != nil {
+		t.Fatalf("writeRemediationTask: %v", err)
+	}
+
+	reloaded := LoadManifest(d, "demo", m.Path)
+	if !reloaded.Valid {
+		t.Fatalf("reloaded manifest invalid: %v", reloaded.Errors)
+	}
+	assertHITLBlockedBy(t, reloaded, "03-mid-gate", []string{"01-a", id})
+	assertHITLBlockedBy(t, reloaded, "04-approval", []string{"02-b", id})
+}
+
+// TestCompleteHITLGatedByOpenRemediation: manual complete of a gated HITL task
+// is refused while remediation is open and succeeds once it is done or skipped.
+func TestCompleteHITLGatedByOpenRemediation(t *testing.T) {
+	t.Parallel()
+	env := setupCustomTaskFixture(t, []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+		{ID: "02-remediation", File: "02-remediation.md", Title: "Remediation", Type: "AFK", Status: "open"},
+		{ID: "03-gate", File: "03-gate.md", Title: "Sign off", Type: "HITL", Status: "open", BlockedBy: []string{"01-a", "02-remediation"}},
+	})
+
+	_, err := CompleteTaskWith(env.deps(), nil, nil, CompleteTaskOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		TaskPath:     env.demoTaskRef(t, "03-gate.md"),
+	})
+	assertExitCode(t, err, ExitNoRunnable)
+	if !strings.Contains(err.Error(), "blocked by 02-remediation") {
+		t.Fatalf("err = %v", err)
+	}
+
+	// Completing the remediation unblocks the gate.
+	_, err = CompleteTaskWith(env.deps(), nil, nil, CompleteTaskOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		TaskPath:     env.demoTaskRef(t, "02-remediation.md"),
+	})
+	if err != nil {
+		t.Fatalf("complete remediation: %v", err)
+	}
+	_, err = CompleteTaskWith(env.deps(), nil, nil, CompleteTaskOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		TaskPath:     env.demoTaskRef(t, "03-gate.md"),
+	})
+	if err != nil {
+		t.Fatalf("complete gate after remediation done: %v", err)
+	}
+	assertTaskDone(t, env, "03-gate")
+
+	// Skipping remediation also satisfies the gate edge.
+	env2 := setupCustomTaskFixture(t, []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+		{ID: "02-remediation", File: "02-remediation.md", Title: "Remediation", Type: "AFK", Status: "open"},
+		{ID: "03-gate", File: "03-gate.md", Title: "Sign off", Type: "HITL", Status: "open", BlockedBy: []string{"01-a", "02-remediation"}},
+	})
+	_, err = SkipTaskWith(env2.deps(), nil, nil, SkipTaskOptions{
+		ResolveInput: ResolveInput{CWD: env2.root},
+		TaskPath:     env2.demoTaskRef(t, "02-remediation.md"),
+	})
+	if err != nil {
+		t.Fatalf("skip remediation: %v", err)
+	}
+	_, err = CompleteTaskWith(env2.deps(), nil, nil, CompleteTaskOptions{
+		ResolveInput: ResolveInput{CWD: env2.root},
+		TaskPath:     env2.demoTaskRef(t, "03-gate.md"),
+	})
+	if err != nil {
+		t.Fatalf("complete gate after remediation skipped: %v", err)
+	}
+}
+
+// TestRemediationSpawnStatusUnchanged: derived status stays READY while an open
+// remediation blocks manual sign-off, then returns to AWAITING-APPROVAL once the
+// remediation lands — the wiring does not change status derivation (ADR-0155).
+func TestRemediationSpawnStatusUnchanged(t *testing.T) {
+	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), terminalHITLSet(), nil)
+	if got := DeriveStatus(m); got != StatusAwaitingApproval {
+		t.Fatalf("base status = %q, want AWAITING-APPROVAL", got)
+	}
+
+	id, err := spawnRemediationTask(d, m, "", "sha1", "finding", "", RemediationOriginAuto)
+	if err != nil {
+		t.Fatalf("spawnRemediationTask: %v", err)
+	}
+	reloaded := LoadManifest(d, "demo", m.Path)
+	if got := DeriveStatus(reloaded); got != StatusReady {
+		t.Fatalf("status with open remediation = %q, want READY", got)
+	}
+	assertHITLBlockedBy(t, reloaded, "02-h", []string{id})
+
+	// Land the remediation: the gate's dependencies are satisfied again.
+	for i := range reloaded.Tasks {
+		if reloaded.Tasks[i].ID == id {
+			reloaded.Tasks[i].Status = TaskDone
+		}
+	}
+	if got := DeriveStatus(reloaded); got != StatusAwaitingApproval {
+		t.Fatalf("status after remediation done = %q, want AWAITING-APPROVAL", got)
+	}
+}
+
+// TestSpawnRemediationManifestFailureRollsBackHITLWiring: a manifest-write
+// failure rolls back both the markdown and the dependency edges, leaving no
+// half-wired manifest (ADR-0155).
+func TestSpawnRemediationManifestFailureRollsBackHITLWiring(t *testing.T) {
+	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), hitlGateRemediationSet(), nil)
+	d.FS = &atomicBlockingFS{FileSystem: d.FS, failManifestWrite: true}
+
+	before := LoadManifest(d, "demo", m.Path)
+	_, err := spawnRemediationTask(d, m, "", "sha1", "finding", "", RemediationOriginAuto)
+	assertExitCode(t, err, ExitOperational)
+
+	after := LoadManifest(d, "demo", m.Path)
+	if !after.Valid {
+		t.Fatalf("manifest invalid after failed spawn: %v", after.Errors)
+	}
+	if len(after.Tasks) != len(before.Tasks) {
+		t.Fatalf("task count = %d, want %d (no remediation appended)", len(after.Tasks), len(before.Tasks))
+	}
+	assertHITLBlockedBy(t, after, "03-mid-gate", []string{"01-a"})
+	assertHITLBlockedBy(t, after, "04-approval", []string{"02-b"})
+	if _, statErr := os.Stat(filepath.Join(m.Dir, "07-remediation.md")); !os.IsNotExist(statErr) {
+		t.Fatalf("orphan remediation markdown should be removed: stat err = %v", statErr)
+	}
+}
