@@ -464,8 +464,9 @@ type DashboardCreateWorktreeResult struct {
 	BaseRef     string
 }
 
-// CreateWorktree creates a pop-managed worktree on a fresh branch and
-// records a provisioned binding. It never opens or attaches a tmux session.
+// CreateWorktree creates a pop-managed worktree on a fresh branch and records
+// a binding whose Provisioned bit is derived from its location under the
+// managed-worktree root. It never opens or attaches a tmux session.
 func CreateWorktree(d *Deps, cfg *config.Config, ref SetRef, baseRef, name string) (DashboardCreateWorktreeResult, error) {
 	baseRef = strings.TrimSpace(baseRef)
 	name = strings.TrimSpace(name)
@@ -495,7 +496,7 @@ func CreateWorktree(d *Deps, cfg *config.Config, ref SetRef, baseRef, name strin
 		proj = repoName(scans, rep)
 	}
 	key := setScopedKey(repoKey, ref.SetID)
-	if err := binding.Put(d.Tasks, key, binding.Binding{RuntimePath: path, Branch: branch, Project: proj, Provisioned: true}); err != nil {
+	if err := binding.Put(d.Tasks, key, binding.Adopt(d.Tasks, path, branch, proj)); err != nil {
 		return DashboardCreateWorktreeResult{}, err
 	}
 	return DashboardCreateWorktreeResult{SetID: ref.SetID, RuntimePath: path, Branch: branch, BaseRef: baseRef}, nil

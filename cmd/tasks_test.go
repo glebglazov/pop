@@ -1425,7 +1425,7 @@ func TestBindingFirstVerifyResolveInputBoundSetPinsBinding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("identity: %v", err)
 	}
-	if err := binding.Put(td, binding.Key(id, "bound-set"), binding.Adopt(wt, "verify-binding-first", "")); err != nil {
+	if err := binding.Put(td, binding.Key(id, "bound-set"), binding.Adopt(td, wt, "verify-binding-first", "")); err != nil {
 		t.Fatalf("seed binding: %v", err)
 	}
 

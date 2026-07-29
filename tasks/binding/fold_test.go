@@ -606,3 +606,59 @@ func TestFoldNeverPushes(t *testing.T) {
 		t.Fatal("fold must not compute a mergeability verdict")
 	}
 }
+
+// TestFoldAdoptedManagedRootCheckoutReachesTeardown asserts that adopting a
+// checkout under the managed-worktree root records a provisioned binding and
+// that fold reaches the confirm-gated teardown path instead of silently leaving
+// the directory (ADR-0152).
+func TestFoldAdoptedManagedRootCheckoutReachesTeardown(t *testing.T) {
+	t.Parallel()
+	repo := initAdoptRepo(t)
+	td := lifecycleTestDeps(t)
+	seedDoneTaskSet(t, td, repo, "set-adopt-managed")
+
+	id, err := tasks.ResolveRepositoryIdentity(td, repo)
+	if err != nil {
+		t.Fatalf("identity: %v", err)
+	}
+	path := filepath.Join(ManagedWorktreesRoot(td), RepoKey(id), "adopted-managed")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir managed parent: %v", err)
+	}
+	adoptRunGit(t, repo, "worktree", "add", "-b", "adopted-managed", path, "HEAD")
+	writeFileCommit(t, path, "feature.txt", "adopted managed\n", "adopted managed work")
+
+	adopted, err := AdoptCurrentCheckout(td, nil, nil, repo, path, "set-adopt-managed")
+	if err != nil {
+		t.Fatalf("adopt current checkout: %v", err)
+	}
+	if !adopted {
+		t.Fatal("expected binding to be recorded")
+	}
+
+	_, b, ok, err := FindBySetID(td, "set-adopt-managed")
+	if err != nil {
+		t.Fatalf("lookup binding: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected a binding for set-adopt-managed")
+	}
+	if !b.Provisioned {
+		t.Fatalf("managed-root adoption must be recorded as provisioned, got %+v", b)
+	}
+	if b.RuntimePath != path {
+		t.Fatalf("RuntimePath = %q, want %q", b.RuntimePath, path)
+	}
+
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+	got, err := Fold(td, nil, cfg, "set-adopt-managed", FoldOptions{Yes: true, In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, io.Discard)
+	if err != nil {
+		t.Fatalf("fold: %v", err)
+	}
+	if !got.TornDown {
+		t.Fatal("TornDown = false, want true for managed-root adoption")
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("managed worktree should be torn down, stat err = %v", err)
+	}
+}

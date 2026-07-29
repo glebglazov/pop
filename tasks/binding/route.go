@@ -245,11 +245,12 @@ func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult
 	// to the current checkout and resumes there on later drains (ADR-0062), rather
 	// than running transiently. In practice only a foreground implement reaches this
 	// step: the Queue faults an unbound, no-intent set as needs-bind before dispatch
-	// (ADR-0070/0072), so it never routes here to land on the trunk. The binding is
-	// adopted (Provisioned=false, never torn down): routing chose the checkout but
-	// never created it, so it must never be removed. It records the branch too, so
+	// (ADR-0070/0072), so it never routes here to land on the trunk. The Provisioned
+	// bit is derived from the checkout's location (ADR-0152): a checkout under the
+	// managed-worktree root is recorded as provisioned even though routing did not
+	// create it, and a checkout elsewhere is adopted. It records the branch too, so
 	// the dashboard reads execution checkout and branch from the table.
-	b := Adopt(currentRuntime, CurrentBranch(req.TD, currentRuntime), DetectProject(req.PD, req.TD, req.Config, repoID))
+	b := Adopt(req.TD, currentRuntime, CurrentBranch(req.TD, currentRuntime), DetectProject(req.PD, req.TD, req.Config, repoID))
 	if err := Put(req.TD, key, b); err != nil {
 		return RouteDrainCheckoutResult{}, err
 	}
@@ -632,8 +633,10 @@ func Provisioned(td *tasks.Deps, key string) bool {
 
 // ShouldTeardown reports whether the checkout under key may be removed. It
 // returns true when no binding is recorded (legacy/unknown — pop probably
-// created it) or when the binding is explicitly provisioned, and false only for
-// explicitly adopted bindings, which must never be deleted.
+// created it) or when the binding is provisioned, and false only for adopted
+// bindings, which must never be deleted. Since ADR-0152 the Provisioned bit is
+// derived from the checkout's location: a checkout under the managed-worktree
+// root reads as provisioned, and any other checkout reads as adopted.
 func ShouldTeardown(td *tasks.Deps, key string) bool {
 	b, ok, err := Lookup(td, key)
 	if err != nil || !ok {

@@ -205,9 +205,10 @@ var taskBindWorktreeCmd = &cobra.Command{
 	Long: `Set a task set's drain target.
 
 Default mode adopts the current checkout: run from inside the target checkout
-and pop drains the named set there, keeping the directory on abandon — only the
-binding is forgotten. Use --force to re-point a set that is already bound
-elsewhere.
+and pop drains the named set there. The binding is recorded as provisioned
+when the checkout lives under pop's managed-worktree root (pop owns the
+directory), and as adopted otherwise; adopted checkouts are kept on abandon.
+Use --force to re-point a set that is already bound elsewhere.
 
 --managed forks a pop-owned worktree from the Trunk worktree and records a
 provisioned binding before returning — the same eager provisioning as
@@ -452,13 +453,14 @@ func runTaskRegisterWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 
 // eagerBindNewRegistrations adopts the current checkout as the Worktree binding
 // for each set this register just activated (ADR-0115). It reuses the operator
-// bind-worktree adopt path (binding.BindWorktree): an adopted (Provisioned=false)
-// never-delete binding pointing at checkoutPath, created without provisioning any
-// worktree. It runs only for first-time registrations, so re-registering a set —
-// including from a different checkout — never rebinds; a set that already carries
-// a binding is skipped, and explicit `pop tasks bind-worktree --force` remains the
-// rebind path. Binding is best-effort: a failure is warned, not fatal, so a
-// checkout register cannot itself bind (e.g. detached HEAD) still registers.
+// bind-worktree adopt path (binding.BindWorktree): the Provisioned bit is
+// derived from checkoutPath, so a checkout under the managed-worktree root is
+// recorded as provisioned while any other checkout is adopted. It runs only for
+// first-time registrations, so re-registering a set — including from a different
+// checkout — never rebinds; a set that already carries a binding is skipped, and
+// explicit `pop tasks bind-worktree --force` remains the rebind path. Binding is
+// best-effort: a failure is warned, not fatal, so a checkout register cannot
+// itself bind (e.g. detached HEAD) still registers.
 func eagerBindNewRegistrations(d *tasks.Deps, cfg *config.Config, checkoutPath string, newSetIDs []string, w io.Writer) {
 	for _, setID := range newSetIDs {
 		if _, _, bound, err := binding.FindBySetID(d, setID); err != nil {
@@ -929,9 +931,10 @@ func isTaskFileTarget(target string) bool {
 
 // taskBindCheckout returns the binding hook `pop tasks implement` passes to the
 // executor. It adopts the run's current checkout into the binding model
-// (ADR-0036): a worktree-locus run records a never-delete adopted binding via
-// the shared module, while a trunk-locus run records nothing. `implement` never
-// provisions a worktree — auto-provisioning stays the Queue's path.
+// (ADR-0036): a worktree-locus run records a binding via the shared module, with
+// the Provisioned bit derived from the checkout's location, while a trunk-locus run
+// records nothing. `implement` never provisions a worktree — auto-provisioning
+// stays the Queue's path.
 func taskBindCheckout(d *tasks.Deps) func(setID, projectPath, runtimePath string) error {
 	return func(setID, projectPath, runtimePath string) error {
 		cfg, _ := taskConfigLoad(config.DefaultConfigPath())

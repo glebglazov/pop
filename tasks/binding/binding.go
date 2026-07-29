@@ -87,9 +87,10 @@ func SetIDFromKey(key string) string {
 // façade that used to wrap it is retired, so callers read and write keyed store
 // rows directly.
 //
-// Provisioned is true when pop ran `git worktree add` to create the checkout.
-// False (or absent) means the binding is adopted — a human pointed an
-// existing checkout at the set; pop must never delete it.
+// Provisioned is true when the checkout lives under the managed-worktree root,
+// meaning pop created the directory (ADR-0152). False (or absent) means the
+// binding is adopted — a human pointed an existing checkout at the set; pop must
+// never delete it. The bit is derived from location when a binding is recorded.
 type Binding = store.Binding
 
 // ManagedWorktreesRoot returns the directory under which pop-provisioned
@@ -189,11 +190,18 @@ func migrateLegacyBindingsFile(d *tasks.Deps) error {
 	return d.FS.RemoveAll(path)
 }
 
-// Adopt builds an adopted binding record (Provisioned=false) for an existing
-// checkout a human pointed at a set. Adopted checkouts are never deleted on
-// teardown — only the association is forgotten. The caller persists the record.
-func Adopt(checkoutPath, branch, proj string) Binding {
-	return Binding{RuntimePath: checkoutPath, Branch: branch, Project: proj, Provisioned: false}
+// Adopt builds a binding record for an existing checkout a human pointed at a
+// set. The Provisioned bit is derived from the checkout's location: true when
+// the path lives under the managed-worktree root (pop created the directory),
+// false otherwise. The caller persists the record.
+func Adopt(td *tasks.Deps, checkoutPath, branch, proj string) Binding {
+	provisioned := false
+	if td != nil && checkoutPath != "" {
+		if under, err := checkoutUnderManagedRoot(td, checkoutPath); err == nil {
+			provisioned = under
+		}
+	}
+	return Binding{RuntimePath: checkoutPath, Branch: branch, Project: proj, Provisioned: provisioned}
 }
 
 // AdoptCurrentCheckout records an adopted Worktree binding for setID pointing at
@@ -252,7 +260,7 @@ func AdoptCurrentCheckout(td *tasks.Deps, pd *project.Deps, cfg *config.Config, 
 		return false, err
 	}
 	branch := CurrentBranch(td, checkoutPath)
-	b := Adopt(checkoutPath, branch, DetectProject(pd, td, cfg, id))
+	b := Adopt(td, checkoutPath, branch, DetectProject(pd, td, cfg, id))
 	b.ScopedKey = key
 	// PutBindingIfAbsent is the atomic never-clobber guard: even if a concurrent
 	// Bind worktree or Queue provision raced in between the Lookup above and here,

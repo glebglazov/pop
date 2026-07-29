@@ -148,7 +148,7 @@ func TestRouteDrainCheckoutForceRebindRepointsToCurrentCheckout(t *testing.T) {
 	repo := initAdoptRepo(t)
 	oldWT := addLinkedWorktree(t, repo, "old-bound")
 	currentWT := addLinkedWorktree(t, repo, "current")
-	seedBinding(t, td, repo, "set-a", Adopt(oldWT, "old-bound", "proj"))
+	seedBinding(t, td, repo, "set-a", Adopt(td, oldWT, "old-bound", "proj"))
 
 	got, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
 		TD:              td,

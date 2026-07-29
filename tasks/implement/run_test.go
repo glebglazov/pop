@@ -293,7 +293,7 @@ func TestResolveTaskSetRuntimeBoundDrainsAtBindingFromOtherCheckout(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := binding.Put(d.tasksDeps(), binding.Key(id, "demo"), binding.Adopt(wt, "bound", "")); err != nil {
+	if err := binding.Put(d.tasksDeps(), binding.Key(id, "demo"), binding.Adopt(d.tasksDeps(), wt, "bound", "")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -337,7 +337,7 @@ func TestResolveTaskSetRuntimeManagedDirectiveYieldsToExistingBinding(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := binding.Put(d.tasksDeps(), binding.Key(id, "demo"), binding.Adopt(wt, "bound", "")); err != nil {
+	if err := binding.Put(d.tasksDeps(), binding.Key(id, "demo"), binding.Adopt(d.tasksDeps(), wt, "bound", "")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -371,7 +371,7 @@ func TestResolveTaskSetRuntimeInvalidBindingRefuses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := binding.Put(d.tasksDeps(), binding.Key(id, "demo"), binding.Adopt(missing, "gone", "")); err != nil {
+	if err := binding.Put(d.tasksDeps(), binding.Key(id, "demo"), binding.Adopt(d.tasksDeps(), missing, "gone", "")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -442,7 +442,7 @@ func TestResolveTaskSetRuntimeInWorktreeRejectsBoundSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := binding.Put(d.tasksDeps(), binding.Key(id, "demo"), binding.Adopt(wt, "feature", "")); err != nil {
+	if err := binding.Put(d.tasksDeps(), binding.Key(id, "demo"), binding.Adopt(d.tasksDeps(), wt, "feature", "")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -465,7 +465,7 @@ func TestResolveTaskSetRuntimeForceRebindCleanSetRepoints(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := binding.Put(d.tasksDeps(), binding.Key(id, "demo"), binding.Adopt(wt, "bound", "")); err != nil {
+	if err := binding.Put(d.tasksDeps(), binding.Key(id, "demo"), binding.Adopt(d.tasksDeps(), wt, "bound", "")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -503,7 +503,7 @@ func TestResolveTaskSetRuntimeForceRebindStartedDecline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := binding.Put(d.tasksDeps(), binding.Key(id, "demo"), binding.Adopt(wt, "bound", "")); err != nil {
+	if err := binding.Put(d.tasksDeps(), binding.Key(id, "demo"), binding.Adopt(d.tasksDeps(), wt, "bound", "")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -541,7 +541,7 @@ func TestResolveTaskSetRuntimeForceRebindStartedNonInteractiveErrors(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := binding.Put(d.tasksDeps(), binding.Key(id, "demo"), binding.Adopt(wt, "bound", "")); err != nil {
+	if err := binding.Put(d.tasksDeps(), binding.Key(id, "demo"), binding.Adopt(d.tasksDeps(), wt, "bound", "")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -566,7 +566,7 @@ func TestResolveTaskSetRuntimeForceRebindStartedYesProceeds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := binding.Put(d.tasksDeps(), binding.Key(id, "demo"), binding.Adopt(wt, "bound", "")); err != nil {
+	if err := binding.Put(d.tasksDeps(), binding.Key(id, "demo"), binding.Adopt(d.tasksDeps(), wt, "bound", "")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -634,7 +634,7 @@ func TestResolveTaskSetRuntimeInWorktreeForceRebindRetargets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := binding.Put(d.tasksDeps(), binding.Key(id, "demo"), binding.Adopt(wt, "feature", "")); err != nil {
+	if err := binding.Put(d.tasksDeps(), binding.Key(id, "demo"), binding.Adopt(d.tasksDeps(), wt, "feature", "")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -867,7 +867,7 @@ func TestResolveTaskSetRuntimeUsesExistingBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := binding.Put(d.tasksDeps(), binding.Key(id, "demo"), binding.Adopt(wt, "feature", "")); err != nil {
+	if err := binding.Put(d.tasksDeps(), binding.Key(id, "demo"), binding.Adopt(d.tasksDeps(), wt, "feature", "")); err != nil {
 		t.Fatal(err)
 	}
 

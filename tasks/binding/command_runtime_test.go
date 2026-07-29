@@ -18,7 +18,7 @@ func TestResolveCommandRuntimeBoundUsesBinding(t *testing.T) {
 	td := isolatedTasksDeps(t)
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "bound-branch")
-	seedBinding(t, td, repo, "demo", Adopt(wt, "bound-branch", ""))
+	seedBinding(t, td, repo, "demo", Adopt(td, wt, "bound-branch", ""))
 
 	got, err := ResolveCommandRuntime(td, repo, "demo", "")
 	if err != nil {
@@ -57,7 +57,7 @@ func TestResolveCommandRuntimeOverrideWins(t *testing.T) {
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "bound-branch")
 	other := addLinkedWorktree(t, repo, "override-branch")
-	seedBinding(t, td, repo, "demo", Adopt(wt, "bound-branch", ""))
+	seedBinding(t, td, repo, "demo", Adopt(td, wt, "bound-branch", ""))
 
 	got, err := ResolveCommandRuntime(td, repo, "demo", other)
 	if err != nil {
@@ -77,7 +77,7 @@ func TestCommandRuntimeResolverPerSet(t *testing.T) {
 	td := isolatedTasksDeps(t)
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "bound-branch")
-	seedBinding(t, td, repo, "bound", Adopt(wt, "bound-branch", ""))
+	seedBinding(t, td, repo, "bound", Adopt(td, wt, "bound-branch", ""))
 
 	resolver, current, err := CommandRuntimeResolver(td, repo)
 	if err != nil {
@@ -125,7 +125,7 @@ func TestAcceptFromUnboundCwdUsesBindingWorkSHAAndRepo(t *testing.T) {
 		t.Fatalf("need distinct HEADs: trunk=%q bound=%q", trunkSHA, boundSHA)
 	}
 
-	seedBinding(t, td, repo, "demo", Adopt(wt, "verify-bind", ""))
+	seedBinding(t, td, repo, "demo", Adopt(td, wt, "verify-bind", ""))
 
 	boundID, err := tasks.ResolveRepositoryIdentity(td, wt)
 	if err != nil {

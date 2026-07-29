@@ -86,11 +86,12 @@ func lockedByAnotherSet(lock *tasks.RuntimeLockStatus, setID string) bool {
 		lock.Metadata.SetID != setID
 }
 
-// BindWorktree creates an adopted (Provisioned=false) binding for (repo
-// identity, setID) pointing to checkoutPath. Run from inside the checkout;
-// pass os.Getwd() as checkoutPath. It refuses to re-point a set already bound
-// elsewhere unless opts.Force is true, and always refuses while the set holds
-// a live Runtime execution lock.
+// BindWorktree creates a binding for (repo identity, setID) pointing to
+// checkoutPath. The Provisioned bit is derived from checkoutPath: true when it
+// lives under the managed-worktree root, false otherwise. Run from inside the
+// checkout; pass os.Getwd() as checkoutPath. It refuses to re-point a set
+// already bound elsewhere unless opts.Force is true, and always refuses while
+// the set holds a live Runtime execution lock.
 func BindWorktree(td *tasks.Deps, pd *project.Deps, cfg *config.Config, setID, checkoutPath string, opts BindWorktreeOptions, hooks LifecycleHooks, out io.Writer) (BindWorktreeResult, error) {
 	setID = strings.TrimSpace(setID)
 	if setID == "" {
@@ -158,7 +159,7 @@ func BindWorktree(td *tasks.Deps, pd *project.Deps, cfg *config.Config, setID, c
 		proj = DetectProject(pd, td, cfg, id)
 	}
 
-	if err := Put(td, key, Adopt(checkoutPath, branch, proj)); err != nil {
+	if err := Put(td, key, Adopt(td, checkoutPath, branch, proj)); err != nil {
 		return BindWorktreeResult{}, err
 	}
 	fmt.Fprintf(out, "Bound %s to %s (branch %s)\n", setID, checkoutPath, branch)
@@ -342,8 +343,10 @@ func confirmManagedWorktreeDelete(in io.Reader, out io.Writer, yes bool, runtime
 }
 
 // TeardownManagedWorktree removes a managed binding's checkout and branch.
-// It must only be called for provisioned bindings; adopted checkouts are never
-// torn down.
+// It must only be called for bindings whose Provisioned bit is true. Since
+// ADR-0152 that bit is derived from the checkout's location: any binding that
+// reaches this helper lives under the managed-worktree root and is therefore
+// provisioned, so the contract holds for every caller.
 func TeardownManagedWorktree(td *tasks.Deps, pd *project.Deps, cfg *config.Config, b Binding, hooks LifecycleHooks) error {
 	if td == nil {
 		td = tasks.DefaultDeps()

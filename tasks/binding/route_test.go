@@ -45,7 +45,7 @@ func TestRouteDrainCheckoutExistingBindingWins(t *testing.T) {
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "feature")
-	seedBinding(t, td, wt, "set-a", Adopt(wt, "feature", "proj"))
+	seedBinding(t, td, wt, "set-a", Adopt(td, wt, "feature", "proj"))
 
 	got, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
 		TD:              td,
@@ -252,7 +252,7 @@ func TestRouteDrainCheckoutOperatorBindingWinsOverDefault(t *testing.T) {
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 	bound := addLinkedWorktree(t, repo, "operator")
-	seedBinding(t, td, repo, "set-a", Adopt(bound, "operator", "proj"))
+	seedBinding(t, td, repo, "set-a", Adopt(td, bound, "operator", "proj"))
 
 	got, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
 		TD:              td,
@@ -535,7 +535,7 @@ func TestRouteDrainCheckoutBindingWinsOverManagedDirective(t *testing.T) {
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "feature")
 	seedManagedIntent(t, td, repo, "managed-set")
-	seedBinding(t, td, repo, "managed-set", Adopt(wt, "feature", "proj"))
+	seedBinding(t, td, repo, "managed-set", Adopt(td, wt, "feature", "proj"))
 	addCalls := countingGit(t, td)
 
 	got, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
@@ -634,7 +634,7 @@ func TestRouteDrainCheckoutBindingWinsOverNamedDirective(t *testing.T) {
 	addNamedWorktree(t, repo, "feature-x", "feature-x")
 	bound := addLinkedWorktree(t, repo, "bound")
 	seedNamedIntent(t, td, repo, "named-set", "feature-x")
-	seedBinding(t, td, repo, "named-set", Adopt(bound, "bound", "proj"))
+	seedBinding(t, td, repo, "named-set", Adopt(td, bound, "bound", "proj"))
 
 	got, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
 		TD:              td,
@@ -897,7 +897,7 @@ func TestProbeWorktreeDirectiveBoundSatisfied(t *testing.T) {
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "feature")
 	seedNamedIntent(t, td, repo, "named-set", "absent")
-	seedBinding(t, td, repo, "named-set", Adopt(wt, "feature", "proj"))
+	seedBinding(t, td, repo, "named-set", Adopt(td, wt, "feature", "proj"))
 
 	if err := ProbeWorktreeDirective(td, nil, nil, repo, "named-set"); err != nil {
 		t.Fatalf("probe err = %v, want nil for a bound set", err)
@@ -914,7 +914,7 @@ func TestRouteDrainCheckoutForegroundResumesAdoptedBinding(t *testing.T) {
 	repo := initAdoptRepo(t)
 	oldWT := addLinkedWorktree(t, repo, "old-bound")
 	currentWT := addLinkedWorktree(t, repo, "current")
-	seedBinding(t, td, repo, "set-a", Adopt(oldWT, "old-bound", "proj"))
+	seedBinding(t, td, repo, "set-a", Adopt(td, oldWT, "old-bound", "proj"))
 
 	got, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
 		TD:              td,
@@ -971,7 +971,7 @@ func TestRouteDrainCheckoutForegroundInvalidBindingRefuses(t *testing.T) {
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 	missing := filepath.Join(t.TempDir(), "gone-wt")
-	seedBinding(t, td, repo, "set-a", Adopt(missing, "gone", "proj"))
+	seedBinding(t, td, repo, "set-a", Adopt(td, missing, "gone", "proj"))
 
 	_, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
 		TD:              td,
@@ -998,7 +998,7 @@ func TestRouteDrainCheckoutOverrideMatchesBindingViaSymlink(t *testing.T) {
 		t.Fatalf("symlink: %v", err)
 	}
 	// Bindings store the provisioned path; the Queue may pin via a symlink alias.
-	seedBinding(t, td, link, "set-a", Adopt(link, "bound", "proj"))
+	seedBinding(t, td, link, "set-a", Adopt(td, link, "bound", "proj"))
 
 	got, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
 		TD:              td,
@@ -1023,7 +1023,7 @@ func TestRouteDrainCheckoutOverrideConflictsWithBinding(t *testing.T) {
 	repo := initAdoptRepo(t)
 	bound := addLinkedWorktree(t, repo, "bound")
 	other := addLinkedWorktree(t, repo, "other")
-	seedBinding(t, td, bound, "set-a", Adopt(bound, "bound", "proj"))
+	seedBinding(t, td, bound, "set-a", Adopt(td, bound, "bound", "proj"))
 
 	_, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
 		TD:              td,

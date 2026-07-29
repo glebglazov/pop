@@ -138,7 +138,7 @@ func RebindForegroundCheckout(td *tasks.Deps, pd *project.Deps, cfg *config.Conf
 	if err != nil {
 		return Binding{}, false, err
 	}
-	b := Adopt(runtimePath, CurrentBranch(td, runtimePath), DetectProject(pd, td, cfg, id))
+	b := Adopt(td, runtimePath, CurrentBranch(td, runtimePath), DetectProject(pd, td, cfg, id))
 	if err := Put(td, key, b); err != nil {
 		return Binding{}, false, err
 	}

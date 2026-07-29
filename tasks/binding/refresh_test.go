@@ -182,7 +182,7 @@ func TestRefreshCommitlessManagedBranchNoopForAdoptedBinding(t *testing.T) {
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
 	wt := addLinkedWorktree(t, repo, "adopted")
-	b := Adopt(wt, "adopted", "")
+	b := Adopt(td, wt, "adopted", "")
 
 	mergeCalls := 0
 	inner := deps.NewRealGit()
