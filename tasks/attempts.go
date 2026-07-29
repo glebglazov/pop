@@ -49,8 +49,9 @@ func taskExitErr(sel *Selection, code int, format string, args ...any) *ExitErro
 
 // executeTaskAttempts runs the retry loop for one task. The prompt is rebuilt
 // per attempt (via buildInvocation over basePrompt) so a retry can carry this
-// task's own prior-attempt digest forward; attempt 1 runs the base prompt
-// unchanged (ADR 0040).
+// task's own prior-attempt digest forward alongside set-wide remediation
+// history and sibling briefs; attempt 1 runs those feeds only when they have
+// content (ADR 0040/ADR 0154).
 func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOut io.Writer, basePrompt string, buildInvocation func(prompt string) (*AgentInvocation, error), maxTries int, timeout time.Duration, commitOverrides []string, retryDelays []time.Duration) (*RunTaskResult, error) {
 	if errOut == nil {
 		errOut = os.Stderr
@@ -67,14 +68,20 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 	var streamPaths []string
 	for attempt := 1; attempt <= maxTries; attempt++ {
 		prompt := basePrompt
-		// Carry two harness-built feeds forward whenever they have content so
-		// a retry converges instead of repeating (ADR 0040/ADR 0089): briefs of
-		// sibling tasks already completed in the set (cross-task orientation),
-		// then this task's own prior-attempt story. They fire on attempt 1 when
-		// non-empty, which is how a resumed interrupted/quota-paused task sees
-		// its own context immediately. Both are always harness-built, never a
-		// pointer to a raw stream (ADR 0020).
+		// Carry harness-built feeds forward whenever they have content so a
+		// retry converges instead of repeating (ADR 0040/ADR 0089/ADR 0154):
+		// set-wide remediation history (cross-task, capped self-reports),
+		// briefs of sibling tasks already completed in the set (cross-task
+		// orientation), then this task's own prior-attempt story. They fire
+		// on attempt 1 when non-empty, which is how a resumed interrupted/
+		// quota-paused task sees its own context immediately. All are always
+		// harness-built, never a pointer to a raw stream (ADR 0020). The
+		// remediation history channel is not fused with the prior-attempt
+		// digest (ADR-0154).
 		var carry strings.Builder
+		if history := formatRemediationHistoryBlock(d, sel.Manifest); history != "" {
+			carry.WriteString("\n" + history)
+		}
 		if briefs := formatSiblingCompletedBriefs(d, sel.Manifest); briefs != "" {
 			carry.WriteString("\n" + briefs)
 		}

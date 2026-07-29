@@ -940,7 +940,9 @@ const specFileName = "spec.md"
 // an error. A non-empty priorNote carries a human's earlier Accept rationale
 // (ADR-0103): it is folded in as context so the known non-issue it describes is
 // not re-flagged, but it is explicitly not a suppression — a genuine regression
-// at that spot must still fail.
+// at that spot must still fail. Done Remediation history is folded in the same
+// way when present (ADR-0154): unverified claims with the diff authoritative;
+// verdict scope remains done AFK work judged against the criteria and the diff.
 func buildVerifierPrompt(d *Deps, m *Manifest, workSHA, diff, priorNote string) string {
 	var b strings.Builder
 	b.WriteString("You are an independent Verifier. A separate agent has already implemented this Task set; ")
@@ -960,6 +962,11 @@ func buildVerifierPrompt(d *Deps, m *Manifest, workSHA, diff, priorNote string) 
 		b.WriteString("if a criterion genuinely fails now, still say so.\n")
 		b.WriteString(note)
 		b.WriteString("\n\n")
+	}
+
+	if history := formatRemediationHistoryForVerifier(d, m); history != "" {
+		b.WriteString(history)
+		b.WriteString("\n")
 	}
 
 	if spec, ok := readSpec(d, m); ok {

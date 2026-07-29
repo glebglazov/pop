@@ -777,6 +777,88 @@ func TestRunTaskFreshTaskPromptHasNoCarry(t *testing.T) {
 	if strings.Contains(prompt, "Sibling tasks already completed") {
 		t.Fatalf("fresh task prompt should not contain sibling briefs:\n%s", prompt)
 	}
+	if strings.Contains(prompt, "Remediation history") {
+		t.Fatalf("fresh task prompt should not contain remediation history:\n%s", prompt)
+	}
+}
+
+// A later AFK attempt in a set with done remediations receives the history
+// block (ADR-0154), as a separate channel from the prior-attempt digest.
+func TestRunTaskPromptCarriesRemediationHistory(t *testing.T) {
+	setEnv := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+		{ID: "02-remediation", File: "02-remediation.md", Title: "Remediation 1: retry cap", Type: "AFK", Status: "done"},
+		{ID: "03-b", File: "03-b.md", Title: "B", Type: "AFK", Status: "open"},
+	})
+	env := setEnv.execFixture()
+	writeRemediationProgress(t, env.demoDir(), "2026-06-10T09:00:00Z [02-remediation.md] DONE\nraised the retry cap to three")
+
+	runner := &captureAgentRunner{}
+	d := env.deps()
+	d.Runner = runner
+
+	opts := env.runOpts(true, "./agent.sh")
+	opts.AgentPreset = "claude"
+	opts.MaxTries = 1
+	opts.Output = io.Discard
+	opts.TaskPathOverride = env.demoTaskRef(t, "03-b.md")
+
+	_, _ = RunTaskWith(d, nil, nil, opts)
+	if len(runner.argLists) != 1 {
+		t.Fatalf("expected 1 attempt, got %d", len(runner.argLists))
+	}
+	prompt := customAgentPrompt(runner.argLists[0])
+	for _, want := range []string{
+		"Remediation history",
+		"not work for you to do",
+		"Remediation 1: retry cap",
+		"raised the retry cap to three",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("AFK prompt missing remediation history %q:\n%s", want, prompt)
+		}
+	}
+	// Prior-attempt digest stays a separate channel and stays empty on a fresh task.
+	if strings.Contains(prompt, "Prior attempts on THIS task") {
+		t.Fatalf("fresh task must not fuse/include prior-attempt digest:\n%s", prompt)
+	}
+}
+
+// A later remediation attempt also receives earlier remediations' history —
+// cycle 2 must not re-tread cycle 1 blind (ADR-0154).
+func TestRunTaskRemediationAttemptCarriesPriorRemediationHistory(t *testing.T) {
+	setEnv := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+		{ID: "02-remediation", File: "02-remediation.md", Title: "Remediation 1: first", Type: "AFK", Status: "done"},
+		{ID: "03-remediation", File: "03-remediation.md", Title: "Remediation 2: second", Type: "AFK", Status: "open"},
+	})
+	env := setEnv.execFixture()
+	writeRemediationProgress(t, env.demoDir(), "2026-06-10T09:00:00Z [02-remediation.md] DONE\nfixed the flaky assertion")
+
+	runner := &captureAgentRunner{}
+	d := env.deps()
+	d.Runner = runner
+
+	opts := env.runOpts(true, "./agent.sh")
+	opts.AgentPreset = "claude"
+	opts.MaxTries = 1
+	opts.Output = io.Discard
+	opts.TaskPathOverride = env.demoTaskRef(t, "03-remediation.md")
+
+	_, _ = RunTaskWith(d, nil, nil, opts)
+	if len(runner.argLists) != 1 {
+		t.Fatalf("expected 1 attempt, got %d", len(runner.argLists))
+	}
+	prompt := customAgentPrompt(runner.argLists[0])
+	for _, want := range []string{
+		"Remediation history",
+		"Remediation 1: first",
+		"fixed the flaky assertion",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("remediation attempt missing prior history %q:\n%s", want, prompt)
+		}
+	}
 }
 
 func TestRunTaskReopenedTaskPromptHasNoPriorDigest(t *testing.T) {
