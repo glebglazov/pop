@@ -34,7 +34,7 @@ func TestFindPaneWith(t *testing.T) {
 	// list-panes construction, so the test asserts on state, not arg vectors.
 	mod := &tmuxtest.Fake{
 		Windows: map[string]map[string][]string{
-			"project": {paneWindow: {"%5", "%6", "%7"}},
+			"project": {spawnWindow: {"%5", "%6", "%7"}},
 		},
 		PaneTitles: map[string]string{"%5": "server", "%6": "db", "%7": "logs"},
 	}
@@ -80,24 +80,36 @@ func TestRunPaneSendToPaneIDWith(t *testing.T) {
 	})
 }
 
-func TestHasAgentWindowWith(t *testing.T) {
+func TestHasSpawnWindowWith(t *testing.T) {
 	t.Parallel()
-	t.Run("agent window exists", func(t *testing.T) {
+	t.Run("Spawn window exists", func(t *testing.T) {
 		mod := &tmuxtest.Fake{
 			Windows: map[string]map[string][]string{
-				"project": {paneWindow: {"%5"}},
+				"project": {spawnWindow: {"%5"}},
 			},
 			PaneTitles: map[string]string{"%5": "server"},
 		}
-		if !hasAgentWindowWith(mod, "project") {
-			t.Error("expected agent window to exist")
+		if !hasSpawnWindowWith(mod, "project") {
+			t.Error("expected Spawn window to exist")
 		}
 	})
 
-	t.Run("no agent window", func(t *testing.T) {
+	t.Run("no Spawn window", func(t *testing.T) {
 		mod := &tmuxtest.Fake{}
-		if hasAgentWindowWith(mod, "project") {
-			t.Error("expected no agent window")
+		if hasSpawnWindowWith(mod, "project") {
+			t.Error("expected no Spawn window")
+		}
+	})
+
+	t.Run("legacy agent window does not count as Spawn window", func(t *testing.T) {
+		mod := &tmuxtest.Fake{
+			Windows: map[string]map[string][]string{
+				"project": {"agent": {"%5"}},
+			},
+			PaneTitles: map[string]string{"%5": "server"},
+		}
+		if hasSpawnWindowWith(mod, "project") {
+			t.Error("expected legacy agent window not to satisfy Spawn window lookup")
 		}
 	})
 }
@@ -235,14 +247,14 @@ func TestRunPaneCreateWith(t *testing.T) {
 
 	// titledPanes returns the fake's current titled panes for the target session.
 	panes := func(mod *tmuxtest.Fake) []tmuxmod.TitledPane {
-		got, _ := mod.WindowTitledPanes(session, paneWindow)
+		got, _ := mod.WindowTitledPanes(session, spawnWindow)
 		return got
 	}
 
 	t.Run("returns existing alive pane", func(t *testing.T) {
 		mod := &tmuxtest.Fake{
 			Windows: map[string]map[string][]string{
-				session: {paneWindow: {"%5"}},
+				session: {spawnWindow: {"%5"}},
 			},
 			PaneTitles: map[string]string{"%5": "mypane"},
 		}
@@ -253,7 +265,7 @@ func TestRunPaneCreateWith(t *testing.T) {
 		}
 		// The alive pane is returned untouched: no new pane, no keys sent.
 		if got := panes(mod); len(got) != 1 || got[0].ID != "%5" {
-			t.Errorf("agent panes = %v, want the single alive pane %%5", got)
+			t.Errorf("Spawn window panes = %v, want the single alive pane %%5", got)
 		}
 		if len(mod.SentKeys) != 0 {
 			t.Errorf("expected no send-keys for an alive pane, got %v", mod.SentKeys)
@@ -263,7 +275,7 @@ func TestRunPaneCreateWith(t *testing.T) {
 	t.Run("kills dead pane and recreates with new-window", func(t *testing.T) {
 		mod := &tmuxtest.Fake{
 			Windows: map[string]map[string][]string{
-				session: {paneWindow: {"%5"}},
+				session: {spawnWindow: {"%5"}},
 			},
 			PaneTitles: map[string]string{"%5": "mypane"},
 			DeadPanes:  map[string]bool{"%5": true},
@@ -275,7 +287,7 @@ func TestRunPaneCreateWith(t *testing.T) {
 		}
 		got := panes(mod)
 		if len(got) != 1 {
-			t.Fatalf("agent panes = %v, want exactly one fresh pane", got)
+			t.Fatalf("Spawn window panes = %v, want exactly one fresh pane", got)
 		}
 		if got[0].ID == "%5" {
 			t.Error("expected the dead pane %5 to be replaced by a fresh one")
@@ -292,12 +304,12 @@ func TestRunPaneCreateWith(t *testing.T) {
 		}
 	})
 
-	t.Run("uses split-window when agent window exists", func(t *testing.T) {
-		// A different pane already occupies the agent window, so mypane is
+	t.Run("uses split-window when Spawn window exists", func(t *testing.T) {
+		// A different pane already occupies the Spawn window, so mypane is
 		// absent but the window exists → split path.
 		mod := &tmuxtest.Fake{
 			Windows: map[string]map[string][]string{
-				session: {paneWindow: {"%9"}},
+				session: {spawnWindow: {"%9"}},
 			},
 			PaneTitles: map[string]string{"%9": "other"},
 		}
@@ -308,7 +320,7 @@ func TestRunPaneCreateWith(t *testing.T) {
 		}
 		got := panes(mod)
 		if len(got) != 2 {
-			t.Fatalf("agent panes = %v, want the existing pane plus a split", got)
+			t.Fatalf("Spawn window panes = %v, want the existing pane plus a split", got)
 		}
 		found := false
 		for _, p := range got {
@@ -319,13 +331,13 @@ func TestRunPaneCreateWith(t *testing.T) {
 		if !found {
 			t.Error("expected a new pane titled mypane after the split")
 		}
-		wantRetile := session + ":" + paneWindow
+		wantRetile := session + ":" + spawnWindow
 		if len(mod.WindowRetiled) == 0 || mod.WindowRetiled[len(mod.WindowRetiled)-1] != wantRetile {
-			t.Errorf("expected the agent window to be re-tiled, retiled = %v", mod.WindowRetiled)
+			t.Errorf("expected the Spawn window to be re-tiled, retiled = %v", mod.WindowRetiled)
 		}
 	})
 
-	t.Run("uses new-window when no agent window", func(t *testing.T) {
+	t.Run("uses new-window when no Spawn window", func(t *testing.T) {
 		mod := &tmuxtest.Fake{}
 		withTmuxMod(t, mod)
 
@@ -334,7 +346,32 @@ func TestRunPaneCreateWith(t *testing.T) {
 		}
 		got := panes(mod)
 		if len(got) != 1 || got[0].Title != "mypane" {
-			t.Errorf("agent panes = %v, want a single new-window pane titled mypane", got)
+			t.Errorf("Spawn window panes = %v, want a single new-window pane titled mypane", got)
+		}
+	})
+
+	t.Run("creates pop-spawn beside legacy agent window", func(t *testing.T) {
+		mod := &tmuxtest.Fake{
+			Windows: map[string]map[string][]string{
+				session: {"agent": {"%9"}},
+			},
+			PaneTitles: map[string]string{"%9": "legacy"},
+		}
+		withTmuxMod(t, mod)
+
+		if err := runPaneCreateWith(mod, "mypane", "echo hi"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		legacy, _ := mod.WindowTitledPanes(session, "agent")
+		if len(legacy) != 1 || legacy[0].ID != "%9" || legacy[0].Title != "legacy" {
+			t.Errorf("legacy agent window = %v, want unchanged legacy pane %%9", legacy)
+		}
+		spawn, _ := mod.WindowTitledPanes(session, spawnWindow)
+		if len(spawn) != 1 || spawn[0].Title != "mypane" {
+			t.Errorf("Spawn window panes = %v, want single mypane pane", spawn)
+		}
+		if len(mod.KilledWindows) != 0 {
+			t.Errorf("expected no windows killed, got %v", mod.KilledWindows)
 		}
 	})
 }
@@ -491,7 +528,7 @@ func TestResolvePaneArg(t *testing.T) {
 		mod := &tmuxtest.Fake{
 			CurrentSessionName: "session-x",
 			Windows: map[string]map[string][]string{
-				"session-x": {paneWindow: {"%5", "%6"}},
+				"session-x": {spawnWindow: {"%5", "%6"}},
 			},
 			PaneTitles: map[string]string{"%5": "myagent", "%6": "other"},
 		}

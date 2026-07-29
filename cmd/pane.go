@@ -25,10 +25,9 @@ import (
 
 var paneProject string
 
-// paneWindow is the shared tmux window named panes live in. Still "agent" for
-// this slice; renaming to pop-spawn is the next task. Addressed through the
-// generic window primitives — the tmux module has no agent-window verbs.
-const paneWindow = "agent"
+// spawnWindow is the Spawn window: the shared tmux window (pop-spawn) named
+// panes live in. Addressed through the generic window primitives.
+const spawnWindow = "pop-spawn"
 
 // paneOnSocketSendFailed is invoked when a daemon socket send fails so the
 // next call can reach a running daemon. Tests may replace it to observe the hook.
@@ -37,7 +36,7 @@ var paneOnSocketSendFailed = func() { go ensureMonitorDaemon() }
 var paneCmd = &cobra.Command{
 	Use:   "pane",
 	Short: "Manage named tmux panes",
-	Long: `Manage named tmux panes in a shared "agent" window.
+	Long: `Manage named tmux panes in the shared Spawn window (pop-spawn).
 
 Designed for agentic workflows where agents need to create, find,
 send commands to, and read output from named panes.
@@ -98,16 +97,16 @@ func findPane(session, name string) (string, error) {
 }
 
 func findPaneWith(tmux tmuxmod.Tmux, session, name string) (string, error) {
-	return tmux.FindPaneByTitle(session, paneWindow, name)
+	return tmux.FindPaneByTitle(session, spawnWindow, name)
 }
 
-// hasAgentWindow checks if the shared pane window exists in the given session.
-func hasAgentWindow(session string) bool {
-	return hasAgentWindowWith(defaultTmuxMod, session)
+// hasSpawnWindow checks if the Spawn window exists in the given session.
+func hasSpawnWindow(session string) bool {
+	return hasSpawnWindowWith(defaultTmuxMod, session)
 }
 
-func hasAgentWindowWith(tmux tmuxmod.Tmux, session string) bool {
-	exists, err := tmux.WindowExists(session, paneWindow)
+func hasSpawnWindowWith(tmux tmuxmod.Tmux, session string) bool {
+	exists, err := tmux.WindowExists(session, spawnWindow)
 	return err == nil && exists
 }
 
@@ -124,8 +123,8 @@ func isPaneDeadWith(tmux tmuxmod.Tmux, paneID string) bool {
 
 var paneCreateCmd = &cobra.Command{
 	Use:   "create <name> <command>",
-	Short: "Create a named pane in the agent window",
-	Long: `Create a named pane running the given command in the "agent" window.
+	Short: "Create a named pane in the Spawn window",
+	Long: `Create a named pane running the given command in the Spawn window (pop-spawn).
 
 The pane starts an interactive shell in the project directory (respecting
 direnv and other shell hooks), then sends the command to it.
@@ -181,17 +180,17 @@ func runPaneCreateWith(tmux tmuxmod.Tmux, name, command string) error {
 	// directory. The shell's rc files run, which triggers direnv and any
 	// other hooks so environment variables are loaded before the command.
 	var paneID string
-	if !hasAgentWindowWith(tmux, session) {
-		paneID, err = tmux.NewWindow(session, paneWindow, dir)
+	if !hasSpawnWindowWith(tmux, session) {
+		paneID, err = tmux.NewWindow(session, spawnWindow, dir)
 		if err != nil {
 			return err
 		}
 	} else {
-		paneID, err = tmux.SplitWindow(session, paneWindow, dir)
+		paneID, err = tmux.SplitWindow(session, spawnWindow, dir)
 		if err != nil {
 			return err
 		}
-		if err := tmux.RetileWindow(session, paneWindow); err != nil {
+		if err := tmux.RetileWindow(session, spawnWindow); err != nil {
 			debug.Error("pane create: select-layout: %v", err)
 		}
 	}
@@ -217,10 +216,10 @@ func runPaneCreateWith(tmux tmuxmod.Tmux, name, command string) error {
 var paneKillCmd = &cobra.Command{
 	Use:   "kill <name>",
 	Short: "Kill a named pane",
-	Long: `Kill the named pane in the agent window.
+	Long: `Kill the named pane in the Spawn window.
 
 Remaining panes are automatically re-tiled. If this is the last pane,
-the agent window is destroyed.
+the Spawn window is destroyed.
 
 Uses tmux kill-pane to destroy the pane and select-layout tiled to
 rebalance the remaining panes.`,
@@ -248,7 +247,7 @@ func runPaneKillWith(tmux tmuxmod.Tmux, name string) error {
 	}
 
 	// Re-tile remaining panes if the shared pane window still exists
-	if err := tmux.RetileWindow(session, paneWindow); err != nil {
+	if err := tmux.RetileWindow(session, spawnWindow); err != nil {
 		debug.Error("pane kill: select-layout: %v", err)
 	}
 
@@ -267,7 +266,7 @@ this to check whether a pane is running:
 
   pop pane find server && echo "running" || echo "not found"
 
-Matches panes by title in the agent window.`,
+Matches panes by title in the Spawn window.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runPaneFind,
 }
@@ -293,8 +292,8 @@ func runPaneFind(cmd *cobra.Command, args []string) error {
 
 var paneListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List all named panes in the agent window",
-	Long: `List all panes in the agent window as tab-separated lines:
+	Short: "List all named panes in the Spawn window",
+	Long: `List all panes in the Spawn window as tab-separated lines:
 
   <title>\t<pane_id>
 
@@ -318,7 +317,7 @@ func runPaneListWith(tmux tmuxmod.Tmux) error {
 		return err
 	}
 
-	panes, err := tmux.WindowTitledPanes(session, paneWindow)
+	panes, err := tmux.WindowTitledPanes(session, spawnWindow)
 	if err != nil {
 		return err
 	}
@@ -1356,7 +1355,7 @@ var paneFollowCmd = &cobra.Command{
 
 Followed panes show up in pop's "following" attention view (toggle with F
 in the picker). If the argument starts with '%' it is treated as a tmux
-pane_id; otherwise it is resolved as a pane name in the agent window of
+pane_id; otherwise it is resolved as a pane name in the Spawn window of
 the current session (or --project's session).
 
 Untracked panes are auto-registered as clear.`,
@@ -1496,7 +1495,7 @@ func runPaneVisitDirect(paneID string) error {
 }
 
 // resolvePaneArg accepts a tmux pane_id ("%N") verbatim, or a pane name to
-// look up in the current/--project session's agent window. Mirrors the
+// look up in the current/--project session's Spawn window. Mirrors the
 // kill/send/capture pattern but admits raw pane IDs for use from scripts
 // that already know them.
 func resolvePaneArg(tmux tmuxmod.Tmux, arg string) (string, error) {

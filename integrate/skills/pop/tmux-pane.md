@@ -15,7 +15,7 @@ Two main use cases:
 
 Because this wraps tmux `send-keys`, you can type into running processes, answer interactive prompts, navigate TUIs, send Ctrl-C, and pipe arbitrary input — all by name rather than by pane ID.
 
-All panes live in a shared "agent" window within the current tmux session. Pane names are unique per session.
+All panes live in the shared Spawn window (`pop-spawn`) within the current tmux session. Pane names are unique per session.
 
 ## Commands
 
@@ -24,7 +24,7 @@ All panes live in a shared "agent" window within the current tmux session. Pane 
 pop pane create <name> "<command>"
 ```
 Creates a named pane running the given command. Prints the tmux pane ID.
-- First pane creates the "agent" window
+- First pane creates the Spawn window (`pop-spawn`)
 - Subsequent panes split and auto-tile
 - Pane stays open after command exits so you can read the output
 - **Idempotent**: if a pane with that name is already running, returns its ID
@@ -40,7 +40,7 @@ Prints the tmux pane ID (e.g., `%5`). Useful to check if a pane exists — retur
 ```bash
 pop pane list
 ```
-Lists all panes in the agent window as `title<TAB>pane_id` lines.
+Lists all panes in the Spawn window as `title<TAB>pane_id` lines.
 
 ### Send keys to a pane
 ```bash
