@@ -26,6 +26,44 @@ func (c AgentAvailabilityProbeCapability) Available() bool {
 	return c.Command != nil && c.Command.Name != "" && c.Interpret != nil
 }
 
+// AgentAuthenticationStatus is the doctor-facing outcome of an availability probe.
+type AgentAuthenticationStatus int
+
+const (
+	AgentAuthAuthenticated AgentAuthenticationStatus = iota
+	AgentAuthUnauthenticated
+	AgentAuthUnknown
+	AgentAuthCannotDetermine
+)
+
+// AgentAuthenticationProbe reports one preset's authentication status for doctor.
+type AgentAuthenticationProbe struct {
+	Status AgentAuthenticationStatus
+	Detail string
+}
+
+// ProbeAgentAuthentication runs a preset's availability probe for doctor. It execs
+// the probe command when the preset ships one; presets without a probe report
+// cannot determine rather than a failure.
+func ProbeAgentAuthentication(d *Deps, runtimePath, preset string) AgentAuthenticationProbe {
+	adapter, err := ResolveAgentAdapter(preset)
+	if err != nil {
+		return AgentAuthenticationProbe{
+			Status: AgentAuthCannotDetermine,
+			Detail: "pop cannot determine authentication (unrecognized preset)",
+		}
+	}
+	capability := adapter.AvailabilityProbeCapability()
+	if !capability.Available() {
+		return AgentAuthenticationProbe{
+			Status: AgentAuthCannotDetermine,
+			Detail: "pop cannot determine authentication (no availability probe)",
+		}
+	}
+	status, detail := evaluateAgentAvailabilityProbe(d, runtimePath, preset, capability)
+	return AgentAuthenticationProbe{Status: status, Detail: detail}
+}
+
 // agentAvailabilityProbeMemo records one-way probe results for a single
 // Implement or Verifier run: a preset marked unavailable stays skipped; every
 // other preset is probed at most once.
@@ -73,8 +111,31 @@ func (m *agentAvailabilityProbeMemo) checkUnavailability(d *Deps, runtimePath, p
 }
 
 func runAgentAvailabilityProbe(d *Deps, runtimePath, preset string, capability AgentAvailabilityProbeCapability) *AgentUnavailability {
-	if d == nil || d.Runner == nil || !capability.Available() {
+	status, detail := evaluateAgentAvailabilityProbe(d, runtimePath, preset, capability)
+	if status != AgentAuthUnauthenticated {
 		return nil
+	}
+	u := DetectedAuthFailure(detail).WithPreset(preset)
+	return &u
+}
+
+func evaluateAgentAvailabilityProbe(d *Deps, runtimePath, preset string, capability AgentAvailabilityProbeCapability) (AgentAuthenticationStatus, string) {
+	exitCode, combined, ok := execAgentAvailabilityProbe(d, runtimePath, capability)
+	if !ok {
+		return AgentAuthUnknown, "authentication status unknown"
+	}
+	if u := capability.Interpret(exitCode, combined); u != nil {
+		return AgentAuthUnauthenticated, u.Reason
+	}
+	if probeReportsExplicitlyAuthenticated(preset, exitCode, combined) {
+		return AgentAuthAuthenticated, "authenticated"
+	}
+	return AgentAuthUnknown, "authentication status unknown"
+}
+
+func execAgentAvailabilityProbe(d *Deps, runtimePath string, capability AgentAvailabilityProbeCapability) (exitCode int, combined string, ok bool) {
+	if d == nil || d.Runner == nil || !capability.Available() {
+		return 0, "", false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), agentAvailabilityProbeTimeout)
 	defer cancel()
@@ -82,23 +143,47 @@ func runAgentAvailabilityProbe(d *Deps, runtimePath, preset string, capability A
 	var stdout, stderr bytes.Buffer
 	exitCode, err := d.Runner.Run(ctx, runtimePath, &stdout, &stderr, capability.Command.Name, capability.Command.Args...)
 	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return nil
-		}
-		return nil
+		return 0, "", false
 	}
-	combined := strings.TrimSpace(stdout.String())
+	combined = strings.TrimSpace(stdout.String())
 	if stderr.Len() > 0 {
 		if combined != "" {
 			combined += "\n"
 		}
 		combined += strings.TrimSpace(stderr.String())
 	}
-	if u := capability.Interpret(exitCode, combined); u != nil {
-		withPreset := u.WithPreset(preset)
-		return &withPreset
+	return exitCode, combined, true
+}
+
+func probeReportsExplicitlyAuthenticated(preset string, exitCode int, output string) bool {
+	switch preset {
+	case "cursor":
+		if exitCode != 0 {
+			return false
+		}
+		var status struct {
+			IsAuthenticated *bool `json:"isAuthenticated"`
+		}
+		if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &status); err != nil {
+			return false
+		}
+		return status.IsAuthenticated != nil && *status.IsAuthenticated
+	case "claude":
+		if exitCode != 0 {
+			return false
+		}
+		var status struct {
+			LoggedIn *bool `json:"loggedIn"`
+		}
+		if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &status); err != nil {
+			return false
+		}
+		return status.LoggedIn != nil && *status.LoggedIn
+	case "codex":
+		return exitCode == 0
+	default:
+		return false
 	}
-	return nil
 }
 
 func interpretCursorAvailabilityProbe(exitCode int, output string) *AgentUnavailability {

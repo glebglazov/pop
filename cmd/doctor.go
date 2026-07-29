@@ -58,6 +58,8 @@ type doctorDeps struct {
 	orphanedTaskStorage       func() ([]tasks.OrphanedStorage, error)
 	legacyLayoutStorage       func() ([]string, error)
 	updateCheck               func() release.Result
+	agentCatalog              func() []tasks.AgentCatalogRow
+	probeAgentAuthentication  func(preset string) tasks.AgentAuthenticationProbe
 }
 
 func defaultDoctorDeps() *doctorDeps {
@@ -121,6 +123,19 @@ func defaultDoctorDeps() *doctorDeps {
 			return tasks.LegacyLayoutStorageDirs(cmdLayerDeps().tasksDeps())
 		},
 		updateCheck: func() release.Result { return release.Check(buildVersion()) },
+	}
+	d.agentCatalog = func() []tasks.AgentCatalogRow {
+		cfg, err := config.Load(config.DefaultConfigPath())
+		if err != nil && !os.IsNotExist(err) {
+			cfg = nil
+		}
+		if os.IsNotExist(err) {
+			cfg = nil
+		}
+		return tasks.AgentCatalogWithConfig(cmdLayerDeps().tasksDeps(), cfg)
+	}
+	d.probeAgentAuthentication = func(preset string) tasks.AgentAuthenticationProbe {
+		return tasks.ProbeAgentAuthentication(cmdLayerDeps().tasksDeps(), cmdLayerDeps().WorkDir(), preset)
 	}
 	d.agentIntent = func() (*integrate.AgentIntentReport, error) {
 		home, err := os.UserHomeDir()
@@ -458,7 +473,36 @@ func doctorTaskChecks(d *doctorDeps) []doctorCheck {
 	checks = append(checks, doctorTaskLegacyCheck(d))
 	checks = append(checks, doctorTaskLegacyLayoutCheck(d))
 	checks = append(checks, doctorTaskOrphanCheck(d))
+	checks = append(checks, doctorTaskAgentAuthenticationChecks(d)...)
 	return checks
+}
+
+func doctorTaskAgentAuthenticationChecks(d *doctorDeps) []doctorCheck {
+	if d.agentCatalog == nil || d.probeAgentAuthentication == nil {
+		return nil
+	}
+	rows := d.agentCatalog()
+	checks := make([]doctorCheck, 0, len(rows))
+	for _, row := range rows {
+		checks = append(checks, doctorAgentAuthenticationCheck(row.Agent, d.probeAgentAuthentication(row.Agent)))
+	}
+	return checks
+}
+
+func doctorAgentAuthenticationCheck(preset string, probe tasks.AgentAuthenticationProbe) doctorCheck {
+	label := preset + " authentication"
+	switch probe.Status {
+	case tasks.AgentAuthAuthenticated:
+		return doctorCheck{label: label, status: doctorStatusOK, detail: probe.Detail}
+	case tasks.AgentAuthUnauthenticated:
+		return doctorCheck{label: label, status: doctorStatusPartial, detail: probe.Detail}
+	case tasks.AgentAuthUnknown:
+		return doctorCheck{label: label, status: doctorStatusNA, detail: probe.Detail}
+	case tasks.AgentAuthCannotDetermine:
+		return doctorCheck{label: label, status: doctorStatusNA, detail: probe.Detail}
+	default:
+		return doctorCheck{label: label, status: doctorStatusNA, detail: "authentication status unknown"}
+	}
 }
 
 // doctorTaskLegacyLayoutCheck surfaces a pre-rename storage layout still

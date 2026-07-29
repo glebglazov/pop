@@ -12,6 +12,48 @@ import (
 	"time"
 )
 
+func TestProbeAgentAuthentication(t *testing.T) {
+	t.Run("no probe reports cannot determine", func(t *testing.T) {
+		for _, preset := range []string{"pi", "opencode"} {
+			got := ProbeAgentAuthentication(&Deps{}, ".", preset)
+			if got.Status != AgentAuthCannotDetermine {
+				t.Fatalf("%s status = %v, want cannot determine", preset, got.Status)
+			}
+			if !strings.Contains(got.Detail, "cannot determine") {
+				t.Fatalf("%s detail = %q, want cannot determine wording", preset, got.Detail)
+			}
+		}
+	})
+
+	t.Run("authenticated", func(t *testing.T) {
+		runner := &probeCountingRunner{output: `{"loggedIn":true}`}
+		got := ProbeAgentAuthentication(&Deps{Runner: runner}, ".", "claude")
+		if got.Status != AgentAuthAuthenticated || got.Detail != "authenticated" {
+			t.Fatalf("got = %+v, want authenticated", got)
+		}
+	})
+
+	t.Run("unauthenticated", func(t *testing.T) {
+		raw := `{"isAuthenticated":false}`
+		runner := &probeCountingRunner{output: raw}
+		got := ProbeAgentAuthentication(&Deps{Runner: runner}, ".", "cursor")
+		if got.Status != AgentAuthUnauthenticated || got.Detail != raw {
+			t.Fatalf("got = %+v, want unauthenticated with provider line", got)
+		}
+	})
+
+	t.Run("unknown not unauthenticated", func(t *testing.T) {
+		runner := &probeCountingRunner{output: "not json"}
+		got := ProbeAgentAuthentication(&Deps{Runner: runner}, ".", "cursor")
+		if got.Status != AgentAuthUnknown {
+			t.Fatalf("got = %+v, want unknown", got)
+		}
+		if got.Status == AgentAuthUnauthenticated {
+			t.Fatal("unparseable probe must not report unauthenticated")
+		}
+	})
+}
+
 func TestAvailabilityProbeCapabilityByPreset(t *testing.T) {
 	wantProbe := map[string]bool{
 		"claude":   true,
