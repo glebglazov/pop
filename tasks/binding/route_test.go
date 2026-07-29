@@ -984,6 +984,59 @@ func TestRouteDrainCheckoutForegroundInvalidBindingRefuses(t *testing.T) {
 	}
 }
 
+// TestRouteDrainCheckoutOverrideMatchesBindingViaSymlink asserts a
+// --task-runtime-path pin that names the same checkout as the binding through
+// a different symlink spelling routes normally instead of raising a spurious
+// runtime-override conflict (ADR-0151).
+func TestRouteDrainCheckoutOverrideMatchesBindingViaSymlink(t *testing.T) {
+	t.Parallel()
+	td := routeTestDeps(t)
+	repo := initAdoptRepo(t)
+	wt := addLinkedWorktree(t, repo, "bound")
+	link := filepath.Join(t.TempDir(), "checkout-link")
+	if err := os.Symlink(wt, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	// Bindings store the provisioned path; the Queue may pin via a symlink alias.
+	seedBinding(t, td, link, "set-a", Adopt(link, "bound", "proj"))
+
+	got, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
+		TD:              td,
+		CurrentCheckout: repo,
+		SetID:           "set-a",
+		Trigger:         TriggerQueueSpawn,
+		RuntimeOverride: wt,
+	})
+	if err != nil {
+		t.Fatalf("route: %v", err)
+	}
+	if !got.UsedExistingBinding || got.RuntimePath != link {
+		t.Fatalf("result = %+v, want existing binding at symlink path %q", got, link)
+	}
+}
+
+// TestRouteDrainCheckoutOverrideConflictsWithBinding asserts a pin naming a
+// genuinely different checkout than the binding still raises a conflict.
+func TestRouteDrainCheckoutOverrideConflictsWithBinding(t *testing.T) {
+	t.Parallel()
+	td := routeTestDeps(t)
+	repo := initAdoptRepo(t)
+	bound := addLinkedWorktree(t, repo, "bound")
+	other := addLinkedWorktree(t, repo, "other")
+	seedBinding(t, td, bound, "set-a", Adopt(bound, "bound", "proj"))
+
+	_, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
+		TD:              td,
+		CurrentCheckout: repo,
+		SetID:           "set-a",
+		Trigger:         TriggerQueueSpawn,
+		RuntimeOverride: other,
+	})
+	if err == nil || !errors.Is(err, ErrRuntimeOverrideConflict) {
+		t.Fatalf("route err = %v, want ErrRuntimeOverrideConflict", err)
+	}
+}
+
 func runRouteGitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	out, err := deps.NewRealGit().CommandInDir(dir, args...)

@@ -150,7 +150,15 @@ func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult
 			if err != nil {
 				return RouteDrainCheckoutResult{}, err
 			}
-			if overridePath != existing.RuntimePath {
+			overrideCanon, err := canonicalCheckoutPath(req.TD, overridePath)
+			if err != nil {
+				return RouteDrainCheckoutResult{}, err
+			}
+			bindingCanon, err := canonicalCheckoutPath(req.TD, existing.RuntimePath)
+			if err != nil {
+				return RouteDrainCheckoutResult{}, err
+			}
+			if overrideCanon != bindingCanon {
 				return RouteDrainCheckoutResult{}, fmt.Errorf("%w: %s conflicts with %s for %s", ErrRuntimeOverrideConflict, overridePath, existing.RuntimePath, setID)
 			}
 		}
