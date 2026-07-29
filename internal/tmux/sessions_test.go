@@ -68,6 +68,22 @@ func TestCurrentPaneBuildsArgs(t *testing.T) {
 	}
 }
 
+func TestCurrentSessionBuildsArgs(t *testing.T) {
+	r := &recordingRunner{out: "proj-x"}
+	tm := &realTmux{run: r}
+	session, err := tm.CurrentSession()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if session != "proj-x" {
+		t.Errorf("session = %q, want proj-x", session)
+	}
+	wantArgs := [][]string{{"display-message", "-p", "#S"}}
+	if !reflect.DeepEqual(r.calls, wantArgs) {
+		t.Errorf("args = %v, want %v", r.calls, wantArgs)
+	}
+}
+
 func TestSessionsSkipsMalformedLines(t *testing.T) {
 	tm := &realTmux{run: &recordingRunner{out: "good\t100\nnotabhere\nother\t200"}}
 

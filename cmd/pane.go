@@ -25,6 +25,11 @@ import (
 
 var paneProject string
 
+// paneWindow is the shared tmux window named panes live in. Still "agent" for
+// this slice; renaming to pop-spawn is the next task. Addressed through the
+// generic window primitives — the tmux module has no agent-window verbs.
+const paneWindow = "agent"
+
 // paneOnSocketSendFailed is invoked when a daemon socket send fails so the
 // next call can reach a running daemon. Tests may replace it to observe the hook.
 var paneOnSocketSendFailed = func() { go ensureMonitorDaemon() }
@@ -86,23 +91,24 @@ func resolveSessionWith(tmux tmuxmod.Tmux) (string, error) {
 	return session, nil
 }
 
-// findPane finds a pane by title in the given session's "agent" window.
+// findPane finds a pane by title in the given session's shared pane window.
 // Returns the pane_id (e.g., "%5") or error if not found.
 func findPane(session, name string) (string, error) {
 	return findPaneWith(defaultTmuxMod, session, name)
 }
 
 func findPaneWith(tmux tmuxmod.Tmux, session, name string) (string, error) {
-	return tmux.FindAgentPane(session, name)
+	return tmux.FindPaneByTitle(session, paneWindow, name)
 }
 
-// hasAgentWindow checks if the "agent" window exists in the given session.
+// hasAgentWindow checks if the shared pane window exists in the given session.
 func hasAgentWindow(session string) bool {
 	return hasAgentWindowWith(defaultTmuxMod, session)
 }
 
 func hasAgentWindowWith(tmux tmuxmod.Tmux, session string) bool {
-	return tmux.HasAgentWindow(session)
+	exists, err := tmux.WindowExists(session, paneWindow)
+	return err == nil && exists
 }
 
 // isPaneDead checks if a pane's process has exited.
@@ -176,16 +182,16 @@ func runPaneCreateWith(tmux tmuxmod.Tmux, name, command string) error {
 	// other hooks so environment variables are loaded before the command.
 	var paneID string
 	if !hasAgentWindowWith(tmux, session) {
-		paneID, err = tmux.NewAgentWindow(session, dir)
+		paneID, err = tmux.NewWindow(session, paneWindow, dir)
 		if err != nil {
 			return err
 		}
 	} else {
-		paneID, err = tmux.SplitAgentPane(session, dir)
+		paneID, err = tmux.SplitWindow(session, paneWindow, dir)
 		if err != nil {
 			return err
 		}
-		if err := tmux.RetileAgentWindow(session); err != nil {
+		if err := tmux.RetileWindow(session, paneWindow); err != nil {
 			debug.Error("pane create: select-layout: %v", err)
 		}
 	}
@@ -241,8 +247,8 @@ func runPaneKillWith(tmux tmuxmod.Tmux, name string) error {
 		return fmt.Errorf("failed to kill pane %q: %w", name, err)
 	}
 
-	// Re-tile remaining panes if agent window still exists
-	if err := tmux.RetileAgentWindow(session); err != nil {
+	// Re-tile remaining panes if the shared pane window still exists
+	if err := tmux.RetileWindow(session, paneWindow); err != nil {
 		debug.Error("pane kill: select-layout: %v", err)
 	}
 
@@ -312,7 +318,7 @@ func runPaneListWith(tmux tmuxmod.Tmux) error {
 		return err
 	}
 
-	panes, err := tmux.AgentPanes(session)
+	panes, err := tmux.WindowTitledPanes(session, paneWindow)
 	if err != nil {
 		return err
 	}

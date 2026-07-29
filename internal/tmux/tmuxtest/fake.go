@@ -75,11 +75,6 @@ type Fake struct {
 	// in order.
 	SelectedWindows []string
 
-	// AgentWindows maps a session name to its agent-window panes in order. The
-	// agent-window verbs (HasAgentWindow, AgentPanes, FindAgentPane,
-	// NewAgentWindow, SplitAgentPane, RetileAgentWindow, KillPane) read and
-	// mutate it; tests arrange and assert on it.
-	AgentWindows map[string][]tmux.AgentPane
 	// nextPaneNum seeds generated pane ids for created panes ("%100", "%101",
 	// …), high enough not to collide with test-arranged ids.
 	nextPaneNum int
@@ -92,17 +87,15 @@ type Fake struct {
 	DeadPanes map[string]bool
 	// RemainOnExit records the last remain-on-exit value set per pane id.
 	RemainOnExit map[string]bool
-	// Retiled records the sessions whose agent window was re-tiled, in order.
-	Retiled []string
 
 	// Topics maps a pane id to its Topic state. The Topic verbs (ReadTopic,
 	// SetTopic, SetTopicWithKind, ClearTopic, PaneTopics) read and mutate it.
 	Topics map[string]tmux.TopicState
 
-	// Windows models generic (non-agent) windows: session -> window name ->
-	// ordered pane ids. The window/pane spawn verbs (WindowExists, NewWindow,
-	// SplitWindow, WindowPanes, RetileWindow) and the tagged-pane composite read
-	// and mutate it; tests arrange and assert on it.
+	// Windows models named windows: session -> window name -> ordered pane ids.
+	// The window/pane spawn verbs (WindowExists, NewWindow, SplitWindow,
+	// WindowPanes, WindowTitledPanes, FindPaneByTitle, RetileWindow) and the
+	// tagged-pane composite read and mutate it; tests arrange and assert on it.
 	Windows map[string]map[string][]string
 	// PaneTagValues maps a pane id to its @pop_* tag values keyed by PaneTag.
 	// TagPane writes it, FindTaggedPane reads it.
@@ -328,32 +321,7 @@ func (f *Fake) ZoomPane(target string) error {
 	return nil
 }
 
-// --- agentic panes ---
-
-func (f *Fake) HasAgentWindow(session string) bool {
-	return len(f.AgentWindows[session]) > 0
-}
-
-func (f *Fake) AgentPanes(session string) ([]tmux.AgentPane, error) {
-	panes, ok := f.AgentWindows[session]
-	if !ok {
-		return nil, fmt.Errorf("no agent window in session %q", session)
-	}
-	return panes, nil
-}
-
-func (f *Fake) FindAgentPane(session, title string) (string, error) {
-	panes, err := f.AgentPanes(session)
-	if err != nil {
-		return "", err
-	}
-	for _, p := range panes {
-		if p.Title == title {
-			return p.ID, nil
-		}
-	}
-	return "", fmt.Errorf("pane %q not found in session %q", title, session)
-}
+// --- pane-id primitives ---
 
 // newPaneID mints a fresh pane id for a created pane.
 func (f *Fake) newPaneID() string {
@@ -365,39 +333,11 @@ func (f *Fake) newPaneID() string {
 	return id
 }
 
-func (f *Fake) NewAgentWindow(session, dir string) (string, error) {
-	if f.AgentWindows == nil {
-		f.AgentWindows = map[string][]tmux.AgentPane{}
-	}
-	id := f.newPaneID()
-	f.AgentWindows[session] = append(f.AgentWindows[session], tmux.AgentPane{ID: id})
-	return id, nil
-}
-
-func (f *Fake) SplitAgentPane(session, dir string) (string, error) {
-	return f.NewAgentWindow(session, dir)
-}
-
-func (f *Fake) RetileAgentWindow(session string) error {
-	f.Retiled = append(f.Retiled, session)
-	return nil
-}
-
-// --- pane-id primitives ---
-
 func (f *Fake) SetPaneTitle(paneID, title string) error {
 	if f.PaneTitles == nil {
 		f.PaneTitles = map[string]string{}
 	}
 	f.PaneTitles[paneID] = title
-	for session, panes := range f.AgentWindows {
-		for i := range panes {
-			if panes[i].ID == paneID {
-				f.AgentWindows[session][i].Title = title
-				return nil
-			}
-		}
-	}
 	return nil
 }
 
@@ -422,19 +362,25 @@ func (f *Fake) SendKeys(paneID string, keys ...string) error {
 }
 
 func (f *Fake) KillPane(paneID string) error {
-	for session, panes := range f.AgentWindows {
-		kept := panes[:0]
-		for _, p := range panes {
-			if p.ID != paneID {
-				kept = append(kept, p)
+	for session, windows := range f.Windows {
+		for name, panes := range windows {
+			kept := panes[:0]
+			for _, id := range panes {
+				if id != paneID {
+					kept = append(kept, id)
+				}
+			}
+			if len(kept) == 0 {
+				delete(f.Windows[session], name)
+			} else {
+				f.Windows[session][name] = kept
 			}
 		}
-		if len(kept) == 0 {
-			delete(f.AgentWindows, session)
-		} else {
-			f.AgentWindows[session] = kept
+		if len(f.Windows[session]) == 0 {
+			delete(f.Windows, session)
 		}
 	}
+	delete(f.PaneTitles, paneID)
 	return nil
 }
 
@@ -556,6 +502,31 @@ func (f *Fake) WindowPanes(session, name string) ([]string, error) {
 		return nil, fmt.Errorf("no window %s:%s", session, name)
 	}
 	return panes, nil
+}
+
+func (f *Fake) WindowTitledPanes(session, name string) ([]tmux.TitledPane, error) {
+	ids, err := f.WindowPanes(session, name)
+	if err != nil {
+		return nil, fmt.Errorf("no window %q in session %q", name, session)
+	}
+	panes := make([]tmux.TitledPane, 0, len(ids))
+	for _, id := range ids {
+		panes = append(panes, tmux.TitledPane{Title: f.PaneTitles[id], ID: id})
+	}
+	return panes, nil
+}
+
+func (f *Fake) FindPaneByTitle(session, name, title string) (string, error) {
+	panes, err := f.WindowTitledPanes(session, name)
+	if err != nil {
+		return "", err
+	}
+	for _, p := range panes {
+		if p.Title == title {
+			return p.ID, nil
+		}
+	}
+	return "", fmt.Errorf("pane %q not found in session %q", title, session)
 }
 
 func (f *Fake) SelectPane(paneID string) error {

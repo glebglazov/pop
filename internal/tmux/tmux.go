@@ -89,6 +89,10 @@ type Tmux interface {
 	RetileWindow(session, name string) error
 	// WindowPanes lists the pane ids in session's window name.
 	WindowPanes(session, name string) ([]string, error)
+	// WindowTitledPanes lists title + id for every pane in session's window name.
+	WindowTitledPanes(session, name string) ([]TitledPane, error)
+	// FindPaneByTitle resolves a pane id by title in session's window name.
+	FindPaneByTitle(session, name, title string) (string, error)
 	// SelectPane makes paneID the active pane in its window.
 	SelectPane(paneID string) error
 	// SelectWindow makes session's window name the current window.
@@ -101,23 +105,6 @@ type Tmux interface {
 	// FindTaggedPane returns the pane in session's drain window tagged
 	// tag=value, or "" when none (an absent window included).
 	FindTaggedPane(session string, tag PaneTag, value string) (string, error)
-
-	// --- agentic panes: the shared "agent" window (glossary: Agentic pane) ---
-
-	// HasAgentWindow reports whether session owns the shared "agent" window.
-	HasAgentWindow(session string) bool
-	// AgentPanes lists the named panes in session's agent window (title + id).
-	AgentPanes(session string) ([]AgentPane, error)
-	// FindAgentPane resolves a pane id by title in session's agent window.
-	FindAgentPane(session, title string) (string, error)
-	// NewAgentWindow creates session's agent window rooted at dir and returns
-	// the new pane's id (glossary: Pane ID target).
-	NewAgentWindow(session, dir string) (string, error)
-	// SplitAgentPane splits a new pane into session's agent window rooted at
-	// dir and returns the new pane's id.
-	SplitAgentPane(session, dir string) (string, error)
-	// RetileAgentWindow re-tiles session's agent window (select-layout tiled).
-	RetileAgentWindow(session string) error
 
 	// --- pane-id primitives (glossary: Pane ID target) ---
 

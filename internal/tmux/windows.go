@@ -80,6 +80,48 @@ func (t *realTmux) WindowPanes(session, name string) ([]string, error) {
 	return ids, nil
 }
 
+// TitledPane is one pane in a named window: its title and its pane-id target
+// (glossary: Pane ID target).
+type TitledPane struct {
+	Title string
+	ID    string
+}
+
+// WindowTitledPanes lists title + id for every pane in session's window name.
+// A missing window surfaces as an error.
+func (t *realTmux) WindowTitledPanes(session, name string) ([]TitledPane, error) {
+	out, err := t.run.output("list-panes", "-t", windowTarget(session, name), "-F", "#{pane_title}\t#{pane_id}")
+	if err != nil {
+		return nil, fmt.Errorf("no window %q in session %q", name, session)
+	}
+	var panes []TitledPane
+	for _, line := range strings.Split(out, "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		panes = append(panes, TitledPane{Title: parts[0], ID: parts[1]})
+	}
+	return panes, nil
+}
+
+// FindPaneByTitle resolves a pane id by title in session's window name.
+func (t *realTmux) FindPaneByTitle(session, name, title string) (string, error) {
+	panes, err := t.WindowTitledPanes(session, name)
+	if err != nil {
+		return "", err
+	}
+	for _, p := range panes {
+		if p.Title == title {
+			return p.ID, nil
+		}
+	}
+	return "", fmt.Errorf("pane %q not found in session %q", title, session)
+}
+
 // SelectPane makes paneID the active pane in its window.
 func (t *realTmux) SelectPane(paneID string) error {
 	_, err := t.run.output("select-pane", "-t", paneID)

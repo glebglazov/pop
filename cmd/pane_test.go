@@ -30,11 +30,14 @@ func withTmuxMod(t *testing.T, f *tmuxtest.Fake) {
 
 func TestFindPaneWith(t *testing.T) {
 	t.Parallel()
-	// Arrange the agent window's panes as fake state; the module owns the
+	// Arrange the shared pane window's panes as fake state; the module owns the
 	// list-panes construction, so the test asserts on state, not arg vectors.
-	mod := &tmuxtest.Fake{AgentWindows: map[string][]tmuxmod.AgentPane{
-		"project": {{Title: "server", ID: "%5"}, {Title: "db", ID: "%6"}, {Title: "logs", ID: "%7"}},
-	}}
+	mod := &tmuxtest.Fake{
+		Windows: map[string]map[string][]string{
+			"project": {paneWindow: {"%5", "%6", "%7"}},
+		},
+		PaneTitles: map[string]string{"%5": "server", "%6": "db", "%7": "logs"},
+	}
 
 	t.Run("finds existing pane", func(t *testing.T) {
 		paneID, err := findPaneWith(mod, "project", "db")
@@ -80,9 +83,12 @@ func TestRunPaneSendToPaneIDWith(t *testing.T) {
 func TestHasAgentWindowWith(t *testing.T) {
 	t.Parallel()
 	t.Run("agent window exists", func(t *testing.T) {
-		mod := &tmuxtest.Fake{AgentWindows: map[string][]tmuxmod.AgentPane{
-			"project": {{Title: "server", ID: "%5"}},
-		}}
+		mod := &tmuxtest.Fake{
+			Windows: map[string]map[string][]string{
+				"project": {paneWindow: {"%5"}},
+			},
+			PaneTitles: map[string]string{"%5": "server"},
+		}
 		if !hasAgentWindowWith(mod, "project") {
 			t.Error("expected agent window to exist")
 		}
@@ -227,13 +233,19 @@ func TestRunPaneCreateWith(t *testing.T) {
 	paneProject = "/home/user/project"
 	session := project.SessionName(paneProject)
 
-	// findAgentPane returns the fake's current panes for the target session.
-	panes := func(mod *tmuxtest.Fake) []tmuxmod.AgentPane { return mod.AgentWindows[session] }
+	// titledPanes returns the fake's current titled panes for the target session.
+	panes := func(mod *tmuxtest.Fake) []tmuxmod.TitledPane {
+		got, _ := mod.WindowTitledPanes(session, paneWindow)
+		return got
+	}
 
 	t.Run("returns existing alive pane", func(t *testing.T) {
-		mod := &tmuxtest.Fake{AgentWindows: map[string][]tmuxmod.AgentPane{
-			session: {{Title: "mypane", ID: "%5"}},
-		}}
+		mod := &tmuxtest.Fake{
+			Windows: map[string]map[string][]string{
+				session: {paneWindow: {"%5"}},
+			},
+			PaneTitles: map[string]string{"%5": "mypane"},
+		}
 		withTmuxMod(t, mod)
 
 		if err := runPaneCreateWith(mod, "mypane", "echo hi"); err != nil {
@@ -250,8 +262,11 @@ func TestRunPaneCreateWith(t *testing.T) {
 
 	t.Run("kills dead pane and recreates with new-window", func(t *testing.T) {
 		mod := &tmuxtest.Fake{
-			AgentWindows: map[string][]tmuxmod.AgentPane{session: {{Title: "mypane", ID: "%5"}}},
-			DeadPanes:    map[string]bool{"%5": true},
+			Windows: map[string]map[string][]string{
+				session: {paneWindow: {"%5"}},
+			},
+			PaneTitles: map[string]string{"%5": "mypane"},
+			DeadPanes:  map[string]bool{"%5": true},
 		}
 		withTmuxMod(t, mod)
 
@@ -280,9 +295,12 @@ func TestRunPaneCreateWith(t *testing.T) {
 	t.Run("uses split-window when agent window exists", func(t *testing.T) {
 		// A different pane already occupies the agent window, so mypane is
 		// absent but the window exists → split path.
-		mod := &tmuxtest.Fake{AgentWindows: map[string][]tmuxmod.AgentPane{
-			session: {{Title: "other", ID: "%9"}},
-		}}
+		mod := &tmuxtest.Fake{
+			Windows: map[string]map[string][]string{
+				session: {paneWindow: {"%9"}},
+			},
+			PaneTitles: map[string]string{"%9": "other"},
+		}
 		withTmuxMod(t, mod)
 
 		if err := runPaneCreateWith(mod, "mypane", "echo hi"); err != nil {
@@ -301,8 +319,9 @@ func TestRunPaneCreateWith(t *testing.T) {
 		if !found {
 			t.Error("expected a new pane titled mypane after the split")
 		}
-		if len(mod.Retiled) == 0 || mod.Retiled[len(mod.Retiled)-1] != session {
-			t.Errorf("expected the agent window to be re-tiled, retiled = %v", mod.Retiled)
+		wantRetile := session + ":" + paneWindow
+		if len(mod.WindowRetiled) == 0 || mod.WindowRetiled[len(mod.WindowRetiled)-1] != wantRetile {
+			t.Errorf("expected the agent window to be re-tiled, retiled = %v", mod.WindowRetiled)
 		}
 	})
 
@@ -471,9 +490,10 @@ func TestResolvePaneArg(t *testing.T) {
 	t.Run("resolves name via findPane in current session", func(t *testing.T) {
 		mod := &tmuxtest.Fake{
 			CurrentSessionName: "session-x",
-			AgentWindows: map[string][]tmuxmod.AgentPane{
-				"session-x": {{Title: "myagent", ID: "%5"}, {Title: "other", ID: "%6"}},
+			Windows: map[string]map[string][]string{
+				"session-x": {paneWindow: {"%5", "%6"}},
 			},
+			PaneTitles: map[string]string{"%5": "myagent", "%6": "other"},
 		}
 		got, err := resolvePaneArg(mod, "myagent")
 		if err != nil {

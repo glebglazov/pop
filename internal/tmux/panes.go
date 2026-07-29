@@ -86,3 +86,48 @@ func (t *realTmux) LivePanes() ([]string, error) {
 	}
 	return panes, nil
 }
+
+// SetPaneTitle sets a pane's title.
+func (t *realTmux) SetPaneTitle(paneID, title string) error {
+	_, err := t.run.output("select-pane", "-t", paneID, "-T", title)
+	return err
+}
+
+// SetRemainOnExit toggles a pane's remain-on-exit option so its content stays
+// readable after the command exits.
+func (t *realTmux) SetRemainOnExit(paneID string, on bool) error {
+	value := "off"
+	if on {
+		value = "on"
+	}
+	_, err := t.run.output("set-option", "-p", "-t", paneID, "remain-on-exit", value)
+	return err
+}
+
+// SendKeys sends literal keys to a pane. Keys are not auto-terminated.
+func (t *realTmux) SendKeys(paneID string, keys ...string) error {
+	_, err := t.run.output(append([]string{"send-keys", "-t", paneID}, keys...)...)
+	return err
+}
+
+// KillPane kills a pane.
+func (t *realTmux) KillPane(paneID string) error {
+	_, err := t.run.output("kill-pane", "-t", paneID)
+	return err
+}
+
+// CapturePane captures a pane's visible content plus 50 lines of scrollback,
+// stripped of ANSI codes (capture-pane -p).
+func (t *realTmux) CapturePane(paneID string) (string, error) {
+	return t.run.output("capture-pane", "-p", "-S", "-50", "-t", paneID)
+}
+
+// PaneDead reports whether a pane's process has exited. Any lookup failure
+// reports false.
+func (t *realTmux) PaneDead(paneID string) bool {
+	out, err := t.run.output("display-message", "-t", paneID, "-p", "#{pane_dead}")
+	if err != nil {
+		return false
+	}
+	return out == "1"
+}

@@ -3,6 +3,7 @@ package tmux
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -37,6 +38,18 @@ func TestNewWindowBuildsArgsAndReturnsPane(t *testing.T) {
 	}
 	if id != "%9" {
 		t.Fatalf("id = %q, want %%9", id)
+	}
+	// Regression: never pass -a or an explicit window index. -a (insert after
+	// current) and session:N collide with an occupied next index in a live
+	// interactive session ("index N in use"). Let tmux append at the first free
+	// index instead — target the session by name only.
+	for _, arg := range r.calls[0] {
+		if arg == "-a" {
+			t.Fatal("new-window must not pass -a")
+		}
+		if strings.Contains(arg, ":") && !strings.HasPrefix(arg, "#{") {
+			t.Fatalf("new-window must not pass an explicit window index target, got %q", arg)
+		}
 	}
 }
 
@@ -124,5 +137,44 @@ func TestWindowExistsPropagatesRunnerError(t *testing.T) {
 	tm := &realTmux{run: &recordingRunner{err: fmt.Errorf("no server")}}
 	if _, err := tm.WindowExists("proj", "w"); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestWindowTitledPanesBuildsArgsAndParses(t *testing.T) {
+	r := &recordingRunner{out: "server\t%5\ndb\t%6\nlogs\t%7"}
+	tm := &realTmux{run: r}
+
+	panes, err := tm.WindowTitledPanes("proj", "agent")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	wantArgs := [][]string{{"list-panes", "-t", "proj:agent", "-F", "#{pane_title}\t#{pane_id}"}}
+	if !reflect.DeepEqual(r.calls, wantArgs) {
+		t.Fatalf("args = %v, want %v", r.calls, wantArgs)
+	}
+	want := []TitledPane{{Title: "server", ID: "%5"}, {Title: "db", ID: "%6"}, {Title: "logs", ID: "%7"}}
+	if !reflect.DeepEqual(panes, want) {
+		t.Fatalf("panes = %v, want %v", panes, want)
+	}
+}
+
+func TestWindowTitledPanesErrorsWhenNoWindow(t *testing.T) {
+	tm := &realTmux{run: &recordingRunner{err: fmt.Errorf("can't find window")}}
+	if _, err := tm.WindowTitledPanes("proj", "agent"); err == nil {
+		t.Fatal("expected error for missing window")
+	}
+}
+
+func TestFindPaneByTitle(t *testing.T) {
+	tm := &realTmux{run: &recordingRunner{out: "server\t%5\ndb\t%6"}}
+	id, err := tm.FindPaneByTitle("proj", "agent", "db")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if id != "%6" {
+		t.Errorf("id = %q, want %%6", id)
+	}
+	if _, err := tm.FindPaneByTitle("proj", "agent", "missing"); err == nil {
+		t.Error("expected error for missing pane")
 	}
 }
