@@ -516,6 +516,7 @@ func taskMenuItems(task tasks.Task) []taskMenuItem {
 	if task.Status == tasks.TaskOpen {
 		items = append(items, taskMenuItem{key: "K", label: "skip"})
 	}
+	items = append(items, taskMenuItem{key: "y", label: "copy name"})
 	return items
 }
 
@@ -618,6 +619,21 @@ type taskTextPeek struct {
 	loading bool
 	err     error
 	scroll  int
+	// statusMsg is a transient one-line message shown above the hint bar.
+	statusMsg string
+}
+
+// ticketByDisplayName returns the Map ticket whose display name matches name.
+func (d *detailView) ticketByDisplayName(name string) (wayfinder.Ticket, bool) {
+	if d.wfMap == nil {
+		return wayfinder.Ticket{}, false
+	}
+	for _, t := range d.wfMap.Tickets {
+		if detailTicketName(t) == name {
+			return t, true
+		}
+	}
+	return wayfinder.Ticket{}, false
 }
 
 // taskByID returns the manifest task with the given ID, or false if absent.
@@ -730,14 +746,31 @@ func rowCopyNamePayload(row DashboardRow) string {
 	return row.SetID
 }
 
+// copyClipboard writes payload via Clipboard copy and returns a transient status
+// message naming what was copied, or the error.
+func (m QueueDashboard) copyClipboard(payload string) string {
+	if err := m.clipboardCopy()(payload); err != nil {
+		return fmt.Sprintf("copy failed: %v", err)
+	}
+	return fmt.Sprintf("copied %s", payload)
+}
+
+// taskRefCopyPayload is the paste-ready Task target reference for a task:
+// the <task-set>/<file>.md form accepted by pop tasks implement/complete/open.
+func taskRefCopyPayload(setID string, task tasks.Task) string {
+	return setID + "/" + task.File
+}
+
+// ticketCopyNamePayload is the bare ticket id the copy-name verb writes for a
+// Map detail row.
+func ticketCopyNamePayload(ticket wayfinder.Ticket) string {
+	return ticket.ID
+}
+
 // copyRowName copies the cursored row's identifier via Clipboard copy and
 // returns a transient status message naming what was copied, or the error.
 func (m QueueDashboard) copyRowName(row DashboardRow) string {
-	name := rowCopyNamePayload(row)
-	if err := m.clipboardCopy()(name); err != nil {
-		return fmt.Sprintf("copy failed: %v", err)
-	}
-	return fmt.Sprintf("copied %s", name)
+	return m.copyClipboard(rowCopyNamePayload(row))
 }
 
 // TestDashboardRow builds a minimal dashboard row for tests outside the queue
@@ -1465,6 +1498,21 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.taskMenu = newTaskMenu(task, items, true)
+		case "y":
+			if m.detail.row.IsMap {
+				ticket, ok := m.detail.ticketByDisplayName(m.detail.peek.taskID)
+				if !ok {
+					return m, nil
+				}
+				m.detail.peek.statusMsg = m.copyClipboard(ticketCopyNamePayload(ticket))
+				return m, nil
+			}
+			task, ok := m.detail.taskByID(m.detail.peek.taskID)
+			if !ok {
+				return m, nil
+			}
+			m.detail.peek.statusMsg = m.copyClipboard(taskRefCopyPayload(m.detail.row.SetID, task))
+			return m, nil
 		}
 		return m, nil
 	}
@@ -1580,6 +1628,24 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.detail.statusMsg = ""
 		m.taskMenu = newTaskMenu(task, items, false)
 		return m, nil
+	case "y":
+		if m.detail == nil || m.detail.loading {
+			return m, nil
+		}
+		if m.detail.row.IsMap {
+			ticket, ok := m.detail.ticketList.Selected()
+			if !ok {
+				return m, nil
+			}
+			m.detail.statusMsg = m.copyClipboard(ticketCopyNamePayload(ticket))
+			return m, nil
+		}
+		task, ok := m.detail.list.Selected()
+		if !ok {
+			return m, nil
+		}
+		m.detail.statusMsg = m.copyClipboard(taskRefCopyPayload(m.detail.row.SetID, task))
+		return m, nil
 	}
 	return m, nil
 }
@@ -1629,7 +1695,17 @@ func (m QueueDashboard) invokeTaskMenuItem(idx int) (tea.Model, tea.Cmd) {
 	}
 	item := items[idx]
 	task := m.taskMenu.task
+	inPeek := m.taskMenu.inPeek
 	m.taskMenu = nil
+	if item.key == "y" {
+		msg := m.copyClipboard(taskRefCopyPayload(m.detail.row.SetID, task))
+		if inPeek {
+			m.detail.peek.statusMsg = msg
+		} else {
+			m.detail.statusMsg = msg
+		}
+		return m, nil
+	}
 	m.detail.statusMsg = ""
 	return m, m.applyDetailOverride(m.detail.row, task, item.key)
 }
@@ -2266,6 +2342,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "C", Desc: "complete task"},
 			{Key: "O", Desc: "open/reopen task"},
 			{Key: "K", Desc: "skip task"},
+			{Key: "y", Desc: "copy name"},
 			{Key: "j/k", Desc: "navigate"},
 			{Key: "enter", Desc: "run action"},
 			{Key: "esc", Desc: "close menu"},
@@ -2304,6 +2381,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "ctrl+u", Desc: "page up"},
 			{Key: "gg", Desc: "top"},
 			{Key: "G", Desc: "bottom"},
+			{Key: "y", Desc: "copy name"},
 			{Key: "h/esc", Desc: "close peek"},
 		}
 		if m.detail != nil && !m.detail.row.IsMap {
@@ -2318,6 +2396,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "G", Desc: "last ticket"},
 			{Key: "i/enter", Desc: "work frontier ticket"},
 			{Key: "l", Desc: "peek ticket text"},
+			{Key: "y", Desc: "copy name"},
 			{Key: "h/esc", Desc: "back to list"},
 		}
 	case m.detail != nil:
@@ -2328,6 +2407,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "G", Desc: "last task"},
 			{Key: "l/enter", Desc: "peek task text"},
 			{Key: "a", Desc: "task actions"},
+			{Key: "y", Desc: "copy name"},
 			{Key: "ctrl+g", Desc: "open worktree"},
 			{Key: "h/esc", Desc: "back to list"},
 		}
@@ -2717,7 +2797,7 @@ func (m QueueDashboard) detailFrame() (ui.Frame, string) {
 		TermH:  m.height,
 		Header: header,
 		Status: d.statusMsg,
-		Hints:  "j/k · gg/G top/bottom · l/enter peek · a actions · h/esc back",
+		Hints:  "j/k · gg/G top/bottom · l/enter peek · a actions · y copy name · h/esc back",
 	}
 	listH := frame.BodyHeight(m.height) - detailTableChromeLines
 	if listH < 1 {
@@ -2763,7 +2843,7 @@ func (m QueueDashboard) detailMapFrame() (ui.Frame, string) {
 		TermH:  m.height,
 		Header: detailMapHeader(*d.wfMap),
 		Status: d.statusMsg,
-		Hints:  "j/k · gg/G top/bottom · l/enter peek · h/esc back",
+		Hints:  "j/k · gg/G top/bottom · l/enter peek · y copy name · h/esc back",
 	}
 	listH := frame.BodyHeight(m.height) - detailTableChromeLines
 	if listH < 1 {
@@ -2996,7 +3076,7 @@ func renderDetailContent(b *strings.Builder, d *detailView, height, width int, m
 	if d.statusMsg != "" {
 		fmt.Fprintf(b, "  %s\n", d.statusMsg)
 	}
-	hint := "  j/k · gg/G top/bottom · l/enter peek · a actions · h/esc back"
+	hint := "  j/k · gg/G top/bottom · l/enter peek · a actions · y copy name · h/esc back"
 	if menu != nil {
 		hint = "  j/k move · enter/letter run · esc close"
 	}
@@ -3076,11 +3156,14 @@ func renderTaskTextPeek(b *strings.Builder, d *detailView, height, width int, me
 		}
 	}
 	fmt.Fprintln(b)
+	if p.statusMsg != "" {
+		fmt.Fprintf(b, "  %s\n", p.statusMsg)
+	}
 	position := ""
 	if maxScroll > 0 {
 		position = fmt.Sprintf(" · %d/%d", p.scroll+1, len(lines))
 	}
-	hint := "  j/k · C-d/C-u · gg/G · a actions · h/esc back" + position
+	hint := "  j/k · C-d/C-u · gg/G · y copy name · a actions · h/esc back" + position
 	if menu != nil && menu.inPeek {
 		hint = "  j/k move · enter/letter run · esc close"
 	}

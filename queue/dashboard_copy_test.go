@@ -171,3 +171,176 @@ func TestQueueDashboardCopyHintAdvertisesY(t *testing.T) {
 		t.Fatalf("mainHint = %q, want y copy name advertised", hint)
 	}
 }
+
+// detailCopyModel builds a QueueDashboard with a loaded task-set detail view.
+func detailCopyModel(setID string, task tasks.Task) QueueDashboard {
+	row := DashboardRow{SetRef: SetRef{SetID: setID, DefPath: "/def"}}
+	manifest := &tasks.Manifest{Valid: true, Tasks: []tasks.Task{task}}
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m.width, m.height = 120, 24
+	dv := newDetailView(row)
+	dv.syncManifest(manifest, nil)
+	m.detail = dv
+	return m
+}
+
+// TestQueueDashboardCopyDetailTask covers the `y` verb in the task-set detail
+// view: the cursored task's <task-set>/<file>.md reference is copied.
+func TestQueueDashboardCopyDetailTask(t *testing.T) {
+	task := tasks.Task{ID: "01-a", File: "01-a.md", Status: "open"}
+	m := detailCopyModel("my-set", task)
+
+	var captured string
+	m.copyFunc = func(s string) error {
+		captured = s
+		return nil
+	}
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	if cmd != nil {
+		t.Fatal("y should not schedule a command")
+	}
+	got := updated.(QueueDashboard)
+	if captured != "my-set/01-a.md" {
+		t.Fatalf("copyFunc captured %q, want my-set/01-a.md", captured)
+	}
+	if got.detail.statusMsg != "copied my-set/01-a.md" {
+		t.Fatalf("statusMsg = %q, want copied confirmation", got.detail.statusMsg)
+	}
+}
+
+// TestQueueDashboardCopyDetailTaskViaMenu confirms copy name is reachable from
+// the task action menu in the detail view.
+func TestQueueDashboardCopyDetailTaskViaMenu(t *testing.T) {
+	task := tasks.Task{ID: "01-a", File: "01-a.md", Status: "open"}
+	m := detailCopyModel("set-menu", task)
+
+	items := taskMenuItems(task)
+	if !menuHasTaskKey(items, "y") {
+		t.Fatal("task menu missing copy name bound to y")
+	}
+
+	var captured string
+	m.copyFunc = func(s string) error { captured = s; return nil }
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	got := updated.(QueueDashboard)
+	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	if cmd != nil {
+		t.Fatal("y in task menu should not schedule a command")
+	}
+	got = updated.(QueueDashboard)
+	if got.taskMenu != nil {
+		t.Fatal("y in task menu should close the menu")
+	}
+	if captured != "set-menu/01-a.md" {
+		t.Fatalf("copyFunc captured %q, want set-menu/01-a.md", captured)
+	}
+	if got.detail.statusMsg != "copied set-menu/01-a.md" {
+		t.Fatalf("statusMsg = %q, want copied confirmation", got.detail.statusMsg)
+	}
+}
+
+// TestQueueDashboardCopyPeekTask covers the `y` verb inside the task text peek.
+func TestQueueDashboardCopyPeekTask(t *testing.T) {
+	task := tasks.Task{ID: "02-b", File: "02-b.md", Status: "open"}
+	m := detailCopyModel("set-peek", task)
+	m.detail.peek = &taskTextPeek{taskID: "02-b", text: "body\n"}
+
+	var captured string
+	m.copyFunc = func(s string) error { captured = s; return nil }
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	if cmd != nil {
+		t.Fatal("y should not schedule a command")
+	}
+	got := updated.(QueueDashboard)
+	if captured != "set-peek/02-b.md" {
+		t.Fatalf("copyFunc captured %q, want set-peek/02-b.md", captured)
+	}
+	if got.detail.peek.statusMsg != "copied set-peek/02-b.md" {
+		t.Fatalf("peek statusMsg = %q, want copied confirmation", got.detail.peek.statusMsg)
+	}
+	view := got.View().Content
+	if !strings.Contains(view, "copied set-peek/02-b.md") {
+		t.Fatalf("peek view missing status line:\n%s", view)
+	}
+}
+
+// TestQueueDashboardCopyPeekTaskViaMenu confirms copy name from the peek menu.
+func TestQueueDashboardCopyPeekTaskViaMenu(t *testing.T) {
+	task := tasks.Task{ID: "02-b", File: "02-b.md", Status: "failed"}
+	m := detailCopyModel("set-peek-menu", task)
+	m.detail.peek = &taskTextPeek{taskID: "02-b", text: "body\n"}
+
+	var captured string
+	m.copyFunc = func(s string) error { captured = s; return nil }
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	got := updated.(QueueDashboard)
+	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	if cmd != nil {
+		t.Fatal("y in peek menu should not schedule a command")
+	}
+	got = updated.(QueueDashboard)
+	if captured != "set-peek-menu/02-b.md" {
+		t.Fatalf("copyFunc captured %q, want set-peek-menu/02-b.md", captured)
+	}
+	if got.detail.peek.statusMsg != "copied set-peek-menu/02-b.md" {
+		t.Fatalf("peek statusMsg = %q, want copied confirmation", got.detail.peek.statusMsg)
+	}
+}
+
+// TestQueueDashboardCopyMapDetailTicket covers the `y` verb on a Map detail
+// ticket list: the bare ticket id is copied.
+func TestQueueDashboardCopyMapDetailTicket(t *testing.T) {
+	m, _ := newMapDetailDashboard(t)
+	got := loadMapDetail(t, m)
+
+	var captured string
+	got.copyFunc = func(s string) error { captured = s; return nil }
+
+	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	if cmd != nil {
+		t.Fatal("y should not schedule a command")
+	}
+	result := updated.(QueueDashboard)
+	if captured != "01" {
+		t.Fatalf("copyFunc captured %q, want bare ticket id 01", captured)
+	}
+	if result.detail.statusMsg != "copied 01" {
+		t.Fatalf("statusMsg = %q, want copied confirmation", result.detail.statusMsg)
+	}
+}
+
+// TestQueueDashboardCopyMapPeekTicket covers the `y` verb inside a Map ticket
+// text peek: the bare ticket id is copied.
+func TestQueueDashboardCopyMapPeekTicket(t *testing.T) {
+	m, _ := newMapDetailDashboard(t)
+	got := loadMapDetail(t, m)
+	got.detail.peek = &taskTextPeek{taskID: "01-frontier", text: "ticket body\n"}
+
+	var captured string
+	got.copyFunc = func(s string) error { captured = s; return nil }
+
+	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	if cmd != nil {
+		t.Fatal("y should not schedule a command")
+	}
+	result := updated.(QueueDashboard)
+	if captured != "01" {
+		t.Fatalf("copyFunc captured %q, want bare ticket id 01", captured)
+	}
+	if result.detail.peek.statusMsg != "copied 01" {
+		t.Fatalf("peek statusMsg = %q, want copied confirmation", result.detail.peek.statusMsg)
+	}
+}
+
+func menuHasTaskKey(items []taskMenuItem, key string) bool {
+	for _, item := range items {
+		if item.key == key {
+			return true
+		}
+	}
+	return false
+}
