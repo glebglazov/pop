@@ -294,6 +294,14 @@ func TestDecideRepoDispatchesBindingRoutesRegardlessOfTrunkConfig(t *testing.T) 
 	if got := canon(t, d, actionable[0].scan.RuntimePath); got != canon(t, d, wts[1]) {
 		t.Fatalf("drain routed to %q, want bound checkout %q", got, canon(t, d, wts[1]))
 	}
+	wantSession := project.SessionNameWith(project.DefaultDeps(), wts[0])
+	if actionable[0].scan.SessionName != wantSession {
+		t.Fatalf("SessionName = %q, want project session %q (not named after managed worktree %q)", actionable[0].scan.SessionName, wantSession, wts[1])
+	}
+	worktreeSession := project.SessionNameWith(project.DefaultDeps(), wts[1])
+	if actionable[0].scan.SessionName == worktreeSession {
+		t.Fatalf("SessionName must not be derived from bound checkout %q", wts[1])
+	}
 }
 
 func TestDecideRepoDispatchesNonBareRoutesToGitMainWorktree(t *testing.T) {

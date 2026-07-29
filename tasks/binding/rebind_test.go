@@ -176,6 +176,30 @@ func TestRouteDrainCheckoutForceRebindRepointsToCurrentCheckout(t *testing.T) {
 	}
 }
 
+func TestConfirmYesNoNilInUsesCharDeviceStdin(t *testing.T) {
+	devNull, err := os.Open("/dev/null")
+	if err != nil {
+		t.Skipf("no /dev/null: %v", err)
+	}
+	defer devNull.Close()
+
+	oldStdin := os.Stdin
+	os.Stdin = devNull
+	defer func() { os.Stdin = oldStdin }()
+
+	var out bytes.Buffer
+	ok, err := confirmYesNo(nil, &out, false, "prompt? [y/N]: ", "non-interactive")
+	if err != nil {
+		t.Fatalf("confirmYesNo(nil, char-device stdin): %v", err)
+	}
+	if ok {
+		t.Fatal("EOF from /dev/null should decline")
+	}
+	if out.String() != "prompt? [y/N]: " {
+		t.Fatalf("output = %q, want prompt only", out.String())
+	}
+}
+
 func TestDoubleConfirmYesNoReadsSequentialLines(t *testing.T) {
 	t.Parallel()
 	confirmIn := &lineReader{br: bufio.NewReader(strings.NewReader("y\ny\n"))}

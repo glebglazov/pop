@@ -439,7 +439,11 @@ func confirmYesNo(in io.Reader, out io.Writer, yes bool, prompt, nonInteractiveE
 		}
 	}
 	fmt.Fprintf(out, "%s", prompt)
-	answer, err := asLineReader(in).br.ReadString('\n')
+	reader := in
+	if reader == nil {
+		reader = src
+	}
+	answer, err := asLineReader(reader).br.ReadString('\n')
 	if err != nil && err != io.EOF {
 		return false, fmt.Errorf("read confirmation: %w", err)
 	}

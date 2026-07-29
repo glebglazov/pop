@@ -371,7 +371,7 @@ func decideBareWithoutBase(d *Deps, cfg *config.Config, scans []projectScan, nam
 		action.TaskSetID = id
 		action.scan.ProjectPath = b.RuntimePath
 		action.scan.RuntimePath = b.RuntimePath
-		action.scan.SessionName = project.SessionNameWith(d.Project, b.RuntimePath)
+		action.scan.SessionName = project.SessionNameWith(d.Project, base.ProjectPath)
 		if lock := d.readLock(b.RuntimePath); lock != nil && lock.Locked {
 			busyDec := skel
 			busyDec.Busy = true
