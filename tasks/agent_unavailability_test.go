@@ -29,3 +29,13 @@ func TestHumanHealingCannotReportTimeHealing(t *testing.T) {
 		t.Fatal("human-healing must not report TimeHealing — recovery wait accepts TimeHealingRecovery only")
 	}
 }
+
+func TestMissingBinaryUnavailabilityIsHumanHealing(t *testing.T) {
+	u := NewMissingBinaryUnavailability("cursor", "binary not found on PATH")
+	if u.Kind != UnavailabilityMissingBinary {
+		t.Fatalf("kind = %q, want %q", u.Kind, UnavailabilityMissingBinary)
+	}
+	if _, ok := u.TimeHealing(); ok {
+		t.Fatal("missing binary must be human-healing")
+	}
+}

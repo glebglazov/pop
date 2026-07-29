@@ -752,7 +752,7 @@ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, t
 		}
 		// Missing-binary fall-through: an agent whose binary is not on PATH is
 		// skipped so the next configured agent gets a turn.
-		if !verifierBinaryAvailable(d, preset) {
+		if !agentBinaryAvailable(d, preset) {
 			if out != nil {
 				outputFor(out).line(ansiDim, "   Verifier agent %s unavailable (binary not found); trying next", preset)
 			}
@@ -845,9 +845,9 @@ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, t
 	return lastRaw, nil
 }
 
-// verifierBinaryAvailable reports whether the agent preset's binary is resolvable
+// agentBinaryAvailable reports whether the agent preset's binary is resolvable
 // on PATH, so a missing agent can be skipped before it is invoked.
-func verifierBinaryAvailable(d *Deps, preset string) bool {
+func agentBinaryAvailable(d *Deps, preset string) bool {
 	adapter, err := ResolveAgentAdapter(preset)
 	if err != nil {
 		return false

@@ -10,6 +10,9 @@ const (
 	UnavailabilityQuotaPause AgentUnavailabilityKind = "quota_pause"
 	// UnavailabilityAuthFailure is a human-healing kind: a logged-out CLI (ADR-0153).
 	UnavailabilityAuthFailure AgentUnavailabilityKind = "auth_failure"
+	// UnavailabilityMissingBinary is a human-healing kind: the preset's binary is
+	// absent from PATH (ADR-0153).
+	UnavailabilityMissingBinary AgentUnavailabilityKind = "missing_binary"
 )
 
 // AgentUnavailabilityRecovery is what would make an unavailable Agent preset
@@ -77,6 +80,16 @@ func NewAuthFailureUnavailability(preset, reason string) AgentUnavailability {
 func DetectedAuthFailure(reason string) *AgentUnavailability {
 	u := NewAuthFailureUnavailability("", reason)
 	return &u
+}
+
+// NewMissingBinaryUnavailability builds a human-healing missing-binary verdict.
+func NewMissingBinaryUnavailability(preset, reason string) AgentUnavailability {
+	return AgentUnavailability{
+		Kind:     UnavailabilityMissingBinary,
+		Recovery: HumanHealingRecovery{},
+		Reason:   reason,
+		Preset:   preset,
+	}
 }
 
 // TimeHealing reports the time-healing recovery when present. A human-healing

@@ -208,6 +208,14 @@ func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath s
 			unavailableResults = append(unavailableResults, unavailabilityResult(sel, u))
 			continue
 		}
+		if !agentBinaryAvailable(d, preset) {
+			u := NewMissingBinaryUnavailability(preset, "binary not found on PATH")
+			if i+1 < len(specs) && out != nil {
+				outputFor(out).line(ansiDim, "   Agent %s unavailable (binary not found); trying next", preset)
+			}
+			unavailableResults = append(unavailableResults, unavailabilityResult(sel, u))
+			continue
+		}
 		buildInvocation, err := buildForAgent(agentSpec)
 		if err != nil {
 			return nil, taskExitErr(sel, ExitSetup, "%v", err)

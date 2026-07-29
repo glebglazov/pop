@@ -114,13 +114,13 @@ func TestVerifierBinaryAvailable(t *testing.T) {
 		}
 		return "", exec.ErrNotFound
 	}}
-	if !verifierBinaryAvailable(d, "claude") {
+	if !agentBinaryAvailable(d, "claude") {
 		t.Fatal("claude should be available (LookPath resolves it)")
 	}
-	if verifierBinaryAvailable(d, "cursor") {
+	if agentBinaryAvailable(d, "cursor") {
 		t.Fatal("cursor should be unavailable (LookPath does not resolve cursor-agent)")
 	}
-	if verifierBinaryAvailable(d, "not-a-preset") {
+	if agentBinaryAvailable(d, "not-a-preset") {
 		t.Fatal("an unknown preset must never be available")
 	}
 }
