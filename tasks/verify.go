@@ -715,9 +715,10 @@ func nonEmptyStrings(specs []string) []string {
 // retry delays between invocation failures, then falling through to the next
 // agent on quota pause or exhausted retries. A timeout is retry-eligible: it
 // waits the Task attempt retry delay and consumes the verify cap like any other
-// failure. A missing binary skips to the next agent. An empty
-// result or an exhausted list yields empty output, which ParseVerdict turns
-// into a NEEDS-HUMAN the human is told about.
+// failure. Missing-binary and logged-out presets are skipped via the shared
+// Agent unavailability kinds (PATH check, availability probe, passive auth
+// detection). When every preset is human-healing unavailable the run hard-errors
+// with each preset's diagnostic instead of yielding a fabricated NEEDS-HUMAN.
 //
 // Every structured adapter-mode invocation is persisted as a Captured run pair
 // under <task-set>/streams/runs/. Quota-paused fall-through attempts are
@@ -742,19 +743,28 @@ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, t
 	}
 
 	var (
-		lastRaw     string
-		quotaPauses []VerifyQuotaPause
+		lastRaw            string
+		unavailablePresets []AgentUnavailability
 	)
-	for _, agentSpec := range nonEmptyAgentSpecs(sel.Agents, DefaultAgentPreset) {
+	specs := nonEmptyAgentSpecs(sel.Agents, DefaultAgentPreset)
+	probeMemo := newAgentAvailabilityProbeMemo()
+	for i, agentSpec := range specs {
 		preset, err := AgentPresetName(agentSpec)
 		if err != nil {
 			return "", exitErr(ExitSetup, "resolve verifier agent: %v", err)
 		}
-		// Missing-binary fall-through: an agent whose binary is not on PATH is
-		// skipped so the next configured agent gets a turn.
 		if !agentBinaryAvailable(d, preset) {
-			if out != nil {
+			u := NewMissingBinaryUnavailability(preset, "binary not found on PATH")
+			unavailablePresets = append(unavailablePresets, u)
+			if i+1 < len(specs) && out != nil {
 				outputFor(out).line(ansiDim, "   Verifier agent %s unavailable (binary not found); trying next", preset)
+			}
+			continue
+		}
+		if u := probeMemo.checkUnavailability(d, runtimePath, preset); u != nil {
+			unavailablePresets = append(unavailablePresets, *u)
+			if i+1 < len(specs) && out != nil {
+				outputFor(out).line(ansiDim, "   Verifier agent %s unauthenticated; trying next", preset)
 			}
 			continue
 		}
@@ -787,23 +797,26 @@ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, t
 				return "", exitErr(ExitInterrupted, "interrupted")
 			}
 			normalized := invocation.NormalizeOutput(raw)
-			// Quota fall-through: a paused agent renders no verdict, so try the next.
+			// Agent unavailability fall-through: quota pause and human-healing
+			// kinds (e.g. passive auth detection) render no verdict, so try next.
 			if normalized.Unavailability != nil {
-				_ = persistVerifyRun(d, errOut, taskSetDir, setID, workSHA, outcome.stream, invocation.AgentPreset(), invocation.RequestedAgent, try, streamOutcomeQuotaPaused, "", exitCode, "")
 				u := normalized.Unavailability.WithPreset(preset)
-				resetAt := time.Time{}
 				if _, ok := u.TimeHealing(); ok {
-					resetAt = agentQuotaResetAt(preset, u.Reason, time.Now())
+					resetAt := agentQuotaResetAt(preset, u.Reason, time.Now())
+					u = u.WithResetAt(resetAt)
 					until := agentQuotaCooldownUntil(resetAt, time.Now(), quotaRetryAfter)
 					_ = updateAgentCooldown(d, preset, until)
+					_ = persistVerifyRun(d, errOut, taskSetDir, setID, workSHA, outcome.stream, invocation.AgentPreset(), invocation.RequestedAgent, try, streamOutcomeQuotaPaused, "", exitCode, "")
+					unavailablePresets = append(unavailablePresets, u)
+					if out != nil {
+						outputFor(out).line(ansiDim, "   Verifier agent %s quota-paused; trying next", preset)
+					}
+					break
 				}
-				quotaPauses = append(quotaPauses, VerifyQuotaPause{
-					Preset:  preset,
-					ResetAt: resetAt,
-					Reason:  u.Reason,
-				})
-				if out != nil {
-					outputFor(out).line(ansiDim, "   Verifier agent %s quota-paused; trying next", preset)
+				_ = persistVerifyRun(d, errOut, taskSetDir, setID, workSHA, outcome.stream, invocation.AgentPreset(), invocation.RequestedAgent, try, streamOutcomeAgentUnusable, u.Reason, exitCode, "")
+				unavailablePresets = append(unavailablePresets, u)
+				if i+1 < len(specs) && out != nil && u.Kind == UnavailabilityAuthFailure {
+					outputFor(out).line(ansiDim, "   Verifier agent %s unauthenticated; trying next", preset)
 				}
 				break
 			}
@@ -837,12 +850,40 @@ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, t
 			}
 		}
 	}
-	// Every configured agent was unavailable, quota-paused, or exhausted.
-	if len(quotaPauses) > 0 && strings.TrimSpace(lastRaw) == "" {
-		return "", newVerifyQuotaPause(earliestVerifyQuotaPause(quotaPauses))
+	return resolveVerifierAgentExhaustion(lastRaw, unavailablePresets)
+}
+
+// resolveVerifierAgentExhaustion returns the last verifier output when present,
+// otherwise maps an exhausted fallback list to quota pause or human-healing
+// setup errors — mirroring Implement's resolveAgentFallbackUnavailable (ADR-0153).
+func resolveVerifierAgentExhaustion(lastRaw string, unavailable []AgentUnavailability) (string, error) {
+	if strings.TrimSpace(lastRaw) != "" {
+		return lastRaw, nil
 	}
-	// Return the last invocation output when present so ParseVerdict can surface why.
-	return lastRaw, nil
+	if len(unavailable) == 0 {
+		return lastRaw, nil
+	}
+	var results []*RunTaskResult
+	for _, u := range unavailable {
+		cp := u
+		results = append(results, &RunTaskResult{Unavailability: &cp})
+	}
+	resolved := resolveAgentFallbackUnavailable(nil, results)
+	if resolved == nil || resolved.Unavailability == nil {
+		return lastRaw, nil
+	}
+	if th, ok := resolved.Unavailability.TimeHealing(); ok {
+		return "", newVerifyQuotaPause(VerifyQuotaPause{
+			Preset:  resolved.Unavailability.Preset,
+			ResetAt: th.ResetAt,
+			Reason:  resolved.Unavailability.Reason,
+		})
+	}
+	presets := resolved.UnavailablePresets
+	if len(presets) == 0 {
+		presets = []AgentUnavailability{*resolved.Unavailability}
+	}
+	return "", exitErr(ExitSetup, "%s", formatHumanHealingExhaustionMessage(presets))
 }
 
 // agentBinaryAvailable reports whether the agent preset's binary is resolvable

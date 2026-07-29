@@ -26,9 +26,9 @@ func (c AgentAvailabilityProbeCapability) Available() bool {
 	return c.Command != nil && c.Command.Name != "" && c.Interpret != nil
 }
 
-// agentAvailabilityProbeMemo records one-way probe results for a single Implement
-// run: a preset marked unavailable stays skipped; every other preset is probed at
-// most once.
+// agentAvailabilityProbeMemo records one-way probe results for a single
+// Implement or Verifier run: a preset marked unavailable stays skipped; every
+// other preset is probed at most once.
 type agentAvailabilityProbeMemo struct {
 	skipped map[string]AgentUnavailability
 	probed  map[string]struct{}
