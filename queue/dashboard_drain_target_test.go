@@ -99,8 +99,8 @@ func TestDashboardDrainTargetAdoptsWorktreeAndDrains(t *testing.T) {
 	if b.RuntimePath != wt || b.Provisioned {
 		t.Fatalf("binding = %+v, want adopted %s", b, wt)
 	}
-	if cmd, ok := extractSpawnCommand(rt); !ok || !strings.Contains(cmd, "pop tasks implement "+setID) {
-		t.Fatalf("spawn command = %q, want implement for %s", cmd, setID)
+	if cmd, ok := extractSpawnCommand(rt); !ok || !strings.Contains(cmd, "pop tasks implement "+setID) || !strings.Contains(cmd, "--task-runtime-path "+wt) {
+		t.Fatalf("spawn command = %q, want implement for %s pinned to adopted checkout %q", cmd, setID, wt)
 	}
 }
 
@@ -132,8 +132,8 @@ func TestDashboardDrainTargetNewManagedProvisionsOffTrunkAndDrains(t *testing.T)
 	if !strings.HasPrefix(b.Branch, "pop/") {
 		t.Fatalf("branch = %q, want pop/<set>/<stamp> forked from trunk", b.Branch)
 	}
-	if cmd, ok := extractSpawnCommand(rt); !ok || !strings.Contains(cmd, "pop tasks implement "+setID) {
-		t.Fatalf("spawn command = %q, want implement for %s", cmd, setID)
+	if cmd, ok := extractSpawnCommand(rt); !ok || !strings.Contains(cmd, "pop tasks implement "+setID) || !strings.Contains(cmd, "--task-runtime-path "+result.RuntimePath) {
+		t.Fatalf("spawn command = %q, want implement for %s pinned to managed worktree %q", cmd, setID, result.RuntimePath)
 	}
 }
 
@@ -159,8 +159,8 @@ func TestDashboardDrainTargetTrunkDrainsInlineNoBinding(t *testing.T) {
 	if b, ok := loadBindingStore(t, d.Tasks)[setScopedKey(repoKey, setID)]; ok {
 		t.Fatalf("trunk drain recorded a binding: %+v", b)
 	}
-	if cmd, ok := extractSpawnCommand(rt); !ok || strings.Contains(cmd, "--task-runtime-path") {
-		t.Fatalf("spawn command = %q, want in-place trunk drain", cmd)
+	if cmd, ok := extractSpawnCommand(rt); !ok || !strings.Contains(cmd, "pop tasks implement "+setID) || !strings.Contains(cmd, "--task-runtime-path "+result.RuntimePath) {
+		t.Fatalf("spawn command = %q, want implement for %s pinned to trunk %q", cmd, setID, result.RuntimePath)
 	}
 }
 
@@ -275,7 +275,7 @@ func TestDashboardIKeyBoundDrainsWithoutPicker(t *testing.T) {
 	if drainMsg.err != nil {
 		t.Fatalf("bound drain err = %v", drainMsg.err)
 	}
-	if cmd, ok := extractSpawnCommand(rt); !ok || !strings.Contains(cmd, "pop tasks implement "+setID) {
-		t.Fatalf("spawn command = %q, want implement for %s in bound checkout", cmd, setID)
+	if cmd, ok := extractSpawnCommand(rt); !ok || !strings.Contains(cmd, "pop tasks implement "+setID) || !strings.Contains(cmd, "--task-runtime-path "+bound) {
+		t.Fatalf("spawn command = %q, want implement for %s pinned to bound checkout %q", cmd, setID, bound)
 	}
 }

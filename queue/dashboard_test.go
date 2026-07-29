@@ -1773,8 +1773,8 @@ func TestDashboardLaunchDrainRoutesPlainTrunkWorktreeAndRecordsPane(t *testing.T
 	if !ok {
 		t.Fatal("expected drain spawn command")
 	}
-	if !strings.Contains(cmd, "pop tasks implement "+setID) || strings.Contains(cmd, "--task-runtime-path") {
-		t.Fatalf("spawn command = %q, want in-place queue-base drain", cmd)
+	if !strings.Contains(cmd, "pop tasks implement "+setID) || !strings.Contains(cmd, "--task-runtime-path "+result.RuntimePath) {
+		t.Fatalf("spawn command = %q, want implement for %s pinned to trunk %q", cmd, setID, result.RuntimePath)
 	}
 	assertDashboardPaneMapping(t, d, repo, setID, "%3", "dashboard")
 }
@@ -1805,6 +1805,10 @@ func TestDashboardLaunchDrainRoutesBoundCheckout(t *testing.T) {
 	if !ok || !argsContain(newWindow, "-c", bound) {
 		t.Fatalf("new-window = %v, want cwd %q", newWindow, bound)
 	}
+	cmd, ok := extractSpawnCommand(rt)
+	if !ok || !strings.Contains(cmd, "--task-runtime-path "+bound) {
+		t.Fatalf("spawn command = %q, want drain pinned to bound checkout %q", cmd, bound)
+	}
 	assertDashboardPaneMapping(t, d, repo, setID, "%3", "dashboard")
 }
 
@@ -1829,8 +1833,8 @@ func TestDashboardLaunchDrainUnboundUsesRepresentativeCheckout(t *testing.T) {
 		t.Fatalf("runtime = %q, want representative checkout %q with no provisioned worktree", result.RuntimePath, repo)
 	}
 	cmd, ok := extractSpawnCommand(rt)
-	if !ok || !strings.Contains(cmd, "pop tasks implement "+setID) {
-		t.Fatalf("spawn command = %q, want implement command for set %q", cmd, setID)
+	if !ok || !strings.Contains(cmd, "pop tasks implement "+setID) || !strings.Contains(cmd, "--task-runtime-path "+result.RuntimePath) {
+		t.Fatalf("spawn command = %q, want implement for %s pinned to representative checkout %q", cmd, setID, result.RuntimePath)
 	}
 	repoKey, err := resolveRepoKey(d, repo)
 	if err != nil {

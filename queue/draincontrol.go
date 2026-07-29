@@ -122,6 +122,10 @@ func LaunchDrain(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult,
 		dec.scan = *rep
 	}
 
+	// Pin implement to the resolved checkout so a reused pane cannot re-resolve
+	// to its stale cwd — the same contract as supervisor-spawned drains.
+	dec.pinRuntimePath = true
+
 	spawn, err := SpawnWithResult(d, dec)
 	if err != nil {
 		return DashboardDrainResult{}, err
