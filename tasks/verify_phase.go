@@ -106,7 +106,7 @@ func (r *implementRun) verifyPhase(currentRefresh *RefreshResult, row *Row) (ver
 		// keeps draining; only a NEEDS-HUMAN verdict or an exhausted cap
 		// actually parks the set.
 		if verdict != nil && Verdict(verdict.Verdict) == VerdictFixable {
-			spawned, remID, rerr := spawnRemediationIfUnderCap(d, m, repo, verdict.WorkSHA, verdict.Findings, maxRemediationDepth(cfg))
+			spawned, remID, rerr := spawnRemediationIfUnderCap(d, m, repo, verdict.WorkSHA, verdict.Findings, verdict.Summary, maxRemediationDepth(cfg))
 			if rerr != nil {
 				return verifyReturn, rerr
 			}

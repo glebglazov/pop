@@ -17,6 +17,10 @@ import (
 // .max_remediation_depth` overrides it.
 const DefaultMaxRemediationDepth = 3
 
+// remediationSummaryMaxLen caps the one-line summary in a Remediation task title
+// (the Verifier summary line or the first line of a human --remediate note).
+const remediationSummaryMaxLen = 72
+
 // remediationIDPattern matches a Remediation task's id (`NN-remediation`), so
 // the set's remediation depth is derived from these entries.
 var remediationIDPattern = regexp.MustCompile(`^\d+-remediation$`)
@@ -108,6 +112,55 @@ func nextTaskNumber(m *Manifest) int {
 // build" framing reflects the human authorisation rather than the automatic
 // FIXABLE spawn — the untrusted note is neutralized the same way findings are so
 // an echoed AC heading can never invalidate the task.
+// remediationTitle builds a Remediation task's manifest title from the cycle
+// number and an optional one-line summary. An empty summary yields the generic
+// title used before the Verifier summary line existed.
+func remediationTitle(cycle int, summary string) string {
+	if s := sanitizeRemediationSummary(summary); s != "" {
+		return fmt.Sprintf("Remediation %d: %s", cycle, s)
+	}
+	return fmt.Sprintf("Remediation %d: resolve verification findings", cycle)
+}
+
+// remediationTitleSummary picks the title summary for a Remediation spawn: a
+// human-origin task uses the first line of the human note; an auto-origin task
+// uses the Verifier's optional SUMMARY line.
+func remediationTitleSummary(origin, humanNote, verifierSummary string) string {
+	if origin == RemediationOriginHuman {
+		return humanRemediationSummary(humanNote)
+	}
+	return verifierSummary
+}
+
+// humanRemediationSummary returns the first line of a human --remediate note,
+// capped and sanitized for use in the task title.
+func humanRemediationSummary(note string) string {
+	note = strings.TrimSpace(note)
+	if note == "" {
+		return ""
+	}
+	first, _, _ := strings.Cut(note, "\n")
+	return sanitizeRemediationSummary(first)
+}
+
+// sanitizeRemediationSummary normalizes untrusted summary text for a task title:
+// single line, whitespace collapsed, AC headings demoted, capped at
+// remediationSummaryMaxLen.
+func sanitizeRemediationSummary(text string) string {
+	line := strings.TrimSpace(text)
+	if line == "" {
+		return ""
+	}
+	if i := strings.IndexAny(line, "\r\n"); i >= 0 {
+		line = strings.TrimSpace(line[:i])
+	}
+	line = strings.Join(strings.Fields(neutralizeACHeaders(line)), " ")
+	if len(line) > remediationSummaryMaxLen {
+		line = strings.TrimSpace(line[:remediationSummaryMaxLen])
+	}
+	return line
+}
+
 func remediationBody(workSHA, findings, humanNote string, cycle int) string {
 	note := neutralizeACHeaders(strings.TrimSpace(humanNote))
 	var b strings.Builder
@@ -180,8 +233,8 @@ func neutralizeACHeaders(findings string) string {
 // human's rationale is carried into the task body alongside the findings and the
 // framing reflects that a human authorised the fix (the auto FIXABLE path passes
 // an empty note).
-func spawnRemediationTask(d *Deps, m *Manifest, repo, workSHA, findings, humanNote, origin string) (string, error) {
-	id, err := writeRemediationTask(d, m, workSHA, findings, humanNote, origin)
+func spawnRemediationTask(d *Deps, m *Manifest, repo, workSHA, findings, humanNote, verifierSummary, origin string) (string, error) {
+	id, err := writeRemediationTask(d, m, workSHA, findings, humanNote, verifierSummary, origin)
 	if err != nil {
 		return "", err
 	}
@@ -230,7 +283,7 @@ func restoreHITLGatesBlockedBy(m *Manifest, snap []hitlBlockedBySnapshot) {
 // half of spawning — the caller invalidates the set's cached verdicts. The human
 // out-of-band Remediate path (ADR-0104) drives this directly so the manifest
 // append and the verdict invalidation ride one quiescence-gated transaction.
-func writeRemediationTask(d *Deps, m *Manifest, workSHA, findings, humanNote, origin string) (string, error) {
+func writeRemediationTask(d *Deps, m *Manifest, workSHA, findings, humanNote, verifierSummary, origin string) (string, error) {
 	if m == nil {
 		return "", exitErr(ExitOperational, "spawn remediation task: nil manifest")
 	}
@@ -246,7 +299,7 @@ func writeRemediationTask(d *Deps, m *Manifest, workSHA, findings, humanNote, or
 	m.Tasks = append(m.Tasks, Task{
 		ID:        id,
 		File:      file,
-		Title:     fmt.Sprintf("Remediation %d: resolve verification findings", cycle),
+		Title:     remediationTitle(cycle, remediationTitleSummary(origin, humanNote, verifierSummary)),
 		Type:      "AFK",
 		Status:    TaskOpen,
 		BlockedBy: []string{},
@@ -270,11 +323,11 @@ func writeRemediationTask(d *Deps, m *Manifest, workSHA, findings, humanNote, or
 // completion moves the work SHA so the cached verdict goes stale and the Verifier
 // re-fires, closing the loop. At or over the cap it writes nothing and returns
 // spawned=false, so the caller parks the set at VERIFY-FAILED.
-func spawnRemediationIfUnderCap(d *Deps, m *Manifest, repo, workSHA, findings string, maxDepth int) (spawned bool, id string, err error) {
+func spawnRemediationIfUnderCap(d *Deps, m *Manifest, repo, workSHA, findings, verifierSummary string, maxDepth int) (spawned bool, id string, err error) {
 	if remediationDepth(m) >= maxDepth {
 		return false, "", nil
 	}
-	id, err = spawnRemediationTask(d, m, repo, workSHA, findings, "", RemediationOriginAuto)
+	id, err = spawnRemediationTask(d, m, repo, workSHA, findings, "", verifierSummary, RemediationOriginAuto)
 	if err != nil {
 		return false, "", err
 	}

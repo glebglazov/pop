@@ -289,7 +289,7 @@ func remediateResolvedSet(d *Deps, opts verifyCoreOptions, m *Manifest, workSHA 
 	var id string
 	if err := mutateWithCheckoutQuiescence(d, s, opts.RuntimePath, func(ctx context.Context, ex store.Execer) error {
 		var werr error
-		if id, werr = writeRemediationTask(d, m, workSHA, findings, note, RemediationOriginHuman); werr != nil {
+		if id, werr = writeRemediationTask(d, m, workSHA, findings, note, "", RemediationOriginHuman); werr != nil {
 			return werr
 		}
 		return store.CaptureNoteThenInvalidateExec(ctx, ex, opts.Repo, m.Stem)
@@ -471,13 +471,14 @@ func runAndStoreVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *
 		return nil, err
 	}
 
-	verdict, findings := ParseVerdict(raw)
+	verdict, findings, summary := ParseVerdict(raw)
 	v := store.VerifyVerdict{
 		Repo:       opts.Repo,
 		SetID:      opts.SetID,
 		WorkSHA:    workSHA,
 		Verdict:    string(verdict),
 		Findings:   findings,
+		Summary:    summary,
 		Scope:      afkTaskCount(m),
 		ComputedAt: time.Now().UTC(),
 	}
@@ -814,7 +815,7 @@ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, t
 				outputFor(out).line(ansiRed, "   Attempt %d/%d timed out after %s", try, maxTries, timeout)
 			}
 
-			verdict, _ := ParseVerdict(normalized.Output)
+			verdict, _, _ := ParseVerdict(normalized.Output)
 			_ = persistVerifyRun(d, errOut, taskSetDir, setID, workSHA, outcome.stream, invocation.AgentPreset(), invocation.RequestedAgent, try, outcomeStr, reason, exitCode, string(verdict))
 			lastRaw = normalized.Output
 
@@ -1003,10 +1004,12 @@ func buildVerifierPrompt(d *Deps, m *Manifest, workSHA, diff, priorNote string) 
 	b.WriteString("VERDICT: FIXABLE\n")
 	b.WriteString("VERDICT: NEEDS-HUMAN\n")
 	b.WriteString("Then, on the following lines:\n")
+	b.WriteString("SUMMARY: <in one line, what needs fixing — optional; omit for PASS>\n")
 	b.WriteString("FINDINGS: <what fails a criterion and why — leave empty for PASS>\n\n")
 	b.WriteString("PASS = every acceptance criterion is met. ")
 	b.WriteString("FIXABLE = criteria are unmet but an agent could resolve the findings. ")
-	b.WriteString("NEEDS-HUMAN = the findings need a human decision.\n")
+	b.WriteString("NEEDS-HUMAN = the findings need a human decision. ")
+	b.WriteString("SUMMARY names, in one line, what needs fixing when remediation is warranted — it is optional and must not affect the verdict.\n")
 	return b.String()
 }
 
@@ -1121,17 +1124,19 @@ func ShortSHA(sha string) string {
 	return sha
 }
 
-// ParseVerdict extracts the three-way verdict and findings from a Verifier's raw
-// response. It looks for a `VERDICT:` line naming PASS, FIXABLE, or NEEDS-HUMAN
-// (tolerating markdown decoration and spelling variants) and takes the findings
-// from a `FINDINGS:` line or, failing that, everything after the verdict line. A
+// ParseVerdict extracts the three-way verdict, findings, and optional summary
+// from a Verifier's raw response. It looks for a `VERDICT:` line naming PASS,
+// FIXABLE, or NEEDS-HUMAN (tolerating markdown decoration and spelling
+// variants) and takes the findings from a `FINDINGS:` line or, failing that,
+// everything after the verdict line except an optional `SUMMARY:` line. A
 // missing verdict, an unrecognized token, or an empty response all resolve to
 // NEEDS-HUMAN with findings that tell the human what happened — so a malformed
-// or absent response never reads as PASS.
-func ParseVerdict(raw string) (Verdict, string) {
+// or absent response never reads as PASS. An omitted or unparseable `SUMMARY:`
+// line yields an empty summary without affecting the verdict.
+func ParseVerdict(raw string) (Verdict, string, string) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		return VerdictNeedsHuman, unparsedFindings(raw)
+		return VerdictNeedsHuman, unparsedFindings(raw), ""
 	}
 	lines := strings.Split(trimmed, "\n")
 	for i, line := range lines {
@@ -1141,11 +1146,11 @@ func ParseVerdict(raw string) (Verdict, string) {
 		}
 		v, ok := canonicalVerdict(value)
 		if !ok {
-			return VerdictNeedsHuman, unparsedFindings(raw)
+			return VerdictNeedsHuman, unparsedFindings(raw), ""
 		}
-		return v, extractFindings(lines, i)
+		return v, extractFindings(lines, i), extractVerifierSummary(lines)
 	}
-	return VerdictNeedsHuman, unparsedFindings(raw)
+	return VerdictNeedsHuman, unparsedFindings(raw), ""
 }
 
 // verdictLabelValue reports whether a line is the `VERDICT:` label line and, if
@@ -1177,7 +1182,8 @@ func canonicalVerdict(s string) (Verdict, bool) {
 }
 
 // extractFindings returns the findings text: the value of a `FINDINGS:` label
-// (and everything after it) when present, otherwise every line after the verdict.
+// (and everything after it) when present, otherwise every line after the
+// verdict except an optional `SUMMARY:` line.
 func extractFindings(lines []string, verdictIdx int) string {
 	for i, line := range lines {
 		stripped := stripMarkdown(line)
@@ -1192,9 +1198,39 @@ func extractFindings(lines []string, verdictIdx int) string {
 		return strings.TrimSpace(body)
 	}
 	if verdictIdx+1 < len(lines) {
-		return strings.TrimSpace(strings.Join(lines[verdictIdx+1:], "\n"))
+		var rest []string
+		for _, line := range lines[verdictIdx+1:] {
+			if _, ok := summaryLabelValue(line); ok {
+				continue
+			}
+			rest = append(rest, line)
+		}
+		return strings.TrimSpace(strings.Join(rest, "\n"))
 	}
 	return ""
+}
+
+// extractVerifierSummary returns the optional `SUMMARY:` line value when present.
+func extractVerifierSummary(lines []string) string {
+	for _, line := range lines {
+		if value, ok := summaryLabelValue(line); ok {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+// summaryLabelValue reports whether a line is the `SUMMARY:` label line and, if
+// so, returns the text after the label. Leading markdown decoration is
+// tolerated.
+func summaryLabelValue(line string) (string, bool) {
+	stripped := stripMarkdown(line)
+	if !strings.HasPrefix(strings.ToUpper(stripped), "SUMMARY") {
+		return "", false
+	}
+	rest := stripped[len("SUMMARY"):]
+	rest = strings.TrimLeft(rest, "*: \t")
+	return rest, true
 }
 
 // unparsedFindings is the findings text for a malformed or absent response, so

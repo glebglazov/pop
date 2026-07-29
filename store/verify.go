@@ -30,6 +30,7 @@ type VerifyVerdict struct {
 	WorkSHA       string
 	Verdict       string
 	Findings      string
+	Summary       string // optional one-line Verifier summary for remediation titles
 	Scope         int
 	HumanAuthored bool
 	Note          string

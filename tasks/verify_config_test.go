@@ -169,7 +169,7 @@ func TestRunConfiguredVerifierFallsThroughMissingBinary(t *testing.T) {
 	if !strings.Contains(out, "VERDICT: PASS") {
 		t.Fatalf("output = %q, want the fallback claude's PASS verdict", out)
 	}
-	if v, _ := ParseVerdict(out); v != VerdictPass {
+	if v, _, _ := ParseVerdict(out); v != VerdictPass {
 		t.Fatalf("verdict = %q, want PASS from the fallback agent", v)
 	}
 

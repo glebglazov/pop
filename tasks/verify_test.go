@@ -23,6 +23,7 @@ func TestParseVerdict(t *testing.T) {
 		raw          string
 		wantVerdict  Verdict
 		wantFindings string // substring the findings must contain ("" = must be empty)
+		wantSummary  string
 	}{
 		{name: "pass", raw: "VERDICT: PASS\nFINDINGS:\n", wantVerdict: VerdictPass, wantFindings: ""},
 		{name: "fixable", raw: "VERDICT: FIXABLE\nFINDINGS: criterion 3 is unmet", wantVerdict: VerdictFixable, wantFindings: "criterion 3 is unmet"},
@@ -36,10 +37,13 @@ func TestParseVerdict(t *testing.T) {
 		{name: "whitespace-only response", raw: "   \n\t\n", wantVerdict: VerdictNeedsHuman, wantFindings: "no output"},
 		{name: "no verdict marker", raw: "Looks good to me, everything passes.", wantVerdict: VerdictNeedsHuman, wantFindings: "could not be parsed"},
 		{name: "unrecognized verdict token", raw: "VERDICT: MAYBE\nFINDINGS: unsure", wantVerdict: VerdictNeedsHuman, wantFindings: "could not be parsed"},
+		{name: "with summary", raw: "VERDICT: FIXABLE\nSUMMARY: widget never renders\nFINDINGS: criterion 2 unmet", wantVerdict: VerdictFixable, wantFindings: "criterion 2 unmet", wantSummary: "widget never renders"},
+		{name: "summary omitted", raw: "VERDICT: FIXABLE\nFINDINGS: criterion 2 unmet", wantVerdict: VerdictFixable, wantFindings: "criterion 2 unmet", wantSummary: ""},
+		{name: "summary not in findings fallback", raw: "VERDICT: FIXABLE\nSUMMARY: one line\ndetails without findings label", wantVerdict: VerdictFixable, wantFindings: "details without findings label", wantSummary: "one line"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotV, gotF := ParseVerdict(tt.raw)
+			gotV, gotF, gotS := ParseVerdict(tt.raw)
 			if gotV != tt.wantVerdict {
 				t.Fatalf("verdict = %q, want %q", gotV, tt.wantVerdict)
 			}
@@ -47,10 +51,16 @@ func TestParseVerdict(t *testing.T) {
 				if strings.TrimSpace(gotF) != "" {
 					t.Fatalf("findings = %q, want empty", gotF)
 				}
+				if gotS != "" {
+					t.Fatalf("summary = %q, want empty", gotS)
+				}
 				return
 			}
 			if !strings.Contains(gotF, tt.wantFindings) {
 				t.Fatalf("findings = %q, want to contain %q", gotF, tt.wantFindings)
+			}
+			if gotS != tt.wantSummary {
+				t.Fatalf("summary = %q, want %q", gotS, tt.wantSummary)
 			}
 		})
 	}
@@ -59,7 +69,7 @@ func TestParseVerdict(t *testing.T) {
 func TestParseVerdictMalformedIncludesRawForHuman(t *testing.T) {
 	t.Parallel()
 	raw := "I think it is basically fine."
-	v, findings := ParseVerdict(raw)
+	v, findings, _ := ParseVerdict(raw)
 	if v != VerdictNeedsHuman {
 		t.Fatalf("verdict = %q, want NEEDS-HUMAN", v)
 	}
@@ -796,6 +806,21 @@ func TestBuildVerifierPromptForwardFeedsAcceptedNote(t *testing.T) {
 	withoutNote := buildVerifierPrompt(d, m, "sha1", "", "")
 	if strings.Contains(withoutNote, "Prior human note") {
 		t.Fatalf("prompt must omit the note section when no note is given:\n%s", withoutNote)
+	}
+}
+
+func TestBuildVerifierPromptAsksForOptionalSummary(t *testing.T) {
+	t.Parallel()
+	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), doneAFKSet(), nil)
+	prompt := buildVerifierPrompt(d, m, "sha1", "", "")
+	for _, want := range []string{
+		"SUMMARY:",
+		"what needs fixing",
+		"optional",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
 	}
 }
 

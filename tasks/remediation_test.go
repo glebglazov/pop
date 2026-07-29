@@ -84,7 +84,7 @@ func TestNextTaskNumber(t *testing.T) {
 func TestSpawnRemediationTaskWritesMarkdownAndIndex(t *testing.T) {
 	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), doneAFKSet(), nil)
 
-	id, err := spawnRemediationTask(d, m, "", "deadbeefcafe", "criterion 2 unmet: the widget never renders", "", RemediationOriginAuto)
+	id, err := spawnRemediationTask(d, m, "", "deadbeefcafe", "criterion 2 unmet: the widget never renders", "", "", RemediationOriginAuto)
 	if err != nil {
 		t.Fatalf("spawnRemediationTask: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestSpawnRemediationTaskFindingsNotWrittenIntoOtherSpecs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := spawnRemediationTask(d, m, "", "sha1", "some finding", "", RemediationOriginAuto); err != nil {
+	if _, err := spawnRemediationTask(d, m, "", "sha1", "some finding", "", "", RemediationOriginAuto); err != nil {
 		t.Fatalf("spawnRemediationTask: %v", err)
 	}
 	after, err := os.ReadFile(filepath.Join(m.Dir, "01-a.md"))
@@ -154,7 +154,7 @@ func TestSpawnRemediationTaskFindingsNotWrittenIntoOtherSpecs(t *testing.T) {
 func TestSpawnRemediationTaskFindingsWithACHeaderStaysValid(t *testing.T) {
 	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), doneAFKSet(), nil)
 	findings := "The set does not meet:\n## Acceptance criteria\n- the second box is unchecked"
-	if _, err := spawnRemediationTask(d, m, "", "sha1", findings, "", RemediationOriginAuto); err != nil {
+	if _, err := spawnRemediationTask(d, m, "", "sha1", findings, "", "", RemediationOriginAuto); err != nil {
 		t.Fatalf("spawnRemediationTask: %v", err)
 	}
 	reloaded := LoadManifest(d, "demo", m.Path)
@@ -176,7 +176,7 @@ func TestSpawnRemediationTaskFindingsWithACHeaderStaysValid(t *testing.T) {
 func TestSpawnRemediationIfUnderCap(t *testing.T) {
 	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), doneAFKSet(), nil)
 
-	spawned, id, err := spawnRemediationIfUnderCap(d, m, "", "sha1", "f1", 2)
+	spawned, id, err := spawnRemediationIfUnderCap(d, m, "", "sha1", "f1", "", 2)
 	if err != nil || !spawned {
 		t.Fatalf("first spawn: spawned=%v err=%v, want true/nil", spawned, err)
 	}
@@ -187,7 +187,7 @@ func TestSpawnRemediationIfUnderCap(t *testing.T) {
 		t.Fatalf("depth after first spawn = %d, want 1", remediationDepth(m))
 	}
 
-	spawned, id, err = spawnRemediationIfUnderCap(d, m, "", "sha1", "f2", 2)
+	spawned, id, err = spawnRemediationIfUnderCap(d, m, "", "sha1", "f2", "", 2)
 	if err != nil || !spawned {
 		t.Fatalf("second spawn: spawned=%v err=%v, want true/nil", spawned, err)
 	}
@@ -198,7 +198,7 @@ func TestSpawnRemediationIfUnderCap(t *testing.T) {
 		t.Fatalf("depth after second spawn = %d, want 2", remediationDepth(m))
 	}
 
-	spawned, _, err = spawnRemediationIfUnderCap(d, m, "", "sha1", "f3", 2)
+	spawned, _, err = spawnRemediationIfUnderCap(d, m, "", "sha1", "f3", "", 2)
 	if err != nil {
 		t.Fatalf("third spawn err = %v", err)
 	}
@@ -214,7 +214,7 @@ func TestSpawnRemediationIfUnderCap(t *testing.T) {
 // entirely — a FIXABLE verdict spawns nothing.
 func TestSpawnRemediationCapZeroNeverSpawns(t *testing.T) {
 	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), doneAFKSet(), nil)
-	spawned, _, err := spawnRemediationIfUnderCap(d, m, "", "sha1", "f", 0)
+	spawned, _, err := spawnRemediationIfUnderCap(d, m, "", "sha1", "f", "", 0)
 	if err != nil {
 		t.Fatalf("spawn err = %v", err)
 	}
@@ -237,7 +237,7 @@ func TestHumanRemediationReenablesAutoBudget(t *testing.T) {
 
 	const cap = 2
 	// Auto budget exhausted: at the cap the Verifier spawns nothing.
-	spawned, _, err := spawnRemediationIfUnderCap(d, m, "", "sha1", "still failing", cap)
+	spawned, _, err := spawnRemediationIfUnderCap(d, m, "", "sha1", "still failing", "", cap)
 	if err != nil {
 		t.Fatalf("capped spawn err = %v", err)
 	}
@@ -246,7 +246,7 @@ func TestHumanRemediationReenablesAutoBudget(t *testing.T) {
 	}
 
 	// A human Remediate authorises a fix, resetting the auto budget.
-	if _, err := writeRemediationTask(d, m, "sha1", "finding", "please fix", RemediationOriginHuman); err != nil {
+	if _, err := writeRemediationTask(d, m, "sha1", "finding", "please fix", "", RemediationOriginHuman); err != nil {
 		t.Fatalf("human writeRemediationTask: %v", err)
 	}
 	if got := remediationDepth(m); got != 0 {
@@ -254,7 +254,7 @@ func TestHumanRemediationReenablesAutoBudget(t *testing.T) {
 	}
 
 	// Fresh budget: the next FIXABLE spawns an auto task again.
-	spawned, id, err := spawnRemediationIfUnderCap(d, m, "", "sha1", "new finding", cap)
+	spawned, id, err := spawnRemediationIfUnderCap(d, m, "", "sha1", "new finding", "", cap)
 	if err != nil || !spawned {
 		t.Fatalf("post-reset spawn: spawned=%v err=%v, want true/nil", spawned, err)
 	}
@@ -461,7 +461,7 @@ func assertHITLBlockedBy(t *testing.T, m *Manifest, taskID string, want []string
 func TestSpawnRemediationWiresOpenHITLGatesAuto(t *testing.T) {
 	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), hitlGateRemediationSet(), nil)
 
-	id, err := spawnRemediationTask(d, m, "", "sha1", "finding", "", RemediationOriginAuto)
+	id, err := spawnRemediationTask(d, m, "", "sha1", "finding", "", "", RemediationOriginAuto)
 	if err != nil {
 		t.Fatalf("spawnRemediationTask: %v", err)
 	}
@@ -484,7 +484,7 @@ func TestSpawnRemediationWiresOpenHITLGatesAuto(t *testing.T) {
 func TestSpawnRemediationWiresOpenHITLGatesHuman(t *testing.T) {
 	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), hitlGateRemediationSet(), nil)
 
-	id, err := writeRemediationTask(d, m, "sha1", "finding", "please fix", RemediationOriginHuman)
+	id, err := writeRemediationTask(d, m, "sha1", "finding", "please fix", "", RemediationOriginHuman)
 	if err != nil {
 		t.Fatalf("writeRemediationTask: %v", err)
 	}
@@ -564,7 +564,7 @@ func TestRemediationSpawnStatusUnchanged(t *testing.T) {
 		t.Fatalf("base status = %q, want AWAITING-APPROVAL", got)
 	}
 
-	id, err := spawnRemediationTask(d, m, "", "sha1", "finding", "", RemediationOriginAuto)
+	id, err := spawnRemediationTask(d, m, "", "sha1", "finding", "", "", RemediationOriginAuto)
 	if err != nil {
 		t.Fatalf("spawnRemediationTask: %v", err)
 	}
@@ -593,7 +593,7 @@ func TestSpawnRemediationManifestFailureRollsBackHITLWiring(t *testing.T) {
 	d.FS = &atomicBlockingFS{FileSystem: d.FS, failManifestWrite: true}
 
 	before := LoadManifest(d, "demo", m.Path)
-	_, err := spawnRemediationTask(d, m, "", "sha1", "finding", "", RemediationOriginAuto)
+	_, err := spawnRemediationTask(d, m, "", "sha1", "finding", "", "", RemediationOriginAuto)
 	assertExitCode(t, err, ExitOperational)
 
 	after := LoadManifest(d, "demo", m.Path)
@@ -607,5 +607,81 @@ func TestSpawnRemediationManifestFailureRollsBackHITLWiring(t *testing.T) {
 	assertHITLBlockedBy(t, after, "04-approval", []string{"02-b"})
 	if _, statErr := os.Stat(filepath.Join(m.Dir, "07-remediation.md")); !os.IsNotExist(statErr) {
 		t.Fatalf("orphan remediation markdown should be removed: stat err = %v", statErr)
+	}
+}
+
+func TestRemediationTitleFromVerifierSummary(t *testing.T) {
+	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), doneAFKSet(), nil)
+	id, err := spawnRemediationTask(d, m, "", "sha1", "finding", "", "widget never renders", RemediationOriginAuto)
+	if err != nil {
+		t.Fatalf("spawnRemediationTask: %v", err)
+	}
+	if id != "02-remediation" {
+		t.Fatalf("id = %q, want 02-remediation", id)
+	}
+	reloaded := LoadManifest(d, "demo", m.Path)
+	var rem *Task
+	for i := range reloaded.Tasks {
+		if reloaded.Tasks[i].ID == id {
+			rem = &reloaded.Tasks[i]
+		}
+	}
+	if rem == nil {
+		t.Fatal("remediation task missing from manifest")
+	}
+	if rem.Title != "Remediation 1: widget never renders" {
+		t.Fatalf("title = %q, want Remediation 1: widget never renders", rem.Title)
+	}
+}
+
+func TestRemediationTitleGenericWithoutSummary(t *testing.T) {
+	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), doneAFKSet(), nil)
+	if _, err := spawnRemediationTask(d, m, "", "sha1", "finding", "", "", RemediationOriginAuto); err != nil {
+		t.Fatalf("spawnRemediationTask: %v", err)
+	}
+	reloaded := LoadManifest(d, "demo", m.Path)
+	for _, tk := range reloaded.Tasks {
+		if tk.ID == "02-remediation" && tk.Title != "Remediation 1: resolve verification findings" {
+			t.Fatalf("title = %q, want generic remediation title", tk.Title)
+		}
+	}
+}
+
+func TestRemediationTitleFromHumanNoteFirstLine(t *testing.T) {
+	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), doneAFKSet(), nil)
+	note := "close the retry gap\nsecond line is body only"
+	if _, err := writeRemediationTask(d, m, "sha1", "finding", note, "", RemediationOriginHuman); err != nil {
+		t.Fatalf("writeRemediationTask: %v", err)
+	}
+	reloaded := LoadManifest(d, "demo", m.Path)
+	for _, tk := range reloaded.Tasks {
+		if tk.ID == "02-remediation" && tk.Title != "Remediation 1: close the retry gap" {
+			t.Fatalf("title = %q, want first-line human summary", tk.Title)
+		}
+	}
+}
+
+func TestRemediationTitleSanitizesSummary(t *testing.T) {
+	long := strings.Repeat("x", 100)
+	if got := sanitizeRemediationSummary(long); len(got) > remediationSummaryMaxLen {
+		t.Fatalf("sanitized length = %d, want <= %d", len(got), remediationSummaryMaxLen)
+	}
+	if got := sanitizeRemediationSummary("## Acceptance criteria"); acHeaderPattern.MatchString(got) {
+		t.Fatalf("sanitized summary still matches AC heading: %q", got)
+	}
+}
+
+func TestRemediationDepthUnchangedWithTitledRemediation(t *testing.T) {
+	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), doneAFKSet(), nil)
+	if _, err := spawnRemediationTask(d, m, "", "sha1", "f", "", "summary line", RemediationOriginAuto); err != nil {
+		t.Fatalf("spawnRemediationTask: %v", err)
+	}
+	if got := remediationDepth(m); got != 1 {
+		t.Fatalf("remediationDepth() = %d, want 1", got)
+	}
+	for _, tk := range m.Tasks {
+		if tk.ID == "02-remediation" && !remediationIDPattern.MatchString(tk.ID) {
+			t.Fatalf("id %q does not match remediation pattern", tk.ID)
+		}
 	}
 }

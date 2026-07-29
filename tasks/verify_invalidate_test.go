@@ -239,7 +239,7 @@ func TestSpawnRemediationTaskInvalidatesVerifyVerdicts(t *testing.T) {
 	repo := "/repo/.git"
 	seedVerifyVerdict(t, d, store.VerifyVerdict{Repo: repo, SetID: "demo", WorkSHA: "sha1", Verdict: "PASS"})
 
-	_, err := spawnRemediationTask(d, m, repo, "sha1", "criterion 2 unmet", "", RemediationOriginAuto)
+	_, err := spawnRemediationTask(d, m, repo, "sha1", "criterion 2 unmet", "", "", RemediationOriginAuto)
 	if err != nil {
 		t.Fatalf("spawnRemediationTask: %v", err)
 	}
@@ -309,7 +309,7 @@ func TestResetTaskInvalidationLeavesSetNeedsVerifyAfterHEADMoves(t *testing.T) {
 func TestSpawnRemediationTaskInvalidationBestEffortNoStore(t *testing.T) {
 	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), doneAFKSet(), nil)
 	// repo is set but the store was never created; invalidation must not fail.
-	_, err := spawnRemediationTask(d, m, "/repo/.git", "sha1", "criterion 2 unmet", "", RemediationOriginAuto)
+	_, err := spawnRemediationTask(d, m, "/repo/.git", "sha1", "criterion 2 unmet", "", "", RemediationOriginAuto)
 	if err != nil {
 		t.Fatalf("spawnRemediationTask with no store: %v", err)
 	}
