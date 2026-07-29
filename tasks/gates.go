@@ -96,7 +96,7 @@ func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverif
 		// this set (ADR-0086/ADR-0012); the option force-re-runs the Verifier so a
 		// human who edited the work inline can re-check it without a fresh drain.
 		showReverify := gateReverifyEnabled(rv, m)
-		action, err := promptHITLGateAction(out, d, runtimePath, reader, taskSetID, hitl, body, invocation, showReverify)
+		action, err := promptHITLGateAction(out, d, runtimePath, reader, taskSetID, m, hitl, body, invocation, showReverify)
 		if err != nil {
 			return true, err
 		}
@@ -271,12 +271,13 @@ func gateReverifyEnabled(rv *reverifyGateContext, m *Manifest) bool {
 	return rv != nil && verifyEnabled(rv.cfg) && m != nil && !m.VerifyOptedOut()
 }
 
-func promptHITLGateAction(out io.Writer, d *Deps, runtimePath string, reader *bufio.Reader, taskSetID string, hitl *Task, body string, invocation *AgentAssistanceInvocation, showReverify bool) (hitlGateAction, error) {
+func promptHITLGateAction(out io.Writer, d *Deps, runtimePath string, reader *bufio.Reader, taskSetID string, m *Manifest, hitl *Task, body string, invocation *AgentAssistanceInvocation, showReverify bool) (hitlGateAction, error) {
 	display := outputFor(out)
 	fmt.Fprintln(display)
 	renderBlockedWaiterCount(display, d, runtimePath)
 	display.line(ansiYellow, "Human-blocked: %s/%s needs human work before the set can continue.", taskSetID, hitl.ID)
 	renderGateTaskBody(display, hitl.File, body)
+	renderRemediationReviewBlockFromManifest(display, d, taskSetID, m)
 	fmt.Fprintln(display, "  1. Get agent assistance (default)")
 	if invocation != nil {
 		fmt.Fprintf(display, "     %s\n", invocation.Display)
@@ -318,7 +319,7 @@ func promptHITLGateAction(out io.Writer, d *Deps, runtimePath string, reader *bu
 		} else {
 			fmt.Fprintln(display, "Choose 1, 2, 3, 4, or 0.")
 		}
-		return promptHITLGateAction(out, d, runtimePath, reader, taskSetID, hitl, body, invocation, showReverify)
+		return promptHITLGateAction(out, d, runtimePath, reader, taskSetID, m, hitl, body, invocation, showReverify)
 	}
 }
 
@@ -531,7 +532,7 @@ func handleInteractiveVerifyFailedGate(env gateEnv, repo string, m *Manifest, wo
 	}
 
 	for {
-		action, err := promptVerifyFailedGateAction(out, d, runtimePath, reader, taskSetID, findings, invocation)
+		action, err := promptVerifyFailedGateAction(out, d, runtimePath, reader, taskSetID, m, findings, invocation)
 		if err != nil {
 			return true, err
 		}
@@ -590,12 +591,13 @@ func handleInteractiveVerifyFailedGate(env gateEnv, repo string, m *Manifest, wo
 	}
 }
 
-func promptVerifyFailedGateAction(out io.Writer, d *Deps, runtimePath string, reader *bufio.Reader, taskSetID, findings string, invocation *AgentAssistanceInvocation) (verifyFailedGateAction, error) {
+func promptVerifyFailedGateAction(out io.Writer, d *Deps, runtimePath string, reader *bufio.Reader, taskSetID string, m *Manifest, findings string, invocation *AgentAssistanceInvocation) (verifyFailedGateAction, error) {
 	display := outputFor(out)
 	fmt.Fprintln(display)
 	renderBlockedWaiterCount(display, d, runtimePath)
 	display.line(ansiRed, "Verify-failed: %s did not clear the Verifier and needs a human decision.", taskSetID)
 	renderVerifyGateFindings(display, findings)
+	renderRemediationReviewBlockFromManifest(display, d, taskSetID, m)
 	fmt.Fprintln(display, "  1. Accept (record a human-authored PASS)")
 	fmt.Fprintln(display, "  2. Remediate (spawn a fix task)")
 	fmt.Fprintln(display, "  3. Agent assistance")
@@ -626,7 +628,7 @@ func promptVerifyFailedGateAction(out io.Writer, d *Deps, runtimePath string, re
 		return verifyFailedGateExit, nil
 	default:
 		fmt.Fprintln(display, "Choose 1, 2, 3, 4, or 0.")
-		return promptVerifyFailedGateAction(out, d, runtimePath, reader, taskSetID, findings, invocation)
+		return promptVerifyFailedGateAction(out, d, runtimePath, reader, taskSetID, m, findings, invocation)
 	}
 }
 
