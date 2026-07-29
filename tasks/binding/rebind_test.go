@@ -68,6 +68,56 @@ func TestAuthorizeLeavingBindingStartedNonInteractiveRequiresYes(t *testing.T) {
 	}
 }
 
+func TestAuthorizeLeavingBindingStartedPipedStdinRequiresYes(t *testing.T) {
+	repo := initAdoptRepo(t)
+	td := lifecycleTestDeps(t)
+	managed := seedManagedBindingAtRoot(t, td, repo, "set-a")
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	oldStdin := os.Stdin
+	os.Stdin = r
+	defer func() { os.Stdin = oldStdin }()
+
+	_, err = AuthorizeLeavingBinding(td, nil, cfg, "set-a", managed, keyForRepoSet(td, repo, "set-a"), true, "1/2 done", false, os.Stdin, io.Discard, LifecycleHooks{})
+	if err == nil || !strings.Contains(err.Error(), implementRebindNonInteractiveErr) {
+		t.Fatalf("err = %v, want non-interactive progress error for piped stdin", err)
+	}
+}
+
+func TestAuthorizeLeavingBindingManagedTeardownPipedStdinRequiresYes(t *testing.T) {
+	repo := initAdoptRepo(t)
+	td := lifecycleTestDeps(t)
+	managed := seedManagedBindingAtRoot(t, td, repo, "set-a")
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	oldStdin := os.Stdin
+	os.Stdin = r
+	defer func() { os.Stdin = oldStdin }()
+
+	_, err = AuthorizeLeavingBinding(td, nil, cfg, "set-a", managed, keyForRepoSet(td, repo, "set-a"), false, "", false, os.Stdin, io.Discard, LifecycleHooks{})
+	if err == nil || !strings.Contains(err.Error(), implementRebindTeardownNonInteractiveErr) {
+		t.Fatalf("err = %v, want non-interactive teardown error for piped stdin", err)
+	}
+}
+
 func TestAuthorizeLeavingBindingManagedTeardownAfterProgress(t *testing.T) {
 	t.Parallel()
 	repo := initAdoptRepo(t)

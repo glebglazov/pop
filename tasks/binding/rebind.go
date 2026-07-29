@@ -59,7 +59,7 @@ func AuthorizeLeavingBinding(td *tasks.Deps, pd *project.Deps, cfg *config.Confi
 	confirmIn := in
 	if confirmIn != nil {
 		if _, ok := confirmIn.(tasks.NonInteractiveReader); !ok {
-			confirmIn = &lineReader{br: bufio.NewReader(confirmIn)}
+			confirmIn = &lineReader{br: bufio.NewReader(confirmIn), orig: confirmIn}
 		}
 	}
 

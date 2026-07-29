@@ -426,11 +426,12 @@ func confirmYesNo(in io.Reader, out io.Writer, yes bool, prompt, nonInteractiveE
 	if _, ok := in.(tasks.NonInteractiveReader); ok {
 		return false, fmt.Errorf("%s", nonInteractiveErr)
 	}
-	if in == nil {
-		in = os.Stdin
+	src := confirmationSource(in)
+	if src == nil {
+		src = os.Stdin
 	}
-	if in == os.Stdin {
-		if f, ok := in.(*os.File); ok {
+	if src == os.Stdin {
+		if f, ok := src.(*os.File); ok {
 			info, err := f.Stat()
 			if err != nil || info.Mode()&os.ModeCharDevice == 0 {
 				return false, fmt.Errorf("%s", nonInteractiveErr)
@@ -450,13 +451,23 @@ func asLineReader(in io.Reader) *lineReader {
 	if lr, ok := in.(*lineReader); ok {
 		return lr
 	}
-	return &lineReader{br: bufio.NewReader(in)}
+	return &lineReader{br: bufio.NewReader(in), orig: in}
+}
+
+// confirmationSource returns the reader confirmYesNo should treat as the
+// operator's stdin — the original stream before any lineReader wrap.
+func confirmationSource(in io.Reader) io.Reader {
+	if lr, ok := in.(*lineReader); ok && lr.orig != nil {
+		return lr.orig
+	}
+	return in
 }
 
 // lineReader buffers confirmation input so multiple prompts can share one
 // underlying reader without bufio read-ahead consuming later answers.
 type lineReader struct {
-	br *bufio.Reader
+	br   *bufio.Reader
+	orig io.Reader
 }
 
 func (lr *lineReader) Read(p []byte) (int, error) {
