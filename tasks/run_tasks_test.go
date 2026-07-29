@@ -1930,6 +1930,10 @@ func TestRunTaskSetAgentFallbackAdvancesOnCursorAuthFailure(t *testing.T) {
 	authLine := "Error: Authentication required. Please run 'agent login' first, or set CURSOR_API_KEY environment variable."
 	cursorCount := filepath.Join(env.root, ".agent-bin", "cursor-agent.count")
 	installAgentShim(t, env.root, "cursor-agent", fmt.Sprintf(`#!/bin/sh
+if [ "$1" = status ]; then
+  printf 'probe unknown\n'
+  exit 1
+fi
 n=0
 test -f %[1]q && n=$(cat %[1]q)
 n=$((n + 1))
@@ -2226,6 +2230,10 @@ func TestRunTaskSetAgentFallbackDoesNotAdvanceOnPlainFailure(t *testing.T) {
 	claudeCount := filepath.Join(env.root, ".agent-bin", "claude.count")
 	codexCount := filepath.Join(env.root, ".agent-bin", "codex.count")
 	installAgentShim(t, env.root, "claude", fmt.Sprintf(`#!/bin/sh
+if [ "$1" = auth ] && [ "$2" = status ]; then
+  printf '{"loggedIn":true}\n'
+  exit 0
+fi
 n=0
 test -f %[1]q && n=$(cat %[1]q)
 n=$((n + 1))
@@ -3096,6 +3104,9 @@ type hitlAssistanceRunner struct {
 }
 
 func (r *hitlAssistanceRunner) Run(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (int, error) {
+	if IsAgentAvailabilityProbeCommand(name, args) {
+		return fakeAwareRunner{}.Run(ctx, dir, stdout, stderr, name, args...)
+	}
 	r.calls++
 	r.name = name
 	r.args = append([]string{}, args...)
@@ -3130,6 +3141,9 @@ type configurableHITLAssistanceRunner struct {
 }
 
 func (r *configurableHITLAssistanceRunner) Run(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (int, error) {
+	if IsAgentAvailabilityProbeCommand(name, args) {
+		return fakeAwareRunner{}.Run(ctx, dir, stdout, stderr, name, args...)
+	}
 	r.runCalls++
 	return r.run(name, args...)
 }

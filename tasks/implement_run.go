@@ -65,6 +65,8 @@ type implementRun struct {
 	// gate; the loop continues to (re)seed it.
 	sharedPromptReader *bufio.Reader
 	result             *RunTaskSetResult
+
+	agentProbeMemo *agentAvailabilityProbeMemo
 }
 
 // newImplementRun resolves everything RunTaskSetWith needs before it can drain:
@@ -152,6 +154,7 @@ func newImplementRun(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 		out:          out,
 		refresh:      refresh,
 		drain:        drain,
+		agentProbeMemo: newAgentAvailabilityProbeMemo(),
 	}, nil
 }
 

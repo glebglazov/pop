@@ -190,7 +190,7 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 	return nil, taskExitErr(sel, ExitOperational, "unexpected attempt loop exit")
 }
 
-func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath string, out, errOut io.Writer, basePrompt string, agentSpecs []string, buildForAgent func(agentSpec string) (func(prompt string) (*AgentInvocation, error), error), maxTries int, timeout time.Duration, commitOverrides []string, agentQuotaRetryAfter time.Duration, retryDelays []time.Duration) (*RunTaskResult, error) {
+func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath string, out, errOut io.Writer, basePrompt string, agentSpecs []string, buildForAgent func(agentSpec string) (func(prompt string) (*AgentInvocation, error), error), maxTries int, timeout time.Duration, commitOverrides []string, agentQuotaRetryAfter time.Duration, retryDelays []time.Duration, probeMemo *agentAvailabilityProbeMemo) (*RunTaskResult, error) {
 	cooldowns, err := readAgentCooldowns(d)
 	if err != nil {
 		return nil, taskExitErr(sel, ExitOperational, "%v", err)
@@ -214,6 +214,13 @@ func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath s
 				outputFor(out).line(ansiDim, "   Agent %s unavailable (binary not found); trying next", preset)
 			}
 			unavailableResults = append(unavailableResults, unavailabilityResult(sel, u))
+			continue
+		}
+		if u := probeMemo.checkUnavailability(d, runtimePath, preset); u != nil {
+			if i+1 < len(specs) && out != nil {
+				outputFor(out).line(ansiDim, "   Agent %s unauthenticated; trying next", preset)
+			}
+			unavailableResults = append(unavailableResults, unavailabilityResult(sel, *u))
 			continue
 		}
 		buildInvocation, err := buildForAgent(agentSpec)

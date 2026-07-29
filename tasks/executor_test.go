@@ -1051,6 +1051,9 @@ type captureAgentRunner struct {
 }
 
 func (r *captureAgentRunner) Run(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (int, error) {
+	if IsAgentAvailabilityProbeCommand(name, args) {
+		return fakeAwareRunner{}.Run(ctx, dir, stdout, stderr, name, args...)
+	}
 	proc, err := r.Start(ctx, dir, stdout, stderr, name, args...)
 	if err != nil {
 		return 1, err
@@ -1059,6 +1062,9 @@ func (r *captureAgentRunner) Run(ctx context.Context, dir string, stdout, stderr
 }
 
 func (r *captureAgentRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
+	if IsAgentAvailabilityProbeCommand(name, args) {
+		return fakeAwareRunner{}.Start(ctx, dir, stdout, stderr, name, args...)
+	}
 	r.names = append(r.names, name)
 	r.argLists = append(r.argLists, append([]string{}, args...))
 	proc := &ManagedProcess{done: make(chan waitResult, 1)}

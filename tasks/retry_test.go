@@ -125,6 +125,10 @@ func installClaudeQuotaAgent(t *testing.T, root string) string {
 	}
 	counterPath := filepath.Join(dir, "claude.count")
 	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = auth ] && [ \"$2\" = status ]; then\n" +
+		"  printf '{\"loggedIn\":true}\\n'\n" +
+		"  exit 0\n" +
+		"fi\n" +
 		"COUNT=0\n" +
 		"if [ -f " + counterPath + " ]; then COUNT=$(cat " + counterPath + "); fi\n" +
 		"echo $((COUNT + 1)) > " + counterPath + "\n" +
