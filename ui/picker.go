@@ -56,6 +56,7 @@ const (
 	ActionRefresh
 	ActionYankPath
 	ActionCreateWorktree
+	ActionCreateManagedWorktree
 	ActionSetPreferredWorkbench
 )
 
@@ -156,7 +157,9 @@ func WithOpenWindow() PickerOption {
 	}
 }
 
-// WithCreateWorktree enables the create-worktree keybinding (ctrl+a)
+// WithCreateWorktree enables the create-worktree keybindings: ctrl+a for an
+// ordinary worktree, ctrl+t for a pop-managed worktree ahead of any Task set
+// (ADR-0152)
 func WithCreateWorktree() PickerOption {
 	return func(p *Picker) {
 		p.showCreateWorktree = true
@@ -445,6 +448,15 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return p, tea.Quit
 			}
 
+		case key.Matches(msg, keys.CreateManagedWorktree):
+			if p.showCreateWorktree {
+				p.result = Result{Action: ActionCreateManagedWorktree}
+				if item, ok := p.selectedItem(); ok {
+					p.result.Selected = item
+				}
+				return p, tea.Quit
+			}
+
 		case key.Matches(msg, keys.SetPreferred):
 			if p.showSetPreferred {
 				if item, ok := p.selectedItem(); ok {
@@ -717,6 +729,9 @@ func (p *Picker) helpEntries() []HelpEntry {
 	if p.showCreateWorktree && !p.isKeyOverridden("ctrl+a") {
 		entries = append(entries, HelpEntry{"C-a", "Create worktree"})
 	}
+	if p.showCreateWorktree && !p.isKeyOverridden("ctrl+t") {
+		entries = append(entries, HelpEntry{"C-t", "Create managed worktree"})
+	}
 	if p.showSetPreferred && !p.isKeyOverridden("ctrl+w") {
 		entries = append(entries, HelpEntry{"C-w", "Set preferred workbench"})
 	}
@@ -785,21 +800,22 @@ func Run(items []Item, opts ...PickerOption) (Result, error) {
 
 // Key bindings
 type keyMap struct {
-	Up             key.Binding
-	Down           key.Binding
-	HalfPageUp     key.Binding
-	HalfPageDown   key.Binding
-	Enter          key.Binding
-	Quit           key.Binding
-	Delete         key.Binding
-	ForceDelete    key.Binding
-	KillSession    key.Binding
-	Reset          key.Binding
-	OpenWindow     key.Binding
-	ClearInput     key.Binding
-	YankPath       key.Binding
-	CreateWorktree key.Binding
-	SetPreferred   key.Binding
+	Up                    key.Binding
+	Down                  key.Binding
+	HalfPageUp            key.Binding
+	HalfPageDown          key.Binding
+	Enter                 key.Binding
+	Quit                  key.Binding
+	Delete                key.Binding
+	ForceDelete           key.Binding
+	KillSession           key.Binding
+	Reset                 key.Binding
+	OpenWindow            key.Binding
+	ClearInput            key.Binding
+	YankPath              key.Binding
+	CreateWorktree        key.Binding
+	CreateManagedWorktree key.Binding
+	SetPreferred          key.Binding
 }
 
 var keys = keyMap{
@@ -844,6 +860,9 @@ var keys = keyMap{
 	),
 	CreateWorktree: key.NewBinding(
 		key.WithKeys("ctrl+a"),
+	),
+	CreateManagedWorktree: key.NewBinding(
+		key.WithKeys("ctrl+t"),
 	),
 	SetPreferred: key.NewBinding(
 		key.WithKeys("ctrl+w"),

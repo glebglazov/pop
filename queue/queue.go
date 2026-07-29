@@ -1188,7 +1188,7 @@ func provisionWorktree(d *Deps, projectPath, setID string) (provisionedWorktree,
 		return provisionedWorktree{}, fmt.Errorf("missing task dependencies")
 	}
 	worktreesRoot := filepath.Join(QueueDataDir(d.Tasks), "worktrees")
-	b, err := binding.ProvisionWorktree(d.Tasks, worktreesRoot, projectPath, setID, d.now())
+	b, err := binding.ProvisionWorktree(d.Tasks, worktreesRoot, projectPath, setID, "HEAD", d.now())
 	if err != nil {
 		return provisionedWorktree{}, err
 	}

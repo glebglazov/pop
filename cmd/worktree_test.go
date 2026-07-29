@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -520,6 +521,74 @@ func TestOpenWorktreeWithShaping_SessionPresentAttachesFlat(t *testing.T) {
 	}
 	if spy.attached != "" {
 		t.Errorf("shaping Attach must not run for an existing session, got %q", spy.attached)
+	}
+}
+
+// TestTrunkBranchCursorIndexPreselectsTrunkBranch pins the managed-create
+// base-ref picker's preselection (ADR-0152): the cursor index lands on the
+// Trunk worktree's own branch — even when that branch is not the main/master
+// default — so Enter accepts it with no further input, while the main/master
+// default stays at the bottom for the cursor-at-end fallback.
+func TestTrunkBranchCursorIndexPreselectsTrunkBranch(t *testing.T) {
+	t.Parallel()
+	root, _, td := setupCmdRepoTest(t)
+	cd := cmdLayerDeps().configDeps()
+
+	git := func(args ...string) string {
+		t.Helper()
+		c := exec.Command("git", args...)
+		c.Dir = root
+		out, err := c.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	defaultBranch := git("branch", "--show-current")
+	git("checkout", "-b", "feature-work")
+
+	ctx := &project.RepoContext{GitRoot: root, RepoName: filepath.Base(root)}
+	branches, err := project.ListBranches(ctx)
+	if err != nil {
+		t.Fatalf("list branches: %v", err)
+	}
+	items, _ := baseRefPickerItems(branches)
+
+	want := -1
+	for i, it := range items {
+		if it.Name == "feature-work" {
+			want = i
+		}
+	}
+	if want < 0 {
+		t.Fatalf("feature-work not among base-ref items: %+v", items)
+	}
+	if got := trunkBranchCursorIndex(td, cd, nil, root, items); got != want {
+		t.Errorf("trunkBranchCursorIndex = %d, want %d (the trunk's own branch, feature-work)", got, want)
+	}
+	if got := items[len(items)-1].Name; got != defaultBranch {
+		t.Errorf("bottom item = %q, want the %q default under the cursor-at-end fallback", got, defaultBranch)
+	}
+}
+
+// TestBaseRefPickerItemsPutsMainFirstBranchesAtBottom pins the reversal both
+// create flows share: ListBranches orders main/master first, and the picker's
+// bottom-anchored cursor must find them on the bottom row.
+func TestBaseRefPickerItemsPutsMainFirstBranchesAtBottom(t *testing.T) {
+	t.Parallel()
+	branches := []project.Branch{{Ref: "main"}, {Ref: "zebra"}, {Ref: "origin/ahead", IsRemote: true}}
+	items, byRef := baseRefPickerItems(branches)
+	wantOrder := []string{"origin/ahead", "zebra", "main"}
+	if len(items) != len(wantOrder) {
+		t.Fatalf("items = %d, want %d", len(items), len(wantOrder))
+	}
+	for i, ref := range wantOrder {
+		if items[i].Name != ref || items[i].Path != ref {
+			t.Errorf("items[%d] = %+v, want ref %q", i, items[i], ref)
+		}
+	}
+	if b, ok := byRef["zebra"]; !ok || b.Ref != "zebra" {
+		t.Errorf("byRef lookup lost the zebra branch: %+v", byRef)
 	}
 }
 

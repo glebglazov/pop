@@ -59,7 +59,7 @@ func seedArchiveBinding(t *testing.T, td *tasks.Deps, repo, setID string, b Bind
 
 func archiveManagedBinding(t *testing.T, td *tasks.Deps, repo, setID string) Binding {
 	t.Helper()
-	b, err := ProvisionWorktree(td, ManagedWorktreesRoot(td), repo, setID, time.Now())
+	b, err := ProvisionWorktree(td, ManagedWorktreesRoot(td), repo, setID, "HEAD", time.Now())
 	if err != nil {
 		t.Fatalf("provision managed worktree: %v", err)
 	}

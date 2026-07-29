@@ -275,7 +275,7 @@ func provisionInWorktree(d *Deps, in tasks.ResolveInput, projectPath, setID stri
 		return in, fmt.Errorf("tasks implement: task set %s is already bound", setID)
 	}
 
-	b, err := binding.ProvisionWorktree(td, binding.ManagedWorktreesRoot(td), projectPath, setID, d.now())
+	b, err := binding.ProvisionWorktree(td, binding.ManagedWorktreesRoot(td), projectPath, setID, "HEAD", d.now())
 	if err != nil {
 		return in, err
 	}

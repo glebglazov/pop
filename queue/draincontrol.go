@@ -605,7 +605,7 @@ func ProvisionManagedWorktree(d *Deps, cfg *config.Config, ref SetRef) (Dashboar
 	if bare || strings.TrimSpace(trunkPath) == "" {
 		return DashboardCreateWorktreeResult{}, fmt.Errorf("no Trunk worktree configured; set trunk = true in a global [repo.\"<path>\"] block")
 	}
-	b, err := binding.ProvisionWorktree(d.Tasks, binding.ManagedWorktreesRoot(d.Tasks), trunkPath, ref.SetID, d.now())
+	b, err := binding.ProvisionWorktree(d.Tasks, binding.ManagedWorktreesRoot(d.Tasks), trunkPath, ref.SetID, "HEAD", d.now())
 	if err != nil {
 		return DashboardCreateWorktreeResult{}, err
 	}

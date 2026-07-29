@@ -64,7 +64,7 @@ func setupImplementFixtureStarted(t *testing.T) (root string, d *Deps) {
 
 func seedImplementManagedBinding(t *testing.T, td *tasks.Deps, repoRoot, setID string) binding.Binding {
 	t.Helper()
-	b, err := binding.ProvisionWorktree(td, binding.ManagedWorktreesRoot(td), repoRoot, setID, time.Now())
+	b, err := binding.ProvisionWorktree(td, binding.ManagedWorktreesRoot(td), repoRoot, setID, "HEAD", time.Now())
 	if err != nil {
 		t.Fatalf("provision managed: %v", err)
 	}

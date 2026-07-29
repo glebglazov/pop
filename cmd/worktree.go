@@ -5,12 +5,16 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/history"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/project"
+	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/ui"
 	"github.com/spf13/cobra"
 )
@@ -163,6 +167,15 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 			}
 			return nil
 
+		case ui.ActionCreateManagedWorktree:
+			if err := createManagedWorktree(ctx); err != nil {
+				debug.Error("worktree: create managed: %v", err)
+				fmt.Fprintf(os.Stderr, "Failed to create managed worktree: %v\n", err)
+				// Continue loop to show picker again
+				continue
+			}
+			return nil
+
 		case ui.ActionYankPath:
 			if result.Selected == nil {
 				return nil
@@ -299,16 +312,7 @@ func createWorktree(ctx *project.RepoContext) error {
 		return fmt.Errorf("no branches found")
 	}
 
-	// ListBranches orders main/master first, but the picker anchors to the
-	// bottom with the cursor there (like the dashboards). Reverse into items so
-	// main/master land on the bottom row under the cursor — unified cursor
-	// position AND the sensible fork base stays the default.
-	items := make([]ui.Item, len(branches))
-	byRef := make(map[string]project.Branch, len(branches))
-	for i, b := range branches {
-		items[len(branches)-1-i] = ui.Item{Name: b.Ref, Path: b.Ref}
-		byRef[b.Ref] = b
-	}
+	items, byRef := baseRefPickerItems(branches)
 
 	result, err := ui.Run(items,
 		ui.WithHeader("Pick a branch for the new worktree"),
@@ -347,6 +351,91 @@ func createWorktree(ctx *project.RepoContext) error {
 	// worktree has no session yet, so the session-absence gate is transparent
 	// here and this behaves exactly as before.
 	return openWorktreeWithShaping(defaultWorktreeShapeDeps(), ctx, path)
+}
+
+// createManagedWorktree runs the managed-create flow (ADR-0152): pick a base
+// ref — the Trunk worktree's branch preselected, so Enter accepts it with no
+// further input — then fork a pop-managed worktree under the managed-worktree
+// root and attach, shaped exactly like the ordinary create path. No name is
+// requested (the directory carries a generated scratch name) and no Task set
+// is involved: the worktree stays unbound until a set registers from inside it.
+func createManagedWorktree(ctx *project.RepoContext) error {
+	td := cmdLayerDeps().tasksDeps()
+	branches, err := project.ListBranches(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list branches: %w", err)
+	}
+	if len(branches) == 0 {
+		return fmt.Errorf("no branches found")
+	}
+
+	items, byRef := baseRefPickerItems(branches)
+
+	opts := []ui.PickerOption{
+		ui.WithHeader("Pick a base ref for the managed worktree"),
+		ui.WithCursorAtEnd(),
+	}
+	cfg, _ := config.Load(config.DefaultConfigPathWith(cmdLayerDeps().configDeps()))
+	if idx := trunkBranchCursorIndex(td, cmdLayerDeps().configDeps(), cfg, ctx.GitRoot, items); idx >= 0 {
+		opts = append(opts, ui.WithInitialCursorIndex(idx))
+	}
+
+	result, err := ui.Run(items, opts...)
+	if err != nil {
+		return err
+	}
+	if result.Action != ui.ActionConfirm || result.Selected == nil {
+		// Esc/cancel in the base-ref picker: create nothing.
+		return nil
+	}
+	selection := byRef[result.Selected.Path]
+
+	b, err := binding.ProvisionScratchWorktree(td, ctx.GitRoot, selection.Ref, time.Now())
+	if err != nil {
+		return err
+	}
+
+	// A freshly-created managed worktree has no session yet, so the
+	// session-absence gate is transparent and this attaches exactly like the
+	// ordinary create path, Workbench shaping included.
+	return openWorktreeWithShaping(defaultWorktreeShapeDeps(), ctx, b.RuntimePath)
+}
+
+// baseRefPickerItems builds the base-ref picker's items from branches.
+// ListBranches orders main/master first, but the picker anchors to the bottom
+// with the cursor there (like the dashboards). Reverse into items so
+// main/master land on the bottom row under the cursor — unified cursor
+// position AND the sensible fork base stays the default.
+func baseRefPickerItems(branches []project.Branch) ([]ui.Item, map[string]project.Branch) {
+	items := make([]ui.Item, len(branches))
+	byRef := make(map[string]project.Branch, len(branches))
+	for i, b := range branches {
+		items[len(branches)-1-i] = ui.Item{Name: b.Ref, Path: b.Ref}
+		byRef[b.Ref] = b
+	}
+	return items, byRef
+}
+
+// trunkBranchCursorIndex returns the index of the Trunk worktree's branch in
+// the base-ref item list, so the managed-create picker opens with it
+// preselected (ADR-0152). It returns -1 — the caller falls back to the
+// cursor-at-end default — when no trunk resolves, the trunk is detached, or
+// its branch is not among the items.
+func trunkBranchCursorIndex(td *tasks.Deps, cd *config.Deps, cfg *config.Config, checkoutPath string, items []ui.Item) int {
+	trunkPath, bare, err := binding.ResolveTrunkPathWith(cd, td, cfg, checkoutPath)
+	if err != nil || bare || strings.TrimSpace(trunkPath) == "" {
+		return -1
+	}
+	branch := binding.CurrentBranch(td, trunkPath)
+	if branch == "" {
+		return -1
+	}
+	for i, item := range items {
+		if item.Name == branch {
+			return i
+		}
+	}
+	return -1
 }
 
 // worktreeShapeDeps carries the seams for shaping a freshly-created worktree's

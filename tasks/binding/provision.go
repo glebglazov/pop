@@ -24,10 +24,11 @@ type ProvisionManagedBindingRequest struct {
 }
 
 // ProvisionManagedBinding forks a managed worktree from the repository's Trunk
-// worktree for setID, records a provisioned Worktree binding, and returns it.
-// It is the shared seam for `register --managed` and `bind-worktree --managed`
-// (ADR-0147). When TrunkPath is empty the trunk is resolved from CheckoutPath;
-// a repo with no resolvable trunk yields ErrNoResolvableTrunk.
+// worktree's HEAD for setID, records a provisioned Worktree binding, and
+// returns it. It is the shared seam for `register --managed` and
+// `bind-worktree --managed` (ADR-0147). When TrunkPath is empty the trunk is
+// resolved from CheckoutPath; a repo with no resolvable trunk yields
+// ErrNoResolvableTrunk.
 func ProvisionManagedBinding(req ProvisionManagedBindingRequest) (Binding, error) {
 	if req.TD == nil {
 		return Binding{}, fmt.Errorf("missing task dependencies")
@@ -67,7 +68,7 @@ func ProvisionManagedBinding(req ProvisionManagedBindingRequest) (Binding, error
 	if now.IsZero() {
 		now = time.Now()
 	}
-	b, err := ProvisionWorktree(req.TD, ManagedWorktreesRoot(req.TD), trunkPath, setID, now)
+	b, err := ProvisionWorktree(req.TD, ManagedWorktreesRoot(req.TD), trunkPath, setID, "HEAD", now)
 	if err != nil {
 		return Binding{}, err
 	}

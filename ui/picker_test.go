@@ -154,6 +154,65 @@ func TestCreateWorktreeKey(t *testing.T) {
 	}
 }
 
+func TestCreateManagedWorktreeKey(t *testing.T) {
+	items := []Item{{Name: "wt", Path: "/wt"}}
+
+	// Disabled: ctrl+t is a no-op.
+	picker := NewPicker(items)
+	picker.Init()
+	picker.Update(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
+	if picker.result.Action == ActionCreateManagedWorktree {
+		t.Error("ctrl+t should not fire when WithCreateWorktree is disabled")
+	}
+
+	// Enabled: ctrl+t fires ActionCreateManagedWorktree, a distinct action from
+	// the ordinary create key's ActionCreateWorktree.
+	picker = NewPicker(items, WithCreateWorktree())
+	picker.Init()
+	_, cmd := picker.Update(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
+	if picker.result.Action != ActionCreateManagedWorktree {
+		t.Errorf("ctrl+t should fire ActionCreateManagedWorktree, got %v", picker.result.Action)
+	}
+	if cmd == nil {
+		t.Error("ctrl+t should return tea.Quit cmd")
+	}
+}
+
+func TestHelpViewShowsCreateManagedWorktree(t *testing.T) {
+	items := []Item{{Name: "test", Path: "/test"}}
+
+	// Absent when the feature flag is off.
+	off := NewPicker(items)
+	off.width, off.height, off.showHelp = 60, 20, true
+	if containsSubstring(off.viewHelp(), "Create managed worktree") {
+		t.Error("help view should omit the ctrl+t hint when disabled")
+	}
+
+	// Present alongside the ordinary create binding when enabled.
+	on := NewPicker(items, WithCreateWorktree())
+	on.width, on.height, on.showHelp = 60, 20, true
+	view := on.viewHelp()
+	if !containsSubstring(view, "C-t") {
+		t.Error("help view should contain the C-t key hint")
+	}
+	if !containsSubstring(view, "Create managed worktree") {
+		t.Error("help view should describe the managed-create binding")
+	}
+	if !containsSubstring(view, "Create worktree") {
+		t.Error("help view should keep the ordinary create binding alongside")
+	}
+
+	// Hidden when a user-defined command overrides ctrl+t, gated the same way
+	// as the ordinary create key.
+	overridden := NewPicker(items, WithCreateWorktree(), WithUserDefinedCommands([]UserDefinedCommand{
+		{Key: "ctrl+t", Label: "mine", Command: "true"},
+	}))
+	overridden.width, overridden.height, overridden.showHelp = 60, 20, true
+	if containsSubstring(overridden.viewHelp(), "Create managed worktree") {
+		t.Error("help view should omit the ctrl+t hint when a user command overrides it")
+	}
+}
+
 func TestSetPreferredWorkbenchKey(t *testing.T) {
 	items := []Item{{Name: "wt", Path: "/wt"}}
 
@@ -1175,6 +1234,30 @@ func TestInitWithInitialCursorIndex(t *testing.T) {
 
 	if picker.cursor != 1 {
 		t.Errorf("cursor = %d, want 1 (WithInitialCursorIndex overrides WithCursorAtEnd)", picker.cursor)
+	}
+}
+
+// TestInitialCursorIndexEnterAcceptsPreselection pins the managed-create
+// base-ref picker's accept path (ADR-0152): with the Trunk branch's index
+// preselected, Enter confirms that item with no further input.
+func TestInitialCursorIndexEnterAcceptsPreselection(t *testing.T) {
+	items := []Item{
+		{Name: "feature-x", Path: "feature-x"},
+		{Name: "develop", Path: "develop"},
+		{Name: "main", Path: "main"},
+	}
+	picker := NewPicker(items, WithCursorAtEnd(), WithInitialCursorIndex(1))
+	picker.Init()
+
+	_, cmd := picker.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if picker.result.Action != ActionConfirm {
+		t.Fatalf("Enter should confirm, got action %v", picker.result.Action)
+	}
+	if picker.result.Selected == nil || picker.result.Selected.Path != "develop" {
+		t.Errorf("Enter should accept the preselected item, got %+v", picker.result.Selected)
+	}
+	if cmd == nil {
+		t.Error("Enter should return tea.Quit cmd")
 	}
 }
 

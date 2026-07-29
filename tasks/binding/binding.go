@@ -354,9 +354,17 @@ func CurrentBranch(td *tasks.Deps, checkoutPath string) string {
 // Queue's hands-free path; the human-attended path adopts an existing checkout
 // instead (see the queue bind-worktree command). The caller persists the
 // returned binding into the Store.
-func ProvisionWorktree(d *tasks.Deps, worktreesRoot, projectPath, setID string, now time.Time) (Binding, error) {
+//
+// startPoint is the ref the new branch forks from (ADR-0152); an empty
+// startPoint forks from projectPath's HEAD, which is what the managed callers
+// (register --managed, bind-worktree --managed, the Queue) pass explicitly.
+func ProvisionWorktree(d *tasks.Deps, worktreesRoot, projectPath, setID, startPoint string, now time.Time) (Binding, error) {
 	if d == nil {
 		return Binding{}, fmt.Errorf("missing task dependencies")
+	}
+	startPoint = strings.TrimSpace(startPoint)
+	if startPoint == "" {
+		startPoint = "HEAD"
 	}
 	id, err := tasks.ResolveRepositoryIdentity(d, projectPath)
 	if err != nil {
@@ -369,7 +377,7 @@ func ProvisionWorktree(d *tasks.Deps, worktreesRoot, projectPath, setID string, 
 	if err := d.FS.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return Binding{}, fmt.Errorf("create worktree parent: %w", err)
 	}
-	if _, err := d.Git.CommandInDir(projectPath, "worktree", "add", "-b", branch, path, "HEAD"); err != nil {
+	if _, err := d.Git.CommandInDir(projectPath, "worktree", "add", "-b", branch, path, startPoint); err != nil {
 		return Binding{}, fmt.Errorf("git worktree add: %w", err)
 	}
 	return Binding{RuntimePath: path, Branch: branch, Provisioned: true}, nil
