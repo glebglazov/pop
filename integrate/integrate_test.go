@@ -2108,15 +2108,15 @@ func TestRefreshComponent_SkipsConflictSilently(t *testing.T) {
 	_, real := fakeFactories("/h", fs)
 	outcomes, warning := refreshComponent(real, "claude", ComponentPaneSkill, baselineComponentSet(defaultIntegrationBaseline()))
 	for _, o := range outcomes {
-		if o.Label == "updated" || o.Label == "added" {
-			t.Errorf("expected no update on conflict, got %v", outcomes)
+		if o.Skill == "pop-tmux-pane" && (o.Label == "updated" || o.Label == "added") {
+			t.Errorf("expected no update on tmux-pane conflict, got %v", outcomes)
 		}
 	}
 	if warning != "" {
 		t.Errorf("conflict must be silent, got warning %q", warning)
 	}
-	if len(fs.symlinks) != 0 {
-		t.Errorf("conflict must not write a symlink, got %v", fs.symlinks)
+	if _, ok := fs.symlinks[filepath.Join("/h", ".claude", "skills", "pop-tmux-pane")]; ok {
+		t.Errorf("tmux-pane conflict must not write a symlink, got %v", fs.symlinks)
 	}
 }
 

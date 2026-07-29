@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-// TestRenderPaneSkillClaude pins the pane skill's rendered tree for claude: a
-// single skill-directory entry whose bytes are the embedded source with the
-// frontmatter name injected to match the directory.
+// TestRenderPaneSkillClaude pins the pane skills' rendered tree for claude: two
+// skill-directory entries whose bytes are the embedded sources with the
+// frontmatter name injected to match each directory.
 func TestRenderPaneSkillClaude(t *testing.T) {
 	t.Parallel()
 	tree, err := renderComponent(ComponentPaneSkill, "claude", "pop-")
@@ -15,8 +15,8 @@ func TestRenderPaneSkillClaude(t *testing.T) {
 		t.Fatalf("renderComponent: %v", err)
 	}
 
-	if len(tree) != 1 {
-		t.Fatalf("expected 1 entry, got %d: %v", len(tree), keysOf(tree))
+	if len(tree) != paneSkillCount {
+		t.Fatalf("expected %d entries, got %d: %v", paneSkillCount, len(tree), keysOf(tree))
 	}
 	got, ok := tree["pop-tmux-pane/SKILL.md"]
 	if !ok {
@@ -39,11 +39,29 @@ func TestRenderPaneSkillClaude(t *testing.T) {
 	if !strings.Contains(string(got), "\npop-owned: true\n") {
 		t.Fatalf("rendered SKILL.md missing ownership marker: %q", string(got))
 	}
+
+	spawnGot, ok := tree["pop-spawn-agent/SKILL.md"]
+	if !ok {
+		t.Fatalf("missing pop-spawn-agent/SKILL.md; tree has %v", keysOf(tree))
+	}
+	spawnSrc, err := skillFiles.ReadFile("skills/pop/spawn-agent.md")
+	if err != nil {
+		t.Fatalf("read embedded spawn-agent source: %v", err)
+	}
+	spawnContent := rewriteSkillReferences(string(spawnSrc), "pop-", fileBasedSkillBaseNames())
+	_, spawnWant, err := renderSkillFile("claude", "pop-spawn-agent", spawnContent)
+	if err != nil {
+		t.Fatalf("renderSkillFile(spawn-agent): %v", err)
+	}
+	if string(spawnGot) != spawnWant {
+		t.Fatalf("spawn-agent render bytes mismatch:\n got: %q\nwant: %q", string(spawnGot), spawnWant)
+	}
 }
 
-// TestRenderPaneSkillSkillDirAgents pins the pane skill's rendered tree for the
+// TestRenderPaneSkillSkillDirAgents pins the pane skills' rendered tree for the
 // agents that host skills as directories (codex, pi, cursor) — identical layout
-// to claude: a single `pop-tmux-pane/SKILL.md` entry with the frontmatter name injected.
+// to claude: `pop-tmux-pane/SKILL.md` and `pop-spawn-agent/SKILL.md` with the
+// frontmatter name injected.
 func TestRenderPaneSkillSkillDirAgents(t *testing.T) {
 	t.Parallel()
 	src, err := skillFiles.ReadFile("skills/pop/tmux-pane.md")
@@ -51,15 +69,24 @@ func TestRenderPaneSkillSkillDirAgents(t *testing.T) {
 		t.Fatalf("read embedded source: %v", err)
 	}
 	want := injectOwnershipMarker(injectFrontmatterName(string(src), "pop-tmux-pane"))
+	spawnSrc, err := skillFiles.ReadFile("skills/pop/spawn-agent.md")
+	if err != nil {
+		t.Fatalf("read embedded spawn-agent source: %v", err)
+	}
+	spawnContent := rewriteSkillReferences(string(spawnSrc), "pop-", fileBasedSkillBaseNames())
 
 	for _, agent := range []string{"codex", "pi", "cursor"} {
 		t.Run(agent, func(t *testing.T) {
+			_, spawnWant, err := renderSkillFile(agent, "pop-spawn-agent", spawnContent)
+			if err != nil {
+				t.Fatalf("renderSkillFile(spawn-agent): %v", err)
+			}
 			tree, err := renderComponent(ComponentPaneSkill, agent, "pop-")
 			if err != nil {
 				t.Fatalf("renderComponent(%s): %v", agent, err)
 			}
-			if len(tree) != 1 {
-				t.Fatalf("expected 1 entry, got %d: %v", len(tree), keysOf(tree))
+			if len(tree) != paneSkillCount {
+				t.Fatalf("expected %d entries, got %d: %v", paneSkillCount, len(tree), keysOf(tree))
 			}
 			got, ok := tree["pop-tmux-pane/SKILL.md"]
 			if !ok {
@@ -71,22 +98,29 @@ func TestRenderPaneSkillSkillDirAgents(t *testing.T) {
 			if !strings.Contains(string(got), "\nname: pop-tmux-pane\n") {
 				t.Fatalf("rendered SKILL.md missing injected name: %q", string(got))
 			}
+			spawnGot, ok := tree["pop-spawn-agent/SKILL.md"]
+			if !ok {
+				t.Fatalf("missing pop-spawn-agent/SKILL.md; tree has %v", keysOf(tree))
+			}
+			if string(spawnGot) != spawnWant {
+				t.Fatalf("spawn-agent render bytes mismatch:\n got: %q\nwant: %q", string(spawnGot), spawnWant)
+			}
 		})
 	}
 }
 
-// TestRenderPaneSkillOpencode pins the pane skill's rendered tree for opencode:
-// a single flat `pop-tmux-pane.md` entry whose bytes are the embedded source
-// verbatim — opencode has no skill-directory layout and requires no name
-// injection (the file name carries the identity).
+// TestRenderPaneSkillOpencode pins the pane skills' rendered tree for opencode:
+// two flat entries (`pop-tmux-pane.md`, `pop-spawn-agent.md`) whose bytes are
+// the embedded sources verbatim — opencode has no skill-directory layout and
+// requires no name injection (the file name carries the identity).
 func TestRenderPaneSkillOpencode(t *testing.T) {
 	t.Parallel()
 	tree, err := renderComponent(ComponentPaneSkill, "opencode", "pop-")
 	if err != nil {
 		t.Fatalf("renderComponent(opencode): %v", err)
 	}
-	if len(tree) != 1 {
-		t.Fatalf("expected 1 entry, got %d: %v", len(tree), keysOf(tree))
+	if len(tree) != paneSkillCount {
+		t.Fatalf("expected %d entries, got %d: %v", paneSkillCount, len(tree), keysOf(tree))
 	}
 	got, ok := tree["pop-tmux-pane.md"]
 	if !ok {
@@ -99,6 +133,22 @@ func TestRenderPaneSkillOpencode(t *testing.T) {
 	if string(got) != injectOwnershipMarker(string(src)) {
 		t.Fatalf("opencode render should be source with ownership marker:\n got: %q\nwant: %q", string(got), injectOwnershipMarker(string(src)))
 	}
+	spawnGot, ok := tree["pop-spawn-agent.md"]
+	if !ok {
+		t.Fatalf("missing pop-spawn-agent.md; tree has %v", keysOf(tree))
+	}
+	spawnSrc, err := skillFiles.ReadFile("skills/pop/spawn-agent.md")
+	if err != nil {
+		t.Fatalf("read embedded spawn-agent source: %v", err)
+	}
+	spawnContent := rewriteSkillReferences(string(spawnSrc), "pop-", fileBasedSkillBaseNames())
+	_, spawnWant, err := renderSkillFile("opencode", "pop-spawn-agent", spawnContent)
+	if err != nil {
+		t.Fatalf("renderSkillFile(spawn-agent): %v", err)
+	}
+	if string(spawnGot) != spawnWant {
+		t.Fatalf("opencode spawn-agent render mismatch:\n got: %q\nwant: %q", string(spawnGot), spawnWant)
+	}
 }
 
 // TestRenderCaseInsensitiveAgent confirms the agent name is normalized.
@@ -110,6 +160,9 @@ func TestRenderCaseInsensitiveAgent(t *testing.T) {
 	}
 	if _, ok := tree["pop-tmux-pane/SKILL.md"]; !ok {
 		t.Fatalf("expected pop-tmux-pane/SKILL.md, got %v", keysOf(tree))
+	}
+	if _, ok := tree["pop-spawn-agent/SKILL.md"]; !ok {
+		t.Fatalf("expected pop-spawn-agent/SKILL.md, got %v", keysOf(tree))
 	}
 }
 

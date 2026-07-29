@@ -10,13 +10,24 @@ import (
 
 const installerHome = "/home/u"
 
+const paneSkillCount = 2
+
 // paneSkillPaths returns the canonical paths the pane-skill install touches for
-// claude, derived from installerHome.
+// claude (tmux-pane), derived from installerHome.
 func paneSkillPaths() (renderFile, linkDest, linkTarget string) {
 	renderRoot := filepath.Join(installerHome, ".local", "share", "pop", "integrations", "claude", "pane-skills")
 	renderFile = filepath.Join(renderRoot, "pop-tmux-pane", "SKILL.md")
 	linkDest = filepath.Join(installerHome, ".claude", "skills", "pop-tmux-pane")
 	linkTarget = filepath.Join(renderRoot, "pop-tmux-pane")
+	return
+}
+
+// paneSpawnSkillPaths returns the canonical paths for the spawn-agent pane skill.
+func paneSpawnSkillPaths() (renderFile, linkDest, linkTarget string) {
+	renderRoot := filepath.Join(installerHome, ".local", "share", "pop", "integrations", "claude", "pane-skills")
+	renderFile = filepath.Join(renderRoot, "pop-spawn-agent", "SKILL.md")
+	linkDest = filepath.Join(installerHome, ".claude", "skills", "pop-spawn-agent")
+	linkTarget = filepath.Join(renderRoot, "pop-spawn-agent")
 	return
 }
 
@@ -43,12 +54,30 @@ func TestInstallFileComponentInstall(t *testing.T) {
 		t.Fatalf("render bytes mismatch")
 	}
 
+	spawnRender, spawnLinkDest, spawnLinkTarget := paneSpawnSkillPaths()
+	spawnData, ok := fs.files[spawnRender]
+	if !ok {
+		t.Fatalf("spawn-agent render file not written: %s (have %v)", spawnRender, sortedKeys(fs.files))
+	}
+	spawnSrc, _ := skillFiles.ReadFile("skills/pop/spawn-agent.md")
+	spawnContent := rewriteSkillReferences(string(spawnSrc), "pop-", fileBasedSkillBaseNames())
+	_, spawnWant, err := renderSkillFile("claude", "pop-spawn-agent", spawnContent)
+	if err != nil {
+		t.Fatalf("renderSkillFile(spawn-agent): %v", err)
+	}
+	if string(spawnData) != spawnWant {
+		t.Fatalf("spawn-agent render bytes mismatch")
+	}
+
 	target, ok := fs.symlinks[linkDest]
 	if !ok {
 		t.Fatalf("no symlink at %s", linkDest)
 	}
 	if target != linkTarget {
 		t.Fatalf("symlink target = %q, want %q", target, linkTarget)
+	}
+	if fs.symlinks[spawnLinkDest] != spawnLinkTarget {
+		t.Fatalf("spawn-agent symlink target = %q, want %q", fs.symlinks[spawnLinkDest], spawnLinkTarget)
 	}
 }
 
@@ -66,11 +95,15 @@ func TestInstallFileComponentIdempotent(t *testing.T) {
 	}
 
 	_, linkDest, linkTarget := paneSkillPaths()
-	if len(fs.symlinks) != 1 {
-		t.Fatalf("expected exactly 1 symlink, got %d: %v", len(fs.symlinks), fs.symlinks)
+	_, spawnLinkDest, spawnLinkTarget := paneSpawnSkillPaths()
+	if len(fs.symlinks) != paneSkillCount {
+		t.Fatalf("expected exactly %d symlinks, got %d: %v", paneSkillCount, len(fs.symlinks), fs.symlinks)
 	}
 	if fs.symlinks[linkDest] != linkTarget {
 		t.Fatalf("symlink target = %q, want %q", fs.symlinks[linkDest], linkTarget)
+	}
+	if fs.symlinks[spawnLinkDest] != spawnLinkTarget {
+		t.Fatalf("spawn-agent symlink target = %q, want %q", fs.symlinks[spawnLinkDest], spawnLinkTarget)
 	}
 }
 
@@ -238,8 +271,8 @@ func TestInstallFileComponentIdempotentNewAgents(t *testing.T) {
 					t.Fatalf("install pass %d (%s): %v", i, a.name, err)
 				}
 			}
-			if len(fs.symlinks) != 1 {
-				t.Fatalf("expected exactly 1 symlink, got %d: %v", len(fs.symlinks), fs.symlinks)
+			if len(fs.symlinks) != paneSkillCount {
+				t.Fatalf("expected exactly %d symlinks, got %d: %v", paneSkillCount, len(fs.symlinks), fs.symlinks)
 			}
 			if fs.symlinks[a.linkDest] != a.linkTarget {
 				t.Fatalf("symlink %q = %q, want %q", a.linkDest, fs.symlinks[a.linkDest], a.linkTarget)
@@ -374,6 +407,8 @@ func TestConflictCandidates(t *testing.T) {
 	}{
 		{"pop-tmux-pane", "pop-", []string{"pop-tmux-pane", "tmux-pane"}},
 		{"pop-tmux-pane.md", "pop-", []string{"pop-tmux-pane.md", "tmux-pane.md"}},
+		{"pop-spawn-agent", "pop-", []string{"pop-spawn-agent", "spawn-agent"}},
+		{"pop-spawn-agent.md", "pop-", []string{"pop-spawn-agent.md", "spawn-agent.md"}},
 		{"pop-grill-with-docs", "pop-", []string{"pop-grill-with-docs", "grill-with-docs"}},
 		{"no-prefix", "pop-", []string{"no-prefix"}},
 		{"tmux-pane", "", []string{"tmux-pane"}},
@@ -736,8 +771,8 @@ func TestRefreshFileComponentDebugConflict(t *testing.T) {
 
 	outcomes, warning := refreshFileComponent(real, "claude", ComponentPaneSkill)
 	for _, o := range outcomes {
-		if o.Label == "updated" || o.Label == "added" {
-			t.Errorf("expected no update/warning on conflict, got outcomes=%v warning=%q", outcomes, warning)
+		if o.Skill == "pop-tmux-pane" && (o.Label == "updated" || o.Label == "added") {
+			t.Errorf("expected no update on tmux-pane conflict, got outcomes=%v warning=%q", outcomes, warning)
 			break
 		}
 	}

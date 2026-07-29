@@ -69,7 +69,7 @@ func TestStaleResolved_ContentOnlyDivergence(t *testing.T) {
 	fs := newFakeFS()
 	seedFileComponent(t, fs, "/h", ComponentPaneSkill, "claude")
 	d := fakeDeps("/h", fs, io.Discard)
-	installed := map[string]bool{"pop-tmux-pane": true}
+	installed := map[string]bool{"pop-tmux-pane": true, "pop-spawn-agent": true}
 
 	// Current state: not stale.
 	stale, err := fileComponentStaleResolved(d, "/h", ComponentPaneSkill, "claude", installed)

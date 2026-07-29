@@ -75,8 +75,8 @@ func TestInstallFileComponentBarePrefix(t *testing.T) {
 	if fs.symlinks[bareLink] != bareTarget {
 		t.Fatalf("bare symlink = %q -> %q, want -> %q", bareLink, fs.symlinks[bareLink], bareTarget)
 	}
-	if len(fs.symlinks) != 1 {
-		t.Fatalf("expected exactly 1 symlink, got %d: %v", len(fs.symlinks), fs.symlinks)
+	if len(fs.symlinks) != paneSkillCount {
+		t.Fatalf("expected exactly %d symlinks, got %d: %v", paneSkillCount, len(fs.symlinks), fs.symlinks)
 	}
 	// The injected frontmatter name is bare — the file name carries no prefix.
 	src, _ := skillFiles.ReadFile("skills/pop/tmux-pane.md")
@@ -126,8 +126,8 @@ func TestInstallFileComponentPrefixChangeMigration(t *testing.T) {
 	if _, ok := fs.symlinks[popLink]; ok {
 		t.Fatalf("stale pop- symlink not pruned: %s still -> %q", popLink, fs.symlinks[popLink])
 	}
-	if len(fs.symlinks) != 1 {
-		t.Fatalf("expected exactly 1 symlink after migration, got %d: %v", len(fs.symlinks), fs.symlinks)
+	if len(fs.symlinks) != paneSkillCount {
+		t.Fatalf("expected exactly %d symlinks after migration, got %d: %v", paneSkillCount, len(fs.symlinks), fs.symlinks)
 	}
 	// Old render-tree directory pruned (removeAll(renderRoot) before re-render).
 	popRender := filepath.Join(paneRenderRoot(), "pop-tmux-pane", "SKILL.md")
@@ -275,8 +275,12 @@ func TestInstallFileComponentBarePrefixConflict(t *testing.T) {
 	if string(fs.files[userFile]) != "hand-written skill" {
 		t.Fatalf("user skill at resolved name was modified: %q", fs.files[userFile])
 	}
-	if len(fs.symlinks) != 0 {
-		t.Fatalf("conflict must not install a symlink, got %v", fs.symlinks)
+	if len(fs.symlinks) != 1 {
+		t.Fatalf("conflict must only install spawn-agent, got %v", fs.symlinks)
+	}
+	spawnLink := filepath.Join(installerHome, ".claude", "skills", "spawn-agent")
+	if fs.symlinks[spawnLink] == "" {
+		t.Fatalf("expected spawn-agent symlink, got %v", fs.symlinks)
 	}
 	// The report names the conflicting resolved path.
 	if report := out.String(); !strings.Contains(report, bareDest) || !strings.Contains(report, "not owned by pop") {

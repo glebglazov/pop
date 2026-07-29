@@ -114,6 +114,28 @@ func TestCatalog_StatusWiringConsumedByIntegrate(t *testing.T) {
 	}
 }
 
+// TestCatalog_PaneSkillsSources pins the pane-skills embed catalog order.
+// Integrate outcome lines follow this sequence.
+func TestCatalog_PaneSkillsSources(t *testing.T) {
+	t.Parallel()
+	comp, ok := LookupComponent(ComponentPaneSkill)
+	if !ok {
+		t.Fatal("pane-skills component missing")
+	}
+	want := []string{
+		"skills/pop/tmux-pane.md",
+		"skills/pop/spawn-agent.md",
+	}
+	if len(comp.sources) != len(want) {
+		t.Fatalf("sources len = %d, want %d: %v", len(comp.sources), len(want), comp.sources)
+	}
+	for i := range want {
+		if comp.sources[i] != want[i] {
+			t.Fatalf("sources[%d] = %q, want %q", i, comp.sources[i], want[i])
+		}
+	}
+}
+
 // TestCatalog_TaskSkillsSources pins the task-skills embed catalog order.
 // Integrate outcome lines follow this sequence (ADR: Integrate outcome line).
 func TestCatalog_TaskSkillsSources(t *testing.T) {
