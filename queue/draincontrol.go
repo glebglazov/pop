@@ -388,9 +388,8 @@ func UnbindWorktree(d *Deps, cfg *config.Config, ref SetRef) (AbandonResult, err
 // BindWorktreeEntries returns the inline bind picker entries for the
 // highlighted dashboard row: every existing worktree in the row's repository,
 // followed by the managed-intent entry and the pop-native creation entry. The
-// managed entry is not gated on trunk resolution — unlike the Drain target
-// picker it provisions nothing now; the intent is lazy and the trunk is only
-// needed at the next Queue drain.
+// managed entry forks a new worktree from the Trunk worktree and binds it
+// immediately (ADR-0147), with no drain required.
 func BindWorktreeEntries(d *Deps, cfg *config.Config, ref SetRef) ([]dashboardBindEntry, error) {
 	scans, _, err := dashboardBindContext(d, cfg, ref)
 	if err != nil {
@@ -409,7 +408,7 @@ func BindWorktreeEntries(d *Deps, cfg *config.Config, ref SetRef) ([]dashboardBi
 		}
 		entries = append(entries, dashboardBindEntry{Label: label, Path: wt.Path, Branch: wt.Branch})
 	}
-	entries = append(entries, dashboardBindEntry{Label: "＋ Managed worktree (provision at next Queue drain)", Managed: true})
+	entries = append(entries, dashboardBindEntry{Label: "＋ Managed worktree (fork from trunk)", Managed: true})
 	entries = append(entries, dashboardBindEntry{Label: "＋ Create new worktree", Create: true})
 	return entries, nil
 }
