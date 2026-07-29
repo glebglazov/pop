@@ -139,10 +139,12 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 			u := agentResult.Unavailability.WithPreset(invocation.AgentPreset())
 			if _, ok := u.TimeHealing(); ok {
 				u = u.WithResetAt(agentQuotaResetAt(u.Preset, u.Reason, time.Now()))
+				persist(outcome.stream, attempt, streamOutcomeQuotaPaused, "", outcome.exitCode)
+				display.line(ansiYellow, "Paused: agent quota exhausted for %s/%s", sel.TaskSetID, sel.TaskID)
+				display.line(ansiYellow, "  %s", u.Reason)
+			} else {
+				persist(outcome.stream, attempt, streamOutcomeAgentUnusable, u.Reason, outcome.exitCode)
 			}
-			persist(outcome.stream, attempt, streamOutcomeQuotaPaused, "", outcome.exitCode)
-			display.line(ansiYellow, "Paused: agent quota exhausted for %s/%s", sel.TaskSetID, sel.TaskID)
-			display.line(ansiYellow, "  %s", u.Reason)
 			return unavailabilityResult(sel, u), nil
 		}
 
@@ -221,8 +223,13 @@ func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath s
 				return nil, taskExitErr(sel, ExitOperational, "%v", err)
 			}
 			activeCooldowns[u.Preset] = until
-			if i+1 < len(specs) && out != nil && u.Kind == UnavailabilityQuotaPause {
+		}
+		if i+1 < len(specs) && out != nil {
+			switch u.Kind {
+			case UnavailabilityQuotaPause:
 				outputFor(out).line(ansiDim, "   Agent %s quota-paused; trying next", u.Preset)
+			case UnavailabilityAuthFailure:
+				outputFor(out).line(ansiDim, "   Agent %s unauthenticated; trying next", u.Preset)
 			}
 		}
 		unavailableResults = append(unavailableResults, result)

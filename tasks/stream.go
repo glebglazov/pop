@@ -33,7 +33,8 @@ const (
 	streamOutcomeFailed      = "failed"
 	streamOutcomeTimedOut    = "timed_out"
 	streamOutcomeInterrupted = "interrupted"
-	streamOutcomeQuotaPaused = "quota_paused"
+	streamOutcomeQuotaPaused  = "quota_paused"
+	streamOutcomeAgentUnusable = "agent_unusable"
 )
 
 // streamHeaderRecord opens a Captured attempt stream file.

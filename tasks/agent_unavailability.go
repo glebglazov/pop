@@ -6,8 +6,10 @@ import "time"
 type AgentUnavailabilityKind string
 
 const (
-	// UnavailabilityQuotaPause is the sole time-healing kind (ADR-0153).
+	// UnavailabilityQuotaPause is the time-healing kind (ADR-0153).
 	UnavailabilityQuotaPause AgentUnavailabilityKind = "quota_pause"
+	// UnavailabilityAuthFailure is a human-healing kind: a logged-out CLI (ADR-0153).
+	UnavailabilityAuthFailure AgentUnavailabilityKind = "auth_failure"
 )
 
 // AgentUnavailabilityRecovery is what would make an unavailable Agent preset
@@ -57,6 +59,23 @@ func NewQuotaPauseUnavailability(preset, reason string, resetAt time.Time) Agent
 // only. Preset and ResetAt are filled by the executor after detection.
 func DetectedQuotaPause(reason string) *AgentUnavailability {
 	u := NewQuotaPauseUnavailability("", reason, time.Time{})
+	return &u
+}
+
+// NewAuthFailureUnavailability builds a human-healing auth-failure verdict.
+func NewAuthFailureUnavailability(preset, reason string) AgentUnavailability {
+	return AgentUnavailability{
+		Kind:     UnavailabilityAuthFailure,
+		Recovery: HumanHealingRecovery{},
+		Reason:   reason,
+		Preset:   preset,
+	}
+}
+
+// DetectedAuthFailure is the adapter-side form of an auth failure: kind and
+// reason only. Preset is filled by the executor after detection.
+func DetectedAuthFailure(reason string) *AgentUnavailability {
+	u := NewAuthFailureUnavailability("", reason)
 	return &u
 }
 

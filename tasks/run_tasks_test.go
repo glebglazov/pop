@@ -1922,6 +1922,89 @@ printf 'SUMMARY_START\nclaude done\nSUMMARY_END\nTASK_COMPLETE\n'
 	assertTaskDone(t, env.execFixture(), "01-a")
 }
 
+func TestRunTaskSetAgentFallbackAdvancesOnCursorAuthFailure(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	authLine := "Error: Authentication required. Please run 'agent login' first, or set CURSOR_API_KEY environment variable."
+	cursorCount := filepath.Join(env.root, ".agent-bin", "cursor-agent.count")
+	installAgentShim(t, env.root, "cursor-agent", fmt.Sprintf(`#!/bin/sh
+n=0
+test -f %[1]q && n=$(cat %[1]q)
+n=$((n + 1))
+printf '%%s\n' "$n" > %[1]q
+printf '%%s\n' %q
+exit 1
+`, cursorCount, authLine))
+	installAgentShim(t, env.root, "claude", `#!/bin/sh
+TASK=$(printf '%s' "$*" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
+if [ -n "$TASK" ] && [ -f "$TASK" ]; then sed -i '' 's/- \[ \]/- [x]/g' "$TASK" 2>/dev/null || sed -i 's/- \[ \]/- [x]/g' "$TASK"; fi
+printf 'SUMMARY_START\nclaude done\nSUMMARY_END\nTASK_COMPLETE\n'
+`)
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(true, "", &buf)
+	opts.AgentPresets = []string{"cursor", "claude"}
+	opts.AgentExplicit = true
+	opts.MaxTries = 3
+
+	start := time.Now()
+	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.TaskSetDone || len(result.Completed) != 1 {
+		t.Fatalf("result = %#v", result)
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("fallback took %s, want no retry delay between agents", elapsed)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "Attempt 1/3 · cursor") || !strings.Contains(out, "Attempt 1/3 · claude") {
+		t.Fatalf("fallback attempts not rendered:\n%s", out)
+	}
+	if !strings.Contains(out, "Agent cursor unauthenticated; trying next") {
+		t.Fatalf("missing cursor auth fallback line:\n%s", out)
+	}
+	if got := strings.TrimSpace(readFileString(t, cursorCount)); got != "1" {
+		t.Fatalf("cursor attempts = %q, want 1 (retry cap not burned)", got)
+	}
+
+	runs, err := listSetRuns(env.deps(), env.execFixture().demoDir())
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	var cursorRun capturedRun
+	var foundCursor bool
+	for _, run := range runs {
+		if run.meta.Agent == "cursor" {
+			cursorRun = run
+			foundCursor = true
+			break
+		}
+	}
+	if !foundCursor {
+		t.Fatal("missing cursor captured run")
+	}
+	if cursorRun.meta.Outcome != streamOutcomeAgentUnusable {
+		t.Fatalf("cursor outcome = %q, want %s", cursorRun.meta.Outcome, streamOutcomeAgentUnusable)
+	}
+	if cursorRun.meta.Reason != authLine {
+		t.Fatalf("cursor reason = %q, want %q", cursorRun.meta.Reason, authLine)
+	}
+
+	cooldowns, err := readAgentCooldowns(env.deps())
+	if err != nil {
+		t.Fatalf("read cooldowns: %v", err)
+	}
+	if _, ok := cooldowns["cursor"]; ok {
+		t.Fatalf("auth failure wrote cooldown: %#v", cooldowns)
+	}
+
+	assertTaskDone(t, env.execFixture(), "01-a")
+}
+
 func TestRunTaskSetAgentFallbackDoesNotAdvanceOnPlainFailure(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},

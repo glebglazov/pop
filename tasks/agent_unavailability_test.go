@@ -21,11 +21,9 @@ func TestQuotaPauseUnavailabilityIsTimeHealing(t *testing.T) {
 }
 
 func TestHumanHealingCannotReportTimeHealing(t *testing.T) {
-	u := AgentUnavailability{
-		Kind:     "auth_failure",
-		Recovery: HumanHealingRecovery{},
-		Reason:   "Authentication required",
-		Preset:   "cursor",
+	u := NewAuthFailureUnavailability("cursor", "Authentication required")
+	if u.Kind != UnavailabilityAuthFailure {
+		t.Fatalf("kind = %q, want %q", u.Kind, UnavailabilityAuthFailure)
 	}
 	if _, ok := u.TimeHealing(); ok {
 		t.Fatal("human-healing must not report TimeHealing — recovery wait accepts TimeHealingRecovery only")

@@ -920,6 +920,33 @@ func TestNormalizeCursorStreamJSONExtractsResult(t *testing.T) {
 	}
 }
 
+func TestNormalizeCursorStreamJSONDetectsAuthFailure(t *testing.T) {
+	authLine := "Error: Authentication required. Please run 'agent login' first, or set CURSOR_API_KEY environment variable."
+	raw := authLine + "\n"
+	result := NormalizeAgentOutput(AgentOutputCursorStreamJSON, raw)
+	if result.Unavailability == nil {
+		t.Fatal("missing auth failure unavailability")
+	}
+	if result.Unavailability.Kind != UnavailabilityAuthFailure {
+		t.Fatalf("kind = %q, want %q", result.Unavailability.Kind, UnavailabilityAuthFailure)
+	}
+	if result.Unavailability.Reason != authLine {
+		t.Fatalf("reason = %q, want %q", result.Unavailability.Reason, authLine)
+	}
+	if _, ok := result.Unavailability.TimeHealing(); ok {
+		t.Fatal("auth failure must be human-healing")
+	}
+}
+
+func TestNormalizeCursorStreamJSONAuthFailureNotDetectedOnOtherFormats(t *testing.T) {
+	authLine := "Error: Authentication required. Please run 'agent login' first, or set CURSOR_API_KEY environment variable.\n"
+	for _, format := range []AgentOutputFormat{AgentOutputClaudeStreamJSON, AgentOutputCodexJSONL, AgentOutputPlain} {
+		if result := NormalizeAgentOutput(format, authLine); result.Unavailability != nil {
+			t.Fatalf("format %q detected auth failure: %#v", format, result.Unavailability)
+		}
+	}
+}
+
 func TestNormalizeCodexJSONLExtractsLastAgentMessage(t *testing.T) {
 	raw := "{\"type\":\"thread.started\",\"thread_id\":\"1\"}\n" +
 		"{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"working\"}}\n" +
