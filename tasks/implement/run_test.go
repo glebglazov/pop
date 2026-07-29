@@ -1,6 +1,7 @@
 package implement
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"os/exec"
@@ -246,9 +247,52 @@ func TestResolveTaskSetRuntimeManagedDirectiveForegroundIgnored(t *testing.T) {
 	}
 }
 
+// TestResolveTaskSetRuntimeBoundDrainsAtBindingFromOtherCheckout asserts a
+// pre-existing binding at a different checkout is drained there (not rebound),
+// the binding is unchanged, and the run reports the checkout (ADR-0151).
+func TestResolveTaskSetRuntimeBoundDrainsAtBindingFromOtherCheckout(t *testing.T) {
+	t.Parallel()
+	root, d := setupImplementFixture(t)
+
+	wt := filepath.Join(t.TempDir(), "bound-wt")
+	if out, err := exec.Command("git", "-C", root, "worktree", "add", "-b", "bound", wt, "HEAD").CombinedOutput(); err != nil {
+		t.Fatalf("worktree add: %v\n%s", err, out)
+	}
+	id, err := tasks.ResolveRepositoryIdentity(d.tasksDeps(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := binding.Put(d.tasksDeps(), binding.Key(id, "demo"), binding.Adopt(wt, "bound", "")); err != nil {
+		t.Fatal(err)
+	}
+
+	var report bytes.Buffer
+	resolved, err := ResolveTaskSetRuntimeWith(d, tasks.ResolveInput{CWD: root}, "demo", false, RuntimeConfirmOptions{
+		Output: &report,
+	})
+	if err != nil {
+		t.Fatalf("resolve runtime: %v", err)
+	}
+	if resolved.RuntimeOverride != wt {
+		t.Fatalf("RuntimeOverride = %q, want bound checkout %q", resolved.RuntimeOverride, wt)
+	}
+	if !strings.Contains(report.String(), "draining at bound checkout "+wt) {
+		t.Fatalf("report = %q, want drain-at-binding location for %q", report.String(), wt)
+	}
+
+	b, ok, err := binding.Lookup(d.tasksDeps(), binding.Key(id, "demo"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || b.Provisioned || b.RuntimePath != wt {
+		t.Fatalf("binding = %+v ok=%v, want unchanged adopted at %q", b, ok, wt)
+	}
+}
+
 // TestResolveTaskSetRuntimeManagedDirectiveYieldsToExistingBinding asserts a
-// pre-existing binding at a different checkout is silently re-bound to the
-// current checkout on foreground implement; the directive is ignored (ADR-0072).
+// pre-existing binding at a different checkout wins over a managed directive on
+// foreground implement; the directive is ignored and the binding is resumed
+// (ADR-0072/0151).
 func TestResolveTaskSetRuntimeManagedDirectiveYieldsToExistingBinding(t *testing.T) {
 	t.Parallel()
 	root, d := setupImplementFixture(t)
@@ -270,24 +314,87 @@ func TestResolveTaskSetRuntimeManagedDirectiveYieldsToExistingBinding(t *testing
 	if err != nil {
 		t.Fatalf("resolve runtime: %v", err)
 	}
-	// Rebound to current checkout (trunk); executor already resolves it.
-	if resolved.RuntimeOverride != "" {
-		t.Fatalf("RuntimeOverride = %q, want empty after silent rebind to current", resolved.RuntimeOverride)
+	if resolved.RuntimeOverride != wt {
+		t.Fatalf("RuntimeOverride = %q, want bound checkout %q", resolved.RuntimeOverride, wt)
 	}
 
-	currentRuntime, err := tasks.ResolveRuntimePathWith(d.tasksDeps(), root, "")
-	if err != nil {
-		t.Fatal(err)
-	}
 	b, ok, err := binding.Lookup(d.tasksDeps(), binding.Key(id, "demo"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !ok || b.Provisioned || b.RuntimePath != currentRuntime {
-		t.Fatalf("binding = %+v ok=%v, want adopted rebind at current %q", b, ok, currentRuntime)
+	if !ok || b.Provisioned || b.RuntimePath != wt {
+		t.Fatalf("binding = %+v ok=%v, want unchanged adopted at %q", b, ok, wt)
 	}
 	if _, err := os.Stat(wt); err != nil {
-		t.Fatalf("old adopted worktree must remain on disk: %v", err)
+		t.Fatalf("bound worktree must remain on disk: %v", err)
+	}
+}
+
+// TestResolveTaskSetRuntimeInvalidBindingRefuses asserts a missing bound
+// checkout is refused on the foreground path with Queue-matching guidance.
+func TestResolveTaskSetRuntimeInvalidBindingRefuses(t *testing.T) {
+	t.Parallel()
+	root, d := setupImplementFixture(t)
+	missing := filepath.Join(t.TempDir(), "gone-wt")
+	id, err := tasks.ResolveRepositoryIdentity(d.tasksDeps(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := binding.Put(d.tasksDeps(), binding.Key(id, "demo"), binding.Adopt(missing, "gone", "")); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = ResolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root}, "demo", false)
+	if err == nil || !strings.Contains(err.Error(), "bound worktree for demo is invalid") {
+		t.Fatalf("err = %v, want invalid-binding refusal naming the set", err)
+	}
+	if !strings.Contains(err.Error(), "repair git state") || !strings.Contains(err.Error(), "unbind-worktree") {
+		t.Fatalf("err = %v, want repair/unbind guidance", err)
+	}
+}
+
+// TestResolveTaskSetRuntimeRefusesDifferentRepository asserts a runtime
+// override pointing at another repository is refused, naming that repository.
+func TestResolveTaskSetRuntimeRefusesDifferentRepository(t *testing.T) {
+	t.Parallel()
+	root, d := setupImplementFixture(t)
+
+	other := t.TempDir()
+	for _, args := range [][]string{
+		{"init"},
+		{"config", "user.email", "test@test"},
+		{"config", "user.name", "test"},
+	} {
+		if out, err := runImplementGit(other, args...); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	writeImplementFile(t, filepath.Join(other, "README.md"), "# other\n")
+	if out, err := runImplementGit(other, "add", "-A"); err != nil {
+		t.Fatal(err, out)
+	}
+	if out, err := runImplementGit(other, "commit", "-m", "init"); err != nil {
+		t.Fatal(err, out)
+	}
+
+	otherID, err := tasks.ResolveRepositoryIdentity(d.tasksDeps(), other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentID, err := tasks.ResolveRepositoryIdentity(d.tasksDeps(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = ResolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root, RuntimeOverride: other}, "demo", false)
+	if err == nil || !strings.Contains(err.Error(), "belongs to a different repository") {
+		t.Fatalf("err = %v, want different-repository refusal", err)
+	}
+	if !strings.Contains(err.Error(), otherID.CommonDir) {
+		t.Fatalf("err = %v, want set's repository %q named", err, otherID.CommonDir)
+	}
+	if !strings.Contains(err.Error(), currentID.CommonDir) {
+		t.Fatalf("err = %v, want current repository %q named", err, currentID.CommonDir)
 	}
 }
 

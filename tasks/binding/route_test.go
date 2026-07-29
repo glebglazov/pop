@@ -200,10 +200,10 @@ func TestRouteDrainCheckoutNoDirectiveQueueBindsIntegrationTarget(t *testing.T) 
 	}
 }
 
-// TestRouteDrainCheckoutNoDirectiveSecondDrainRebindsForeground asserts a later
-// foreground drain from a different checkout re-points the binding to the current
-// checkout rather than resuming the first bound worktree (ADR-0072).
-func TestRouteDrainCheckoutNoDirectiveSecondDrainRebindsForeground(t *testing.T) {
+// TestRouteDrainCheckoutNoDirectiveSecondDrainResumesBinding asserts a later
+// foreground drain from a different checkout resumes the first bound worktree
+// rather than re-pointing the binding (ADR-0151).
+func TestRouteDrainCheckoutNoDirectiveSecondDrainResumesBinding(t *testing.T) {
 	t.Parallel()
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
@@ -232,18 +232,15 @@ func TestRouteDrainCheckoutNoDirectiveSecondDrainRebindsForeground(t *testing.T)
 	if err != nil {
 		t.Fatalf("second route: %v", err)
 	}
-	if !secondRes.Rebound {
-		t.Fatalf("second drain must rebind to current checkout, got %+v", secondRes)
+	if !secondRes.UsedExistingBinding || secondRes.Rebound {
+		t.Fatalf("second drain must resume the first binding, got %+v", secondRes)
 	}
-	secondRuntime, err := tasks.ResolveRuntimePathWith(td, second, "")
-	if err != nil {
-		t.Fatal(err)
+	if secondRes.RuntimePath != firstRes.RuntimePath {
+		t.Fatalf("second runtime %q != first binding %q", secondRes.RuntimePath, firstRes.RuntimePath)
 	}
-	if secondRes.RuntimePath != secondRuntime {
-		t.Fatalf("second runtime %q != current %q", secondRes.RuntimePath, secondRuntime)
-	}
-	if _, err := os.Stat(first); err != nil {
-		t.Fatalf("first bound worktree must remain on disk after rebind: %v", err)
+	_, b, ok, err := GetForSet(td, second, "set-a")
+	if err != nil || !ok || b.RuntimePath != firstRes.RuntimePath {
+		t.Fatalf("binding = %+v ok=%v, want unchanged at %q", b, ok, firstRes.RuntimePath)
 	}
 }
 
@@ -909,10 +906,9 @@ func TestProbeWorktreeDirectiveBoundSatisfied(t *testing.T) {
 
 func boolPtr(v bool) *bool { return &v }
 
-// TestRouteDrainCheckoutForegroundRebindsAdoptedSilently asserts an idle
-// adopted binding at a different checkout is silently re-pointed to the current
-// checkout; the old worktree stays on disk (ADR-0072).
-func TestRouteDrainCheckoutForegroundRebindsAdoptedSilently(t *testing.T) {
+// TestRouteDrainCheckoutForegroundResumesAdoptedBinding asserts an idle
+// adopted binding at a different checkout is resumed, not re-pointed (ADR-0151).
+func TestRouteDrainCheckoutForegroundResumesAdoptedBinding(t *testing.T) {
 	t.Parallel()
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
@@ -929,26 +925,18 @@ func TestRouteDrainCheckoutForegroundRebindsAdoptedSilently(t *testing.T) {
 	if err != nil {
 		t.Fatalf("route: %v", err)
 	}
-	currentRuntime, err := tasks.ResolveRuntimePathWith(td, currentWT, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !got.Rebound || got.UsedExistingBinding || got.RuntimePath != currentRuntime {
-		t.Fatalf("result = %+v, want silent rebind to %q", got, currentRuntime)
-	}
-	if _, err := os.Stat(oldWT); err != nil {
-		t.Fatalf("old adopted worktree must remain on disk: %v", err)
+	if !got.UsedExistingBinding || got.Rebound || got.RuntimePath != oldWT {
+		t.Fatalf("result = %+v, want resume binding at %q", got, oldWT)
 	}
 	_, b, ok, err := GetForSet(td, currentWT, "set-a")
-	if err != nil || !ok || b.RuntimePath != currentRuntime || b.Provisioned {
-		t.Fatalf("binding = %+v ok=%v, want adopted rebind at %q", b, ok, currentRuntime)
+	if err != nil || !ok || b.RuntimePath != oldWT || b.Provisioned {
+		t.Fatalf("binding = %+v ok=%v, want unchanged adopted at %q", b, ok, oldWT)
 	}
 }
 
-// TestRouteDrainCheckoutForegroundManagedRebindConfirmDeletes asserts confirming
-// the managed rebind prompt tears down the old managed worktree and rebinds to
-// current (ADR-0072).
-func TestRouteDrainCheckoutForegroundManagedRebindConfirmDeletes(t *testing.T) {
+// TestRouteDrainCheckoutForegroundResumesManagedBinding asserts a managed
+// binding at a different checkout is resumed without teardown (ADR-0151).
+func TestRouteDrainCheckoutForegroundResumesManagedBinding(t *testing.T) {
 	t.Parallel()
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
@@ -965,92 +953,35 @@ func TestRouteDrainCheckoutForegroundManagedRebindConfirmDeletes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("route: %v", err)
 	}
-	currentRuntime, err := tasks.ResolveRuntimePathWith(td, currentWT, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !got.Rebound || got.RuntimePath != currentRuntime {
-		t.Fatalf("result = %+v, want rebind to %q", got, currentRuntime)
-	}
-	if _, err := os.Stat(managed.RuntimePath); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("managed worktree should be deleted, stat err = %v", err)
-	}
-	if branch := runRouteGitOutput(t, repo, "branch", "--list", managed.Branch); strings.TrimSpace(branch) != "" {
-		t.Fatalf("managed branch should be deleted, still have %q", branch)
-	}
-	_, b, ok, err := GetForSet(td, currentWT, "set-m")
-	if err != nil || !ok || b.RuntimePath != currentRuntime || b.Provisioned {
-		t.Fatalf("binding = %+v ok=%v, want adopted rebind at %q", b, ok, currentRuntime)
-	}
-}
-
-// TestRouteDrainCheckoutForegroundManagedRebindDeclineCompletesRebind asserts
-// declining the managed rebind prompt completes the rebind and retains the old
-// managed checkout on disk.
-func TestRouteDrainCheckoutForegroundManagedRebindDeclineCompletesRebind(t *testing.T) {
-	t.Parallel()
-	td := routeTestDeps(t)
-	repo := initAdoptRepo(t)
-	currentWT := addLinkedWorktree(t, repo, "current")
-	managed := seedManagedBindingAtRoot(t, td, repo, "set-m")
-
-	got, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
-		TD:              td,
-		CurrentCheckout: currentWT,
-		SetID:           "set-m",
-		Trigger:         TriggerImplementForeground,
-		ConfirmIn:       strings.NewReader("n\n"),
-	})
-	if err != nil {
-		t.Fatalf("route err = %v, want successful rebind", err)
-	}
-	currentRuntime, err := tasks.ResolveRuntimePathWith(td, currentWT, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !got.Rebound || got.RuntimePath != currentRuntime {
-		t.Fatalf("result = %+v, want rebind to %q", got, currentRuntime)
+	if !got.UsedExistingBinding || got.Rebound || got.RuntimePath != managed.RuntimePath {
+		t.Fatalf("result = %+v, want resume managed binding at %q", got, managed.RuntimePath)
 	}
 	if _, err := os.Stat(managed.RuntimePath); err != nil {
-		t.Fatalf("managed worktree must remain after decline: %v", err)
+		t.Fatalf("managed worktree must remain: %v", err)
 	}
 	_, b, ok, err := GetForSet(td, currentWT, "set-m")
-	if err != nil || !ok || b.RuntimePath != currentRuntime || b.Provisioned {
-		t.Fatalf("binding = %+v ok=%v, want adopted rebind at %q", b, ok, currentRuntime)
+	if err != nil || !ok || b.RuntimePath != managed.RuntimePath || !b.Provisioned {
+		t.Fatalf("binding = %+v ok=%v, want unchanged managed at %q", b, ok, managed.RuntimePath)
 	}
 }
 
-// TestRouteDrainCheckoutForegroundRebindRefusesLiveLock asserts foreground
-// implement refuses to rebind while the bound checkout holds a live Runtime
-// execution lock.
-func TestRouteDrainCheckoutForegroundRebindRefusesLiveLock(t *testing.T) {
+// TestRouteDrainCheckoutForegroundInvalidBindingRefuses asserts a missing
+// bound checkout is refused on the foreground path (ADR-0151).
+func TestRouteDrainCheckoutForegroundInvalidBindingRefuses(t *testing.T) {
 	t.Parallel()
 	td := routeTestDeps(t)
 	repo := initAdoptRepo(t)
-	oldWT := addLinkedWorktree(t, repo, "locked")
-	currentWT := addLinkedWorktree(t, repo, "current")
-	seedBinding(t, td, repo, "set-a", Adopt(oldWT, "locked", "proj"))
+	missing := filepath.Join(t.TempDir(), "gone-wt")
+	seedBinding(t, td, repo, "set-a", Adopt(missing, "gone", "proj"))
 
 	_, err := RouteDrainCheckout(RouteDrainCheckoutRequest{
 		TD:              td,
-		CurrentCheckout: currentWT,
+		CurrentCheckout: repo,
 		SetID:           "set-a",
 		Trigger:         TriggerImplementForeground,
-		Hooks: LifecycleHooks{
-			ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus {
-				if runtimePath == oldWT {
-					return &tasks.RuntimeLockStatus{Locked: true, Metadata: &tasks.RuntimeLockMetadata{SetID: "set-a"}}
-				}
-				return &tasks.RuntimeLockStatus{RuntimePath: runtimePath}
-			},
-		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "currently executing") {
-		t.Fatalf("route err = %v, want live-lock refusal", err)
-	}
-	_, b, ok, err := GetForSet(td, repo, "set-a")
-	if err != nil || !ok || b.RuntimePath != oldWT {
-		t.Fatalf("binding = %+v ok=%v, want unchanged at %q", b, ok, oldWT)
+	if err == nil || !errors.Is(err, ErrBoundWorktreeInvalid) {
+		t.Fatalf("route err = %v, want ErrBoundWorktreeInvalid", err)
 	}
 }
 

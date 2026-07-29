@@ -1,6 +1,7 @@
 package implement
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -41,11 +42,15 @@ type WholeSetOptions struct {
 	PreSeedTopic func(taskTitle string)
 }
 
-// RuntimeConfirmOptions carries confirmation inputs for foreground rebind prompts.
+// RuntimeConfirmOptions carries confirmation inputs and the report writer for
+// foreground drain routing.
 type RuntimeConfirmOptions struct {
 	Yes        bool
 	ConfirmIn  io.Reader
 	ConfirmOut io.Writer
+	// Output receives the drain-at-binding location report. When nil, the report
+	// is discarded (tests that only assert ResolveInput may omit it).
+	Output io.Writer
 }
 
 // RunWholeSet orchestrates whole-set Implement: route → drain.
@@ -62,6 +67,7 @@ func RunWholeSetWith(d *Deps, opts WholeSetOptions) (*tasks.RunTaskSetResult, er
 		Yes:        opts.Yes,
 		ConfirmIn:  opts.ConfirmIn,
 		ConfirmOut: opts.ConfirmOut,
+		Output:     opts.Output,
 	})
 	if err != nil {
 		return nil, err
@@ -98,6 +104,12 @@ func RunWholeSetWith(d *Deps, opts WholeSetOptions) (*tasks.RunTaskSetResult, er
 // the ResolveInput the executor should use.
 func ResolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, inWorktree bool) (tasks.ResolveInput, error) {
 	return resolveTaskSetRuntime(d, in, taskSetPath, inWorktree, RuntimeConfirmOptions{})
+}
+
+// ResolveTaskSetRuntimeWith applies drain checkout routing with confirmation and
+// report options — the domain-contract seam behaviour tests exercise.
+func ResolveTaskSetRuntimeWith(d *Deps, in tasks.ResolveInput, taskSetPath string, inWorktree bool, confirm RuntimeConfirmOptions) (tasks.ResolveInput, error) {
+	return resolveTaskSetRuntime(d, in, taskSetPath, inWorktree, confirm)
 }
 
 func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, inWorktree bool, confirm RuntimeConfirmOptions) (tasks.ResolveInput, error) {
@@ -152,18 +164,51 @@ func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, i
 		},
 	})
 	if err != nil {
+		if errors.Is(err, binding.ErrBoundWorktreeInvalid) {
+			return in, fmt.Errorf("bound worktree for %s is invalid (%v); repair git state or run `pop tasks unbind-worktree`", taskSetID, err)
+		}
 		return in, err
 	}
+
+	currentID, err := tasks.ResolveRepositoryIdentity(td, resolved.ProjectPath)
+	if err != nil {
+		return in, err
+	}
+	runtimeID, err := tasks.ResolveRepositoryIdentity(td, route.RuntimePath)
+	if err != nil {
+		return in, err
+	}
+	if currentID.CommonDir != runtimeID.CommonDir {
+		return in, fmt.Errorf("task set %q belongs to a different repository than the current checkout (%s vs %s); run implement from a checkout of the set's repository",
+			taskSetID, currentID.CommonDir, runtimeID.CommonDir)
+	}
+
 	// Foreground implement never reaches the Queue-only worktree directive
-	// (ADR-0072), so ProvisionedManaged/AdoptedNamed are never set here. An existing
-	// binding at the current checkout resumes there; rebinding off a different idle
-	// checkout re-points to current (Rebound). An explicit override resolves to that
-	// checkout — both resolved checkouts the executor must be pointed at. The
-	// directive is ignored; the final step persists a default binding to the current
-	// checkout (ADR-0062), but its RuntimePath is that same current checkout the
-	// executor already resolves, so it needs no re-pointing here.
+	// (ADR-0072), so ProvisionedManaged/AdoptedNamed are never set here. An
+	// existing binding wins regardless of cwd (ADR-0151): point the executor at
+	// it and, when invoked from elsewhere, report where the drain actually runs.
+	// An unbound set's BoundDefault persists a binding to the current checkout —
+	// RuntimePath is that same checkout the executor already resolves, so it
+	// needs no re-pointing here.
 	if route.UsedExistingBinding || route.ProvisionedManaged || route.AdoptedNamed || strings.TrimSpace(in.RuntimeOverride) != "" {
 		in.RuntimeOverride = route.RuntimePath
+	}
+	if route.UsedExistingBinding {
+		currentRuntime, err := tasks.ResolveRuntimePathWith(td, resolved.ProjectPath, "")
+		if err != nil {
+			return in, err
+		}
+		boundRuntime, err := tasks.ResolveRuntimePathWith(td, route.RuntimePath, "")
+		if err != nil {
+			return in, err
+		}
+		if boundRuntime != currentRuntime {
+			out := confirm.Output
+			if out == nil {
+				out = io.Discard
+			}
+			fmt.Fprintf(out, "draining at bound checkout %s\n", route.RuntimePath)
+		}
 	}
 	return in, nil
 }

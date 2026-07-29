@@ -42,8 +42,8 @@ type RouteDrainCheckoutRequest struct {
 	SetID           string
 	Trigger         DrainTrigger
 	RuntimeOverride string
-	// Yes, ConfirmIn, and ConfirmOut gate managed-worktree teardown when a
-	// foreground implement rebinds off an idle managed binding (ADR-0072).
+	// Yes, ConfirmIn, and ConfirmOut are reserved for forced-rebind teardown
+	// confirmation (ADR-0151); the silent-rebind path that used them is retired.
 	Yes        bool
 	ConfirmIn  io.Reader
 	ConfirmOut io.Writer
@@ -71,8 +71,9 @@ type RouteDrainCheckoutResult struct {
 	// resume via step 1. RuntimePath is the checkout the executor already resolves
 	// on its own, so unlike the other flags the caller need not re-point at it.
 	BoundDefault bool
-	// Rebound is true when a foreground implement re-pointed an idle binding at a
-	// different checkout to the current checkout (ADR-0072).
+	// Rebound is true when a forced rebind re-pointed an idle binding at a
+	// different checkout to the current checkout (ADR-0151). Unset until the
+	// --force-rebind path lands; silent rebind from foreground implement is retired.
 	Rebound bool
 	Binding Binding
 }
@@ -96,18 +97,22 @@ var (
 // RouteDrainCheckout resolves which checkout a set drain runs in, honoring the
 // precedence binding → runtime-path override → (Queue-only) registration
 // worktree-intent → default binding to the chosen checkout (ADR-0059, ADR-0062,
-// ADR-0072). An existing Worktree binding resumes there; an explicit runtime-path
-// override resolves to that checkout. The managed worktree directive is Queue-only:
-// on a Queue spawn an unbound set whose registration carries a `managed` directive
-// forks a managed worktree from the Trunk worktree (records a managed binding), but a
-// foreground implement ignores the directive entirely. The retired `name` directive
-// is no longer consumed (ADR-0115). Otherwise the first such drain persists a default
+// ADR-0151). An existing Worktree binding resumes there for both triggers — a
+// foreground implement invoked outside the binding drains at the binding rather
+// than re-pointing it. An explicit runtime-path override resolves to that
+// checkout. The managed worktree directive is Queue-only: on a Queue spawn an
+// unbound set whose registration carries a `managed` directive forks a managed
+// worktree from the Trunk worktree (records a managed binding), but a foreground
+// implement ignores the directive entirely. The retired `name` directive is no
+// longer consumed (ADR-0115). Otherwise the first such drain persists a default
 // (adopted) Worktree binding to the checkout it chose — the current checkout for a
 // foreground implement, the integration target the Queue routes into for a
 // headless spawn — and resumes there on later drains (ADR-0062). The directive and
 // the default binding are reached only when unbound and unoverridden, so an
 // operator's bind/override always wins and any provisioning stays lazy and
-// one-time: later drains resume via the binding recorded here.
+// one-time: later drains resume via the binding recorded here. Both triggers
+// validate a bound checkout before returning it (missing / unregistered ⇒
+// ErrBoundWorktreeInvalid).
 func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult, error) {
 	if req.TD == nil {
 		return RouteDrainCheckoutResult{}, fmt.Errorf("missing task dependencies")
@@ -137,8 +142,10 @@ func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult
 		return RouteDrainCheckoutResult{}, err
 	}
 
-	// 1. An existing Worktree binding resumes there (Queue) or is re-pointed to
-	// the current checkout (foreground implement, ADR-0072).
+	// 1. An existing Worktree binding resumes there for both triggers
+	// (ADR-0146/0151). Foreground implement no longer silently re-points the set
+	// to the current checkout; moving off a binding is an explicit act
+	// (bind-worktree --force today; --force-rebind on implement in a later slice).
 	if ok && strings.TrimSpace(existing.RuntimePath) != "" {
 		if override := strings.TrimSpace(req.RuntimeOverride); override != "" {
 			overridePath, err := tasks.ResolveRuntimePathWith(req.TD, checkout, override)
@@ -149,66 +156,13 @@ func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult
 				return RouteDrainCheckoutResult{}, fmt.Errorf("%w: %s conflicts with %s for %s", ErrRuntimeOverrideConflict, overridePath, existing.RuntimePath, setID)
 			}
 		}
-		if req.Trigger == TriggerQueueSpawn {
-			if err := ValidateBoundWorktree(req.TD, checkout, existing); err != nil {
-				return RouteDrainCheckoutResult{}, fmt.Errorf("%w: %v", ErrBoundWorktreeInvalid, err)
-			}
-			return RouteDrainCheckoutResult{
-				RuntimePath:         existing.RuntimePath,
-				UsedExistingBinding: true,
-				Binding:             existing,
-			}, nil
-		}
-		existingCanon, err := canonicalCheckoutPath(req.TD, existing.RuntimePath)
-		if err != nil {
-			return RouteDrainCheckoutResult{}, fmt.Errorf("canonicalize bound checkout: %w", err)
-		}
-		currentCanon, err := canonicalCheckoutPath(req.TD, currentRuntime)
-		if err != nil {
-			return RouteDrainCheckoutResult{}, fmt.Errorf("canonicalize current checkout: %w", err)
-		}
-		if existingCanon == currentCanon {
-			return RouteDrainCheckoutResult{
-				RuntimePath:         existing.RuntimePath,
-				UsedExistingBinding: true,
-				Binding:             existing,
-			}, nil
-		}
-		lock := readRuntimeLock(req.Hooks, existing.RuntimePath)
-		if lock != nil && lock.Locked {
-			if lock.Metadata != nil && lock.Metadata.SetID != "" && lock.Metadata.SetID != setID {
-				return RouteDrainCheckoutResult{}, fmt.Errorf("refusing implement: %s runtime checkout is locked for another set (%s)", setID, lock.Metadata.SetID)
-			}
-			return RouteDrainCheckoutResult{}, fmt.Errorf("refusing implement: %s is currently executing", setID)
-		}
-		confirmOut := req.ConfirmOut
-		if confirmOut == nil {
-			confirmOut = io.Discard
-		}
-		shouldTeardown, err := shouldOfferManagedCheckoutTeardown(req.TD, existing.RuntimePath, map[string]bool{key: true})
-		if err != nil {
-			return RouteDrainCheckoutResult{}, err
-		}
-		if shouldTeardown {
-			confirmed, err := confirmManagedWorktreeDelete(req.ConfirmIn, confirmOut, req.Yes, existing.RuntimePath,
-				"non-interactive implement requires --yes to delete managed worktree when rebinding")
-			if err != nil {
-				return RouteDrainCheckoutResult{}, err
-			}
-			if confirmed {
-				if err := TeardownManagedWorktree(req.TD, req.PD, req.Config, existing, req.Hooks); err != nil {
-					return RouteDrainCheckoutResult{}, err
-				}
-			}
-		}
-		b := Adopt(currentRuntime, CurrentBranch(req.TD, currentRuntime), DetectProject(req.PD, req.TD, req.Config, repoID))
-		if err := Put(req.TD, key, b); err != nil {
-			return RouteDrainCheckoutResult{}, err
+		if err := ValidateBoundWorktree(req.TD, checkout, existing); err != nil {
+			return RouteDrainCheckoutResult{}, fmt.Errorf("%w: %v", ErrBoundWorktreeInvalid, err)
 		}
 		return RouteDrainCheckoutResult{
-			RuntimePath: currentRuntime,
-			Rebound:     true,
-			Binding:     b,
+			RuntimePath:         existing.RuntimePath,
+			UsedExistingBinding: true,
+			Binding:             existing,
 		}, nil
 	}
 
