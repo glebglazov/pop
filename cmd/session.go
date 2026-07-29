@@ -22,6 +22,7 @@ const (
 	iconDirSession        = "■"
 	iconStandaloneSession = "□"
 	iconAttention         = ui.IconAttention
+	iconUnboundManaged    = "U" // Unbound managed worktree marker (ADR-0152)
 )
 
 func currentTmuxSession() string {

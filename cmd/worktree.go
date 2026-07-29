@@ -235,10 +235,11 @@ func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefine
 	}
 
 	// Convert to UI items with session icons
-	items := buildWorktreeItems(ctx, sortedWorktrees, history.TmuxSessionActivity())
+	items := buildWorktreeItems(ctx, sortedWorktrees, history.TmuxSessionActivity(), cmdLayerDeps().tasksDeps())
 
 	iconLegends := []ui.IconLegend{
 		{Icon: iconDirSession, Desc: "Directory with tmux session"},
+		{Icon: iconUnboundManaged, Desc: "Unbound managed worktree (no Task set bound)"},
 	}
 	if attentionEnabled {
 		iconLegends = append(iconLegends, ui.IconLegend{Icon: iconAttention, Desc: "Agent has unread output"})
@@ -284,7 +285,11 @@ func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefine
 	return ui.Run(items, opts...)
 }
 
-func buildWorktreeItems(ctx *project.RepoContext, worktrees []project.Worktree, sessionActivity map[string]int64) []ui.Item {
+// buildWorktreeItems converts worktrees to picker items, applying the session
+// icon and the Unbound managed worktree marker. The marker classification is
+// the one binding-store read this surface makes (ADR-0152) — bounded to here;
+// it never runs during project expansion.
+func buildWorktreeItems(ctx *project.RepoContext, worktrees []project.Worktree, sessionActivity map[string]int64, td *tasks.Deps) []ui.Item {
 	items := make([]ui.Item, len(worktrees))
 	for i, wt := range worktrees {
 		items[i] = ui.Item{
@@ -295,6 +300,9 @@ func buildWorktreeItems(ctx *project.RepoContext, worktrees []project.Worktree, 
 		sessionName := project.TmuxSessionName(ctx, wt.Name)
 		if _, hasSession := sessionActivity[sessionName]; hasSession {
 			items[i].Icon = iconDirSession
+		}
+		if state, err := binding.ClassifyManagedWorktree(td, wt.Path); err == nil && state == binding.ManagedUnbound {
+			items[i].Marker = iconUnboundManaged
 		}
 	}
 	return items

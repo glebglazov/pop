@@ -20,6 +20,7 @@ type Item struct {
 	Path        string // Full path (returned on selection)
 	Context     string // Additional context (e.g., branch name)
 	Icon        string // Optional icon displayed to the left of name
+	Marker      string // Optional leading marker, independent of Icon (e.g. Unbound managed worktree)
 	SessionName string // Pre-computed tmux session name
 }
 
@@ -659,6 +660,15 @@ func (p *Picker) pickerHasIcons() bool {
 	return false
 }
 
+func (p *Picker) pickerHasMarkers() bool {
+	for j := range p.items {
+		if p.items[j].Marker != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *Picker) pickerMaxContextLen() int {
 	if !p.showContext {
 		return 0
@@ -675,6 +685,7 @@ func (p *Picker) pickerMaxContextLen() int {
 func (p *Picker) pickerCell(item Item, _ RowState) string {
 	maxContextLen := p.pickerMaxContextLen()
 	hasIcons := p.pickerHasIcons()
+	hasMarkers := p.pickerHasMarkers()
 
 	var line string
 	if p.showContext && item.Context != "" {
@@ -687,6 +698,17 @@ func (p *Picker) pickerCell(item Item, _ RowState) string {
 	if hasIcons {
 		if item.Icon != "" {
 			line = " " + item.Icon + line
+		} else {
+			line = "  " + line
+		}
+	}
+
+	// Marker is a separate column from Icon: session/attention state and
+	// managed-binding state are independent facts that can both apply to the
+	// same row, so one must not overwrite the other.
+	if hasMarkers {
+		if item.Marker != "" {
+			line = " " + item.Marker + line
 		} else {
 			line = "  " + line
 		}
@@ -759,6 +781,9 @@ func (p *Picker) helpEntries() []HelpEntry {
 	for _, item := range p.items {
 		if item.Icon != "" {
 			iconsSeen[item.Icon] = true
+		}
+		if item.Marker != "" {
+			iconsSeen[item.Marker] = true
 		}
 	}
 	if len(iconsSeen) > 0 {

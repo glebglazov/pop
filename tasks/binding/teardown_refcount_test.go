@@ -13,6 +13,50 @@ import (
 	"github.com/glebglazov/pop/tasks"
 )
 
+// TestClassifyManagedWorktreeMarksUnboundAfterFoldReleasesLastReferent proves
+// the Worktree picker's "next open" guarantee (ADR-0152): classification reads
+// live binding state fresh rather than caching it, so a checkout that was
+// ManagedBound goes ManagedUnbound the moment its last referent's binding is
+// released — here, by a fold whose teardown offer is declined.
+func TestClassifyManagedWorktreeMarksUnboundAfterFoldReleasesLastReferent(t *testing.T) {
+	t.Parallel()
+	repo := initAdoptRepo(t)
+	td := lifecycleTestDeps(t)
+	seedDoneTaskSet(t, td, repo, "set-marker")
+	b, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
+		TD: td, CheckoutPath: repo, SetID: "set-marker",
+	})
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	writeFileCommit(t, b.RuntimePath, "feature.txt", "work\n", "set work")
+
+	before, err := ClassifyManagedWorktree(td, b.RuntimePath)
+	if err != nil {
+		t.Fatalf("classify before fold: %v", err)
+	}
+	if before != ManagedBound {
+		t.Fatalf("before fold: state = %v, want ManagedBound", before)
+	}
+
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+	got, err := Fold(td, nil, cfg, "set-marker", FoldOptions{In: strings.NewReader("n\n")}, LifecycleHooks{}, io.Discard)
+	if err != nil {
+		t.Fatalf("fold decline teardown: %v", err)
+	}
+	if got.TornDown {
+		t.Fatal("TornDown should be false when declined")
+	}
+
+	after, err := ClassifyManagedWorktree(td, b.RuntimePath)
+	if err != nil {
+		t.Fatalf("classify after fold: %v", err)
+	}
+	if after != ManagedUnbound {
+		t.Fatalf("after fold: state = %v, want ManagedUnbound", after)
+	}
+}
+
 func TestBindWorktreeRebindLastManagedReferentPromptsAndDeletes(t *testing.T) {
 	t.Parallel()
 	repo := initAdoptRepo(t)

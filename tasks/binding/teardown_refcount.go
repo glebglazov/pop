@@ -30,6 +30,44 @@ func shouldOfferManagedCheckoutTeardown(td *tasks.Deps, runtimePath string, excl
 	return n == 0, nil
 }
 
+// WorktreeMarkerState is the Worktree picker's three-way classification of a
+// checkout for the Unbound managed worktree marker (ADR-0152).
+type WorktreeMarkerState int
+
+const (
+	// OrdinaryWorktree is a checkout pop did not create.
+	OrdinaryWorktree WorktreeMarkerState = iota
+	// ManagedBound is a pop-managed checkout with at least one live,
+	// non-archived Task set referent.
+	ManagedBound
+	// ManagedUnbound is a pop-managed checkout with zero live referents —
+	// the state the Worktree picker marks (ADR-0152).
+	ManagedUnbound
+)
+
+// ClassifyManagedWorktree reports runtimePath's marker state for the Worktree
+// picker. It delegates to shouldOfferManagedCheckoutTeardown rather than
+// re-deriving the rule: "location stays the teardown marker" (ADR-0152) means
+// the marker and the teardown offer describe the same fact and must never
+// disagree.
+func ClassifyManagedWorktree(td *tasks.Deps, runtimePath string) (WorktreeMarkerState, error) {
+	under, err := checkoutUnderManagedRoot(td, runtimePath)
+	if err != nil {
+		return OrdinaryWorktree, err
+	}
+	if !under {
+		return OrdinaryWorktree, nil
+	}
+	unbound, err := shouldOfferManagedCheckoutTeardown(td, runtimePath, nil)
+	if err != nil {
+		return OrdinaryWorktree, err
+	}
+	if unbound {
+		return ManagedUnbound, nil
+	}
+	return ManagedBound, nil
+}
+
 func checkoutUnderManagedRoot(td *tasks.Deps, runtimePath string) (bool, error) {
 	if td == nil {
 		td = tasks.DefaultDeps()

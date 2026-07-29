@@ -8,11 +8,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
+	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/ui"
 )
 
@@ -37,6 +40,14 @@ func countingGitDeps(t *testing.T) (gitCalls *int, restore func()) {
 	return &n, project.SetDefaultDeps(d)
 }
 
+// isolatedWorktreeTestTasksDeps builds a *tasks.Deps rooted at a temp XDG data
+// dir, so buildWorktreeItems' binding-store classification never touches the
+// real machine's pop data (ADR-0145).
+func isolatedWorktreeTestTasksDeps(t *testing.T) *tasks.Deps {
+	t.Helper()
+	return newTestCmdDeps(t, "", "", "").tasksDeps()
+}
+
 func TestBuildWorktreeItems(t *testing.T) {
 	t.Parallel()
 	t.Run("worktree with active session gets icon", func(t *testing.T) {
@@ -47,7 +58,7 @@ func TestBuildWorktreeItems(t *testing.T) {
 			project.SessionName("/repo/feature"): 1000,
 		}
 
-		items := buildWorktreeItems(&project.RepoContext{IsBare: false}, worktrees, sessionActivity)
+		items := buildWorktreeItems(&project.RepoContext{IsBare: false}, worktrees, sessionActivity, isolatedWorktreeTestTasksDeps(t))
 
 		if len(items) != 1 {
 			t.Fatalf("got %d items, want 1", len(items))
@@ -66,7 +77,7 @@ func TestBuildWorktreeItems(t *testing.T) {
 		}
 		sessionActivity := map[string]int64{}
 
-		items := buildWorktreeItems(&project.RepoContext{IsBare: false}, worktrees, sessionActivity)
+		items := buildWorktreeItems(&project.RepoContext{IsBare: false}, worktrees, sessionActivity, isolatedWorktreeTestTasksDeps(t))
 
 		if items[0].Icon != "" {
 			t.Errorf("Icon = %q, want empty", items[0].Icon)
@@ -82,7 +93,7 @@ func TestBuildWorktreeItems(t *testing.T) {
 			project.SessionName("/repo/active"): 1000,
 		}
 
-		items := buildWorktreeItems(&project.RepoContext{IsBare: false}, worktrees, sessionActivity)
+		items := buildWorktreeItems(&project.RepoContext{IsBare: false}, worktrees, sessionActivity, isolatedWorktreeTestTasksDeps(t))
 
 		if len(items) != 2 {
 			t.Fatalf("got %d items, want 2", len(items))
@@ -103,12 +114,48 @@ func TestBuildWorktreeItems(t *testing.T) {
 			project.SessionName("/repo/feature"): 1000,
 		}
 
-		items := buildWorktreeItems(&project.RepoContext{IsBare: false}, worktrees, sessionActivity)
+		items := buildWorktreeItems(&project.RepoContext{IsBare: false}, worktrees, sessionActivity, isolatedWorktreeTestTasksDeps(t))
 
 		if items[0].Icon != iconDirSession {
 			t.Errorf("Icon = %q, want %q", items[0].Icon, iconDirSession)
 		}
 	})
+
+	t.Run("ordinary worktree gets no marker", func(t *testing.T) {
+		worktrees := []project.Worktree{
+			{Name: "feature", Path: "/repo/feature", Branch: "feature-branch"},
+		}
+
+		items := buildWorktreeItems(&project.RepoContext{IsBare: false}, worktrees, map[string]int64{}, isolatedWorktreeTestTasksDeps(t))
+
+		if items[0].Marker != "" {
+			t.Errorf("Marker = %q, want empty", items[0].Marker)
+		}
+	})
+}
+
+// TestBuildWorktreeItemsMarksUnboundManagedWorktree provisions a real scratch
+// worktree via git, so it deliberately does not run in the package's t.Parallel()
+// pool (ADR-0152): overlapping it with TestBuildWorktreeItemsTasksNoGitCalls's
+// brief global project-deps swap (countingGitDeps) would race on that shared
+// package-level variable.
+func TestBuildWorktreeItemsMarksUnboundManagedWorktree(t *testing.T) {
+	td := isolatedWorktreeTestTasksDeps(t)
+	repo := t.TempDir()
+	initGitRepoWithCommitCmd(t, repo)
+	b, err := binding.ProvisionScratchWorktree(td, repo, "HEAD", time.Now())
+	if err != nil {
+		t.Fatalf("provision scratch worktree: %v", err)
+	}
+	worktrees := []project.Worktree{
+		{Name: filepath.Base(b.RuntimePath), Path: b.RuntimePath, Branch: b.Branch},
+	}
+
+	items := buildWorktreeItems(&project.RepoContext{IsBare: false}, worktrees, map[string]int64{}, td)
+
+	if items[0].Marker != iconUnboundManaged {
+		t.Errorf("Marker = %q, want %q", items[0].Marker, iconUnboundManaged)
+	}
 }
 
 func TestRemoveFromHistoryWith(t *testing.T) {
@@ -620,7 +667,7 @@ func TestBuildWorktreeItemsTasksNoGitCalls(t *testing.T) {
 		}
 
 		gitCalls, restore := countingGitDeps(t)
-		buildWorktreeItems(ctx, worktrees, map[string]int64{})
+		buildWorktreeItems(ctx, worktrees, map[string]int64{}, isolatedWorktreeTestTasksDeps(t))
 		restore()
 
 		if *gitCalls != 0 {
