@@ -2,12 +2,14 @@ package implement
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
@@ -45,6 +47,35 @@ func setupImplementFixture(t *testing.T) (root string, d *Deps) {
 	d.Tasks = td
 	d.StdinInteractive = func(io.Reader) bool { return false }
 	return root, d
+}
+
+func setupImplementFixtureStarted(t *testing.T) (root string, d *Deps) {
+	t.Helper()
+	root, d = setupImplementFixture(t)
+	tasksDir := implementTasksDir(t, d.tasksDeps(), root)
+	taskDir := filepath.Join(tasksDir, "demo")
+	manifest := `{"tasks":[{"id":"01-a","file":"01-a.md","title":"A","type":"AFK","status":"done"},{"id":"02-b","file":"02-b.md","title":"B","type":"AFK","status":"open"}]}`
+	if err := os.WriteFile(filepath.Join(taskDir, "index.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeImplementFile(t, filepath.Join(taskDir, "02-b.md"), "## Acceptance criteria\n\n- [ ] ok\n")
+	return root, d
+}
+
+func seedImplementManagedBinding(t *testing.T, td *tasks.Deps, repoRoot, setID string) binding.Binding {
+	t.Helper()
+	b, err := binding.ProvisionWorktree(td, binding.ManagedWorktreesRoot(td), repoRoot, setID, time.Now())
+	if err != nil {
+		t.Fatalf("provision managed: %v", err)
+	}
+	id, err := tasks.ResolveRepositoryIdentity(td, repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := binding.Put(td, binding.Key(id, setID), b); err != nil {
+		t.Fatal(err)
+	}
+	return b
 }
 
 func implementTasksDir(t *testing.T, td *tasks.Deps, repoRoot string) string {
@@ -399,7 +430,7 @@ func TestResolveTaskSetRuntimeRefusesDifferentRepository(t *testing.T) {
 }
 
 // TestResolveTaskSetRuntimeInWorktreeRejectsBoundSet asserts --in-worktree on an
-// already-bound set is rejected with guidance to unbind first — a binding wins.
+// already-bound set is rejected without --force-rebind.
 func TestResolveTaskSetRuntimeInWorktreeRejectsBoundSet(t *testing.T) {
 	t.Parallel()
 	root, d := setupImplementFixture(t)
@@ -415,9 +446,217 @@ func TestResolveTaskSetRuntimeInWorktreeRejectsBoundSet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = ResolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root}, "demo", true)
-	if err == nil || !strings.Contains(err.Error(), "already bound") || !strings.Contains(err.Error(), "unbind-worktree") {
-		t.Fatalf("err = %v, want already-bound rejection with unbind guidance", err)
+	_, err = resolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root}, "demo", true, false, RuntimeConfirmOptions{})
+	if err == nil || !strings.Contains(err.Error(), "already bound") || !strings.Contains(err.Error(), "--force-rebind") {
+		t.Fatalf("err = %v, want already-bound rejection with --force-rebind guidance", err)
+	}
+}
+
+// TestResolveTaskSetRuntimeForceRebindCleanSetRepoints asserts --force-rebind on
+// a bound set with no done tasks re-points to the current checkout without prompting.
+func TestResolveTaskSetRuntimeForceRebindCleanSetRepoints(t *testing.T) {
+	t.Parallel()
+	root, d := setupImplementFixture(t)
+	wt := filepath.Join(t.TempDir(), "bound-wt")
+	if out, err := exec.Command("git", "-C", root, "worktree", "add", "-b", "bound", wt, "HEAD").CombinedOutput(); err != nil {
+		t.Fatalf("worktree add: %v\n%s", err, out)
+	}
+	id, err := tasks.ResolveRepositoryIdentity(d.tasksDeps(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := binding.Put(d.tasksDeps(), binding.Key(id, "demo"), binding.Adopt(wt, "bound", "")); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	resolved, err := resolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root}, "demo", false, true, RuntimeConfirmOptions{Output: &out})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	currentRuntime, err := tasks.ResolveRuntimePathWith(d.tasksDeps(), root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.RuntimeOverride != currentRuntime {
+		t.Fatalf("RuntimeOverride = %q, want current checkout %q", resolved.RuntimeOverride, currentRuntime)
+	}
+	b, ok, err := binding.Lookup(d.tasksDeps(), binding.Key(id, "demo"))
+	if err != nil || !ok || b.RuntimePath != currentRuntime {
+		t.Fatalf("binding = %+v ok=%v, want rebind to %q", b, ok, currentRuntime)
+	}
+	if out.String() != "" {
+		t.Fatalf("unexpected output for clean rebind: %q", out.String())
+	}
+}
+
+// TestResolveTaskSetRuntimeForceRebindStartedDecline asserts a started set
+// prompts before rebind and declining leaves the binding and drain at the original checkout.
+func TestResolveTaskSetRuntimeForceRebindStartedDecline(t *testing.T) {
+	t.Parallel()
+	root, d := setupImplementFixtureStarted(t)
+	wt := filepath.Join(t.TempDir(), "bound-wt")
+	if out, err := exec.Command("git", "-C", root, "worktree", "add", "-b", "bound", wt, "HEAD").CombinedOutput(); err != nil {
+		t.Fatalf("worktree add: %v\n%s", err, out)
+	}
+	id, err := tasks.ResolveRepositoryIdentity(d.tasksDeps(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := binding.Put(d.tasksDeps(), binding.Key(id, "demo"), binding.Adopt(wt, "bound", "")); err != nil {
+		t.Fatal(err)
+	}
+
+	var report bytes.Buffer
+	resolved, err := resolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root}, "demo", false, true, RuntimeConfirmOptions{
+		ConfirmIn:  strings.NewReader("n\n"),
+		ConfirmOut: &report,
+		Output:     &report,
+	})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if resolved.RuntimeOverride != wt {
+		t.Fatalf("RuntimeOverride = %q, want original binding %q", resolved.RuntimeOverride, wt)
+	}
+	if !strings.Contains(report.String(), "away from its binding") {
+		t.Fatalf("report = %q, want progress rebind prompt", report.String())
+	}
+	b, ok, err := binding.Lookup(d.tasksDeps(), binding.Key(id, "demo"))
+	if err != nil || !ok || b.RuntimePath != wt {
+		t.Fatalf("binding = %+v ok=%v, want unchanged at %q", b, ok, wt)
+	}
+}
+
+// TestResolveTaskSetRuntimeForceRebindStartedNonInteractiveErrors asserts
+// non-interactive runs without --yes error instead of rebinding a started set.
+func TestResolveTaskSetRuntimeForceRebindStartedNonInteractiveErrors(t *testing.T) {
+	t.Parallel()
+	root, d := setupImplementFixtureStarted(t)
+	wt := filepath.Join(t.TempDir(), "bound-wt")
+	if out, err := exec.Command("git", "-C", root, "worktree", "add", "-b", "bound", wt, "HEAD").CombinedOutput(); err != nil {
+		t.Fatalf("worktree add: %v\n%s", err, out)
+	}
+	id, err := tasks.ResolveRepositoryIdentity(d.tasksDeps(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := binding.Put(d.tasksDeps(), binding.Key(id, "demo"), binding.Adopt(wt, "bound", "")); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = resolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root}, "demo", false, true, RuntimeConfirmOptions{
+		ConfirmIn: tasks.NonInteractiveReader{},
+	})
+	if err == nil || !strings.Contains(err.Error(), "non-interactive implement requires --yes to rebind away from binding when the set has progress") {
+		t.Fatalf("err = %v, want non-interactive progress error", err)
+	}
+}
+
+// TestResolveTaskSetRuntimeForceRebindStartedYesProceeds asserts --yes skips the
+// progress prompt and rebinds to the current checkout.
+func TestResolveTaskSetRuntimeForceRebindStartedYesProceeds(t *testing.T) {
+	t.Parallel()
+	root, d := setupImplementFixtureStarted(t)
+	wt := filepath.Join(t.TempDir(), "bound-wt")
+	if out, err := exec.Command("git", "-C", root, "worktree", "add", "-b", "bound", wt, "HEAD").CombinedOutput(); err != nil {
+		t.Fatalf("worktree add: %v\n%s", err, out)
+	}
+	id, err := tasks.ResolveRepositoryIdentity(d.tasksDeps(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := binding.Put(d.tasksDeps(), binding.Key(id, "demo"), binding.Adopt(wt, "bound", "")); err != nil {
+		t.Fatal(err)
+	}
+
+	resolved, err := resolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root}, "demo", false, true, RuntimeConfirmOptions{
+		Yes:        true,
+		ConfirmIn:  tasks.NonInteractiveReader{},
+	})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	currentRuntime, err := tasks.ResolveRuntimePathWith(d.tasksDeps(), root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.RuntimeOverride != currentRuntime {
+		t.Fatalf("RuntimeOverride = %q, want %q", resolved.RuntimeOverride, currentRuntime)
+	}
+}
+
+// TestResolveTaskSetRuntimeForceRebindManagedTeardownAfterProgress asserts
+// rebinding away from an idle managed binding reaches the reference-counted
+// delete confirmation after the progress prompt.
+func TestResolveTaskSetRuntimeForceRebindManagedTeardownAfterProgress(t *testing.T) {
+	t.Parallel()
+	root, d := setupImplementFixtureStarted(t)
+	td := d.tasksDeps()
+	managed := seedImplementManagedBinding(t, td, root, "demo")
+
+	var confirmOut bytes.Buffer
+	resolved, err := resolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root}, "demo", false, true, RuntimeConfirmOptions{
+		ConfirmIn:  strings.NewReader("y\ny\n"),
+		ConfirmOut: &confirmOut,
+	})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	currentRuntime, err := tasks.ResolveRuntimePathWith(td, root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.RuntimeOverride != currentRuntime {
+		t.Fatalf("RuntimeOverride = %q, want %q", resolved.RuntimeOverride, currentRuntime)
+	}
+	if !strings.Contains(confirmOut.String(), "away from its binding") {
+		t.Fatalf("confirm output = %q, want progress prompt first", confirmOut.String())
+	}
+	if !strings.Contains(confirmOut.String(), managed.RuntimePath) {
+		t.Fatalf("confirm output = %q, want managed delete prompt for %q", confirmOut.String(), managed.RuntimePath)
+	}
+	if _, err := os.Stat(managed.RuntimePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("managed worktree should be deleted")
+	}
+}
+
+// TestResolveTaskSetRuntimeInWorktreeForceRebindRetargets asserts --in-worktree
+// on a bound set retargets when --force-rebind is passed.
+func TestResolveTaskSetRuntimeInWorktreeForceRebindRetargets(t *testing.T) {
+	t.Parallel()
+	root, d := setupImplementFixture(t)
+	wt := filepath.Join(t.TempDir(), "existing-wt")
+	if out, err := exec.Command("git", "-C", root, "worktree", "add", "-b", "feature", wt, "HEAD").CombinedOutput(); err != nil {
+		t.Fatalf("worktree add: %v\n%s", err, out)
+	}
+	id, err := tasks.ResolveRepositoryIdentity(d.tasksDeps(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := binding.Put(d.tasksDeps(), binding.Key(id, "demo"), binding.Adopt(wt, "feature", "")); err != nil {
+		t.Fatal(err)
+	}
+
+	resolved, err := resolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root}, "demo", true, true, RuntimeConfirmOptions{
+		Yes:        true,
+		ConfirmIn:  tasks.NonInteractiveReader{},
+	})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	b, ok, err := binding.Lookup(d.tasksDeps(), binding.Key(id, "demo"))
+	if err != nil || !ok {
+		t.Fatalf("lookup: %v ok=%v", err, ok)
+	}
+	if !b.Provisioned {
+		t.Fatalf("binding = %+v, want provisioned managed retarget", b)
+	}
+	if b.RuntimePath != resolved.RuntimeOverride {
+		t.Fatalf("binding %q != runtime override %q", b.RuntimePath, resolved.RuntimeOverride)
+	}
+	if b.RuntimePath == wt {
+		t.Fatalf("binding still at old checkout %q", wt)
 	}
 }
 

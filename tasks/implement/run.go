@@ -19,6 +19,7 @@ type WholeSetOptions struct {
 	ResolveInput    tasks.ResolveInput
 	TaskSetOverride string
 	InWorktree      bool
+	ForceRebind     bool
 	AgentPreset     string
 	AgentPresets    []string
 	AgentExplicit   bool
@@ -63,7 +64,7 @@ func RunWholeSetWith(d *Deps, opts WholeSetOptions) (*tasks.RunTaskSetResult, er
 	if d == nil {
 		d = DefaultDeps()
 	}
-	resolveInput, err := resolveTaskSetRuntime(d, opts.ResolveInput, opts.TaskSetOverride, opts.InWorktree, RuntimeConfirmOptions{
+	resolveInput, err := resolveTaskSetRuntime(d, opts.ResolveInput, opts.TaskSetOverride, opts.InWorktree, opts.ForceRebind, RuntimeConfirmOptions{
 		Yes:        opts.Yes,
 		ConfirmIn:  opts.ConfirmIn,
 		ConfirmOut: opts.ConfirmOut,
@@ -103,16 +104,16 @@ func RunWholeSetWith(d *Deps, opts WholeSetOptions) (*tasks.RunTaskSetResult, er
 // ResolveTaskSetRuntime applies drain checkout routing for tests and returns
 // the ResolveInput the executor should use.
 func ResolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, inWorktree bool) (tasks.ResolveInput, error) {
-	return resolveTaskSetRuntime(d, in, taskSetPath, inWorktree, RuntimeConfirmOptions{})
+	return resolveTaskSetRuntime(d, in, taskSetPath, inWorktree, false, RuntimeConfirmOptions{})
 }
 
 // ResolveTaskSetRuntimeWith applies drain checkout routing with confirmation and
 // report options — the domain-contract seam behaviour tests exercise.
 func ResolveTaskSetRuntimeWith(d *Deps, in tasks.ResolveInput, taskSetPath string, inWorktree bool, confirm RuntimeConfirmOptions) (tasks.ResolveInput, error) {
-	return resolveTaskSetRuntime(d, in, taskSetPath, inWorktree, confirm)
+	return resolveTaskSetRuntime(d, in, taskSetPath, inWorktree, false, confirm)
 }
 
-func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, inWorktree bool, confirm RuntimeConfirmOptions) (tasks.ResolveInput, error) {
+func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, inWorktree bool, forceRebind bool, confirm RuntimeConfirmOptions) (tasks.ResolveInput, error) {
 	resolved, err := tasks.ResolvePathsWith(d.tasksDeps(), d.projectDeps(), d.loadConfig, in)
 	if err != nil {
 		return in, err
@@ -135,16 +136,67 @@ func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, i
 		return in, err
 	}
 
-	// --in-worktree is the explicit opt-in to isolation: provision a managed
-	// worktree forked from the current checkout's HEAD, bind it, and drain there
-	// (ADR-0072). It runs before routing so the subsequent route resolves the
-	// fresh binding.
-	if inWorktree {
-		return provisionInWorktree(d, in, resolved.ProjectPath, taskSetID)
-	}
-
+	started, progress := taskSetRowInfo(refresh, taskSetID)
 	cfg, _ := d.loadConfig(config.DefaultConfigPath())
 	td := d.tasksDeps()
+	hooks := implementLifecycleHooks(td)
+
+	key, existing, bound, err := binding.GetForSet(td, resolved.ProjectPath, taskSetID)
+	if err != nil {
+		return in, err
+	}
+
+	confirmOut := confirm.ConfirmOut
+	if confirmOut == nil {
+		confirmOut = io.Discard
+	}
+
+	// --in-worktree is the explicit opt-in to isolation: provision a managed
+	// worktree forked from the current checkout's HEAD, bind it, and drain there
+	// (ADR-0072). On an already-bound set it is refused without --force-rebind;
+	// with it, retarget passes through the same leave-binding authorization as a
+	// plain rebind (ADR-0151).
+	if inWorktree {
+		if bound {
+			if !forceRebind {
+				return in, fmt.Errorf("tasks implement: task set %s is already bound; pass --force-rebind to retarget --in-worktree", taskSetID)
+			}
+			confirmed, err := binding.AuthorizeLeavingBinding(td, d.projectDeps(), cfg, taskSetID, existing, key, started, progress, confirm.Yes, confirm.ConfirmIn, confirmOut, hooks)
+			if err != nil {
+				return in, err
+			}
+			if !confirmed {
+				inWorktree = false
+				forceRebind = false
+			} else {
+				if err := binding.Delete(td, key); err != nil {
+					return in, err
+				}
+				return provisionInWorktree(d, in, resolved.ProjectPath, taskSetID)
+			}
+		} else {
+			return provisionInWorktree(d, in, resolved.ProjectPath, taskSetID)
+		}
+	}
+
+	if bound && forceRebind {
+		differs, err := binding.CheckoutPathsDiffer(td, existing.RuntimePath, resolved.ProjectPath)
+		if err != nil {
+			return in, err
+		}
+		if differs {
+			confirmed, err := binding.AuthorizeLeavingBinding(td, d.projectDeps(), cfg, taskSetID, existing, key, started, progress, confirm.Yes, confirm.ConfirmIn, confirmOut, hooks)
+			if err != nil {
+				return in, err
+			}
+			if !confirmed {
+				forceRebind = false
+			}
+		} else {
+			forceRebind = false
+		}
+	}
+
 	route, err := binding.RouteDrainCheckout(binding.RouteDrainCheckoutRequest{
 		TD:              td,
 		PD:              d.projectDeps(),
@@ -154,14 +206,7 @@ func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, i
 		SetID:           taskSetID,
 		Trigger:         binding.TriggerImplementForeground,
 		RuntimeOverride: in.RuntimeOverride,
-		Yes:             confirm.Yes,
-		ConfirmIn:       confirm.ConfirmIn,
-		ConfirmOut:      confirm.ConfirmOut,
-		Hooks: binding.LifecycleHooks{
-			ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus {
-				return tasks.ReadRuntimeLockStatus(td, runtimePath)
-			},
-		},
+		ForceRebind:     forceRebind,
 	})
 	if err != nil {
 		if errors.Is(err, binding.ErrBoundWorktreeInvalid) {
@@ -187,13 +232,13 @@ func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, i
 	// (ADR-0072), so ProvisionedManaged/AdoptedNamed are never set here. An
 	// existing binding wins regardless of cwd (ADR-0151): point the executor at
 	// it and, when invoked from elsewhere, report where the drain actually runs.
-	// An unbound set's BoundDefault persists a binding to the current checkout —
-	// RuntimePath is that same checkout the executor already resolves, so it
-	// needs no re-pointing here.
-	if route.UsedExistingBinding || route.ProvisionedManaged || route.AdoptedNamed || strings.TrimSpace(in.RuntimeOverride) != "" {
+	// --force-rebind re-points to the current checkout (Rebound). An unbound set's
+	// BoundDefault persists a binding to the current checkout — RuntimePath is that
+	// same checkout the executor already resolves, so it needs no re-pointing here.
+	if route.Rebound || route.UsedExistingBinding || route.ProvisionedManaged || route.AdoptedNamed || strings.TrimSpace(in.RuntimeOverride) != "" {
 		in.RuntimeOverride = route.RuntimePath
 	}
-	if route.UsedExistingBinding {
+	if route.UsedExistingBinding && !route.Rebound {
 		currentRuntime, err := tasks.ResolveRuntimePathWith(td, resolved.ProjectPath, "")
 		if err != nil {
 			return in, err
@@ -215,8 +260,9 @@ func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, i
 
 // provisionInWorktree implements `--in-worktree`: it forks a managed worktree
 // from the current checkout's HEAD, records a provisioned Worktree binding for
-// the set, and points the drain at the new checkout. An already bound set is
-// rejected so the operator unbinds to retarget.
+// the set, and points the drain at the new checkout. Callers retargeting an
+// already-bound set must authorize leaving the binding and delete the old row
+// before calling this helper.
 func provisionInWorktree(d *Deps, in tasks.ResolveInput, projectPath, setID string) (tasks.ResolveInput, error) {
 	td := d.tasksDeps()
 	cfg, _ := d.loadConfig(config.DefaultConfigPath())
@@ -226,7 +272,7 @@ func provisionInWorktree(d *Deps, in tasks.ResolveInput, projectPath, setID stri
 		return in, err
 	}
 	if bound {
-		return in, fmt.Errorf("tasks implement: task set %s is already bound; run `pop tasks unbind-worktree %s` to retarget --in-worktree", setID, setID)
+		return in, fmt.Errorf("tasks implement: task set %s is already bound", setID)
 	}
 
 	b, err := binding.ProvisionWorktree(td, binding.ManagedWorktreesRoot(td), projectPath, setID, d.now())
@@ -269,5 +315,25 @@ func refreshManagedCheckout(d *Deps) func(setID, projectPath, runtimePath string
 		}
 		_ = binding.RefreshCommitlessManagedBranch(td, cfg, projectPath, b)
 		return nil
+	}
+}
+
+func taskSetRowInfo(refresh *tasks.RefreshResult, setID string) (started bool, progress string) {
+	if refresh == nil {
+		return false, ""
+	}
+	for _, row := range refresh.Rows {
+		if row.ID == setID {
+			return row.Started, row.Progress
+		}
+	}
+	return false, ""
+}
+
+func implementLifecycleHooks(td *tasks.Deps) binding.LifecycleHooks {
+	return binding.LifecycleHooks{
+		ReadLock: func(runtimePath string) *tasks.RuntimeLockStatus {
+			return tasks.ReadRuntimeLockStatus(td, runtimePath)
+		},
 	}
 }

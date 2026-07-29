@@ -948,7 +948,6 @@ func TestRouteDrainCheckoutForegroundResumesManagedBinding(t *testing.T) {
 		CurrentCheckout: currentWT,
 		SetID:           "set-m",
 		Trigger:         TriggerImplementForeground,
-		Yes:             true,
 	})
 	if err != nil {
 		t.Fatalf("route: %v", err)

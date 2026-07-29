@@ -438,10 +438,27 @@ func confirmYesNo(in io.Reader, out io.Writer, yes bool, prompt, nonInteractiveE
 		}
 	}
 	fmt.Fprintf(out, "%s", prompt)
-	answer, err := bufio.NewReader(in).ReadString('\n')
+	answer, err := asLineReader(in).br.ReadString('\n')
 	if err != nil && err != io.EOF {
 		return false, fmt.Errorf("read confirmation: %w", err)
 	}
 	answer = strings.ToLower(strings.TrimSpace(answer))
 	return answer == "y" || answer == "yes", nil
+}
+
+func asLineReader(in io.Reader) *lineReader {
+	if lr, ok := in.(*lineReader); ok {
+		return lr
+	}
+	return &lineReader{br: bufio.NewReader(in)}
+}
+
+// lineReader buffers confirmation input so multiple prompts can share one
+// underlying reader without bufio read-ahead consuming later answers.
+type lineReader struct {
+	br *bufio.Reader
+}
+
+func (lr *lineReader) Read(p []byte) (int, error) {
+	return lr.br.Read(p)
 }

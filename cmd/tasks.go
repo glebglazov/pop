@@ -32,6 +32,7 @@ var (
 	taskAgentOutput           tasks.AgentOutputMode
 	taskRunYes                bool
 	taskInWorktree            bool
+	taskForceRebind           bool
 	taskAllowDirty            tasks.DirtyRuntimeStrategy = tasks.DirtyRuntimeContinue
 	taskMaxTries              int
 	taskTimeout               string
@@ -302,6 +303,7 @@ func init() {
 	taskImplementCmd.Flags().StringVar(&taskTimeout, "timeout", "45m", "Maximum duration per attempt")
 	taskImplementCmd.Flags().BoolVarP(&taskRunYes, "yes", "y", false, "Skip confirmation prompt")
 	taskImplementCmd.Flags().BoolVar(&taskInWorktree, "in-worktree", false, "Provision a managed worktree forked from the current checkout and drain there")
+	taskImplementCmd.Flags().BoolVar(&taskForceRebind, "force-rebind", false, "Re-point a bound set to the current checkout (or retarget --in-worktree)")
 	taskImplementCmd.Flags().StringArrayVar(&taskImplementVerifyAgents, "verify-agent", nil, "Verifier agent preset for the in-drain verify phase; repeat to define an ordered fallback list (steers verification independently of --agent)")
 	taskImplementCmd.Flags().StringVar(&taskImplementVerifyEffort, "verify-effort", "", "Verifier model-strength tier for the in-drain verify phase: light, standard, or heavy (default heavy)")
 
@@ -995,6 +997,7 @@ func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reade
 		ResolveInput:     taskResolveInput(),
 		TaskSetOverride:  taskSetPath,
 		InWorktree:       taskInWorktree,
+		ForceRebind:      taskForceRebind,
 		AgentPreset:      selectedTaskAgentPreset(),
 		AgentPresets:     selectedTaskAgentPresets(),
 		AgentExplicit:    agentExplicit,

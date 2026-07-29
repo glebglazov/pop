@@ -3,7 +3,6 @@ package binding
 import (
 	"errors"
 	"fmt"
-	"io"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -42,12 +41,11 @@ type RouteDrainCheckoutRequest struct {
 	SetID           string
 	Trigger         DrainTrigger
 	RuntimeOverride string
-	// Yes, ConfirmIn, and ConfirmOut are reserved for forced-rebind teardown
-	// confirmation (ADR-0151); the silent-rebind path that used them is retired.
-	Yes        bool
-	ConfirmIn  io.Reader
-	ConfirmOut io.Writer
-	Hooks      LifecycleHooks
+	// ForceRebind requests moving a bound set off its Worktree binding to the
+	// current checkout on a foreground implement (ADR-0151). Authorization and
+	// managed-checkout teardown run in implement before routing calls this with
+	// ForceRebind; routing only performs the re-point.
+	ForceRebind bool
 }
 
 // RouteDrainCheckoutResult describes the resolved drain checkout.
@@ -154,6 +152,29 @@ func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult
 			}
 			if overridePath != existing.RuntimePath {
 				return RouteDrainCheckoutResult{}, fmt.Errorf("%w: %s conflicts with %s for %s", ErrRuntimeOverrideConflict, overridePath, existing.RuntimePath, setID)
+			}
+		}
+		if req.ForceRebind && req.Trigger == TriggerImplementForeground {
+			oldCanon, err := checkoutCanonOrMissing(req.TD, existing.RuntimePath)
+			if err != nil {
+				return RouteDrainCheckoutResult{}, err
+			}
+			newCanon, err := canonicalCheckoutPath(req.TD, currentRuntime)
+			if err != nil {
+				return RouteDrainCheckoutResult{}, err
+			}
+			if oldCanon == "" || oldCanon != newCanon {
+				b, rebound, err := RebindForegroundCheckout(req.TD, req.PD, req.Config, key, checkout, setID, existing, true)
+				if err != nil {
+					return RouteDrainCheckoutResult{}, err
+				}
+				if rebound {
+					return RouteDrainCheckoutResult{
+						RuntimePath: b.RuntimePath,
+						Rebound:     true,
+						Binding:     b,
+					}, nil
+				}
 			}
 		}
 		if err := ValidateBoundWorktree(req.TD, checkout, existing); err != nil {
