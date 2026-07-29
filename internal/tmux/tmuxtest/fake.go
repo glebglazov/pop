@@ -142,6 +142,9 @@ type Fake struct {
 	PaneIdentity map[string]string
 	// PaneTitles records SetPaneTitle: pane id -> title.
 	PaneTitles map[string]string
+	// PaneCwd records each pane's working directory. NewWindow, SplitWindow, and
+	// RespawnPane write it; PaneCurrentPath reads it.
+	PaneCwd map[string]string
 	// Respawned records RespawnPane: pane id -> new working directory.
 	Respawned map[string]string
 	// ResizedWidth / ResizedHeight record ResizePane by axis: pane id -> size.
@@ -248,6 +251,13 @@ func (f *Fake) PaneSession(paneID string) (string, error) {
 		return "", err
 	}
 	return info.Session, nil
+}
+
+func (f *Fake) PaneCurrentPath(paneID string) (string, error) {
+	if f.PaneCwd == nil {
+		return "", nil
+	}
+	return f.PaneCwd[paneID], nil
 }
 
 func (f *Fake) IsActivePane(paneID string) bool {
@@ -501,6 +511,13 @@ func (f *Fake) addWindowPane(session, name, id string) {
 	f.Windows[session][name] = append(f.Windows[session][name], id)
 }
 
+func (f *Fake) setPaneCwd(paneID, dir string) {
+	if f.PaneCwd == nil {
+		f.PaneCwd = map[string]string{}
+	}
+	f.PaneCwd[paneID] = dir
+}
+
 func (f *Fake) NewWindow(session, name, dir string) (string, error) {
 	if f.NewWindowFunc != nil {
 		return f.NewWindowFunc(session, name, dir)
@@ -511,6 +528,7 @@ func (f *Fake) NewWindow(session, name, dir string) (string, error) {
 		f.WindowCwd = map[string]string{}
 	}
 	f.WindowCwd[session+":"+name] = dir
+	f.setPaneCwd(id, dir)
 	return id, nil
 }
 
@@ -520,6 +538,7 @@ func (f *Fake) SplitWindow(session, name, dir string) (string, error) {
 	}
 	id := f.newPaneID()
 	f.addWindowPane(session, name, id)
+	f.setPaneCwd(id, dir)
 	return id, nil
 }
 
@@ -668,6 +687,7 @@ func (f *Fake) RespawnPane(paneID, dir string) error {
 		f.Respawned = map[string]string{}
 	}
 	f.Respawned[paneID] = dir
+	f.setPaneCwd(paneID, dir)
 	return nil
 }
 

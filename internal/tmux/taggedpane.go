@@ -2,6 +2,7 @@ package tmux
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 )
 
@@ -95,6 +96,11 @@ func EnsureTaggedPane(t Tmux, tag PaneTag, session, dir, value, command string) 
 		return "", err
 	}
 	if paneID != "" {
+		if dir != "" {
+			if err := ensurePaneDir(t, paneID, dir); err != nil {
+				return "", err
+			}
+		}
 		if err := t.SendKeys(paneID, command, "Enter"); err != nil {
 			return "", fmt.Errorf("send command: %w", err)
 		}
@@ -122,4 +128,38 @@ func EnsureTaggedPane(t Tmux, tag PaneTag, session, dir, value, command string) 
 		return "", fmt.Errorf("send command: %w", err)
 	}
 	return paneID, nil
+}
+
+// ensurePaneDir respawns a reused pane when its cwd differs from the checkout
+// the caller asked for. An empty dir skips correction so callers that omit a
+// directory keep their current behaviour.
+func ensurePaneDir(t Tmux, paneID, dir string) error {
+	current, err := t.PaneCurrentPath(paneID)
+	if err != nil {
+		return fmt.Errorf("read pane directory: %w", err)
+	}
+	if pathsSame(current, dir) {
+		return nil
+	}
+	if err := t.RespawnPane(paneID, dir); err != nil {
+		return fmt.Errorf("correct pane directory: %w", err)
+	}
+	return nil
+}
+
+func pathsSame(a, b string) bool {
+	if a == b {
+		return true
+	}
+	ca, errA := filepath.Abs(a)
+	cb, errB := filepath.Abs(b)
+	if errA != nil || errB != nil {
+		return filepath.Clean(a) == filepath.Clean(b)
+	}
+	ra, errA := filepath.EvalSymlinks(ca)
+	rb, errB := filepath.EvalSymlinks(cb)
+	if errA == nil && errB == nil {
+		return ra == rb
+	}
+	return ca == cb
 }

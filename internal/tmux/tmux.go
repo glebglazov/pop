@@ -38,6 +38,8 @@ type Tmux interface {
 	PaneInfo(paneID string) (PaneInfo, error)
 	// PaneSession resolves just the session name owning a pane.
 	PaneSession(paneID string) (string, error)
+	// PaneCurrentPath returns the pane's working directory (#{pane_current_path}).
+	PaneCurrentPath(paneID string) (string, error)
 	// IsActivePane reports whether the pane is the attended pane (pane active
 	// + window active + session attached). Lookup failure reports false.
 	IsActivePane(paneID string) bool

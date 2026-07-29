@@ -1234,6 +1234,38 @@ func TestSpawnReusesExistingPaneForSameSet(t *testing.T) {
 	if len(f.WindowRetiled) != 0 {
 		t.Fatalf("reusing a pane must not split or retile, got retiles %v", f.WindowRetiled)
 	}
+	if len(f.Respawned) != 0 {
+		t.Fatalf("same checkout must not respawn the pane, got %v", f.Respawned)
+	}
+}
+
+func TestSpawnReusesPaneCorrectsDirectory(t *testing.T) {
+	f := &tmuxtest.Fake{}
+	d := &Deps{Tmux: f}
+
+	first := actionableDecision()
+	if err := Spawn(d, first); err != nil {
+		t.Fatalf("first Spawn: %v", err)
+	}
+	pane := soleDrainPane(t, f, "proj-session")
+
+	second := actionableDecision()
+	second.pinRuntimePath = true
+	second.scan.ProjectPath = "/pop/worktrees/repo/set"
+	second.scan.RuntimePath = "/pop/worktrees/repo/set"
+	if err := Spawn(d, second); err != nil {
+		t.Fatalf("second Spawn: %v", err)
+	}
+	if got := soleDrainPane(t, f, "proj-session"); got != pane {
+		t.Fatalf("second spawn used pane %q, want reused %q", got, pane)
+	}
+	if got := f.Respawned[pane]; got != "/pop/worktrees/repo/set" {
+		t.Fatalf("Respawned[%s] = %q, want worktree checkout", pane, got)
+	}
+	joined := strings.Join(f.SentCommands[pane], " || ")
+	if !strings.Contains(joined, "--task-runtime-path /pop/worktrees/repo/set") {
+		t.Fatalf("drain command %q must pass the runtime override", joined)
+	}
 }
 
 func TestSpawnNonActionableNoOp(t *testing.T) {

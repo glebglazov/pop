@@ -159,6 +159,63 @@ func TestEnsureTaggedPaneReusesTaggedPane(t *testing.T) {
 	if got := f.SentCommands[first]; len(got) != 2 {
 		t.Fatalf("sent = %v, want two commands into the reused pane", got)
 	}
+	if len(f.Respawned) != 0 {
+		t.Fatalf("same directory must not respawn, got %v", f.Respawned)
+	}
+}
+
+func TestEnsureTaggedPaneReusedPaneCorrectsDirectory(t *testing.T) {
+	f := &tmuxtest.Fake{}
+
+	pane, err := tmux.EnsureTaggedPane(f, tmux.TagSet, "work", "/trunk", "set-1", "one")
+	if err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	if f.PaneCwd[pane] != "/trunk" {
+		t.Fatalf("initial pane cwd = %q, want /trunk", f.PaneCwd[pane])
+	}
+
+	reused, err := tmux.EnsureTaggedPane(f, tmux.TagSet, "work", "/worktree/set-1", "set-1", "two")
+	if err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	if reused != pane {
+		t.Fatalf("pane = %q, want reused %q", reused, pane)
+	}
+	if got := f.Respawned[pane]; got != "/worktree/set-1" {
+		t.Fatalf("Respawned[%s] = %q, want /worktree/set-1", pane, got)
+	}
+	if f.PaneCwd[pane] != "/worktree/set-1" {
+		t.Fatalf("pane cwd after respawn = %q, want /worktree/set-1", f.PaneCwd[pane])
+	}
+	if got := f.SentCommands[pane]; len(got) != 2 || got[1] != "two Enter" {
+		t.Fatalf("sent = %v, want two commands ending with the worktree spawn", got)
+	}
+}
+
+func TestEnsureTaggedPaneReusedPaneEmptyDirSkipsCorrection(t *testing.T) {
+	f := &tmuxtest.Fake{
+		Live:    map[string]string{"work": "/proj"},
+		Windows: map[string]map[string][]string{"work": {"pop-queue": {"%1"}}},
+		PaneCwd: map[string]string{"%1": "/stale"},
+		PaneTagValues: map[string]map[tmux.PaneTag]string{
+			"%1": {tmux.TagSet: "set-1"},
+		},
+	}
+
+	pane, err := tmux.EnsureTaggedPane(f, tmux.TagSet, "work", "", "set-1", "run")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pane != "%1" {
+		t.Fatalf("pane = %q, want reused %%1", pane)
+	}
+	if len(f.Respawned) != 0 {
+		t.Fatalf("empty dir must not respawn, got %v", f.Respawned)
+	}
+	if f.PaneCwd["%1"] != "/stale" {
+		t.Fatalf("pane cwd = %q, want stale directory left unchanged", f.PaneCwd["%1"])
+	}
 }
 
 func TestEnsureWindowCreatesAndReports(t *testing.T) {

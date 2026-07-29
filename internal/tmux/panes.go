@@ -30,6 +30,11 @@ func (t *realTmux) PaneSession(paneID string) (string, error) {
 	return t.run.output("display-message", "-t", paneID, "-p", "#{session_name}")
 }
 
+// PaneCurrentPath returns the pane's working directory.
+func (t *realTmux) PaneCurrentPath(paneID string) (string, error) {
+	return t.run.output("display-message", "-t", paneID, "-p", "#{pane_current_path}")
+}
+
 // IsActivePane reports whether the pane is visible to the user: active in its
 // window, the window active in its session, and the session attached. Any
 // lookup failure reports false.

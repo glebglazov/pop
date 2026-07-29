@@ -55,6 +55,23 @@ func TestPaneSessionBuildsArgs(t *testing.T) {
 	}
 }
 
+func TestPaneCurrentPathBuildsArgs(t *testing.T) {
+	r := &recordingRunner{out: "/repo/api"}
+	tm := &realTmux{run: r}
+
+	path, err := tm.PaneCurrentPath("%1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	wantArgs := [][]string{{"display-message", "-t", "%1", "-p", "#{pane_current_path}"}}
+	if !reflect.DeepEqual(r.calls, wantArgs) {
+		t.Fatalf("args = %v, want %v", r.calls, wantArgs)
+	}
+	if path != "/repo/api" {
+		t.Fatalf("path = %q, want /repo/api", path)
+	}
+}
+
 func TestIsActivePane(t *testing.T) {
 	tests := []struct {
 		name string
