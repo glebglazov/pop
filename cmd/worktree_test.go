@@ -158,6 +158,45 @@ func TestBuildWorktreeItemsMarksUnboundManagedWorktree(t *testing.T) {
 	}
 }
 
+// TestBuildWorktreeItemsDistinguishesBoundManagedWorktree pins the third marker
+// state: a managed worktree that still has a live Task set bound must not read
+// on screen as either an unbound managed worktree or a human one. Like the
+// unbound test it provisions a real worktree, so it stays out of the package's
+// t.Parallel() pool.
+func TestBuildWorktreeItemsDistinguishesBoundManagedWorktree(t *testing.T) {
+	td := isolatedWorktreeTestTasksDeps(t)
+	repo := t.TempDir()
+	initGitRepoWithCommitCmd(t, repo)
+	b, err := binding.ProvisionScratchWorktree(td, repo, "HEAD", time.Now())
+	if err != nil {
+		t.Fatalf("provision scratch worktree: %v", err)
+	}
+	id, err := tasks.ResolveRepositoryIdentity(td, b.RuntimePath)
+	if err != nil {
+		t.Fatalf("resolve repository identity: %v", err)
+	}
+	if err := binding.Put(td, binding.Key(id, "set-bound"), binding.Adopt(td, b.RuntimePath, b.Branch, repo)); err != nil {
+		t.Fatalf("bind set to managed worktree: %v", err)
+	}
+
+	worktrees := []project.Worktree{
+		{Name: filepath.Base(b.RuntimePath), Path: b.RuntimePath, Branch: b.Branch},
+		{Name: filepath.Base(repo), Path: repo, Branch: "master"},
+	}
+
+	items := buildWorktreeItems(&project.RepoContext{IsBare: false}, worktrees, map[string]int64{}, td)
+
+	if items[0].Marker != iconBoundManaged {
+		t.Errorf("bound managed worktree: Marker = %q, want %q", items[0].Marker, iconBoundManaged)
+	}
+	if items[0].Marker == iconUnboundManaged {
+		t.Errorf("bound managed worktree shares the unbound glyph %q", iconUnboundManaged)
+	}
+	if items[1].Marker != "" {
+		t.Errorf("ordinary worktree: Marker = %q, want empty", items[1].Marker)
+	}
+}
+
 func TestRemoveFromHistoryWith(t *testing.T) {
 	t.Parallel()
 	histJSON := `{"entries":[
@@ -654,8 +693,11 @@ func TestWorktreeHelpHasNoPhantomCreateBinding(t *testing.T) {
 // project.SessionName(path) — which spawns 2-3 git subprocesses per worktree —
 // inside the build loop. Building items for many worktrees must cost zero git
 // calls regardless of count.
+//
+// It cannot run in the package's t.Parallel() pool: countingGitDeps swaps the
+// process-global project deps, so any other parallel test running git during
+// the swap window is counted here and fails this one spuriously.
 func TestBuildWorktreeItemsTasksNoGitCalls(t *testing.T) {
-	t.Parallel()
 	for _, ctx := range []*project.RepoContext{
 		{IsBare: true, RepoName: "myrepo"},
 		{IsBare: false},

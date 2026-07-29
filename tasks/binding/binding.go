@@ -10,10 +10,12 @@
 // retired bindings.json file.
 //
 // The store keys bindings by Repository identity plus Task set identifier and
-// records, per binding, whether pop provisioned the checkout (`git worktree
-// add`) or merely adopted an existing one. Provisioned bindings are torn down
-// on integration/abandon; adopted bindings are never deleted — only the
-// association is forgotten.
+// records, per binding, whether pop created the checkout's directory. That bit
+// is derived from where the checkout lives — under the managed-worktree root or
+// not — rather than from the verb that recorded the binding (ADR-0152), so the
+// same checkout is classified the same way however it was bound. Provisioned
+// checkouts are torn down on integration/abandon; checkouts pop did not create
+// are never deleted — only the association is forgotten.
 package binding
 
 import (
@@ -208,8 +210,9 @@ func Adopt(td *tasks.Deps, checkoutPath, branch, proj string) Binding {
 // checkoutPath when that checkout is a linked git worktree (a non-trunk
 // checkout). It is the entry point `pop tasks implement` uses to adopt the
 // checkout it runs in (ADR-0036): the binding is identical in shape to a
-// `bind-worktree` adoption (Provisioned=false, never deleted), routed through
-// this module's shared store. It never runs `git worktree add` — routing never
+// `bind-worktree` adoption, routed through this module's shared store, with
+// Provisioned derived from the checkout's location like every other adoption
+// (ADR-0152). It never runs `git worktree add` — routing never
 // provisions (ADR-0052); provisioning is an explicit act handled elsewhere.
 //
 // It is a no-op returning (false, nil) in two cases. First, when checkoutPath is

@@ -239,6 +239,7 @@ func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefine
 
 	iconLegends := []ui.IconLegend{
 		{Icon: iconDirSession, Desc: "Directory with tmux session"},
+		{Icon: iconBoundManaged, Desc: "Managed worktree (Task set bound)"},
 		{Icon: iconUnboundManaged, Desc: "Unbound managed worktree (no Task set bound)"},
 	}
 	if attentionEnabled {
@@ -286,9 +287,12 @@ func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefine
 }
 
 // buildWorktreeItems converts worktrees to picker items, applying the session
-// icon and the Unbound managed worktree marker. The marker classification is
-// the one binding-store read this surface makes (ADR-0152) — bounded to here;
-// it never runs during project expansion.
+// icon and the managed-worktree marker. The marker renders all three states the
+// classifier reports — bound managed, unbound managed, and (as a blank column)
+// an ordinary human worktree — so the picker never conflates a live managed
+// checkout with one a human made. The classification is the one binding-store
+// read this surface makes (ADR-0152) — bounded to here; it never runs during
+// project expansion.
 func buildWorktreeItems(ctx *project.RepoContext, worktrees []project.Worktree, sessionActivity map[string]int64, td *tasks.Deps) []ui.Item {
 	items := make([]ui.Item, len(worktrees))
 	for i, wt := range worktrees {
@@ -301,8 +305,15 @@ func buildWorktreeItems(ctx *project.RepoContext, worktrees []project.Worktree, 
 		if _, hasSession := sessionActivity[sessionName]; hasSession {
 			items[i].Icon = iconDirSession
 		}
-		if state, err := binding.ClassifyManagedWorktree(td, wt.Path); err == nil && state == binding.ManagedUnbound {
-			items[i].Marker = iconUnboundManaged
+		if state, err := binding.ClassifyManagedWorktree(td, wt.Path); err == nil {
+			switch state {
+			case binding.ManagedUnbound:
+				items[i].Marker = iconUnboundManaged
+			case binding.ManagedBound:
+				items[i].Marker = iconBoundManaged
+			case binding.OrdinaryWorktree:
+				items[i].Marker = ""
+			}
 		}
 	}
 	return items

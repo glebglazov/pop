@@ -22,7 +22,11 @@ const (
 	iconDirSession        = "■"
 	iconStandaloneSession = "□"
 	iconAttention         = ui.IconAttention
-	iconUnboundManaged    = "U" // Unbound managed worktree marker (ADR-0152)
+	// The two managed-worktree markers are a pair: every pop-managed checkout
+	// carries one of them, so a blank marker column means "human worktree"
+	// rather than "not classified yet" (ADR-0152).
+	iconUnboundManaged = "U"
+	iconBoundManaged   = "M"
 )
 
 func currentTmuxSession() string {

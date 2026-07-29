@@ -57,6 +57,43 @@ func TestClassifyManagedWorktreeMarksUnboundAfterFoldReleasesLastReferent(t *tes
 	}
 }
 
+// TestClassifyManagedWorktreeMarksUnboundWhenOnlyReferentIsArchived covers the
+// other way a managed checkout loses its last live referent: the binding row
+// survives, but the set it points at is archived, so nothing is working there
+// any more (ADR-0152). Archiving must reach the marker exactly like folding.
+func TestClassifyManagedWorktreeMarksUnboundWhenOnlyReferentIsArchived(t *testing.T) {
+	t.Parallel()
+	repo := initAdoptRepo(t)
+	td := lifecycleTestDeps(t)
+	defPath := seedDoneTaskSet(t, td, repo, "set-archived")
+	b, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
+		TD: td, CheckoutPath: repo, SetID: "set-archived",
+	})
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+
+	before, err := ClassifyManagedWorktree(td, b.RuntimePath)
+	if err != nil {
+		t.Fatalf("classify before archive: %v", err)
+	}
+	if before != ManagedBound {
+		t.Fatalf("before archive: state = %v, want ManagedBound", before)
+	}
+
+	if err := tasks.SetTaskSetArchived(td, defPath, []string{"set-archived"}, true); err != nil {
+		t.Fatalf("archive set: %v", err)
+	}
+
+	after, err := ClassifyManagedWorktree(td, b.RuntimePath)
+	if err != nil {
+		t.Fatalf("classify after archive: %v", err)
+	}
+	if after != ManagedUnbound {
+		t.Fatalf("after archive: state = %v, want ManagedUnbound", after)
+	}
+}
+
 func TestBindWorktreeRebindLastManagedReferentPromptsAndDeletes(t *testing.T) {
 	t.Parallel()
 	repo := initAdoptRepo(t)
