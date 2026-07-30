@@ -156,7 +156,7 @@ func TestLivePaneMenuReloadUsesCache(t *testing.T) {
 		live: live,
 	})
 	got = updated.(QueueDashboard)
-	if got.live.state(tmuxmod.TagAssist, setID) != livePaneRunning {
+	if got.liveCache().state(tmuxmod.TagAssist, setID) != livePaneRunning {
 		t.Fatalf("live cache not stored on reload")
 	}
 	view := got.View().Content
@@ -212,7 +212,90 @@ func TestLivePaneReloadFillsCache(t *testing.T) {
 	m := newQueueDashboard(d, nil, DashboardSnapshot{})
 	updated, _ := m.Update(msg)
 	got := updated.(QueueDashboard)
-	if got.live.state(tmuxmod.TagSet, "set-a") != livePaneRunning {
-		t.Fatalf("model live after rows msg = %v", got.live.state(tmuxmod.TagSet, "set-a"))
+	if got.liveCache().state(tmuxmod.TagSet, "set-a") != livePaneRunning {
+		t.Fatalf("model live after rows msg = %v", got.liveCache().state(tmuxmod.TagSet, "set-a"))
+	}
+}
+
+// TestLivePaneRowClusterMatchesMenu asserts the row activity cluster uses the
+// same dark/grey/green scheme as the action-menu handoff keys (ADR-0158).
+func TestLivePaneRowClusterMatchesMenu(t *testing.T) {
+	setID := "2026-07-31-cluster"
+	row := DashboardRow{SetRef: SetRef{SetID: setID, Bound: true, RuntimePath: "/wt"}}
+	live := livePaneCache{}
+	live.set(tmuxmod.TagSet, setID, livePaneRunning)
+	live.set(tmuxmod.TagVerify, setID, livePaneIdle)
+	live.set(tmuxmod.TagFold, setID, livePaneNone)
+	live.set(tmuxmod.TagAssist, setID, livePaneRunning)
+
+	cluster := dashboardActivityCluster(row, live, true)
+	menu := newDashboardMenu(row)
+	lines := dashboardMenuLines(menu, 80, live)
+	joined := strings.Join(lines, "\n")
+
+	for _, item := range menu.list.Items() {
+		switch item.action {
+		case menuActionDrain, menuActionVerify, menuActionFold, menuActionAssist:
+			want := styleHandoffKey(item.key, menuItemLiveState(item, row, live))
+			if !strings.Contains(cluster, want) {
+				t.Fatalf("cluster missing %q styled like menu for %s:\ncluster=%q\nmenu=%q", want, item.label, cluster, joined)
+			}
+		}
+	}
+}
+
+// TestLivePaneRowClusterInView asserts the main dashboard view colours the row
+// cluster from the cached per-poll liveness without an extra tmux query.
+func TestLivePaneRowClusterInView(t *testing.T) {
+	setID := "set-row-cluster"
+	row := DashboardRow{CursorKey: "p\x00" + setID, Project: "p", SetRef: SetRef{SetID: setID}}
+	m := newQueueDashboard(&Deps{}, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
+
+	live := livePaneCache{}
+	live.set(tmuxmod.TagSet, setID, livePaneRunning)
+	live.set(tmuxmod.TagAssist, setID, livePaneIdle)
+	updated, _ := m.Update(dashboardRowsMsg{
+		snap: DashboardSnapshot{Rows: []DashboardRow{row}},
+		live: live,
+	})
+	got := updated.(QueueDashboard)
+	view := got.View().Content
+	if !strings.Contains(view, livePaneRunningStyle.Render("i")) {
+		t.Fatalf("view must show green drain in row cluster:\n%s", view)
+	}
+	if !strings.Contains(view, livePaneIdleStyle.Render("S")) {
+		t.Fatalf("view must show grey assist in row cluster:\n%s", view)
+	}
+}
+
+// TestLivePaneRowClusterClearsOnReload asserts a pane dying is reflected on the
+// row by the next poll — the cluster goes dark when tmux no longer reports it.
+func TestLivePaneRowClusterClearsOnReload(t *testing.T) {
+	setID := "set-died"
+	row := DashboardRow{CursorKey: "p\x00" + setID, Project: "p", SetRef: SetRef{SetID: setID}}
+	m := newQueueDashboard(&Deps{}, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
+
+	live := livePaneCache{}
+	live.set(tmuxmod.TagSet, setID, livePaneRunning)
+	updated, _ := m.Update(dashboardRowsMsg{
+		snap: DashboardSnapshot{Rows: []DashboardRow{row}},
+		live: live,
+	})
+	got := updated.(QueueDashboard)
+	if !strings.Contains(got.View().Content, livePaneRunningStyle.Render("i")) {
+		t.Fatal("expected green drain before pane died")
+	}
+
+	updated, _ = got.Update(dashboardRowsMsg{
+		snap: DashboardSnapshot{Rows: []DashboardRow{row}},
+		live: livePaneCache{},
+	})
+	got = updated.(QueueDashboard)
+	view := got.View().Content
+	if strings.Contains(view, livePaneRunningStyle.Render("i")) || strings.Contains(view, livePaneIdleStyle.Render("i")) {
+		t.Fatalf("cluster must be dark after pane died:\n%s", view)
+	}
+	if !strings.Contains(view, dashboardActivityClusterPlain) {
+		t.Fatalf("cluster letters must remain:\n%s", view)
 	}
 }

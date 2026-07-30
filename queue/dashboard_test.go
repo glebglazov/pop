@@ -14,6 +14,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/wayfinder"
@@ -164,8 +165,8 @@ func TestRenderStatusTableColumnsAndIndicator(t *testing.T) {
 	text := out.String()
 
 	for _, want := range []string{
-		"IN PROGRESS",       // live-drained READY → IN PROGRESS
-		work.LiveDrainGlyph, // trailing live-drain indicator
+		"IN PROGRESS",              // live-drained READY → IN PROGRESS
+		dashboardActivityClusterPlain, // trailing activity cluster
 		work.DestLabelManagedWt,
 		work.DestLabelNeedsBind,
 	} {
@@ -184,7 +185,7 @@ func TestDashboardAutoDrainBadgeAndToggle(t *testing.T) {
 		{Project: "pop", Worktree: "/repo/main (main)", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "plain"}},
 	}
 	var rendered strings.Builder
-	renderDashboardTable(&rendered, rows, 0, 0, 20)
+	renderDashboardTable(&rendered, rows, 0, 0, 20, nil)
 	if !strings.Contains(rendered.String(), "AD") {
 		t.Fatalf("missing auto-drain flag:\n%s", rendered.String())
 	}
@@ -919,11 +920,11 @@ func TestDashboardTwoLineRowLine1ShowsIndicatorProjectSetIDWorktree(t *testing.T
 		CursorKey: "pop\x00set",
 	}
 	widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths([]DashboardRow{row}), 120)
-	line1 := dashboardTwoLineRowLine1(row, widths)
+	line1 := dashboardTwoLineRowLine1(row, widths, nil)
 
-	// Line 1 carries PROJECT, TASK SET, WORKTREE and the trailing live-drain
-	// indicator; STATUS lives on line 2. A live drain lights the ● (ADR-0111).
-	for _, want := range []string{work.LiveDrainGlyph, "pop", row.SetID, "main"} {
+	// Line 1 carries PROJECT, TASK SET, WORKTREE and the trailing activity
+	// cluster; STATUS lives on line 2.
+	for _, want := range []string{dashboardActivityClusterPlain, "pop", row.SetID, "main"} {
 		if !strings.Contains(line1, want) {
 			t.Fatalf("two-line row line 1 missing expected value %q: %q", want, line1)
 		}
@@ -1018,41 +1019,37 @@ func TestDashboardTwoLineSingleLineLayoutUnchanged(t *testing.T) {
 	}
 }
 
-// TestDashboardLiveIndicator pins the trailing live-drain indicator (ADR-0111): a
-// PID-alive drain lights a single ● in the house working colour, an idle row
-// shows a blank cell, and the plain (width-measurement) form carries no ANSI.
-func TestDashboardLiveIndicator(t *testing.T) {
-	live := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady, LiveDrain: true}}
-	idle := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady}}
+// TestDashboardActivityCluster pins the trailing per-activity cluster (ADR-0158):
+// every task-set row carries a fixed-width ivfS cluster; map rows stay blank.
+func TestDashboardActivityCluster(t *testing.T) {
+	setID := "set-cluster"
+	row := DashboardRow{SetRef: SetRef{SetID: setID}}
+	mapRow := DashboardRow{IsMap: true, SetRef: SetRef{SetID: "map-1"}}
 
-	if got := dashboardLiveIndicator(idle, true); got != "" {
-		t.Fatalf("idle indicator = %q, want blank", got)
+	plain := dashboardActivityCluster(row, nil, false)
+	if plain != dashboardActivityClusterPlain {
+		t.Fatalf("plain cluster = %q, want %q", plain, dashboardActivityClusterPlain)
 	}
-	if got := dashboardLiveIndicator(idle, false); got != "" {
-		t.Fatalf("idle indicator (plain) = %q, want blank", got)
+	if got := dashboardActivityCluster(mapRow, nil, false); got != "" {
+		t.Fatalf("map cluster = %q, want blank", got)
 	}
 
-	plain := dashboardLiveIndicator(live, false)
-	if plain != work.LiveDrainGlyph {
-		t.Fatalf("live indicator (plain) = %q, want %q", plain, work.LiveDrainGlyph)
+	live := livePaneCache{}
+	live.set(tmuxmod.TagSet, setID, livePaneRunning)
+	styled := dashboardActivityCluster(row, live, true)
+	if !strings.Contains(styled, livePaneRunningStyle.Render("i")) {
+		t.Fatalf("styled cluster missing green drain key: %q", styled)
 	}
-	styled := dashboardLiveIndicator(live, true)
-	if !strings.Contains(styled, work.LiveDrainGlyph) {
-		t.Fatalf("live indicator (styled) = %q, want it to contain %q", styled, work.LiveDrainGlyph)
-	}
-	if styled == plain {
-		t.Fatalf("styled indicator = %q, want ANSI styling distinct from the plain glyph", styled)
-	}
-	if w := lipgloss.Width(styled); w != 1 {
-		t.Fatalf("styled indicator width = %d, want 1 (one-character cell)", w)
+	if w := lipgloss.Width(styled); w != len(dashboardActivityClusterPlain) {
+		t.Fatalf("styled cluster width = %d, want %d", w, len(dashboardActivityClusterPlain))
 	}
 }
 
-// TestDashboardSingleLineDropsDrainColumnKeepsIndicator pins the retired DRAIN
-// column and the trailing indicator on the single-line layout (ADR-0111): the
-// header carries no DRAIN, the column order is PROJECT/TASK SET/STATUS/WORKTREE/
-// indicator, and a live row carries the ● glyph.
-func TestDashboardSingleLineDropsDrainColumnKeepsIndicator(t *testing.T) {
+// TestDashboardSingleLineDropsDrainColumnKeepsCluster pins the retired DRAIN
+// column and the trailing activity cluster on the single-line layout (ADR-0158):
+// the header carries no DRAIN, the column order is PROJECT/TASK SET/STATUS/
+// WORKTREE/cluster, and every task-set row carries ivfS.
+func TestDashboardSingleLineDropsDrainColumnKeepsCluster(t *testing.T) {
 	rows := []DashboardRow{
 		{Project: "pop", Worktree: "main", CursorKey: "pop\x00live", SetRef: SetRef{SetID: "live", RawStatus: tasks.StatusReady, LiveDrain: true}},
 		{Project: "pop", Worktree: "main", CursorKey: "pop\x00idle", SetRef: SetRef{SetID: "idle", RawStatus: tasks.StatusDone}},
@@ -1068,7 +1065,7 @@ func TestDashboardSingleLineDropsDrainColumnKeepsIndicator(t *testing.T) {
 		t.Fatalf("single-line view must not carry the retired DRAIN column:\n%s", view)
 	}
 	// Column order: PROJECT, TASK SET, STATUS, WORKTREE — left to right, then the
-	// blank-header indicator column trails (no DRAIN anywhere).
+	// blank-header activity cluster trails (no DRAIN anywhere).
 	header := strings.Split(view, "\n")[dashboardTestLineIndex(strings.Split(view, "\n"), "PROJECT")]
 	iProject := strings.Index(header, "PROJECT")
 	iSet := strings.Index(header, "TASK SET")
@@ -1077,40 +1074,39 @@ func TestDashboardSingleLineDropsDrainColumnKeepsIndicator(t *testing.T) {
 	if !(iProject >= 0 && iProject < iSet && iSet < iStatus && iStatus < iWorktree) {
 		t.Fatalf("single-line header column order wrong: %q", header)
 	}
-	// The live row carries the ● glyph; the done row does not.
 	lines := strings.Split(view, "\n")
 	liveIdx := dashboardTestLineIndex(lines, "live")
 	if liveIdx < 0 {
 		t.Fatalf("live row missing from view:\n%s", view)
 	}
-	if !strings.Contains(lines[liveIdx], work.LiveDrainGlyph) {
-		t.Fatalf("live row missing ● indicator: %q", lines[liveIdx])
+	if !strings.Contains(lines[liveIdx], dashboardActivityClusterPlain) {
+		t.Fatalf("live row missing activity cluster: %q", lines[liveIdx])
 	}
 	doneIdx := dashboardTestLineIndex(lines, "idle")
 	if doneIdx < 0 {
 		t.Fatalf("idle row missing from view:\n%s", view)
 	}
-	if strings.Contains(lines[doneIdx], work.LiveDrainGlyph) {
-		t.Fatalf("idle row must not show the ● indicator: %q", lines[doneIdx])
+	if !strings.Contains(lines[doneIdx], dashboardActivityClusterPlain) {
+		t.Fatalf("idle row missing activity cluster: %q", lines[doneIdx])
 	}
 }
 
-// TestDashboardNarrowPaneKeepsIndicator confirms the fixed-width indicator is
-// never dropped by elastic width fitting even when the pane is very narrow
-// (ADR-0111): the ● still appears in a live row's rendered cells.
-func TestDashboardNarrowPaneKeepsIndicator(t *testing.T) {
+// TestDashboardNarrowPaneKeepsCluster confirms the fixed-width activity cluster
+// is never dropped by elastic width fitting even when the pane is very narrow
+// (ADR-0158): ivfS still appears in every task-set row's rendered cells.
+func TestDashboardNarrowPaneKeepsCluster(t *testing.T) {
 	rows := []DashboardRow{
 		{Project: "a-really-long-project-name", Worktree: "some-long-branch", CursorKey: "a\x00live",
 			SetRef: SetRef{SetID: "live", RawStatus: tasks.StatusReady, LiveDrain: true}},
 	}
 	natural := dashboardColumnWidths(rows)
 	fitted := dashboardFitColumnWidths(natural, 20)
-	if fitted[dashboardColIndicator] < 1 {
-		t.Fatalf("indicator column width = %d, want >= 1 (never dropped)", fitted[dashboardColIndicator])
+	if fitted[dashboardColIndicator] < len(dashboardActivityClusterPlain) {
+		t.Fatalf("indicator column width = %d, want >= %d (never dropped)", fitted[dashboardColIndicator], len(dashboardActivityClusterPlain))
 	}
-	line := dashboardTableLine(dashboardRowValues(rows[0]), fitted)
-	if !strings.Contains(line, work.LiveDrainGlyph) {
-		t.Fatalf("narrow-pane live row missing ● indicator: %q", line)
+	line := dashboardTableLine(dashboardRowValues(rows[0], nil), fitted)
+	if !strings.Contains(line, dashboardActivityClusterPlain) {
+		t.Fatalf("narrow-pane row missing activity cluster: %q", line)
 	}
 }
 
@@ -4291,7 +4287,7 @@ func TestDashboardStatusSuffixesRender(t *testing.T) {
 	// that no truncation clips the suffixes. Column order: PROJECT, TASK SET,
 	// STATUS (index 2, given the width), WORKTREE, indicator.
 	widths := []int{20, 20, 60, 20, 20}
-	single := dashboardTableLine(dashboardRowValues(both), widths)
+	single := dashboardTableLine(dashboardRowValues(both, nil), widths)
 	if !strings.Contains(single, "· auto-drain · orphaned") {
 		t.Fatalf("single-line render missing suffixes:\n%s", single)
 	}
@@ -4314,7 +4310,7 @@ func TestDashboardParkedAndConfigErrorSuffixes(t *testing.T) {
 
 	for _, status := range []tasks.TaskSetStatus{tasks.StatusReady, tasks.StatusBlocked, tasks.StatusAwaitingApproval, tasks.StatusFailed} {
 		row := DashboardRow{SetRef: SetRef{RawStatus: status, Parked: true}}
-		single := dashboardTableLine(dashboardRowValues(row), statusW)
+		single := dashboardTableLine(dashboardRowValues(row, nil), statusW)
 		if !strings.Contains(single, "· parked") {
 			t.Fatalf("status %s single-line parked render missing suffix:\n%s", status, single)
 		}
@@ -4329,7 +4325,7 @@ func TestDashboardParkedAndConfigErrorSuffixes(t *testing.T) {
 	if ce.LiveDrain {
 		t.Fatalf("config-error row LiveDrain = true, want false (config error is not a live drain)")
 	}
-	single := dashboardTableLine(dashboardRowValues(ce), statusW)
+	single := dashboardTableLine(dashboardRowValues(ce, nil), statusW)
 	if !strings.Contains(single, "· config error: "+msg) {
 		t.Fatalf("single-line config-error render missing suffix:\n%s", single)
 	}
@@ -4460,7 +4456,7 @@ func TestDashboardMapRowTwoLineRender(t *testing.T) {
 		MapOpen: 3, MapFrontier: 2,
 	}
 	widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths([]DashboardRow{row}), 120)
-	line1 := dashboardTwoLineRowLine1(row, widths)
+	line1 := dashboardTwoLineRowLine1(row, widths, nil)
 	line2 := dashboardTwoLineRowLine2(row, widths)
 	if !strings.Contains(line1, "pop") || !strings.Contains(line1, "2026-07-01-wayfinding-map") {
 		t.Fatalf("two-line line1 missing project/map id: %q", line1)

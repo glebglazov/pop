@@ -159,6 +159,13 @@ type dashboardRowsMsg struct {
 	live livePaneCache
 	err  error
 }
+
+func (m QueueDashboard) liveCache() livePaneCache {
+	if m.live == nil {
+		return nil
+	}
+	return *m.live
+}
 type dashboardToggleMsg struct {
 	key       string
 	autoDrain bool
@@ -772,9 +779,10 @@ type QueueDashboard struct {
 	openCheckout string
 
 	// live is the per-poll live-pane affordance cache (ADR-0158): handoff-verb
-	// key colours and (later) the row activity cluster read from it. Rebuilt
-	// from one tmux ListActivityPanes query per reload — never from DrainPane.
-	live livePaneCache
+	// key colours and the row activity cluster read from it. Rebuilt from one
+	// tmux ListActivityPanes query per reload — never from DrainPane. A pointer
+	// so the List cell closure sees updates on each poll.
+	live *livePaneCache
 
 	// copyFunc performs the clipboard write for the `y` copy-name verb. Injected
 	// so tests can avoid touching the real tmux / /dev/tty. Defaults to
@@ -848,23 +856,28 @@ func newQueueDashboard(d *Deps, cfg *config.Config, snap DashboardSnapshot) Queu
 	}
 	cols := &dashboardColumns{}
 	cols.syncNatural(snap.Rows)
+	live := &livePaneCache{}
 	var list *ui.List[DashboardRow]
 	list = ui.NewList(snap.Rows, ui.Opts[DashboardRow]{
 		Key:    func(r DashboardRow) string { return r.CursorKey },
 		Anchor: ui.AnchorTop,
 		Cell: func(r DashboardRow, rs ui.RowState) string {
 			budget := dashboardListCellBudget(cols.width)
+			cache := livePaneCache{}
+			if live != nil {
+				cache = *live
+			}
 			if list.LinesPerItem() == 2 {
 				line1Widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths(list.Items()), budget)
 				if rs.LineIndex == 1 {
 					return ui.TruncateString(dashboardTwoLineRowLine2(r, line1Widths), budget)
 				}
-				return ui.TruncateString(dashboardTwoLineRowLine1(r, line1Widths), budget)
+				return ui.TruncateString(dashboardTwoLineRowLine1(r, line1Widths, cache), budget)
 			}
-			return ui.TruncateString(dashboardTableLine(dashboardRowValues(r), cols.widths), budget)
+			return ui.TruncateString(dashboardTableLine(dashboardRowValues(r, cache), cols.widths), budget)
 		},
 	})
-	return QueueDashboard{d: d, cfg: cfg, snap: snap, allRows: snap.Rows, list: list, cols: cols}
+	return QueueDashboard{d: d, cfg: cfg, snap: snap, allRows: snap.Rows, list: list, cols: cols, live: live}
 }
 
 // dashboardChromeLines returns the chrome height above the List rows for the
@@ -922,23 +935,7 @@ func (m QueueDashboard) FilterActive() bool {
 }
 
 func (m QueueDashboard) Init() tea.Cmd {
-	cmds := []tea.Cmd{dashboardTick()}
-	if m.hasLiveDrain() {
-		cmds = append(cmds, ui.SpinnerTick())
-	}
-	return tea.Batch(cmds...)
-}
-
-// hasLiveDrain reports whether any row currently holds a live (PID-alive) drain,
-// gating the working-spinner animation the same way the Monitor gates on
-// hasWorkingPanes: the 100ms tick self-sustains only while there's a dot to spin.
-func (m QueueDashboard) hasLiveDrain() bool {
-	for _, r := range m.allRows {
-		if r.LiveDrain {
-			return true
-		}
-	}
-	return false
+	return dashboardTick()
 }
 
 func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -1079,18 +1076,16 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 	case ui.SpinnerTickMsg:
-		dashboardSpinnerFrame = (dashboardSpinnerFrame + 1) % len(ui.SpinnerFrames)
-		if m.hasLiveDrain() {
-			return m, ui.SpinnerTick()
-		}
 		return m, nil
 	case dashboardRowsMsg:
 		m.err = msg.err
 		if msg.err == nil {
-			hadLiveDrain := m.hasLiveDrain()
 			m.allRows = msg.snap.Rows
 			m.snap = msg.snap
-			m.live = msg.live
+			if m.live == nil {
+				m.live = &livePaneCache{}
+			}
+			*m.live = msg.live
 			if m.filterMode {
 				m.snap.Rows = filterDashboardRows(m.allRows, m.filterInput.Value())
 			}
@@ -1110,11 +1105,6 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						break
 					}
 				}
-			}
-			// A reload can surface a live drain on a dashboard whose spinner loop
-			// had gone idle; re-arm the animation the same way the Monitor does.
-			if !hadLiveDrain && m.hasLiveDrain() {
-				return m, ui.SpinnerTick()
 			}
 		}
 	case dashboardDetailMsg:
@@ -2729,7 +2719,7 @@ func (m QueueDashboard) viewWithMenu() string {
 	}
 	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.snap.Rows))
 	fmt.Fprintln(&body)
-	renderDashboardTableWithMenu(&body, m.snap.Rows, m.list.Cursor(), m.width, m.height, m.menu, m.live)
+	renderDashboardTableWithMenu(&body, m.snap.Rows, m.list.Cursor(), m.width, m.height, m.menu, m.liveCache())
 	if m.statusMsg != "" {
 		fmt.Fprintf(&body, "  %s\n", m.statusMsg)
 	}
@@ -2755,7 +2745,7 @@ func (m QueueDashboard) viewWithFilterMenu() string {
 	}
 	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.snap.Rows))
 	fmt.Fprintln(&body)
-	renderDashboardTable(&body, m.snap.Rows, m.list.Cursor(), m.width, m.height)
+	renderDashboardTable(&body, m.snap.Rows, m.list.Cursor(), m.width, m.height, m.liveCache())
 	for _, ml := range m.dashboardFilterMenuLines() {
 		fmt.Fprintf(&body, "%s\n", ml)
 	}
@@ -2802,7 +2792,7 @@ func (m QueueDashboard) viewWithModal() string {
 	}
 	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.snap.Rows))
 	fmt.Fprintln(&body)
-	renderDashboardTable(&body, m.snap.Rows, m.list.Cursor(), m.width, m.height)
+	renderDashboardTable(&body, m.snap.Rows, m.list.Cursor(), m.width, m.height, m.liveCache())
 	// avail is the number of body lines left for the modal below the table, so
 	// its scroll window clamps long worktree/ref lists instead of overflowing.
 	// A non-positive avail (no WindowSizeMsg yet) means "don't clamp".
@@ -3428,8 +3418,8 @@ func renderDashboardAbandonModal(w io.Writer, modal *dashboardAbandonModal, widt
 	fmt.Fprint(w, ui.HintStyle.Render(ui.TruncateString("enter/y confirm · n/esc cancel", width)))
 }
 
-func renderDashboardTable(w io.Writer, rows []DashboardRow, cursor, width, height int) {
-	renderDashboardTableWithMenu(w, rows, cursor, width, height, nil, nil)
+func renderDashboardTable(w io.Writer, rows []DashboardRow, cursor, width, height int, live livePaneCache) {
+	renderDashboardTableWithMenu(w, rows, cursor, width, height, nil, live)
 }
 
 // renderDashboardTableWithMenu renders the task-set table and, when menu is
@@ -3468,7 +3458,7 @@ func renderDashboardTableWithMenu(w io.Writer, rows []DashboardRow, cursor, widt
 		} else {
 			prefix = "  "
 		}
-		line := ui.TruncateString(prefix+dashboardTableLine(dashboardRowValues(row), widths), width)
+		line := ui.TruncateString(prefix+dashboardTableLine(dashboardRowValues(row, live), widths), width)
 		fmt.Fprintf(w, "%s\n", line)
 		if menu != nil && i == cursor && placeBelow {
 			writeMenu()
@@ -3478,7 +3468,7 @@ func renderDashboardTableWithMenu(w io.Writer, rows []DashboardRow, cursor, widt
 
 // renderDashboardTableTwoLineWithMenu renders the two-line task-set table and,
 // when menu is non-nil, splices the action overlay next to the cursored row.
-// Each row occupies two terminal lines: line 1 holds the live-drain indicator,
+// Each row occupies two terminal lines: line 1 holds the activity cluster,
 // PROJECT, TASK SET (the set id) and WORKTREE; line 2 holds STATUS indented under
 // the TASK SET column.
 func renderDashboardTableTwoLineWithMenu(w io.Writer, rows []DashboardRow, cursor, width, height int, menu *dashboardMenu, live livePaneCache) {
@@ -3508,7 +3498,7 @@ func renderDashboardTableTwoLineWithMenu(w io.Writer, rows []DashboardRow, curso
 		} else {
 			prefix = "  "
 		}
-		line1 := ui.TruncateString(prefix+dashboardTwoLineRowLine1(row, line1Widths), width)
+		line1 := ui.TruncateString(prefix+dashboardTwoLineRowLine1(row, line1Widths, live), width)
 		line2 := ui.TruncateString("  "+dashboardTwoLineRowLine2(row, line1Widths), width)
 		fmt.Fprintf(w, "%s\n", line1)
 		fmt.Fprintf(w, "%s\n", line2)

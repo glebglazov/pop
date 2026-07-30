@@ -1,6 +1,8 @@
 package queue
 
 import (
+	"strings"
+
 	"charm.land/lipgloss/v2"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 )
@@ -116,6 +118,47 @@ func styleHandoffKey(key string, state livePaneState) string {
 	default:
 		return key
 	}
+}
+
+// dashboardActivityClusterPlain is the fixed-width, ANSI-free activity cluster
+// used for column-width math and the static status table.
+const dashboardActivityClusterPlain = "ivfS"
+
+type rowActivityClusterItem struct {
+	key string
+	tag tmuxmod.PaneTag
+}
+
+// rowActivityCluster lists the supervised activities shown on each dashboard row,
+// in the same order and casing as the action-menu handoff keys (ADR-0158).
+var rowActivityCluster = []rowActivityClusterItem{
+	{key: "i", tag: tmuxmod.TagSet},
+	{key: "v", tag: tmuxmod.TagVerify},
+	{key: "f", tag: tmuxmod.TagFold},
+	{key: "S", tag: tmuxmod.TagAssist},
+}
+
+// dashboardActivityCluster renders the compact per-activity cluster for a row.
+// Map rows carry no supervised activities and return blank. When styled is false
+// the cluster is plain text for width measurement; when true each key is coloured
+// by the cached live-pane state using the same rules as the action menu.
+func dashboardActivityCluster(row DashboardRow, live livePaneCache, styled bool) string {
+	if row.IsMap {
+		return ""
+	}
+	var b strings.Builder
+	for _, item := range rowActivityCluster {
+		state := livePaneNone
+		if live != nil {
+			state = live.state(item.tag, row.SetID)
+		}
+		if styled {
+			b.WriteString(styleHandoffKey(item.key, state))
+		} else {
+			b.WriteString(item.key)
+		}
+	}
+	return b.String()
 }
 
 // menuItemLiveState returns the live-pane state for a handoff menu item on row.

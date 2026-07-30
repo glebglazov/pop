@@ -62,37 +62,6 @@ func dashboardStatusCellStyled(row DashboardRow) string {
 // dashboardManagedWtStyle colors the [managed wt] destination badge.
 var dashboardManagedWtStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
 
-// dashboardSpinnerFrame is the current working-spinner frame, advanced by the
-// Update loop while any row holds a live drain. It is process-global render
-// state: the Work dashboard's render path is a tree of free functions built once
-// at construction, so the frame can't ride the (value-receiver) model into
-// dashboardLiveIndicator — a single package var is the seam. Only one queue
-// dashboard runs per process (it owns the terminal), and Bubbletea serialises
-// Update and View on one goroutine, so this is race-free.
-var dashboardSpinnerFrame int
-
-// dashboardLiveDrainStyle colors the live-drain spinner in the Monitor's working
-// colour (ui.ColorWorkingSpinner, bright yellow). The queue's live-drain
-// indicator now reuses the Monitor working dots outright — colour, animation and
-// shape — so a live agent reads identically across both dashboards.
-var dashboardLiveDrainStyle = lipgloss.NewStyle().Foreground(ui.ColorWorkingSpinner)
-
-// dashboardLiveIndicator returns the trailing indicator cell for the TUI: the
-// animated working spinner (ui.SpinnerFrames in the house working colour) when a
-// live drain holds the checkout, blank otherwise. It is the queue-side styled
-// wrapper (ADR-0143): the styled path shows the current frame; the plain path
-// defers to work.LiveIndicator so the fixed-width stand-in keeps ANSI out of
-// column math and the measured width constant across frames.
-func dashboardLiveIndicator(row DashboardRow, styled bool) string {
-	if !row.LiveDrain {
-		return ""
-	}
-	if styled {
-		frame := ui.SpinnerFrames[dashboardSpinnerFrame%len(ui.SpinnerFrames)]
-		return dashboardLiveDrainStyle.Render(frame)
-	}
-	return work.LiveIndicator(row)
-}
 
 // dashboardVerifiedAtBadgeStyled renders the Verified-at SHA badge with the
 // three-state colour rule (ADR-0156): green at HEAD, yellow when drifted, red
@@ -198,8 +167,8 @@ const (
 const dashboardColSep = 2
 
 // dashboardColShrinkOrder lists elastic columns in shrink priority: WORKTREE
-// gives way first. The trailing live-drain indicator is fixed-width and absent
-// here, so narrow-pane fitting never drops it (ADR-0111).
+// gives way first. The trailing activity cluster is fixed-width and absent here,
+// so narrow-pane fitting never drops it (ADR-0158).
 var dashboardColShrinkOrder = []int{
 	dashboardColWorktree,
 	dashboardColStatus,
@@ -208,8 +177,8 @@ var dashboardColShrinkOrder = []int{
 }
 
 // dashboardTableHeaders is the fixed column header row. The trailing column is
-// the live-drain indicator: an empty header over a ● / blank cell, so no label
-// sits above the glyph.
+// the per-activity cluster: an empty header over the ivfS keys, so no label sits
+// above the glyphs.
 func dashboardTableHeaders() []string {
 	return []string{"PROJECT", "TASK SET", "STATUS", "WORKTREE", ""}
 }
@@ -335,9 +304,9 @@ func dashboardTwoLineMode(rows []DashboardRow, termWidth, termHeight int) bool {
 }
 
 // dashboardTwoLineHeaders returns the line-1 column headers for two-line mode:
-// PROJECT, TASK SET, WORKTREE, and the trailing live-drain indicator (empty
-// header). STATUS is rendered on line 2, indented to sit under the TASK SET
-// column (see dashboardTwoLineStatusHeader).
+// PROJECT, TASK SET, WORKTREE, and the trailing activity cluster (empty header).
+// STATUS is rendered on line 2, indented to sit under the TASK SET column (see
+// dashboardTwoLineStatusHeader).
 func dashboardTwoLineHeaders() []string {
 	return []string{"PROJECT", "TASK SET", "WORKTREE", ""}
 }
@@ -367,14 +336,14 @@ func dashboardTwoLineStatusHeader(line1Widths []int) string {
 }
 
 // dashboardTwoLineRowValuesLine1 returns the cell values for line 1 of a two-line
-// row: PROJECT, TASK SET (the set id), WORKTREE, and the trailing live-drain
-// indicator.
-func dashboardTwoLineRowValuesLine1(row DashboardRow) []string {
+// row: PROJECT, TASK SET (the set id), WORKTREE, and the trailing activity
+// cluster.
+func dashboardTwoLineRowValuesLine1(row DashboardRow, live livePaneCache) []string {
 	return []string{
 		row.Project,
 		row.SetID,
 		renderDashboardDest(row.DestKind, row.Worktree),
-		dashboardLiveIndicator(row, true),
+		dashboardActivityCluster(row, live, true),
 	}
 }
 
@@ -387,7 +356,7 @@ func dashboardTwoLineNaturalWidths(rows []DashboardRow) []int {
 		widths[i] = len(h)
 	}
 	for _, row := range rows {
-		for i, v := range dashboardTwoLineRowValuesLine1(row) {
+		for i, v := range dashboardTwoLineRowValuesLine1(row, nil) {
 			if n := lipgloss.Width(v); n > widths[i] {
 				widths[i] = n
 			}
@@ -412,7 +381,7 @@ func dashboardTwoLineTableLineWidth(widths []int) int {
 // dashboardTwoLineColShrinkOrder lists elastic line-1 columns in shrink
 // priority: WORKTREE gives way first, then PROJECT, so the TASK SET set id keeps
 // as much width as possible and only truncates as a last resort. The trailing
-// live-drain indicator is fixed-width and absent here, so it is never dropped.
+// activity cluster is fixed-width and absent here, so it is never dropped.
 var dashboardTwoLineColShrinkOrder = []int{
 	dashboardTwoLineColWorktree,
 	dashboardTwoLineColProject,
@@ -457,8 +426,8 @@ func dashboardTwoLineTableSeparator(widths []int) string {
 }
 
 // dashboardTwoLineRowLine1 renders the padded line-1 cells of a two-line row.
-func dashboardTwoLineRowLine1(row DashboardRow, widths []int) string {
-	return dashboardTableLine(dashboardTwoLineRowValuesLine1(row), widths)
+func dashboardTwoLineRowLine1(row DashboardRow, widths []int, live livePaneCache) string {
+	return dashboardTableLine(dashboardTwoLineRowValuesLine1(row, live), widths)
 }
 
 // dashboardTwoLineRowLine2 renders line 2 of a two-line row: the STATUS value,
@@ -480,13 +449,13 @@ const dashboardTwoLineChromeLines = dashboardTableChromeLines + 1
 
 // dashboardRowValues returns a row's rendered column cells, with the STATUS cell
 // composed at render time from the row's live fields (styled for display).
-func dashboardRowValues(row DashboardRow) []string {
+func dashboardRowValues(row DashboardRow, live livePaneCache) []string {
 	return []string{
 		row.Project,
 		row.SetID,
 		dashboardStatusCellStyled(row),
 		renderDashboardDest(row.DestKind, row.Worktree),
-		dashboardLiveIndicator(row, true),
+		dashboardActivityCluster(row, live, true),
 	}
 }
 
@@ -499,7 +468,7 @@ func dashboardRowNaturalValues(row DashboardRow) []string {
 		row.SetID,
 		work.StatusCell(row),
 		renderDashboardDest(row.DestKind, row.Worktree),
-		work.LiveIndicator(row),
+		dashboardActivityCluster(row, nil, false),
 	}
 }
 
@@ -514,8 +483,8 @@ func dashboardTableLine(values []string, widths []int) string {
 func dashboardTableSeparator(widths []int) string {
 	parts := make([]string, len(widths))
 	for i, width := range widths {
-		// The trailing live-drain indicator has no header label, so its rule is
-		// blank (spaces) rather than dashes — nothing to underline (ADR-0111).
+		// The trailing activity cluster has no header label, so its rule is blank
+		// (spaces) rather than dashes — nothing to underline (ADR-0158).
 		if i == len(widths)-1 {
 			parts[i] = strings.Repeat(" ", width)
 			continue
