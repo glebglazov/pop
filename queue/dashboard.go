@@ -190,6 +190,11 @@ type dashboardFoldMsg struct {
 	setID string
 	err   error
 }
+type dashboardStatusMsg struct {
+	setID string
+	verb  string
+	err   error
+}
 type dashboardDetailMsg struct {
 	dashRow  DashboardRow
 	manifest *tasks.Manifest
@@ -346,6 +351,7 @@ const (
 	menuActionUnbind
 	menuActionAutoDrain
 	menuActionPreview
+	menuActionStatusSubmenu
 	menuActionAssist
 	menuActionFold
 	menuActionUnpark
@@ -362,12 +368,58 @@ type dashboardMenuItem struct {
 	action dashboardMenuAction
 }
 
+// dashboardStatusAction identifies a task-set status verb in the status submenu.
+type dashboardStatusAction int
+
+const (
+	statusActionComplete dashboardStatusAction = iota
+	statusActionOpen
+	statusActionSkip
+	statusActionArchive
+	statusActionUnarchive
+)
+
+// dashboardStatusMenuItem is one verb in the status submenu.
+type dashboardStatusMenuItem struct {
+	key    string
+	label  string
+	action dashboardStatusAction
+	verb   string // pop tasks subcommand
+}
+
+// dashboardStatusMenu is the nested status overlay opened with `s` from the
+// action menu. It shells out to pop tasks so whole-set multi-task selection
+// runs in a real TTY.
+type dashboardStatusMenu struct {
+	row  DashboardRow
+	list *ui.List[dashboardStatusMenuItem]
+}
+
+func dashboardStatusMenuItems() []dashboardStatusMenuItem {
+	return []dashboardStatusMenuItem{
+		{key: "c", label: "complete", action: statusActionComplete, verb: "complete"},
+		{key: "o", label: "open", action: statusActionOpen, verb: "open"},
+		{key: "k", label: "skip", action: statusActionSkip, verb: "skip"},
+		{key: "A", label: "archive", action: statusActionArchive, verb: "archive"},
+		{key: "u", label: "unarchive", action: statusActionUnarchive, verb: "unarchive"},
+	}
+}
+
+func newDashboardStatusMenu(row DashboardRow) *dashboardStatusMenu {
+	return &dashboardStatusMenu{
+		row:  row,
+		list: ui.NewList(dashboardStatusMenuItems(), ui.Opts[dashboardStatusMenuItem]{Wrap: true}),
+	}
+}
+
 // dashboardMenu is the layered action overlay opened with `a` over the focused
 // row. It carries the snapshot of the row it was opened on and the verbs
 // applicable to that row on a ui.List whose cursor drives j/k + Enter selection.
+// When status is non-nil the status submenu is open over the action menu.
 type dashboardMenu struct {
-	row  DashboardRow
-	list *ui.List[dashboardMenuItem]
+	row    DashboardRow
+	list   *ui.List[dashboardMenuItem]
+	status *dashboardStatusMenu
 }
 
 // dashboardMenuItems returns the verbs applicable to row, in a stable order.
@@ -401,7 +453,8 @@ func dashboardMenuItems(row DashboardRow) []dashboardMenuItem {
 		items = append(items, dashboardMenuItem{key: "a", label: "auto-drain", action: menuActionAutoDrain})
 	}
 	items = append(items, dashboardMenuItem{key: "p", label: "preview", action: menuActionPreview})
-	items = append(items, dashboardMenuItem{key: "s", label: "assist", action: menuActionAssist})
+	items = append(items, dashboardMenuItem{key: "s", label: "status ▸", action: menuActionStatusSubmenu})
+	items = append(items, dashboardMenuItem{key: "S", label: "assist", action: menuActionAssist})
 	if dashboardFoldEligible(row) {
 		items = append(items, dashboardMenuItem{key: "f", label: "fold", action: menuActionFold})
 	}
@@ -1150,6 +1203,13 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.statusMsg = fmt.Sprintf("%s folded", msg.setID)
 		return m, m.reload()
+	case dashboardStatusMsg:
+		if msg.err != nil {
+			m.actionErr = msg.err
+		} else {
+			m.statusMsg = fmt.Sprintf("%s: %s applied", msg.setID, msg.verb)
+		}
+		return m, m.reload()
 	case dashboardBindListMsg:
 		if msg.err != nil {
 			m.actionErr = msg.err
@@ -1256,10 +1316,14 @@ func (m QueueDashboard) updateAbandonModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 
 // updateMenu drives the action overlay: esc/ctrl+c close it, j/k move the
 // highlight, Enter runs the highlighted verb, and any matching verb letter runs
-// that verb directly. Non-matching keys are inert while the menu is open.
+// that verb directly. Non-matching keys are inert while the menu is open. When
+// the status submenu is open, esc returns to the action menu instead.
 func (m QueueDashboard) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.menu == nil {
 		return m, nil
+	}
+	if m.menu.status != nil {
+		return m.updateStatusMenu(msg)
 	}
 	switch msg.String() {
 	case "esc", "ctrl+c":
@@ -1282,8 +1346,36 @@ func (m QueueDashboard) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// updateStatusMenu drives the nested status submenu: esc returns to the action
+// menu, j/k move the highlight, Enter runs the highlighted verb, and any
+// matching verb letter runs that verb directly.
+func (m QueueDashboard) updateStatusMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.menu == nil || m.menu.status == nil {
+		return m, nil
+	}
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		m.menu.status = nil
+		return m, nil
+	case "j", "down":
+		m.menu.status.list.MoveDown()
+		return m, nil
+	case "k", "up":
+		m.menu.status.list.MoveUp()
+		return m, nil
+	case "enter":
+		return m.invokeStatusMenuItem(m.menu.status.list.Cursor())
+	}
+	for i, item := range m.menu.status.list.Items() {
+		if msg.String() == item.key {
+			return m.invokeStatusMenuItem(i)
+		}
+	}
+	return m, nil
+}
+
 // invokeMenuItem closes the menu and dispatches the verb at idx against the row
-// the menu was opened on.
+// the menu was opened on, except for the status submenu opener which nests.
 func (m QueueDashboard) invokeMenuItem(idx int) (tea.Model, tea.Cmd) {
 	if m.menu == nil {
 		return m, nil
@@ -1294,8 +1386,28 @@ func (m QueueDashboard) invokeMenuItem(idx int) (tea.Model, tea.Cmd) {
 	}
 	item := items[idx]
 	row := m.menu.row
+	if item.action == menuActionStatusSubmenu {
+		m.menu.status = newDashboardStatusMenu(row)
+		return m, nil
+	}
 	m.menu = nil
 	return m.dispatchMenuAction(item.action, row)
+}
+
+// invokeStatusMenuItem closes both menus and shells out to pop tasks for the
+// status verb at idx.
+func (m QueueDashboard) invokeStatusMenuItem(idx int) (tea.Model, tea.Cmd) {
+	if m.menu == nil || m.menu.status == nil {
+		return m, nil
+	}
+	items := m.menu.status.list.Items()
+	if idx < 0 || idx >= len(items) {
+		return m, nil
+	}
+	item := items[idx]
+	row := m.menu.row
+	m.menu = nil
+	return m, m.launchStatusVerb(row, item.verb)
 }
 
 // updateFilterMenu drives the row-inclusion filter modal: esc/ctrl+c/f close it,
@@ -2020,6 +2132,15 @@ func (m QueueDashboard) launchFold(row DashboardRow) tea.Cmd {
 	})
 }
 
+func (m QueueDashboard) launchStatusVerb(row DashboardRow, verb string) tea.Cmd {
+	stderr := &strings.Builder{}
+	cmd := statusExecCommand(row, verb)
+	cmd.Stderr = stderr
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		return dashboardStatusMsg{setID: row.SetID, verb: verb, err: statusExecError(stderr.String(), err)}
+	})
+}
+
 func (m QueueDashboard) loadDetail(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
 		d := m.d
@@ -2347,6 +2468,17 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "enter", Desc: "run action"},
 			{Key: "esc", Desc: "close menu"},
 		}
+	case m.menu != nil && m.menu.status != nil:
+		return []ui.HelpEntry{
+			{Key: "c", Desc: "complete"},
+			{Key: "o", Desc: "open (reopen)"},
+			{Key: "k", Desc: "skip"},
+			{Key: "A", Desc: "archive"},
+			{Key: "u", Desc: "unarchive"},
+			{Key: "j/k", Desc: "navigate"},
+			{Key: "enter", Desc: "run action"},
+			{Key: "esc", Desc: "back to action menu"},
+		}
 	case m.menu != nil:
 		// Dashboard action menu
 		return []ui.HelpEntry{
@@ -2355,7 +2487,8 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "U", Desc: "unbind worktree"},
 			{Key: "a", Desc: "toggle auto-drain"},
 			{Key: "p", Desc: "preview drain"},
-			{Key: "s", Desc: "assist"},
+			{Key: "s", Desc: "status submenu"},
+			{Key: "S", Desc: "assist"},
 			{Key: "f", Desc: "fold"},
 			{Key: "P", Desc: "unpark"},
 			{Key: "O", Desc: "shell"},
@@ -2451,6 +2584,8 @@ func (m QueueDashboard) View() tea.View {
 			title = "Help · Queue · peek"
 		} else if m.detail != nil {
 			title = "Help · Queue · detail"
+		} else if m.menu != nil && m.menu.status != nil {
+			title = "Help · Queue · status submenu"
 		} else if m.menu != nil {
 			title = "Help · Queue · action menu"
 		} else if m.filter != nil {
@@ -2599,7 +2734,11 @@ func (m QueueDashboard) viewWithMenu() string {
 	if m.statusMsg != "" {
 		fmt.Fprintf(&body, "  %s\n", m.statusMsg)
 	}
-	writeDashboardFooter(&body, m.height, ui.HintStyle.Render("j/k move · enter/letter run · esc close"))
+	hint := "j/k move · enter/letter run · esc close"
+	if m.menu.status != nil {
+		hint = "j/k move · enter/letter run · esc back"
+	}
+	writeDashboardFooter(&body, m.height, ui.HintStyle.Render(hint))
 	return body.String()
 }
 
@@ -3409,14 +3548,36 @@ func dashboardMenuPlaceBelow(cursor, menuHeight, height int) bool {
 
 // dashboardMenuLines renders the action overlay as a block of lines indented to
 // nest under the cursored row, with the highlighted item carrying the shared
-// cursor block. The first line is a dimmed "actions" caption.
+// cursor block. The first line is a dimmed "actions" caption. When the status
+// submenu is open it renders that instead.
 func dashboardMenuLines(menu *dashboardMenu, width int) []string {
 	if menu == nil {
 		return nil
 	}
+	if menu.status != nil {
+		return dashboardStatusMenuLines(menu.status, width)
+	}
 	lines := []string{ui.TruncateString("    "+ui.HintStyle.Render("actions"), width)}
 	cursor := menu.list.Cursor()
 	for i, item := range menu.list.Items() {
+		marker := "  "
+		if i == cursor {
+			marker = ui.IndicatorStyle.Render("█") + " "
+		}
+		line := fmt.Sprintf("    %s%s  %s", marker, item.key, item.label)
+		lines = append(lines, ui.TruncateString(line, width))
+	}
+	return lines
+}
+
+// dashboardStatusMenuLines renders the nested status submenu.
+func dashboardStatusMenuLines(status *dashboardStatusMenu, width int) []string {
+	if status == nil {
+		return nil
+	}
+	lines := []string{ui.TruncateString("    "+ui.HintStyle.Render("status"), width)}
+	cursor := status.list.Cursor()
+	for i, item := range status.list.Items() {
 		marker := "  "
 		if i == cursor {
 			marker = ui.IndicatorStyle.Render("█") + " "

@@ -30,17 +30,17 @@ func TestDashboardAssistMenuPlacement(t *testing.T) {
 		}
 		return -1
 	}
-	p, s, o, i, v := idx("p"), idx("s"), idx("O"), idx("i"), idx("v")
-	if p < 0 || s < 0 || o < 0 {
-		t.Fatalf("menu missing preview/assist/shell keys: %+v", keys)
+	p, status, assist, o, i, v := idx("p"), idx("s"), idx("S"), idx("O"), idx("i"), idx("v")
+	if p < 0 || status < 0 || assist < 0 || o < 0 {
+		t.Fatalf("menu missing preview/status/assist/shell keys: %+v", keys)
 	}
-	if !(p < s && s < o) {
-		t.Fatalf("assist must sit between preview and shell, got keys %v", keys)
+	if !(p < status && status < assist && assist < o) {
+		t.Fatalf("assist must sit between status submenu and shell, got keys %v", keys)
 	}
-	if i >= 0 && i > s {
+	if i >= 0 && i > assist {
 		t.Fatalf("assist must not follow drain, got keys %v", keys)
 	}
-	if v >= 0 && v > s {
+	if v >= 0 && v > assist {
 		t.Fatalf("assist must not follow verify, got keys %v", keys)
 	}
 
@@ -50,7 +50,7 @@ func TestDashboardAssistMenuPlacement(t *testing.T) {
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
 	view := got.View().Content
-	if !strings.Contains(view, "s  assist") {
+	if !strings.Contains(view, "S  assist") {
 		t.Fatalf("menu view missing assist verb:\n%s", view)
 	}
 }
