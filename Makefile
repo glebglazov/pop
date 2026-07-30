@@ -34,4 +34,7 @@ live-agent-smoke:
 	fi
 	scripts/live-agent-smoke.sh $(AGENTS)
 
-.PHONY: build install install-dev test test-race live-agent-smoke
+live-tmux-layout:
+	go test -tags live ./cmd -run '^TestLiveWorkbench' -count=1
+
+.PHONY: build install install-dev test test-race live-agent-smoke live-tmux-layout
