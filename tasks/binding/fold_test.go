@@ -1180,6 +1180,37 @@ func TestFoldAwaitingApprovalCompletesHITLAndReachesDone(t *testing.T) {
 	}
 }
 
+func TestFoldAwaitingApprovalChainedHITLCompletesAllAndReachesDone(t *testing.T) {
+	t.Parallel()
+	repo := initAdoptRepo(t)
+	td := lifecycleTestDeps(t)
+	seedAwaitingApprovalTaskSet(t, td, repo, "set-chained-signoff", []map[string]any{
+		{"id": "09-review", "title": "Approve the release"},
+		{"id": "10-signoff", "title": "Sign off", "blocked_by": []string{"09-review"}},
+	})
+	b, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
+		TD: td, CheckoutPath: repo, SetID: "set-chained-signoff",
+	})
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	writeFileCommit(t, b.RuntimePath, "feature.txt", "set work\n", "set work")
+
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+	_, err = Fold(td, nil, cfg, "set-chained-signoff", FoldOptions{Yes: true, In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, io.Discard)
+	if err != nil {
+		t.Fatalf("fold: %v", err)
+	}
+	if got := manifestStatusAt(t, td, repo, "set-chained-signoff"); got != tasks.StatusDone {
+		t.Fatalf("set status = %q, want DONE", got)
+	}
+	for _, id := range []string{"09-review", "10-signoff"} {
+		if got := hitlTaskStatus(t, td, repo, "set-chained-signoff", id); got != tasks.TaskDone {
+			t.Fatalf("task %s status = %q, want done", id, got)
+		}
+	}
+}
+
 func TestFoldAwaitingApprovalConflictLeavesHITLUntouched(t *testing.T) {
 	t.Parallel()
 	repo := initAdoptRepo(t)

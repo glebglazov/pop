@@ -14,8 +14,29 @@ func TestOpenHITLTasks(t *testing.T) {
 		},
 	}
 	got := OpenHITLTasks(m)
-	if len(got) != 1 || got[0].ID != "02-gate" {
-		t.Fatalf("OpenHITLTasks = %#v, want only 02-gate", got)
+	if len(got) != 2 {
+		t.Fatalf("OpenHITLTasks len = %d, want 2 (all open HITL, including blocked)", len(got))
+	}
+	if got[0].ID != "02-gate" || got[1].ID != "03-wait" {
+		t.Fatalf("OpenHITLTasks = %#v, want 02-gate and 03-wait", got)
+	}
+}
+
+func TestFoldSignOffTaskLabel(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		task Task
+		want string
+	}{
+		{Task{ID: "09-review", Title: "Review"}, "09-review"},
+		{Task{ID: "10-signoff", Title: "Sign off"}, "10-signoff"},
+		{Task{ID: "09-review", Title: "Approve the release"}, "09-review — Approve the release"},
+		{Task{ID: "gate", Title: ""}, "gate"},
+	}
+	for _, tc := range cases {
+		if got := FoldSignOffTaskLabel(tc.task); got != tc.want {
+			t.Errorf("FoldSignOffTaskLabel(%#v) = %q, want %q", tc.task, got, tc.want)
+		}
 	}
 }
 
