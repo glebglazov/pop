@@ -58,9 +58,11 @@ type Worktree struct {
 
 // RepoContext holds information about the current git repository
 type RepoContext struct {
-	GitRoot  string
-	RepoName string
-	IsBare   bool
+	GitRoot          string
+	RepoName         string
+	IsBare           bool
+	IsLinkedWorktree bool   // checkout path is a linked worktree, not the main working tree
+	MainWorktreePath string // non-bare main checkout path; parent of the common .git dir
 }
 
 // DetectRepoContext determines the git repo context from the current directory
@@ -111,9 +113,40 @@ func DetectRepoContextFromPathWith(d *Deps, path string) (*RepoContext, error) {
 				IsBare:   true,
 			}, nil
 		}
+
+		topLevel, err := d.Git.CommandInDir(path, "rev-parse", "--show-toplevel")
+		if err != nil {
+			return nil, err
+		}
+		topLevel = filepath.Clean(topLevel)
+
+		canonCommonDir := commonDir
+		if !filepath.IsAbs(canonCommonDir) {
+			canonCommonDir = filepath.Join(path, canonCommonDir)
+		}
+		canonCommonDir = filepath.Clean(canonCommonDir)
+
+		var mainWorktreePath string
+		if filepath.Base(canonCommonDir) == ".git" {
+			mainWorktreePath = filepath.Dir(canonCommonDir)
+		}
+
+		repoName := filepath.Base(topLevel)
+		isLinked := mainWorktreePath != "" && filepath.Clean(path) != filepath.Clean(mainWorktreePath)
+		if isLinked {
+			repoName = repoBasenameFromCommonDir(canonCommonDir)
+		}
+
+		return &RepoContext{
+			GitRoot:          topLevel,
+			RepoName:         repoName,
+			IsBare:           false,
+			IsLinkedWorktree: isLinked,
+			MainWorktreePath: mainWorktreePath,
+		}, nil
 	}
 
-	// Regular repo
+	// Regular repo (common dir unavailable — fall back to show-toplevel only)
 	topLevel, err := d.Git.CommandInDir(path, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return nil, err
@@ -159,8 +192,9 @@ func SessionName(path string) string {
 }
 
 // SessionNameWith returns the sanitized tmux session name using provided dependencies.
-// Bare-repo worktrees use repoName/worktreeFolderName; non-bare worktrees use the
-// worktree folder name; non-git paths fall back to the directory base name.
+// Linked worktrees (bare or non-bare) use repoName/worktreeFolderName, with repoName
+// from the git common dir; the main checkout uses the plain directory name; non-git
+// paths fall back to the directory base name.
 func SessionNameWith(d *Deps, path string) string {
 	path = filepath.Clean(path)
 	worktreeName := filepath.Base(path)
@@ -168,7 +202,7 @@ func SessionNameWith(d *Deps, path string) string {
 	if err != nil {
 		return sanitizeSessionName(worktreeName)
 	}
-	return TmuxSessionName(ctx, worktreeName)
+	return TmuxSessionNameAt(ctx, path, worktreeName)
 }
 
 // ListWorktrees returns all worktrees for the current repo context
@@ -220,10 +254,23 @@ func parseWorktrees(output string) []Worktree {
 	return worktrees
 }
 
-// TmuxSessionName generates a tmux-compatible session name
+// TmuxSessionName generates a tmux-compatible session name for worktreeName when
+// checkoutPath is unknown. Prefer TmuxSessionNameAt when the worktree path is known.
 func TmuxSessionName(ctx *RepoContext, worktreeName string) string {
+	return TmuxSessionNameAt(ctx, "", worktreeName)
+}
+
+// TmuxSessionNameAt generates a tmux-compatible session name for the worktree at
+// checkoutPath. Linked worktrees (bare or non-bare) are prefixed with repoName.
+func TmuxSessionNameAt(ctx *RepoContext, checkoutPath, worktreeName string) string {
+	prefixed := ctx.IsBare
+	if !prefixed && checkoutPath != "" && ctx.MainWorktreePath != "" {
+		prefixed = filepath.Clean(checkoutPath) != filepath.Clean(ctx.MainWorktreePath)
+	} else if !prefixed && ctx.IsLinkedWorktree {
+		prefixed = true
+	}
 	var name string
-	if ctx.IsBare {
+	if prefixed {
 		name = ctx.RepoName + "/" + worktreeName
 	} else {
 		name = worktreeName
@@ -231,13 +278,25 @@ func TmuxSessionName(ctx *RepoContext, worktreeName string) string {
 	return sanitizeSessionName(name)
 }
 
+// repoBasenameFromCommonDir derives a repository display name from a canonical git
+// common directory (same rules as tasks.RepoBasename).
+func repoBasenameFromCommonDir(commonDir string) string {
+	base := filepath.Base(commonDir)
+	switch base {
+	case ".git", ".bare":
+		return filepath.Base(filepath.Dir(commonDir))
+	}
+	return strings.TrimSuffix(base, ".git")
+}
+
 // FastSessionName returns a best-effort session name from a path without
 // calling git. It uses the directory base name with tmux-safe sanitization.
 //
-// For regular repos and non-git paths this is identical to SessionName.
-// For bare-repo worktrees the exact name is repo/worktree; this returns
-// only worktree. Use it only for fuzzy/bulk matching (dashboard history
-// sorting, test helpers) where speed matters more than exactness.
+// This matches SessionName for a repository's main checkout and for non-git paths.
+// For every linked worktree (bare or non-bare) the exact name is
+// repoName/worktreeFolderName; this returns only the worktree folder. Use it
+// only for fuzzy/bulk matching (dashboard history sorting, test helpers) where
+// speed matters more than exactness. See ADR-0005 and ADR-0157.
 func FastSessionName(path string) string {
 	return sanitizeSessionName(filepath.Base(path))
 }

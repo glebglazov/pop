@@ -184,16 +184,16 @@ func TestSessionNameWith(t *testing.T) {
 			expected: "myrepo/feature",
 		},
 		{
-			name: "non-bare worktree",
+			name: "non-bare linked worktree",
 			deps: &Deps{
 				Git: &deps.MockGit{
 					CommandInDirFunc: func(dir string, args ...string) (string, error) {
 						if len(args) >= 2 && args[0] == "rev-parse" {
 							if args[1] == "--git-common-dir" {
-								return ".git", nil
+								return "/projects/regular-repo/.git", nil
 							}
 							if args[1] == "--show-toplevel" {
-								return "/projects/regular-repo", nil
+								return "/projects/regular-repo/feature", nil
 							}
 						}
 						if len(args) >= 2 && args[0] == "config" && args[1] == "--get" {
@@ -209,7 +209,7 @@ func TestSessionNameWith(t *testing.T) {
 				},
 			},
 			path:     "/projects/regular-repo/feature",
-			expected: "feature",
+			expected: "regular-repo/feature",
 		},
 		{
 			name: "main checkout",
@@ -281,6 +281,7 @@ func TestTmuxSessionName(t *testing.T) {
 	tests := []struct {
 		name         string
 		ctx          *RepoContext
+		worktreePath string
 		worktreeName string
 		expected     string
 	}{
@@ -291,10 +292,17 @@ func TestTmuxSessionName(t *testing.T) {
 			expected:     "myproject/main",
 		},
 		{
-			name:         "regular repo",
-			ctx:          &RepoContext{RepoName: "myproject", IsBare: false},
-			worktreeName: "main",
-			expected:     "main",
+			name:         "regular repo main checkout",
+			ctx:          &RepoContext{RepoName: "myproject", IsBare: false, MainWorktreePath: "/projects/myproject"},
+			worktreeName: "myproject",
+			expected:     "myproject",
+		},
+		{
+			name:         "regular repo linked worktree",
+			ctx:          &RepoContext{RepoName: "myproject", IsBare: false, MainWorktreePath: "/projects/myproject"},
+			worktreePath: "/projects/myproject/feature",
+			worktreeName: "feature",
+			expected:     "myproject/feature",
 		},
 		{
 			name:         "sanitizes dots",
@@ -312,9 +320,14 @@ func TestTmuxSessionName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := TmuxSessionName(tt.ctx, tt.worktreeName)
+			var result string
+			if tt.worktreePath != "" {
+				result = TmuxSessionNameAt(tt.ctx, tt.worktreePath, tt.worktreeName)
+			} else {
+				result = TmuxSessionName(tt.ctx, tt.worktreeName)
+			}
 			if result != tt.expected {
-				t.Errorf("TmuxSessionName() = %q, want %q", result, tt.expected)
+				t.Errorf("session name = %q, want %q", result, tt.expected)
 			}
 		})
 	}
@@ -440,6 +453,12 @@ func TestDetectRepoContextWith_RegularRepo(t *testing.T) {
 	}
 	if ctx.RepoName != "regular-repo" {
 		t.Errorf("expected RepoName 'regular-repo', got %q", ctx.RepoName)
+	}
+	if ctx.IsLinkedWorktree {
+		t.Error("expected IsLinkedWorktree to be false")
+	}
+	if ctx.MainWorktreePath != "/projects/regular-repo" {
+		t.Errorf("expected MainWorktreePath '/projects/regular-repo', got %q", ctx.MainWorktreePath)
 	}
 }
 

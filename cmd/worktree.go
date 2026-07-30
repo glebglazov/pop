@@ -248,7 +248,7 @@ func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefine
 		attentionSessions := monitorAttentionSessions()
 		if attentionSessions != nil {
 			for i := range items {
-				sessionName := project.TmuxSessionName(ctx, items[i].Name)
+				sessionName := project.TmuxSessionNameAt(ctx, items[i].Path, items[i].Name)
 				if attentionSessions[sessionName] {
 					items[i].Icon = iconAttention
 				}
@@ -301,7 +301,7 @@ func buildWorktreeItems(ctx *project.RepoContext, worktrees []project.Worktree, 
 			Path:    wt.Path,
 			Context: wt.Branch,
 		}
-		sessionName := project.TmuxSessionName(ctx, wt.Name)
+		sessionName := project.TmuxSessionNameAt(ctx, wt.Path, wt.Name)
 		if _, hasSession := sessionActivity[sessionName]; hasSession {
 			items[i].Icon = iconDirSession
 		}
