@@ -382,7 +382,7 @@ func TestFoldConflictOffersAssistanceAndCompletesOnResolve(t *testing.T) {
 	var out bytes.Buffer
 	got, err := Fold(td, nil, cfg, "set-resolve", FoldOptions{
 		Yes: true,
-		In:  strings.NewReader("\n"),
+		In:  strings.NewReader("\n"), // agent assistance; post-resolve verify declines on EOF→n
 	}, LifecycleHooks{}, &out)
 	if err != nil {
 		t.Fatalf("fold after assistance: %v\n%s", err, out.String())
@@ -390,8 +390,19 @@ func TestFoldConflictOffersAssistanceAndCompletesOnResolve(t *testing.T) {
 	if !got.TornDown {
 		t.Fatalf("TornDown = %v, want true", got.TornDown)
 	}
-	if !strings.Contains(out.String(), "Fold conflict") {
-		t.Fatalf("output should offer fold conflict assistance:\n%s", out.String())
+	gotOut := out.String()
+	for _, want := range []string{
+		"Fold conflict",
+		"1. Agent assistance (default)",
+		"2. Resume fold",
+		"3. Retry fold from scratch",
+		"4. Verify set",
+		"0. Exit",
+		"Verify set? [y/N]:",
+	} {
+		if !strings.Contains(gotOut, want) {
+			t.Fatalf("output missing %q:\n%s", want, gotOut)
+		}
 	}
 	if _, err := os.Stat(filepath.Join(repo, "clash.txt")); err != nil {
 		t.Fatalf("trunk must carry merged file: %v", err)
@@ -399,6 +410,256 @@ func TestFoldConflictOffersAssistanceAndCompletesOnResolve(t *testing.T) {
 	if _, _, ok, _ := FindBySetID(td, "set-resolve"); ok {
 		t.Fatal("binding should be released after successful fold")
 	}
+}
+
+// foldConflictNoopRunner leaves the rebase unresolved so the conflict prompt loops.
+type foldConflictNoopRunner struct{}
+
+func (r *foldConflictNoopRunner) Run(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (int, error) {
+	return 0, nil
+}
+
+func (r *foldConflictNoopRunner) RunAttended(ctx context.Context, dir string, stdin io.Reader, stdout, stderr io.Writer, name string, args ...string) (int, error) {
+	return 0, nil
+}
+
+func (r *foldConflictNoopRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*tasks.ManagedProcess, error) {
+	return tasks.RealCommandRunner{}.Start(ctx, dir, stdout, stderr, name, args...)
+}
+
+func TestFoldConflictAssistanceUnresolvedRePrompts(t *testing.T) {
+	t.Parallel()
+	repo := initAdoptRepo(t)
+	td := lifecycleTestDeps(t)
+	seedDoneTaskSet(t, td, repo, "set-reprompt")
+	b, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
+		TD: td, CheckoutPath: repo, SetID: "set-reprompt",
+	})
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	writeFileCommit(t, b.RuntimePath, "clash.txt", "from-set\n", "set clash")
+	writeFileCommit(t, repo, "clash.txt", "from-trunk\n", "trunk clash")
+
+	td.Runner = &foldConflictNoopRunner{}
+
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+	var out bytes.Buffer
+	// Agent (noop), then Exit — must re-show the prompt after the noop, not refuse.
+	_, err = Fold(td, nil, cfg, "set-reprompt", FoldOptions{
+		In: strings.NewReader("1\n0\n"),
+	}, LifecycleHooks{}, &out)
+	if err == nil || !strings.Contains(err.Error(), "conflict") {
+		t.Fatalf("err = %v, want conflict refusal after exit", err)
+	}
+	gotOut := out.String()
+	if strings.Count(gotOut, "Fold conflict:") < 2 {
+		t.Fatalf("expected conflict prompt twice after unresolved assistance:\n%s", gotOut)
+	}
+	if !rebaseInProgress(td, b.RuntimePath) {
+		t.Fatal("rebase must remain in progress after exit")
+	}
+}
+
+func TestFoldConflictResumeContinuesWithoutPreflight(t *testing.T) {
+	t.Parallel()
+	repo := initAdoptRepo(t)
+	td := lifecycleTestDeps(t)
+	seedDoneTaskSet(t, td, repo, "set-resume")
+	b, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
+		TD: td, CheckoutPath: repo, SetID: "set-resume",
+	})
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	writeFileCommit(t, b.RuntimePath, "clash.txt", "from-set\n", "set clash")
+	writeFileCommit(t, repo, "clash.txt", "from-trunk\n", "trunk clash")
+
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+	_, err = Fold(td, nil, cfg, "set-resume", FoldOptions{In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "conflict") {
+		t.Fatalf("err = %v, want initial conflict", err)
+	}
+	if !rebaseInProgress(td, b.RuntimePath) {
+		t.Fatal("expected parked rebase")
+	}
+
+	// Resolve conflict files, then Resume (2) — must not die on dirty preflight.
+	clash := filepath.Join(b.RuntimePath, "clash.txt")
+	if err := os.WriteFile(clash, []byte("resolved\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.Command("git", "-C", b.RuntimePath, "add", "clash.txt").Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	got, err := Fold(td, nil, cfg, "set-resume", FoldOptions{
+		Yes: true,
+		In:  strings.NewReader("2\nn\n"), // resume, decline post-resolve verify
+	}, LifecycleHooks{}, &out)
+	if err != nil {
+		t.Fatalf("fold resume: %v\n%s", err, out.String())
+	}
+	if !got.TornDown {
+		t.Fatalf("TornDown = %v, want true", got.TornDown)
+	}
+	if !strings.Contains(out.String(), "2. Resume fold") {
+		t.Fatalf("missing resume option:\n%s", out.String())
+	}
+	if rebaseInProgress(td, b.RuntimePath) {
+		t.Fatal("rebase should be finished after resume")
+	}
+}
+
+func TestFoldConflictRetryAbortsAndRestartsFromPreflight(t *testing.T) {
+	t.Parallel()
+	repo := initAdoptRepo(t)
+	td := lifecycleTestDeps(t)
+	seedDoneTaskSet(t, td, repo, "set-retry")
+	b, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
+		TD: td, CheckoutPath: repo, SetID: "set-retry",
+	})
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	writeFileCommit(t, b.RuntimePath, "clash.txt", "from-set\n", "set clash")
+	writeFileCommit(t, repo, "clash.txt", "from-trunk\n", "trunk clash")
+
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+	_, err = Fold(td, nil, cfg, "set-retry", FoldOptions{In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "conflict") {
+		t.Fatalf("err = %v, want initial conflict", err)
+	}
+	if !rebaseInProgress(td, b.RuntimePath) {
+		t.Fatal("expected parked rebase")
+	}
+
+	// Human refreshes trunk by hand (no fetch inside fold), then Retry.
+	writeFileCommit(t, repo, "trunk-refresh.txt", "refreshed\n", "refresh trunk")
+	trunkAfterRefresh := strings.TrimSpace(runGitOutput(t, repo, "rev-parse", "HEAD"))
+
+	var fetchCalls atomic.Int32
+	inner := td.Git
+	td.Git = &interceptGit{
+		inner: inner,
+		onCommandInDir: func(dir string, args ...string) (string, error) {
+			if len(args) >= 1 && args[0] == "fetch" {
+				fetchCalls.Add(1)
+			}
+			return inner.CommandInDir(dir, args...)
+		},
+	}
+
+	// Retry aborts; next rebase still conflicts; Exit.
+	var out bytes.Buffer
+	_, err = Fold(td, nil, cfg, "set-retry", FoldOptions{
+		In: strings.NewReader("3\n0\n"),
+	}, LifecycleHooks{}, &out)
+	if err == nil || !strings.Contains(err.Error(), "conflict") {
+		t.Fatalf("err = %v, want conflict after retry", err)
+	}
+	if fetchCalls.Load() != 0 {
+		t.Fatalf("fold retry must not fetch; fetchCalls=%d", fetchCalls.Load())
+	}
+	if !strings.Contains(out.String(), "retrying fold from preflight") {
+		t.Fatalf("missing retry notice:\n%s", out.String())
+	}
+	// After abort+retry the second conflict leaves rebase in progress again.
+	if !rebaseInProgress(td, b.RuntimePath) {
+		t.Fatal("expected rebase in progress after retry conflict")
+	}
+	trunkNow := strings.TrimSpace(runGitOutput(t, repo, "rev-parse", "HEAD"))
+	if trunkNow != trunkAfterRefresh {
+		t.Fatalf("trunk must stay at refreshed HEAD; want %s got %s", trunkAfterRefresh, trunkNow)
+	}
+}
+
+func TestFoldParkedRebaseReentersConflictPrompt(t *testing.T) {
+	t.Parallel()
+	repo := initAdoptRepo(t)
+	td := lifecycleTestDeps(t)
+	seedDoneTaskSet(t, td, repo, "set-parked")
+	b, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
+		TD: td, CheckoutPath: repo, SetID: "set-parked",
+	})
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	writeFileCommit(t, b.RuntimePath, "clash.txt", "from-set\n", "set clash")
+	writeFileCommit(t, repo, "clash.txt", "from-trunk\n", "trunk clash")
+
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+	_, err = Fold(td, nil, cfg, "set-parked", FoldOptions{In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "conflict") {
+		t.Fatalf("err = %v, want initial conflict", err)
+	}
+
+	if err := PreflightFold(td, cfg, "set-parked"); err != nil {
+		t.Fatalf("PreflightFold on parked rebase: %v", err)
+	}
+
+	var out bytes.Buffer
+	_, err = Fold(td, nil, cfg, "set-parked", FoldOptions{
+		In: strings.NewReader("0\n"),
+	}, LifecycleHooks{}, &out)
+	if err == nil || !strings.Contains(err.Error(), "conflict") {
+		t.Fatalf("err = %v, want conflict refusal on exit", err)
+	}
+	if strings.Contains(err.Error(), "dirty") {
+		t.Fatalf("parked rebase must not refuse as dirty: %v", err)
+	}
+	if !strings.Contains(out.String(), "Fold conflict") {
+		t.Fatalf("expected conflict prompt on re-entry:\n%s", out.String())
+	}
+	if !rebaseInProgress(td, b.RuntimePath) {
+		t.Fatal("exit must leave rebase parked")
+	}
+}
+
+func TestFoldConflictVerifyFailStopsFold(t *testing.T) {
+	t.Parallel()
+	repo := initAdoptRepo(t)
+	td := lifecycleTestDeps(t)
+	seedDoneTaskSet(t, td, repo, "set-vfail")
+	b, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
+		TD: td, CheckoutPath: repo, SetID: "set-vfail",
+	})
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	writeFileCommit(t, b.RuntimePath, "clash.txt", "from-set\n", "set clash")
+	writeFileCommit(t, repo, "clash.txt", "from-trunk\n", "trunk clash")
+
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+	_, err = Fold(td, nil, cfg, "set-vfail", FoldOptions{In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, io.Discard)
+	if err == nil {
+		t.Fatal("want conflict")
+	}
+
+	// Drive HandleFoldConflict directly with a failing verifier at the parked set.
+	trunkBranch := CurrentBranch(td, repo)
+	err = tasks.HandleFoldConflict(td, cfg, tasks.FoldConflictContext{
+		SetID:       "set-vfail",
+		RuntimePath: b.RuntimePath,
+		SetBranch:   b.Branch,
+		TrunkBranch: trunkBranch,
+		TrunkPath:   repo,
+	}, tasks.FoldConflictAssistanceOptions{
+		In:  strings.NewReader("4\n"),
+		Out: io.Discard,
+		RunVerifier: func(string) (string, error) {
+			return "VERDICT: NEEDS-HUMAN\nFINDINGS: nope\n", nil
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "verify") {
+		t.Fatalf("err = %v, want verify refusal", err)
+	}
+	if !rebaseInProgress(td, b.RuntimePath) {
+		t.Fatal("verify FAIL must leave rebase parked")
+	}
+	trunkBefore := strings.TrimSpace(runGitOutput(t, repo, "rev-parse", "HEAD"))
+	_ = trunkBefore
 }
 
 func TestFoldConflictInteractiveDeclineLeavesRebaseInProgress(t *testing.T) {

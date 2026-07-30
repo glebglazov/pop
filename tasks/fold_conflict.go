@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,12 @@ import (
 
 	"github.com/glebglazov/pop/config"
 )
+
+// ErrFoldRetry signals that the operator chose "Retry fold from scratch" at the
+// Fold conflict prompt: the in-flight rebase was aborted and Fold should restart
+// from preflight (status, dirty, claim, trunk HEAD re-read). Fold itself still
+// never fetches.
+var ErrFoldRetry = errors.New("fold: retry from preflight")
 
 // FoldConflictContext carries the identity and git context for a fold rebase
 // conflict inside the set's own checkout.
@@ -28,13 +35,18 @@ type FoldConflictAssistanceOptions struct {
 	AgentCmd    string
 	In          io.Reader
 	Out         io.Writer
+	// RunVerifier is a test seam for Verify set / post-resolve verify; nil uses
+	// the real Verifier path behind verifyResolvedSet.
+	RunVerifier func(prompt string) (string, error)
 }
 
 // HandleFoldConflict runs when rebasing the set branch onto trunk left a
-// conflict with the rebase in progress. It offers attended agent assistance on
-// a TTY; otherwise it refuses without aborting the rebase. Returns nil when the
+// conflict with the rebase in progress — including when Fold re-enters a parked
+// operation. It loops the Fold conflict prompt until the rebase completes, the
+// operator retries from scratch, exits, or verify fails. Returns nil when the
 // rebase completed (conflicts resolved and continued); the caller may continue
-// the fold fast-forward.
+// the fold fast-forward. Returns ErrFoldRetry when the operator aborted and
+// asked to restart Fold from preflight.
 func HandleFoldConflict(d *Deps, cfg *config.Config, ctx FoldConflictContext, opts FoldConflictAssistanceOptions) error {
 	if d == nil {
 		d = defaultDeps
@@ -70,7 +82,8 @@ func HandleFoldConflict(d *Deps, cfg *config.Config, ctx FoldConflictContext, op
 
 	reader := bufio.NewReader(in)
 	for {
-		action, err := promptFoldConflictAction(out, reader, ctx.SetID, invocation)
+		badge := foldConflictVerifiedBadge(d, cfg, ctx.SetID, ctx.RuntimePath)
+		action, err := promptFoldConflictAction(out, reader, ctx.SetID, badge, invocation)
 		if err != nil {
 			return err
 		}
@@ -95,9 +108,29 @@ func HandleFoldConflict(d *Deps, cfg *config.Config, ctx FoldConflictContext, op
 				return fmt.Errorf("fold refused: %w", err)
 			}
 			if err := foldRebaseCompleted(d, ctx.RuntimePath, ctx.TrunkBranch); err != nil {
+				// Still unresolved — re-prompt rather than refuse once.
+				continue
+			}
+			return offerFoldPostResolveVerify(d, cfg, ctx, opts, out, reader)
+		case foldConflictResume:
+			if err := foldResumeRebase(d, ctx.RuntimePath, out); err != nil {
+				fmt.Fprintf(outputFor(out), "Resume fold: %v\n", err)
+			}
+			if err := foldRebaseCompleted(d, ctx.RuntimePath, ctx.TrunkBranch); err != nil {
+				continue
+			}
+			return offerFoldPostResolveVerify(d, cfg, ctx, opts, out, reader)
+		case foldConflictRetry:
+			if _, err := d.Git.CommandInDir(ctx.RuntimePath, "rebase", "--abort"); err != nil {
+				return fmt.Errorf("fold refused: abort rebase for retry: %w", err)
+			}
+			fmt.Fprintln(outputFor(out), "Aborted in-flight rebase; retrying fold from preflight.")
+			return ErrFoldRetry
+		case foldConflictVerify:
+			if err := runFoldSetVerify(d, cfg, ctx, opts, out); err != nil {
 				return err
 			}
-			return nil
+			continue
 		case foldConflictExit:
 			return foldConflictRefusal(d, ctx.RuntimePath)
 		}
@@ -108,13 +141,19 @@ type foldConflictAction int
 
 const (
 	foldConflictAgent foldConflictAction = iota
+	foldConflictResume
+	foldConflictRetry
+	foldConflictVerify
 	foldConflictExit
 )
 
-func promptFoldConflictAction(out io.Writer, reader *bufio.Reader, setID string, invocation *AgentAssistanceInvocation) (foldConflictAction, error) {
+func promptFoldConflictAction(out io.Writer, reader *bufio.Reader, setID string, badge VerifiedAtBadge, invocation *AgentAssistanceInvocation) (foldConflictAction, error) {
 	display := outputFor(out)
 	fmt.Fprintln(display)
 	display.line(ansiCyan, "Fold conflict: %s needs its branch rebased onto trunk.", setID)
+	if text := VerifiedAtBadgeText(badge); text != "" {
+		fmt.Fprintf(display, "  %s\n", display.styled(verifiedAtBadgeANSI(badge), text))
+	}
 	fmt.Fprintln(display, "  1. Agent assistance (default)")
 	if invocation != nil {
 		fmt.Fprintf(display, "     %s\n", invocation.Display)
@@ -122,7 +161,10 @@ func promptFoldConflictAction(out io.Writer, reader *bufio.Reader, setID string,
 			fmt.Fprintf(display, "     %s\n", invocation.Detail)
 		}
 	}
-	fmt.Fprintln(display, "  0. Exit without resolving")
+	fmt.Fprintln(display, "  2. Resume fold")
+	fmt.Fprintln(display, "  3. Retry fold from scratch")
+	fmt.Fprintln(display, "  4. Verify set")
+	fmt.Fprintln(display, "  0. Exit")
 	fmt.Fprintf(display, "%s", display.styled(ansiCyan, "Choose [1]: "))
 
 	answer, err := readPromptLine(reader, "0")
@@ -132,11 +174,17 @@ func promptFoldConflictAction(out io.Writer, reader *bufio.Reader, setID string,
 	switch strings.ToLower(strings.TrimSpace(answer)) {
 	case "", "1":
 		return foldConflictAgent, nil
+	case "2":
+		return foldConflictResume, nil
+	case "3":
+		return foldConflictRetry, nil
+	case "4":
+		return foldConflictVerify, nil
 	case "0", "q", "quit", "exit":
 		return foldConflictExit, nil
 	default:
-		fmt.Fprintln(display, "Choose 1 or 0.")
-		return promptFoldConflictAction(out, reader, setID, invocation)
+		fmt.Fprintln(display, "Choose 1, 2, 3, 4, or 0.")
+		return promptFoldConflictAction(out, reader, setID, badge, invocation)
 	}
 }
 
@@ -229,6 +277,95 @@ func listConflictedPaths(d *Deps, checkoutPath string) ([]string, error) {
 		}
 	}
 	return paths, nil
+}
+
+func foldResumeRebase(d *Deps, setPath string, out io.Writer) error {
+	// core.editor=true accepts the replayed commit message without opening a TTY
+	// editor — resume is a continue, not a re-author.
+	_, err := d.Git.CommandInDir(setPath, "-c", "core.editor=true", "rebase", "--continue")
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(outputFor(out), "Resumed rebase.")
+	return nil
+}
+
+func offerFoldPostResolveVerify(d *Deps, cfg *config.Config, ctx FoldConflictContext, opts FoldConflictAssistanceOptions, out io.Writer, reader *bufio.Reader) error {
+	display := outputFor(out)
+	fmt.Fprintln(display)
+	fmt.Fprintln(display, "Rebase resolved. Verify the set before fast-forwarding trunk?")
+	fmt.Fprintf(display, "%s", display.styled(ansiCyan, "Verify set? [y/N]: "))
+	answer, err := readPromptLine(reader, "n")
+	if err != nil {
+		return err
+	}
+	switch strings.ToLower(strings.TrimSpace(answer)) {
+	case "y", "yes":
+		return runFoldSetVerify(d, cfg, ctx, opts, out)
+	default:
+		return nil
+	}
+}
+
+func runFoldSetVerify(d *Deps, cfg *config.Config, ctx FoldConflictContext, opts FoldConflictAssistanceOptions, out io.Writer) error {
+	id, err := ResolveRepositoryIdentity(d, ctx.RuntimePath)
+	if err != nil {
+		return fmt.Errorf("fold refused: verify resolve repository: %w", err)
+	}
+	defPath, err := CanonicalDefinitionPathWith(d, id.TasksDir)
+	if err != nil {
+		return fmt.Errorf("fold refused: verify resolve task storage: %w", err)
+	}
+	m := ctx.Manifest
+	if m == nil || !m.Valid {
+		loaded, loadErr := loadVerifiableManifest(d, verifyCoreOptions{
+			DefPath: defPath,
+			SetID:   ctx.SetID,
+		})
+		if loadErr != nil {
+			return fmt.Errorf("fold refused: verify load set: %w", loadErr)
+		}
+		m = loaded
+	}
+	res, err := verifyResolvedSet(d, cfg, verifyCoreOptions{
+		Repo:        id.CommonDir,
+		DefPath:     defPath,
+		RuntimePath: ctx.RuntimePath,
+		SetID:       ctx.SetID,
+		Output:      out,
+		runVerifier: opts.RunVerifier,
+	})
+	if err != nil {
+		return fmt.Errorf("fold refused: verify failed: %w", err)
+	}
+	if res.Verdict != VerdictPass {
+		return fmt.Errorf("fold refused: verify returned %s (trunk unchanged)", res.Verdict)
+	}
+	return nil
+}
+
+func foldConflictVerifiedBadge(d *Deps, cfg *config.Config, setID, runtimePath string) VerifiedAtBadge {
+	if d == nil || strings.TrimSpace(setID) == "" || strings.TrimSpace(runtimePath) == "" {
+		return VerifiedAtBadge{}
+	}
+	id, err := ResolveRepositoryIdentity(d, runtimePath)
+	if err != nil {
+		return VerifiedAtBadge{}
+	}
+	defPath, err := CanonicalDefinitionPathWith(d, id.TasksDir)
+	if err != nil {
+		return VerifiedAtBadge{}
+	}
+	refresh, err := RefreshWith(d, defPath, StatePathFor(defPath))
+	if err != nil {
+		return VerifiedAtBadge{}
+	}
+	ApplyVerifyVerdicts(d, refresh, cfg, runtimePath)
+	row := FindRow(refresh, setID)
+	if row == nil {
+		return VerifiedAtBadge{}
+	}
+	return DeriveVerifiedAtBadge(*row)
 }
 
 func foldRebaseCompleted(d *Deps, setPath, trunkBranch string) error {

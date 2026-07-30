@@ -1,10 +1,14 @@
 package tasks
 
 import (
+	"bufio"
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/glebglazov/pop/config"
 )
 
 func TestBuildFoldConflictPromptCarriesContextAndBoundaries(t *testing.T) {
@@ -69,5 +73,101 @@ func TestHandleFoldConflictRefusesWithoutTTY(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "rebasing") {
 		t.Fatalf("err = %v, want rebase wording", err)
+	}
+}
+
+func TestPromptFoldConflictActionMenuOptions(t *testing.T) {
+	var out bytes.Buffer
+	reader := bufio.NewReader(strings.NewReader("0\n"))
+	action, err := promptFoldConflictAction(&out, reader, "demo", VerifiedAtBadge{
+		State: VerifiedAtAtHead,
+		SHA:   "abc123def456",
+	}, nil)
+	if err != nil {
+		t.Fatalf("prompt: %v", err)
+	}
+	if action != foldConflictExit {
+		t.Fatalf("action = %v, want exit", action)
+	}
+	got := out.String()
+	for _, want := range []string{
+		"Fold conflict: demo",
+		"verified @ abc123def456",
+		"1. Agent assistance (default)",
+		"2. Resume fold",
+		"3. Retry fold from scratch",
+		"4. Verify set",
+		"0. Exit",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("menu missing %q\n%s", want, got)
+		}
+	}
+}
+
+func TestPromptFoldConflictActionDefaultsToAgent(t *testing.T) {
+	var out bytes.Buffer
+	reader := bufio.NewReader(strings.NewReader("\n"))
+	action, err := promptFoldConflictAction(&out, reader, "demo", VerifiedAtBadge{}, nil)
+	if err != nil {
+		t.Fatalf("prompt: %v", err)
+	}
+	if action != foldConflictAgent {
+		t.Fatalf("action = %v, want agent", action)
+	}
+}
+
+func TestPromptFoldConflictActionSelectsResumeRetryVerify(t *testing.T) {
+	cases := []struct {
+		in   string
+		want foldConflictAction
+	}{
+		{"2\n", foldConflictResume},
+		{"3\n", foldConflictRetry},
+		{"4\n", foldConflictVerify},
+	}
+	for _, tc := range cases {
+		var out bytes.Buffer
+		reader := bufio.NewReader(strings.NewReader(tc.in))
+		got, err := promptFoldConflictAction(&out, reader, "demo", VerifiedAtBadge{}, nil)
+		if err != nil {
+			t.Fatalf("input %q: %v", tc.in, err)
+		}
+		if got != tc.want {
+			t.Fatalf("input %q: got %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestOfferFoldPostResolveVerifyDeclineProceeds(t *testing.T) {
+	d := newTestDeps(t)
+	var out bytes.Buffer
+	reader := bufio.NewReader(strings.NewReader("\n"))
+	err := offerFoldPostResolveVerify(d, nil, FoldConflictContext{SetID: "demo"}, FoldConflictAssistanceOptions{}, &out, reader)
+	if err != nil {
+		t.Fatalf("decline verify: %v", err)
+	}
+	if !strings.Contains(out.String(), "Verify set? [y/N]:") {
+		t.Fatalf("missing verify offer:\n%s", out.String())
+	}
+}
+
+func TestOfferFoldPostResolveVerifyFailStops(t *testing.T) {
+	d := newTestDeps(t)
+	var out bytes.Buffer
+	reader := bufio.NewReader(strings.NewReader("y\n"))
+	err := offerFoldPostResolveVerify(d, &config.Config{}, FoldConflictContext{
+		SetID:       "missing-set",
+		RuntimePath: t.TempDir(),
+	}, FoldConflictAssistanceOptions{
+		RunVerifier: func(string) (string, error) {
+			return "VERDICT: FIXABLE\nFINDINGS: still broken\n", nil
+		},
+	}, &out, reader)
+	if err == nil {
+		t.Fatal("expected verify failure to stop fold")
+	}
+	if !strings.Contains(err.Error(), "fold refused") {
+		t.Fatalf("err = %v, want fold refused", err)
 	}
 }

@@ -23,7 +23,8 @@ func FoldSet(d *Deps, cfg *config.Config, ref SetRef, out io.Writer, opts FoldOp
 }
 
 // PreflightFold applies fold precondition checks for a dashboard row without
-// merging or releasing its binding.
+// rebasing or releasing its binding. A fold rebase left in progress is allowed
+// through so the dashboard can shell out to Fold and re-enter the conflict prompt.
 func PreflightFold(d *Deps, cfg *config.Config, ref SetRef) error {
 	d = ensureQueueDeps(d)
 	return binding.PreflightFold(d.Tasks, cfg, ref.SetID)
