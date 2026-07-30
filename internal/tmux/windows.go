@@ -33,8 +33,13 @@ func (t *realTmux) WindowExists(session, name string) (bool, error) {
 // (insert after current) collides with an already-occupied next index in a
 // live interactive session ("index N in use"). Let tmux append at the first
 // free index instead.
+//
+// The target carries a trailing colon because new-window's -t is a *window*
+// target: a bare "pop" prefix-matches an existing window (say "pop-spawn-…")
+// and tmux then tries to create at that window's occupied index, failing with
+// "index N in use". "pop:" names the session, so tmux appends.
 func (t *realTmux) NewWindow(session, name, dir string) (string, error) {
-	out, err := t.run.output("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", session, "-n", name, "-c", dir)
+	out, err := t.run.output("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", session+":", "-n", name, "-c", dir)
 	if err != nil {
 		return "", fmt.Errorf("create window %q in %q: %w", name, session, err)
 	}

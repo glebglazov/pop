@@ -32,7 +32,7 @@ func TestNewWindowBuildsArgsAndReturnsPane(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	wantArgs := [][]string{{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "proj", "-n", "pop-queue", "-c", "/dir"}}
+	wantArgs := [][]string{{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "proj:", "-n", "pop-queue", "-c", "/dir"}}
 	if !reflect.DeepEqual(r.calls, wantArgs) {
 		t.Fatalf("args = %v, want %v", r.calls, wantArgs)
 	}
@@ -42,12 +42,13 @@ func TestNewWindowBuildsArgsAndReturnsPane(t *testing.T) {
 	// Regression: never pass -a or an explicit window index. -a (insert after
 	// current) and session:N collide with an occupied next index in a live
 	// interactive session ("index N in use"). Let tmux append at the first free
-	// index instead — target the session by name only.
+	// index instead — target the bare session, which -t only reads as a session
+	// when it ends in a colon (otherwise it prefix-matches a window).
 	for _, arg := range r.calls[0] {
 		if arg == "-a" {
 			t.Fatal("new-window must not pass -a")
 		}
-		if strings.Contains(arg, ":") && !strings.HasPrefix(arg, "#{") {
+		if idx := strings.Index(arg, ":"); idx >= 0 && !strings.HasPrefix(arg, "#{") && idx != len(arg)-1 {
 			t.Fatalf("new-window must not pass an explicit window index target, got %q", arg)
 		}
 	}
