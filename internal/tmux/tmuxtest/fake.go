@@ -592,6 +592,26 @@ func (f *Fake) ListActivityPanes() ([]tmux.ActivityPane, error) {
 	return out, nil
 }
 
+func (f *Fake) ListWindowPanes() ([]tmux.WindowPane, error) {
+	var out []tmux.WindowPane
+	for session, windows := range f.Windows {
+		for name, panes := range windows {
+			if len(panes) == 0 {
+				continue
+			}
+			paneID := panes[0]
+			wp := tmux.WindowPane{Session: session, WindowName: name, PaneID: paneID}
+			if info, ok := f.PaneInfos[paneID]; ok {
+				wp.Command = info.Command
+			} else if cmd, ok := f.PaneCommandMap[paneID]; ok {
+				wp.Command = cmd
+			}
+			out = append(out, wp)
+		}
+	}
+	return out, nil
+}
+
 // --- workbench layout ---
 
 // newWindowID mints a fresh window id for a scaffold session.

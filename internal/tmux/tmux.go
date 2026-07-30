@@ -109,6 +109,10 @@ type Tmux interface {
 	// least one Work-dashboard activity tag, with its current foreground
 	// command — one list-panes -a round-trip for the live-pane affordance.
 	ListActivityPanes() ([]ActivityPane, error)
+	// ListWindowPanes returns every live pane across all sessions with its
+	// window name and foreground command — one list-panes -a round-trip for
+	// wayfinder map-window liveness on the Work dashboard.
+	ListWindowPanes() ([]WindowPane, error)
 
 	// --- pane-id primitives (glossary: Pane ID target) ---
 

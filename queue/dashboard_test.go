@@ -185,7 +185,7 @@ func TestDashboardAutoDrainBadgeAndToggle(t *testing.T) {
 		{Project: "pop", Worktree: "/repo/main (main)", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "plain"}},
 	}
 	var rendered strings.Builder
-	renderDashboardTable(&rendered, rows, 0, 0, 20, nil)
+	renderDashboardTable(&rendered, rows, 0, 0, 20, livePaneCache{})
 	if !strings.Contains(rendered.String(), "AD") {
 		t.Fatalf("missing auto-drain flag:\n%s", rendered.String())
 	}
@@ -920,7 +920,7 @@ func TestDashboardTwoLineRowLine1ShowsIndicatorProjectSetIDWorktree(t *testing.T
 		CursorKey: "pop\x00set",
 	}
 	widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths([]DashboardRow{row}), 120)
-	line1 := dashboardTwoLineRowLine1(row, widths, nil)
+	line1 := dashboardTwoLineRowLine1(row, widths, livePaneCache{})
 
 	// Line 1 carries PROJECT, TASK SET, WORKTREE and the trailing activity
 	// cluster; STATUS lives on line 2.
@@ -1020,28 +1020,33 @@ func TestDashboardTwoLineSingleLineLayoutUnchanged(t *testing.T) {
 }
 
 // TestDashboardActivityCluster pins the trailing per-activity cluster (ADR-0158):
-// every task-set row carries a fixed-width ivfS cluster; map rows stay blank.
+// every task-set row carries a fixed-width ivfS cluster; map rows carry I.
 func TestDashboardActivityCluster(t *testing.T) {
 	setID := "set-cluster"
 	row := DashboardRow{SetRef: SetRef{SetID: setID}}
 	mapRow := DashboardRow{IsMap: true, SetRef: SetRef{SetID: "map-1"}}
 
-	plain := dashboardActivityCluster(row, nil, false)
+	plain := dashboardActivityCluster(row, livePaneCache{}, false)
 	if plain != dashboardActivityClusterPlain {
 		t.Fatalf("plain cluster = %q, want %q", plain, dashboardActivityClusterPlain)
 	}
-	if got := dashboardActivityCluster(mapRow, nil, false); got != "" {
-		t.Fatalf("map cluster = %q, want blank", got)
+	if got := dashboardActivityCluster(mapRow, livePaneCache{}, false); got != dashboardMapWayfinderKeyPlain {
+		t.Fatalf("map cluster = %q, want %q", got, dashboardMapWayfinderKeyPlain)
 	}
 
 	live := livePaneCache{}
 	live.set(tmuxmod.TagSet, setID, livePaneRunning)
+	live.setWayfinder("map-1", livePaneRunning)
 	styled := dashboardActivityCluster(row, live, true)
 	if !strings.Contains(styled, livePaneRunningStyle.Render("I")) {
 		t.Fatalf("styled cluster missing green drain key: %q", styled)
 	}
 	if w := lipgloss.Width(styled); w != len(dashboardActivityClusterPlain) {
 		t.Fatalf("styled cluster width = %d, want %d", w, len(dashboardActivityClusterPlain))
+	}
+	styledMap := dashboardActivityCluster(mapRow, live, true)
+	if !strings.Contains(styledMap, livePaneRunningStyle.Render("I")) {
+		t.Fatalf("map cluster missing green wayfinder key: %q", styledMap)
 	}
 }
 
@@ -1104,7 +1109,7 @@ func TestDashboardNarrowPaneKeepsCluster(t *testing.T) {
 	if fitted[dashboardColIndicator] < len(dashboardActivityClusterPlain) {
 		t.Fatalf("indicator column width = %d, want >= %d (never dropped)", fitted[dashboardColIndicator], len(dashboardActivityClusterPlain))
 	}
-	line := dashboardTableLine(dashboardRowValues(rows[0], nil), fitted)
+	line := dashboardTableLine(dashboardRowValues(rows[0], livePaneCache{}), fitted)
 	if !strings.Contains(line, dashboardActivityClusterPlain) {
 		t.Fatalf("narrow-pane row missing activity cluster: %q", line)
 	}
@@ -4297,7 +4302,7 @@ func TestDashboardStatusSuffixesRender(t *testing.T) {
 	// that no truncation clips the suffixes. Column order: PROJECT, TASK SET,
 	// STATUS (index 2, given the width), WORKTREE, indicator.
 	widths := []int{20, 20, 60, 20, 20}
-	single := dashboardTableLine(dashboardRowValues(both, nil), widths)
+	single := dashboardTableLine(dashboardRowValues(both, livePaneCache{}), widths)
 	if !strings.Contains(single, "· auto-drain · orphaned") {
 		t.Fatalf("single-line render missing suffixes:\n%s", single)
 	}
@@ -4320,7 +4325,7 @@ func TestDashboardParkedAndConfigErrorSuffixes(t *testing.T) {
 
 	for _, status := range []tasks.TaskSetStatus{tasks.StatusReady, tasks.StatusBlocked, tasks.StatusAwaitingApproval, tasks.StatusFailed} {
 		row := DashboardRow{SetRef: SetRef{RawStatus: status, Parked: true}}
-		single := dashboardTableLine(dashboardRowValues(row, nil), statusW)
+		single := dashboardTableLine(dashboardRowValues(row, livePaneCache{}), statusW)
 		if !strings.Contains(single, "· parked") {
 			t.Fatalf("status %s single-line parked render missing suffix:\n%s", status, single)
 		}
@@ -4335,7 +4340,7 @@ func TestDashboardParkedAndConfigErrorSuffixes(t *testing.T) {
 	if ce.LiveDrain {
 		t.Fatalf("config-error row LiveDrain = true, want false (config error is not a live drain)")
 	}
-	single := dashboardTableLine(dashboardRowValues(ce, nil), statusW)
+	single := dashboardTableLine(dashboardRowValues(ce, livePaneCache{}), statusW)
 	if !strings.Contains(single, "· config error: "+msg) {
 		t.Fatalf("single-line config-error render missing suffix:\n%s", single)
 	}
@@ -4466,7 +4471,7 @@ func TestDashboardMapRowTwoLineRender(t *testing.T) {
 		MapOpen: 3, MapFrontier: 2,
 	}
 	widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths([]DashboardRow{row}), 120)
-	line1 := dashboardTwoLineRowLine1(row, widths, nil)
+	line1 := dashboardTwoLineRowLine1(row, widths, livePaneCache{})
 	line2 := dashboardTwoLineRowLine2(row, widths)
 	if !strings.Contains(line1, "pop") || !strings.Contains(line1, "2026-07-01-wayfinding-map") {
 		t.Fatalf("two-line line1 missing project/map id: %q", line1)

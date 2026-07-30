@@ -11,18 +11,13 @@ import (
 	"github.com/glebglazov/pop/wayfinder"
 )
 
-// WayfinderSpawnResult is the outcome of spawning an attended wayfinder session.
-type WayfinderSpawnResult struct {
-	PaneID   string
-	MapID    string
-	TicketID string
-}
-
 // LaunchWayfinderSession spawns an attended wayfinder session for map row in a
 // new tmux window named after the map inside the repo's session (ADR-0130). An
 // empty ticketID targets the next frontier ticket; a non-empty ticketID must name
 // a frontier ticket. Pop does not write ticket files — the session self-claims.
-func LaunchWayfinderSession(d *Deps, cfg *config.Config, row DashboardRow, ticketID string) (WayfinderSpawnResult, error) {
+// A running map window is a jump target: focus it rather than re-sending work
+// (ADR-0158). An idle window (bare shell) respawns the command.
+func LaunchWayfinderSession(d *Deps, cfg *config.Config, row DashboardRow, ticketID string) (DashboardDrainResult, error) {
 	if d == nil {
 		d = DefaultDeps()
 	}
@@ -36,16 +31,16 @@ func LaunchWayfinderSession(d *Deps, cfg *config.Config, row DashboardRow, ticke
 		d.Tmux = tmuxmod.New()
 	}
 	if !row.IsMap {
-		return WayfinderSpawnResult{}, fmt.Errorf("not a wayfinder map row")
+		return DashboardDrainResult{}, fmt.Errorf("not a wayfinder map row")
 	}
 	storageDir := dashboardRowStorageDir(row)
 	if storageDir == "" {
-		return WayfinderSpawnResult{}, fmt.Errorf("no storage dir for map %q", row.SetID)
+		return DashboardDrainResult{}, fmt.Errorf("no storage dir for map %q", row.SetID)
 	}
 	wd := &wayfinder.Deps{FS: d.Tasks.FS, Tasks: d.Tasks}
 	maps, err := wayfinder.ScanMapsInStorage(wd, storageDir)
 	if err != nil {
-		return WayfinderSpawnResult{}, err
+		return DashboardDrainResult{}, err
 	}
 	var wfMap *wayfinder.Map
 	for i := range maps {
@@ -56,17 +51,28 @@ func LaunchWayfinderSession(d *Deps, cfg *config.Config, row DashboardRow, ticke
 		}
 	}
 	if wfMap == nil {
-		return WayfinderSpawnResult{}, fmt.Errorf("map %q not found", row.SetID)
+		return DashboardDrainResult{}, fmt.Errorf("map %q not found", row.SetID)
 	}
 	ticket, err := wayfinder.TargetTicket(*wfMap, ticketID)
 	if err != nil {
-		return WayfinderSpawnResult{}, err
+		return DashboardDrainResult{}, err
 	}
 
 	base := strings.TrimSpace(row.ProjectPath)
 	if base == "" {
-		return WayfinderSpawnResult{}, fmt.Errorf("no project path for map %q", row.SetID)
+		return DashboardDrainResult{}, fmt.Errorf("no project path for map %q", row.SetID)
 	}
+	session := project.SessionNameWith(d.Project, base)
+
+	// An already-running wayfinder window for this map is a jump target: focus
+	// it rather than re-sending work into the live process (ADR-0158). An idle
+	// window (bare shell) falls through so spawnWayfinderWindow respawns.
+	if paneID, err := runningWayfinderPane(d.Tmux, session, wfMap.ID); err != nil {
+		return DashboardDrainResult{}, err
+	} else if paneID != "" {
+		return DashboardDrainResult{PaneID: paneID, Session: session}, nil
+	}
+
 	preset := tasks.ResolveDefaultInteractiveAgentPreset(cfg)
 	skillsPrefix := config.DefaultSkillsPrefix
 	if cfg != nil {
@@ -75,19 +81,14 @@ func LaunchWayfinderSession(d *Deps, cfg *config.Config, row DashboardRow, ticke
 	prompt := wayfinder.WorkModeInvocation(skillsPrefix, wfMap.ID, ticket.ID)
 	invocation, err := tasks.ResolveAgentAssistanceInvocation(preset, "", prompt, base)
 	if err != nil {
-		return WayfinderSpawnResult{}, fmt.Errorf("resolve interactive agent: %w", err)
+		return DashboardDrainResult{}, fmt.Errorf("resolve interactive agent: %w", err)
 	}
 	command := attendedShellCommand(invocation)
-	session := project.SessionNameWith(d.Project, base)
 	paneID, err := spawnWayfinderWindow(d.Tmux, session, base, wfMap.ID, command)
 	if err != nil {
-		return WayfinderSpawnResult{}, err
+		return DashboardDrainResult{}, err
 	}
-	return WayfinderSpawnResult{
-		PaneID:   paneID,
-		MapID:    wfMap.ID,
-		TicketID: ticket.ID,
-	}, nil
+	return DashboardDrainResult{PaneID: paneID, Session: session}, nil
 }
 
 // spawnWayfinderWindow creates the repo session when absent and lands command in

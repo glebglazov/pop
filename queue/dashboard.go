@@ -162,7 +162,7 @@ type dashboardRowsMsg struct {
 
 func (m QueueDashboard) liveCache() livePaneCache {
 	if m.live == nil {
-		return nil
+		return livePaneCache{}
 	}
 	return *m.live
 }
@@ -178,11 +178,6 @@ type dashboardHandoffMsg struct {
 	// focus). Empty when quitting or when err is set.
 	status string
 	err    error
-}
-type dashboardWayfinderMsg struct {
-	mapID    string
-	ticketID string
-	err      error
 }
 type dashboardUnparkMsg struct {
 	setID string
@@ -1180,6 +1175,10 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dashboardHandoffMsg:
 		m.drainPick = nil
 		if msg.err != nil {
+			if errors.Is(msg.err, wayfinder.ErrEmptyFrontier) {
+				m.statusMsg = dashboardWayfinderEmptyFrontierMessage()
+				return m, nil
+			}
 			m.actionErr = msg.err
 			return m, nil
 		}
@@ -1192,17 +1191,6 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = msg.status
 		}
 		return m, nil
-	case dashboardWayfinderMsg:
-		if msg.err != nil {
-			if errors.Is(msg.err, wayfinder.ErrEmptyFrontier) {
-				m.statusMsg = dashboardWayfinderEmptyFrontierMessage()
-			} else {
-				m.actionErr = msg.err
-			}
-			return m, nil
-		}
-		m.statusMsg = fmt.Sprintf("spawned wayfinder session for %s ticket %s", msg.mapID, msg.ticketID)
-		return m, m.reload()
 	case dashboardUnparkMsg:
 		if msg.err != nil {
 			m.actionErr = msg.err
@@ -2107,10 +2095,7 @@ func (m QueueDashboard) launchVerify(row DashboardRow) tea.Cmd {
 func (m QueueDashboard) launchWayfinderSession(row DashboardRow, ticketID string) tea.Cmd {
 	return func() tea.Msg {
 		result, err := LaunchWayfinderSession(m.d, m.cfg, row, ticketID)
-		if err != nil {
-			return dashboardWayfinderMsg{err: err}
-		}
-		return dashboardWayfinderMsg{mapID: result.MapID, ticketID: result.TicketID}
+		return handoffAfterLaunch(m.d, result, err)
 	}
 }
 
@@ -2149,9 +2134,9 @@ func (m QueueDashboard) launchShell(row DashboardRow) tea.Cmd {
 }
 
 // handoffAfterLaunch is the single post-spawn path for drain, verify, fold,
-// assist, and shell (ADR-0158): focus the pane when inside tmux and signal quit,
-// or stay open with a status line explaining why focus was unavailable / nothing
-// moved.
+// assist, shell, and wayfinder (ADR-0158): focus the pane when inside tmux and
+// signal quit, or stay open with a status line explaining why focus was
+// unavailable / nothing moved.
 func handoffAfterLaunch(d *Deps, result DashboardDrainResult, err error) dashboardHandoffMsg {
 	if err != nil {
 		return dashboardHandoffMsg{err: err}

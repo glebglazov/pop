@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/glebglazov/pop/config"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/wayfinder"
@@ -65,14 +66,28 @@ func wayfinderPaneCommand(f *tmuxtest.Fake) (string, bool) {
 	return "", false
 }
 
+func seedWayfinderWindow(f *tmuxtest.Fake, session, paneID, command string) {
+	if f.Windows == nil {
+		f.Windows = map[string]map[string][]string{}
+	}
+	if f.Windows[session] == nil {
+		f.Windows[session] = map[string][]string{}
+	}
+	f.Windows[session][wayfinderMapID] = []string{paneID}
+	if f.PaneInfos == nil {
+		f.PaneInfos = map[string]tmuxmod.PaneInfo{}
+	}
+	f.PaneInfos[paneID] = tmuxmod.PaneInfo{Session: session, Command: command}
+}
+
 func TestLaunchWayfinderSessionTargetsNextFrontier(t *testing.T) {
 	d, cfg, row, f, _ := wayfinderSpawnFixture(t)
 	result, err := LaunchWayfinderSession(d, cfg, row, "")
 	if err != nil {
 		t.Fatalf("LaunchWayfinderSession: %v", err)
 	}
-	if result.TicketID != "01" {
-		t.Fatalf("TicketID = %q, want 01", result.TicketID)
+	if result.PaneID == "" {
+		t.Fatal("expected pane id")
 	}
 	cmd, ok := wayfinderPaneCommand(f)
 	if !ok {
@@ -99,8 +114,8 @@ func TestLaunchWayfinderSessionTargetsExplicitTicket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LaunchWayfinderSession: %v", err)
 	}
-	if result.TicketID != "02" {
-		t.Fatalf("TicketID = %q, want 02", result.TicketID)
+	if result.PaneID == "" {
+		t.Fatal("expected pane id")
 	}
 	cmd, ok := wayfinderPaneCommand(f)
 	if !ok || !strings.Contains(cmd, " 02") {
@@ -156,31 +171,58 @@ func TestLaunchWayfinderSessionEmptyFrontier(t *testing.T) {
 	}
 }
 
-func TestDashboardMapRowISpawnsNextFrontier(t *testing.T) {
+func TestLaunchWayfinderSessionReusesRunningWithoutResend(t *testing.T) {
 	d, cfg, row, f, _ := wayfinderSpawnFixture(t)
+	session := project.SessionNameWith(d.Project, row.ProjectPath)
+	seedWayfinderWindow(f, session, "%9", "claude")
+
+	result, err := LaunchWayfinderSession(d, cfg, row, "")
+	if err != nil {
+		t.Fatalf("LaunchWayfinderSession: %v", err)
+	}
+	if result.PaneID != "%9" {
+		t.Fatalf("PaneID = %q, want %%9", result.PaneID)
+	}
+	if f.SentCommands["%9"] != nil {
+		t.Fatalf("reuse must not re-send wayfinder, commands=%v", f.SentCommands)
+	}
+}
+
+func TestDashboardMapRowISpawnsFocusesAndQuits(t *testing.T) {
+	d, cfg, row, f, _ := wayfinderSpawnFixture(t)
+	f.Inside = true
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'I', Text: "I"})
 	if cmd == nil {
-		t.Fatal("i on map row did not return a command")
+		t.Fatal("I on map row did not return a command")
 	}
 	msg := cmd()
-	wfMsg, ok := msg.(dashboardWayfinderMsg)
+	handoff, ok := msg.(dashboardHandoffMsg)
 	if !ok {
-		t.Fatalf("msg = %T, want dashboardWayfinderMsg", msg)
+		t.Fatalf("msg = %T, want dashboardHandoffMsg", msg)
 	}
-	if wfMsg.err != nil {
-		t.Fatalf("spawn err = %v", wfMsg.err)
+	if handoff.err != nil {
+		t.Fatalf("handoff err = %v", handoff.err)
 	}
-	if wfMsg.ticketID != "01" {
-		t.Fatalf("ticketID = %q, want 01", wfMsg.ticketID)
-	}
-	updated, _ = updated.(QueueDashboard).Update(msg)
-	got := updated.(QueueDashboard)
-	if got.statusMsg == "" {
-		t.Fatal("expected spawn status message")
+	if !handoff.quit {
+		t.Fatalf("handoff quit = false, status=%q; want quit after focus", handoff.status)
 	}
 	if _, ok := wayfinderPaneCommand(f); !ok {
 		t.Fatal("expected tmux spawn")
+	}
+	if len(f.Selected) == 0 {
+		t.Fatalf("handoff must focus spawned pane, selected=%v", f.Selected)
+	}
+
+	updated, quitCmd := updated.(QueueDashboard).Update(handoff)
+	if _, ok := updated.(QueueDashboard); !ok {
+		t.Fatalf("Update returned %T", updated)
+	}
+	if quitCmd == nil {
+		t.Fatal("successful handoff must quit the dashboard")
+	}
+	if _, ok := quitCmd().(tea.QuitMsg); !ok {
+		t.Fatalf("quit cmd = %T, want tea.QuitMsg", quitCmd())
 	}
 }
 
@@ -202,5 +244,91 @@ func TestDashboardMapRowIEmptyFrontierMessage(t *testing.T) {
 	got = updated.(QueueDashboard)
 	if got.statusMsg != dashboardWayfinderEmptyFrontierMessage() {
 		t.Fatalf("statusMsg = %q, want empty-frontier explanation", got.statusMsg)
+	}
+}
+
+func TestDashboardMapRowIReusesRunningWithoutResend(t *testing.T) {
+	d, cfg, row, f, _ := wayfinderSpawnFixture(t)
+	session := project.SessionNameWith(d.Project, row.ProjectPath)
+	seedWayfinderWindow(f, session, "%9", "claude")
+	f.Inside = true
+
+	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'I', Text: "I"})
+	if cmd == nil {
+		t.Fatal("I did not return a command")
+	}
+	msg := cmd()
+	handoff, ok := msg.(dashboardHandoffMsg)
+	if !ok {
+		t.Fatalf("msg = %T, want dashboardHandoffMsg", msg)
+	}
+	if !handoff.quit || handoff.err != nil {
+		t.Fatalf("handoff = %+v, want quit without err", handoff)
+	}
+	if f.SentCommands["%9"] != nil {
+		t.Fatalf("reuse must not re-send wayfinder, commands=%v", f.SentCommands)
+	}
+	if len(f.Selected) == 0 || f.Selected[len(f.Selected)-1] != "%9" {
+		t.Fatalf("reuse must focus existing pane, selected=%v", f.Selected)
+	}
+	_, quitCmd := updated.(QueueDashboard).Update(handoff)
+	if quitCmd == nil {
+		t.Fatal("successful handoff must quit the dashboard")
+	}
+}
+
+func TestDashboardMapDetailEnterHandsOffFrontierTicket(t *testing.T) {
+	m, d := newMapDetailDashboard(t)
+	repo := "/repo/checkout"
+	m.cfg = &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+	d.Project = project.DefaultDeps()
+	d.Tmux = &tmuxtest.Fake{Inside: true}
+	m.d = d
+	got := loadMapDetail(t, m)
+	got.detail.row.ProjectPath = repo
+	got.detail.row.SetRef.ProjectPath = repo
+
+	updated, cmd := got.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("enter on frontier ticket did not return a command")
+	}
+	msg := cmd()
+	handoff, ok := msg.(dashboardHandoffMsg)
+	if !ok {
+		t.Fatalf("msg = %T, want dashboardHandoffMsg", msg)
+	}
+	if !handoff.quit || handoff.err != nil {
+		t.Fatalf("handoff = %+v, want quit without err", handoff)
+	}
+	updated, quitCmd := updated.(QueueDashboard).Update(handoff)
+	if quitCmd == nil {
+		t.Fatal("successful handoff must quit the dashboard")
+	}
+	if _, ok := updated.(QueueDashboard); !ok {
+		t.Fatalf("Update returned %T", updated)
+	}
+}
+
+func TestLivePaneCacheWayfinderWindow(t *testing.T) {
+	f := &tmuxtest.Fake{
+		Windows: map[string]map[string][]string{
+			"pop": {
+				wayfinderMapID: {"%3"},
+				"pop-queue":    {"%1"},
+			},
+		},
+		PaneInfos: map[string]tmuxmod.PaneInfo{
+			"%3": {Session: "pop", Command: "claude"},
+			"%1": {Session: "pop", Command: "node"},
+		},
+	}
+	cache := loadLivePaneCache(&Deps{Tmux: f})
+	if cache.wayfinderState(wayfinderMapID) != livePaneRunning {
+		t.Fatalf("map window state = %v, want running", cache.wayfinderState(wayfinderMapID))
+	}
+	styled := dashboardActivityCluster(DashboardRow{IsMap: true, SetRef: SetRef{SetID: wayfinderMapID}}, cache, true)
+	if !strings.Contains(styled, livePaneRunningStyle.Render("I")) {
+		t.Fatalf("map row cluster = %q, want green I", styled)
 	}
 }

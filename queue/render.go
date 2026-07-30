@@ -356,7 +356,7 @@ func dashboardTwoLineNaturalWidths(rows []DashboardRow) []int {
 		widths[i] = len(h)
 	}
 	for _, row := range rows {
-		for i, v := range dashboardTwoLineRowValuesLine1(row, nil) {
+		for i, v := range dashboardTwoLineRowValuesLine1(row, livePaneCache{}) {
 			if n := lipgloss.Width(v); n > widths[i] {
 				widths[i] = n
 			}
@@ -468,7 +468,7 @@ func dashboardRowNaturalValues(row DashboardRow) []string {
 		row.SetID,
 		work.StatusCell(row),
 		renderDashboardDest(row.DestKind, row.Worktree),
-		dashboardActivityCluster(row, nil, false),
+		dashboardActivityCluster(row, livePaneCache{}, false),
 	}
 }
 

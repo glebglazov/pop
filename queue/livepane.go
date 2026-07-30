@@ -18,30 +18,53 @@ const (
 	livePaneRunning
 )
 
-// livePaneCache holds per-poll activity liveness keyed by pane tag then set id.
-// It is rebuilt from a single tmux ListActivityPanes query per dashboard poll —
-// never from the DrainPane store.
-type livePaneCache map[tmuxmod.PaneTag]map[string]livePaneState
+// livePaneCache holds per-poll activity liveness keyed by pane tag then set id,
+// plus wayfinder map windows keyed by map id (window name). It is rebuilt from
+// tmux list queries per dashboard poll — never from the DrainPane store.
+type livePaneCache struct {
+	byTag     map[tmuxmod.PaneTag]map[string]livePaneState
+	wayfinder map[string]livePaneState
+}
 
 func (c livePaneCache) state(tag tmuxmod.PaneTag, setID string) livePaneState {
-	if c == nil || setID == "" {
+	if setID == "" {
 		return livePaneNone
 	}
-	bySet := c[tag]
+	bySet := c.byTag[tag]
 	if bySet == nil {
 		return livePaneNone
 	}
 	return bySet[setID]
 }
 
-func (c livePaneCache) set(tag tmuxmod.PaneTag, setID string, state livePaneState) {
-	if setID == "" || state == livePaneNone {
+func (c livePaneCache) wayfinderState(mapID string) livePaneState {
+	if mapID == "" || c.wayfinder == nil {
+		return livePaneNone
+	}
+	return c.wayfinder[mapID]
+}
+
+func (c *livePaneCache) set(tag tmuxmod.PaneTag, setID string, state livePaneState) {
+	if c == nil || setID == "" || state == livePaneNone {
 		return
 	}
-	if c[tag] == nil {
-		c[tag] = map[string]livePaneState{}
+	if c.byTag == nil {
+		c.byTag = map[tmuxmod.PaneTag]map[string]livePaneState{}
 	}
-	c[tag][setID] = state
+	if c.byTag[tag] == nil {
+		c.byTag[tag] = map[string]livePaneState{}
+	}
+	c.byTag[tag][setID] = state
+}
+
+func (c *livePaneCache) setWayfinder(mapID string, state livePaneState) {
+	if c == nil || mapID == "" || state == livePaneNone {
+		return
+	}
+	if c.wayfinder == nil {
+		c.wayfinder = map[string]livePaneState{}
+	}
+	c.wayfinder[mapID] = state
 }
 
 func stateFromCommand(cmd string) livePaneState {
@@ -52,8 +75,9 @@ func stateFromCommand(cmd string) livePaneState {
 }
 
 // loadLivePaneCache queries tmux once and maps each tagged activity pane to its
-// live-pane state. A nil Tmux or a query failure yields an empty cache (all
-// keys render dark) rather than blocking the dashboard poll.
+// live-pane state, plus each named window's primary pane for wayfinder map rows.
+// A nil Tmux or a query failure yields an empty cache (all keys render dark)
+// rather than blocking the dashboard poll.
 func loadLivePaneCache(d *Deps) livePaneCache {
 	cache := livePaneCache{}
 	if d == nil {
@@ -64,15 +88,25 @@ func loadLivePaneCache(d *Deps) livePaneCache {
 		return cache
 	}
 	panes, err := tmux.ListActivityPanes()
-	if err != nil {
-		return cache
+	if err == nil {
+		for _, p := range panes {
+			state := stateFromCommand(p.Command)
+			cache.set(tmuxmod.TagSet, p.Set, state)
+			cache.set(tmuxmod.TagVerify, p.Verify, state)
+			cache.set(tmuxmod.TagFold, p.Fold, state)
+			cache.set(tmuxmod.TagAssist, p.Assist, state)
+		}
 	}
-	for _, p := range panes {
-		state := stateFromCommand(p.Command)
-		cache.set(tmuxmod.TagSet, p.Set, state)
-		cache.set(tmuxmod.TagVerify, p.Verify, state)
-		cache.set(tmuxmod.TagFold, p.Fold, state)
-		cache.set(tmuxmod.TagAssist, p.Assist, state)
+	windows, err := tmux.ListWindowPanes()
+	if err == nil {
+		seen := map[string]bool{}
+		for _, w := range windows {
+			if w.WindowName == "" || seen[w.WindowName] {
+				continue
+			}
+			seen[w.WindowName] = true
+			cache.setWayfinder(w.WindowName, stateFromCommand(w.Command))
+		}
 	}
 	return cache
 }
@@ -90,6 +124,32 @@ func runningTaggedPane(t tmuxmod.Tmux, session string, tag tmuxmod.PaneTag, setI
 	if err != nil || paneID == "" {
 		return paneID, err
 	}
+	info, err := t.PaneInfo(paneID)
+	if err != nil {
+		return paneID, nil
+	}
+	if tmuxmod.IsBareShell(info.Command) {
+		return "", nil
+	}
+	return paneID, nil
+}
+
+// runningWayfinderPane returns the pane id when the map-named window exists and
+// its foreground command is not a bare shell — the green / jump case. An idle
+// window (grey / respawn) returns "" so the caller re-sends the work command.
+func runningWayfinderPane(t tmuxmod.Tmux, session, mapID string) (string, error) {
+	if t == nil || session == "" || mapID == "" {
+		return "", nil
+	}
+	exists, err := t.WindowExists(session, mapID)
+	if err != nil || !exists {
+		return "", err
+	}
+	panes, err := t.WindowPanes(session, mapID)
+	if err != nil || len(panes) == 0 {
+		return "", err
+	}
+	paneID := panes[0]
 	info, err := t.PaneInfo(paneID)
 	if err != nil {
 		return paneID, nil
@@ -124,6 +184,10 @@ func styleHandoffKey(key string, state livePaneState) string {
 // used for column-width math and the static status table.
 const dashboardActivityClusterPlain = "IVFS"
 
+// dashboardMapWayfinderKeyPlain is the fixed-width wayfinder handoff key shown
+// on map rows in the activity-cluster column.
+const dashboardMapWayfinderKeyPlain = "I"
+
 type rowActivityClusterItem struct {
 	key string
 	tag tmuxmod.PaneTag
@@ -139,19 +203,21 @@ var rowActivityCluster = []rowActivityClusterItem{
 }
 
 // dashboardActivityCluster renders the compact per-activity cluster for a row.
-// Map rows carry no supervised activities and return blank. When styled is false
-// the cluster is plain text for width measurement; when true each key is coloured
-// by the cached live-pane state using the same rules as the action menu.
+// Map rows carry a single wayfinder handoff key (I) coloured from the map
+// window's liveness. Task-set rows carry IVFS from tagged panes. When styled is
+// false the cluster is plain text for width measurement; when true each key is
+// coloured by the cached live-pane state using the same rules as the action menu.
 func dashboardActivityCluster(row DashboardRow, live livePaneCache, styled bool) string {
 	if row.IsMap {
-		return ""
+		state := live.wayfinderState(row.SetID)
+		if styled {
+			return styleHandoffKey(dashboardMapWayfinderKeyPlain, state)
+		}
+		return dashboardMapWayfinderKeyPlain
 	}
 	var b strings.Builder
 	for _, item := range rowActivityCluster {
-		state := livePaneNone
-		if live != nil {
-			state = live.state(item.tag, row.SetID)
-		}
+		state := live.state(item.tag, row.SetID)
 		if styled {
 			b.WriteString(styleHandoffKey(item.key, state))
 		} else {
@@ -164,7 +230,10 @@ func dashboardActivityCluster(row DashboardRow, live livePaneCache, styled bool)
 // menuItemLiveState returns the live-pane state for a handoff menu item on row.
 // Non-handoff verbs and shell always return livePaneNone (dark).
 func menuItemLiveState(item dashboardMenuItem, row DashboardRow, live livePaneCache) livePaneState {
-	if row.IsMap || live == nil {
+	if live.byTag == nil && live.wayfinder == nil {
+		return livePaneNone
+	}
+	if row.IsMap {
 		return livePaneNone
 	}
 	switch item.action {
