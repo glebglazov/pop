@@ -174,9 +174,14 @@ func TestSplitPaneBuildsArgs(t *testing.T) {
 			want: []string{"split-window", "-v", "-b", "-t", "%2", "-P", "-F", "#{pane_id}", "-c", "/repo"},
 		},
 		{
-			name: "with percentage",
-			spec: SplitSpec{Target: "%0", Horizontal: false, Percent: 50, Dir: "/tmp"},
-			want: []string{"split-window", "-v", "-t", "%0", "-p", "50", "-P", "-F", "#{pane_id}", "-c", "/tmp"},
+			name: "with cells",
+			spec: SplitSpec{Target: "%0", Horizontal: false, Cells: 8, Dir: "/tmp"},
+			want: []string{"split-window", "-v", "-t", "%0", "-l", "8", "-P", "-F", "#{pane_id}", "-c", "/tmp"},
+		},
+		{
+			name: "horizontal cells",
+			spec: SplitSpec{Target: "%0", Horizontal: true, Cells: 20, Dir: "/tmp"},
+			want: []string{"split-window", "-h", "-t", "%0", "-l", "20", "-P", "-F", "#{pane_id}", "-c", "/tmp"},
 		},
 	}
 	for _, tt := range tests {

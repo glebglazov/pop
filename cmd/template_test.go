@@ -259,12 +259,19 @@ func TestRunTemplateApplyWithFlatWeightedSplits(t *testing.T) {
 		if !s.Horizontal {
 			t.Errorf("columns container split should be horizontal (-h), got %+v", s)
 		}
+		if s.Cells <= 0 {
+			t.Errorf("split must carry exact cells via -l, got %+v", s)
+		}
 	}
-	// Columns resize width (-x), never height (-y), to weighted cell sizes.
+	// Apportion(120, [1,2,3]) → [20,39,59]; splits pass remaining tail sizes.
+	if f.SplitPanes[0].Cells != 99 || f.SplitPanes[1].Cells != 59 {
+		t.Errorf("split cells = [%d, %d], want [99, 59]", f.SplitPanes[0].Cells, f.SplitPanes[1].Cells)
+	}
+	// Columns resize width (-x), never height (-y), to the same apportioned cells.
 	if len(f.ResizedHeight) != 0 {
 		t.Errorf("columns container must not resize height, got %v", f.ResizedHeight)
 	}
-	want := map[string]int{"%100": 20, "%101": 40, "%102": 60}
+	want := map[string]int{"%100": 20, "%101": 39, "%102": 59}
 	if !reflect.DeepEqual(f.ResizedWidth, want) {
 		t.Errorf("resized widths = %v, want %v", f.ResizedWidth, want)
 	}
@@ -357,6 +364,65 @@ func TestRunTemplateApplyWithNestedContainers(t *testing.T) {
 	}
 }
 
+func TestRunTemplateApplyWithSameDirectionNesting(t *testing.T) {
+	t.Parallel()
+	// Columns inside columns: the inner container must size against its own
+	// pane (after the outer correction), not the window.
+	cfg := &config.Config{
+		Workbenches: []config.Workbench{{
+			Name: "cols-in-cols",
+			Windows: []config.WorkbenchWindow{{
+				Name: "work",
+				Layout: &config.WorkbenchPaneSpec{
+					Children: "columns",
+					Panes: []config.WorkbenchPaneSpec{
+						{
+							Children: "columns",
+							Weight:   2,
+							Panes: []config.WorkbenchPaneSpec{
+								{Name: "a", Command: "echo a", Weight: 1},
+								{Name: "b", Command: "echo b", Weight: 3},
+							},
+						},
+						{Name: "c", Command: "echo c", Weight: 1},
+					},
+				},
+			}},
+		}},
+	}
+	f := &tmuxtest.Fake{CurrentSessionName: "current-session", PaneW: 80, PaneH: 24}
+	d := templateRuntimeDeps{
+		Tmux:        f,
+		Getwd:       func() (string, error) { return "/repo", nil },
+		UserHomeDir: func() (string, error) { return "/home/user", nil },
+	}
+
+	if err := runTemplateApplyWith(d, cfg.Workbenches, "cols-in-cols"); err != nil {
+		t.Fatalf("runTemplateApplyWith() error: %v", err)
+	}
+
+	// Outer Apportion(80, [2,1]) → [53,26]; inner Apportion(53, [1,3]) → [13,39].
+	// Pane ids: %100 = outer/left/a (reused), %101 = c, %102 = b.
+	if len(f.SplitPanes) != 2 {
+		t.Fatalf("expected 2 splits, got %d", len(f.SplitPanes))
+	}
+	for _, s := range f.SplitPanes {
+		if !s.Horizontal || s.Cells <= 0 {
+			t.Errorf("same-direction splits must be horizontal with cells, got %+v", s)
+		}
+	}
+	// Outer split peels left (53) from right tail (26); inner peels a (13) from b (39).
+	if f.SplitPanes[0].Cells != 26 {
+		t.Errorf("outer split cells = %d, want 26", f.SplitPanes[0].Cells)
+	}
+	if f.SplitPanes[1].Cells != 39 {
+		t.Errorf("inner split cells = %d, want 39 (sized against left pane, not window)", f.SplitPanes[1].Cells)
+	}
+	if f.ResizedWidth["%100"] != 13 || f.ResizedWidth["%102"] != 39 || f.ResizedWidth["%101"] != 26 {
+		t.Errorf("final widths = %v, want %%100:13 %%102:39 %%101:26", f.ResizedWidth)
+	}
+}
+
 func TestRunTemplateApplyWithDefaultWeight(t *testing.T) {
 	t.Parallel()
 	// Omitted weights default to 1 (equal split).
@@ -386,9 +452,12 @@ func TestRunTemplateApplyWithDefaultWeight(t *testing.T) {
 		t.Fatalf("runTemplateApplyWith() error: %v", err)
 	}
 
-	want := map[string]int{"%100": 50, "%101": 50}
+	want := map[string]int{"%100": 50, "%101": 49}
 	if !reflect.DeepEqual(f.ResizedWidth, want) {
-		t.Errorf("resized widths = %v, want equal split %v", f.ResizedWidth, want)
+		t.Errorf("resized widths = %v, want equal-split apportionment %v", f.ResizedWidth, want)
+	}
+	if len(f.SplitPanes) != 1 || f.SplitPanes[0].Cells != 49 {
+		t.Errorf("equal split must pass -l 49 for the new pane, got %+v", f.SplitPanes)
 	}
 }
 
@@ -854,9 +923,9 @@ func TestRunTemplateApplyMergeSupersetAppend(t *testing.T) {
 		}
 	}
 
-	// Survivors reproportioned to three equal rows of a 60-cell window = 20 each.
-	if f.ResizedHeight["%1"] != 20 || f.ResizedHeight["%2"] != 20 {
-		t.Errorf("survivors should be reproportioned to 20 cells, got %v", f.ResizedHeight)
+	// Survivors reproportioned: Apportion(60, [1,1,1]) → [20, 19, 19].
+	if f.ResizedHeight["%1"] != 20 || f.ResizedHeight["%2"] != 19 {
+		t.Errorf("survivors should be reproportioned to 20/19 cells, got %v", f.ResizedHeight)
 	}
 }
 
@@ -948,9 +1017,9 @@ func TestRunTemplateApplyMergeReproportionsSurvivors(t *testing.T) {
 	if len(f.SentKeys) != 0 {
 		t.Fatalf("survivors must not be re-run, got %v", f.SentKeys)
 	}
-	// vim weight 3 / claude weight 1 over an 80-cell window → 60 / 20 cells.
-	if f.ResizedHeight["%1"] != 60 || f.ResizedHeight["%2"] != 20 {
-		t.Errorf("reproportion = %v, want %%1:60 %%2:20", f.ResizedHeight)
+	// vim weight 3 / claude weight 1 over an 80-cell extent → Apportion → 59 / 20.
+	if f.ResizedHeight["%1"] != 59 || f.ResizedHeight["%2"] != 20 {
+		t.Errorf("reproportion = %v, want %%1:59 %%2:20", f.ResizedHeight)
 	}
 }
 

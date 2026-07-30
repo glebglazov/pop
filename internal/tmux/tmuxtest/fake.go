@@ -684,6 +684,18 @@ func (f *Fake) PaneSize(target string) (int, int, error) {
 	if h == 0 {
 		h = 24
 	}
+	// Prefer a size written by ResizePane so nested containers read their own
+	// pane's extent after the parent correction pass, not the window default.
+	if f.ResizedWidth != nil {
+		if rw, ok := f.ResizedWidth[target]; ok {
+			w = rw
+		}
+	}
+	if f.ResizedHeight != nil {
+		if rh, ok := f.ResizedHeight[target]; ok {
+			h = rh
+		}
+	}
 	return w, h, nil
 }
 

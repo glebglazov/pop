@@ -144,13 +144,17 @@ func (t *realTmux) RespawnPane(paneID, dir string) error {
 // SplitSpec describes one layout split for SplitPane: which pane to split from
 // (Target), the axis (Horizontal → -h side-by-side columns, else -v stacked
 // rows), whether to place the new pane before the target (Before → -b), an
-// optional size percentage (Percent → -p when > 0), and the new pane's working
-// directory (Dir).
+// optional exact size in cells (Cells → -l when > 0), and the new pane's
+// working directory (Dir).
+//
+// -l sizes the new pane exactly and charges the border cell to the surviving
+// pane on both axes (verified: -l 8 on a 24-row pane → 8/15; -l 20 on an
+// 80-col pane → 20/59).
 type SplitSpec struct {
 	Target     string
 	Horizontal bool
 	Before     bool
-	Percent    int
+	Cells      int
 	Dir        string
 }
 
@@ -166,8 +170,8 @@ func (t *realTmux) SplitPane(spec SplitSpec) (string, error) {
 		args = append(args, "-b")
 	}
 	args = append(args, "-t", spec.Target)
-	if spec.Percent > 0 {
-		args = append(args, "-p", fmt.Sprintf("%d", spec.Percent))
+	if spec.Cells > 0 {
+		args = append(args, "-l", fmt.Sprintf("%d", spec.Cells))
 	}
 	args = append(args, "-P", "-F", "#{pane_id}", "-c", spec.Dir)
 	out, err := t.run.output(args...)

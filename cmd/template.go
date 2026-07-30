@@ -10,6 +10,7 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
+	"github.com/glebglazov/pop/layout"
 	"github.com/spf13/cobra"
 )
 
@@ -527,9 +528,9 @@ func realizePaneTree(tmux tmuxmod.Tmux, pane *config.WorkbenchPaneSpec, paneID, 
 }
 
 // realizeContainer creates child panes for a container and realizes them recursively.
-// It splits the container pane N-1 times to create N child panes, then resizes
-// them according to their weights. parentCwd is the already-resolved effective
-// working directory for this container.
+// It splits the container pane N-1 times to create N child panes, then corrects
+// them to the same apportioned cell counts the splits carried. parentCwd is the
+// already-resolved effective working directory for this container.
 func realizeContainer(tmux tmuxmod.Tmux, containerPaneID string, children []config.WorkbenchPaneSpec, direction, sessionDir, parentCwd, homeDir string) (paneTreeResult, error) {
 	n := len(children)
 	if n == 0 {
@@ -556,15 +557,23 @@ func realizeContainer(tmux tmuxmod.Tmux, containerPaneID string, children []conf
 		}
 	}
 
-	// Calculate total weight
-	totalWeight := 0
-	for _, child := range children {
-		weight := child.Weight
-		if weight == 0 {
-			weight = 1
-		}
-		totalWeight += weight
+	// Read this container's own pane extent before any split — correct at any
+	// nesting depth, including same-direction nesting (ADR-0159).
+	width, height, err := tmux.PaneSize(containerPaneID)
+	if err != nil {
+		return paneTreeResult{}, fmt.Errorf("failed to get pane size: %w", err)
 	}
+	horizontal := direction == "columns"
+	extent := height
+	if horizontal {
+		extent = width
+	}
+
+	weights := make([]int, n)
+	for i, child := range children {
+		weights[i] = child.Weight
+	}
+	cells := layout.Apportion(extent, weights)
 
 	// Determine split flag based on children orientation
 	splitFlag := "-h" // columns = side-by-side
@@ -572,36 +581,18 @@ func realizeContainer(tmux tmuxmod.Tmux, containerPaneID string, children []conf
 		splitFlag = "-v" // rows = stacked
 	}
 
-	// Create panes by splitting
+	// Create panes by splitting. Each split cuts the last pane made; the new
+	// pane is the remaining tail (children i..n-1 plus their future borders),
+	// sized with -l so the surviving pane keeps cells[i-1].
 	paneIDs := []string{containerPaneID}
 	for i := 1; i < n; i++ {
-		// Split the last pane to create a new one
 		lastPaneID := paneIDs[len(paneIDs)-1]
 		childCwd := effectiveCwd(sessionDir, parentCwd, children[i].Cwd, homeDir)
-
-		// Calculate percentage for the new pane
-		// The new pane should get: (weight[i] + ... + weight[n-1]) / (weight[i-1] + ... + weight[n-1])
-		remainingWeight := 0
-		for j := i; j < n; j++ {
-			weight := children[j].Weight
-			if weight == 0 {
-				weight = 1
-			}
-			remainingWeight += weight
-		}
-		previousRemaining := remainingWeight
-		weightPrev := children[i-1].Weight
-		if weightPrev == 0 {
-			weightPrev = 1
-		}
-		previousRemaining += weightPrev
-
-		percentage := (remainingWeight * 100) / previousRemaining
 
 		newPaneID, err := tmux.SplitPane(tmuxmod.SplitSpec{
 			Target:     lastPaneID,
 			Horizontal: splitFlag == "-h",
-			Percent:    percentage,
+			Cells:      remainingSplitCells(cells, i),
 			Dir:        childCwd,
 		})
 		if err != nil {
@@ -610,8 +601,8 @@ func realizeContainer(tmux tmuxmod.Tmux, containerPaneID string, children []conf
 		paneIDs = append(paneIDs, newPaneID)
 	}
 
-	// Resize panes to exact sizes based on weights
-	if err := resizePanesByWeight(tmux, paneIDs, children, direction); err != nil {
+	// Correction pass: repair whatever tmux clamped, using the same cells.
+	if err := resizePanesToCells(tmux, paneIDs, cells, horizontal); err != nil {
 		return paneTreeResult{}, fmt.Errorf("failed to resize panes: %w", err)
 	}
 
@@ -630,19 +621,22 @@ func realizeContainer(tmux tmuxmod.Tmux, containerPaneID string, children []conf
 	return combined, nil
 }
 
-// resizePanesByWeight resizes panes to match their weights. It queries the
-// window dimensions and calculates target sizes in cells.
-//
-// The dimension query is targeted at the first pane being resized (which lives
-// in the window actually being built) via -t, not left untargeted. An
-// untargeted display-message returns the *current client's* window size, which
-// for a detached session born from a Workbench (new-session -d defaults to
-// 80x24) differs from the window the panes actually occupy — the resize math
-// would then size panes against the wrong window and tmux would clamp to a
-// lopsided split that survives the attach rescale as a skewed layout.
+// remainingSplitCells is the -l size for the new pane when splitting to peel
+// child i-1 off the tail. The new pane holds children i..n-1, so it needs their
+// cell counts plus the n-i-1 borders those further splits will consume.
+func remainingSplitCells(cells []int, i int) int {
+	n := len(cells)
+	sum := 0
+	for j := i; j < n; j++ {
+		sum += cells[j]
+	}
+	return sum + (n - i - 1)
+}
+
+// resizePanesByWeight apportions child weights against the first pane's current
+// extent and resizes every pane to those counts. Used by merge reproportion,
+// where the container pane no longer exists as a single pane.
 func resizePanesByWeight(tmux tmuxmod.Tmux, paneIDs []string, children []config.WorkbenchPaneSpec, direction string) error {
-	// Read dimensions of the specific window being built by targeting one of its
-	// panes, so the build-time split and this resize agree on one window.
 	target := paneIDs[0]
 
 	width, height, err := tmux.PaneSize(target)
@@ -650,37 +644,27 @@ func resizePanesByWeight(tmux tmuxmod.Tmux, paneIDs []string, children []config.
 		return fmt.Errorf("failed to get pane size: %w", err)
 	}
 
-	// Calculate total weight
-	totalWeight := 0
-	for _, child := range children {
-		weight := child.Weight
-		if weight == 0 {
-			weight = 1
-		}
-		totalWeight += weight
-	}
-
-	// Determine which dimension to resize: width (-x) for columns, height (-y)
-	// for rows.
 	horizontal := direction == "columns"
-	totalSize := height
+	extent := height
 	if horizontal {
-		totalSize = width
+		extent = width
 	}
 
-	// Resize each pane to its target size
-	for i, paneID := range paneIDs {
-		weight := children[i].Weight
-		if weight == 0 {
-			weight = 1
-		}
-		targetSize := (totalSize * weight) / totalWeight
+	weights := make([]int, len(children))
+	for i, child := range children {
+		weights[i] = child.Weight
+	}
+	return resizePanesToCells(tmux, paneIDs, layout.Apportion(extent, weights), horizontal)
+}
 
-		if err := tmux.ResizePane(paneID, horizontal, targetSize); err != nil {
+// resizePanesToCells resizes each pane to the given cell count along the
+// container's split axis.
+func resizePanesToCells(tmux tmuxmod.Tmux, paneIDs []string, cells []int, horizontal bool) error {
+	for i, paneID := range paneIDs {
+		if err := tmux.ResizePane(paneID, horizontal, cells[i]); err != nil {
 			return fmt.Errorf("failed to resize pane %s: %w", paneID, err)
 		}
 	}
-
 	return nil
 }
 
