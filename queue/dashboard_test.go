@@ -367,7 +367,7 @@ func TestDashboardActionMenuContextFiltering(t *testing.T) {
 
 	// A plain ready set: only the unconditional verbs plus auto-drain (non-orphaned).
 	plain := keysFor(DashboardRow{SetRef: SetRef{SetID: "plain", RuntimePath: "/wt"}})
-	if want := []string{"i", "b", "a", "p", "s", "S", "O", "A", "y"}; !reflect.DeepEqual(plain, want) {
+	if want := []string{"i", "b", "a", "s", "S", "O", "A", "y"}; !reflect.DeepEqual(plain, want) {
 		t.Fatalf("plain row verbs = %v, want %v", plain, want)
 	}
 
@@ -2467,28 +2467,6 @@ func TestDashboardLaunchDrainRefusesBareWithoutTrunk(t *testing.T) {
 	}
 	if len(rt.commands) != 0 {
 		t.Fatalf("bare no-base refusal must not touch tmux, got %v", rt.commands)
-	}
-}
-
-func TestDashboardPreviewDrainPaneAndNoOp(t *testing.T) {
-	rt := newRecordingTmux(true, drainWindowName)
-	d := &Deps{Tmux: rt}
-	if err := PreviewDrain(d, SetRef{PaneID: "%9"}); err != nil {
-		t.Fatalf("PreviewDrain: %v", err)
-	}
-	if _, ok := rt.findCommand("select-pane"); !ok {
-		t.Fatal("expected select-pane")
-	}
-	switchClient, ok := rt.findCommand("switch-client")
-	if !ok || !argsContain(switchClient, "-t", "%9") {
-		t.Fatalf("switch-client = %v, want pane %%9", switchClient)
-	}
-	rt.commands = nil
-	if err := PreviewDrain(d, SetRef{}); err != nil {
-		t.Fatalf("PreviewDrain no-op: %v", err)
-	}
-	if len(rt.commands) != 0 {
-		t.Fatalf("preview without pane must no-op, got %v", rt.commands)
 	}
 }
 

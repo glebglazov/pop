@@ -156,6 +156,7 @@ func (d *Deps) WorkDeps() *work.Deps {
 type dashboardTickMsg struct{}
 type dashboardRowsMsg struct {
 	snap DashboardSnapshot
+	live livePaneCache
 	err  error
 }
 type dashboardToggleMsg struct {
@@ -183,9 +184,6 @@ type dashboardUnparkMsg struct {
 type dashboardArchiveMsg struct {
 	setID string
 	err   error
-}
-type dashboardPreviewMsg struct {
-	err error
 }
 type dashboardStatusMsg struct {
 	setID string
@@ -347,7 +345,6 @@ const (
 	menuActionBind
 	menuActionUnbind
 	menuActionAutoDrain
-	menuActionPreview
 	menuActionStatusSubmenu
 	menuActionAssist
 	menuActionFold
@@ -423,7 +420,7 @@ type dashboardMenu struct {
 // Conditional verbs are filtered to the row's context: verify only for
 // NEEDS-VERIFY / VERIFY-FAILED rows with no live drain, unbind only for bound
 // rows, auto-drain only for non-orphaned rows, and unpark only for parked rows.
-// Drain, bind, preview, the runtime shell, and archive apply to every Task-set
+// Drain, bind, the runtime shell, and archive apply to every Task-set
 // row regardless of status. Map rows carry only copy name — queue verbs
 // (drain/bind/…) stay inert on them (ADR-0130).
 func dashboardMenuItems(row DashboardRow) []dashboardMenuItem {
@@ -449,7 +446,6 @@ func dashboardMenuItems(row DashboardRow) []dashboardMenuItem {
 	if !row.Orphaned {
 		items = append(items, dashboardMenuItem{key: "a", label: "auto-drain", action: menuActionAutoDrain})
 	}
-	items = append(items, dashboardMenuItem{key: "p", label: "preview", action: menuActionPreview})
 	items = append(items, dashboardMenuItem{key: "s", label: "status ▸", action: menuActionStatusSubmenu})
 	items = append(items, dashboardMenuItem{key: "S", label: "assist", action: menuActionAssist})
 	if dashboardFoldEligible(row) {
@@ -775,6 +771,11 @@ type QueueDashboard struct {
 	// TUI exits (task 02).
 	openCheckout string
 
+	// live is the per-poll live-pane affordance cache (ADR-0158): handoff-verb
+	// key colours and (later) the row activity cluster read from it. Rebuilt
+	// from one tmux ListActivityPanes query per reload — never from DrainPane.
+	live livePaneCache
+
 	// copyFunc performs the clipboard write for the `y` copy-name verb. Injected
 	// so tests can avoid touching the real tmux / /dev/tty. Defaults to
 	// ui.CopyToClipboard.
@@ -1089,6 +1090,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			hadLiveDrain := m.hasLiveDrain()
 			m.allRows = msg.snap.Rows
 			m.snap = msg.snap
+			m.live = msg.live
 			if m.filterMode {
 				m.snap.Rows = filterDashboardRows(m.allRows, m.filterInput.Value())
 			}
@@ -1097,6 +1099,14 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				for _, row := range m.snap.Rows {
 					if row.CursorKey == m.detail.row.CursorKey {
 						m.detail.row = row
+						break
+					}
+				}
+			}
+			if m.menu != nil {
+				for _, row := range m.snap.Rows {
+					if row.CursorKey == m.menu.row.CursorKey {
+						m.menu.row = row
 						break
 					}
 				}
@@ -1185,15 +1195,6 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.drainPick = newDashboardDrainModal(msg.row, msg.entries)
 		return m, nil
-	case dashboardPreviewMsg:
-		if msg.err != nil {
-			m.actionErr = msg.err
-			return m, nil
-		}
-		// Preview switched the tmux client to the drain's working pane; the
-		// dashboard has handed off attention, so close it rather than leaving it
-		// stranded behind the pane the operator now looks at.
-		return m, tea.Quit
 	case dashboardStatusMsg:
 		if msg.err != nil {
 			m.actionErr = msg.err
@@ -1500,20 +1501,6 @@ func (m QueueDashboard) dispatchMenuAction(action dashboardMenuAction, row Dashb
 		}
 		m.cols.syncNatural(m.snap.Rows)
 		return m, m.toggleAutoDrain(row)
-	case menuActionPreview:
-		if strings.TrimSpace(row.PaneID) == "" {
-			paneID, err := assistPaneID(m.d, row.SetRef)
-			if err != nil {
-				m.actionErr = err
-				return m, nil
-			}
-			if paneID == "" {
-				m.statusMsg = "no working pane to preview"
-				return m, nil
-			}
-		}
-		m.statusMsg = ""
-		return m, m.previewDrain(row)
 	case menuActionAssist:
 		m.statusMsg = ""
 		return m, m.launchAssist(row)
@@ -1946,7 +1933,8 @@ func (m QueueDashboard) confirmBindModal() (tea.Model, tea.Cmd) {
 func (m QueueDashboard) reload() tea.Cmd {
 	return func() tea.Msg {
 		snap, err := work.BuildSnapshot(m.d.WorkDeps(), m.cfg)
-		return dashboardRowsMsg{snap: snap, err: err}
+		live := loadLivePaneCache(m.d)
+		return dashboardRowsMsg{snap: snap, live: live, err: err}
 	}
 }
 
@@ -2087,13 +2075,6 @@ func detailTicketOnFrontier(wfMap wayfinder.Map, ticket wayfinder.Ticket) bool {
 		}
 	}
 	return false
-}
-
-func (m QueueDashboard) previewDrain(row DashboardRow) tea.Cmd {
-	return func() tea.Msg {
-		err := PreviewDrain(m.d, row.SetRef)
-		return dashboardPreviewMsg{err: err}
-	}
 }
 
 func (m QueueDashboard) launchAssist(row DashboardRow) tea.Cmd {
@@ -2505,7 +2486,6 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "b", Desc: "bind worktree"},
 			{Key: "U", Desc: "unbind worktree"},
 			{Key: "a", Desc: "toggle auto-drain"},
-			{Key: "p", Desc: "preview drain"},
 			{Key: "s", Desc: "status submenu"},
 			{Key: "S", Desc: "assist"},
 			{Key: "f", Desc: "fold"},
@@ -2749,7 +2729,7 @@ func (m QueueDashboard) viewWithMenu() string {
 	}
 	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.snap.Rows))
 	fmt.Fprintln(&body)
-	renderDashboardTableWithMenu(&body, m.snap.Rows, m.list.Cursor(), m.width, m.height, m.menu)
+	renderDashboardTableWithMenu(&body, m.snap.Rows, m.list.Cursor(), m.width, m.height, m.menu, m.live)
 	if m.statusMsg != "" {
 		fmt.Fprintf(&body, "  %s\n", m.statusMsg)
 	}
@@ -3449,16 +3429,17 @@ func renderDashboardAbandonModal(w io.Writer, modal *dashboardAbandonModal, widt
 }
 
 func renderDashboardTable(w io.Writer, rows []DashboardRow, cursor, width, height int) {
-	renderDashboardTableWithMenu(w, rows, cursor, width, height, nil)
+	renderDashboardTableWithMenu(w, rows, cursor, width, height, nil, nil)
 }
 
 // renderDashboardTableWithMenu renders the task-set table and, when menu is
 // non-nil, splices the action overlay in next to the cursored row: below it by
 // default, flipping above when the cursor sits too low for the menu to fit
-// beneath it within height (dashboardMenuPlaceBelow).
-func renderDashboardTableWithMenu(w io.Writer, rows []DashboardRow, cursor, width, height int, menu *dashboardMenu) {
+// beneath it within height (dashboardMenuPlaceBelow). live colours handoff-verb
+// keys in the overlay (ADR-0158).
+func renderDashboardTableWithMenu(w io.Writer, rows []DashboardRow, cursor, width, height int, menu *dashboardMenu, live livePaneCache) {
 	if dashboardTwoLineMode(rows, width, height) {
-		renderDashboardTableTwoLineWithMenu(w, rows, cursor, width, height, menu)
+		renderDashboardTableTwoLineWithMenu(w, rows, cursor, width, height, menu, live)
 		return
 	}
 	headers := dashboardTableHeaders()
@@ -3469,7 +3450,7 @@ func renderDashboardTableWithMenu(w io.Writer, rows []DashboardRow, cursor, widt
 	var menuLines []string
 	placeBelow := true
 	if menu != nil {
-		menuLines = dashboardMenuLines(menu, width)
+		menuLines = dashboardMenuLines(menu, width, live)
 		placeBelow = dashboardMenuPlaceBelow(cursor, len(menuLines), height)
 	}
 	writeMenu := func() {
@@ -3500,7 +3481,7 @@ func renderDashboardTableWithMenu(w io.Writer, rows []DashboardRow, cursor, widt
 // Each row occupies two terminal lines: line 1 holds the live-drain indicator,
 // PROJECT, TASK SET (the set id) and WORKTREE; line 2 holds STATUS indented under
 // the TASK SET column.
-func renderDashboardTableTwoLineWithMenu(w io.Writer, rows []DashboardRow, cursor, width, height int, menu *dashboardMenu) {
+func renderDashboardTableTwoLineWithMenu(w io.Writer, rows []DashboardRow, cursor, width, height int, menu *dashboardMenu, live livePaneCache) {
 	line1Widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths(rows), dashboardTableBodyBudget(width))
 	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTwoLineTableHeader(line1Widths), width))
 	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTwoLineStatusHeader(line1Widths), width))
@@ -3509,7 +3490,7 @@ func renderDashboardTableTwoLineWithMenu(w io.Writer, rows []DashboardRow, curso
 	var menuLines []string
 	placeBelow := true
 	if menu != nil {
-		menuLines = dashboardMenuLines(menu, width)
+		menuLines = dashboardMenuLines(menu, width, live)
 		placeBelow = dashboardMenuPlaceBelowTwoLine(cursor, len(menuLines), height)
 	}
 	writeMenu := func() {
@@ -3568,8 +3549,9 @@ func dashboardMenuPlaceBelow(cursor, menuHeight, height int) bool {
 // dashboardMenuLines renders the action overlay as a block of lines indented to
 // nest under the cursored row, with the highlighted item carrying the shared
 // cursor block. The first line is a dimmed "actions" caption. When the status
-// submenu is open it renders that instead.
-func dashboardMenuLines(menu *dashboardMenu, width int) []string {
+// submenu is open it renders that instead. Handoff-verb keys are coloured by
+// the live-pane affordance (ADR-0158).
+func dashboardMenuLines(menu *dashboardMenu, width int, live livePaneCache) []string {
 	if menu == nil {
 		return nil
 	}
@@ -3583,7 +3565,8 @@ func dashboardMenuLines(menu *dashboardMenu, width int) []string {
 		if i == cursor {
 			marker = ui.IndicatorStyle.Render("█") + " "
 		}
-		line := fmt.Sprintf("    %s%s  %s", marker, item.key, item.label)
+		key := styleHandoffKey(item.key, menuItemLiveState(item, menu.row, live))
+		line := fmt.Sprintf("    %s%s  %s", marker, key, item.label)
 		lines = append(lines, ui.TruncateString(line, width))
 	}
 	return lines

@@ -49,8 +49,9 @@ type SetRef struct {
 	// pop-provisioned (managed) Worktree binding. The dashboard keeps such a
 	// row visible as a clean-up reminder until archived or unbound (ADR-0070).
 	DoneStillManagedBound bool
-	// PaneID is the tmux pane recorded for a live drain of this set, empty if
-	// none was recorded. It is the fact PreviewDrain branches on.
+	// PaneID is the tmux pane recorded for a drain of this set, empty if none
+	// was recorded. Audit/bookkeeping only — live-pane affordance reads tmux
+	// (ADR-0158), not this store field.
 	PaneID string
 	// LiveDrain is true when a live (PID-alive) Runtime execution lock holds
 	// this set's checkout — the structured fact that replaced the retired DRAIN

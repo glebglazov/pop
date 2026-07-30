@@ -105,6 +105,10 @@ type Tmux interface {
 	// FindTaggedPane returns the pane in session's drain window tagged
 	// tag=value, or "" when none (an absent window included).
 	FindTaggedPane(session string, tag PaneTag, value string) (string, error)
+	// ListActivityPanes returns every pane across all sessions that carries at
+	// least one Work-dashboard activity tag, with its current foreground
+	// command — one list-panes -a round-trip for the live-pane affordance.
+	ListActivityPanes() ([]ActivityPane, error)
 
 	// --- pane-id primitives (glossary: Pane ID target) ---
 

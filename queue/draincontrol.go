@@ -172,8 +172,9 @@ func LaunchDrain(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult,
 		d.Tmux = tmuxmod.New()
 	}
 	// An already-running drain pane for this set is a jump target: focus it
-	// rather than re-sending implement into the live process (ADR-0158).
-	if paneID, err := d.Tmux.FindTaggedPane(dec.scan.SessionName, tmuxmod.TagSet, ref.SetID); err != nil {
+	// rather than re-sending implement into the live process (ADR-0158). An
+	// idle tagged pane (bare shell) falls through so EnsureTaggedPane respawns.
+	if paneID, err := runningTaggedPane(d.Tmux, dec.scan.SessionName, tmuxmod.TagSet, ref.SetID); err != nil {
 		return DashboardDrainResult{}, err
 	} else if paneID != "" {
 		return DashboardDrainResult{PaneID: paneID, Session: dec.scan.SessionName, RuntimePath: dec.scan.RuntimePath}, nil
@@ -193,10 +194,9 @@ func LaunchDrain(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult,
 // is the lighter counterpart to LaunchDrain: it runs `pop tasks verify <set>`
 // pinned to the row's runtime path through EnsureTaggedPane with TagVerify,
 // but records neither a Runtime execution lock, a spawn intent, nor a DrainPane —
-// verify is not a drain, so the `●` live-drain indicator must stay dark and `p`
-// must not reach this pane. An empty runtime path omits the flag and lets
-// `pop tasks verify` default to the project root, matching the drain when no
-// worktree is ready.
+// verify is not a drain, so the `●` live-drain indicator must stay dark. An
+// empty runtime path omits the flag and lets `pop tasks verify` default to the
+// project root, matching the drain when no worktree is ready.
 func LaunchVerify(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult, error) {
 	if d == nil {
 		d = DefaultDeps()
@@ -226,8 +226,9 @@ func LaunchVerify(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult
 		d.Tmux = tmuxmod.New()
 	}
 	// An already-running verify pane for this set is a jump target: focus it
-	// rather than re-sending verify into the live process (ADR-0158).
-	if paneID, err := d.Tmux.FindTaggedPane(session, tmuxmod.TagVerify, ref.SetID); err != nil {
+	// rather than re-sending verify into the live process (ADR-0158). An idle
+	// tagged pane (bare shell) falls through so EnsureTaggedPane respawns.
+	if paneID, err := runningTaggedPane(d.Tmux, session, tmuxmod.TagVerify, ref.SetID); err != nil {
 		return DashboardDrainResult{}, err
 	} else if paneID != "" {
 		return DashboardDrainResult{PaneID: paneID, Session: session, RuntimePath: ref.RuntimePath}, nil
@@ -267,34 +268,12 @@ func dashboardScansForDefinition(d *Deps, cfg *config.Config, defPath string) ([
 	return scans, nil
 }
 
-// PreviewDrain switches the active tmux client to the pane associated
-// with the highlighted row. Rows without a recorded drain pane fall back to
-// an Assist session pane tagged for the set when one exists.
-func PreviewDrain(d *Deps, ref SetRef) error {
-	if strings.TrimSpace(ref.PaneID) != "" {
-		if d == nil {
-			d = DefaultDeps()
-		}
-		if d.Tmux == nil {
-			d.Tmux = tmuxmod.New()
-		}
-		return tmuxmod.FocusPane(d.Tmux, ref.PaneID)
-	}
-	paneID, err := assistPaneID(d, ref)
-	if err != nil || paneID == "" {
-		return err
-	}
-	if d.Tmux == nil {
-		d.Tmux = tmuxmod.New()
-	}
-	return tmuxmod.FocusPane(d.Tmux, paneID)
-}
-
 // LaunchAssist opens or reuses an Assist session pane for the dashboard row's
-// set in the project's pop-queue window. A pane already tagged for the set is
-// returned without spawning a twin or re-sending the command; otherwise a fresh
-// pane runs `pop tasks assist` pinned to the row's binding-first runtime
-// checkout. Focus and quit belong to the dashboard handoff path (ADR-0158).
+// set in the project's pop-queue window. A pane already tagged for the set whose
+// command is still running is returned without spawning a twin or re-sending;
+// an idle tagged pane (bare shell) is respawned. Otherwise a fresh pane runs
+// `pop tasks assist` pinned to the row's binding-first runtime checkout. Focus
+// and quit belong to the dashboard handoff path (ADR-0158).
 func LaunchAssist(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult, error) {
 	if d == nil {
 		d = DefaultDeps()
@@ -347,7 +326,7 @@ func LaunchAssist(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult
 		return DashboardDrainResult{}, err
 	}
 
-	if paneID, err := assistPaneIDAt(d, session, ref.SetID); err != nil {
+	if paneID, err := runningTaggedPane(d.Tmux, session, tmuxmod.TagAssist, ref.SetID); err != nil {
 		return DashboardDrainResult{}, err
 	} else if paneID != "" {
 		return DashboardDrainResult{PaneID: paneID, Session: session, RuntimePath: runtimePath}, nil
@@ -391,7 +370,8 @@ func assistPaneTitle(setID string) string {
 // pop-queue window (ADR-0158). The Fold conflict prompt lives in that pane so
 // it outlives the dashboard. An already-running fold pane for the set is a
 // jump target — focus it rather than re-sending fold into the live process.
-// Dashboard-side PreflightFold still refuses ineligible rows before this runs.
+// An idle tagged pane (bare shell) is respawned. Dashboard-side PreflightFold
+// still refuses ineligible rows before this runs.
 func LaunchFold(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult, error) {
 	if d == nil {
 		d = DefaultDeps()
@@ -416,7 +396,7 @@ func LaunchFold(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult, 
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
-	if paneID, err := d.Tmux.FindTaggedPane(session, tmuxmod.TagFold, ref.SetID); err != nil {
+	if paneID, err := runningTaggedPane(d.Tmux, session, tmuxmod.TagFold, ref.SetID); err != nil {
 		return DashboardDrainResult{}, err
 	} else if paneID != "" {
 		return DashboardDrainResult{PaneID: paneID, Session: session, RuntimePath: ref.RuntimePath}, nil
@@ -462,37 +442,6 @@ func LaunchShell(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult,
 		return DashboardDrainResult{}, err
 	}
 	return DashboardDrainResult{PaneID: paneID, Session: session, RuntimePath: checkout}, nil
-}
-
-func assistPaneID(d *Deps, ref SetRef) (string, error) {
-	if d == nil {
-		d = DefaultDeps()
-	}
-	if d.Project == nil {
-		d.Project = project.DefaultDeps()
-	}
-	projectPath := strings.TrimSpace(ref.ProjectPath)
-	if projectPath == "" {
-		projectPath = strings.TrimSpace(ref.RuntimePath)
-	}
-	if projectPath == "" || strings.TrimSpace(ref.SetID) == "" {
-		return "", nil
-	}
-	session := project.SessionNameWith(d.Project, projectPath)
-	return assistPaneIDAt(d, session, ref.SetID)
-}
-
-func assistPaneIDAt(d *Deps, session, setID string) (string, error) {
-	if d == nil {
-		d = DefaultDeps()
-	}
-	if d.Tmux == nil {
-		d.Tmux = tmuxmod.New()
-	}
-	if strings.TrimSpace(session) == "" || strings.TrimSpace(setID) == "" {
-		return "", nil
-	}
-	return d.Tmux.FindTaggedPane(session, tmuxmod.TagAssist, setID)
 }
 
 // UnbindWorktree releases the highlighted set's worktree binding

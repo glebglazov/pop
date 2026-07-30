@@ -563,6 +563,35 @@ func (f *Fake) FindTaggedPane(session string, tag tmux.PaneTag, value string) (s
 	return "", nil
 }
 
+func (f *Fake) ListActivityPanes() ([]tmux.ActivityPane, error) {
+	seen := map[string]bool{}
+	var out []tmux.ActivityPane
+	for paneID, tags := range f.PaneTagValues {
+		if seen[paneID] {
+			continue
+		}
+		seen[paneID] = true
+		p := tmux.ActivityPane{PaneID: paneID}
+		if tags != nil {
+			p.Set = tags[tmux.TagSet]
+			p.Verify = tags[tmux.TagVerify]
+			p.Fold = tags[tmux.TagFold]
+			p.Assist = tags[tmux.TagAssist]
+		}
+		if p.Set == "" && p.Verify == "" && p.Fold == "" && p.Assist == "" {
+			continue
+		}
+		if info, ok := f.PaneInfos[paneID]; ok {
+			p.Session = info.Session
+			p.Command = info.Command
+		} else if cmd, ok := f.PaneCommandMap[paneID]; ok {
+			p.Command = cmd
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
 // --- workbench layout ---
 
 // newWindowID mints a fresh window id for a scaffold session.

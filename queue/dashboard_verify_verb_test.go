@@ -201,8 +201,7 @@ func canonPath(t *testing.T, path string) string {
 }
 
 // assertVerifyRecordsNothing checks the verify spawn left no drain lock, spawn
-// intent, or DrainPane behind — the row's ● indicator must stay dark and `p`
-// (preview) must not reach the verify pane.
+// intent, or DrainPane behind — the row's ● indicator must stay dark.
 func assertVerifyRecordsNothing(t *testing.T, d *Deps, repo string) {
 	t.Helper()
 	panes, err := tasks.AllDrainPanes(d.Tasks)
