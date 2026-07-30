@@ -39,7 +39,7 @@ func TestBuildFoldConflictPromptCarriesContextAndBoundaries(t *testing.T) {
 		"Task set path: " + taskDir,
 		"Set checkout (resolve here): /wt/demo-set",
 		"Set branch: pop/demo-set",
-		"Trunk branch merging in: main",
+		"Trunk branch rebasing onto: main",
 		"Trunk worktree (read-only boundary): /repo/trunk",
 		"- clash.txt",
 		"- pkg/a.go",
@@ -48,6 +48,8 @@ func TestBuildFoldConflictPromptCarriesContextAndBoundaries(t *testing.T) {
 		"Never touch the Trunk worktree",
 		"Never push",
 		"resolve inside the set checkout only",
+		"git rebase --continue",
+		"fold rebase conflict",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("prompt missing %q\n%s", want, prompt)
@@ -55,14 +57,17 @@ func TestBuildFoldConflictPromptCarriesContextAndBoundaries(t *testing.T) {
 	}
 }
 
-func TestHandleFoldMergeConflictRefusesWithoutTTY(t *testing.T) {
+func TestHandleFoldConflictRefusesWithoutTTY(t *testing.T) {
 	d := newTestDeps(t)
-	err := HandleFoldMergeConflict(d, nil, FoldConflictContext{
+	err := HandleFoldConflict(d, nil, FoldConflictContext{
 		SetID:       "demo",
 		RuntimePath: "/wt/demo",
 		TrunkBranch: "main",
 	}, FoldConflictAssistanceOptions{In: NonInteractiveReader{}})
 	if err == nil || !strings.Contains(err.Error(), "conflict") {
 		t.Fatalf("err = %v, want conflict refusal", err)
+	}
+	if !strings.Contains(err.Error(), "rebasing") {
+		t.Fatalf("err = %v, want rebase wording", err)
 	}
 }

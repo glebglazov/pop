@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/glebglazov/pop/config"
@@ -17,7 +18,7 @@ type FoldOptions struct {
 	Yes bool
 	In  io.Reader
 	// AgentPreset / AgentCmd select the attended fold-conflict assistance
-	// adapter when a merge conflict offers an interactive session.
+	// adapter when a rebase conflict offers an interactive session.
 	AgentPreset string
 	AgentCmd    string
 }
@@ -31,11 +32,12 @@ type FoldResult struct {
 	TornDown    bool
 }
 
-// Fold merges a finished Task set's branch back into the Trunk worktree and
-// releases its checkout (ADR-0148). It merges trunk into the set's branch
-// inside the set's own checkout, then advances trunk by fast-forward only.
-// On success it releases the Worktree binding and applies reference-counted
-// teardown. It never pushes and never archives the set.
+// Fold rebases a finished Task set's branch onto the Trunk worktree and
+// releases its checkout (ADR-0148, ADR-0156). It runs a plain rebase of the
+// set branch onto trunk inside the set's own checkout, then advances trunk by
+// fast-forward only. On success it releases the Worktree binding and applies
+// reference-counted teardown. It never pushes, never fetches, and never
+// archives the set.
 func Fold(td *tasks.Deps, pd *project.Deps, cfg *config.Config, setID string, opts FoldOptions, hooks LifecycleHooks, out io.Writer) (FoldResult, error) {
 	setID = strings.TrimSpace(setID)
 	if setID == "" {
@@ -75,7 +77,7 @@ func Fold(td *tasks.Deps, pd *project.Deps, cfg *config.Config, setID string, op
 	}
 
 	manifest := loadFoldManifest(td, setID, runtimePath)
-	if err := foldMergeAndFastForward(td, cfg, opts, out, foldMergeContext{
+	if err := foldRebaseAndFastForward(td, cfg, opts, out, foldRebaseContext{
 		setID:       setID,
 		manifest:    manifest,
 		setPath:     runtimePath,
@@ -128,9 +130,9 @@ type foldPreflightContext struct {
 	openHITL    []tasks.Task
 }
 
-// PreflightFold applies the same precondition checks as Fold without merging or
-// releasing the binding. Dashboard and CLI surfaces use it to refuse early with
-// the same messages Fold would return.
+// PreflightFold applies the same precondition checks as Fold without rebasing
+// or releasing the binding. Dashboard and CLI surfaces use it to refuse early
+// with the same messages Fold would return.
 func PreflightFold(td *tasks.Deps, cfg *config.Config, setID string) error {
 	_, err := preflightFold(td, cfg, setID)
 	return err
@@ -296,7 +298,7 @@ func refuseLiveClaim(td *tasks.Deps, label, path string) error {
 	return fmt.Errorf("fold refused: %s has a live claim (%s)", label, reason)
 }
 
-type foldMergeContext struct {
+type foldRebaseContext struct {
 	setID       string
 	manifest    *tasks.Manifest
 	setPath     string
@@ -325,10 +327,10 @@ func loadFoldManifest(td *tasks.Deps, setID, runtimePath string) *tasks.Manifest
 	return tasks.LoadManifest(td, setID, manifestPath)
 }
 
-// foldMergeAndFastForward merges trunk into the set branch inside the set
+// foldRebaseAndFastForward rebases the set branch onto trunk inside the set
 // checkout, then fast-forwards trunk onto that branch. If trunk moves between
-// the merge and the fast-forward, it redoes the merge once and then refuses.
-func foldMergeAndFastForward(td *tasks.Deps, cfg *config.Config, opts FoldOptions, out io.Writer, ctx foldMergeContext) error {
+// the rebase and the fast-forward, it redoes the rebase once and then refuses.
+func foldRebaseAndFastForward(td *tasks.Deps, cfg *config.Config, opts FoldOptions, out io.Writer, ctx foldRebaseContext) error {
 	const maxAttempts = 2
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		trunkBefore, err := revParseHEAD(td, ctx.trunkPath)
@@ -336,15 +338,15 @@ func foldMergeAndFastForward(td *tasks.Deps, cfg *config.Config, opts FoldOption
 			return fmt.Errorf("fold refused: read trunk HEAD: %w", err)
 		}
 
-		if err := mergeTrunkIntoSet(td, cfg, opts, out, ctx); err != nil {
+		if err := rebaseSetOntoTrunk(td, cfg, opts, out, ctx); err != nil {
 			return err
 		}
 
-		trunkAfterMerge, err := revParseHEAD(td, ctx.trunkPath)
+		trunkAfterRebase, err := revParseHEAD(td, ctx.trunkPath)
 		if err != nil {
 			return fmt.Errorf("fold refused: read trunk HEAD: %w", err)
 		}
-		if trunkAfterMerge != trunkBefore {
+		if trunkAfterRebase != trunkBefore {
 			if attempt+1 < maxAttempts {
 				continue
 			}
@@ -371,16 +373,15 @@ func foldMergeAndFastForward(td *tasks.Deps, cfg *config.Config, opts FoldOption
 
 var errTrunkMovedDuringFold = fmt.Errorf("fold refused: Trunk worktree moved during fold; redo once already attempted — resolve manually and retry")
 
-func mergeTrunkIntoSet(td *tasks.Deps, cfg *config.Config, opts FoldOptions, out io.Writer, ctx foldMergeContext) error {
-	msg := fmt.Sprintf("pop fold: bring trunk (%s) into set branch", ctx.trunkBranch)
-	_, err := td.Git.CommandInDir(ctx.setPath, "merge", "--no-edit", "-m", msg, ctx.trunkBranch)
+func rebaseSetOntoTrunk(td *tasks.Deps, cfg *config.Config, opts FoldOptions, out io.Writer, ctx foldRebaseContext) error {
+	_, err := td.Git.CommandInDir(ctx.setPath, "rebase", ctx.trunkBranch)
 	if err == nil {
 		return nil
 	}
-	if !mergeInProgress(td, ctx.setPath) {
-		return fmt.Errorf("fold refused: merge trunk into set branch failed (trunk unchanged): %w", err)
+	if !rebaseInProgress(td, ctx.setPath) {
+		return fmt.Errorf("fold refused: rebase set branch onto trunk failed (trunk unchanged): %w", err)
 	}
-	return tasks.HandleFoldMergeConflict(td, cfg, tasks.FoldConflictContext{
+	return tasks.HandleFoldConflict(td, cfg, tasks.FoldConflictContext{
 		SetID:       ctx.setID,
 		Manifest:    ctx.manifest,
 		RuntimePath: ctx.setPath,
@@ -400,9 +401,31 @@ func fastForwardTrunk(td *tasks.Deps, trunkPath, setBranch string) error {
 	return err
 }
 
-func mergeInProgress(td *tasks.Deps, path string) bool {
-	_, err := td.Git.CommandInDir(path, "rev-parse", "-q", "--verify", "MERGE_HEAD")
-	return err == nil
+func rebaseInProgress(td *tasks.Deps, path string) bool {
+	return rebaseStateDirPresent(td, path)
+}
+
+// rebaseStateDirPresent reports whether git has a rebase-merge or rebase-apply
+// directory in the checkout. REBASE_HEAD alone is not reliable: git may leave
+// that ref after a successful rebase.
+func rebaseStateDirPresent(td *tasks.Deps, path string) bool {
+	for _, name := range []string{"rebase-merge", "rebase-apply"} {
+		out, err := td.Git.CommandInDir(path, "rev-parse", "--git-path", name)
+		if err != nil {
+			continue
+		}
+		p := strings.TrimSpace(out)
+		if p == "" {
+			continue
+		}
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(path, p)
+		}
+		if st, err := os.Stat(p); err == nil && st.IsDir() {
+			return true
+		}
+	}
+	return false
 }
 
 func revParseHEAD(td *tasks.Deps, path string) (string, error) {

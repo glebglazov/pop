@@ -11,7 +11,7 @@ import (
 	"github.com/glebglazov/pop/config"
 )
 
-// FoldConflictContext carries the identity and git context for a fold merge
+// FoldConflictContext carries the identity and git context for a fold rebase
 // conflict inside the set's own checkout.
 type FoldConflictContext struct {
 	SetID       string
@@ -30,12 +30,12 @@ type FoldConflictAssistanceOptions struct {
 	Out         io.Writer
 }
 
-// HandleFoldMergeConflict runs when merging trunk into the set branch left a
-// conflict with the merge in progress. It offers attended agent assistance on
-// a TTY; otherwise it refuses without aborting the merge. Returns nil when the
-// merge completed (conflicts resolved and committed); the caller may continue
+// HandleFoldConflict runs when rebasing the set branch onto trunk left a
+// conflict with the rebase in progress. It offers attended agent assistance on
+// a TTY; otherwise it refuses without aborting the rebase. Returns nil when the
+// rebase completed (conflicts resolved and continued); the caller may continue
 // the fold fast-forward.
-func HandleFoldMergeConflict(d *Deps, cfg *config.Config, ctx FoldConflictContext, opts FoldConflictAssistanceOptions) error {
+func HandleFoldConflict(d *Deps, cfg *config.Config, ctx FoldConflictContext, opts FoldConflictAssistanceOptions) error {
 	if d == nil {
 		d = defaultDeps
 	}
@@ -94,7 +94,7 @@ func HandleFoldMergeConflict(d *Deps, cfg *config.Config, ctx FoldConflictContex
 			if err != nil {
 				return fmt.Errorf("fold refused: %w", err)
 			}
-			if err := foldMergeCompleted(d, ctx.RuntimePath, ctx.TrunkBranch); err != nil {
+			if err := foldRebaseCompleted(d, ctx.RuntimePath, ctx.TrunkBranch); err != nil {
 				return err
 			}
 			return nil
@@ -114,7 +114,7 @@ const (
 func promptFoldConflictAction(out io.Writer, reader *bufio.Reader, setID string, invocation *AgentAssistanceInvocation) (foldConflictAction, error) {
 	display := outputFor(out)
 	fmt.Fprintln(display)
-	display.line(ansiCyan, "Fold conflict: %s needs trunk merged into its branch.", setID)
+	display.line(ansiCyan, "Fold conflict: %s needs its branch rebased onto trunk.", setID)
 	fmt.Fprintln(display, "  1. Agent assistance (default)")
 	if invocation != nil {
 		fmt.Fprintf(display, "     %s\n", invocation.Display)
@@ -141,25 +141,25 @@ func promptFoldConflictAction(out io.Writer, reader *bufio.Reader, setID string,
 }
 
 // BuildFoldConflictPrompt generates the attended-agent prompt for resolving a
-// fold merge conflict inside the set checkout only.
+// fold rebase conflict inside the set checkout only.
 func BuildFoldConflictPrompt(d *Deps, ctx FoldConflictContext, conflicted []string) string {
 	if d == nil {
 		d = defaultDeps
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "You are assisting a human resolving a Pop fold merge conflict.\n\n")
+	fmt.Fprintf(&b, "You are assisting a human resolving a Pop fold rebase conflict.\n\n")
 	fmt.Fprintf(&b, "Task set: %s\n", ctx.SetID)
 	if ctx.Manifest != nil {
 		fmt.Fprintf(&b, "Task set path: %s\n", ctx.Manifest.Dir)
 	}
 	fmt.Fprintf(&b, "Set checkout (resolve here): %s\n", ctx.RuntimePath)
 	fmt.Fprintf(&b, "Set branch: %s\n", ctx.SetBranch)
-	fmt.Fprintf(&b, "Trunk branch merging in: %s\n", ctx.TrunkBranch)
+	fmt.Fprintf(&b, "Trunk branch rebasing onto: %s\n", ctx.TrunkBranch)
 	fmt.Fprintf(&b, "Trunk worktree (read-only boundary): %s\n", ctx.TrunkPath)
 	fmt.Fprintf(&b, "\n")
 
 	if len(conflicted) == 0 {
-		fmt.Fprintf(&b, "Conflicted paths: (none currently listed — merge may still be in progress)\n\n")
+		fmt.Fprintf(&b, "Conflicted paths: (none currently listed — rebase may still be in progress)\n\n")
 	} else {
 		fmt.Fprintf(&b, "Conflicted paths:\n")
 		for _, p := range conflicted {
@@ -181,11 +181,11 @@ func BuildFoldConflictPrompt(d *Deps, ctx FoldConflictContext, conflicted []stri
 		appendTaskWhatToBuild(d, &b, ctx.Manifest)
 	}
 
-	fmt.Fprintf(&b, "Hard boundary: resolve inside the set checkout only. Never check out, edit, merge into, or commit on the Trunk worktree at %s.\n", ctx.TrunkPath)
+	fmt.Fprintf(&b, "Hard boundary: resolve inside the set checkout only. Never check out, edit, rebase, merge into, or commit on the Trunk worktree at %s.\n", ctx.TrunkPath)
 	fmt.Fprintf(&b, "\n")
 	fmt.Fprintf(&b, "Operations you may perform:\n")
 	fmt.Fprintf(&b, "- Resolve conflict markers in the conflicted paths under the set checkout.\n")
-	fmt.Fprintf(&b, "- Stage and commit the merge in this checkout to complete bringing trunk into the set branch.\n")
+	fmt.Fprintf(&b, "- Stage resolved paths and run `git rebase --continue` in this checkout to finish rebasing the set branch onto trunk.\n")
 	fmt.Fprintf(&b, "- Never touch the Trunk worktree (%s).\n", ctx.TrunkPath)
 	fmt.Fprintf(&b, "- Never push.\n")
 	return b.String()
@@ -231,29 +231,44 @@ func listConflictedPaths(d *Deps, checkoutPath string) ([]string, error) {
 	return paths, nil
 }
 
-func foldMergeCompleted(d *Deps, setPath, trunkBranch string) error {
-	if mergeInProgressBinding(d, setPath) {
+func foldRebaseCompleted(d *Deps, setPath, trunkBranch string) error {
+	if rebaseInProgressBinding(d, setPath) {
 		return foldConflictRefusal(d, setPath)
 	}
-	if !trunkMergedIntoSet(d, setPath, trunkBranch) {
+	if !trunkIsAncestorOfHEAD(d, setPath, trunkBranch) {
 		return foldConflictRefusal(d, setPath)
 	}
 	return nil
 }
 
 func foldConflictRefusal(d *Deps, setPath string) error {
-	if mergeInProgressBinding(d, setPath) {
-		return fmt.Errorf("fold refused: conflict bringing trunk into the set's branch (trunk unchanged); merge still in progress in %s", setPath)
+	if rebaseInProgressBinding(d, setPath) {
+		return fmt.Errorf("fold refused: conflict rebasing the set's branch onto trunk (trunk unchanged); rebase still in progress in %s", setPath)
 	}
-	return fmt.Errorf("fold refused: conflict bringing trunk into the set's branch (trunk unchanged)")
+	return fmt.Errorf("fold refused: conflict rebasing the set's branch onto trunk (trunk unchanged)")
 }
 
-func mergeInProgressBinding(d *Deps, path string) bool {
-	_, err := d.Git.CommandInDir(path, "rev-parse", "-q", "--verify", "MERGE_HEAD")
-	return err == nil
+func rebaseInProgressBinding(d *Deps, path string) bool {
+	for _, name := range []string{"rebase-merge", "rebase-apply"} {
+		out, err := d.Git.CommandInDir(path, "rev-parse", "--git-path", name)
+		if err != nil {
+			continue
+		}
+		p := strings.TrimSpace(out)
+		if p == "" {
+			continue
+		}
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(path, p)
+		}
+		if st, err := os.Stat(p); err == nil && st.IsDir() {
+			return true
+		}
+	}
+	return false
 }
 
-func trunkMergedIntoSet(d *Deps, setPath, trunkBranch string) bool {
+func trunkIsAncestorOfHEAD(d *Deps, setPath, trunkBranch string) bool {
 	_, err := d.Git.CommandInDir(setPath, "merge-base", "--is-ancestor", trunkBranch, "HEAD")
 	return err == nil
 }

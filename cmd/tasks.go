@@ -230,19 +230,22 @@ var taskUnbindWorktreeCmd = &cobra.Command{
 
 var taskFoldCmd = &cobra.Command{
 	Use:   "fold <set>",
-	Short: "Fold a finished set's branch into the Trunk worktree and release its checkout",
-	Long: `Fold a DONE task set's work back into the Trunk worktree and release its
-checkout (ADR-0148).
+	Short: "Fold a finished set's branch onto the Trunk worktree and release its checkout",
+	Long: `Fold a DONE or AWAITING-APPROVAL task set's work onto the Trunk worktree and
+release its checkout (ADR-0148, ADR-0156).
 
-Fold merges trunk into the set's branch inside the set's own checkout, then
-advances trunk by fast-forward only — trunk is never left mid-merge. On success
-it releases the Worktree binding and applies reference-counted managed-worktree
-teardown (confirm-gated; --yes skips only that confirmation). It does not push
-and does not archive the set.
+Fold rebases the set's branch onto trunk inside the set's own checkout (plain
+rebase — merge commits inside the set branch are flattened), then advances
+trunk by fast-forward only — trunk is never left mid-rebase and never gains a
+pop-authored merge commit. On success it releases the Worktree binding and
+applies reference-counted managed-worktree teardown (confirm-gated; --yes skips
+only that confirmation). Folding an AWAITING-APPROVAL set is the sign-off: it
+completes remaining open HITL tasks after a successful land. It does not push,
+does not fetch, and does not archive the set.
 
-Refuses when the set is not DONE (or is NEEDS-VERIFY under enabled verification),
-either worktree is dirty, either carries a live claim, or the set is bound to
-the Trunk worktree itself.`,
+Refuses when the set is not DONE or AWAITING-APPROVAL (or is NEEDS-VERIFY under
+enabled verification), either worktree is dirty, either carries a live claim,
+or the set is bound to the Trunk worktree itself.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runTaskFold,
 }

@@ -204,7 +204,7 @@ func writeFileCommit(t *testing.T, dir, name, contents, msg string) {
 	adoptRunGit(t, dir, "commit", "-m", msg)
 }
 
-func TestFoldMergesTrunkIntoSetThenFastForwardsTrunk(t *testing.T) {
+func TestFoldRebasesSetOntoTrunkThenFastForwardsTrunk(t *testing.T) {
 	t.Parallel()
 	repo := initAdoptRepo(t)
 	td := lifecycleTestDeps(t)
@@ -238,11 +238,59 @@ func TestFoldMergesTrunkIntoSetThenFastForwardsTrunk(t *testing.T) {
 	if !strings.Contains(log, "set work") {
 		t.Fatalf("trunk history missing set work:\n%s", log)
 	}
+	if strings.Contains(log, "pop fold:") {
+		t.Fatalf("trunk must not gain a pop fold merge commit:\n%s", log)
+	}
+	merges := strings.TrimSpace(runGitOutput(t, repo, "log", "--merges", "--oneline"))
+	if merges != "" {
+		t.Fatalf("trunk history must stay linear after fold, got merges:\n%s", merges)
+	}
 	if _, _, ok, err := FindBySetID(td, "set-fold"); err != nil || ok {
 		t.Fatalf("binding should be released: ok=%v err=%v", ok, err)
 	}
 	if _, err := os.Stat(b.RuntimePath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("managed worktree should be torn down, stat=%v", err)
+	}
+}
+
+func TestFoldFlattensMergeCommitOnSetBranch(t *testing.T) {
+	t.Parallel()
+	repo := initAdoptRepo(t)
+	td := lifecycleTestDeps(t)
+	seedDoneTaskSet(t, td, repo, "set-flatten")
+	b, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
+		TD: td, CheckoutPath: repo, SetID: "set-flatten",
+	})
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	writeFileCommit(t, b.RuntimePath, "feature.txt", "set work\n", "set work")
+	// Create a merge commit on the set branch (noise that plain rebase should flatten).
+	side := filepath.Join(t.TempDir(), "side")
+	adoptRunGit(t, repo, "worktree", "add", "-b", "side-merge", side, "HEAD")
+	writeFileCommit(t, side, "side.txt", "side\n", "side work")
+	adoptRunGit(t, b.RuntimePath, "merge", "--no-ff", "-m", "merge side into set", "side-merge")
+	if !strings.Contains(runGitOutput(t, b.RuntimePath, "log", "--merges", "--oneline", "-1"), "merge side into set") {
+		t.Fatal("setup: set branch should contain a merge commit")
+	}
+	writeFileCommit(t, repo, "trunk.txt", "trunk work\n", "trunk work")
+
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+	if _, err := Fold(td, nil, cfg, "set-flatten", FoldOptions{Yes: true, In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, io.Discard); err != nil {
+		t.Fatalf("fold: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "feature.txt")); err != nil {
+		t.Fatalf("trunk must carry set work: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "side.txt")); err != nil {
+		t.Fatalf("trunk must carry flattened side work: %v", err)
+	}
+	merges := strings.TrimSpace(runGitOutput(t, repo, "log", "--merges", "--oneline"))
+	if merges != "" {
+		t.Fatalf("plain rebase must flatten set-branch merge commits; trunk has:\n%s", merges)
+	}
+	if strings.Contains(runGitOutput(t, repo, "log", "--oneline"), "pop fold:") {
+		t.Fatal("trunk must not gain a pop fold merge commit")
 	}
 }
 
@@ -266,22 +314,25 @@ func TestFoldConflictAbortsWithTrunkUnchanged(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "conflict") {
 		t.Fatalf("err = %v, want conflict refusal", err)
 	}
+	if !strings.Contains(err.Error(), "rebase") {
+		t.Fatalf("err = %v, want rebase wording", err)
+	}
 	trunkAfter := strings.TrimSpace(runGitOutput(t, repo, "rev-parse", "HEAD"))
 	if trunkAfter != trunkBefore {
 		t.Fatalf("trunk moved: before=%s after=%s", trunkBefore, trunkAfter)
 	}
-	if mergeInProgress(td, repo) {
-		t.Fatal("trunk must not be mid-merge")
+	if rebaseInProgress(td, repo) {
+		t.Fatal("trunk must not be mid-rebase")
 	}
-	if !mergeInProgress(td, b.RuntimePath) {
-		t.Fatal("set worktree must be left mid-merge for the human to resolve")
+	if !rebaseInProgress(td, b.RuntimePath) {
+		t.Fatal("set worktree must be left mid-rebase for the human to resolve")
 	}
 	if _, _, ok, _ := FindBySetID(td, "set-conflict"); !ok {
 		t.Fatal("binding must remain after refused fold")
 	}
 }
 
-// foldConflictResolverRunner completes an in-progress merge when fold conflict
+// foldConflictResolverRunner completes an in-progress rebase when fold conflict
 // assistance runs the attended agent hook.
 type foldConflictResolverRunner struct {
 	setPath string
@@ -299,8 +350,10 @@ func (r *foldConflictResolverRunner) RunAttended(ctx context.Context, dir string
 	if err := exec.Command("git", "-C", r.setPath, "add", "clash.txt").Run(); err != nil {
 		return 1, err
 	}
-	if err := exec.Command("git", "-C", r.setPath, "commit", "--no-edit").Run(); err != nil {
-		return 1, err
+	cmd := exec.Command("git", "-C", r.setPath, "-c", "core.editor=true", "rebase", "--continue")
+	cmd.Env = append(os.Environ(), "GIT_EDITOR=true", "EDITOR=true")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return 1, fmt.Errorf("rebase --continue: %w\n%s", err, out)
 	}
 	return 0, nil
 }
@@ -348,7 +401,7 @@ func TestFoldConflictOffersAssistanceAndCompletesOnResolve(t *testing.T) {
 	}
 }
 
-func TestFoldConflictInteractiveDeclineLeavesMergeInProgress(t *testing.T) {
+func TestFoldConflictInteractiveDeclineLeavesRebaseInProgress(t *testing.T) {
 	t.Parallel()
 	repo := initAdoptRepo(t)
 	td := lifecycleTestDeps(t)
@@ -372,8 +425,50 @@ func TestFoldConflictInteractiveDeclineLeavesMergeInProgress(t *testing.T) {
 	if trunkAfter != trunkBefore {
 		t.Fatalf("trunk moved: before=%s after=%s", trunkBefore, trunkAfter)
 	}
-	if !mergeInProgress(td, b.RuntimePath) {
-		t.Fatal("set worktree must remain mid-merge after declining assistance")
+	if !rebaseInProgress(td, b.RuntimePath) {
+		t.Fatal("set worktree must remain mid-rebase after declining assistance")
+	}
+}
+
+func TestFoldNonConflictRebaseFailureLeavesTrunkUnchanged(t *testing.T) {
+	t.Parallel()
+	repo := initAdoptRepo(t)
+	td := lifecycleTestDeps(t)
+	seedDoneTaskSet(t, td, repo, "set-fail")
+	b, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
+		TD: td, CheckoutPath: repo, SetID: "set-fail",
+	})
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	writeFileCommit(t, b.RuntimePath, "feature.txt", "set\n", "set work")
+	trunkBefore := strings.TrimSpace(runGitOutput(t, repo, "rev-parse", "HEAD"))
+
+	inner := td.Git
+	td.Git = &interceptGit{
+		inner: inner,
+		onCommandInDir: func(dir string, args ...string) (string, error) {
+			if len(args) >= 1 && args[0] == "rebase" {
+				return "", fmt.Errorf("simulated non-conflict rebase failure")
+			}
+			return inner.CommandInDir(dir, args...)
+		},
+	}
+
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+	_, err = Fold(td, nil, cfg, "set-fail", FoldOptions{Yes: true, In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "rebase set branch onto trunk failed") {
+		t.Fatalf("err = %v, want non-conflict rebase refusal", err)
+	}
+	trunkAfter := strings.TrimSpace(runGitOutput(t, repo, "rev-parse", "HEAD"))
+	if trunkAfter != trunkBefore {
+		t.Fatalf("trunk moved: before=%s after=%s", trunkBefore, trunkAfter)
+	}
+	if rebaseInProgress(td, repo) || rebaseInProgress(td, b.RuntimePath) {
+		t.Fatal("neither checkout should be mid-rebase after plain failure")
+	}
+	if _, _, ok, _ := FindBySetID(td, "set-fail"); !ok {
+		t.Fatal("binding must remain after refused fold")
 	}
 }
 
@@ -413,8 +508,8 @@ func TestFoldTrunkMovingMidFoldRedoesOnceThenRefuses(t *testing.T) {
 	if got := ffAttempts.Load(); got != 2 {
 		t.Fatalf("ff attempts = %d, want 2 (one redo)", got)
 	}
-	if mergeInProgress(td, repo) {
-		t.Fatal("trunk must not be mid-merge")
+	if rebaseInProgress(td, repo) {
+		t.Fatal("trunk must not be mid-rebase")
 	}
 }
 
@@ -679,7 +774,7 @@ func TestFoldNeverArchives(t *testing.T) {
 	}
 }
 
-func TestFoldNeverPushes(t *testing.T) {
+func TestFoldNeverPushesOrFetches(t *testing.T) {
 	t.Parallel()
 	repo := initAdoptRepo(t)
 	td := lifecycleTestDeps(t)
@@ -701,8 +796,14 @@ func TestFoldNeverPushes(t *testing.T) {
 	if rec.ran("push") {
 		t.Fatal("fold must never push")
 	}
+	if rec.ran("fetch") {
+		t.Fatal("fold must never fetch")
+	}
 	if rec.ran("merge-tree") {
 		t.Fatal("fold must not compute a mergeability verdict")
+	}
+	if !rec.ran("rebase") {
+		t.Fatal("fold must rebase the set branch onto trunk")
 	}
 }
 
