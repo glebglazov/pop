@@ -64,6 +64,16 @@ func Fold(td *tasks.Deps, pd *project.Deps, cfg *config.Config, setID string, op
 	branch := ctx.branch
 	trunkBranch := ctx.trunkBranch
 
+	if ctx.setStatus == tasks.StatusAwaitingApproval {
+		confirmed, err := confirmFoldSignOff(opts.In, out, opts.Yes, ctx.openHITL)
+		if err != nil {
+			return FoldResult{}, err
+		}
+		if !confirmed {
+			return FoldResult{}, fmt.Errorf("fold cancelled")
+		}
+	}
+
 	manifest := loadFoldManifest(td, setID, runtimePath)
 	if err := foldMergeAndFastForward(td, cfg, opts, out, foldMergeContext{
 		setID:       setID,
@@ -74,6 +84,16 @@ func Fold(td *tasks.Deps, pd *project.Deps, cfg *config.Config, setID string, op
 		trunkBranch: trunkBranch,
 	}); err != nil {
 		return FoldResult{}, err
+	}
+
+	if ctx.setStatus == tasks.StatusAwaitingApproval {
+		manifest = loadFoldManifest(td, setID, runtimePath)
+		if manifest == nil || !manifest.Valid {
+			return FoldResult{}, fmt.Errorf("fold: reload manifest for sign-off: task set %s is malformed or missing", setID)
+		}
+		if err := tasks.CompleteFoldSignOff(td, manifest, runtimePath); err != nil {
+			return FoldResult{}, fmt.Errorf("fold: complete sign-off: %w", err)
+		}
 	}
 
 	fmt.Fprintf(out, "Folded %s: trunk fast-forwarded onto %s\n", setID, branch)
@@ -100,10 +120,12 @@ func Fold(td *tasks.Deps, pd *project.Deps, cfg *config.Config, setID string, op
 type foldPreflightContext struct {
 	key         string
 	binding     Binding
-	runtimePath     string
-	trunkPath       string
-	branch          string
-	trunkBranch     string
+	runtimePath string
+	trunkPath   string
+	branch      string
+	trunkBranch string
+	setStatus   tasks.TaskSetStatus
+	openHITL    []tasks.Task
 }
 
 // PreflightFold applies the same precondition checks as Fold without merging or
@@ -149,7 +171,8 @@ func preflightFold(td *tasks.Deps, cfg *config.Config, setID string) (foldPrefli
 		return foldPreflightContext{}, fmt.Errorf("fold refused: %s is bound to the Trunk worktree itself; nothing to fold", setID)
 	}
 
-	if err := requireSetDone(td, cfg, setID, runtimePath); err != nil {
+	foldStatus, err := resolveFoldSetStatus(td, cfg, setID, runtimePath)
+	if err != nil {
 		return foldPreflightContext{}, err
 	}
 
@@ -190,6 +213,8 @@ func preflightFold(td *tasks.Deps, cfg *config.Config, setID string) (foldPrefli
 		trunkPath:   trunkPath,
 		branch:      branch,
 		trunkBranch: trunkBranch,
+		setStatus:   foldStatus.status,
+		openHITL:    foldStatus.openHITL,
 	}, nil
 }
 
@@ -205,32 +230,51 @@ func sameCheckout(td *tasks.Deps, a, b string) (bool, error) {
 	return ca == cb, nil
 }
 
-func requireSetDone(td *tasks.Deps, cfg *config.Config, setID, runtimePath string) error {
+type foldSetStatus struct {
+	status   tasks.TaskSetStatus
+	openHITL []tasks.Task
+}
+
+func resolveFoldSetStatus(td *tasks.Deps, cfg *config.Config, setID, runtimePath string) (foldSetStatus, error) {
 	id, err := tasks.ResolveRepositoryIdentity(td, runtimePath)
 	if err != nil {
-		return fmt.Errorf("fold refused: resolve repository: %w", err)
+		return foldSetStatus{}, fmt.Errorf("fold refused: resolve repository: %w", err)
 	}
 	defPath, err := tasks.CanonicalDefinitionPathWith(td, id.TasksDir)
 	if err != nil {
-		return fmt.Errorf("fold refused: resolve task storage: %w", err)
+		return foldSetStatus{}, fmt.Errorf("fold refused: resolve task storage: %w", err)
 	}
 	refresh, err := tasks.RefreshWith(td, defPath, tasks.StatePathFor(defPath))
 	if err != nil {
-		return fmt.Errorf("fold refused: refresh status: %w", err)
+		return foldSetStatus{}, fmt.Errorf("fold refused: refresh status: %w", err)
 	}
 	tasks.ApplyVerifyVerdicts(td, refresh, cfg, runtimePath)
 	row := tasks.FindRow(refresh, setID)
 	if row == nil {
-		return fmt.Errorf("fold refused: task set %s is not registered", setID)
+		return foldSetStatus{}, fmt.Errorf("fold refused: task set %s is not registered", setID)
 	}
 	switch row.Status {
 	case tasks.StatusDone:
-		return nil
+		return foldSetStatus{status: tasks.StatusDone}, nil
+	case tasks.StatusAwaitingApproval:
+		m := refresh.Manifests[setID]
+		if m == nil || !m.Valid {
+			return foldSetStatus{}, fmt.Errorf("fold refused: task set %s is malformed", setID)
+		}
+		return foldSetStatus{status: tasks.StatusAwaitingApproval, openHITL: tasks.OpenHITLTasks(m)}, nil
 	case tasks.StatusNeedsVerify:
-		return fmt.Errorf("fold refused: %s is NEEDS-VERIFY; verify or accept first", setID)
+		return foldSetStatus{}, fmt.Errorf("fold refused: %s is NEEDS-VERIFY; verify or accept first", setID)
 	default:
-		return fmt.Errorf("fold refused: %s is %s (must be DONE)", setID, row.Status)
+		return foldSetStatus{}, fmt.Errorf("fold refused: %s is %s (must be DONE)", setID, row.Status)
 	}
+}
+
+func confirmFoldSignOff(in io.Reader, out io.Writer, yes bool, hitl []tasks.Task) (bool, error) {
+	if len(hitl) == 0 {
+		return true, nil
+	}
+	prompt := tasks.FormatFoldSignOffConfirmation(hitl) + "\nProceed? [y/N]: "
+	return confirmYesNo(in, out, yes, prompt, "non-interactive fold of an AWAITING-APPROVAL set requires --yes")
 }
 
 func refuseLiveClaim(td *tasks.Deps, label, path string) error {

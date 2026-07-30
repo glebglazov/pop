@@ -420,7 +420,7 @@ func promptGenericAssistAction(out io.Writer, reader *bufio.Reader, taskSetID st
 }
 
 func assistFoldEligible(d *Deps, setID string, status TaskSetStatus) bool {
-	return status == StatusDone && stillHasWorktreeBinding(d, setID)
+	return FoldEligibleStatus(status) && stillHasWorktreeBinding(d, setID)
 }
 
 func stillHasWorktreeBinding(d *Deps, setID string) bool {

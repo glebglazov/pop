@@ -425,10 +425,10 @@ func dashboardVerifyEligible(row DashboardRow) bool {
 	return row.RawStatus == tasks.StatusNeedsVerify || row.RawStatus == tasks.StatusVerifyFailed
 }
 
-// dashboardFoldEligible reports whether the fold verb applies to row: a DONE set
-// that still holds a Worktree binding (ADR-0148).
+// dashboardFoldEligible reports whether the fold verb applies to row: a bound DONE
+// or AWAITING-APPROVAL set (ADR-0148, ADR-0156).
 func dashboardFoldEligible(row DashboardRow) bool {
-	return row.Bound && row.RawStatus == tasks.StatusDone
+	return row.Bound && tasks.FoldEligibleStatus(row.RawStatus)
 }
 
 // newDashboardMenu opens the action overlay on row, wrapping its verbs in a

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/store"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -94,6 +95,104 @@ func seedOpenTaskSet(t *testing.T, td *tasks.Deps, repo, setID string) string {
 		t.Fatalf("register: %v", err)
 	}
 	return defPath
+}
+
+func seedAwaitingApprovalTaskSet(t *testing.T, td *tasks.Deps, repo, setID string, hitl []map[string]any) string {
+	t.Helper()
+	id, err := tasks.ResolveRepositoryIdentity(td, repo)
+	if err != nil {
+		t.Fatalf("identity: %v", err)
+	}
+	defPath, err := tasks.CanonicalDefinitionPathWith(td, id.TasksDir)
+	if err != nil {
+		t.Fatalf("def path: %v", err)
+	}
+	taskDir := filepath.Join(defPath, setID)
+	if err := os.MkdirAll(taskDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(taskDir, "01-done.md"), []byte("## Acceptance criteria\n\n- [x] done\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	taskList := []map[string]any{{
+		"id": "01-done", "file": "01-done.md", "title": "Done", "type": "AFK", "status": "done",
+	}}
+	for _, h := range hitl {
+		file := h["id"].(string) + ".md"
+		if err := os.WriteFile(filepath.Join(taskDir, file), []byte("## Acceptance criteria\n\n- [ ] gate\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		h["file"] = file
+		h["type"] = "HITL"
+		if _, ok := h["status"]; !ok {
+			h["status"] = "open"
+		}
+		taskList = append(taskList, h)
+	}
+	payload := map[string]any{"tasks": taskList}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(taskDir, "index.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tasks.RegisterWith(td, defPath, tasks.StatePathFor(defPath)); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	defPath, err = tasks.CanonicalDefinitionPathWith(td, defPath)
+	if err != nil {
+		t.Fatalf("re-canon: %v", err)
+	}
+	return defPath
+}
+
+func manifestStatusAt(t *testing.T, td *tasks.Deps, repo, setID string) tasks.TaskSetStatus {
+	t.Helper()
+	id, err := tasks.ResolveRepositoryIdentity(td, repo)
+	if err != nil {
+		t.Fatalf("identity: %v", err)
+	}
+	defPath, err := tasks.CanonicalDefinitionPathWith(td, id.TasksDir)
+	if err != nil {
+		t.Fatalf("def path: %v", err)
+	}
+	refresh, err := tasks.RefreshWith(td, defPath, tasks.StatePathFor(defPath))
+	if err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	m := refresh.Manifests[setID]
+	if m == nil {
+		t.Fatalf("manifest for %s missing", setID)
+	}
+	return tasks.DeriveStatus(m)
+}
+
+func hitlTaskStatus(t *testing.T, td *tasks.Deps, repo, setID, taskID string) tasks.TaskStatus {
+	t.Helper()
+	id, err := tasks.ResolveRepositoryIdentity(td, repo)
+	if err != nil {
+		t.Fatalf("identity: %v", err)
+	}
+	defPath, err := tasks.CanonicalDefinitionPathWith(td, id.TasksDir)
+	if err != nil {
+		t.Fatalf("def path: %v", err)
+	}
+	refresh, err := tasks.RefreshWith(td, defPath, tasks.StatePathFor(defPath))
+	if err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	m := refresh.Manifests[setID]
+	if m == nil {
+		t.Fatalf("manifest for %s missing", setID)
+	}
+	for _, task := range m.Tasks {
+		if task.ID == taskID {
+			return task.Status
+		}
+	}
+	t.Fatalf("task %s not found in %s", taskID, setID)
+	return ""
 }
 
 func writeFileCommit(t *testing.T, dir, name, contents, msg string) {
@@ -661,4 +760,258 @@ func TestFoldAdoptedManagedRootCheckoutReachesTeardown(t *testing.T) {
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("managed worktree should be torn down, stat err = %v", err)
 	}
+}
+
+func TestFoldAwaitingApprovalListsHITLInConfirmation(t *testing.T) {
+	t.Parallel()
+	repo := initAdoptRepo(t)
+	td := lifecycleTestDeps(t)
+	seedAwaitingApprovalTaskSet(t, td, repo, "set-confirm-signoff", []map[string]any{
+		{"id": "09-review", "title": "Review"},
+		{"id": "10-signoff", "title": "Sign off"},
+	})
+	if _, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
+		TD: td, CheckoutPath: repo, SetID: "set-confirm-signoff",
+	}); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+	var out bytes.Buffer
+	_, err := Fold(td, nil, cfg, "set-confirm-signoff", FoldOptions{In: strings.NewReader("n\n")}, LifecycleHooks{}, &out)
+	if err == nil || !strings.Contains(err.Error(), "cancelled") {
+		t.Fatalf("err = %v, want cancelled fold", err)
+	}
+	if !strings.Contains(out.String(), "fold will complete: 09-review, 10-signoff") {
+		t.Fatalf("confirmation missing HITL list:\n%s", out.String())
+	}
+}
+
+func TestFoldAwaitingApprovalCompletesHITLAndReachesDone(t *testing.T) {
+	t.Parallel()
+	repo := initAdoptRepo(t)
+	td := lifecycleTestDeps(t)
+	seedAwaitingApprovalTaskSet(t, td, repo, "set-signoff", []map[string]any{
+		{"id": "09-review", "title": "Review"},
+		{"id": "10-signoff", "title": "Sign off"},
+	})
+	b, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
+		TD: td, CheckoutPath: repo, SetID: "set-signoff",
+	})
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	writeFileCommit(t, b.RuntimePath, "feature.txt", "set work\n", "set work")
+
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+	_, err = Fold(td, nil, cfg, "set-signoff", FoldOptions{Yes: true, In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, io.Discard)
+	if err != nil {
+		t.Fatalf("fold: %v", err)
+	}
+	if got := manifestStatusAt(t, td, repo, "set-signoff"); got != tasks.StatusDone {
+		t.Fatalf("set status = %q, want DONE", got)
+	}
+	for _, id := range []string{"09-review", "10-signoff"} {
+		if got := hitlTaskStatus(t, td, repo, "set-signoff", id); got != tasks.TaskDone {
+			t.Fatalf("task %s status = %q, want done", id, got)
+		}
+	}
+}
+
+func TestFoldAwaitingApprovalConflictLeavesHITLUntouched(t *testing.T) {
+	t.Parallel()
+	repo := initAdoptRepo(t)
+	td := lifecycleTestDeps(t)
+	seedAwaitingApprovalTaskSet(t, td, repo, "set-conflict-signoff", []map[string]any{
+		{"id": "09-review", "title": "Review"},
+	})
+	b, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
+		TD: td, CheckoutPath: repo, SetID: "set-conflict-signoff",
+	})
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	writeFileCommit(t, b.RuntimePath, "clash.txt", "from-set\n", "set clash")
+	writeFileCommit(t, repo, "clash.txt", "from-trunk\n", "trunk clash")
+
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+	_, err = Fold(td, nil, cfg, "set-conflict-signoff", FoldOptions{
+		Yes: true,
+		In:  tasks.NonInteractiveReader{},
+	}, LifecycleHooks{}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "conflict") {
+		t.Fatalf("err = %v, want conflict refusal", err)
+	}
+	if got := hitlTaskStatus(t, td, repo, "set-conflict-signoff", "09-review"); got != tasks.TaskOpen {
+		t.Fatalf("HITL task status = %q, want open after failed fold", got)
+	}
+	if got := manifestStatusAt(t, td, repo, "set-conflict-signoff"); got != tasks.StatusAwaitingApproval {
+		t.Fatalf("set status = %q, want AWAITING-APPROVAL", got)
+	}
+}
+
+func TestFoldAwaitingApprovalNonInteractiveRefusesWithoutYes(t *testing.T) {
+	t.Parallel()
+	repo := initAdoptRepo(t)
+	td := lifecycleTestDeps(t)
+	seedAwaitingApprovalTaskSet(t, td, repo, "set-ni", []map[string]any{
+		{"id": "09-review", "title": "Review"},
+	})
+	if _, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
+		TD: td, CheckoutPath: repo, SetID: "set-ni",
+	}); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+	_, err := Fold(td, nil, cfg, "set-ni", FoldOptions{In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "AWAITING-APPROVAL set requires --yes") {
+		t.Fatalf("err = %v, want non-interactive sign-off refusal", err)
+	}
+}
+
+func TestFoldAwaitingApprovalNonInteractiveProceedsWithYes(t *testing.T) {
+	t.Parallel()
+	repo := initAdoptRepo(t)
+	td := lifecycleTestDeps(t)
+	seedAwaitingApprovalTaskSet(t, td, repo, "set-ni-yes", []map[string]any{
+		{"id": "09-review", "title": "Review"},
+	})
+	b, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
+		TD: td, CheckoutPath: repo, SetID: "set-ni-yes",
+	})
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	writeFileCommit(t, b.RuntimePath, "feature.txt", "work\n", "set work")
+
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+	_, err = Fold(td, nil, cfg, "set-ni-yes", FoldOptions{Yes: true, In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, io.Discard)
+	if err != nil {
+		t.Fatalf("fold --yes: %v", err)
+	}
+	if got := manifestStatusAt(t, td, repo, "set-ni-yes"); got != tasks.StatusDone {
+		t.Fatalf("set status = %q, want DONE", got)
+	}
+	_ = b
+}
+
+func TestFoldDoneNonInteractiveWithoutSignOffYesUnchanged(t *testing.T) {
+	t.Parallel()
+	repo := initAdoptRepo(t)
+	td := lifecycleTestDeps(t)
+	seedDoneTaskSet(t, td, repo, "set-done-ni")
+	b, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
+		TD: td, CheckoutPath: repo, SetID: "set-done-ni",
+	})
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	writeFileCommit(t, b.RuntimePath, "feature.txt", "work\n", "set work")
+
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+	_, err = Fold(td, nil, cfg, "set-done-ni", FoldOptions{Yes: true, In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, io.Discard)
+	if err != nil {
+		t.Fatalf("DONE fold without sign-off prompt should still work with --yes for teardown: %v", err)
+	}
+	_ = b
+}
+
+func TestFoldRefusesAwaitingApprovalStatuses(t *testing.T) {
+	t.Parallel()
+
+	t.Run("VERIFY-FAILED", func(t *testing.T) {
+		t.Parallel()
+		repo := initAdoptRepo(t)
+		td := lifecycleTestDeps(t)
+		seedAwaitingApprovalTaskSet(t, td, repo, "set-vf", []map[string]any{
+			{"id": "09-review", "title": "Review"},
+		})
+		b, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
+			TD: td, CheckoutPath: repo, SetID: "set-vf",
+		})
+		if err != nil {
+			t.Fatalf("provision: %v", err)
+		}
+		id, err := tasks.ResolveRepositoryIdentity(td, b.RuntimePath)
+		if err != nil {
+			t.Fatalf("identity: %v", err)
+		}
+		workSHA := strings.TrimSpace(runGitOutput(t, b.RuntimePath, "rev-parse", "HEAD"))
+		s, _, err := td.Store(true)
+		if err != nil {
+			t.Fatalf("store: %v", err)
+		}
+		if err := s.PutVerifyVerdict(store.VerifyVerdict{
+			Repo: id.CommonDir, SetID: "set-vf", WorkSHA: workSHA, Verdict: "NEEDS-HUMAN",
+		}); err != nil {
+			t.Fatalf("PutVerifyVerdict: %v", err)
+		}
+		cfg := &config.Config{
+			Projects: []config.ProjectEntry{{Path: repo}},
+			Task:     &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}},
+		}
+		_, err = Fold(td, nil, cfg, "set-vf", FoldOptions{Yes: true, In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, io.Discard)
+		if err == nil || !strings.Contains(err.Error(), "VERIFY-FAILED") {
+			t.Fatalf("err = %v, want VERIFY-FAILED refusal", err)
+		}
+	})
+
+	t.Run("BLOCKED", func(t *testing.T) {
+		t.Parallel()
+		repo := initAdoptRepo(t)
+		td := lifecycleTestDeps(t)
+		seedAwaitingApprovalTaskSet(t, td, repo, "set-blocked", []map[string]any{
+			{"id": "01-gate", "title": "Gate"},
+		})
+		defPath := filepath.Join(tasksDirForBindingRepo(t, td, repo), "set-blocked")
+		manifestPath := filepath.Join(defPath, "index.json")
+		data, err := os.ReadFile(manifestPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(data, &payload); err != nil {
+			t.Fatal(err)
+		}
+		tasksList := payload["tasks"].([]any)
+		tasksList = append(tasksList, map[string]any{
+			"id": "02-a", "file": "02-a.md", "title": "A", "type": "AFK", "status": "open",
+			"blocked_by": []string{"01-gate"},
+		})
+		if err := os.WriteFile(filepath.Join(defPath, "02-a.md"), []byte("## Acceptance criteria\n\n- [ ] a\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		payload["tasks"] = tasksList
+		rewritten, err := json.MarshalIndent(payload, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(manifestPath, rewritten, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
+			TD: td, CheckoutPath: repo, SetID: "set-blocked",
+		}); err != nil {
+			t.Fatalf("provision: %v", err)
+		}
+		cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+		_, err = Fold(td, nil, cfg, "set-blocked", FoldOptions{Yes: true, In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, io.Discard)
+		if err == nil || !strings.Contains(err.Error(), "BLOCKED") {
+			t.Fatalf("err = %v, want BLOCKED refusal", err)
+		}
+	})
+}
+
+func tasksDirForBindingRepo(t *testing.T, td *tasks.Deps, repo string) string {
+	t.Helper()
+	id, err := tasks.ResolveRepositoryIdentity(td, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defPath, err := tasks.CanonicalDefinitionPathWith(td, id.TasksDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return defPath
 }

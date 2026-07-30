@@ -29,6 +29,11 @@ func TestDashboardActionMenuFoldFiltering(t *testing.T) {
 		t.Fatalf("DONE bound row missing fold: %v", doneBound)
 	}
 
+	awaitingBound := keysFor(DashboardRow{SetRef: SetRef{SetID: "await", RawStatus: tasks.StatusAwaitingApproval, Bound: true}})
+	if !contains(awaitingBound, "f") {
+		t.Fatalf("AWAITING-APPROVAL bound row missing fold: %v", awaitingBound)
+	}
+
 	readyBound := keysFor(DashboardRow{SetRef: SetRef{SetID: "ready", RawStatus: tasks.StatusReady, Bound: true}})
 	if contains(readyBound, "f") {
 		t.Fatalf("READY bound row should not offer fold: %v", readyBound)
