@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -479,12 +480,12 @@ func TestRunConfiguredVerifierPersistsMultiAgentFallback(t *testing.T) {
 	d := newTestDeps(t)
 	d.Git = stubGit("sha1\n", "", "")
 	d.LookPath = func(string) (string, error) { return "/bin/claude", nil }
-	d.Runner = runner
+	d.Runner = &probeNeutralRunner{inner: runner}
 
 	var out bytes.Buffer
 	raw, err := runConfiguredVerifier(d, nil, verifierSelection{
 		Agents: []string{"claude", "claude --model opus"}, Effort: "heavy",
-	}, taskSetDir, "demo", "sha1", "/rt", "prompt", &out, &out, time.Minute)
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", &out, &out, time.Minute, nil)
 	if err != nil {
 		t.Fatalf("runConfiguredVerifier: %v", err)
 	}
@@ -540,12 +541,12 @@ func TestRunConfiguredVerifierUnparseableOutputPersistsWithNeedsHumanVerdict(t *
 	d := newTestDeps(t)
 	d.Git = stubGit("sha1\n", "", "")
 	d.LookPath = func(string) (string, error) { return "/bin/claude", nil }
-	d.Runner = runner
+	d.Runner = &probeNeutralRunner{inner: runner}
 
 	var out bytes.Buffer
 	raw, err := runConfiguredVerifier(d, nil, verifierSelection{
 		Agents: []string{"claude"}, Effort: "heavy",
-	}, taskSetDir, "demo", "sha1", "/rt", "prompt", &out, &out, time.Minute)
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", &out, &out, time.Minute, nil)
 	if err != nil {
 		t.Fatalf("runConfiguredVerifier: %v", err)
 	}
@@ -837,11 +838,11 @@ func TestRunConfiguredVerifierAllAgentsQuotaPausedReturnsQuotaPause(t *testing.T
 	d := newTestDeps(t)
 	d.Git = stubGit("sha1\n", "", "")
 	d.LookPath = func(string) (string, error) { return "/bin/codex", nil }
-	d.Runner = runner
+	d.Runner = &probeNeutralRunner{inner: runner}
 
 	_, err := runConfiguredVerifier(d, nil, verifierSelection{
 		Agents: []string{"codex"}, Effort: "heavy",
-	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute)
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute, nil)
 	if err == nil {
 		t.Fatal("expected verifier quota pause error")
 	}
@@ -872,8 +873,31 @@ func verifyRetryDeps(t *testing.T, runner CommandRunner) *Deps {
 		FS:       deps.NewRealFileSystem(),
 		Git:      stubGit("sha1\n", "", ""),
 		LookPath: func(string) (string, error) { return "/bin/claude", nil },
-		Runner:   runner,
+		Runner:   &probeNeutralRunner{inner: runner},
 	}
+}
+
+// probeNeutralRunner satisfies availability probes without forwarding them to the
+// wrapped runner, so test scripts are not consumed by probe calls.
+type probeNeutralRunner struct {
+	inner CommandRunner
+}
+
+func (r *probeNeutralRunner) Run(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (int, error) {
+	proc, err := r.Start(ctx, dir, stdout, stderr, name, args...)
+	if err != nil {
+		return 1, err
+	}
+	return proc.Wait()
+}
+
+func (r *probeNeutralRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
+	if IsAgentAvailabilityProbeCommand(name, args) {
+		proc := &ManagedProcess{done: make(chan waitResult, 1)}
+		proc.done <- waitResult{exitCode: 0}
+		return proc, nil
+	}
+	return r.inner.Start(ctx, dir, stdout, stderr, name, args...)
 }
 
 func instantVerifyRetryConfig(maxTries int) *config.Config {
@@ -896,7 +920,7 @@ func TestRunConfiguredVerifierDoesNotRetryCleanNeedsHuman(t *testing.T) {
 
 	raw, err := runConfiguredVerifier(d, instantVerifyRetryConfig(3), verifierSelection{
 		Agents: []string{"claude"}, Effort: "heavy",
-	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute)
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute, nil)
 	if err != nil {
 		t.Fatalf("runConfiguredVerifier: %v", err)
 	}
@@ -922,7 +946,7 @@ func TestRunConfiguredVerifierRetriesUnparseableWithDelayNotice(t *testing.T) {
 
 	raw, err := runConfiguredVerifier(d, instantVerifyRetryConfig(2), verifierSelection{
 		Agents: []string{"claude"}, Effort: "heavy",
-	}, taskSetDir, "demo", "sha1", "/rt", "prompt", &out, &out, time.Minute)
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", &out, &out, time.Minute, nil)
 	if err != nil {
 		t.Fatalf("runConfiguredVerifier: %v", err)
 	}
@@ -956,7 +980,7 @@ func TestRunConfiguredVerifierFallsThroughAfterRetryExhausted(t *testing.T) {
 
 	raw, err := runConfiguredVerifier(d, cfg, verifierSelection{
 		Agents: []string{"claude", "claude --model opus"}, Effort: "heavy",
-	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute)
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute, nil)
 	if err != nil {
 		t.Fatalf("runConfiguredVerifier: %v", err)
 	}
@@ -979,7 +1003,7 @@ func TestRunConfiguredVerifierTimeoutRetriesThenFallsThrough(t *testing.T) {
 
 	raw, err := runConfiguredVerifier(d, instantVerifyRetryConfig(2), verifierSelection{
 		Agents: []string{"claude", "claude --model opus"}, Effort: "heavy",
-	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, 50*time.Millisecond)
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, 50*time.Millisecond, nil)
 	if err != nil {
 		t.Fatalf("runConfiguredVerifier: %v", err)
 	}
@@ -1006,7 +1030,7 @@ func TestRunConfiguredVerifierTimeoutRetriesThenParses(t *testing.T) {
 
 	raw, err := runConfiguredVerifier(d, instantVerifyRetryConfig(3), verifierSelection{
 		Agents: []string{"claude"}, Effort: "heavy",
-	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, 50*time.Millisecond)
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, 50*time.Millisecond, nil)
 	if err != nil {
 		t.Fatalf("runConfiguredVerifier: %v", err)
 	}
@@ -1039,7 +1063,7 @@ func TestRunConfiguredVerifierUsesVerifyMaxTriesOverride(t *testing.T) {
 
 	_, err := runConfiguredVerifier(d, cfg, verifierSelection{
 		Agents: []string{"claude", "claude --model opus"}, Effort: "heavy",
-	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute)
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute, nil)
 	if err != nil {
 		t.Fatalf("runConfiguredVerifier: %v", err)
 	}
@@ -1109,4 +1133,170 @@ func (r *timeoutThenScriptRunner) Start(ctx context.Context, dir string, stdout,
 	}
 	proc.done <- waitResult{exitCode: 0}
 	return proc, nil
+}
+
+func TestRunConfiguredVerifierSkipsUnauthenticatedPresetByProbe(t *testing.T) {
+	t.Parallel()
+	taskSetDir := t.TempDir()
+	runner := &scriptedVerifyRunner{
+		scripts: []string{
+			`{"type":"system","subtype":"init"}` + "\n" + `{"type":"result","subtype":"success","result":"VERDICT: PASS\nFINDINGS:\n"}`,
+		},
+	}
+	d := newTestDeps(t)
+	d.Git = stubGit("sha1\n", "", "")
+	d.LookPath = func(file string) (string, error) {
+		if file == "cursor-agent" || file == "claude" {
+			return "/bin/" + file, nil
+		}
+		return "", exec.ErrNotFound
+	}
+	d.Runner = &probeAwareVerifyRunner{
+		inner: runner,
+		probeOutputs: map[string]string{
+			"cursor-agent": `{"isAuthenticated":false}`,
+		},
+	}
+
+	var out bytes.Buffer
+	raw, err := runConfiguredVerifier(d, nil, verifierSelection{
+		Agents: []string{"cursor", "claude"}, Effort: "heavy",
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", &out, &out, time.Minute, nil)
+	if err != nil {
+		t.Fatalf("runConfiguredVerifier: %v", err)
+	}
+	if !strings.Contains(raw, "VERDICT: PASS") {
+		t.Fatalf("raw = %q, want PASS from fallback agent", raw)
+	}
+	if runner.calls != 1 {
+		t.Fatalf("headless calls = %d, want 1 (cursor skipped by probe)", runner.calls)
+	}
+	if !strings.Contains(out.String(), "Verifier agent cursor unauthenticated; trying next") {
+		t.Fatalf("missing probe skip line:\n%s", out.String())
+	}
+}
+
+func TestRunConfiguredVerifierSkipsUnauthenticatedPresetByPassiveDetection(t *testing.T) {
+	t.Parallel()
+	taskSetDir := t.TempDir()
+	authLine := "Error: Authentication required. Please run 'agent login' first, or set CURSOR_API_KEY environment variable."
+	runner := &scriptedVerifyRunner{
+		scripts: []string{
+			authLine,
+			`{"type":"system","subtype":"init"}` + "\n" + `{"type":"result","subtype":"success","result":"VERDICT: PASS\nFINDINGS:\n"}`,
+		},
+	}
+	d := newTestDeps(t)
+	d.Git = stubGit("sha1\n", "", "")
+	d.LookPath = func(file string) (string, error) {
+		if file == "cursor-agent" || file == "claude" {
+			return "/bin/" + file, nil
+		}
+		return "", exec.ErrNotFound
+	}
+	d.Runner = &probeAwareVerifyRunner{
+		inner: runner,
+		probeOutputs: map[string]string{
+			"cursor-agent": "unparseable status output",
+		},
+	}
+
+	var out bytes.Buffer
+	raw, err := runConfiguredVerifier(d, nil, verifierSelection{
+		Agents: []string{"cursor", "claude"}, Effort: "heavy",
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", &out, &out, time.Minute, nil)
+	if err != nil {
+		t.Fatalf("runConfiguredVerifier: %v", err)
+	}
+	if !strings.Contains(raw, "VERDICT: PASS") {
+		t.Fatalf("raw = %q, want PASS from fallback agent", raw)
+	}
+	if runner.calls != 2 {
+		t.Fatalf("headless calls = %d, want 2 (cursor invoked then claude)", runner.calls)
+	}
+	if !strings.Contains(out.String(), "Verifier agent cursor unauthenticated; trying next") {
+		t.Fatalf("missing passive auth skip line:\n%s", out.String())
+	}
+
+	pairs := listRunFilePairs(t, capturedRunsDir(taskSetDir))
+	if len(pairs) != 2 {
+		t.Fatalf("want 2 verify runs (auth skip + PASS), got %d", len(pairs))
+	}
+	meta1 := readCapturedRunMeta(t, pairs[0].meta)
+	if meta1.Outcome != streamOutcomeAgentUnusable {
+		t.Fatalf("run1 outcome = %q, want %s", meta1.Outcome, streamOutcomeAgentUnusable)
+	}
+}
+
+func TestRunConfiguredVerifierAllHumanHealingUnavailableHardErrors(t *testing.T) {
+	t.Parallel()
+	taskSetDir := t.TempDir()
+	authLine := "Error: Authentication required. Please run 'agent login' first, or set CURSOR_API_KEY environment variable."
+	runner := &scriptedVerifyRunner{
+		scripts: []string{authLine},
+	}
+	d := newTestDeps(t)
+	d.Git = stubGit("sha1\n", "", "")
+	realLookPath := exec.LookPath
+	d.LookPath = func(file string) (string, error) {
+		if file == "codex" {
+			return "", exec.ErrNotFound
+		}
+		return realLookPath(file)
+	}
+	d.Runner = &probeAwareVerifyRunner{
+		inner: runner,
+		probeOutputs: map[string]string{
+			"cursor-agent": "unparseable status output",
+		},
+	}
+
+	_, err := runConfiguredVerifier(d, nil, verifierSelection{
+		Agents: []string{"cursor", "codex"}, Effort: "heavy",
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute, nil)
+	assertExitCode(t, err, ExitSetup)
+	errText := err.Error()
+	if !strings.Contains(errText, "cursor:") || !strings.Contains(errText, authLine) {
+		t.Fatalf("error = %q, want cursor auth diagnostic", errText)
+	}
+	if !strings.Contains(errText, "codex: \"binary not found on PATH\"") {
+		t.Fatalf("error = %q, want codex missing-binary diagnostic", errText)
+	}
+}
+
+// probeAwareVerifyRunner delegates headless invocations to inner and serves
+// canned availability-probe output for cursor-agent status / claude auth status.
+type probeAwareVerifyRunner struct {
+	inner        *scriptedVerifyRunner
+	probeOutputs map[string]string
+	probeCalls   int
+}
+
+func (r *probeAwareVerifyRunner) Run(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (int, error) {
+	proc, err := r.Start(ctx, dir, stdout, stderr, name, args...)
+	if err != nil {
+		return 1, err
+	}
+	return proc.Wait()
+}
+
+func (r *probeAwareVerifyRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
+	if IsAgentAvailabilityProbeCommand(name, args) {
+		r.probeCalls++
+		out, ok := r.probeOutputs[name]
+		if !ok {
+			proc := &ManagedProcess{done: make(chan waitResult, 1)}
+			proc.done <- waitResult{exitCode: 0}
+			return proc, nil
+		}
+		fmt.Fprint(stdout, out)
+		proc := &ManagedProcess{done: make(chan waitResult, 1)}
+		exitCode := 0
+		if name == "cursor-agent" && out == "unparseable status output" {
+			exitCode = 1
+		}
+		proc.done <- waitResult{exitCode: exitCode}
+		return proc, nil
+	}
+	return r.inner.Start(ctx, dir, stdout, stderr, name, args...)
 }

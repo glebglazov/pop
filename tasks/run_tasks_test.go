@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -1922,6 +1923,306 @@ printf 'SUMMARY_START\nclaude done\nSUMMARY_END\nTASK_COMPLETE\n'
 	assertTaskDone(t, env.execFixture(), "01-a")
 }
 
+func TestRunTaskSetAgentFallbackAdvancesOnCursorAuthFailure(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	authLine := "Error: Authentication required. Please run 'agent login' first, or set CURSOR_API_KEY environment variable."
+	cursorCount := filepath.Join(env.root, ".agent-bin", "cursor-agent.count")
+	installAgentShim(t, env.root, "cursor-agent", fmt.Sprintf(`#!/bin/sh
+if [ "$1" = status ]; then
+  printf 'probe unknown\n'
+  exit 1
+fi
+n=0
+test -f %[1]q && n=$(cat %[1]q)
+n=$((n + 1))
+printf '%%s\n' "$n" > %[1]q
+printf '%%s\n' %q
+exit 1
+`, cursorCount, authLine))
+	installAgentShim(t, env.root, "claude", `#!/bin/sh
+TASK=$(printf '%s' "$*" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
+if [ -n "$TASK" ] && [ -f "$TASK" ]; then sed -i '' 's/- \[ \]/- [x]/g' "$TASK" 2>/dev/null || sed -i 's/- \[ \]/- [x]/g' "$TASK"; fi
+printf 'SUMMARY_START\nclaude done\nSUMMARY_END\nTASK_COMPLETE\n'
+`)
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(true, "", &buf)
+	opts.AgentPresets = []string{"cursor", "claude"}
+	opts.AgentExplicit = true
+	opts.MaxTries = 3
+
+	start := time.Now()
+	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.TaskSetDone || len(result.Completed) != 1 {
+		t.Fatalf("result = %#v", result)
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("fallback took %s, want no retry delay between agents", elapsed)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "Attempt 1/3 · cursor") || !strings.Contains(out, "Attempt 1/3 · claude") {
+		t.Fatalf("fallback attempts not rendered:\n%s", out)
+	}
+	if !strings.Contains(out, "Agent cursor unauthenticated; trying next") {
+		t.Fatalf("missing cursor auth fallback line:\n%s", out)
+	}
+	if got := strings.TrimSpace(readFileString(t, cursorCount)); got != "1" {
+		t.Fatalf("cursor attempts = %q, want 1 (retry cap not burned)", got)
+	}
+
+	runs, err := listSetRuns(env.deps(), env.execFixture().demoDir())
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	var cursorRun capturedRun
+	var foundCursor bool
+	for _, run := range runs {
+		if run.meta.Agent == "cursor" {
+			cursorRun = run
+			foundCursor = true
+			break
+		}
+	}
+	if !foundCursor {
+		t.Fatal("missing cursor captured run")
+	}
+	if cursorRun.meta.Outcome != streamOutcomeAgentUnusable {
+		t.Fatalf("cursor outcome = %q, want %s", cursorRun.meta.Outcome, streamOutcomeAgentUnusable)
+	}
+	if cursorRun.meta.Reason != authLine {
+		t.Fatalf("cursor reason = %q, want %q", cursorRun.meta.Reason, authLine)
+	}
+
+	cooldowns, err := readAgentCooldowns(env.deps())
+	if err != nil {
+		t.Fatalf("read cooldowns: %v", err)
+	}
+	if _, ok := cooldowns["cursor"]; ok {
+		t.Fatalf("auth failure wrote cooldown: %#v", cooldowns)
+	}
+
+	assertTaskDone(t, env.execFixture(), "01-a")
+}
+
+func TestRunTaskSetAgentFallbackAdvancesOnMissingBinary(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	cursorCount := filepath.Join(env.root, ".agent-bin", "cursor-agent.count")
+	installAgentShim(t, env.root, "claude", `#!/bin/sh
+TASK=$(printf '%s' "$*" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
+if [ -n "$TASK" ] && [ -f "$TASK" ]; then sed -i '' 's/- \[ \]/- [x]/g' "$TASK" 2>/dev/null || sed -i 's/- \[ \]/- [x]/g' "$TASK"; fi
+printf 'SUMMARY_START\nclaude done\nSUMMARY_END\nTASK_COMPLETE\n'
+`)
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(true, "", &buf)
+	opts.AgentPresets = []string{"cursor", "claude"}
+	opts.AgentExplicit = true
+	opts.MaxTries = 3
+
+	d := env.deps()
+	realLookPath := exec.LookPath
+	d.LookPath = func(file string) (string, error) {
+		if file == "cursor-agent" {
+			return "", exec.ErrNotFound
+		}
+		return realLookPath(file)
+	}
+
+	start := time.Now()
+	result, err := RunTaskSetWith(d, nil, nil, opts)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.TaskSetDone || len(result.Completed) != 1 {
+		t.Fatalf("result = %#v", result)
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("fallback took %s, want no retry delay between agents", elapsed)
+	}
+	out := buf.String()
+	if strings.Contains(out, "Attempt 1/3 · cursor") {
+		t.Fatalf("cursor should be skipped before spawn:\n%s", out)
+	}
+	if !strings.Contains(out, "Attempt 1/3 · claude") {
+		t.Fatalf("fallback attempt not rendered:\n%s", out)
+	}
+	if !strings.Contains(out, "Agent cursor unavailable (binary not found); trying next") {
+		t.Fatalf("missing cursor binary fallback line:\n%s", out)
+	}
+	if _, err := os.Stat(cursorCount); !os.IsNotExist(err) {
+		t.Fatalf("cursor-agent was spawned despite missing binary: stat err = %v", err)
+	}
+
+	runs, err := listSetRuns(env.deps(), env.execFixture().demoDir())
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	for _, run := range runs {
+		if run.meta.Agent == "cursor" {
+			t.Fatalf("cursor captured run should not exist: %#v", run.meta)
+		}
+	}
+
+	cooldowns, err := readAgentCooldowns(env.deps())
+	if err != nil {
+		t.Fatalf("read cooldowns: %v", err)
+	}
+	if _, ok := cooldowns["cursor"]; ok {
+		t.Fatalf("missing binary wrote cooldown: %#v", cooldowns)
+	}
+
+	assertTaskDone(t, env.execFixture(), "01-a")
+}
+
+func TestRunTaskSetAllAgentsHumanHealingUnavailableExitsSetup(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	authLine := "Error: Authentication required. Please run 'agent login' first, or set CURSOR_API_KEY environment variable."
+	installAgentShim(t, env.root, "cursor-agent", fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' %q
+exit 1
+`, authLine))
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(true, "", &buf)
+	opts.AgentPresets = []string{"cursor", "codex"}
+	opts.AgentExplicit = true
+	opts.MaxTries = 3
+
+	d := env.deps()
+	realLookPath := exec.LookPath
+	d.LookPath = func(file string) (string, error) {
+		if file == "codex" {
+			return "", exec.ErrNotFound
+		}
+		return realLookPath(file)
+	}
+
+	done := make(chan struct{})
+	var result *RunTaskSetResult
+	var runErr error
+	go func() {
+		defer close(done)
+		result, runErr = RunTaskSetWith(d, nil, nil, opts)
+	}()
+
+	time.Sleep(500 * time.Millisecond)
+	if waiter, err := GetRecoveryWaiter(d, "demo"); err != nil {
+		t.Fatalf("get recovery waiter: %v", err)
+	} else if waiter != nil {
+		t.Fatalf("recovery waiter registered on human-healing exhaustion: %#v", waiter)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("run did not finish")
+	}
+
+	assertExitCode(t, runErr, ExitSetup)
+	if result == nil {
+		t.Fatal("expected result on exhaustion exit")
+	}
+	errText := runErr.Error()
+	if !strings.Contains(errText, "cursor:") || !strings.Contains(errText, authLine) {
+		t.Fatalf("error missing cursor diagnostic: %q", errText)
+	}
+	if !strings.Contains(errText, "codex:") || !strings.Contains(errText, "binary not found on PATH") {
+		t.Fatalf("error missing codex missing-binary diagnostic: %q", errText)
+	}
+
+	assertTaskOpen(t, env.execFixture(), "01-a")
+	m := LoadManifest(env.deps(), "demo", env.execFixture().demoManifest())
+	for _, task := range m.Tasks {
+		if task.ID == "01-a" && task.FailedAfter != nil {
+			t.Fatalf("task 01-a failed_after = %v, want nil", task.FailedAfter)
+		}
+	}
+	progressPath := filepath.Join(env.tasksDir, "demo", "progress.txt")
+	if progress, err := os.ReadFile(progressPath); err == nil {
+		if strings.Contains(string(progress), "FAILED") {
+			t.Fatalf("progress.txt must not record FAILED:\n%s", progress)
+		}
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("read progress.txt: %v", err)
+	}
+
+	rec := latestTerminalDrain(t, d, result.RuntimePath)
+	if rec == nil {
+		t.Fatal("no terminal drain recorded")
+	}
+	if rec.State != store.StateFinished {
+		t.Fatalf("state = %q, want finished", rec.State)
+	}
+	if rec.State == store.StateCrashed {
+		t.Fatal("human-healing exhaustion must not record crashed terminal")
+	}
+}
+
+func TestRunTaskSetMixedQuotaAndHumanHealingParksOnQuota(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	authLine := "Error: Authentication required. Please run 'agent login' first."
+	installAgentShim(t, env.root, "cursor-agent", fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' %q
+exit 1
+`, authLine))
+	installAgentShim(t, env.root, "claude", `#!/bin/sh
+printf '%s\n' '{"type":"result","subtype":"error_during_execution","result":"You'\''ve hit your weekly limit · resets Mon 12:00am"}'
+`)
+
+	opts := env.runTaskSetOpts(true, "", io.Discard)
+	opts.AgentPresets = []string{"cursor", "claude"}
+	opts.AgentExplicit = true
+	opts.MaxTries = 1
+
+	d := env.deps()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = RunTaskSetWith(d, nil, nil, opts)
+	}()
+
+	var waiter *RecoveryWaiter
+	for i := 0; i < 20; i++ {
+		time.Sleep(100 * time.Millisecond)
+		var err error
+		waiter, err = GetRecoveryWaiter(d, "demo")
+		if err != nil {
+			t.Fatalf("get recovery waiter: %v", err)
+		}
+		if waiter != nil {
+			break
+		}
+	}
+	if waiter == nil {
+		t.Fatal("recovery waiter not registered for mixed quota+human list")
+	}
+	if waiter.Preset != "claude" {
+		t.Fatalf("waiter preset = %q, want claude", waiter.Preset)
+	}
+	assertTaskOpen(t, env.execFixture(), "01-a")
+	if err := DeregisterRecoveryWaiter(d, "demo"); err != nil {
+		t.Fatalf("deregister recovery waiter: %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("goroutine did not exit after waiter deregistration")
+	}
+}
+
 func TestRunTaskSetAgentFallbackDoesNotAdvanceOnPlainFailure(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
@@ -1929,6 +2230,10 @@ func TestRunTaskSetAgentFallbackDoesNotAdvanceOnPlainFailure(t *testing.T) {
 	claudeCount := filepath.Join(env.root, ".agent-bin", "claude.count")
 	codexCount := filepath.Join(env.root, ".agent-bin", "codex.count")
 	installAgentShim(t, env.root, "claude", fmt.Sprintf(`#!/bin/sh
+if [ "$1" = auth ] && [ "$2" = status ]; then
+  printf '{"loggedIn":true}\n'
+  exit 0
+fi
 n=0
 test -f %[1]q && n=$(cat %[1]q)
 n=$((n + 1))
@@ -2799,6 +3104,9 @@ type hitlAssistanceRunner struct {
 }
 
 func (r *hitlAssistanceRunner) Run(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (int, error) {
+	if IsAgentAvailabilityProbeCommand(name, args) {
+		return fakeAwareRunner{}.Run(ctx, dir, stdout, stderr, name, args...)
+	}
 	r.calls++
 	r.name = name
 	r.args = append([]string{}, args...)
@@ -2833,6 +3141,9 @@ type configurableHITLAssistanceRunner struct {
 }
 
 func (r *configurableHITLAssistanceRunner) Run(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (int, error) {
+	if IsAgentAvailabilityProbeCommand(name, args) {
+		return fakeAwareRunner{}.Run(ctx, dir, stdout, stderr, name, args...)
+	}
 	r.runCalls++
 	return r.run(name, args...)
 }

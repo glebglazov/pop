@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/glebglazov/pop/config"
 )
@@ -68,16 +67,8 @@ func (i *AgentInvocation) AgentPreset() string {
 
 // AgentResult is the provider-neutral result of normalizing one invocation.
 type AgentResult struct {
-	Output     string
-	QuotaPause *AgentQuotaPause
-}
-
-// AgentQuotaPause reports that execution stopped because the agent allowance ran out.
-type AgentQuotaPause struct {
-	Reason string
-	// ResetAt is the agent-reported absolute reset instant. A zero value means
-	// unknown / unparseable; queue supervision must use its fixed fallback.
-	ResetAt time.Time
+	Output         string
+	Unavailability *AgentUnavailability
 }
 
 // AgentHeadlessRequest describes one unattended issue-attempt invocation.
@@ -143,6 +134,7 @@ type AgentAdapter interface {
 	NormalizeOutput(raw string, format AgentOutputFormat) AgentResult
 	RenderOutput(w io.Writer, raw string, format AgentOutputFormat)
 	AssistanceCapability() AgentAssistanceCapability
+	AvailabilityProbeCapability() AgentAvailabilityProbeCapability
 	AssistanceInvocation(AgentAssistanceRequest) (*AgentAssistanceInvocation, error)
 	ReasoningArgs(reasoning string) []string
 	ArgsContainReasoning(args []string) bool
@@ -158,6 +150,11 @@ var agentAdapters = map[string]AgentAdapter{
 		AgentOutputClaudeStreamJSON,
 		[]string{"--output-format", "stream-json", "--verbose"},
 		AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "claude"}},
+		AgentAvailabilityProbeCapability{
+			Command:              &AgentCommand{Name: "claude", Args: []string{"auth", "status"}},
+			Interpret:            interpretClaudeAvailabilityProbe,
+			ReportsAuthenticated: reportsClaudeAuthenticated,
+		},
 		[]string{"opus", "sonnet", "haiku", "fable"},
 	),
 	"opencode": newPresetAgentAdapter("opencode",
@@ -165,6 +162,7 @@ var agentAdapters = map[string]AgentAdapter{
 		AgentOutputOpenCodeJSON,
 		[]string{"--format", "json"},
 		AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "opencode"}},
+		AgentAvailabilityProbeCapability{},
 		[]string{"opencode/kimi-k2.6", "opencode/gpt-5.5", "opencode/claude-opus-4-8", "opencode/claude-sonnet-4-6"},
 	),
 	"cursor": newPresetAgentAdapter("cursor",
@@ -172,6 +170,11 @@ var agentAdapters = map[string]AgentAdapter{
 		AgentOutputCursorStreamJSON,
 		[]string{"--output-format", "stream-json"},
 		AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "cursor-agent"}},
+		AgentAvailabilityProbeCapability{
+			Command:              &AgentCommand{Name: "cursor-agent", Args: []string{"status", "--format", "json"}},
+			Interpret:            interpretCursorAvailabilityProbe,
+			ReportsAuthenticated: reportsCursorAuthenticated,
+		},
 		[]string{"auto", "composer-2.5", "gpt-5.3-codex"},
 	),
 	"codex": newPresetAgentAdapter("codex",
@@ -179,6 +182,10 @@ var agentAdapters = map[string]AgentAdapter{
 		AgentOutputCodexJSONL,
 		[]string{"--json"},
 		AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "codex"}},
+		AgentAvailabilityProbeCapability{
+			Command:              &AgentCommand{Name: "codex", Args: []string{"login", "status"}},
+			ReportsAuthenticated: reportsCodexAuthenticated,
+		},
 		[]string{"gpt-5.5", "gpt-5.4-mini"},
 	),
 	"pi": newPresetAgentAdapter("pi",
@@ -186,6 +193,7 @@ var agentAdapters = map[string]AgentAdapter{
 		AgentOutputPiJSONL,
 		[]string{"--mode", "json"},
 		AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "pi"}},
+		AgentAvailabilityProbeCapability{},
 		[]string{"opencode-go/kimi-k2.6", "opencode-go/qwen3.7-max", "opencode-go/minimax-m3", "opencode-go/deepseek-v4-flash"},
 	),
 }
@@ -227,16 +235,18 @@ type presetAgentAdapter struct {
 	autoFormat     AgentOutputFormat
 	autoArgs       []string
 	assistance     AgentAssistanceCapability
+	availability   AgentAvailabilityProbeCapability
 	models         []string
 }
 
-func newPresetAgentAdapter(preset string, headlessPrefix []string, autoFormat AgentOutputFormat, autoArgs []string, assistance AgentAssistanceCapability, models []string) AgentAdapter {
+func newPresetAgentAdapter(preset string, headlessPrefix []string, autoFormat AgentOutputFormat, autoArgs []string, assistance AgentAssistanceCapability, availability AgentAvailabilityProbeCapability, models []string) AgentAdapter {
 	return &presetAgentAdapter{
 		preset:         preset,
 		headlessPrefix: append([]string{}, headlessPrefix...),
 		autoFormat:     autoFormat,
 		autoArgs:       append([]string{}, autoArgs...),
 		assistance:     assistance,
+		availability:   cloneAvailabilityProbeCapability(availability),
 		models:         append([]string{}, models...),
 	}
 }
@@ -356,6 +366,10 @@ func (a *presetAgentAdapter) AssistanceCapability() AgentAssistanceCapability {
 	return cloneAssistanceCapability(a.assistance)
 }
 
+func (a *presetAgentAdapter) AvailabilityProbeCapability() AgentAvailabilityProbeCapability {
+	return cloneAvailabilityProbeCapability(a.availability)
+}
+
 func (a *presetAgentAdapter) Models() []string {
 	return append([]string{}, a.models...)
 }
@@ -402,6 +416,10 @@ func (a customAgentAdapter) AssistanceCapability() AgentAssistanceCapability {
 	return AgentAssistanceCapability{Mode: AgentAssistanceUnavailable}
 }
 
+func (a customAgentAdapter) AvailabilityProbeCapability() AgentAvailabilityProbeCapability {
+	return AgentAvailabilityProbeCapability{}
+}
+
 func (a customAgentAdapter) AssistanceInvocation(req AgentAssistanceRequest) (*AgentAssistanceInvocation, error) {
 	return nil, fmt.Errorf("custom agent adapter does not support attended assistance")
 }
@@ -413,6 +431,16 @@ func (a customAgentAdapter) ArgsContainReasoning(args []string) bool { return fa
 func (a customAgentAdapter) Models() []string { return nil }
 
 func cloneAssistanceCapability(capability AgentAssistanceCapability) AgentAssistanceCapability {
+	if capability.Command == nil {
+		return capability
+	}
+	clone := *capability.Command
+	clone.Args = append([]string{}, capability.Command.Args...)
+	capability.Command = &clone
+	return capability
+}
+
+func cloneAvailabilityProbeCapability(capability AgentAvailabilityProbeCapability) AgentAvailabilityProbeCapability {
 	if capability.Command == nil {
 		return capability
 	}
@@ -854,7 +882,7 @@ func normalizeAgentOutput(format AgentOutputFormat, raw string) AgentResult {
 	default:
 		return AgentResult{Output: raw}
 	}
-	if result.Output == "" && result.QuotaPause == nil {
+	if result.Output == "" && result.Unavailability == nil {
 		result.Output = raw
 	}
 	return result
@@ -882,8 +910,8 @@ func renderAgentOutput(w io.Writer, format AgentOutputFormat, raw string) {
 		return
 	}
 	normalized := normalizeAgentOutput(format, raw)
-	if normalized.QuotaPause != nil {
-		fmt.Fprintln(w, normalized.QuotaPause.Reason)
+	if normalized.Unavailability != nil {
+		fmt.Fprintln(w, normalized.Unavailability.Reason)
 		return
 	}
 	if normalized.Output != "" {

@@ -202,14 +202,14 @@ func claudeToolTimings(events []streamEventRecord) ([]ToolTiming, []toolWindow) 
 	})
 }
 
-func claudeQuotaPauseReason(result string) *AgentQuotaPause {
+func claudeQuotaPauseReason(result string) *AgentUnavailability {
 	for _, marker := range []string{
 		"You've hit your session limit",
 		"You've hit your weekly limit",
 		"You've hit your Opus limit",
 	} {
 		if strings.Contains(result, marker) {
-			return &AgentQuotaPause{Reason: result}
+			return DetectedQuotaPause(result)
 		}
 	}
 	return nil

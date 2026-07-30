@@ -68,6 +68,10 @@ func readOnlyDoctorDeps(t *testing.T, fs *fakeFS, tmux, cfgOK, daemon bool) *doc
 		orphanedTaskStorage: func() ([]tasks.OrphanedStorage, error) { return nil, nil },
 		legacyLayoutStorage: func() ([]string, error) { return nil, nil },
 		updateCheck:         func() release.Result { return release.Result{Current: "dev", State: release.StateDev} },
+		agentCatalog:        func() []tasks.AgentCatalogRow { return nil },
+		probeAgentAuthentication: func(string) tasks.AgentAuthenticationProbe {
+			return tasks.AgentAuthenticationProbe{}
+		},
 	}
 }
 
@@ -1518,6 +1522,87 @@ func TestDoctorUpdateCheckNeverAffectsFamilyStatus(t *testing.T) {
 					report.families[j].command, st.State, report.families[j].status, baseline[j].status)
 			}
 		}
+	}
+}
+
+func TestDoctorTaskAgentAuthenticationPerPreset(t *testing.T) {
+	t.Parallel()
+	rows := []tasks.AgentCatalogRow{
+		{Agent: "cursor"},
+		{Agent: "claude"},
+		{Agent: "pi"},
+		{Agent: "opencode"},
+	}
+	probes := map[string]tasks.AgentAuthenticationProbe{
+		"cursor":   {Status: tasks.AgentAuthUnauthenticated, Detail: `{"isAuthenticated":false}`},
+		"claude":   {Status: tasks.AgentAuthAuthenticated, Detail: "authenticated"},
+		"pi":       {Status: tasks.AgentAuthCannotDetermine, Detail: "pop cannot determine authentication (no availability probe)"},
+		"opencode": {Status: tasks.AgentAuthCannotDetermine, Detail: "pop cannot determine authentication (no availability probe)"},
+	}
+	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
+	d.agentCatalog = func() []tasks.AgentCatalogRow { return rows }
+	d.probeAgentAuthentication = func(preset string) tasks.AgentAuthenticationProbe {
+		return probes[preset]
+	}
+
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
+	family, ok := familyByCommand(report, "pop tasks")
+	if !ok {
+		t.Fatalf("missing pop tasks family")
+	}
+	for preset, want := range probes {
+		check, ok := checkByLabel(family, preset+" authentication")
+		if !ok {
+			t.Fatalf("missing %q authentication check", preset)
+		}
+		switch want.Status {
+		case tasks.AgentAuthAuthenticated:
+			if check.status != doctorStatusOK || check.detail != want.Detail {
+				t.Fatalf("%s check = %+v, want OK %q", preset, check, want.Detail)
+			}
+		case tasks.AgentAuthUnauthenticated:
+			if check.status != doctorStatusPartial || check.detail != want.Detail {
+				t.Fatalf("%s check = %+v, want Partial %q", preset, check, want.Detail)
+			}
+		case tasks.AgentAuthCannotDetermine:
+			if check.status != doctorStatusNA || check.detail != want.Detail {
+				t.Fatalf("%s check = %+v, want N/A %q", preset, check, want.Detail)
+			}
+		default:
+			t.Fatalf("unexpected probe status for %s", preset)
+		}
+	}
+}
+
+func TestDoctorAgentAuthenticationUnknownNotUnauthenticated(t *testing.T) {
+	t.Parallel()
+	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
+	d.agentCatalog = func() []tasks.AgentCatalogRow {
+		return []tasks.AgentCatalogRow{{Agent: "cursor"}}
+	}
+	d.probeAgentAuthentication = func(string) tasks.AgentAuthenticationProbe {
+		return tasks.AgentAuthenticationProbe{
+			Status: tasks.AgentAuthUnknown,
+			Detail: "authentication status unknown",
+		}
+	}
+
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
+	check := taskCheck(t, report, "cursor authentication")
+	if check.status != doctorStatusNA {
+		t.Fatalf("status = %s, want %s", check.status, doctorStatusNA)
+	}
+	if check.status == doctorStatusPartial || check.status == doctorStatusBlocked {
+		t.Fatalf("unknown probe must not read as unauthenticated: %+v", check)
+	}
+	if check.detail != "authentication status unknown" {
+		t.Fatalf("detail = %q, want authentication status unknown", check.detail)
 	}
 }
 

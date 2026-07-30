@@ -125,6 +125,10 @@ func installClaudeQuotaAgent(t *testing.T, root string) string {
 	}
 	counterPath := filepath.Join(dir, "claude.count")
 	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = auth ] && [ \"$2\" = status ]; then\n" +
+		"  printf '{\"loggedIn\":true}\\n'\n" +
+		"  exit 0\n" +
+		"fi\n" +
 		"COUNT=0\n" +
 		"if [ -f " + counterPath + " ]; then COUNT=$(cat " + counterPath + "); fi\n" +
 		"echo $((COUNT + 1)) > " + counterPath + "\n" +
@@ -623,7 +627,9 @@ func (r *countingRunner) Run(ctx context.Context, dir string, stdout, stderr io.
 }
 
 func (r *countingRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
-	atomic.AddInt32(r.calls, 1)
+	if !IsAgentAvailabilityProbeCommand(name, args) {
+		atomic.AddInt32(r.calls, 1)
+	}
 	return fakeAwareRunner{}.Start(ctx, dir, stdout, stderr, name, args...)
 }
 

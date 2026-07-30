@@ -42,7 +42,7 @@ type priorAttempt struct {
 func attemptLesson(outcome, reason string, exitCode int) string {
 	r := strings.TrimSpace(reason)
 	switch {
-	case outcome == streamOutcomeInterrupted || outcome == streamOutcomeQuotaPaused:
+	case outcome == streamOutcomeInterrupted || outcome == streamOutcomeQuotaPaused || outcome == streamOutcomeAgentUnusable:
 		return lessonResume
 	case outcome == streamOutcomeTimedOut:
 		return lessonContinue
@@ -98,7 +98,8 @@ func buildPriorAttemptDigest(d *Deps, taskSetDir, taskFile string) string {
 		// paused runs all feed a retry. Completed attempts are intentionally
 		// excluded: they have no lesson to teach (ADR 0040/ADR 0089).
 		if run.meta.Outcome != streamOutcomeFailed && run.meta.Outcome != streamOutcomeTimedOut &&
-			run.meta.Outcome != streamOutcomeInterrupted && run.meta.Outcome != streamOutcomeQuotaPaused {
+			run.meta.Outcome != streamOutcomeInterrupted && run.meta.Outcome != streamOutcomeQuotaPaused &&
+			run.meta.Outcome != streamOutcomeAgentUnusable {
 			continue
 		}
 		attempts = append(attempts, priorAttempt{

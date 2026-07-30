@@ -1,13 +1,33 @@
 package tasks
 
 import (
+	"bufio"
 	"encoding/json"
 	"sort"
 	"strings"
 )
 
+const cursorAuthenticationRequiredPrefix = "Error: Authentication required."
+
 func normalizeCursorStreamJSON(raw string) AgentResult {
+	if u := cursorAuthFailureReason(raw); u != nil {
+		return AgentResult{Unavailability: u}
+	}
 	return normalizeResultStreamJSON(raw, nil)
+}
+
+// cursorAuthFailureReason scans the raw capture for the logged-out cursor-agent
+// diagnostic (ADR-0153). Confirmed shape: one plain line on stderr, empty stdout.
+func cursorAuthFailureReason(raw string) *AgentUnavailability {
+	scanner := bufio.NewScanner(strings.NewReader(raw))
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, cursorAuthenticationRequiredPrefix) {
+			return DetectedAuthFailure(line)
+		}
+	}
+	return nil
 }
 
 // cursorLineRenderer renders cursor-agent stream-json events live. Assistant

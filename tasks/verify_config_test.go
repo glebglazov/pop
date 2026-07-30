@@ -114,30 +114,35 @@ func TestVerifierBinaryAvailable(t *testing.T) {
 		}
 		return "", exec.ErrNotFound
 	}}
-	if !verifierBinaryAvailable(d, "claude") {
+	if !agentBinaryAvailable(d, "claude") {
 		t.Fatal("claude should be available (LookPath resolves it)")
 	}
-	if verifierBinaryAvailable(d, "cursor") {
+	if agentBinaryAvailable(d, "cursor") {
 		t.Fatal("cursor should be unavailable (LookPath does not resolve cursor-agent)")
 	}
-	if verifierBinaryAvailable(d, "not-a-preset") {
+	if agentBinaryAvailable(d, "not-a-preset") {
 		t.Fatal("an unknown preset must never be available")
 	}
 }
 
-// TestRunConfiguredVerifierAllMissingYieldsEmpty: when every configured agent's
-// binary is absent, the runner falls through the whole list and returns empty
-// output (which ParseVerdict resolves to NEEDS-HUMAN) rather than crashing.
-func TestRunConfiguredVerifierAllMissingYieldsEmpty(t *testing.T) {
+// TestRunConfiguredVerifierAllMissingHardErrors: when every configured agent's
+// binary is absent, the runner hard-errors with each preset's diagnostic instead
+// of yielding empty output that ParseVerdict would turn into NEEDS-HUMAN.
+func TestRunConfiguredVerifierAllMissingHardErrors(t *testing.T) {
 	d := &Deps{LookPath: func(string) (string, error) { return "", exec.ErrNotFound }}
-	out, err := runConfiguredVerifier(d, nil, verifierSelection{
+	_, err := runConfiguredVerifier(d, nil, verifierSelection{
 		Agents: []string{"cursor", "claude"}, Effort: "heavy",
-	}, t.TempDir(), "demo", "sha1", t.TempDir(), "prompt", &bytes.Buffer{}, &bytes.Buffer{}, time.Minute)
-	if err != nil {
-		t.Fatalf("runConfiguredVerifier: %v", err)
+	}, t.TempDir(), "demo", "sha1", t.TempDir(), "prompt", &bytes.Buffer{}, &bytes.Buffer{}, time.Minute, nil)
+	assertExitCode(t, err, ExitSetup)
+	errText := err.Error()
+	if !strings.Contains(errText, "all configured agents unavailable") {
+		t.Fatalf("error = %q, want exhaustion message", errText)
 	}
-	if strings.TrimSpace(out) != "" {
-		t.Fatalf("output = %q, want empty (all agents unavailable)", out)
+	if !strings.Contains(errText, "cursor: \"binary not found on PATH\"") {
+		t.Fatalf("error = %q, want cursor missing-binary diagnostic", errText)
+	}
+	if !strings.Contains(errText, "claude: \"binary not found on PATH\"") {
+		t.Fatalf("error = %q, want claude missing-binary diagnostic", errText)
 	}
 }
 
@@ -162,7 +167,7 @@ func TestRunConfiguredVerifierFallsThroughMissingBinary(t *testing.T) {
 	d := &Deps{FS: deps.NewRealFileSystem(), Runner: RealCommandRunner{}, LookPath: exec.LookPath}
 	out, err := runConfiguredVerifier(d, nil, verifierSelection{
 		Agents: []string{"cursor", "claude"}, Effort: "heavy",
-	}, taskSetDir, "demo", "sha1", t.TempDir(), "prompt", &bytes.Buffer{}, &bytes.Buffer{}, time.Minute)
+	}, taskSetDir, "demo", "sha1", t.TempDir(), "prompt", &bytes.Buffer{}, &bytes.Buffer{}, time.Minute, nil)
 	if err != nil {
 		t.Fatalf("runConfiguredVerifier: %v", err)
 	}

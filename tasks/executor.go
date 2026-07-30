@@ -50,17 +50,23 @@ type RunTaskOptions struct {
 
 // RunTaskResult is the outcome of a successful or declined run-task.
 type RunTaskResult struct {
-	Selection   *Selection
-	Refresh     *RefreshResult
-	Declined    bool
-	NoOp        bool
+	Selection      *Selection
+	Refresh        *RefreshResult
+	Declined       bool
+	NoOp           bool
+	Unavailability *AgentUnavailability
+	// QuotaPaused and friends mirror a quota-pause Unavailability for callers
+	// that assert the observable pause fields rather than the verdict type.
 	QuotaPaused bool
 	PauseReason string
 	// PausePreset names the agent preset whose quota ran out, when QuotaPaused.
 	PausePreset  string
 	PauseResetAt time.Time
-	CommitSHA    string
-	AgentSummary string
+	// UnavailablePresets lists every preset that was human-healing unavailable
+	// when the agent fallback list is fully exhausted (ADR-0153).
+	UnavailablePresets []AgentUnavailability
+	CommitSHA          string
+	AgentSummary       string
 }
 
 // RunTask executes one task task through an agent.
@@ -199,18 +205,14 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 	}
 	defer func() {
 		var (
-			declined    bool
-			quotaPaused bool
-			preset      string
-			resetAt     time.Time
+			declined bool
+			unavail  *AgentUnavailability
 		)
 		if result != nil {
 			declined = result.Declined
-			quotaPaused = result.QuotaPaused
-			preset = result.PausePreset
-			resetAt = result.PauseResetAt
+			unavail = result.Unavailability
 		}
-		finalizeDrain(drain, declined, quotaPaused, false, preset, false, resetAt, err)
+		finalizeDrain(drain, declined, unavail, false, false, err)
 	}()
 
 	// Adopt this checkout into the binding model (ADR-0036): worktree-locus runs
@@ -250,7 +252,8 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 	timeout := resolveAttemptTimeout(opts.Timeout)
 
 	agentSpecs := resolveTaskAgentSpecs(baseAgentPresets, opts.AgentCmd, sel.Task.Effort, sel.Task.EffortExplicit, cfg)
-	result, execErr := executeTaskAttemptsWithAgentFallback(d, sel, runtimePath, out, confirmOut, basePrompt, agentSpecs, buildForAgent, maxTries, timeout, commitOverrides, agentQuotaRetryAfter, retryDelays)
+	probeMemo := newAgentAvailabilityProbeMemo()
+	result, execErr := executeTaskAttemptsWithAgentFallback(d, sel, runtimePath, out, confirmOut, basePrompt, agentSpecs, buildForAgent, maxTries, timeout, commitOverrides, agentQuotaRetryAfter, retryDelays, probeMemo)
 	if execErr != nil {
 		afterRefresh, refreshErr := RefreshWith(d, resolved.DefinitionPath, statePath)
 		if refreshErr == nil && !opts.Yes {
@@ -258,6 +261,24 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 			Render(out, afterRefresh)
 		}
 		return result, execErr
+	}
+
+	if result != nil && result.Unavailability != nil {
+		if _, ok := result.Unavailability.TimeHealing(); !ok {
+			presets := result.UnavailablePresets
+			if len(presets) == 0 {
+				presets = []AgentUnavailability{*result.Unavailability}
+			}
+			afterRefresh, refreshErr := RefreshWith(d, resolved.DefinitionPath, statePath)
+			if refreshErr == nil {
+				result.Refresh = afterRefresh
+				if !opts.Yes {
+					fmt.Fprintln(out)
+					Render(out, afterRefresh)
+				}
+			}
+			return result, taskExitErr(sel, ExitSetup, "%s", formatHumanHealingExhaustionMessage(presets))
+		}
 	}
 
 	afterRefresh, err := RefreshWith(d, resolved.DefinitionPath, statePath)

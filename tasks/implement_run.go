@@ -65,6 +65,8 @@ type implementRun struct {
 	// gate; the loop continues to (re)seed it.
 	sharedPromptReader *bufio.Reader
 	result             *RunTaskSetResult
+
+	agentProbeMemo *agentAvailabilityProbeMemo
 }
 
 // newImplementRun resolves everything RunTaskSetWith needs before it can drain:
@@ -152,6 +154,7 @@ func newImplementRun(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 		out:          out,
 		refresh:      refresh,
 		drain:        drain,
+		agentProbeMemo: newAgentAvailabilityProbeMemo(),
 	}, nil
 }
 
@@ -164,25 +167,21 @@ func newImplementRun(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 func (r *implementRun) finalize(errp *error) {
 	var (
 		declined     bool
-		quotaPaused  bool
+		unavail      *AgentUnavailability
 		verifyFailed bool
-		preset       string
 		pinned       bool
-		resetAt      time.Time
 	)
 	if r.result != nil {
 		declined = r.result.Declined
-		quotaPaused = r.result.QuotaPaused
+		unavail = r.result.Unavailability
 		verifyFailed = r.result.TaskSetVerifyFailed
-		preset = r.result.PausePreset
 		pinned = r.result.PausePinnedAgent
-		resetAt = r.result.PauseResetAt
 	}
 	var err error
 	if errp != nil {
 		err = *errp
 	}
-	finalizeDrain(r.drain, declined, quotaPaused, verifyFailed, preset, pinned, resetAt, err)
+	finalizeDrain(r.drain, declined, unavail, verifyFailed, pinned, err)
 }
 
 // setup runs the remaining preparation after the opening BeginDrain: checkout

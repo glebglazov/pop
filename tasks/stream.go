@@ -29,11 +29,12 @@ const capturedRunsDirName = "runs"
 // mirroring the Exhausted task / Interrupted task / Agent quota pause
 // vocabulary, so a killed attempt's file still carries its terminal outcome.
 const (
-	streamOutcomeCompleted   = "completed"
-	streamOutcomeFailed      = "failed"
-	streamOutcomeTimedOut    = "timed_out"
-	streamOutcomeInterrupted = "interrupted"
-	streamOutcomeQuotaPaused = "quota_paused"
+	streamOutcomeCompleted     = "completed"
+	streamOutcomeFailed        = "failed"
+	streamOutcomeTimedOut      = "timed_out"
+	streamOutcomeInterrupted   = "interrupted"
+	streamOutcomeQuotaPaused   = "quota_paused"
+	streamOutcomeAgentUnusable = "agent_unusable"
 )
 
 // streamHeaderRecord opens a Captured attempt stream file.

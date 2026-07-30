@@ -298,11 +298,11 @@ func (h *DrainHandle) Cancel() error {
 
 // finalizeDrain records the appropriate exit-reason terminal for a finished
 // drain, or cancels the row when the drain was declined and never executed.
-func finalizeDrain(h *DrainHandle, declined, quotaPaused, verifyFailed bool, preset string, pinned bool, resetAt time.Time, err error) {
+func finalizeDrain(h *DrainHandle, declined bool, unavail *AgentUnavailability, verifyFailed bool, pinned bool, err error) {
 	if h == nil {
 		return
 	}
-	terminal, p, pin, r, executed := drainTerminal(declined, quotaPaused, verifyFailed, preset, pinned, resetAt, err)
+	terminal, p, pin, r, executed := drainTerminal(declined, unavail, verifyFailed, pinned, err)
 	if !executed {
 		_ = h.Cancel()
 		return
@@ -312,17 +312,20 @@ func finalizeDrain(h *DrainHandle, declined, quotaPaused, verifyFailed bool, pre
 
 // drainTerminal maps the observable end of a drain to its exit-reason store
 // state (ADR-0056). A declined run never executed, so it returns executed=false
-// and the caller cancels the Drain row. Quota pause, SIGINT, and a failed
-// pre-approval verification (NEEDS-HUMAN or an exhausted remediation cap,
-// ADR-0086/0087) are the non-finished terminals; everything else — success,
-// failure, blocked, setup error after the drain began — is a finished process
-// whose disposition is read from the manifest, not the Drain.
-func drainTerminal(declined, quotaPaused, verifyFailed bool, preset string, pinned bool, resetAt time.Time, err error) (terminal string, _ string, _ bool, _ time.Time, executed bool) {
+// and the caller cancels the Drain row. Time-healing Agent unavailability,
+// SIGINT, and a failed pre-approval verification (NEEDS-HUMAN or an exhausted
+// remediation cap, ADR-0086/0087) are the non-finished terminals; everything
+// else — success, failure, blocked, setup error after the drain began — is a
+// finished process whose disposition is read from the manifest, not the Drain.
+func drainTerminal(declined bool, unavail *AgentUnavailability, verifyFailed bool, pinned bool, err error) (terminal string, _ string, _ bool, _ time.Time, executed bool) {
 	if declined {
 		return "", "", false, time.Time{}, false
 	}
-	if quotaPaused {
-		return store.StateQuotaPaused, preset, pinned, resetAt, true
+	if unavail != nil {
+		if th, ok := unavail.TimeHealing(); ok {
+			return store.StateQuotaPaused, unavail.Preset, pinned, th.ResetAt, true
+		}
+		// Human-healing unavailability is a clean finished stop (ADR-0153).
 	}
 	if isInterrupted(err) {
 		return store.StateInterrupted, "", false, time.Time{}, true

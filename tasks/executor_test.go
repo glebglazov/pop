@@ -1051,6 +1051,9 @@ type captureAgentRunner struct {
 }
 
 func (r *captureAgentRunner) Run(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (int, error) {
+	if IsAgentAvailabilityProbeCommand(name, args) {
+		return fakeAwareRunner{}.Run(ctx, dir, stdout, stderr, name, args...)
+	}
 	proc, err := r.Start(ctx, dir, stdout, stderr, name, args...)
 	if err != nil {
 		return 1, err
@@ -1059,6 +1062,9 @@ func (r *captureAgentRunner) Run(ctx context.Context, dir string, stdout, stderr
 }
 
 func (r *captureAgentRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
+	if IsAgentAvailabilityProbeCommand(name, args) {
+		return fakeAwareRunner{}.Start(ctx, dir, stdout, stderr, name, args...)
+	}
 	r.names = append(r.names, name)
 	r.argLists = append(r.argLists, append([]string{}, args...))
 	proc := &ManagedProcess{done: make(chan waitResult, 1)}
@@ -1144,4 +1150,43 @@ func TestRunTaskNoEffortKeyKeepsLegacyClaudeInvocation(t *testing.T) {
 	if strings.Contains(strings.Join(runner.argLists[0], " "), "--effort") {
 		t.Fatalf("legacy invocation unexpectedly contains effort: %v", runner.argLists[0])
 	}
+}
+
+func TestRunTaskWithAllAgentsHumanHealingUnavailableExitsSetup(t *testing.T) {
+	env := setupExecutorFixtureIsolated(t)
+	authLine := "Error: Authentication required. Please run 'agent login' first, or set CURSOR_API_KEY environment variable."
+	installAgentShim(t, env.root, "cursor-agent", fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' %q
+exit 1
+`, authLine))
+
+	d := env.deps()
+	realLookPath := exec.LookPath
+	d.LookPath = func(file string) (string, error) {
+		if file == "codex" {
+			return "", exec.ErrNotFound
+		}
+		return realLookPath(file)
+	}
+
+	opts := env.runOpts(true, "")
+	opts.AgentPresets = []string{"cursor", "codex"}
+	opts.AgentExplicit = true
+	opts.MaxTries = 3
+	opts.Output = io.Discard
+	opts.ConfirmOut = io.Discard
+
+	result, err := RunTaskWith(d, nil, nil, opts)
+	assertExitCode(t, err, ExitSetup)
+	if result == nil {
+		t.Fatal("expected result on exhaustion exit")
+	}
+	errText := err.Error()
+	if !strings.Contains(errText, "cursor:") || !strings.Contains(errText, authLine) {
+		t.Fatalf("error missing cursor diagnostic: %q", errText)
+	}
+	if !strings.Contains(errText, "codex:") || !strings.Contains(errText, "binary not found on PATH") {
+		t.Fatalf("error missing codex missing-binary diagnostic: %q", errText)
+	}
+	assertTaskOpen(t, env, "01-a")
 }

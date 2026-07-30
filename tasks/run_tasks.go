@@ -77,6 +77,9 @@ type RunTaskSetResult struct {
 	VerifyRerunCmd string
 	SkippedTasks        []string
 	BlockedReason       string
+	Unavailability      *AgentUnavailability
+	// QuotaPaused and friends mirror a quota-pause Unavailability for callers
+	// that assert the observable pause fields rather than the verdict type.
 	QuotaPaused         bool
 	PauseReason         string
 	// PausePreset names the agent preset whose quota ran out, when QuotaPaused.

@@ -34,11 +34,17 @@ func RunRoutineAgentInvocation(d *Deps, runtimePath string, liveOut io.Writer, t
 	}
 	normalized := invocation.NormalizeOutput(raw)
 	result.Output = normalized.Output
-	if normalized.QuotaPause != nil {
-		result.QuotaPaused = true
-		result.QuotaPreset = invocation.AgentPreset()
-		result.QuotaReason = normalized.QuotaPause.Reason
-		result.QuotaResetAt = agentQuotaResetAt(result.QuotaPreset, normalized.QuotaPause.Reason, time.Now())
+	if normalized.Unavailability != nil {
+		u := normalized.Unavailability.WithPreset(invocation.AgentPreset())
+		if _, ok := u.TimeHealing(); ok {
+			u = u.WithResetAt(agentQuotaResetAt(u.Preset, u.Reason, time.Now()))
+		}
+		result.QuotaPaused = u.Kind == UnavailabilityQuotaPause
+		result.QuotaPreset = u.Preset
+		result.QuotaReason = u.Reason
+		if th, ok := u.TimeHealing(); ok {
+			result.QuotaResetAt = th.ResetAt
+		}
 	}
 	return result, nil
 }

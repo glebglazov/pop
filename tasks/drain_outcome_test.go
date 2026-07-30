@@ -199,27 +199,37 @@ func TestDrainTerminal(t *testing.T) {
 	cases := []struct {
 		name         string
 		declined     bool
-		quotaPaused  bool
+		unavail      *AgentUnavailability
 		verifyFailed bool
-		preset       string
 		pinned       bool
-		resetAt      time.Time
 		err          error
 		wantTerminal string
 		wantPreset   string
 		wantPinned   bool
+		wantReset    time.Time
 		wantExecuted bool
 		wantAbnorm   bool
 	}{
 		{
-			name:         "quota pause carries preset and reset",
-			quotaPaused:  true,
-			preset:       "claude",
+			name: "quota pause carries preset and reset",
+			unavail: func() *AgentUnavailability {
+				u := NewQuotaPauseUnavailability("claude", "weekly limit", resetAt)
+				return &u
+			}(),
 			pinned:       true,
-			resetAt:      resetAt,
 			wantTerminal: store.StateQuotaPaused,
 			wantPreset:   "claude",
 			wantPinned:   true,
+			wantReset:    resetAt,
+			wantExecuted: true,
+		},
+		{
+			name: "human-healing exhaustion is a finished process",
+			unavail: func() *AgentUnavailability {
+				u := NewAuthFailureUnavailability("cursor", "Authentication required")
+				return &u
+			}(),
+			wantTerminal: store.StateFinished,
 			wantExecuted: true,
 		},
 		{
@@ -261,7 +271,7 @@ func TestDrainTerminal(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			terminal, preset, pinned, gotReset, executed := drainTerminal(tc.declined, tc.quotaPaused, tc.verifyFailed, tc.preset, tc.pinned, tc.resetAt, tc.err)
+			terminal, preset, pinned, gotReset, executed := drainTerminal(tc.declined, tc.unavail, tc.verifyFailed, tc.pinned, tc.err)
 			if executed != tc.wantExecuted {
 				t.Fatalf("executed = %v, want %v", executed, tc.wantExecuted)
 			}
@@ -277,8 +287,8 @@ func TestDrainTerminal(t *testing.T) {
 			if pinned != tc.wantPinned {
 				t.Fatalf("pinned = %v, want %v", pinned, tc.wantPinned)
 			}
-			if tc.quotaPaused && !gotReset.Equal(tc.resetAt) {
-				t.Fatalf("reset = %v, want %v", gotReset, tc.resetAt)
+			if tc.unavail != nil && !gotReset.Equal(tc.wantReset) {
+				t.Fatalf("reset = %v, want %v", gotReset, tc.wantReset)
 			}
 			// Only crashed is abnormal (ADR-0120); interrupted is now a clean stop.
 			gotAbnorm := terminal == store.StateCrashed

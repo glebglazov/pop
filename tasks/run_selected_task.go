@@ -92,7 +92,7 @@ func (r *implementRun) runSelectedTask(currentRefresh *RefreshResult, sel *Selec
 	buildForAgent := buildAgentInvocationFactory(loadConfig, runtimePath, baseAgentPreset, opts.AgentCmd, agentOutput, opts.AgentOutput)
 
 	agentSpecs := resolveTaskAgentSpecs(baseAgentPresets, opts.AgentCmd, sel.Task.Effort, sel.Task.EffortExplicit, cfg)
-	taskResult, execErr := executeTaskAttemptsWithAgentFallback(d, sel, runtimePath, out, confirmOut, basePrompt, agentSpecs, buildForAgent, maxTries, timeout, commitOverrides, agentQuotaRetryAfter, retryDelays)
+	taskResult, execErr := executeTaskAttemptsWithAgentFallback(d, sel, runtimePath, out, confirmOut, basePrompt, agentSpecs, buildForAgent, maxTries, timeout, commitOverrides, agentQuotaRetryAfter, retryDelays, r.agentProbeMemo)
 	if execErr != nil {
 		afterRefresh, refreshErr := RefreshWith(d, resolved.DefinitionPath, statePath)
 		if refreshErr == nil {
@@ -131,7 +131,19 @@ func (r *implementRun) runSelectedTask(currentRefresh *RefreshResult, sel *Selec
 		}
 		return runTaskReturn, result, execErr
 	}
-	if taskResult.QuotaPaused {
+	if taskResult.Unavailability != nil {
+		u := taskResult.Unavailability
+		th, ok := u.TimeHealing()
+		if !ok {
+			// Every configured preset is human-healing unavailable: exit setup with
+			// each preset's provider diagnostic; never enter recovery wait (ADR-0153).
+			presets := taskResult.UnavailablePresets
+			if len(presets) == 0 {
+				presets = []AgentUnavailability{*u}
+			}
+			result.Unavailability = &presets[0]
+			return runTaskReturn, result, taskExitErr(sel, ExitSetup, "%s", formatHumanHealingExhaustionMessage(presets))
+		}
 		// Quota recovery wait (ADR-0100): instead of exiting with ExitQuotaPaused,
 		// park the drain, register a recovery waiter, and poll until the preset's
 		// cooldown elapses and a recovery turn is acquired. Both foreground and
@@ -140,15 +152,16 @@ func (r *implementRun) runSelectedTask(currentRefresh *RefreshResult, sel *Selec
 		if row := findRow(currentRefresh, taskSetID); row != nil {
 			priority = row.Priority
 		}
-		regFailed, waitErr := ParkAndWaitForQuotaRecovery(d, &r.drain, taskSetID, taskResult.PausePreset, taskResult.PauseResetAt, runtimePath, priority, out, r.ensureDrain)
+		regFailed, waitErr := ParkAndWaitForQuotaRecovery(d, &r.drain, taskSetID, u.Preset, th, runtimePath, priority, out, r.ensureDrain)
 		if waitErr != nil {
 			return runTaskReturn, result, waitErr
 		}
 		if regFailed {
+			result.Unavailability = u
 			result.QuotaPaused = true
-			result.PauseReason = taskResult.PauseReason
-			result.PausePreset = taskResult.PausePreset
-			result.PauseResetAt = taskResult.PauseResetAt
+			result.PauseReason = u.Reason
+			result.PausePreset = u.Preset
+			result.PauseResetAt = th.ResetAt
 			result.Refresh = currentRefresh
 			printTaskSetSummary(out, result)
 			return runTaskReturn, result, nil

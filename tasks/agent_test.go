@@ -757,8 +757,8 @@ func TestNormalizeClaudeStreamJSONExtractsResult(t *testing.T) {
 		"{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"working\"}]}}\n" +
 		"{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"SUMMARY_START\\ndone\\nSUMMARY_END\\nTASK_COMPLETE\"}\n"
 	result := NormalizeAgentOutput(AgentOutputClaudeStreamJSON, raw)
-	if result.QuotaPause != nil {
-		t.Fatalf("unexpected quota pause: %#v", result.QuotaPause)
+	if result.Unavailability != nil {
+		t.Fatalf("unexpected quota pause: %#v", result.Unavailability)
 	}
 	if !strings.Contains(result.Output, "SUMMARY_START\ndone\nSUMMARY_END\nTASK_COMPLETE") {
 		t.Fatalf("output = %q", result.Output)
@@ -768,11 +768,11 @@ func TestNormalizeClaudeStreamJSONExtractsResult(t *testing.T) {
 func TestNormalizeClaudeStreamJSONDetectsQuotaPause(t *testing.T) {
 	raw := "{\"type\":\"result\",\"subtype\":\"error_during_execution\",\"result\":\"You've hit your weekly limit · resets Mon 12:00am\"}\n"
 	result := NormalizeAgentOutput(AgentOutputClaudeStreamJSON, raw)
-	if result.QuotaPause == nil {
+	if result.Unavailability == nil {
 		t.Fatal("missing quota pause")
 	}
-	if !strings.Contains(result.QuotaPause.Reason, "weekly limit") {
-		t.Fatalf("reason = %q", result.QuotaPause.Reason)
+	if !strings.Contains(result.Unavailability.Reason, "weekly limit") {
+		t.Fatalf("reason = %q", result.Unavailability.Reason)
 	}
 	var out bytes.Buffer
 	RenderAgentOutput(&out, AgentOutputClaudeStreamJSON, raw)
@@ -827,14 +827,14 @@ func TestNormalizeCodexJSONLDetectsQuotaPause(t *testing.T) {
 {"type":"turn.failed","error":{"message":"You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 2:28 AM."}}
 `
 	result := NormalizeAgentOutput(AgentOutputCodexJSONL, raw)
-	if result.QuotaPause == nil {
+	if result.Unavailability == nil {
 		t.Fatal("missing quota pause")
 	}
-	if !strings.Contains(result.QuotaPause.Reason, "usage limit") {
-		t.Fatalf("reason = %q", result.QuotaPause.Reason)
+	if !strings.Contains(result.Unavailability.Reason, "usage limit") {
+		t.Fatalf("reason = %q", result.Unavailability.Reason)
 	}
-	if !strings.Contains(result.QuotaPause.Reason, "2:28 AM") {
-		t.Fatalf("reset time not preserved in reason = %q", result.QuotaPause.Reason)
+	if !strings.Contains(result.Unavailability.Reason, "2:28 AM") {
+		t.Fatalf("reset time not preserved in reason = %q", result.Unavailability.Reason)
 	}
 	var out bytes.Buffer
 	RenderAgentOutput(&out, AgentOutputCodexJSONL, raw)
@@ -879,7 +879,7 @@ func TestNormalizeCodexJSONLNonLimitErrorIsNotQuotaPause(t *testing.T) {
 		`{"type":"turn.failed","error":{"message":"sandbox denied write to /etc/hosts"}}` + "\n",
 		`{"type":"item.completed","item":{"type":"agent_message","text":"done"}}` + "\n",
 	} {
-		if pause := NormalizeAgentOutput(AgentOutputCodexJSONL, raw).QuotaPause; pause != nil {
+		if pause := NormalizeAgentOutput(AgentOutputCodexJSONL, raw).Unavailability; pause != nil {
 			t.Fatalf("unexpected quota pause for %q: %q", raw, pause.Reason)
 		}
 	}
@@ -892,19 +892,19 @@ func TestInvocationNormalizesStructuredOutputThroughAdapter(t *testing.T) {
 	}
 	raw := "{\"type\":\"result\",\"subtype\":\"error_during_execution\",\"result\":\"You've hit your weekly limit · resets Mon 12:00am\"}\n"
 	result := invocation.NormalizeOutput(raw)
-	if result.QuotaPause == nil {
+	if result.Unavailability == nil {
 		t.Fatal("missing quota pause")
 	}
-	if !strings.Contains(result.QuotaPause.Reason, "weekly limit") {
-		t.Fatalf("reason = %q", result.QuotaPause.Reason)
+	if !strings.Contains(result.Unavailability.Reason, "weekly limit") {
+		t.Fatalf("reason = %q", result.Unavailability.Reason)
 	}
 }
 
 func TestNormalizePlainOutputDoesNotDetectClaudeQuotaPause(t *testing.T) {
 	raw := "You've hit your weekly limit · resets Mon 12:00am\n"
 	result := NormalizeAgentOutput(AgentOutputPlain, raw)
-	if result.QuotaPause != nil {
-		t.Fatalf("plain output detected quota pause: %#v", result.QuotaPause)
+	if result.Unavailability != nil {
+		t.Fatalf("plain output detected quota pause: %#v", result.Unavailability)
 	}
 	if result.Output != raw {
 		t.Fatalf("output = %q, want %q", result.Output, raw)
@@ -917,6 +917,33 @@ func TestNormalizeCursorStreamJSONExtractsResult(t *testing.T) {
 	result := NormalizeAgentOutput(AgentOutputCursorStreamJSON, raw)
 	if !strings.Contains(result.Output, "SUMMARY_START\ncursor\nSUMMARY_END\nTASK_COMPLETE") {
 		t.Fatalf("output = %q", result.Output)
+	}
+}
+
+func TestNormalizeCursorStreamJSONDetectsAuthFailure(t *testing.T) {
+	authLine := "Error: Authentication required. Please run 'agent login' first, or set CURSOR_API_KEY environment variable."
+	raw := authLine + "\n"
+	result := NormalizeAgentOutput(AgentOutputCursorStreamJSON, raw)
+	if result.Unavailability == nil {
+		t.Fatal("missing auth failure unavailability")
+	}
+	if result.Unavailability.Kind != UnavailabilityAuthFailure {
+		t.Fatalf("kind = %q, want %q", result.Unavailability.Kind, UnavailabilityAuthFailure)
+	}
+	if result.Unavailability.Reason != authLine {
+		t.Fatalf("reason = %q, want %q", result.Unavailability.Reason, authLine)
+	}
+	if _, ok := result.Unavailability.TimeHealing(); ok {
+		t.Fatal("auth failure must be human-healing")
+	}
+}
+
+func TestNormalizeCursorStreamJSONAuthFailureNotDetectedOnOtherFormats(t *testing.T) {
+	authLine := "Error: Authentication required. Please run 'agent login' first, or set CURSOR_API_KEY environment variable.\n"
+	for _, format := range []AgentOutputFormat{AgentOutputClaudeStreamJSON, AgentOutputCodexJSONL, AgentOutputPlain} {
+		if result := NormalizeAgentOutput(format, authLine); result.Unavailability != nil {
+			t.Fatalf("format %q detected auth failure: %#v", format, result.Unavailability)
+		}
 	}
 }
 
