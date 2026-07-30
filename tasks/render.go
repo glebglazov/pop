@@ -387,22 +387,29 @@ func rowStatusDetail(out *output, row Row) string {
 		if row.CompleteHint != "" {
 			parts = append(parts, "complete: "+row.CompleteHint)
 		}
-		if suffix := verifiedAtSuffix(row); suffix != "" {
-			parts = append(parts, out.styled(ansiYellow, suffix))
+		if suffix := verifiedAtBadgeSuffix(out, row); suffix != "" {
+			parts = append(parts, suffix)
 		}
 		return strings.Join(parts, " — ")
 	case StatusNeedsVerify:
-		return strings.Join([]string{row.Progress, "verify: pop tasks verify " + row.ID}, " — ")
+		parts := []string{row.Progress, "verify: pop tasks verify " + row.ID}
+		if suffix := verifiedAtBadgeSuffix(out, row); suffix != "" {
+			parts = append(parts, suffix)
+		}
+		return strings.Join(parts, " — ")
 	case StatusVerifyFailed:
 		parts := []string{row.Progress}
 		if f := firstFindingsLine(row.VerifyFindings); f != "" {
 			parts = append(parts, "findings: "+f)
 		}
 		parts = append(parts, "re-verify: pop tasks verify "+row.ID)
+		if suffix := verifiedAtBadgeSuffix(out, row); suffix != "" {
+			parts = append(parts, suffix)
+		}
 		return strings.Join(parts, " — ")
 	case StatusDone:
-		if suffix := verifiedAtSuffix(row); suffix != "" {
-			return row.Progress + " — " + out.styled(ansiYellow, suffix)
+		if suffix := verifiedAtBadgeSuffix(out, row); suffix != "" {
+			return row.Progress + " — " + suffix
 		}
 		return row.Progress
 	default:
@@ -410,14 +417,27 @@ func rowStatusDetail(out *output, row Row) string {
 	}
 }
 
-// verifiedAtSuffix returns the yellow display suffix for an immunized terminal
-// row whose HEAD differs from the PASS verdict's work SHA. Empty when the row
-// carries no such SHA.
-func verifiedAtSuffix(row Row) string {
-	if row.VerifiedAtSHA == "" {
+// verifiedAtBadgeSuffix returns the styled Verified-at SHA badge for a row.
+func verifiedAtBadgeSuffix(out *output, row Row) string {
+	badge := DeriveVerifiedAtBadge(row)
+	text := VerifiedAtBadgeText(badge)
+	if text == "" {
 		return ""
 	}
-	return "verified @ " + row.VerifiedAtSHA
+	return out.styled(verifiedAtBadgeANSI(badge), text)
+}
+
+func verifiedAtBadgeANSI(badge VerifiedAtBadge) string {
+	switch badge.State {
+	case VerifiedAtAtHead:
+		return ansiGreen
+	case VerifiedAtDrifted:
+		return ansiYellow
+	case VerifiedAtUnverified:
+		return ansiRed
+	default:
+		return ""
+	}
 }
 
 // firstFindingsLine returns the first non-empty line of a Verifier's findings,

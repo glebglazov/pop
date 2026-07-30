@@ -36,34 +36,38 @@ func TestResolveVerifiedStatus(t *testing.T) {
 		latestPass   *store.VerifyVerdict
 		wantStatus   TaskSetStatus
 		wantVerified string
+		wantDrifted  bool
 	}{
-		{"PASS at HEAD → DONE, no SHA surfaced",
-			pureAFKDone, verdictAt(head, VerdictPass), verdictAt(head, VerdictPass), StatusDone, ""},
+		{"PASS at HEAD → DONE, SHA surfaced at HEAD",
+			pureAFKDone, verdictAt(head, VerdictPass), verdictAt(head, VerdictPass), StatusDone, ShortSHA(head), false},
 		{"NEEDS-HUMAN at HEAD → VERIFY-FAILED",
-			pureAFKDone, verdictAt(head, VerdictNeedsHuman), nil, StatusVerifyFailed, ""},
+			pureAFKDone, verdictAt(head, VerdictNeedsHuman), nil, StatusVerifyFailed, "", false},
 		{"FIXABLE at HEAD → VERIFY-FAILED",
-			pureAFKDone, verdictAt(head, VerdictFixable), nil, StatusVerifyFailed, ""},
-		{"no HEAD verdict, older PASS → DONE + immunization SHA (ADR-0096)",
-			pureAFKDone, nil, verdictAt(older, VerdictPass), StatusDone, ShortSHA(older)},
-		{"no HEAD verdict, PASS recorded at HEAD → DONE, no SHA surfaced",
-			pureAFKDone, nil, verdictAt(head, VerdictPass), StatusDone, ""},
+			pureAFKDone, verdictAt(head, VerdictFixable), nil, StatusVerifyFailed, "", false},
+		{"no HEAD verdict, older PASS → DONE + drifted SHA (ADR-0096)",
+			pureAFKDone, nil, verdictAt(older, VerdictPass), StatusDone, ShortSHA(older), true},
+		{"no HEAD verdict, PASS recorded at HEAD → DONE, SHA at HEAD",
+			pureAFKDone, nil, verdictAt(head, VerdictPass), StatusDone, ShortSHA(head), false},
 		{"no verdict at all → NEEDS-VERIFY",
-			pureAFKDone, nil, nil, StatusNeedsVerify, ""},
-		{"AWAITING-APPROVAL immunized by older PASS → AWAITING-APPROVAL + SHA",
-			afkDoneHITLOpen, nil, verdictAt(older, VerdictPass), StatusAwaitingApproval, ShortSHA(older)},
+			pureAFKDone, nil, nil, StatusNeedsVerify, "", false},
+		{"AWAITING-APPROVAL immunized by older PASS → AWAITING-APPROVAL + drifted SHA",
+			afkDoneHITLOpen, nil, verdictAt(older, VerdictPass), StatusAwaitingApproval, ShortSHA(older), true},
 		{"non-terminal manifest is never gated → READY, no SHA",
-			ready, verdictAt(head, VerdictNeedsHuman), verdictAt(older, VerdictPass), StatusReady, ""},
+			ready, verdictAt(head, VerdictNeedsHuman), verdictAt(older, VerdictPass), StatusReady, "", false},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			m := &Manifest{Valid: true, Tasks: tc.tasks}
-			gotStatus, gotVerified := ResolveVerifiedStatus(m, head, tc.current, tc.latestPass)
+			gotStatus, gotVerified, gotDrifted := ResolveVerifiedStatus(m, head, tc.current, tc.latestPass)
 			if gotStatus != tc.wantStatus {
 				t.Errorf("status = %q, want %q", gotStatus, tc.wantStatus)
 			}
 			if gotVerified != tc.wantVerified {
 				t.Errorf("verifiedAtSHA = %q, want %q", gotVerified, tc.wantVerified)
+			}
+			if gotDrifted != tc.wantDrifted {
+				t.Errorf("drifted = %v, want %v", gotDrifted, tc.wantDrifted)
 			}
 		})
 	}

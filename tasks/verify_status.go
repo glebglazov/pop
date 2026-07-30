@@ -100,12 +100,14 @@ func ApplyVerifyVerdictsWith(d *Deps, result *RefreshResult, cfg *config.Config,
 		// clearing the immunized-SHA badge.
 		if row.Status != StatusDone && row.Status != StatusAwaitingApproval {
 			row.VerifiedAtSHA = ""
+			row.VerifiedAtDrifted = false
 			continue
 		}
 		runtimePath := runtimeForSet(row.ID)
 		if runtimePath == "" {
 			// Unplaced: no checkout to gate on (ADR-0147). Leave manifest status.
 			row.VerifiedAtSHA = ""
+			row.VerifiedAtDrifted = false
 			continue
 		}
 		info := resolveCheckout(runtimePath)
@@ -139,10 +141,12 @@ func ApplyVerifyVerdictsWith(d *Deps, result *RefreshResult, cfg *config.Config,
 func decorateRowWithVerdict(row *Row, m *Manifest, workSHA string, currentVerdict, latestPass *store.VerifyVerdict) bool {
 	if row.Status != StatusDone && row.Status != StatusAwaitingApproval {
 		row.VerifiedAtSHA = ""
+		row.VerifiedAtDrifted = false
 		return false
 	}
-	status, verifiedAtSHA := ResolveVerifiedStatus(m, workSHA, currentVerdict, latestPass)
+	status, verifiedAtSHA, drifted := ResolveVerifiedStatus(m, workSHA, currentVerdict, latestPass)
 	row.VerifiedAtSHA = verifiedAtSHA
+	row.VerifiedAtDrifted = drifted
 
 	if status == row.Status {
 		return false

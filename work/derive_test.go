@@ -235,7 +235,8 @@ func TestStatusCellComposition(t *testing.T) {
 		want string
 	}{
 		{"plain", Row{SetRef: SetRef{RawStatus: tasks.StatusBlocked}}, "BLOCKED"},
-		{"verified", Row{VerifiedAtSHA: "abc123", SetRef: SetRef{RawStatus: tasks.StatusAwaitingApproval}}, "AWAITING-APPROVAL · verified @ abc123"},
+		{"verified drifted", Row{VerifiedAtSHA: "abc123", VerifiedAtDrifted: true, SetRef: SetRef{RawStatus: tasks.StatusAwaitingApproval}}, "AWAITING-APPROVAL · verified @ abc123"},
+		{"unverified", Row{SetRef: SetRef{RawStatus: tasks.StatusNeedsVerify}}, "NEEDS-VERIFY · unverified"},
 		{"auto-drain waiting", Row{SetRef: SetRef{RawStatus: tasks.StatusReady, AutoDrain: true}}, "READY · auto-drain"},
 		{"auto-drain silenced by live drain", Row{SetRef: SetRef{RawStatus: tasks.StatusReady, AutoDrain: true, LiveDrain: true}}, "IN PROGRESS"},
 		{"auto-drain then orphaned", Row{SetRef: SetRef{RawStatus: tasks.StatusBlocked, AutoDrain: true, Orphaned: true}}, "BLOCKED · auto-drain · orphaned"},
@@ -244,8 +245,8 @@ func TestStatusCellComposition(t *testing.T) {
 		{"orphaned then parked then config", Row{SetRef: SetRef{RawStatus: tasks.StatusBlocked, Orphaned: true, Parked: true, ConfigError: "no trunk"}}, "BLOCKED · orphaned · parked · config error: no trunk"},
 		{
 			"full suffix order",
-			Row{VerifiedAtSHA: "abcdef123456", SetRef: SetRef{RawStatus: tasks.StatusReady, AutoDrain: true, Orphaned: true, Parked: true, ConfigError: "no trunk"}},
-			"READY · verified @ abcdef123456 · auto-drain · orphaned · parked · config error: no trunk",
+			Row{VerifiedAtSHA: "abcdef123456", VerifiedAtDrifted: true, SetRef: SetRef{RawStatus: tasks.StatusAwaitingApproval, AutoDrain: true, Orphaned: true, Parked: true, ConfigError: "no trunk"}},
+			"AWAITING-APPROVAL · verified @ abcdef123456 · auto-drain · orphaned · parked · config error: no trunk",
 		},
 		{"map row", Row{IsMap: true, MapOpen: 3, MapFrontier: 1}, "WAYFINDING · 3 open / 1 frontier"},
 	}

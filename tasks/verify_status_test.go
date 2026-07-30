@@ -410,11 +410,12 @@ func TestApplyVerifyVerdictsSetsVerifiedAtSHA(t *testing.T) {
 		verdict       string
 		wantStatus    TaskSetStatus
 		wantVerified  string
+		wantDrifted   bool
 	}{
-		{"fresh PASS at HEAD", "shaCUR", "shaCUR", "PASS", StatusDone, ""},
-		{"stale PASS immunizes with different SHA", "shaCUR", "shaOLD", "PASS", StatusDone, "shaOLD"},
-		{"no verdict → NEEDS-VERIFY", "shaCUR", "", "", StatusNeedsVerify, ""},
-		{"current NEEDS-HUMAN → VERIFY-FAILED", "shaCUR", "shaCUR", "NEEDS-HUMAN", StatusVerifyFailed, ""},
+		{"fresh PASS at HEAD", "shaCUR", "shaCUR", "PASS", StatusDone, "shaCUR", false},
+		{"stale PASS immunizes with different SHA", "shaCUR", "shaOLD", "PASS", StatusDone, "shaOLD", true},
+		{"no verdict → NEEDS-VERIFY", "shaCUR", "", "", StatusNeedsVerify, "", false},
+		{"current NEEDS-HUMAN → VERIFY-FAILED", "shaCUR", "shaCUR", "NEEDS-HUMAN", StatusVerifyFailed, "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -433,6 +434,9 @@ func TestApplyVerifyVerdictsSetsVerifiedAtSHA(t *testing.T) {
 			}
 			if row.VerifiedAtSHA != tc.wantVerified {
 				t.Fatalf("VerifiedAtSHA = %q, want %q", row.VerifiedAtSHA, tc.wantVerified)
+			}
+			if row.VerifiedAtDrifted != tc.wantDrifted {
+				t.Fatalf("VerifiedAtDrifted = %v, want %v", row.VerifiedAtDrifted, tc.wantDrifted)
 			}
 		})
 	}
@@ -463,44 +467,56 @@ func TestApplyVerifyVerdictsAwaitingApprovalVerifiedAtSHA(t *testing.T) {
 	if row.VerifiedAtSHA != "shaOLD" {
 		t.Fatalf("VerifiedAtSHA = %q, want shaOLD", row.VerifiedAtSHA)
 	}
+	if !row.VerifiedAtDrifted {
+		t.Fatalf("VerifiedAtDrifted = false, want true")
+	}
 }
 
-// TestRenderVerifiedAtSHASuffix confirms the yellow `verified @ <shortSHA>`
-// suffix appears in the Details column for immunized DONE and AWAITING-APPROVAL
-// rows, and is absent for NEEDS-VERIFY / VERIFY-FAILED rows.
-func TestRenderVerifiedAtSHASuffix(t *testing.T) {
+// TestRenderVerifiedAtBadge confirms the three-state Verified-at SHA badge in the
+// Details column: green at HEAD, yellow when drifted, red unverified, absent when
+// verification is off or irrelevant.
+func TestRenderVerifiedAtBadge(t *testing.T) {
 	t.Parallel()
 	plainOut := outputFor(io.Discard)
 
-	done := Row{ID: "done", Status: StatusDone, Progress: "1/1 done", VerifiedAtSHA: "abcdef1234567890"}
-	if got := rowDetail(plainOut, done); !strings.Contains(got, "verified @ abcdef123456") {
-		t.Fatalf("DONE detail missing suffix: %q", got)
+	doneDrifted := Row{ID: "done", Status: StatusDone, Progress: "1/1 done", VerifiedAtSHA: "abcdef1234567890", VerifiedAtDrifted: true}
+	if got := rowDetail(plainOut, doneDrifted); !strings.Contains(got, "verified @ abcdef123456") {
+		t.Fatalf("drifted DONE detail missing suffix: %q", got)
 	}
 
-	await := Row{ID: "await", Status: StatusAwaitingApproval, Progress: "1/1 done", VerifiedAtSHA: "abcdef1234567890"}
+	doneAtHead := Row{ID: "done", Status: StatusDone, Progress: "1/1 done", VerifiedAtSHA: "abcdef1234567890", VerifiedAtDrifted: false}
+	if got := rowDetail(plainOut, doneAtHead); !strings.Contains(got, "verified @ abcdef123456") {
+		t.Fatalf("at-HEAD DONE detail missing suffix: %q", got)
+	}
+
+	await := Row{ID: "await", Status: StatusAwaitingApproval, Progress: "1/1 done", VerifiedAtSHA: "abcdef1234567890", VerifiedAtDrifted: true}
 	if got := rowDetail(plainOut, await); !strings.Contains(got, "verified @ abcdef123456") {
 		t.Fatalf("AWAITING-APPROVAL detail missing suffix: %q", got)
 	}
 
-	needs := Row{ID: "needs", Status: StatusNeedsVerify, Progress: "1/1 done", VerifiedAtSHA: ""}
-	if got := rowDetail(plainOut, needs); strings.Contains(got, "verified @") {
-		t.Fatalf("NEEDS-VERIFY detail should not contain suffix: %q", got)
+	needs := Row{ID: "needs", Status: StatusNeedsVerify, Progress: "1/1 done"}
+	if got := rowDetail(plainOut, needs); !strings.Contains(got, "unverified") {
+		t.Fatalf("NEEDS-VERIFY detail should contain unverified: %q", got)
 	}
 
-	failed := Row{ID: "failed", Status: StatusVerifyFailed, Progress: "1/1 done", VerifiedAtSHA: ""}
-	if got := rowDetail(plainOut, failed); strings.Contains(got, "verified @") {
-		t.Fatalf("VERIFY-FAILED detail should not contain suffix: %q", got)
+	failed := Row{ID: "failed", Status: StatusVerifyFailed, Progress: "1/1 done"}
+	if got := rowDetail(plainOut, failed); !strings.Contains(got, "unverified") {
+		t.Fatalf("VERIFY-FAILED detail should contain unverified: %q", got)
 	}
 
-	// A DONE row whose HEAD matches the verified SHA shows no suffix.
-	matched := Row{ID: "matched", Status: StatusDone, Progress: "1/1 done", VerifiedAtSHA: ""}
-	if got := rowDetail(plainOut, matched); strings.Contains(got, "verified @") {
-		t.Fatalf("matched DONE detail should not contain suffix: %q", got)
+	ready := Row{ID: "ready", Status: StatusReady, Progress: "0/1 done"}
+	if got := rowDetail(plainOut, ready); strings.Contains(got, "verified @") || strings.Contains(got, "unverified") {
+		t.Fatalf("READY detail should have no badge: %q", got)
 	}
 
-	// With color enabled the suffix is wrapped in yellow ANSI codes.
 	colorOut := &output{Writer: io.Discard, color: true}
-	if got := rowDetail(colorOut, done); !strings.Contains(got, ansiYellow+"verified @") {
-		t.Fatalf("color output should wrap suffix in yellow: %q", got)
+	if got := rowDetail(colorOut, doneDrifted); !strings.Contains(got, ansiYellow+"verified @") {
+		t.Fatalf("drifted color output should wrap suffix in yellow: %q", got)
+	}
+	if got := rowDetail(colorOut, doneAtHead); !strings.Contains(got, ansiGreen+"verified @") {
+		t.Fatalf("at-HEAD color output should wrap suffix in green: %q", got)
+	}
+	if got := rowDetail(colorOut, needs); !strings.Contains(got, ansiRed+"unverified") {
+		t.Fatalf("NEEDS-VERIFY color output should wrap unverified in red: %q", got)
 	}
 }

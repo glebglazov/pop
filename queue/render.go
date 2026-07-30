@@ -38,8 +38,8 @@ func dashboardStatusCellStyled(row DashboardRow) string {
 	if st, ok := dashboardStatusBucketStyle[label]; ok {
 		label = st.Render(label)
 	}
-	if row.VerifiedAtSHA != "" {
-		label += " · " + dashboardVerifiedAtStyle.Render("verified @ "+row.VerifiedAtSHA)
+	if badgeText := dashboardVerifiedAtBadgeStyled(row); badgeText != "" {
+		label += " · " + badgeText
 	}
 	if work.AutoDrainWaiting(row) {
 		label += " · auto-drain"
@@ -94,9 +94,40 @@ func dashboardLiveIndicator(row DashboardRow, styled bool) string {
 	return work.LiveIndicator(row)
 }
 
-// dashboardVerifiedAtStyle colors the immunized "verified @ <shortSHA>" suffix
-// (same ANSI yellow as pop tasks status Details output).
-var dashboardVerifiedAtStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+// dashboardVerifiedAtBadgeStyled renders the Verified-at SHA badge with the
+// three-state colour rule (ADR-0156): green at HEAD, yellow when drifted, red
+// unverified.
+func dashboardVerifiedAtBadgeStyled(row DashboardRow) string {
+	badge := tasks.DeriveVerifiedAtBadge(tasks.Row{
+		Status:            row.RawStatus,
+		VerifiedAtSHA:     row.VerifiedAtSHA,
+		VerifiedAtDrifted: row.VerifiedAtDrifted,
+	})
+	text := tasks.VerifiedAtBadgeText(badge)
+	if text == "" {
+		return ""
+	}
+	switch badge.State {
+	case tasks.VerifiedAtAtHead:
+		return dashboardVerifiedAtAtHeadStyle.Render(text)
+	case tasks.VerifiedAtDrifted:
+		return dashboardVerifiedAtDriftedStyle.Render(text)
+	case tasks.VerifiedAtUnverified:
+		return dashboardVerifiedAtUnverifiedStyle.Render(text)
+	default:
+		return text
+	}
+}
+
+// dashboardVerifiedAtAtHeadStyle colors a PASS-at-HEAD badge (same green as DONE).
+var dashboardVerifiedAtAtHeadStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+
+// dashboardVerifiedAtDriftedStyle colors a drifted PASS badge (same yellow as
+// pop tasks status Details output).
+var dashboardVerifiedAtDriftedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+
+// dashboardVerifiedAtUnverifiedStyle colors the red unverified badge.
+var dashboardVerifiedAtUnverifiedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 
 // dashboardStatusBucketStyle maps a base status label to its semantic bucket
 // color. Only the base label token is colored here; the verified@/auto-drain/

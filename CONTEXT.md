@@ -480,7 +480,7 @@ Clearing every cached **Verify verdict** row for a `(repo, set)` in the Drain st
 _Avoid_: verdict expiry, SHA staleness, verify reset, verify epoch
 
 **Verified-at SHA**:
-The work SHA recorded on the set's latest PASS **Verify verdict** in the current **verification episode**, surfaced when runtime HEAD differs — signalling "cleared at this commit, HEAD has moved since" without regressing DONE or AWAITING-APPROVAL to NEEDS-VERIFY. Shown in yellow as `verified @ <shortSHA>` (12-char prefix, matching verify output) on **`pop tasks status`** in the Details column and on the **Queue dashboard** in the main STATUS column (and in the detail-view header when a set is opened). Absent when HEAD matches the verified SHA or the set has no PASS in the episode.
+The work SHA recorded on the set's latest PASS **Verify verdict** in the current **verification episode**, surfaced as a three-state badge wherever pop shows a set's status: **green** `verified @ <shortSHA>` when runtime HEAD matches that SHA, **yellow** when HEAD has moved past it ("cleared at this commit, HEAD has moved since" — without regressing DONE or AWAITING-APPROVAL to NEEDS-VERIFY), and **red** `unverified` when verification is enabled but no PASS exists in the episode. Omitted entirely when verification is off. The shortSHA is a 12-char prefix, matching verify output; the badge renders on **`pop tasks status`** in the Details column, on the **Queue dashboard** in the main STATUS column and the detail-view header, and in the **Fold conflict prompt**.
 _Avoid_: stale SHA, verified commit, work SHA badge
 
 **Verification idempotency after PASS**:

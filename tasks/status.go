@@ -59,11 +59,13 @@ type Row struct {
 	// VerifyFindings carries the Verifier's human-facing reasons for a
 	// VERIFY-FAILED row (ADR-0086); empty for every other status.
 	VerifyFindings string
-	// VerifiedAtSHA carries the short SHA of the immunizing PASS verdict when
-	// the runtime HEAD differs from that SHA (ADR-0096). It is surfaced in
-	// status details as yellow `verified @ <shortSHA>`. Empty when the set is
-	// not immunized or when HEAD matches the verified SHA.
+	// VerifiedAtSHA carries the short SHA of the episode's PASS verdict when the
+	// set is terminal and cleared (ADR-0096/0156). Populated by ApplyVerifyVerdicts;
+	// DeriveVerifiedAtBadge maps it with VerifiedAtDrifted to green/yellow badge text.
 	VerifiedAtSHA string
+	// VerifiedAtDrifted is true when runtime HEAD differs from the PASS SHA on
+	// VerifiedAtSHA — the yellow drifted badge rather than green at-HEAD.
+	VerifiedAtDrifted bool
 }
 
 // StatusLabel returns a row's display label. A started Ready set (one that

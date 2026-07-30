@@ -23,11 +23,11 @@ import "github.com/glebglazov/pop/store"
 // read-only and side-effect free — deciding whether to *run* the Verifier on a
 // cache miss belongs to the Drain phase, not here.
 //
-// It returns the resolved status and, when a terminal set is immunized by an
-// older PASS whose SHA differs from the current work SHA, the short SHA of that
-// PASS (empty otherwise). Callers already hold the verdicts they pass in, so the
+// It returns the resolved status, the short SHA of the episode's PASS when the
+// set is terminal and cleared (empty otherwise), and whether runtime HEAD has
+// drifted past that PASS. Callers already hold the verdicts they pass in, so the
 // gating verdict is not echoed back.
-func ResolveVerifiedStatus(m *Manifest, workSHA string, currentAtSHA, latestPass *store.VerifyVerdict) (TaskSetStatus, string) {
+func ResolveVerifiedStatus(m *Manifest, workSHA string, currentAtSHA, latestPass *store.VerifyVerdict) (TaskSetStatus, string, bool) {
 	var current *Verdict
 	if currentAtSHA != nil {
 		vv := Verdict(currentAtSHA.Verdict)
@@ -41,14 +41,16 @@ func ResolveVerifiedStatus(m *Manifest, workSHA string, currentAtSHA, latestPass
 
 	status := DeriveStatusWithVerdict(m, true, current, pass)
 
-	// ADR-0096: when the terminal status stands only because an older PASS
-	// immunizes it (no verdict at HEAD, HEAD has moved past that PASS), surface
-	// the SHA the set was verified at.
 	if status == StatusDone || status == StatusAwaitingApproval {
-		if currentAtSHA == nil && latestPass != nil &&
-			latestPass.Verdict == string(VerdictPass) && latestPass.WorkSHA != workSHA {
-			return status, ShortSHA(latestPass.WorkSHA)
+		passSHA := ""
+		if currentAtSHA != nil && currentAtSHA.Verdict == string(VerdictPass) {
+			passSHA = currentAtSHA.WorkSHA
+		} else if latestPass != nil && latestPass.Verdict == string(VerdictPass) {
+			passSHA = latestPass.WorkSHA
+		}
+		if passSHA != "" {
+			return status, ShortSHA(passSHA), passSHA != workSHA
 		}
 	}
-	return status, ""
+	return status, "", false
 }

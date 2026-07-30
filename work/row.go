@@ -71,11 +71,13 @@ type Row struct {
 	// composition (StatusCell), never a schedulability fact — logic keys on
 	// RawStatus.
 	Started bool
-	// VerifiedAtSHA mirrors tasks.Row.VerifiedAtSHA: the short SHA of the
-	// immunizing PASS verdict, rendered as a yellow "verified @ <sha>" suffix when
-	// non-empty. It is carried on the row so the STATUS cell is composed at render
-	// time from live fields instead of a pre-baked string (ADR-0108).
+	// VerifiedAtSHA mirrors tasks.Row.VerifiedAtSHA: the short SHA of the episode's
+	// PASS verdict when the set is terminal and cleared. DeriveVerifiedAtBadge maps
+	// it with VerifiedAtDrifted to badge text for the STATUS cell (ADR-0156).
 	VerifiedAtSHA string
+	// VerifiedAtDrifted mirrors tasks.Row.VerifiedAtDrifted: HEAD has moved past
+	// the PASS SHA on VerifiedAtSHA.
+	VerifiedAtDrifted bool
 	Worktree      string
 
 	// IsMap marks a Wayfinder Map row (ADR-0130). Map rows reuse SetID for the

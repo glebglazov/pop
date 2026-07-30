@@ -1173,25 +1173,43 @@ func TestDashboardDetailViewClampsToBodyHeight(t *testing.T) {
 }
 
 // TestDashboardStatusAppendsVerifiedAtSHA confirms the main table STATUS column
-// appends a yellow `verified @ <shortSHA>` suffix when the row carries one.
+// appends the Verified-at SHA badge with three-state colouring.
 func TestDashboardStatusAppendsVerifiedAtSHA(t *testing.T) {
-	row := DashboardRow{VerifiedAtSHA: "abcdef1234567890", SetRef: SetRef{RawStatus: tasks.StatusAwaitingApproval}}
-	got := dashboardStatusCellStyled(row)
+	drifted := DashboardRow{
+		VerifiedAtSHA:     "abcdef1234567890",
+		VerifiedAtDrifted: true,
+		SetRef:            SetRef{RawStatus: tasks.StatusAwaitingApproval},
+	}
+	got := dashboardStatusCellStyled(drifted)
 	if !strings.Contains(got, "AWAITING-APPROVAL") {
 		t.Fatalf("status label missing: %q", got)
 	}
 	if !strings.Contains(got, "verified @ abcdef123456") {
 		t.Fatalf("verified suffix missing: %q", got)
 	}
-	// The suffix should carry ANSI yellow (same as pop tasks status Details).
 	if !strings.Contains(got, "\x1b[33m") {
-		t.Fatalf("verified suffix should be yellow: %q", got)
+		t.Fatalf("drifted verified suffix should be yellow: %q", got)
 	}
 
-	// No suffix when VerifiedAtSHA is empty.
+	atHead := DashboardRow{
+		VerifiedAtSHA:     "abcdef1234567890",
+		VerifiedAtDrifted: false,
+		SetRef:            SetRef{RawStatus: tasks.StatusDone},
+	}
+	gotHead := dashboardStatusCellStyled(atHead)
+	if !strings.Contains(gotHead, "\x1b[32mverified @") {
+		t.Fatalf("at-HEAD verified suffix should be green: %q", gotHead)
+	}
+
+	unverified := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusNeedsVerify}}
+	gotUnv := dashboardStatusCellStyled(unverified)
+	if !strings.Contains(gotUnv, "\x1b[31munverified") {
+		t.Fatalf("NEEDS-VERIFY should show red unverified: %q", gotUnv)
+	}
+
 	plain := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusAwaitingApproval}}
-	if got := dashboardStatusCellStyled(plain); strings.Contains(got, "verified @") {
-		t.Fatalf("plain status should not contain suffix: %q", got)
+	if got := dashboardStatusCellStyled(plain); strings.Contains(got, "verified @") || strings.Contains(got, "unverified") {
+		t.Fatalf("plain status should not contain badge: %q", got)
 	}
 }
 
@@ -1270,9 +1288,14 @@ func TestDashboardSummaryRunningCountsLiveDrainsOnly(t *testing.T) {
 }
 
 // TestDashboardDetailHeaderIncludesVerifiedAtSHA confirms the detail view header
-// includes the yellow suffix inside the status brackets when applicable.
+// includes the Verified-at SHA badge inside the status brackets when applicable.
 func TestDashboardDetailHeaderIncludesVerifiedAtSHA(t *testing.T) {
-	header := detailHeader("demo", "AWAITING-APPROVAL", "1/1 done", "abcdef1234567890")
+	driftedRow := &tasks.Row{
+		Status:            tasks.StatusAwaitingApproval,
+		VerifiedAtSHA:     "abcdef1234567890",
+		VerifiedAtDrifted: true,
+	}
+	header := detailHeader("demo", "AWAITING-APPROVAL", "1/1 done", driftedRow)
 	if !strings.Contains(header, "Task · demo") {
 		t.Fatalf("header missing set prefix: %q", header)
 	}
@@ -1283,10 +1306,19 @@ func TestDashboardDetailHeaderIncludesVerifiedAtSHA(t *testing.T) {
 		t.Fatalf("header missing verified suffix: %q", header)
 	}
 	if !strings.Contains(header, "\x1b[33m") {
-		t.Fatalf("verified suffix should be yellow: %q", header)
+		t.Fatalf("drifted verified suffix should be yellow: %q", header)
 	}
 
-	plain := detailHeader("demo", "AWAITING-APPROVAL", "1/1 done", "")
+	atHeadRow := &tasks.Row{
+		Status:        tasks.StatusDone,
+		VerifiedAtSHA: "abcdef1234567890",
+	}
+	headHeader := detailHeader("demo", "DONE", "1/1 done", atHeadRow)
+	if !strings.Contains(headHeader, "\x1b[32mverified @") {
+		t.Fatalf("at-HEAD header should be green: %q", headHeader)
+	}
+
+	plain := detailHeader("demo", "AWAITING-APPROVAL", "1/1 done", nil)
 	if strings.Contains(plain, "verified @") {
 		t.Fatalf("plain header should not contain suffix: %q", plain)
 	}
@@ -1296,9 +1328,10 @@ func TestDashboardDetailHeaderIncludesVerifiedAtSHA(t *testing.T) {
 // dashboard status pipeline renders the suffix in the STATUS column.
 func TestDashboardTableRendersVerifiedAtSHA(t *testing.T) {
 	row := DashboardRow{
-		Project:       "pop",
-		VerifiedAtSHA: "abcdef1234567890",
-		Worktree:      "main",
+		Project:           "pop",
+		VerifiedAtSHA:     "abcdef1234567890",
+		VerifiedAtDrifted: true,
+		Worktree:          "main",
 		CursorKey:     "pop\x00set",
 		SetRef:        SetRef{SetID: "set", RawStatus: tasks.StatusDone},
 	}
@@ -4244,7 +4277,7 @@ func TestDashboardStatusAppendsAutoDrain(t *testing.T) {
 
 	// The yellow verify suffix must still render and precede the uncolored
 	// auto-drain suffix: <label> · verified @ <sha> · auto-drain.
-	ordered := dashboardStatusCellStyled(DashboardRow{VerifiedAtSHA: "abcdef1234567890", SetRef: SetRef{RawStatus: tasks.StatusAwaitingApproval, AutoDrain: true}})
+	ordered := dashboardStatusCellStyled(DashboardRow{VerifiedAtSHA: "abcdef1234567890", VerifiedAtDrifted: true, SetRef: SetRef{RawStatus: tasks.StatusAwaitingApproval, AutoDrain: true}})
 	vIdx := strings.Index(ordered, "verified @")
 	aIdx := strings.Index(ordered, "auto-drain")
 	if vIdx < 0 || aIdx < 0 || vIdx > aIdx {

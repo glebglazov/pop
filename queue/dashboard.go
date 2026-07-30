@@ -2770,14 +2770,12 @@ func (m QueueDashboard) detailFrame() (ui.Frame, string) {
 	status := tasks.DeriveStatus(manifest)
 	label := string(status)
 	progress := ""
-	verifiedSHA := ""
 	if d.taskRow != nil {
 		status = d.taskRow.Status
 		label = tasks.StatusLabel(*d.taskRow)
 		progress = d.taskRow.Progress
-		verifiedSHA = d.taskRow.VerifiedAtSHA
 	}
-	header := detailHeader(d.row.SetID, label, progress, verifiedSHA)
+	header := detailHeader(d.row.SetID, label, progress, d.taskRow)
 
 	if status == tasks.StatusMissing {
 		return ui.Frame{Width: m.width, TermH: m.height, Header: header, Hints: backHint}, "  registered task set missing"
@@ -2939,12 +2937,17 @@ func detailMapTableSeparator(nameW int) string {
 }
 
 // detailHeader builds the detail view's title line: "Task · <set>  [<status>]"
-// plus progress and, when applicable, a yellow "verified @ <shortSHA>" suffix
-// inside the status brackets (ADR-0096).
-func detailHeader(setID, label, progress, verifiedSHA string) string {
-	if verifiedSHA != "" {
-		suffix := dashboardVerifiedAtStyle.Render("verified @ " + verifiedSHA)
-		label += " · " + suffix
+// plus progress and, when applicable, the Verified-at SHA badge inside the
+// status brackets (ADR-0096/0156).
+func detailHeader(setID, label, progress string, taskRow *tasks.Row) string {
+	if taskRow != nil {
+		if badgeText := dashboardVerifiedAtBadgeStyled(DashboardRow{
+			SetRef:            SetRef{RawStatus: taskRow.Status},
+			VerifiedAtSHA:     taskRow.VerifiedAtSHA,
+			VerifiedAtDrifted: taskRow.VerifiedAtDrifted,
+		}); badgeText != "" {
+			label += " · " + badgeText
+		}
 	}
 	header := fmt.Sprintf("Task · %s  [%s]", setID, label)
 	if progress != "" {
@@ -3013,15 +3016,13 @@ func renderDetailContent(b *strings.Builder, d *detailView, height, width int, m
 	status := tasks.DeriveStatus(manifest)
 	label := string(status)
 	progress := ""
-	verifiedSHA := ""
 	if taskRow != nil {
 		status = taskRow.Status
 		label = tasks.StatusLabel(*taskRow)
 		progress = taskRow.Progress
-		verifiedSHA = taskRow.VerifiedAtSHA
 	}
 
-	header := detailHeader(d.row.SetID, label, progress, verifiedSHA)
+	header := detailHeader(d.row.SetID, label, progress, taskRow)
 	fmt.Fprintln(b, header)
 
 	if status == tasks.StatusMissing {

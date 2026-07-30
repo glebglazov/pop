@@ -164,8 +164,13 @@ func StatusCell(row Row) string {
 		return fmt.Sprintf("WAYFINDING · %d open / %d frontier", row.MapOpen, row.MapFrontier)
 	}
 	label := StatusLabel(row)
-	if row.VerifiedAtSHA != "" {
-		label += " · verified @ " + row.VerifiedAtSHA
+	badge := tasks.DeriveVerifiedAtBadge(tasks.Row{
+		Status:            row.RawStatus,
+		VerifiedAtSHA:     row.VerifiedAtSHA,
+		VerifiedAtDrifted: row.VerifiedAtDrifted,
+	})
+	if text := tasks.VerifiedAtBadgeText(badge); text != "" {
+		label += " · " + text
 	}
 	if AutoDrainWaiting(row) {
 		label += " · auto-drain"
