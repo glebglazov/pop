@@ -646,6 +646,10 @@ func installClaudeHangingAgent(t *testing.T, root string, trapTerm bool) {
 	if trapTerm {
 		b.WriteString("trap '' TERM\n")
 	}
+	b.WriteString("if [ \"$1\" = auth ] && [ \"$2\" = status ]; then\n")
+	b.WriteString("  printf '{\"loggedIn\":true}\\n'\n")
+	b.WriteString("  exit 0\n")
+	b.WriteString("fi\n")
 	b.WriteString(`printf '%s\n' '{"type":"system","subtype":"init"}'` + "\n")
 	b.WriteString(`printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}'` + "\n")
 	fmt.Fprintf(&b, ": > %q\n", slowAgentSentinel(root))

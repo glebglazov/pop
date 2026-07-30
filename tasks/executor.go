@@ -252,7 +252,8 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 	timeout := resolveAttemptTimeout(opts.Timeout)
 
 	agentSpecs := resolveTaskAgentSpecs(baseAgentPresets, opts.AgentCmd, sel.Task.Effort, sel.Task.EffortExplicit, cfg)
-	result, execErr := executeTaskAttemptsWithAgentFallback(d, sel, runtimePath, out, confirmOut, basePrompt, agentSpecs, buildForAgent, maxTries, timeout, commitOverrides, agentQuotaRetryAfter, retryDelays, nil)
+	probeMemo := newAgentAvailabilityProbeMemo()
+	result, execErr := executeTaskAttemptsWithAgentFallback(d, sel, runtimePath, out, confirmOut, basePrompt, agentSpecs, buildForAgent, maxTries, timeout, commitOverrides, agentQuotaRetryAfter, retryDelays, probeMemo)
 	if execErr != nil {
 		afterRefresh, refreshErr := RefreshWith(d, resolved.DefinitionPath, statePath)
 		if refreshErr == nil && !opts.Yes {
@@ -260,6 +261,24 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 			Render(out, afterRefresh)
 		}
 		return result, execErr
+	}
+
+	if result != nil && result.Unavailability != nil {
+		if _, ok := result.Unavailability.TimeHealing(); !ok {
+			presets := result.UnavailablePresets
+			if len(presets) == 0 {
+				presets = []AgentUnavailability{*result.Unavailability}
+			}
+			afterRefresh, refreshErr := RefreshWith(d, resolved.DefinitionPath, statePath)
+			if refreshErr == nil {
+				result.Refresh = afterRefresh
+				if !opts.Yes {
+					fmt.Fprintln(out)
+					Render(out, afterRefresh)
+				}
+			}
+			return result, taskExitErr(sel, ExitSetup, "%s", formatHumanHealingExhaustionMessage(presets))
+		}
 	}
 
 	afterRefresh, err := RefreshWith(d, resolved.DefinitionPath, statePath)

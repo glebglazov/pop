@@ -17,13 +17,15 @@ var agentAvailabilityProbeTimeout = 5 * time.Second
 // probe command and how to interpret its output. Presets with no status readout
 // ship an empty capability.
 type AgentAvailabilityProbeCapability struct {
-	Command     *AgentCommand
-	Interpret   func(exitCode int, output string) *AgentUnavailability
+	Command              *AgentCommand
+	Interpret            func(exitCode int, output string) *AgentUnavailability
+	ReportsAuthenticated func(exitCode int, output string) bool
 }
 
 // Available reports whether this preset ships an availability probe.
 func (c AgentAvailabilityProbeCapability) Available() bool {
-	return c.Command != nil && c.Command.Name != "" && c.Interpret != nil
+	return c.Command != nil && c.Command.Name != "" &&
+		(c.Interpret != nil || c.ReportsAuthenticated != nil)
 }
 
 // AgentAuthenticationStatus is the doctor-facing outcome of an availability probe.
@@ -124,10 +126,12 @@ func evaluateAgentAvailabilityProbe(d *Deps, runtimePath, preset string, capabil
 	if !ok {
 		return AgentAuthUnknown, "authentication status unknown"
 	}
-	if u := capability.Interpret(exitCode, combined); u != nil {
-		return AgentAuthUnauthenticated, u.Reason
+	if capability.Interpret != nil {
+		if u := capability.Interpret(exitCode, combined); u != nil {
+			return AgentAuthUnauthenticated, u.Reason
+		}
 	}
-	if probeReportsExplicitlyAuthenticated(preset, exitCode, combined) {
+	if capability.ReportsAuthenticated != nil && capability.ReportsAuthenticated(exitCode, combined) {
 		return AgentAuthAuthenticated, "authenticated"
 	}
 	return AgentAuthUnknown, "authentication status unknown"
@@ -155,35 +159,35 @@ func execAgentAvailabilityProbe(d *Deps, runtimePath string, capability AgentAva
 	return exitCode, combined, true
 }
 
-func probeReportsExplicitlyAuthenticated(preset string, exitCode int, output string) bool {
-	switch preset {
-	case "cursor":
-		if exitCode != 0 {
-			return false
-		}
-		var status struct {
-			IsAuthenticated *bool `json:"isAuthenticated"`
-		}
-		if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &status); err != nil {
-			return false
-		}
-		return status.IsAuthenticated != nil && *status.IsAuthenticated
-	case "claude":
-		if exitCode != 0 {
-			return false
-		}
-		var status struct {
-			LoggedIn *bool `json:"loggedIn"`
-		}
-		if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &status); err != nil {
-			return false
-		}
-		return status.LoggedIn != nil && *status.LoggedIn
-	case "codex":
-		return exitCode == 0
-	default:
+func reportsCursorAuthenticated(exitCode int, output string) bool {
+	if exitCode != 0 {
 		return false
 	}
+	var status struct {
+		IsAuthenticated *bool `json:"isAuthenticated"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &status); err != nil {
+		return false
+	}
+	return status.IsAuthenticated != nil && *status.IsAuthenticated
+}
+
+func reportsClaudeAuthenticated(exitCode int, output string) bool {
+	if exitCode != 0 {
+		return false
+	}
+	var status struct {
+		LoggedIn *bool `json:"loggedIn"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &status); err != nil {
+		return false
+	}
+	return status.LoggedIn != nil && *status.LoggedIn
+}
+
+func reportsCodexAuthenticated(exitCode int, output string) bool {
+	_ = output
+	return exitCode == 0
 }
 
 func interpretCursorAvailabilityProbe(exitCode int, output string) *AgentUnavailability {
@@ -230,15 +234,6 @@ func interpretClaudeAvailabilityProbe(exitCode int, output string) *AgentUnavail
 		reason = "claude auth status: not logged in"
 	}
 	return DetectedAuthFailure(reason)
-}
-
-func interpretCodexAvailabilityProbe(exitCode int, output string) *AgentUnavailability {
-	// Only exit 0 is an explicit positive; non-zero reads as unknown (ADR-0153).
-	_ = output
-	if exitCode == 0 {
-		return nil
-	}
-	return nil
 }
 
 // IsAgentAvailabilityProbeCommand reports whether name/args name a probe

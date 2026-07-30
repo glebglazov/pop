@@ -140,6 +140,7 @@ func (r *implementRun) hitlGate(m *Manifest, hitl *Task) (bool, error) {
 		effort:      r.opts.VerifyEffort,
 		timeout:     r.timeout,
 		runVerifier: r.opts.verifyRunner,
+		probeMemo:   r.agentProbeMemo,
 	}
 	handled, err := handleInteractiveHITLGate(r.newGateEnv(), m, hitl, rv)
 	r.releaseGateHold()

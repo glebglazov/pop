@@ -119,12 +119,12 @@ func TestInterpretClaudeAvailabilityProbe(t *testing.T) {
 	})
 }
 
-func TestInterpretCodexAvailabilityProbeNeverNegative(t *testing.T) {
-	if u := interpretCodexAvailabilityProbe(1, "not logged in"); u != nil {
-		t.Fatalf("non-zero exit must be unknown, got %#v", u)
+func TestReportsCodexAuthenticatedNeverNegative(t *testing.T) {
+	if reportsCodexAuthenticated(1, "not logged in") {
+		t.Fatal("non-zero exit must not report authenticated")
 	}
-	if u := interpretCodexAvailabilityProbe(0, "Logged in"); u != nil {
-		t.Fatalf("exit zero must proceed, got %#v", u)
+	if !reportsCodexAuthenticated(0, "Logged in") {
+		t.Fatal("exit zero must report authenticated")
 	}
 }
 
@@ -162,6 +162,52 @@ func TestAgentAvailabilityProbeMemoOneWaySkip(t *testing.T) {
 	}
 	if runner.calls != 1 {
 		t.Fatalf("probe calls = %d, want 1", runner.calls)
+	}
+}
+
+func TestRunConfiguredVerifierSharedProbeMemoRunsOnce(t *testing.T) {
+	runner := &probeCountingRunner{output: `{"isAuthenticated":false}`}
+	d := &Deps{Runner: runner}
+	memo := newAgentAvailabilityProbeMemo()
+	sel := verifierSelection{Agents: []string{"cursor"}, Effort: "heavy"}
+
+	_, err := runConfiguredVerifier(d, nil, sel, t.TempDir(), "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute, memo)
+	if err == nil {
+		t.Fatal("expected exhaustion error")
+	}
+	if runner.calls != 1 {
+		t.Fatalf("first verify round probe calls = %d, want 1", runner.calls)
+	}
+
+	_, err = runConfiguredVerifier(d, nil, sel, t.TempDir(), "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute, memo)
+	if err == nil {
+		t.Fatal("expected exhaustion error on second round")
+	}
+	if runner.calls != 1 {
+		t.Fatalf("second verify round re-probed cursor: total calls = %d, want 1", runner.calls)
+	}
+}
+
+func TestImplementAndVerifyShareProbeMemo(t *testing.T) {
+	runner := &probeCountingRunner{output: `{"isAuthenticated":false}`}
+	d := &Deps{Runner: runner}
+	memo := newAgentAvailabilityProbeMemo()
+
+	if u := memo.checkUnavailability(d, ".", "cursor"); u == nil || u.Kind != UnavailabilityAuthFailure {
+		t.Fatalf("implement probe = %#v, want auth failure", u)
+	}
+	if runner.calls != 1 {
+		t.Fatalf("implement probe calls = %d, want 1", runner.calls)
+	}
+
+	_, err := runConfiguredVerifier(d, nil, verifierSelection{
+		Agents: []string{"cursor"}, Effort: "heavy",
+	}, t.TempDir(), "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute, memo)
+	if err == nil {
+		t.Fatal("expected verifier exhaustion")
+	}
+	if runner.calls != 1 {
+		t.Fatalf("verify re-probed cursor after implement: total calls = %d, want 1", runner.calls)
 	}
 }
 

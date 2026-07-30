@@ -77,6 +77,7 @@ func (r *implementRun) verifyPhase(currentRefresh *RefreshResult, row *Row) (ver
 		Timeout:     timeout,
 		Output:      out,
 		runVerifier: opts.verifyRunner,
+		probeMemo:   r.agentProbeMemo,
 	}, m, row.Status)
 	if verr != nil {
 		if qp, ok := AsVerifyQuotaPause(verr); ok {

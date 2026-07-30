@@ -44,27 +44,6 @@ func AsVerifyQuotaPause(err error) (*VerifyQuotaPause, bool) {
 	return nil, false
 }
 
-func earliestVerifyQuotaPause(pauses []VerifyQuotaPause) VerifyQuotaPause {
-	var best *VerifyQuotaPause
-	for i := range pauses {
-		p := &pauses[i]
-		if best == nil {
-			best = p
-			continue
-		}
-		if p.ResetAt.IsZero() {
-			continue
-		}
-		if best.ResetAt.IsZero() || p.ResetAt.Before(best.ResetAt) {
-			best = p
-		}
-	}
-	if best == nil {
-		return VerifyQuotaPause{}
-	}
-	return *best
-}
-
 // Verdict is the three-way Verify verdict (ADR-0086): the cached judgment an
 // independent Verifier agent renders over a Task set's completed AFK work.
 type Verdict string
@@ -155,6 +134,9 @@ type verifyCoreOptions struct {
 	Remediate     bool
 	RemediateNote string
 	runVerifier   func(prompt string) (string, error)
+	// probeMemo shares availability-probe results across Implement implement and
+	// verify phases within one run; nil constructs a fresh memo for standalone verify.
+	probeMemo *agentAvailabilityProbeMemo
 }
 
 // VerifyTaskSet runs the Verifier over a set using default dependencies.
@@ -382,6 +364,7 @@ type reverifyGateContext struct {
 	effort      string
 	timeout     time.Duration
 	runVerifier func(prompt string) (string, error)
+	probeMemo   *agentAvailabilityProbeMemo
 }
 
 // reverifyAtGate force-runs the Verifier against the set's current work SHA
@@ -413,6 +396,7 @@ func reverifyAtGate(d *Deps, rv *reverifyGateContext, out io.Writer, repo, runti
 		Timeout:     rv.timeout,
 		Output:      out,
 		runVerifier: rv.runVerifier,
+		probeMemo:   rv.probeMemo,
 	}
 	workSHA := verifyWorkSHA(d, runtimePath)
 	v, err := runAndStoreVerdict(d, rv.cfg, opts, m, workSHA, priorAcceptedNote(d, repo, setID))
@@ -460,7 +444,7 @@ func runAndStoreVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *
 	if run == nil {
 		sel := resolveVerifier(opts.Agents, opts.Effort, m, cfg)
 		run = func(prompt string) (string, error) {
-			return runConfiguredVerifier(d, cfg, sel, m.Dir, opts.SetID, workSHA, opts.RuntimePath, prompt, opts.Output, opts.Output, opts.Timeout)
+			return runConfiguredVerifier(d, cfg, sel, m.Dir, opts.SetID, workSHA, opts.RuntimePath, prompt, opts.Output, opts.Output, opts.Timeout, opts.probeMemo)
 		}
 	}
 	raw, err := run(prompt)
@@ -724,7 +708,7 @@ func nonEmptyStrings(specs []string) []string {
 // under <task-set>/streams/runs/. Quota-paused fall-through attempts are
 // persisted without a verdict; the parsed invocation is persisted with its
 // verdict. Persistence is best-effort and never fails the verify command.
-func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, taskSetDir, setID, workSHA, runtimePath, prompt string, out, errOut io.Writer, timeout time.Duration) (string, error) {
+func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, taskSetDir, setID, workSHA, runtimePath, prompt string, out, errOut io.Writer, timeout time.Duration, probeMemo *agentAvailabilityProbeMemo) (string, error) {
 	if timeout <= 0 {
 		timeout = DefaultAttemptTimeout
 	}
@@ -747,7 +731,9 @@ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, t
 		unavailablePresets []AgentUnavailability
 	)
 	specs := nonEmptyAgentSpecs(sel.Agents, DefaultAgentPreset)
-	probeMemo := newAgentAvailabilityProbeMemo()
+	if probeMemo == nil {
+		probeMemo = newAgentAvailabilityProbeMemo()
+	}
 	for i, agentSpec := range specs {
 		preset, err := AgentPresetName(agentSpec)
 		if err != nil {

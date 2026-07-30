@@ -132,7 +132,7 @@ func TestRunConfiguredVerifierAllMissingHardErrors(t *testing.T) {
 	d := &Deps{LookPath: func(string) (string, error) { return "", exec.ErrNotFound }}
 	_, err := runConfiguredVerifier(d, nil, verifierSelection{
 		Agents: []string{"cursor", "claude"}, Effort: "heavy",
-	}, t.TempDir(), "demo", "sha1", t.TempDir(), "prompt", &bytes.Buffer{}, &bytes.Buffer{}, time.Minute)
+	}, t.TempDir(), "demo", "sha1", t.TempDir(), "prompt", &bytes.Buffer{}, &bytes.Buffer{}, time.Minute, nil)
 	assertExitCode(t, err, ExitSetup)
 	errText := err.Error()
 	if !strings.Contains(errText, "all configured agents unavailable") {
@@ -167,7 +167,7 @@ func TestRunConfiguredVerifierFallsThroughMissingBinary(t *testing.T) {
 	d := &Deps{FS: deps.NewRealFileSystem(), Runner: RealCommandRunner{}, LookPath: exec.LookPath}
 	out, err := runConfiguredVerifier(d, nil, verifierSelection{
 		Agents: []string{"cursor", "claude"}, Effort: "heavy",
-	}, taskSetDir, "demo", "sha1", t.TempDir(), "prompt", &bytes.Buffer{}, &bytes.Buffer{}, time.Minute)
+	}, taskSetDir, "demo", "sha1", t.TempDir(), "prompt", &bytes.Buffer{}, &bytes.Buffer{}, time.Minute, nil)
 	if err != nil {
 		t.Fatalf("runConfiguredVerifier: %v", err)
 	}

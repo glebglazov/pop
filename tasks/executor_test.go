@@ -1151,3 +1151,42 @@ func TestRunTaskNoEffortKeyKeepsLegacyClaudeInvocation(t *testing.T) {
 		t.Fatalf("legacy invocation unexpectedly contains effort: %v", runner.argLists[0])
 	}
 }
+
+func TestRunTaskWithAllAgentsHumanHealingUnavailableExitsSetup(t *testing.T) {
+	env := setupExecutorFixtureIsolated(t)
+	authLine := "Error: Authentication required. Please run 'agent login' first, or set CURSOR_API_KEY environment variable."
+	installAgentShim(t, env.root, "cursor-agent", fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' %q
+exit 1
+`, authLine))
+
+	d := env.deps()
+	realLookPath := exec.LookPath
+	d.LookPath = func(file string) (string, error) {
+		if file == "codex" {
+			return "", exec.ErrNotFound
+		}
+		return realLookPath(file)
+	}
+
+	opts := env.runOpts(true, "")
+	opts.AgentPresets = []string{"cursor", "codex"}
+	opts.AgentExplicit = true
+	opts.MaxTries = 3
+	opts.Output = io.Discard
+	opts.ConfirmOut = io.Discard
+
+	result, err := RunTaskWith(d, nil, nil, opts)
+	assertExitCode(t, err, ExitSetup)
+	if result == nil {
+		t.Fatal("expected result on exhaustion exit")
+	}
+	errText := err.Error()
+	if !strings.Contains(errText, "cursor:") || !strings.Contains(errText, authLine) {
+		t.Fatalf("error missing cursor diagnostic: %q", errText)
+	}
+	if !strings.Contains(errText, "codex:") || !strings.Contains(errText, "binary not found on PATH") {
+		t.Fatalf("error missing codex missing-binary diagnostic: %q", errText)
+	}
+	assertTaskOpen(t, env, "01-a")
+}

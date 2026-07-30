@@ -627,7 +627,9 @@ func (r *countingRunner) Run(ctx context.Context, dir string, stdout, stderr io.
 }
 
 func (r *countingRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
-	atomic.AddInt32(r.calls, 1)
+	if !IsAgentAvailabilityProbeCommand(name, args) {
+		atomic.AddInt32(r.calls, 1)
+	}
 	return fakeAwareRunner{}.Start(ctx, dir, stdout, stderr, name, args...)
 }
 

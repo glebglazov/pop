@@ -473,7 +473,7 @@ func TestRunConfiguredVerifierPersistsMultiAgentFallback(t *testing.T) {
 	var out bytes.Buffer
 	raw, err := runConfiguredVerifier(d, nil, verifierSelection{
 		Agents: []string{"claude", "claude --model opus"}, Effort: "heavy",
-	}, taskSetDir, "demo", "sha1", "/rt", "prompt", &out, &out, time.Minute)
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", &out, &out, time.Minute, nil)
 	if err != nil {
 		t.Fatalf("runConfiguredVerifier: %v", err)
 	}
@@ -534,7 +534,7 @@ func TestRunConfiguredVerifierUnparseableOutputPersistsWithNeedsHumanVerdict(t *
 	var out bytes.Buffer
 	raw, err := runConfiguredVerifier(d, nil, verifierSelection{
 		Agents: []string{"claude"}, Effort: "heavy",
-	}, taskSetDir, "demo", "sha1", "/rt", "prompt", &out, &out, time.Minute)
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", &out, &out, time.Minute, nil)
 	if err != nil {
 		t.Fatalf("runConfiguredVerifier: %v", err)
 	}
@@ -815,7 +815,7 @@ func TestRunConfiguredVerifierAllAgentsQuotaPausedReturnsQuotaPause(t *testing.T
 
 	_, err := runConfiguredVerifier(d, nil, verifierSelection{
 		Agents: []string{"codex"}, Effort: "heavy",
-	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute)
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute, nil)
 	if err == nil {
 		t.Fatal("expected verifier quota pause error")
 	}
@@ -893,7 +893,7 @@ func TestRunConfiguredVerifierDoesNotRetryCleanNeedsHuman(t *testing.T) {
 
 	raw, err := runConfiguredVerifier(d, instantVerifyRetryConfig(3), verifierSelection{
 		Agents: []string{"claude"}, Effort: "heavy",
-	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute)
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute, nil)
 	if err != nil {
 		t.Fatalf("runConfiguredVerifier: %v", err)
 	}
@@ -919,7 +919,7 @@ func TestRunConfiguredVerifierRetriesUnparseableWithDelayNotice(t *testing.T) {
 
 	raw, err := runConfiguredVerifier(d, instantVerifyRetryConfig(2), verifierSelection{
 		Agents: []string{"claude"}, Effort: "heavy",
-	}, taskSetDir, "demo", "sha1", "/rt", "prompt", &out, &out, time.Minute)
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", &out, &out, time.Minute, nil)
 	if err != nil {
 		t.Fatalf("runConfiguredVerifier: %v", err)
 	}
@@ -953,7 +953,7 @@ func TestRunConfiguredVerifierFallsThroughAfterRetryExhausted(t *testing.T) {
 
 	raw, err := runConfiguredVerifier(d, cfg, verifierSelection{
 		Agents: []string{"claude", "claude --model opus"}, Effort: "heavy",
-	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute)
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute, nil)
 	if err != nil {
 		t.Fatalf("runConfiguredVerifier: %v", err)
 	}
@@ -976,7 +976,7 @@ func TestRunConfiguredVerifierTimeoutRetriesThenFallsThrough(t *testing.T) {
 
 	raw, err := runConfiguredVerifier(d, instantVerifyRetryConfig(2), verifierSelection{
 		Agents: []string{"claude", "claude --model opus"}, Effort: "heavy",
-	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, 50*time.Millisecond)
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, 50*time.Millisecond, nil)
 	if err != nil {
 		t.Fatalf("runConfiguredVerifier: %v", err)
 	}
@@ -1003,7 +1003,7 @@ func TestRunConfiguredVerifierTimeoutRetriesThenParses(t *testing.T) {
 
 	raw, err := runConfiguredVerifier(d, instantVerifyRetryConfig(3), verifierSelection{
 		Agents: []string{"claude"}, Effort: "heavy",
-	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, 50*time.Millisecond)
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, 50*time.Millisecond, nil)
 	if err != nil {
 		t.Fatalf("runConfiguredVerifier: %v", err)
 	}
@@ -1036,7 +1036,7 @@ func TestRunConfiguredVerifierUsesVerifyMaxTriesOverride(t *testing.T) {
 
 	_, err := runConfiguredVerifier(d, cfg, verifierSelection{
 		Agents: []string{"claude", "claude --model opus"}, Effort: "heavy",
-	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute)
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute, nil)
 	if err != nil {
 		t.Fatalf("runConfiguredVerifier: %v", err)
 	}
@@ -1134,7 +1134,7 @@ func TestRunConfiguredVerifierSkipsUnauthenticatedPresetByProbe(t *testing.T) {
 	var out bytes.Buffer
 	raw, err := runConfiguredVerifier(d, nil, verifierSelection{
 		Agents: []string{"cursor", "claude"}, Effort: "heavy",
-	}, taskSetDir, "demo", "sha1", "/rt", "prompt", &out, &out, time.Minute)
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", &out, &out, time.Minute, nil)
 	if err != nil {
 		t.Fatalf("runConfiguredVerifier: %v", err)
 	}
@@ -1177,7 +1177,7 @@ func TestRunConfiguredVerifierSkipsUnauthenticatedPresetByPassiveDetection(t *te
 	var out bytes.Buffer
 	raw, err := runConfiguredVerifier(d, nil, verifierSelection{
 		Agents: []string{"cursor", "claude"}, Effort: "heavy",
-	}, taskSetDir, "demo", "sha1", "/rt", "prompt", &out, &out, time.Minute)
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", &out, &out, time.Minute, nil)
 	if err != nil {
 		t.Fatalf("runConfiguredVerifier: %v", err)
 	}
@@ -1226,7 +1226,7 @@ func TestRunConfiguredVerifierAllHumanHealingUnavailableHardErrors(t *testing.T)
 
 	_, err := runConfiguredVerifier(d, nil, verifierSelection{
 		Agents: []string{"cursor", "codex"}, Effort: "heavy",
-	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute)
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute, nil)
 	assertExitCode(t, err, ExitSetup)
 	errText := err.Error()
 	if !strings.Contains(errText, "cursor:") || !strings.Contains(errText, authLine) {
