@@ -2,6 +2,11 @@ package layout
 
 import "sort"
 
+// MinPaneCells is tmux's minimum pane extent along either axis. Layout
+// realization refuses a container whose cell budget cannot give every child at
+// least this many cells.
+const MinPaneCells = 1
+
 // CellBudget is the apportionable cell count for n children in a container of
 // extent along the split axis. Tmux charges one cell per split to the surviving
 // pane, so n children consume n-1 border cells.

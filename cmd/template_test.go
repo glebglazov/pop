@@ -461,6 +461,52 @@ func TestRunTemplateApplyWithDefaultWeight(t *testing.T) {
 	}
 }
 
+func TestRunTemplateApplyRejectsUnfittableLayout(t *testing.T) {
+	t.Parallel()
+	// 25 stacked rows in a 24-row window: cell budget 0, need 25 — refused
+	// before any split for that container.
+	panes := make([]config.WorkbenchPaneSpec, 25)
+	for i := range panes {
+		panes[i] = config.WorkbenchPaneSpec{Name: fmt.Sprintf("p%d", i), Command: fmt.Sprintf("echo %d", i)}
+	}
+	cfg := &config.Config{
+		Workbenches: []config.Workbench{{
+			Name: "crowded",
+			Windows: []config.WorkbenchWindow{{
+				Name: "work",
+				Layout: &config.WorkbenchPaneSpec{
+					Children: "rows",
+					Panes:    panes,
+				},
+			}},
+		}},
+	}
+	f := &tmuxtest.Fake{CurrentSessionName: "current-session", PaneW: 80, PaneH: 24}
+	d := templateRuntimeDeps{
+		Tmux:        f,
+		Getwd:       func() (string, error) { return "/repo", nil },
+		UserHomeDir: func() (string, error) { return "/home/user", nil },
+	}
+
+	err := runTemplateApplyWith(d, cfg.Workbenches, "crowded")
+	if err == nil {
+		t.Fatal("expected unfittable layout to be rejected")
+	}
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, `window "work"`) {
+		t.Errorf("error = %q, want window name", errMsg)
+	}
+	if !strings.Contains(errMsg, "layout") {
+		t.Errorf("error = %q, want pane spec path", errMsg)
+	}
+	if !strings.Contains(errMsg, "cannot fit") {
+		t.Errorf("error = %q, want fit refusal", errMsg)
+	}
+	if len(f.SplitPanes) != 0 {
+		t.Errorf("expected no splits before refusal, got %d", len(f.SplitPanes))
+	}
+}
+
 func TestRunTemplateApplyWithDeepNesting(t *testing.T) {
 	t.Parallel()
 	// 3 levels deep nesting: every leaf's command must be sent.
@@ -809,7 +855,7 @@ func TestRealizePaneTreeStampsNamedLeafSkipsUnnamed(t *testing.T) {
 	// Named leaf: identity is stamped.
 	f := &tmuxtest.Fake{}
 	named := &config.WorkbenchPaneSpec{Name: "server", Command: "go test ./..."}
-	if _, err := realizePaneTree(f, named, "%7", "/repo", "/repo", "/home/user"); err != nil {
+	if _, err := realizePaneTree(f, named, "%7", "/repo", "/repo", "/home/user", "work", "layout"); err != nil {
 		t.Fatalf("realizePaneTree(named) error: %v", err)
 	}
 	if f.PaneTitles["%7"] != "server" {
@@ -822,7 +868,7 @@ func TestRealizePaneTreeStampsNamedLeafSkipsUnnamed(t *testing.T) {
 	// Unnamed leaf: no @pop_pane stamp.
 	f = &tmuxtest.Fake{}
 	unnamed := &config.WorkbenchPaneSpec{Command: "htop"}
-	if _, err := realizePaneTree(f, unnamed, "%8", "/repo", "/repo", "/home/user"); err != nil {
+	if _, err := realizePaneTree(f, unnamed, "%8", "/repo", "/repo", "/home/user", "work", "layout"); err != nil {
 		t.Fatalf("realizePaneTree(unnamed) error: %v", err)
 	}
 	if _, ok := f.PaneIdentity["%8"]; ok {

@@ -230,7 +230,7 @@ func applyWorkbench(d templateRuntimeDeps, tmpl config.Workbench, session, dir s
 			if err != nil {
 				return fmt.Errorf("failed to inspect live window %q: %w", window.Name, err)
 			}
-			merged, err := mergeWindow(d.Tmux, window.Layout, liveNames, fallbackAnchor, dir, rootCwd, homeDir)
+			merged, err := mergeWindow(d.Tmux, window.Layout, liveNames, fallbackAnchor, dir, rootCwd, homeDir, window.Name)
 			if err != nil {
 				return fmt.Errorf("failed to merge workbench window %q: %w", window.Name, err)
 			}
@@ -256,7 +256,7 @@ func applyWorkbench(d templateRuntimeDeps, tmpl config.Workbench, session, dir s
 			}
 
 			// Realize the pane tree
-			result, err := realizePaneTree(d.Tmux, window.Layout, paneID, dir, rootCwd, homeDir)
+			result, err := realizePaneTree(d.Tmux, window.Layout, paneID, dir, rootCwd, homeDir, window.Name, "layout")
 			if err != nil {
 				return fmt.Errorf("failed to realize pane tree for window %q: %w", window.Name, err)
 			}
@@ -338,7 +338,7 @@ type mergeResult struct {
 // mergeWindow merges a target window's layout into a live, pop-owned window
 // (ADR-0075). It is the entry point that decides whether the window root is a
 // single leaf or a container.
-func mergeWindow(tmux tmuxmod.Tmux, layout *config.WorkbenchPaneSpec, liveNames map[string]string, fallbackAnchor, sessionDir, rootCwd, homeDir string) (mergeResult, error) {
+func mergeWindow(tmux tmuxmod.Tmux, layout *config.WorkbenchPaneSpec, liveNames map[string]string, fallbackAnchor, sessionDir, rootCwd, homeDir, windowName string) (mergeResult, error) {
 	if len(layout.Panes) == 0 {
 		if id := liveNames[layout.Name]; id != "" {
 			// The sole pane survived: leave its process intact.
@@ -350,19 +350,19 @@ func mergeWindow(tmux tmuxmod.Tmux, layout *config.WorkbenchPaneSpec, liveNames 
 		}
 		// Window matched but its only named pane is gone — rebuild into the
 		// window's surviving pane rather than spawning a duplicate window.
-		realized, err := realizePaneTree(tmux, layout, fallbackAnchor, sessionDir, rootCwd, homeDir)
+		realized, err := realizePaneTree(tmux, layout, fallbackAnchor, sessionDir, rootCwd, homeDir, windowName, "layout")
 		if err != nil {
 			return mergeResult{}, err
 		}
 		return mergeResult{anchor: fallbackAnchor, leafIDs: realized.leafIDs, focusIDs: realized.focusIDs}, nil
 	}
-	return mergeContainer(tmux, layout.Panes, layout.Children, liveNames, fallbackAnchor, sessionDir, rootCwd, homeDir)
+	return mergeContainer(tmux, layout, liveNames, fallbackAnchor, sessionDir, rootCwd, homeDir, windowName, "layout")
 }
 
 // mergePaneTree merges a present-live subtree. A matched leaf is left untouched
 // (its process survives); a present container recurses. Wholly-missing subtrees
 // are never routed here — their container parent builds them fresh.
-func mergePaneTree(tmux tmuxmod.Tmux, pane *config.WorkbenchPaneSpec, liveNames map[string]string, sessionDir, parentCwd, homeDir string) (mergeResult, error) {
+func mergePaneTree(tmux tmuxmod.Tmux, pane *config.WorkbenchPaneSpec, liveNames map[string]string, sessionDir, parentCwd, homeDir, windowName, specPath string) (mergeResult, error) {
 	if len(pane.Panes) == 0 {
 		id := liveNames[pane.Name]
 		res := mergeResult{anchor: id, leafIDs: []string{id}}
@@ -371,7 +371,7 @@ func mergePaneTree(tmux tmuxmod.Tmux, pane *config.WorkbenchPaneSpec, liveNames 
 		}
 		return res, nil
 	}
-	return mergeContainer(tmux, pane.Panes, pane.Children, liveNames, "", sessionDir, parentCwd, homeDir)
+	return mergeContainer(tmux, pane, liveNames, "", sessionDir, parentCwd, homeDir, windowName, specPath)
 }
 
 // mergeContainer walks a container's children in target order. Present children
@@ -381,7 +381,9 @@ func mergePaneTree(tmux tmuxmod.Tmux, pane *config.WorkbenchPaneSpec, liveNames 
 // container is reproportioned to the target weights, which may resize (never
 // kill) surviving panes. fallbackAnchor seeds the split when the container has no
 // live children at all (only reachable at a matched window root).
-func mergeContainer(tmux tmuxmod.Tmux, children []config.WorkbenchPaneSpec, direction string, liveNames map[string]string, fallbackAnchor, sessionDir, parentCwd, homeDir string) (mergeResult, error) {
+func mergeContainer(tmux tmuxmod.Tmux, container *config.WorkbenchPaneSpec, liveNames map[string]string, fallbackAnchor, sessionDir, parentCwd, homeDir, windowName, specPath string) (mergeResult, error) {
+	children := container.Panes
+	direction := container.Children
 	n := len(children)
 	if n == 0 {
 		return mergeResult{}, nil
@@ -397,15 +399,35 @@ func mergeContainer(tmux tmuxmod.Tmux, children []config.WorkbenchPaneSpec, dire
 		present[i] = subtreeLive(&children[i], liveNames)
 	}
 
+	if n > 1 {
+		measureTarget := fallbackAnchor
+		if measureTarget == "" {
+			for i := range children {
+				if present[i] {
+					if id := firstLiveLeaf(&children[i], liveNames); id != "" {
+						measureTarget = id
+						break
+					}
+				}
+			}
+		}
+		if measureTarget != "" {
+			if err := checkContainerFits(tmux, measureTarget, direction, n, windowName, specPath, container); err != nil {
+				return mergeResult{}, err
+			}
+		}
+	}
+
 	childAnchors := make([]string, n)
 	var combined mergeResult
 	lastAnchor := ""
 
 	for i := range children {
 		childCwd := effectiveCwd(sessionDir, parentCwd, children[i].Cwd, homeDir)
+		childPath := fmt.Sprintf("%s.panes[%d]", specPath, i)
 
 		if present[i] {
-			merged, err := mergePaneTree(tmux, &children[i], liveNames, sessionDir, childCwd, homeDir)
+			merged, err := mergePaneTree(tmux, &children[i], liveNames, sessionDir, childCwd, homeDir, windowName, childPath)
 			if err != nil {
 				return mergeResult{}, err
 			}
@@ -434,7 +456,7 @@ func mergeContainer(tmux tmuxmod.Tmux, children []config.WorkbenchPaneSpec, dire
 		if err != nil {
 			return mergeResult{}, fmt.Errorf("failed to split for pane %q: %w", children[i].Name, err)
 		}
-		realized, err := realizePaneTree(tmux, &children[i], newPaneID, sessionDir, childCwd, homeDir)
+		realized, err := realizePaneTree(tmux, &children[i], newPaneID, sessionDir, childCwd, homeDir, windowName, childPath)
 		if err != nil {
 			return mergeResult{}, err
 		}
@@ -499,7 +521,7 @@ type paneTreeResult struct {
 // it sets the title and sends the command. If it's a container, it creates
 // child panes via splits and recursively realizes them. parentCwd is the
 // already-resolved effective working directory inherited from ancestors.
-func realizePaneTree(tmux tmuxmod.Tmux, pane *config.WorkbenchPaneSpec, paneID, sessionDir, parentCwd, homeDir string) (paneTreeResult, error) {
+func realizePaneTree(tmux tmuxmod.Tmux, pane *config.WorkbenchPaneSpec, paneID, sessionDir, parentCwd, homeDir, windowName, specPath string) (paneTreeResult, error) {
 	if len(pane.Panes) == 0 {
 		// Leaf node: set title and send command
 		if err := tmux.SetPaneTitle(paneID, pane.Name); err != nil {
@@ -524,14 +546,16 @@ func realizePaneTree(tmux tmuxmod.Tmux, pane *config.WorkbenchPaneSpec, paneID, 
 	}
 
 	// Container node: create child panes and realize them
-	return realizeContainer(tmux, paneID, pane.Panes, pane.Children, sessionDir, parentCwd, homeDir)
+	return realizeContainer(tmux, paneID, pane, sessionDir, parentCwd, homeDir, windowName, specPath)
 }
 
 // realizeContainer creates child panes for a container and realizes them recursively.
 // It splits the container pane N-1 times to create N child panes, then corrects
 // them to the same apportioned cell counts the splits carried. parentCwd is the
 // already-resolved effective working directory for this container.
-func realizeContainer(tmux tmuxmod.Tmux, containerPaneID string, children []config.WorkbenchPaneSpec, direction, sessionDir, parentCwd, homeDir string) (paneTreeResult, error) {
+func realizeContainer(tmux tmuxmod.Tmux, containerPaneID string, container *config.WorkbenchPaneSpec, sessionDir, parentCwd, homeDir, windowName, specPath string) (paneTreeResult, error) {
+	children := container.Panes
+	direction := container.Children
 	n := len(children)
 	if n == 0 {
 		return paneTreeResult{}, nil
@@ -544,7 +568,8 @@ func realizeContainer(tmux tmuxmod.Tmux, containerPaneID string, children []conf
 				return paneTreeResult{}, fmt.Errorf("failed to set pane directory to %q: %w", childCwd, err)
 			}
 		}
-		return realizePaneTree(tmux, &children[0], containerPaneID, sessionDir, childCwd, homeDir)
+		childPath := fmt.Sprintf("%s.panes[0]", specPath)
+		return realizePaneTree(tmux, &children[0], containerPaneID, sessionDir, childCwd, homeDir, windowName, childPath)
 	}
 
 	// If the first child overrides the container's cwd, the container pane
@@ -567,6 +592,10 @@ func realizeContainer(tmux tmuxmod.Tmux, containerPaneID string, children []conf
 	extent := height
 	if horizontal {
 		extent = width
+	}
+
+	if err := checkContainerFitsExtent(extent, direction, n, windowName, specPath, container); err != nil {
+		return paneTreeResult{}, err
 	}
 
 	weights := make([]int, n)
@@ -610,7 +639,8 @@ func realizeContainer(tmux tmuxmod.Tmux, containerPaneID string, children []conf
 	var combined paneTreeResult
 	for i := range children {
 		childCwd := effectiveCwd(sessionDir, parentCwd, children[i].Cwd, homeDir)
-		result, err := realizePaneTree(tmux, &children[i], paneIDs[i], sessionDir, childCwd, homeDir)
+		childPath := fmt.Sprintf("%s.panes[%d]", specPath, i)
+		result, err := realizePaneTree(tmux, &children[i], paneIDs[i], sessionDir, childCwd, homeDir, windowName, childPath)
 		if err != nil {
 			return paneTreeResult{}, err
 		}
@@ -666,6 +696,52 @@ func resizePanesToCells(tmux tmuxmod.Tmux, paneIDs []string, cells []int, horizo
 		}
 	}
 	return nil
+}
+
+func checkContainerFits(tmux tmuxmod.Tmux, measureTarget, direction string, childCount int, windowName, specPath string, container *config.WorkbenchPaneSpec) error {
+	width, height, err := tmux.PaneSize(measureTarget)
+	if err != nil {
+		return fmt.Errorf("failed to get pane size: %w", err)
+	}
+	extent := height
+	if direction == "columns" {
+		extent = width
+	}
+	return checkContainerFitsExtent(extent, direction, childCount, windowName, specPath, container)
+}
+
+func checkContainerFitsExtent(extent int, direction string, childCount int, windowName, specPath string, container *config.WorkbenchPaneSpec) error {
+	if childCount <= 1 {
+		return nil
+	}
+	budget := layout.CellBudget(extent, childCount)
+	if layout.FitsMinCells(budget, childCount, layout.MinPaneCells) {
+		return nil
+	}
+	axis := "rows"
+	if direction == "columns" {
+		axis = "columns"
+	}
+	return fmt.Errorf(
+		"window %q: pane spec %s cannot fit %d %s in %d cells (cell budget %d, need %d)",
+		windowName,
+		formatPaneSpecRef(specPath, container),
+		childCount,
+		axis,
+		extent,
+		budget,
+		childCount*layout.MinPaneCells,
+	)
+}
+
+func formatPaneSpecRef(specPath string, pane *config.WorkbenchPaneSpec) string {
+	if pane != nil && pane.Name != "" {
+		return fmt.Sprintf("%q", pane.Name)
+	}
+	if specPath == "" {
+		return "layout"
+	}
+	return specPath
 }
 
 func findWorkbench(templates []config.Workbench, name string) (config.Workbench, bool) {
