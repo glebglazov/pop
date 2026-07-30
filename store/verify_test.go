@@ -25,6 +25,7 @@ func TestPutGetVerifyVerdictRoundTrip(t *testing.T) {
 		WorkSHA:    "sha1",
 		Verdict:    "FIXABLE",
 		Findings:   "criterion 2 unmet",
+		Summary:    "widget never renders",
 		ComputedAt: now,
 	}
 	if err := s.PutVerifyVerdict(v); err != nil {
@@ -37,8 +38,8 @@ func TestPutGetVerifyVerdictRoundTrip(t *testing.T) {
 	if got == nil {
 		t.Fatalf("GetVerifyVerdict = nil, want a row")
 	}
-	if got.Verdict != "FIXABLE" || got.Findings != "criterion 2 unmet" {
-		t.Fatalf("GetVerifyVerdict = %+v, want FIXABLE / criterion 2 unmet", got)
+	if got.Verdict != "FIXABLE" || got.Findings != "criterion 2 unmet" || got.Summary != "widget never renders" {
+		t.Fatalf("GetVerifyVerdict = %+v, want FIXABLE / criterion 2 unmet / widget never renders", got)
 	}
 	if !got.ComputedAt.Equal(now) {
 		t.Fatalf("ComputedAt = %v, want %v", got.ComputedAt, now)

@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/glebglazov/pop/config"
 )
@@ -155,8 +156,9 @@ func sanitizeRemediationSummary(text string) string {
 		line = strings.TrimSpace(line[:i])
 	}
 	line = strings.Join(strings.Fields(neutralizeACHeaders(line)), " ")
-	if len(line) > remediationSummaryMaxLen {
-		line = strings.TrimSpace(line[:remediationSummaryMaxLen])
+	if utf8.RuneCountInString(line) > remediationSummaryMaxLen {
+		runes := []rune(line)
+		line = strings.TrimSpace(string(runes[:remediationSummaryMaxLen]))
 	}
 	return line
 }

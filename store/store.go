@@ -379,6 +379,10 @@ var migrations = []string{
 	// blocks another set's StartDrain via the checkout claim union. Legacy rows
 	// default to 0 (non-claiming) — the historical occupancy-only behaviour.
 	`ALTER TABLE checkout_gate_holds ADD COLUMN claim INTEGER NOT NULL DEFAULT 0;`,
+	// 24: verify_verdicts.summary — the Verifier's optional one-line SUMMARY for
+	// Remediation task titles. Persisted with the verdict so a cache-hit FIXABLE
+	// spawn (re-drain at the same work SHA) still names what needs fixing.
+	`ALTER TABLE verify_verdicts ADD COLUMN summary TEXT NOT NULL DEFAULT '';`,
 }
 
 func (s *Store) migrate() error {

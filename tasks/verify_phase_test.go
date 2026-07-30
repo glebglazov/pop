@@ -5,8 +5,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/glebglazov/pop/store"
 )
 
 // newVerifyPhaseRun builds an implementRun wired to a real store-backed checkout
@@ -83,6 +86,53 @@ func TestVerifyPhaseFixableUnderCapSpawnsRemediationAndContinues(t *testing.T) {
 	}
 	if got := remediationDepth(m); got != 1 {
 		t.Fatalf("remediationDepth = %d, want 1 (one spawned Remediation task)", got)
+	}
+}
+
+// TestVerifyPhaseCachedFixableUsesStoredSummary: a cache-hit FIXABLE verdict
+// must carry its persisted SUMMARY into the spawned Remediation title.
+func TestVerifyPhaseCachedFixableUsesStoredSummary(t *testing.T) {
+	run, refresh, row, indexPath := newVerifyPhaseRun(t, func(string) (string, error) {
+		t.Fatal("cache hit must not invoke the Verifier")
+		return "", nil
+	})
+
+	id, err := ResolveRepositoryIdentity(run.d, run.runtimePath)
+	if err != nil {
+		t.Fatalf("ResolveRepositoryIdentity: %v", err)
+	}
+	headOut, err := run.d.Git.CommandInDir(run.runtimePath, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse HEAD: %v", err)
+	}
+	workSHA := strings.TrimSpace(headOut)
+	s, err := openDrainStore(run.d)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if err := s.PutVerifyVerdict(store.VerifyVerdict{
+		Repo:     id.CommonDir,
+		SetID:    "demo",
+		WorkSHA:  workSHA,
+		Verdict:  "FIXABLE",
+		Findings: "criterion 2 unmet",
+		Summary:  "widget never renders",
+	}); err != nil {
+		t.Fatalf("seed cached FIXABLE verdict: %v", err)
+	}
+
+	directive, err := run.verifyPhase(refresh, row)
+	if err != nil {
+		t.Fatalf("verifyPhase: %v", err)
+	}
+	if directive != verifyContinue {
+		t.Fatalf("directive = %d, want verifyContinue (%d)", directive, verifyContinue)
+	}
+	m := LoadManifest(run.d, "demo", indexPath)
+	for _, tk := range m.Tasks {
+		if tk.ID == "02-remediation" && tk.Title != "Remediation 1: widget never renders" {
+			t.Fatalf("title = %q, want Remediation 1: widget never renders", tk.Title)
+		}
 	}
 }
 

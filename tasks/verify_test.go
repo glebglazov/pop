@@ -40,6 +40,8 @@ func TestParseVerdict(t *testing.T) {
 		{name: "with summary", raw: "VERDICT: FIXABLE\nSUMMARY: widget never renders\nFINDINGS: criterion 2 unmet", wantVerdict: VerdictFixable, wantFindings: "criterion 2 unmet", wantSummary: "widget never renders"},
 		{name: "summary omitted", raw: "VERDICT: FIXABLE\nFINDINGS: criterion 2 unmet", wantVerdict: VerdictFixable, wantFindings: "criterion 2 unmet", wantSummary: ""},
 		{name: "summary not in findings fallback", raw: "VERDICT: FIXABLE\nSUMMARY: one line\ndetails without findings label", wantVerdict: VerdictFixable, wantFindings: "details without findings label", wantSummary: "one line"},
+		{name: "summary prose in findings fallback kept", raw: "VERDICT: FIXABLE\nSUMMARY of the retry gap is unclear", wantVerdict: VerdictFixable, wantFindings: "SUMMARY of the retry gap is unclear", wantSummary: ""},
+		{name: "summary label inside findings body ignored", raw: "VERDICT: FIXABLE\nFINDINGS: first line\nSUMMARY: nested label", wantVerdict: VerdictFixable, wantFindings: "first line\nSUMMARY: nested label", wantSummary: ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -43,7 +43,7 @@ type VerifyVerdict struct {
 // re-verified.
 func (s *Store) GetVerifyVerdict(repo, setID, workSHA string) (*VerifyVerdict, error) {
 	row := s.db.QueryRow(
-		`SELECT repo, set_id, work_sha, verdict, findings, scope, human_authored, note, computed_at
+		`SELECT repo, set_id, work_sha, verdict, findings, summary, scope, human_authored, note, computed_at
 		 FROM verify_verdicts
 		 WHERE repo = ? AND set_id = ? AND work_sha = ?`,
 		repo, setID, workSHA)
@@ -58,7 +58,7 @@ func (s *Store) GetVerifyVerdict(repo, setID, workSHA string) (*VerifyVerdict, e
 // (ADR-0096). Returns nil when no PASS verdict exists for the set.
 func (s *Store) GetLatestPassVerifyVerdict(repo, setID string) (*VerifyVerdict, error) {
 	row := s.db.QueryRow(
-		`SELECT repo, set_id, work_sha, verdict, findings, scope, human_authored, note, computed_at
+		`SELECT repo, set_id, work_sha, verdict, findings, summary, scope, human_authored, note, computed_at
 		 FROM verify_verdicts
 		 WHERE repo = ? AND set_id = ? AND verdict = 'PASS'
 		 ORDER BY computed_at DESC, work_sha DESC
@@ -96,7 +96,7 @@ func (s *Store) GetLatestAcceptedNote(repo, setID string) (string, error) {
 func scanVerifyVerdict(row *sql.Row) (*VerifyVerdict, error) {
 	var v VerifyVerdict
 	var computed string
-	err := row.Scan(&v.Repo, &v.SetID, &v.WorkSHA, &v.Verdict, &v.Findings, &v.Scope, &v.HumanAuthored, &v.Note, &computed)
+	err := row.Scan(&v.Repo, &v.SetID, &v.WorkSHA, &v.Verdict, &v.Findings, &v.Summary, &v.Scope, &v.HumanAuthored, &v.Note, &computed)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -119,12 +119,13 @@ func (s *Store) PutVerifyVerdict(v VerifyVerdict) error {
 // the verdict inside the same transaction as its check (ADR-0104).
 func PutVerifyVerdictExec(ctx context.Context, ex Execer, v VerifyVerdict) error {
 	_, err := ex.ExecContext(ctx,
-		`INSERT INTO verify_verdicts (repo, set_id, work_sha, verdict, findings, scope, human_authored, note, computed_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO verify_verdicts (repo, set_id, work_sha, verdict, findings, summary, scope, human_authored, note, computed_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(repo, set_id, work_sha) DO UPDATE SET
-		   verdict=excluded.verdict, findings=excluded.findings, scope=excluded.scope,
-		   human_authored=excluded.human_authored, note=excluded.note, computed_at=excluded.computed_at`,
-		v.Repo, v.SetID, v.WorkSHA, v.Verdict, v.Findings, v.Scope, v.HumanAuthored, v.Note, mergeTime(v.ComputedAt))
+		   verdict=excluded.verdict, findings=excluded.findings, summary=excluded.summary,
+		   scope=excluded.scope, human_authored=excluded.human_authored, note=excluded.note,
+		   computed_at=excluded.computed_at`,
+		v.Repo, v.SetID, v.WorkSHA, v.Verdict, v.Findings, v.Summary, v.Scope, v.HumanAuthored, v.Note, mergeTime(v.ComputedAt))
 	return err
 }
 

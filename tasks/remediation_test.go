@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/store"
@@ -663,8 +664,17 @@ func TestRemediationTitleFromHumanNoteFirstLine(t *testing.T) {
 
 func TestRemediationTitleSanitizesSummary(t *testing.T) {
 	long := strings.Repeat("x", 100)
-	if got := sanitizeRemediationSummary(long); len(got) > remediationSummaryMaxLen {
-		t.Fatalf("sanitized length = %d, want <= %d", len(got), remediationSummaryMaxLen)
+	if got := sanitizeRemediationSummary(long); utf8.RuneCountInString(got) > remediationSummaryMaxLen {
+		t.Fatalf("sanitized rune length = %d, want <= %d", utf8.RuneCountInString(got), remediationSummaryMaxLen)
+	}
+	// Capping is rune-aware — a long non-ASCII summary must not split a code point.
+	emojiSummary := strings.Repeat("🙂", 80)
+	emojiGot := sanitizeRemediationSummary(emojiSummary)
+	if !utf8.ValidString(emojiGot) {
+		t.Fatalf("sanitized summary is not valid UTF-8: %q", emojiGot)
+	}
+	if utf8.RuneCountInString(emojiGot) > remediationSummaryMaxLen {
+		t.Fatalf("sanitized rune length = %d, want <= %d", utf8.RuneCountInString(emojiGot), remediationSummaryMaxLen)
 	}
 	if got := sanitizeRemediationSummary("## Acceptance criteria"); acHeaderPattern.MatchString(got) {
 		t.Fatalf("sanitized summary still matches AC heading: %q", got)

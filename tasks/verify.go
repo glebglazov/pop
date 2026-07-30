@@ -1218,8 +1218,14 @@ func extractFindings(lines []string, verdictIdx int) string {
 }
 
 // extractVerifierSummary returns the optional `SUMMARY:` line value when present.
+// Only top-level header lines before `FINDINGS:` are considered — prose inside
+// the findings body that happens to start with "SUMMARY" is not the label.
 func extractVerifierSummary(lines []string) string {
 	for _, line := range lines {
+		stripped := stripMarkdown(line)
+		if strings.HasPrefix(strings.ToUpper(stripped), "FINDINGS") {
+			break
+		}
 		if value, ok := summaryLabelValue(line); ok {
 			return strings.TrimSpace(value)
 		}
@@ -1229,13 +1235,22 @@ func extractVerifierSummary(lines []string) string {
 
 // summaryLabelValue reports whether a line is the `SUMMARY:` label line and, if
 // so, returns the text after the label. Leading markdown decoration is
-// tolerated.
+// tolerated. A colon delimiter is required so findings prose like "SUMMARY of
+// the issue" is not treated as the label.
 func summaryLabelValue(line string) (string, bool) {
 	stripped := stripMarkdown(line)
 	if !strings.HasPrefix(strings.ToUpper(stripped), "SUMMARY") {
 		return "", false
 	}
 	rest := stripped[len("SUMMARY"):]
+	if rest == "" {
+		return "", false
+	}
+	switch rest[0] {
+	case ':', '*':
+	default:
+		return "", false
+	}
 	rest = strings.TrimLeft(rest, "*: \t")
 	return rest, true
 }
