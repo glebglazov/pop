@@ -122,10 +122,10 @@ type Fake struct {
 	// LiveWBFallback is arranged input for LivePaneIdentities' fallback anchor:
 	// window ref -> first pane id.
 	LiveWBFallback map[string]string
-	// WindowW / WindowH are the dimensions WindowSize reports for every target
-	// (a test builds one window). Zero values default to tmux's 80x24.
-	WindowW int
-	WindowH int
+	// PaneW / PaneH are the dimensions PaneSize reports for every target (a test
+	// builds one window). Zero values default to tmux's 80x24.
+	PaneW int
+	PaneH int
 
 	// WBWindowIdentity records StampWorkbenchWindow: window target -> identity.
 	WBWindowIdentity map[string]string
@@ -676,8 +676,8 @@ func (f *Fake) StampPane(paneID, identity string) error {
 	return nil
 }
 
-func (f *Fake) WindowSize(target string) (int, int, error) {
-	w, h := f.WindowW, f.WindowH
+func (f *Fake) PaneSize(target string) (int, int, error) {
+	w, h := f.PaneW, f.PaneH
 	if w == 0 {
 		w = 80
 	}

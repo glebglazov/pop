@@ -645,9 +645,9 @@ func resizePanesByWeight(tmux tmuxmod.Tmux, paneIDs []string, children []config.
 	// panes, so the build-time split and this resize agree on one window.
 	target := paneIDs[0]
 
-	width, height, err := tmux.WindowSize(target)
+	width, height, err := tmux.PaneSize(target)
 	if err != nil {
-		return fmt.Errorf("failed to get window size: %w", err)
+		return fmt.Errorf("failed to get pane size: %w", err)
 	}
 
 	// Calculate total weight

@@ -101,17 +101,17 @@ func TestStampPaneBuildsArgs(t *testing.T) {
 	}
 }
 
-func TestWindowSizeTargetsWindowAndParses(t *testing.T) {
+func TestPaneSizeTargetsPaneAndParses(t *testing.T) {
 	r := &recordingRunner{out: "120\t40\n"}
 	tm := &realTmux{run: r}
 
-	w, h, err := tm.WindowSize("%0")
+	w, h, err := tm.PaneSize("%0")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// The dimension read must target the built window's pane via -t, never be
-	// untargeted (regression: a detached session is 80x24 on the client).
-	want := [][]string{{"display-message", "-t", "%0", "-p", "#{window_width}\t#{window_height}"}}
+	// The dimension read must target the pane via -t, never be untargeted
+	// (regression: a detached session is 80x24 on the client).
+	want := [][]string{{"display-message", "-t", "%0", "-p", "#{pane_width}\t#{pane_height}"}}
 	if !reflect.DeepEqual(r.calls, want) {
 		t.Fatalf("args = %v, want %v", r.calls, want)
 	}

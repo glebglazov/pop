@@ -103,19 +103,19 @@ func (t *realTmux) StampPane(paneID, identity string) error {
 	return err
 }
 
-// WindowSize reads the width and height (in cells) of the window owning target.
-// It is read by targeting a pane in that window (-t), never left untargeted: an
-// untargeted read returns the current client's window size, which for a detached
-// session (born 80x24 from new-session -d) differs from the window the panes
-// actually occupy and would skew the resize math.
-func (t *realTmux) WindowSize(target string) (int, int, error) {
-	out, err := t.run.output("display-message", "-t", target, "-p", "#{window_width}\t#{window_height}")
+// PaneSize reads the width and height (in cells) of the named pane. The query
+// must target that pane (-t), never be left untargeted: an untargeted read
+// returns the current client's window size, which for a detached session (born
+// 80x24 from new-session -d) differs from the window the panes actually occupy
+// and would skew the resize math.
+func (t *realTmux) PaneSize(target string) (int, int, error) {
+	out, err := t.run.output("display-message", "-t", target, "-p", "#{pane_width}\t#{pane_height}")
 	if err != nil {
 		return 0, 0, err
 	}
 	parts := strings.SplitN(strings.TrimSpace(out), "\t", 2)
 	if len(parts) != 2 {
-		return 0, 0, fmt.Errorf("unexpected window-size output: %q", out)
+		return 0, 0, fmt.Errorf("unexpected pane-size output: %q", out)
 	}
 	var w, h int
 	fmt.Sscanf(parts[0], "%d", &w)

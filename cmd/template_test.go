@@ -240,7 +240,7 @@ func TestRunTemplateApplyWithFlatWeightedSplits(t *testing.T) {
 			}},
 		}},
 	}
-	f := &tmuxtest.Fake{CurrentSessionName: "current-session", WindowW: 120, WindowH: 40}
+	f := &tmuxtest.Fake{CurrentSessionName: "current-session", PaneW: 120, PaneH: 40}
 	d := templateRuntimeDeps{
 		Tmux:        f,
 		Getwd:       func() (string, error) { return "/repo", nil },
@@ -288,7 +288,7 @@ func TestRunTemplateApplyWithColumnDirection(t *testing.T) {
 			}},
 		}},
 	}
-	f := &tmuxtest.Fake{CurrentSessionName: "current-session", WindowW: 120, WindowH: 40}
+	f := &tmuxtest.Fake{CurrentSessionName: "current-session", PaneW: 120, PaneH: 40}
 	d := templateRuntimeDeps{
 		Tmux:        f,
 		Getwd:       func() (string, error) { return "/repo", nil },
@@ -340,7 +340,7 @@ func TestRunTemplateApplyWithNestedContainers(t *testing.T) {
 			}},
 		}},
 	}
-	f := &tmuxtest.Fake{CurrentSessionName: "current-session", WindowW: 120, WindowH: 40}
+	f := &tmuxtest.Fake{CurrentSessionName: "current-session", PaneW: 120, PaneH: 40}
 	d := templateRuntimeDeps{
 		Tmux:        f,
 		Getwd:       func() (string, error) { return "/repo", nil },
@@ -375,7 +375,7 @@ func TestRunTemplateApplyWithDefaultWeight(t *testing.T) {
 			}},
 		}},
 	}
-	f := &tmuxtest.Fake{CurrentSessionName: "current-session", WindowW: 100, WindowH: 50}
+	f := &tmuxtest.Fake{CurrentSessionName: "current-session", PaneW: 100, PaneH: 50}
 	d := templateRuntimeDeps{
 		Tmux:        f,
 		Getwd:       func() (string, error) { return "/repo", nil },
@@ -422,7 +422,7 @@ func TestRunTemplateApplyWithDeepNesting(t *testing.T) {
 			}},
 		}},
 	}
-	f := &tmuxtest.Fake{CurrentSessionName: "current-session", WindowW: 120, WindowH: 40}
+	f := &tmuxtest.Fake{CurrentSessionName: "current-session", PaneW: 120, PaneH: 40}
 	d := templateRuntimeDeps{
 		Tmux:        f,
 		Getwd:       func() (string, error) { return "/repo", nil },
@@ -676,7 +676,7 @@ func TestRunTemplateApplyWithFocusOverride(t *testing.T) {
 			}},
 		}},
 	}
-	f := &tmuxtest.Fake{CurrentSessionName: "current-session", WindowW: 100, WindowH: 50}
+	f := &tmuxtest.Fake{CurrentSessionName: "current-session", PaneW: 100, PaneH: 50}
 	d := templateRuntimeDeps{
 		Tmux:        f,
 		Getwd:       func() (string, error) { return "/repo", nil },
@@ -714,7 +714,7 @@ func TestRunTemplateApplyWithMultipleFocusWarning(t *testing.T) {
 			}},
 		}},
 	}
-	f := &tmuxtest.Fake{CurrentSessionName: "current-session", WindowW: 100, WindowH: 50}
+	f := &tmuxtest.Fake{CurrentSessionName: "current-session", PaneW: 100, PaneH: 50}
 	d := templateRuntimeDeps{
 		Tmux:        f,
 		Getwd:       func() (string, error) { return "/repo", nil },
@@ -772,8 +772,8 @@ func mergeFake(livePanes map[string]string, width, height int) *tmuxtest.Fake {
 	}
 	return &tmuxtest.Fake{
 		CurrentSessionName: "current-session",
-		WindowW:            width,
-		WindowH:            height,
+		PaneW:            width,
+		PaneH:            height,
 		LiveWBWindows:      map[string]map[string]string{"current-session": {"dev": "@1"}},
 		LiveWBPanes:        map[string]map[string]string{"@1": livePanes},
 		LiveWBFallback:     map[string]string{"@1": fallback},

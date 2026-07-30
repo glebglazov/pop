@@ -163,8 +163,8 @@ type Tmux interface {
 	DisableAutomaticRename(windowTarget string) error
 	// StampPane records identity as a pane's @pop_pane.
 	StampPane(paneID, identity string) error
-	// WindowSize reads the width and height in cells of the window owning target.
-	WindowSize(target string) (width, height int, err error)
+	// PaneSize reads the width and height in cells of the named pane.
+	PaneSize(target string) (width, height int, err error)
 	// ResizePane resizes a pane to an exact cell size along one axis: width
 	// (-x) when horizontal is true, height (-y) otherwise.
 	ResizePane(paneID string, horizontal bool, size int) error
