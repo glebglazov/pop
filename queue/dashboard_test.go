@@ -3658,7 +3658,7 @@ func TestQueueDashboardHelpContent(t *testing.T) {
 		for _, e := range entries {
 			found[e.Key] = true
 		}
-		required := []string{"j/k", "gg", "G", "l/enter", "y", "a", "/", "h/esc"}
+		required := []string{"j/k", "gg", "G", "l/enter", "y", "a", "A", "/", "h/esc"}
 		for _, key := range required {
 			if !found[key] {
 				t.Errorf("main list help missing key: %s", key)

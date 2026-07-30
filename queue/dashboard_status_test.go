@@ -50,7 +50,7 @@ func TestDashboardStatusSubmenuItems(t *testing.T) {
 func TestDashboardStatusSubmenuEscNavigation(t *testing.T) {
 	row := DashboardRow{SetRef: SetRef{SetID: "demo"}}
 	m := newQueueDashboard(nil, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
-	m.menu = newDashboardMenu(row)
+	m.menu = newDashboardMenu(row, false)
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
 	got := updated.(QueueDashboard)
@@ -131,7 +131,7 @@ func TestDashboardStatusSubmenuDispatchInProcess(t *testing.T) {
 	d, cfg, row, _ := dashboardLaunchFixture(t, repo, setID)
 	row.ProjectPath = repo
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
-	m.menu = newDashboardMenu(row)
+	m.menu = newDashboardMenu(row, false)
 	m.menu.status = newDashboardStatusMenu(row)
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Text: "c"})

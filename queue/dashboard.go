@@ -413,14 +413,17 @@ func newDashboardStatusMenu(row DashboardRow) *dashboardStatusMenu {
 	}
 }
 
-// dashboardMenu is the layered action overlay opened with `a` over the focused
-// row. It carries the snapshot of the row it was opened on and the verbs
-// applicable to that row on a ui.List whose cursor drives j/k + Enter selection.
-// When status is non-nil the status submenu is open over the action menu.
+// dashboardMenu is the layered action overlay opened with `a` (one-shot) or `A`
+// (pinned) over the focused row. It carries the snapshot of the row it was
+// opened on and the verbs applicable to that row on a ui.List whose cursor
+// drives j/k + Enter selection. When pinned, J/K move the dashboard row cursor
+// beneath the menu and the verb list re-filters to each row's context. When
+// status is non-nil the status submenu is open over the action menu.
 type dashboardMenu struct {
 	row    DashboardRow
 	list   *ui.List[dashboardMenuItem]
 	status *dashboardStatusMenu
+	pinned bool
 }
 
 // Row-verb key case (ADR-0158): uppercase = handoff (spawns/focuses a pane, quits
@@ -489,13 +492,41 @@ func dashboardFoldEligible(row DashboardRow) bool {
 	return row.Bound && tasks.FoldEligibleStatus(row.RawStatus)
 }
 
-// newDashboardMenu opens the action overlay on row, wrapping its verbs in a
-// ui.List with j/k wrap-around navigation.
-func newDashboardMenu(row DashboardRow) *dashboardMenu {
-	return &dashboardMenu{
-		row:  row,
-		list: ui.NewList(dashboardMenuItems(row), ui.Opts[dashboardMenuItem]{Wrap: true}),
+// dashboardMenuActionHandoff reports whether action is a handoff verb (ADR-0158).
+func dashboardMenuActionHandoff(action dashboardMenuAction) bool {
+	switch action {
+	case menuActionDrain, menuActionVerify, menuActionAssist, menuActionFold, menuActionShell:
+		return true
+	default:
+		return false
 	}
+}
+
+// newDashboardMenu opens the action overlay on row, wrapping its verbs in a
+// ui.List with j/k wrap-around navigation. When pinned is true the menu survives
+// in-place verbs and J/K move the row cursor beneath it.
+func newDashboardMenu(row DashboardRow, pinned bool) *dashboardMenu {
+	return &dashboardMenu{
+		row:    row,
+		pinned: pinned,
+		list:   ui.NewList(dashboardMenuItems(row), ui.Opts[dashboardMenuItem]{Wrap: true}),
+	}
+}
+
+// syncPinnedMenuRow re-filters the pinned menu to the dashboard's cursored row.
+func (m QueueDashboard) syncPinnedMenuRow() (tea.Model, tea.Cmd) {
+	if m.menu == nil || !m.menu.pinned {
+		return m, nil
+	}
+	row, ok := m.list.Selected()
+	if !ok || len(dashboardMenuItems(row)) == 0 {
+		m.menu = nil
+		return m, nil
+	}
+	m.menu.row = row
+	m.menu.status = nil
+	m.menu.list = ui.NewList(dashboardMenuItems(row), ui.Opts[dashboardMenuItem]{Wrap: true})
+	return m, nil
 }
 
 // dashboardFilterToggle identifies one row-inclusion view filter the filter
@@ -1025,7 +1056,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = ""
 			m.openCheckout = row.RuntimePath
 			return m, tea.Quit
-		case "a":
+		case "a", "A":
 			row, ok := m.list.Selected()
 			if !ok {
 				return m, nil
@@ -1033,7 +1064,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(dashboardMenuItems(row)) == 0 {
 				return m, nil
 			}
-			m.menu = newDashboardMenu(row)
+			m.menu = newDashboardMenu(row, msg.String() == "A")
 			m.err = nil
 			m.statusMsg = ""
 			return m, nil
@@ -1104,10 +1135,17 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			if m.menu != nil {
-				for _, row := range m.snap.Rows {
-					if row.CursorKey == m.menu.row.CursorKey {
+				if m.menu.pinned {
+					if row, ok := m.list.Selected(); ok {
 						m.menu.row = row
-						break
+						m.menu.list = ui.NewList(dashboardMenuItems(row), ui.Opts[dashboardMenuItem]{Wrap: true})
+					}
+				} else {
+					for _, row := range m.snap.Rows {
+						if row.CursorKey == m.menu.row.CursorKey {
+							m.menu.row = row
+							break
+						}
 					}
 				}
 			}
@@ -1316,6 +1354,16 @@ func (m QueueDashboard) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc", "ctrl+c":
 		m.menu = nil
 		return m, nil
+	case "J":
+		if m.menu.pinned {
+			m.list.MoveDown()
+			return m.syncPinnedMenuRow()
+		}
+	case "K":
+		if m.menu.pinned {
+			m.list.MoveUp()
+			return m.syncPinnedMenuRow()
+		}
 	case "j", "down":
 		m.menu.list.MoveDown()
 		return m, nil
@@ -1377,7 +1425,10 @@ func (m QueueDashboard) invokeMenuItem(idx int) (tea.Model, tea.Cmd) {
 		m.menu.status = newDashboardStatusMenu(row)
 		return m, nil
 	}
-	m.menu = nil
+	pinned := m.menu.pinned && !dashboardMenuActionHandoff(item.action)
+	if !pinned {
+		m.menu = nil
+	}
 	return m.dispatchMenuAction(item.action, row)
 }
 
@@ -1393,7 +1444,11 @@ func (m QueueDashboard) invokeStatusMenuItem(idx int) (tea.Model, tea.Cmd) {
 	}
 	item := items[idx]
 	row := m.menu.row
-	m.menu = nil
+	if m.menu.pinned {
+		m.menu.status = nil
+	} else {
+		m.menu = nil
+	}
 	return m, m.launchStatusVerb(row, item.verb)
 }
 
@@ -2476,7 +2531,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 		}
 	case m.menu != nil:
 		// Dashboard action menu
-		return []ui.HelpEntry{
+		entries := []ui.HelpEntry{
 			{Key: "I", Desc: "drain"},
 			{Key: "V", Desc: "verify"},
 			{Key: "b", Desc: "bind worktree"},
@@ -2493,6 +2548,10 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "enter", Desc: "run action"},
 			{Key: "esc", Desc: "close menu"},
 		}
+		if m.menu.pinned {
+			entries = append(entries, ui.HelpEntry{Key: "J/K", Desc: "move row cursor"})
+		}
+		return entries
 	case m.filter != nil:
 		// Row-inclusion filter menu
 		return []ui.HelpEntry{
@@ -2556,6 +2615,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "l/enter", Desc: "open detail"},
 			{Key: "y", Desc: "copy name"},
 			{Key: "a", Desc: "action menu"},
+			{Key: "A", Desc: "pinned action menu"},
 			{Key: "ctrl+g", Desc: "open worktree"},
 			{Key: "/", Desc: "filter"},
 			{Key: "f", Desc: "filter menu"},
@@ -2581,6 +2641,8 @@ func (m QueueDashboard) View() tea.View {
 			title = "Help · Queue · detail"
 		} else if m.menu != nil && m.menu.status != nil {
 			title = "Help · Queue · status submenu"
+		} else if m.menu != nil && m.menu.pinned {
+			title = "Help · Queue · pinned action menu"
 		} else if m.menu != nil {
 			title = "Help · Queue · action menu"
 		} else if m.filter != nil {
@@ -2730,8 +2792,14 @@ func (m QueueDashboard) viewWithMenu() string {
 		fmt.Fprintf(&body, "  %s\n", m.statusMsg)
 	}
 	hint := "j/k move · enter/letter run · esc close"
+	if m.menu.pinned {
+		hint = "j/k move · J/K row · enter/letter run · esc close"
+	}
 	if m.menu.status != nil {
 		hint = "j/k move · enter/letter run · esc back"
+		if m.menu.pinned {
+			hint = "j/k move · J/K row · enter/letter run · esc back"
+		}
 	}
 	writeDashboardFooter(&body, m.height, ui.HintStyle.Render(hint))
 	return body.String()
