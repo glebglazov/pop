@@ -191,12 +191,12 @@ func LaunchDrain(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult,
 
 // LaunchVerify spawns a Verifier pane on the dashboard row's set (ADR-0123). It
 // is the lighter counterpart to LaunchDrain: it runs `pop tasks verify <set>`
-// pinned to the row's runtime path through the same EnsureTaggedPane composite
-// (so the pane inherits the module's per-set pane tagging), but records neither a
-// Runtime execution lock, a spawn intent, nor a DrainPane — verify is not a
-// drain, so the `●` live-drain indicator must stay dark and `p` must not reach
-// this pane. An empty runtime path omits the flag and lets `pop tasks verify`
-// default to the project root, matching the drain when no worktree is ready.
+// pinned to the row's runtime path through EnsureTaggedPane with TagVerify,
+// but records neither a Runtime execution lock, a spawn intent, nor a DrainPane —
+// verify is not a drain, so the `●` live-drain indicator must stay dark and `p`
+// must not reach this pane. An empty runtime path omits the flag and lets
+// `pop tasks verify` default to the project root, matching the drain when no
+// worktree is ready.
 func LaunchVerify(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult, error) {
 	if d == nil {
 		d = DefaultDeps()
@@ -227,7 +227,7 @@ func LaunchVerify(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult
 	}
 	// An already-running verify pane for this set is a jump target: focus it
 	// rather than re-sending verify into the live process (ADR-0158).
-	if paneID, err := d.Tmux.FindTaggedPane(session, tmuxmod.TagSet, ref.SetID); err != nil {
+	if paneID, err := d.Tmux.FindTaggedPane(session, tmuxmod.TagVerify, ref.SetID); err != nil {
 		return DashboardDrainResult{}, err
 	} else if paneID != "" {
 		return DashboardDrainResult{PaneID: paneID, Session: session, RuntimePath: ref.RuntimePath}, nil
@@ -236,8 +236,11 @@ func LaunchVerify(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult
 	if strings.TrimSpace(ref.RuntimePath) != "" {
 		command += " --task-runtime-path " + shellQuote(ref.RuntimePath)
 	}
-	paneID, err := tmuxmod.EnsureTaggedPane(d.Tmux, tmuxmod.TagSet, session, checkout, ref.SetID, command)
+	paneID, err := tmuxmod.EnsureTaggedPane(d.Tmux, tmuxmod.TagVerify, session, checkout, ref.SetID, command)
 	if err != nil {
+		return DashboardDrainResult{}, err
+	}
+	if err := d.Tmux.SetPaneTitle(paneID, verifyPaneTitle(ref.SetID)); err != nil {
 		return DashboardDrainResult{}, err
 	}
 	return DashboardDrainResult{PaneID: paneID, Session: session, RuntimePath: ref.RuntimePath}, nil
@@ -364,8 +367,24 @@ func LaunchAssist(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult
 	return DashboardDrainResult{PaneID: paneID, Session: session, RuntimePath: runtimePath}, nil
 }
 
+func activityPaneTitle(setID, activity string) string {
+	return setID + "-" + activity
+}
+
+func drainPaneTitle(setID string) string {
+	return activityPaneTitle(setID, "drain")
+}
+
+func verifyPaneTitle(setID string) string {
+	return activityPaneTitle(setID, "verify")
+}
+
+func foldPaneTitle(setID string) string {
+	return activityPaneTitle(setID, "fold")
+}
+
 func assistPaneTitle(setID string) string {
-	return setID + "-assist"
+	return activityPaneTitle(setID, "assist")
 }
 
 func assistPaneID(d *Deps, ref SetRef) (string, error) {

@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/glebglazov/pop/project"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -66,7 +67,7 @@ func TestDashboardHandoffAssistReusesWithoutResend(t *testing.T) {
 	row.ProjectPath = repo
 	rt.hasSession = true
 	rt.windowNames["pop-queue"] = true
-	rt.paneList = setID + " %5"
+	seedTaggedPane(rt, "%5", tmuxmod.TagAssist, setID)
 	rt.Fake.Inside = true
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
@@ -198,7 +199,7 @@ func TestDashboardHandoffVerifyReusesWithoutResend(t *testing.T) {
 	row.RawStatus = tasks.StatusNeedsVerify
 	rt.hasSession = true
 	rt.windowNames["pop-queue"] = true
-	rt.paneList = setID + " %9"
+	seedTaggedPane(rt, "%9", tmuxmod.TagVerify, setID)
 	rt.Fake.Inside = true
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
@@ -291,7 +292,7 @@ func TestDashboardHandoffDrainReusesWithoutResend(t *testing.T) {
 	})
 	rt.hasSession = true
 	rt.windowNames["pop-queue"] = true
-	rt.paneList = setID + " %4"
+	seedTaggedPane(rt, "%4", tmuxmod.TagSet, setID)
 	rt.Fake.Inside = true
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})

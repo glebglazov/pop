@@ -793,11 +793,12 @@ func queueTestTasksDeps(t *testing.T, allFound bool) *tasks.Deps {
 // tests use a plain tmuxtest.Fake and assert on pane state instead.
 type recordingTmux struct {
 	*tmuxtest.Fake
-	commands    [][]string
-	hasSession  bool
-	windowNames map[string]bool
-	paneList    string
-	splitErr    error
+	commands      [][]string
+	hasSession    bool
+	windowNames   map[string]bool
+	paneList      string
+	splitErr      error
+	nextSplitPane int
 }
 
 func newRecordingTmux(hasSession bool, windowNames string) *recordingTmux {
@@ -834,7 +835,12 @@ func (rt *recordingTmux) SplitWindow(session, name, dir string) (string, error) 
 	if rt.splitErr != nil {
 		return "", rt.splitErr
 	}
-	return "%7", nil
+	if rt.nextSplitPane == 0 {
+		rt.nextSplitPane = 7
+	}
+	paneID := fmt.Sprintf("%%%d", rt.nextSplitPane)
+	rt.nextSplitPane++
+	return paneID, nil
 }
 
 func (rt *recordingTmux) RetileWindow(session, name string) error {
@@ -847,9 +853,14 @@ func (rt *recordingTmux) WindowPanes(session, name string) ([]string, error) {
 	return recorderPaneIDs(rt.paneList), nil
 }
 
-func (rt *recordingTmux) FindTaggedPane(session string, _ tmuxmod.PaneTag, value string) (string, error) {
+func (rt *recordingTmux) FindTaggedPane(session string, tag tmuxmod.PaneTag, value string) (string, error) {
 	rt.record("list-panes", "-t", session+":"+drainWindowName)
-	return recorderTaggedPane(rt.paneList, value), nil
+	for paneID, tags := range rt.PaneTagValues {
+		if tags[tag] == value {
+			return paneID, nil
+		}
+	}
+	return "", nil
 }
 
 func (rt *recordingTmux) TagPane(paneID string, tag tmuxmod.PaneTag, value string) error {

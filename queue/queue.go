@@ -1226,7 +1226,13 @@ func SpawnWithResult(d *Deps, dec Decision) (SpawnResult, error) {
 		command += " --task-runtime-path " + shellQuote(dec.scan.RuntimePath)
 	}
 	paneID, err := tmuxmod.EnsureTaggedPane(d.Tmux, tmuxmod.TagSet, dec.scan.SessionName, dec.scan.ProjectPath, dec.TaskSetID, command)
-	return SpawnResult{PaneID: paneID}, err
+	if err != nil {
+		return SpawnResult{}, err
+	}
+	if err := d.Tmux.SetPaneTitle(paneID, drainPaneTitle(dec.TaskSetID)); err != nil {
+		return SpawnResult{}, err
+	}
+	return SpawnResult{PaneID: paneID}, nil
 }
 
 // recordSpawnIntent persists the pending-spawn marker for a just-selected drain.

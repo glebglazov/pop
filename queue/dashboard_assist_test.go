@@ -183,7 +183,7 @@ func TestDashboardLaunchAssistReusesPane(t *testing.T) {
 	row.ProjectPath = repo
 	rt.hasSession = true
 	rt.windowNames["pop-queue"] = true
-	rt.paneList = setID + " %5"
+	seedTaggedPane(rt, "%5", tmuxmod.TagAssist, setID)
 
 	result, err := LaunchAssist(d, cfg, row.SetRef)
 	if err != nil {

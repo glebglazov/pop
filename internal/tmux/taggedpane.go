@@ -21,6 +21,10 @@ const (
 	TagRoutine PaneTag = iota
 	// TagSet tags a pane with the Task-set id it drains (@pop_set).
 	TagSet
+	// TagVerify tags a pane with the Task-set id it verifies (@pop_verify).
+	TagVerify
+	// TagFold tags a pane with the Task-set id it folds (@pop_fold).
+	TagFold
 	// TagAssist tags a pane with the Task-set id its Assist session belongs to
 	// (@pop_assist).
 	TagAssist
@@ -32,6 +36,10 @@ func (tg PaneTag) option() string {
 		return "@pop_routine"
 	case TagSet:
 		return "@pop_set"
+	case TagVerify:
+		return "@pop_verify"
+	case TagFold:
+		return "@pop_fold"
 	case TagAssist:
 		return "@pop_assist"
 	default:
