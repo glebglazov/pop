@@ -97,11 +97,6 @@ type Deps struct {
 	// sentinels (ErrNoResolvableTrunk, ErrNamedWorktreeNotFound).
 	ProbeDirective func(checkout, setID string) string
 
-	// FoldSet folds a dashboard row's task set through the same implementation as
-	// `pop tasks fold`. When nil, launchFold runs `pop tasks fold` via ExecProcess
-	// so teardown confirmation and fold-conflict assistance use a real TTY.
-	FoldSet func(ref SetRef, out io.Writer, opts FoldOptions) (FoldResult, error)
-
 	// CompleteDetailTask, ResetDetailTask, SkipDetailTask are seams for the
 	// detail-view override keys (C/O/K). Each defaults to the corresponding
 	// tasks.*With function resolved with the Deps' Tasks, Project, and LoadConfig.
@@ -247,6 +242,11 @@ func (d *Deps) archiveSet(defPath, setID string) error {
 		return d.ArchiveSet(defPath, setID)
 	}
 	return tasks.SetTaskSetArchived(d.Tasks, defPath, []string{setID}, true)
+}
+
+// unarchiveSet clears the archived flag on one registered Task set.
+func (d *Deps) unarchiveSet(defPath, setID string) error {
+	return tasks.SetTaskSetArchived(d.Tasks, defPath, []string{setID}, false)
 }
 
 func (d *Deps) acquireRuntimeLock(runtimePath string) (runtimeLock, error) {

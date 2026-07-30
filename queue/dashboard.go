@@ -4,8 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -188,10 +186,6 @@ type dashboardArchiveMsg struct {
 }
 type dashboardPreviewMsg struct {
 	err error
-}
-type dashboardFoldMsg struct {
-	setID string
-	err   error
 }
 type dashboardStatusMsg struct {
 	setID string
@@ -391,8 +385,8 @@ type dashboardStatusMenuItem struct {
 }
 
 // dashboardStatusMenu is the nested status overlay opened with `s` from the
-// action menu. It shells out to pop tasks so whole-set multi-task selection
-// runs in a real TTY.
+// action menu. Status verbs write in-process (ADR-0158) — complete/open/skip
+// apply every unlocked task in the set; archive/unarchive flip the set flag.
 type dashboardStatusMenu struct {
 	row  DashboardRow
 	list *ui.List[dashboardStatusMenuItem]
@@ -1200,13 +1194,6 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// dashboard has handed off attention, so close it rather than leaving it
 		// stranded behind the pane the operator now looks at.
 		return m, tea.Quit
-	case dashboardFoldMsg:
-		if msg.err != nil {
-			m.actionErr = msg.err
-			return m, nil
-		}
-		m.statusMsg = fmt.Sprintf("%s folded", msg.setID)
-		return m, m.reload()
 	case dashboardStatusMsg:
 		if msg.err != nil {
 			m.actionErr = msg.err
@@ -1398,8 +1385,8 @@ func (m QueueDashboard) invokeMenuItem(idx int) (tea.Model, tea.Cmd) {
 	return m.dispatchMenuAction(item.action, row)
 }
 
-// invokeStatusMenuItem closes both menus and shells out to pop tasks for the
-// status verb at idx.
+// invokeStatusMenuItem closes both menus and applies the status verb at idx
+// in-process (ADR-0158).
 func (m QueueDashboard) invokeStatusMenuItem(idx int) (tea.Model, tea.Cmd) {
 	if m.menu == nil || m.menu.status == nil {
 		return m, nil
@@ -1553,13 +1540,7 @@ func (m QueueDashboard) dispatchMenuAction(action dashboardMenuAction, row Dashb
 			return m, nil
 		}
 		m.statusMsg = ""
-		shell := os.Getenv("SHELL")
-		if shell == "" {
-			shell = "/bin/sh"
-		}
-		cmd := exec.Command(shell)
-		cmd.Dir = row.RuntimePath
-		return m, tea.ExecProcess(cmd, nil)
+		return m, m.launchShell(row)
 	case menuActionArchive:
 		m.statusMsg = ""
 		return m, m.archiveSet(row)
@@ -2122,9 +2103,24 @@ func (m QueueDashboard) launchAssist(row DashboardRow) tea.Cmd {
 	}
 }
 
-// handoffAfterLaunch is the single post-spawn path for drain, verify, and
-// assist (ADR-0158): focus the pane when inside tmux and signal quit, or stay
-// open with a status line explaining why focus was unavailable / nothing moved.
+func (m QueueDashboard) launchFold(row DashboardRow) tea.Cmd {
+	return func() tea.Msg {
+		result, err := LaunchFold(m.d, m.cfg, row.SetRef)
+		return handoffAfterLaunch(m.d, result, err)
+	}
+}
+
+func (m QueueDashboard) launchShell(row DashboardRow) tea.Cmd {
+	return func() tea.Msg {
+		result, err := LaunchShell(m.d, m.cfg, row.SetRef)
+		return handoffAfterLaunch(m.d, result, err)
+	}
+}
+
+// handoffAfterLaunch is the single post-spawn path for drain, verify, fold,
+// assist, and shell (ADR-0158): focus the pane when inside tmux and signal quit,
+// or stay open with a status line explaining why focus was unavailable / nothing
+// moved.
 func handoffAfterLaunch(d *Deps, result DashboardDrainResult, err error) dashboardHandoffMsg {
 	if err != nil {
 		return dashboardHandoffMsg{err: err}
@@ -2157,28 +2153,11 @@ func handoffAfterLaunch(d *Deps, result DashboardDrainResult, err error) dashboa
 	return dashboardHandoffMsg{quit: true}
 }
 
-func (m QueueDashboard) launchFold(row DashboardRow) tea.Cmd {
-	if m.d != nil && m.d.FoldSet != nil {
-		return func() tea.Msg {
-			_, err := m.d.FoldSet(row.SetRef, io.Discard, FoldOptions{In: os.Stdin})
-			return dashboardFoldMsg{setID: row.SetID, err: err}
-		}
-	}
-	stderr := &strings.Builder{}
-	cmd := foldExecCommand(row)
-	cmd.Stderr = stderr
-	return tea.ExecProcess(cmd, func(err error) tea.Msg {
-		return dashboardFoldMsg{setID: row.SetID, err: foldExecError(stderr.String(), err)}
-	})
-}
-
 func (m QueueDashboard) launchStatusVerb(row DashboardRow, verb string) tea.Cmd {
-	stderr := &strings.Builder{}
-	cmd := statusExecCommand(row, verb)
-	cmd.Stderr = stderr
-	return tea.ExecProcess(cmd, func(err error) tea.Msg {
-		return dashboardStatusMsg{setID: row.SetID, verb: verb, err: statusExecError(stderr.String(), err)}
-	})
+	return func() tea.Msg {
+		err := applyDashboardStatusVerb(m.d, row, verb)
+		return dashboardStatusMsg{setID: row.SetID, verb: verb, err: err}
+	}
 }
 
 func (m QueueDashboard) loadDetail(row DashboardRow) tea.Cmd {

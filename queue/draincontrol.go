@@ -387,6 +387,83 @@ func assistPaneTitle(setID string) string {
 	return activityPaneTitle(setID, "assist")
 }
 
+// LaunchFold spawns `pop tasks fold <set>` under TagFold in the project's
+// pop-queue window (ADR-0158). The Fold conflict prompt lives in that pane so
+// it outlives the dashboard. An already-running fold pane for the set is a
+// jump target — focus it rather than re-sending fold into the live process.
+// Dashboard-side PreflightFold still refuses ineligible rows before this runs.
+func LaunchFold(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult, error) {
+	if d == nil {
+		d = DefaultDeps()
+	}
+	if d.Tasks == nil {
+		d.Tasks = tasks.DefaultDeps()
+	}
+	if d.Project == nil {
+		d.Project = project.DefaultDeps()
+	}
+	if d.Tmux == nil {
+		d.Tmux = tmuxmod.New()
+	}
+	scans, err := dashboardScansForDefinition(d, cfg, ref.DefPath)
+	if err != nil {
+		return DashboardDrainResult{}, err
+	}
+	if len(scans) == 0 {
+		return DashboardDrainResult{}, fmt.Errorf("task set %s is no longer in a registered queue project", ref.SetID)
+	}
+	session, checkout, err := dashboardSetPaneCoords(d, cfg, scans, ref, ref.RuntimePath)
+	if err != nil {
+		return DashboardDrainResult{}, err
+	}
+	if paneID, err := d.Tmux.FindTaggedPane(session, tmuxmod.TagFold, ref.SetID); err != nil {
+		return DashboardDrainResult{}, err
+	} else if paneID != "" {
+		return DashboardDrainResult{PaneID: paneID, Session: session, RuntimePath: ref.RuntimePath}, nil
+	}
+	command := fmt.Sprintf("pop tasks fold %s", shellQuote(ref.SetID))
+	paneID, err := tmuxmod.EnsureTaggedPane(d.Tmux, tmuxmod.TagFold, session, checkout, ref.SetID, command)
+	if err != nil {
+		return DashboardDrainResult{}, err
+	}
+	if err := d.Tmux.SetPaneTitle(paneID, foldPaneTitle(ref.SetID)); err != nil {
+		return DashboardDrainResult{}, err
+	}
+	return DashboardDrainResult{PaneID: paneID, Session: session, RuntimePath: ref.RuntimePath}, nil
+}
+
+// LaunchShell opens a fresh untagged Runtime shell pane in the set's checkout
+// (ADR-0158). Every press yields a new pane — shells are never tagged or
+// reused — so the operator's process outlives the dashboard exiting.
+func LaunchShell(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult, error) {
+	if d == nil {
+		d = DefaultDeps()
+	}
+	if d.Project == nil {
+		d.Project = project.DefaultDeps()
+	}
+	if d.Tmux == nil {
+		d.Tmux = tmuxmod.New()
+	}
+	checkout := strings.TrimSpace(ref.RuntimePath)
+	if checkout == "" {
+		return DashboardDrainResult{}, fmt.Errorf("no checkout bound to this task set")
+	}
+	scans, err := dashboardScansForDefinition(d, cfg, ref.DefPath)
+	if err != nil {
+		return DashboardDrainResult{}, err
+	}
+	session, dir, err := dashboardSetPaneCoords(d, cfg, scans, ref, checkout)
+	if err != nil {
+		return DashboardDrainResult{}, err
+	}
+	paneID, err := tmuxmod.SpawnFreshPane(d.Tmux, session, dir, "")
+	if err != nil {
+		return DashboardDrainResult{}, err
+	}
+	return DashboardDrainResult{PaneID: paneID, Session: session, RuntimePath: checkout}, nil
+}
+
 func assistPaneID(d *Deps, ref SetRef) (string, error) {
 	if d == nil {
 		d = DefaultDeps()

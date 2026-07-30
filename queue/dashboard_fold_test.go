@@ -1,7 +1,6 @@
 package queue
 
 import (
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,10 +8,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/glebglazov/pop/config"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
-	"github.com/glebglazov/pop/work"
 )
 
 func TestDashboardActionMenuFoldFiltering(t *testing.T) {
@@ -92,85 +91,130 @@ func TestDashboardFoldRefusalSticky(t *testing.T) {
 	}
 }
 
-func TestDashboardFoldSuccessClearsBoundRow(t *testing.T) {
-	repo, setID, _ := setupSupervisorSpawnRepo(t, "fold-ok", []spawnTestTask{
+// TestDashboardHandoffFoldSpawnsFocusesAndQuits drives fold from the action menu
+// through TagFold spawn, focus, and quit (ADR-0158).
+func TestDashboardHandoffFoldSpawnsFocusesAndQuits(t *testing.T) {
+	repo, setID, _ := setupSupervisorSpawnRepo(t, "handoff-fold", []spawnTestTask{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
 	})
-	td := queueTestTasksDeps(t, true)
-	b, err := binding.ProvisionManagedBinding(binding.ProvisionManagedBindingRequest{
-		TD: td, CheckoutPath: repo, SetID: setID,
-	})
+	bound := filepath.Join(t.TempDir(), "handoff-fold-wt")
+	runGit(t, repo, "worktree", "add", "--detach", bound, "HEAD")
+	d, cfg, row, rt := dashboardLaunchFixture(t, repo, setID)
+	repoKey, err := resolveRepoKey(d, repo)
 	if err != nil {
-		t.Fatalf("provision: %v", err)
+		t.Fatal(err)
 	}
-	writeFileCommitForQueue(t, b.RuntimePath, "feature.txt", "set work\n", "set work")
-	writeFileCommitForQueue(t, repo, "trunk.txt", "trunk work\n", "trunk work")
+	row.RepoKey = repoKey
+	row.RuntimePath = bound
+	row.ProjectPath = repo
+	row.Bound = true
+	row.RawStatus = tasks.StatusDone
+	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
+		setScopedKey(repoKey, setID): {RuntimePath: bound, Branch: "handoff-fold", Project: "pop", Provisioned: false},
+	})
+	rt.Fake.Inside = true
 
-	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
-	d := &Deps{
-		Tasks:       td,
-		Project:     project.DefaultDeps(),
-		LoadConfig:  func(string) (*config.Config, error) { return cfg, nil },
-		IncludeDone: true,
-	}
-	d.FoldSet = func(ref SetRef, out io.Writer, opts FoldOptions) (FoldResult, error) {
-		opts.Yes = true
-		opts.In = tasks.NonInteractiveReader{}
-		return binding.Fold(td, project.DefaultDeps(), cfg, ref.SetID, opts, binding.LifecycleHooks{ReadLock: d.readLock}, out)
-	}
-	row := DashboardRow{
-		Project:   "pop",
-		CursorKey: "pop\x00" + setID,
-		SetRef: SetRef{
-			SetID:       setID,
-			DefPath:     tasksDirForRepo(t, td, repo),
-			StatePath:   statePathForRepo(t, td, repo),
-			RuntimePath: b.RuntimePath,
-			ProjectPath: repo,
-			RawStatus:   tasks.StatusDone,
-			Bound:       true,
-		},
-		Worktree:  setID,
-		DestKind:  work.DestDoneManagedBound,
-	}
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
-
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
-	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
-	got = updated.(QueueDashboard)
+	_, cmd := got.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
 	if cmd == nil {
-		t.Fatal("fold dispatch returned no command")
+		t.Fatal("f did not return a command")
 	}
-	msg, ok := cmd().(dashboardFoldMsg)
+	msg := cmd()
+	handoff, ok := msg.(dashboardHandoffMsg)
 	if !ok {
-		t.Fatalf("msg type = %T", cmd())
+		t.Fatalf("msg = %T, want dashboardHandoffMsg", msg)
 	}
-	if msg.err != nil {
-		t.Fatalf("fold msg err = %v", msg.err)
+	if handoff.err != nil {
+		t.Fatalf("handoff err = %v", handoff.err)
 	}
-
-	updated, cmd = got.Update(msg)
-	got = updated.(QueueDashboard)
-	if cmd == nil {
-		t.Fatal("reload returned no command")
+	if !handoff.quit {
+		t.Fatalf("handoff quit = false, status=%q; want quit after focus", handoff.status)
 	}
-	reloadMsg, ok := cmd().(dashboardRowsMsg)
-	if !ok {
-		t.Fatalf("reload msg type = %T", cmd())
-	}
-	if reloadMsg.err != nil {
-		t.Fatalf("reload err = %v", reloadMsg.err)
-	}
-	updated, _ = got.Update(reloadMsg)
-	got = updated.(QueueDashboard)
-	for _, r := range got.snap.Rows {
-		if r.SetID == setID && r.Bound {
-			t.Fatalf("row still bound after fold: %+v", r)
+	foldPane := ""
+	for paneID, tags := range rt.PaneTagValues {
+		if tags[tmuxmod.TagFold] == setID {
+			foldPane = paneID
 		}
 	}
-	if _, _, ok, err := binding.FindBySetID(td, setID); err != nil || ok {
-		t.Fatalf("binding still present: ok=%v err=%v", ok, err)
+	if foldPane == "" {
+		t.Fatalf("fold must tag a pane, tags=%v", rt.PaneTagValues)
+	}
+	if got := rt.PaneTitles[foldPane]; got != foldPaneTitle(setID) {
+		t.Fatalf("fold pane title = %q, want %q", got, foldPaneTitle(setID))
+	}
+	if !rt.findSwitched(foldPane) {
+		t.Fatalf("fold handoff must focus spawned pane, commands=%v", rt.commands)
+	}
+	sent := false
+	for _, c := range rt.commands {
+		if len(c) >= 4 && c[0] == "send-keys" && strings.Contains(c[3], "pop tasks fold") {
+			sent = true
+		}
+	}
+	if !sent {
+		t.Fatalf("fold must send pop tasks fold, commands=%v", rt.commands)
+	}
+
+	updated, quitCmd := got.Update(handoff)
+	if _, ok := updated.(QueueDashboard); !ok {
+		t.Fatalf("Update returned %T", updated)
+	}
+	if quitCmd == nil {
+		t.Fatal("successful handoff must quit the dashboard")
+	}
+	if _, ok := quitCmd().(tea.QuitMsg); !ok {
+		t.Fatalf("quit cmd = %T, want tea.QuitMsg", quitCmd())
+	}
+}
+
+// TestDashboardHandoffFoldReusesConflictPane focuses an existing fold pane
+// without re-sending, so a mid-conflict fold stays attended in its pane.
+func TestDashboardHandoffFoldReusesConflictPane(t *testing.T) {
+	repo, setID, _ := setupSupervisorSpawnRepo(t, "handoff-fold-reuse", []spawnTestTask{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	bound := filepath.Join(t.TempDir(), "handoff-fold-reuse-wt")
+	runGit(t, repo, "worktree", "add", "--detach", bound, "HEAD")
+	d, cfg, row, rt := dashboardLaunchFixture(t, repo, setID)
+	repoKey, err := resolveRepoKey(d, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row.RepoKey = repoKey
+	row.RuntimePath = bound
+	row.ProjectPath = repo
+	row.Bound = true
+	row.RawStatus = tasks.StatusDone
+	seedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
+		setScopedKey(repoKey, setID): {RuntimePath: bound, Branch: "handoff-fold-reuse", Project: "pop", Provisioned: false},
+	})
+	rt.hasSession = true
+	rt.windowNames["pop-queue"] = true
+	seedTaggedPane(rt, "%11", tmuxmod.TagFold, setID)
+	rt.Fake.Inside = true
+
+	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	got := updated.(QueueDashboard)
+	_, cmd := got.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
+	if cmd == nil {
+		t.Fatal("f did not return a command")
+	}
+	msg := cmd()
+	handoff, ok := msg.(dashboardHandoffMsg)
+	if !ok {
+		t.Fatalf("msg = %T, want dashboardHandoffMsg", msg)
+	}
+	if !handoff.quit || handoff.err != nil {
+		t.Fatalf("handoff = %+v, want quit without err", handoff)
+	}
+	if rt.countCommand("send-keys") != 0 {
+		t.Fatalf("reuse must not re-send fold, commands=%v", rt.commands)
+	}
+	if !rt.findSwitched("%11") {
+		t.Fatalf("reuse must focus existing fold pane, commands=%v", rt.commands)
 	}
 }
 

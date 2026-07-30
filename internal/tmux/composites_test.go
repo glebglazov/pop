@@ -306,3 +306,29 @@ func TestSwitchAndZoomOutsideZoomsBeforeAttach(t *testing.T) {
 		t.Error("target window not zoomed before attach")
 	}
 }
+
+func TestSpawnFreshPaneAlwaysCreatesUntagged(t *testing.T) {
+	f := &tmuxtest.Fake{}
+
+	first, err := tmux.SpawnFreshPane(f, "work", "/proj", "")
+	if err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	second, err := tmux.SpawnFreshPane(f, "work", "/proj", "")
+	if err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	if second == first {
+		t.Fatalf("second pane = %q, want a fresh pane distinct from %q", second, first)
+	}
+	panes := f.Windows["work"]["pop-queue"]
+	if len(panes) != 2 {
+		t.Fatalf("panes = %v, want two untagged shells", panes)
+	}
+	if len(f.PaneTagValues[first]) != 0 || len(f.PaneTagValues[second]) != 0 {
+		t.Fatalf("shell panes must stay untagged, got %v", f.PaneTagValues)
+	}
+	if len(f.SentCommands[first]) != 0 || len(f.SentCommands[second]) != 0 {
+		t.Fatalf("empty command must not send-keys, got %v", f.SentCommands)
+	}
+}

@@ -192,11 +192,16 @@ func TestHandoffPaneTitles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LaunchAssist: %v", err)
 	}
+	foldResult, err := LaunchFold(d, cfg, row.SetRef)
+	if err != nil {
+		t.Fatalf("LaunchFold: %v", err)
+	}
 
 	want := map[string]string{
 		drainResult.PaneID:  drainPaneTitle(setID),
 		verifyResult.PaneID: verifyPaneTitle(setID),
 		assistResult.PaneID: assistPaneTitle(setID),
+		foldResult.PaneID:   foldPaneTitle(setID),
 	}
 	for paneID, wantTitle := range want {
 		if got := rt.PaneTitles[paneID]; got != wantTitle {
@@ -214,13 +219,22 @@ func TestShellVerbSpawnsNothingTagged(t *testing.T) {
 	d, cfg, row, rt := dashboardLaunchFixture(t, repo, setID)
 	row.RuntimePath = repo
 	row.ProjectPath = repo
+	rt.Fake.Inside = true
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
 	_, cmd := got.Update(tea.KeyPressMsg{Code: 'O', Text: "O"})
 	if cmd == nil {
-		t.Fatal("shell verb must return ExecProcess cmd")
+		t.Fatal("shell verb must return a command")
+	}
+	msg := cmd()
+	handoff, ok := msg.(dashboardHandoffMsg)
+	if !ok {
+		t.Fatalf("msg = %T, want dashboardHandoffMsg", msg)
+	}
+	if handoff.err != nil || !handoff.quit {
+		t.Fatalf("handoff = %+v, want quit without err", handoff)
 	}
 	if len(rt.PaneTagValues) != 0 {
 		t.Fatalf("shell must not tag panes, got %v", rt.PaneTagValues)
@@ -229,6 +243,38 @@ func TestShellVerbSpawnsNothingTagged(t *testing.T) {
 		if len(c) > 0 && c[0] == "set-option" {
 			t.Fatalf("shell must not set pane options, commands=%v", rt.commands)
 		}
+	}
+}
+
+// TestShellVerbTwiceYieldsTwoPanes asserts every shell press spawns a fresh
+// untagged pane rather than reusing one.
+func TestShellVerbTwiceYieldsTwoPanes(t *testing.T) {
+	repo, setID, _ := setupSupervisorSpawnRepo(t, "shell-twice", []spawnTestTask{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	d, cfg, row, rt := dashboardLaunchFixture(t, repo, setID)
+	row.RuntimePath = repo
+	row.ProjectPath = repo
+	rt.Fake.Inside = true
+
+	first, err := LaunchShell(d, cfg, row.SetRef)
+	if err != nil {
+		t.Fatalf("first LaunchShell: %v", err)
+	}
+	rt.hasSession = true
+	rt.windowNames["pop-queue"] = true
+	second, err := LaunchShell(d, cfg, row.SetRef)
+	if err != nil {
+		t.Fatalf("second LaunchShell: %v", err)
+	}
+	if first.PaneID == "" || second.PaneID == "" {
+		t.Fatalf("shell panes empty: first=%q second=%q", first.PaneID, second.PaneID)
+	}
+	if first.PaneID == second.PaneID {
+		t.Fatalf("second shell reused pane %s; want a fresh pane", first.PaneID)
+	}
+	if len(rt.PaneTagValues) != 0 {
+		t.Fatalf("shell panes must stay untagged, got %v", rt.PaneTagValues)
 	}
 }
 

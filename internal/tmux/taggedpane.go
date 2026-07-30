@@ -138,6 +138,45 @@ func EnsureTaggedPane(t Tmux, tag PaneTag, session, dir, value, command string) 
 	return paneID, nil
 }
 
+// SpawnFreshPane ensures the session and shared drain window, then always
+// creates a new untagged pane rooted at dir (reusing a freshly created
+// window's initial pane, else splitting and retiling). An empty command leaves
+// the pane's login shell alone; a non-empty command is send-keys'd with Enter.
+// Unlike EnsureTaggedPane it never looks up or tags panes — every call yields a
+// distinct pane (the Runtime shell path).
+func SpawnFreshPane(t Tmux, session, dir, command string) (string, error) {
+	if err := Ensure(t, session, dir); err != nil {
+		return "", err
+	}
+
+	exists, err := t.WindowExists(session, drainWindow)
+	if err != nil {
+		return "", err
+	}
+	var paneID string
+	if !exists {
+		paneID, err = t.NewWindow(session, drainWindow, dir)
+		if err != nil {
+			return "", err
+		}
+	} else {
+		paneID, err = t.SplitWindow(session, drainWindow, dir)
+		if err != nil {
+			return "", err
+		}
+		if err := t.RetileWindow(session, drainWindow); err != nil {
+			return "", fmt.Errorf("retile drain window: %w", err)
+		}
+	}
+
+	if strings.TrimSpace(command) != "" {
+		if err := t.SendKeys(paneID, command, "Enter"); err != nil {
+			return "", fmt.Errorf("send command: %w", err)
+		}
+	}
+	return paneID, nil
+}
+
 // ensurePaneDir respawns a reused pane when its cwd differs from the checkout
 // the caller asked for. An empty dir skips correction so callers that omit a
 // directory keep their current behaviour.

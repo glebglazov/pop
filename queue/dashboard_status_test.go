@@ -2,6 +2,7 @@ package queue
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -73,26 +74,6 @@ func TestDashboardStatusSubmenuEscNavigation(t *testing.T) {
 	}
 }
 
-func TestDashboardStatusExecCommand(t *testing.T) {
-	row := DashboardRow{
-		SetRef: SetRef{
-			SetID:       "my-set",
-			ProjectPath: "/repo",
-		},
-	}
-	cmd := statusExecCommand(row, "complete")
-	if len(cmd.Args) < 2 || filepath.Base(cmd.Args[0]) != "pop" {
-		t.Fatalf("cmd = %v, want pop tasks complete", cmd.Args)
-	}
-	wantArgs := []string{"tasks", "complete", "my-set"}
-	if strings.Join(cmd.Args[1:], " ") != strings.Join(wantArgs, " ") {
-		t.Fatalf("args = %v, want %v", cmd.Args[1:], wantArgs)
-	}
-	if cmd.Dir != "/repo" {
-		t.Fatalf("dir = %q, want /repo", cmd.Dir)
-	}
-}
-
 func TestDashboardStatusMsgReloadsOnError(t *testing.T) {
 	td := queueDataDeps(t)
 	row := DashboardRow{
@@ -142,9 +123,14 @@ func TestDashboardStatusSubmenuHelp(t *testing.T) {
 	}
 }
 
-func TestDashboardStatusSubmenuDispatch(t *testing.T) {
-	row := DashboardRow{SetRef: SetRef{SetID: "demo", ProjectPath: "/repo"}}
-	m := newQueueDashboard(nil, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
+func TestDashboardStatusSubmenuDispatchInProcess(t *testing.T) {
+	repo, setID, _ := setupSupervisorSpawnRepo(t, "status-complete", []spawnTestTask{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open"},
+	})
+	d, cfg, row, _ := dashboardLaunchFixture(t, repo, setID)
+	row.ProjectPath = repo
+	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
 	m.menu = newDashboardMenu(row)
 	m.menu.status = newDashboardStatusMenu(row)
 
@@ -156,11 +142,75 @@ func TestDashboardStatusSubmenuDispatch(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("complete dispatch returned no command")
 	}
-	// ExecProcess commands are opaque in unit tests; verify the msg handler path
-	// separately. Simulate child exit.
-	updated, reloadCmd := got.Update(dashboardStatusMsg{setID: "demo", verb: "complete"})
+	msg := cmd()
+	statusMsg, ok := msg.(dashboardStatusMsg)
+	if !ok {
+		t.Fatalf("msg = %T, want dashboardStatusMsg (in-process, not ExecProcess)", msg)
+	}
+	if statusMsg.err != nil {
+		t.Fatalf("complete err = %v", statusMsg.err)
+	}
+	if statusMsg.verb != "complete" {
+		t.Fatalf("verb = %q, want complete", statusMsg.verb)
+	}
+
+	updated, reloadCmd := got.Update(statusMsg)
 	got = updated.(QueueDashboard)
 	if reloadCmd == nil {
-		t.Fatal("expected reload after status child exit")
+		t.Fatal("expected reload after in-process status write")
+	}
+	if got.statusMsg == "" || !strings.Contains(got.statusMsg, "complete") {
+		t.Fatalf("statusMsg = %q, want complete confirmation", got.statusMsg)
+	}
+
+	result, err := tasks.RefreshWith(d.Tasks, row.DefPath, row.StatePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := result.Manifests[setID]
+	if manifest == nil {
+		t.Fatal("missing manifest after complete")
+	}
+	for _, task := range manifest.Tasks {
+		if task.Status != tasks.TaskDone {
+			t.Fatalf("task %s status = %s, want done after in-process complete-all", task.ID, task.Status)
+		}
+	}
+}
+
+func TestDashboardStatusArchiveInProcess(t *testing.T) {
+	var archivedDef, archivedSet string
+	d := &Deps{
+		ArchiveSet: func(defPath, setID string) error {
+			archivedDef, archivedSet = defPath, setID
+			return nil
+		},
+		Tasks: queueDataDeps(t),
+	}
+	row := DashboardRow{SetRef: SetRef{SetID: "demo", DefPath: "/repo/tasks"}}
+	if err := applyDashboardStatusVerb(d, row, "archive"); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	if archivedDef != "/repo/tasks" || archivedSet != "demo" {
+		t.Fatalf("archive target = (%q, %q), want (/repo/tasks, demo)", archivedDef, archivedSet)
+	}
+}
+
+func TestQueueDashboardHasNoExecProcess(t *testing.T) {
+	entries, err := filepath.Glob("dashboard*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range entries {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		body, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(body), "tea.ExecProcess") {
+			t.Fatalf("%s still references tea.ExecProcess", name)
+		}
 	}
 }
