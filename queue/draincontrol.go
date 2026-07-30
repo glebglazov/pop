@@ -61,6 +61,7 @@ func StatusDetailLines(d *Deps, ref SetRef) ([]string, error) {
 
 type DashboardDrainResult struct {
 	PaneID      string
+	Session     string
 	RuntimePath string
 }
 
@@ -167,6 +168,17 @@ func LaunchDrain(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult,
 	// to its stale cwd — the same contract as supervisor-spawned drains.
 	dec.pinRuntimePath = true
 
+	if d.Tmux == nil {
+		d.Tmux = tmuxmod.New()
+	}
+	// An already-running drain pane for this set is a jump target: focus it
+	// rather than re-sending implement into the live process (ADR-0158).
+	if paneID, err := d.Tmux.FindTaggedPane(dec.scan.SessionName, tmuxmod.TagSet, ref.SetID); err != nil {
+		return DashboardDrainResult{}, err
+	} else if paneID != "" {
+		return DashboardDrainResult{PaneID: paneID, Session: dec.scan.SessionName, RuntimePath: dec.scan.RuntimePath}, nil
+	}
+
 	spawn, err := SpawnWithResult(d, dec)
 	if err != nil {
 		return DashboardDrainResult{}, err
@@ -174,7 +186,7 @@ func LaunchDrain(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult,
 	if err := recordDrainPane(d, dec, spawn.PaneID, "dashboard"); err != nil {
 		return DashboardDrainResult{}, err
 	}
-	return DashboardDrainResult{PaneID: spawn.PaneID, RuntimePath: dec.scan.RuntimePath}, nil
+	return DashboardDrainResult{PaneID: spawn.PaneID, Session: dec.scan.SessionName, RuntimePath: dec.scan.RuntimePath}, nil
 }
 
 // LaunchVerify spawns a Verifier pane on the dashboard row's set (ADR-0123). It
@@ -210,6 +222,16 @@ func LaunchVerify(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
+	if d.Tmux == nil {
+		d.Tmux = tmuxmod.New()
+	}
+	// An already-running verify pane for this set is a jump target: focus it
+	// rather than re-sending verify into the live process (ADR-0158).
+	if paneID, err := d.Tmux.FindTaggedPane(session, tmuxmod.TagSet, ref.SetID); err != nil {
+		return DashboardDrainResult{}, err
+	} else if paneID != "" {
+		return DashboardDrainResult{PaneID: paneID, Session: session, RuntimePath: ref.RuntimePath}, nil
+	}
 	command := fmt.Sprintf("pop tasks verify %s", shellQuote(ref.SetID))
 	if strings.TrimSpace(ref.RuntimePath) != "" {
 		command += " --task-runtime-path " + shellQuote(ref.RuntimePath)
@@ -218,7 +240,7 @@ func LaunchVerify(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
-	return DashboardDrainResult{PaneID: paneID, RuntimePath: ref.RuntimePath}, nil
+	return DashboardDrainResult{PaneID: paneID, Session: session, RuntimePath: ref.RuntimePath}, nil
 }
 
 func dashboardScansForDefinition(d *Deps, cfg *config.Config, defPath string) ([]projectScan, error) {
@@ -265,11 +287,12 @@ func PreviewDrain(d *Deps, ref SetRef) error {
 	return tmuxmod.FocusPane(d.Tmux, paneID)
 }
 
-// LaunchAssist opens or focuses an Assist session pane for the dashboard row's
+// LaunchAssist opens or reuses an Assist session pane for the dashboard row's
 // set in the project's pop-queue window. A pane already tagged for the set is
-// focused without spawning a twin; otherwise a fresh pane runs
-// `pop tasks assist` pinned to the row's binding-first runtime checkout.
-func LaunchAssist(d *Deps, cfg *config.Config, ref SetRef) error {
+// returned without spawning a twin or re-sending the command; otherwise a fresh
+// pane runs `pop tasks assist` pinned to the row's binding-first runtime
+// checkout. Focus and quit belong to the dashboard handoff path (ADR-0158).
+func LaunchAssist(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult, error) {
 	if d == nil {
 		d = DefaultDeps()
 	}
@@ -284,10 +307,10 @@ func LaunchAssist(d *Deps, cfg *config.Config, ref SetRef) error {
 	}
 	scans, err := dashboardScansForDefinition(d, cfg, ref.DefPath)
 	if err != nil {
-		return err
+		return DashboardDrainResult{}, err
 	}
 	if len(scans) == 0 {
-		return fmt.Errorf("task set %s is no longer in a registered queue project", ref.SetID)
+		return DashboardDrainResult{}, fmt.Errorf("task set %s is no longer in a registered queue project", ref.SetID)
 	}
 	projectPath := scans[0].ProjectPath
 	if strings.TrimSpace(ref.ProjectPath) != "" {
@@ -298,7 +321,7 @@ func LaunchAssist(d *Deps, cfg *config.Config, ref SetRef) error {
 		var resolveErr error
 		runtimeOverride, resolveErr = binding.ResolveCommandRuntime(d.Tasks, projectPath, ref.SetID, "")
 		if resolveErr != nil {
-			return resolveErr
+			return DashboardDrainResult{}, resolveErr
 		}
 	}
 	loadConfig := config.Load
@@ -313,18 +336,18 @@ func LaunchAssist(d *Deps, cfg *config.Config, ref SetRef) error {
 		TaskSetID: ref.SetID,
 	})
 	if err != nil {
-		return err
+		return DashboardDrainResult{}, err
 	}
 
 	session, checkout, err := dashboardSetPaneCoords(d, cfg, scans, ref, runtimePath)
 	if err != nil {
-		return err
+		return DashboardDrainResult{}, err
 	}
 
 	if paneID, err := assistPaneIDAt(d, session, ref.SetID); err != nil {
-		return err
+		return DashboardDrainResult{}, err
 	} else if paneID != "" {
-		return tmuxmod.FocusPane(d.Tmux, paneID)
+		return DashboardDrainResult{PaneID: paneID, Session: session, RuntimePath: runtimePath}, nil
 	}
 
 	command := fmt.Sprintf("pop tasks assist %s", shellQuote(ref.SetID))
@@ -333,9 +356,12 @@ func LaunchAssist(d *Deps, cfg *config.Config, ref SetRef) error {
 	}
 	paneID, err := tmuxmod.EnsureTaggedPane(d.Tmux, tmuxmod.TagAssist, session, checkout, ref.SetID, command)
 	if err != nil {
-		return err
+		return DashboardDrainResult{}, err
 	}
-	return d.Tmux.SetPaneTitle(paneID, assistPaneTitle(ref.SetID))
+	if err := d.Tmux.SetPaneTitle(paneID, assistPaneTitle(ref.SetID)); err != nil {
+		return DashboardDrainResult{}, err
+	}
+	return DashboardDrainResult{PaneID: paneID, Session: session, RuntimePath: runtimePath}, nil
 }
 
 func assistPaneTitle(setID string) string {

@@ -268,9 +268,9 @@ func TestDashboardIKeyBoundDrainsWithoutPicker(t *testing.T) {
 		t.Fatal("i did not return a command")
 	}
 	msg := cmd()
-	drainMsg, ok := msg.(dashboardDrainMsg)
+	drainMsg, ok := msg.(dashboardHandoffMsg)
 	if !ok {
-		t.Fatalf("i on bound set produced %T, want dashboardDrainMsg (no picker)", msg)
+		t.Fatalf("i on bound set produced %T, want dashboardHandoffMsg (no picker)", msg)
 	}
 	if drainMsg.err != nil {
 		t.Fatalf("bound drain err = %v", drainMsg.err)

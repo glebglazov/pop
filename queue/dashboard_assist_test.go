@@ -82,7 +82,7 @@ func TestDashboardLaunchAssistSpawnsTaggedPane(t *testing.T) {
 	row.RuntimePath = repo
 	row.ProjectPath = repo
 
-	if err := LaunchAssist(d, cfg, row.SetRef); err != nil {
+	if _, err := LaunchAssist(d, cfg, row.SetRef); err != nil {
 		t.Fatalf("LaunchAssist: %v", err)
 	}
 
@@ -126,7 +126,7 @@ func TestDashboardLaunchAssistBoundCheckoutUsesProjectSession(t *testing.T) {
 	row.RuntimePath = bound
 	row.ProjectPath = repo
 
-	if err := LaunchAssist(d, cfg, row.SetRef); err != nil {
+	if _, err := LaunchAssist(d, cfg, row.SetRef); err != nil {
 		t.Fatalf("LaunchAssist: %v", err)
 	}
 	assertSetPaneProjectSessionAndCheckout(t, rt, repo, bound)
@@ -151,7 +151,7 @@ func TestDashboardPreviewAssistFindsBoundCheckoutPane(t *testing.T) {
 	row.RuntimePath = bound
 	row.ProjectPath = repo
 
-	if err := LaunchAssist(d, cfg, row.SetRef); err != nil {
+	if _, err := LaunchAssist(d, cfg, row.SetRef); err != nil {
 		t.Fatalf("LaunchAssist: %v", err)
 	}
 	if pane := rt.Fake.PaneTagValues["%3"][tmuxmod.TagAssist]; pane != setID {
@@ -185,8 +185,12 @@ func TestDashboardLaunchAssistReusesPane(t *testing.T) {
 	rt.windowNames["pop-queue"] = true
 	rt.paneList = setID + " %5"
 
-	if err := LaunchAssist(d, cfg, row.SetRef); err != nil {
+	result, err := LaunchAssist(d, cfg, row.SetRef)
+	if err != nil {
 		t.Fatalf("LaunchAssist reuse: %v", err)
+	}
+	if result.PaneID != "%5" {
+		t.Fatalf("reuse PaneID = %q, want %%5", result.PaneID)
 	}
 	if rt.countCommand("split-window") != 0 {
 		t.Fatalf("reuse must not split, commands=%v", rt.commands)
@@ -194,8 +198,10 @@ func TestDashboardLaunchAssistReusesPane(t *testing.T) {
 	if rt.countCommand("send-keys") != 0 {
 		t.Fatalf("reuse must not re-send assist command, commands=%v", rt.commands)
 	}
-	if !rt.findSwitched("%5") {
-		t.Fatalf("reuse must focus existing pane, commands=%v", rt.commands)
+	// Focus belongs to the dashboard handoff path; LaunchAssist only returns the
+	// existing pane id.
+	if rt.findSwitched("%5") {
+		t.Fatalf("LaunchAssist must not focus; handoff does, commands=%v", rt.commands)
 	}
 }
 
@@ -237,7 +243,7 @@ func TestLaunchAssistRefusesLiveDrain(t *testing.T) {
 		t.Fatalf("StartDrain: %v", err)
 	}
 
-	err = LaunchAssist(d, cfg, row.SetRef)
+	_, err = LaunchAssist(d, cfg, row.SetRef)
 	if err == nil {
 		t.Fatal("LaunchAssist must refuse while drain is live")
 	}
@@ -254,7 +260,7 @@ func TestDashboardAssistRefusalSticky(t *testing.T) {
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{row}})
 	m.width, m.height = 120, 40
 
-	updated, _ := m.Update(dashboardAssistMsg{err: errors.New(refusal)})
+	updated, _ := m.Update(dashboardHandoffMsg{err: errors.New(refusal)})
 	got := updated.(QueueDashboard)
 	if got.actionErr == nil || got.actionErr.Error() != refusal {
 		t.Fatalf("action error = %v, want %q", got.actionErr, refusal)

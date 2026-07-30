@@ -14,6 +14,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/glebglazov/pop/config"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
@@ -164,8 +165,13 @@ type dashboardToggleMsg struct {
 	autoDrain bool
 	err       error
 }
-type dashboardDrainMsg struct {
-	err error
+type dashboardHandoffMsg struct {
+	// quit is set when focus succeeded inside tmux; the dashboard exits.
+	quit bool
+	// status explains why the dashboard stays open (outside tmux, nothing to
+	// focus). Empty when quitting or when err is set.
+	status string
+	err    error
 }
 type dashboardWayfinderMsg struct {
 	mapID    string
@@ -181,9 +187,6 @@ type dashboardArchiveMsg struct {
 	err   error
 }
 type dashboardPreviewMsg struct {
-	err error
-}
-type dashboardAssistMsg struct {
 	err error
 }
 type dashboardFoldMsg struct {
@@ -1137,12 +1140,21 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.cols.syncNatural(m.snap.Rows)
-	case dashboardDrainMsg:
+	case dashboardHandoffMsg:
 		m.drainPick = nil
 		if msg.err != nil {
 			m.actionErr = msg.err
+			return m, nil
 		}
-		return m, m.reload()
+		if msg.quit {
+			// Handoff focused the operator onto the spawned/reused pane; close
+			// the dashboard rather than leaving it stranded behind that pane.
+			return m, tea.Quit
+		}
+		if msg.status != "" {
+			m.statusMsg = msg.status
+		}
+		return m, nil
 	case dashboardWayfinderMsg:
 		if msg.err != nil {
 			if errors.Is(msg.err, wayfinder.ErrEmptyFrontier) {
@@ -1187,14 +1199,6 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Preview switched the tmux client to the drain's working pane; the
 		// dashboard has handed off attention, so close it rather than leaving it
 		// stranded behind the pane the operator now looks at.
-		return m, tea.Quit
-	case dashboardAssistMsg:
-		if msg.err != nil {
-			m.actionErr = msg.err
-			return m, nil
-		}
-		// Assist focused the operator in the session pane; close the dashboard
-		// the same way preview does after handing off attention.
 		return m, tea.Quit
 	case dashboardFoldMsg:
 		if msg.err != nil {
@@ -1998,7 +2002,8 @@ func (m QueueDashboard) toggleAutoDrain(row DashboardRow) tea.Cmd {
 
 // launchDrain handles the `i` key. A set that already holds a Worktree binding
 // resumes in it immediately (no picker). An unbound set opens the Drain target
-// picker so the operator chooses where the drain lands (ADR-0052).
+// picker so the operator chooses where the drain lands (ADR-0052). Bound drains
+// and confirmed picker drains both finish through the shared handoff path.
 func (m QueueDashboard) launchDrain(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
 		bound, err := dashboardSetBound(m.d, m.cfg, row.SetRef)
@@ -2006,8 +2011,8 @@ func (m QueueDashboard) launchDrain(row DashboardRow) tea.Cmd {
 			return dashboardDrainListMsg{row: row, err: err}
 		}
 		if bound {
-			_, err := LaunchDrain(m.d, m.cfg, row.SetRef)
-			return dashboardDrainMsg{err: err}
+			result, err := LaunchDrain(m.d, m.cfg, row.SetRef)
+			return handoffAfterLaunch(m.d, result, err)
 		}
 		entries, err := DrainTargetEntries(m.d, m.cfg, row.SetRef)
 		return dashboardDrainListMsg{row: row, entries: entries, err: err}
@@ -2049,11 +2054,11 @@ func (m QueueDashboard) confirmDrainModal() (tea.Model, tea.Cmd) {
 }
 
 // launchDrainTarget binds the chosen target (adopt, provision, or leave unbound
-// for trunk) and drains in one action.
+// for trunk) and drains in one action, then hands off through the shared path.
 func (m QueueDashboard) launchDrainTarget(row DashboardRow, target dashboardDrainEntry) tea.Cmd {
 	return func() tea.Msg {
-		_, err := LaunchDrainTarget(m.d, m.cfg, row.SetRef, target)
-		return dashboardDrainMsg{err: err}
+		result, err := LaunchDrainTarget(m.d, m.cfg, row.SetRef, target)
+		return handoffAfterLaunch(m.d, result, err)
 	}
 }
 
@@ -2069,14 +2074,14 @@ func defaultDrainCursor(entries []dashboardDrainEntry) int {
 	return 0
 }
 
-// launchVerify spawns a Verifier pane on the focused set (ADR-0123). It records
-// no lock, spawn intent, or DrainPane — verify is not a drain — so the verdict
-// surfaces through the next poll's ApplyVerifyVerdicts re-derivation via the
-// reload dashboardDrainMsg drives.
+// launchVerify spawns a Verifier pane on the focused set (ADR-0123) and hands
+// off through the shared path. It records no lock, spawn intent, or DrainPane —
+// verify is not a drain — so the verdict surfaces through the next poll's
+// ApplyVerifyVerdicts re-derivation when the dashboard stays open.
 func (m QueueDashboard) launchVerify(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
-		_, err := LaunchVerify(m.d, m.cfg, row.SetRef)
-		return dashboardDrainMsg{err: err}
+		result, err := LaunchVerify(m.d, m.cfg, row.SetRef)
+		return handoffAfterLaunch(m.d, result, err)
 	}
 }
 
@@ -2112,9 +2117,44 @@ func (m QueueDashboard) previewDrain(row DashboardRow) tea.Cmd {
 
 func (m QueueDashboard) launchAssist(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
-		err := LaunchAssist(m.d, m.cfg, row.SetRef)
-		return dashboardAssistMsg{err: err}
+		result, err := LaunchAssist(m.d, m.cfg, row.SetRef)
+		return handoffAfterLaunch(m.d, result, err)
 	}
+}
+
+// handoffAfterLaunch is the single post-spawn path for drain, verify, and
+// assist (ADR-0158): focus the pane when inside tmux and signal quit, or stay
+// open with a status line explaining why focus was unavailable / nothing moved.
+func handoffAfterLaunch(d *Deps, result DashboardDrainResult, err error) dashboardHandoffMsg {
+	if err != nil {
+		return dashboardHandoffMsg{err: err}
+	}
+	if strings.TrimSpace(result.PaneID) == "" {
+		return dashboardHandoffMsg{status: "nothing to hand off to"}
+	}
+	if d == nil {
+		d = DefaultDeps()
+	}
+	if d.Tmux == nil {
+		d.Tmux = tmuxmod.New()
+	}
+	session := strings.TrimSpace(result.Session)
+	if session == "" {
+		if s, serr := d.Tmux.PaneSession(result.PaneID); serr == nil {
+			session = s
+		}
+	}
+	if !d.Tmux.InTmux() {
+		status := "not inside tmux"
+		if session != "" {
+			status = fmt.Sprintf("pane opened in session %s (not inside tmux)", session)
+		}
+		return dashboardHandoffMsg{status: status}
+	}
+	if ferr := tmuxmod.FocusPane(d.Tmux, result.PaneID); ferr != nil {
+		return dashboardHandoffMsg{err: ferr}
+	}
+	return dashboardHandoffMsg{quit: true}
 }
 
 func (m QueueDashboard) launchFold(row DashboardRow) tea.Cmd {

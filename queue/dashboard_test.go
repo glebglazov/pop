@@ -4803,7 +4803,7 @@ func TestDashboardActionErrorLongMessageReadable(t *testing.T) {
 	m.width, m.height = 80, 40
 
 	long := "runtime checkout /some/very/long/path/to/a/worktree is locked for another set and cannot be released without --force"
-	updated, _ := m.Update(dashboardDrainMsg{err: errors.New(long)})
+	updated, _ := m.Update(dashboardHandoffMsg{err: errors.New(long)})
 	got := updated.(QueueDashboard)
 	if view := got.View().Content; !strings.Contains(view, long) {
 		t.Fatalf("long error message truncated in view; got:\n%s", view)
