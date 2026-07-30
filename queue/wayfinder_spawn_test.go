@@ -159,7 +159,7 @@ func TestLaunchWayfinderSessionEmptyFrontier(t *testing.T) {
 func TestDashboardMapRowISpawnsNextFrontier(t *testing.T) {
 	d, cfg, row, f, _ := wayfinderSpawnFixture(t)
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'I', Text: "I"})
 	if cmd == nil {
 		t.Fatal("i on map row did not return a command")
 	}
@@ -193,7 +193,7 @@ func TestDashboardMapRowIEmptyFrontierMessage(t *testing.T) {
 	withWayfinderMaps(t, d, storageDir, files)
 	row.MapFrontier = 0
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'I', Text: "I"})
 	if cmd == nil {
 		t.Fatal("expected spawn command")
 	}

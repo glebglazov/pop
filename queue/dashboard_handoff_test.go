@@ -162,7 +162,7 @@ func TestDashboardHandoffVerifySpawnsFocusesAndQuits(t *testing.T) {
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
-	_, cmd := got.Update(tea.KeyPressMsg{Code: 'v', Text: "v"})
+	_, cmd := got.Update(tea.KeyPressMsg{Code: 'V', Text: "V"})
 	if cmd == nil {
 		t.Fatal("v did not return a command")
 	}
@@ -205,7 +205,7 @@ func TestDashboardHandoffVerifyReusesWithoutResend(t *testing.T) {
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
-	_, cmd := got.Update(tea.KeyPressMsg{Code: 'v', Text: "v"})
+	_, cmd := got.Update(tea.KeyPressMsg{Code: 'V', Text: "V"})
 	msg := cmd()
 	handoff, ok := msg.(dashboardHandoffMsg)
 	if !ok {
@@ -246,7 +246,7 @@ func TestDashboardHandoffDrainSpawnsFocusesAndQuits(t *testing.T) {
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
-	_, cmd := got.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
+	_, cmd := got.Update(tea.KeyPressMsg{Code: 'I', Text: "I"})
 	if cmd == nil {
 		t.Fatal("i did not return a command")
 	}
@@ -298,7 +298,7 @@ func TestDashboardHandoffDrainReusesWithoutResend(t *testing.T) {
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
-	_, cmd := got.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
+	_, cmd := got.Update(tea.KeyPressMsg{Code: 'I', Text: "I"})
 	msg := cmd()
 	handoff, ok := msg.(dashboardHandoffMsg)
 	if !ok {
@@ -338,7 +338,7 @@ func TestDashboardHandoffDrainOutsideTmuxStays(t *testing.T) {
 	m.width, m.height = 120, 40
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
-	_, cmd := got.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
+	_, cmd := got.Update(tea.KeyPressMsg{Code: 'I', Text: "I"})
 	msg := cmd()
 	handoff, ok := msg.(dashboardHandoffMsg)
 	if !ok {

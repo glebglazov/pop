@@ -30,7 +30,7 @@ func TestDashboardAssistMenuPlacement(t *testing.T) {
 		}
 		return -1
 	}
-	status, assist, o, i, v, p := idx("s"), idx("S"), idx("O"), idx("i"), idx("v"), idx("p")
+	status, assist, o, drain, verify, p := idx("s"), idx("S"), idx("O"), idx("I"), idx("V"), idx("p")
 	if status < 0 || assist < 0 || o < 0 {
 		t.Fatalf("menu missing status/assist/shell keys: %+v", keys)
 	}
@@ -40,10 +40,10 @@ func TestDashboardAssistMenuPlacement(t *testing.T) {
 	if !(status < assist && assist < o) {
 		t.Fatalf("assist must sit between status submenu and shell, got keys %v", keys)
 	}
-	if i >= 0 && i > assist {
+	if drain >= 0 && drain > assist {
 		t.Fatalf("assist must not follow drain, got keys %v", keys)
 	}
-	if v >= 0 && v > assist {
+	if verify >= 0 && verify > assist {
 		t.Fatalf("assist must not follow verify, got keys %v", keys)
 	}
 

@@ -24,22 +24,22 @@ func TestDashboardActionMenuFoldFiltering(t *testing.T) {
 	}
 
 	doneBound := keysFor(DashboardRow{SetRef: SetRef{SetID: "done", RawStatus: tasks.StatusDone, Bound: true}})
-	if !contains(doneBound, "f") {
+	if !contains(doneBound, "F") {
 		t.Fatalf("DONE bound row missing fold: %v", doneBound)
 	}
 
 	awaitingBound := keysFor(DashboardRow{SetRef: SetRef{SetID: "await", RawStatus: tasks.StatusAwaitingApproval, Bound: true}})
-	if !contains(awaitingBound, "f") {
+	if !contains(awaitingBound, "F") {
 		t.Fatalf("AWAITING-APPROVAL bound row missing fold: %v", awaitingBound)
 	}
 
 	readyBound := keysFor(DashboardRow{SetRef: SetRef{SetID: "ready", RawStatus: tasks.StatusReady, Bound: true}})
-	if contains(readyBound, "f") {
+	if contains(readyBound, "F") {
 		t.Fatalf("READY bound row should not offer fold: %v", readyBound)
 	}
 
 	doneUnbound := keysFor(DashboardRow{SetRef: SetRef{SetID: "done", RawStatus: tasks.StatusDone}})
-	if contains(doneUnbound, "f") {
+	if contains(doneUnbound, "F") {
 		t.Fatalf("DONE unbound row should not offer fold: %v", doneUnbound)
 	}
 }
@@ -81,7 +81,7 @@ func TestDashboardFoldRefusalSticky(t *testing.T) {
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
-	updated, _ = got.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
+	updated, _ = got.Update(tea.KeyPressMsg{Code: 'F', Text: "F"})
 	got = updated.(QueueDashboard)
 	if got.actionErr == nil || !strings.Contains(got.actionErr.Error(), "dirty") {
 		t.Fatalf("action error = %v, want dirty refusal", got.actionErr)
@@ -117,7 +117,7 @@ func TestDashboardHandoffFoldSpawnsFocusesAndQuits(t *testing.T) {
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
-	_, cmd := got.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
+	_, cmd := got.Update(tea.KeyPressMsg{Code: 'F', Text: "F"})
 	if cmd == nil {
 		t.Fatal("f did not return a command")
 	}
@@ -198,7 +198,7 @@ func TestDashboardHandoffFoldReusesConflictPane(t *testing.T) {
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
-	_, cmd := got.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
+	_, cmd := got.Update(tea.KeyPressMsg{Code: 'F', Text: "F"})
 	if cmd == nil {
 		t.Fatal("f did not return a command")
 	}

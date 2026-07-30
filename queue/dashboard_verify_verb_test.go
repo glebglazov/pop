@@ -15,7 +15,7 @@ import (
 func TestDashboardVerifyVerbConditionalInclusion(t *testing.T) {
 	has := func(row DashboardRow) bool {
 		for _, item := range dashboardMenuItems(row) {
-			if item.key == "v" && item.action == menuActionVerify {
+			if item.key == "V" && item.action == menuActionVerify {
 				return true
 			}
 		}

@@ -21,7 +21,7 @@ func TestLivePaneMenuKeyColours(t *testing.T) {
 	lines := dashboardMenuLines(menu, 80, live)
 	joined := strings.Join(lines, "\n")
 
-	greenI := livePaneRunningStyle.Render("i")
+	greenI := livePaneRunningStyle.Render("I")
 	greyS := livePaneIdleStyle.Render("S")
 	if !strings.Contains(joined, greenI) {
 		t.Fatalf("drain key must be green when running:\n%s", joined)
@@ -260,7 +260,7 @@ func TestLivePaneRowClusterInView(t *testing.T) {
 	})
 	got := updated.(QueueDashboard)
 	view := got.View().Content
-	if !strings.Contains(view, livePaneRunningStyle.Render("i")) {
+	if !strings.Contains(view, livePaneRunningStyle.Render("I")) {
 		t.Fatalf("view must show green drain in row cluster:\n%s", view)
 	}
 	if !strings.Contains(view, livePaneIdleStyle.Render("S")) {
@@ -282,7 +282,7 @@ func TestLivePaneRowClusterClearsOnReload(t *testing.T) {
 		live: live,
 	})
 	got := updated.(QueueDashboard)
-	if !strings.Contains(got.View().Content, livePaneRunningStyle.Render("i")) {
+	if !strings.Contains(got.View().Content, livePaneRunningStyle.Render("I")) {
 		t.Fatal("expected green drain before pane died")
 	}
 
@@ -292,7 +292,7 @@ func TestLivePaneRowClusterClearsOnReload(t *testing.T) {
 	})
 	got = updated.(QueueDashboard)
 	view := got.View().Content
-	if strings.Contains(view, livePaneRunningStyle.Render("i")) || strings.Contains(view, livePaneIdleStyle.Render("i")) {
+	if strings.Contains(view, livePaneRunningStyle.Render("I")) || strings.Contains(view, livePaneIdleStyle.Render("I")) {
 		t.Fatalf("cluster must be dark after pane died:\n%s", view)
 	}
 	if !strings.Contains(view, dashboardActivityClusterPlain) {

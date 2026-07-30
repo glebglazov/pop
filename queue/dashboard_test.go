@@ -340,7 +340,7 @@ func TestDashboardActionMenuOpenAndClose(t *testing.T) {
 }
 
 func TestDashboardFormerDirectKeysInertAtTopLevel(t *testing.T) {
-	for _, key := range []string{"i", "I", "b", "U", "p", "P", "O", "d"} {
+	for _, key := range []string{"i", "I", "b", "u", "U", "p", "P", "O", "d"} {
 		m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{Project: "pop", Worktree: "/repo/wt (main)", CursorKey: "pop\x00set", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set", DefPath: "/repo/tasks", StatePath: "/repo/state.json", RuntimePath: "/repo/wt", Bound: true, Parked: true}}}})
 		updated, cmd := m.Update(tea.KeyPressMsg{Code: []rune(key)[0], Text: key})
 		got := updated.(QueueDashboard)
@@ -368,23 +368,23 @@ func TestDashboardActionMenuContextFiltering(t *testing.T) {
 
 	// A plain ready set: only the unconditional verbs plus auto-drain (non-orphaned).
 	plain := keysFor(DashboardRow{SetRef: SetRef{SetID: "plain", RuntimePath: "/wt"}})
-	if want := []string{"i", "b", "a", "s", "S", "O", "A", "y"}; !reflect.DeepEqual(plain, want) {
+	if want := []string{"I", "b", "a", "s", "S", "O", "x", "y"}; !reflect.DeepEqual(plain, want) {
 		t.Fatalf("plain row verbs = %v, want %v", plain, want)
 	}
 
 	// Bound row gains unbind; unbound row does not.
-	if got := keysFor(DashboardRow{SetRef: SetRef{SetID: "bound", Bound: true}}); !contains(got, "U") {
+	if got := keysFor(DashboardRow{SetRef: SetRef{SetID: "bound", Bound: true}}); !contains(got, "u") {
 		t.Fatalf("bound row missing unbind: %v", got)
 	}
-	if got := keysFor(DashboardRow{SetRef: SetRef{SetID: "unbound"}}); contains(got, "U") {
+	if got := keysFor(DashboardRow{SetRef: SetRef{SetID: "unbound"}}); contains(got, "u") {
 		t.Fatalf("unbound row should not offer unbind: %v", got)
 	}
 
 	// Parked row gains unpark; non-parked row does not.
-	if got := keysFor(DashboardRow{SetRef: SetRef{SetID: "parked", Parked: true}}); !contains(got, "P") {
+	if got := keysFor(DashboardRow{SetRef: SetRef{SetID: "parked", Parked: true}}); !contains(got, "r") {
 		t.Fatalf("parked row missing unpark: %v", got)
 	}
-	if got := keysFor(DashboardRow{SetRef: SetRef{SetID: "live"}}); contains(got, "P") {
+	if got := keysFor(DashboardRow{SetRef: SetRef{SetID: "live"}}); contains(got, "r") {
 		t.Fatalf("non-parked row should not offer unpark: %v", got)
 	}
 
@@ -399,10 +399,10 @@ func TestDashboardActionMenuVerbDispatch(t *testing.T) {
 		return newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{Project: "pop", Worktree: "/repo/wt (main)", CursorKey: "pop\x00set", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set", DefPath: "/repo/tasks", StatePath: "/repo/state.json", RuntimePath: "/repo/wt", Bound: true}}}})
 	}
 
-	// Letter path: `a` then `U` opens the unbind confirm and closes the menu.
+	// Letter path: `a` then `u` opens the unbind confirm and closes the menu.
 	updated, _ := newModel().Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
-	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'U', Text: "U"})
+	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'u', Text: "u"})
 	got = updated.(QueueDashboard)
 	if got.menu != nil {
 		t.Fatal("letter dispatch did not close the menu")
@@ -454,7 +454,7 @@ func TestDashboardActionMenuArchiveDispatch(t *testing.T) {
 	// A DONE, bound row: archive is offered regardless of status.
 	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{Project: "pop", Worktree: "/repo/wt (main)", CursorKey: "pop\x00set", SetRef: SetRef{RawStatus: tasks.StatusDone, SetID: "set", DefPath: "/repo/tasks", StatePath: "/repo/state.json", RuntimePath: "/repo/wt", Bound: true}}}})
 
-	// Archive lives behind the action menu: open with `a`, archive with `A`.
+	// Archive lives behind the action menu: open with `a`, archive with `x`.
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
 	if got.menu == nil {
@@ -464,14 +464,14 @@ func TestDashboardActionMenuArchiveDispatch(t *testing.T) {
 	for _, item := range got.menu.list.Items() {
 		keys = append(keys, item.key)
 	}
-	if !contains(keys, "A") {
+	if !contains(keys, "x") {
 		t.Fatalf("archive verb absent from a DONE bound row's menu: %v", keys)
 	}
 
-	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'A', Text: "A"})
+	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 	got = updated.(QueueDashboard)
 	if got.menu != nil {
-		t.Fatal("A did not close the action menu after dispatch")
+		t.Fatal("x did not close the action menu after dispatch")
 	}
 	// No confirmation prompt: archiving opens no modal (it is fully reversible).
 	if got.bind != nil || got.abandon != nil || got.drainPick != nil {
@@ -536,7 +536,7 @@ func TestDashboardArchiveRetainsBinding(t *testing.T) {
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
-	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'A', Text: "A"})
+	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 	got = updated.(QueueDashboard)
 	if cmd == nil {
 		t.Fatal("archive dispatch returned no command")
@@ -1037,7 +1037,7 @@ func TestDashboardActivityCluster(t *testing.T) {
 	live := livePaneCache{}
 	live.set(tmuxmod.TagSet, setID, livePaneRunning)
 	styled := dashboardActivityCluster(row, live, true)
-	if !strings.Contains(styled, livePaneRunningStyle.Render("i")) {
+	if !strings.Contains(styled, livePaneRunningStyle.Render("I")) {
 		t.Fatalf("styled cluster missing green drain key: %q", styled)
 	}
 	if w := lipgloss.Width(styled); w != len(dashboardActivityClusterPlain) {
@@ -2259,24 +2259,24 @@ func TestDashboardBindRefusesLiveLock(t *testing.T) {
 func TestDashboardUKeyRequiresInlineConfirmBeforeUnbind(t *testing.T) {
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{{Project: "pop", Worktree: "/repo/bound (branch)", CursorKey: "pop\x00set-unbind", SetRef: SetRef{RawStatus: tasks.StatusFailed, SetID: "set-unbind", DefPath: "/repo/tasks", StatePath: "/repo/state.json", Bound: true}}}})
 
-	// Unbind now lives behind the action menu: open with `a`, then `U`.
+	// Unbind now lives behind the action menu: open with `a`, then `u`.
 	openMenu := func(model QueueDashboard) QueueDashboard {
 		updated, _ := model.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 		got := updated.(QueueDashboard)
-		if !menuHasKey(got.menu, "U") {
+		if !menuHasKey(got.menu, "u") {
 			t.Fatalf("unbind not offered on bound row: %+v", got.menu)
 		}
 		return got
 	}
 
 	got := openMenu(m)
-	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'U', Text: "U"})
+	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'u', Text: "u"})
 	got = updated.(QueueDashboard)
 	if cmd != nil {
-		t.Fatalf("U key returned command before confirmation")
+		t.Fatalf("u key returned command before confirmation")
 	}
 	if got.menu != nil {
-		t.Fatal("U did not close the action menu")
+		t.Fatal("u did not close the action menu")
 	}
 	if got.abandon == nil || got.abandon.row.SetID != "set-unbind" {
 		t.Fatalf("abandon modal = %+v, want set-unbind", got.abandon)
@@ -2285,17 +2285,26 @@ func TestDashboardUKeyRequiresInlineConfirmBeforeUnbind(t *testing.T) {
 		t.Fatalf("view missing unbind modal:\n%s", got.View().Content)
 	}
 
-	updated, cmd = got.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	updated, cmd = got.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	got = updated.(QueueDashboard)
 	if cmd == nil {
-		t.Fatalf("confirm did not return unbind command")
+		t.Fatalf("y confirm did not return unbind command")
 	}
 	if got.abandon == nil || !got.abandon.loading {
 		t.Fatalf("abandon modal after confirm = %+v, want loading", got.abandon)
 	}
 
 	got = openMenu(m)
-	updated, cmd = got.Update(tea.KeyPressMsg{Code: 'U', Text: "U"})
+	updated, cmd = got.Update(tea.KeyPressMsg{Code: 'u', Text: "u"})
+	got = updated.(QueueDashboard)
+	updated, cmd = got.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	got = updated.(QueueDashboard)
+	if cmd != nil || got.abandon != nil {
+		t.Fatalf("enter should cancel without command: modal=%+v cmd=%v", got.abandon, cmd)
+	}
+
+	got = openMenu(m)
+	updated, cmd = got.Update(tea.KeyPressMsg{Code: 'u', Text: "u"})
 	got = updated.(QueueDashboard)
 	updated, cmd = got.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	got = updated.(QueueDashboard)
@@ -2877,6 +2886,7 @@ func TestDashboardFilterMode_BareActionsInertInFilterMode(t *testing.T) {
 		{Code: 'I', Text: "I"},
 		{Code: 'b', Text: "b"},
 		{Code: 'U', Text: "U"},
+		{Code: 'u', Text: "u"},
 		{Code: 'a', Text: "a"},
 		{Code: 'p', Text: "p"},
 		{Code: 's', Text: "s"},
@@ -3048,10 +3058,10 @@ func TestDetailTaskMenuCompleteVerb(t *testing.T) {
 	if m.taskMenu == nil {
 		t.Fatal("a on open task: expected task menu to open")
 	}
-	if got := taskMenuItemKeys(m.taskMenu); !slices.Contains(got, "C") {
+	if got := taskMenuItemKeys(m.taskMenu); !slices.Contains(got, "c") {
 		t.Fatalf("open task menu = %v, want to contain C", got)
 	}
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'C', Text: "C"})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Text: "c"})
 	got := updated.(QueueDashboard)
 	if got.taskMenu != nil {
 		t.Fatal("C should close the menu")
@@ -3078,13 +3088,13 @@ func TestDetailTaskMenuCompleteVerb(t *testing.T) {
 		t.Fatal("a on done task: expected task menu to open with Open verb")
 	}
 	keys := taskMenuItemKeys(m2.taskMenu)
-	if slices.Contains(keys, "C") {
+	if slices.Contains(keys, "c") {
 		t.Fatalf("done task menu = %v, want NOT to contain C", keys)
 	}
-	if !slices.Contains(keys, "O") {
+	if !slices.Contains(keys, "o") {
 		t.Fatalf("done task menu = %v, want to contain O", keys)
 	}
-	_, cmd2 := m2.Update(tea.KeyPressMsg{Code: 'O', Text: "O"})
+	_, cmd2 := m2.Update(tea.KeyPressMsg{Code: 'o', Text: "o"})
 	if cmd2 == nil {
 		t.Fatal("O on done task: expected a command")
 	}
@@ -3104,10 +3114,10 @@ func TestDetailTaskMenuOpenVerb(t *testing.T) {
 	failedTask := tasks.Task{ID: "02-b", File: "02-b.md", Status: "failed"}
 	m, _, resetCalls, _ := detailOverrideModel(row, failedTask, nil, nil, nil)
 	m = openTaskMenu(t, m)
-	if got := taskMenuItemKeys(m.taskMenu); !slices.Contains(got, "O") {
+	if got := taskMenuItemKeys(m.taskMenu); !slices.Contains(got, "o") {
 		t.Fatalf("failed task menu = %v, want to contain O", got)
 	}
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'O', Text: "O"})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'o', Text: "o"})
 	got := updated.(QueueDashboard)
 	if cmd == nil {
 		t.Fatal("O on failed: expected a command")
@@ -3126,10 +3136,10 @@ func TestDetailTaskMenuOpenVerb(t *testing.T) {
 	skippedTask := tasks.Task{ID: "03-c", File: "03-c.md", Status: "skipped"}
 	m2, _, resetCalls2, _ := detailOverrideModel(row, skippedTask, nil, nil, nil)
 	m2 = openTaskMenu(t, m2)
-	if got := taskMenuItemKeys(m2.taskMenu); !slices.Contains(got, "O") {
+	if got := taskMenuItemKeys(m2.taskMenu); !slices.Contains(got, "o") {
 		t.Fatalf("skipped task menu = %v, want to contain O", got)
 	}
-	_, cmd2 := m2.Update(tea.KeyPressMsg{Code: 'O', Text: "O"})
+	_, cmd2 := m2.Update(tea.KeyPressMsg{Code: 'o', Text: "o"})
 	if cmd2 == nil {
 		t.Fatal("O on skipped: expected a command")
 	}
@@ -3142,11 +3152,11 @@ func TestDetailTaskMenuOpenVerb(t *testing.T) {
 	openTask := tasks.Task{ID: "04-d", File: "04-d.md", Status: "open"}
 	m3, _, resetCalls3, _ := detailOverrideModel(row, openTask, nil, nil, nil)
 	m3 = openTaskMenu(t, m3)
-	if got := taskMenuItemKeys(m3.taskMenu); slices.Contains(got, "O") {
+	if got := taskMenuItemKeys(m3.taskMenu); slices.Contains(got, "o") {
 		t.Fatalf("open task menu = %v, want NOT to contain O", got)
 	}
 	// Pressing O is inert while the menu is open and has no O item.
-	_, cmd3 := m3.Update(tea.KeyPressMsg{Code: 'O', Text: "O"})
+	_, cmd3 := m3.Update(tea.KeyPressMsg{Code: 'o', Text: "o"})
 	if cmd3 != nil {
 		t.Fatal("O on open task: expected no command")
 	}
@@ -3162,10 +3172,10 @@ func TestDetailTaskMenuSkipVerb(t *testing.T) {
 	openTask := tasks.Task{ID: "04-d", File: "04-d.md", Status: "open"}
 	m, _, _, skipCalls := detailOverrideModel(row, openTask, nil, nil, nil)
 	m = openTaskMenu(t, m)
-	if got := taskMenuItemKeys(m.taskMenu); !slices.Contains(got, "K") {
+	if got := taskMenuItemKeys(m.taskMenu); !slices.Contains(got, "k") {
 		t.Fatalf("open task menu = %v, want to contain K", got)
 	}
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'K', Text: "K"})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 	got := updated.(QueueDashboard)
 	if cmd == nil {
 		t.Fatal("K on open: expected a command")
@@ -3184,10 +3194,10 @@ func TestDetailTaskMenuSkipVerb(t *testing.T) {
 	failedTask := tasks.Task{ID: "04-d", File: "04-d.md", Status: "failed"}
 	m2, _, _, skipCalls2 := detailOverrideModel(row, failedTask, nil, nil, nil)
 	m2 = openTaskMenu(t, m2)
-	if got := taskMenuItemKeys(m2.taskMenu); slices.Contains(got, "K") {
+	if got := taskMenuItemKeys(m2.taskMenu); slices.Contains(got, "k") {
 		t.Fatalf("failed task menu = %v, want NOT to contain K", got)
 	}
-	_, cmd2 := m2.Update(tea.KeyPressMsg{Code: 'K', Text: "K"})
+	_, cmd2 := m2.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 	if cmd2 != nil {
 		t.Fatal("K on failed: expected no command")
 	}
@@ -3251,7 +3261,7 @@ func TestDetailTaskMenuErrorSurfaced(t *testing.T) {
 	m, _, _, _ := detailOverrideModel(row, openTask, someErr, nil, nil)
 
 	m = openTaskMenu(t, m)
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'C', Text: "C"})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Text: "c"})
 	got := updated.(QueueDashboard)
 	msg := cmd()
 	updated, _ = got.Update(msg)
@@ -3302,7 +3312,7 @@ func TestPeekTaskMenuOpensAndDispatches(t *testing.T) {
 	if !got.taskMenu.inPeek {
 		t.Fatal("peek-opened menu should be marked inPeek")
 	}
-	if keys := taskMenuItemKeys(got.taskMenu); !slices.Contains(keys, "O") || slices.Contains(keys, "K") {
+	if keys := taskMenuItemKeys(got.taskMenu); !slices.Contains(keys, "o") || slices.Contains(keys, "k") {
 		t.Fatalf("peek failed-task menu = %v, want O and not K", keys)
 	}
 	// The peek stays open beneath the menu.
@@ -3310,13 +3320,13 @@ func TestPeekTaskMenuOpensAndDispatches(t *testing.T) {
 		t.Fatal("peek should remain open while menu is up")
 	}
 
-	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'O', Text: "O"})
+	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'o', Text: "o"})
 	got = updated.(QueueDashboard)
 	if got.taskMenu != nil {
-		t.Fatal("O should close the menu")
+		t.Fatal("o should close the menu")
 	}
 	if cmd == nil {
-		t.Fatal("O in peek menu: expected a command")
+		t.Fatal("o in peek menu: expected a command")
 	}
 	cmd()
 	if *resetCalls != 1 {
@@ -3339,7 +3349,7 @@ func TestPeekTaskMenuRendersOverlay(t *testing.T) {
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
 	out := got.View().Content
-	for _, want := range []string{"actions", "C  complete", "K  skip"} {
+	for _, want := range []string{"actions", "c  complete", "k  skip"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("rendered peek menu missing %q:\n%s", want, out)
 		}
@@ -3354,7 +3364,7 @@ func TestPeekFormerKeysInertWithoutMenu(t *testing.T) {
 	m, completeCalls, _, skipCalls := detailOverrideModel(row, openTask, nil, nil, nil)
 	m.detail.peek = &taskTextPeek{taskID: "01-a", text: "body\n"}
 
-	for _, key := range []rune{'C', 'O', 'K'} {
+	for _, key := range []rune{'c', 'o', 'k'} {
 		updated, cmd := m.Update(tea.KeyPressMsg{Code: key, Text: string(key)})
 		got := updated.(QueueDashboard)
 		if cmd != nil {
@@ -3376,7 +3386,7 @@ func TestDetailFormerKeysInertWithoutMenu(t *testing.T) {
 	openTask := tasks.Task{ID: "01-a", File: "01-a.md", Status: "open"}
 	m, completeCalls, resetCalls, skipCalls := detailOverrideModel(row, openTask, nil, nil, nil)
 
-	for _, key := range []rune{'C', 'O', 'K'} {
+	for _, key := range []rune{'c', 'o', 'k'} {
 		updated, cmd := m.Update(tea.KeyPressMsg{Code: key, Text: string(key)})
 		got := updated.(QueueDashboard)
 		if cmd != nil {
@@ -3401,12 +3411,12 @@ func TestDetailTaskMenuRendersOverlay(t *testing.T) {
 	m.height = 12
 	m = openTaskMenu(t, m)
 	out := m.View().Content
-	for _, want := range []string{"actions", "C  complete", "O  open"} {
+	for _, want := range []string{"actions", "c  complete", "o  open"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("rendered detail menu missing %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "K  skip") {
+	if strings.Contains(out, "k  skip") {
 		t.Fatalf("failed task menu should not offer skip:\n%s", out)
 	}
 }
@@ -3716,8 +3726,8 @@ func TestQueueDashboardHelpContent(t *testing.T) {
 			found[e.Key] = true
 		}
 		// Should show menu-specific verbs
-		if !found["i"] {
-			t.Error("action menu help missing 'i' (drain)")
+		if !found["I"] {
+			t.Error("action menu help missing 'I' (drain)")
 		}
 		if !found["b"] {
 			t.Error("action menu help missing 'b' (bind)")
@@ -3735,14 +3745,14 @@ func TestQueueDashboardHelpContent(t *testing.T) {
 		for _, e := range entries {
 			found[e.Key] = true
 		}
-		if !found["C"] {
-			t.Error("task menu help missing 'C' (complete)")
+		if !found["c"] {
+			t.Error("task menu help missing 'c' (complete)")
 		}
-		if !found["O"] {
-			t.Error("task menu help missing 'O' (open)")
+		if !found["o"] {
+			t.Error("task menu help missing 'o' (open)")
 		}
-		if !found["K"] {
-			t.Error("task menu help missing 'K' (skip)")
+		if !found["k"] {
+			t.Error("task menu help missing 'k' (skip)")
 		}
 	})
 
@@ -3786,11 +3796,11 @@ func TestQueueDashboardHelpContent(t *testing.T) {
 		for _, e := range entries {
 			found[e.Key] = true
 		}
-		if !found["y/enter"] {
-			t.Error("abandon modal help missing 'y/enter'")
+		if !found["y"] {
+			t.Error("abandon modal help missing 'y'")
 		}
-		if !found["n/esc"] {
-			t.Error("abandon modal help missing 'n/esc'")
+		if !found["enter/n/esc"] {
+			t.Error("abandon modal help missing 'enter/n/esc'")
 		}
 	})
 }
@@ -4431,7 +4441,7 @@ func TestDashboardMapRowQueueVerbsInert(t *testing.T) {
 	}
 
 	// Former direct bind/unbind keys stay inert at top level on map rows too.
-	for _, key := range []string{"b", "U"} {
+	for _, key := range []string{"b", "u"} {
 		updated, _ = got.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 		got = updated.(QueueDashboard)
 		updated, _ = got.Update(tea.KeyPressMsg{Code: []rune(key)[0], Text: key})

@@ -217,7 +217,7 @@ func TestDashboardIKeyUnboundOpensPicker(t *testing.T) {
 	// Drain now lives behind the action menu: open with `a`, then `i`.
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
-	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
+	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'I', Text: "I"})
 	got = updated.(QueueDashboard)
 	if cmd == nil {
 		t.Fatal("i did not return a command")
@@ -263,7 +263,7 @@ func TestDashboardIKeyBoundDrainsWithoutPicker(t *testing.T) {
 	// Drain now lives behind the action menu: open with `a`, then `i`.
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
-	_, cmd := got.Update(tea.KeyPressMsg{Code: 'i', Text: "i"})
+	_, cmd := got.Update(tea.KeyPressMsg{Code: 'I', Text: "I"})
 	if cmd == nil {
 		t.Fatal("i did not return a command")
 	}

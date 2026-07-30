@@ -177,7 +177,7 @@ var dashboardColShrinkOrder = []int{
 }
 
 // dashboardTableHeaders is the fixed column header row. The trailing column is
-// the per-activity cluster: an empty header over the ivfS keys, so no label sits
+// the per-activity cluster: an empty header over the IVFS keys, so no label sits
 // above the glyphs.
 func dashboardTableHeaders() []string {
 	return []string{"PROJECT", "TASK SET", "STATUS", "WORKTREE", ""}

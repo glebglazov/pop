@@ -401,7 +401,7 @@ func dashboardStatusMenuItems() []dashboardStatusMenuItem {
 		{key: "c", label: "complete", action: statusActionComplete, verb: "complete"},
 		{key: "o", label: "open", action: statusActionOpen, verb: "open"},
 		{key: "k", label: "skip", action: statusActionSkip, verb: "skip"},
-		{key: "A", label: "archive", action: statusActionArchive, verb: "archive"},
+		{key: "x", label: "archive", action: statusActionArchive, verb: "archive"},
 		{key: "u", label: "unarchive", action: statusActionUnarchive, verb: "unarchive"},
 	}
 }
@@ -423,6 +423,11 @@ type dashboardMenu struct {
 	status *dashboardStatusMenu
 }
 
+// Row-verb key case (ADR-0158): uppercase = handoff (spawns/focuses a pane, quits
+// the dashboard); lowercase = in-place (acts and leaves the dashboard standing).
+// Mode and navigation keys — action menu `a`, filter `/` and `f`, search, `G`/`gg`
+// top/bottom — are outside this rule and keep their own casing.
+//
 // dashboardMenuItems returns the verbs applicable to row, in a stable order.
 // Conditional verbs are filtered to the row's context: verify only for
 // NEEDS-VERIFY / VERIFY-FAILED rows with no live drain, unbind only for bound
@@ -437,18 +442,18 @@ func dashboardMenuItems(row DashboardRow) []dashboardMenuItem {
 		}
 	}
 	items := []dashboardMenuItem{
-		{key: "i", label: "drain", action: menuActionDrain},
+		{key: "I", label: "drain", action: menuActionDrain},
 	}
 	// Verify is the lighter, explicit Verifier force (ADR-0123): offered only on
 	// rows a verdict can move (NEEDS-VERIFY / VERIFY-FAILED) and hidden while a
 	// live drain holds the set — a plain verify is not quiescence-gated, so the
 	// running drain verifies itself instead.
 	if dashboardVerifyEligible(row) {
-		items = append(items, dashboardMenuItem{key: "v", label: "verify", action: menuActionVerify})
+		items = append(items, dashboardMenuItem{key: "V", label: "verify", action: menuActionVerify})
 	}
 	items = append(items, dashboardMenuItem{key: "b", label: "bind worktree", action: menuActionBind})
 	if row.Bound {
-		items = append(items, dashboardMenuItem{key: "U", label: "unbind worktree", action: menuActionUnbind})
+		items = append(items, dashboardMenuItem{key: "u", label: "unbind worktree", action: menuActionUnbind})
 	}
 	if !row.Orphaned {
 		items = append(items, dashboardMenuItem{key: "a", label: "auto-drain", action: menuActionAutoDrain})
@@ -456,13 +461,13 @@ func dashboardMenuItems(row DashboardRow) []dashboardMenuItem {
 	items = append(items, dashboardMenuItem{key: "s", label: "status ▸", action: menuActionStatusSubmenu})
 	items = append(items, dashboardMenuItem{key: "S", label: "assist", action: menuActionAssist})
 	if dashboardFoldEligible(row) {
-		items = append(items, dashboardMenuItem{key: "f", label: "fold", action: menuActionFold})
+		items = append(items, dashboardMenuItem{key: "F", label: "fold", action: menuActionFold})
 	}
 	if row.Parked {
-		items = append(items, dashboardMenuItem{key: "P", label: "unpark", action: menuActionUnpark})
+		items = append(items, dashboardMenuItem{key: "r", label: "unpark", action: menuActionUnpark})
 	}
 	items = append(items, dashboardMenuItem{key: "O", label: "shell", action: menuActionShell})
-	items = append(items, dashboardMenuItem{key: "A", label: "archive", action: menuActionArchive})
+	items = append(items, dashboardMenuItem{key: "x", label: "archive", action: menuActionArchive})
 	items = append(items, dashboardMenuItem{key: "y", label: "copy name", action: menuActionCopyName})
 	return items
 }
@@ -561,13 +566,13 @@ type taskMenu struct {
 func taskMenuItems(task tasks.Task) []taskMenuItem {
 	var items []taskMenuItem
 	if task.Status != tasks.TaskDone {
-		items = append(items, taskMenuItem{key: "C", label: "complete"})
+		items = append(items, taskMenuItem{key: "c", label: "complete"})
 	}
 	if tasks.CanReopen(task.Status) {
-		items = append(items, taskMenuItem{key: "O", label: "open"})
+		items = append(items, taskMenuItem{key: "o", label: "open"})
 	}
 	if task.Status == tasks.TaskOpen {
-		items = append(items, taskMenuItem{key: "K", label: "skip"})
+		items = append(items, taskMenuItem{key: "k", label: "skip"})
 	}
 	items = append(items, taskMenuItem{key: "y", label: "copy name"})
 	return items
@@ -1040,7 +1045,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = nil
 			m.statusMsg = ""
 			return m, nil
-		case "i":
+		case "I":
 			row, ok := m.list.Selected()
 			if !ok || !row.IsMap {
 				return m, nil
@@ -1283,10 +1288,10 @@ func (m QueueDashboard) updateBindModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m QueueDashboard) updateAbandonModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "esc", "ctrl+c", "n":
+	case "esc", "ctrl+c", "n", "enter":
 		m.abandon = nil
 		return m, nil
-	case "enter", "y":
+	case "y":
 		if m.abandon == nil || m.abandon.loading {
 			return m, nil
 		}
@@ -1335,6 +1340,11 @@ func (m QueueDashboard) updateStatusMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.menu == nil || m.menu.status == nil {
 		return m, nil
 	}
+	for i, item := range m.menu.status.list.Items() {
+		if msg.String() == item.key {
+			return m.invokeStatusMenuItem(i)
+		}
+	}
 	switch msg.String() {
 	case "esc", "ctrl+c":
 		m.menu.status = nil
@@ -1347,11 +1357,6 @@ func (m QueueDashboard) updateStatusMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "enter":
 		return m.invokeStatusMenuItem(m.menu.status.list.Cursor())
-	}
-	for i, item := range m.menu.status.list.Items() {
-		if msg.String() == item.key {
-			return m.invokeStatusMenuItem(i)
-		}
 	}
 	return m, nil
 }
@@ -1651,7 +1656,7 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.detail.list.SetCursor(len(m.detail.manifest.Tasks) - 1)
 			}
 		}
-	case "i":
+	case "I":
 		if m.detail == nil || m.detail.loading || !m.detail.row.IsMap || m.detail.wfMap == nil {
 			return m, nil
 		}
@@ -1731,6 +1736,11 @@ func (m QueueDashboard) updateTaskMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.taskMenu == nil {
 		return m, nil
 	}
+	for i, item := range m.taskMenu.list.Items() {
+		if msg.String() == item.key {
+			return m.invokeTaskMenuItem(i)
+		}
+	}
 	switch msg.String() {
 	case "esc", "ctrl+c":
 		m.taskMenu = nil
@@ -1743,11 +1753,6 @@ func (m QueueDashboard) updateTaskMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "enter":
 		return m.invokeTaskMenuItem(m.taskMenu.list.Cursor())
-	}
-	for i, item := range m.taskMenu.list.Items() {
-		if msg.String() == item.key {
-			return m.invokeTaskMenuItem(i)
-		}
 	}
 	return m, nil
 }
@@ -1784,7 +1789,7 @@ func (m QueueDashboard) invokeTaskMenuItem(idx int) (tea.Model, tea.Cmd) {
 	return m, m.applyDetailOverride(m.detail.row, task, item.key)
 }
 
-// applyDetailOverride dispatches the C/O/K override verb to the appropriate
+// applyDetailOverride dispatches the c/o/k override verb to the appropriate
 // tasks.*With function via the Deps seam.
 func (m QueueDashboard) applyDetailOverride(row DashboardRow, task tasks.Task, verb string) tea.Cmd {
 	d := m.d
@@ -1795,14 +1800,14 @@ func (m QueueDashboard) applyDetailOverride(row DashboardRow, task tasks.Task, v
 	return func() tea.Msg {
 		var err error
 		switch verb {
-		case "C":
+		case "c":
 			err = d.completeDetailTask(row.DefPath, taskPath)
-		case "O":
+		case "o":
 			err = d.resetDetailTask(row.DefPath, taskPath)
-		case "K":
+		case "k":
 			err = d.skipDetailTask(row.DefPath, taskPath)
 		}
-		verbName := map[string]string{"C": "complete", "O": "open", "K": "skip"}[verb]
+		verbName := map[string]string{"c": "complete", "o": "open", "k": "skip"}[verb]
 		return dashboardDetailOverrideMsg{taskID: task.ID, verb: verbName, err: err}
 	}
 }
@@ -2444,15 +2449,15 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 	case m.abandon != nil:
 		// Abandon/unbind confirmation modal
 		return []ui.HelpEntry{
-			{Key: "y/enter", Desc: "confirm unbind"},
-			{Key: "n/esc", Desc: "cancel"},
+			{Key: "y", Desc: "confirm unbind"},
+			{Key: "enter/n/esc", Desc: "cancel"},
 		}
 	case m.taskMenu != nil:
 		// Task-level action menu (in detail or peek)
 		return []ui.HelpEntry{
-			{Key: "C", Desc: "complete task"},
-			{Key: "O", Desc: "open/reopen task"},
-			{Key: "K", Desc: "skip task"},
+			{Key: "c", Desc: "complete task"},
+			{Key: "o", Desc: "open/reopen task"},
+			{Key: "k", Desc: "skip task"},
 			{Key: "y", Desc: "copy name"},
 			{Key: "j/k", Desc: "navigate"},
 			{Key: "enter", Desc: "run action"},
@@ -2463,7 +2468,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "c", Desc: "complete"},
 			{Key: "o", Desc: "open (reopen)"},
 			{Key: "k", Desc: "skip"},
-			{Key: "A", Desc: "archive"},
+			{Key: "x", Desc: "archive"},
 			{Key: "u", Desc: "unarchive"},
 			{Key: "j/k", Desc: "navigate"},
 			{Key: "enter", Desc: "run action"},
@@ -2472,16 +2477,17 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 	case m.menu != nil:
 		// Dashboard action menu
 		return []ui.HelpEntry{
-			{Key: "i", Desc: "drain"},
+			{Key: "I", Desc: "drain"},
+			{Key: "V", Desc: "verify"},
 			{Key: "b", Desc: "bind worktree"},
-			{Key: "U", Desc: "unbind worktree"},
+			{Key: "u", Desc: "unbind worktree"},
 			{Key: "a", Desc: "toggle auto-drain"},
 			{Key: "s", Desc: "status submenu"},
 			{Key: "S", Desc: "assist"},
-			{Key: "f", Desc: "fold"},
-			{Key: "P", Desc: "unpark"},
+			{Key: "F", Desc: "fold"},
+			{Key: "r", Desc: "unpark"},
 			{Key: "O", Desc: "shell"},
-			{Key: "A", Desc: "archive"},
+			{Key: "x", Desc: "archive"},
 			{Key: "y", Desc: "copy name"},
 			{Key: "j/k", Desc: "navigate"},
 			{Key: "enter", Desc: "run action"},
@@ -2516,7 +2522,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "j/k", Desc: "navigate tickets"},
 			{Key: "gg", Desc: "first ticket"},
 			{Key: "G", Desc: "last ticket"},
-			{Key: "i/enter", Desc: "work frontier ticket"},
+			{Key: "I/enter", Desc: "work frontier ticket"},
 			{Key: "l", Desc: "peek ticket text"},
 			{Key: "y", Desc: "copy name"},
 			{Key: "h/esc", Desc: "back to list"},
@@ -2557,7 +2563,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "h/esc", Desc: "quit"},
 		}
 		if row, ok := m.list.Selected(); ok && row.IsMap {
-			entries = append(entries, ui.HelpEntry{Key: "i", Desc: "work next frontier ticket"})
+			entries = append(entries, ui.HelpEntry{Key: "I", Desc: "work next frontier ticket"})
 		}
 		return entries
 	}
@@ -3415,7 +3421,7 @@ func renderDashboardAbandonModal(w io.Writer, modal *dashboardAbandonModal, widt
 		return
 	}
 	fmt.Fprintln(w, ui.TruncateString("This releases the binding without integrating. Task statuses are unchanged.", width))
-	fmt.Fprint(w, ui.HintStyle.Render(ui.TruncateString("enter/y confirm · n/esc cancel", width)))
+	fmt.Fprint(w, ui.HintStyle.Render(ui.TruncateString("y confirm · enter/n/esc cancel", width)))
 }
 
 func renderDashboardTable(w io.Writer, rows []DashboardRow, cursor, width, height int, live livePaneCache) {

@@ -24,8 +24,8 @@ func TestDashboardActionMenuStatusAndAssistKeys(t *testing.T) {
 	if keys["S"] != "assist" {
 		t.Fatalf("assist key = %q, want assist on S", keys["S"])
 	}
-	if _, ok := keys["A"]; !ok {
-		t.Fatal("top-level archive shortcut A missing")
+	if _, ok := keys["x"]; !ok {
+		t.Fatal("top-level archive shortcut x missing")
 	}
 
 	mapKeys := dashboardMenuItems(DashboardRow{IsMap: true, SetRef: SetRef{SetID: "map-1"}})
@@ -37,7 +37,7 @@ func TestDashboardActionMenuStatusAndAssistKeys(t *testing.T) {
 }
 
 func TestDashboardStatusSubmenuItems(t *testing.T) {
-	want := []string{"c", "o", "k", "A", "u"}
+	want := []string{"c", "o", "k", "x", "u"}
 	var got []string
 	for _, item := range dashboardStatusMenuItems() {
 		got = append(got, item.key)
@@ -103,7 +103,7 @@ func TestDashboardStatusSubmenuHelp(t *testing.T) {
 	for _, e := range entries {
 		found[e.Key] = true
 	}
-	for _, key := range []string{"c", "o", "k", "A", "u", "esc"} {
+	for _, key := range []string{"c", "o", "k", "x", "u", "esc"} {
 		if !found[key] {
 			t.Errorf("status submenu help missing %q", key)
 		}

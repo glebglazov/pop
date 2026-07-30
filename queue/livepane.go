@@ -122,7 +122,7 @@ func styleHandoffKey(key string, state livePaneState) string {
 
 // dashboardActivityClusterPlain is the fixed-width, ANSI-free activity cluster
 // used for column-width math and the static status table.
-const dashboardActivityClusterPlain = "ivfS"
+const dashboardActivityClusterPlain = "IVFS"
 
 type rowActivityClusterItem struct {
 	key string
@@ -132,9 +132,9 @@ type rowActivityClusterItem struct {
 // rowActivityCluster lists the supervised activities shown on each dashboard row,
 // in the same order and casing as the action-menu handoff keys (ADR-0158).
 var rowActivityCluster = []rowActivityClusterItem{
-	{key: "i", tag: tmuxmod.TagSet},
-	{key: "v", tag: tmuxmod.TagVerify},
-	{key: "f", tag: tmuxmod.TagFold},
+	{key: "I", tag: tmuxmod.TagSet},
+	{key: "V", tag: tmuxmod.TagVerify},
+	{key: "F", tag: tmuxmod.TagFold},
 	{key: "S", tag: tmuxmod.TagAssist},
 }
 
