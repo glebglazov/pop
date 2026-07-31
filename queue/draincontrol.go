@@ -6,10 +6,9 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
-	"time"
+	"sync"
 
 	"github.com/glebglazov/pop/config"
-	"github.com/glebglazov/pop/debug"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
@@ -116,44 +115,21 @@ func LaunchDrain(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult,
 	if d.Project == nil {
 		d.Project = project.DefaultDeps()
 	}
-	// TEMPORARY step timings (POP_LOG=...): the handoff takes seconds with no
-	// feedback, and this is the stretch that spends them. Remove once the
-	// latency is understood and dealt with.
-	step := time.Now()
-	lap := func(what string) {
-		debug.Log("LaunchDrain %s: %s", what, time.Since(step))
-		step = time.Now()
-	}
-	scans, err := dashboardScansForDefinition(d, cfg, ref.DefPath)
-	lap("dashboardScansForDefinition")
+	// Bound-set drains — every resume of a live or parked set — resolve entirely
+	// from the SetRef's carried coordinates, forking no git (ADR-0167). Only the
+	// unbound branch below, which must choose a trunk among the repo's checkouts,
+	// earns the project scan fan-out.
+	scans, repoKey, err := dashboardBindContext(d, cfg, ref)
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
-	if len(scans) == 0 {
-		return DashboardDrainResult{}, fmt.Errorf("task set %s is no longer in a registered queue project", ref.SetID)
-	}
-	repoKey, err := scanRepoKey(d, scans[0])
-	lap("scanRepoKey")
-	if err != nil {
-		return DashboardDrainResult{}, err
-	}
-	rep, bare, err := resolveRepresentative(d, cfg, scans)
-	lap("resolveRepresentative")
-	if err != nil {
-		return DashboardDrainResult{}, err
-	}
-	dec := Decision{
-		Project:   repoName(scans, rep),
-		TaskSetID: ref.SetID,
-	}
+	dec := Decision{TaskSetID: ref.SetID}
 	if b, ok := bindingForSet(d.Tasks, repoKey, ref.SetID); ok && strings.TrimSpace(b.RuntimePath) != "" {
-		lap("bindingForSet")
+		dec.Project = repoName(scans, nil)
 		if err := validateBoundWorktree(d, scans[0].ProjectPath, b); err != nil {
 			return DashboardDrainResult{}, fmt.Errorf("bound worktree for %s is invalid (%v); repair git state or run `pop tasks unbind-worktree`", ref.SetID, err)
 		}
-		lap("validateBoundWorktree")
 		session, checkout, err := dashboardSetPaneCoords(d, cfg, scans, ref, b.RuntimePath)
-		lap("dashboardSetPaneCoords")
 		if err != nil {
 			return DashboardDrainResult{}, err
 		}
@@ -166,17 +142,29 @@ func LaunchDrain(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult,
 			RepoKey:        repoKey,
 		}
 	} else {
+		// An unbound row drains inline at the representative (the trunk), which is
+		// chosen by comparing every checkout registered for this definition path —
+		// the one question a single carried scan cannot answer. Provisioning a
+		// managed worktree or adopting an existing one is the Drain target picker's
+		// job (LaunchDrainTarget), which binds before this runs.
+		allScans, err := dashboardScansForDefinition(d, cfg, ref.DefPath)
+		if err != nil {
+			return DashboardDrainResult{}, err
+		}
+		if len(allScans) == 0 {
+			return DashboardDrainResult{}, fmt.Errorf("task set %s is no longer in a registered queue project", ref.SetID)
+		}
+		rep, bare, err := resolveRepresentative(d, cfg, allScans)
+		if err != nil {
+			return DashboardDrainResult{}, err
+		}
 		if rep == nil {
 			if bare {
 				return DashboardDrainResult{}, fmt.Errorf("%s", repoScanReason)
 			}
 			return DashboardDrainResult{}, fmt.Errorf("no Trunk worktree configured; set trunk = true in a global [repo.\"<path>\"] block")
 		}
-		// An unbound row drains inline at the representative (the trunk) and records
-		// no binding. Provisioning a managed worktree or adopting an existing one is
-		// the Drain target picker's job (LaunchDrainTarget), which binds before this
-		// runs; by the time LaunchDrain is reached the set is either already bound
-		// (handled above) or an explicit inline trunk drain.
+		dec.Project = repoName(allScans, rep)
 		dec.scan = *rep
 	}
 
@@ -191,7 +179,6 @@ func LaunchDrain(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult,
 	// rather than re-sending implement into the live process (ADR-0158). An
 	// idle tagged pane (bare shell) falls through so EnsureTaggedPane respawns.
 	paneID, err := runningTaggedPane(d.Tmux, dec.scan.SessionName, tmuxmod.TagSet, ref.SetID)
-	lap("runningTaggedPane")
 	if err != nil {
 		return DashboardDrainResult{}, err
 	} else if paneID != "" {
@@ -225,12 +212,9 @@ func LaunchVerify(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult
 	if d.Project == nil {
 		d.Project = project.DefaultDeps()
 	}
-	scans, err := dashboardScansForDefinition(d, cfg, ref.DefPath)
+	scans, _, err := dashboardBindContext(d, cfg, ref)
 	if err != nil {
 		return DashboardDrainResult{}, err
-	}
-	if len(scans) == 0 {
-		return DashboardDrainResult{}, fmt.Errorf("task set %s is no longer in a registered queue project", ref.SetID)
 	}
 	// The pane spawns into the checkout the verdict must judge: the row's runtime
 	// path when it resolves to one (a bound worktree or trunk), else the project
@@ -270,17 +254,35 @@ func dashboardScansForDefinition(d *Deps, cfg *config.Config, defPath string) ([
 	if err != nil {
 		return nil, err
 	}
+	// Each resolveScan forks git, so a serial loop costs one process per
+	// registered project — 2.7s across 55 projects, all of it in front of a verb
+	// the operator is waiting on (ADR-0167). The scans are independent, so fan
+	// out and keep the results in project order.
+	type scanResult struct {
+		scan projectScan
+		err  error
+	}
+	results := make([]scanResult, len(projects))
+	var wg sync.WaitGroup
+	for i, p := range projects {
+		wg.Add(1)
+		go func(idx int, ep project.ExpandedProject) {
+			defer wg.Done()
+			scan, err := resolveScan(d, ep)
+			results[idx] = scanResult{scan: scan, err: err}
+		}(i, p)
+	}
+	wg.Wait()
 	var scans []projectScan
-	for _, p := range projects {
-		scan, err := resolveScan(d, p)
-		if err != nil {
-			if outsideQueueScopeResolveError(err) {
+	for _, r := range results {
+		if r.err != nil {
+			if outsideQueueScopeResolveError(r.err) {
 				continue
 			}
-			return nil, err
+			return nil, r.err
 		}
-		if scan.DefinitionPath == defPath {
-			scans = append(scans, scan)
+		if r.scan.DefinitionPath == defPath {
+			scans = append(scans, r.scan)
 		}
 	}
 	return scans, nil
@@ -305,12 +307,9 @@ func LaunchAssist(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult
 	if d.Tmux == nil {
 		d.Tmux = tmuxmod.New()
 	}
-	scans, err := dashboardScansForDefinition(d, cfg, ref.DefPath)
+	scans, _, err := dashboardBindContext(d, cfg, ref)
 	if err != nil {
 		return DashboardDrainResult{}, err
-	}
-	if len(scans) == 0 {
-		return DashboardDrainResult{}, fmt.Errorf("task set %s is no longer in a registered queue project", ref.SetID)
 	}
 	projectPath := scans[0].ProjectPath
 	if strings.TrimSpace(ref.ProjectPath) != "" {
@@ -403,12 +402,9 @@ func LaunchFold(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult, 
 	if d.Tmux == nil {
 		d.Tmux = tmuxmod.New()
 	}
-	scans, err := dashboardScansForDefinition(d, cfg, ref.DefPath)
+	scans, _, err := dashboardBindContext(d, cfg, ref)
 	if err != nil {
 		return DashboardDrainResult{}, err
-	}
-	if len(scans) == 0 {
-		return DashboardDrainResult{}, fmt.Errorf("task set %s is no longer in a registered queue project", ref.SetID)
 	}
 	session, checkout, err := dashboardSetPaneCoords(d, cfg, scans, ref, ref.RuntimePath)
 	if err != nil {
@@ -447,7 +443,7 @@ func LaunchShell(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult,
 	if checkout == "" {
 		return DashboardDrainResult{}, fmt.Errorf("no checkout bound to this task set")
 	}
-	scans, err := dashboardScansForDefinition(d, cfg, ref.DefPath)
+	scans, _, err := dashboardBindContext(d, cfg, ref)
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
@@ -728,6 +724,7 @@ func dashboardBindContext(d *Deps, cfg *config.Config, ref SetRef) ([]projectSca
 	// "loading...".
 	if ref.ProjectPath != "" && ref.RepoKey != "" {
 		scan := projectScan{
+			Name:           ref.ProjectName,
 			ProjectPath:    ref.ProjectPath,
 			DefinitionPath: ref.DefPath,
 			RuntimePath:    ref.ProjectPath,

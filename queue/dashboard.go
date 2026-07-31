@@ -12,7 +12,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/glebglazov/pop/config"
-	"github.com/glebglazov/pop/debug"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
@@ -23,6 +22,13 @@ import (
 )
 
 const dashboardPollInterval = 2 * time.Second
+
+// dashboardHandoffPending is shown from the moment a Handoff verb dispatches
+// until it either quits the dashboard or reports why it could not. A handoff
+// ends the surface that could report progress, so without this a slow one is
+// indistinguishable from a key that did nothing — which is exactly how the
+// pre-ADR-0167 drain latency was experienced (ADR-0167).
+const dashboardHandoffPending = "handing off…"
 
 // The Work dashboard's row model and pure derivation live in the top-level work
 // package (ADR-0143); queue keeps these aliases so its row building, TUI model,
@@ -155,6 +161,12 @@ func (d *Deps) WorkDeps() *work.Deps {
 }
 
 type dashboardTickMsg struct{}
+
+// dashboardLivePrimeMsg carries the open-time live-pane cache, ahead of the
+// first poll's full snapshot rebuild.
+type dashboardLivePrimeMsg struct {
+	live livePaneCache
+}
 type dashboardRowsMsg struct {
 	snap DashboardSnapshot
 	live livePaneCache
@@ -966,20 +978,27 @@ func (m QueueDashboard) FilterActive() bool {
 	return m.filterMode
 }
 
+// Init starts the poll and, alongside it, primes the live-pane affordance cache.
+// The model is constructed with a snapshot but an empty cache, so without this
+// the first paint renders every handoff key dark — telling the operator "this
+// key spawns" about a set whose pane is already running, and only correcting
+// itself a poll later. The priming is one tmux list query, not a snapshot
+// rebuild, so it costs the open nothing measurable.
 func (m QueueDashboard) Init() tea.Cmd {
-	return dashboardTick()
+	return tea.Batch(dashboardTick(), m.primeLiveCache())
+}
+
+// primeLiveCache loads the live-pane cache without rebuilding the snapshot,
+// reusing the same message the poll delivers so there is one apply path.
+func (m QueueDashboard) primeLiveCache() tea.Cmd {
+	return func() tea.Msg {
+		return dashboardLivePrimeMsg{live: loadLivePaneCache(m.d)}
+	}
 }
 
 func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		// TEMPORARY key trace (POP_LOG=...): records what the dashboard actually
-		// matches on, so a key that "does nothing" can be told apart from a key
-		// that never arrives. Remove once the uppercase-verb bug is settled.
-		if kpm, ok := msg.(tea.KeyPressMsg); ok {
-			debug.Log("dashboard key: String=%q Text=%q Code=%d(%q) Mod=%d menu=%t detail=%t",
-				msg.String(), kpm.Text, kpm.Code, string(kpm.Code), kpm.Mod, m.menu != nil, m.detail != nil)
-		}
 		// Any keypress is a deliberate interaction, so it clears the sticky action
 		// error. A keypress that triggers a fresh verb repopulates actionErr when
 		// that verb's result message arrives.
@@ -1115,6 +1134,12 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 	case ui.SpinnerTickMsg:
+		return m, nil
+	case dashboardLivePrimeMsg:
+		if m.live == nil {
+			m.live = &livePaneCache{}
+		}
+		*m.live = msg.live
 		return m, nil
 	case dashboardRowsMsg:
 		m.err = msg.err
@@ -1519,12 +1544,13 @@ func (m QueueDashboard) dispatchMenuAction(action dashboardMenuAction, row Dashb
 	m.err = nil
 	switch action {
 	case menuActionDrain:
+		m.statusMsg = dashboardHandoffPending
 		return m, m.launchDrain(row)
 	case menuActionVerify:
 		if !dashboardVerifyEligible(row) {
 			return m, nil
 		}
-		m.statusMsg = ""
+		m.statusMsg = dashboardHandoffPending
 		return m, m.launchVerify(row)
 	case menuActionBind:
 		m.bind = &dashboardBindModal{row: row, loading: true}
@@ -1548,7 +1574,7 @@ func (m QueueDashboard) dispatchMenuAction(action dashboardMenuAction, row Dashb
 		m.cols.syncNatural(m.snap.Rows)
 		return m, m.toggleAutoDrain(row)
 	case menuActionAssist:
-		m.statusMsg = ""
+		m.statusMsg = dashboardHandoffPending
 		return m, m.launchAssist(row)
 	case menuActionFold:
 		if !dashboardFoldEligible(row) {
@@ -1558,7 +1584,7 @@ func (m QueueDashboard) dispatchMenuAction(action dashboardMenuAction, row Dashb
 			m.actionErr = err
 			return m, nil
 		}
-		m.statusMsg = ""
+		m.statusMsg = dashboardHandoffPending
 		return m, m.launchFold(row)
 	case menuActionUnpark:
 		if !row.Parked {
@@ -1572,7 +1598,7 @@ func (m QueueDashboard) dispatchMenuAction(action dashboardMenuAction, row Dashb
 			m.statusMsg = "no checkout bound to this task set"
 			return m, nil
 		}
-		m.statusMsg = ""
+		m.statusMsg = dashboardHandoffPending
 		return m, m.launchShell(row)
 	case menuActionArchive:
 		m.statusMsg = ""
