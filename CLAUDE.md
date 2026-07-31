@@ -2,6 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Working in this repo
+
+Verify with one chained call: `go build ./... && go vet ./<pkg>/... && go test
+./<pkg>/...`; `make test` is the whole-tree gate. Package map, the oversized
+files to read in ranges, and where agent-CLI wire facts live:
+`docs/agents/navigation.md` — read it before grepping for a symbol.
+
 ## Agent skills
 
 ### Issue tracker
