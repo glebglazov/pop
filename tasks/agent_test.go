@@ -590,10 +590,10 @@ func TestCursorAdapterDetectsBracketedReasoning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !adapter.ArgsContainReasoning([]string{"--model", "composer-2.5[effort=high]"}) {
+	if !adapter.ReasoningCapability().argsContainReasoning([]string{"--model", "composer-2.5[effort=high]"}) {
 		t.Fatal("cursor adapter did not detect bracketed effort")
 	}
-	if adapter.ArgsContainReasoning([]string{"--model", "composer-2.5"}) {
+	if adapter.ReasoningCapability().argsContainReasoning([]string{"--model", "composer-2.5"}) {
 		t.Fatal("cursor adapter detected reasoning in a plain model token")
 	}
 }
@@ -617,9 +617,9 @@ func TestPiAdapterDetectsThinkingReasoning(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := adapter.ArgsContainReasoning(tt.args)
+			got := adapter.ReasoningCapability().argsContainReasoning(tt.args)
 			if got != tt.want {
-				t.Fatalf("ArgsContainReasoning(%#v) = %v, want %v", tt.args, got, tt.want)
+				t.Fatalf("argsContainReasoning(%#v) = %v, want %v", tt.args, got, tt.want)
 			}
 		})
 	}

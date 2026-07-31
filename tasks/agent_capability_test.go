@@ -278,6 +278,52 @@ func TestAgentPeakInputCapabilityValidate(t *testing.T) {
 	})
 }
 
+func TestAgentReasoningCapabilityValidate(t *testing.T) {
+	t.Run("unset is invalid", func(t *testing.T) {
+		err := (AgentReasoningCapability{}).validate("claude")
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "claude") || !strings.Contains(err.Error(), "reasoning") {
+			t.Fatalf("error should name preset and capability, got %v", err)
+		}
+	})
+	t.Run("supported requires SpecTokens", func(t *testing.T) {
+		err := (AgentReasoningCapability{Kind: CapabilitySupported, Contains: func([]string) bool { return false }}).validate("claude")
+		if err == nil || !strings.Contains(err.Error(), "SpecTokens") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("supported requires Contains", func(t *testing.T) {
+		err := (AgentReasoningCapability{Kind: CapabilitySupported, SpecTokens: func(string) []string { return nil }}).validate("claude")
+		if err == nil || !strings.Contains(err.Error(), "Contains") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("supported with SpecTokens and Contains passes", func(t *testing.T) {
+		cap := AgentReasoningCapability{
+			Kind:       CapabilitySupported,
+			SpecTokens: func(string) []string { return nil },
+			Contains:   func([]string) bool { return false },
+		}
+		if err := cap.validate("claude"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("blind requires Reason", func(t *testing.T) {
+		err := (AgentReasoningCapability{Kind: CapabilityBlind}).validate("cursor")
+		if err == nil || !strings.Contains(err.Error(), "Reason") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("blind with Reason passes", func(t *testing.T) {
+		cap := AgentReasoningCapability{Kind: CapabilityBlind, Reason: "no separate reasoning parameter"}
+		if err := cap.validate("cursor"); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
 func TestPresetUsageAndCostCapabilitiesDeclared(t *testing.T) {
 	// validate is not yet wired into construction; assert every preset's
 	// declared stance would pass so the later switch-on slice is a one-liner.
@@ -306,6 +352,9 @@ func TestPresetUsageAndCostCapabilitiesDeclared(t *testing.T) {
 		}
 		if err := adapter.PeakInputCapability().validate(preset); err != nil {
 			t.Fatalf("%s peak-input: %v", preset, err)
+		}
+		if err := adapter.ReasoningCapability().validate(preset); err != nil {
+			t.Fatalf("%s reasoning: %v", preset, err)
 		}
 	}
 }

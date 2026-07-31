@@ -218,3 +218,40 @@ func (c AgentPeakInputCapability) validate(preset string) error {
 		return fmt.Errorf("agent preset %q: peak-input capability has unknown kind %d", preset, c.Kind)
 	}
 }
+
+// AgentReasoningCapability is a preset's declared stance on emitting and
+// detecting a reasoning/thinking level for the Effort ladder (ADR-0049,
+// ADR-0164, ADR-0166). Emitting and detecting are a matched pair: one
+// declaration per preset so they cannot drift apart. A preset with no
+// separate reasoning parameter is Blind; kimi's env channel is EnvKey on the
+// same struct, not a parallel field.
+type AgentReasoningCapability struct {
+	Kind       CapabilityKind
+	SpecTokens func(reasoning string) []string // required iff Supported
+	Contains   func(args []string) bool        // required iff Supported; optional for Blind
+	EnvKey     string                          // iff Supported and env-channel (kimi)
+	Reason     string                          // required iff Blind
+}
+
+// validate reports whether this reasoning stance is a complete declaration.
+func (c AgentReasoningCapability) validate(preset string) error {
+	switch c.Kind {
+	case CapabilitySupported:
+		if c.SpecTokens == nil {
+			return fmt.Errorf("agent preset %q: reasoning capability is Supported but SpecTokens is nil", preset)
+		}
+		if c.Contains == nil {
+			return fmt.Errorf("agent preset %q: reasoning capability is Supported but Contains is nil", preset)
+		}
+		return nil
+	case CapabilityBlind:
+		if strings.TrimSpace(c.Reason) == "" {
+			return fmt.Errorf("agent preset %q: reasoning capability is Blind but Reason is empty", preset)
+		}
+		return nil
+	case capabilityUnset:
+		return fmt.Errorf("agent preset %q: reasoning capability is unset", preset)
+	default:
+		return fmt.Errorf("agent preset %q: reasoning capability has unknown kind %d", preset, c.Kind)
+	}
+}

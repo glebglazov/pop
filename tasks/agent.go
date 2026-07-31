@@ -174,13 +174,8 @@ type AgentAdapter interface {
 	StreamRenderCapability() AgentStreamRenderCapability
 	TurnCapability() AgentTurnCapability
 	PeakInputCapability() AgentPeakInputCapability
+	ReasoningCapability() AgentReasoningCapability
 	AssistanceInvocation(AgentAssistanceRequest) (*AgentAssistanceInvocation, error)
-	// ReasoningSpecTokens renders an Effort ladder's reasoning level as tokens
-	// appended to an Agent-preset spec. Most presets take a CLI flag; a preset
-	// with no reasoning flag renders an environment assignment instead, which its
-	// own invocation hoists out of argv (ADR-0164).
-	ReasoningSpecTokens(reasoning string) []string
-	ArgsContainReasoning(args []string) bool
 	// Models returns the preset's curated, recommended-first model aliases that
 	// Pop ships for display. Advisory only; never a validation gate (ADR-0019).
 	Models() []string
@@ -206,6 +201,11 @@ var agentAdapters = map[string]AgentAdapter{
 		streamRender: AgentStreamRenderCapability{Kind: CapabilitySupported, Render: renderClaudeEvent},
 		turns:        AgentTurnCapability{Kind: CapabilitySupported, Extract: claudeTurnCount},
 		peakInput:    AgentPeakInputCapability{Kind: CapabilitySupported, Extract: claudePeakInput},
+		reasoning: AgentReasoningCapability{
+			Kind:       CapabilitySupported,
+			SpecTokens: claudeReasoningSpecTokens,
+			Contains:   claudeArgsContainReasoning,
+		},
 		models:      []string{"opus", "sonnet", "haiku", "fable"},
 	}),
 	"opencode": newPresetAgentAdapter(presetAgentSpec{
@@ -221,6 +221,7 @@ var agentAdapters = map[string]AgentAdapter{
 		streamRender:   AgentStreamRenderCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no renderable assistant/tool_result message shape"},
 		turns:          AgentTurnCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no message boundary"},
 		peakInput:      AgentPeakInputCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no per-call usage block"},
+		reasoning:      AgentReasoningCapability{Kind: CapabilityBlind, Reason: "opencode's CLI carries no reasoning or thinking level parameter"},
 		models:         []string{"opencode/kimi-k2.6", "opencode/gpt-5.5", "opencode/claude-opus-4-8", "opencode/claude-sonnet-4-6"},
 		modelsInstallDependent: true,
 	}),
@@ -242,6 +243,11 @@ var agentAdapters = map[string]AgentAdapter{
 		streamRender:           AgentStreamRenderCapability{Kind: CapabilityBlind, Reason: "cursor stream-json events carry no renderable assistant/tool_result message shape"},
 		turns:                  AgentTurnCapability{Kind: CapabilitySupported, Extract: cursorTurnCount},
 		peakInput:              AgentPeakInputCapability{Kind: CapabilityBlind, Reason: "cursor reports token usage only as a whole-run total on result"},
+		reasoning: AgentReasoningCapability{
+			Kind:     CapabilityBlind,
+			Reason:   "cursor selects a full model name per effort tier instead of a separate reasoning parameter",
+			Contains: cursorArgsContainReasoning,
+		},
 		models:                 []string{"auto", "composer-2.5", "gpt-5.3-codex"},
 		modelsInstallDependent: true,
 	}),
@@ -262,6 +268,11 @@ var agentAdapters = map[string]AgentAdapter{
 		streamRender:           AgentStreamRenderCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no renderable assistant/tool_result message shape"},
 		turns:                  AgentTurnCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no verifiable turn boundary"},
 		peakInput:              AgentPeakInputCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no per-call usage block"},
+		reasoning: AgentReasoningCapability{
+			Kind:       CapabilitySupported,
+			SpecTokens: codexReasoningSpecTokens,
+			Contains:   codexArgsContainReasoning,
+		},
 		models:                 []string{"gpt-5.5", "gpt-5.4-mini"},
 		modelsInstallDependent: true,
 	}),
@@ -278,6 +289,11 @@ var agentAdapters = map[string]AgentAdapter{
 		streamRender:   AgentStreamRenderCapability{Kind: CapabilityBlind, Reason: "pi jsonl events carry no renderable assistant/tool_result message shape"},
 		turns:          AgentTurnCapability{Kind: CapabilitySupported, Extract: piTurnCount},
 		peakInput:      AgentPeakInputCapability{Kind: CapabilitySupported, Extract: piPeakInput},
+		reasoning: AgentReasoningCapability{
+			Kind:       CapabilitySupported,
+			SpecTokens: piReasoningSpecTokens,
+			Contains:   piArgsContainReasoning,
+		},
 		models:         []string{"opencode-go/kimi-k2.6", "opencode-go/qwen3.7-max", "opencode-go/minimax-m3", "opencode-go/deepseek-v4-flash"},
 		modelsInstallDependent: true,
 	}),
@@ -290,7 +306,6 @@ var agentAdapters = map[string]AgentAdapter{
 		autoFormat:      AgentOutputKimiStreamJSON,
 		autoArgs:        []string{"--output-format", "stream-json"},
 		env:             []string{"KIMI_CODE_NO_AUTO_UPDATE=1"},
-		reasoningEnvKey: "KIMI_MODEL_THINKING_EFFORT",
 		assistance:      AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "kimi"}},
 		usage:           AgentUsageCapability{Kind: CapabilityBlind, Reason: "kimi stream usage has not been verified against a captured run"},
 		cost:            AgentCostCapability{Kind: CapabilityBlind, Reason: "kimi stream cost has not been verified against a captured run"},
@@ -299,6 +314,12 @@ var agentAdapters = map[string]AgentAdapter{
 		streamRender:    AgentStreamRenderCapability{Kind: CapabilityBlind, Reason: "kimi stream rendering has not been verified against a captured run"},
 		turns:           AgentTurnCapability{Kind: CapabilityBlind, Reason: "kimi stream turn count has not been verified against a captured run"},
 		peakInput:       AgentPeakInputCapability{Kind: CapabilityBlind, Reason: "kimi stream peak input has not been verified against a captured run"},
+		reasoning: AgentReasoningCapability{
+			Kind:       CapabilitySupported,
+			EnvKey:     "KIMI_MODEL_THINKING_EFFORT",
+			SpecTokens: kimiReasoningSpecTokens,
+			Contains:   kimiArgsContainReasoning,
+		},
 		models:          []string{"moonshot-ai/kimi-k3", "moonshot-ai/kimi-k2.7-code", "moonshot-ai/kimi-k2.7-code-highspeed"},
 		modelsInstallDependent: true,
 	}),
@@ -371,11 +392,6 @@ type presetAgentSpec struct {
 	// layered over pop's own environment, for knobs the CLI exposes nowhere
 	// else (ADR-0164).
 	env []string
-	// reasoningEnvKey names the environment variable this preset reads its
-	// thinking level from, for a preset whose CLI has no reasoning flag at all
-	// (kimi, ADR-0164). Empty for every preset that takes reasoning as an
-	// argument.
-	reasoningEnvKey string
 	assistance      AgentAssistanceCapability
 	availability    AgentAvailabilityProbeCapability
 	usage           AgentUsageCapability
@@ -385,6 +401,7 @@ type presetAgentSpec struct {
 	streamRender    AgentStreamRenderCapability
 	turns           AgentTurnCapability
 	peakInput       AgentPeakInputCapability
+	reasoning       AgentReasoningCapability
 	models          []string
 	// modelsInstallDependent marks a curated list whose aliases are resolved by
 	// the local install's own provider config rather than being stable,
@@ -406,97 +423,6 @@ func newPresetAgentAdapter(spec presetAgentSpec) AgentAdapter {
 }
 
 func (a *presetAgentAdapter) Preset() string { return a.preset }
-
-func (a *presetAgentAdapter) ReasoningSpecTokens(reasoning string) []string {
-	reasoning = strings.TrimSpace(reasoning)
-	if reasoning == "" {
-		return nil
-	}
-	if a.reasoningEnvKey != "" {
-		// A level already exported to pop is hand-set and outranks the ladder,
-		// exactly as a hand-set reasoning argument does.
-		if _, handSet := os.LookupEnv(a.reasoningEnvKey); handSet {
-			return nil
-		}
-		return []string{a.reasoningEnvKey + "=" + reasoning}
-	}
-	switch a.preset {
-	case "claude":
-		return []string{"--effort", reasoning}
-	case "codex":
-		return []string{"-c", fmt.Sprintf(`model_reasoning_effort="%s"`, reasoning)}
-	case "pi":
-		return []string{"--thinking", reasoning}
-	default:
-		return nil
-	}
-}
-
-func (a *presetAgentAdapter) ArgsContainReasoning(args []string) bool {
-	if a.reasoningEnvKey != "" {
-		for _, arg := range args {
-			if strings.HasPrefix(arg, a.reasoningEnvKey+"=") {
-				return true
-			}
-		}
-		return false
-	}
-	switch a.preset {
-	case "claude":
-		for _, arg := range args {
-			if arg == "--effort" || strings.HasPrefix(arg, "--effort=") {
-				return true
-			}
-		}
-	case "codex":
-		for i, arg := range args {
-			if arg == "-c" {
-				if i+1 < len(args) && isCodexReasoningConfig(args[i+1]) {
-					return true
-				}
-				continue
-			}
-			if strings.HasPrefix(arg, "-c=") && isCodexReasoningConfig(strings.TrimPrefix(arg, "-c=")) {
-				return true
-			}
-		}
-	case "cursor":
-		for _, arg := range args {
-			if strings.Contains(arg, "[") && strings.Contains(arg, "]") && strings.Contains(arg, "effort=") {
-				return true
-			}
-		}
-	case "pi":
-		for i, arg := range args {
-			if arg == "--thinking" {
-				return true
-			}
-			if strings.HasPrefix(arg, "--thinking=") {
-				return true
-			}
-			if arg == "--model" {
-				if i+1 < len(args) && piModelTokenContainsThinking(args[i+1]) {
-					return true
-				}
-				continue
-			}
-			if strings.HasPrefix(arg, "--model=") && piModelTokenContainsThinking(strings.TrimPrefix(arg, "--model=")) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func isCodexReasoningConfig(arg string) bool {
-	key, _, found := strings.Cut(strings.TrimSpace(arg), "=")
-	return found && strings.TrimSpace(key) == "model_reasoning_effort"
-}
-
-func piModelTokenContainsThinking(arg string) bool {
-	model, thinking, found := strings.Cut(strings.TrimSpace(arg), ":")
-	return found && strings.TrimSpace(model) != "" && strings.TrimSpace(thinking) != ""
-}
 
 func (a *presetAgentAdapter) HeadlessInvocation(req AgentHeadlessRequest) (*AgentInvocation, error) {
 	if err := validateAgentOutputMode(req.OutputMode); err != nil {
@@ -560,7 +486,7 @@ func (a *presetAgentAdapter) ownsEnvKey(key string) bool {
 	if key == "" {
 		return false
 	}
-	if key == a.reasoningEnvKey {
+	if key == a.reasoning.EnvKey {
 		return true
 	}
 	for _, entry := range a.env {
@@ -613,6 +539,10 @@ func (a *presetAgentAdapter) TurnCapability() AgentTurnCapability {
 
 func (a *presetAgentAdapter) PeakInputCapability() AgentPeakInputCapability {
 	return a.peakInput
+}
+
+func (a *presetAgentAdapter) ReasoningCapability() AgentReasoningCapability {
+	return a.reasoning
 }
 
 func (a *presetAgentAdapter) Models() []string {
@@ -704,13 +634,13 @@ func (a customAgentAdapter) PeakInputCapability() AgentPeakInputCapability {
 	return AgentPeakInputCapability{Kind: CapabilityBlind, Reason: "custom agent commands produce no structured stream"}
 }
 
+func (a customAgentAdapter) ReasoningCapability() AgentReasoningCapability {
+	return AgentReasoningCapability{Kind: CapabilityBlind, Reason: "custom agent commands carry no reasoning parameter"}
+}
+
 func (a customAgentAdapter) AssistanceInvocation(req AgentAssistanceRequest) (*AgentAssistanceInvocation, error) {
 	return nil, fmt.Errorf("custom agent adapter does not support attended assistance")
 }
-
-func (a customAgentAdapter) ReasoningSpecTokens(reasoning string) []string { return nil }
-
-func (a customAgentAdapter) ArgsContainReasoning(args []string) bool { return false }
 
 func (a customAgentAdapter) Models() []string { return nil }
 
@@ -945,8 +875,11 @@ func resolveTaskAgentSpecForEffortWithConfig(agentSpec, effort string, effortExp
 	args := append([]string{name}, extraArgs...)
 	adapter := agentAdapters[name]
 	args = append(args, "--model", effortModelTokenForAgent(name, bundles[0], adapter, extraArgs))
-	if adapter != nil && !adapter.ArgsContainReasoning(extraArgs) {
-		args = append(args, adapter.ReasoningSpecTokens(bundles[0].Reasoning)...)
+	if adapter != nil {
+		reasoning := adapter.ReasoningCapability()
+		if !reasoning.argsContainReasoning(extraArgs) {
+			args = append(args, reasoning.specTokens(bundles[0].Reasoning)...)
+		}
 	}
 	for i, arg := range args {
 		args[i] = shellQuote(arg)
