@@ -1,6 +1,5 @@
 ---
-status: superseded
-superseded_by: ADR-0044
+status: superseded by ADR-0044
 ---
 
 # Tasks may declare a per-task agent in the Manifest

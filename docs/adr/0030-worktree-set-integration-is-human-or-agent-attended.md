@@ -1,6 +1,5 @@
 ---
-status: superseded
-superseded_by: ADR-0070
+status: superseded by ADR-0070
 ---
 
 # Worktree-set integration is human or agent attended

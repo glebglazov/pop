@@ -1,6 +1,5 @@
 ---
-status: superseded
-superseded_by: ADR-0068
+status: superseded by ADR-0068
 ---
 
 # Topic command derives once per pane

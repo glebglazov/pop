@@ -1,6 +1,5 @@
 ---
-status: superseded
-superseded_by: ADR-0064
+status: superseded by ADR-0064
 ---
 
 # Integrate is a per-component consent wizard

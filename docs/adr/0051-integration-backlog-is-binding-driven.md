@@ -1,6 +1,5 @@
 ---
-status: superseded
-superseded_by: ADR-0070
+status: superseded by ADR-0070
 ---
 
 # Integration backlog membership is binding-driven, not mergeability-record-driven

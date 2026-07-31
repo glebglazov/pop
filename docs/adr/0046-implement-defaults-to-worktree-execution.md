@@ -1,6 +1,5 @@
 ---
-status: superseded
-superseded_by: ADR-0052
+status: superseded by ADR-0052
 ---
 
 # Implement defaults whole-set drains to worktree execution

@@ -1,6 +1,5 @@
 ---
-status: superseded
-superseded_by: ADR-0039
+status: superseded by ADR-0039
 ---
 
 # Workload target references resolve from the current working directory

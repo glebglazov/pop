@@ -1,6 +1,5 @@
 ---
-status: superseded
-superseded_by: ADR-0094
+status: superseded by ADR-0094
 ---
 
 # Verifier runs persist Captured verify streams

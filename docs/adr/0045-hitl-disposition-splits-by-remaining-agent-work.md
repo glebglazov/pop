@@ -1,6 +1,5 @@
 ---
-status: superseded
-superseded_by: ADR-0087
+status: superseded by ADR-0087
 ---
 
 # HITL disposition splits by remaining agent work (UNVERIFIED vs BLOCKED)
