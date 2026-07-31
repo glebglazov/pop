@@ -92,13 +92,19 @@ func claudeActualModel(events []streamEventRecord) string {
 	return ""
 }
 
-// claudeTokenUsage derives per-attempt token spend from one stored Captured
-// claude stream. Claude reports cumulative usage on the final result event
-// (and on any event carrying Anthropic API-style usage fields), so we sum
-// every reported usage block and treat a present zero as a reported value.
-// Cache write maps from cache_creation_input_tokens; cache read from
-// cache_read_input_tokens. Other claude events (e.g. task_progress) use a
-// different usage shape and are ignored because they lack the API fields.
+// claudeTokenUsage is claude's Usage extraction rule (ADR-0160).
+//
+// Authoritative events: each per-API-call `usage` block Claude emits for an
+// assistant turn. In the stream-json wire format those blocks are aggregated
+// onto events with a top-level `usage` object under Anthropic API field names
+// (input_tokens, output_tokens, cache_read_input_tokens,
+// cache_creation_input_tokens) — typically the terminal `result` event.
+// Nested message.usage on streamed assistant partials is not authoritative
+// (duplicated incomplete figures); other shapes (e.g. task_progress) lack the
+// API fields and are ignored.
+//
+// Semantics: accumulate — sum every matching block. A present zero is a
+// reported value (Has* true), not a Token-blind absence.
 func claudeTokenUsage(events []streamEventRecord) TokenUsage {
 	var u TokenUsage
 	for _, ev := range events {

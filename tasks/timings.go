@@ -43,8 +43,9 @@ type AttemptTiming struct {
 }
 
 // TokenUsage is the per-attempt token spend derived from a structured agent
-// stream. Presence flags distinguish a reported zero from an absent field;
-// a zero-value TokenUsage means the stream reported no usage.
+// stream via a Usage extraction rule. Presence flags distinguish a reported
+// zero from an absent field; a zero-value TokenUsage (no Has* flags) is a
+// Token-blind run — usage unknown, not zero.
 type TokenUsage struct {
 	Input         int64
 	Output        int64
@@ -163,10 +164,6 @@ var toolTimingParsers = map[string]func([]streamEventRecord) ([]ToolTiming, []to
 
 var actualModelParsers = map[string]func([]streamEventRecord) string{
 	"claude": claudeActualModel,
-}
-
-var tokenUsageParsers = map[string]func([]streamEventRecord) TokenUsage{
-	"claude": claudeTokenUsage,
 }
 
 // modelTime derives Model time: the attempt's total duration minus the union
@@ -390,10 +387,7 @@ func deriveAttemptTiming(header streamHeaderRecord, footer streamFooterRecord, e
 			model = modelTime(windows, footer.DurationMS)
 		}
 	}
-	var tokens TokenUsage
-	if parse := tokenUsageParsers[header.Agent]; parse != nil {
-		tokens = parse(events)
-	}
+	tokens := extractTokenUsage(header.Agent, events)
 	return AttemptTiming{
 		Agent:          header.Agent,
 		RequestedAgent: requestedAgent,

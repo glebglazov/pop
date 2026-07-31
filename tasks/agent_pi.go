@@ -158,3 +158,55 @@ func piToolHint(args json.RawMessage) string {
 		return firstNonEmpty(p.Path, p.FilePath, p.Command, p.Pattern, p.URL, p.Query)
 	})
 }
+
+// piTokenUsage is pi's Usage extraction rule (ADR-0160).
+//
+// Authoritative events: `message_end` events whose message carries a usage
+// block under keys input / output / cacheRead / cacheWrite. That block is
+// the settled per-message total. `message_update` deltas also carry a
+// *cumulative* usage block on every partial — summing those over-counts by
+// roughly the number of deltas per message (measured ~4× on real runs).
+//
+// Semantics: accumulate — sum every message_end usage block; ignore all
+// message_update deltas. A present usage object reports its fields even
+// when zero (Has* true), distinct from a Token-blind absence.
+func piTokenUsage(events []streamEventRecord) TokenUsage {
+	var u TokenUsage
+	for _, ev := range events {
+		var event struct {
+			Type    string `json:"type"`
+			Message struct {
+				Usage *struct {
+					Input      *int64 `json:"input"`
+					Output     *int64 `json:"output"`
+					CacheRead  *int64 `json:"cacheRead"`
+					CacheWrite *int64 `json:"cacheWrite"`
+				} `json:"usage"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(ev.Raw), &event); err != nil {
+			continue
+		}
+		if event.Type != "message_end" || event.Message.Usage == nil {
+			continue
+		}
+		usage := event.Message.Usage
+		if v := usage.Input; v != nil {
+			u.Input += *v
+			u.HasInput = true
+		}
+		if v := usage.Output; v != nil {
+			u.Output += *v
+			u.HasOutput = true
+		}
+		if v := usage.CacheRead; v != nil {
+			u.CacheRead += *v
+			u.HasCacheRead = true
+		}
+		if v := usage.CacheWrite; v != nil {
+			u.CacheWrite += *v
+			u.HasCacheWrite = true
+		}
+	}
+	return u
+}

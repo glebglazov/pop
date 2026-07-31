@@ -153,3 +153,59 @@ func cursorToolHint(args json.RawMessage) string {
 		return firstNonEmpty(p.Command, p.Pattern, p.GlobPattern, p.Query, p.Path, p.URL)
 	})
 }
+
+// cursorTokenUsage is cursor's Usage extraction rule (ADR-0160).
+//
+// Authoritative event: the terminal `result` event's top-level `usage`
+// object, under camelCase keys (inputTokens, outputTokens, cacheReadTokens,
+// cacheWriteTokens). That block is the whole-run total — cursor emits it
+// exactly once.
+//
+// Semantics: replace — read that one event; sum nothing. A present zero is
+// a reported value (Has* true), not a Token-blind absence.
+func cursorTokenUsage(events []streamEventRecord) TokenUsage {
+	var u TokenUsage
+	found := false
+	for _, ev := range events {
+		var event struct {
+			Type  string `json:"type"`
+			Usage *struct {
+				InputTokens      *int64 `json:"inputTokens"`
+				OutputTokens     *int64 `json:"outputTokens"`
+				CacheReadTokens  *int64 `json:"cacheReadTokens"`
+				CacheWriteTokens *int64 `json:"cacheWriteTokens"`
+			} `json:"usage"`
+		}
+		if err := json.Unmarshal([]byte(ev.Raw), &event); err != nil {
+			continue
+		}
+		if event.Type != "result" || event.Usage == nil {
+			continue
+		}
+		// Replace: the last matching result wins (cursor emits one; fixtures
+		// that emit more still must not accumulate).
+		var next TokenUsage
+		if v := event.Usage.InputTokens; v != nil {
+			next.Input = *v
+			next.HasInput = true
+		}
+		if v := event.Usage.OutputTokens; v != nil {
+			next.Output = *v
+			next.HasOutput = true
+		}
+		if v := event.Usage.CacheReadTokens; v != nil {
+			next.CacheRead = *v
+			next.HasCacheRead = true
+		}
+		if v := event.Usage.CacheWriteTokens; v != nil {
+			next.CacheWrite = *v
+			next.HasCacheWrite = true
+		}
+		u = next
+		found = true
+	}
+	if !found {
+		return TokenUsage{}
+	}
+	return u
+}
