@@ -1234,3 +1234,87 @@ func TestHumanizeBytes(t *testing.T) {
 		}
 	}
 }
+
+func TestStreamRenderBlindAdapterRefusesInsteadOfRawJSON(t *testing.T) {
+	env := streamFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	rawLine := `{"type":"assistant","message":{"content":[{"type":"text","text":"opaque json soup"}]}}`
+	events := []streamEventRecord{
+		{Type: "event", AtMS: 100, Raw: rawLine},
+	}
+	writeTimingStreamWithEvents(t, taskStreamDir(env.demoDir(), "01-a.md"), "attempt-001.jsonl.gz", "codex", "", 1, base, "completed", 60_000, events)
+
+	result, err := StreamWith(env.deps(), nil, nil, StreamOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "demo/01-a.md",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventsOut := result.Tasks[0].Attempts[0].Events
+	if len(eventsOut) != 1 || eventsOut[0].Type != "render_refused" {
+		t.Fatalf("events = %#v, want one render_refused", eventsOut)
+	}
+	if !strings.Contains(eventsOut[0].Text, "codex") || !strings.Contains(eventsOut[0].Text, "cannot be normalized") {
+		t.Fatalf("refusal should name codex and state normalization is impossible: %q", eventsOut[0].Text)
+	}
+	cap, _ := ResolveAgentAdapter("codex")
+	if !strings.Contains(eventsOut[0].Text, cap.StreamRenderCapability().Reason) {
+		t.Fatalf("refusal should carry the declared reason: %q", eventsOut[0].Text)
+	}
+
+	var buf bytes.Buffer
+	RenderStream(&buf, result, RenderStreamOptions{})
+	out := buf.String()
+	if strings.Contains(out, rawLine) || strings.Contains(out, "opaque json soup") {
+		t.Fatalf("rendered output must not dump raw JSON:\n%s", out)
+	}
+	if !strings.Contains(out, "cannot be normalized") {
+		t.Fatalf("rendered output should report normalization refusal:\n%s", out)
+	}
+}
+
+func TestStreamRenderClaudeReplayUnchanged(t *testing.T) {
+	env := streamFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	claudeEvents := []streamEventRecord{
+		{Type: "event", AtMS: 5, Raw: `{"type":"system","subtype":"init","model":"claude-sonnet-4-20250514"}`},
+		{Type: "event", AtMS: 100, Raw: `{"type":"assistant","message":{"content":[{"type":"text","text":"Hello world"}]}}`},
+		{Type: "event", AtMS: 2000, Raw: `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu_1","name":"Bash","input":{"command":"ls -la"}}]}}`},
+		{Type: "event", AtMS: 3000, Raw: `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu_1","content":[{"type":"text","text":"file1.txt\nfile2.txt"}]}]}}`},
+	}
+	writeTimingStreamWithEvents(t, taskStreamDir(env.demoDir(), "02-b.md"), "attempt-001.jsonl.gz", "claude", "", 1, base, "completed", 60_000, claudeEvents)
+
+	result, err := StreamWith(env.deps(), nil, nil, StreamOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "demo/02-b.md",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	RenderStream(&buf, result, RenderStreamOptions{})
+	out := buf.String()
+
+	wantFragments := []string{
+		"system init (model: claude-sonnet-4-20250514)",
+		"+5ms",
+		"+100ms",
+		"Hello world",
+		"+2s",
+		"→ Bash",
+		`{"command":"ls -la"}`,
+		"+3s",
+		"file1.txt",
+		"file2.txt",
+	}
+	for _, frag := range wantFragments {
+		if !strings.Contains(out, frag) {
+			t.Fatalf("claude replay missing %q:\n%s", frag, out)
+		}
+	}
+	if strings.Contains(out, "cannot be normalized") {
+		t.Fatalf("claude replay should not show render refusal:\n%s", out)
+	}
+}

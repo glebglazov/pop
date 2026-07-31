@@ -171,6 +171,7 @@ type AgentAdapter interface {
 	CostCapability() AgentCostCapability
 	ToolTimingCapability() AgentToolTimingCapability
 	ActualModelCapability() AgentActualModelCapability
+	StreamRenderCapability() AgentStreamRenderCapability
 	AssistanceInvocation(AgentAssistanceRequest) (*AgentAssistanceInvocation, error)
 	// ReasoningSpecTokens renders an Effort ladder's reasoning level as tokens
 	// appended to an Agent-preset spec. Most presets take a CLI flag; a preset
@@ -200,6 +201,7 @@ var agentAdapters = map[string]AgentAdapter{
 		cost:        AgentCostCapability{Kind: CapabilityBlind, Reason: "claude reports token usage but no dollar cost"},
 		toolTimings: AgentToolTimingCapability{Kind: CapabilitySupported, Extract: claudeToolTimings},
 		actualModel: AgentActualModelCapability{Kind: CapabilitySupported, Extract: claudeActualModel},
+		streamRender: AgentStreamRenderCapability{Kind: CapabilitySupported, Render: renderClaudeEvent},
 		models:      []string{"opus", "sonnet", "haiku", "fable"},
 	}),
 	"opencode": newPresetAgentAdapter(presetAgentSpec{
@@ -212,6 +214,7 @@ var agentAdapters = map[string]AgentAdapter{
 		cost:           AgentCostCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no dollar cost"},
 		toolTimings:    AgentToolTimingCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no tool-use/tool-result pairing"},
 		actualModel:    AgentActualModelCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no actual-model field"},
+		streamRender:   AgentStreamRenderCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no renderable assistant/tool_result message shape"},
 		models:         []string{"opencode/kimi-k2.6", "opencode/gpt-5.5", "opencode/claude-opus-4-8", "opencode/claude-sonnet-4-6"},
 		modelsInstallDependent: true,
 	}),
@@ -230,6 +233,7 @@ var agentAdapters = map[string]AgentAdapter{
 		cost:                   AgentCostCapability{Kind: CapabilityBlind, Reason: "cursor reports token usage but no dollar cost"},
 		toolTimings:            AgentToolTimingCapability{Kind: CapabilityBlind, Reason: "cursor stream-json events carry no paired tool invocation boundaries"},
 		actualModel:            AgentActualModelCapability{Kind: CapabilityBlind, Reason: "cursor stream-json events carry no actual-model field"},
+		streamRender:           AgentStreamRenderCapability{Kind: CapabilityBlind, Reason: "cursor stream-json events carry no renderable assistant/tool_result message shape"},
 		models:                 []string{"auto", "composer-2.5", "gpt-5.3-codex"},
 		modelsInstallDependent: true,
 	}),
@@ -247,6 +251,7 @@ var agentAdapters = map[string]AgentAdapter{
 		cost:                   AgentCostCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no dollar cost"},
 		toolTimings:            AgentToolTimingCapability{Kind: CapabilitySupported, Extract: codexToolTimings},
 		actualModel:            AgentActualModelCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no actual-model init event"},
+		streamRender:           AgentStreamRenderCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no renderable assistant/tool_result message shape"},
 		models:                 []string{"gpt-5.5", "gpt-5.4-mini"},
 		modelsInstallDependent: true,
 	}),
@@ -260,6 +265,7 @@ var agentAdapters = map[string]AgentAdapter{
 		cost:           AgentCostCapability{Kind: CapabilitySupported, Extract: piPartialCost},
 		toolTimings:    AgentToolTimingCapability{Kind: CapabilityBlind, Reason: "pi jsonl events carry no paired tool invocation boundaries"},
 		actualModel:    AgentActualModelCapability{Kind: CapabilityBlind, Reason: "pi jsonl events carry no actual-model field"},
+		streamRender:   AgentStreamRenderCapability{Kind: CapabilityBlind, Reason: "pi jsonl events carry no renderable assistant/tool_result message shape"},
 		models:         []string{"opencode-go/kimi-k2.6", "opencode-go/qwen3.7-max", "opencode-go/minimax-m3", "opencode-go/deepseek-v4-flash"},
 		modelsInstallDependent: true,
 	}),
@@ -278,6 +284,7 @@ var agentAdapters = map[string]AgentAdapter{
 		cost:            AgentCostCapability{Kind: CapabilityBlind, Reason: "kimi stream cost has not been verified against a captured run"},
 		toolTimings:     AgentToolTimingCapability{Kind: CapabilityBlind, Reason: "kimi stream tool timings have not been verified against a captured run"},
 		actualModel:     AgentActualModelCapability{Kind: CapabilityBlind, Reason: "kimi stream actual model has not been verified against a captured run"},
+		streamRender:    AgentStreamRenderCapability{Kind: CapabilityBlind, Reason: "kimi stream rendering has not been verified against a captured run"},
 		models:          []string{"moonshot-ai/kimi-k3", "moonshot-ai/kimi-k2.7-code", "moonshot-ai/kimi-k2.7-code-highspeed"},
 		modelsInstallDependent: true,
 	}),
@@ -361,6 +368,7 @@ type presetAgentSpec struct {
 	cost            AgentCostCapability
 	toolTimings     AgentToolTimingCapability
 	actualModel     AgentActualModelCapability
+	streamRender    AgentStreamRenderCapability
 	models          []string
 	// modelsInstallDependent marks a curated list whose aliases are resolved by
 	// the local install's own provider config rather than being stable,
@@ -579,6 +587,10 @@ func (a *presetAgentAdapter) ActualModelCapability() AgentActualModelCapability 
 	return a.actualModel
 }
 
+func (a *presetAgentAdapter) StreamRenderCapability() AgentStreamRenderCapability {
+	return a.streamRender
+}
+
 func (a *presetAgentAdapter) Models() []string {
 	return append([]string{}, a.models...)
 }
@@ -654,6 +666,10 @@ func (a customAgentAdapter) ToolTimingCapability() AgentToolTimingCapability {
 
 func (a customAgentAdapter) ActualModelCapability() AgentActualModelCapability {
 	return AgentActualModelCapability{Kind: CapabilityBlind, Reason: "custom agent commands produce no structured stream"}
+}
+
+func (a customAgentAdapter) StreamRenderCapability() AgentStreamRenderCapability {
+	return AgentStreamRenderCapability{Kind: CapabilityBlind, Reason: "custom agent commands produce no structured stream"}
 }
 
 func (a customAgentAdapter) AssistanceInvocation(req AgentAssistanceRequest) (*AgentAssistanceInvocation, error) {

@@ -317,41 +317,6 @@ func loadAttemptStream(d *Deps, path string) (AttemptStream, error) {
 	}, nil
 }
 
-// renderStreamEvents converts raw stream events into a readable sequence for
-// the tracer. For claude agents, it parses assistant messages (text and
-// tool_use) and user tool_result messages. For other agents, it renders the
-// raw JSON.
-func renderStreamEvents(agent string, events []streamEventRecord) []StreamEvent {
-	var out []StreamEvent
-	for _, ev := range events {
-		rendered := renderOneStreamEvent(agent, ev)
-		out = append(out, rendered...)
-	}
-	return out
-}
-
-// renderOneStreamEvent renders one raw event into zero or more StreamEvents.
-// For claude agents, assistant events produce text and tool_use entries, user
-// events produce tool_result entries. System events (like init) are rendered
-// as narration.
-func renderOneStreamEvent(agent string, ev streamEventRecord) []StreamEvent {
-	var out []StreamEvent
-
-	switch agent {
-	case "claude":
-		out = renderClaudeEvent(ev)
-	default:
-		// For agents without a specific renderer, show the raw JSON
-		out = append(out, StreamEvent{
-			AtMS: ev.AtMS,
-			Type: "raw",
-			Text: ev.Raw,
-		})
-	}
-
-	return out
-}
-
 // renderClaudeEvent parses one claude-format event into readable entries.
 func renderClaudeEvent(ev streamEventRecord) []StreamEvent {
 	var out []StreamEvent
@@ -659,6 +624,8 @@ func renderAttemptEventReplay(out *output, a AttemptStream, opts RenderStreamOpt
 					}
 				}
 			}
+		case "render_refused":
+			out.line(ansiDim, "  %s", ev.Text)
 		case "raw":
 			out.line(ansiDim, "    %s  %s", offset, ev.Text)
 		}

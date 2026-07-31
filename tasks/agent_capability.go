@@ -134,3 +134,31 @@ func (c AgentActualModelCapability) validate(preset string) error {
 		return fmt.Errorf("agent preset %q: actual-model capability has unknown kind %d", preset, c.Kind)
 	}
 }
+
+// AgentStreamRenderCapability is a preset's declared stance on rendering a
+// Captured run's events into a readable stream replay (ADR-0165).
+type AgentStreamRenderCapability struct {
+	Kind   CapabilityKind
+	Render func(streamEventRecord) []StreamEvent // required iff Supported
+	Reason string                                // required iff Blind
+}
+
+// validate reports whether this stream-render stance is a complete declaration.
+func (c AgentStreamRenderCapability) validate(preset string) error {
+	switch c.Kind {
+	case CapabilitySupported:
+		if c.Render == nil {
+			return fmt.Errorf("agent preset %q: stream-render capability is Supported but Render is nil", preset)
+		}
+		return nil
+	case CapabilityBlind:
+		if strings.TrimSpace(c.Reason) == "" {
+			return fmt.Errorf("agent preset %q: stream-render capability is Blind but Reason is empty", preset)
+		}
+		return nil
+	case capabilityUnset:
+		return fmt.Errorf("agent preset %q: stream-render capability is unset", preset)
+	default:
+		return fmt.Errorf("agent preset %q: stream-render capability has unknown kind %d", preset, c.Kind)
+	}
+}

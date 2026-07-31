@@ -161,6 +161,45 @@ func TestAgentActualModelCapabilityValidate(t *testing.T) {
 	})
 }
 
+func TestAgentStreamRenderCapabilityValidate(t *testing.T) {
+	t.Run("unset is invalid", func(t *testing.T) {
+		err := (AgentStreamRenderCapability{}).validate("cursor")
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "cursor") || !strings.Contains(err.Error(), "stream-render") {
+			t.Fatalf("error should name preset and capability, got %v", err)
+		}
+	})
+	t.Run("supported requires Render", func(t *testing.T) {
+		err := (AgentStreamRenderCapability{Kind: CapabilitySupported}).validate("claude")
+		if err == nil || !strings.Contains(err.Error(), "Render") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("supported with Render passes", func(t *testing.T) {
+		cap := AgentStreamRenderCapability{
+			Kind:   CapabilitySupported,
+			Render: func(streamEventRecord) []StreamEvent { return nil },
+		}
+		if err := cap.validate("claude"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("blind requires Reason", func(t *testing.T) {
+		err := (AgentStreamRenderCapability{Kind: CapabilityBlind}).validate("codex")
+		if err == nil || !strings.Contains(err.Error(), "Reason") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("blind with Reason passes", func(t *testing.T) {
+		cap := AgentStreamRenderCapability{Kind: CapabilityBlind, Reason: "stream carries no renderable message shape"}
+		if err := cap.validate("codex"); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
 func TestPresetUsageAndCostCapabilitiesDeclared(t *testing.T) {
 	// validate is not yet wired into construction; assert every preset's
 	// declared stance would pass so the later switch-on slice is a one-liner.
@@ -180,6 +219,9 @@ func TestPresetUsageAndCostCapabilitiesDeclared(t *testing.T) {
 		}
 		if err := adapter.ActualModelCapability().validate(preset); err != nil {
 			t.Fatalf("%s actual-model: %v", preset, err)
+		}
+		if err := adapter.StreamRenderCapability().validate(preset); err != nil {
+			t.Fatalf("%s stream-render: %v", preset, err)
 		}
 	}
 }
