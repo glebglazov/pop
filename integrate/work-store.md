@@ -86,6 +86,12 @@ go stale fast. Exception: a prototype-derived snippet that encodes a decision
 more precisely than prose (state machine, reducer, schema, type shape) may be
 inlined, trimmed to the decision-rich parts, noting it came from a prototype.
 
+## Orientation
+
+Perishable pointers, as of authoring: the files to touch, the symbols and types
+involved, and the exact build/test command that proves the slice. Verify before
+trusting — anything here may have moved.
+
 ## Type
 
 HITL or AFK.
@@ -103,6 +109,17 @@ Or "None - can start immediately" if no blockers.
 ```
 
 Do NOT close or modify any parent (spec or source) file while writing tickets.
+
+**Orientation is the one place paths belong.** "What to build" stays path-free
+because durable intent outlives the tree; Orientation is explicitly the opposite
+— a hint, stamped and labelled as stale-able, so the executor stops re-deriving a
+map the author already had. Unattended drains spend a large share of their tool
+calls on that rediscovery, and the author writes it for free from the context they
+just used to slice the work. Fill it from what you actually know: name only the
+files and symbols you touched or read while planning, plus the command that
+verifies the slice. Omit the section only for a slice with no code surface (a
+HITL sign-off); never pad it with guesses, because a wrong pointer costs more
+than a missing one.
 
 ### HITL / AFK typing rules
 

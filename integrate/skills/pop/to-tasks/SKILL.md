@@ -148,6 +148,33 @@ Skip upstream's **"### 4. Quiz the user"** step entirely — do not present the
 breakdown for approval or iterate on it. Breakdown approval belongs to the
 planning session that precedes `to-tasks`; publish without a second gate.
 
+## Slice sizing
+
+Sharpen upstream's "sized to fit in a single fresh context window": a slice is
+sized for **one drain attempt under ~120 agent turns**, peaking under ~100k
+context.
+
+The budget is not a comfort limit. An attempt's token cost is the sum of its
+context across every turn, and context only grows, so cost rises with the
+*square* of turn count — measured drains show a 60-turn task at 2.7M tokens
+against a 252-turn task at 29.5M. Two 120-turn slices cost roughly half of one
+250-turn slice doing the same work, because each starts from a fresh context.
+
+Split when a candidate slice would:
+
+- cross layers that each need their own discovery pass (a CLI change *and* the
+  desktop surface that consumes it),
+- need interactive verification (browser driving, screenshot review) *on top of*
+  non-trivial implementation — the verification is its own slice, blocked by the
+  build,
+- carry more than a handful of acceptance criteria whose checks don't share a
+  single test command.
+
+Vertical slicing still governs — a split must stay a complete path through the
+layers it claims, never a horizontal layer split. When a slice genuinely cannot
+go below the budget without going horizontal, leave it whole and say so in the
+set; the budget yields to the tracer-bullet rule, not the reverse.
+
 ## Arguments
 
 `to-tasks` reads two optional keyword arguments from the invocation; both default
