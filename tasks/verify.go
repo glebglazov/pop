@@ -787,7 +787,7 @@ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, t
 			// Agent unavailability fall-through: quota pause and human-healing
 			// kinds (e.g. passive auth detection) render no verdict, so try next.
 			if normalized.Unavailability != nil {
-				u := normalized.Unavailability.WithPreset(preset)
+				u := stampDetectedUnavailability(*normalized.Unavailability, preset, invocation.PinnedModel())
 				if _, ok := u.TimeHealing(); ok {
 					resetAt := agentQuotaResetAt(preset, u.Reason, time.Now())
 					u = u.WithResetAt(resetAt)
@@ -802,8 +802,13 @@ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, t
 				}
 				_ = persistVerifyRun(d, errOut, taskSetDir, setID, workSHA, outcome.stream, invocation.AgentPreset(), invocation.RequestedAgent, try, streamOutcomeAgentUnusable, u.Reason, exitCode, "")
 				unavailablePresets = append(unavailablePresets, u)
-				if i+1 < len(specs) && out != nil && u.Kind == UnavailabilityAuthFailure {
-					outputFor(out).line(ansiDim, "   Verifier agent %s unauthenticated; trying next", preset)
+				if i+1 < len(specs) && out != nil {
+					switch u.Kind {
+					case UnavailabilityAuthFailure:
+						outputFor(out).line(ansiDim, "   Verifier agent %s unauthenticated; trying next", preset)
+					case UnavailabilityPlanGate:
+						outputFor(out).line(ansiDim, "   %s", formatPlanGateFallThrough("Verifier agent", u))
+					}
 				}
 				break
 			}

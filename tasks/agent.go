@@ -70,6 +70,28 @@ func (i *AgentInvocation) AgentPreset() string {
 	return i.adapter.Preset()
 }
 
+// PinnedModel returns the model this command pins through pop's `--model` flag —
+// whatever an Effort ladder resolved, or what the human typed in `--agent` args.
+// Empty when nothing is pinned and the agent's own configuration picks the model,
+// which is why a Plan gate falls back to the model name the provider reported.
+func (i *AgentInvocation) PinnedModel() string {
+	if i == nil {
+		return ""
+	}
+	for idx, arg := range i.Args {
+		if arg == "--model" {
+			if idx+1 < len(i.Args) {
+				return i.Args[idx+1]
+			}
+			return ""
+		}
+		if value, ok := strings.CutPrefix(arg, "--model="); ok {
+			return value
+		}
+	}
+	return ""
+}
+
 // AgentResult is the provider-neutral result of normalizing one invocation.
 type AgentResult struct {
 	Output         string

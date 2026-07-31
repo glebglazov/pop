@@ -2083,6 +2083,176 @@ printf 'SUMMARY_START\nclaude done\nSUMMARY_END\nTASK_COMPLETE\n'
 	assertTaskDone(t, env.execFixture(), "01-a")
 }
 
+// kimiPlanGateLine is kimi's subscription-gate 401 for the light tier's model,
+// the third Agent fallback fall-through trigger (ADR-0151).
+const kimiPlanGateLine = "Error: Your current subscription does not have access to kimi-for-coding-highspeed. Upgrade to an Allegretto plan or above."
+
+// installKimiPlanGateShim installs a `kimi` that counts its spawns and reports the
+// plan gate, so a test can prove the retry cap was never burned.
+func installKimiPlanGateShim(t *testing.T, root, diagnostic string) string {
+	t.Helper()
+	count := filepath.Join(root, ".agent-bin", "kimi.count")
+	installAgentShim(t, root, "kimi", fmt.Sprintf(`#!/bin/sh
+n=0
+test -f %[1]q && n=$(cat %[1]q)
+n=$((n + 1))
+printf '%%s\n' "$n" > %[1]q
+printf '%%s\n' %[2]q
+exit 1
+`, count, diagnostic))
+	return count
+}
+
+func installCompletingClaudeShim(t *testing.T, root string) {
+	t.Helper()
+	installAgentShim(t, root, "claude", `#!/bin/sh
+TASK=$(printf '%s' "$*" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
+if [ -n "$TASK" ] && [ -f "$TASK" ]; then sed -i '' 's/- \[ \]/- [x]/g' "$TASK" 2>/dev/null || sed -i 's/- \[ \]/- [x]/g' "$TASK"; fi
+printf 'SUMMARY_START\nclaude done\nSUMMARY_END\nTASK_COMPLETE\n'
+`)
+}
+
+func TestRunTaskSetAgentFallbackAdvancesOnKimiPlanGate(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open", Effort: "light", EffortExplicit: true},
+	})
+	kimiCount := installKimiPlanGateShim(t, env.root, kimiPlanGateLine)
+	installCompletingClaudeShim(t, env.root)
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(true, "", &buf)
+	opts.AgentPresets = []string{"kimi", "claude"}
+	opts.AgentExplicit = true
+	opts.MaxTries = 3
+
+	d := env.deps()
+	result, err := RunTaskSetWith(d, nil, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.TaskSetDone || len(result.Completed) != 1 {
+		t.Fatalf("result = %#v", result)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "Attempt 1/3 · kimi") || !strings.Contains(out, "Attempt 1/3 · claude") {
+		t.Fatalf("fallback attempts not rendered:\n%s", out)
+	}
+	// The light tier pinned the gated alias, so the fall-through names it rather
+	// than the wire id the provider used.
+	if !strings.Contains(out, "Agent kimi plan-gated on moonshot-ai/kimi-k2.7-code-highspeed; trying next") {
+		t.Fatalf("missing kimi plan-gate fallback line:\n%s", out)
+	}
+	if got := strings.TrimSpace(readFileString(t, kimiCount)); got != "1" {
+		t.Fatalf("kimi attempts = %q, want 1 (retry cap not burned)", got)
+	}
+
+	cooldowns, err := readAgentCooldowns(d)
+	if err != nil {
+		t.Fatalf("read cooldowns: %v", err)
+	}
+	if _, ok := cooldowns["kimi"]; ok {
+		t.Fatalf("plan gate wrote cooldown: %#v", cooldowns)
+	}
+
+	runs, err := listSetRuns(d, env.execFixture().demoDir())
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	var kimiRun capturedRun
+	var foundKimi bool
+	for _, run := range runs {
+		if run.meta.Agent == "kimi" {
+			kimiRun, foundKimi = run, true
+			break
+		}
+	}
+	if !foundKimi {
+		t.Fatal("missing kimi captured run")
+	}
+	if kimiRun.meta.Outcome != streamOutcomeAgentUnusable {
+		t.Fatalf("kimi outcome = %q, want %s", kimiRun.meta.Outcome, streamOutcomeAgentUnusable)
+	}
+	if kimiRun.meta.Reason != kimiPlanGateLine {
+		t.Fatalf("kimi reason = %q, want %q", kimiRun.meta.Reason, kimiPlanGateLine)
+	}
+
+	progress := readFileString(t, filepath.Join(env.tasksDir, "demo", "progress.txt"))
+	if strings.Contains(progress, "FAILED") {
+		t.Fatalf("plan gate must not record FAILED:\n%s", progress)
+	}
+	assertTaskDone(t, env.execFixture(), "01-a")
+}
+
+// A plan gate leaves no state behind, so the next implement probes kimi once more
+// and falls through again — the deliberate cost of not recording a cooldown.
+func TestRunTaskSetKimiPlanGateLeavesTaskOpenAndReprobesNextRun(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open", Effort: "light", EffortExplicit: true},
+	})
+	kimiCount := installKimiPlanGateShim(t, env.root, kimiPlanGateLine)
+
+	d := env.deps()
+	for run := 1; run <= 2; run++ {
+		var buf bytes.Buffer
+		opts := env.runTaskSetOpts(true, "", &buf)
+		opts.AgentPresets = []string{"kimi"}
+		opts.AgentExplicit = true
+		opts.MaxTries = 3
+
+		_, err := RunTaskSetWith(d, nil, nil, opts)
+		assertExitCode(t, err, ExitSetup)
+		if !strings.Contains(err.Error(), kimiPlanGateLine) {
+			t.Fatalf("run %d error missing plan-gate diagnostic: %q", run, err.Error())
+		}
+		if got := strings.TrimSpace(readFileString(t, kimiCount)); got != fmt.Sprint(run) {
+			t.Fatalf("kimi attempts after run %d = %q, want %d (one probe per run)", run, got, run)
+		}
+		assertTaskOpen(t, env.execFixture(), "01-a")
+		if waiter, err := GetRecoveryWaiter(d, "demo"); err != nil {
+			t.Fatalf("get recovery waiter: %v", err)
+		} else if waiter != nil {
+			t.Fatalf("plan gate registered a recovery waiter: %#v", waiter)
+		}
+		cooldowns, err := readAgentCooldowns(d)
+		if err != nil {
+			t.Fatalf("read cooldowns: %v", err)
+		}
+		if _, ok := cooldowns["kimi"]; ok {
+			t.Fatalf("plan gate wrote cooldown: %#v", cooldowns)
+		}
+		if _, err := os.Stat(filepath.Join(env.tasksDir, "demo", "progress.txt")); !os.IsNotExist(err) {
+			t.Fatalf("progress.txt should not exist after a plan gate: stat err = %v", err)
+		}
+	}
+}
+
+// Only the subscription gate falls through: kimi's other 401s are ordinary
+// failures that burn the retry cap and finalize the task Failed.
+func TestRunTaskSetKimiAuthErrorFailsThroughRetryCap(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	authLine := "Error: The API Key appears to be invalid or may have expired"
+	kimiCount := installKimiPlanGateShim(t, env.root, authLine)
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(true, "", &buf)
+	opts.AgentPresets = []string{"kimi"}
+	opts.AgentExplicit = true
+	opts.MaxTries = 2
+
+	d := env.deps()
+	_, err := RunTaskSetWith(d, nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+	if got := strings.TrimSpace(readFileString(t, kimiCount)); got != "2" {
+		t.Fatalf("kimi attempts = %q, want 2 (full retry cap)", got)
+	}
+	if strings.Contains(buf.String(), "plan-gated") {
+		t.Fatalf("generic auth 401 must not read as a plan gate:\n%s", buf.String())
+	}
+	assertTaskFailed(t, env.execFixture(), "01-a", 2)
+}
+
 func TestRunTaskSetAllAgentsHumanHealingUnavailableExitsSetup(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},

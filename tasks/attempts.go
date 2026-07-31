@@ -143,7 +143,7 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 		}
 		agentResult := invocation.NormalizeOutput(agentOut)
 		if agentResult.Unavailability != nil {
-			u := agentResult.Unavailability.WithPreset(invocation.AgentPreset())
+			u := stampDetectedUnavailability(*agentResult.Unavailability, invocation.AgentPreset(), invocation.PinnedModel())
 			if _, ok := u.TimeHealing(); ok {
 				u = u.WithResetAt(agentQuotaResetAt(u.Preset, u.Reason, time.Now()))
 				persist(outcome.stream, attempt, streamOutcomeQuotaPaused, "", outcome.exitCode)
@@ -252,6 +252,8 @@ func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath s
 				outputFor(out).line(ansiDim, "   Agent %s quota-paused; trying next", u.Preset)
 			case UnavailabilityAuthFailure:
 				outputFor(out).line(ansiDim, "   Agent %s unauthenticated; trying next", u.Preset)
+			case UnavailabilityPlanGate:
+				outputFor(out).line(ansiDim, "   %s", formatPlanGateFallThrough("Agent", u))
 			}
 		}
 		unavailableResults = append(unavailableResults, result)

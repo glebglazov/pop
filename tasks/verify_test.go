@@ -468,6 +468,17 @@ func (r *scriptedVerifyRunner) Start(ctx context.Context, dir string, stdout, st
 	return proc, nil
 }
 
+// StartWithEnv keeps the scripted runner usable for a preset whose invocation
+// carries environment entries (kimi, ADR-0151); the env itself is irrelevant to a
+// scripted script, so it replays the same way.
+func (r *scriptedVerifyRunner) StartWithEnv(ctx context.Context, dir string, env []string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
+	return r.Start(ctx, dir, stdout, stderr, name, args...)
+}
+
+func (r *probeNeutralRunner) StartWithEnv(ctx context.Context, dir string, env []string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
+	return r.Start(ctx, dir, stdout, stderr, name, args...)
+}
+
 func TestRunConfiguredVerifierPersistsMultiAgentFallback(t *testing.T) {
 	t.Parallel()
 	taskSetDir := t.TempDir()
@@ -1225,6 +1236,61 @@ func TestRunConfiguredVerifierSkipsUnauthenticatedPresetByPassiveDetection(t *te
 	meta1 := readCapturedRunMeta(t, pairs[0].meta)
 	if meta1.Outcome != streamOutcomeAgentUnusable {
 		t.Fatalf("run1 outcome = %q, want %s", meta1.Outcome, streamOutcomeAgentUnusable)
+	}
+}
+
+func TestRunConfiguredVerifierFallsThroughKimiPlanGate(t *testing.T) {
+	t.Parallel()
+	taskSetDir := t.TempDir()
+	runner := &scriptedVerifyRunner{
+		scripts: []string{
+			kimiPlanGateLine,
+			`{"type":"system","subtype":"init"}` + "\n" + `{"type":"result","subtype":"success","result":"VERDICT: PASS\nFINDINGS:\n"}`,
+		},
+	}
+	d := newTestDeps(t)
+	d.Git = stubGit("sha1\n", "", "")
+	d.LookPath = func(file string) (string, error) { return "/bin/" + file, nil }
+	d.Runner = &probeNeutralRunner{inner: runner}
+
+	var out bytes.Buffer
+	raw, err := runConfiguredVerifier(d, nil, verifierSelection{
+		Agents: []string{"kimi", "claude"}, Effort: "light",
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", &out, &out, time.Minute, nil)
+	if err != nil {
+		t.Fatalf("runConfiguredVerifier: %v", err)
+	}
+	if !strings.Contains(raw, "VERDICT: PASS") {
+		t.Fatalf("raw = %q, want PASS from the fallback agent", raw)
+	}
+	if runner.calls != 2 {
+		t.Fatalf("headless calls = %d, want 2 (one kimi probe then claude)", runner.calls)
+	}
+	if !strings.Contains(out.String(), "Verifier agent kimi plan-gated on moonshot-ai/kimi-k2.7-code-highspeed; trying next") {
+		t.Fatalf("missing verifier plan-gate fall-through line:\n%s", out.String())
+	}
+
+	pairs := listRunFilePairs(t, capturedRunsDir(taskSetDir))
+	if len(pairs) != 2 {
+		t.Fatalf("want 2 verify runs (plan gate + PASS), got %d", len(pairs))
+	}
+	meta1 := readCapturedRunMeta(t, pairs[0].meta)
+	if meta1.Outcome != streamOutcomeAgentUnusable {
+		t.Fatalf("run1 outcome = %q, want %s", meta1.Outcome, streamOutcomeAgentUnusable)
+	}
+	if meta1.Reason != kimiPlanGateLine {
+		t.Fatalf("run1 reason = %q, want %q", meta1.Reason, kimiPlanGateLine)
+	}
+	if meta1.Verdict != "" {
+		t.Fatalf("run1 should have no verdict, got %q", meta1.Verdict)
+	}
+
+	cooldowns, err := readAgentCooldowns(d)
+	if err != nil {
+		t.Fatalf("read cooldowns: %v", err)
+	}
+	if _, ok := cooldowns["kimi"]; ok {
+		t.Fatalf("plan gate wrote cooldown: %#v", cooldowns)
 	}
 }
 

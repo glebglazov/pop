@@ -23,11 +23,21 @@ const (
 	kimiMonthlyQuotaBackoff      = 7 * 24 * time.Hour
 )
 
-// kimiQuotaPauseReason scans the raw agent capture line-by-line and returns a
-// quota-pause Agent unavailability when any line carries a kimi quota signal.
-// The whole matching line becomes the reason so the human sees kimi's own
-// wording and the reset derivation can re-read the signal from it.
-func kimiQuotaPauseReason(raw string) *AgentUnavailability {
+// kimiPlanGateSignal is the stable fragment of kimi's subscription-gate 401
+// (`provider.auth_error`): "Your current subscription does not have access to
+// <model>. Upgrade to an <tier> plan or above." Deliberately narrow — kimi's other
+// 401s (an invalid or expired key, missing authentication, a context window above
+// the plan's ceiling) are ordinary failures that must keep their retry cap, so
+// nothing but this phrase becomes a Plan gate (ADR-0151).
+const kimiPlanGateSignal = "does not have access to"
+
+// kimiUnavailability scans the raw agent capture line-by-line for the diagnostics
+// that make the preset unusable for this task rather than merely failed: a quota
+// signal (Agent quota pause) or the subscription gate (Plan gate). kimi writes
+// both to stderr and never into its stream-json. The whole matching line becomes
+// the reason, so the human sees kimi's own wording and the reset derivation can
+// re-read the quota signal from it.
+func kimiUnavailability(raw string) *AgentUnavailability {
 	scanner := bufio.NewScanner(strings.NewReader(raw))
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	for scanner.Scan() {
@@ -38,8 +48,28 @@ func kimiQuotaPauseReason(raw string) *AgentUnavailability {
 		if kimiQuotaBackoff(line) > 0 {
 			return DetectedQuotaPause(line)
 		}
+		if model, gated := kimiPlanGatedModel(line); gated {
+			return DetectedPlanGate(model, line)
+		}
 	}
 	return nil
+}
+
+// kimiPlanGatedModel reports whether a diagnostic line is the subscription gate
+// and, if so, the model the provider named as gated — the token right after the
+// signal, shorn of the sentence's period. That name is the wire id (`k3`,
+// `kimi-for-coding-highspeed`) rather than the config alias pop asked for, so it
+// serves only as the fallback when the invocation pinned no model of its own.
+func kimiPlanGatedModel(line string) (string, bool) {
+	at := strings.Index(strings.ToLower(line), kimiPlanGateSignal)
+	if at < 0 {
+		return "", false
+	}
+	fields := strings.Fields(line[at+len(kimiPlanGateSignal):])
+	if len(fields) == 0 {
+		return "", true
+	}
+	return strings.TrimRight(fields[0], ".,;:"), true
 }
 
 // kimiQuotaResetAt derives PauseResetAt from a kimi quota diagnostic: the
@@ -94,8 +124,8 @@ type kimiStreamLine struct {
 // failed run has no assistant prose and the raw capture (exit code plus
 // stderr) remains what the completion contract sees.
 func normalizeKimiStreamJSON(raw string) AgentResult {
-	if pause := kimiQuotaPauseReason(raw); pause != nil {
-		return AgentResult{Unavailability: pause}
+	if u := kimiUnavailability(raw); u != nil {
+		return AgentResult{Unavailability: u}
 	}
 	var transcript string
 	scanAgentJSONLines(raw, nil, func(line []byte) bool {

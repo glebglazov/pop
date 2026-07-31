@@ -158,7 +158,10 @@ projects = [
 # KIMI_MODEL_THINKING_EFFORT on the invocation, which bypasses kimi's own
 # validation — pair only levels the model supports (k3: low/high/max), or a
 # request 400s. A KIMI_MODEL_THINKING_EFFORT already set in your environment
-# wins over the ladder's.
+# wins over the ladder's. A ladder model your subscription lacks (kimi answers
+# "does not have access to ...") is not a task failure: the attempt falls
+# through to the next agent in the list, records no cooldown, and probes kimi
+# again on the next run.
 # [effort.kimi]
 # heavy = [{ model = "kimi-code/k3", reasoning = "max" }]
 # standard = [{ model = "kimi-code/k3", reasoning = "high" }]

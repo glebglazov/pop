@@ -255,6 +255,93 @@ func TestKimiQuotaSignalsPauseWithADRBackoffs(t *testing.T) {
 	}
 }
 
+// Plan-gate and authentication diagnostics as the Kimi Code error reference
+// documents them (all HTTP 401): the subscription gate names the model the
+// account's plan lacks, while the rest are ordinary auth or request faults.
+const (
+	kimiSampleHighspeedPlanGateLine = "Error: Your current subscription does not have access to kimi-for-coding-highspeed. Upgrade to an Allegretto plan or above. Upgrade: https://www.kimi.com/membership/pricing?from=server_k3_error"
+	kimiSampleK3PlanGateLine        = "Error: Your current subscription does not have access to k3. Upgrade to an Moderato plan or above."
+)
+
+func TestKimiPlanGateIsUnavailableWithNoResetInstant(t *testing.T) {
+	tests := []struct {
+		name      string
+		line      string
+		wantModel string
+	}{
+		{name: "highspeed", line: kimiSampleHighspeedPlanGateLine, wantModel: "kimi-for-coding-highspeed"},
+		{name: "k3", line: kimiSampleK3PlanGateLine, wantModel: "k3"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw := strings.Join([]string{kimiSampleVersionLine, tt.line}, "\n") + "\n"
+			result := NormalizeAgentOutput(AgentOutputKimiStreamJSON, raw)
+			if result.Unavailability == nil {
+				t.Fatal("expected a plan gate")
+			}
+			u := *result.Unavailability
+			if u.Kind != UnavailabilityPlanGate {
+				t.Fatalf("kind = %q, want %q", u.Kind, UnavailabilityPlanGate)
+			}
+			if u.Model != tt.wantModel {
+				t.Fatalf("model = %q, want %q", u.Model, tt.wantModel)
+			}
+			if u.Reason != tt.line {
+				t.Fatalf("reason = %q, want the whole diagnostic line %q", u.Reason, tt.line)
+			}
+			// A gate is deterministic per account+model: nothing to wait out, so no
+			// recovery instant and no cooldown derivation.
+			if _, ok := u.TimeHealing(); ok {
+				t.Fatal("a plan gate must not report a time-healing recovery")
+			}
+			if got := agentQuotaResetAt("kimi", u.Reason, time.Now()); !got.IsZero() {
+				t.Fatalf("reset = %s, want zero time", got)
+			}
+		})
+	}
+}
+
+// The pinned alias pop resolved outranks the wire name the provider used, since
+// the alias is what a human would edit to clear the gate.
+func TestKimiPlanGateNamesThePinnedModelWhenPopPinnedOne(t *testing.T) {
+	raw := kimiSampleHighspeedPlanGateLine + "\n"
+	detected := NormalizeAgentOutput(AgentOutputKimiStreamJSON, raw).Unavailability
+	if detected == nil {
+		t.Fatal("expected a plan gate")
+	}
+	invocation, err := ResolveAgentInvocation("kimi --model moonshot-ai/kimi-k2.7-code-highspeed", "", "prompt", "/rt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := stampDetectedUnavailability(*detected, invocation.AgentPreset(), invocation.PinnedModel())
+	if u.Model != "moonshot-ai/kimi-k2.7-code-highspeed" {
+		t.Fatalf("model = %q, want the pinned alias", u.Model)
+	}
+	want := "Agent kimi plan-gated on moonshot-ai/kimi-k2.7-code-highspeed; trying next"
+	if got := formatPlanGateFallThrough("Agent", u); got != want {
+		t.Fatalf("fall-through line = %q, want %q", got, want)
+	}
+}
+
+// Generic kimi 401s (and the context-ceiling permission error, which no model
+// switch inside a tier resolves) keep their retry cap instead of falling through.
+func TestKimiOtherAuthErrorsAreOrdinaryFailures(t *testing.T) {
+	for _, line := range []string{
+		"Error: The API Key appears to be invalid or may have expired",
+		"Error: Invalid Authentication",
+		"Error: Your current plan supports only kimi-k3 up to 256K context",
+		"Error: Your model id does not exist, recognized as other",
+	} {
+		t.Run(line, func(t *testing.T) {
+			raw := strings.Join([]string{kimiSampleProseLine, line}, "\n") + "\n"
+			result := NormalizeAgentOutput(AgentOutputKimiStreamJSON, raw)
+			if result.Unavailability != nil {
+				t.Fatalf("unexpected unavailability: %#v", result.Unavailability)
+			}
+		})
+	}
+}
+
 func TestKimiTransientOverloadNeverPauses(t *testing.T) {
 	for _, line := range []string{
 		"Error: engine is currently overloaded, please try again later",
