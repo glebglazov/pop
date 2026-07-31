@@ -8,11 +8,15 @@ import (
 	"time"
 )
 
+// quotaAssuranceOffset pads every derived reset instant so pop never retries a
+// paused agent a moment before its window actually reopens. Shared by every
+// adapter's quota reset derivation.
+const quotaAssuranceOffset = 2 * time.Minute
+
 const (
 	opencodeGoFiveHourQuotaSignal   = "5-hour usage limit reached"
 	opencodeGoWeeklyQuotaSignal     = "weekly usage limit reached"
 	opencodeGoMonthlyQuotaSignal    = "monthly usage limit reached"
-	opencodeGoQuotaAssuranceOffset  = 2 * time.Minute
 	opencodeGoFiveHourQuotaFallback = time.Hour
 	opencodeGoWeeklyQuotaFallback   = 24 * time.Hour
 	opencodeGoMonthlyQuotaFallback  = 30 * 24 * time.Hour
@@ -59,10 +63,10 @@ func opencodeGoQuotaSignalInLine(line string) bool {
 // assurance offset).
 func piQuotaResetAt(reason string, now time.Time) time.Time {
 	if duration, ok := opencodeGoQuotaResetDuration(reason); ok {
-		return now.Add(duration).Add(opencodeGoQuotaAssuranceOffset)
+		return now.Add(duration).Add(quotaAssuranceOffset)
 	}
 	if fallback := opencodeGoQuotaFallbackDuration(reason); fallback > 0 {
-		return now.Add(fallback).Add(opencodeGoQuotaAssuranceOffset)
+		return now.Add(fallback).Add(quotaAssuranceOffset)
 	}
 	return time.Time{}
 }

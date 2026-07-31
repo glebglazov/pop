@@ -49,7 +49,7 @@ func TestOpencodeGoQuotaPauseReasonDetectsMonthlySignal(t *testing.T) {
 func TestPiQuotaResetAtParsesResetsInNDays(t *testing.T) {
 	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
 	reason := "429 Monthly usage limit reached. Resets in 13 days. To continue using this model now, enable usage from your available balance."
-	want := now.Add(13 * 24 * time.Hour).Add(opencodeGoQuotaAssuranceOffset)
+	want := now.Add(13 * 24 * time.Hour).Add(quotaAssuranceOffset)
 	if got := piQuotaResetAt(reason, now); !got.Equal(want) {
 		t.Fatalf("reset = %s, want %s", got, want)
 	}
@@ -61,7 +61,7 @@ func TestPiQuotaResetAtParsesResetsInNDays(t *testing.T) {
 func TestPiQuotaResetAtParsesResetsInSingularDay(t *testing.T) {
 	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
 	reason := "429 Monthly usage limit reached. Resets in 1 day."
-	want := now.Add(24 * time.Hour).Add(opencodeGoQuotaAssuranceOffset)
+	want := now.Add(24 * time.Hour).Add(quotaAssuranceOffset)
 	if got := piQuotaResetAt(reason, now); !got.Equal(want) {
 		t.Fatalf("reset = %s, want %s", got, want)
 	}
@@ -69,7 +69,7 @@ func TestPiQuotaResetAtParsesResetsInSingularDay(t *testing.T) {
 
 func TestPiQuotaResetAtMonthlyFallbackWhenPatternMissing(t *testing.T) {
 	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
-	want := now.Add(opencodeGoMonthlyQuotaFallback).Add(opencodeGoQuotaAssuranceOffset)
+	want := now.Add(opencodeGoMonthlyQuotaFallback).Add(quotaAssuranceOffset)
 	reason := "429 Monthly usage limit reached."
 	if got := piQuotaResetAt(reason, now); !got.Equal(want) {
 		t.Fatalf("reset = %s, want %s", got, want)
@@ -118,7 +118,7 @@ func TestOpencodeGoQuotaPauseReasonScansLineByLine(t *testing.T) {
 func TestPiQuotaResetAtParsesResetsInNMin(t *testing.T) {
 	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
 	reason := "429 5-hour usage limit reached. Resets in 7min. Upgrade to continue."
-	want := now.Add(7 * time.Minute).Add(opencodeGoQuotaAssuranceOffset)
+	want := now.Add(7 * time.Minute).Add(quotaAssuranceOffset)
 	if got := piQuotaResetAt(reason, now); !got.Equal(want) {
 		t.Fatalf("reset = %s, want %s", got, want)
 	}
@@ -130,7 +130,7 @@ func TestPiQuotaResetAtParsesResetsInNMin(t *testing.T) {
 func TestPiQuotaResetAtParsesResetsInHrMin(t *testing.T) {
 	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
 	reason := "429 Weekly usage limit reached. Resets in 9hr 4min. To continue using this model now, enable usage from your available balance."
-	want := now.Add(9*time.Hour + 4*time.Minute).Add(opencodeGoQuotaAssuranceOffset)
+	want := now.Add(9*time.Hour + 4*time.Minute).Add(quotaAssuranceOffset)
 	if got := piQuotaResetAt(reason, now); !got.Equal(want) {
 		t.Fatalf("reset = %s, want %s", got, want)
 	}
@@ -141,7 +141,7 @@ func TestPiQuotaResetAtParsesResetsInHrMin(t *testing.T) {
 
 func TestPiQuotaResetAtFiveHourFallbackWhenPatternMissing(t *testing.T) {
 	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
-	want := now.Add(opencodeGoFiveHourQuotaFallback).Add(opencodeGoQuotaAssuranceOffset)
+	want := now.Add(opencodeGoFiveHourQuotaFallback).Add(quotaAssuranceOffset)
 	reason := "429 5-hour usage limit reached."
 	if got := piQuotaResetAt(reason, now); !got.Equal(want) {
 		t.Fatalf("reset = %s, want %s", got, want)
@@ -157,7 +157,7 @@ func TestPiQuotaResetAtReturnsZeroWithoutQuotaSignal(t *testing.T) {
 
 func TestPiQuotaResetAtWeeklyFallbackWhenPatternMissing(t *testing.T) {
 	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
-	want := now.Add(opencodeGoWeeklyQuotaFallback).Add(opencodeGoQuotaAssuranceOffset)
+	want := now.Add(opencodeGoWeeklyQuotaFallback).Add(quotaAssuranceOffset)
 	reason := "429 Weekly usage limit reached."
 	if got := piQuotaResetAt(reason, now); !got.Equal(want) {
 		t.Fatalf("reset = %s, want %s", got, want)
@@ -264,7 +264,7 @@ func TestNormalizeOpenCodeJSONNonQuotaErrorIsNotQuotaPause(t *testing.T) {
 func TestOpencodeQuotaResetAtSharesPiLogic(t *testing.T) {
 	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
 	reason := "429 5-hour usage limit reached. Resets in 7min. Upgrade to continue."
-	want := now.Add(7 * time.Minute).Add(opencodeGoQuotaAssuranceOffset)
+	want := now.Add(7 * time.Minute).Add(quotaAssuranceOffset)
 	if got := agentQuotaResetAt("opencode", reason, now); !got.Equal(want) {
 		t.Fatalf("reset = %s, want %s", got, want)
 	}
@@ -272,7 +272,7 @@ func TestOpencodeQuotaResetAtSharesPiLogic(t *testing.T) {
 
 func TestOpencodeQuotaResetAtFiveHourFallbackWhenPatternMissing(t *testing.T) {
 	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
-	want := now.Add(opencodeGoFiveHourQuotaFallback).Add(opencodeGoQuotaAssuranceOffset)
+	want := now.Add(opencodeGoFiveHourQuotaFallback).Add(quotaAssuranceOffset)
 	for _, reason := range []string{
 		"429 5-hour usage limit reached.",
 		"",
@@ -294,7 +294,7 @@ func TestOpencodeQuotaResetAtFiveHourFallbackWhenPatternMissing(t *testing.T) {
 
 func TestOpencodeQuotaResetAtWeeklyFallbackWhenPatternMissing(t *testing.T) {
 	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
-	want := now.Add(opencodeGoWeeklyQuotaFallback).Add(opencodeGoQuotaAssuranceOffset)
+	want := now.Add(opencodeGoWeeklyQuotaFallback).Add(quotaAssuranceOffset)
 	reason := "429 Weekly usage limit reached."
 	if got := agentQuotaResetAt("opencode", reason, now); !got.Equal(want) {
 		t.Fatalf("reset = %s, want %s", got, want)
@@ -304,7 +304,7 @@ func TestOpencodeQuotaResetAtWeeklyFallbackWhenPatternMissing(t *testing.T) {
 func TestNormalizeAgentOutputWeeklyQuotaPauseResetAt(t *testing.T) {
 	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
 	reason := "429 Weekly usage limit reached. Resets in 9hr 4min. To continue using this model now, enable usage from your available balance."
-	want := now.Add(9*time.Hour + 4*time.Minute).Add(opencodeGoQuotaAssuranceOffset)
+	want := now.Add(9*time.Hour + 4*time.Minute).Add(quotaAssuranceOffset)
 	got := agentQuotaResetAt("pi", reason, now)
 	if got.IsZero() {
 		t.Fatal("expected non-zero PauseResetAt for weekly compound reset")

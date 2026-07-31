@@ -188,7 +188,7 @@ func TestRunTaskPiWeeklyQuotaPause(t *testing.T) {
 	if result.PauseResetAt.IsZero() {
 		t.Fatal("expected non-zero PauseResetAt")
 	}
-	wantReset := time.Now().Add(9*time.Hour + 4*time.Minute + opencodeGoQuotaAssuranceOffset)
+	wantReset := time.Now().Add(9*time.Hour + 4*time.Minute + quotaAssuranceOffset)
 	if result.PauseResetAt.Before(wantReset.Add(-time.Minute)) || result.PauseResetAt.After(wantReset.Add(time.Minute)) {
 		t.Fatalf("PauseResetAt = %s, want near %s", result.PauseResetAt, wantReset)
 	}
@@ -223,7 +223,7 @@ func TestRunTaskPiQuotaPause(t *testing.T) {
 	if result.PauseResetAt.IsZero() {
 		t.Fatal("expected non-zero PauseResetAt")
 	}
-	wantReset := time.Now().Add(7*time.Minute + opencodeGoQuotaAssuranceOffset)
+	wantReset := time.Now().Add(7*time.Minute + quotaAssuranceOffset)
 	if result.PauseResetAt.Before(wantReset.Add(-time.Minute)) || result.PauseResetAt.After(wantReset.Add(time.Minute)) {
 		t.Fatalf("PauseResetAt = %s, want near %s", result.PauseResetAt, wantReset)
 	}

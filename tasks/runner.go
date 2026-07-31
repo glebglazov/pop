@@ -27,6 +27,15 @@ type AttendedCommandRunner interface {
 	RunAttended(ctx context.Context, dir string, stdin io.Reader, stdout, stderr io.Writer, name string, args ...string) (exitCode int, err error)
 }
 
+// EnvCommandRunner starts a command with extra KEY=VALUE entries layered over
+// pop's own environment. It is separate from CommandRunner because only an
+// Agent invocation that carries env (ADR-0151) needs it; a runner that never
+// spawns one is unaffected, and one that is handed such an invocation without
+// implementing this fails loudly rather than silently dropping the variable.
+type EnvCommandRunner interface {
+	StartWithEnv(ctx context.Context, dir string, env []string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error)
+}
+
 // ManagedProcess is a command running in its own process group.
 type ManagedProcess struct {
 	cmd  *exec.Cmd
@@ -132,11 +141,20 @@ func terminalFd(r io.Reader) (int, bool) {
 }
 
 func (RealCommandRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
+	return RealCommandRunner{}.StartWithEnv(ctx, dir, nil, stdout, stderr, name, args...)
+}
+
+func (RealCommandRunner) StartWithEnv(ctx context.Context, dir string, env []string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	cmd.Stdin = nil
+	if len(env) > 0 {
+		// Appending after the inherited environment makes these entries win:
+		// exec keeps the last value for a duplicated key.
+		cmd.Env = append(os.Environ(), env...)
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		return nil, err

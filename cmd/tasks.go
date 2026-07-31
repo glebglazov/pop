@@ -57,6 +57,7 @@ var (
 	taskStreamRaw             bool
 	taskStreamLast            bool
 	taskSpendJSON             bool
+	taskAgentsModels          bool
 )
 
 var taskCmd = &cobra.Command{
@@ -202,7 +203,7 @@ var taskMigrateCmd = &cobra.Command{
 
 var taskAgentsCmd = &cobra.Command{
 	Use:   "agents",
-	Short: "List agent PATH availability and resolved effort ladders",
+	Short: "List agent PATH availability, attended assistance, and resolved effort ladders",
 	Args:  cobra.NoArgs,
 	RunE:  runTaskAgents,
 }
@@ -287,6 +288,7 @@ func init() {
 	taskTransferCmd.AddCommand(taskExportCmd)
 	taskTransferCmd.AddCommand(taskImportCmd)
 	taskCmd.AddCommand(taskMigrateCmd)
+	taskAgentsCmd.Flags().BoolVar(&taskAgentsModels, "models", false, "Also list each preset's curated model aliases, recommended first")
 	taskCmd.AddCommand(taskAgentsCmd)
 	taskBindWorktreeCmd.Flags().BoolVar(&taskBindWorktreeForce, "force", false, "Re-point a set already bound elsewhere")
 	taskBindWorktreeCmd.Flags().BoolVarP(&taskRunYes, "yes", "y", false, "Skip managed-worktree delete confirmation when rebinding")
@@ -296,7 +298,7 @@ func init() {
 	taskUnbindWorktreeCmd.Flags().BoolVar(&taskUnbindWorktreeYes, "yes", false, "Skip confirmation prompt")
 	taskCmd.AddCommand(taskUnbindWorktreeCmd)
 	taskFoldCmd.Flags().BoolVarP(&taskFoldYes, "yes", "y", false, "Skip managed-worktree delete confirmation after fold")
-	taskFoldCmd.Flags().StringArrayVar(&taskAgentPresets, "agent", nil, "Agent preset for fold-conflict assistance (claude, opencode, cursor, codex, pi), optionally followed by extra agent args")
+	taskFoldCmd.Flags().StringArrayVar(&taskAgentPresets, "agent", nil, "Agent preset for fold-conflict assistance (claude, opencode, cursor, codex, pi, kimi), optionally followed by extra agent args")
 	taskFoldCmd.Flags().StringVar(&taskAgentCmd, "agent-cmd", "", "Trusted shell prefix for fold-conflict assistance; generated prompt passed as final positional argument")
 	taskCmd.AddCommand(taskFoldCmd)
 
@@ -310,7 +312,7 @@ func init() {
 	taskImplementCmd.Flags().StringVar(&taskRuntimePath, "task-runtime-path", "", "Git checkout root for task execution (normalized to checkout root)")
 	taskImplementCmd.Flags().Var(&taskAllowDirty, "allow-dirty", "Dirty runtime strategy: continue (default), commit-and-continue, stash-and-continue")
 	taskImplementCmd.Flags().Lookup("allow-dirty").NoOptDefVal = string(tasks.DirtyRuntimeContinue)
-	taskImplementCmd.Flags().StringArrayVar(&taskAgentPresets, "agent", nil, "Agent preset (claude, opencode, cursor, codex, pi), optionally followed by extra agent args, e.g. \"claude --model opus4.8\"; repeat to define an ordered quota fallback list")
+	taskImplementCmd.Flags().StringArrayVar(&taskAgentPresets, "agent", nil, "Agent preset (claude, opencode, cursor, codex, pi, kimi), optionally followed by extra agent args, e.g. \"claude --model opus4.8\"; repeat to define an ordered quota fallback list")
 	taskImplementCmd.Flags().StringVar(&taskAgentCmd, "agent-cmd", "", "Trusted shell prefix; generated prompt passed as final positional argument")
 	taskImplementCmd.Flags().Var(&taskAgentOutput, "agent-output", "Agent output mode: auto (default), text")
 	taskImplementCmd.Flags().IntVar(&taskMaxTries, "max-tries", tasks.DefaultMaxTries, "Maximum started attempts per task")
@@ -329,7 +331,7 @@ func init() {
 	taskVerifyCmd.Flags().StringVar(&taskVerifyRemediate, "remediate", "", "Remediate a non-PASS verdict: spawn a Remediation task from the set's findings carrying this note (skips the Verifier), even from NEEDS-HUMAN or past the remediation depth cap; the Drain then picks it up")
 
 	taskAssistCmd.Flags().StringVar(&taskRuntimePath, "task-runtime-path", "", "Git checkout root for task execution (normalized to checkout root)")
-	taskAssistCmd.Flags().StringArrayVar(&taskAgentPresets, "agent", nil, "Agent preset for attended assistance (claude, opencode, cursor, codex, pi), optionally followed by extra agent args")
+	taskAssistCmd.Flags().StringArrayVar(&taskAgentPresets, "agent", nil, "Agent preset for attended assistance (claude, opencode, cursor, codex, pi, kimi), optionally followed by extra agent args")
 	taskAssistCmd.Flags().StringVar(&taskAgentCmd, "agent-cmd", "", "Trusted shell prefix; generated prompt passed as final positional argument")
 
 	taskExportCmd.Flags().StringVarP(&taskExportOutput, "output", "o", "", "Output archive path (default: <task-set-id>.tar.gz in the current directory)")
@@ -1506,10 +1508,10 @@ func runTaskMigrateWith(d *tasks.Deps, w io.Writer) error {
 }
 
 func runTaskAgents(cmd *cobra.Command, args []string) error {
-	return runTaskAgentsWith(cmdLayerDeps().tasksDeps(), os.Stdout)
+	return runTaskAgentsWith(cmdLayerDeps().tasksDeps(), os.Stdout, taskAgentsModels)
 }
 
-func runTaskAgentsWith(d *tasks.Deps, w io.Writer) error {
+func runTaskAgentsWith(d *tasks.Deps, w io.Writer, models bool) error {
 	cfg, err := taskConfigLoad(config.DefaultConfigPath())
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("tasks agents: load config: %w", err)
@@ -1517,19 +1519,44 @@ func runTaskAgentsWith(d *tasks.Deps, w io.Writer) error {
 	if os.IsNotExist(err) {
 		cfg = nil
 	}
-	renderTaskAgents(w, tasks.AgentCatalogWithConfig(d, cfg))
+	rows := tasks.AgentCatalogWithConfig(d, cfg)
+	renderTaskAgents(w, rows)
+	if models {
+		renderTaskAgentModels(w, rows)
+	}
 	return nil
 }
 
 func renderTaskAgents(w io.Writer, rows []tasks.AgentCatalogRow) {
-	fmt.Fprintf(w, "%-9s %-14s %-5s %s\n", "agent", "binary", "found", "effort ladder")
+	fmt.Fprintf(w, "%-9s %-14s %-5s %-6s %s\n", "agent", "binary", "found", "assist", "effort ladder")
 	for _, row := range rows {
-		found := "no"
-		if row.Found {
-			found = "yes"
-		}
-		fmt.Fprintf(w, "%-9s %-14s %-5s %s\n", row.Agent, row.Binary, found, renderEffortLadder(row.Agent, row.EffortLadder))
+		fmt.Fprintf(w, "%-9s %-14s %-5s %-6s %s\n", row.Agent, row.Binary, yesNo(row.Found), yesNo(row.Assistance), renderEffortLadder(row.Agent, row.EffortLadder))
 	}
+}
+
+// renderTaskAgentModels prints each preset's curated model aliases, recommended
+// first. Models are a suggestion surface for whoever fills in --model, so they
+// stay off the default render and appear only when asked for.
+func renderTaskAgentModels(w io.Writer, rows []tasks.AgentCatalogRow) {
+	fmt.Fprintf(w, "\n%-9s %s\n", "agent", "models (recommended first)")
+	for _, row := range rows {
+		if len(row.Models) == 0 {
+			fmt.Fprintf(w, "%-9s %s\n", row.Agent, "none")
+			continue
+		}
+		models := strings.Join(row.Models, ", ")
+		if row.ModelsInstallDependent {
+			models += " (install-dependent aliases)"
+		}
+		fmt.Fprintf(w, "%-9s %s\n", row.Agent, models)
+	}
+}
+
+func yesNo(v bool) string {
+	if v {
+		return "yes"
+	}
+	return "no"
 }
 
 func renderEffortLadder(agent string, ladder []tasks.AgentCatalogEffortTier) string {

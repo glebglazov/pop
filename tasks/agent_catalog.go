@@ -9,15 +9,23 @@ import (
 
 const DefaultAgentPreset = "claude"
 
-var agentCatalogOrder = []string{"claude", "opencode", "cursor", "codex", "pi"}
+var agentCatalogOrder = []string{"claude", "opencode", "cursor", "codex", "pi", "kimi"}
 
-// AgentCatalogRow describes Pop's recognition, PATH availability, and resolved
-// effort ladder for one agent row.
+// AgentCatalogRow describes Pop's recognition, PATH availability, attended
+// assistance, curated models, and resolved effort ladder for one agent row.
 type AgentCatalogRow struct {
 	Agent        string
 	Binary       string
 	Found        bool
+	Assistance   bool
 	EffortLadder []AgentCatalogEffortTier
+	// Models is the preset's curated, recommended-first alias list — advisory
+	// only, never a validation gate (ADR-0019).
+	Models []string
+	// ModelsInstallDependent reports that those aliases are whatever the local
+	// install's provider config names them, not stable account-independent
+	// names, so a planner knows they may need overriding.
+	ModelsInstallDependent bool
 }
 
 // AgentCatalogEffortTier describes one resolved effort tier for display.
@@ -50,10 +58,13 @@ func AgentCatalogWithConfig(d *Deps, cfg *config.Config) []AgentCatalogRow {
 		binary := AgentBinary(adapter)
 		_, err := lookPath(binary)
 		rows = append(rows, AgentCatalogRow{
-			Agent:        preset,
-			Binary:       binary,
-			Found:        err == nil,
-			EffortLadder: effortLadderForCatalog(cfg, preset),
+			Agent:                  preset,
+			Binary:                 binary,
+			Found:                  err == nil,
+			Assistance:             adapter.AssistanceCapability().Available(),
+			EffortLadder:           effortLadderForCatalog(cfg, preset),
+			Models:                 adapter.Models(),
+			ModelsInstallDependent: modelsInstallDependent(adapter),
 		})
 		seen[preset] = true
 	}
@@ -75,6 +86,11 @@ func AgentBinary(adapter AgentAdapter) string {
 		return preset.headlessPrefix[0]
 	}
 	return adapter.Preset()
+}
+
+func modelsInstallDependent(adapter AgentAdapter) bool {
+	preset, ok := adapter.(*presetAgentAdapter)
+	return ok && preset.modelsInstallDependent
 }
 
 func configuredEffortAgents(cfg *config.Config, seen map[string]bool) []string {

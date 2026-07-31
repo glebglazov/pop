@@ -463,6 +463,21 @@ func min(a, b int) int {
 	return b
 }
 
+// startAgentInvocation spawns one resolved agent command, taking the env-aware
+// runner path when the invocation carries environment entries. Both of the
+// agent's streams go to one writer, which is what interleaves kimi's stderr
+// (its Bash tool echoes there) into the same capture as its stream-json.
+func startAgentInvocation(ctx context.Context, runner CommandRunner, runtimePath string, agentOut io.Writer, invocation *AgentInvocation) (*ManagedProcess, error) {
+	if len(invocation.Env) == 0 {
+		return runner.Start(ctx, runtimePath, agentOut, agentOut, invocation.Name, invocation.Args...)
+	}
+	envRunner, ok := runner.(EnvCommandRunner)
+	if !ok {
+		return nil, fmt.Errorf("agent %s needs invocation environment (%s) that command runner %T cannot carry", invocation.Name, strings.Join(invocation.Env, " "), runner)
+	}
+	return envRunner.StartWithEnv(ctx, runtimePath, invocation.Env, agentOut, agentOut, invocation.Name, invocation.Args...)
+}
+
 func runAgentAttempt(d *Deps, runtimePath string, liveOut io.Writer, timeout time.Duration, invocation *AgentInvocation) (string, *attemptOutcome, error) {
 	var capture bytes.Buffer
 	var agentOut io.Writer = &capture
@@ -490,7 +505,7 @@ func runAgentAttempt(d *Deps, runtimePath string, liveOut io.Writer, timeout tim
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
 
-	proc, err := d.Runner.Start(ctx, runtimePath, agentOut, agentOut, invocation.Name, invocation.Args...)
+	proc, err := startAgentInvocation(ctx, d.Runner, runtimePath, agentOut, invocation)
 	if err != nil {
 		return "", nil, err
 	}

@@ -75,6 +75,9 @@ import (
 //   - signal handling: TestRunTaskSignalLeavesTaskOpen, TestRunTaskSignalReleasesRuntimeLock,
 //     and TestRunTaskSetInterruptionPropagation SIGTERM the live drain while a real
 //     agent is running; the fake never installs a real process to interrupt.
+//   - invocation environment: TestStartWithEnvLayersInvocationEnvOverParentEnvironment
+//     spawns a real `sh` that prints its own environment, because merging an
+//     Agent invocation's env into the spawned process is the OS behavior itself.
 //
 // These pace themselves on short (sub-second) deadlines or a start-sentinel
 // signal, not on the shims' nominal multi-second sleeps, so they no longer cost
@@ -95,6 +98,7 @@ var realShimSmokeSet = []string{
 	"TestRunTaskSignalLeavesTaskOpen",
 	"TestRunTaskSignalReleasesRuntimeLock",
 	"TestRunTaskSetInterruptionPropagation",
+	"TestStartWithEnvLayersInvocationEnvOverParentEnvironment",
 }
 
 const fakeAgentTokenPrefix = "__pop_fake_agent_"
@@ -178,6 +182,19 @@ func (fakeAwareRunner) Start(ctx context.Context, dir string, stdout, stderr io.
 		return proc, nil
 	}
 	return RealCommandRunner{}.Start(ctx, dir, stdout, stderr, name, args...)
+}
+
+// StartWithEnv keeps the fixture runner usable for presets whose invocation
+// carries env (ADR-0151): a registered fake is replayed as usual, and a real
+// spawn takes the env-aware path.
+func (fakeAwareRunner) StartWithEnv(ctx context.Context, dir string, env []string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
+	if b, prompt, ok := lookupFakeAgent(args); ok {
+		exit := b.play(dir, stdout, prompt)
+		proc := &ManagedProcess{done: make(chan waitResult, 1)}
+		proc.done <- waitResult{exitCode: exit}
+		return proc, nil
+	}
+	return RealCommandRunner{}.StartWithEnv(ctx, dir, env, stdout, stderr, name, args...)
 }
 
 func (fakeAwareRunner) RunAttended(ctx context.Context, dir string, stdin io.Reader, stdout, stderr io.Writer, name string, args ...string) (int, error) {

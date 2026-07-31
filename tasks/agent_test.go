@@ -133,6 +133,104 @@ func TestResolveAgentCommandPiHermetic(t *testing.T) {
 	}
 }
 
+func TestResolveAgentInvocationKimiPromptRidesAsFlagValue(t *testing.T) {
+	invocation, err := ResolveAgentInvocation("kimi", "", "prompt text", "/tmp/runtime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if invocation.Name != "kimi" {
+		t.Fatalf("name = %q, want kimi", invocation.Name)
+	}
+	// kimi has no positional prompt form: the prompt is -p's value, so it sits
+	// next to the flag rather than at the end, and -p is auto-permission so no
+	// permission flag is owned at all.
+	want := []string{"-p", "prompt text", "--output-format", "stream-json"}
+	if !reflect.DeepEqual(invocation.Args, want) {
+		t.Fatalf("args = %#v, want %#v", invocation.Args, want)
+	}
+	if invocation.OutputFormat != AgentOutputKimiStreamJSON {
+		t.Fatalf("format = %q, want %q", invocation.OutputFormat, AgentOutputKimiStreamJSON)
+	}
+	if !reflect.DeepEqual(invocation.Env, []string{"KIMI_CODE_NO_AUTO_UPDATE=1"}) {
+		t.Fatalf("env = %#v, want KIMI_CODE_NO_AUTO_UPDATE=1", invocation.Env)
+	}
+}
+
+func TestResolveAgentInvocationKimiExtraArgsPrecedeOwnedFlags(t *testing.T) {
+	invocation, err := ResolveAgentInvocation("kimi --model moonshot-ai/kimi-k3", "", "prompt text", "/tmp/runtime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"--model", "moonshot-ai/kimi-k3", "-p", "prompt text", "--output-format", "stream-json"}
+	if !reflect.DeepEqual(invocation.Args, want) {
+		t.Fatalf("args = %#v, want %#v", invocation.Args, want)
+	}
+}
+
+func TestResolveAgentInvocationKimiTextModeDropsOwnedOutputFlags(t *testing.T) {
+	invocation, err := ResolveAgentInvocationWithMode("kimi", "", "prompt text", "/tmp/runtime", AgentOutputText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"-p", "prompt text"}
+	if !reflect.DeepEqual(invocation.Args, want) {
+		t.Fatalf("args = %#v, want %#v", invocation.Args, want)
+	}
+	if invocation.OutputFormat != AgentOutputPlain {
+		t.Fatalf("format = %q, want plain", invocation.OutputFormat)
+	}
+}
+
+func TestPresetInvocationsWithoutEnvNeedsStayEmpty(t *testing.T) {
+	for _, preset := range []string{"claude", "opencode", "cursor", "codex", "pi"} {
+		t.Run(preset, func(t *testing.T) {
+			invocation, err := ResolveAgentInvocation(preset, "", "p", "/tmp/runtime")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(invocation.Env) != 0 {
+				t.Fatalf("env = %#v, want empty", invocation.Env)
+			}
+		})
+	}
+}
+
+func TestKimiIsOptInOnlyAndNeverADefault(t *testing.T) {
+	if DefaultAgentPreset == "kimi" {
+		t.Fatal("built-in default must stay claude")
+	}
+	for _, specs := range [][]string{
+		ResolveDefaultAgentPresets(nil, "", false, nil),
+		ResolveDefaultAgentPresets(nil, "", false, &config.Config{}),
+		{ResolveDefaultInteractiveAgentPreset(nil)},
+	} {
+		for _, spec := range specs {
+			if spec == "kimi" {
+				t.Fatalf("kimi appeared in a default agent list: %v", specs)
+			}
+		}
+	}
+}
+
+func TestKimiAssistanceLaunchesBareInteractiveBinary(t *testing.T) {
+	invocation, err := ResolveAgentAssistanceInvocation("kimi --model moonshot-ai/kimi-k3", "", "briefing text", "/tmp/runtime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if invocation.Mode != AgentAssistanceNative {
+		t.Fatalf("mode = %q, want native", invocation.Mode)
+	}
+	if invocation.Command.Name != "kimi" {
+		t.Fatalf("command = %q, want kimi", invocation.Command.Name)
+	}
+	// kimi's interactive mode accepts no initial prompt, so the briefing is
+	// never an argv item (ADR-0151).
+	want := []string{"--model", "moonshot-ai/kimi-k3"}
+	if !reflect.DeepEqual(invocation.Command.Args, want) {
+		t.Fatalf("args = %#v, want %#v", invocation.Command.Args, want)
+	}
+}
+
 func TestResolveAgentCommandCustom(t *testing.T) {
 	name, args, err := ResolveAgentCommand("", "fake-agent --verbose", "prompt", "/tmp/runtime")
 	if err != nil {
@@ -491,6 +589,7 @@ func TestResolveAgentInvocationOutputFormats(t *testing.T) {
 		"cursor":   AgentOutputCursorStreamJSON,
 		"codex":    AgentOutputCodexJSONL,
 		"pi":       AgentOutputPiJSONL,
+		"kimi":     AgentOutputKimiStreamJSON,
 	}
 	for preset, want := range formats {
 		invocation, err := ResolveAgentInvocation(preset, "", "p", "/tmp/runtime")
@@ -521,6 +620,7 @@ func TestResolveAgentInvocationStructuredFlags(t *testing.T) {
 		{preset: "codex", flag: "--json"},
 		{preset: "opencode", flag: "--format json"},
 		{preset: "pi", flag: "--mode json"},
+		{preset: "kimi", flag: "--output-format stream-json"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.preset, func(t *testing.T) {
@@ -1309,6 +1409,7 @@ func TestCuratedModelAliasesPerPreset(t *testing.T) {
 		"cursor":   {"auto", "composer-2.5", "gpt-5.3-codex"},
 		"codex":    {"gpt-5.5", "gpt-5.4-mini"},
 		"pi":       {"opencode-go/kimi-k2.6", "opencode-go/qwen3.7-max", "opencode-go/minimax-m3", "opencode-go/deepseek-v4-flash"},
+		"kimi":     {"moonshot-ai/kimi-k3", "moonshot-ai/kimi-k2.7-code", "moonshot-ai/kimi-k2.7-code-highspeed"},
 	}
 	for preset, models := range want {
 		adapter, err := ResolveAgentAdapter(preset)

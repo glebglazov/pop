@@ -28,6 +28,8 @@ func lineRendererFor(format AgentOutputFormat, color bool) lineRenderer {
 		return openCodeLineRenderer(color)
 	case AgentOutputPiJSONL:
 		return piLineRenderer(color)
+	case AgentOutputKimiStreamJSON:
+		return kimiLineRenderer(color)
 	default:
 		return nil
 	}

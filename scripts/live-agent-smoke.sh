@@ -53,6 +53,7 @@ agent_executable() {
     cursor) printf 'cursor-agent' ;;
     opencode) printf 'opencode' ;;
     pi) printf 'pi' ;;
+    kimi) printf 'kimi' ;;
     *)
       printf 'unknown agent preset: %s\n' "$1" >&2
       return 1

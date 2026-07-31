@@ -96,6 +96,8 @@ func agentQuotaResetAt(preset, reason string, now time.Time) time.Time {
 		return claudeQuotaResetAt(reason, now)
 	case "opencode", "pi":
 		return piQuotaResetAt(reason, now)
+	case "kimi":
+		return kimiQuotaResetAt(reason, now)
 	default:
 		return time.Time{}
 	}

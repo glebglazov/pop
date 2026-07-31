@@ -20,6 +20,7 @@ const (
 	AgentOutputCodexJSONL       AgentOutputFormat = "codex-jsonl"
 	AgentOutputOpenCodeJSON     AgentOutputFormat = "opencode-json"
 	AgentOutputPiJSONL          AgentOutputFormat = "pi-jsonl"
+	AgentOutputKimiStreamJSON   AgentOutputFormat = "kimi-stream-json"
 
 	AgentOutputAuto AgentOutputMode = "auto"
 	AgentOutputText AgentOutputMode = "text"
@@ -50,8 +51,12 @@ func ValidAgentOutputModes() []string {
 
 // AgentInvocation is one resolved headless-agent command.
 type AgentInvocation struct {
-	Name           string
-	Args           []string
+	Name string
+	Args []string
+	// Env carries KEY=VALUE entries layered over pop's own environment when the
+	// process spawns — the one adapter capability arguments cannot express
+	// (ADR-0151). Empty for every preset whose knobs are all flags.
+	Env            []string
 	OutputFormat   AgentOutputFormat
 	RequestedAgent string
 	adapter        AgentAdapter
@@ -145,57 +150,77 @@ type AgentAdapter interface {
 
 // Agent adapters map preset names to per-agent behavior.
 var agentAdapters = map[string]AgentAdapter{
-	"claude": newPresetAgentAdapter("claude",
-		[]string{"claude", "--dangerously-skip-permissions", "-p"},
-		AgentOutputClaudeStreamJSON,
-		[]string{"--output-format", "stream-json", "--verbose"},
-		AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "claude"}},
-		AgentAvailabilityProbeCapability{
+	"claude": newPresetAgentAdapter(presetAgentSpec{
+		preset:         "claude",
+		headlessPrefix: []string{"claude", "--dangerously-skip-permissions", "-p"},
+		autoFormat:     AgentOutputClaudeStreamJSON,
+		autoArgs:       []string{"--output-format", "stream-json", "--verbose"},
+		assistance:     AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "claude"}},
+		availability: AgentAvailabilityProbeCapability{
 			Command:              &AgentCommand{Name: "claude", Args: []string{"auth", "status"}},
 			Interpret:            interpretClaudeAvailabilityProbe,
 			ReportsAuthenticated: reportsClaudeAuthenticated,
 		},
-		[]string{"opus", "sonnet", "haiku", "fable"},
-	),
-	"opencode": newPresetAgentAdapter("opencode",
-		[]string{"opencode", "run"},
-		AgentOutputOpenCodeJSON,
-		[]string{"--format", "json"},
-		AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "opencode"}},
-		AgentAvailabilityProbeCapability{},
-		[]string{"opencode/kimi-k2.6", "opencode/gpt-5.5", "opencode/claude-opus-4-8", "opencode/claude-sonnet-4-6"},
-	),
-	"cursor": newPresetAgentAdapter("cursor",
-		[]string{"cursor-agent", "-p", "--force", "--trust"},
-		AgentOutputCursorStreamJSON,
-		[]string{"--output-format", "stream-json"},
-		AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "cursor-agent"}},
-		AgentAvailabilityProbeCapability{
+		models: []string{"opus", "sonnet", "haiku", "fable"},
+	}),
+	"opencode": newPresetAgentAdapter(presetAgentSpec{
+		preset:                 "opencode",
+		headlessPrefix:         []string{"opencode", "run"},
+		autoFormat:             AgentOutputOpenCodeJSON,
+		autoArgs:               []string{"--format", "json"},
+		assistance:             AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "opencode"}},
+		models:                 []string{"opencode/kimi-k2.6", "opencode/gpt-5.5", "opencode/claude-opus-4-8", "opencode/claude-sonnet-4-6"},
+		modelsInstallDependent: true,
+	}),
+	"cursor": newPresetAgentAdapter(presetAgentSpec{
+		preset:         "cursor",
+		headlessPrefix: []string{"cursor-agent", "-p", "--force", "--trust"},
+		autoFormat:     AgentOutputCursorStreamJSON,
+		autoArgs:       []string{"--output-format", "stream-json"},
+		assistance:     AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "cursor-agent"}},
+		availability: AgentAvailabilityProbeCapability{
 			Command:              &AgentCommand{Name: "cursor-agent", Args: []string{"status", "--format", "json"}},
 			Interpret:            interpretCursorAvailabilityProbe,
 			ReportsAuthenticated: reportsCursorAuthenticated,
 		},
-		[]string{"auto", "composer-2.5", "gpt-5.3-codex"},
-	),
-	"codex": newPresetAgentAdapter("codex",
-		[]string{"codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check"},
-		AgentOutputCodexJSONL,
-		[]string{"--json"},
-		AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "codex"}},
-		AgentAvailabilityProbeCapability{
+		models:                 []string{"auto", "composer-2.5", "gpt-5.3-codex"},
+		modelsInstallDependent: true,
+	}),
+	"codex": newPresetAgentAdapter(presetAgentSpec{
+		preset:         "codex",
+		headlessPrefix: []string{"codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check"},
+		autoFormat:     AgentOutputCodexJSONL,
+		autoArgs:       []string{"--json"},
+		assistance:     AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "codex"}},
+		availability: AgentAvailabilityProbeCapability{
 			Command:              &AgentCommand{Name: "codex", Args: []string{"login", "status"}},
 			ReportsAuthenticated: reportsCodexAuthenticated,
 		},
-		[]string{"gpt-5.5", "gpt-5.4-mini"},
-	),
-	"pi": newPresetAgentAdapter("pi",
-		[]string{"pi", "-p", "--no-extensions", "--no-skills"},
-		AgentOutputPiJSONL,
-		[]string{"--mode", "json"},
-		AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "pi"}},
-		AgentAvailabilityProbeCapability{},
-		[]string{"opencode-go/kimi-k2.6", "opencode-go/qwen3.7-max", "opencode-go/minimax-m3", "opencode-go/deepseek-v4-flash"},
-	),
+		models:                 []string{"gpt-5.5", "gpt-5.4-mini"},
+		modelsInstallDependent: true,
+	}),
+	"pi": newPresetAgentAdapter(presetAgentSpec{
+		preset:                 "pi",
+		headlessPrefix:         []string{"pi", "-p", "--no-extensions", "--no-skills"},
+		autoFormat:             AgentOutputPiJSONL,
+		autoArgs:               []string{"--mode", "json"},
+		assistance:             AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "pi"}},
+		models:                 []string{"opencode-go/kimi-k2.6", "opencode-go/qwen3.7-max", "opencode-go/minimax-m3", "opencode-go/deepseek-v4-flash"},
+		modelsInstallDependent: true,
+	}),
+	// kimi takes the prompt as its -p value and needs no permission flag: -p is
+	// auto-permission by design and rejects --yolo/--auto (ADR-0151).
+	"kimi": newPresetAgentAdapter(presetAgentSpec{
+		preset:                 "kimi",
+		headlessPrefix:         []string{"kimi", "-p"},
+		promptDelivery:         promptAsPrefixFlagValue,
+		autoFormat:             AgentOutputKimiStreamJSON,
+		autoArgs:               []string{"--output-format", "stream-json"},
+		env:                    []string{"KIMI_CODE_NO_AUTO_UPDATE=1"},
+		assistance:             AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "kimi"}},
+		models:                 []string{"moonshot-ai/kimi-k3", "moonshot-ai/kimi-k2.7-code", "moonshot-ai/kimi-k2.7-code-highspeed"},
+		modelsInstallDependent: true,
+	}),
 }
 
 var claudeEffortModels = map[string][]config.EffortModel{
@@ -229,26 +254,50 @@ var builtInEffortModels = map[string]map[string][]config.EffortModel{
 	"pi":     piEffortModels,
 }
 
-type presetAgentAdapter struct {
+// agentPromptDelivery names where a preset's generated prompt rides in the
+// resolved command. Most CLIs take it as a positional argument; kimi has no
+// positional prompt form and reads it as the value of the -p flag its headless
+// prefix ends with (ADR-0151).
+type agentPromptDelivery int
+
+const (
+	promptAsFinalArg agentPromptDelivery = iota
+	promptAsPrefixFlagValue
+)
+
+// presetAgentSpec is one preset's declaration of everything the shared
+// preset adapter needs: how it is invoked, how its output is read, and what it
+// can offer a human.
+type presetAgentSpec struct {
 	preset         string
 	headlessPrefix []string
+	promptDelivery agentPromptDelivery
 	autoFormat     AgentOutputFormat
 	autoArgs       []string
-	assistance     AgentAssistanceCapability
-	availability   AgentAvailabilityProbeCapability
-	models         []string
+	// env rides into every invocation of this preset as KEY=VALUE entries
+	// layered over pop's own environment, for knobs the CLI exposes nowhere
+	// else (ADR-0151).
+	env          []string
+	assistance   AgentAssistanceCapability
+	availability AgentAvailabilityProbeCapability
+	models       []string
+	// modelsInstallDependent marks a curated list whose aliases are resolved by
+	// the local install's own provider config rather than being stable,
+	// account-independent names, so the catalog can say so.
+	modelsInstallDependent bool
 }
 
-func newPresetAgentAdapter(preset string, headlessPrefix []string, autoFormat AgentOutputFormat, autoArgs []string, assistance AgentAssistanceCapability, availability AgentAvailabilityProbeCapability, models []string) AgentAdapter {
-	return &presetAgentAdapter{
-		preset:         preset,
-		headlessPrefix: append([]string{}, headlessPrefix...),
-		autoFormat:     autoFormat,
-		autoArgs:       append([]string{}, autoArgs...),
-		assistance:     assistance,
-		availability:   cloneAvailabilityProbeCapability(availability),
-		models:         append([]string{}, models...),
-	}
+type presetAgentAdapter struct {
+	presetAgentSpec
+}
+
+func newPresetAgentAdapter(spec presetAgentSpec) AgentAdapter {
+	spec.headlessPrefix = append([]string{}, spec.headlessPrefix...)
+	spec.autoArgs = append([]string{}, spec.autoArgs...)
+	spec.env = append([]string{}, spec.env...)
+	spec.availability = cloneAvailabilityProbeCapability(spec.availability)
+	spec.models = append([]string{}, spec.models...)
+	return &presetAgentAdapter{presetAgentSpec: spec}
 }
 
 func (a *presetAgentAdapter) Preset() string { return a.preset }
@@ -339,6 +388,11 @@ func (a *presetAgentAdapter) HeadlessInvocation(req AgentHeadlessRequest) (*Agen
 	args := []string{a.headlessPrefix[0]}
 	args = append(args, req.ExtraArgs...)
 	args = append(args, a.headlessPrefix[1:]...)
+	// A flag-value prompt must stay adjacent to the flag it belongs to, so it
+	// lands before pop's owned output flags instead of at the very end.
+	if a.promptDelivery == promptAsPrefixFlagValue {
+		args = append(args, req.Prompt)
+	}
 	format := AgentOutputPlain
 	if mode == AgentOutputAuto {
 		args = append(args, a.autoArgs...)
@@ -350,8 +404,16 @@ func (a *presetAgentAdapter) HeadlessInvocation(req AgentHeadlessRequest) (*Agen
 		}
 		args = append(args, "--workspace", req.RuntimePath)
 	}
-	args = append(args, req.Prompt)
-	return &AgentInvocation{Name: args[0], Args: args[1:], OutputFormat: format, adapter: a}, nil
+	if a.promptDelivery == promptAsFinalArg {
+		args = append(args, req.Prompt)
+	}
+	return &AgentInvocation{
+		Name:         args[0],
+		Args:         args[1:],
+		Env:          append([]string(nil), a.env...),
+		OutputFormat: format,
+		adapter:      a,
+	}, nil
 }
 
 func (a *presetAgentAdapter) NormalizeOutput(raw string, format AgentOutputFormat) AgentResult {
@@ -383,7 +445,9 @@ func (a *presetAgentAdapter) AssistanceInvocation(req AgentAssistanceRequest) (*
 	command.Args = []string{}
 	command.Args = append(command.Args, req.ExtraArgs...)
 	command.Args = append(command.Args, capability.Command.Args...)
-	if req.Prompt != "" {
+	// A preset with no positional prompt form (kimi) launches bare; its briefing
+	// reaches the human another way (ADR-0151).
+	if req.Prompt != "" && a.promptDelivery == promptAsFinalArg {
 		command.Args = append(command.Args, req.Prompt)
 	}
 	invocation := &AgentAssistanceInvocation{
@@ -879,6 +943,8 @@ func normalizeAgentOutput(format AgentOutputFormat, raw string) AgentResult {
 		result = normalizeOpenCodeJSON(raw)
 	case AgentOutputPiJSONL:
 		result = normalizePiJSONL(raw)
+	case AgentOutputKimiStreamJSON:
+		result = normalizeKimiStreamJSON(raw)
 	default:
 		return AgentResult{Output: raw}
 	}
