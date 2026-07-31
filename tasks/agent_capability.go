@@ -78,3 +78,59 @@ func (c AgentCostCapability) validate(preset string) error {
 		return fmt.Errorf("agent preset %q: cost capability has unknown kind %d", preset, c.Kind)
 	}
 }
+
+// AgentToolTimingCapability is a preset's declared stance on extracting per-tool
+// durations from a Captured run's events (ADR 0016, ADR-0165).
+type AgentToolTimingCapability struct {
+	Kind    CapabilityKind
+	Extract func([]streamEventRecord) ([]ToolTiming, []toolWindow) // required iff Supported
+	Reason  string                                               // required iff Blind
+}
+
+// validate reports whether this tool-timing stance is a complete declaration.
+func (c AgentToolTimingCapability) validate(preset string) error {
+	switch c.Kind {
+	case CapabilitySupported:
+		if c.Extract == nil {
+			return fmt.Errorf("agent preset %q: tool-timing capability is Supported but Extract is nil", preset)
+		}
+		return nil
+	case CapabilityBlind:
+		if strings.TrimSpace(c.Reason) == "" {
+			return fmt.Errorf("agent preset %q: tool-timing capability is Blind but Reason is empty", preset)
+		}
+		return nil
+	case capabilityUnset:
+		return fmt.Errorf("agent preset %q: tool-timing capability is unset", preset)
+	default:
+		return fmt.Errorf("agent preset %q: tool-timing capability has unknown kind %d", preset, c.Kind)
+	}
+}
+
+// AgentActualModelCapability is a preset's declared stance on reading the
+// attempt's actual model from a Captured run's events (ADR-0165).
+type AgentActualModelCapability struct {
+	Kind    CapabilityKind
+	Extract func([]streamEventRecord) string // required iff Supported
+	Reason  string                           // required iff Blind
+}
+
+// validate reports whether this actual-model stance is a complete declaration.
+func (c AgentActualModelCapability) validate(preset string) error {
+	switch c.Kind {
+	case CapabilitySupported:
+		if c.Extract == nil {
+			return fmt.Errorf("agent preset %q: actual-model capability is Supported but Extract is nil", preset)
+		}
+		return nil
+	case CapabilityBlind:
+		if strings.TrimSpace(c.Reason) == "" {
+			return fmt.Errorf("agent preset %q: actual-model capability is Blind but Reason is empty", preset)
+		}
+		return nil
+	case capabilityUnset:
+		return fmt.Errorf("agent preset %q: actual-model capability is unset", preset)
+	default:
+		return fmt.Errorf("agent preset %q: actual-model capability has unknown kind %d", preset, c.Kind)
+	}
+}

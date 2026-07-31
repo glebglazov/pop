@@ -166,20 +166,6 @@ func accumulateToolTimings(events []streamEventRecord, extract func(streamEventR
 	return out, windows
 }
 
-// toolTimingParsers maps agent preset → pairing parser over one attempt's
-// stored events. Pairing tool_use with tool_result is per-adapter work because
-// the stream shape differs across agents (ADR 0016); agents without a parser
-// show outcome + total only. The windows feed the agent-independent Model
-// time derivation.
-var toolTimingParsers = map[string]func([]streamEventRecord) ([]ToolTiming, []toolWindow){
-	"claude": claudeToolTimings,
-	"codex":  codexToolTimings,
-}
-
-var actualModelParsers = map[string]func([]streamEventRecord) string{
-	"claude": claudeActualModel,
-}
-
 // modelTime derives Model time: the attempt's total duration minus the union
 // of tool-active intervals. The union — not the sum — is subtracted so
 // parallel tool calls are not double-counted; open windows clamp to the
@@ -388,18 +374,11 @@ func deriveAttemptTiming(header streamHeaderRecord, footer streamFooterRecord, e
 	if requestedAgent == "" {
 		requestedAgent = header.Agent
 	}
-	var actualModel string
-	if parse := actualModelParsers[header.Agent]; parse != nil {
-		actualModel = parse(events)
-	}
-	var tools []ToolTiming
+	actualModel := extractActualModel(header.Agent, events)
+	tools, windows := extractToolTimings(header.Agent, events)
 	var model time.Duration
-	if parse := toolTimingParsers[header.Agent]; parse != nil {
-		var windows []toolWindow
-		tools, windows = parse(events)
-		if len(tools) > 0 {
-			model = modelTime(windows, footer.DurationMS)
-		}
+	if len(tools) > 0 {
+		model = modelTime(windows, footer.DurationMS)
 	}
 	tokens := extractTokenUsage(header.Agent, events)
 	return AttemptTiming{

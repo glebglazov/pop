@@ -169,6 +169,8 @@ type AgentAdapter interface {
 	AvailabilityProbeCapability() AgentAvailabilityProbeCapability
 	UsageCapability() AgentUsageCapability
 	CostCapability() AgentCostCapability
+	ToolTimingCapability() AgentToolTimingCapability
+	ActualModelCapability() AgentActualModelCapability
 	AssistanceInvocation(AgentAssistanceRequest) (*AgentAssistanceInvocation, error)
 	// ReasoningSpecTokens renders an Effort ladder's reasoning level as tokens
 	// appended to an Agent-preset spec. Most presets take a CLI flag; a preset
@@ -194,9 +196,11 @@ var agentAdapters = map[string]AgentAdapter{
 			Interpret:            interpretClaudeAvailabilityProbe,
 			ReportsAuthenticated: reportsClaudeAuthenticated,
 		},
-		usage:  AgentUsageCapability{Kind: CapabilitySupported, Extract: claudeTokenUsage},
-		cost:   AgentCostCapability{Kind: CapabilityBlind, Reason: "claude reports token usage but no dollar cost"},
-		models: []string{"opus", "sonnet", "haiku", "fable"},
+		usage:       AgentUsageCapability{Kind: CapabilitySupported, Extract: claudeTokenUsage},
+		cost:        AgentCostCapability{Kind: CapabilityBlind, Reason: "claude reports token usage but no dollar cost"},
+		toolTimings: AgentToolTimingCapability{Kind: CapabilitySupported, Extract: claudeToolTimings},
+		actualModel: AgentActualModelCapability{Kind: CapabilitySupported, Extract: claudeActualModel},
+		models:      []string{"opus", "sonnet", "haiku", "fable"},
 	}),
 	"opencode": newPresetAgentAdapter(presetAgentSpec{
 		preset:         "opencode",
@@ -206,6 +210,8 @@ var agentAdapters = map[string]AgentAdapter{
 		assistance:     AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "opencode"}},
 		usage:          AgentUsageCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no usage block"},
 		cost:           AgentCostCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no dollar cost"},
+		toolTimings:    AgentToolTimingCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no tool-use/tool-result pairing"},
+		actualModel:    AgentActualModelCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no actual-model field"},
 		models:         []string{"opencode/kimi-k2.6", "opencode/gpt-5.5", "opencode/claude-opus-4-8", "opencode/claude-sonnet-4-6"},
 		modelsInstallDependent: true,
 	}),
@@ -222,6 +228,8 @@ var agentAdapters = map[string]AgentAdapter{
 		},
 		usage:                  AgentUsageCapability{Kind: CapabilitySupported, Extract: cursorTokenUsage},
 		cost:                   AgentCostCapability{Kind: CapabilityBlind, Reason: "cursor reports token usage but no dollar cost"},
+		toolTimings:            AgentToolTimingCapability{Kind: CapabilityBlind, Reason: "cursor stream-json events carry no paired tool invocation boundaries"},
+		actualModel:            AgentActualModelCapability{Kind: CapabilityBlind, Reason: "cursor stream-json events carry no actual-model field"},
 		models:                 []string{"auto", "composer-2.5", "gpt-5.3-codex"},
 		modelsInstallDependent: true,
 	}),
@@ -237,6 +245,8 @@ var agentAdapters = map[string]AgentAdapter{
 		},
 		usage:                  AgentUsageCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no usage block"},
 		cost:                   AgentCostCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no dollar cost"},
+		toolTimings:            AgentToolTimingCapability{Kind: CapabilitySupported, Extract: codexToolTimings},
+		actualModel:            AgentActualModelCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no actual-model init event"},
 		models:                 []string{"gpt-5.5", "gpt-5.4-mini"},
 		modelsInstallDependent: true,
 	}),
@@ -248,6 +258,8 @@ var agentAdapters = map[string]AgentAdapter{
 		assistance:     AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "pi"}},
 		usage:          AgentUsageCapability{Kind: CapabilitySupported, Extract: piTokenUsage},
 		cost:           AgentCostCapability{Kind: CapabilitySupported, Extract: piPartialCost},
+		toolTimings:    AgentToolTimingCapability{Kind: CapabilityBlind, Reason: "pi jsonl events carry no paired tool invocation boundaries"},
+		actualModel:    AgentActualModelCapability{Kind: CapabilityBlind, Reason: "pi jsonl events carry no actual-model field"},
 		models:         []string{"opencode-go/kimi-k2.6", "opencode-go/qwen3.7-max", "opencode-go/minimax-m3", "opencode-go/deepseek-v4-flash"},
 		modelsInstallDependent: true,
 	}),
@@ -264,6 +276,8 @@ var agentAdapters = map[string]AgentAdapter{
 		assistance:      AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "kimi"}},
 		usage:           AgentUsageCapability{Kind: CapabilityBlind, Reason: "kimi stream usage has not been verified against a captured run"},
 		cost:            AgentCostCapability{Kind: CapabilityBlind, Reason: "kimi stream cost has not been verified against a captured run"},
+		toolTimings:     AgentToolTimingCapability{Kind: CapabilityBlind, Reason: "kimi stream tool timings have not been verified against a captured run"},
+		actualModel:     AgentActualModelCapability{Kind: CapabilityBlind, Reason: "kimi stream actual model has not been verified against a captured run"},
 		models:          []string{"moonshot-ai/kimi-k3", "moonshot-ai/kimi-k2.7-code", "moonshot-ai/kimi-k2.7-code-highspeed"},
 		modelsInstallDependent: true,
 	}),
@@ -345,6 +359,8 @@ type presetAgentSpec struct {
 	availability    AgentAvailabilityProbeCapability
 	usage           AgentUsageCapability
 	cost            AgentCostCapability
+	toolTimings     AgentToolTimingCapability
+	actualModel     AgentActualModelCapability
 	models          []string
 	// modelsInstallDependent marks a curated list whose aliases are resolved by
 	// the local install's own provider config rather than being stable,
@@ -555,6 +571,14 @@ func (a *presetAgentAdapter) CostCapability() AgentCostCapability {
 	return a.cost
 }
 
+func (a *presetAgentAdapter) ToolTimingCapability() AgentToolTimingCapability {
+	return a.toolTimings
+}
+
+func (a *presetAgentAdapter) ActualModelCapability() AgentActualModelCapability {
+	return a.actualModel
+}
+
 func (a *presetAgentAdapter) Models() []string {
 	return append([]string{}, a.models...)
 }
@@ -622,6 +646,14 @@ func (a customAgentAdapter) UsageCapability() AgentUsageCapability {
 
 func (a customAgentAdapter) CostCapability() AgentCostCapability {
 	return AgentCostCapability{Kind: CapabilityBlind, Reason: "custom agent commands produce no structured stream"}
+}
+
+func (a customAgentAdapter) ToolTimingCapability() AgentToolTimingCapability {
+	return AgentToolTimingCapability{Kind: CapabilityBlind, Reason: "custom agent commands produce no structured stream"}
+}
+
+func (a customAgentAdapter) ActualModelCapability() AgentActualModelCapability {
+	return AgentActualModelCapability{Kind: CapabilityBlind, Reason: "custom agent commands produce no structured stream"}
 }
 
 func (a customAgentAdapter) AssistanceInvocation(req AgentAssistanceRequest) (*AgentAssistanceInvocation, error) {
