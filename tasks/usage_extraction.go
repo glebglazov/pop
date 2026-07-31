@@ -110,8 +110,10 @@ func runSpend(run capturedRun) (RunSpend, error) {
 		return RunSpend{}, fmt.Errorf("spend does not read legacy attempt streams (%s)", filepath.Base(run.legacyPath))
 	}
 	spend := RunSpend{
-		Tokens: extractTokenUsage(run.meta.Agent, run.events),
-		Cost:   extractPartialCost(run.meta.Agent, run.events),
+		Tokens:    extractTokenUsage(run.meta.Agent, run.events),
+		Cost:      extractPartialCost(run.meta.Agent, run.events),
+		Turns:     extractTurnCount(run.meta.Agent, run.events),
+		PeakInput: extractPeakInput(run.meta.Agent, run.events),
 	}
 	if err := checkUsageOverCountGuard(run.meta.Agent, run.events, spend.Tokens); err != nil {
 		return RunSpend{}, err

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
@@ -27,13 +28,19 @@ type SpendRollupRow struct {
 	TaskSetID      string
 	Tokens         TokenUsage
 	Cost           PartialCost
+	Turns          TurnCount
+	PeakInput      PeakInput
 	RunCount       int
 	TokenBlindRuns int
+	TurnBlindRuns  int
+	PeakBlindRuns  int
+	Agents         string // populated when the set mixes agents
 }
 
 // SpendRollupResult is the cross-set spend rollup.
 type SpendRollupResult struct {
-	Sets []SpendRollupRow
+	Sets       []SpendRollupRow
+	ShowAgents bool // true when any displayed set mixes agents
 }
 
 // spendRollupJSONRow is the machine-readable rollup row emitted by --json.
@@ -44,8 +51,13 @@ type spendRollupJSONRow struct {
 	CacheReadTokens  int64    `json:"cache_read_tokens"`
 	CacheWriteTokens int64    `json:"cache_write_tokens"`
 	PartialCostUSD   *float64 `json:"partial_cost_usd,omitempty"`
+	Turns            *int     `json:"turns"`
+	TurnBlindRuns    int      `json:"turn_blind_runs"`
+	PeakInputTokens  *int64   `json:"peak_input_tokens"`
+	PeakBlindRuns    int      `json:"peak_blind_runs"`
 	RunCount         int      `json:"run_count"`
 	TokenBlindRuns   int      `json:"token_blind_runs"`
+	Agent            string   `json:"agent,omitempty"`
 }
 
 // spendRollupJSON is the machine-readable rollup payload.
@@ -59,14 +71,20 @@ type SpendBreakdownRow struct {
 	Title          string
 	Tokens         TokenUsage
 	Cost           PartialCost
+	Turns          TurnCount
+	PeakInput      PeakInput
 	RunCount       int
 	TokenBlindRuns int
+	TurnBlindRuns  int
+	PeakBlindRuns  int
+	Agent          string // populated when the set mixes agents
 }
 
 // SpendSetBreakdownResult is the per-task spend breakdown for one Task set.
 type SpendSetBreakdownResult struct {
 	TaskSetID                  string
 	Rows                       []SpendBreakdownRow
+	ShowAgents                 bool // true when the set mixes agents
 	CompletedTasks             int
 	TokensPerCompletedTask     *int64
 	ImplementTokens            TokenUsage
@@ -88,8 +106,13 @@ type spendBreakdownJSONRow struct {
 	CacheReadTokens  int64    `json:"cache_read_tokens"`
 	CacheWriteTokens int64    `json:"cache_write_tokens"`
 	PartialCostUSD   *float64 `json:"partial_cost_usd,omitempty"`
+	Turns            *int     `json:"turns"`
+	TurnBlindRuns    int      `json:"turn_blind_runs"`
+	PeakInputTokens  *int64   `json:"peak_input_tokens"`
+	PeakBlindRuns    int      `json:"peak_blind_runs"`
 	RunCount         int      `json:"run_count"`
 	TokenBlindRuns   int      `json:"token_blind_runs"`
+	Agent            string   `json:"agent,omitempty"`
 }
 
 // spendSetBreakdownJSON is the machine-readable per-set breakdown payload.
@@ -154,6 +177,12 @@ func SpendRollupWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 	sort.Slice(result.Sets, func(i, j int) bool {
 		return tokenUsageTotal(result.Sets[i].Tokens) > tokenUsageTotal(result.Sets[j].Tokens)
 	})
+	for _, row := range result.Sets {
+		if spendAgentsMix(row.Agents) {
+			result.ShowAgents = true
+			break
+		}
+	}
 	return result, nil
 }
 
@@ -209,10 +238,14 @@ func buildSpendSetBreakdown(d *Deps, taskSetID string, m *Manifest) (*SpendSetBr
 
 	result := &SpendSetBreakdownResult{TaskSetID: taskSetID}
 	seen := map[string]int{}
+	setAgents := map[string]bool{}
 	for _, run := range runs {
 		spend, err := runSpend(run)
 		if err != nil {
 			return nil, err
+		}
+		if run.meta.Agent != "" {
+			setAgents[run.meta.Agent] = true
 		}
 
 		key, taskID, title := spendBreakdownRowKey(run, m)
@@ -227,8 +260,17 @@ func buildSpendSetBreakdown(d *Deps, taskSetID string, m *Manifest) (*SpendSetBr
 		if !spend.Tokens.HasUsage() {
 			row.TokenBlindRuns++
 		}
+		if !spend.Turns.HasTurn {
+			row.TurnBlindRuns++
+		}
+		if !spend.PeakInput.HasPeak {
+			row.PeakBlindRuns++
+		}
 		addTokenUsage(&row.Tokens, spend.Tokens)
 		addPartialCost(&row.Cost, spend.Cost)
+		addTurnCount(&row.Turns, spend.Turns)
+		addPeakInput(&row.PeakInput, spend.PeakInput)
+		recordSpendRowAgent(row, run.meta.Agent)
 
 		if key == spendVerifyRowKey {
 			result.VerificationRunCount++
@@ -252,6 +294,7 @@ func buildSpendSetBreakdown(d *Deps, taskSetID string, m *Manifest) (*SpendSetBr
 		perTask := tokenUsageTotal(result.ImplementTokens) / int64(result.CompletedTasks)
 		result.TokensPerCompletedTask = &perTask
 	}
+	result.ShowAgents = len(setAgents) > 1
 	return result, nil
 }
 
@@ -323,18 +366,31 @@ func taskSetSpendRollup(d *Deps, taskSetID, taskSetDir string) (SpendRollupRow, 
 		return SpendRollupRow{}, err
 	}
 	row := SpendRollupRow{TaskSetID: taskSetID}
+	setAgents := map[string]bool{}
 	for _, run := range runs {
 		spend, err := runSpend(run)
 		if err != nil {
 			return SpendRollupRow{}, err
 		}
+		if run.meta.Agent != "" {
+			setAgents[run.meta.Agent] = true
+		}
 		row.RunCount++
 		if !spend.Tokens.HasUsage() {
 			row.TokenBlindRuns++
 		}
+		if !spend.Turns.HasTurn {
+			row.TurnBlindRuns++
+		}
+		if !spend.PeakInput.HasPeak {
+			row.PeakBlindRuns++
+		}
 		addTokenUsage(&row.Tokens, spend.Tokens)
 		addPartialCost(&row.Cost, spend.Cost)
+		addTurnCount(&row.Turns, spend.Turns)
+		addPeakInput(&row.PeakInput, spend.PeakInput)
 	}
+	row.Agents = formatSpendAgents(setAgents)
 	return row, nil
 }
 
@@ -364,6 +420,57 @@ func addTokenUsage(acc *TokenUsage, u TokenUsage) {
 	}
 }
 
+func addTurnCount(acc *TurnCount, tc TurnCount) {
+	if !tc.HasTurn {
+		return
+	}
+	acc.Count += tc.Count
+	acc.HasTurn = true
+}
+
+func addPeakInput(acc *PeakInput, peak PeakInput) {
+	if !peak.HasPeak {
+		return
+	}
+	if !acc.HasPeak || peak.Tokens > acc.Tokens {
+		acc.Tokens = peak.Tokens
+	}
+	acc.HasPeak = true
+}
+
+func recordSpendRowAgent(row *SpendBreakdownRow, agent string) {
+	if agent == "" {
+		return
+	}
+	seen := map[string]bool{}
+	for _, part := range strings.Split(row.Agent, ",") {
+		if part != "" {
+			seen[part] = true
+		}
+	}
+	seen[agent] = true
+	row.Agent = formatSpendAgents(seen)
+}
+
+func formatSpendAgents(agents map[string]bool) string {
+	if len(agents) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(agents))
+	for agent := range agents {
+		parts = append(parts, agent)
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, ",")
+}
+
+func spendAgentsMix(agents string) bool {
+	if agents == "" {
+		return false
+	}
+	return strings.Contains(agents, ",")
+}
+
 func tokenUsageTotal(u TokenUsage) int64 {
 	var total int64
 	if u.HasInput {
@@ -384,36 +491,88 @@ func tokenUsageTotal(u TokenUsage) int64 {
 // RenderSpendRollup writes the cross-set spend rollup for humans.
 func RenderSpendRollup(w io.Writer, result *SpendRollupResult) {
 	showCost := spendRollupHasPartialCost(result)
-	if showCost {
-		fmt.Fprintf(w, "%-28s %8s %8s %9s %9s %5s %6s %12s\n",
-			"task set", "in", "out", "cache-r", "cache-w", "runs", "blind", "cost (partial)")
-	} else {
-		fmt.Fprintf(w, "%-28s %8s %8s %9s %9s %5s %6s\n",
-			"task set", "in", "out", "cache-r", "cache-w", "runs", "blind")
-	}
+	showAgents := result != nil && result.ShowAgents
+	writeSpendRollupHeader(w, showCost, showAgents)
 	for _, row := range result.Sets {
-		if showCost {
-			fmt.Fprintf(w, "%-28s %8s %8s %9s %9s %5d %6d %12s\n",
-				row.TaskSetID,
-				formatSpendCount(row.Tokens.HasInput, row.Tokens.Input),
-				formatSpendCount(row.Tokens.HasOutput, row.Tokens.Output),
-				formatSpendCount(row.Tokens.HasCacheRead, row.Tokens.CacheRead),
-				formatSpendCount(row.Tokens.HasCacheWrite, row.Tokens.CacheWrite),
-				row.RunCount,
-				row.TokenBlindRuns,
-				formatPartialCost(row.Cost),
-			)
-		} else {
-			fmt.Fprintf(w, "%-28s %8s %8s %9s %9s %5d %6d\n",
-				row.TaskSetID,
-				formatSpendCount(row.Tokens.HasInput, row.Tokens.Input),
-				formatSpendCount(row.Tokens.HasOutput, row.Tokens.Output),
-				formatSpendCount(row.Tokens.HasCacheRead, row.Tokens.CacheRead),
-				formatSpendCount(row.Tokens.HasCacheWrite, row.Tokens.CacheWrite),
-				row.RunCount,
-				row.TokenBlindRuns,
-			)
-		}
+		writeSpendRollupRow(w, row, showCost, showAgents)
+	}
+}
+
+func writeSpendRollupHeader(w io.Writer, showCost, showAgents bool) {
+	switch {
+	case showCost && showAgents:
+		fmt.Fprintf(w, "%-28s %6s %6s %8s %8s %8s %9s %9s %5s %6s %12s\n",
+			"task set", "agent", "turns", "peak-in", "in", "out", "cache-r", "cache-w", "runs", "blind", "cost (partial)")
+	case showCost:
+		fmt.Fprintf(w, "%-28s %6s %8s %8s %8s %9s %9s %5s %6s %12s\n",
+			"task set", "turns", "peak-in", "in", "out", "cache-r", "cache-w", "runs", "blind", "cost (partial)")
+	case showAgents:
+		fmt.Fprintf(w, "%-28s %6s %6s %8s %8s %8s %9s %9s %5s %6s\n",
+			"task set", "agent", "turns", "peak-in", "in", "out", "cache-r", "cache-w", "runs", "blind")
+	default:
+		fmt.Fprintf(w, "%-28s %6s %8s %8s %8s %9s %9s %5s %6s\n",
+			"task set", "turns", "peak-in", "in", "out", "cache-r", "cache-w", "runs", "blind")
+	}
+}
+
+func writeSpendRollupRow(w io.Writer, row SpendRollupRow, showCost, showAgents bool) {
+	agent := ""
+	if showAgents {
+		agent = row.Agents
+	}
+	switch {
+	case showCost && showAgents:
+		fmt.Fprintf(w, "%-28s %6s %6s %8s %8s %8s %9s %9s %5d %6d %12s\n",
+			row.TaskSetID,
+			agent,
+			formatSpendTurns(row.Turns),
+			formatSpendPeakInput(row.PeakInput),
+			formatSpendCount(row.Tokens.HasInput, row.Tokens.Input),
+			formatSpendCount(row.Tokens.HasOutput, row.Tokens.Output),
+			formatSpendCount(row.Tokens.HasCacheRead, row.Tokens.CacheRead),
+			formatSpendCount(row.Tokens.HasCacheWrite, row.Tokens.CacheWrite),
+			row.RunCount,
+			row.TokenBlindRuns,
+			formatPartialCost(row.Cost),
+		)
+	case showCost:
+		fmt.Fprintf(w, "%-28s %6s %8s %8s %8s %9s %9s %5d %6d %12s\n",
+			row.TaskSetID,
+			formatSpendTurns(row.Turns),
+			formatSpendPeakInput(row.PeakInput),
+			formatSpendCount(row.Tokens.HasInput, row.Tokens.Input),
+			formatSpendCount(row.Tokens.HasOutput, row.Tokens.Output),
+			formatSpendCount(row.Tokens.HasCacheRead, row.Tokens.CacheRead),
+			formatSpendCount(row.Tokens.HasCacheWrite, row.Tokens.CacheWrite),
+			row.RunCount,
+			row.TokenBlindRuns,
+			formatPartialCost(row.Cost),
+		)
+	case showAgents:
+		fmt.Fprintf(w, "%-28s %6s %6s %8s %8s %8s %9s %9s %5d %6d\n",
+			row.TaskSetID,
+			agent,
+			formatSpendTurns(row.Turns),
+			formatSpendPeakInput(row.PeakInput),
+			formatSpendCount(row.Tokens.HasInput, row.Tokens.Input),
+			formatSpendCount(row.Tokens.HasOutput, row.Tokens.Output),
+			formatSpendCount(row.Tokens.HasCacheRead, row.Tokens.CacheRead),
+			formatSpendCount(row.Tokens.HasCacheWrite, row.Tokens.CacheWrite),
+			row.RunCount,
+			row.TokenBlindRuns,
+		)
+	default:
+		fmt.Fprintf(w, "%-28s %6s %8s %8s %8s %9s %9s %5d %6d\n",
+			row.TaskSetID,
+			formatSpendTurns(row.Turns),
+			formatSpendPeakInput(row.PeakInput),
+			formatSpendCount(row.Tokens.HasInput, row.Tokens.Input),
+			formatSpendCount(row.Tokens.HasOutput, row.Tokens.Output),
+			formatSpendCount(row.Tokens.HasCacheRead, row.Tokens.CacheRead),
+			formatSpendCount(row.Tokens.HasCacheWrite, row.Tokens.CacheWrite),
+			row.RunCount,
+			row.TokenBlindRuns,
+		)
 	}
 }
 
@@ -434,6 +593,36 @@ func formatSpendCount(reported bool, n int64) string {
 		return "—"
 	}
 	return fmt.Sprintf("%d", n)
+}
+
+func formatSpendTurns(tc TurnCount) string {
+	if !tc.HasTurn {
+		return "—"
+	}
+	return fmt.Sprintf("%d", tc.Count)
+}
+
+func formatSpendPeakInput(peak PeakInput) string {
+	if !peak.HasPeak {
+		return "—"
+	}
+	return fmt.Sprintf("%d", peak.Tokens)
+}
+
+func spendTurnsJSONPtr(tc TurnCount) *int {
+	if !tc.HasTurn {
+		return nil
+	}
+	v := tc.Count
+	return &v
+}
+
+func spendPeakInputJSONPtr(peak PeakInput) *int64 {
+	if !peak.HasPeak {
+		return nil
+	}
+	v := peak.Tokens
+	return &v
 }
 
 // RenderSpendSetBreakdown writes the per-set spend breakdown for humans.
@@ -459,36 +648,88 @@ func RenderSpendSetBreakdown(w io.Writer, result *SpendSetBreakdownResult) {
 	fmt.Fprintf(w, "%s\n\n", verifyLine)
 
 	showCost := spendBreakdownHasPartialCost(result)
-	if showCost {
-		fmt.Fprintf(w, "%-28s %8s %8s %9s %9s %5s %6s %12s\n",
-			"task", "in", "out", "cache-r", "cache-w", "runs", "blind", "cost (partial)")
-	} else {
-		fmt.Fprintf(w, "%-28s %8s %8s %9s %9s %5s %6s\n",
-			"task", "in", "out", "cache-r", "cache-w", "runs", "blind")
-	}
+	showAgents := result != nil && result.ShowAgents
+	writeSpendBreakdownHeader(w, showCost, showAgents)
 	for _, row := range result.Rows {
-		if showCost {
-			fmt.Fprintf(w, "%-28s %8s %8s %9s %9s %5d %6d %12s\n",
-				row.TaskID,
-				formatSpendCount(row.Tokens.HasInput, row.Tokens.Input),
-				formatSpendCount(row.Tokens.HasOutput, row.Tokens.Output),
-				formatSpendCount(row.Tokens.HasCacheRead, row.Tokens.CacheRead),
-				formatSpendCount(row.Tokens.HasCacheWrite, row.Tokens.CacheWrite),
-				row.RunCount,
-				row.TokenBlindRuns,
-				formatPartialCost(row.Cost),
-			)
-		} else {
-			fmt.Fprintf(w, "%-28s %8s %8s %9s %9s %5d %6d\n",
-				row.TaskID,
-				formatSpendCount(row.Tokens.HasInput, row.Tokens.Input),
-				formatSpendCount(row.Tokens.HasOutput, row.Tokens.Output),
-				formatSpendCount(row.Tokens.HasCacheRead, row.Tokens.CacheRead),
-				formatSpendCount(row.Tokens.HasCacheWrite, row.Tokens.CacheWrite),
-				row.RunCount,
-				row.TokenBlindRuns,
-			)
-		}
+		writeSpendBreakdownRow(w, row, showCost, showAgents)
+	}
+}
+
+func writeSpendBreakdownHeader(w io.Writer, showCost, showAgents bool) {
+	switch {
+	case showCost && showAgents:
+		fmt.Fprintf(w, "%-28s %6s %6s %8s %8s %8s %9s %9s %5s %6s %12s\n",
+			"task", "agent", "turns", "peak-in", "in", "out", "cache-r", "cache-w", "runs", "blind", "cost (partial)")
+	case showCost:
+		fmt.Fprintf(w, "%-28s %6s %8s %8s %8s %9s %9s %5s %6s %12s\n",
+			"task", "turns", "peak-in", "in", "out", "cache-r", "cache-w", "runs", "blind", "cost (partial)")
+	case showAgents:
+		fmt.Fprintf(w, "%-28s %6s %6s %8s %8s %8s %9s %9s %5s %6s\n",
+			"task", "agent", "turns", "peak-in", "in", "out", "cache-r", "cache-w", "runs", "blind")
+	default:
+		fmt.Fprintf(w, "%-28s %6s %8s %8s %8s %9s %9s %5s %6s\n",
+			"task", "turns", "peak-in", "in", "out", "cache-r", "cache-w", "runs", "blind")
+	}
+}
+
+func writeSpendBreakdownRow(w io.Writer, row SpendBreakdownRow, showCost, showAgents bool) {
+	agent := ""
+	if showAgents {
+		agent = row.Agent
+	}
+	switch {
+	case showCost && showAgents:
+		fmt.Fprintf(w, "%-28s %6s %6s %8s %8s %8s %9s %9s %5d %6d %12s\n",
+			row.TaskID,
+			agent,
+			formatSpendTurns(row.Turns),
+			formatSpendPeakInput(row.PeakInput),
+			formatSpendCount(row.Tokens.HasInput, row.Tokens.Input),
+			formatSpendCount(row.Tokens.HasOutput, row.Tokens.Output),
+			formatSpendCount(row.Tokens.HasCacheRead, row.Tokens.CacheRead),
+			formatSpendCount(row.Tokens.HasCacheWrite, row.Tokens.CacheWrite),
+			row.RunCount,
+			row.TokenBlindRuns,
+			formatPartialCost(row.Cost),
+		)
+	case showCost:
+		fmt.Fprintf(w, "%-28s %6s %8s %8s %8s %9s %9s %5d %6d %12s\n",
+			row.TaskID,
+			formatSpendTurns(row.Turns),
+			formatSpendPeakInput(row.PeakInput),
+			formatSpendCount(row.Tokens.HasInput, row.Tokens.Input),
+			formatSpendCount(row.Tokens.HasOutput, row.Tokens.Output),
+			formatSpendCount(row.Tokens.HasCacheRead, row.Tokens.CacheRead),
+			formatSpendCount(row.Tokens.HasCacheWrite, row.Tokens.CacheWrite),
+			row.RunCount,
+			row.TokenBlindRuns,
+			formatPartialCost(row.Cost),
+		)
+	case showAgents:
+		fmt.Fprintf(w, "%-28s %6s %6s %8s %8s %8s %9s %9s %5d %6d\n",
+			row.TaskID,
+			agent,
+			formatSpendTurns(row.Turns),
+			formatSpendPeakInput(row.PeakInput),
+			formatSpendCount(row.Tokens.HasInput, row.Tokens.Input),
+			formatSpendCount(row.Tokens.HasOutput, row.Tokens.Output),
+			formatSpendCount(row.Tokens.HasCacheRead, row.Tokens.CacheRead),
+			formatSpendCount(row.Tokens.HasCacheWrite, row.Tokens.CacheWrite),
+			row.RunCount,
+			row.TokenBlindRuns,
+		)
+	default:
+		fmt.Fprintf(w, "%-28s %6s %8s %8s %8s %9s %9s %5d %6d\n",
+			row.TaskID,
+			formatSpendTurns(row.Turns),
+			formatSpendPeakInput(row.PeakInput),
+			formatSpendCount(row.Tokens.HasInput, row.Tokens.Input),
+			formatSpendCount(row.Tokens.HasOutput, row.Tokens.Output),
+			formatSpendCount(row.Tokens.HasCacheRead, row.Tokens.CacheRead),
+			formatSpendCount(row.Tokens.HasCacheWrite, row.Tokens.CacheWrite),
+			row.RunCount,
+			row.TokenBlindRuns,
+		)
 	}
 }
 
@@ -559,7 +800,7 @@ func RenderSpendSetBreakdownJSON(w io.Writer, result *SpendSetBreakdownResult) e
 		Rows:                         make([]spendBreakdownJSONRow, len(result.Rows)),
 	}
 	for i, row := range result.Rows {
-		payload.Rows[i] = spendBreakdownJSONRow{
+		jr := spendBreakdownJSONRow{
 			TaskID:           row.TaskID,
 			Title:            row.Title,
 			InputTokens:      row.Tokens.Input,
@@ -567,9 +808,17 @@ func RenderSpendSetBreakdownJSON(w io.Writer, result *SpendSetBreakdownResult) e
 			CacheReadTokens:  row.Tokens.CacheRead,
 			CacheWriteTokens: row.Tokens.CacheWrite,
 			PartialCostUSD:   partialCostUSDPtr(row.Cost),
+			Turns:            spendTurnsJSONPtr(row.Turns),
+			TurnBlindRuns:    row.TurnBlindRuns,
+			PeakInputTokens:  spendPeakInputJSONPtr(row.PeakInput),
+			PeakBlindRuns:    row.PeakBlindRuns,
 			RunCount:         row.RunCount,
 			TokenBlindRuns:   row.TokenBlindRuns,
 		}
+		if result.ShowAgents {
+			jr.Agent = row.Agent
+		}
+		payload.Rows[i] = jr
 	}
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
@@ -580,16 +829,24 @@ func RenderSpendSetBreakdownJSON(w io.Writer, result *SpendSetBreakdownResult) e
 func RenderSpendRollupJSON(w io.Writer, result *SpendRollupResult) error {
 	payload := spendRollupJSON{Sets: make([]spendRollupJSONRow, len(result.Sets))}
 	for i, row := range result.Sets {
-		payload.Sets[i] = spendRollupJSONRow{
+		jr := spendRollupJSONRow{
 			TaskSetID:        row.TaskSetID,
 			InputTokens:      row.Tokens.Input,
 			OutputTokens:     row.Tokens.Output,
 			CacheReadTokens:  row.Tokens.CacheRead,
 			CacheWriteTokens: row.Tokens.CacheWrite,
 			PartialCostUSD:   partialCostUSDPtr(row.Cost),
+			Turns:            spendTurnsJSONPtr(row.Turns),
+			TurnBlindRuns:    row.TurnBlindRuns,
+			PeakInputTokens:  spendPeakInputJSONPtr(row.PeakInput),
+			PeakBlindRuns:    row.PeakBlindRuns,
 			RunCount:         row.RunCount,
 			TokenBlindRuns:   row.TokenBlindRuns,
 		}
+		if result.ShowAgents {
+			jr.Agent = row.Agents
+		}
+		payload.Sets[i] = jr
 	}
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")

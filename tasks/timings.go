@@ -85,10 +85,13 @@ type PeakInput struct {
 	HasPeak bool
 }
 
-// RunSpend is the token and cost accounting of one Captured run (ADR-0160).
+// RunSpend is the token, cost, and work-shape accounting of one Captured run
+// (ADR-0160).
 type RunSpend struct {
-	Tokens TokenUsage
-	Cost   PartialCost
+	Tokens    TokenUsage
+	Cost      PartialCost
+	Turns     TurnCount
+	PeakInput PeakInput
 }
 
 // ToolTiming aggregates one tool's paired invocations within an attempt:

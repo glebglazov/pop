@@ -143,14 +143,20 @@ func TestSpendRollupCountsTokenBlindRuns(t *testing.T) {
 }
 
 func TestRenderSpendRollupJSON(t *testing.T) {
+	turns := 4
+	peak := int64(900)
 	result := &SpendRollupResult{Sets: []SpendRollupRow{{
 		TaskSetID: "demo",
 		Tokens: TokenUsage{
 			Input: 10, Output: 5, CacheRead: 2, CacheWrite: 1,
 			HasInput: true, HasOutput: true, HasCacheRead: true, HasCacheWrite: true,
 		},
+		Turns:          TurnCount{Count: turns, HasTurn: true},
+		PeakInput:      PeakInput{Tokens: peak, HasPeak: true},
 		RunCount:       3,
 		TokenBlindRuns: 1,
+		TurnBlindRuns:  1,
+		PeakBlindRuns:  1,
 	}}}
 	var buf bytes.Buffer
 	if err := RenderSpendRollupJSON(&buf, result); err != nil {
@@ -169,6 +175,12 @@ func TestRenderSpendRollupJSON(t *testing.T) {
 		got.RunCount != 3 || got.TokenBlindRuns != 1 {
 		t.Fatalf("row = %+v", got)
 	}
+	if got.Turns == nil || *got.Turns != turns || got.TurnBlindRuns != 1 {
+		t.Fatalf("turns = %v blind = %d, want %d and 1 blind", got.Turns, got.TurnBlindRuns, turns)
+	}
+	if got.PeakInputTokens == nil || *got.PeakInputTokens != peak || got.PeakBlindRuns != 1 {
+		t.Fatalf("peak = %v blind = %d, want %d and 1 blind", got.PeakInputTokens, got.PeakBlindRuns, peak)
+	}
 }
 
 func TestRenderSpendRollupHumanTable(t *testing.T) {
@@ -184,7 +196,7 @@ func TestRenderSpendRollupHumanTable(t *testing.T) {
 	var buf bytes.Buffer
 	RenderSpendRollup(&buf, result)
 	out := buf.String()
-	for _, want := range []string{"task set", "cache-r", "cache-w", "runs", "blind", "demo", "100", "50", "10", "2", "1"} {
+	for _, want := range []string{"task set", "turns", "peak-in", "cache-r", "cache-w", "runs", "blind", "demo", "100", "50", "10", "2", "1"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output missing %q:\n%s", want, out)
 		}
@@ -338,6 +350,21 @@ func claudeUsageEvents(input, output int64) []streamEventRecord {
 	return []streamEventRecord{
 		{Type: "event", AtMS: 100, Raw: fmt.Sprintf(`{"type":"result","usage":{"input_tokens":%d,"output_tokens":%d}}`, input, output)},
 	}
+}
+
+func claudeTurnAndUsageEvents(turns int, input, output int64) []streamEventRecord {
+	events := make([]streamEventRecord, 0, turns+1)
+	for i := 0; i < turns; i++ {
+		events = append(events, streamEventRecord{
+			Type: "event", AtMS: int64(i + 1),
+			Raw: fmt.Sprintf(`{"type":"assistant","message":{"id":"msg_%d","role":"assistant","usage":{"input_tokens":%d,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}`, i, input/int64(turns)),
+		})
+	}
+	events = append(events, streamEventRecord{
+		Type: "event", AtMS: 100,
+		Raw: fmt.Sprintf(`{"type":"result","usage":{"input_tokens":%d,"output_tokens":%d}}`, input, output),
+	})
+	return events
 }
 
 func TestSpendSetBreakdownPerTask(t *testing.T) {
@@ -524,7 +551,7 @@ func TestRenderSpendSetBreakdownHuman(t *testing.T) {
 	var buf bytes.Buffer
 	RenderSpendSetBreakdown(&buf, result)
 	out := buf.String()
-	for _, want := range []string{"tokens per completed task: 150", "verification spend: 500", "01-a", "verify", "blind"} {
+	for _, want := range []string{"tokens per completed task: 150", "verification spend: 500", "turns", "peak-in", "01-a", "verify", "blind"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output missing %q:\n%s", want, out)
 		}
@@ -705,5 +732,199 @@ func TestRenderSpendSetBreakdownShowsPartialCostLabel(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestSpendRollupAggregatesTurnsAndPeakInput(t *testing.T) {
+	env := spendFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	setDir := registerSpendSet(t, env, "2026-06-10-demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	writeSpendRun(t, setDir, "01-a.md", "01-a", "claude", base, claudeTurnAndUsageEvents(3, 100, 50))
+	writeSpendRun(t, setDir, "01-a.md", "01-a", "claude", base.Add(time.Minute), claudeTurnAndUsageEvents(2, 50, 25))
+
+	result, err := SpendRollupWith(env.deps(), nil, nil, SpendOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := result.Sets[0]
+	if !row.Turns.HasTurn || row.Turns.Count != 5 {
+		t.Fatalf("turns = %+v, want 5 reported", row.Turns)
+	}
+	if !row.PeakInput.HasPeak || row.PeakInput.Tokens != 33 {
+		t.Fatalf("peak = %+v, want 33 reported", row.PeakInput)
+	}
+}
+
+func TestSpendRollupTurnAndPeakBlindShowMarkerNotZero(t *testing.T) {
+	env := spendFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	setDir := registerSpendSet(t, env, "2026-06-10-demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	writeSpendRun(t, setDir, "01-a.md", "01-a", "codex", base, []streamEventRecord{
+		{Type: "event", AtMS: 100, Raw: `{"type":"result","result":"ok"}`},
+	})
+
+	result, err := SpendRollupWith(env.deps(), nil, nil, SpendOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := result.Sets[0]
+	if row.Turns.HasTurn {
+		t.Fatalf("turns should be blind, got %+v", row.Turns)
+	}
+	if row.PeakInput.HasPeak {
+		t.Fatalf("peak should be blind, got %+v", row.PeakInput)
+	}
+	var buf bytes.Buffer
+	RenderSpendRollup(&buf, result)
+	if !strings.Contains(buf.String(), "—") {
+		t.Fatalf("expected blind marker, got:\n%s", buf.String())
+	}
+	if strings.Contains(buf.String(), " 0 ") {
+		t.Fatalf("blind run must not show zero, got:\n%s", buf.String())
+	}
+}
+
+func TestSpendRollupShowsAgentColumnOnlyWhenSetMixesAgents(t *testing.T) {
+	single := &SpendRollupResult{Sets: []SpendRollupRow{{
+		TaskSetID: "demo",
+		Tokens:    TokenUsage{Input: 1, HasInput: true},
+		Agents:    "claude",
+		RunCount:  1,
+	}}}
+	var buf bytes.Buffer
+	RenderSpendRollup(&buf, single)
+	if strings.Contains(buf.String(), "agent") {
+		t.Fatalf("single-agent set should hide agent column:\n%s", buf.String())
+	}
+
+	mixed := &SpendRollupResult{
+		ShowAgents: true,
+		Sets: []SpendRollupRow{{
+			TaskSetID: "mixed",
+			Tokens:    TokenUsage{Input: 1, HasInput: true},
+			Agents:    "claude,codex",
+			RunCount:  2,
+		}},
+	}
+	buf.Reset()
+	RenderSpendRollup(&buf, mixed)
+	if !strings.Contains(buf.String(), "agent") || !strings.Contains(buf.String(), "claude,codex") {
+		t.Fatalf("mixed set should show agent column:\n%s", buf.String())
+	}
+}
+
+func TestSpendSetBreakdownShowsAgentColumnOnlyWhenSetMixesAgents(t *testing.T) {
+	env := spendFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	setDir := registerSpendSet(t, env, "2026-06-10-demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	writeSpendRun(t, setDir, "01-a.md", "01-a", "claude", base, claudeUsageEvents(10, 5))
+	writeSpendRun(t, setDir, "01-a.md", "01-a", "codex", base.Add(time.Minute), []streamEventRecord{
+		{Type: "event", AtMS: 100, Raw: `{"type":"result","result":"ok"}`},
+	})
+
+	result, err := SpendSetBreakdownWith(env.deps(), nil, nil, SpendOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "2026-06-10-demo",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.ShowAgents {
+		t.Fatal("expected ShowAgents for mixed-agent set")
+	}
+	var buf bytes.Buffer
+	RenderSpendSetBreakdown(&buf, result)
+	out := buf.String()
+	if !strings.Contains(out, "agent") {
+		t.Fatalf("mixed set should show agent column:\n%s", out)
+	}
+	if !strings.Contains(out, "claude,codex") {
+		t.Fatalf("row should list both agents:\n%s", out)
+	}
+
+	singleDir := registerSpendSet(t, env, "2026-06-11-single", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	writeSpendRun(t, singleDir, "01-a.md", "01-a", "claude", base, claudeUsageEvents(10, 5))
+	single, err := SpendSetBreakdownWith(env.deps(), nil, nil, SpendOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "2026-06-11-single",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if single.ShowAgents {
+		t.Fatal("single-agent set should not show agent column")
+	}
+	buf.Reset()
+	RenderSpendSetBreakdown(&buf, single)
+	if strings.Contains(buf.String(), "agent") {
+		t.Fatalf("single-agent set should hide agent column:\n%s", buf.String())
+	}
+}
+
+func TestRenderSpendRollupJSONTurnAndPeakBlindExplicit(t *testing.T) {
+	result := &SpendRollupResult{Sets: []SpendRollupRow{{
+		TaskSetID:     "demo",
+		Tokens:        TokenUsage{Input: 1, HasInput: true},
+		TurnBlindRuns: 1,
+		PeakBlindRuns: 1,
+		RunCount:      1,
+	}}}
+	var buf bytes.Buffer
+	if err := RenderSpendRollupJSON(&buf, result); err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	sets := raw["sets"].([]any)
+	row := sets[0].(map[string]any)
+	if row["turns"] != nil {
+		t.Fatalf("turns = %v, want null for blind", row["turns"])
+	}
+	if row["peak_input_tokens"] != nil {
+		t.Fatalf("peak_input_tokens = %v, want null for blind", row["peak_input_tokens"])
+	}
+	if row["turn_blind_runs"].(float64) != 1 || row["peak_blind_runs"].(float64) != 1 {
+		t.Fatalf("blind counts = %+v", row)
+	}
+}
+
+func TestRenderSpendRollupJSONReportsTurnsAndPeakWhenPresent(t *testing.T) {
+	turns := 7
+	peak := int64(39552)
+	result := &SpendRollupResult{Sets: []SpendRollupRow{{
+		TaskSetID: "demo",
+		Tokens:    TokenUsage{Input: 1, HasInput: true},
+		Turns:     TurnCount{Count: turns, HasTurn: true},
+		PeakInput: PeakInput{Tokens: peak, HasPeak: true},
+		RunCount:  1,
+	}}}
+	var buf bytes.Buffer
+	if err := RenderSpendRollupJSON(&buf, result); err != nil {
+		t.Fatal(err)
+	}
+	var decoded spendRollupJSON
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	got := decoded.Sets[0]
+	if got.Turns == nil || *got.Turns != turns {
+		t.Fatalf("turns = %v, want %d", got.Turns, turns)
+	}
+	if got.PeakInputTokens == nil || *got.PeakInputTokens != peak {
+		t.Fatalf("peak = %v, want %d", got.PeakInputTokens, peak)
 	}
 }
