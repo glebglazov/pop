@@ -140,6 +140,25 @@ func TestStartAgentInvocationRoutesEnvToTheRunner(t *testing.T) {
 	}
 }
 
+// The last hop of the kimi effort path: a heavy-tier spec's thinking level is
+// what the runner is asked to spawn with, not an argument (ADR-0151).
+func TestStartAgentInvocationCarriesLadderReasoningEnv(t *testing.T) {
+	unsetEnvForTest(t, "KIMI_MODEL_THINKING_EFFORT")
+	spec := resolveTaskAgentSpecForEffort("kimi", "heavy", true)
+	invocation, err := ResolveAgentInvocation(spec, "", "prompt text", "/tmp/runtime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &envCapturingRunner{t: t}
+	if _, err := startAgentInvocation(context.Background(), runner, "/tmp/runtime", io.Discard, invocation); err != nil {
+		t.Fatal(err)
+	}
+	want := "KIMI_CODE_NO_AUTO_UPDATE=1 KIMI_MODEL_THINKING_EFFORT=high"
+	if strings.Join(runner.env, " ") != want {
+		t.Fatalf("runner env = %#v, want %q", runner.env, want)
+	}
+}
+
 func TestStartAgentInvocationFailsLoudlyWhenEnvCannotBeCarried(t *testing.T) {
 	invocation, err := ResolveAgentInvocation("kimi", "", "prompt text", "/tmp/runtime")
 	if err != nil {

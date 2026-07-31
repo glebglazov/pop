@@ -143,12 +143,26 @@ projects = [
 
 # Per-agent effort ladders map task effort to ordered { model, reasoning }
 # entries. reasoning is optional; a model-only entry resolves just --model.
-# Built-in ladders exist for claude/codex/cursor/pi; configuring an agent here
-# fully replaces that agent's built-in ladder.
+# Built-in ladders exist for claude/codex/cursor/pi/kimi; configuring an agent
+# here fully replaces that agent's built-in ladder.
 # [effort.opencode]
 # heavy = [{ model = "opencode/claude-opus-4-8", reasoning = "high" }]
 # standard = [{ model = "opencode/claude-sonnet-4-6", reasoning = "medium" }]
 # light = [{ model = "opencode/kimi-k2.6" }]
+#
+# kimi resolves --model by exact provider-config key, so its built-in ladder
+# names the standard-login aliases (heavy moonshot-ai/kimi-k3 @high, standard
+# the same model @low, light moonshot-ai/kimi-k2.7-code-highspeed, model-only).
+# Override here if your install names them differently, e.g. the managed
+# kimi-code/ prefix. kimi has no reasoning flag: reasoning is passed as
+# KIMI_MODEL_THINKING_EFFORT on the invocation, which bypasses kimi's own
+# validation — pair only levels the model supports (k3: low/high/max), or a
+# request 400s. A KIMI_MODEL_THINKING_EFFORT already set in your environment
+# wins over the ladder's.
+# [effort.kimi]
+# heavy = [{ model = "kimi-code/k3", reasoning = "max" }]
+# standard = [{ model = "kimi-code/k3", reasoning = "high" }]
+# light = [{ model = "kimi-code/k2.7-code" }]
 
 # [tasks]
 # Task attempt retry schedule and caps (ADR-0099). Delays apply between

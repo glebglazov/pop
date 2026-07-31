@@ -55,9 +55,9 @@ func TestTaskAgentsCatalogListsPresetsWithEffortLadders(t *testing.T) {
 		{"cursor", "cursor-agent", "no", "yes", "heavy: composer-2.5 (built-in); standard: composer-2.5 (built-in); light: composer-2.5-fast (built-in)"},
 		{"codex", "codex", "yes", "yes", "heavy: gpt-5.5[reasoning=high] (built-in); standard: gpt-5.5[reasoning=medium] (built-in); light: gpt-5.4-mini[reasoning=low] (built-in)"},
 		{"pi", "pi", "no", "yes", "heavy: opencode-go/qwen3.7-max[reasoning=high] (built-in); standard: opencode-go/kimi-k2.6[reasoning=medium] (built-in); light: opencode-go/deepseek-v4-flash[reasoning=low] (built-in)"},
-		// kimi is last and opt-in only; its built-in ladder lands with the
-		// effort slice, so it reports none for now.
-		{"kimi", "kimi", "no", "yes", "none"},
+		// kimi is last and opt-in only; its ladder's reasoning reaches the process
+		// through the environment, but the catalog renders it like any other.
+		{"kimi", "kimi", "no", "yes", "heavy: moonshot-ai/kimi-k3[reasoning=high] (built-in); standard: moonshot-ai/kimi-k3[reasoning=low] (built-in); light: moonshot-ai/kimi-k2.7-code-highspeed (built-in)"},
 	}
 	var want strings.Builder
 	for _, r := range rows {
@@ -92,8 +92,14 @@ func TestTaskAgentsModelsListsCuratedAliases(t *testing.T) {
 			t.Fatalf("models section missing\nwant contains:\n%sgot:\n%s", want, got)
 		}
 	}
-	if strings.Contains(strings.SplitN(got, "\n\n", 2)[0], "moonshot-ai") {
-		t.Fatalf("models belong in the requested section, not the default table:\n%s", got)
+	// Curated aliases stay out of the default table. Ladder models legitimately
+	// appear there, so this pins alias-only content: the install-dependent marker
+	// and a curated entry no ladder tier names.
+	defaultTable := strings.SplitN(got, "\n\n", 2)[0]
+	for _, unwanted := range []string{"install-dependent aliases", "fable"} {
+		if strings.Contains(defaultTable, unwanted) {
+			t.Fatalf("models belong in the requested section, not the default table:\n%s", got)
+		}
 	}
 }
 

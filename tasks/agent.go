@@ -141,7 +141,11 @@ type AgentAdapter interface {
 	AssistanceCapability() AgentAssistanceCapability
 	AvailabilityProbeCapability() AgentAvailabilityProbeCapability
 	AssistanceInvocation(AgentAssistanceRequest) (*AgentAssistanceInvocation, error)
-	ReasoningArgs(reasoning string) []string
+	// ReasoningSpecTokens renders an Effort ladder's reasoning level as tokens
+	// appended to an Agent-preset spec. Most presets take a CLI flag; a preset
+	// with no reasoning flag renders an environment assignment instead, which its
+	// own invocation hoists out of argv (ADR-0151).
+	ReasoningSpecTokens(reasoning string) []string
 	ArgsContainReasoning(args []string) bool
 	// Models returns the preset's curated, recommended-first model aliases that
 	// Pop ships for display. Advisory only; never a validation gate (ADR-0019).
@@ -217,6 +221,7 @@ var agentAdapters = map[string]AgentAdapter{
 		autoFormat:             AgentOutputKimiStreamJSON,
 		autoArgs:               []string{"--output-format", "stream-json"},
 		env:                    []string{"KIMI_CODE_NO_AUTO_UPDATE=1"},
+		reasoningEnvKey:        "KIMI_MODEL_THINKING_EFFORT",
 		assistance:             AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "kimi"}},
 		models:                 []string{"moonshot-ai/kimi-k3", "moonshot-ai/kimi-k2.7-code", "moonshot-ai/kimi-k2.7-code-highspeed"},
 		modelsInstallDependent: true,
@@ -247,11 +252,23 @@ var piEffortModels = map[string][]config.EffortModel{
 	"light":    {{Model: "opencode-go/deepseek-v4-flash", Reasoning: "low"}},
 }
 
+// kimi resolves --model by exact provider-config key, so these are the
+// standard-login `moonshot-ai/` alias names; an install that names them
+// differently overrides the tier wholesale through [effort.kimi] (ADR-0151).
+// Reasoning levels here are only ones k3 declares — the env channel bypasses
+// kimi's own validation, so an unsupported level would be a server 400.
+var kimiEffortModels = map[string][]config.EffortModel{
+	"heavy":    {{Model: "moonshot-ai/kimi-k3", Reasoning: "high"}},
+	"standard": {{Model: "moonshot-ai/kimi-k3", Reasoning: "low"}},
+	"light":    {{Model: "moonshot-ai/kimi-k2.7-code-highspeed"}},
+}
+
 var builtInEffortModels = map[string]map[string][]config.EffortModel{
 	"claude": claudeEffortModels,
 	"codex":  codexEffortModels,
 	"cursor": cursorEffortModels,
 	"pi":     piEffortModels,
+	"kimi":   kimiEffortModels,
 }
 
 // agentPromptDelivery names where a preset's generated prompt rides in the
@@ -277,10 +294,15 @@ type presetAgentSpec struct {
 	// env rides into every invocation of this preset as KEY=VALUE entries
 	// layered over pop's own environment, for knobs the CLI exposes nowhere
 	// else (ADR-0151).
-	env          []string
-	assistance   AgentAssistanceCapability
-	availability AgentAvailabilityProbeCapability
-	models       []string
+	env []string
+	// reasoningEnvKey names the environment variable this preset reads its
+	// thinking level from, for a preset whose CLI has no reasoning flag at all
+	// (kimi, ADR-0151). Empty for every preset that takes reasoning as an
+	// argument.
+	reasoningEnvKey string
+	assistance      AgentAssistanceCapability
+	availability    AgentAvailabilityProbeCapability
+	models          []string
 	// modelsInstallDependent marks a curated list whose aliases are resolved by
 	// the local install's own provider config rather than being stable,
 	// account-independent names, so the catalog can say so.
@@ -302,10 +324,18 @@ func newPresetAgentAdapter(spec presetAgentSpec) AgentAdapter {
 
 func (a *presetAgentAdapter) Preset() string { return a.preset }
 
-func (a *presetAgentAdapter) ReasoningArgs(reasoning string) []string {
+func (a *presetAgentAdapter) ReasoningSpecTokens(reasoning string) []string {
 	reasoning = strings.TrimSpace(reasoning)
 	if reasoning == "" {
 		return nil
+	}
+	if a.reasoningEnvKey != "" {
+		// A level already exported to pop is hand-set and outranks the ladder,
+		// exactly as a hand-set reasoning argument does.
+		if _, handSet := os.LookupEnv(a.reasoningEnvKey); handSet {
+			return nil
+		}
+		return []string{a.reasoningEnvKey + "=" + reasoning}
 	}
 	switch a.preset {
 	case "claude":
@@ -320,6 +350,14 @@ func (a *presetAgentAdapter) ReasoningArgs(reasoning string) []string {
 }
 
 func (a *presetAgentAdapter) ArgsContainReasoning(args []string) bool {
+	if a.reasoningEnvKey != "" {
+		for _, arg := range args {
+			if strings.HasPrefix(arg, a.reasoningEnvKey+"=") {
+				return true
+			}
+		}
+		return false
+	}
 	switch a.preset {
 	case "claude":
 		for _, arg := range args {
@@ -385,8 +423,9 @@ func (a *presetAgentAdapter) HeadlessInvocation(req AgentHeadlessRequest) (*Agen
 	if mode == "" {
 		mode = AgentOutputAuto
 	}
+	extraArgs, extraEnv := a.splitEnvAssignments(req.ExtraArgs)
 	args := []string{a.headlessPrefix[0]}
-	args = append(args, req.ExtraArgs...)
+	args = append(args, extraArgs...)
 	args = append(args, a.headlessPrefix[1:]...)
 	// A flag-value prompt must stay adjacent to the flag it belongs to, so it
 	// lands before pop's owned output flags instead of at the very end.
@@ -410,10 +449,43 @@ func (a *presetAgentAdapter) HeadlessInvocation(req AgentHeadlessRequest) (*Agen
 	return &AgentInvocation{
 		Name:         args[0],
 		Args:         args[1:],
-		Env:          append([]string(nil), a.env...),
+		Env:          append(append([]string(nil), a.env...), extraEnv...),
 		OutputFormat: format,
 		adapter:      a,
 	}, nil
+}
+
+// splitEnvAssignments separates the environment assignments a spec carries for
+// this preset from its real arguments. The Effort ladder writes a reasoning
+// level for a flagless preset as a KEY=VALUE spec token, and a spec may carry
+// one hand-written; either way it belongs in the invocation environment, never
+// in argv. Only keys this preset itself owns count, so an argument value that
+// happens to contain "=" (codex's `-c model_reasoning_effort="high"`) stays an
+// argument.
+func (a *presetAgentAdapter) splitEnvAssignments(tokens []string) (args, env []string) {
+	for _, token := range tokens {
+		if key, _, found := strings.Cut(token, "="); found && a.ownsEnvKey(key) {
+			env = append(env, token)
+			continue
+		}
+		args = append(args, token)
+	}
+	return args, env
+}
+
+func (a *presetAgentAdapter) ownsEnvKey(key string) bool {
+	if key == "" {
+		return false
+	}
+	if key == a.reasoningEnvKey {
+		return true
+	}
+	for _, entry := range a.env {
+		if name, _, found := strings.Cut(entry, "="); found && name == key {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *presetAgentAdapter) NormalizeOutput(raw string, format AgentOutputFormat) AgentResult {
@@ -443,7 +515,10 @@ func (a *presetAgentAdapter) AssistanceInvocation(req AgentAssistanceRequest) (*
 	}
 	command := *capability.Command
 	command.Args = []string{}
-	command.Args = append(command.Args, req.ExtraArgs...)
+	// An attended launch inherits the human's own shell environment and has no
+	// env channel of its own, so a spec's env assignments are simply not argv.
+	extraArgs, _ := a.splitEnvAssignments(req.ExtraArgs)
+	command.Args = append(command.Args, extraArgs...)
 	command.Args = append(command.Args, capability.Command.Args...)
 	// A preset with no positional prompt form (kimi) launches bare; its briefing
 	// reaches the human another way (ADR-0151).
@@ -488,7 +563,7 @@ func (a customAgentAdapter) AssistanceInvocation(req AgentAssistanceRequest) (*A
 	return nil, fmt.Errorf("custom agent adapter does not support attended assistance")
 }
 
-func (a customAgentAdapter) ReasoningArgs(reasoning string) []string { return nil }
+func (a customAgentAdapter) ReasoningSpecTokens(reasoning string) []string { return nil }
 
 func (a customAgentAdapter) ArgsContainReasoning(args []string) bool { return false }
 
@@ -726,7 +801,7 @@ func resolveTaskAgentSpecForEffortWithConfig(agentSpec, effort string, effortExp
 	adapter := agentAdapters[name]
 	args = append(args, "--model", effortModelTokenForAgent(name, bundles[0], adapter, extraArgs))
 	if adapter != nil && !adapter.ArgsContainReasoning(extraArgs) {
-		args = append(args, adapter.ReasoningArgs(bundles[0].Reasoning)...)
+		args = append(args, adapter.ReasoningSpecTokens(bundles[0].Reasoning)...)
 	}
 	for i, arg := range args {
 		args[i] = shellQuote(arg)

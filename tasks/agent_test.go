@@ -372,6 +372,178 @@ func TestResolveTaskAgentSpecForEffortPiModels(t *testing.T) {
 	}
 }
 
+// unsetEnvForTest clears a variable for one test and restores whatever the
+// ambient environment had, so a level exported into the dev's own shell cannot
+// silently flip a ladder expectation.
+func unsetEnvForTest(t *testing.T, key string) {
+	t.Helper()
+	t.Setenv(key, "")
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestResolveTaskAgentSpecForEffortKimiModels(t *testing.T) {
+	tests := []struct {
+		name      string
+		agentSpec string
+		effort    string
+		want      string
+	}{
+		{name: "heavy", agentSpec: "kimi", effort: "heavy", want: "kimi --model moonshot-ai/kimi-k3 KIMI_MODEL_THINKING_EFFORT=high"},
+		{name: "standard", agentSpec: "kimi", effort: "standard", want: "kimi --model moonshot-ai/kimi-k3 KIMI_MODEL_THINKING_EFFORT=low"},
+		{name: "light is model only", agentSpec: "kimi", effort: "light", want: "kimi --model moonshot-ai/kimi-k2.7-code-highspeed"},
+		{name: "preserves explicit model and skips reasoning", agentSpec: "kimi --model kimi-code/k3", effort: "heavy", want: "kimi --model kimi-code/k3"},
+		{name: "preserves explicit reasoning assignment", agentSpec: "kimi KIMI_MODEL_THINKING_EFFORT=max", effort: "heavy", want: "kimi KIMI_MODEL_THINKING_EFFORT=max --model moonshot-ai/kimi-k3"},
+		{name: "absent effort unchanged", agentSpec: "kimi", effort: "standard", want: "kimi"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			unsetEnvForTest(t, "KIMI_MODEL_THINKING_EFFORT")
+			explicit := tt.name != "absent effort unchanged"
+			got := resolveTaskAgentSpecForEffort(tt.agentSpec, tt.effort, explicit)
+			if got != tt.want {
+				t.Fatalf("spec = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// The kimi ladder's reasoning has no flag to ride, so this walks the whole path
+// an effort tier takes to the spawned process: tier to spec, spec to invocation
+// environment (ADR-0151).
+func TestKimiEffortReasoningReachesTheInvocationEnvironment(t *testing.T) {
+	tests := []struct {
+		effort   string
+		wantArgs []string
+		wantEnv  []string
+	}{
+		{
+			effort:   "heavy",
+			wantArgs: []string{"--model", "moonshot-ai/kimi-k3", "-p", "prompt text", "--output-format", "stream-json"},
+			wantEnv:  []string{"KIMI_CODE_NO_AUTO_UPDATE=1", "KIMI_MODEL_THINKING_EFFORT=high"},
+		},
+		{
+			effort:   "standard",
+			wantArgs: []string{"--model", "moonshot-ai/kimi-k3", "-p", "prompt text", "--output-format", "stream-json"},
+			wantEnv:  []string{"KIMI_CODE_NO_AUTO_UPDATE=1", "KIMI_MODEL_THINKING_EFFORT=low"},
+		},
+		{
+			effort:   "light",
+			wantArgs: []string{"--model", "moonshot-ai/kimi-k2.7-code-highspeed", "-p", "prompt text", "--output-format", "stream-json"},
+			wantEnv:  []string{"KIMI_CODE_NO_AUTO_UPDATE=1"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.effort, func(t *testing.T) {
+			unsetEnvForTest(t, "KIMI_MODEL_THINKING_EFFORT")
+			spec := resolveTaskAgentSpecForEffort("kimi", tt.effort, true)
+			invocation, err := ResolveAgentInvocation(spec, "", "prompt text", "/tmp/runtime")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(invocation.Args, tt.wantArgs) {
+				t.Fatalf("args = %#v, want %#v", invocation.Args, tt.wantArgs)
+			}
+			if !reflect.DeepEqual(invocation.Env, tt.wantEnv) {
+				t.Fatalf("env = %#v, want %#v", invocation.Env, tt.wantEnv)
+			}
+		})
+	}
+}
+
+func TestKimiHandSetThinkingEffortEnvWinsOverLadder(t *testing.T) {
+	t.Setenv("KIMI_MODEL_THINKING_EFFORT", "max")
+	spec := resolveTaskAgentSpecForEffort("kimi", "heavy", true)
+	// The model still applies; only the reasoning half yields.
+	if want := "kimi --model moonshot-ai/kimi-k3"; spec != want {
+		t.Fatalf("spec = %q, want %q", spec, want)
+	}
+	invocation, err := ResolveAgentInvocation(spec, "", "prompt text", "/tmp/runtime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Pop's own KIMI_MODEL_THINKING_EFFORT reaches the child through inheritance,
+	// so the invocation carries only the baked entry.
+	if !reflect.DeepEqual(invocation.Env, []string{"KIMI_CODE_NO_AUTO_UPDATE=1"}) {
+		t.Fatalf("env = %#v, want only the baked entry", invocation.Env)
+	}
+}
+
+func TestKimiPinnedModelSuppressesModelAndReasoning(t *testing.T) {
+	unsetEnvForTest(t, "KIMI_MODEL_THINKING_EFFORT")
+	spec := resolveTaskAgentSpecForEffort("kimi --model kimi-code/k3", "heavy", true)
+	if want := "kimi --model kimi-code/k3"; spec != want {
+		t.Fatalf("spec = %q, want %q", spec, want)
+	}
+	invocation, err := ResolveAgentInvocation(spec, "", "prompt text", "/tmp/runtime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(invocation.Env, []string{"KIMI_CODE_NO_AUTO_UPDATE=1"}) {
+		t.Fatalf("env = %#v, want only the baked entry", invocation.Env)
+	}
+}
+
+func TestResolveTaskAgentSpecForEffortKimiConfiguredLadderReplacesBuiltIn(t *testing.T) {
+	// An install whose provider config names aliases differently overrides the
+	// baked moonshot-ai names wholesale (ADR-0151).
+	cfg := &config.Config{Effort: map[string]config.EffortConfig{
+		"kimi": {
+			Heavy: []config.EffortModel{{Model: "kimi-code/k3", Reasoning: "max"}},
+			Light: []config.EffortModel{{Model: "kimi-code/k2.7-code"}},
+		},
+	}}
+	tests := []struct {
+		name   string
+		effort string
+		want   string
+	}{
+		{name: "configured heavy", effort: "heavy", want: "kimi --model kimi-code/k3 KIMI_MODEL_THINKING_EFFORT=max"},
+		{name: "configured light", effort: "light", want: "kimi --model kimi-code/k2.7-code"},
+		{name: "unconfigured tier resolves nothing", effort: "standard", want: "kimi"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			unsetEnvForTest(t, "KIMI_MODEL_THINKING_EFFORT")
+			got := resolveTaskAgentSpecForEffortWithConfig("kimi", tt.effort, true, cfg)
+			if got != tt.want {
+				t.Fatalf("spec = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// The env-assignment channel is per-preset: an argument that merely contains
+// "=" must stay in argv for a preset that has no env keys of its own.
+func TestArgChannelPresetKeepsEqualsArgsInArgv(t *testing.T) {
+	spec := resolveTaskAgentSpecForEffort("codex", "heavy", true)
+	invocation, err := ResolveAgentInvocation(spec, "", "prompt text", "/tmp/runtime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(invocation.Env) != 0 {
+		t.Fatalf("env = %#v, want empty", invocation.Env)
+	}
+	joined := strings.Join(invocation.Args, " ")
+	if !strings.Contains(joined, `-c model_reasoning_effort="high"`) {
+		t.Fatalf("args lost the reasoning config: %#v", invocation.Args)
+	}
+}
+
+func TestKimiAssistanceKeepsEnvAssignmentsOutOfArgv(t *testing.T) {
+	unsetEnvForTest(t, "KIMI_MODEL_THINKING_EFFORT")
+	spec := resolveTaskAgentSpecForEffort("kimi", "heavy", true)
+	invocation, err := ResolveAgentAssistanceInvocation(spec, "", "briefing text", "/tmp/runtime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"--model", "moonshot-ai/kimi-k3"}
+	if !reflect.DeepEqual(invocation.Command.Args, want) {
+		t.Fatalf("args = %#v, want %#v", invocation.Command.Args, want)
+	}
+}
+
 func TestResolveTaskAgentSpecForEffortCursorConfiguredModelOnly(t *testing.T) {
 	cfg := &config.Config{Effort: map[string]config.EffortConfig{
 		"cursor": {
