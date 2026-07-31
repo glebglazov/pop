@@ -134,7 +134,9 @@ Tell the user the setup is complete and which engineering skills will now read f
 Everything below is pop-specific and replaces the parts of the verbatim region
 above that assume Matt's full skill set. Pop ships no `triage` skill and never
 writes into a repo's `.pop/` tree, so the deltas below (ADR-0141) trim
-upstream's Section A tracker menu, negate Section B, and forbid `.pop/`
+upstream's Section A tracker menu, negate Section B, replace step 4's
+instruction-file selection with the `AGENTS.md` + `CLAUDE.md`-symlink layout every
+agent CLI pop drains through can read, and forbid `.pop/`
 scaffolding — while keeping upstream's `docs/agents/domain.md` write and the
 `## Agent skills` block, the only discovery path a repo-resident agent has.
 Where a line below contradicts the verbatim upstream region, the line below
@@ -183,6 +185,48 @@ its omission is deliberate, not the missing-companion bug that 02 caught. The
 `./triage-labels.md` link in the verbatim region above is dead by design: with
 Section B negated the template is unreachable, so unlike `domain.md` and the
 three `issue-tracker-*.md` seeds it is intentionally not embedded.
+
+## Step 4 file selection — `AGENTS.md` is the file, `CLAUDE.md` the symlink
+
+Upstream's step 4 ("if `CLAUDE.md` exists edit it, else `AGENTS.md`, never create
+the other, ask when neither exists") is **replaced**. Do not ask which name to
+use. The layout is always:
+
+- `AGENTS.md` — the real file, holding the `## Agent skills` block.
+- `CLAUDE.md` — a committed symlink to `AGENTS.md`.
+
+Because pop drains attempts through several agent CLIs and they disagree on the
+name, verified on installed versions:
+
+| CLI | Reads at the repo root |
+| --- | --- |
+| claude 2.1.220 | `CLAUDE.md` only — a project-root `AGENTS.md` is invisible to it |
+| codex | `AGENTS.md` |
+| kimi | `AGENTS.md` / `agents.md` only |
+| pi 0.77.0 | first match of `AGENTS.md`, `CLAUDE.md` |
+| opencode 1.18.4 | first match of `AGENTS.md`, `CLAUDE.md`, `CONTEXT.md` |
+
+Either name alone is a blind spot for some of them. The symlink is one file under
+two names, so it cannot drift, and the two CLIs that would take both stop at the
+first match — no double-load, no duplicated context cost.
+
+How to get there from what exploration found:
+
+- **Neither exists** — write `AGENTS.md`, then `ln -s AGENTS.md CLAUDE.md` and
+  stage both. In a git repo the symlink must be committed (mode `120000`), or
+  clones lose it.
+- **Only `CLAUDE.md`, a regular file** — `git mv CLAUDE.md AGENTS.md`, retitle its
+  heading, then `ln -s AGENTS.md CLAUDE.md`. Preserve every existing section;
+  this is a rename, not a rewrite.
+- **Only `AGENTS.md`** — edit it, add the symlink.
+- **`CLAUDE.md` already a symlink to `AGENTS.md`** — nothing to do but edit
+  `AGENTS.md`.
+- **Both exist as regular files** — do not guess. Show the user both and ask which
+  content survives before collapsing them; divergent instruction files are the
+  failure this layout exists to prevent.
+
+Keep the file short. It is read on turn one of every session in the repo, so
+depth belongs in `docs/agents/*.md` with a one-line pointer here.
 
 ## Never scaffold `.pop/`
 
