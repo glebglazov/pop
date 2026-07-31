@@ -577,9 +577,11 @@ func runToHeaderFooter(run capturedRun) (streamHeaderRecord, streamFooterRecord)
 // StreamWith.
 func attemptStreamFromRun(run capturedRun) AttemptStream {
 	header, footer := runToHeaderFooter(run)
+	agent := run.meta.Agent
 	return AttemptStream{
-		Timing: deriveAttemptTiming(header, footer, run.events),
-		Events: renderStreamEvents(run.meta.Agent, run.events),
+		Timing:     deriveAttemptTiming(header, footer, run.events),
+		Events:     renderStreamEvents(agent, run.events),
+		ToolDetail: extractToolDetail(agent, run.events),
 	}
 }
 

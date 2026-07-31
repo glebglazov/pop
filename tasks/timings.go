@@ -34,6 +34,8 @@ type AttemptTiming struct {
 	Tools          []ToolTiming
 	Model          time.Duration
 	Tokens         TokenUsage
+	Turns          TurnCount
+	PeakInput      PeakInput
 	// Reason is the structured failure verdict from the footer and ExitCode the
 	// agent's exit status; both are meaningful only when Outcome is a failure
 	// and empty otherwise (ADR 0020). The timing lens does not render them — they
@@ -399,6 +401,8 @@ func deriveAttemptTiming(header streamHeaderRecord, footer streamFooterRecord, e
 		model = modelTime(windows, footer.DurationMS)
 	}
 	tokens := extractTokenUsage(header.Agent, events)
+	turns := extractTurnCount(header.Agent, events)
+	peak := extractPeakInput(header.Agent, events)
 	return AttemptTiming{
 		Agent:          header.Agent,
 		RequestedAgent: requestedAgent,
@@ -409,6 +413,8 @@ func deriveAttemptTiming(header streamHeaderRecord, footer streamFooterRecord, e
 		Tools:          tools,
 		Model:          model,
 		Tokens:         tokens,
+		Turns:          turns,
+		PeakInput:      peak,
 		Reason:         footer.Reason,
 		ExitCode:       footer.ExitCode,
 	}

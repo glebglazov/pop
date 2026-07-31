@@ -56,6 +56,7 @@ var (
 	taskStreamFull            bool
 	taskStreamRaw             bool
 	taskStreamLast            bool
+	taskStreamToolDetail      bool
 	taskSpendJSON             bool
 	taskAgentsModels          bool
 )
@@ -281,6 +282,7 @@ func init() {
 	taskStreamCmd.Flags().BoolVar(&taskStreamFull, "full", false, "Print all tool payloads verbatim without truncation")
 	taskStreamCmd.Flags().BoolVar(&taskStreamRaw, "raw", false, "Decompress and write raw JSONL without rendering (ignores --full)")
 	taskStreamCmd.Flags().BoolVar(&taskStreamLast, "last", false, "Show only the most recent attempt per task")
+	taskStreamCmd.Flags().BoolVar(&taskStreamToolDetail, "tool-detail", false, "Deepen the timing breakdown to argument-level tool facts")
 	taskCmd.AddCommand(taskSpendCmd)
 	taskSpendCmd.Flags().BoolVar(&taskSpendJSON, "json", false, "Emit spend data as JSON instead of a table")
 	taskCmd.AddCommand(taskShowPathCmd)
@@ -1397,7 +1399,10 @@ func runTaskStreamWith(d *tasks.Deps, w io.Writer, target string) error {
 	if err != nil {
 		return err
 	}
-	tasks.RenderStream(w, result, tasks.RenderStreamOptions{Full: taskStreamFull})
+	tasks.RenderStream(w, result, tasks.RenderStreamOptions{
+		Full:       taskStreamFull,
+		ToolDetail: taskStreamToolDetail,
+	})
 	return nil
 }
 

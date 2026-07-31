@@ -27,6 +27,8 @@ type StreamOptions struct {
 type RenderStreamOptions struct {
 	// Full disables payload truncation and prints every payload verbatim.
 	Full bool
+	// ToolDetail deepens the attempt timing breakdown to argument granularity.
+	ToolDetail bool
 }
 
 // streamDelimiter is written as a JSON line before each attempt file in raw
@@ -71,8 +73,9 @@ type TaskStream struct {
 
 // AttemptStream is one captured attempt's timing header and event sequence.
 type AttemptStream struct {
-	Timing AttemptTiming
-	Events []StreamEvent
+	Timing     AttemptTiming
+	Events     []StreamEvent
+	ToolDetail ToolDetailReport
 }
 
 // StreamEvent is one rendered event from the attempt's stream.
@@ -312,8 +315,9 @@ func loadAttemptStream(d *Deps, path string) (AttemptStream, error) {
 	renderedEvents := renderStreamEvents(header.Agent, events)
 
 	return AttemptStream{
-		Timing: timing,
-		Events: renderedEvents,
+		Timing:     timing,
+		Events:     renderedEvents,
+		ToolDetail: extractToolDetail(header.Agent, events),
 	}, nil
 }
 
@@ -545,6 +549,12 @@ func RenderStream(w io.Writer, result *StreamResult, opts RenderStreamOptions) {
 		return
 	}
 
+	var allAttempts []AttemptStream
+	for _, task := range result.Tasks {
+		allAttempts = append(allAttempts, task.Attempts...)
+	}
+	medianTurns, hasMedianTurns := medianTurnCount(allAttempts)
+
 	for i, task := range result.Tasks {
 		if i > 0 {
 			fmt.Fprintln(out)
@@ -558,16 +568,16 @@ func RenderStream(w io.Writer, result *StreamResult, opts RenderStreamOptions) {
 			out.line(ansiDim, "  no captured attempt streams")
 			continue
 		}
-		renderAttemptStreams(out, task.Attempts, opts)
+		renderAttemptStreams(out, task.Attempts, opts, medianTurns, hasMedianTurns)
 	}
 }
 
 // renderAttemptStreams writes one task's attempt streams: the timing breakdown
 // header followed by the event replay with +Xs offsets.
-func renderAttemptStreams(out *output, attempts []AttemptStream, opts RenderStreamOptions) {
+func renderAttemptStreams(out *output, attempts []AttemptStream, opts RenderStreamOptions, medianTurns int, hasMedianTurns bool) {
 	// First render the timing breakdown header for each attempt
 	for _, a := range attempts {
-		renderAttemptTimingHeader(out, a.Timing)
+		renderAttemptTimingHeader(out, a, opts, medianTurns, hasMedianTurns)
 	}
 
 	// Then render the event sequence for each attempt
@@ -581,16 +591,21 @@ func renderAttemptStreams(out *output, attempts []AttemptStream, opts RenderStre
 
 // renderAttemptTimingHeader writes the timing breakdown for one attempt,
 // mirroring the format used by RenderTimings.
-func renderAttemptTimingHeader(out *output, a AttemptTiming) {
-	tokens := formatTokenUsage(a.Tokens)
-	if a.ActualModel != "" {
-		out.line(timingOutcomeStyle(a.Outcome), "  %s  %s  %s  %s  %s  %s",
-			a.Start.Format(time.RFC3339), displayAttemptAgent(a), a.ActualModel, a.Outcome, formatAttemptDuration(a.Duration), tokens)
+func renderAttemptTimingHeader(out *output, a AttemptStream, opts RenderStreamOptions, medianTurns int, hasMedianTurns bool) {
+	timing := a.Timing
+	tokens := formatTokenUsage(timing.Tokens)
+	if timing.ActualModel != "" {
+		out.line(timingOutcomeStyle(timing.Outcome), "  %s  %s  %s  %s  %s  %s",
+			timing.Start.Format(time.RFC3339), displayAttemptAgent(timing), timing.ActualModel, timing.Outcome, formatAttemptDuration(timing.Duration), tokens)
 	} else {
-		out.line(timingOutcomeStyle(a.Outcome), "  %s  %s  %s  %s  %s",
-			a.Start.Format(time.RFC3339), displayAttemptAgent(a), a.Outcome, formatAttemptDuration(a.Duration), tokens)
+		out.line(timingOutcomeStyle(timing.Outcome), "  %s  %s  %s  %s  %s",
+			timing.Start.Format(time.RFC3339), displayAttemptAgent(timing), timing.Outcome, formatAttemptDuration(timing.Duration), tokens)
 	}
-	renderToolTimings(out, a.Tools, a.Model)
+	renderToolTimings(out, timing.Tools, timing.Model)
+	if opts.ToolDetail {
+		renderToolDetail(out, a.ToolDetail)
+		renderAttemptSuspects(out, timing, medianTurns, hasMedianTurns)
+	}
 }
 
 // renderAttemptEventReplay writes one attempt's event sequence with +Xs offsets.
