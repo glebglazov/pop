@@ -10,7 +10,7 @@ import (
 
 func loadTurnFixture(t *testing.T, name string) []streamEventRecord {
 	t.Helper()
-	path := filepath.Join("testdata", "turns", name)
+	path := filepath.Join("testdata", "streams", name)
 	f, err := os.Open(path)
 	if err != nil {
 		t.Fatalf("open %s: %v", path, err)
