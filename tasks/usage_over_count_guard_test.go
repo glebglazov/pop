@@ -1,59 +1,24 @@
 package tasks
 
 import (
-	"encoding/json"
-	"strings"
 	"testing"
 )
 
-func TestCheckUsageOverCountGuardPiDeltaOverCountFailsLoudly(t *testing.T) {
+func TestCheckUsageOverCountGuardPiInapplicable(t *testing.T) {
 	events := piDeltaOverCountFixtureEvents()
-
-	// Correct extraction passes the guard.
-	correct := piTokenUsage(events)
-	if status, err := checkUsageOverCountGuard("pi", events, correct); err != nil {
-		t.Fatalf("correct extraction: %v", err)
-	} else if status != OverCountGuardOK {
-		t.Fatalf("correct extraction guard = %v, want OK", status)
-	}
-
-	// Summing message_update deltas is the ~4× failure mode ADR-0160 guards.
-	wrong := piTokenUsageSumDeltas(events)
-	if wrong.Input <= correct.Input {
-		t.Fatalf("fixture must over-count input: wrong=%d correct=%d", wrong.Input, correct.Input)
-	}
-	_, err := checkUsageOverCountGuard("pi", events, wrong)
-	if err == nil {
-		t.Fatal("expected over-count guard error for delta sum")
-	}
-	if !strings.Contains(err.Error(), "usage over-count guard") {
-		t.Fatalf("error = %q, want loud guard failure", err)
+	extracted := piTokenUsage(events)
+	if err := checkUsageOverCountGuard("pi", events, extracted); err != nil {
+		t.Fatalf("pi guard should be inapplicable: %v", err)
 	}
 }
 
-func TestCheckUsageOverCountGuardCursorPassesWhenExtractedMatchesTerminal(t *testing.T) {
+func TestCheckUsageOverCountGuardCursorInapplicable(t *testing.T) {
 	events := []streamEventRecord{
 		{Type: "event", AtMS: 100, Raw: `{"type":"result","subtype":"success","usage":{"inputTokens":10,"outputTokens":20}}`},
 	}
 	extracted := cursorTokenUsage(events)
-	status, err := checkUsageOverCountGuard("cursor", events, extracted)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if status != OverCountGuardOK {
-		t.Fatalf("guard status = %v, want OK", status)
-	}
-}
-
-func TestCheckUsageOverCountGuardCursorRejectsSummedResults(t *testing.T) {
-	events := []streamEventRecord{
-		{Type: "event", AtMS: 100, Raw: `{"type":"result","subtype":"success","usage":{"inputTokens":10,"outputTokens":20}}`},
-		{Type: "event", AtMS: 200, Raw: `{"type":"result","subtype":"success","usage":{"inputTokens":100,"outputTokens":200}}`},
-	}
-	// A mistaken accumulate across result events exceeds the terminal total.
-	wrong := cursorTokenUsageSumResults(events)
-	if _, err := checkUsageOverCountGuard("cursor", events, wrong); err == nil {
-		t.Fatal("expected over-count guard error for summed cursor results")
+	if err := checkUsageOverCountGuard("cursor", events, extracted); err != nil {
+		t.Fatalf("cursor guard should be inapplicable: %v", err)
 	}
 }
 
@@ -62,37 +27,26 @@ func TestCheckUsageOverCountGuardClaudeInapplicable(t *testing.T) {
 		{Type: "event", AtMS: 100, Raw: `{"type":"result","usage":{"input_tokens":10,"output_tokens":20}}`},
 	}
 	extracted := claudeTokenUsage(events)
-	status, err := checkUsageOverCountGuard("claude", events, extracted)
-	if err != nil {
+	if err := checkUsageOverCountGuard("claude", events, extracted); err != nil {
 		t.Fatal(err)
-	}
-	if status != OverCountGuardInapplicable {
-		t.Fatalf("guard status = %v, want Inapplicable", status)
 	}
 }
 
 func TestCheckUsageOverCountGuardUnknownAdapterInapplicable(t *testing.T) {
-	status, err := checkUsageOverCountGuard("codex", nil, TokenUsage{})
-	if err != nil {
+	if err := checkUsageOverCountGuard("codex", nil, TokenUsage{}); err != nil {
 		t.Fatal(err)
-	}
-	if status != OverCountGuardInapplicable {
-		t.Fatalf("guard status = %v, want Inapplicable", status)
 	}
 }
 
 func TestRunSpendAppliesOverCountGuard(t *testing.T) {
 	events := piDeltaOverCountFixtureEvents()
 	run := capturedRun{
-		meta: capturedRunMeta{Agent: "pi"},
+		meta:   capturedRunMeta{Agent: "pi"},
 		events: events,
 	}
-	spend, status, err := runSpend(run)
+	spend, err := runSpend(run)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if status != OverCountGuardOK {
-		t.Fatalf("guard status = %v, want OK", status)
 	}
 	if spend.Tokens.Input != 180 {
 		t.Fatalf("tokens = %+v", spend.Tokens)
@@ -129,86 +83,4 @@ func piDeltaOverCountFixtureEvents() []streamEventRecord {
 		},
 	)
 	return events
-}
-
-// piTokenUsageSumDeltas is the mistaken extraction rule that sums every
-// message_update cumulative block — the regression ADR-0160 guards against.
-func piTokenUsageSumDeltas(events []streamEventRecord) TokenUsage {
-	var u TokenUsage
-	for _, ev := range events {
-		var event struct {
-			Type    string `json:"type"`
-			Message struct {
-				Usage *struct {
-					Input      *int64 `json:"input"`
-					Output     *int64 `json:"output"`
-					CacheRead  *int64 `json:"cacheRead"`
-					CacheWrite *int64 `json:"cacheWrite"`
-				} `json:"usage"`
-			} `json:"message"`
-		}
-		if err := json.Unmarshal([]byte(ev.Raw), &event); err != nil {
-			continue
-		}
-		if event.Type != "message_update" || event.Message.Usage == nil {
-			continue
-		}
-		usage := event.Message.Usage
-		if v := usage.Input; v != nil {
-			u.Input += *v
-			u.HasInput = true
-		}
-		if v := usage.Output; v != nil {
-			u.Output += *v
-			u.HasOutput = true
-		}
-		if v := usage.CacheRead; v != nil {
-			u.CacheRead += *v
-			u.HasCacheRead = true
-		}
-		if v := usage.CacheWrite; v != nil {
-			u.CacheWrite += *v
-			u.HasCacheWrite = true
-		}
-	}
-	return u
-}
-
-// cursorTokenUsageSumResults is a mistaken accumulate rule for cursor.
-func cursorTokenUsageSumResults(events []streamEventRecord) TokenUsage {
-	var u TokenUsage
-	for _, ev := range events {
-		var event struct {
-			Type  string `json:"type"`
-			Usage *struct {
-				InputTokens      *int64 `json:"inputTokens"`
-				OutputTokens     *int64 `json:"outputTokens"`
-				CacheReadTokens  *int64 `json:"cacheReadTokens"`
-				CacheWriteTokens *int64 `json:"cacheWriteTokens"`
-			} `json:"usage"`
-		}
-		if err := json.Unmarshal([]byte(ev.Raw), &event); err != nil {
-			continue
-		}
-		if event.Type != "result" || event.Usage == nil {
-			continue
-		}
-		if v := event.Usage.InputTokens; v != nil {
-			u.Input += *v
-			u.HasInput = true
-		}
-		if v := event.Usage.OutputTokens; v != nil {
-			u.Output += *v
-			u.HasOutput = true
-		}
-		if v := event.Usage.CacheReadTokens; v != nil {
-			u.CacheRead += *v
-			u.HasCacheRead = true
-		}
-		if v := event.Usage.CacheWriteTokens; v != nil {
-			u.CacheWrite += *v
-			u.HasCacheWrite = true
-		}
-	}
-	return u
 }

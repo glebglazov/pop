@@ -83,17 +83,16 @@ func listSpendRuns(d *Deps, taskSetDir string) ([]capturedRun, error) {
 // runSpend derives Run spend for one Captured run via its adapter's extraction
 // rules and applies the over-count guard. Legacy runs are rejected — spend
 // never reads them.
-func runSpend(run capturedRun) (RunSpend, OverCountGuardStatus, error) {
+func runSpend(run capturedRun) (RunSpend, error) {
 	if isLegacyRun(run) {
-		return RunSpend{}, OverCountGuardInapplicable, fmt.Errorf("spend does not read legacy attempt streams (%s)", filepath.Base(run.legacyPath))
+		return RunSpend{}, fmt.Errorf("spend does not read legacy attempt streams (%s)", filepath.Base(run.legacyPath))
 	}
 	spend := RunSpend{
 		Tokens: extractTokenUsage(run.meta.Agent, run.events),
 		Cost:   extractPartialCost(run.meta.Agent, run.events),
 	}
-	status, err := checkUsageOverCountGuard(run.meta.Agent, run.events, spend.Tokens)
-	if err != nil {
-		return RunSpend{}, status, err
+	if err := checkUsageOverCountGuard(run.meta.Agent, run.events, spend.Tokens); err != nil {
+		return RunSpend{}, err
 	}
-	return spend, status, nil
+	return spend, nil
 }

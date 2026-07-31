@@ -171,14 +171,6 @@ func piToolHint(args json.RawMessage) string {
 // message_update deltas. A present usage object reports its fields even
 // when zero (Has* true), distinct from a Token-blind absence.
 func piTokenUsage(events []streamEventRecord) TokenUsage {
-	u, _ := piTerminalTokenUsage(events)
-	return u
-}
-
-// piTerminalTokenUsage reads settled per-message totals from message_end events
-// for the over-count guard. Independent of the Usage extraction rule so a
-// mistaken sum across message_update deltas is caught.
-func piTerminalTokenUsage(events []streamEventRecord) (TokenUsage, bool) {
 	var u TokenUsage
 	for _, ev := range events {
 		var event struct {
@@ -216,7 +208,7 @@ func piTerminalTokenUsage(events []streamEventRecord) (TokenUsage, bool) {
 			u.HasCacheWrite = true
 		}
 	}
-	return u, u.HasUsage()
+	return u
 }
 
 // piPartialCost is pi's cost extraction rule (ADR-0160).

@@ -465,20 +465,20 @@ func TestSpendSetBreakdownCountsTokenBlindRuns(t *testing.T) {
 func TestRenderSpendSetBreakdownJSON(t *testing.T) {
 	perTask := int64(150)
 	result := &SpendSetBreakdownResult{
-		TaskSetID:      "demo",
-		CompletedTasks: 1,
+		TaskSetID:              "demo",
+		CompletedTasks:         1,
 		TokensPerCompletedTask: &perTask,
-		ImplementTokens: TokenUsage{Input: 100, Output: 50, HasInput: true, HasOutput: true},
-		ImplementRunCount: 1,
-		VerificationTokens: TokenUsage{Input: 500, Output: 250, HasInput: true, HasOutput: true},
-		VerificationRunCount: 1,
+		ImplementTokens:        TokenUsage{Input: 100, Output: 50, HasInput: true, HasOutput: true},
+		ImplementRunCount:      1,
+		VerificationTokens:     TokenUsage{Input: 500, Output: 250, HasInput: true, HasOutput: true},
+		VerificationRunCount:   1,
 		Rows: []SpendBreakdownRow{{
 			TaskID: "01-a", Title: "A",
-			Tokens: TokenUsage{Input: 100, Output: 50, HasInput: true, HasOutput: true},
+			Tokens:   TokenUsage{Input: 100, Output: 50, HasInput: true, HasOutput: true},
 			RunCount: 1,
 		}, {
 			TaskID: "verify", Title: "Verify",
-			Tokens: TokenUsage{Input: 500, Output: 250, HasInput: true, HasOutput: true},
+			Tokens:   TokenUsage{Input: 500, Output: 250, HasInput: true, HasOutput: true},
 			RunCount: 1,
 		}},
 	}
@@ -512,12 +512,12 @@ func TestRenderSpendSetBreakdownHuman(t *testing.T) {
 		VerificationTokens:     TokenUsage{Input: 500, HasInput: true},
 		VerificationRunCount:   1,
 		Rows: []SpendBreakdownRow{{
-			TaskID: "01-a",
-			Tokens: TokenUsage{Input: 100, Output: 50, HasInput: true, HasOutput: true},
+			TaskID:   "01-a",
+			Tokens:   TokenUsage{Input: 100, Output: 50, HasInput: true, HasOutput: true},
 			RunCount: 1,
 		}, {
-			TaskID: "verify",
-			Tokens: TokenUsage{Input: 500, HasInput: true},
+			TaskID:   "verify",
+			Tokens:   TokenUsage{Input: 500, HasInput: true},
 			RunCount: 1,
 		}},
 	}
@@ -684,17 +684,17 @@ func TestRenderSpendSetBreakdownShowsPartialCostLabel(t *testing.T) {
 		ImplementCost:          PartialCost{Dollars: 0.50, HasCost: true},
 		ImplementRunCount:      1,
 		VerificationTokens:     TokenUsage{Input: 500, HasInput: true},
-		VerificationCost:         PartialCost{Dollars: 0.25, HasCost: true},
+		VerificationCost:       PartialCost{Dollars: 0.25, HasCost: true},
 		VerificationRunCount:   1,
 		Rows: []SpendBreakdownRow{{
-			TaskID: "01-a",
-			Tokens: TokenUsage{Input: 100, Output: 50, HasInput: true, HasOutput: true},
-			Cost:   PartialCost{Dollars: 0.50, HasCost: true},
+			TaskID:   "01-a",
+			Tokens:   TokenUsage{Input: 100, Output: 50, HasInput: true, HasOutput: true},
+			Cost:     PartialCost{Dollars: 0.50, HasCost: true},
 			RunCount: 1,
 		}, {
-			TaskID: "verify",
-			Tokens: TokenUsage{Input: 500, HasInput: true},
-			Cost:   PartialCost{Dollars: 0.25, HasCost: true},
+			TaskID:   "verify",
+			Tokens:   TokenUsage{Input: 500, HasInput: true},
+			Cost:     PartialCost{Dollars: 0.25, HasCost: true},
 			RunCount: 1,
 		}},
 	}

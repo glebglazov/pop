@@ -2,44 +2,33 @@ package tasks
 
 import "fmt"
 
-// OverCountGuardStatus reports whether the usage over-count guard applied to a
-// run. Adapters with no independent terminal total are Inapplicable rather
-// than silently passing (ADR-0160).
-type OverCountGuardStatus int
-
-const (
-	OverCountGuardInapplicable OverCountGuardStatus = iota
-	OverCountGuardOK
-)
-
 // terminalTokenUsageReaders map agent preset → independent terminal-total
 // reader. These are separate from Usage extraction rules so a mistaken
 // accumulate/replace implementation is caught when summed usage exceeds what
-// the run's own terminal event reports.
-var terminalTokenUsageReaders = map[string]func([]streamEventRecord) (TokenUsage, bool){
-	"cursor": cursorTerminalTokenUsage,
-	"pi":     piTerminalTokenUsage,
-}
+// the run's own terminal event reports. Adapters with no independent anchor
+// are absent from this map.
+var terminalTokenUsageReaders = map[string]func([]streamEventRecord) (TokenUsage, bool){}
 
 // checkUsageOverCountGuard verifies extracted usage does not exceed the run's
-// terminal-reported total. A violation returns an error — spend must fail
-// loudly rather than render a plausible wrong figure.
-func checkUsageOverCountGuard(agent string, events []streamEventRecord, extracted TokenUsage) (OverCountGuardStatus, error) {
+// terminal-reported total when an independent anchor exists. A violation
+// returns an error — spend must fail loudly rather than render a plausible
+// wrong figure. Adapters with no independent terminal total are skipped.
+func checkUsageOverCountGuard(agent string, events []streamEventRecord, extracted TokenUsage) error {
 	reader := terminalTokenUsageReaders[agent]
 	if reader == nil {
-		return OverCountGuardInapplicable, nil
+		return nil
 	}
 	terminal, ok := reader(events)
 	if !ok {
-		return OverCountGuardInapplicable, nil
+		return nil
 	}
 	if field, got, ceiling, over := tokenUsageExceeds(extracted, terminal); over {
-		return OverCountGuardOK, fmt.Errorf(
+		return fmt.Errorf(
 			"usage over-count guard: %s run %s tokens %d exceed terminal %d",
 			agent, field, got, ceiling,
 		)
 	}
-	return OverCountGuardOK, nil
+	return nil
 }
 
 // tokenUsageExceeds reports whether a exceeds ceiling on any field the

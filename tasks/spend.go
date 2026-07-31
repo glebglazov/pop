@@ -210,7 +210,7 @@ func buildSpendSetBreakdown(d *Deps, taskSetID string, m *Manifest) (*SpendSetBr
 	result := &SpendSetBreakdownResult{TaskSetID: taskSetID}
 	seen := map[string]int{}
 	for _, run := range runs {
-		spend, _, err := runSpend(run)
+		spend, err := runSpend(run)
 		if err != nil {
 			return nil, err
 		}
@@ -324,7 +324,7 @@ func taskSetSpendRollup(d *Deps, taskSetID, taskSetDir string) (SpendRollupRow, 
 	}
 	row := SpendRollupRow{TaskSetID: taskSetID}
 	for _, run := range runs {
-		spend, _, err := runSpend(run)
+		spend, err := runSpend(run)
 		if err != nil {
 			return SpendRollupRow{}, err
 		}
