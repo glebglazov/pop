@@ -325,8 +325,8 @@ func TestAgentReasoningCapabilityValidate(t *testing.T) {
 }
 
 func TestPresetUsageAndCostCapabilitiesDeclared(t *testing.T) {
-	// validate is not yet wired into construction; assert every preset's
-	// declared stance would pass so the later switch-on slice is a one-liner.
+	// Construction validates every capability; this loop still names the preset
+	// and capability when a declaration regresses.
 	for _, preset := range agentCatalogOrder {
 		adapter, err := ResolveAgentAdapter(preset)
 		if err != nil {
@@ -369,4 +369,107 @@ func TestPresetUsageAndCostCapabilitiesDeclared(t *testing.T) {
 			t.Fatalf("%s availability-probe: %v", preset, err)
 		}
 	}
+}
+
+func validTestPresetAgentSpec() presetAgentSpec {
+	const reason = "test blind reason"
+	return presetAgentSpec{
+		preset: "test-preset",
+		usage: AgentUsageCapability{
+			Kind: CapabilityBlind, Reason: reason,
+		},
+		cost: AgentCostCapability{
+			Kind: CapabilityBlind, Reason: reason,
+		},
+		toolTimings: AgentToolTimingCapability{
+			Kind: CapabilityBlind, Reason: reason,
+		},
+		actualModel: AgentActualModelCapability{
+			Kind: CapabilityBlind, Reason: reason,
+		},
+		streamRender: AgentStreamRenderCapability{
+			Kind: CapabilityBlind, Reason: reason,
+		},
+		turns: AgentTurnCapability{
+			Kind: CapabilityBlind, Reason: reason,
+		},
+		peakInput: AgentPeakInputCapability{
+			Kind: CapabilityBlind, Reason: reason,
+		},
+		reasoning: AgentReasoningCapability{
+			Kind: CapabilityBlind, Reason: reason,
+		},
+		quotaReset: AgentQuotaResetCapability{
+			Kind: CapabilityBlind, Reason: reason,
+		},
+		effortLadder: AgentEffortLadderCapability{
+			Kind: CapabilityBlind, Reason: reason,
+		},
+		executable: AgentExecutableCapability{
+			Kind: CapabilityBlind, Reason: reason,
+		},
+		availability: AgentAvailabilityProbeCapability{
+			Kind: CapabilityBlind, Reason: reason,
+		},
+	}
+}
+
+func TestPresetAgentSpecValidateRejectsMissingCapability(t *testing.T) {
+	valid := validTestPresetAgentSpec()
+	if err := valid.validate(); err != nil {
+		t.Fatalf("valid spec: %v", err)
+	}
+
+	tests := []struct {
+		name       string
+		mutate     func(*presetAgentSpec)
+		capability string
+	}{
+		{"usage", func(s *presetAgentSpec) { s.usage = AgentUsageCapability{} }, "usage"},
+		{"cost", func(s *presetAgentSpec) { s.cost = AgentCostCapability{} }, "cost"},
+		{"tool-timing", func(s *presetAgentSpec) { s.toolTimings = AgentToolTimingCapability{} }, "tool-timing"},
+		{"actual-model", func(s *presetAgentSpec) { s.actualModel = AgentActualModelCapability{} }, "actual-model"},
+		{"stream-render", func(s *presetAgentSpec) { s.streamRender = AgentStreamRenderCapability{} }, "stream-render"},
+		{"turn", func(s *presetAgentSpec) { s.turns = AgentTurnCapability{} }, "turn"},
+		{"peak-input", func(s *presetAgentSpec) { s.peakInput = AgentPeakInputCapability{} }, "peak-input"},
+		{"reasoning", func(s *presetAgentSpec) { s.reasoning = AgentReasoningCapability{} }, "reasoning"},
+		{"quota-reset", func(s *presetAgentSpec) { s.quotaReset = AgentQuotaResetCapability{} }, "quota-reset"},
+		{"effort-ladder", func(s *presetAgentSpec) { s.effortLadder = AgentEffortLadderCapability{} }, "effort-ladder"},
+		{"executable", func(s *presetAgentSpec) { s.executable = AgentExecutableCapability{} }, "executable"},
+		{"availability-probe", func(s *presetAgentSpec) { s.availability = AgentAvailabilityProbeCapability{} }, "availability-probe"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := validTestPresetAgentSpec()
+			tc.mutate(&spec)
+			err := spec.validate()
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			msg := err.Error()
+			if !strings.Contains(msg, "test-preset") || !strings.Contains(msg, tc.capability) {
+				t.Fatalf("error should name preset and capability, got %v", err)
+			}
+		})
+	}
+}
+
+func TestNewPresetAgentAdapterPanicsOnInvalidSpec(t *testing.T) {
+	spec := validTestPresetAgentSpec()
+	spec.usage = AgentUsageCapability{}
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic")
+		}
+		err, ok := r.(error)
+		if !ok {
+			t.Fatalf("panic value %T %v", r, r)
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "test-preset") || !strings.Contains(msg, "usage") {
+			t.Fatalf("panic should name preset and capability, got %v", err)
+		}
+	}()
+	newPresetAgentAdapter(spec)
 }

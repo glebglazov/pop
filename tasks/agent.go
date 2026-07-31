@@ -451,7 +451,35 @@ type presetAgentAdapter struct {
 	presetAgentSpec
 }
 
+func (s presetAgentSpec) validate() error {
+	preset := s.preset
+	for _, check := range []struct {
+		err error
+	}{
+		{s.usage.validate(preset)},
+		{s.cost.validate(preset)},
+		{s.toolTimings.validate(preset)},
+		{s.actualModel.validate(preset)},
+		{s.streamRender.validate(preset)},
+		{s.turns.validate(preset)},
+		{s.peakInput.validate(preset)},
+		{s.reasoning.validate(preset)},
+		{s.quotaReset.validate(preset)},
+		{s.effortLadder.validate(preset)},
+		{s.executable.validate(preset)},
+		{s.availability.validate(preset)},
+	} {
+		if check.err != nil {
+			return check.err
+		}
+	}
+	return nil
+}
+
 func newPresetAgentAdapter(spec presetAgentSpec) AgentAdapter {
+	if err := spec.validate(); err != nil {
+		panic(err)
+	}
 	spec.headlessPrefix = append([]string{}, spec.headlessPrefix...)
 	spec.autoArgs = append([]string{}, spec.autoArgs...)
 	spec.env = append([]string{}, spec.env...)

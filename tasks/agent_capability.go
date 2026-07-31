@@ -30,8 +30,6 @@ type AgentUsageCapability struct {
 }
 
 // validate reports whether this usage stance is a complete declaration.
-// Construction does not call it yet — that waits until every capability is
-// declared (ADR-0165).
 func (c AgentUsageCapability) validate(preset string) error {
 	switch c.Kind {
 	case CapabilitySupported:
@@ -61,8 +59,6 @@ type AgentCostCapability struct {
 }
 
 // validate reports whether this cost stance is a complete declaration.
-// Construction does not call it yet — that waits until every capability is
-// declared (ADR-0165).
 func (c AgentCostCapability) validate(preset string) error {
 	switch c.Kind {
 	case CapabilitySupported:
