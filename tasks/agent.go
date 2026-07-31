@@ -167,6 +167,8 @@ type AgentAdapter interface {
 	RenderOutput(w io.Writer, raw string, format AgentOutputFormat)
 	AssistanceCapability() AgentAssistanceCapability
 	AvailabilityProbeCapability() AgentAvailabilityProbeCapability
+	UsageCapability() AgentUsageCapability
+	CostCapability() AgentCostCapability
 	AssistanceInvocation(AgentAssistanceRequest) (*AgentAssistanceInvocation, error)
 	// ReasoningSpecTokens renders an Effort ladder's reasoning level as tokens
 	// appended to an Agent-preset spec. Most presets take a CLI flag; a preset
@@ -192,15 +194,19 @@ var agentAdapters = map[string]AgentAdapter{
 			Interpret:            interpretClaudeAvailabilityProbe,
 			ReportsAuthenticated: reportsClaudeAuthenticated,
 		},
+		usage:  AgentUsageCapability{Kind: CapabilitySupported, Extract: claudeTokenUsage},
+		cost:   AgentCostCapability{Kind: CapabilityBlind, Reason: "claude reports token usage but no dollar cost"},
 		models: []string{"opus", "sonnet", "haiku", "fable"},
 	}),
 	"opencode": newPresetAgentAdapter(presetAgentSpec{
-		preset:                 "opencode",
-		headlessPrefix:         []string{"opencode", "run"},
-		autoFormat:             AgentOutputOpenCodeJSON,
-		autoArgs:               []string{"--format", "json"},
-		assistance:             AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "opencode"}},
-		models:                 []string{"opencode/kimi-k2.6", "opencode/gpt-5.5", "opencode/claude-opus-4-8", "opencode/claude-sonnet-4-6"},
+		preset:         "opencode",
+		headlessPrefix: []string{"opencode", "run"},
+		autoFormat:     AgentOutputOpenCodeJSON,
+		autoArgs:       []string{"--format", "json"},
+		assistance:     AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "opencode"}},
+		usage:          AgentUsageCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no usage block"},
+		cost:           AgentCostCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no dollar cost"},
+		models:         []string{"opencode/kimi-k2.6", "opencode/gpt-5.5", "opencode/claude-opus-4-8", "opencode/claude-sonnet-4-6"},
 		modelsInstallDependent: true,
 	}),
 	"cursor": newPresetAgentAdapter(presetAgentSpec{
@@ -214,6 +220,8 @@ var agentAdapters = map[string]AgentAdapter{
 			Interpret:            interpretCursorAvailabilityProbe,
 			ReportsAuthenticated: reportsCursorAuthenticated,
 		},
+		usage:                  AgentUsageCapability{Kind: CapabilitySupported, Extract: cursorTokenUsage},
+		cost:                   AgentCostCapability{Kind: CapabilityBlind, Reason: "cursor reports token usage but no dollar cost"},
 		models:                 []string{"auto", "composer-2.5", "gpt-5.3-codex"},
 		modelsInstallDependent: true,
 	}),
@@ -227,30 +235,36 @@ var agentAdapters = map[string]AgentAdapter{
 			Command:              &AgentCommand{Name: "codex", Args: []string{"login", "status"}},
 			ReportsAuthenticated: reportsCodexAuthenticated,
 		},
+		usage:                  AgentUsageCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no usage block"},
+		cost:                   AgentCostCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no dollar cost"},
 		models:                 []string{"gpt-5.5", "gpt-5.4-mini"},
 		modelsInstallDependent: true,
 	}),
 	"pi": newPresetAgentAdapter(presetAgentSpec{
-		preset:                 "pi",
-		headlessPrefix:         []string{"pi", "-p", "--no-extensions", "--no-skills"},
-		autoFormat:             AgentOutputPiJSONL,
-		autoArgs:               []string{"--mode", "json"},
-		assistance:             AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "pi"}},
-		models:                 []string{"opencode-go/kimi-k2.6", "opencode-go/qwen3.7-max", "opencode-go/minimax-m3", "opencode-go/deepseek-v4-flash"},
+		preset:         "pi",
+		headlessPrefix: []string{"pi", "-p", "--no-extensions", "--no-skills"},
+		autoFormat:     AgentOutputPiJSONL,
+		autoArgs:       []string{"--mode", "json"},
+		assistance:     AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "pi"}},
+		usage:          AgentUsageCapability{Kind: CapabilitySupported, Extract: piTokenUsage},
+		cost:           AgentCostCapability{Kind: CapabilitySupported, Extract: piPartialCost},
+		models:         []string{"opencode-go/kimi-k2.6", "opencode-go/qwen3.7-max", "opencode-go/minimax-m3", "opencode-go/deepseek-v4-flash"},
 		modelsInstallDependent: true,
 	}),
 	// kimi takes the prompt as its -p value and needs no permission flag: -p is
 	// auto-permission by design and rejects --yolo/--auto (ADR-0164).
 	"kimi": newPresetAgentAdapter(presetAgentSpec{
-		preset:                 "kimi",
-		headlessPrefix:         []string{"kimi", "-p"},
-		promptDelivery:         promptAsPrefixFlagValue,
-		autoFormat:             AgentOutputKimiStreamJSON,
-		autoArgs:               []string{"--output-format", "stream-json"},
-		env:                    []string{"KIMI_CODE_NO_AUTO_UPDATE=1"},
-		reasoningEnvKey:        "KIMI_MODEL_THINKING_EFFORT",
-		assistance:             AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "kimi"}},
-		models:                 []string{"moonshot-ai/kimi-k3", "moonshot-ai/kimi-k2.7-code", "moonshot-ai/kimi-k2.7-code-highspeed"},
+		preset:          "kimi",
+		headlessPrefix:  []string{"kimi", "-p"},
+		promptDelivery:  promptAsPrefixFlagValue,
+		autoFormat:      AgentOutputKimiStreamJSON,
+		autoArgs:        []string{"--output-format", "stream-json"},
+		env:             []string{"KIMI_CODE_NO_AUTO_UPDATE=1"},
+		reasoningEnvKey: "KIMI_MODEL_THINKING_EFFORT",
+		assistance:      AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "kimi"}},
+		usage:           AgentUsageCapability{Kind: CapabilityBlind, Reason: "kimi stream usage has not been verified against a captured run"},
+		cost:            AgentCostCapability{Kind: CapabilityBlind, Reason: "kimi stream cost has not been verified against a captured run"},
+		models:          []string{"moonshot-ai/kimi-k3", "moonshot-ai/kimi-k2.7-code", "moonshot-ai/kimi-k2.7-code-highspeed"},
 		modelsInstallDependent: true,
 	}),
 }
@@ -329,6 +343,8 @@ type presetAgentSpec struct {
 	reasoningEnvKey string
 	assistance      AgentAssistanceCapability
 	availability    AgentAvailabilityProbeCapability
+	usage           AgentUsageCapability
+	cost            AgentCostCapability
 	models          []string
 	// modelsInstallDependent marks a curated list whose aliases are resolved by
 	// the local install's own provider config rather than being stable,
@@ -531,6 +547,14 @@ func (a *presetAgentAdapter) AvailabilityProbeCapability() AgentAvailabilityProb
 	return cloneAvailabilityProbeCapability(a.availability)
 }
 
+func (a *presetAgentAdapter) UsageCapability() AgentUsageCapability {
+	return a.usage
+}
+
+func (a *presetAgentAdapter) CostCapability() AgentCostCapability {
+	return a.cost
+}
+
 func (a *presetAgentAdapter) Models() []string {
 	return append([]string{}, a.models...)
 }
@@ -590,6 +614,14 @@ func (a customAgentAdapter) AssistanceCapability() AgentAssistanceCapability {
 
 func (a customAgentAdapter) AvailabilityProbeCapability() AgentAvailabilityProbeCapability {
 	return AgentAvailabilityProbeCapability{}
+}
+
+func (a customAgentAdapter) UsageCapability() AgentUsageCapability {
+	return AgentUsageCapability{Kind: CapabilityBlind, Reason: "custom agent commands produce no structured stream"}
+}
+
+func (a customAgentAdapter) CostCapability() AgentCostCapability {
+	return AgentCostCapability{Kind: CapabilityBlind, Reason: "custom agent commands produce no structured stream"}
 }
 
 func (a customAgentAdapter) AssistanceInvocation(req AgentAssistanceRequest) (*AgentAssistanceInvocation, error) {

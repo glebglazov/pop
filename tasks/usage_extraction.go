@@ -7,40 +7,34 @@ import (
 	"strings"
 )
 
-// usageExtractionRules maps agent preset → Usage extraction rule (ADR-0160).
-// A rule states where a stream's authoritative usage lives and whether those
-// figures accumulate or replace — it is deliberately not a field-name
-// translation table. An adapter absent from this map yields a Token-blind
-// run: a zero-value TokenUsage with no Has* flags, distinguishable from a
-// reported zero (Has* true, counts zero).
-var usageExtractionRules = map[string]func([]streamEventRecord) TokenUsage{
-	"claude": claudeTokenUsage,
-	"cursor": cursorTokenUsage,
-	"pi":     piTokenUsage,
-}
-
-// costExtractionRules maps agent preset → cost extraction. Adapters absent
-// from this map report no cost (HasCost false), never zero or an estimate.
-var costExtractionRules = map[string]func([]streamEventRecord) PartialCost{
-	"pi": piPartialCost,
-}
-
-// extractTokenUsage applies the agent's Usage extraction rule to a Captured
-// run's stored events. Unknown adapters return a token-blind TokenUsage.
+// extractTokenUsage applies the agent's declared Usage capability to a
+// Captured run's stored events (ADR-0160, ADR-0165). Blind or unknown
+// adapters return a token-blind TokenUsage: a zero-value with no Has* flags,
+// distinguishable from a reported zero (Has* true, counts zero).
 func extractTokenUsage(agent string, events []streamEventRecord) TokenUsage {
-	if rule := usageExtractionRules[agent]; rule != nil {
-		return rule(events)
+	adapter, ok := agentAdapters[agent]
+	if !ok {
+		return TokenUsage{}
 	}
-	return TokenUsage{}
+	cap := adapter.UsageCapability()
+	if cap.Kind != CapabilitySupported || cap.Extract == nil {
+		return TokenUsage{}
+	}
+	return cap.Extract(events)
 }
 
-// extractPartialCost applies the agent's cost extraction rule. Adapters
-// without a rule return HasCost false rather than zero dollars.
+// extractPartialCost applies the agent's declared Cost capability. Blind or
+// unknown adapters return HasCost false rather than zero dollars.
 func extractPartialCost(agent string, events []streamEventRecord) PartialCost {
-	if rule := costExtractionRules[agent]; rule != nil {
-		return rule(events)
+	adapter, ok := agentAdapters[agent]
+	if !ok {
+		return PartialCost{}
 	}
-	return PartialCost{}
+	cap := adapter.CostCapability()
+	if cap.Kind != CapabilitySupported || cap.Extract == nil {
+		return PartialCost{}
+	}
+	return cap.Extract(events)
 }
 
 // collectSpendRuns loads every Captured run under streams/runs/ for a task
