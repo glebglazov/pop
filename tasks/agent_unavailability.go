@@ -18,7 +18,7 @@ const (
 	// absent from PATH (ADR-0153).
 	UnavailabilityMissingBinary AgentUnavailabilityKind = "missing_binary"
 	// UnavailabilityPlanGate is a human-healing kind: the agent reported that the
-	// resolved model is not on this account's plan at all (ADR-0151). Human-healing
+	// resolved model is not on this account's plan at all (ADR-0164). Human-healing
 	// because only a plan upgrade or a different model clears it — and, unlike a
 	// quota pause, no cooldown is worth recording: the gate is deterministic per
 	// account+model, so the next attempt re-probes once and falls through again.

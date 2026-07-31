@@ -14,7 +14,7 @@ The reported irritation: interrupt a queue-spawned drain and, because the bit is
 
 A manual interrupt of a live drain **clears the Auto-drain bit unconditionally at the moment of interrupt**. Because clearing removes the set from queue eligibility outright, the daemon stops re-firing it — no reliance on backoff.
 
-The pre-interrupt value is snapshotted. Choosing **Continue** at the **[Interrupt gate prompt](0119-interrupting-a-live-drain-lands-on-an-interrupt-gate.md)** **revives** the snapshotted value (announced to the user); **Exit**, or a crash before the human chooses, leaves it cleared. Net: consent is truly discarded only when the human does not resume, yet it is cleared throughout the at-gate window so a crash-at-gate cannot let the daemon grab the set mid-decision. Re-enabling after Exit is a fresh human mark.
+The pre-interrupt value is snapshotted. Choosing **Continue** at the **[Interrupt gate prompt](0163-interrupting-a-live-drain-lands-on-an-interrupt-gate.md)** **revives** the snapshotted value (announced to the user); **Exit**, or a crash before the human chooses, leaves it cleared. Net: consent is truly discarded only when the human does not resume, yet it is cleared throughout the at-gate window so a crash-at-gate cannot let the daemon grab the set mid-decision. Re-enabling after Exit is a fresh human mark.
 
 Consequently the `interrupted` terminal is **reclassified as a clean exit**: it is dropped from `drainStateAbnormal` (only `crashed`/kill remain abnormal) and no longer drives Queue backoff. The reason interrupt was ever lumped with crash — immediate re-spawn thrash — is gone, since interrupt now clears consent.
 
@@ -28,4 +28,4 @@ Consequently the `interrupted` terminal is **reclassified as a clean exit**: it 
 
 - Auto-drain now has two clear triggers (terminal finalization, ADR-0098; manual interrupt, here); a set interrupted and exited must be re-marked to rejoin the queue.
 - Sort/park/backoff logic that keyed on interrupt-as-abnormal must re-key on crash/kill only.
-- The auto-drain revocation is shared by wait-state interrupts (quota-recovery, retry backoff) even though those keep their current exit path rather than showing the interrupt gate (ADR-0119 scope).
+- The auto-drain revocation is shared by wait-state interrupts (quota-recovery, retry backoff) even though those keep their current exit path rather than showing the interrupt gate (ADR-0163 scope).

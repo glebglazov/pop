@@ -55,7 +55,7 @@ type AgentInvocation struct {
 	Args []string
 	// Env carries KEY=VALUE entries layered over pop's own environment when the
 	// process spawns — the one adapter capability arguments cannot express
-	// (ADR-0151). Empty for every preset whose knobs are all flags.
+	// (ADR-0164). Empty for every preset whose knobs are all flags.
 	Env            []string
 	OutputFormat   AgentOutputFormat
 	RequestedAgent string
@@ -141,7 +141,7 @@ type AgentAssistanceInvocation struct {
 	// ClipboardPrompt is the generated briefing text for a preset whose
 	// interactive binary takes no positional prompt (kimi), so it never rides
 	// in Command.Args. The caller places it on the clipboard before launch and
-	// tells the human to paste it (ADR-0151).
+	// tells the human to paste it (ADR-0164).
 	ClipboardPrompt string
 }
 
@@ -171,7 +171,7 @@ type AgentAdapter interface {
 	// ReasoningSpecTokens renders an Effort ladder's reasoning level as tokens
 	// appended to an Agent-preset spec. Most presets take a CLI flag; a preset
 	// with no reasoning flag renders an environment assignment instead, which its
-	// own invocation hoists out of argv (ADR-0151).
+	// own invocation hoists out of argv (ADR-0164).
 	ReasoningSpecTokens(reasoning string) []string
 	ArgsContainReasoning(args []string) bool
 	// Models returns the preset's curated, recommended-first model aliases that
@@ -240,7 +240,7 @@ var agentAdapters = map[string]AgentAdapter{
 		modelsInstallDependent: true,
 	}),
 	// kimi takes the prompt as its -p value and needs no permission flag: -p is
-	// auto-permission by design and rejects --yolo/--auto (ADR-0151).
+	// auto-permission by design and rejects --yolo/--auto (ADR-0164).
 	"kimi": newPresetAgentAdapter(presetAgentSpec{
 		preset:                 "kimi",
 		headlessPrefix:         []string{"kimi", "-p"},
@@ -281,7 +281,7 @@ var piEffortModels = map[string][]config.EffortModel{
 
 // kimi resolves --model by exact provider-config key, so these are the
 // standard-login `moonshot-ai/` alias names; an install that names them
-// differently overrides the tier wholesale through [effort.kimi] (ADR-0151).
+// differently overrides the tier wholesale through [effort.kimi] (ADR-0164).
 // Reasoning levels here are only ones k3 declares — the env channel bypasses
 // kimi's own validation, so an unsupported level would be a server 400.
 var kimiEffortModels = map[string][]config.EffortModel{
@@ -301,7 +301,7 @@ var builtInEffortModels = map[string]map[string][]config.EffortModel{
 // agentPromptDelivery names where a preset's generated prompt rides in the
 // resolved command. Most CLIs take it as a positional argument; kimi has no
 // positional prompt form and reads it as the value of the -p flag its headless
-// prefix ends with (ADR-0151).
+// prefix ends with (ADR-0164).
 type agentPromptDelivery int
 
 const (
@@ -320,11 +320,11 @@ type presetAgentSpec struct {
 	autoArgs       []string
 	// env rides into every invocation of this preset as KEY=VALUE entries
 	// layered over pop's own environment, for knobs the CLI exposes nowhere
-	// else (ADR-0151).
+	// else (ADR-0164).
 	env []string
 	// reasoningEnvKey names the environment variable this preset reads its
 	// thinking level from, for a preset whose CLI has no reasoning flag at all
-	// (kimi, ADR-0151). Empty for every preset that takes reasoning as an
+	// (kimi, ADR-0164). Empty for every preset that takes reasoning as an
 	// argument.
 	reasoningEnvKey string
 	assistance      AgentAssistanceCapability
@@ -548,7 +548,7 @@ func (a *presetAgentAdapter) AssistanceInvocation(req AgentAssistanceRequest) (*
 	command.Args = append(command.Args, extraArgs...)
 	command.Args = append(command.Args, capability.Command.Args...)
 	// A preset with no positional prompt form (kimi) launches bare; its briefing
-	// reaches the human another way (ADR-0151).
+	// reaches the human another way (ADR-0164).
 	clipboardPrompt := ""
 	detail := fmt.Sprintf("using %s native attended assistance", a.preset)
 	if req.Prompt != "" && a.promptDelivery == promptAsFinalArg {

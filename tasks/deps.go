@@ -57,7 +57,7 @@ type Deps struct {
 	RetryDelayWait func(out io.Writer, delay time.Duration) bool
 
 	// ClipboardCopy places text on the system clipboard for an attended
-	// assistance briefing with no positional prompt form (kimi, ADR-0151). A nil
+	// assistance briefing with no positional prompt form (kimi, ADR-0164). A nil
 	// seam falls back to clipboard.Copy (tmux buffer / OSC 52); tests inject a
 	// fake to assert delivery and failure messaging without a real clipboard.
 	ClipboardCopy func(text string) error

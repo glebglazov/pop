@@ -103,7 +103,7 @@ func (r *implementRun) runSelectedTask(currentRefresh *RefreshResult, sel *Selec
 			}
 			m := afterRefresh.Manifests[taskSetID]
 			if isInterrupted(execErr) {
-				// SIGINT tore the attempt down mid-run (ADR-0119): the task is still
+				// SIGINT tore the attempt down mid-run (ADR-0163): the task is still
 				// open (the interrupt path writes no failed/done transition), so present
 				// the interrupt gate rather than the Failed gate. Continue re-acquires
 				// the lock and re-runs the interrupted task, keeping the drain going;

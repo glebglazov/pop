@@ -41,7 +41,7 @@ type interruptReadResult struct {
 }
 
 // handleInteractiveInterruptGate is the fourth sibling of the HITL / Failed /
-// Verify-fail gate menus (ADR-0119): when a live AFK attempt is torn down by
+// Verify-fail gate menus (ADR-0163): when a live AFK attempt is torn down by
 // SIGINT on a TTY, the drain lands here instead of exiting 130. It offers four
 // options — 1 Continue draining (re-run the interrupted task), 2 Get agent
 // assistance (an attended session over the interrupted task + set context), 3
@@ -174,7 +174,7 @@ func promptInterruptGateAction(out io.Writer, reader *bufio.Reader, sigCh <-chan
 	}
 }
 
-// interruptGate runs the interrupt gate choreography (ADR-0119) for the drain
+// interruptGate runs the interrupt gate choreography (ADR-0163) for the drain
 // loop: when a live AFK attempt is torn down by SIGINT, park the Runtime
 // execution lock (registering a checkout gate hold) so the menu runs lock-free,
 // present the Continue/Exit menu, then re-acquire the lock. It reuses the exact

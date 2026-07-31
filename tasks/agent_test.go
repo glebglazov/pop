@@ -224,13 +224,13 @@ func TestKimiAssistanceLaunchesBareInteractiveBinary(t *testing.T) {
 		t.Fatalf("command = %q, want kimi", invocation.Command.Name)
 	}
 	// kimi's interactive mode accepts no initial prompt, so the briefing is
-	// never an argv item (ADR-0151).
+	// never an argv item (ADR-0164).
 	want := []string{"--model", "moonshot-ai/kimi-k3"}
 	if !reflect.DeepEqual(invocation.Command.Args, want) {
 		t.Fatalf("args = %#v, want %#v", invocation.Command.Args, want)
 	}
 	if invocation.ClipboardPrompt != "briefing text" {
-		t.Fatalf("ClipboardPrompt = %q, want the briefing (delivered via clipboard, ADR-0151)", invocation.ClipboardPrompt)
+		t.Fatalf("ClipboardPrompt = %q, want the briefing (delivered via clipboard, ADR-0164)", invocation.ClipboardPrompt)
 	}
 	if !strings.Contains(invocation.Detail, "clipboard") {
 		t.Fatalf("Detail = %q, want it to mention clipboard delivery", invocation.Detail)
@@ -439,7 +439,7 @@ func TestResolveTaskAgentSpecForEffortKimiModels(t *testing.T) {
 
 // The kimi ladder's reasoning has no flag to ride, so this walks the whole path
 // an effort tier takes to the spawned process: tier to spec, spec to invocation
-// environment (ADR-0151).
+// environment (ADR-0164).
 func TestKimiEffortReasoningReachesTheInvocationEnvironment(t *testing.T) {
 	tests := []struct {
 		effort   string
@@ -515,7 +515,7 @@ func TestKimiPinnedModelSuppressesModelAndReasoning(t *testing.T) {
 
 func TestResolveTaskAgentSpecForEffortKimiConfiguredLadderReplacesBuiltIn(t *testing.T) {
 	// An install whose provider config names aliases differently overrides the
-	// baked moonshot-ai names wholesale (ADR-0151).
+	// baked moonshot-ai names wholesale (ADR-0164).
 	cfg := &config.Config{Effort: map[string]config.EffortConfig{
 		"kimi": {
 			Heavy: []config.EffortModel{{Model: "kimi-code/k3", Reasoning: "max"}},

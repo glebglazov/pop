@@ -267,7 +267,7 @@ func BuildVerifyFailedAssistancePrompt(d *Deps, taskSetID string, m *Manifest, w
 
 // BuildInterruptAssistancePrompt generates the attended-agent prompt shown when a
 // live AFK attempt is interrupted (SIGINT) and the drain lands on the interrupt
-// gate (ADR-0119). The agent is loaded with the interrupted task and surrounding
+// gate (ADR-0163). The agent is loaded with the interrupted task and surrounding
 // Task set context to advise or edit by hand; it deliberately mirrors the HITL
 // assistance contract — it must not mutate task state or resume the drain, since
 // the human resolves the interrupt from the gate menu (Continue / Exit).

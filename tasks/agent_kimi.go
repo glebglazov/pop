@@ -10,7 +10,7 @@ import (
 // Kimi quota signals: the stable stderr substrings that gate Agent quota
 // detection for the kimi preset. kimi writes quota diagnostics to stderr and
 // never into its stream-json, and the texts carry no reset hint, so each signal
-// maps to a fixed backoff plus the shared quota assurance offset (ADR-0151).
+// maps to a fixed backoff plus the shared quota assurance offset (ADR-0164).
 // Transient overload and concurrency 429s are deliberately absent: kimi retries
 // those internally and reports them as informational meta retry lines.
 const (
@@ -28,7 +28,7 @@ const (
 // <model>. Upgrade to an <tier> plan or above." Deliberately narrow — kimi's other
 // 401s (an invalid or expired key, missing authentication, a context window above
 // the plan's ceiling) are ordinary failures that must keep their retry cap, so
-// nothing but this phrase becomes a Plan gate (ADR-0151).
+// nothing but this phrase becomes a Plan gate (ADR-0164).
 const kimiPlanGateSignal = "does not have access to"
 
 // kimiUnavailability scans the raw agent capture line-by-line for the diagnostics

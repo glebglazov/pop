@@ -141,7 +141,7 @@ func TestStartAgentInvocationRoutesEnvToTheRunner(t *testing.T) {
 }
 
 // The last hop of the kimi effort path: a heavy-tier spec's thinking level is
-// what the runner is asked to spawn with, not an argument (ADR-0151).
+// what the runner is asked to spawn with, not an argument (ADR-0164).
 func TestStartAgentInvocationCarriesLadderReasoningEnv(t *testing.T) {
 	unsetEnvForTest(t, "KIMI_MODEL_THINKING_EFFORT")
 	spec := resolveTaskAgentSpecForEffort("kimi", "heavy", true)

@@ -469,7 +469,7 @@ func (r *scriptedVerifyRunner) Start(ctx context.Context, dir string, stdout, st
 }
 
 // StartWithEnv keeps the scripted runner usable for a preset whose invocation
-// carries environment entries (kimi, ADR-0151); the env itself is irrelevant to a
+// carries environment entries (kimi, ADR-0164); the env itself is irrelevant to a
 // scripted script, so it replays the same way.
 func (r *scriptedVerifyRunner) StartWithEnv(ctx context.Context, dir string, env []string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
 	return r.Start(ctx, dir, stdout, stderr, name, args...)

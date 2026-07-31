@@ -61,7 +61,7 @@ rest of the task combined — read ranges, and read each once:
 How each agent CLI is configured — kimi's `[[hooks]]` array-of-tables in
 `~/.kimi-code/config.toml`, `KIMI_CODE_HOME` resolution, which hook event carries
 "working", stream-json shapes — is documented in comments in `integrate/`
-(`hooks_toml.go`, `hooks.go`) and in `docs/adr/0151-*`. Read those. Do not
+(`hooks_toml.go`, `hooks.go`) and in `docs/adr/0164-*`. Read those. Do not
 `strings(1)` the agent binaries to re-derive it; one audited task spent 21 shell
 calls and ~68k tokens doing that for facts already written down here.
 

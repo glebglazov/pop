@@ -2084,7 +2084,7 @@ printf 'SUMMARY_START\nclaude done\nSUMMARY_END\nTASK_COMPLETE\n'
 }
 
 // kimiPlanGateLine is kimi's subscription-gate 401 for the light tier's model,
-// the third Agent fallback fall-through trigger (ADR-0151).
+// the third Agent fallback fall-through trigger (ADR-0164).
 const kimiPlanGateLine = "Error: Your current subscription does not have access to kimi-for-coding-highspeed. Upgrade to an Allegretto plan or above."
 
 // installKimiPlanGateShim installs a `kimi` that counts its spawns and reports the

@@ -217,7 +217,7 @@ func (f *fakeAttendedRunner) RunAttended(ctx context.Context, dir string, stdin 
 }
 
 // TestRunAttendedAssistanceCommandDeliversClipboardBriefing pins kimi's
-// clipboard-delivery path (ADR-0151): a briefing with no positional prompt
+// clipboard-delivery path (ADR-0164): a briefing with no positional prompt
 // form is copied to the clipboard before launch, and the gate tells the human
 // to paste it.
 func TestRunAttendedAssistanceCommandDeliversClipboardBriefing(t *testing.T) {

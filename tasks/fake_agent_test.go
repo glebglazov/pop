@@ -185,7 +185,7 @@ func (fakeAwareRunner) Start(ctx context.Context, dir string, stdout, stderr io.
 }
 
 // StartWithEnv keeps the fixture runner usable for presets whose invocation
-// carries env (ADR-0151): a registered fake is replayed as usual, and a real
+// carries env (ADR-0164): a registered fake is replayed as usual, and a real
 // spawn takes the env-aware path.
 func (fakeAwareRunner) StartWithEnv(ctx context.Context, dir string, env []string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
 	if b, prompt, ok := lookupFakeAgent(args); ok {

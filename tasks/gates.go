@@ -202,7 +202,7 @@ func runAttendedAssistanceCommand(d *Deps, stdin io.Reader, runtimePath string, 
 // deliverClipboardBriefing places an attended assistance briefing on the
 // clipboard before launch, for a preset whose interactive binary takes no
 // positional prompt (kimi) — the only way the briefing reaches the human is
-// via paste (ADR-0151). A no-op when the invocation carries no such briefing.
+// via paste (ADR-0164). A no-op when the invocation carries no such briefing.
 // Clipboard failure degrades to printing the briefing text in full; it never
 // blocks the launch.
 func deliverClipboardBriefing(d *Deps, out io.Writer, prompt string) {

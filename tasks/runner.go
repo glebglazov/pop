@@ -29,7 +29,7 @@ type AttendedCommandRunner interface {
 
 // EnvCommandRunner starts a command with extra KEY=VALUE entries layered over
 // pop's own environment. It is separate from CommandRunner because only an
-// Agent invocation that carries env (ADR-0151) needs it; a runner that never
+// Agent invocation that carries env (ADR-0164) needs it; a runner that never
 // spawns one is unaffected, and one that is handed such an invocation without
 // implementing this fails loudly rather than silently dropping the variable.
 type EnvCommandRunner interface {
