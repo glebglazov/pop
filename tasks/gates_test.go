@@ -2,6 +2,8 @@ package tasks
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -186,5 +188,116 @@ func TestImplementRunHITLGateSkipsParkWhenNotPrompting(t *testing.T) {
 	}
 	if hold != nil {
 		t.Fatalf("a non-prompting gate must register no hold: %#v", hold)
+	}
+}
+
+// fakeAttendedRunner is a minimal CommandRunner + AttendedCommandRunner fake
+// recording the one attended launch runAttendedAssistanceCommand issues, so
+// clipboard-delivery tests can assert the launch happens exactly once and
+// carries the expected argv.
+type fakeAttendedRunner struct {
+	attendedCalls int
+	name          string
+	args          []string
+}
+
+func (f *fakeAttendedRunner) Run(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (int, error) {
+	return 0, nil
+}
+
+func (f *fakeAttendedRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
+	return nil, nil
+}
+
+func (f *fakeAttendedRunner) RunAttended(ctx context.Context, dir string, stdin io.Reader, stdout, stderr io.Writer, name string, args ...string) (int, error) {
+	f.attendedCalls++
+	f.name = name
+	f.args = append([]string{}, args...)
+	return 0, nil
+}
+
+// TestRunAttendedAssistanceCommandDeliversClipboardBriefing pins kimi's
+// clipboard-delivery path (ADR-0151): a briefing with no positional prompt
+// form is copied to the clipboard before launch, and the gate tells the human
+// to paste it.
+func TestRunAttendedAssistanceCommandDeliversClipboardBriefing(t *testing.T) {
+	runner := &fakeAttendedRunner{}
+	var copied string
+	d := &Deps{Runner: runner, ClipboardCopy: func(text string) error {
+		copied = text
+		return nil
+	}}
+	invocation := &AgentAssistanceInvocation{
+		Command:         AgentCommand{Name: "kimi", Args: []string{"--model", "moonshot-ai/kimi-k3"}},
+		ClipboardPrompt: "briefing text",
+	}
+	var out bytes.Buffer
+	exitCode, err := runAttendedAssistanceCommand(d, nil, "/tmp/runtime", &out, invocation)
+	if err != nil {
+		t.Fatalf("runAttendedAssistanceCommand: %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0", exitCode)
+	}
+	if copied != "briefing text" {
+		t.Fatalf("clipboard copy got %q, want the briefing", copied)
+	}
+	if runner.attendedCalls != 1 || runner.name != "kimi" {
+		t.Fatalf("attended launch = %d call(s), name %q, want 1 call to kimi", runner.attendedCalls, runner.name)
+	}
+	if !strings.Contains(out.String(), "Briefing copied to clipboard") {
+		t.Fatalf("output missing clipboard-paste instruction:\n%s", out.String())
+	}
+}
+
+// TestRunAttendedAssistanceCommandClipboardFailureFallsBackToPrintingBriefing
+// pins the never-blocks-the-launch guarantee: a clipboard write failure prints
+// the full briefing text instead, and the interactive binary still launches.
+func TestRunAttendedAssistanceCommandClipboardFailureFallsBackToPrintingBriefing(t *testing.T) {
+	runner := &fakeAttendedRunner{}
+	d := &Deps{Runner: runner, ClipboardCopy: func(text string) error {
+		return fmt.Errorf("no clipboard available")
+	}}
+	invocation := &AgentAssistanceInvocation{
+		Command:         AgentCommand{Name: "kimi"},
+		ClipboardPrompt: "the full briefing text",
+	}
+	var out bytes.Buffer
+	exitCode, err := runAttendedAssistanceCommand(d, nil, "/tmp/runtime", &out, invocation)
+	if err != nil {
+		t.Fatalf("runAttendedAssistanceCommand: %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0", exitCode)
+	}
+	if runner.attendedCalls != 1 {
+		t.Fatalf("clipboard failure must not block the launch: attended calls = %d", runner.attendedCalls)
+	}
+	got := out.String()
+	if !strings.Contains(got, "no clipboard available") || !strings.Contains(got, "the full briefing text") {
+		t.Fatalf("output missing failure detail and fallback briefing text:\n%s", got)
+	}
+}
+
+// TestRunAttendedAssistanceCommandSkipsClipboardWhenNoBriefing pins the
+// no-op for every preset whose prompt already rides in argv (every preset but
+// kimi): no clipboard touch, no extra output.
+func TestRunAttendedAssistanceCommandSkipsClipboardWhenNoBriefing(t *testing.T) {
+	runner := &fakeAttendedRunner{}
+	copyCalled := false
+	d := &Deps{Runner: runner, ClipboardCopy: func(text string) error {
+		copyCalled = true
+		return nil
+	}}
+	invocation := &AgentAssistanceInvocation{Command: AgentCommand{Name: "claude", Args: []string{"prompt"}}}
+	var out bytes.Buffer
+	if _, err := runAttendedAssistanceCommand(d, nil, "/tmp/runtime", &out, invocation); err != nil {
+		t.Fatalf("runAttendedAssistanceCommand: %v", err)
+	}
+	if copyCalled {
+		t.Fatal("a preset whose prompt rides in argv must not touch the clipboard")
+	}
+	if out.Len() != 0 {
+		t.Fatalf("output = %q, want empty", out.String())
 	}
 }

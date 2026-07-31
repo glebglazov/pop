@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"encoding/base64"
 	"fmt"
 	"os"
 	"strings"
@@ -9,12 +8,9 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/glebglazov/pop/internal/clipboard"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 )
-
-// defaultTmuxMod is the production tmux module handle used by
-// CopyToClipboard's inside-tmux path (ADR-0142).
-var defaultTmuxMod tmuxmod.Tmux = tmuxmod.New()
 
 // errorModel is the Bubbletea model for the dedicated error screen.
 type errorModel struct {
@@ -162,41 +158,12 @@ func ShowError(err error, trace string) {
 // CopyToClipboard copies text to the system clipboard.
 // Prefers `tmux load-buffer` when inside tmux, falls back to OSC 52 otherwise.
 func CopyToClipboard(text string) error {
-	return CopyToClipboardWith(defaultTmuxMod, text)
+	return clipboard.Copy(text)
 }
 
 // CopyToClipboardWith is CopyToClipboard with an injectable tmux module
 // handle, so tests can assert against the tmuxtest fake instead of a real
 // tmux server.
 func CopyToClipboardWith(mod tmuxmod.Tmux, text string) error {
-	if os.Getenv("TMUX") != "" {
-		if err := mod.LoadBuffer(text); err == nil {
-			return nil
-		}
-		// Fall through to OSC 52 if tmux load-buffer failed.
-	}
-	return osc52Copy(text)
-}
-
-// osc52Copy writes an OSC 52 escape sequence to /dev/tty, which most modern
-// terminal emulators honor to update the system clipboard.
-func osc52Copy(text string) error {
-	encoded := base64.StdEncoding.EncodeToString([]byte(text))
-	seq := "\x1b]52;c;" + encoded + "\x07"
-
-	// Write to /dev/tty so the sequence reaches the terminal even if stderr/stdout
-	// have been redirected.
-	tty, err := os.OpenFile("/dev/tty", os.O_WRONLY, 0)
-	if err != nil {
-		// Fall back to stderr as a last resort.
-		if _, werr := os.Stderr.WriteString(seq); werr != nil {
-			return werr
-		}
-		return nil
-	}
-	defer tty.Close()
-	if _, err := tty.WriteString(seq); err != nil {
-		return err
-	}
-	return nil
+	return clipboard.CopyWith(mod, text)
 }

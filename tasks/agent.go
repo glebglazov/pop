@@ -138,6 +138,11 @@ type AgentAssistanceInvocation struct {
 	Command     AgentCommand
 	Display     string
 	Detail      string
+	// ClipboardPrompt is the generated briefing text for a preset whose
+	// interactive binary takes no positional prompt (kimi), so it never rides
+	// in Command.Args. The caller places it on the clipboard before launch and
+	// tells the human to paste it (ADR-0151).
+	ClipboardPrompt string
 }
 
 // AgentAssistanceCapability reports whether attended assistance can be offered.
@@ -544,15 +549,21 @@ func (a *presetAgentAdapter) AssistanceInvocation(req AgentAssistanceRequest) (*
 	command.Args = append(command.Args, capability.Command.Args...)
 	// A preset with no positional prompt form (kimi) launches bare; its briefing
 	// reaches the human another way (ADR-0151).
+	clipboardPrompt := ""
+	detail := fmt.Sprintf("using %s native attended assistance", a.preset)
 	if req.Prompt != "" && a.promptDelivery == promptAsFinalArg {
 		command.Args = append(command.Args, req.Prompt)
+	} else if req.Prompt != "" {
+		clipboardPrompt = req.Prompt
+		detail = fmt.Sprintf("using %s native attended assistance; briefing delivered via clipboard", a.preset)
 	}
 	invocation := &AgentAssistanceInvocation{
-		AgentPreset: a.preset,
-		Mode:        capability.Mode,
-		Command:     command,
-		Display:     displayAgentCommand(command, req.Prompt),
-		Detail:      fmt.Sprintf("using %s native attended assistance", a.preset),
+		AgentPreset:     a.preset,
+		Mode:            capability.Mode,
+		Command:         command,
+		Display:         displayAgentCommand(command, req.Prompt),
+		Detail:          detail,
+		ClipboardPrompt: clipboardPrompt,
 	}
 	return invocation, nil
 }

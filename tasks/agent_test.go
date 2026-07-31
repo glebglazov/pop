@@ -229,6 +229,34 @@ func TestKimiAssistanceLaunchesBareInteractiveBinary(t *testing.T) {
 	if !reflect.DeepEqual(invocation.Command.Args, want) {
 		t.Fatalf("args = %#v, want %#v", invocation.Command.Args, want)
 	}
+	if invocation.ClipboardPrompt != "briefing text" {
+		t.Fatalf("ClipboardPrompt = %q, want the briefing (delivered via clipboard, ADR-0151)", invocation.ClipboardPrompt)
+	}
+	if !strings.Contains(invocation.Detail, "clipboard") {
+		t.Fatalf("Detail = %q, want it to mention clipboard delivery", invocation.Detail)
+	}
+}
+
+// TestClaudeAssistanceCarriesNoClipboardPrompt contrasts kimi's clipboard path
+// with every preset whose interactive binary takes the briefing positionally:
+// the prompt rides in argv, so ClipboardPrompt must stay empty.
+func TestClaudeAssistanceCarriesNoClipboardPrompt(t *testing.T) {
+	invocation, err := ResolveAgentAssistanceInvocation("claude", "", "briefing text", "/tmp/runtime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if invocation.ClipboardPrompt != "" {
+		t.Fatalf("ClipboardPrompt = %q, want empty when the prompt rides in argv", invocation.ClipboardPrompt)
+	}
+	found := false
+	for _, arg := range invocation.Command.Args {
+		if arg == "briefing text" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("args = %#v, want the briefing as a positional arg", invocation.Command.Args)
+	}
 }
 
 func TestResolveAgentCommandCustom(t *testing.T) {

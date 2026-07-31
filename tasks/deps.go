@@ -56,6 +56,12 @@ type Deps struct {
 	// no-sleep hook so retries advance without wall-clock waits (ADR-0145).
 	RetryDelayWait func(out io.Writer, delay time.Duration) bool
 
+	// ClipboardCopy places text on the system clipboard for an attended
+	// assistance briefing with no positional prompt form (kimi, ADR-0151). A nil
+	// seam falls back to clipboard.Copy (tmux buffer / OSC 52); tests inject a
+	// fake to assert delivery and failure messaging without a real clipboard.
+	ClipboardCopy func(text string) error
+
 	// store is the lazily-opened, process-cached execution-state store handle
 	// holder. DefaultDeps pre-allocates it so production copies of Deps share one
 	// handle; a Deps built from a bare literal (tests) gets its holder lazily on

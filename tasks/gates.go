@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/glebglazov/pop/internal/clipboard"
 )
 
 // gateEnv is the shared context the three interactive gate menus (HITL, Failed,
@@ -190,10 +192,32 @@ func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverif
 // pipe instead, so a TTY-requiring agent (e.g. codex) fails immediately with
 // "stdin is not a terminal".
 func runAttendedAssistanceCommand(d *Deps, stdin io.Reader, runtimePath string, out io.Writer, invocation *AgentAssistanceInvocation) (int, error) {
+	deliverClipboardBriefing(d, out, invocation.ClipboardPrompt)
 	if attended, ok := d.Runner.(AttendedCommandRunner); ok {
 		return attended.RunAttended(context.Background(), runtimePath, stdin, out, out, invocation.Command.Name, invocation.Command.Args...)
 	}
 	return d.Runner.Run(context.Background(), runtimePath, out, out, invocation.Command.Name, invocation.Command.Args...)
+}
+
+// deliverClipboardBriefing places an attended assistance briefing on the
+// clipboard before launch, for a preset whose interactive binary takes no
+// positional prompt (kimi) — the only way the briefing reaches the human is
+// via paste (ADR-0151). A no-op when the invocation carries no such briefing.
+// Clipboard failure degrades to printing the briefing text in full; it never
+// blocks the launch.
+func deliverClipboardBriefing(d *Deps, out io.Writer, prompt string) {
+	if prompt == "" {
+		return
+	}
+	copyFn := clipboard.Copy
+	if d != nil && d.ClipboardCopy != nil {
+		copyFn = d.ClipboardCopy
+	}
+	if err := copyFn(prompt); err != nil {
+		fmt.Fprintf(outputFor(out), "Could not copy briefing to clipboard (%v); paste this into the session:\n%s\n", err, prompt)
+		return
+	}
+	fmt.Fprintln(outputFor(out), "Briefing copied to clipboard — paste it into the session.")
 }
 
 // spawnRuntimeShell spawns $SHELL (falling back to /bin/sh) in the runtime
