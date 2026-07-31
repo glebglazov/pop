@@ -6,8 +6,10 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/debug"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
@@ -114,7 +116,16 @@ func LaunchDrain(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult,
 	if d.Project == nil {
 		d.Project = project.DefaultDeps()
 	}
+	// TEMPORARY step timings (POP_LOG=...): the handoff takes seconds with no
+	// feedback, and this is the stretch that spends them. Remove once the
+	// latency is understood and dealt with.
+	step := time.Now()
+	lap := func(what string) {
+		debug.Log("LaunchDrain %s: %s", what, time.Since(step))
+		step = time.Now()
+	}
 	scans, err := dashboardScansForDefinition(d, cfg, ref.DefPath)
+	lap("dashboardScansForDefinition")
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
@@ -122,10 +133,12 @@ func LaunchDrain(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult,
 		return DashboardDrainResult{}, fmt.Errorf("task set %s is no longer in a registered queue project", ref.SetID)
 	}
 	repoKey, err := scanRepoKey(d, scans[0])
+	lap("scanRepoKey")
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
 	rep, bare, err := resolveRepresentative(d, cfg, scans)
+	lap("resolveRepresentative")
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
@@ -134,10 +147,13 @@ func LaunchDrain(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult,
 		TaskSetID: ref.SetID,
 	}
 	if b, ok := bindingForSet(d.Tasks, repoKey, ref.SetID); ok && strings.TrimSpace(b.RuntimePath) != "" {
+		lap("bindingForSet")
 		if err := validateBoundWorktree(d, scans[0].ProjectPath, b); err != nil {
 			return DashboardDrainResult{}, fmt.Errorf("bound worktree for %s is invalid (%v); repair git state or run `pop tasks unbind-worktree`", ref.SetID, err)
 		}
+		lap("validateBoundWorktree")
 		session, checkout, err := dashboardSetPaneCoords(d, cfg, scans, ref, b.RuntimePath)
+		lap("dashboardSetPaneCoords")
 		if err != nil {
 			return DashboardDrainResult{}, err
 		}
@@ -174,7 +190,9 @@ func LaunchDrain(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult,
 	// An already-running drain pane for this set is a jump target: focus it
 	// rather than re-sending implement into the live process (ADR-0158). An
 	// idle tagged pane (bare shell) falls through so EnsureTaggedPane respawns.
-	if paneID, err := runningTaggedPane(d.Tmux, dec.scan.SessionName, tmuxmod.TagSet, ref.SetID); err != nil {
+	paneID, err := runningTaggedPane(d.Tmux, dec.scan.SessionName, tmuxmod.TagSet, ref.SetID)
+	lap("runningTaggedPane")
+	if err != nil {
 		return DashboardDrainResult{}, err
 	} else if paneID != "" {
 		return DashboardDrainResult{PaneID: paneID, Session: dec.scan.SessionName, RuntimePath: dec.scan.RuntimePath}, nil

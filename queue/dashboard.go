@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/debug"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
@@ -972,6 +973,13 @@ func (m QueueDashboard) Init() tea.Cmd {
 func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// TEMPORARY key trace (POP_LOG=...): records what the dashboard actually
+		// matches on, so a key that "does nothing" can be told apart from a key
+		// that never arrives. Remove once the uppercase-verb bug is settled.
+		if kpm, ok := msg.(tea.KeyPressMsg); ok {
+			debug.Log("dashboard key: String=%q Text=%q Code=%d(%q) Mod=%d menu=%t detail=%t",
+				msg.String(), kpm.Text, kpm.Code, string(kpm.Code), kpm.Mod, m.menu != nil, m.detail != nil)
+		}
 		// Any keypress is a deliberate interaction, so it clears the sticky action
 		// error. A keypress that triggers a fresh verb repopulates actionErr when
 		// that verb's result message arrives.
