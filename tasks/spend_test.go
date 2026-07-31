@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 func spendFixture(t *testing.T) *execFixture {
@@ -266,4 +269,278 @@ func TestSpendRollupExcludesArchivedSets(t *testing.T) {
 
 func formatSpendSetID(n int) string {
 	return fmt.Sprintf("2026-06-10-set-%02d", n)
+}
+
+type spendRunOpts struct {
+	phase   string
+	attempt int
+	outcome string
+}
+
+func writeSpendRunEx(t *testing.T, taskSetDir, taskFile, taskID, agent string, start time.Time, events []streamEventRecord, opts spendRunOpts) {
+	t.Helper()
+	if opts.phase == "" {
+		opts.phase = "implement"
+	}
+	if opts.attempt == 0 {
+		opts.attempt = 1
+	}
+	if opts.outcome == "" {
+		opts.outcome = "completed"
+	}
+	dir := capturedRunsDir(taskSetDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runID := uuid.New().String()
+	meta := capturedRunMeta{
+		RunID:     runID,
+		Phase:     opts.phase,
+		TaskSetID: filepath.Base(taskSetDir),
+		TaskID:    taskID,
+		TaskFile:  taskFile,
+		StartTime: start.UTC(),
+		EndTime:   start.Add(time.Minute).UTC(),
+		Outcome:   opts.outcome,
+		Agent:     agent,
+		Attempt:   opts.attempt,
+	}
+	metaData, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, runID+".meta.json"), metaData, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var raw []byte
+	for _, ev := range events {
+		line, err := json.Marshal(ev)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw = append(raw, line...)
+		raw = append(raw, '\n')
+	}
+	var gz bytes.Buffer
+	zw := gzip.NewWriter(&gz)
+	if _, err := zw.Write(raw); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, runID+".events.jsonl.gz"), gz.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func claudeUsageEvents(input, output int64) []streamEventRecord {
+	return []streamEventRecord{
+		{Type: "event", AtMS: 100, Raw: fmt.Sprintf(`{"type":"result","usage":{"input_tokens":%d,"output_tokens":%d}}`, input, output)},
+	}
+}
+
+func TestSpendSetBreakdownPerTask(t *testing.T) {
+	env := spendFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	setDir := registerSpendSet(t, env, "2026-06-10-demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "First", Type: "AFK", Status: "done"},
+		{ID: "02-b", File: "02-b.md", Title: "Second", Type: "AFK", Status: "done"},
+	})
+	writeSpendRun(t, setDir, "01-a.md", "01-a", "claude", base, claudeUsageEvents(100, 50))
+	writeSpendRun(t, setDir, "02-b.md", "02-b", "claude", base.Add(time.Minute), claudeUsageEvents(200, 100))
+
+	result, err := SpendSetBreakdownWith(env.deps(), nil, nil, SpendOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "2026-06-10-demo",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Rows) != 2 {
+		t.Fatalf("rows = %#v", result.Rows)
+	}
+	if result.Rows[0].TaskID != "01-a" || result.Rows[1].TaskID != "02-b" {
+		t.Fatalf("row order = %#v", result.Rows)
+	}
+	if result.Rows[0].Tokens.Input != 100 || result.Rows[1].Tokens.Input != 200 {
+		t.Fatalf("task tokens = %#v", result.Rows)
+	}
+	if result.TokensPerCompletedTask == nil || *result.TokensPerCompletedTask != 225 {
+		t.Fatalf("tokens/completed = %v, want 225", result.TokensPerCompletedTask)
+	}
+	if result.CompletedTasks != 2 {
+		t.Fatalf("completed = %d", result.CompletedTasks)
+	}
+}
+
+func TestSpendSetBreakdownChargesFailedAndRetriedAttemptsToTask(t *testing.T) {
+	env := spendFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	setDir := registerSpendSet(t, env, "2026-06-10-demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	writeSpendRunEx(t, setDir, "01-a.md", "01-a", "claude", base, claudeUsageEvents(10, 5), spendRunOpts{attempt: 1, outcome: "failed"})
+	writeSpendRunEx(t, setDir, "01-a.md", "01-a", "claude", base.Add(time.Minute), claudeUsageEvents(20, 10), spendRunOpts{attempt: 2, outcome: "completed"})
+
+	result, err := SpendSetBreakdownWith(env.deps(), nil, nil, SpendOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "2026-06-10-demo",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Rows) != 1 {
+		t.Fatalf("rows = %#v", result.Rows)
+	}
+	row := result.Rows[0]
+	if row.RunCount != 2 || row.Tokens.Input != 30 || row.Tokens.Output != 15 {
+		t.Fatalf("row = %+v", row)
+	}
+	if result.TokensPerCompletedTask != nil {
+		t.Fatalf("expected no tokens/completed with zero done tasks, got %d", *result.TokensPerCompletedTask)
+	}
+}
+
+func TestSpendSetBreakdownListsVerifyRunsSeparately(t *testing.T) {
+	env := spendFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	setDir := registerSpendSet(t, env, "2026-06-10-demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	writeSpendRun(t, setDir, "01-a.md", "01-a", "claude", base, claudeUsageEvents(100, 50))
+	writeSpendRunEx(t, setDir, "", "", "claude", base.Add(5*time.Minute), claudeUsageEvents(500, 250), spendRunOpts{phase: "verify"})
+
+	result, err := SpendSetBreakdownWith(env.deps(), nil, nil, SpendOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "2026-06-10-demo",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Rows) != 2 || result.Rows[1].TaskID != "verify" {
+		t.Fatalf("rows = %#v", result.Rows)
+	}
+	if result.Rows[0].Tokens.Input != 100 || result.Rows[1].Tokens.Input != 500 {
+		t.Fatalf("task vs verify tokens = %#v", result.Rows)
+	}
+	if result.VerificationRunCount != 1 || result.VerificationTokens.Input != 500 {
+		t.Fatalf("verification = runs %d tokens %+v", result.VerificationRunCount, result.VerificationTokens)
+	}
+	if result.ImplementRunCount != 1 || result.ImplementTokens.Input != 100 {
+		t.Fatalf("implement = runs %d tokens %+v", result.ImplementRunCount, result.ImplementTokens)
+	}
+	if result.TokensPerCompletedTask == nil || *result.TokensPerCompletedTask != 150 {
+		t.Fatalf("tokens/completed = %v, want 150 (implement only)", result.TokensPerCompletedTask)
+	}
+}
+
+func TestSpendSetBreakdownCountsTokenBlindRuns(t *testing.T) {
+	env := spendFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	setDir := registerSpendSet(t, env, "2026-06-10-demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	writeSpendRun(t, setDir, "01-a.md", "01-a", "claude", base, claudeUsageEvents(10, 5))
+	writeSpendRun(t, setDir, "01-a.md", "01-a", "codex", base.Add(time.Minute), []streamEventRecord{
+		{Type: "event", AtMS: 100, Raw: `{"type":"result","result":"ok"}`},
+	})
+
+	result, err := SpendSetBreakdownWith(env.deps(), nil, nil, SpendOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "2026-06-10-demo",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := result.Rows[0]
+	if row.RunCount != 2 || row.TokenBlindRuns != 1 {
+		t.Fatalf("row counts = runs %d blind %d", row.RunCount, row.TokenBlindRuns)
+	}
+	if result.ImplementTokenBlindRuns != 1 {
+		t.Fatalf("implement blind = %d", result.ImplementTokenBlindRuns)
+	}
+}
+
+func TestRenderSpendSetBreakdownJSON(t *testing.T) {
+	perTask := int64(150)
+	result := &SpendSetBreakdownResult{
+		TaskSetID:      "demo",
+		CompletedTasks: 1,
+		TokensPerCompletedTask: &perTask,
+		ImplementTokens: TokenUsage{Input: 100, Output: 50, HasInput: true, HasOutput: true},
+		ImplementRunCount: 1,
+		VerificationTokens: TokenUsage{Input: 500, Output: 250, HasInput: true, HasOutput: true},
+		VerificationRunCount: 1,
+		Rows: []SpendBreakdownRow{{
+			TaskID: "01-a", Title: "A",
+			Tokens: TokenUsage{Input: 100, Output: 50, HasInput: true, HasOutput: true},
+			RunCount: 1,
+		}, {
+			TaskID: "verify", Title: "Verify",
+			Tokens: TokenUsage{Input: 500, Output: 250, HasInput: true, HasOutput: true},
+			RunCount: 1,
+		}},
+	}
+	var buf bytes.Buffer
+	if err := RenderSpendSetBreakdownJSON(&buf, result); err != nil {
+		t.Fatal(err)
+	}
+	var decoded spendSetBreakdownJSON
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.TaskSetID != "demo" || decoded.CompletedTasks != 1 || decoded.TokensPerCompletedTask == nil || *decoded.TokensPerCompletedTask != 150 {
+		t.Fatalf("headline = %+v", decoded)
+	}
+	if decoded.ImplementInputTokens != 100 || decoded.VerificationInputTokens != 500 {
+		t.Fatalf("scoped totals = implement %d verify %d", decoded.ImplementInputTokens, decoded.VerificationInputTokens)
+	}
+	if len(decoded.Rows) != 2 || decoded.Rows[1].TaskID != "verify" {
+		t.Fatalf("rows = %#v", decoded.Rows)
+	}
+}
+
+func TestRenderSpendSetBreakdownHuman(t *testing.T) {
+	perTask := int64(150)
+	result := &SpendSetBreakdownResult{
+		TaskSetID:              "demo",
+		CompletedTasks:         1,
+		TokensPerCompletedTask: &perTask,
+		ImplementTokens:        TokenUsage{Input: 100, Output: 50, HasInput: true, HasOutput: true},
+		ImplementRunCount:      1,
+		VerificationTokens:     TokenUsage{Input: 500, HasInput: true},
+		VerificationRunCount:   1,
+		Rows: []SpendBreakdownRow{{
+			TaskID: "01-a",
+			Tokens: TokenUsage{Input: 100, Output: 50, HasInput: true, HasOutput: true},
+			RunCount: 1,
+		}, {
+			TaskID: "verify",
+			Tokens: TokenUsage{Input: 500, HasInput: true},
+			RunCount: 1,
+		}},
+	}
+	var buf bytes.Buffer
+	RenderSpendSetBreakdown(&buf, result)
+	out := buf.String()
+	for _, want := range []string{"tokens per completed task: 150", "verification spend: 500", "01-a", "verify", "blind"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestSpendSetBreakdownRejectsTaskFileTarget(t *testing.T) {
+	env := spendFixture(t)
+	registerSpendSet(t, env, "2026-06-10-demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	_, err := SpendSetBreakdownWith(env.deps(), nil, nil, SpendOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "2026-06-10-demo/01-a.md",
+	})
+	if err == nil {
+		t.Fatal("expected error for task file target")
+	}
 }

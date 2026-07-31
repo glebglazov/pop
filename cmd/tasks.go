@@ -156,9 +156,9 @@ var taskStreamCmd = &cobra.Command{
 }
 
 var taskSpendCmd = &cobra.Command{
-	Use:   "spend",
-	Short: "Roll up run spend across the ten most recent task sets",
-	Args:  cobra.NoArgs,
+	Use:   "spend [TASK_SET]",
+	Short: "Roll up run spend across recent task sets or break one set down per task",
+	Args:  cobra.MaximumNArgs(1),
 	RunE:  runTaskSpend,
 }
 
@@ -281,7 +281,7 @@ func init() {
 	taskStreamCmd.Flags().BoolVar(&taskStreamRaw, "raw", false, "Decompress and write raw JSONL without rendering (ignores --full)")
 	taskStreamCmd.Flags().BoolVar(&taskStreamLast, "last", false, "Show only the most recent attempt per task")
 	taskCmd.AddCommand(taskSpendCmd)
-	taskSpendCmd.Flags().BoolVar(&taskSpendJSON, "json", false, "Emit the rollup as JSON instead of a table")
+	taskSpendCmd.Flags().BoolVar(&taskSpendJSON, "json", false, "Emit spend data as JSON instead of a table")
 	taskCmd.AddCommand(taskShowPathCmd)
 	taskCmd.AddCommand(taskTransferCmd)
 	taskTransferCmd.AddCommand(taskExportCmd)
@@ -1400,10 +1400,28 @@ func runTaskStreamWith(d *tasks.Deps, w io.Writer, target string) error {
 }
 
 func runTaskSpend(cmd *cobra.Command, args []string) error {
-	return runTaskSpendWith(cmdLayerDeps().tasksDeps(), os.Stdout)
+	target := ""
+	if len(args) > 0 {
+		target = args[0]
+	}
+	return runTaskSpendWith(cmdLayerDeps().tasksDeps(), os.Stdout, target)
 }
 
-func runTaskSpendWith(d *tasks.Deps, w io.Writer) error {
+func runTaskSpendWith(d *tasks.Deps, w io.Writer, target string) error {
+	if target != "" {
+		result, err := tasks.SpendSetBreakdownWith(d, taskProjectDeps(), taskConfigLoad, tasks.SpendOptions{
+			ResolveInput: taskResolveInput(),
+			Target:       target,
+		})
+		if err != nil {
+			return err
+		}
+		if taskSpendJSON {
+			return tasks.RenderSpendSetBreakdownJSON(w, result)
+		}
+		tasks.RenderSpendSetBreakdown(w, result)
+		return nil
+	}
 	result, err := tasks.SpendRollupWith(d, taskProjectDeps(), taskConfigLoad, tasks.SpendOptions{
 		ResolveInput: taskResolveInput(),
 	})

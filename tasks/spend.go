@@ -14,9 +14,12 @@ import (
 // ten most recent Task sets, not a claim about substrate depth (ADR-0160).
 const spendRollupSetLimit = 10
 
-// SpendOptions configures the Spend lens rollup.
+// SpendOptions configures the Spend lens.
 type SpendOptions struct {
 	ResolveInput
+	// Target is a bare Task set identifier for per-set breakdown. Empty selects
+	// the cross-set rollup.
+	Target string
 }
 
 // SpendRollupRow is aggregated Run spend for one Task set.
@@ -46,6 +49,61 @@ type spendRollupJSONRow struct {
 // spendRollupJSON is the machine-readable rollup payload.
 type spendRollupJSON struct {
 	Sets []spendRollupJSONRow `json:"sets"`
+}
+
+// SpendBreakdownRow is aggregated Run spend for one task or verification row.
+type SpendBreakdownRow struct {
+	TaskID         string
+	Title          string
+	Tokens         TokenUsage
+	RunCount       int
+	TokenBlindRuns int
+}
+
+// SpendSetBreakdownResult is the per-task spend breakdown for one Task set.
+type SpendSetBreakdownResult struct {
+	TaskSetID                  string
+	Rows                       []SpendBreakdownRow
+	CompletedTasks             int
+	TokensPerCompletedTask     *int64
+	ImplementTokens            TokenUsage
+	ImplementRunCount          int
+	ImplementTokenBlindRuns    int
+	VerificationTokens         TokenUsage
+	VerificationRunCount       int
+	VerificationTokenBlindRuns int
+}
+
+// spendBreakdownJSONRow is the machine-readable breakdown row emitted by --json.
+type spendBreakdownJSONRow struct {
+	TaskID           string `json:"task_id"`
+	Title            string `json:"title"`
+	InputTokens      int64  `json:"input_tokens"`
+	OutputTokens     int64  `json:"output_tokens"`
+	CacheReadTokens  int64  `json:"cache_read_tokens"`
+	CacheWriteTokens int64  `json:"cache_write_tokens"`
+	RunCount         int    `json:"run_count"`
+	TokenBlindRuns   int    `json:"token_blind_runs"`
+}
+
+// spendSetBreakdownJSON is the machine-readable per-set breakdown payload.
+type spendSetBreakdownJSON struct {
+	TaskSetID                  string                  `json:"task_set_id"`
+	CompletedTasks             int                     `json:"completed_tasks"`
+	TokensPerCompletedTask     *int64                  `json:"tokens_per_completed_task,omitempty"`
+	ImplementInputTokens       int64                   `json:"implement_input_tokens"`
+	ImplementOutputTokens      int64                   `json:"implement_output_tokens"`
+	ImplementCacheReadTokens   int64                   `json:"implement_cache_read_tokens"`
+	ImplementCacheWriteTokens  int64                   `json:"implement_cache_write_tokens"`
+	ImplementRunCount          int                     `json:"implement_run_count"`
+	ImplementTokenBlindRuns    int                     `json:"implement_token_blind_runs"`
+	VerificationInputTokens    int64                   `json:"verification_input_tokens"`
+	VerificationOutputTokens   int64                   `json:"verification_output_tokens"`
+	VerificationCacheReadTokens int64                  `json:"verification_cache_read_tokens"`
+	VerificationCacheWriteTokens int64                 `json:"verification_cache_write_tokens"`
+	VerificationRunCount       int                     `json:"verification_run_count"`
+	VerificationTokenBlindRuns int                     `json:"verification_token_blind_runs"`
+	Rows                       []spendBreakdownJSONRow `json:"rows"`
 }
 
 // SpendRollup aggregates Run spend across the most recent Task sets. It is a
@@ -89,6 +147,127 @@ func SpendRollupWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 		return tokenUsageTotal(result.Sets[i].Tokens) > tokenUsageTotal(result.Sets[j].Tokens)
 	})
 	return result, nil
+}
+
+// SpendSetBreakdown aggregates Run spend for one Task set, broken down per task
+// with verification runs on their own rows. It is a read-only lens (ADR-0160).
+func SpendSetBreakdown(opts SpendOptions) (*SpendSetBreakdownResult, error) {
+	return SpendSetBreakdownWith(defaultDeps, project.DefaultDeps(), config.Load, opts)
+}
+
+// SpendSetBreakdownWith aggregates per-task Run spend using injected dependencies.
+func SpendSetBreakdownWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts SpendOptions) (*SpendSetBreakdownResult, error) {
+	resolved, err := ResolvePathsWith(d, pd, loadConfig, opts.ResolveInput)
+	if err != nil {
+		return nil, exitErr(ExitSetup, "%v", err)
+	}
+
+	refresh, err := RefreshWith(d, resolved.DefinitionPath, StatePathFor(resolved.DefinitionPath))
+	if err != nil {
+		return nil, exitErr(ExitSetup, "%v", err)
+	}
+
+	taskSetID, taskID, err := ResolveTaskTarget(refresh, opts.Target)
+	if err != nil {
+		return nil, err
+	}
+	if taskSetID == "" {
+		return nil, exitErr(ExitSetup, "spend breakdown requires a task set identifier")
+	}
+	if taskID != "" {
+		return nil, exitErr(ExitSetup, "spend breakdown requires a bare task set identifier, not <task-set>/<file>.md")
+	}
+
+	m := refresh.Manifests[taskSetID]
+	if m == nil {
+		return nil, exitErr(ExitNoRunnable, "task set %q has no task manifest", taskSetID)
+	}
+	if !m.Valid {
+		return nil, exitErr(ExitNoRunnable, "task set %q is malformed", taskSetID)
+	}
+
+	result, err := buildSpendSetBreakdown(d, taskSetID, m)
+	if err != nil {
+		return nil, exitErr(ExitOperational, "spend for %s: %v", taskSetID, err)
+	}
+	return result, nil
+}
+
+func buildSpendSetBreakdown(d *Deps, taskSetID string, m *Manifest) (*SpendSetBreakdownResult, error) {
+	runs, err := listSpendRuns(d, m.Dir)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &SpendSetBreakdownResult{TaskSetID: taskSetID}
+	seen := map[string]int{}
+	for _, run := range runs {
+		tokens, _, err := runSpendTokens(run)
+		if err != nil {
+			return nil, err
+		}
+
+		key, taskID, title := spendBreakdownRowKey(run, m)
+		idx, ok := seen[key]
+		if !ok {
+			result.Rows = append(result.Rows, SpendBreakdownRow{TaskID: taskID, Title: title})
+			idx = len(result.Rows) - 1
+			seen[key] = idx
+		}
+		row := &result.Rows[idx]
+		row.RunCount++
+		if !tokens.HasUsage() {
+			row.TokenBlindRuns++
+		}
+		addTokenUsage(&row.Tokens, tokens)
+
+		if key == spendVerifyRowKey {
+			result.VerificationRunCount++
+			if !tokens.HasUsage() {
+				result.VerificationTokenBlindRuns++
+			}
+			addTokenUsage(&result.VerificationTokens, tokens)
+		} else {
+			result.ImplementRunCount++
+			if !tokens.HasUsage() {
+				result.ImplementTokenBlindRuns++
+			}
+			addTokenUsage(&result.ImplementTokens, tokens)
+		}
+	}
+
+	result.CompletedTasks = countCompletedTasks(m)
+	if result.CompletedTasks > 0 {
+		perTask := tokenUsageTotal(result.ImplementTokens) / int64(result.CompletedTasks)
+		result.TokensPerCompletedTask = &perTask
+	}
+	return result, nil
+}
+
+const spendVerifyRowKey = "__verify__"
+
+func spendBreakdownRowKey(run capturedRun, m *Manifest) (key, taskID, title string) {
+	if run.meta.Phase == "verify" {
+		return spendVerifyRowKey, "verify", "Verify"
+	}
+	key = run.meta.TaskFile
+	if task := taskByFile(m, key); task != nil {
+		return key, task.ID, task.Title
+	}
+	return key, run.meta.TaskID, key
+}
+
+func countCompletedTasks(m *Manifest) int {
+	if m == nil {
+		return 0
+	}
+	n := 0
+	for _, task := range m.Tasks {
+		if task.Status == TaskDone {
+			n++
+		}
+	}
+	return n
 }
 
 // recentTaskSetIDsForSpend returns up to limit non-archived Task set identifiers
@@ -205,6 +384,86 @@ func formatSpendCount(reported bool, n int64) string {
 		return "—"
 	}
 	return fmt.Sprintf("%d", n)
+}
+
+// RenderSpendSetBreakdown writes the per-set spend breakdown for humans.
+func RenderSpendSetBreakdown(w io.Writer, result *SpendSetBreakdownResult) {
+	fmt.Fprintf(w, "tokens per completed task: %s", formatSpendPerCompletedTask(result))
+	fmt.Fprintf(w, "  (%s implement, %d done, %d runs, %d blind)\n",
+		formatSpendTotal(result.ImplementTokens),
+		result.CompletedTasks,
+		result.ImplementRunCount,
+		result.ImplementTokenBlindRuns,
+	)
+	fmt.Fprintf(w, "verification spend: %s  (%d runs, %d blind)\n\n",
+		formatSpendTotal(result.VerificationTokens),
+		result.VerificationRunCount,
+		result.VerificationTokenBlindRuns,
+	)
+	fmt.Fprintf(w, "%-28s %8s %8s %9s %9s %5s %6s\n",
+		"task", "in", "out", "cache-r", "cache-w", "runs", "blind")
+	for _, row := range result.Rows {
+		fmt.Fprintf(w, "%-28s %8s %8s %9s %9s %5d %6d\n",
+			row.TaskID,
+			formatSpendCount(row.Tokens.HasInput, row.Tokens.Input),
+			formatSpendCount(row.Tokens.HasOutput, row.Tokens.Output),
+			formatSpendCount(row.Tokens.HasCacheRead, row.Tokens.CacheRead),
+			formatSpendCount(row.Tokens.HasCacheWrite, row.Tokens.CacheWrite),
+			row.RunCount,
+			row.TokenBlindRuns,
+		)
+	}
+}
+
+func formatSpendPerCompletedTask(result *SpendSetBreakdownResult) string {
+	if result.TokensPerCompletedTask == nil {
+		return "—"
+	}
+	return fmt.Sprintf("%d", *result.TokensPerCompletedTask)
+}
+
+func formatSpendTotal(u TokenUsage) string {
+	if !u.HasUsage() {
+		return "—"
+	}
+	return fmt.Sprintf("%d", tokenUsageTotal(u))
+}
+
+// RenderSpendSetBreakdownJSON writes the per-set spend breakdown as JSON.
+func RenderSpendSetBreakdownJSON(w io.Writer, result *SpendSetBreakdownResult) error {
+	payload := spendSetBreakdownJSON{
+		TaskSetID:                    result.TaskSetID,
+		CompletedTasks:               result.CompletedTasks,
+		TokensPerCompletedTask:       result.TokensPerCompletedTask,
+		ImplementInputTokens:         result.ImplementTokens.Input,
+		ImplementOutputTokens:        result.ImplementTokens.Output,
+		ImplementCacheReadTokens:     result.ImplementTokens.CacheRead,
+		ImplementCacheWriteTokens:    result.ImplementTokens.CacheWrite,
+		ImplementRunCount:            result.ImplementRunCount,
+		ImplementTokenBlindRuns:      result.ImplementTokenBlindRuns,
+		VerificationInputTokens:      result.VerificationTokens.Input,
+		VerificationOutputTokens:     result.VerificationTokens.Output,
+		VerificationCacheReadTokens:  result.VerificationTokens.CacheRead,
+		VerificationCacheWriteTokens: result.VerificationTokens.CacheWrite,
+		VerificationRunCount:         result.VerificationRunCount,
+		VerificationTokenBlindRuns:   result.VerificationTokenBlindRuns,
+		Rows:                         make([]spendBreakdownJSONRow, len(result.Rows)),
+	}
+	for i, row := range result.Rows {
+		payload.Rows[i] = spendBreakdownJSONRow{
+			TaskID:           row.TaskID,
+			Title:            row.Title,
+			InputTokens:      row.Tokens.Input,
+			OutputTokens:     row.Tokens.Output,
+			CacheReadTokens:  row.Tokens.CacheRead,
+			CacheWriteTokens: row.Tokens.CacheWrite,
+			RunCount:         row.RunCount,
+			TokenBlindRuns:   row.TokenBlindRuns,
+		}
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
 }
 
 // RenderSpendRollupJSON writes the cross-set spend rollup as JSON.
