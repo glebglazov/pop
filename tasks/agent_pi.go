@@ -218,3 +218,34 @@ func piTerminalTokenUsage(events []streamEventRecord) (TokenUsage, bool) {
 	}
 	return u, u.HasUsage()
 }
+
+// piPartialCost is pi's cost extraction rule (ADR-0160).
+//
+// Authoritative events: `message_end` events whose message carries a cost
+// object. Read cost.total — the settled per-message figure. Component keys
+// (input/output/cacheRead/cacheWrite) must not be summed alongside total.
+// message_update deltas are ignored, matching pi's token rule.
+func piPartialCost(events []streamEventRecord) PartialCost {
+	var c PartialCost
+	for _, ev := range events {
+		var event struct {
+			Type    string `json:"type"`
+			Message struct {
+				Cost *struct {
+					Total *float64 `json:"total"`
+				} `json:"cost"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(ev.Raw), &event); err != nil {
+			continue
+		}
+		if event.Type != "message_end" || event.Message.Cost == nil {
+			continue
+		}
+		if v := event.Message.Cost.Total; v != nil {
+			c.Dollars += *v
+			c.HasCost = true
+		}
+	}
+	return c
+}

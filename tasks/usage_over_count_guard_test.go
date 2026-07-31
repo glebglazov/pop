@@ -81,21 +81,21 @@ func TestCheckUsageOverCountGuardUnknownAdapterInapplicable(t *testing.T) {
 	}
 }
 
-func TestRunSpendTokensAppliesOverCountGuard(t *testing.T) {
+func TestRunSpendAppliesOverCountGuard(t *testing.T) {
 	events := piDeltaOverCountFixtureEvents()
 	run := capturedRun{
 		meta: capturedRunMeta{Agent: "pi"},
 		events: events,
 	}
-	tokens, status, err := runSpendTokens(run)
+	spend, status, err := runSpend(run)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if status != OverCountGuardOK {
 		t.Fatalf("guard status = %v, want OK", status)
 	}
-	if tokens.Input != 180 {
-		t.Fatalf("tokens = %+v", tokens)
+	if spend.Tokens.Input != 180 {
+		t.Fatalf("tokens = %+v", spend.Tokens)
 	}
 }
 

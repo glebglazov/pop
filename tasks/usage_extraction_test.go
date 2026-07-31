@@ -140,6 +140,60 @@ func TestExtractTokenUsageTokenBlindForUnknownAdapter(t *testing.T) {
 	}
 }
 
+func TestPiPartialCostSumsMessageEndTotalIgnoresComponents(t *testing.T) {
+	// Component keys must not be summed alongside total — that double-counts.
+	events := []streamEventRecord{
+		{Type: "event", AtMS: 100, Raw: `{"type":"message_end","message":{"role":"assistant","cost":{"total":0.05,"input":0.03,"output":0.02}}}`},
+		{Type: "event", AtMS: 200, Raw: `{"type":"message_end","message":{"role":"assistant","cost":{"total":0.10,"input":0.06,"output":0.04,"cacheRead":0.01,"cacheWrite":0.02}}}`},
+	}
+	c := piPartialCost(events)
+	if !c.HasCost {
+		t.Fatal("expected cost")
+	}
+	if diff := c.Dollars - 0.15; diff > 0.0001 || diff < -0.0001 {
+		t.Fatalf("cost = %v, want 0.15 (total only, not components)", c.Dollars)
+	}
+}
+
+func TestPiPartialCostIgnoresMessageUpdateDeltas(t *testing.T) {
+	var events []streamEventRecord
+	for i := 0; i < 20; i++ {
+		events = append(events, streamEventRecord{
+			Type: "event", AtMS: int64(10 + i),
+			Raw: `{"type":"message_update","message":{"role":"assistant","cost":{"total":0.99,"input":0.50,"output":0.49}}}`,
+		})
+	}
+	events = append(events, streamEventRecord{
+		Type: "event", AtMS: 100,
+		Raw: `{"type":"message_end","message":{"role":"assistant","cost":{"total":0.05,"input":0.03,"output":0.02}}}`,
+	})
+	c := piPartialCost(events)
+	if c.Dollars != 0.05 {
+		t.Fatalf("cost = %v, want message_end total only", c.Dollars)
+	}
+}
+
+func TestExtractPartialCostNoCostForClaudeCursorOrUnknown(t *testing.T) {
+	events := []streamEventRecord{
+		{Type: "event", AtMS: 1, Raw: `{"type":"result","usage":{"input_tokens":1,"output_tokens":1}}`},
+	}
+	for _, agent := range []string{"claude", "cursor", "codex"} {
+		c := extractPartialCost(agent, events)
+		if c.HasCost {
+			t.Fatalf("%s should report no cost, got %+v", agent, c)
+		}
+	}
+}
+
+func TestExtractPartialCostDispatchesPi(t *testing.T) {
+	c := extractPartialCost("pi", []streamEventRecord{
+		{Type: "event", AtMS: 1, Raw: `{"type":"message_end","message":{"cost":{"total":1.25}}}`},
+	})
+	if !c.HasCost || c.Dollars != 1.25 {
+		t.Fatalf("pi cost = %+v", c)
+	}
+}
+
 func TestExtractTokenUsageDispatchesAllThreeAdapters(t *testing.T) {
 	claude := extractTokenUsage("claude", []streamEventRecord{
 		{Type: "event", AtMS: 1, Raw: `{"type":"result","usage":{"input_tokens":1,"output_tokens":2}}`},
@@ -186,19 +240,22 @@ func TestListSpendRunsIgnoresLegacyAttemptLayout(t *testing.T) {
 	if isLegacyRun(runs[0]) {
 		t.Fatal("spend run must not be legacy")
 	}
-	tokens, status, err := runSpendTokens(runs[0])
+	spend, status, err := runSpend(runs[0])
 	if err != nil {
 		t.Fatal(err)
 	}
 	if status != OverCountGuardInapplicable {
 		t.Fatalf("guard status = %v, want Inapplicable for claude", status)
 	}
-	if tokens.Input != 42 || tokens.Output != 7 {
-		t.Fatalf("tokens = %+v", tokens)
+	if spend.Tokens.Input != 42 || spend.Tokens.Output != 7 {
+		t.Fatalf("tokens = %+v", spend.Tokens)
+	}
+	if spend.Cost.HasCost {
+		t.Fatalf("claude should report no cost, got %+v", spend.Cost)
 	}
 }
 
-func TestRunSpendTokensRejectsLegacy(t *testing.T) {
+func TestRunSpendRejectsLegacy(t *testing.T) {
 	run := capturedRun{
 		meta:       capturedRunMeta{Agent: "claude", RunID: "legacy:01-a:attempt-001"},
 		legacyPath: "/tmp/streams/01-a/attempt-001.jsonl.gz",
@@ -206,7 +263,7 @@ func TestRunSpendTokensRejectsLegacy(t *testing.T) {
 			{Type: "event", AtMS: 1, Raw: `{"type":"result","usage":{"input_tokens":1,"output_tokens":1}}`},
 		},
 	}
-	if _, _, err := runSpendTokens(run); err == nil {
+	if _, _, err := runSpend(run); err == nil {
 		t.Fatal("expected error for legacy run")
 	}
 }

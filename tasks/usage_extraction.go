@@ -19,6 +19,12 @@ var usageExtractionRules = map[string]func([]streamEventRecord) TokenUsage{
 	"pi":     piTokenUsage,
 }
 
+// costExtractionRules maps agent preset → cost extraction. Adapters absent
+// from this map report no cost (HasCost false), never zero or an estimate.
+var costExtractionRules = map[string]func([]streamEventRecord) PartialCost{
+	"pi": piPartialCost,
+}
+
 // extractTokenUsage applies the agent's Usage extraction rule to a Captured
 // run's stored events. Unknown adapters return a token-blind TokenUsage.
 func extractTokenUsage(agent string, events []streamEventRecord) TokenUsage {
@@ -26,6 +32,15 @@ func extractTokenUsage(agent string, events []streamEventRecord) TokenUsage {
 		return rule(events)
 	}
 	return TokenUsage{}
+}
+
+// extractPartialCost applies the agent's cost extraction rule. Adapters
+// without a rule return HasCost false rather than zero dollars.
+func extractPartialCost(agent string, events []streamEventRecord) PartialCost {
+	if rule := costExtractionRules[agent]; rule != nil {
+		return rule(events)
+	}
+	return PartialCost{}
 }
 
 // collectSpendRuns loads every Captured run under streams/runs/ for a task
@@ -65,17 +80,20 @@ func listSpendRuns(d *Deps, taskSetDir string) ([]capturedRun, error) {
 	return runs, nil
 }
 
-// runSpendTokens derives TokenUsage for one Captured run via its adapter's
-// Usage extraction rule and applies the over-count guard. Legacy runs are
-// rejected — spend never reads them.
-func runSpendTokens(run capturedRun) (TokenUsage, OverCountGuardStatus, error) {
+// runSpend derives Run spend for one Captured run via its adapter's extraction
+// rules and applies the over-count guard. Legacy runs are rejected — spend
+// never reads them.
+func runSpend(run capturedRun) (RunSpend, OverCountGuardStatus, error) {
 	if isLegacyRun(run) {
-		return TokenUsage{}, OverCountGuardInapplicable, fmt.Errorf("spend does not read legacy attempt streams (%s)", filepath.Base(run.legacyPath))
+		return RunSpend{}, OverCountGuardInapplicable, fmt.Errorf("spend does not read legacy attempt streams (%s)", filepath.Base(run.legacyPath))
 	}
-	tokens := extractTokenUsage(run.meta.Agent, run.events)
-	status, err := checkUsageOverCountGuard(run.meta.Agent, run.events, tokens)
+	spend := RunSpend{
+		Tokens: extractTokenUsage(run.meta.Agent, run.events),
+		Cost:   extractPartialCost(run.meta.Agent, run.events),
+	}
+	status, err := checkUsageOverCountGuard(run.meta.Agent, run.events, spend.Tokens)
 	if err != nil {
-		return TokenUsage{}, status, err
+		return RunSpend{}, status, err
 	}
-	return tokens, status, nil
+	return spend, status, nil
 }

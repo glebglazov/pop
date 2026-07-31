@@ -544,3 +544,166 @@ func TestSpendSetBreakdownRejectsTaskFileTarget(t *testing.T) {
 		t.Fatal("expected error for task file target")
 	}
 }
+
+func piCostEvents(total float64) []streamEventRecord {
+	return []streamEventRecord{
+		{Type: "event", AtMS: 100, Raw: fmt.Sprintf(`{"type":"message_end","message":{"role":"assistant","usage":{"input":100,"output":50},"cost":{"total":%g,"input":0.03,"output":0.02}}}`, total)},
+	}
+}
+
+func TestSpendRollupAggregatesPiPartialCost(t *testing.T) {
+	env := spendFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	setDir := registerSpendSet(t, env, "2026-06-10-demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	writeSpendRun(t, setDir, "01-a.md", "01-a", "pi", base, piCostEvents(0.05))
+	writeSpendRun(t, setDir, "01-a.md", "01-a", "pi", base.Add(time.Minute), piCostEvents(0.10))
+	writeSpendRun(t, setDir, "01-a.md", "01-a", "claude", base.Add(2*time.Minute), claudeUsageEvents(10, 5))
+
+	result, err := SpendRollupWith(env.deps(), nil, nil, SpendOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Sets) != 1 {
+		t.Fatalf("sets = %#v", result.Sets)
+	}
+	row := result.Sets[0]
+	if !row.Cost.HasCost {
+		t.Fatalf("expected partial cost, got %+v", row.Cost)
+	}
+	if diff := row.Cost.Dollars - 0.15; diff > 0.0001 || diff < -0.0001 {
+		t.Fatalf("partial cost = %+v, want 0.15 from pi runs only", row.Cost)
+	}
+	if row.RunCount != 3 {
+		t.Fatalf("runs = %d", row.RunCount)
+	}
+}
+
+func TestSpendRollupOmitsCostColumnWhenNoAdapterReportsIt(t *testing.T) {
+	result := &SpendRollupResult{Sets: []SpendRollupRow{{
+		TaskSetID: "demo",
+		Tokens: TokenUsage{
+			Input: 100, Output: 50, HasInput: true, HasOutput: true,
+		},
+		RunCount: 1,
+	}}}
+	var buf bytes.Buffer
+	RenderSpendRollup(&buf, result)
+	out := buf.String()
+	if strings.Contains(out, "cost") || strings.Contains(out, "$") {
+		t.Fatalf("expected no cost column when absent, got:\n%s", out)
+	}
+}
+
+func TestRenderSpendRollupShowsPartialCostLabel(t *testing.T) {
+	result := &SpendRollupResult{Sets: []SpendRollupRow{{
+		TaskSetID: "demo",
+		Tokens: TokenUsage{
+			Input: 100, Output: 50, HasInput: true, HasOutput: true,
+		},
+		Cost:     PartialCost{Dollars: 0.1234, HasCost: true},
+		RunCount: 1,
+	}}}
+	var buf bytes.Buffer
+	RenderSpendRollup(&buf, result)
+	out := buf.String()
+	for _, want := range []string{"cost (partial)", "$0.1234"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestRenderSpendRollupJSONPartialCostOmitempty(t *testing.T) {
+	noCost := &SpendRollupResult{Sets: []SpendRollupRow{{
+		TaskSetID: "demo",
+		Tokens:    TokenUsage{Input: 1, HasInput: true},
+		RunCount:  1,
+	}}}
+	var buf bytes.Buffer
+	if err := RenderSpendRollupJSON(&buf, noCost); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "partial_cost") {
+		t.Fatalf("expected no partial_cost_usd when absent, got %s", buf.String())
+	}
+
+	withCost := &SpendRollupResult{Sets: []SpendRollupRow{{
+		TaskSetID: "demo",
+		Tokens:    TokenUsage{Input: 1, HasInput: true},
+		Cost:      PartialCost{Dollars: 0.42, HasCost: true},
+		RunCount:  1,
+	}}}
+	buf.Reset()
+	if err := RenderSpendRollupJSON(&buf, withCost); err != nil {
+		t.Fatal(err)
+	}
+	var decoded spendRollupJSON
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Sets[0].PartialCostUSD == nil || *decoded.Sets[0].PartialCostUSD != 0.42 {
+		t.Fatalf("partial_cost_usd = %v", decoded.Sets[0].PartialCostUSD)
+	}
+}
+
+func TestSpendSetBreakdownAggregatesPiPartialCost(t *testing.T) {
+	env := spendFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	setDir := registerSpendSet(t, env, "2026-06-10-demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	writeSpendRun(t, setDir, "01-a.md", "01-a", "pi", base, piCostEvents(0.08))
+	writeSpendRunEx(t, setDir, "", "", "pi", base.Add(5*time.Minute), piCostEvents(0.02), spendRunOpts{phase: "verify"})
+
+	result, err := SpendSetBreakdownWith(env.deps(), nil, nil, SpendOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Target:       "2026-06-10-demo",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.ImplementCost.HasCost || result.ImplementCost.Dollars != 0.08 {
+		t.Fatalf("implement cost = %+v", result.ImplementCost)
+	}
+	if !result.VerificationCost.HasCost || result.VerificationCost.Dollars != 0.02 {
+		t.Fatalf("verification cost = %+v", result.VerificationCost)
+	}
+}
+
+func TestRenderSpendSetBreakdownShowsPartialCostLabel(t *testing.T) {
+	perTask := int64(150)
+	result := &SpendSetBreakdownResult{
+		TaskSetID:              "demo",
+		CompletedTasks:         1,
+		TokensPerCompletedTask: &perTask,
+		ImplementTokens:        TokenUsage{Input: 100, Output: 50, HasInput: true, HasOutput: true},
+		ImplementCost:          PartialCost{Dollars: 0.50, HasCost: true},
+		ImplementRunCount:      1,
+		VerificationTokens:     TokenUsage{Input: 500, HasInput: true},
+		VerificationCost:         PartialCost{Dollars: 0.25, HasCost: true},
+		VerificationRunCount:   1,
+		Rows: []SpendBreakdownRow{{
+			TaskID: "01-a",
+			Tokens: TokenUsage{Input: 100, Output: 50, HasInput: true, HasOutput: true},
+			Cost:   PartialCost{Dollars: 0.50, HasCost: true},
+			RunCount: 1,
+		}, {
+			TaskID: "verify",
+			Tokens: TokenUsage{Input: 500, HasInput: true},
+			Cost:   PartialCost{Dollars: 0.25, HasCost: true},
+			RunCount: 1,
+		}},
+	}
+	var buf bytes.Buffer
+	RenderSpendSetBreakdown(&buf, result)
+	out := buf.String()
+	for _, want := range []string{"partial cost", "cost (partial)", "$0.5000", "$0.2500"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+}

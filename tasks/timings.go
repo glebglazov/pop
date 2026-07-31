@@ -62,6 +62,20 @@ func (u TokenUsage) HasUsage() bool {
 	return u.HasInput || u.HasOutput || u.HasCacheRead || u.HasCacheWrite
 }
 
+// PartialCost is dollar spend reported by an adapter. HasCost false means the
+// adapter reported no cost — distinct from zero dollars. Aggregated figures
+// are partial by construction when adapters in the mix omit cost (ADR-0160).
+type PartialCost struct {
+	Dollars float64
+	HasCost bool
+}
+
+// RunSpend is the token and cost accounting of one Captured run (ADR-0160).
+type RunSpend struct {
+	Tokens TokenUsage
+	Cost   PartialCost
+}
+
 // ToolTiming aggregates one tool's paired invocations within an attempt:
 // how many times it ran and the total wall-clock spent across those runs.
 type ToolTiming struct {
