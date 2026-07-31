@@ -56,6 +56,7 @@ var (
 	taskStreamFull            bool
 	taskStreamRaw             bool
 	taskStreamLast            bool
+	taskSpendJSON             bool
 )
 
 var taskCmd = &cobra.Command{
@@ -152,6 +153,13 @@ var taskStreamCmd = &cobra.Command{
 	Short: "Show per-task attempt stream replay derived from captured attempt streams",
 	Args:  cobra.ExactArgs(1),
 	Run:   runTaskStream,
+}
+
+var taskSpendCmd = &cobra.Command{
+	Use:   "spend",
+	Short: "Roll up run spend across the ten most recent task sets",
+	Args:  cobra.NoArgs,
+	RunE:  runTaskSpend,
 }
 
 var taskShowPathCmd = &cobra.Command{
@@ -272,6 +280,8 @@ func init() {
 	taskStreamCmd.Flags().BoolVar(&taskStreamFull, "full", false, "Print all tool payloads verbatim without truncation")
 	taskStreamCmd.Flags().BoolVar(&taskStreamRaw, "raw", false, "Decompress and write raw JSONL without rendering (ignores --full)")
 	taskStreamCmd.Flags().BoolVar(&taskStreamLast, "last", false, "Show only the most recent attempt per task")
+	taskCmd.AddCommand(taskSpendCmd)
+	taskSpendCmd.Flags().BoolVar(&taskSpendJSON, "json", false, "Emit the rollup as JSON instead of a table")
 	taskCmd.AddCommand(taskShowPathCmd)
 	taskCmd.AddCommand(taskTransferCmd)
 	taskTransferCmd.AddCommand(taskExportCmd)
@@ -1386,6 +1396,24 @@ func runTaskStreamWith(d *tasks.Deps, w io.Writer, target string) error {
 		return err
 	}
 	tasks.RenderStream(w, result, tasks.RenderStreamOptions{Full: taskStreamFull})
+	return nil
+}
+
+func runTaskSpend(cmd *cobra.Command, args []string) error {
+	return runTaskSpendWith(cmdLayerDeps().tasksDeps(), os.Stdout)
+}
+
+func runTaskSpendWith(d *tasks.Deps, w io.Writer) error {
+	result, err := tasks.SpendRollupWith(d, taskProjectDeps(), taskConfigLoad, tasks.SpendOptions{
+		ResolveInput: taskResolveInput(),
+	})
+	if err != nil {
+		return err
+	}
+	if taskSpendJSON {
+		return tasks.RenderSpendRollupJSON(w, result)
+	}
+	tasks.RenderSpendRollup(w, result)
 	return nil
 }
 
