@@ -224,7 +224,7 @@ The active half of **Agent unavailability** detection: a short read-only command
 _Avoid_: agent health check, auth preflight, agent status command, doctor check
 
 **Workflow skill**:
-An embedded skill that is a session-shaped workflow the user opens deliberately: manual-invocation-only via `disable-model-invocation` — grill-with-docs, grill-consolidate, to-prd, to-tasks, wayfinder. The counterpart of a Tool skill; the two kinds together make up the Task planning skills.
+An embedded skill that is a session-shaped workflow the user opens deliberately: manual-invocation-only via `disable-model-invocation` — grill-with-docs, grill-consolidate, to-spec, to-tasks, wayfinder. The counterpart of a Tool skill; the two kinds together make up the Task planning skills.
 _Avoid_: command skill, manual-only skill
 
 **Tool skill**:
@@ -501,20 +501,11 @@ A commit created by the task executor from runtime-checkout changes. After succe
 _Avoid_: Task artifact update, progress record
 
 **Task manifest**:
-The `index.json` within a Task set. It remains the source of truth for task eligibility and completion. It may optionally carry one set-level key beside the `tasks` array — `auto_drain`, consumed once at first registration into **Task state** as a **Registration seed** and not re-applied on refresh. A non-boolean `auto_drain` is a contract fault that makes the Task set **Malformed**. A `worktree` key is inert (see **Worktree directive**): placement is decided by CLI, never by the manifest.
+The `index.json` within a Task set. It remains the source of truth for task eligibility and completion, and carries **only** the `tasks` array — it no longer holds set-level `worktree` or `auto_drain` keys (ADR-0115: binding and auto-drain are register/CLI/dashboard concerns, not manifest fields). A legacy manifest still carrying those keys is **not** Malformed; the keys are ignored with a deprecation warning. Task-level fields inside the array still follow their declared types.
 _Avoid_: Issue manifest, workload, dashboard
-
 **Worktree directive**:
 A retired manifest key. The `worktree` key in a **Task manifest** is now read by nothing: registration ignores it and records no intent (ADR-0115), and placement is CLI-only — `pop tasks register --managed` and `pop tasks bind-worktree --managed` provision a **managed** worktree and bind it eagerly (ADR-0147), so "placed" and "registered" are the same instant. The registered-intent field survives solely as a Queue-side healing path for sets registered under the old lazy behaviour; a foreground **`pop tasks implement`** never consults it, and nothing writes a new one.
 _Avoid_: worktree_ready, worktree mode, per-set worktree flag, isolation flag
-
-**Registration seed**:
-A set-level key in a **Task manifest** whose value is applied once into the persisted **Task state** at a Task set's first **Task set registration**, then never re-read from the manifest — authoring intent, not live config. The category has exactly one member, `auto_drain` (the **Manifest auto-drain seed**). Editing it after a set is registered has no effect; the durable registry row is authoritative thereafter.
-_Avoid_: manifest config, live setting, manifest sync key
-
-**Manifest auto-drain seed**:
-The one-time application of a **Task manifest**'s `"auto_drain"` key into **Task state** at first registration. When the key is the boolean `true`, pop sets the set's **Auto-drain** bit on; absent or `false` seeds off. Pop prints `(auto-drain)` on the registration line only when it seeded true. The key is never re-read after registration.
-_Avoid_: auto-drain sync, manifest consent refresh
 
 **Task parent reference**:
 Optional planning context written inside a task markdown file, such as a `## Parent` section pointing to a PRD or another artifact. A task may be self-contained. Pop does not require, synthesize, validate, or interpret parent references.
@@ -1263,7 +1254,7 @@ The `Status:` line in `map.md` — `active` (default), `done` (way found; skill 
 _Avoid_: map state, derived map status
 
 **Spawned set**:
-A Task set created from a Map's resolved decisions (via to-prd/to-tasks) once the way — or an early-splittable chunk — is clear. The forward link between the two concepts: the Map records the ids of sets it spawned; a spawned set's prd.md records its source Map. One Map may spawn many sets.
+A Task set created from a Map's resolved decisions (via to-spec/to-tasks) once the way — or an early-splittable chunk — is clear. The forward link between the two concepts: the Map records the ids of sets it spawned; a spawned set's `spec.md` records its source Map. One Map may spawn many sets.
 _Avoid_: child set, output set
 
 **Work dashboard**:
