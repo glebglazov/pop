@@ -27,7 +27,7 @@ var taskSkillDirs = map[string][]string{
 func TestRenderTaskSkillsDirAgents(t *testing.T) {
 	t.Parallel()
 	baseNames := fileBasedSkillBaseNames()
-	for _, agent := range []string{"claude", "codex", "pi", "cursor", "opencode"} {
+	for _, agent := range []string{"claude", "codex", "pi", "cursor", "opencode", "kimi"} {
 		t.Run(agent, func(t *testing.T) {
 			tree, err := renderComponent(ComponentTaskSkills, agent, "pop-")
 			if err != nil {

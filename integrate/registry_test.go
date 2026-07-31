@@ -6,7 +6,7 @@ import (
 
 func TestRegistry_OneProfilePerSupportedAgent(t *testing.T) {
 	t.Parallel()
-	want := []string{"claude", "codex", "pi", "opencode", "cursor"}
+	want := []string{"claude", "codex", "pi", "opencode", "cursor", "kimi"}
 	if len(profiles) != len(want) {
 		t.Fatalf("profiles len = %d, want %d", len(profiles), len(want))
 	}

@@ -86,7 +86,7 @@ func renderSingleFileSkill(tree map[string][]byte, agent, prefix, src string, ba
 // renderMultiFileSkill renders a directory-shaped skill source: its `SKILL.md`
 // becomes the skill body (with the frontmatter name injected) and every other
 // file is emitted verbatim alongside it under `<prefix><base>/`. Directory-hosting
-// agents (claude, codex, pi, cursor, opencode) preserve companion documents
+// agents (claude, codex, pi, cursor, kimi) preserve companion documents
 // so relative references in the skill body resolve.
 func renderMultiFileSkill(tree map[string][]byte, agent, prefix, dir string, baseNames []string) error {
 	skillName := prefix + path.Base(dir)

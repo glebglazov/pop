@@ -1,0 +1,30 @@
+# Kimi Code configuration — hand written. Every comment, key order, and table
+# below must survive a pop integrate run untouched.
+default_model = "moonshot-ai/kimi-k3"
+
+[providers.moonshot-ai]
+type = "kimi"
+base_url = "https://api.moonshot.ai/v1"
+
+# The k3 rung pop's built-in effort ladder names.
+[models."moonshot-ai/kimi-k3"]
+provider = "moonshot-ai"
+model = "kimi-k3"
+max_context_size = 1048576
+support_efforts = [ "low", "high", "max" ]
+
+# The user's own hook. pop owns nothing here and must leave it alone.
+[[hooks]]
+event = "Stop"
+command = "notify-send 'kimi finished'"
+timeout = 5
+
+[experimental]
+banner = """
+Multi-line strings may contain lines that look like table headers:
+[[hooks]]
+"""
+
+[thinking]
+enabled = true
+effort = "high"

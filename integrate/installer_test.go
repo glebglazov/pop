@@ -174,8 +174,8 @@ type paneSkillAgent struct {
 	legacyFile string
 }
 
-// paneSkillAgents returns the install layout for every agent newly wired in
-// this slice (codex, pi, cursor, opencode), derived from installerHome.
+// paneSkillAgents returns the install layout for every agent wired after
+// claude (codex, pi, cursor, opencode, kimi), derived from installerHome.
 func paneSkillAgents() []paneSkillAgent {
 	src, _ := skillFiles.ReadFile("skills/pop/tmux-pane.md")
 	skillDirBytes := []byte(injectOwnershipMarker(injectFrontmatterName(string(src), "pop-tmux-pane")))
@@ -186,11 +186,13 @@ func paneSkillAgents() []paneSkillAgent {
 	piRoot := filepath.Join(dataRoot, "pi", "pane-skills")
 	curRoot := filepath.Join(dataRoot, "cursor", "pane-skills")
 	ocRoot := filepath.Join(dataRoot, "opencode", "pane-skills")
+	kimiRoot := filepath.Join(dataRoot, "kimi", "pane-skills")
 
 	codexDest := filepath.Join(installerHome, ".codex", "skills", "pop-tmux-pane")
 	piDest := filepath.Join(installerHome, ".pi", "agent", "skills", "pop-tmux-pane")
 	curDest := filepath.Join(installerHome, ".cursor", "skills", "pop-tmux-pane")
 	ocDest := filepath.Join(installerHome, ".config", "opencode", "agent", "pop-tmux-pane.md")
+	kimiDest := filepath.Join(installerHome, ".kimi-code", "skills", "pop-tmux-pane")
 
 	return []paneSkillAgent{
 		{
@@ -224,6 +226,14 @@ func paneSkillAgents() []paneSkillAgent {
 			linkTarget: filepath.Join(ocRoot, "pop-tmux-pane.md"),
 			wantBytes:  []byte(injectOwnershipMarker(string(src))),
 			legacyFile: ocDest,
+		},
+		{
+			name:       "kimi",
+			renderFile: filepath.Join(kimiRoot, "pop-tmux-pane", "SKILL.md"),
+			linkDest:   kimiDest,
+			linkTarget: filepath.Join(kimiRoot, "pop-tmux-pane"),
+			wantBytes:  skillDirBytes,
+			legacyDir:  kimiDest,
 		},
 	}
 }

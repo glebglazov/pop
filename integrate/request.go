@@ -3,7 +3,8 @@ package integrate
 // Request carries per-invocation intent for an integrate run. Mode flags and
 // component selections live here; injection closures stay on Deps.
 type Request struct {
-	// Agent is the target coding agent (claude, codex, pi, opencode, cursor).
+	// Agent is the target coding agent (claude, codex, pi, opencode, cursor,
+	// kimi).
 	Agent string
 
 	// Components is the optional-component baseline to install alongside

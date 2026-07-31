@@ -36,7 +36,7 @@ func installFileComponent(r *run, home string, id ComponentID, agent string) err
 	integrationsRoot := filepath.Join(dataDir, "integrations")
 	renderRoot := filepath.Join(integrationsRoot, agent, string(id))
 
-	agentDir, err := agentSkillDir(home, agent, id)
+	agentDir, err := agentSkillDir(d, home, agent, id)
 	if err != nil {
 		return err
 	}
@@ -47,7 +47,7 @@ func installFileComponent(r *run, home string, id ComponentID, agent string) err
 
 	r.prunedStale = nil
 
-	for _, p := range legacyArtifacts(home, agent, id) {
+	for _, p := range legacyArtifacts(d, home, agent, id) {
 		if d.logf != nil {
 			d.logf("installFileComponent: removing legacy artifact %s", p)
 		}
@@ -237,7 +237,7 @@ func fileComponentInstalledNames(d *Deps, home string, id ComponentID, agent str
 	if err != nil {
 		return nil, err
 	}
-	agentDir, err := agentSkillDir(home, agent, id)
+	agentDir, err := agentSkillDir(d, home, agent, id)
 	if err != nil {
 		return nil, err
 	}
@@ -348,20 +348,20 @@ func conflictCandidates(name, prefix string) []string {
 	return []string{name}
 }
 
-func agentSkillDir(home, agent string, id ComponentID) (string, error) {
+func agentSkillDir(d *Deps, home, agent string, id ComponentID) (string, error) {
 	p, ok := LookupProfile(agent)
 	if !ok {
 		return "", fmt.Errorf("agent %q has no skill location", agent)
 	}
-	return p.SkillDir(home, id), nil
+	return p.SkillDir(d, home, id), nil
 }
 
-func legacyArtifacts(home, agent string, id ComponentID) []string {
+func legacyArtifacts(d *Deps, home, agent string, id ComponentID) []string {
 	p, ok := LookupProfile(agent)
 	if !ok {
 		return nil
 	}
-	return p.LegacyArtifacts(home, id)
+	return p.LegacyArtifacts(d, home, id)
 }
 
 // InstallFileComponent installs a single file-based component for tests and tooling.

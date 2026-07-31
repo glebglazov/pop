@@ -14,7 +14,7 @@ type ComponentID string
 const (
 	// ComponentStatusWiring is the core component implied by running
 	// `pop integrate <agent>` at all: the pane-status hooks (claude, codex,
-	// cursor) or the status-sync agent extension (pi, opencode). It is
+	// cursor, kimi) or the status-sync agent extension (pi, opencode). It is
 	// plumbing — it makes the agent report pane status to the Monitor without
 	// changing how the agent behaves. See ADR 0010.
 	ComponentStatusWiring ComponentID = "status-wiring"

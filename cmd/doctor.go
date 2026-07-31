@@ -822,6 +822,7 @@ var doctorAgentExecutables = map[string]string{
 	"cursor":   "cursor-agent",
 	"opencode": "opencode",
 	"pi":       "pi",
+	"kimi":     "kimi",
 }
 
 func doctorAgentExecutableAvailable(agent string) bool {

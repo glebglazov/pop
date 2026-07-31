@@ -89,7 +89,7 @@ func componentConflict(d *Deps, home string, id ComponentID, agent string) (stri
 		return "", false, err
 	}
 	integrationsRoot := filepath.Join(dataDir, "integrations")
-	agentDir, err := agentSkillDir(home, agent, id)
+	agentDir, err := agentSkillDir(d, home, agent, id)
 	if err != nil {
 		return "", false, err
 	}

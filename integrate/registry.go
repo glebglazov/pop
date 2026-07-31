@@ -59,6 +59,9 @@ var (
 // what makes a JSON-hook agent and a file-drop extension agent interchangeable
 // to the rest of integrate. It is a struct with function fields, not a Go
 // interface — the agents are static and known at compile time.
+// Path resolution takes Deps as well as the user's home directory because an
+// agent may relocate its own root through the environment (kimi's
+// KIMI_CODE_HOME); the env read goes through the same seam as every other one.
 type AgentProfile struct {
 	Name string
 
@@ -67,10 +70,10 @@ type AgentProfile struct {
 	DetectStatusWiring  func(d *Deps, home string) (bool, error)
 
 	// SkillDir returns the Agent install path root for a file-based component.
-	SkillDir func(home string, id ComponentID) string
+	SkillDir func(d *Deps, home string, id ComponentID) string
 
 	// LegacyArtifacts returns paths to prune when installing a component.
-	LegacyArtifacts func(home string, id ComponentID) []string
+	LegacyArtifacts func(d *Deps, home string, id ComponentID) []string
 
 	// SkillLayout selects how single-file skills are rendered for this agent.
 	SkillLayout SkillLayout
@@ -85,10 +88,10 @@ var profiles = []AgentProfile{
 		".claude/settings.json",
 		popHooks,
 		nestedHookDialect,
-		func(home string, _ ComponentID) string {
+		func(_ *Deps, home string, _ ComponentID) string {
 			return filepath.Join(home, ".claude", "skills")
 		},
-		func(home string, id ComponentID) []string {
+		func(_ *Deps, home string, id ComponentID) []string {
 			if id == ComponentPaneSkill {
 				return []string{filepath.Join(home, ".claude", "commands", "pop", "pane.md")}
 			}
@@ -101,7 +104,7 @@ var profiles = []AgentProfile{
 		".codex/hooks.json",
 		codexPopHooks,
 		nestedHookDialect,
-		func(home string, _ ComponentID) string {
+		func(_ *Deps, home string, _ ComponentID) string {
 			return filepath.Join(home, ".codex", "skills")
 		},
 		nil,
@@ -112,7 +115,7 @@ var profiles = []AgentProfile{
 		".pi/agent/extensions/pop-status-sync.ts",
 		piExtensionFile,
 		"pi extension",
-		func(home string, _ ComponentID) string {
+		func(_ *Deps, home string, _ ComponentID) string {
 			return filepath.Join(home, ".pi", "agent", "skills")
 		},
 		nil,
@@ -123,7 +126,7 @@ var profiles = []AgentProfile{
 		".config/opencode/plugins/pop-status-sync.ts",
 		opencodeExtensionFile,
 		"opencode plugin",
-		func(home string, id ComponentID) string {
+		func(_ *Deps, home string, id ComponentID) string {
 			if id == ComponentPaneSkill {
 				return filepath.Join(home, ".config", "opencode", "agent")
 			}
@@ -137,8 +140,20 @@ var profiles = []AgentProfile{
 		".cursor/hooks.json",
 		cursorPopHooks,
 		flatHookDialect,
-		func(home string, _ ComponentID) string {
+		func(_ *Deps, home string, _ ComponentID) string {
 			return filepath.Join(home, ".cursor", "skills")
+		},
+		nil,
+		SkillLayoutDirectory,
+	),
+	tomlHookAgentProfile(
+		"kimi",
+		kimiPopHooks,
+		func(d *Deps, home string) string {
+			return filepath.Join(kimiHome(d, home), "config.toml")
+		},
+		func(d *Deps, home string, _ ComponentID) string {
+			return filepath.Join(kimiHome(d, home), "skills")
 		},
 		nil,
 		SkillLayoutDirectory,
@@ -180,13 +195,11 @@ func jsonHookAgentProfile(
 	name, relSettingsPath string,
 	hooks []hookSpec,
 	dialect HookDialect,
-	skillDir func(home string, id ComponentID) string,
-	legacy func(home string, id ComponentID) []string,
+	skillDir func(d *Deps, home string, id ComponentID) string,
+	legacy func(d *Deps, home string, id ComponentID) []string,
 	layout SkillLayout,
 ) AgentProfile {
-	if legacy == nil {
-		legacy = func(string, ComponentID) []string { return nil }
-	}
+	legacy = orNoLegacyArtifacts(legacy)
 	settingsPath := func(home string) string {
 		return filepath.Join(home, filepath.FromSlash(relSettingsPath))
 	}
@@ -211,13 +224,11 @@ func extensionAgentProfile(
 	name, relPath string,
 	content []byte,
 	installedLabel string,
-	skillDir func(home string, id ComponentID) string,
-	legacy func(home string, id ComponentID) []string,
+	skillDir func(d *Deps, home string, id ComponentID) string,
+	legacy func(d *Deps, home string, id ComponentID) []string,
 	layout SkillLayout,
 ) AgentProfile {
-	if legacy == nil {
-		legacy = func(string, ComponentID) []string { return nil }
-	}
+	legacy = orNoLegacyArtifacts(legacy)
 	extPath := func(home string) string {
 		return filepath.Join(home, filepath.FromSlash(relPath))
 	}
@@ -236,4 +247,41 @@ func extensionAgentProfile(
 		LegacyArtifacts: legacy,
 		SkillLayout:     layout,
 	}
+}
+
+// tomlHookAgentProfile builds the profile for an agent whose status wiring is a
+// run of [[hooks]] blocks inside a hand-authored TOML config (kimi). The config
+// path is a func of Deps because the agent's root is env-relocatable, unlike the
+// JSON-hook and extension agents whose paths are fixed under the user's home.
+func tomlHookAgentProfile(
+	name string,
+	hooks []hookSpec,
+	configPath func(d *Deps, home string) string,
+	skillDir func(d *Deps, home string, id ComponentID) string,
+	legacy func(d *Deps, home string, id ComponentID) []string,
+	layout SkillLayout,
+) AgentProfile {
+	legacy = orNoLegacyArtifacts(legacy)
+	return AgentProfile{
+		Name: name,
+		InstallStatusWiring: func(r *run, home string) error {
+			return installTOMLHooks(r, configPath(r.deps, home), hooks)
+		},
+		RemoveStatusWiring: func(d *Deps, home string) error {
+			return stripTOMLHooks(d, configPath(d, home))
+		},
+		DetectStatusWiring: func(d *Deps, home string) (bool, error) {
+			return tomlHasPopHooks(d, configPath(d, home))
+		},
+		SkillDir:        skillDir,
+		LegacyArtifacts: legacy,
+		SkillLayout:     layout,
+	}
+}
+
+func orNoLegacyArtifacts(legacy func(d *Deps, home string, id ComponentID) []string) func(*Deps, string, ComponentID) []string {
+	if legacy != nil {
+		return legacy
+	}
+	return func(*Deps, string, ComponentID) []string { return nil }
 }

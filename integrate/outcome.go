@@ -247,7 +247,7 @@ func preInstallSkillConflicts(d *Deps, home, agent string, id ComponentID, prefi
 		return nil, err
 	}
 	integrationsRoot := filepath.Join(dataDir, "integrations")
-	agentDir, err := agentSkillDir(home, agent, id)
+	agentDir, err := agentSkillDir(d, home, agent, id)
 	if err != nil {
 		return nil, err
 	}

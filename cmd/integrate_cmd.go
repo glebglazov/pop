@@ -58,6 +58,8 @@ Supported agents:
   opencode  Install a pane monitoring plugin at
             ~/.config/opencode/plugins/pop-status-sync.ts.
   cursor    Install pane monitoring hooks in ~/.cursor/hooks.json.
+  kimi      Merge pane monitoring [[hooks]] into ~/.kimi-code/config.toml
+            (or $KIMI_CODE_HOME/config.toml), preserving the rest of the file.
 
 Multiple agents can be integrated in a single invocation (e.g. 'pop integrate
 claude pi cursor'); each is installed in order with the same component flags
@@ -80,7 +82,7 @@ after copying a new binary into place.`,
 			return nil
 		}
 		if len(args) < 1 {
-			return fmt.Errorf("requires at least 1 argument: agent name (claude, codex, pi, opencode, or cursor)")
+			return fmt.Errorf("requires at least 1 argument: agent name (%s)", strings.Join(integrate.Agents, ", "))
 		}
 		return nil
 	},
@@ -98,13 +100,14 @@ agent is removed. With identifiers, exactly that set is removed. Valid
 identifiers: status-wiring, pane-skills, task-skills.
 
 Removal only ever deletes artifacts pop owns: status wiring strips pop's hook
-entries while preserving unrelated hooks (claude, codex, cursor) or deletes the
-pop-owned status-sync extension (pi, opencode); file-based skills delete only
-pop-owned symlinks and their render-tree entries — a same-named entry pop does
-not own is left untouched and reported.`,
+entries while preserving unrelated hooks (claude, codex, cursor), deletes the
+pop-owned status-sync extension (pi, opencode), or prunes pop's [[hooks]] blocks
+from kimi's config.toml and leaves the rest of the file alone; file-based skills
+delete only pop-owned symlinks and their render-tree entries — a same-named entry
+pop does not own is left untouched and reported.`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) < 1 {
-			return fmt.Errorf("requires an agent name (claude, codex, pi, opencode, or cursor)")
+			return fmt.Errorf("requires an agent name (%s)", strings.Join(integrate.Agents, ", "))
 		}
 		return nil
 	},

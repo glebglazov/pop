@@ -1519,7 +1519,7 @@ func TestDryRun_NoInstallation(t *testing.T) {
 	t.Parallel()
 	// Empty fake FS: no pop artifacts for any agent. Every dry-run should
 	// report neither installed nor changed.
-	for _, agent := range []string{"claude", "codex", "pi", "opencode", "cursor"} {
+	for _, agent := range []string{"claude", "codex", "pi", "opencode", "cursor", "kimi"} {
 		t.Run(agent, func(t *testing.T) {
 			fs := newFakeFS()
 			report, err := Install(fakeDeps("/h", fs, io.Discard), dryCoreReq(agent))
@@ -1544,7 +1544,7 @@ func TestDryRun_InstalledAndCurrent(t *testing.T) {
 	t.Parallel()
 	// Seed the FS with a real install, then dry-run against the same FS.
 	// Every agent should report installed=true, changed=false.
-	for _, agent := range []string{"claude", "codex", "pi", "opencode", "cursor"} {
+	for _, agent := range []string{"claude", "codex", "pi", "opencode", "cursor", "kimi"} {
 		t.Run(agent, func(t *testing.T) {
 			fs := newFakeFS()
 			installViaFake(t, fs, "/h", agent)
