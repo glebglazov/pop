@@ -209,3 +209,11 @@ func cursorTokenUsage(events []streamEventRecord) TokenUsage {
 	}
 	return u
 }
+
+// cursorTerminalTokenUsage reads the whole-run total from the terminal result
+// event for the over-count guard. Independent of the Usage extraction rule so
+// a mistaken sum across events is caught.
+func cursorTerminalTokenUsage(events []streamEventRecord) (TokenUsage, bool) {
+	u := cursorTokenUsage(events)
+	return u, u.HasUsage()
+}

@@ -66,10 +66,16 @@ func listSpendRuns(d *Deps, taskSetDir string) ([]capturedRun, error) {
 }
 
 // runSpendTokens derives TokenUsage for one Captured run via its adapter's
-// Usage extraction rule. Legacy runs are rejected — spend never reads them.
-func runSpendTokens(run capturedRun) (TokenUsage, error) {
+// Usage extraction rule and applies the over-count guard. Legacy runs are
+// rejected — spend never reads them.
+func runSpendTokens(run capturedRun) (TokenUsage, OverCountGuardStatus, error) {
 	if isLegacyRun(run) {
-		return TokenUsage{}, fmt.Errorf("spend does not read legacy attempt streams (%s)", filepath.Base(run.legacyPath))
+		return TokenUsage{}, OverCountGuardInapplicable, fmt.Errorf("spend does not read legacy attempt streams (%s)", filepath.Base(run.legacyPath))
 	}
-	return extractTokenUsage(run.meta.Agent, run.events), nil
+	tokens := extractTokenUsage(run.meta.Agent, run.events)
+	status, err := checkUsageOverCountGuard(run.meta.Agent, run.events, tokens)
+	if err != nil {
+		return TokenUsage{}, status, err
+	}
+	return tokens, status, nil
 }

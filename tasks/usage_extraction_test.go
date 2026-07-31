@@ -186,9 +186,12 @@ func TestListSpendRunsIgnoresLegacyAttemptLayout(t *testing.T) {
 	if isLegacyRun(runs[0]) {
 		t.Fatal("spend run must not be legacy")
 	}
-	tokens, err := runSpendTokens(runs[0])
+	tokens, status, err := runSpendTokens(runs[0])
 	if err != nil {
 		t.Fatal(err)
+	}
+	if status != OverCountGuardInapplicable {
+		t.Fatalf("guard status = %v, want Inapplicable for claude", status)
 	}
 	if tokens.Input != 42 || tokens.Output != 7 {
 		t.Fatalf("tokens = %+v", tokens)
@@ -203,7 +206,7 @@ func TestRunSpendTokensRejectsLegacy(t *testing.T) {
 			{Type: "event", AtMS: 1, Raw: `{"type":"result","usage":{"input_tokens":1,"output_tokens":1}}`},
 		},
 	}
-	if _, err := runSpendTokens(run); err == nil {
+	if _, _, err := runSpendTokens(run); err == nil {
 		t.Fatal("expected error for legacy run")
 	}
 }
