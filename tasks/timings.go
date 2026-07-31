@@ -70,6 +70,21 @@ type PartialCost struct {
 	HasCost bool
 }
 
+// TurnCount is the number of model calls in a Captured run, derived via the
+// adapter's Turn rule. HasTurn false is a turn-blind run — absent, not zero.
+type TurnCount struct {
+	Count   int
+	HasTurn bool
+}
+
+// PeakInput is the largest context any single model call fed the model: the
+// maximum over calls of input + cache-read + cache-write. HasPeak false is a
+// peak-blind run — absent, not zero.
+type PeakInput struct {
+	Tokens  int64
+	HasPeak bool
+}
+
 // RunSpend is the token and cost accounting of one Captured run (ADR-0160).
 type RunSpend struct {
 	Tokens TokenUsage

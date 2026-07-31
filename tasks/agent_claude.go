@@ -139,6 +139,80 @@ func claudeTokenUsage(events []streamEventRecord) TokenUsage {
 	return u
 }
 
+// claudeTurnCount is claude's Turn extraction rule (ADR-0165).
+//
+// Authoritative events: type=="assistant", deduped by message.id. Consecutive
+// assistant events repeat identical usage for the same turn; counting without
+// dedup inflates the figure.
+func claudeTurnCount(events []streamEventRecord) TurnCount {
+	seen := make(map[string]struct{})
+	for _, ev := range events {
+		var event struct {
+			Type    string `json:"type"`
+			Message struct {
+				ID string `json:"id"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(ev.Raw), &event); err != nil {
+			continue
+		}
+		if event.Type != "assistant" || event.Message.ID == "" {
+			continue
+		}
+		seen[event.Message.ID] = struct{}{}
+	}
+	return TurnCount{Count: len(seen), HasTurn: true}
+}
+
+// claudePeakInput is claude's peak-input extraction rule (ADR-0165).
+//
+// For each deduped assistant turn, read message.usage and take the maximum of
+// input_tokens + cache_read_input_tokens + cache_creation_input_tokens.
+func claudePeakInput(events []streamEventRecord) PeakInput {
+	perTurn := make(map[string]int64)
+	for _, ev := range events {
+		var event struct {
+			Type    string `json:"type"`
+			Message struct {
+				ID    string `json:"id"`
+				Usage *struct {
+					InputTokens              *int64 `json:"input_tokens"`
+					CacheReadInputTokens     *int64 `json:"cache_read_input_tokens"`
+					CacheCreationInputTokens *int64 `json:"cache_creation_input_tokens"`
+				} `json:"usage"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(ev.Raw), &event); err != nil {
+			continue
+		}
+		if event.Type != "assistant" || event.Message.ID == "" || event.Message.Usage == nil {
+			continue
+		}
+		usage := event.Message.Usage
+		var sum int64
+		if v := usage.InputTokens; v != nil {
+			sum += *v
+		}
+		if v := usage.CacheReadInputTokens; v != nil {
+			sum += *v
+		}
+		if v := usage.CacheCreationInputTokens; v != nil {
+			sum += *v
+		}
+		perTurn[event.Message.ID] = sum
+	}
+	if len(perTurn) == 0 {
+		return PeakInput{}
+	}
+	var peak int64
+	for _, v := range perTurn {
+		if v > peak {
+			peak = v
+		}
+	}
+	return PeakInput{Tokens: peak, HasPeak: true}
+}
+
 // claudeToolTick formats a compact "→ Name hint" line, probing the tool input
 // for the first recognized salient key without knowing per-tool schemas.
 func claudeToolTick(name string, input json.RawMessage) string {

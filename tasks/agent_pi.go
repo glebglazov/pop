@@ -241,3 +241,73 @@ func piPartialCost(events []streamEventRecord) PartialCost {
 	}
 	return c
 }
+
+// piTurnCount is pi's Turn extraction rule (ADR-0165).
+//
+// Authoritative events: type=="turn_end" with message.role=="assistant".
+// message_end mixes assistant, toolResult and user roles and must not be used.
+func piTurnCount(events []streamEventRecord) TurnCount {
+	count := 0
+	for _, ev := range events {
+		var event struct {
+			Type    string `json:"type"`
+			Message struct {
+				Role string `json:"role"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(ev.Raw), &event); err != nil {
+			continue
+		}
+		if event.Type == "turn_end" && event.Message.Role == "assistant" {
+			count++
+		}
+	}
+	return TurnCount{Count: count, HasTurn: true}
+}
+
+// piPeakInput is pi's peak-input extraction rule (ADR-0165).
+//
+// For each assistant turn_end, read message.usage and take the maximum of
+// input + cacheRead + cacheWrite.
+func piPeakInput(events []streamEventRecord) PeakInput {
+	var peak int64
+	found := false
+	for _, ev := range events {
+		var event struct {
+			Type    string `json:"type"`
+			Message struct {
+				Role  string `json:"role"`
+				Usage *struct {
+					Input      *int64 `json:"input"`
+					CacheRead  *int64 `json:"cacheRead"`
+					CacheWrite *int64 `json:"cacheWrite"`
+				} `json:"usage"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(ev.Raw), &event); err != nil {
+			continue
+		}
+		if event.Type != "turn_end" || event.Message.Role != "assistant" || event.Message.Usage == nil {
+			continue
+		}
+		usage := event.Message.Usage
+		var sum int64
+		if v := usage.Input; v != nil {
+			sum += *v
+		}
+		if v := usage.CacheRead; v != nil {
+			sum += *v
+		}
+		if v := usage.CacheWrite; v != nil {
+			sum += *v
+		}
+		if !found || sum > peak {
+			peak = sum
+			found = true
+		}
+	}
+	if !found {
+		return PeakInput{}
+	}
+	return PeakInput{Tokens: peak, HasPeak: true}
+}

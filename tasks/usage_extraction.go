@@ -37,6 +37,34 @@ func extractPartialCost(agent string, events []streamEventRecord) PartialCost {
 	return cap.Extract(events)
 }
 
+// extractTurnCount applies the agent's declared Turn capability. Blind or
+// unknown adapters return HasTurn false rather than zero turns.
+func extractTurnCount(agent string, events []streamEventRecord) TurnCount {
+	adapter, ok := agentAdapters[agent]
+	if !ok {
+		return TurnCount{}
+	}
+	cap := adapter.TurnCapability()
+	if cap.Kind != CapabilitySupported || cap.Extract == nil {
+		return TurnCount{}
+	}
+	return cap.Extract(events)
+}
+
+// extractPeakInput applies the agent's declared peak-input capability. Blind or
+// unknown adapters return HasPeak false rather than zero tokens.
+func extractPeakInput(agent string, events []streamEventRecord) PeakInput {
+	adapter, ok := agentAdapters[agent]
+	if !ok {
+		return PeakInput{}
+	}
+	cap := adapter.PeakInputCapability()
+	if cap.Kind != CapabilitySupported || cap.Extract == nil {
+		return PeakInput{}
+	}
+	return cap.Extract(events)
+}
+
 // collectSpendRuns loads every Captured run under streams/runs/ for a task
 // set. The legacy streams/<task-stem>/attempt-NNN.jsonl.gz layout is out of
 // scope for spend (ADR-0160) and is never read here.

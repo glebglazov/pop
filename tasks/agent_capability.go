@@ -162,3 +162,59 @@ func (c AgentStreamRenderCapability) validate(preset string) error {
 		return fmt.Errorf("agent preset %q: stream-render capability has unknown kind %d", preset, c.Kind)
 	}
 }
+
+// AgentTurnCapability is a preset's declared stance on counting model calls in
+// a Captured run (ADR-0165).
+type AgentTurnCapability struct {
+	Kind    CapabilityKind
+	Extract func([]streamEventRecord) TurnCount // required iff Supported
+	Reason  string                              // required iff Blind
+}
+
+// validate reports whether this turn stance is a complete declaration.
+func (c AgentTurnCapability) validate(preset string) error {
+	switch c.Kind {
+	case CapabilitySupported:
+		if c.Extract == nil {
+			return fmt.Errorf("agent preset %q: turn capability is Supported but Extract is nil", preset)
+		}
+		return nil
+	case CapabilityBlind:
+		if strings.TrimSpace(c.Reason) == "" {
+			return fmt.Errorf("agent preset %q: turn capability is Blind but Reason is empty", preset)
+		}
+		return nil
+	case capabilityUnset:
+		return fmt.Errorf("agent preset %q: turn capability is unset", preset)
+	default:
+		return fmt.Errorf("agent preset %q: turn capability has unknown kind %d", preset, c.Kind)
+	}
+}
+
+// AgentPeakInputCapability is a preset's declared stance on deriving the
+// largest per-call context size from a Captured run (ADR-0165).
+type AgentPeakInputCapability struct {
+	Kind    CapabilityKind
+	Extract func([]streamEventRecord) PeakInput // required iff Supported
+	Reason  string                              // required iff Blind
+}
+
+// validate reports whether this peak-input stance is a complete declaration.
+func (c AgentPeakInputCapability) validate(preset string) error {
+	switch c.Kind {
+	case CapabilitySupported:
+		if c.Extract == nil {
+			return fmt.Errorf("agent preset %q: peak-input capability is Supported but Extract is nil", preset)
+		}
+		return nil
+	case CapabilityBlind:
+		if strings.TrimSpace(c.Reason) == "" {
+			return fmt.Errorf("agent preset %q: peak-input capability is Blind but Reason is empty", preset)
+		}
+		return nil
+	case capabilityUnset:
+		return fmt.Errorf("agent preset %q: peak-input capability is unset", preset)
+	default:
+		return fmt.Errorf("agent preset %q: peak-input capability has unknown kind %d", preset, c.Kind)
+	}
+}

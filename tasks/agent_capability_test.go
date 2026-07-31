@@ -200,6 +200,84 @@ func TestAgentStreamRenderCapabilityValidate(t *testing.T) {
 	})
 }
 
+func TestAgentTurnCapabilityValidate(t *testing.T) {
+	t.Run("unset is invalid", func(t *testing.T) {
+		err := (AgentTurnCapability{}).validate("pi")
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "pi") || !strings.Contains(err.Error(), "turn") {
+			t.Fatalf("error should name preset and capability, got %v", err)
+		}
+	})
+	t.Run("supported requires Extract", func(t *testing.T) {
+		err := (AgentTurnCapability{Kind: CapabilitySupported}).validate("claude")
+		if err == nil || !strings.Contains(err.Error(), "Extract") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("supported with Extract passes", func(t *testing.T) {
+		cap := AgentTurnCapability{
+			Kind:    CapabilitySupported,
+			Extract: func([]streamEventRecord) TurnCount { return TurnCount{} },
+		}
+		if err := cap.validate("claude"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("blind requires Reason", func(t *testing.T) {
+		err := (AgentTurnCapability{Kind: CapabilityBlind}).validate("codex")
+		if err == nil || !strings.Contains(err.Error(), "Reason") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("blind with Reason passes", func(t *testing.T) {
+		cap := AgentTurnCapability{Kind: CapabilityBlind, Reason: "stream carries no turn boundary"}
+		if err := cap.validate("codex"); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func TestAgentPeakInputCapabilityValidate(t *testing.T) {
+	t.Run("unset is invalid", func(t *testing.T) {
+		err := (AgentPeakInputCapability{}).validate("cursor")
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "cursor") || !strings.Contains(err.Error(), "peak-input") {
+			t.Fatalf("error should name preset and capability, got %v", err)
+		}
+	})
+	t.Run("supported requires Extract", func(t *testing.T) {
+		err := (AgentPeakInputCapability{Kind: CapabilitySupported}).validate("pi")
+		if err == nil || !strings.Contains(err.Error(), "Extract") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("supported with Extract passes", func(t *testing.T) {
+		cap := AgentPeakInputCapability{
+			Kind:    CapabilitySupported,
+			Extract: func([]streamEventRecord) PeakInput { return PeakInput{} },
+		}
+		if err := cap.validate("pi"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("blind requires Reason", func(t *testing.T) {
+		err := (AgentPeakInputCapability{Kind: CapabilityBlind}).validate("cursor")
+		if err == nil || !strings.Contains(err.Error(), "Reason") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("blind with Reason passes", func(t *testing.T) {
+		cap := AgentPeakInputCapability{Kind: CapabilityBlind, Reason: "stream carries no per-call usage block"}
+		if err := cap.validate("cursor"); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
 func TestPresetUsageAndCostCapabilitiesDeclared(t *testing.T) {
 	// validate is not yet wired into construction; assert every preset's
 	// declared stance would pass so the later switch-on slice is a one-liner.
@@ -222,6 +300,12 @@ func TestPresetUsageAndCostCapabilitiesDeclared(t *testing.T) {
 		}
 		if err := adapter.StreamRenderCapability().validate(preset); err != nil {
 			t.Fatalf("%s stream-render: %v", preset, err)
+		}
+		if err := adapter.TurnCapability().validate(preset); err != nil {
+			t.Fatalf("%s turn: %v", preset, err)
+		}
+		if err := adapter.PeakInputCapability().validate(preset); err != nil {
+			t.Fatalf("%s peak-input: %v", preset, err)
 		}
 	}
 }

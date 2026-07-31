@@ -172,6 +172,8 @@ type AgentAdapter interface {
 	ToolTimingCapability() AgentToolTimingCapability
 	ActualModelCapability() AgentActualModelCapability
 	StreamRenderCapability() AgentStreamRenderCapability
+	TurnCapability() AgentTurnCapability
+	PeakInputCapability() AgentPeakInputCapability
 	AssistanceInvocation(AgentAssistanceRequest) (*AgentAssistanceInvocation, error)
 	// ReasoningSpecTokens renders an Effort ladder's reasoning level as tokens
 	// appended to an Agent-preset spec. Most presets take a CLI flag; a preset
@@ -202,6 +204,8 @@ var agentAdapters = map[string]AgentAdapter{
 		toolTimings: AgentToolTimingCapability{Kind: CapabilitySupported, Extract: claudeToolTimings},
 		actualModel: AgentActualModelCapability{Kind: CapabilitySupported, Extract: claudeActualModel},
 		streamRender: AgentStreamRenderCapability{Kind: CapabilitySupported, Render: renderClaudeEvent},
+		turns:        AgentTurnCapability{Kind: CapabilitySupported, Extract: claudeTurnCount},
+		peakInput:    AgentPeakInputCapability{Kind: CapabilitySupported, Extract: claudePeakInput},
 		models:      []string{"opus", "sonnet", "haiku", "fable"},
 	}),
 	"opencode": newPresetAgentAdapter(presetAgentSpec{
@@ -215,6 +219,8 @@ var agentAdapters = map[string]AgentAdapter{
 		toolTimings:    AgentToolTimingCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no tool-use/tool-result pairing"},
 		actualModel:    AgentActualModelCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no actual-model field"},
 		streamRender:   AgentStreamRenderCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no renderable assistant/tool_result message shape"},
+		turns:          AgentTurnCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no message boundary"},
+		peakInput:      AgentPeakInputCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no per-call usage block"},
 		models:         []string{"opencode/kimi-k2.6", "opencode/gpt-5.5", "opencode/claude-opus-4-8", "opencode/claude-sonnet-4-6"},
 		modelsInstallDependent: true,
 	}),
@@ -234,6 +240,8 @@ var agentAdapters = map[string]AgentAdapter{
 		toolTimings:            AgentToolTimingCapability{Kind: CapabilityBlind, Reason: "cursor stream-json events carry no paired tool invocation boundaries"},
 		actualModel:            AgentActualModelCapability{Kind: CapabilityBlind, Reason: "cursor stream-json events carry no actual-model field"},
 		streamRender:           AgentStreamRenderCapability{Kind: CapabilityBlind, Reason: "cursor stream-json events carry no renderable assistant/tool_result message shape"},
+		turns:                  AgentTurnCapability{Kind: CapabilitySupported, Extract: cursorTurnCount},
+		peakInput:              AgentPeakInputCapability{Kind: CapabilityBlind, Reason: "cursor reports token usage only as a whole-run total on result"},
 		models:                 []string{"auto", "composer-2.5", "gpt-5.3-codex"},
 		modelsInstallDependent: true,
 	}),
@@ -252,6 +260,8 @@ var agentAdapters = map[string]AgentAdapter{
 		toolTimings:            AgentToolTimingCapability{Kind: CapabilitySupported, Extract: codexToolTimings},
 		actualModel:            AgentActualModelCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no actual-model init event"},
 		streamRender:           AgentStreamRenderCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no renderable assistant/tool_result message shape"},
+		turns:                  AgentTurnCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no verifiable turn boundary"},
+		peakInput:              AgentPeakInputCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no per-call usage block"},
 		models:                 []string{"gpt-5.5", "gpt-5.4-mini"},
 		modelsInstallDependent: true,
 	}),
@@ -266,6 +276,8 @@ var agentAdapters = map[string]AgentAdapter{
 		toolTimings:    AgentToolTimingCapability{Kind: CapabilityBlind, Reason: "pi jsonl events carry no paired tool invocation boundaries"},
 		actualModel:    AgentActualModelCapability{Kind: CapabilityBlind, Reason: "pi jsonl events carry no actual-model field"},
 		streamRender:   AgentStreamRenderCapability{Kind: CapabilityBlind, Reason: "pi jsonl events carry no renderable assistant/tool_result message shape"},
+		turns:          AgentTurnCapability{Kind: CapabilitySupported, Extract: piTurnCount},
+		peakInput:      AgentPeakInputCapability{Kind: CapabilitySupported, Extract: piPeakInput},
 		models:         []string{"opencode-go/kimi-k2.6", "opencode-go/qwen3.7-max", "opencode-go/minimax-m3", "opencode-go/deepseek-v4-flash"},
 		modelsInstallDependent: true,
 	}),
@@ -285,6 +297,8 @@ var agentAdapters = map[string]AgentAdapter{
 		toolTimings:     AgentToolTimingCapability{Kind: CapabilityBlind, Reason: "kimi stream tool timings have not been verified against a captured run"},
 		actualModel:     AgentActualModelCapability{Kind: CapabilityBlind, Reason: "kimi stream actual model has not been verified against a captured run"},
 		streamRender:    AgentStreamRenderCapability{Kind: CapabilityBlind, Reason: "kimi stream rendering has not been verified against a captured run"},
+		turns:           AgentTurnCapability{Kind: CapabilityBlind, Reason: "kimi stream turn count has not been verified against a captured run"},
+		peakInput:       AgentPeakInputCapability{Kind: CapabilityBlind, Reason: "kimi stream peak input has not been verified against a captured run"},
 		models:          []string{"moonshot-ai/kimi-k3", "moonshot-ai/kimi-k2.7-code", "moonshot-ai/kimi-k2.7-code-highspeed"},
 		modelsInstallDependent: true,
 	}),
@@ -369,6 +383,8 @@ type presetAgentSpec struct {
 	toolTimings     AgentToolTimingCapability
 	actualModel     AgentActualModelCapability
 	streamRender    AgentStreamRenderCapability
+	turns           AgentTurnCapability
+	peakInput       AgentPeakInputCapability
 	models          []string
 	// modelsInstallDependent marks a curated list whose aliases are resolved by
 	// the local install's own provider config rather than being stable,
@@ -591,6 +607,14 @@ func (a *presetAgentAdapter) StreamRenderCapability() AgentStreamRenderCapabilit
 	return a.streamRender
 }
 
+func (a *presetAgentAdapter) TurnCapability() AgentTurnCapability {
+	return a.turns
+}
+
+func (a *presetAgentAdapter) PeakInputCapability() AgentPeakInputCapability {
+	return a.peakInput
+}
+
 func (a *presetAgentAdapter) Models() []string {
 	return append([]string{}, a.models...)
 }
@@ -670,6 +694,14 @@ func (a customAgentAdapter) ActualModelCapability() AgentActualModelCapability {
 
 func (a customAgentAdapter) StreamRenderCapability() AgentStreamRenderCapability {
 	return AgentStreamRenderCapability{Kind: CapabilityBlind, Reason: "custom agent commands produce no structured stream"}
+}
+
+func (a customAgentAdapter) TurnCapability() AgentTurnCapability {
+	return AgentTurnCapability{Kind: CapabilityBlind, Reason: "custom agent commands produce no structured stream"}
+}
+
+func (a customAgentAdapter) PeakInputCapability() AgentPeakInputCapability {
+	return AgentPeakInputCapability{Kind: CapabilityBlind, Reason: "custom agent commands produce no structured stream"}
 }
 
 func (a customAgentAdapter) AssistanceInvocation(req AgentAssistanceRequest) (*AgentAssistanceInvocation, error) {

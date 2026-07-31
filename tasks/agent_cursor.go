@@ -209,3 +209,28 @@ func cursorTokenUsage(events []streamEventRecord) TokenUsage {
 	}
 	return u
 }
+
+// cursorTurnCount is cursor's Turn extraction rule (ADR-0165).
+//
+// Authoritative boundary: distinct model_call_id values on assistant and
+// tool_call events. One model call may fan out into many tool_call events.
+func cursorTurnCount(events []streamEventRecord) TurnCount {
+	seen := make(map[string]struct{})
+	for _, ev := range events {
+		var event struct {
+			Type        string `json:"type"`
+			ModelCallID string `json:"model_call_id"`
+		}
+		if err := json.Unmarshal([]byte(ev.Raw), &event); err != nil {
+			continue
+		}
+		if event.Type != "assistant" && event.Type != "tool_call" {
+			continue
+		}
+		if event.ModelCallID == "" {
+			continue
+		}
+		seen[event.ModelCallID] = struct{}{}
+	}
+	return TurnCount{Count: len(seen), HasTurn: true}
+}
