@@ -82,8 +82,9 @@ func AgentCatalogWithConfig(d *Deps, cfg *config.Config) []AgentCatalogRow {
 }
 
 func AgentBinary(adapter AgentAdapter) string {
-	if preset, ok := adapter.(*presetAgentAdapter); ok && len(preset.headlessPrefix) > 0 {
-		return preset.headlessPrefix[0]
+	name := adapter.ExecutableCapability().executableName()
+	if name != "" {
+		return name
 	}
 	return adapter.Preset()
 }
@@ -113,14 +114,19 @@ func effortLadderForCatalog(cfg *config.Config, agent string) []AgentCatalogEffo
 			return effortLadderTiers(ladder, "configured")
 		}
 	}
-	if ladder, ok := builtInEffortModels[agent]; ok {
-		return []AgentCatalogEffortTier{
-			{Tier: "heavy", Entries: append([]config.EffortModel(nil), ladder["heavy"]...), Source: "built-in"},
-			{Tier: "standard", Entries: append([]config.EffortModel(nil), ladder["standard"]...), Source: "built-in"},
-			{Tier: "light", Entries: append([]config.EffortModel(nil), ladder["light"]...), Source: "built-in"},
-		}
+	adapter, err := ResolveAgentAdapter(agent)
+	if err != nil {
+		return nil
 	}
-	return nil
+	cap := adapter.EffortLadderCapability()
+	if cap.Kind != CapabilitySupported || len(cap.Ladder) == 0 {
+		return nil
+	}
+	return []AgentCatalogEffortTier{
+		{Tier: "heavy", Entries: append([]config.EffortModel(nil), cap.Ladder["heavy"]...), Source: "built-in"},
+		{Tier: "standard", Entries: append([]config.EffortModel(nil), cap.Ladder["standard"]...), Source: "built-in"},
+		{Tier: "light", Entries: append([]config.EffortModel(nil), cap.Ladder["light"]...), Source: "built-in"},
+	}
 }
 
 func effortLadderTiers(ladder config.EffortConfig, source string) []AgentCatalogEffortTier {

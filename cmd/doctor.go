@@ -104,7 +104,7 @@ func defaultDoctorDeps() *doctorDeps {
 		},
 		paneSessionAddressable: defaultPaneSessionAddressable,
 		explicitAgentContext:     func() []string { return nil },
-		agentExecutableAvailable: doctorAgentExecutableAvailable,
+		agentExecutableAvailable: tasks.AgentExecutableAvailable,
 		taskStorageWritable: func() (string, error) { return tasks.ProbeStorageWritable(cmdLayerDeps().tasksDeps()) },
 		scanWayfinderMaps: func() (int, error) {
 			maps, err := wayfinder.ScanMaps(cmdLayerDeps().wayfinderDeps(), cmdLayerDeps().WorkDir())
@@ -142,7 +142,7 @@ func defaultDoctorDeps() *doctorDeps {
 		if err != nil {
 			return nil, err
 		}
-		return integrate.DetectAgentIntent(d.integrate, home, config.Load, nil, doctorAgentExecutableAvailable)
+		return integrate.DetectAgentIntent(d.integrate, home, config.Load, nil, tasks.AgentExecutableAvailable)
 	}
 	return d
 }
@@ -814,24 +814,6 @@ func doctorIntendedAgentStatusWiring(d *integrate.Deps, intent *doctorAgentInten
 		return nil, err
 	}
 	return integrate.IntendedAgentComponentStates(d, home, intent, integrate.ComponentStatusWiring)
-}
-
-var doctorAgentExecutables = map[string]string{
-	"claude":   "claude",
-	"codex":    "codex",
-	"cursor":   "cursor-agent",
-	"opencode": "opencode",
-	"pi":       "pi",
-	"kimi":     "kimi",
-}
-
-func doctorAgentExecutableAvailable(agent string) bool {
-	exe, ok := doctorAgentExecutables[strings.ToLower(agent)]
-	if !ok {
-		return false
-	}
-	_, err := exec.LookPath(exe)
-	return err == nil
 }
 
 func doctorIntegrateIntentChecks(intent *doctorAgentIntentReport) []doctorCheck {

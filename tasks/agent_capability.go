@@ -3,6 +3,9 @@ package tasks
 import (
 	"fmt"
 	"strings"
+	"time"
+
+	"github.com/glebglazov/pop/config"
 )
 
 // CapabilityKind is the supported/blind stance for a stream-shape adapter
@@ -253,5 +256,90 @@ func (c AgentReasoningCapability) validate(preset string) error {
 		return fmt.Errorf("agent preset %q: reasoning capability is unset", preset)
 	default:
 		return fmt.Errorf("agent preset %q: reasoning capability has unknown kind %d", preset, c.Kind)
+	}
+}
+
+// AgentQuotaResetCapability is a preset's declared stance on deriving PauseResetAt
+// from quota diagnostics (ADR-0166).
+type AgentQuotaResetCapability struct {
+	Kind    CapabilityKind
+	ResetAt func(reason string, now time.Time) time.Time // required iff Supported
+	Reason  string                                        // required iff Blind
+}
+
+// validate reports whether this quota-reset stance is a complete declaration.
+func (c AgentQuotaResetCapability) validate(preset string) error {
+	switch c.Kind {
+	case CapabilitySupported:
+		if c.ResetAt == nil {
+			return fmt.Errorf("agent preset %q: quota-reset capability is Supported but ResetAt is nil", preset)
+		}
+		return nil
+	case CapabilityBlind:
+		if strings.TrimSpace(c.Reason) == "" {
+			return fmt.Errorf("agent preset %q: quota-reset capability is Blind but Reason is empty", preset)
+		}
+		return nil
+	case capabilityUnset:
+		return fmt.Errorf("agent preset %q: quota-reset capability is unset", preset)
+	default:
+		return fmt.Errorf("agent preset %q: quota-reset capability has unknown kind %d", preset, c.Kind)
+	}
+}
+
+// AgentEffortLadderCapability is a preset's declared stance on Pop's built-in
+// effort tier → model mapping when config does not override it (ADR-0049,
+// ADR-0166).
+type AgentEffortLadderCapability struct {
+	Kind   CapabilityKind
+	Ladder map[string][]config.EffortModel // required iff Supported
+	Reason string                            // required iff Blind
+}
+
+// validate reports whether this effort-ladder stance is a complete declaration.
+func (c AgentEffortLadderCapability) validate(preset string) error {
+	switch c.Kind {
+	case CapabilitySupported:
+		if len(c.Ladder) == 0 {
+			return fmt.Errorf("agent preset %q: effort-ladder capability is Supported but Ladder is empty", preset)
+		}
+		return nil
+	case CapabilityBlind:
+		if strings.TrimSpace(c.Reason) == "" {
+			return fmt.Errorf("agent preset %q: effort-ladder capability is Blind but Reason is empty", preset)
+		}
+		return nil
+	case capabilityUnset:
+		return fmt.Errorf("agent preset %q: effort-ladder capability is unset", preset)
+	default:
+		return fmt.Errorf("agent preset %q: effort-ladder capability has unknown kind %d", preset, c.Kind)
+	}
+}
+
+// AgentExecutableCapability is a preset's declared CLI executable basename
+// (ADR-0166).
+type AgentExecutableCapability struct {
+	Kind   CapabilityKind
+	Name   string // required iff Supported
+	Reason string // required iff Blind
+}
+
+// validate reports whether this executable-name stance is a complete declaration.
+func (c AgentExecutableCapability) validate(preset string) error {
+	switch c.Kind {
+	case CapabilitySupported:
+		if strings.TrimSpace(c.Name) == "" {
+			return fmt.Errorf("agent preset %q: executable capability is Supported but Name is empty", preset)
+		}
+		return nil
+	case CapabilityBlind:
+		if strings.TrimSpace(c.Reason) == "" {
+			return fmt.Errorf("agent preset %q: executable capability is Blind but Reason is empty", preset)
+		}
+		return nil
+	case capabilityUnset:
+		return fmt.Errorf("agent preset %q: executable capability is unset", preset)
+	default:
+		return fmt.Errorf("agent preset %q: executable capability has unknown kind %d", preset, c.Kind)
 	}
 }

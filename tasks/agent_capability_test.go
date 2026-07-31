@@ -356,5 +356,17 @@ func TestPresetUsageAndCostCapabilitiesDeclared(t *testing.T) {
 		if err := adapter.ReasoningCapability().validate(preset); err != nil {
 			t.Fatalf("%s reasoning: %v", preset, err)
 		}
+		if err := adapter.QuotaResetCapability().validate(preset); err != nil {
+			t.Fatalf("%s quota-reset: %v", preset, err)
+		}
+		if err := adapter.EffortLadderCapability().validate(preset); err != nil {
+			t.Fatalf("%s effort-ladder: %v", preset, err)
+		}
+		if err := adapter.ExecutableCapability().validate(preset); err != nil {
+			t.Fatalf("%s executable: %v", preset, err)
+		}
+		if err := adapter.AvailabilityProbeCapability().validate(preset); err != nil {
+			t.Fatalf("%s availability-probe: %v", preset, err)
+		}
 	}
 }

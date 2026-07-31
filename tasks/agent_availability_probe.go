@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -14,17 +15,45 @@ import (
 var agentAvailabilityProbeTimeout = 5 * time.Second
 
 // AgentAvailabilityProbeCapability describes a preset's optional read-only auth
-// probe command and how to interpret its output. Presets with no status readout
-// ship an empty capability.
+// probe command and how to interpret its output (ADR-0153, ADR-0166).
 type AgentAvailabilityProbeCapability struct {
+	Kind                 CapabilityKind
 	Command              *AgentCommand
 	Interpret            func(exitCode int, output string) *AgentUnavailability
 	ReportsAuthenticated func(exitCode int, output string) bool
+	// IdentifyingArgs are the argv prefix after the executable that distinguish
+	// a probe invocation from headless work. Defaults to Command.Args when nil.
+	IdentifyingArgs []string
+	Reason          string // required iff Blind
+}
+
+// validate reports whether this availability-probe stance is a complete declaration.
+func (c AgentAvailabilityProbeCapability) validate(preset string) error {
+	switch c.Kind {
+	case CapabilitySupported:
+		if c.Command == nil || strings.TrimSpace(c.Command.Name) == "" {
+			return fmt.Errorf("agent preset %q: availability-probe capability is Supported but Command is missing", preset)
+		}
+		if c.Interpret == nil && c.ReportsAuthenticated == nil {
+			return fmt.Errorf("agent preset %q: availability-probe capability is Supported but neither Interpret nor ReportsAuthenticated is set", preset)
+		}
+		return nil
+	case CapabilityBlind:
+		if strings.TrimSpace(c.Reason) == "" {
+			return fmt.Errorf("agent preset %q: availability-probe capability is Blind but Reason is empty", preset)
+		}
+		return nil
+	case capabilityUnset:
+		return fmt.Errorf("agent preset %q: availability-probe capability is unset", preset)
+	default:
+		return fmt.Errorf("agent preset %q: availability-probe capability has unknown kind %d", preset, c.Kind)
+	}
 }
 
 // Available reports whether this preset ships an availability probe.
 func (c AgentAvailabilityProbeCapability) Available() bool {
-	return c.Command != nil && c.Command.Name != "" &&
+	return c.Kind == CapabilitySupported &&
+		c.Command != nil && c.Command.Name != "" &&
 		(c.Interpret != nil || c.ReportsAuthenticated != nil)
 }
 
@@ -239,14 +268,10 @@ func interpretClaudeAvailabilityProbe(exitCode int, output string) *AgentUnavail
 // IsAgentAvailabilityProbeCommand reports whether name/args name a probe
 // invocation rather than a headless agent attempt.
 func IsAgentAvailabilityProbeCommand(name string, args []string) bool {
-	switch name {
-	case "claude":
-		return len(args) >= 2 && args[0] == "auth" && args[1] == "status"
-	case "cursor-agent":
-		return len(args) >= 1 && args[0] == "status"
-	case "codex":
-		return len(args) >= 2 && args[0] == "login" && args[1] == "status"
-	default:
-		return false
+	for _, adapter := range agentAdapters {
+		if adapter.AvailabilityProbeCapability().matchesProbeInvocation(name, args) {
+			return true
+		}
 	}
+	return false
 }

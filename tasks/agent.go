@@ -175,6 +175,9 @@ type AgentAdapter interface {
 	TurnCapability() AgentTurnCapability
 	PeakInputCapability() AgentPeakInputCapability
 	ReasoningCapability() AgentReasoningCapability
+	QuotaResetCapability() AgentQuotaResetCapability
+	EffortLadderCapability() AgentEffortLadderCapability
+	ExecutableCapability() AgentExecutableCapability
 	AssistanceInvocation(AgentAssistanceRequest) (*AgentAssistanceInvocation, error)
 	// Models returns the preset's curated, recommended-first model aliases that
 	// Pop ships for display. Advisory only; never a validation gate (ADR-0019).
@@ -190,10 +193,21 @@ var agentAdapters = map[string]AgentAdapter{
 		autoArgs:       []string{"--output-format", "stream-json", "--verbose"},
 		assistance:     AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "claude"}},
 		availability: AgentAvailabilityProbeCapability{
+			Kind:                 CapabilitySupported,
 			Command:              &AgentCommand{Name: "claude", Args: []string{"auth", "status"}},
 			Interpret:            interpretClaudeAvailabilityProbe,
 			ReportsAuthenticated: reportsClaudeAuthenticated,
 		},
+		quotaReset: AgentQuotaResetCapability{Kind: CapabilitySupported, ResetAt: claudeQuotaResetAt},
+		effortLadder: AgentEffortLadderCapability{
+			Kind: CapabilitySupported,
+			Ladder: map[string][]config.EffortModel{
+				"heavy":    {{Model: "opus", Reasoning: "high"}},
+				"standard": {{Model: "sonnet", Reasoning: "high"}},
+				"light":    {{Model: "haiku", Reasoning: "high"}},
+			},
+		},
+		executable: AgentExecutableCapability{Kind: CapabilitySupported, Name: "claude"},
 		usage:       AgentUsageCapability{Kind: CapabilitySupported, Extract: claudeTokenUsage},
 		cost:        AgentCostCapability{Kind: CapabilityBlind, Reason: "claude reports token usage but no dollar cost"},
 		toolTimings: AgentToolTimingCapability{Kind: CapabilitySupported, Extract: claudeToolTimings},
@@ -214,6 +228,16 @@ var agentAdapters = map[string]AgentAdapter{
 		autoFormat:     AgentOutputOpenCodeJSON,
 		autoArgs:       []string{"--format", "json"},
 		assistance:     AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "opencode"}},
+		availability: AgentAvailabilityProbeCapability{
+			Kind:   CapabilityBlind,
+			Reason: "opencode ships no read-only auth status command",
+		},
+		quotaReset: AgentQuotaResetCapability{Kind: CapabilitySupported, ResetAt: piQuotaResetAt},
+		effortLadder: AgentEffortLadderCapability{
+			Kind:   CapabilityBlind,
+			Reason: "opencode has no built-in effort ladder",
+		},
+		executable:     AgentExecutableCapability{Kind: CapabilitySupported, Name: "opencode"},
 		usage:          AgentUsageCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no usage block"},
 		cost:           AgentCostCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no dollar cost"},
 		toolTimings:    AgentToolTimingCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no tool-use/tool-result pairing"},
@@ -232,10 +256,25 @@ var agentAdapters = map[string]AgentAdapter{
 		autoArgs:       []string{"--output-format", "stream-json"},
 		assistance:     AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "cursor-agent"}},
 		availability: AgentAvailabilityProbeCapability{
+			Kind:                 CapabilitySupported,
 			Command:              &AgentCommand{Name: "cursor-agent", Args: []string{"status", "--format", "json"}},
+			IdentifyingArgs:        []string{"status"},
 			Interpret:            interpretCursorAvailabilityProbe,
 			ReportsAuthenticated: reportsCursorAuthenticated,
 		},
+		quotaReset: AgentQuotaResetCapability{
+			Kind:   CapabilityBlind,
+			Reason: "cursor quota diagnostics carry no parseable reset time",
+		},
+		effortLadder: AgentEffortLadderCapability{
+			Kind: CapabilitySupported,
+			Ladder: map[string][]config.EffortModel{
+				"heavy":    {{Model: "composer-2.5"}},
+				"standard": {{Model: "composer-2.5"}},
+				"light":    {{Model: "composer-2.5-fast"}},
+			},
+		},
+		executable:             AgentExecutableCapability{Kind: CapabilitySupported, Name: "cursor-agent"},
 		usage:                  AgentUsageCapability{Kind: CapabilitySupported, Extract: cursorTokenUsage},
 		cost:                   AgentCostCapability{Kind: CapabilityBlind, Reason: "cursor reports token usage but no dollar cost"},
 		toolTimings:            AgentToolTimingCapability{Kind: CapabilityBlind, Reason: "cursor stream-json events carry no paired tool invocation boundaries"},
@@ -258,9 +297,20 @@ var agentAdapters = map[string]AgentAdapter{
 		autoArgs:       []string{"--json"},
 		assistance:     AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "codex"}},
 		availability: AgentAvailabilityProbeCapability{
+			Kind:                 CapabilitySupported,
 			Command:              &AgentCommand{Name: "codex", Args: []string{"login", "status"}},
 			ReportsAuthenticated: reportsCodexAuthenticated,
 		},
+		quotaReset: AgentQuotaResetCapability{Kind: CapabilitySupported, ResetAt: codexQuotaResetAt},
+		effortLadder: AgentEffortLadderCapability{
+			Kind: CapabilitySupported,
+			Ladder: map[string][]config.EffortModel{
+				"heavy":    {{Model: "gpt-5.5", Reasoning: "high"}},
+				"standard": {{Model: "gpt-5.5", Reasoning: "medium"}},
+				"light":    {{Model: "gpt-5.4-mini", Reasoning: "low"}},
+			},
+		},
+		executable:             AgentExecutableCapability{Kind: CapabilitySupported, Name: "codex"},
 		usage:                  AgentUsageCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no usage block"},
 		cost:                   AgentCostCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no dollar cost"},
 		toolTimings:            AgentToolTimingCapability{Kind: CapabilitySupported, Extract: codexToolTimings},
@@ -282,6 +332,20 @@ var agentAdapters = map[string]AgentAdapter{
 		autoFormat:     AgentOutputPiJSONL,
 		autoArgs:       []string{"--mode", "json"},
 		assistance:     AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "pi"}},
+		availability: AgentAvailabilityProbeCapability{
+			Kind:   CapabilityBlind,
+			Reason: "pi ships no read-only auth status command",
+		},
+		quotaReset: AgentQuotaResetCapability{Kind: CapabilitySupported, ResetAt: piQuotaResetAt},
+		effortLadder: AgentEffortLadderCapability{
+			Kind: CapabilitySupported,
+			Ladder: map[string][]config.EffortModel{
+				"heavy":    {{Model: "opencode-go/qwen3.7-max", Reasoning: "high"}},
+				"standard": {{Model: "opencode-go/kimi-k2.6", Reasoning: "medium"}},
+				"light":    {{Model: "opencode-go/deepseek-v4-flash", Reasoning: "low"}},
+			},
+		},
+		executable:     AgentExecutableCapability{Kind: CapabilitySupported, Name: "pi"},
 		usage:          AgentUsageCapability{Kind: CapabilitySupported, Extract: piTokenUsage},
 		cost:           AgentCostCapability{Kind: CapabilitySupported, Extract: piPartialCost},
 		toolTimings:    AgentToolTimingCapability{Kind: CapabilityBlind, Reason: "pi jsonl events carry no paired tool invocation boundaries"},
@@ -307,6 +371,20 @@ var agentAdapters = map[string]AgentAdapter{
 		autoArgs:        []string{"--output-format", "stream-json"},
 		env:             []string{"KIMI_CODE_NO_AUTO_UPDATE=1"},
 		assistance:      AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "kimi"}},
+		availability: AgentAvailabilityProbeCapability{
+			Kind:   CapabilityBlind,
+			Reason: "kimi ships no read-only auth status command",
+		},
+		quotaReset: AgentQuotaResetCapability{Kind: CapabilitySupported, ResetAt: kimiQuotaResetAt},
+		effortLadder: AgentEffortLadderCapability{
+			Kind: CapabilitySupported,
+			Ladder: map[string][]config.EffortModel{
+				"heavy":    {{Model: "moonshot-ai/kimi-k3", Reasoning: "high"}},
+				"standard": {{Model: "moonshot-ai/kimi-k3", Reasoning: "low"}},
+				"light":    {{Model: "moonshot-ai/kimi-k2.7-code-highspeed"}},
+			},
+		},
+		executable:      AgentExecutableCapability{Kind: CapabilitySupported, Name: "kimi"},
 		usage:           AgentUsageCapability{Kind: CapabilityBlind, Reason: "kimi stream usage has not been verified against a captured run"},
 		cost:            AgentCostCapability{Kind: CapabilityBlind, Reason: "kimi stream cost has not been verified against a captured run"},
 		toolTimings:     AgentToolTimingCapability{Kind: CapabilityBlind, Reason: "kimi stream tool timings have not been verified against a captured run"},
@@ -323,49 +401,6 @@ var agentAdapters = map[string]AgentAdapter{
 		models:          []string{"moonshot-ai/kimi-k3", "moonshot-ai/kimi-k2.7-code", "moonshot-ai/kimi-k2.7-code-highspeed"},
 		modelsInstallDependent: true,
 	}),
-}
-
-var claudeEffortModels = map[string][]config.EffortModel{
-	"heavy":    {{Model: "opus", Reasoning: "high"}},
-	"standard": {{Model: "sonnet", Reasoning: "high"}},
-	"light":    {{Model: "haiku", Reasoning: "high"}},
-}
-
-var codexEffortModels = map[string][]config.EffortModel{
-	"heavy":    {{Model: "gpt-5.5", Reasoning: "high"}},
-	"standard": {{Model: "gpt-5.5", Reasoning: "medium"}},
-	"light":    {{Model: "gpt-5.4-mini", Reasoning: "low"}},
-}
-
-var cursorEffortModels = map[string][]config.EffortModel{
-	"heavy":    {{Model: "composer-2.5"}},
-	"standard": {{Model: "composer-2.5"}},
-	"light":    {{Model: "composer-2.5-fast"}},
-}
-
-var piEffortModels = map[string][]config.EffortModel{
-	"heavy":    {{Model: "opencode-go/qwen3.7-max", Reasoning: "high"}},
-	"standard": {{Model: "opencode-go/kimi-k2.6", Reasoning: "medium"}},
-	"light":    {{Model: "opencode-go/deepseek-v4-flash", Reasoning: "low"}},
-}
-
-// kimi resolves --model by exact provider-config key, so these are the
-// standard-login `moonshot-ai/` alias names; an install that names them
-// differently overrides the tier wholesale through [effort.kimi] (ADR-0164).
-// Reasoning levels here are only ones k3 declares — the env channel bypasses
-// kimi's own validation, so an unsupported level would be a server 400.
-var kimiEffortModels = map[string][]config.EffortModel{
-	"heavy":    {{Model: "moonshot-ai/kimi-k3", Reasoning: "high"}},
-	"standard": {{Model: "moonshot-ai/kimi-k3", Reasoning: "low"}},
-	"light":    {{Model: "moonshot-ai/kimi-k2.7-code-highspeed"}},
-}
-
-var builtInEffortModels = map[string]map[string][]config.EffortModel{
-	"claude": claudeEffortModels,
-	"codex":  codexEffortModels,
-	"cursor": cursorEffortModels,
-	"pi":     piEffortModels,
-	"kimi":   kimiEffortModels,
 }
 
 // agentPromptDelivery names where a preset's generated prompt rides in the
@@ -402,6 +437,9 @@ type presetAgentSpec struct {
 	turns           AgentTurnCapability
 	peakInput       AgentPeakInputCapability
 	reasoning       AgentReasoningCapability
+	quotaReset      AgentQuotaResetCapability
+	effortLadder    AgentEffortLadderCapability
+	executable      AgentExecutableCapability
 	models          []string
 	// modelsInstallDependent marks a curated list whose aliases are resolved by
 	// the local install's own provider config rather than being stable,
@@ -545,6 +583,18 @@ func (a *presetAgentAdapter) ReasoningCapability() AgentReasoningCapability {
 	return a.reasoning
 }
 
+func (a *presetAgentAdapter) QuotaResetCapability() AgentQuotaResetCapability {
+	return a.quotaReset
+}
+
+func (a *presetAgentAdapter) EffortLadderCapability() AgentEffortLadderCapability {
+	return a.effortLadder
+}
+
+func (a *presetAgentAdapter) ExecutableCapability() AgentExecutableCapability {
+	return a.executable
+}
+
 func (a *presetAgentAdapter) Models() []string {
 	return append([]string{}, a.models...)
 }
@@ -603,7 +653,7 @@ func (a customAgentAdapter) AssistanceCapability() AgentAssistanceCapability {
 }
 
 func (a customAgentAdapter) AvailabilityProbeCapability() AgentAvailabilityProbeCapability {
-	return AgentAvailabilityProbeCapability{}
+	return AgentAvailabilityProbeCapability{Kind: CapabilityBlind, Reason: "custom agent commands ship no availability probe"}
 }
 
 func (a customAgentAdapter) UsageCapability() AgentUsageCapability {
@@ -638,6 +688,18 @@ func (a customAgentAdapter) ReasoningCapability() AgentReasoningCapability {
 	return AgentReasoningCapability{Kind: CapabilityBlind, Reason: "custom agent commands carry no reasoning parameter"}
 }
 
+func (a customAgentAdapter) QuotaResetCapability() AgentQuotaResetCapability {
+	return AgentQuotaResetCapability{Kind: CapabilityBlind, Reason: "custom agent commands carry no quota reset parsing"}
+}
+
+func (a customAgentAdapter) EffortLadderCapability() AgentEffortLadderCapability {
+	return AgentEffortLadderCapability{Kind: CapabilityBlind, Reason: "custom agent commands carry no effort ladder"}
+}
+
+func (a customAgentAdapter) ExecutableCapability() AgentExecutableCapability {
+	return AgentExecutableCapability{Kind: CapabilityBlind, Reason: "custom agent commands have no preset executable name"}
+}
+
 func (a customAgentAdapter) AssistanceInvocation(req AgentAssistanceRequest) (*AgentAssistanceInvocation, error) {
 	return nil, fmt.Errorf("custom agent adapter does not support attended assistance")
 }
@@ -656,11 +718,17 @@ func cloneAssistanceCapability(capability AgentAssistanceCapability) AgentAssist
 
 func cloneAvailabilityProbeCapability(capability AgentAvailabilityProbeCapability) AgentAvailabilityProbeCapability {
 	if capability.Command == nil {
+		if len(capability.IdentifyingArgs) > 0 {
+			capability.IdentifyingArgs = append([]string{}, capability.IdentifyingArgs...)
+		}
 		return capability
 	}
 	clone := *capability.Command
 	clone.Args = append([]string{}, capability.Command.Args...)
 	capability.Command = &clone
+	if len(capability.IdentifyingArgs) > 0 {
+		capability.IdentifyingArgs = append([]string{}, capability.IdentifyingArgs...)
+	}
 	return capability
 }
 
@@ -897,10 +965,11 @@ func effortModelsForAgent(cfg *config.Config, agent, effort string) []config.Eff
 			return effortModelsForTier(ladder, effort)
 		}
 	}
-	if ladder, ok := builtInEffortModels[agent]; ok {
-		return ladder[effort]
+	adapter, err := ResolveAgentAdapter(agent)
+	if err != nil {
+		return nil
 	}
-	return nil
+	return adapter.EffortLadderCapability().modelsForTier(effort)
 }
 
 func effortModelsForTier(ladder config.EffortConfig, effort string) []config.EffortModel {

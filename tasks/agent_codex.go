@@ -89,18 +89,11 @@ func codexQuotaResetAt(reason string, now time.Time) time.Time {
 }
 
 func agentQuotaResetAt(preset, reason string, now time.Time) time.Time {
-	switch preset {
-	case "codex":
-		return codexQuotaResetAt(reason, now)
-	case "claude":
-		return claudeQuotaResetAt(reason, now)
-	case "opencode", "pi":
-		return piQuotaResetAt(reason, now)
-	case "kimi":
-		return kimiQuotaResetAt(reason, now)
-	default:
+	adapter, err := ResolveAgentAdapter(preset)
+	if err != nil {
 		return time.Time{}
 	}
+	return adapter.QuotaResetCapability().resetAt(reason, now)
 }
 
 // codexLineRenderer renders codex-jsonl Thread Events live: assistant prose is
