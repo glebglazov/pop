@@ -248,10 +248,11 @@ Semantics:
   once per bare repo). Against the *default* (no keywords), a skill retries as
   plain and warns instead of forwarding the refusal; against an *explicit*
   `managed`/`isolated`, the refusal is reported as-is.
-- `--auto-drain` lets the Queue daemon drain the set unattended. Only the literal
-  keywords enable it — there is no "here and now" phrasing. It is never applied
-  without `--managed`: draining unattended in the current checkout, with no
-  isolation, is not a reachable combination.
+- `--auto-drain` lets the Queue daemon drain the set unattended. It applies by
+  default alongside `--managed`; typing it explicitly agrees with the default
+  and changes nothing on its own. It is never applied without `--managed`:
+  draining unattended in the current checkout, with no isolation, is not a
+  reachable combination.
 - `pop tasks register --managed --auto-drain <task-set-name>` is the default —
   the safest unattended combo (isolated worktree, drained unattended) — not an
   opt-in.
