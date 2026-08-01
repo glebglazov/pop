@@ -145,19 +145,25 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 				break
 			}
 			refused := stampDetectedVerdict(*agentResult.ProceedVerdict, invocation.AgentPreset(), invocation.PinnedModel())
-			persist(outcome.stream, attempt, streamOutcomeAgentUnusable, refused.Reason, outcome.exitCode)
 			stop, err := walk.retire(refused)
 			if err != nil {
 				return nil, taskExitErr(sel, ExitOperational, "%v", err)
 			}
+			// The run is persisted as what the verdict finally condemned: a skip
+			// when another tier entry takes over, an unusable agent when the
+			// escalation hands the whole preset on.
 			if stop != nil {
+				persist(outcome.stream, attempt, streamOutcomeAgentUnusable, refused.Reason, outcome.exitCode)
 				escalated = stop
 				break
+			}
+			if p := persistSkippedAttemptStream(d, errOut, sel, outcome.stream, entry.AgentPreset(), entry.RequestedAgent, refused.Model, attempt, refused.Reason, outcome.exitCode); p != "" {
+				streamPaths = append(streamPaths, p)
 			}
 			// The verdict is spent here — this attempt starts over on the tier's
 			// next entry, and nothing downstream should see it.
 			agentResult = AgentResult{}
-			display.line(ansiDim, "   %s", refused.fallThroughMessage("Agent"))
+			display.line(ansiDim, "   %s", refused.effortModelSkipMessage("Agent", walk.nextModel()))
 		}
 		if escalated != nil {
 			return proceedVerdictResult(sel, *escalated), nil

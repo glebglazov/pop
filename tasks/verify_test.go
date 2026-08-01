@@ -1341,7 +1341,7 @@ func TestRunConfiguredVerifierWalksTheEffortTierOnAModelRefusal(t *testing.T) {
 	if runner.calls != 2 {
 		t.Fatalf("headless calls = %d, want 2 (refused model then its tier successor)", runner.calls)
 	}
-	if !strings.Contains(out.String(), "Verifier agent kimi cannot run moonshot-ai/kimi-k2.7-code-highspeed; trying the next model in its effort tier") {
+	if !strings.Contains(out.String(), "Verifier agent kimi cannot run moonshot-ai/kimi-k2.7-code-highspeed; trying moonshot-ai/kimi-k3 instead") {
 		t.Fatalf("missing in-tier fall-through line:\n%s", out.String())
 	}
 
@@ -1351,6 +1351,24 @@ func TestRunConfiguredVerifierWalksTheEffortTierOnAModelRefusal(t *testing.T) {
 	}
 	if len(skips) != 1 || skips[0].Preset != "kimi" || skips[0].Model != "moonshot-ai/kimi-k2.7-code-highspeed" {
 		t.Fatalf("model skips = %#v, want only the refused entry recorded", skips)
+	}
+
+	runs, err := listSetRuns(d, taskSetDir)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	var skipped int
+	for _, run := range runs {
+		if run.meta.Outcome != streamOutcomeModelSkipped {
+			continue
+		}
+		skipped++
+		if run.meta.Model != "moonshot-ai/kimi-k2.7-code-highspeed" {
+			t.Fatalf("skipped run model = %q, want the refused entry", run.meta.Model)
+		}
+	}
+	if skipped != 1 {
+		t.Fatalf("skipped verify runs = %d, want 1:\n%#v", skipped, runs)
 	}
 
 	cooldowns, err := readAgentCooldowns(d)

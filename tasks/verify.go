@@ -836,17 +836,21 @@ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, t
 				// handling below (ADR-0168).
 				persisted := false
 				if v.Scope == ProceedScopeModel {
-					_ = persistVerifyRun(d, errOut, taskSetDir, setID, workSHA, outcome.stream, invocation.AgentPreset(), invocation.RequestedAgent, try, streamOutcomeAgentUnusable, v.Reason, exitCode, "")
 					stop, err := walk.retire(v)
 					if err != nil {
 						return "", exitErr(ExitOperational, "%v", err)
 					}
+					// The run is persisted as what the verdict finally
+					// condemned: a skip when another tier entry takes over, an
+					// unusable agent when the escalation hands the preset on.
 					if stop == nil {
+						_ = persistSkippedVerifyRun(d, errOut, taskSetDir, setID, workSHA, outcome.stream, invocation.AgentPreset(), invocation.RequestedAgent, v.Model, try, v.Reason, exitCode)
 						if out != nil {
-							outputFor(out).line(ansiDim, "   %s", v.fallThroughMessage("Verifier agent"))
+							outputFor(out).line(ansiDim, "   %s", v.effortModelSkipMessage("Verifier agent", walk.nextModel()))
 						}
 						continue
 					}
+					_ = persistVerifyRun(d, errOut, taskSetDir, setID, workSHA, outcome.stream, invocation.AgentPreset(), invocation.RequestedAgent, try, streamOutcomeAgentUnusable, v.Reason, exitCode, "")
 					v, persisted = *stop, true
 				}
 				if _, ok := v.TimeHealing(); ok {

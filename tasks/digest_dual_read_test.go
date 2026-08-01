@@ -21,7 +21,7 @@ func writeTestNewFormatRun(t *testing.T, d *Deps, taskSetDir, taskFile string, r
 		TaskFile:  taskFile,
 		Manifest:  &Manifest{Dir: taskSetDir},
 	}
-	if _, _, err := writeCapturedRun(d, taskSetDir, "implement", sel.TaskSetID, sel.TaskID, sel.TaskFile, rec, agent, requestedAgent, attempt, outcome, reason, exitCode, "", ""); err != nil {
+	if _, _, err := writeCapturedRun(d, taskSetDir, "implement", sel.TaskSetID, sel.TaskID, sel.TaskFile, rec, agent, requestedAgent, "", attempt, outcome, reason, exitCode, "", ""); err != nil {
 		t.Fatal(err)
 	}
 }

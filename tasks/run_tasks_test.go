@@ -2315,7 +2315,7 @@ func TestRunTaskSetEffortModelSkipWalksToTheTierTail(t *testing.T) {
 	if strings.Contains(out, "Attempt 2/3") {
 		t.Fatalf("an Effort model skip must not consume a try:\n%s", out)
 	}
-	if !strings.Contains(out, "Agent kimi cannot run gated-model; trying the next model in its effort tier") {
+	if !strings.Contains(out, "Agent kimi cannot run gated-model; trying runnable-model instead") {
 		t.Fatalf("missing model-skip fall-through line:\n%s", out)
 	}
 	if strings.Contains(out, "· claude") {
@@ -2335,6 +2335,25 @@ func TestRunTaskSetEffortModelSkipWalksToTheTierTail(t *testing.T) {
 	}
 	if len(skips) != 1 || skips[0].Model != "gated-model" {
 		t.Fatalf("model skips = %#v, want the gated head only", skips)
+	}
+	// The skipped spawn leaves its own trace: a run with the skip outcome,
+	// naming the model that was walked past.
+	runs, err := listTaskRuns(d, env.execFixture().demoDir(), "01-a.md")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	var skippedRuns int
+	for _, run := range runs {
+		if run.meta.Outcome != streamOutcomeModelSkipped {
+			continue
+		}
+		skippedRuns++
+		if run.meta.Model != "gated-model" {
+			t.Fatalf("skipped run model = %q, want gated-model", run.meta.Model)
+		}
+	}
+	if skippedRuns != 1 {
+		t.Fatalf("skipped runs = %d, want 1:\n%#v", skippedRuns, runs)
 	}
 	assertTaskDone(t, env.execFixture(), "01-a")
 	assertTaskDone(t, env.execFixture(), "02-b")

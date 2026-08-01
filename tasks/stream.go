@@ -35,6 +35,12 @@ const (
 	streamOutcomeInterrupted   = "interrupted"
 	streamOutcomeQuotaPaused   = "quota_paused"
 	streamOutcomeAgentUnusable = "agent_unusable"
+	// streamOutcomeModelSkipped is the terminal outcome of a run the Effort
+	// ladder walked past: the provider refused the model this run pinned, so the
+	// same attempt restarted on the tier's next entry (ADR-0168). It is neither a
+	// failure — nothing about the task was answered — nor an unusable agent, the
+	// CLI kept running fine.
+	streamOutcomeModelSkipped = "model_skipped"
 )
 
 // streamHeaderRecord opens a Captured attempt stream file.
@@ -42,6 +48,7 @@ type streamHeaderRecord struct {
 	Type           string    `json:"type"`
 	Agent          string    `json:"agent"`
 	RequestedAgent string    `json:"requested_agent,omitempty"`
+	Model          string    `json:"model,omitempty"`
 	Attempt        int       `json:"attempt"`
 	StartTime      time.Time `json:"start_time"`
 }
@@ -86,9 +93,14 @@ type capturedRunMeta struct {
 	ExitCode       int       `json:"exit_code,omitempty"`
 	Agent          string    `json:"agent"`
 	RequestedAgent string    `json:"requested_agent,omitempty"`
-	Attempt        int       `json:"attempt"`
-	WorkSHA        string    `json:"work_sha,omitempty"`
-	Verdict        string    `json:"verdict,omitempty"`
+	// Model is the model pop pinned for the invocation, recorded when the run's
+	// own events cannot name it — a refused model never gets far enough to
+	// report one, and a skipped run the timing lens could not name would read as
+	// a gap.
+	Model   string `json:"model,omitempty"`
+	Attempt int    `json:"attempt"`
+	WorkSHA string `json:"work_sha,omitempty"`
+	Verdict string `json:"verdict,omitempty"`
 }
 
 // capturedRun is an in-memory representation of one persisted run, pairing its
@@ -243,7 +255,7 @@ var attemptStreamNamePattern = regexp.MustCompile(`^attempt-(\d+)\.jsonl\.gz$`)
 // meta.json index and a matching events.jsonl.gz payload. Both files are
 // written best-effort; if the meta write fails the events file is removed so
 // an orphan payload never lacks an index.
-func writeCapturedRun(d *Deps, taskSetDir, phase, taskSetID, taskID, taskFile string, rec *streamRecorder, agent, requestedAgent string, attempt int, outcome, reason string, exitCode int, workSHA, verdict string) (string, string, error) {
+func writeCapturedRun(d *Deps, taskSetDir, phase, taskSetID, taskID, taskFile string, rec *streamRecorder, agent, requestedAgent, model string, attempt int, outcome, reason string, exitCode int, workSHA, verdict string) (string, string, error) {
 	dir := capturedRunsDir(taskSetDir)
 	if err := d.FS.MkdirAll(dir, 0o755); err != nil {
 		return "", "", err
@@ -267,6 +279,7 @@ func writeCapturedRun(d *Deps, taskSetDir, phase, taskSetID, taskID, taskFile st
 		ExitCode:       exitCode,
 		Agent:          agent,
 		RequestedAgent: requestedAgent,
+		Model:          model,
 		Attempt:        attempt,
 		WorkSHA:        workSHA,
 		Verdict:        verdict,
@@ -310,7 +323,23 @@ func persistAttemptStream(d *Deps, errOut io.Writer, sel *Selection, rec *stream
 	if rec == nil {
 		return ""
 	}
-	metaPath, _, err := writeCapturedRun(d, sel.Manifest.Dir, "implement", sel.TaskSetID, sel.TaskID, sel.TaskFile, rec, agent, requestedAgent, attempt, outcome, reason, exitCode, "", "")
+	metaPath, _, err := writeCapturedRun(d, sel.Manifest.Dir, "implement", sel.TaskSetID, sel.TaskID, sel.TaskFile, rec, agent, requestedAgent, "", attempt, outcome, reason, exitCode, "", "")
+	if err != nil {
+		fmt.Fprintf(errOut, "warning: persist attempt stream for %s/%s: %v\n", sel.TaskSetID, sel.TaskID, err)
+		return ""
+	}
+	return metaPath
+}
+
+// persistSkippedAttemptStream writes the Captured run pair for an implement
+// attempt the Effort ladder walked past (ADR-0168). It records the refused model
+// beside the skip outcome, so the run reads as "this model was skipped" rather
+// than as a nameless gap in the replay.
+func persistSkippedAttemptStream(d *Deps, errOut io.Writer, sel *Selection, rec *streamRecorder, agent, requestedAgent, model string, attempt int, reason string, exitCode int) string {
+	if rec == nil {
+		return ""
+	}
+	metaPath, _, err := writeCapturedRun(d, sel.Manifest.Dir, "implement", sel.TaskSetID, sel.TaskID, sel.TaskFile, rec, agent, requestedAgent, model, attempt, streamOutcomeModelSkipped, reason, exitCode, "", "")
 	if err != nil {
 		fmt.Fprintf(errOut, "warning: persist attempt stream for %s/%s: %v\n", sel.TaskSetID, sel.TaskID, err)
 		return ""
@@ -325,7 +354,24 @@ func persistVerifyRun(d *Deps, errOut io.Writer, taskSetDir, setID, workSHA stri
 	if rec == nil {
 		return ""
 	}
-	metaPath, _, err := writeCapturedRun(d, taskSetDir, "verify", setID, "", "", rec, agent, requestedAgent, attempt, outcome, reason, exitCode, workSHA, verdict)
+	metaPath, _, err := writeCapturedRun(d, taskSetDir, "verify", setID, "", "", rec, agent, requestedAgent, "", attempt, outcome, reason, exitCode, workSHA, verdict)
+	if err != nil {
+		if errOut != nil {
+			fmt.Fprintf(errOut, "warning: persist verify run for %s: %v\n", setID, err)
+		}
+		return ""
+	}
+	return metaPath
+}
+
+// persistSkippedVerifyRun is persistSkippedAttemptStream's verify-phase twin: a
+// Verifier invocation whose model the provider refused, recorded with the model
+// it was walked past on (ADR-0168). It renders no verdict, so none is stored.
+func persistSkippedVerifyRun(d *Deps, errOut io.Writer, taskSetDir, setID, workSHA string, rec *streamRecorder, agent, requestedAgent, model string, attempt int, reason string, exitCode int) string {
+	if rec == nil {
+		return ""
+	}
+	metaPath, _, err := writeCapturedRun(d, taskSetDir, "verify", setID, "", "", rec, agent, requestedAgent, model, attempt, streamOutcomeModelSkipped, reason, exitCode, workSHA, "")
 	if err != nil {
 		if errOut != nil {
 			fmt.Fprintf(errOut, "warning: persist verify run for %s: %v\n", setID, err)
@@ -560,6 +606,7 @@ func runToHeaderFooter(run capturedRun) (streamHeaderRecord, streamFooterRecord)
 		Type:           "header",
 		Agent:          run.meta.Agent,
 		RequestedAgent: run.meta.RequestedAgent,
+		Model:          run.meta.Model,
 		Attempt:        run.meta.Attempt,
 		StartTime:      run.meta.StartTime,
 	}

@@ -96,7 +96,10 @@ func buildPriorAttemptDigest(d *Deps, taskSetDir, taskFile string) string {
 		}
 		// Captured attempts from failed, timed-out, interrupted, and quota-
 		// paused runs all feed a retry. Completed attempts are intentionally
-		// excluded: they have no lesson to teach (ADR 0040/ADR 0089).
+		// excluded: they have no lesson to teach (ADR 0040/ADR 0089). So is a
+		// model-skipped run: the provider refused the model before the agent
+		// said anything about the task, so carrying it forward would teach the
+		// next attempt a lesson about a failure that never happened (ADR-0168).
 		if run.meta.Outcome != streamOutcomeFailed && run.meta.Outcome != streamOutcomeTimedOut &&
 			run.meta.Outcome != streamOutcomeInterrupted && run.meta.Outcome != streamOutcomeQuotaPaused &&
 			run.meta.Outcome != streamOutcomeAgentUnusable {

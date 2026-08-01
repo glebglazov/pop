@@ -394,7 +394,12 @@ func deriveAttemptTiming(header streamHeaderRecord, footer streamFooterRecord, e
 	if requestedAgent == "" {
 		requestedAgent = header.Agent
 	}
+	// A run that never reached the model — a refusal the Effort ladder skipped —
+	// reports none in its events, so the model the header recorded stands in.
 	actualModel := extractActualModel(header.Agent, events)
+	if actualModel == "" {
+		actualModel = header.Model
+	}
 	tools, windows := extractToolTimings(header.Agent, events)
 	var model time.Duration
 	if len(tools) > 0 {

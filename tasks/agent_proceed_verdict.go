@@ -237,6 +237,19 @@ func (v AgentProceedVerdict) fallThroughMessage(role string) string {
 	}
 }
 
+// effortModelSkipMessage is the dim line printed when the orchestrator walks
+// past one Effort tier entry onto the next inside the same preset: it names the
+// model skipped and the model taking over, so the human reads the substitution
+// rather than a gap. A walk that cannot name its successor falls back to the
+// generic model-scoped phrasing.
+func (v AgentProceedVerdict) effortModelSkipMessage(role, next string) string {
+	next = strings.TrimSpace(next)
+	if next == "" {
+		return v.fallThroughMessage(role)
+	}
+	return fmt.Sprintf("%s %s cannot run %s; trying %s instead", role, v.Preset, v.modelOrPlaceholder(), next)
+}
+
 // modelOrPlaceholder names the model a verdict is about, standing in a phrase
 // for the invocation that pinned none.
 func (v AgentProceedVerdict) modelOrPlaceholder() string {

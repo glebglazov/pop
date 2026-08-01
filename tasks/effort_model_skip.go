@@ -175,6 +175,13 @@ func (w *effortModelWalk) builder() (func(prompt string) (*AgentInvocation, erro
 	return build, nil, nil
 }
 
+// nextModel names the ladder token the tier would resolve now, for the line the
+// orchestrator prints after retiring an entry. Empty when nothing survives or no
+// ladder resolved a model.
+func (w *effortModelWalk) nextModel() string {
+	return w.resolve(w.baseSpec, w.skips).Model
+}
+
 // retire records the entry a model-scoped verdict condemns as a durable Effort
 // model skip, so this task's next resolution and every later run filter it out.
 // It reports the preset-scoped escalation when that leaves the tier with nothing
