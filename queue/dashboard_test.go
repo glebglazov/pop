@@ -3173,17 +3173,17 @@ func TestDetailTaskMenuOpenVerb(t *testing.T) {
 func TestDetailTaskMenuSkipVerb(t *testing.T) {
 	row := DashboardRow{SetRef: SetRef{SetID: "set-z", DefPath: "/def"}}
 
-	// Skip on open task: menu offers K.
+	// Skip on open task: menu offers s.
 	openTask := tasks.Task{ID: "04-d", File: "04-d.md", Status: "open"}
 	m, _, _, skipCalls := detailOverrideModel(row, openTask, nil, nil, nil)
 	m = openTaskMenu(t, m)
-	if got := taskMenuItemKeys(m.taskMenu); !slices.Contains(got, "k") {
-		t.Fatalf("open task menu = %v, want to contain K", got)
+	if got := taskMenuItemKeys(m.taskMenu); !slices.Contains(got, "s") {
+		t.Fatalf("open task menu = %v, want to contain s", got)
 	}
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
 	got := updated.(QueueDashboard)
 	if cmd == nil {
-		t.Fatal("K on open: expected a command")
+		t.Fatal("s on open: expected a command")
 	}
 	msg := cmd()
 	if *skipCalls != 1 {
@@ -3192,23 +3192,135 @@ func TestDetailTaskMenuSkipVerb(t *testing.T) {
 	updated, _ = got.Update(msg)
 	got = updated.(QueueDashboard)
 	if !strings.Contains(got.detail.statusMsg, "skip") {
-		t.Fatalf("K confirmation = %q, want 'skip'", got.detail.statusMsg)
+		t.Fatalf("s confirmation = %q, want 'skip'", got.detail.statusMsg)
 	}
 
 	// Skip is NOT offered for a failed task (requires open).
 	failedTask := tasks.Task{ID: "04-d", File: "04-d.md", Status: "failed"}
 	m2, _, _, skipCalls2 := detailOverrideModel(row, failedTask, nil, nil, nil)
 	m2 = openTaskMenu(t, m2)
-	if got := taskMenuItemKeys(m2.taskMenu); slices.Contains(got, "k") {
-		t.Fatalf("failed task menu = %v, want NOT to contain K", got)
+	if got := taskMenuItemKeys(m2.taskMenu); slices.Contains(got, "s") {
+		t.Fatalf("failed task menu = %v, want NOT to contain s", got)
 	}
-	_, cmd2 := m2.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	_, cmd2 := m2.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
 	if cmd2 != nil {
-		t.Fatal("K on failed: expected no command")
+		t.Fatal("s on failed: expected no command")
 	}
 	if *skipCalls2 != 0 {
-		t.Fatalf("K on failed: skipCalls = %d, want 0", *skipCalls2)
+		t.Fatalf("s on failed: skipCalls = %d, want 0", *skipCalls2)
 	}
+}
+
+// TestTaskMenuKMovesCursor pins j/k as movement-only in the task menu: `k` must
+// move the highlight rather than fire a verb.
+func TestTaskMenuKMovesCursor(t *testing.T) {
+	row := DashboardRow{SetRef: SetRef{SetID: "set-move", DefPath: "/def"}}
+	openTask := tasks.Task{ID: "01-a", File: "01-a.md", Status: "open"}
+	m, completeCalls, resetCalls, skipCalls := detailOverrideModel(row, openTask, nil, nil, nil)
+	m = openTaskMenu(t, m)
+	before := m.taskMenu.list.Cursor()
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	got := updated.(QueueDashboard)
+	if cmd != nil {
+		t.Fatal("k in task menu: expected no command")
+	}
+	if got.taskMenu == nil {
+		t.Fatal("k in task menu: menu should stay open")
+	}
+	if got.taskMenu.list.Cursor() == before {
+		t.Fatalf("k in task menu: cursor did not move from %d", before)
+	}
+	if *completeCalls != 0 || *resetCalls != 0 || *skipCalls != 0 {
+		t.Fatal("k in task menu should not change any task status")
+	}
+
+	updated, _ = got.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	got = updated.(QueueDashboard)
+	if got.taskMenu.list.Cursor() != before {
+		t.Fatalf("j should return the cursor to %d, got %d", before, got.taskMenu.list.Cursor())
+	}
+}
+
+// TestStatusSubmenuKMovesCursor pins j/k as movement-only in the status submenu.
+func TestStatusSubmenuKMovesCursor(t *testing.T) {
+	row := DashboardRow{SetRef: SetRef{SetID: "demo"}}
+	m := newQueueDashboard(nil, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m.menu = newDashboardMenu(row, false)
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+	got := updated.(QueueDashboard)
+	if got.menu == nil || got.menu.status == nil {
+		t.Fatal("s should open status submenu")
+	}
+	before := got.menu.status.list.Cursor()
+
+	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	got = updated.(QueueDashboard)
+	if cmd != nil {
+		t.Fatal("k in status submenu: expected no command (no status verb)")
+	}
+	if got.menu == nil || got.menu.status == nil {
+		t.Fatal("k in status submenu: submenu should stay open")
+	}
+	if got.menu.status.list.Cursor() == before {
+		t.Fatalf("k in status submenu: cursor did not move from %d", before)
+	}
+
+	updated, _ = got.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	got = updated.(QueueDashboard)
+	if got.menu.status.list.Cursor() != before {
+		t.Fatalf("j should return the cursor to %d, got %d", before, got.menu.status.list.Cursor())
+	}
+}
+
+// TestDashboardMenusReserveMovementKeys keeps j/k/J/K movement-only: no menu
+// item in any dashboard table may bind them, so a new verb cannot shadow
+// navigation.
+func TestDashboardMenusReserveMovementKeys(t *testing.T) {
+	reserved := []string{"j", "k", "J", "K"}
+	check := func(table string, keys []string) {
+		t.Helper()
+		for _, key := range keys {
+			if slices.Contains(reserved, key) {
+				t.Errorf("%s binds reserved movement key %q", table, key)
+			}
+		}
+	}
+
+	rows := []DashboardRow{
+		{SetRef: SetRef{SetID: "plain"}},
+		{SetRef: SetRef{SetID: "bound", Bound: true, RawStatus: tasks.StatusNeedsVerify}},
+		{SetRef: SetRef{SetID: "parked", Parked: true, Orphaned: true}},
+		{SetRef: SetRef{SetID: "map"}, IsMap: true},
+	}
+	for _, row := range rows {
+		var keys []string
+		for _, item := range dashboardMenuItems(row) {
+			keys = append(keys, item.key)
+		}
+		check("action menu ("+row.SetID+")", keys)
+	}
+
+	var statusKeys []string
+	for _, item := range dashboardStatusMenuItems() {
+		statusKeys = append(statusKeys, item.key)
+	}
+	check("status submenu", statusKeys)
+
+	for _, status := range []tasks.TaskStatus{tasks.TaskOpen, tasks.TaskDone, "failed", "skipped"} {
+		var keys []string
+		for _, item := range taskMenuItems(tasks.Task{ID: "01-a", File: "01-a.md", Status: status}) {
+			keys = append(keys, item.key)
+		}
+		check("task menu ("+string(status)+")", keys)
+	}
+
+	var filterKeys []string
+	for _, item := range dashboardFilterItems() {
+		filterKeys = append(filterKeys, item.key)
+	}
+	check("filter menu", filterKeys)
 }
 
 // TestDetailTaskMenuDispatchViaEnter exercises j/k highlight + Enter dispatch.
@@ -3354,7 +3466,7 @@ func TestPeekTaskMenuRendersOverlay(t *testing.T) {
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
 	out := got.View().Content
-	for _, want := range []string{"actions", "c  complete", "k  skip"} {
+	for _, want := range []string{"actions", "c  complete", "s  skip"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("rendered peek menu missing %q:\n%s", want, out)
 		}
@@ -3421,7 +3533,7 @@ func TestDetailTaskMenuRendersOverlay(t *testing.T) {
 			t.Fatalf("rendered detail menu missing %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "k  skip") {
+	if strings.Contains(out, "s  skip") {
 		t.Fatalf("failed task menu should not offer skip:\n%s", out)
 	}
 }
@@ -3756,8 +3868,8 @@ func TestQueueDashboardHelpContent(t *testing.T) {
 		if !found["o"] {
 			t.Error("task menu help missing 'o' (open)")
 		}
-		if !found["k"] {
-			t.Error("task menu help missing 'k' (skip)")
+		if !found["s"] {
+			t.Error("task menu help missing 's' (skip)")
 		}
 	})
 

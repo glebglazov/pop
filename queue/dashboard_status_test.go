@@ -37,7 +37,7 @@ func TestDashboardActionMenuStatusAndAssistKeys(t *testing.T) {
 }
 
 func TestDashboardStatusSubmenuItems(t *testing.T) {
-	want := []string{"c", "o", "k", "x", "u"}
+	want := []string{"c", "o", "s", "x", "u"}
 	var got []string
 	for _, item := range dashboardStatusMenuItems() {
 		got = append(got, item.key)
@@ -103,7 +103,7 @@ func TestDashboardStatusSubmenuHelp(t *testing.T) {
 	for _, e := range entries {
 		found[e.Key] = true
 	}
-	for _, key := range []string{"c", "o", "k", "x", "u", "esc"} {
+	for _, key := range []string{"c", "o", "s", "x", "u", "esc"} {
 		if !found[key] {
 			t.Errorf("status submenu help missing %q", key)
 		}

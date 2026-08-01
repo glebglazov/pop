@@ -408,7 +408,7 @@ func dashboardStatusMenuItems() []dashboardStatusMenuItem {
 	return []dashboardStatusMenuItem{
 		{key: "c", label: "complete", action: statusActionComplete, verb: "complete"},
 		{key: "o", label: "open", action: statusActionOpen, verb: "open"},
-		{key: "k", label: "skip", action: statusActionSkip, verb: "skip"},
+		{key: "s", label: "skip", action: statusActionSkip, verb: "skip"},
 		{key: "x", label: "archive", action: statusActionArchive, verb: "archive"},
 		{key: "u", label: "unarchive", action: statusActionUnarchive, verb: "unarchive"},
 	}
@@ -623,7 +623,7 @@ func taskMenuItems(task tasks.Task) []taskMenuItem {
 		items = append(items, taskMenuItem{key: "o", label: "open", action: taskActionOpen})
 	}
 	if task.Status == tasks.TaskOpen {
-		items = append(items, taskMenuItem{key: "k", label: "skip", action: taskActionSkip})
+		items = append(items, taskMenuItem{key: "s", label: "skip", action: taskActionSkip})
 	}
 	items = append(items, taskMenuItem{key: "y", label: "copy name", action: taskActionCopyName})
 	return items
@@ -1416,15 +1416,11 @@ func (m QueueDashboard) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // updateStatusMenu drives the nested status submenu: esc returns to the action
 // menu, j/k move the highlight, Enter runs the highlighted verb, and any
-// matching verb letter runs that verb directly.
+// matching verb letter runs that verb directly. Navigation is resolved before
+// verb letters so a hotkey can never shadow movement.
 func (m QueueDashboard) updateStatusMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.menu == nil || m.menu.status == nil {
 		return m, nil
-	}
-	for i, item := range m.menu.status.list.Items() {
-		if msg.String() == item.key {
-			return m.invokeStatusMenuItem(i)
-		}
 	}
 	switch msg.String() {
 	case "esc", "ctrl+c":
@@ -1438,6 +1434,11 @@ func (m QueueDashboard) updateStatusMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "enter":
 		return m.invokeStatusMenuItem(m.menu.status.list.Cursor())
+	}
+	for i, item := range m.menu.status.list.Items() {
+		if msg.String() == item.key {
+			return m.invokeStatusMenuItem(i)
+		}
 	}
 	return m, nil
 }
@@ -1821,14 +1822,11 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // updateTaskMenu drives the task-level action overlay: esc/ctrl+c close it, j/k
 // move the highlight, Enter runs the highlighted verb, and any matching verb
 // letter runs that verb directly. Non-matching keys are inert while open.
+// Navigation is resolved before verb letters so a hotkey can never shadow
+// movement.
 func (m QueueDashboard) updateTaskMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.taskMenu == nil {
 		return m, nil
-	}
-	for i, item := range m.taskMenu.list.Items() {
-		if msg.String() == item.key {
-			return m.invokeTaskMenuItem(i)
-		}
 	}
 	switch msg.String() {
 	case "esc", "ctrl+c":
@@ -1842,6 +1840,11 @@ func (m QueueDashboard) updateTaskMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "enter":
 		return m.invokeTaskMenuItem(m.taskMenu.list.Cursor())
+	}
+	for i, item := range m.taskMenu.list.Items() {
+		if msg.String() == item.key {
+			return m.invokeTaskMenuItem(i)
+		}
 	}
 	return m, nil
 }
@@ -2546,7 +2549,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 		return []ui.HelpEntry{
 			{Key: "c", Desc: "complete task"},
 			{Key: "o", Desc: "open/reopen task"},
-			{Key: "k", Desc: "skip task"},
+			{Key: "s", Desc: "skip task"},
 			{Key: "y", Desc: "copy name"},
 			{Key: "j/k", Desc: "navigate"},
 			{Key: "enter", Desc: "run action"},
@@ -2556,7 +2559,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 		return []ui.HelpEntry{
 			{Key: "c", Desc: "complete"},
 			{Key: "o", Desc: "open (reopen)"},
-			{Key: "k", Desc: "skip"},
+			{Key: "s", Desc: "skip"},
 			{Key: "x", Desc: "archive"},
 			{Key: "u", Desc: "unarchive"},
 			{Key: "j/k", Desc: "navigate"},
