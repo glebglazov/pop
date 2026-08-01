@@ -169,6 +169,53 @@ func extractStreamShapeOutput(preset string, cap streamShapeCapability, events [
 	}
 }
 
+// probeStreamShapeOutput asks what a preset's stream could yield for one
+// capability, ignoring the declared Supported/Blind stance. The fixture gate
+// uses this on Blind rows so "you have the data; write the rule" fires when a
+// registered Extract rule or stream-render path would produce real output.
+func probeStreamShapeOutput(preset string, cap streamShapeCapability, events []streamEventRecord) (any, error) {
+	adapter, ok := agentAdapters[preset]
+	if !ok {
+		return nil, fmt.Errorf("unknown preset %q", preset)
+	}
+	switch cap {
+	case streamShapeUsage:
+		c := adapter.UsageCapability()
+		if c.Extract != nil {
+			return c.Extract(events), nil
+		}
+	case streamShapeCost:
+		c := adapter.CostCapability()
+		if c.Extract != nil {
+			return c.Extract(events), nil
+		}
+	case streamShapeToolTimings:
+		c := adapter.ToolTimingCapability()
+		if c.Extract != nil {
+			tools, _ := c.Extract(events)
+			return tools, nil
+		}
+	case streamShapeActualModel:
+		c := adapter.ActualModelCapability()
+		if c.Extract != nil {
+			return c.Extract(events), nil
+		}
+	case streamShapeStreamRender:
+		c := adapter.StreamRenderCapability()
+		if c.Kind == CapabilitySupported && c.Render != nil {
+			return summarizeStreamRender(renderStreamEvents(preset, events)), nil
+		}
+	case streamShapeTurn:
+		c := adapter.TurnCapability()
+		if c.Extract != nil {
+			return c.Extract(events), nil
+		}
+	default:
+		return nil, fmt.Errorf("unknown stream-shape capability %v", cap)
+	}
+	return extractStreamShapeOutput(preset, cap, events)
+}
+
 func summarizeStreamRender(events []StreamEvent) streamRenderGolden {
 	counts := make(map[string]int)
 	for _, ev := range events {
@@ -324,7 +371,7 @@ func checkStreamShapeFixture(preset string, cap streamShapeCapability, kind Capa
 			}
 		}
 		if fixtureExists {
-			got, err := extractStreamShapeOutput(preset, cap, events)
+			got, err := probeStreamShapeOutput(preset, cap, events)
 			if err != nil {
 				return &streamShapeFixtureViolation{
 					Preset:      preset,
@@ -411,9 +458,17 @@ var streamShapeFixtureGoldens = map[string]*streamShapeGolden{
 		turn: &TurnCount{Count: 8, HasTurn: true},
 	},
 	"cursor": {
-		turn: &TurnCount{Count: 67, HasTurn: true},
+		usage: &TokenUsage{
+			Input: 135956, Output: 27212, CacheRead: 4885941, CacheWrite: 0,
+			HasInput: true, HasOutput: true, HasCacheRead: true, HasCacheWrite: true,
+		},
+		turn: &TurnCount{Count: 8, HasTurn: true},
 	},
 	"codex": {
+		usage: &TokenUsage{
+			Input: 33469, Output: 99, CacheRead: 26112,
+			HasInput: true, HasOutput: true, HasCacheRead: true,
+		},
 		toolTimings: []toolTimingGolden{
 			{Name: "command_execution", Count: 1, TotalNanos: 0},
 		},

@@ -311,7 +311,7 @@ var agentAdapters = map[string]AgentAdapter{
 			},
 		},
 		executable:             AgentExecutableCapability{Kind: CapabilitySupported, Name: "codex"},
-		usage:                  AgentUsageCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no usage block"},
+		usage:                  AgentUsageCapability{Kind: CapabilitySupported, Extract: codexTokenUsage},
 		cost:                   AgentCostCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no dollar cost"},
 		toolTimings:            AgentToolTimingCapability{Kind: CapabilitySupported, Extract: codexToolTimings},
 		actualModel:            AgentActualModelCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no actual-model init event"},

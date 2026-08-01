@@ -194,6 +194,54 @@ func codexArgumentsHint(args json.RawMessage) string {
 	return ""
 }
 
+// codexTokenUsage is codex's Usage extraction rule (ADR-0160).
+//
+// Authoritative event: turn.completed's top-level usage object under snake_case
+// keys (input_tokens, cached_input_tokens, output_tokens). That block is the
+// whole-run total — codex emits it once per turn.
+//
+// Semantics: replace — read the last matching turn.completed; sum nothing. A
+// present zero is a reported value (Has* true), not a Token-blind absence.
+func codexTokenUsage(events []streamEventRecord) TokenUsage {
+	var u TokenUsage
+	found := false
+	for _, ev := range events {
+		var event struct {
+			Type  string `json:"type"`
+			Usage *struct {
+				InputTokens       *int64 `json:"input_tokens"`
+				CachedInputTokens *int64 `json:"cached_input_tokens"`
+				OutputTokens      *int64 `json:"output_tokens"`
+			} `json:"usage"`
+		}
+		if err := json.Unmarshal([]byte(ev.Raw), &event); err != nil {
+			continue
+		}
+		if event.Type != "turn.completed" || event.Usage == nil {
+			continue
+		}
+		var next TokenUsage
+		if v := event.Usage.InputTokens; v != nil {
+			next.Input = *v
+			next.HasInput = true
+		}
+		if v := event.Usage.OutputTokens; v != nil {
+			next.Output = *v
+			next.HasOutput = true
+		}
+		if v := event.Usage.CachedInputTokens; v != nil {
+			next.CacheRead = *v
+			next.HasCacheRead = true
+		}
+		u = next
+		found = true
+	}
+	if !found {
+		return TokenUsage{}
+	}
+	return u
+}
+
 // codexToolTimings derives per-tool durations from one stored Captured attempt
 // stream: each tool item's item.started is paired with the item.completed
 // carrying the same item id, and the gap between their arrival times is that

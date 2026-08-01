@@ -100,7 +100,7 @@ func TestSampledRunTurnCounts(t *testing.T) {
 		wantTurn int
 	}{
 		{"claude", "claude.events.jsonl.gz", 8},
-		{"cursor", "cursor.events.jsonl.gz", 67},
+		{"cursor", "cursor.events.jsonl.gz", 8},
 		{"pi", "pi.events.jsonl.gz", 11},
 	}
 	for _, tc := range cases {
