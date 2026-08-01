@@ -186,6 +186,26 @@ func witnessToolTimingsBytes(events []streamEventRecord) bool {
 			}
 		}
 	}
+	// Field-presence fallback: correlation ids that pair tool start/end events.
+	for _, ev := range events {
+		var probe struct {
+			ToolCallId string `json:"toolCallId"`
+			CallID     string `json:"call_id"`
+			ToolUseID  string `json:"tool_use_id"`
+			Item       *struct {
+				ID string `json:"id"`
+			} `json:"item"`
+		}
+		if err := json.Unmarshal([]byte(ev.Raw), &probe); err != nil {
+			continue
+		}
+		if probe.ToolCallId != "" || probe.CallID != "" || probe.ToolUseID != "" {
+			return true
+		}
+		if probe.Item != nil && probe.Item.ID != "" {
+			return true
+		}
+	}
 	return false
 }
 
@@ -195,11 +215,18 @@ func witnessActualModelBytes(events []streamEventRecord) bool {
 			Type    string `json:"type"`
 			Subtype string `json:"subtype"`
 			Model   string `json:"model"`
+			Message *struct {
+				Model    string `json:"model"`
+				Provider string `json:"provider"`
+			} `json:"message"`
 		}
 		if err := json.Unmarshal([]byte(ev.Raw), &probe); err != nil {
 			continue
 		}
-		if probe.Type == "system" && probe.Subtype == "init" && strings.TrimSpace(probe.Model) != "" {
+		if strings.TrimSpace(probe.Model) != "" {
+			return true
+		}
+		if probe.Message != nil && strings.TrimSpace(probe.Message.Model) != "" {
 			return true
 		}
 	}
@@ -210,18 +237,30 @@ func witnessStreamRenderBytes(events []streamEventRecord) bool {
 	for _, ev := range events {
 		var probe struct {
 			Type    string `json:"type"`
+			Subtype string `json:"subtype"`
+			ToolName string `json:"toolName"`
 			Message *struct {
 				Content []struct {
 					Type string `json:"type"`
+					Text string `json:"text"`
 				} `json:"content"`
 			} `json:"message"`
+			AssistantMessageEvent *struct {
+				Type  string `json:"type"`
+				Delta string `json:"delta"`
+			} `json:"assistantMessageEvent"`
+			ToolCall json.RawMessage `json:"tool_call"`
 		}
 		if err := json.Unmarshal([]byte(ev.Raw), &probe); err != nil {
 			continue
 		}
 		if probe.Type == "assistant" && probe.Message != nil {
 			for _, c := range probe.Message.Content {
-				if c.Type == "tool_use" {
+				switch c.Type {
+				case "tool_use", "text":
+					if c.Type == "text" && strings.TrimSpace(c.Text) == "" {
+						continue
+					}
 					return true
 				}
 			}
@@ -229,6 +268,23 @@ func witnessStreamRenderBytes(events []streamEventRecord) bool {
 		if probe.Type == "user" && probe.Message != nil {
 			for _, c := range probe.Message.Content {
 				if c.Type == "tool_result" {
+					return true
+				}
+			}
+		}
+		if probe.Type == "tool_call" && probe.Subtype == "started" && len(probe.ToolCall) > 0 {
+			return true
+		}
+		if probe.Type == "tool_execution_start" && probe.ToolName != "" {
+			return true
+		}
+		if probe.Type == "message_update" && probe.AssistantMessageEvent != nil &&
+			probe.AssistantMessageEvent.Type == "text_delta" && probe.AssistantMessageEvent.Delta != "" {
+			return true
+		}
+		if probe.Message != nil {
+			for _, c := range probe.Message.Content {
+				if c.Type == "toolCall" || c.Type == "thinking" {
 					return true
 				}
 			}
@@ -250,23 +306,17 @@ func witnessTurnBytes(events []streamEventRecord) bool {
 		if err := json.Unmarshal([]byte(ev.Raw), &probe); err != nil {
 			continue
 		}
-		switch probe.Type {
-		case "assistant":
-			if probe.Message != nil && probe.Message.ID != "" {
-				return true
-			}
-			if probe.ModelCallID != "" {
-				return true
-			}
-		case "tool_call":
-			if probe.ModelCallID != "" {
-				return true
-			}
-		case "turn_end":
-			if probe.Message != nil && probe.Message.Role == "assistant" {
-				return true
-			}
-		case "turn.started", "turn.completed":
+		if probe.ModelCallID != "" {
+			return true
+		}
+		if probe.Message != nil && probe.Message.ID != "" {
+			return true
+		}
+		if probe.Message != nil && probe.Message.Role == "assistant" &&
+			(probe.Type == "turn_end" || probe.Type == "message_end") {
+			return true
+		}
+		if probe.Type == "turn.started" || probe.Type == "turn.completed" {
 			return true
 		}
 	}

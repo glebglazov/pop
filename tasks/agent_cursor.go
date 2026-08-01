@@ -231,6 +231,67 @@ func cursorActualModel(events []streamEventRecord) string {
 	return ""
 }
 
+// renderCursorEvent parses one cursor stream-json event into readable entries.
+func renderCursorEvent(ev streamEventRecord) []StreamEvent {
+	var out []StreamEvent
+
+	var event struct {
+		Type    string `json:"type"`
+		Subtype string `json:"subtype"`
+		Message struct {
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"message"`
+		ToolCall json.RawMessage `json:"tool_call"`
+	}
+	if err := json.Unmarshal([]byte(ev.Raw), &event); err != nil {
+		return []StreamEvent{{
+			AtMS: ev.AtMS,
+			Type: "raw",
+			Text: ev.Raw,
+		}}
+	}
+
+	switch event.Type {
+	case "assistant":
+		var text strings.Builder
+		for _, c := range event.Message.Content {
+			if c.Type == "text" {
+				text.WriteString(c.Text)
+			}
+		}
+		if s := strings.TrimRight(text.String(), "\n"); s != "" {
+			out = append(out, StreamEvent{
+				AtMS: ev.AtMS,
+				Type: "assistant",
+				Text: s,
+			})
+		}
+	case "tool_call":
+		if event.Subtype != "started" {
+			break
+		}
+		toolName, args := cursorToolCall(event.ToolCall)
+		if toolName == "" {
+			break
+		}
+		argsStr := ""
+		if len(args) > 0 {
+			argsStr = string(args)
+		}
+		out = append(out, StreamEvent{
+			AtMS:     ev.AtMS,
+			Type:     "tool_use",
+			ToolName: toolName,
+			ToolArgs: argsStr,
+		})
+	}
+
+	return out
+}
+
 // cursorToolTimings derives per-tool durations from cursor stream-json events:
 // each tool_call started is paired with the completed event sharing call_id
 // (or toolCallId), and the gap between their arrival times is that invocation's

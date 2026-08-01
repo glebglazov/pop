@@ -279,7 +279,7 @@ var agentAdapters = map[string]AgentAdapter{
 		cost:                   AgentCostCapability{Kind: CapabilityBlind, Reason: "cursor reports token usage but no dollar cost"},
 		toolTimings:            AgentToolTimingCapability{Kind: CapabilitySupported, Extract: cursorToolTimings},
 		actualModel:            AgentActualModelCapability{Kind: CapabilitySupported, Extract: cursorActualModel},
-		streamRender:           AgentStreamRenderCapability{Kind: CapabilityBlind, Reason: "cursor stream-json events carry no renderable assistant/tool_result message shape"},
+		streamRender:           AgentStreamRenderCapability{Kind: CapabilitySupported, Render: renderCursorEvent},
 		turns:                  AgentTurnCapability{Kind: CapabilitySupported, Extract: cursorTurnCount},
 		peakInput:              AgentPeakInputCapability{Kind: CapabilityBlind, Reason: "cursor reports token usage only as a whole-run total on result"},
 		reasoning: AgentReasoningCapability{
@@ -349,8 +349,8 @@ var agentAdapters = map[string]AgentAdapter{
 		usage:          AgentUsageCapability{Kind: CapabilitySupported, Extract: piTokenUsage},
 		cost:           AgentCostCapability{Kind: CapabilitySupported, Extract: piPartialCost},
 		toolTimings:    AgentToolTimingCapability{Kind: CapabilitySupported, Extract: piToolTimings},
-		actualModel:    AgentActualModelCapability{Kind: CapabilityBlind, Reason: "pi jsonl events carry no actual-model field"},
-		streamRender:   AgentStreamRenderCapability{Kind: CapabilityBlind, Reason: "pi jsonl events carry no renderable assistant/tool_result message shape"},
+		actualModel:    AgentActualModelCapability{Kind: CapabilitySupported, Extract: piActualModel},
+		streamRender:   AgentStreamRenderCapability{Kind: CapabilitySupported, Render: renderPiEvent},
 		turns:          AgentTurnCapability{Kind: CapabilitySupported, Extract: piTurnCount},
 		peakInput:      AgentPeakInputCapability{Kind: CapabilitySupported, Extract: piPeakInput},
 		reasoning: AgentReasoningCapability{

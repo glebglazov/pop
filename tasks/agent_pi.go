@@ -254,7 +254,109 @@ func piPartialCost(events []streamEventRecord) PartialCost {
 	return c
 }
 
-// piToolTimings derives per-tool durations from pi jsonl events: each
+// piActualModel is pi's actual-model extraction rule (ADR-0165).
+//
+// Authoritative field: message.model on assistant-role events. pi repeats the
+// resolved model on every message lifecycle event; the last assistant message
+// wins.
+func piActualModel(events []streamEventRecord) string {
+	var model string
+	for _, ev := range events {
+		var event struct {
+			Message struct {
+				Role  string `json:"role"`
+				Model string `json:"model"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(ev.Raw), &event); err != nil {
+			continue
+		}
+		if event.Message.Role == "assistant" {
+			if m := strings.TrimSpace(event.Message.Model); m != "" {
+				model = m
+			}
+		}
+	}
+	return model
+}
+
+// renderPiEvent parses one pi-jsonl event into readable stream entries.
+func renderPiEvent(ev streamEventRecord) []StreamEvent {
+	var out []StreamEvent
+
+	var event struct {
+		Type                  string          `json:"type"`
+		ToolName              string          `json:"toolName"`
+		Args                  json.RawMessage `json:"args"`
+		AssistantMessageEvent struct {
+			Type  string `json:"type"`
+			Delta string `json:"delta"`
+		} `json:"assistantMessageEvent"`
+		Message struct {
+			Role         string `json:"role"`
+			ErrorMessage string `json:"errorMessage"`
+			Content      []struct {
+				Type string `json:"type"`
+				Name string `json:"name"`
+			} `json:"content"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal([]byte(ev.Raw), &event); err != nil {
+		return []StreamEvent{{
+			AtMS: ev.AtMS,
+			Type: "raw",
+			Text: ev.Raw,
+		}}
+	}
+
+	switch event.Type {
+	case "message_update":
+		if event.AssistantMessageEvent.Type == "text_delta" {
+			if text := strings.TrimRight(event.AssistantMessageEvent.Delta, "\n"); text != "" {
+				out = append(out, StreamEvent{
+					AtMS: ev.AtMS,
+					Type: "assistant",
+					Text: text,
+				})
+			}
+		}
+	case "tool_execution_start":
+		name := event.ToolName
+		if name == "" {
+			name = "tool"
+		}
+		args := ""
+		if len(event.Args) > 0 {
+			args = string(event.Args)
+		}
+		out = append(out, StreamEvent{
+			AtMS:     ev.AtMS,
+			Type:     "tool_use",
+			ToolName: name,
+			ToolArgs: args,
+		})
+	case "message_end":
+		if event.Message.Role == "assistant" && event.Message.ErrorMessage != "" {
+			out = append(out, StreamEvent{
+				AtMS: ev.AtMS,
+				Type: "assistant",
+				Text: event.Message.ErrorMessage,
+			})
+		}
+		for _, c := range event.Message.Content {
+			if c.Type == "toolCall" && c.Name != "" {
+				out = append(out, StreamEvent{
+					AtMS:     ev.AtMS,
+					Type:     "tool_use",
+					ToolName: c.Name,
+				})
+			}
+		}
+	}
+
+	return out
+}
+
 // tool_execution_start is paired with tool_execution_end sharing toolCallId,
 // and the gap between their arrival times is that invocation's duration.
 func piToolTimings(events []streamEventRecord) ([]ToolTiming, []toolWindow) {

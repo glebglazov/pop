@@ -416,6 +416,10 @@ var streamShapeFixtureGoldens = map[string]*streamShapeGolden{
 			{Name: "globToolCall", Count: 4, TotalNanos: (4*time.Second + 306*time.Millisecond).Nanoseconds()},
 		},
 		actualModel: strPtr("Composer 2.5"),
+		streamRender: &streamRenderGolden{
+			EventCount: 20,
+			TypeCounts: map[string]int{"assistant": 2, "tool_use": 18},
+		},
 		turn: &TurnCount{Count: 8, HasTurn: true},
 	},
 	"codex": {
@@ -437,6 +441,11 @@ var streamShapeFixtureGoldens = map[string]*streamShapeGolden{
 		toolTimings: []toolTimingGolden{
 			{Name: "bash", Count: 12, TotalNanos: (15*time.Second + 467*time.Millisecond).Nanoseconds()},
 			{Name: "read", Count: 3, TotalNanos: (3 * time.Millisecond).Nanoseconds()},
+		},
+		actualModel: strPtr("qwen3.7-max"),
+		streamRender: &streamRenderGolden{
+			EventCount: 144,
+			TypeCounts: map[string]int{"assistant": 114, "tool_use": 30},
 		},
 		turn: &TurnCount{Count: 11, HasTurn: true},
 	},
