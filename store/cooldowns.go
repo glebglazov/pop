@@ -44,3 +44,55 @@ func (s *Store) AllAgentCooldowns() (map[string]time.Time, error) {
 	}
 	return out, rows.Err()
 }
+
+// AgentModelCooldown is one machine-global Effort model skip (ADR-0168): a
+// model recorded as unrunnable for one preset, with the instant it may be
+// tried again. A zero Until is a permanent skip that never expires.
+type AgentModelCooldown struct {
+	Preset string
+	Model  string
+	Until  time.Time
+}
+
+// PutAgentModelCooldown upserts the skip for one (preset, model) pair. A zero
+// until records a permanent skip that never expires; a non-zero until is the
+// instant the skip lifts. An empty preset or model is a no-op. The latest
+// write for a (preset, model) pair wins, mirroring PutAgentCooldown
+// (ADR-0055/0168). This table is separate from agent_cooldowns so a spent
+// model never renders as a paused preset.
+func (s *Store) PutAgentModelCooldown(preset, model string, until time.Time) error {
+	if preset == "" || model == "" {
+		return nil
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO agent_model_cooldowns (preset, model, until) VALUES (?, ?, ?)
+		 ON CONFLICT(preset, model) DO UPDATE SET until = excluded.until`,
+		preset, model, nullTime(until))
+	return err
+}
+
+// ActiveAgentModelCooldowns returns every (preset, model) skip still in force
+// at now: a permanent skip (zero Until) always qualifies, and a timed skip
+// qualifies while now is before its Until.
+func (s *Store) ActiveAgentModelCooldowns(now time.Time) ([]AgentModelCooldown, error) {
+	rows, err := s.db.Query(`SELECT preset, model, until FROM agent_model_cooldowns`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	now = now.UTC()
+	var out []AgentModelCooldown
+	for rows.Next() {
+		var preset, model string
+		var until sql.NullString
+		if err := rows.Scan(&preset, &model, &until); err != nil {
+			return nil, err
+		}
+		u := parseTime(until.String)
+		if !u.IsZero() && !u.After(now) {
+			continue
+		}
+		out = append(out, AgentModelCooldown{Preset: preset, Model: model, Until: u})
+	}
+	return out, rows.Err()
+}

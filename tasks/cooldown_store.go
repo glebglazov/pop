@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/glebglazov/pop/store"
 )
 
 const (
@@ -151,6 +153,43 @@ func agentQuotaCooldownUntil(resetAt, now time.Time, fallback time.Duration) tim
 		return now.Add(fallback)
 	}
 	return resetAt.Add(agentQuotaResetSkew)
+}
+
+// updateAgentModelCooldown records (or refreshes) an Effort model skip
+// (ADR-0168) — one model recorded as unrunnable for one preset — in the store,
+// creating the store on first write. permanent records a skip that never
+// expires (a Permanent recovery verdict); otherwise until is derived from
+// resetAt via the same parsed-instant-else-fallback policy preset cooldowns
+// use (agentQuotaCooldownUntil), with a one hour default rather than a second
+// policy. This is a prefactor: nothing calls it until the Effort model skip is
+// wired into dispatch.
+func updateAgentModelCooldown(d *Deps, preset, model string, resetAt time.Time, permanent bool) error {
+	preset = strings.TrimSpace(preset)
+	model = strings.TrimSpace(model)
+	if preset == "" || model == "" {
+		return nil
+	}
+	s, err := openDrainStore(d)
+	if err != nil {
+		return err
+	}
+	if permanent {
+		return s.PutAgentModelCooldown(preset, model, time.Time{})
+	}
+	until := agentQuotaCooldownUntil(resetAt, time.Now(), defaultAgentQuotaRetryAfter)
+	return s.PutAgentModelCooldown(preset, model, until)
+}
+
+// ActiveAgentModelCooldownsWith returns every Effort model skip (ADR-0168)
+// still in force at now: a permanent skip always qualifies, a timed one while
+// now precedes its expiry. It is read-only and never materialises an empty
+// store, mirroring ActiveAgentCooldownsWith.
+func ActiveAgentModelCooldownsWith(d *Deps, now time.Time) ([]store.AgentModelCooldown, error) {
+	s, ok, err := openDrainStoreIfExists(d)
+	if err != nil || !ok {
+		return nil, err
+	}
+	return s.ActiveAgentModelCooldowns(now)
 }
 
 func activeAgentCooldowns(store agentCooldownStore, now time.Time) map[string]time.Time {

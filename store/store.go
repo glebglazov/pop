@@ -383,6 +383,22 @@ var migrations = []string{
 	// Remediation task titles. Persisted with the verdict so a cache-hit FIXABLE
 	// spawn (re-drain at the same work SHA) still names what needs fixing.
 	`ALTER TABLE verify_verdicts ADD COLUMN summary TEXT NOT NULL DEFAULT '';`,
+	// 25: agent_model_cooldowns — the machine-global Effort model skip (ADR-0168):
+	// a `Scope=Model` proceed verdict names one model of one preset as spent
+	// rather than the whole preset, so it is a table of its own rather than a
+	// column on agent_cooldowns — a spent model must never render as a paused
+	// preset (queue's blockedItemsFromAgentCooldowns reads only agent_cooldowns
+	// and so never sees these rows). until is NULL for a Permanent skip (never
+	// expires); otherwise it is the adapter's parsed reset instant or a one hour
+	// default, via the same policy preset cooldowns use. Keyed by (preset,
+	// model); the latest write wins. A prefactor — nothing writes here until the
+	// task that consumes the Effort model skip lands.
+	`CREATE TABLE agent_model_cooldowns (
+		preset TEXT NOT NULL,
+		model  TEXT NOT NULL,
+		until  TEXT,
+		PRIMARY KEY (preset, model)
+	);`,
 }
 
 func (s *Store) migrate() error {
