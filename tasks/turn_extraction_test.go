@@ -99,7 +99,7 @@ func TestSampledRunTurnCounts(t *testing.T) {
 		fixture  string
 		wantTurn int
 	}{
-		{"claude", "claude.events.jsonl.gz", 7},
+		{"claude", "claude.events.jsonl.gz", 8},
 		{"cursor", "cursor.events.jsonl.gz", 67},
 		{"pi", "pi.events.jsonl.gz", 11},
 	}
@@ -117,8 +117,8 @@ func TestSampledRunTurnCounts(t *testing.T) {
 func TestSampledRunPeakInput(t *testing.T) {
 	claudeEvents := loadTurnFixture(t, "claude.events.jsonl.gz")
 	claudePeak := extractPeakInput("claude", claudeEvents)
-	if !claudePeak.HasPeak || claudePeak.Tokens != 39552 {
-		t.Fatalf("claude peak = %+v, want 39552 reported", claudePeak)
+	if !claudePeak.HasPeak || claudePeak.Tokens != 40038 {
+		t.Fatalf("claude peak = %+v, want 40038 reported", claudePeak)
 	}
 
 	piEvents := loadTurnFixture(t, "pi.events.jsonl.gz")

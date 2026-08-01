@@ -281,18 +281,66 @@ type streamShapeFixtureViolation struct {
 	Description string
 }
 
+// streamShapeOutputPresent reports whether a capability's extraction output
+// carries real stream-derived data (not a blind/absent result).
+func streamShapeOutputPresent(cap streamShapeCapability, got any) bool {
+	switch cap {
+	case streamShapeUsage:
+		return got.(TokenUsage).HasUsage()
+	case streamShapeCost:
+		return got.(PartialCost).HasCost
+	case streamShapeToolTimings:
+		return len(got.([]ToolTiming)) > 0
+	case streamShapeActualModel:
+		return got.(string) != ""
+	case streamShapeStreamRender:
+		g := got.(streamRenderGolden)
+		if g.EventCount == 0 {
+			return false
+		}
+		if len(g.TypeCounts) == 1 && g.TypeCounts["render_refused"] == g.EventCount {
+			return false
+		}
+		return true
+	case streamShapeTurn:
+		return got.(TurnCount).HasTurn
+	default:
+		return false
+	}
+}
+
 // checkStreamShapeFixture applies the ADR-0165 fixture gate for one preset and
 // capability. fixtureExists is whether a trimmed stream file is on disk;
 // goldens may be nil when no golden table entry exists for the preset.
 func checkStreamShapeFixture(preset string, cap streamShapeCapability, kind CapabilityKind, fixtureExists bool, goldens *streamShapeGolden, events []streamEventRecord) *streamShapeFixtureViolation {
 	hasGolden := goldens != nil && goldens.hasGolden(cap)
 
-	if hasGolden && kind == CapabilityBlind {
-		return &streamShapeFixtureViolation{
-			Preset:      preset,
-			Capability:  cap,
-			Description: "blind capability has a golden fixture entry — the stream data is present; write the rule",
+	if kind == CapabilityBlind {
+		if hasGolden {
+			return &streamShapeFixtureViolation{
+				Preset:      preset,
+				Capability:  cap,
+				Description: "blind capability has a golden fixture entry — remove it or write the rule",
+			}
 		}
+		if fixtureExists {
+			got, err := extractStreamShapeOutput(preset, cap, events)
+			if err != nil {
+				return &streamShapeFixtureViolation{
+					Preset:      preset,
+					Capability:  cap,
+					Description: err.Error(),
+				}
+			}
+			if streamShapeOutputPresent(cap, got) {
+				return &streamShapeFixtureViolation{
+					Preset:      preset,
+					Capability:  cap,
+					Description: "blind capability has extractable stream data — write the rule",
+				}
+			}
+		}
+		return nil
 	}
 
 	if kind == CapabilitySupported {
@@ -303,13 +351,6 @@ func checkStreamShapeFixture(preset string, cap streamShapeCapability, kind Capa
 				Description: "supported capability has no captured stream fixture",
 			}
 		}
-		if !hasGolden {
-			return &streamShapeFixtureViolation{
-				Preset:      preset,
-				Capability:  cap,
-				Description: "supported capability is missing a golden value for its stream fixture",
-			}
-		}
 		got, err := extractStreamShapeOutput(preset, cap, events)
 		if err != nil {
 			return &streamShapeFixtureViolation{
@@ -318,12 +359,30 @@ func checkStreamShapeFixture(preset string, cap streamShapeCapability, kind Capa
 				Description: err.Error(),
 			}
 		}
+		present := streamShapeOutputPresent(cap, got)
+		if !hasGolden {
+			if present {
+				return &streamShapeFixtureViolation{
+					Preset:      preset,
+					Capability:  cap,
+					Description: "supported capability is missing a golden value for its stream fixture",
+				}
+			}
+			return nil
+		}
 		want := streamShapeGoldenValue(goldens, cap)
 		if !streamShapeOutputsMatch(cap, want, got) {
 			return &streamShapeFixtureViolation{
 				Preset:      preset,
 				Capability:  cap,
 				Description: streamShapeGoldenMismatch(cap, want, got),
+			}
+		}
+		if !present {
+			return &streamShapeFixtureViolation{
+				Preset:      preset,
+				Capability:  cap,
+				Description: "supported capability golden does not prove the rule against its fixture",
 			}
 		}
 	}
@@ -336,28 +395,35 @@ func checkStreamShapeFixture(preset string, cap streamShapeCapability, kind Capa
 // update them when a fixture changes.
 var streamShapeFixtureGoldens = map[string]*streamShapeGolden{
 	"claude": {
-		usage: &TokenUsage{},
+		usage: &TokenUsage{
+			Input: 1363, Output: 3690, CacheRead: 246817, CacheWrite: 34891,
+			HasInput: true, HasOutput: true, HasCacheRead: true, HasCacheWrite: true,
+		},
 		toolTimings: []toolTimingGolden{
 			{Name: "Bash", Count: 9, TotalNanos: (43*time.Second + 211*time.Millisecond).Nanoseconds()},
 			{Name: "Read", Count: 1, TotalNanos: (51 * time.Millisecond).Nanoseconds()},
 		},
 		actualModel: strPtr("claude-opus-5"),
 		streamRender: &streamRenderGolden{
-			EventCount: 21,
-			TypeCounts: map[string]int{"raw": 10, "system": 1, "tool_use": 10},
+			EventCount: 22,
+			TypeCounts: map[string]int{"assistant": 1, "raw": 10, "system": 1, "tool_use": 10},
 		},
-		turn: &TurnCount{Count: 7, HasTurn: true},
+		turn: &TurnCount{Count: 8, HasTurn: true},
 	},
 	"cursor": {
-		usage: &TokenUsage{},
-		turn:  &TurnCount{Count: 67, HasTurn: true},
+		turn: &TurnCount{Count: 67, HasTurn: true},
+	},
+	"codex": {
+		toolTimings: []toolTimingGolden{
+			{Name: "command_execution", Count: 1, TotalNanos: 0},
+		},
 	},
 	"pi": {
 		usage: &TokenUsage{
 			Input: 66, Output: 3405, CacheRead: 71494, CacheWrite: 16868,
 			HasInput: true, HasOutput: true, HasCacheRead: true, HasCacheWrite: true,
 		},
-		cost: &PartialCost{},
+		cost: &PartialCost{Dollars: 0.11416199999999999, HasCost: true},
 		turn: &TurnCount{Count: 11, HasTurn: true},
 	},
 }

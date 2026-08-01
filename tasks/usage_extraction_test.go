@@ -140,6 +140,20 @@ func TestExtractTokenUsageTokenBlindForUnknownAdapter(t *testing.T) {
 	}
 }
 
+func TestPiPartialCostReadsUsageCostTotalOnMessageEnd(t *testing.T) {
+	events := []streamEventRecord{
+		{Type: "event", AtMS: 100, Raw: `{"type":"message_end","message":{"role":"assistant","usage":{"cost":{"total":0.05}}}}`},
+		{Type: "event", AtMS: 200, Raw: `{"type":"message_end","message":{"role":"assistant","usage":{"cost":{"total":0.10}}}}`},
+	}
+	c := piPartialCost(events)
+	if !c.HasCost {
+		t.Fatal("expected cost")
+	}
+	if diff := c.Dollars - 0.15; diff > 0.0001 || diff < -0.0001 {
+		t.Fatalf("cost = %v, want 0.15", c.Dollars)
+	}
+}
+
 func TestPiPartialCostSumsMessageEndTotalIgnoresComponents(t *testing.T) {
 	// Component keys must not be summed alongside total — that double-counts.
 	events := []streamEventRecord{

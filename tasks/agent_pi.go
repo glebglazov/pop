@@ -213,8 +213,9 @@ func piTokenUsage(events []streamEventRecord) TokenUsage {
 
 // piPartialCost is pi's cost extraction rule (ADR-0160).
 //
-// Authoritative events: `message_end` events whose message carries a cost
-// object. Read cost.total — the settled per-message figure. Component keys
+// Authoritative events: `message_end` events whose message carries a settled
+// cost total. On real pi streams the dollars live under usage.cost.total;
+// message.cost.total is accepted when present. Component keys
 // (input/output/cacheRead/cacheWrite) must not be summed alongside total.
 // message_update deltas are ignored, matching pi's token rule.
 func piPartialCost(events []streamEventRecord) PartialCost {
@@ -226,16 +227,27 @@ func piPartialCost(events []streamEventRecord) PartialCost {
 				Cost *struct {
 					Total *float64 `json:"total"`
 				} `json:"cost"`
+				Usage *struct {
+					Cost *struct {
+						Total *float64 `json:"total"`
+					} `json:"cost"`
+				} `json:"usage"`
 			} `json:"message"`
 		}
 		if err := json.Unmarshal([]byte(ev.Raw), &event); err != nil {
 			continue
 		}
-		if event.Type != "message_end" || event.Message.Cost == nil {
+		if event.Type != "message_end" {
 			continue
 		}
-		if v := event.Message.Cost.Total; v != nil {
-			c.Dollars += *v
+		var total *float64
+		if event.Message.Cost != nil {
+			total = event.Message.Cost.Total
+		} else if event.Message.Usage != nil && event.Message.Usage.Cost != nil {
+			total = event.Message.Usage.Cost.Total
+		}
+		if total != nil {
+			c.Dollars += *total
 			c.HasCost = true
 		}
 	}

@@ -16,13 +16,14 @@ func TestStreamShapeFixtureHarness(t *testing.T) {
 
 			goldens := streamShapeFixtureGoldens[preset]
 			fixtureExists := streamFixtureExists(preset)
-			if !fixtureExists {
-				return
-			}
 
-			events, err := loadStreamFixture(preset)
-			if err != nil {
-				t.Fatalf("load stream fixture: %v", err)
+			var events []streamEventRecord
+			if fixtureExists {
+				var err error
+				events, err = loadStreamFixture(preset)
+				if err != nil {
+					t.Fatalf("load stream fixture: %v", err)
+				}
 			}
 
 			for _, cap := range streamShapeCapabilityOrder {
@@ -75,7 +76,7 @@ func TestStreamShapeFixtureHarness_blindWithGoldenFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	goldens := &streamShapeGolden{
-		cost: &PartialCost{},
+		cost: &PartialCost{Dollars: 0.01, HasCost: true},
 	}
 	violation := checkStreamShapeFixture(
 		"claude", streamShapeCost, CapabilityBlind, true, goldens, events,
@@ -84,6 +85,37 @@ func TestStreamShapeFixtureHarness_blindWithGoldenFails(t *testing.T) {
 		t.Fatal("expected violation")
 	}
 	if !strings.Contains(violation.Description, "blind capability has a golden fixture entry") {
+		t.Fatalf("description = %q", violation.Description)
+	}
+}
+
+func TestStreamShapeFixtureHarness_blindWithExtractableDataFails(t *testing.T) {
+	events, err := loadStreamFixture("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	violation := checkStreamShapeFixture(
+		"claude", streamShapeTurn, CapabilityBlind, true, nil, events,
+	)
+	if violation == nil {
+		t.Fatal("expected violation")
+	}
+	if !strings.Contains(violation.Description, "blind capability has extractable stream data") {
+		t.Fatalf("description = %q", violation.Description)
+	}
+}
+
+func TestStreamShapeFixtureHarness_supportedWithoutFixtureFailsInTable(t *testing.T) {
+	adapter, err := ResolveAgentAdapter("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	kind := streamShapeCapabilityKind(adapter, streamShapeToolTimings)
+	violation := checkStreamShapeFixture("codex", streamShapeToolTimings, kind, false, nil, nil)
+	if violation == nil {
+		t.Fatal("expected violation")
+	}
+	if !strings.Contains(violation.Description, "no captured stream fixture") {
 		t.Fatalf("description = %q", violation.Description)
 	}
 }
