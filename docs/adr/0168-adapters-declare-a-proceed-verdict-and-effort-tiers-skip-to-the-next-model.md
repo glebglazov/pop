@@ -1,10 +1,10 @@
 ---
-status: deferred
+status: accepted
 ---
 
 # Adapters declare a proceed verdict, and effort tiers skip to the next model
 
-> ⚠️ **DEFERRED — intended design, not shipped behavior.** Generalizes ADR-0153 (agent unavailability) by adding a *model* scope beneath its preset scope; consumes the ladder tail that ADR-0032 reserved and ADR-0049 carried forward; folds in the **Plan gate** of ADR-0164; leaves ADR-0043's preset ordering and ADR-0099's retry schedule intact.
+Generalizes ADR-0153 (agent unavailability) by adding a *model* scope beneath its preset scope; consumes the ladder tail that ADR-0032 reserved and ADR-0049 carried forward; folds in the **Plan gate** of ADR-0164; leaves ADR-0043's preset ordering and ADR-0099's retry schedule intact.
 
 ## Context
 

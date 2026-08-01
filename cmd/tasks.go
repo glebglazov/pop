@@ -1535,7 +1535,7 @@ func runTaskAgentsWith(d *tasks.Deps, w io.Writer, models bool) error {
 func renderTaskAgents(w io.Writer, rows []tasks.AgentCatalogRow) {
 	fmt.Fprintf(w, "%-9s %-14s %-5s %-6s %s\n", "agent", "binary", "found", "assist", "effort ladder")
 	for _, row := range rows {
-		fmt.Fprintf(w, "%-9s %-14s %-5s %-6s %s\n", row.Agent, row.Binary, yesNo(row.Found), yesNo(row.Assistance), renderEffortLadder(row.Agent, row.EffortLadder))
+		fmt.Fprintf(w, "%-9s %-14s %-5s %-6s %s\n", row.Agent, row.Binary, yesNo(row.Found), yesNo(row.Assistance), renderEffortLadder(row.Agent, row.EffortLadder, row.ModelSkips))
 	}
 }
 
@@ -1564,10 +1564,15 @@ func yesNo(v bool) string {
 	return "no"
 }
 
-func renderEffortLadder(agent string, ladder []tasks.AgentCatalogEffortTier) string {
+// renderEffortLadder renders one preset's resolved tiers. An entry the ladder is
+// currently walking past carries its Effort model skip's remaining time —
+// "(skipped 47m)", or "(skipped ∞)" for a permanent one (ADR-0168) — so the
+// catalog answers why a drain is running the tier's tail.
+func renderEffortLadder(agent string, ladder []tasks.AgentCatalogEffortTier, skips map[string]time.Time) string {
 	if len(ladder) == 0 {
 		return "none"
 	}
+	now := time.Now()
 	parts := make([]string, 0, len(ladder))
 	for _, tier := range ladder {
 		entries := "none"
@@ -1577,6 +1582,9 @@ func renderEffortLadder(agent string, ladder []tasks.AgentCatalogEffortTier) str
 				model := entry.Model
 				if agent != "cursor" && entry.Reasoning != "" {
 					model += "[reasoning=" + entry.Reasoning + "]"
+				}
+				if until, ok := skips[entry.Model]; ok {
+					model += " (skipped " + tasks.FormatModelSkipRemaining(until, now) + ")"
 				}
 				rendered = append(rendered, model)
 			}

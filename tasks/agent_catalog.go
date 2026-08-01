@@ -3,6 +3,7 @@ package tasks
 import (
 	"os/exec"
 	"sort"
+	"time"
 
 	"github.com/glebglazov/pop/config"
 )
@@ -26,6 +27,12 @@ type AgentCatalogRow struct {
 	// install's provider config names them, not stable account-independent
 	// names, so a planner knows they may need overriding.
 	ModelsInstallDependent bool
+	// ModelSkips carries the Effort model skips still in force for this preset
+	// (ADR-0168), keyed by the ladder `--model` token, so a reader can see which
+	// entries the ladder is currently walking past. A zero instant is a permanent
+	// skip; an absent key is runnable. This is the store's own encoding
+	// (store.AgentModelCooldown.Until).
+	ModelSkips map[string]time.Time
 }
 
 // AgentCatalogEffortTier describes one resolved effort tier for display.
@@ -38,7 +45,8 @@ type AgentCatalogEffortTier struct {
 }
 
 // AgentCatalog returns stable rows for every recognized built-in agent preset.
-// It performs PATH lookup only; it does not invoke agent binaries.
+// It performs PATH lookup and a read-only Effort model skip lookup; it does not
+// invoke agent binaries.
 func AgentCatalog(d *Deps) []AgentCatalogRow {
 	return AgentCatalogWithConfig(d, nil)
 }
@@ -50,6 +58,7 @@ func AgentCatalogWithConfig(d *Deps, cfg *config.Config) []AgentCatalogRow {
 	if d != nil && d.LookPath != nil {
 		lookPath = d.LookPath
 	}
+	skips := catalogModelSkips(d, time.Now())
 
 	rows := make([]AgentCatalogRow, 0, len(agentCatalogOrder))
 	seen := make(map[string]bool, len(agentCatalogOrder))
@@ -65,6 +74,7 @@ func AgentCatalogWithConfig(d *Deps, cfg *config.Config) []AgentCatalogRow {
 			EffortLadder:           effortLadderForCatalog(cfg, preset),
 			Models:                 adapter.Models(),
 			ModelsInstallDependent: modelsInstallDependent(adapter),
+			ModelSkips:             skips[preset],
 		})
 		seen[preset] = true
 	}
@@ -76,9 +86,32 @@ func AgentCatalogWithConfig(d *Deps, cfg *config.Config) []AgentCatalogRow {
 			Binary:       agent,
 			Found:        err == nil,
 			EffortLadder: effortLadderForCatalog(cfg, agent),
+			ModelSkips:   skips[agent],
 		})
 	}
 	return rows
+}
+
+// catalogModelSkips reads the Effort model skips in force at now, grouped by
+// preset. The catalog is a display surface with no error channel, so a store it
+// cannot read yields no annotations: the ladder still renders, unmarked, which
+// is exactly what a machine that has never skipped a model shows.
+func catalogModelSkips(d *Deps, now time.Time) map[string]map[string]time.Time {
+	if d == nil {
+		return nil
+	}
+	rows, err := ActiveAgentModelCooldownsWith(d, now)
+	if err != nil {
+		return nil
+	}
+	skips := map[string]map[string]time.Time{}
+	for _, row := range rows {
+		if skips[row.Preset] == nil {
+			skips[row.Preset] = map[string]time.Time{}
+		}
+		skips[row.Preset][row.Model] = row.Until
+	}
+	return skips
 }
 
 func AgentBinary(adapter AgentAdapter) string {

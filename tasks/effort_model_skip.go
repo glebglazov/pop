@@ -57,6 +57,25 @@ func (s effortModelSkips) models(preset string) []string {
 	return out
 }
 
+// FormatModelSkipRemaining renders how much longer an Effort model skip holds,
+// in the one compact form both read surfaces use (`pop tasks agents` and the
+// Work dashboard footer, ADR-0168): "∞" for a permanent skip — the zero until
+// the store writes for a Permanent recovery — and the remaining time otherwise,
+// floored at "<1m" so a skip about to lift never renders as "0m".
+func FormatModelSkipRemaining(until, now time.Time) string {
+	if until.IsZero() {
+		return "∞"
+	}
+	remaining := until.Sub(now)
+	if remaining < time.Minute {
+		return "<1m"
+	}
+	if remaining < time.Hour {
+		return fmt.Sprintf("%dm", int(remaining.Minutes()))
+	}
+	return fmt.Sprintf("%dh%dm", int(remaining.Hours()), int(remaining.Minutes())%60)
+}
+
 // effortModelResolution is what one Agent fallback entry's Effort tier resolves
 // to once recorded skips are filtered out.
 type effortModelResolution struct {

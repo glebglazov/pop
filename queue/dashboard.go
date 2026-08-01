@@ -2744,8 +2744,41 @@ func (m QueueDashboard) frameSpec() ui.Frame {
 		InputBox: inputBox,
 		Warnings: warnings,
 		Status:   m.statusMsg,
+		Footnote: m.modelSkipFootnote(),
 		Hints:    m.mainHint(),
 	}
+}
+
+// modelSkipFootnote renders the standing Effort model skip line (ADR-0168) —
+// `skipped: cursor/claude-opus-5-thinking-high 47m · kimi/k2.7-code-highspeed ∞`
+// — clipped to the terminal width. It is empty when nothing is skipped, which is
+// the steady state, and also in a pane shorter than the two-line-mode floor: at
+// that height ADR-0107 already trades completeness for visible-row density, and
+// the diagnostic is available from `pop tasks agents`.
+func (m QueueDashboard) modelSkipFootnote() string {
+	if len(m.snap.ModelSkips) == 0 || m.height < dashboardTwoLineHeightFloor {
+		return ""
+	}
+	// The Frame indents the footnote region two columns, as it does the status
+	// line, so the budget for the text itself is that much narrower.
+	return ui.TruncateString(formatModelSkipFootnote(m.snap.ModelSkips, time.Now()), m.width-2)
+}
+
+// formatModelSkipFootnote groups the snapshot's skips by preset — each preset
+// named once, its skipped models comma-separated after the slash — and joins the
+// groups with the dashboard's · separator. The snapshot orders skips by preset
+// then model, so adjacent runs are the groups.
+func formatModelSkipFootnote(skips []work.ModelSkip, now time.Time) string {
+	var groups []string
+	for i := 0; i < len(skips); {
+		preset := skips[i].Preset
+		var entries []string
+		for ; i < len(skips) && skips[i].Preset == preset; i++ {
+			entries = append(entries, skips[i].Model+" "+tasks.FormatModelSkipRemaining(skips[i].Until, now))
+		}
+		groups = append(groups, preset+"/"+strings.Join(entries, ", "))
+	}
+	return "skipped: " + strings.Join(groups, " · ")
 }
 
 // mainHint returns the footer hint for the main (non-modal, non-menu) view.

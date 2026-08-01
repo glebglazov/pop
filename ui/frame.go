@@ -19,12 +19,18 @@ type Frame struct {
 	InputBox string   // "" = absent; content when present (e.g. input.View() or " Help")
 	Warnings []string // reserved AND rendered; nil/empty = none
 	Status   string   // "" = absent; transient action feedback, distinct from Warnings
-	Hints    string   // "" = absent
+	// Footnote is a dim standing one-liner about the environment the view runs
+	// in, sitting between Status and Hints. Unlike Status it is derived from the
+	// snapshot rather than from a keypress, so it persists across refreshes;
+	// unlike Warnings it reports a condition the operator need not act on.
+	Footnote string // "" = absent
+	Hints    string // "" = absent
 }
 
 // BodyHeight returns the body row budget for a terminal of height termH: termH
 // minus every present region (1 for Notice, 1 for Header, 3 for InputBox,
-// len(Warnings) for warnings, 1 for Status, 1 for Hints), floored at >= 3.
+// len(Warnings) for warnings, 1 for Status, 1 for Footnote, 1 for Hints),
+// floored at >= 3.
 func (f Frame) BodyHeight(termH int) int {
 	h := termH
 	if f.Notice != "" {
@@ -40,6 +46,9 @@ func (f Frame) BodyHeight(termH int) int {
 	if f.Status != "" {
 		h--
 	}
+	if f.Footnote != "" {
+		h--
+	}
 	if f.Hints != "" {
 		h--
 	}
@@ -50,15 +59,15 @@ func (f Frame) BodyHeight(termH int) int {
 }
 
 // Render composes the frame's regions around body in the fixed order notice
-// -> header -> body -> input box -> warnings -> status -> hints, omitting
-// absent ones. When TermH is known, a short body is padded to the full
+// -> header -> body -> input box -> warnings -> status -> footnote -> hints,
+// omitting absent ones. When TermH is known, a short body is padded to the full
 // BodyHeight budget so trailing regions sit at the bottom of the screen.
 func (f Frame) Render(body string) string {
 	if f.TermH > 0 {
 		body = f.padBody(body)
 	}
 
-	parts := make([]string, 0, 7)
+	parts := make([]string, 0, 8)
 
 	if f.Notice != "" {
 		parts = append(parts, renderUpdateNotice(f.Width, f.Notice))
@@ -87,6 +96,10 @@ func (f Frame) Render(body string) string {
 	if f.Status != "" {
 		statusStyle := lipgloss.NewStyle().Foreground(colorAccent)
 		parts = append(parts, statusStyle.Render("  "+f.Status))
+	}
+
+	if f.Footnote != "" {
+		parts = append(parts, hintStyle.Render("  "+f.Footnote))
 	}
 
 	if f.Hints != "" {

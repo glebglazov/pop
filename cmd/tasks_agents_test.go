@@ -8,8 +8,10 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/tasks"
@@ -23,6 +25,7 @@ func TestTaskAgentsCatalogListsPresetsWithEffortLadders(t *testing.T) {
 	}
 	var looked []string
 	d := &tasks.Deps{
+		FS: cmdTestFS(filepath.Join(t.TempDir(), "xdg"), ""),
 		LookPath: func(file string) (string, error) {
 			looked = append(looked, file)
 			if found[file] {
@@ -74,7 +77,10 @@ func TestTaskAgentsCatalogListsPresetsWithEffortLadders(t *testing.T) {
 }
 
 func TestTaskAgentsModelsListsCuratedAliases(t *testing.T) {
-	d := &tasks.Deps{LookPath: func(file string) (string, error) { return "/mock/bin/" + file, nil }}
+	d := &tasks.Deps{
+		FS:       cmdTestFS(filepath.Join(t.TempDir(), "xdg"), ""),
+		LookPath: func(file string) (string, error) { return "/mock/bin/" + file, nil },
+	}
 	oldLoad := taskConfigLoad
 	taskConfigLoad = func(string) (*config.Config, error) { return nil, nil }
 	t.Cleanup(func() { taskConfigLoad = oldLoad })
@@ -105,6 +111,7 @@ func TestTaskAgentsModelsListsCuratedAliases(t *testing.T) {
 
 func TestTaskAgentsCatalogListsConfigOnlyEffortAgents(t *testing.T) {
 	d := &tasks.Deps{
+		FS: cmdTestFS(filepath.Join(t.TempDir(), "xdg"), ""),
 		LookPath: func(file string) (string, error) {
 			if file == "custom-agent" {
 				return "/mock/bin/" + file, nil
@@ -130,6 +137,52 @@ func TestTaskAgentsCatalogListsConfigOnlyEffortAgents(t *testing.T) {
 	want := "custom-agent custom-agent   yes   no     heavy: custom-large[reasoning=high] (configured); standard: none (configured); light: none (configured)\n"
 	if !strings.Contains(got, want) {
 		t.Fatalf("config-only agent row missing\nwant contains:\n%sgot:\n%s", want, got)
+	}
+}
+
+// TestTaskAgentsCatalogMarksSkippedLadderEntries pins the read surface that
+// answers "why is it running the cheap model?" (ADR-0168): a ladder entry with
+// an Effort model skip in force carries its remaining time, a permanent skip
+// carries ∞, and every other entry renders unmarked.
+func TestTaskAgentsCatalogMarksSkippedLadderEntries(t *testing.T) {
+	d := &tasks.Deps{
+		FS:       cmdTestFS(filepath.Join(t.TempDir(), "xdg"), ""),
+		LookPath: func(file string) (string, error) { return "/mock/bin/" + file, nil },
+	}
+	s, _, err := d.Store(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutAgentModelCooldown("claude", "opus", time.Now().Add(47*time.Minute+30*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutAgentModelCooldown("kimi", "moonshot-ai/kimi-k2.7-code-highspeed", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	oldLoad := taskConfigLoad
+	taskConfigLoad = func(string) (*config.Config, error) { return nil, nil }
+	t.Cleanup(func() { taskConfigLoad = oldLoad })
+
+	var buf bytes.Buffer
+	if err := runTaskAgentsWith(d, &buf, false); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{
+		"heavy: opus[reasoning=high] (skipped 47m) (built-in)",
+		"light: moonshot-ai/kimi-k2.7-code-highspeed (skipped ∞) (built-in)",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("catalog missing %q:\n%s", want, got)
+		}
+	}
+	// A model with no skip recorded stays unmarked, and a skip is keyed by
+	// preset: claude's opus skip says nothing about another preset's tier.
+	if strings.Contains(got, "sonnet[reasoning=high] (skipped") {
+		t.Fatalf("unskipped ladder entry marked as skipped:\n%s", got)
+	}
+	if strings.Contains(got, "moonshot-ai/kimi-k3[reasoning=high] (skipped") {
+		t.Fatalf("kimi heavy marked from a light-tier skip:\n%s", got)
 	}
 }
 

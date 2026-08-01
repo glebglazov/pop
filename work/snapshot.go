@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -277,15 +278,22 @@ func BuildSnapshot(d *Deps, cfg *config.Config) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
+	now := d.now().UTC()
+	// Machine-global, so it holds even for a machine with no renderable repo
+	// group: the footer explains a ladder walking its tail regardless of which
+	// rows are on screen.
+	skips, err := modelSkips(d, now)
+	if err != nil {
+		return Snapshot{}, err
+	}
 	if len(statics) == 0 {
-		return Snapshot{}, nil
+		return Snapshot{ModelSkips: skips}, nil
 	}
 
 	var delays []time.Duration
 	if qcfg, qerr := cfg.ResolveQueue(); qerr == nil {
 		delays = qcfg.CrashRetryDelays
 	}
-	now := d.now().UTC()
 	snap, err := newSnapshot(d)
 	if err != nil {
 		return Snapshot{}, err
@@ -299,7 +307,31 @@ func BuildSnapshot(d *Deps, cfg *config.Config) (Snapshot, error) {
 		rows = append(rows, groupRows...)
 	}
 	SortRows(rows)
-	return Snapshot{Rows: rows}, nil
+	return Snapshot{Rows: rows, ModelSkips: skips}, nil
+}
+
+// modelSkips reads the Effort model skips in force at now (ADR-0168) in a stable
+// preset-then-model order. The read never materialises a store, so a machine
+// that has never skipped a model pays only the miss.
+func modelSkips(d *Deps, now time.Time) ([]ModelSkip, error) {
+	rows, err := tasks.ActiveAgentModelCooldownsWith(d.Tasks, now)
+	if err != nil {
+		return nil, err
+	}
+	skips := make([]ModelSkip, 0, len(rows))
+	for _, row := range rows {
+		skips = append(skips, ModelSkip{Preset: row.Preset, Model: row.Model, Until: row.Until})
+	}
+	sort.Slice(skips, func(i, j int) bool {
+		if skips[i].Preset != skips[j].Preset {
+			return skips[i].Preset < skips[j].Preset
+		}
+		return skips[i].Model < skips[j].Model
+	})
+	if len(skips) == 0 {
+		return nil, nil
+	}
+	return skips, nil
 }
 
 // repoStatics resolves every renderable repo group's static coordinates fork-free

@@ -8,7 +8,11 @@
 // derives from them.
 package work
 
-import "github.com/glebglazov/pop/tasks"
+import (
+	"time"
+
+	"github.com/glebglazov/pop/tasks"
+)
 
 // SetRef holds the resolved, fork-free coordinates of one registered Task set
 // that the Queue write-path acts on, plus the per-build derived facts the
@@ -102,6 +106,20 @@ type Row struct {
 // Snapshot is the data model for `pop work dashboard`.
 type Snapshot struct {
 	Rows []Row
+	// ModelSkips are the Effort model skips in force at build time (ADR-0168),
+	// ordered by preset then model. They are machine-global rather than per-row,
+	// which is why they ride the snapshot and render as a footer one-liner rather
+	// than as a row cell. Empty is the steady state.
+	ModelSkips []ModelSkip
+}
+
+// ModelSkip is one Effort model skip still in force: the preset whose ladder
+// entry pop is walking past, the `--model` token that entry pins, and when the
+// skip lifts. A zero Until is a permanent skip (ADR-0168).
+type ModelSkip struct {
+	Preset string
+	Model  string
+	Until  time.Time
 }
 
 // DestKind selects how the WORKTREE destination column is styled. The plain
