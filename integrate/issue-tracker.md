@@ -5,12 +5,10 @@ pop's own Task storage, reached through the `pop` CLI. A planning skill that onl
 knows "consult the Work store doc for this operation" can publish correctly using
 the per-operation sections below; nothing here refers back into a skill body.
 
-Resolution is two-layer. A repo-level `docs/agents/issue-tracker.md` (the upstream
-tracker-doc convention) wins when present. Absent that, skills read *this* file,
-pop's Shipped asset at `${XDG_DATA_HOME:-~/.local/share}/pop/work-store.md`.
-pop rewrites it on every Integration refresh whenever its bytes differ from the
-embedded copy — so to change publish behaviour, write the repo doc at
-`docs/agents/issue-tracker.md`.
+Resolution is two-layer. A repo-level `docs/agents/issue-tracker.md` wins when
+present. Absent that, skills read the user-level `~/.agents/docs/issue-tracker.md`
+— which is where *this* file is reached from. To change publish behaviour for one
+repository, write the repo doc at `docs/agents/issue-tracker.md`.
 
 All paths resolve through one command. Run it once per session:
 

@@ -185,10 +185,22 @@ func popDataDirWith(d *Deps) (string, error) {
 	return filepath.Join(home, ".local", "share", "pop"), nil
 }
 
-// workStoreDocPath returns the pop Work store doc Shipped-asset path at
-// ${XDG_DATA_HOME:-~/.local/share}/pop/work-store.md (ADR-0150). Resolution
-// goes through the deps data-dir seam so tests can redirect it into a fake FS.
-func workStoreDocPath(d *Deps) (string, error) {
+// issueTrackerDocPath returns the Issue tracker doc Shipped-asset path at
+// ${XDG_DATA_HOME:-~/.local/share}/pop/agents/docs/issue-tracker.md (ADR-0169),
+// mirroring the user-level `~/.agents/docs/` layout. Resolution goes through the
+// deps data-dir seam so tests can redirect it into a fake FS.
+func issueTrackerDocPath(d *Deps) (string, error) {
+	dataDir, err := d.dataDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dataDir, "agents", "docs", "issue-tracker.md"), nil
+}
+
+// staleDataDirWorkStoreDocPath returns the pre-ADR-0169 Shipped-asset path at
+// ${XDG_DATA_HOME:-~/.local/share}/pop/work-store.md. Nothing reads this file
+// anymore; Integration refresh deletes it unconditionally when present.
+func staleDataDirWorkStoreDocPath(d *Deps) (string, error) {
 	dataDir, err := d.dataDir()
 	if err != nil {
 		return "", err
@@ -225,37 +237,50 @@ func legacyWorkStoreDocPath(d *Deps) (string, error) {
 // outcome naming the removed path, or nil when the file is absent or removal
 // fails — refresh callers must not treat a removal failure as fatal.
 func removeLegacyWorkStoreDoc(d *Deps) *Outcome {
-	path, err := legacyWorkStoreDocPath(d)
+	return removeStaleDoc(d, legacyWorkStoreDocPath, "removeLegacyWorkStoreDoc")
+}
+
+// removeStaleDataDirWorkStoreDoc deletes the pre-ADR-0169 data-dir Work store
+// doc when present, with the same non-fatal contract as the config-dir removal.
+func removeStaleDataDirWorkStoreDoc(d *Deps) *Outcome {
+	return removeStaleDoc(d, staleDataDirWorkStoreDocPath, "removeStaleDataDirWorkStoreDoc")
+}
+
+// removeStaleDoc deletes one superseded doc path when present, unconditionally
+// and without byte comparison. Returns one Integrate outcome naming the removed
+// path, or nil when the file is absent or removal fails.
+func removeStaleDoc(d *Deps, resolve func(*Deps) (string, error), what string) *Outcome {
+	path, err := resolve(d)
 	if err != nil {
-		debug.Error("removeLegacyWorkStoreDoc: path: %v", err)
+		debug.Error("%s: path: %v", what, err)
 		return nil
 	}
 	if _, err := d.readFile(path); err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
-		debug.Error("removeLegacyWorkStoreDoc: read %s: %v", path, err)
+		debug.Error("%s: read %s: %v", what, path, err)
 		return nil
 	}
 	if err := d.removeAll(path); err != nil {
-		debug.Error("removeLegacyWorkStoreDoc: remove %s: %v", path, err)
+		debug.Error("%s: remove %s: %v", what, path, err)
 		return nil
 	}
 	return &Outcome{Skill: path, Label: "removed"}
 }
 
-// seedWorkStoreDoc writes the embedded pop Work store doc to its Shipped-asset
-// path whenever on-disk bytes differ from the embedded copy (ADR-0150). A
-// matching file is left untouched. Agent-agnostic: callers invoke it once per
-// Integration refresh, not once per agent.
-func seedWorkStoreDoc(d *Deps) error {
-	path, err := workStoreDocPath(d)
+// seedIssueTrackerDoc writes the embedded Issue tracker doc to its Shipped-asset
+// path whenever on-disk bytes differ from the embedded copy (ADR-0150,
+// ADR-0169). A matching file is left untouched. Agent-agnostic: callers invoke
+// it once per Integration refresh, not once per agent.
+func seedIssueTrackerDoc(d *Deps) error {
+	path, err := issueTrackerDocPath(d)
 	if err != nil {
 		return err
 	}
 	existing, err := d.readFile(path)
 	if err == nil {
-		if bytes.Equal(existing, workStoreDoc) {
+		if bytes.Equal(existing, issueTrackerDoc) {
 			return nil
 		}
 	} else if !os.IsNotExist(err) {
@@ -264,5 +289,5 @@ func seedWorkStoreDoc(d *Deps) error {
 	if err := d.mkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return d.writeFile(path, workStoreDoc, 0o644)
+	return d.writeFile(path, issueTrackerDoc, 0o644)
 }

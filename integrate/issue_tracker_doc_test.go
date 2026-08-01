@@ -9,12 +9,12 @@ import (
 	"testing"
 )
 
-// TestWorkStoreDoc_EmbeddedContent asserts the embedded pop Work store doc
+// TestIssueTrackerDoc_EmbeddedContent asserts the embedded pop Work store doc
 // carries the three per-operation sections and uses spec.md throughout — never
 // the legacy prd.md filename (ADR-0136).
-func TestWorkStoreDoc_EmbeddedContent(t *testing.T) {
+func TestIssueTrackerDoc_EmbeddedContent(t *testing.T) {
 	t.Parallel()
-	body := string(workStoreDoc)
+	body := string(issueTrackerDoc)
 	if len(body) == 0 {
 		t.Fatal("embedded work store doc is empty")
 	}
@@ -36,12 +36,19 @@ func TestWorkStoreDoc_EmbeddedContent(t *testing.T) {
 	if strings.Contains(body, "XDG_CONFIG_HOME") {
 		t.Error("embedded doc must not reference the legacy config-dir path")
 	}
-	if !strings.Contains(body, "XDG_DATA_HOME") {
-		t.Error("embedded doc must name the data-dir Shipped-asset path")
+	if strings.Contains(body, "XDG_DATA_HOME") {
+		t.Error("embedded doc must not quote a pop data-dir path (ADR-0169)")
+	}
+	if !strings.Contains(body, "~/.agents/docs/issue-tracker.md") {
+		t.Error("embedded doc must name the vendor-neutral user-level path")
 	}
 }
 
-func workStoreDataPath(home string) string {
+func issueTrackerDataPath(home string) string {
+	return filepath.Join(home, ".local", "share", "pop", "agents", "docs", "issue-tracker.md")
+}
+
+func staleWorkStoreDataPath(home string) string {
 	return filepath.Join(home, ".local", "share", "pop", "work-store.md")
 }
 
@@ -165,54 +172,54 @@ func TestRefresh_LegacyWorkStoreDocRemoval(t *testing.T) {
 	})
 }
 
-// TestSeedWorkStoreDoc_WritesWhenAbsent covers the write-if-different semantics:
+// TestSeedIssueTrackerDoc_WritesWhenAbsent covers the write-if-different semantics:
 // an empty machine writes the embedded doc verbatim to the data-dir path.
-func TestSeedWorkStoreDoc_WritesWhenAbsent(t *testing.T) {
+func TestSeedIssueTrackerDoc_WritesWhenAbsent(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
 	d := fakeDeps("/h", fs, io.Discard)
 
-	if err := seedWorkStoreDoc(d); err != nil {
-		t.Fatalf("seedWorkStoreDoc: %v", err)
+	if err := seedIssueTrackerDoc(d); err != nil {
+		t.Fatalf("seedIssueTrackerDoc: %v", err)
 	}
-	want := workStoreDataPath("/h")
+	want := issueTrackerDataPath("/h")
 	got, ok := fs.files[want]
 	if !ok {
 		t.Fatalf("expected doc at %s, files: %v", want, sortedKeys(fs.files))
 	}
-	if !bytes.Equal(got, workStoreDoc) {
+	if !bytes.Equal(got, issueTrackerDoc) {
 		t.Error("written doc bytes differ from the embedded doc")
 	}
 }
 
-// TestSeedWorkStoreDoc_RewritesWhenDifferent covers the rewrite semantics: a
+// TestSeedIssueTrackerDoc_RewritesWhenDifferent covers the rewrite semantics: a
 // stale on-disk copy is replaced with the embedded bytes on every seed call.
-func TestSeedWorkStoreDoc_RewritesWhenDifferent(t *testing.T) {
+func TestSeedIssueTrackerDoc_RewritesWhenDifferent(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
-	path := workStoreDataPath("/h")
+	path := issueTrackerDataPath("/h")
 	stale := []byte("# stale copy\n")
 	fs.files[path] = append([]byte{}, stale...)
 
 	d := fakeDeps("/h", fs, io.Discard)
 	for i := 0; i < 3; i++ {
-		if err := seedWorkStoreDoc(d); err != nil {
-			t.Fatalf("seedWorkStoreDoc (pass %d): %v", i, err)
+		if err := seedIssueTrackerDoc(d); err != nil {
+			t.Fatalf("seedIssueTrackerDoc (pass %d): %v", i, err)
 		}
 	}
-	if !bytes.Equal(fs.files[path], workStoreDoc) {
+	if !bytes.Equal(fs.files[path], issueTrackerDoc) {
 		t.Errorf("stale doc was not rewritten to embedded bytes: %q", fs.files[path])
 	}
 }
 
-// TestSeedWorkStoreDoc_SkipsWriteWhenMatching proves a refresh with matching
+// TestSeedIssueTrackerDoc_SkipsWriteWhenMatching proves a refresh with matching
 // bytes performs no write — the file map entry is left untouched.
-func TestSeedWorkStoreDoc_SkipsWriteWhenMatching(t *testing.T) {
+func TestSeedIssueTrackerDoc_SkipsWriteWhenMatching(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
-	path := workStoreDataPath("/h")
+	path := issueTrackerDataPath("/h")
 	// Pre-seed with embedded bytes; a write would be observable via a counter.
-	fs.files[path] = append([]byte{}, workStoreDoc...)
+	fs.files[path] = append([]byte{}, issueTrackerDoc...)
 	var writes int
 
 	d := fakeDeps("/h", fs, io.Discard)
@@ -222,8 +229,8 @@ func TestSeedWorkStoreDoc_SkipsWriteWhenMatching(t *testing.T) {
 	}
 
 	for i := 0; i < 3; i++ {
-		if err := seedWorkStoreDoc(d); err != nil {
-			t.Fatalf("seedWorkStoreDoc (pass %d): %v", i, err)
+		if err := seedIssueTrackerDoc(d); err != nil {
+			t.Fatalf("seedIssueTrackerDoc (pass %d): %v", i, err)
 		}
 	}
 	if writes != 0 {
@@ -231,9 +238,9 @@ func TestSeedWorkStoreDoc_SkipsWriteWhenMatching(t *testing.T) {
 	}
 }
 
-// TestSeedWorkStoreDoc_RespectsXDGDataHome resolves the doc under
+// TestSeedIssueTrackerDoc_RespectsXDGDataHome resolves the doc under
 // $XDG_DATA_HOME/pop, not the home fallback, when the env var is set.
-func TestSeedWorkStoreDoc_RespectsXDGDataHome(t *testing.T) {
+func TestSeedIssueTrackerDoc_RespectsXDGDataHome(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
 	d := fakeDeps("/h", fs, io.Discard)
@@ -245,14 +252,14 @@ func TestSeedWorkStoreDoc_RespectsXDGDataHome(t *testing.T) {
 	}
 	d.dataDir = func() (string, error) { return filepath.Join("/data", "pop"), nil }
 
-	if err := seedWorkStoreDoc(d); err != nil {
-		t.Fatalf("seedWorkStoreDoc: %v", err)
+	if err := seedIssueTrackerDoc(d); err != nil {
+		t.Fatalf("seedIssueTrackerDoc: %v", err)
 	}
-	want := filepath.Join("/data", "pop", "work-store.md")
+	want := filepath.Join("/data", "pop", "agents", "docs", "issue-tracker.md")
 	if _, ok := fs.files[want]; !ok {
 		t.Fatalf("expected doc at %s, files: %v", want, sortedKeys(fs.files))
 	}
-	if _, ok := fs.files[workStoreDataPath("/h")]; ok {
+	if _, ok := fs.files[issueTrackerDataPath("/h")]; ok {
 		t.Error("doc must not be written under the home fallback when XDG_DATA_HOME is set")
 	}
 }
@@ -272,12 +279,12 @@ func TestRefresh_WritesWorkStoreDocOnceAcrossAgents(t *testing.T) {
 		t.Fatalf("unexpected warnings: %v", warnings)
 	}
 
-	path := workStoreDataPath("/h")
+	path := issueTrackerDataPath("/h")
 	got, ok := fs.files[path]
 	if !ok {
 		t.Fatalf("refresh did not write the Work store doc at %s", path)
 	}
-	if !bytes.Equal(got, workStoreDoc) {
+	if !bytes.Equal(got, issueTrackerDoc) {
 		t.Error("written doc bytes differ from the embedded doc")
 	}
 }
@@ -290,7 +297,7 @@ func TestRefresh_RewritesStaleWorkStoreDoc(t *testing.T) {
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 
-	path := workStoreDataPath("/h")
+	path := issueTrackerDataPath("/h")
 	stale := []byte("# hand-edited stale copy\n\nconsult pop docs.\n")
 	fs.files[path] = append([]byte{}, stale...)
 
@@ -299,7 +306,7 @@ func TestRefresh_RewritesStaleWorkStoreDoc(t *testing.T) {
 		t.Fatalf("unexpected warnings: %v", warnings)
 	}
 
-	if !bytes.Equal(fs.files[path], workStoreDoc) {
+	if !bytes.Equal(fs.files[path], issueTrackerDoc) {
 		t.Errorf("refresh did not rewrite stale Work store doc: %q", fs.files[path])
 	}
 }
@@ -312,8 +319,8 @@ func TestRefresh_SkipsWriteWhenWorkStoreDocMatches(t *testing.T) {
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 
-	path := workStoreDataPath("/h")
-	fs.files[path] = append([]byte{}, workStoreDoc...)
+	path := issueTrackerDataPath("/h")
+	fs.files[path] = append([]byte{}, issueTrackerDoc...)
 	var workStoreWrites int
 
 	_, baseReal := fakeFactories("/h", fs)
@@ -334,6 +341,104 @@ func TestRefresh_SkipsWriteWhenWorkStoreDocMatches(t *testing.T) {
 	}
 
 	if workStoreWrites != 0 {
-		t.Errorf("refresh wrote work-store.md when bytes already matched, got %d writes", workStoreWrites)
+		t.Errorf("refresh wrote issue-tracker.md when bytes already matched, got %d writes", workStoreWrites)
 	}
+}
+
+// TestRemoveStaleDataDirWorkStoreDoc covers present / absent / unwritable
+// removal of the pre-ADR-0169 data-dir Work store doc.
+func TestRemoveStaleDataDirWorkStoreDoc(t *testing.T) {
+	t.Parallel()
+
+	t.Run("present", func(t *testing.T) {
+		t.Parallel()
+		fs := newFakeFS()
+		path := staleWorkStoreDataPath("/h")
+		fs.files[path] = []byte("# stale data-dir copy\n")
+
+		outcome := removeStaleDataDirWorkStoreDoc(fakeDeps("/h", fs, io.Discard))
+		if outcome == nil {
+			t.Fatal("expected removal outcome when stale doc is present")
+		}
+		if outcome.Skill != path {
+			t.Errorf("outcome path = %q, want %q", outcome.Skill, path)
+		}
+		if outcome.Label != "removed" {
+			t.Errorf("outcome label = %q, want removed", outcome.Label)
+		}
+		if _, ok := fs.files[path]; ok {
+			t.Errorf("stale doc still present at %s", path)
+		}
+	})
+
+	t.Run("absent", func(t *testing.T) {
+		t.Parallel()
+		fs := newFakeFS()
+		if outcome := removeStaleDataDirWorkStoreDoc(fakeDeps("/h", fs, io.Discard)); outcome != nil {
+			t.Errorf("expected no outcome when stale doc is absent, got %+v", outcome)
+		}
+	})
+
+	t.Run("unwritable", func(t *testing.T) {
+		t.Parallel()
+		fs := newFakeFS()
+		path := staleWorkStoreDataPath("/h")
+		fs.files[path] = []byte("# stale data-dir copy\n")
+		fs.removeErr[path] = os.ErrPermission
+
+		if outcome := removeStaleDataDirWorkStoreDoc(fakeDeps("/h", fs, io.Discard)); outcome != nil {
+			t.Errorf("expected no outcome when removal fails, got %+v", outcome)
+		}
+		if _, ok := fs.files[path]; !ok {
+			t.Error("stale doc must remain when removal fails")
+		}
+	})
+}
+
+// TestRefresh_StaleDataDirWorkStoreDocRemoval proves Integration refresh deletes
+// the pre-ADR-0169 data-dir copy while seeding the asset at its new path, and
+// does not fail when removal is blocked.
+func TestRefresh_StaleDataDirWorkStoreDocRemoval(t *testing.T) {
+	t.Parallel()
+
+	t.Run("present", func(t *testing.T) {
+		t.Parallel()
+		setupIntegrateConfigLayer(t)
+		fs := newFakeFS()
+		stalePath := staleWorkStoreDataPath("/h")
+		fs.files[stalePath] = []byte("# stale data-dir copy\n")
+
+		_, real := fakeFactories("/h", fs)
+		var stdout strings.Builder
+		if err := RunUpdateExistingWith("rev-stale1", testConfigDeps(t), real, &stdout, io.Discard, false); err != nil {
+			t.Fatalf("RunUpdateExistingWith: %v", err)
+		}
+		if _, ok := fs.files[stalePath]; ok {
+			t.Errorf("refresh did not delete stale doc at %s", stalePath)
+		}
+		if _, ok := fs.files[issueTrackerDataPath("/h")]; !ok {
+			t.Errorf("refresh must seed the asset at its new path, files: %v", sortedKeys(fs.files))
+		}
+		got := stdout.String()
+		if !strings.Contains(got, stalePath) || !strings.Contains(got, "removed") {
+			t.Errorf("expected removal outcome naming %s, got %q", stalePath, got)
+		}
+	})
+
+	t.Run("unwritable", func(t *testing.T) {
+		t.Parallel()
+		setupIntegrateConfigLayer(t)
+		fs := newFakeFS()
+		stalePath := staleWorkStoreDataPath("/h")
+		fs.files[stalePath] = []byte("# stale data-dir copy\n")
+		fs.removeErr[stalePath] = os.ErrPermission
+
+		_, real := fakeFactories("/h", fs)
+		if warnings := ensureForRevisionWith("rev-stale2", testConfigDeps(t), real); len(warnings) != 0 {
+			t.Fatalf("refresh must not fail on removal error, got warnings: %v", warnings)
+		}
+		if _, ok := fs.files[stalePath]; !ok {
+			t.Error("stale doc must remain when removal is blocked")
+		}
+	})
 }

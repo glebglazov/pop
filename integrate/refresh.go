@@ -83,8 +83,8 @@ func saveAppState(d *Deps, s *appState) error {
 // EnsureForRevision is the revision-gated Integration refresh entry point.
 // The caller supplies the binary revision (cmd injects buildRevision());
 // integrate never derives it. When the recorded revision differs, installed
-// integration components are reconciled to the merged baseline and the Work
-// store doc is seeded; when it matches, refresh is skipped. Returns warnings
+// integration components are reconciled to the merged baseline and the Issue
+// tracker doc is seeded; when it matches, refresh is skipped. Returns warnings
 // to surface in the picker for any failures.
 func EnsureForRevision(rev string, cd *config.Deps) []string {
 	return ensureForRevisionWith(rev, cd, DefaultDeps)
@@ -109,11 +109,14 @@ type integrationUpdateResult struct {
 // on top (see ensureForRevisionWith and RunUpdateExistingWith).
 func updateStaleIntegrations(cd *config.Deps, newDeps func() *Deps) integrationUpdateResult {
 	d := newDeps()
-	if err := seedWorkStoreDoc(d); err != nil {
-		debug.Error("updateStaleIntegrations: seed work store doc: %v", err)
+	if err := seedIssueTrackerDoc(d); err != nil {
+		debug.Error("updateStaleIntegrations: seed issue tracker doc: %v", err)
 	}
 
 	var result integrationUpdateResult
+	if o := removeStaleDataDirWorkStoreDoc(d); o != nil {
+		result.Outcomes = append(result.Outcomes, *o)
+	}
 	if o := removeLegacyWorkStoreDoc(d); o != nil {
 		result.Outcomes = append(result.Outcomes, *o)
 	}

@@ -1760,7 +1760,7 @@ func TestEnsureIntegrations_SkipsUninstalledAgents(t *testing.T) {
 		t.Errorf("expected no agent artifacts for uninstalled agents, got symlinks %v", fs.symlinks)
 	}
 	// Refresh still seeds the machine-global Work store doc (agent-agnostic).
-	docPath, err := workStoreDocPath(fakeDeps("/h", fs, io.Discard))
+	docPath, err := issueTrackerDocPath(fakeDeps("/h", fs, io.Discard))
 	if err != nil {
 		t.Fatalf("resolve work store doc path: %v", err)
 	}
@@ -1966,7 +1966,7 @@ func TestEnsureIntegrations_NeverAddsUninstalledFileComponent(t *testing.T) {
 		t.Errorf("refresh must never add a component: created symlinks %v", fs.symlinks)
 	}
 	// The Work store doc is seeded on every refresh; it is not a component.
-	docPath, err := workStoreDocPath(fakeDeps("/h", fs, io.Discard))
+	docPath, err := issueTrackerDocPath(fakeDeps("/h", fs, io.Discard))
 	if err != nil {
 		t.Fatalf("resolve work store doc path: %v", err)
 	}
