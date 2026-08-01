@@ -16,7 +16,7 @@ files to read in ranges, and where agent-CLI wire facts live:
 
 Issues, specs, and task sets live in pop's per-machine Work store. No repo
 tracker doc by design — each machine resolves its own store via
-`${XDG_DATA_HOME:-~/.local/share}/pop/work-store.md`.
+`~/.agents/docs/issue-tracker.md`.
 
 ### Domain docs
 

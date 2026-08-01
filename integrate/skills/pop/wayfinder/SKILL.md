@@ -15,11 +15,12 @@ installed). Pop-authored frontmatter is kept (name `wayfinder`, pop description,
 `disable-model-invocation`: wayfinding is a manual-only session the user opens
 with `/pop-wayfinder`, never something the model starts on its own). Pop's
 Work-store seam and its irreducible invocation deltas live below the marker
-(ADR-0136). Upstream already routes the map, its tickets, blocking, claiming,
-resolution, and the frontier through the tracker doc's "Wayfinding operations"
-section (see "The Map"); the pop doc now carries those, so the overlay only names
-which doc and states the deltas with no home there. To review upstream drift, diff
-the region between this header and the marker against engineering/wayfinder@<newref>.
+(ADR-0136, ADR-0169). Upstream already routes the map, its tickets, blocking,
+claiming, resolution, and the frontier through the tracker doc's "Wayfinding
+operations" section (see "The Map"); the pop doc now carries those, so the
+overlay only names which doc and states the deltas with no home there. To
+review upstream drift, diff the region between this header and the marker
+against engineering/wayfinder@<newref>.
 -->
 
 A loose idea has arrived — too big for one agent session, and wrapped in fog: the way from here to the **destination** isn't visible yet. Wayfinding is about finding that way, not charging at the destination. This skill charts the way as a **shared map** on the repo's issue tracker, then works its **decision tickets** — questions whose resolution is a decision, not slices of a build to execute — one at a time until the route is clear.
@@ -150,19 +151,20 @@ verbatim region above. Upstream already routes the map, its tickets, blocking,
 claiming, resolution, and the frontier through the tracker doc's "Wayfinding
 operations" section (see "The Map"); the pop doc now carries those, so this
 overlay only resolves which doc and states the deltas that live in upstream's
-`## Invocation` flow rather than behind that seam (ADR-0136). Where a line below
-contradicts the verbatim upstream region, the line below wins; the upstream text
-is kept byte-intact only so drift stays diffable.
+`## Invocation` flow rather than behind that seam (ADR-0136, ADR-0169). Where
+a line below contradicts the verbatim upstream region, the line below wins;
+the upstream text is kept byte-intact only so drift stays diffable.
 -->
 
-## Work store resolution
+## Issue tracker doc resolution
 
 Ignore upstream's "run `/setup-matt-pocock-skills`" line and its default
-local-markdown tracker. Resolve the Work store two-layer instead:
+local-markdown tracker. Resolve the issue-tracker doc two-layer instead:
 
-1. If the repo has `docs/agents/issue-tracker.md`, that store wins.
-2. Otherwise read pop's Shipped asset at
-   `${XDG_DATA_HOME:-~/.local/share}/pop/work-store.md`.
+1. If the repo has `docs/agents/issue-tracker.md`, that doc wins.
+2. Otherwise read `~/.agents/docs/issue-tracker.md`.
+3. If neither exists, stop and tell the user no issue-tracker doc is
+   configured — there is no further fallback.
 
 Resolve this repository's Task-storage root once per session with
 `pop work show-path`; the doc lays maps out under a `wayfinder/` sibling of that

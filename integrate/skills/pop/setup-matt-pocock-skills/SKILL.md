@@ -15,8 +15,8 @@ without them installed). The name is kept upstream-verbatim — pop honors the
 flow's origin rather than renaming it (ADR-0141) — with a pop description and
 `disable-model-invocation` (this is a manual-only setup session). Pop's
 Work-store seam and its trims to upstream's tracker/triage/scaffolding steps
-live below the marker (ADR-0136, ADR-0141). To review upstream drift, diff the
-region between this header and the marker against
+live below the marker (ADR-0136, ADR-0141, ADR-0169). To review upstream
+drift, diff the region between this header and the marker against
 engineering/setup-matt-pocock-skills@<newref>.
 -->
 
@@ -143,7 +143,7 @@ Where a line below contradicts the verbatim upstream region, the line below
 wins; the upstream text is kept byte-intact only so drift stays diffable.
 -->
 
-## Work store: pop as a tracker choice
+## Issue tracker doc resolution
 
 In **Section A**, add pop's Work store as a first-class option alongside
 GitHub / GitLab / Local markdown / Other:
@@ -155,19 +155,18 @@ GitHub / GitLab / Local markdown / Other:
 
 When the user picks pop, **write NO repo `docs/agents/issue-tracker.md` by
 default.** An absent repo doc is the signal: the planning skills fall back to
-pop's Shipped asset at
-`${XDG_DATA_HOME:-~/.local/share}/pop/work-store.md`, so each machine resolves
+the machine-level `~/.agents/docs/issue-tracker.md`, so each machine resolves
 its own store. Do not synthesize a repo tracker doc from a template — there is
-no pop tracker template, and a committed doc would override the Shipped asset
-for everyone.
+no pop tracker template, and a committed doc would override that machine-level
+default for everyone.
 
 Offer, as a **one-line option only**, committing a repo doc to pin the choice
 for the whole team:
 
 > Want to pin pop as the tracker for everyone who clones this repo? I can
 > commit a one-line `docs/agents/issue-tracker.md` that names pop; otherwise I
-> leave it absent and each machine uses its own Shipped asset at
-> `${XDG_DATA_HOME:-~/.local/share}/pop/work-store.md`.
+> leave it absent and each machine uses its own
+> `~/.agents/docs/issue-tracker.md`.
 
 Only write the repo doc if the user says yes. Silence means leave it absent.
 

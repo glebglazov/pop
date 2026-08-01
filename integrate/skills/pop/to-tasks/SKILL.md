@@ -14,8 +14,9 @@ ADR-0009 (skills are embedded in the binary and ship to machines without them
 installed). Pop-authored frontmatter is kept (name `to-tasks`, pop description,
 `disable-model-invocation`: to-tasks is a manual-only planning skill). Pop's
 Work-store seam, quiz negation, invocation arguments, and the wayfinder-map
-source live below the marker (ADR-0136). To review upstream drift, diff the
-region between this header and the marker against engineering/to-tickets@<newref>.
+source live below the marker (ADR-0136, ADR-0169). To review upstream drift,
+diff the region between this header and the marker against
+engineering/to-tickets@<newref>.
 -->
 
 # To Tickets
@@ -121,20 +122,21 @@ In either form, avoid specific file paths or code snippets — they go stale fas
 Everything below is pop-specific and replaces the tracker-doc seam in the
 verbatim region above. It swaps upstream's `/setup-matt-pocock-skills` line and
 its step-5 publish mechanics for pop's Work-store doc, negates the Quiz step,
-and adds pop's invocation arguments (ADR-0136). Where a line below contradicts
-the verbatim upstream region, the line below wins; the upstream text is kept
-byte-intact only so drift stays diffable.
+and adds pop's invocation arguments (ADR-0136, ADR-0169). Where a line below
+contradicts the verbatim upstream region, the line below wins; the upstream
+text is kept byte-intact only so drift stays diffable.
 -->
 
-## Work store resolution
+## Issue tracker doc resolution
 
 Ignore upstream's "run `/setup-matt-pocock-skills`" line **and** its step-5
 publish mechanics (templates, `ready-for-agent` label, `.scratch/…` paths).
-Resolve the Work store two-layer instead:
+Resolve the issue-tracker doc two-layer instead:
 
-1. If the repo has `docs/agents/issue-tracker.md`, that store wins.
-2. Otherwise read pop's Shipped asset at
-   `${XDG_DATA_HOME:-~/.local/share}/pop/work-store.md`.
+1. If the repo has `docs/agents/issue-tracker.md`, that doc wins.
+2. Otherwise read `~/.agents/docs/issue-tracker.md`.
+3. If neither exists, stop and tell the user no issue-tracker doc is
+   configured — there is no further fallback.
 
 Publish the tickets per the resolved doc's **"Publishing tickets"** section. That
 section owns every publish mechanic — the task-markdown template, the `index.json`

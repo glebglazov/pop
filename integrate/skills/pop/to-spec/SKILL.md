@@ -13,9 +13,9 @@ the pinned ref above. Pop inlines rather than delegating to Matt's skills, per
 ADR-0009 (skills are embedded in the binary and ship to machines without them
 installed). Pop-authored frontmatter is kept (name `to-spec`, pop description,
 `disable-model-invocation`: to-spec is a manual-only planning skill). Pop's
-Work-store seam and the wayfinder-map source live below the marker (ADR-0136).
-To review upstream drift, diff the region between this header and the marker
-against engineering/to-spec@<newref>.
+Work-store seam and the wayfinder-map source live below the marker (ADR-0136,
+ADR-0169). To review upstream drift, diff the region between this header and
+the marker against engineering/to-spec@<newref>.
 -->
 
 This skill takes the current conversation context and codebase understanding and produces a spec (you may know this document as a PRD). Do NOT interview the user — just synthesize what you already know.
@@ -91,20 +91,21 @@ Any further notes about the feature.
 Everything below is pop-specific and replaces the tracker-doc seam in the
 verbatim region above. It swaps upstream's `/setup-matt-pocock-skills` line and
 its step-3 publish mechanics for pop's Work-store doc, and adds the
-wayfinder-map source (ADR-0136). Where a line below contradicts the verbatim
-upstream region, the line below wins; the upstream text is kept byte-intact only
-so drift stays diffable.
+wayfinder-map source (ADR-0136, ADR-0169). Where a line below contradicts the
+verbatim upstream region, the line below wins; the upstream text is kept
+byte-intact only so drift stays diffable.
 -->
 
-## Work store resolution
+## Issue tracker doc resolution
 
 Ignore upstream's "run `/setup-matt-pocock-skills`" line **and** its step-3
 publish mechanics (publish to the tracker, apply the `ready-for-agent` label).
-Resolve the Work store two-layer instead:
+Resolve the issue-tracker doc two-layer instead:
 
-1. If the repo has `docs/agents/issue-tracker.md`, that store wins.
-2. Otherwise read pop's Shipped asset at
-   `${XDG_DATA_HOME:-~/.local/share}/pop/work-store.md`.
+1. If the repo has `docs/agents/issue-tracker.md`, that doc wins.
+2. Otherwise read `~/.agents/docs/issue-tracker.md`.
+3. If neither exists, stop and tell the user no issue-tracker doc is
+   configured — there is no further fallback.
 
 Publish the spec per the resolved doc's **"Publishing a spec"** section. That
 section owns every publish mechanic — the co-located `spec.md` path, the
