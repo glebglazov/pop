@@ -579,12 +579,24 @@ func newDashboardFilterMenu() *dashboardFilterMenu {
 	}
 }
 
+// taskMenuAction identifies a verb in the task-level action menu, independent
+// of the shortcut key that triggers it.
+type taskMenuAction int
+
+const (
+	taskActionComplete taskMenuAction = iota
+	taskActionOpen
+	taskActionSkip
+	taskActionCopyName
+)
+
 // taskMenuItem is one verb in the task-level action menu: the flat shortcut
-// letter it keeps (also the verb code passed to applyDetailOverride) and the
-// label shown beside it.
+// letter it keeps, the label shown beside it, and the action identity
+// dispatched by applyDetailOverride (or handled directly for copy name).
 type taskMenuItem struct {
-	key   string
-	label string
+	key    string
+	label  string
+	action taskMenuAction
 }
 
 // taskMenu is the action overlay opened with `a` over a single task — in the
@@ -605,15 +617,15 @@ type taskMenu struct {
 func taskMenuItems(task tasks.Task) []taskMenuItem {
 	var items []taskMenuItem
 	if task.Status != tasks.TaskDone {
-		items = append(items, taskMenuItem{key: "c", label: "complete"})
+		items = append(items, taskMenuItem{key: "c", label: "complete", action: taskActionComplete})
 	}
 	if tasks.CanReopen(task.Status) {
-		items = append(items, taskMenuItem{key: "o", label: "open"})
+		items = append(items, taskMenuItem{key: "o", label: "open", action: taskActionOpen})
 	}
 	if task.Status == tasks.TaskOpen {
-		items = append(items, taskMenuItem{key: "k", label: "skip"})
+		items = append(items, taskMenuItem{key: "k", label: "skip", action: taskActionSkip})
 	}
-	items = append(items, taskMenuItem{key: "y", label: "copy name"})
+	items = append(items, taskMenuItem{key: "y", label: "copy name", action: taskActionCopyName})
 	return items
 }
 
@@ -1853,7 +1865,7 @@ func (m QueueDashboard) invokeTaskMenuItem(idx int) (tea.Model, tea.Cmd) {
 	task := m.taskMenu.task
 	inPeek := m.taskMenu.inPeek
 	m.taskMenu = nil
-	if item.key == "y" {
+	if item.action == taskActionCopyName {
 		msg := m.copyClipboard(taskRefCopyPayload(m.detail.row.SetID, task))
 		if inPeek {
 			m.detail.peek.statusMsg = msg
@@ -1863,12 +1875,12 @@ func (m QueueDashboard) invokeTaskMenuItem(idx int) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.detail.statusMsg = ""
-	return m, m.applyDetailOverride(m.detail.row, task, item.key)
+	return m, m.applyDetailOverride(m.detail.row, task, item.action)
 }
 
-// applyDetailOverride dispatches the c/o/k override verb to the appropriate
-// tasks.*With function via the Deps seam.
-func (m QueueDashboard) applyDetailOverride(row DashboardRow, task tasks.Task, verb string) tea.Cmd {
+// applyDetailOverride dispatches the complete/open/skip override action to the
+// appropriate tasks.*With function via the Deps seam.
+func (m QueueDashboard) applyDetailOverride(row DashboardRow, task tasks.Task, action taskMenuAction) tea.Cmd {
 	d := m.d
 	if d == nil {
 		d = DefaultDeps()
@@ -1876,15 +1888,18 @@ func (m QueueDashboard) applyDetailOverride(row DashboardRow, task tasks.Task, v
 	taskPath := row.SetID + "/" + task.File
 	return func() tea.Msg {
 		var err error
-		switch verb {
-		case "c":
+		var verbName string
+		switch action {
+		case taskActionComplete:
+			verbName = "complete"
 			err = d.completeDetailTask(row.DefPath, taskPath)
-		case "o":
+		case taskActionOpen:
+			verbName = "open"
 			err = d.resetDetailTask(row.DefPath, taskPath)
-		case "k":
+		case taskActionSkip:
+			verbName = "skip"
 			err = d.skipDetailTask(row.DefPath, taskPath)
 		}
-		verbName := map[string]string{"c": "complete", "o": "open", "k": "skip"}[verb]
 		return dashboardDetailOverrideMsg{taskID: task.ID, verb: verbName, err: err}
 	}
 }
