@@ -1242,7 +1242,7 @@ func TestStreamRenderBlindAdapterRefusesInsteadOfRawJSON(t *testing.T) {
 	events := []streamEventRecord{
 		{Type: "event", AtMS: 100, Raw: rawLine},
 	}
-	writeTimingStreamWithEvents(t, taskStreamDir(env.demoDir(), "01-a.md"), "attempt-001.jsonl.gz", "codex", "", 1, base, "completed", 60_000, events)
+	writeTimingStreamWithEvents(t, taskStreamDir(env.demoDir(), "01-a.md"), "attempt-001.jsonl.gz", "opencode", "", 1, base, "completed", 60_000, events)
 
 	result, err := StreamWith(env.deps(), nil, nil, StreamOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
@@ -1255,10 +1255,10 @@ func TestStreamRenderBlindAdapterRefusesInsteadOfRawJSON(t *testing.T) {
 	if len(eventsOut) != 1 || eventsOut[0].Type != "render_refused" {
 		t.Fatalf("events = %#v, want one render_refused", eventsOut)
 	}
-	if !strings.Contains(eventsOut[0].Text, "codex") || !strings.Contains(eventsOut[0].Text, "cannot be normalized") {
-		t.Fatalf("refusal should name codex and state normalization is impossible: %q", eventsOut[0].Text)
+	if !strings.Contains(eventsOut[0].Text, "opencode") || !strings.Contains(eventsOut[0].Text, "cannot be normalized") {
+		t.Fatalf("refusal should name opencode and state normalization is impossible: %q", eventsOut[0].Text)
 	}
-	cap, _ := ResolveAgentAdapter("codex")
+	cap, _ := ResolveAgentAdapter("opencode")
 	if !strings.Contains(eventsOut[0].Text, cap.StreamRenderCapability().Reason) {
 		t.Fatalf("refusal should carry the declared reason: %q", eventsOut[0].Text)
 	}

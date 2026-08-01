@@ -173,6 +173,70 @@ func codexItemTick(kind, hint string) string {
 	return toolTick(kind, hint)
 }
 
+// renderCodexEvent parses one codex-jsonl Thread Event into readable stream
+// entries, mirroring codexLineRenderer: agent_message prose on
+// item.completed and a tool_use tick on item.started for tool item types.
+func renderCodexEvent(ev streamEventRecord) []StreamEvent {
+	var event struct {
+		Type string `json:"type"`
+		Item struct {
+			Type      string          `json:"type"`
+			Text      string          `json:"text"`
+			Command   string          `json:"command"`
+			Tool      string          `json:"tool"`
+			Server    string          `json:"server"`
+			Arguments json.RawMessage `json:"arguments"`
+			Query     string          `json:"query"`
+			Changes   []struct {
+				Path string `json:"path"`
+				Kind string `json:"kind"`
+			} `json:"changes"`
+		} `json:"item"`
+	}
+	if err := json.Unmarshal([]byte(ev.Raw), &event); err != nil {
+		return []StreamEvent{{
+			AtMS: ev.AtMS,
+			Type: "raw",
+			Text: ev.Raw,
+		}}
+	}
+
+	switch event.Type {
+	case "item.completed":
+		if event.Item.Type == "agent_message" {
+			if text := strings.TrimRight(event.Item.Text, "\n"); text != "" {
+				return []StreamEvent{{
+					AtMS: ev.AtMS,
+					Type: "assistant",
+					Text: text,
+				}}
+			}
+		}
+	case "item.started":
+		if codexToolItemTypes[event.Item.Type] {
+			var changePath string
+			if len(event.Item.Changes) > 0 {
+				changePath = event.Item.Changes[0].Path
+			}
+			hint := codexItemHint(
+				event.Item.Command,
+				event.Item.Tool,
+				event.Item.Server,
+				codexArgumentsHint(event.Item.Arguments),
+				changePath,
+				event.Item.Query,
+			)
+			return []StreamEvent{{
+				AtMS:     ev.AtMS,
+				Type:     "tool_use",
+				ToolName: event.Item.Type,
+				ToolArgs: hint,
+			}}
+		}
+	}
+	return nil
+}
+
 // codexItemHint returns the first non-empty probe value, collapsed to a single
 // line and truncated to ~80 chars, matching claudeToolHint.
 func codexItemHint(values ...string) string {

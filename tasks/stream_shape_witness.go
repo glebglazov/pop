@@ -249,6 +249,10 @@ func witnessStreamRenderBytes(events []streamEventRecord) bool {
 				Type  string `json:"type"`
 				Delta string `json:"delta"`
 			} `json:"assistantMessageEvent"`
+			Item *struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"item"`
 			ToolCall json.RawMessage `json:"tool_call"`
 		}
 		if err := json.Unmarshal([]byte(ev.Raw), &probe); err != nil {
@@ -288,6 +292,37 @@ func witnessStreamRenderBytes(events []streamEventRecord) bool {
 					return true
 				}
 			}
+		}
+		switch probe.Type {
+		case "item.completed":
+			if probe.Item != nil && probe.Item.Type == "agent_message" && strings.TrimSpace(probe.Item.Text) != "" {
+				return true
+			}
+		case "item.started":
+			if probe.Item != nil && codexToolItemTypes[probe.Item.Type] {
+				return true
+			}
+		}
+	}
+	// Field-presence fallback: item carriers that render as assistant prose or tool ticks.
+	for _, ev := range events {
+		var probe struct {
+			Item *struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"item"`
+		}
+		if err := json.Unmarshal([]byte(ev.Raw), &probe); err != nil {
+			continue
+		}
+		if probe.Item == nil {
+			continue
+		}
+		if probe.Item.Type == "agent_message" && strings.TrimSpace(probe.Item.Text) != "" {
+			return true
+		}
+		if codexToolItemTypes[probe.Item.Type] {
+			return true
 		}
 	}
 	return false

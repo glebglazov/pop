@@ -430,6 +430,10 @@ var streamShapeFixtureGoldens = map[string]*streamShapeGolden{
 		toolTimings: []toolTimingGolden{
 			{Name: "command_execution", Count: 1, TotalNanos: 0},
 		},
+		streamRender: &streamRenderGolden{
+			EventCount: 1,
+			TypeCounts: map[string]int{"tool_use": 1},
+		},
 		turn: &TurnCount{Count: 1, HasTurn: true},
 	},
 	"pi": {

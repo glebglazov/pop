@@ -315,7 +315,7 @@ var agentAdapters = map[string]AgentAdapter{
 		cost:                   AgentCostCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no dollar cost"},
 		toolTimings:            AgentToolTimingCapability{Kind: CapabilitySupported, Extract: codexToolTimings},
 		actualModel:            AgentActualModelCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no actual-model init event"},
-		streamRender:           AgentStreamRenderCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no renderable assistant/tool_result message shape"},
+		streamRender:           AgentStreamRenderCapability{Kind: CapabilitySupported, Render: renderCodexEvent},
 		turns:                  AgentTurnCapability{Kind: CapabilitySupported, Extract: codexTurnCount},
 		peakInput:              AgentPeakInputCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no per-call usage block"},
 		reasoning: AgentReasoningCapability{

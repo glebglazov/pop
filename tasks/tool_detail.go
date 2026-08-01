@@ -72,7 +72,10 @@ func extractToolDetail(agent string, events []streamEventRecord) ToolDetailRepor
 	case "claude":
 		return ToolDetailReport{Invocations: claudeToolDetail(events)}
 	default:
-		return ToolDetailReport{}
+		return ToolDetailReport{
+			Refused:       true,
+			RefusalReason: toolDetailRefusal(agent, "argument-level tool detail has not been implemented for this adapter"),
+		}
 	}
 }
 

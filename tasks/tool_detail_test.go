@@ -74,13 +74,13 @@ func TestClaudeToolDetailDetectsErrors(t *testing.T) {
 }
 
 func TestExtractToolDetailRenderBlindRefuses(t *testing.T) {
-	report := extractToolDetail("codex", []streamEventRecord{
-		{Type: "event", AtMS: 100, Raw: `{"type":"item.started","item":{"id":"i1","type":"command_execution"}}`},
+	report := extractToolDetail("opencode", []streamEventRecord{
+		{Type: "event", AtMS: 100, Raw: `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}`},
 	})
 	if !report.Refused {
-		t.Fatal("codex should refuse tool detail")
+		t.Fatal("opencode should refuse tool detail")
 	}
-	cap, _ := ResolveAgentAdapter("codex")
+	cap, _ := ResolveAgentAdapter("opencode")
 	if !strings.Contains(report.RefusalReason, cap.StreamRenderCapability().Reason) {
 		t.Fatalf("refusal = %q, want declared reason %q", report.RefusalReason, cap.StreamRenderCapability().Reason)
 	}
@@ -203,7 +203,7 @@ func TestRenderStreamToolDetailShowsFactsAndSuspects(t *testing.T) {
 
 func TestRenderStreamToolDetailRenderBlindRefuses(t *testing.T) {
 	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
-	cap, _ := ResolveAgentAdapter("codex")
+	cap, _ := ResolveAgentAdapter("opencode")
 	res := &StreamResult{
 		TaskSetID: "demo",
 		Tasks: []TaskStream{{
@@ -211,12 +211,12 @@ func TestRenderStreamToolDetailRenderBlindRefuses(t *testing.T) {
 			Title: "A",
 			Attempts: []AttemptStream{{
 				Timing: AttemptTiming{
-					Agent:    "codex",
+					Agent:    "opencode",
 					Start:    base,
 					Outcome:  "completed",
 					Duration: 10 * time.Second,
 				},
-				ToolDetail: extractToolDetail("codex", nil),
+				ToolDetail: extractToolDetail("opencode", nil),
 			}},
 		}},
 	}
