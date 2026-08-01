@@ -1756,8 +1756,8 @@ func TestEnsureIntegrations_SkipsUninstalledAgents(t *testing.T) {
 		t.Errorf("expected nil warnings for no-install case, got %v", warnings)
 	}
 	// No agent artifacts are installed for uninstalled agents.
-	if len(fs.symlinks) != 0 {
-		t.Errorf("expected no agent artifacts for uninstalled agents, got symlinks %v", fs.symlinks)
+	if got := agentSymlinks(fs, "/h"); len(got) != 0 {
+		t.Errorf("expected no agent artifacts for uninstalled agents, got symlinks %v", got)
 	}
 	// Refresh still seeds the machine-global Work store doc (agent-agnostic).
 	docPath, err := issueTrackerDocPath(fakeDeps("/h", fs, io.Discard))
@@ -1962,8 +1962,8 @@ func TestEnsureIntegrations_NeverAddsUninstalledFileComponent(t *testing.T) {
 	if warnings != nil {
 		t.Errorf("expected no warnings, got %v", warnings)
 	}
-	if len(fs.symlinks) != 0 {
-		t.Errorf("refresh must never add a component: created symlinks %v", fs.symlinks)
+	if got := agentSymlinks(fs, "/h"); len(got) != 0 {
+		t.Errorf("refresh must never add a component: created symlinks %v", got)
 	}
 	// The Work store doc is seeded on every refresh; it is not a component.
 	docPath, err := issueTrackerDocPath(fakeDeps("/h", fs, io.Discard))
@@ -2335,6 +2335,7 @@ func TestUpdateExisting_SilentOnNoInstallations(t *testing.T) {
 	// the update-existing path, so default output is "nothing to do".
 	// state.json is stamped regardless (runtime fast-path can skip next launch).
 	fs := newFakeFS()
+	seedUserIssueTrackerLink(fs, "/h")
 	_, real := fakeFactories("/h", fs)
 
 	var stdout, stderr bytes.Buffer
@@ -2408,6 +2409,7 @@ func TestUpdateExisting_SilentWhenInstalledAndCurrent(t *testing.T) {
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 	seedBaselineComponents(t, fs, "/h", "claude")
+	seedUserIssueTrackerLink(fs, "/h")
 
 	_, real := fakeFactories("/h", fs)
 	var stdout, stderr bytes.Buffer
@@ -2436,6 +2438,7 @@ func TestUpdateExisting_WritesWarningToStderrAndDoesNotStamp(t *testing.T) {
 	stalePath := filepath.Join("/h", ".claude", "settings.json")
 	fs.files[stalePath] = []byte(staleClaudeSettings)
 	fs.writeErr[stalePath] = errors.New("simulated failure")
+	seedUserIssueTrackerLink(fs, "/h")
 
 	_, real := fakeFactories("/h", fs)
 	var stdout, stderr bytes.Buffer
@@ -2758,6 +2761,7 @@ skills = ["tasks"]
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 	seedFileComponent(t, fs, "/h", ComponentTaskSkills, "claude")
+	seedUserIssueTrackerLink(fs, "/h")
 	_, real := fakeFactories("/h", fs)
 
 	// Without verbose: opted-out outcomes are suppressed → "nothing to do".
@@ -2818,6 +2822,7 @@ func TestUpdateExisting_VerboseShowsAlreadyCurrent(t *testing.T) {
 	fs := newFakeFS()
 	installViaFake(t, fs, "/h", "claude")
 	seedBaselineComponents(t, fs, "/h", "claude")
+	seedUserIssueTrackerLink(fs, "/h")
 
 	_, real := fakeFactories("/h", fs)
 
@@ -2846,6 +2851,7 @@ func TestUpdateExisting_NothingToDoMessage(t *testing.T) {
 	t.Parallel()
 	setupIntegrateConfigLayer(t)
 	fs := newFakeFS()
+	seedUserIssueTrackerLink(fs, "/h")
 	_, real := fakeFactories("/h", fs)
 
 	var stdout bytes.Buffer

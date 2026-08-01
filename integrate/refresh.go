@@ -114,6 +114,9 @@ func updateStaleIntegrations(cd *config.Deps, newDeps func() *Deps) integrationU
 	}
 
 	var result integrationUpdateResult
+	if o := linkUserIssueTrackerDoc(d); o != nil {
+		result.Outcomes = append(result.Outcomes, *o)
+	}
 	if o := removeStaleDataDirWorkStoreDoc(d); o != nil {
 		result.Outcomes = append(result.Outcomes, *o)
 	}

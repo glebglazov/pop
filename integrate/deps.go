@@ -197,6 +197,67 @@ func issueTrackerDocPath(d *Deps) (string, error) {
 	return filepath.Join(dataDir, "agents", "docs", "issue-tracker.md"), nil
 }
 
+// userIssueTrackerDocLinkPath returns the vendor-neutral user-level Issue
+// tracker doc path at ~/.agents/docs/issue-tracker.md (ADR-0169). The location
+// is hardcoded off the home directory — ADR-0169 rejected an env override.
+func userIssueTrackerDocLinkPath(d *Deps) (string, error) {
+	home, err := d.userHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".agents", "docs", "issue-tracker.md"), nil
+}
+
+// linkUserIssueTrackerDoc publishes the user-level second layer by symlinking
+// ~/.agents/docs/issue-tracker.md at pop's Shipped asset. Creation is strictly
+// create-if-absent: anything already at the link path — regular file, directory,
+// or symlink pointing anywhere, dangling or not — is the user's and is left
+// alone. A regular file occupying ~/.agents/docs aborts the step entirely.
+//
+// This is the narrow ADR-0169 exception to ADR-0150: pop writes a link, never
+// content, outside its data dir, and only into empty space. Every failure is
+// logged and skipped so a read-only home still integrates.
+func linkUserIssueTrackerDoc(d *Deps) *Outcome {
+	target, err := issueTrackerDocPath(d)
+	if err != nil {
+		debug.Error("linkUserIssueTrackerDoc: asset path: %v", err)
+		return nil
+	}
+	link, err := userIssueTrackerDocLinkPath(d)
+	if err != nil {
+		debug.Error("linkUserIssueTrackerDoc: link path: %v", err)
+		return nil
+	}
+
+	if _, err := d.lstatMode(link); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		debug.Error("linkUserIssueTrackerDoc: lstat %s: %v", link, err)
+		return nil
+	}
+
+	dir := filepath.Dir(link)
+	if mode, err := d.lstatMode(dir); err == nil {
+		if mode.IsRegular() {
+			debug.Error("linkUserIssueTrackerDoc: %s is a regular file; skipping", dir)
+			return nil
+		}
+	} else if !os.IsNotExist(err) {
+		debug.Error("linkUserIssueTrackerDoc: lstat %s: %v", dir, err)
+		return nil
+	}
+
+	if err := d.mkdirAll(dir, 0o755); err != nil {
+		debug.Error("linkUserIssueTrackerDoc: mkdir %s: %v", dir, err)
+		return nil
+	}
+	if err := d.symlink(target, link); err != nil {
+		debug.Error("linkUserIssueTrackerDoc: symlink %s -> %s: %v", link, target, err)
+		return nil
+	}
+	return &Outcome{Skill: link, Label: "linked"}
+}
+
 // staleDataDirWorkStoreDocPath returns the pre-ADR-0169 Shipped-asset path at
 // ${XDG_DATA_HOME:-~/.local/share}/pop/work-store.md. Nothing reads this file
 // anymore; Integration refresh deletes it unconditionally when present.
