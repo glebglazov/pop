@@ -44,24 +44,50 @@ func TestMissingBinaryVerdictIsHumanHealing(t *testing.T) {
 	}
 }
 
-// TestEveryDetectorIsPresetScopedAndFree pins the expand half of ADR-0168: the
-// verdict now carries a scope and an attempt charge, and every detector that
-// shipped before it answers preset scope with no charge, so behaviour is unchanged.
-func TestEveryDetectorIsPresetScopedAndFree(t *testing.T) {
+// TestWholeCLIVerdictsArePresetScopedAndFree pins ADR-0168's dispatch axis: a
+// verdict about the CLI itself condemns the preset, and none of them charge the
+// Task retry cap.
+func TestWholeCLIVerdictsArePresetScopedAndFree(t *testing.T) {
 	for _, v := range []AgentProceedVerdict{
 		NewQuotaPauseVerdict("claude", "weekly limit", time.Now()),
 		NewAuthFailureVerdict("cursor", "Authentication required"),
 		NewMissingBinaryVerdict("codex", "binary not found on PATH"),
-		NewPlanGateVerdict("kimi", "k3", "does not have access to k3"),
+		NewTierExhaustedVerdict("kimi", "every effort tier model is skipped: k3"),
 		*DetectedQuotaPause("usage limit"),
 		*DetectedAuthFailure("Error: Authentication required."),
-		*DetectedPlanGate("k3", "does not have access to k3"),
 	} {
 		if v.Scope != ProceedScopePreset {
 			t.Fatalf("kind %q: scope = %q, want %q", v.Kind, v.Scope, ProceedScopePreset)
 		}
 		if v.ConsumesAttempt {
 			t.Fatalf("kind %q: ConsumesAttempt = true, want false — a stopped preset abandons the retry cap", v.Kind)
+		}
+	}
+}
+
+// A model refusal condemns one token, and escalates to the whole preset only
+// once its tier has nothing left to walk to — never charging the retry cap on
+// either side of that line.
+func TestModelRefusalIsModelScopedUntilItEscalates(t *testing.T) {
+	for _, v := range []AgentProceedVerdict{
+		NewModelRefusedVerdict("kimi", "k3", "does not have access to k3", ProceedRecoveryPermanent),
+		*DetectedPermanentModelRefusal("k3", "does not have access to k3"),
+	} {
+		if v.Scope != ProceedScopeModel {
+			t.Fatalf("scope = %q, want %q", v.Scope, ProceedScopeModel)
+		}
+		if v.ConsumesAttempt {
+			t.Fatal("an Effort model skip must not charge the retry cap")
+		}
+		escalated := v.escalateToPreset()
+		if escalated.Scope != ProceedScopePreset {
+			t.Fatalf("escalated scope = %q, want %q", escalated.Scope, ProceedScopePreset)
+		}
+		if escalated.Recovery != v.Recovery || escalated.Reason != v.Reason || escalated.Model != v.Model {
+			t.Fatalf("escalation lost the cause: %#v", escalated)
+		}
+		if escalated.ConsumesAttempt {
+			t.Fatal("escalation must not start charging the retry cap")
 		}
 	}
 }
@@ -78,8 +104,10 @@ func TestFallThroughMessageNamesEveryKind(t *testing.T) {
 		{NewQuotaPauseVerdict("claude", "weekly limit", time.Time{}), "Agent", "Agent claude quota-paused; trying next"},
 		{NewAuthFailureVerdict("cursor", "logged out"), "Agent", "Agent cursor unauthenticated; trying next"},
 		{NewMissingBinaryVerdict("codex", "absent"), "Verifier agent", "Verifier agent codex unavailable (binary not found); trying next"},
-		{NewPlanGateVerdict("kimi", "k3", "gated"), "Agent", "Agent kimi plan-gated on k3; trying next"},
-		{NewPlanGateVerdict("kimi", "", "gated"), "Verifier agent", "Verifier agent kimi plan-gated on its resolved model; trying next"},
+		{NewModelRefusedVerdict("kimi", "k3", "gated", ProceedRecoveryPermanent), "Agent", "Agent kimi cannot run k3; trying the next model in its effort tier"},
+		{NewModelRefusedVerdict("kimi", "k3", "gated", ProceedRecoveryPermanent).escalateToPreset(), "Agent", "Agent kimi cannot run k3 and has no effort tier entry left; trying next"},
+		{NewModelRefusedVerdict("kimi", "", "gated", ProceedRecoveryPermanent).escalateToPreset(), "Verifier agent", "Verifier agent kimi cannot run its resolved model and has no effort tier entry left; trying next"},
+		{NewTierExhaustedVerdict("kimi", "every effort tier model is skipped: k3"), "Agent", "Agent kimi has no runnable model left in its effort tier; trying next"},
 		{AgentProceedVerdict{Preset: "future"}, "Agent", "Agent future unavailable; trying next"},
 	} {
 		if got := tt.verdict.fallThroughMessage(tt.role); got != tt.want {

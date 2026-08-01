@@ -1239,12 +1239,12 @@ func TestRunConfiguredVerifierSkipsUnauthenticatedPresetByPassiveDetection(t *te
 	}
 }
 
-func TestRunConfiguredVerifierFallsThroughKimiPlanGate(t *testing.T) {
+func TestRunConfiguredVerifierFallsThroughKimiSubscriptionGate(t *testing.T) {
 	t.Parallel()
 	taskSetDir := t.TempDir()
 	runner := &scriptedVerifyRunner{
 		scripts: []string{
-			kimiPlanGateLine,
+			kimiSubscriptionGateLine,
 			`{"type":"system","subtype":"init"}` + "\n" + `{"type":"result","subtype":"success","result":"VERDICT: PASS\nFINDINGS:\n"}`,
 		},
 	}
@@ -1266,20 +1266,20 @@ func TestRunConfiguredVerifierFallsThroughKimiPlanGate(t *testing.T) {
 	if runner.calls != 2 {
 		t.Fatalf("headless calls = %d, want 2 (one kimi probe then claude)", runner.calls)
 	}
-	if !strings.Contains(out.String(), "Verifier agent kimi plan-gated on moonshot-ai/kimi-k2.7-code-highspeed; trying next") {
-		t.Fatalf("missing verifier plan-gate fall-through line:\n%s", out.String())
+	if !strings.Contains(out.String(), "Verifier agent kimi cannot run moonshot-ai/kimi-k2.7-code-highspeed and has no effort tier entry left; trying next") {
+		t.Fatalf("missing verifier subscription-gate fall-through line:\n%s", out.String())
 	}
 
 	pairs := listRunFilePairs(t, capturedRunsDir(taskSetDir))
 	if len(pairs) != 2 {
-		t.Fatalf("want 2 verify runs (plan gate + PASS), got %d", len(pairs))
+		t.Fatalf("want 2 verify runs (model refusal + PASS), got %d", len(pairs))
 	}
 	meta1 := readCapturedRunMeta(t, pairs[0].meta)
 	if meta1.Outcome != streamOutcomeAgentUnusable {
 		t.Fatalf("run1 outcome = %q, want %s", meta1.Outcome, streamOutcomeAgentUnusable)
 	}
-	if meta1.Reason != kimiPlanGateLine {
-		t.Fatalf("run1 reason = %q, want %q", meta1.Reason, kimiPlanGateLine)
+	if meta1.Reason != kimiSubscriptionGateLine {
+		t.Fatalf("run1 reason = %q, want %q", meta1.Reason, kimiSubscriptionGateLine)
 	}
 	if meta1.Verdict != "" {
 		t.Fatalf("run1 should have no verdict, got %q", meta1.Verdict)
@@ -1290,7 +1290,7 @@ func TestRunConfiguredVerifierFallsThroughKimiPlanGate(t *testing.T) {
 		t.Fatalf("read cooldowns: %v", err)
 	}
 	if _, ok := cooldowns["kimi"]; ok {
-		t.Fatalf("plan gate wrote cooldown: %#v", cooldowns)
+		t.Fatalf("a model refusal wrote a preset cooldown: %#v", cooldowns)
 	}
 }
 

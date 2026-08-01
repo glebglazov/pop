@@ -23,20 +23,22 @@ const (
 	kimiMonthlyQuotaBackoff      = 7 * 24 * time.Hour
 )
 
-// kimiPlanGateSignal is the stable fragment of kimi's subscription-gate 401
-// (`provider.auth_error`): "Your current subscription does not have access to
+// kimiSubscriptionGateSignal is the stable fragment of kimi's subscription-gate
+// 401 (`provider.auth_error`): "Your current subscription does not have access to
 // <model>. Upgrade to an <tier> plan or above." Deliberately narrow — kimi's other
 // 401s (an invalid or expired key, missing authentication, a context window above
 // the plan's ceiling) are ordinary failures that must keep their retry cap, so
-// nothing but this phrase becomes a Plan gate (ADR-0164).
-const kimiPlanGateSignal = "does not have access to"
+// nothing but this phrase condemns a model (ADR-0164).
+const kimiSubscriptionGateSignal = "does not have access to"
 
 // kimiProceedVerdict scans the raw agent capture line-by-line for the diagnostics
-// that make the preset unusable for this task rather than merely failed: a quota
-// signal (Agent quota pause) or the subscription gate (Plan gate). kimi writes
-// both to stderr and never into its stream-json. The whole matching line becomes
-// the reason, so the human sees kimi's own wording and the reset derivation can
-// re-read the quota signal from it.
+// that make the agent unable to carry on rather than merely failed: a quota
+// signal (preset-scoped Agent quota pause) or the subscription gate (model-scoped
+// and permanent — the plan will not gain the model by waiting, but every other
+// model kimi serves this account still runs). kimi writes both to stderr and
+// never into its stream-json. The whole matching line becomes the reason, so the
+// human sees kimi's own wording and the reset derivation can re-read the quota
+// signal from it.
 func kimiProceedVerdict(raw string) *AgentProceedVerdict {
 	scanner := bufio.NewScanner(strings.NewReader(raw))
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
@@ -48,24 +50,25 @@ func kimiProceedVerdict(raw string) *AgentProceedVerdict {
 		if kimiQuotaBackoff(line) > 0 {
 			return DetectedQuotaPause(line)
 		}
-		if model, gated := kimiPlanGatedModel(line); gated {
-			return DetectedPlanGate(model, line)
+		if model, gated := kimiSubscriptionGatedModel(line); gated {
+			return DetectedPermanentModelRefusal(model, line)
 		}
 	}
 	return nil
 }
 
-// kimiPlanGatedModel reports whether a diagnostic line is the subscription gate
-// and, if so, the model the provider named as gated — the token right after the
-// signal, shorn of the sentence's period. That name is the wire id (`k3`,
-// `kimi-for-coding-highspeed`) rather than the config alias pop asked for, so it
-// serves only as the fallback when the invocation pinned no model of its own.
-func kimiPlanGatedModel(line string) (string, bool) {
-	at := strings.Index(strings.ToLower(line), kimiPlanGateSignal)
+// kimiSubscriptionGatedModel reports whether a diagnostic line is the
+// subscription gate and, if so, the model the provider named as refused — the
+// token right after the signal, shorn of the sentence's period. That name is the
+// wire id (`k3`, `kimi-for-coding-highspeed`) rather than the config alias pop
+// asked for, so it serves only as the fallback when the invocation pinned no
+// model of its own.
+func kimiSubscriptionGatedModel(line string) (string, bool) {
+	at := strings.Index(strings.ToLower(line), kimiSubscriptionGateSignal)
 	if at < 0 {
 		return "", false
 	}
-	fields := strings.Fields(line[at+len(kimiPlanGateSignal):])
+	fields := strings.Fields(line[at+len(kimiSubscriptionGateSignal):])
 	if len(fields) == 0 {
 		return "", true
 	}

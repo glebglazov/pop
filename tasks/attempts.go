@@ -48,11 +48,13 @@ func taskExitErr(sel *Selection, code int, format string, args ...any) *ExitErro
 }
 
 // executeTaskAttempts runs the retry loop for one task. The prompt is rebuilt
-// per attempt (via buildInvocation over basePrompt) so a retry can carry this
-// task's own prior-attempt digest forward alongside set-wide remediation
-// history and sibling briefs; attempt 1 runs those feeds only when they have
-// content (ADR 0040/ADR 0154).
-func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOut io.Writer, basePrompt string, buildInvocation func(prompt string) (*AgentInvocation, error), maxTries int, timeout time.Duration, commitOverrides []string, retryDelays []time.Duration) (*RunTaskResult, error) {
+// per attempt (via the walk's invocation builder over basePrompt) so a retry can
+// carry this task's own prior-attempt digest forward alongside set-wide
+// remediation history and sibling briefs; attempt 1 runs those feeds only when
+// they have content (ADR 0040/ADR 0154). Inside each attempt the walk steps
+// through the preset's Effort tier: a model-scoped verdict restarts the attempt
+// on the next entry without spending a try (ADR-0168).
+func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOut io.Writer, basePrompt string, walk *effortModelWalk, maxTries int, timeout time.Duration, commitOverrides []string, retryDelays []time.Duration) (*RunTaskResult, error) {
 	if errOut == nil {
 		errOut = os.Stderr
 	}
@@ -91,27 +93,74 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 		if carry.Len() > 0 {
 			prompt = basePrompt + carry.String()
 		}
-		invocation, err := buildInvocation(prompt)
-		if err != nil {
-			return nil, taskExitErr(sel, ExitSetup, "%v", err)
-		}
-		persist := func(rec *streamRecorder, attempt int, outcome, reason string, exitCode int) {
-			if p := persistAttemptStream(d, errOut, sel, rec, invocation.AgentPreset(), invocation.RequestedAgent, attempt, outcome, reason, exitCode); p != "" {
-				streamPaths = append(streamPaths, p)
+		// One attempt, walked across the Effort tier: a model-scoped verdict
+		// retires the entry it just used and restarts here on the next one, so
+		// the try is spent only once the agent answers about the task rather
+		// than about its model (ADR-0168).
+		var (
+			invocation  *AgentInvocation
+			outcome     *attemptOutcome
+			agentResult AgentResult
+			persist     func(rec *streamRecorder, attempt int, outcome, reason string, exitCode int)
+			escalated   *AgentProceedVerdict
+		)
+		for {
+			build, exhausted, err := walk.builder()
+			if err != nil {
+				return nil, taskExitErr(sel, ExitSetup, "%v", err)
 			}
-		}
-		display.line(ansiDim, "   Attempt %d/%d · %s", attempt, maxTries, invocation.RequestedAgent)
-		display.line(ansiDim, "── Agent output ────────────────────────────────────────")
+			if exhausted != nil {
+				escalated = exhausted
+				break
+			}
+			invocation, err = build(prompt)
+			if err != nil {
+				return nil, taskExitErr(sel, ExitSetup, "%v", err)
+			}
+			entry := invocation
+			persist = func(rec *streamRecorder, attempt int, outcome, reason string, exitCode int) {
+				if p := persistAttemptStream(d, errOut, sel, rec, entry.AgentPreset(), entry.RequestedAgent, attempt, outcome, reason, exitCode); p != "" {
+					streamPaths = append(streamPaths, p)
+				}
+			}
+			display.line(ansiDim, "   Attempt %d/%d · %s", attempt, maxTries, invocation.RequestedAgent)
+			display.line(ansiDim, "── Agent output ────────────────────────────────────────")
 
-		agentOut, outcome, err := runAgentAttempt(d, runtimePath, out, timeout, invocation)
-		if err != nil {
-			display.line(ansiRed, "✗ Agent failed to start for %s/%s", sel.TaskSetID, sel.TaskID)
-			return nil, taskExitErr(sel, ExitOperational, "agent execution: %v", err)
+			agentOut, attemptOut, err := runAgentAttempt(d, runtimePath, out, timeout, invocation)
+			if err != nil {
+				display.line(ansiRed, "✗ Agent failed to start for %s/%s", sel.TaskSetID, sel.TaskID)
+				return nil, taskExitErr(sel, ExitOperational, "agent execution: %v", err)
+			}
+			outcome = attemptOut
+			if outcome.timedOut {
+				display.line(ansiDim, "── Agent killed (timeout) for %s/%s ───────────────────", sel.TaskSetID, sel.TaskID)
+			} else {
+				display.line(ansiDim, "── Agent finished for %s/%s ───────────────────────────", sel.TaskSetID, sel.TaskID)
+			}
+			if outcome.interrupted || outcome.timedOut || outcome.runErr != nil {
+				break
+			}
+			agentResult = invocation.NormalizeOutput(agentOut)
+			if agentResult.ProceedVerdict == nil || agentResult.ProceedVerdict.Scope != ProceedScopeModel {
+				break
+			}
+			refused := stampDetectedVerdict(*agentResult.ProceedVerdict, invocation.AgentPreset(), invocation.PinnedModel())
+			persist(outcome.stream, attempt, streamOutcomeAgentUnusable, refused.Reason, outcome.exitCode)
+			stop, err := walk.retire(refused)
+			if err != nil {
+				return nil, taskExitErr(sel, ExitOperational, "%v", err)
+			}
+			if stop != nil {
+				escalated = stop
+				break
+			}
+			// The verdict is spent here — this attempt starts over on the tier's
+			// next entry, and nothing downstream should see it.
+			agentResult = AgentResult{}
+			display.line(ansiDim, "   %s", refused.fallThroughMessage("Agent"))
 		}
-		if outcome.timedOut {
-			display.line(ansiDim, "── Agent killed (timeout) for %s/%s ───────────────────", sel.TaskSetID, sel.TaskID)
-		} else {
-			display.line(ansiDim, "── Agent finished for %s/%s ───────────────────────────", sel.TaskSetID, sel.TaskID)
+		if escalated != nil {
+			return proceedVerdictResult(sel, *escalated), nil
 		}
 		if outcome.interrupted {
 			persist(outcome.stream, attempt, streamOutcomeInterrupted, "", outcome.exitCode)
@@ -141,7 +190,6 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 		if outcome.runErr != nil {
 			return nil, taskExitErr(sel, ExitOperational, "agent execution: %v", outcome.runErr)
 		}
-		agentResult := invocation.NormalizeOutput(agentOut)
 		if agentResult.ProceedVerdict != nil {
 			v := stampDetectedVerdict(*agentResult.ProceedVerdict, invocation.AgentPreset(), invocation.PinnedModel())
 			if _, ok := v.TimeHealing(); ok {
@@ -197,12 +245,21 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 	return nil, taskExitErr(sel, ExitOperational, "unexpected attempt loop exit")
 }
 
-func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath string, out, errOut io.Writer, basePrompt string, agentSpecs []string, buildForAgent func(agentSpec string) (func(prompt string) (*AgentInvocation, error), error), maxTries int, timeout time.Duration, commitOverrides []string, agentQuotaRetryAfter time.Duration, retryDelays []time.Duration, probeMemo *agentAvailabilityProbeMemo) (*RunTaskResult, error) {
+// executeTaskAttemptsWithAgentFallback walks the two nested lists a task's
+// agents form: the Agent fallback presets, and inside each preset the Effort
+// tier resolveSpec resolves. agentSpecs are the base specs, before Effort
+// resolution — the tier is resolved per attempt so a recorded Effort model skip
+// is filtered out of every resolution after the one that recorded it (ADR-0168).
+func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath string, out, errOut io.Writer, basePrompt string, agentSpecs []string, resolveSpec effortSpecResolver, buildForAgent func(agentSpec string) (func(prompt string) (*AgentInvocation, error), error), maxTries int, timeout time.Duration, commitOverrides []string, agentQuotaRetryAfter time.Duration, retryDelays []time.Duration, probeMemo *agentAvailabilityProbeMemo) (*RunTaskResult, error) {
 	cooldowns, err := readAgentCooldowns(d)
 	if err != nil {
 		return nil, taskExitErr(sel, ExitOperational, "%v", err)
 	}
 	activeCooldowns := activeAgentCooldowns(cooldowns, time.Now())
+	skips, err := loadEffortModelSkips(d, time.Now())
+	if err != nil {
+		return nil, taskExitErr(sel, ExitOperational, "%v", err)
+	}
 	specs := nonEmptyAgentSpecs(agentSpecs, DefaultAgentPreset)
 	var unavailableResults []*RunTaskResult
 	for i, agentSpec := range specs {
@@ -230,11 +287,8 @@ func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath s
 			unavailableResults = append(unavailableResults, proceedVerdictResult(sel, *v))
 			continue
 		}
-		buildInvocation, err := buildForAgent(agentSpec)
-		if err != nil {
-			return nil, taskExitErr(sel, ExitSetup, "%v", err)
-		}
-		result, execErr := executeTaskAttempts(d, sel, runtimePath, out, errOut, basePrompt, buildInvocation, maxTries, timeout, commitOverrides, retryDelays)
+		walk := &effortModelWalk{d: d, preset: preset, baseSpec: agentSpec, resolve: resolveSpec, skips: skips, build: buildForAgent}
+		result, execErr := executeTaskAttempts(d, sel, runtimePath, out, errOut, basePrompt, walk, maxTries, timeout, commitOverrides, retryDelays)
 		if execErr != nil || result == nil || result.ProceedVerdict == nil {
 			return result, execErr
 		}

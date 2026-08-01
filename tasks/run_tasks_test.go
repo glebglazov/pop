@@ -2083,13 +2083,15 @@ printf 'SUMMARY_START\nclaude done\nSUMMARY_END\nTASK_COMPLETE\n'
 	assertTaskDone(t, env.execFixture(), "01-a")
 }
 
-// kimiPlanGateLine is kimi's subscription-gate 401 for the light tier's model,
-// the third Agent fallback fall-through trigger (ADR-0164).
-const kimiPlanGateLine = "Error: Your current subscription does not have access to kimi-for-coding-highspeed. Upgrade to an Allegretto plan or above."
+// kimiSubscriptionGateLine is kimi's subscription-gate 401 for the built-in
+// light tier's model: the live producer of a model-scoped proceed verdict
+// (ADR-0164, ADR-0168).
+const kimiSubscriptionGateLine = "Error: Your current subscription does not have access to kimi-for-coding-highspeed. Upgrade to an Allegretto plan or above."
 
-// installKimiPlanGateShim installs a `kimi` that counts its spawns and reports the
-// plan gate, so a test can prove the retry cap was never burned.
-func installKimiPlanGateShim(t *testing.T, root, diagnostic string) string {
+// installKimiRefusingShim installs a `kimi` that counts its spawns and refuses
+// every model with one diagnostic, so a test can prove the retry cap was never
+// burned.
+func installKimiRefusingShim(t *testing.T, root, diagnostic string) string {
 	t.Helper()
 	count := filepath.Join(root, ".agent-bin", "kimi.count")
 	installAgentShim(t, root, "kimi", fmt.Sprintf(`#!/bin/sh
@@ -2112,11 +2114,14 @@ printf 'SUMMARY_START\nclaude done\nSUMMARY_END\nTASK_COMPLETE\n'
 `)
 }
 
-func TestRunTaskSetAgentFallbackAdvancesOnKimiPlanGate(t *testing.T) {
+// kimi's built-in light tier is a single entry, so its subscription gate leaves
+// the tier with nothing to walk to: the verdict escalates to preset scope and
+// Agent fallback advances exactly as it did before ADR-0168.
+func TestRunTaskSetAgentFallbackAdvancesOnExhaustedKimiTier(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open", Effort: "light", EffortExplicit: true},
 	})
-	kimiCount := installKimiPlanGateShim(t, env.root, kimiPlanGateLine)
+	kimiCount := installKimiRefusingShim(t, env.root, kimiSubscriptionGateLine)
 	installCompletingClaudeShim(t, env.root)
 
 	var buf bytes.Buffer
@@ -2139,8 +2144,8 @@ func TestRunTaskSetAgentFallbackAdvancesOnKimiPlanGate(t *testing.T) {
 	}
 	// The light tier pinned the gated alias, so the fall-through names it rather
 	// than the wire id the provider used.
-	if !strings.Contains(out, "Agent kimi plan-gated on moonshot-ai/kimi-k2.7-code-highspeed; trying next") {
-		t.Fatalf("missing kimi plan-gate fallback line:\n%s", out)
+	if !strings.Contains(out, "Agent kimi cannot run moonshot-ai/kimi-k2.7-code-highspeed and has no effort tier entry left; trying next") {
+		t.Fatalf("missing kimi exhausted-tier fallback line:\n%s", out)
 	}
 	if got := strings.TrimSpace(readFileString(t, kimiCount)); got != "1" {
 		t.Fatalf("kimi attempts = %q, want 1 (retry cap not burned)", got)
@@ -2151,7 +2156,16 @@ func TestRunTaskSetAgentFallbackAdvancesOnKimiPlanGate(t *testing.T) {
 		t.Fatalf("read cooldowns: %v", err)
 	}
 	if _, ok := cooldowns["kimi"]; ok {
-		t.Fatalf("plan gate wrote cooldown: %#v", cooldowns)
+		t.Fatalf("a model refusal wrote a preset cooldown: %#v", cooldowns)
+	}
+	// The refused model is recorded permanently: a subscription gate is
+	// deterministic per account+model, so there is nothing to expire.
+	skips, err := ActiveAgentModelCooldownsWith(d, time.Now())
+	if err != nil {
+		t.Fatalf("read model skips: %v", err)
+	}
+	if len(skips) != 1 || skips[0].Preset != "kimi" || skips[0].Model != "moonshot-ai/kimi-k2.7-code-highspeed" || !skips[0].Until.IsZero() {
+		t.Fatalf("model skips = %#v, want one permanent kimi entry", skips)
 	}
 
 	runs, err := listSetRuns(d, env.execFixture().demoDir())
@@ -2172,24 +2186,25 @@ func TestRunTaskSetAgentFallbackAdvancesOnKimiPlanGate(t *testing.T) {
 	if kimiRun.meta.Outcome != streamOutcomeAgentUnusable {
 		t.Fatalf("kimi outcome = %q, want %s", kimiRun.meta.Outcome, streamOutcomeAgentUnusable)
 	}
-	if kimiRun.meta.Reason != kimiPlanGateLine {
-		t.Fatalf("kimi reason = %q, want %q", kimiRun.meta.Reason, kimiPlanGateLine)
+	if kimiRun.meta.Reason != kimiSubscriptionGateLine {
+		t.Fatalf("kimi reason = %q, want %q", kimiRun.meta.Reason, kimiSubscriptionGateLine)
 	}
 
 	progress := readFileString(t, filepath.Join(env.tasksDir, "demo", "progress.txt"))
 	if strings.Contains(progress, "FAILED") {
-		t.Fatalf("plan gate must not record FAILED:\n%s", progress)
+		t.Fatalf("a model refusal must not record FAILED:\n%s", progress)
 	}
 	assertTaskDone(t, env.execFixture(), "01-a")
 }
 
-// A plan gate leaves no state behind, so the next implement probes kimi once more
-// and falls through again — the deliberate cost of not recording a cooldown.
-func TestRunTaskSetKimiPlanGateLeavesTaskOpenAndReprobesNextRun(t *testing.T) {
+// The skip is durable, so the next implement resolves kimi's light tier to
+// nothing and never spawns it again — the refused model is filtered out of
+// resolution rather than rediscovered by re-erroring (ADR-0168).
+func TestRunTaskSetKimiSkipSurvivesIntoTheNextRun(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open", Effort: "light", EffortExplicit: true},
 	})
-	kimiCount := installKimiPlanGateShim(t, env.root, kimiPlanGateLine)
+	kimiCount := installKimiRefusingShim(t, env.root, kimiSubscriptionGateLine)
 
 	d := env.deps()
 	for run := 1; run <= 2; run++ {
@@ -2201,28 +2216,169 @@ func TestRunTaskSetKimiPlanGateLeavesTaskOpenAndReprobesNextRun(t *testing.T) {
 
 		_, err := RunTaskSetWith(d, nil, nil, opts)
 		assertExitCode(t, err, ExitSetup)
-		if !strings.Contains(err.Error(), kimiPlanGateLine) {
-			t.Fatalf("run %d error missing plan-gate diagnostic: %q", run, err.Error())
+		wantDiagnostic := kimiSubscriptionGateLine
+		if run == 2 {
+			wantDiagnostic = "every effort tier model is skipped: moonshot-ai/kimi-k2.7-code-highspeed"
 		}
-		if got := strings.TrimSpace(readFileString(t, kimiCount)); got != fmt.Sprint(run) {
-			t.Fatalf("kimi attempts after run %d = %q, want %d (one probe per run)", run, got, run)
+		if !strings.Contains(err.Error(), wantDiagnostic) {
+			t.Fatalf("run %d error = %q, want it to carry %q", run, err.Error(), wantDiagnostic)
+		}
+		// One spawn total: run 2 resolves the tier to nothing before spawning.
+		if got := strings.TrimSpace(readFileString(t, kimiCount)); got != "1" {
+			t.Fatalf("kimi attempts after run %d = %q, want 1", run, got)
 		}
 		assertTaskOpen(t, env.execFixture(), "01-a")
 		if waiter, err := GetRecoveryWaiter(d, "demo"); err != nil {
 			t.Fatalf("get recovery waiter: %v", err)
 		} else if waiter != nil {
-			t.Fatalf("plan gate registered a recovery waiter: %#v", waiter)
+			t.Fatalf("a model refusal registered a recovery waiter: %#v", waiter)
 		}
 		cooldowns, err := readAgentCooldowns(d)
 		if err != nil {
 			t.Fatalf("read cooldowns: %v", err)
 		}
 		if _, ok := cooldowns["kimi"]; ok {
-			t.Fatalf("plan gate wrote cooldown: %#v", cooldowns)
+			t.Fatalf("a model refusal wrote a preset cooldown: %#v", cooldowns)
 		}
 		if _, err := os.Stat(filepath.Join(env.tasksDir, "demo", "progress.txt")); !os.IsNotExist(err) {
-			t.Fatalf("progress.txt should not exist after a plan gate: stat err = %v", err)
+			t.Fatalf("progress.txt should not exist after a model refusal: stat err = %v", err)
 		}
+	}
+}
+
+// kimiTierConfig points kimi's light tier at a gated head with a runnable tail
+// behind it — the shape ADR-0168's Effort model skip exists for.
+func kimiTierConfig(models ...string) func(string) (*config.Config, error) {
+	entries := make([]config.EffortModel, 0, len(models))
+	for _, model := range models {
+		entries = append(entries, config.EffortModel{Model: model})
+	}
+	return func(string) (*config.Config, error) {
+		return &config.Config{Effort: map[string]config.EffortConfig{"kimi": {Light: entries}}}, nil
+	}
+}
+
+// installKimiTierShim installs a `kimi` that refuses one model with the
+// subscription gate and completes the task on any other, counting its spawns.
+func installKimiTierShim(t *testing.T, root, gatedModel string) string {
+	t.Helper()
+	count := filepath.Join(root, ".agent-bin", "kimi.count")
+	gateLine := fmt.Sprintf("Error: Your current subscription does not have access to %s. Upgrade to an Allegretto plan or above.", gatedModel)
+	installAgentShim(t, root, "kimi", fmt.Sprintf(`#!/bin/sh
+n=0
+test -f %[1]q && n=$(cat %[1]q)
+n=$((n + 1))
+printf '%%s\n' "$n" > %[1]q
+case " $* " in
+  *" %[2]s "*)
+    printf '%%s\n' %[3]q
+    exit 1
+    ;;
+esac
+TASK=$(printf '%%s' "$*" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
+if [ -n "$TASK" ] && [ -f "$TASK" ]; then sed -i '' 's/- \[ \]/- [x]/g' "$TASK" 2>/dev/null || sed -i 's/- \[ \]/- [x]/g' "$TASK"; fi
+printf '%%s\n' '{"role":"assistant","content":"SUMMARY_START\nkimi tail done\nSUMMARY_END\nTASK_COMPLETE"}'
+`, count, gatedModel, gateLine))
+	return count
+}
+
+// The skip's whole point: the tier's tail runs on the same preset, the try is
+// not spent, and the next task resolves straight to the tail.
+func TestRunTaskSetEffortModelSkipWalksToTheTierTail(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open", Effort: "light", EffortExplicit: true},
+		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open", Effort: "light", EffortExplicit: true},
+	})
+	kimiCount := installKimiTierShim(t, env.root, "gated-model")
+	installCompletingClaudeShim(t, env.root)
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(true, "", &buf)
+	opts.AgentPresets = []string{"kimi", "claude"}
+	opts.AgentExplicit = true
+	opts.MaxTries = 3
+
+	d := env.deps()
+	result, err := RunTaskSetWith(d, nil, kimiTierConfig("gated-model", "runnable-model"), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.TaskSetDone || len(result.Completed) != 2 {
+		t.Fatalf("result = %#v", result)
+	}
+	out := buf.String()
+	// Both spawns of the first task are attempt 1: a skip restarts the attempt
+	// rather than spending a try.
+	if !strings.Contains(out, "Attempt 1/3 · kimi --model gated-model") || !strings.Contains(out, "Attempt 1/3 · kimi --model runnable-model") {
+		t.Fatalf("tier walk not rendered on one attempt:\n%s", out)
+	}
+	if strings.Contains(out, "Attempt 2/3") {
+		t.Fatalf("an Effort model skip must not consume a try:\n%s", out)
+	}
+	if !strings.Contains(out, "Agent kimi cannot run gated-model; trying the next model in its effort tier") {
+		t.Fatalf("missing model-skip fall-through line:\n%s", out)
+	}
+	if strings.Contains(out, "· claude") {
+		t.Fatalf("Agent fallback advanced while kimi still had a runnable model:\n%s", out)
+	}
+	// Three spawns: gated head then tail for the first task, tail only for the
+	// second — the skip is already filtered out of its resolution.
+	if got := strings.TrimSpace(readFileString(t, kimiCount)); got != "3" {
+		t.Fatalf("kimi spawns = %q, want 3", got)
+	}
+	if strings.Count(out, "cannot run gated-model") != 1 {
+		t.Fatalf("gated model resolved twice — the skip did not filter resolution:\n%s", out)
+	}
+	skips, err := ActiveAgentModelCooldownsWith(d, time.Now())
+	if err != nil {
+		t.Fatalf("read model skips: %v", err)
+	}
+	if len(skips) != 1 || skips[0].Model != "gated-model" {
+		t.Fatalf("model skips = %#v, want the gated head only", skips)
+	}
+	assertTaskDone(t, env.execFixture(), "01-a")
+	assertTaskDone(t, env.execFixture(), "02-b")
+}
+
+// A hand-pinned --model steps outside the ladder (ADR-0049) and so outside the
+// skip: nothing is recorded, no tier is walked, and the refusal stops the preset.
+func TestRunTaskSetPinnedModelBypassesTheEffortModelSkip(t *testing.T) {
+	env := setupRunTaskSetFixture(t, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open", Effort: "light", EffortExplicit: true},
+	})
+	kimiCount := installKimiTierShim(t, env.root, "gated-model")
+	installCompletingClaudeShim(t, env.root)
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(true, "", &buf)
+	opts.AgentPresets = []string{"kimi --model gated-model", "claude"}
+	opts.AgentExplicit = true
+	opts.MaxTries = 3
+
+	d := env.deps()
+	result, err := RunTaskSetWith(d, nil, kimiTierConfig("gated-model", "runnable-model"), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.TaskSetDone || len(result.Completed) != 1 {
+		t.Fatalf("result = %#v", result)
+	}
+	out := buf.String()
+	if strings.Contains(out, "runnable-model") {
+		t.Fatalf("a pinned model must not fall back onto the tier tail:\n%s", out)
+	}
+	if !strings.Contains(out, "Attempt 1/3 · claude") {
+		t.Fatalf("Agent fallback did not advance past the pinned preset:\n%s", out)
+	}
+	if got := strings.TrimSpace(readFileString(t, kimiCount)); got != "1" {
+		t.Fatalf("kimi spawns = %q, want 1", got)
+	}
+	skips, err := ActiveAgentModelCooldownsWith(d, time.Now())
+	if err != nil {
+		t.Fatalf("read model skips: %v", err)
+	}
+	if len(skips) != 0 {
+		t.Fatalf("model skips = %#v, want none for a hand-pinned model", skips)
 	}
 }
 
@@ -2233,7 +2389,7 @@ func TestRunTaskSetKimiAuthErrorFailsThroughRetryCap(t *testing.T) {
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 	authLine := "Error: The API Key appears to be invalid or may have expired"
-	kimiCount := installKimiPlanGateShim(t, env.root, authLine)
+	kimiCount := installKimiRefusingShim(t, env.root, authLine)
 
 	var buf bytes.Buffer
 	opts := env.runTaskSetOpts(true, "", &buf)
@@ -2247,8 +2403,8 @@ func TestRunTaskSetKimiAuthErrorFailsThroughRetryCap(t *testing.T) {
 	if got := strings.TrimSpace(readFileString(t, kimiCount)); got != "2" {
 		t.Fatalf("kimi attempts = %q, want 2 (full retry cap)", got)
 	}
-	if strings.Contains(buf.String(), "plan-gated") {
-		t.Fatalf("generic auth 401 must not read as a plan gate:\n%s", buf.String())
+	if strings.Contains(buf.String(), "cannot run") {
+		t.Fatalf("generic auth 401 must not read as a model refusal:\n%s", buf.String())
 	}
 	assertTaskFailed(t, env.execFixture(), "01-a", 2)
 }

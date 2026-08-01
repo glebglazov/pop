@@ -255,33 +255,44 @@ func TestKimiQuotaSignalsPauseWithADRBackoffs(t *testing.T) {
 	}
 }
 
-// Plan-gate and authentication diagnostics as the Kimi Code error reference
-// documents them (all HTTP 401): the subscription gate names the model the
-// account's plan lacks, while the rest are ordinary auth or request faults.
+// Subscription-gate and authentication diagnostics as the Kimi Code error
+// reference documents them (all HTTP 401): the subscription gate names the model
+// the account's plan lacks, while the rest are ordinary auth or request faults.
 const (
-	kimiSampleHighspeedPlanGateLine = "Error: Your current subscription does not have access to kimi-for-coding-highspeed. Upgrade to an Allegretto plan or above. Upgrade: https://www.kimi.com/membership/pricing?from=server_k3_error"
-	kimiSampleK3PlanGateLine        = "Error: Your current subscription does not have access to k3. Upgrade to an Moderato plan or above."
+	kimiSampleHighspeedGateLine = "Error: Your current subscription does not have access to kimi-for-coding-highspeed. Upgrade to an Allegretto plan or above. Upgrade: https://www.kimi.com/membership/pricing?from=server_k3_error"
+	kimiSampleK3GateLine        = "Error: Your current subscription does not have access to k3. Upgrade to an Moderato plan or above."
 )
 
-func TestKimiPlanGateIsUnavailableWithNoResetInstant(t *testing.T) {
+// The subscription gate condemns a model, not the CLI: it is model-scoped and
+// permanent, so an Effort tier walks past it (ADR-0168) and nothing waits.
+func TestKimiSubscriptionGateIsModelScopedAndPermanent(t *testing.T) {
 	tests := []struct {
 		name      string
 		line      string
 		wantModel string
 	}{
-		{name: "highspeed", line: kimiSampleHighspeedPlanGateLine, wantModel: "kimi-for-coding-highspeed"},
-		{name: "k3", line: kimiSampleK3PlanGateLine, wantModel: "k3"},
+		{name: "highspeed", line: kimiSampleHighspeedGateLine, wantModel: "kimi-for-coding-highspeed"},
+		{name: "k3", line: kimiSampleK3GateLine, wantModel: "k3"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			raw := strings.Join([]string{kimiSampleVersionLine, tt.line}, "\n") + "\n"
 			result := NormalizeAgentOutput(AgentOutputKimiStreamJSON, raw)
 			if result.ProceedVerdict == nil {
-				t.Fatal("expected a plan gate")
+				t.Fatal("expected a model refusal")
 			}
 			u := *result.ProceedVerdict
-			if u.Kind != ProceedPlanGate {
-				t.Fatalf("kind = %q, want %q", u.Kind, ProceedPlanGate)
+			if u.Kind != ProceedModelRefused {
+				t.Fatalf("kind = %q, want %q", u.Kind, ProceedModelRefused)
+			}
+			if u.Scope != ProceedScopeModel {
+				t.Fatalf("scope = %q, want %q — the CLI is healthy", u.Scope, ProceedScopeModel)
+			}
+			if u.Recovery != ProceedRecoveryPermanent {
+				t.Fatalf("recovery = %q, want %q", u.Recovery, ProceedRecoveryPermanent)
+			}
+			if u.ConsumesAttempt {
+				t.Fatal("an Effort model skip must not charge the retry cap")
 			}
 			if u.Model != tt.wantModel {
 				t.Fatalf("model = %q, want %q", u.Model, tt.wantModel)
@@ -289,10 +300,10 @@ func TestKimiPlanGateIsUnavailableWithNoResetInstant(t *testing.T) {
 			if u.Reason != tt.line {
 				t.Fatalf("reason = %q, want the whole diagnostic line %q", u.Reason, tt.line)
 			}
-			// A gate is deterministic per account+model: nothing to wait out, so no
+			// The gate is deterministic per account+model: nothing to wait out, so no
 			// recovery instant and no cooldown derivation.
 			if _, ok := u.TimeHealing(); ok {
-				t.Fatal("a plan gate must not report a time-healing recovery")
+				t.Fatal("a subscription gate must not report a time-healing recovery")
 			}
 			if got := agentQuotaResetAt("kimi", u.Reason, time.Now()); !got.IsZero() {
 				t.Fatalf("reset = %s, want zero time", got)
@@ -301,13 +312,13 @@ func TestKimiPlanGateIsUnavailableWithNoResetInstant(t *testing.T) {
 	}
 }
 
-// The pinned alias pop resolved outranks the wire name the provider used, since
-// the alias is what a human would edit to clear the gate.
-func TestKimiPlanGateNamesThePinnedModelWhenPopPinnedOne(t *testing.T) {
-	raw := kimiSampleHighspeedPlanGateLine + "\n"
+// The pinned alias pop resolved outranks the wire name the provider used: the
+// alias is the Effort ladder entry to skip and what a human would edit.
+func TestKimiSubscriptionGateNamesThePinnedModelWhenPopPinnedOne(t *testing.T) {
+	raw := kimiSampleHighspeedGateLine + "\n"
 	detected := NormalizeAgentOutput(AgentOutputKimiStreamJSON, raw).ProceedVerdict
 	if detected == nil {
-		t.Fatal("expected a plan gate")
+		t.Fatal("expected a model refusal")
 	}
 	invocation, err := ResolveAgentInvocation("kimi --model moonshot-ai/kimi-k2.7-code-highspeed", "", "prompt", "/rt")
 	if err != nil {
@@ -317,7 +328,7 @@ func TestKimiPlanGateNamesThePinnedModelWhenPopPinnedOne(t *testing.T) {
 	if u.Model != "moonshot-ai/kimi-k2.7-code-highspeed" {
 		t.Fatalf("model = %q, want the pinned alias", u.Model)
 	}
-	want := "Agent kimi plan-gated on moonshot-ai/kimi-k2.7-code-highspeed; trying next"
+	want := "Agent kimi cannot run moonshot-ai/kimi-k2.7-code-highspeed; trying the next model in its effort tier"
 	if got := u.fallThroughMessage("Agent"); got != want {
 		t.Fatalf("fall-through line = %q, want %q", got, want)
 	}

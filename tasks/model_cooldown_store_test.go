@@ -53,7 +53,7 @@ func TestUpdateAgentModelCooldownPermanentNeverExpires(t *testing.T) {
 	t.Parallel()
 	d := newTestDeps(t)
 
-	if err := updateAgentModelCooldown(d, "kimi", "plan-gated-model", time.Time{}, true); err != nil {
+	if err := updateAgentModelCooldown(d, "kimi", "subscription-gated-model", time.Time{}, true); err != nil {
 		t.Fatalf("updateAgentModelCooldown: %v", err)
 	}
 

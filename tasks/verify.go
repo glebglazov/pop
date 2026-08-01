@@ -788,6 +788,12 @@ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, t
 			// the Verifier walks to the next preset (ADR-0153, ADR-0168).
 			if normalized.ProceedVerdict != nil {
 				v := stampDetectedVerdict(*normalized.ProceedVerdict, preset, invocation.PinnedModel())
+				// The Verifier resolves its Effort tier's head and does not walk
+				// the tail, so a model-scoped verdict stops this preset outright:
+				// escalate it, and what the human reads matches what happens.
+				if v.Scope == ProceedScopeModel {
+					v = v.escalateToPreset()
+				}
 				if _, ok := v.TimeHealing(); ok && v.Scope == ProceedScopePreset {
 					resetAt := agentQuotaResetAt(preset, v.Reason, time.Now())
 					v = v.WithResetAt(resetAt)

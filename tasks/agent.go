@@ -73,7 +73,7 @@ func (i *AgentInvocation) AgentPreset() string {
 // PinnedModel returns the model this command pins through pop's `--model` flag —
 // whatever an Effort ladder resolved, or what the human typed in `--agent` args.
 // Empty when nothing is pinned and the agent's own configuration picks the model,
-// which is why a Plan gate falls back to the model name the provider reported.
+// which is why a model refusal falls back to the name the provider reported.
 func (i *AgentInvocation) PinnedModel() string {
 	if i == nil {
 		return ""
@@ -925,18 +925,6 @@ func nonEmptyAgentSpecs(specs []string, fallback string) []string {
 	return out
 }
 
-func resolveTaskAgentSpecs(defaultSpecs []string, agentCmd, effort string, effortExplicit bool, cfg *config.Config) []string {
-	specs := nonEmptyAgentSpecs(defaultSpecs, DefaultAgentPreset)
-	if agentCmd != "" {
-		return specs
-	}
-	resolved := make([]string, 0, len(specs))
-	for _, spec := range specs {
-		resolved = append(resolved, resolveTaskAgentSpecForEffortWithConfig(spec, effort, effortExplicit, cfg))
-	}
-	return resolved
-}
-
 func resolveTaskAgentSpecForEffort(agentSpec, effort string, effortExplicit bool) string {
 	return resolveTaskAgentSpecForEffortWithConfig(agentSpec, effort, effortExplicit, nil)
 }
@@ -949,40 +937,14 @@ func ResolveAgentSpecForEffort(agentSpec, effort string, cfg *config.Config) str
 	return resolveTaskAgentSpecForEffortWithConfig(agentSpec, effort, true, cfg)
 }
 
+// resolveTaskAgentSpecForEffortWithConfig resolves an agent spec at the head of
+// its Effort tier, with no Effort model skip filtered out. Callers that walk the
+// tier resolve through effortSpecResolver instead.
 func resolveTaskAgentSpecForEffortWithConfig(agentSpec, effort string, effortExplicit bool, cfg *config.Config) string {
-	if !effortExplicit {
-		return agentSpec
+	if resolution := resolveEffortModel(agentSpec, effort, effortExplicit, cfg, nil); !resolution.Exhausted {
+		return resolution.Spec
 	}
-	if effort == "" {
-		effort = DefaultTaskEffort
-	}
-	name, extraArgs, err := parseAgentPresetSpec(agentSpec)
-	if err != nil {
-		return agentSpec
-	}
-	if name == "" {
-		name = DefaultAgentPreset
-	}
-	if agentArgsContainModel(extraArgs) {
-		return agentSpec
-	}
-	bundles := effortModelsForAgent(cfg, name, effort)
-	if len(bundles) == 0 || strings.TrimSpace(bundles[0].Model) == "" {
-		return agentSpec
-	}
-	args := append([]string{name}, extraArgs...)
-	adapter := agentAdapters[name]
-	args = append(args, "--model", effortModelTokenForAgent(name, bundles[0], adapter, extraArgs))
-	if adapter != nil {
-		reasoning := adapter.ReasoningCapability()
-		if !reasoning.argsContainReasoning(extraArgs) {
-			args = append(args, reasoning.specTokens(bundles[0].Reasoning)...)
-		}
-	}
-	for i, arg := range args {
-		args[i] = shellQuote(arg)
-	}
-	return strings.Join(args, " ")
+	return agentSpec
 }
 
 func effortModelTokenForAgent(agent string, bundle config.EffortModel, adapter AgentAdapter, extraArgs []string) string {

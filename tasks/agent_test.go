@@ -719,7 +719,11 @@ func TestResolveTaskAgentSpecEffortModelPrecedence(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := resolveTaskAgentSpecs(tt.defaultSpecs, tt.agentCmd, tt.effort, tt.effortExplicit, nil)
+			resolve := newEffortSpecResolver(tt.agentCmd, tt.effort, tt.effortExplicit, nil)
+			var got []string
+			for _, spec := range nonEmptyAgentSpecs(tt.defaultSpecs, DefaultAgentPreset) {
+				got = append(got, resolve(spec, nil).Spec)
+			}
 			if !reflect.DeepEqual(got, tt.wantSpecs) {
 				t.Fatalf("resolved specs = %#v, want %#v", got, tt.wantSpecs)
 			}

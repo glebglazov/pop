@@ -19,12 +19,17 @@ const (
 	// ProceedMissingBinary is a human-healing kind: the preset's binary is
 	// absent from PATH (ADR-0153).
 	ProceedMissingBinary AgentProceedKind = "missing_binary"
-	// ProceedPlanGate is a human-healing kind: the agent reported that the
-	// resolved model is not on this account's plan at all (ADR-0164). Human-healing
-	// because only a plan upgrade or a different model clears it — and, unlike a
-	// quota pause, no cooldown is worth recording: the gate is deterministic per
-	// account+model, so the next attempt re-probes once and falls through again.
-	ProceedPlanGate AgentProceedKind = "plan_gate"
+	// ProceedModelRefused is the kind for a provider refusing one model to this
+	// account while the CLI itself stays healthy — kimi's subscription 401
+	// (`does not have access to …`), and the same shape for a broker's spent
+	// per-vendor allowance. It is model-scoped when the Effort ladder resolved
+	// the model, and escalates to preset scope once the tier has no entry left
+	// (ADR-0168).
+	ProceedModelRefused AgentProceedKind = "model_refused"
+	// ProceedTierExhausted is the preset-scoped kind for an Effort tier whose
+	// every entry is already recorded as an Effort model skip, so this run never
+	// spawned the preset at all (ADR-0168).
+	ProceedTierExhausted AgentProceedKind = "tier_exhausted"
 )
 
 // AgentProceedScope is how much of an Agent a verdict condemns (ADR-0168).
@@ -76,14 +81,15 @@ type AgentProceedVerdict struct {
 	// always zero for a recovery that no instant can heal.
 	ResetAt time.Time
 	// ConsumesAttempt reports whether this verdict charges the Task retry cap.
-	// Every Scope=Preset verdict abandons the rest of the cap instead of spending
-	// from it, so it is false throughout; ADR-0168's Effort model skip is what
-	// makes the field vary.
+	// A Scope=Preset verdict abandons the rest of the cap instead of spending
+	// from it, and an Effort model skip restarts the attempt on the tier's next
+	// entry rather than spending a try, so it is false throughout: nothing about
+	// the Task failed in either case.
 	ConsumesAttempt bool
 	Reason          string
 	Preset          string
 	// Model names the model the verdict is about, for a verdict that condemns one
-	// model rather than the whole preset (a Plan gate). Empty otherwise.
+	// model rather than the whole preset. Empty otherwise.
 	Model string
 }
 
@@ -143,47 +149,78 @@ func NewMissingBinaryVerdict(preset, reason string) AgentProceedVerdict {
 	}
 }
 
-// NewPlanGateVerdict builds a human-healing plan-gate verdict against one model.
-// model is what the diagnostic or the invocation names as gated; it only ever
-// reaches human-facing messaging, never a policy decision.
-func NewPlanGateVerdict(preset, model, reason string) AgentProceedVerdict {
+// NewModelRefusedVerdict builds a model-scoped verdict against one model: the
+// CLI is healthy and this token is not runnable on this account. recovery says
+// what would bring it back — Permanent for a subscription that simply lacks the
+// model, Time for an allowance that refills. model is what the diagnostic or the
+// invocation names as refused; it names the Effort model skip to record and the
+// wording the human reads, never a policy branch.
+func NewModelRefusedVerdict(preset, model, reason string, recovery AgentProceedRecovery) AgentProceedVerdict {
 	return AgentProceedVerdict{
-		Kind:     ProceedPlanGate,
-		Scope:    ProceedScopePreset,
-		Recovery: ProceedRecoveryHuman,
+		Kind:     ProceedModelRefused,
+		Scope:    ProceedScopeModel,
+		Recovery: recovery,
 		Reason:   reason,
 		Preset:   preset,
 		Model:    model,
 	}
 }
 
-// DetectedPlanGate is the adapter-side form of a plan gate: kind, reason, and the
-// model the provider's own diagnostic named. Preset — and the model pop pinned,
-// when it pinned one — are filled by the executor after detection.
-func DetectedPlanGate(model, reason string) *AgentProceedVerdict {
-	v := NewPlanGateVerdict("", model, reason)
+// DetectedPermanentModelRefusal is the adapter-side form of a model refusal that
+// never heals on its own: kind, reason, and the model the provider's own
+// diagnostic named. Preset — and the model pop pinned, when it pinned one — are
+// filled by the executor after detection.
+func DetectedPermanentModelRefusal(model, reason string) *AgentProceedVerdict {
+	v := NewModelRefusedVerdict("", model, reason, ProceedRecoveryPermanent)
 	return &v
 }
 
+// NewTierExhaustedVerdict builds the preset-scoped stop for an Effort tier whose
+// every entry is already recorded as skipped, so the preset was never spawned.
+// Human-healing: only widening the tier or waiting out the skips brings it back,
+// and the recovery wait polls for neither.
+func NewTierExhaustedVerdict(preset, reason string) AgentProceedVerdict {
+	return AgentProceedVerdict{
+		Kind:     ProceedTierExhausted,
+		Scope:    ProceedScopePreset,
+		Recovery: ProceedRecoveryHuman,
+		Reason:   reason,
+		Preset:   preset,
+	}
+}
+
+// escalateToPreset returns a model-scoped verdict as the preset-scoped stop it
+// becomes when its Effort tier has no entry left to walk to: same cause, same
+// recovery, but condemning the whole preset so Agent fallback advances (ADR-0168).
+func (v AgentProceedVerdict) escalateToPreset() AgentProceedVerdict {
+	v.Scope = ProceedScopePreset
+	return v
+}
+
 // stampDetectedVerdict completes an adapter-detected verdict with what only the
-// caller knows: which preset produced it and, for a Plan gate, the model pop
-// pinned for the invocation. The pinned alias outranks the wire name the provider
-// used, because the alias is what the human would change to clear the gate; an
-// invocation that pins no model leaves the adapter's name in place.
+// caller knows: which preset produced it and, for a model-scoped verdict, the
+// model pop pinned for the invocation. The pinned alias outranks the wire name
+// the provider used, because the alias is the Effort ladder entry to skip and
+// what the human would change; an invocation that pins no model leaves the
+// adapter's name in place.
 func stampDetectedVerdict(v AgentProceedVerdict, preset, pinnedModel string) AgentProceedVerdict {
 	v = v.WithPreset(preset)
-	if v.Kind == ProceedPlanGate && pinnedModel != "" {
+	if v.Scope == ProceedScopeModel && pinnedModel != "" {
 		v.Model = pinnedModel
 	}
 	return v
 }
 
 // fallThroughMessage is the dim line printed when the orchestrator walks past a
-// stopped agent. role is the caller's word for what it is walking past ("Agent"
-// on implement, "Verifier agent" on verify). Kind picks the wording, so a kind
-// nobody has taught a phrase to still names the preset rather than printing
-// nothing.
+// stopped agent — past the model, for a model-scoped verdict, and past the whole
+// preset otherwise. role is the caller's word for what it is walking past
+// ("Agent" on implement, "Verifier agent" on verify). Scope picks which list is
+// advancing and Kind picks the wording, so a kind nobody has taught a phrase to
+// still names the preset rather than printing nothing.
 func (v AgentProceedVerdict) fallThroughMessage(role string) string {
+	if v.Scope == ProceedScopeModel {
+		return fmt.Sprintf("%s %s cannot run %s; trying the next model in its effort tier", role, v.Preset, v.modelOrPlaceholder())
+	}
 	switch v.Kind {
 	case ProceedQuotaPause:
 		return fmt.Sprintf("%s %s quota-paused; trying next", role, v.Preset)
@@ -191,15 +228,22 @@ func (v AgentProceedVerdict) fallThroughMessage(role string) string {
 		return fmt.Sprintf("%s %s unauthenticated; trying next", role, v.Preset)
 	case ProceedMissingBinary:
 		return fmt.Sprintf("%s %s unavailable (binary not found); trying next", role, v.Preset)
-	case ProceedPlanGate:
-		model := v.Model
-		if model == "" {
-			model = "its resolved model"
-		}
-		return fmt.Sprintf("%s %s plan-gated on %s; trying next", role, v.Preset, model)
+	case ProceedModelRefused:
+		return fmt.Sprintf("%s %s cannot run %s and has no effort tier entry left; trying next", role, v.Preset, v.modelOrPlaceholder())
+	case ProceedTierExhausted:
+		return fmt.Sprintf("%s %s has no runnable model left in its effort tier; trying next", role, v.Preset)
 	default:
 		return fmt.Sprintf("%s %s unavailable; trying next", role, v.Preset)
 	}
+}
+
+// modelOrPlaceholder names the model a verdict is about, standing in a phrase
+// for the invocation that pinned none.
+func (v AgentProceedVerdict) modelOrPlaceholder() string {
+	if v.Model == "" {
+		return "its resolved model"
+	}
+	return v.Model
 }
 
 // TimeHealing reports the time-healing witness when this verdict heals with
