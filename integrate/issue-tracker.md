@@ -226,13 +226,17 @@ pop tasks register <task-set-name>
 
 Add flags per the invocation arguments:
 
-- plain (no flags) by default;
-- `--managed` for the `managed` / `isolated` argument;
-- `--auto-drain` for the `auto-drain` / `drain` argument;
-- both together for `managed auto-drain`.
+- `--managed --auto-drain` **by default**, with no arguments at all;
+- `no-drain` / `manual` alone drops to plain (no flags);
+- `no-drain` / `manual` combined with `managed` / `isolated` drops to
+  `--managed` only;
+- `managed` / `isolated` and `auto-drain` / `drain` may still be typed
+  explicitly — they agree with the default, so they change nothing on their
+  own.
 
-`managed` / `auto-drain` are **pop-store-only**. (When the resolved Work store is
-not pop, a skill warns and ignores them, then publishes to the configured store.)
+`managed` / `auto-drain` / `no-drain` / `manual` are **pop-store-only**. (When
+the resolved Work store is not pop, a skill warns and ignores all of them, then
+publishes to the configured store.)
 
 Semantics:
 
@@ -241,11 +245,16 @@ Semantics:
 - `--managed` provisions immediately instead: it forks an isolated worktree from
   the Trunk worktree and binds the set to it the moment it registers. A repo with
   no resolvable trunk refuses the registration; `--trunk <path>` names one (needed
-  once per bare repo).
+  once per bare repo). Against the *default* (no keywords), a skill retries as
+  plain and warns instead of forwarding the refusal; against an *explicit*
+  `managed`/`isolated`, the refusal is reported as-is.
 - `--auto-drain` lets the Queue daemon drain the set unattended. Only the literal
-  keywords enable it — there is no "here and now" phrasing.
-- `managed auto-drain` → `pop tasks register --managed --auto-drain <task-set-name>`,
-  the safest unattended combo (isolated worktree, drained unattended).
+  keywords enable it — there is no "here and now" phrasing. It is never applied
+  without `--managed`: draining unattended in the current checkout, with no
+  isolation, is not a reachable combination.
+- `pop tasks register --managed --auto-drain <task-set-name>` is the default —
+  the safest unattended combo (isolated worktree, drained unattended) — not an
+  opt-in.
 - Re-registering an already-registered set never rebinds it. To move it to a
   different checkout, run `pop tasks bind-worktree <task-set-name> --force` from
   inside the target checkout.
