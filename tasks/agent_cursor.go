@@ -210,6 +210,72 @@ func cursorTokenUsage(events []streamEventRecord) TokenUsage {
 	return u
 }
 
+// cursorActualModel is cursor's actual-model extraction rule (ADR-0165).
+//
+// Authoritative event: system/init's top-level model field — the model cursor
+// actually ran, which may differ from the requested preset model.
+func cursorActualModel(events []streamEventRecord) string {
+	for _, ev := range events {
+		var event struct {
+			Type    string `json:"type"`
+			Subtype string `json:"subtype"`
+			Model   string `json:"model"`
+		}
+		if err := json.Unmarshal([]byte(ev.Raw), &event); err != nil {
+			continue
+		}
+		if event.Type == "system" && event.Subtype == "init" {
+			return strings.TrimSpace(event.Model)
+		}
+	}
+	return ""
+}
+
+// cursorToolTimings derives per-tool durations from cursor stream-json events:
+// each tool_call started is paired with the completed event sharing call_id
+// (or toolCallId), and the gap between their arrival times is that invocation's
+// duration. Tool names come from the started event's tool_call payload.
+func cursorToolTimings(events []streamEventRecord) ([]ToolTiming, []toolWindow) {
+	return accumulateToolTimings(events, func(ev streamEventRecord) ([]toolOpen, []toolClose) {
+		var event struct {
+			Type     string          `json:"type"`
+			Subtype  string          `json:"subtype"`
+			CallID   string          `json:"call_id"`
+			ToolCall json.RawMessage `json:"tool_call"`
+		}
+		if err := json.Unmarshal([]byte(ev.Raw), &event); err != nil {
+			return nil, nil
+		}
+		if event.Type != "tool_call" {
+			return nil, nil
+		}
+		id := event.CallID
+		if id == "" && len(event.ToolCall) > 0 {
+			var meta struct {
+				ToolCallId string `json:"toolCallId"`
+			}
+			if err := json.Unmarshal(event.ToolCall, &meta); err == nil {
+				id = meta.ToolCallId
+			}
+		}
+		if id == "" {
+			return nil, nil
+		}
+		switch event.Subtype {
+		case "started":
+			name, _ := cursorToolCall(event.ToolCall)
+			if name == "" {
+				name = "tool_call"
+			}
+			return []toolOpen{{ID: id, Name: name}}, nil
+		case "completed":
+			return nil, []toolClose{{ID: id}}
+		default:
+			return nil, nil
+		}
+	})
+}
+
 // cursorTurnCount is cursor's Turn extraction rule (ADR-0165).
 //
 // Authoritative boundary: distinct model_call_id values on assistant and

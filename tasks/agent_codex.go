@@ -242,6 +242,30 @@ func codexTokenUsage(events []streamEventRecord) TokenUsage {
 	return u
 }
 
+// codexTurnCount is codex's Turn extraction rule (ADR-0165).
+//
+// Authoritative events: turn.completed — one per codex exec turn. turn.started
+// may appear without a matching completed on aborted runs; only completed events
+// count as verifiable turn boundaries.
+func codexTurnCount(events []streamEventRecord) TurnCount {
+	count := 0
+	for _, ev := range events {
+		var event struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal([]byte(ev.Raw), &event); err != nil {
+			continue
+		}
+		if event.Type == "turn.completed" {
+			count++
+		}
+	}
+	if count == 0 {
+		return TurnCount{}
+	}
+	return TurnCount{Count: count, HasTurn: true}
+}
+
 // codexToolTimings derives per-tool durations from one stored Captured attempt
 // stream: each tool item's item.started is paired with the item.completed
 // carrying the same item id, and the gap between their arrival times is that

@@ -169,53 +169,7 @@ func extractStreamShapeOutput(preset string, cap streamShapeCapability, events [
 	}
 }
 
-// probeStreamShapeOutput asks what a preset's stream could yield for one
-// capability, ignoring the declared Supported/Blind stance. The fixture gate
-// uses this on Blind rows so "you have the data; write the rule" fires when a
-// registered Extract rule or stream-render path would produce real output.
-func probeStreamShapeOutput(preset string, cap streamShapeCapability, events []streamEventRecord) (any, error) {
-	adapter, ok := agentAdapters[preset]
-	if !ok {
-		return nil, fmt.Errorf("unknown preset %q", preset)
-	}
-	switch cap {
-	case streamShapeUsage:
-		c := adapter.UsageCapability()
-		if c.Extract != nil {
-			return c.Extract(events), nil
-		}
-	case streamShapeCost:
-		c := adapter.CostCapability()
-		if c.Extract != nil {
-			return c.Extract(events), nil
-		}
-	case streamShapeToolTimings:
-		c := adapter.ToolTimingCapability()
-		if c.Extract != nil {
-			tools, _ := c.Extract(events)
-			return tools, nil
-		}
-	case streamShapeActualModel:
-		c := adapter.ActualModelCapability()
-		if c.Extract != nil {
-			return c.Extract(events), nil
-		}
-	case streamShapeStreamRender:
-		c := adapter.StreamRenderCapability()
-		if c.Kind == CapabilitySupported && c.Render != nil {
-			return summarizeStreamRender(renderStreamEvents(preset, events)), nil
-		}
-	case streamShapeTurn:
-		c := adapter.TurnCapability()
-		if c.Extract != nil {
-			return c.Extract(events), nil
-		}
-	default:
-		return nil, fmt.Errorf("unknown stream-shape capability %v", cap)
-	}
-	return extractStreamShapeOutput(preset, cap, events)
-}
-
+// summarizeStreamRender builds a stable summary of rendered stream events.
 func summarizeStreamRender(events []StreamEvent) streamRenderGolden {
 	counts := make(map[string]int)
 	for _, ev := range events {
@@ -371,15 +325,7 @@ func checkStreamShapeFixture(preset string, cap streamShapeCapability, kind Capa
 			}
 		}
 		if fixtureExists {
-			got, err := probeStreamShapeOutput(preset, cap, events)
-			if err != nil {
-				return &streamShapeFixtureViolation{
-					Preset:      preset,
-					Capability:  cap,
-					Description: err.Error(),
-				}
-			}
-			if streamShapeOutputPresent(cap, got) {
+			if streamShapeBytesWitness(cap, events) {
 				return &streamShapeFixtureViolation{
 					Preset:      preset,
 					Capability:  cap,
@@ -446,6 +392,7 @@ var streamShapeFixtureGoldens = map[string]*streamShapeGolden{
 			Input: 1363, Output: 3690, CacheRead: 246817, CacheWrite: 34891,
 			HasInput: true, HasOutput: true, HasCacheRead: true, HasCacheWrite: true,
 		},
+		cost: &PartialCost{Dollars: 0.5713835, HasCost: true},
 		toolTimings: []toolTimingGolden{
 			{Name: "Bash", Count: 9, TotalNanos: (43*time.Second + 211*time.Millisecond).Nanoseconds()},
 			{Name: "Read", Count: 1, TotalNanos: (51 * time.Millisecond).Nanoseconds()},
@@ -462,6 +409,13 @@ var streamShapeFixtureGoldens = map[string]*streamShapeGolden{
 			Input: 135956, Output: 27212, CacheRead: 4885941, CacheWrite: 0,
 			HasInput: true, HasOutput: true, HasCacheRead: true, HasCacheWrite: true,
 		},
+		toolTimings: []toolTimingGolden{
+			{Name: "shellToolCall", Count: 4, TotalNanos: (9*time.Second + 331*time.Millisecond).Nanoseconds()},
+			{Name: "grepToolCall", Count: 5, TotalNanos: (5*time.Second + 303*time.Millisecond).Nanoseconds()},
+			{Name: "readToolCall", Count: 5, TotalNanos: (5*time.Second + 292*time.Millisecond).Nanoseconds()},
+			{Name: "globToolCall", Count: 4, TotalNanos: (4*time.Second + 306*time.Millisecond).Nanoseconds()},
+		},
+		actualModel: strPtr("Composer 2.5"),
 		turn: &TurnCount{Count: 8, HasTurn: true},
 	},
 	"codex": {
@@ -472,6 +426,7 @@ var streamShapeFixtureGoldens = map[string]*streamShapeGolden{
 		toolTimings: []toolTimingGolden{
 			{Name: "command_execution", Count: 1, TotalNanos: 0},
 		},
+		turn: &TurnCount{Count: 1, HasTurn: true},
 	},
 	"pi": {
 		usage: &TokenUsage{
@@ -479,6 +434,10 @@ var streamShapeFixtureGoldens = map[string]*streamShapeGolden{
 			HasInput: true, HasOutput: true, HasCacheRead: true, HasCacheWrite: true,
 		},
 		cost: &PartialCost{Dollars: 0.11416199999999999, HasCost: true},
+		toolTimings: []toolTimingGolden{
+			{Name: "bash", Count: 12, TotalNanos: (15*time.Second + 467*time.Millisecond).Nanoseconds()},
+			{Name: "read", Count: 3, TotalNanos: (3 * time.Millisecond).Nanoseconds()},
+		},
 		turn: &TurnCount{Count: 11, HasTurn: true},
 	},
 }

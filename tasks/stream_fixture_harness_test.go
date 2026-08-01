@@ -105,6 +105,25 @@ func TestStreamShapeFixtureHarness_blindWithExtractableDataFails(t *testing.T) {
 	}
 }
 
+func TestStreamShapeFixtureHarness_witnessGateFailsBlindOnDataCarryingFixture(t *testing.T) {
+	events, err := loadStreamFixture("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	violation := checkStreamShapeFixture(
+		"claude", streamShapeCost, CapabilityBlind, true, nil, events,
+	)
+	if violation == nil {
+		t.Fatal("expected violation")
+	}
+	if !strings.Contains(violation.Description, "blind capability has extractable stream data") {
+		t.Fatalf("description = %q", violation.Description)
+	}
+	if !streamShapeBytesWitness(streamShapeCost, events) {
+		t.Fatal("witness should detect cost bytes in claude fixture")
+	}
+}
+
 func TestStreamShapeFixtureHarness_supportedWithoutFixtureFailsInTable(t *testing.T) {
 	adapter, err := ResolveAgentAdapter("codex")
 	if err != nil {

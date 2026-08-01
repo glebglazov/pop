@@ -139,6 +139,32 @@ func claudeTokenUsage(events []streamEventRecord) TokenUsage {
 	return u
 }
 
+// claudePartialCost is claude's cost extraction rule (ADR-0160).
+//
+// Authoritative event: the terminal `result` event's total_cost_usd field and
+// per-model costUSD entries in modelUsage. That block is the whole-run total
+// — claude emits it once on the final result.
+//
+// Semantics: replace — read the last matching result; sum nothing.
+func claudePartialCost(events []streamEventRecord) PartialCost {
+	var c PartialCost
+	for _, ev := range events {
+		var event struct {
+			Type         string   `json:"type"`
+			TotalCostUSD *float64 `json:"total_cost_usd"`
+		}
+		if err := json.Unmarshal([]byte(ev.Raw), &event); err != nil {
+			continue
+		}
+		if event.Type != "result" || event.TotalCostUSD == nil {
+			continue
+		}
+		c.Dollars = *event.TotalCostUSD
+		c.HasCost = true
+	}
+	return c
+}
+
 // claudeTurnCount is claude's Turn extraction rule (ADR-0165).
 //
 // Authoritative events: type=="assistant", deduped by message.id. Consecutive

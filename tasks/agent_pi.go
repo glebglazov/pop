@@ -254,6 +254,40 @@ func piPartialCost(events []streamEventRecord) PartialCost {
 	return c
 }
 
+// piToolTimings derives per-tool durations from pi jsonl events: each
+// tool_execution_start is paired with tool_execution_end sharing toolCallId,
+// and the gap between their arrival times is that invocation's duration.
+func piToolTimings(events []streamEventRecord) ([]ToolTiming, []toolWindow) {
+	return accumulateToolTimings(events, func(ev streamEventRecord) ([]toolOpen, []toolClose) {
+		var event struct {
+			Type       string `json:"type"`
+			ToolCallId string `json:"toolCallId"`
+			ToolName   string `json:"toolName"`
+		}
+		if err := json.Unmarshal([]byte(ev.Raw), &event); err != nil {
+			return nil, nil
+		}
+		switch event.Type {
+		case "tool_execution_start":
+			if event.ToolCallId == "" {
+				return nil, nil
+			}
+			name := event.ToolName
+			if name == "" {
+				name = "tool"
+			}
+			return []toolOpen{{ID: event.ToolCallId, Name: name}}, nil
+		case "tool_execution_end":
+			if event.ToolCallId == "" {
+				return nil, nil
+			}
+			return nil, []toolClose{{ID: event.ToolCallId}}
+		default:
+			return nil, nil
+		}
+	})
+}
+
 // piTurnCount is pi's Turn extraction rule (ADR-0165).
 //
 // Authoritative events: type=="turn_end" with message.role=="assistant".

@@ -199,6 +199,15 @@ func TestExtractPartialCostNoCostForClaudeCursorOrUnknown(t *testing.T) {
 	}
 }
 
+func TestExtractPartialCostDispatchesClaude(t *testing.T) {
+	c := extractPartialCost("claude", []streamEventRecord{
+		{Type: "event", AtMS: 1, Raw: `{"type":"result","total_cost_usd":0.5713835}`},
+	})
+	if !c.HasCost || c.Dollars != 0.5713835 {
+		t.Fatalf("claude cost = %+v", c)
+	}
+}
+
 func TestExtractPartialCostDispatchesPi(t *testing.T) {
 	c := extractPartialCost("pi", []streamEventRecord{
 		{Type: "event", AtMS: 1, Raw: `{"type":"message_end","message":{"cost":{"total":1.25}}}`},

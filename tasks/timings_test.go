@@ -711,7 +711,38 @@ func TestTimingsPerToolBreakdownForClaudeOnly(t *testing.T) {
 		t.Fatalf("codex tools = %#v, want none", attempts[1].Tools)
 	}
 	if attempts[1].Model != 0 {
-		t.Fatalf("codex model = %v, want zero without a pairing parser", attempts[1].Model)
+		t.Fatalf("codex model = %v, want zero without claude-style tool events", attempts[1].Model)
+	}
+}
+
+func TestCursorToolTimingsPairsStartedWithCompletedByCallID(t *testing.T) {
+	tools, _ := cursorToolTimings([]streamEventRecord{
+		{Type: "event", AtMS: 100, Raw: `{"type":"tool_call","subtype":"started","call_id":"c1","tool_call":{"readToolCall":{"args":{"path":"/tmp"}},"toolCallId":"c1"}}`},
+		{Type: "event", AtMS: 600, Raw: `{"type":"tool_call","subtype":"completed","call_id":"c1","tool_call":{"toolCallId":"c1"}}`},
+	})
+	want := []ToolTiming{{Name: "readToolCall", Count: 1, Total: 500 * time.Millisecond}}
+	if len(tools) != 1 || tools[0] != want[0] {
+		t.Fatalf("tools = %#v, want %#v", tools, want)
+	}
+}
+
+func TestPiToolTimingsPairsStartWithEndByToolCallId(t *testing.T) {
+	tools, _ := piToolTimings([]streamEventRecord{
+		{Type: "event", AtMS: 100, Raw: `{"type":"tool_execution_start","toolCallId":"t1","toolName":"read"}`},
+		{Type: "event", AtMS: 250, Raw: `{"type":"tool_execution_end","toolCallId":"t1","toolName":"read"}`},
+	})
+	want := []ToolTiming{{Name: "read", Count: 1, Total: 150 * time.Millisecond}}
+	if len(tools) != 1 || tools[0] != want[0] {
+		t.Fatalf("tools = %#v, want %#v", tools, want)
+	}
+}
+
+func TestCursorActualModelReadsSystemInit(t *testing.T) {
+	model := cursorActualModel([]streamEventRecord{
+		{Type: "event", AtMS: 1, Raw: `{"type":"system","subtype":"init","model":"Composer 2.5"}`},
+	})
+	if model != "Composer 2.5" {
+		t.Fatalf("model = %q", model)
 	}
 }
 

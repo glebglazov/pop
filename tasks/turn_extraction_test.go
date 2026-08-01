@@ -102,6 +102,7 @@ func TestSampledRunTurnCounts(t *testing.T) {
 		{"claude", "claude.events.jsonl.gz", 8},
 		{"cursor", "cursor.events.jsonl.gz", 8},
 		{"pi", "pi.events.jsonl.gz", 11},
+		{"codex", "codex.events.jsonl.gz", 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.agent, func(t *testing.T) {
@@ -128,11 +129,34 @@ func TestSampledRunPeakInput(t *testing.T) {
 	}
 }
 
+func TestCodexTurnCountUsesTurnCompleted(t *testing.T) {
+	events := []streamEventRecord{
+		{Type: "event", AtMS: 1, Raw: `{"type":"turn.started"}`},
+		{Type: "event", AtMS: 2, Raw: `{"type":"turn.completed"}`},
+		{Type: "event", AtMS: 3, Raw: `{"type":"turn.started"}`},
+		{Type: "event", AtMS: 4, Raw: `{"type":"turn.completed"}`},
+	}
+	tc := codexTurnCount(events)
+	if tc.Count != 2 || !tc.HasTurn {
+		t.Fatalf("turns = %+v, want 2 reported", tc)
+	}
+}
+
+func TestClaudePartialCostReadsResultTotalCostUSD(t *testing.T) {
+	events := []streamEventRecord{
+		{Type: "event", AtMS: 1, Raw: `{"type":"result","total_cost_usd":0.42}`},
+	}
+	c := claudePartialCost(events)
+	if !c.HasCost || c.Dollars != 0.42 {
+		t.Fatalf("cost = %+v", c)
+	}
+}
+
 func TestExtractTurnCountBlindForUnsupportedAdapters(t *testing.T) {
 	events := []streamEventRecord{
 		{Type: "event", AtMS: 1, Raw: `{"type":"assistant","message":{"id":"msg_1"}}`},
 	}
-	for _, agent := range []string{"codex", "kimi", "opencode"} {
+	for _, agent := range []string{"kimi", "opencode"} {
 		tc := extractTurnCount(agent, events)
 		if tc.HasTurn {
 			t.Fatalf("%s should be turn-blind, got %+v", agent, tc)
