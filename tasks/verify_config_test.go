@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/config"
-	"github.com/glebglazov/pop/internal/deps"
 )
 
 // manifestWithVerifier builds a bare manifest carrying a per-set `verifier`
@@ -164,7 +163,7 @@ func TestRunConfiguredVerifierFallsThroughMissingBinary(t *testing.T) {
 	taskSetDir := t.TempDir()
 	// Real-subprocess smoke: verify fall-through spawns the fake claude on PATH
 	// (see realShimSmokeSet).
-	d := &Deps{FS: deps.NewRealFileSystem(), Runner: RealCommandRunner{}, LookPath: exec.LookPath}
+	d := &Deps{FS: testFSWithDataHome(t.TempDir()), Runner: RealCommandRunner{}, LookPath: exec.LookPath}
 	out, err := runConfiguredVerifier(d, nil, verifierSelection{
 		Agents: []string{"cursor", "claude"}, Effort: "heavy",
 	}, taskSetDir, "demo", "sha1", t.TempDir(), "prompt", &bytes.Buffer{}, &bytes.Buffer{}, time.Minute, nil)

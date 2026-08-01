@@ -705,6 +705,12 @@ func nonEmptyStrings(specs []string) []string {
 // detection). When every preset is human-healing unavailable the run hard-errors
 // with each preset's diagnostic instead of yielding a fabricated NEEDS-HUMAN.
 //
+// Inside a preset it also walks that preset's Effort tier the way implement
+// does: a model-scoped verdict records an Effort model skip and restarts the
+// try on the tier's next entry, spending no try, and only an exhausted tier
+// advances the agent list (ADR-0168). Falling through on exhausted retries
+// stays the Verifier's own asymmetry with implement.
+//
 // Every structured adapter-mode invocation is persisted as a Captured run pair
 // under <task-set>/streams/runs/. Quota-paused fall-through attempts are
 // persisted without a verdict; the parsed invocation is persisted with its
@@ -735,6 +741,11 @@ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, t
 	if probeMemo == nil {
 		probeMemo = newAgentAvailabilityProbeMemo()
 	}
+	// The recorded Effort model skips are shared by every preset in the list and
+	// read once, on the first preset that actually reaches its tier — a round
+	// where every preset is skipped before invocation never opens the store.
+	var skips effortModelSkips
+	resolveSpec := newEffortSpecResolver("", sel.Effort, true, cfg)
 	for i, agentSpec := range specs {
 		preset, err := AgentPresetName(agentSpec)
 		if err != nil {
@@ -755,16 +766,46 @@ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, t
 			}
 			continue
 		}
-		spec := resolveTaskAgentSpecForEffortWithConfig(agentSpec, sel.Effort, true, cfg)
-		invocation, err := ResolveAgentInvocationWithMode(spec, "", prompt, runtimePath, AgentOutputAuto)
-		if err != nil {
-			return "", exitErr(ExitSetup, "resolve verifier agent: %v", err)
+		if skips == nil {
+			loaded, err := loadEffortModelSkips(d, time.Now())
+			if err != nil {
+				return "", exitErr(ExitOperational, "%v", err)
+			}
+			skips = loaded
 		}
-		if out != nil {
-			outputFor(out).line(ansiBold+ansiCyan, "━━ Verifying with %s", invocation.RequestedAgent)
+		walk := &effortModelWalk{
+			d: d, preset: preset, baseSpec: agentSpec, resolve: resolveSpec, skips: skips,
+			build: func(spec string) (func(prompt string) (*AgentInvocation, error), error) {
+				return func(prompt string) (*AgentInvocation, error) {
+					return ResolveAgentInvocationWithMode(spec, "", prompt, runtimePath, AgentOutputAuto)
+				}, nil
+			},
 		}
+		announced := false
 
-		for try := 1; try <= maxTries; try++ {
+		// try advances by hand because an Effort model skip restarts the try on
+		// the tier's next entry rather than spending one: only an answer about
+		// the work under verification charges the verify cap (ADR-0168).
+		for try := 1; try <= maxTries; {
+			build, exhausted, err := walk.builder()
+			if err != nil {
+				return "", exitErr(ExitSetup, "resolve verifier agent: %v", err)
+			}
+			if exhausted != nil {
+				unavailablePresets = append(unavailablePresets, *exhausted)
+				if i+1 < len(specs) && out != nil {
+					outputFor(out).line(ansiDim, "   %s", exhausted.fallThroughMessage("Verifier agent"))
+				}
+				break
+			}
+			invocation, err := build(prompt)
+			if err != nil {
+				return "", exitErr(ExitSetup, "resolve verifier agent: %v", err)
+			}
+			if !announced && out != nil {
+				outputFor(out).line(ansiBold+ansiCyan, "━━ Verifying with %s", invocation.RequestedAgent)
+			}
+			announced = true
 			if out != nil {
 				outputFor(out).line(ansiDim, "   Attempt %d/%d · %s", try, maxTries, invocation.RequestedAgent)
 			}
@@ -788,27 +829,45 @@ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, t
 			// the Verifier walks to the next preset (ADR-0153, ADR-0168).
 			if normalized.ProceedVerdict != nil {
 				v := stampDetectedVerdict(*normalized.ProceedVerdict, preset, invocation.PinnedModel())
-				// The Verifier resolves its Effort tier's head and does not walk
-				// the tail, so a model-scoped verdict stops this preset outright:
-				// escalate it, and what the human reads matches what happens.
+				// A model-scoped verdict condemns the entry, not the preset: the
+				// run is persisted as the refusal it is, the model is recorded as
+				// an Effort model skip, and this try restarts on the tier's next
+				// entry. Only an exhausted tier escalates into the preset-scoped
+				// handling below (ADR-0168).
+				persisted := false
 				if v.Scope == ProceedScopeModel {
-					v = v.escalateToPreset()
+					_ = persistVerifyRun(d, errOut, taskSetDir, setID, workSHA, outcome.stream, invocation.AgentPreset(), invocation.RequestedAgent, try, streamOutcomeAgentUnusable, v.Reason, exitCode, "")
+					stop, err := walk.retire(v)
+					if err != nil {
+						return "", exitErr(ExitOperational, "%v", err)
+					}
+					if stop == nil {
+						if out != nil {
+							outputFor(out).line(ansiDim, "   %s", v.fallThroughMessage("Verifier agent"))
+						}
+						continue
+					}
+					v, persisted = *stop, true
 				}
-				if _, ok := v.TimeHealing(); ok && v.Scope == ProceedScopePreset {
+				if _, ok := v.TimeHealing(); ok {
 					resetAt := agentQuotaResetAt(preset, v.Reason, time.Now())
 					v = v.WithResetAt(resetAt)
 					until := agentQuotaCooldownUntil(resetAt, time.Now(), quotaRetryAfter)
 					_ = updateAgentCooldown(d, preset, until)
-					_ = persistVerifyRun(d, errOut, taskSetDir, setID, workSHA, outcome.stream, invocation.AgentPreset(), invocation.RequestedAgent, try, streamOutcomeQuotaPaused, "", exitCode, "")
+					if !persisted {
+						_ = persistVerifyRun(d, errOut, taskSetDir, setID, workSHA, outcome.stream, invocation.AgentPreset(), invocation.RequestedAgent, try, streamOutcomeQuotaPaused, "", exitCode, "")
+					}
 					unavailablePresets = append(unavailablePresets, v)
 					if out != nil {
 						outputFor(out).line(ansiDim, "   %s", v.fallThroughMessage("Verifier agent"))
 					}
 					break
 				}
-				_ = persistVerifyRun(d, errOut, taskSetDir, setID, workSHA, outcome.stream, invocation.AgentPreset(), invocation.RequestedAgent, try, streamOutcomeAgentUnusable, v.Reason, exitCode, "")
+				if !persisted {
+					_ = persistVerifyRun(d, errOut, taskSetDir, setID, workSHA, outcome.stream, invocation.AgentPreset(), invocation.RequestedAgent, try, streamOutcomeAgentUnusable, v.Reason, exitCode, "")
+				}
 				unavailablePresets = append(unavailablePresets, v)
-				if v.Scope == ProceedScopePreset && i+1 < len(specs) && out != nil {
+				if i+1 < len(specs) && out != nil {
 					outputFor(out).line(ansiDim, "   %s", v.fallThroughMessage("Verifier agent"))
 				}
 				break
@@ -830,16 +889,17 @@ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, t
 			if !verifyAttemptRetryEligible(outcome, normalized.Output) {
 				return normalized.Output, nil
 			}
-			if try < maxTries {
-				delay := attemptRetryDelay(retryDelays, try)
-				if delay <= 0 {
-					if out != nil {
-						outputFor(out).line(ansiYellow, "↻ Retrying with preserved changes...")
-					}
-				} else if waitRetryDelay(d, out, delay) {
-					return "", exitErr(ExitInterrupted, "interrupted")
+			if try >= maxTries {
+				break
+			}
+			delay := attemptRetryDelay(retryDelays, try)
+			try++
+			if delay <= 0 {
+				if out != nil {
+					outputFor(out).line(ansiYellow, "↻ Retrying with preserved changes...")
 				}
-				continue
+			} else if waitRetryDelay(d, out, delay) {
+				return "", exitErr(ExitInterrupted, "interrupted")
 			}
 		}
 	}

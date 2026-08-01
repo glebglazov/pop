@@ -878,14 +878,16 @@ func TestRunConfiguredVerifierAllAgentsQuotaPausedReturnsQuotaPause(t *testing.T
 	}
 }
 
+// verifyRetryDeps is a verify fixture whose data dir is isolated (newTestDeps),
+// so a run that reads or records an Effort model skip touches a temp store
+// rather than the developer's.
 func verifyRetryDeps(t *testing.T, runner CommandRunner) *Deps {
 	t.Helper()
-	return &Deps{
-		FS:       deps.NewRealFileSystem(),
-		Git:      stubGit("sha1\n", "", ""),
-		LookPath: func(string) (string, error) { return "/bin/claude", nil },
-		Runner:   &probeNeutralRunner{inner: runner},
-	}
+	d := newTestDeps(t)
+	d.Git = stubGit("sha1\n", "", "")
+	d.LookPath = func(string) (string, error) { return "/bin/claude", nil }
+	d.Runner = &probeNeutralRunner{inner: runner}
+	return d
 }
 
 // probeNeutralRunner satisfies availability probes without forwarding them to the
@@ -1291,6 +1293,129 @@ func TestRunConfiguredVerifierFallsThroughKimiSubscriptionGate(t *testing.T) {
 	}
 	if _, ok := cooldowns["kimi"]; ok {
 		t.Fatalf("a model refusal wrote a preset cooldown: %#v", cooldowns)
+	}
+}
+
+// kimiVerifyLadderConfig gives kimi a multi-entry light tier and a verify cap,
+// so a verify test can watch the tier being walked inside one try.
+func kimiVerifyLadderConfig(maxTries int, models ...string) *config.Config {
+	entries := make([]config.EffortModel, 0, len(models))
+	for _, model := range models {
+		entries = append(entries, config.EffortModel{Model: model})
+	}
+	tries := maxTries
+	return &config.Config{
+		Effort: map[string]config.EffortConfig{"kimi": {Light: entries}},
+		Task:   &config.TasksConfig{MaxTries: &tries, AttemptRetryDelays: []string{}},
+	}
+}
+
+// A model refusal condemns the tier entry, not the verifier preset: the same
+// preset restarts on the tier's next model, and with the verify cap at one try
+// the PASS below can only come from a restart that spent no try (ADR-0168).
+func TestRunConfiguredVerifierWalksTheEffortTierOnAModelRefusal(t *testing.T) {
+	t.Parallel()
+	taskSetDir := t.TempDir()
+	runner := &scriptedVerifyRunner{
+		scripts: []string{
+			kimiSubscriptionGateLine,
+			"VERDICT: PASS\nFINDINGS:\n",
+		},
+	}
+	d := newTestDeps(t)
+	d.Git = stubGit("sha1\n", "", "")
+	d.LookPath = func(file string) (string, error) { return "/bin/" + file, nil }
+	d.Runner = &probeNeutralRunner{inner: runner}
+	cfg := kimiVerifyLadderConfig(1, "moonshot-ai/kimi-k2.7-code-highspeed", "moonshot-ai/kimi-k3")
+
+	var out bytes.Buffer
+	raw, err := runConfiguredVerifier(d, cfg, verifierSelection{
+		Agents: []string{"kimi"}, Effort: "light",
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", &out, &out, time.Minute, nil)
+	if err != nil {
+		t.Fatalf("runConfiguredVerifier: %v", err)
+	}
+	if !strings.Contains(raw, "VERDICT: PASS") {
+		t.Fatalf("raw = %q, want PASS from the tier's next model", raw)
+	}
+	if runner.calls != 2 {
+		t.Fatalf("headless calls = %d, want 2 (refused model then its tier successor)", runner.calls)
+	}
+	if !strings.Contains(out.String(), "Verifier agent kimi cannot run moonshot-ai/kimi-k2.7-code-highspeed; trying the next model in its effort tier") {
+		t.Fatalf("missing in-tier fall-through line:\n%s", out.String())
+	}
+
+	skips, err := ActiveAgentModelCooldownsWith(d, time.Now())
+	if err != nil {
+		t.Fatalf("read model skips: %v", err)
+	}
+	if len(skips) != 1 || skips[0].Preset != "kimi" || skips[0].Model != "moonshot-ai/kimi-k2.7-code-highspeed" {
+		t.Fatalf("model skips = %#v, want only the refused entry recorded", skips)
+	}
+
+	cooldowns, err := readAgentCooldowns(d)
+	if err != nil {
+		t.Fatalf("read cooldowns: %v", err)
+	}
+	if _, ok := cooldowns["kimi"]; ok {
+		t.Fatalf("a walked model refusal wrote a preset cooldown: %#v", cooldowns)
+	}
+}
+
+// A tier every entry of which an earlier run recorded as skipped is a
+// preset-scoped stop: the verifier never spawns it and the agent list advances.
+func TestRunConfiguredVerifierExhaustedTierAdvancesTheAgentList(t *testing.T) {
+	t.Parallel()
+	taskSetDir := t.TempDir()
+	runner := &scriptedVerifyRunner{
+		scripts: []string{
+			`{"type":"system","subtype":"init"}` + "\n" + `{"type":"result","subtype":"success","result":"VERDICT: PASS\nFINDINGS:\n"}`,
+		},
+	}
+	d := newTestDeps(t)
+	d.Git = stubGit("sha1\n", "", "")
+	d.LookPath = func(file string) (string, error) { return "/bin/" + file, nil }
+	d.Runner = &probeNeutralRunner{inner: runner}
+	if err := updateAgentModelCooldown(d, "kimi", "moonshot-ai/kimi-k2.7-code-highspeed", time.Time{}, true); err != nil {
+		t.Fatalf("updateAgentModelCooldown: %v", err)
+	}
+
+	var out bytes.Buffer
+	raw, err := runConfiguredVerifier(d, nil, verifierSelection{
+		Agents: []string{"kimi", "claude"}, Effort: "light",
+	}, taskSetDir, "demo", "sha1", "/rt", "prompt", &out, &out, time.Minute, nil)
+	if err != nil {
+		t.Fatalf("runConfiguredVerifier: %v", err)
+	}
+	if !strings.Contains(raw, "VERDICT: PASS") {
+		t.Fatalf("raw = %q, want PASS from the fallback agent", raw)
+	}
+	if runner.calls != 1 {
+		t.Fatalf("headless calls = %d, want 1 (kimi never spawned)", runner.calls)
+	}
+	if !strings.Contains(out.String(), "Verifier agent kimi has no runnable model left in its effort tier; trying next") {
+		t.Fatalf("missing exhausted-tier fall-through line:\n%s", out.String())
+	}
+}
+
+// An exhausted tier is the whole diagnostic when it is the only agent: the run
+// hard-errors rather than fabricating a verdict.
+func TestRunConfiguredVerifierExhaustedTierAloneHardErrors(t *testing.T) {
+	t.Parallel()
+	d := newTestDeps(t)
+	d.Git = stubGit("sha1\n", "", "")
+	d.LookPath = func(file string) (string, error) { return "/bin/" + file, nil }
+	d.Runner = &probeNeutralRunner{inner: &scriptedVerifyRunner{}}
+	if err := updateAgentModelCooldown(d, "kimi", "moonshot-ai/kimi-k2.7-code-highspeed", time.Time{}, true); err != nil {
+		t.Fatalf("updateAgentModelCooldown: %v", err)
+	}
+
+	_, err := runConfiguredVerifier(d, nil, verifierSelection{
+		Agents: []string{"kimi"}, Effort: "light",
+	}, t.TempDir(), "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute, nil)
+	assertExitCode(t, err, ExitSetup)
+	if !strings.Contains(err.Error(), "every effort tier model is skipped: moonshot-ai/kimi-k2.7-code-highspeed") {
+		t.Fatalf("error = %q, want the exhausted-tier diagnostic", err.Error())
 	}
 }
 
