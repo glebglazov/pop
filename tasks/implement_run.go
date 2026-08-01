@@ -167,13 +167,13 @@ func newImplementRun(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 func (r *implementRun) finalize(errp *error) {
 	var (
 		declined     bool
-		unavail      *AgentUnavailability
+		unavail      *AgentProceedVerdict
 		verifyFailed bool
 		pinned       bool
 	)
 	if r.result != nil {
 		declined = r.result.Declined
-		unavail = r.result.Unavailability
+		unavail = r.result.ProceedVerdict
 		verifyFailed = r.result.TaskSetVerifyFailed
 		pinned = r.result.PausePinnedAgent
 	}

@@ -27,7 +27,7 @@ func stripThinkTags(s string) string {
 
 func normalizePiJSONL(raw string) AgentResult {
 	if pause := opencodeGoQuotaPauseReason(raw); pause != nil {
-		return AgentResult{Unavailability: pause}
+		return AgentResult{ProceedVerdict: pause}
 	}
 	var transcript string
 	var diagnostics []string

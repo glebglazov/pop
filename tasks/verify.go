@@ -729,7 +729,7 @@ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, t
 
 	var (
 		lastRaw            string
-		unavailablePresets []AgentUnavailability
+		unavailablePresets []AgentProceedVerdict
 	)
 	specs := nonEmptyAgentSpecs(sel.Agents, DefaultAgentPreset)
 	if probeMemo == nil {
@@ -741,17 +741,17 @@ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, t
 			return "", exitErr(ExitSetup, "resolve verifier agent: %v", err)
 		}
 		if !agentBinaryAvailable(d, preset) {
-			u := NewMissingBinaryUnavailability(preset, "binary not found on PATH")
-			unavailablePresets = append(unavailablePresets, u)
+			v := NewMissingBinaryVerdict(preset, "binary not found on PATH")
+			unavailablePresets = append(unavailablePresets, v)
 			if i+1 < len(specs) && out != nil {
-				outputFor(out).line(ansiDim, "   Verifier agent %s unavailable (binary not found); trying next", preset)
+				outputFor(out).line(ansiDim, "   %s", v.fallThroughMessage("Verifier agent"))
 			}
 			continue
 		}
-		if u := probeMemo.checkUnavailability(d, runtimePath, preset); u != nil {
-			unavailablePresets = append(unavailablePresets, *u)
+		if v := probeMemo.checkProceedVerdict(d, runtimePath, preset); v != nil {
+			unavailablePresets = append(unavailablePresets, *v)
 			if i+1 < len(specs) && out != nil {
-				outputFor(out).line(ansiDim, "   Verifier agent %s unauthenticated; trying next", preset)
+				outputFor(out).line(ansiDim, "   %s", v.fallThroughMessage("Verifier agent"))
 			}
 			continue
 		}
@@ -784,31 +784,26 @@ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, t
 				return "", exitErr(ExitInterrupted, "interrupted")
 			}
 			normalized := invocation.NormalizeOutput(raw)
-			// Agent unavailability fall-through: quota pause and human-healing
-			// kinds (e.g. passive auth detection) render no verdict, so try next.
-			if normalized.Unavailability != nil {
-				u := stampDetectedUnavailability(*normalized.Unavailability, preset, invocation.PinnedModel())
-				if _, ok := u.TimeHealing(); ok {
-					resetAt := agentQuotaResetAt(preset, u.Reason, time.Now())
-					u = u.WithResetAt(resetAt)
+			// Proceed-verdict fall-through: a stopped agent renders no verdict, so
+			// the Verifier walks to the next preset (ADR-0153, ADR-0168).
+			if normalized.ProceedVerdict != nil {
+				v := stampDetectedVerdict(*normalized.ProceedVerdict, preset, invocation.PinnedModel())
+				if _, ok := v.TimeHealing(); ok && v.Scope == ProceedScopePreset {
+					resetAt := agentQuotaResetAt(preset, v.Reason, time.Now())
+					v = v.WithResetAt(resetAt)
 					until := agentQuotaCooldownUntil(resetAt, time.Now(), quotaRetryAfter)
 					_ = updateAgentCooldown(d, preset, until)
 					_ = persistVerifyRun(d, errOut, taskSetDir, setID, workSHA, outcome.stream, invocation.AgentPreset(), invocation.RequestedAgent, try, streamOutcomeQuotaPaused, "", exitCode, "")
-					unavailablePresets = append(unavailablePresets, u)
+					unavailablePresets = append(unavailablePresets, v)
 					if out != nil {
-						outputFor(out).line(ansiDim, "   Verifier agent %s quota-paused; trying next", preset)
+						outputFor(out).line(ansiDim, "   %s", v.fallThroughMessage("Verifier agent"))
 					}
 					break
 				}
-				_ = persistVerifyRun(d, errOut, taskSetDir, setID, workSHA, outcome.stream, invocation.AgentPreset(), invocation.RequestedAgent, try, streamOutcomeAgentUnusable, u.Reason, exitCode, "")
-				unavailablePresets = append(unavailablePresets, u)
-				if i+1 < len(specs) && out != nil {
-					switch u.Kind {
-					case UnavailabilityAuthFailure:
-						outputFor(out).line(ansiDim, "   Verifier agent %s unauthenticated; trying next", preset)
-					case UnavailabilityPlanGate:
-						outputFor(out).line(ansiDim, "   %s", formatPlanGateFallThrough("Verifier agent", u))
-					}
+				_ = persistVerifyRun(d, errOut, taskSetDir, setID, workSHA, outcome.stream, invocation.AgentPreset(), invocation.RequestedAgent, try, streamOutcomeAgentUnusable, v.Reason, exitCode, "")
+				unavailablePresets = append(unavailablePresets, v)
+				if v.Scope == ProceedScopePreset && i+1 < len(specs) && out != nil {
+					outputFor(out).line(ansiDim, "   %s", v.fallThroughMessage("Verifier agent"))
 				}
 				break
 			}
@@ -847,8 +842,8 @@ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, t
 
 // resolveVerifierAgentExhaustion returns the last verifier output when present,
 // otherwise maps an exhausted fallback list to quota pause or human-healing
-// setup errors — mirroring Implement's resolveAgentFallbackUnavailable (ADR-0153).
-func resolveVerifierAgentExhaustion(lastRaw string, unavailable []AgentUnavailability) (string, error) {
+// setup errors — mirroring Implement's resolveAgentFallbackVerdict (ADR-0153).
+func resolveVerifierAgentExhaustion(lastRaw string, unavailable []AgentProceedVerdict) (string, error) {
 	if strings.TrimSpace(lastRaw) != "" {
 		return lastRaw, nil
 	}
@@ -856,24 +851,24 @@ func resolveVerifierAgentExhaustion(lastRaw string, unavailable []AgentUnavailab
 		return lastRaw, nil
 	}
 	var results []*RunTaskResult
-	for _, u := range unavailable {
-		cp := u
-		results = append(results, &RunTaskResult{Unavailability: &cp})
+	for _, v := range unavailable {
+		cp := v
+		results = append(results, &RunTaskResult{ProceedVerdict: &cp})
 	}
-	resolved := resolveAgentFallbackUnavailable(nil, results)
-	if resolved == nil || resolved.Unavailability == nil {
+	resolved := resolveAgentFallbackVerdict(nil, results)
+	if resolved == nil || resolved.ProceedVerdict == nil {
 		return lastRaw, nil
 	}
-	if th, ok := resolved.Unavailability.TimeHealing(); ok {
+	if th, ok := resolved.ProceedVerdict.TimeHealing(); ok {
 		return "", newVerifyQuotaPause(VerifyQuotaPause{
-			Preset:  resolved.Unavailability.Preset,
+			Preset:  resolved.ProceedVerdict.Preset,
 			ResetAt: th.ResetAt,
-			Reason:  resolved.Unavailability.Reason,
+			Reason:  resolved.ProceedVerdict.Reason,
 		})
 	}
 	presets := resolved.UnavailablePresets
 	if len(presets) == 0 {
-		presets = []AgentUnavailability{*resolved.Unavailability}
+		presets = []AgentProceedVerdict{*resolved.ProceedVerdict}
 	}
 	return "", exitErr(ExitSetup, "%s", formatHumanHealingExhaustionMessage(presets))
 }

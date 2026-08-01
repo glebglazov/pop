@@ -131,17 +131,17 @@ func (r *implementRun) runSelectedTask(currentRefresh *RefreshResult, sel *Selec
 		}
 		return runTaskReturn, result, execErr
 	}
-	if taskResult.Unavailability != nil {
-		u := taskResult.Unavailability
+	if taskResult.ProceedVerdict != nil {
+		u := taskResult.ProceedVerdict
 		th, ok := u.TimeHealing()
 		if !ok {
 			// Every configured preset is human-healing unavailable: exit setup with
 			// each preset's provider diagnostic; never enter recovery wait (ADR-0153).
 			presets := taskResult.UnavailablePresets
 			if len(presets) == 0 {
-				presets = []AgentUnavailability{*u}
+				presets = []AgentProceedVerdict{*u}
 			}
-			result.Unavailability = &presets[0]
+			result.ProceedVerdict = &presets[0]
 			return runTaskReturn, result, taskExitErr(sel, ExitSetup, "%s", formatHumanHealingExhaustionMessage(presets))
 		}
 		// Quota recovery wait (ADR-0100): instead of exiting with ExitQuotaPaused,
@@ -157,7 +157,7 @@ func (r *implementRun) runSelectedTask(currentRefresh *RefreshResult, sel *Selec
 			return runTaskReturn, result, waitErr
 		}
 		if regFailed {
-			result.Unavailability = u
+			result.ProceedVerdict = u
 			result.QuotaPaused = true
 			result.PauseReason = u.Reason
 			result.PausePreset = u.Preset

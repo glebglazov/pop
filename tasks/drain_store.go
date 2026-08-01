@@ -298,7 +298,7 @@ func (h *DrainHandle) Cancel() error {
 
 // finalizeDrain records the appropriate exit-reason terminal for a finished
 // drain, or cancels the row when the drain was declined and never executed.
-func finalizeDrain(h *DrainHandle, declined bool, unavail *AgentUnavailability, verifyFailed bool, pinned bool, err error) {
+func finalizeDrain(h *DrainHandle, declined bool, unavail *AgentProceedVerdict, verifyFailed bool, pinned bool, err error) {
 	if h == nil {
 		return
 	}
@@ -312,12 +312,12 @@ func finalizeDrain(h *DrainHandle, declined bool, unavail *AgentUnavailability, 
 
 // drainTerminal maps the observable end of a drain to its exit-reason store
 // state (ADR-0056). A declined run never executed, so it returns executed=false
-// and the caller cancels the Drain row. Time-healing Agent unavailability,
+// and the caller cancels the Drain row. A time-healing Agent proceed verdict,
 // SIGINT, and a failed pre-approval verification (NEEDS-HUMAN or an exhausted
 // remediation cap, ADR-0086/0087) are the non-finished terminals; everything
 // else — success, failure, blocked, setup error after the drain began — is a
 // finished process whose disposition is read from the manifest, not the Drain.
-func drainTerminal(declined bool, unavail *AgentUnavailability, verifyFailed bool, pinned bool, err error) (terminal string, _ string, _ bool, _ time.Time, executed bool) {
+func drainTerminal(declined bool, unavail *AgentProceedVerdict, verifyFailed bool, pinned bool, err error) (terminal string, _ string, _ bool, _ time.Time, executed bool) {
 	if declined {
 		return "", "", false, time.Time{}, false
 	}
@@ -325,7 +325,7 @@ func drainTerminal(declined bool, unavail *AgentUnavailability, verifyFailed boo
 		if th, ok := unavail.TimeHealing(); ok {
 			return store.StateQuotaPaused, unavail.Preset, pinned, th.ResetAt, true
 		}
-		// Human-healing unavailability is a clean finished stop (ADR-0153).
+		// A human-healing verdict is a clean finished stop (ADR-0153).
 	}
 	if isInterrupted(err) {
 		return store.StateInterrupted, "", false, time.Time{}, true

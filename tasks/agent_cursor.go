@@ -10,15 +10,15 @@ import (
 const cursorAuthenticationRequiredPrefix = "Error: Authentication required."
 
 func normalizeCursorStreamJSON(raw string) AgentResult {
-	if u := cursorAuthFailureReason(raw); u != nil {
-		return AgentResult{Unavailability: u}
+	if v := cursorAuthFailureReason(raw); v != nil {
+		return AgentResult{ProceedVerdict: v}
 	}
 	return normalizeResultStreamJSON(raw, nil)
 }
 
 // cursorAuthFailureReason scans the raw capture for the logged-out cursor-agent
 // diagnostic (ADR-0153). Confirmed shape: one plain line on stderr, empty stdout.
-func cursorAuthFailureReason(raw string) *AgentUnavailability {
+func cursorAuthFailureReason(raw string) *AgentProceedVerdict {
 	scanner := bufio.NewScanner(strings.NewReader(raw))
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	for scanner.Scan() {

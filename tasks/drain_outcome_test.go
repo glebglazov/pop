@@ -199,7 +199,7 @@ func TestDrainTerminal(t *testing.T) {
 	cases := []struct {
 		name         string
 		declined     bool
-		unavail      *AgentUnavailability
+		unavail      *AgentProceedVerdict
 		verifyFailed bool
 		pinned       bool
 		err          error
@@ -212,8 +212,8 @@ func TestDrainTerminal(t *testing.T) {
 	}{
 		{
 			name: "quota pause carries preset and reset",
-			unavail: func() *AgentUnavailability {
-				u := NewQuotaPauseUnavailability("claude", "weekly limit", resetAt)
+			unavail: func() *AgentProceedVerdict {
+				u := NewQuotaPauseVerdict("claude", "weekly limit", resetAt)
 				return &u
 			}(),
 			pinned:       true,
@@ -225,8 +225,8 @@ func TestDrainTerminal(t *testing.T) {
 		},
 		{
 			name: "human-healing exhaustion is a finished process",
-			unavail: func() *AgentUnavailability {
-				u := NewAuthFailureUnavailability("cursor", "Authentication required")
+			unavail: func() *AgentProceedVerdict {
+				u := NewAuthFailureVerdict("cursor", "Authentication required")
 				return &u
 			}(),
 			wantTerminal: store.StateFinished,

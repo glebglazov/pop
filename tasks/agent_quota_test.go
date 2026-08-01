@@ -79,11 +79,11 @@ func TestPiQuotaResetAtMonthlyFallbackWhenPatternMissing(t *testing.T) {
 func TestNormalizeOpenCodeJSONDetectsMonthlyQuotaPause(t *testing.T) {
 	raw := "429 Monthly usage limit reached. Resets in 13 days. To continue using this model now, enable usage from your available balance.\n"
 	result := NormalizeAgentOutput(AgentOutputOpenCodeJSON, raw)
-	if result.Unavailability == nil {
+	if result.ProceedVerdict == nil {
 		t.Fatal("expected monthly quota pause")
 	}
-	if !strings.Contains(strings.ToLower(result.Unavailability.Reason), "monthly usage limit reached") {
-		t.Fatalf("reason = %q", result.Unavailability.Reason)
+	if !strings.Contains(strings.ToLower(result.ProceedVerdict.Reason), "monthly usage limit reached") {
+		t.Fatalf("reason = %q", result.ProceedVerdict.Reason)
 	}
 }
 
@@ -174,41 +174,41 @@ func TestPiQuotaResetAtReturnsZeroWithoutSignal(t *testing.T) {
 func TestNormalizePiJSONLDetectsOpencodeGoQuotaPause(t *testing.T) {
 	raw := "429 5-hour usage limit reached. Resets in 7min. Upgrade to continue.\n"
 	result := NormalizeAgentOutput(AgentOutputPiJSONL, raw)
-	if result.Unavailability == nil {
+	if result.ProceedVerdict == nil {
 		t.Fatal("expected quota pause")
 	}
-	if !strings.Contains(result.Unavailability.Reason, "5-hour usage limit reached") {
-		t.Fatalf("reason = %q", result.Unavailability.Reason)
+	if !strings.Contains(result.ProceedVerdict.Reason, "5-hour usage limit reached") {
+		t.Fatalf("reason = %q", result.ProceedVerdict.Reason)
 	}
 }
 
 func TestNormalizePiJSONLDetectsWeeklyQuotaPause(t *testing.T) {
 	raw := "429 Weekly usage limit reached. Resets in 9hr 4min. To continue using this model now, enable usage from your available balance.\n"
 	result := NormalizeAgentOutput(AgentOutputPiJSONL, raw)
-	if result.Unavailability == nil {
+	if result.ProceedVerdict == nil {
 		t.Fatal("expected weekly quota pause")
 	}
-	if !strings.Contains(strings.ToLower(result.Unavailability.Reason), "weekly usage limit reached") {
-		t.Fatalf("reason = %q", result.Unavailability.Reason)
+	if !strings.Contains(strings.ToLower(result.ProceedVerdict.Reason), "weekly usage limit reached") {
+		t.Fatalf("reason = %q", result.ProceedVerdict.Reason)
 	}
 }
 
 func TestNormalizePiJSONLNonLimitErrorIsNotQuotaPause(t *testing.T) {
 	raw := `{"type":"message_end","message":{"role":"assistant","errorMessage":"400 bad request"}}` + "\n"
 	result := NormalizeAgentOutput(AgentOutputPiJSONL, raw)
-	if result.Unavailability != nil {
-		t.Fatalf("unexpected quota pause: %#v", result.Unavailability)
+	if result.ProceedVerdict != nil {
+		t.Fatalf("unexpected quota pause: %#v", result.ProceedVerdict)
 	}
 }
 
 func TestNormalizeOpenCodeJSONDetectsQuotaPauseFromPlainLine(t *testing.T) {
 	raw := "429 5-hour usage limit reached. Resets in 7min. Upgrade to continue.\n"
 	result := NormalizeAgentOutput(AgentOutputOpenCodeJSON, raw)
-	if result.Unavailability == nil {
+	if result.ProceedVerdict == nil {
 		t.Fatal("expected quota pause")
 	}
-	if !strings.Contains(result.Unavailability.Reason, "5-hour usage limit reached") {
-		t.Fatalf("reason = %q", result.Unavailability.Reason)
+	if !strings.Contains(result.ProceedVerdict.Reason, "5-hour usage limit reached") {
+		t.Fatalf("reason = %q", result.ProceedVerdict.Reason)
 	}
 	if result.Output != "" {
 		t.Fatalf("output = %q, want empty on quota pause", result.Output)
@@ -218,11 +218,11 @@ func TestNormalizeOpenCodeJSONDetectsQuotaPauseFromPlainLine(t *testing.T) {
 func TestNormalizeOpenCodeJSONDetectsWeeklyQuotaPauseFromPlainLine(t *testing.T) {
 	raw := "429 Weekly usage limit reached. Resets in 9hr 4min. To continue using this model now, enable usage from your available balance.\n"
 	result := NormalizeAgentOutput(AgentOutputOpenCodeJSON, raw)
-	if result.Unavailability == nil {
+	if result.ProceedVerdict == nil {
 		t.Fatal("expected weekly quota pause")
 	}
-	if !strings.Contains(strings.ToLower(result.Unavailability.Reason), "weekly usage limit reached") {
-		t.Fatalf("reason = %q", result.Unavailability.Reason)
+	if !strings.Contains(strings.ToLower(result.ProceedVerdict.Reason), "weekly usage limit reached") {
+		t.Fatalf("reason = %q", result.ProceedVerdict.Reason)
 	}
 }
 
@@ -230,11 +230,11 @@ func TestNormalizeOpenCodeJSONDetectsQuotaPauseFromJSONError(t *testing.T) {
 	raw := `{"type":"step_start","sessionID":"1","part":{}}` + "\n" +
 		`{"type":"error","sessionID":"1","error":{"message":"429 5-hour usage limit reached. Resets in 12min. Upgrade to continue."}}` + "\n"
 	result := NormalizeAgentOutput(AgentOutputOpenCodeJSON, raw)
-	if result.Unavailability == nil {
+	if result.ProceedVerdict == nil {
 		t.Fatal("expected quota pause from JSON error diagnostic")
 	}
-	if !strings.Contains(result.Unavailability.Reason, "5-hour usage limit reached") {
-		t.Fatalf("reason = %q", result.Unavailability.Reason)
+	if !strings.Contains(result.ProceedVerdict.Reason, "5-hour usage limit reached") {
+		t.Fatalf("reason = %q", result.ProceedVerdict.Reason)
 	}
 }
 
@@ -242,19 +242,19 @@ func TestNormalizeOpenCodeJSONDetectsWeeklyQuotaPauseFromJSONError(t *testing.T)
 	raw := `{"type":"step_start","sessionID":"1","part":{}}` + "\n" +
 		`{"type":"error","sessionID":"1","error":{"message":"429 Weekly usage limit reached. Resets in 9hr 4min. To continue using this model now, enable usage from your available balance."}}` + "\n"
 	result := NormalizeAgentOutput(AgentOutputOpenCodeJSON, raw)
-	if result.Unavailability == nil {
+	if result.ProceedVerdict == nil {
 		t.Fatal("expected weekly quota pause from JSON error diagnostic")
 	}
-	if !strings.Contains(strings.ToLower(result.Unavailability.Reason), "weekly usage limit reached") {
-		t.Fatalf("reason = %q", result.Unavailability.Reason)
+	if !strings.Contains(strings.ToLower(result.ProceedVerdict.Reason), "weekly usage limit reached") {
+		t.Fatalf("reason = %q", result.ProceedVerdict.Reason)
 	}
 }
 
 func TestNormalizeOpenCodeJSONNonQuotaErrorIsNotQuotaPause(t *testing.T) {
 	raw := `{"type":"error","sessionID":"1","error":{"message":"opencode failed"}}` + "\n"
 	result := NormalizeAgentOutput(AgentOutputOpenCodeJSON, raw)
-	if result.Unavailability != nil {
-		t.Fatalf("unexpected quota pause: %#v", result.Unavailability)
+	if result.ProceedVerdict != nil {
+		t.Fatalf("unexpected quota pause: %#v", result.ProceedVerdict)
 	}
 	if result.Output != "opencode failed\n" {
 		t.Fatalf("output = %q, want diagnostic fallback", result.Output)

@@ -142,17 +142,17 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 			return nil, taskExitErr(sel, ExitOperational, "agent execution: %v", outcome.runErr)
 		}
 		agentResult := invocation.NormalizeOutput(agentOut)
-		if agentResult.Unavailability != nil {
-			u := stampDetectedUnavailability(*agentResult.Unavailability, invocation.AgentPreset(), invocation.PinnedModel())
-			if _, ok := u.TimeHealing(); ok {
-				u = u.WithResetAt(agentQuotaResetAt(u.Preset, u.Reason, time.Now()))
+		if agentResult.ProceedVerdict != nil {
+			v := stampDetectedVerdict(*agentResult.ProceedVerdict, invocation.AgentPreset(), invocation.PinnedModel())
+			if _, ok := v.TimeHealing(); ok {
+				v = v.WithResetAt(agentQuotaResetAt(v.Preset, v.Reason, time.Now()))
 				persist(outcome.stream, attempt, streamOutcomeQuotaPaused, "", outcome.exitCode)
 				display.line(ansiYellow, "Paused: agent quota exhausted for %s/%s", sel.TaskSetID, sel.TaskID)
-				display.line(ansiYellow, "  %s", u.Reason)
+				display.line(ansiYellow, "  %s", v.Reason)
 			} else {
-				persist(outcome.stream, attempt, streamOutcomeAgentUnusable, u.Reason, outcome.exitCode)
+				persist(outcome.stream, attempt, streamOutcomeAgentUnusable, v.Reason, outcome.exitCode)
 			}
-			return unavailabilityResult(sel, u), nil
+			return proceedVerdictResult(sel, v), nil
 		}
 
 		taskData, err := d.FS.ReadFile(sel.TaskPath)
@@ -211,23 +211,23 @@ func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath s
 			return nil, taskExitErr(sel, ExitSetup, "%v", err)
 		}
 		if until, cooling := activeCooldowns[preset]; cooling {
-			u := NewQuotaPauseUnavailability(preset, fmt.Sprintf("agent quota cooldown until %s", until.UTC().Format(time.RFC3339)), until)
-			unavailableResults = append(unavailableResults, unavailabilityResult(sel, u))
+			v := NewQuotaPauseVerdict(preset, fmt.Sprintf("agent quota cooldown until %s", until.UTC().Format(time.RFC3339)), until)
+			unavailableResults = append(unavailableResults, proceedVerdictResult(sel, v))
 			continue
 		}
 		if !agentBinaryAvailable(d, preset) {
-			u := NewMissingBinaryUnavailability(preset, "binary not found on PATH")
+			v := NewMissingBinaryVerdict(preset, "binary not found on PATH")
 			if i+1 < len(specs) && out != nil {
-				outputFor(out).line(ansiDim, "   Agent %s unavailable (binary not found); trying next", preset)
+				outputFor(out).line(ansiDim, "   %s", v.fallThroughMessage("Agent"))
 			}
-			unavailableResults = append(unavailableResults, unavailabilityResult(sel, u))
+			unavailableResults = append(unavailableResults, proceedVerdictResult(sel, v))
 			continue
 		}
-		if u := probeMemo.checkUnavailability(d, runtimePath, preset); u != nil {
+		if v := probeMemo.checkProceedVerdict(d, runtimePath, preset); v != nil {
 			if i+1 < len(specs) && out != nil {
-				outputFor(out).line(ansiDim, "   Agent %s unauthenticated; trying next", preset)
+				outputFor(out).line(ansiDim, "   %s", v.fallThroughMessage("Agent"))
 			}
-			unavailableResults = append(unavailableResults, unavailabilityResult(sel, *u))
+			unavailableResults = append(unavailableResults, proceedVerdictResult(sel, *v))
 			continue
 		}
 		buildInvocation, err := buildForAgent(agentSpec)
@@ -235,66 +235,61 @@ func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath s
 			return nil, taskExitErr(sel, ExitSetup, "%v", err)
 		}
 		result, execErr := executeTaskAttempts(d, sel, runtimePath, out, errOut, basePrompt, buildInvocation, maxTries, timeout, commitOverrides, retryDelays)
-		if execErr != nil || result == nil || result.Unavailability == nil {
+		if execErr != nil || result == nil || result.ProceedVerdict == nil {
 			return result, execErr
 		}
-		u := *result.Unavailability
-		if th, ok := u.TimeHealing(); ok {
+		v := *result.ProceedVerdict
+		// Only a preset-scoped verdict reaches the preset cooldown store; a
+		// model-scoped one leaves the CLI running fine (ADR-0168).
+		if th, ok := v.TimeHealing(); ok && v.Scope == ProceedScopePreset {
 			until := agentQuotaCooldownUntil(th.ResetAt, time.Now(), agentQuotaRetryAfter)
-			if err := updateAgentCooldown(d, u.Preset, until); err != nil {
+			if err := updateAgentCooldown(d, v.Preset, until); err != nil {
 				return nil, taskExitErr(sel, ExitOperational, "%v", err)
 			}
-			activeCooldowns[u.Preset] = until
+			activeCooldowns[v.Preset] = until
 		}
-		if i+1 < len(specs) && out != nil {
-			switch u.Kind {
-			case UnavailabilityQuotaPause:
-				outputFor(out).line(ansiDim, "   Agent %s quota-paused; trying next", u.Preset)
-			case UnavailabilityAuthFailure:
-				outputFor(out).line(ansiDim, "   Agent %s unauthenticated; trying next", u.Preset)
-			case UnavailabilityPlanGate:
-				outputFor(out).line(ansiDim, "   %s", formatPlanGateFallThrough("Agent", u))
-			}
+		if v.Scope == ProceedScopePreset && i+1 < len(specs) && out != nil {
+			outputFor(out).line(ansiDim, "   %s", v.fallThroughMessage("Agent"))
 		}
 		unavailableResults = append(unavailableResults, result)
 	}
 	if len(unavailableResults) == 0 {
 		return nil, taskExitErr(sel, ExitOperational, "no agent attempts were run")
 	}
-	return resolveAgentFallbackUnavailable(sel, unavailableResults), nil
+	return resolveAgentFallbackVerdict(sel, unavailableResults), nil
 }
 
-func unavailabilityResult(sel *Selection, u AgentUnavailability) *RunTaskResult {
+func proceedVerdictResult(sel *Selection, v AgentProceedVerdict) *RunTaskResult {
 	result := &RunTaskResult{
 		Selection:      sel,
-		Unavailability: &u,
+		ProceedVerdict: &v,
 	}
-	if u.Kind == UnavailabilityQuotaPause {
+	if v.Kind == ProceedQuotaPause {
 		result.QuotaPaused = true
-		result.PauseReason = u.Reason
-		result.PausePreset = u.Preset
-		if th, ok := u.TimeHealing(); ok {
+		result.PauseReason = v.Reason
+		result.PausePreset = v.Preset
+		if th, ok := v.TimeHealing(); ok {
 			result.PauseResetAt = th.ResetAt
 		}
 	}
 	return result
 }
 
-func resolveAgentFallbackUnavailable(sel *Selection, results []*RunTaskResult) *RunTaskResult {
+func resolveAgentFallbackVerdict(sel *Selection, results []*RunTaskResult) *RunTaskResult {
 	if len(results) == 0 {
 		return nil
 	}
-	if best := earliestTimeHealingUnavailability(results); best != nil {
-		if _, ok := best.Unavailability.TimeHealing(); ok {
+	if best := earliestTimeHealingVerdict(results); best != nil {
+		if _, ok := best.ProceedVerdict.TimeHealing(); ok {
 			return best
 		}
 	}
-	var presets []AgentUnavailability
+	var presets []AgentProceedVerdict
 	for _, result := range results {
-		if result == nil || result.Unavailability == nil {
+		if result == nil || result.ProceedVerdict == nil {
 			continue
 		}
-		presets = append(presets, *result.Unavailability)
+		presets = append(presets, *result.ProceedVerdict)
 	}
 	if len(presets) == 0 {
 		for _, result := range results {
@@ -304,19 +299,19 @@ func resolveAgentFallbackUnavailable(sel *Selection, results []*RunTaskResult) *
 		}
 		return nil
 	}
-	out := unavailabilityResult(sel, presets[0])
+	out := proceedVerdictResult(sel, presets[0])
 	out.UnavailablePresets = presets
 	return out
 }
 
-func earliestTimeHealingUnavailability(results []*RunTaskResult) *RunTaskResult {
+func earliestTimeHealingVerdict(results []*RunTaskResult) *RunTaskResult {
 	var best *RunTaskResult
 	var bestReset time.Time
 	for _, result := range results {
-		if result == nil || result.Unavailability == nil {
+		if result == nil || result.ProceedVerdict == nil {
 			continue
 		}
-		th, ok := result.Unavailability.TimeHealing()
+		th, ok := result.ProceedVerdict.TimeHealing()
 		if !ok {
 			continue
 		}
@@ -566,7 +561,7 @@ func runAgentAttempt(d *Deps, runtimePath string, liveOut io.Writer, timeout tim
 	// Formats rendered live already streamed to liveOut; only the silently
 	// captured formats still need the post-hoc dump.
 	if invocation.OutputFormat != AgentOutputPlain && liveWriter == nil {
-		if normalized := invocation.NormalizeOutput(raw); normalized.Unavailability == nil {
+		if normalized := invocation.NormalizeOutput(raw); normalized.ProceedVerdict == nil {
 			invocation.RenderOutput(liveOut, raw)
 		}
 	}

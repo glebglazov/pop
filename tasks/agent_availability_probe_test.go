@@ -85,7 +85,7 @@ func TestInterpretCursorAvailabilityProbe(t *testing.T) {
 	t.Run("explicit negative", func(t *testing.T) {
 		raw := `{"isAuthenticated":false}`
 		u := interpretCursorAvailabilityProbe(0, raw)
-		if u == nil || u.Kind != UnavailabilityAuthFailure {
+		if u == nil || u.Kind != ProceedAuthFailure {
 			t.Fatalf("unavailability = %#v", u)
 		}
 		if u.Reason != raw {
@@ -113,7 +113,7 @@ func TestInterpretClaudeAvailabilityProbe(t *testing.T) {
 	t.Run("explicit negative", func(t *testing.T) {
 		raw := `{"loggedIn":false}`
 		u := interpretClaudeAvailabilityProbe(0, raw)
-		if u == nil || u.Kind != UnavailabilityAuthFailure {
+		if u == nil || u.Kind != ProceedAuthFailure {
 			t.Fatalf("unavailability = %#v", u)
 		}
 	})
@@ -133,11 +133,11 @@ func TestAgentAvailabilityProbeMemoRunsOncePerPreset(t *testing.T) {
 	d := &Deps{Runner: runner}
 	memo := newAgentAvailabilityProbeMemo()
 
-	first := memo.checkUnavailability(d, ".", "cursor")
+	first := memo.checkProceedVerdict(d, ".", "cursor")
 	if first != nil {
 		t.Fatalf("first probe = %#v, want nil (authenticated)", first)
 	}
-	second := memo.checkUnavailability(d, ".", "cursor")
+	second := memo.checkProceedVerdict(d, ".", "cursor")
 	if second != nil {
 		t.Fatalf("second probe = %#v, want memoised proceed", second)
 	}
@@ -151,13 +151,13 @@ func TestAgentAvailabilityProbeMemoOneWaySkip(t *testing.T) {
 	d := &Deps{Runner: runner}
 	memo := newAgentAvailabilityProbeMemo()
 
-	first := memo.checkUnavailability(d, ".", "cursor")
-	if first == nil || first.Kind != UnavailabilityAuthFailure {
+	first := memo.checkProceedVerdict(d, ".", "cursor")
+	if first == nil || first.Kind != ProceedAuthFailure {
 		t.Fatalf("first probe = %#v, want auth failure", first)
 	}
 	runner.output = `{"isAuthenticated":true}`
-	second := memo.checkUnavailability(d, ".", "cursor")
-	if second == nil || second.Kind != UnavailabilityAuthFailure {
+	second := memo.checkProceedVerdict(d, ".", "cursor")
+	if second == nil || second.Kind != ProceedAuthFailure {
 		t.Fatalf("second probe = %#v, want memoised skip", second)
 	}
 	if runner.calls != 1 {
@@ -193,7 +193,7 @@ func TestImplementAndVerifyShareProbeMemo(t *testing.T) {
 	d := &Deps{Runner: runner}
 	memo := newAgentAvailabilityProbeMemo()
 
-	if u := memo.checkUnavailability(d, ".", "cursor"); u == nil || u.Kind != UnavailabilityAuthFailure {
+	if u := memo.checkProceedVerdict(d, ".", "cursor"); u == nil || u.Kind != ProceedAuthFailure {
 		t.Fatalf("implement probe = %#v, want auth failure", u)
 	}
 	if runner.calls != 1 {
@@ -238,7 +238,7 @@ func TestAgentAvailabilityProbeTimeoutProceeds(t *testing.T) {
 	d := &Deps{Runner: runner}
 	memo := newAgentAvailabilityProbeMemo()
 
-	if u := memo.checkUnavailability(d, ".", "cursor"); u != nil {
+	if u := memo.checkProceedVerdict(d, ".", "cursor"); u != nil {
 		t.Fatalf("timeout probe = %#v, want proceed", u)
 	}
 	if !runner.started {

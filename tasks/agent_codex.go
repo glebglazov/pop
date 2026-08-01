@@ -24,7 +24,7 @@ var codexToolItemTypes = map[string]bool{
 func normalizeCodexJSONL(raw string) AgentResult {
 	var transcript string
 	var diagnostics []string
-	var pause *AgentUnavailability
+	var pause *AgentProceedVerdict
 	scanAgentJSONLines(raw, nil, func(line []byte) bool {
 		var event struct {
 			Type    string          `json:"type"`
@@ -56,7 +56,7 @@ func normalizeCodexJSONL(raw string) AgentResult {
 		return true
 	})
 	if pause != nil {
-		return AgentResult{Unavailability: pause}
+		return AgentResult{ProceedVerdict: pause}
 	}
 	return normalizedTranscript(transcript, diagnostics)
 }
@@ -69,7 +69,7 @@ func normalizeCodexJSONL(raw string) AgentResult {
 // <time>." The reset time and upsell URLs vary, so the stable anchor is the
 // leading sentence; the full message is kept as the pause reason so the reset
 // time reaches the user.
-func codexQuotaPauseReason(message string) *AgentUnavailability {
+func codexQuotaPauseReason(message string) *AgentProceedVerdict {
 	if strings.Contains(message, "You've hit your usage limit") {
 		return DetectedQuotaPause(message)
 	}

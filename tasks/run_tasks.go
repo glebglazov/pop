@@ -75,13 +75,14 @@ type RunTaskSetResult struct {
 	VerifyFindings      string
 	// VerifyRerunCmd is a copy-pasteable `pop tasks verify …` when verification failed.
 	VerifyRerunCmd string
-	SkippedTasks        []string
-	BlockedReason       string
-	Unavailability      *AgentUnavailability
-	// QuotaPaused and friends mirror a quota-pause Unavailability for callers
-	// that assert the observable pause fields rather than the verdict type.
-	QuotaPaused         bool
-	PauseReason         string
+	SkippedTasks  []string
+	BlockedReason string
+	// ProceedVerdict is set when an agent could not carry on (ADR-0168).
+	ProceedVerdict *AgentProceedVerdict
+	// QuotaPaused and friends mirror a quota-pause verdict for callers that
+	// assert the observable pause fields rather than the verdict type.
+	QuotaPaused bool
+	PauseReason string
 	// PausePreset names the agent preset whose quota ran out, when QuotaPaused.
 	PausePreset      string
 	PauseResetAt     time.Time

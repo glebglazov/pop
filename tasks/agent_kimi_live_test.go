@@ -149,8 +149,8 @@ func TestNormalizeKimiStreamJSONTakesLastAssistantProse(t *testing.T) {
 	if result.Output != want {
 		t.Fatalf("output = %q, want %q", result.Output, want)
 	}
-	if result.Unavailability != nil {
-		t.Fatalf("unexpected unavailability: %#v", result.Unavailability)
+	if result.ProceedVerdict != nil {
+		t.Fatalf("unexpected unavailability: %#v", result.ProceedVerdict)
 	}
 }
 
@@ -241,14 +241,14 @@ func TestKimiQuotaSignalsPauseWithADRBackoffs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			raw := strings.Join([]string{kimiSampleToolCallLine, tt.line}, "\n") + "\n"
 			result := NormalizeAgentOutput(AgentOutputKimiStreamJSON, raw)
-			if result.Unavailability == nil {
+			if result.ProceedVerdict == nil {
 				t.Fatal("expected an agent quota pause")
 			}
-			if result.Unavailability.Reason != tt.line {
-				t.Fatalf("reason = %q, want the whole diagnostic line %q", result.Unavailability.Reason, tt.line)
+			if result.ProceedVerdict.Reason != tt.line {
+				t.Fatalf("reason = %q, want the whole diagnostic line %q", result.ProceedVerdict.Reason, tt.line)
 			}
 			want := now.Add(tt.backoff).Add(quotaAssuranceOffset)
-			if got := agentQuotaResetAt("kimi", result.Unavailability.Reason, now); !got.Equal(want) {
+			if got := agentQuotaResetAt("kimi", result.ProceedVerdict.Reason, now); !got.Equal(want) {
 				t.Fatalf("reset = %s, want %s", got, want)
 			}
 		})
@@ -276,12 +276,12 @@ func TestKimiPlanGateIsUnavailableWithNoResetInstant(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			raw := strings.Join([]string{kimiSampleVersionLine, tt.line}, "\n") + "\n"
 			result := NormalizeAgentOutput(AgentOutputKimiStreamJSON, raw)
-			if result.Unavailability == nil {
+			if result.ProceedVerdict == nil {
 				t.Fatal("expected a plan gate")
 			}
-			u := *result.Unavailability
-			if u.Kind != UnavailabilityPlanGate {
-				t.Fatalf("kind = %q, want %q", u.Kind, UnavailabilityPlanGate)
+			u := *result.ProceedVerdict
+			if u.Kind != ProceedPlanGate {
+				t.Fatalf("kind = %q, want %q", u.Kind, ProceedPlanGate)
 			}
 			if u.Model != tt.wantModel {
 				t.Fatalf("model = %q, want %q", u.Model, tt.wantModel)
@@ -305,7 +305,7 @@ func TestKimiPlanGateIsUnavailableWithNoResetInstant(t *testing.T) {
 // the alias is what a human would edit to clear the gate.
 func TestKimiPlanGateNamesThePinnedModelWhenPopPinnedOne(t *testing.T) {
 	raw := kimiSampleHighspeedPlanGateLine + "\n"
-	detected := NormalizeAgentOutput(AgentOutputKimiStreamJSON, raw).Unavailability
+	detected := NormalizeAgentOutput(AgentOutputKimiStreamJSON, raw).ProceedVerdict
 	if detected == nil {
 		t.Fatal("expected a plan gate")
 	}
@@ -313,12 +313,12 @@ func TestKimiPlanGateNamesThePinnedModelWhenPopPinnedOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	u := stampDetectedUnavailability(*detected, invocation.AgentPreset(), invocation.PinnedModel())
+	u := stampDetectedVerdict(*detected, invocation.AgentPreset(), invocation.PinnedModel())
 	if u.Model != "moonshot-ai/kimi-k2.7-code-highspeed" {
 		t.Fatalf("model = %q, want the pinned alias", u.Model)
 	}
 	want := "Agent kimi plan-gated on moonshot-ai/kimi-k2.7-code-highspeed; trying next"
-	if got := formatPlanGateFallThrough("Agent", u); got != want {
+	if got := u.fallThroughMessage("Agent"); got != want {
 		t.Fatalf("fall-through line = %q, want %q", got, want)
 	}
 }
@@ -335,8 +335,8 @@ func TestKimiOtherAuthErrorsAreOrdinaryFailures(t *testing.T) {
 		t.Run(line, func(t *testing.T) {
 			raw := strings.Join([]string{kimiSampleProseLine, line}, "\n") + "\n"
 			result := NormalizeAgentOutput(AgentOutputKimiStreamJSON, raw)
-			if result.Unavailability != nil {
-				t.Fatalf("unexpected unavailability: %#v", result.Unavailability)
+			if result.ProceedVerdict != nil {
+				t.Fatalf("unexpected unavailability: %#v", result.ProceedVerdict)
 			}
 		})
 	}
@@ -352,8 +352,8 @@ func TestKimiTransientOverloadNeverPauses(t *testing.T) {
 		t.Run(line, func(t *testing.T) {
 			raw := strings.Join([]string{kimiSampleProseLine, line}, "\n") + "\n"
 			result := NormalizeAgentOutput(AgentOutputKimiStreamJSON, raw)
-			if result.Unavailability != nil {
-				t.Fatalf("unexpected quota pause: %#v", result.Unavailability)
+			if result.ProceedVerdict != nil {
+				t.Fatalf("unexpected quota pause: %#v", result.ProceedVerdict)
 			}
 			if got := kimiQuotaResetAt(line, time.Now()); !got.IsZero() {
 				t.Fatalf("reset = %s, want zero time", got)

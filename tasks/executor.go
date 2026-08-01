@@ -50,13 +50,14 @@ type RunTaskOptions struct {
 
 // RunTaskResult is the outcome of a successful or declined run-task.
 type RunTaskResult struct {
-	Selection      *Selection
-	Refresh        *RefreshResult
-	Declined       bool
-	NoOp           bool
-	Unavailability *AgentUnavailability
-	// QuotaPaused and friends mirror a quota-pause Unavailability for callers
-	// that assert the observable pause fields rather than the verdict type.
+	Selection *Selection
+	Refresh   *RefreshResult
+	Declined  bool
+	NoOp      bool
+	// ProceedVerdict is set when an agent could not carry on (ADR-0168).
+	ProceedVerdict *AgentProceedVerdict
+	// QuotaPaused and friends mirror a quota-pause verdict for callers that
+	// assert the observable pause fields rather than the verdict type.
 	QuotaPaused bool
 	PauseReason string
 	// PausePreset names the agent preset whose quota ran out, when QuotaPaused.
@@ -64,7 +65,7 @@ type RunTaskResult struct {
 	PauseResetAt time.Time
 	// UnavailablePresets lists every preset that was human-healing unavailable
 	// when the agent fallback list is fully exhausted (ADR-0153).
-	UnavailablePresets []AgentUnavailability
+	UnavailablePresets []AgentProceedVerdict
 	CommitSHA          string
 	AgentSummary       string
 }
@@ -206,11 +207,11 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 	defer func() {
 		var (
 			declined bool
-			unavail  *AgentUnavailability
+			unavail  *AgentProceedVerdict
 		)
 		if result != nil {
 			declined = result.Declined
-			unavail = result.Unavailability
+			unavail = result.ProceedVerdict
 		}
 		finalizeDrain(drain, declined, unavail, false, false, err)
 	}()
@@ -263,11 +264,11 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 		return result, execErr
 	}
 
-	if result != nil && result.Unavailability != nil {
-		if _, ok := result.Unavailability.TimeHealing(); !ok {
+	if result != nil && result.ProceedVerdict != nil {
+		if _, ok := result.ProceedVerdict.TimeHealing(); !ok {
 			presets := result.UnavailablePresets
 			if len(presets) == 0 {
-				presets = []AgentUnavailability{*result.Unavailability}
+				presets = []AgentProceedVerdict{*result.ProceedVerdict}
 			}
 			afterRefresh, refreshErr := RefreshWith(d, resolved.DefinitionPath, statePath)
 			if refreshErr == nil {

@@ -19,7 +19,7 @@ var agentAvailabilityProbeTimeout = 5 * time.Second
 type AgentAvailabilityProbeCapability struct {
 	Kind                 CapabilityKind
 	Command              *AgentCommand
-	Interpret            func(exitCode int, output string) *AgentUnavailability
+	Interpret            func(exitCode int, output string) *AgentProceedVerdict
 	ReportsAuthenticated func(exitCode int, output string) bool
 	// IdentifyingArgs are the argv prefix after the executable that distinguish
 	// a probe invocation from headless work. Defaults to Command.Args when nil.
@@ -99,26 +99,26 @@ func ProbeAgentAuthentication(d *Deps, runtimePath, preset string) AgentAuthenti
 // Implement or Verifier run: a preset marked unavailable stays skipped; every
 // other preset is probed at most once.
 type agentAvailabilityProbeMemo struct {
-	skipped map[string]AgentUnavailability
+	skipped map[string]AgentProceedVerdict
 	probed  map[string]struct{}
 }
 
 func newAgentAvailabilityProbeMemo() *agentAvailabilityProbeMemo {
 	return &agentAvailabilityProbeMemo{
-		skipped: make(map[string]AgentUnavailability),
+		skipped: make(map[string]AgentProceedVerdict),
 		probed:  make(map[string]struct{}),
 	}
 }
 
-// checkUnavailability returns a human-healing auth verdict when a prior probe or
+// checkProceedVerdict returns a human-healing auth verdict when a prior probe or
 // a fresh probe marks the preset unavailable. Nil means proceed (authenticated,
 // unknown, or no probe).
-func (m *agentAvailabilityProbeMemo) checkUnavailability(d *Deps, runtimePath, preset string) *AgentUnavailability {
+func (m *agentAvailabilityProbeMemo) checkProceedVerdict(d *Deps, runtimePath, preset string) *AgentProceedVerdict {
 	if m == nil {
 		return nil
 	}
-	if u, ok := m.skipped[preset]; ok {
-		cp := u
+	if v, ok := m.skipped[preset]; ok {
+		cp := v
 		return &cp
 	}
 	if _, ok := m.probed[preset]; ok {
@@ -134,20 +134,20 @@ func (m *agentAvailabilityProbeMemo) checkUnavailability(d *Deps, runtimePath, p
 	if !capability.Available() {
 		return nil
 	}
-	if u := runAgentAvailabilityProbe(d, runtimePath, preset, capability); u != nil {
-		m.skipped[preset] = *u
-		return u
+	if v := runAgentAvailabilityProbe(d, runtimePath, preset, capability); v != nil {
+		m.skipped[preset] = *v
+		return v
 	}
 	return nil
 }
 
-func runAgentAvailabilityProbe(d *Deps, runtimePath, preset string, capability AgentAvailabilityProbeCapability) *AgentUnavailability {
+func runAgentAvailabilityProbe(d *Deps, runtimePath, preset string, capability AgentAvailabilityProbeCapability) *AgentProceedVerdict {
 	status, detail := evaluateAgentAvailabilityProbe(d, runtimePath, preset, capability)
 	if status != AgentAuthUnauthenticated {
 		return nil
 	}
-	u := DetectedAuthFailure(detail).WithPreset(preset)
-	return &u
+	v := DetectedAuthFailure(detail).WithPreset(preset)
+	return &v
 }
 
 func evaluateAgentAvailabilityProbe(d *Deps, runtimePath, preset string, capability AgentAvailabilityProbeCapability) (AgentAuthenticationStatus, string) {
@@ -156,8 +156,8 @@ func evaluateAgentAvailabilityProbe(d *Deps, runtimePath, preset string, capabil
 		return AgentAuthUnknown, "authentication status unknown"
 	}
 	if capability.Interpret != nil {
-		if u := capability.Interpret(exitCode, combined); u != nil {
-			return AgentAuthUnauthenticated, u.Reason
+		if v := capability.Interpret(exitCode, combined); v != nil {
+			return AgentAuthUnauthenticated, v.Reason
 		}
 	}
 	if capability.ReportsAuthenticated != nil && capability.ReportsAuthenticated(exitCode, combined) {
@@ -219,7 +219,7 @@ func reportsCodexAuthenticated(exitCode int, output string) bool {
 	return exitCode == 0
 }
 
-func interpretCursorAvailabilityProbe(exitCode int, output string) *AgentUnavailability {
+func interpretCursorAvailabilityProbe(exitCode int, output string) *AgentProceedVerdict {
 	if exitCode != 0 {
 		return nil
 	}
@@ -242,7 +242,7 @@ func interpretCursorAvailabilityProbe(exitCode int, output string) *AgentUnavail
 	return DetectedAuthFailure(reason)
 }
 
-func interpretClaudeAvailabilityProbe(exitCode int, output string) *AgentUnavailability {
+func interpretClaudeAvailabilityProbe(exitCode int, output string) *AgentProceedVerdict {
 	if exitCode != 0 {
 		return nil
 	}

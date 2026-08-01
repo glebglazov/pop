@@ -94,8 +94,10 @@ func (i *AgentInvocation) PinnedModel() string {
 
 // AgentResult is the provider-neutral result of normalizing one invocation.
 type AgentResult struct {
-	Output         string
-	Unavailability *AgentUnavailability
+	Output string
+	// ProceedVerdict is nil when the adapter can carry on, and otherwise says at
+	// what scope it is stopped (ADR-0168).
+	ProceedVerdict *AgentProceedVerdict
 }
 
 // AgentHeadlessRequest describes one unattended issue-attempt invocation.
@@ -1198,7 +1200,7 @@ func normalizeAgentOutput(format AgentOutputFormat, raw string) AgentResult {
 	default:
 		return AgentResult{Output: raw}
 	}
-	if result.Output == "" && result.Unavailability == nil {
+	if result.Output == "" && result.ProceedVerdict == nil {
 		result.Output = raw
 	}
 	return result
@@ -1226,8 +1228,8 @@ func renderAgentOutput(w io.Writer, format AgentOutputFormat, raw string) {
 		return
 	}
 	normalized := normalizeAgentOutput(format, raw)
-	if normalized.Unavailability != nil {
-		fmt.Fprintln(w, normalized.Unavailability.Reason)
+	if normalized.ProceedVerdict != nil {
+		fmt.Fprintln(w, normalized.ProceedVerdict.Reason)
 		return
 	}
 	if normalized.Output != "" {

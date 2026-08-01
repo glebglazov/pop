@@ -31,13 +31,13 @@ const (
 // nothing but this phrase becomes a Plan gate (ADR-0164).
 const kimiPlanGateSignal = "does not have access to"
 
-// kimiUnavailability scans the raw agent capture line-by-line for the diagnostics
+// kimiProceedVerdict scans the raw agent capture line-by-line for the diagnostics
 // that make the preset unusable for this task rather than merely failed: a quota
 // signal (Agent quota pause) or the subscription gate (Plan gate). kimi writes
 // both to stderr and never into its stream-json. The whole matching line becomes
 // the reason, so the human sees kimi's own wording and the reset derivation can
 // re-read the quota signal from it.
-func kimiUnavailability(raw string) *AgentUnavailability {
+func kimiProceedVerdict(raw string) *AgentProceedVerdict {
 	scanner := bufio.NewScanner(strings.NewReader(raw))
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	for scanner.Scan() {
@@ -124,8 +124,8 @@ type kimiStreamLine struct {
 // failed run has no assistant prose and the raw capture (exit code plus
 // stderr) remains what the completion contract sees.
 func normalizeKimiStreamJSON(raw string) AgentResult {
-	if u := kimiUnavailability(raw); u != nil {
-		return AgentResult{Unavailability: u}
+	if v := kimiProceedVerdict(raw); v != nil {
+		return AgentResult{ProceedVerdict: v}
 	}
 	var transcript string
 	scanAgentJSONLines(raw, nil, func(line []byte) bool {
