@@ -141,11 +141,23 @@ The embedded skills that teach an agent to drive `pop pane` — driving panes (`
 _Avoid_: Agent integration, hooks
 
 **Task planning skills**:
-The embedded, pop-independent skills installed together by the `task-skills` component, in three kinds: Workflow skills (batch-grill-me, grill-with-docs, to-spec, to-tasks, wayfinder — session-shaped, manual-invocation-only; grill-consolidate rides along as the glossary-maintenance pass), Tool skills (prototype, research — model-invoked, verbatim upstream), and the Setup skill (setup-matt-pocock-skills — session-shaped, manual-invocation-only, prepares a repo for the others). Versioned with the pop binary and installed only by explicit opt-in; pop's task scheduling and execution do not depend on them being installed.
+The embedded, pop-independent skills installed together by the `task-skills` component, in three kinds: Workflow skills (batch-grill-me, grill-with-docs, grill-with-map, to-spec, to-tasks, wayfinder — session-shaped, manual-invocation-only; grill-consolidate rides along as the glossary-maintenance pass), Tool skills (prototype, research — model-invoked, verbatim upstream), and the Setup skill (setup-matt-pocock-skills — session-shaped, manual-invocation-only, prepares a repo for the others). Versioned with the pop binary and installed only by explicit opt-in; pop's task scheduling and execution do not depend on them being installed.
 _Avoid_: Workload framework, workload skills bundle, agent integration
 
+**batch-grill-me**:
+The interview primitive both grilling skills compose: design tree, frontier, rounds, find-facts-yourself. A verbatim upstream overlay that reads the glossary union and writes nothing at all; every pop addition is a composition concern belonging to the composing skill, so a session loading it has no write instruction to disobey.
+_Avoid_: grilling primitive, base grill
+
+**grill-with-docs**:
+The standalone grilling skill: **batch-grill-me** plus the domain-modeling write discipline (glossary fragments, numbered ADRs) and commit-on-close. Composed over the primitive rather than inlining the interview rules, so its verbatim upstream region is the domain-modeling half alone. Never loaded by a wayfinding ticket — its contract mandates repository writes.
+_Avoid_: grill-me, the grilling skill
+
+**grill-with-map**:
+The grilling skill a wayfinding ticket loads: **batch-grill-me** plus the wayfinding answer discipline (ADR-shaped answers, **ADR draft**s and **Context draft**s, prototypes to the Map's scratch directory). Writes only into the Map — never the repo, never a commit.
+_Avoid_: grill-in-map, wayfinder grilling
+
 **Shared skill document**:
-A pop-owned companion document that more than one embedded skill depends on, held once under `integrate/skills/pop/_shared/` and copied into each consuming skill's installed directory at install time — only the destination differs per skill. `CONTEXT-FORMAT.md` (the glossary union rule and the `+`/`~`/`-` op syntax, read by batch-grill-me and written against by grill-with-docs) is the first. Distinct from an ordinary companion file, which lives in its one skill's own directory; a shared document that goes missing or drifts from its source is a **Doctor** finding like any other rendered file.
+A pop-owned companion document that more than one embedded skill depends on, held once under `integrate/skills/pop/_shared/` and copied into each consuming skill's installed directory at install time — only the destination differs per skill. `CONTEXT-FORMAT.md` (the glossary union rule and the `+`/`~`/`-` op syntax, read by batch-grill-me and written against by grill-with-docs and grill-with-map) and `ADR-FORMAT.md` (the ADR template, used by grill-with-docs for a numbered repo ADR and by grill-with-map for an unnumbered **ADR draft**) are the first two. Distinct from an ordinary companion file, which lives in its one skill's own directory; a shared document that goes missing or drifts from its source is a **Doctor** finding like any other rendered file.
 _Avoid_: shared skill, common file, skill include
 
 **Skills prefix**:
@@ -233,7 +245,7 @@ The active half of **Agent proceed verdict** detection: a short read-only comman
 _Avoid_: agent health check, auth preflight, agent status command, doctor check
 
 **Workflow skill**:
-An embedded skill that is a session-shaped workflow the user opens deliberately: manual-invocation-only via `disable-model-invocation` — batch-grill-me, grill-with-docs, grill-consolidate, to-spec, to-tasks, wayfinder. The counterpart of a Tool skill; the two kinds together make up the Task planning skills.
+An embedded skill that is a session-shaped workflow the user opens deliberately: manual-invocation-only via `disable-model-invocation` — batch-grill-me, grill-with-docs, grill-with-map, grill-consolidate, to-spec, to-tasks, wayfinder. The counterpart of a Tool skill; the two kinds together make up the Task planning skills.
 _Avoid_: command skill, manual-only skill
 
 **Tool skill**:
@@ -1265,6 +1277,18 @@ _Avoid_: map state, derived map status
 **Spawned set**:
 A Task set created from a Map's resolved decisions (via to-spec/to-tasks) once the way — or an early-splittable chunk — is clear. The forward link between the two concepts: the Map records the ids of sets it spawned; a spawned set's `spec.md` records its source Map. One Map may spawn many sets.
 _Avoid_: child set, output set
+
+**ADR draft**:
+An ADR body written during a wayfinding session into the Map's `adrs/` directory, identified by an 8-hex id and carrying no ADR number. It is the single copy of the decision's repo-facing form; the ticket answer links it rather than restating it. A number is assigned only when a slice **Mint**s it.
+_Avoid_: pending ADR, unnumbered ADR, ADR stub
+
+**Context draft**:
+The glossary ops (`+`/`~`/`-`) a wayfinding ticket settles, written into the Map's `context/` directory, one file per ticket. Identical in syntax to a `.grill-context` fragment and differing only in destination — the repo is not written during wayfinding.
+_Avoid_: glossary draft, pending fragment, fragment stub
+
+**Mint**:
+To copy an **ADR draft** or **Context draft** out of the Map and into the repo as a numbered ADR or a `.grill-context` fragment. Performed by the slice that implements the decision, as an acceptance criterion, so the decision lands in the same commit as the change it describes.
+_Avoid_: publish, materialise, fold
 
 **Work dashboard**:
 The unified `pop work dashboard` TUI: one machine-global table of what you are doing or planning, interleaving Task set rows (unchanged behaviour and keys) with Map rows per project. On a Map row `i` spawns an attended wayfinder session for the next frontier ticket (new window in the repo's tmux session, named after the Map); Enter/`l` opens the Map detail view. Subsumes the Queue dashboard; `pop queue dashboard` stays a hidden compatibility alias. The Queue daemon is untouched — Maps are invisible to it.

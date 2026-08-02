@@ -7,6 +7,13 @@ above. Pop's additions (clash-tolerant max+1 id selection, the
 grill-consolidate reconciliation note, and filename-link cross-references) live
 below that marker. To review upstream drift, diff the region between this
 header and the marker against domain-modeling@<newref>.
+
+Pop keeps exactly one copy of this file, here in `_shared/`. Both skills that
+produce ADRs receive a copy in their installed directory at install time —
+grill-with-docs writes numbered ADRs into `docs/adr/`, grill-with-map writes
+unnumbered drafts into a Map's `adrs/` directory and overrides the location and
+numbering rules below. Only the destination differs; see `sharedSkillDocs` in
+integrate/catalog.go.
 -->
 
 # ADR Format

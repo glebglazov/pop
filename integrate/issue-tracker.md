@@ -391,9 +391,10 @@ answer explaining why, and add one line to the map's **Out of scope** section
 
 **Ticket-type overrides:**
 
-- **Grilling** (HITL): run the `grill-with-docs` skill (not `/grilling` or
-  `/domain-modeling`). One question at a time with the human; never answer your
-  own grilling questions.
+- **Grilling** (HITL): run the `grill-with-map` skill (not `grill-with-docs`,
+  `/grilling` or `/domain-modeling`) — it writes ADR and glossary drafts into
+  the map's own directory and never into the repository. Work with the human;
+  never answer your own grilling questions.
 - **Research** (AFK): run the `research` skill. Record findings in the ticket's
   `## Answer` with source citations — do **not** open a throwaway `research/<name>`
   branch or any side branch for research output.

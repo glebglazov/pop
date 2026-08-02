@@ -51,7 +51,7 @@ func taskAgents() []taskAgent {
 
 // taskSkillNames is the set of skill directory names the task-skills
 // component installs.
-var taskSkillNames = []string{"pop-batch-grill-me", "pop-grill-with-docs", "pop-grill-consolidate", "pop-to-spec", "pop-to-tasks", "pop-wayfinder", "pop-prototype", "pop-research", "pop-setup-matt-pocock-skills", "pop-spend-audit"}
+var taskSkillNames = []string{"pop-batch-grill-me", "pop-grill-with-docs", "pop-grill-with-map", "pop-grill-consolidate", "pop-to-spec", "pop-to-tasks", "pop-wayfinder", "pop-prototype", "pop-research", "pop-setup-matt-pocock-skills", "pop-spend-audit"}
 
 // TestInstallTaskSkillsAllAgents covers the clean install for claude, codex,
 // pi, and cursor: all seven planning skills land as render trees under the data
@@ -90,6 +90,7 @@ func TestInstallTaskSkillsAllAgents(t *testing.T) {
 			for skill, companions := range map[string][]string{
 				"pop-batch-grill-me":           {"CONTEXT-FORMAT.md"},
 				"pop-grill-with-docs":          {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
+				"pop-grill-with-map":           {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
 				"pop-prototype":                {"LOGIC.md", "UI.md"},
 				"pop-setup-matt-pocock-skills": {"domain.md", "issue-tracker-github.md", "issue-tracker-gitlab.md", "issue-tracker-local.md"},
 			} {

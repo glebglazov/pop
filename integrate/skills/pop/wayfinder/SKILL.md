@@ -187,7 +187,10 @@ the tracker-doc seam, so the resolved doc has no place to carry them.)*
 
 - **Charting skills.** Where upstream's *Chart the map* runs `/grilling` and
   `/domain-modeling` (steps 1–2) to name the destination and map the frontier,
-  run pop's `grill-with-docs` instead. The `research` subagents fired in step 5
+  run pop's `grill-with-map` instead — the wayfinding grilling skill, which
+  writes only into the Map's own directory. Never `grill-with-docs`: its
+  contract mandates repository fragment writes and a commit at session close,
+  which is the one thing wayfinding must not do. The `research` subagents fired in step 5
   write their findings into the ticket's `## Answer` (per the doc's research
   override), **not** onto a throwaway `research/<name>` branch.
 - **Invocation form.** `/wayfinder` charts a new map from a bare loose idea

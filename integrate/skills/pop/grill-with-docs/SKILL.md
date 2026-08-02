@@ -5,33 +5,26 @@ disable-model-invocation: true
 ---
 
 <!--
-base: mattpocock/skills in-progress/batch-grill-me@fde4cd5 + domain-modeling@391a2701
+base: mattpocock/skills domain-modeling@391a2701
 
 This file is a marked overlay. Everything from here down to the "POP OVERLAY"
-marker is a verbatim copy of two upstream skills at the pinned refs above,
-concatenated: first the body of in-progress/batch-grill-me/SKILL.md (the
-interview primitive — map a design tree, ask the whole settled frontier one
-round at a time), then the body of domain-modeling/SKILL.md (the glossary/ADR
-discipline). Pop inlines both rather than delegating to `/batch-grill-me` +
+marker is a verbatim copy of domain-modeling/SKILL.md at the pinned ref above —
+the glossary/ADR discipline on its own. Pop inlines it rather than delegating to
 `/domain-modeling`, per ADR-0009 (skills are embedded in the binary and ship to
-machines without Matt's skills installed). batch-grill-me's
-`disable-model-invocation` frontmatter is kept: grilling is a manual-only
-session the user opens with `/grill-with-docs`, never something the model
-starts on its own. Pop's parallel-safety additions — the
+machines without Matt's skills installed).
+
+The interview half is no longer inlined here. It is pop's own `batch-grill-me`
+skill — the same upstream primitive, installed alongside this one by the same
+component — and the overlay below composes over it rather than restating it, so
+one copy of the interview rules serves both this skill and the wayfinding
+variant. domain-modeling's `disable-model-invocation` counterpart is kept:
+grilling is a manual-only session the user opens with `/grill-with-docs`, never
+something the model starts on its own. Pop's parallel-safety additions — the
 single-writer override, grill-consolidate, and the commit-on-close discipline —
-live below that marker. To review upstream drift, diff the region between this
-header and the marker against batch-grill-me@<newref> + domain-modeling@<newref>.
+live below the marker. To review upstream drift, diff the region between this
+header and the marker against domain-modeling@<newref>.
 -->
 
-Interview the user relentlessly until you reach a shared understanding. Map this as a **design tree**: every decision branches into the decisions that hang off it.
-
-Work the tree in **rounds**. The **frontier** is every decision whose prerequisites are already settled — the questions you can ask *now* without guessing at answers you haven't heard yet. Ask the whole frontier in one round: number each question and give your recommended answer. Then wait for the user's answers before the next round.
-
-Each round the user answers reshapes the tree — settled decisions push the frontier outward and unblock questions that depended on them. Recompute the frontier and ask the next round. A question whose answer depends on another question still open in this round belongs to a *later* round, not this one.
-
-Finding *facts* is your job, never the user's. When a frontier question needs a fact from the environment (filesystem, tools, etc.), dispatch a sub-agent to find it — don't ask the user for anything you could look up yourself. Don't block on it: a running exploration is an unsettled prerequisite, so only the questions downstream of it wait for the sub-agent to report — ask the rest of the frontier now. The *decisions* are the user's — put each to them and wait.
-
-The session is done when the frontier is empty: every branch of the design tree visited, nothing left silently assumed. Do not act on it until the user confirms you have reached a shared understanding.
 # Domain Modeling
 
 Actively build and sharpen the project's domain model as you design. This is the *active* discipline — challenging terms, inventing edge-case scenarios, and writing the glossary and decisions down the moment they crystallise. (Merely *reading* `CONTEXT.md` for vocabulary is not this skill — that's a one-line habit any skill can do. This skill is for when you're changing the model, not just consuming it.)
@@ -102,7 +95,8 @@ Only offer to create an ADR when all three are true:
 
 If any of the three is missing, skip the ADR. Use the format in [ADR-FORMAT.md](./ADR-FORMAT.md).
 <!-- ═══════════════════════════════ POP OVERLAY ═══════════════════════════════
-Everything below is pop-specific and has no upstream twin. It carries the
+Everything below is pop-specific and has no upstream twin. It names the
+interview primitive this skill composes over (batch-grill-me), and carries the
 behavioural overrides of the base — replacing domain-modeling's "Update
 CONTEXT.md inline" single-writer instruction with per-session fragments written
 once a round, and collapsing the base's scattered fact-finding into one rule —
@@ -111,6 +105,18 @@ make grilling safe under parallel agents and teams. Where a line below contradic
 the verbatim upstream region, the line below wins; the upstream text is kept
 byte-intact only so drift stays diffable.
 -->
+
+## Composed over batch-grill-me
+
+Run the `batch-grill-me` skill for the conversation itself: map the design tree,
+ask the whole settled frontier one round at a time, find every fact yourself,
+and stop when the frontier is empty. That skill is the interview and nothing
+else — it deliberately writes nothing, and asks which skill records the
+decisions. This one is that answer: the glossary fragments, ADRs and closing
+commit below are where a `grill-with-docs` session's decisions land.
+
+Everything on this page is the write discipline layered on top of the interview.
+Read both before the first round.
 
 ## Single-writer override
 

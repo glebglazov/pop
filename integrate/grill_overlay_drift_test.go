@@ -10,15 +10,21 @@ import (
 // vendored upstream fixture its above-marker region must stay byte-identical
 // to. Per ADR-0112/ADR-0136, drift review reduces to diffing this region
 // against the pinned upstream source; this test makes that diff mechanical
-// instead of archaeological. It covers both the grill-with-docs companions
-// (pinned to domain-modeling@391a2701), the batch-grill-me interview primitive
-// (pinned to the in-progress, unpublished in-progress/batch-grill-me@fde4cd5 —
-// a frozen pin whose diff is expected to stay empty), and the
-// setup-matt-pocock-skills seed templates (pinned to mattpocock/skills@ed37663).
+// instead of archaeological. It covers the grill-with-docs body and the shared
+// format documents (pinned to domain-modeling@391a2701), the batch-grill-me
+// interview primitive (pinned to the in-progress, unpublished
+// in-progress/batch-grill-me@fde4cd5 — a frozen pin whose diff is expected to
+// stay empty), and the setup-matt-pocock-skills seed templates (pinned to
+// mattpocock/skills@ed37663).
+//
+// grill-with-docs' verbatim region is the domain-modeling half alone: the
+// interview half it used to inline is now batch-grill-me, composed over rather
+// than concatenated, so each upstream skill is pinned in exactly one place.
 var overlayPinnedFiles = map[string]string{
 	"skills/pop/batch-grill-me/SKILL.md":                          "testdata/batch-grill-me-pin/SKILL.md",
+	"skills/pop/grill-with-docs/SKILL.md":                         "testdata/domain-modeling-pin/SKILL.md",
 	"skills/pop/_shared/CONTEXT-FORMAT.md":                        "testdata/domain-modeling-pin/CONTEXT-FORMAT.md",
-	"skills/pop/grill-with-docs/ADR-FORMAT.md":                    "testdata/domain-modeling-pin/ADR-FORMAT.md",
+	"skills/pop/_shared/ADR-FORMAT.md":                            "testdata/domain-modeling-pin/ADR-FORMAT.md",
 	"skills/pop/setup-matt-pocock-skills/domain.md":               "testdata/setup-skill-pin/domain.md",
 	"skills/pop/setup-matt-pocock-skills/issue-tracker-github.md": "testdata/setup-skill-pin/issue-tracker-github.md",
 	"skills/pop/setup-matt-pocock-skills/issue-tracker-gitlab.md": "testdata/setup-skill-pin/issue-tracker-gitlab.md",

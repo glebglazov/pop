@@ -11,6 +11,7 @@ import (
 var taskSkillDirs = map[string][]string{
 	"pop-batch-grill-me":           {"CONTEXT-FORMAT.md"},
 	"pop-grill-with-docs":          {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
+	"pop-grill-with-map":           {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
 	"pop-grill-consolidate":        {},
 	"pop-to-spec":                  {},
 	"pop-to-tasks":                 {},

@@ -26,7 +26,8 @@ const (
 	ComponentPaneSkill ComponentID = "pane-skills"
 
 	// ComponentTaskSkills is the opt-in task planning skill set
-	// (batch-grill-me, grill-with-docs, grill-consolidate, to-spec, to-tasks,
+	// (batch-grill-me, grill-with-docs, grill-with-map, grill-consolidate,
+	// to-spec, to-tasks,
 	// wayfinder, prototype, research, setup-matt-pocock-skills, spend-audit).
 	ComponentTaskSkills ComponentID = "task-skills"
 )
@@ -91,13 +92,14 @@ var catalog = []Component{
 		id:       ComponentTaskSkills,
 		supports: allRegisteredAgents(),
 		// Each source is a skill directory (SKILL.md plus any companion
-		// documents). grill-with-docs ships two companion format files that
-		// must ride alongside its body so its relative references resolve;
-		// sharedSkillDocs below adds the pop-owned documents several skills
-		// share.
+		// documents). Companion files must ride alongside a body so its
+		// relative references resolve; sharedSkillDocs below adds the pop-owned
+		// documents several skills share, which is where both grilling skills
+		// get their two format documents.
 		sources: []string{
 			"skills/pop/batch-grill-me",
 			"skills/pop/grill-with-docs",
+			"skills/pop/grill-with-map",
 			"skills/pop/grill-consolidate",
 			"skills/pop/to-spec",
 			"skills/pop/to-tasks",
@@ -119,13 +121,17 @@ const sharedSkillDocDir = "skills/pop/_shared"
 // sharedSkillDocs maps a skill's base name to the shared documents its
 // installed directory receives a copy of. One source of truth, several
 // destinations: the glossary union rule and the `+`/`~`/`-` op syntax are the
-// same text for the skill that only reads the union (batch-grill-me) and the
-// one that writes fragments into it (grill-with-docs), so they cannot be
-// allowed to drift apart. Each copy lands beside the skill body, so a body's
-// `./CONTEXT-FORMAT.md` link resolves wherever the skill is installed.
+// same text for the skill that only reads the union (batch-grill-me), the one
+// that writes fragments into it (grill-with-docs) and the one that drafts the
+// same ops into a Map (grill-with-map), so they cannot be allowed to drift
+// apart. The ADR template is shared the same way by the two skills that
+// produce ADRs — one as a numbered repo file, one as an unnumbered Map draft.
+// Each copy lands beside the skill body, so a body's `./CONTEXT-FORMAT.md`
+// link resolves wherever the skill is installed.
 var sharedSkillDocs = map[string][]string{
 	"batch-grill-me":  {"CONTEXT-FORMAT.md"},
-	"grill-with-docs": {"CONTEXT-FORMAT.md"},
+	"grill-with-docs": {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
+	"grill-with-map":  {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
 }
 
 // sharedDocSource returns the embedded path of a shared document.
