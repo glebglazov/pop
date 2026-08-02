@@ -399,6 +399,27 @@ var migrations = []string{
 		until  TEXT,
 		PRIMARY KEY (preset, model)
 	);`,
+	// 26: work_containers — the one cross-kind Work registry, keyed (kind, id):
+	// membership plus machine-local runtime for every Work kind, so a Map
+	// registers the same way a Task set does. A `kind` column on `sets` was
+	// rejected — a table named for one kind cannot be the cross-kind registry
+	// without lying. It carries `archived`, the only genuinely cross-kind
+	// registration bit (Maps archive through it too), and never a derived status:
+	// derivation is cheap and a status cache is a second source of truth that
+	// drifts (ADR-0006/0056). Kind-local registration (priority, auto_drain, the
+	// worktree directive) stays on its kind's own table. The autoincrement seq
+	// preserves registration order, which listings render by. Copying the `sets`
+	// rows in as kind='task-set' rides a later slice; this migration only creates
+	// the table so `pop map` can register against it first.
+	`CREATE TABLE work_containers (
+		seq           INTEGER PRIMARY KEY AUTOINCREMENT,
+		kind          TEXT    NOT NULL,
+		id            TEXT    NOT NULL,
+		archived      INTEGER NOT NULL DEFAULT 0,
+		registered_at TEXT    NOT NULL DEFAULT '',
+		UNIQUE(kind, id)
+	);
+	CREATE INDEX idx_work_containers_kind ON work_containers(kind);`,
 }
 
 func (s *Store) migrate() error {

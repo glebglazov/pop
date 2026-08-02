@@ -27,6 +27,7 @@ AGENTS="…"`) are opt-in and not part of ordinary verification.
 | `tasks/binding/` | Binding a Task set to a checkout or worktree |
 | `queue/` | `pop queue` supervisor **and** the Work dashboard TUI (`dashboard.go`) |
 | `work/` | Work-dashboard data core — rows, derivation, snapshot (ADR-0143) |
+| `work/ref/` | `WorkRef` + the closed Work-kind enum; a leaf `store` may import |
 | `routine/` | Project routines: discovery, firing, per-checkout state |
 | `integrate/` | Agent-CLI integration — install/remove/doctor per agent |
 | `internal/tmux/` | All tmux knowledge; nothing else shells out to tmux (ADR-0142) |
