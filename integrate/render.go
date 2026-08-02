@@ -49,7 +49,8 @@ func renderComponent(id ComponentID, agent, prefix string) (map[string][]byte, e
 //   - A directory `skills/pop/<base>` holding `SKILL.md` plus any companion
 //     documents — a multi-file skill named `<prefix><base>`. The companion
 //     files ride alongside the skill body so the body's relative references
-//     resolve (grill-with-docs and its two format documents).
+//     resolve (grill-with-docs and its two format documents), as do the
+//     pop-owned documents the skill shares with others (sharedSkillDocs).
 func renderSkillComponent(comp Component, agent, prefix string) (map[string][]byte, error) {
 	baseNames := fileBasedSkillBaseNames()
 	tree := make(map[string][]byte, len(comp.sources))
@@ -111,6 +112,22 @@ func renderMultiFileSkill(tree map[string][]byte, agent, prefix, dir string, bas
 			continue
 		}
 		tree[skillName+"/"+e.Name()] = []byte(content)
+	}
+	return renderSharedSkillDocs(tree, prefix, path.Base(dir), skillName, baseNames)
+}
+
+// renderSharedSkillDocs copies each document this skill shares with others
+// (sharedSkillDocs) from `skills/pop/_shared/` into the skill's own rendered
+// directory, so the installed skill is self-contained and its relative links
+// resolve without knowing where pop keeps the original.
+func renderSharedSkillDocs(tree map[string][]byte, prefix, base, skillName string, baseNames []string) error {
+	for _, name := range sharedSkillDocs[base] {
+		src := sharedDocSource(name)
+		data, err := skillFiles.ReadFile(src)
+		if err != nil {
+			return fmt.Errorf("failed to read embedded shared skill doc %s: %w", src, err)
+		}
+		tree[skillName+"/"+name] = []byte(rewriteSkillReferences(string(data), prefix, baseNames))
 	}
 	return nil
 }

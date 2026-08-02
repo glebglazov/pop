@@ -9,6 +9,7 @@ import (
 // renders, with the companion files each one is expected to carry alongside its
 // SKILL.md body.
 var taskSkillDirs = map[string][]string{
+	"pop-batch-grill-me":           {"CONTEXT-FORMAT.md"},
 	"pop-grill-with-docs":          {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
 	"pop-grill-consolidate":        {},
 	"pop-to-spec":                  {},
@@ -18,6 +19,18 @@ var taskSkillDirs = map[string][]string{
 	"pop-research":                 {},
 	"pop-setup-matt-pocock-skills": {"domain.md", "issue-tracker-github.md", "issue-tracker-gitlab.md", "issue-tracker-local.md"},
 	"pop-spend-audit":              {},
+}
+
+// companionSource resolves where a rendered companion's bytes come from: the
+// skill's own embedded directory, or skills/pop/_shared/ for a document the
+// skill shares with others.
+func companionSource(base, name string) string {
+	for _, shared := range sharedSkillDocs[base] {
+		if shared == name {
+			return sharedDocSource(name)
+		}
+	}
+	return "skills/pop/" + base + "/" + name
 }
 
 // TestRenderTaskSkillsDirAgents pins the task-skills rendered tree for
@@ -56,7 +69,7 @@ func TestRenderTaskSkillsDirAgents(t *testing.T) {
 					if !ok {
 						t.Fatalf("missing companion %s; tree has %v", key, keysOf(tree))
 					}
-					srcPath := "skills/pop/" + strings.TrimPrefix(skill, "pop-") + "/" + c
+					srcPath := companionSource(strings.TrimPrefix(skill, "pop-"), c)
 					raw, err := skillFiles.ReadFile(srcPath)
 					if err != nil {
 						t.Fatalf("read embedded companion %s: %v", srcPath, err)
@@ -179,7 +192,7 @@ func TestRenderTaskSkillsBarePrefixNoBodyRewrite(t *testing.T) {
 			t.Fatalf("%s/SKILL.md bare-prefix mismatch:\n got: %q\nwant: %q", base, string(got), want)
 		}
 		for _, c := range companions {
-			raw, err := skillFiles.ReadFile("skills/pop/" + base + "/" + c)
+			raw, err := skillFiles.ReadFile(companionSource(base, c))
 			if err != nil {
 				t.Fatalf("read companion %s/%s: %v", base, c, err)
 			}

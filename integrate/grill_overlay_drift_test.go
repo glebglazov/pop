@@ -11,10 +11,13 @@ import (
 // to. Per ADR-0112/ADR-0136, drift review reduces to diffing this region
 // against the pinned upstream source; this test makes that diff mechanical
 // instead of archaeological. It covers both the grill-with-docs companions
-// (pinned to domain-modeling@391a2701) and the setup-matt-pocock-skills seed
-// templates (pinned to mattpocock/skills@ed37663).
+// (pinned to domain-modeling@391a2701), the batch-grill-me interview primitive
+// (pinned to the in-progress, unpublished in-progress/batch-grill-me@fde4cd5 —
+// a frozen pin whose diff is expected to stay empty), and the
+// setup-matt-pocock-skills seed templates (pinned to mattpocock/skills@ed37663).
 var overlayPinnedFiles = map[string]string{
-	"skills/pop/grill-with-docs/CONTEXT-FORMAT.md":                "testdata/domain-modeling-pin/CONTEXT-FORMAT.md",
+	"skills/pop/batch-grill-me/SKILL.md":                          "testdata/batch-grill-me-pin/SKILL.md",
+	"skills/pop/_shared/CONTEXT-FORMAT.md":                        "testdata/domain-modeling-pin/CONTEXT-FORMAT.md",
 	"skills/pop/grill-with-docs/ADR-FORMAT.md":                    "testdata/domain-modeling-pin/ADR-FORMAT.md",
 	"skills/pop/setup-matt-pocock-skills/domain.md":               "testdata/setup-skill-pin/domain.md",
 	"skills/pop/setup-matt-pocock-skills/issue-tracker-github.md": "testdata/setup-skill-pin/issue-tracker-github.md",

@@ -141,8 +141,12 @@ The embedded skills that teach an agent to drive `pop pane` — driving panes (`
 _Avoid_: Agent integration, hooks
 
 **Task planning skills**:
-The embedded, pop-independent skills installed together by the `task-skills` component, in three kinds: Workflow skills (grill-with-docs, to-spec, to-tasks, wayfinder — session-shaped, manual-invocation-only; grill-consolidate rides along as the glossary-maintenance pass), Tool skills (prototype, research — model-invoked, verbatim upstream), and the Setup skill (setup-matt-pocock-skills — session-shaped, manual-invocation-only, prepares a repo for the others). Versioned with the pop binary and installed only by explicit opt-in; pop's task scheduling and execution do not depend on them being installed.
+The embedded, pop-independent skills installed together by the `task-skills` component, in three kinds: Workflow skills (batch-grill-me, grill-with-docs, to-spec, to-tasks, wayfinder — session-shaped, manual-invocation-only; grill-consolidate rides along as the glossary-maintenance pass), Tool skills (prototype, research — model-invoked, verbatim upstream), and the Setup skill (setup-matt-pocock-skills — session-shaped, manual-invocation-only, prepares a repo for the others). Versioned with the pop binary and installed only by explicit opt-in; pop's task scheduling and execution do not depend on them being installed.
 _Avoid_: Workload framework, workload skills bundle, agent integration
+
+**Shared skill document**:
+A pop-owned companion document that more than one embedded skill depends on, held once under `integrate/skills/pop/_shared/` and copied into each consuming skill's installed directory at install time — only the destination differs per skill. `CONTEXT-FORMAT.md` (the glossary union rule and the `+`/`~`/`-` op syntax, read by batch-grill-me and written against by grill-with-docs) is the first. Distinct from an ordinary companion file, which lives in its one skill's own directory; a shared document that goes missing or drifts from its source is a **Doctor** finding like any other rendered file.
+_Avoid_: shared skill, common file, skill include
 
 **Skills prefix**:
 The configurable string prepended to an embedded skill's base name to form its installed name (`<prefix><base>`). Set via `skills_prefix` in `[integrations]`, default `pop-`; an empty value installs skills under their bare base name. The prefix reaches skill *bodies* too: render rewrites cross-skill references (the known embedded base names) to their resolved installed names, so a rendered skill never tells an agent to run a skill under a name that isn't in its listing. Embedded sources stay byte-intact — the rewrite happens only at render, keeping upstream-drift diffs clean.
@@ -229,7 +233,7 @@ The active half of **Agent proceed verdict** detection: a short read-only comman
 _Avoid_: agent health check, auth preflight, agent status command, doctor check
 
 **Workflow skill**:
-An embedded skill that is a session-shaped workflow the user opens deliberately: manual-invocation-only via `disable-model-invocation` — grill-with-docs, grill-consolidate, to-spec, to-tasks, wayfinder. The counterpart of a Tool skill; the two kinds together make up the Task planning skills.
+An embedded skill that is a session-shaped workflow the user opens deliberately: manual-invocation-only via `disable-model-invocation` — batch-grill-me, grill-with-docs, grill-consolidate, to-spec, to-tasks, wayfinder. The counterpart of a Tool skill; the two kinds together make up the Task planning skills.
 _Avoid_: command skill, manual-only skill
 
 **Tool skill**:

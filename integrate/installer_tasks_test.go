@@ -51,7 +51,7 @@ func taskAgents() []taskAgent {
 
 // taskSkillNames is the set of skill directory names the task-skills
 // component installs.
-var taskSkillNames = []string{"pop-grill-with-docs", "pop-grill-consolidate", "pop-to-spec", "pop-to-tasks", "pop-wayfinder", "pop-prototype", "pop-research", "pop-setup-matt-pocock-skills", "pop-spend-audit"}
+var taskSkillNames = []string{"pop-batch-grill-me", "pop-grill-with-docs", "pop-grill-consolidate", "pop-to-spec", "pop-to-tasks", "pop-wayfinder", "pop-prototype", "pop-research", "pop-setup-matt-pocock-skills", "pop-spend-audit"}
 
 // TestInstallTaskSkillsAllAgents covers the clean install for claude, codex,
 // pi, and cursor: all seven planning skills land as render trees under the data
@@ -88,6 +88,7 @@ func TestInstallTaskSkillsAllAgents(t *testing.T) {
 			// grill-with-docs and prototype companions ride alongside their bodies
 			// in the render tree so their relative references resolve.
 			for skill, companions := range map[string][]string{
+				"pop-batch-grill-me":           {"CONTEXT-FORMAT.md"},
 				"pop-grill-with-docs":          {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
 				"pop-prototype":                {"LOGIC.md", "UI.md"},
 				"pop-setup-matt-pocock-skills": {"domain.md", "issue-tracker-github.md", "issue-tracker-gitlab.md", "issue-tracker-local.md"},
@@ -249,6 +250,64 @@ func TestInstallTaskSkillsPrunesStaleToPRD(t *testing.T) {
 			}
 			if !containsSubstr(logs, "pruning stale "+staleLink) {
 				t.Fatalf("expected a prune log line for %s, got: %v", staleLink, logs)
+			}
+		})
+	}
+}
+
+// TestTaskSkillsDoctorSeesMissingSkillOrSharedDoc drives the state Doctor
+// reports for the task-skills component after the install is damaged three
+// ways: the interview primitive's body deleted, its copy of the shared
+// CONTEXT-FORMAT.md deleted, and another consumer's copy hand-edited. Each is
+// a finding — an installed skill missing the format document reads the
+// glossary union by guesswork, and one that carries a drifted copy reads it by
+// stale rules.
+func TestTaskSkillsDoctorSeesMissingSkillOrSharedDoc(t *testing.T) {
+	t.Parallel()
+	renderDir := filepath.Join(installerHome, ".local", "share", "pop", "integrations", "claude", "task-skills")
+	for _, tc := range []struct {
+		name   string
+		damage func(fs *fakeFS)
+	}{
+		{
+			name:   "skill body absent",
+			damage: func(fs *fakeFS) { delete(fs.files, filepath.Join(renderDir, "pop-batch-grill-me", "SKILL.md")) },
+		},
+		{
+			name: "shared doc absent",
+			damage: func(fs *fakeFS) {
+				delete(fs.files, filepath.Join(renderDir, "pop-batch-grill-me", "CONTEXT-FORMAT.md"))
+			},
+		},
+		{
+			name: "shared doc drifted",
+			damage: func(fs *fakeFS) {
+				fs.files[filepath.Join(renderDir, "pop-grill-with-docs", "CONTEXT-FORMAT.md")] = []byte("hand-edited format rules")
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := newFakeFS()
+			d := fakeDeps(installerHome, fs, nil)
+			if err := installFileComponent(fileRun(d, "claude"), installerHome, ComponentTaskSkills, "claude"); err != nil {
+				t.Fatalf("installFileComponent: %v", err)
+			}
+			state, err := ComponentState(d, installerHome, ComponentTaskSkills, "claude")
+			if err != nil {
+				t.Fatalf("ComponentState (fresh): %v", err)
+			}
+			if state.Kind != StateInstalledCurrent {
+				t.Fatalf("fresh install state = %v, want installed-current", state.Kind)
+			}
+
+			tc.damage(fs)
+
+			state, err = ComponentState(d, installerHome, ComponentTaskSkills, "claude")
+			if err != nil {
+				t.Fatalf("ComponentState (damaged): %v", err)
+			}
+			if state.Kind != StateStale {
+				t.Fatalf("state after %s = %v, want stale", tc.name, state.Kind)
 			}
 		})
 	}

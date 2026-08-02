@@ -145,6 +145,7 @@ func TestCatalog_TaskSkillsSources(t *testing.T) {
 		t.Fatal("task-skills component missing")
 	}
 	want := []string{
+		"skills/pop/batch-grill-me",
 		"skills/pop/grill-with-docs",
 		"skills/pop/grill-consolidate",
 		"skills/pop/to-spec",

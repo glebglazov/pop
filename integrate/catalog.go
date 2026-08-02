@@ -26,8 +26,8 @@ const (
 	ComponentPaneSkill ComponentID = "pane-skills"
 
 	// ComponentTaskSkills is the opt-in task planning skill set
-	// (grill-with-docs, grill-consolidate, to-spec, to-tasks, wayfinder,
-	// prototype, research, setup-matt-pocock-skills, spend-audit).
+	// (batch-grill-me, grill-with-docs, grill-consolidate, to-spec, to-tasks,
+	// wayfinder, prototype, research, setup-matt-pocock-skills, spend-audit).
 	ComponentTaskSkills ComponentID = "task-skills"
 )
 
@@ -92,8 +92,11 @@ var catalog = []Component{
 		supports: allRegisteredAgents(),
 		// Each source is a skill directory (SKILL.md plus any companion
 		// documents). grill-with-docs ships two companion format files that
-		// must ride alongside its body so its relative references resolve.
+		// must ride alongside its body so its relative references resolve;
+		// sharedSkillDocs below adds the pop-owned documents several skills
+		// share.
 		sources: []string{
+			"skills/pop/batch-grill-me",
 			"skills/pop/grill-with-docs",
 			"skills/pop/grill-consolidate",
 			"skills/pop/to-spec",
@@ -105,6 +108,29 @@ var catalog = []Component{
 			"skills/pop/spend-audit",
 		},
 	},
+}
+
+// sharedSkillDocDir holds the pop-owned documents that more than one skill
+// depends on. It is not a skill source and never renders as a skill of its
+// own; renderMultiFileSkill copies the named documents into each consuming
+// skill's directory instead.
+const sharedSkillDocDir = "skills/pop/_shared"
+
+// sharedSkillDocs maps a skill's base name to the shared documents its
+// installed directory receives a copy of. One source of truth, several
+// destinations: the glossary union rule and the `+`/`~`/`-` op syntax are the
+// same text for the skill that only reads the union (batch-grill-me) and the
+// one that writes fragments into it (grill-with-docs), so they cannot be
+// allowed to drift apart. Each copy lands beside the skill body, so a body's
+// `./CONTEXT-FORMAT.md` link resolves wherever the skill is installed.
+var sharedSkillDocs = map[string][]string{
+	"batch-grill-me":  {"CONTEXT-FORMAT.md"},
+	"grill-with-docs": {"CONTEXT-FORMAT.md"},
+}
+
+// sharedDocSource returns the embedded path of a shared document.
+func sharedDocSource(name string) string {
+	return sharedSkillDocDir + "/" + name
 }
 
 // LookupComponent returns the catalog entry for the given identifier.
