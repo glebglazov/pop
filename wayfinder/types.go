@@ -34,9 +34,15 @@ type Ticket struct {
 	Number    int
 	Slug      string
 	ID        string // zero-padded ticket number, e.g. "01"
+	Title     string // manifest-only; empty on header-parsed tickets
 	Type      TicketType
 	Status    TicketStatus
 	BlockedBy []string // blocker ticket numbers, e.g. "01"
+	// ADRDrafts and ContextDrafts name the draft files a resolution declared,
+	// relative to the Map folder. Manifest-only; the implementing slice mints
+	// them into the repository.
+	ADRDrafts     []string
+	ContextDrafts []string
 }
 
 // Map is a parsed Wayfinder map folder.

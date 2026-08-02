@@ -1270,6 +1270,10 @@ _Avoid_: wayfinder task set, plan, chart
 One unit of a Map: a question whose resolution is a decision, recorded as `issues/NN-<slug>.md` with `Type:` (research/prototype/grilling/task), `Status:`, and `Blocked by:` lines, its answer appended under `## Answer` on resolution. Distinct from a task: no acceptance criteria, no agent commit, and a claimed state exists (persisted in_progress stays malformed for tasks).
 _Avoid_: task (the Task-set unit), issue, question file
 
+**Map manifest**:
+The `index.json` beside a Map's `map.md` — the machine-readable half of a Map, mirroring the **Task manifest** so no consumer hand-parses metadata out of N ticket markdown files. Per Decision ticket it carries id, file, title, type, status (`open` | `resolved`; a claim is pop.db state, never a file state), `blocked_by`, `adr_drafts` and `context_drafts`, plus a Map-level `spawned_sets` array defaulting to empty. Blocking edges live here because they are definitional and travel with the content. Where one exists it is the source of truth for status, type and blocking; a Map without one still reads its ticket markdown headers. Validation names every problem — unknown status or type, a blocker naming no entry, an entry with no markdown file, a markdown file with no entry — and a failing manifest renders the Map Malformed.
+_Avoid_: ticket index, map index file, wayfinder manifest
+
 **Map status**:
 The `Status:` line in `map.md` — `active` (default), `done` (way found; skill writes it at handoff), or `abandoned` (closed without reaching the destination). Declared, not derived: fog is prose, so "way is clear" is a judgment the session records. Orthogonal to a pop-side reversible Archive flag (same shape as Task-set Archive) that hides old Maps from default views without deleting; deletion stays manual.
 _Avoid_: map state, derived map status

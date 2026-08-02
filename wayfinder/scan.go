@@ -79,9 +79,9 @@ func loadMap(d *Deps, id, dir string) (Map, error) {
 		return Map{}, err
 	}
 
-	tickets, ticketErrs := loadTickets(d, filepath.Join(dir, issuesDirName))
-	if len(ticketErrs) > 0 {
-		return Map{}, fmt.Errorf("%s", strings.Join(ticketErrs, "; "))
+	tickets, err := loadMapTickets(d, dir)
+	if err != nil {
+		return Map{}, err
 	}
 
 	return Map{
@@ -92,6 +92,28 @@ func loadMap(d *Deps, id, dir string) (Map, error) {
 		DecisionsSoFar: ParseDecisionsSoFar(string(data)),
 		Tickets:        tickets,
 	}, nil
+}
+
+// loadMapTickets prefers the manifest and falls back to the ticket markdown
+// headers only for Maps that have not been folded yet — index.json is the single
+// source of a ticket's status, type and blocking wherever it exists.
+func loadMapTickets(d *Deps, dir string) ([]Ticket, error) {
+	manifest, err := LoadMapManifest(d, dir)
+	if err == nil {
+		if !manifest.Valid {
+			return nil, fmt.Errorf("%s: %s", MapManifestFileName, manifest.MalformedReason())
+		}
+		return manifest.ToTickets(), nil
+	}
+	if !os.IsNotExist(err) {
+		return nil, err
+	}
+
+	tickets, ticketErrs := loadTickets(d, filepath.Join(dir, issuesDirName))
+	if len(ticketErrs) > 0 {
+		return nil, fmt.Errorf("%s", strings.Join(ticketErrs, "; "))
+	}
+	return tickets, nil
 }
 
 func loadTickets(d *Deps, issuesDir string) ([]Ticket, []string) {
