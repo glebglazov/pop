@@ -150,21 +150,15 @@ func TestScanMapsMalformedFolder(t *testing.T) {
 }
 
 func TestBuildStatusHidesDoneAndAbandonedByDefault(t *testing.T) {
-	dataHome := "/data"
-	commonDir := "/repo/.git"
-	t.Setenv("XDG_DATA_HOME", dataHome)
-	id, err := tasks.IdentityFromCommonDir(&tasks.Deps{FS: deps.NewRealFileSystem()}, commonDir)
-	if err != nil {
+	files := oneTicketMap("archived-map")
+	files["maps/active/map.md"] = "## Destination\nactive"
+	files["maps/done-map/map.md"] = "Status: done\n\n## Destination\ndone"
+	files["maps/quit-map/map.md"] = "Status: abandoned\n\n## Destination\nquit"
+	d, _ := registryFixture(t, files)
+	mustRegister(t, d, "archived-map")
+	if _, err := ArchiveMap(d, "", "archived-map"); err != nil {
 		t.Fatal(err)
 	}
-	files := map[string]string{
-		filepath.Join(id.StorageDir, "maps", "active", "map.md"):     "## Destination\nactive",
-		filepath.Join(id.StorageDir, "maps", "done-map", "map.md"):   "Status: done\n\n## Destination\ndone",
-		filepath.Join(id.StorageDir, "maps", "quit-map", "map.md"):   "Status: abandoned\n\n## Destination\nquit",
-		filepath.Join(id.StorageDir, "wayfinder-archive.json"):            `{"archived":["archived-map"]}`,
-		filepath.Join(id.StorageDir, "maps", "archived-map", "map.md"): "## Destination\narchived",
-	}
-	d := wayfinderTestDeps(t, dataHome, commonDir, files)
 
 	snap, err := BuildStatus(d, "", false)
 	if err != nil {

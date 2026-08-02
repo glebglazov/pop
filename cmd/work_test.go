@@ -34,7 +34,7 @@ func TestWorkHelpDescribesCrossConceptSurface(t *testing.T) {
 		t.Fatal(err)
 	}
 	help := buf.String()
-	for _, want := range []string{"Cross-concept", "Work dashboard", "show-path", "tasks/", "wayfinder/"} {
+	for _, want := range []string{"Cross-concept", "Work dashboard", "show-path", "tasks/", "maps/"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("work help missing %q:\n%s", want, help)
 		}

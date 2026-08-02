@@ -78,7 +78,7 @@ type StatusRow struct {
 	MalformedSummary string
 }
 
-// StatusSnapshot is the pure data model for pop wayfinder status.
+// StatusSnapshot is the pure data model for pop map status.
 type StatusSnapshot struct {
 	Rows []StatusRow
 }

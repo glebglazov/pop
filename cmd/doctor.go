@@ -53,7 +53,7 @@ type doctorDeps struct {
 	explicitAgentContext      func() []string
 	agentExecutableAvailable  func(string) bool
 	taskStorageWritable       func() (string, error)
-	scanWayfinderMaps         func() (int, error)
+	scanMaps                  func() (int, error)
 	legacyTaskSets            func() ([]string, error)
 	orphanedTaskStorage       func() ([]tasks.OrphanedStorage, error)
 	legacyLayoutStorage       func() ([]string, error)
@@ -102,11 +102,11 @@ func defaultDoctorDeps() *doctorDeps {
 		loadMonitorState: func() (*monitor.State, error) {
 			return monitor.Load(monitor.DefaultStatePath())
 		},
-		paneSessionAddressable: defaultPaneSessionAddressable,
+		paneSessionAddressable:   defaultPaneSessionAddressable,
 		explicitAgentContext:     func() []string { return nil },
 		agentExecutableAvailable: tasks.AgentExecutableAvailable,
-		taskStorageWritable: func() (string, error) { return tasks.ProbeStorageWritable(cmdLayerDeps().tasksDeps()) },
-		scanWayfinderMaps: func() (int, error) {
+		taskStorageWritable:      func() (string, error) { return tasks.ProbeStorageWritable(cmdLayerDeps().tasksDeps()) },
+		scanMaps: func() (int, error) {
 			maps, err := wayfinder.ScanMaps(cmdLayerDeps().wayfinderDeps(), cmdLayerDeps().WorkDir())
 			if err != nil {
 				return 0, err
@@ -193,7 +193,7 @@ var doctorCmd = &cobra.Command{
 	Long: `Report pop's readiness on this machine — strictly read-only.
 
 Doctor prints the canonical command families (project, worktree, monitor,
-pane, tasks, wayfinder, integrate) and nested checks for each family. When a family
+pane, tasks, map, integrate) and nested checks for each family. When a family
 depends on agent setup, Doctor reads Pop's existing integration evidence to
 explain that family's readiness; it does not present a support matrix or
 per-agent component inventory as the report.
@@ -230,7 +230,7 @@ var canonicalDoctorCommands = []string{
 	"pop monitor",
 	"pop pane",
 	"pop tasks",
-	"pop wayfinder",
+	"pop map",
 	"pop integrate",
 }
 
@@ -250,7 +250,7 @@ func buildDoctorReport(d *doctorDeps) (*doctorReport, error) {
 			familyReport("pop monitor", doctorMonitorChecks(d, intent)),
 			familyReport("pop pane", doctorPaneChecks(d)),
 			familyReport("pop tasks", doctorTaskChecks(d)),
-			familyReport("pop wayfinder", doctorWayfinderChecks(d, intent)),
+			familyReport("pop map", doctorMapChecks(d, intent)),
 		},
 	}
 
@@ -412,13 +412,13 @@ func doctorPaneChecks(d *doctorDeps) []doctorCheck {
 // storage layout is left un-migrated, and no Task storage has been orphaned by a
 // vanished repository. Legacy-layout, orphan, and migration reporting are
 // informational only — Doctor never deletes, moves, or modifies storage.
-// doctorWayfinderChecks reports Wayfinder readiness with the same git and Task
+// doctorMapChecks reports `pop map` readiness with the same git and Task
 // storage gates as Tasks: a runtime checkout must resolve and pop must be able
 // to write beneath Task storage. Map count is informational only — zero maps is
 // OK, matching Worktree readiness (absence is content, never Degraded). When
 // maps exist, a second gate checks that at least one intended agent has the
 // task-skills component (which ships the wayfinder planning skill).
-func doctorWayfinderChecks(d *doctorDeps, intent *doctorAgentIntentReport) []doctorCheck {
+func doctorMapChecks(d *doctorDeps, intent *doctorAgentIntentReport) []doctorCheck {
 	ctx, err := d.detectRepoContext()
 	if err != nil {
 		return []doctorCheck{{
@@ -435,10 +435,10 @@ func doctorWayfinderChecks(d *doctorDeps, intent *doctorAgentIntentReport) []doc
 	}}
 	checks = append(checks, doctorTaskStorageWritableCheck(d))
 
-	if d.scanWayfinderMaps == nil {
+	if d.scanMaps == nil {
 		return checks
 	}
-	count, err := d.scanWayfinderMaps()
+	count, err := d.scanMaps()
 	if err != nil {
 		checks = append(checks, doctorCheck{
 			label:  "maps listed",

@@ -342,12 +342,14 @@ Status: active
 
 The `Status:` line (top of `map.md`, before headings) is `active` (default while
 wayfinding), `done` (way found — write at handoff), or `abandoned` (closed without
-reaching the destination). Charting writes `Status: active`. Open tickets are
-**not** listed in `map.md`; they are files under `issues/`, discovered by reading
-the directory.
+reaching the destination). Charting writes `Status: active` and ends with
+`pop map register <map-id>`, which validates the Map's `index.json` and makes it
+registered Work; it prints every problem it finds and is re-runnable until clean.
+Open tickets are **not** listed in `map.md`; they are files under `issues/`,
+discovered by reading the directory.
 
 Ticket files (`issues/NN-<slug>.md`) put metadata lines first (parsed by
-`pop wayfinder` and the Work dashboard):
+`pop map` and the Work dashboard):
 
 ```markdown
 Type: research|prototype|grilling|task

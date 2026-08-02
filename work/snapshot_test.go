@@ -844,6 +844,20 @@ func TestMapRowsMixedAndFiltered(t *testing.T) {
 func withWayfinderMaps(t *testing.T, d *Deps, storageDir string, files map[string]string) {
 	t.Helper()
 	fs := d.Tasks.FS.(*deps.MockFileSystem)
+	// A Map's archived bit is a work_containers row, so scanning Maps opens
+	// pop.db. Route the data dir into a temp location: the mock filesystem's fake
+	// home is not a real directory the store could be created under.
+	dataHome := t.TempDir()
+	origGetenv := fs.GetenvFunc
+	fs.GetenvFunc = func(key string) string {
+		if key == "XDG_DATA_HOME" {
+			return dataHome
+		}
+		if origGetenv != nil {
+			return origGetenv(key)
+		}
+		return ""
+	}
 	origReadFile := fs.ReadFileFunc
 	origReadDir := fs.ReadDirFunc
 	fs.ReadDirFunc = func(path string) ([]os.DirEntry, error) {

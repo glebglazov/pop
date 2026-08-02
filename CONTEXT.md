@@ -1259,12 +1259,16 @@ _Avoid_: virtual routine, .pop routine, project-local routine
 ### Wayfinder
 
 **Wayfinding**:
-The search phase of a large effort: resolving decision tickets one at a time until the way to a destination is clear. Produces decisions, not deliverables; implementation happens in Task sets a Map spawns. Driven by the wayfinder skill (forked from mattpocock/skills).
+The search phase of a large effort: resolving decision tickets one at a time until the way to a destination is clear. Produces decisions, not deliverables; implementation happens in Task sets a Map spawns. Driven by the wayfinder skill (forked from mattpocock/skills). pop owns the lifecycle — registration, the frontier, claiming, resolution, arrival — and the skills own only the HITL conversation; nothing is written into the repository under study for the whole life of a Map, so decisions reach it through **Mint** at handoff (ADR-0172).
 _Avoid_: exploration, discovery (code term), planning effort, effort (that is the task strength knob)
 
 **Map**:
-The canonical artifact of one Wayfinding effort: a folder holding `map.md` (destination, notes, decisions-so-far index, fog, out-of-scope) plus its Decision tickets. A first-class concept beside Task sets, not a Task set kind — it never registers, never drains, and its membership grows and shrinks as fog graduates. Stored per-repository in Task storage under a `maps/` sibling of `tasks/`; a Map exists because its folder exists.
+The canonical artifact of one Wayfinding effort: a folder holding `map.md` (destination, notes, decisions-so-far index, fog, out-of-scope) plus its Decision tickets. A first-class concept beside Task sets, not a Task set kind — it never drains, and its membership grows and shrinks as fog graduates. Stored per-repository in Task storage under a `maps/` sibling of `tasks/`; the folder is the Map's content, and **Map registration** is what makes it Work pop looks after.
 _Avoid_: wayfinder task set, plan, chart
+
+**Map verb family**:
+`pop map` — the one command family that reads and mutates Maps: `status`, `show`, `register`, `archive`, `unarchive`. Renamed from `pop wayfinder` as a hard cut with **no alias** (same discipline as the `pop queue` cut): kind nouns everywhere, and "wayfinder" survives only as the *skill's* name. Reads never create state; a Map's metadata is never hand-edited once the family owns it.
+_Avoid_: pop wayfinder, map commands
 
 **Decision ticket**:
 One unit of a Map: a question whose resolution is a decision, recorded as `issues/NN-<slug>.md` with `Type:` (research/prototype/grilling/task), `Status:`, and `Blocked by:` lines, its answer appended under `## Answer` on resolution. Distinct from a task: no acceptance criteria, no agent commit, and a claimed state exists (persisted in_progress stays malformed for tasks).
@@ -1275,8 +1279,20 @@ The `index.json` beside a Map's `map.md` — the machine-readable half of a Map,
 _Avoid_: ticket index, map index file, wayfinder manifest
 
 **Map status**:
-The `Status:` line in `map.md` — `active` (default), `done` (way found; skill writes it at handoff), or `abandoned` (closed without reaching the destination). Declared, not derived: fog is prose, so "way is clear" is a judgment the session records. Orthogonal to a pop-side reversible Archive flag (same shape as Task-set Archive) that hides old Maps from default views without deleting; deletion stays manual.
+The `Status:` line in `map.md` — `active` (default), `done` (way found; skill writes it at handoff), or `abandoned` (closed without reaching the destination). Declared, not derived: fog is prose, so "way is clear" is a judgment the session records. Orthogonal to **Map archive**, the reversible pop-side flag that hides old Maps from default views without deleting; deletion stays manual.
 _Avoid_: map state, derived map status
+
+**Work container registry**:
+The machine-global `work_containers` table keying every registered Work container by (kind, id) — the one place that answers "does pop look after this?" for any kind. It carries the registration time and the `archived` bit, and deliberately no status: status is derived from files on every read, so a cached copy here would be a second source of truth. Maps are the first kind to key into it; Task sets migrate onto it from **Task state** later.
+_Avoid_: work table, container index, map registry
+
+**Map registration**:
+`pop map register <map-id>` — the act that ends charting and makes a Map registered Work. It validates the **Map manifest** and, when clean, writes the Map's **Work container registry** row. A malformed Map is refused with *every* problem named at once and nothing written, so registration is a fix loop the session re-runs until it comes back clean; a second run on an already-registered Map is a no-op, never a reset. Explicit by design — no verb registers a Map as a side effect, because a lazy row-on-first-act would be a second, invisible registration path (the one exception is **Map archive**'s legacy fold, which is migrating a decision already made). Always **plain, never managed**: wayfinding writes nothing into the repository, so a Map has no checkout of its own, provisions no worktree, and `register` has no `--managed` flag.
+_Avoid_: chart complete, map create, lazy registration
+
+**Map archive**:
+`pop map archive` / `pop map unarchive` — the reversible act of hiding a Map from default views and restoring it, written as the `archived` bit on the Map's **Work container registry** row, so a Map is filed away through the same mechanism a Task set is. Archiving is idempotent; unarchiving a Map that is not archived is an error. Both refuse an unregistered Map and name **Map registration**, since the bit rides a registration. The retired `wayfinder-archive.json` side-file folds into this bit on an ordinary read and is then deleted — the fold registers the ids it archives, because the bit exists nowhere else.
+_Avoid_: hide map, delete map, archive file
 
 **Spawned set**:
 A Task set created from a Map's resolved decisions (via to-spec/to-tasks) once the way — or an early-splittable chunk — is clear. The forward link between the two concepts: the Map records the ids of sets it spawned; a spawned set's `spec.md` records its source Map. One Map may spawn many sets.

@@ -25,7 +25,7 @@ func readOnlyDoctorDeps(t *testing.T, fs *fakeFS, tmux, cfgOK, daemon bool) *doc
 	base := fakeDeps(installerHome, fs, nil)
 	integrate.GuardReadOnly(t, base)
 	return &doctorDeps{
-		integrate: base,
+		integrate:     base,
 		tmuxAvailable: func() bool { return tmux },
 		loadProjectConfig: func() (*config.Config, error) {
 			if cfgOK {
@@ -63,7 +63,7 @@ func readOnlyDoctorDeps(t *testing.T, fs *fakeFS, tmux, cfgOK, daemon bool) *doc
 		taskStorageWritable: func() (string, error) {
 			return "/data/pop/repos", nil
 		},
-		scanWayfinderMaps:   func() (int, error) { return 0, nil },
+		scanMaps:            func() (int, error) { return 0, nil },
 		legacyTaskSets:      func() ([]string, error) { return nil, nil },
 		orphanedTaskStorage: func() ([]tasks.OrphanedStorage, error) { return nil, nil },
 		legacyLayoutStorage: func() ([]string, error) { return nil, nil },
@@ -138,11 +138,11 @@ func taskCheck(t *testing.T, report *doctorReport, label string) doctorCheck {
 	return check
 }
 
-func wayfinderCheck(t *testing.T, report *doctorReport, label string) doctorCheck {
+func mapFamilyCheck(t *testing.T, report *doctorReport, label string) doctorCheck {
 	t.Helper()
-	family, ok := familyByCommand(report, "pop wayfinder")
+	family, ok := familyByCommand(report, "pop map")
 	if !ok {
-		t.Fatalf("missing pop wayfinder family")
+		t.Fatalf("missing pop map family")
 	}
 	check, ok := checkByLabel(family, label)
 	if !ok {
@@ -588,7 +588,7 @@ func TestDoctorHealthyCoreFamiliesRenderOK(t *testing.T) {
 		"OK        pop project    ready",
 		"OK        pop monitor    ready",
 		"OK        pop pane       ready",
-		"OK        pop wayfinder  ready",
+		"OK        pop map        ready",
 	} {
 		if !strings.Contains(s, line) {
 			t.Fatalf("output missing %q:\n%s", line, s)
@@ -752,29 +752,29 @@ func TestDoctorProjectAllConfiguredExpansionFailuresBlock(t *testing.T) {
 	}
 }
 
-func TestDoctorWayfinderReadinessOKWithZeroMaps(t *testing.T) {
+func TestDoctorMapReadinessOKWithZeroMaps(t *testing.T) {
 	t.Parallel()
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
-	d.scanWayfinderMaps = func() (int, error) { return 0, nil }
+	d.scanMaps = func() (int, error) { return 0, nil }
 
 	report, err := buildDoctorReport(d)
 	if err != nil {
 		t.Fatalf("buildDoctorReport: %v", err)
 	}
-	family, ok := familyByCommand(report, "pop wayfinder")
+	family, ok := familyByCommand(report, "pop map")
 	if !ok {
-		t.Fatalf("missing pop wayfinder family")
+		t.Fatalf("missing pop map family")
 	}
 	if family.status != doctorStatusOK {
-		t.Fatalf("wayfinder status = %s, want %s (%s)", family.status, doctorStatusOK, family.reason)
+		t.Fatalf("map family status = %s, want %s (%s)", family.status, doctorStatusOK, family.reason)
 	}
-	maps := wayfinderCheck(t, report, "maps listed")
+	maps := mapFamilyCheck(t, report, "maps listed")
 	if maps.status != doctorStatusOK || !strings.Contains(maps.detail, "0 map") {
 		t.Fatalf("maps check = %+v, want OK zero-map detail", maps)
 	}
 }
 
-func TestDoctorWayfinderReadinessOKWithMapsPresent(t *testing.T) {
+func TestDoctorMapReadinessOKWithMapsPresent(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
 	d := readOnlyDoctorDeps(t, fs, true, true, true)
@@ -782,48 +782,48 @@ func TestDoctorWayfinderReadinessOKWithMapsPresent(t *testing.T) {
 	if err := integrate.InstallFileComponent(fakeDeps(installerHome, fs, nil), installerHome, integrate.ComponentTaskSkills, "claude"); err != nil {
 		t.Fatalf("install task-skills: %v", err)
 	}
-	d.scanWayfinderMaps = func() (int, error) { return 2, nil }
+	d.scanMaps = func() (int, error) { return 2, nil }
 
 	report, err := buildDoctorReport(d)
 	if err != nil {
 		t.Fatalf("buildDoctorReport: %v", err)
 	}
-	family, ok := familyByCommand(report, "pop wayfinder")
+	family, ok := familyByCommand(report, "pop map")
 	if !ok {
-		t.Fatalf("missing pop wayfinder family")
+		t.Fatalf("missing pop map family")
 	}
 	if family.status != doctorStatusOK {
-		t.Fatalf("wayfinder status = %s, want %s (%s)", family.status, doctorStatusOK, family.reason)
+		t.Fatalf("map family status = %s, want %s (%s)", family.status, doctorStatusOK, family.reason)
 	}
-	maps := wayfinderCheck(t, report, "maps listed")
+	maps := mapFamilyCheck(t, report, "maps listed")
 	if maps.status != doctorStatusOK || !strings.Contains(maps.detail, "2 map") {
 		t.Fatalf("maps check = %+v, want OK two-map detail", maps)
 	}
-	skill := wayfinderCheck(t, report, "wayfinder planning skill installed")
+	skill := mapFamilyCheck(t, report, "wayfinder planning skill installed")
 	if skill.status != doctorStatusOK || !strings.Contains(skill.detail, "claude") {
 		t.Fatalf("skill check = %+v, want OK with claude installed", skill)
 	}
 }
 
-func TestDoctorWayfinderDegradedWhenMapsExistWithoutTaskSkills(t *testing.T) {
+func TestDoctorMapDegradedWhenMapsExistWithoutTaskSkills(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
 	d := readOnlyDoctorDeps(t, fs, true, true, true)
 	setDoctorIntent(d, "claude")
-	d.scanWayfinderMaps = func() (int, error) { return 1, nil }
+	d.scanMaps = func() (int, error) { return 1, nil }
 
 	report, err := buildDoctorReport(d)
 	if err != nil {
 		t.Fatalf("buildDoctorReport: %v", err)
 	}
-	family, ok := familyByCommand(report, "pop wayfinder")
+	family, ok := familyByCommand(report, "pop map")
 	if !ok {
-		t.Fatalf("missing pop wayfinder family")
+		t.Fatalf("missing pop map family")
 	}
 	if family.status != doctorStatusDegraded {
-		t.Fatalf("wayfinder status = %s, want %s (%s)", family.status, doctorStatusDegraded, family.reason)
+		t.Fatalf("map family status = %s, want %s (%s)", family.status, doctorStatusDegraded, family.reason)
 	}
-	skill := wayfinderCheck(t, report, "wayfinder planning skill installed")
+	skill := mapFamilyCheck(t, report, "wayfinder planning skill installed")
 	if skill.status != doctorStatusDegraded {
 		t.Fatalf("skill check status = %s, want %s", skill.status, doctorStatusDegraded)
 	}
@@ -835,29 +835,29 @@ func TestDoctorWayfinderDegradedWhenMapsExistWithoutTaskSkills(t *testing.T) {
 	}
 }
 
-func TestDoctorWayfinderZeroMapsSkipsTaskSkillsCheck(t *testing.T) {
+func TestDoctorMapZeroMapsSkipsTaskSkillsCheck(t *testing.T) {
 	t.Parallel()
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
 	setDoctorIntent(d, "claude")
-	d.scanWayfinderMaps = func() (int, error) { return 0, nil }
+	d.scanMaps = func() (int, error) { return 0, nil }
 
 	report, err := buildDoctorReport(d)
 	if err != nil {
 		t.Fatalf("buildDoctorReport: %v", err)
 	}
-	family, ok := familyByCommand(report, "pop wayfinder")
+	family, ok := familyByCommand(report, "pop map")
 	if !ok {
-		t.Fatalf("missing pop wayfinder family")
+		t.Fatalf("missing pop map family")
 	}
 	if family.status != doctorStatusOK {
-		t.Fatalf("wayfinder status = %s, want %s (%s)", family.status, doctorStatusOK, family.reason)
+		t.Fatalf("map family status = %s, want %s (%s)", family.status, doctorStatusOK, family.reason)
 	}
 	if _, ok := checkByLabel(family, "wayfinder planning skill installed"); ok {
 		t.Fatalf("zero maps should not add wayfinder planning skill check")
 	}
 }
 
-func TestDoctorWayfinderPathOnlyAgentDoesNotDegradeTaskSkills(t *testing.T) {
+func TestDoctorMapPathOnlyAgentDoesNotDegradeTaskSkills(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
 	detectDeps := fakeDeps(installerHome, fs, nil)
@@ -870,26 +870,26 @@ func TestDoctorWayfinderPathOnlyAgentDoesNotDegradeTaskSkills(t *testing.T) {
 
 	d := readOnlyDoctorDeps(t, fs, true, true, true)
 	d.agentIntent = func() (*doctorAgentIntentReport, error) { return intent, nil }
-	d.scanWayfinderMaps = func() (int, error) { return 1, nil }
+	d.scanMaps = func() (int, error) { return 1, nil }
 
 	report, err := buildDoctorReport(d)
 	if err != nil {
 		t.Fatalf("buildDoctorReport: %v", err)
 	}
-	family, ok := familyByCommand(report, "pop wayfinder")
+	family, ok := familyByCommand(report, "pop map")
 	if !ok {
-		t.Fatalf("missing pop wayfinder family")
+		t.Fatalf("missing pop map family")
 	}
 	if family.status != doctorStatusOK {
-		t.Fatalf("PATH-only codex should not degrade wayfinder: status = %s (%s)", family.status, family.reason)
+		t.Fatalf("PATH-only codex should not degrade the map family: status = %s (%s)", family.status, family.reason)
 	}
-	skill := wayfinderCheck(t, report, "wayfinder planning skill installed")
+	skill := mapFamilyCheck(t, report, "wayfinder planning skill installed")
 	if skill.status != doctorStatusOK || skill.detail != "no intended agents detected" {
 		t.Fatalf("skill check = %+v, want OK with no intended agents", skill)
 	}
 }
 
-func TestDoctorWayfinderReadinessBlocksOutsideGit(t *testing.T) {
+func TestDoctorMapReadinessBlocksOutsideGit(t *testing.T) {
 	t.Parallel()
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
 	d.detectRepoContext = func() (*project.RepoContext, error) { return nil, errors.New("not git") }
@@ -898,19 +898,19 @@ func TestDoctorWayfinderReadinessBlocksOutsideGit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildDoctorReport: %v", err)
 	}
-	family, ok := familyByCommand(report, "pop wayfinder")
+	family, ok := familyByCommand(report, "pop map")
 	if !ok {
-		t.Fatalf("missing pop wayfinder family")
+		t.Fatalf("missing pop map family")
 	}
 	if family.status != doctorStatusBlocked {
-		t.Fatalf("wayfinder status = %s, want %s", family.status, doctorStatusBlocked)
+		t.Fatalf("map family status = %s, want %s", family.status, doctorStatusBlocked)
 	}
 	if !strings.Contains(family.reason, "not in a git repository") {
 		t.Fatalf("blocked reason should explain outside-git context: %q", family.reason)
 	}
 }
 
-func TestDoctorWayfinderReadinessBlocksWhenStorageUnwritable(t *testing.T) {
+func TestDoctorMapReadinessBlocksWhenStorageUnwritable(t *testing.T) {
 	t.Parallel()
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
 	d.taskStorageWritable = func() (string, error) {
@@ -921,23 +921,23 @@ func TestDoctorWayfinderReadinessBlocksWhenStorageUnwritable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildDoctorReport: %v", err)
 	}
-	family, ok := familyByCommand(report, "pop wayfinder")
+	family, ok := familyByCommand(report, "pop map")
 	if !ok {
-		t.Fatalf("missing pop wayfinder family")
+		t.Fatalf("missing pop map family")
 	}
 	if family.status != doctorStatusBlocked {
-		t.Fatalf("wayfinder status = %s, want %s", family.status, doctorStatusBlocked)
+		t.Fatalf("map family status = %s, want %s", family.status, doctorStatusBlocked)
 	}
-	writable := wayfinderCheck(t, report, "task storage writable")
+	writable := mapFamilyCheck(t, report, "task storage writable")
 	if writable.status != doctorStatusBlocked {
 		t.Fatalf("writable status = %s, want %s", writable.status, doctorStatusBlocked)
 	}
 }
 
-func TestDoctorWayfinderMapListingFailureBlocks(t *testing.T) {
+func TestDoctorMapMapListingFailureBlocks(t *testing.T) {
 	t.Parallel()
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
-	d.scanWayfinderMaps = func() (int, error) {
+	d.scanMaps = func() (int, error) {
 		return 0, errors.New("read wayfinder dir: permission denied")
 	}
 
@@ -945,12 +945,12 @@ func TestDoctorWayfinderMapListingFailureBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildDoctorReport: %v", err)
 	}
-	family, ok := familyByCommand(report, "pop wayfinder")
+	family, ok := familyByCommand(report, "pop map")
 	if !ok {
-		t.Fatalf("missing pop wayfinder family")
+		t.Fatalf("missing pop map family")
 	}
 	if family.status != doctorStatusBlocked {
-		t.Fatalf("wayfinder status = %s, want %s (%s)", family.status, doctorStatusBlocked, family.reason)
+		t.Fatalf("map family status = %s, want %s (%s)", family.status, doctorStatusBlocked, family.reason)
 	}
 }
 

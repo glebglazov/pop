@@ -5,14 +5,19 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"time"
 
-	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/store"
+	"github.com/glebglazov/pop/work/ref"
 )
 
-const archiveStateFile = "wayfinder-archive.json"
+// legacyArchiveStateFile is the retired per-repository side-file that listed
+// archived map ids. Archival is now the Work registry's `archived` bit, so a Map
+// is hidden through the same mechanism a Task set is; the file folds into that
+// bit on the first read that finds it.
+const legacyArchiveStateFile = "wayfinder-archive.json"
 
-type archiveState struct {
+type legacyArchiveState struct {
 	Archived []string `json:"archived"`
 }
 
@@ -22,45 +27,81 @@ type ArchiveResult struct {
 	Archived bool
 }
 
-// LoadArchivedMapIDs reads archived map ids from pop-owned per-repository state.
-// A missing state file yields an empty set.
-func LoadArchivedMapIDs(d *Deps, storageDir string) (map[string]bool, error) {
-	path := filepath.Join(storageDir, archiveStateFile)
-	data, err := d.FS.ReadFile(path)
+// MapRef names one Map in the cross-kind Work registry, so a Map's registration
+// row is addressed the same way every other kind's is.
+func MapRef(mapID string) ref.WorkRef {
+	return ref.WorkRef{Kind: ref.KindMap, ContainerID: mapID}
+}
+
+// archivedMapIDs returns the ids of the Maps the human has filed away, read from
+// the Work registry once any legacy side-file has been folded into it. A machine
+// with no pop.db has archived nothing, so a missing store is an empty set rather
+// than an error — a pure read never materialises the database.
+func archivedMapIDs(d *Deps, storageDir string) (map[string]bool, error) {
+	if err := foldLegacyArchiveState(d, storageDir); err != nil {
+		return nil, err
+	}
+	out := map[string]bool{}
+	s, ok, err := d.taskDeps().Store(false)
+	if err != nil || !ok {
+		return out, err
+	}
+	rows, err := s.WorkContainersOfKind(ref.KindMap)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return map[string]bool{}, nil
-		}
 		return nil, err
 	}
-	var state archiveState
-	if err := json.Unmarshal(data, &state); err != nil {
-		return nil, err
-	}
-	out := make(map[string]bool, len(state.Archived))
-	for _, id := range state.Archived {
-		if id != "" {
-			out[id] = true
+	for _, row := range rows {
+		if row.Archived {
+			out[row.Ref.ContainerID] = true
 		}
 	}
 	return out, nil
 }
 
-// SaveArchivedMapIDs writes archived map ids to pop-owned per-repository state.
-func SaveArchivedMapIDs(d *Deps, storageDir string, archived map[string]bool) error {
-	ids := make([]string, 0, len(archived))
-	for id, on := range archived {
-		if on {
-			ids = append(ids, id)
-		}
-	}
-	sort.Strings(ids)
-	data, err := json.Marshal(archiveState{Archived: ids})
+// foldLegacyArchiveState moves the retired side-file's ids onto the registry's
+// archived bit and deletes the file. It registers what it archives: the bit only
+// exists on a registry row, and a Map filed away before Maps registered has none,
+// so folding without registering would silently restore it to the default views.
+// The file goes last, so an interrupted fold re-runs from a file that still names
+// every archived Map.
+func foldLegacyArchiveState(d *Deps, storageDir string) error {
+	path := filepath.Join(storageDir, legacyArchiveStateFile)
+	data, err := d.FS.ReadFile(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
 		return err
 	}
-	path := filepath.Join(storageDir, archiveStateFile)
-	return d.FS.WriteFile(path, data, 0o644)
+	var state legacyArchiveState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return fmt.Errorf("read %s: %w", legacyArchiveStateFile, err)
+	}
+	var s *store.Store
+	for _, id := range state.Archived {
+		if id == "" {
+			continue
+		}
+		if s == nil {
+			if s, err = openWorkRegistry(d); err != nil {
+				return err
+			}
+		}
+		if err := s.RegisterWorkContainer(MapRef(id), time.Now().UTC()); err != nil {
+			return err
+		}
+		if err := s.ArchiveWorkContainer(MapRef(id)); err != nil {
+			return err
+		}
+	}
+	return d.FS.RemoveAll(path)
+}
+
+// openWorkRegistry resolves the machine-global execution-state store for a write.
+// A Map's registration row and its archived bit live there beside a Task set's.
+func openWorkRegistry(d *Deps) (*store.Store, error) {
+	s, _, err := d.taskDeps().Store(true)
+	return s, err
 }
 
 // ArchiveMap marks one map as archived. The operation is idempotent.
@@ -78,27 +119,32 @@ func setMapArchived(d *Deps, cwd, mapID string, archived bool) (*ArchiveResult, 
 	if err != nil {
 		return nil, err
 	}
-	id, err := tasks.ResolveRepositoryIdentity(d.taskDeps(), cwd)
+	s, err := openWorkRegistry(d)
 	if err != nil {
 		return nil, err
 	}
-	state, err := LoadArchivedMapIDs(d, id.StorageDir)
+	row, registered, err := s.FindWorkContainer(MapRef(m.ID))
 	if err != nil {
 		return nil, err
 	}
-	already := state[m.ID]
+	// The archived bit rides a registration, so archival needs one. Creating it
+	// here would be exactly the hidden second registration path that RegisterMap
+	// exists to be the only alternative to.
+	if !registered {
+		return nil, fmt.Errorf("map %q is not registered; run `pop map register %s` first", m.ID, m.ID)
+	}
+	if row.Archived == archived {
+		if !archived {
+			return nil, fmt.Errorf("map %q is not archived", m.ID)
+		}
+		return &ArchiveResult{MapID: m.ID, Archived: true}, nil
+	}
 	if archived {
-		if already {
-			return &ArchiveResult{MapID: m.ID, Archived: true}, nil
-		}
-		state[m.ID] = true
+		err = s.ArchiveWorkContainer(MapRef(m.ID))
 	} else {
-		if !already {
-			return nil, fmt.Errorf("wayfinder map %q is not archived", m.ID)
-		}
-		delete(state, m.ID)
+		err = s.UnarchiveWorkContainer(MapRef(m.ID))
 	}
-	if err := SaveArchivedMapIDs(d, id.StorageDir, state); err != nil {
+	if err != nil {
 		return nil, err
 	}
 	return &ArchiveResult{MapID: m.ID, Archived: archived}, nil

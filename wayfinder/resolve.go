@@ -25,6 +25,26 @@ func FindMap(d *Deps, cwd, raw string) (Map, error) {
 	return Map{}, fmt.Errorf("unknown wayfinder map %q; valid: %s", resolved, mapIDList(maps))
 }
 
+// CompletionMapIDs lists map identifiers for shell completion, sorted. archivedOnly
+// selects the set `unarchive` offers — the one verb whose whole purpose is an
+// archived Map, which every other surface hides. A scan error yields no candidates
+// rather than an error: completion stays silent where a verb would complain.
+func CompletionMapIDs(d *Deps, cwd string, archivedOnly bool) []string {
+	maps, err := ScanMaps(d, cwd)
+	if err != nil {
+		return nil
+	}
+	var ids []string
+	for _, m := range maps {
+		if m.Archived != archivedOnly {
+			continue
+		}
+		ids = append(ids, m.ID)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
 func resolveMapTarget(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

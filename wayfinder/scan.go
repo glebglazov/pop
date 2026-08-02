@@ -28,7 +28,7 @@ func ScanMaps(d *Deps, cwd string) ([]Map, error) {
 // identity from cwd. It is the bulk seam the Work dashboard uses when walking
 // every registered repository's Task storage. A missing maps directory yields an
 // empty slice, never an error; a store still carrying the pre-rename wayfinder/
-// directory is folded here.
+// directory, or the retired archive side-file, is folded here.
 func ScanMapsInStorage(d *Deps, storageDir string) ([]Map, error) {
 	root, err := mapsDir(d, storageDir)
 	if err != nil {
@@ -42,7 +42,7 @@ func ScanMapsInStorage(d *Deps, storageDir string) ([]Map, error) {
 		return nil, err
 	}
 
-	archived, err := LoadArchivedMapIDs(d, storageDir)
+	archived, err := archivedMapIDs(d, storageDir)
 	if err != nil {
 		return nil, err
 	}

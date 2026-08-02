@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/tasks"
 )
 
 // foldFixture lays down a pre-manifest store on disk — maps under the retired
@@ -25,7 +25,12 @@ func foldFixture(t *testing.T, files map[string]string) (*Deps, string) {
 			t.Fatalf("write %s: %v", rel, err)
 		}
 	}
-	return &Deps{FS: deps.NewRealFileSystem()}, storageDir
+	// A scan reads the archived bit out of the Work registry, so even a fold
+	// fixture needs the store pointed somewhere disposable.
+	fs := realFSWithDataHome(filepath.Join(storageDir, "xdg"))
+	td := &tasks.Deps{FS: fs}
+	t.Cleanup(func() { _ = td.CloseStore() })
+	return &Deps{FS: fs, Tasks: td}, storageDir
 }
 
 func readFoldedManifest(t *testing.T, mapDir string) map[string]json.RawMessage {
