@@ -13,7 +13,7 @@ the pinned ref above. Pop inlines rather than delegating to Matt's skills, per
 ADR-0009 (skills are embedded in the binary and ship to machines without them
 installed). Pop-authored frontmatter is kept (name `wayfinder`, pop description,
 `disable-model-invocation`: wayfinding is a manual-only session the user opens
-with `/pop-wayfinder`, never something the model starts on its own). Pop's
+with `/wayfinder`, never something the model starts on its own). Pop's
 Work-store seam and its irreducible invocation deltas live below the marker
 (ADR-0136, ADR-0169). Upstream already routes the map, its tickets, blocking,
 claiming, resolution, and the frontier through the tracker doc's "Wayfinding
@@ -190,6 +190,6 @@ the tracker-doc seam, so the resolved doc has no place to carry them.)*
   run pop's `grill-with-docs` instead. The `research` subagents fired in step 5
   write their findings into the ticket's `## Answer` (per the doc's research
   override), **not** onto a throwaway `research/<name>` branch.
-- **Invocation form.** `/pop-wayfinder` charts a new map from a bare loose idea
+- **Invocation form.** `/wayfinder` charts a new map from a bare loose idea
   (no map id), and works an existing one as `work <map-id> [<ticket-id>]` — the
   ticket id optional, defaulting to the first frontier ticket.

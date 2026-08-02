@@ -184,6 +184,34 @@ func TestRenderNonFileComponent(t *testing.T) {
 	}
 }
 
+// TestRenderWayfinderInvocationFollowsPrefix pins that the wayfinder skill body
+// names its own slash invocation through the resolved skills_prefix. A hardcoded
+// `/pop-wayfinder` in the source would hand a bare-prefix user a command that
+// does not exist on their machine.
+func TestRenderWayfinderInvocationFollowsPrefix(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		prefix string
+		want   string
+	}{
+		{prefix: "pop-", want: "`/pop-wayfinder`"},
+		{prefix: "", want: "`/wayfinder`"},
+	} {
+		tree, err := renderComponent(ComponentTaskSkills, "claude", tc.prefix)
+		if err != nil {
+			t.Fatalf("renderComponent(prefix=%q): %v", tc.prefix, err)
+		}
+		body := string(tree[tc.prefix+"wayfinder/SKILL.md"])
+		if body == "" {
+			t.Fatalf("prefix=%q: no wayfinder SKILL.md in %v", tc.prefix, keysOf(tree))
+		}
+		if !strings.Contains(body, "- **Invocation form.** "+tc.want) {
+			t.Fatalf("prefix=%q: invocation form does not name %s", tc.prefix, tc.want)
+		}
+	}
+}
+
 func keysOf(m map[string][]byte) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
