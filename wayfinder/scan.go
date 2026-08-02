@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
 	"github.com/glebglazov/pop/tasks"
 )
@@ -14,9 +13,9 @@ const mapFileName = "map.md"
 const issuesDirName = "issues"
 
 // ScanMaps lists maps non-recursively under the current repository's
-// <task-storage-root>/wayfinder/*/. A missing wayfinder directory yields an
-// empty slice, never an error. Unparseable map folders are returned as
-// malformed rows rather than failing the scan.
+// <task-storage-root>/maps/*/. A missing maps directory yields an empty slice,
+// never an error. Unparseable map folders are returned as malformed rows rather
+// than failing the scan.
 func ScanMaps(d *Deps, cwd string) ([]Map, error) {
 	id, err := tasks.ResolveRepositoryIdentity(d.taskDeps(), cwd)
 	if err != nil {
@@ -25,12 +24,16 @@ func ScanMaps(d *Deps, cwd string) ([]Map, error) {
 	return ScanMapsInStorage(d, id.StorageDir)
 }
 
-// ScanMapsInStorage lists maps under <storageDir>/wayfinder/*/ without resolving
-// git identity from cwd. It is the bulk seam the Work dashboard uses when walking
-// every registered repository's Task storage. A missing wayfinder directory
-// yields an empty slice, never an error.
+// ScanMapsInStorage lists maps under <storageDir>/maps/*/ without resolving git
+// identity from cwd. It is the bulk seam the Work dashboard uses when walking
+// every registered repository's Task storage. A missing maps directory yields an
+// empty slice, never an error; a store still carrying the pre-rename wayfinder/
+// directory is folded here.
 func ScanMapsInStorage(d *Deps, storageDir string) ([]Map, error) {
-	root := filepath.Join(storageDir, "wayfinder")
+	root, err := mapsDir(d, storageDir)
+	if err != nil {
+		return nil, err
+	}
 	entries, err := d.FS.ReadDir(root)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -94,9 +97,9 @@ func loadMap(d *Deps, id, dir string) (Map, error) {
 	}, nil
 }
 
-// loadMapTickets prefers the manifest and falls back to the ticket markdown
-// headers only for Maps that have not been folded yet — index.json is the single
-// source of a ticket's status, type and blocking wherever it exists.
+// loadMapTickets prefers the manifest and folds a Map that has none — index.json
+// is the single source of a ticket's status, type and blocking wherever it exists,
+// and the fold is what makes it exist for Maps charted before the manifest.
 func loadMapTickets(d *Deps, dir string) ([]Ticket, error) {
 	manifest, err := LoadMapManifest(d, dir)
 	if err == nil {
@@ -108,47 +111,15 @@ func loadMapTickets(d *Deps, dir string) ([]Ticket, error) {
 	if !os.IsNotExist(err) {
 		return nil, err
 	}
-
-	tickets, ticketErrs := loadTickets(d, filepath.Join(dir, issuesDirName))
-	if len(ticketErrs) > 0 {
-		return nil, fmt.Errorf("%s", strings.Join(ticketErrs, "; "))
-	}
-	return tickets, nil
+	return foldMapManifest(d, dir)
 }
 
-func loadTickets(d *Deps, issuesDir string) ([]Ticket, []string) {
-	entries, err := d.FS.ReadDir(issuesDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, []string{fmt.Sprintf("list issues: %v", err)}
-	}
-
-	var tickets []Ticket
-	var errs []string
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
-			continue
-		}
-		path := filepath.Join(issuesDir, entry.Name())
-		data, err := d.FS.ReadFile(path)
-		if err != nil {
-			errs = append(errs, fmt.Sprintf("%s: %v", entry.Name(), err))
-			continue
-		}
-		ticket, err := ParseTicketMarkdown(entry.Name(), string(data))
-		if err != nil {
-			errs = append(errs, fmt.Sprintf("%s: %v", entry.Name(), err))
-			continue
-		}
-		tickets = append(tickets, ticket)
-	}
+// sortTickets orders tickets by number, falling back to id for the numberless.
+func sortTickets(tickets []Ticket) {
 	sort.Slice(tickets, func(i, j int) bool {
 		if tickets[i].Number != tickets[j].Number {
 			return tickets[i].Number < tickets[j].Number
 		}
 		return tickets[i].ID < tickets[j].ID
 	})
-	return tickets, errs
 }

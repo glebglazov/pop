@@ -167,7 +167,7 @@ local-markdown tracker. Resolve the issue-tracker doc two-layer instead:
    configured — there is no further fallback.
 
 Resolve this repository's Task-storage root once per session with
-`pop work show-path`; the doc lays maps out under a `wayfinder/` sibling of that
+`pop work show-path`; the doc lays maps out under a `maps/` sibling of that
 root's `tasks/`.
 
 Everywhere the verbatim region above defers to "the tracker doc's 'Wayfinding

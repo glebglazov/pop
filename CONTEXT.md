@@ -1263,7 +1263,7 @@ The search phase of a large effort: resolving decision tickets one at a time unt
 _Avoid_: exploration, discovery (code term), planning effort, effort (that is the task strength knob)
 
 **Map**:
-The canonical artifact of one Wayfinding effort: a folder holding `map.md` (destination, notes, decisions-so-far index, fog, out-of-scope) plus its Decision tickets. A first-class concept beside Task sets, not a Task set kind — it never registers, never drains, and its membership grows and shrinks as fog graduates. Stored per-repository in Task storage under a `wayfinder/` sibling of `tasks/`; a Map exists because its folder exists.
+The canonical artifact of one Wayfinding effort: a folder holding `map.md` (destination, notes, decisions-so-far index, fog, out-of-scope) plus its Decision tickets. A first-class concept beside Task sets, not a Task set kind — it never registers, never drains, and its membership grows and shrinks as fog graduates. Stored per-repository in Task storage under a `maps/` sibling of `tasks/`; a Map exists because its folder exists.
 _Avoid_: wayfinder task set, plan, chart
 
 **Decision ticket**:

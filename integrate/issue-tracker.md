@@ -294,10 +294,10 @@ no registration step.
 
 ### Storage layout
 
-Maps live under a `wayfinder/` sibling of `tasks/`:
+Maps live under a `maps/` sibling of `tasks/`:
 
 ```
-$(pop work show-path)/wayfinder/<YYYY-MM-DD-slug>/
+$(pop work show-path)/maps/<YYYY-MM-DD-slug>/
 ├── map.md
 └── issues/
     ├── 01-<slug>.md

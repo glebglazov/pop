@@ -29,7 +29,7 @@ func TestArchiveMapPersistsAndIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mapDir := filepath.Join(id.StorageDir, "wayfinder", "demo-map")
+	mapDir := filepath.Join(id.StorageDir, "maps", "demo-map")
 	mapPath := filepath.Join(mapDir, "map.md")
 	original := "Status: active\n\n## Destination\nShip it\n\n## Decisions so far\n- one decision"
 	files := map[string]string{
@@ -98,7 +98,7 @@ func TestUnarchiveUnknownAndNotArchivedErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mapDir := filepath.Join(id.StorageDir, "wayfinder", "demo-map")
+	mapDir := filepath.Join(id.StorageDir, "maps", "demo-map")
 	files := map[string]string{
 		filepath.Join(mapDir, "map.md"): "## Destination\nShip it",
 	}

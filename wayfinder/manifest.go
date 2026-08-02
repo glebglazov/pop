@@ -264,12 +264,7 @@ func (m *MapManifest) ToTickets() []Ticket {
 	for _, entry := range m.Tickets {
 		tickets = append(tickets, entry.ToTicket())
 	}
-	sort.Slice(tickets, func(i, j int) bool {
-		if tickets[i].Number != tickets[j].Number {
-			return tickets[i].Number < tickets[j].Number
-		}
-		return tickets[i].ID < tickets[j].ID
-	})
+	sortTickets(tickets)
 	return tickets
 }
 

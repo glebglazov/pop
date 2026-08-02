@@ -120,7 +120,7 @@ doc's "Publishing a spec" section owns the reverse direction: the `Source map:`
 line and the `## Spawned sets` back-link.)*
 
 When the breakdown source is a Map (the user names a map id, or the session is
-handing off from wayfinder), read `$(pop work show-path)/wayfinder/<map-id>/map.md`
+handing off from wayfinder), read `$(pop work show-path)/maps/<map-id>/map.md`
 and each **resolved** ticket under `issues/` — at minimum every ticket linked
 from **Decisions so far**, plus any other resolved tickets whose `## Answer`
 should inform the spec. Synthesize from the map's Destination, **Decisions so

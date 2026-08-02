@@ -36,7 +36,7 @@ func TestWayfinderShowRendersMap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mapDir := filepath.Join(id.StorageDir, "wayfinder", "demo")
+	mapDir := filepath.Join(id.StorageDir, "maps", "demo")
 	files := map[string]string{
 		filepath.Join(mapDir, "map.md"):                 "Status: active\n\n## Destination\nShip it\n\n## Decisions so far\n- one decision",
 		filepath.Join(mapDir, "issues", "01-first.md"):  "Type: research\nStatus: resolved\n",
@@ -66,7 +66,7 @@ func TestWayfinderArchiveRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mapDir := filepath.Join(id.StorageDir, "wayfinder", "demo")
+	mapDir := filepath.Join(id.StorageDir, "maps", "demo")
 	mapPath := filepath.Join(mapDir, "map.md")
 	original := "## Destination\nShip it"
 	files := map[string]string{mapPath: original}

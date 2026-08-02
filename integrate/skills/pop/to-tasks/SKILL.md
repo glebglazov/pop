@@ -214,7 +214,7 @@ doc's publish sections — it is an input mode of `to-tasks`, not a publish
 mechanic.)*
 
 When invoked directly on a Map (the user names a map id, with no co-located
-`spec.md` yet), read `$(pop work show-path)/wayfinder/<map-id>/map.md` and each
+`spec.md` yet), read `$(pop work show-path)/maps/<map-id>/map.md` and each
 **resolved** ticket under `issues/` — at minimum every ticket linked from
 **Decisions so far**, plus any other resolved tickets whose `## Answer` should
 inform the breakdown. After writing the set, append `<task-set-name>` under the

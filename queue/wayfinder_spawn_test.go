@@ -17,13 +17,13 @@ import (
 func wayfinderSpawnFixture(t *testing.T) (*Deps, *config.Config, DashboardRow, *tmuxtest.Fake, string) {
 	t.Helper()
 	storageDir := filepath.Join(t.TempDir(), "repos", "repo-wayfinder-spawn")
-	activeMap := filepath.Join(storageDir, "wayfinder", "2026-07-01-active")
+	activeMap := filepath.Join(storageDir, "maps", "2026-07-01-active")
 	files := map[string]string{
 		filepath.Join(storageDir, "repo.json"):               `{"common_dir":"/repo/.git"}`,
 		filepath.Join(activeMap, "map.md"):                 "Status: active\n\n## Destination\nShip it\n",
 		filepath.Join(activeMap, "issues/01-frontier.md"):  "Type: research\nStatus: open\n\n## Question\nA\n",
 		filepath.Join(activeMap, "issues/02-blocked.md"):   "Type: research\nStatus: open\nBlocked by: 01\n\n## Question\nB\n",
-		filepath.Join(activeMap, "issues/03-claimed.md"):   "Type: grilling\nStatus: claimed\n\n## Question\nC\n",
+		filepath.Join(activeMap, "issues/03-answered.md"):  "Type: grilling\nStatus: resolved\n\n## Question\nC\n",
 	}
 	d := dashboardTestDeps(t, nil, nil)
 	withWayfinderMaps(t, d, storageDir, files)
@@ -105,9 +105,9 @@ func TestLaunchWayfinderSessionTargetsExplicitTicket(t *testing.T) {
 	d, cfg, row, f, storageDir := wayfinderSpawnFixture(t)
 	files := map[string]string{
 		filepath.Join(storageDir, "repo.json"):               `{"common_dir":"/repo/.git"}`,
-		filepath.Join(storageDir, "wayfinder", "2026-07-01-active", "map.md"): "Status: active\n\n## Destination\nShip it\n",
-		filepath.Join(storageDir, "wayfinder", "2026-07-01-active", "issues/01-frontier.md"): "Type: research\nStatus: resolved\n\n## Question\nA\n",
-		filepath.Join(storageDir, "wayfinder", "2026-07-01-active", "issues/02-blocked.md"):  "Type: research\nStatus: open\n\n## Question\nB\n",
+		filepath.Join(storageDir, "maps", "2026-07-01-active", "map.md"): "Status: active\n\n## Destination\nShip it\n",
+		filepath.Join(storageDir, "maps", "2026-07-01-active", "issues/01-frontier.md"): "Type: research\nStatus: resolved\n\n## Question\nA\n",
+		filepath.Join(storageDir, "maps", "2026-07-01-active", "issues/02-blocked.md"):  "Type: research\nStatus: open\n\n## Question\nB\n",
 	}
 	withWayfinderMaps(t, d, storageDir, files)
 	result, err := LaunchWayfinderSession(d, cfg, row, "02")
@@ -159,7 +159,7 @@ func TestLaunchWayfinderSessionCreatesDetachedSession(t *testing.T) {
 func TestLaunchWayfinderSessionEmptyFrontier(t *testing.T) {
 	d, cfg, row, f, storageDir := wayfinderSpawnFixture(t)
 	files := map[string]string{
-		filepath.Join(storageDir, "wayfinder", "2026-07-01-active", "issues/01-frontier.md"): "Type: research\nStatus: open\nBlocked by: 99\n\n## Question\nA\n",
+		filepath.Join(storageDir, "maps", "2026-07-01-active", "issues/01-frontier.md"): "Type: research\nStatus: open\nBlocked by: 99\n\n## Question\nA\n",
 	}
 	withWayfinderMaps(t, d, storageDir, files)
 	_, err := LaunchWayfinderSession(d, cfg, row, "")
@@ -229,8 +229,8 @@ func TestDashboardMapRowISpawnsFocusesAndQuits(t *testing.T) {
 func TestDashboardMapRowIEmptyFrontierMessage(t *testing.T) {
 	d, cfg, row, _, storageDir := wayfinderSpawnFixture(t)
 	files := map[string]string{
-		filepath.Join(storageDir, "wayfinder", "2026-07-01-active", "issues/01-frontier.md"): "Type: research\nStatus: claimed\n\n## Question\nA\n",
-		filepath.Join(storageDir, "wayfinder", "2026-07-01-active", "issues/02-blocked.md"):  "Type: research\nStatus: open\nBlocked by: 01\n\n## Question\nB\n",
+		filepath.Join(storageDir, "maps", "2026-07-01-active", "issues/01-frontier.md"): "Type: research\nStatus: resolved\n\n## Question\nA\n",
+		filepath.Join(storageDir, "maps", "2026-07-01-active", "issues/02-blocked.md"):  "Type: research\nStatus: resolved\n\n## Question\nB\n",
 	}
 	withWayfinderMaps(t, d, storageDir, files)
 	row.MapFrontier = 0

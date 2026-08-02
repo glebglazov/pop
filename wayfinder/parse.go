@@ -96,36 +96,104 @@ func ParseTicketMarkdown(filename, content string) (Ticket, error) {
 		ticket.Slug = strings.TrimSuffix(base[dash+1:], ".md")
 	}
 
-	for _, line := range strings.Split(content, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		if m := typeLinePattern.FindStringSubmatch(trimmed); m != nil {
-			parsed, err := parseTicketType(strings.TrimSpace(m[1]))
+	_, headers := ticketHeaderLines(content)
+	for _, h := range headers {
+		switch h.kind {
+		case headerType:
+			parsed, err := parseTicketType(h.value)
 			if err != nil {
 				return Ticket{}, err
 			}
 			ticket.Type = parsed
-			continue
-		}
-		if m := statusLinePattern.FindStringSubmatch(trimmed); m != nil {
-			parsed, err := parseTicketStatus(strings.TrimSpace(m[1]))
+		case headerStatus:
+			parsed, err := parseTicketStatus(h.value)
 			if err != nil {
 				return Ticket{}, err
 			}
 			ticket.Status = parsed
-			continue
-		}
-		if m := blockedByPattern.FindStringSubmatch(trimmed); m != nil {
-			ticket.BlockedBy = parseBlockedBy(m[1])
-			continue
-		}
-		if !strings.Contains(trimmed, ":") {
-			break
+		case headerBlockedBy:
+			ticket.BlockedBy = parseBlockedBy(h.value)
 		}
 	}
 	return ticket, nil
+}
+
+// The three metadata facts a pre-manifest ticket markdown carried in its header.
+const (
+	headerType      = "type"
+	headerStatus    = "status"
+	headerBlockedBy = "blocked-by"
+)
+
+// ticketHeaderLine is one matched metadata line, keyed by which fact it carries
+// and pinned to the line it occupied.
+type ticketHeaderLine struct {
+	index int
+	kind  string
+	value string
+}
+
+// ticketHeaderLines splits a ticket markdown and walks its metadata region: from
+// the top, past blanks and headings, to the first line that is not `key: value`.
+// One walk feeds both readers — the parser that interprets the facts and the fold
+// that deletes the lines — so stripping can never remove a line the parser did
+// not read, nor leave one it did.
+func ticketHeaderLines(content string) ([]string, []ticketHeaderLine) {
+	lines := strings.Split(content, "\n")
+	var headers []ticketHeaderLine
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		switch {
+		case typeLinePattern.MatchString(trimmed):
+			m := typeLinePattern.FindStringSubmatch(trimmed)
+			headers = append(headers, ticketHeaderLine{index: i, kind: headerType, value: strings.TrimSpace(m[1])})
+		case statusLinePattern.MatchString(trimmed):
+			m := statusLinePattern.FindStringSubmatch(trimmed)
+			headers = append(headers, ticketHeaderLine{index: i, kind: headerStatus, value: strings.TrimSpace(m[1])})
+		case blockedByPattern.MatchString(trimmed):
+			m := blockedByPattern.FindStringSubmatch(trimmed)
+			headers = append(headers, ticketHeaderLine{index: i, kind: headerBlockedBy, value: m[1]})
+		case !strings.Contains(trimmed, ":"):
+			return lines, headers
+		}
+	}
+	return lines, headers
+}
+
+// StripTicketHeaders removes the Status: / Type: / Blocked by: lines a ticket
+// markdown carried before Maps had a manifest, leaving the body untouched. The
+// blank lines the removal orphans in the metadata region are collapsed; blanks in
+// the body are load-bearing and left alone.
+func StripTicketHeaders(content string) string {
+	lines, headers := ticketHeaderLines(content)
+	if len(headers) == 0 {
+		return content
+	}
+	drop := make(map[int]bool, len(headers))
+	last := 0
+	for _, h := range headers {
+		drop[h.index] = true
+		if h.index > last {
+			last = h.index
+		}
+	}
+
+	out := make([]string, 0, len(lines))
+	for i, line := range lines {
+		if drop[i] {
+			continue
+		}
+		if i <= last+1 && strings.TrimSpace(line) == "" {
+			if len(out) == 0 || strings.TrimSpace(out[len(out)-1]) == "" {
+				continue
+			}
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
 }
 
 func filepathBase(path string) string {

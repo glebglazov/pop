@@ -58,7 +58,7 @@ func TestShowMapUnknownID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mapDir := filepath.Join(id.StorageDir, "wayfinder", "known-map")
+	mapDir := filepath.Join(id.StorageDir, "maps", "known-map")
 	files := map[string]string{
 		filepath.Join(mapDir, "map.md"): "## Destination\nknown",
 	}

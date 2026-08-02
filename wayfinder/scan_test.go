@@ -99,7 +99,7 @@ func TestScanMapsParsesMapAndTickets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mapDir := filepath.Join(id.StorageDir, "wayfinder", "2026-07-19-demo")
+	mapDir := filepath.Join(id.StorageDir, "maps", "2026-07-19-demo")
 	files := map[string]string{
 		filepath.Join(mapDir, "map.md"): "Status: active\n\n## Destination\nShip it",
 		filepath.Join(mapDir, "issues", "01-first.md"):  "Type: research\nStatus: resolved\n",
@@ -134,7 +134,7 @@ func TestScanMapsMalformedFolder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mapDir := filepath.Join(id.StorageDir, "wayfinder", "broken-map")
+	mapDir := filepath.Join(id.StorageDir, "maps", "broken-map")
 	files := map[string]string{
 		filepath.Join(mapDir, "map.md"): "Status: wandering\n",
 	}
@@ -158,11 +158,11 @@ func TestBuildStatusHidesDoneAndAbandonedByDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	files := map[string]string{
-		filepath.Join(id.StorageDir, "wayfinder", "active", "map.md"):     "## Destination\nactive",
-		filepath.Join(id.StorageDir, "wayfinder", "done-map", "map.md"):   "Status: done\n\n## Destination\ndone",
-		filepath.Join(id.StorageDir, "wayfinder", "quit-map", "map.md"):   "Status: abandoned\n\n## Destination\nquit",
+		filepath.Join(id.StorageDir, "maps", "active", "map.md"):     "## Destination\nactive",
+		filepath.Join(id.StorageDir, "maps", "done-map", "map.md"):   "Status: done\n\n## Destination\ndone",
+		filepath.Join(id.StorageDir, "maps", "quit-map", "map.md"):   "Status: abandoned\n\n## Destination\nquit",
 		filepath.Join(id.StorageDir, "wayfinder-archive.json"):            `{"archived":["archived-map"]}`,
-		filepath.Join(id.StorageDir, "wayfinder", "archived-map", "map.md"): "## Destination\narchived",
+		filepath.Join(id.StorageDir, "maps", "archived-map", "map.md"): "## Destination\narchived",
 	}
 	d := wayfinderTestDeps(t, dataHome, commonDir, files)
 

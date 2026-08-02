@@ -179,7 +179,7 @@ func TestScanMapsPrefersManifestOverHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mapDir := filepath.Join(id.StorageDir, "wayfinder", "2026-07-19-demo")
+	mapDir := filepath.Join(id.StorageDir, "maps", "2026-07-19-demo")
 	files := map[string]string{
 		filepath.Join(mapDir, "map.md"): "Status: active\n\n## Destination\nShip it",
 		// Stale headers left behind by a pre-manifest Map: the manifest wins.
@@ -224,7 +224,7 @@ func TestScanMapsManifestBlockedTicketIsOffTheFrontier(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mapDir := filepath.Join(id.StorageDir, "wayfinder", "blocked-map")
+	mapDir := filepath.Join(id.StorageDir, "maps", "blocked-map")
 	files := map[string]string{
 		filepath.Join(mapDir, "map.md"):                 "## Destination\nShip it",
 		filepath.Join(mapDir, "issues", "01-first.md"):  "## Question\nwhy?\n",
@@ -260,7 +260,7 @@ func TestScanMapsMalformedManifestRendersMapMalformed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mapDir := filepath.Join(id.StorageDir, "wayfinder", "bad-manifest")
+	mapDir := filepath.Join(id.StorageDir, "maps", "bad-manifest")
 	files := map[string]string{
 		filepath.Join(mapDir, "map.md"):                "## Destination\nShip it",
 		filepath.Join(mapDir, "issues", "01-first.md"): "## Question\nwhy?\n",

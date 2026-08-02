@@ -161,13 +161,17 @@ func storageHasDashboardWork(d *Deps, storageDir string, includeWayfinderOnly bo
 	if !includeWayfinderOnly {
 		return false
 	}
-	maps, err := d.FS.ReadDir(filepath.Join(storageDir, "wayfinder"))
-	if err != nil || len(maps) == 0 {
-		return false
-	}
-	for _, e := range maps {
-		if e.IsDir() {
-			return true
+	// Both names are probed: discovery must reach a store that still carries the
+	// pre-rename directory, since the scan it leads to is what folds the name.
+	for _, name := range []string{"maps", "wayfinder"} {
+		maps, err := d.FS.ReadDir(filepath.Join(storageDir, name))
+		if err != nil {
+			continue
+		}
+		for _, e := range maps {
+			if e.IsDir() {
+				return true
+			}
 		}
 	}
 	return false

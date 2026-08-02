@@ -769,10 +769,10 @@ func TestHeadBranchFromCheckout(t *testing.T) {
 func TestMapRowsMixedAndFiltered(t *testing.T) {
 	storageDir := "/data/repos/repo-aaaa"
 	tasksDir := filepath.Join(storageDir, "tasks")
-	activeMap := filepath.Join(storageDir, "wayfinder", "2026-07-01-active")
-	doneMap := filepath.Join(storageDir, "wayfinder", "2026-07-02-done")
-	abandonedMap := filepath.Join(storageDir, "wayfinder", "2026-07-03-abandoned")
-	archivedMap := filepath.Join(storageDir, "wayfinder", "2026-07-04-archived")
+	activeMap := filepath.Join(storageDir, "maps", "2026-07-01-active")
+	doneMap := filepath.Join(storageDir, "maps", "2026-07-02-done")
+	abandonedMap := filepath.Join(storageDir, "maps", "2026-07-03-abandoned")
+	archivedMap := filepath.Join(storageDir, "maps", "2026-07-04-archived")
 	files := map[string]string{
 		filepath.Join(activeMap, "map.md"): "Status: active\n\n## Destination\nShip it\n",
 		filepath.Join(activeMap, "issues", "01-research.md"): "" +

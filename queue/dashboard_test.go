@@ -4603,15 +4603,15 @@ func TestDashboardMapRowTwoLineRender(t *testing.T) {
 
 func mapDetailTestFiles() (storageDir string, files map[string]string) {
 	storageDir = "/data/repos/repo-map-detail"
-	activeMap := filepath.Join(storageDir, "wayfinder", "2026-07-01-active")
+	activeMap := filepath.Join(storageDir, "maps", "2026-07-01-active")
 	files = map[string]string{
 		filepath.Join(activeMap, "map.md"): "Status: active\n\n## Destination\nShip it\n",
 		filepath.Join(activeMap, "issues", "01-frontier.md"): "" +
 			"Type: research\nStatus: open\n\n# Frontier question\n",
 		filepath.Join(activeMap, "issues", "02-blocked.md"): "" +
 			"Type: prototype\nStatus: open\nBlocked by: 01\n\n# Blocked question\n",
-		filepath.Join(activeMap, "issues", "03-claimed.md"): "" +
-			"Type: grilling\nStatus: claimed\n\n# Claimed question\n",
+		filepath.Join(activeMap, "issues", "03-grilling.md"): "" +
+			"Type: grilling\nStatus: open\n\n# Grilling question\n",
 		filepath.Join(activeMap, "issues", "04-resolved.md"): "" +
 			"Type: task\nStatus: resolved\n\n# Resolved question\n",
 	}
@@ -4727,7 +4727,7 @@ func TestDashboardMapDetailViewRendersTicketsAndFrontier(t *testing.T) {
 	for _, want := range []string{
 		"01-frontier", "research", "open",
 		"02-blocked", "prototype", "open (blocked)",
-		"03-claimed", "claimed",
+		"03-grilling", "grilling",
 		"04-resolved", "resolved",
 	} {
 		if !strings.Contains(view, want) {
@@ -4735,7 +4735,7 @@ func TestDashboardMapDetailViewRendersTicketsAndFrontier(t *testing.T) {
 		}
 	}
 
-	// Frontier row is highlighted (cyan); blocked/claimed/resolved are dim.
+	// Frontier row is highlighted (cyan); blocked and resolved are dim.
 	frontierLine := ""
 	blockedLine := ""
 	for _, line := range strings.Split(view, "\n") {
@@ -4805,7 +4805,7 @@ func TestDashboardMapDetailViewPeekTicketText(t *testing.T) {
 		t.Fatalf("loaded peek = %+v", got.detail.peek)
 	}
 	view := got.View().Content
-	ticketPath := filepath.Join("/data/repos/repo-map-detail/wayfinder/2026-07-01-active/issues/01-frontier.md")
+	ticketPath := filepath.Join("/data/repos/repo-map-detail/maps/2026-07-01-active/issues/01-frontier.md")
 	for _, want := range []string{
 		"2026-07-01-active / 01-frontier",
 		ticketPath,
