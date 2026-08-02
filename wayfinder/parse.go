@@ -90,6 +90,7 @@ func ParseTicketMarkdown(filename, content string) (Ticket, error) {
 	ticket := Ticket{
 		Number: number,
 		ID:     normalizeTicketID(m[1]),
+		File:   base,
 		Status: TicketOpen,
 	}
 	if dash := strings.Index(base, "-"); dash > 0 {

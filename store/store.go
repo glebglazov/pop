@@ -420,6 +420,23 @@ var migrations = []string{
 		UNIQUE(kind, id)
 	);
 	CREATE INDEX idx_work_containers_kind ON work_containers(kind);`,
+	// 27: work_item_claims — who is working one item of one Work container right
+	// now. A Map's Decision ticket claims here rather than in its markdown or its
+	// manifest: a claim belongs to a live grilling window, and a file-borne claim
+	// outlives the window that took it with nothing able to release it. Keyed by
+	// the whole item ref so the table is cross-kind from the start — a Task set's
+	// item claims the same way. owner is a tmux pane id when the claimer runs
+	// inside tmux and a pid otherwise, both opaque here; claimed_at drives the TTL
+	// that makes an abandoned claim stealable, which is the only liveness policy
+	// available when the owner may be a pane rather than a process.
+	`CREATE TABLE work_item_claims (
+		kind         TEXT NOT NULL,
+		container_id TEXT NOT NULL,
+		item_id      TEXT NOT NULL,
+		owner        TEXT NOT NULL,
+		claimed_at   TEXT NOT NULL,
+		PRIMARY KEY (kind, container_id, item_id)
+	);`,
 }
 
 func (s *Store) migrate() error {

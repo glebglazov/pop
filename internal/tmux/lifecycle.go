@@ -39,6 +39,16 @@ func (t *realTmux) InTmux() bool {
 	return os.Getenv("TMUX") != ""
 }
 
+// PaneIDFromEnv returns the id of the pane the caller is running in, empty when
+// it is not running in one. It is a package function rather than a Tmux verb
+// because tmux exports the answer in the environment ($TMUX_PANE) and asking the
+// server instead would return the *active* pane, which is a different pane
+// whenever a command runs in the background. Callers that identify themselves —
+// a Work claim naming its owner — want this one.
+func PaneIDFromEnv() string {
+	return os.Getenv("TMUX_PANE")
+}
+
 // Ensure creates the session for name rooted at dir if it does not already
 // exist. A no-op when the session is already live.
 func Ensure(t Tmux, name, dir string) error {

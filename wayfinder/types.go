@@ -1,5 +1,7 @@
 package wayfinder
 
+import "time"
+
 // MapStatus is the declared lifecycle of a Map (map.md Status: line).
 type MapStatus string
 
@@ -34,10 +36,17 @@ type Ticket struct {
 	Number    int
 	Slug      string
 	ID        string // zero-padded ticket number, e.g. "01"
+	File      string // markdown filename under issues/, e.g. "01-first.md"
 	Title     string // manifest-only; empty on header-parsed tickets
 	Type      TicketType
 	Status    TicketStatus
 	BlockedBy []string // blocker ticket numbers, e.g. "01"
+	// ClaimOwner and ClaimedAt carry the live claim on this ticket, overlaid from
+	// pop.db at scan time. They are the only ticket state no file holds: a claim
+	// belongs to a grilling window, and the TTL that frees an abandoned one can
+	// only run against a timestamp pop writes.
+	ClaimOwner string
+	ClaimedAt  time.Time
 	// ADRDrafts and ContextDrafts name the draft files a resolution declared,
 	// relative to the Map folder. Manifest-only; the implementing slice mints
 	// them into the repository.

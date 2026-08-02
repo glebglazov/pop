@@ -92,6 +92,9 @@ func formatTicketLine(t Ticket, showBlockers bool) string {
 	if showBlockers && len(t.BlockedBy) > 0 {
 		line += fmt.Sprintf("  (blocked by %s)", strings.Join(t.BlockedBy, ", "))
 	}
+	if t.ClaimOwner != "" {
+		line += fmt.Sprintf("  (claimed by %s)", t.ClaimOwner)
+	}
 	return line
 }
 

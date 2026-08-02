@@ -1,6 +1,8 @@
 package wayfinder
 
 import (
+	"time"
+
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/tasks"
 )
@@ -9,6 +11,12 @@ import (
 type Deps struct {
 	FS    deps.FileSystem
 	Tasks *tasks.Deps
+	// Clock and Owner are the two inputs a claim needs beyond the store: when it
+	// was taken, and who took it. Both are injectable because a claim's whole
+	// behaviour — TTL expiry, refusing another window, renewing your own — is a
+	// function of them, and neither is reproducible from a test process.
+	Clock func() time.Time
+	Owner func() string
 }
 
 // DefaultDeps returns dependencies using real implementations.
@@ -24,4 +32,18 @@ func (d *Deps) taskDeps() *tasks.Deps {
 		return d.Tasks
 	}
 	return tasks.DefaultDeps()
+}
+
+func (d *Deps) now() time.Time {
+	if d.Clock != nil {
+		return d.Clock().UTC()
+	}
+	return time.Now().UTC()
+}
+
+func (d *Deps) owner() string {
+	if d.Owner != nil {
+		return d.Owner()
+	}
+	return DefaultClaimOwner()
 }

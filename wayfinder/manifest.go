@@ -272,6 +272,7 @@ func (m *MapManifest) ToTickets() []Ticket {
 func (t ManifestTicket) ToTicket() Ticket {
 	ticket := Ticket{
 		ID:            t.ID,
+		File:          t.File,
 		Title:         t.Title,
 		Type:          t.Type,
 		Status:        t.Status,

@@ -1267,12 +1267,24 @@ The canonical artifact of one Wayfinding effort: a folder holding `map.md` (dest
 _Avoid_: wayfinder task set, plan, chart
 
 **Map verb family**:
-`pop map` — the one command family that reads and mutates Maps: `status`, `show`, `register`, `archive`, `unarchive`. Renamed from `pop wayfinder` as a hard cut with **no alias** (same discipline as the `pop queue` cut): kind nouns everywhere, and "wayfinder" survives only as the *skill's* name. Reads never create state; a Map's metadata is never hand-edited once the family owns it.
+`pop map` — the one command family that reads and mutates Maps: `status`, `show`, `register`, `next`, `claim`, `archive`, `unarchive`. Renamed from `pop wayfinder` as a hard cut with **no alias** (same discipline as the `pop queue` cut): kind nouns everywhere, and "wayfinder" survives only as the *skill's* name. Reads never create state; a Map's metadata is never hand-edited once the family owns it.
 _Avoid_: pop wayfinder, map commands
 
 **Decision ticket**:
-One unit of a Map: a question whose resolution is a decision, recorded as `issues/NN-<slug>.md` with `Type:` (research/prototype/grilling/task), `Status:`, and `Blocked by:` lines, its answer appended under `## Answer` on resolution. Distinct from a task: no acceptance criteria, no agent commit, and a claimed state exists (persisted in_progress stays malformed for tasks).
+One unit of a Map: a question whose resolution is a decision, recorded as `issues/NN-<slug>.md` with its type (research/prototype/grilling/task), status and blocking edges held in the **Map manifest**, and its answer written under `## Answer` on resolution. Distinct from a task: no acceptance criteria, no agent commit, and a claimed state exists (persisted in_progress stays malformed for tasks) — see **Ticket claim**.
 _Avoid_: task (the Task-set unit), issue, question file
+
+**Frontier**:
+The Decision tickets of a Map that are open, unblocked (every blocker resolved) and unclaimed, in manifest order. What parallel grilling draws from: **Ticket claim** is what removes one from it, resolution is what removes it for good. An empty frontier is not arrival — a Map may still carry fog.
+_Avoid_: ready tickets, next up, queue
+
+**Ticket claim**:
+One grilling window's hold on one Decision ticket, taken by `pop map next` (first frontier ticket, atomically picked and claimed) or `pop map claim <map-id> <NN>` (the override for when the human names a ticket). It is a `work_item_claims` row in pop.db keyed by the item's Work ref and nothing else — never a file state, because a claim belongs to a live window and a file-borne one outlives everything able to release it. The scan overlays live claims onto tickets, which is where the derived `claimed` status comes from. `next` exits nonzero on an empty frontier; two windows racing it get two different tickets, because the pick and the write share one transaction.
+_Avoid_: ticket lock, assignment, claimed status line
+
+**Claim owner**:
+Who holds a **Ticket claim**: the tmux pane id when the command runs inside tmux, else the pid. No configuration and no login concept — an owner is only ever compared for equality. A claim expires four hours after it was taken or last renewed (its owner re-claiming renews it); past that `pop map next` may steal it, and always reports the steal, since a dead grilling window would otherwise strand its ticket forever. The TTL is the only liveness policy available when the owner is a pane rather than a process.
+_Avoid_: session id, lease holder, lock owner
 
 **Map manifest**:
 The `index.json` beside a Map's `map.md` — the machine-readable half of a Map, mirroring the **Task manifest** so no consumer hand-parses metadata out of N ticket markdown files. Per Decision ticket it carries id, file, title, type, status (`open` | `resolved`; a claim is pop.db state, never a file state), `blocked_by`, `adr_drafts` and `context_drafts`, plus a Map-level `spawned_sets` array defaulting to empty. Blocking edges live here because they are definitional and travel with the content. Where one exists it is the source of truth for status, type and blocking; a Map without one still reads its ticket markdown headers. Validation names every problem — unknown status or type, a blocker naming no entry, an entry with no markdown file, a markdown file with no entry — and a failing manifest renders the Map Malformed.

@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/tasks"
@@ -20,6 +21,8 @@ func TestMapCommandTree(t *testing.T) {
 		{"map", "status"},
 		{"map", "show"},
 		{"map", "register"},
+		{"map", "next"},
+		{"map", "claim"},
 		{"map", "archive"},
 		{"map", "unarchive"},
 	} {
@@ -33,7 +36,7 @@ func TestMapCommandTree(t *testing.T) {
 	if cmd, _, _ := rootCmd.Find([]string{"wayfinder", "status"}); cmd.CommandPath() != "pop" {
 		t.Fatalf("pop wayfinder should not exist; Find resolved %q", cmd.CommandPath())
 	}
-	for _, cmd := range []*cobra.Command{mapCmd, mapStatusCmd, mapShowCmd, mapRegisterCmd, mapArchiveCmd, mapUnarchiveCmd} {
+	for _, cmd := range []*cobra.Command{mapCmd, mapStatusCmd, mapShowCmd, mapRegisterCmd, mapNextCmd, mapClaimCmd, mapArchiveCmd, mapUnarchiveCmd} {
 		if strings.Contains(cmd.CommandPath(), "wayfinder") {
 			t.Fatalf("command path still says wayfinder: %q", cmd.CommandPath())
 		}
@@ -124,6 +127,99 @@ func TestMapRegisterValidatesThenRegisters(t *testing.T) {
 		t.Fatalf("pop map register grew flags: %v", mapRegisterCmd.Flags().FlagUsages())
 	}
 	assertNoWorktreesProvisioned(t, dataHome)
+}
+
+// TestMapNextAndClaimDriveParallelGrilling walks the CLI surface two grilling
+// windows share: `next` hands each of them a different frontier ticket and
+// prints where to read it, the exhausted frontier is an error, and `claim` is the
+// override that still refuses a ticket someone else is holding.
+func TestMapNextAndClaimDriveParallelGrilling(t *testing.T) {
+	t.Parallel()
+	d, storageDir, _ := mapRegistryTestDeps(t, threeTicketMapFiles("demo"))
+	if err := runMapRegisterWith(d, &bytes.Buffer{}, "demo"); err != nil {
+		t.Fatal(err)
+	}
+	nine := time.Date(2026, 8, 3, 9, 0, 0, 0, time.UTC)
+	d.Clock = func() time.Time { return nine }
+	d.Owner = func() string { return "pane:%1" }
+
+	var first bytes.Buffer
+	if err := runMapNextWith(d, &first, "demo"); err != nil {
+		t.Fatalf("next: %v", err)
+	}
+	wantPath := filepath.Join(storageDir, "maps", "demo", "issues", "01-first.md")
+	if got := strings.SplitN(first.String(), "\n", 2)[0]; got != "01\t"+wantPath {
+		t.Fatalf("next headline = %q, want the id and path", got)
+	}
+	if !strings.Contains(first.String(), "claimed by pane:%1") {
+		t.Fatalf("next output = %q", first.String())
+	}
+
+	d.Owner = func() string { return "pane:%2" }
+	var second bytes.Buffer
+	if err := runMapNextWith(d, &second, "demo"); err != nil {
+		t.Fatalf("second next: %v", err)
+	}
+	if !strings.HasPrefix(second.String(), "03\t") {
+		t.Fatalf("second window got %q, want ticket 03 (02 is blocked)", second.String())
+	}
+
+	if err := runMapNextWith(d, &bytes.Buffer{}, "demo"); err == nil {
+		t.Fatal("expected an exhausted frontier to fail")
+	} else if !strings.Contains(err.Error(), "frontier is empty") {
+		t.Fatalf("empty-frontier error = %v", err)
+	}
+
+	if err := runMapClaimWith(d, &bytes.Buffer{}, "demo", "01"); err == nil {
+		t.Fatal("expected claim to refuse a ticket held by another window")
+	} else if !strings.Contains(err.Error(), "pane:%1") {
+		t.Fatalf("claim refusal = %v", err)
+	}
+
+	// Four hours on, the first window is gone and its ticket comes back — with
+	// the steal on the record.
+	d.Clock = func() time.Time { return nine.Add(5 * time.Hour) }
+	var stolen bytes.Buffer
+	if err := runMapNextWith(d, &stolen, "demo"); err != nil {
+		t.Fatalf("next after the TTL: %v", err)
+	}
+	if !strings.HasPrefix(stolen.String(), "01\t") || !strings.Contains(stolen.String(), "stole an expired claim held by pane:%1") {
+		t.Fatalf("steal output = %q", stolen.String())
+	}
+
+	// `pop map show` is where a human sees who holds what; the files never say.
+	var shown bytes.Buffer
+	if err := runMapShowWith(d, &shown, "demo"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(shown.String(), "claimed by pane:%2") {
+		t.Fatalf("show output does not report the live claim:\n%s", shown.String())
+	}
+	manifest, err := os.ReadFile(filepath.Join(storageDir, "maps", "demo", "index.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(manifest), "claim") {
+		t.Fatalf("the manifest records a claim:\n%s", manifest)
+	}
+}
+
+func TestMapClaimCompletionOffersUnresolvedTickets(t *testing.T) {
+	t.Parallel()
+	d, _, _ := mapRegistryTestDeps(t, threeTicketMapFiles("demo"))
+	if err := runMapRegisterWith(d, &bytes.Buffer{}, "demo"); err != nil {
+		t.Fatal(err)
+	}
+	if ids, _ := mapClaimCmd.ValidArgsFunction(mapClaimCmd, nil, ""); !slices.Equal(ids, []string{"demo"}) {
+		t.Fatalf("first positional completion = %v, want [demo]", ids)
+	}
+	ids, _ := mapClaimCmd.ValidArgsFunction(mapClaimCmd, []string{"demo"}, "")
+	if !slices.Equal(ids, []string{"01", "02", "03"}) {
+		t.Fatalf("ticket completion = %v", ids)
+	}
+	if third, _ := mapClaimCmd.ValidArgsFunction(mapClaimCmd, []string{"demo", "01"}, ""); third != nil {
+		t.Fatalf("completion offered a third positional: %v", third)
+	}
 }
 
 func TestMapArchiveRoundTrip(t *testing.T) {
@@ -300,6 +396,21 @@ func oneTicketMapFiles(id string) map[string]string {
 		"maps/" + id + "/issues/01-first.md": "## Question\nWhy?\n",
 		"maps/" + id + "/index.json": `{"tickets":[` +
 			`{"id":"01","file":"01-first.md","type":"grilling","status":"open","blocked_by":[]}` +
+			`],"spawned_sets":[]}`,
+	}
+}
+
+// threeTicketMapFiles is a Map with a frontier of two: 02 waits on 01.
+func threeTicketMapFiles(id string) map[string]string {
+	return map[string]string{
+		"maps/" + id + "/map.md":              "Status: active\n\n## Destination\nShip it\n",
+		"maps/" + id + "/issues/01-first.md":  "## Question\nFirst?\n",
+		"maps/" + id + "/issues/02-second.md": "## Question\nSecond?\n",
+		"maps/" + id + "/issues/03-third.md":  "## Question\nThird?\n",
+		"maps/" + id + "/index.json": `{"tickets":[` +
+			`{"id":"01","file":"01-first.md","type":"grilling","status":"open","blocked_by":[]},` +
+			`{"id":"02","file":"02-second.md","type":"grilling","status":"open","blocked_by":["01"]},` +
+			`{"id":"03","file":"03-third.md","type":"grilling","status":"open","blocked_by":[]}` +
 			`],"spawned_sets":[]}`,
 	}
 }

@@ -46,6 +46,10 @@ func ScanMapsInStorage(d *Deps, storageDir string) ([]Map, error) {
 	if err != nil {
 		return nil, err
 	}
+	claims, err := liveMapClaims(d)
+	if err != nil {
+		return nil, err
+	}
 
 	var maps []Map
 	for _, entry := range entries {
@@ -65,6 +69,7 @@ func ScanMapsInStorage(d *Deps, storageDir string) ([]Map, error) {
 			continue
 		}
 		m.Archived = archived[m.ID]
+		applyClaims(m.Tickets, claims[m.ID])
 		maps = append(maps, m)
 	}
 	sort.Slice(maps, func(i, j int) bool { return maps[i].ID < maps[j].ID })

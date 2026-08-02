@@ -45,6 +45,25 @@ func CompletionMapIDs(d *Deps, cwd string, archivedOnly bool) []string {
 	return ids
 }
 
+// CompletionTicketIDs lists the ticket ids of one Map that are still open or
+// claimed, sorted. Like CompletionMapIDs it stays silent on any error — an
+// unknown map id completes to nothing rather than to a complaint.
+func CompletionTicketIDs(d *Deps, cwd, mapID string) []string {
+	m, err := FindMap(d, cwd, mapID)
+	if err != nil {
+		return nil
+	}
+	var ids []string
+	for _, t := range m.Tickets {
+		if t.Status == TicketResolved {
+			continue
+		}
+		ids = append(ids, t.ID)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
 func resolveMapTarget(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
