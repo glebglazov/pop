@@ -11,8 +11,8 @@ import (
 )
 
 // The Task-set kind's verbs. Ids are stable strings, keys follow ADR-0158's case
-// rule (uppercase hands off, lowercase acts in place), and the order is the order
-// the action menu has always shown them in.
+// rule (uppercase hands off, lowercase acts in place), and Actions orders
+// spawning verbs before in-place ones.
 const (
 	VerbDrain     work.Verb = "drain"
 	VerbVerify    work.Verb = "verify"
@@ -24,6 +24,10 @@ const (
 	VerbFold      work.Verb = "fold"
 	VerbUnpark    work.Verb = "unpark"
 	VerbArchive   work.Verb = "archive"
+	// VerbCopyPath copies the bound worktree's path to the clipboard. In-place
+	// (lowercase) like copy-name, and hidden rather than shown-and-erroring on an
+	// unbound set — the same gate unbind uses.
+	VerbCopyPath work.Verb = "copy-path"
 
 	// Item verbs, filtered to a task's status the way the task action menu has
 	// always filtered them.
@@ -32,12 +36,16 @@ const (
 	VerbSkip     work.Verb = "skip"
 )
 
-// Actions returns the container-level verbs that apply to one task set right now.
-// Conditional verbs are filtered to the set's context: verify only for
-// NEEDS-VERIFY / VERIFY-FAILED sets with no live drain, unbind only for bound
-// sets, auto-drain only for non-orphaned sets, fold only for a bound terminal
-// set, and unpark only for parked sets. Drain, bind, the runtime shell, archive
-// and copy-name apply to every set regardless of status.
+// Actions returns the container-level verbs that apply to one task set right now,
+// spawning (handoff) verbs first and in-place verbs last: `I V F S O` then
+// `b u a s r x y p`, mirroring the order handoffAfterLaunch already names (drain,
+// verify, fold, assist, shell) so the two lists never drift apart. Conditional
+// verbs are filtered to the set's context: verify only for NEEDS-VERIFY /
+// VERIFY-FAILED sets with no live drain, fold only for a bound terminal set,
+// unbind only for bound sets, auto-drain only for non-orphaned sets, unpark only
+// for parked sets, and copy-path only for bound sets. Drain, assist, the runtime
+// shell, bind, status, archive and copy-name apply to every set regardless of
+// status.
 //
 // It is called when a menu opens over one container, not per container at load
 // time, so the eligibility it reports is as fresh as the keypress.
@@ -50,28 +58,32 @@ func (k *Kind) Actions(c work.Container) []work.Action {
 	if verifyEligible(c) {
 		actions = append(actions, work.Action{Verb: VerbVerify, Key: "V", Label: "verify"})
 	}
-	actions = append(actions, work.Action{Verb: VerbBind, Key: "b", Label: "bind worktree"})
+	if foldEligible(c) {
+		actions = append(actions, work.Action{Verb: VerbFold, Key: "F", Label: "fold"})
+	}
+	actions = append(actions,
+		work.Action{Verb: VerbAssist, Key: "S", Label: "assist"},
+		work.Action{Verb: work.VerbShell, Key: "O", Label: "shell"},
+		work.Action{Verb: VerbBind, Key: "b", Label: "bind worktree"},
+	)
 	if c.Bound {
 		actions = append(actions, work.Action{Verb: VerbUnbind, Key: "u", Label: "unbind worktree"})
 	}
 	if !c.Orphaned {
 		actions = append(actions, work.Action{Verb: VerbAutoDrain, Key: "a", Label: "auto-drain"})
 	}
-	actions = append(actions,
-		work.Action{Verb: VerbStatus, Key: "s", Label: "status ▸"},
-		work.Action{Verb: VerbAssist, Key: "S", Label: "assist"},
-	)
-	if foldEligible(c) {
-		actions = append(actions, work.Action{Verb: VerbFold, Key: "F", Label: "fold"})
-	}
+	actions = append(actions, work.Action{Verb: VerbStatus, Key: "s", Label: "status ▸"})
 	if c.Parked {
 		actions = append(actions, work.Action{Verb: VerbUnpark, Key: "r", Label: "unpark"})
 	}
-	return append(actions,
-		work.Action{Verb: work.VerbShell, Key: "O", Label: "shell"},
+	actions = append(actions,
 		work.Action{Verb: VerbArchive, Key: "x", Label: "archive"},
 		work.Action{Verb: work.VerbCopyName, Key: "y", Label: "copy name"},
 	)
+	if c.Bound {
+		actions = append(actions, work.Action{Verb: VerbCopyPath, Key: "p", Label: "copy path"})
+	}
+	return actions
 }
 
 // ItemActions returns the verbs applicable to one task, filtered to its status:
@@ -126,6 +138,12 @@ func (k *Kind) Perform(c work.Container, item *work.Item, verb work.Verb) (work.
 			payload = TaskRef(c.ID, *item)
 		}
 		return work.Outcome{Kind: work.OutcomeMessage, Clipboard: payload, Message: "copied " + payload}, nil
+	case VerbCopyPath:
+		path := strings.TrimSpace(c.RuntimePath)
+		if path == "" {
+			return work.Outcome{}, fmt.Errorf("setkind: %s is not bound to a worktree", c.ID)
+		}
+		return work.Outcome{Kind: work.OutcomeMessage, Clipboard: path, Message: "copied " + path}, nil
 	case work.VerbShell:
 		dir := strings.TrimSpace(c.Checkout)
 		if dir == "" {

@@ -77,8 +77,8 @@ func conformanceCases() []conformanceCase {
 				})
 			},
 			wantActions: []work.Verb{
-				setkind.VerbDrain, setkind.VerbBind, setkind.VerbAutoDrain, setkind.VerbStatus,
-				setkind.VerbAssist, work.VerbShell, setkind.VerbArchive, work.VerbCopyName,
+				setkind.VerbDrain, setkind.VerbAssist, work.VerbShell, setkind.VerbBind,
+				setkind.VerbAutoDrain, setkind.VerbStatus, setkind.VerbArchive, work.VerbCopyName,
 			},
 			wantItemActions: []work.Verb{setkind.VerbComplete, setkind.VerbSkip, work.VerbCopyName},
 			wantSummary:     []string{"1 task set", "1 ready"},
@@ -125,9 +125,9 @@ func conformanceCases() []conformanceCase {
 			// the row-level copy-report-path is absent while the run item — which
 			// points at the report path it would have written — offers it.
 			wantActions: []work.Verb{
-				routine.VerbFire, routine.VerbPause, routine.VerbPreview, routine.VerbEdit,
-				routine.VerbRefine, routine.VerbRuns, routine.VerbHandoff,
-				work.VerbShell, work.VerbCopyName,
+				routine.VerbFire, routine.VerbPreview, routine.VerbEdit, routine.VerbRefine,
+				work.VerbShell, routine.VerbPause, routine.VerbRuns, routine.VerbHandoff,
+				work.VerbCopyName,
 			},
 			wantItemActions: []work.Verb{routine.VerbCopyReportPath, work.VerbCopyName},
 			wantSummary:     []string{"1 routine", "1 here"},

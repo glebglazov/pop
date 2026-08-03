@@ -76,8 +76,8 @@ func TestRoutineActionsAnswerTheRowInFrontOfThem(t *testing.T) {
 	}
 	c := containerByID(t, containers, "alpha")
 	want := []work.Verb{
-		VerbFire, VerbPause, VerbPreview, VerbEdit, VerbRefine, VerbRuns, VerbHandoff,
-		work.VerbShell, work.VerbCopyName,
+		VerbFire, VerbPreview, VerbEdit, VerbRefine, work.VerbShell,
+		VerbPause, VerbRuns, VerbHandoff, work.VerbCopyName,
 	}
 	if got := verbsOffered(k.Actions(c)); !equalVerbs(got, want) {
 		t.Fatalf("actions = %v, want %v", got, want)

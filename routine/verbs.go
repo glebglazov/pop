@@ -51,17 +51,25 @@ const (
 // never-fired Routine, a skipped run, or a run still in flight.
 const noReportMessage = "no report to copy"
 
-// Actions returns the container-level verbs that apply to one Routine right now.
-// A Routine whose definition would not load offers only copy-name: every other
-// verb reads or writes a definition that is not there, and offering one would
-// promise an act that can only fail. A Project routine carries no pause bit
-// (ADR-0138), so the consent pair is absent from it — the same filtering the
-// Routine action menu has always done, now answered by the kind that knows why.
+// Actions returns the container-level verbs that apply to one Routine right now,
+// spawning (handoff) verbs first and in-place verbs last: `I P E R O` then
+// `a l h c y`. A Routine whose definition would not load offers only copy-name:
+// every other verb reads or writes a definition that is not there, and offering
+// one would promise an act that can only fail. A Project routine carries no
+// pause bit (ADR-0138), so the consent pair is absent from it — the same
+// filtering the Routine action menu has always done, now answered by the kind
+// that knows why.
 func (k *Kind) Actions(c work.Container) []work.Action {
 	if c.Broken {
 		return []work.Action{{Verb: work.VerbCopyName, Key: "y", Label: "copy name"}}
 	}
-	actions := []work.Action{{Verb: VerbFire, Key: "I", Label: "fire now"}}
+	actions := []work.Action{
+		{Verb: VerbFire, Key: "I", Label: "fire now"},
+		{Verb: VerbPreview, Key: "P", Label: "preview pane"},
+		{Verb: VerbEdit, Key: "E", Label: "edit prompt"},
+		{Verb: VerbRefine, Key: "R", Label: "refine"},
+		{Verb: work.VerbShell, Key: "O", Label: "shell"},
+	}
 	if !projectRoutineContainer(c) {
 		if c.RoutinePaused {
 			actions = append(actions, work.Action{Verb: VerbResume, Key: "a", Label: "resume"})
@@ -70,19 +78,13 @@ func (k *Kind) Actions(c work.Container) []work.Action {
 		}
 	}
 	actions = append(actions,
-		work.Action{Verb: VerbPreview, Key: "P", Label: "preview pane"},
-		work.Action{Verb: VerbEdit, Key: "E", Label: "edit prompt"},
-		work.Action{Verb: VerbRefine, Key: "R", Label: "refine"},
 		work.Action{Verb: VerbRuns, Key: "l", Label: "runs"},
 		work.Action{Verb: VerbHandoff, Key: "h", Label: "handoff prompt"},
 	)
 	if c.RoutineLastReport != "" {
 		actions = append(actions, work.Action{Verb: VerbCopyReportPath, Key: "c", Label: "copy report path"})
 	}
-	return append(actions,
-		work.Action{Verb: work.VerbShell, Key: "O", Label: "shell"},
-		work.Action{Verb: work.VerbCopyName, Key: "y", Label: "copy name"},
-	)
+	return append(actions, work.Action{Verb: work.VerbCopyName, Key: "y", Label: "copy name"})
 }
 
 // ItemActions returns the verbs for one run. A run is a record, not a thing to

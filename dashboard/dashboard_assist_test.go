@@ -16,8 +16,10 @@ import (
 	"github.com/glebglazov/pop/tasks"
 )
 
-// TestDashboardAssistMenuPlacement asserts Assist sits with status and shell,
-// not among the drain/verify work verbs.
+// TestDashboardAssistMenuPlacement asserts Assist sits in the spawning cluster,
+// immediately before shell and after drain/verify — the `I V F S O` order the
+// action list now guarantees (06-action-order-and-copy-path), rather than beside
+// the in-place status verb the interleaved order used to place it next to.
 func TestDashboardAssistMenuPlacement(t *testing.T) {
 	items := dashboardMenuItems(testKinds(), DashboardRow{ID: "demo"})
 	var keys []string
@@ -32,15 +34,15 @@ func TestDashboardAssistMenuPlacement(t *testing.T) {
 		}
 		return -1
 	}
-	status, assist, o, drain, verify, p := idx("s"), idx("S"), idx("O"), idx("I"), idx("V"), idx("p")
-	if status < 0 || assist < 0 || o < 0 {
-		t.Fatalf("menu missing status/assist/shell keys: %+v", keys)
+	assist, o, drain, verify, preview := idx("S"), idx("O"), idx("I"), idx("V"), idx("p")
+	if assist < 0 || o < 0 {
+		t.Fatalf("menu missing assist/shell keys: %+v", keys)
 	}
-	if p >= 0 {
+	if preview >= 0 {
 		t.Fatalf("preview verb must be gone, got keys %v", keys)
 	}
-	if !(status < assist && assist < o) {
-		t.Fatalf("assist must sit between status submenu and shell, got keys %v", keys)
+	if assist+1 != o {
+		t.Fatalf("assist must sit immediately before shell, got keys %v", keys)
 	}
 	if drain >= 0 && drain > assist {
 		t.Fatalf("assist must not follow drain, got keys %v", keys)

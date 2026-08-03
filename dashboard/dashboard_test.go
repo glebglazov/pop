@@ -384,7 +384,7 @@ func TestDashboardActionMenuContextFiltering(t *testing.T) {
 
 	// A plain ready set: only the unconditional verbs plus auto-drain (non-orphaned).
 	plain := keysFor(DashboardRow{ID: "plain", RuntimePath: "/wt"})
-	if want := []string{"I", "b", "a", "s", "S", "O", "x", "y"}; !reflect.DeepEqual(plain, want) {
+	if want := []string{"I", "S", "O", "b", "a", "s", "x", "y"}; !reflect.DeepEqual(plain, want) {
 		t.Fatalf("plain row verbs = %v, want %v", plain, want)
 	}
 
