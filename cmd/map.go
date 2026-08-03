@@ -42,10 +42,17 @@ refuses naming the missing path. A dirty repository working tree only warns —
 pop cannot tell an unrelated in-flight change from a stray fragment a grilling
 session left behind.
 
+` + "`pop map spawned <map-id> <task-set-id>`" + ` records the handoff: the set id is
+appended to the manifest's ` + "`spawned_sets`" + ` and ` + "`## Spawned sets`" + ` is
+re-rendered from it. It is idempotent, and it is the only writer of that section —
+appending a set there by hand is lost on the next resolve. There is no reverse
+flag on ` + "`pop tasks register`" + `; the set's own index.json carries
+` + "`source_map`" + ` as the other half of the link.
+
 Every Map gets a tmux session of its own, ` + "`pop-map-<map-id>`" + `, rooted at the
 Trunk worktree: window 1 runs ` + "`pop map show`" + ` and ` + "`pop map next`" + ` spawns a
 grilling window per ticket and switches you there. The other writes auto-open —
-` + "`register`" + `, ` + "`claim`" + `, ` + "`resolve`" + ` and ` + "`out-of-scope`" + ` run
+` + "`register`" + `, ` + "`claim`" + `, ` + "`resolve`" + `, ` + "`out-of-scope`" + ` and ` + "`spawned`" + ` run
 in place, ensure the session exists and report where it is, so a verb called from
 a Task-set pane never relocates you. ` + "`show`" + ` and ` + "`status`" + ` create no
 tmux state at all. Pass ` + "`--trunk <path>`" + ` when pop cannot work out the Trunk
@@ -122,6 +129,18 @@ var mapOutOfScopeCmd = &cobra.Command{
 	Run:   runMapOutOfScope,
 }
 
+// mapSpawnedCmd is the only writer of the Map's lineage. `to-tasks` calls it
+// after `pop tasks register`, so the set exists by the time the Map names it; the
+// id is taken bare and never checked against the Task store, because a Map is a
+// historical record of what the effort spawned and a set may later be archived or
+// deleted without rewriting that.
+var mapSpawnedCmd = &cobra.Command{
+	Use:   "spawned MAP SET",
+	Short: "Record a task set this map spawned",
+	Args:  cobra.ExactArgs(2),
+	Run:   runMapSpawned,
+}
+
 var (
 	mapResolveAnswerFile    string
 	mapResolveADRDrafts     []string
@@ -171,6 +190,7 @@ func init() {
 	mapCmd.AddCommand(mapClaimCmd)
 	mapCmd.AddCommand(mapResolveCmd)
 	mapCmd.AddCommand(mapOutOfScopeCmd)
+	mapCmd.AddCommand(mapSpawnedCmd)
 	mapCmd.AddCommand(mapArriveCmd)
 	mapCmd.AddCommand(mapOpenCmd)
 	mapCmd.AddCommand(mapArchiveCmd)
@@ -424,6 +444,26 @@ func renderResolution(w io.Writer, result *wayfinder.ResolveResult) {
 	if result.DirtyRepo {
 		fmt.Fprintln(w, "warning: the repository working tree is dirty")
 	}
+}
+
+func runMapSpawned(cmd *cobra.Command, args []string) {
+	err := runMapSpawnedWith(mapVerbDeps(), os.Stdout, args[0], args[1])
+	handleTaskExit(err)
+}
+
+func runMapSpawnedWith(d *wayfinder.Deps, w io.Writer, mapID, setID string) error {
+	result, err := wayfinder.RecordSpawnedSet(d, cmdLayerDeps().WorkDir(), mapID, setID)
+	if err != nil {
+		return err
+	}
+	if result.AlreadyRecorded {
+		fmt.Fprintf(w, "map %s already lists task set %s\n", result.MapID, result.SetID)
+	} else {
+		fmt.Fprintf(w, "map %s spawned task set %s\n", result.MapID, result.SetID)
+	}
+	fmt.Fprintf(w, "%d spawned set(s): %s\n", len(result.SpawnedSets), strings.Join(result.SpawnedSets, ", "))
+	reportMapSession(w, d, result.MapID)
+	return nil
 }
 
 func runMapArrive(cmd *cobra.Command, args []string) {

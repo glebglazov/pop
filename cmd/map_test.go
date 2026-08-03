@@ -26,6 +26,7 @@ func TestMapCommandTree(t *testing.T) {
 		{"map", "claim"},
 		{"map", "resolve"},
 		{"map", "out-of-scope"},
+		{"map", "spawned"},
 		{"map", "arrive"},
 		{"map", "open"},
 		{"map", "archive"},
@@ -41,7 +42,7 @@ func TestMapCommandTree(t *testing.T) {
 	if cmd, _, _ := rootCmd.Find([]string{"wayfinder", "status"}); cmd.CommandPath() != "pop" {
 		t.Fatalf("pop wayfinder should not exist; Find resolved %q", cmd.CommandPath())
 	}
-	for _, cmd := range []*cobra.Command{mapCmd, mapStatusCmd, mapShowCmd, mapRegisterCmd, mapNextCmd, mapClaimCmd, mapResolveCmd, mapOutOfScopeCmd, mapArriveCmd, mapOpenCmd, mapArchiveCmd, mapUnarchiveCmd} {
+	for _, cmd := range []*cobra.Command{mapCmd, mapStatusCmd, mapShowCmd, mapRegisterCmd, mapNextCmd, mapClaimCmd, mapResolveCmd, mapOutOfScopeCmd, mapSpawnedCmd, mapArriveCmd, mapOpenCmd, mapArchiveCmd, mapUnarchiveCmd} {
 		if strings.Contains(cmd.CommandPath(), "wayfinder") {
 			t.Fatalf("command path still says wayfinder: %q", cmd.CommandPath())
 		}
@@ -345,6 +346,56 @@ func TestMapResolveDraftFlagsRecordAndWarnOnDirtyTree(t *testing.T) {
 	}
 	if string(before) != string(after) {
 		t.Fatalf("a refused resolve modified the manifest:\nbefore: %s\nafter: %s", before, after)
+	}
+}
+
+// TestMapSpawnedRecordsTheHandoff walks the CLI half of the lineage link: the
+// verb reports what it recorded, a second call over the same set is an
+// idempotent no-op, and the generated `## Spawned sets` section is what a reader
+// of map.md sees.
+func TestMapSpawnedRecordsTheHandoff(t *testing.T) {
+	t.Parallel()
+	d, storageDir, _ := mapRegistryTestDeps(t, oneTicketMapFiles("demo"))
+	if err := runMapRegisterWith(d, &bytes.Buffer{}, "demo"); err != nil {
+		t.Fatal(err)
+	}
+
+	var recorded bytes.Buffer
+	if err := runMapSpawnedWith(d, &recorded, "demo", "2026-08-05-implementing"); err != nil {
+		t.Fatalf("spawned: %v", err)
+	}
+	if !strings.Contains(recorded.String(), "map demo spawned task set 2026-08-05-implementing") {
+		t.Fatalf("spawned output = %q", recorded.String())
+	}
+
+	var again bytes.Buffer
+	if err := runMapSpawnedWith(d, &again, "demo", "2026-08-05-implementing"); err != nil {
+		t.Fatalf("second spawned: %v", err)
+	}
+	if !strings.Contains(again.String(), "already lists task set 2026-08-05-implementing") {
+		t.Fatalf("second spawned output = %q", again.String())
+	}
+
+	mapDir := filepath.Join(storageDir, "maps", "demo")
+	manifest, err := os.ReadFile(filepath.Join(mapDir, "index.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(manifest), "2026-08-05-implementing"); got != 1 {
+		t.Fatalf("manifest lists the set %d times:\n%s", got, manifest)
+	}
+	mapMD, err := os.ReadFile(filepath.Join(mapDir, "map.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"## Spawned sets",
+		"<!-- pop:generated spawned-sets -->",
+		"- 2026-08-05-implementing",
+	} {
+		if !strings.Contains(string(mapMD), want) {
+			t.Fatalf("map.md missing %q:\n%s", want, mapMD)
+		}
 	}
 }
 

@@ -1275,7 +1275,7 @@ The canonical artifact of one Wayfinding effort: a folder holding `map.md` (dest
 _Avoid_: wayfinder task set, plan, chart, done map, closed map, completed map
 
 **Map verb family**:
-`pop map` — the one command family that reads and mutates Maps: `status`, `show`, `register`, `next`, `claim`, `resolve`, `out-of-scope`, `arrive`, `open`, `archive`, `unarchive`. Renamed from `pop wayfinder` as a hard cut with **no alias** (same discipline as the `pop queue` cut): kind nouns everywhere, and "wayfinder" survives only as the *skill's* name. Reads never create state; a Map's metadata is never hand-edited once the family owns it. Every write **auto-opens, never refuses**: it ensures the **Map session** exists and reports where it is, rather than erroring because it was run from somewhere else.
+`pop map` — the one command family that reads and mutates Maps: `status`, `show`, `register`, `next`, `claim`, `resolve`, `out-of-scope`, `spawned`, `arrive`, `open`, `archive`, `unarchive`. Renamed from `pop wayfinder` as a hard cut with **no alias** (same discipline as the `pop queue` cut): kind nouns everywhere, and "wayfinder" survives only as the *skill's* name. Reads never create state; a Map's metadata is never hand-edited once the family owns it. Every write **auto-opens, never refuses**: it ensures the **Map session** exists and reports where it is, rather than erroring because it was run from somewhere else.
 _Avoid_: pop wayfinder, map commands
 
 **Decision ticket**:
@@ -1363,8 +1363,16 @@ A span of `map.md` pop owns, delimited by `<!-- pop:generated <name> -->` marker
 _Avoid_: managed block, generated section (as a file), pop block
 
 **Spawned set**:
-A Task set created from a Map's resolved decisions (via to-spec/to-tasks) once the Map has **Arrived** — the whole Map, in one handoff. A wayfinding session never pre-splits a Map into per-area sets: a chunk boundary has to be invented by a session that has read fewer ticket answers than `to-spec` will, while the sequencing that matters already lives inside the answers and travels with the Map for free. The forward link between the two concepts: the Map records the ids of sets it spawned; a spawned set records its source Map, in `spec.md` prose where a spec exists and on its `index.json` manifest always. A Map may spawn a further set later — a remediation set, or a second handoff after fog has cleared.
+A Task set created from a Map's resolved decisions (via to-spec/to-tasks) once the Map has **Arrived** — the whole Map, in one handoff. A wayfinding session never pre-splits a Map into per-area sets: a chunk boundary has to be invented by a session that has read fewer ticket answers than `to-spec` will, while the sequencing that matters already lives inside the answers and travels with the Map for free. The forward link between the two concepts is **Spawned-set recording**, and its reverse is the **Source map** on the set. A Map may spawn a further set later — a remediation set, or a second handoff after fog has cleared.
 _Avoid_: child set, output set, chunked handoff, early-splittable chunk, partial handoff
+
+**Spawned-set recording**:
+`pop map spawned <map-id> <task-set-id>` — the append of a Task-set id to the **Map manifest**'s bare `spawned_sets` array, and the re-render of map.md's `Spawned sets` **Generated region** from it. Idempotent, and the only writer of either half: hand-appending to the section is lost on the next resolve. This *is* pop's link model — the one relationship a human traverses (Map → the sets it spawned) runs one way and is owned by one side, so it is a field on that side rather than a graph. Typed directed edges and a pop.db edges table were both rejected: a general graph for one one-way relationship, and lineage that a store move would lose, where a manifest key travels with the Map's folder. The array holds ids and nothing else — a title, timestamp or status here would cache another file's truth and drift, so a spawned set's status is read fresh at render. The write lives on `pop map` rather than behind a `pop tasks register --source-map` flag, which would make `tasks` know wayfinder's storage layout.
+_Avoid_: work link, edge, lineage graph, spawn edge
+
+**Source map**:
+The `source_map` key on a **Task manifest**, naming the Map a set was spawned from — the set-side half of **Spawned-set recording**, written on every Map-sourced set whether or not a spec exists, so the link is never half-built for a spec-less one. `spec.md`'s `Source map:` line is the human-facing twin: prose only, parsed by nothing and derived from by nothing, so the two can never disagree about which is authoritative.
+_Avoid_: parent map, back-link line, spec header
 
 **ADR draft**:
 An ADR body written during a wayfinding session into the Map's `adrs/` directory, identified by an 8-hex id and carrying no ADR number. It is the single copy of the decision's repo-facing form; the ticket answer links it rather than restating it. A number is assigned only when a slice **Mint**s it.

@@ -114,6 +114,14 @@ type Manifest struct {
 	Errors  []string
 	Valid   bool
 	Unknown map[string]json.RawMessage
+	// SourceMap names the Map this set was spawned from, read from and written
+	// back as the set-level `source_map` key. It is the set-side half of the one
+	// lineage link pop keeps — the Map's own `spawned_sets` is the traversed half —
+	// and it is recorded on every Map-sourced set, spec or no spec, so the link is
+	// never half-built. Empty for a set with no Map behind it. Nothing derives from
+	// it: `spec.md`'s `Source map:` line stays human-facing prose and is never
+	// parsed.
+	SourceMap string
 	// DeprecatedKeys names retired set-level keys (`worktree`, `auto_drain`) that
 	// are still present in the manifest but no longer read (ADR-0115). They are
 	// ignored — never MALFORMED — and preserved verbatim in Unknown; register
@@ -184,6 +192,14 @@ func parseManifestJSON(data []byte, m *Manifest) error {
 			// no forced migration rewrites the file.
 			m.DeprecatedKeys = append(m.DeprecatedKeys, k)
 			m.Unknown[k] = v
+		case "source_map":
+			// A malformed value is a diagnostic rather than a parse failure: the tasks
+			// array is the set, and a bad back-link must not hide what is wrong with it.
+			// The raw value rides through Unknown so a rewrite never eats it.
+			if err := json.Unmarshal(v, &m.SourceMap); err != nil {
+				m.Errors = append(m.Errors, "source_map: must be a map id string")
+				m.Unknown[k] = v
+			}
 		default:
 			m.Unknown[k] = v
 		}
@@ -317,6 +333,13 @@ func WriteManifestAtomic(d *Deps, m *Manifest) error {
 		return err
 	}
 	out["tasks"] = tasksData
+	if m.SourceMap != "" {
+		sourceMap, err := json.Marshal(m.SourceMap)
+		if err != nil {
+			return err
+		}
+		out["source_map"] = sourceMap
+	}
 
 	data, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {

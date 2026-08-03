@@ -117,7 +117,8 @@ Map back-link. None of it is restated here; consult the doc.
 *(Irreducible pop bit: reading a Map as the spec source has no home in the doc's
 publish sections — it is an input mode of `to-spec`, not a publish mechanic. The
 doc's "Publishing a spec" section owns the reverse direction: the `Source map:`
-line and the `## Spawned sets` back-link.)*
+line. The map's own record of the set is written later, by `to-tasks`, per the
+doc's "Map-sourced sets" section — never by hand.)*
 
 When the breakdown source is a Map (the user names a map id, or the session is
 handing off from wayfinder), read `$(pop work show-path)/maps/<map-id>/map.md`

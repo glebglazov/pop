@@ -48,13 +48,13 @@ invisible to the dashboard and never scheduled — until it is later registered
 with `pop tasks register` (see *Publishing tickets*). The spec artifact is named
 `spec.md`; there is no backward-compatible read of any other filename.
 
-**Map back-link (ADR-0129).** When the source is a Wayfinder Map, record the
-forward link both ways:
-
-1. Include `Source map: <map-id>` as the **first line** of `spec.md`, before the
-   template headings.
-2. Append `<task-set-name>` under the map's `## Spawned sets` section in `map.md`
-   (create the section if absent).
+**Map back-link (ADR-0129).** When the source is a Wayfinder Map, include
+`Source map: <map-id>` as the **first line** of `spec.md`, before the template
+headings. That line is human-facing prose — nothing parses it, and nothing
+derives from it. The machine-readable halves of the link are written at ticket
+time, by *Publishing tickets* → *Map-sourced sets*: `source_map` on the set's
+`index.json`, and the map's own record written by `pop map spawned`. Never append
+to `## Spawned sets` in `map.md` by hand; it is generated.
 
 ---
 
@@ -65,6 +65,10 @@ inside the same `<tasks-dir>/<task-set-name>/` folder. When breaking down a
 co-located `spec.md`, reuse that folder and its `<task-set-name>` — write the
 task files alongside the spec, do not mint a new folder. Write files in
 dependency order (blockers first) so "Blocked by" can name real identifiers.
+
+When the work came from a Wayfinder Map — directly or through its `spec.md` —
+read *Map-sourced sets* at the end of this section **before** writing the
+slices: it adds acceptance criteria to some of them.
 
 ### Task markdown template
 
@@ -170,9 +174,9 @@ Effort is model-strength intent, not an agent choice; do not consult
 ### `index.json` manifest
 
 Write `<tasks-dir>/<task-set-name>/index.json` alongside the markdown, one entry
-per file. The manifest carries **only** the `tasks` array — no `worktree` or
-`auto_drain` key (ADR-0115); binding and auto-drain are `register` flags (below),
-never written here.
+per file. The manifest carries the `tasks` array, plus `source_map` for a
+Map-sourced set (see below) — and no `worktree` or `auto_drain` key (ADR-0115);
+binding and auto-drain are `register` flags (below), never written here.
 
 ```json
 {
@@ -206,6 +210,12 @@ Field rules:
   explicitly asks for a specific agent or model; not part of the default flow.
 - `failed_after` — optional integer; attempts after which a runner gave up.
   Written only when `status` becomes `failed`.
+
+Set-level key:
+
+- `source_map` — the map id this set was spawned from. Written on **every**
+  Map-sourced set, spec or no spec, so the back-link is never half-built for a
+  spec-less one. Absent otherwise.
 
 The JSON is the source of truth for automation. The eligibility condition
 (`status == "open"` and every `blocked_by` id is satisfied by a task whose status
@@ -283,6 +293,51 @@ Do not suggest implementing a single task (e.g. the first file). `pop tasks
 implement` drains the entire set in dependency order on its own, and that whole-set
 drain is the intended entry point. The targeted single-task form
 (`<task-set-name>/<file>.md`) exists only for re-running one specific task.
+
+### Map-sourced sets
+
+A set broken down from a Wayfinder Map — directly, or through the `spec.md` a map
+produced — carries two extra obligations. Read the map's
+`$(pop work show-path)/maps/<map-id>/index.json`: it is where ticket status, type
+and the decision **drafts** live.
+
+**Mint the drafts through the slices that implement them (ADR-0171).**
+Wayfinding writes nothing into the repository, so each resolved ticket's
+`adr_drafts` and `context_drafts` are still sitting in the map's folder. They mint
+in the slice that implements that ticket's subject, as acceptance criteria that
+are pure file operations:
+
+```markdown
+- [ ] docs/adr/NNNN-<slug>.md created from
+      <map-dir>/adrs/<8hex>-<slug>.md (next free ADR number)
+- [ ] .grill-context/CONTEXT.<gen>.<HASH>.md created from
+      <map-dir>/context/NN-<slug>.md
+```
+
+Write `<map-dir>` out in full — `$(pop work show-path)/maps/<map-id>` — so the
+draining agent can open the draft without resolving anything.
+
+Attribution needs no inference — the slice's `## Parent` names the map ticket. A
+slice implementing no decision gets the parent reference and no minting checkbox.
+Each draft mints **exactly once** across every set a map spawns, so a second
+handoff carries only the drafts the first one left. Do not mint them yourself:
+publishing does not commit, and an artifact written now would sit uncommitted
+while the set's worktree forks past it.
+
+**Record the link both ways.** On the set, write `"source_map": "<map-id>"` in
+its `index.json` — always, spec or no spec. On the map, after `pop tasks register`
+has succeeded:
+
+```bash
+pop map spawned <map-id> <task-set-name>
+```
+
+That verb is the only writer of the map's lineage: it appends the id to the map
+manifest's `spawned_sets` and regenerates `## Spawned sets` in `map.md`. It is
+idempotent, so a re-registered set is recorded once. Never edit the section or the
+array by hand — the section is generated, and a hand-written line is lost on the
+next resolve. There is no reverse flag on `pop tasks register`; the two halves are
+written by the two sides that own them.
 
 ---
 
@@ -447,11 +502,14 @@ by a session that has read fewer answers than `to-spec` will. Wayfinding produce
 decisions; implementation happens in ordinary registered Task sets. Record the
 forward link both ways:
 
-1. **On the map:** add each spawned task-set id to the `spawned_sets` array in
-   the map's `index.json`. `## Spawned sets` in `map.md` is generated from that
-   array — appending to the section by hand is lost on the next resolve.
-2. **On the set:** `to-spec` writes a `Source map: <map-id>` line as the first
-   line of `spec.md`.
+1. **On the map:** `pop map spawned <map-id> <task-set-name>`, run after the set
+   registers. It appends the id to the `spawned_sets` array in the map's
+   `index.json` and regenerates `## Spawned sets` in `map.md`; it is idempotent,
+   and it is the only writer of either. Appending to the section by hand is lost
+   on the next resolve.
+2. **On the set:** `source_map` in the set's `index.json`, always — plus, where a
+   spec exists, the `Source map: <map-id>` line `to-spec` writes as the first
+   line of `spec.md`. That line is prose for a human; nothing parses it.
 
 Then declare arrival: `pop map arrive <map-id>` writes `Status: arrived` and tears
 down the map's tmux session. The gate is the **destination**, not empty fog — a map

@@ -217,5 +217,8 @@ When invoked directly on a Map (the user names a map id, with no co-located
 `spec.md` yet), read `$(pop work show-path)/maps/<map-id>/map.md` and each
 **resolved** ticket under `issues/` — at minimum every ticket linked from
 **Decisions so far**, plus any other resolved tickets whose `## Answer` should
-inform the breakdown. After writing the set, append `<task-set-name>` under the
-map's `## Spawned sets` section in `map.md` (create the section if absent).
+inform the breakdown. Also read the map's `index.json`: it is where ticket status
+and each ticket's `adr_drafts` / `context_drafts` live. Everything you then owe
+the map — minting those drafts through the implementing slices, `source_map` on
+the set, and `pop map spawned` after registering — is the doc's *Publishing
+tickets* → *Map-sourced sets* section; follow it there.

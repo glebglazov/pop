@@ -19,6 +19,22 @@ func registerMapShellCompletions() {
 	for _, cmd := range []*cobra.Command{mapClaimCmd, mapResolveCmd, mapOutOfScopeCmd} {
 		cmd.ValidArgsFunction = completeMapTicketArgs
 	}
+	mapSpawnedCmd.ValidArgsFunction = completeMapSpawnedArgs
+}
+
+// completeMapSpawnedArgs completes `pop map spawned`: a map id, then a task-set
+// id. The second position is the only place in this family where the candidates
+// come from the other kind's store — the verb records a link across kinds, so
+// completion crosses too.
+func completeMapSpawnedArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	switch len(args) {
+	case 0:
+		return completeMapIDs(args, toComplete, false)
+	case 1:
+		return completeTaskTaskSets(cmd, args, toComplete)
+	default:
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
 }
 
 // completeMapTicketArgs completes `pop map claim`: a map id first, then the

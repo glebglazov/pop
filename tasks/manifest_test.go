@@ -413,6 +413,52 @@ func TestManifestPreservesUnknownFields(t *testing.T) {
 	}
 }
 
+// TestManifestRecordsSourceMap pins the set-side half of the lineage link: a
+// Map-sourced set carries `source_map`, it survives a state rewrite, and a
+// non-string value is a diagnostic rather than a parse failure that would hide
+// whatever else is wrong with the set.
+func TestManifestRecordsSourceMap(t *testing.T) {
+	root := t.TempDir()
+	taskDir := filepath.Join(root, "thoughts/issues/demo")
+	writeTaskMD(t, taskDir, "01-one.md", "## Acceptance criteria\n\n- [ ] one\n")
+	path := filepath.Join(taskDir, "index.json")
+	manifestWith := func(sourceMap string) string {
+		return `{"tasks":[{"id":"01-one","file":"01-one.md","title":"One","type":"AFK","status":"open","blocked_by":[]}],` +
+			`"source_map":` + sourceMap + `}`
+	}
+	if err := os.WriteFile(path, []byte(manifestWith(`"2026-08-03-generalize-work"`)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	d := DefaultDeps()
+	m := LoadManifest(d, "demo", path)
+	if !m.Valid {
+		t.Fatalf("unexpected invalid: %v", m.Errors)
+	}
+	if m.SourceMap != "2026-08-03-generalize-work" {
+		t.Fatalf("SourceMap = %q", m.SourceMap)
+	}
+
+	m.Tasks[0].Status = "done"
+	if err := WriteManifestAtomic(d, m); err != nil {
+		t.Fatal(err)
+	}
+	if again := LoadManifest(d, "demo", path); again.SourceMap != m.SourceMap {
+		t.Fatalf("SourceMap after a rewrite = %q, want %q", again.SourceMap, m.SourceMap)
+	}
+
+	if err := os.WriteFile(path, []byte(manifestWith(`{"id":"nope"}`)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	broken := LoadManifest(d, "demo", path)
+	if broken.Valid || len(broken.Tasks) != 1 {
+		t.Fatalf("a malformed source_map should be a diagnostic over a parsed set: %+v", broken)
+	}
+	if !strings.Contains(strings.Join(broken.Errors, "; "), "source_map") {
+		t.Fatalf("errors = %v, want one naming source_map", broken.Errors)
+	}
+}
+
 func TestAcceptanceCriteriaValidation(t *testing.T) {
 	root := t.TempDir()
 	taskDir := filepath.Join(root, "thoughts/issues/demo")
