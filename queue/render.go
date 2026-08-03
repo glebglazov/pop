@@ -17,13 +17,13 @@ import (
 // (dashboard.go) key on this file so the boundary reads as designed rather
 // than as leftovers.
 
-// dashboardStatusCellStyled is the plain composed STATUS cell (work.StatusCell)
+// dashboardStatusCellStyled is the plain composed STATUS cell (dashboardStatusCellText)
 // with per-token styling for the TUI: the base label carries its semantic
 // bucket colour and the immunized "verified @ <sha>" token renders yellow,
 // while the auto-drain, orphaned, parked, and config-error suffixes stay
 // plain. It layers styling over work's unstyled composition (ADR-0143) so
-// work.StatusCell — the width-measured form — stays ANSI-free, and it
-// reproduces work.StatusCell's token order so the two forms differ only by
+// dashboardStatusCellText — the width-measured form — stays ANSI-free, and it
+// reproduces that composition's token order so the two forms differ only by
 // ANSI. Map rows colour the WAYFINDING label and keep the tally plain
 // (ADR-0130).
 func dashboardStatusCellStyled(row DashboardRow) string {
@@ -34,7 +34,7 @@ func dashboardStatusCellStyled(row DashboardRow) string {
 		}
 		return fmt.Sprintf("%s · %d open / %d frontier", label, row.MapOpen, row.MapFrontier)
 	}
-	label := work.StatusLabel(row)
+	label := dashboardStatusLabelText(row)
 	if st, ok := dashboardStatusBucketStyle[label]; ok {
 		label = st.Render(label)
 	}
@@ -49,7 +49,7 @@ func dashboardStatusCellStyled(row DashboardRow) string {
 	}
 	// Parked and config-error ride the STATUS cell (ADR-0111) as uncoloured plain
 	// text, trailing the auto-drain/orphaned suffixes in the same fixed order
-	// work.StatusCell uses.
+	// dashboardStatusCellText uses.
 	if row.Parked {
 		label += " · parked"
 	}
@@ -466,7 +466,7 @@ func dashboardRowNaturalValues(row DashboardRow) []string {
 	return []string{
 		row.Project,
 		row.SetID,
-		work.StatusCell(row),
+		dashboardStatusCellText(row),
 		renderDashboardDest(row.DestKind, row.Worktree),
 		dashboardActivityCluster(row, livePaneCache{}, false),
 	}

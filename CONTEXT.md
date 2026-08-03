@@ -1310,6 +1310,22 @@ _Avoid_: wayfinder session, map window, map workbench
 One Decision ticket's window inside a **Map session**, named after the ticket file's stem and running the interactive agent on the wayfinding skill in work mode. Spawned by `pop map next`, which switches the caller there — taking work puts you where the work is — and by the Work dashboard's map row, which focuses it on its way out. A window whose agent is still alive is a jump target and is never sent work again (ADR-0158); an idle one (bare shell) is respawned. The other writes (`register`, `claim`, `resolve`, `out-of-scope`) run **in place** and spawn nothing: an agent resolving a ticket from a Task-set pane must not relocate its human.
 _Avoid_: map window, ticket pane, grill pane
 
+**Work kind**:
+One of the closed set of things pop looks after — `task-set` | `map` | `routine` — and the single interface each complies with: load your containers, order them among themselves, say which verbs apply, perform one, summarise a page of them. Every kind is a container of items, which is the whole of what is shared: there is no shared status vocabulary and no shared status taxonomy, so a **Work container** surfaces its own label and pop never ranks one kind's status against another's. Ordering is fixed kind precedence — task sets, then Maps, then Routines — then that kind's own comparator, and header counts are each kind's own phrases joined in that order. The seam imports no kind: adapters live kind-side and the wiring list lives at the CLI edge, so a future kind adds an adapter and one line and cannot make the seam grow an import. Closed on purpose — a new kind is a deliberate edit, never a plugin registration.
+_Avoid_: work type, plugin, kind registry (that is the **Work container registry**)
+
+**Work container**:
+One unit of work of some **Work kind**: a Task set, a Map, later a Routine. Containers carry registration, status derivation and archival — the dashboard shows containers, while the supervisor advances **Work item**s. Plain data by design: every consumer reads its fields (its project, its own status label, its composed status cell, its items, its detail prose) rather than asking it questions, and it carries no facet shared with another kind. A container pop cannot read at all carries that verdict and the corrective beside it, so a read surface can show what needs fixing instead of dropping it silently.
+_Avoid_: row (that is the render form), work unit, entity
+
+**Work item**:
+One advanceable thing inside a **Work container**: a task in a Task set, a **Decision ticket** on a Map, a run of a Routine. Items carry kind-local statuses, blocking and advanceability. An item earns a **Work container registry** row only when something must point at it — a claim, a holder — never eagerly, because an item's status is derived from files like a container's.
+_Avoid_: unit, subtask, ticket (that is the Map's item)
+
+**Work ref**:
+`{Kind, ContainerID, ItemID}` — the name of a piece of Work independent of the kind that produced it, rendered `task-set:2026-08-02-foo/03`, with the item segment dropped for a whole container (`map:generalize-work`). It is how one record points at another piece of work — a **Ticket claim**'s subject, a Checkout claim's holder — without the pointer's owner knowing what kind it names. It lives in a leaf package so the store can name one without importing the domain.
+_Avoid_: work id, work path, set id (that names only the container)
+
 **Work container registry**:
 The machine-global `work_containers` table keying every registered Work container by (kind, id) — the one place that answers "does pop look after this?" for any kind. It carries the registration time and the `archived` bit, and deliberately no status: status is derived from files on every read, so a cached copy here would be a second source of truth. Maps are the first kind to key into it; Task sets migrate onto it from **Task state** later.
 _Avoid_: work table, container index, map registry

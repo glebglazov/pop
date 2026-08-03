@@ -1,18 +1,26 @@
-// Package work is the data core of the Work dashboard (ADR-0143): the row and
-// snapshot types, the ADR-0121 sort tiers/bands/status order, the shared
-// Done-inclusion row filter, and the unstyled cell composition (status
-// label/cell, live indicator, worktree/destination label). It imports neither
-// bubbletea nor lipgloss — the styled render layer lives queue-side and consumes
-// this core (a guard test enforces the boundary). Snapshot *building* (the store
-// read and repo scanning) stays in queue for now; queue assembles rows and work
-// derives from them.
+// Package work is the Work seam: one `Kind` interface that every Work kind
+// complies with, the plain data structs its methods pass around (Container,
+// Item, Action, Outcome, Section), and the snapshot builder that walks a wired
+// list of kinds. It imports no kind package — adapters live kind-side and `cmd`
+// wires them — and it imports neither bubbletea nor lipgloss, so the styled
+// render layer stays TUI-side (ADR-0143); guard tests enforce both boundaries.
+//
+// The transitional legacy row model (Row, SetRef, and the unstyled cell
+// composition around them) still lives here, derived from Container, so the
+// consumers the contract slices have yet to migrate keep compiling.
 package work
 
 import (
 	"time"
-
-	"github.com/glebglazov/pop/tasks"
 )
+
+// SetStatus is the status vocabulary the legacy Row model carries. It lives here
+// only because Row does: `tasks.TaskSetStatus` is an alias of it, so the Task-set
+// kind keeps its own name and its own constants and nothing in the seam ever
+// names a task-set status. The alias is what lets `work` hold the transitional
+// row model without importing the kind that owns the vocabulary; type and alias
+// both die with Row in the contract slices.
+type SetStatus string
 
 // SetRef holds the resolved, fork-free coordinates of one registered Task set
 // that the Queue write-path acts on, plus the per-build derived facts the
@@ -48,7 +56,7 @@ type SetRef struct {
 	ConfigError string
 	// RawStatus is the underlying derived Task-set status, kept for counts and
 	// comparisons so display relabels never leak into logic.
-	RawStatus tasks.TaskSetStatus
+	RawStatus SetStatus
 	// DoneStillManagedBound is true when a Done set still holds a
 	// pop-provisioned (managed) Worktree binding. The dashboard keeps such a
 	// row visible as a clean-up reminder until archived or unbound (ADR-0070).
@@ -106,6 +114,13 @@ type Row struct {
 // Snapshot is the data model for `pop work dashboard`.
 type Snapshot struct {
 	Rows []Row
+	// Containers are every loaded Work container in snapshot order — kind
+	// precedence, then each kind's own comparator. Rows is a projection of this;
+	// consumers migrate from one to the other surface by surface.
+	Containers []Container
+	// Summary is every kind's header phrases in kind order, already pluralised.
+	// SummaryLine joins them.
+	Summary []string
 	// ModelSkips are the Effort model skips in force at build time (ADR-0168),
 	// ordered by preset then model. They are machine-global rather than per-row,
 	// which is why they ride the snapshot and render as a footer one-liner rather

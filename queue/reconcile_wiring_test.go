@@ -54,7 +54,7 @@ func TestBuildDashboardReconcilesBeforeReading(t *testing.T) {
 		Reconcile:  func() (int, error) { reconciled++; return 0, nil },
 	}
 
-	if _, err := work.BuildSnapshot(d.WorkDeps(), cfg); err != nil {
+	if _, err := work.BuildSnapshot(d.WorkKinds(cfg)); err != nil {
 		t.Fatalf("BuildSnapshot: %v", err)
 	}
 	if reconciled != 1 {
@@ -114,7 +114,7 @@ func TestBuildDashboardSurfacesReconcileErrorButContinues(t *testing.T) {
 		ReconcileOut: &out,
 	}
 
-	if _, err := work.BuildSnapshot(d.WorkDeps(), cfg); err != nil {
+	if _, err := work.BuildSnapshot(d.WorkKinds(cfg)); err != nil {
 		t.Fatalf("BuildSnapshot: %v, want reconcile failure to not fail the build", err)
 	}
 	if !strings.Contains(out.String(), reconcileErr.Error()) {

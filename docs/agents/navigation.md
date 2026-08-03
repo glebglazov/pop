@@ -25,15 +25,17 @@ AGENTS="…"`) are opt-in and not part of ordinary verification.
 | `cmd/` | Cobra commands, one file per family; thin over the packages below |
 | `tasks/` | Task sets: manifests, runner, attempt streams, prompts, spend |
 | `tasks/binding/` | Binding a Task set to a checkout or worktree |
+| `tasks/setkind/` | The Task-set `work.Kind` adapter: loads containers per repo group, the ADR-0121 comparator, the set's verbs. One level down from `tasks` because it needs `tasks/binding` |
 | `queue/` | `pop queue` supervisor **and** the Work dashboard TUI (`dashboard.go`) |
-| `work/` | Work-dashboard data core — rows, derivation, snapshot (ADR-0143) |
+| `work/` | The Work seam (ADR-0173): the `Kind` interface, the plain `Container`/`Item`/`Action`/`Outcome`/`Section` structs, the snapshot builder over a wired `[]Kind`. Imports no kind and no TUI — two guard tests. Still holds the transitional `Row` model derived from `Container` |
 | `work/ref/` | `WorkRef` + the closed Work-kind enum; a leaf `store` may import |
+| `repogroup/` | Fork-free resolution of the repository groups every kind scans (markers, integration target, HEAD branch, ADR-0060) — below the kinds because it needs `tasks/binding` |
 | `routine/` | Project routines: discovery, firing, per-checkout state |
 | `integrate/` | Agent-CLI integration — install/remove/doctor per agent |
 | `internal/tmux/` | All tmux knowledge; nothing else shells out to tmux (ADR-0142). `@pop_*` option semantics including Work-session typing (`@pop_work_kind`/`@pop_work_id`) live here |
 | `store/` | `pop.db`, single connection, opened once via `tasks.Deps` (ADR-0140) |
 | `monitor/` | Pane status daemon and state |
-| `project/`, `wayfinder/` | Project picker; Maps — scan, `index.json` manifest, `pop map register`/archive against the Work registry, read-path folds (pre-manifest Maps, the `wayfinder/`→`maps/` rename, the retired archive side-file), frontier, `pop map next`/`claim` over `store`'s `work_item_claims`, `pop map resolve`/`out-of-scope` writing answer + manifest + map.md's `pop:generated` regions under a per-Map file lock, `pop map arrive`/`open` writing the `active`/`arrived`/`abandoned` status line, the per-Map tmux session `pop-map-<id>` (`session.go`: create-or-attach at the Trunk, `@pop_work_*` stamp, one grilling window per ticket — shared with the Work dashboard's map row), skill invocation |
+| `project/`, `wayfinder/` | Project picker; Maps — scan, `index.json` manifest, `pop map register`/archive against the Work registry, read-path folds (pre-manifest Maps, the `wayfinder/`→`maps/` rename, the retired archive side-file), frontier, `pop map next`/`claim` over `store`'s `work_item_claims`, `pop map resolve`/`out-of-scope` writing answer + manifest + map.md's `pop:generated` regions under a per-Map file lock, `pop map arrive`/`open` writing the `active`/`arrived`/`abandoned` status line, the per-Map tmux session `pop-map-<id>` (`session.go`: create-or-attach at the Trunk, `@pop_work_*` stamp, one grilling window per ticket — shared with the Work dashboard's map row), skill invocation, and the Map `work.Kind` adapter (`workkind.go`) |
 | `config/` | `config.toml` load, validation, migration |
 | `ui/`, `layout/`, `dashboardshell/` | lipgloss styles and shared render helpers |
 

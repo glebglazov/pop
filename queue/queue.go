@@ -7,7 +7,7 @@
 //
 // queue also hosts the Work dashboard's TUI (dashboard.go) and its static
 // `pop queue status` render (status.go); both consume the top-level work
-// package, the dashboard's pure data core (ADR-0143). queue owns the styled
+// package, the Work seam its rows are projected from (ADR-0143, ADR-0173). queue owns the styled
 // wrappers, style maps, and column/layout math the work package's rows are
 // rendered through (render.go) — the render-shared layer between the two
 // render surfaces.
@@ -32,6 +32,7 @@ import (
 	"github.com/glebglazov/pop/store"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
+	"github.com/glebglazov/pop/work"
 )
 
 const drainWindowName = "pop-queue"
@@ -103,6 +104,11 @@ type Deps struct {
 	CompleteDetailTask func(defPath, taskPath string) error
 	ResetDetailTask    func(defPath, taskPath string) error
 	SkipDetailTask     func(defPath, taskPath string) error
+
+	// Kinds overrides the Work-kind wiring list the dashboard's snapshot builds
+	// through (WorkKinds). Left nil it is the real Task-set and Map adapters over
+	// the seams above; a test sets it to hand the builder kinds of its own.
+	Kinds func(cfg *config.Config) []work.Kind
 }
 
 type runtimeLock interface {

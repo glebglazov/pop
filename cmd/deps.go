@@ -16,7 +16,9 @@ import (
 	"github.com/glebglazov/pop/queue"
 	"github.com/glebglazov/pop/routine"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/setkind"
 	"github.com/glebglazov/pop/wayfinder"
+	"github.com/glebglazov/pop/work"
 )
 
 // Deps is the cmd-layer seam for explicit working-directory and env routing
@@ -171,16 +173,36 @@ func (d *Deps) projectDeps() *project.Deps {
 }
 
 func (d *Deps) queueDeps() *queue.Deps {
-	if d != nil && d.Queue != nil {
-		return d.Queue
-	}
-	qd := queue.DefaultDeps()
-	if d != nil && d.FS != nil {
-		if qd.Tasks != nil {
-			qd.Tasks.FS = d.FS
+	qd := d.Queue
+	if d == nil || qd == nil {
+		qd = queue.DefaultDeps()
+		if d != nil && d.FS != nil {
+			if qd.Tasks != nil {
+				qd.Tasks.FS = d.FS
+			}
 		}
 	}
+	if qd.Kinds == nil {
+		qd.Kinds = workKinds(qd)
+	}
 	return qd
+}
+
+// workKinds is the Work-kind wiring list: which kinds a read surface sees, in
+// what order, each constructed with its own dependencies captured. It lives at
+// the CLI edge on purpose — `work` defines the seam and imports no kind, so
+// something has to name them, and an explicit list here is the accepted cost of
+// keeping the seam free of a per-kind import (ADR-0173). Adding a kind is one
+// entry here plus its adapter.
+func workKinds(qd *queue.Deps) func(cfg *config.Config) []work.Kind {
+	return func(cfg *config.Config) []work.Kind {
+		// One repository-group resolution, shared by every kind of this build.
+		groups := qd.RepoGroups(cfg)
+		return []work.Kind{
+			setkind.New(qd.SetKindDeps(cfg, groups)),
+			wayfinder.NewMapKind(qd.MapKindDeps(cfg, groups)),
+		}
+	}
 }
 
 func (d *Deps) routineDeps() *routine.Deps {

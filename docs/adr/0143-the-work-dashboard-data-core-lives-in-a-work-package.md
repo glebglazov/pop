@@ -4,6 +4,14 @@ status: accepted
 
 # The Work dashboard's data core lives in a top-level `work` package; the TUI consumes it
 
+> Partially superseded by [ADR-0173](0173-work-is-one-kind-interface-with-data-shaped-returns-and-kind-side-adapters.md).
+> The no-TUI boundary and its guard test stand unchanged. What moved: `work` is
+> now the Work *seam* and imports no kind, so the snapshot building, the ADR-0121
+> comparator, the Done-inclusion filter and the STATUS-cell composition described
+> below live kind-side (`tasks`, `tasks/setkind`) with the repository-group
+> resolution in `repogroup`. `work.Row`/`SetRef` survive as a transitional
+> projection of `Container` until the contract slices delete them.
+
 ## Context
 
 `queue/dashboard.go` (4,538 LOC, ~230 decls) fuses the Work dashboard's data derivation — snapshot loading, row building (Task set and Map rows), the ADR-0121 sort tiers/bands/status order, the Done-inclusion filter, status-cell composition — with the Bubbletea model, its ~17 async message types, action side-effects, and all rendering. Its 5,668-LOC test file is the symptom of an interface too wide to pin down. The split half-exists already: the derivation functions are pure over `DashboardRow` (the model calls them, never the reverse), and `queue/status.go` already consumes rows + comparator + unstyled cells with zero bubbletea — ADR-0121's "one row builder, one comparator" realized. What's missing is a mechanical boundary. Meanwhile [ADR-0130](0130-the-queue-dashboard-becomes-the-work-dashboard.md) moved the surface to the `pop work` family while the code stayed in `queue`.

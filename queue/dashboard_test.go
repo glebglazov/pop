@@ -89,7 +89,7 @@ func dashboardTestDeps(t *testing.T, rows []tasks.Row, locks map[string]*tasks.R
 
 // TestRenderStatusMirrorsDashboardRows proves `pop queue status` renders the
 // same rows in the same order as the Work dashboard (ADR-0121): both consume the
-// one comparator (work.SortRows / sortDashboardRows) over the one row set, so the
+// one comparator (tasks.SortWorkRows / sortDashboardRows) over the one row set, so the
 // static status table's TASK SET order equals the sorted dashboard rows' order,
 // under the Summary headline and without any retired inventory section. The row
 // derivation itself lives in work's tests now (ADR-0143); here the rows are the
@@ -1240,13 +1240,13 @@ func TestDashboardStatusBucketColors(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			row := DashboardRow{SetRef: SetRef{RawStatus: c.status}, Started: c.started}
 			styled := dashboardStatusCellStyled(row)
-			label := work.StatusLabel(row)
+			label := dashboardStatusLabelText(row)
 			// The bucket ANSI must wrap the base label token.
 			if !strings.Contains(styled, c.ansi+label) {
 				t.Fatalf("styled label = %q, want bucket %q on %q", styled, c.ansi, label)
 			}
 			// Width measurement stays plain: no ANSI in the un-styled cell.
-			if plain := work.StatusCell(row); strings.Contains(plain, "\x1b[") {
+			if plain := dashboardStatusCellText(row); strings.Contains(plain, "\x1b[") {
 				t.Fatalf("plain cell should carry no ANSI: %q", plain)
 			}
 		})
@@ -1911,7 +1911,7 @@ func TestDashboardShowsUnsatisfiableWorktreeDirective(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	snap, err := work.BuildSnapshot(d.WorkDeps(), cfg)
+	snap, err := work.BuildSnapshot(d.WorkKinds(cfg))
 	if err != nil {
 		t.Fatalf("BuildSnapshot: %v", err)
 	}
@@ -1927,7 +1927,7 @@ func TestDashboardShowsUnsatisfiableWorktreeDirective(t *testing.T) {
 	if row.LiveDrain {
 		t.Fatalf("LiveDrain = true, want false (config error row is not a live drain)")
 	}
-	status := work.StatusCell(*row)
+	status := dashboardStatusCellText(*row)
 	if !strings.Contains(status, "· config error:") || !strings.Contains(status, "no worktree of that name") {
 		t.Fatalf("status = %q, want a config error suffix for the unsatisfiable named directive", status)
 	}
@@ -1984,7 +1984,7 @@ func TestDashboardBindPickerListsAndAdoptsExistingWorktree(t *testing.T) {
 	if binding.RuntimePath != wt2 || binding.Provisioned {
 		t.Fatalf("binding = %+v, want adopted %s", binding, wt2)
 	}
-	snap, err := work.BuildSnapshot(d.WorkDeps(), cfg)
+	snap, err := work.BuildSnapshot(d.WorkKinds(cfg))
 	if err != nil {
 		t.Fatalf("BuildSnapshot: %v", err)
 	}
@@ -2174,7 +2174,7 @@ func TestDashboardBuildForksNoStaticGit(t *testing.T) {
 	d.Tasks.Git = guard
 	d.Project.Git = guard
 
-	snap, err := work.BuildSnapshot(d.WorkDeps(), cfg)
+	snap, err := work.BuildSnapshot(d.WorkKinds(cfg))
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -4475,7 +4475,7 @@ func TestDashboardParkedAndConfigErrorSuffixes(t *testing.T) {
 			ConfigError: "no trunk",
 		},
 	}
-	plain := work.StatusCell(multi)
+	plain := dashboardStatusCellText(multi)
 	if styled := dashboardStatusCellStyled(multi); lipgloss.Width(styled) != lipgloss.Width(plain) {
 		t.Fatalf("styled width %d != plain width %d (ANSI leaked into width math)", lipgloss.Width(styled), lipgloss.Width(plain))
 	}

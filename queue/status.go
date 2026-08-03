@@ -195,7 +195,7 @@ func statusRowValues(row DashboardRow) []string {
 	return []string{
 		row.Project,
 		row.SetID,
-		work.StatusCell(row),
+		dashboardStatusCellText(row),
 		work.WorktreeLabel(row.DestKind, row.Worktree),
 		dashboardActivityCluster(row, livePaneCache{}, false),
 	}

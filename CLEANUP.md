@@ -101,6 +101,8 @@ message naming the new status (loud-failure preference). Current embedded templa
 | Item | Location | Notes |
 |---|---|---|
 | `queue.WorktreeBinding` type alias | `queue/state.go:15` (`= binding.Binding`; becomes `= store.Binding` after the store-seam refactor) | Kept only to avoid churning 30+ test files in the refactor that deleted the mirror types. Flip call sites to `store.Binding` and delete the alias. |
+| `work.SetStatus` + the `tasks.TaskSetStatus` alias | `work/row.go`, `tasks/status.go` | The Work seam holds the transitional `Row` model, so it needs to name the Task-set status type without importing the kind that owns it (ADR-0173). Deleted with `Row`: move the type back into `tasks` as a plain `type TaskSetStatus string`. |
+| Legacy row model + its queue-side dispatch | `work/row.go` (`Row`, `SetRef`, `DestKind`), `work/derive.go`, `tasks/work_row.go`, `queue/work_rows.go` | The expand half of the seam refactor kept `Row` alive as a projection of `Container` so consumers could migrate one surface at a time; `queue/work_rows.go`'s `IsMap` dispatch exists only to keep composing a row's cell. All of it goes when the contract slices land — a Container already carries its kind's composed cell. |
 
 ### E. Cross-references that go stale (fix in the same change)
 

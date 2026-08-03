@@ -86,7 +86,7 @@ var (
 	// core (ADR-0143): the command surface is a consumer of work.BuildSnapshot, so
 	// `pop queue status` renders the same rows the dashboard derives.
 	queueBuildDashboard = func(d *queue.Deps, cfg *config.Config) (queue.DashboardSnapshot, error) {
-		return work.BuildSnapshot(d.WorkDeps(), cfg)
+		return work.BuildSnapshot(d.WorkKinds(cfg))
 	}
 	queueRunDashboard = dashboardshell.RunFromQueue
 )

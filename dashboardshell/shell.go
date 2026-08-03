@@ -78,7 +78,7 @@ func newShell(start View, qd *queue.Deps, cfg *config.Config, rd *routine.Deps) 
 			return Shell{}, err
 		}
 	}
-	qSnap, err := work.BuildSnapshot(qd.WorkDeps(), cfg)
+	qSnap, err := work.BuildSnapshot(qd.WorkKinds(cfg))
 	if err != nil {
 		return Shell{}, err
 	}

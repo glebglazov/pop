@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -14,8 +15,10 @@ import (
 	"github.com/glebglazov/pop/config"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/project"
+	"github.com/glebglazov/pop/repogroup"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
+	"github.com/glebglazov/pop/tasks/setkind"
 	"github.com/glebglazov/pop/ui"
 	"github.com/glebglazov/pop/wayfinder"
 	"github.com/glebglazov/pop/work"
@@ -127,36 +130,82 @@ func pathWithinOrEqual(p, base string) bool {
 	return p == base || strings.HasPrefix(p, base+string(filepath.Separator))
 }
 
-// sortDashboardRows applies the shared Queue surface order to a dashboard
-// build's rows. The comparator — the ADR-0121 membership tiers, status bands,
-// intra-project status order, and SetID tiebreak — lives in the work data core
-// (ADR-0143); this is the queue-side seam both BuildDashboard and the static
-// status render key on.
-func sortDashboardRows(rows []DashboardRow) {
-	work.SortRows(rows)
+// WorkKinds is the wiring list the Work snapshot builder consumes: one adapter
+// per Work kind, each constructed with queue's own dependencies captured — the
+// store handle, the config loader, the Done-inclusion flag, and every build seam
+// the dashboard tests inject — so the TUI's refresh rebuilds through exactly the
+// seams its tests drive. The borrow is by pointer: no adapter closes the
+// process-cached store handle it reaches through Tasks (ADR-0140).
+//
+// The list itself — which kinds exist and in what order — is `cmd`'s to wire
+// through Kinds (ADR-0173); this is the default for callers that build queue deps
+// directly, and the hook a test uses to hand the builder a synthetic kind.
+func (d *Deps) WorkKinds(cfg *config.Config) []work.Kind {
+	if d == nil {
+		d = DefaultDeps()
+	}
+	if d.Kinds != nil {
+		return d.Kinds(cfg)
+	}
+	groups := d.RepoGroups(cfg)
+	return []work.Kind{
+		setkind.New(d.SetKindDeps(cfg, groups)),
+		wayfinder.NewMapKind(d.MapKindDeps(cfg, groups)),
+	}
 }
 
-// WorkDeps projects the supervisor's Deps onto the Work data core's Deps
-// (ADR-0143): queue is a consumer of work, so it forwards the store handle, the
-// config loader, the Done-inclusion flag, and every build seam the dashboard
-// tests inject, letting work.BuildSnapshot derive the same rows the removed
-// queue-side builder did. The borrow is by pointer — work never closes the
-// process-cached store handle it reaches through Tasks (ADR-0140).
-func (d *Deps) WorkDeps() *work.Deps {
-	if d == nil {
-		return work.DefaultDeps()
-	}
-	return &work.Deps{
+// SetKindDeps projects queue's dependencies onto the Task-set kind's, forwarding
+// every build seam the dashboard tests inject. The borrow is by pointer: the
+// adapter never closes the process-cached store handle it reaches through Tasks
+// (ADR-0140).
+func (d *Deps) SetKindDeps(cfg *config.Config, groups func() ([]repogroup.Group, error)) *setkind.Deps {
+	return &setkind.Deps{
 		Tasks:          d.Tasks,
 		Project:        d.Project,
 		LoadConfig:     d.LoadConfig,
+		Config:         cfg,
 		IncludeDone:    d.IncludeDone,
+		Groups:         groups,
 		Refresh:        d.Refresh,
 		LiveDrains:     d.LiveDrains,
 		Reconcile:      d.Reconcile,
 		ReconcileOut:   d.ReconcileOut,
 		Now:            d.Now,
 		ProbeDirective: d.ProbeDirective,
+	}
+}
+
+// MapKindDeps projects queue's dependencies onto the Map kind's. The Map kind
+// reads through queue's own filesystem and tmux, so a test that injects either
+// sees Maps through it too.
+func (d *Deps) MapKindDeps(cfg *config.Config, groups func() ([]repogroup.Group, error)) *wayfinder.MapKindDeps {
+	return &wayfinder.MapKindDeps{
+		Wayfinder: &wayfinder.Deps{FS: d.Tasks.FS, Tasks: d.Tasks, Tmux: d.Tmux},
+		Project:   d.Project,
+		Config:    cfg,
+		Groups:    groups,
+	}
+}
+
+// RepoGroups resolves the repository groups once per build and replays the
+// answer: every kind scans per repository group, and the kinds of one build must
+// read the same repository picture. A wiring list calls this once and hands the
+// result to every kind it constructs.
+func (d *Deps) RepoGroups(cfg *config.Config) func() ([]repogroup.Group, error) {
+	return memoRepoGroups(&repogroup.Deps{Tasks: d.Tasks, Project: d.Project}, cfg)
+}
+
+// memoRepoGroups resolves the repository groups once and replays the answer, so
+// every kind of one build reads the same repository picture.
+func memoRepoGroups(rd *repogroup.Deps, cfg *config.Config) func() ([]repogroup.Group, error) {
+	var (
+		once   sync.Once
+		groups []repogroup.Group
+		err    error
+	)
+	return func() ([]repogroup.Group, error) {
+		once.Do(func() { groups, err = repogroup.Resolve(rd, cfg) })
+		return groups, err
 	}
 }
 
@@ -2022,7 +2071,7 @@ func (m QueueDashboard) confirmBindModal() (tea.Model, tea.Cmd) {
 
 func (m QueueDashboard) reload() tea.Cmd {
 	return func() tea.Msg {
-		snap, err := work.BuildSnapshot(m.d.WorkDeps(), m.cfg)
+		snap, err := work.BuildSnapshot(m.d.WorkKinds(m.cfg))
 		live := loadLivePaneCache(m.d)
 		return dashboardRowsMsg{snap: snap, live: live, err: err}
 	}
@@ -3745,7 +3794,7 @@ func writeDashboardFooter(b *strings.Builder, height int, hint string) {
 // quit for any other reason), leaving the workbench-aware open to the command
 // layer (task 02).
 func RunDashboard(d *Deps, cfg *config.Config) (string, error) {
-	snap, err := work.BuildSnapshot(d.WorkDeps(), cfg)
+	snap, err := work.BuildSnapshot(d.WorkKinds(cfg))
 	if err != nil {
 		return "", err
 	}

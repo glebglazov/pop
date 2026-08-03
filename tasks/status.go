@@ -4,10 +4,16 @@ import (
 	"fmt"
 	"path"
 	"strings"
+
+	"github.com/glebglazov/pop/work"
 )
 
-// TaskSetStatus is a derived task status for one Task-set row.
-type TaskSetStatus string
+// TaskSetStatus is a derived task status for one Task-set row. It is an alias of
+// work.SetStatus so the transitional Work row model can carry the field without
+// `work` importing this package — the Work seam's import direction is one-way,
+// kinds comply and `work` imports no kind. The vocabulary itself stays here: the
+// constants below are the Task-set kind's own, and no other kind reads them.
+type TaskSetStatus = work.SetStatus
 
 const (
 	StatusMissing          TaskSetStatus = "MISSING"
