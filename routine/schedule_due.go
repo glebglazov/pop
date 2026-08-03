@@ -10,6 +10,13 @@ import (
 // run of the same routine is still live.
 const SkipReasonOverlap = "previous run still live"
 
+// SkipReasonChanged is recorded when a due fire is skipped because the routine's
+// run-affecting inputs drifted since its last run (ADR-0128). The same dispatch
+// pauses the routine with reason `changed`, so exactly one such row is written
+// per drift: every later tick stops at the pause bit and never reaches the
+// fingerprint check.
+const SkipReasonChanged = "run-affecting inputs drifted"
+
 // IsDue reports whether a routine should fire at now given its schedule and the
 // instant of its most recent non-skipped fire. A zero lastFired means the
 // routine has never fired and is never due: the first fire is a human act

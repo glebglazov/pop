@@ -70,15 +70,9 @@ func tick(d *Deps, out io.Writer, runOut *runOutputState) {
 		return
 	}
 
-	// One kind list per tick: an adapter carries this pass's candidates, so a fresh
-	// list is what keeps that state tick-scoped.
-	advancers := work.Advancers(d.WorkKinds(cfg))
-
-	// Routines are not behind the seam yet, so their reconcile stays an explicit
-	// serial call beside the phases rather than riding them.
-	d.reconcileRoutineRuns()
-
-	passes, err := readPasses(advancers)
+	// One advancer list per tick: an adapter carries this pass's candidates, so a
+	// fresh list is what keeps that state tick-scoped.
+	passes, err := readPasses(d.advancers(cfg))
 	if err != nil {
 		runOut.emitScanError(out, err.Error())
 		return
@@ -117,8 +111,15 @@ func tick(d *Deps, out io.Writer, runOut *runOutputState) {
 		// guard, not by this view patch (see seedSpawnedRunning).
 		runOut.emitPostSpawnView(out, seedSpawnedRunning(BuildRunView(snap, time.Now()), spawned))
 	}
+}
 
-	tickRoutines(d, out)
+// advancers is the supervisor's list: the advanceable kinds of the read-surface
+// wiring list, then the Routine adapter, which is not on that list because it
+// wears the advance seam and not yet the read one. Appending is
+// precedence-correct — routine is last in the closed enum — and the special case
+// dies the moment a Routine becomes a Work kind the dashboard shows.
+func (d *Deps) advancers(cfg *config.Config) []work.Advancer {
+	return append(work.Advancers(d.WorkKinds(cfg)), d.routineAdvancer())
 }
 
 // kindPass is one kind's half of a supervisor tick: the advancer, the kind it
@@ -182,11 +183,12 @@ func dispatch(pass kindPass, c work.Candidate, occupancy *checkoutOccupancy) wor
 	return event
 }
 
-// advancerKindID names the kind behind an advancer. Every advancer is obtained by
-// asserting a wired Kind, so the id is always there; a hand-built advancer that
-// is not one answers the zero kind rather than failing the tick.
+// advancerKindID names the kind behind an advancer. It asks for the id alone
+// rather than asserting work.Kind, because an adapter may wear the advance seam
+// before the read one — the Routine adapter does — and a hand-built advancer
+// that names no kind answers the zero kind rather than failing the tick.
 func advancerKindID(adv work.Advancer) work.KindID {
-	if k, ok := adv.(work.Kind); ok {
+	if k, ok := adv.(interface{ ID() work.KindID }); ok {
 		return k.ID()
 	}
 	return work.KindID("")

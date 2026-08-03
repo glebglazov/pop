@@ -120,3 +120,13 @@ pure reads of it.
 - **A candidate is not durable.** It describes the tick it was read in, and the
   kind that produced it is what resolves it back to its own coordinates at
   dispatch — a candidate replayed into a later pass is refused as not that pass's.
+- **As landed, Routines were the seam's second implementer and its proof.** The
+  inline routine pass is gone: consent (scheduled and not paused) is applied while
+  listing candidates, and the two writes it used to perform mid-scan — the
+  fingerprint-drift pause and the overlap skip record — are refusal verdicts whose
+  writes happen at dispatch. That is what makes one `Advance` call for both
+  verdicts load-bearing rather than tidy. A drift pause now also records a skipped
+  run, so both refusals reach the journal beside the drains. The Routine adapter
+  wears this seam before the read one, so the supervisor asks an advancer for its
+  kind id rather than asserting `work.Kind`, and its entry is appended to the
+  advancer list until it joins the wiring list as a kind.

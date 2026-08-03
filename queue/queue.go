@@ -28,7 +28,6 @@ import (
 	"github.com/glebglazov/pop/config"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/project"
-	"github.com/glebglazov/pop/routine"
 	"github.com/glebglazov/pop/store"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
@@ -208,32 +207,18 @@ func (d *Deps) reconcile() error {
 	if err == nil {
 		return nil
 	}
-	out := d.ReconcileOut
-	if out == nil {
-		out = os.Stderr
-	}
-	fmt.Fprintf(out, "queue: reconcile: %v (continuing with pre-reconcile snapshot)\n", err)
+	fmt.Fprintf(d.reconcileOut(), "queue: reconcile: %v (continuing with pre-reconcile snapshot)\n", err)
 	return err
 }
 
-func (d *Deps) reconcileRoutineRuns() {
-	n, err := routine.ReconcileRunsWith(d.routineDeps())
-	if err != nil {
-		out := d.ReconcileOut
-		if out == nil {
-			out = os.Stderr
-		}
-		fmt.Fprintf(out, "queue: reconcile routines: %v\n", err)
-		return
+// reconcileOut is where a reconcile phase narrates: a healed-row count and a
+// reconcile failure are statements about the pass rather than about a candidate,
+// so they go here instead of into the supervisor's per-advance event stream.
+func (d *Deps) reconcileOut() io.Writer {
+	if d.ReconcileOut != nil {
+		return d.ReconcileOut
 	}
-	if n == 0 {
-		return
-	}
-	out := d.ReconcileOut
-	if out == nil {
-		out = os.Stderr
-	}
-	fmt.Fprintf(out, "queue: reconciled %d stale routine run(s)\n", n)
+	return os.Stderr
 }
 
 func (d *Deps) toggleAutoDrain(defPath, statePath, setID string) (*tasks.AutoDrainResult, error) {

@@ -1,113 +1,27 @@
 package queue
 
 import (
-	"fmt"
-	"io"
 	"os"
 
 	"github.com/glebglazov/pop/routine"
-	"github.com/glebglazov/pop/store"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/work"
 )
 
-// tickRoutines evaluates every discovered routine's schedule and spawns a pane
-// fire for each due, non-paused routine that is not already running.
-func tickRoutines(d *Deps, out io.Writer) {
-	rd := d.routineDeps()
-	routines, warnings, err := routine.ListRoutines(rd)
-	if err != nil {
-		fmt.Fprintf(out, "queue: routines: %v\n", err)
-		return
-	}
-	for _, w := range warnings {
-		fmt.Fprintf(out, "queue: routine %s: load failed: %v\n", w.ID, w.Err)
-	}
-	if len(routines) == 0 {
-		return
-	}
-
-	s, ok, err := rd.Tasks.Store(false)
-	if err != nil {
-		fmt.Fprintf(out, "queue: routines: %v\n", err)
-		return
-	}
-	if !ok {
-		return
-	}
-
-	now := d.now().UTC()
-	isAlive := func(run store.RoutineRun) bool {
-		return tasks.ProcessLiveWithToken(d.Tasks, run.PID, run.ProcStart)
-	}
-
-	for _, r := range routines {
-		if r.Manifest.Paused {
-			continue
-		}
-		// An unscheduled Routine is durable manual-fire-only (ADR-0134): the
-		// daemon never fires it regardless of its pause bit or anchor.
-		if !r.Manifest.IsScheduled() {
-			continue
-		}
-		lastFired, err := routine.LastFireTime(s, r.ID)
-		if err != nil {
-			fmt.Fprintf(out, "queue: routine %s: last fire: %v\n", r.ID, err)
-			continue
-		}
-		if !routine.IsDue(r.Schedule, lastFired, now) {
-			continue
-		}
-		// Run-affecting drift safety net (ADR-0128): if the current fingerprint
-		// no longer matches the last non-skipped run's, a prompt.md edit no CLI
-		// chokepoint saw slipped in. Pause with reason `changed` instead of
-		// firing; a human re-proves it with a manual fire. An empty last
-		// fingerprint (pre-migration or first fire) is never a mismatch.
-		current, err := routine.Fingerprint(rd, r)
-		if err != nil {
-			fmt.Fprintf(out, "queue: routine %s: fingerprint: %v\n", r.ID, err)
-			continue
-		}
-		last, err := routine.LastFingerprint(s, r.ID)
-		if err != nil {
-			fmt.Fprintf(out, "queue: routine %s: last fingerprint: %v\n", r.ID, err)
-			continue
-		}
-		if last != "" && last != current {
-			if err := routine.PauseChangedWith(rd, r.ID); err != nil {
-				fmt.Fprintf(out, "queue: routine %s: pause on change: %v\n", r.ID, err)
-				continue
-			}
-			fmt.Fprintf(out, "queue: routine %s: paused (changed): run-affecting inputs drifted\n", r.ID)
-			continue
-		}
-		if live, err := s.LiveRoutineRun(r.ID, isAlive); err != nil {
-			fmt.Fprintf(out, "queue: routine %s: live run: %v\n", r.ID, err)
-			continue
-		} else if live != nil {
-			if _, err := s.InsertSkippedRoutineRun(store.RoutineRun{
-				RoutineID:  r.ID,
-				FiredAt:    now,
-				SkipReason: routine.SkipReasonOverlap,
-			}); err != nil {
-				fmt.Fprintf(out, "queue: routine %s: record skip: %v\n", r.ID, err)
-				continue
-			}
-			fmt.Fprintf(out, "queue: routine %s: skipped fire (%s)\n", r.ID, routine.SkipReasonOverlap)
-			continue
-		}
-		rd.Tmux = d.Tmux
-		rd.Project = d.Project
-		if err := routine.FirePaneWith(rd, r.ID); err != nil {
-			fmt.Fprintf(out, "queue: routine %s: spawn: %v\n", r.ID, err)
-			continue
-		}
-		fmt.Fprintf(out, "queue: routine %s: spawned fire\n", r.ID)
-	}
+// routineAdvancer is the Routine kind's advance seam, wired with the
+// supervisor's own dependencies. There is no routine pipeline left in queue: the
+// schedule, the drift safety net, the overlap check and the fire all live beside
+// the Routine's other verbs, and this is only the wiring that hands them the
+// daemon's tmux, project and clock seams.
+func (d *Deps) routineAdvancer() work.Advancer {
+	return routine.NewAdvancer(d.routineDeps(), d.reconcileOut())
 }
 
 func (d *Deps) routineDeps() *routine.Deps {
 	rd := routine.DefaultDeps()
 	rd.Now = d.now
+	rd.Tmux = d.Tmux
+	rd.Project = d.Project
 	if d.Tasks != nil {
 		rd.Tasks = d.Tasks
 		if d.Tasks.FS != nil {
