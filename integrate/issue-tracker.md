@@ -426,8 +426,16 @@ and blockers live in the Map's `index.json`, which every consumer reads:
 
 ## Answer
 
+<!-- pop:generated answer -->
+
 <written by `pop map resolve` — prose answer, links to assets>
+
+<!-- /pop:generated answer -->
 ```
+
+The answer body between those markers is pop's: `pop map resolve` replaces it
+whole on every run, headings and all, so edit the answer file and resolve again
+rather than hand-editing the ticket.
 
 Per ticket, `index.json` carries `id`, `file`, `title`, `type`
 (`research|prototype|grilling|task`), `status` (`open|resolved`), `blocked_by`

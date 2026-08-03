@@ -35,6 +35,39 @@ func generatedRegionMarkers(name string) (string, string) {
 		strings.Replace(generatedRegionClose, "%s", name, 1)
 }
 
+// locateGeneratedRegion finds a region's marker pair anywhere in the file. The
+// scan is deliberately unbounded by section: a generated body may carry its own
+// `## ` headings, and a heading-bounded scan would stop before the close marker,
+// mistake the rest of the region for someone else's content, and leave it behind
+// on the next write.
+func locateGeneratedRegion(lines []string, name string) (open, close int, found bool) {
+	openMarker, closeMarker := generatedRegionMarkers(name)
+	open, close = -1, -1
+	for i, line := range lines {
+		switch strings.TrimSpace(line) {
+		case openMarker:
+			if open < 0 {
+				open = i
+			}
+		case closeMarker:
+			if open >= 0 && close < 0 {
+				close = i
+			}
+		}
+	}
+	return open, close, open >= 0 && close > open
+}
+
+// generatedRegionBody returns what a region currently holds, blank lines and all,
+// or reports that the region is absent.
+func generatedRegionBody(lines []string, name string) (string, bool) {
+	open, close, found := locateGeneratedRegion(lines, name)
+	if !found {
+		return "", false
+	}
+	return strings.Join(lines[open+1:close], "\n"), true
+}
+
 // renderGeneratedSections rewrites every pop-owned region of map.md and leaves
 // the rest of the file byte-for-byte alone.
 func renderGeneratedSections(content string, sections []generatedSection) string {
@@ -51,7 +84,13 @@ func renderGeneratedSections(content string, sections []generatedSection) string
 // convention is new, and merging hand-written index lines with generated ones
 // would duplicate every decision already recorded there.
 func applyGeneratedSection(lines []string, section generatedSection) []string {
-	block := generatedBlock(section)
+	block := generatedRegionBlock(section.name, section.body)
+	if openIdx, closeIdx, marked := locateGeneratedRegion(lines, section.name); marked {
+		out := append([]string{}, lines[:openIdx]...)
+		out = append(out, block...)
+		return append(out, lines[closeIdx+1:]...)
+	}
+
 	start, end, found := sectionBounds(lines, section.header)
 	if !found {
 		out := append([]string{}, trimTrailingBlank(lines)...)
@@ -59,38 +98,19 @@ func applyGeneratedSection(lines []string, section generatedSection) []string {
 		return append(out, block...)
 	}
 
-	openMarker, closeMarker := generatedRegionMarkers(section.name)
-	openIdx, closeIdx := -1, -1
-	for i := start; i < end; i++ {
-		switch strings.TrimSpace(lines[i]) {
-		case openMarker:
-			if openIdx < 0 {
-				openIdx = i
-			}
-		case closeMarker:
-			closeIdx = i
-		}
-	}
-
 	out := append([]string{}, lines[:start]...)
-	if openIdx >= 0 && closeIdx > openIdx {
-		out = append(out, lines[start:openIdx]...)
-		out = append(out, block...)
-		out = append(out, lines[closeIdx+1:end]...)
-	} else {
-		out = append(out, "")
-		out = append(out, block...)
-		out = append(out, "")
-	}
+	out = append(out, "")
+	out = append(out, block...)
+	out = append(out, "")
 	return append(out, lines[end:]...)
 }
 
-func generatedBlock(section generatedSection) []string {
-	openMarker, closeMarker := generatedRegionMarkers(section.name)
-	if len(section.body) == 0 {
+func generatedRegionBlock(name string, body []string) []string {
+	openMarker, closeMarker := generatedRegionMarkers(name)
+	if len(body) == 0 {
 		return []string{openMarker, closeMarker}
 	}
 	block := []string{openMarker, ""}
-	block = append(block, section.body...)
+	block = append(block, body...)
 	return append(block, "", closeMarker)
 }

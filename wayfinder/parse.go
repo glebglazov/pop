@@ -17,8 +17,12 @@ var (
 	answerHeader          = regexp.MustCompile(`(?i)^##\s+Answer\s*$`)
 )
 
-// answerSectionName is the one section of a Decision ticket pop writes.
-const answerSectionName = "Answer"
+// answerSectionName is the one section of a Decision ticket pop writes;
+// answerRegionName names the generated region that delimits pop's part of it.
+const (
+	answerSectionName = "Answer"
+	answerRegionName  = "answer"
+)
 
 // ParseMapMarkdown extracts map status and destination from map.md contents.
 func ParseMapMarkdown(content string) (MapStatus, string, error) {
@@ -355,34 +359,57 @@ func sectionBounds(lines []string, header *regexp.Regexp) (start, end int, found
 // ParseTicketAnswer returns the body of a Decision ticket's `## Answer` section,
 // with the surrounding blank lines removed. Empty when the ticket carries no
 // answer — which is how an unresolved ticket reads.
+//
+// The answer pop wrote sits between generated-region markers; a ticket written
+// before the markers existed is read the way it will be folded — heading to end
+// of file — so that what is read back is what the next resolve replaces.
 func ParseTicketAnswer(content string) string {
 	lines := strings.Split(content, "\n")
-	start, end, found := sectionBounds(lines, answerHeader)
+	if body, marked := generatedRegionBody(lines, answerRegionName); marked {
+		return strings.Trim(body, "\n \t")
+	}
+	start, _, found := sectionBounds(lines, answerHeader)
 	if !found {
 		return ""
 	}
-	return strings.Trim(strings.Join(lines[start:end], "\n"), "\n \t")
+	return strings.Trim(strings.Join(lines[start:], "\n"), "\n \t")
 }
 
-// ReplaceTicketAnswer writes body as the ticket's `## Answer`, replacing whatever
-// the section held. Replacement rather than appending is what makes the resolve
-// verb re-runnable: a wrong answer is corrected by resolving again, and a ticket
-// never accumulates a stack of answers a reader has to date-order.
+// ReplaceTicketAnswer writes body as the ticket's `## Answer`, wrapped in the
+// generated-region markers that mark it as pop's to overwrite. Replacement rather
+// than appending is what makes the resolve verb re-runnable: a wrong answer is
+// corrected by resolving again, and a ticket never accumulates a stack of answers
+// a reader has to date-order.
+//
+// The markers, not the heading structure, delimit the region, so an answer body
+// carrying its own `## ` headings is still replaced whole. An `## Answer` that
+// predates them is folded on this write: a Decision ticket is `## Question` then
+// `## Answer`, so the answer is terminal and everything below the heading is
+// pop's — including the duplicate body a pre-marker resolve may have left there.
 func ReplaceTicketAnswer(content, body string) string {
-	bodyLines := strings.Split(strings.Trim(body, "\n"), "\n")
+	var bodyLines []string
+	if trimmed := strings.Trim(body, "\n"); trimmed != "" {
+		bodyLines = strings.Split(trimmed, "\n")
+	}
+	block := generatedRegionBlock(answerRegionName, bodyLines)
+
 	lines := strings.Split(content, "\n")
-	start, end, found := sectionBounds(lines, answerHeader)
+	if openIdx, closeIdx, marked := locateGeneratedRegion(lines, answerRegionName); marked {
+		out := append([]string{}, lines[:openIdx]...)
+		out = append(out, block...)
+		out = append(out, lines[closeIdx+1:]...)
+		return strings.Join(trimTrailingBlank(out), "\n") + "\n"
+	}
+
+	start, _, found := sectionBounds(lines, answerHeader)
 	if !found {
 		out := append([]string{}, trimTrailingBlank(lines)...)
 		out = append(out, "", "## "+answerSectionName, "")
-		out = append(out, bodyLines...)
-		return strings.Join(out, "\n") + "\n"
+		return strings.Join(append(out, block...), "\n") + "\n"
 	}
 	out := append([]string{}, lines[:start]...)
 	out = append(out, "")
-	out = append(out, bodyLines...)
-	out = append(out, "")
-	out = append(out, lines[end:]...)
+	out = append(out, block...)
 	return strings.Join(trimTrailingBlank(out), "\n") + "\n"
 }
 

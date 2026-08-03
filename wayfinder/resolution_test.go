@@ -200,6 +200,153 @@ func TestResolveIsRerunnableAndReplacesTheAnswer(t *testing.T) {
 	}
 }
 
+// headingAnswer is the answer shape that used to break the verb: a research
+// write-up whose own `## ` headings sit past the point a section scan stops.
+const headingAnswer = `Postgres, because the data is relational.
+
+## Citations
+
+- [the manual](https://example.com/manual)
+
+## Alternatives considered
+
+SQLite, ruled out on the joins.
+`
+
+// TestResolveReplacesAnAnswerCarryingHeadings: the answer region is delimited by
+// markers, not by heading structure, so a body with its own `## ` headings lands
+// once and is replaced whole on the next run rather than accumulating.
+func TestResolveReplacesAnAnswerCarryingHeadings(t *testing.T) {
+	t.Parallel()
+	d, storageDir := resolveFixture(t)
+	ticketPath := filepath.Join(storageDir, "maps", resolveMapID, "issues", "03-third.md")
+	mapPath := filepath.Join(storageDir, "maps", resolveMapID, "map.md")
+
+	resolve := func(body string) {
+		t.Helper()
+		if _, err := ResolveTicket(d, "", ResolveRequest{
+			MapID: resolveMapID, Ticket: "03", AnswerFile: answerFile(t, body),
+		}); err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+	}
+
+	resolve(headingAnswer)
+	first := readFile(t, ticketPath)
+	if got := strings.TrimSpace(regionBody(t, first, "answer")); got != strings.TrimSpace(headingAnswer) {
+		t.Fatalf("answer region = %q, want the answer body verbatim", got)
+	}
+	if n := strings.Count(first, "## Citations"); n != 1 {
+		t.Fatalf("ticket carries %d citation headings, want 1:\n%s", n, first)
+	}
+	// The gist skips the region markers and the headings, as map.md's index needs.
+	if want := "— Postgres, because the data is relational."; !strings.Contains(readFile(t, mapPath), want) {
+		t.Fatalf("map.md missing %q:\n%s", want, readFile(t, mapPath))
+	}
+
+	resolve(headingAnswer)
+	if second := readFile(t, ticketPath); second != first {
+		t.Fatalf("re-resolving the same answer changed the file:\n--- first ---\n%s\n--- second ---\n%s", first, second)
+	}
+
+	resolve("Redis, the joins never came.\n")
+	third := readFile(t, ticketPath)
+	for _, gone := range []string{"Citations", "Alternatives considered", "Postgres", "SQLite"} {
+		if strings.Contains(third, gone) {
+			t.Fatalf("the replaced answer left %q behind:\n%s", gone, third)
+		}
+	}
+	if !strings.Contains(third, "Which client?") {
+		t.Fatalf("replacing the answer ate the question:\n%s", third)
+	}
+}
+
+// TestResolveFoldsAPreMarkerAnswer: a ticket resolved before the markers existed
+// — including one the old write path duplicated — is healed by resolving again.
+func TestResolveFoldsAPreMarkerAnswer(t *testing.T) {
+	t.Parallel()
+	d, storageDir := resolveFixture(t)
+	ticketPath := filepath.Join(storageDir, "maps", resolveMapID, "issues", "03-third.md")
+	legacy := `## Question
+
+Which client?
+
+## Answer
+
+The old answer.
+
+## Citations
+
+- [a stale source](https://example.com/stale)
+
+The old answer.
+
+## Citations
+
+- [a stale source](https://example.com/stale)
+`
+	if err := os.WriteFile(ticketPath, []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := ResolveTicket(d, "", ResolveRequest{
+		MapID: resolveMapID, Ticket: "03", AnswerFile: answerFile(t, "The Go client.\n"),
+	}); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+
+	ticket := readFile(t, ticketPath)
+	if got := strings.TrimSpace(regionBody(t, ticket, "answer")); got != "The Go client." {
+		t.Fatalf("answer region = %q, want the new answer alone", got)
+	}
+	for _, gone := range []string{"The old answer.", "stale"} {
+		if strings.Contains(ticket, gone) {
+			t.Fatalf("the fold preserved %q:\n%s", gone, ticket)
+		}
+	}
+	if n := strings.Count(ticket, "## Answer"); n != 1 {
+		t.Fatalf("ticket carries %d Answer sections, want 1:\n%s", n, ticket)
+	}
+	if !strings.Contains(ticket, "Which client?") {
+		t.Fatalf("the fold ate the question:\n%s", ticket)
+	}
+}
+
+// TestGeneratedRegionSurvivesAHeadingInItsBody covers map.md's side of the same
+// marker lookup: today its bodies are single-line link lists, and a heading in
+// one must not truncate the region.
+func TestGeneratedRegionSurvivesAHeadingInItsBody(t *testing.T) {
+	t.Parallel()
+	section := generatedSection{
+		name:    "decisions",
+		heading: "Decisions so far",
+		header:  decisionsSoFarHeader,
+		body:    []string{"- [Database](issues/01-first.md) — Postgres.", "", "## A heading inside the region", "", "- [Client](issues/03-third.md) — Go."},
+	}
+	first := renderGeneratedSections(resolveMapMarkdown, []generatedSection{section})
+	if got := strings.TrimSpace(regionBody(t, first, "decisions")); got != strings.TrimSpace(strings.Join(section.body, "\n")) {
+		t.Fatalf("region = %q, want the body verbatim", got)
+	}
+
+	second := renderGeneratedSections(first, []generatedSection{section})
+	if second != first {
+		t.Fatalf("re-rendering the region changed the file:\n--- first ---\n%s\n--- second ---\n%s", first, second)
+	}
+
+	shrunk := renderGeneratedSections(second, []generatedSection{{
+		name: "decisions", heading: "Decisions so far", header: decisionsSoFarHeader,
+		body: []string{"- [Database](issues/01-first.md) — Postgres."},
+	}})
+	if strings.Contains(shrunk, "A heading inside the region") {
+		t.Fatalf("a heading in the old body survived the rewrite:\n%s", shrunk)
+	}
+	for _, want := range []string{"Prose only a session writes.", "Fog stays here.", "## Not yet specified"} {
+		if !strings.Contains(shrunk, want) {
+			t.Fatalf("map.md lost %q:\n%s", want, shrunk)
+		}
+	}
+}
+
 // TestResolveRefusalTouchesNothing: validation runs before the first byte, so a
 // refusal cannot leave a half-resolved ticket behind.
 func TestResolveRefusalTouchesNothing(t *testing.T) {
