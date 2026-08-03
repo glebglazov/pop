@@ -107,3 +107,22 @@ directory-level failures only, as it always did.
 - **Relevance is display, never scheduling.** A tier decides where a row sits and
   nothing else: the daemon's candidate read stays global and cwd-independent, so
   the machine fires the same Routines whatever directory anyone is standing in.
+
+## As landed (page B)
+
+- **Each page has its own wiring list.** Page B is wired from `Deps.RoutinePageKinds`
+  rather than by adding the Routine kind to `WorkKinds`, because `WorkKinds` is also
+  what the supervisor derives its advancers from and what `pop queue status` prints:
+  folding the Routine in there would have doubled its advance entry (the appended
+  one is still there) and put Routine rows in the static Task-set table. The
+  supervisor's appended advancer therefore survives this slice and dies with the
+  status surface's own split.
+- **Relevance tiers are wired at the page, not at the tick.** The Routine page
+  resolves the reader's checkout once per rebuild and hands it to the adapter; the
+  supervisor leaves it unwired, so a tick still pays nothing for a fact it never
+  reads.
+- **The status label carries a tone, not a colour table.** The kind tags its own
+  status word with one of the seam's attention levels — a live or finished run good,
+  a pause warning, a failure or an unreadable definition bad — so the render layer
+  paints page B's STATUS cell through the same segment walk as page A's, and the
+  retired TUI's private colour switch is gone.

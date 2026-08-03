@@ -181,9 +181,10 @@ func renderStatusTable(out io.Writer, kinds workKinds, rows []DashboardRow) {
 		fmt.Fprintln(out, "No queue-actionable task sets.")
 		return
 	}
-	widths := dashboardColumnWidths(kinds, rows)
-	fmt.Fprintln(out, strings.TrimRight(dashboardTableLine(dashboardTableHeaders(), widths), " "))
-	fmt.Fprintln(out, strings.TrimRight(dashboardTableSeparator(widths), " "))
+	headers := dashboardTableHeaders()
+	widths := workPage().columnWidths(kinds, rows)
+	fmt.Fprintln(out, strings.TrimRight(dashboardTableLine(headers, widths), " "))
+	fmt.Fprintln(out, strings.TrimRight(dashboardTableSeparator(headers, widths), " "))
 	for _, row := range rows {
 		fmt.Fprintln(out, strings.TrimRight(dashboardTableLine(statusRowValues(kinds, row), widths), " "))
 	}

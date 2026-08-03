@@ -4,32 +4,39 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/queue"
-	"github.com/glebglazov/pop/routine"
-	"github.com/glebglazov/pop/work"
 )
 
-// View selects which dashboard the shared shell shows.
-type View int
+// The Work dashboard's entry layer: it opens the dashboard on one of its two
+// pages and switches between them with `v`.
+//
+// The shell used to host two different TUIs as sibling views. Both pages are now
+// the same Work dashboard model — one wired with the registered kinds, one with
+// the Routine kind — so all that is left here is which page has the keyboard.
+// Each page keeps its own cursor, filter and snapshot across a switch because
+// each is its own model instance.
+
+// Page selects which page of the Work dashboard the shell shows.
+type Page = queue.Page
 
 const (
-	ViewQueue View = iota
-	ViewRoutine
+	// PageWork is page A: Task sets and Maps.
+	PageWork = queue.PageWork
+	// PageRoutines is page B: Routines.
+	PageRoutines = queue.PageRoutines
 )
 
-// Shell is the shared TUI hosting the Queue and Routine dashboards as sibling
-// views toggled with v.
+// Shell is the Work dashboard's two pages with one of them in focus.
 type Shell struct {
-	active  View
-	queue   queue.QueueDashboard
-	routine routine.RoutineDashboard
-	width   int
-	height  int
+	active Page
+	pages  map[Page]queue.QueueDashboard
+	width  int
+	height int
 }
 
-// RunFromQueue opens the shell on the Work dashboard. It returns the bound
-// checkout path chosen with Ctrl-g (empty otherwise), matching queue.RunDashboard.
+// RunFromQueue opens the dashboard on page A. It returns the bound checkout path
+// chosen with Ctrl-g (empty otherwise), matching queue.RunDashboard.
 func RunFromQueue(d *queue.Deps, cfg *config.Config) (string, error) {
-	s, err := newShell(ViewQueue, d, cfg, routine.DefaultDeps())
+	s, err := newShell(PageWork, d, cfg)
 	if err != nil {
 		return "", err
 	}
@@ -37,26 +44,13 @@ func RunFromQueue(d *queue.Deps, cfg *config.Config) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return final.queueOpenCheckout(), nil
+	return final.page(PageWork).OpenCheckout(), nil
 }
 
-// RunFromRoutine opens the shell on the Routine dashboard.
-func RunFromRoutine(d *routine.Deps) error {
-	if d == nil {
-		d = routine.DefaultDeps()
-	}
-	qd := queue.DefaultDeps()
-	if d.LoadConfig != nil {
-		load := d.LoadConfig
-		qd.LoadConfig = func(string) (*config.Config, error) {
-			return load()
-		}
-	}
-	cfg, err := qd.LoadConfig(config.DefaultConfigPath())
-	if err != nil {
-		return err
-	}
-	s, err := newShell(ViewRoutine, qd, cfg, d)
+// RunFromRoutine opens the same dashboard on page B — the whole of what
+// `pop routine dashboard` is now.
+func RunFromRoutine(d *queue.Deps, cfg *config.Config) error {
+	s, err := newShell(PageRoutines, d, cfg)
 	if err != nil {
 		return err
 	}
@@ -64,33 +58,26 @@ func RunFromRoutine(d *routine.Deps) error {
 	return err
 }
 
-func newShell(start View, qd *queue.Deps, cfg *config.Config, rd *routine.Deps) (Shell, error) {
-	if qd == nil {
-		qd = queue.DefaultDeps()
-	}
-	if rd == nil {
-		rd = routine.DefaultDeps()
+func newShell(start Page, d *queue.Deps, cfg *config.Config) (Shell, error) {
+	if d == nil {
+		d = queue.DefaultDeps()
 	}
 	if cfg == nil {
 		var err error
-		cfg, err = qd.LoadConfig(config.DefaultConfigPath())
+		cfg, err = d.LoadConfig(config.DefaultConfigPath())
 		if err != nil {
 			return Shell{}, err
 		}
 	}
-	qSnap, err := work.BuildSnapshot(qd.WorkKinds(cfg))
-	if err != nil {
-		return Shell{}, err
+	pages := make(map[Page]queue.QueueDashboard, 2)
+	for _, id := range []Page{PageWork, PageRoutines} {
+		snap, err := queue.BuildPageSnapshot(d, cfg, id)
+		if err != nil {
+			return Shell{}, err
+		}
+		pages[id] = queue.NewDashboardOn(d, cfg, snap, id)
 	}
-	rSnap, err := routine.BuildDashboard(rd)
-	if err != nil {
-		return Shell{}, err
-	}
-	return Shell{
-		active:  start,
-		queue:   queue.NewDashboard(qd, cfg, qSnap),
-		routine: routine.NewDashboard(rd, rSnap),
-	}, nil
+	return Shell{active: start, pages: pages}, nil
 }
 
 func runShell(s Shell) (Shell, error) {
@@ -106,94 +93,65 @@ func runShell(s Shell) (Shell, error) {
 }
 
 func (s Shell) Init() tea.Cmd {
-	return s.initActiveView()
+	return s.initActivePage()
 }
 
 func (s Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if msg, ok := msg.(tea.WindowSizeMsg); ok {
 		s.width = msg.Width
 		s.height = msg.Height
-		var qCmd, rCmd tea.Cmd
-		var qModel tea.Model
-		qModel, qCmd = s.queue.Update(msg)
-		s.queue = qModel.(queue.QueueDashboard)
-		var rModel tea.Model
-		rModel, rCmd = s.routine.Update(msg)
-		s.routine = rModel.(routine.RoutineDashboard)
-		return s, tea.Batch(qCmd, rCmd)
+		var cmds []tea.Cmd
+		for _, id := range []Page{PageWork, PageRoutines} {
+			cmds = append(cmds, s.updatePage(id, msg))
+		}
+		return s, tea.Batch(cmds...)
 	}
 
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
-		if keyMsg.String() == "v" && s.activeViewToggleAllowed() {
-			s.toggleActive()
-			return s, s.initActiveView()
+		if keyMsg.String() == "v" && s.activePageToggleAllowed() {
+			s.active = s.page(s.active).OtherPage()
+			return s, s.initActivePage()
 		}
 	}
 
-	var cmd tea.Cmd
-	switch s.active {
-	case ViewQueue:
-		var updated tea.Model
-		updated, cmd = s.queue.Update(msg)
-		s.queue = updated.(queue.QueueDashboard)
-	case ViewRoutine:
-		var updated tea.Model
-		updated, cmd = s.routine.Update(msg)
-		s.routine = updated.(routine.RoutineDashboard)
-	}
-	return s, cmd
+	// Everything else goes to the page in focus. The page it was meant for is
+	// stamped on the poll messages, so a reload in flight when the operator pressed
+	// v is dropped by the page that receives it rather than landing in the wrong
+	// table.
+	return s, s.updatePage(s.active, msg)
 }
 
 func (s Shell) View() tea.View {
-	switch s.active {
-	case ViewRoutine:
-		return s.routine.View()
-	default:
-		return s.queue.View()
+	return s.page(s.active).View()
+}
+
+// updatePage hands msg to one page and keeps the model it returns.
+func (s Shell) updatePage(id Page, msg tea.Msg) tea.Cmd {
+	updated, cmd := s.page(id).Update(msg)
+	if dash, ok := updated.(queue.QueueDashboard); ok {
+		s.pages[id] = dash
 	}
+	return cmd
 }
 
-func (s *Shell) toggleActive() {
-	if s.active == ViewQueue {
-		s.active = ViewRoutine
-	} else {
-		s.active = ViewQueue
-	}
+func (s Shell) page(id Page) queue.QueueDashboard {
+	return s.pages[id]
 }
 
-func (s Shell) activeViewToggleAllowed() bool {
-	switch s.active {
-	case ViewRoutine:
-		return s.routine.ViewToggleAllowed()
-	default:
-		return s.queue.ViewToggleAllowed()
-	}
+func (s Shell) activePageToggleAllowed() bool {
+	return s.page(s.active).ViewToggleAllowed()
 }
 
-func (s Shell) initActiveView() tea.Cmd {
-	switch s.active {
-	case ViewRoutine:
-		return s.routine.Init()
-	default:
-		return s.queue.Init()
-	}
+func (s Shell) initActivePage() tea.Cmd {
+	return s.page(s.active).Init()
 }
 
-func (s Shell) queueOpenCheckout() string {
-	return s.queue.OpenCheckout()
-}
-
-// ActiveView exposes the current view for tests.
-func (s Shell) ActiveView() View {
+// ActivePage exposes the page in focus for tests.
+func (s Shell) ActivePage() Page {
 	return s.active
 }
 
-// QueueDashboard exposes the queue model for tests.
-func (s Shell) QueueDashboard() queue.QueueDashboard {
-	return s.queue
-}
-
-// RoutineDashboard exposes the routine model for tests.
-func (s Shell) RoutineDashboard() routine.RoutineDashboard {
-	return s.routine
+// PageDashboard exposes one page's model for tests.
+func (s Shell) PageDashboard(id Page) queue.QueueDashboard {
+	return s.page(id)
 }

@@ -188,7 +188,7 @@ func TestDashboardAutoDrainBadgeAndToggle(t *testing.T) {
 		{Project: "pop", Worktree: "/repo/main (main)", RawStatus: tasks.StatusReady, ID: "plain"},
 	}
 	var rendered strings.Builder
-	renderDashboardTable(&rendered, testKinds(), rows, 0, 0, 20, livePaneCache{})
+	renderDashboardTable(&rendered, workPage(), testKinds(), rows, 0, 0, 20, livePaneCache{})
 	if !strings.Contains(rendered.String(), "AD") {
 		t.Fatalf("missing auto-drain flag:\n%s", rendered.String())
 	}
@@ -843,7 +843,7 @@ func TestDashboardTableFitsTerminalWidth(t *testing.T) {
 
 func TestDashboardFitColumnWidths(t *testing.T) {
 	natural := []int{20, 30, 40, 25, 1} // PROJECT, TASK SET, STATUS, WORKTREE, indicator
-	fitted := dashboardFitColumnWidths(natural, 50)
+	fitted := workPage().fitWidths(testKinds(), natural, 50)
 	if dashboardTableLineWidth(fitted) > 50 {
 		t.Fatalf("fitted line width %d exceeds budget 50: %v", dashboardTableLineWidth(fitted), fitted)
 	}
@@ -1105,8 +1105,8 @@ func TestDashboardNarrowPaneKeepsCluster(t *testing.T) {
 		{Project: "a-really-long-project-name", Worktree: "some-long-branch", CursorKey: "a\x00live",
 			ID: "live", RawStatus: tasks.StatusReady, LiveDrain: true},
 	}
-	natural := dashboardColumnWidths(testKinds(), rows)
-	fitted := dashboardFitColumnWidths(natural, 20)
+	natural := workPage().columnWidths(testKinds(), rows)
+	fitted := workPage().fitWidths(testKinds(), natural, 20)
 	if fitted[dashboardColIndicator] < len(dashboardActivityClusterPlain) {
 		t.Fatalf("indicator column width = %d, want >= %d (never dropped)", fitted[dashboardColIndicator], len(dashboardActivityClusterPlain))
 	}

@@ -108,6 +108,11 @@ type Deps struct {
 	// through (WorkKinds). Left nil it is the real Task-set and Map adapters over
 	// the seams above; a test sets it to hand the builder kinds of its own.
 	Kinds func(cfg *config.Config) []work.Kind
+	// RoutineKinds is the same override for the dashboard's Routine page
+	// (RoutinePageKinds). The two pages have separate wiring lists because they are
+	// separate pages: the supervisor and `pop queue status` read Kinds, and neither
+	// wants a Routine folded into it.
+	RoutineKinds func(cfg *config.Config) []work.Kind
 }
 
 type runtimeLock interface {

@@ -16,10 +16,11 @@ var workCmd = &cobra.Command{
 	Short: "Cross-concept work surface for planning, maps, and task sets",
 	Long: `Cross-concept work surface for planning, maps, and task sets.
 
-The Work dashboard is the unified hands-on surface for ongoing work —
-task sets and maps — across registered projects. show-path resolves this
-repository's Task-storage root — the directory holding repo.json, tasks/,
-and maps/ — for humans and planning skills alike.`,
+The Work dashboard is the unified hands-on surface for ongoing work across
+registered projects, in two pages toggled with v: task sets and maps, and
+routines. show-path resolves this repository's Task-storage root — the
+directory holding repo.json, tasks/, and maps/ — for humans and planning
+skills alike.`,
 }
 
 var workShowPathCmd = &cobra.Command{

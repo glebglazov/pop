@@ -53,6 +53,18 @@ func (w workKinds) statusSegments(row DashboardRow) []work.StatusSegment {
 	return k.StatusCell(row)
 }
 
+// columns is the column header row a page reads under: the page's primary kind's
+// own, because that kind authors the cells beneath them (ADR-0173). A page whose
+// primary kind is not wired shows no header rather than a guess, the same rule
+// kindFor follows for cells.
+func (w workKinds) columns(primary work.KindID) []string {
+	k := w.byID[primary]
+	if k == nil {
+		return nil
+	}
+	return k.Columns()
+}
+
 // actionsFor is the verb list the kind offers over row right now. It is called
 // when a menu opens over one row, never per row at build time, so eligibility is
 // as fresh as the keypress that asked (ADR-0173).

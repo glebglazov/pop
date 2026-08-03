@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/dashboardshell"
 	"github.com/glebglazov/pop/routine"
 	"github.com/spf13/cobra"
@@ -137,9 +138,15 @@ found".`,
 func newRoutineDashboardCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "dashboard",
-		Short: "Open the interactive routines dashboard",
-		Args:  cobra.NoArgs,
-		RunE:  runRoutineDashboard,
+		Short: "Open the Work dashboard on its routines page",
+		Long: `Open the Work dashboard on its routines page.
+
+Every routine is listed, ordered by how close it is to where you are standing:
+this checkout first (project routines included), then another checkout of this
+project, then everything else. Press v to switch to the task sets and maps page
+and back.`,
+		Args: cobra.NoArgs,
+		RunE: runRoutineDashboard,
 	}
 }
 
@@ -292,8 +299,23 @@ func runRoutineHandoff(cmd *cobra.Command, args []string) error {
 	return routine.HandoffWith(cmdLayerDeps().routineDeps(), args[0], cmd.OutOrStdout())
 }
 
+// routineRunDashboard is the Work dashboard opened on its Routine page. There is
+// no Routine TUI behind this any more: the verb is an entry onto page B of the
+// one dashboard, so a `v` from there lands on Task sets and Maps.
+var routineRunDashboard = dashboardshell.RunFromRoutine
+
 func runRoutineDashboard(cmd *cobra.Command, args []string) error {
-	return dashboardshell.RunFromRoutine(cmdLayerDeps().routineDeps())
+	cfgPath := cfgFile
+	if cfgPath == "" {
+		cfgPath = config.DefaultConfigPath()
+	}
+	cfg, err := queueConfigLoad(cfgPath)
+	if err != nil {
+		return err
+	}
+	d := cmdLayerDeps().queueDeps()
+	d.LoadConfig = queueConfigLoad
+	return routineRunDashboard(d, cfg)
 }
 
 func runRoutineMigrateManifests(cmd *cobra.Command, args []string) error {

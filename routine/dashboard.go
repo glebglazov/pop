@@ -1801,14 +1801,7 @@ func dashboardStatusStyled(status string) string {
 	}
 }
 
-// RunDashboard opens the Routine dashboard TUI.
-func RunDashboard(d *Deps) error {
-	snap, err := BuildDashboard(d)
-	if err != nil {
-		return err
-	}
-	m := newRoutineDashboard(d, snap)
-	program := tea.NewProgram(m)
-	_, err = program.Run()
-	return err
-}
+// There is no Routine TUI entry point any more: `pop routine dashboard` opens the
+// Work dashboard on its Routine page. What is left of this file is the row model
+// and the verb behaviour the Routine kind's actions take over next, not a program
+// anything can run.

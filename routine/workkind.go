@@ -146,8 +146,26 @@ func (k *Kind) Less(a, b work.Container) bool {
 // beside it. A Routine's pause reason is already folded into that label
 // (`paused (changed)`), and an unloadable Routine's reason belongs in the detail
 // sections rather than in a cell a column has to fit.
+//
+// The tone carries what the label means so a renderer needs no table of Routine
+// status words: a finished or live run reads good, a pause reads as wanting
+// attention, a failure or an unreadable definition reads bad, and a Routine that
+// has simply never fired carries no weight at all.
 func (k *Kind) StatusCell(c work.Container) []work.StatusSegment {
-	return []work.StatusSegment{{Text: c.Status, Tone: work.ToneLabel}}
+	return []work.StatusSegment{{Text: c.Status, Tone: statusTone(c.Status)}}
+}
+
+// statusTone maps one Routine status label onto its attention level.
+func statusTone(status string) work.StatusTone {
+	switch {
+	case status == "running", status == store.RoutineRunSucceeded:
+		return work.ToneGood
+	case status == store.RoutineRunFailed, status == BrokenStatus:
+		return work.ToneBad
+	case strings.HasPrefix(status, pausedStatusPrefix):
+		return work.ToneWarn
+	}
+	return work.ToneLabel
 }
 
 // Columns are the headers a page of Routines reads under — the Routine table's

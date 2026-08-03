@@ -7,158 +7,197 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/queue"
-	"github.com/glebglazov/pop/routine"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/work"
+	"github.com/glebglazov/pop/work/ref"
 )
 
-func queueRows() []queue.DashboardRow {
-	return []queue.DashboardRow{
-		queue.TestDashboardRow("alpha", "set-a", queue.DashboardRow{RawStatus: tasks.StatusReady, DefPath: "/a/tasks", StatePath: "/a/state.json"}),
-		queue.TestDashboardRow("beta", "set-b", queue.DashboardRow{RawStatus: tasks.StatusReady, DefPath: "/b/tasks", StatePath: "/b/state.json"}),
-		queue.TestDashboardRow("gamma", "set-g", queue.DashboardRow{RawStatus: tasks.StatusReady, DefPath: "/g/tasks", StatePath: "/g/state.json"}),
+// pageKind is a wired Work kind standing in for one page's real adapter: it loads
+// the containers the test declares and answers the seam's questions from them, so
+// the shell's paging is exercised through production wiring without touching a
+// data dir.
+type pageKind struct {
+	id         work.KindID
+	containers []work.Container
+	columns    []string
+	noun       string
+}
+
+func (k *pageKind) ID() work.KindID                                     { return k.id }
+func (k *pageKind) Load() ([]work.Container, error)                     { return k.containers, nil }
+func (k *pageKind) Less(a, b work.Container) bool                       { return a.ID < b.ID }
+func (k *pageKind) Columns() []string                                   { return k.columns }
+func (k *pageKind) Actions(work.Container) []work.Action                { return nil }
+func (k *pageKind) ItemActions(work.Container, work.Item) []work.Action { return nil }
+
+func (k *pageKind) StatusCell(c work.Container) []work.StatusSegment {
+	return []work.StatusSegment{{Text: c.Status, Tone: work.ToneLabel}}
+}
+
+func (k *pageKind) Perform(work.Container, *work.Item, work.Verb) (work.Outcome, error) {
+	return work.Outcome{}, nil
+}
+
+func (k *pageKind) Summary(containers []work.Container) []string {
+	return []string{work.CountPhrase(len(containers), k.noun, k.noun+"s")}
+}
+
+func setRows() []work.Container {
+	return []work.Container{
+		queue.TestDashboardRow("alpha", "set-a", queue.DashboardRow{RawStatus: tasks.StatusReady, Status: "READY", DefPath: "/a/tasks", StatePath: "/a/state.json"}),
+		queue.TestDashboardRow("beta", "set-b", queue.DashboardRow{RawStatus: tasks.StatusReady, Status: "READY", DefPath: "/b/tasks", StatePath: "/b/state.json"}),
+		queue.TestDashboardRow("gamma", "set-g", queue.DashboardRow{RawStatus: tasks.StatusReady, Status: "READY", DefPath: "/g/tasks", StatePath: "/g/state.json"}),
 	}
 }
 
-func routineRows() []routine.DashboardRow {
-	return []routine.DashboardRow{
-		{ID: "daily", Directory: "/home/daily", Schedule: "daily at 10:00", LastRun: "never", Status: "idle"},
-		{ID: "hourly", Directory: "/home/hourly", Schedule: "every 6h", LastRun: "never", Status: "idle"},
+func routineRows() []work.Container {
+	return []work.Container{
+		{Kind: ref.KindRoutine, ID: "daily", CursorKey: "routine\x00daily", Status: "idle",
+			RoutineDirectory: "/home/daily", RoutineSchedule: "daily at 10:00", RoutineLastRun: "never"},
+		{Kind: ref.KindRoutine, ID: "hourly", CursorKey: "routine\x00hourly", Status: "idle",
+			RoutineDirectory: "/home/hourly", RoutineSchedule: "every 6h", RoutineLastRun: "never"},
 	}
 }
 
-func newTestShell(start View) Shell {
-	return Shell{
-		active:  start,
-		queue:   queue.NewDashboard(&queue.Deps{}, &config.Config{}, queue.DashboardSnapshot{Containers: queueRows()}),
-		routine: routine.NewDashboard(&routine.Deps{}, routine.DashboardSnapshot{Rows: routineRows()}),
+func testDeps() *queue.Deps {
+	return &queue.Deps{
+		Kinds: func(*config.Config) []work.Kind {
+			return []work.Kind{&pageKind{id: ref.KindTaskSet, containers: setRows(), columns: []string{"PROJECT", "TASK SET", "STATUS", "WORKTREE", ""}, noun: "task set"}}
+		},
+		RoutineKinds: func(*config.Config) []work.Kind {
+			return []work.Kind{&pageKind{id: ref.KindRoutine, containers: routineRows(), columns: []string{"ROUTINE", "DIRECTORY", "SCHEDULE", "LAST RUN", "STATUS"}, noun: "routine"}}
+		},
 	}
 }
 
-func applySize(m Shell) Shell {
-	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+func newTestShell(t *testing.T, start Page) Shell {
+	t.Helper()
+	s, err := newShell(start, testDeps(), &config.Config{})
+	if err != nil {
+		t.Fatalf("newShell: %v", err)
+	}
+	updated, _ := s.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
 	return updated.(Shell)
 }
 
-func TestShellStartsOnQueueEntryView(t *testing.T) {
-	s := applySize(newTestShell(ViewQueue))
-	if s.ActiveView() != ViewQueue {
-		t.Fatalf("active view = %v, want queue", s.ActiveView())
-	}
-	if !strings.Contains(s.View().Content, "Queue ·") {
-		t.Fatalf("expected queue header, got:\n%s", s.View().Content)
-	}
-}
-
-func TestShellStartsOnRoutineEntryView(t *testing.T) {
-	s := applySize(newTestShell(ViewRoutine))
-	if s.ActiveView() != ViewRoutine {
-		t.Fatalf("active view = %v, want routine", s.ActiveView())
-	}
-	if !strings.Contains(s.View().Content, "Routines ·") {
-		t.Fatalf("expected routines header, got:\n%s", s.View().Content)
-	}
-}
-
-func TestShellVTogglesBetweenViews(t *testing.T) {
-	s := applySize(newTestShell(ViewQueue))
-	updated, cmd := s.Update(tea.KeyPressMsg{Code: 'v', Text: "v"})
-	if cmd == nil {
-		t.Fatal("v should restart active view tick")
-	}
-	s = updated.(Shell)
-	if s.ActiveView() != ViewRoutine {
-		t.Fatalf("after v active = %v, want routine", s.ActiveView())
-	}
-	if !strings.Contains(s.View().Content, "Routines ·") {
-		t.Fatalf("expected routines view, got:\n%s", s.View().Content)
-	}
-
-	updated, _ = s.Update(tea.KeyPressMsg{Code: 'v', Text: "v"})
-	s = updated.(Shell)
-	if s.ActiveView() != ViewQueue {
-		t.Fatalf("after second v active = %v, want queue", s.ActiveView())
-	}
-	if !strings.Contains(s.View().Content, "Queue ·") {
-		t.Fatalf("expected queue view, got:\n%s", s.View().Content)
-	}
-}
-
-func TestShellTogglePreservesCursorAndFilter(t *testing.T) {
-	s := applySize(newTestShell(ViewQueue))
-	q := s.QueueDashboard()
-	var qModel tea.Model
-	qModel, _ = q.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	q = qModel.(queue.QueueDashboard)
-	qModel, _ = q.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	q = qModel.(queue.QueueDashboard)
-	if q.ListCursor() != 2 {
-		t.Fatalf("queue cursor = %d, want 2", q.ListCursor())
-	}
-	s.queue = q
-
-	qModel, _ = q.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
-	q = qModel.(queue.QueueDashboard)
-	s.queue = q
-	if !q.FilterActive() {
-		t.Fatal("expected queue filter mode")
-	}
-
+func pressV(t *testing.T, s Shell) Shell {
+	t.Helper()
 	updated, _ := s.Update(tea.KeyPressMsg{Code: 'v', Text: "v"})
-	s = updated.(Shell)
-	r := s.RoutineDashboard()
-	var rModel tea.Model
-	rModel, _ = r.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	r = rModel.(routine.RoutineDashboard)
-	if r.ListCursor() != 1 {
-		t.Fatalf("routine cursor = %d, want 1", r.ListCursor())
-	}
-	s.routine = r
+	return updated.(Shell)
+}
 
-	updated, _ = s.Update(tea.KeyPressMsg{Code: 'v', Text: "v"})
-	s = updated.(Shell)
-	if s.QueueDashboard().ListCursor() != 2 {
-		t.Fatalf("restored queue cursor = %d, want 2", s.QueueDashboard().ListCursor())
+func TestShellOpensOnTheEntryPage(t *testing.T) {
+	wp := newTestShell(t, PageWork)
+	if wp.ActivePage() != PageWork {
+		t.Fatalf("active page = %v, want work", wp.ActivePage())
 	}
-	if !s.QueueDashboard().FilterActive() {
-		t.Fatal("expected queue filter to persist across toggle")
+	if !strings.Contains(wp.View().Content, "Queue ·") {
+		t.Fatalf("expected the work page header, got:\n%s", wp.View().Content)
 	}
-	if s.RoutineDashboard().ListCursor() != 1 {
-		t.Fatalf("restored routine cursor = %d, want 1", s.RoutineDashboard().ListCursor())
+
+	rp := newTestShell(t, PageRoutines)
+	if rp.ActivePage() != PageRoutines {
+		t.Fatalf("active page = %v, want routines", rp.ActivePage())
+	}
+	if !strings.Contains(rp.View().Content, "Routines ·") {
+		t.Fatalf("expected the routine page header, got:\n%s", rp.View().Content)
 	}
 }
 
-func TestShellHelpDocumentsViewToggle(t *testing.T) {
-	s := applySize(newTestShell(ViewQueue))
-	q, _ := s.QueueDashboard().Update(tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
-	s.queue = q.(queue.QueueDashboard)
+// TestShellVTogglesPagesFromEitherSide pins the toggle as a page switch rather
+// than a one-way trip: it works from page A and from page B, and each page brings
+// its own columns and its own rows with it.
+func TestShellVTogglesPagesFromEitherSide(t *testing.T) {
+	s := newTestShell(t, PageWork)
+	s = pressV(t, s)
+	if s.ActivePage() != PageRoutines {
+		t.Fatalf("after v active = %v, want routines", s.ActivePage())
+	}
 	view := s.View().Content
-	if !strings.Contains(view, "routines view") {
-		t.Fatalf("queue help missing v:\n%s", view)
+	if !strings.Contains(view, "Routines ·") || !strings.Contains(view, "DIRECTORY") {
+		t.Fatalf("expected the routine page, got:\n%s", view)
+	}
+	if strings.Contains(view, "set-a") {
+		t.Fatalf("routine page must not list task sets:\n%s", view)
 	}
 
-	s = applySize(newTestShell(ViewRoutine))
-	r, _ := s.RoutineDashboard().Update(tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
-	s.routine = r.(routine.RoutineDashboard)
-	s.active = ViewRoutine
+	s = pressV(t, s)
+	if s.ActivePage() != PageWork {
+		t.Fatalf("after second v active = %v, want work", s.ActivePage())
+	}
 	view = s.View().Content
-	if !strings.Contains(view, "queue view") {
-		t.Fatalf("routine help missing v:\n%s", view)
+	if !strings.Contains(view, "Queue ·") || !strings.Contains(view, "TASK SET") {
+		t.Fatalf("expected the work page, got:\n%s", view)
+	}
+	if strings.Contains(view, "daily") {
+		t.Fatalf("work page must not list routines:\n%s", view)
+	}
+
+	// The toggle is available from page B without re-entering through page A.
+	s = newTestShell(t, PageRoutines)
+	if s = pressV(t, s); s.ActivePage() != PageWork {
+		t.Fatalf("v from the routine page = %v, want work", s.ActivePage())
 	}
 }
 
-func TestShellVIgnoredInQueueDetail(t *testing.T) {
-	s := applySize(newTestShell(ViewQueue))
-	q, cmd := s.QueueDashboard().Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
-	if cmd != nil {
+func TestShellTogglePreservesEachPagesCursorAndFilter(t *testing.T) {
+	s := newTestShell(t, PageWork)
+	for i := 0; i < 2; i++ {
+		s.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	}
+	if got := s.PageDashboard(PageWork).ListCursor(); got != 2 {
+		t.Fatalf("work cursor = %d, want 2", got)
+	}
+	s.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	if !s.PageDashboard(PageWork).FilterActive() {
+		t.Fatal("expected the work page filter to engage")
+	}
+
+	s = pressV(t, s)
+	s.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	if got := s.PageDashboard(PageRoutines).ListCursor(); got != 1 {
+		t.Fatalf("routine cursor = %d, want 1", got)
+	}
+
+	s = pressV(t, s)
+	if got := s.PageDashboard(PageWork).ListCursor(); got != 2 {
+		t.Fatalf("restored work cursor = %d, want 2", got)
+	}
+	if !s.PageDashboard(PageWork).FilterActive() {
+		t.Fatal("expected the work page filter to survive the switch")
+	}
+	if got := s.PageDashboard(PageRoutines).ListCursor(); got != 1 {
+		t.Fatalf("restored routine cursor = %d, want 1", got)
+	}
+}
+
+func TestShellHelpNamesThePageTheToggleLeadsTo(t *testing.T) {
+	s := newTestShell(t, PageWork)
+	s.Update(tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
+	view := s.View().Content
+	if !strings.Contains(view, "Help · Queue") || !strings.Contains(view, "routines view") {
+		t.Fatalf("work page help missing the toggle:\n%s", view)
+	}
+
+	s = newTestShell(t, PageRoutines)
+	s.Update(tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
+	view = s.View().Content
+	if !strings.Contains(view, "Help · Routines") || !strings.Contains(view, "queue view") {
+		t.Fatalf("routine page help missing the toggle:\n%s", view)
+	}
+}
+
+func TestShellVIgnoredWhileAPageOwnsTheKeyboard(t *testing.T) {
+	s := newTestShell(t, PageWork)
+	if _, cmd := s.Update(tea.KeyPressMsg{Code: 'l', Text: "l"}); cmd != nil {
 		t.Fatal("entering the detail reads the container in hand, not a fresh load")
 	}
-	s.queue = q.(queue.QueueDashboard)
 
 	updated, cmd := s.Update(tea.KeyPressMsg{Code: 'v', Text: "v"})
 	if cmd != nil {
-		t.Fatal("v should not toggle from queue detail")
+		t.Fatal("v should not toggle out of a detail view")
 	}
-	if updated.(Shell).ActiveView() != ViewQueue {
-		t.Fatal("should stay on queue view in detail")
+	if updated.(Shell).ActivePage() != PageWork {
+		t.Fatal("should stay on the work page while its detail is open")
 	}
 }

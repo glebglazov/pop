@@ -211,7 +211,14 @@ func memoRepoGroups(rd *repogroup.Deps, cfg *config.Config) func() ([]repogroup.
 	}
 }
 
-type dashboardTickMsg struct{}
+// dashboardTickMsg and dashboardRowsMsg name the page they belong to. Both pages
+// are this same model, so an untagged poll would let one page's tick drive the
+// other's reload — and one page's rows land in the other's table. A page ignores
+// what is not its own, which also lets the entry shell hand every message to the
+// page in focus without cross-wiring the two.
+type dashboardTickMsg struct {
+	page Page
+}
 
 // dashboardLivePrimeMsg carries the open-time live-pane cache, ahead of the
 // first poll's full snapshot rebuild.
@@ -219,6 +226,7 @@ type dashboardLivePrimeMsg struct {
 	live livePaneCache
 }
 type dashboardRowsMsg struct {
+	page Page
 	snap DashboardSnapshot
 	live livePaneCache
 	err  error
@@ -694,6 +702,11 @@ type itemTextPeek struct {
 type QueueDashboard struct {
 	d   *Deps
 	cfg *config.Config
+	// page is which of the dashboard's two pages this model shows: which kinds it
+	// lists, which of them heads its columns, and the words its chrome uses. The
+	// model is otherwise identical on both pages — that is what makes them pages of
+	// one dashboard rather than two TUIs.
+	page dashboardPage
 	// kinds is the wired Work-kind list indexed by id: every cell a row renders
 	// and every verb its menu offers is asked of the kind that owns the row, so
 	// the dashboard branches on no kind of its own (ADR-0173).
@@ -784,17 +797,38 @@ func TestDashboardRow(project, setID string, row DashboardRow) DashboardRow {
 	return row
 }
 
-// NewDashboard constructs a Work dashboard model from a snapshot.
+// NewDashboard constructs a Work dashboard model from a snapshot, on page A.
 func NewDashboard(d *Deps, cfg *config.Config, snap DashboardSnapshot) QueueDashboard {
 	return newQueueDashboard(d, cfg, snap)
 }
 
-func newQueueDashboard(d *Deps, cfg *config.Config, snap DashboardSnapshot) QueueDashboard {
+// NewDashboardOn constructs the model on one named page. It is how the entry
+// layer opens the dashboard on page B — `pop routine dashboard` is this call and
+// nothing else.
+func NewDashboardOn(d *Deps, cfg *config.Config, snap DashboardSnapshot, page Page) QueueDashboard {
+	return newQueueDashboardOn(d, cfg, snap, pageSpec(page))
+}
+
+// BuildPageSnapshot builds one page's snapshot: only the kinds that page lists,
+// so kind precedence orders that page alone and every Kind.Summary counts only
+// the containers on it.
+func BuildPageSnapshot(d *Deps, cfg *config.Config, page Page) (DashboardSnapshot, error) {
 	if d == nil {
 		d = DefaultDeps()
 	}
-	kinds := newWorkKinds(d.WorkKinds(cfg))
-	cols := &dashboardColumns{}
+	return work.BuildSnapshot(pageSpec(page).kinds(d, cfg))
+}
+
+func newQueueDashboard(d *Deps, cfg *config.Config, snap DashboardSnapshot) QueueDashboard {
+	return newQueueDashboardOn(d, cfg, snap, workPage())
+}
+
+func newQueueDashboardOn(d *Deps, cfg *config.Config, snap DashboardSnapshot, page dashboardPage) QueueDashboard {
+	if d == nil {
+		d = DefaultDeps()
+	}
+	kinds := newWorkKinds(page.kinds(d, cfg))
+	cols := &dashboardColumns{page: page}
 	cols.syncNatural(kinds, snap.Containers)
 	live := &livePaneCache{}
 	var list *ui.List[DashboardRow]
@@ -814,16 +848,16 @@ func newQueueDashboard(d *Deps, cfg *config.Config, snap DashboardSnapshot) Queu
 				}
 				return ui.TruncateString(dashboardTwoLineRowLine1(r, line1Widths, cache), budget)
 			}
-			return ui.TruncateString(dashboardTableLine(dashboardRowValues(kinds, r, cache), cols.widths), budget)
+			return ui.TruncateString(dashboardTableLine(page.styledCells(kinds, r, cache), cols.widths), budget)
 		},
 	})
-	return QueueDashboard{d: d, cfg: cfg, kinds: kinds, snap: snap, allRows: snap.Containers, list: list, cols: cols, live: live}
+	return QueueDashboard{d: d, cfg: cfg, page: page, kinds: kinds, snap: snap, allRows: snap.Containers, list: list, cols: cols, live: live}
 }
 
 // dashboardChromeLines returns the chrome height above the List rows for the
 // current render mode.
 func (m QueueDashboard) dashboardChromeLines() int {
-	if dashboardTwoLineMode(m.snap.Containers, m.width, m.height) {
+	if m.page.twoLine(m.snap.Containers, m.width, m.height) {
 		return dashboardTwoLineChromeLines
 	}
 	return dashboardTableChromeLines
@@ -845,7 +879,7 @@ func (m QueueDashboard) resizeMainList() {
 	if listH < 1 {
 		listH = 1
 	}
-	if dashboardTwoLineMode(m.snap.Containers, m.width, m.height) {
+	if m.page.twoLine(m.snap.Containers, m.width, m.height) {
 		m.list.SetLinesPerItem(2)
 	} else {
 		m.list.SetLinesPerItem(1)
@@ -853,10 +887,22 @@ func (m QueueDashboard) resizeMainList() {
 	m.list.Resize(listH)
 }
 
-// ViewToggleAllowed reports whether v may switch to the Routine dashboard.
+// ViewToggleAllowed reports whether v may switch to the other page. The rule is
+// unchanged from when the toggle swapped two TUIs: a modal, menu or detail owns
+// the keyboard, so v means whatever that overlay says it means.
 func (m QueueDashboard) ViewToggleAllowed() bool {
 	return m.bind == nil && m.drainPick == nil && m.abandon == nil &&
 		m.detail == nil && m.menu == nil && m.itemMenu == nil && m.filter == nil
+}
+
+// ActivePage reports which page this model shows.
+func (m QueueDashboard) ActivePage() Page {
+	return m.page.id
+}
+
+// OtherPage is the page `v` switches to from here.
+func (m QueueDashboard) OtherPage() Page {
+	return m.page.other()
 }
 
 // OpenCheckout returns the checkout path chosen with Ctrl-g before quit.
@@ -881,7 +927,7 @@ func (m QueueDashboard) FilterActive() bool {
 // itself a poll later. The priming is one tmux list query, not a snapshot
 // rebuild, so it costs the open nothing measurable.
 func (m QueueDashboard) Init() tea.Cmd {
-	return tea.Batch(dashboardTick(), m.primeLiveCache())
+	return tea.Batch(dashboardTick(m.page.id), m.primeLiveCache())
 }
 
 // primeLiveCache loads the live-pane cache without rebuilding the snapshot,
@@ -990,6 +1036,9 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Open the row-inclusion filter menu (ADR-0121). Unlike `/` (a transient
 			// fuzzy query over the already-included rows) this modal flips which rows
 			// are included at all; the two are independent concepts.
+			if !m.page.rowFilters {
+				return m, nil
+			}
 			m.filter = newDashboardFilterMenu()
 			m.err = nil
 			m.statusMsg = ""
@@ -1027,7 +1076,13 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cols.refit()
 		m.resizeMainList()
 	case dashboardTickMsg:
-		return m, tea.Batch(dashboardTick(), m.reload())
+		if msg.page != m.page.id {
+			// The other page's poll, arriving while this one is in focus: dropping it
+			// retires that page's tick chain, which its own Init restarts when the
+			// operator switches back.
+			return m, nil
+		}
+		return m, tea.Batch(dashboardTick(m.page.id), m.reload())
 	case ui.SpinnerTickMsg:
 		return m, nil
 	case dashboardLivePrimeMsg:
@@ -1037,6 +1092,9 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		*m.live = msg.live
 		return m, nil
 	case dashboardRowsMsg:
+		if msg.page != m.page.id {
+			return m, nil
+		}
 		m.err = msg.err
 		if msg.err == nil {
 			m.allRows = msg.snap.Containers
@@ -1868,11 +1926,14 @@ func (m QueueDashboard) confirmBindModal() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// reload rebuilds this page's snapshot: only its own kinds, so the poll never
+// pays for the other page's scan and the header it recomputes counts only what is
+// on screen.
 func (m QueueDashboard) reload() tea.Cmd {
 	return func() tea.Msg {
-		snap, err := work.BuildSnapshot(m.d.WorkKinds(m.cfg))
+		snap, err := work.BuildSnapshot(m.page.kinds(m.d, m.cfg))
 		live := loadLivePaneCache(m.d)
-		return dashboardRowsMsg{snap: snap, live: live, err: err}
+		return dashboardRowsMsg{page: m.page.id, snap: snap, live: live, err: err}
 	}
 }
 
@@ -2267,8 +2328,8 @@ func dashboardBaseRefRank(ref string) int {
 	return 4
 }
 
-func dashboardTick() tea.Cmd {
-	return tea.Tick(dashboardPollInterval, func(time.Time) tea.Msg { return dashboardTickMsg{} })
+func dashboardTick(page Page) tea.Cmd {
+	return tea.Tick(dashboardPollInterval, func(time.Time) tea.Msg { return dashboardTickMsg{page: page} })
 }
 
 func (m QueueDashboard) helpEntries() []ui.HelpEntry {
@@ -2395,7 +2456,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 		return []ui.HelpEntry{
 			{Key: "typing", Desc: "filter rows"},
 			{Key: "j/k", Desc: "navigate filtered"},
-			{Key: "v", Desc: "routines view"},
+			{Key: "v", Desc: m.page.toggleWord + " view"},
 			{Key: "esc", Desc: "clear filter"},
 		}
 	default:
@@ -2410,10 +2471,14 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "A", Desc: "pinned action menu"},
 			{Key: "ctrl+g", Desc: "open worktree"},
 			{Key: "/", Desc: "filter"},
-			{Key: "f", Desc: "filter menu"},
-			{Key: "v", Desc: "routines view"},
-			{Key: "h/esc", Desc: "quit"},
 		}
+		if m.page.rowFilters {
+			entries = append(entries, ui.HelpEntry{Key: "f", Desc: "filter menu"})
+		}
+		entries = append(entries,
+			ui.HelpEntry{Key: "v", Desc: m.page.toggleWord + " view"},
+			ui.HelpEntry{Key: "h/esc", Desc: "quit"},
+		)
 		if row, ok := m.list.Selected(); ok && mapRow(row) {
 			entries = append(entries, ui.HelpEntry{Key: "I", Desc: "work next frontier ticket"})
 		}
@@ -2424,29 +2489,32 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 
 func (m QueueDashboard) View() tea.View {
 	if m.showHelp {
-		title := "Help · Queue"
+		// The help overlay names the page it was opened over, so an operator who
+		// pressed v cannot mistake one page's key list for the other's.
+		page := m.page.title
+		title := "Help · " + page
 		if m.filterMode {
-			title = "Help · Queue · filter"
+			title = "Help · " + page + " · filter"
 		} else if m.detail != nil && m.detail.peek != nil {
-			title = "Help · Queue · peek"
+			title = "Help · " + page + " · peek"
 		} else if m.detail != nil {
-			title = "Help · Queue · detail"
+			title = "Help · " + page + " · detail"
 		} else if m.menu != nil && m.menu.status != nil {
-			title = "Help · Queue · status submenu"
+			title = "Help · " + page + " · status submenu"
 		} else if m.menu != nil && m.menu.pinned {
-			title = "Help · Queue · pinned action menu"
+			title = "Help · " + page + " · pinned action menu"
 		} else if m.menu != nil {
-			title = "Help · Queue · action menu"
+			title = "Help · " + page + " · action menu"
 		} else if m.filter != nil {
-			title = "Help · Queue · filter menu"
+			title = "Help · " + page + " · filter menu"
 		} else if m.itemMenu != nil {
-			title = "Help · Queue · item menu"
+			title = "Help · " + page + " · item menu"
 		} else if m.bind != nil {
-			title = "Help · Queue · bind"
+			title = "Help · " + page + " · bind"
 		} else if m.drainPick != nil {
-			title = "Queue · drain"
+			title = page + " · drain"
 		} else if m.abandon != nil {
-			title = "Queue · unbind"
+			title = page + " · unbind"
 		}
 		content := ui.RenderHelpOverlay(title, m.helpEntries(), m.width, m.height)
 		v := tea.NewView(content)
@@ -2504,7 +2572,7 @@ func (m QueueDashboard) frameSpec() ui.Frame {
 	}
 	header := ""
 	if len(m.snap.Containers) > 0 {
-		header = "Queue · " + dashboardSummary(m.kinds, m.snap.Containers)
+		header = m.pageHeader()
 	}
 	inputBox := ""
 	if m.filterMode {
@@ -2554,18 +2622,31 @@ func formatModelSkipFootnote(skips []work.ModelSkip, now time.Time) string {
 	return "skipped: " + strings.Join(groups, " · ")
 }
 
+// pageHeader is the summary line over the rows on screen: this page's noun, then
+// each of its kinds' own phrases. The counts are the page's alone — a page never
+// reports the other page's containers, so the Routine page's "M here" tally
+// cannot be diluted by task sets.
+func (m QueueDashboard) pageHeader() string {
+	return m.page.title + " · " + dashboardSummary(m.kinds, m.snap.Containers)
+}
+
 // mainHint returns the footer hint for the main (non-modal, non-menu) view.
 func (m QueueDashboard) mainHint() string {
+	toggle := "v " + m.page.toggleWord
 	if len(m.snap.Containers) == 0 {
 		if m.filterMode {
-			return "esc clear filter · v routines · C-h help"
+			return "esc clear filter · " + toggle + " · C-h help"
 		}
-		return "v routines · C-h help · h/esc quit"
+		return toggle + " · C-h help · h/esc quit"
 	}
 	if m.filterMode {
-		return "esc clear filter · j/k navigate · v routines · C-h help"
+		return "esc clear filter · j/k navigate · " + toggle + " · C-h help"
 	}
-	return "j/k move · gg/G top/bottom · l/enter status · y copy name · a actions · / filter · f filters · v routines · C-h help · h/esc quit"
+	filters := ""
+	if m.page.rowFilters {
+		filters = "f filters · "
+	}
+	return "j/k move · gg/G top/bottom · l/enter status · y copy name · a actions · / filter · " + filters + toggle + " · C-h help · h/esc quit"
 }
 
 // mainBody renders the table body (a blank line, the column header, the
@@ -2574,12 +2655,12 @@ func (m QueueDashboard) mainHint() string {
 func (m QueueDashboard) mainBody() string {
 	if len(m.snap.Containers) == 0 {
 		if m.filterMode {
-			return "No matching task sets."
+			return m.page.emptyFiltered
 		}
-		return "No queue-actionable task sets."
+		return m.page.empty
 	}
 	var parts []string
-	if dashboardTwoLineMode(m.snap.Containers, m.width, m.height) {
+	if m.page.twoLine(m.snap.Containers, m.width, m.height) {
 		line1Widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths(m.snap.Containers), dashboardTableBodyBudget(m.width))
 		parts = []string{
 			"",
@@ -2588,10 +2669,11 @@ func (m QueueDashboard) mainBody() string {
 			ui.TruncateString("  "+dashboardTwoLineTableSeparator(line1Widths), m.width),
 		}
 	} else {
+		headers := m.page.headers(m.kinds)
 		parts = []string{
 			"",
-			ui.TruncateString("  "+dashboardTableLine(dashboardTableHeaders(), m.cols.widths), m.width),
-			ui.TruncateString("  "+dashboardTableSeparator(m.cols.widths), m.width),
+			ui.TruncateString("  "+dashboardTableLine(headers, m.cols.widths), m.width),
+			ui.TruncateString("  "+dashboardTableSeparator(headers, m.cols.widths), m.width),
 		}
 	}
 	parts = append(parts, m.list.VisibleRows()...)
@@ -2610,9 +2692,9 @@ func (m QueueDashboard) viewWithMenu() string {
 	if m.actionErr != nil {
 		fmt.Fprintf(&body, "%s\n", dashboardActionErrorLine(m.actionErr))
 	}
-	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.kinds, m.snap.Containers))
+	fmt.Fprintf(&body, "%s\n", m.pageHeader())
 	fmt.Fprintln(&body)
-	renderDashboardTableWithMenu(&body, m.kinds, m.snap.Containers, m.list.Cursor(), m.width, m.height, m.menu, m.liveCache())
+	renderDashboardTableWithMenu(&body, m.page, m.kinds, m.snap.Containers, m.list.Cursor(), m.width, m.height, m.menu, m.liveCache())
 	if m.statusMsg != "" {
 		fmt.Fprintf(&body, "  %s\n", m.statusMsg)
 	}
@@ -2642,9 +2724,9 @@ func (m QueueDashboard) viewWithFilterMenu() string {
 	if m.actionErr != nil {
 		fmt.Fprintf(&body, "%s\n", dashboardActionErrorLine(m.actionErr))
 	}
-	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.kinds, m.snap.Containers))
+	fmt.Fprintf(&body, "%s\n", m.pageHeader())
 	fmt.Fprintln(&body)
-	renderDashboardTable(&body, m.kinds, m.snap.Containers, m.list.Cursor(), m.width, m.height, m.liveCache())
+	renderDashboardTable(&body, m.page, m.kinds, m.snap.Containers, m.list.Cursor(), m.width, m.height, m.liveCache())
 	for _, ml := range m.dashboardFilterMenuLines() {
 		fmt.Fprintf(&body, "%s\n", ml)
 	}
@@ -2689,9 +2771,9 @@ func (m QueueDashboard) viewWithModal() string {
 	if m.actionErr != nil {
 		fmt.Fprintf(&body, "%s\n", dashboardActionErrorLine(m.actionErr))
 	}
-	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.kinds, m.snap.Containers))
+	fmt.Fprintf(&body, "%s\n", m.pageHeader())
 	fmt.Fprintln(&body)
-	renderDashboardTable(&body, m.kinds, m.snap.Containers, m.list.Cursor(), m.width, m.height, m.liveCache())
+	renderDashboardTable(&body, m.page, m.kinds, m.snap.Containers, m.list.Cursor(), m.width, m.height, m.liveCache())
 	// avail is the number of body lines left for the modal below the table, so
 	// its scroll window clamps long worktree/ref lists instead of overflowing.
 	// A non-positive avail (no WindowSizeMsg yet) means "don't clamp".
@@ -3155,8 +3237,8 @@ func renderDashboardAbandonModal(w io.Writer, modal *dashboardAbandonModal, widt
 	fmt.Fprint(w, ui.HintStyle.Render(ui.TruncateString("y confirm · enter/n/esc cancel", width)))
 }
 
-func renderDashboardTable(w io.Writer, kinds workKinds, rows []DashboardRow, cursor, width, height int, live livePaneCache) {
-	renderDashboardTableWithMenu(w, kinds, rows, cursor, width, height, nil, live)
+func renderDashboardTable(w io.Writer, page dashboardPage, kinds workKinds, rows []DashboardRow, cursor, width, height int, live livePaneCache) {
+	renderDashboardTableWithMenu(w, page, kinds, rows, cursor, width, height, nil, live)
 }
 
 // renderDashboardTableWithMenu renders the task-set table and, when menu is
@@ -3164,15 +3246,15 @@ func renderDashboardTable(w io.Writer, kinds workKinds, rows []DashboardRow, cur
 // default, flipping above when the cursor sits too low for the menu to fit
 // beneath it within height (dashboardMenuPlaceBelow). live colours handoff-verb
 // keys in the overlay (ADR-0158).
-func renderDashboardTableWithMenu(w io.Writer, kinds workKinds, rows []DashboardRow, cursor, width, height int, menu *dashboardMenu, live livePaneCache) {
-	if dashboardTwoLineMode(rows, width, height) {
+func renderDashboardTableWithMenu(w io.Writer, page dashboardPage, kinds workKinds, rows []DashboardRow, cursor, width, height int, menu *dashboardMenu, live livePaneCache) {
+	if page.twoLine(rows, width, height) {
 		renderDashboardTableTwoLineWithMenu(w, kinds, rows, cursor, width, height, menu, live)
 		return
 	}
-	headers := dashboardTableHeaders()
-	widths := dashboardTableWidthsForRows(kinds, rows, width)
+	headers := page.headers(kinds)
+	widths := page.tableWidthsForRows(kinds, rows, width)
 	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTableLine(headers, widths), width))
-	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTableSeparator(widths), width))
+	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTableSeparator(headers, widths), width))
 
 	var menuLines []string
 	placeBelow := true
@@ -3195,7 +3277,7 @@ func renderDashboardTableWithMenu(w io.Writer, kinds workKinds, rows []Dashboard
 		} else {
 			prefix = "  "
 		}
-		line := ui.TruncateString(prefix+dashboardTableLine(dashboardRowValues(kinds, row, live), widths), width)
+		line := ui.TruncateString(prefix+dashboardTableLine(page.styledCells(kinds, row, live), widths), width)
 		fmt.Fprintf(w, "%s\n", line)
 		if menu != nil && i == cursor && placeBelow {
 			writeMenu()

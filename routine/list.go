@@ -12,6 +12,10 @@ import (
 
 const emptyListHint = "No routines yet. Run `pop routine new <id> --schedule \"every 6h\"` to create one. " + ScheduleGrammar
 
+// EmptyListHint is the same line for a surface outside this package — the Work
+// dashboard's Routine page, which shows it when there is nothing to list.
+const EmptyListHint = emptyListHint
+
 // RoutineWarning names a routine whose manifest could not be loaded during
 // listing. A broken manifest suspends only that routine; the rest are returned.
 type RoutineWarning struct {

@@ -59,17 +59,21 @@ type stateFile struct {
 	CreatedAt      string      `json:"created_at"`
 }
 
+// pausedStatusPrefix opens every paused status label, whatever cause follows it.
+// It is the one token a reader keys "this Routine is switched off" on.
+const pausedStatusPrefix = "paused"
+
 // pausedStatusLabel renders a paused Routine's status for the dashboard and the
 // refinement-loop header. Created/manual/legacy paused routines read as plain
 // "paused"; failure and changed carry their cause in parentheses.
 func pausedStatusLabel(reason PauseReason) string {
 	switch reason {
 	case PauseReasonFailure:
-		return "paused (failed)"
+		return pausedStatusPrefix + " (failed)"
 	case PauseReasonChanged:
-		return "paused (changed)"
+		return pausedStatusPrefix + " (changed)"
 	default:
-		return "paused"
+		return pausedStatusPrefix
 	}
 }
 

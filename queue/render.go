@@ -162,8 +162,12 @@ func renderDashboardDest(kind work.DestKind, label string) string {
 }
 
 // dashboardColumns holds a table's precomputed natural and terminal-fit column
-// widths, cached on the model so resize and row updates recompute cheaply.
+// widths, cached on the model so resize and row updates recompute cheaply. It
+// carries the page whose columns it measures — a page's header labels are the
+// floor every fit respects — and the wiring list those headers are asked of.
 type dashboardColumns struct {
+	page    dashboardPage
+	kinds   workKinds
 	natural []int
 	widths  []int
 	width   int
@@ -189,31 +193,14 @@ var dashboardColShrinkOrder = []int{
 	dashboardColProject,
 }
 
-// dashboardTableHeaders is this page's column header row, taken from its primary
-// **Work kind** — the Task set — rather than restated here: the kind authors these
-// cells, and a Map row on the same page fills them. The trailing column is the
-// per-activity cluster: an empty header over the IVFS keys, so no label sits above
-// the glyphs.
+// dashboardTableHeaders is the Task-set columns as the static `pop queue status`
+// table prints them, taken from the Task-set **Work kind** rather than restated
+// here: the kind authors these cells, and a Map row on the same page fills them.
+// The trailing column is the per-activity cluster: an empty header over the IVFS
+// keys, so no label sits above the glyphs. The TUI asks the wired kind instead —
+// see dashboardPage.headers.
 func dashboardTableHeaders() []string {
 	return setkind.TaskSetColumns()
-}
-
-// dashboardColumnWidths precomputes each column's natural width over the full row
-// set, floored at the header label width.
-func dashboardColumnWidths(kinds workKinds, rows []DashboardRow) []int {
-	headers := dashboardTableHeaders()
-	widths := make([]int, len(headers))
-	for i, h := range headers {
-		widths[i] = len(h)
-	}
-	for _, row := range rows {
-		for i, v := range dashboardRowNaturalValues(kinds, row) {
-			if n := lipgloss.Width(v); n > widths[i] {
-				widths[i] = n
-			}
-		}
-	}
-	return widths
 }
 
 func dashboardTableLineWidth(widths []int) int {
@@ -225,35 +212,6 @@ func dashboardTableLineWidth(widths []int) int {
 		total += w
 	}
 	return total + dashboardColSep*(len(widths)-1)
-}
-
-// dashboardFitColumnWidths shrinks elastic columns until the table fits budget.
-// When budget is still exceeded after shrinking, cells are truncated at render
-// time via padDashboardCell.
-func dashboardFitColumnWidths(natural []int, budget int) []int {
-	if budget <= 0 || len(natural) == 0 {
-		return append([]int(nil), natural...)
-	}
-	widths := append([]int(nil), natural...)
-	headers := dashboardTableHeaders()
-	mins := make([]int, len(headers))
-	for i, h := range headers {
-		mins[i] = len(h)
-	}
-	for dashboardTableLineWidth(widths) > budget {
-		shrunk := false
-		for _, col := range dashboardColShrinkOrder {
-			if widths[col] > mins[col] {
-				widths[col]--
-				shrunk = true
-				break
-			}
-		}
-		if !shrunk {
-			break
-		}
-	}
-	return widths
 }
 
 // dashboardListCellBudget is the visible width available to a List row's table
@@ -275,16 +233,19 @@ func dashboardTableBodyBudget(termWidth int) int {
 }
 
 func (c *dashboardColumns) syncNatural(kinds workKinds, rows []DashboardRow) {
-	c.natural = dashboardColumnWidths(kinds, rows)
+	c.kinds = kinds
+	c.natural = c.page.columnWidths(kinds, rows)
 	c.refit()
 }
 
 func (c *dashboardColumns) refit() {
-	c.widths = dashboardFitColumnWidths(c.natural, dashboardListCellBudget(c.width))
+	c.widths = c.page.fitWidths(c.kinds, c.natural, dashboardListCellBudget(c.width))
 }
 
-func dashboardTableWidthsForRows(kinds workKinds, rows []DashboardRow, termWidth int) []int {
-	return dashboardFitColumnWidths(dashboardColumnWidths(kinds, rows), dashboardTableBodyBudget(termWidth))
+// tableWidthsForRows is the fitted width set for a table rendered with a body
+// indent rather than a List cursor column.
+func (p dashboardPage) tableWidthsForRows(kinds workKinds, rows []DashboardRow, termWidth int) []int {
+	return p.fitWidths(kinds, p.columnWidths(kinds, rows), dashboardTableBodyBudget(termWidth))
 }
 
 const (
@@ -437,7 +398,7 @@ func dashboardTwoLineTableHeader(widths []int) string {
 
 // dashboardTwoLineTableSeparator renders the two-line mode line-1 separator.
 func dashboardTwoLineTableSeparator(widths []int) string {
-	return dashboardTableSeparator(widths)
+	return dashboardTableSeparator(dashboardTwoLineHeaders(), widths)
 }
 
 // dashboardTwoLineRowLine1 renders the padded line-1 cells of a two-line row.
@@ -490,17 +451,25 @@ func dashboardRowNaturalValues(kinds workKinds, row DashboardRow) []string {
 func dashboardTableLine(values []string, widths []int) string {
 	parts := make([]string, len(values))
 	for i, v := range values {
-		parts[i] = padDashboardCell(v, widths[i])
+		width := 0
+		if i < len(widths) {
+			width = widths[i]
+		}
+		parts[i] = padDashboardCell(v, width)
 	}
 	return strings.Join(parts, "  ")
 }
 
-func dashboardTableSeparator(widths []int) string {
+// dashboardTableSeparator rules each column that carries a header label. A column
+// with no label — page A's trailing activity cluster (ADR-0158) — gets blanks
+// instead: there is nothing to underline. Reading the rule off the headers is what
+// lets a page whose last column *is* labelled (the Routine page's STATUS) keep its
+// dashes without a second switch.
+func dashboardTableSeparator(headers []string, widths []int) string {
 	parts := make([]string, len(widths))
 	for i, width := range widths {
-		// The trailing activity cluster has no header label, so its rule is blank
-		// (spaces) rather than dashes — nothing to underline (ADR-0158).
-		if i == len(widths)-1 {
+		labelled := i < len(headers) && headers[i] != ""
+		if !labelled {
 			parts[i] = strings.Repeat(" ", width)
 			continue
 		}
