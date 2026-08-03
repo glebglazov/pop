@@ -185,27 +185,17 @@ set; the budget yields to the tracer-bullet rule, not the reverse.
 ## Arguments
 
 `to-tasks` reads optional keyword arguments from the invocation that map straight
-to `pop tasks register` flags (their register-time semantics are documented in
-the doc's "Publishing tickets" → "Register the set" section). **With no keywords
-at all, the set registers `managed auto-drain`** (`--managed --auto-drain`) —
-this is the default, not an opt-in:
+to `pop tasks register` flags:
 
-- **`managed`** / **`isolated`** → `--managed`. Stays meaningful to type
-  explicitly even though the default already grants it.
-- **`auto-drain`** / **`drain`** → `--auto-drain`. Same: explicit and default
-  agree, so typing it changes nothing on its own.
-- **`no-drain`** / **`manual`** → the opt-out. Alone, it registers plain (no
-  flags). Combined with `managed`/`isolated`, it registers `--managed` only —
-  an isolated worktree provisioned immediately, not auto-drained. There is no
-  way to request `--auto-drain` without `--managed`; that combination would
-  let the Queue daemon drain the set unattended in whatever checkout
-  `register` binds to, and the default's whole point is closing that off.
+- **`managed`** / **`isolated`** → `--managed`
+- **`auto-drain`** / **`drain`** → `--auto-drain`
+- **`no-drain`** / **`manual`** → drops `--auto-drain`
 
-**Trunk-less fallback.** If the default (no keywords) tries `--managed` and the
-repo has no resolvable trunk, retry registration **plain** and warn the user —
-do not retry with `--auto-drain` alone, which would drain the current checkout
-unattended. If the user explicitly typed `managed`/`isolated`, keep today's
-behavior instead: report the refusal and point at `--trunk <path>`.
+That is the whole mapping. What each flag *means* at register time, what runs
+when no keyword is typed at all, and how a keyword interacts with the default all
+belong to the doc's "Publishing tickets" → "Register the set" section — the
+default is checkout-dependent and is stated there once, so this skill carries
+none of its own. Read that section before registering.
 
 **Non-pop stores.** These arguments are pop-store-only. When the resolved Work
 store is **not** pop (a repo `docs/agents/issue-tracker.md` points at a real

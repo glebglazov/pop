@@ -68,6 +68,14 @@ func ClassifyManagedWorktree(td *tasks.Deps, runtimePath string) (WorktreeMarker
 	return ManagedBound, nil
 }
 
+// IsManagedCheckout reports whether runtimePath is a checkout pop provisioned —
+// the same location-derived question every teardown and marker predicate here
+// asks. It exists so a read-only reporter (`pop tasks checkout --json`) can
+// state the fact without reaching into the store or re-deriving the roots.
+func IsManagedCheckout(td *tasks.Deps, runtimePath string) (bool, error) {
+	return checkoutUnderManagedRoot(td, runtimePath)
+}
+
 // checkoutUnderManagedRoot reports whether runtimePath is a checkout pop created
 // — the Provisioned bit every adoption derives (ADR-0152). It asks the same
 // question of every managed root, not just the current one, so a worktree still

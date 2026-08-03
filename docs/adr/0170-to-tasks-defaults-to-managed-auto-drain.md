@@ -1,5 +1,6 @@
 ---
 status: accepted
+relates: "narrowed by [ADR-0181](0181-registration-default-routes-on-checkout-locality.md) — this default is now the trunk case; from a non-trunk worktree the set binds in place"
 ---
 
 # `to-tasks` defaults to `managed auto-drain`; `no-drain` opts out

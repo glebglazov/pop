@@ -1198,6 +1198,8 @@ func resetTaskFlags() {
 	taskRegisterManaged = false
 	taskRegisterTrunk = ""
 	taskRegisterAutoDrain = false
+	taskCheckoutLocality = false
+	taskCheckoutJSON = false
 	taskBindWorktreeForce = false
 	taskBindWorktreeManaged = false
 	taskBindWorktreeTrunk = ""
