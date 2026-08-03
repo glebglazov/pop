@@ -2,6 +2,8 @@ package tasks
 
 import (
 	"bytes"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -198,6 +200,7 @@ func TestAssistGenericMenuOffersFoldForDoneBoundSet(t *testing.T) {
 		AgentPreset:  "claude",
 		Output:       &out,
 		Input:        strings.NewReader("0\n"),
+		Fold:         func(string, io.Reader, io.Writer) error { return nil },
 	})
 	if err != nil {
 		t.Fatalf("AssistTaskSetWith: %v", err)
@@ -207,6 +210,58 @@ func TestAssistGenericMenuOffersFoldForDoneBoundSet(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "3. Fold branch back into Trunk and release checkout") {
 		t.Fatalf("DONE bound menu missing fold:\n%s", out.String())
+	}
+}
+
+// TestAssistFoldRefusalReasonReachesTheMenu: a refused fold prints the refusal
+// itself, not just a status. The seam exists because assist used to re-exec `pop
+// tasks fold`, whose refusal never made it back across the process boundary.
+func TestAssistFoldRefusalReasonReachesTheMenu(t *testing.T) {
+	d, defPath, root := setupAssistFixture(t, doneAFKSet())
+	s, _, err := d.Store(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutBinding(store.Binding{
+		ScopedKey:   "repo\x00demo",
+		RuntimePath: root,
+		Branch:      "demo",
+		Project:     "demo",
+	}); err != nil {
+		t.Fatalf("PutBinding: %v", err)
+	}
+	runtime, err := ResolveRuntimePathWith(d, root, root)
+	if err != nil {
+		t.Fatalf("ResolveRuntimePathWith: %v", err)
+	}
+
+	var out bytes.Buffer
+	folds := 0
+	err = AssistTaskSetWith(d, &project.Deps{Git: d.Git, FS: d.FS}, func(string) (*config.Config, error) {
+		return &config.Config{}, nil
+	}, AssistOptions{
+		ResolveInput: ResolveInput{CWD: root, DefinitionOverride: defPath, RuntimeOverride: runtime},
+		TaskSetID:    "demo",
+		AgentPreset:  "claude",
+		Output:       &out,
+		// Choose fold, see the refusal, then exit from the re-shown menu.
+		Input: strings.NewReader("3\n0\n"),
+		Fold: func(setID string, _ io.Reader, _ io.Writer) error {
+			folds++
+			if setID != "demo" {
+				t.Fatalf("fold set = %q, want demo", setID)
+			}
+			return fmt.Errorf("fold refused: set worktree is dirty (%s)", runtime)
+		},
+	})
+	if err != nil {
+		t.Fatalf("AssistTaskSetWith: %v", err)
+	}
+	if folds != 1 {
+		t.Fatalf("fold seam called %d times, want 1", folds)
+	}
+	if !strings.Contains(out.String(), "Fold failed: fold refused: set worktree is dirty") {
+		t.Fatalf("menu must print the refusal reason:\n%s", out.String())
 	}
 }
 

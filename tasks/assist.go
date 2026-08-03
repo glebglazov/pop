@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -26,7 +25,16 @@ type AssistOptions struct {
 	Output io.Writer
 	// Input is the interactive TTY (or test reader). Non-interactive input refuses.
 	Input io.Reader
+	// Fold performs the menu's fold action. This package cannot call
+	// binding.Fold itself — tasks/binding imports tasks — so the cmd layer
+	// injects it, keeping the refusal error in this process where the menu can
+	// print it. A nil seam hides the fold action.
+	Fold AssistFold
 }
+
+// AssistFold folds a set's branch onto Trunk and releases its checkout,
+// streaming its own progress and fold-conflict prompts through in/out.
+type AssistFold func(setID string, in io.Reader, out io.Writer) error
 
 // AssistTaskSet opens an Assist session using default dependencies.
 func AssistTaskSet(opts AssistOptions) error {
@@ -130,6 +138,7 @@ func AssistTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 		definitionPath: resolved.DefinitionPath,
 		statePath:      statePath,
 		taskSetID:      setID,
+		fold:           opts.Fold,
 	}
 
 	for {
@@ -327,7 +336,7 @@ func handleGenericAssistMenu(env gateEnv, m *Manifest, status TaskSetStatus, fin
 	if err != nil {
 		return false, exitErr(ExitSetup, "%v", err)
 	}
-	offerFold := assistFoldEligible(d, taskSetID, status)
+	offerFold := env.fold != nil && assistFoldEligible(d, taskSetID, status)
 
 	for {
 		action, err := promptGenericAssistAction(out, reader, taskSetID, status, invocation, offerFold)
@@ -362,7 +371,7 @@ func handleGenericAssistMenu(env gateEnv, m *Manifest, status TaskSetStatus, fin
 				fmt.Fprintf(outputFor(out), "Could not start shell: %v\n", err)
 			}
 		case genericAssistFold:
-			if err := runAssistFold(in, out, taskSetID, runtimePath); err != nil {
+			if err := env.fold(taskSetID, in, out); err != nil {
 				fmt.Fprintf(outputFor(out), "Fold failed: %v\n", err)
 				continue
 			}
@@ -446,14 +455,3 @@ func stillHasWorktreeBinding(d *Deps, setID string) bool {
 	return false
 }
 
-func runAssistFold(in io.Reader, out io.Writer, taskSetID, runtimePath string) error {
-	cmd := exec.Command("pop", "tasks", "fold", taskSetID)
-	if wd := strings.TrimSpace(runtimePath); wd != "" {
-		cmd.Dir = wd
-	}
-	cmd.Stdin = in
-	display := outputFor(out)
-	cmd.Stdout = display
-	cmd.Stderr = display
-	return cmd.Run()
-}

@@ -849,10 +849,34 @@ func runTaskAssistWith(d *tasks.Deps, w io.Writer, stdin io.Reader, taskSetID st
 		AgentCmd:     taskAgentCmd,
 		Output:       w,
 		Input:        stdin,
+		Fold:         assistFold(d),
 	}); err != nil {
 		return fmt.Errorf("tasks assist: %w", err)
 	}
 	return nil
+}
+
+// assistFold gives the Assist menu the same fold `pop tasks fold` performs, run
+// in-process. Assist used to re-exec `pop tasks fold`, which routed its refusal
+// through the root command's error screen and left the menu with nothing but an
+// exit status to report.
+func assistFold(d *tasks.Deps) tasks.AssistFold {
+	return func(setID string, in io.Reader, out io.Writer) error {
+		cfgPath := cfgFile
+		if cfgPath == "" {
+			cfgPath = config.DefaultConfigPath()
+		}
+		cfg, err := taskConfigLoad(cfgPath)
+		if err != nil {
+			return err
+		}
+		_, err = binding.Fold(d, taskProjectDeps(), cfg, setID, binding.FoldOptions{
+			In:          in,
+			AgentPreset: selectedTaskAgentPreset(),
+			AgentCmd:    taskAgentCmd,
+		}, binding.LifecycleHooks{}, out)
+		return err
+	}
 }
 
 func runTaskVerifyWith(d *tasks.Deps, w io.Writer, taskSetID string, accept bool, acceptNote string, remediate bool, remediateNote string) error {

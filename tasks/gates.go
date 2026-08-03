@@ -32,6 +32,7 @@ type gateEnv struct {
 	definitionPath string
 	statePath      string
 	taskSetID      string
+	fold           AssistFold
 }
 
 // ensurePromptReader returns a single prompt reader reused across every gate
