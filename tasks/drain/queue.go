@@ -1,0 +1,1298 @@
+// Package queue implements `pop queue`, a parallel per-project supervisor that
+// fans Task-set drains out across registered projects (ADR 0027). It is
+// concurrent across projects and serial within each — per-project
+// serialization falls out of the Drain's transactional mutual exclusion in the
+// global store for free (ADR-0055), so the supervisor never coordinates within a
+// project, it only ensures at most one drain per idle project.
+//
+// queue also hosts the Work dashboard's TUI (dashboard.go) and its static
+// `pop queue status` render (status.go); both consume the top-level work
+// package, the Work seam its rows are projected from (ADR-0143, ADR-0173). queue owns the styled
+// wrappers, style maps, and column/layout math the work package's rows are
+// rendered through (render.go) — the render-shared layer between the two
+// render surfaces.
+package drain
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"runtime"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/glebglazov/pop/config"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
+	"github.com/glebglazov/pop/project"
+	"github.com/glebglazov/pop/store"
+	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/binding"
+	"github.com/glebglazov/pop/work"
+)
+
+const DrainWindowName = "pop-queue"
+
+// Deps holds the supervisor's external dependencies. Refresh and ReadLock are
+// seams over the tasks package so the scan/selection logic can be unit-tested
+// with mocked Task-set rows and lock state without driving the filesystem.
+type Deps struct {
+	Tasks      *tasks.Deps
+	Project    *project.Deps
+	Tmux       tmuxmod.Tmux
+	LoadConfig func(string) (*config.Config, error)
+
+	// IncludeDone is the Done-inclusion view flag (ADR-0121): the single
+	// inclusion state that threads through the shared row layer both Queue read
+	// surfaces (`pop queue status` and `pop work dashboard`) consume. Default
+	// false hides every DONE Task set — including a DONE set that still holds a
+	// managed Worktree binding (the old teardown-reminder carve-out is retired).
+	// `--include-done` on either command sets it true; the dashboard's `f` filter
+	// menu (task 04) flips it at runtime. It is a view filter, not persisted
+	// consent — Archive (ADR-0071/0116) stays independent and always hides.
+	IncludeDone bool
+
+	// Refresh returns the Task-set rows registered under a definition path.
+	// Defaults to tasks.RefreshWith.
+	Refresh func(defPath string) (*tasks.RefreshResult, error)
+	// ReadLock returns the runtime execution lock status for a runtime
+	// checkout. Defaults to tasks.ReadRuntimeLockStatus.
+	ReadLock func(runtimePath string) *tasks.RuntimeLockStatus
+	// LiveDrains returns every running Drain whose owning process is still
+	// alive. The dashboard build reads it once per build into its snapshot so the
+	// drain column is served by an in-memory map lookup per row rather than a
+	// per-row runtime-lock open. Defaults to tasks.LiveRunningDrains.
+	LiveDrains func() ([]tasks.RunningDrain, error)
+	// Reconcile runs the opportunistic crash-detection pass before a read,
+	// transitioning dead-PID running Drains to crashed. Defaults to
+	// tasks.ReconcileDrains.
+	Reconcile func() (int, error)
+	// ReconcileOut receives a message when the opportunistic reconcile pass
+	// fails, so a transient store failure is visible to whoever is watching
+	// queue output instead of being silently discarded. Defaults to os.Stderr.
+	ReconcileOut io.Writer
+	// ToggleAutoDrain flips a registered Task-set auto-drain bit in Task state.
+	// Defaults to tasks.ToggleAutoDrainWith.
+	ToggleAutoDrain func(defPath, statePath, setID string) (*tasks.AutoDrainResult, error)
+	// ArchiveSet sets the reversible archived flag on one registered Task set in
+	// Task state, leaving its Worktree binding untouched. Defaults to
+	// tasks.SetTaskSetArchived.
+	ArchiveSet func(defPath, setID string) error
+	// AcquireRuntimeLock serializes human-triggered integration with normal
+	// runtime execution. Defaults to tasks.AcquireRuntimeLock.
+	AcquireRuntimeLock func(runtimePath string) (runtimeLock, error)
+	// Now returns the current time. Defaults to time.Now.
+	Now func() time.Time
+
+	// ProbeDirective reports a config/registration-class error message when a
+	// Ready set's worktree directive cannot be satisfied in the current
+	// environment (ADR-0059) — read-only, never provisioning. Empty means
+	// satisfiable or no directive. The decision phase consults it so an
+	// unsatisfiable directive becomes a visible config error on the set instead of
+	// a dispatched drain (no crash-backoff, no silent in-place fallback). Defaults
+	// to a binding.ProbeWorktreeDirective probe surfacing only the two directive
+	// sentinels (ErrNoResolvableTrunk, ErrNamedWorktreeNotFound).
+	ProbeDirective func(checkout, setID string) string
+
+	// CompleteDetailTask, ResetDetailTask, SkipDetailTask are seams for the
+	// detail-view override keys (C/O/K). Each defaults to the corresponding
+	// tasks.*With function resolved with the Deps' Tasks, Project, and LoadConfig.
+	CompleteDetailTask func(defPath, taskPath string) error
+	ResetDetailTask    func(defPath, taskPath string) error
+	SkipDetailTask     func(defPath, taskPath string) error
+
+	// Kinds overrides the Work-kind wiring list the dashboard's snapshot builds
+	// through (WorkKinds). Left nil it is the real Task-set and Map adapters over
+	// the seams above; a test sets it to hand the builder kinds of its own.
+	Kinds func(cfg *config.Config) []work.Kind
+	// RoutineKinds is the same override for the dashboard's Routine page
+	// (RoutinePageKinds). The two pages have separate wiring lists because they are
+	// separate pages: the supervisor and `pop queue status` read Kinds, and neither
+	// wants a Routine folded into it.
+	RoutineKinds func(cfg *config.Config) []work.Kind
+}
+
+type runtimeLock interface {
+	Release() error
+}
+
+// DefaultDeps returns supervisor dependencies backed by real implementations.
+func DefaultDeps() *Deps {
+	d := &Deps{
+		Tasks:      tasks.DefaultDeps(),
+		Project:    project.DefaultDeps(),
+		Tmux:       tmuxmod.New(),
+		LoadConfig: config.Load,
+	}
+	return d
+}
+
+// refresh resolves the Refresh seam, defaulting to tasks.RefreshWith.
+func (d *Deps) refresh(defPath string) (*tasks.RefreshResult, error) {
+	if d.Refresh != nil {
+		return d.Refresh(defPath)
+	}
+	return tasks.RefreshWith(d.Tasks, defPath, tasks.StatePathFor(defPath))
+}
+
+// probeDirective resolves the ProbeDirective seam, defaulting to a read-only
+// binding.ProbeWorktreeDirective probe. It returns a config-class error message
+// only for the two unsatisfiable-directive sentinels (ADR-0059); any other probe
+// error (incidental resolution failure) yields "" so the normal decision flow is
+// undisturbed.
+func (d *Deps) probeDirective(checkout, setID string) string {
+	if d.ProbeDirective != nil {
+		return d.ProbeDirective(checkout, setID)
+	}
+	var cfg *config.Config
+	if d.LoadConfig != nil {
+		cfg, _ = d.LoadConfig(config.DefaultConfigPath())
+	}
+	err := binding.ProbeWorktreeDirective(d.Tasks, d.Project, cfg, checkout, setID)
+	if errors.Is(err, binding.ErrNoResolvableTrunk) || errors.Is(err, binding.ErrNamedWorktreeNotFound) {
+		return err.Error()
+	}
+	return ""
+}
+
+// directiveConfigReason marks a decision whose Ready set was withheld because its
+// worktree directive is unsatisfiable in the current environment (ADR-0059).
+const directiveConfigReason = "worktree directive unsatisfiable"
+
+// directiveConfigDecision turns a base decision into a non-actionable config-class
+// error for an unsatisfiable worktree directive on setID (ADR-0059): TaskSetID is
+// cleared so no drain is dispatched (no crash-backoff accrues, no silent in-place
+// fallback), and the fault surfaces the same way a project/registration config
+// error does — via ProjectConfigError, which the run view routes to its scan-error
+// channel. BlockedSetID names the offending set.
+func directiveConfigDecision(base Decision, setID, msg string) Decision {
+	dec := base
+	dec.TaskSetID = ""
+	dec.Reason = directiveConfigReason
+	dec.BlockedSetID = setID
+	dec.ProjectConfigError = fmt.Sprintf("%s: %s", setID, msg)
+	return dec
+}
+
+// readLock resolves the ReadLock seam, defaulting to tasks.ReadRuntimeLockStatus.
+func (d *Deps) readLock(runtimePath string) *tasks.RuntimeLockStatus {
+	if d.ReadLock != nil {
+		return d.ReadLock(runtimePath)
+	}
+	return tasks.ReadRuntimeLockStatus(d.Tasks, runtimePath)
+}
+
+// liveDrains resolves the LiveDrains seam, defaulting to tasks.LiveRunningDrains.
+func (d *Deps) liveDrains() ([]tasks.RunningDrain, error) {
+	if d.LiveDrains != nil {
+		return d.LiveDrains()
+	}
+	return tasks.LiveRunningDrains(d.Tasks)
+}
+
+// reconcile runs the crash-detection pass, healing dead-PID running Drains into
+// crashed (ADR-0055). It defaults to tasks.ReconcileDrains. It is the Task-set
+// advancer's reconcile phase and no longer rides any read: the result count is
+// advisory, and a failure never blocks the pass that follows — that pass then
+// reflects the pre-reconcile truth, which is no worse than before this pass
+// existed. The error is neither silently discarded nor fatal: it is logged to
+// ReconcileOut (default os.Stderr) so a human watching queue output notices a
+// transient store failure instead of unknowingly acting on stale liveness, and
+// returned so the seam's caller can report it too.
+func (d *Deps) reconcile() error {
+	var err error
+	if d.Reconcile != nil {
+		_, err = d.Reconcile()
+	} else {
+		_, err = tasks.ReconcileDrains(d.Tasks)
+	}
+	if err == nil {
+		return nil
+	}
+	fmt.Fprintf(d.reconcileOut(), "queue: reconcile: %v (continuing with pre-reconcile snapshot)\n", err)
+	return err
+}
+
+// reconcileOut is where a reconcile phase narrates: a healed-row count and a
+// reconcile failure are statements about the pass rather than about a candidate,
+// so they go here instead of into the supervisor's per-advance event stream.
+func (d *Deps) reconcileOut() io.Writer {
+	if d.ReconcileOut != nil {
+		return d.ReconcileOut
+	}
+	return os.Stderr
+}
+
+func (d *Deps) ToggleSetAutoDrain(defPath, statePath, setID string) (*tasks.AutoDrainResult, error) {
+	if d.ToggleAutoDrain != nil {
+		return d.ToggleAutoDrain(defPath, statePath, setID)
+	}
+	return tasks.ToggleAutoDrainWith(d.Tasks, defPath, statePath, setID)
+}
+
+// archiveSet resolves the ArchiveSet seam, defaulting to tasks.SetTaskSetArchived.
+// It writes only the archived flag; the set's Worktree binding is never touched.
+func (d *Deps) ArchiveTaskSet(defPath, setID string) error {
+	if d.ArchiveSet != nil {
+		return d.ArchiveSet(defPath, setID)
+	}
+	return tasks.SetTaskSetArchived(d.Tasks, defPath, []string{setID}, true)
+}
+
+// unarchiveSet clears the archived flag on one registered Task set.
+func (d *Deps) UnarchiveTaskSet(defPath, setID string) error {
+	return tasks.SetTaskSetArchived(d.Tasks, defPath, []string{setID}, false)
+}
+
+func (d *Deps) acquireRuntimeLock(runtimePath string) (runtimeLock, error) {
+	if d.AcquireRuntimeLock != nil {
+		return d.AcquireRuntimeLock(runtimePath)
+	}
+	return tasks.AcquireRuntimeLock(d.Tasks, runtimePath, nil)
+}
+
+func (d *Deps) resolveInput(defPath string) tasks.ResolveInput {
+	return tasks.ResolveInput{DefinitionOverride: defPath, CWD: defPath}
+}
+
+func (d *Deps) ConfigLoader() func(string) (*config.Config, error) {
+	if d.LoadConfig != nil {
+		return d.LoadConfig
+	}
+	return config.Load
+}
+
+func (d *Deps) ProjectDeps() *project.Deps {
+	if d.Project != nil {
+		return d.Project
+	}
+	return project.DefaultDeps()
+}
+
+func (d *Deps) CompleteTaskFile(defPath, taskPath string) error {
+	if d.CompleteDetailTask != nil {
+		return d.CompleteDetailTask(defPath, taskPath)
+	}
+	td := d.Tasks
+	if td == nil {
+		td = tasks.DefaultDeps()
+	}
+	_, err := tasks.CompleteTaskWith(td, d.ProjectDeps(), d.ConfigLoader(), tasks.CompleteTaskOptions{
+		ResolveInput: d.resolveInput(defPath),
+		TaskPath:     taskPath,
+	})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (d *Deps) ResetTaskFile(defPath, taskPath string) error {
+	if d.ResetDetailTask != nil {
+		return d.ResetDetailTask(defPath, taskPath)
+	}
+	td := d.Tasks
+	if td == nil {
+		td = tasks.DefaultDeps()
+	}
+	_, err := tasks.ResetTaskWith(td, d.ProjectDeps(), d.ConfigLoader(), tasks.ResetTaskOptions{
+		ResolveInput: d.resolveInput(defPath),
+		TaskPath:     taskPath,
+	})
+	return err
+}
+
+func (d *Deps) SkipTaskFile(defPath, taskPath string) error {
+	if d.SkipDetailTask != nil {
+		return d.SkipDetailTask(defPath, taskPath)
+	}
+	td := d.Tasks
+	if td == nil {
+		td = tasks.DefaultDeps()
+	}
+	_, err := tasks.SkipTaskWith(td, d.ProjectDeps(), d.ConfigLoader(), tasks.SkipTaskOptions{
+		ResolveInput: d.resolveInput(defPath),
+		TaskPath:     taskPath,
+	})
+	return err
+}
+
+// projectScan holds one registered project's resolved coordinates for a scan.
+type projectScan struct {
+	Name           string
+	ProjectLabel   string
+	ProjectPath    string
+	DefinitionPath string
+	RuntimePath    string
+	SessionName    string
+	// RepoKey is the repository identity prefix (basename-shortHash) resolved
+	// once during scan path resolution. Carrying it lets the decision phase reuse
+	// it instead of re-forking `git rev-parse --git-common-dir` per group.
+	RepoKey string
+	// RepoCommonDir is the repository's canonical git common directory — the
+	// Drain row's repo key. The decision phase queries per-set abnormal-terminal
+	// history (Queue backoff/parking) by it (ADR-0055).
+	RepoCommonDir string
+}
+
+type provisionedWorktree struct {
+	Path   string
+	Branch string
+}
+
+// Decision is the supervisor's per-project outcome for one scan iteration.
+type Decision struct {
+	Project            string
+	Busy               bool   // a live runtime lock ⇒ already executing, skip
+	TaskSetID          string // the drain to spawn; empty when nothing is actionable
+	Reason             string // why no drain was spawned (busy, no-ready-set, error)
+	WaitUntil          time.Time
+	ProjectConfigError string
+	// AwaitingApprovalSetID is the first Task-set in AWAITING-APPROVAL state (AFK
+	// done, terminal HITL gate awaits human sign-off). Empty when the project has
+	// no awaiting-approval set.
+	AwaitingApprovalSetID string
+	// BlockedSetID names the set whose abnormal-backoff or parking produced
+	// Reason. It lets the dashboard attribute a backoff/park to a specific set
+	// without reading any persisted flag (ADR-0055).
+	BlockedSetID string
+	// Deferral is the readiness selector's single "Ready but not spawning" verdict
+	// (ADR-0106) when one applies — its reason species drives Reason/WaitUntil/
+	// BlockedSetID, which are a pure projection of it. Zero (DeferNone) for every
+	// non-deferral outcome (busy, error, needs-bind, awaiting approval, no ready set).
+	Deferral   SpawnDeferral
+	Err        error
+	scan       projectScan
+	LockStatus *tasks.RuntimeLockStatus
+	// boundCheckout is the checkout this set's Worktree binding names, blank when
+	// it holds none. It is the occupancy the advance would take — an unbound set
+	// provisions a fresh worktree and so occupies nothing yet — and is carried
+	// rather than re-derived because only the decision phase holds the bindings.
+	boundCheckout string
+	// pinRuntimePath is set once a drain has been routed to a definite checkout
+	// (prepareWorktreeDrain → RouteDrainCheckout): the spawn then pins the inner
+	// implement to that checkout with --task-runtime-path so a reused pane can
+	// never re-resolve to its stale cwd (e.g. the trunk). It stays false for an
+	// inline representative drain, which resolves via the pane's own cwd.
+	pinRuntimePath bool
+}
+
+// applyDeferral projects a readiness SpawnDeferral onto a Decision: it records
+// the typed verdict and mirrors it into the display fields (Reason from the
+// reason species, plus the set and until-instant) so dispatch, dashboard, and
+// run output all read one source (ADR-0106).
+func applyDeferral(dec *Decision, d SpawnDeferral) {
+	dec.Deferral = d
+	dec.Reason = d.Message()
+	dec.WaitUntil = d.Until
+	dec.BlockedSetID = d.SetID
+}
+
+// Actionable reports whether the decision selected a Task set to drain.
+func (dec Decision) Actionable() bool {
+	return dec.Err == nil && !dec.Busy && dec.TaskSetID != ""
+}
+
+func (d *Deps) now() time.Time {
+	if d != nil && d.Now != nil {
+		return d.Now()
+	}
+	return time.Now()
+}
+
+// Scan resolves every registered project, collapses the checkouts that share a
+// Repository identity into one scheduling unit (ADR-0035), derives each repo's
+// actionable drain(s), and returns the Decisions for this scan. A repository is
+// scheduled at most once per Ready set regardless of how many worktrees it
+// expands into. Drain routing runs unconditionally (ADR-0070/0072): a repo may
+// return one busy Decision per live worktree drain plus one actionable Decision
+// per queue-drainable Ready set not already running, each routed to its own
+// checkout.
+//
+// It is a pure read: no tmux side effects, and no crash-detection pass either —
+// reconciliation is the supervisor's explicit phase, so `pop queue status` and
+// the dashboard no longer mutate state to render.
+func Scan(d *Deps, cfg *config.Config) ([]Decision, error) {
+	projects, err := tasks.ListPickerProjectsWith(d.Project, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := resolvedQueueConfig(cfg); err != nil {
+		return nil, err
+	}
+	now := d.now().UTC()
+	recoveryWaiters := loadRecoveryWaiters(d)
+
+	// Memoize idempotent git reads for this scan. The static partition below
+	// forks no git (ADR-0060), but the per-group decision still forks for the few
+	// task-storage repos (worktree-directive probes, the spawn session name); wrap
+	// a shallow copy of the deps so those repeated reads serve from cache and the
+	// caller's git is untouched.
+	if d.Tasks != nil && d.Tasks.Git != nil {
+		scanDeps := *d
+		tasksDeps := *d.Tasks
+		tasksDeps.Git = newScanGitCache(d.Tasks.Git)
+		scanDeps.Tasks = &tasksDeps
+		d = &scanDeps
+	}
+
+	// Partition config projects against on-disk Task-storage markers with the
+	// same fork-free path-nesting match the dashboard uses (ADR-0060). A project
+	// matching no marker is idle/no-tasks from its name alone — no git; only
+	// repositories with task storage take the marker-based decision path.
+	groups, idleProjects, err := scanRepoStatics(d, cfg, projects)
+	if err != nil {
+		return nil, err
+	}
+
+	decisions := make([]Decision, 0, len(projects))
+	for _, p := range idleProjects {
+		decisions = append(decisions, Decision{Project: p.Name, Reason: "no ready set"})
+	}
+
+	// Decide each task-storage repo group concurrently, preserving group order.
+	// decideRepoDispatchesWithRep reads only the shared Deps, so the groups are
+	// concurrency-safe.
+	groupDecisions := make([][]Decision, len(groups))
+	sem := make(chan struct{}, scanConcurrency())
+	var wg sync.WaitGroup
+	for i := range groups {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(idx int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			g := groups[idx]
+			decs := decideRepoDispatchesWithRep(d, cfg, g.scans, g.rep, g.repErr, recoveryWaiters, now)
+			// The fork-free static path leaves the representative's spawn session
+			// name unset (deriving it forks git). Fill it only for a drain about to
+			// be dispatched — never for the idle full-fleet listing — so a created
+			// and registered Ready set stays dispatchable. Derive the session from
+			// the integration-target checkout, not a binding-routed worktree cwd.
+			for j := range decs {
+				if !decs[j].Actionable() || decs[j].scan.SessionName != "" {
+					continue
+				}
+				projectPath := decs[j].scan.ProjectPath
+				if g.rep != nil && strings.TrimSpace(g.rep.ProjectPath) != "" {
+					projectPath = g.rep.ProjectPath
+				}
+				if projectPath == "" {
+					continue
+				}
+				decs[j].scan.SessionName = project.SessionNameWith(d.Project, projectPath)
+			}
+			groupDecisions[idx] = decs
+		}(i)
+	}
+	wg.Wait()
+	for _, gd := range groupDecisions {
+		decisions = append(decisions, gd...)
+	}
+	return decisions, nil
+}
+
+// scanRepoStatic holds one task-storage repo's fork-free scan coordinates: the
+// marker-derived projectScans for its in-config checkouts and the integration
+// representative resolved with no git (ADR-0060). repErr carries a fatal
+// config-class finding (a renamed execution key) so the group surfaces it
+// exactly as the git-resolved path did.
+type scanRepoStatic struct {
+	scans  []projectScan
+	rep    *projectScan
+	repErr error
+}
+
+// scanRepoStatics partitions config projects against on-disk Task-storage
+// markers, forking no git (ADR-0060). It mirrors the dashboard's discovery
+// (dashboardRepoStatics): every repository with a storage marker that intersects
+// config yields one decision group whose identity, paths, and integration target
+// derive from the marker's common directory plus config; config projects matching
+// no marker are returned as idle (no-tasks) projects. A registered repository
+// absent from config is dropped by the intersection (ADR-0042).
+func scanRepoStatics(d *Deps, cfg *config.Config, projects []project.ExpandedProject) ([]scanRepoStatic, []project.ExpandedProject, error) {
+	repos, err := tasks.ListTaskStorageRepos(d.Tasks)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Canonicalize each candidate project path once (cheap symlink eval, never a
+	// git fork) for path-nesting comparison against each repo's working-tree root.
+	canons := make([]string, len(projects))
+	matched := make([]bool, len(projects))
+	for i, p := range projects {
+		canon, cerr := canonicalCheckoutPath(d.Tasks, p.Path)
+		if cerr != nil {
+			canon = p.Path
+		}
+		canons[i] = canon
+	}
+
+	var groups []scanRepoStatic
+	for _, repo := range repos {
+		root := storageRepoRoot(d.Tasks, repo.RepositoryPath)
+		var scans []projectScan
+		for i := range projects {
+			if pathWithinOrEqual(canons[i], root) || pathWithinOrEqual(root, canons[i]) {
+				matched[i] = true
+				scans = append(scans, projectScan{
+					Name:         projects[i].Name,
+					ProjectLabel: projects[i].ProjectLabel,
+					ProjectPath:  canons[i],
+					RuntimePath:  canons[i],
+				})
+			}
+		}
+		if len(scans) == 0 {
+			continue // registered storage but de-registered from config (ADR-0042).
+		}
+		st, serr := scanRepoStaticFromMarker(d, cfg, repo.RepositoryPath, scans)
+		if serr != nil {
+			return nil, nil, serr
+		}
+		groups = append(groups, st)
+	}
+
+	var idle []project.ExpandedProject
+	for i := range projects {
+		if !matched[i] {
+			idle = append(idle, projects[i])
+		}
+	}
+	return groups, idle, nil
+}
+
+// scanRepoStaticFromMarker derives one repo group's scan coordinates from its
+// marker's common directory and config, forking no git (ADR-0060): identity and
+// paths come from IdentityFromCommonDir (sha256 + path ops), and the integration
+// representative from dashboardRepresentative (explicit config trunk, or — for a
+// non-bare repo — the parent of the common directory). The marker-derived
+// definition path, repo key, and common directory are stamped onto every scan and
+// the representative so the decision phase reuses them instead of re-forking
+// `git rev-parse` per project and per group.
+func scanRepoStaticFromMarker(d *Deps, cfg *config.Config, commonDir string, scans []projectScan) (scanRepoStatic, error) {
+	id, err := tasks.IdentityFromCommonDir(d.Tasks, commonDir)
+	if err != nil {
+		return scanRepoStatic{}, err
+	}
+	defPath, err := tasks.CanonicalDefinitionPathWith(d.Tasks, id.TasksDir)
+	if err != nil {
+		return scanRepoStatic{}, err
+	}
+	repoKey := repoIdentityKey(id)
+	for i := range scans {
+		scans[i].DefinitionPath = defPath
+		scans[i].RepoKey = repoKey
+		scans[i].RepoCommonDir = id.CommonDir
+	}
+
+	rep, _, repErr := dashboardRepresentative(d, cfg, id.CommonDir, scans)
+	if rep != nil {
+		rep.DefinitionPath = defPath
+		rep.RepoKey = repoKey
+		rep.RepoCommonDir = id.CommonDir
+	}
+	return scanRepoStatic{scans: scans, rep: rep, repErr: repErr}, nil
+}
+
+// scanConcurrency bounds the worker pool used to resolve project scans and decide
+// repo groups in parallel. The work is git-subprocess (I/O) bound, so it oversubscribes
+// the CPU count; the cap keeps a large project list from spawning hundreds of
+// simultaneous git processes.
+func scanConcurrency() int {
+	n := runtime.NumCPU() * 4
+	if n < 4 {
+		n = 4
+	}
+	if n > 32 {
+		n = 32
+	}
+	return n
+}
+
+// outsideQueueScopeResolveError reports whether resolveScan failed because the
+// project has no git checkout. Such projects are picker Projects but outside
+// Queue scope — they have no Repository identity and therefore no Task storage.
+func outsideQueueScopeResolveError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "not inside a git repository") ||
+		strings.Contains(msg, "is not a git checkout")
+}
+
+func resolvedQueueConfig(cfg *config.Config) (config.ResolvedQueueConfig, error) {
+	qcfg, err := cfg.ResolveQueue()
+	if err != nil {
+		return config.ResolvedQueueConfig{}, err
+	}
+	return qcfg, nil
+}
+
+// resolveScan derives a project's definition path, runtime checkout, and tmux
+// session name from its picker-visible entry.
+func resolveScan(d *Deps, p project.ExpandedProject) (projectScan, error) {
+	// ResolveScanPaths derives the project root and definition path in a single
+	// git invocation. The runtime checkout equals the project root here (the
+	// queue never overrides it), so no separate runtime-path resolution is needed.
+	resolved, id, err := tasks.ResolveScanPaths(d.Tasks, p.Path)
+	if err != nil {
+		return projectScan{}, err
+	}
+	return projectScan{
+		Name:           p.Name,
+		ProjectLabel:   p.ProjectLabel,
+		ProjectPath:    resolved.ProjectPath,
+		DefinitionPath: resolved.DefinitionPath,
+		RuntimePath:    resolved.ProjectPath,
+		SessionName:    project.SessionNameWith(d.Project, resolved.ProjectPath),
+		RepoKey:        repoIdentityKey(id),
+		RepoCommonDir:  id.CommonDir,
+	}, nil
+}
+
+// scanRepoKey returns the repository key resolved during scan path resolution,
+// falling back to a git lookup for callers (tests, the spawn path) that build a
+// projectScan without it.
+func scanRepoKey(d *Deps, scan projectScan) (string, error) {
+	if scan.RepoKey != "" {
+		return scan.RepoKey, nil
+	}
+	return ResolveRepoKey(d, scan.ProjectPath)
+}
+
+// scanRepoCommonDir returns the repository's canonical git common directory (the
+// Drain row's repo key for backoff/parking history), reusing the value resolved
+// during scan path resolution and falling back to a git lookup for callers
+// (tests, the spawn path) that build a projectScan without it.
+func scanRepoCommonDir(d *Deps, scan projectScan) string {
+	if scan.RepoCommonDir != "" {
+		return scan.RepoCommonDir
+	}
+	if d == nil || d.Tasks == nil || strings.TrimSpace(scan.ProjectPath) == "" {
+		return ""
+	}
+	id, err := tasks.ResolveRepositoryIdentity(d.Tasks, scan.ProjectPath)
+	if err != nil {
+		return ""
+	}
+	return id.CommonDir
+}
+
+// decideProject reads the runtime lock and Ready sets for one project and
+// returns the first Decision. It is retained for tests and callers that need the
+// v1 single-decision view; Scan uses decideProjectDispatches to expose
+// worktree-ready multi-set fan-out.
+func decideProject(d *Deps, scan projectScan, now time.Time) Decision {
+	decisions := decideProjectDispatches(d, scan, nil, loadRecoveryWaiters(d), now)
+	if len(decisions) == 0 {
+		return Decision{Project: scan.Name, scan: scan, Reason: "no ready set"}
+	}
+	return decisions[0]
+}
+
+// decideProjectDispatches reads runtime locks and Ready sets for one project.
+// Live worktree drains surface as per-checkout busy Decisions; a v1 in-place lock
+// on the representative makes the project busy. Otherwise every queue-drainable
+// Ready set not already running is dispatched, each to its own checkout — drain
+// routing runs unconditionally (ADR-0070/0072), with per-checkout busy accounting
+// rather than repo-wide serialization.
+func decideProjectDispatches(d *Deps, scan projectScan, delays []time.Duration, recoveryWaiters map[string]tasks.RecoveryWaiter, now time.Time) []Decision {
+	dec := Decision{Project: scan.Name, scan: scan}
+	dec.ProjectConfigError = repoConfigError(d, scan.ProjectPath)
+
+	var decisions []Decision
+	runningSets := map[string]bool{}
+	// A set with a live pending-spawn marker was dispatched in a prior tick but has
+	// not yet reached BeginDrain (no running Drain row exists yet). Treat it as busy
+	// so this poll does not re-select it and send a second implement into the pane.
+	// This closes the double-spawn window against durable state, so correctness no
+	// longer depends on the in-memory post-spawn view seeding surviving the tick.
+	if pending, err := pendingSpawnSets(d, scan); err != nil {
+		dec.Err = err
+		dec.Reason = "drain store"
+		return []Decision{dec}
+	} else {
+		for id := range pending {
+			runningSets[id] = true
+		}
+	}
+	openSpawns, err := liveOpenSpawns(d, scan)
+	if err != nil {
+		dec.Err = err
+		dec.Reason = "drain store"
+		return []Decision{dec}
+	}
+	for _, open := range openSpawns {
+		if open.Lock == nil || !open.Lock.Locked {
+			continue
+		}
+		busy := dec
+		busy.Busy = true
+		busy.Reason = "busy"
+		busy.TaskSetID = open.SetID
+		busy.LockStatus = open.Lock
+		busy.scan.RuntimePath = open.RuntimePath
+		decisions = append(decisions, busy)
+		runningSets[open.SetID] = true
+	}
+
+	lock := d.readLock(scan.RuntimePath)
+	dec.LockStatus = lock
+	// When the current checkout has been adopted into the worktree binding model
+	// (ADR-0036), its runtime path equals an open spawn's runtime path that the
+	// openSpawns loop above already reported as busy. Treating that lock as a v1
+	// in-place lock here would both double-count the live drain and short-circuit
+	// dispatch of the repo's other Ready sets into fresh worktrees, so fall
+	// through to the dispatch logic instead.
+	adoptedSpawn := lock != nil && lock.Metadata != nil && runningSets[lock.Metadata.SetID]
+	if lock != nil && lock.Locked && !adoptedSpawn {
+		dec.Busy = true
+		dec.Reason = "busy"
+		if lock.Metadata != nil && lock.Metadata.SetID != "" {
+			dec.TaskSetID = lock.Metadata.SetID
+			runningSets[lock.Metadata.SetID] = true
+		}
+		decisions = append(decisions, dec)
+		return decisions
+	}
+	if adoptedSpawn {
+		// The dispatch baseline must not carry the adopted spawn's live lock.
+		dec.LockStatus = nil
+	}
+
+	refresh, err := d.refresh(scan.DefinitionPath)
+	if err != nil {
+		dec.Err = err
+		dec.Reason = "refresh"
+		return appendOrOnly(decisions, dec)
+	}
+
+	repoKey, err := scanRepoKey(d, scan)
+	if err != nil {
+		dec.Err = err
+		dec.Reason = "repo"
+		return appendOrOnly(decisions, dec)
+	}
+
+	bindings, _ := binding.AllBindings(d.Tasks)
+	var cfg *config.Config
+	if d.LoadConfig != nil {
+		cfg, _ = d.LoadConfig(config.DefaultConfigPath())
+	}
+	tasks.ApplyVerifyVerdictsWith(d.Tasks, refresh, cfg, func(setID string) string {
+		return binding.RuntimeForSet(bindings, repoKey, setID)
+	})
+
+	backoff := d.setBackoffLookup(scanRepoCommonDir(d, scan), delays, now)
+	claimFor := d.checkoutClaimLookup(bindings, repoKey)
+	ids, deferral, ok := selectReadySets(refresh, backoff, recoveryWaiters, claimFor)
+	if !ok {
+		if deferral.Deferred() {
+			applyDeferral(&dec, deferral)
+		} else if id := firstAwaitingApprovalSetID(refresh.Rows); id != "" {
+			dec.Reason = "awaiting approval"
+			dec.AwaitingApprovalSetID = id
+		} else {
+			dec.Reason = "no ready set"
+		}
+		return appendOrOnly(decisions, dec)
+	}
+	for _, id := range ids {
+		if runningSets[id] {
+			continue
+		}
+		// An unsatisfiable worktree directive is a static config defect, not a
+		// runtime crash: withhold the set as a config error rather than dispatch a
+		// drain that could only fail and churn (ADR-0059).
+		if msg := d.probeDirective(scan.ProjectPath, id); msg != "" {
+			decisions = append(decisions, directiveConfigDecision(dec, id, msg))
+			continue
+		}
+		// The Queue routes only bound sets and sets carrying a worktree directive
+		// (ADR-0072). An unbound, no-directive set is not Queue-drainable: with the
+		// Integration-target fallback gone (ADR-0070) there is no checkout to invent,
+		// so it is skipped rather than silently landed on the representative (trunk).
+		// Task 08 surfaces it as a needs-bind fault.
+		if !queueDrainable(d, scan.DefinitionPath, repoKey, id, bindings) {
+			skip := dec
+			skip.Reason = NeedsBindReason
+			skip.BlockedSetID = id
+			decisions = append(decisions, skip)
+			continue
+		}
+		action := dec
+		action.TaskSetID = id
+		action.boundCheckout = binding.RuntimeForSet(bindings, repoKey, id)
+		decisions = append(decisions, action)
+	}
+	if len(decisions) == 0 {
+		dec.Reason = "ready set already running"
+		return []Decision{dec}
+	}
+	return decisions
+}
+
+// NeedsBindReason is the Decision reason for an unbound, no-directive set the
+// Queue refuses to route (ADR-0070/0072). It is reported, never dispatched; the
+// human binds a worktree (or authors a directive) to make it Queue-drainable.
+const NeedsBindReason = "unbound set with no worktree directive; bind a worktree to drain it"
+
+// queueDrainable reports whether the Queue may route setID: it has either an
+// existing Worktree binding or an authored worktree directive (ADR-0072). An
+// unbound, no-directive set is not routable — the Queue never invents a checkout.
+func queueDrainable(d *Deps, defPath, repoKey, setID string, bindings map[string]WorktreeBinding) bool {
+	if b, ok := bindings[SetScopedKey(repoKey, setID)]; ok && strings.TrimSpace(b.RuntimePath) != "" {
+		return true
+	}
+	if defPath == "" {
+		return false
+	}
+	intent, err := tasks.RegisteredWorktreeIntent(d.Tasks, defPath, setID)
+	return err == nil && intent != nil
+}
+
+func appendOrOnly(decisions []Decision, dec Decision) []Decision {
+	if len(decisions) > 0 {
+		return decisions
+	}
+	return []Decision{dec}
+}
+
+type liveOpenSpawn struct {
+	SetID       string
+	RuntimePath string
+	Lock        *tasks.RuntimeLockStatus
+}
+
+// liveOpenSpawns returns the live Drains running against any checkout of the
+// scan's repository, one per (runtime path, set). ADR-0055 retires the journal's
+// open-spawn tracking: a running Drain row whose process is alive IS the live
+// execution claim, so the store's running drains are the source of truth. Each
+// is surfaced with a synthesized RuntimeLockStatus so callers read it exactly as
+// they read a single-checkout lock.
+// pendingSpawnSets returns the set IDs of the scan's repository that carry a
+// live pending-spawn marker (dispatched but not yet running). It is the durable
+// half of the double-spawn guard: a set here has an implement command already in
+// flight, so the dispatcher must not select it again this tick.
+func pendingSpawnSets(d *Deps, scan projectScan) (map[string]bool, error) {
+	if d == nil || d.Tasks == nil {
+		return nil, nil
+	}
+	commonDir := scanRepoCommonDir(d, scan)
+	if commonDir == "" {
+		return nil, nil
+	}
+	pending, err := tasks.PendingSpawns(d.Tasks, commonDir)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(pending))
+	for _, ps := range pending {
+		if ps.SetID != "" {
+			out[ps.SetID] = true
+		}
+	}
+	return out, nil
+}
+
+func liveOpenSpawns(d *Deps, scan projectScan) ([]liveOpenSpawn, error) {
+	if d == nil || d.Tasks == nil {
+		return nil, nil
+	}
+	commonDir := scanRepoCommonDir(d, scan)
+	if commonDir == "" {
+		return nil, nil
+	}
+	running, err := tasks.LiveRunningDrains(d.Tasks)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var out []liveOpenSpawn
+	for _, dr := range running {
+		if dr.Repo != commonDir || dr.RuntimePath == "" || dr.SetID == "" {
+			continue
+		}
+		key := dr.RuntimePath + "\x00" + dr.SetID
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, liveOpenSpawn{
+			SetID:       dr.SetID,
+			RuntimePath: dr.RuntimePath,
+			Lock: &tasks.RuntimeLockStatus{
+				RuntimePath: dr.RuntimePath,
+				Locked:      true,
+				Metadata: &tasks.RuntimeLockMetadata{
+					PID:         dr.PID,
+					RuntimePath: dr.RuntimePath,
+					StartedAt:   dr.StartedAt,
+					SetID:       dr.SetID,
+				},
+			},
+		})
+	}
+	return out, nil
+}
+
+// repoConfigError returns the non-empty error string when a repo's
+// .pop/config.toml fails to load (including the `worktree_ready was removed`
+// migration tripwire), else "". It surfaces the config-class defect on the
+// Decision without gating any routing — the drain router runs unconditionally
+// (ADR-0070/0072).
+func repoConfigError(d *Deps, repoRoot string) string {
+	if _, err := loadRepoConfig(d, repoRoot); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+func loadRepoConfig(d *Deps, repoRoot string) (config.RepoConfig, error) {
+	pd := d.Project
+	if pd == nil || pd.FS == nil {
+		pd = project.DefaultDeps()
+	}
+	return config.LoadRepoConfigWith(&config.Deps{FS: pd.FS}, repoRoot)
+}
+
+// firstAwaitingApprovalSetID returns the ID of the first Task-set in
+// AWAITING-APPROVAL state (all AFK work done/skipped, only a terminal HITL gate
+// remains). Empty when none.
+func firstAwaitingApprovalSetID(rows []tasks.Row) string {
+	for _, row := range rows {
+		if row.Status == tasks.StatusAwaitingApproval {
+			return row.ID
+		}
+	}
+	return ""
+}
+
+// setBackoffFunc reports a set's abnormal-derived Queue eligibility: parked
+// reports whether repeated abnormal terminals have parked it (skip indefinitely
+// until a human unparks); a non-zero until is the instant it next becomes
+// spawnable after an escalating backoff. Both are derived from Drain history, so
+// a nil func (tests, callers without a store) means "always spawnable".
+type setBackoffFunc func(setID string) (parked bool, until time.Time)
+
+// checkoutClaimFunc reports the live Checkout claim on a Ready set's bound
+// checkout, or nil when nothing claims it (ADR-0135). Deriving it needs the
+// set→checkout resolution (bindings only — an unplaced set has no checkout to
+// claim-gate, ADR-0147), so the caller builds the closure and selectReadySets
+// consults it per candidate. A nil func (tests, callers without a store) means
+// "no checkout claim".
+type checkoutClaimFunc func(setID string) *store.CheckoutClaim
+
+// checkoutClaimLookup builds the per-set Checkout-claim probe used during
+// dispatch: it resolves each set's bound checkout (its Worktree binding path,
+// or none when unplaced — ADR-0147) and reads the live claim on it. An unplaced
+// set yields no claim, so a drain holding the trunk does not defer it. A read
+// error or missing store degrades to "no claim", never blocking dispatch on a
+// transient store problem — the transactional BeginDrain chokepoint still
+// refuses a genuine double-spawn.
+func (d *Deps) checkoutClaimLookup(bindings map[string]WorktreeBinding, repoKey string) checkoutClaimFunc {
+	if d == nil || d.Tasks == nil {
+		return nil
+	}
+	return func(setID string) *store.CheckoutClaim {
+		return d.CheckoutClaimAt(binding.RuntimeForSet(bindings, repoKey, setID))
+	}
+}
+
+// checkoutClaimAt reads the live Checkout claim on one runtime path, or nil when
+// nothing claims it, no path was named, or the read failed (never blocking on a
+// transient store problem — the transactional BeginDrain chokepoint still refuses
+// a genuine double-spawn).
+//
+// It is the single read behind both enforcements of checkout occupancy: the
+// Task-set adapter's own deferral display resolves a set to its checkout and
+// calls this, and the supervisor's cross-kind backstop calls it over
+// Candidate.Checkout. Those are not two sources of truth — the store's claim
+// union is the truth and both are pure reads of it through here.
+func (d *Deps) CheckoutClaimAt(runtimePath string) *store.CheckoutClaim {
+	if d == nil || d.Tasks == nil || strings.TrimSpace(runtimePath) == "" {
+		return nil
+	}
+	claim, err := tasks.ReadCheckoutClaim(d.Tasks, runtimePath)
+	if err != nil {
+		return nil
+	}
+	return claim
+}
+
+// selectReadySets is the single queue-side readiness selector: it returns the
+// Auto-drain Ready sets eligible for supervisor dispatch, highest priority
+// first. RefreshWith returns only non-Archived sets, so Archived sets are
+// already dropped. The one ordering definition lives here — higher priority
+// integers rank first, ties break by registration order, matching the status
+// table's active-set ordering — and backoff/parking (abnormal-drain history)
+// and quota-recovery waiters gate which of those ready sets are spawnable now.
+// On no eligible set it reports why via a single SpawnDeferral (ADR-0106) —
+// reason species, the blocked set, and an optional until-instant — so every
+// caller renders the same decision without re-deriving per-subsystem strings.
+func selectReadySets(refresh *tasks.RefreshResult, backoff setBackoffFunc, recoveryWaiters map[string]tasks.RecoveryWaiter, claimFor checkoutClaimFunc) ([]string, SpawnDeferral, bool) {
+	if refresh == nil {
+		return nil, SpawnDeferral{}, false
+	}
+	var ready []tasks.Row
+	for _, row := range refresh.Rows {
+		if row.Status == tasks.StatusReady && row.AutoDrain {
+			ready = append(ready, row)
+		}
+	}
+	if len(ready) == 0 {
+		return nil, SpawnDeferral{}, false
+	}
+	sort.SliceStable(ready, func(i, j int) bool {
+		if ready[i].Priority != ready[j].Priority {
+			return ready[i].Priority > ready[j].Priority
+		}
+		return ready[i].RegIndex < ready[j].RegIndex
+	})
+	var earliest time.Time
+	var parkedID, backoffID, recoveryID, claimID string
+	var claimHolder *store.CheckoutClaim
+	var ids []string
+	for _, row := range ready {
+		if backoff != nil {
+			if parked, until := backoff(row.ID); parked {
+				if parkedID == "" {
+					parkedID = row.ID
+				}
+				continue
+			} else if !until.IsZero() {
+				if backoffID == "" {
+					backoffID = row.ID
+				}
+				if earliest.IsZero() || until.Before(earliest) {
+					earliest = until
+				}
+				continue
+			}
+		}
+		if w, ok := recoveryWaiters[row.ID]; ok {
+			if recoveryID == "" {
+				recoveryID = row.ID
+			}
+			if earliest.IsZero() || w.ResetAt.Before(earliest) {
+				earliest = w.ResetAt
+			}
+			continue
+		}
+		// Checkout-scoped claim (ADR-0135): the set's own waiter was handled above
+		// (set-scoped); here a candidate whose bound checkout carries *another*
+		// set's live claim defers rather than burning a spawn attempt BeginDrain
+		// would only refuse. A quota-waiter claim reuses the DeferQuotaRecovery
+		// path so its reset instant feeds the earliest-eligible display; a dirty
+		// Failed-gate (or shared running-drain) claim reports DeferCheckoutClaim
+		// naming the holding set. Non-claiming gate holds return no claim and so
+		// never defer dispatch.
+		if claimFor != nil {
+			if claim := claimFor(row.ID); claim != nil && claim.Holder.ContainerID != row.ID {
+				if claim.Reason == store.ClaimQuotaWaiter {
+					if w, ok := recoveryWaiters[claim.Holder.ContainerID]; ok {
+						if recoveryID == "" {
+							recoveryID = row.ID
+						}
+						if earliest.IsZero() || w.ResetAt.Before(earliest) {
+							earliest = w.ResetAt
+						}
+						continue
+					}
+				}
+				if claimID == "" {
+					claimID = row.ID
+					claimHolder = claim
+				}
+				continue
+			}
+		}
+		ids = append(ids, row.ID)
+	}
+	if len(ids) > 0 {
+		return ids, SpawnDeferral{}, true
+	}
+	switch {
+	case !earliest.IsZero() && backoffID != "":
+		return nil, SpawnDeferral{Reason: DeferCrashBackoff, SetID: backoffID, Until: earliest}, false
+	case !earliest.IsZero() && recoveryID != "":
+		return nil, SpawnDeferral{Reason: DeferQuotaRecovery, SetID: recoveryID, Until: earliest}, false
+	case claimID != "":
+		return nil, SpawnDeferral{Reason: DeferCheckoutClaim, SetID: claimID, Claim: claimHolder}, false
+	case parkedID != "":
+		return nil, SpawnDeferral{Reason: DeferParked, SetID: parkedID}, false
+	default:
+		return nil, SpawnDeferral{}, false
+	}
+}
+
+// setBackoffStatus derives a set's abnormal-driven Queue eligibility from its
+// Drain history (ADR-0055): with n consecutive abnormal terminals it is parked
+// once n exceeds the retry schedule's length, otherwise it backs off until the
+// most recent abnormal terminal plus the nth escalating delay. A park-clear
+// event newer than that terminal lifts both backoff and park. No timer or flag
+// is persisted — the history is the source of truth.
+func setBackoffStatus(info tasks.SetBackoffInfo, delays []time.Duration, now time.Time) (parked bool, until time.Time) {
+	n := info.ConsecutiveAbnormal
+	if n == 0 {
+		return false, time.Time{}
+	}
+	if !info.ParkClearedAt.IsZero() && info.ParkClearedAt.After(info.LastAbnormalAt) {
+		return false, time.Time{}
+	}
+	if len(delays) == 0 || n > len(delays) {
+		return true, time.Time{}
+	}
+	candidate := info.LastAbnormalAt.Add(delays[n-1])
+	if candidate.After(now) {
+		return false, candidate
+	}
+	return false, time.Time{}
+}
+
+// setBackoffLookup builds the per-set abnormal-backoff probe used during
+// dispatch. It reads each set's Drain history under the repository's common dir
+// and applies the configured escalation schedule. Read errors and a missing
+// store degrade to "spawnable", never blocking dispatch on a transient store
+// problem.
+func (d *Deps) setBackoffLookup(repoCommonDir string, delays []time.Duration, now time.Time) setBackoffFunc {
+	if d == nil || d.Tasks == nil || strings.TrimSpace(repoCommonDir) == "" {
+		return nil
+	}
+	return func(setID string) (bool, time.Time) {
+		info, err := tasks.ReadSetBackoff(d.Tasks, repoCommonDir, setID)
+		if err != nil {
+			return false, time.Time{}
+		}
+		return setBackoffStatus(info, delays, now)
+	}
+}
+
+func ResolveRepoKey(d *Deps, projectPath string) (string, error) {
+	if d == nil || d.Tasks == nil {
+		return "", fmt.Errorf("missing task dependencies")
+	}
+	id, err := tasks.ResolveRepositoryIdentity(d.Tasks, projectPath)
+	if err != nil {
+		return "", err
+	}
+	return repoIdentityKey(id), nil
+}
+
+func scopedKeyForPaths(d *Deps, projectPath, runtimePath, setID string) (string, error) {
+	repoKey := repoIdentityFromWorktreePath(runtimePath)
+	if repoKey == "" {
+		rk, err := ResolveRepoKey(d, projectPath)
+		if err != nil {
+			return "", err
+		}
+		return SetScopedKey(rk, setID), nil
+	}
+	return SetScopedKey(repoKey, setID), nil
+}
+
+// provisionWorktree is the Queue's adapter over the binding module's
+// provisioner. The worktree directory tree lives under the queue data dir; the
+// binding module owns the `git worktree add` and path-layout details.
+func provisionWorktree(d *Deps, projectPath, setID string) (provisionedWorktree, error) {
+	if d == nil || d.Tasks == nil {
+		return provisionedWorktree{}, fmt.Errorf("missing task dependencies")
+	}
+	worktreesRoot := filepath.Join(QueueDataDir(d.Tasks), "worktrees")
+	b, err := binding.ProvisionWorktree(d.Tasks, worktreesRoot, projectPath, setID, "HEAD", d.now())
+	if err != nil {
+		return provisionedWorktree{}, err
+	}
+	return provisionedWorktree{Path: b.RuntimePath, Branch: b.Branch}, nil
+}
+
+// Spawn launches the selected drain into a new pane of the project's tmux
+// session, creating the session detached when absent. It is a no-op for
+// non-actionable decisions.
+func Spawn(d *Deps, dec Decision) error {
+	_, err := SpawnWithResult(d, dec)
+	return err
+}
+
+type SpawnResult struct {
+	PaneID string
+}
+
+func SpawnWithResult(d *Deps, dec Decision) (SpawnResult, error) {
+	if !dec.Actionable() {
+		return SpawnResult{}, nil
+	}
+	// Record the pending-spawn marker in durable state *before* sending the drain
+	// command, so the window between the send and the drain reaching BeginDrain is
+	// covered by the store, not merely by in-memory view seeding: a fast re-poll
+	// reads the intent and treats the set as busy instead of dispatching a second
+	// implement into the same pane (ADR item: double-spawn window).
+	if err := recordSpawnIntent(d, dec); err != nil {
+		return SpawnResult{}, fmt.Errorf("record spawn intent: %w", err)
+	}
+	command := fmt.Sprintf("pop tasks implement %s", shellQuote(dec.TaskSetID))
+	// Pin implement to the routed checkout so a bound or managed drain runs where
+	// routing sent it instead of silently adopting the pane's cwd (the trunk).
+	if dec.pinRuntimePath && dec.scan.RuntimePath != "" {
+		command += " --task-runtime-path " + shellQuote(dec.scan.RuntimePath)
+	}
+	paneID, err := tmuxmod.EnsureTaggedPane(d.Tmux, tmuxmod.TagSet, dec.scan.SessionName, dec.scan.ProjectPath, dec.TaskSetID, command)
+	if err != nil {
+		return SpawnResult{}, err
+	}
+	if err := d.Tmux.SetPaneTitle(paneID, DrainPaneTitle(dec.TaskSetID)); err != nil {
+		return SpawnResult{}, err
+	}
+	return SpawnResult{PaneID: paneID}, nil
+}
+
+// recordSpawnIntent persists the pending-spawn marker for a just-selected drain.
+// The runtime path resolves to the repository the intent is keyed by; it falls
+// back to the project path for the v1 in-place case where the two coincide.
+func recordSpawnIntent(d *Deps, dec Decision) error {
+	if d == nil || d.Tasks == nil {
+		return nil
+	}
+	runtimePath := dec.scan.RuntimePath
+	if runtimePath == "" {
+		runtimePath = dec.scan.ProjectPath
+	}
+	return tasks.RecordSpawnIntent(d.Tasks, runtimePath, dec.TaskSetID)
+}
+
+func recordDrainPane(d *Deps, dec Decision, paneID, source string) error {
+	if d == nil || d.Tasks == nil || paneID == "" || dec.TaskSetID == "" {
+		return nil
+	}
+	key, err := scopedKeyForPaths(d, dec.scan.ProjectPath, dec.scan.RuntimePath, dec.TaskSetID)
+	if err != nil {
+		return err
+	}
+	return tasks.RecordDrainPane(d.Tasks, tasks.DrainPane{
+		ScopedKey:   key,
+		Project:     dec.Project,
+		RuntimePath: dec.scan.RuntimePath,
+		SetID:       dec.TaskSetID,
+		PaneID:      paneID,
+		RecordedAt:  d.now().UTC(),
+		Source:      source,
+	})
+}
+
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	for _, r := range s {
+		switch r {
+		case ' ', '\t', '\n', '\'', '"', '\\', '$', '`', '!', '&', '|', ';', '(', ')', '<', '>':
+			return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+		}
+	}
+	return s
+}

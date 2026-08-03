@@ -14,44 +14,44 @@ import (
 
 // Deps holds external dependencies for the routine package.
 type Deps struct {
-	FS            deps.FileSystem
-	OpenEditor    func(path string) error
-	OpenPager     func(path string) error
-	IsInteractive func() bool
-	InTmux        func() bool
-	Executable    func() (string, error)
-	Now           func() time.Time
-	Stdin         io.Reader
-	Stdout        io.Writer
-	LoadConfig    LoadConfigFunc
-	Tasks         *tasks.Deps
-	Tmux          tmuxmod.Tmux
-	Project       *project.Deps
+	FS             deps.FileSystem
+	OpenEditor     func(path string) error
+	OpenPager      func(path string) error
+	IsInteractive  func() bool
+	InTmux         func() bool
+	Executable     func() (string, error)
+	Now            func() time.Time
+	Stdin          io.Reader
+	Stdout         io.Writer
+	LoadConfig     LoadConfigFunc
+	Tasks          *tasks.Deps
+	Tmux           tmuxmod.Tmux
+	Project        *project.Deps
 	AttemptTimeout time.Duration
-	PID           func() int
+	PID            func() int
 	ProcStartToken func(pid int) (string, bool)
-	ProcessAlive  func(pid int, procStart string) bool
+	ProcessAlive   func(pid int, procStart string) bool
 }
 
 // DefaultDeps returns dependencies using real implementations.
 func DefaultDeps() *Deps {
 	taskDeps := tasks.DefaultDeps()
 	return &Deps{
-		FS:            deps.NewRealFileSystem(),
-		OpenEditor:    defaultOpenEditor,
-		OpenPager:     defaultOpenPager,
-		IsInteractive: defaultIsInteractive,
-		InTmux:        func() bool { return os.Getenv("TMUX") != "" },
-		Executable:    os.Executable,
-		Now:           time.Now,
-		Stdin:         os.Stdin,
-		Stdout:        os.Stdout,
-		LoadConfig:    DefaultLoadConfig,
-		Tasks:         taskDeps,
+		FS:             deps.NewRealFileSystem(),
+		OpenEditor:     defaultOpenEditor,
+		OpenPager:      defaultOpenPager,
+		IsInteractive:  defaultIsInteractive,
+		InTmux:         func() bool { return os.Getenv("TMUX") != "" },
+		Executable:     os.Executable,
+		Now:            time.Now,
+		Stdin:          os.Stdin,
+		Stdout:         os.Stdout,
+		LoadConfig:     DefaultLoadConfig,
+		Tasks:          taskDeps,
 		AttemptTimeout: tasks.DefaultAttemptTimeout,
-		PID:           os.Getpid,
+		PID:            os.Getpid,
 		ProcStartToken: defaultProcStartToken,
-		ProcessAlive:  defaultProcessAlive(taskDeps),
+		ProcessAlive:   defaultProcessAlive(taskDeps),
 	}
 }
 

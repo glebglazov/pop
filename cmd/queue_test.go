@@ -10,7 +10,8 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/config"
-	"github.com/glebglazov/pop/queue"
+	"github.com/glebglazov/pop/dashboard"
+	"github.com/glebglazov/pop/tasks/drain"
 )
 
 func writeQueueConfig(t *testing.T, body string) string {
@@ -37,7 +38,7 @@ poll_interval = "2s"
 
 	cfgFile = path
 	var got time.Duration
-	queueRun = func(d *queue.Deps, interval time.Duration, out io.Writer, sigCh <-chan os.Signal) error {
+	queueRun = func(d *drain.Deps, interval time.Duration, out io.Writer, sigCh <-chan os.Signal) error {
 		got = interval
 		return nil
 	}
@@ -46,13 +47,13 @@ poll_interval = "2s"
 		t.Fatal(err)
 	}
 	if got != 2*time.Second {
-		t.Fatalf("queue.Run interval = %s, want 2s", got)
+		t.Fatalf("supervisor.Run interval = %s, want 2s", got)
 	}
 }
 
 // TestQueueReadSurfacesThreadIncludeDone pins the ADR-0121 Done-inclusion flag
 // wiring: `--include-done` on both `pop queue status` and `pop work dashboard`
-// sets the single inclusion flag (queue.Deps.IncludeDone) the shared row layer
+// sets the single inclusion flag (drain.Deps.IncludeDone) the shared row layer
 // reads, and it defaults off (DONE hidden).
 func TestQueueReadSurfacesThreadIncludeDone(t *testing.T) {
 	path := writeQueueConfig(t, "")
@@ -80,16 +81,16 @@ func TestQueueReadSurfacesThreadIncludeDone(t *testing.T) {
 	queueConfigLoad = func(string) (*config.Config, error) { return &config.Config{}, nil }
 
 	var statusInclude, dashInclude bool
-	queueBuildStatus = func(d *queue.Deps, _ *config.Config) (queue.StatusSnapshot, error) {
+	queueBuildStatus = func(d *drain.Deps, _ *config.Config) (drain.StatusSnapshot, error) {
 		statusInclude = d.IncludeDone
-		return queue.StatusSnapshot{Tasks: cmdLayerDeps().tasksDeps()}, nil
+		return drain.StatusSnapshot{Tasks: cmdLayerDeps().tasksDeps()}, nil
 	}
 	// `pop queue status` renders the dashboard's rows as its table (ADR-0121), so
 	// it builds the dashboard too; stub it to an empty snapshot.
-	queueBuildDashboard = func(d *queue.Deps, _ *config.Config) (queue.DashboardSnapshot, error) {
-		return queue.DashboardSnapshot{}, nil
+	queueBuildDashboard = func(d *drain.Deps, _ *config.Config) (dashboard.DashboardSnapshot, error) {
+		return dashboard.DashboardSnapshot{}, nil
 	}
-	queueRunDashboard = func(d *queue.Deps, _ *config.Config) (string, error) {
+	queueRunDashboard = func(d *drain.Deps, _ *config.Config) (string, error) {
 		dashInclude = d.IncludeDone
 		return "", nil
 	}

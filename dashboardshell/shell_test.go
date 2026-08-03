@@ -6,8 +6,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/glebglazov/pop/config"
-	"github.com/glebglazov/pop/queue"
+	"github.com/glebglazov/pop/dashboard"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/drain"
 	"github.com/glebglazov/pop/work"
 	"github.com/glebglazov/pop/work/ref"
 )
@@ -44,9 +45,9 @@ func (k *pageKind) Summary(containers []work.Container) []string {
 
 func setRows() []work.Container {
 	return []work.Container{
-		queue.TestDashboardRow("alpha", "set-a", queue.DashboardRow{RawStatus: tasks.StatusReady, Status: "READY", DefPath: "/a/tasks", StatePath: "/a/state.json"}),
-		queue.TestDashboardRow("beta", "set-b", queue.DashboardRow{RawStatus: tasks.StatusReady, Status: "READY", DefPath: "/b/tasks", StatePath: "/b/state.json"}),
-		queue.TestDashboardRow("gamma", "set-g", queue.DashboardRow{RawStatus: tasks.StatusReady, Status: "READY", DefPath: "/g/tasks", StatePath: "/g/state.json"}),
+		dashboard.TestDashboardRow("alpha", "set-a", dashboard.DashboardRow{RawStatus: tasks.StatusReady, Status: "READY", DefPath: "/a/tasks", StatePath: "/a/state.json"}),
+		dashboard.TestDashboardRow("beta", "set-b", dashboard.DashboardRow{RawStatus: tasks.StatusReady, Status: "READY", DefPath: "/b/tasks", StatePath: "/b/state.json"}),
+		dashboard.TestDashboardRow("gamma", "set-g", dashboard.DashboardRow{RawStatus: tasks.StatusReady, Status: "READY", DefPath: "/g/tasks", StatePath: "/g/state.json"}),
 	}
 }
 
@@ -59,8 +60,8 @@ func routineRows() []work.Container {
 	}
 }
 
-func testDeps() *queue.Deps {
-	return &queue.Deps{
+func testDeps() *drain.Deps {
+	return &drain.Deps{
 		Kinds: func(*config.Config) []work.Kind {
 			return []work.Kind{&pageKind{id: ref.KindTaskSet, containers: setRows(), columns: []string{"PROJECT", "TASK SET", "STATUS", "WORKTREE", ""}, noun: "task set"}}
 		},

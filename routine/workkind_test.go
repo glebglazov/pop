@@ -49,7 +49,6 @@ func mkdirs(t *testing.T, dirs ...string) {
 	}
 }
 
-
 // TestRoutineKindStampsTiersAtLoadAndOrdersByThem drives the whole relevance
 // model through the real snapshot builder: the tier is a fact about where the
 // reader stands, so it is stamped when the container is built, and the comparator

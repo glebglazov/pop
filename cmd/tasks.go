@@ -13,9 +13,9 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
-	"github.com/glebglazov/pop/queue"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
+	"github.com/glebglazov/pop/tasks/drain"
 	"github.com/glebglazov/pop/tasks/implement"
 	"github.com/glebglazov/pop/ui"
 	"github.com/spf13/cobra"
@@ -1625,7 +1625,7 @@ func runTaskBindWorktree(cmd *cobra.Command, args []string) error {
 	}
 	d := cmdLayerDeps().queueDeps()
 	d.LoadConfig = taskConfigLoad
-	opts := queue.BindWorktreeOptions{
+	opts := drain.BindWorktreeOptions{
 		Force:   taskBindWorktreeForce,
 		Managed: taskBindWorktreeManaged,
 		Yes:     taskRunYes,
@@ -1638,7 +1638,7 @@ func runTaskBindWorktree(cmd *cobra.Command, args []string) error {
 		}
 		opts.TrunkPath = trunkPath
 	}
-	_, err = queue.BindWorktree(d, cfg, args[0], cwd, opts, os.Stdout)
+	_, err = drain.BindWorktree(d, cfg, args[0], cwd, opts, os.Stdout)
 	return err
 }
 
@@ -1653,7 +1653,7 @@ func runTaskUnbindWorktree(cmd *cobra.Command, args []string) error {
 	}
 	d := cmdLayerDeps().queueDeps()
 	d.LoadConfig = taskConfigLoad
-	_, err = queue.AbandonWithOptions(d, cfg, args[0], os.Stdout, queue.AbandonOptions{Yes: taskUnbindWorktreeYes, In: os.Stdin})
+	_, err = drain.AbandonWithOptions(d, cfg, args[0], os.Stdout, drain.AbandonOptions{Yes: taskUnbindWorktreeYes, In: os.Stdin})
 	return err
 }
 

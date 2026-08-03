@@ -13,9 +13,9 @@ import (
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/monitor"
 	"github.com/glebglazov/pop/project"
-	"github.com/glebglazov/pop/queue"
 	"github.com/glebglazov/pop/routine"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/drain"
 	"github.com/glebglazov/pop/wayfinder"
 	"github.com/glebglazov/pop/work"
 )
@@ -35,7 +35,7 @@ type Deps struct {
 	Tasks     *tasks.Deps
 	Config    *config.Deps
 	Project   *project.Deps
-	Queue     *queue.Deps
+	Queue     *drain.Deps
 	Routine   *routine.Deps
 	Wayfinder *wayfinder.Deps
 }
@@ -111,7 +111,7 @@ func DefaultDeps() *Deps {
 		Tasks:     tasks.DefaultDeps(),
 		Config:    config.DefaultDeps(),
 		Project:   project.DefaultDeps(),
-		Queue:     queue.DefaultDeps(),
+		Queue:     drain.DefaultDeps(),
 		Routine:   routine.DefaultDeps(),
 		Wayfinder: wayfinder.DefaultDeps(),
 	}
@@ -171,10 +171,10 @@ func (d *Deps) projectDeps() *project.Deps {
 	return project.DefaultDeps()
 }
 
-func (d *Deps) queueDeps() *queue.Deps {
+func (d *Deps) queueDeps() *drain.Deps {
 	qd := d.Queue
 	if d == nil || qd == nil {
-		qd = queue.DefaultDeps()
+		qd = drain.DefaultDeps()
 		if d != nil && d.FS != nil {
 			if qd.Tasks != nil {
 				qd.Tasks.FS = d.FS
@@ -193,7 +193,7 @@ func (d *Deps) queueDeps() *queue.Deps {
 // something has to name them, and an explicit list here is the accepted cost of
 // keeping the seam free of a per-kind import (ADR-0173). Adding a kind is one
 // entry here plus its adapter.
-func workKinds(qd *queue.Deps) func(cfg *config.Config) []work.Kind {
+func workKinds(qd *drain.Deps) func(cfg *config.Config) []work.Kind {
 	return func(cfg *config.Config) []work.Kind {
 		// One repository-group resolution, shared by every kind of this build.
 		groups := qd.RepoGroups(cfg)

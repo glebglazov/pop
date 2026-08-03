@@ -43,10 +43,10 @@ func TestHandoffNoRunsYet(t *testing.T) {
 	memoryDir := filepath.Join(routineDir(d, "bugfinder"), memoryDirName)
 	for _, want := range []string{
 		"Find bugs in the codebase and log them.", // prompt embedded inline
-		"No runs yet",                             // no-runs-yet note
-		memoryDir,                                 // memory dir absolute path
-		home,                                      // bound directory named
-		"the user",                                // closing hands off to user
+		"No runs yet", // no-runs-yet note
+		memoryDir,     // memory dir absolute path
+		home,          // bound directory named
+		"the user",    // closing hands off to user
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("handoff missing %q:\n%s", want, text)

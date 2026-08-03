@@ -8,9 +8,11 @@ import (
 	"syscall"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/dashboard"
 	"github.com/glebglazov/pop/dashboardshell"
-	"github.com/glebglazov/pop/queue"
+	"github.com/glebglazov/pop/supervisor"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/drain"
 	"github.com/glebglazov/pop/work"
 	"github.com/spf13/cobra"
 )
@@ -80,12 +82,12 @@ func init() {
 
 var (
 	queueConfigLoad  = config.Load
-	queueRun         = queue.Run
-	queueBuildStatus = queue.BuildStatus
+	queueRun         = supervisor.Run
+	queueBuildStatus = drain.BuildStatus
 	// queueBuildDashboard builds the Work dashboard rows through the work data
 	// core (ADR-0143): the command surface is a consumer of work.BuildSnapshot, so
 	// `pop queue status` renders the same rows the dashboard derives.
-	queueBuildDashboard = func(d *queue.Deps, cfg *config.Config) (queue.DashboardSnapshot, error) {
+	queueBuildDashboard = func(d *drain.Deps, cfg *config.Config) (dashboard.DashboardSnapshot, error) {
 		return work.BuildSnapshot(d.WorkKinds(cfg))
 	}
 	queueRunDashboard = dashboardshell.RunFromQueue
@@ -148,15 +150,15 @@ func runQueueStatus(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	queue.RenderStatus(os.Stdout, d.WorkKinds(cfg), snap, dash.Containers)
+	dashboard.RenderStatus(os.Stdout, d.WorkKinds(cfg), snap, dash.Containers)
 	return nil
 }
 
 func runQueueLog(cmd *cobra.Command, args []string) error {
-	events, err := queue.BuildLog(cmdLayerDeps().tasksDeps())
+	events, err := supervisor.BuildLog(cmdLayerDeps().tasksDeps())
 	if err != nil {
 		return err
 	}
-	queue.RenderLog(os.Stdout, events, queueLogLimit)
+	supervisor.RenderLog(os.Stdout, events, queueLogLimit)
 	return nil
 }

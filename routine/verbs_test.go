@@ -17,11 +17,13 @@ import (
 func verbKind(t *testing.T, d *Deps, home string) *Kind {
 	t.Helper()
 	return NewKind(&KindDeps{
-		Routine:   d,
-		Out:       io.Discard,
-		Checkout:  canonical(t, home),
-		Project:   "pop",
-		Checkouts: func() ([]project.ExpandedProject, error) { return []project.ExpandedProject{{Name: "pop", ProjectLabel: "pop", Path: canonical(t, home)}}, nil },
+		Routine:  d,
+		Out:      io.Discard,
+		Checkout: canonical(t, home),
+		Project:  "pop",
+		Checkouts: func() ([]project.ExpandedProject, error) {
+			return []project.ExpandedProject{{Name: "pop", ProjectLabel: "pop", Path: canonical(t, home)}}, nil
+		},
 	})
 }
 

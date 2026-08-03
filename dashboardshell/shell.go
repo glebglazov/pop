@@ -3,7 +3,8 @@ package dashboardshell
 import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/glebglazov/pop/config"
-	"github.com/glebglazov/pop/queue"
+	"github.com/glebglazov/pop/dashboard"
+	"github.com/glebglazov/pop/tasks/drain"
 )
 
 // The Work dashboard's entry layer: it opens the dashboard on one of its two
@@ -16,26 +17,26 @@ import (
 // each is its own model instance.
 
 // Page selects which page of the Work dashboard the shell shows.
-type Page = queue.Page
+type Page = dashboard.Page
 
 const (
 	// PageWork is page A: Task sets and Maps.
-	PageWork = queue.PageWork
+	PageWork = dashboard.PageWork
 	// PageRoutines is page B: Routines.
-	PageRoutines = queue.PageRoutines
+	PageRoutines = dashboard.PageRoutines
 )
 
 // Shell is the Work dashboard's two pages with one of them in focus.
 type Shell struct {
 	active Page
-	pages  map[Page]queue.QueueDashboard
+	pages  map[Page]dashboard.QueueDashboard
 	width  int
 	height int
 }
 
 // RunFromQueue opens the dashboard on page A. It returns the bound checkout path
-// chosen with Ctrl-g (empty otherwise), matching queue.RunDashboard.
-func RunFromQueue(d *queue.Deps, cfg *config.Config) (string, error) {
+// chosen with Ctrl-g (empty otherwise), matching dashboard.RunDashboard.
+func RunFromQueue(d *drain.Deps, cfg *config.Config) (string, error) {
 	s, err := newShell(PageWork, d, cfg)
 	if err != nil {
 		return "", err
@@ -49,7 +50,7 @@ func RunFromQueue(d *queue.Deps, cfg *config.Config) (string, error) {
 
 // RunFromRoutine opens the same dashboard on page B — the whole of what
 // `pop routine dashboard` is now.
-func RunFromRoutine(d *queue.Deps, cfg *config.Config) error {
+func RunFromRoutine(d *drain.Deps, cfg *config.Config) error {
 	s, err := newShell(PageRoutines, d, cfg)
 	if err != nil {
 		return err
@@ -58,9 +59,9 @@ func RunFromRoutine(d *queue.Deps, cfg *config.Config) error {
 	return err
 }
 
-func newShell(start Page, d *queue.Deps, cfg *config.Config) (Shell, error) {
+func newShell(start Page, d *drain.Deps, cfg *config.Config) (Shell, error) {
 	if d == nil {
-		d = queue.DefaultDeps()
+		d = drain.DefaultDeps()
 	}
 	if cfg == nil {
 		var err error
@@ -69,13 +70,13 @@ func newShell(start Page, d *queue.Deps, cfg *config.Config) (Shell, error) {
 			return Shell{}, err
 		}
 	}
-	pages := make(map[Page]queue.QueueDashboard, 2)
+	pages := make(map[Page]dashboard.QueueDashboard, 2)
 	for _, id := range []Page{PageWork, PageRoutines} {
-		snap, err := queue.BuildPageSnapshot(d, cfg, id)
+		snap, err := dashboard.BuildPageSnapshot(d, cfg, id)
 		if err != nil {
 			return Shell{}, err
 		}
-		pages[id] = queue.NewDashboardOn(d, cfg, snap, id)
+		pages[id] = dashboard.NewDashboardOn(d, cfg, snap, id)
 	}
 	return Shell{active: start, pages: pages}, nil
 }
@@ -128,13 +129,13 @@ func (s Shell) View() tea.View {
 // updatePage hands msg to one page and keeps the model it returns.
 func (s Shell) updatePage(id Page, msg tea.Msg) tea.Cmd {
 	updated, cmd := s.page(id).Update(msg)
-	if dash, ok := updated.(queue.QueueDashboard); ok {
+	if dash, ok := updated.(dashboard.QueueDashboard); ok {
 		s.pages[id] = dash
 	}
 	return cmd
 }
 
-func (s Shell) page(id Page) queue.QueueDashboard {
+func (s Shell) page(id Page) dashboard.QueueDashboard {
 	return s.pages[id]
 }
 
@@ -152,6 +153,6 @@ func (s Shell) ActivePage() Page {
 }
 
 // PageDashboard exposes one page's model for tests.
-func (s Shell) PageDashboard(id Page) queue.QueueDashboard {
+func (s Shell) PageDashboard(id Page) dashboard.QueueDashboard {
 	return s.page(id)
 }

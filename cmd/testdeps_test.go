@@ -7,9 +7,9 @@ import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
-	"github.com/glebglazov/pop/queue"
 	"github.com/glebglazov/pop/routine"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/drain"
 	"github.com/glebglazov/pop/wayfinder"
 )
 
@@ -63,14 +63,14 @@ func newTestCmdDeps(t *testing.T, workDir, dataHome, configHome string) *Deps {
 		Runner: tasks.RealCommandRunner{},
 	}
 	return &Deps{
-		Dir: workDir,
-		FS:  fs,
+		Dir:   workDir,
+		FS:    fs,
 		Tasks: td,
 		Config: &config.Deps{
 			FS: fs,
 		},
 		Project:   project.DefaultDeps(),
-		Queue:     &queue.Deps{Tasks: td},
+		Queue:     &drain.Deps{Tasks: td},
 		Routine:   &routine.Deps{FS: fs, Tasks: td},
 		Wayfinder: &wayfinder.Deps{FS: fs, Tasks: td},
 	}

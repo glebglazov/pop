@@ -33,8 +33,8 @@ func PauseWith(d *Deps, id string) (*PauseResult, error) {
 
 // ResumeResult is the outcome of resuming a Routine.
 type ResumeResult struct {
-	RoutineID   string
-	NotPaused   bool
+	RoutineID string
+	NotPaused bool
 }
 
 // Resume clears a Routine's persisted pause bit using default dependencies.
