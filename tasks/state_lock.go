@@ -45,14 +45,15 @@ func (l *StateLock) Release() error {
 
 // StateLockPathWith returns the global task state lock file path.
 func StateLockPathWith(d *Deps) string {
-	if xdgData := d.FS.Getenv("XDG_DATA_HOME"); xdgData != "" {
-		return filepath.Join(xdgData, "pop", stateLockFileName)
-	}
-	home, err := d.FS.UserHomeDir()
-	if err != nil {
-		return filepath.Join("/tmp", "pop", stateLockFileName)
-	}
-	return filepath.Join(home, ".local", "share", "pop", stateLockFileName)
+	return filepath.Join(popDataDirWith(d), stateLockFileName)
+}
+
+// LockPathWith returns the path of a named cross-process lock, under pop's data
+// directory beside the global task state lock. A lock names a resource pop
+// serialises writes to (`map-<id>`, say), and keeping every one of them in one
+// directory means a stale lock is always findable in the same place.
+func LockPathWith(d *Deps, name string) string {
+	return filepath.Join(popDataDirWith(d), "locks", name+".lock")
 }
 
 func noticeWriter(d *Deps) io.Writer {
@@ -86,10 +87,21 @@ func UpdateGlobalStateWith(d *Deps, statePath string, merge func(*GlobalState) e
 // store-backed (UpdateGlobalStateWith) and the retired-file pruning
 // (updateLegacyGlobalState) alike — across processes.
 func withStateLock(d *Deps, fn func() error) error {
+	return WithFileLock(d, StateLockPathWith(d), "task state lock", fn)
+}
+
+// WithFileLock runs fn while holding the cross-process lock at lockPath,
+// retrying while another live process holds it and recovering one left behind by
+// a process that died. label names the lock in every message the recovery path
+// prints, so a human reading "stale <label>" knows which resource was stuck.
+//
+// The lock is the serialisation point for a read-modify-write that spans several
+// files, which no single atomic rename can make safe on its own.
+func WithFileLock(d *Deps, lockPath, label string, fn func() error) error {
 	noticeOut := noticeWriter(d)
 	var lastErr error
 	for attempt := 0; attempt < stateLockRetries; attempt++ {
-		lock, err := acquireStateLock(d, noticeOut, false)
+		lock, err := acquireLock(d, lockPath, label, noticeOut, false)
 		if err != nil {
 			if errors.Is(err, ErrStateLockBusy) && attempt < stateLockRetries-1 {
 				lastErr = err
@@ -111,19 +123,23 @@ func withStateLock(d *Deps, fn func() error) error {
 	if lastErr != nil {
 		return lastErr
 	}
-	return fmt.Errorf("acquire task state lock: exceeded retry limit")
+	return fmt.Errorf("acquire %s: exceeded retry limit", label)
 }
 
+// acquireStateLock takes the one lock every registration mutation shares.
 func acquireStateLock(d *Deps, noticeOut io.Writer, retried bool) (*StateLock, error) {
+	return acquireLock(d, StateLockPathWith(d), "task state lock", noticeOut, retried)
+}
+
+func acquireLock(d *Deps, lockPath, label string, noticeOut io.Writer, retried bool) (*StateLock, error) {
 	if noticeOut == nil {
 		noticeOut = io.Discard
 	}
 	out := outputFor(noticeOut)
 
-	lockPath := StateLockPathWith(d)
 	lockDir := filepath.Dir(lockPath)
 	if err := d.FS.MkdirAll(lockDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create task state lock directory: %w", err)
+		return nil, fmt.Errorf("create %s directory: %w", label, err)
 	}
 
 	meta := StateLockMetadata{
@@ -132,7 +148,7 @@ func acquireStateLock(d *Deps, noticeOut io.Writer, retried bool) (*StateLock, e
 	}
 	payload, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {
-		return nil, fmt.Errorf("encode task state lock: %w", err)
+		return nil, fmt.Errorf("encode %s: %w", label, err)
 	}
 
 	created, err := createStateLockFile(d, lockPath, payload)
@@ -140,48 +156,49 @@ func acquireStateLock(d *Deps, noticeOut io.Writer, retried bool) (*StateLock, e
 		return &StateLock{path: lockPath}, nil
 	}
 	if !os.IsExist(err) {
-		return nil, fmt.Errorf("acquire task state lock: %w", err)
+		return nil, fmt.Errorf("acquire %s: %w", label, err)
 	}
 
 	existing, readErr := d.FS.ReadFile(lockPath)
 	if readErr != nil {
 		if os.IsNotExist(readErr) {
-			return acquireStateLock(d, noticeOut, false)
+			return acquireLock(d, lockPath, label, noticeOut, false)
 		}
-		out.line(ansiYellow, "Removing unreadable task state lock at %s", lockPath)
+		out.line(ansiYellow, "Removing unreadable %s at %s", label, lockPath)
 		_ = os.Remove(lockPath)
 		if retried {
-			return nil, fmt.Errorf("acquire task state lock after recovery: %w", readErr)
+			return nil, fmt.Errorf("acquire %s after recovery: %w", label, readErr)
 		}
-		return acquireStateLock(d, noticeOut, true)
+		return acquireLock(d, lockPath, label, noticeOut, true)
 	}
 
 	existingMeta, parseErr := parseStateLockMetadata(existing)
 	if parseErr != nil {
-		out.line(ansiYellow, "Removing malformed task state lock at %s", lockPath)
+		out.line(ansiYellow, "Removing malformed %s at %s", label, lockPath)
 		_ = os.Remove(lockPath)
 		if retried {
-			return nil, fmt.Errorf("acquire task state lock after recovery: %w", parseErr)
+			return nil, fmt.Errorf("acquire %s after recovery: %w", label, parseErr)
 		}
-		return acquireStateLock(d, noticeOut, true)
+		return acquireLock(d, lockPath, label, noticeOut, true)
 	}
 
 	if processAlive(d, existingMeta.PID) {
-		return nil, fmt.Errorf("%w (PID %d since %s)",
+		return nil, fmt.Errorf("%w: %s (PID %d since %s)",
 			ErrStateLockBusy,
+			label,
 			existingMeta.PID,
 			existingMeta.StartedAt.Format(time.RFC3339),
 		)
 	}
 
-	out.line(ansiYellow, "Removing stale task state lock (PID %d no longer running)", existingMeta.PID)
+	out.line(ansiYellow, "Removing stale %s (PID %d no longer running)", label, existingMeta.PID)
 	if removeErr := os.Remove(lockPath); removeErr != nil && !os.IsNotExist(removeErr) {
-		return nil, fmt.Errorf("remove stale task state lock: %w", removeErr)
+		return nil, fmt.Errorf("remove stale %s: %w", label, removeErr)
 	}
 	if retried {
-		return nil, fmt.Errorf("acquire task state lock after removing stale lock")
+		return nil, fmt.Errorf("acquire %s after removing stale lock", label)
 	}
-	return acquireStateLock(d, noticeOut, true)
+	return acquireLock(d, lockPath, label, noticeOut, true)
 }
 
 func createStateLockFile(d *Deps, lockPath string, payload []byte) (bool, error) {

@@ -1267,11 +1267,11 @@ The canonical artifact of one Wayfinding effort: a folder holding `map.md` (dest
 _Avoid_: wayfinder task set, plan, chart
 
 **Map verb family**:
-`pop map` — the one command family that reads and mutates Maps: `status`, `show`, `register`, `next`, `claim`, `archive`, `unarchive`. Renamed from `pop wayfinder` as a hard cut with **no alias** (same discipline as the `pop queue` cut): kind nouns everywhere, and "wayfinder" survives only as the *skill's* name. Reads never create state; a Map's metadata is never hand-edited once the family owns it.
+`pop map` — the one command family that reads and mutates Maps: `status`, `show`, `register`, `next`, `claim`, `resolve`, `out-of-scope`, `archive`, `unarchive`. Renamed from `pop wayfinder` as a hard cut with **no alias** (same discipline as the `pop queue` cut): kind nouns everywhere, and "wayfinder" survives only as the *skill's* name. Reads never create state; a Map's metadata is never hand-edited once the family owns it.
 _Avoid_: pop wayfinder, map commands
 
 **Decision ticket**:
-One unit of a Map: a question whose resolution is a decision, recorded as `issues/NN-<slug>.md` with its type (research/prototype/grilling/task), status and blocking edges held in the **Map manifest**, and its answer written under `## Answer` on resolution. Distinct from a task: no acceptance criteria, no agent commit, and a claimed state exists (persisted in_progress stays malformed for tasks) — see **Ticket claim**.
+One unit of a Map: a question whose resolution is a decision, recorded as `issues/NN-<slug>.md` with its type (research/prototype/grilling/task), status and blocking edges held in the **Map manifest**, and its answer written under `## Answer` by **Ticket resolution** (pop writes it; the session hands over a file). Distinct from a task: no acceptance criteria, no agent commit, and a claimed state exists (persisted in_progress stays malformed for tasks) — see **Ticket claim**.
 _Avoid_: task (the Task-set unit), issue, question file
 
 **Frontier**:
@@ -1279,7 +1279,7 @@ The Decision tickets of a Map that are open, unblocked (every blocker resolved) 
 _Avoid_: ready tickets, next up, queue
 
 **Ticket claim**:
-One grilling window's hold on one Decision ticket, taken by `pop map next` (first frontier ticket, atomically picked and claimed) or `pop map claim <map-id> <NN>` (the override for when the human names a ticket). It is a `work_item_claims` row in pop.db keyed by the item's Work ref and nothing else — never a file state, because a claim belongs to a live window and a file-borne one outlives everything able to release it. The scan overlays live claims onto tickets, which is where the derived `claimed` status comes from. `next` exits nonzero on an empty frontier; two windows racing it get two different tickets, because the pick and the write share one transaction.
+One grilling window's hold on one Decision ticket, taken by `pop map next` (first frontier ticket, atomically picked and claimed) or `pop map claim <map-id> <NN>` (the override for when the human names a ticket). It is a `work_item_claims` row in pop.db keyed by the item's Work ref and nothing else — never a file state, because a claim belongs to a live window and a file-borne one outlives everything able to release it. The scan overlays live claims onto tickets, which is where the derived `claimed` status comes from. `next` exits nonzero on an empty frontier; two windows racing it get two different tickets, because the pick and the write share one transaction. **Ticket resolution** releases the claim; otherwise it expires on its TTL.
 _Avoid_: ticket lock, assignment, claimed status line
 
 **Claim owner**:
@@ -1287,7 +1287,7 @@ Who holds a **Ticket claim**: the tmux pane id when the command runs inside tmux
 _Avoid_: session id, lease holder, lock owner
 
 **Map manifest**:
-The `index.json` beside a Map's `map.md` — the machine-readable half of a Map, mirroring the **Task manifest** so no consumer hand-parses metadata out of N ticket markdown files. Per Decision ticket it carries id, file, title, type, status (`open` | `resolved`; a claim is pop.db state, never a file state), `blocked_by`, `adr_drafts` and `context_drafts`, plus a Map-level `spawned_sets` array defaulting to empty. Blocking edges live here because they are definitional and travel with the content. Where one exists it is the source of truth for status, type and blocking; a Map without one still reads its ticket markdown headers. Validation names every problem — unknown status or type, a blocker naming no entry, an entry with no markdown file, a markdown file with no entry — and a failing manifest renders the Map Malformed.
+The `index.json` beside a Map's `map.md` — the machine-readable half of a Map, mirroring the **Task manifest** so no consumer hand-parses metadata out of N ticket markdown files. Per Decision ticket it carries id, file, title, type, status (`open` | `resolved`; a claim is pop.db state, never a file state), `out_of_scope`, `blocked_by`, `adr_drafts` and `context_drafts`, plus a Map-level `spawned_sets` array defaulting to empty. Blocking edges live here because they are definitional and travel with the content. Where one exists it is the source of truth for status, type and blocking; a Map without one still reads its ticket markdown headers. Validation names every problem — unknown status or type, a blocker naming no entry, an entry with no markdown file, a markdown file with no entry — and a failing manifest renders the Map Malformed.
 _Avoid_: ticket index, map index file, wayfinder manifest
 
 **Map status**:
@@ -1305,6 +1305,18 @@ _Avoid_: chart complete, map create, lazy registration
 **Map archive**:
 `pop map archive` / `pop map unarchive` — the reversible act of hiding a Map from default views and restoring it, written as the `archived` bit on the Map's **Work container registry** row, so a Map is filed away through the same mechanism a Task set is. Archiving is idempotent; unarchiving a Map that is not archived is an error. Both refuse an unregistered Map and name **Map registration**, since the bit rides a registration. The retired `wayfinder-archive.json` side-file folds into this bit on an ordinary read and is then deleted — the fold registers the ids it archives, because the bit exists nowhere else.
 _Avoid_: hide map, delete map, archive file
+
+**Ticket resolution**:
+`pop map resolve <map-id> <NN> --answer-file <path>` — the one atomic write that closes a **Decision ticket**: the ticket's `## Answer`, its **Map manifest** entry flipped to `resolved`, and a re-render of map.md's **Generated region**s, all three or none. Validate-then-write and re-runnable: a second run *replaces* the answer rather than appending one, so a mistake is fixed by resolving again and never by hand-editing what pop wrote. Prose arrives as a file because an answer is paragraphs. Resolution also releases the ticket's **Ticket claim** — the hold has nothing left to protect.
+_Avoid_: close ticket, answer command, mark resolved
+
+**Out-of-scope ruling**:
+`pop map out-of-scope <map-id> <NN> --reason <why>` — the second resolution path, ending a ticket by ruling it beyond the destination. A verb of its own rather than a flag on **Ticket resolution** because the destination section differs: a scope boundary is not a step on the route actually walked, so it renders under `Out of scope` and never into the decision index. The manifest entry carries `out_of_scope`, which is what decides the section — never a guess at the prose.
+_Avoid_: resolve --out-of-scope, wontfix, reject ticket
+
+**Generated region**:
+A span of `map.md` pop owns, delimited by `<!-- pop:generated <name> -->` markers and rebuilt from the **Map manifest** and the answers on disk at every resolution: `Decisions so far`, `Out of scope`, `Spawned sets`. This is what splits map.md by writer — the prose sections (`Destination`, `Notes`, `Not yet specified`) stay skill-written, single-writer by convention, while parallel grilling windows append to the index concurrently and only a single writer rebuilding from truth makes that safe. Hand-written content inside a region is lost on the next resolve; content outside it, in the same section or elsewhere, survives untouched. A section with no markers yet is taken over whole. Moving these sections into the manifest and rendering them only in `pop map show` was rejected: map.md must stay a readable standalone artifact.
+_Avoid_: managed block, generated section (as a file), pop block
 
 **Spawned set**:
 A Task set created from a Map's resolved decisions (via to-spec/to-tasks) once the way — or an early-splittable chunk — is clear. The forward link between the two concepts: the Map records the ids of sets it spawned; a spawned set's `spec.md` records its source Map. One Map may spawn many sets.

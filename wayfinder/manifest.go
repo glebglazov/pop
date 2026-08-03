@@ -31,14 +31,19 @@ var (
 // open | resolved only: a claim is an owner plus a timestamp in pop.db, not a
 // file state, so it has no representation here.
 type ManifestTicket struct {
-	ID            string       `json:"id"`
-	File          string       `json:"file"`
-	Title         string       `json:"title"`
-	Type          TicketType   `json:"type"`
-	Status        TicketStatus `json:"status"`
-	BlockedBy     []string     `json:"blocked_by"`
-	ADRDrafts     []string     `json:"adr_drafts,omitempty"`
-	ContextDrafts []string     `json:"context_drafts,omitempty"`
+	ID     string       `json:"id"`
+	File   string       `json:"file"`
+	Title  string       `json:"title"`
+	Type   TicketType   `json:"type"`
+	Status TicketStatus `json:"status"`
+	// OutOfScope splits the two resolutions. Both end a ticket, but one is a step
+	// on the route walked and the other is a boundary of it, and the generated
+	// sections of map.md are rebuilt from this bit — so which section a resolved
+	// ticket renders into is a manifest fact, never a guess at its prose.
+	OutOfScope    bool     `json:"out_of_scope,omitempty"`
+	BlockedBy     []string `json:"blocked_by"`
+	ADRDrafts     []string `json:"adr_drafts,omitempty"`
+	ContextDrafts []string `json:"context_drafts,omitempty"`
 }
 
 // MapManifest is a parsed and validated Map manifest.
@@ -276,6 +281,7 @@ func (t ManifestTicket) ToTicket() Ticket {
 		Title:         t.Title,
 		Type:          t.Type,
 		Status:        t.Status,
+		OutOfScope:    t.OutOfScope,
 		BlockedBy:     t.BlockedBy,
 		ADRDrafts:     t.ADRDrafts,
 		ContextDrafts: t.ContextDrafts,

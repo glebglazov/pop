@@ -23,6 +23,8 @@ func TestMapCommandTree(t *testing.T) {
 		{"map", "register"},
 		{"map", "next"},
 		{"map", "claim"},
+		{"map", "resolve"},
+		{"map", "out-of-scope"},
 		{"map", "archive"},
 		{"map", "unarchive"},
 	} {
@@ -36,7 +38,7 @@ func TestMapCommandTree(t *testing.T) {
 	if cmd, _, _ := rootCmd.Find([]string{"wayfinder", "status"}); cmd.CommandPath() != "pop" {
 		t.Fatalf("pop wayfinder should not exist; Find resolved %q", cmd.CommandPath())
 	}
-	for _, cmd := range []*cobra.Command{mapCmd, mapStatusCmd, mapShowCmd, mapRegisterCmd, mapNextCmd, mapClaimCmd, mapArchiveCmd, mapUnarchiveCmd} {
+	for _, cmd := range []*cobra.Command{mapCmd, mapStatusCmd, mapShowCmd, mapRegisterCmd, mapNextCmd, mapClaimCmd, mapResolveCmd, mapOutOfScopeCmd, mapArchiveCmd, mapUnarchiveCmd} {
 		if strings.Contains(cmd.CommandPath(), "wayfinder") {
 			t.Fatalf("command path still says wayfinder: %q", cmd.CommandPath())
 		}
@@ -201,6 +203,81 @@ func TestMapNextAndClaimDriveParallelGrilling(t *testing.T) {
 	}
 	if strings.Contains(string(manifest), "claim") {
 		t.Fatalf("the manifest records a claim:\n%s", manifest)
+	}
+}
+
+// TestMapResolveAndOutOfScopeCloseTickets walks the resolution surface: `resolve`
+// takes the answer from a file and reports where it landed, `out-of-scope` closes
+// into the other section, and a Map that never had the generated sections gains
+// them.
+func TestMapResolveAndOutOfScopeCloseTickets(t *testing.T) {
+	t.Parallel()
+	d, storageDir, _ := mapRegistryTestDeps(t, threeTicketMapFiles("demo"))
+	if err := runMapRegisterWith(d, &bytes.Buffer{}, "demo"); err != nil {
+		t.Fatal(err)
+	}
+	d.Clock = func() time.Time { return time.Date(2026, 8, 3, 9, 0, 0, 0, time.UTC) }
+	d.Owner = func() string { return "pane:%1" }
+	if err := runMapClaimWith(d, &bytes.Buffer{}, "demo", "01"); err != nil {
+		t.Fatal(err)
+	}
+
+	answerPath := filepath.Join(t.TempDir(), "answer.md")
+	if err := os.WriteFile(answerPath, []byte("Postgres, because the data is relational.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var resolved bytes.Buffer
+	err := runMapResolveWith(d, &resolved, wayfinder.ResolveRequest{MapID: "demo", Ticket: "01", AnswerFile: answerPath})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	ticketPath := filepath.Join(storageDir, "maps", "demo", "issues", "01-first.md")
+	if got := strings.SplitN(resolved.String(), "\n", 2)[0]; got != "01\t"+ticketPath {
+		t.Fatalf("resolve headline = %q, want the id and path", got)
+	}
+	for _, want := range []string{`rendered into "Decisions so far"`, "released the claim held by pane:%1"} {
+		if !strings.Contains(resolved.String(), want) {
+			t.Fatalf("resolve output missing %q:\n%s", want, resolved.String())
+		}
+	}
+
+	var ruledOut bytes.Buffer
+	err = runMapOutOfScopeWith(d, &ruledOut, wayfinder.ResolveRequest{
+		MapID: "demo", Ticket: "03", Reason: "A separate effort owns the client.",
+	})
+	if err != nil {
+		t.Fatalf("out-of-scope: %v", err)
+	}
+	if !strings.Contains(ruledOut.String(), `rendered into "Out of scope"`) {
+		t.Fatalf("out-of-scope output = %q", ruledOut.String())
+	}
+
+	mapMD, err := os.ReadFile(filepath.Join(storageDir, "maps", "demo", "map.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"## Decisions so far",
+		"<!-- pop:generated decisions -->",
+		"- [01-first](issues/01-first.md) — Postgres, because the data is relational.",
+		"## Out of scope",
+		"- [03-third](issues/03-third.md) — A separate effort owns the client.",
+		"## Spawned sets",
+	} {
+		if !strings.Contains(string(mapMD), want) {
+			t.Fatalf("map.md missing %q:\n%s", want, mapMD)
+		}
+	}
+
+	// Both resolutions move the frontier on: 01 is gone from it and 02, which
+	// waited on 01, is what the next window is handed.
+	var next bytes.Buffer
+	if err := runMapNextWith(d, &next, "demo"); err != nil {
+		t.Fatalf("next after resolving: %v", err)
+	}
+	if !strings.HasPrefix(next.String(), "02\t") {
+		t.Fatalf("next handed out %q, want the newly unblocked 02", next.String())
 	}
 }
 

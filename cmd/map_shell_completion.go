@@ -16,7 +16,9 @@ func registerMapShellCompletions() {
 		cmd.ValidArgsFunction = completeMapArgs
 	}
 	mapUnarchiveCmd.ValidArgsFunction = completeArchivedMapArgs
-	mapClaimCmd.ValidArgsFunction = completeMapTicketArgs
+	for _, cmd := range []*cobra.Command{mapClaimCmd, mapResolveCmd, mapOutOfScopeCmd} {
+		cmd.ValidArgsFunction = completeMapTicketArgs
+	}
 }
 
 // completeMapTicketArgs completes `pop map claim`: a map id first, then the

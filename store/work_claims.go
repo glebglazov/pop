@@ -156,6 +156,21 @@ func (s *Store) ClaimFirstWorkItem(container ref.WorkRef, itemIDs []string, owne
 	return WorkClaimResult{}, ErrNoClaimableWorkItem
 }
 
+// ReleaseWorkItem drops the claim on one item, whoever holds it. Releasing is
+// what a terminal outcome does — a resolved Decision ticket is never handed out
+// again, so leaving its row behind would only age into a phantom hold. Releasing
+// an unclaimed item is a no-op: the caller wants the item free, not a report of
+// how it got that way.
+func (s *Store) ReleaseWorkItem(r ref.WorkRef) error {
+	if err := validItemRef(r); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(
+		`DELETE FROM work_item_claims WHERE kind = ? AND container_id = ? AND item_id = ?`,
+		string(r.Kind), r.ContainerID, r.ItemID)
+	return err
+}
+
 // LiveWorkClaimsOfKind returns every unexpired claim on one kind's items. One
 // query serves a whole scan: the Map listing overlays claims onto tickets it read
 // from disk, and asking per Map would put a query behind every row.

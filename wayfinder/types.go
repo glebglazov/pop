@@ -40,7 +40,11 @@ type Ticket struct {
 	Title     string // manifest-only; empty on header-parsed tickets
 	Type      TicketType
 	Status    TicketStatus
-	BlockedBy []string // blocker ticket numbers, e.g. "01"
+	// OutOfScope marks a ticket resolved by being ruled beyond the destination
+	// rather than answered. It decides which generated section of map.md the
+	// ticket renders into.
+	OutOfScope bool
+	BlockedBy  []string // blocker ticket numbers, e.g. "01"
 	// ClaimOwner and ClaimedAt carry the live claim on this ticket, overlaid from
 	// pop.db at scan time. They are the only ticket state no file holds: a claim
 	// belongs to a grilling window, and the TTL that frees an abandoned one can

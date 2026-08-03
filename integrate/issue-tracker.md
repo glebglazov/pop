@@ -323,7 +323,11 @@ Status: active
 
 ## Decisions so far
 
+<!-- pop:generated decisions -->
+
 - [01-first-ticket](issues/01-first-ticket.md) — one-line gist of the answer
+
+<!-- /pop:generated decisions -->
 
 ## Not yet specified
 
@@ -331,14 +335,21 @@ Status: active
 
 ## Out of scope
 
-<work ruled beyond the destination>
+<!-- pop:generated out-of-scope -->
+<!-- /pop:generated out-of-scope -->
 
 ## Spawned sets
 
-<!-- forward links to Task sets this map spawned via to-spec / to-tasks -->
-
-- <task-set-id>
+<!-- pop:generated spawned-sets -->
+<!-- /pop:generated spawned-sets -->
 ```
+
+**`map.md` has two writers.** `Destination`, `Notes` and `Not yet specified` are
+yours. `Decisions so far`, `Out of scope` and `Spawned sets` are pop's: it
+rebuilds everything between the `pop:generated` markers from `index.json` and the
+ticket answers on every resolve, so anything you write inside a region is lost on
+the next one. Write prose outside the markers — it survives — and never hand-edit
+a decision line.
 
 The `Status:` line (top of `map.md`, before headings) is `active` (default while
 wayfinding), `done` (way found — write at handoff), or `abandoned` (closed without
@@ -348,48 +359,50 @@ registered Work; it prints every problem it finds and is re-runnable until clean
 Open tickets are **not** listed in `map.md`; they are files under `issues/`,
 discovered by reading the directory.
 
-Ticket files (`issues/NN-<slug>.md`) put metadata lines first (parsed by
-`pop map` and the Work dashboard):
+Ticket files (`issues/NN-<slug>.md`) hold prose only — id, title, type, status
+and blockers live in the Map's `index.json`, which every consumer reads:
 
 ```markdown
-Type: research|prototype|grilling|task
-Status: open|claimed|resolved
-Blocked by: 01, 02
-
 ## Question
 
 <the decision or investigation this ticket resolves>
 
 ## Answer
 
-<written on resolution — prose answer, links to assets>
+<written by `pop map resolve` — prose answer, links to assets>
 ```
 
-- `Type:` — one of `research`, `prototype`, `grilling`, `task`.
-- `Status:` — `open` (default; omitting the line means open), `claimed` (this
-  session owns it), or `resolved` (decision recorded).
-- `Blocked by:` — comma-separated blocker ticket numbers (e.g. `01, 02`).
+Per ticket, `index.json` carries `id`, `file`, `title`, `type`
+(`research|prototype|grilling|task`), `status` (`open|resolved`), `blocked_by`
+(blocker ids, e.g. `["01"]`) and `out_of_scope`.
 
 ### Claiming
 
-Set `Status: claimed` in the ticket file **first**, before any investigation or
-conversation. Concurrent sessions must skip claimed tickets. An open, unclaimed
-ticket is takeable. A ticket is **unblocked** when every blocker is `resolved`;
-the **frontier** is the open, unblocked, unclaimed tickets — the edge of the known.
+Take a ticket with `pop map next [<map-id>]` — it claims the first frontier
+ticket atomically and prints `<id>\t<path>` — or `pop map claim <map-id> <NN>`
+when you are naming one. A claim is a pop.db row owned by your tmux pane, not a
+file state, so never write one into the markdown; it frees itself after four
+hours. A ticket is **unblocked** when every blocker is `resolved`; the
+**frontier** is the open, unblocked, unclaimed tickets — the edge of the known,
+and the only thing `next` hands out.
 
 ### Resolution
 
-To resolve a ticket:
+Write the decision to a file, then hand it to pop:
 
-1. Write the decision under `## Answer` in the ticket file (link assets, don't
-   paste them in full).
-2. Set `Status: resolved`.
-3. Append one line to the map's **Decisions so far**:
-   `[<ticket title>](issues/NN-<slug>.md) — <one-line gist>`.
+```bash
+pop map resolve <map-id> <NN> --answer-file <path>
+```
 
-**Out of scope:** for a mis-scoped ticket, set `Status: resolved` with a brief
-answer explaining why, and add one line to the map's **Out of scope** section
-(not Decisions so far).
+One call writes `## Answer`, flips the manifest entry to `resolved`, re-renders
+the generated regions of `map.md` and releases your claim. It is re-runnable: a
+second run **replaces** the answer, so fix a mistake by resolving again — never
+by editing the ticket or the index by hand. Link assets from the answer; don't
+paste them in full.
+
+**Out of scope:** for a mis-scoped ticket, run
+`pop map out-of-scope <map-id> <NN> --reason "<why>"`. It resolves the ticket the
+same way but renders it under `Out of scope`, never into the decision index.
 
 **Ticket-type overrides:**
 
@@ -418,8 +431,9 @@ When the way to the destination is clear — or an early-splittable chunk is —
 suggest `to-spec` and/or `to-tasks`. Wayfinding produces decisions; implementation
 happens in ordinary registered Task sets. Record the forward link both ways:
 
-1. **On the map:** append each spawned task-set id under `## Spawned sets` in
-   `map.md`.
+1. **On the map:** add each spawned task-set id to the `spawned_sets` array in
+   the map's `index.json`. `## Spawned sets` in `map.md` is generated from that
+   array — appending to the section by hand is lost on the next resolve.
 2. **On the set:** `to-spec` writes a `Source map: <map-id>` line as the first
    line of `spec.md`.
 

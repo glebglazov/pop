@@ -26,7 +26,13 @@ Map registered Work.
 Grilling then draws from the frontier: ` + "`pop map next`" + ` claims the first
 open, unblocked, unclaimed ticket and prints where to read it, so several windows
 can grill one Map at once. A claim is a pop.db row owned by the tmux pane (else
-the pid) that took it, never a file state; it frees itself after four hours.`,
+the pid) that took it, never a file state; it frees itself after four hours.
+
+` + "`pop map resolve`" + ` closes a ticket: it writes the answer, flips the manifest
+entry and re-renders map.md's generated index in one re-runnable call, and
+` + "`pop map out-of-scope`" + ` does the same into the Out of scope section. pop is the
+only writer of those regions — they carry pop:generated markers and are rebuilt
+from the manifest on every resolve, so hand-edits inside them are lost.`,
 }
 
 var mapStatusCmd = &cobra.Command{
@@ -71,6 +77,31 @@ var mapClaimCmd = &cobra.Command{
 	Run:   runMapClaim,
 }
 
+// mapResolveCmd is one atomic write of three files. It is also re-runnable: a
+// second run replaces the answer instead of appending one, so a mistake is fixed
+// by resolving again rather than by hand-editing what pop generated.
+var mapResolveCmd = &cobra.Command{
+	Use:   "resolve MAP NN --answer-file PATH",
+	Short: "Record a decision: write the answer, resolve the ticket, re-render the index",
+	Args:  cobra.ExactArgs(2),
+	Run:   runMapResolve,
+}
+
+// mapOutOfScopeCmd is the other resolution path. It is a verb rather than a flag
+// on resolve because the destination section differs: a scope boundary is not a
+// step on the route actually walked.
+var mapOutOfScopeCmd = &cobra.Command{
+	Use:   "out-of-scope MAP NN --reason WHY",
+	Short: "Resolve a ticket by ruling it beyond the destination",
+	Args:  cobra.ExactArgs(2),
+	Run:   runMapOutOfScope,
+}
+
+var (
+	mapResolveAnswerFile string
+	mapOutOfScopeReason  string
+)
+
 var mapArchiveCmd = &cobra.Command{
 	Use:   "archive MAP",
 	Short: "Hide a map from default views",
@@ -92,9 +123,15 @@ func init() {
 	mapCmd.AddCommand(mapRegisterCmd)
 	mapCmd.AddCommand(mapNextCmd)
 	mapCmd.AddCommand(mapClaimCmd)
+	mapCmd.AddCommand(mapResolveCmd)
+	mapCmd.AddCommand(mapOutOfScopeCmd)
 	mapCmd.AddCommand(mapArchiveCmd)
 	mapCmd.AddCommand(mapUnarchiveCmd)
 	mapStatusCmd.Flags().BoolVar(&mapStatusAll, "all", false, "include done, abandoned, and archived maps")
+	mapResolveCmd.Flags().StringVar(&mapResolveAnswerFile, "answer-file", "", "file holding the answer body written under ## Answer")
+	_ = mapResolveCmd.MarkFlagRequired("answer-file")
+	mapOutOfScopeCmd.Flags().StringVar(&mapOutOfScopeReason, "reason", "", "why the ticket is beyond the destination")
+	_ = mapOutOfScopeCmd.MarkFlagRequired("reason")
 }
 
 func runMapStatus(cmd *cobra.Command, args []string) {
@@ -182,6 +219,60 @@ func renderClaim(w io.Writer, result *wayfinder.ClaimResult) {
 	if len(result.UnresolvedBlockers) > 0 {
 		fmt.Fprintf(w, "warning: blocked by %s, still unresolved\n",
 			strings.Join(result.UnresolvedBlockers, ", "))
+	}
+}
+
+func runMapResolve(cmd *cobra.Command, args []string) {
+	err := runMapResolveWith(cmdLayerDeps().wayfinderDeps(), os.Stdout, wayfinder.ResolveRequest{
+		MapID:      args[0],
+		Ticket:     args[1],
+		AnswerFile: mapResolveAnswerFile,
+	})
+	handleTaskExit(err)
+}
+
+func runMapResolveWith(d *wayfinder.Deps, w io.Writer, req wayfinder.ResolveRequest) error {
+	result, err := wayfinder.ResolveTicket(d, cmdLayerDeps().WorkDir(), req)
+	if err != nil {
+		return err
+	}
+	renderResolution(w, result)
+	return nil
+}
+
+func runMapOutOfScope(cmd *cobra.Command, args []string) {
+	err := runMapOutOfScopeWith(cmdLayerDeps().wayfinderDeps(), os.Stdout, wayfinder.ResolveRequest{
+		MapID:  args[0],
+		Ticket: args[1],
+		Reason: mapOutOfScopeReason,
+	})
+	handleTaskExit(err)
+}
+
+func runMapOutOfScopeWith(d *wayfinder.Deps, w io.Writer, req wayfinder.ResolveRequest) error {
+	result, err := wayfinder.RuleOutOfScope(d, cmdLayerDeps().WorkDir(), req)
+	if err != nil {
+		return err
+	}
+	renderResolution(w, result)
+	return nil
+}
+
+// renderResolution leads with the ticket and its path, as `next` and `claim` do,
+// then names the generated section the decision landed in — the file a session
+// must not hand-edit is the one it should go read.
+func renderResolution(w io.Writer, result *wayfinder.ResolveResult) {
+	fmt.Fprintf(w, "%s\t%s\n", result.Ticket.ID, result.Path)
+	section := "Decisions so far"
+	if result.OutOfScope {
+		section = "Out of scope"
+	}
+	fmt.Fprintf(w, "resolved in map %s, rendered into %q\n", result.MapID, section)
+	if result.Replaced {
+		fmt.Fprintln(w, "replaced the answer a previous resolve wrote")
+	}
+	if result.ReleasedClaim != "" {
+		fmt.Fprintf(w, "released the claim held by %s\n", result.ReleasedClaim)
 	}
 }
 

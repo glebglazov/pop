@@ -33,7 +33,7 @@ AGENTS="…"`) are opt-in and not part of ordinary verification.
 | `internal/tmux/` | All tmux knowledge; nothing else shells out to tmux (ADR-0142) |
 | `store/` | `pop.db`, single connection, opened once via `tasks.Deps` (ADR-0140) |
 | `monitor/` | Pane status daemon and state |
-| `project/`, `wayfinder/` | Project picker; Maps — scan, `index.json` manifest, `pop map register`/archive against the Work registry, read-path folds (pre-manifest Maps, the `wayfinder/`→`maps/` rename, the retired archive side-file), frontier, `pop map next`/`claim` over `store`'s `work_item_claims`, skill invocation |
+| `project/`, `wayfinder/` | Project picker; Maps — scan, `index.json` manifest, `pop map register`/archive against the Work registry, read-path folds (pre-manifest Maps, the `wayfinder/`→`maps/` rename, the retired archive side-file), frontier, `pop map next`/`claim` over `store`'s `work_item_claims`, `pop map resolve`/`out-of-scope` writing answer + manifest + map.md's `pop:generated` regions under a per-Map file lock, skill invocation |
 | `config/` | `config.toml` load, validation, migration |
 | `ui/`, `layout/`, `dashboardshell/` | lipgloss styles and shared render helpers |
 

@@ -14,7 +14,11 @@ var (
 	blockedByPattern  = regexp.MustCompile(`(?i)^Blocked by:\s*(.+)$`)
 	destinationHeader     = regexp.MustCompile(`(?i)^##\s+Destination\s*$`)
 	decisionsSoFarHeader  = regexp.MustCompile(`(?i)^##\s+Decisions so far\s*$`)
+	answerHeader          = regexp.MustCompile(`(?i)^##\s+Answer\s*$`)
 )
+
+// answerSectionName is the one section of a Decision ticket pop writes.
+const answerSectionName = "Answer"
 
 // ParseMapMarkdown extracts map status and destination from map.md contents.
 func ParseMapMarkdown(content string) (MapStatus, string, error) {
@@ -285,6 +289,82 @@ func extractSectionBody(lines []string, start int) string {
 		body = append(body, trimmed)
 	}
 	return strings.Join(body, " ")
+}
+
+// sectionBounds locates the body of a `## ` section: the half-open line range
+// between its heading and the next heading of the same level.
+func sectionBounds(lines []string, header *regexp.Regexp) (start, end int, found bool) {
+	start = -1
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if start < 0 {
+			if header.MatchString(trimmed) {
+				start = i + 1
+			}
+			continue
+		}
+		if strings.HasPrefix(trimmed, "## ") {
+			return start, i, true
+		}
+	}
+	if start < 0 {
+		return 0, 0, false
+	}
+	return start, len(lines), true
+}
+
+// ParseTicketAnswer returns the body of a Decision ticket's `## Answer` section,
+// with the surrounding blank lines removed. Empty when the ticket carries no
+// answer — which is how an unresolved ticket reads.
+func ParseTicketAnswer(content string) string {
+	lines := strings.Split(content, "\n")
+	start, end, found := sectionBounds(lines, answerHeader)
+	if !found {
+		return ""
+	}
+	return strings.Trim(strings.Join(lines[start:end], "\n"), "\n \t")
+}
+
+// ReplaceTicketAnswer writes body as the ticket's `## Answer`, replacing whatever
+// the section held. Replacement rather than appending is what makes the resolve
+// verb re-runnable: a wrong answer is corrected by resolving again, and a ticket
+// never accumulates a stack of answers a reader has to date-order.
+func ReplaceTicketAnswer(content, body string) string {
+	bodyLines := strings.Split(strings.Trim(body, "\n"), "\n")
+	lines := strings.Split(content, "\n")
+	start, end, found := sectionBounds(lines, answerHeader)
+	if !found {
+		out := append([]string{}, trimTrailingBlank(lines)...)
+		out = append(out, "", "## "+answerSectionName, "")
+		out = append(out, bodyLines...)
+		return strings.Join(out, "\n") + "\n"
+	}
+	out := append([]string{}, lines[:start]...)
+	out = append(out, "")
+	out = append(out, bodyLines...)
+	out = append(out, "")
+	out = append(out, lines[end:]...)
+	return strings.Join(trimTrailingBlank(out), "\n") + "\n"
+}
+
+// AnswerGist condenses an answer body into the single line that stands for the
+// decision in map.md's index: its first line of prose, whitespace collapsed.
+func AnswerGist(answer string, maxLen int) string {
+	for _, line := range strings.Split(answer, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		return DestinationGist(trimmed, maxLen)
+	}
+	return ""
+}
+
+func trimTrailingBlank(lines []string) []string {
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
 }
 
 // DestinationGist returns a short single-line summary of a destination.
