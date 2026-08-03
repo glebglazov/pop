@@ -60,11 +60,11 @@ func ScanMapsInStorage(d *Deps, storageDir string) ([]Map, error) {
 		m, err := loadMap(d, entry.Name(), mapDir)
 		if err != nil {
 			maps = append(maps, Map{
-				ID:              entry.Name(),
-				Dir:             mapDir,
-				Status:          MapMalformed,
-				Malformed:       true,
-				MalformedReason: err.Error(),
+				ID:           entry.Name(),
+				Dir:          mapDir,
+				Status:       MapBroken,
+				Broken:       true,
+				BrokenReason: err.Error(),
 			})
 			continue
 		}

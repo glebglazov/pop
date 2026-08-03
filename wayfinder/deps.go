@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -17,6 +18,9 @@ type Deps struct {
 	// function of them, and neither is reproducible from a test process.
 	Clock func() time.Time
 	Owner func() string
+	// Tmux is the Map's session surface — `arrive` tears one down. Left nil it
+	// resolves lazily to the real tmux, so a read verb never shells out.
+	Tmux tmux.Tmux
 }
 
 // DefaultDeps returns dependencies using real implementations.
@@ -39,6 +43,14 @@ func (d *Deps) now() time.Time {
 		return d.Clock().UTC()
 	}
 	return time.Now().UTC()
+}
+
+func (d *Deps) tmux() tmux.Tmux {
+	if d.Tmux != nil {
+		return d.Tmux
+	}
+	d.Tmux = tmux.New()
+	return d.Tmux
 }
 
 func (d *Deps) owner() string {

@@ -78,10 +78,10 @@ func mapRegistrationProblems(d *Deps, m Map) []string {
 	case !manifest.Valid:
 		return manifest.Errors
 	}
-	// The manifest reads, so anything still rendering the Map malformed is a
-	// map.md problem — an unreadable file or an unrecognised Status: line.
-	if m.Malformed {
-		return []string{m.MalformedReason}
+	// The manifest reads, so anything still rendering the Map BROKEN is a map.md
+	// problem — an unreadable file or an unrecognised Status: line.
+	if m.Broken {
+		return []string{m.BrokenReason}
 	}
 	if len(manifest.Tickets) == 0 {
 		return []string{fmt.Sprintf(

@@ -1,4 +1,10 @@
+---
+status: accepted
+---
+
 # Wayfinder Maps are a first-class sibling of Task sets
+
+> ⚠️ **Two clauses below are SUPERSEDED BY [ADR-0172](0172-pop-owns-the-wayfinding-lifecycle-and-pop-wayfinder-becomes-pop-map.md).** The **status vocabulary** is `active` / `arrived` / `abandoned`, not `active`/`done`/`abandoned` — `done` is gone with no read-fold, and arrival is written by `pop map arrive`, not by a skill editing the line. The **forward link's trigger** is the whole map, once: a wayfinding session never pre-splits a Map into per-area sets, so "when the way (or an early-splittable chunk) is clear" reads "when the way is clear". Everything else here — a Map as its own concept beside Task sets, and why the Task-set machinery was rejected — still holds; the storage location moved to a `maps/` sibling and Maps now register (ADR-0172), and the handoff artifact is `spec.md`, not `prd.md`.
 
 Pop adopts the wayfinder skill (forked with changes from mattpocock/skills, like the other embedded planning skills per [ADR-0009](0009-planning-skills-are-embedded-in-the-binary.md)) to plan efforts too big for one agent session: a **Map** of **Decision tickets** worked one at a time until the way to a destination is clear. The obvious home was the Task-set machinery — a map is a set of markdown work items with `Blocked by` edges — and we rejected it. A Map violates the Task-set contract on every load-bearing clause: its membership grows and shrinks continuously as fog graduates into tickets (sets are fixed at registration), its tickets need a persisted `claimed` state (persisted `in_progress` is a contract fault for tasks), its resolutions are prose answers written into Task storage rather than agent commits against a runtime checkout (the implement done-condition), and a Map is HITL-dominant by design, so as a Task set it would sit BLOCKED on every dashboard forever. Teaching implement/queue/status a second "kind" of set would have spread wayfinding semantics through the manifest contract, the status derivation, and the drain path.
 

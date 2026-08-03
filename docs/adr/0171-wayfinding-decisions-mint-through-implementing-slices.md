@@ -159,9 +159,9 @@ primitive has no write instructions to disobey.
 
 ## Consequences
 
-- Decisions live outside the repo for the life of the map, and a chunk that is
+- Decisions live outside the repo for the life of the map, and a decision that is
   never implemented leaves no repo trace at all. Accepted: no work, no record.
-  Drafts survive in the map directory — `Status: done` does not reap them.
+  Drafts survive in the map directory — arrival does not reap them.
 - Repo ADR numbers are no longer knowable at decision time, so a ticket answer
   cannot cite "ADR-0175" for a decision this map made. It cites the draft.
 - `pop map resolve` grows two repeatable flags and a manifest field pair; `pop map

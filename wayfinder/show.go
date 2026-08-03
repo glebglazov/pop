@@ -44,8 +44,8 @@ func GroupTickets(tickets []Ticket) TicketGroups {
 // RenderShow prints one map's detail as plain text.
 func RenderShow(out io.Writer, m Map) error {
 	status := string(m.Status)
-	if m.Malformed {
-		status = string(MapMalformed)
+	if m.Broken {
+		status = string(MapBroken)
 	}
 	if m.Archived {
 		status += " [archived]"
@@ -53,9 +53,9 @@ func RenderShow(out io.Writer, m Map) error {
 
 	fmt.Fprintf(out, "Map: %s\n", m.ID)
 	fmt.Fprintf(out, "Status: %s\n", status)
-	if m.Malformed {
-		if m.MalformedReason != "" {
-			fmt.Fprintf(out, "Malformed: %s\n", m.MalformedReason)
+	if m.Broken {
+		if m.BrokenReason != "" {
+			fmt.Fprintf(out, "Fix: %s\n", m.BrokenReason)
 		}
 		return nil
 	}

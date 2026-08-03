@@ -39,7 +39,14 @@ draft files a decision produced; pop never parses the answer for links, so a
 draft is verified to exist and recorded on the manifest entry, or the resolve
 refuses naming the missing path. A dirty repository working tree only warns —
 pop cannot tell an unrelated in-flight change from a stray fragment a grilling
-session left behind.`,
+session left behind.
+
+A Map ends at ` + "`pop map arrive`" + `, which writes ` + "`Status: arrived`" + ` and tears down
+the Map's tmux session; ` + "`pop map open`" + ` reverses it when fog reopens. The gate is
+the destination, not empty fog — a Map may carry non-prerequisite fog forever — so
+arrival warns about open or claimed tickets and proceeds. An arrived Map stays
+visible; ` + "`pop map archive`" + ` is what hides one. A ` + "`Status:`" + ` line outside
+` + "`active | arrived | abandoned`" + ` renders the Map BROKEN with the fix printed.`,
 }
 
 var mapStatusCmd = &cobra.Command{
@@ -111,6 +118,22 @@ var (
 	mapOutOfScopeReason     string
 )
 
+// mapArriveCmd is the Map's terminal act, and the one gate that is a judgment
+// rather than a count: it warns about unfinished tickets and proceeds.
+var mapArriveCmd = &cobra.Command{
+	Use:   "arrive MAP",
+	Short: "Declare a map's destination reached and tear down its session",
+	Args:  cobra.ExactArgs(1),
+	Run:   runMapArrive,
+}
+
+var mapOpenCmd = &cobra.Command{
+	Use:   "open MAP",
+	Short: "Reopen an arrived map for more wayfinding",
+	Args:  cobra.ExactArgs(1),
+	Run:   runMapOpen,
+}
+
 var mapArchiveCmd = &cobra.Command{
 	Use:   "archive MAP",
 	Short: "Hide a map from default views",
@@ -134,9 +157,11 @@ func init() {
 	mapCmd.AddCommand(mapClaimCmd)
 	mapCmd.AddCommand(mapResolveCmd)
 	mapCmd.AddCommand(mapOutOfScopeCmd)
+	mapCmd.AddCommand(mapArriveCmd)
+	mapCmd.AddCommand(mapOpenCmd)
 	mapCmd.AddCommand(mapArchiveCmd)
 	mapCmd.AddCommand(mapUnarchiveCmd)
-	mapStatusCmd.Flags().BoolVar(&mapStatusAll, "all", false, "include done, abandoned, and archived maps")
+	mapStatusCmd.Flags().BoolVar(&mapStatusAll, "all", false, "include abandoned and archived maps")
 	mapResolveCmd.Flags().StringVar(&mapResolveAnswerFile, "answer-file", "", "file holding the answer body written under ## Answer")
 	_ = mapResolveCmd.MarkFlagRequired("answer-file")
 	mapResolveCmd.Flags().StringArrayVar(&mapResolveADRDrafts, "adr", nil, "path to an ADR draft this decision produced; repeat for more than one")
@@ -289,6 +314,58 @@ func renderResolution(w io.Writer, result *wayfinder.ResolveResult) {
 	}
 	if result.DirtyRepo {
 		fmt.Fprintln(w, "warning: the repository working tree is dirty")
+	}
+}
+
+func runMapArrive(cmd *cobra.Command, args []string) {
+	err := runMapArriveWith(cmdLayerDeps().wayfinderDeps(), os.Stdout, args[0])
+	handleTaskExit(err)
+}
+
+func runMapArriveWith(d *wayfinder.Deps, w io.Writer, mapID string) error {
+	result, err := wayfinder.ArriveMap(d, cmdLayerDeps().WorkDir(), mapID)
+	if err != nil {
+		return err
+	}
+	renderArrival(w, result)
+	return nil
+}
+
+func runMapOpen(cmd *cobra.Command, args []string) {
+	err := runMapOpenWith(cmdLayerDeps().wayfinderDeps(), os.Stdout, args[0])
+	handleTaskExit(err)
+}
+
+func runMapOpenWith(d *wayfinder.Deps, w io.Writer, mapID string) error {
+	result, err := wayfinder.OpenMap(d, cmdLayerDeps().WorkDir(), mapID)
+	if err != nil {
+		return err
+	}
+	renderArrival(w, result)
+	return nil
+}
+
+// renderArrival names the new status first, then everything the declaration did
+// not stop for: the tickets left unfinished (a warning, never a refusal) and the
+// session that went with the Map.
+func renderArrival(w io.Writer, result *wayfinder.ArrivalResult) {
+	if result.Unchanged {
+		fmt.Fprintf(w, "Map %s is already %s\n", result.MapID, result.Status)
+	} else {
+		fmt.Fprintf(w, "Map %s is %s (was %s)\n", result.MapID, result.Status, result.Previous)
+	}
+	if len(result.Unfinished) > 0 {
+		fmt.Fprintf(w, "warning: %d ticket(s) still unresolved:\n", len(result.Unfinished))
+		for _, t := range result.Unfinished {
+			line := fmt.Sprintf("  %s  %s", t.ID, t.Status)
+			if t.ClaimOwner != "" {
+				line += fmt.Sprintf("  (claimed by %s)", t.ClaimOwner)
+			}
+			fmt.Fprintln(w, line)
+		}
+	}
+	if result.KilledSession != "" {
+		fmt.Fprintf(w, "tore down tmux session %s\n", result.KilledSession)
 	}
 }
 

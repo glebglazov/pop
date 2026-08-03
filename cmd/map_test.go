@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/wayfinder"
 	"github.com/spf13/cobra"
@@ -25,6 +26,8 @@ func TestMapCommandTree(t *testing.T) {
 		{"map", "claim"},
 		{"map", "resolve"},
 		{"map", "out-of-scope"},
+		{"map", "arrive"},
+		{"map", "open"},
 		{"map", "archive"},
 		{"map", "unarchive"},
 	} {
@@ -38,7 +41,7 @@ func TestMapCommandTree(t *testing.T) {
 	if cmd, _, _ := rootCmd.Find([]string{"wayfinder", "status"}); cmd.CommandPath() != "pop" {
 		t.Fatalf("pop wayfinder should not exist; Find resolved %q", cmd.CommandPath())
 	}
-	for _, cmd := range []*cobra.Command{mapCmd, mapStatusCmd, mapShowCmd, mapRegisterCmd, mapNextCmd, mapClaimCmd, mapResolveCmd, mapOutOfScopeCmd, mapArchiveCmd, mapUnarchiveCmd} {
+	for _, cmd := range []*cobra.Command{mapCmd, mapStatusCmd, mapShowCmd, mapRegisterCmd, mapNextCmd, mapClaimCmd, mapResolveCmd, mapOutOfScopeCmd, mapArriveCmd, mapOpenCmd, mapArchiveCmd, mapUnarchiveCmd} {
 		if strings.Contains(cmd.CommandPath(), "wayfinder") {
 			t.Fatalf("command path still says wayfinder: %q", cmd.CommandPath())
 		}
@@ -360,6 +363,61 @@ func TestMapClaimCompletionOffersUnresolvedTickets(t *testing.T) {
 	}
 	if third, _ := mapClaimCmd.ValidArgsFunction(mapClaimCmd, []string{"demo", "01"}, ""); third != nil {
 		t.Fatalf("completion offered a third positional: %v", third)
+	}
+}
+
+// TestMapArriveAndOpenDeclareArrival walks the terminal state from the CLI: the
+// declaration warns about what is unfinished instead of refusing, the session goes
+// with the Map, the arrived Map stays on the table, and open puts it back.
+func TestMapArriveAndOpenDeclareArrival(t *testing.T) {
+	t.Parallel()
+	d, storageDir, _ := mapRegistryTestDeps(t, oneTicketMapFiles("demo"))
+	fake := &tmuxtest.Fake{Live: map[string]string{wayfinder.MapSessionName("demo"): "/repo"}}
+	d.Tmux = fake
+	if err := runMapRegisterWith(d, &bytes.Buffer{}, "demo"); err != nil {
+		t.Fatal(err)
+	}
+
+	var arriveBuf bytes.Buffer
+	if err := runMapArriveWith(d, &arriveBuf, "demo"); err != nil {
+		t.Fatal(err)
+	}
+	out := arriveBuf.String()
+	for _, want := range []string{
+		"Map demo is arrived (was active)",
+		"warning: 1 ticket(s) still unresolved",
+		"01  open",
+		"tore down tmux session " + wayfinder.MapSessionName("demo"),
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("arrive output missing %q:\n%s", want, out)
+		}
+	}
+	if fake.HasSession(wayfinder.MapSessionName("demo")) {
+		t.Fatal("the map's tmux session survived arrival")
+	}
+	body, err := os.ReadFile(filepath.Join(storageDir, "maps", "demo", "map.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "Status: arrived") {
+		t.Fatalf("map.md missing the arrived status:\n%s", body)
+	}
+
+	var statusBuf bytes.Buffer
+	if err := runMapStatusWith(d, &statusBuf, false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(statusBuf.String(), "demo") || !strings.Contains(statusBuf.String(), "arrived") {
+		t.Fatalf("arrived map missing from the default table:\n%s", statusBuf.String())
+	}
+
+	var openBuf bytes.Buffer
+	if err := runMapOpenWith(d, &openBuf, "demo"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(openBuf.String(), "Map demo is active (was arrived)") {
+		t.Fatalf("open output = %q", openBuf.String())
 	}
 }
 

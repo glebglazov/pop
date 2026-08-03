@@ -27,16 +27,15 @@ func BuildStatus(d *Deps, cwd string, includeAll bool) (StatusSnapshot, error) {
 	return StatusSnapshot{Rows: rows}, nil
 }
 
+// visibleByDefault hides only what the human filed away or closed without
+// arriving. An arrived Map stays on the table: it is the lineage view for the sets
+// it spawned, and Archive is the one mechanism that hides a Map (ADR-0172). A
+// BROKEN Map is visible too — it exists to be fixed.
 func visibleByDefault(row StatusRow) bool {
 	if row.Archived {
 		return false
 	}
-	switch row.Status {
-	case MapDone, MapAbandoned:
-		return false
-	default:
-		return true
-	}
+	return row.Status != MapAbandoned
 }
 
 func mapToStatusRow(m Map) StatusRow {
@@ -45,10 +44,10 @@ func mapToStatusRow(m Map) StatusRow {
 		DestinationGist: DestinationGist(m.Destination, destinationGistMaxLen),
 		Archived:        m.Archived,
 	}
-	if m.Malformed {
-		row.Malformed = true
-		row.Status = MapMalformed
-		row.MalformedSummary = m.MalformedReason
+	if m.Broken {
+		row.Broken = true
+		row.Status = MapBroken
+		row.BrokenSummary = m.BrokenReason
 		return row
 	}
 	row.Status = m.Status
@@ -71,10 +70,12 @@ func RenderStatus(out io.Writer, snap StatusSnapshot) error {
 		if row.Archived {
 			status += " [archived]"
 		}
-		if row.Malformed {
-			dest := row.MalformedSummary
+		// The reason takes the destination column: a Map pop cannot read has no
+		// counts to print, and the corrective is the only useful thing on the row.
+		if row.Broken {
+			dest := row.BrokenSummary
 			if dest == "" {
-				dest = "malformed"
+				dest = "unreadable map"
 			}
 			fmt.Fprintf(tw, "%s\t%s\t%s\t-\t-\t-\t-\n", row.ID, status, dest)
 			continue

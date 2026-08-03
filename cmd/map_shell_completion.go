@@ -12,7 +12,7 @@ import (
 // Maps, and every other verb offers only the visible ones, but explicitly typing
 // either still resolves.
 func registerMapShellCompletions() {
-	for _, cmd := range []*cobra.Command{mapShowCmd, mapRegisterCmd, mapArchiveCmd, mapNextCmd} {
+	for _, cmd := range []*cobra.Command{mapShowCmd, mapRegisterCmd, mapArchiveCmd, mapNextCmd, mapArriveCmd, mapOpenCmd} {
 		cmd.ValidArgsFunction = completeMapArgs
 	}
 	mapUnarchiveCmd.ValidArgsFunction = completeArchivedMapArgs

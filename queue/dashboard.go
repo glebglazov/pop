@@ -3095,10 +3095,10 @@ func (m QueueDashboard) detailMapFrame() (ui.Frame, string) {
 	if d.wfMap == nil {
 		return ui.Frame{Width: m.width, TermH: m.height, Hints: backHint}, "  map not found"
 	}
-	if d.wfMap.Malformed {
-		body := "  malformed map"
-		if d.wfMap.MalformedReason != "" {
-			body += ": " + d.wfMap.MalformedReason
+	if d.wfMap.Broken {
+		body := "  BROKEN map"
+		if d.wfMap.BrokenReason != "" {
+			body += ": " + d.wfMap.BrokenReason
 		}
 		return ui.Frame{
 			Width:  m.width,

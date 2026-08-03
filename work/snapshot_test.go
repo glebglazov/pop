@@ -770,7 +770,8 @@ func TestMapRowsMixedAndFiltered(t *testing.T) {
 	storageDir := "/data/repos/repo-aaaa"
 	tasksDir := filepath.Join(storageDir, "tasks")
 	activeMap := filepath.Join(storageDir, "maps", "2026-07-01-active")
-	doneMap := filepath.Join(storageDir, "maps", "2026-07-02-done")
+	arrivedMap := filepath.Join(storageDir, "maps", "2026-07-02-arrived")
+	brokenMap := filepath.Join(storageDir, "maps", "2026-07-05-broken")
 	abandonedMap := filepath.Join(storageDir, "maps", "2026-07-03-abandoned")
 	archivedMap := filepath.Join(storageDir, "maps", "2026-07-04-archived")
 	files := map[string]string{
@@ -779,7 +780,8 @@ func TestMapRowsMixedAndFiltered(t *testing.T) {
 			"Type: research\nStatus: open\n\n# Q\n",
 		filepath.Join(activeMap, "issues", "02-blocked.md"): "" +
 			"Type: research\nStatus: open\nBlocked by: 01\n\n# Q\n",
-		filepath.Join(doneMap, "map.md"):                    "Status: done\n\n## Destination\nDone\n",
+		filepath.Join(arrivedMap, "map.md"):                 "Status: arrived\n\n## Destination\nArrived\n",
+		filepath.Join(brokenMap, "map.md"):                  "Status: done\n\n## Destination\nRetired word\n",
 		filepath.Join(abandonedMap, "map.md"):               "Status: abandoned\n\n## Destination\nNope\n",
 		filepath.Join(archivedMap, "map.md"):                "Status: active\n\n## Destination\nHidden\n",
 		filepath.Join(storageDir, "wayfinder-archive.json"): `{"archived":["2026-07-04-archived"]}`,
@@ -808,10 +810,14 @@ func TestMapRowsMixedAndFiltered(t *testing.T) {
 		ids = append(ids, r.SetID)
 		byID[r.SetID] = r
 	}
-	if !slices.Contains(ids, "2026-07-01-active") {
-		t.Fatalf("missing active map row; got %v", ids)
+	// An arrived Map stays on the dashboard beside the active one: it is the
+	// lineage view for the sets it spawned, and Archive is what hides a Map.
+	for _, shown := range []string{"2026-07-01-active", "2026-07-02-arrived"} {
+		if !slices.Contains(ids, shown) {
+			t.Fatalf("missing map row %q; got %v", shown, ids)
+		}
 	}
-	for _, hidden := range []string{"2026-07-02-done", "2026-07-03-abandoned", "2026-07-04-archived"} {
+	for _, hidden := range []string{"2026-07-03-abandoned", "2026-07-04-archived", "2026-07-05-broken"} {
 		if slices.Contains(ids, hidden) {
 			t.Fatalf("hidden map %q still present: %v", hidden, ids)
 		}
@@ -835,7 +841,7 @@ func TestMapRowsMixedAndFiltered(t *testing.T) {
 		t.Fatalf("map STATUS = %q, want %q", got, wantStatus)
 	}
 
-	wantOrder := []string{"2026-07-01-set-b", "2026-07-01-set-a", "2026-07-01-active"}
+	wantOrder := []string{"2026-07-01-set-b", "2026-07-01-set-a", "2026-07-02-arrived", "2026-07-01-active"}
 	if !reflect.DeepEqual(ids, wantOrder) {
 		t.Fatalf("interleave order = %v, want %v", ids, wantOrder)
 	}

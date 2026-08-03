@@ -705,9 +705,9 @@ func rowsFromStatic(d *Deps, cfg *config.Config, snap *snapshot, delays []time.D
 	return rows, nil
 }
 
-// mapRowsFromStatic walks one repo's wayfinder/ maps and returns Work dashboard
-// rows for active, non-archived maps (ADR-0130). Done, abandoned, archived, and
-// malformed maps are hidden.
+// mapRowsFromStatic walks one repo's maps/ directory and returns Work dashboard
+// rows for the Maps still worth looking at (ADR-0130, ADR-0172): active and
+// arrived. Abandoned, archived, and BROKEN maps are hidden.
 func mapRowsFromStatic(d *Deps, st repoStatic) ([]Row, error) {
 	storageDir := st.storageDir
 	if storageDir == "" && st.defPath != "" {
@@ -748,14 +748,15 @@ func mapRowsFromStatic(d *Deps, st repoStatic) ([]Row, error) {
 	return rows, nil
 }
 
-// mapVisible reports whether a Map should appear on the Work dashboard: active
-// and not archived. Done, abandoned, archived, and malformed maps are hidden
-// (ADR-0130).
+// mapVisible reports whether a Map should appear on the Work dashboard. An
+// arrived Map stays: it is the lineage view for the sets it spawned, and hiding it
+// on arrival would destroy exactly the thing arrival produces — Archive is the
+// hide mechanism (ADR-0172). Abandoned, archived and BROKEN maps are hidden.
 func mapVisible(m wayfinder.Map) bool {
-	if m.Archived || m.Malformed {
+	if m.Archived || m.Broken {
 		return false
 	}
-	return m.Status == wayfinder.MapActive
+	return m.Status == wayfinder.MapActive || m.Status == wayfinder.MapArrived
 }
 
 // staticProjectPath returns the repo group's representative checkout, the path

@@ -1263,11 +1263,11 @@ The search phase of a large effort: resolving decision tickets one at a time unt
 _Avoid_: exploration, discovery (code term), planning effort, effort (that is the task strength knob)
 
 **Map**:
-The canonical artifact of one Wayfinding effort: a folder holding `map.md` (destination, notes, decisions-so-far index, fog, out-of-scope) plus its Decision tickets. A first-class concept beside Task sets, not a Task set kind — it never drains, and its membership grows and shrinks as fog graduates. Stored per-repository in Task storage under a `maps/` sibling of `tasks/`; the folder is the Map's content, and **Map registration** is what makes it Work pop looks after.
-_Avoid_: wayfinder task set, plan, chart
+The canonical artifact of one Wayfinding effort: a folder holding `map.md` (destination, notes, decisions-so-far index, fog, out-of-scope) plus its Decision tickets. A first-class concept beside Task sets, not a Task set kind — it never drains, and its membership grows and shrinks as fog graduates. Stored per-repository in Task storage under a `maps/` sibling of `tasks/`; the folder is the Map's content, and **Map registration** is what makes it Work pop looks after. Its lifecycle is `active` / `arrived` / `abandoned` (see **Map status**); an **Arrived** Map stays visible in the Work dashboard and **Map archive** is what hides it.
+_Avoid_: wayfinder task set, plan, chart, done map, closed map, completed map
 
 **Map verb family**:
-`pop map` — the one command family that reads and mutates Maps: `status`, `show`, `register`, `next`, `claim`, `resolve`, `out-of-scope`, `archive`, `unarchive`. Renamed from `pop wayfinder` as a hard cut with **no alias** (same discipline as the `pop queue` cut): kind nouns everywhere, and "wayfinder" survives only as the *skill's* name. Reads never create state; a Map's metadata is never hand-edited once the family owns it.
+`pop map` — the one command family that reads and mutates Maps: `status`, `show`, `register`, `next`, `claim`, `resolve`, `out-of-scope`, `arrive`, `open`, `archive`, `unarchive`. Renamed from `pop wayfinder` as a hard cut with **no alias** (same discipline as the `pop queue` cut): kind nouns everywhere, and "wayfinder" survives only as the *skill's* name. Reads never create state; a Map's metadata is never hand-edited once the family owns it.
 _Avoid_: pop wayfinder, map commands
 
 **Decision ticket**:
@@ -1287,12 +1287,16 @@ Who holds a **Ticket claim**: the tmux pane id when the command runs inside tmux
 _Avoid_: session id, lease holder, lock owner
 
 **Map manifest**:
-The `index.json` beside a Map's `map.md` — the machine-readable half of a Map, mirroring the **Task manifest** so no consumer hand-parses metadata out of N ticket markdown files. Per Decision ticket it carries id, file, title, type, status (`open` | `resolved`; a claim is pop.db state, never a file state), `out_of_scope`, `blocked_by`, `adr_drafts` and `context_drafts`, plus a Map-level `spawned_sets` array defaulting to empty. Blocking edges live here because they are definitional and travel with the content. Where one exists it is the source of truth for status, type and blocking; a Map without one still reads its ticket markdown headers. Validation names every problem — unknown status or type, a blocker naming no entry, an entry with no markdown file, a markdown file with no entry — and a failing manifest renders the Map Malformed.
+The `index.json` beside a Map's `map.md` — the machine-readable half of a Map, mirroring the **Task manifest** so no consumer hand-parses metadata out of N ticket markdown files. Per Decision ticket it carries id, file, title, type, status (`open` | `resolved`; a claim is pop.db state, never a file state), `out_of_scope`, `blocked_by`, `adr_drafts` and `context_drafts`, plus a Map-level `spawned_sets` array defaulting to empty. Blocking edges live here because they are definitional and travel with the content. Where one exists it is the source of truth for status, type and blocking; a Map without one still reads its ticket markdown headers. Validation names every problem — unknown status or type, a blocker naming no entry, an entry with no markdown file, a markdown file with no entry — and a failing manifest renders the Map `BROKEN`.
 _Avoid_: ticket index, map index file, wayfinder manifest
 
 **Map status**:
-The `Status:` line in `map.md` — `active` (default), `done` (way found; skill writes it at handoff), or `abandoned` (closed without reaching the destination). Declared, not derived: fog is prose, so "way is clear" is a judgment the session records. Orthogonal to **Map archive**, the reversible pop-side flag that hides old Maps from default views without deleting; deletion stays manual.
-_Avoid_: map state, derived map status
+The `Status:` line in `map.md` — `active` (default), `arrived` (destination reached; written by `pop map arrive`, never by hand), or `abandoned` (closed without reaching the destination). Declared, not derived: fog is prose, so "the way is clear" is a judgment the human records through a verb. Any other value renders the Map `BROKEN`, with the corrective printed on the row — `done` was retired with **no read-fold**, because the only Maps that exist are per-machine and an alias would keep a dead word in the parser forever. Orthogonal to **Map archive**, the reversible pop-side flag that hides old Maps from default views without deleting; deletion stays manual.
+_Avoid_: map state, derived map status, done, malformed map
+
+**Arrived**:
+A Map's terminal status: the way to its destination is clear and nothing is left to decide before someone builds it. Named for the destination rather than reusing the Task-set word `DONE`, which the Work dashboard hides by default — and an arrived Map must stay visible, being the lineage view for the sets it spawned. Declared by `pop map arrive <map-id>`, which writes the status and tears down the Map's tmux session; `pop map open <map-id>` reverses it when fog reopens. The gate is the **destination**, not an empty fog section: a Map may carry deliberately non-prerequisite fog forever, so arrival lists open or claimed tickets and proceeds — refusing would only buy fake resolutions typed to clear the gate. `to-spec` and `to-tasks` never touch the line: they cannot judge "destination reached", and a second handoff must not re-mark an already arrived Map.
+_Avoid_: done, cleared, settled, closed
 
 **Work container registry**:
 The machine-global `work_containers` table keying every registered Work container by (kind, id) — the one place that answers "does pop look after this?" for any kind. It carries the registration time and the `archived` bit, and deliberately no status: status is derived from files on every read, so a cached copy here would be a second source of truth. Maps are the first kind to key into it; Task sets migrate onto it from **Task state** later.
@@ -1319,8 +1323,8 @@ A span of `map.md` pop owns, delimited by `<!-- pop:generated <name> -->` marker
 _Avoid_: managed block, generated section (as a file), pop block
 
 **Spawned set**:
-A Task set created from a Map's resolved decisions (via to-spec/to-tasks) once the way — or an early-splittable chunk — is clear. The forward link between the two concepts: the Map records the ids of sets it spawned; a spawned set's `spec.md` records its source Map. One Map may spawn many sets.
-_Avoid_: child set, output set
+A Task set created from a Map's resolved decisions (via to-spec/to-tasks) once the Map has **Arrived** — the whole Map, in one handoff. A wayfinding session never pre-splits a Map into per-area sets: a chunk boundary has to be invented by a session that has read fewer ticket answers than `to-spec` will, while the sequencing that matters already lives inside the answers and travels with the Map for free. The forward link between the two concepts: the Map records the ids of sets it spawned; a spawned set records its source Map, in `spec.md` prose where a spec exists and on its `index.json` manifest always. A Map may spawn a further set later — a remediation set, or a second handoff after fog has cleared.
+_Avoid_: child set, output set, chunked handoff, early-splittable chunk, partial handoff
 
 **ADR draft**:
 An ADR body written during a wayfinding session into the Map's `adrs/` directory, identified by an 8-hex id and carrying no ADR number. It is the single copy of the decision's repo-facing form; the ticket answer links it rather than restating it. A number is assigned only when a slice **Mint**s it.

@@ -169,8 +169,8 @@ func findClaimableMap(d *Deps, cwd, mapID string) (Map, error) {
 	if !registered[m.ID] {
 		return Map{}, fmt.Errorf("map %q is not registered; run `pop map register %s` first", m.ID, m.ID)
 	}
-	if m.Malformed {
-		return Map{}, fmt.Errorf("map %q is MALFORMED: %s", m.ID, m.MalformedReason)
+	if m.Broken {
+		return Map{}, fmt.Errorf("map %q is BROKEN: %s", m.ID, m.BrokenReason)
 	}
 	return m, nil
 }
@@ -185,7 +185,7 @@ func soleActiveMap(d *Deps, cwd string, registered map[string]bool) (Map, error)
 	}
 	var candidates []Map
 	for _, m := range maps {
-		if m.Archived || m.Malformed || m.Status != MapActive || !registered[m.ID] {
+		if m.Archived || m.Broken || m.Status != MapActive || !registered[m.ID] {
 			continue
 		}
 		candidates = append(candidates, m)

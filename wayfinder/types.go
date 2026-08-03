@@ -6,10 +6,20 @@ import "time"
 type MapStatus string
 
 const (
-	MapActive     MapStatus = "active"
-	MapDone       MapStatus = "done"
-	MapAbandoned  MapStatus = "abandoned"
-	MapMalformed  MapStatus = "malformed"
+	MapActive MapStatus = "active"
+	// MapArrived is the terminal status of a Map that reached its destination,
+	// written by `pop map arrive` and reversed by `pop map open`. It replaced
+	// `done` outright — the Work dashboard hides DONE work by default, and a Map's
+	// terminal state must not inherit a hiding rule written for Task sets
+	// (ADR-0172).
+	MapArrived   MapStatus = "arrived"
+	MapAbandoned MapStatus = "abandoned"
+	// MapBroken is pop's verdict for a Map it cannot read: an unrecognised Status:
+	// word, an unreadable map.md, a manifest that does not validate. Uppercase
+	// because it is the one value no human ever writes into map.md, and the fix
+	// travels beside it in BrokenReason. Registration's own diagnostics stay
+	// MALFORMED: that is a fix loop over the manifest, not a row label.
+	MapBroken MapStatus = "BROKEN"
 )
 
 // TicketType classifies a Decision ticket.
@@ -67,9 +77,10 @@ type Map struct {
 	DecisionsSoFar  string
 	Archived        bool
 	Tickets         []Ticket
-	Malformed       bool
-	// MalformedReason is set when Malformed is true.
-	MalformedReason string
+	Broken          bool
+	// BrokenReason is set when Broken is true, and carries the corrective: what a
+	// human has to change in the Map's files to make pop able to read it again.
+	BrokenReason string
 }
 
 // TicketCounts tallies tickets by workflow status.
@@ -87,8 +98,8 @@ type StatusRow struct {
 	Counts          TicketCounts
 	FrontierSize    int
 	Archived        bool
-	Malformed       bool
-	MalformedSummary string
+	Broken          bool
+	BrokenSummary   string
 }
 
 // StatusSnapshot is the pure data model for pop map status.

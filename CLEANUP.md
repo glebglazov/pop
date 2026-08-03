@@ -92,7 +92,7 @@ message naming the new status (loud-failure preference). Current embedded templa
 | Storage-layout auto-migration `workloads/` → `repos/`, `issues/` → `tasks/`, global state → per-repo | `tasks/migrate_layout.go` (+ `migrate_layout_test.go`) | Auto-runs per-repository on first touch — see sign-off item 3 |
 | Legacy global state path | `tasks/state.go:40-55` (`DefaultStatePath`, `DefaultStatePathWith` → `workloads-state.json`) | Only consumer is `MigrateStorageLayout`; delete together |
 | `prds/` directory — full retirement | pending the PRD co-location feature (ADR-0088) | Co-location moves PRDs to `tasks/<set>/prd.md` and ships a `prds/<slug>.md` → set-folder migration. This cleanup **fully retires the `prds/` directory**: remove the sibling `prds/` read-path, the to-prd/to-tasks fallbacks, and the migration itself, once every repo's PRDs have moved. Verify no `<data-dir>/pop/**/prds/` remain (mirror of the `workloads/` storage check). Blocked on ADR-0088 landing first. |
-| Map manifest fold + `wayfinder/` → `maps/` storage rename | `wayfinder/fold.go` (+ `fold_test.go`); the legacy-name probe in `tasks/storage_doctor.go` (`storageHasDashboardWork`) | Auto-runs per Map on the first scan that finds no `index.json`: mints the manifest from the retired `Status:` / `Type:` / `Blocked by:` header lines, strips those lines from each ticket markdown, and renames the storage directory. Removing it also deletes `StripTicketHeaders`, the header walk it shares with `ParseTicketMarkdown`, and the ticket-status/type/blocking parsing in `wayfinder/parse.go` — after removal a Map without a manifest is simply MALFORMED. Sign-off check: item 6 below. |
+| Map manifest fold + `wayfinder/` → `maps/` storage rename | `wayfinder/fold.go` (+ `fold_test.go`); the legacy-name probe in `tasks/storage_doctor.go` (`storageHasDashboardWork`) | Auto-runs per Map on the first scan that finds no `index.json`: mints the manifest from the retired `Status:` / `Type:` / `Blocked by:` header lines, strips those lines from each ticket markdown, and renames the storage directory. Removing it also deletes `StripTicketHeaders`, the header walk it shares with `ParseTicketMarkdown`, and the ticket-status/type/blocking parsing in `wayfinder/parse.go` — after removal a Map without a manifest is simply BROKEN. Sign-off check: item 6 below. |
 | `wayfinder-archive.json` → registry `archived` bit | `foldLegacyArchiveState` in `wayfinder/archive.go` (+ `archive_test.go`) | Auto-runs per repository on the first Map scan that finds the side-file: registers each id it names and sets the registry's `archived` bit, then deletes the file. Removing it also deletes `legacyArchiveState` and the `legacyArchiveStateFile` constant — after removal a leftover file is ignored and its Maps come back visible. Sign-off check: item 6 below. |
 | Legacy `bindings.json` → store migration | `migrateLegacyBindingsFile` (moving to `tasks/binding` in the store-seam refactor; currently `tasks/bindings_store.go:101`) | One-time fold of the retired standalone binding file into the execution-state store (ADR-0055). Every machine that ran a post-ADR-0055 build has migrated; sign-off check: no `<data-dir>/pop/bindings.json` remains. |
 
@@ -147,9 +147,11 @@ Per tester, before removal lands:
    Map folder carries `index.json`, and no ticket markdown still carries a
    `Status:` / `Type:` / `Blocked by:` header. A Map the fold declined (a blocker
    naming no ticket, a ticket with no `Type:` line) needs fixing by hand before
-   sign-off — after removal it reads as MALFORMED. An archived Map must also show
+   sign-off — after removal it reads as BROKEN. An archived Map must also show
    `[archived]` under `pop map status --all`, proving its bit reached the registry
-   before the side-file went.
+   before the side-file went. `Status: done` in a `map.md` is a **hard cut with no
+   fold**: such a Map shows as `BROKEN` with the fix on its row, and the line must
+   be edited to `arrived` (or the Map arrived through `pop map arrive`) by hand.
 
 | Tester | 1 config | 2 [tasks] | 3 storage | 4 re-integrate | 5 scripts | 6 maps | Signed off |
 |---|---|---|---|---|---|---|---|

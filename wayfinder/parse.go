@@ -49,17 +49,56 @@ func ParseMapMarkdown(content string) (MapStatus, string, error) {
 	return status, destination, nil
 }
 
+// parseMapStatus reads the declared vocabulary and nothing else. `done` is a hard
+// cut with no fold: the only Maps that exist are per-machine and none of them is
+// `done`, so an alias would keep a dead word in the parser forever. The error is
+// the corrective a reader of a BROKEN Map acts on, so it names the replacement
+// rather than just rejecting the word.
 func parseMapStatus(raw string) (MapStatus, error) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "active":
+	case string(MapActive):
 		return MapActive, nil
-	case "done":
-		return MapDone, nil
-	case "abandoned":
+	case string(MapArrived):
+		return MapArrived, nil
+	case string(MapAbandoned):
 		return MapAbandoned, nil
 	default:
-		return "", fmt.Errorf("unknown map status %q", raw)
+		return "", fmt.Errorf("unknown map status %q: map.md's Status: line takes active | arrived | abandoned "+
+			"(a Map that reached its destination is `arrived` — write it with `pop map arrive <map-id>`)", raw)
 	}
+}
+
+// ReplaceMapStatus writes status onto map.md's Status: line. Only the metadata
+// region above the first `## ` heading is considered — further down, `Status:` is
+// prose a session wrote. A Map charted without the line reads as active, so one is
+// inserted where every existing map keeps it: under the title, above the sections.
+func ReplaceMapStatus(content string, status MapStatus) string {
+	line := "Status: " + string(status)
+	lines := strings.Split(content, "\n")
+	insertAt := 0
+	for i, raw := range lines {
+		trimmed := strings.TrimSpace(raw)
+		if statusLinePattern.MatchString(trimmed) {
+			lines[i] = line
+			return strings.Join(lines, "\n")
+		}
+		if strings.HasPrefix(trimmed, "## ") {
+			break
+		}
+		if strings.HasPrefix(trimmed, "#") {
+			insertAt = i + 1
+		}
+	}
+	out := append([]string{}, lines[:insertAt]...)
+	if insertAt > 0 {
+		out = append(out, "")
+	}
+	out = append(out, line, "")
+	rest := lines[insertAt:]
+	for len(rest) > 0 && strings.TrimSpace(rest[0]) == "" {
+		rest = rest[1:]
+	}
+	return strings.Join(append(out, rest...), "\n")
 }
 
 func extractDestination(lines []string, start int) string {

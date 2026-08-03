@@ -6,7 +6,7 @@ status: accepted
 
 ## Context
 
-A Map arrived as a folder of markdown and a skill that edited it. Ticket state
+A Map began as a folder of markdown and a skill that edited it. Ticket state
 lived in hand-parsed `Status:` / `Type:` / `Blocked by:` header lines, claiming a
 ticket was a header edit, and the only pop-side surface was four read verbs
 (`show`, `status`, `archive`, `unarchive`) plus an `archive` side-file. Nothing
@@ -20,6 +20,23 @@ Second, the wayfinder overlay had swapped in `grill-with-docs`, whose
 commit-on-close rule was written for standalone grilling; carried into
 wayfinding it made every grilling session write into the repository under study.
 One session on the source Map did exactly that and had to be reverted by hand.
+
+Two more inherited clauses fail on contact with a real Map. [ADR-0129](0129-wayfinder-maps-are-a-first-class-sibling-of-task-sets.md)
+wrote the forward link's trigger as "when the way (or an early-splittable chunk)
+is clear", which authorised a session to pre-split its own map into per-area Task
+sets before handing off. The failure mode is not hypothetical: a session about to
+hand off the source Map proposed six chunks, two of them its own invention rather
+than anything a ticket had fixed. A chunk boundary has to be re-derived by a
+session that has read fewer ticket answers than `to-spec` will, while the
+sequencing constraints that matter already live *inside* the answers and travel
+with the map for free. Chunking also has no upstream twin: upstream wayfinder
+hands off once and says plainly that slicing is not wayfinding's job, `to-spec`
+emits one spec per invocation, and `to-tasks` produces one cohesive vertical
+breakdown per invocation.
+
+And ADR-0129 declared the lifecycle `active`/`done`/`abandoned`, while `pop work
+dashboard` hides `DONE` work by default — so a Map's terminal state inherits a
+hiding rule written for Task sets.
 
 ## Decision
 
@@ -59,6 +76,32 @@ One session on the source Map did exactly that and had to be reverted by hand.
   archives — the bit only exists on a row — and that is the one place other
   than `register` that writes one, precisely because refusing would silently
   restore an archived Map to the default views.
+- **A Map hands off whole, once.** A wayfinding session never pre-splits a Map
+  into chunks; all chunking language leaves ADR-0129, the Work-store doc and
+  `CONTEXT.md`. The route is Map → `to-spec` → `spec.md` → `to-tasks` → one
+  registered set, with the direct Map → `to-tasks` route surviving for small Maps
+  whose answers already *are* the spec. `spawned_sets` stays an array, but no
+  longer because of chunking: a remediation set for a spawned set, and a second
+  handoff after fog that was open at the first handoff has cleared, are the two
+  things that justify a second entry.
+- **Arrival is a declared judgment, made by a verb.** The terminal status is
+  renamed `done` → **`arrived`**: `Status: active | arrived | abandoned`. `pop map
+  arrive <map-id>` writes it and tears down the Map's tmux session; `pop map open
+  <map-id>` reverses it when fog reopens. `to-spec` and `to-tasks` never touch
+  `Status:` — they cannot judge "destination reached", and a second handoff must
+  not re-mark an already arrived Map.
+- **The gate is the destination, not empty fog.** A Map may carry deliberately
+  non-prerequisite fog forever, so a fog-empty gate would deadlock it. `arrive`
+  warns and proceeds when open or claimed tickets remain, listing them, per the
+  house rule that a Map verb writes rather than refuses; refusing would only buy
+  fake resolutions typed to clear the gate.
+- **An arrived Map stays visible**, and Archive is the hide mechanism. An arrived
+  Map is the lineage view for the sets it spawned — the one thing hiding it on
+  arrival would destroy.
+- **`done` is a hard cut, not an alias.** No fold on read: an unrecognised
+  `Status:` renders the Map `BROKEN` with the fix printed. The only Maps that
+  exist are per-machine and none is `done`, so an alias would keep a dead word in
+  the parser forever.
 
 ## Considered Options
 
@@ -81,6 +124,21 @@ One session on the source Map did exactly that and had to be reverted by hand.
 - **Keep archival in the side-file.** Rejected: every kind's archived bit would
   then live somewhere different, and the dashboard would need a per-kind reader
   for a bit that means exactly one thing.
+- **Keep the early-splittable-chunk handoff.** Rejected: "several sets from one
+  round of wayfinding" can only mean repeated `to-spec` invocations at boundaries
+  a session invented, since `to-spec` is one spec per invocation. The trigger that
+  produced the six-chunk proposal — "one spec per landed ADR" — is backwards under
+  [ADR-0171](0171-wayfinding-decisions-mint-through-implementing-slices.md), which
+  makes an ADR an *output* minted by the slice implementing a decision: it sized
+  the inputs by counting the outputs.
+- **Gate arrival on an empty `## Not yet specified`.** Rejected: it deadlocks any
+  Map carrying fog that was never a prerequisite — including the Map that made
+  this decision.
+- **Keep `done` as an alias for `arrived`.** Rejected: a dead word in the parser
+  forever, for a corpus of Maps that is per-machine and contains none.
+- **Hide an arrived Map, as the dashboard hides a DONE set.** Rejected: that is
+  the hiding rule the rename exists to escape, and it destroys the lineage view.
+  Archive already hides, reversibly, on demand.
 - **Keep `grill-with-docs` for wayfinding tickets and fix the ordering
   problems it creates** (fold-before-spawn, sets forking the Map's branch,
   incremental folds). Rejected: all three are descendants of the repo write.
@@ -102,3 +160,14 @@ One session on the source Map did exactly that and had to be reverted by hand.
 - Decisions live outside the repository for the life of a Map, so a repo-only
   reader cannot see them until handoff. Consistent with the Work store already
   being per-machine.
+- ADR-0129's forward-link clause and status vocabulary are superseded here; it
+  keeps its body and its `accepted` status, because the decision it exists for —
+  a Map as its own concept beside Task sets — is untouched.
+- Five sites lose the chunking clause: ADR-0129's forward-link sentence, the
+  Work-store doc's *Handoff to implementation* (both sentences), `CONTEXT.md`'s
+  **Spawned set** entry, and the source Map's own notes. The Map ticket that
+  authorised chunking is audit trail and is superseded rather than edited.
+- The Map parser, `pop map register`'s fix list, the `pop map status` table and
+  the Work dashboard's Map rows all read `arrived`; nothing reads `done`. A Map
+  left carrying the retired word reads as `BROKEN` until a human edits the line —
+  the acknowledged cost of refusing an alias.

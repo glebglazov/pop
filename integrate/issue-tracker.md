@@ -352,8 +352,10 @@ the next one. Write prose outside the markers — it survives — and never hand
 a decision line.
 
 The `Status:` line (top of `map.md`, before headings) is `active` (default while
-wayfinding), `done` (way found — write at handoff), or `abandoned` (closed without
-reaching the destination). Charting writes `Status: active` and ends with
+wayfinding), `arrived` (destination reached — written by `pop map arrive`, never by
+hand), or `abandoned` (closed without reaching the destination). Any other value
+renders the Map BROKEN with the fix printed; `done` is retired and does not fold.
+Charting writes `Status: active` and ends with
 `pop map register <map-id>`, which validates the Map's `index.json` and makes it
 registered Work; it prints every problem it finds and is re-runnable until clean.
 Open tickets are **not** listed in `map.md`; they are files under `issues/`,
@@ -427,9 +429,14 @@ before claiming.
 
 ### Handoff to implementation
 
-When the way to the destination is clear — or an early-splittable chunk is —
-suggest `to-spec` and/or `to-tasks`. Wayfinding produces decisions; implementation
-happens in ordinary registered Task sets. Record the forward link both ways:
+**A map hands off whole, once.** When the way to the destination is clear, suggest
+`to-spec` (then `to-tasks` over its `spec.md`), or `to-tasks` directly for a small
+map whose ticket answers already *are* the spec. Never pre-split a map into
+per-area sets: the sequencing constraints that matter already live inside the
+answers and travel with the map for free, while a chunk boundary has to be invented
+by a session that has read fewer answers than `to-spec` will. Wayfinding produces
+decisions; implementation happens in ordinary registered Task sets. Record the
+forward link both ways:
 
 1. **On the map:** add each spawned task-set id to the `spawned_sets` array in
    the map's `index.json`. `## Spawned sets` in `map.md` is generated from that
@@ -437,6 +444,12 @@ happens in ordinary registered Task sets. Record the forward link both ways:
 2. **On the set:** `to-spec` writes a `Source map: <map-id>` line as the first
    line of `spec.md`.
 
-Then set `Status: done` in `map.md`. One map may spawn many sets over time; only
-mark `done` when wayfinding for this destination is finished (individual chunks
-may hand off earlier while the map stays `active` if fog remains).
+Then declare arrival: `pop map arrive <map-id>` writes `Status: arrived` and tears
+down the map's tmux session. The gate is the **destination**, not empty fog — a map
+may carry deliberately non-prerequisite fog forever — so arrival lists open or
+claimed tickets and proceeds anyway; never resolve a ticket just to clear the gate.
+`pop map open <map-id>` reverses it when fog reopens. One map may still spawn a
+further set later: a remediation set, or a second handoff once fog that was open at
+the first handoff has cleared. An arrived map stays visible in the Work dashboard —
+it is the lineage view for the sets it spawned; `pop map archive` is what files it
+away.

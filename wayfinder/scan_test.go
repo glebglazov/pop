@@ -126,7 +126,7 @@ func TestScanMapsParsesMapAndTickets(t *testing.T) {
 	}
 }
 
-func TestScanMapsMalformedFolder(t *testing.T) {
+func TestScanMapsBrokenFolder(t *testing.T) {
 	dataHome := "/data"
 	commonDir := "/repo/.git"
 	t.Setenv("XDG_DATA_HOME", dataHome)
@@ -144,15 +144,17 @@ func TestScanMapsMalformedFolder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(maps) != 1 || !maps[0].Malformed {
+	if len(maps) != 1 || !maps[0].Broken {
 		t.Fatalf("expected one malformed map, got %+v", maps)
 	}
 }
 
-func TestBuildStatusHidesDoneAndAbandonedByDefault(t *testing.T) {
+// An arrived Map is deliberately not hidden: it is the lineage view for the sets
+// it spawned, so only archiving and abandonment take a Map off the table.
+func TestBuildStatusHidesAbandonedAndArchivedButKeepsArrived(t *testing.T) {
 	files := oneTicketMap("archived-map")
 	files["maps/active/map.md"] = "## Destination\nactive"
-	files["maps/done-map/map.md"] = "Status: done\n\n## Destination\ndone"
+	files["maps/arrived-map/map.md"] = "Status: arrived\n\n## Destination\narrived"
 	files["maps/quit-map/map.md"] = "Status: abandoned\n\n## Destination\nquit"
 	d, _ := registryFixture(t, files)
 	mustRegister(t, d, "archived-map")
@@ -164,8 +166,12 @@ func TestBuildStatusHidesDoneAndAbandonedByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snap.Rows) != 1 || snap.Rows[0].ID != "active" {
-		t.Fatalf("default rows = %+v, want only active", snap.Rows)
+	var visible []string
+	for _, row := range snap.Rows {
+		visible = append(visible, row.ID)
+	}
+	if len(visible) != 2 || visible[0] != "active" || visible[1] != "arrived-map" {
+		t.Fatalf("default rows = %v, want [active arrived-map]", visible)
 	}
 
 	all, err := BuildStatus(d, "", true)

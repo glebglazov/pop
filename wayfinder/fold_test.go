@@ -57,7 +57,7 @@ func TestScanMapsFoldsLegacyMapIntoManifest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ScanMapsInStorage: %v", err)
 	}
-	if len(maps) != 1 || maps[0].Malformed {
+	if len(maps) != 1 || maps[0].Broken {
 		t.Fatalf("maps = %+v, want one well-formed map", maps)
 	}
 
@@ -212,7 +212,7 @@ func TestScanMapsSkipsFoldWhenHeadersCannotFormManifest(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ScanMapsInStorage: %v", err)
 			}
-			if len(maps) != 1 || maps[0].Malformed {
+			if len(maps) != 1 || maps[0].Broken {
 				t.Fatalf("maps = %+v, want one readable map", maps)
 			}
 			if len(maps[0].Tickets) != 1 || maps[0].Tickets[0].Status != TicketOpen {

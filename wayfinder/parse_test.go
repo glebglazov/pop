@@ -19,13 +19,13 @@ func TestParseMapMarkdownDefaultsActive(t *testing.T) {
 }
 
 func TestParseMapMarkdownStatusAndDestination(t *testing.T) {
-	content := "Status: done\n\n## Destination\n\nShip v1\nwith polish\n\n## Notes\nignored"
+	content := "Status: arrived\n\n## Destination\n\nShip v1\nwith polish\n\n## Notes\nignored"
 	status, dest, err := ParseMapMarkdown(content)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status != MapDone {
-		t.Fatalf("status = %q, want done", status)
+	if status != MapArrived {
+		t.Fatalf("status = %q, want arrived", status)
 	}
 	if dest != "Ship v1 with polish" {
 		t.Fatalf("destination = %q", dest)

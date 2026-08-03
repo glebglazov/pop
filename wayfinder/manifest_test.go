@@ -196,7 +196,7 @@ func TestScanMapsPrefersManifestOverHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(maps) != 1 || maps[0].Malformed {
+	if len(maps) != 1 || maps[0].Broken {
 		t.Fatalf("maps = %+v", maps)
 	}
 	tickets := maps[0].Tickets
@@ -252,7 +252,7 @@ func TestScanMapsManifestBlockedTicketIsOffTheFrontier(t *testing.T) {
 	}
 }
 
-func TestScanMapsMalformedManifestRendersMapMalformed(t *testing.T) {
+func TestScanMapsMalformedManifestRendersMapBroken(t *testing.T) {
 	dataHome := "/data"
 	commonDir := "/repo/.git"
 	t.Setenv("XDG_DATA_HOME", dataHome)
@@ -274,10 +274,10 @@ func TestScanMapsMalformedManifestRendersMapMalformed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(maps) != 1 || !maps[0].Malformed {
+	if len(maps) != 1 || !maps[0].Broken {
 		t.Fatalf("maps = %+v", maps)
 	}
-	if !strings.Contains(maps[0].MalformedReason, `unknown status "claimed"`) {
-		t.Fatalf("reason = %q", maps[0].MalformedReason)
+	if !strings.Contains(maps[0].BrokenReason, `unknown status "claimed"`) {
+		t.Fatalf("reason = %q", maps[0].BrokenReason)
 	}
 }
