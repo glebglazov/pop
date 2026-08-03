@@ -13,37 +13,34 @@ const (
 )
 
 // FirePaneWith spawns `pop routine fire <id>` into a tmux pane for the routine,
-// reusing the same pane when one is already tagged for that routine. The id may
-// be an authored routine or a Project routine's `project:<name>` (ADR-0138);
-// the pane runs in the routine's bound directory (a Project routine's checkout).
-func FirePaneWith(d *Deps, routineID string) error {
+// reusing the same pane when one is already tagged for that routine, and returns
+// that pane. The id may be an authored routine or a Project routine's
+// `project:<name>` (ADR-0138); the pane runs in the routine's bound directory (a
+// Project routine's checkout).
+func FirePaneWith(d *Deps, routineID string) (string, error) {
 	dir, err := paneBoundDir(d, routineID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	session, paneDir := sessionAndDir(d, dir)
 	command := fmt.Sprintf("pop routine fire %s", shellQuote(routineID))
-	_, err = tmuxmod.EnsureTaggedPane(tmuxDeps(d), tmuxmod.TagRoutine, session, paneDir, routineID, command)
-	return err
+	return tmuxmod.EnsureTaggedPane(tmuxDeps(d), tmuxmod.TagRoutine, session, paneDir, routineID, command)
 }
 
-// PreviewPaneWith switches the active tmux client to the pane tagged for the
-// routine. When no pane exists the call is a no-op.
-func PreviewPaneWith(d *Deps, routineID string) error {
+// RunPaneWith returns the pane tagged for the routine, empty when the routine has
+// none. It spawns nothing: it is the lookup behind the preview verb, which takes
+// the operator to the pane a fire is running in and says so when there is none.
+func RunPaneWith(d *Deps, routineID string) (string, error) {
 	dir, err := paneBoundDir(d, routineID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	session, _ := sessionAndDir(d, dir)
-	tmux := tmuxDeps(d)
-	paneID, err := tmux.FindTaggedPane(session, tmuxmod.TagRoutine, routineID)
+	paneID, err := tmuxDeps(d).FindTaggedPane(session, tmuxmod.TagRoutine, routineID)
 	if err != nil {
-		return err
+		return "", err
 	}
-	if strings.TrimSpace(paneID) == "" {
-		return nil
-	}
-	return tmuxmod.FocusPane(tmux, paneID)
+	return strings.TrimSpace(paneID), nil
 }
 
 // paneBoundDir resolves the directory a routine's pane runs in. An authored

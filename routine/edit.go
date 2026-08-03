@@ -24,12 +24,12 @@ func UpdateSchedule(id, scheduleRaw string) (Manifest, error) {
 // if it parses, persists it to the routine's manifest (read-modify-write). An
 // unparseable expression is rejected before anything is written. An
 // explicitly-empty expression is a clear back to unscheduled (manual-only,
-// ADR-0134) rather than a parser error — mirroring the agent/effort modal's
-// clear-to-unset semantics. The bound directory and creation time are preserved.
+// ADR-0134) rather than a parser error — the same clear-to-unset semantics the
+// runtime agent/effort write follows. The bound directory and creation time are preserved.
 // Editing the schedule is a run-affecting change, so this eager chokepoint pauses
 // the Routine. The pause reason follows the anchor rule (ADR-0134): `changed`
 // only once the Routine has fired at least once, otherwise it keeps `created`.
-// The dashboard's edit-schedule modal and the refinement loop call this same helper.
+// The refinement loop calls this same helper.
 func UpdateScheduleWith(d *Deps, id, scheduleRaw string) (Manifest, error) {
 	if err := validateID(id); err != nil {
 		return Manifest{}, err

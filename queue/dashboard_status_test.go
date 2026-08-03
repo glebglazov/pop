@@ -98,7 +98,8 @@ func TestDashboardStatusMsgReloadsOnError(t *testing.T) {
 
 func TestDashboardStatusSubmenuHelp(t *testing.T) {
 	m := newQueueDashboard(nil, nil, DashboardSnapshot{})
-	m.menu = &dashboardMenu{status: newDashboardStatusMenu(DashboardRow{})}
+	m.menu = newDashboardMenu(testKinds(), DashboardRow{ID: "set"}, false)
+	m.menu.status = newDashboardStatusMenu(DashboardRow{})
 	entries := m.helpEntries()
 	found := map[string]bool{}
 	for _, e := range entries {

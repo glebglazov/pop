@@ -297,12 +297,14 @@ func TestRoutineKindLoadWritesNothingAndRegistersNothing(t *testing.T) {
 	}
 }
 
-// TestRoutineColumnsAreTheTableHeaders keeps the header in one place: the kind
-// authors the cells, so the table it renders reads under the kind's own list.
-func TestRoutineColumnsAreTheTableHeaders(t *testing.T) {
+// TestRoutineColumnsAreTheRoutinePageHeaders pins the headers a page of Routines
+// reads under: the kind authors the cells, so the kind names the columns and the
+// page asks it rather than restating them.
+func TestRoutineColumnsAreTheRoutinePageHeaders(t *testing.T) {
 	k := NewKind(&KindDeps{Routine: &Deps{}})
-	if !slices.Equal(k.Columns(), dashboardTableHeaders()) {
-		t.Fatalf("Columns() = %v, table headers = %v", k.Columns(), dashboardTableHeaders())
+	want := []string{"ROUTINE", "DIRECTORY", "SCHEDULE", "LAST RUN", "STATUS"}
+	if !slices.Equal(k.Columns(), want) {
+		t.Fatalf("Columns() = %v, want %v", k.Columns(), want)
 	}
 }
 

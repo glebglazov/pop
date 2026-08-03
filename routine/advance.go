@@ -218,7 +218,7 @@ func (a *Advancer) Advance(c work.Candidate) (work.Outcome, error) {
 	id := c.Ref.ContainerID
 	switch p.action {
 	case actionFire:
-		if err := FirePaneWith(a.d, id); err != nil {
+		if _, err := FirePaneWith(a.d, id); err != nil {
 			return work.Outcome{}, fmt.Errorf("queue: %s: spawn: %w", c.Label, err)
 		}
 		return advanceMessage("queue: %s: spawned fire", c.Label), nil

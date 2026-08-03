@@ -224,6 +224,12 @@ type Container struct {
 	// RoutinePaused is the persisted pause bit — the one enable/disable state a
 	// Routine has, and a state a Project routine never carries.
 	RoutinePaused bool
+	// RoutineLastReport is the absolute path of the newest run's report, empty
+	// when the Routine has never fired or its newest run wrote none (skipped, or
+	// still running). It is not a column cell: the row-level copy-report-path verb
+	// copies it and the detail sections name it, and both need the path that
+	// exists rather than the one a run would have written.
+	RoutineLastReport string
 	// RoutineTier is the kind-local relevance tier stamped at load time: the
 	// checkout the reader stands in, another checkout of the same project, then
 	// everything else. `work` never interprets it — it is the Routine
@@ -317,6 +323,12 @@ const (
 	// Task-set drain, bind and abandon pickers stay caller-side in this version;
 	// moving them behind Perform needs a modal-capable Outcome and is deferred.
 	OutcomeCallerModal
+	// OutcomeDetail asks the caller to open the container's detail view — its
+	// items, as the caller already renders them. It exists because a kind may
+	// offer a verb whose whole content is "show me the items" (a Routine's `runs`),
+	// and the alternative was the caller recognising that verb by id, which would
+	// put one kind's vocabulary back into the surface.
+	OutcomeDetail
 )
 
 // Outcome is what performing a verb produced: a message, a refresh, a handoff,

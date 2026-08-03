@@ -119,8 +119,17 @@ func conformanceCases() []conformanceCase {
 					},
 				})
 			},
-			wantActions:     []work.Verb{work.VerbShell, work.VerbCopyName},
-			wantItemActions: []work.Verb{work.VerbCopyName},
+			// Every Routine verb is the kind's own; only shell and copy-name are
+			// shared. The fixture's Routine is unpaused (so the consent pair reads
+			// `pause`) and its newest run is a skipped one that wrote no report, so
+			// the row-level copy-report-path is absent while the run item — which
+			// points at the report path it would have written — offers it.
+			wantActions: []work.Verb{
+				routine.VerbFire, routine.VerbPause, routine.VerbPreview, routine.VerbEdit,
+				routine.VerbRefine, routine.VerbRuns, routine.VerbHandoff,
+				work.VerbShell, work.VerbCopyName,
+			},
+			wantItemActions: []work.Verb{routine.VerbCopyReportPath, work.VerbCopyName},
 			wantSummary:     []string{"1 routine", "1 here"},
 		},
 	}

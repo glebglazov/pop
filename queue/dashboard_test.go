@@ -3863,7 +3863,9 @@ func TestQueueDashboardHelpContent(t *testing.T) {
 
 	t.Run("action menu shows menu verbs", func(t *testing.T) {
 		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
-		m.menu = &dashboardMenu{}
+		// The help lists the menu that is open, so it is opened over a row the way a
+		// keypress opens it — the verbs are the row's kind's, not a second list here.
+		m.menu = newDashboardMenu(testKinds(), DashboardRow{ID: "set"}, false)
 		entries := m.helpEntries()
 		found := map[string]bool{}
 		for _, e := range entries {

@@ -146,6 +146,21 @@ the container is the Task-set cell block, kept because page A's columns are the
 Task-set columns and a Map fills them too; it dies when a page takes its columns
 from its primary kind.
 
+*Amended when the Routine verbs moved onto the kind.* The outcome vocabulary
+above gained one member: `OutcomeDetail`, "open this container's detail view". A
+Routine's `runs` verb is nothing but the drill-down, and the alternative was the
+dashboard recognising that verb by id — one kind's vocabulary back inside the
+surface, which is the thing this decision removes. Everything else the Routine
+verbs needed was already expressible: dispatch now falls through to
+`Kind.Perform` for any verb the dashboard owns no modal for, so a kind-local verb
+costs no dashboard code at all, and `tea.ExecProcess` stayed out of the dashboard
+(ADR-0158) by making the prompt editor a spawned pane like every other handoff.
+The Routine's two modal verbs — edit-schedule and agent/effort — did *not* move:
+they need the modal-capable `Outcome` still deferred above, so they remain
+`pop routine edit --schedule/--agent/--effort` on the CLI. The action menu's help
+overlay now lists the open menu's own keys rather than a written-out Task-set
+list, because with three kinds on two pages a fixed list is wrong for two of them.
+
 A conformance test in `work` drives the real adapters through every method of the
 interface, so a fourth kind earns its coverage by being named in one table rather
 than by growing a suite. Because every kind imports `work`, that test lives in an

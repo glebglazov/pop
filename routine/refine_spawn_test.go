@@ -12,13 +12,13 @@ import (
 // resulting window/pane state — never on tmux argument arrays (ADR-0142).
 
 func TestRefinePaneWithFreshSpawn(t *testing.T) {
-	d, home := routineDashboardDeps(t)
+	d, home := routineTmuxDeps(t)
 	f := &tmuxtest.Fake{}
 	d.Tmux = f
 	if _, err := AddWith(d, "fresh", "every 6h", home); err != nil {
 		t.Fatal(err)
 	}
-	if err := RefinePaneWith(d, "fresh", ""); err != nil {
+	if _, err := RefinePaneWith(d, "fresh", ""); err != nil {
 		t.Fatalf("RefinePaneWith: %v", err)
 	}
 	if f.Live[RoutinesSessionName] != home {
@@ -35,7 +35,7 @@ func TestRefinePaneWithFreshSpawn(t *testing.T) {
 }
 
 func TestRefinePaneWithExistingWindowSendsNothing(t *testing.T) {
-	d, home := routineDashboardDeps(t)
+	d, home := routineTmuxDeps(t)
 	f := &tmuxtest.Fake{
 		Live:    map[string]string{RoutinesSessionName: home},
 		Windows: map[string]map[string][]string{RoutinesSessionName: {"live": {"%5"}}},
@@ -44,7 +44,7 @@ func TestRefinePaneWithExistingWindowSendsNothing(t *testing.T) {
 	if _, err := AddWith(d, "live", "every 6h", home); err != nil {
 		t.Fatal(err)
 	}
-	if err := RefinePaneWith(d, "live", ""); err != nil {
+	if _, err := RefinePaneWith(d, "live", ""); err != nil {
 		t.Fatalf("RefinePaneWith: %v", err)
 	}
 	if len(f.SentCommands) != 0 {
@@ -59,13 +59,13 @@ func TestRefinePaneWithExistingWindowSendsNothing(t *testing.T) {
 }
 
 func TestRefinePaneWithForwardsRefineAgent(t *testing.T) {
-	d, home := routineDashboardDeps(t)
+	d, home := routineTmuxDeps(t)
 	f := &tmuxtest.Fake{}
 	d.Tmux = f
 	if _, err := AddWith(d, "fwd", "every 6h", home); err != nil {
 		t.Fatal(err)
 	}
-	if err := RefinePaneWith(d, "fwd", "claude"); err != nil {
+	if _, err := RefinePaneWith(d, "fwd", "claude"); err != nil {
 		t.Fatalf("RefinePaneWith: %v", err)
 	}
 	panes := f.Windows[RoutinesSessionName]["fwd"]
@@ -79,14 +79,14 @@ func TestRefinePaneWithForwardsRefineAgent(t *testing.T) {
 }
 
 func TestRefinePaneWithOutsideTmuxRefuses(t *testing.T) {
-	d, home := routineDashboardDeps(t)
+	d, home := routineTmuxDeps(t)
 	f := &tmuxtest.Fake{}
 	d.Tmux = f
 	d.InTmux = func() bool { return false }
 	if _, err := AddWith(d, "cli", "every 6h", home); err != nil {
 		t.Fatal(err)
 	}
-	err := RefinePaneWith(d, "cli", "codex")
+	_, err := RefinePaneWith(d, "cli", "codex")
 	if err == nil {
 		t.Fatal("expected refusal outside tmux")
 	}

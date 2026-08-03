@@ -266,13 +266,13 @@ func TestBuildProjectAuthoringPromptIsProjectAware(t *testing.T) {
 }
 
 func TestRefinePaneWithProjectRoutineSpawnsProjectEdit(t *testing.T) {
-	d, _ := routineDashboardDeps(t)
+	d, _ := routineTmuxDeps(t)
 	checkout := t.TempDir()
 	var gitCalls [][]string
 	d.Project = recordingProjectDeps(checkout, &gitCalls)
 	writeProjectRoutine(t, checkout, "audit", "---\n---\nAudit.\n")
 
-	if err := RefinePaneWith(d, "project:audit", ""); err != nil {
+	if _, err := RefinePaneWith(d, "project:audit", ""); err != nil {
 		t.Fatalf("RefinePaneWith: %v", err)
 	}
 	rt := tmuxRecorder(d)

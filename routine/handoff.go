@@ -29,7 +29,7 @@ func HandoffWith(d *Deps, id string, out io.Writer) error {
 }
 
 // buildHandoff is the testable seam (deps-injected) that assembles the handoff
-// prompt string. The dashboard verb (task 07) reuses it. Addressing follows
+// prompt string. The Routine kind's handoff verb reuses it. Addressing follows
 // ADR-0138: a `project:<name>` id (or a bare name that resolves to a Project
 // routine) hands off the current checkout's Project routine, reading its
 // per-checkout run history and memory.

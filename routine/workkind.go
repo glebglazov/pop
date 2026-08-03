@@ -57,6 +57,11 @@ const BrokenStatus = "BROKEN"
 // parse error — the whole of what fixing it needs.
 const brokenSectionTitle = "Load error"
 
+// projectRoutineBadge marks a Project routine's id cell (ADR-0138): the same Work
+// kind as an authored Routine, saying in a glyph that its definition is committed
+// to a checkout rather than authored in pop's data dir.
+const projectRoutineBadge = "◆"
+
 // unknownProject labels a container whose bound directory names no project, which
 // on this kind means a Routine whose definition would not load at all.
 const unknownProject = "unknown"
@@ -180,48 +185,6 @@ func routineColumns() []string {
 	return []string{"ROUTINE", "DIRECTORY", "SCHEDULE", "LAST RUN", "STATUS"}
 }
 
-// Actions returns the container-level verbs that apply to a Routine right now.
-// Only the two shared verbs are here: the Routine's own verbs — fire, pause,
-// resume, edit, handoff, copy-report-path — become kind-local actions with the
-// detail view, and until then they stay where their surface already dispatches
-// them.
-func (k *Kind) Actions(c work.Container) []work.Action {
-	return []work.Action{
-		{Verb: work.VerbShell, Key: "O", Label: "shell"},
-		{Verb: work.VerbCopyName, Key: "y", Label: "copy name"},
-	}
-}
-
-// ItemActions returns the verbs for one run. A run is a record, not a thing to
-// act on: copying its name is the whole of it until the run verbs land.
-func (k *Kind) ItemActions(c work.Container, item work.Item) []work.Action {
-	return []work.Action{{Verb: work.VerbCopyName, Key: "y", Label: "copy name"}}
-}
-
-// Perform runs one Routine verb.
-func (k *Kind) Perform(c work.Container, item *work.Item, verb work.Verb) (work.Outcome, error) {
-	switch verb {
-	case work.VerbCopyName:
-		payload := c.ID
-		if item != nil {
-			payload = item.ID
-		}
-		return work.Outcome{Kind: work.OutcomeMessage, Clipboard: payload, Message: "copied " + payload}, nil
-	case work.VerbShell:
-		dir := strings.TrimSpace(c.Checkout)
-		if dir == "" {
-			return work.Outcome{}, fmt.Errorf("routine %q has no directory to open a shell in", c.ID)
-		}
-		return work.Outcome{
-			Kind:    work.OutcomeHandoff,
-			Handoff: work.Handoff{Kind: work.HandoffTmux, Dir: dir},
-			Message: "shell in " + dir,
-		}, nil
-	default:
-		return work.Outcome{}, work.UnknownVerb(k.ID(), verb)
-	}
-}
-
 // Summary returns the Routine kind's header phrases: how many Routines there are,
 // how many of them belong to the checkout the reader stands in, and how many are
 // paused. The "here" tally is what keeps an unfiltered global list from
@@ -271,6 +234,11 @@ type routineEntry struct {
 	// (ADR-0134) and for every Project routine.
 	schedule string
 	paused   bool
+	// pauseReason is why the Routine is paused, empty when it is not. The detail
+	// sections spell it out — a fingerprint-drift pause is the one Routine state
+	// that genuinely needs a human, and it says so there rather than only in the
+	// parenthesis a status cell has room for.
+	pauseReason PauseReason
 	// projectRoutine marks a Project routine (ADR-0138): discovered live from a
 	// checkout's committed `.pop/routines/`, carrying no pause bit and no schedule.
 	projectRoutine bool
@@ -309,14 +277,15 @@ func loadRoutineEntries(d *Deps, root string) ([]routineEntry, *store.Store, err
 	entries := make([]routineEntry, 0, len(routines)+len(warnings))
 	for _, r := range routines {
 		e := routineEntry{
-			id:        r.ID,
-			directory: r.Manifest.BoundDirectory,
-			schedule:  r.Manifest.Schedule,
-			paused:    r.Manifest.Paused,
-			storeID:   r.ID,
-			runsDir:   filepath.Join(routineDir(d, r.ID), runsDirName),
-			lastRun:   "never",
-			status:    dashboardIdleStatus(r.Manifest, ""),
+			id:          r.ID,
+			directory:   r.Manifest.BoundDirectory,
+			schedule:    r.Manifest.Schedule,
+			paused:      r.Manifest.Paused,
+			pauseReason: r.Manifest.PauseReason,
+			storeID:     r.ID,
+			runsDir:     filepath.Join(routineDir(d, r.ID), runsDirName),
+			lastRun:     "never",
+			status:      idleStatus(r.Manifest, ""),
 		}
 		if s != nil {
 			last, err := LastFireTime(s, r.ID)
@@ -324,7 +293,7 @@ func loadRoutineEntries(d *Deps, root string) ([]routineEntry, *store.Store, err
 				return nil, nil, err
 			}
 			e.lastRun = formatLastRun(last)
-			e.status, e.lastReportPath = dashboardStatusFor(d, s, r.ID, r.Manifest)
+			e.status, e.lastReportPath = statusFor(d, s, r.ID, r.Manifest)
 		}
 		entries = append(entries, e)
 	}
@@ -365,7 +334,7 @@ func projectRoutineEntries(d *Deps, root string, s *store.Store) ([]routineEntry
 			storeID:        storeID,
 			runsDir:        filepath.Join(projectRoutineDataDir(d, key, pr.Name), runsDirName),
 			lastRun:        "never",
-			status:         dashboardIdleStatus(Manifest{}, ""),
+			status:         idleStatus(Manifest{}, ""),
 		}
 		if s != nil {
 			last, err := LastFireTime(s, storeID)
@@ -373,7 +342,7 @@ func projectRoutineEntries(d *Deps, root string, s *store.Store) ([]routineEntry
 				return nil, err
 			}
 			e.lastRun = formatLastRun(last)
-			e.status, e.lastReportPath = dashboardStatusFor(d, s, storeID, Manifest{})
+			e.status, e.lastReportPath = statusFor(d, s, storeID, Manifest{})
 		}
 		entries = append(entries, e)
 	}
@@ -406,15 +375,16 @@ func containerFor(d *Deps, e routineEntry, tiers tierTable, s *store.Store) (wor
 	cell, checkout := directoryCells(d, e.directory)
 	tier, label := tiers.resolve(e, cell == MissingDirectoryCell)
 	c := work.Container{
-		Kind:            ref.KindRoutine,
-		ID:              e.id,
-		Project:         label,
-		Status:          e.status,
-		CursorKey:       "routine\x00" + e.id,
-		RoutineSchedule: ScheduleLabel(e.schedule),
-		RoutineLastRun:  e.lastRun,
-		RoutinePaused:   e.paused,
-		RoutineTier:     tier,
+		Kind:              ref.KindRoutine,
+		ID:                e.id,
+		Project:           label,
+		Status:            e.status,
+		CursorKey:         "routine\x00" + e.id,
+		RoutineSchedule:   ScheduleLabel(e.schedule),
+		RoutineLastRun:    e.lastRun,
+		RoutinePaused:     e.paused,
+		RoutineLastReport: e.lastReportPath,
+		RoutineTier:       tier,
 	}
 	if e.projectRoutine {
 		c.Badge = projectRoutineBadge
@@ -425,16 +395,75 @@ func containerFor(d *Deps, e routineEntry, tiers tierTable, s *store.Store) (wor
 		c.Status = BrokenStatus
 		c.RoutineSchedule = ""
 		c.RoutineLastRun = ""
+		c.RoutineLastReport = ""
 		c.DetailSections = []work.Section{{Title: brokenSectionTitle, Body: e.loadErr.Error()}}
 		return c, nil
 	}
 	c.RoutineDirectory, c.Checkout = cell, checkout
+	c.DetailSections = detailSections(e, cell)
 	items, err := runItems(s, e)
 	if err != nil {
 		return work.Container{}, err
 	}
 	c.Items = items
 	return c, nil
+}
+
+// detailSections are the four facts a Routine's detail view shows above its runs:
+// what makes it fire, where it fires, whether it is switched off and why, and
+// where the last thing it produced went. They are the whole of what the retired
+// run-history frame drew around the list, now authored by the kind and rendered by
+// the generic detail view like any other kind's.
+func detailSections(e routineEntry, directoryCell string) []work.Section {
+	return []work.Section{
+		{Title: "Schedule", Body: ScheduleLabel(e.schedule)},
+		{Title: "Directory", Body: directorySectionBody(directoryCell)},
+		{Title: "Pause state", Body: pauseSectionBody(e)},
+		{Title: "Last report", Body: reportSectionBody(e.lastReportPath)},
+	}
+}
+
+// directorySectionBody names the bound directory, or says the directory is gone
+// for a Routine that outlived it — the same fact the `(missing)` cell carries,
+// spelled out where there is room for what it means.
+func directorySectionBody(cell string) string {
+	if cell == MissingDirectoryCell {
+		return "bound directory is gone; a fire or a shell will refuse until it is back"
+	}
+	if cell == "" {
+		return "none"
+	}
+	return cell
+}
+
+// pauseSectionBody spells out the pause. A drift pause is the one Routine state
+// that genuinely needs a human — the prompt or the schedule moved since the last
+// run, so pop stopped firing rather than run something nobody has proven — and
+// this is where it says so instead of being a facet on a shared status.
+func pauseSectionBody(e routineEntry) string {
+	if !e.paused {
+		return "active"
+	}
+	switch e.pauseReason {
+	case PauseReasonChanged:
+		return pausedStatusLabel(e.pauseReason) + " — a run-affecting input changed; fire it once by hand to re-prove it, then resume"
+	case PauseReasonFailure:
+		return pausedStatusLabel(e.pauseReason) + " — the last run failed; read its report before resuming"
+	case PauseReasonCreated:
+		return pausedStatusLabel(e.pauseReason) + " — created paused; it fires on a schedule once you resume it"
+	default:
+		return pausedStatusLabel(e.pauseReason)
+	}
+}
+
+// reportSectionBody names the newest run's report, or says there is none — a
+// Routine that has never fired, or whose newest run was skipped or is still
+// running.
+func reportSectionBody(path string) string {
+	if path == "" {
+		return "none yet"
+	}
+	return path
 }
 
 // directoryCells splits a bound directory into the cell a reader sees and the

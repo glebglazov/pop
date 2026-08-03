@@ -517,6 +517,14 @@ func dashboardMenuItemHandoff(item dashboardMenuItem) bool {
 	return item.key != "" && item.key != strings.ToLower(item.key)
 }
 
+// items are the verbs the open menu is showing, empty for a menu with no list yet.
+func (menu *dashboardMenu) items() []dashboardMenuItem {
+	if menu == nil || menu.list == nil {
+		return nil
+	}
+	return menu.list.Items()
+}
+
 // newDashboardMenu opens the action overlay on row, wrapping the kind's verbs in
 // a ui.List with j/k wrap-around navigation. When pinned is true the menu
 // survives in-place verbs and J/K move the row cursor beneath it.
@@ -1242,6 +1250,8 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.detail.statusMsg = fmt.Sprintf("%s applied to %s", msg.verb, msg.taskID)
 		}
 		return m, m.reload()
+	case dashboardKindVerbMsg:
+		return m.applyKindVerb(msg)
 	case dashboardItemTextMsg:
 		if m.detail == nil || m.detail.peek == nil {
 			return m, nil
@@ -1565,7 +1575,11 @@ func (m QueueDashboard) dispatchVerb(verb work.Verb, row DashboardRow) (tea.Mode
 		m.statusMsg = m.copyRowName(row)
 		return m, nil
 	}
-	return m, nil
+	// Every other verb is the kind's own to run: it performs it and the dashboard
+	// carries out the outcome, so a kind whose verbs need no dashboard-owned modal
+	// needs no case here (ADR-0173).
+	m.statusMsg = ""
+	return m, m.performKindVerb(row, verb)
 }
 
 func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1759,7 +1773,8 @@ func (m QueueDashboard) invokeItemMenuItem(idx int) (tea.Model, tea.Cmd) {
 // same split the container-level dispatch keeps (ADR-0173). Copy-name is the
 // kind's own answer, taken from its Perform; the Task-set status writes and the
 // Map's grilling handoff run through queue's existing launchers because they are
-// the ones that own the process handoff and the detail's refresh.
+// the ones that own the process handoff and the detail's refresh. Anything else is
+// performed by the kind and its outcome applied, exactly as for a row verb.
 func (m QueueDashboard) dispatchItemVerb(verb work.Verb, row work.Container, item work.Item, inPeek bool) (tea.Model, tea.Cmd) {
 	switch verb {
 	case work.VerbCopyName:
@@ -1777,7 +1792,8 @@ func (m QueueDashboard) dispatchItemVerb(verb work.Verb, row work.Container, ite
 		m.detail.statusMsg = ""
 		return m, m.applyDetailOverride(row, item, verb)
 	}
-	return m, nil
+	m.detail.statusMsg = ""
+	return m, m.performKindItemVerb(row, item, inPeek, verb)
 }
 
 // copyItemName copies the item reference the owning kind names — a task set's
@@ -2396,24 +2412,19 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "esc", Desc: "back to action menu"},
 		}
 	case m.menu != nil:
-		// Dashboard action menu
-		entries := []ui.HelpEntry{
-			{Key: "I", Desc: "drain"},
-			{Key: "V", Desc: "verify"},
-			{Key: "b", Desc: "bind worktree"},
-			{Key: "u", Desc: "unbind worktree"},
-			{Key: "a", Desc: "toggle auto-drain"},
-			{Key: "s", Desc: "status submenu"},
-			{Key: "S", Desc: "assist"},
-			{Key: "F", Desc: "fold"},
-			{Key: "r", Desc: "unpark"},
-			{Key: "O", Desc: "shell"},
-			{Key: "x", Desc: "archive"},
-			{Key: "y", Desc: "copy name"},
-			{Key: "j/k", Desc: "navigate"},
-			{Key: "enter", Desc: "run action"},
-			{Key: "esc", Desc: "close menu"},
+		// Dashboard action menu. Its verbs are the focused row's own kind's, so the
+		// help lists the menu that is actually open rather than one kind's vocabulary
+		// written out here — a Routine row's keys would otherwise be a lie.
+		items := m.menu.items()
+		entries := make([]ui.HelpEntry, 0, len(items)+4)
+		for _, item := range items {
+			entries = append(entries, ui.HelpEntry{Key: item.key, Desc: item.label})
 		}
+		entries = append(entries,
+			ui.HelpEntry{Key: "j/k", Desc: "navigate"},
+			ui.HelpEntry{Key: "enter", Desc: "run action"},
+			ui.HelpEntry{Key: "esc", Desc: "close menu"},
+		)
 		if m.menu.pinned {
 			entries = append(entries, ui.HelpEntry{Key: "J/K", Desc: "move row cursor"})
 		}
