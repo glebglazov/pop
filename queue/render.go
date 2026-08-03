@@ -5,6 +5,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/setkind"
 	"github.com/glebglazov/pop/ui"
 	"github.com/glebglazov/pop/work"
 )
@@ -188,11 +189,13 @@ var dashboardColShrinkOrder = []int{
 	dashboardColProject,
 }
 
-// dashboardTableHeaders is the fixed column header row. The trailing column is
-// the per-activity cluster: an empty header over the IVFS keys, so no label sits
-// above the glyphs.
+// dashboardTableHeaders is this page's column header row, taken from its primary
+// **Work kind** — the Task set — rather than restated here: the kind authors these
+// cells, and a Map row on the same page fills them. The trailing column is the
+// per-activity cluster: an empty header over the IVFS keys, so no label sits above
+// the glyphs.
 func dashboardTableHeaders() []string {
-	return []string{"PROJECT", "TASK SET", "STATUS", "WORKTREE", ""}
+	return setkind.TaskSetColumns()
 }
 
 // dashboardColumnWidths precomputes each column's natural width over the full row

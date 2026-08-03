@@ -50,6 +50,7 @@ func (k *itemVerbKind) Perform(c work.Container, item *work.Item, verb work.Verb
 	return work.Outcome{}, work.UnknownVerb(k.ID(), verb)
 }
 func (k *itemVerbKind) Summary([]work.Container) []string { return nil }
+func (k *itemVerbKind) Columns() []string                 { return nil }
 
 func genericDetailRow() DashboardRow {
 	return DashboardRow{

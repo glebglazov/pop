@@ -42,6 +42,7 @@ func (k *countingKind) Perform(work.Container, *work.Item, work.Verb) (work.Outc
 	return work.Outcome{}, nil
 }
 func (k *countingKind) Summary(containers []work.Container) []string { return nil }
+func (k *countingKind) Columns() []string                            { return nil }
 func (k *countingKind) ModelSkips() ([]work.ModelSkip, error)        { return k.skipped, nil }
 
 // TestActionMenuIsBuiltOnOpenFromTheKind pins the laziness the seam bought: the

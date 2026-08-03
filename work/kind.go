@@ -63,6 +63,14 @@ type Kind interface {
 	// already pluralised. The builder joins every kind's phrases with " · " in
 	// kind order.
 	Summary([]Container) []string
+	// Columns returns the column headers a page of this kind's containers reads
+	// under, in cell order. It belongs to the kind because the kind authors the
+	// cells: a dashboard page takes its header from its primary kind, and a
+	// non-primary kind on that page fills those same columns (a Map filling the
+	// Task-set ones is the standing example). Declaring headers surface-side would
+	// separate the header from the kind that fills it, and make a page for a
+	// future kind cost custom dashboard code.
+	Columns() []string
 }
 
 // SkipSource is the optional extension a kind implements when it carries
@@ -123,9 +131,11 @@ type Container struct {
 	// ── Repository-group coordinates ───────────────────────────────────────────
 	// Where the container's repository group is, resolved once per build and
 	// carried rather than re-derived: nothing downstream forks git to find them
-	// again, which is what keeps the build fork-free (ADR-0060). Every kind fills
-	// them — a container always belongs to a repository group — and the write
-	// verbs act on them.
+	// again, which is what keeps the build fork-free (ADR-0060). A registered kind
+	// always fills them — registration happens per repository group — and the
+	// write verbs act on them. A kind whose membership is *discovered* fills none:
+	// a Routine belongs to the directory it was created in, which may be no
+	// repository at all, so it carries a project label and leaves these blank.
 	DefPath, StatePath     string
 	RepoKey, RepoCommonDir string
 	// ProjectPath is the repository-group checkout the container was found
@@ -195,6 +205,36 @@ type Container struct {
 	// plain label (branch name, "[managed wt]", or "needs bind"). It is the
 	// style-selection fact the queue-side wrappers read (ADR-0143).
 	DestKind DestKind
+
+	// ── Routine cells ──────────────────────────────────────────────────────────
+	// The Routine page's columns, filled the way the Task-set cells above are:
+	// derived per build, none of them a persisted status, blank on a container of
+	// another kind.
+	//
+	// RoutineDirectory is the bound-directory cell — the canonical cwd stamped at
+	// the Routine's creation, or `(missing)` when that directory is gone. It is a
+	// display cell, never a path to act on: a Routine whose directory vanished
+	// carries an empty Checkout, so a shell or fire refuses instead of landing
+	// nowhere, and the Routine is still listed rather than pruned.
+	RoutineDirectory string
+	// RoutineSchedule is the rendered recurrence (`manual` for an unscheduled
+	// Routine and for every Project routine) and RoutineLastRun the last fire
+	// instant, `never` before the first.
+	RoutineSchedule, RoutineLastRun string
+	// RoutinePaused is the persisted pause bit — the one enable/disable state a
+	// Routine has, and a state a Project routine never carries.
+	RoutinePaused bool
+	// RoutineTier is the kind-local relevance tier stamped at load time: the
+	// checkout the reader stands in, another checkout of the same project, then
+	// everything else. `work` never interprets it — it is the Routine
+	// comparator's first key. Stamped rather than derived in Less because a
+	// comparator is pure over two containers and cannot consult a cwd.
+	RoutineTier int
+	// Badge is the marker glyph a kind prefixes the container's id cell with,
+	// empty for a container needing none. A Project routine's is the only one
+	// today: it is the same Work kind as an authored Routine and says so in a
+	// cell, rather than being a fourth kind for a display distinction.
+	Badge string
 }
 
 // Ref names the container independently of the kind that produced it.

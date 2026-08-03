@@ -20,10 +20,17 @@ const dashboardPollInterval = 2 * time.Second
 type DashboardRow struct {
 	ID        string
 	Directory string
-	Schedule  string
-	LastRun   string
-	Status    string
-	Paused    bool
+	// Schedule is the raw recurrence expression, not the rendered label: the
+	// schedule modal prefills from it, and an unscheduled Routine must open that
+	// modal empty rather than pre-filled with the word "manual".
+	Schedule string
+	LastRun  string
+	Status   string
+	Paused   bool
+	// Broken marks a Routine whose definition could not be read. Such a Routine is
+	// a row carrying BROKEN rather than a warning line beside the table — the cells
+	// its definition would have filled stay blank.
+	Broken bool
 	// LastReportPath is the absolute path of the routine's most recent run
 	// report. Empty when the routine has never fired or its latest run has
 	// no report (e.g. skipped).
@@ -42,12 +49,11 @@ type DashboardRow struct {
 	RunsDir string
 }
 
-// DashboardSnapshot is the data model for `pop routine dashboard`.
+// DashboardSnapshot is the data model for `pop routine dashboard`. There is no
+// warnings channel beside the rows: a Routine that will not load is a row of its
+// own carrying BROKEN, so nothing a reader must act on arrives out of band.
 type DashboardSnapshot struct {
 	Rows []DashboardRow
-	// Warnings names routines whose manifest could not be loaded; healthy
-	// rows still render.
-	Warnings []string
 }
 
 // BuildDashboard derives Routine dashboard rows from on-disk routine artifacts
@@ -56,7 +62,11 @@ func BuildDashboard(d *Deps) (DashboardSnapshot, error) {
 	return BuildDashboardWith(d)
 }
 
-// BuildDashboardWith is the injectable BuildDashboard entry point.
+// BuildDashboardWith is the injectable BuildDashboard entry point. The rows are a
+// projection of the one Routine derivation the Work kind loads from, so the table
+// and the Work container can never disagree about a Routine's status, last run or
+// bound directory. Project routines are discovered live from the current checkout
+// and appended to the authored rows, as they have always been (ADR-0138).
 func BuildDashboardWith(d *Deps) (DashboardSnapshot, error) {
 	if d == nil {
 		d = DefaultDeps()
@@ -64,80 +74,35 @@ func BuildDashboardWith(d *Deps) (DashboardSnapshot, error) {
 	if _, err := ReconcileRunsWith(d); err != nil {
 		return DashboardSnapshot{}, err
 	}
-	routines, warnings, err := ListRoutines(d)
+	root, _ := checkoutRoot(d)
+	entries, _, err := loadRoutineEntries(d, root)
 	if err != nil {
 		return DashboardSnapshot{}, err
 	}
-	s, _, err := openExecutionStoreIfExists(d)
-	if err != nil {
-		return DashboardSnapshot{}, err
+	rows := make([]DashboardRow, 0, len(entries))
+	for _, e := range entries {
+		rows = append(rows, dashboardRowFor(e))
 	}
+	return DashboardSnapshot{Rows: rows}, nil
+}
 
-	rows := make([]DashboardRow, 0, len(routines))
-	for _, r := range routines {
-		row := DashboardRow{
-			ID:        r.ID,
-			Directory: r.Manifest.BoundDirectory,
-			Schedule:  r.Manifest.Schedule,
-			Paused:    r.Manifest.Paused,
-			StoreID:   r.ID,
-			RunsDir:   filepath.Join(routineDir(d, r.ID), runsDirName),
-		}
-		if s != nil {
-			last, err := LastFireTime(s, r.ID)
-			if err != nil {
-				return DashboardSnapshot{}, err
-			}
-			row.LastRun = formatLastRun(last)
-			row.Status, row.LastReportPath = dashboardStatusFor(d, s, r.ID, r.Manifest)
-		} else {
-			row.LastRun = "never"
-			row.Status = dashboardIdleStatus(r.Manifest, "")
-		}
-		rows = append(rows, row)
+// dashboardRowFor projects one derived Routine onto a table row. A broken Routine
+// keeps its id and its BROKEN status and nothing else: every remaining cell is a
+// fact its definition would have carried.
+func dashboardRowFor(e routineEntry) DashboardRow {
+	return DashboardRow{
+		ID:             e.id,
+		Directory:      e.directory,
+		Schedule:       e.schedule,
+		LastRun:        e.lastRun,
+		Status:         e.status,
+		Paused:         e.paused,
+		Broken:         e.loadErr != nil,
+		LastReportPath: e.lastReportPath,
+		Project:        e.projectRoutine,
+		StoreID:        e.storeID,
+		RunsDir:        e.runsDir,
 	}
-
-	// Project routines are discovered live from the current checkout and appended
-	// to the authored rows (ADR-0138): distinct-styled, badged, manual-only, with
-	// per-checkout run state. Outside a checkout this is empty, so the dashboard
-	// is byte-for-byte the authored-only one.
-	projectRoutines, projectWarnings := DiscoverProjectRoutines(d)
-	for _, pr := range projectRoutines {
-		key := checkoutKey(pr.Dir)
-		storeID := projectStoreID(key, pr.Name)
-		row := DashboardRow{
-			ID:        ProjectOrigin + pr.Name,
-			Directory: pr.Dir,
-			// A Project routine carries no schedule; SCHEDULE reads `manual`.
-			Schedule: "",
-			Project:  true,
-			StoreID:  storeID,
-			RunsDir:  filepath.Join(projectRoutineDataDir(d, key, pr.Name), runsDirName),
-		}
-		if s != nil {
-			last, err := LastFireTime(s, storeID)
-			if err != nil {
-				return DashboardSnapshot{}, err
-			}
-			row.LastRun = formatLastRun(last)
-			// Project routines have no pause state, so status derives from an empty
-			// manifest — never `paused`, only running / ok / failed / idle.
-			row.Status, row.LastReportPath = dashboardStatusFor(d, s, storeID, Manifest{})
-		} else {
-			row.LastRun = "never"
-			row.Status = dashboardIdleStatus(Manifest{}, "")
-		}
-		rows = append(rows, row)
-	}
-
-	snap := DashboardSnapshot{Rows: rows}
-	for _, w := range warnings {
-		snap.Warnings = append(snap.Warnings, fmt.Sprintf("routine %s: %v", w.ID, w.Err))
-	}
-	for _, w := range projectWarnings {
-		snap.Warnings = append(snap.Warnings, fmt.Sprintf("routine %s: %v", w.ID, w.Err))
-	}
-	return snap, nil
 }
 
 func formatLastRun(t time.Time) string {
@@ -442,8 +407,11 @@ var dashboardColShrinkOrder = []int{
 	dashboardColStatus,
 }
 
+// dashboardTableHeaders is the table's header row, taken from the Routine kind's
+// declared columns rather than restated here: the kind authors these cells, so it
+// is the one place their names belong.
 func dashboardTableHeaders() []string {
-	return []string{"ROUTINE", "DIRECTORY", "SCHEDULE", "LAST RUN", "STATUS"}
+	return routineColumns()
 }
 
 func dashboardColumnWidths(rows []DashboardRow) []int {
@@ -1574,7 +1542,6 @@ func (m RoutineDashboard) frameSpec() ui.Frame {
 	if m.err != nil {
 		warnings = append(warnings, fmt.Sprintf("refresh error: %v", m.err))
 	}
-	warnings = append(warnings, m.snap.Warnings...)
 	return ui.Frame{
 		Width:    m.width,
 		TermH:    m.height,
@@ -1768,7 +1735,7 @@ func dashboardRowValues(row DashboardRow) []string {
 	return []string{
 		dashboardRoutineCellStyled(row),
 		row.Directory,
-		ScheduleLabel(row.Schedule),
+		dashboardScheduleCell(row),
 		row.LastRun,
 		dashboardStatusStyled(row.Status),
 	}
@@ -1778,10 +1745,20 @@ func dashboardRowNaturalValues(row DashboardRow) []string {
 	return []string{
 		dashboardRoutineCellPlain(row),
 		row.Directory,
-		ScheduleLabel(row.Schedule),
+		dashboardScheduleCell(row),
 		row.LastRun,
 		row.Status,
 	}
+}
+
+// dashboardScheduleCell renders the SCHEDULE cell: the recurrence label, or blank
+// for a Routine whose definition would not load — reading "manual" off a schedule
+// nobody could parse would state a fact pop does not have.
+func dashboardScheduleCell(row DashboardRow) string {
+	if row.Broken {
+		return ""
+	}
+	return ScheduleLabel(row.Schedule)
 }
 
 // projectRoutineBadge prefixes a Project routine's ROUTINE cell so it reads as

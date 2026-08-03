@@ -106,7 +106,7 @@ func routineTickDeps(t *testing.T, now time.Time) (*Deps, *routine.Deps, string)
 // loop.
 func routineTick(t *testing.T, qd *Deps, out io.Writer) {
 	t.Helper()
-	adv := qd.routineAdvancer()
+	adv := qd.routineAdvancer(nil)
 	_ = adv.Reconcile()
 	candidates, err := adv.Candidates()
 	if err != nil {
@@ -124,7 +124,7 @@ func routineTick(t *testing.T, qd *Deps, out io.Writer) {
 
 func routineCandidates(t *testing.T, qd *Deps) []work.Candidate {
 	t.Helper()
-	candidates, err := qd.routineAdvancer().Candidates()
+	candidates, err := qd.routineAdvancer(nil).Candidates()
 	if err != nil {
 		t.Fatalf("Candidates: %v", err)
 	}
@@ -752,7 +752,7 @@ func TestRoutineCandidatesWriteNothingAndDispatchDoes(t *testing.T) {
 	_ = s.Close()
 
 	dataDir := filepath.Dir(tasks.DrainStorePathWith(qd.Tasks))
-	adv := qd.routineAdvancer()
+	adv := qd.routineAdvancer(nil)
 	// Settle the data dir: the first read opens the store and creates its sidecar
 	// files, which is a one-off rather than a write the read performs.
 	if _, err := adv.Candidates(); err != nil {

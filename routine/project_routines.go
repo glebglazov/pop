@@ -53,6 +53,13 @@ func DiscoverProjectRoutines(d *Deps) ([]ProjectRoutine, []RoutineWarning) {
 	if !ok {
 		return nil, nil
 	}
+	return DiscoverProjectRoutinesIn(d, root)
+}
+
+// DiscoverProjectRoutinesIn reads one named checkout's `.pop/routines/*.md`. It is
+// the form a caller with the checkout already in hand uses: the Work kind is wired
+// with the reader's checkout, so it never forks git to re-derive one.
+func DiscoverProjectRoutinesIn(d *Deps, root string) ([]ProjectRoutine, []RoutineWarning) {
 	dir := filepath.Join(root, ".pop", projectRoutinesDirName)
 	entries, err := d.FS.ReadDir(dir)
 	if err != nil {

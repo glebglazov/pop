@@ -151,6 +151,22 @@ func (k *Kind) StatusCell(c work.Container) []work.StatusSegment {
 	return tasks.WorkRowStatusSegments(c)
 }
 
+// Columns are the Task-set page's column headers. They are the Work dashboard's
+// long-standing five — the trailing one deliberately unlabelled, since the
+// per-activity glyph cluster under it has no name a header could carry. A page
+// whose primary kind is this one reads under them, and a Map on that page fills
+// the same cells.
+func (k *Kind) Columns() []string {
+	return TaskSetColumns()
+}
+
+// TaskSetColumns is the Task-set column header row, exported because a kind that
+// fills these cells rather than its own must head its page with the identical
+// list — a copy in the other kind would be a second source of one header.
+func TaskSetColumns() []string {
+	return []string{"PROJECT", "TASK SET", "STATUS", "WORKTREE", ""}
+}
+
 // ModelSkips reports the Effort model skips in force (ADR-0168). They are
 // machine-global rather than per-container, which is why the kind reports them
 // through the snapshot's footnote extension rather than as a container field: the

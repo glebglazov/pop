@@ -113,6 +113,15 @@ func (k *MapKind) Summary(containers []work.Container) []string {
 	return []string{work.CountPhrase(len(containers), "map", "maps")}
 }
 
+// Columns are the headers a page of Maps reads under. They are the Task-set
+// column headers verbatim, because a Map row fills the Task-set cells rather than
+// a set of its own — repeated here rather than imported from the Task-set kind,
+// since one kind importing another to borrow five strings is a worse coupling
+// than the conformance test that pins the two lists equal.
+func (k *MapKind) Columns() []string {
+	return []string{"PROJECT", "TASK SET", "STATUS", "WORKTREE", ""}
+}
+
 // Actions returns the container-level verbs for a Map: work its frontier when it
 // has one, a shell in the repository, and copy-name. The Task-set verbs
 // (drain/bind/…) have never applied to a Map and still do not — the shared two

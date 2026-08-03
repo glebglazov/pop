@@ -114,12 +114,12 @@ func tick(d *Deps, out io.Writer, runOut *runOutputState) {
 }
 
 // advancers is the supervisor's list: the advanceable kinds of the read-surface
-// wiring list, then the Routine adapter, which is not on that list because it
-// wears the advance seam and not yet the read one. Appending is
-// precedence-correct — routine is last in the closed enum — and the special case
-// dies the moment a Routine becomes a Work kind the dashboard shows.
+// wiring list, then the Routine adapter, which wears both seams but is not on that
+// list yet — the Routine dashboard page it belongs to arrives next. Appending is
+// precedence-correct, routine being last in the closed enum, and the special case
+// dies the moment the read list carries it.
 func (d *Deps) advancers(cfg *config.Config) []work.Advancer {
-	return append(work.Advancers(d.WorkKinds(cfg)), d.routineAdvancer())
+	return append(work.Advancers(d.WorkKinds(cfg)), d.routineAdvancer(cfg))
 }
 
 // kindPass is one kind's half of a supervisor tick: the advancer, the kind it

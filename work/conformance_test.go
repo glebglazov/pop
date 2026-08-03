@@ -10,11 +10,14 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/repogroup"
+	"github.com/glebglazov/pop/routine"
+	"github.com/glebglazov/pop/store"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/setkind"
 	"github.com/glebglazov/pop/wayfinder"
@@ -97,6 +100,28 @@ func conformanceCases() []conformanceCase {
 			wantActions:     []work.Verb{wayfinder.VerbWork, work.VerbShell, work.VerbCopyName},
 			wantItemActions: []work.Verb{wayfinder.VerbWork, work.VerbCopyName},
 			wantSummary:     []string{"1 map"},
+		},
+		{
+			name:      "routine",
+			id:        ref.KindRoutine,
+			container: "demo",
+			// A Routine's Work items are its runs; the fixture holds one.
+			items: 1,
+			kind: func(t *testing.T, f fixture) work.Kind {
+				return routine.NewKind(&routine.KindDeps{
+					Routine: &routine.Deps{FS: f.fs, Tasks: f.tasks, Project: f.project},
+					// The reader's location, wired the way `cmd` wires it: the kind stamps
+					// relevance tiers from it at load time and never consults a cwd itself.
+					Checkout: "/repo/main",
+					Project:  "pop",
+					Checkouts: func() ([]project.ExpandedProject, error) {
+						return []project.ExpandedProject{{Name: "pop", ProjectLabel: "pop", Path: "/repo/main"}}, nil
+					},
+				})
+			},
+			wantActions:     []work.Verb{work.VerbShell, work.VerbCopyName},
+			wantItemActions: []work.Verb{work.VerbCopyName},
+			wantSummary:     []string{"1 routine", "1 here"},
 		},
 	}
 }
@@ -296,10 +321,14 @@ func newFixture(t *testing.T) fixture {
 	t.Setenv("XDG_DATA_HOME", dataHome)
 	storageDir := "/data/repos/repo-aaaa"
 	mapDir := filepath.Join(storageDir, "maps", "2026-07-01-chart")
+	routineDir := filepath.Join(dataHome, "pop", "routines", "demo")
 	files := map[string]string{
 		filepath.Join(mapDir, "map.md"):                       "Status: active\n\n## Destination\nChart it\n",
 		filepath.Join(mapDir, "issues", "01-first.md"):        "Type: grilling\nStatus: open\n\n# Q\n",
 		filepath.Join(storageDir, "tasks", "definition.json"): "{}\n",
+		// One authored Routine, bound to the checkout the reader stands in.
+		filepath.Join(routineDir, "state.json"): `{"bound_directory":"/repo/main","paused":false,"created_at":"2026-07-01T00:00:00Z"}`,
+		filepath.Join(routineDir, "prompt.md"):  "---\nschedule: every 6h\n---\n\nDo the thing\n",
 	}
 	fs := &deps.MockFileSystem{
 		GetwdFunc:       func() (string, error) { return "/repo/main", nil },
@@ -311,7 +340,14 @@ func newFixture(t *testing.T) fixture {
 			return ""
 		},
 		EvalSymlinksFunc: func(p string) (string, error) { return p, nil },
-		StatFunc:         func(string) (os.FileInfo, error) { return nil, os.ErrNotExist },
+		// The group's checkout exists; nothing else on this filesystem does. The
+		// Routine kind stats a bound directory to decide whether it is still there.
+		StatFunc: func(path string) (os.FileInfo, error) {
+			if path == "/repo/main" {
+				return deps.MockFileInfo{NameVal: "main", IsDirVal: true}, nil
+			}
+			return nil, os.ErrNotExist
+		},
 		ReadDirFunc: func(path string) ([]os.DirEntry, error) {
 			entries := dirEntriesFor(path, files)
 			if entries == nil {
@@ -328,6 +364,19 @@ func newFixture(t *testing.T) fixture {
 	}
 	td := &tasks.Deps{FS: fs}
 	t.Cleanup(func() { _ = td.CloseStore() })
+	// One run for the fixture's Routine: its Work items are its run history, and a
+	// skipped run needs no live process to stand for one.
+	s, _, err := td.Store(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.InsertSkippedRoutineRun(store.RoutineRun{
+		RoutineID:  "demo",
+		FiredAt:    time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC),
+		SkipReason: "overlap",
+	}); err != nil {
+		t.Fatal(err)
+	}
 	tasksDir := filepath.Join(storageDir, "tasks")
 	return fixture{
 		fs:      fs,

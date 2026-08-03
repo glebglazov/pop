@@ -334,6 +334,7 @@ func (k *recordingAdvancer) Perform(work.Container, *work.Item, work.Verb) (work
 	return work.Outcome{}, nil
 }
 func (k *recordingAdvancer) Summary([]work.Container) []string { return nil }
+func (k *recordingAdvancer) Columns() []string                 { return nil }
 
 func (k *recordingAdvancer) Reconcile() error {
 	k.record("reconcile")

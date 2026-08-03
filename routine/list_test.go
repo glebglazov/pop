@@ -130,7 +130,7 @@ func TestListWithPrintsHealthyAndWarns(t *testing.T) {
 	}
 }
 
-func TestBuildDashboardWarnsBrokenManifest(t *testing.T) {
+func TestBuildDashboardListsBrokenManifestAsRow(t *testing.T) {
 	root := t.TempDir()
 	dataHome := filepath.Join(root, "data")
 	home := filepath.Join(root, "home")
@@ -149,10 +149,23 @@ func TestBuildDashboardWarnsBrokenManifest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildDashboardWith: %v", err)
 	}
-	if len(snap.Rows) != 1 || snap.Rows[0].ID != "alpha" {
-		t.Fatalf("rows = %v, want just alpha", snap.Rows)
+	// The unreadable Routine is a row of its own carrying BROKEN — there is no
+	// warnings channel beside the table for it to arrive on.
+	if len(snap.Rows) != 2 || snap.Rows[0].ID != "alpha" || snap.Rows[1].ID != "broken" {
+		t.Fatalf("rows = %v, want alpha then broken", snap.Rows)
 	}
-	if len(snap.Warnings) != 1 || !strings.Contains(snap.Warnings[0], "broken") {
-		t.Fatalf("warnings = %v, want one naming broken", snap.Warnings)
+	if snap.Rows[0].Broken || snap.Rows[0].Status == BrokenStatus {
+		t.Fatalf("healthy row reads as broken: %+v", snap.Rows[0])
+	}
+	broken := snap.Rows[1]
+	if !broken.Broken || broken.Status != BrokenStatus {
+		t.Fatalf("broken row = %+v, want Broken with a %s status", broken, BrokenStatus)
+	}
+	// Every cell its definition would have filled stays blank rather than guessing.
+	if broken.Directory != "" || broken.Schedule != "" || broken.LastRun != "" {
+		t.Fatalf("broken row invented cells: %+v", broken)
+	}
+	if cell := dashboardScheduleCell(broken); cell != "" {
+		t.Fatalf("broken schedule cell = %q, want blank", cell)
 	}
 }
