@@ -6,7 +6,7 @@ import "github.com/glebglazov/pop/store"
 // (CONTEXT.md): it layers a set's Verify verdicts onto its manifest-derived
 // status and reports the ADR-0096 immunization SHA to surface. Every surface
 // that gates status on a verdict — `pop tasks status`, the Work dashboard,
-// `pop queue status`/daemon scan, and the pre-approval Drain phase — routes
+// `pop work status`/daemon scan, and the pre-approval Drain phase — routes
 // through here, so the gate rule and the immunization-SHA surfacing live in one
 // place.
 //

@@ -48,7 +48,7 @@ output = "auto"
 [tasks.git]
 # Commit-time git config applied only to pop's own commits during a task drain.
 # Each entry is a git `-c`-style `key=value` pair. Disable GPG signing so an
-# unattended `pop queue` drain never blocks on a 1Password presence prompt:
+# unattended `pop work daemon` drain never blocks on a 1Password presence prompt:
 commit_config_overrides = ["commit.gpgsign=false"]
 ```
 

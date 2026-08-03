@@ -20,7 +20,15 @@ The Work dashboard is the unified hands-on surface for ongoing work across
 registered projects, in two pages toggled with v: task sets and maps, and
 routines. show-path resolves this repository's Task-storage root — the
 directory holding repo.json, tasks/, and maps/ — for humans and planning
-skills alike.`,
+skills alike.
+
+pop work daemon starts a foreground supervisor that, every poll interval, asks
+every advanceable Work kind what it can advance and dispatches it: a drain (pop
+tasks implement <set>) for each idle project with a Ready task set, a fire for
+each due routine. Execution is concurrent across projects and serial within
+each (enforced by the runtime execution lock). Ctrl-C stops the supervisor;
+in-flight drains keep running in their panes. status reports what the daemon
+can advance — task sets, then routines — and log replays what it did.`,
 }
 
 var workShowPathCmd = &cobra.Command{
@@ -74,7 +82,7 @@ func runWorkDashboard(cmd *cobra.Command, args []string) error {
 	d := cmdLayerDeps().queueDeps()
 	d.LoadConfig = queueConfigLoad
 	d.IncludeDone = workDashboardIncludeDone
-	checkout, err := queueRunDashboard(d, cfg)
+	checkout, err := workRunDashboard(d, cfg)
 	if err != nil {
 		return err
 	}

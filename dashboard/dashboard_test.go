@@ -92,7 +92,7 @@ func dashboardTestDeps(t *testing.T, rows []tasks.Row, locks map[string]*tasks.R
 	}
 }
 
-// TestRenderStatusMirrorsDashboardRows proves `pop queue status` renders the
+// TestRenderStatusMirrorsDashboardRows proves `pop work status` renders the
 // same rows in the same order as the Work dashboard (ADR-0121): both consume the
 // one comparator (tasks.SortWorkRows / sortDashboardRows) over the one row set, so the
 // static status table's TASK SET order equals the sorted dashboard rows' order,
@@ -115,7 +115,7 @@ func TestRenderStatusMirrorsDashboardRows(t *testing.T) {
 	}
 
 	var out strings.Builder
-	RenderStatus(&out, (&drain.Deps{}).WorkKinds(nil), drain.StatusSnapshot{Tasks: td}, got)
+	RenderStatus(&out, drain.StatusSnapshot{Tasks: td}, StatusTables{TaskSets: StatusTable{Kinds: (&drain.Deps{}).WorkKinds(nil), Rows: got}})
 	text := out.String()
 
 	if !strings.Contains(text, "Summary:") {
@@ -166,7 +166,7 @@ func TestRenderStatusTableColumnsAndIndicator(t *testing.T) {
 	sortDashboardRows(rows)
 
 	var out strings.Builder
-	RenderStatus(&out, (&drain.Deps{}).WorkKinds(nil), drain.StatusSnapshot{Tasks: td}, rows)
+	RenderStatus(&out, drain.StatusSnapshot{Tasks: td}, StatusTables{TaskSets: StatusTable{Kinds: (&drain.Deps{}).WorkKinds(nil), Rows: rows}})
 	text := out.String()
 
 	for _, want := range []string{

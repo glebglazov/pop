@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/internal/queuetest"
+	"github.com/glebglazov/pop/routine"
 	"github.com/glebglazov/pop/store"
 )
 
@@ -50,6 +51,59 @@ func TestBuildLogFromStore(t *testing.T) {
 		"set-1 quota_paused agent=codex",
 		"set-1 unparked",
 		"set-2 integrated base=main",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("log output missing %q:\n%s", want, text)
+		}
+	}
+}
+
+// TestBuildLogCarriesRoutineFiresAndSkips pins the one-journal property: every
+// Routine decision the daemon made reaches `pop work log` beside the Drain
+// events — a fire and its outcome, an overlap skip, and the skip a
+// run-affecting-fingerprint drift pause stands for — each carrying the reason it
+// was recorded with.
+func TestBuildLogCarriesRoutineFiresAndSkips(t *testing.T) {
+	td := queuetest.DataDeps(t)
+	s, _, err := td.Store(true)
+	if err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	fired := time.Now().Add(-time.Hour).UTC()
+
+	run, err := s.StartRoutineRun(store.RoutineRun{RoutineID: "nightly", FiredAt: fired}, nil)
+	if err != nil {
+		t.Fatalf("StartRoutineRun: %v", err)
+	}
+	if err := s.FinishRoutineRun(run.ID, store.RoutineRunFailed, "", "agent exited 1", fired.Add(time.Minute)); err != nil {
+		t.Fatalf("FinishRoutineRun: %v", err)
+	}
+	for _, skip := range []struct {
+		id     string
+		reason string
+	}{
+		{"busy", routine.SkipReasonOverlap},
+		{"drifted", routine.SkipReasonChanged},
+	} {
+		if _, err := s.InsertSkippedRoutineRun(store.RoutineRun{
+			RoutineID: skip.id, FiredAt: fired, SkipReason: skip.reason,
+		}); err != nil {
+			t.Fatalf("InsertSkippedRoutineRun(%s): %v", skip.id, err)
+		}
+	}
+
+	events, err := BuildLog(td)
+	if err != nil {
+		t.Fatalf("BuildLog: %v", err)
+	}
+	var out bytes.Buffer
+	RenderLog(&out, events, 50)
+	text := out.String()
+	for _, want := range []string{
+		"nightly fired",
+		"nightly failed agent exited 1",
+		"busy skipped " + routine.SkipReasonOverlap,
+		"drifted skipped " + routine.SkipReasonChanged,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("log output missing %q:\n%s", want, text)

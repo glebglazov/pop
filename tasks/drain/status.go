@@ -54,7 +54,7 @@ type SkippedRepo struct {
 	Reason    string
 }
 
-// StatusSnapshot is the pure data model for `pop queue status`.
+// StatusSnapshot is the pure data model for `pop work status`.
 type StatusSnapshot struct {
 	PickedUp             []PickedUpSet
 	Idle                 []IdleProject

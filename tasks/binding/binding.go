@@ -3,7 +3,7 @@
 // in. Bindings used to live in Queue daemon-private state (ADR-0031); ADR-0036
 // moved them into a shared per-repository binding store, and ADR-0055 folds that
 // store into pop's global execution-state database (the `bindings` table) so
-// that both `pop queue run` (the AFK provisioner) and `pop tasks implement`
+// that both `pop work daemon` (the AFK provisioner) and `pop tasks implement`
 // (the attended adopter) can read and write the same association without a
 // daemon process running. This module wraps the store-backed accessors in its
 // own Store/Binding façade, so its callers are unchanged by the move off the
@@ -49,7 +49,7 @@ func ScopedKey(repoKey, setID string) string {
 
 // Key builds the store key for one (Repository identity, Task set identifier)
 // pair. It is the single key shape every caller of the store addresses, so
-// `pop queue run` and `pop tasks implement` resolve the same binding for the
+// `pop work daemon` and `pop tasks implement` resolve the same binding for the
 // same (repo, set).
 func Key(id *tasks.RepositoryIdentity, setID string) string {
 	return ScopedKey(RepoKey(id), setID)

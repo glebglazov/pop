@@ -345,7 +345,7 @@ func TestImplementRunInterruptGateYesKeepsLockHeld(t *testing.T) {
 // TestImplementRunInterruptClearsAutoDrainOnExit: interrupting a live drain whose
 // set has Auto-drain on clears the consent bit at interrupt time — announced and
 // left as a durable AUTO-DRAIN-CLEARED per-set trace — and choosing Exit leaves it
-// cleared (ADR-0120). With the bit off, `pop queue run`'s `Ready && AutoDrain`
+// cleared (ADR-0120). With the bit off, `pop work daemon`'s `Ready && AutoDrain`
 // predicate no longer selects the set.
 func TestImplementRunInterruptClearsAutoDrainOnExit(t *testing.T) {
 	var buf bytes.Buffer
@@ -450,7 +450,7 @@ func TestImplementRunInterruptContinueLeavesOffBitOff(t *testing.T) {
 
 // TestImplementRunInterruptClearsAutoDrainUnattended: an unattended (--yes)
 // interrupt still clears Auto-drain — the clear runs ahead of the prompt guard, so
-// a manually interrupted daemon drain stops `pop queue run` from re-firing the set
+// a manually interrupted daemon drain stops `pop work daemon` from re-firing the set
 // even though no gate menu is shown (ADR-0120).
 func TestImplementRunInterruptClearsAutoDrainUnattended(t *testing.T) {
 	var buf bytes.Buffer

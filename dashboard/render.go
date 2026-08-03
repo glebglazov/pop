@@ -5,7 +5,6 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/glebglazov/pop/tasks"
-	"github.com/glebglazov/pop/tasks/setkind"
 	"github.com/glebglazov/pop/ui"
 	"github.com/glebglazov/pop/work"
 )
@@ -13,7 +12,7 @@ import (
 // The Work dashboard's data core is pure and carries no lipgloss (ADR-0143):
 // styled cell wrappers, the lipgloss style maps, column-width/layout math, and
 // table-line/header rendering stay queue-side as one render-shared layer. Both
-// the static `pop queue status` render (status.go) and the TUI model
+// the static `pop work status` render (status.go) and the TUI model
 // (dashboard.go) key on this file so the boundary reads as designed rather
 // than as leftovers.
 
@@ -191,16 +190,6 @@ var dashboardColShrinkOrder = []int{
 	dashboardColStatus,
 	dashboardColSetID,
 	dashboardColProject,
-}
-
-// dashboardTableHeaders is the Task-set columns as the static `pop queue status`
-// table prints them, taken from the Task-set **Work kind** rather than restated
-// here: the kind authors these cells, and a Map row on the same page fills them.
-// The trailing column is the per-activity cluster: an empty header over the IVFS
-// keys, so no label sits above the glyphs. The TUI asks the wired kind instead —
-// see dashboardPage.headers.
-func dashboardTableHeaders() []string {
-	return setkind.TaskSetColumns()
 }
 
 func dashboardTableLineWidth(widths []int) int {

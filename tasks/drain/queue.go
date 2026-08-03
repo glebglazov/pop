@@ -6,7 +6,7 @@
 // project, it only ensures at most one drain per idle project.
 //
 // queue also hosts the Work dashboard's TUI (dashboard.go) and its static
-// `pop queue status` render (status.go); both consume the top-level work
+// `pop work status` render (status.go); both consume the top-level work
 // package, the Work seam its rows are projected from (ADR-0143, ADR-0173). queue owns the styled
 // wrappers, style maps, and column/layout math the work package's rows are
 // rendered through (render.go) — the render-shared layer between the two
@@ -47,7 +47,7 @@ type Deps struct {
 
 	// IncludeDone is the Done-inclusion view flag (ADR-0121): the single
 	// inclusion state that threads through the shared row layer both Queue read
-	// surfaces (`pop queue status` and `pop work dashboard`) consume. Default
+	// surfaces (`pop work status` and `pop work dashboard`) consume. Default
 	// false hides every DONE Task set — including a DONE set that still holds a
 	// managed Worktree binding (the old teardown-reminder carve-out is retired).
 	// `--include-done` on either command sets it true; the dashboard's `f` filter
@@ -110,7 +110,7 @@ type Deps struct {
 	Kinds func(cfg *config.Config) []work.Kind
 	// RoutineKinds is the same override for the dashboard's Routine page
 	// (RoutinePageKinds). The two pages have separate wiring lists because they are
-	// separate pages: the supervisor and `pop queue status` read Kinds, and neither
+	// separate pages: the supervisor and `pop work status` read Kinds, and neither
 	// wants a Routine folded into it.
 	RoutineKinds func(cfg *config.Config) []work.Kind
 }
@@ -413,7 +413,7 @@ func (d *Deps) now() time.Time {
 // checkout.
 //
 // It is a pure read: no tmux side effects, and no crash-detection pass either —
-// reconciliation is the supervisor's explicit phase, so `pop queue status` and
+// reconciliation is the supervisor's explicit phase, so `pop work status` and
 // the dashboard no longer mutate state to render.
 func Scan(d *Deps, cfg *config.Config) ([]Decision, error) {
 	projects, err := tasks.ListPickerProjectsWith(d.Project, cfg)

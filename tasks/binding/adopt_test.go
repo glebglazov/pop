@@ -194,7 +194,7 @@ func TestAdoptCurrentCheckoutDoesNotClobberManagedBinding(t *testing.T) {
 	}
 	key := Key(id, "set-a")
 
-	// Pre-seed a managed binding, as `pop queue run` would after provisioning.
+	// Pre-seed a managed binding, as `pop work daemon` would after provisioning.
 	if err := Put(td, key, Binding{RuntimePath: wt, Branch: "feature", Provisioned: true}); err != nil {
 		t.Fatalf("seed store: %v", err)
 	}

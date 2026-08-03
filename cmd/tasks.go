@@ -554,7 +554,7 @@ func runTaskStatusWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 
 	// Binding-first per-set resolution (ADR-0146) feeds the SHA-gated Verify
 	// verdict pass so a bound set derives status at its Worktree binding — the
-	// same checkout the Queue dashboard and `pop queue status` use — rather than
+	// same checkout the Queue dashboard and `pop work status` use — rather than
 	// the invoking cwd. Overview runtime-lock and checkout badges still describe
 	// the current checkout.
 	runtimePath, runtimeErr := tasks.ResolveRuntimePathWith(d, resolved.ProjectPath, taskRuntimePath)

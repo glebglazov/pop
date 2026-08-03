@@ -56,6 +56,10 @@ type dashboardPage struct {
 	// them is the render layer's business (ADR-0143).
 	styledCells func(workKinds, DashboardRow, livePaneCache) []string
 	plainCells  func(workKinds, DashboardRow) []string
+	// statusCells is the same projection for the static `pop work status` table,
+	// where no cell may carry ANSI at all — the TUI's plain cells still style the
+	// WORKTREE badge, because the TUI paints them.
+	statusCells func(workKinds, DashboardRow) []string
 	// shrinkOrder lists the elastic columns in the order they give way when the
 	// table overruns the terminal budget.
 	shrinkOrder []int
@@ -104,6 +108,7 @@ func workPage() dashboardPage {
 		},
 		styledCells:    dashboardRowValues,
 		plainCells:     dashboardRowNaturalValues,
+		statusCells:    statusRowValues,
 		shrinkOrder:    dashboardColShrinkOrder,
 		twoLineCapable: true,
 		rowFilters:     true,
@@ -127,6 +132,7 @@ func routinePage() dashboardPage {
 		},
 		styledCells:   routineRowValues,
 		plainCells:    routineRowNaturalValues,
+		statusCells:   routineRowNaturalValues,
 		shrinkOrder:   routineColShrinkOrder,
 		toggleWord:    "queue",
 		empty:         routine.EmptyListHint,
@@ -210,9 +216,19 @@ func (p dashboardPage) headers(kinds workKinds) []string {
 // columnWidths precomputes each column's natural width over the full row set,
 // floored at the header label width.
 func (p dashboardPage) columnWidths(kinds workKinds, rows []DashboardRow) []int {
+	return p.widthsOver(p.plainCells, kinds, rows)
+}
+
+// statusWidths is the same measurement over the cells the static status table
+// prints, so that surface is never sized by a projection it does not render.
+func (p dashboardPage) statusWidths(kinds workKinds, rows []DashboardRow) []int {
+	return p.widthsOver(p.statusCells, kinds, rows)
+}
+
+func (p dashboardPage) widthsOver(cells func(workKinds, DashboardRow) []string, kinds workKinds, rows []DashboardRow) []int {
 	widths := headerWidths(p.headers(kinds))
 	for _, row := range rows {
-		for i, v := range p.plainCells(kinds, row) {
+		for i, v := range cells(kinds, row) {
 			widths = growWidths(widths, i+1)
 			if n := lipgloss.Width(v); n > widths[i] {
 				widths[i] = n

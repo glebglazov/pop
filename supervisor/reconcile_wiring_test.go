@@ -15,7 +15,7 @@ import (
 )
 
 // TestReadPathsDoNotReconcile guards the move of the crash-detection pass off
-// every read: neither the scheduling scan (`pop queue status`) nor the Work
+// every read: neither the scheduling scan (`pop work status`) nor the Work
 // snapshot (the dashboard) heals anything, because healing is a write and both
 // are reads.
 func TestReadPathsDoNotReconcile(t *testing.T) {

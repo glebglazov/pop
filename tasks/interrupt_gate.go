@@ -193,7 +193,7 @@ func (r *implementRun) interruptGate(m *Manifest, interrupted *Task) (bool, erro
 	// set out of queue eligibility (Ready && AutoDrain) for the whole at-gate window,
 	// so a crash-at-gate cannot let the daemon grab the set mid-decision. This runs
 	// ahead of the prompt guard so an unattended (--yes / non-interactive) interrupt
-	// still stops `pop queue run` from re-firing the set. The snapshot it returns —
+	// still stops `pop work daemon` from re-firing the set. The snapshot it returns —
 	// the pre-interrupt value — is revived only when the human chooses Continue.
 	autoDrainWasOn, err := r.revokeAutoDrainOnInterrupt(m)
 	if err != nil {

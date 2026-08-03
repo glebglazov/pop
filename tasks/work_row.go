@@ -100,7 +100,7 @@ func statusOrder(s TaskSetStatus) int {
 }
 
 // WorkRowLess is the shared Queue surface comparator (ADR-0121), the single
-// source of the total order both `pop work dashboard` and `pop queue status`
+// source of the total order both `pop work dashboard` and `pop work status`
 // read. Rows float by membership tier (live-drain → auto-drain → orphaned), then
 // fall through to the status scheme: the IN PROGRESS and READY bands read
 // cross-project (Project asc, then ID desc), and every remaining status reads

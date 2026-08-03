@@ -137,7 +137,7 @@ func (k *Kind) Load() ([]work.Container, error) {
 
 // Less orders two task-set containers by the shared Queue surface comparator
 // (ADR-0121) over their row projections — the same total order `pop work
-// dashboard` and `pop queue status` have always read, ported wholesale rather
+// dashboard` and `pop work status` have always read, ported wholesale rather
 // than re-derived, so the seam's ordering is that comparator and not a second one.
 func (k *Kind) Less(a, b work.Container) bool {
 	return tasks.WorkRowLess(a, b)

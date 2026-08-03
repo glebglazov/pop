@@ -126,7 +126,7 @@ func TestTaskSetDeferralBecomesRefusalCandidate(t *testing.T) {
 }
 
 // TestReadSurfacesWriteNothing is the purity guard: neither Candidates nor the
-// two calls `pop queue status` makes may touch the machine's state. It snapshots
+// two calls `pop work status` makes may touch the machine's state. It snapshots
 // every file under the data dir across each call — and proves the snapshot can
 // see a write at all by making one.
 func TestReadSurfacesWriteNothing(t *testing.T) {
@@ -144,7 +144,7 @@ func TestReadSurfacesWriteNothing(t *testing.T) {
 
 	before := queuetest.DataDirSnapshot(t, dataDir)
 	statusReads(t, d, cfg)
-	queuetest.AssertSameSnapshot(t, "pop queue status", before, queuetest.DataDirSnapshot(t, dataDir))
+	queuetest.AssertSameSnapshot(t, "pop work status", before, queuetest.DataDirSnapshot(t, dataDir))
 
 	advancer := taskSetAdvancer(t, d, cfg)
 	before = queuetest.DataDirSnapshot(t, dataDir)
@@ -162,7 +162,7 @@ func TestReadSurfacesWriteNothing(t *testing.T) {
 	}
 }
 
-// statusReads performs exactly what `pop queue status` does: the scheduling
+// statusReads performs exactly what `pop work status` does: the scheduling
 // snapshot and the Work snapshot its table is rendered from.
 func statusReads(t *testing.T, d *Deps, cfg *config.Config) {
 	t.Helper()

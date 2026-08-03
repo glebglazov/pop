@@ -135,7 +135,7 @@ projects = [
 # notice_enabled = true
 
 # [queue]
-# Supervisor timing for `pop queue run`. Agent selection is configured under
+# Supervisor timing for `pop work daemon`. Agent selection is configured under
 # [tasks.implement].agents (see above), not in this section.
 # poll_interval = "60s"
 # agent_quota_retry_after = "1h"

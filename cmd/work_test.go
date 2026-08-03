@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -14,7 +16,13 @@ import (
 
 func TestWorkCommandTree(t *testing.T) {
 	t.Parallel()
-	for _, path := range [][]string{{"work", "show-path"}, {"work", "dashboard"}} {
+	for _, path := range [][]string{
+		{"work", "show-path"},
+		{"work", "dashboard"},
+		{"work", "daemon"},
+		{"work", "status"},
+		{"work", "log"},
+	} {
 		if _, _, err := rootCmd.Find(path); err != nil {
 			t.Fatalf("Find(%v): %v", path, err)
 		}
@@ -34,7 +42,7 @@ func TestWorkHelpDescribesCrossConceptSurface(t *testing.T) {
 		t.Fatal(err)
 	}
 	help := buf.String()
-	for _, want := range []string{"Cross-concept", "Work dashboard", "show-path", "tasks/", "maps/"} {
+	for _, want := range []string{"Cross-concept", "Work dashboard", "show-path", "tasks/", "maps/", "pop work daemon", "Ctrl-C"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("work help missing %q:\n%s", want, help)
 		}
@@ -141,36 +149,46 @@ func TestWorkDashboardUsesWorkHandler(t *testing.T) {
 	}
 }
 
-func TestQueueDashboardAliasIsHidden(t *testing.T) {
+// TestQueueCommandFamilyIsGone pins the hard cut: `pop queue` and every
+// subcommand it carried — including the hidden `dashboard` alias — are deleted
+// with no alias left behind, and the three verbs that survived live under `work`.
+func TestQueueCommandFamilyIsGone(t *testing.T) {
 	t.Parallel()
-	got, _, err := rootCmd.Find([]string{"queue", "dashboard"})
-	if err != nil {
-		t.Fatalf("Find([queue dashboard]): %v", err)
-	}
-	if got != queueDashboardCmd {
-		t.Fatalf("Find([queue dashboard]) = %q, want hidden alias", got.CommandPath())
-	}
-	if !queueDashboardCmd.Hidden {
-		t.Fatal("queue dashboard alias must stay hidden")
-	}
-
-	var out bytes.Buffer
-	queueCmd.SetOut(&out)
-	queueCmd.SetErr(&out)
-	t.Cleanup(func() {
-		queueCmd.SetOut(nil)
-		queueCmd.SetErr(nil)
-	})
-	if err := queueCmd.Help(); err != nil {
-		t.Fatal(err)
-	}
-	help := out.String()
-	if strings.Contains(help, "\n  dashboard ") {
-		t.Fatalf("queue help exposes hidden dashboard alias:\n%s", help)
-	}
-	for _, want := range []string{"run", "status", "log"} {
-		if !strings.Contains(help, "\n  "+want+" ") {
-			t.Fatalf("queue help missing %q subcommand:\n%s", want, help)
+	for _, path := range [][]string{
+		{"queue"},
+		{"queue", "run"},
+		{"queue", "status"},
+		{"queue", "log"},
+		{"queue", "dashboard"},
+	} {
+		got, _, _ := rootCmd.Find(path)
+		if strings.HasPrefix(got.CommandPath(), "pop queue") {
+			t.Fatalf("Find(%v) resolved to %q; pop queue is deleted, not aliased", path, got.CommandPath())
 		}
+	}
+	for _, c := range rootCmd.Commands() {
+		if c.Name() == "queue" || c.HasAlias("queue") {
+			t.Fatalf("root still carries a %q command", "queue")
+		}
+	}
+}
+
+// TestWorkSubcommandsAreTheWholeSurface pins the verb set: the two read surfaces
+// plus the three former Queue verbs, and no service-management verb — the daemon
+// is foreground and Ctrl-C is stop, so there is nothing to start, stop or install.
+func TestWorkSubcommandsAreTheWholeSurface(t *testing.T) {
+	t.Parallel()
+	var got []string
+	for _, c := range workCmd.Commands() {
+		got = append(got, c.Name())
+	}
+	sort.Strings(got)
+	want := []string{"dashboard", "daemon", "log", "show-path", "status"}
+	sort.Strings(want)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("pop work subcommands = %v, want %v", got, want)
+	}
+	if workDaemonCmd.Hidden {
+		t.Fatal("pop work daemon must not be hidden")
 	}
 }

@@ -53,7 +53,7 @@ func SupervisorLockPath(d *tasks.Deps) string {
 }
 
 // AcquireSupervisorLock acquires the single-instance supervisor lock. A second
-// `pop queue run` while one is already supervising is refused with an
+// `pop work daemon` while one is already supervising is refused with an
 // operational error naming the running PID; a stale lock (PID no longer alive)
 // is reclaimed, mirroring the runtime execution lock's self-healing.
 func AcquireSupervisorLock(d *tasks.Deps) (*SupervisorLock, error) {

@@ -17,7 +17,7 @@ import (
 // lock, then every poll interval scans every registered project and spawns a
 // drain into tmux for each idle project with a Ready set. It returns when a
 // signal arrives on sigCh (graceful shutdown) — in-flight drains are
-// tmux-owned panes and keep running. A second `pop queue run` while one holds
+// tmux-owned panes and keep running. A second `pop work daemon` while one holds
 // the lock is refused before the loop starts.
 func Run(d *drain.Deps, interval time.Duration, out io.Writer, sigCh <-chan os.Signal) error {
 	out, supervisorLog, err := supervisorOutput(d.Tasks, out)
