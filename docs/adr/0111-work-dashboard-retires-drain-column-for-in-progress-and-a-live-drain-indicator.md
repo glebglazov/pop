@@ -2,11 +2,11 @@
 status: accepted
 ---
 
-# Queue dashboard retires the DRAIN column; live drains surface as an IN-PROGRESS refinement plus a live-drain indicator
+# Work dashboard retires the DRAIN column; live drains surface as an IN-PROGRESS refinement plus a live-drain indicator
 
 ## Context
 
-The `pop queue dashboard` carried a dedicated DRAIN column holding four values — `picked up` (a live, PID-alive Runtime execution lock), `parked`, `config error: <msg>`, and blank. Separately, the STATUS column already refined a READY set to "IN PROGRESS" when it had ≥1 done task. This split two closely-related facts across two columns and let "IN PROGRESS" and "picked up" drift apart in the reader's head, while spending a whole column on state that is blank for most rows.
+The `pop work dashboard` carried a dedicated DRAIN column holding four values — `picked up` (a live, PID-alive Runtime execution lock), `parked`, `config error: <msg>`, and blank. Separately, the STATUS column already refined a READY set to "IN PROGRESS" when it had ≥1 done task. This split two closely-related facts across two columns and let "IN PROGRESS" and "picked up" drift apart in the reader's head, while spending a whole column on state that is blank for most rows.
 
 ## Decision
 

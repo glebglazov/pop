@@ -2,26 +2,26 @@
 status: accepted
 ---
 
-# Queue identity and integration target resolve from markers and config, not live git
+# Work-supervision identity and integration target resolve from markers and config, not live git
 
-> **Relates:** extends [ADR-0042](0042-queue-dashboard-scoped-to-task-storage.md) (dashboard discovery) and revisits its "the surviving projects take the existing git-resolution path unchanged" clause for both the dashboard and `Scan`.
+> **Relates:** extends [ADR-0042](0042-work-dashboard-scoped-to-task-storage.md) (dashboard discovery) and revisits its "the surviving projects take the existing git-resolution path unchanged" clause for both the dashboard and `Scan`.
 
 ## Context
 
-ADR-0042 scoped dashboard discovery to repositories with **Task storage** intersected with config, but the surviving repositories still took the original git-resolution path, and `Scan` (powering `pop queue status` and the daemon) still expanded the whole registered fleet with a `git rev-parse` per project.
+ADR-0042 scoped dashboard discovery to repositories with **Task storage** intersected with config, but the surviving repositories still took the original git-resolution path, and `Scan` (powering `pop work status` and the daemon) still expanded the whole registered fleet with a `git rev-parse` per project.
 
 Measured on the `~/Dev/*/*` config (158 projects, 4 with task storage):
 
-- `pop queue dashboard` cold build ≈ **470ms**, of which ≈ **350ms is git** in `resolveRepoStatic` (`rev-parse` per surviving candidate + `worktree list` per repo group), recomputed on every fresh launch (the cache is in-memory only). The per-tick overlay adds ≈110ms, dominated not by queries but by **reopening `pop.db` ~5× per row**: `bindingForSet` reloads the entire bindings table and is called three times per row; `mergeabilityForSet`/`readLock` reopen per row.
-- `pop queue status` ≈ **3.3s**, almost entirely `git rev-parse` × 158.
+- `pop work dashboard` cold build ≈ **470ms**, of which ≈ **350ms is git** in `resolveRepoStatic` (`rev-parse` per surviving candidate + `worktree list` per repo group), recomputed on every fresh launch (the cache is in-memory only). The per-tick overlay adds ≈110ms, dominated not by queries but by **reopening `pop.db` ~5× per row**: `bindingForSet` reloads the entire bindings table and is called three times per row; `mergeabilityForSet`/`readLock` reopen per row.
+- `pop work status` ≈ **3.3s**, almost entirely `git rev-parse` × 158.
 
 The waste is structural. A repository's identity (key, definition/state paths, basename, bare-ness) is fully derivable from its canonical git **common directory** — `identityFromCommonDir` is a sha256 plus path ops, no git — and the common directory is already persisted in each repo's `repo.json` marker. Forking `rev-parse` re-derives what is already on disk.
 
-The only thing that ever genuinely needed git was finding the **integration target** (where a set merges, and where the queue drains an unbound set headless) for a *bare* repository with no configured trunk — enumerating its worktrees. But the integration target is otherwise derivable with no git at all, and a bare repo without a configured trunk has no answer anyway. So once a bare repo is required to declare its trunk in config, **no case needs git for the static side**.
+The only thing that ever genuinely needed git was finding the **integration target** (where a set merges, and where the daemon drains an unbound set headless) for a *bare* repository with no configured trunk — enumerating its worktrees. But the integration target is otherwise derivable with no git at all, and a bare repo without a configured trunk has no answer anyway. So once a bare repo is required to declare its trunk in config, **no case needs git for the static side**.
 
 ## Decision
 
-The queue resolves its **static** coordinates from persisted markers and config, never from live git, on both read paths:
+**Work supervision** resolves its **static** coordinates from persisted markers and config, never from live git, on both read paths:
 
 1. **Identity & paths from the marker.** Repo key, definition path, state path, basename, and bare-ness derive from the marker's recorded common directory — no `rev-parse`. ADR-0042's candidate match already pairs each config project to its repo by fork-free path nesting; that pairing is carried through instead of re-resolved with git.
 2. **Integration target derived, not stored.** It is computed fork-free on every read: a **non-bare** repo's target is its main worktree, the **parent of the common directory** (`…/repo/.git` → `…/repo`); a **bare** repo's target is its **config trunk** (`[repo."…"] trunk = true`). No marker field, no staleness, no background refresher. A bare repo with no configured trunk surfaces a config-class error on its sets (ADR-0059's invariant), not a git fork.
@@ -41,7 +41,7 @@ Mergeability for Done sets keeps its SHA-gated git in reconcile (ADR-0051/0055) 
 ## Consequences
 
 - Synchronous dashboard build and `status` drop from ~470ms / ~3.3s toward a file read plus one DB pass; git becomes a background-only, SHA-gated cost (mergeability) for repos with task storage.
-- **Bare repos must declare `trunk` in config** to be queue-actionable; without it their sets show a config-class error rather than silently resolving. Non-bare repos need no trunk config — their target is derived.
+- **Bare repos must declare `trunk` in config** to be actionable; without it their sets show a config-class error rather than silently resolving. Non-bare repos need no trunk config — their target is derived.
 - The marker stays a pure identity record (`repository_path` + `created_at`); this ADR adds no field to it.
 - `status` no longer distinguishes a non-git config entry from an idle repo with no tasks; the full-fleet idle listing is otherwise unchanged.
 - **Unrelated finding surfaced while measuring:** a test (`TestAbandonSuccessfulPreservesTaskStatus…`) writes into the real `pop.db` (28 of 32 set rows are temp-dir pollution). A test-isolation bug, tracked separately.

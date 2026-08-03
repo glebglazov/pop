@@ -116,5 +116,5 @@ Five tasks, sequential. Each leaves tests green. Scope: architecture review cand
 
 ## Reference
 
-- ADR: `docs/adr/0048-task-execution-modules-split-from-queue.md`
+- ADR: `docs/adr/0048-task-execution-modules-split-from-work.md`
 - Glossary fragment: `CONTEXT.0003.FC249732.md` (+ Drain routing, Integration backlog ownership)

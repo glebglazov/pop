@@ -4,7 +4,7 @@ status: accepted
 
 # Managed-worktree teardown is reference-counted; checkout↔set exclusivity is retired
 
-> **Relates:** enables the sharing introduced by [ADR-0115](0115-to-tasks-always-writes-the-worktree-directive-here-and-now-retired.md); amends the **Archive** teardown path and the [ADR-0072](0072-worktree-directive-is-queue-only-foreground-implement-binds-the-current-checkout.md) / [ADR-0036](0036-implement-adopts-its-checkout-into-the-binding-model.md) binding model.
+> **Relates:** enables the sharing introduced by [ADR-0115](0115-to-tasks-always-writes-the-worktree-directive-here-and-now-retired.md); amends the **Archive** teardown path and the [ADR-0072](0072-worktree-directive-is-work-daemon-only-foreground-implement-binds-the-current-checkout.md) / [ADR-0036](0036-implement-adopts-its-checkout-into-the-binding-model.md) binding model.
 
 ## Context
 

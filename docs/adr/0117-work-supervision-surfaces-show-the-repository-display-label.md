@@ -1,11 +1,11 @@
-# Queue surfaces show the repository display label, not the trunk worktree's picker name
+# Work-supervision surfaces show the repository display label, not the trunk worktree's picker name
 
 ## Context
 
-The **Queue dashboard** PROJECT column (and `pop queue status` / daemon output,
+The **Work dashboard** PROJECT column (and `pop work status` / daemon output,
 all fed by the same `repoName()` derivation) showed the *representative (trunk)
 worktree's* picker name — assembled for a bare repo as `displayName + "/" +
-wt.Name`, e.g. `game server/main`. But the queue keys on **Repository identity**:
+wt.Name`, e.g. `game server/main`. But **Work supervision** keys on **Repository identity**:
 a repo's worktrees collapse to one scheduling unit, the row denotes the *repo*,
 and the bound worktree already has its own WORKTREE column. So the trailing
 `/main` was doubly wrong — it named a worktree in a column that means "repo," and
@@ -20,15 +20,15 @@ discarded) onto `project.ExpandedProject.ProjectLabel` and carry it through
 the full picker `Name`. The result is the picker display name **minus the
 trailing worktree segment**, so a bare repo reads as `game server` while a
 `display_depth = 2` repo still reads `work/game server` — `display_depth`
-disambiguation is preserved (and matters more here, since the queue is
-machine-global across every repo). Only the queue path changes; the project
+disambiguation is preserved (and matters more here, since **Work supervision** is
+machine-global across every repo). Only the Work-supervision path changes; the project
 picker's `ui.Item.Name` is untouched.
 
 ## Considered Options
 
 - **Reuse the git-identity basename** (`repoLabelFromScan` →
-  `tasks.RepoBasename(commonDir)`). Already available and already the queue's
-  *identity* key, but it ignores config — a `display_depth = 2` repo would
+  `tasks.RepoBasename(commonDir)`). Already available and already Work
+  supervision's *identity* key, but it ignores config — a `display_depth = 2` repo would
   collapse to a bare basename, losing the disambiguation the project picker
   keeps. Rejected: identity ≠ display.
 - **Strip the segment after the last `/` from `Name`.** No new field, but a

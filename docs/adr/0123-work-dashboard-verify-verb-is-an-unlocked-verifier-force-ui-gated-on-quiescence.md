@@ -2,11 +2,11 @@
 status: accepted
 ---
 
-# Queue dashboard verify verb is an un-locked Verifier force, UI-gated on quiescence
+# Work dashboard verify verb is an un-locked Verifier force, UI-gated on quiescence
 
 ## Context
 
-The Queue dashboard surfaces NEEDS-VERIFY and VERIFY-FAILED sets but offers no
+The Work dashboard surfaces NEEDS-VERIFY and VERIFY-FAILED sets but offers no
 way to run the **Verifier** on them without launching a full drain (`i`). A
 dedicated verb is wanted. Draining a NEEDS-VERIFY set already reaches the verify
 phase (no eligible AFK tasks → straight to the Verifier), so a separate verb
@@ -61,5 +61,5 @@ Four decisions carry the weight:
 
 Builds on [ADR-0104](0104-out-of-band-mutators-require-checkout-quiescence.md)
 (quiescence for out-of-band verdict mutators) and
-[ADR-0111](0111-queue-dashboard-retires-drain-column-for-in-progress-and-a-live-drain-indicator.md)
+[ADR-0111](0111-work-dashboard-retires-drain-column-for-in-progress-and-a-live-drain-indicator.md)
 (the live-drain indicator this verb is careful not to light).

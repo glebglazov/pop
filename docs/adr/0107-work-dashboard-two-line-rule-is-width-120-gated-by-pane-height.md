@@ -2,11 +2,11 @@
 status: accepted
 ---
 
-# Queue dashboard two-line rule is width<120 gated by pane height
+# Work dashboard two-line rule is width<120 gated by pane height
 
-Supersedes [ADR-0097](0097-queue-dashboard-two-line-rows-below-width-threshold.md).
+Supersedes [ADR-0097](0097-work-dashboard-two-line-rows-below-width-threshold.md).
 
-The **Queue dashboard** task-set table renders every row as **two lines** when a trigger fires and the pane is tall enough to afford it; otherwise every row is a single line. The decision is global and uniform — all rows share the same height so scroll and cursor math stay uniform ([ADR-0079](0079-shared-tui-list-foundation-is-for-selectable-lists.md)).
+The **Work dashboard** task-set table renders every row as **two lines** when a trigger fires and the pane is tall enough to afford it; otherwise every row is a single line. The decision is global and uniform — all rows share the same height so scroll and cursor math stay uniform ([ADR-0079](0079-shared-tui-list-foundation-is-for-selectable-lists.md)).
 
 Two triggers, not equal in kind:
 

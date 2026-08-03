@@ -2,22 +2,22 @@
 status: accepted
 ---
 
-# Queue read surfaces converge: status mirrors the dashboard, DONE is hidden by default, and rows sort by status
+# Work-supervision read surfaces converge: status mirrors the dashboard, DONE is hidden by default, and rows sort by status
 
 ## Context
 
-Pop has two machine-global read surfaces answering the same question — "what is in the queue right now?" — in two different shapes:
+Pop has two machine-global read surfaces answering the same question — "what is being supervised right now?" — in two different shapes:
 
-- `pop queue status` was a labeled-line inventory: a `Summary` headline over per-bucket detail sections (`Picked-up sets`, `Active worktrees`, `Queued ready sets`, `Blocked`, `Awaiting approval`, `Skipped repositories`, a trailing idle-count line).
-- `pop queue dashboard` was a task-set table (PROJECT / TASK SET / STATUS / WORKTREE plus a live-drain indicator).
+- `pop work status` was a labeled-line inventory: a `Summary` headline over per-bucket detail sections (`Picked-up sets`, `Active worktrees`, `Queued ready sets`, `Blocked`, `Awaiting approval`, `Skipped repositories`, a trailing idle-count line).
+- `pop work dashboard` was a task-set table (PROJECT / TASK SET / STATUS / WORKTREE plus a live-drain indicator).
 
 Two shapes for one question drift apart and double the surface area a change has to touch. Separately, both surfaces surfaced finished work: the dashboard deliberately kept DONE sets that still held a managed Worktree binding as a teardown reminder, cluttering the common case with completed sets. And the dashboard sort grouped rows by Project within a running tier, so an in-progress set in a late-alphabet project sorted below idle work of an early-alphabet one — the reader could not scan "what is running / ready" across the machine at a glance.
 
 ## Decision
 
-Three cohesive changes to the queue read surfaces.
+Three cohesive changes to the Work-supervision read surfaces.
 
-1. **`pop queue status` mirrors the dashboard.** It becomes a static, non-interactive render of the *same rows, columns, row filter, and sort* as the Queue dashboard, under a one-line `Summary` headline (`N running, queued, blocked, awaiting approval`). Both surfaces share one row builder and one comparator. Every former inventory section is retired except a trailing `Scan errors` section. Status stays non-interactive so it remains greppable/pipeable and serves as the Queue run baseline.
+1. **`pop work status` mirrors the dashboard.** It becomes a static, non-interactive render of the *same rows, columns, row filter, and sort* as the Work dashboard, under a one-line `Summary` headline (`N running, queued, blocked, awaiting approval`). Both surfaces share one row builder and one comparator. Every former inventory section is retired except a trailing `Scan errors` section. Status stays non-interactive so it remains greppable/pipeable and serves as the Daemon run baseline.
 
 2. **DONE is hidden by default, uniformly.** DONE Task sets are omitted from both surfaces — including sets that still hold a managed Worktree binding. `--include-done` (both surfaces, sets the initial state) reveals them; the dashboard additionally exposes a **Show done** toggle inside a new `f` **filter menu** popup (a session-only view state). `/` remains the fuzzy text filter; `f` is the inclusion-settings popup.
 
@@ -34,5 +34,5 @@ Three cohesive changes to the queue read surfaces.
 
 - **Amends ADR-0111.** Its "sort keeps a running tier that floats live-drain rows to the top" is generalized: live-drain stays the top tier, but auto-drain and orphaned join as explicit tiers above the status scheme, and the within-rest ordering flips from Project-first-then-status-sink to the status scheme above.
 - **Trade-off, accepted:** the uniform DONE-hide drops the dashboard's standing managed-worktree teardown reminder. A pop-created worktree left on a DONE set is no longer visible by default; it is reachable via `--include-done` / Show done, and teardown remains gated at Archive.
-- Glossary: `Queue status summary` and `Queue dashboard` are redefined; `Queue surface sort order`, `Queue dashboard filter menu`, and `Done inclusion` are added.
-- `pop queue status` and the dashboard now key on one row builder and one comparator — a change to filter or order lands in both surfaces at once.
+- Glossary: `Work status summary` and `Work dashboard` are redefined; `Work surface sort order`, `Work dashboard filter menu`, and `Done inclusion` are added.
+- `pop work status` and the dashboard now key on one row builder and one comparator — a change to filter or order lands in both surfaces at once.

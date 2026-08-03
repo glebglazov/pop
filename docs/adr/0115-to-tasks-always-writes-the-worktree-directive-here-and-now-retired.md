@@ -4,7 +4,7 @@ status: accepted
 
 # to-tasks auto-binds the current worktree at register; worktree & auto-drain leave the manifest
 
-> **Relates:** supersedes [ADR-0113](0113-to-tasks-here-and-now-binds-current-worktree-at-the-skill-layer.md) (the here-and-now wrapper is deleted), amends [ADR-0059](0059-task-set-may-declare-a-worktree-directive.md) (the `worktree` manifest key is retired), keeps [ADR-0072](0072-worktree-directive-is-queue-only-foreground-implement-binds-the-current-checkout.md) (foreground implement still binds the current checkout), relates [ADR-0104](0104-out-of-band-mutators-require-checkout-quiescence.md) (auto-drain is a runtime consent bit) and [ADR-0116](0116-managed-worktree-teardown-is-reference-counted.md) (N-sets-to-one-checkout teardown stays reference-counted).
+> **Relates:** supersedes [ADR-0113](0113-to-tasks-here-and-now-binds-current-worktree-at-the-skill-layer.md) (the here-and-now wrapper is deleted), amends [ADR-0059](0059-task-set-may-declare-a-worktree-directive.md) (the `worktree` manifest key is retired), keeps [ADR-0072](0072-worktree-directive-is-work-daemon-only-foreground-implement-binds-the-current-checkout.md) (foreground implement still binds the current checkout), relates [ADR-0104](0104-out-of-band-mutators-require-checkout-quiescence.md) (auto-drain is a runtime consent bit) and [ADR-0116](0116-managed-worktree-teardown-is-reference-counted.md) (N-sets-to-one-checkout teardown stays reference-counted).
 
 ## Context
 

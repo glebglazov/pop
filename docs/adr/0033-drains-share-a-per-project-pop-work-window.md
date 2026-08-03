@@ -2,7 +2,7 @@
 status: accepted
 ---
 
-# Queue drains share a per-project `pop-queue` window
+# Drains share a per-project `pop-work` window
 
 ADR-0029/0031 made Pop own `git worktree add` for **Worktree sets** and bind one checkout per
 set. The first implementation spawned each worktree-set drain into its **own tmux session**, named
@@ -15,12 +15,12 @@ Pop no longer auto-creates a session for it. The checkout is still a registered 
 stays reachable on demand through the **Worktree picker**, which creates a session only when the
 human selects it.
 
-All queue-spawned drains — both in-place and Worktree set — now land in a single per-project
-**Queue window** named `pop-queue` inside the **originating project Session**, as panes under a
+All daemon-spawned drains — both in-place and Worktree set — now land in a single per-project
+**Work window** named `pop-work` inside the **originating project Session**, as panes under a
 balanced (`tiled`) layout. The user's working windows (window 0 and friends) are left untouched.
 Concretely: `prepareWorktreeDrain` stops overwriting `scan.SessionName` with the worktree's session
 (it keeps `ProjectPath` rewritten to the checkout so the pane's cwd is the runtime path), and
-`spawnDrain` targets the named `pop-queue` window — creating the project session detached if absent
+`spawnDrain` targets the named `pop-work` window — creating the project session detached if absent
 and the window if absent.
 
 Drains keep their existing persistence mechanism (a `split-window` shell that `send-keys` runs the
@@ -35,14 +35,14 @@ the scrollback is left for the human to close.
 
 - **Keep a session per worktree set.** Rejected — manufactures unchosen sessions that look like
   Projects but aren't; the very proliferation this ADR removes.
-- **A window per set instead of a shared `pop-queue` window.** Rejected — the human wanted panes in
+- **A window per set instead of a shared `pop-work` window.** Rejected — the human wanted panes in
   one named window, navigable as a group, rather than a tab per set.
-- **Scope `pop-queue` to worktree sets only; leave in-place drains in window 0.** Rejected — in-place
+- **Scope `pop-work` to worktree sets only; leave in-place drains in window 0.** Rejected — in-place
   drains splitting into the user's shell window is the same intermixing, just in-session; unifying
-  keeps one invariant ("queue activity lives in `pop-queue`").
+  keeps one invariant ("daemon activity lives in `pop-work`").
 - **Split a new pane on every spawn.** Rejected — unbounded pane growth under re-spawn (agent-quota
   pause, failure retry) makes the `tiled` layout unreadable.
-- **Record the drain pane id (`%N`) in Queue daemon state.** Rejected — couples transient UI plumbing
+- **Record the drain pane id (`%N`) in Work daemon state.** Rejected — couples transient UI plumbing
   to durable state (ADR-0031 reserves state for bindings/backoffs/mergeability) and leaves stale
   handles when the human closes a pane. The pane-scoped `@pop_set` option makes tmux the source of
   truth and self-heals.
@@ -53,10 +53,10 @@ the scrollback is left for the human to close.
 
 - `prepareWorktreeDrain` no longer derives a worktree session name; `scan.SessionName` stays the
   originating project session for the whole decision.
-- `spawnDrain`/`resolveDrainWindowTarget` target a window by name (`pop-queue`), creating it if
+- `spawnDrain`/`resolveDrainWindowTarget` target a window by name (`pop-work`), creating it if
   absent, rather than the session's lowest-index window.
 - Each drain pane carries `@pop_set`; spawn first looks for the set's existing pane and reuses it.
-- A freshly queue-created project session has an idle window 0 plus `pop-queue` — visible when the
+- A freshly daemon-created project session has an idle window 0 plus `pop-work` — visible when the
   human later opens the project.
 - Requires tmux ≥ 3.0 for pane-scoped user options.
 - The glossary's "each worktree gets its own session" applies to user Worktrees, not Worktree sets.

@@ -5,7 +5,7 @@ supersedes: [ADR-0072]
 
 # Managed worktrees are provisioned eagerly, at the operator's request
 
-> **Relates:** supersedes [ADR-0072](0072-worktree-directive-is-queue-only-foreground-implement-binds-the-current-checkout.md), carrying forward its surviving foreground/Queue routing split (below). Amends [ADR-0052](0052-drain-checkout-is-chosen-not-auto-provisioned.md) — provisioning stays an explicit act, but now happens *at* the explicit act rather than at the drain that follows it.
+> **Relates:** supersedes [ADR-0072](0072-worktree-directive-is-work-daemon-only-foreground-implement-binds-the-current-checkout.md), carrying forward its surviving foreground/daemon routing split (below). Amends [ADR-0052](0052-drain-checkout-is-chosen-not-auto-provisioned.md) — provisioning stays an explicit act, but now happens *at* the explicit act rather than at the drain that follows it.
 
 `--managed` recorded an *intent* and provisioned nothing: the worktree was forked from the Trunk worktree at the first unbound Queue drain. That left a set in a state the binding model has no word for — registered, managed, and placed nowhere. Every consumer of the binding-to-runtime-path resolution silently substituted the trunk for such a set (the queue's dispatch claim gate and verdict resolution, the Work dashboard, the work snapshot), which produced a deadlock in practice: an unprovisioned managed set's claim target resolved to the trunk, so while anything drained on the trunk the set was deferred as claimed — and it could never provision the worktree that would have moved it off the trunk, because provisioning only happens at the drain it was being denied.
 

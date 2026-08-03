@@ -71,7 +71,7 @@ auto-applies when a session is born for that checkout.
   onto the whole team.
 - **A separate "Default worktree" interactive trunk-setter** (the sibling idea).
   Dropped: trunk stays config-only. Auto-detecting a bare repo's trunk was declined
-  for the same reason [ADR-0035](0035-queue-schedules-one-representative-checkout-per-repository.md)
+  for the same reason [ADR-0035](0035-work-supervision-schedules-one-representative-checkout-per-repository.md)
   rejected it — the `symbolic-ref HEAD` / folder-name heuristics misfire on real
   repos (no worktree on the default branch) and trunk carries the dangerous
   integration role, so pop keeps refusing to guess.
