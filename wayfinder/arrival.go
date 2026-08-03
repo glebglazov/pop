@@ -10,8 +10,10 @@ import (
 // down and `open` brings it back, so both ends have to agree on the name without
 // consulting the other.
 func MapSessionName(mapID string) string {
-	return "pop-map-" + mapID
+	return mapSessionPrefix + mapID
 }
+
+const mapSessionPrefix = "pop-map-"
 
 // ArrivalResult is one declared change of a Map's lifecycle status.
 type ArrivalResult struct {
@@ -27,6 +29,8 @@ type ArrivalResult struct {
 	Unfinished []Ticket
 	// KilledSession names the tmux session torn down, empty when the Map had none.
 	KilledSession string
+	// Session is the Map's session as `open` left it, nil for `arrive`.
+	Session *MapSession
 }
 
 // ArriveMap declares a Map's destination reached: it writes `Status: arrived` and
@@ -50,12 +54,24 @@ func ArriveMap(d *Deps, cwd, mapID string) (*ArrivalResult, error) {
 	return result, nil
 }
 
-// OpenMap reverses arrival: fog reopened, so the Map goes back to `active` and is
-// grillable again. It never refuses a Map that is already active — the Map verbs
-// auto-open rather than complain, and slice 11 gives this verb its second half,
-// creating or attaching the Map's tmux session.
+// OpenMap reverses arrival: fog reopened, so the Map goes back to `active` and
+// is grillable again, and the caller lands in the Map's tmux session. It never
+// refuses a Map that is already active — `open` is also how you get back to a
+// Map you never left, so the status write and the attach are independent halves
+// of one verb.
 func OpenMap(d *Deps, cwd, mapID string) (*ArrivalResult, error) {
-	return setMapStatus(d, cwd, mapID, MapActive)
+	result, err := setMapStatus(d, cwd, mapID, MapActive)
+	if err != nil {
+		return nil, err
+	}
+	// The status is on disk before the attach, so an `open` that ends up blocked
+	// on attach-session outside tmux has already reopened the Map.
+	session, err := AttachMapSession(d, result.MapID)
+	if err != nil {
+		return nil, err
+	}
+	result.Session = session
+	return result, nil
 }
 
 // setMapStatus rewrites map.md's Status: line under the Map's lock, so a status

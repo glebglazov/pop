@@ -93,6 +93,10 @@ type ProjectDeps struct {
 	// Session state
 	SessionActivity   func() map[string]int64
 	AttentionSessions func() map[string]bool
+	// WorkSessions returns the live sessions hosting a Work container, keyed by
+	// session name, so the picker can badge them by kind. It reads the sessions'
+	// @pop_work_* stamps, never their names.
+	WorkSessions func() map[string]tmuxmod.WorkSession
 
 	// Side effects
 	OpenSession func(item *ui.Item) error
@@ -167,6 +171,7 @@ func DefaultProjectDeps() *ProjectDeps {
 
 		SessionActivity:   history.TmuxSessionActivity,
 		AttentionSessions: monitorAttentionSessions,
+		WorkSessions:      tmuxWorkSessions,
 
 		// Tmux side effects run through the tmux module (ADR-0142).
 		OpenSession: func(item *ui.Item) error {
@@ -384,12 +389,19 @@ func RunProject(d *ProjectDeps) error {
 		if cfg.UnreadNotificationsEnabled("project") {
 			attention = d.AttentionSessions()
 		}
-		items := buildSessionAwareItemsWith(baseItems, hist, d.SessionActivity(), excludedSessionNames, attention)
+		var workSessions map[string]tmuxmod.WorkSession
+		if d.WorkSessions != nil {
+			workSessions = d.WorkSessions()
+		}
+		items := buildSessionAwareItemsWith(baseItems, hist, d.SessionActivity(), excludedSessionNames, attention, workSessions)
 
 		quickAccessModifier := cfg.GetQuickAccessModifier()
 		iconLegends := []ui.IconLegend{
 			{Icon: iconDirSession, Desc: "Directory with tmux session"},
 			{Icon: iconStandaloneSession, Desc: "Standalone tmux session"},
+			{Icon: iconMapSession, Desc: "Map session"},
+			{Icon: iconTaskSetSession, Desc: "Task-set session"},
+			{Icon: iconRoutineSession, Desc: "Routine session"},
 		}
 		if cfg.UnreadNotificationsEnabled("project") {
 			iconLegends = append(iconLegends, ui.IconLegend{Icon: iconAttention, Desc: "Agent has unread output"})
@@ -593,10 +605,10 @@ func buildSessionAwareItems(baseItems []ui.Item, hist *history.History, excluded
 	if monitorEnabled {
 		attentionSessions = monitorAttentionSessions()
 	}
-	return buildSessionAwareItemsWith(baseItems, hist, history.TmuxSessionActivity(), excludedSessionNames, attentionSessions)
+	return buildSessionAwareItemsWith(baseItems, hist, history.TmuxSessionActivity(), excludedSessionNames, attentionSessions, tmuxWorkSessions())
 }
 
-func buildSessionAwareItemsWith(baseItems []ui.Item, hist *history.History, sessionActivity map[string]int64, excludedSessionNames map[string]bool, attentionSessions map[string]bool) []ui.Item {
+func buildSessionAwareItemsWith(baseItems []ui.Item, hist *history.History, sessionActivity map[string]int64, excludedSessionNames map[string]bool, attentionSessions map[string]bool, workSessions map[string]tmuxmod.WorkSession) []ui.Item {
 	// Build set of session names that correspond to project items
 	projectSessionNames := make(map[string]bool)
 	for _, item := range baseItems {
@@ -623,6 +635,13 @@ func buildSessionAwareItemsWith(baseItems []ui.Item, hist *history.History, sess
 		}
 	}
 
+	// Badge the Work sessions among the project rows. A managed worktree's
+	// session is a project row here, so the two columns coexist: the icon says
+	// whether a session is live, the marker says what kind of Work it hosts.
+	for i := range items {
+		items[i].Marker = workSessionBadge(workSessions[items[i].SessionName].Kind)
+	}
+
 	// Add standalone sessions (not matching any project or excluded project)
 	for sessionName := range sessionActivity {
 		if !projectSessionNames[sessionName] && !excludedSessionNames[sessionName] {
@@ -631,9 +650,10 @@ func buildSessionAwareItemsWith(baseItems []ui.Item, hist *history.History, sess
 				icon = iconAttention
 			}
 			items = append(items, ui.Item{
-				Name: sessionName,
-				Path: tmuxSessionPathPrefix + sessionName,
-				Icon: icon,
+				Name:   sessionName,
+				Path:   tmuxSessionPathPrefix + sessionName,
+				Icon:   icon,
+				Marker: workSessionBadge(workSessions[sessionName].Kind),
 			})
 		}
 	}

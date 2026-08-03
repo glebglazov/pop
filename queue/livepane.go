@@ -5,6 +5,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
+	"github.com/glebglazov/pop/wayfinder"
 )
 
 // livePaneState is the three-state live-pane affordance for one supervised
@@ -19,8 +20,8 @@ const (
 )
 
 // livePaneCache holds per-poll activity liveness keyed by pane tag then set id,
-// plus wayfinder map windows keyed by map id (window name). It is rebuilt from
-// tmux list queries per dashboard poll — never from the DrainPane store.
+// plus Map liveness keyed by map id (its session). It is rebuilt from tmux list
+// queries per dashboard poll — never from the DrainPane store.
 type livePaneCache struct {
 	byTag     map[tmuxmod.PaneTag]map[string]livePaneState
 	wayfinder map[string]livePaneState
@@ -99,13 +100,18 @@ func loadLivePaneCache(d *Deps) livePaneCache {
 	}
 	windows, err := tmux.ListWindowPanes()
 	if err == nil {
-		seen := map[string]bool{}
+		// A Map's liveness is its session's, not one window's: grilling windows are
+		// named after tickets and come and go, while the Map is running as long as
+		// any window in `pop-map-<id>` still holds a process.
 		for _, w := range windows {
-			if w.WindowName == "" || seen[w.WindowName] {
+			mapID := wayfinder.MapIDFromSession(w.Session)
+			if mapID == "" {
 				continue
 			}
-			seen[w.WindowName] = true
-			cache.setWayfinder(w.WindowName, stateFromCommand(w.Command))
+			state := stateFromCommand(w.Command)
+			if state == livePaneRunning || cache.wayfinderState(mapID) == livePaneNone {
+				cache.setWayfinder(mapID, state)
+			}
 		}
 	}
 	return cache
@@ -124,32 +130,6 @@ func runningTaggedPane(t tmuxmod.Tmux, session string, tag tmuxmod.PaneTag, setI
 	if err != nil || paneID == "" {
 		return paneID, err
 	}
-	info, err := t.PaneInfo(paneID)
-	if err != nil {
-		return paneID, nil
-	}
-	if tmuxmod.IsBareShell(info.Command) {
-		return "", nil
-	}
-	return paneID, nil
-}
-
-// runningWayfinderPane returns the pane id when the map-named window exists and
-// its foreground command is not a bare shell — the green / jump case. An idle
-// window (grey / respawn) returns "" so the caller re-sends the work command.
-func runningWayfinderPane(t tmuxmod.Tmux, session, mapID string) (string, error) {
-	if t == nil || session == "" || mapID == "" {
-		return "", nil
-	}
-	exists, err := t.WindowExists(session, mapID)
-	if err != nil || !exists {
-		return "", err
-	}
-	panes, err := t.WindowPanes(session, mapID)
-	if err != nil || len(panes) == 0 {
-		return "", err
-	}
-	paneID := panes[0]
 	info, err := t.PaneInfo(paneID)
 	if err != nil {
 		return paneID, nil

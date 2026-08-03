@@ -11,6 +11,7 @@ import (
 	"github.com/glebglazov/pop/monitor"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/ui"
+	"github.com/glebglazov/pop/work/ref"
 )
 
 // defaultTmuxMod is the production tmux module handle used by all tmux
@@ -27,7 +28,51 @@ const (
 	// rather than "not classified yet" (ADR-0152).
 	iconUnboundManaged = "U"
 	iconBoundManaged   = "M"
+	// Work-session badges, one per Work kind. A session hosting a Work container
+	// is a different animal from a project's session — you are in it to decide,
+	// drain or fire something, not to sit in a checkout — so it gets its own
+	// marker column entry.
+	iconMapSession     = "◆"
+	iconTaskSetSession = "▲"
+	iconRoutineSession = "●"
 )
+
+// workSessionBadge maps a session's stamped Work kind to its picker marker. An
+// unknown kind badges nothing rather than guessing: the vocabulary is closed and
+// a fourth kind will arrive with its own badge.
+func workSessionBadge(kind string) string {
+	switch ref.Kind(kind) {
+	case ref.KindMap:
+		return iconMapSession
+	case ref.KindTaskSet:
+		return iconTaskSetSession
+	case ref.KindRoutine:
+		return iconRoutineSession
+	default:
+		return ""
+	}
+}
+
+// tmuxWorkSessions maps live session name -> its Work stamp. The stamp, not the
+// session name, is what says a session hosts Work: names are pop's convention
+// and would go stale the moment one changed, while the option travels with the
+// session it describes.
+func tmuxWorkSessions() map[string]tmuxmod.WorkSession {
+	return tmuxWorkSessionsWith(defaultTmuxMod)
+}
+
+func tmuxWorkSessionsWith(mod tmuxmod.Tmux) map[string]tmuxmod.WorkSession {
+	sessions, err := mod.WorkSessions()
+	if err != nil {
+		debug.Error("tmuxWorkSessions: %v", err)
+		return nil
+	}
+	out := make(map[string]tmuxmod.WorkSession, len(sessions))
+	for _, s := range sessions {
+		out[s.Session] = s
+	}
+	return out
+}
 
 func currentTmuxSession() string {
 	return currentTmuxSessionWith(defaultTmuxMod)

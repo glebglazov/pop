@@ -47,33 +47,46 @@ func wayfinderSpawnFixture(t *testing.T) (*Deps, *config.Config, DashboardRow, *
 	return d, cfg, row, f, storageDir
 }
 
-const wayfinderMapID = "2026-07-01-active"
+const (
+	wayfinderMapID = "2026-07-01-active"
+	// mapOverviewWindow mirrors wayfinder's window 1: it runs `pop map show`, not
+	// a grilling agent, so the assertions below step over it.
+	mapOverviewWindow = "map"
+)
 
-// wayfinderPaneCommand returns the command sent into the pane of the window
-// named after the map, across whichever session hosts it.
+func wayfinderMapSession() string { return wayfinder.MapSessionName(wayfinderMapID) }
+
+// wayfinderPaneCommand returns the command sent into the Map session's grilling
+// window — whichever ticket it is for.
 func wayfinderPaneCommand(f *tmuxtest.Fake) (string, bool) {
-	for _, windows := range f.Windows {
-		panes, ok := windows[wayfinderMapID]
-		if !ok || len(panes) == 0 {
+	for name, panes := range f.Windows[wayfinderMapSession()] {
+		if name == mapOverviewWindow || len(panes) == 0 {
 			continue
 		}
 		cmds := f.SentCommands[panes[0]]
 		if len(cmds) == 0 {
-			return "", false
+			continue
 		}
 		return strings.Join(cmds, " "), true
 	}
 	return "", false
 }
 
-func seedWayfinderWindow(f *tmuxtest.Fake, session, paneID, command string) {
+// seedWayfinderWindow arranges a live Map session already grilling window, so the
+// reuse path (ADR-0158) has something to find.
+func seedWayfinderWindow(f *tmuxtest.Fake, window, paneID, command string) {
+	session := wayfinderMapSession()
+	if f.Live == nil {
+		f.Live = map[string]string{}
+	}
+	f.Live[session] = "/repo/checkout"
 	if f.Windows == nil {
 		f.Windows = map[string]map[string][]string{}
 	}
 	if f.Windows[session] == nil {
 		f.Windows[session] = map[string][]string{}
 	}
-	f.Windows[session][wayfinderMapID] = []string{paneID}
+	f.Windows[session][window] = []string{paneID}
 	if f.PaneInfos == nil {
 		f.PaneInfos = map[string]tmuxmod.PaneInfo{}
 	}
@@ -123,22 +136,29 @@ func TestLaunchWayfinderSessionTargetsExplicitTicket(t *testing.T) {
 	}
 }
 
-func TestLaunchWayfinderSessionWindowNamedAfterMap(t *testing.T) {
+// TestLaunchWayfinderSessionSpawnsIntoTheMapSession pins the reconciliation: the
+// dashboard's map row lands in `pop-map-<id>` alongside `pop map next`'s windows,
+// never in the repo session's drain window.
+func TestLaunchWayfinderSessionSpawnsIntoTheMapSession(t *testing.T) {
 	d, cfg, row, f, _ := wayfinderSpawnFixture(t)
-	if _, err := LaunchWayfinderSession(d, cfg, row, ""); err != nil {
+	result, err := LaunchWayfinderSession(d, cfg, row, "")
+	if err != nil {
 		t.Fatalf("LaunchWayfinderSession: %v", err)
 	}
-	var found bool
-	for _, windows := range f.Windows {
-		if _, ok := windows[wayfinderMapID]; ok {
-			found = true
-		}
-		if _, ok := windows[drainWindowName]; ok {
-			t.Fatalf("must not create the %q drain window, windows=%v", drainWindowName, windows)
-		}
+	if result.Session != wayfinderMapSession() {
+		t.Fatalf("session = %q, want %q", result.Session, wayfinderMapSession())
 	}
-	if !found {
-		t.Fatalf("expected a window named after the map %q, windows=%v", wayfinderMapID, f.Windows)
+	windows := f.Windows[wayfinderMapSession()]
+	if _, ok := windows["01-frontier"]; !ok {
+		t.Fatalf("expected a window named after the ticket, windows=%v", windows)
+	}
+	if _, ok := windows[mapOverviewWindow]; !ok {
+		t.Fatalf("expected window 1 to be the map overview, windows=%v", windows)
+	}
+	for session, ws := range f.Windows {
+		if _, ok := ws[drainWindowName]; ok {
+			t.Fatalf("must not create the %q drain window in %q", drainWindowName, session)
+		}
 	}
 }
 
@@ -147,12 +167,12 @@ func TestLaunchWayfinderSessionCreatesDetachedSession(t *testing.T) {
 	if _, err := LaunchWayfinderSession(d, cfg, row, ""); err != nil {
 		t.Fatalf("LaunchWayfinderSession: %v", err)
 	}
-	var gotCWD string
-	for _, dir := range f.Live {
-		gotCWD = dir
+	if got := f.Live[wayfinderMapSession()]; got != row.ProjectPath {
+		t.Fatalf("detached session cwd = %q, want %q", got, row.ProjectPath)
 	}
-	if gotCWD != row.ProjectPath {
-		t.Fatalf("detached session cwd = %q, want %q", gotCWD, row.ProjectPath)
+	stamp := f.WorkStamps[wayfinderMapSession()]
+	if stamp.Kind != "map" || stamp.ID != wayfinderMapID {
+		t.Fatalf("work stamp = %+v, want kind map and id %q", stamp, wayfinderMapID)
 	}
 }
 
@@ -173,8 +193,7 @@ func TestLaunchWayfinderSessionEmptyFrontier(t *testing.T) {
 
 func TestLaunchWayfinderSessionReusesRunningWithoutResend(t *testing.T) {
 	d, cfg, row, f, _ := wayfinderSpawnFixture(t)
-	session := project.SessionNameWith(d.Project, row.ProjectPath)
-	seedWayfinderWindow(f, session, "%9", "claude")
+	seedWayfinderWindow(f, "01-frontier", "%9", "claude")
 
 	result, err := LaunchWayfinderSession(d, cfg, row, "")
 	if err != nil {
@@ -249,8 +268,7 @@ func TestDashboardMapRowIEmptyFrontierMessage(t *testing.T) {
 
 func TestDashboardMapRowIReusesRunningWithoutResend(t *testing.T) {
 	d, cfg, row, f, _ := wayfinderSpawnFixture(t)
-	session := project.SessionNameWith(d.Project, row.ProjectPath)
-	seedWayfinderWindow(f, session, "%9", "claude")
+	seedWayfinderWindow(f, "01-frontier", "%9", "claude")
 	f.Inside = true
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
@@ -313,13 +331,15 @@ func TestDashboardMapDetailEnterHandsOffFrontierTicket(t *testing.T) {
 func TestLivePaneCacheWayfinderWindow(t *testing.T) {
 	f := &tmuxtest.Fake{
 		Windows: map[string]map[string][]string{
-			"pop": {
-				wayfinderMapID: {"%3"},
-				"pop-queue":    {"%1"},
+			wayfinderMapSession(): {
+				"01-frontier":     {"%3"},
+				mapOverviewWindow: {"%2"},
 			},
+			"pop": {"pop-queue": {"%1"}},
 		},
 		PaneInfos: map[string]tmuxmod.PaneInfo{
-			"%3": {Session: "pop", Command: "claude"},
+			"%3": {Session: wayfinderMapSession(), Command: "claude"},
+			"%2": {Session: wayfinderMapSession(), Command: "zsh"},
 			"%1": {Session: "pop", Command: "node"},
 		},
 	}

@@ -388,6 +388,15 @@ hours. A ticket is **unblocked** when every blocker is `resolved`; the
 **frontier** is the open, unblocked, unclaimed tickets — the edge of the known,
 and the only thing `next` hands out.
 
+`next` also spawns the ticket's grilling window inside the map's own tmux session
+`pop-map-<map-id>` — window 1 there runs `pop map show` — and switches you to it.
+`pop map open <map-id>` creates or attaches that session on its own. The other
+writes (`register`, `claim`, `resolve`, `out-of-scope`) run **in place**: they
+ensure the session exists, tell you where it is, and never move you, so calling
+one from a task-set pane is safe. Reads create no tmux state at all. The session
+is rooted at the repository's trunk worktree; pass `--trunk <path>` if pop cannot
+work out which checkout that is.
+
 ### Resolution
 
 Write the decision to a file, then hand it to pop:
@@ -448,7 +457,8 @@ Then declare arrival: `pop map arrive <map-id>` writes `Status: arrived` and tea
 down the map's tmux session. The gate is the **destination**, not empty fog — a map
 may carry deliberately non-prerequisite fog forever — so arrival lists open or
 claimed tickets and proceeds anyway; never resolve a ticket just to clear the gate.
-`pop map open <map-id>` reverses it when fog reopens. One map may still spawn a
+`pop map open <map-id>` reverses it when fog reopens, putting you back in a fresh
+session for the map. One map may still spawn a
 further set later: a remediation set, or a second handoff once fog that was open at
 the first handoff has cleared. An arrived map stays visible in the Work dashboard —
 it is the lineage view for the sets it spawned; `pop map archive` is what files it

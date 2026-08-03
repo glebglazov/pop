@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/wayfinder"
 	"github.com/spf13/cobra"
 )
@@ -41,8 +42,18 @@ refuses naming the missing path. A dirty repository working tree only warns —
 pop cannot tell an unrelated in-flight change from a stray fragment a grilling
 session left behind.
 
+Every Map gets a tmux session of its own, ` + "`pop-map-<map-id>`" + `, rooted at the
+Trunk worktree: window 1 runs ` + "`pop map show`" + ` and ` + "`pop map next`" + ` spawns a
+grilling window per ticket and switches you there. The other writes auto-open —
+` + "`register`" + `, ` + "`claim`" + `, ` + "`resolve`" + ` and ` + "`out-of-scope`" + ` run
+in place, ensure the session exists and report where it is, so a verb called from
+a Task-set pane never relocates you. ` + "`show`" + ` and ` + "`status`" + ` create no
+tmux state at all. Pass ` + "`--trunk <path>`" + ` when pop cannot work out the Trunk
+on its own.
+
 A Map ends at ` + "`pop map arrive`" + `, which writes ` + "`Status: arrived`" + ` and tears down
-the Map's tmux session; ` + "`pop map open`" + ` reverses it when fog reopens. The gate is
+the Map's tmux session; ` + "`pop map open`" + ` reverses it, reopening the Map and putting
+you back in its session. The gate is
 the destination, not empty fog — a Map may carry non-prerequisite fog forever — so
 arrival warns about open or claimed tickets and proceeds. An arrived Map stays
 visible; ` + "`pop map archive`" + ` is what hides one. A ` + "`Status:`" + ` line outside
@@ -116,6 +127,7 @@ var (
 	mapResolveADRDrafts     []string
 	mapResolveContextDrafts []string
 	mapOutOfScopeReason     string
+	mapTrunk                string
 )
 
 // mapArriveCmd is the Map's terminal act, and the one gate that is a judgment
@@ -127,9 +139,11 @@ var mapArriveCmd = &cobra.Command{
 	Run:   runMapArrive,
 }
 
+// mapOpenCmd is both halves of "take me back to this Map": the status write that
+// reverses arrival, and the create-or-attach of the Map's tmux session.
 var mapOpenCmd = &cobra.Command{
 	Use:   "open MAP",
-	Short: "Reopen an arrived map for more wayfinding",
+	Short: "Open a map's tmux session, reopening an arrived map",
 	Args:  cobra.ExactArgs(1),
 	Run:   runMapOpen,
 }
@@ -168,6 +182,67 @@ func init() {
 	mapResolveCmd.Flags().StringArrayVar(&mapResolveContextDrafts, "context", nil, "path to a CONTEXT.md glossary draft this decision produced; repeat for more than one")
 	mapOutOfScopeCmd.Flags().StringVar(&mapOutOfScopeReason, "reason", "", "why the ticket is beyond the destination")
 	_ = mapOutOfScopeCmd.MarkFlagRequired("reason")
+	// --trunk goes on the two verbs that refuse without a Trunk. The in-place
+	// writes only ever warn about the session, and the read verbs create none, so
+	// a flag there would advertise a side effect they do not have.
+	for _, c := range []*cobra.Command{mapNextCmd, mapOpenCmd} {
+		c.Flags().StringVar(&mapTrunk, "trunk", "", "Trunk worktree to root the map's tmux session at")
+	}
+}
+
+// mapVerbDeps wires the Trunk resolver onto the wayfinder deps used by the
+// session-touching verbs. Resolution is the cmd layer's job: it is the only
+// layer that holds both the repository config and the caller's --trunk override.
+func mapVerbDeps() *wayfinder.Deps {
+	d := cmdLayerDeps().wayfinderDeps()
+	if d.Trunk == nil {
+		d.Trunk = resolveMapTrunk
+	}
+	return d
+}
+
+func resolveMapTrunk() (string, error) {
+	d := cmdLayerDeps()
+	checkout, err := d.DirOrGetwd()
+	if err != nil {
+		return "", err
+	}
+	return resolveManagedTrunk(d.tasksDeps(), mapVerbConfig(), checkout, mapTrunk)
+}
+
+// mapVerbConfig loads the user config for the Map verbs, tolerating its absence.
+// A missing or broken config is not a refusal: trunk resolution falls back to the
+// repository's main worktree and the agent preset falls back to its default,
+// which is the right answer for a repo that configured neither.
+func mapVerbConfig() *config.Config {
+	d := cmdLayerDeps()
+	cfgPath := cfgFile
+	if cfgPath == "" {
+		cfgPath = config.DefaultConfigPathWith(d.configDeps())
+	}
+	cfg, err := config.LoadWith(d.configDeps(), cfgPath)
+	if err != nil {
+		return nil
+	}
+	return cfg
+}
+
+// reportMapSession is the auto-open half of the Map verbs' house rule: the write
+// has already landed, so a session pop could not open warns rather than fails.
+// An agent resolving a ticket from a Task-set pane must not be blocked by the
+// state of the human's tmux, and it must not be relocated either — this reports
+// where the session is and never switches the caller's client.
+func reportMapSession(w io.Writer, d *wayfinder.Deps, mapID string) {
+	session, err := wayfinder.EnsureMapSession(d, mapID)
+	if err != nil {
+		fmt.Fprintf(w, "warning: no map session: %v\n", err)
+		return
+	}
+	if session.Created {
+		fmt.Fprintf(w, "opened tmux session %s at %s\n", session.Name, session.Dir)
+		return
+	}
+	fmt.Fprintf(w, "tmux session %s is live\n", session.Name)
 }
 
 func runMapStatus(cmd *cobra.Command, args []string) {
@@ -193,7 +268,7 @@ func runMapShowWith(d *wayfinder.Deps, w io.Writer, mapID string) error {
 }
 
 func runMapRegister(cmd *cobra.Command, args []string) {
-	err := runMapRegisterWith(cmdLayerDeps().wayfinderDeps(), os.Stdout, args[0])
+	err := runMapRegisterWith(mapVerbDeps(), os.Stdout, args[0])
 	handleTaskExit(err)
 }
 
@@ -204,9 +279,10 @@ func runMapRegisterWith(d *wayfinder.Deps, w io.Writer, mapID string) error {
 	}
 	if result.AlreadyRegistered {
 		fmt.Fprintf(w, "Map %s is already registered\n", result.MapID)
-		return nil
+	} else {
+		fmt.Fprintf(w, "Registered map %s\n", result.MapID)
 	}
-	fmt.Fprintf(w, "Registered map %s\n", result.MapID)
+	reportMapSession(w, d, result.MapID)
 	return nil
 }
 
@@ -215,21 +291,51 @@ func runMapNext(cmd *cobra.Command, args []string) {
 	if len(args) > 0 {
 		mapID = args[0]
 	}
-	err := runMapNextWith(cmdLayerDeps().wayfinderDeps(), os.Stdout, mapID)
+	err := runMapNextWith(mapVerbDeps(), os.Stdout, mapID)
 	handleTaskExit(err)
 }
 
+// runMapNextWith resolves the Trunk before it claims anything, so a Trunk that
+// cannot be named refuses while the frontier is still untouched — refusing after
+// the claim would strand the ticket for the length of its TTL.
 func runMapNextWith(d *wayfinder.Deps, w io.Writer, mapID string) error {
+	var trunk string
+	if d.Trunk != nil {
+		resolved, err := d.Trunk()
+		if err != nil {
+			return err
+		}
+		trunk = resolved
+	}
 	result, err := wayfinder.NextTicket(d, cmdLayerDeps().WorkDir(), mapID)
 	if err != nil {
 		return err
 	}
 	renderClaim(w, result)
-	return nil
+	command, err := wayfinder.GrillingInvocation(mapVerbConfig(), result.MapID, result.Ticket.ID, trunk)
+	if err != nil {
+		return err
+	}
+	win, err := wayfinder.OpenGrillingWindow(d, result.MapID, result.Ticket, command)
+	if err != nil {
+		return err
+	}
+	renderGrillingWindow(w, win)
+	return wayfinder.FocusGrillingWindow(d, win)
+}
+
+// renderGrillingWindow names where the work is now happening. `next` is the one
+// verb that moves the human, so it says so.
+func renderGrillingWindow(w io.Writer, win *wayfinder.GrillingWindow) {
+	verb := "opened"
+	if win.Reused {
+		verb = "returned to"
+	}
+	fmt.Fprintf(w, "%s grilling window %s:%s\n", verb, win.Session.Name, win.Window)
 }
 
 func runMapClaim(cmd *cobra.Command, args []string) {
-	err := runMapClaimWith(cmdLayerDeps().wayfinderDeps(), os.Stdout, args[0], args[1])
+	err := runMapClaimWith(mapVerbDeps(), os.Stdout, args[0], args[1])
 	handleTaskExit(err)
 }
 
@@ -239,6 +345,7 @@ func runMapClaimWith(d *wayfinder.Deps, w io.Writer, mapID, ticket string) error
 		return err
 	}
 	renderClaim(w, result)
+	reportMapSession(w, d, result.MapID)
 	return nil
 }
 
@@ -259,7 +366,7 @@ func renderClaim(w io.Writer, result *wayfinder.ClaimResult) {
 }
 
 func runMapResolve(cmd *cobra.Command, args []string) {
-	err := runMapResolveWith(cmdLayerDeps().wayfinderDeps(), os.Stdout, wayfinder.ResolveRequest{
+	err := runMapResolveWith(mapVerbDeps(), os.Stdout, wayfinder.ResolveRequest{
 		MapID:         args[0],
 		Ticket:        args[1],
 		AnswerFile:    mapResolveAnswerFile,
@@ -275,11 +382,12 @@ func runMapResolveWith(d *wayfinder.Deps, w io.Writer, req wayfinder.ResolveRequ
 		return err
 	}
 	renderResolution(w, result)
+	reportMapSession(w, d, result.MapID)
 	return nil
 }
 
 func runMapOutOfScope(cmd *cobra.Command, args []string) {
-	err := runMapOutOfScopeWith(cmdLayerDeps().wayfinderDeps(), os.Stdout, wayfinder.ResolveRequest{
+	err := runMapOutOfScopeWith(mapVerbDeps(), os.Stdout, wayfinder.ResolveRequest{
 		MapID:  args[0],
 		Ticket: args[1],
 		Reason: mapOutOfScopeReason,
@@ -293,6 +401,7 @@ func runMapOutOfScopeWith(d *wayfinder.Deps, w io.Writer, req wayfinder.ResolveR
 		return err
 	}
 	renderResolution(w, result)
+	reportMapSession(w, d, result.MapID)
 	return nil
 }
 
@@ -332,7 +441,7 @@ func runMapArriveWith(d *wayfinder.Deps, w io.Writer, mapID string) error {
 }
 
 func runMapOpen(cmd *cobra.Command, args []string) {
-	err := runMapOpenWith(cmdLayerDeps().wayfinderDeps(), os.Stdout, args[0])
+	err := runMapOpenWith(mapVerbDeps(), os.Stdout, args[0])
 	handleTaskExit(err)
 }
 
@@ -366,6 +475,13 @@ func renderArrival(w io.Writer, result *wayfinder.ArrivalResult) {
 	}
 	if result.KilledSession != "" {
 		fmt.Fprintf(w, "tore down tmux session %s\n", result.KilledSession)
+	}
+	if result.Session != nil {
+		if result.Session.Created {
+			fmt.Fprintf(w, "opened tmux session %s at %s\n", result.Session.Name, result.Session.Dir)
+		} else {
+			fmt.Fprintf(w, "attached tmux session %s\n", result.Session.Name)
+		}
 	}
 }
 

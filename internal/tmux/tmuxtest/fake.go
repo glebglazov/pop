@@ -7,6 +7,7 @@ package tmuxtest
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/glebglazov/pop/internal/tmux"
@@ -152,6 +153,11 @@ type Fake struct {
 	// SplitPanes records SplitPane specs, in order.
 	SplitPanes []tmux.SplitSpec
 
+	// WorkStamps records StampWorkSession: session name -> its Work stamp.
+	// WorkSessions reads it, so a test arranges live Work sessions by writing
+	// here directly.
+	WorkStamps map[string]tmux.WorkSession
+
 	// ClipboardBuffer records the last text LoadBuffer wrote.
 	ClipboardBuffer string
 	// LoadBufferFunc, when set, replaces LoadBuffer entirely — used to inject
@@ -169,6 +175,9 @@ type Fake struct {
 	SplitWindowFunc        func(session, name, dir string) (string, error)
 	NewScaffoldSessionFunc func(name, dir string) (string, error)
 	SplitPaneFunc          func(spec tmux.SplitSpec) (string, error)
+
+	NewSessionWithWindowFunc func(name, dir, window string) (string, error)
+	WorkSessionsFunc         func() ([]tmux.WorkSession, error)
 
 	// nextWindowNum seeds generated window ids for scaffold sessions ("@200",
 	// "@201", …), high enough not to collide with test-arranged ids.
@@ -435,6 +444,50 @@ func (f *Fake) PaneTopics() (map[string]string, error) {
 		}
 	}
 	return result, nil
+}
+
+// --- Work sessions (@pop_work_kind / @pop_work_id) ---
+
+func (f *Fake) NewSessionWithWindow(name, dir, window string) (string, error) {
+	if f.NewSessionWithWindowFunc != nil {
+		return f.NewSessionWithWindowFunc(name, dir, window)
+	}
+	if f.Live == nil {
+		f.Live = map[string]string{}
+	}
+	f.Live[name] = dir
+	id := f.newPaneID()
+	f.addWindowPane(name, window, id)
+	if f.WindowCwd == nil {
+		f.WindowCwd = map[string]string{}
+	}
+	f.WindowCwd[name+":"+window] = dir
+	f.setPaneCwd(id, dir)
+	return id, nil
+}
+
+func (f *Fake) StampWorkSession(session, kind, id string) error {
+	if f.WorkStamps == nil {
+		f.WorkStamps = map[string]tmux.WorkSession{}
+	}
+	f.WorkStamps[session] = tmux.WorkSession{Session: session, Kind: kind, ID: id}
+	return nil
+}
+
+func (f *Fake) WorkSessions() ([]tmux.WorkSession, error) {
+	if f.WorkSessionsFunc != nil {
+		return f.WorkSessionsFunc()
+	}
+	names := make([]string, 0, len(f.WorkStamps))
+	for name := range f.WorkStamps {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]tmux.WorkSession, 0, len(names))
+	for _, name := range names {
+		out = append(out, f.WorkStamps[name])
+	}
+	return out, nil
 }
 
 // --- generic windows / panes ---

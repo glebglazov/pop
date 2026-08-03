@@ -13,6 +13,7 @@ import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/internal/deps"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/ui"
@@ -151,7 +152,7 @@ func TestBuildSessionAwareItems(t *testing.T) {
 		}
 		hist := &history.History{}
 
-		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil)
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil, nil)
 
 		// Should have 4 items: 2 projects + 2 standalone
 		if len(result) != 4 {
@@ -169,6 +170,41 @@ func TestBuildSessionAwareItems(t *testing.T) {
 		}
 	})
 
+	// A Map session is a row like any other, badged from its @pop_work_kind stamp.
+	// The stamp, not the name, is what decides: a session called pop-map-… that
+	// pop never stamped is somebody else's, and a stamped session badges wherever
+	// it sits — including on a project row for a managed worktree.
+	t.Run("work sessions badged by kind", func(t *testing.T) {
+		baseItems := []ui.Item{testItem("app", "/app")}
+		sessionActivity := map[string]int64{
+			project.SessionName("/app"):  now.Unix(),
+			"pop-map-2026-08-03-demo":    now.Unix(),
+			"pop-map-someone-elses-name": now.Unix(),
+		}
+		workSessions := map[string]tmuxmod.WorkSession{
+			"pop-map-2026-08-03-demo": {Session: "pop-map-2026-08-03-demo", Kind: "map", ID: "2026-08-03-demo"},
+			project.SessionName("/app"): {
+				Session: project.SessionName("/app"), Kind: "task-set", ID: "2026-08-03-work",
+			},
+		}
+
+		result := buildSessionAwareItemsWith(baseItems, &history.History{}, sessionActivity, nil, nil, workSessions)
+
+		markerByPath := make(map[string]string)
+		for _, item := range result {
+			markerByPath[item.Path] = item.Marker
+		}
+		if got := markerByPath[tmuxSessionPathPrefix+"pop-map-2026-08-03-demo"]; got != iconMapSession {
+			t.Errorf("map session: Marker = %q, want %q", got, iconMapSession)
+		}
+		if got := markerByPath["/app"]; got != iconTaskSetSession {
+			t.Errorf("task-set session: Marker = %q, want %q", got, iconTaskSetSession)
+		}
+		if got := markerByPath[tmuxSessionPathPrefix+"pop-map-someone-elses-name"]; got != "" {
+			t.Errorf("unstamped session: Marker = %q, want none", got)
+		}
+	})
+
 	t.Run("icon assignment", func(t *testing.T) {
 		baseItems := []ui.Item{
 			testItem("app", "/app"),
@@ -180,7 +216,7 @@ func TestBuildSessionAwareItems(t *testing.T) {
 		}
 		hist := &history.History{}
 
-		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil)
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil, nil)
 
 		iconByPath := make(map[string]string)
 		for _, item := range result {
@@ -206,7 +242,7 @@ func TestBuildSessionAwareItems(t *testing.T) {
 		sessionActivity := map[string]int64{}
 		hist := &history.History{}
 
-		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil)
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil, nil)
 
 		if len(result) != 2 {
 			t.Fatalf("got %d items, want 2", len(result))
@@ -233,7 +269,7 @@ func TestBuildSessionAwareItems(t *testing.T) {
 		}
 		hist := &history.History{}
 
-		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, excludedSessionNames, nil)
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, excludedSessionNames, nil, nil)
 
 		// Should have only 1 item: "api" with dir session icon
 		// "app" should NOT appear as standalone
@@ -259,7 +295,7 @@ func TestBuildSessionAwareItems(t *testing.T) {
 		}
 		hist := &history.History{}
 
-		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil)
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil, nil)
 
 		if len(result) != 1 {
 			t.Fatalf("got %d items, want 1 (session should match project)", len(result))
@@ -279,7 +315,7 @@ func TestBuildSessionAwareItems(t *testing.T) {
 		}
 		hist := &history.History{}
 
-		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil)
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil, nil)
 
 		if len(result) != 1 {
 			t.Fatalf("got %d items, want 1", len(result))
@@ -300,7 +336,7 @@ func TestBuildSessionAwareItems(t *testing.T) {
 		}
 		hist := &history.History{}
 
-		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil)
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil, nil)
 
 		if len(result) != 1 {
 			t.Fatalf("got %d items, want 1", len(result))
@@ -330,7 +366,7 @@ func TestBuildSessionAwareItems_AttentionIndicator(t *testing.T) {
 		}
 		hist := &history.History{}
 
-		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, attentionSessions)
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, attentionSessions, nil)
 
 		iconByPath := make(map[string]string)
 		for _, item := range result {
@@ -356,7 +392,7 @@ func TestBuildSessionAwareItems_AttentionIndicator(t *testing.T) {
 		}
 		hist := &history.History{}
 
-		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, attentionSessions)
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, attentionSessions, nil)
 
 		iconByPath := make(map[string]string)
 		for _, item := range result {
@@ -380,7 +416,7 @@ func TestBuildSessionAwareItems_AttentionIndicator(t *testing.T) {
 		}
 		hist := &history.History{}
 
-		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil)
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil, nil)
 
 		if result[0].Icon != iconDirSession {
 			t.Errorf("nil attention: Icon = %q, want %q", result[0].Icon, iconDirSession)

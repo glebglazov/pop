@@ -34,6 +34,16 @@ type Tmux interface {
 	// InTmux reports whether the caller is running inside a tmux client.
 	InTmux() bool
 
+	// --- Work sessions (@pop_work_kind / @pop_work_id; glossary: Work session) ---
+
+	// NewSessionWithWindow creates a detached session named name rooted at dir
+	// whose first window is named window, returning that window's pane id.
+	NewSessionWithWindow(name, dir, window string) (string, error)
+	// StampWorkSession records the Work kind and container id a session hosts.
+	StampWorkSession(session, kind, id string) error
+	// WorkSessions lists every live session carrying a Work stamp.
+	WorkSessions() ([]WorkSession, error)
+
 	// PaneInfo reads a pane's session name and current foreground command.
 	PaneInfo(paneID string) (PaneInfo, error)
 	// PaneSession resolves just the session name owning a pane.

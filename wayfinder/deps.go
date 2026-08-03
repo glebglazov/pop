@@ -1,6 +1,8 @@
 package wayfinder
 
 import (
+	"os"
+	"strings"
 	"time"
 
 	"github.com/glebglazov/pop/internal/deps"
@@ -21,6 +23,13 @@ type Deps struct {
 	// Tmux is the Map's session surface — `arrive` tears one down. Left nil it
 	// resolves lazily to the real tmux, so a read verb never shells out.
 	Tmux tmux.Tmux
+	// Trunk resolves the Trunk worktree a Map's session is rooted at. It is a
+	// dependency rather than a wayfinder computation because the answer comes
+	// from the repository config and the caller's --trunk override, both of which
+	// live at the CLI edge. Left nil, opening a session refuses with ErrNoTrunk.
+	Trunk func() (string, error)
+	// Exe locates the pop binary the session's overview window re-invokes.
+	Exe func() (string, error)
 }
 
 // DefaultDeps returns dependencies using real implementations.
@@ -51,6 +60,36 @@ func (d *Deps) tmux() tmux.Tmux {
 	}
 	d.Tmux = tmux.New()
 	return d.Tmux
+}
+
+// trunk resolves the Trunk worktree, refusing rather than guessing a directory:
+// a Map session rooted at the wrong checkout would put every grilling window in
+// the wrong tree.
+func (d *Deps) trunk() (string, error) {
+	if d.Trunk == nil {
+		return "", ErrNoTrunk
+	}
+	dir, err := d.Trunk()
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(dir) == "" {
+		return "", ErrNoTrunk
+	}
+	return dir, nil
+}
+
+// exe falls back to the bare name on PATH: a pop that cannot locate its own
+// binary should still leave a session with a working overview window.
+func (d *Deps) exe() string {
+	resolve := d.Exe
+	if resolve == nil {
+		resolve = os.Executable
+	}
+	if path, err := resolve(); err == nil && strings.TrimSpace(path) != "" {
+		return path
+	}
+	return "pop"
 }
 
 func (d *Deps) owner() string {

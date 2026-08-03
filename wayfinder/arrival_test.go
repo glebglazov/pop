@@ -74,6 +74,16 @@ func TestArriveWritesStatusAndTearsDownSessionThenOpenReverses(t *testing.T) {
 	if reopened.Status != MapActive || reopened.Previous != MapArrived {
 		t.Fatalf("open result = %+v, want arrived -> active", reopened)
 	}
+	// Open is both halves: the Map is grillable again *and* its session is back.
+	if reopened.Session == nil || !reopened.Session.Created {
+		t.Fatalf("open session = %+v, want a freshly created one", reopened.Session)
+	}
+	if !fake.HasSession(MapSessionName("demo-map")) {
+		t.Fatal("open did not bring the map's session back")
+	}
+	if len(fake.Attached) == 0 && len(fake.Switched) == 0 {
+		t.Fatal("open did not put the caller in the session")
+	}
 	if got := mapStatusOnDisk(t, d, storageDir, "demo-map"); got != MapActive {
 		t.Fatalf("status after open = %q, want active", got)
 	}

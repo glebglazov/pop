@@ -366,6 +366,126 @@ func TestMapClaimCompletionOffersUnresolvedTickets(t *testing.T) {
 	}
 }
 
+// TestMapSessionPerMapAutoOpensWithoutRelocatingTheCaller walks the session
+// contract from the CLI: `next` spawns a grilling window and moves you there,
+// the in-place writes ensure the session and merely say where it is, and the
+// read verbs touch tmux not at all.
+func TestMapSessionPerMapAutoOpensWithoutRelocatingTheCaller(t *testing.T) {
+	t.Parallel()
+	d, _, _ := mapRegistryTestDeps(t, threeTicketMapFiles("demo"))
+	fake := d.Tmux.(*tmuxtest.Fake)
+	fake.Inside = true
+	session := wayfinder.MapSessionName("demo")
+
+	var registered bytes.Buffer
+	if err := runMapRegisterWith(d, &registered, "demo"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(registered.String(), "opened tmux session "+session) {
+		t.Fatalf("register did not report the session it opened:\n%s", registered.String())
+	}
+	if stamp := fake.WorkStamps[session]; stamp.Kind != "map" || stamp.ID != "demo" {
+		t.Fatalf("work stamp = %+v, want kind map with the map id", stamp)
+	}
+	if len(fake.Switched) != 0 || len(fake.Attached) != 0 {
+		t.Fatalf("register relocated the caller: switched=%v attached=%v", fake.Switched, fake.Attached)
+	}
+
+	var next bytes.Buffer
+	if err := runMapNextWith(d, &next, "demo"); err != nil {
+		t.Fatalf("next: %v", err)
+	}
+	if !strings.Contains(next.String(), "opened grilling window "+session+":01-first") {
+		t.Fatalf("next did not report its window:\n%s", next.String())
+	}
+	panes := fake.Windows[session]["01-first"]
+	if len(panes) != 1 {
+		t.Fatalf("grilling windows = %v, want one named after the ticket", fake.Windows[session])
+	}
+	if got := strings.Join(fake.SentCommands[panes[0]], " "); !strings.Contains(got, "/pop-wayfinder work demo 01") {
+		t.Fatalf("grilling window runs %q, want the work-mode invocation", got)
+	}
+	if len(fake.Switched) != 1 || fake.Switched[0] != panes[0] {
+		t.Fatalf("next did not switch to the grilling window: %v", fake.Switched)
+	}
+
+	// An in-place write from anywhere reports the session and leaves the caller
+	// where they are — an agent resolving from a Task-set pane must not be moved.
+	var claimed bytes.Buffer
+	if err := runMapClaimWith(d, &claimed, "demo", "03"); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if !strings.Contains(claimed.String(), "tmux session "+session+" is live") {
+		t.Fatalf("claim did not report the live session:\n%s", claimed.String())
+	}
+	answerPath := filepath.Join(t.TempDir(), "answer.md")
+	if err := os.WriteFile(answerPath, []byte("Because it is simpler.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var resolved bytes.Buffer
+	if err := runMapResolveWith(d, &resolved, wayfinder.ResolveRequest{
+		MapID: "demo", Ticket: "01", AnswerFile: answerPath,
+	}); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	var ruledOut bytes.Buffer
+	if err := runMapOutOfScopeWith(d, &ruledOut, wayfinder.ResolveRequest{
+		MapID: "demo", Ticket: "03", Reason: "Another effort owns it.",
+	}); err != nil {
+		t.Fatalf("out-of-scope: %v", err)
+	}
+	for name, out := range map[string]string{"resolve": resolved.String(), "out-of-scope": ruledOut.String()} {
+		if !strings.Contains(out, "tmux session "+session+" is live") {
+			t.Fatalf("%s did not report the live session:\n%s", name, out)
+		}
+	}
+	if len(fake.Switched) != 1 || len(fake.Attached) != 0 {
+		t.Fatalf("an in-place write relocated the caller: switched=%v attached=%v", fake.Switched, fake.Attached)
+	}
+
+	// Reads never create tmux state, so they get a fake with nothing arranged.
+	quiet := &tmuxtest.Fake{}
+	d.Tmux = quiet
+	if err := runMapShowWith(d, &bytes.Buffer{}, "demo"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runMapStatusWith(d, &bytes.Buffer{}, false); err != nil {
+		t.Fatal(err)
+	}
+	if len(quiet.Live) != 0 || len(quiet.Windows) != 0 || len(quiet.SentCommands) != 0 ||
+		len(quiet.Switched) != 0 || len(quiet.Attached) != 0 || len(quiet.WorkStamps) != 0 {
+		t.Fatalf("a read verb touched tmux: %+v", quiet)
+	}
+}
+
+// An unresolvable Trunk refuses before anything is claimed, and names the flag
+// that fixes it.
+func TestMapNextRefusesAnUnresolvableTrunk(t *testing.T) {
+	t.Parallel()
+	d, _, _ := mapRegistryTestDeps(t, threeTicketMapFiles("demo"))
+	if err := runMapRegisterWith(d, &bytes.Buffer{}, "demo"); err != nil {
+		t.Fatal(err)
+	}
+	d.Trunk = func() (string, error) { return "", wayfinder.ErrNoTrunk }
+
+	err := runMapNextWith(d, &bytes.Buffer{}, "demo")
+	if err == nil || !strings.Contains(err.Error(), "--trunk <path>") {
+		t.Fatalf("err = %v, want a refusal naming --trunk <path>", err)
+	}
+	// The frontier is untouched, so the ticket is still there once a Trunk is named.
+	d.Trunk = func() (string, error) { return t.TempDir(), nil }
+	var next bytes.Buffer
+	if err := runMapNextWith(d, &next, "demo"); err != nil {
+		t.Fatalf("next after naming a trunk: %v", err)
+	}
+	if !strings.HasPrefix(next.String(), "01\t") {
+		t.Fatalf("next handed out %q, want the first ticket still unclaimed", next.String())
+	}
+	if mapNextCmd.Flags().Lookup("trunk") == nil || mapOpenCmd.Flags().Lookup("trunk") == nil {
+		t.Fatal("the verbs that refuse without a Trunk must offer --trunk")
+	}
+}
+
 // TestMapArriveAndOpenDeclareArrival walks the terminal state from the CLI: the
 // declaration warns about what is unfinished instead of refusing, the session goes
 // with the Map, the arrived Map stays on the table, and open puts it back.
@@ -569,8 +689,15 @@ func mapRegistryTestDeps(t *testing.T, files map[string]string) (*wayfinder.Deps
 		},
 	}
 	t.Cleanup(func() { _ = td.CloseStore() })
-	wd := &wayfinder.Deps{FS: fs, Tasks: td}
-	setCmdLayerDeps(t, &Deps{Dir: filepath.Join(root, "repo"), FS: fs, Tasks: td, Wayfinder: wd})
+	trunk := filepath.Join(root, "repo")
+	wd := &wayfinder.Deps{
+		FS:    fs,
+		Tasks: td,
+		Tmux:  &tmuxtest.Fake{},
+		Trunk: func() (string, error) { return trunk, nil },
+		Exe:   func() (string, error) { return "/bin/pop", nil },
+	}
+	setCmdLayerDeps(t, &Deps{Dir: trunk, FS: fs, Tasks: td, Wayfinder: wd})
 
 	id, err := tasks.IdentityFromCommonDir(td, commonDir)
 	if err != nil {

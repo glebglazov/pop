@@ -67,7 +67,13 @@ func registryFixture(t *testing.T, files map[string]string) (*Deps, string) {
 			t.Fatalf("write %s: %v", rel, err)
 		}
 	}
-	return &Deps{FS: fs, Tasks: td}, id.StorageDir
+	trunk := filepath.Join(root, "repo")
+	return &Deps{
+		FS:    fs,
+		Tasks: td,
+		Trunk: func() (string, error) { return trunk, nil },
+		Exe:   func() (string, error) { return "/bin/pop", nil },
+	}, id.StorageDir
 }
 
 // oneTicketMap is the smallest Map that registers: a destination plus one ticket
