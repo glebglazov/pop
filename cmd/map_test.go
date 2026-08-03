@@ -20,7 +20,6 @@ func TestMapCommandTree(t *testing.T) {
 	t.Parallel()
 	for _, path := range [][]string{
 		{"map", "status"},
-		{"map", "show"},
 		{"map", "register"},
 		{"map", "next"},
 		{"map", "claim"},
@@ -42,7 +41,11 @@ func TestMapCommandTree(t *testing.T) {
 	if cmd, _, _ := rootCmd.Find([]string{"wayfinder", "status"}); cmd.CommandPath() != "pop" {
 		t.Fatalf("pop wayfinder should not exist; Find resolved %q", cmd.CommandPath())
 	}
-	for _, cmd := range []*cobra.Command{mapCmd, mapStatusCmd, mapShowCmd, mapRegisterCmd, mapNextCmd, mapClaimCmd, mapResolveCmd, mapOutOfScopeCmd, mapSpawnedCmd, mapArriveCmd, mapOpenCmd, mapArchiveCmd, mapUnarchiveCmd} {
+	// show folded into status: a hard cut, no alias.
+	if cmd, _, _ := rootCmd.Find([]string{"map", "show"}); cmd.CommandPath() != "pop map" {
+		t.Fatalf("pop map show should not exist; Find resolved %q", cmd.CommandPath())
+	}
+	for _, cmd := range []*cobra.Command{mapCmd, mapStatusCmd, mapRegisterCmd, mapNextCmd, mapClaimCmd, mapResolveCmd, mapOutOfScopeCmd, mapSpawnedCmd, mapArriveCmd, mapOpenCmd, mapArchiveCmd, mapUnarchiveCmd} {
 		if strings.Contains(cmd.CommandPath(), "wayfinder") {
 			t.Fatalf("command path still says wayfinder: %q", cmd.CommandPath())
 		}
@@ -196,7 +199,8 @@ func TestMapNextAndClaimDriveParallelGrilling(t *testing.T) {
 		t.Fatalf("steal output = %q", stolen.String())
 	}
 
-	// `pop map show` is where a human sees who holds what; the files never say.
+	// `pop map status <map-id>` is where a human sees who holds what; the files
+	// never say.
 	var shown bytes.Buffer
 	if err := runMapShowWith(d, &shown, "demo"); err != nil {
 		t.Fatal(err)
@@ -401,7 +405,7 @@ func TestMapSpawnedRecordsTheHandoff(t *testing.T) {
 		}
 	}
 
-	// `pop map show` prints the lineage block with the set's status read fresh. No
+	// `pop map status <map-id>` prints the lineage block with the set's status read fresh. No
 	// such set exists in this fixture's storage, and the id still renders: the Map
 	// records what the effort spawned, so a set that resolves to nothing is
 	// reported, never dropped.
@@ -669,7 +673,7 @@ func TestMapShellCompletionOffersMapIDs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, cmd := range []*cobra.Command{mapShowCmd, mapRegisterCmd, mapArchiveCmd} {
+	for _, cmd := range []*cobra.Command{mapStatusCmd, mapRegisterCmd, mapArchiveCmd} {
 		got, directive := cmd.ValidArgsFunction(cmd, nil, "")
 		if !slices.Equal(got, []string{"visible"}) {
 			t.Fatalf("%s completion = %v, want [visible]", cmd.Name(), got)
@@ -682,7 +686,7 @@ func TestMapShellCompletionOffersMapIDs(t *testing.T) {
 	if !slices.Equal(got, []string{"filed-away"}) {
 		t.Fatalf("unarchive completion = %v, want [filed-away]", got)
 	}
-	if second, _ := mapShowCmd.ValidArgsFunction(mapShowCmd, []string{"visible"}, ""); second != nil {
+	if second, _ := mapStatusCmd.ValidArgsFunction(mapStatusCmd, []string{"visible"}, ""); second != nil {
 		t.Fatalf("completion offered a second positional: %v", second)
 	}
 }
@@ -697,6 +701,21 @@ func TestMapShowUnknownMap(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unknown wayfinder map") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+// TestMapStatusAcceptsOptionalMapArg pins the Args validator show folded into:
+// bare status still lists, and a single map id still resolves to detail.
+func TestMapStatusAcceptsOptionalMapArg(t *testing.T) {
+	t.Parallel()
+	if err := mapStatusCmd.Args(mapStatusCmd, []string{}); err != nil {
+		t.Fatalf("bare status: %v", err)
+	}
+	if err := mapStatusCmd.Args(mapStatusCmd, []string{"demo"}); err != nil {
+		t.Fatalf("status with one map id: %v", err)
+	}
+	if err := mapStatusCmd.Args(mapStatusCmd, []string{"demo", "extra"}); err == nil {
+		t.Fatal("expected error for two positional args")
 	}
 }
 

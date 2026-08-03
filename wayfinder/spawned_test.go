@@ -93,8 +93,8 @@ func writeFixtureFile(t *testing.T, path, content string) {
 // field: from a Map you can see whether the work it spawned has landed. It pins
 // the three facts that make the block trustworthy — the status is the set's own
 // and read at render time, an id that resolves to nothing still renders, and an
-// archived set still renders with its status — and that `pop map show` prints the
-// very same lines the dashboard's detail pane does.
+// archived set still renders with its status — and that `pop map status
+// <map-id>` prints the very same lines the dashboard's detail pane does.
 func TestSpawnedSetsResolveLiveAndRenderOnBothSurfaces(t *testing.T) {
 	d, storageDir, m := spawnedFixture(t)
 

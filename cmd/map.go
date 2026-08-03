@@ -47,17 +47,17 @@ appended to the manifest's ` + "`spawned_sets`" + ` and ` + "`## Spawned sets`" 
 re-rendered from it. It is idempotent, and it is the only writer of that section —
 appending a set there by hand is lost on the next resolve. There is no reverse
 flag on ` + "`pop tasks register`" + `; the set's own index.json carries
-` + "`source_map`" + ` as the other half of the link. ` + "`pop map show`" + ` prints
+` + "`source_map`" + ` as the other half of the link. ` + "`pop map status <map-id>`" + ` prints
 those sets back with their live status and task tally — the same block the Work
 dashboard's detail pane shows, read fresh from the sets and stored nowhere. A set
 that resolves to nothing renders ` + "`(missing)`" + ` rather than disappearing.
 
 Every Map gets a tmux session of its own, ` + "`pop-map-<map-id>`" + `, rooted at the
-Trunk worktree: window 1 runs ` + "`pop map show`" + ` and ` + "`pop map next`" + ` spawns a
+Trunk worktree: window 1 runs ` + "`pop map status <map-id>`" + ` and ` + "`pop map next`" + ` spawns a
 grilling window per ticket and switches you there. The other writes auto-open —
 ` + "`register`" + `, ` + "`claim`" + `, ` + "`resolve`" + `, ` + "`out-of-scope`" + ` and ` + "`spawned`" + ` run
 in place, ensure the session exists and report where it is, so a verb called from
-a Task-set pane never relocates you. ` + "`show`" + ` and ` + "`status`" + ` create no
+a Task-set pane never relocates you. ` + "`status`" + ` creates no
 tmux state at all. Pass ` + "`--trunk <path>`" + ` when pop cannot work out the Trunk
 on its own.
 
@@ -71,17 +71,10 @@ visible; ` + "`pop map archive`" + ` is what hides one. A ` + "`Status:`" + ` li
 }
 
 var mapStatusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "Show map status",
-	Args:  cobra.NoArgs,
+	Use:   "status [MAP]",
+	Short: "List every map, or show one map's detail",
+	Args:  cobra.MaximumNArgs(1),
 	Run:   runMapStatus,
-}
-
-var mapShowCmd = &cobra.Command{
-	Use:   "show MAP",
-	Short: "Show one map in detail",
-	Args:  cobra.ExactArgs(1),
-	Run:   runMapShow,
 }
 
 // mapRegisterCmd deliberately carries no --managed flag: wayfinding writes
@@ -187,7 +180,6 @@ var mapUnarchiveCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(mapCmd)
 	mapCmd.AddCommand(mapStatusCmd)
-	mapCmd.AddCommand(mapShowCmd)
 	mapCmd.AddCommand(mapRegisterCmd)
 	mapCmd.AddCommand(mapNextCmd)
 	mapCmd.AddCommand(mapClaimCmd)
@@ -268,7 +260,16 @@ func reportMapSession(w io.Writer, d *wayfinder.Deps, mapID string) {
 	fmt.Fprintf(w, "tmux session %s is live\n", session.Name)
 }
 
+// runMapStatus is `pop map status [MAP]`: bare, it lists every map; given a map
+// id it prints that one map's detail, folding the former `pop map show` verb in
+// (ADR-0181's sibling consistency fix — `pop tasks status` already carries both
+// halves of this same question).
 func runMapStatus(cmd *cobra.Command, args []string) {
+	if len(args) > 0 {
+		err := runMapShowWith(cmdLayerDeps().wayfinderDeps(), os.Stdout, args[0])
+		handleTaskExit(err)
+		return
+	}
 	err := runMapStatusWith(cmdLayerDeps().wayfinderDeps(), os.Stdout, mapStatusAll)
 	handleTaskExit(err)
 }
@@ -279,11 +280,6 @@ func runMapStatusWith(d *wayfinder.Deps, w io.Writer, includeAll bool) error {
 		return err
 	}
 	return wayfinder.RenderStatus(w, snap)
-}
-
-func runMapShow(cmd *cobra.Command, args []string) {
-	err := runMapShowWith(cmdLayerDeps().wayfinderDeps(), os.Stdout, args[0])
-	handleTaskExit(err)
 }
 
 func runMapShowWith(d *wayfinder.Deps, w io.Writer, mapID string) error {

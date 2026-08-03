@@ -48,7 +48,8 @@ func (s SpawnedSet) Line() string {
 
 // ResolveSpawnedSets reads the live status of every set a Map spawned, in the
 // order the Map recorded them. It is the one derivation both read surfaces use —
-// the dashboard's detail pane and `pop map show` — so the two can never disagree.
+// the dashboard's detail pane and `pop map status <map-id>` — so the two can
+// never disagree.
 func ResolveSpawnedSets(d *Deps, m Map) []SpawnedSet {
 	return newSetStatusTable(d, defPathForMap(m)).resolve(m.SpawnedSets)
 }

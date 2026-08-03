@@ -485,7 +485,7 @@ hours. A ticket is **unblocked** when every blocker is `resolved`; the
 and the only thing `next` hands out.
 
 `next` also spawns the ticket's grilling window inside the map's own tmux session
-`pop-map-<map-id>` — window 1 there runs `pop map show` — and switches you to it.
+`pop-map-<map-id>` — window 1 there runs `pop map status <map-id>` — and switches you to it.
 `pop map open <map-id>` creates or attaches that session on its own. The other
 writes (`register`, `claim`, `resolve`, `out-of-scope`) run **in place**: they
 ensure the session exists, tell you where it is, and never move you, so calling

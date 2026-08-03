@@ -11,9 +11,9 @@ import (
 	"github.com/glebglazov/pop/work/ref"
 )
 
-// mapOverviewWindow is window 1 of a Map's session. It runs `pop map show`, so
-// attaching to a Map opens on what the Map is deciding rather than on a bare
-// shell, and every later window in the session is a grilling window.
+// mapOverviewWindow is window 1 of a Map's session. It runs `pop map status
+// <map-id>`, so attaching to a Map opens on what the Map is deciding rather than
+// on a bare shell, and every later window in the session is a grilling window.
 const mapOverviewWindow = "map"
 
 // ErrNoTrunk refuses to root a Map's session anywhere but the Trunk worktree.
@@ -193,7 +193,7 @@ func grillingWindowName(ticket Ticket) string {
 // rather than whatever `pop` resolves to on PATH, so a session opened by a
 // development build shows that build's view of the Map.
 func mapOverviewCommand(d *Deps, mapID string) string {
-	return shellQuote(d.exe()) + " map show " + shellQuote(mapID)
+	return shellQuote(d.exe()) + " map status " + shellQuote(mapID)
 }
 
 func shellQuote(s string) string {

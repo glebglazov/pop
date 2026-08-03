@@ -49,8 +49,8 @@ func wayfinderSpawnFixture(t *testing.T) (*drain.Deps, *config.Config, Dashboard
 
 const (
 	wayfinderMapID = "2026-07-01-active"
-	// mapOverviewWindow mirrors wayfinder's window 1: it runs `pop map show`, not
-	// a grilling agent, so the assertions below step over it.
+	// mapOverviewWindow mirrors wayfinder's window 1: it runs `pop map status
+	// <map-id>`, not a grilling agent, so the assertions below step over it.
 	mapOverviewWindow = "map"
 )
 

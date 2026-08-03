@@ -39,8 +39,8 @@ func TestEnsureMapSessionCreatesStampedSessionAtTheTrunk(t *testing.T) {
 	if len(panes) != 1 {
 		t.Fatalf("window 1 = %v, want one pane in a window named map", fake.Windows[name])
 	}
-	if got := strings.Join(fake.SentCommands[panes[0]], " "); !strings.Contains(got, "/opt/pop/bin/pop map show demo-map") {
-		t.Fatalf("window 1 runs %q, want pop map show", got)
+	if got := strings.Join(fake.SentCommands[panes[0]], " "); !strings.Contains(got, "/opt/pop/bin/pop map status demo-map") {
+		t.Fatalf("window 1 runs %q, want pop map status", got)
 	}
 	if stamp := fake.WorkStamps[name]; stamp.Kind != "map" || stamp.ID != "demo-map" {
 		t.Fatalf("work stamp = %+v, want kind map with the map id", stamp)
