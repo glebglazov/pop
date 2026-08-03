@@ -4,6 +4,13 @@ status: accepted
 
 # Agent verification is a pre-approval drain phase that produces remediation tasks
 
+> ⚠️ **Amended by [ADR-0179](0179-human-completion-and-verification-are-two-axes.md)** for
+> one case: on a set a human's own `pop tasks complete` carried terminal, "all AFK done"
+> does *not* derive NEEDS-VERIFY and a non-PASS verdict does not park the set or spawn a
+> **Remediation task**. The Verifier still runs and its verdict is still recorded — it
+> surfaces as a **Verification mark** beside the human's terminal status instead of
+> becoming it. Everything below still describes every set that reached terminal on its own.
+
 Once a Drain exhausts a Task set's open AFK work, an independent **Verifier** agent judges the whole set — acceptance criteria (authoritative), task bodies, the accumulated diff, and the optional `prd.md` (enrichment; PRD-less sets verify fully) — before any human is asked to approve. When enabled, this makes "all AFK done" derive **NEEDS-VERIFY**, not immediately Done: a set reaches Done (pure-AFK) or AWAITING-APPROVAL (has a terminal HITL task) only with a **PASS** verdict at the current work SHA.
 
 The feature is **gated by user config and off by default**: verification runs only when `[tasks.verify].enabled = true` (explicit opt-in). Unconfigured, the Verifier never runs, status derivation never gates Done on a verdict, and Pop behaves exactly as before this feature. When enabled, a set may narrow that with `"verify": false` (per-set opt-out only — user config is the master gate, so there is no per-set opt-*in* while the feature is globally off).

@@ -294,14 +294,15 @@ func dashboardMenuItems(kinds workKinds, row DashboardRow) []dashboardMenuItem {
 }
 
 // dashboardVerifyEligible reports whether the verify verb applies to row: a set
-// a verdict can still move (NEEDS-VERIFY or VERIFY-FAILED) that no live drain
-// holds (ADR-0123). It is the single guard shared by the menu (inclusion) and
-// dispatch (self-containment).
+// a verdict can still move that no live drain holds (ADR-0123). It keys on the
+// verification mark rather than the status, so a human-completed set — DONE with
+// an unverified mark — still offers the verb. It is the single guard shared by
+// the menu (inclusion) and dispatch (self-containment).
 func dashboardVerifyEligible(row DashboardRow) bool {
 	if row.LiveDrain {
 		return false
 	}
-	return row.RawStatus == tasks.StatusNeedsVerify || row.RawStatus == tasks.StatusVerifyFailed
+	return row.VerifyMark == tasks.VerifyMarkUnverified || row.VerifyMark == tasks.VerifyMarkFailed
 }
 
 // dashboardFoldEligible reports whether the fold verb applies to row: a bound DONE

@@ -1189,6 +1189,7 @@ func TestDashboardDetailViewClampsToBodyHeight(t *testing.T) {
 // appends the Verified-at SHA badge with three-state colouring.
 func TestDashboardStatusAppendsVerifiedAtSHA(t *testing.T) {
 	drifted := DashboardRow{
+		VerifyMark:        tasks.VerifyMarkVerified,
 		VerifiedAtSHA:     "abcdef1234567890",
 		VerifiedAtDrifted: true,
 		RawStatus:         tasks.StatusAwaitingApproval,
@@ -1205,6 +1206,7 @@ func TestDashboardStatusAppendsVerifiedAtSHA(t *testing.T) {
 	}
 
 	atHead := DashboardRow{
+		VerifyMark:        tasks.VerifyMarkVerified,
 		VerifiedAtSHA:     "abcdef1234567890",
 		VerifiedAtDrifted: false,
 		RawStatus:         tasks.StatusDone,
@@ -1307,6 +1309,7 @@ func TestDashboardDetailHeaderIncludesVerifiedAtSHA(t *testing.T) {
 	m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{})
 	drifted := DashboardRow{
 		ID: "demo", RawStatus: tasks.StatusAwaitingApproval,
+		VerifyMark:        tasks.VerifyMarkVerified,
 		VerifiedAtSHA:     "abcdef1234567890",
 		VerifiedAtDrifted: true,
 		Headline:          "1/1 done",
@@ -1329,7 +1332,7 @@ func TestDashboardDetailHeaderIncludesVerifiedAtSHA(t *testing.T) {
 		t.Fatalf("header missing progress headline: %q", header)
 	}
 
-	atHead := DashboardRow{ID: "demo", RawStatus: tasks.StatusDone, VerifiedAtSHA: "abcdef1234567890"}
+	atHead := DashboardRow{ID: "demo", RawStatus: tasks.StatusDone, VerifyMark: tasks.VerifyMarkVerified, VerifiedAtSHA: "abcdef1234567890"}
 	atHead.ID = "demo"
 	if headHeader := m.detailHeader(atHead); !strings.Contains(headHeader, "\x1b[32mverified @") {
 		t.Fatalf("at-HEAD header should be green: %q", headHeader)
@@ -1347,6 +1350,7 @@ func TestDashboardDetailHeaderIncludesVerifiedAtSHA(t *testing.T) {
 func TestDashboardTableRendersVerifiedAtSHA(t *testing.T) {
 	row := DashboardRow{
 		Project:           "pop",
+		VerifyMark:        tasks.VerifyMarkVerified,
 		VerifiedAtSHA:     "abcdef1234567890",
 		VerifiedAtDrifted: true,
 		Worktree:          "main",
@@ -4413,7 +4417,7 @@ func TestDashboardStatusAppendsAutoDrain(t *testing.T) {
 
 	// The yellow verify suffix must still render and precede the uncolored
 	// auto-drain suffix: <label> · verified @ <sha> · auto-drain.
-	ordered := dashboardStatusCellStyled(testKinds(), DashboardRow{VerifiedAtSHA: "abcdef1234567890", VerifiedAtDrifted: true, RawStatus: tasks.StatusAwaitingApproval, AutoDrain: true})
+	ordered := dashboardStatusCellStyled(testKinds(), DashboardRow{VerifyMark: tasks.VerifyMarkVerified, VerifiedAtSHA: "abcdef1234567890", VerifiedAtDrifted: true, RawStatus: tasks.StatusAwaitingApproval, AutoDrain: true})
 	vIdx := strings.Index(ordered, "verified @")
 	aIdx := strings.Index(ordered, "auto-drain")
 	if vIdx < 0 || aIdx < 0 || vIdx > aIdx {

@@ -79,11 +79,7 @@ var dashboardManagedWtStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("39"
 // three-state colour rule (ADR-0156): green at HEAD, yellow when drifted, red
 // unverified.
 func dashboardVerifiedAtBadgeStyled(row DashboardRow) string {
-	badge := tasks.DeriveVerifiedAtBadge(tasks.Row{
-		Status:            row.RawStatus,
-		VerifiedAtSHA:     row.VerifiedAtSHA,
-		VerifiedAtDrifted: row.VerifiedAtDrifted,
-	})
+	badge := tasks.VerifiedAtBadgeFor(row)
 	text := tasks.VerifiedAtBadgeText(badge)
 	if text == "" {
 		return ""
@@ -93,7 +89,7 @@ func dashboardVerifiedAtBadgeStyled(row DashboardRow) string {
 		return dashboardVerifiedAtAtHeadStyle.Render(text)
 	case tasks.VerifiedAtDrifted:
 		return dashboardVerifiedAtDriftedStyle.Render(text)
-	case tasks.VerifiedAtUnverified:
+	case tasks.VerifiedAtUnverified, tasks.VerifiedAtFailed:
 		return dashboardVerifiedAtUnverifiedStyle.Render(text)
 	default:
 		return text

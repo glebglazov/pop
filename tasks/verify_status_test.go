@@ -479,17 +479,17 @@ func TestRenderVerifiedAtBadge(t *testing.T) {
 	t.Parallel()
 	plainOut := outputFor(io.Discard)
 
-	doneDrifted := Row{ID: "done", Status: StatusDone, Progress: "1/1 done", VerifiedAtSHA: "abcdef1234567890", VerifiedAtDrifted: true}
+	doneDrifted := Row{ID: "done", Status: StatusDone, Progress: "1/1 done", VerifyMark: VerifyMarkVerified, VerifiedAtSHA: "abcdef1234567890", VerifiedAtDrifted: true}
 	if got := rowDetail(plainOut, doneDrifted); !strings.Contains(got, "verified @ abcdef123456") {
 		t.Fatalf("drifted DONE detail missing suffix: %q", got)
 	}
 
-	doneAtHead := Row{ID: "done", Status: StatusDone, Progress: "1/1 done", VerifiedAtSHA: "abcdef1234567890", VerifiedAtDrifted: false}
+	doneAtHead := Row{ID: "done", Status: StatusDone, Progress: "1/1 done", VerifyMark: VerifyMarkVerified, VerifiedAtSHA: "abcdef1234567890", VerifiedAtDrifted: false}
 	if got := rowDetail(plainOut, doneAtHead); !strings.Contains(got, "verified @ abcdef123456") {
 		t.Fatalf("at-HEAD DONE detail missing suffix: %q", got)
 	}
 
-	await := Row{ID: "await", Status: StatusAwaitingApproval, Progress: "1/1 done", VerifiedAtSHA: "abcdef1234567890", VerifiedAtDrifted: true}
+	await := Row{ID: "await", Status: StatusAwaitingApproval, Progress: "1/1 done", VerifyMark: VerifyMarkVerified, VerifiedAtSHA: "abcdef1234567890", VerifiedAtDrifted: true}
 	if got := rowDetail(plainOut, await); !strings.Contains(got, "verified @ abcdef123456") {
 		t.Fatalf("AWAITING-APPROVAL detail missing suffix: %q", got)
 	}

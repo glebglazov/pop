@@ -296,7 +296,10 @@ func assistDerivedStatus(d *Deps, cfg *config.Config, m *Manifest, setID, runtim
 	}
 	row := Row{ID: setID, Status: status}
 	decorateRowWithVerdict(&row, m, workSHA, current, latestPass)
-	if row.Status == StatusVerifyFailed {
+	// Findings key on the mark, not the status: on a human-completed set the
+	// verdict is only a mark, and the assistance prompt must still carry what the
+	// Verifier found.
+	if row.VerifyMark == VerifyMarkFailed {
 		findings = row.VerifyFindings
 	}
 	return row.Status, findings, workSHA

@@ -128,6 +128,15 @@ func ApplyTransitions(d *Deps, m *Manifest, projectPath string, ops []Transition
 			m.Tasks[idx].FailedAfter = nil
 		}
 	}
+	// Record the human-completion bit when a human's own completion is what carried
+	// the set into the terminal zone (ADR-0086's gate then reports a mark instead of
+	// demoting the status). The chokepoint is the only place that knows both facts —
+	// who drove the edge and what the set became — so no verb re-derives it. The
+	// converse, clearing the bit when the set leaves terminal, belongs to the
+	// manifest writer: paths other than a transition can move a set out.
+	if humanCarriedTerminal(m, ops) {
+		m.HumanCompleted = true
+	}
 	if err := WriteManifestAtomic(d, m); err != nil {
 		return manualRepairErr(fmt.Errorf("update manifest after transition progress: %w", err))
 	}
@@ -155,6 +164,22 @@ func ApplyTransitions(d *Deps, m *Manifest, projectPath string, ops []Transition
 		}
 	}
 	return nil
+}
+
+// humanCarriedTerminal reports whether this batch is a human completing work
+// that leaves the set terminal — the assertion "this is done" the Verify gate
+// must not contradict. Only a human →done edge counts: an executor draining the
+// last task is exactly the case that still owes a verdict, and a human skip or
+// reopen carries the set somewhere the verdict never gated.
+func humanCarriedTerminal(m *Manifest, ops []TransitionOp) bool {
+	human := false
+	for _, op := range ops {
+		if op.Actor == ActorHuman && op.To == TaskDone {
+			human = true
+			break
+		}
+	}
+	return human && TerminalStatus(DeriveStatus(m))
 }
 
 func manualRepairErr(err error) *ExitError {

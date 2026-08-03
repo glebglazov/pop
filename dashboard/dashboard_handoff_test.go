@@ -159,6 +159,7 @@ func TestDashboardHandoffVerifySpawnsFocusesAndQuits(t *testing.T) {
 	row.RuntimePath = repo
 	row.ProjectPath = repo
 	row.RawStatus = tasks.StatusNeedsVerify
+	row.VerifyMark = tasks.VerifyMarkUnverified
 	rt.Fake.Inside = true
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
@@ -199,6 +200,7 @@ func TestDashboardHandoffVerifyReusesWithoutResend(t *testing.T) {
 	row.RuntimePath = repo
 	row.ProjectPath = repo
 	row.RawStatus = tasks.StatusNeedsVerify
+	row.VerifyMark = tasks.VerifyMarkUnverified
 	rt.SessionLive = true
 	rt.WindowNames["pop-work"] = true
 	seedTaggedPane(rt, "%9", tmuxmod.TagVerify, setID)

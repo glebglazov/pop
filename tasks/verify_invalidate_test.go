@@ -255,11 +255,14 @@ func TestSpawnRemediationTaskInvalidatesVerifyVerdicts(t *testing.T) {
 	}
 }
 
-// TestResetTaskInvalidationLeavesSetNeedsVerifyAfterHEADMoves: a terminal set
+// TestResetTaskInvalidationLeavesSetUnverifiedAfterHEADMoves: a terminal set
 // with a cached PASS verdict is immunized against a moved HEAD; after reopening
-// invalidates that PASS, the set (once completed again at the new SHA) derives
-// NEEDS-VERIFY until a fresh PASS is recorded (ADR-0096).
-func TestResetTaskInvalidationLeavesSetNeedsVerifyAfterHEADMoves(t *testing.T) {
+// invalidates that PASS, the set (once completed again at the new SHA) carries no
+// verified badge until a fresh PASS is recorded (ADR-0096). The re-completion
+// here is a human's, so the invalidation shows as an unverified mark beside DONE
+// rather than as NEEDS-VERIFY — the verdict's absence never contradicts the
+// human's assertion.
+func TestResetTaskInvalidationLeavesSetUnverifiedAfterHEADMoves(t *testing.T) {
 	env := setupCustomTaskFixture(t, []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
 	})
@@ -298,8 +301,14 @@ func TestResetTaskInvalidationLeavesSetNeedsVerifyAfterHEADMoves(t *testing.T) {
 	if row == nil {
 		t.Fatal("refresh missing demo row")
 	}
-	if row.Status != StatusNeedsVerify {
-		t.Fatalf("status = %q, want NEEDS-VERIFY", row.Status)
+	if row.Status != StatusDone {
+		t.Fatalf("status = %q, want DONE (the human completed it)", row.Status)
+	}
+	if row.VerifyMark != VerifyMarkUnverified {
+		t.Fatalf("mark = %q, want unverified (the PASS was invalidated)", row.VerifyMark)
+	}
+	if row.VerifiedAtSHA != "" {
+		t.Fatalf("VerifiedAtSHA = %q, want empty (no PASS survives the reopen)", row.VerifiedAtSHA)
 	}
 }
 

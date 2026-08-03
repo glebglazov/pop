@@ -122,6 +122,17 @@ type Manifest struct {
 	// it: `spec.md`'s `Source map:` line stays human-facing prose and is never
 	// parsed.
 	SourceMap string
+	// HumanCompleted records that a human's own `complete` is what carried this set
+	// terminal, read from and written back as the set-level `human_completed` key.
+	// It lives in the manifest rather than the store because it is an assertion
+	// about the set's work, not about a checkout's HEAD: Verify verdicts are keyed
+	// by (repo, set, work SHA) because a Verifier's PASS expires when the branch
+	// moves (ADR-0096), whereas "I am okay with this" does not — so the bit travels
+	// with the set, survives later commits, and needs no SHA.
+	//
+	// It is cleared on the way out of the terminal zone (see WriteManifestAtomic):
+	// a reopened task means the assertion no longer describes the set.
+	HumanCompleted bool
 	// DeprecatedKeys names retired set-level keys (`worktree`, `auto_drain`) that
 	// are still present in the manifest but no longer read (ADR-0115). They are
 	// ignored — never MALFORMED — and preserved verbatim in Unknown; register
@@ -198,6 +209,16 @@ func parseManifestJSON(data []byte, m *Manifest) error {
 			// The raw value rides through Unknown so a rewrite never eats it.
 			if err := json.Unmarshal(v, &m.SourceMap); err != nil {
 				m.Errors = append(m.Errors, "source_map: must be a map id string")
+				m.Unknown[k] = v
+			}
+		case "human_completed":
+			// A malformed value reads as absent rather than MALFORMED: this key is
+			// hand-editable, and a typo in it must not hide what the set's tasks say.
+			// Absent means "no human assertion", which is the pre-existing behaviour —
+			// verification still gates the status — so the fail-safe direction is off.
+			// The raw value rides through Unknown so a rewrite never eats it.
+			if err := json.Unmarshal(v, &m.HumanCompleted); err != nil {
+				m.HumanCompleted = false
 				m.Unknown[k] = v
 			}
 		default:
@@ -339,6 +360,19 @@ func WriteManifestAtomic(d *Deps, m *Manifest) error {
 			return err
 		}
 		out["source_map"] = sourceMap
+	}
+	// The human-completion bit never outlives the terminal it describes. Every
+	// path that changes a set's tasks — the transition chokepoint, a spawned
+	// Remediation task — lands here, so clearing it on the way out of the terminal
+	// zone is one rule in one place rather than a clear at each verb. A manifest
+	// that does not validate is left alone: its derived status is MALFORMED, which
+	// says nothing about whether the work is finished.
+	delete(out, "human_completed")
+	if m.HumanCompleted && m.Valid && !TerminalStatus(DeriveStatus(m)) {
+		m.HumanCompleted = false
+	}
+	if m.HumanCompleted {
+		out["human_completed"] = json.RawMessage("true")
 	}
 
 	data, err := json.MarshalIndent(out, "", "  ")

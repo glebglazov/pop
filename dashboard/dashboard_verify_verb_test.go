@@ -13,8 +13,9 @@ import (
 )
 
 // TestDashboardVerifyVerbConditionalInclusion asserts the `v` verify verb (ADR-0123)
-// is offered only on rows a verdict can still move — NEEDS-VERIFY and VERIFY-FAILED —
-// and is absent for every other status and whenever a live drain holds the set.
+// is offered only on rows a verdict can still move — the unverified and
+// verify-failed marks, whatever status carries them — and is absent for every
+// unmarked row and whenever a live drain holds the set.
 func TestDashboardVerifyVerbConditionalInclusion(t *testing.T) {
 	has := func(row DashboardRow) bool {
 		for _, item := range dashboardMenuItems(testKinds(), row) {
@@ -25,10 +26,19 @@ func TestDashboardVerifyVerbConditionalInclusion(t *testing.T) {
 		return false
 	}
 
-	eligible := []tasks.TaskSetStatus{tasks.StatusNeedsVerify, tasks.StatusVerifyFailed}
-	for _, st := range eligible {
-		if !has(DashboardRow{ID: "s", RawStatus: st}) {
-			t.Fatalf("verify verb missing on a %s row", st)
+	// A human-completed set reads DONE and still owes a verdict — the verb must
+	// follow the mark, not the status, or verification would be skipped for exactly
+	// the set that deferred it.
+	eligible := []DashboardRow{
+		{ID: "s", RawStatus: tasks.StatusNeedsVerify, VerifyMark: tasks.VerifyMarkUnverified},
+		{ID: "s", RawStatus: tasks.StatusVerifyFailed, VerifyMark: tasks.VerifyMarkFailed},
+		{ID: "s", RawStatus: tasks.StatusDone, VerifyMark: tasks.VerifyMarkUnverified},
+		{ID: "s", RawStatus: tasks.StatusDone, VerifyMark: tasks.VerifyMarkFailed},
+		{ID: "s", RawStatus: tasks.StatusAwaitingApproval, VerifyMark: tasks.VerifyMarkUnverified},
+	}
+	for _, row := range eligible {
+		if !has(row) {
+			t.Fatalf("verify verb missing on a %s row marked %q", row.RawStatus, row.VerifyMark)
 		}
 	}
 
@@ -38,15 +48,20 @@ func TestDashboardVerifyVerbConditionalInclusion(t *testing.T) {
 	}
 	for _, st := range ineligible {
 		if has(DashboardRow{ID: "s", RawStatus: st}) {
-			t.Fatalf("verify verb present on a %s row", st)
+			t.Fatalf("verify verb present on an unmarked %s row", st)
 		}
+	}
+	// A cleared set carries no work a verdict could move.
+	if has(DashboardRow{ID: "s", RawStatus: tasks.StatusDone, VerifyMark: tasks.VerifyMarkVerified}) {
+		t.Fatal("verify verb present on a verified DONE row")
 	}
 
 	// A live drain hides the verb even on an otherwise-eligible row: a plain verify
 	// is not quiescence-gated, so the running drain verifies itself.
-	for _, st := range eligible {
-		if has(DashboardRow{ID: "s", RawStatus: st, LiveDrain: true}) {
-			t.Fatalf("verify verb present on a live-drained %s row", st)
+	for _, row := range eligible {
+		row.LiveDrain = true
+		if has(row) {
+			t.Fatalf("verify verb present on a live-drained %s row", row.RawStatus)
 		}
 	}
 }

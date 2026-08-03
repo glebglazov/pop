@@ -207,8 +207,14 @@ func TestWorkRowStatusCellComposition(t *testing.T) {
 		want string
 	}{
 		{"plain", work.Container{RawStatus: StatusBlocked}, "BLOCKED"},
-		{"verified drifted", work.Container{VerifiedAtSHA: "abc123", VerifiedAtDrifted: true, RawStatus: StatusAwaitingApproval}, "AWAITING-APPROVAL · verified @ abc123"},
+		{"verified drifted", work.Container{VerifyMark: VerifyMarkVerified, VerifiedAtSHA: "abc123", VerifiedAtDrifted: true, RawStatus: StatusAwaitingApproval}, "AWAITING-APPROVAL · verified @ abc123"},
 		{"unverified", work.Container{RawStatus: StatusNeedsVerify}, "NEEDS-VERIFY · unverified"},
+		// The badge follows the mark, not the status: a human-completed set reads
+		// DONE and shows whichever verification outcome rides beside it, while a
+		// terminal row with no mark at all (verification disabled) shows none.
+		{"human-completed unverified", work.Container{RawStatus: StatusDone, VerifyMark: VerifyMarkUnverified}, "DONE · unverified"},
+		{"human-completed verify-failed", work.Container{RawStatus: StatusDone, VerifyMark: VerifyMarkFailed}, "DONE · verify-failed"},
+		{"terminal, verification off", work.Container{RawStatus: StatusDone}, "DONE"},
 		{"auto-drain waiting", work.Container{RawStatus: StatusReady, AutoDrain: true}, "READY · auto-drain"},
 		{"auto-drain silenced by live drain", work.Container{RawStatus: StatusReady, AutoDrain: true, LiveDrain: true}, "IN PROGRESS"},
 		{"auto-drain then orphaned", work.Container{RawStatus: StatusBlocked, AutoDrain: true, Orphaned: true}, "BLOCKED · auto-drain · orphaned"},
@@ -217,7 +223,7 @@ func TestWorkRowStatusCellComposition(t *testing.T) {
 		{"orphaned then parked then config", work.Container{RawStatus: StatusBlocked, Orphaned: true, Parked: true, ConfigError: "no trunk"}, "BLOCKED · orphaned · parked · config error: no trunk"},
 		{
 			"full suffix order",
-			work.Container{VerifiedAtSHA: "abcdef123456", VerifiedAtDrifted: true, RawStatus: StatusAwaitingApproval, AutoDrain: true, Orphaned: true, Parked: true, ConfigError: "no trunk"},
+			work.Container{VerifyMark: VerifyMarkVerified, VerifiedAtSHA: "abcdef123456", VerifiedAtDrifted: true, RawStatus: StatusAwaitingApproval, AutoDrain: true, Orphaned: true, Parked: true, ConfigError: "no trunk"},
 			"AWAITING-APPROVAL · verified @ abcdef123456 · auto-drain · orphaned · parked · config error: no trunk",
 		},
 	}

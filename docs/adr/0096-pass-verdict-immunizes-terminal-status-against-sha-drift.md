@@ -4,6 +4,14 @@ status: accepted
 
 # A PASS Verify verdict immunizes terminal status against later commits
 
+> ⚠️ **Amended by [ADR-0179](0179-human-completion-and-verification-are-two-axes.md).**
+> "NEEDS-VERIFY is reserved for terminal sets with no PASS in the current episode" now
+> reads "…with no PASS *that reached terminal on their own*". A **Human completion** keeps
+> its terminal status with no PASS at all, carrying an `unverified` **Verification mark**
+> instead. Note the asymmetry this ADR's reasoning makes necessary: a Verifier's PASS is
+> immunized against drift and then invalidated by it, because it is a claim about a tree;
+> a human's assertion is a claim about the set's work and so never expires on a commit.
+
 Once Agent verification returns **PASS** within a **verification episode**, a **Task set**'s terminal derived status (**DONE** for pure-AFK, **AWAITING-APPROVAL** when a HITL gate remains) no longer regresses to **NEEDS-VERIFY** when runtime HEAD moves past the verified work SHA. The set stays terminal; surfaces show a yellow **`verified @ <shortSHA>`** annotation when HEAD differs — on `pop tasks status` in the Details column, and on the **Queue dashboard** as a STATUS suffix (plus the detail-view header when a set is opened). **NEEDS-VERIFY** is reserved for terminal sets with no PASS in the current episode.
 
 A **verification episode** ends when the set leaves the terminal zone (human **Open task** / batch reopen, or **Remediation task** spawn). That triggers **verification invalidation**: `DELETE` of every cached `verify_verdicts` row for `(repo, set)` in the Drain store (the table is a cache; **Captured verify run**s remain). The next terminal arrival requires fresh verification. Explicit re-verify (`pop tasks verify`, HITL gate Re-verify) still runs and may record a non-PASS verdict at the current HEAD.

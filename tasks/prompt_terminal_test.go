@@ -166,7 +166,9 @@ func TestPromptTerminalHelper(t *testing.T) {
 	case "attended":
 		// The child compares its own process group against the terminal's foreground
 		// group; the two agreeing is what a TTY-requiring agent depends on.
-		script := `p=$(ps -o pgid= -p $$); t=$(ps -o tpgid= -p $$)
+		// `ps` pads each column to its header width, so the two ids must be stripped
+		// before they are compared as strings — " 893" and "893" are the same group.
+		script := `p=$(ps -o pgid= -p $$ | tr -d ' '); t=$(ps -o tpgid= -p $$ | tr -d ' ')
 if [ "$p" = "$t" ]; then echo CHILD-IS-FOREGROUND; else echo "HELPER-FAIL child pgid=$p tpgid=$t"; fi`
 		if _, err := (RealCommandRunner{}).RunAttended(context.Background(), "", os.Stdin, os.Stdout, os.Stderr, "/bin/sh", "-c", script); err != nil {
 			fmt.Printf("HELPER-FAIL attended run: %v\n", err)

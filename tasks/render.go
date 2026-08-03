@@ -387,6 +387,7 @@ func rowStatusDetail(out *output, row Row) string {
 		if row.CompleteHint != "" {
 			parts = append(parts, "complete: "+row.CompleteHint)
 		}
+		parts = append(parts, verifyMarkDetailParts(row)...)
 		if suffix := verifiedAtBadgeSuffix(out, row); suffix != "" {
 			parts = append(parts, suffix)
 		}
@@ -408,13 +409,36 @@ func rowStatusDetail(out *output, row Row) string {
 		}
 		return strings.Join(parts, " — ")
 	case StatusDone:
+		parts := append([]string{row.Progress}, verifyMarkDetailParts(row)...)
 		if suffix := verifiedAtBadgeSuffix(out, row); suffix != "" {
-			return row.Progress + " — " + suffix
+			parts = append(parts, suffix)
 		}
-		return row.Progress
+		return strings.Join(parts, " — ")
 	default:
 		return row.Progress
 	}
+}
+
+// verifyMarkDetailParts are the detail segments a verification mark contributes
+// to a terminal row whose status the verdict did not become — a human-completed
+// set. The findings must stay reachable when VERIFY-FAILED is only a mark, so the
+// same first-findings-line and re-verify hint a VERIFY-FAILED row carries are
+// spelled out here beside DONE.
+func verifyMarkDetailParts(row Row) []string {
+	if row.Status == StatusNeedsVerify || row.Status == StatusVerifyFailed {
+		return nil
+	}
+	switch row.VerifyMark {
+	case VerifyMarkFailed:
+		var parts []string
+		if f := firstFindingsLine(row.VerifyFindings); f != "" {
+			parts = append(parts, "findings: "+f)
+		}
+		return append(parts, "re-verify: pop tasks verify "+row.ID)
+	case VerifyMarkUnverified:
+		return []string{"verify: pop tasks verify " + row.ID}
+	}
+	return nil
 }
 
 // verifiedAtBadgeSuffix returns the styled Verified-at SHA badge for a row.
@@ -433,7 +457,7 @@ func verifiedAtBadgeANSI(badge VerifiedAtBadge) string {
 		return ansiGreen
 	case VerifiedAtDrifted:
 		return ansiYellow
-	case VerifiedAtUnverified:
+	case VerifiedAtUnverified, VerifiedAtFailed:
 		return ansiRed
 	default:
 		return ""

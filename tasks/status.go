@@ -72,6 +72,10 @@ type Row struct {
 	// VerifiedAtDrifted is true when runtime HEAD differs from the PASS SHA on
 	// VerifiedAtSHA — the yellow drifted badge rather than green at-HEAD.
 	VerifiedAtDrifted bool
+	// VerifyMark is the verification outcome riding beside the status, resolved by
+	// ResolveVerifiedStatus. On a human-completed set it is the only place the
+	// verdict shows: the status stays DONE.
+	VerifyMark VerifyMark
 }
 
 // StatusLabel returns a row's display label. A started Ready set (one that
@@ -127,6 +131,15 @@ func DeriveStatus(m *Manifest) TaskSetStatus {
 	return StatusAwaitingApproval
 }
 
+// TerminalStatus reports whether a manifest-derived status is in the terminal
+// zone — the set's AFK work is exhausted, so the Verify verdict has something to
+// judge (DONE, or AWAITING-APPROVAL with only a human sign-off left). It is the
+// one definition of that zone: verdict gating, mark resolution, and the
+// human-completion bit's lifetime all key on it.
+func TerminalStatus(status TaskSetStatus) bool {
+	return status == StatusDone || status == StatusAwaitingApproval
+}
+
 // DeriveStatusWithVerdict layers the Verify verdict onto the manifest-derived
 // status (ADR-0086/0096). When verification is disabled it returns the manifest
 // status unchanged — all-AFK-done still reaches DONE and no
@@ -146,6 +159,14 @@ func DeriveStatus(m *Manifest) TaskSetStatus {
 // by spawning a Remediation task, which makes the set carry open AFK work again
 // so DeriveStatus returns a non-terminal base and the verdict is not consulted.
 //
+// A human-completed set (Manifest.HumanCompleted — a human's own `complete` is
+// what carried it terminal) is exempt: its terminal status stands whatever the
+// verdict says. The two are not competing for one slot — whether the work is
+// finished the human just asserted, and the verdict's answer to the separate
+// question rides beside it as a VerifyMark. VERIFY-FAILED in particular becomes
+// a mark rather than the status: the human has seen the work and said so, so the
+// finding is information, not a veto.
+//
 // Every other manifest status is returned untouched, so READY/FAILED/DEFERRED/
 // MALFORMED/MISSING are never gated, and a BLOCKED set (an open AFK task still
 // gated behind a human) stays BLOCKED — its work is not complete, so there is
@@ -155,10 +176,11 @@ func DeriveStatusWithVerdict(m *Manifest, verifyEnabled bool, currentVerdict, la
 	if !verifyEnabled {
 		return base
 	}
-	switch base {
-	case StatusDone, StatusAwaitingApproval:
-		// AFK work is complete — the verdict decides.
-	default:
+	if !TerminalStatus(base) {
+		return base
+	}
+	// AFK work is complete — the verdict decides, unless a human already did.
+	if m.HumanCompleted {
 		return base
 	}
 	if currentVerdict != nil {

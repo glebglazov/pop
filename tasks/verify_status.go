@@ -98,16 +98,14 @@ func ApplyVerifyVerdictsWith(d *Deps, result *RefreshResult, cfg *config.Config,
 		// git-forking checkout resolution and store lookup for non-terminal rows
 		// entirely, mirroring decorateRowWithVerdict's own non-terminal branch by
 		// clearing the immunized-SHA badge.
-		if row.Status != StatusDone && row.Status != StatusAwaitingApproval {
-			row.VerifiedAtSHA = ""
-			row.VerifiedAtDrifted = false
+		if !TerminalStatus(row.Status) {
+			clearVerifyDecoration(row)
 			continue
 		}
 		runtimePath := runtimeForSet(row.ID)
 		if runtimePath == "" {
 			// Unplaced: no checkout to gate on (ADR-0147). Leave manifest status.
-			row.VerifiedAtSHA = ""
-			row.VerifiedAtDrifted = false
+			clearVerifyDecoration(row)
 			continue
 		}
 		info := resolveCheckout(runtimePath)
@@ -138,24 +136,37 @@ func ApplyVerifyVerdictsWith(d *Deps, result *RefreshResult, cfg *config.Config,
 // already DONE or AWAITING-APPROVAL. Every other row (missing, malformed,
 // ready, failed, deferred, blocked) is left untouched; in particular a missing
 // row carries no manifest, so re-deriving it would wrongly read as MALFORMED.
+//
+// The mark and the findings are refreshed whether or not the status moves: on a
+// human-completed set the status is exactly what it was and the mark is the only
+// thing the verdict says.
 func decorateRowWithVerdict(row *Row, m *Manifest, workSHA string, currentVerdict, latestPass *store.VerifyVerdict) bool {
-	if row.Status != StatusDone && row.Status != StatusAwaitingApproval {
-		row.VerifiedAtSHA = ""
-		row.VerifiedAtDrifted = false
+	if !TerminalStatus(row.Status) {
+		clearVerifyDecoration(row)
 		return false
 	}
-	status, verifiedAtSHA, drifted := ResolveVerifiedStatus(m, workSHA, currentVerdict, latestPass)
-	row.VerifiedAtSHA = verifiedAtSHA
-	row.VerifiedAtDrifted = drifted
-
-	if status == row.Status {
-		return false
-	}
-	row.Status = status
-	row.Progress = BuildProgress(m, status)
+	res := ResolveVerifiedStatus(m, workSHA, currentVerdict, latestPass)
+	row.VerifiedAtSHA = res.VerifiedAtSHA
+	row.VerifiedAtDrifted = res.Drifted
+	row.VerifyMark = res.Mark
 	row.VerifyFindings = ""
-	if status == StatusVerifyFailed && currentVerdict != nil {
+	if res.Mark == VerifyMarkFailed && currentVerdict != nil {
 		row.VerifyFindings = currentVerdict.Findings
 	}
+
+	if res.Status == row.Status {
+		return false
+	}
+	row.Status = res.Status
+	row.Progress = BuildProgress(m, res.Status)
 	return true
+}
+
+// clearVerifyDecoration drops every verdict-derived display field from a row the
+// verdict does not gate, so a row that left the terminal zone cannot keep a
+// stale badge or mark.
+func clearVerifyDecoration(row *Row) {
+	row.VerifiedAtSHA = ""
+	row.VerifiedAtDrifted = false
+	row.VerifyMark = VerifyMarkNone
 }

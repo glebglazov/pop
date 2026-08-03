@@ -313,6 +313,7 @@ func containersFromGroup(d *Deps, cfg *config.Config, snap *snapshot, delays []t
 			Started:               taskRow.Started,
 			VerifiedAtSHA:         taskRow.VerifiedAtSHA,
 			VerifiedAtDrifted:     taskRow.VerifiedAtDrifted,
+			VerifyMark:            taskRow.VerifyMark,
 			Worktree:              wt.label,
 			CursorKey:             g.ProjectName + "\x00" + taskRow.ID,
 			DestKind:              wt.DestKind,

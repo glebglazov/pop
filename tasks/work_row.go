@@ -172,11 +172,7 @@ func WorkRowStatusCell(row work.Container) string {
 // sequence.
 func WorkRowStatusSegments(row work.Container) []work.StatusSegment {
 	segments := []work.StatusSegment{{Text: WorkRowStatusLabel(row), Tone: work.ToneLabel}}
-	badge := DeriveVerifiedAtBadge(Row{
-		Status:            row.RawStatus,
-		VerifiedAtSHA:     row.VerifiedAtSHA,
-		VerifiedAtDrifted: row.VerifiedAtDrifted,
-	})
+	badge := VerifiedAtBadgeFor(row)
 	if text := VerifiedAtBadgeText(badge); text != "" {
 		segments = append(segments, work.StatusSegment{Text: text, Tone: verifiedAtTone(badge.State)})
 	}
@@ -198,16 +194,16 @@ func WorkRowStatusSegments(row work.Container) []work.StatusSegment {
 	return segments
 }
 
-// verifiedAtTone maps the three verified-at states onto the seam's attention
-// tones (ADR-0156): a PASS at HEAD is good, a drifted one warns, an unverified
-// terminal set is bad.
+// verifiedAtTone maps the verified-at states onto the seam's attention tones
+// (ADR-0156): a PASS at HEAD is good, a drifted one warns, an unverified or
+// verify-failed terminal set is bad.
 func verifiedAtTone(state VerifiedAtBadgeState) work.StatusTone {
 	switch state {
 	case VerifiedAtAtHead:
 		return work.ToneGood
 	case VerifiedAtDrifted:
 		return work.ToneWarn
-	case VerifiedAtUnverified:
+	case VerifiedAtUnverified, VerifiedAtFailed:
 		return work.ToneBad
 	default:
 		return work.TonePlain

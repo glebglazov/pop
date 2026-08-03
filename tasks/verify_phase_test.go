@@ -20,7 +20,15 @@ import (
 // guard fires.
 func newVerifyPhaseRun(t *testing.T, verify func(string) (string, error)) (*implementRun, *RefreshResult, *Row, string) {
 	t.Helper()
-	env := setupRunTaskSetFixture(t, "demo", doneAFKSet())
+	return newVerifyPhaseRunWithKeys(t, verify, nil)
+}
+
+// newVerifyPhaseRunWithKeys is newVerifyPhaseRun with set-level manifest keys
+// (e.g. {"human_completed": true}), so the phase can be driven against a set
+// whose own manifest changes what the verdict is allowed to do.
+func newVerifyPhaseRunWithKeys(t *testing.T, verify func(string) (string, error), setKeys map[string]any) (*implementRun, *RefreshResult, *Row, string) {
+	t.Helper()
+	env := setupRunTaskSetFixtureWithKeys(t, "demo", doneAFKSet(), setKeys)
 	d := env.deps()
 	d.ProcessAlive = func(pid int) bool { return pid == os.Getpid() }
 

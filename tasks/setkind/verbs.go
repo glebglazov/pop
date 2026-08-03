@@ -93,13 +93,15 @@ func (k *Kind) ItemActions(c work.Container, item work.Item) []work.Action {
 }
 
 // verifyEligible reports whether the verify verb applies to a set: one a verdict
-// can still move (NEEDS-VERIFY or VERIFY-FAILED) that no live drain holds
-// (ADR-0123).
+// can still move that no live drain holds (ADR-0123). The mark, not the status, is
+// the fact — a human-completed set reads DONE and still needs verifying, so
+// keying on NEEDS-VERIFY / VERIFY-FAILED would hide the verb from exactly the set
+// whose verification was deferred.
 func verifyEligible(row work.Container) bool {
 	if row.LiveDrain {
 		return false
 	}
-	return row.RawStatus == tasks.StatusNeedsVerify || row.RawStatus == tasks.StatusVerifyFailed
+	return row.VerifyMark == tasks.VerifyMarkUnverified || row.VerifyMark == tasks.VerifyMarkFailed
 }
 
 // foldEligible reports whether the fold verb applies to a set: a bound DONE or

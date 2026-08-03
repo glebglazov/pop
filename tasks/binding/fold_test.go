@@ -62,6 +62,28 @@ func seedDoneTaskSet(t *testing.T, td *tasks.Deps, repo, setID string) string {
 	return defPath
 }
 
+// markHumanCompleted sets the manifest's `human_completed` bit in place, standing
+// in for the `pop tasks complete` that would have written it.
+func markHumanCompleted(t *testing.T, manifestPath string) {
+	t.Helper()
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal manifest: %v", err)
+	}
+	raw["human_completed"] = true
+	out, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, out, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func seedOpenTaskSet(t *testing.T, td *tasks.Deps, repo, setID string) string {
 	t.Helper()
 	id, err := tasks.ResolveRepositoryIdentity(td, repo)
@@ -813,6 +835,29 @@ func TestFoldRefusesPreconditions(t *testing.T) {
 		_, err := Fold(td, nil, cfg, "set-nv", FoldOptions{Yes: true, In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, io.Discard)
 		if err == nil || !strings.Contains(err.Error(), "NEEDS-VERIFY") {
 			t.Fatalf("err = %v, want NEEDS-VERIFY refusal", err)
+		}
+	})
+
+	// A human-completed set reads DONE, so the gate that refuses NEEDS-VERIFY above
+	// opens for it: the set reaches the fold rather than sitting behind a verdict
+	// the human's assertion already outranks.
+	t.Run("human-completed opens the gate", func(t *testing.T) {
+		t.Parallel()
+		repo := initAdoptRepo(t)
+		td := lifecycleTestDeps(t)
+		defPath := seedDoneTaskSet(t, td, repo, "set-hc")
+		markHumanCompleted(t, filepath.Join(defPath, "set-hc", "index.json"))
+		if _, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
+			TD: td, CheckoutPath: repo, SetID: "set-hc",
+		}); err != nil {
+			t.Fatalf("provision: %v", err)
+		}
+		cfg := &config.Config{
+			Projects: []config.ProjectEntry{{Path: repo}},
+			Task:     &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}},
+		}
+		if _, err := Fold(td, nil, cfg, "set-hc", FoldOptions{Yes: true, In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, io.Discard); err != nil {
+			t.Fatalf("fold of a human-completed set = %v, want it to proceed", err)
 		}
 	})
 

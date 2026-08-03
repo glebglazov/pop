@@ -9,8 +9,8 @@ func TestDeriveVerifiedAtBadge(t *testing.T) {
 		want  VerifiedAtBadgeState
 		wantSHA string
 	}{
-		{"green at HEAD", Row{Status: StatusDone, VerifiedAtSHA: "abc123", VerifiedAtDrifted: false}, VerifiedAtAtHead, "abc123"},
-		{"yellow drifted", Row{Status: StatusDone, VerifiedAtSHA: "abc123", VerifiedAtDrifted: true}, VerifiedAtDrifted, "abc123"},
+		{"green at HEAD", Row{Status: StatusDone, VerifyMark: VerifyMarkVerified, VerifiedAtSHA: "abc123", VerifiedAtDrifted: false}, VerifiedAtAtHead, "abc123"},
+		{"yellow drifted", Row{Status: StatusDone, VerifyMark: VerifyMarkVerified, VerifiedAtSHA: "abc123", VerifiedAtDrifted: true}, VerifiedAtDrifted, "abc123"},
 		{"red unverified NEEDS-VERIFY", Row{Status: StatusNeedsVerify}, VerifiedAtUnverified, ""},
 		{"red unverified VERIFY-FAILED", Row{Status: StatusVerifyFailed}, VerifiedAtUnverified, ""},
 		{"absent READY", Row{Status: StatusReady}, VerifiedAtAbsent, ""},

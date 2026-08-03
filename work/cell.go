@@ -54,6 +54,13 @@ func StatusCellText(segments []StatusSegment) string {
 // it, and the kind keeps its own name and its own constants.
 type SetStatus string
 
+// VerifyMark is the verification-outcome vocabulary a container's VerifyMark
+// carries — the second, independent fact beside a Task-set's status: whether a
+// Verifier has judged the work. Like SetStatus it is declared here with no
+// constants, so the seam can hold the cell without importing the kind that owns
+// the vocabulary (`tasks.VerifyMark` is an alias of it).
+type VerifyMark string
+
 // DestKind selects how the WORKTREE destination column is styled. The plain
 // label lives on Container.Worktree; the styled wrapper lives queue-side
 // (ADR-0143).

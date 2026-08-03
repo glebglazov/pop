@@ -23,11 +23,10 @@ import "github.com/glebglazov/pop/store"
 // read-only and side-effect free — deciding whether to *run* the Verifier on a
 // cache miss belongs to the Drain phase, not here.
 //
-// It returns the resolved status, the short SHA of the episode's PASS when the
-// set is terminal and cleared (empty otherwise), and whether runtime HEAD has
-// drifted past that PASS. Callers already hold the verdicts they pass in, so the
-// gating verdict is not echoed back.
-func ResolveVerifiedStatus(m *Manifest, workSHA string, currentAtSHA, latestPass *store.VerifyVerdict) (TaskSetStatus, string, bool) {
+// It returns the resolved status together with the verification mark and the
+// immunization SHA behind it. Callers already hold the verdicts they pass in, so
+// the gating verdict is not echoed back.
+func ResolveVerifiedStatus(m *Manifest, workSHA string, currentAtSHA, latestPass *store.VerifyVerdict) VerifiedResolution {
 	var current *Verdict
 	if currentAtSHA != nil {
 		vv := Verdict(currentAtSHA.Verdict)
@@ -39,18 +38,43 @@ func ResolveVerifiedStatus(m *Manifest, workSHA string, currentAtSHA, latestPass
 		pass = &vv
 	}
 
-	status := DeriveStatusWithVerdict(m, true, current, pass)
-
-	if status == StatusDone || status == StatusAwaitingApproval {
-		passSHA := ""
-		if currentAtSHA != nil && currentAtSHA.Verdict == string(VerdictPass) {
-			passSHA = currentAtSHA.WorkSHA
-		} else if latestPass != nil && latestPass.Verdict == string(VerdictPass) {
-			passSHA = latestPass.WorkSHA
-		}
-		if passSHA != "" {
-			return status, ShortSHA(passSHA), passSHA != workSHA
-		}
+	res := VerifiedResolution{Status: DeriveStatusWithVerdict(m, true, current, pass)}
+	if !TerminalStatus(DeriveStatus(m)) {
+		// Nothing is finished, so there is nothing to have judged: no mark.
+		return res
 	}
-	return status, "", false
+
+	// The mark is derived from the verdicts alone — the same rule whether or not the
+	// set is human-completed. What human completion changes is only whether that
+	// answer is also allowed to be the status (see DeriveStatusWithVerdict).
+	switch {
+	case current != nil && *current == VerdictPass:
+		res.Mark = VerifyMarkVerified
+		res.VerifiedAtSHA = ShortSHA(currentAtSHA.WorkSHA)
+		res.Drifted = currentAtSHA.WorkSHA != workSHA
+	case current != nil:
+		res.Mark = VerifyMarkFailed
+	case pass != nil && *pass == VerdictPass:
+		res.Mark = VerifyMarkVerified
+		res.VerifiedAtSHA = ShortSHA(latestPass.WorkSHA)
+		res.Drifted = latestPass.WorkSHA != workSHA
+	default:
+		res.Mark = VerifyMarkUnverified
+	}
+	return res
+}
+
+// VerifiedResolution is what the read-side resolution answers for one terminal
+// set: the status every surface displays, plus the verification outcome riding
+// beside it. The two are separate fields because they are separate facts — a
+// human-completed set reads DONE with an unverified or verify-failed mark — and
+// they are resolved together here so no surface re-derives either.
+type VerifiedResolution struct {
+	Status TaskSetStatus
+	// Mark is the verification outcome, blank when the set is not terminal.
+	Mark VerifyMark
+	// VerifiedAtSHA is the short SHA of the episode's PASS (empty unless Mark is
+	// VerifyMarkVerified), and Drifted reports runtime HEAD having moved past it.
+	VerifiedAtSHA string
+	Drifted       bool
 }

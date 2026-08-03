@@ -197,7 +197,12 @@ type Container struct {
 	// it. DeriveVerifiedAtBadge maps the pair to the STATUS badge (ADR-0156).
 	VerifiedAtSHA     string
 	VerifiedAtDrifted bool
-	Worktree          string
+	// VerifyMark is the verification outcome riding beside the status — verified,
+	// unverified, or verify-failed — for a terminal set, blank otherwise. It is a
+	// separate fact from RawStatus: a human-completed set stays DONE and carries
+	// its verification outcome here, so a verdict never contradicts the human.
+	VerifyMark VerifyMark
+	Worktree   string
 	// MapOpen and MapFrontier are the Map ticket tallies its STATUS cell reports.
 	// Zero on Task-set rows.
 	MapOpen, MapFrontier int

@@ -34,6 +34,10 @@ const (
 // spawns a new AFK Remediation task whose body is the findings and keeps draining
 // (verifyContinue) — the Drain picks the task up, its completion moves the work
 // SHA, the cached verdict goes stale, and the Verifier re-fires, closing the loop.
+// A human-completed set is the exception to everything below the verdict itself:
+// the Verifier still runs and its verdict is still recorded and printed, but a
+// non-PASS neither parks the set nor spawns remediation, because the status is
+// the human's assertion and the verdict rides beside it as a mark.
 // At or over the cap (or on a NEEDS-HUMAN verdict) the set parks as VERIFY-FAILED:
 // on a TTY a human gate dispositions it (Accept / Remediate / shell / exit) and a
 // handled disposition clears the terminal and resumes (verifyContinue); otherwise
@@ -104,6 +108,14 @@ func (r *implementRun) verifyPhase(currentRefresh *RefreshResult, row *Row) (ver
 			return verifyContinue, nil
 		}
 		return verifyReturn, verr
+	}
+	if effective == StatusVerifyFailed && m.HumanCompleted {
+		// A human already asserted this set is done, so the finding is information,
+		// not a veto: the verdict is recorded and printed (the status surfaces it as
+		// a verify-failed mark beside DONE) and the drain falls through to its
+		// terminal switch. Remediation is skipped for the same reason — spawning
+		// fix work would reopen the set and erase the assertion.
+		return verifyFallThrough, nil
 	}
 	if effective == StatusVerifyFailed {
 		// A FIXABLE verdict under the cap spawns a Remediation task and
