@@ -16,6 +16,8 @@ import (
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 	"github.com/glebglazov/pop/project"
+	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/ui"
 )
 
@@ -2078,5 +2080,64 @@ func TestDiscoverManagedWorktreesWith_SkipsNonDirs(t *testing.T) {
 	}
 	if got[0].Name != "repo/realwt" {
 		t.Errorf("Name = %q, want %q", got[0].Name, "repo/realwt")
+	}
+}
+
+// The row builder never opens the binding store (ADR-0110); this pins that a
+// bound set's row label is unaffected by the store row's own lifecycle. The
+// worktree directory is a fixture, held constant throughout, while a real
+// binding is written and then deleted against an isolated store — the store
+// mutation the fs-only row builder must stay blind to.
+func TestDiscoverManagedWorktreesWith_LabelStableAcrossBindUnbind(t *testing.T) {
+	t.Parallel()
+	root := "/data/pop/work/worktrees"
+	setID := "2026-08-04-example-set"
+	layout := map[string][]string{
+		"myrepo-a1b2c3d4e5f6": {setID},
+	}
+	fs := managedFS(root, layout, nil)
+
+	label := func() string {
+		got := discoverManagedWorktreesWith(fs, root)
+		if len(got) != 1 {
+			t.Fatalf("discovered %d worktrees, want 1: %+v", len(got), got)
+		}
+		return got[0].Name
+	}
+
+	dir := t.TempDir()
+	storeFS := cmdTestFS(filepath.Join(dir, "xdg"), "")
+	td := &tasks.Deps{FS: storeFS, Git: deps.NewRealGit()}
+	t.Cleanup(func() { _ = td.CloseStore() })
+	id := &tasks.RepositoryIdentity{Basename: "myrepo", ShortHash: "a1b2c3d4e5f6"}
+	key := binding.Key(id, setID)
+
+	before := label()
+
+	if err := binding.Put(td, key, binding.Binding{RuntimePath: filepath.Join(root, "myrepo-a1b2c3d4e5f6", setID), Provisioned: true}); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	bound := label()
+
+	all, err := binding.AllBindings(td)
+	if err != nil || len(all) != 1 {
+		t.Fatalf("binding must be present after bind: bindings=%+v err=%v", all, err)
+	}
+
+	if err := binding.Delete(td, key); err != nil {
+		t.Fatalf("unbind: %v", err)
+	}
+	unbound := label()
+
+	all, err = binding.AllBindings(td)
+	if err != nil || len(all) != 0 {
+		t.Fatalf("binding must be gone after unbind: bindings=%+v err=%v", all, err)
+	}
+
+	if before != bound || bound != unbound {
+		t.Fatalf("label changed across bind/unbind: before=%q bound=%q unbound=%q", before, bound, unbound)
+	}
+	if before != "myrepo/"+setID {
+		t.Errorf("label = %q, want %q", before, "myrepo/"+setID)
 	}
 }
