@@ -2,6 +2,7 @@ package setkind
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/glebglazov/pop/config"
@@ -118,8 +119,9 @@ func (k *Kind) Perform(c work.Container, item *work.Item, verb work.Verb) (work.
 		payload := c.ID
 		if item != nil {
 			// The paste-ready Task target reference: the <task-set>/<file>.md form
-			// `pop tasks implement/complete/open` accept.
-			payload = c.ID + "/" + item.File
+			// `pop tasks implement/complete/open` accept. The item carries the file's
+			// absolute path, so the reference is its base name under the set.
+			payload = TaskRef(c.ID, *item)
 		}
 		return work.Outcome{Kind: work.OutcomeMessage, Clipboard: payload, Message: "copied " + payload}, nil
 	case work.VerbShell:
@@ -145,6 +147,14 @@ func (k *Kind) Perform(c work.Container, item *work.Item, verb work.Verb) (work.
 	default:
 		return work.Outcome{}, work.UnknownVerb(k.ID(), verb)
 	}
+}
+
+// TaskRef is the paste-ready `<task-set>/<file>.md` target reference for one
+// task item — the form every `pop tasks` verb accepts. It is exported because a
+// caller that dispatches a task write of its own (the dashboard's detail
+// overrides) must name the task the same way this kind does.
+func TaskRef(setID string, item work.Item) string {
+	return setID + "/" + filepath.Base(item.File)
 }
 
 // applyTaskVerb writes one task's status in-process (ADR-0158): no subprocess, no

@@ -104,6 +104,12 @@ type Container struct {
 	// DetailSections are the kind-authored prose blocks a detail view renders
 	// above the item list.
 	DetailSections []Section
+	// Headline is the kind's one-line suffix for a detail header — a task set's
+	// task progress, and nothing at all for a kind with no such phrase. It is the
+	// container's own sentence about itself, which is why it is a field rather
+	// than a section: a section is a block of prose, this is part of the title
+	// line.
+	Headline string
 
 	// ── Transitional Task-set-only cells ───────────────────────────────────────
 	// What follows is the legacy Work-dashboard row, absorbed into the container
@@ -144,14 +150,33 @@ func (c Container) Ref() ref.WorkRef {
 type Item struct {
 	ID    string
 	Title string
-	// Status is the kind's own item status label.
+	// Type is the kind's own item classification (a task's `AFK`, a Decision
+	// ticket's `research`), empty when the kind classifies none.
+	Type string
+	// Status is the kind's own item status label — the token the kind's own
+	// ItemActions keys on, so it stays the machine-readable one.
 	Status string
+	// StatusLabel is what a reader should see instead of Status when the kind has
+	// more to say about it than the status word (a task's `failed(2)` retry
+	// count). Empty means Status renders as it stands.
+	StatusLabel string
 	// Blocked reports that the item cannot be advanced yet, with BlockedBy naming
 	// the item ids holding it.
 	Blocked   bool
 	BlockedBy []string
-	// File is the path to the item's text, empty when the kind stores none.
+	// File is the absolute path to the item's text, empty when the kind stores
+	// none. Absolute because the surfaces that read it — a detail peek, an editor
+	// handoff — have no directory of the kind's to resolve it against.
 	File string
+}
+
+// DisplayStatus is the item status a reader sees: the kind's embellished label
+// when it wrote one, the plain status otherwise.
+func (i Item) DisplayStatus() string {
+	if i.StatusLabel != "" {
+		return i.StatusLabel
+	}
+	return i.Status
 }
 
 // ItemRef names one item of a container.

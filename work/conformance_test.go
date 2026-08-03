@@ -63,6 +63,7 @@ func conformanceCases() []conformanceCase {
 						return &tasks.RefreshResult{
 							Rows: []tasks.Row{{ID: "2026-07-01-demo", Status: tasks.StatusReady}},
 							Manifests: map[string]*tasks.Manifest{"2026-07-01-demo": {
+								Dir:   "/repo/tasks/2026-07-01-demo",
 								Valid: true,
 								Tasks: []tasks.Task{
 									{ID: "01-first", File: "01-first.md", Title: "First", Type: "AFK", Status: tasks.TaskOpen},
@@ -161,6 +162,14 @@ func TestKindConformance(t *testing.T) {
 				t.Fatalf("Actions = %v, want %v", got, tc.wantActions)
 			}
 			item := c.Items[0]
+			// An item names itself, says what it is, and points at its text with a
+			// path its reader can open without knowing the kind's layout.
+			if item.ID == "" || item.Status == "" {
+				t.Fatalf("item %+v must carry an id and a status", item)
+			}
+			if !filepath.IsAbs(item.File) {
+				t.Fatalf("item file = %q, want an absolute path", item.File)
+			}
 			if got := verbsOf(k.ItemActions(c, item)); !slices.Equal(got, tc.wantItemActions) {
 				t.Fatalf("ItemActions = %v, want %v", got, tc.wantItemActions)
 			}

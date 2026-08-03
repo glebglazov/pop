@@ -52,6 +52,26 @@ func dashboardStatusSegmentStyled(seg work.StatusSegment) string {
 	return seg.Text
 }
 
+// detailStatusStyled paints the same segments for a detail header, where the
+// status label sits inside brackets that already set it apart: the label is left
+// unpainted (a bracketed label in its bucket colour reads as two markers for one
+// fact) while every attention badge keeps its three-state colour (ADR-0156).
+func detailStatusStyled(kinds workKinds, row DashboardRow) string {
+	segments := kinds.statusSegments(row)
+	parts := make([]string, 0, len(segments))
+	for _, seg := range segments {
+		if seg.Text == "" {
+			continue
+		}
+		if seg.Tone == work.ToneLabel {
+			parts = append(parts, seg.Text)
+			continue
+		}
+		parts = append(parts, dashboardStatusSegmentStyled(seg))
+	}
+	return strings.Join(parts, " · ")
+}
+
 // dashboardManagedWtStyle colors the [managed wt] destination badge.
 var dashboardManagedWtStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
 

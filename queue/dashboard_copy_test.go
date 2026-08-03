@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/work"
 	"github.com/glebglazov/pop/work/ref"
 )
 
@@ -179,8 +180,7 @@ func detailCopyModel(setID string, task tasks.Task) QueueDashboard {
 	manifest := &tasks.Manifest{Valid: true, Tasks: []tasks.Task{task}}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{row}})
 	m.width, m.height = 120, 24
-	dv := newDetailView(row)
-	dv.syncManifest(manifest, nil)
+	dv := newTaskDetailView(row, manifest, nil)
 	m.detail = dv
 	return m
 }
@@ -216,9 +216,8 @@ func TestQueueDashboardCopyDetailTaskViaMenu(t *testing.T) {
 	task := tasks.Task{ID: "01-a", File: "01-a.md", Status: "open"}
 	m := detailCopyModel("set-menu", task)
 
-	items := taskMenuItems(task)
-	if !menuHasTaskKey(items, "y") {
-		t.Fatal("task menu missing copy name bound to y")
+	if !menuHasItemKey(m.kinds.itemActionsFor(m.detail.row, m.detail.row.Items[0]), "y") {
+		t.Fatal("task item menu missing copy name bound to y")
 	}
 
 	var captured string
@@ -231,7 +230,7 @@ func TestQueueDashboardCopyDetailTaskViaMenu(t *testing.T) {
 		t.Fatal("y in task menu should not schedule a command")
 	}
 	got = updated.(QueueDashboard)
-	if got.taskMenu != nil {
+	if got.itemMenu != nil {
 		t.Fatal("y in task menu should close the menu")
 	}
 	if captured != "set-menu/01-a.md" {
@@ -246,7 +245,7 @@ func TestQueueDashboardCopyDetailTaskViaMenu(t *testing.T) {
 func TestQueueDashboardCopyPeekTask(t *testing.T) {
 	task := tasks.Task{ID: "02-b", File: "02-b.md", Status: "open"}
 	m := detailCopyModel("set-peek", task)
-	m.detail.peek = &taskTextPeek{taskID: "02-b", text: "body\n"}
+	m.detail.peek = &itemTextPeek{itemID: "02-b", text: "body\n"}
 
 	var captured string
 	m.copyFunc = func(s string) error { captured = s; return nil }
@@ -272,7 +271,7 @@ func TestQueueDashboardCopyPeekTask(t *testing.T) {
 func TestQueueDashboardCopyPeekTaskViaMenu(t *testing.T) {
 	task := tasks.Task{ID: "02-b", File: "02-b.md", Status: "failed"}
 	m := detailCopyModel("set-peek-menu", task)
-	m.detail.peek = &taskTextPeek{taskID: "02-b", text: "body\n"}
+	m.detail.peek = &itemTextPeek{itemID: "02-b", text: "body\n"}
 
 	var captured string
 	m.copyFunc = func(s string) error { captured = s; return nil }
@@ -296,7 +295,7 @@ func TestQueueDashboardCopyPeekTaskViaMenu(t *testing.T) {
 // ticket list: the bare ticket id is copied.
 func TestQueueDashboardCopyMapDetailTicket(t *testing.T) {
 	m, _ := newMapDetailDashboard(t)
-	got := loadMapDetail(t, m)
+	got := openMapDetail(t, m)
 
 	var captured string
 	got.copyFunc = func(s string) error { captured = s; return nil }
@@ -318,8 +317,8 @@ func TestQueueDashboardCopyMapDetailTicket(t *testing.T) {
 // text peek: the bare ticket id is copied.
 func TestQueueDashboardCopyMapPeekTicket(t *testing.T) {
 	m, _ := newMapDetailDashboard(t)
-	got := loadMapDetail(t, m)
-	got.detail.peek = &taskTextPeek{taskID: "01-frontier", text: "ticket body\n"}
+	got := openMapDetail(t, m)
+	got.detail.peek = &itemTextPeek{itemID: "01", text: "ticket body\n"}
 
 	var captured string
 	got.copyFunc = func(s string) error { captured = s; return nil }
@@ -337,9 +336,9 @@ func TestQueueDashboardCopyMapPeekTicket(t *testing.T) {
 	}
 }
 
-func menuHasTaskKey(items []taskMenuItem, key string) bool {
-	for _, item := range items {
-		if item.key == key {
+func menuHasItemKey(actions []work.Action, key string) bool {
+	for _, action := range actions {
+		if action.Key == key {
 			return true
 		}
 	}

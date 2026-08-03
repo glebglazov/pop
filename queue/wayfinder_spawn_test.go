@@ -3,6 +3,7 @@ package queue
 import (
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -20,11 +21,11 @@ func wayfinderSpawnFixture(t *testing.T) (*Deps, *config.Config, DashboardRow, *
 	storageDir := filepath.Join(t.TempDir(), "repos", "repo-wayfinder-spawn")
 	activeMap := filepath.Join(storageDir, "maps", "2026-07-01-active")
 	files := map[string]string{
-		filepath.Join(storageDir, "repo.json"):               `{"common_dir":"/repo/.git"}`,
-		filepath.Join(activeMap, "map.md"):                 "Status: active\n\n## Destination\nShip it\n",
-		filepath.Join(activeMap, "issues/01-frontier.md"):  "Type: research\nStatus: open\n\n## Question\nA\n",
-		filepath.Join(activeMap, "issues/02-blocked.md"):   "Type: research\nStatus: open\nBlocked by: 01\n\n## Question\nB\n",
-		filepath.Join(activeMap, "issues/03-answered.md"):  "Type: grilling\nStatus: resolved\n\n## Question\nC\n",
+		filepath.Join(storageDir, "repo.json"):            `{"common_dir":"/repo/.git"}`,
+		filepath.Join(activeMap, "map.md"):                "Status: active\n\n## Destination\nShip it\n",
+		filepath.Join(activeMap, "issues/01-frontier.md"): "Type: research\nStatus: open\n\n## Question\nA\n",
+		filepath.Join(activeMap, "issues/02-blocked.md"):  "Type: research\nStatus: open\nBlocked by: 01\n\n## Question\nB\n",
+		filepath.Join(activeMap, "issues/03-answered.md"): "Type: grilling\nStatus: resolved\n\n## Question\nC\n",
 	}
 	d := dashboardTestDeps(t, nil, nil)
 	withWayfinderMaps(t, d, storageDir, files)
@@ -118,8 +119,8 @@ func TestLaunchWayfinderSessionTargetsNextFrontier(t *testing.T) {
 func TestLaunchWayfinderSessionTargetsExplicitTicket(t *testing.T) {
 	d, cfg, row, f, storageDir := wayfinderSpawnFixture(t)
 	files := map[string]string{
-		filepath.Join(storageDir, "repo.json"):               `{"common_dir":"/repo/.git"}`,
-		filepath.Join(storageDir, "maps", "2026-07-01-active", "map.md"): "Status: active\n\n## Destination\nShip it\n",
+		filepath.Join(storageDir, "repo.json"):                                          `{"common_dir":"/repo/.git"}`,
+		filepath.Join(storageDir, "maps", "2026-07-01-active", "map.md"):                "Status: active\n\n## Destination\nShip it\n",
 		filepath.Join(storageDir, "maps", "2026-07-01-active", "issues/01-frontier.md"): "Type: research\nStatus: resolved\n\n## Question\nA\n",
 		filepath.Join(storageDir, "maps", "2026-07-01-active", "issues/02-blocked.md"):  "Type: research\nStatus: open\n\n## Question\nB\n",
 	}
@@ -297,20 +298,32 @@ func TestDashboardMapRowIReusesRunningWithoutResend(t *testing.T) {
 	}
 }
 
-func TestDashboardMapDetailEnterHandsOffFrontierTicket(t *testing.T) {
+// TestDashboardMapDetailWorksFrontierTicketFromItemMenu covers the Map's item
+// verb through the generic detail: the menu the kind fills over a frontier
+// ticket carries `work ticket`, and running it hands the operator off to the
+// Map's grilling window.
+func TestDashboardMapDetailWorksFrontierTicketFromItemMenu(t *testing.T) {
 	m, d := newMapDetailDashboard(t)
 	repo := "/repo/checkout"
 	m.cfg = &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
 	d.Project = project.DefaultDeps()
 	d.Tmux = &tmuxtest.Fake{Inside: true}
 	m.d = d
-	got := loadMapDetail(t, m)
+	got := openMapDetail(t, m)
 	got.detail.row.ProjectPath = repo
 	got.detail.row.SetRef.ProjectPath = repo
 
-	updated, cmd := got.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	updated, _ := got.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	got = updated.(QueueDashboard)
+	if got.itemMenu == nil {
+		t.Fatal("a on a frontier ticket did not open the item menu")
+	}
+	if keys := itemMenuKeys(got.itemMenu); !slices.Contains(keys, "I") {
+		t.Fatalf("frontier ticket menu = %v, want the work verb on I", keys)
+	}
+	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'I', Text: "I"})
 	if cmd == nil {
-		t.Fatal("enter on frontier ticket did not return a command")
+		t.Fatal("work verb on frontier ticket did not return a command")
 	}
 	msg := cmd()
 	handoff, ok := msg.(dashboardHandoffMsg)

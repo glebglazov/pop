@@ -1,6 +1,8 @@
 package queue
 
 import (
+	"fmt"
+
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/work"
 	"github.com/glebglazov/pop/work/ref"
@@ -62,6 +64,33 @@ func (w workKinds) actionsFor(row DashboardRow) []work.Action {
 	return k.Actions(row)
 }
 
+// itemActionsFor is the verb list the kind offers over one of row's items right
+// now. Like actionsFor it is asked when the menu opens, never carried on the
+// item: a task completed in another pane must not still offer "complete".
+func (w workKinds) itemActionsFor(row DashboardRow, item work.Item) []work.Action {
+	k := w.kindFor(row)
+	if k == nil {
+		return nil
+	}
+	return k.ItemActions(row, item)
+}
+
+// itemCopyPayload is the reference the kind writes to the clipboard for one of
+// its items. The kind answers rather than the surface guessing: a task set names
+// a task by its paste-ready `<set>/<file>.md` target, a Map names a ticket by its
+// bare id, and neither form is derivable from the item alone.
+func (w workKinds) itemCopyPayload(row DashboardRow, item work.Item) (string, error) {
+	k := w.kindFor(row)
+	if k == nil {
+		return "", fmt.Errorf("no Work kind wired for %s", row.ID)
+	}
+	outcome, err := k.Perform(row, &item, work.VerbCopyName)
+	if err != nil {
+		return "", err
+	}
+	return outcome.Clipboard, nil
+}
+
 // offers reports whether the kind currently offers verb over row.
 func (w workKinds) offers(row DashboardRow, verb work.Verb) bool {
 	for _, a := range w.actionsFor(row) {
@@ -101,8 +130,8 @@ func (w workKinds) summary(rows []DashboardRow) []string {
 // dashboard still asks a row about its kind, and only where the question is
 // genuinely about the kind rather than about a verb: the flat wayfinding
 // shortcut (a Map with an empty frontier must still answer, so the key cannot
-// hang off the verb being offered), the activity cluster, and the detail frame
-// slice 14 replaces.
+// hang off the verb being offered) and the activity cluster. The detail view no
+// longer asks at all — it is generic over containers and their items.
 func mapRow(row DashboardRow) bool {
 	return row.Kind == ref.KindMap
 }

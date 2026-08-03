@@ -4,10 +4,40 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
+	"github.com/glebglazov/pop/tasks/setkind"
 )
+
+// detailRowWithTasks returns row carrying what the Task-set kind would have
+// built from manifest: the Work items the detail view lists, the malformed
+// verdict, and the progress headline. The detail view reads the container, so a
+// test that wants tasks on screen puts them there — through the kind's own
+// projection, never a second one.
+func detailRowWithTasks(row DashboardRow, manifest *tasks.Manifest, taskRow *tasks.Row) DashboardRow {
+	// A hand-built row names only the set; a loaded container carries the same
+	// name as its kind-agnostic id, which is what the detail view reads.
+	if row.ID == "" {
+		row.ID = row.SetID
+	}
+	row.Items = setkind.ItemsFromManifest(manifest)
+	if manifest != nil && !manifest.Valid {
+		row.Broken, row.BrokenReason = true, strings.Join(manifest.Errors, "; ")
+	}
+	if taskRow != nil {
+		row.Headline = taskRow.Progress
+	}
+	return row
+}
+
+// newTaskDetailView opens a detail view over row as the Task-set kind would have
+// loaded it.
+func newTaskDetailView(row DashboardRow, manifest *tasks.Manifest, taskRow *tasks.Row) *detailView {
+	return newDetailView(detailRowWithTasks(row, manifest, taskRow))
+}
 
 // initGitRepoWithBase creates a temp git repo with one committed file and
 // returns its path. Shared across queue tests that need a real repository.

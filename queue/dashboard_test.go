@@ -16,6 +16,7 @@ import (
 	"github.com/glebglazov/pop/internal/deps"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/project"
+	"github.com/glebglazov/pop/repogroup"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/setkind"
 	"github.com/glebglazov/pop/wayfinder"
@@ -655,11 +656,11 @@ func TestDashboardStatusKeysOpenDetailViewAndClosePreservesCursor(t *testing.T) 
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
 	got := updated.(QueueDashboard)
-	if got.detail == nil || !got.detail.loading || got.detail.row.SetID != "second" {
-		t.Fatalf("detail view = %+v, want loading for second", got.detail)
+	if got.detail == nil || got.detail.row.SetID != "second" {
+		t.Fatalf("detail view = %+v, want the detail for second", got.detail)
 	}
-	if cmd == nil {
-		t.Fatalf("l key did not return a loading command")
+	if cmd != nil {
+		t.Fatalf("l key should open the detail from the container already in hand")
 	}
 	// View must be the detail view (no table).
 	view := got.View().Content
@@ -699,11 +700,11 @@ func TestDashboardStatusKeysOpenDetailViewAndClosePreservesCursor(t *testing.T) 
 			}})
 			updated, cmd := m.Update(tc.msg)
 			got := updated.(QueueDashboard)
-			if got.detail == nil || !got.detail.loading || got.detail.row.SetID != "target" {
-				t.Fatalf("detail view = %+v, want loading for target", got.detail)
+			if got.detail == nil || got.detail.row.SetID != "target" {
+				t.Fatalf("detail view = %+v, want the detail for target", got.detail)
 			}
-			if cmd == nil {
-				t.Fatalf("%s key did not return a loading command", tc.name)
+			if cmd != nil {
+				t.Fatalf("%s key should open the detail without a load", tc.name)
 			}
 		})
 	}
@@ -1127,8 +1128,7 @@ func TestDashboardDetailViewOmitsTitleAndUsesBottomShortcutLegend(t *testing.T) 
 	}})
 	m.width = 120
 	m.height = 8
-	d := newDetailView(m.snap.Rows[0])
-	d.syncManifest(manifest, nil)
+	d := newTaskDetailView(m.snap.Rows[0], manifest, nil)
 	m.detail = d
 
 	view := m.View().Content
@@ -1164,8 +1164,7 @@ func TestDashboardDetailViewClampsToBodyHeight(t *testing.T) {
 	}})
 	m.width = 120
 	m.height = 10
-	d := newDetailView(m.snap.Rows[0])
-	d.syncManifest(manifest, nil)
+	d := newTaskDetailView(m.snap.Rows[0], manifest, nil)
 	m.detail = d
 
 	view := m.viewDetail()
@@ -1291,14 +1290,18 @@ func TestDashboardSummaryRunningCountsLiveDrainsOnly(t *testing.T) {
 }
 
 // TestDashboardDetailHeaderIncludesVerifiedAtSHA confirms the detail view header
-// includes the Verified-at SHA badge inside the status brackets when applicable.
+// includes the Verified-at SHA badge inside the status brackets when applicable —
+// composed from the kind's STATUS segments, with the label itself left unpainted.
 func TestDashboardDetailHeaderIncludesVerifiedAtSHA(t *testing.T) {
-	driftedRow := &tasks.Row{
-		Status:            tasks.StatusAwaitingApproval,
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{})
+	drifted := DashboardRow{
+		SetRef:            SetRef{SetID: "demo", RawStatus: tasks.StatusAwaitingApproval},
 		VerifiedAtSHA:     "abcdef1234567890",
 		VerifiedAtDrifted: true,
+		Headline:          "1/1 done",
 	}
-	header := detailHeader("demo", "AWAITING-APPROVAL", "1/1 done", driftedRow)
+	drifted.ID = "demo"
+	header := m.detailHeader(drifted)
 	if !strings.Contains(header, "Task · demo") {
 		t.Fatalf("header missing set prefix: %q", header)
 	}
@@ -1311,19 +1314,20 @@ func TestDashboardDetailHeaderIncludesVerifiedAtSHA(t *testing.T) {
 	if !strings.Contains(header, "\x1b[33m") {
 		t.Fatalf("drifted verified suffix should be yellow: %q", header)
 	}
-
-	atHeadRow := &tasks.Row{
-		Status:        tasks.StatusDone,
-		VerifiedAtSHA: "abcdef1234567890",
+	if !strings.Contains(header, "1/1 done") {
+		t.Fatalf("header missing progress headline: %q", header)
 	}
-	headHeader := detailHeader("demo", "DONE", "1/1 done", atHeadRow)
-	if !strings.Contains(headHeader, "\x1b[32mverified @") {
+
+	atHead := DashboardRow{SetRef: SetRef{SetID: "demo", RawStatus: tasks.StatusDone}, VerifiedAtSHA: "abcdef1234567890"}
+	atHead.ID = "demo"
+	if headHeader := m.detailHeader(atHead); !strings.Contains(headHeader, "\x1b[32mverified @") {
 		t.Fatalf("at-HEAD header should be green: %q", headHeader)
 	}
 
-	plain := detailHeader("demo", "AWAITING-APPROVAL", "1/1 done", nil)
-	if strings.Contains(plain, "verified @") {
-		t.Fatalf("plain header should not contain suffix: %q", plain)
+	plain := DashboardRow{SetRef: SetRef{SetID: "demo", RawStatus: tasks.StatusAwaitingApproval}}
+	plain.ID = "demo"
+	if got := m.detailHeader(plain); strings.Contains(got, "verified @") {
+		t.Fatalf("plain header should not contain suffix: %q", got)
 	}
 }
 
@@ -1487,13 +1491,12 @@ func TestDashboardDetailViewPeekTaskText(t *testing.T) {
 	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
 		{Project: "pop", CursorKey: "pop\x00set-peek", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-peek"}},
 	}})
-	d0 := newDetailView(m.snap.Rows[0])
-	d0.syncManifest(manifest, nil)
+	d0 := newTaskDetailView(m.snap.Rows[0], manifest, nil)
 	m.detail = d0
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
 	got := updated.(QueueDashboard)
-	if got.detail.peek == nil || !got.detail.peek.loading || got.detail.peek.taskID != "01-a" {
+	if got.detail.peek == nil || !got.detail.peek.loading || got.detail.peek.itemID != "01-a" {
 		t.Fatalf("peek = %+v, want loading peek for 01-a", got.detail.peek)
 	}
 	if cmd == nil {
@@ -1524,12 +1527,11 @@ func TestDashboardDetailViewPeekTaskText(t *testing.T) {
 	m2 := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
 		{Project: "pop", CursorKey: "pop\x00set-peek", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-peek"}},
 	}})
-	d2 := newDetailView(m2.snap.Rows[0])
-	d2.syncManifest(manifest, nil)
+	d2 := newTaskDetailView(m2.snap.Rows[0], manifest, nil)
 	m2.detail = d2
 	updated, cmd = m2.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	got = updated.(QueueDashboard)
-	if got.detail.peek == nil || !got.detail.peek.loading || got.detail.peek.taskID != "01-a" {
+	if got.detail.peek == nil || !got.detail.peek.loading || got.detail.peek.itemID != "01-a" {
 		t.Fatalf("enter peek = %+v, want loading peek for 01-a", got.detail.peek)
 	}
 	if cmd == nil {
@@ -1545,8 +1547,8 @@ func TestDashboardTaskTextPeekScrolls(t *testing.T) {
 	m.width = 80
 	m.detail = &detailView{
 		row: m.snap.Rows[0],
-		peek: &taskTextPeek{
-			taskID: "01-a",
+		peek: &itemTextPeek{
+			itemID: "01-a",
 			path:   filepath.Join("/tasks", "set-scroll", "01-a.md"),
 			text:   "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\n",
 		},
@@ -1659,8 +1661,7 @@ func TestDashboardDetailViewRendersTaskList(t *testing.T) {
 	}})
 	m.width = 120
 	m.height = 20
-	d := newDetailView(m.snap.Rows[0])
-	d.syncManifest(manifest, taskRow)
+	d := newTaskDetailView(m.snap.Rows[0], manifest, taskRow)
 	m.detail = d
 	out := m.viewDetail()
 
@@ -1675,6 +1676,26 @@ func TestDashboardDetailViewRendersTaskList(t *testing.T) {
 	// Cursor indicator on first task.
 	if !strings.Contains(out, "█") {
 		t.Fatalf("expected cursor indicator:\n%s", out)
+	}
+}
+
+// TestDashboardDetailViewKeepsRetryCountInStatusCell pins the one place a task's
+// status cell says more than its status word: a failed task folds its retry
+// count into the label the detail renders.
+func TestDashboardDetailViewKeepsRetryCountInStatusCell(t *testing.T) {
+	after := 3
+	manifest := &tasks.Manifest{
+		Valid: true,
+		Tasks: []tasks.Task{{ID: "01-a", File: "01-a.md", Title: "First", Type: "AFK", Status: tasks.TaskFailed, FailedAfter: &after}},
+	}
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
+		{Project: "pop", CursorKey: "pop\x00set-failed", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-failed"}},
+	}})
+	m.width, m.height = 120, 20
+	m.detail = newTaskDetailView(m.snap.Rows[0], manifest, nil)
+
+	if out := m.viewDetail(); !strings.Contains(out, "failed(3)") {
+		t.Fatalf("detail should fold the retry count into the status cell:\n%s", out)
 	}
 }
 
@@ -1695,8 +1716,7 @@ func TestDashboardDetailViewCursorByIDPinsAcrossRefresh(t *testing.T) {
 		},
 	}
 
-	d := newDetailView(DashboardRow{SetRef: SetRef{SetID: "set-x"}})
-	d.syncManifest(manifest1, nil)
+	d := newTaskDetailView(DashboardRow{SetRef: SetRef{SetID: "set-x"}}, manifest1, nil)
 	d.list.SetCursorToKey("02-b")
 
 	// Cursor is on 02-b at index 1 before refresh.
@@ -1705,7 +1725,7 @@ func TestDashboardDetailViewCursorByIDPinsAcrossRefresh(t *testing.T) {
 	}
 
 	// After a refresh that reorders, the cursor follows 02-b to its new index.
-	d.syncManifest(manifest2, nil)
+	d.sync(detailRowWithTasks(d.row, manifest2, nil))
 	if sel, ok := d.list.Selected(); !ok || sel.ID != "02-b" || d.list.Cursor() != 0 {
 		t.Fatalf("after refresh selected = %+v (ok=%v) cursor=%d, want 02-b at index 0", sel, ok, d.list.Cursor())
 	}
@@ -1723,8 +1743,7 @@ func TestDashboardDetailViewVimNavigation(t *testing.T) {
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
 		{Project: "pop", CursorKey: "pop\x00set-nav", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-nav"}},
 	}})
-	d := newDetailView(m.snap.Rows[0])
-	d.syncManifest(manifest, nil)
+	d := newTaskDetailView(m.snap.Rows[0], manifest, nil)
 	m.detail = d
 
 	selID := func(m QueueDashboard) string {
@@ -3029,21 +3048,20 @@ func detailOverrideModel(row DashboardRow, task tasks.Task, completeErr, resetEr
 		Tasks: []tasks.Task{task},
 	}
 	m := newQueueDashboard(d, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
-	dv := newDetailView(row)
-	dv.syncManifest(manifest, nil)
+	dv := newTaskDetailView(row, manifest, nil)
 	m.detail = dv
 	return m, &completeCalls, &resetCalls, &skipCalls
 }
 
-// taskMenuItemKeys returns the verb-letter keys offered by an open task menu.
-func taskMenuItemKeys(menu *taskMenu) []string {
+// itemMenuKeys returns the verb-letter keys offered by an open item menu.
+func itemMenuKeys(menu *itemMenu) []string {
 	if menu == nil {
 		return nil
 	}
-	items := menu.list.Items()
-	keys := make([]string, len(items))
-	for i, item := range items {
-		keys[i] = item.key
+	actions := menu.list.Items()
+	keys := make([]string, len(actions))
+	for i, action := range actions {
+		keys[i] = action.Key
 	}
 	return keys
 }
@@ -3062,15 +3080,15 @@ func TestDetailTaskMenuCompleteVerb(t *testing.T) {
 	openTask := tasks.Task{ID: "01-a", File: "01-a.md", Status: "open"}
 	m, completeCalls, _, _ := detailOverrideModel(row, openTask, nil, nil, nil)
 	m = openTaskMenu(t, m)
-	if m.taskMenu == nil {
+	if m.itemMenu == nil {
 		t.Fatal("a on open task: expected task menu to open")
 	}
-	if got := taskMenuItemKeys(m.taskMenu); !slices.Contains(got, "c") {
+	if got := itemMenuKeys(m.itemMenu); !slices.Contains(got, "c") {
 		t.Fatalf("open task menu = %v, want to contain C", got)
 	}
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Text: "c"})
 	got := updated.(QueueDashboard)
-	if got.taskMenu != nil {
+	if got.itemMenu != nil {
 		t.Fatal("C should close the menu")
 	}
 	if cmd == nil {
@@ -3091,10 +3109,10 @@ func TestDetailTaskMenuCompleteVerb(t *testing.T) {
 	doneTask := tasks.Task{ID: "01-a", File: "01-a.md", Status: "done"}
 	m2, completeCalls2, resetCalls2, _ := detailOverrideModel(row, doneTask, nil, nil, nil)
 	m2 = openTaskMenu(t, m2)
-	if m2.taskMenu == nil {
+	if m2.itemMenu == nil {
 		t.Fatal("a on done task: expected task menu to open with Open verb")
 	}
-	keys := taskMenuItemKeys(m2.taskMenu)
+	keys := itemMenuKeys(m2.itemMenu)
 	if slices.Contains(keys, "c") {
 		t.Fatalf("done task menu = %v, want NOT to contain C", keys)
 	}
@@ -3121,7 +3139,7 @@ func TestDetailTaskMenuOpenVerb(t *testing.T) {
 	failedTask := tasks.Task{ID: "02-b", File: "02-b.md", Status: "failed"}
 	m, _, resetCalls, _ := detailOverrideModel(row, failedTask, nil, nil, nil)
 	m = openTaskMenu(t, m)
-	if got := taskMenuItemKeys(m.taskMenu); !slices.Contains(got, "o") {
+	if got := itemMenuKeys(m.itemMenu); !slices.Contains(got, "o") {
 		t.Fatalf("failed task menu = %v, want to contain O", got)
 	}
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'o', Text: "o"})
@@ -3143,7 +3161,7 @@ func TestDetailTaskMenuOpenVerb(t *testing.T) {
 	skippedTask := tasks.Task{ID: "03-c", File: "03-c.md", Status: "skipped"}
 	m2, _, resetCalls2, _ := detailOverrideModel(row, skippedTask, nil, nil, nil)
 	m2 = openTaskMenu(t, m2)
-	if got := taskMenuItemKeys(m2.taskMenu); !slices.Contains(got, "o") {
+	if got := itemMenuKeys(m2.itemMenu); !slices.Contains(got, "o") {
 		t.Fatalf("skipped task menu = %v, want to contain O", got)
 	}
 	_, cmd2 := m2.Update(tea.KeyPressMsg{Code: 'o', Text: "o"})
@@ -3159,7 +3177,7 @@ func TestDetailTaskMenuOpenVerb(t *testing.T) {
 	openTask := tasks.Task{ID: "04-d", File: "04-d.md", Status: "open"}
 	m3, _, resetCalls3, _ := detailOverrideModel(row, openTask, nil, nil, nil)
 	m3 = openTaskMenu(t, m3)
-	if got := taskMenuItemKeys(m3.taskMenu); slices.Contains(got, "o") {
+	if got := itemMenuKeys(m3.itemMenu); slices.Contains(got, "o") {
 		t.Fatalf("open task menu = %v, want NOT to contain O", got)
 	}
 	// Pressing O is inert while the menu is open and has no O item.
@@ -3179,7 +3197,7 @@ func TestDetailTaskMenuSkipVerb(t *testing.T) {
 	openTask := tasks.Task{ID: "04-d", File: "04-d.md", Status: "open"}
 	m, _, _, skipCalls := detailOverrideModel(row, openTask, nil, nil, nil)
 	m = openTaskMenu(t, m)
-	if got := taskMenuItemKeys(m.taskMenu); !slices.Contains(got, "s") {
+	if got := itemMenuKeys(m.itemMenu); !slices.Contains(got, "s") {
 		t.Fatalf("open task menu = %v, want to contain s", got)
 	}
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
@@ -3201,7 +3219,7 @@ func TestDetailTaskMenuSkipVerb(t *testing.T) {
 	failedTask := tasks.Task{ID: "04-d", File: "04-d.md", Status: "failed"}
 	m2, _, _, skipCalls2 := detailOverrideModel(row, failedTask, nil, nil, nil)
 	m2 = openTaskMenu(t, m2)
-	if got := taskMenuItemKeys(m2.taskMenu); slices.Contains(got, "s") {
+	if got := itemMenuKeys(m2.itemMenu); slices.Contains(got, "s") {
 		t.Fatalf("failed task menu = %v, want NOT to contain s", got)
 	}
 	_, cmd2 := m2.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
@@ -3220,17 +3238,17 @@ func TestTaskMenuKMovesCursor(t *testing.T) {
 	openTask := tasks.Task{ID: "01-a", File: "01-a.md", Status: "open"}
 	m, completeCalls, resetCalls, skipCalls := detailOverrideModel(row, openTask, nil, nil, nil)
 	m = openTaskMenu(t, m)
-	before := m.taskMenu.list.Cursor()
+	before := m.itemMenu.list.Cursor()
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
 	got := updated.(QueueDashboard)
 	if cmd != nil {
 		t.Fatal("k in task menu: expected no command")
 	}
-	if got.taskMenu == nil {
+	if got.itemMenu == nil {
 		t.Fatal("k in task menu: menu should stay open")
 	}
-	if got.taskMenu.list.Cursor() == before {
+	if got.itemMenu.list.Cursor() == before {
 		t.Fatalf("k in task menu: cursor did not move from %d", before)
 	}
 	if *completeCalls != 0 || *resetCalls != 0 || *skipCalls != 0 {
@@ -3239,8 +3257,8 @@ func TestTaskMenuKMovesCursor(t *testing.T) {
 
 	updated, _ = got.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	got = updated.(QueueDashboard)
-	if got.taskMenu.list.Cursor() != before {
-		t.Fatalf("j should return the cursor to %d, got %d", before, got.taskMenu.list.Cursor())
+	if got.itemMenu.list.Cursor() != before {
+		t.Fatalf("j should return the cursor to %d, got %d", before, got.itemMenu.list.Cursor())
 	}
 }
 
@@ -3310,12 +3328,22 @@ func TestDashboardMenusReserveMovementKeys(t *testing.T) {
 	}
 	check("status submenu", statusKeys)
 
+	kinds := testKinds()
 	for _, status := range []tasks.TaskStatus{tasks.TaskOpen, tasks.TaskDone, "failed", "skipped"} {
 		var keys []string
-		for _, item := range taskMenuItems(tasks.Task{ID: "01-a", File: "01-a.md", Status: status}) {
-			keys = append(keys, item.key)
+		item := work.Item{ID: "01-a", File: "01-a.md", Status: string(status)}
+		for _, action := range kinds.itemActionsFor(DashboardRow{SetRef: SetRef{SetID: "set"}}, item) {
+			keys = append(keys, action.Key)
 		}
-		check("task menu ("+string(status)+")", keys)
+		check("item menu ("+string(status)+")", keys)
+	}
+	for _, status := range []string{"open", "claimed", "resolved"} {
+		var keys []string
+		item := work.Item{ID: "01", Status: status}
+		for _, action := range kinds.itemActionsFor(DashboardRow{Kind: ref.KindMap, SetRef: SetRef{SetID: "map"}}, item) {
+			keys = append(keys, action.Key)
+		}
+		check("map item menu ("+status+")", keys)
 	}
 
 	var filterKeys []string
@@ -3334,8 +3362,8 @@ func TestDetailTaskMenuDispatchViaEnter(t *testing.T) {
 	// Menu order for a failed task: complete (C), open (O). Highlight O via j.
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	got := updated.(QueueDashboard)
-	if got.taskMenu.list.Cursor() != 1 {
-		t.Fatalf("after j cursor = %d, want 1", got.taskMenu.list.Cursor())
+	if got.itemMenu.list.Cursor() != 1 {
+		t.Fatalf("after j cursor = %d, want 1", got.itemMenu.list.Cursor())
 	}
 	updated, cmd := got.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	got = updated.(QueueDashboard)
@@ -3359,7 +3387,7 @@ func TestDetailTaskMenuEscCloses(t *testing.T) {
 	m = openTaskMenu(t, m)
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	got := updated.(QueueDashboard)
-	if got.taskMenu != nil {
+	if got.itemMenu != nil {
 		t.Fatal("esc should close the task menu")
 	}
 	if cmd != nil {
@@ -3400,8 +3428,7 @@ func TestDetailViewActionsHintRendered(t *testing.T) {
 	}})
 	m.width = 80
 	m.height = 12
-	d := newDetailView(m.snap.Rows[0])
-	d.syncManifest(manifest, nil)
+	d := newTaskDetailView(m.snap.Rows[0], manifest, nil)
 	d.statusMsg = "completed 01-a"
 	m.detail = d
 
@@ -3421,17 +3448,17 @@ func TestPeekTaskMenuOpensAndDispatches(t *testing.T) {
 	failedTask := tasks.Task{ID: "02-b", File: "02-b.md", Status: "failed"}
 	m, completeCalls, resetCalls, _ := detailOverrideModel(row, failedTask, nil, nil, nil)
 	// Open a peek over the previewed task.
-	m.detail.peek = &taskTextPeek{taskID: "02-b", text: "body\n"}
+	m.detail.peek = &itemTextPeek{itemID: "02-b", text: "body\n"}
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
-	if got.taskMenu == nil {
+	if got.itemMenu == nil {
 		t.Fatal("a in peek: expected task menu to open")
 	}
-	if !got.taskMenu.inPeek {
+	if !got.itemMenu.inPeek {
 		t.Fatal("peek-opened menu should be marked inPeek")
 	}
-	if keys := taskMenuItemKeys(got.taskMenu); !slices.Contains(keys, "o") || slices.Contains(keys, "k") {
+	if keys := itemMenuKeys(got.itemMenu); !slices.Contains(keys, "o") || slices.Contains(keys, "k") {
 		t.Fatalf("peek failed-task menu = %v, want O and not K", keys)
 	}
 	// The peek stays open beneath the menu.
@@ -3441,7 +3468,7 @@ func TestPeekTaskMenuOpensAndDispatches(t *testing.T) {
 
 	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'o', Text: "o"})
 	got = updated.(QueueDashboard)
-	if got.taskMenu != nil {
+	if got.itemMenu != nil {
 		t.Fatal("o should close the menu")
 	}
 	if cmd == nil {
@@ -3463,7 +3490,7 @@ func TestPeekTaskMenuRendersOverlay(t *testing.T) {
 	m, _, _, _ := detailOverrideModel(row, openTask, nil, nil, nil)
 	m.width = 120
 	m.height = 14
-	m.detail.peek = &taskTextPeek{taskID: "01-a", text: "body line\n"}
+	m.detail.peek = &itemTextPeek{itemID: "01-a", text: "body line\n"}
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
@@ -3481,7 +3508,7 @@ func TestPeekFormerKeysInertWithoutMenu(t *testing.T) {
 	row := DashboardRow{SetRef: SetRef{SetID: "set-peek-inert", DefPath: "/def"}}
 	openTask := tasks.Task{ID: "01-a", File: "01-a.md", Status: "open"}
 	m, completeCalls, _, skipCalls := detailOverrideModel(row, openTask, nil, nil, nil)
-	m.detail.peek = &taskTextPeek{taskID: "01-a", text: "body\n"}
+	m.detail.peek = &itemTextPeek{itemID: "01-a", text: "body\n"}
 
 	for _, key := range []rune{'c', 'o', 'k'} {
 		updated, cmd := m.Update(tea.KeyPressMsg{Code: key, Text: string(key)})
@@ -3489,7 +3516,7 @@ func TestPeekFormerKeysInertWithoutMenu(t *testing.T) {
 		if cmd != nil {
 			t.Fatalf("%c in peek (no menu): expected no command", key)
 		}
-		if got.taskMenu != nil {
+		if got.itemMenu != nil {
 			t.Fatalf("%c in peek (no menu): should not open a menu", key)
 		}
 	}
@@ -3511,7 +3538,7 @@ func TestDetailFormerKeysInertWithoutMenu(t *testing.T) {
 		if cmd != nil {
 			t.Fatalf("%c in detail (no menu): expected no command", key)
 		}
-		if got.taskMenu != nil {
+		if got.itemMenu != nil {
 			t.Fatalf("%c in detail (no menu): should not open a menu", key)
 		}
 	}
@@ -3697,7 +3724,7 @@ func TestQueueDashboardHelpOverlay(t *testing.T) {
 
 	t.Run("help works in peek mode", func(t *testing.T) {
 		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
-		m.detail = &detailView{peek: &taskTextPeek{}}
+		m.detail = &detailView{peek: &itemTextPeek{}}
 		updated, _ := m.Update(ctrlH)
 		got := updated.(QueueDashboard)
 		if !got.showHelp {
@@ -3715,13 +3742,13 @@ func TestQueueDashboardHelpOverlay(t *testing.T) {
 		}
 	})
 
-	t.Run("help works in task menu", func(t *testing.T) {
+	t.Run("help works in item menu", func(t *testing.T) {
 		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
-		m.taskMenu = &taskMenu{}
+		m.itemMenu = &itemMenu{}
 		updated, _ := m.Update(ctrlH)
 		got := updated.(QueueDashboard)
 		if !got.showHelp {
-			t.Error("C-h should open help in task menu")
+			t.Error("C-h should open help in item menu")
 		}
 	})
 
@@ -3822,7 +3849,7 @@ func TestQueueDashboardHelpContent(t *testing.T) {
 
 	t.Run("peek mode shows peek bindings", func(t *testing.T) {
 		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
-		m.detail = &detailView{peek: &taskTextPeek{}}
+		m.detail = &detailView{peek: &itemTextPeek{}}
 		entries := m.helpEntries()
 		found := map[string]bool{}
 		for _, e := range entries {
@@ -3856,22 +3883,23 @@ func TestQueueDashboardHelpContent(t *testing.T) {
 		}
 	})
 
-	t.Run("task menu shows task verbs", func(t *testing.T) {
+	t.Run("item menu shows the open menu's verbs", func(t *testing.T) {
 		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
-		m.taskMenu = &taskMenu{}
+		m.itemMenu = newItemMenu(work.Item{ID: "01-a", Status: "open"}, testKinds().itemActionsFor(
+			DashboardRow{SetRef: SetRef{SetID: "set"}}, work.Item{ID: "01-a", Status: "open"}), false)
 		entries := m.helpEntries()
 		found := map[string]bool{}
 		for _, e := range entries {
 			found[e.Key] = true
 		}
 		if !found["c"] {
-			t.Error("task menu help missing 'c' (complete)")
-		}
-		if !found["o"] {
-			t.Error("task menu help missing 'o' (open)")
+			t.Error("item menu help missing 'c' (complete)")
 		}
 		if !found["s"] {
-			t.Error("task menu help missing 's' (skip)")
+			t.Error("item menu help missing 's' (skip)")
+		}
+		if !found["esc"] {
+			t.Error("item menu help missing 'esc'")
 		}
 	})
 
@@ -4633,65 +4661,61 @@ func mapDetailTestFiles() (storageDir string, files map[string]string) {
 	return storageDir, files
 }
 
+// newMapDetailDashboard builds a dashboard whose one row is the Map container
+// the Map kind loads from the fixture — items, sections and all, the same
+// container the detail view reads in production.
 func newMapDetailDashboard(t *testing.T) (QueueDashboard, *Deps) {
 	t.Helper()
 	storageDir, files := mapDetailTestFiles()
 	tasksDir := filepath.Join(storageDir, "tasks")
 	d := dashboardTestDeps(t, nil, nil)
 	withWayfinderMaps(t, d, storageDir, files)
-	mapRow := DashboardRow{
-		Project:   "pop",
-		Kind:      ref.KindMap,
-		CursorKey: "pop\x00map\x00" + "2026-07-01-active",
-		SetRef: SetRef{
-			SetID:   "2026-07-01-active",
-			DefPath: tasksDir,
-		},
-		MapOpen: 2, MapFrontier: 1,
+	cfg := &config.Config{}
+	groups := func() ([]repogroup.Group, error) {
+		return []repogroup.Group{{
+			DefPath:     tasksDir,
+			StorageDir:  storageDir,
+			RepoKey:     "repo-map-detail",
+			ProjectName: "pop",
+			Rep:         &repogroup.Checkout{ProjectPath: "/repo/checkout"},
+		}}, nil
 	}
-	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{mapRow}})
+	rows, err := wayfinder.NewMapKind(d.MapKindDeps(cfg, groups)).Load()
+	if err != nil {
+		t.Fatalf("map kind Load: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("loaded %d map containers, want 1", len(rows))
+	}
+	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: rows})
 	m.width, m.height = 120, 24
 	return m, d
 }
 
-func openMapDetailFromList(t *testing.T, m QueueDashboard) (QueueDashboard, tea.Cmd) {
+// openMapDetail presses `l` on the Map row and returns the opened detail.
+func openMapDetail(t *testing.T, m QueueDashboard) QueueDashboard {
 	t.Helper()
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
 	got := updated.(QueueDashboard)
-	if got.detail == nil || !got.detail.loading || cmd == nil {
-		t.Fatalf("l on map row = detail %+v, want loading with cmd", got.detail)
+	if got.detail == nil {
+		t.Fatal("l on map row did not open the detail")
 	}
-	return got, cmd
-}
-
-func finishMapDetailLoad(t *testing.T, m QueueDashboard, cmd tea.Cmd) QueueDashboard {
-	t.Helper()
-	updated, _ := m.Update(cmd())
-	got := updated.(QueueDashboard)
-	if got.detail.loading || got.detail.err != nil || got.detail.wfMap == nil {
-		t.Fatalf("loaded detail = loading=%v err=%v map=%+v", got.detail.loading, got.detail.err, got.detail.wfMap)
+	if cmd != nil {
+		t.Fatal("opening a detail reads the container in hand, not a fresh load")
 	}
 	return got
-}
-
-func loadMapDetail(t *testing.T, m QueueDashboard) QueueDashboard {
-	t.Helper()
-	loading, cmd := openMapDetailFromList(t, m)
-	return finishMapDetailLoad(t, loading, cmd)
 }
 
 func TestDashboardMapDetailViewOpenClose(t *testing.T) {
 	m, _ := newMapDetailDashboard(t)
 
-	loading, cmd := openMapDetailFromList(t, m)
-	view := loading.View().Content
+	got := openMapDetail(t, m)
+	view := got.View().Content
 	if strings.Contains(view, "PROJECT") || strings.Contains(view, "TASK SET") {
 		t.Fatalf("detail view should replace table:\n%s", view)
 	}
-
-	got := finishMapDetailLoad(t, loading, cmd)
-	if !strings.Contains(got.View().Content, "Map · 2026-07-01-active") {
-		t.Fatalf("detail missing map header:\n%s", got.View().Content)
+	if !strings.Contains(view, "Map · 2026-07-01-active") {
+		t.Fatalf("detail missing map header:\n%s", view)
 	}
 
 	for _, tc := range []struct {
@@ -4700,10 +4724,11 @@ func TestDashboardMapDetailViewOpenClose(t *testing.T) {
 	}{
 		{name: "h", msg: tea.KeyPressMsg{Code: 'h', Text: "h"}},
 		{name: "left", msg: tea.KeyPressMsg{Code: tea.KeyLeft, Text: "left"}},
+		{name: "esc", msg: tea.KeyPressMsg{Code: tea.KeyEscape}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			mOpen, _ := newMapDetailDashboard(t)
-			loaded := loadMapDetail(t, mOpen)
+			loaded := openMapDetail(t, mOpen)
 			updated, cmd := loaded.Update(tc.msg)
 			closed := updated.(QueueDashboard)
 			if cmd != nil {
@@ -4715,101 +4740,88 @@ func TestDashboardMapDetailViewOpenClose(t *testing.T) {
 		})
 	}
 
-	m2, _ := newMapDetailDashboard(t)
-	got2 := loadMapDetail(t, m2)
-	updated, cmd := got2.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	if cmd != nil || updated.(QueueDashboard).detail != nil {
-		t.Fatal("esc should close map detail without quitting")
-	}
-
 	m3, _ := newMapDetailDashboard(t)
-	updated3, cmd3 := m3.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	loading3 := updated3.(QueueDashboard)
-	if loading3.detail == nil || !loading3.detail.loading || cmd3 == nil {
-		t.Fatal("enter on map row should open loading detail with cmd")
-	}
-	got3 := finishMapDetailLoad(t, loading3, cmd3)
-	if got3.detail.wfMap == nil {
-		t.Fatal("enter should load map detail")
+	updated3, _ := m3.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	opened := updated3.(QueueDashboard)
+	if opened.detail == nil || len(opened.detail.row.Items) == 0 {
+		t.Fatalf("enter on map row should open the detail over its tickets: %+v", opened.detail)
 	}
 }
 
-func TestDashboardMapDetailViewRendersTicketsAndFrontier(t *testing.T) {
+// TestDashboardMapDetailRendersSectionsAndTickets covers the generic detail over
+// a Map: the kind's prose sections render above the item list, and its Decision
+// tickets are the items, each with its kind-local status and its blockers.
+func TestDashboardMapDetailRendersSectionsAndTickets(t *testing.T) {
 	m, _ := newMapDetailDashboard(t)
-	got := loadMapDetail(t, m)
+	got := openMapDetail(t, m)
 	view := got.View().Content
 
 	for _, want := range []string{
-		"01-frontier", "research", "open",
-		"02-blocked", "prototype", "open (blocked)",
-		"03-grilling", "grilling",
-		"04-resolved", "resolved",
+		"Destination", "Ship it",
+		"01", "research", "open",
+		"02", "prototype",
+		"03", "grilling",
+		"04", "resolved",
 	} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("detail missing %q:\n%s", want, view)
 		}
 	}
-
-	// Frontier row is highlighted (cyan); blocked and resolved are dim.
-	frontierLine := ""
+	lines := strings.Split(view, "\n")
+	sectionLine := dashboardTestLineIndex(lines, "Ship it")
+	tableLine := dashboardTestLineIndex(lines, "STATUS")
+	if sectionLine < 0 || tableLine < 0 || sectionLine > tableLine {
+		t.Fatalf("sections must render above the item table (section=%d table=%d):\n%s", sectionLine, tableLine, view)
+	}
 	blockedLine := ""
-	for _, line := range strings.Split(view, "\n") {
-		if strings.Contains(line, "01-frontier") {
-			frontierLine = line
-		}
-		if strings.Contains(line, "02-blocked") {
+	for _, line := range lines {
+		if strings.Contains(line, " 02 ") {
 			blockedLine = line
 		}
 	}
-	if frontierLine == "" || blockedLine == "" {
-		t.Fatalf("could not find ticket lines in:\n%s", view)
-	}
-	if !strings.Contains(frontierLine, "\x1b[") {
-		t.Fatalf("frontier line should be styled: %q", frontierLine)
-	}
-	if !strings.Contains(blockedLine, "2m") {
-		t.Fatalf("blocked line should be dimmed: %q", blockedLine)
+	if !strings.HasSuffix(strings.TrimRight(blockedLine, " "), "01") {
+		t.Fatalf("blocked ticket should name its blocker in BLOCKED-BY: %q", blockedLine)
 	}
 }
 
 func TestDashboardMapDetailViewVimNavigation(t *testing.T) {
 	m, _ := newMapDetailDashboard(t)
-	got := loadMapDetail(t, m)
+	got := openMapDetail(t, m)
 
-	selName := func(m QueueDashboard) string {
-		ticket, _ := m.detail.ticketList.Selected()
-		return detailTicketName(ticket)
+	selID := func(m QueueDashboard) string {
+		item, _ := m.detail.list.Selected()
+		return item.ID
 	}
 
 	updated, _ := got.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	got = updated.(QueueDashboard)
-	if name := selName(got); name != "02-blocked" {
-		t.Fatalf("after j: selected = %q, want 02-blocked", name)
+	if id := selID(got); id != "02" {
+		t.Fatalf("after j: selected = %q, want 02", id)
 	}
 
 	updated, _ = got.Update(tea.KeyPressMsg{Code: 'G', Text: "G"})
 	got = updated.(QueueDashboard)
-	if name := selName(got); name != "04-resolved" {
-		t.Fatalf("G: selected = %q, want 04-resolved", name)
+	if id := selID(got); id != "04" {
+		t.Fatalf("G: selected = %q, want 04", id)
 	}
 
 	updated, _ = got.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
 	got = updated.(QueueDashboard)
 	updated, _ = got.Update(tea.KeyPressMsg{Code: 'g', Text: "g"})
 	got = updated.(QueueDashboard)
-	if name := selName(got); name != "01-frontier" {
-		t.Fatalf("gg: selected = %q, want 01-frontier", name)
+	if id := selID(got); id != "01" {
+		t.Fatalf("gg: selected = %q, want 01", id)
 	}
 }
 
 func TestDashboardMapDetailViewPeekTicketText(t *testing.T) {
 	m, _ := newMapDetailDashboard(t)
-	got := loadMapDetail(t, m)
+	got := openMapDetail(t, m)
 
 	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
 	got = updated.(QueueDashboard)
-	if got.detail.peek == nil || !got.detail.peek.loading || got.detail.peek.taskID != "01-frontier" {
-		t.Fatalf("peek = %+v, want loading for 01-frontier", got.detail.peek)
+	if got.detail.peek == nil || !got.detail.peek.loading || got.detail.peek.itemID != "01" {
+		t.Fatalf("peek = %+v, want loading for 01", got.detail.peek)
 	}
 	if cmd == nil {
 		t.Fatal("l in map detail did not return load command")
@@ -4822,7 +4834,7 @@ func TestDashboardMapDetailViewPeekTicketText(t *testing.T) {
 	view := got.View().Content
 	ticketPath := filepath.Join("/data/repos/repo-map-detail/maps/2026-07-01-active/issues/01-frontier.md")
 	for _, want := range []string{
-		"2026-07-01-active / 01-frontier",
+		"2026-07-01-active / 01",
 		ticketPath,
 		"# Frontier question",
 	} {
@@ -4841,27 +4853,6 @@ func TestDashboardMapDetailViewPeekTicketText(t *testing.T) {
 	}
 	if !strings.Contains(got.View().Content, "Map · 2026-07-01-active") {
 		t.Fatalf("should return to map detail list after closing peek")
-	}
-}
-
-func TestStyledDetailMapTicketLineFrontierVsDim(t *testing.T) {
-	frontier := map[string]bool{"01": true}
-	open := wayfinder.Ticket{ID: "01", Slug: "a", Type: wayfinder.TicketResearch, Status: wayfinder.TicketOpen}
-	blocked := wayfinder.Ticket{ID: "02", Slug: "b", Type: wayfinder.TicketPrototype, Status: wayfinder.TicketOpen}
-	claimed := wayfinder.Ticket{ID: "03", Slug: "c", Type: wayfinder.TicketGrilling, Status: wayfinder.TicketClaimed}
-
-	frontierStyled := styledDetailMapTicketLine(open, 12, frontier)
-	blockedStyled := styledDetailMapTicketLine(blocked, 12, frontier)
-	claimedStyled := styledDetailMapTicketLine(claimed, 12, frontier)
-
-	if !strings.Contains(frontierStyled, "\x1b[") {
-		t.Fatalf("frontier line not styled: %q", frontierStyled)
-	}
-	if !strings.Contains(blockedStyled, "2m") {
-		t.Fatalf("blocked line not dimmed: %q", blockedStyled)
-	}
-	if !strings.Contains(claimedStyled, "2m") {
-		t.Fatalf("claimed line not dimmed: %q", claimedStyled)
 	}
 }
 

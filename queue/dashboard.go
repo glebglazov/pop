@@ -11,7 +11,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/glebglazov/pop/config"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/project"
@@ -22,6 +21,7 @@ import (
 	"github.com/glebglazov/pop/ui"
 	"github.com/glebglazov/pop/wayfinder"
 	"github.com/glebglazov/pop/work"
+	"github.com/glebglazov/pop/work/ref"
 )
 
 const dashboardPollInterval = 2 * time.Second
@@ -261,16 +261,10 @@ type dashboardStatusMsg struct {
 	verb  string
 	err   error
 }
-type dashboardDetailMsg struct {
-	dashRow  DashboardRow
-	manifest *tasks.Manifest
-	taskRow  *tasks.Row
-	wfMap    *wayfinder.Map
-	err      error
-}
 
-type dashboardTaskTextMsg struct {
-	taskID string
+// dashboardItemTextMsg carries one Work item's text back to the detail peek.
+type dashboardItemTextMsg struct {
+	itemID string
 	path   string
 	text   string
 	err    error
@@ -589,102 +583,56 @@ func newDashboardFilterMenu() *dashboardFilterMenu {
 	}
 }
 
-// taskMenuAction identifies a verb in the task-level action menu, independent
-// of the shortcut key that triggers it.
-type taskMenuAction int
-
-const (
-	taskActionComplete taskMenuAction = iota
-	taskActionOpen
-	taskActionSkip
-	taskActionCopyName
-)
-
-// taskMenuItem is one verb in the task-level action menu: the flat shortcut
-// letter it keeps, the label shown beside it, and the action identity
-// dispatched by applyDetailOverride (or handled directly for copy name).
-type taskMenuItem struct {
-	key    string
-	label  string
-	action taskMenuAction
-}
-
-// taskMenu is the action overlay opened with `a` over a single task — in the
-// task-set detail view (over the cursored task) or the task text peek (over the
-// previewed task). It carries the task snapshot and the verbs applicable to that
-// task's status on a ui.List whose cursor drives j/k + Enter selection. inPeek
-// marks which view it was opened from so the renderer can place it correctly.
-type taskMenu struct {
-	task   tasks.Task
-	list   *ui.List[taskMenuItem]
+// itemMenu is the action overlay opened with `a` over a single Work item — in
+// the detail view (over the cursored item) or the item text peek (over the
+// previewed one). Its verbs are the owning kind's ItemActions, asked for when the
+// menu opens rather than carried on the item, so eligibility is as fresh as the
+// keypress (ADR-0173). inPeek marks which view it was opened from so the renderer
+// can place it correctly.
+type itemMenu struct {
+	item   work.Item
+	list   *ui.List[work.Action]
 	inPeek bool
 }
 
-// taskMenuItems returns the task verbs applicable to task, filtered to its
-// status: Complete for open/failed/skipped (anything not already done), Open for
-// any non-open task (done/failed/skipped, mirroring CanReopen), and Skip for
-// open. A done task yields Open.
-func taskMenuItems(task tasks.Task) []taskMenuItem {
-	var items []taskMenuItem
-	if task.Status != tasks.TaskDone {
-		items = append(items, taskMenuItem{key: "c", label: "complete", action: taskActionComplete})
-	}
-	if tasks.CanReopen(task.Status) {
-		items = append(items, taskMenuItem{key: "o", label: "open", action: taskActionOpen})
-	}
-	if task.Status == tasks.TaskOpen {
-		items = append(items, taskMenuItem{key: "s", label: "skip", action: taskActionSkip})
-	}
-	items = append(items, taskMenuItem{key: "y", label: "copy name", action: taskActionCopyName})
-	return items
-}
-
-// newTaskMenu wraps pre-filtered task verbs in a ui.List with j/k wrap-around
-// navigation. inPeek records which detail view opened it for placement.
-func newTaskMenu(task tasks.Task, items []taskMenuItem, inPeek bool) *taskMenu {
-	return &taskMenu{
-		task:   task,
-		list:   ui.NewList(items, ui.Opts[taskMenuItem]{Wrap: true}),
+// newItemMenu wraps the kind's verbs for one item in a ui.List with j/k
+// wrap-around navigation. inPeek records which detail view opened it.
+func newItemMenu(item work.Item, actions []work.Action, inPeek bool) *itemMenu {
+	return &itemMenu{
+		item:   item,
+		list:   ui.NewList(actions, ui.Opts[work.Action]{Wrap: true}),
 		inPeek: inPeek,
 	}
 }
 
-// detailView is the full-screen task-set or Map detail that replaces the table.
-// Task-set rows use list keyed by task ID; Map rows use ticketList keyed by
-// ticket ID. ReplaceItems re-anchors the cursor by key on refresh (ADR-0079).
+// detailView is the full-screen container detail that replaces the table. It is
+// generic over kinds: the kind's prose sections render above one item list, and
+// every item verb comes from that kind (ADR-0173) — a new kind gets a detail view
+// by filling Items and DetailSections, never by writing a frame of its own.
+//
+// Its data is the container itself, refreshed by the same periodic rebuild that
+// feeds the table: there is no second loader to drift from the rows behind it.
+// ReplaceItems re-anchors the cursor by item id on refresh (ADR-0079).
 type detailView struct {
-	row        DashboardRow
-	manifest   *tasks.Manifest
-	taskRow    *tasks.Row
-	list       *ui.List[tasks.Task]
-	cols       *detailColumns
-	wfMap      *wayfinder.Map
-	ticketList *ui.List[wayfinder.Ticket]
-	ticketCols *detailTicketColumns
-	frontier   map[string]bool
-	loading    bool
-	err        error
-	peek       *taskTextPeek
+	row  work.Container
+	list *ui.List[work.Item]
+	cols *detailColumns
+	peek *itemTextPeek
 	// statusMsg is a transient one-line message shown above the hint bar.
 	// Set to a hint on invalid transition; set to confirmation on success.
 	statusMsg string
 }
 
-// detailColumns holds the detail task list's ID-column width, precomputed over the
-// manifest tasks (the status/type/title columns are fixed). The List's Cell closure
-// closes over a pointer to it so a manifest refresh updates the width in place,
+// detailColumns holds the detail item list's ID-column width, precomputed over the
+// container's items (the status/type/title columns are fixed). The List's Cell closure
+// closes over a pointer to it so a refresh updates the width in place,
 // matching the house pattern (dashboardColumns / pickerCell).
 type detailColumns struct {
 	idW int
 }
 
-// detailTicketColumns holds the Map detail ticket-table name-column width.
-type detailTicketColumns struct {
-	nameW int
-}
-
-// Detail task-table column widths. Status, type, and title are fixed; the ID
-// column grows to the widest task ID (floored at the "ID" header).
+// Detail item-table column widths. Status, type, and title are fixed; the ID
+// column grows to the widest item ID (floored at the "ID" header).
 const (
 	detailStatusW = 10
 	detailTypeW   = 4
@@ -692,47 +640,47 @@ const (
 )
 
 // detailTableChromeLines is the number of body lines above the detail List rows:
-// the blank line under the header, the column header, and the separator.
+// the blank line under the header (or under the last prose section), the column
+// header, and the separator.
 const detailTableChromeLines = 3
 
-// newDetailView builds a loading detail view for row. Task sets get an empty task
-// List; Maps get an empty ticket List. Content arrives via syncManifest or syncMap.
-func newDetailView(row DashboardRow) *detailView {
-	if mapRow(row) {
-		return newMapDetailView(row)
-	}
+// newDetailView builds the detail view for row over the items the container
+// already carries.
+func newDetailView(row work.Container) *detailView {
 	cols := &detailColumns{idW: len("ID")}
-	d := &detailView{row: row, loading: true, cols: cols}
-	d.list = ui.NewList([]tasks.Task{}, ui.Opts[tasks.Task]{
-		Key:    func(t tasks.Task) string { return t.ID },
+	d := &detailView{row: row, cols: cols}
+	d.list = ui.NewList([]work.Item{}, ui.Opts[work.Item]{
+		Key:    func(i work.Item) string { return i.ID },
 		Anchor: ui.AnchorTop,
-		Cell: func(t tasks.Task, _ ui.RowState) string {
-			return detailTaskLine(t, cols.idW)
+		Cell: func(i work.Item, _ ui.RowState) string {
+			return detailItemLine(i, cols.idW)
 		},
 	})
+	d.sync(row)
 	return d
 }
 
-func newMapDetailView(row DashboardRow) *detailView {
-	cols := &detailTicketColumns{nameW: len("TICKET")}
-	d := &detailView{
-		row:        row,
-		loading:    true,
-		ticketCols: cols,
-		frontier:   map[string]bool{},
+// sync adopts a rebuilt container: the same container the table now shows, with
+// its items fed to the List (which re-anchors the cursor by item id) and the ID
+// column re-measured.
+func (d *detailView) sync(row work.Container) {
+	d.row = row
+	d.cols.idW = detailIDWidth(row.Items)
+	d.list.ReplaceItems(row.Items)
+}
+
+// itemByID returns the container item with the given id, or false if absent.
+func (d *detailView) itemByID(id string) (work.Item, bool) {
+	for _, item := range d.row.Items {
+		if item.ID == id {
+			return item, true
+		}
 	}
-	d.ticketList = ui.NewList([]wayfinder.Ticket{}, ui.Opts[wayfinder.Ticket]{
-		Key:    func(t wayfinder.Ticket) string { return t.ID },
-		Anchor: ui.AnchorTop,
-		Cell: func(t wayfinder.Ticket, _ ui.RowState) string {
-			return styledDetailMapTicketLine(t, cols.nameW, d.frontier)
-		},
-	})
-	return d
+	return work.Item{}, false
 }
 
-type taskTextPeek struct {
-	taskID  string
+type itemTextPeek struct {
+	itemID  string
 	path    string
 	text    string
 	loading bool
@@ -740,68 +688,6 @@ type taskTextPeek struct {
 	scroll  int
 	// statusMsg is a transient one-line message shown above the hint bar.
 	statusMsg string
-}
-
-// ticketByDisplayName returns the Map ticket whose display name matches name.
-func (d *detailView) ticketByDisplayName(name string) (wayfinder.Ticket, bool) {
-	if d.wfMap == nil {
-		return wayfinder.Ticket{}, false
-	}
-	for _, t := range d.wfMap.Tickets {
-		if detailTicketName(t) == name {
-			return t, true
-		}
-	}
-	return wayfinder.Ticket{}, false
-}
-
-// taskByID returns the manifest task with the given ID, or false if absent.
-func (d *detailView) taskByID(id string) (tasks.Task, bool) {
-	if d.manifest == nil {
-		return tasks.Task{}, false
-	}
-	for _, t := range d.manifest.Tasks {
-		if t.ID == id {
-			return t, true
-		}
-	}
-	return tasks.Task{}, false
-}
-
-// syncManifest updates the manifest on load or a tick refresh, feeding the tasks
-// to the List (which re-anchors the cursor by task ID) and recomputing the ID
-// column width. It clears the loading/error state, since a synced manifest is a
-// completed load.
-func (d *detailView) syncManifest(m *tasks.Manifest, row *tasks.Row) {
-	d.manifest = m
-	d.taskRow = row
-	d.loading = false
-	d.err = nil
-	var items []tasks.Task
-	if m != nil {
-		items = m.Tasks
-	}
-	d.cols.idW = detailIDWidth(items)
-	d.list.ReplaceItems(items)
-}
-
-// syncMap updates the Map on load or tick refresh, feeding tickets to ticketList
-// and recomputing frontier highlighting state.
-func (d *detailView) syncMap(m *wayfinder.Map) {
-	d.wfMap = m
-	d.loading = false
-	d.err = nil
-	var items []wayfinder.Ticket
-	if m != nil {
-		items = m.Tickets
-	}
-	frontier := wayfinder.Frontier(items)
-	d.frontier = make(map[string]bool, len(frontier))
-	for _, t := range frontier {
-		d.frontier[t.ID] = true
-	}
-	d.ticketCols.nameW = detailTicketNameWidth(items)
-	d.ticketList.ReplaceItems(items)
 }
 
 // dashboardColumns holds the task-set table's natural column widths (derived from
@@ -834,7 +720,7 @@ type QueueDashboard struct {
 	abandon   *dashboardAbandonModal
 	detail    *detailView
 	menu      *dashboardMenu
-	taskMenu  *taskMenu
+	itemMenu  *itemMenu
 	filter    *dashboardFilterMenu
 
 	filterMode  bool
@@ -882,18 +768,6 @@ func (m QueueDashboard) copyClipboard(payload string) string {
 		return fmt.Sprintf("copy failed: %v", err)
 	}
 	return fmt.Sprintf("copied %s", payload)
-}
-
-// taskRefCopyPayload is the paste-ready Task target reference for a task:
-// the <task-set>/<file>.md form accepted by pop tasks implement/complete/open.
-func taskRefCopyPayload(setID string, task tasks.Task) string {
-	return setID + "/" + task.File
-}
-
-// ticketCopyNamePayload is the bare ticket id the copy-name verb writes for a
-// Map detail row.
-func ticketCopyNamePayload(ticket wayfinder.Ticket) string {
-	return ticket.ID
 }
 
 // copyRowName copies the cursored row's identifier via Clipboard copy and
@@ -987,7 +861,7 @@ func (m QueueDashboard) resizeMainList() {
 // ViewToggleAllowed reports whether v may switch to the Routine dashboard.
 func (m QueueDashboard) ViewToggleAllowed() bool {
 	return m.bind == nil && m.drainPick == nil && m.abandon == nil &&
-		m.detail == nil && m.menu == nil && m.taskMenu == nil && m.filter == nil
+		m.detail == nil && m.menu == nil && m.itemMenu == nil && m.filter == nil
 }
 
 // OpenCheckout returns the checkout path chosen with Ctrl-g before quit.
@@ -1142,7 +1016,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.err = nil
 			m.detail = newDetailView(row)
-			return m, m.loadDetail(row)
+			return m, nil
 		case "y":
 			row, ok := m.list.Selected()
 			if !ok {
@@ -1158,11 +1032,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cols.refit()
 		m.resizeMainList()
 	case dashboardTickMsg:
-		cmds := []tea.Cmd{dashboardTick(), m.reload()}
-		if m.detail != nil {
-			cmds = append(cmds, m.loadDetail(m.detail.row))
-		}
-		return m, tea.Batch(cmds...)
+		return m, tea.Batch(dashboardTick(), m.reload())
 	case ui.SpinnerTickMsg:
 		return m, nil
 	case dashboardLivePrimeMsg:
@@ -1185,9 +1055,12 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.syncListRows()
 			if m.detail != nil {
+				// The detail view reads the container the table just rebuilt: one
+				// data path, so an item status that moved on disk shows up in the
+				// detail and the row it was opened from at the same tick.
 				for _, row := range m.snap.Rows {
 					if row.CursorKey == m.detail.row.CursorKey {
-						m.detail.row = row
+						m.detail.sync(row)
 						break
 					}
 				}
@@ -1208,21 +1081,6 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-	case dashboardDetailMsg:
-		if m.detail == nil {
-			return m, nil
-		}
-		if msg.err != nil {
-			m.detail.loading = false
-			m.detail.err = msg.err
-			return m, nil
-		}
-		if mapRow(m.detail.row) {
-			m.detail.syncMap(msg.wfMap)
-		} else {
-			m.detail.syncManifest(msg.manifest, msg.taskRow)
-		}
-		return m, nil
 	case dashboardToggleMsg:
 		if msg.err != nil {
 			m.actionErr = msg.err
@@ -1330,13 +1188,13 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.detail.statusMsg = fmt.Sprintf("%s applied to %s", msg.verb, msg.taskID)
 		}
-		return m, m.loadDetail(m.detail.row)
-	case dashboardTaskTextMsg:
+		return m, m.reload()
+	case dashboardItemTextMsg:
 		if m.detail == nil || m.detail.peek == nil {
 			return m, nil
 		}
 		m.detail.peek.loading = false
-		m.detail.peek.taskID = msg.taskID
+		m.detail.peek.itemID = msg.itemID
 		m.detail.peek.path = msg.path
 		m.detail.peek.text = msg.text
 		m.detail.peek.err = msg.err
@@ -1658,9 +1516,9 @@ func (m QueueDashboard) dispatchVerb(verb work.Verb, row DashboardRow) (tea.Mode
 }
 
 func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.taskMenu != nil {
+	if m.itemMenu != nil {
 		m.pendingG = false
-		return m.updateTaskMenu(msg)
+		return m.updateItemMenu(msg)
 	}
 	if m.detail != nil && m.detail.peek != nil {
 		if msg.String() == "g" {
@@ -1679,42 +1537,31 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "ctrl+c":
 			return m, tea.Quit
 		case "j", "down":
-			m.moveTaskTextPeek(1)
+			m.moveItemTextPeek(1)
 		case "k", "up":
-			m.moveTaskTextPeek(-1)
+			m.moveItemTextPeek(-1)
 		case "ctrl+d":
-			m.moveTaskTextPeek(halfPageDelta(m.taskTextPeekPageSize()))
+			m.moveItemTextPeek(halfPageDelta(m.itemTextPeekPageSize()))
 		case "ctrl+u":
-			m.moveTaskTextPeek(-halfPageDelta(m.taskTextPeekPageSize()))
+			m.moveItemTextPeek(-halfPageDelta(m.itemTextPeekPageSize()))
 		case "G":
-			m.detail.peek.scroll = m.maxTaskTextPeekScroll()
+			m.detail.peek.scroll = m.maxItemTextPeekScroll()
 		case "a":
-			if mapRow(m.detail.row) {
-				return m, nil
-			}
-			task, ok := m.detail.taskByID(m.detail.peek.taskID)
+			item, ok := m.detail.itemByID(m.detail.peek.itemID)
 			if !ok {
 				return m, nil
 			}
-			items := taskMenuItems(task)
-			if len(items) == 0 {
+			actions := m.kinds.itemActionsFor(m.detail.row, item)
+			if len(actions) == 0 {
 				return m, nil
 			}
-			m.taskMenu = newTaskMenu(task, items, true)
+			m.itemMenu = newItemMenu(item, actions, true)
 		case "y":
-			if mapRow(m.detail.row) {
-				ticket, ok := m.detail.ticketByDisplayName(m.detail.peek.taskID)
-				if !ok {
-					return m, nil
-				}
-				m.detail.peek.statusMsg = m.copyClipboard(ticketCopyNamePayload(ticket))
-				return m, nil
-			}
-			task, ok := m.detail.taskByID(m.detail.peek.taskID)
+			item, ok := m.detail.itemByID(m.detail.peek.itemID)
 			if !ok {
 				return m, nil
 			}
-			m.detail.peek.statusMsg = m.copyClipboard(taskRefCopyPayload(m.detail.row.SetID, task))
+			m.detail.peek.statusMsg = m.copyItemName(m.detail.row, item)
 			return m, nil
 		}
 		return m, nil
@@ -1723,11 +1570,7 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.pendingG {
 			m.pendingG = false
 			if m.detail != nil {
-				if mapRow(m.detail.row) {
-					m.detail.ticketList.SetCursor(0)
-				} else {
-					m.detail.list.SetCursor(0)
-				}
+				m.detail.list.SetCursor(0)
 			}
 		} else {
 			m.pendingG = true
@@ -1742,11 +1585,11 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "ctrl+g":
-		// Open the detail's task set checkout in pop, mirroring the main-list
-		// Ctrl-g: surface the bound checkout on quit so the command layer runs the
-		// workbench-aware open after the TUI exits; an unbound set shows an inline
-		// status and keeps the dashboard running. Map rows have no checkout.
-		if m.detail == nil || mapRow(m.detail.row) {
+		// Open the detail container's checkout in pop, mirroring the main-list
+		// Ctrl-g: surface the checkout on quit so the command layer runs the
+		// workbench-aware open after the TUI exits; a container whose kind resolves
+		// none shows an inline status and keeps the dashboard running.
+		if m.detail == nil {
 			return m, nil
 		}
 		if strings.TrimSpace(m.detail.row.RuntimePath) == "" {
@@ -1758,186 +1601,162 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "j", "down":
 		if m.detail != nil {
-			if mapRow(m.detail.row) {
-				m.detail.ticketList.MoveDown()
-			} else {
-				m.detail.list.MoveDown()
-			}
+			m.detail.list.MoveDown()
 		}
 	case "k", "up":
 		if m.detail != nil {
-			if mapRow(m.detail.row) {
-				m.detail.ticketList.MoveUp()
-			} else {
-				m.detail.list.MoveUp()
-			}
+			m.detail.list.MoveUp()
 		}
 	case "G":
 		if m.detail != nil {
-			if mapRow(m.detail.row) && m.detail.wfMap != nil {
-				m.detail.ticketList.SetCursor(len(m.detail.wfMap.Tickets) - 1)
-			} else if m.detail.manifest != nil {
-				m.detail.list.SetCursor(len(m.detail.manifest.Tasks) - 1)
-			}
+			m.detail.list.SetCursor(len(m.detail.row.Items) - 1)
 		}
-	case "I":
-		if m.detail == nil || m.detail.loading || !mapRow(m.detail.row) || m.detail.wfMap == nil {
-			return m, nil
-		}
-		ticket, ok := m.detail.ticketList.Selected()
-		if !ok {
-			return m, nil
-		}
-		if !detailTicketOnFrontier(*m.detail.wfMap, ticket) {
-			m.detail.statusMsg = "only frontier tickets can be worked"
-			return m, nil
-		}
-		m.detail.statusMsg = ""
-		return m, m.launchWayfinderSession(m.detail.row, ticket.ID)
 	case "l", "enter":
-		if m.detail == nil || m.detail.loading {
+		if m.detail == nil {
 			return m, nil
 		}
-		if mapRow(m.detail.row) {
-			ticket, ok := m.detail.ticketList.Selected()
-			if !ok {
-				return m, nil
-			}
-			if msg.String() == "enter" && detailTicketOnFrontier(*m.detail.wfMap, ticket) {
-				m.detail.statusMsg = ""
-				return m, m.launchWayfinderSession(m.detail.row, ticket.ID)
-			}
-			m.detail.peek = &taskTextPeek{taskID: detailTicketName(ticket), loading: true}
-			return m, m.loadTicketText(m.detail.wfMap, ticket)
-		}
-		task, ok := m.detail.list.Selected()
+		item, ok := m.detail.list.Selected()
 		if !ok {
 			return m, nil
 		}
-		m.detail.peek = &taskTextPeek{taskID: task.ID, loading: true}
-		return m, m.loadTaskText(m.detail.manifest, task)
+		m.detail.peek = &itemTextPeek{itemID: item.ID, loading: true}
+		return m, m.loadItemText(item)
 	case "a":
-		if m.detail == nil || m.detail.loading || mapRow(m.detail.row) {
+		if m.detail == nil {
 			return m, nil
 		}
-		task, ok := m.detail.list.Selected()
+		item, ok := m.detail.list.Selected()
 		if !ok {
 			return m, nil
 		}
-		items := taskMenuItems(task)
-		if len(items) == 0 {
+		actions := m.kinds.itemActionsFor(m.detail.row, item)
+		if len(actions) == 0 {
 			return m, nil
 		}
 		m.detail.statusMsg = ""
-		m.taskMenu = newTaskMenu(task, items, false)
+		m.itemMenu = newItemMenu(item, actions, false)
 		return m, nil
 	case "y":
-		if m.detail == nil || m.detail.loading {
+		if m.detail == nil {
 			return m, nil
 		}
-		if mapRow(m.detail.row) {
-			ticket, ok := m.detail.ticketList.Selected()
-			if !ok {
-				return m, nil
-			}
-			m.detail.statusMsg = m.copyClipboard(ticketCopyNamePayload(ticket))
-			return m, nil
-		}
-		task, ok := m.detail.list.Selected()
+		item, ok := m.detail.list.Selected()
 		if !ok {
 			return m, nil
 		}
-		m.detail.statusMsg = m.copyClipboard(taskRefCopyPayload(m.detail.row.SetID, task))
+		m.detail.statusMsg = m.copyItemName(m.detail.row, item)
 		return m, nil
 	}
 	return m, nil
 }
 
-// updateTaskMenu drives the task-level action overlay: esc/ctrl+c close it, j/k
+// updateItemMenu drives the item-level action overlay: esc/ctrl+c close it, j/k
 // move the highlight, Enter runs the highlighted verb, and any matching verb
 // letter runs that verb directly. Non-matching keys are inert while open.
 // Navigation is resolved before verb letters so a hotkey can never shadow
 // movement.
-func (m QueueDashboard) updateTaskMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.taskMenu == nil {
+func (m QueueDashboard) updateItemMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.itemMenu == nil {
 		return m, nil
 	}
 	switch msg.String() {
 	case "esc", "ctrl+c":
-		m.taskMenu = nil
+		m.itemMenu = nil
 		return m, nil
 	case "j", "down":
-		m.taskMenu.list.MoveDown()
+		m.itemMenu.list.MoveDown()
 		return m, nil
 	case "k", "up":
-		m.taskMenu.list.MoveUp()
+		m.itemMenu.list.MoveUp()
 		return m, nil
 	case "enter":
-		return m.invokeTaskMenuItem(m.taskMenu.list.Cursor())
+		return m.invokeItemMenuItem(m.itemMenu.list.Cursor())
 	}
-	for i, item := range m.taskMenu.list.Items() {
-		if msg.String() == item.key {
-			return m.invokeTaskMenuItem(i)
+	for i, action := range m.itemMenu.list.Items() {
+		if msg.String() == action.Key {
+			return m.invokeItemMenuItem(i)
 		}
 	}
 	return m, nil
 }
 
-// invokeTaskMenuItem closes the menu and dispatches the verb at idx against the
-// task the menu was opened on. The items are pre-filtered to valid transitions
-// (taskMenuItems), so the verb applies without a separate confirmation.
-func (m QueueDashboard) invokeTaskMenuItem(idx int) (tea.Model, tea.Cmd) {
-	if m.taskMenu == nil {
+// invokeItemMenuItem closes the menu and dispatches the verb at idx against the
+// item the menu was opened on. The kind pre-filtered the verbs to the ones that
+// apply, so the verb runs without a separate confirmation.
+func (m QueueDashboard) invokeItemMenuItem(idx int) (tea.Model, tea.Cmd) {
+	if m.itemMenu == nil {
 		return m, nil
 	}
-	items := m.taskMenu.list.Items()
-	if idx < 0 || idx >= len(items) {
+	actions := m.itemMenu.list.Items()
+	if idx < 0 || idx >= len(actions) {
 		return m, nil
 	}
 	if m.detail == nil {
-		m.taskMenu = nil
+		m.itemMenu = nil
 		return m, nil
 	}
-	item := items[idx]
-	task := m.taskMenu.task
-	inPeek := m.taskMenu.inPeek
-	m.taskMenu = nil
-	if item.action == taskActionCopyName {
-		msg := m.copyClipboard(taskRefCopyPayload(m.detail.row.SetID, task))
-		if inPeek {
+	verb := actions[idx].Verb
+	item := m.itemMenu.item
+	inPeek := m.itemMenu.inPeek
+	m.itemMenu = nil
+	return m.dispatchItemVerb(verb, m.detail.row, item, inPeek)
+}
+
+// dispatchItemVerb runs one item verb, keyed by verb id and never by kind — the
+// same split the container-level dispatch keeps (ADR-0173). Copy-name is the
+// kind's own answer, taken from its Perform; the Task-set status writes and the
+// Map's grilling handoff run through queue's existing launchers because they are
+// the ones that own the process handoff and the detail's refresh.
+func (m QueueDashboard) dispatchItemVerb(verb work.Verb, row work.Container, item work.Item, inPeek bool) (tea.Model, tea.Cmd) {
+	switch verb {
+	case work.VerbCopyName:
+		msg := m.copyItemName(row, item)
+		if inPeek && m.detail.peek != nil {
 			m.detail.peek.statusMsg = msg
 		} else {
 			m.detail.statusMsg = msg
 		}
 		return m, nil
+	case wayfinder.VerbWork:
+		m.detail.statusMsg = ""
+		return m, m.launchWayfinderSession(row, item.ID)
+	case setkind.VerbComplete, setkind.VerbOpen, setkind.VerbSkip:
+		m.detail.statusMsg = ""
+		return m, m.applyDetailOverride(row, item, verb)
 	}
-	m.detail.statusMsg = ""
-	return m, m.applyDetailOverride(m.detail.row, task, item.action)
+	return m, nil
 }
 
-// applyDetailOverride dispatches the complete/open/skip override action to the
-// appropriate tasks.*With function via the Deps seam.
-func (m QueueDashboard) applyDetailOverride(row DashboardRow, task tasks.Task, action taskMenuAction) tea.Cmd {
+// copyItemName copies the item reference the owning kind names — a task set's
+// paste-ready `<set>/<file>.md`, a Map's bare ticket id — and returns the
+// transient confirmation.
+func (m QueueDashboard) copyItemName(row work.Container, item work.Item) string {
+	payload, err := m.kinds.itemCopyPayload(row, item)
+	if err != nil {
+		return fmt.Sprintf("copy failed: %v", err)
+	}
+	return m.copyClipboard(payload)
+}
+
+// applyDetailOverride dispatches the complete/open/skip verb to the appropriate
+// tasks.*With function via the Deps seam.
+func (m QueueDashboard) applyDetailOverride(row work.Container, item work.Item, verb work.Verb) tea.Cmd {
 	d := m.d
 	if d == nil {
 		d = DefaultDeps()
 	}
-	taskPath := row.SetID + "/" + task.File
+	taskPath := setkind.TaskRef(row.SetID, item)
 	return func() tea.Msg {
 		var err error
-		var verbName string
-		switch action {
-		case taskActionComplete:
-			verbName = "complete"
+		switch verb {
+		case setkind.VerbComplete:
 			err = d.completeDetailTask(row.DefPath, taskPath)
-		case taskActionOpen:
-			verbName = "open"
+		case setkind.VerbOpen:
 			err = d.resetDetailTask(row.DefPath, taskPath)
-		case taskActionSkip:
-			verbName = "skip"
+		case setkind.VerbSkip:
 			err = d.skipDetailTask(row.DefPath, taskPath)
 		}
-		return dashboardDetailOverrideMsg{taskID: task.ID, verb: verbName, err: err}
+		return dashboardDetailOverrideMsg{taskID: item.ID, verb: string(verb), err: err}
 	}
 }
 
@@ -1965,7 +1784,7 @@ func (m QueueDashboard) updateFilterMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
-func (m QueueDashboard) moveTaskTextPeek(delta int) {
+func (m QueueDashboard) moveItemTextPeek(delta int) {
 	if m.detail == nil || m.detail.peek == nil || delta == 0 {
 		return
 	}
@@ -1973,28 +1792,28 @@ func (m QueueDashboard) moveTaskTextPeek(delta int) {
 	if m.detail.peek.scroll < 0 {
 		m.detail.peek.scroll = 0
 	}
-	if maxScroll := m.maxTaskTextPeekScroll(); m.detail.peek.scroll > maxScroll {
+	if maxScroll := m.maxItemTextPeekScroll(); m.detail.peek.scroll > maxScroll {
 		m.detail.peek.scroll = maxScroll
 	}
 }
 
-func (m QueueDashboard) maxTaskTextPeekScroll() int {
+func (m QueueDashboard) maxItemTextPeekScroll() int {
 	if m.detail == nil || m.detail.peek == nil {
 		return 0
 	}
-	lines := taskTextPeekLines(m.detail.peek.text)
-	maxScroll := len(lines) - m.taskTextPeekPageSize()
+	lines := itemTextPeekLines(m.detail.peek.text)
+	maxScroll := len(lines) - m.itemTextPeekPageSize()
 	if maxScroll < 0 {
 		return 0
 	}
 	return maxScroll
 }
 
-func (m QueueDashboard) taskTextPeekPageSize() int {
+func (m QueueDashboard) itemTextPeekPageSize() int {
 	if m.detail == nil || m.detail.peek == nil {
 		return 1
 	}
-	return taskTextPeekPageSize(m.height, m.detail.peek.path)
+	return itemTextPeekPageSize(m.height, m.detail.peek.path)
 }
 
 // filterDashboardRows returns rows whose Project or SetID contain query
@@ -2189,15 +2008,6 @@ func dashboardWayfinderEmptyFrontierMessage() string {
 	return "no frontier tickets — open tickets are blocked or claimed"
 }
 
-func detailTicketOnFrontier(wfMap wayfinder.Map, ticket wayfinder.Ticket) bool {
-	for _, t := range wayfinder.Frontier(wfMap.Tickets) {
-		if t.ID == ticket.ID {
-			return true
-		}
-	}
-	return false
-}
-
 func (m QueueDashboard) launchAssist(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
 		result, err := LaunchAssist(m.d, m.cfg, row.SetRef)
@@ -2262,61 +2072,8 @@ func (m QueueDashboard) launchStatusVerb(row DashboardRow, verb string) tea.Cmd 
 	}
 }
 
-func (m QueueDashboard) loadDetail(row DashboardRow) tea.Cmd {
-	return func() tea.Msg {
-		d := m.d
-		if d == nil {
-			d = DefaultDeps()
-		}
-		if mapRow(row) {
-			return loadMapDetailMsg(d, row)
-		}
-		if d.Tasks == nil {
-			d.Tasks = tasks.DefaultDeps()
-		}
-		refresh, err := d.refresh(row.DefPath)
-		if err != nil {
-			return dashboardDetailMsg{dashRow: row, err: err}
-		}
-		// The detail overlay needs only the per-set binding for the verify-verdict
-		// runtime resolution; read the bindings directly (the same if-exists borrow
-		// the snapshot build takes) rather than reopening the whole snapshot.
-		bindings, _ := binding.AllBindings(d.Tasks)
-		var cfg *config.Config
-		if d.LoadConfig != nil {
-			cfg, _ = d.LoadConfig(config.DefaultConfigPath())
-		}
-		tasks.ApplyVerifyVerdictsWith(d.Tasks, refresh, cfg, func(setID string) string {
-			return binding.RuntimeForSet(bindings, row.RepoKey, setID)
-		})
-		taskRow := tasks.FindRow(refresh, row.SetID)
-		manifest := refresh.Manifests[row.SetID]
-		return dashboardDetailMsg{dashRow: row, manifest: manifest, taskRow: taskRow}
-	}
-}
-
-func loadMapDetailMsg(d *Deps, row DashboardRow) dashboardDetailMsg {
-	if d.Tasks == nil {
-		d.Tasks = tasks.DefaultDeps()
-	}
-	storageDir := dashboardRowStorageDir(row)
-	if storageDir == "" {
-		return dashboardDetailMsg{dashRow: row, err: fmt.Errorf("no storage dir for map %q", row.SetID)}
-	}
-	wd := &wayfinder.Deps{FS: d.Tasks.FS, Tasks: d.Tasks}
-	maps, err := wayfinder.ScanMapsInStorage(wd, storageDir)
-	if err != nil {
-		return dashboardDetailMsg{dashRow: row, err: err}
-	}
-	for i := range maps {
-		if maps[i].ID == row.SetID {
-			cp := maps[i]
-			return dashboardDetailMsg{dashRow: row, wfMap: &cp}
-		}
-	}
-	return dashboardDetailMsg{dashRow: row, err: fmt.Errorf("map %q not found", row.SetID)}
-}
-
+// dashboardRowStorageDir derives a container's Task-storage directory from the
+// definition path its repository group carried.
 func dashboardRowStorageDir(row DashboardRow) string {
 	if row.DefPath != "" {
 		return filepath.Dir(row.DefPath)
@@ -2324,10 +2081,13 @@ func dashboardRowStorageDir(row DashboardRow) string {
 	return ""
 }
 
-func (m QueueDashboard) loadTaskText(manifest *tasks.Manifest, task tasks.Task) tea.Cmd {
+// loadItemText reads one Work item's text for the peek. The path is the item's
+// own — every kind resolves it when it builds the item, so the peek needs no
+// directory of the kind's to join against.
+func (m QueueDashboard) loadItemText(item work.Item) tea.Cmd {
 	return func() tea.Msg {
-		if manifest == nil {
-			return dashboardTaskTextMsg{taskID: task.ID, err: fmt.Errorf("manifest not loaded")}
+		if strings.TrimSpace(item.File) == "" {
+			return dashboardItemTextMsg{itemID: item.ID, err: fmt.Errorf("%s has no file to preview", item.ID)}
 		}
 		d := m.d
 		if d == nil {
@@ -2336,34 +2096,11 @@ func (m QueueDashboard) loadTaskText(manifest *tasks.Manifest, task tasks.Task) 
 		if d.Tasks == nil {
 			d.Tasks = tasks.DefaultDeps()
 		}
-		path := filepath.Join(manifest.Dir, task.File)
-		data, err := d.Tasks.FS.ReadFile(path)
+		data, err := d.Tasks.FS.ReadFile(item.File)
 		if err != nil {
-			return dashboardTaskTextMsg{taskID: task.ID, path: path, err: err}
+			return dashboardItemTextMsg{itemID: item.ID, path: item.File, err: err}
 		}
-		return dashboardTaskTextMsg{taskID: task.ID, path: path, text: string(data)}
-	}
-}
-
-func (m QueueDashboard) loadTicketText(wfMap *wayfinder.Map, ticket wayfinder.Ticket) tea.Cmd {
-	label := detailTicketName(ticket)
-	return func() tea.Msg {
-		if wfMap == nil {
-			return dashboardTaskTextMsg{taskID: label, err: fmt.Errorf("map not loaded")}
-		}
-		d := m.d
-		if d == nil {
-			d = DefaultDeps()
-		}
-		if d.Tasks == nil {
-			d.Tasks = tasks.DefaultDeps()
-		}
-		path := filepath.Join(wfMap.Dir, "issues", detailTicketFilename(ticket))
-		data, err := d.Tasks.FS.ReadFile(path)
-		if err != nil {
-			return dashboardTaskTextMsg{taskID: label, path: path, err: err}
-		}
-		return dashboardTaskTextMsg{taskID: label, path: path, text: string(data)}
+		return dashboardItemTextMsg{itemID: item.ID, path: item.File, text: string(data)}
 	}
 }
 
@@ -2578,17 +2315,19 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "y", Desc: "confirm unbind"},
 			{Key: "enter/n/esc", Desc: "cancel"},
 		}
-	case m.taskMenu != nil:
-		// Task-level action menu (in detail or peek)
-		return []ui.HelpEntry{
-			{Key: "c", Desc: "complete task"},
-			{Key: "o", Desc: "open/reopen task"},
-			{Key: "s", Desc: "skip task"},
-			{Key: "y", Desc: "copy name"},
-			{Key: "j/k", Desc: "navigate"},
-			{Key: "enter", Desc: "run action"},
-			{Key: "esc", Desc: "close menu"},
+	case m.itemMenu != nil:
+		// Item-level action menu (in detail or peek). Its verbs are the owning
+		// kind's, so the help lists the menu that is actually open rather than one
+		// kind's vocabulary written out here.
+		entries := make([]ui.HelpEntry, 0, len(m.itemMenu.list.Items())+3)
+		for _, action := range m.itemMenu.list.Items() {
+			entries = append(entries, ui.HelpEntry{Key: action.Key, Desc: action.Label})
 		}
+		return append(entries,
+			ui.HelpEntry{Key: "j/k", Desc: "navigate"},
+			ui.HelpEntry{Key: "enter", Desc: "run action"},
+			ui.HelpEntry{Key: "esc", Desc: "close menu"},
+		)
 	case m.menu != nil && m.menu.status != nil:
 		return []ui.HelpEntry{
 			{Key: "c", Desc: "complete"},
@@ -2642,29 +2381,16 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "y", Desc: "copy name"},
 			{Key: "h/esc", Desc: "close peek"},
 		}
-		if m.detail != nil && !mapRow(m.detail.row) {
-			entries = append(entries, ui.HelpEntry{Key: "a", Desc: "task actions"})
-		}
+		entries = append(entries, ui.HelpEntry{Key: "a", Desc: "item actions"})
 		return entries
-	case m.detail != nil && mapRow(m.detail.row):
-		// Map detail view (ticket list)
-		return []ui.HelpEntry{
-			{Key: "j/k", Desc: "navigate tickets"},
-			{Key: "gg", Desc: "first ticket"},
-			{Key: "G", Desc: "last ticket"},
-			{Key: "I/enter", Desc: "work frontier ticket"},
-			{Key: "l", Desc: "peek ticket text"},
-			{Key: "y", Desc: "copy name"},
-			{Key: "h/esc", Desc: "back to list"},
-		}
 	case m.detail != nil:
-		// Detail view (task list)
+		// Detail view (one container's items, whatever kind it is)
 		return []ui.HelpEntry{
-			{Key: "j/k", Desc: "navigate tasks"},
-			{Key: "gg", Desc: "first task"},
-			{Key: "G", Desc: "last task"},
-			{Key: "l/enter", Desc: "peek task text"},
-			{Key: "a", Desc: "task actions"},
+			{Key: "j/k", Desc: "navigate items"},
+			{Key: "gg", Desc: "first item"},
+			{Key: "G", Desc: "last item"},
+			{Key: "l/enter", Desc: "peek item text"},
+			{Key: "a", Desc: "item actions"},
 			{Key: "y", Desc: "copy name"},
 			{Key: "ctrl+g", Desc: "open worktree"},
 			{Key: "h/esc", Desc: "back to list"},
@@ -2718,8 +2444,8 @@ func (m QueueDashboard) View() tea.View {
 			title = "Help · Queue · action menu"
 		} else if m.filter != nil {
 			title = "Help · Queue · filter menu"
-		} else if m.taskMenu != nil {
-			title = "Help · Queue · task menu"
+		} else if m.itemMenu != nil {
+			title = "Help · Queue · item menu"
 		} else if m.bind != nil {
 			title = "Help · Queue · bind"
 		} else if m.drainPick != nil {
@@ -2997,66 +2723,41 @@ func dashboardSummary(kinds workKinds, rows []DashboardRow) string {
 	return strings.Join(kinds.summary(rows), " · ")
 }
 
-// viewDetail renders the full-screen task-set detail view. The task text peek
-// (ADR-0079) and the task action-menu overlay keep their bespoke rendering; the
-// loading, error, and content states compose through a Frame with the task list on
-// ui.List.
+// viewDetail renders the full-screen container detail view. The item text peek
+// (ADR-0079) and the item action-menu overlay keep their bespoke rendering; the
+// plain state composes through a Frame with the item list on ui.List.
 func (m QueueDashboard) viewDetail() string {
 	d := m.detail
 	if d.peek != nil {
 		var b strings.Builder
-		renderTaskTextPeek(&b, d, m.height, m.width, m.taskMenu)
+		renderItemTextPeek(&b, d, m.height, m.width, m.itemMenu)
 		return b.String()
 	}
-	if m.taskMenu != nil {
+	if m.itemMenu != nil {
 		var b strings.Builder
-		renderDetailContent(&b, d, m.height, m.width, m.taskMenu)
+		m.renderDetailContent(&b, d, m.height, m.width, m.itemMenu)
 		return b.String()
 	}
 	frame, body := m.detailFrame()
 	return frame.Render(body)
 }
 
-// detailFrame builds the Frame and body for the non-menu detail states: loading,
-// error, missing/malformed manifest, and the task-list content. The same Frame
-// drives the body-height budget and the render (ADR-0079); the content body's List
-// is sized to the budget the Frame leaves minus the table's own chrome, so the list
-// clamps to the terminal instead of rendering every task.
+// detailFrame builds the Frame and body for the non-menu detail states: a
+// container that could not be read, and the sections-plus-item-list content. The
+// same Frame drives the body-height budget and the render (ADR-0079); the
+// content body's List is sized to the budget the Frame leaves minus the prose
+// sections and the table's own chrome, so the list clamps to the terminal
+// instead of rendering every item.
 func (m QueueDashboard) detailFrame() (ui.Frame, string) {
 	d := m.detail
-	if mapRow(d.row) {
-		return m.detailMapFrame()
-	}
 	const backHint = "h/esc back"
-	if d.loading {
-		return ui.Frame{Width: m.width, TermH: m.height, Hints: backHint}, fmt.Sprintf("Loading %s...", d.row.SetID)
-	}
-	if d.err != nil {
-		return ui.Frame{Width: m.width, TermH: m.height, Hints: backHint}, fmt.Sprintf("error loading %s: %v", d.row.SetID, d.err)
-	}
-
-	manifest := d.manifest
-	status := tasks.DeriveStatus(manifest)
-	label := string(status)
-	progress := ""
-	if d.taskRow != nil {
-		status = d.taskRow.Status
-		label = tasks.StatusLabel(*d.taskRow)
-		progress = d.taskRow.Progress
-	}
-	header := detailHeader(d.row.SetID, label, progress, d.taskRow)
-
-	if status == tasks.StatusMissing {
-		return ui.Frame{Width: m.width, TermH: m.height, Header: header, Hints: backHint}, "  registered task set missing"
-	}
-	if manifest == nil || !manifest.Valid {
-		lines := []string{"  malformed manifest"}
-		if manifest != nil {
-			for _, e := range manifest.Errors {
-				lines = append(lines, "  - "+e)
-			}
+	header := m.detailHeader(d.row)
+	if d.row.Broken {
+		body := "  BROKEN"
+		if d.row.BrokenReason != "" {
+			body += ": " + d.row.BrokenReason
 		}
-		return ui.Frame{Width: m.width, TermH: m.height, Header: header, Hints: backHint}, strings.Join(lines, "\n")
+		return ui.Frame{Width: m.width, TermH: m.height, Header: header, Hints: backHint}, body
 	}
 
 	frame := ui.Frame{
@@ -3066,199 +2767,115 @@ func (m QueueDashboard) detailFrame() (ui.Frame, string) {
 		Status: d.statusMsg,
 		Hints:  "j/k · gg/G top/bottom · l/enter peek · a actions · y copy name · h/esc back",
 	}
-	listH := frame.BodyHeight(m.height) - detailTableChromeLines
+	budget := frame.BodyHeight(m.height)
+	// The item list is the point of the view, so prose yields to it: sections are
+	// cut (with an elision marker) before the list is squeezed below one row.
+	sections := clampDetailSections(detailSectionLines(d.row.DetailSections, m.width), budget-detailTableChromeLines-1)
+	listH := budget - detailTableChromeLines - len(sections)
 	if listH < 1 {
 		listH = 1
 	}
 	d.list.Resize(listH)
-	parts := []string{
+	parts := append([]string{}, sections...)
+	parts = append(parts,
 		"",
-		"  " + detailTableHeader(d.cols.idW),
-		"  " + detailTableSeparator(d.cols.idW),
-	}
+		"  "+detailTableHeader(d.cols.idW),
+		"  "+detailTableSeparator(d.cols.idW),
+	)
 	parts = append(parts, d.list.VisibleRows()...)
 	return frame, strings.Join(parts, "\n")
 }
 
-func (m QueueDashboard) detailMapFrame() (ui.Frame, string) {
-	d := m.detail
-	const backHint = "h/esc back"
-	if d.loading {
-		return ui.Frame{Width: m.width, TermH: m.height, Hints: backHint}, fmt.Sprintf("Loading %s...", d.row.SetID)
-	}
-	if d.err != nil {
-		return ui.Frame{Width: m.width, TermH: m.height, Hints: backHint}, fmt.Sprintf("error loading %s: %v", d.row.SetID, d.err)
-	}
-	if d.wfMap == nil {
-		return ui.Frame{Width: m.width, TermH: m.height, Hints: backHint}, "  map not found"
-	}
-	if d.wfMap.Broken {
-		body := "  BROKEN map"
-		if d.wfMap.BrokenReason != "" {
-			body += ": " + d.wfMap.BrokenReason
+// detailSectionLines renders the kind-authored prose blocks that sit above the
+// item list: each is a blank line, its title, and its body indented under it.
+// A kind with nothing to say renders nothing at all, so its detail is the item
+// list alone.
+func detailSectionLines(sections []work.Section, width int) []string {
+	var lines []string
+	for _, section := range sections {
+		body := strings.TrimRight(section.Body, "\n")
+		if strings.TrimSpace(section.Title) == "" && strings.TrimSpace(body) == "" {
+			continue
 		}
-		return ui.Frame{
-			Width:  m.width,
-			TermH:  m.height,
-			Header: detailMapHeader(*d.wfMap),
-			Hints:  backHint,
-		}, body
-	}
-
-	frame := ui.Frame{
-		Width:  m.width,
-		TermH:  m.height,
-		Header: detailMapHeader(*d.wfMap),
-		Status: d.statusMsg,
-		Hints:  "j/k · gg/G top/bottom · l/enter peek · y copy name · h/esc back",
-	}
-	listH := frame.BodyHeight(m.height) - detailTableChromeLines
-	if listH < 1 {
-		listH = 1
-	}
-	d.ticketList.Resize(listH)
-	parts := []string{
-		"",
-		"  " + detailMapTableHeader(d.ticketCols.nameW),
-		"  " + detailMapTableSeparator(d.ticketCols.nameW),
-	}
-	parts = append(parts, d.ticketList.VisibleRows()...)
-	return frame, strings.Join(parts, "\n")
-}
-
-// detailMapHeader builds the Map detail title line.
-func detailMapHeader(m wayfinder.Map) string {
-	counts := wayfinder.CountTickets(m.Tickets)
-	frontier := len(wayfinder.Frontier(m.Tickets))
-	return fmt.Sprintf("Map · %s  [WAYFINDING]  %d open / %d frontier", m.ID, counts.Open, frontier)
-}
-
-func detailTicketName(t wayfinder.Ticket) string {
-	if t.Slug != "" {
-		return t.ID + "-" + t.Slug
-	}
-	return t.ID
-}
-
-func detailTicketFilename(t wayfinder.Ticket) string {
-	if t.Slug != "" {
-		return t.ID + "-" + t.Slug + ".md"
-	}
-	return t.ID + ".md"
-}
-
-func detailTicketNameWidth(items []wayfinder.Ticket) int {
-	w := len("TICKET")
-	for _, t := range items {
-		if n := len(detailTicketName(t)); n > w {
-			w = n
+		lines = append(lines, "", "  "+ui.TruncateString(section.Title, width))
+		for _, line := range strings.Split(body, "\n") {
+			lines = append(lines, ui.TruncateString("    "+line, width))
 		}
 	}
-	return w
+	return lines
 }
 
-var (
-	mapFrontierTicketStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
-	mapDimTicketStyle      = lipgloss.NewStyle().Faint(true)
-)
-
-func detailMapTicketStatusLabel(t wayfinder.Ticket, frontier map[string]bool) string {
-	switch t.Status {
-	case wayfinder.TicketResolved:
-		return "resolved"
-	case wayfinder.TicketClaimed:
-		return "claimed"
-	case wayfinder.TicketOpen:
-		if frontier[t.ID] {
-			return "open"
-		}
-		return "open (blocked)"
-	default:
-		return string(t.Status)
+// clampDetailSections cuts the rendered section lines to max, marking the cut so
+// a reader knows the prose was elided rather than empty.
+func clampDetailSections(lines []string, max int) []string {
+	if max < 1 {
+		return nil
 	}
-}
-
-func detailMapTicketLine(t wayfinder.Ticket, nameW int, frontier map[string]bool) string {
-	return fmt.Sprintf("%-*s  %-*s  %s",
-		nameW, detailTicketName(t),
-		detailTypeW, t.Type,
-		detailMapTicketStatusLabel(t, frontier))
-}
-
-func styledDetailMapTicketLine(t wayfinder.Ticket, nameW int, frontier map[string]bool) string {
-	line := detailMapTicketLine(t, nameW, frontier)
-	if frontier[t.ID] {
-		return mapFrontierTicketStyle.Render(line)
+	if len(lines) <= max {
+		return lines
 	}
-	return mapDimTicketStyle.Render(line)
+	cut := append([]string{}, lines[:max-1]...)
+	return append(cut, "  …")
 }
 
-func detailMapTableHeader(nameW int) string {
-	return fmt.Sprintf("%-*s  %-*s  %s",
-		nameW, "TICKET", detailTypeW, "TYPE", "STATUS")
-}
-
-func detailMapTableSeparator(nameW int) string {
-	return fmt.Sprintf("%-*s  %-*s  %s",
-		nameW, strings.Repeat("-", nameW),
-		detailTypeW, strings.Repeat("-", detailTypeW),
-		strings.Repeat("-", 10))
-}
-
-// detailHeader builds the detail view's title line: "Task · <set>  [<status>]"
-// plus progress and, when applicable, the Verified-at SHA badge inside the
-// status brackets (ADR-0096/0156).
-func detailHeader(setID, label, progress string, taskRow *tasks.Row) string {
-	if taskRow != nil {
-		if badgeText := dashboardVerifiedAtBadgeStyled(DashboardRow{
-			SetRef:            SetRef{RawStatus: taskRow.Status},
-			VerifiedAtSHA:     taskRow.VerifiedAtSHA,
-			VerifiedAtDrifted: taskRow.VerifiedAtDrifted,
-		}); badgeText != "" {
-			label += " · " + badgeText
-		}
-	}
-	header := fmt.Sprintf("Task · %s  [%s]", setID, label)
-	if progress != "" {
-		header += "  " + progress
+// detailHeader is the detail view's title line: the kind's noun, the container
+// id, and the STATUS cell the kind composed, plus its headline phrase when it
+// wrote one. The status label is left unpainted inside the brackets — the
+// brackets already mark it — while an attention badge keeps its colour
+// (ADR-0156).
+func (m QueueDashboard) detailHeader(row work.Container) string {
+	header := fmt.Sprintf("%s · %s  [%s]", detailKindNoun(row.Kind), row.ID, detailStatusStyled(m.kinds, row))
+	if row.Headline != "" {
+		header += "  " + row.Headline
 	}
 	return header
 }
 
-// detailIDWidth returns the ID-column width: the widest task ID, floored at the
+// detailKindNoun is what a container of each kind is called in a title line. It
+// is a display noun and nothing else — no behaviour keys on it — so a kind whose
+// noun is missing shows its enum member rather than being unrenderable.
+func detailKindNoun(kind work.KindID) string {
+	switch kind {
+	case ref.KindMap:
+		return "Map"
+	case ref.KindRoutine:
+		return "Routine"
+	case ref.KindTaskSet, "":
+		return "Task"
+	}
+	return string(kind)
+}
+
+// detailIDWidth returns the ID-column width: the widest item ID, floored at the
 // "ID" header label.
-func detailIDWidth(items []tasks.Task) int {
+func detailIDWidth(items []work.Item) int {
 	idW := len("ID")
-	for _, t := range items {
-		if len(t.ID) > idW {
-			idW = len(t.ID)
+	for _, item := range items {
+		if len(item.ID) > idW {
+			idW = len(item.ID)
 		}
 	}
 	return idW
 }
 
-// detailTaskLine formats one task row's cells (status / type / id / title /
+// detailItemLine formats one item's cells (status / type / id / title /
 // blocked-by) over the fixed and idW-derived widths, without the cursor prefix —
 // the List owns the leading indicator column.
-func detailTaskLine(t tasks.Task, idW int) string {
-	title := t.Title
+func detailItemLine(item work.Item, idW int) string {
+	title := item.Title
 	if len(title) > detailTitleW {
 		title = title[:detailTitleW-3] + "..."
 	}
 	blockedBy := "-"
-	if len(t.BlockedBy) > 0 {
-		blockedBy = strings.Join(t.BlockedBy, ", ")
-	}
-	statusCell := string(t.Status)
-	if t.Status == tasks.TaskFailed && t.FailedAfter != nil {
-		statusCell = fmt.Sprintf("failed(%d)", *t.FailedAfter)
+	if len(item.BlockedBy) > 0 {
+		blockedBy = strings.Join(item.BlockedBy, ", ")
 	}
 	return fmt.Sprintf("%-*s  %-*s  %-*s  %-*s  %s",
-		detailStatusW, statusCell, detailTypeW, t.Type, idW, t.ID, detailTitleW, title, blockedBy)
+		detailStatusW, item.DisplayStatus(), detailTypeW, item.Type, idW, item.ID, detailTitleW, title, blockedBy)
 }
 
-// detailTableHeader is the detail task-table column header, idW-aligned to match
-// detailTaskLine.
+// detailTableHeader is the detail item-table column header, idW-aligned to match
+// detailItemLine.
 func detailTableHeader(idW int) string {
 	return fmt.Sprintf("%-*s  %-*s  %-*s  %-*s  %s",
 		detailStatusW, "STATUS", detailTypeW, "TYPE", idW, "ID", detailTitleW, "TITLE", "BLOCKED-BY")
@@ -3274,42 +2891,26 @@ func detailTableSeparator(idW int) string {
 		strings.Repeat("-", 12))
 }
 
-// renderDetailContent renders the detail task list with the action-menu overlay
-// spliced next to the cursored task (ADR-0079 bespoke placement; its cursor is
-// ported onto List in a later slice). It renders every task — no scroll window —
-// and reads the cursor from the List. The non-menu states render via detailFrame.
-func renderDetailContent(b *strings.Builder, d *detailView, height, width int, menu *taskMenu) {
-	manifest := d.manifest
-	taskRow := d.taskRow
+// renderDetailContent renders the detail item list with the action-menu overlay
+// spliced next to the cursored item (ADR-0079 bespoke placement; its cursor is
+// ported onto List in a later slice). It renders every item — no scroll window —
+// and reads the cursor from the List. The non-menu state renders via detailFrame.
+func (m QueueDashboard) renderDetailContent(b *strings.Builder, d *detailView, height, width int, menu *itemMenu) {
+	fmt.Fprintln(b, m.detailHeader(d.row))
 
-	status := tasks.DeriveStatus(manifest)
-	label := string(status)
-	progress := ""
-	if taskRow != nil {
-		status = taskRow.Status
-		label = tasks.StatusLabel(*taskRow)
-		progress = taskRow.Progress
-	}
-
-	header := detailHeader(d.row.SetID, label, progress, taskRow)
-	fmt.Fprintln(b, header)
-
-	if status == tasks.StatusMissing {
-		fmt.Fprintln(b, "  registered task set missing")
-		writeDashboardFooter(b, height, ui.HintStyle.Render("  h/esc back"))
-		return
-	}
-	if manifest == nil || !manifest.Valid {
-		fmt.Fprintln(b, "  malformed manifest")
-		if manifest != nil {
-			for _, e := range manifest.Errors {
-				fmt.Fprintf(b, "  - %s\n", e)
-			}
+	if d.row.Broken {
+		body := "  BROKEN"
+		if d.row.BrokenReason != "" {
+			body += ": " + d.row.BrokenReason
 		}
+		fmt.Fprintln(b, body)
 		writeDashboardFooter(b, height, ui.HintStyle.Render("  h/esc back"))
 		return
 	}
 
+	for _, line := range detailSectionLines(d.row.DetailSections, width) {
+		fmt.Fprintln(b, line)
+	}
 	fmt.Fprintln(b)
 
 	idW := d.cols.idW
@@ -3320,7 +2921,7 @@ func renderDetailContent(b *strings.Builder, d *detailView, height, width int, m
 	var menuLines []string
 	placeBelow := true
 	if menu != nil && !menu.inPeek {
-		menuLines = taskMenuLines(menu, width)
+		menuLines = itemMenuLines(menu, width)
 		placeBelow = dashboardMenuPlaceBelow(cursorIdx, len(menuLines), height)
 	}
 	writeMenu := func() {
@@ -3328,7 +2929,7 @@ func renderDetailContent(b *strings.Builder, d *detailView, height, width int, m
 			fmt.Fprintf(b, "%s\n", ml)
 		}
 	}
-	for i, t := range manifest.Tasks {
+	for i, item := range d.row.Items {
 		if menuLines != nil && i == cursorIdx && !placeBelow {
 			writeMenu()
 		}
@@ -3336,7 +2937,7 @@ func renderDetailContent(b *strings.Builder, d *detailView, height, width int, m
 		if i == cursorIdx {
 			prefix = ui.IndicatorStyle.Render("█") + " "
 		}
-		fmt.Fprintf(b, "%s%s\n", prefix, detailTaskLine(t, idW))
+		fmt.Fprintf(b, "%s%s\n", prefix, detailItemLine(item, idW))
 		if menuLines != nil && i == cursorIdx && placeBelow {
 			writeMenu()
 		}
@@ -3353,36 +2954,36 @@ func renderDetailContent(b *strings.Builder, d *detailView, height, width int, m
 	writeDashboardFooter(b, height, ui.HintStyle.Render(hint))
 }
 
-// taskMenuLines renders the task-level action overlay as a block of lines,
-// indented to nest under the cursored task, with the highlighted item carrying
+// itemMenuLines renders the item-level action overlay as a block of lines,
+// indented to nest under the cursored item, with the highlighted verb carrying
 // the shared cursor block. The first line is a dimmed "actions" caption. It
-// mirrors dashboardMenuLines (the set-view overlay) for a consistent look.
-func taskMenuLines(menu *taskMenu, width int) []string {
+// mirrors dashboardMenuLines (the container-view overlay) for a consistent look.
+func itemMenuLines(menu *itemMenu, width int) []string {
 	if menu == nil {
 		return nil
 	}
 	lines := []string{ui.TruncateString("    "+ui.HintStyle.Render("actions"), width)}
 	cursor := menu.list.Cursor()
-	for i, item := range menu.list.Items() {
+	for i, action := range menu.list.Items() {
 		marker := "  "
 		if i == cursor {
 			marker = ui.IndicatorStyle.Render("█") + " "
 		}
-		line := fmt.Sprintf("    %s%s  %s", marker, item.key, item.label)
+		line := fmt.Sprintf("    %s%s  %s", marker, action.Key, action.Label)
 		lines = append(lines, ui.TruncateString(line, width))
 	}
 	return lines
 }
 
-func renderTaskTextPeek(b *strings.Builder, d *detailView, height, width int, menu *taskMenu) {
+func renderItemTextPeek(b *strings.Builder, d *detailView, height, width int, menu *itemMenu) {
 	p := d.peek
-	header := d.row.SetID
-	if p.taskID != "" {
-		header += " / " + p.taskID
+	header := d.row.ID
+	if p.itemID != "" {
+		header += " / " + p.itemID
 	}
 	fmt.Fprintln(b, header)
 	if menu != nil && menu.inPeek {
-		for _, ml := range taskMenuLines(menu, width) {
+		for _, ml := range itemMenuLines(menu, width) {
 			fmt.Fprintln(b, ml)
 		}
 	}
@@ -3402,8 +3003,8 @@ func renderTaskTextPeek(b *strings.Builder, d *detailView, height, width int, me
 	if p.path != "" {
 		fmt.Fprintf(b, "  %s\n\n", p.path)
 	}
-	lines := taskTextPeekLines(p.text)
-	pageSize := taskTextPeekPageSize(height, p.path)
+	lines := itemTextPeekLines(p.text)
+	pageSize := itemTextPeekPageSize(height, p.path)
 	maxScroll := len(lines) - pageSize
 	if maxScroll < 0 {
 		maxScroll = 0
@@ -3440,7 +3041,7 @@ func renderTaskTextPeek(b *strings.Builder, d *detailView, height, width int, me
 	writeDashboardFooter(b, height, ui.HintStyle.Render(hint))
 }
 
-func taskTextPeekLines(text string) []string {
+func itemTextPeekLines(text string) []string {
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}
@@ -3451,7 +3052,7 @@ func taskTextPeekLines(text string) []string {
 	return lines
 }
 
-func taskTextPeekPageSize(height int, path string) int {
+func itemTextPeekPageSize(height int, path string) int {
 	if height <= 0 {
 		height = 20
 	}

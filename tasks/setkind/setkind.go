@@ -11,7 +11,9 @@
 package setkind
 
 import (
+	"fmt"
 	"io"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -313,7 +315,9 @@ func containersFromGroup(d *Deps, cfg *config.Config, snap *snapshot, delays []t
 			CursorKey:         g.ProjectName + "\x00" + taskRow.ID,
 			DestKind:          wt.DestKind,
 			Items:             itemsFor(refresh, taskRow.ID),
+			Headline:          taskRow.Progress,
 		}
+		container.Broken, container.BrokenReason = brokenFor(refresh, taskRow.ID)
 		container.Status = tasks.WorkRowStatusLabel(container)
 		container.Checkout = shellDir(container)
 		containers = append(containers, container)
@@ -325,25 +329,60 @@ func containersFromGroup(d *Deps, cfg *config.Config, snap *snapshot, delays []t
 // already parsed by the refresh the statuses came from, so the items cost nothing
 // extra to carry.
 func itemsFor(refresh *tasks.RefreshResult, setID string) []work.Item {
-	if refresh == nil || refresh.Manifests == nil {
-		return nil
-	}
-	m := refresh.Manifests[setID]
+	return ItemsFromManifest(manifestFor(refresh, setID))
+}
+
+// ItemsFromManifest projects one parsed manifest's tasks onto Work items. It is
+// exported because it is the whole of how a task becomes an item — a caller that
+// has a manifest in hand and wants the items a set would carry must get the same
+// projection, not a second one that drifts.
+func ItemsFromManifest(m *tasks.Manifest) []work.Item {
 	if m == nil {
 		return nil
 	}
 	items := make([]work.Item, 0, len(m.Tasks))
 	for _, task := range m.Tasks {
 		items = append(items, work.Item{
-			ID:        task.ID,
-			Title:     task.Title,
-			Status:    string(task.Status),
-			Blocked:   len(task.BlockedBy) > 0 && task.Status == tasks.TaskOpen,
-			BlockedBy: task.BlockedBy,
-			File:      task.File,
+			ID:          task.ID,
+			Title:       task.Title,
+			Type:        task.Type,
+			Status:      string(task.Status),
+			StatusLabel: taskStatusLabel(task),
+			Blocked:     len(task.BlockedBy) > 0 && task.Status == tasks.TaskOpen,
+			BlockedBy:   task.BlockedBy,
+			File:        filepath.Join(m.Dir, task.File),
 		})
 	}
 	return items
+}
+
+// taskStatusLabel is the display embellishment a task status carries beyond its
+// word: a failed task folds its retry count into the label (`failed(2)`), which
+// is the whole of the difference between a task's status and how it reads.
+func taskStatusLabel(task tasks.Task) string {
+	if task.Status == tasks.TaskFailed && task.FailedAfter != nil {
+		return fmt.Sprintf("failed(%d)", *task.FailedAfter)
+	}
+	return ""
+}
+
+// brokenFor reports a set whose definition could not be read as a set: a
+// manifest that failed validation. The reason is the manifest's own diagnostics,
+// which is what a reader needs to fix it.
+func brokenFor(refresh *tasks.RefreshResult, setID string) (bool, string) {
+	m := manifestFor(refresh, setID)
+	if m == nil || m.Valid {
+		return false, ""
+	}
+	return true, strings.Join(m.Errors, "; ")
+}
+
+// manifestFor returns the parsed manifest a refresh already holds for setID.
+func manifestFor(refresh *tasks.RefreshResult, setID string) *tasks.Manifest {
+	if refresh == nil || refresh.Manifests == nil {
+		return nil
+	}
+	return refresh.Manifests[setID]
 }
 
 // shellDir is the directory a shell or handoff verb runs in for a set: its bound

@@ -121,6 +121,18 @@ a field on `Container`: the styled render needs the cell as tone-tagged segments
 rather than one string, and a stored copy beside the composer that produces it
 would be a second source of truth for the same text.
 
+*Amended when the detail view became generic.* The detail frame reads the
+container the table already built rather than loading its own copy: the periodic
+rebuild is the one data path, so a per-detail loader that could disagree with the
+row it was opened from no longer exists, and `Container` grew the two fields a
+detail header and body need from a kind — `DetailSections` and a one-line
+`Headline`. `Item` grew the same way, gaining the cells a reader sees (`Type`,
+`StatusLabel` for a status that reads as more than its word, and an absolute
+`File`) while its verbs stay off it, asked of the kind when a menu opens. Two
+Map-only affordances were spent on that generality: the ticket table's
+frontier/dim colouring and the flat Enter-to-grill shortcut, both now reached
+through the item menu the kind fills.
+
 A conformance test in `work` drives the real adapters through every method of the
 interface, so a fourth kind earns its coverage by being named in one table rather
 than by growing a suite. Because every kind imports `work`, that test lives in an

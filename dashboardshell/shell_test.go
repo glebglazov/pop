@@ -149,8 +149,8 @@ func TestShellHelpDocumentsViewToggle(t *testing.T) {
 func TestShellVIgnoredInQueueDetail(t *testing.T) {
 	s := applySize(newTestShell(ViewQueue))
 	q, cmd := s.QueueDashboard().Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
-	if cmd == nil {
-		t.Fatal("enter detail should load")
+	if cmd != nil {
+		t.Fatal("entering the detail reads the container in hand, not a fresh load")
 	}
 	s.queue = q.(queue.QueueDashboard)
 

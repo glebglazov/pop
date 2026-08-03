@@ -318,6 +318,7 @@ func itemsFor(m Map) []work.Item {
 		items = append(items, work.Item{
 			ID:        t.ID,
 			Title:     t.Title,
+			Type:      string(t.Type),
 			Status:    string(t.Status),
 			Blocked:   blocked,
 			BlockedBy: t.BlockedBy,
