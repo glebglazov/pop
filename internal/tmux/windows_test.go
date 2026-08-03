@@ -8,10 +8,10 @@ import (
 )
 
 func TestWindowExistsBuildsArgs(t *testing.T) {
-	r := &recordingRunner{out: "main\npop-queue\nother"}
+	r := &recordingRunner{out: "main\npop-work\nother"}
 	tm := &realTmux{run: r}
 
-	got, err := tm.WindowExists("proj", "pop-queue")
+	got, err := tm.WindowExists("proj", "pop-work")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -28,11 +28,11 @@ func TestNewWindowBuildsArgsAndReturnsPane(t *testing.T) {
 	r := &recordingRunner{out: "%9\n"}
 	tm := &realTmux{run: r}
 
-	id, err := tm.NewWindow("proj", "pop-queue", "/dir")
+	id, err := tm.NewWindow("proj", "pop-work", "/dir")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	wantArgs := [][]string{{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "proj:", "-n", "pop-queue", "-c", "/dir"}}
+	wantArgs := [][]string{{"new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "proj:", "-n", "pop-work", "-c", "/dir"}}
 	if !reflect.DeepEqual(r.calls, wantArgs) {
 		t.Fatalf("args = %v, want %v", r.calls, wantArgs)
 	}
@@ -65,11 +65,11 @@ func TestSplitWindowBuildsArgs(t *testing.T) {
 	r := &recordingRunner{out: "%12"}
 	tm := &realTmux{run: r}
 
-	id, err := tm.SplitWindow("proj", "pop-queue", "/dir")
+	id, err := tm.SplitWindow("proj", "pop-work", "/dir")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	wantArgs := [][]string{{"split-window", "-d", "-P", "-F", "#{pane_id}", "-t", "proj:pop-queue", "-c", "/dir"}}
+	wantArgs := [][]string{{"split-window", "-d", "-P", "-F", "#{pane_id}", "-t", "proj:pop-work", "-c", "/dir"}}
 	if !reflect.DeepEqual(r.calls, wantArgs) {
 		t.Fatalf("args = %v, want %v", r.calls, wantArgs)
 	}
@@ -82,10 +82,10 @@ func TestRetileWindowBuildsArgs(t *testing.T) {
 	r := &recordingRunner{}
 	tm := &realTmux{run: r}
 
-	if err := tm.RetileWindow("proj", "pop-queue"); err != nil {
+	if err := tm.RetileWindow("proj", "pop-work"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	wantArgs := [][]string{{"select-layout", "-t", "proj:pop-queue", "tiled"}}
+	wantArgs := [][]string{{"select-layout", "-t", "proj:pop-work", "tiled"}}
 	if !reflect.DeepEqual(r.calls, wantArgs) {
 		t.Fatalf("args = %v, want %v", r.calls, wantArgs)
 	}

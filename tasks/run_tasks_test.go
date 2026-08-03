@@ -2786,7 +2786,7 @@ func TestRunTaskSetAgentFallbackWritesFixedIntervalCooldownWhenResetMissing(t *t
 printf '%s\n' '{"type":"result","subtype":"error_during_execution","result":"You'\''ve hit your weekly limit"}'
 `)
 	loadConfig := func(string) (*config.Config, error) {
-		return &config.Config{Queue: &config.QueueConfig{AgentQuotaRetryAfter: "17m"}}, nil
+		return &config.Config{Work: &config.WorkConfig{Daemon: &config.WorkDaemonConfig{AgentQuotaRetryAfter: "17m"}}}, nil
 	}
 
 	opts := env.runTaskSetOpts(true, "", io.Discard)

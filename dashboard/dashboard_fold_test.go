@@ -191,7 +191,7 @@ func TestDashboardHandoffFoldReusesConflictPane(t *testing.T) {
 		drain.SetScopedKey(repoKey, setID): {RuntimePath: bound, Branch: "handoff-fold-reuse", Project: "pop", Provisioned: false},
 	})
 	rt.SessionLive = true
-	rt.WindowNames["pop-queue"] = true
+	rt.WindowNames["pop-work"] = true
 	seedTaggedPane(rt, "%11", tmuxmod.TagFold, setID)
 	rt.Fake.Inside = true
 

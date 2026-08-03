@@ -1142,11 +1142,10 @@ commit_config_overrides = ["commit.gpgsign=false"]
 	}
 }
 
-func TestLoadQueueConfig(t *testing.T) {
+func TestLoadWorkDaemonConfig(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`
-[queue]
-agents = ["claude --model opus4.8", "codex", "opencode"]
+[work.daemon]
 poll_interval = "30s"
 agent_quota_retry_after = "2h"
 crash_retry_delays = ["10s", "1m", "5m"]
@@ -1158,16 +1157,13 @@ crash_retry_delays = ["10s", "1m", "5m"]
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Queue == nil {
-		t.Fatal("expected [queue] section to parse")
+	if cfg.Work == nil || cfg.Work.Daemon == nil {
+		t.Fatal("expected [work.daemon] section to parse")
 	}
-	if len(cfg.Warnings) != 1 {
-		t.Fatalf("expected 1 warning for deprecated [queue].agents, got %d: %v", len(cfg.Warnings), cfg.Warnings)
+	if len(cfg.Warnings) != 0 {
+		t.Fatalf("expected no warnings for [work.daemon], got: %v", cfg.Warnings)
 	}
-	if !strings.Contains(cfg.Warnings[0], "[queue] agents") || !strings.Contains(cfg.Warnings[0], "[tasks.implement].agents") {
-		t.Fatalf("warning = %q, want [queue] agents ignored with pointer to [tasks.implement].agents", cfg.Warnings[0])
-	}
-	resolved, err := cfg.ResolveQueue()
+	resolved, err := cfg.ResolveWorkDaemon()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1413,39 +1409,44 @@ func TestLoadSkillsPrefixFromTOML(t *testing.T) {
 	})
 }
 
-func TestResolveQueueDefaults(t *testing.T) {
+func TestResolveWorkDaemonDefaults(t *testing.T) {
 	tests := []struct {
 		name string
 		cfg  *Config
 	}{
 		{name: "nil config", cfg: nil},
 		{name: "missing section", cfg: &Config{}},
-		{name: "empty section", cfg: &Config{Queue: &QueueConfig{}}},
+		{name: "empty section", cfg: &Config{Work: &WorkConfig{Daemon: &WorkDaemonConfig{}}}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := tt.cfg.ResolveQueue()
+			got, err := tt.cfg.ResolveWorkDaemon()
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got.PollInterval != DefaultQueuePollInterval {
-				t.Fatalf("poll interval = %s, want %s", got.PollInterval, DefaultQueuePollInterval)
+			if got.PollInterval != DefaultWorkDaemonPollInterval {
+				t.Fatalf("poll interval = %s, want %s", got.PollInterval, DefaultWorkDaemonPollInterval)
 			}
-			if got.AgentQuotaRetryAfter != DefaultQueueQuotaRetryAfter {
-				t.Fatalf("quota retry = %s, want %s", got.AgentQuotaRetryAfter, DefaultQueueQuotaRetryAfter)
+			if got.AgentQuotaRetryAfter != DefaultWorkDaemonQuotaRetryAfter {
+				t.Fatalf("quota retry = %s, want %s", got.AgentQuotaRetryAfter, DefaultWorkDaemonQuotaRetryAfter)
 			}
-			if !reflect.DeepEqual(got.CrashRetryDelays, DefaultQueueCrashRetryDelays) {
-				t.Fatalf("crash retry delays = %#v, want %#v", got.CrashRetryDelays, DefaultQueueCrashRetryDelays)
+			if !reflect.DeepEqual(got.CrashRetryDelays, DefaultWorkDaemonCrashRetryDelays) {
+				t.Fatalf("crash retry delays = %#v, want %#v", got.CrashRetryDelays, DefaultWorkDaemonCrashRetryDelays)
 			}
 		})
 	}
 }
 
-func TestLoadQueueConfigNoAgentsWarning(t *testing.T) {
+// TestLeftoverQueueSectionIsUnknownSection pins the hard cut: [queue] is not a
+// deprecated alias for [work.daemon]. A file that still carries it loads, keeps
+// the defaults, and reports the table as an unknown section naming where the keys
+// went — including the second hop agent fallback took.
+func TestLeftoverQueueSectionIsUnknownSection(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`
 [queue]
+agents = ["claude", "codex"]
 poll_interval = "30s"
 `), 0o644); err != nil {
 		t.Fatal(err)
@@ -1455,14 +1456,34 @@ poll_interval = "30s"
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, w := range cfg.Warnings {
-		if strings.Contains(w, "agents") {
-			t.Fatalf("expected no agents-related warning, got: %v", cfg.Warnings)
+	if len(cfg.Warnings) != 1 {
+		t.Fatalf("expected exactly 1 finding for the leftover [queue] table, got %d: %v", len(cfg.Warnings), cfg.Warnings)
+	}
+	w := cfg.Warnings[0]
+	for _, want := range []string{"[queue] is not a config section", "[work.daemon]", "[tasks.implement].agents"} {
+		if !strings.Contains(w, want) {
+			t.Fatalf("finding = %q, want it to contain %q", w, want)
 		}
+	}
+	pathed := false
+	for _, f := range cfg.Findings {
+		if f.Path == "unknown_section.queue" {
+			pathed = true
+		}
+	}
+	if !pathed {
+		t.Fatalf("expected an unknown_section.queue finding: %+v", cfg.Findings)
+	}
+	resolved, err := cfg.ResolveWorkDaemon()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.PollInterval != DefaultWorkDaemonPollInterval {
+		t.Fatalf("poll interval = %s, want the default %s (a [queue] table must not be read)", resolved.PollInterval, DefaultWorkDaemonPollInterval)
 	}
 }
 
-func TestResolveQueueDurationErrors(t *testing.T) {
+func TestResolveWorkDaemonDurationErrors(t *testing.T) {
 	tests := []struct {
 		name string
 		cfg  *Config
@@ -1470,24 +1491,24 @@ func TestResolveQueueDurationErrors(t *testing.T) {
 	}{
 		{
 			name: "poll interval",
-			cfg:  &Config{Queue: &QueueConfig{PollInterval: "soon"}},
-			want: "[queue] poll_interval",
+			cfg:  &Config{Work: &WorkConfig{Daemon: &WorkDaemonConfig{PollInterval: "soon"}}},
+			want: "[work.daemon] poll_interval",
 		},
 		{
 			name: "quota retry",
-			cfg:  &Config{Queue: &QueueConfig{AgentQuotaRetryAfter: "later"}},
-			want: "[queue] agent_quota_retry_after",
+			cfg:  &Config{Work: &WorkConfig{Daemon: &WorkDaemonConfig{AgentQuotaRetryAfter: "later"}}},
+			want: "[work.daemon] agent_quota_retry_after",
 		},
 		{
 			name: "crash retry list",
-			cfg:  &Config{Queue: &QueueConfig{CrashRetryDelays: []string{"1s", "bad"}}},
-			want: "[queue] crash_retry_delays[1]",
+			cfg:  &Config{Work: &WorkConfig{Daemon: &WorkDaemonConfig{CrashRetryDelays: []string{"1s", "bad"}}}},
+			want: "[work.daemon] crash_retry_delays[1]",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := tt.cfg.ResolveQueue()
+			_, err := tt.cfg.ResolveWorkDaemon()
 			if err == nil {
 				t.Fatal("expected error")
 			}

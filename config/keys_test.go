@@ -60,7 +60,7 @@ func TestScopeKeyDocsGlobal(t *testing.T) {
 		t.Fatal("ScopeGlobal reported unknown")
 	}
 	got := keySet(docs)
-	for _, k := range []string{"projects", "workbenches", "repo", "queue"} {
+	for _, k := range []string{"projects", "workbenches", "repo", "work"} {
 		if !got[k] {
 			t.Errorf("global missing key %q", k)
 		}

@@ -43,10 +43,10 @@ func prepareWorktreeDrain(d *Deps, dec Decision) (Decision, string) {
 		dec.TaskSetID = ""
 		if errors.Is(err, binding.ErrBoundWorktreeInvalid) {
 			dec.Reason = "bound worktree invalid"
-			return dec, fmt.Sprintf("queue: %s: bound worktree for %s is invalid (%v); repair git state or run `pop tasks unbind-worktree`", dec.Project, setID, err)
+			return dec, fmt.Sprintf("work: %s: bound worktree for %s is invalid (%v); repair git state or run `pop tasks unbind-worktree`", dec.Project, setID, err)
 		}
 		dec.Reason = "route"
-		return dec, fmt.Sprintf("queue: %s: route drain for %s: %v", dec.Project, setID, err)
+		return dec, fmt.Sprintf("work: %s: route drain for %s: %v", dec.Project, setID, err)
 	}
 	dec.scan.ProjectPath = route.RuntimePath
 	dec.scan.RuntimePath = route.RuntimePath

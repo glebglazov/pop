@@ -92,11 +92,11 @@ func (a *Advancer) ID() work.KindID { return ref.KindRoutine }
 func (a *Advancer) Reconcile() error {
 	n, err := ReconcileRunsWith(a.d)
 	if err != nil {
-		fmt.Fprintf(a.out, "queue: reconcile routines: %v\n", err)
+		fmt.Fprintf(a.out, "work: reconcile routines: %v\n", err)
 		return err
 	}
 	if n > 0 {
-		fmt.Fprintf(a.out, "queue: reconciled %d stale routine run(s)\n", n)
+		fmt.Fprintf(a.out, "work: reconciled %d stale routine run(s)\n", n)
 	}
 	return nil
 }
@@ -110,7 +110,7 @@ func (a *Advancer) Candidates() ([]work.Candidate, error) {
 	if err != nil {
 		// The wording is the kind's because it is the line the daemon prints; the
 		// supervisor renders what it is handed.
-		return nil, fmt.Errorf("queue: routines: %w", err)
+		return nil, fmt.Errorf("work: routines: %w", err)
 	}
 	a.pending = map[ref.WorkRef]pendingAdvance{}
 	a.store = nil
@@ -129,7 +129,7 @@ func (a *Advancer) Candidates() ([]work.Candidate, error) {
 	// out must not materialise the database (ADR-0140).
 	s, ok, err := openExecutionStoreIfExists(a.d)
 	if err != nil {
-		return nil, fmt.Errorf("queue: routines: %w", err)
+		return nil, fmt.Errorf("work: routines: %w", err)
 	}
 	if !ok {
 		return candidates, nil
@@ -213,30 +213,30 @@ func (a *Advancer) refuse(id, reason string, action advanceAction, now time.Time
 func (a *Advancer) Advance(c work.Candidate) (work.Outcome, error) {
 	p, ok := a.pending[c.Ref]
 	if !ok {
-		return work.Outcome{}, fmt.Errorf("queue: %s is not a candidate of this pass", c.Ref)
+		return work.Outcome{}, fmt.Errorf("work: %s is not a candidate of this pass", c.Ref)
 	}
 	id := c.Ref.ContainerID
 	switch p.action {
 	case actionFire:
 		if _, err := FirePaneWith(a.d, id); err != nil {
-			return work.Outcome{}, fmt.Errorf("queue: %s: spawn: %w", c.Label, err)
+			return work.Outcome{}, fmt.Errorf("work: %s: spawn: %w", c.Label, err)
 		}
-		return advanceMessage("queue: %s: spawned fire", c.Label), nil
+		return advanceMessage("work: %s: spawned fire", c.Label), nil
 	case actionPauseChanged:
 		if err := PauseChangedWith(a.d, id); err != nil {
-			return work.Outcome{}, fmt.Errorf("queue: %s: pause on change: %w", c.Label, err)
+			return work.Outcome{}, fmt.Errorf("work: %s: pause on change: %w", c.Label, err)
 		}
 		if err := a.recordSkip(id, c.Verdict.Reason, p.firedAt); err != nil {
-			return work.Outcome{}, fmt.Errorf("queue: %s: record skip: %w", c.Label, err)
+			return work.Outcome{}, fmt.Errorf("work: %s: record skip: %w", c.Label, err)
 		}
-		return advanceMessage("queue: %s: paused (changed): %s", c.Label, c.Verdict.Reason), nil
+		return advanceMessage("work: %s: paused (changed): %s", c.Label, c.Verdict.Reason), nil
 	case actionRecordSkip:
 		if err := a.recordSkip(id, c.Verdict.Reason, p.firedAt); err != nil {
-			return work.Outcome{}, fmt.Errorf("queue: %s: record skip: %w", c.Label, err)
+			return work.Outcome{}, fmt.Errorf("work: %s: record skip: %w", c.Label, err)
 		}
-		return advanceMessage("queue: %s: skipped fire (%s)", c.Label, c.Verdict.Reason), nil
+		return advanceMessage("work: %s: skipped fire (%s)", c.Label, c.Verdict.Reason), nil
 	}
-	return advanceMessage("queue: %s: %s", c.Label, c.Verdict.Reason), nil
+	return advanceMessage("work: %s: %s", c.Label, c.Verdict.Reason), nil
 }
 
 // recordSkip writes the skipped run a refusal stands for, dated from the fire it

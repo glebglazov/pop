@@ -34,7 +34,7 @@ import (
 	"github.com/glebglazov/pop/work"
 )
 
-const DrainWindowName = "pop-queue"
+const DrainWindowName = "pop-work"
 
 // Deps holds the supervisor's external dependencies. Refresh and ReadLock are
 // seams over the tasks package so the scan/selection logic can be unit-tested
@@ -212,7 +212,7 @@ func (d *Deps) reconcile() error {
 	if err == nil {
 		return nil
 	}
-	fmt.Fprintf(d.reconcileOut(), "queue: reconcile: %v (continuing with pre-reconcile snapshot)\n", err)
+	fmt.Fprintf(d.reconcileOut(), "work: reconcile: %v (continuing with pre-reconcile snapshot)\n", err)
 	return err
 }
 
@@ -420,7 +420,7 @@ func Scan(d *Deps, cfg *config.Config) ([]Decision, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := resolvedQueueConfig(cfg); err != nil {
+	if _, err := resolvedWorkDaemonConfig(cfg); err != nil {
 		return nil, err
 	}
 	now := d.now().UTC()
@@ -625,10 +625,10 @@ func outsideQueueScopeResolveError(err error) bool {
 		strings.Contains(msg, "is not a git checkout")
 }
 
-func resolvedQueueConfig(cfg *config.Config) (config.ResolvedQueueConfig, error) {
-	qcfg, err := cfg.ResolveQueue()
+func resolvedWorkDaemonConfig(cfg *config.Config) (config.ResolvedWorkDaemonConfig, error) {
+	qcfg, err := cfg.ResolveWorkDaemon()
 	if err != nil {
-		return config.ResolvedQueueConfig{}, err
+		return config.ResolvedWorkDaemonConfig{}, err
 	}
 	return qcfg, nil
 }

@@ -599,7 +599,7 @@ func FindBySetID(td *tasks.Deps, setID string) (string, Binding, bool, error) {
 	default:
 		sort.Strings(keys)
 		var b strings.Builder
-		fmt.Fprintf(&b, "queue: set %q is ambiguous; bound in:", setID)
+		fmt.Fprintf(&b, "work: set %q is ambiguous; bound in:", setID)
 		for _, key := range keys {
 			rec := all[key]
 			fmt.Fprintf(&b, "\n  %s (%s)", rec.Project, rec.RuntimePath)

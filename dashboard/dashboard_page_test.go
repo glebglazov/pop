@@ -149,7 +149,7 @@ func TestRoutinePageRendersRowsWithNoTierChrome(t *testing.T) {
 	if !strings.Contains(view, "/repo/mid-project") {
 		t.Fatalf("routine page missing the directory cell:\n%s", view)
 	}
-	if !strings.Contains(view, "v queue") {
+	if !strings.Contains(view, "v work") {
 		t.Fatalf("routine page footer should offer the page toggle:\n%s", view)
 	}
 }

@@ -36,7 +36,7 @@ func Run(d *drain.Deps, interval time.Duration, out io.Writer, sigCh <-chan os.S
 		return err
 	}
 
-	fmt.Fprintf(out, "pop queue supervisor started (PID %d); poll every %s. Ctrl-C to stop.\n", os.Getpid(), interval)
+	fmt.Fprintf(out, "pop work supervisor started (PID %d); poll every %s. Ctrl-C to stop.\n", os.Getpid(), interval)
 	tasks.WarnProcStartUnsupported(out)
 
 	output := newRunOutputState()
@@ -63,7 +63,7 @@ func Run(d *drain.Deps, interval time.Duration, out io.Writer, sigCh <-chan os.S
 func tick(d *drain.Deps, out io.Writer, runOut *runOutputState) {
 	cfg, err := d.LoadConfig(config.DefaultConfigPath())
 	if err != nil {
-		runOut.emitScanError(out, fmt.Sprintf("queue: load config: %v", err))
+		runOut.emitScanError(out, fmt.Sprintf("work: load config: %v", err))
 		return
 	}
 
@@ -80,7 +80,7 @@ func tick(d *drain.Deps, out io.Writer, runOut *runOutputState) {
 		preSpawn := drain.BuildRunView(snap, time.Now())
 		runOut.emitViewTransition(out, preSpawn, nil)
 	} else {
-		fmt.Fprintf(out, "queue: status: %v\n", err)
+		fmt.Fprintf(out, "work: status: %v\n", err)
 	}
 
 	// Dispatch phase — serial, in kind precedence order, because it mutates the
@@ -169,7 +169,7 @@ func dispatch(pass kindPass, c work.Candidate, occupancy *checkoutOccupancy) wor
 	event := work.AdvanceEvent{Kind: pass.kind, Ref: c.Ref, Label: c.Label}
 	if !c.Refused() {
 		if reason := occupancy.refusal(c); reason != "" {
-			event.Outcome = work.Outcome{Kind: work.OutcomeMessage, Message: fmt.Sprintf("queue: %s: skip; %s", c.Label, reason)}
+			event.Outcome = work.Outcome{Kind: work.OutcomeMessage, Message: fmt.Sprintf("work: %s: skip; %s", c.Label, reason)}
 			return event
 		}
 	}

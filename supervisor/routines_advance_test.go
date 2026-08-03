@@ -44,7 +44,7 @@ func TestSupervisorDrivesRoutinesThroughTheAdvanceSeam(t *testing.T) {
 	if _, ok := extractRoutineSpawnCommand(rt, "nightly"); !ok {
 		t.Fatalf("a tick must fire a due routine, commands=%v", rt.Commands)
 	}
-	if !strings.Contains(out.String(), "queue: routine nightly: spawned fire") {
+	if !strings.Contains(out.String(), "work: routine nightly: spawned fire") {
 		t.Fatalf("tick output missing the routine's fire line:\n%s", out.String())
 	}
 }

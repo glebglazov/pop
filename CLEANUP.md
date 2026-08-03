@@ -59,7 +59,7 @@ week of 2026-06-08, after beta-tester sign-off.
 | `[workload.verify]` | `[tasks.verify]` | `TaskConfig.Verify`; includes-merge `config.go:1890` |
 | `[workload.git]` | `[tasks.git]` | `TaskConfig.Git`; includes-merge `config.go:1880` |
 | `[workload.agents.<name>]` (per-preset map) | `[tasks.presets.<name>]` | `TaskConfig.Agents`; includes-merge `config.go:1867` |
-| `[queue] agents ignored` warning text | point at `[tasks.implement].agents` | `config/config.go:1705` |
+| `[queue]` section (whole table) | `[work.daemon]` (`poll_interval`, `agent_quota_retry_after`, `crash_retry_delays`) | `retiredQueueSectionFindings` in `config/config.go` — the finding that reports a leftover `[queue]` as an unknown section (and still points `agents` at `[tasks.implement].agents`). A **hard cut, not an alias**: nothing reads `[queue]`, so removal here means dropping the finding, after which the table is silently ignored. |
 | includes whitelist enumerates `workload` | accept both `workload` (deprecated) + `tasks` | `config/config.go:1840` |
 
 Tombstone behavior: presence of any old key → config load fails with
@@ -95,6 +95,7 @@ message naming the new status (loud-failure preference). Current embedded templa
 | Map manifest fold + `wayfinder/` → `maps/` storage rename | `wayfinder/fold.go` (+ `fold_test.go`); the legacy-name probe in `tasks/storage_doctor.go` (`storageHasDashboardWork`) | Auto-runs per Map on the first scan that finds no `index.json`: mints the manifest from the retired `Status:` / `Type:` / `Blocked by:` header lines, strips those lines from each ticket markdown, and renames the storage directory. Removing it also deletes `StripTicketHeaders`, the header walk it shares with `ParseTicketMarkdown`, and the ticket-status/type/blocking parsing in `wayfinder/parse.go` — after removal a Map without a manifest is simply BROKEN. Sign-off check: item 6 below. |
 | `wayfinder-archive.json` → registry `archived` bit | `foldLegacyArchiveState` in `wayfinder/archive.go` (+ `archive_test.go`) | Auto-runs per repository on the first Map scan that finds the side-file: registers each id it names and sets the registry's `archived` bit, then deletes the file. Removing it also deletes `legacyArchiveState` and the `legacyArchiveStateFile` constant — after removal a leftover file is ignored and its Maps come back visible. Sign-off check: item 6 below. |
 | Tombstoned `sets` table — drop it | migration list in `store/store.go` (#8/#9 create it, #28 copies it out) | Read-dead and write-dead from #28, which copies every row onto the **Work container registry** (`work_containers` + `task_set_registrations`) and never dual-writes. Kept only so a pre-cut binary still boots: its migrate loop is bounded by its own migration count, so the newer `user_version` is a no-op and it reads its own frozen rows. Dropping it is a `DROP TABLE sets` appended as a new migration (never an edit to a shipped one) plus deleting `legacySetRows` in `store/sets_test.go` and the two `sets`-seeding test helpers. After the drop, rolling back to a pre-cut binary loses every registration — so this row goes last, once no tester needs the rollback. Sign-off check: item 7 below. |
+| Pre-cut supervisor lock path check — **delete one release after the cut** | `LegacySupervisorLockPath` + `refuseIfLegacySupervisorLive` in `supervisor/supervisor_lock.go` (+ `TestAcquireSupervisorLockRefusesLivePreCutDaemon`) | The supervisor lock moved from `<data>/pop/queue/supervisor.lock` to `<data>/pop/work/supervisor.lock` with the `pop queue` → `pop work` cut. Unlike the **Queue journal** (a view rebuilt from SQLite), a running pre-cut daemon holds the old path and nothing else, so a post-cut binary reading only its own path would double-supervise. Startup therefore reads both and refuses if either is live, naming the file held. One release later no pre-cut daemon can still be running: delete the legacy path helper, its check and its test, leaving the single-path acquire. Nothing migrates or is deleted on disk — the old file belongs to its owner. Sign-off check: item 8 below. |
 | Legacy `bindings.json` → store migration | `migrateLegacyBindingsFile` (moving to `tasks/binding` in the store-seam refactor; currently `tasks/bindings_store.go:101`) | One-time fold of the retired standalone binding file into the execution-state store (ADR-0055). Every machine that ran a post-ADR-0055 build has migrated; sign-off check: no `<data-dir>/pop/bindings.json` remains. |
 
 ### D2. Internal code aliases (compile-time only, no user impact — remove in a quiet pass)
@@ -169,9 +170,18 @@ Per tester, before removal lands:
    id. Then confirm you have no reason left to run a pre-#28 binary — dropping `sets`
    removes the frozen snapshot that made rolling back survivable.
 
-| Tester | 1 config | 2 [tasks] | 3 storage | 4 re-integrate | 5 scripts | 6 maps | 7 registry | Signed off |
-|---|---|---|---|---|---|---|---|---|
-| _(fill in)_ | | | | | | | | |
+8. **No pre-cut daemon, and `[queue]` gone from config** — stop any `pop queue run`
+   daemon started by a pre-cut binary, then start `pop work daemon` once and confirm it
+   acquires the lock rather than refusing (a refusal names the pre-cut lock file it
+   found live). Verify no `<data-dir>/pop/queue/supervisor.lock` remains and that
+   `~/.config/pop/config.toml` has no `[queue]` table — the keys moved to
+   `[work.daemon]` and a leftover table is reported as an unknown section, never read.
+   A live `pop-queue` tmux window at upgrade time is expected to be orphaned: drains
+   are ephemeral, so close it rather than migrating it.
+
+| Tester | 1 config | 2 [tasks] | 3 storage | 4 re-integrate | 5 scripts | 6 maps | 7 registry | 8 work cut | Signed off |
+|---|---|---|---|---|---|---|---|---|---|
+| _(fill in)_ | | | | | | | | | |
 
 ## Questions for beta testers (before cleanup)
 

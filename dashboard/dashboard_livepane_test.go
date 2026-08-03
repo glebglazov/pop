@@ -69,7 +69,7 @@ func TestLivePaneGreenKeyJumpsWithoutResend(t *testing.T) {
 	row.RuntimePath = repo
 	row.ProjectPath = repo
 	rt.SessionLive = true
-	rt.WindowNames["pop-queue"] = true
+	rt.WindowNames["pop-work"] = true
 	seedTaggedPane(rt, "%5", tmuxmod.TagAssist, setID)
 	rt.Fake.PaneInfos = map[string]tmuxmod.PaneInfo{
 		"%5": {Session: "proj", Command: "node"},
@@ -100,7 +100,7 @@ func TestLivePaneGreyKeyRespawns(t *testing.T) {
 	row.RuntimePath = repo
 	row.ProjectPath = repo
 	rt.SessionLive = true
-	rt.WindowNames["pop-queue"] = true
+	rt.WindowNames["pop-work"] = true
 	seedTaggedPane(rt, "%5", tmuxmod.TagAssist, setID)
 	rt.Fake.PaneInfos = map[string]tmuxmod.PaneInfo{
 		"%5": {Session: "proj", Command: "zsh"},

@@ -27,7 +27,7 @@ func writeDaemonConfig(t *testing.T, body string) string {
 
 func TestRunWorkDaemonHonorsConfiguredPollInterval(t *testing.T) {
 	path := writeDaemonConfig(t, `
-[queue]
+[work.daemon]
 poll_interval = "2s"
 `)
 
@@ -61,7 +61,7 @@ func TestWorkReadSurfacesThreadIncludeDone(t *testing.T) {
 	path := writeDaemonConfig(t, "")
 
 	oldCfgFile := cfgFile
-	oldLoad := queueConfigLoad
+	oldLoad := workConfigLoad
 	oldStatus := workBuildStatus
 	oldTables := workBuildStatusTables
 	oldDash := workRunDashboard
@@ -69,7 +69,7 @@ func TestWorkReadSurfacesThreadIncludeDone(t *testing.T) {
 	oldDashInc := workDashboardIncludeDone
 	defer func() {
 		cfgFile = oldCfgFile
-		queueConfigLoad = oldLoad
+		workConfigLoad = oldLoad
 		workBuildStatus = oldStatus
 		workBuildStatusTables = oldTables
 		workRunDashboard = oldDash
@@ -80,7 +80,7 @@ func TestWorkReadSurfacesThreadIncludeDone(t *testing.T) {
 	setCmdLayerDeps(t, newTestCmdDeps(t, "", t.TempDir(), ""))
 
 	cfgFile = path
-	queueConfigLoad = func(string) (*config.Config, error) { return &config.Config{}, nil }
+	workConfigLoad = func(string) (*config.Config, error) { return &config.Config{}, nil }
 
 	var statusInclude, dashInclude bool
 	workBuildStatus = func(d *drain.Deps, _ *config.Config) (drain.StatusSnapshot, error) {
@@ -145,15 +145,15 @@ func TestWorkReadSurfacesRegisterIncludeDoneFlag(t *testing.T) {
 // journal, each through the command's own writer.
 func TestWorkStatusAndLogPrintTheirSurfaces(t *testing.T) {
 	oldCfgFile := cfgFile
-	oldLoad := queueConfigLoad
+	oldLoad := workConfigLoad
 	defer func() {
 		cfgFile = oldCfgFile
-		queueConfigLoad = oldLoad
+		workConfigLoad = oldLoad
 	}()
 
 	setCmdLayerDeps(t, newTestCmdDeps(t, "", t.TempDir(), ""))
 	cfgFile = writeDaemonConfig(t, "")
-	queueConfigLoad = func(string) (*config.Config, error) { return &config.Config{}, nil }
+	workConfigLoad = func(string) (*config.Config, error) { return &config.Config{}, nil }
 
 	var statusOut bytes.Buffer
 	workStatusCmd.SetOut(&statusOut)

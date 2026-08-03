@@ -115,7 +115,7 @@ func resolveAttemptTimeout(optTimeout time.Duration) time.Duration {
 }
 
 func resolveAgentQuotaRetryAfter(cfg *config.Config) (time.Duration, error) {
-	resolved, err := cfg.ResolveQueue()
+	resolved, err := cfg.ResolveWorkDaemon()
 	if err != nil {
 		return 0, err
 	}

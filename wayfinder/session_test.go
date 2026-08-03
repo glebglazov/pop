@@ -173,7 +173,7 @@ func TestMapIDFromSession(t *testing.T) {
 	for _, tc := range []struct{ session, want string }{
 		{"pop-map-2026-08-03-demo", "2026-08-03-demo"},
 		{"pop", ""},
-		{"pop-queue", ""},
+		{"pop-work", ""},
 		{"", ""},
 	} {
 		if got := MapIDFromSession(tc.session); got != tc.want {

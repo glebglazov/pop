@@ -55,7 +55,7 @@ func decideRepoDispatchesWithRep(d *Deps, cfg *config.Config, scans []projectSca
 	// once for the group; a config error degrades to no schedule (every abnormal
 	// parks immediately), matching the daemon's fail-safe stance.
 	var delays []time.Duration
-	if qcfg, qerr := resolvedQueueConfig(cfg); qerr == nil {
+	if qcfg, qerr := resolvedWorkDaemonConfig(cfg); qerr == nil {
 		delays = qcfg.CrashRetryDelays
 	}
 

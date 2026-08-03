@@ -101,7 +101,7 @@ func (p dashboardPage) other() Page {
 func workPage() dashboardPage {
 	return dashboardPage{
 		id:      PageWork,
-		title:   "Queue",
+		title:   "Work",
 		primary: ref.KindTaskSet,
 		kinds: func(d *drain.Deps, cfg *config.Config) []work.Kind {
 			return d.WorkKinds(cfg)
@@ -113,7 +113,7 @@ func workPage() dashboardPage {
 		twoLineCapable: true,
 		rowFilters:     true,
 		toggleWord:     "routines",
-		empty:          "No queue-actionable task sets.",
+		empty:          "No work-actionable task sets.",
 		emptyFiltered:  "No matching task sets.",
 	}
 }
@@ -134,7 +134,7 @@ func routinePage() dashboardPage {
 		plainCells:    routineRowNaturalValues,
 		statusCells:   routineRowNaturalValues,
 		shrinkOrder:   routineColShrinkOrder,
-		toggleWord:    "queue",
+		toggleWord:    "work",
 		empty:         routine.EmptyListHint,
 		emptyFiltered: "No matching routines.",
 	}

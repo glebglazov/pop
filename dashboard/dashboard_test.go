@@ -769,7 +769,7 @@ func TestDashboardViewUsesTaskTableHeaderAndBottomShortcutLegend(t *testing.T) {
 	}
 	// The auto-drain set here is Picked-up, so per ADR-0108 it drops out of the
 	// waiting-only auto-drain tally (the live-drain indicator already signals it).
-	if !strings.Contains(view, "Queue · 2 task sets · 1 ready · 1 running") {
+	if !strings.Contains(view, "Work · 2 task sets · 1 ready · 1 running") {
 		t.Fatalf("task-set list should render useful summary:\n%s", view)
 	}
 	if strings.Contains(view, "auto-drain") {

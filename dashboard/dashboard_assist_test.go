@@ -78,7 +78,7 @@ func extractAssistSpawnCommand(rt *queuetest.RecordingTmux) (string, bool) {
 }
 
 // TestDashboardLaunchAssistSpawnsTaggedPane asserts drain.LaunchAssist creates a
-// pop-queue pane tagged @pop_assist, titled <set>-assist, running assist.
+// pop-work pane tagged @pop_assist, titled <set>-assist, running assist.
 func TestDashboardLaunchAssistSpawnsTaggedPane(t *testing.T) {
 	repo, setID, _ := queuetest.SetupSpawnRepo(t, "assist-spawn", []queuetest.SpawnTask{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
@@ -147,7 +147,7 @@ func TestDashboardLaunchAssistReusesPane(t *testing.T) {
 	row.RuntimePath = repo
 	row.ProjectPath = repo
 	rt.SessionLive = true
-	rt.WindowNames["pop-queue"] = true
+	rt.WindowNames["pop-work"] = true
 	seedTaggedPane(rt, "%5", tmuxmod.TagAssist, setID)
 
 	result, err := drain.LaunchAssist(d, cfg, row)

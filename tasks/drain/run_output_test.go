@@ -339,7 +339,7 @@ func TestRepoIdentityLabelAcrossSpawnAndBackoff(t *testing.T) {
 	}
 
 	lines := DiffRunView(&RunView{}, view)
-	if len(lines) != 1 || !strings.Contains(lines[0], "queue: "+basename+": spawned drain for "+setID) {
+	if len(lines) != 1 || !strings.Contains(lines[0], "work: "+basename+": spawned drain for "+setID) {
 		t.Fatalf("spawn delta = %v, want repo basename label", lines)
 	}
 
@@ -363,7 +363,7 @@ func TestRepoIdentityLabelAcrossSpawnAndBackoff(t *testing.T) {
 
 	clearedView := BuildRunView(snap, info.LastAbnormalAt.Add(2*time.Minute))
 	lines = DiffRunView(&blockedView, clearedView)
-	if len(lines) != 1 || !strings.Contains(lines[0], "queue: "+basename+": "+setID+" backoff cleared") {
+	if len(lines) != 1 || !strings.Contains(lines[0], "work: "+basename+": "+setID+" backoff cleared") {
 		t.Fatalf("backoff cleared delta = %v, want repo basename label", lines)
 	}
 }
@@ -508,10 +508,10 @@ func TestRepoIdentityLabelBaselineDeltaParity(t *testing.T) {
 	spawnFound := false
 	readyFound := false
 	for _, line := range lines {
-		if strings.Contains(line, "queue: "+basename+": spawned drain for "+setIDRunning) {
+		if strings.Contains(line, "work: "+basename+": spawned drain for "+setIDRunning) {
 			spawnFound = true
 		}
-		if strings.Contains(line, "queue: "+basename+": ready set "+setIDQueued) {
+		if strings.Contains(line, "work: "+basename+": ready set "+setIDQueued) {
 			readyFound = true
 		}
 	}
@@ -558,7 +558,7 @@ func TestRepoIdentityLabelFallsBackToProject(t *testing.T) {
 	}
 
 	lines := DiffRunView(&RunView{}, view)
-	if len(lines) != 1 || !strings.Contains(lines[0], "queue: pop: spawned drain for set-1") {
+	if len(lines) != 1 || !strings.Contains(lines[0], "work: pop: spawned drain for set-1") {
 		t.Fatalf("spawn delta = %v, want project fallback label", lines)
 	}
 }
@@ -629,7 +629,7 @@ func TestAdoptedWorktreeSuffixOnBaselineAndDelta(t *testing.T) {
 	}
 
 	lines := DiffRunView(&RunView{}, view)
-	wantDelta := "queue: " + basename + " (in wt0): spawned drain for " + setID
+	wantDelta := "work: " + basename + " (in wt0): spawned drain for " + setID
 	found := false
 	for _, line := range lines {
 		if strings.Contains(line, wantDelta) {
@@ -716,7 +716,7 @@ func TestManagedWorktreeSuffixSuppressed(t *testing.T) {
 			t.Fatalf("managed spawn delta must not render adopted suffix: %q", line)
 		}
 	}
-	wantDelta := "queue: " + basename + ": spawned drain for " + setID
+	wantDelta := "work: " + basename + ": spawned drain for " + setID
 	found := false
 	for _, line := range lines {
 		if strings.Contains(line, wantDelta) {

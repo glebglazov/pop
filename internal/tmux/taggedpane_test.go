@@ -37,7 +37,7 @@ func TestFindTaggedPaneBuildsArgsAndMatches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	wantArgs := [][]string{{"list-panes", "-t", "proj:pop-queue", "-F", "#{@pop_set}\t#{pane_id}"}}
+	wantArgs := [][]string{{"list-panes", "-t", "proj:pop-work", "-F", "#{@pop_set}\t#{pane_id}"}}
 	if !reflect.DeepEqual(r.calls, wantArgs) {
 		t.Fatalf("args = %v, want %v", r.calls, wantArgs)
 	}

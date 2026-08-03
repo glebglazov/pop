@@ -134,7 +134,7 @@ projects = [
 # Defaults to true.
 # notice_enabled = true
 
-# [queue]
+# [work.daemon]
 # Supervisor timing for `pop work daemon`. Agent selection is configured under
 # [tasks.implement].agents (see above), not in this section.
 # poll_interval = "60s"

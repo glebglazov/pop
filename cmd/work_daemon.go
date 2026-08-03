@@ -61,7 +61,7 @@ func init() {
 }
 
 var (
-	queueConfigLoad = config.Load
+	workConfigLoad  = config.Load
 	supervisorRun   = supervisor.Run
 	workBuildStatus = drain.BuildStatus
 	// workBuildStatusTables builds the two tables `pop work status` prints through
@@ -103,11 +103,11 @@ func runWorkDaemon(cmd *cobra.Command, args []string) error {
 	if cfgPath == "" {
 		cfgPath = config.DefaultConfigPath()
 	}
-	cfg, err := queueConfigLoad(cfgPath)
+	cfg, err := workConfigLoad(cfgPath)
 	if err != nil {
 		return err
 	}
-	resolved, err := cfg.ResolveQueue()
+	resolved, err := cfg.ResolveWorkDaemon()
 	if err != nil {
 		return err
 	}
@@ -135,12 +135,12 @@ func runWorkStatus(cmd *cobra.Command, args []string) error {
 	if cfgPath == "" {
 		cfgPath = config.DefaultConfigPath()
 	}
-	cfg, err := queueConfigLoad(cfgPath)
+	cfg, err := workConfigLoad(cfgPath)
 	if err != nil {
 		return err
 	}
 	d := cmdLayerDeps().queueDeps()
-	d.LoadConfig = queueConfigLoad
+	d.LoadConfig = workConfigLoad
 	d.IncludeDone = workStatusIncludeDone
 	snap, err := workBuildStatus(d, cfg)
 	if err != nil {

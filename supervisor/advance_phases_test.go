@@ -23,7 +23,7 @@ func TestSupervisorReconcilesBeforeCandidatesThenDispatches(t *testing.T) {
 			{Ref: ref.WorkRef{Kind: ref.KindTaskSet, ContainerID: "set-a"}, Label: "repo/set-a", Verdict: work.Advance()},
 			{Ref: ref.WorkRef{Kind: ref.KindTaskSet, ContainerID: "set-b"}, Label: "repo/set-b", Verdict: work.Refuse("set parked after repeated abnormal drain exits")},
 		},
-		Message: func(c work.Candidate) string { return "queue: " + c.Label + " handled" },
+		Message: func(c work.Candidate) string { return "work: " + c.Label + " handled" },
 	}
 
 	var out bytes.Buffer
@@ -38,7 +38,7 @@ func TestSupervisorReconcilesBeforeCandidatesThenDispatches(t *testing.T) {
 	if strings.Join(kind.Calls(), ",") != strings.Join(want, ",") {
 		t.Fatalf("supervisor drove the kind as %v, want %v", kind.Calls(), want)
 	}
-	for _, line := range []string{"queue: repo/set-a handled", "queue: repo/set-b handled"} {
+	for _, line := range []string{"work: repo/set-a handled", "work: repo/set-b handled"} {
 		if !strings.Contains(out.String(), line) {
 			t.Fatalf("supervisor output missing %q:\n%s", line, out.String())
 		}
@@ -55,20 +55,20 @@ func TestSupervisorReportsAdvanceFailure(t *testing.T) {
 		},
 		Err: func(c work.Candidate) error {
 			if c.Ref.ContainerID == "set-a" {
-				return errors.New("queue: repo: spawn set-a: tmux refused pane")
+				return errors.New("work: repo: spawn set-a: tmux refused pane")
 			}
 			return nil
 		},
-		Message: func(c work.Candidate) string { return "queue: " + c.Label + " handled" },
+		Message: func(c work.Candidate) string { return "work: " + c.Label + " handled" },
 	}
 
 	var out bytes.Buffer
 	tick(supervisorTestDeps(t, kind), &out, newRunOutputState())
 
-	if !strings.Contains(out.String(), "queue: repo: spawn set-a: tmux refused pane") {
+	if !strings.Contains(out.String(), "work: repo: spawn set-a: tmux refused pane") {
 		t.Fatalf("supervisor output missing the kind's failure line:\n%s", out.String())
 	}
-	if !strings.Contains(out.String(), "queue: repo/set-b handled") {
+	if !strings.Contains(out.String(), "work: repo/set-b handled") {
 		t.Fatalf("one candidate's failure must not stop the pass:\n%s", out.String())
 	}
 }
@@ -77,12 +77,12 @@ func TestSupervisorReportsAdvanceFailure(t *testing.T) {
 // and dispatches nothing — the pre-seam behaviour, now expressed as the kind's
 // own error crossing the seam.
 func TestSupervisorStopsOnCandidateError(t *testing.T) {
-	kind := &queuetest.RecordingAdvancer{CandidatesErr: errors.New("queue: scan: store unreadable")}
+	kind := &queuetest.RecordingAdvancer{CandidatesErr: errors.New("work: scan: store unreadable")}
 
 	var out bytes.Buffer
 	tick(supervisorTestDeps(t, kind), &out, newRunOutputState())
 
-	if !strings.Contains(out.String(), "queue: scan: store unreadable") {
+	if !strings.Contains(out.String(), "work: scan: store unreadable") {
 		t.Fatalf("supervisor output missing the scan error:\n%s", out.String())
 	}
 	for _, call := range kind.Calls() {

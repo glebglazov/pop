@@ -97,9 +97,9 @@ func TestDispatchIsSerialInKindPrecedenceOrder(t *testing.T) {
 // outcome and the error, and all three render through the same call.
 func TestDispatchEmitsStructuredEvents(t *testing.T) {
 	claimed := &store.CheckoutClaim{Holder: ref.WorkRef{Kind: ref.KindTaskSet, ContainerID: "set-a"}, Reason: store.ClaimFailedGate}
-	spawnErr := errors.New("queue: repo: spawn set-c: tmux refused pane")
+	spawnErr := errors.New("work: repo: spawn set-c: tmux refused pane")
 	kind := &queuetest.RecordingAdvancer{
-		Message: func(c work.Candidate) string { return "queue: repo: spawned drain for " + c.Ref.ContainerID },
+		Message: func(c work.Candidate) string { return "work: repo: spawned drain for " + c.Ref.ContainerID },
 		Err: func(c work.Candidate) error {
 			if c.Ref.ContainerID == "set-c" {
 				return spawnErr
@@ -139,10 +139,10 @@ func TestDispatchEmitsStructuredEvents(t *testing.T) {
 			t.Fatalf("event = %+v, want the candidate's ref and label", event)
 		}
 	}
-	if started.Err != nil || started.Line() != "queue: repo: spawned drain for set-b" {
+	if started.Err != nil || started.Line() != "work: repo: spawned drain for set-b" {
 		t.Fatalf("start event = %+v, want the kind's own message", started)
 	}
-	if blocked.Err != nil || blocked.Line() != "queue: repo/set-d: skip; "+(drain.SpawnDeferral{Reason: drain.DeferCheckoutClaim, Claim: claimed}).Message() {
+	if blocked.Err != nil || blocked.Line() != "work: repo/set-d: skip; "+(drain.SpawnDeferral{Reason: drain.DeferCheckoutClaim, Claim: claimed}).Message() {
 		t.Fatalf("occupancy event = %+v, want the supervisor's refusal", blocked)
 	}
 	if !errors.Is(failed.Err, spawnErr) || failed.Line() != spawnErr.Error() {

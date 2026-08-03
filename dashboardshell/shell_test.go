@@ -92,7 +92,7 @@ func TestShellOpensOnTheEntryPage(t *testing.T) {
 	if wp.ActivePage() != PageWork {
 		t.Fatalf("active page = %v, want work", wp.ActivePage())
 	}
-	if !strings.Contains(wp.View().Content, "Queue ·") {
+	if !strings.Contains(wp.View().Content, "Work ·") {
 		t.Fatalf("expected the work page header, got:\n%s", wp.View().Content)
 	}
 
@@ -127,7 +127,7 @@ func TestShellVTogglesPagesFromEitherSide(t *testing.T) {
 		t.Fatalf("after second v active = %v, want work", s.ActivePage())
 	}
 	view = s.View().Content
-	if !strings.Contains(view, "Queue ·") || !strings.Contains(view, "TASK SET") {
+	if !strings.Contains(view, "Work ·") || !strings.Contains(view, "TASK SET") {
 		t.Fatalf("expected the work page, got:\n%s", view)
 	}
 	if strings.Contains(view, "daily") {
@@ -176,14 +176,14 @@ func TestShellHelpNamesThePageTheToggleLeadsTo(t *testing.T) {
 	s := newTestShell(t, PageWork)
 	s.Update(tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
 	view := s.View().Content
-	if !strings.Contains(view, "Help · Queue") || !strings.Contains(view, "routines view") {
+	if !strings.Contains(view, "Help · Work") || !strings.Contains(view, "routines view") {
 		t.Fatalf("work page help missing the toggle:\n%s", view)
 	}
 
 	s = newTestShell(t, PageRoutines)
 	s.Update(tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
 	view = s.View().Content
-	if !strings.Contains(view, "Help · Routines") || !strings.Contains(view, "queue view") {
+	if !strings.Contains(view, "Help · Routines") || !strings.Contains(view, "work view") {
 		t.Fatalf("routine page help missing the toggle:\n%s", view)
 	}
 }

@@ -309,12 +309,12 @@ func runRoutineDashboard(cmd *cobra.Command, args []string) error {
 	if cfgPath == "" {
 		cfgPath = config.DefaultConfigPath()
 	}
-	cfg, err := queueConfigLoad(cfgPath)
+	cfg, err := workConfigLoad(cfgPath)
 	if err != nil {
 		return err
 	}
 	d := cmdLayerDeps().queueDeps()
-	d.LoadConfig = queueConfigLoad
+	d.LoadConfig = workConfigLoad
 	return routineRunDashboard(d, cfg)
 }
 

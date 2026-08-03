@@ -18,7 +18,7 @@ const (
 
 // SupervisorLogPath returns the durable free-form supervisor narration path.
 func SupervisorLogPath(d *tasks.Deps) string {
-	return filepath.Join(drain.QueueDataDir(d), supervisorLogName)
+	return filepath.Join(drain.WorkDataDir(d), supervisorLogName)
 }
 
 func supervisorOutput(d *tasks.Deps, out io.Writer) (io.Writer, io.Closer, error) {
@@ -38,8 +38,8 @@ type rotatingSupervisorLog struct {
 }
 
 func newRotatingSupervisorLog(d *tasks.Deps, maxSize int64, backups int) (*rotatingSupervisorLog, error) {
-	if err := d.FS.MkdirAll(drain.QueueDataDir(d), 0o755); err != nil {
-		return nil, fmt.Errorf("create queue data dir: %w", err)
+	if err := d.FS.MkdirAll(drain.WorkDataDir(d), 0o755); err != nil {
+		return nil, fmt.Errorf("create work data dir: %w", err)
 	}
 	w := &rotatingSupervisorLog{
 		path:    SupervisorLogPath(d),

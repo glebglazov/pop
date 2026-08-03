@@ -49,7 +49,7 @@ func TestActivityPaneTagsDistinct(t *testing.T) {
 		t.Fatalf("drain.LaunchDrain: %v", err)
 	}
 	rt.SessionLive = true
-	rt.WindowNames["pop-queue"] = true
+	rt.WindowNames["pop-work"] = true
 	if _, err := drain.LaunchVerify(d, cfg, row); err != nil {
 		t.Fatalf("drain.LaunchVerify: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestVerifyWhileDrainLiveSpawnsSecondPane(t *testing.T) {
 		t.Fatalf("drain.LaunchDrain: %v", err)
 	}
 	rt.SessionLive = true
-	rt.WindowNames["pop-queue"] = true
+	rt.WindowNames["pop-work"] = true
 	drainSendKeys := rt.CountCommand("send-keys")
 
 	if _, err := drain.LaunchVerify(d, cfg, row); err != nil {
@@ -184,7 +184,7 @@ func TestHandoffPaneTitles(t *testing.T) {
 		t.Fatalf("drain.LaunchDrain: %v", err)
 	}
 	rt.SessionLive = true
-	rt.WindowNames["pop-queue"] = true
+	rt.WindowNames["pop-work"] = true
 	verifyResult, err := drain.LaunchVerify(d, cfg, row)
 	if err != nil {
 		t.Fatalf("drain.LaunchVerify: %v", err)
@@ -264,7 +264,7 @@ func TestShellVerbTwiceYieldsTwoPanes(t *testing.T) {
 		t.Fatalf("first drain.LaunchShell: %v", err)
 	}
 	rt.SessionLive = true
-	rt.WindowNames["pop-queue"] = true
+	rt.WindowNames["pop-work"] = true
 	second, err := drain.LaunchShell(d, cfg, row)
 	if err != nil {
 		t.Fatalf("second drain.LaunchShell: %v", err)

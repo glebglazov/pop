@@ -37,7 +37,7 @@ func TestSupervisorBlocksAnOccupyingKindThatOmitsItsOwnCheck(t *testing.T) {
 			Checkout: occupiedCheckout,
 			Verdict:  work.Advance(),
 		}},
-		Message: func(c work.Candidate) string { return "queue: " + c.Label + " started" },
+		Message: func(c work.Candidate) string { return "work: " + c.Label + " started" },
 	}
 
 	var out bytes.Buffer
@@ -48,7 +48,7 @@ func TestSupervisorBlocksAnOccupyingKindThatOmitsItsOwnCheck(t *testing.T) {
 			t.Fatalf("an occupied checkout must not reach the kind at all, got %v", kind.Calls())
 		}
 	}
-	want := "queue: repo/occupier: skip; checkout claimed by set set-a (running drain)"
+	want := "work: repo/occupier: skip; checkout claimed by set set-a (running drain)"
 	if !strings.Contains(out.String(), want) {
 		t.Fatalf("supervisor output missing %q:\n%s", want, out.String())
 	}
@@ -117,7 +117,7 @@ func TestEmptyCheckoutIsNeverBlocked(t *testing.T) {
 			{Ref: ref.WorkRef{Kind: ref.KindMap, ContainerID: "map-a"}, Label: "repo/map-a", Verdict: work.Advance()},
 			{Ref: ref.WorkRef{Kind: ref.KindMap, ContainerID: "map-b"}, Label: "repo/map-b", Verdict: work.Advance()},
 		},
-		Message: func(c work.Candidate) string { return "queue: " + c.Label + " started" },
+		Message: func(c work.Candidate) string { return "work: " + c.Label + " started" },
 	}
 
 	var out bytes.Buffer
@@ -127,7 +127,7 @@ func TestEmptyCheckoutIsNeverBlocked(t *testing.T) {
 	if strings.Join(kind.Calls()[len(kind.Calls())-2:], ",") != strings.Join(want, ",") {
 		t.Fatalf("kind driven as %v, want both no-checkout candidates advanced", kind.Calls())
 	}
-	for _, line := range []string{"queue: repo/map-a started", "queue: repo/map-b started"} {
+	for _, line := range []string{"work: repo/map-a started", "work: repo/map-b started"} {
 		if !strings.Contains(out.String(), line) {
 			t.Fatalf("supervisor output missing %q:\n%s", line, out.String())
 		}
@@ -146,16 +146,16 @@ func TestOccupancyLedgerDefersTheSecondCandidateOnOneCheckout(t *testing.T) {
 			{Ref: ref.WorkRef{Kind: ref.KindTaskSet, ContainerID: "set-a"}, Label: "repo/set-a", Checkout: occupiedCheckout, Verdict: work.Advance()},
 			{Ref: ref.WorkRef{Kind: ref.KindTaskSet, ContainerID: "set-b"}, Label: "repo/set-b", Checkout: occupiedCheckout, Verdict: work.Advance()},
 		},
-		Message: func(c work.Candidate) string { return "queue: " + c.Label + " started" },
+		Message: func(c work.Candidate) string { return "work: " + c.Label + " started" },
 	}
 
 	var out bytes.Buffer
 	tick(supervisorDepsOver(td, kind), &out, newRunOutputState())
 
-	if !strings.Contains(out.String(), "queue: repo/set-a started") {
+	if !strings.Contains(out.String(), "work: repo/set-a started") {
 		t.Fatalf("the first candidate must take the checkout:\n%s", out.String())
 	}
-	want := "queue: repo/set-b: skip; checkout " + occupiedCheckout + " already taken by task-set:set-a this tick"
+	want := "work: repo/set-b: skip; checkout " + occupiedCheckout + " already taken by task-set:set-a this tick"
 	if !strings.Contains(out.String(), want) {
 		t.Fatalf("supervisor output missing %q:\n%s", want, out.String())
 	}

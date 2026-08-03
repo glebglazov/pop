@@ -256,17 +256,33 @@ func dashboardScanForCheckout(d *Deps, scans []projectScan, checkoutPath string)
 	}
 }
 
-// QueueDataDir returns the data directory for queue-owned durable files (the
-// supervisor lock, state, log, and provisioned worktrees). The append-only
-// journal that once lived here is retired — the journal is now a view over the
-// store (ADR-0055).
+// WorkDataDir returns the data directory for the Work supervisor's own durable
+// runtime files — its single-instance lock and its narration log. The append-only
+// journal that once lived beside them is retired: the journal is now a view over
+// the store (ADR-0055).
+func WorkDataDir(d *tasks.Deps) string {
+	return popDataDir(d, "work")
+}
+
+// QueueDataDir returns the directory rooting pop's provisioned worktrees. The
+// queue name is historical — the supervisor's lock and log moved to WorkDataDir
+// with the `pop queue` → `pop work` cut, but a provisioned worktree's absolute
+// path is recorded in its Worktree binding, so this root cannot move without a
+// migration. tasks/binding computes the same location from the Task-storage root.
 func QueueDataDir(d *tasks.Deps) string {
+	return popDataDir(d, "queue")
+}
+
+// popDataDir resolves one of pop's data subdirectories through the same three
+// branches every pop data path uses: XDG_DATA_HOME, then the home directory,
+// then /tmp when the home directory is unknowable.
+func popDataDir(d *tasks.Deps, name string) string {
 	if xdgData := d.FS.Getenv("XDG_DATA_HOME"); xdgData != "" {
-		return filepath.Join(xdgData, "pop", "queue")
+		return filepath.Join(xdgData, "pop", name)
 	}
 	home, err := d.FS.UserHomeDir()
 	if err != nil {
-		return filepath.Join("/tmp", "pop", "queue")
+		return filepath.Join("/tmp", "pop", name)
 	}
-	return filepath.Join(home, ".local", "share", "pop", "queue")
+	return filepath.Join(home, ".local", "share", "pop", name)
 }

@@ -42,9 +42,10 @@ func (l *SupervisorLock) Release() error {
 }
 
 // SupervisorLockDir returns the directory holding the supervisor lock file.
-// It mirrors the runtime-lock data location so all pop state lives together.
+// It mirrors the daemon's other runtime files so all supervisor state lives
+// together.
 func SupervisorLockDir(d *tasks.Deps) string {
-	return drain.QueueDataDir(d)
+	return drain.WorkDataDir(d)
 }
 
 // SupervisorLockPath returns the path to the single-instance supervisor lock.
@@ -52,12 +53,51 @@ func SupervisorLockPath(d *tasks.Deps) string {
 	return filepath.Join(SupervisorLockDir(d), "supervisor.lock")
 }
 
+// LegacySupervisorLockPath returns the pre-cut lock path, under the queue-named
+// data dir. A daemon started before `pop queue` became `pop work` holds that
+// file and nothing else, so a post-cut binary that only consulted its own path
+// would happily supervise alongside it. AcquireSupervisorLock therefore reads
+// both. Delete this and its caller one release after the cut (CLEANUP.md).
+func LegacySupervisorLockPath(d *tasks.Deps) string {
+	return filepath.Join(drain.QueueDataDir(d), "supervisor.lock")
+}
+
 // AcquireSupervisorLock acquires the single-instance supervisor lock. A second
 // `pop work daemon` while one is already supervising is refused with an
 // operational error naming the running PID; a stale lock (PID no longer alive)
 // is reclaimed, mirroring the runtime execution lock's self-healing.
 func AcquireSupervisorLock(d *tasks.Deps) (*SupervisorLock, error) {
+	if err := refuseIfLegacySupervisorLive(d); err != nil {
+		return nil, err
+	}
 	return acquireSupervisorLock(d, false)
+}
+
+// refuseIfLegacySupervisorLive refuses when a pre-cut daemon is still supervising
+// under the old lock path. A stale or unreadable legacy lock is ignored: only a
+// live process can double-supervise, and the file is left for its owner.
+func refuseIfLegacySupervisorLive(d *tasks.Deps) error {
+	path := LegacySupervisorLockPath(d)
+	if path == SupervisorLockPath(d) {
+		return nil
+	}
+	data, err := d.FS.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	meta, err := parseSupervisorLockMetadata(data)
+	if err != nil {
+		return nil
+	}
+	if !tasks.ProcessLiveWithToken(d, meta.PID, meta.ProcStart) {
+		return nil
+	}
+	return &tasks.ExitError{Code: tasks.ExitOperational, Err: fmt.Errorf(
+		"work supervisor already running (PID %d since %s) holding the pre-cut lock %s",
+		meta.PID,
+		meta.StartedAt.Format(time.RFC3339),
+		path,
+	)}
 }
 
 func acquireSupervisorLock(d *tasks.Deps, retried bool) (*SupervisorLock, error) {
@@ -116,9 +156,10 @@ func acquireSupervisorLock(d *tasks.Deps, retried bool) (*SupervisorLock, error)
 
 	if tasks.ProcessLiveWithToken(d, existingMeta.PID, existingMeta.ProcStart) {
 		return nil, &tasks.ExitError{Code: tasks.ExitOperational, Err: fmt.Errorf(
-			"queue supervisor already running (PID %d since %s)",
+			"work supervisor already running (PID %d since %s) holding %s",
 			existingMeta.PID,
 			existingMeta.StartedAt.Format(time.RFC3339),
+			lockPath,
 		)}
 	}
 

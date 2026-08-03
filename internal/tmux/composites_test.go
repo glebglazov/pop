@@ -103,7 +103,7 @@ func TestEnsureTaggedPaneFreshWindowReusesInitialPane(t *testing.T) {
 	if f.Live["work"] != "/proj" {
 		t.Errorf("Live[work] = %q, want /proj", f.Live["work"])
 	}
-	if panes := f.Windows["work"]["pop-queue"]; len(panes) != 1 || panes[0] != pane {
+	if panes := f.Windows["work"]["pop-work"]; len(panes) != 1 || panes[0] != pane {
 		t.Errorf("drain window panes = %v, want just the returned pane %q", panes, pane)
 	}
 	if got := f.PaneTagValues[pane][tmux.TagSet]; got != "set-1" {
@@ -120,22 +120,22 @@ func TestEnsureTaggedPaneFreshWindowReusesInitialPane(t *testing.T) {
 func TestEnsureTaggedPaneExistingWindowSplitsAndRetiles(t *testing.T) {
 	f := &tmuxtest.Fake{
 		Live:    map[string]string{"work": "/proj"},
-		Windows: map[string]map[string][]string{"work": {"pop-queue": {"%1"}}},
+		Windows: map[string]map[string][]string{"work": {"pop-work": {"%1"}}},
 	}
 
 	pane, err := tmux.EnsureTaggedPane(f, tmux.TagRoutine, "work", "/proj", "r1", "fire")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	panes := f.Windows["work"]["pop-queue"]
+	panes := f.Windows["work"]["pop-work"]
 	if len(panes) != 2 || panes[1] != pane {
 		t.Fatalf("panes = %v, want the sibling plus the split pane %q", panes, pane)
 	}
 	if got := f.PaneTagValues[pane][tmux.TagRoutine]; got != "r1" {
 		t.Errorf("tag = %q, want r1", got)
 	}
-	if len(f.WindowRetiled) != 1 || f.WindowRetiled[0] != "work:pop-queue" {
-		t.Errorf("WindowRetiled = %v, want [work:pop-queue]", f.WindowRetiled)
+	if len(f.WindowRetiled) != 1 || f.WindowRetiled[0] != "work:pop-work" {
+		t.Errorf("WindowRetiled = %v, want [work:pop-work]", f.WindowRetiled)
 	}
 }
 
@@ -153,7 +153,7 @@ func TestEnsureTaggedPaneReusesTaggedPane(t *testing.T) {
 	if second != first {
 		t.Fatalf("second pane = %q, want reused %q", second, first)
 	}
-	if panes := f.Windows["work"]["pop-queue"]; len(panes) != 1 {
+	if panes := f.Windows["work"]["pop-work"]; len(panes) != 1 {
 		t.Fatalf("panes = %v, want a single reused pane", panes)
 	}
 	if got := f.SentCommands[first]; len(got) != 2 {
@@ -196,7 +196,7 @@ func TestEnsureTaggedPaneReusedPaneCorrectsDirectory(t *testing.T) {
 func TestEnsureTaggedPaneReusedPaneEmptyDirSkipsCorrection(t *testing.T) {
 	f := &tmuxtest.Fake{
 		Live:    map[string]string{"work": "/proj"},
-		Windows: map[string]map[string][]string{"work": {"pop-queue": {"%1"}}},
+		Windows: map[string]map[string][]string{"work": {"pop-work": {"%1"}}},
 		PaneCwd: map[string]string{"%1": "/stale"},
 		PaneTagValues: map[string]map[tmux.PaneTag]string{
 			"%1": {tmux.TagSet: "set-1"},
@@ -321,7 +321,7 @@ func TestSpawnFreshPaneAlwaysCreatesUntagged(t *testing.T) {
 	if second == first {
 		t.Fatalf("second pane = %q, want a fresh pane distinct from %q", second, first)
 	}
-	panes := f.Windows["work"]["pop-queue"]
+	panes := f.Windows["work"]["pop-work"]
 	if len(panes) != 2 {
 		t.Fatalf("panes = %v, want two untagged shells", panes)
 	}

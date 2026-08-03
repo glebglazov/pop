@@ -10,7 +10,7 @@ import (
 // live in: one pane per key (routine id or Task-set id), tagged with a @pop_*
 // option and tiled alongside its siblings. The window name is constructed only
 // here.
-const drainWindow = "pop-queue"
+const drainWindow = "pop-work"
 
 // PaneTag selects which @pop_* per-pane option a spawned pane is tagged with.
 // The option key strings are internal to this module — no consumer names them.

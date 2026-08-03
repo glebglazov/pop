@@ -408,51 +408,59 @@ type RoutinesConfig struct {
 	Agents []string `toml:"agents" desc:"Ordered fallback agent list for routine runs (falls back to [tasks.implement].agents when omitted)."`
 }
 
-// QueueConfig holds `pop queue` supervisor configuration. Durations are stored
-// as standard duration strings (e.g. "60s", "1h") and parsed by ResolveQueue.
-type QueueConfig struct {
-	// PollInterval is the supervisor's scan cadence. Empty ⇒ DefaultQueuePollInterval.
+// WorkConfig holds the [work] table. It is deliberately a container: the
+// supervisor's timing lives one level down under [work.daemon], leaving [work]
+// free for later non-daemon Work keys.
+type WorkConfig struct {
+	Daemon *WorkDaemonConfig `toml:"daemon" desc:"Work supervisor timing ([work.daemon] table)."`
+}
+
+// WorkDaemonConfig holds `pop work daemon` supervisor configuration. Durations
+// are stored as standard duration strings (e.g. "60s", "1h") and parsed by
+// ResolveWorkDaemon.
+type WorkDaemonConfig struct {
+	// PollInterval is the supervisor's scan cadence. Empty ⇒ DefaultWorkDaemonPollInterval.
 	PollInterval string `toml:"poll_interval" desc:"Supervisor scan cadence as a duration string (e.g. \"60s\")."`
 	// AgentQuotaRetryAfter is the global cooldown applied after an agent reports
-	// a quota exit, before it re-enters rotation. Empty ⇒ DefaultQueueQuotaRetryAfter.
+	// a quota exit, before it re-enters rotation. Empty ⇒ DefaultWorkDaemonQuotaRetryAfter.
 	AgentQuotaRetryAfter string `toml:"agent_quota_retry_after" desc:"Cooldown after an agent quota exit, as a duration string."`
 	// CrashRetryDelays is the ordered backoff schedule for crash retries; its
-	// length is the park threshold. Empty ⇒ DefaultQueueCrashRetryDelays.
+	// length is the park threshold. Empty ⇒ DefaultWorkDaemonCrashRetryDelays.
 	CrashRetryDelays []string `toml:"crash_retry_delays" desc:"Crash-retry backoff schedule (array of duration strings); length = park threshold."`
 }
 
-// Queue default values applied when the [queue] section or individual fields
-// are omitted.
+// Work-daemon default values applied when the [work.daemon] section or
+// individual fields are omitted.
 const (
-	DefaultQueuePollInterval    = 60 * time.Second
-	DefaultQueueQuotaRetryAfter = time.Hour
+	DefaultWorkDaemonPollInterval    = 60 * time.Second
+	DefaultWorkDaemonQuotaRetryAfter = time.Hour
 )
 
-// DefaultQueueCrashRetryDelays is the default crash-retry backoff schedule.
-var DefaultQueueCrashRetryDelays = []time.Duration{time.Minute, 5 * time.Minute, 15 * time.Minute}
+// DefaultWorkDaemonCrashRetryDelays is the default crash-retry backoff schedule.
+var DefaultWorkDaemonCrashRetryDelays = []time.Duration{time.Minute, 5 * time.Minute, 15 * time.Minute}
 
-// ResolvedQueueConfig holds the parsed queue configuration with defaults
-// applied and durations parsed.
-type ResolvedQueueConfig struct {
+// ResolvedWorkDaemonConfig holds the parsed supervisor configuration with
+// defaults applied and durations parsed.
+type ResolvedWorkDaemonConfig struct {
 	PollInterval         time.Duration
 	AgentQuotaRetryAfter time.Duration
 	CrashRetryDelays     []time.Duration
 }
 
-// ResolveQueue parses the [queue] section, applying defaults for omitted
-// fields and validating that every duration string is well-formed. A bad
-// duration is a config error. The receiver may be nil (no [queue] section), in
+// ResolveWorkDaemon parses the [work.daemon] section, applying defaults for
+// omitted fields and validating that every duration string is well-formed. A bad
+// duration is a config error. The receiver may be nil (no [work] section), in
 // which case all defaults apply.
-func (c *Config) ResolveQueue() (ResolvedQueueConfig, error) {
-	resolved := ResolvedQueueConfig{
-		PollInterval:         DefaultQueuePollInterval,
-		AgentQuotaRetryAfter: DefaultQueueQuotaRetryAfter,
-		CrashRetryDelays:     append([]time.Duration(nil), DefaultQueueCrashRetryDelays...),
+func (c *Config) ResolveWorkDaemon() (ResolvedWorkDaemonConfig, error) {
+	resolved := ResolvedWorkDaemonConfig{
+		PollInterval:         DefaultWorkDaemonPollInterval,
+		AgentQuotaRetryAfter: DefaultWorkDaemonQuotaRetryAfter,
+		CrashRetryDelays:     append([]time.Duration(nil), DefaultWorkDaemonCrashRetryDelays...),
 	}
 
-	var q *QueueConfig
-	if c != nil {
-		q = c.Queue
+	var q *WorkDaemonConfig
+	if c != nil && c.Work != nil {
+		q = c.Work.Daemon
 	}
 	if q == nil {
 		return resolved, nil
@@ -461,7 +469,7 @@ func (c *Config) ResolveQueue() (ResolvedQueueConfig, error) {
 	if strings.TrimSpace(q.PollInterval) != "" {
 		d, err := time.ParseDuration(q.PollInterval)
 		if err != nil {
-			return ResolvedQueueConfig{}, fmt.Errorf("[queue] poll_interval: %w", err)
+			return ResolvedWorkDaemonConfig{}, fmt.Errorf("[work.daemon] poll_interval: %w", err)
 		}
 		resolved.PollInterval = d
 	}
@@ -469,7 +477,7 @@ func (c *Config) ResolveQueue() (ResolvedQueueConfig, error) {
 	if strings.TrimSpace(q.AgentQuotaRetryAfter) != "" {
 		d, err := time.ParseDuration(q.AgentQuotaRetryAfter)
 		if err != nil {
-			return ResolvedQueueConfig{}, fmt.Errorf("[queue] agent_quota_retry_after: %w", err)
+			return ResolvedWorkDaemonConfig{}, fmt.Errorf("[work.daemon] agent_quota_retry_after: %w", err)
 		}
 		resolved.AgentQuotaRetryAfter = d
 	}
@@ -479,7 +487,7 @@ func (c *Config) ResolveQueue() (ResolvedQueueConfig, error) {
 		for i, raw := range q.CrashRetryDelays {
 			d, err := time.ParseDuration(raw)
 			if err != nil {
-				return ResolvedQueueConfig{}, fmt.Errorf("[queue] crash_retry_delays[%d]: %w", i, err)
+				return ResolvedWorkDaemonConfig{}, fmt.Errorf("[work.daemon] crash_retry_delays[%d]: %w", i, err)
 			}
 			delays = append(delays, d)
 		}
@@ -595,7 +603,7 @@ type Config struct {
 	// WorkbenchOpts holds the [workbench] options table (pick_on_create, order).
 	WorkbenchOpts *WorkbenchOptions   `toml:"workbench" include:"fields" desc:"Workbench options ([workbench] table)."`
 	Routines      *RoutinesConfig     `toml:"routines" desc:"Routine settings ([routines] table)."`
-	Queue         *QueueConfig        `toml:"queue" desc:"Queue supervisor settings ([queue] table)."`
+	Work          *WorkConfig         `toml:"work" include:"fields" desc:"Work settings ([work] table; supervisor timing under [work.daemon])."`
 	Updates       *UpdatesConfig      `toml:"updates" desc:"Auto-update behavior ([updates] table)."`
 	Integrations  *IntegrationsConfig `toml:"integrations" merge:"fields" desc:"AI-agent integration settings ([integrations] table)."`
 	// Repo holds [repo."<path>"] override blocks keyed by any checkout path.
@@ -1404,7 +1412,7 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 	for _, f := range repoBlockWarnings(path, md) {
 		cfg.recordFinding(f)
 	}
-	for _, f := range queueAgentsWarnings(path, md) {
+	for _, f := range retiredQueueSectionFindings(path, md) {
 		cfg.recordFinding(f)
 	}
 
@@ -1972,22 +1980,33 @@ func cloneWorkloadVerifyAsVerify(src *WorkloadVerifyConfig) *VerifyConfig {
 	return dst
 }
 
-// queueAgentsWarnings returns a load-time finding when a config file still
-// sets the deleted [queue].agents key. Agent selection is owned by
-// [tasks.implement].agents; the old key is ignored (fail-soft).
-func queueAgentsWarnings(path string, md toml.MetaData) []Finding {
+// retiredQueueSectionFindings returns a load-time finding when a config file
+// still carries a [queue] table. The section was cut, not aliased: `pop queue`
+// became `pop work` and its timing moved to [work.daemon], so a leftover [queue]
+// is an unknown section whose keys are read by nothing (fail-soft, ADR-0054). The
+// message keeps the [queue].agents pointer alive for files that set that key,
+// since agent fallback lives somewhere else again ([tasks.implement].agents).
+func retiredQueueSectionFindings(path string, md toml.MetaData) []Finding {
+	found, agents := false, false
 	for _, key := range md.Undecoded() {
-		if len(key) == 2 && key[0] == "queue" && key[1] == "agents" {
-			return []Finding{{
-				Path: "deprecated.queue.agents",
-				Message: fmt.Sprintf(
-					"%s: [queue] agents is ignored; configure agent fallback under [tasks.implement].agents",
-					path,
-				),
-			}}
+		if len(key) > 0 && key[0] == "queue" {
+			found = true
+			if len(key) == 2 && key[1] == "agents" {
+				agents = true
+			}
 		}
 	}
-	return nil
+	if !found {
+		return nil
+	}
+	msg := fmt.Sprintf(
+		"%s: [queue] is not a config section; supervisor timing moved to [work.daemon] (poll_interval, agent_quota_retry_after, crash_retry_delays)",
+		path,
+	)
+	if agents {
+		msg += "; configure agent fallback under [tasks.implement].agents"
+	}
+	return []Finding{{Path: "unknown_section.queue", Message: msg}}
 }
 
 // repoScopeLegalKeys returns the set of TOML keys that are legal at repo scope,

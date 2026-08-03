@@ -71,7 +71,7 @@ func (k *taskSetKind) Candidates() ([]work.Candidate, error) {
 	if err != nil {
 		// The wording is the kind's because it is the line the daemon prints; the
 		// supervisor renders what it is handed.
-		return nil, fmt.Errorf("queue: scan: %w", err)
+		return nil, fmt.Errorf("work: scan: %w", err)
 	}
 	k.pending = map[ref.WorkRef]Decision{}
 	k.dispatched = map[string]bool{}
@@ -133,7 +133,7 @@ func (k *taskSetKind) Advance(c work.Candidate) (work.Outcome, error) {
 	}
 	dec, ok := k.pending[c.Ref]
 	if !ok {
-		return work.Outcome{}, fmt.Errorf("queue: %s is not a candidate of this pass", c.Ref)
+		return work.Outcome{}, fmt.Errorf("work: %s is not a candidate of this pass", c.Ref)
 	}
 	repoLabel := repoLabelFromScan(dec.scan)
 	dec, refusal := prepareWorktreeDrain(k.d, dec)
@@ -144,19 +144,19 @@ func (k *taskSetKind) Advance(c work.Candidate) (work.Outcome, error) {
 	}
 	if path := dec.scan.RuntimePath; path != "" {
 		if k.dispatched[path] {
-			return work.Outcome{Kind: work.OutcomeMessage, Message: fmt.Sprintf("queue: %s: skip %s; another set already dispatched to %s this tick", repoLabel, dec.TaskSetID, path)}, nil
+			return work.Outcome{Kind: work.OutcomeMessage, Message: fmt.Sprintf("work: %s: skip %s; another set already dispatched to %s this tick", repoLabel, dec.TaskSetID, path)}, nil
 		}
 		k.dispatched[path] = true
 	}
 	spawn, err := SpawnWithResult(k.d, dec)
 	if err != nil {
-		return work.Outcome{}, fmt.Errorf("queue: %s: spawn %s: %w", repoLabel, dec.TaskSetID, err)
+		return work.Outcome{}, fmt.Errorf("work: %s: spawn %s: %w", repoLabel, dec.TaskSetID, err)
 	}
 	var lines []string
 	if err := recordDrainPane(k.d, dec, spawn.PaneID, "supervisor"); err != nil {
-		lines = append(lines, fmt.Sprintf("queue: %s: record drain pane %s: %v", repoLabel, dec.TaskSetID, err))
+		lines = append(lines, fmt.Sprintf("work: %s: record drain pane %s: %v", repoLabel, dec.TaskSetID, err))
 	}
-	lines = append(lines, fmt.Sprintf("queue: %s: spawned drain for %s", statusProjectLabel(repoLabel, dec.ProjectConfigError), dec.TaskSetID))
+	lines = append(lines, fmt.Sprintf("work: %s: spawned drain for %s", statusProjectLabel(repoLabel, dec.ProjectConfigError), dec.TaskSetID))
 	k.spawned = append(k.spawned, PickedUpSet{Project: dec.Project, RepoLabel: repoLabel, SetID: dec.TaskSetID, ProjectConfigError: dec.ProjectConfigError})
 	return work.Outcome{Kind: work.OutcomeMessage, Message: strings.Join(lines, "\n")}, nil
 }

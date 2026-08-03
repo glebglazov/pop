@@ -116,7 +116,7 @@ func (k *Kind) Load() ([]work.Container, error) {
 		return nil, nil
 	}
 	var delays []time.Duration
-	if qcfg, qerr := cfg.ResolveQueue(); qerr == nil {
+	if qcfg, qerr := cfg.ResolveWorkDaemon(); qerr == nil {
 		delays = qcfg.CrashRetryDelays
 	}
 	snap, err := newSnapshot(d)
@@ -230,7 +230,7 @@ func (k *Kind) Summary(containers []work.Container) []string {
 // kind's public surface stays containers-out.
 func containersForGroup(d *Deps, cfg *config.Config, g repogroup.Group) ([]work.Container, error) {
 	var delays []time.Duration
-	if qcfg, qerr := cfg.ResolveQueue(); qerr == nil {
+	if qcfg, qerr := cfg.ResolveWorkDaemon(); qerr == nil {
 		delays = qcfg.CrashRetryDelays
 	}
 	snap, err := newSnapshot(d)

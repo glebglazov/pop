@@ -91,7 +91,7 @@ func BuildStatus(d *Deps, cfg *config.Config) (StatusSnapshot, error) {
 	snap.RecoveryWaiters = loadRecoveryWaiters(d)
 	snap.Tasks = d.Tasks
 	snap.IncludeDone = d.IncludeDone
-	if qcfg, qerr := resolvedQueueConfig(cfg); qerr == nil {
+	if qcfg, qerr := resolvedWorkDaemonConfig(cfg); qerr == nil {
 		snap.CrashRetryDelays = qcfg.CrashRetryDelays
 	}
 	return snap, nil

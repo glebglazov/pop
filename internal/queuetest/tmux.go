@@ -22,7 +22,7 @@ import (
 // drainWindowName mirrors the drain pipeline's tmux window name. It is copied
 // rather than imported so this fixture stays importable from that package's own
 // tests.
-const drainWindowName = "pop-queue"
+const drainWindowName = "pop-work"
 
 type RecordingTmux struct {
 	*tmuxtest.Fake

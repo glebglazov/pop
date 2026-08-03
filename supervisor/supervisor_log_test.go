@@ -34,13 +34,13 @@ func TestRunTeesSupervisorNarrationToDurableLog(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	want := "pop queue supervisor started"
+	want := "pop work supervisor started"
 	if !strings.Contains(stdout.String(), want) {
 		t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 	}
 	logPath := SupervisorLogPath(td)
-	if !strings.HasPrefix(logPath, filepath.Join(dataHome, "pop", "queue")+string(filepath.Separator)) {
-		t.Fatalf("supervisor log path %q is not under queue data dir %q", logPath, drain.QueueDataDir(td))
+	if !strings.HasPrefix(logPath, filepath.Join(dataHome, "pop", "work")+string(filepath.Separator)) {
+		t.Fatalf("supervisor log path %q is not under work data dir %q", logPath, drain.WorkDataDir(td))
 	}
 	data, err := os.ReadFile(logPath)
 	if err != nil {

@@ -727,7 +727,7 @@ func DiffRunView(prev *RunView, curr RunView) []string {
 			setID = "(unknown set)"
 		}
 		label := projectLabelWithWorktree(repoLabelOrProject(p.RepoLabel, p.Project), p.RuntimePath, setID, p.ProjectConfigError)
-		lines = append(lines, fmt.Sprintf("queue: %s: spawned drain for %s", label, setID))
+		lines = append(lines, fmt.Sprintf("work: %s: spawned drain for %s", label, setID))
 	}
 
 	prevQueued := queuedIndex(prev.Queued)
@@ -737,7 +737,7 @@ func DiffRunView(prev *RunView, curr RunView) []string {
 			continue
 		}
 		label := projectLabelWithWorktree(repoLabelOrProject(q.RepoLabel, q.Project), q.RuntimePath, q.ReadySet, q.ProjectConfigError)
-		lines = append(lines, fmt.Sprintf("queue: %s: ready set %s", label, q.ReadySet))
+		lines = append(lines, fmt.Sprintf("work: %s: ready set %s", label, q.ReadySet))
 	}
 
 	prevBlocked := blockedIndex(prev.Blocked)
@@ -761,20 +761,20 @@ func DiffRunView(prev *RunView, curr RunView) []string {
 		if _, ok := prevSkipped[repoLabel]; ok {
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("queue: %s: %s", repoLabel, s.Reason))
+		lines = append(lines, fmt.Sprintf("work: %s: %s", repoLabel, s.Reason))
 	}
 
 	for project, msg := range curr.ScanErrors {
 		if prev.ScanErrors[project] == msg {
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("queue: %s: %s", project, msg))
+		lines = append(lines, fmt.Sprintf("work: %s: %s", project, msg))
 	}
 	for project := range prev.ScanErrors {
 		if _, ok := curr.ScanErrors[project]; ok {
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("queue: %s: scan error cleared", project))
+		lines = append(lines, fmt.Sprintf("work: %s: scan error cleared", project))
 	}
 
 	return lines
@@ -785,13 +785,13 @@ func formatBlockedDelta(b BlockedItem, cleared bool) string {
 	if cleared {
 		switch b.Kind {
 		case "agent_cooldown":
-			return fmt.Sprintf("queue: agent %s cooldown cleared", b.Agent)
+			return fmt.Sprintf("work: agent %s cooldown cleared", b.Agent)
 		case "parked":
-			return fmt.Sprintf("queue: %s: %s unparked", label, b.SetID)
+			return fmt.Sprintf("work: %s: %s unparked", label, b.SetID)
 		case "recovery_wait":
-			return fmt.Sprintf("queue: %s: %s quota recovery cleared", label, b.SetID)
+			return fmt.Sprintf("work: %s: %s quota recovery cleared", label, b.SetID)
 		default:
-			return fmt.Sprintf("queue: %s: %s backoff cleared", label, b.SetID)
+			return fmt.Sprintf("work: %s: %s backoff cleared", label, b.SetID)
 		}
 	}
 	switch b.Kind {
@@ -800,9 +800,9 @@ func formatBlockedDelta(b BlockedItem, cleared bool) string {
 		if !b.Until.IsZero() {
 			until = b.Until.Local().Format(time.RFC3339)
 		}
-		return fmt.Sprintf("queue: agent %s cooldown until=%s", b.Agent, until)
+		return fmt.Sprintf("work: agent %s cooldown until=%s", b.Agent, until)
 	case "parked":
-		return fmt.Sprintf("queue: %s: %s parked reason=%s", label, b.SetID, b.Reason)
+		return fmt.Sprintf("work: %s: %s parked reason=%s", label, b.SetID, b.Reason)
 	case "recovery_wait":
 		until := ""
 		if !b.Until.IsZero() {
@@ -812,13 +812,13 @@ func formatBlockedDelta(b BlockedItem, cleared bool) string {
 		if b.Agent != "" {
 			agent = " agent=" + b.Agent
 		}
-		return fmt.Sprintf("queue: %s: %s waiting for quota recovery%s until=%s", label, b.SetID, agent, until)
+		return fmt.Sprintf("work: %s: %s waiting for quota recovery%s until=%s", label, b.SetID, agent, until)
 	default:
 		until := ""
 		if !b.Until.IsZero() {
 			until = b.Until.UTC().Format(time.RFC3339)
 		}
-		return fmt.Sprintf("queue: %s: %s %s until=%s", label, b.SetID, b.Reason, until)
+		return fmt.Sprintf("work: %s: %s %s until=%s", label, b.SetID, b.Reason, until)
 	}
 }
 

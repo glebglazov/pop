@@ -1023,7 +1023,7 @@ func TestSpawnReusesQueueWindowWhenSessionExists(t *testing.T) {
 
 func TestSpawnDoesNotTargetLowestIndexWindow(t *testing.T) {
 	// Sibling numeric windows exist but no drain window: the spawn creates the
-	// named pop-queue window rather than landing in an existing numeric window.
+	// named pop-work window rather than landing in an existing numeric window.
 	f := &tmuxtest.Fake{
 		Live:    map[string]string{"proj-session": "/checkout"},
 		Windows: map[string]map[string][]string{"proj-session": {"0": {"%1"}, "1": {"%2"}}},

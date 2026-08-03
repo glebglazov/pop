@@ -289,7 +289,7 @@ func dashboardScansForDefinition(d *Deps, cfg *config.Config, defPath string) ([
 }
 
 // LaunchAssist opens or reuses an Assist session pane for the dashboard row's
-// set in the project's pop-queue window. A pane already tagged for the set whose
+// set in the project's pop-work window. A pane already tagged for the set whose
 // command is still running is returned without spawning a twin or re-sending;
 // an idle tagged pane (bare shell) is respawned. Otherwise a fresh pane runs
 // `pop tasks assist` pinned to the row's binding-first runtime checkout. Focus
@@ -384,7 +384,7 @@ func AssistPaneTitle(setID string) string {
 }
 
 // LaunchFold spawns `pop tasks fold <set>` under TagFold in the project's
-// pop-queue window (ADR-0158). The Fold conflict prompt lives in that pane so
+// pop-work window (ADR-0158). The Fold conflict prompt lives in that pane so
 // it outlives the dashboard. An already-running fold pane for the set is a
 // jump target — focus it rather than re-sending fold into the live process.
 // An idle tagged pane (bare shell) is respawned. Dashboard-side PreflightFold

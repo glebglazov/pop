@@ -174,7 +174,7 @@ func assertSetPaneProjectSessionAndCheckout(t *testing.T, rt *queuetest.Recordin
 	}
 	newWindow, ok := rt.FindCommand("new-window")
 	if !ok {
-		t.Fatalf("expected pop-queue window; commands=%v", rt.Commands)
+		t.Fatalf("expected pop-work window; commands=%v", rt.Commands)
 	}
 	cwd := newWindowCwd(newWindow)
 	if cwd == "" {

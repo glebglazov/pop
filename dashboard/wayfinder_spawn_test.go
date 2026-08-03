@@ -347,7 +347,7 @@ func TestLivePaneCacheWayfinderWindow(t *testing.T) {
 				"01-frontier":     {"%3"},
 				mapOverviewWindow: {"%2"},
 			},
-			"pop": {"pop-queue": {"%1"}},
+			"pop": {"pop-work": {"%1"}},
 		},
 		PaneInfos: map[string]tmuxmod.PaneInfo{
 			"%3": {Session: wayfinderMapSession(), Command: "claude"},

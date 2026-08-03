@@ -68,7 +68,7 @@ func TestDashboardHandoffAssistReusesWithoutResend(t *testing.T) {
 	row.RuntimePath = repo
 	row.ProjectPath = repo
 	rt.SessionLive = true
-	rt.WindowNames["pop-queue"] = true
+	rt.WindowNames["pop-work"] = true
 	seedTaggedPane(rt, "%5", tmuxmod.TagAssist, setID)
 	rt.Fake.Inside = true
 
@@ -200,7 +200,7 @@ func TestDashboardHandoffVerifyReusesWithoutResend(t *testing.T) {
 	row.ProjectPath = repo
 	row.RawStatus = tasks.StatusNeedsVerify
 	rt.SessionLive = true
-	rt.WindowNames["pop-queue"] = true
+	rt.WindowNames["pop-work"] = true
 	seedTaggedPane(rt, "%9", tmuxmod.TagVerify, setID)
 	rt.Fake.Inside = true
 
@@ -293,7 +293,7 @@ func TestDashboardHandoffDrainReusesWithoutResend(t *testing.T) {
 		drain.SetScopedKey(repoKey, setID): {RuntimePath: bound, Branch: "handoff-drain-reuse", Project: "pop", Provisioned: false},
 	})
 	rt.SessionLive = true
-	rt.WindowNames["pop-queue"] = true
+	rt.WindowNames["pop-work"] = true
 	seedTaggedPane(rt, "%4", tmuxmod.TagSet, setID)
 	rt.Fake.Inside = true
 
