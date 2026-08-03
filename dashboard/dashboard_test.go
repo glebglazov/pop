@@ -4774,6 +4774,68 @@ func TestDashboardMapDetailRendersSectionsAndTickets(t *testing.T) {
 	}
 }
 
+// TestDashboardMapDetailTitleFallsBackToSlugWhenManifestTitleEmpty covers a
+// folded legacy Map, whose manifest tickets carry "title": "" because the
+// pre-manifest header lines never named one: the detail view's TITLE column
+// must fall back to the ticket's NN-slug display name, the same fallback
+// ticketLinkLabel already used for map.md and `pop map show`. A ticket that
+// does carry a manifest title renders it unchanged.
+func TestDashboardMapDetailTitleFallsBackToSlugWhenManifestTitleEmpty(t *testing.T) {
+	storageDir := "/data/repos/repo-map-title-fallback"
+	activeMap := filepath.Join(storageDir, "maps", "2026-07-01-active")
+	files := map[string]string{
+		filepath.Join(activeMap, "map.md"):                   "Status: active\n\n## Destination\nShip it\n",
+		filepath.Join(activeMap, "issues", "01-frontier.md"): "## Question\nWhat now?\n",
+		filepath.Join(activeMap, "issues", "02-titled.md"):   "## Question\nWhat next?\n",
+		filepath.Join(activeMap, "index.json"): `{"tickets":[` +
+			`{"id":"01","file":"01-frontier.md","title":"","type":"research","status":"open"},` +
+			`{"id":"02","file":"02-titled.md","title":"Custom title","type":"research","status":"open"}` +
+			`]}`,
+	}
+	tasksDir := filepath.Join(storageDir, "tasks")
+	d := dashboardTestDeps(t, nil, nil)
+	withWayfinderMaps(t, d, storageDir, files)
+	cfg := &config.Config{}
+	groups := func() ([]repogroup.Group, error) {
+		return []repogroup.Group{{
+			DefPath:     tasksDir,
+			StorageDir:  storageDir,
+			RepoKey:     "repo-map-title-fallback",
+			ProjectName: "pop",
+			Rep:         &repogroup.Checkout{ProjectPath: "/repo/checkout"},
+		}}, nil
+	}
+	rows, err := wayfinder.NewMapKind(d.MapKindDeps(cfg, groups)).Load()
+	if err != nil {
+		t.Fatalf("map kind Load: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("loaded %d map containers, want 1", len(rows))
+	}
+
+	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: rows})
+	m.width, m.height = 120, 24
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	got := updated.(QueueDashboard)
+	view := got.View().Content
+
+	var line01, line02 string
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, " 01 ") {
+			line01 = line
+		}
+		if strings.Contains(line, " 02 ") {
+			line02 = line
+		}
+	}
+	if !strings.Contains(line01, "01-frontier") {
+		t.Fatalf("empty manifest title should render the NN-slug fallback in TITLE:\n%q\nfull view:\n%s", line01, view)
+	}
+	if !strings.Contains(line02, "Custom title") {
+		t.Fatalf("manifest title should render unchanged in TITLE:\n%q\nfull view:\n%s", line02, view)
+	}
+}
+
 func TestDashboardMapDetailViewVimNavigation(t *testing.T) {
 	m, _ := newMapDetailDashboard(t)
 	got := openMapDetail(t, m)

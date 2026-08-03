@@ -325,7 +325,7 @@ func itemsFor(m Map) []work.Item {
 		}
 		items = append(items, work.Item{
 			ID:        t.ID,
-			Title:     t.Title,
+			Title:     ticketLinkLabel(t),
 			Type:      string(t.Type),
 			Status:    string(t.Status),
 			Blocked:   blocked,
