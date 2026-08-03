@@ -12,8 +12,10 @@ marker is a byte-verbatim copy of upstream engineering/wayfinder/SKILL.md body a
 the pinned ref above. Pop inlines rather than delegating to Matt's skills, per
 ADR-0009 (skills are embedded in the binary and ship to machines without them
 installed). Pop-authored frontmatter is kept (name `wayfinder`, pop description,
-`disable-model-invocation`: wayfinding is a manual-only session the user opens
-with `/wayfinder`, never something the model starts on its own). Pop's
+`disable-model-invocation`): **human-opened**: wayfinding is a manual-only
+session the user opens with `/wayfinder`, never something the model starts on
+its own — a huge chunk of work gets charted only when a human decides it's
+time. Pop's
 Work-store seam and its irreducible invocation deltas live below the marker
 (ADR-0136, ADR-0169). Upstream already routes the map, its tickets, blocking,
 claiming, resolution, and the frontier through the tracker doc's "Wayfinding

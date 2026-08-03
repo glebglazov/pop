@@ -1,8 +1,19 @@
 ---
 name: grill-with-map
 description: Wayfinding grilling session for one Decision ticket on a Map — interviews the human to a settled answer and writes only into the Map's own directory (ADR drafts, glossary-op drafts, prototypes), never into the repository and never a commit. Use when resolving a grilling ticket on a wayfinder Map.
-disable-model-invocation: true
 ---
+
+<!--
+No upstream base: this skill is pop-original, composing batch-grill-me's
+interview primitive with the wayfinding answer discipline (Map-directory-only
+writes, no commit). Agent-loaded: it is the skill a wayfinding ticket loads to
+resolve itself, so the agent working that ticket must be able to invoke it
+directly — gating it behind a human "open" step would force every grilling
+ticket through a hand-rolled workaround just to start the interview. The
+manual gate stays on the sessions that decide a map (or its handoff) is done —
+`wayfinder` and the handoff skills `to-spec`/`to-tasks` — not on the per-ticket
+grilling session itself.
+-->
 
 # Grill with a Map
 

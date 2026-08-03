@@ -18,8 +18,10 @@ skill — the same upstream primitive, installed alongside this one by the same
 component — and the overlay below composes over it rather than restating it, so
 one copy of the interview rules serves both this skill and the wayfinding
 variant. domain-modeling's `disable-model-invocation` counterpart is kept:
-grilling is a manual-only session the user opens with `/grill-with-docs`, never
-something the model starts on its own. Pop's parallel-safety additions — the
+**human-opened**, because this session is where a decision is committed to
+`CONTEXT.md`/`docs/adr/` — grilling is a manual-only session the user opens
+with `/grill-with-docs`, never something the model starts on its own. Pop's
+parallel-safety additions — the
 single-writer override, grill-consolidate, and the commit-on-close discipline —
 live below the marker. To review upstream drift, diff the region between this
 header and the marker against domain-modeling@<newref>.

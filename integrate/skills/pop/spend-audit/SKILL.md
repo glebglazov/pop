@@ -4,6 +4,15 @@ description: Audit drain spend on a task set — rank runs by turns and peak inp
 disable-model-invocation: true
 ---
 
+<!--
+No upstream base: this skill is pop-original, auditing pop's own captured run
+store for a drain that looked expensive. Human-opened: naming the waste bucket
+and choosing the remedy are judgment calls for the human running the audit —
+the skill "walks the procedure; it does not let the model start an audit on
+its own" (see below) — so it must stay something a person opens against a
+specific drain, never something triggered against every task set.
+-->
+
 # Spend audit
 
 A spend audit answers one question: **why did this drain cost so much, and what do we change?**

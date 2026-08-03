@@ -12,7 +12,12 @@ marker is a byte-verbatim copy of upstream engineering/to-tickets/SKILL.md body
 at the pinned ref above. Pop inlines rather than delegating to Matt's skills, per
 ADR-0009 (skills are embedded in the binary and ship to machines without them
 installed). Pop-authored frontmatter is kept (name `to-tasks`, pop description,
-`disable-model-invocation`: to-tasks is a manual-only planning skill). Pop's
+`disable-model-invocation`): **human-opened, deliberately**. `to-tasks` is one
+of the two handoff skills (with `to-spec`) that end a wayfinding map — breaking
+it into the tasks a map hands off to — and handoff is the moment a human judges
+the map done. Making either handoff skill model-loadable would let an agent end
+a map on its own, so the flag stays regardless of how agent-loadable the rest
+of the map's skills become. Pop's
 Work-store seam, quiz negation, invocation arguments, and the wayfinder-map
 source live below the marker (ADR-0136, ADR-0169). To review upstream drift,
 diff the region between this header and the marker against

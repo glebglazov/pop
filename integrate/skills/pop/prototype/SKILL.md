@@ -9,8 +9,11 @@ base: mattpocock/skills engineering/prototype@9603c1cc8118d08bc1b3bf34cf714f6217
 This file is a verbatim copy of upstream engineering/prototype/SKILL.md at the
 pinned ref above. Pop inlines rather than delegating to Matt's skills, per
 ADR-0009 (skills are embedded in the binary and ship to machines without them
-installed). There is no POP OVERLAY region. To review upstream drift, diff
-against engineering/prototype@<newref>.
+installed). There is no POP OVERLAY region. Agent-loaded: upstream ships it
+with no `disable-model-invocation` flag and pop keeps it that way — a
+throwaway prototype is disposable and easy to point at, so there's no
+manual-only reason to gate an agent from reaching for it mid-task. To review
+upstream drift, diff against engineering/prototype@<newref>.
 -->
 
 # Prototype

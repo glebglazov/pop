@@ -13,7 +13,8 @@ body at the pinned ref above. Pop inlines rather than delegating to Matt's
 skills, per ADR-0009 (skills are embedded in the binary and ship to machines
 without them installed). The name is kept upstream-verbatim — pop honors the
 flow's origin rather than renaming it (ADR-0141) — with a pop description and
-`disable-model-invocation` (this is a manual-only setup session). Pop's
+`disable-model-invocation`: **human-opened**, this is a manual-only setup
+session run once, deliberately, before first use of the planning skills. Pop's
 Work-store seam and its trims to upstream's tracker/triage/scaffolding steps
 live below the marker (ADR-0136, ADR-0141, ADR-0169). To review upstream
 drift, diff the region between this header and the marker against

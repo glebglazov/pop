@@ -9,8 +9,11 @@ base: mattpocock/skills engineering/research@9603c1cc8118d08bc1b3bf34cf714f62178
 This file is a verbatim copy of upstream engineering/research/SKILL.md at the
 pinned ref above. Pop inlines rather than delegating to Matt's skills, per
 ADR-0009 (skills are embedded in the binary and ship to machines without them
-installed). There is no POP OVERLAY region. To review upstream drift, diff
-against engineering/research@<newref>.
+installed). There is no POP OVERLAY region. Agent-loaded: upstream ships it
+with no `disable-model-invocation` flag and pop keeps it that way — it reads
+primary sources and writes one findings file, nothing durable enough to need a
+human to open it by hand. To review upstream drift, diff against
+engineering/research@<newref>.
 -->
 
 Spin up a **background agent** to do the research, so you keep working while it reads.

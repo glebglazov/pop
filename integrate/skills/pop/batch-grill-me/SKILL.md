@@ -1,7 +1,6 @@
 ---
 name: batch-grill-me
 description: Interview the user relentlessly about a plan or design until you reach a shared understanding — map the design tree, ask the whole settled frontier one round at a time, and find every fact yourself. Reads the project glossary as input and writes nothing. Use when a plan needs stress-testing without anything on disk being touched.
-disable-model-invocation: true
 ---
 
 <!--
@@ -13,8 +12,13 @@ ref above — the interview primitive on its own: design tree, frontier, rounds,
 find-facts-yourself. Pop inlines it rather than delegating to
 `/batch-grill-me`, per ADR-0009 (skills are embedded in the binary and ship to
 machines without Matt's skills installed). Upstream's `disable-model-invocation`
-frontmatter is kept: grilling is a manual-only session the user opens, never
-something the model starts on its own.
+frontmatter is dropped here: **agent-loaded**. This is the interview primitive
+alone, and pop's `grill-with-map` composes over it for every wayfinding
+ticket — a wayfinding session must be able to load both without a human
+re-opening each one by hand, or every grilling ticket needs a manual
+workaround just to start. The manual gate belongs to the sessions that commit
+decisions to the repo (`grill-with-docs`, `wayfinder`, and the handoff skills
+that close a map), not to the shared interview step underneath them.
 
 **The pinned ref is in-progress and unpublished upstream.** Upstream's shipped
 grilling skills are explicitly one-question-at-a-time, so the batch variant

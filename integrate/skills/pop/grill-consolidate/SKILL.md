@@ -4,6 +4,16 @@ description: Fold accumulated glossary fragments (from `.grill-context/`, plus a
 disable-model-invocation: true
 ---
 
+<!--
+No upstream base: this skill is pop-original, the single-writer maintenance
+pass over the artifacts `grill-with-docs` produces under parallel use (glossary
+fragment folding, ADR resequencing, superseded-ADR stubbing). Human-opened: it
+mutates `CONTEXT.md` and `docs/adr/` across every accumulated fragment at once
+and must never run speculatively, automatically, or in parallel with another
+consolidation pass — see "This is a single-writer operation" below. The gate
+stays on the human who decides it's time to consolidate.
+-->
+
 # Grill Consolidate
 
 Use this skill for the single-writer maintenance pass over the artifacts `grill-with-docs` produces under parallel use:
