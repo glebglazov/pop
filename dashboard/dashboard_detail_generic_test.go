@@ -69,7 +69,7 @@ func genericDetailRow() DashboardRow {
 }
 
 func genericDetailDashboard(kind work.Kind) QueueDashboard {
-	d := &drain.Deps{Kinds: func(*config.Config) []work.Kind { return []work.Kind{kind} }}
+	d := &drain.Deps{Kinds: func(*drain.Deps, *config.Config) []work.Kind { return []work.Kind{kind} }}
 	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{genericDetailRow()}})
 	m.width, m.height = 120, 24
 	return m
@@ -107,7 +107,7 @@ func TestDetailSectionsRenderAboveTheItemList(t *testing.T) {
 func TestDetailWithSectionsClampsToBodyHeight(t *testing.T) {
 	row := genericDetailRow()
 	row.DetailSections = []work.Section{{Title: "Destination", Body: strings.Repeat("a long thought\n", 30)}}
-	d := &drain.Deps{Kinds: func(*config.Config) []work.Kind { return []work.Kind{&itemVerbKind{}} }}
+	d := &drain.Deps{Kinds: func(*drain.Deps, *config.Config) []work.Kind { return []work.Kind{&itemVerbKind{}} }}
 	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{row}})
 	m.width, m.height = 120, 12
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})

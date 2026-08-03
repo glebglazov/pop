@@ -62,10 +62,10 @@ func routineRows() []work.Container {
 
 func testDeps() *drain.Deps {
 	return &drain.Deps{
-		Kinds: func(*config.Config) []work.Kind {
+		Kinds: func(*drain.Deps, *config.Config) []work.Kind {
 			return []work.Kind{&pageKind{id: ref.KindTaskSet, containers: setRows(), columns: []string{"PROJECT", "TASK SET", "STATUS", "WORKTREE", ""}, noun: "task set"}}
 		},
-		RoutineKinds: func(*config.Config) []work.Kind {
+		RoutineKinds: func(*drain.Deps, *config.Config) []work.Kind {
 			return []work.Kind{&pageKind{id: ref.KindRoutine, containers: routineRows(), columns: []string{"ROUTINE", "DIRECTORY", "SCHEDULE", "LAST RUN", "STATUS"}, noun: "routine"}}
 		},
 	}

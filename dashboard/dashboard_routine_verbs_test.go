@@ -94,7 +94,7 @@ func TestRoutineVerbsComeFromTheKindAndDispatchToIt(t *testing.T) {
 // hang off the kind rather than off the page.
 func TestRoutineVerbBehavesTheSameOnEitherPage(t *testing.T) {
 	container := firedRoutineContainer()
-	kinds := func(*config.Config) []work.Kind {
+	kinds := func(*drain.Deps, *config.Config) []work.Kind {
 		return []work.Kind{&fixedRoutineKind{Kind: routine.NewKind(nil), containers: []work.Container{container}}}
 	}
 	d := &drain.Deps{Kinds: kinds, RoutineKinds: kinds}
@@ -194,7 +194,7 @@ func TestKindVerbOutcomesAreCarriedOutGenerically(t *testing.T) {
 
 	open := func(t *testing.T, k *outcomeKind) (QueueDashboard, *string) {
 		t.Helper()
-		kinds := func(*config.Config) []work.Kind { return []work.Kind{k} }
+		kinds := func(*drain.Deps, *config.Config) []work.Kind { return []work.Kind{k} }
 		d := &drain.Deps{Kinds: kinds, RoutineKinds: kinds, Tmux: &tmuxtest.Fake{Inside: true}}
 		m := openPage(t, d, PageRoutines)
 		copied := new(string)

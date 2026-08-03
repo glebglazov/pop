@@ -75,6 +75,11 @@ type StatusSnapshot struct {
 
 // BuildStatus derives queue status from on-disk lock/state truth.
 func BuildStatus(d *Deps, cfg *config.Config) (StatusSnapshot, error) {
+	// A status build is one load, and the snapshot it returns is read further
+	// (BuildRunView resolves a repository identity per blocked item off
+	// snap.Tasks): memoize the git seam here so the whole derivation pays one fork
+	// per checkout per question, and hand the memoized deps on with the snapshot.
+	d = d.WithGitMemo()
 	decisions, err := Scan(d, cfg)
 	if err != nil {
 		return StatusSnapshot{}, err

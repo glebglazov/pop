@@ -142,6 +142,12 @@ func runWorkStatus(cmd *cobra.Command, args []string) error {
 	d := cmdLayerDeps().queueDeps()
 	d.LoadConfig = workConfigLoad
 	d.IncludeDone = workStatusIncludeDone
+	// The verb is one load across two builders — the status snapshot and the two
+	// tables — so the git memo is derived once here and threaded through both.
+	// Each builder memoizes for itself as well; nesting is free, and what it buys
+	// is that the common dir the tables resolve is the fork the snapshot already
+	// paid for.
+	d = d.WithGitMemo()
 	snap, err := workBuildStatus(d, cfg)
 	if err != nil {
 		return err

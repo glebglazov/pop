@@ -116,7 +116,7 @@ func tick(d *drain.Deps, out io.Writer, runOut *runOutputState) {
 // precedence-correct, routine being last in the closed enum, and the special case
 // dies the moment the read list carries it.
 func advancers(d *drain.Deps, cfg *config.Config) []work.Advancer {
-	return append(work.Advancers(d.WorkKinds(cfg)), d.RoutineAdvancer(cfg))
+	return append(work.Advancers(d.AdvanceKinds(cfg)), d.RoutineAdvancer(cfg))
 }
 
 // kindPass is one kind's half of a supervisor tick: the advancer, the kind it

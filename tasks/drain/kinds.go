@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/repogroup"
 	"github.com/glebglazov/pop/routine"
@@ -27,14 +28,75 @@ func (d *Deps) WorkKinds(cfg *config.Config) []work.Kind {
 	if d == nil {
 		d = DefaultDeps()
 	}
+	// One wiring list is one load: every kind on it reads through a git seam that
+	// memoizes the load's repeated questions (see AdvanceKinds for the wiring that
+	// deliberately does not). The memoized deps are handed to the wiring list rather
+	// than captured by it, so an override list builds its kinds over this load's
+	// seam too.
+	d = d.WithGitMemo()
 	if d.Kinds != nil {
-		return d.Kinds(cfg)
+		return d.Kinds(d, cfg)
 	}
+	return d.kinds(cfg)
+}
+
+// AdvanceKinds is the same wiring list without the per-load git memo: the
+// supervisor's dispatch phase creates worktrees and moves branches between
+// asking a kind for candidates and telling it to advance, so a memo spanning the
+// tick would answer a question about the repository as it was before its own
+// writes. The read it does pay for — each kind's scan — memoizes inside itself.
+func (d *Deps) AdvanceKinds(cfg *config.Config) []work.Kind {
+	if d == nil {
+		d = DefaultDeps()
+	}
+	if d.Kinds != nil {
+		return d.Kinds(d, cfg)
+	}
+	return d.kinds(cfg)
+}
+
+// kinds builds the adapters over whatever git seam the receiver carries.
+func (d *Deps) kinds(cfg *config.Config) []work.Kind {
 	groups := d.RepoGroups(cfg)
 	return []work.Kind{
 		d.TaskSetKind(cfg, groups),
 		wayfinder.NewMapKind(d.MapKindDeps(cfg, groups)),
 	}
+}
+
+// WithGitMemo returns a shallow copy of the deps whose git seams memoize the
+// idempotent reads of one load (deps.MemoGit), leaving the caller's own deps
+// untouched. Task and Project deps share one memo when they share one seam, so
+// the common dir a project resolution and a task resolution both ask for is
+// forked once rather than twice.
+func (d *Deps) WithGitMemo() *Deps {
+	if d == nil {
+		return nil
+	}
+	td, pd := d.Tasks, d.Project
+	tasksGit := td != nil && td.Git != nil
+	projectGit := pd != nil && pd.Git != nil
+	if !tasksGit && !projectGit {
+		return d
+	}
+	out := *d
+	var shared *deps.MemoGit
+	if tasksGit {
+		shared = deps.NewMemoGit(td.Git)
+		cp := *td
+		cp.Git = shared
+		out.Tasks = &cp
+	}
+	if projectGit {
+		memo := shared
+		if memo == nil || memo.Inner() != pd.Git {
+			memo = deps.NewMemoGit(pd.Git)
+		}
+		cp := *pd
+		cp.Git = memo
+		out.Project = &cp
+	}
+	return &out
 }
 
 // SetKindDeps projects queue's dependencies onto the Task-set kind's, forwarding
@@ -106,8 +168,11 @@ func (d *Deps) RoutinePageKinds(cfg *config.Config) []work.Kind {
 	if d == nil {
 		d = DefaultDeps()
 	}
+	// A read surface's wiring list is one load, as on page A: the reader's own
+	// checkout and every routine's bound directory ask the same few questions.
+	d = d.WithGitMemo()
 	if d.RoutineKinds != nil {
-		return d.RoutineKinds(cfg)
+		return d.RoutineKinds(d, cfg)
 	}
 	kd := d.RoutineKindDeps(cfg)
 	// A read surface narrates nothing: the advance half's writer would print into

@@ -53,7 +53,7 @@ func (k *countingKind) ModelSkips() ([]work.ModelSkip, error)        { return k.
 // reflected without a rebuild.
 func TestActionMenuIsBuiltOnOpenFromTheKind(t *testing.T) {
 	kind := &countingKind{}
-	d := &drain.Deps{Kinds: func(*config.Config) []work.Kind { return []work.Kind{kind} }}
+	d := &drain.Deps{Kinds: func(*drain.Deps, *config.Config) []work.Kind { return []work.Kind{kind} }}
 	row := DashboardRow{Project: "pop", CursorKey: "pop\x00set", Kind: ref.KindTaskSet, ID: "set"}
 	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{row}})
 	m.width, m.height = 120, 24

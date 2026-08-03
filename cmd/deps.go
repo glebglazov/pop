@@ -182,7 +182,7 @@ func (d *Deps) queueDeps() *drain.Deps {
 		}
 	}
 	if qd.Kinds == nil {
-		qd.Kinds = workKinds(qd)
+		qd.Kinds = workKinds()
 	}
 	return qd
 }
@@ -193,8 +193,11 @@ func (d *Deps) queueDeps() *drain.Deps {
 // something has to name them, and an explicit list here is the accepted cost of
 // keeping the seam free of a per-kind import (ADR-0173). Adding a kind is one
 // entry here plus its adapter.
-func workKinds(qd *drain.Deps) func(cfg *config.Config) []work.Kind {
-	return func(cfg *config.Config) []work.Kind {
+// The list is a function of the deps it is handed, not of the deps that
+// installed it: a load hands it a git seam memoized for that load (ADR-0060's
+// fork budget), and a captured pointer would read past it.
+func workKinds() func(qd *drain.Deps, cfg *config.Config) []work.Kind {
+	return func(qd *drain.Deps, cfg *config.Config) []work.Kind {
 		// One repository-group resolution, shared by every kind of this build.
 		groups := qd.RepoGroups(cfg)
 		return []work.Kind{

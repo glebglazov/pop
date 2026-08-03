@@ -16,8 +16,13 @@ type Git interface {
 // RealGit implements Git using actual git commands
 type RealGit struct{}
 
+// realGit is the one process-wide instance. RealGit is stateless, so sharing it
+// costs nothing and buys a fact the per-load memo reads: two dependency sets
+// wired with the real git are the same seam, and one memo can serve both.
+var realGit = &RealGit{}
+
 func NewRealGit() *RealGit {
-	return &RealGit{}
+	return realGit
 }
 
 func (g *RealGit) Command(args ...string) (string, error) {

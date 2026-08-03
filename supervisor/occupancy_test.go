@@ -234,6 +234,6 @@ func supervisorDepsOver(td *tasks.Deps, kinds ...work.Kind) *drain.Deps {
 		Tasks:      td,
 		Project:    project.DefaultDeps(),
 		LoadConfig: func(string) (*config.Config, error) { return cfg, nil },
-		Kinds:      func(*config.Config) []work.Kind { return kinds },
+		Kinds:      func(*drain.Deps, *config.Config) []work.Kind { return kinds },
 	}
 }

@@ -101,6 +101,6 @@ func supervisorTestDeps(t *testing.T, kind work.Kind) *drain.Deps {
 		Tasks:      queuetest.TasksDeps(t, true),
 		Project:    project.DefaultDeps(),
 		LoadConfig: func(string) (*config.Config, error) { return cfg, nil },
-		Kinds:      func(*config.Config) []work.Kind { return []work.Kind{kind} },
+		Kinds:      func(*drain.Deps, *config.Config) []work.Kind { return []work.Kind{kind} },
 	}
 }

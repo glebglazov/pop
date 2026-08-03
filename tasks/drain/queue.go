@@ -106,12 +106,12 @@ type Deps struct {
 	// Kinds overrides the Work-kind wiring list the dashboard's snapshot builds
 	// through (WorkKinds). Left nil it is the real Task-set and Map adapters over
 	// the seams above; a test sets it to hand the builder kinds of its own.
-	Kinds func(cfg *config.Config) []work.Kind
+	Kinds func(d *Deps, cfg *config.Config) []work.Kind
 	// RoutineKinds is the same override for the dashboard's Routine page
 	// (RoutinePageKinds). The two pages have separate wiring lists because they are
 	// separate pages: the supervisor and `pop work status` read Kinds, and neither
 	// wants a Routine folded into it.
-	RoutineKinds func(cfg *config.Config) []work.Kind
+	RoutineKinds func(d *Deps, cfg *config.Config) []work.Kind
 }
 
 type runtimeLock interface {
@@ -429,14 +429,9 @@ func Scan(d *Deps, cfg *config.Config) ([]Decision, error) {
 	// forks no git (ADR-0060), but the per-group decision still forks for the few
 	// task-storage repos (worktree-directive probes, the spawn session name); wrap
 	// a shallow copy of the deps so those repeated reads serve from cache and the
-	// caller's git is untouched.
-	if d.Tasks != nil && d.Tasks.Git != nil {
-		scanDeps := *d
-		tasksDeps := *d.Tasks
-		tasksDeps.Git = newScanGitCache(d.Tasks.Git)
-		scanDeps.Tasks = &tasksDeps
-		d = &scanDeps
-	}
+	// caller's git is untouched. A scan is a point-in-time snapshot, so the memo's
+	// scope is this call.
+	d = d.WithGitMemo()
 
 	// Partition config projects against on-disk Task-storage markers with the
 	// same fork-free path-nesting match the dashboard uses (ADR-0060). A project

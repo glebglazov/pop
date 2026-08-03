@@ -58,7 +58,7 @@ func routinePageContainers() []work.Container {
 }
 
 func routinePageDeps(containers []work.Container) *drain.Deps {
-	return &drain.Deps{RoutineKinds: func(*config.Config) []work.Kind {
+	return &drain.Deps{RoutineKinds: func(*drain.Deps, *config.Config) []work.Kind {
 		return []work.Kind{&fixedRoutineKind{Kind: routine.NewKind(nil), containers: containers}}
 	}}
 }
@@ -176,7 +176,7 @@ func (k *declaredColumnsKind) StatusCell(c work.Container) []work.StatusSegment 
 
 func TestWorkPageHeaderComesFromItsPrimaryKind(t *testing.T) {
 	headers := []string{"WHERE", "WHAT", "HOW", "WHITHER", ""}
-	d := &drain.Deps{Kinds: func(*config.Config) []work.Kind {
+	d := &drain.Deps{Kinds: func(*drain.Deps, *config.Config) []work.Kind {
 		return []work.Kind{&declaredColumnsKind{columns: headers}}
 	}}
 	snap := DashboardSnapshot{Containers: []DashboardRow{
