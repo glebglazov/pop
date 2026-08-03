@@ -15,6 +15,7 @@ import (
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/release"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/binding"
 )
 
 // readOnlyDoctorDeps wires a doctorDeps over a fakeFS with injectable core
@@ -1670,5 +1671,69 @@ func TestDoctorStatusAggregation(t *testing.T) {
 				t.Fatalf("reason = %q, want %q", gotReason, tt.wantReason)
 			}
 		})
+	}
+}
+
+// TestDoctorManagedWorktreeRootMoveGatedNamesOffenders: a gated root move is the
+// one thing in this family a human has to act on, so it is reported as Degraded
+// with each blocking worktree named.
+func TestDoctorManagedWorktreeRootMoveGatedNamesOffenders(t *testing.T) {
+	t.Parallel()
+	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
+	d.pendingWorktreeRootMove = func() (binding.WorktreeRootMove, error) {
+		return binding.WorktreeRootMove{
+			From:     "/data/pop/queue/worktrees",
+			To:       "/data/pop/work/worktrees",
+			Pending:  []string{"repo-abc123/set-one"},
+			Refusals: []string{"repo-abc123/set-one: uncommitted changes in /data/pop/queue/worktrees/repo-abc123/set-one"},
+		}, nil
+	}
+
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
+	check := taskCheck(t, report, "managed worktree root")
+	if check.status != doctorStatusPartial {
+		t.Fatalf("managed worktree root status = %s, want %s", check.status, doctorStatusPartial)
+	}
+	if !strings.Contains(check.detail, "repo-abc123/set-one") || !strings.Contains(check.detail, "uncommitted changes") {
+		t.Fatalf("detail should name the blocking worktree: %q", check.detail)
+	}
+	if check.nextAction == "" {
+		t.Fatal("a gated move must carry a next action")
+	}
+}
+
+// TestDoctorManagedWorktreeRootMovePendingIsReportOnly: a move nothing blocks
+// happens by itself on the next binding touch, so it never drives readiness down.
+func TestDoctorManagedWorktreeRootMovePendingIsReportOnly(t *testing.T) {
+	t.Parallel()
+	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
+	d.pendingWorktreeRootMove = func() (binding.WorktreeRootMove, error) {
+		return binding.WorktreeRootMove{
+			From:    "/data/pop/queue/worktrees",
+			To:      "/data/pop/work/worktrees",
+			Pending: []string{"repo-abc123/set-one"},
+		}, nil
+	}
+
+	report, err := buildDoctorReport(d)
+	if err != nil {
+		t.Fatalf("buildDoctorReport: %v", err)
+	}
+	family, ok := familyByCommand(report, "pop tasks")
+	if !ok {
+		t.Fatalf("missing pop tasks family")
+	}
+	if family.status != doctorStatusOK {
+		t.Fatalf("task status = %s, want %s (a pending move must not block)", family.status, doctorStatusOK)
+	}
+	check := taskCheck(t, report, "managed worktree root")
+	if check.status != doctorStatusNA {
+		t.Fatalf("managed worktree root status = %s, want %s", check.status, doctorStatusNA)
+	}
+	if !strings.Contains(check.detail, "/data/pop/work/worktrees") {
+		t.Fatalf("detail should name the destination root: %q", check.detail)
 	}
 }

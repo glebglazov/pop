@@ -1876,7 +1876,7 @@ func TestDashboardLaunchDrainUnboundUsesRepresentativeCheckout(t *testing.T) {
 	}
 	wantRepo, _ := filepath.EvalSymlinks(repo)
 	gotRuntime, _ := filepath.EvalSymlinks(result.RuntimePath)
-	if gotRuntime != wantRepo || strings.Contains(result.RuntimePath, filepath.Join("pop", "queue", "worktrees")) {
+	if gotRuntime != wantRepo || strings.Contains(result.RuntimePath, filepath.Join("pop", "work", "worktrees")) {
 		t.Fatalf("runtime = %q, want representative checkout %q with no provisioned worktree", result.RuntimePath, repo)
 	}
 	cmd, ok := queuetest.ExtractSpawnCommand(rt)

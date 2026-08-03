@@ -15,6 +15,7 @@ import (
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/release"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/wayfinder"
 	"github.com/spf13/cobra"
 )
@@ -57,6 +58,7 @@ type doctorDeps struct {
 	legacyTaskSets            func() ([]string, error)
 	orphanedTaskStorage       func() ([]tasks.OrphanedStorage, error)
 	legacyLayoutStorage       func() ([]string, error)
+	pendingWorktreeRootMove   func() (binding.WorktreeRootMove, error)
 	updateCheck               func() release.Result
 	agentCatalog              func() []tasks.AgentCatalogRow
 	probeAgentAuthentication  func(preset string) tasks.AgentAuthenticationProbe
@@ -121,6 +123,9 @@ func defaultDoctorDeps() *doctorDeps {
 		},
 		legacyLayoutStorage: func() ([]string, error) {
 			return tasks.LegacyLayoutStorageDirs(cmdLayerDeps().tasksDeps())
+		},
+		pendingWorktreeRootMove: func() (binding.WorktreeRootMove, error) {
+			return binding.PendingWorktreeRootMove(cmdLayerDeps().tasksDeps())
 		},
 		updateCheck: func() release.Result { return release.Check(buildVersion()) },
 	}
@@ -472,6 +477,7 @@ func doctorTaskChecks(d *doctorDeps) []doctorCheck {
 	checks := []doctorCheck{doctorTaskStorageWritableCheck(d)}
 	checks = append(checks, doctorTaskLegacyCheck(d))
 	checks = append(checks, doctorTaskLegacyLayoutCheck(d))
+	checks = append(checks, doctorManagedWorktreeRootCheck(d))
 	checks = append(checks, doctorTaskOrphanCheck(d))
 	checks = append(checks, doctorTaskAgentAuthenticationChecks(d)...)
 	return checks
@@ -538,6 +544,41 @@ func doctorTaskLegacyLayoutCheck(d *doctorDeps) doctorCheck {
 			status: doctorStatusOK,
 			detail: "no pre-rename task storage layout present",
 		}
+	}
+}
+
+// doctorManagedWorktreeRootCheck reports the managed-worktree root move: the
+// pop-provisioned worktrees still under the pre-cut `queue/worktrees` root, and
+// whether anything blocks relocating them. The move runs by itself on the next
+// binding touch, so a merely-pending move is informational (N/A) — but a *gated*
+// move is the one thing here a human has to act on, so a refusal is reported as
+// Degraded with the offending worktrees named. Doctor only looks: the inspection
+// never moves a directory or rewrites a binding.
+func doctorManagedWorktreeRootCheck(d *doctorDeps) doctorCheck {
+	const label = "managed worktree root"
+	if d.pendingWorktreeRootMove == nil {
+		return doctorCheck{label: label, status: doctorStatusOK, detail: "managed worktrees live under the current root"}
+	}
+	move, err := d.pendingWorktreeRootMove()
+	switch {
+	case err != nil:
+		return doctorCheck{label: label, status: doctorStatusNA, detail: fmt.Sprintf("not assessed: %v", err)}
+	case move.Refused():
+		return doctorCheck{
+			label:      label,
+			status:     doctorStatusPartial,
+			detail:     fmt.Sprintf("move to %s is gated: %s", move.To, strings.Join(move.Refusals, "; ")),
+			nextAction: "commit, discard or finish the work named above",
+		}
+	case len(move.Pending) > 0:
+		return doctorCheck{
+			label:      label,
+			status:     doctorStatusNA,
+			detail:     fmt.Sprintf("%d managed worktree(s) still under %s, moved to %s on the next binding touch: %s", len(move.Pending), move.From, move.To, strings.Join(move.Pending, ", ")),
+			nextAction: "pop tasks status",
+		}
+	default:
+		return doctorCheck{label: label, status: doctorStatusOK, detail: "managed worktrees live under the current root"}
 	}
 }
 

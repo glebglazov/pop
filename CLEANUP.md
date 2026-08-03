@@ -96,6 +96,7 @@ message naming the new status (loud-failure preference). Current embedded templa
 | `wayfinder-archive.json` → registry `archived` bit | `foldLegacyArchiveState` in `wayfinder/archive.go` (+ `archive_test.go`) | Auto-runs per repository on the first Map scan that finds the side-file: registers each id it names and sets the registry's `archived` bit, then deletes the file. Removing it also deletes `legacyArchiveState` and the `legacyArchiveStateFile` constant — after removal a leftover file is ignored and its Maps come back visible. Sign-off check: item 6 below. |
 | Tombstoned `sets` table — drop it | migration list in `store/store.go` (#8/#9 create it, #28 copies it out) | Read-dead and write-dead from #28, which copies every row onto the **Work container registry** (`work_containers` + `task_set_registrations`) and never dual-writes. Kept only so a pre-cut binary still boots: its migrate loop is bounded by its own migration count, so the newer `user_version` is a no-op and it reads its own frozen rows. Dropping it is a `DROP TABLE sets` appended as a new migration (never an edit to a shipped one) plus deleting `legacySetRows` in `store/sets_test.go` and the two `sets`-seeding test helpers. After the drop, rolling back to a pre-cut binary loses every registration — so this row goes last, once no tester needs the rollback. Sign-off check: item 7 below. |
 | Pre-cut supervisor lock path check — **delete one release after the cut** | `LegacySupervisorLockPath` + `refuseIfLegacySupervisorLive` in `supervisor/supervisor_lock.go` (+ `TestAcquireSupervisorLockRefusesLivePreCutDaemon`) | The supervisor lock moved from `<data>/pop/queue/supervisor.lock` to `<data>/pop/work/supervisor.lock` with the `pop queue` → `pop work` cut. Unlike the **Queue journal** (a view rebuilt from SQLite), a running pre-cut daemon holds the old path and nothing else, so a post-cut binary reading only its own path would double-supervise. Startup therefore reads both and refuses if either is live, naming the file held. One release later no pre-cut daemon can still be running: delete the legacy path helper, its check and its test, leaving the single-path acquire. Nothing migrates or is deleted on disk — the old file belongs to its owner. Sign-off check: item 8 below. |
+| Managed-worktree root move `queue/worktrees` → `work/worktrees` | `tasks/binding/worktree_root_move.go` (+ `worktree_root_move_test.go`), `LegacyManagedWorktreesRoot`/`ManagedWorktreeRoots` in `tasks/binding/binding.go`, `store.RewriteBindingRuntimePathPrefix`, `doctorManagedWorktreeRootCheck` in `cmd/doctor.go`, `drain.LegacyQueueDataDir` | Auto-runs on the first binding read or write that finds a `queue/worktrees` directory: relocates each managed worktree, repoints every `bindings.runtime_path` in one transaction, runs `git worktree repair` per repository, then deletes the emptied legacy root. **Gated** — a dirty worktree, a live drain or an occupied destination refuses the whole move and names itself, so removal is only safe once every machine's move has actually run, not merely once the code shipped. Removing it also collapses the two-root reads back to one: `ManagedWorktreeRoots` → `ManagedWorktreesRoot` in `checkoutUnderManagedRoot`, the drain-target picker's exclusion (`pathUnderAny`) and `cmd/project.go`'s `ManagedWorktrees`, plus the doctor check and its seam. Sign-off check: item 9 below. |
 | Legacy `bindings.json` → store migration | `migrateLegacyBindingsFile` (moving to `tasks/binding` in the store-seam refactor; currently `tasks/bindings_store.go:101`) | One-time fold of the retired standalone binding file into the execution-state store (ADR-0055). Every machine that ran a post-ADR-0055 build has migrated; sign-off check: no `<data-dir>/pop/bindings.json` remains. |
 
 ### D2. Internal code aliases (compile-time only, no user impact — remove in a quiet pass)
@@ -179,9 +180,21 @@ Per tester, before removal lands:
    A live `pop-queue` tmux window at upgrade time is expected to be orphaned: drains
    are ephemeral, so close it rather than migrating it.
 
-| Tester | 1 config | 2 [tasks] | 3 storage | 4 re-integrate | 5 scripts | 6 maps | 7 registry | 8 work cut | Signed off |
-|---|---|---|---|---|---|---|---|---|---|
-| _(fill in)_ | | | | | | | | | |
+9. **Managed worktrees moved off `queue/worktrees`** — the move runs on the first
+   binding touch per machine, but it *refuses* rather than half-completing, so a
+   machine can sit un-migrated indefinitely. Run `pop doctor` and confirm the
+   `managed worktree root` check is OK. If it is Degraded it names each worktree
+   holding the move up: commit or discard the uncommitted changes, or let the live
+   drain finish, then run `pop tasks status` and re-check. Verify no
+   `<data-dir>/pop/queue/worktrees/` remains and that `pop tasks status` in each
+   repo still shows every bound set with its worktree — the recorded paths moved
+   with the directories. Removing the fold before this is signed off strands the
+   worktrees: the new binary would classify them as adopted checkouts and never
+   tear them down.
+
+| Tester | 1 config | 2 [tasks] | 3 storage | 4 re-integrate | 5 scripts | 6 maps | 7 registry | 8 work cut | 9 worktree root | Signed off |
+|---|---|---|---|---|---|---|---|---|---|---|
+| _(fill in)_ | | | | | | | | | | |
 
 ## Questions for beta testers (before cleanup)
 

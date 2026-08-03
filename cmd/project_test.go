@@ -1932,7 +1932,7 @@ func managedFS(root string, layout map[string][]string, nonDirs map[string]bool)
 
 func TestDiscoverManagedWorktreesWith_Discovery(t *testing.T) {
 	t.Parallel()
-	root := "/data/pop/queue/worktrees"
+	root := "/data/pop/work/worktrees"
 	layout := map[string][]string{
 		"game_server-a1b2c3d4e5f6": {"2026-07-14-feature", "hotfix"},
 		"tooling-0123456789ab":     {"cleanup"},
@@ -1982,7 +1982,7 @@ func TestDiscoverManagedWorktreesWith_Discovery(t *testing.T) {
 // session name (matching the drain) but preserved in the display name.
 func TestDiscoverManagedWorktreesWith_NameAndSessionDerivation(t *testing.T) {
 	t.Parallel()
-	root := "/data/pop/queue/worktrees"
+	root := "/data/pop/work/worktrees"
 	layout := map[string][]string{
 		"my-cool.repo-abcdef012345": {"wt"},
 	}
@@ -2009,7 +2009,7 @@ func TestDiscoverManagedWorktreesWith_EmptyRoot(t *testing.T) {
 			return nil, os.ErrNotExist
 		},
 	}
-	got := discoverManagedWorktreesWith(fs, "/data/pop/queue/worktrees")
+	got := discoverManagedWorktreesWith(fs, "/data/pop/work/worktrees")
 	if len(got) != 0 {
 		t.Errorf("absent root should yield no entries, got %+v", got)
 	}
@@ -2019,7 +2019,7 @@ func TestDiscoverManagedWorktreesWith_EmptyRoot(t *testing.T) {
 // both skipped — only directories become entries.
 func TestDiscoverManagedWorktreesWith_SkipsNonDirs(t *testing.T) {
 	t.Parallel()
-	root := "/data/pop/queue/worktrees"
+	root := "/data/pop/work/worktrees"
 	layout := map[string][]string{
 		"repo-000000000000": {"realwt", "stray.txt"},
 		"loose.file":        {},

@@ -38,3 +38,11 @@ The picker can show an orphaned managed dir the store no longer tracks, or miss 
 freshly-recorded binding whose dir does not yet exist; both are acceptable because
 the picker's job is to open real directories. The list is scoped to disk, so managed
 worktrees for repos absent from config still appear.
+
+**Amended by the `pop queue` → `pop work` cut:** the root walked is now
+`<dataDir>/work/worktrees/`, and the walk runs once per **managed-worktree root**
+rather than once — a machine whose gated root move has not completed still has
+worktrees under the retired `queue/worktrees`, and a checkout the picker cannot
+open is worse than one extra `ReadDir` of a directory that is usually absent. The
+decision itself — a filesystem walk, no store and no git — is unchanged. See
+ADR-0174 decision 8.

@@ -59,7 +59,7 @@ func SupervisorLockPath(d *tasks.Deps) string {
 // would happily supervise alongside it. AcquireSupervisorLock therefore reads
 // both. Delete this and its caller one release after the cut (CLEANUP.md).
 func LegacySupervisorLockPath(d *tasks.Deps) string {
-	return filepath.Join(drain.QueueDataDir(d), "supervisor.lock")
+	return filepath.Join(drain.LegacyQueueDataDir(d), "supervisor.lock")
 }
 
 // AcquireSupervisorLock acquires the single-instance supervisor lock. A second

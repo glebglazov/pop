@@ -53,7 +53,9 @@ func SetScopedKey(repoKey, setID string) string {
 	return binding.ScopedKey(repoKey, setID)
 }
 
-// repoIdentityFromWorktreePath extracts basename-shortHash from a queue worktree path.
+// repoIdentityFromWorktreePath extracts basename-shortHash from a managed
+// worktree path. It matches on the `worktrees` component rather than the root
+// above it, so it reads a path under either managed-worktree root.
 func repoIdentityFromWorktreePath(path string) string {
 	clean := filepath.Clean(path)
 	parts := strings.Split(clean, string(os.PathSeparator))

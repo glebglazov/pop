@@ -576,7 +576,7 @@ func CreateWorktree(d *Deps, cfg *config.Config, row DashboardRow, baseRef, name
 		return DashboardCreateWorktreeResult{}, err
 	}
 	branch := name
-	path := filepath.Join(QueueDataDir(d.Tasks), "worktrees", repoKey, binding.SafeComponent(name))
+	path := filepath.Join(binding.ManagedWorktreesRoot(d.Tasks), repoKey, binding.SafeComponent(name))
 	if err := d.Tasks.FS.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return DashboardCreateWorktreeResult{}, fmt.Errorf("create worktree parent: %w", err)
 	}
@@ -624,7 +624,13 @@ func DrainTargetEntries(d *Deps, cfg *config.Config, row DashboardRow) ([]DrainE
 	if err != nil {
 		return nil, err
 	}
-	managedRoot := bestEffortCanon(d, binding.ManagedWorktreesRoot(d.Tasks))
+	// Every managed root, not just the current one: a worktree still waiting for
+	// the gated root move is pop-managed too, and offering it here would let a
+	// human adopt a checkout pop is about to relocate.
+	var managedRoots []string
+	for _, root := range binding.ManagedWorktreeRoots(d.Tasks) {
+		managedRoots = append(managedRoots, bestEffortCanon(d, root))
+	}
 
 	var entries []DrainEntry
 	for _, wt := range worktrees {
@@ -632,7 +638,7 @@ func DrainTargetEntries(d *Deps, cfg *config.Config, row DashboardRow) ([]DrainE
 		if hasTrunk && canon == canonTrunk {
 			continue // the trunk is offered as its own option
 		}
-		if PathUnder(canon, managedRoot) {
+		if pathUnderAny(canon, managedRoots) {
 			continue // a pop-managed worktree
 		}
 		if bound[canon] {

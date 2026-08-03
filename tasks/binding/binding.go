@@ -96,23 +96,55 @@ func SetIDFromKey(key string) string {
 type Binding = store.Binding
 
 // ManagedWorktreesRoot returns the directory under which pop-provisioned
-// (managed) worktrees live: <pop data dir>/queue/worktrees. It is the single
-// fork-base layout shared by every explicit provisioner — the Queue, the Drain
-// target picker, and `pop tasks implement --in-worktree` — so a worktree any of
-// them creates lands in the same tree and integration/teardown find it.
+// (managed) worktrees are created: <pop data dir>/work/worktrees. It is the
+// single fork-base layout shared by every explicit provisioner — the Work
+// supervisor, the Drain target picker, and `pop tasks implement --in-worktree` —
+// so a worktree any of them creates lands in the same tree and
+// integration/teardown find it.
+//
+// It names only where a *new* worktree goes. A checkout provisioned before the
+// `pop queue` → `pop work` cut still sits under LegacyManagedWorktreesRoot until
+// MoveManagedWorktreesRoot relocates it, so every predicate asking "is this
+// checkout managed?" reads ManagedWorktreeRoots instead of this one root.
 func ManagedWorktreesRoot(d *tasks.Deps) string {
-	return filepath.Join(filepath.Dir(tasks.TaskStorageRoot(d)), "queue", "worktrees")
+	return filepath.Join(popDataDir(d), "work", "worktrees")
 }
 
-// bindingStore runs the one-time legacy bindings.json migration (a cheap read
-// miss once the file is gone) then returns the shared store handle through the
-// process-cached accessor (ADR-0055, ADR-0118). It is the single funnel every
-// keyed binding accessor goes through, so the migration still fires on any read
-// or write without a whole-table map in front of the store. create decides
+// LegacyManagedWorktreesRoot returns the pre-cut managed-worktree root,
+// <pop data dir>/queue/worktrees. Nothing provisions into it any more; it is
+// read so the gated move can find what is still there and so a checkout waiting
+// to be moved keeps classifying as managed in the meantime.
+func LegacyManagedWorktreesRoot(d *tasks.Deps) string {
+	return filepath.Join(popDataDir(d), "queue", "worktrees")
+}
+
+// ManagedWorktreeRoots returns every root a pop-provisioned worktree can live
+// under, current root first. There are two only while a machine still has
+// worktrees waiting for the gated move; the list collapses to one root the
+// moment MoveManagedWorktreesRoot completes and the legacy root is retired.
+func ManagedWorktreeRoots(d *tasks.Deps) []string {
+	return []string{ManagedWorktreesRoot(d), LegacyManagedWorktreesRoot(d)}
+}
+
+// popDataDir returns pop's base data directory, derived from the Task-storage
+// root so this package never re-implements the XDG/home resolution `tasks` owns.
+func popDataDir(d *tasks.Deps) string {
+	return filepath.Dir(tasks.TaskStorageRoot(d))
+}
+
+// bindingStore runs this module's two read-path folds — the one-time legacy
+// bindings.json migration and the managed-worktree root move, each a cheap stat
+// or read miss once it has happened — then returns the shared store handle
+// through the process-cached accessor (ADR-0055, ADR-0118). It is the single
+// funnel every keyed binding accessor goes through, so a fold still fires on any
+// read or write without a whole-table map in front of the store. create decides
 // whether a missing store is opened: read paths pass false and treat ok=false
 // as "no bindings"; write paths pass true.
 func bindingStore(d *tasks.Deps, create bool) (*store.Store, bool, error) {
 	if err := migrateLegacyBindingsFile(d); err != nil {
+		return nil, false, err
+	}
+	if _, err := MoveManagedWorktreesRoot(d); err != nil {
 		return nil, false, err
 	}
 	return d.Store(create)

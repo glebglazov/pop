@@ -134,3 +134,77 @@ func TestPutBindingIfAbsentConcurrentWritersOneWins(t *testing.T) {
 		}
 	}
 }
+
+// TestRewriteBindingRuntimePathPrefixRepointsOnlyMatchingRows: the storage-layout
+// move repoints every binding under the old root and leaves every other recorded
+// checkout — an adopted one, a sibling directory sharing a name prefix — alone.
+func TestRewriteBindingRuntimePathPrefixRepointsOnlyMatchingRows(t *testing.T) {
+	s := openTestStore(t)
+
+	rows := []Binding{
+		{ScopedKey: "repo\x00set-a", RuntimePath: "/data/pop/queue/worktrees/repo-abc/set-a", Branch: "pop/set-a", Provisioned: true},
+		{ScopedKey: "repo\x00set-b", RuntimePath: "/data/pop/queue/worktrees/repo-abc/set-b", Branch: "pop/set-b", Provisioned: true},
+		{ScopedKey: "repo\x00adopted", RuntimePath: "/home/me/checkouts/feature", Branch: "feature"},
+		// A sibling of the root whose name starts with it: the prefix carries a
+		// separator so this must not match.
+		{ScopedKey: "repo\x00sibling", RuntimePath: "/data/pop/queue/worktrees-old/repo-abc/set-c", Branch: "pop/set-c", Provisioned: true},
+	}
+	for _, b := range rows {
+		if err := s.PutBinding(b); err != nil {
+			t.Fatalf("seed %s: %v", b.ScopedKey, err)
+		}
+	}
+
+	n, err := s.RewriteBindingRuntimePathPrefix("/data/pop/queue/worktrees/", "/data/pop/work/worktrees/")
+	if err != nil {
+		t.Fatalf("RewriteBindingRuntimePathPrefix: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("rewrote %d rows, want 2", n)
+	}
+
+	want := map[string]string{
+		"repo\x00set-a":   "/data/pop/work/worktrees/repo-abc/set-a",
+		"repo\x00set-b":   "/data/pop/work/worktrees/repo-abc/set-b",
+		"repo\x00adopted": "/home/me/checkouts/feature",
+		"repo\x00sibling": "/data/pop/queue/worktrees-old/repo-abc/set-c",
+	}
+	all, err := s.AllBindings()
+	if err != nil {
+		t.Fatalf("AllBindings: %v", err)
+	}
+	for key, path := range want {
+		got, ok := all[key]
+		if !ok {
+			t.Fatalf("binding %q vanished", key)
+		}
+		if got.RuntimePath != path {
+			t.Fatalf("binding %q runtime path = %q, want %q", key, got.RuntimePath, path)
+		}
+	}
+	// The rewrite touches runtime_path and nothing else.
+	if b := all["repo\x00set-a"]; b.Branch != "pop/set-a" || !b.Provisioned {
+		t.Fatalf("rewrite changed more than the path: %+v", b)
+	}
+
+	// Re-running finds nothing left to do.
+	again, err := s.RewriteBindingRuntimePathPrefix("/data/pop/queue/worktrees/", "/data/pop/work/worktrees/")
+	if err != nil {
+		t.Fatalf("second rewrite: %v", err)
+	}
+	if again != 0 {
+		t.Fatalf("second rewrite touched %d rows, want 0", again)
+	}
+}
+
+// TestRewriteBindingRuntimePathPrefixRequiresBothPrefixes: an empty prefix would
+// match (or produce) every path, so it is refused rather than guessed at.
+func TestRewriteBindingRuntimePathPrefixRequiresBothPrefixes(t *testing.T) {
+	s := openTestStore(t)
+	if _, err := s.RewriteBindingRuntimePathPrefix("", "/data/pop/work/worktrees/"); err == nil {
+		t.Fatal("empty old prefix must be refused")
+	}
+	if _, err := s.RewriteBindingRuntimePathPrefix("/data/pop/queue/worktrees/", ""); err == nil {
+		t.Fatal("empty new prefix must be refused")
+	}
+}

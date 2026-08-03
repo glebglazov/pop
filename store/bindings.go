@@ -1,6 +1,10 @@
 package store
 
-import "database/sql"
+import (
+	"database/sql"
+	"fmt"
+	"strings"
+)
 
 // Binding is one non-trunk Worktree binding: the durable 1:1 association between
 // a Task set (within a repository identity) and the checkout it drains in. It is
@@ -107,6 +111,64 @@ func (s *Store) PutBinding(b Binding) error {
 		   project=excluded.project, provisioned=excluded.provisioned`,
 		b.ScopedKey, b.RuntimePath, b.Branch, b.Project, boolToInt(b.Provisioned))
 	return err
+}
+
+// RewriteBindingRuntimePathPrefix repoints every binding whose recorded checkout
+// starts with oldPrefix at newPrefix, and returns how many rows it rewrote. Both
+// prefixes must be non-empty.
+//
+// The whole rewrite runs in one transaction because it serves a storage-layout
+// move: the managed-worktree root relocating on disk. A half-applied rewrite
+// would leave some sets bound to directories that no longer exist, which is the
+// one failure mode that can strand uncommitted work, so the recorded paths move
+// all together or not at all. The matching is done in Go rather than in SQL so
+// the prefix is compared byte-for-byte as the filesystem spells it, with no
+// dependence on SQLite's character-oriented substr.
+func (s *Store) RewriteBindingRuntimePathPrefix(oldPrefix, newPrefix string) (int, error) {
+	if oldPrefix == "" || newPrefix == "" {
+		return 0, fmt.Errorf("rewrite binding runtime paths: both prefixes are required")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	rows, err := tx.Query(`SELECT scoped_key, runtime_path FROM bindings`)
+	if err != nil {
+		return 0, err
+	}
+	type rewrite struct{ key, path string }
+	var pending []rewrite
+	for rows.Next() {
+		var key, path string
+		if err := rows.Scan(&key, &path); err != nil {
+			_ = rows.Close()
+			return 0, err
+		}
+		if !strings.HasPrefix(path, oldPrefix) {
+			continue
+		}
+		pending = append(pending, rewrite{key: key, path: newPrefix + strings.TrimPrefix(path, oldPrefix)})
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return 0, err
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+
+	for _, r := range pending {
+		if _, err := tx.Exec(
+			`UPDATE bindings SET runtime_path = ? WHERE scoped_key = ?`, r.path, r.key); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return len(pending), nil
 }
 
 // DeleteBinding forgets the binding under scopedKey.

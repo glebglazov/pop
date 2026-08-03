@@ -158,3 +158,18 @@ code.
   keys `(kind, id)` and carries no `def_path`, one set id registered under two
   repositories collapses to its earliest registration: the same machine-wide
   uniqueness of a set id that `recovery_waiters` has assumed since ADR-0100.
+- **As landed (decision 8, the worktree move):** the fold hangs off the funnel every
+  keyed binding accessor already goes through, beside the `bindings.json` migration,
+  so no verb owns it and the steady state costs one stat. Three details the decision
+  did not settle. *Two roots for the length of a refusal:* a worktree that has not
+  moved yet is still pop-managed, so the predicates that classify a checkout
+  (`Provisioned`, the drain-target picker's exclusion, the Project picker's walk)
+  read a two-element root list, not the one provisioning root. Only provisioning is
+  single-rooted, which is what "no two roots alive indefinitely" was protecting. *A
+  refusal needs a reader:* the fold runs silently, so `pop doctor` gained a
+  `managed worktree root` check over a read-only inspection that names the same
+  offenders — the fold itself never reports to a human. *Crash between the renames
+  and the transaction self-heals:* the recorded-path rewrite is a blanket prefix
+  rewrite rather than one per moved directory, so worktrees a killed run had already
+  relocated are repointed by the next one. An error, as opposed to a crash, moves
+  the directories back before returning.

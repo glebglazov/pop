@@ -790,7 +790,7 @@ func TestProvisionWorktreeAddsFreshBranchFromHead(t *testing.T) {
 	}
 
 	wantBranch := "pop/set-with-spaces/20260614T090807Z"
-	wantPath := filepath.Join("/xdg", "pop", "queue", "worktrees", "repo-"+repoHashForTest(t, filepath.Join("/repo", ".git")), "set-with-spaces")
+	wantPath := filepath.Join("/xdg", "pop", "work", "worktrees", "repo-"+repoHashForTest(t, filepath.Join("/repo", ".git")), "set-with-spaces")
 	if wt.Branch != wantBranch || wt.Path != wantPath {
 		t.Fatalf("provisioned = %+v, want branch %q path %q", wt, wantBranch, wantPath)
 	}
@@ -808,7 +808,7 @@ func TestPrepareWorktreeDrainReusesBindingWithoutWorktreeAdd(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", xdg)
 	now := time.Date(2026, 6, 14, 9, 8, 7, 0, time.UTC)
 	repoHash := repoHashForTest(t, filepath.Join("/repo", ".git"))
-	boundPath := filepath.Join(xdg, "pop", "queue", "worktrees", "repo-"+repoHash, "2026-06-14-queue")
+	boundPath := filepath.Join(xdg, "pop", "work", "worktrees", "repo-"+repoHash, "2026-06-14-queue")
 	worktreeAddCalls := 0
 	real := deps.NewRealFileSystem()
 	d := worktreeProvisionDeps(t, now, nil)
@@ -875,7 +875,7 @@ func TestPrepareWorktreeDrainRefusesInvalidBinding(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", xdg)
 	now := time.Date(2026, 6, 14, 9, 8, 7, 0, time.UTC)
 	repoHash := repoHashForTest(t, filepath.Join("/repo", ".git"))
-	missingPath := filepath.Join(xdg, "pop", "queue", "worktrees", "repo-"+repoHash, "2026-06-14-queue")
+	missingPath := filepath.Join(xdg, "pop", "work", "worktrees", "repo-"+repoHash, "2026-06-14-queue")
 	real := deps.NewRealFileSystem()
 	d := worktreeProvisionDeps(t, now, nil)
 	d.Tasks.FS = &deps.MockFileSystem{
@@ -1115,7 +1115,7 @@ func TestSpawnNonActionableNoOp(t *testing.T) {
 func worktreeProvisionDeps(t *testing.T, now time.Time, addErr error) *Deps {
 	t.Helper()
 	dataHome := t.TempDir()
-	wtPath := filepath.Join(dataHome, "pop", "queue", "worktrees", "repo-"+repoHashForTest(t, filepath.Join("/repo", ".git")), "2026-06-14-queue")
+	wtPath := filepath.Join(dataHome, "pop", "work", "worktrees", "repo-"+repoHashForTest(t, filepath.Join("/repo", ".git")), "2026-06-14-queue")
 	real := deps.NewRealFileSystem()
 	gitMock := func(dir string, args ...string) (string, error) {
 		switch {

@@ -135,6 +135,19 @@ func PathUnder(path, root string) bool {
 	return strings.HasPrefix(path, root+string(filepath.Separator))
 }
 
+// pathUnderAny reports whether path lies under any of roots. It serves the
+// callers that must ask about a set of roots at once — the managed-worktree root
+// is two directories while a machine still has worktrees waiting for the gated
+// root move.
+func pathUnderAny(path string, roots []string) bool {
+	for _, root := range roots {
+		if PathUnder(path, root) {
+			return true
+		}
+	}
+	return false
+}
+
 func parseDashboardBaseRefs(output string) []string {
 	seen := map[string]bool{}
 	var refs []string
@@ -264,12 +277,13 @@ func WorkDataDir(d *tasks.Deps) string {
 	return popDataDir(d, "work")
 }
 
-// QueueDataDir returns the directory rooting pop's provisioned worktrees. The
-// queue name is historical — the supervisor's lock and log moved to WorkDataDir
-// with the `pop queue` → `pop work` cut, but a provisioned worktree's absolute
-// path is recorded in its Worktree binding, so this root cannot move without a
-// migration. tasks/binding computes the same location from the Task-storage root.
-func QueueDataDir(d *tasks.Deps) string {
+// LegacyQueueDataDir returns the retired <data>/pop/queue directory. Nothing pop
+// writes lives there any more: the supervisor's lock and log moved to
+// WorkDataDir and the managed-worktree root moved to <data>/pop/work/worktrees,
+// both with the `pop queue` → `pop work` cut. It survives as the pre-cut path
+// the lock handover still reads, so a daemon started by a pre-cut binary is seen
+// (supervisor_lock.go).
+func LegacyQueueDataDir(d *tasks.Deps) string {
 	return popDataDir(d, "queue")
 }
 

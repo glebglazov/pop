@@ -68,6 +68,11 @@ func ClassifyManagedWorktree(td *tasks.Deps, runtimePath string) (WorktreeMarker
 	return ManagedBound, nil
 }
 
+// checkoutUnderManagedRoot reports whether runtimePath is a checkout pop created
+// — the Provisioned bit every adoption derives (ADR-0152). It asks the same
+// question of every managed root, not just the current one, so a worktree still
+// waiting for the gated root move stays managed (and therefore torn down on
+// integration) instead of silently reading as adopted for the length of the wait.
 func checkoutUnderManagedRoot(td *tasks.Deps, runtimePath string) (bool, error) {
 	if td == nil {
 		td = tasks.DefaultDeps()
@@ -76,22 +81,26 @@ func checkoutUnderManagedRoot(td *tasks.Deps, runtimePath string) (bool, error) 
 	if err != nil {
 		return false, err
 	}
-	rootAbs, err := filepath.Abs(ManagedWorktreesRoot(td))
-	if err != nil {
-		return false, err
-	}
-	canonRoot := rootAbs
-	if _, err := td.FS.Stat(rootAbs); err == nil {
-		canonRoot, err = td.FS.EvalSymlinks(rootAbs)
+	for _, root := range ManagedWorktreeRoots(td) {
+		rootAbs, err := filepath.Abs(root)
 		if err != nil {
 			return false, err
 		}
+		canonRoot := rootAbs
+		if _, err := td.FS.Stat(rootAbs); err == nil {
+			canonRoot, err = td.FS.EvalSymlinks(rootAbs)
+			if err != nil {
+				return false, err
+			}
+		}
+		if canonPath == canonRoot {
+			continue
+		}
+		if strings.HasPrefix(canonPath, canonRoot+string(os.PathSeparator)) {
+			return true, nil
+		}
 	}
-	if canonPath == canonRoot {
-		return false, nil
-	}
-	prefix := canonRoot + string(os.PathSeparator)
-	return strings.HasPrefix(canonPath, prefix), nil
+	return false, nil
 }
 
 func liveReferentCount(td *tasks.Deps, checkoutPath string, excludeKeys map[string]bool) (int, error) {

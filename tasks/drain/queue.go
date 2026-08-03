@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -1196,15 +1195,14 @@ func scopedKeyForPaths(d *Deps, projectPath, runtimePath, setID string) (string,
 	return SetScopedKey(repoKey, setID), nil
 }
 
-// provisionWorktree is the Queue's adapter over the binding module's
-// provisioner. The worktree directory tree lives under the queue data dir; the
-// binding module owns the `git worktree add` and path-layout details.
+// provisionWorktree is the Work supervisor's adapter over the binding module's
+// provisioner. The binding module owns the managed-worktree root, the
+// `git worktree add` and the path-layout details.
 func provisionWorktree(d *Deps, projectPath, setID string) (provisionedWorktree, error) {
 	if d == nil || d.Tasks == nil {
 		return provisionedWorktree{}, fmt.Errorf("missing task dependencies")
 	}
-	worktreesRoot := filepath.Join(QueueDataDir(d.Tasks), "worktrees")
-	b, err := binding.ProvisionWorktree(d.Tasks, worktreesRoot, projectPath, setID, "HEAD", d.now())
+	b, err := binding.ProvisionWorktree(d.Tasks, binding.ManagedWorktreesRoot(d.Tasks), projectPath, setID, "HEAD", d.now())
 	if err != nil {
 		return provisionedWorktree{}, err
 	}

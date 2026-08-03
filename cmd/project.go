@@ -82,9 +82,10 @@ type ProjectDeps struct {
 	LoadConfig  func() (*config.Config, error)
 	LoadHistory func() (*history.History, error)
 
-	// ManagedWorktrees discovers pop-managed worktrees under ManagedWorktreesRoot
-	// via a filesystem-only walk — no store open, no git fork (ADR-0110). A seam so
-	// tests supply a fixed set (or none) without a real queue data dir.
+	// ManagedWorktrees discovers pop-managed worktrees under every
+	// ManagedWorktreeRoots entry via a filesystem-only walk — no store open, no git
+	// fork (ADR-0110). A seam so tests supply a fixed set (or none) without a real
+	// managed-worktree root on disk.
 	ManagedWorktrees func() []project.ExpandedProject
 
 	// Picker — the critical testing seam
@@ -164,7 +165,13 @@ func DefaultProjectDeps() *ProjectDeps {
 
 		ManagedWorktrees: func() []project.ExpandedProject {
 			td := tasks.DefaultDeps()
-			return discoverManagedWorktreesWith(td.FS, binding.ManagedWorktreesRoot(td))
+			// Every managed root: a worktree still under the pre-cut root (the
+			// gated move has not run, or refused) is pickable like any other.
+			var out []project.ExpandedProject
+			for _, root := range binding.ManagedWorktreeRoots(td) {
+				out = append(out, discoverManagedWorktreesWith(td.FS, root)...)
+			}
+			return out
 		},
 
 		RunPicker: ui.Run,
