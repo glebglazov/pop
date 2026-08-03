@@ -277,13 +277,15 @@ func TestDecideRepoDispatchesBindingRoutesRegardlessOfTrunkConfig(t *testing.T) 
 	if got := queuetest.Canon(t, d.Tasks, actionable[0].scan.RuntimePath); got != queuetest.Canon(t, d.Tasks, wts[1]) {
 		t.Fatalf("drain routed to %q, want bound checkout %q", got, queuetest.Canon(t, d.Tasks, wts[1]))
 	}
-	wantSession := project.SessionNameWith(project.DefaultDeps(), wts[0])
+	// The pane goes to the session of the checkout the set is bound to, never to
+	// the session of the repository the drain was decided from (ADR-0180).
+	wantSession := project.CheckoutSessionNameWith(project.DefaultDeps(), wts[1])
 	if actionable[0].scan.SessionName != wantSession {
-		t.Fatalf("SessionName = %q, want project session %q (not named after managed worktree %q)", actionable[0].scan.SessionName, wantSession, wts[1])
+		t.Fatalf("SessionName = %q, want bound checkout's session %q", actionable[0].scan.SessionName, wantSession)
 	}
-	worktreeSession := project.SessionNameWith(project.DefaultDeps(), wts[1])
-	if actionable[0].scan.SessionName == worktreeSession {
-		t.Fatalf("SessionName must not be derived from bound checkout %q", wts[1])
+	originatingSession := project.CheckoutSessionNameWith(project.DefaultDeps(), wts[0])
+	if actionable[0].scan.SessionName == originatingSession {
+		t.Fatalf("SessionName must not be derived from the originating checkout %q", wts[0])
 	}
 }
 
@@ -353,5 +355,111 @@ func TestScanCrossRepositoryFanOutPreserved(t *testing.T) {
 	}
 	if actionable != 2 {
 		t.Fatalf("two single-checkout repos: %d drains, want 2 (cross-repo fan-out preserved)\n%+v", actionable, decisions)
+	}
+}
+
+// handoffFixture builds a repository with one task set bound to a linked worktree,
+// plus the dashboard row a handoff verb is invoked on. The row carries the
+// coordinates the live dashboard carries (project path and repo key), so the verbs
+// take the fork-free bind context and the only session derivation left is the one
+// under test.
+func handoffFixture(t *testing.T, stem string) (d *Deps, cfg *config.Config, row DashboardRow, repo, bound string, rt *queuetest.RecordingTmux) {
+	t.Helper()
+	repo, setID, _ := queuetest.SetupSpawnRepo(t, stem, []queuetest.SpawnTask{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	bound = filepath.Join(t.TempDir(), stem+"-wt")
+	runGit(t, repo, "worktree", "add", "--detach", bound, "HEAD")
+
+	cfg = &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+	rt = queuetest.NewRecordingTmux(false, "0")
+	d = &Deps{
+		Tasks:      queuetest.TasksDeps(t, true),
+		Project:    project.DefaultDeps(),
+		Tmux:       rt,
+		LoadConfig: func(string) (*config.Config, error) { return cfg, nil },
+		ReadLock:   func(runtimePath string) *tasks.RuntimeLockStatus { return queuetest.IdleLock(runtimePath) },
+	}
+	repoKey, err := ResolveRepoKey(d, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queuetest.SeedBindingStore(t, d.Tasks, map[string]WorktreeBinding{
+		SetScopedKey(repoKey, setID): {RuntimePath: bound, Branch: "detached", Project: filepath.Base(repo)},
+	})
+	row = DashboardRow{Project: "pop", ID: setID, ProjectPath: repo, RepoKey: repoKey, RuntimePath: bound}
+	return d, cfg, row, repo, bound, rt
+}
+
+// TestHandoffVerbsTargetBoundCheckoutSession is ADR-0180 at every verb: drain,
+// verify, assist, fold and the runtime shell all put their pane in the session of
+// the checkout the set is bound to — created detached, since none exists yet — and
+// none of them lands in the session of the project the operator invoked them from.
+func TestHandoffVerbsTargetBoundCheckoutSession(t *testing.T) {
+	verbs := map[string]func(*Deps, *config.Config, DashboardRow) (DashboardDrainResult, error){
+		"drain":  LaunchDrain,
+		"verify": LaunchVerify,
+		"assist": LaunchAssist,
+		"fold":   LaunchFold,
+		"shell":  LaunchShell,
+	}
+	for name, launch := range verbs {
+		t.Run(name, func(t *testing.T) {
+			d, cfg, row, repo, bound, rt := handoffFixture(t, "locality-"+name)
+			wantSession := project.CheckoutSessionNameWith(d.Project, bound)
+			projectSession := project.CheckoutSessionNameWith(d.Project, repo)
+			if wantSession == projectSession {
+				t.Fatalf("fixture is not discriminating: bound and project sessions are both %q", wantSession)
+			}
+
+			result, err := launch(d, cfg, row)
+			if err != nil {
+				t.Fatalf("Launch %s: %v", name, err)
+			}
+			if result.Session != wantSession {
+				t.Fatalf("%s session = %q, want the bound checkout's %q", name, result.Session, wantSession)
+			}
+			newSession, ok := rt.FindCommand("new-session")
+			if !ok {
+				t.Fatalf("%s: the bound checkout's session must be created detached; commands=%v", name, rt.Commands)
+			}
+			if len(newSession) != 3 || newSession[1] != wantSession {
+				t.Fatalf("%s new-session = %v, want session %q", name, newSession, wantSession)
+			}
+		})
+	}
+}
+
+// TestHandoffVerbsRefuseMissingBoundWorktree pins the other half of ADR-0180: with
+// the pane's session derived from the bound checkout, a verb whose checkout is gone
+// refuses rather than falling back to the trunk — the silent mislocation the ADR
+// removes. The guard used to sit on drain alone.
+func TestHandoffVerbsRefuseMissingBoundWorktree(t *testing.T) {
+	verbs := map[string]func(*Deps, *config.Config, DashboardRow) (DashboardDrainResult, error){
+		"drain":  LaunchDrain,
+		"verify": LaunchVerify,
+		"assist": LaunchAssist,
+		"fold":   LaunchFold,
+		"shell":  LaunchShell,
+	}
+	for name, launch := range verbs {
+		t.Run(name, func(t *testing.T) {
+			d, cfg, row, repo, bound, rt := handoffFixture(t, "missing-"+name)
+			if err := os.RemoveAll(bound); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := launch(d, cfg, row)
+			if err == nil {
+				t.Fatalf("%s: a missing bound worktree must refuse the verb", name)
+			}
+			if !strings.Contains(err.Error(), "bound worktree for "+row.ID+" is invalid") {
+				t.Fatalf("%s refusal = %v, want the invalid-bound-worktree refusal", name, err)
+			}
+			if _, spawned := rt.FindCommand("new-session"); spawned {
+				trunkSession := project.CheckoutSessionNameWith(d.Project, repo)
+				t.Fatalf("%s opened a session (%q would be the trunk fallback) instead of refusing; commands=%v", name, trunkSession, rt.Commands)
+			}
+		})
 	}
 }

@@ -865,8 +865,14 @@ func TestPrepareWorktreeDrainReusesBindingWithoutWorktreeAdd(t *testing.T) {
 	if got.scan.RuntimePath != boundPath || got.scan.ProjectPath != boundPath {
 		t.Fatalf("expected bound checkout %+v, got %+v", boundPath, got.scan)
 	}
-	if got.scan.SessionName != dec.scan.SessionName {
-		t.Fatalf("SessionName = %q, want originating project session %q", got.scan.SessionName, dec.scan.SessionName)
+	// Routing is the last word on the checkout, and the session follows it
+	// (ADR-0180): the pre-routing session the decision carried is discarded.
+	wantSession := project.CheckoutSessionNameWith(d.Project, boundPath)
+	if got.scan.SessionName != wantSession {
+		t.Fatalf("SessionName = %q, want bound checkout's session %q", got.scan.SessionName, wantSession)
+	}
+	if got.scan.SessionName == dec.scan.SessionName {
+		t.Fatalf("SessionName must not stay at the originating project session %q", dec.scan.SessionName)
 	}
 }
 

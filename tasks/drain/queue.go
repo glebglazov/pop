@@ -461,23 +461,20 @@ func Scan(d *Deps, cfg *config.Config) ([]Decision, error) {
 			defer func() { <-sem }()
 			g := groups[idx]
 			decs := decideRepoDispatchesWithRep(d, cfg, g.scans, g.rep, g.repErr, recoveryWaiters, now)
-			// The fork-free static path leaves the representative's spawn session
-			// name unset (deriving it forks git). Fill it only for a drain about to
-			// be dispatched — never for the idle full-fleet listing — so a created
-			// and registered Ready set stays dispatchable. Derive the session from
-			// the integration-target checkout, not a binding-routed worktree cwd.
+			// The fork-free static path leaves the spawn session name unset (deriving
+			// it forks git). Fill it only for a drain about to be dispatched — never
+			// for the idle full-fleet listing — so a created and registered Ready set
+			// stays dispatchable. The checkout the decision routed to is the session
+			// (ADR-0180): binding routing has already pointed ProjectPath at the bound
+			// worktree, and the spawn re-derives after routing in case it provisions.
 			for j := range decs {
 				if !decs[j].Actionable() || decs[j].scan.SessionName != "" {
 					continue
 				}
-				projectPath := decs[j].scan.ProjectPath
-				if g.rep != nil && strings.TrimSpace(g.rep.ProjectPath) != "" {
-					projectPath = g.rep.ProjectPath
-				}
-				if projectPath == "" {
+				if decs[j].scan.ProjectPath == "" {
 					continue
 				}
-				decs[j].scan.SessionName = project.SessionNameWith(d.Project, projectPath)
+				decs[j].scan.SessionName = project.CheckoutSessionNameWith(d.Project, decs[j].scan.ProjectPath)
 			}
 			groupDecisions[idx] = decs
 		}(i)
@@ -643,7 +640,7 @@ func resolveScan(d *Deps, p project.ExpandedProject) (projectScan, error) {
 		ProjectPath:    resolved.ProjectPath,
 		DefinitionPath: resolved.DefinitionPath,
 		RuntimePath:    resolved.ProjectPath,
-		SessionName:    project.SessionNameWith(d.Project, resolved.ProjectPath),
+		SessionName:    project.CheckoutSessionNameWith(d.Project, resolved.ProjectPath),
 		RepoKey:        repoIdentityKey(id),
 		RepoCommonDir:  id.CommonDir,
 	}, nil

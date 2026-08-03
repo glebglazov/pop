@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
 )
@@ -50,6 +51,10 @@ func prepareWorktreeDrain(d *Deps, dec Decision) (Decision, string) {
 	}
 	dec.scan.ProjectPath = route.RuntimePath
 	dec.scan.RuntimePath = route.RuntimePath
+	// Routing is the last word on which checkout the drain runs in — it may have
+	// just provisioned one — and the session follows the checkout (ADR-0180), so
+	// re-derive rather than spawn into whatever the scan named before routing.
+	dec.scan.SessionName = project.CheckoutSessionNameWith(d.Project, route.RuntimePath)
 	dec.pinRuntimePath = true
 	return dec, ""
 }

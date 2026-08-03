@@ -82,11 +82,11 @@ func SessionAndDir(d *Deps, boundDir string) (session, dir string) {
 	return sessionAndDir(d, boundDir)
 }
 
+// sessionAndDir places a routine's pane: in the session of the directory it is
+// bound to, which is the same rule every Task-set pane follows (ADR-0180), and in
+// the shared routines session when that directory is not a checkout at all.
 func sessionAndDir(d *Deps, boundDir string) (session, dir string) {
-	if _, err := project.DetectRepoContextFromPathWith(projectDeps(d), boundDir); err != nil {
-		return RoutinesSessionName, boundDir
-	}
-	return project.SessionNameWith(projectDeps(d), boundDir), boundDir
+	return project.CheckoutSessionOrWith(projectDeps(d), boundDir, RoutinesSessionName), boundDir
 }
 
 func shellQuote(s string) string {

@@ -222,7 +222,7 @@ func scanForCheckout(d *Deps, scans []projectScan, checkoutPath string) *project
 		ProjectPath:    canon,
 		DefinitionPath: base.DefinitionPath,
 		RuntimePath:    runtimePath,
-		SessionName:    project.SessionNameWith(d.Project, canon),
+		SessionName:    project.CheckoutSessionNameWith(d.Project, canon),
 	}
 }
 
@@ -371,7 +371,9 @@ func decideBareWithoutBase(d *Deps, cfg *config.Config, scans []projectScan, nam
 		action.TaskSetID = id
 		action.scan.ProjectPath = b.RuntimePath
 		action.scan.RuntimePath = b.RuntimePath
-		action.scan.SessionName = project.SessionNameWith(d.Project, base.ProjectPath)
+		// The bound checkout is the session, not the repository the scan came from
+		// (ADR-0180) — a bare repo has no checkout of its own to fall back to anyway.
+		action.scan.SessionName = project.CheckoutSessionNameWith(d.Project, b.RuntimePath)
 		if lock := d.readLock(b.RuntimePath); lock != nil && lock.Locked {
 			busyDec := skel
 			busyDec.Busy = true

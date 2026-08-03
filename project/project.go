@@ -363,6 +363,58 @@ func FastSessionNameWith(d *Deps, path string) string {
 	return FastSessionName(path)
 }
 
+// CheckoutSession returns the tmux session that belongs to a checkout: the one
+// answer to "where does work on this directory happen" (ADR-0180). Uses default
+// dependencies.
+func CheckoutSession(path string) (string, error) {
+	return CheckoutSessionWith(defaultDeps, path)
+}
+
+// CheckoutSessionWith is the injectable variant, and the single owner of the rule.
+//
+// Everything that opens a pane for a checkout derives from it — a Task set's drain,
+// verify, assist, fold and runtime shell, the Work daemon's unattended auto-drain,
+// a Routine's fire pane, and the `ctrl+g` worktree open — so all of them land in
+// the same session and a checkout is never reachable under two names.
+//
+// The name is SessionNameForWith's, with its diagnosis: a checkout git cannot answer
+// for still gets a name, and the caller is told why it may be the wrong one. An empty
+// path is an error with no name, because no session belongs to nothing — a caller with
+// no checkout in hand must refuse rather than name a session after its cwd.
+func CheckoutSessionWith(d *Deps, path string) (string, error) {
+	if d == nil {
+		d = defaultDeps
+	}
+	if strings.TrimSpace(path) == "" {
+		return "", fmt.Errorf("no checkout to derive a tmux session from")
+	}
+	return SessionNameForWith(d, path)
+}
+
+// CheckoutSessionNameWith is CheckoutSessionWith for a caller with nowhere to show a
+// diagnosis — an unattended spawn, a bulk row — logging the reason instead.
+func CheckoutSessionNameWith(d *Deps, path string) string {
+	name, err := CheckoutSessionWith(d, path)
+	if err != nil {
+		debug.Error("CheckoutSession: %v", err)
+	}
+	return name
+}
+
+// CheckoutSessionOrWith is CheckoutSessionNameWith for a directory that may not be a
+// checkout at all, answering fallback for those. A Routine's bound directory is any
+// directory the operator named, so routines land their panes in one shared session
+// rather than in a session named after some directory git has never heard of.
+func CheckoutSessionOrWith(d *Deps, path, fallback string) string {
+	if d == nil {
+		d = defaultDeps
+	}
+	if _, err := DetectRepoContextFromPathWith(d, path); err != nil {
+		return fallback
+	}
+	return CheckoutSessionNameWith(d, path)
+}
+
 // ListWorktrees returns all worktrees for the current repo context
 // Uses default dependencies
 func ListWorktrees(ctx *RepoContext) ([]Worktree, error) {

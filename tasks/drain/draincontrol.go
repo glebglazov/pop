@@ -67,10 +67,16 @@ type DashboardDrainResult struct {
 }
 
 // dashboardSetPaneCoords resolves the tmux session and working directory for a
-// Task-set pane opened from the dashboard. The pane lives in the project's
-// session (the integration-target checkout), with cwd at checkout — matching
-// supervisor-spawned drains.
-func dashboardSetPaneCoords(d *Deps, cfg *config.Config, scans []projectScan, row DashboardRow, checkout string) (session, dir string, err error) {
+// Task-set pane opened from the dashboard. Both come from one place — the checkout
+// the set is bound to — so the pane lives in that checkout's session rather than in
+// the session of the project the operator invoked the verb from (ADR-0180). An
+// unbound set has no binding to follow and falls back to the repository's own
+// checkout, which is where its drain would run inline.
+//
+// It resolves no project path and forks no git: deriving the session from the
+// checkout is what let the resolveRepresentative fan-out be deleted from in front
+// of a verb the operator is waiting on.
+func dashboardSetPaneCoords(d *Deps, scans []projectScan, row DashboardRow, checkout string) (session, dir string, err error) {
 	if d == nil {
 		d = DefaultDeps()
 	}
@@ -81,26 +87,38 @@ func dashboardSetPaneCoords(d *Deps, cfg *config.Config, scans []projectScan, ro
 	if dir == "" {
 		dir = strings.TrimSpace(row.RuntimePath)
 	}
+	if dir == "" {
+		dir = strings.TrimSpace(row.ProjectPath)
+	}
 	if dir == "" && len(scans) > 0 {
 		dir = strings.TrimSpace(scans[0].ProjectPath)
 	}
-	projectPath := strings.TrimSpace(row.ProjectPath)
-	if projectPath == "" && len(scans) > 0 {
-		projectPath = strings.TrimSpace(scans[0].ProjectPath)
+	session, err = project.CheckoutSessionWith(d.Project, dir)
+	if err != nil {
+		return "", "", err
 	}
-	if projectPath == "" {
-		rep, _, repErr := resolveRepresentative(d, cfg, scans)
-		if repErr != nil {
-			return "", "", repErr
-		}
-		if rep != nil {
-			projectPath = strings.TrimSpace(rep.ProjectPath)
-		}
+	return session, dir, nil
+}
+
+// refuseUnusableBoundCheckout refuses a handoff verb whose set is bound to a
+// checkout that is missing or that git no longer registers. Every verb calls it,
+// not just drain: now that the pane's session is the bound checkout's, a verb that
+// carried on would either name a session after a directory that is gone or fall
+// back to the trunk — the silent mislocation ADR-0180 removes, arriving at the
+// moment the operator is least able to notice it. An unbound set has nothing to
+// validate and passes.
+func refuseUnusableBoundCheckout(d *Deps, scans []projectScan, repoKey string, row DashboardRow) error {
+	if strings.TrimSpace(repoKey) == "" || len(scans) == 0 {
+		return nil
 	}
-	if projectPath == "" {
-		projectPath = dir
+	b, ok := BindingForSet(d.Tasks, repoKey, row.ID)
+	if !ok || strings.TrimSpace(b.RuntimePath) == "" {
+		return nil
 	}
-	return project.SessionNameWith(d.Project, projectPath), dir, nil
+	if err := validateBoundWorktree(d, scans[0].ProjectPath, b); err != nil {
+		return fmt.Errorf("bound worktree for %s is invalid (%v); repair git state or run `pop tasks unbind-worktree`", row.ID, err)
+	}
+	return nil
 }
 
 // LaunchDrain manually launches the highlighted dashboard row through
@@ -126,10 +144,10 @@ func LaunchDrain(d *Deps, cfg *config.Config, row DashboardRow) (DashboardDrainR
 	dec := Decision{TaskSetID: row.ID}
 	if b, ok := BindingForSet(d.Tasks, repoKey, row.ID); ok && strings.TrimSpace(b.RuntimePath) != "" {
 		dec.Project = repoName(scans, nil)
-		if err := validateBoundWorktree(d, scans[0].ProjectPath, b); err != nil {
-			return DashboardDrainResult{}, fmt.Errorf("bound worktree for %s is invalid (%v); repair git state or run `pop tasks unbind-worktree`", row.ID, err)
+		if err := refuseUnusableBoundCheckout(d, scans, repoKey, row); err != nil {
+			return DashboardDrainResult{}, err
 		}
-		session, checkout, err := dashboardSetPaneCoords(d, cfg, scans, row, b.RuntimePath)
+		session, checkout, err := dashboardSetPaneCoords(d, scans, row, b.RuntimePath)
 		if err != nil {
 			return DashboardDrainResult{}, err
 		}
@@ -212,15 +230,18 @@ func LaunchVerify(d *Deps, cfg *config.Config, row DashboardRow) (DashboardDrain
 	if d.Project == nil {
 		d.Project = project.DefaultDeps()
 	}
-	scans, _, err := dashboardBindContext(d, cfg, row)
+	scans, repoKey, err := dashboardBindContext(d, cfg, row)
 	if err != nil {
+		return DashboardDrainResult{}, err
+	}
+	if err := refuseUnusableBoundCheckout(d, scans, repoKey, row); err != nil {
 		return DashboardDrainResult{}, err
 	}
 	// The pane spawns into the checkout the verdict must judge: the row's runtime
 	// path when it resolves to one (a bound worktree or trunk), else the project
 	// root. EnsureTaggedPane reuses this set's existing tagged pane, so verify
 	// lands in the same session the set's drain would.
-	session, checkout, err := dashboardSetPaneCoords(d, cfg, scans, row, row.RuntimePath)
+	session, checkout, err := dashboardSetPaneCoords(d, scans, row, row.RuntimePath)
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
@@ -307,8 +328,11 @@ func LaunchAssist(d *Deps, cfg *config.Config, row DashboardRow) (DashboardDrain
 	if d.Tmux == nil {
 		d.Tmux = tmuxmod.New()
 	}
-	scans, _, err := dashboardBindContext(d, cfg, row)
+	scans, repoKey, err := dashboardBindContext(d, cfg, row)
 	if err != nil {
+		return DashboardDrainResult{}, err
+	}
+	if err := refuseUnusableBoundCheckout(d, scans, repoKey, row); err != nil {
 		return DashboardDrainResult{}, err
 	}
 	projectPath := scans[0].ProjectPath
@@ -338,7 +362,7 @@ func LaunchAssist(d *Deps, cfg *config.Config, row DashboardRow) (DashboardDrain
 		return DashboardDrainResult{}, err
 	}
 
-	session, checkout, err := dashboardSetPaneCoords(d, cfg, scans, row, runtimePath)
+	session, checkout, err := dashboardSetPaneCoords(d, scans, row, runtimePath)
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
@@ -402,11 +426,14 @@ func LaunchFold(d *Deps, cfg *config.Config, row DashboardRow) (DashboardDrainRe
 	if d.Tmux == nil {
 		d.Tmux = tmuxmod.New()
 	}
-	scans, _, err := dashboardBindContext(d, cfg, row)
+	scans, repoKey, err := dashboardBindContext(d, cfg, row)
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
-	session, checkout, err := dashboardSetPaneCoords(d, cfg, scans, row, row.RuntimePath)
+	if err := refuseUnusableBoundCheckout(d, scans, repoKey, row); err != nil {
+		return DashboardDrainResult{}, err
+	}
+	session, checkout, err := dashboardSetPaneCoords(d, scans, row, row.RuntimePath)
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
@@ -451,11 +478,14 @@ func LaunchShellIn(d *Deps, cfg *config.Config, row DashboardRow, dir string) (D
 	if checkout == "" {
 		return DashboardDrainResult{}, fmt.Errorf("no checkout bound to this task set")
 	}
-	scans, _, err := dashboardBindContext(d, cfg, row)
+	scans, repoKey, err := dashboardBindContext(d, cfg, row)
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
-	session, dir, err := dashboardSetPaneCoords(d, cfg, scans, row, checkout)
+	if err := refuseUnusableBoundCheckout(d, scans, repoKey, row); err != nil {
+		return DashboardDrainResult{}, err
+	}
+	session, dir, err := dashboardSetPaneCoords(d, scans, row, checkout)
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
@@ -742,7 +772,7 @@ func dashboardBindContext(d *Deps, cfg *config.Config, row DashboardRow) ([]proj
 			ProjectPath:    row.ProjectPath,
 			DefinitionPath: row.DefPath,
 			RuntimePath:    row.ProjectPath,
-			SessionName:    project.SessionNameWith(d.Project, row.ProjectPath),
+			SessionName:    project.CheckoutSessionNameWith(d.Project, row.ProjectPath),
 			RepoKey:        row.RepoKey,
 		}
 		return []projectScan{scan}, row.RepoKey, nil

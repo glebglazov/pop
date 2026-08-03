@@ -111,10 +111,10 @@ func TestDashboardLaunchAssistSpawnsTaggedPane(t *testing.T) {
 	}
 }
 
-// TestDashboardLaunchAssistBoundCheckoutUsesProjectSession asserts assist panes
-// for a bound non-trunk checkout open in the project session with the binding
-// as cwd — never a worktree-derived session.
-func TestDashboardLaunchAssistBoundCheckoutUsesProjectSession(t *testing.T) {
+// TestDashboardLaunchAssistBoundCheckoutUsesCheckoutSession asserts assist panes
+// for a bound non-trunk checkout open in that checkout's own session with the
+// binding as cwd — never the originating project's session (ADR-0180).
+func TestDashboardLaunchAssistBoundCheckoutUsesCheckoutSession(t *testing.T) {
 	repo, setID, _ := queuetest.SetupSpawnRepo(t, "assist-bound", []queuetest.SpawnTask{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
 	})
@@ -134,7 +134,7 @@ func TestDashboardLaunchAssistBoundCheckoutUsesProjectSession(t *testing.T) {
 	if _, err := drain.LaunchAssist(d, cfg, row); err != nil {
 		t.Fatalf("drain.LaunchAssist: %v", err)
 	}
-	assertSetPaneProjectSessionAndCheckout(t, rt, repo, bound)
+	assertSetPaneCheckoutSessionAndCwd(t, rt, repo, bound)
 }
 
 // TestDashboardLaunchAssistReusesPane asserts a second drain.LaunchAssist on a set
