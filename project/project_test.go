@@ -410,8 +410,11 @@ func TestDetectRepoContextWith_StandardBareRepo(t *testing.T) {
 	if ctx.GitRoot != "/repos/game_server.git" {
 		t.Errorf("expected GitRoot '/repos/game_server.git', got %q", ctx.GitRoot)
 	}
-	if ctx.RepoName != "game_server.git" {
-		t.Errorf("expected RepoName 'game_server.git', got %q", ctx.RepoName)
+	// The repo is named by the same helper the linked-worktree branch uses, so a
+	// bare clone's ".git" suffix is stripped rather than sanitized into the
+	// session name as "game_server_git".
+	if ctx.RepoName != "game_server" {
+		t.Errorf("expected RepoName 'game_server', got %q", ctx.RepoName)
 	}
 }
 

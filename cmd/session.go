@@ -37,6 +37,22 @@ const (
 	iconRoutineSession = "●"
 )
 
+// checkoutSessionName is the naming call for surfaces that open a session for a
+// checkout with a human watching. It is project.SessionName plus the diagnosis:
+// when git cannot answer for the checkout the session name loses its <project>/
+// prefix, which silently makes one checkout reachable under two names, so the
+// cause is printed to stderr instead of only reaching the debug log. The
+// best-effort name is still returned — a broken trunk must not stop the operator
+// getting into their worktree.
+func checkoutSessionName(path string) string {
+	name, err := project.SessionNameFor(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "pop: %v\n", err)
+		debug.Error("session name: %v", err)
+	}
+	return name
+}
+
 // workSessionBadge maps a session's stamped Work kind to its picker marker. An
 // unknown kind badges nothing rather than guessing: the vocabulary is closed and
 // a fourth kind will arrive with its own badge.

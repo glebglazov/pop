@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/internal/repokey"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/store"
 	"github.com/glebglazov/pop/tasks"
@@ -39,7 +40,7 @@ const keySeparator = "\x00"
 
 // RepoKey returns the repository-identity prefix used in set-scoped store keys.
 func RepoKey(id *tasks.RepositoryIdentity) string {
-	return id.Basename + "-" + id.ShortHash
+	return repokey.Key(id.Basename, id.ShortHash)
 }
 
 // ScopedKey joins a repository key and Task set identifier into a store key.

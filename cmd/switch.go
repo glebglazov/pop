@@ -8,7 +8,6 @@ import (
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/internal/deps"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
-	"github.com/glebglazov/pop/project"
 	"github.com/spf13/cobra"
 )
 
@@ -47,7 +46,7 @@ func DefaultSwitchDeps() *SwitchDeps {
 	return &SwitchDeps{
 		FS:          deps.NewRealFileSystem(),
 		Tmux:        defaultTmuxMod,
-		SessionName: project.SessionName,
+		SessionName: checkoutSessionName,
 		LoadHistory: func() (*history.History, error) {
 			return history.Load(history.DefaultHistoryPath())
 		},

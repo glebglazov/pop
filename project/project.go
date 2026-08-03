@@ -7,6 +7,7 @@ import (
 
 	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/internal/repokey"
 )
 
 // Deps holds external dependencies for the project package
@@ -96,6 +97,8 @@ func DetectRepoContextFromPathWith(d *Deps, path string) (*RepoContext, error) {
 	// Check git-common-dir for worktree of bare repo
 	commonDir, err := d.Git.CommandInDir(path, "rev-parse", "--git-common-dir")
 	if err == nil && commonDir != "" {
+		canonCommonDir := canonicalGitPath(path, commonDir)
+
 		isBare, err := d.Git.CommandInDir(commonDir, "config", "--get", "core.bare")
 		if err != nil {
 			debug.Error("DetectRepoContextFromPath: git config core.bare: %v", err)
@@ -103,13 +106,16 @@ func DetectRepoContextFromPathWith(d *Deps, path string) (*RepoContext, error) {
 		if isBare == "true" {
 			// For standard bare repos, commonDir IS the repo root.
 			// For bare repos with a .git subdirectory, commonDir points to .git.
-			gitRoot := commonDir
-			if filepath.Base(commonDir) == ".git" {
-				gitRoot = filepath.Dir(commonDir)
+			gitRoot := canonCommonDir
+			if filepath.Base(canonCommonDir) == ".git" {
+				gitRoot = filepath.Dir(canonCommonDir)
 			}
 			return &RepoContext{
-				GitRoot:  gitRoot,
-				RepoName: filepath.Base(gitRoot),
+				GitRoot: gitRoot,
+				// The <repo>/.bare layout names the repo <repo>, not ".bare":
+				// the same helper the linked-worktree branch uses, so one
+				// repository is named identically whichever branch resolves it.
+				RepoName: repoBasenameFromCommonDir(canonCommonDir),
 				IsBare:   true,
 			}, nil
 		}
@@ -120,19 +126,25 @@ func DetectRepoContextFromPathWith(d *Deps, path string) (*RepoContext, error) {
 		}
 		topLevel = filepath.Clean(topLevel)
 
-		canonCommonDir := commonDir
-		if !filepath.IsAbs(canonCommonDir) {
-			canonCommonDir = filepath.Join(path, canonCommonDir)
-		}
-		canonCommonDir = filepath.Clean(canonCommonDir)
-
 		var mainWorktreePath string
 		if filepath.Base(canonCommonDir) == ".git" {
 			mainWorktreePath = filepath.Dir(canonCommonDir)
 		}
 
+		isLinked, known := linkedWorktreeWith(d, path, canonCommonDir)
+		if !known {
+			isLinked = mainWorktreePath != "" && filepath.Clean(path) != mainWorktreePath
+		}
+		if !isLinked && mainWorktreePath == "" {
+			// The checkout is the main working tree, so it is its own
+			// MainWorktreePath whatever the common dir is called — separate-git-dir
+			// and submodule trunks land here, and without this their linked
+			// worktrees would have nothing to be compared against and would lose
+			// the prefix.
+			mainWorktreePath = topLevel
+		}
+
 		repoName := filepath.Base(topLevel)
-		isLinked := mainWorktreePath != "" && filepath.Clean(path) != filepath.Clean(mainWorktreePath)
 		if isLinked {
 			repoName = repoBasenameFromCommonDir(canonCommonDir)
 		}
@@ -157,6 +169,38 @@ func DetectRepoContextFromPathWith(d *Deps, path string) (*RepoContext, error) {
 		RepoName: filepath.Base(topLevel),
 		IsBare:   false,
 	}, nil
+}
+
+// canonicalGitPath absolutises a path git reported relative to the directory it
+// was asked about (`rev-parse` answers ".git" for a main checkout).
+func canonicalGitPath(gitCwd, reported string) string {
+	reported = strings.TrimSpace(reported)
+	if reported == "" {
+		return ""
+	}
+	if !filepath.IsAbs(reported) {
+		reported = filepath.Join(gitCwd, reported)
+	}
+	return filepath.Clean(reported)
+}
+
+// linkedWorktreeWith asks git whether path is a linked worktree: a linked
+// worktree's own git directory is <commonDir>/worktrees/<name>, while a main
+// checkout's is the common dir itself. This is the only test that holds for a
+// trunk whose git directory is *not* named ".git" — separate-git-dir trunks and
+// submodules — where comparing the checkout against a ".git"-derived main
+// worktree path answers nothing. known is false when git declined to say, so the
+// caller can fall back to the layout comparison.
+func linkedWorktreeWith(d *Deps, path, canonCommonDir string) (linked, known bool) {
+	gitDir, err := d.Git.CommandInDir(path, "rev-parse", "--git-dir")
+	if err != nil {
+		return false, false
+	}
+	canonGitDir := canonicalGitPath(path, gitDir)
+	if canonGitDir == "" || canonCommonDir == "" {
+		return false, false
+	}
+	return canonGitDir != canonCommonDir, true
 }
 
 // CurrentCheckoutPath returns the absolute path of the git worktree containing
@@ -191,18 +235,132 @@ func SessionName(path string) string {
 	return SessionNameWith(defaultDeps, path)
 }
 
-// SessionNameWith returns the sanitized tmux session name using provided dependencies.
-// Linked worktrees (bare or non-bare) use repoName/worktreeFolderName, with repoName
-// from the git common dir; the main checkout uses the plain directory name; non-git
-// paths fall back to the directory base name.
+// SessionNameWith returns the sanitized tmux session name using provided dependencies,
+// logging rather than returning the diagnosis when git cannot answer for the checkout.
+// It is the best-effort form for bulk and unattended callers (dashboard rows, drain
+// scans); a surface facing a human should call SessionNameForWith and show the
+// diagnosis, because the name it gets back may be missing its project prefix.
 func SessionNameWith(d *Deps, path string) string {
+	name, err := SessionNameForWith(d, path)
+	if err != nil {
+		debug.Error("SessionName: %v", err)
+	}
+	return name
+}
+
+// SessionNameFor returns the session name for a checkout path together with the
+// diagnosis when git could not answer for it. Uses default dependencies.
+func SessionNameFor(path string) (string, error) {
+	return SessionNameForWith(defaultDeps, path)
+}
+
+// SessionNameForWith returns the sanitized tmux session name and, when git could not
+// answer for the checkout, an error naming why.
+//
+// Linked worktrees (bare or non-bare) use repoName/worktreeFolderName, with repoName
+// from the git common dir; the main checkout uses the plain directory name. When git
+// fails — a pruned worktree administrative directory, a trunk that moved or is
+// unmounted, a stray GIT_DIR — the prefix is recovered from the checkout's directory
+// layout instead (see SessionNameFromLayoutWith), and only a checkout whose layout
+// says nothing degrades to the bare directory name. Either way the failure is
+// returned, because a checkout that git cannot answer for is broken whether or not
+// its name survived: it is the silence, not the rename alone, that let one checkout
+// end up reachable under two session names.
+//
+// A path that is not a checkout at all — no `.git` entry, not in the managed-worktree
+// layout — is simply a directory: its bare name is the right answer and no error is
+// returned.
+func SessionNameForWith(d *Deps, path string) (string, error) {
 	path = filepath.Clean(path)
 	worktreeName := filepath.Base(path)
 	ctx, err := DetectRepoContextFromPathWith(d, path)
-	if err != nil {
-		return sanitizeSessionName(worktreeName)
+	if err == nil {
+		return TmuxSessionNameAt(ctx, path, worktreeName), nil
 	}
-	return TmuxSessionNameAt(ctx, path, worktreeName)
+
+	if name, ok := SessionNameFromLayoutWith(d, path); ok {
+		return name, fmt.Errorf("git cannot answer for checkout %s (its git administrative directory is missing or unreadable): %w; session name %q derived from the directory layout instead", path, err, name)
+	}
+	degraded := sanitizeSessionName(worktreeName)
+	if !hasGitEntry(d, path) {
+		return degraded, nil
+	}
+	return degraded, fmt.Errorf("git cannot answer for checkout %s (its git administrative directory is missing or unreadable): %w; session name degrades to %q with no project prefix", path, err, degraded)
+}
+
+// SessionNameFromLayoutWith returns the session name a checkout's directory layout
+// implies, reading only the filesystem — no git fork. It knows the two layouts that
+// carry a repository name in the path itself:
+//
+//   - pop's managed-worktree root, <root>/<basename>-<shortHash>/<worktree>, whose
+//     parent directory is a repo key;
+//   - any linked worktree, whose `.git` is a pointer file naming
+//     <commonDir>/worktrees/<name>.
+//
+// ok is false for a main checkout or a plain directory, where the bare directory name
+// is already the right answer, and for a layout it cannot read.
+//
+// Two callers need this. A checkout git cannot answer for would otherwise lose its
+// prefix and become a second session for the same directory. And the project picker
+// must name every configured path without forking git per path (ADR-0005, ADR-0110),
+// which is what made its worktree paths bare in the first place.
+func SessionNameFromLayoutWith(d *Deps, path string) (string, bool) {
+	path = filepath.Clean(path)
+	if key := filepath.Base(filepath.Dir(path)); repokey.HasKeyShape(key) {
+		return sanitizeSessionName(repokey.Basename(key) + "/" + filepath.Base(path)), true
+	}
+	if commonDir, ok := commonDirFromGitPointer(d, path); ok {
+		return sanitizeSessionName(repoBasenameFromCommonDir(commonDir) + "/" + filepath.Base(path)), true
+	}
+	return "", false
+}
+
+// commonDirFromGitPointer reads a linked worktree's `.git` pointer file and returns
+// the repository's common directory: the pointer names <commonDir>/worktrees/<name>,
+// so stripping the last two components recovers it. ok is false when `.git` is a
+// directory (a main checkout or a bare repo), is unreadable, or does not point into a
+// worktrees/ administrative directory — the pointer is read, never followed, so a
+// trunk that has moved or is unmounted still answers.
+func commonDirFromGitPointer(d *Deps, path string) (string, bool) {
+	gitPath := filepath.Join(path, ".git")
+	info, err := d.FS.Stat(gitPath)
+	if err != nil || info.IsDir() {
+		return "", false
+	}
+	data, err := d.FS.ReadFile(gitPath)
+	if err != nil {
+		return "", false
+	}
+	pointer := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(string(data)), "gitdir:"))
+	if pointer == "" {
+		return "", false
+	}
+	adminDir := canonicalGitPath(path, pointer)
+	if filepath.Base(filepath.Dir(adminDir)) != "worktrees" {
+		return "", false
+	}
+	return filepath.Dir(filepath.Dir(adminDir)), true
+}
+
+// hasGitEntry reports whether path carries a `.git` entry at all, which is what
+// separates a broken checkout from a directory that was never a checkout. Only the
+// former has a name to lose.
+func hasGitEntry(d *Deps, path string) bool {
+	_, err := d.FS.Stat(filepath.Join(path, ".git"))
+	return err == nil
+}
+
+// FastSessionNameWith is FastSessionName plus every prefix the filesystem can prove:
+// the fork-free naming for bulk surfaces that must not pay a git call per item (the
+// project picker's expansion, ADR-0005/ADR-0110). It agrees with SessionName for
+// managed worktrees, linked worktrees, main checkouts and plain directories, and
+// differs only for a worktree of a bare repository, whose repository name lives
+// nowhere in its path.
+func FastSessionNameWith(d *Deps, path string) string {
+	if name, ok := SessionNameFromLayoutWith(d, path); ok {
+		return name
+	}
+	return FastSessionName(path)
 }
 
 // ListWorktrees returns all worktrees for the current repo context

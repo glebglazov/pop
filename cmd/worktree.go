@@ -134,7 +134,7 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 		case ui.ActionKillSession:
 			if result.Selected != nil {
 				restoreCursorIdx = result.CursorIndex
-				sessionName := project.SessionName(result.Selected.Path)
+				sessionName := checkoutSessionName(result.Selected.Path)
 				killTmuxSessionByName(sessionName)
 			}
 			// Continue loop — showWorktreePicker refreshes session state
@@ -504,7 +504,7 @@ func defaultWorktreeShapeDeps() *worktreeShapeDeps {
 		CreateSession: func(tmpl config.Workbench, sessionName, path string) error {
 			return createSessionFromWorkbench(defaultTemplateRuntimeDeps(), tmpl, sessionName, path)
 		},
-		SessionName:   project.SessionName,
+		SessionName:   checkoutSessionName,
 		SessionExists: func(sessionName string) bool { return defaultTmuxMod.HasSession(sessionName) },
 		RecordHistory: recordWorktreeHistory,
 		Attach:        func(sessionName string) error { return switchToTmuxTargetWith(defaultTmuxMod, sessionName) },
@@ -616,7 +616,7 @@ func switchTmuxSession(item *ui.Item) error {
 }
 
 func switchTmuxSessionWith(mod tmuxmod.Tmux, item *ui.Item) error {
-	return tmuxmod.Attach(mod, project.SessionName(item.Path), item.Path)
+	return tmuxmod.Attach(mod, checkoutSessionName(item.Path), item.Path)
 }
 
 func deleteWorktree(path string, force bool) {

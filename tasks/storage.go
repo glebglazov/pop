@@ -9,13 +9,17 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/glebglazov/pop/internal/repokey"
 )
 
 // repoMarkerFile is the reverse-lookup marker written into each Task storage directory.
 const repoMarkerFile = "repo.json"
 
 // ShortHashLen is the number of hex characters retained from the identity hash for directory naming.
-const ShortHashLen = 12
+// The repokey package owns the value: every reader that recovers a basename from
+// a "<basename>-<shortHash>" directory name must agree with what writes it.
+const ShortHashLen = repokey.ShortHashLen
 
 // RepoMarker is persisted as repo.json inside a Task storage directory.
 type RepoMarker struct {

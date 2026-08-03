@@ -16,6 +16,7 @@ import (
 	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/internal/repokey"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
@@ -919,7 +920,7 @@ func discoverManagedWorktreesWith(fs deps.FileSystem, root string) []project.Exp
 			continue
 		}
 		repoKey := repoEntry.Name()
-		basename := repoKeyBasename(repoKey)
+		basename := repokey.Basename(repoKey)
 		repoPath := filepath.Join(root, repoKey)
 		wtEntries, err := fs.ReadDir(repoPath)
 		if err != nil {
@@ -940,31 +941,6 @@ func discoverManagedWorktreesWith(fs deps.FileSystem, root string) []project.Exp
 		}
 	}
 	return out
-}
-
-// repoKeyBasename strips the trailing "-<shortHash>" from a managed-worktree
-// repoKey to recover the human-readable repository basename. The short hash is
-// exactly tasks.ShortHashLen hex characters; only a suffix matching that shape is
-// stripped, so a basename that itself contains dashes survives intact.
-func repoKeyBasename(repoKey string) string {
-	i := strings.LastIndex(repoKey, "-")
-	if i < 0 {
-		return repoKey
-	}
-	suffix := repoKey[i+1:]
-	if len(suffix) != tasks.ShortHashLen || !isHexString(suffix) {
-		return repoKey
-	}
-	return repoKey[:i]
-}
-
-func isHexString(s string) bool {
-	for _, r := range s {
-		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
-			return false
-		}
-	}
-	return true
 }
 
 // expandProjects runs expandProjectsWith using the default project dependencies.
@@ -1032,14 +1008,18 @@ func expandProjectsWith(d *project.Deps, paths []config.ExpandedPath) (expanded 
 					})
 				}
 			} else {
-				// Regular project
+				// Regular project. The session name is read off the checkout's
+				// layout rather than assumed to be a non-worktree one, so a
+				// configured path that is really a linked worktree gets the same
+				// prefixed name the open paths use — and the picker still forks
+				// no git per path (ADR-0110).
 				projects = append(projects, project.ExpandedProject{
 					Name:         displayName,
 					ProjectLabel: displayName,
 					Path:         ep.Path,
 					ProjectName:  projectName,
 					IsWorktree:   false,
-					SessionName:  project.TmuxSessionName(&project.RepoContext{IsBare: false}, filepath.Base(ep.Path)),
+					SessionName:  project.FastSessionNameWith(d, ep.Path),
 				})
 			}
 		}(i, p)

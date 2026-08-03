@@ -831,6 +831,52 @@ func TestExpandProjectsWith_BareRepoExpandsWorktrees(t *testing.T) {
 	}
 }
 
+// TestExpandProjectsWith_LinkedWorktreeProjectKeepsPrefix pins the project-item
+// naming: a configured path that is really a linked worktree must get the same
+// <repo>/<worktree> session name the open paths use, or the picker attaches one
+// name while ctrl+g attaches another for the same checkout. The name comes off the
+// `.git` pointer file, so the expansion still forks no git — the MockGit fails the
+// test if it is called at all.
+func TestExpandProjectsWith_LinkedWorktreeProjectKeepsPrefix(t *testing.T) {
+	t.Parallel()
+	const worktree = "/home/user/checkouts/feature"
+	gitPointer := filepath.Join(worktree, ".git")
+	d := &project.Deps{
+		Git: &deps.MockGit{
+			CommandInDirFunc: func(dir string, args ...string) (string, error) {
+				t.Errorf("expansion forked git: %v in %s", args, dir)
+				return "", nil
+			},
+		},
+		FS: &deps.MockFileSystem{
+			StatFunc: func(path string) (os.FileInfo, error) {
+				if path == gitPointer {
+					return deps.MockFileInfo{NameVal: ".git", IsDirVal: false}, nil
+				}
+				return nil, os.ErrNotExist
+			},
+			ReadFileFunc: func(path string) ([]byte, error) {
+				if path == gitPointer {
+					return []byte("gitdir: /home/user/game_server/.git/worktrees/feature\n"), nil
+				}
+				return nil, os.ErrNotExist
+			},
+		},
+	}
+
+	expanded, failed := expandProjectsWith(d, []config.ExpandedPath{{Path: worktree, DisplayDepth: 1}})
+
+	if len(failed) != 0 {
+		t.Fatalf("expected no failures, got %v", failed)
+	}
+	if len(expanded) != 1 {
+		t.Fatalf("expected 1 entry, got %+v", expanded)
+	}
+	if got, want := expanded[0].SessionName, "game_server/feature"; got != want {
+		t.Errorf("SessionName = %q, want %q", got, want)
+	}
+}
+
 func TestExpandProjectsWith_PartialFailureKeepsGoodProjects(t *testing.T) {
 	t.Parallel()
 	paths := []config.ExpandedPath{
@@ -2032,21 +2078,5 @@ func TestDiscoverManagedWorktreesWith_SkipsNonDirs(t *testing.T) {
 	}
 	if got[0].Name != "repo/realwt" {
 		t.Errorf("Name = %q, want %q", got[0].Name, "repo/realwt")
-	}
-}
-
-func TestRepoKeyBasename(t *testing.T) {
-	t.Parallel()
-	cases := []struct{ in, want string }{
-		{"game_server-a1b2c3d4e5f6", "game_server"},
-		{"my-cool-repo-abcdef012345", "my-cool-repo"},
-		{"nodash", "nodash"},                       // no dash at all
-		{"repo-short", "repo-short"},               // suffix not 12 chars
-		{"repo-ghijklmnopqr", "repo-ghijklmnopqr"}, // 12 chars but non-hex
-	}
-	for _, c := range cases {
-		if got := repoKeyBasename(c.in); got != c.want {
-			t.Errorf("repoKeyBasename(%q) = %q, want %q", c.in, got, c.want)
-		}
 	}
 }

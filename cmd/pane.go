@@ -19,7 +19,6 @@ import (
 	"github.com/glebglazov/pop/history"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/monitor"
-	"github.com/glebglazov/pop/project"
 	"github.com/spf13/cobra"
 )
 
@@ -77,7 +76,7 @@ func resolveSession() (string, error) {
 
 func resolveSessionWith(tmux tmuxmod.Tmux) (string, error) {
 	if paneProject != "" {
-		name := project.SessionName(paneProject)
+		name := checkoutSessionName(paneProject)
 		if err := tmuxmod.Ensure(tmux, name, paneProject); err != nil {
 			return "", err
 		}
