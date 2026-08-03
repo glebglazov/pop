@@ -262,7 +262,7 @@ func BeginDrain(d *Deps, runtimePath, setID string, noticeOut io.Writer) (*Drain
 		if errors.As(err, &claimed) {
 			return nil, exitErr(ExitOperational,
 				"checkout claimed by set %s (%s)",
-				claimed.Claim.SetID, claimed.Claim.Reason())
+				claimed.Claim.Holder.ContainerID, claimed.Claim.Reason.Phrase())
 		}
 		return nil, exitErr(ExitOperational, "record drain start: %v", err)
 	}

@@ -14,8 +14,8 @@ type RecoveryBlockKind string
 const (
 	// RecoveryBlockClaimed: a live Checkout claim holds the path (ADR-0135) — a
 	// running Drain of another set, or another set's claim-bearing Failed-gate
-	// hold (a dirty tree under review). The Claim field carries the owning set and
-	// claim kind so the status line can name it. A non-claiming gate hold (HITL,
+	// hold (a dirty tree under review). The Claim field carries the holder and
+	// claim reason so the status line can name it. A non-claiming gate hold (HITL,
 	// verify-fail, clean Failed gate) and peer quota waiters are not blockers here:
 	// peers are resolved by the waiter-ordering check below.
 	RecoveryBlockClaimed RecoveryBlockKind = "claimed"
@@ -27,8 +27,8 @@ const (
 
 // RecoveryBlock is the reason a recovery turn was denied after the waiter's
 // cooldown elapsed: a kind plus the ID of the set that is blocking the path. For
-// a RecoveryBlockClaimed block, Claim carries the live Checkout claim (owning set
-// + claim kind) so the status line can render "claimed by set X — <reason>".
+// a RecoveryBlockClaimed block, Claim carries the live Checkout claim (holder +
+// claim reason) so the status line can render "claimed by set X — <reason>".
 type RecoveryBlock struct {
 	Kind  RecoveryBlockKind
 	SetID string
@@ -65,12 +65,12 @@ func (s *Store) TryAcquireRecoveryTurn(w RecoveryWaiter, now time.Time) (bool, *
 	if claim, err := s.liveDrainClaim(tx, w.RuntimePath); err != nil {
 		return false, nil, err
 	} else if claim != nil {
-		return false, &RecoveryBlock{Kind: RecoveryBlockClaimed, SetID: claim.SetID, Claim: claim}, nil
+		return false, &RecoveryBlock{Kind: RecoveryBlockClaimed, SetID: claim.Holder.ContainerID, Claim: claim}, nil
 	}
 	if claim, err := s.liveGateHoldClaim(tx, w.RuntimePath, w.SetID); err != nil {
 		return false, nil, err
 	} else if claim != nil {
-		return false, &RecoveryBlock{Kind: RecoveryBlockClaimed, SetID: claim.SetID, Claim: claim}, nil
+		return false, &RecoveryBlock{Kind: RecoveryBlockClaimed, SetID: claim.Holder.ContainerID, Claim: claim}, nil
 	}
 
 	var turnSetID sql.NullString

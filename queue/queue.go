@@ -1090,9 +1090,9 @@ func selectReadySets(refresh *tasks.RefreshResult, backoff setBackoffFunc, recov
 		// naming the holding set. Non-claiming gate holds return no claim and so
 		// never defer dispatch.
 		if claimFor != nil {
-			if claim := claimFor(row.ID); claim != nil && claim.SetID != row.ID {
-				if claim.Kind == store.ClaimQuotaWaiter {
-					if w, ok := recoveryWaiters[claim.SetID]; ok {
+			if claim := claimFor(row.ID); claim != nil && claim.Holder.ContainerID != row.ID {
+				if claim.Reason == store.ClaimQuotaWaiter {
+					if w, ok := recoveryWaiters[claim.Holder.ContainerID]; ok {
 						if recoveryID == "" {
 							recoveryID = row.ID
 						}

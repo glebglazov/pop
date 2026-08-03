@@ -7,6 +7,7 @@ import (
 
 	"github.com/glebglazov/pop/store"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/work/ref"
 )
 
 // claimForMap builds a checkoutClaimFunc from a candidate-set → claim map, the
@@ -28,7 +29,7 @@ func TestSelectReadySetDefersBehindOtherSetQuotaWaiter(t *testing.T) {
 		"set-a": {SetID: "set-a", Preset: "codex", ResetAt: resetAt, RuntimePath: "/rt"},
 	}
 	claims := claimForMap(map[string]*store.CheckoutClaim{
-		"set-b": {Kind: store.ClaimQuotaWaiter, SetID: "set-a"},
+		"set-b": {Holder: ref.WorkRef{Kind: ref.KindTaskSet, ContainerID: "set-a"}, Reason: store.ClaimQuotaWaiter},
 	})
 
 	ids, deferral, ok := selectReadySets(refresh, nil, recoveryWaiters, claims)
@@ -48,7 +49,7 @@ func TestSelectReadySetDefersBehindOtherSetFailedGate(t *testing.T) {
 		{ID: "set-b", Status: tasks.StatusReady, AutoDrain: true, Priority: 100, RegIndex: 0},
 	}}
 	claims := claimForMap(map[string]*store.CheckoutClaim{
-		"set-b": {Kind: store.ClaimFailedGate, SetID: "set-a"},
+		"set-b": {Holder: ref.WorkRef{Kind: ref.KindTaskSet, ContainerID: "set-a"}, Reason: store.ClaimFailedGate},
 	})
 
 	ids, deferral, ok := selectReadySets(refresh, nil, nil, claims)
@@ -94,7 +95,7 @@ func TestSelectReadySetOwnClaimStillDefers(t *testing.T) {
 	// The claim on set-a's checkout is set-a's own waiter; the checkout-scoped arm
 	// must not treat an own claim as another set's.
 	claims := claimForMap(map[string]*store.CheckoutClaim{
-		"set-a": {Kind: store.ClaimQuotaWaiter, SetID: "set-a"},
+		"set-a": {Holder: ref.WorkRef{Kind: ref.KindTaskSet, ContainerID: "set-a"}, Reason: store.ClaimQuotaWaiter},
 	})
 
 	ids, deferral, ok := selectReadySets(refresh, nil, recoveryWaiters, claims)
@@ -148,7 +149,7 @@ func TestUnplacedSetNotClaimDeferredBehindTrunkDrain(t *testing.T) {
 		setScopedKey("repo-key", "bound-on-trunk"): {RuntimePath: trunk},
 	}
 	boundClaim := d.checkoutClaimLookup(bound, "repo-key")
-	if claim := boundClaim("bound-on-trunk"); claim == nil || claim.Kind != store.ClaimRunningDrain || claim.SetID != "trunk-drain" {
+	if claim := boundClaim("bound-on-trunk"); claim == nil || claim.Reason != store.ClaimRunningDrain || claim.Holder.ContainerID != "trunk-drain" {
 		t.Fatalf("bound-on-trunk claim = %+v, want trunk-drain running claim", claim)
 	}
 
@@ -174,7 +175,7 @@ func TestCheckoutClaimDeferralRendersReason(t *testing.T) {
 		Deferral: SpawnDeferral{
 			Reason: DeferCheckoutClaim,
 			SetID:  "set-b",
-			Claim:  &store.CheckoutClaim{Kind: store.ClaimFailedGate, SetID: "set-a"},
+			Claim:  &store.CheckoutClaim{Holder: ref.WorkRef{Kind: ref.KindTaskSet, ContainerID: "set-a"}, Reason: store.ClaimFailedGate},
 		},
 	}
 	item := blockedItemFromIdle(idle)

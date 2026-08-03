@@ -349,7 +349,7 @@ func TestAcquireRecoveryTurn_BlockedByClaimBearingGateHold(t *testing.T) {
 		t.Fatal("recovery turn must not be acquired while a claim-bearing gate hold is active")
 	}
 	if block == nil || block.Kind != store.RecoveryBlockClaimed || block.Claim == nil ||
-		block.Claim.Kind != store.ClaimFailedGate || block.Claim.SetID != "set-a" {
+		block.Claim.Reason != store.ClaimFailedGate || block.Claim.Holder.ContainerID != "set-a" {
 		t.Fatalf("want failed_gate claim block for set-a, got %+v", block)
 	}
 

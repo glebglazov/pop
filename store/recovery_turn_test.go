@@ -117,7 +117,7 @@ func TestTryAcquireRecoveryTurnBlockedByClaimBearingGateHold(t *testing.T) {
 	if block == nil || block.Kind != RecoveryBlockClaimed || block.SetID != "set-gate" {
 		t.Fatalf("want claimed block for set-gate, got %+v", block)
 	}
-	if block.Claim == nil || block.Claim.Kind != ClaimFailedGate {
+	if block.Claim == nil || block.Claim.Reason != ClaimFailedGate {
 		t.Fatalf("want failed_gate claim, got %+v", block.Claim)
 	}
 }
@@ -169,7 +169,7 @@ func TestTryAcquireRecoveryTurnBlockedByLiveDrain(t *testing.T) {
 	if block == nil || block.Kind != RecoveryBlockClaimed || block.SetID != "set-drain" {
 		t.Fatalf("want claimed block for set-drain, got %+v", block)
 	}
-	if block.Claim == nil || block.Claim.Kind != ClaimRunningDrain {
+	if block.Claim == nil || block.Claim.Reason != ClaimRunningDrain {
 		t.Fatalf("want running_drain claim, got %+v", block.Claim)
 	}
 }

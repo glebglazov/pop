@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/glebglazov/pop/work/ref"
 )
 
 // ErrCheckoutClaimed reports that StartDrain refused because another set's live
@@ -12,44 +14,36 @@ import (
 // from ErrDrainInProgress — which names a live *running Drain* on the same (repo,
 // set) or checkout — because a claim can be held by a non-executing process (a
 // quota-recovery waiter that will resume). A *CheckoutClaimedError carries the
-// claiming set and claim kind and satisfies errors.Is(err, ErrCheckoutClaimed).
+// claiming holder and claim reason and satisfies errors.Is(err, ErrCheckoutClaimed).
 var ErrCheckoutClaimed = errors.New("checkout claimed by another set")
 
-// CheckoutClaimKind names what holds a Checkout claim on a runtime path. The
-// claim union is derived at read time (no table): a live running Drain, a live
-// Recovery waiter, or a live claim-bearing Checkout gate hold.
-type CheckoutClaimKind string
+// ClaimReason names why a Checkout claim holds a runtime path. It survives the
+// move to a Work-ref holder because two of its three values are *states of a
+// Task set*: with a ref holder all three would collapse to task-set:<id> and a
+// deferral message would lose why the checkout is held. The claim union is
+// derived at read time (no table): a live running Drain, a live Recovery waiter,
+// or a live claim-bearing Checkout gate hold.
+type ClaimReason string
 
 const (
 	// ClaimRunningDrain: a live running Drain is executing against the path.
-	ClaimRunningDrain CheckoutClaimKind = "running_drain"
+	ClaimRunningDrain ClaimReason = "running_drain"
 	// ClaimQuotaWaiter: a live Recovery waiter is parked on the path, waiting for
 	// its preset's cooldown before resuming — an automatic process that will
 	// resume, so it claims the checkout (ADR-0135).
-	ClaimQuotaWaiter CheckoutClaimKind = "quota_waiter"
+	ClaimQuotaWaiter ClaimReason = "quota_waiter"
 	// ClaimFailedGate: a live claim-bearing Checkout gate hold — a set parked at a
 	// Failed gate over uncommitted work (dirtiness snapshotted at park time,
 	// ADR-0135). Admitting another set would rewrite the dirty tree the human is
 	// mid-review of. A non-claiming gate hold (HITL, verify-fail, clean Failed
 	// gate) is not a claim.
-	ClaimFailedGate CheckoutClaimKind = "failed_gate"
+	ClaimFailedGate ClaimReason = "failed_gate"
 )
 
-// CheckoutClaim is a live claim on a runtime checkout, derived at read time from
-// the claim union (ADR-0135): the kind of claim and the set that owns it, plus
-// the owner's PID and the instant the claim began so a caller can say how long it
-// has been held.
-type CheckoutClaim struct {
-	Kind  CheckoutClaimKind
-	SetID string
-	PID   int
-	Since time.Time
-}
-
-// Reason renders the claim kind as a short human phrase for status and refusal
+// Phrase renders the claim reason as a short human phrase for status and refusal
 // lines (e.g. "checkout claimed by set X (quota wait)").
-func (c CheckoutClaim) Reason() string {
-	switch c.Kind {
+func (r ClaimReason) Phrase() string {
+	switch r {
 	case ClaimRunningDrain:
 		return "running drain"
 	case ClaimQuotaWaiter:
@@ -57,19 +51,39 @@ func (c CheckoutClaim) Reason() string {
 	case ClaimFailedGate:
 		return "failed gate, uncommitted changes"
 	default:
-		return string(c.Kind)
+		return string(r)
 	}
 }
 
+// CheckoutClaim is a live claim on a runtime checkout, derived at read time from
+// the claim union (ADR-0135): the piece of Work that owns it and why, plus the
+// owner's PID and the instant the claim began so a caller can say how long it has
+// been held. Holder is a Work ref rather than a set id so a checkout can be held
+// by something that is not a Task set; every source of the union derives from a
+// Task set today, so every holder is currently task-set:<id>.
+type CheckoutClaim struct {
+	Holder ref.WorkRef
+	Reason ClaimReason
+	PID    int
+	Since  time.Time
+}
+
+// taskSetHolder names the Task set owning a claim. Each row the union reads
+// (drains, recovery_waiters, checkout_gate_holds) is keyed by set id, so the
+// kind is fixed here rather than stored.
+func taskSetHolder(setID string) ref.WorkRef {
+	return ref.WorkRef{Kind: ref.KindTaskSet, ContainerID: setID}
+}
+
 // CheckoutClaimedError carries the claim that caused a StartDrain refusal so the
-// caller can name the claiming set and claim kind. It unwraps to ErrCheckoutClaimed
-// so errors.Is(err, ErrCheckoutClaimed) holds.
+// caller can name the claiming holder and claim reason. It unwraps to
+// ErrCheckoutClaimed so errors.Is(err, ErrCheckoutClaimed) holds.
 type CheckoutClaimedError struct {
 	Claim CheckoutClaim
 }
 
 func (e *CheckoutClaimedError) Error() string {
-	return fmt.Sprintf("checkout claimed by set %s (%s)", e.Claim.SetID, e.Claim.Reason())
+	return fmt.Sprintf("checkout claimed by set %s (%s)", e.Claim.Holder.ContainerID, e.Claim.Reason.Phrase())
 }
 
 func (e *CheckoutClaimedError) Is(target error) bool { return target == ErrCheckoutClaimed }
@@ -146,7 +160,7 @@ func (s *Store) liveGateHoldClaim(q claimQuerier, runtimePath, excludeSet string
 			continue
 		}
 		if s.alive(c.pid, c.procStart) {
-			return &CheckoutClaim{Kind: ClaimFailedGate, SetID: c.setID, PID: c.pid, Since: c.since}, nil
+			return &CheckoutClaim{Holder: taskSetHolder(c.setID), Reason: ClaimFailedGate, PID: c.pid, Since: c.since}, nil
 		}
 	}
 	return nil, nil
@@ -191,7 +205,7 @@ func (s *Store) liveDrainClaim(q claimQuerier, runtimePath string) (*CheckoutCla
 
 	for _, c := range cands {
 		if s.alive(c.pid, c.procStart) {
-			return &CheckoutClaim{Kind: ClaimRunningDrain, SetID: c.setID, PID: c.pid, Since: c.since}, nil
+			return &CheckoutClaim{Holder: taskSetHolder(c.setID), Reason: ClaimRunningDrain, PID: c.pid, Since: c.since}, nil
 		}
 	}
 	return nil, nil
@@ -239,7 +253,7 @@ func (s *Store) liveWaiterClaim(q claimQuerier, runtimePath, excludeSet string) 
 			continue
 		}
 		if s.alive(c.pid, c.procStart) {
-			return &CheckoutClaim{Kind: ClaimQuotaWaiter, SetID: c.setID, PID: c.pid, Since: c.since}, nil
+			return &CheckoutClaim{Holder: taskSetHolder(c.setID), Reason: ClaimQuotaWaiter, PID: c.pid, Since: c.since}, nil
 		}
 	}
 	return nil, nil

@@ -33,7 +33,7 @@ const (
 	// DeferCheckoutClaim is a checkout-scoped deferral (ADR-0135): a Ready set's
 	// bound checkout carries *another* set's live Checkout claim over which quota
 	// recovery does not already speak — a dirty Failed-gate hold (or a running
-	// drain sharing the checkout). Claim names the holding set and claim kind; a
+	// drain sharing the checkout). Claim names the holder and claim reason; a
 	// quota-waiter claim is instead reported as DeferQuotaRecovery so its reset
 	// instant feeds the earliest-eligible display.
 	DeferCheckoutClaim
@@ -47,7 +47,7 @@ type SpawnDeferral struct {
 	SetID  string
 	Until  time.Time
 	// Claim carries the other set's Checkout claim when Reason is
-	// DeferCheckoutClaim — the holding set and claim kind the message names. Nil
+	// DeferCheckoutClaim — the holder and claim reason the message names. Nil
 	// for every other species.
 	Claim *store.CheckoutClaim
 }
@@ -56,11 +56,11 @@ type SpawnDeferral struct {
 func (d SpawnDeferral) Deferred() bool { return d.Reason != DeferNone }
 
 // Message is the human-readable decision reason for this deferral. For a
-// DeferCheckoutClaim it names the holding set and its claim kind; every other
+// DeferCheckoutClaim it names the holding set and its claim reason; every other
 // species defers to the reason-species wording.
 func (d SpawnDeferral) Message() string {
 	if d.Reason == DeferCheckoutClaim && d.Claim != nil {
-		return fmt.Sprintf("checkout claimed by set %s (%s)", d.Claim.SetID, d.Claim.Reason())
+		return fmt.Sprintf("checkout claimed by set %s (%s)", d.Claim.Holder.ContainerID, d.Claim.Reason.Phrase())
 	}
 	return d.Reason.Message()
 }

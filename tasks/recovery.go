@@ -515,17 +515,17 @@ func (d *Deps) recoveryPollImminentInterval() time.Duration {
 // recoveryPrinter decides when the recovery wait loop emits a status line,
 // decoupling printing cadence from the poll/fast-check ticker cadence (ADR-0100).
 // The pre-reset countdown prints on every poll tick; the post-reset block line
-// prints only when the reason changes (different kind or blocking set) or when
-// the heartbeat interval elapses.
+// prints only when the reason changes (different claim reason or blocking set)
+// or when the heartbeat interval elapses.
 type recoveryPrinter struct {
 	out       *output
 	heartbeat time.Duration
 
-	haveBlock    bool
-	lastKind     store.RecoveryBlockKind
-	lastClaimKnd store.CheckoutClaimKind
-	lastSetID    string
-	lastBlockAt  time.Time
+	haveBlock       bool
+	lastKind        store.RecoveryBlockKind
+	lastClaimReason store.ClaimReason
+	lastSetID       string
+	lastBlockAt     time.Time
 }
 
 // countdown prints the pre-reset waiting line. It is called once per poll tick,
@@ -551,12 +551,12 @@ func (p *recoveryPrinter) blocked(now time.Time, block *store.RecoveryBlock) {
 	if p == nil || p.out == nil || block == nil {
 		return
 	}
-	var claimKnd store.CheckoutClaimKind
+	var claimReason store.ClaimReason
 	if block.Claim != nil {
-		claimKnd = block.Claim.Kind
+		claimReason = block.Claim.Reason
 	}
 	changed := !p.haveBlock || block.Kind != p.lastKind ||
-		block.SetID != p.lastSetID || claimKnd != p.lastClaimKnd
+		block.SetID != p.lastSetID || claimReason != p.lastClaimReason
 	if !changed && now.Sub(p.lastBlockAt) < p.heartbeat {
 		return
 	}
@@ -564,7 +564,7 @@ func (p *recoveryPrinter) blocked(now time.Time, block *store.RecoveryBlock) {
 		recoveryBlockMessage(block))
 	p.haveBlock = true
 	p.lastKind = block.Kind
-	p.lastClaimKnd = claimKnd
+	p.lastClaimReason = claimReason
 	p.lastSetID = block.SetID
 	p.lastBlockAt = now
 }
@@ -601,14 +601,14 @@ func acquireRecoveryTurnWithStore(s *store.Store, w *RecoveryWaiter) (bool, *sto
 
 // recoveryBlockMessage renders a post-cooldown recovery block as a human phrase
 // naming the actual blocker, with distinct wording per kind. A claim block names
-// the claiming set and claim kind (e.g. "claimed by set X — failed gate,
+// the claiming set and claim reason (e.g. "claimed by set X — failed gate,
 // uncommitted changes"); turn-held and behind-waiter blocks are queue positions,
 // not claims.
 func recoveryBlockMessage(b *store.RecoveryBlock) string {
 	switch b.Kind {
 	case store.RecoveryBlockClaimed:
 		if b.Claim != nil {
-			return fmt.Sprintf("claimed by set %s — %s", b.Claim.SetID, b.Claim.Reason())
+			return fmt.Sprintf("claimed by set %s — %s", b.Claim.Holder.ContainerID, b.Claim.Reason.Phrase())
 		}
 		return fmt.Sprintf("claimed by set %s", b.SetID)
 	case store.RecoveryBlockTurnHeld:

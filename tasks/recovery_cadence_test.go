@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/store"
+	"github.com/glebglazov/pop/work/ref"
 )
 
 // countLines counts non-empty status lines written to the buffer.
@@ -59,7 +60,7 @@ func TestRecoveryPrinterBlockedReasonChange(t *testing.T) {
 
 	// Different kind (a claim block): prints again.
 	drain := &store.RecoveryBlock{Kind: store.RecoveryBlockClaimed, SetID: "set-a",
-		Claim: &store.CheckoutClaim{Kind: store.ClaimRunningDrain, SetID: "set-a"}}
+		Claim: &store.CheckoutClaim{Holder: ref.WorkRef{Kind: ref.KindTaskSet, ContainerID: "set-a"}, Reason: store.ClaimRunningDrain}}
 	p.blocked(base.Add(41*time.Second), drain)
 	if got := countLines(&buf); got != 2 {
 		t.Fatalf("reason-kind change printed total %d lines, want 2", got)
@@ -67,7 +68,7 @@ func TestRecoveryPrinterBlockedReasonChange(t *testing.T) {
 
 	// Same kind, different blocking set: prints again.
 	drainOther := &store.RecoveryBlock{Kind: store.RecoveryBlockClaimed, SetID: "set-b",
-		Claim: &store.CheckoutClaim{Kind: store.ClaimRunningDrain, SetID: "set-b"}}
+		Claim: &store.CheckoutClaim{Holder: ref.WorkRef{Kind: ref.KindTaskSet, ContainerID: "set-b"}, Reason: store.ClaimRunningDrain}}
 	p.blocked(base.Add(42*time.Second), drainOther)
 	if got := countLines(&buf); got != 3 {
 		t.Fatalf("blocking-set change printed total %d lines, want 3", got)
@@ -75,7 +76,7 @@ func TestRecoveryPrinterBlockedReasonChange(t *testing.T) {
 
 	// Same set, different claim kind (drain → failed gate): prints again.
 	gateClaim := &store.RecoveryBlock{Kind: store.RecoveryBlockClaimed, SetID: "set-b",
-		Claim: &store.CheckoutClaim{Kind: store.ClaimFailedGate, SetID: "set-b"}}
+		Claim: &store.CheckoutClaim{Holder: ref.WorkRef{Kind: ref.KindTaskSet, ContainerID: "set-b"}, Reason: store.ClaimFailedGate}}
 	p.blocked(base.Add(43*time.Second), gateClaim)
 	if got := countLines(&buf); got != 4 {
 		t.Fatalf("claim-kind change printed total %d lines, want 4", got)
@@ -91,7 +92,7 @@ func TestRecoveryPrinterBlockedHeartbeat(t *testing.T) {
 
 	base := time.Now().UTC()
 	gate := &store.RecoveryBlock{Kind: store.RecoveryBlockClaimed, SetID: "set-a",
-		Claim: &store.CheckoutClaim{Kind: store.ClaimFailedGate, SetID: "set-a"}}
+		Claim: &store.CheckoutClaim{Holder: ref.WorkRef{Kind: ref.KindTaskSet, ContainerID: "set-a"}, Reason: store.ClaimFailedGate}}
 
 	// Drive 150 seconds of 2s fast-tick-equivalent calls with an unchanged
 	// reason. Expect an initial print plus one per elapsed 60s heartbeat.

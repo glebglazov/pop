@@ -297,11 +297,8 @@ func refuseLiveClaim(td *tasks.Deps, label, path string) error {
 	if claim == nil {
 		return nil
 	}
-	reason := claim.Reason()
-	if reason == "" {
-		reason = string(claim.Kind)
-	}
-	holder := strings.TrimSpace(claim.SetID)
+	reason := claim.Reason.Phrase()
+	holder := strings.TrimSpace(claim.Holder.ContainerID)
 	if holder != "" {
 		return fmt.Errorf("fold refused: %s has a live claim (%s, held by %s)", label, reason, holder)
 	}

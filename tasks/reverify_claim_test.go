@@ -34,7 +34,7 @@ func TestReverifyAtGateAcquiresAndReleasesClaim(t *testing.T) {
 	if claimDuringRun == nil {
 		t.Fatalf("re-verify ran without holding a Checkout claim")
 	}
-	if claimDuringRun.Kind != store.ClaimRunningDrain || claimDuringRun.SetID != "demo" {
+	if claimDuringRun.Reason != store.ClaimRunningDrain || claimDuringRun.Holder.ContainerID != "demo" {
 		t.Fatalf("claim during run = %#v, want running-drain claim for demo", claimDuringRun)
 	}
 
@@ -92,7 +92,7 @@ func TestReverifyAtGateRefusedByOtherSetClaim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadCheckoutClaim: %v", err)
 	}
-	if claim == nil || claim.SetID != "set-other" || claim.Kind != store.ClaimQuotaWaiter {
+	if claim == nil || claim.Holder.ContainerID != "set-other" || claim.Reason != store.ClaimQuotaWaiter {
 		t.Fatalf("claim = %#v, want the surviving set-other quota waiter", claim)
 	}
 }

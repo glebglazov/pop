@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/glebglazov/pop/work/ref"
 )
 
 func putWaiter(t *testing.T, s *Store, setID, path string, pid int, procStart string) {
@@ -42,11 +44,11 @@ func TestReadCheckoutClaimFailedGate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadCheckoutClaim: %v", err)
 	}
-	if claim == nil || claim.Kind != ClaimFailedGate || claim.SetID != "set-a" {
+	if claim == nil || claim.Reason != ClaimFailedGate || claim.Holder.ContainerID != "set-a" {
 		t.Fatalf("claim = %+v, want failed-gate claim by set-a", claim)
 	}
-	if claim.Reason() != "failed gate, uncommitted changes" {
-		t.Fatalf("reason = %q, want %q", claim.Reason(), "failed gate, uncommitted changes")
+	if claim.Reason.Phrase() != "failed gate, uncommitted changes" {
+		t.Fatalf("reason = %q, want %q", claim.Reason.Phrase(), "failed gate, uncommitted changes")
 	}
 }
 
@@ -90,7 +92,7 @@ func TestStartDrainRefusesOtherSetClaimingGateHold(t *testing.T) {
 	if !errors.As(err, &claimed) {
 		t.Fatalf("err = %v, want *CheckoutClaimedError", err)
 	}
-	if claimed.Claim.SetID != "set-a" || claimed.Claim.Kind != ClaimFailedGate {
+	if claimed.Claim.Holder.ContainerID != "set-a" || claimed.Claim.Reason != ClaimFailedGate {
 		t.Fatalf("claim = %+v, want failed-gate claim by set-a", claimed.Claim)
 	}
 }
@@ -159,7 +161,7 @@ func TestReadCheckoutClaimRunningDrain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadCheckoutClaim: %v", err)
 	}
-	if claim == nil || claim.Kind != ClaimRunningDrain || claim.SetID != "set-a" {
+	if claim == nil || claim.Reason != ClaimRunningDrain || claim.Holder.ContainerID != "set-a" {
 		t.Fatalf("claim = %+v, want running-drain claim by set-a", claim)
 	}
 }
@@ -171,8 +173,73 @@ func TestReadCheckoutClaimQuotaWaiter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadCheckoutClaim: %v", err)
 	}
-	if claim == nil || claim.Kind != ClaimQuotaWaiter || claim.SetID != "set-a" {
+	if claim == nil || claim.Reason != ClaimQuotaWaiter || claim.Holder.ContainerID != "set-a" {
 		t.Fatalf("claim = %+v, want quota-waiter claim by set-a", claim)
+	}
+}
+
+// TestCheckoutClaimHoldersAreTaskSetRefs pins the property the ref holder buys
+// and the one it must not cost: all three arms of the claim union name their
+// holder as task-set:<id>, and each keeps its own reason phrase — the reason is
+// the only thing distinguishing them once the holder collapses to one shape.
+func TestCheckoutClaimHoldersAreTaskSetRefs(t *testing.T) {
+	cases := []struct {
+		name   string
+		setUp  func(t *testing.T, s *Store)
+		reason ClaimReason
+		phrase string
+	}{
+		{
+			name: "running drain",
+			setUp: func(t *testing.T, s *Store) {
+				if _, err := s.StartDrain(Drain{Repo: "repo", SetID: "set-a", RuntimePath: "/rt", PID: 100, ProcStart: "t1", StartedAt: time.Now()}); err != nil {
+					t.Fatalf("StartDrain: %v", err)
+				}
+			},
+			reason: ClaimRunningDrain,
+			phrase: "running drain",
+		},
+		{
+			name:   "quota waiter",
+			setUp:  func(t *testing.T, s *Store) { putWaiter(t, s, "set-a", "/rt", 100, "t1") },
+			reason: ClaimQuotaWaiter,
+			phrase: "quota wait",
+		},
+		{
+			name:   "failed gate",
+			setUp:  func(t *testing.T, s *Store) { putGateHold(t, s, "set-a", "/rt", 100, "t1", true) },
+			reason: ClaimFailedGate,
+			phrase: "failed gate, uncommitted changes",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := openTestStore(t, aliveByToken(Drain{PID: 100, ProcStart: "t1"}))
+			tc.setUp(t, s)
+			claim, err := s.ReadCheckoutClaim("/rt")
+			if err != nil {
+				t.Fatalf("ReadCheckoutClaim: %v", err)
+			}
+			if claim == nil {
+				t.Fatal("ReadCheckoutClaim = nil, want a live claim")
+			}
+			if claim.Holder != (ref.WorkRef{Kind: ref.KindTaskSet, ContainerID: "set-a"}) {
+				t.Fatalf("holder = %+v, want task-set:set-a", claim.Holder)
+			}
+			if claim.Holder.String() != "task-set:set-a" {
+				t.Fatalf("holder renders %q, want %q", claim.Holder, "task-set:set-a")
+			}
+			if claim.Reason != tc.reason || claim.Reason.Phrase() != tc.phrase {
+				t.Fatalf("reason = %q (%q), want %q (%q)", claim.Reason, claim.Reason.Phrase(), tc.reason, tc.phrase)
+			}
+			// The refusal names the bare set id, not the rendered ref: routing the
+			// message through the holder's String() would silently reword every
+			// refusal and deferral line to "claimed by set task-set:set-a".
+			refusal := (&CheckoutClaimedError{Claim: *claim}).Error()
+			if want := "checkout claimed by set set-a (" + tc.phrase + ")"; refusal != want {
+				t.Fatalf("refusal = %q, want %q", refusal, want)
+			}
+		})
 	}
 }
 
@@ -205,7 +272,7 @@ func TestStartDrainRefusesOtherSetWaiter(t *testing.T) {
 	if !errors.As(err, &claimed) {
 		t.Fatalf("err = %v, want *CheckoutClaimedError", err)
 	}
-	if claimed.Claim.SetID != "set-a" || claimed.Claim.Kind != ClaimQuotaWaiter {
+	if claimed.Claim.Holder.ContainerID != "set-a" || claimed.Claim.Reason != ClaimQuotaWaiter {
 		t.Fatalf("claim = %+v, want quota-waiter claim by set-a", claimed.Claim)
 	}
 }
