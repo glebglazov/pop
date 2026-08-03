@@ -5,8 +5,8 @@
 // wires them — and it imports neither bubbletea nor lipgloss, so the styled
 // render layer stays TUI-side (ADR-0143); guard tests enforce both boundaries.
 //
-// The transitional legacy row model (Row, SetRef, and the unstyled cell
-// composition around them) still lives here, derived from Container, so the
+// The transitional legacy row model (the Row alias, SetRef, and the unstyled
+// cell composition around them) still lives here, folded into Container, so the
 // consumers the contract slices have yet to migrate keep compiling.
 package work
 
@@ -74,50 +74,21 @@ type SetRef struct {
 	LiveDrain bool
 }
 
-// Row is one read-only Work dashboard table row.
-type Row struct {
-	SetRef
-
-	Project string
-	// Started mirrors tasks.Row.Started: a started READY set renders as
-	// "IN PROGRESS". It is a presentational input to the render-time STATUS
-	// composition (StatusCell), never a schedulability fact — logic keys on
-	// RawStatus.
-	Started bool
-	// VerifiedAtSHA mirrors tasks.Row.VerifiedAtSHA: the short SHA of the episode's
-	// PASS verdict when the set is terminal and cleared. DeriveVerifiedAtBadge maps
-	// it with VerifiedAtDrifted to badge text for the STATUS cell (ADR-0156).
-	VerifiedAtSHA string
-	// VerifiedAtDrifted mirrors tasks.Row.VerifiedAtDrifted: HEAD has moved past
-	// the PASS SHA on VerifiedAtSHA.
-	VerifiedAtDrifted bool
-	Worktree      string
-
-	// IsMap marks a Wayfinder Map row (ADR-0130). Map rows reuse SetID for the
-	// map id and leave Worktree blank; queue verbs (a/b/U) are inert on them.
-	IsMap bool
-	// MapOpen and MapFrontier are ticket tallies for map-row STATUS cells
-	// (`WAYFINDING · N open / M frontier`). Zero on Task-set rows.
-	MapOpen, MapFrontier int
-
-	// CursorKey is the stable per-row identity the TUI pins cursor memory to
-	// across refreshes. It is queue's navigation seam, carried on the row so the
-	// model can restore the cursor by key after a rebuild; blank on rows built
-	// outside the dashboard.
-	CursorKey string
-	// DestKind selects how the destination column is styled; Worktree holds the
-	// plain label (branch name, "[managed wt]", or "needs bind"). It is the
-	// style-selection fact the queue-side wrappers read (ADR-0143).
-	DestKind DestKind
-}
+// Row is the Work dashboard row, which is now the Work container itself: the
+// transitional Task-set-only cells were absorbed into Container rather than kept
+// beside it, so a row is a container and there is no second model to keep in
+// step. The alias is what lets the consumers the contract slices have yet to
+// migrate keep saying "row"; it dies with them.
+type Row = Container
 
 // Snapshot is the data model for `pop work dashboard`.
 type Snapshot struct {
-	Rows []Row
 	// Containers are every loaded Work container in snapshot order — kind
-	// precedence, then each kind's own comparator. Rows is a projection of this;
-	// consumers migrate from one to the other surface by surface.
+	// precedence, then each kind's own comparator.
 	Containers []Container
+	// Rows is the same slice under the row model's name, for the consumers that
+	// still speak in rows.
+	Rows []Row
 	// Summary is every kind's header phrases in kind order, already pluralised.
 	// SummaryLine joins them.
 	Summary []string

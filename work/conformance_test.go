@@ -132,8 +132,17 @@ func TestKindConformance(t *testing.T) {
 			if c.Kind != tc.id {
 				t.Fatalf("container kind = %q, want %q", c.Kind, tc.id)
 			}
-			if c.Project == "" || c.Status == "" || c.StatusCell == "" || c.CursorKey == "" {
-				t.Fatalf("container %+v must carry a project, a status label, a status cell and a cursor key", c)
+			if c.Project == "" || c.Status == "" || c.CursorKey == "" {
+				t.Fatalf("container %+v must carry a project, a status label and a cursor key", c)
+			}
+			// Every kind composes a STATUS cell, and its first segment is the label a
+			// surface colours by bucket.
+			segments := k.StatusCell(c)
+			if len(segments) == 0 || segments[0].Tone != work.ToneLabel || segments[0].Text != c.Status {
+				t.Fatalf("StatusCell = %+v, want a leading label segment carrying %q", segments, c.Status)
+			}
+			if cell := work.StatusCellText(segments); cell == "" {
+				t.Fatalf("StatusCell composed nothing for %+v", c)
 			}
 			if c.Ref() != (ref.WorkRef{Kind: tc.id, ContainerID: tc.container}) {
 				t.Fatalf("Ref() = %q, want %s:%s", c.Ref(), tc.id, tc.container)
@@ -164,10 +173,16 @@ func TestKindConformance(t *testing.T) {
 				t.Fatalf("copy-name = %+v, %v, want the container id on the clipboard", out, err)
 			}
 			out, err = k.Perform(c, nil, work.VerbShell)
-			if err != nil {
+			switch {
+			case c.Checkout == "":
+				// A kind that resolves no directory refuses the shell rather than
+				// picking one.
+				if err == nil {
+					t.Fatalf("shell = %+v, want a refusal when the kind resolves no checkout", out)
+				}
+			case err != nil:
 				t.Fatalf("shell: %v", err)
-			}
-			if out.Kind != work.OutcomeHandoff || out.Handoff.Dir != c.Checkout {
+			case out.Kind != work.OutcomeHandoff || out.Handoff.Dir != c.Checkout:
 				t.Fatalf("shell = %+v, want a handoff into %q", out, c.Checkout)
 			}
 			if _, err := k.Perform(c, nil, work.Verb("no-such-verb")); err == nil {

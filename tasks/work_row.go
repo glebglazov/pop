@@ -162,29 +162,54 @@ func WorkRowStatusLabel(row work.Row) string {
 // into column math; the queue-side styled wrapper layers styling for the rendered
 // output.
 func WorkRowStatusCell(row work.Row) string {
-	label := WorkRowStatusLabel(row)
+	return work.StatusCellText(WorkRowStatusSegments(row))
+}
+
+// WorkRowStatusSegments is that same composition as tone-tagged tokens — the
+// form a styled surface needs, since it must paint the label by status bucket
+// and the verified-at badge by verdict age while leaving every other suffix
+// plain. Plain and styled therefore differ only by ANSI: both walk this one
+// sequence.
+func WorkRowStatusSegments(row work.Row) []work.StatusSegment {
+	segments := []work.StatusSegment{{Text: WorkRowStatusLabel(row), Tone: work.ToneLabel}}
 	badge := DeriveVerifiedAtBadge(Row{
 		Status:            row.RawStatus,
 		VerifiedAtSHA:     row.VerifiedAtSHA,
 		VerifiedAtDrifted: row.VerifiedAtDrifted,
 	})
 	if text := VerifiedAtBadgeText(badge); text != "" {
-		label += " · " + text
+		segments = append(segments, work.StatusSegment{Text: text, Tone: verifiedAtTone(badge.State)})
 	}
 	if work.AutoDrainWaiting(row) {
-		label += " · auto-drain"
+		segments = append(segments, work.StatusSegment{Text: "auto-drain", Tone: work.TonePlain})
 	}
 	if row.Orphaned {
-		label += " · orphaned"
+		segments = append(segments, work.StatusSegment{Text: "orphaned", Tone: work.TonePlain})
 	}
 	// Parked and config-error relocated off the DRAIN string onto the STATUS cell
 	// (ADR-0111). Both are uncoloured plain text; they trail the auto-drain/
 	// orphaned suffixes in a fixed order.
 	if row.Parked {
-		label += " · parked"
+		segments = append(segments, work.StatusSegment{Text: "parked", Tone: work.TonePlain})
 	}
 	if row.ConfigError != "" {
-		label += " · config error: " + row.ConfigError
+		segments = append(segments, work.StatusSegment{Text: "config error: " + row.ConfigError, Tone: work.TonePlain})
 	}
-	return label
+	return segments
+}
+
+// verifiedAtTone maps the three verified-at states onto the seam's attention
+// tones (ADR-0156): a PASS at HEAD is good, a drifted one warns, an unverified
+// terminal set is bad.
+func verifiedAtTone(state VerifiedAtBadgeState) work.StatusTone {
+	switch state {
+	case VerifiedAtAtHead:
+		return work.ToneGood
+	case VerifiedAtDrifted:
+		return work.ToneWarn
+	case VerifiedAtUnverified:
+		return work.ToneBad
+	default:
+		return work.TonePlain
+	}
 }

@@ -10,12 +10,13 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/work/ref"
 )
 
 func TestDashboardActionMenuStatusAndAssistKeys(t *testing.T) {
 	row := DashboardRow{SetRef: SetRef{SetID: "demo", RawStatus: tasks.StatusReady, Bound: true}}
 	keys := make(map[string]string)
-	for _, item := range dashboardMenuItems(row) {
+	for _, item := range dashboardMenuItems(testKinds(), row) {
 		keys[item.key] = item.label
 	}
 	if keys["s"] != "status ▸" {
@@ -28,7 +29,7 @@ func TestDashboardActionMenuStatusAndAssistKeys(t *testing.T) {
 		t.Fatal("top-level archive shortcut x missing")
 	}
 
-	mapKeys := dashboardMenuItems(DashboardRow{IsMap: true, SetRef: SetRef{SetID: "map-1"}})
+	mapKeys := dashboardMenuItems(testKinds(), DashboardRow{Kind: ref.KindMap, SetRef: SetRef{SetID: "map-1"}})
 	for _, item := range mapKeys {
 		if item.key == "s" || item.key == "S" {
 			t.Fatalf("map row should not offer status or assist: %v", mapKeys)
@@ -50,7 +51,7 @@ func TestDashboardStatusSubmenuItems(t *testing.T) {
 func TestDashboardStatusSubmenuEscNavigation(t *testing.T) {
 	row := DashboardRow{SetRef: SetRef{SetID: "demo"}}
 	m := newQueueDashboard(nil, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
-	m.menu = newDashboardMenu(row, false)
+	m.menu = newDashboardMenu(testKinds(), row, false)
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
 	got := updated.(QueueDashboard)
@@ -131,7 +132,7 @@ func TestDashboardStatusSubmenuDispatchInProcess(t *testing.T) {
 	d, cfg, row, _ := dashboardLaunchFixture(t, repo, setID)
 	row.ProjectPath = repo
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
-	m.menu = newDashboardMenu(row, false)
+	m.menu = newDashboardMenu(testKinds(), row, false)
 	m.menu.status = newDashboardStatusMenu(row)
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Text: "c"})

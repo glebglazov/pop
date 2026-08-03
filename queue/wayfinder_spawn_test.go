@@ -12,6 +12,7 @@ import (
 	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/wayfinder"
+	"github.com/glebglazov/pop/work/ref"
 )
 
 func wayfinderSpawnFixture(t *testing.T) (*Deps, *config.Config, DashboardRow, *tmuxtest.Fake, string) {
@@ -33,7 +34,7 @@ func wayfinderSpawnFixture(t *testing.T) (*Deps, *config.Config, DashboardRow, *
 	d.Project = project.DefaultDeps()
 	d.Tmux = f
 	row := DashboardRow{
-		IsMap:   true,
+		Kind:    ref.KindMap,
 		Project: "pop",
 		SetRef: SetRef{
 			SetID:       "2026-07-01-active",
@@ -347,7 +348,7 @@ func TestLivePaneCacheWayfinderWindow(t *testing.T) {
 	if cache.wayfinderState(wayfinderMapID) != livePaneRunning {
 		t.Fatalf("map window state = %v, want running", cache.wayfinderState(wayfinderMapID))
 	}
-	styled := dashboardActivityCluster(DashboardRow{IsMap: true, SetRef: SetRef{SetID: wayfinderMapID}}, cache, true)
+	styled := dashboardActivityCluster(DashboardRow{Kind: ref.KindMap, SetRef: SetRef{SetID: wayfinderMapID}}, cache, true)
 	if !strings.Contains(styled, livePaneRunningStyle.Render("I")) {
 		t.Fatalf("map row cluster = %q, want green I", styled)
 	}

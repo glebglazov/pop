@@ -179,8 +179,15 @@ func (d *Deps) SetKindDeps(cfg *config.Config, groups func() ([]repogroup.Group,
 // reads through queue's own filesystem and tmux, so a test that injects either
 // sees Maps through it too.
 func (d *Deps) MapKindDeps(cfg *config.Config, groups func() ([]repogroup.Group, error)) *wayfinder.MapKindDeps {
+	// A caller that wired no Task deps still gets a usable kind: constructing one
+	// must never touch the filesystem, and every read it does later goes through
+	// these.
+	td := d.Tasks
+	if td == nil {
+		td = tasks.DefaultDeps()
+	}
 	return &wayfinder.MapKindDeps{
-		Wayfinder: &wayfinder.Deps{FS: d.Tasks.FS, Tasks: d.Tasks, Tmux: d.Tmux},
+		Wayfinder: &wayfinder.Deps{FS: td.FS, Tasks: td, Tmux: d.Tmux},
 		Project:   d.Project,
 		Config:    cfg,
 		Groups:    groups,
@@ -400,30 +407,14 @@ type dashboardAbandonModal struct {
 	loading bool
 }
 
-// dashboardMenuAction identifies the verb a menu item dispatches.
-type dashboardMenuAction int
-
-const (
-	menuActionDrain dashboardMenuAction = iota
-	menuActionVerify
-	menuActionBind
-	menuActionUnbind
-	menuActionAutoDrain
-	menuActionStatusSubmenu
-	menuActionAssist
-	menuActionFold
-	menuActionUnpark
-	menuActionShell
-	menuActionArchive
-	menuActionCopyName
-)
-
 // dashboardMenuItem is one verb in the action menu overlay: the flat shortcut
-// letter it keeps, the label shown beside it, and the verb it dispatches.
+// letter it keeps, the label shown beside it, and the verb id it dispatches. All
+// three are the owning kind's (ADR-0173) — the dashboard authors no verb of its
+// own, it only recognises the ids whose modal it still owns.
 type dashboardMenuItem struct {
-	key    string
-	label  string
-	action dashboardMenuAction
+	key   string
+	label string
+	verb  work.Verb
 }
 
 // dashboardStatusAction identifies a task-set status verb in the status submenu.
@@ -488,47 +479,18 @@ type dashboardMenu struct {
 // Mode and navigation keys — action menu `a`, filter `/` and `f`, search, `G`/`gg`
 // top/bottom — are outside this rule and keep their own casing.
 //
-// dashboardMenuItems returns the verbs applicable to row, in a stable order.
-// Conditional verbs are filtered to the row's context: verify only for
-// NEEDS-VERIFY / VERIFY-FAILED rows with no live drain, unbind only for bound
-// rows, auto-drain only for non-orphaned rows, and unpark only for parked rows.
-// Drain, bind, the runtime shell, and archive apply to every Task-set
-// row regardless of status. Map rows carry only copy name — queue verbs
-// (drain/bind/…) stay inert on them (ADR-0130).
-func dashboardMenuItems(row DashboardRow) []dashboardMenuItem {
-	if row.IsMap {
-		return []dashboardMenuItem{
-			{key: "y", label: "copy name", action: menuActionCopyName},
-		}
+// dashboardMenuItems returns the verbs applicable to row: whatever the row's own
+// Work kind offers over it right now (ADR-0173). Conditional verbs are the
+// kind's to filter — a task set shows verify only where a verdict can move it,
+// unbind only when bound, unpark only when parked; a Map shows its frontier verb
+// only when it has a frontier — and the dashboard neither knows nor reproduces
+// those rules. `copy-name` and `shell` come back on the same key from every kind.
+func dashboardMenuItems(kinds workKinds, row DashboardRow) []dashboardMenuItem {
+	actions := kinds.actionsFor(row)
+	items := make([]dashboardMenuItem, 0, len(actions))
+	for _, a := range actions {
+		items = append(items, dashboardMenuItem{key: a.Key, label: a.Label, verb: a.Verb})
 	}
-	items := []dashboardMenuItem{
-		{key: "I", label: "drain", action: menuActionDrain},
-	}
-	// Verify is the lighter, explicit Verifier force (ADR-0123): offered only on
-	// rows a verdict can move (NEEDS-VERIFY / VERIFY-FAILED) and hidden while a
-	// live drain holds the set — a plain verify is not quiescence-gated, so the
-	// running drain verifies itself instead.
-	if dashboardVerifyEligible(row) {
-		items = append(items, dashboardMenuItem{key: "V", label: "verify", action: menuActionVerify})
-	}
-	items = append(items, dashboardMenuItem{key: "b", label: "bind worktree", action: menuActionBind})
-	if row.Bound {
-		items = append(items, dashboardMenuItem{key: "u", label: "unbind worktree", action: menuActionUnbind})
-	}
-	if !row.Orphaned {
-		items = append(items, dashboardMenuItem{key: "a", label: "auto-drain", action: menuActionAutoDrain})
-	}
-	items = append(items, dashboardMenuItem{key: "s", label: "status ▸", action: menuActionStatusSubmenu})
-	items = append(items, dashboardMenuItem{key: "S", label: "assist", action: menuActionAssist})
-	if dashboardFoldEligible(row) {
-		items = append(items, dashboardMenuItem{key: "F", label: "fold", action: menuActionFold})
-	}
-	if row.Parked {
-		items = append(items, dashboardMenuItem{key: "r", label: "unpark", action: menuActionUnpark})
-	}
-	items = append(items, dashboardMenuItem{key: "O", label: "shell", action: menuActionShell})
-	items = append(items, dashboardMenuItem{key: "x", label: "archive", action: menuActionArchive})
-	items = append(items, dashboardMenuItem{key: "y", label: "copy name", action: menuActionCopyName})
 	return items
 }
 
@@ -549,24 +511,22 @@ func dashboardFoldEligible(row DashboardRow) bool {
 	return row.Bound && tasks.FoldEligibleStatus(row.RawStatus)
 }
 
-// dashboardMenuActionHandoff reports whether action is a handoff verb (ADR-0158).
-func dashboardMenuActionHandoff(action dashboardMenuAction) bool {
-	switch action {
-	case menuActionDrain, menuActionVerify, menuActionAssist, menuActionFold, menuActionShell:
-		return true
-	default:
-		return false
-	}
+// dashboardMenuItemHandoff reports whether a menu item hands off. The key's case
+// is the fact, not a second list to keep in step with the kinds: ADR-0158 makes
+// an uppercase key mean "spawns or focuses a pane and leaves the surface", so a
+// kind that follows the rule needs no registration here.
+func dashboardMenuItemHandoff(item dashboardMenuItem) bool {
+	return item.key != "" && item.key != strings.ToLower(item.key)
 }
 
-// newDashboardMenu opens the action overlay on row, wrapping its verbs in a
-// ui.List with j/k wrap-around navigation. When pinned is true the menu survives
-// in-place verbs and J/K move the row cursor beneath it.
-func newDashboardMenu(row DashboardRow, pinned bool) *dashboardMenu {
+// newDashboardMenu opens the action overlay on row, wrapping the kind's verbs in
+// a ui.List with j/k wrap-around navigation. When pinned is true the menu
+// survives in-place verbs and J/K move the row cursor beneath it.
+func newDashboardMenu(kinds workKinds, row DashboardRow, pinned bool) *dashboardMenu {
 	return &dashboardMenu{
 		row:    row,
 		pinned: pinned,
-		list:   ui.NewList(dashboardMenuItems(row), ui.Opts[dashboardMenuItem]{Wrap: true}),
+		list:   ui.NewList(dashboardMenuItems(kinds, row), ui.Opts[dashboardMenuItem]{Wrap: true}),
 	}
 }
 
@@ -576,13 +536,14 @@ func (m QueueDashboard) syncPinnedMenuRow() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	row, ok := m.list.Selected()
-	if !ok || len(dashboardMenuItems(row)) == 0 {
+	items := dashboardMenuItems(m.kinds, row)
+	if !ok || len(items) == 0 {
 		m.menu = nil
 		return m, nil
 	}
 	m.menu.row = row
 	m.menu.status = nil
-	m.menu.list = ui.NewList(dashboardMenuItems(row), ui.Opts[dashboardMenuItem]{Wrap: true})
+	m.menu.list = ui.NewList(items, ui.Opts[dashboardMenuItem]{Wrap: true})
 	return m, nil
 }
 
@@ -737,7 +698,7 @@ const detailTableChromeLines = 3
 // newDetailView builds a loading detail view for row. Task sets get an empty task
 // List; Maps get an empty ticket List. Content arrives via syncManifest or syncMap.
 func newDetailView(row DashboardRow) *detailView {
-	if row.IsMap {
+	if mapRow(row) {
 		return newMapDetailView(row)
 	}
 	cols := &detailColumns{idW: len("ID")}
@@ -849,8 +810,12 @@ func (d *detailView) syncMap(m *wayfinder.Map) {
 // place without rebuilding the list — matching the house pattern of pickerCell
 // closing over its picker.
 type QueueDashboard struct {
-	d         *Deps
-	cfg       *config.Config
+	d   *Deps
+	cfg *config.Config
+	// kinds is the wired Work-kind list indexed by id: every cell a row renders
+	// and every verb its menu offers is asked of the kind that owns the row, so
+	// the dashboard branches on no kind of its own (ADR-0173).
+	kinds     workKinds
 	snap      DashboardSnapshot
 	allRows   []DashboardRow // source of truth; snap.Rows is the filtered view
 	list      *ui.List[DashboardRow]
@@ -959,8 +924,9 @@ func newQueueDashboard(d *Deps, cfg *config.Config, snap DashboardSnapshot) Queu
 	if d == nil {
 		d = DefaultDeps()
 	}
+	kinds := newWorkKinds(d.WorkKinds(cfg))
 	cols := &dashboardColumns{}
-	cols.syncNatural(snap.Rows)
+	cols.syncNatural(kinds, snap.Rows)
 	live := &livePaneCache{}
 	var list *ui.List[DashboardRow]
 	list = ui.NewList(snap.Rows, ui.Opts[DashboardRow]{
@@ -975,14 +941,14 @@ func newQueueDashboard(d *Deps, cfg *config.Config, snap DashboardSnapshot) Queu
 			if list.LinesPerItem() == 2 {
 				line1Widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths(list.Items()), budget)
 				if rs.LineIndex == 1 {
-					return ui.TruncateString(dashboardTwoLineRowLine2(r, line1Widths), budget)
+					return ui.TruncateString(dashboardTwoLineRowLine2(kinds, r, line1Widths), budget)
 				}
 				return ui.TruncateString(dashboardTwoLineRowLine1(r, line1Widths, cache), budget)
 			}
-			return ui.TruncateString(dashboardTableLine(dashboardRowValues(r, cache), cols.widths), budget)
+			return ui.TruncateString(dashboardTableLine(dashboardRowValues(kinds, r, cache), cols.widths), budget)
 		},
 	})
-	return QueueDashboard{d: d, cfg: cfg, snap: snap, allRows: snap.Rows, list: list, cols: cols, live: live}
+	return QueueDashboard{d: d, cfg: cfg, kinds: kinds, snap: snap, allRows: snap.Rows, list: list, cols: cols, live: live}
 }
 
 // dashboardChromeLines returns the chrome height above the List rows for the
@@ -998,7 +964,7 @@ func (m QueueDashboard) dashboardChromeLines() int {
 // cursor by CursorKey) and recomputes the column widths over them.
 func (m QueueDashboard) syncListRows() {
 	m.list.ReplaceItems(m.snap.Rows)
-	m.cols.syncNatural(m.snap.Rows)
+	m.cols.syncNatural(m.kinds, m.snap.Rows)
 }
 
 // resizeMainList sizes the List to the body budget the Frame leaves, minus the
@@ -1144,10 +1110,10 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !ok {
 				return m, nil
 			}
-			if len(dashboardMenuItems(row)) == 0 {
+			if len(dashboardMenuItems(m.kinds, row)) == 0 {
 				return m, nil
 			}
-			m.menu = newDashboardMenu(row, msg.String() == "A")
+			m.menu = newDashboardMenu(m.kinds, row, msg.String() == "A")
 			m.err = nil
 			m.statusMsg = ""
 			return m, nil
@@ -1160,8 +1126,11 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = ""
 			return m, nil
 		case "I":
+			// The wayfinding shortcut is anchored to the Map kind rather than to the
+			// verb being offered: a Map with an empty frontier must still answer with
+			// the "no frontier tickets" report rather than a dead key.
 			row, ok := m.list.Selected()
-			if !ok || !row.IsMap {
+			if !ok || !mapRow(row) {
 				return m, nil
 			}
 			m.err = nil
@@ -1227,7 +1196,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.menu.pinned {
 					if row, ok := m.list.Selected(); ok {
 						m.menu.row = row
-						m.menu.list = ui.NewList(dashboardMenuItems(row), ui.Opts[dashboardMenuItem]{Wrap: true})
+						m.menu.list = ui.NewList(dashboardMenuItems(m.kinds, row), ui.Opts[dashboardMenuItem]{Wrap: true})
 					}
 				} else {
 					for _, row := range m.snap.Rows {
@@ -1248,7 +1217,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.detail.err = msg.err
 			return m, nil
 		}
-		if m.detail.row.IsMap {
+		if mapRow(m.detail.row) {
 			m.detail.syncMap(msg.wfMap)
 		} else {
 			m.detail.syncManifest(msg.manifest, msg.taskRow)
@@ -1265,7 +1234,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 		}
-		m.cols.syncNatural(m.snap.Rows)
+		m.cols.syncNatural(m.kinds, m.snap.Rows)
 	case dashboardHandoffMsg:
 		m.drainPick = nil
 		if msg.err != nil {
@@ -1504,15 +1473,15 @@ func (m QueueDashboard) invokeMenuItem(idx int) (tea.Model, tea.Cmd) {
 	}
 	item := items[idx]
 	row := m.menu.row
-	if item.action == menuActionStatusSubmenu {
+	if item.verb == setkind.VerbStatus {
 		m.menu.status = newDashboardStatusMenu(row)
 		return m, nil
 	}
-	pinned := m.menu.pinned && !dashboardMenuActionHandoff(item.action)
+	pinned := m.menu.pinned && !dashboardMenuItemHandoff(item)
 	if !pinned {
 		m.menu = nil
 	}
-	return m.dispatchMenuAction(item.action, row)
+	return m.dispatchVerb(item.verb, row)
 }
 
 // invokeStatusMenuItem closes both menus and applies the status verb at idx
@@ -1599,31 +1568,36 @@ func (m QueueDashboard) filterToggleOn(toggle dashboardFilterToggle) bool {
 	return false
 }
 
-// dispatchMenuAction runs the verb. The conditional guards mirror
-// dashboardMenuItems' context filtering — an item present in the menu always
-// passes its guard, but the guards keep dispatch self-contained.
-func (m QueueDashboard) dispatchMenuAction(action dashboardMenuAction, row DashboardRow) (tea.Model, tea.Cmd) {
+// dispatchVerb runs the verb the menu (or a flat shortcut) selected, keyed by
+// verb id and never by kind. The Task-set verbs that drive a modal the dashboard
+// owns — the drain picker, the bind picker, the unbind confirm — plus the ones
+// that spawn through queue's own launchers stay here by decision (ADR-0173):
+// moving them behind Kind.Perform needs a modal-capable Outcome and is deferred.
+// The conditional guards mirror the kind's own eligibility filtering — an item
+// present in the menu always passes its guard, but the guards keep dispatch
+// self-contained.
+func (m QueueDashboard) dispatchVerb(verb work.Verb, row DashboardRow) (tea.Model, tea.Cmd) {
 	m.err = nil
-	switch action {
-	case menuActionDrain:
+	switch verb {
+	case setkind.VerbDrain:
 		m.statusMsg = dashboardHandoffPending
 		return m, m.launchDrain(row)
-	case menuActionVerify:
+	case setkind.VerbVerify:
 		if !dashboardVerifyEligible(row) {
 			return m, nil
 		}
 		m.statusMsg = dashboardHandoffPending
 		return m, m.launchVerify(row)
-	case menuActionBind:
+	case setkind.VerbBind:
 		m.bind = &dashboardBindModal{row: row, loading: true}
 		return m, m.loadBindWorktrees(row)
-	case menuActionUnbind:
+	case setkind.VerbUnbind:
 		if !row.Bound {
 			return m, nil
 		}
 		m.abandon = &dashboardAbandonModal{row: row}
 		return m, nil
-	case menuActionAutoDrain:
+	case setkind.VerbAutoDrain:
 		if row.Orphaned {
 			return m, nil
 		}
@@ -1633,12 +1607,12 @@ func (m QueueDashboard) dispatchMenuAction(action dashboardMenuAction, row Dashb
 				break
 			}
 		}
-		m.cols.syncNatural(m.snap.Rows)
+		m.cols.syncNatural(m.kinds, m.snap.Rows)
 		return m, m.toggleAutoDrain(row)
-	case menuActionAssist:
+	case setkind.VerbAssist:
 		m.statusMsg = dashboardHandoffPending
 		return m, m.launchAssist(row)
-	case menuActionFold:
+	case setkind.VerbFold:
 		if !dashboardFoldEligible(row) {
 			return m, nil
 		}
@@ -1648,24 +1622,35 @@ func (m QueueDashboard) dispatchMenuAction(action dashboardMenuAction, row Dashb
 		}
 		m.statusMsg = dashboardHandoffPending
 		return m, m.launchFold(row)
-	case menuActionUnpark:
+	case setkind.VerbUnpark:
 		if !row.Parked {
 			m.statusMsg = "task set is not parked"
 			return m, nil
 		}
 		m.statusMsg = ""
 		return m, m.unparkSet(row)
-	case menuActionShell:
-		if strings.TrimSpace(row.RuntimePath) == "" {
+	case setkind.VerbArchive:
+		m.statusMsg = ""
+		return m, m.archiveSet(row)
+	case wayfinder.VerbWork:
+		m.statusMsg = dashboardHandoffPending
+		return m, m.launchWayfinderSession(row, "")
+	case work.VerbShell:
+		// The directory is the kind's answer, not the dashboard's: a task set opens
+		// in its bound checkout, a Map in its repository, and a kind that resolves
+		// none says so by leaving it blank. A row from a builder that predates the
+		// seam carries only the Task-set binding, which is that kind's answer too.
+		dir := strings.TrimSpace(row.Checkout)
+		if dir == "" {
+			dir = strings.TrimSpace(row.RuntimePath)
+		}
+		if dir == "" {
 			m.statusMsg = "no checkout bound to this task set"
 			return m, nil
 		}
 		m.statusMsg = dashboardHandoffPending
-		return m, m.launchShell(row)
-	case menuActionArchive:
-		m.statusMsg = ""
-		return m, m.archiveSet(row)
-	case menuActionCopyName:
+		return m, m.launchShell(row, dir)
+	case work.VerbCopyName:
 		m.statusMsg = m.copyRowName(row)
 		return m, nil
 	}
@@ -1704,7 +1689,7 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "G":
 			m.detail.peek.scroll = m.maxTaskTextPeekScroll()
 		case "a":
-			if m.detail.row.IsMap {
+			if mapRow(m.detail.row) {
 				return m, nil
 			}
 			task, ok := m.detail.taskByID(m.detail.peek.taskID)
@@ -1717,7 +1702,7 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.taskMenu = newTaskMenu(task, items, true)
 		case "y":
-			if m.detail.row.IsMap {
+			if mapRow(m.detail.row) {
 				ticket, ok := m.detail.ticketByDisplayName(m.detail.peek.taskID)
 				if !ok {
 					return m, nil
@@ -1738,7 +1723,7 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.pendingG {
 			m.pendingG = false
 			if m.detail != nil {
-				if m.detail.row.IsMap {
+				if mapRow(m.detail.row) {
 					m.detail.ticketList.SetCursor(0)
 				} else {
 					m.detail.list.SetCursor(0)
@@ -1761,7 +1746,7 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Ctrl-g: surface the bound checkout on quit so the command layer runs the
 		// workbench-aware open after the TUI exits; an unbound set shows an inline
 		// status and keeps the dashboard running. Map rows have no checkout.
-		if m.detail == nil || m.detail.row.IsMap {
+		if m.detail == nil || mapRow(m.detail.row) {
 			return m, nil
 		}
 		if strings.TrimSpace(m.detail.row.RuntimePath) == "" {
@@ -1773,7 +1758,7 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "j", "down":
 		if m.detail != nil {
-			if m.detail.row.IsMap {
+			if mapRow(m.detail.row) {
 				m.detail.ticketList.MoveDown()
 			} else {
 				m.detail.list.MoveDown()
@@ -1781,7 +1766,7 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "k", "up":
 		if m.detail != nil {
-			if m.detail.row.IsMap {
+			if mapRow(m.detail.row) {
 				m.detail.ticketList.MoveUp()
 			} else {
 				m.detail.list.MoveUp()
@@ -1789,14 +1774,14 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "G":
 		if m.detail != nil {
-			if m.detail.row.IsMap && m.detail.wfMap != nil {
+			if mapRow(m.detail.row) && m.detail.wfMap != nil {
 				m.detail.ticketList.SetCursor(len(m.detail.wfMap.Tickets) - 1)
 			} else if m.detail.manifest != nil {
 				m.detail.list.SetCursor(len(m.detail.manifest.Tasks) - 1)
 			}
 		}
 	case "I":
-		if m.detail == nil || m.detail.loading || !m.detail.row.IsMap || m.detail.wfMap == nil {
+		if m.detail == nil || m.detail.loading || !mapRow(m.detail.row) || m.detail.wfMap == nil {
 			return m, nil
 		}
 		ticket, ok := m.detail.ticketList.Selected()
@@ -1813,7 +1798,7 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.detail == nil || m.detail.loading {
 			return m, nil
 		}
-		if m.detail.row.IsMap {
+		if mapRow(m.detail.row) {
 			ticket, ok := m.detail.ticketList.Selected()
 			if !ok {
 				return m, nil
@@ -1832,7 +1817,7 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.detail.peek = &taskTextPeek{taskID: task.ID, loading: true}
 		return m, m.loadTaskText(m.detail.manifest, task)
 	case "a":
-		if m.detail == nil || m.detail.loading || m.detail.row.IsMap {
+		if m.detail == nil || m.detail.loading || mapRow(m.detail.row) {
 			return m, nil
 		}
 		task, ok := m.detail.list.Selected()
@@ -1850,7 +1835,7 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.detail == nil || m.detail.loading {
 			return m, nil
 		}
-		if m.detail.row.IsMap {
+		if mapRow(m.detail.row) {
 			ticket, ok := m.detail.ticketList.Selected()
 			if !ok {
 				return m, nil
@@ -2227,9 +2212,9 @@ func (m QueueDashboard) launchFold(row DashboardRow) tea.Cmd {
 	}
 }
 
-func (m QueueDashboard) launchShell(row DashboardRow) tea.Cmd {
+func (m QueueDashboard) launchShell(row DashboardRow, dir string) tea.Cmd {
 	return func() tea.Msg {
-		result, err := LaunchShell(m.d, m.cfg, row.SetRef)
+		result, err := LaunchShellIn(m.d, m.cfg, row.SetRef, dir)
 		return handoffAfterLaunch(m.d, result, err)
 	}
 }
@@ -2283,7 +2268,7 @@ func (m QueueDashboard) loadDetail(row DashboardRow) tea.Cmd {
 		if d == nil {
 			d = DefaultDeps()
 		}
-		if row.IsMap {
+		if mapRow(row) {
 			return loadMapDetailMsg(d, row)
 		}
 		if d.Tasks == nil {
@@ -2657,11 +2642,11 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "y", Desc: "copy name"},
 			{Key: "h/esc", Desc: "close peek"},
 		}
-		if m.detail != nil && !m.detail.row.IsMap {
+		if m.detail != nil && !mapRow(m.detail.row) {
 			entries = append(entries, ui.HelpEntry{Key: "a", Desc: "task actions"})
 		}
 		return entries
-	case m.detail != nil && m.detail.row.IsMap:
+	case m.detail != nil && mapRow(m.detail.row):
 		// Map detail view (ticket list)
 		return []ui.HelpEntry{
 			{Key: "j/k", Desc: "navigate tickets"},
@@ -2708,7 +2693,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "v", Desc: "routines view"},
 			{Key: "h/esc", Desc: "quit"},
 		}
-		if row, ok := m.list.Selected(); ok && row.IsMap {
+		if row, ok := m.list.Selected(); ok && mapRow(row) {
 			entries = append(entries, ui.HelpEntry{Key: "I", Desc: "work next frontier ticket"})
 		}
 		return entries
@@ -2798,7 +2783,7 @@ func (m QueueDashboard) frameSpec() ui.Frame {
 	}
 	header := ""
 	if len(m.snap.Rows) > 0 {
-		header = "Queue · " + dashboardSummary(m.snap.Rows)
+		header = "Queue · " + dashboardSummary(m.kinds, m.snap.Rows)
 	}
 	inputBox := ""
 	if m.filterMode {
@@ -2904,9 +2889,9 @@ func (m QueueDashboard) viewWithMenu() string {
 	if m.actionErr != nil {
 		fmt.Fprintf(&body, "%s\n", dashboardActionErrorLine(m.actionErr))
 	}
-	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.snap.Rows))
+	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.kinds, m.snap.Rows))
 	fmt.Fprintln(&body)
-	renderDashboardTableWithMenu(&body, m.snap.Rows, m.list.Cursor(), m.width, m.height, m.menu, m.liveCache())
+	renderDashboardTableWithMenu(&body, m.kinds, m.snap.Rows, m.list.Cursor(), m.width, m.height, m.menu, m.liveCache())
 	if m.statusMsg != "" {
 		fmt.Fprintf(&body, "  %s\n", m.statusMsg)
 	}
@@ -2936,9 +2921,9 @@ func (m QueueDashboard) viewWithFilterMenu() string {
 	if m.actionErr != nil {
 		fmt.Fprintf(&body, "%s\n", dashboardActionErrorLine(m.actionErr))
 	}
-	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.snap.Rows))
+	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.kinds, m.snap.Rows))
 	fmt.Fprintln(&body)
-	renderDashboardTable(&body, m.snap.Rows, m.list.Cursor(), m.width, m.height, m.liveCache())
+	renderDashboardTable(&body, m.kinds, m.snap.Rows, m.list.Cursor(), m.width, m.height, m.liveCache())
 	for _, ml := range m.dashboardFilterMenuLines() {
 		fmt.Fprintf(&body, "%s\n", ml)
 	}
@@ -2983,9 +2968,9 @@ func (m QueueDashboard) viewWithModal() string {
 	if m.actionErr != nil {
 		fmt.Fprintf(&body, "%s\n", dashboardActionErrorLine(m.actionErr))
 	}
-	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.snap.Rows))
+	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.kinds, m.snap.Rows))
 	fmt.Fprintln(&body)
-	renderDashboardTable(&body, m.snap.Rows, m.list.Cursor(), m.width, m.height, m.liveCache())
+	renderDashboardTable(&body, m.kinds, m.snap.Rows, m.list.Cursor(), m.width, m.height, m.liveCache())
 	// avail is the number of body lines left for the modal below the table, so
 	// its scroll window clamps long worktree/ref lists instead of overflowing.
 	// A non-positive avail (no WindowSizeMsg yet) means "don't clamp".
@@ -3004,49 +2989,12 @@ func (m QueueDashboard) viewWithModal() string {
 	return body.String()
 }
 
-func dashboardSummary(rows []DashboardRow) string {
-	total := len(rows)
-	ready := 0
-	running := 0
-	autoDrain := 0
-	maps := 0
-	for _, row := range rows {
-		if row.IsMap {
-			maps++
-			continue
-		}
-		if row.RawStatus == tasks.StatusReady {
-			ready++
-		}
-		if row.LiveDrain {
-			running++
-		}
-		if work.AutoDrainWaiting(row) {
-			autoDrain++
-		}
-	}
-	sets := total - maps
-	parts := []string{countPhrase(sets, "task set", "task sets")}
-	if maps > 0 {
-		parts = append(parts, countPhrase(maps, "map", "maps"))
-	}
-	if ready > 0 {
-		parts = append(parts, countPhrase(ready, "ready", "ready"))
-	}
-	if running > 0 {
-		parts = append(parts, countPhrase(running, "running", "running"))
-	}
-	if autoDrain > 0 {
-		parts = append(parts, countPhrase(autoDrain, "auto-drain", "auto-drain"))
-	}
-	return strings.Join(parts, " · ")
-}
-
-func countPhrase(n int, singular, plural string) string {
-	if n == 1 {
-		return fmt.Sprintf("1 %s", singular)
-	}
-	return fmt.Sprintf("%d %s", n, plural)
+// dashboardSummary is the header line over the rows currently on screen: each
+// kind's own phrases over its own rows, in kind precedence order (ADR-0173). It
+// counts the displayed rows rather than reusing the snapshot's phrases so a
+// fuzzy filter narrows the header with the table.
+func dashboardSummary(kinds workKinds, rows []DashboardRow) string {
+	return strings.Join(kinds.summary(rows), " · ")
 }
 
 // viewDetail renders the full-screen task-set detail view. The task text peek
@@ -3076,7 +3024,7 @@ func (m QueueDashboard) viewDetail() string {
 // clamps to the terminal instead of rendering every task.
 func (m QueueDashboard) detailFrame() (ui.Frame, string) {
 	d := m.detail
-	if d.row.IsMap {
+	if mapRow(d.row) {
 		return m.detailMapFrame()
 	}
 	const backHint = "h/esc back"
@@ -3611,8 +3559,8 @@ func renderDashboardAbandonModal(w io.Writer, modal *dashboardAbandonModal, widt
 	fmt.Fprint(w, ui.HintStyle.Render(ui.TruncateString("y confirm · enter/n/esc cancel", width)))
 }
 
-func renderDashboardTable(w io.Writer, rows []DashboardRow, cursor, width, height int, live livePaneCache) {
-	renderDashboardTableWithMenu(w, rows, cursor, width, height, nil, live)
+func renderDashboardTable(w io.Writer, kinds workKinds, rows []DashboardRow, cursor, width, height int, live livePaneCache) {
+	renderDashboardTableWithMenu(w, kinds, rows, cursor, width, height, nil, live)
 }
 
 // renderDashboardTableWithMenu renders the task-set table and, when menu is
@@ -3620,13 +3568,13 @@ func renderDashboardTable(w io.Writer, rows []DashboardRow, cursor, width, heigh
 // default, flipping above when the cursor sits too low for the menu to fit
 // beneath it within height (dashboardMenuPlaceBelow). live colours handoff-verb
 // keys in the overlay (ADR-0158).
-func renderDashboardTableWithMenu(w io.Writer, rows []DashboardRow, cursor, width, height int, menu *dashboardMenu, live livePaneCache) {
+func renderDashboardTableWithMenu(w io.Writer, kinds workKinds, rows []DashboardRow, cursor, width, height int, menu *dashboardMenu, live livePaneCache) {
 	if dashboardTwoLineMode(rows, width, height) {
-		renderDashboardTableTwoLineWithMenu(w, rows, cursor, width, height, menu, live)
+		renderDashboardTableTwoLineWithMenu(w, kinds, rows, cursor, width, height, menu, live)
 		return
 	}
 	headers := dashboardTableHeaders()
-	widths := dashboardTableWidthsForRows(rows, width)
+	widths := dashboardTableWidthsForRows(kinds, rows, width)
 	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTableLine(headers, widths), width))
 	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTableSeparator(widths), width))
 
@@ -3651,7 +3599,7 @@ func renderDashboardTableWithMenu(w io.Writer, rows []DashboardRow, cursor, widt
 		} else {
 			prefix = "  "
 		}
-		line := ui.TruncateString(prefix+dashboardTableLine(dashboardRowValues(row, live), widths), width)
+		line := ui.TruncateString(prefix+dashboardTableLine(dashboardRowValues(kinds, row, live), widths), width)
 		fmt.Fprintf(w, "%s\n", line)
 		if menu != nil && i == cursor && placeBelow {
 			writeMenu()
@@ -3664,7 +3612,7 @@ func renderDashboardTableWithMenu(w io.Writer, rows []DashboardRow, cursor, widt
 // Each row occupies two terminal lines: line 1 holds the activity cluster,
 // PROJECT, TASK SET (the set id) and WORKTREE; line 2 holds STATUS indented under
 // the TASK SET column.
-func renderDashboardTableTwoLineWithMenu(w io.Writer, rows []DashboardRow, cursor, width, height int, menu *dashboardMenu, live livePaneCache) {
+func renderDashboardTableTwoLineWithMenu(w io.Writer, kinds workKinds, rows []DashboardRow, cursor, width, height int, menu *dashboardMenu, live livePaneCache) {
 	line1Widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths(rows), dashboardTableBodyBudget(width))
 	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTwoLineTableHeader(line1Widths), width))
 	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTwoLineStatusHeader(line1Widths), width))
@@ -3692,7 +3640,7 @@ func renderDashboardTableTwoLineWithMenu(w io.Writer, rows []DashboardRow, curso
 			prefix = "  "
 		}
 		line1 := ui.TruncateString(prefix+dashboardTwoLineRowLine1(row, line1Widths, live), width)
-		line2 := ui.TruncateString("  "+dashboardTwoLineRowLine2(row, line1Widths), width)
+		line2 := ui.TruncateString("  "+dashboardTwoLineRowLine2(kinds, row, line1Widths), width)
 		fmt.Fprintf(w, "%s\n", line1)
 		fmt.Fprintf(w, "%s\n", line2)
 		if menu != nil && i == cursor && placeBelow {

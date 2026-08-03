@@ -430,6 +430,14 @@ func LaunchFold(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult, 
 // (ADR-0158). Every press yields a new pane — shells are never tagged or
 // reused — so the operator's process outlives the dashboard exiting.
 func LaunchShell(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult, error) {
+	return LaunchShellIn(d, cfg, ref, ref.RuntimePath)
+}
+
+// LaunchShellIn is the same spawn into an explicitly named directory: the shell
+// verb's working directory is the Work kind's answer (a task set's bound
+// checkout, a Map's repository), not something the launcher re-derives from the
+// Task-set binding it was handed.
+func LaunchShellIn(d *Deps, cfg *config.Config, ref SetRef, dir string) (DashboardDrainResult, error) {
 	if d == nil {
 		d = DefaultDeps()
 	}
@@ -439,7 +447,7 @@ func LaunchShell(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult,
 	if d.Tmux == nil {
 		d.Tmux = tmuxmod.New()
 	}
-	checkout := strings.TrimSpace(ref.RuntimePath)
+	checkout := strings.TrimSpace(dir)
 	if checkout == "" {
 		return DashboardDrainResult{}, fmt.Errorf("no checkout bound to this task set")
 	}

@@ -75,3 +75,10 @@ func runGitOutput(t *testing.T, dir string, args ...string) string {
 	}
 	return string(out)
 }
+
+// testKinds is the wiring list a test renders and dispatches through: the same
+// real adapters `queue.Deps.WorkKinds` hands the snapshot builder, so a test row
+// gets the cells and the verbs its own kind composes.
+func testKinds() workKinds {
+	return newWorkKinds((&Deps{}).WorkKinds(nil))
+}

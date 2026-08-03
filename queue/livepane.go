@@ -5,6 +5,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
+	"github.com/glebglazov/pop/tasks/setkind"
 	"github.com/glebglazov/pop/wayfinder"
 )
 
@@ -188,7 +189,7 @@ var rowActivityCluster = []rowActivityClusterItem{
 // false the cluster is plain text for width measurement; when true each key is
 // coloured by the cached live-pane state using the same rules as the action menu.
 func dashboardActivityCluster(row DashboardRow, live livePaneCache, styled bool) string {
-	if row.IsMap {
+	if mapRow(row) {
 		state := live.wayfinderState(row.SetID)
 		if styled {
 			return styleHandoffKey(dashboardMapWayfinderKeyPlain, state)
@@ -213,20 +214,19 @@ func menuItemLiveState(item dashboardMenuItem, row DashboardRow, live livePaneCa
 	if live.byTag == nil && live.wayfinder == nil {
 		return livePaneNone
 	}
-	if row.IsMap {
-		return livePaneNone
-	}
-	switch item.action {
-	case menuActionDrain:
+	switch item.verb {
+	case setkind.VerbDrain:
 		return live.state(tmuxmod.TagSet, row.SetID)
-	case menuActionVerify:
+	case setkind.VerbVerify:
 		return live.state(tmuxmod.TagVerify, row.SetID)
-	case menuActionFold:
+	case setkind.VerbFold:
 		return live.state(tmuxmod.TagFold, row.SetID)
-	case menuActionAssist:
+	case setkind.VerbAssist:
 		return live.state(tmuxmod.TagAssist, row.SetID)
-	case menuActionShell:
-		return livePaneNone
+	case wayfinder.VerbWork:
+		// The Map's frontier verb reads the same window liveness its activity-cluster
+		// key does, so the menu and the row agree about whether a session is running.
+		return live.wayfinderState(row.SetID)
 	default:
 		return livePaneNone
 	}

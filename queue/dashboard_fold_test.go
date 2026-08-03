@@ -17,7 +17,7 @@ import (
 func TestDashboardActionMenuFoldFiltering(t *testing.T) {
 	keysFor := func(row DashboardRow) []string {
 		var keys []string
-		for _, item := range dashboardMenuItems(row) {
+		for _, item := range dashboardMenuItems(testKinds(), row) {
 			keys = append(keys, item.key)
 		}
 		return keys

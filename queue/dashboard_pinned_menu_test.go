@@ -215,7 +215,7 @@ func TestDashboardPinnedActionMenuFooterHint(t *testing.T) {
 	}})
 	m.width = 120
 	m.height = 20
-	m.menu = newDashboardMenu(m.snap.Rows[0], true)
+	m.menu = newDashboardMenu(testKinds(), m.snap.Rows[0], true)
 	view := m.View().Content
 	if !strings.Contains(view, "J/K row") {
 		t.Fatalf("pinned menu footer missing J/K row hint:\n%s", view)

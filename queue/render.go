@@ -1,7 +1,6 @@
 package queue
 
 import (
-	"fmt"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -17,46 +16,40 @@ import (
 // (dashboard.go) key on this file so the boundary reads as designed rather
 // than as leftovers.
 
-// dashboardStatusCellStyled is the plain composed STATUS cell (dashboardStatusCellText)
-// with per-token styling for the TUI: the base label carries its semantic
-// bucket colour and the immunized "verified @ <sha>" token renders yellow,
-// while the auto-drain, orphaned, parked, and config-error suffixes stay
-// plain. It layers styling over work's unstyled composition (ADR-0143) so
-// dashboardStatusCellText — the width-measured form — stays ANSI-free, and it
-// reproduces that composition's token order so the two forms differ only by
-// ANSI. Map rows colour the WAYFINDING label and keep the tally plain
-// (ADR-0130).
-func dashboardStatusCellStyled(row DashboardRow) string {
-	if row.IsMap {
-		label := "WAYFINDING"
-		if st, ok := dashboardStatusBucketStyle[label]; ok {
-			label = st.Render(label)
+// dashboardStatusCellStyled paints the STATUS cell the row's kind composed: it
+// walks that one segment sequence and gives each token the style its tone asks
+// for — the status label its semantic bucket colour, an attention badge its
+// three-state colour (ADR-0156), every plain suffix nothing. Because both forms
+// walk the same segments, the styled cell and the width-measured plain one
+// (dashboardStatusCellText) differ only by ANSI, whatever kind wrote them.
+func dashboardStatusCellStyled(kinds workKinds, row DashboardRow) string {
+	segments := kinds.statusSegments(row)
+	parts := make([]string, 0, len(segments))
+	for _, seg := range segments {
+		if seg.Text == "" {
+			continue
 		}
-		return fmt.Sprintf("%s · %d open / %d frontier", label, row.MapOpen, row.MapFrontier)
+		parts = append(parts, dashboardStatusSegmentStyled(seg))
 	}
-	label := dashboardStatusLabelText(row)
-	if st, ok := dashboardStatusBucketStyle[label]; ok {
-		label = st.Render(label)
+	return strings.Join(parts, " · ")
+}
+
+// dashboardStatusSegmentStyled renders one segment. A tone names what the token
+// means; this is the only place that decides what it looks like (ADR-0143).
+func dashboardStatusSegmentStyled(seg work.StatusSegment) string {
+	switch seg.Tone {
+	case work.ToneLabel:
+		if st, ok := dashboardStatusBucketStyle[seg.Text]; ok {
+			return st.Render(seg.Text)
+		}
+	case work.ToneGood:
+		return dashboardVerifiedAtAtHeadStyle.Render(seg.Text)
+	case work.ToneWarn:
+		return dashboardVerifiedAtDriftedStyle.Render(seg.Text)
+	case work.ToneBad:
+		return dashboardVerifiedAtUnverifiedStyle.Render(seg.Text)
 	}
-	if badgeText := dashboardVerifiedAtBadgeStyled(row); badgeText != "" {
-		label += " · " + badgeText
-	}
-	if work.AutoDrainWaiting(row) {
-		label += " · auto-drain"
-	}
-	if row.Orphaned {
-		label += " · orphaned"
-	}
-	// Parked and config-error ride the STATUS cell (ADR-0111) as uncoloured plain
-	// text, trailing the auto-drain/orphaned suffixes in the same fixed order
-	// dashboardStatusCellText uses.
-	if row.Parked {
-		label += " · parked"
-	}
-	if row.ConfigError != "" {
-		label += " · config error: " + row.ConfigError
-	}
-	return label
+	return seg.Text
 }
 
 // dashboardManagedWtStyle colors the [managed wt] destination badge.
@@ -185,14 +178,14 @@ func dashboardTableHeaders() []string {
 
 // dashboardColumnWidths precomputes each column's natural width over the full row
 // set, floored at the header label width.
-func dashboardColumnWidths(rows []DashboardRow) []int {
+func dashboardColumnWidths(kinds workKinds, rows []DashboardRow) []int {
 	headers := dashboardTableHeaders()
 	widths := make([]int, len(headers))
 	for i, h := range headers {
 		widths[i] = len(h)
 	}
 	for _, row := range rows {
-		for i, v := range dashboardRowNaturalValues(row) {
+		for i, v := range dashboardRowNaturalValues(kinds, row) {
 			if n := lipgloss.Width(v); n > widths[i] {
 				widths[i] = n
 			}
@@ -259,8 +252,8 @@ func dashboardTableBodyBudget(termWidth int) int {
 	return termWidth
 }
 
-func (c *dashboardColumns) syncNatural(rows []DashboardRow) {
-	c.natural = dashboardColumnWidths(rows)
+func (c *dashboardColumns) syncNatural(kinds workKinds, rows []DashboardRow) {
+	c.natural = dashboardColumnWidths(kinds, rows)
 	c.refit()
 }
 
@@ -268,8 +261,8 @@ func (c *dashboardColumns) refit() {
 	c.widths = dashboardFitColumnWidths(c.natural, dashboardListCellBudget(c.width))
 }
 
-func dashboardTableWidthsForRows(rows []DashboardRow, termWidth int) []int {
-	return dashboardFitColumnWidths(dashboardColumnWidths(rows), dashboardTableBodyBudget(termWidth))
+func dashboardTableWidthsForRows(kinds workKinds, rows []DashboardRow, termWidth int) []int {
+	return dashboardFitColumnWidths(dashboardColumnWidths(kinds, rows), dashboardTableBodyBudget(termWidth))
 }
 
 const (
@@ -433,8 +426,8 @@ func dashboardTwoLineRowLine1(row DashboardRow, widths []int, live livePaneCache
 // dashboardTwoLineRowLine2 renders line 2 of a two-line row: the STATUS value,
 // indented to sit under the TASK SET column on line 1. The List (and the bespoke
 // overlay path) supply the two-space gutter on top of this indent.
-func dashboardTwoLineRowLine2(row DashboardRow, line1Widths []int) string {
-	return strings.Repeat(" ", dashboardTwoLineStatusIndent(line1Widths)) + dashboardStatusCellStyled(row)
+func dashboardTwoLineRowLine2(kinds workKinds, row DashboardRow, line1Widths []int) string {
+	return strings.Repeat(" ", dashboardTwoLineStatusIndent(line1Widths)) + dashboardStatusCellStyled(kinds, row)
 }
 
 // dashboardTableChromeLines is the number of body lines above the List rows in
@@ -449,11 +442,11 @@ const dashboardTwoLineChromeLines = dashboardTableChromeLines + 1
 
 // dashboardRowValues returns a row's rendered column cells, with the STATUS cell
 // composed at render time from the row's live fields (styled for display).
-func dashboardRowValues(row DashboardRow, live livePaneCache) []string {
+func dashboardRowValues(kinds workKinds, row DashboardRow, live livePaneCache) []string {
 	return []string{
 		row.Project,
 		row.SetID,
-		dashboardStatusCellStyled(row),
+		dashboardStatusCellStyled(kinds, row),
 		renderDashboardDest(row.DestKind, row.Worktree),
 		dashboardActivityCluster(row, live, true),
 	}
@@ -462,11 +455,11 @@ func dashboardRowValues(row DashboardRow, live livePaneCache) []string {
 // dashboardRowNaturalValues returns a row's column cells for width measurement.
 // It matches dashboardRowValues but uses the plain, un-styled composed status so
 // no ANSI ever reaches column-width math (ADR-0108).
-func dashboardRowNaturalValues(row DashboardRow) []string {
+func dashboardRowNaturalValues(kinds workKinds, row DashboardRow) []string {
 	return []string{
 		row.Project,
 		row.SetID,
-		dashboardStatusCellText(row),
+		dashboardStatusCellText(kinds, row),
 		renderDashboardDest(row.DestKind, row.Worktree),
 		dashboardActivityCluster(row, livePaneCache{}, false),
 	}

@@ -17,8 +17,10 @@ import (
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/setkind"
 	"github.com/glebglazov/pop/wayfinder"
 	"github.com/glebglazov/pop/work"
+	"github.com/glebglazov/pop/work/ref"
 )
 
 func mkdirDrainStoreDir(t *testing.T, td *tasks.Deps) {
@@ -110,7 +112,7 @@ func TestRenderStatusMirrorsDashboardRows(t *testing.T) {
 	}
 
 	var out strings.Builder
-	RenderStatus(&out, StatusSnapshot{Tasks: td}, got)
+	RenderStatus(&out, (&Deps{}).WorkKinds(nil), StatusSnapshot{Tasks: td}, got)
 	text := out.String()
 
 	if !strings.Contains(text, "Summary:") {
@@ -161,11 +163,11 @@ func TestRenderStatusTableColumnsAndIndicator(t *testing.T) {
 	sortDashboardRows(rows)
 
 	var out strings.Builder
-	RenderStatus(&out, StatusSnapshot{Tasks: td}, rows)
+	RenderStatus(&out, (&Deps{}).WorkKinds(nil), StatusSnapshot{Tasks: td}, rows)
 	text := out.String()
 
 	for _, want := range []string{
-		"IN PROGRESS",              // live-drained READY → IN PROGRESS
+		"IN PROGRESS",                 // live-drained READY → IN PROGRESS
 		dashboardActivityClusterPlain, // trailing activity cluster
 		work.DestLabelManagedWt,
 		work.DestLabelNeedsBind,
@@ -185,7 +187,7 @@ func TestDashboardAutoDrainBadgeAndToggle(t *testing.T) {
 		{Project: "pop", Worktree: "/repo/main (main)", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "plain"}},
 	}
 	var rendered strings.Builder
-	renderDashboardTable(&rendered, rows, 0, 0, 20, livePaneCache{})
+	renderDashboardTable(&rendered, testKinds(), rows, 0, 0, 20, livePaneCache{})
 	if !strings.Contains(rendered.String(), "AD") {
 		t.Fatalf("missing auto-drain flag:\n%s", rendered.String())
 	}
@@ -274,7 +276,7 @@ func TestDashboardAutoDrainWaitingMarkerAndCount(t *testing.T) {
 	pickedUp := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady, AutoDrain: true, LiveDrain: true}}
 	plain := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady}}
 
-	summary := dashboardSummary([]DashboardRow{idle, pickedUp, plain})
+	summary := dashboardSummary(testKinds(), []DashboardRow{idle, pickedUp, plain})
 	if !strings.Contains(summary, "1 auto-drain") {
 		t.Errorf("summary count: got %q, want exactly 1 auto-drain (waiting-only)", summary)
 	}
@@ -360,7 +362,7 @@ func TestDashboardFormerDirectKeysInertAtTopLevel(t *testing.T) {
 func TestDashboardActionMenuContextFiltering(t *testing.T) {
 	keysFor := func(row DashboardRow) []string {
 		var keys []string
-		for _, item := range dashboardMenuItems(row) {
+		for _, item := range dashboardMenuItems(testKinds(), row) {
 			keys = append(keys, item.key)
 		}
 		return keys
@@ -944,10 +946,10 @@ func TestDashboardTwoLineRowLine2ShowsStatusUnderTaskSet(t *testing.T) {
 		Started: true,
 	}
 	widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths([]DashboardRow{row}), 120)
-	line2 := dashboardTwoLineRowLine2(row, widths)
+	line2 := dashboardTwoLineRowLine2(testKinds(), row, widths)
 
 	// The base label is bucket-colored (started READY → blue "IN PROGRESS").
-	wantStatus := dashboardStatusCellStyled(row)
+	wantStatus := dashboardStatusCellStyled(testKinds(), row)
 	if strings.TrimLeft(line2, " ") != wantStatus {
 		t.Fatalf("two-line row line 2 = %q, want the status %q (indented)", line2, wantStatus)
 	}
@@ -1024,7 +1026,7 @@ func TestDashboardTwoLineSingleLineLayoutUnchanged(t *testing.T) {
 func TestDashboardActivityCluster(t *testing.T) {
 	setID := "set-cluster"
 	row := DashboardRow{SetRef: SetRef{SetID: setID}}
-	mapRow := DashboardRow{IsMap: true, SetRef: SetRef{SetID: "map-1"}}
+	mapRow := DashboardRow{Kind: ref.KindMap, SetRef: SetRef{SetID: "map-1"}}
 
 	plain := dashboardActivityCluster(row, livePaneCache{}, false)
 	if plain != dashboardActivityClusterPlain {
@@ -1104,12 +1106,12 @@ func TestDashboardNarrowPaneKeepsCluster(t *testing.T) {
 		{Project: "a-really-long-project-name", Worktree: "some-long-branch", CursorKey: "a\x00live",
 			SetRef: SetRef{SetID: "live", RawStatus: tasks.StatusReady, LiveDrain: true}},
 	}
-	natural := dashboardColumnWidths(rows)
+	natural := dashboardColumnWidths(testKinds(), rows)
 	fitted := dashboardFitColumnWidths(natural, 20)
 	if fitted[dashboardColIndicator] < len(dashboardActivityClusterPlain) {
 		t.Fatalf("indicator column width = %d, want >= %d (never dropped)", fitted[dashboardColIndicator], len(dashboardActivityClusterPlain))
 	}
-	line := dashboardTableLine(dashboardRowValues(rows[0], livePaneCache{}), fitted)
+	line := dashboardTableLine(dashboardRowValues(testKinds(), rows[0], livePaneCache{}), fitted)
 	if !strings.Contains(line, dashboardActivityClusterPlain) {
 		t.Fatalf("narrow-pane row missing activity cluster: %q", line)
 	}
@@ -1181,7 +1183,7 @@ func TestDashboardStatusAppendsVerifiedAtSHA(t *testing.T) {
 		VerifiedAtDrifted: true,
 		SetRef:            SetRef{RawStatus: tasks.StatusAwaitingApproval},
 	}
-	got := dashboardStatusCellStyled(drifted)
+	got := dashboardStatusCellStyled(testKinds(), drifted)
 	if !strings.Contains(got, "AWAITING-APPROVAL") {
 		t.Fatalf("status label missing: %q", got)
 	}
@@ -1197,19 +1199,19 @@ func TestDashboardStatusAppendsVerifiedAtSHA(t *testing.T) {
 		VerifiedAtDrifted: false,
 		SetRef:            SetRef{RawStatus: tasks.StatusDone},
 	}
-	gotHead := dashboardStatusCellStyled(atHead)
+	gotHead := dashboardStatusCellStyled(testKinds(), atHead)
 	if !strings.Contains(gotHead, "\x1b[32mverified @") {
 		t.Fatalf("at-HEAD verified suffix should be green: %q", gotHead)
 	}
 
 	unverified := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusNeedsVerify}}
-	gotUnv := dashboardStatusCellStyled(unverified)
+	gotUnv := dashboardStatusCellStyled(testKinds(), unverified)
 	if !strings.Contains(gotUnv, "\x1b[31munverified") {
 		t.Fatalf("NEEDS-VERIFY should show red unverified: %q", gotUnv)
 	}
 
 	plain := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusAwaitingApproval}}
-	if got := dashboardStatusCellStyled(plain); strings.Contains(got, "verified @") || strings.Contains(got, "unverified") {
+	if got := dashboardStatusCellStyled(testKinds(), plain); strings.Contains(got, "verified @") || strings.Contains(got, "unverified") {
 		t.Fatalf("plain status should not contain badge: %q", got)
 	}
 }
@@ -1239,14 +1241,14 @@ func TestDashboardStatusBucketColors(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			row := DashboardRow{SetRef: SetRef{RawStatus: c.status}, Started: c.started}
-			styled := dashboardStatusCellStyled(row)
-			label := dashboardStatusLabelText(row)
+			styled := dashboardStatusCellStyled(testKinds(), row)
+			label := testKinds().statusSegments(row)[0].Text
 			// The bucket ANSI must wrap the base label token.
 			if !strings.Contains(styled, c.ansi+label) {
 				t.Fatalf("styled label = %q, want bucket %q on %q", styled, c.ansi, label)
 			}
 			// Width measurement stays plain: no ANSI in the un-styled cell.
-			if plain := dashboardStatusCellText(row); strings.Contains(plain, "\x1b[") {
+			if plain := dashboardStatusCellText(testKinds(), row); strings.Contains(plain, "\x1b[") {
 				t.Fatalf("plain cell should carry no ANSI: %q", plain)
 			}
 		})
@@ -1258,7 +1260,7 @@ func TestDashboardStatusBucketColors(t *testing.T) {
 // suffixes stay plain and the label ANSI resets before them.
 func TestDashboardStatusBucketColorOnlyBaseToken(t *testing.T) {
 	row := DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusBlocked, AutoDrain: true, Orphaned: true}}
-	styled := dashboardStatusCellStyled(row)
+	styled := dashboardStatusCellStyled(testKinds(), row)
 	// Base label is yellow and reset before the suffixes.
 	if !strings.Contains(styled, "\x1b[33mBLOCKED\x1b[m") {
 		t.Fatalf("base BLOCKED token should be yellow-and-reset: %q", styled)
@@ -1282,7 +1284,7 @@ func TestDashboardSummaryRunningCountsLiveDrainsOnly(t *testing.T) {
 		{SetRef: SetRef{RawStatus: tasks.StatusReady, Parked: true}},
 		{SetRef: SetRef{RawStatus: tasks.StatusReady, ConfigError: "no trunk"}},
 	}
-	summary := dashboardSummary(rows)
+	summary := dashboardSummary(testKinds(), rows)
 	if !strings.Contains(summary, "1 running") {
 		t.Errorf("summary = %q, want exactly 1 running (live-drain rows only)", summary)
 	}
@@ -1333,8 +1335,8 @@ func TestDashboardTableRendersVerifiedAtSHA(t *testing.T) {
 		VerifiedAtSHA:     "abcdef1234567890",
 		VerifiedAtDrifted: true,
 		Worktree:          "main",
-		CursorKey:     "pop\x00set",
-		SetRef:        SetRef{SetID: "set", RawStatus: tasks.StatusDone},
+		CursorKey:         "pop\x00set",
+		SetRef:            SetRef{SetID: "set", RawStatus: tasks.StatusDone},
 	}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{row}})
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 8})
@@ -1927,7 +1929,7 @@ func TestDashboardShowsUnsatisfiableWorktreeDirective(t *testing.T) {
 	if row.LiveDrain {
 		t.Fatalf("LiveDrain = true, want false (config error row is not a live drain)")
 	}
-	status := dashboardStatusCellText(*row)
+	status := dashboardStatusCellText(testKinds(), *row)
 	if !strings.Contains(status, "· config error:") || !strings.Contains(status, "no worktree of that name") {
 		t.Fatalf("status = %q, want a config error suffix for the unsatisfiable named directive", status)
 	}
@@ -3246,7 +3248,7 @@ func TestTaskMenuKMovesCursor(t *testing.T) {
 func TestStatusSubmenuKMovesCursor(t *testing.T) {
 	row := DashboardRow{SetRef: SetRef{SetID: "demo"}}
 	m := newQueueDashboard(nil, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
-	m.menu = newDashboardMenu(row, false)
+	m.menu = newDashboardMenu(testKinds(), row, false)
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
 	got := updated.(QueueDashboard)
@@ -3292,11 +3294,11 @@ func TestDashboardMenusReserveMovementKeys(t *testing.T) {
 		{SetRef: SetRef{SetID: "plain"}},
 		{SetRef: SetRef{SetID: "bound", Bound: true, RawStatus: tasks.StatusNeedsVerify}},
 		{SetRef: SetRef{SetID: "parked", Parked: true, Orphaned: true}},
-		{SetRef: SetRef{SetID: "map"}, IsMap: true},
+		{Kind: ref.KindMap, SetRef: SetRef{SetID: "map"}},
 	}
 	for _, row := range rows {
 		var keys []string
-		for _, item := range dashboardMenuItems(row) {
+		for _, item := range dashboardMenuItems(testKinds(), row) {
 			keys = append(keys, item.key)
 		}
 		check("action menu ("+row.SetID+")", keys)
@@ -4367,18 +4369,18 @@ func TestDashboardFilterReevaluatesTwoLineMode(t *testing.T) {
 // a plain-text ` · auto-drain` suffix for an auto-drain row (after the yellow
 // verify suffix), and nothing for a non-auto-drain row.
 func TestDashboardStatusAppendsAutoDrain(t *testing.T) {
-	ad := dashboardStatusCellStyled(DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady, AutoDrain: true}})
+	ad := dashboardStatusCellStyled(testKinds(), DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady, AutoDrain: true}})
 	// The base label is bucket-colored (READY → blue); the marker follows plainly.
 	if !strings.Contains(ad, "\x1b[34mREADY\x1b[m · auto-drain") {
 		t.Fatalf("auto-drain suffix missing/misplaced: %q", ad)
 	}
-	if plain := dashboardStatusCellStyled(DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady}}); strings.Contains(plain, "auto-drain") {
+	if plain := dashboardStatusCellStyled(testKinds(), DashboardRow{SetRef: SetRef{RawStatus: tasks.StatusReady}}); strings.Contains(plain, "auto-drain") {
 		t.Fatalf("non-auto-drain row should not carry suffix: %q", plain)
 	}
 
 	// The yellow verify suffix must still render and precede the uncolored
 	// auto-drain suffix: <label> · verified @ <sha> · auto-drain.
-	ordered := dashboardStatusCellStyled(DashboardRow{VerifiedAtSHA: "abcdef1234567890", VerifiedAtDrifted: true, SetRef: SetRef{RawStatus: tasks.StatusAwaitingApproval, AutoDrain: true}})
+	ordered := dashboardStatusCellStyled(testKinds(), DashboardRow{VerifiedAtSHA: "abcdef1234567890", VerifiedAtDrifted: true, SetRef: SetRef{RawStatus: tasks.StatusAwaitingApproval, AutoDrain: true}})
 	vIdx := strings.Index(ordered, "verified @")
 	aIdx := strings.Index(ordered, "auto-drain")
 	if vIdx < 0 || aIdx < 0 || vIdx > aIdx {
@@ -4414,11 +4416,11 @@ func TestDashboardStatusSuffixesRender(t *testing.T) {
 	// that no truncation clips the suffixes. Column order: PROJECT, TASK SET,
 	// STATUS (index 2, given the width), WORKTREE, indicator.
 	widths := []int{20, 20, 60, 20, 20}
-	single := dashboardTableLine(dashboardRowValues(both, livePaneCache{}), widths)
+	single := dashboardTableLine(dashboardRowValues(testKinds(), both, livePaneCache{}), widths)
 	if !strings.Contains(single, "· auto-drain · orphaned") {
 		t.Fatalf("single-line render missing suffixes:\n%s", single)
 	}
-	twoLine := dashboardTwoLineRowLine2(both, []int{10, 10, 10, 10})
+	twoLine := dashboardTwoLineRowLine2(testKinds(), both, []int{10, 10, 10, 10})
 	if !strings.Contains(twoLine, "· auto-drain · orphaned") {
 		t.Fatalf("two-line render missing suffixes:\n%s", twoLine)
 	}
@@ -4437,11 +4439,11 @@ func TestDashboardParkedAndConfigErrorSuffixes(t *testing.T) {
 
 	for _, status := range []tasks.TaskSetStatus{tasks.StatusReady, tasks.StatusBlocked, tasks.StatusAwaitingApproval, tasks.StatusFailed} {
 		row := DashboardRow{SetRef: SetRef{RawStatus: status, Parked: true}}
-		single := dashboardTableLine(dashboardRowValues(row, livePaneCache{}), statusW)
+		single := dashboardTableLine(dashboardRowValues(testKinds(), row, livePaneCache{}), statusW)
 		if !strings.Contains(single, "· parked") {
 			t.Fatalf("status %s single-line parked render missing suffix:\n%s", status, single)
 		}
-		twoLine := dashboardTwoLineRowLine2(row, []int{10, 10, 10, 10})
+		twoLine := dashboardTwoLineRowLine2(testKinds(), row, []int{10, 10, 10, 10})
 		if !strings.Contains(twoLine, "· parked") {
 			t.Fatalf("status %s two-line parked render missing suffix:\n%s", status, twoLine)
 		}
@@ -4452,11 +4454,11 @@ func TestDashboardParkedAndConfigErrorSuffixes(t *testing.T) {
 	if ce.LiveDrain {
 		t.Fatalf("config-error row LiveDrain = true, want false (config error is not a live drain)")
 	}
-	single := dashboardTableLine(dashboardRowValues(ce, livePaneCache{}), statusW)
+	single := dashboardTableLine(dashboardRowValues(testKinds(), ce, livePaneCache{}), statusW)
 	if !strings.Contains(single, "· config error: "+msg) {
 		t.Fatalf("single-line config-error render missing suffix:\n%s", single)
 	}
-	twoLine := dashboardTwoLineRowLine2(ce, []int{10, 10, 10, 10})
+	twoLine := dashboardTwoLineRowLine2(testKinds(), ce, []int{10, 10, 10, 10})
 	if !strings.Contains(twoLine, "· config error: "+msg) {
 		t.Fatalf("two-line config-error render missing suffix:\n%s", twoLine)
 	}
@@ -4475,8 +4477,8 @@ func TestDashboardParkedAndConfigErrorSuffixes(t *testing.T) {
 			ConfigError: "no trunk",
 		},
 	}
-	plain := dashboardStatusCellText(multi)
-	if styled := dashboardStatusCellStyled(multi); lipgloss.Width(styled) != lipgloss.Width(plain) {
+	plain := dashboardStatusCellText(testKinds(), multi)
+	if styled := dashboardStatusCellStyled(testKinds(), multi); lipgloss.Width(styled) != lipgloss.Width(plain) {
 		t.Fatalf("styled width %d != plain width %d (ANSI leaked into width math)", lipgloss.Width(styled), lipgloss.Width(plain))
 	}
 }
@@ -4536,7 +4538,7 @@ func mapDirEntries(path string, files map[string]string) []os.DirEntry {
 
 func TestDashboardMapRowQueueVerbsInert(t *testing.T) {
 	mapRow := DashboardRow{
-		Project: "pop", IsMap: true, CursorKey: "pop\x00map\x00demo",
+		Project: "pop", Kind: ref.KindMap, CursorKey: "pop\x00map\x00demo",
 		SetRef: SetRef{SetID: "demo"}, MapOpen: 1, MapFrontier: 1,
 	}
 	setRow := DashboardRow{
@@ -4547,9 +4549,22 @@ func TestDashboardMapRowQueueVerbsInert(t *testing.T) {
 	m.width, m.height = 120, 40
 	m.list.SetCursor(0)
 
-	items := dashboardMenuItems(mapRow)
-	if len(items) != 1 || items[0].key != "y" || items[0].label != "copy name" {
-		t.Fatalf("map menu items = %v, want copy name on y only", items)
+	// A Map's menu is its own kind's: the frontier verb and the two shared ones.
+	// Every Task-set verb stays absent — queue verbs have never applied to a Map.
+	items := dashboardMenuItems(testKinds(), mapRow)
+	var keys []string
+	for _, item := range items {
+		keys = append(keys, item.key)
+	}
+	if want := []string{"I", "O", "y"}; !reflect.DeepEqual(keys, want) {
+		t.Fatalf("map menu keys = %v, want %v", keys, want)
+	}
+	for _, item := range items {
+		switch item.verb {
+		case setkind.VerbDrain, setkind.VerbBind, setkind.VerbUnbind, setkind.VerbAutoDrain,
+			setkind.VerbStatus, setkind.VerbAssist, setkind.VerbArchive:
+			t.Fatalf("map menu offers the Task-set verb %q", item.verb)
+		}
 	}
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
@@ -4579,12 +4594,12 @@ func TestDashboardMapRowQueueVerbsInert(t *testing.T) {
 
 func TestDashboardMapRowTwoLineRender(t *testing.T) {
 	row := DashboardRow{
-		Project: "pop", IsMap: true, SetRef: SetRef{SetID: "2026-07-01-wayfinding-map"},
+		Project: "pop", Kind: ref.KindMap, SetRef: SetRef{SetID: "2026-07-01-wayfinding-map"},
 		MapOpen: 3, MapFrontier: 2,
 	}
 	widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths([]DashboardRow{row}), 120)
 	line1 := dashboardTwoLineRowLine1(row, widths, livePaneCache{})
-	line2 := dashboardTwoLineRowLine2(row, widths)
+	line2 := dashboardTwoLineRowLine2(testKinds(), row, widths)
 	if !strings.Contains(line1, "pop") || !strings.Contains(line1, "2026-07-01-wayfinding-map") {
 		t.Fatalf("two-line line1 missing project/map id: %q", line1)
 	}
@@ -4626,7 +4641,7 @@ func newMapDetailDashboard(t *testing.T) (QueueDashboard, *Deps) {
 	withWayfinderMaps(t, d, storageDir, files)
 	mapRow := DashboardRow{
 		Project:   "pop",
-		IsMap:     true,
+		Kind:      ref.KindMap,
 		CursorKey: "pop\x00map\x00" + "2026-07-01-active",
 		SetRef: SetRef{
 			SetID:   "2026-07-01-active",

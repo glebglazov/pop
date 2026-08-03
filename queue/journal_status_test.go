@@ -79,7 +79,7 @@ func TestRenderStatusFromLocksAndState(t *testing.T) {
 	// Status is now Summary headline + dashboard table + Scan errors (ADR-0121);
 	// this snapshot exercises the Summary roll-up and the trailing Scan errors
 	// section (the table is fed the dashboard's rows by the command).
-	RenderStatus(&out, snap, nil)
+	RenderStatus(&out, (&Deps{}).WorkKinds(nil), snap, nil)
 	text := out.String()
 	for _, want := range []string{
 		"Summary:",
@@ -214,7 +214,7 @@ func TestRenderStatusShowsRecoveryWaiter(t *testing.T) {
 	// A quota-recovery waiter counts as a blocked set in the Summary roll-up; the
 	// former "Blocked:" inventory section (and its per-waiter detail) is retired —
 	// blocked state now rides the dashboard row's STATUS cell (ADR-0121).
-	RenderStatus(&statusOut, snap, nil)
+	RenderStatus(&statusOut, (&Deps{}).WorkKinds(nil), snap, nil)
 	statusText := statusOut.String()
 	if !strings.Contains(statusText, "Summary:") || !strings.Contains(statusText, "blocked") {
 		t.Fatalf("status Summary should roll up the blocked waiter:\n%s", statusText)
@@ -435,7 +435,7 @@ func TestRenderStatusShowsCrashBackoffAndPark(t *testing.T) {
 	// A parked set counts as blocked in the Summary roll-up; the retired
 	// "Blocked:" / "Active worktrees:" inventory sections no longer render — the
 	// dashboard row's STATUS cell carries the parked suffix (ADR-0121).
-	RenderStatus(&statusOut, snap, nil)
+	RenderStatus(&statusOut, (&Deps{}).WorkKinds(nil), snap, nil)
 	statusText := statusOut.String()
 	if !strings.Contains(statusText, "Summary:") || !strings.Contains(statusText, "blocked") {
 		t.Fatalf("status Summary should roll up the parked set:\n%s", statusText)

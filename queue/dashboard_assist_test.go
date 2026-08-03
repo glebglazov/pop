@@ -17,7 +17,7 @@ import (
 // TestDashboardAssistMenuPlacement asserts Assist sits with status and shell,
 // not among the drain/verify work verbs.
 func TestDashboardAssistMenuPlacement(t *testing.T) {
-	items := dashboardMenuItems(DashboardRow{SetRef: SetRef{SetID: "demo"}})
+	items := dashboardMenuItems(testKinds(), DashboardRow{SetRef: SetRef{SetID: "demo"}})
 	var keys []string
 	for _, item := range items {
 		keys = append(keys, item.key)

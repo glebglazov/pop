@@ -41,7 +41,7 @@ func BuildSnapshot(kinds []Kind) (Snapshot, error) {
 		}
 		snap.ModelSkips = append(snap.ModelSkips, skips...)
 	}
-	snap.Rows = rowsFromContainers(snap.Containers)
+	snap.Rows = snap.Containers
 	return snap, nil
 }
 
@@ -82,21 +82,6 @@ func kindModelSkips(k Kind) ([]ModelSkip, error) {
 		return nil, fmt.Errorf("work: %s model skips: %w", k.ID(), err)
 	}
 	return skips, nil
-}
-
-// rowsFromContainers derives the transitional legacy row model from the ordered
-// containers. Every row a consumer reads is now a projection of a container, so
-// the row model has no independent build path left to drift from — which is what
-// lets the contract slices delete it one consumer at a time.
-func rowsFromContainers(containers []Container) []Row {
-	if len(containers) == 0 {
-		return nil
-	}
-	rows := make([]Row, 0, len(containers))
-	for _, c := range containers {
-		rows = append(rows, c.Row)
-	}
-	return rows
 }
 
 // SummaryLine joins every kind's header phrases in kind order — the one header

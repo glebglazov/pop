@@ -7,6 +7,7 @@ import (
 
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/setkind"
 )
 
 // TestDashboardVerifyVerbConditionalInclusion asserts the `v` verify verb (ADR-0123)
@@ -14,8 +15,8 @@ import (
 // and is absent for every other status and whenever a live drain holds the set.
 func TestDashboardVerifyVerbConditionalInclusion(t *testing.T) {
 	has := func(row DashboardRow) bool {
-		for _, item := range dashboardMenuItems(row) {
-			if item.key == "V" && item.action == menuActionVerify {
+		for _, item := range dashboardMenuItems(testKinds(), row) {
+			if item.key == "V" && item.verb == setkind.VerbVerify {
 				return true
 			}
 		}

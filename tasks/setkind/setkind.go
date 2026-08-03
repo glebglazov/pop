@@ -148,7 +148,15 @@ func (k *Kind) Load() ([]work.Container, error) {
 // dashboard` and `pop queue status` have always read, ported wholesale rather
 // than re-derived, so the seam's ordering is that comparator and not a second one.
 func (k *Kind) Less(a, b work.Container) bool {
-	return tasks.WorkRowLess(a.Row, b.Row)
+	return tasks.WorkRowLess(a, b)
+}
+
+// StatusCell composes a task set's STATUS cell: the display label with the
+// READY→IN PROGRESS refinement, then the verified-at, auto-drain, orphaned,
+// parked and config-error suffixes in that fixed order (ADR-0108, ADR-0111). The
+// composition itself is the Task-set model's, ported here unchanged.
+func (k *Kind) StatusCell(c work.Container) []work.StatusSegment {
+	return tasks.WorkRowStatusSegments(c)
 }
 
 // ModelSkips reports the Effort model skips in force (ADR-0168). They are
@@ -184,13 +192,13 @@ func (k *Kind) ModelSkips() ([]work.ModelSkip, error) {
 func (k *Kind) Summary(containers []work.Container) []string {
 	ready, running, autoDrain := 0, 0, 0
 	for _, c := range containers {
-		if c.Row.RawStatus == tasks.StatusReady {
+		if c.RawStatus == tasks.StatusReady {
 			ready++
 		}
-		if c.Row.LiveDrain {
+		if c.LiveDrain {
 			running++
 		}
-		if work.AutoDrainWaiting(c.Row) {
+		if work.AutoDrainWaiting(c) {
 			autoDrain++
 		}
 	}
@@ -275,7 +283,9 @@ func containersFromGroup(d *Deps, cfg *config.Config, snap *snapshot, delays []t
 				}
 			}
 		}
-		row := work.Row{
+		container := work.Container{
+			Kind: ref.KindTaskSet,
+			ID:   taskRow.ID,
 			SetRef: work.SetRef{
 				SetID:                 taskRow.ID,
 				RawStatus:             taskRow.Status,
@@ -302,18 +312,11 @@ func containersFromGroup(d *Deps, cfg *config.Config, snap *snapshot, delays []t
 			Worktree:          wt.label,
 			CursorKey:         g.ProjectName + "\x00" + taskRow.ID,
 			DestKind:          wt.DestKind,
+			Items:             itemsFor(refresh, taskRow.ID),
 		}
-		containers = append(containers, work.Container{
-			Kind:       ref.KindTaskSet,
-			ID:         taskRow.ID,
-			Project:    g.ProjectName,
-			Status:     tasks.WorkRowStatusLabel(row),
-			StatusCell: tasks.WorkRowStatusCell(row),
-			Checkout:   shellDir(row),
-			CursorKey:  row.CursorKey,
-			Items:      itemsFor(refresh, taskRow.ID),
-			Row:        row,
-		})
+		container.Status = tasks.WorkRowStatusLabel(container)
+		container.Checkout = shellDir(container)
+		containers = append(containers, container)
 	}
 	return containers, nil
 }
@@ -344,10 +347,9 @@ func itemsFor(refresh *tasks.RefreshResult, setID string) []work.Item {
 }
 
 // shellDir is the directory a shell or handoff verb runs in for a set: its bound
-// runtime checkout when it has one, else the repo group's integration target.
-func shellDir(row work.Row) string {
-	if strings.TrimSpace(row.RuntimePath) != "" {
-		return row.RuntimePath
-	}
-	return row.ProjectPath
+// runtime checkout, and nothing else. An unbound set resolves none — a shell
+// "in" a set that has no checkout of its own would land in the shared
+// integration target, which is not where work on that set belongs.
+func shellDir(row work.Container) string {
+	return strings.TrimSpace(row.RuntimePath)
 }

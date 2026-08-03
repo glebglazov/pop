@@ -75,14 +75,14 @@ func routineTickDeps(t *testing.T, now time.Time) (*Deps, *routine.Deps, string)
 		t.Fatal(err)
 	}
 	rd := &routine.Deps{
-		FS:            td.FS,
-		Now:           func() time.Time { return now },
-		LoadConfig:    func() (*config.Config, error) { return &config.Config{}, nil },
-		Tasks:         td,
-		IsInteractive: func() bool { return false },
-		PID:           func() int { return 4242 },
+		FS:             td.FS,
+		Now:            func() time.Time { return now },
+		LoadConfig:     func() (*config.Config, error) { return &config.Config{}, nil },
+		Tasks:          td,
+		IsInteractive:  func() bool { return false },
+		PID:            func() int { return 4242 },
 		ProcStartToken: func(pid int) (string, bool) { return "test", true },
-		ProcessAlive:  func(pid int, procStart string) bool { return pid == 9999 },
+		ProcessAlive:   func(pid int, procStart string) bool { return pid == 9999 },
 	}
 	qd := &Deps{
 		Tasks:      td,

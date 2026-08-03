@@ -6,6 +6,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
+	"github.com/glebglazov/pop/tasks/setkind"
+	"github.com/glebglazov/pop/work"
 )
 
 // TestLivePaneMenuKeyColours asserts handoff keys render dark/grey/green from
@@ -17,7 +19,7 @@ func TestLivePaneMenuKeyColours(t *testing.T) {
 	live.set(tmuxmod.TagSet, setID, livePaneRunning)
 	live.set(tmuxmod.TagAssist, setID, livePaneIdle)
 
-	menu := newDashboardMenu(row, false)
+	menu := newDashboardMenu(testKinds(), row, false)
 	lines := dashboardMenuLines(menu, 80, live)
 	joined := strings.Join(lines, "\n")
 
@@ -39,7 +41,7 @@ func TestLivePaneMenuKeyColours(t *testing.T) {
 
 // TestLivePanePreviewVerbGone asserts the preview verb and its key are unbound.
 func TestLivePanePreviewVerbGone(t *testing.T) {
-	for _, item := range dashboardMenuItems(DashboardRow{SetRef: SetRef{SetID: "x"}}) {
+	for _, item := range dashboardMenuItems(testKinds(), DashboardRow{SetRef: SetRef{SetID: "x"}}) {
 		if item.key == "p" || item.label == "preview" {
 			t.Fatalf("preview must be gone, found %+v", item)
 		}
@@ -186,9 +188,9 @@ func TestLivePaneShellAlwaysDarkInMenu(t *testing.T) {
 	row := DashboardRow{SetRef: SetRef{SetID: "s", RuntimePath: "/wt", Bound: true}}
 	live := livePaneCache{}
 	live.set(tmuxmod.TagSet, "s", livePaneRunning)
-	menu := newDashboardMenu(row, false)
+	menu := newDashboardMenu(testKinds(), row, false)
 	for _, item := range menu.list.Items() {
-		if item.action == menuActionShell {
+		if item.verb == work.VerbShell {
 			if st := menuItemLiveState(item, row, live); st != livePaneNone {
 				t.Fatalf("shell live state = %v, want none", st)
 			}
@@ -229,13 +231,13 @@ func TestLivePaneRowClusterMatchesMenu(t *testing.T) {
 	live.set(tmuxmod.TagAssist, setID, livePaneRunning)
 
 	cluster := dashboardActivityCluster(row, live, true)
-	menu := newDashboardMenu(row, false)
+	menu := newDashboardMenu(testKinds(), row, false)
 	lines := dashboardMenuLines(menu, 80, live)
 	joined := strings.Join(lines, "\n")
 
 	for _, item := range menu.list.Items() {
-		switch item.action {
-		case menuActionDrain, menuActionVerify, menuActionFold, menuActionAssist:
+		switch item.verb {
+		case setkind.VerbDrain, setkind.VerbVerify, setkind.VerbFold, setkind.VerbAssist:
 			want := styleHandoffKey(item.key, menuItemLiveState(item, row, live))
 			if !strings.Contains(cluster, want) {
 				t.Fatalf("cluster missing %q styled like menu for %s:\ncluster=%q\nmenu=%q", want, item.label, cluster, joined)

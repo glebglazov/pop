@@ -33,7 +33,7 @@ func rowsForStatic(d *Deps, cfg *config.Config, g repogroup.Group) ([]work.Row, 
 	}
 	rows := make([]work.Row, 0, len(containers))
 	for _, c := range containers {
-		rows = append(rows, c.Row)
+		rows = append(rows, c)
 	}
 	return rows, nil
 }

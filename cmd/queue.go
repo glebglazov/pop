@@ -148,7 +148,7 @@ func runQueueStatus(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	queue.RenderStatus(os.Stdout, snap, dash.Rows)
+	queue.RenderStatus(os.Stdout, d.WorkKinds(cfg), snap, dash.Rows)
 	return nil
 }
 

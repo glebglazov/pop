@@ -32,7 +32,7 @@ func LaunchWayfinderSession(d *Deps, cfg *config.Config, row DashboardRow, ticke
 	if d.Tmux == nil {
 		d.Tmux = tmuxmod.New()
 	}
-	if !row.IsMap {
+	if !mapRow(row) {
 		return DashboardDrainResult{}, fmt.Errorf("not a wayfinder map row")
 	}
 	storageDir := dashboardRowStorageDir(row)

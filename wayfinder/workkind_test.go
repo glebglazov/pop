@@ -89,11 +89,11 @@ func TestMapKindLoadsVisibleMapsOnly(t *testing.T) {
 	if active.Project != "pop" || active.Checkout != "/repo/main" {
 		t.Fatalf("container = %+v, want project pop in /repo/main", active)
 	}
-	if want := "WAYFINDING · 2 open / 1 frontier"; active.StatusCell != want {
-		t.Fatalf("StatusCell = %q, want %q", active.StatusCell, want)
+	if want := "WAYFINDING · 2 open / 1 frontier"; work.StatusCellText(k.StatusCell(active)) != want {
+		t.Fatalf("StatusCell = %q, want %q", work.StatusCellText(k.StatusCell(active)), want)
 	}
-	if !active.Row.IsMap || active.Row.Worktree != "" {
-		t.Fatalf("row projection = %+v, want a map row with a blank worktree", active.Row)
+	if active.Worktree != "" {
+		t.Fatalf("container = %+v, want a map row with a blank worktree", active)
 	}
 	if len(active.Items) != 2 {
 		t.Fatalf("items = %+v, want the two tickets", active.Items)

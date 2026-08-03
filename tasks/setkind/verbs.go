@@ -41,30 +41,29 @@ const (
 // It is called when a menu opens over one container, not per container at load
 // time, so the eligibility it reports is as fresh as the keypress.
 func (k *Kind) Actions(c work.Container) []work.Action {
-	row := c.Row
 	actions := []work.Action{{Verb: VerbDrain, Key: "I", Label: "drain"}}
 	// Verify is the lighter, explicit Verifier force (ADR-0123): offered only on
 	// sets a verdict can move (NEEDS-VERIFY / VERIFY-FAILED) and hidden while a
 	// live drain holds the set — a plain verify is not quiescence-gated, so the
 	// running drain verifies itself instead.
-	if verifyEligible(row) {
+	if verifyEligible(c) {
 		actions = append(actions, work.Action{Verb: VerbVerify, Key: "V", Label: "verify"})
 	}
 	actions = append(actions, work.Action{Verb: VerbBind, Key: "b", Label: "bind worktree"})
-	if row.Bound {
+	if c.Bound {
 		actions = append(actions, work.Action{Verb: VerbUnbind, Key: "u", Label: "unbind worktree"})
 	}
-	if !row.Orphaned {
+	if !c.Orphaned {
 		actions = append(actions, work.Action{Verb: VerbAutoDrain, Key: "a", Label: "auto-drain"})
 	}
 	actions = append(actions,
 		work.Action{Verb: VerbStatus, Key: "s", Label: "status ▸"},
 		work.Action{Verb: VerbAssist, Key: "S", Label: "assist"},
 	)
-	if foldEligible(row) {
+	if foldEligible(c) {
 		actions = append(actions, work.Action{Verb: VerbFold, Key: "F", Label: "fold"})
 	}
-	if row.Parked {
+	if c.Parked {
 		actions = append(actions, work.Action{Verb: VerbUnpark, Key: "r", Label: "unpark"})
 	}
 	return append(actions,
@@ -95,7 +94,7 @@ func (k *Kind) ItemActions(c work.Container, item work.Item) []work.Action {
 // verifyEligible reports whether the verify verb applies to a set: one a verdict
 // can still move (NEEDS-VERIFY or VERIFY-FAILED) that no live drain holds
 // (ADR-0123).
-func verifyEligible(row work.Row) bool {
+func verifyEligible(row work.Container) bool {
 	if row.LiveDrain {
 		return false
 	}
@@ -104,7 +103,7 @@ func verifyEligible(row work.Row) bool {
 
 // foldEligible reports whether the fold verb applies to a set: a bound DONE or
 // AWAITING-APPROVAL one (ADR-0148, ADR-0156).
-func foldEligible(row work.Row) bool {
+func foldEligible(row work.Container) bool {
 	return row.Bound && tasks.FoldEligibleStatus(row.RawStatus)
 }
 
@@ -157,7 +156,7 @@ func (k *Kind) applyTaskVerb(c work.Container, item work.Item, verb work.Verb) e
 	if loadConfig == nil {
 		loadConfig = config.Load
 	}
-	in := resolveInput(c.Row)
+	in := resolveInput(c)
 	ids := []string{item.ID}
 	var err error
 	switch verb {
@@ -187,7 +186,7 @@ func (k *Kind) applyTaskVerb(c work.Container, item work.Item, verb work.Verb) e
 
 // resolveInput points a task-set write at the definition the container was read
 // from, with the best available checkout as the working directory.
-func resolveInput(row work.Row) tasks.ResolveInput {
+func resolveInput(row work.Container) tasks.ResolveInput {
 	cwd := strings.TrimSpace(row.ProjectPath)
 	if cwd == "" {
 		cwd = strings.TrimSpace(row.RuntimePath)

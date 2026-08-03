@@ -26,8 +26,8 @@ AGENTS="…"`) are opt-in and not part of ordinary verification.
 | `tasks/` | Task sets: manifests, runner, attempt streams, prompts, spend |
 | `tasks/binding/` | Binding a Task set to a checkout or worktree |
 | `tasks/setkind/` | The Task-set `work.Kind` adapter: loads containers per repo group, the ADR-0121 comparator, the set's verbs. One level down from `tasks` because it needs `tasks/binding` |
-| `queue/` | `pop queue` supervisor **and** the Work dashboard TUI (`dashboard.go`) |
-| `work/` | The Work seam (ADR-0173): the `Kind` interface, the plain `Container`/`Item`/`Action`/`Outcome`/`Section` structs, the snapshot builder over a wired `[]Kind`. Imports no kind and no TUI — two guard tests. Still holds the transitional `Row` model derived from `Container` |
+| `queue/` | `pop queue` supervisor **and** the Work dashboard TUI (`dashboard.go`). Rows are `work.Container`s: cells, action menus and header phrases all come from the row's own kind through `work_rows.go`'s resolver, and verbs dispatch by verb id |
+| `work/` | The Work seam (ADR-0173): the `Kind` interface (including `StatusCell`, which returns tone-tagged cell segments), the plain `Container`/`Item`/`Action`/`Outcome`/`Section` structs, the snapshot builder over a wired `[]Kind`. Imports no kind and no TUI — two guard tests. `Row` is now an alias of `Container`, which still carries the transitional Task-set-only cells |
 | `work/ref/` | `WorkRef` + the closed Work-kind enum; a leaf `store` may import |
 | `repogroup/` | Fork-free resolution of the repository groups every kind scans (markers, integration target, HEAD branch, ADR-0060) — below the kinds because it needs `tasks/binding` |
 | `routine/` | Project routines: discovery, firing, per-checkout state |

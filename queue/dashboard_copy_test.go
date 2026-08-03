@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/work/ref"
 )
 
 // TestQueueDashboardCopyTaskSetRow covers the `y` verb on a task-set row: the
@@ -46,7 +47,7 @@ func TestQueueDashboardCopyTaskSetRow(t *testing.T) {
 // map id is copied and confirmed.
 func TestQueueDashboardCopyMapRow(t *testing.T) {
 	row := DashboardRow{
-		Project: "pop", IsMap: true, CursorKey: "pop\x00map\x00demo-map",
+		Project: "pop", Kind: ref.KindMap, CursorKey: "pop\x00map\x00demo-map",
 		SetRef: SetRef{SetID: "demo-map"}, MapOpen: 1, MapFrontier: 1,
 	}
 	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{row}})
@@ -81,7 +82,7 @@ func TestQueueDashboardCopyViaMenu(t *testing.T) {
 		}
 		m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{row}})
 		m.width, m.height = 120, 24
-		if !menuHasKey(newDashboardMenu(row, false), "y") {
+		if !menuHasKey(newDashboardMenu(testKinds(), row, false), "y") {
 			t.Fatal("task-set menu missing copy name bound to y")
 		}
 
@@ -108,14 +109,14 @@ func TestQueueDashboardCopyViaMenu(t *testing.T) {
 
 	t.Run("map row", func(t *testing.T) {
 		row := DashboardRow{
-			Project: "pop", IsMap: true, CursorKey: "pop\x00map\x00map-menu",
+			Project: "pop", Kind: ref.KindMap, CursorKey: "pop\x00map\x00map-menu",
 			SetRef: SetRef{SetID: "map-menu"}, MapOpen: 1, MapFrontier: 1,
 		}
 		m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{row}})
 		m.width, m.height = 120, 24
-		items := dashboardMenuItems(row)
-		if len(items) != 1 || items[0].label != "copy name" || items[0].key != "y" {
-			t.Fatalf("map menu items = %v, want single copy name on y", items)
+		items := dashboardMenuItems(testKinds(), row)
+		if last := items[len(items)-1]; last.label != "copy name" || last.key != "y" {
+			t.Fatalf("map menu items = %v, want copy name last on y", items)
 		}
 
 		var captured string

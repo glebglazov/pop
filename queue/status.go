@@ -156,10 +156,13 @@ func statusFromDecisions(d *Deps, decisions []Decision) (StatusSnapshot, error) 
 // are the dashboard rows the command builds via queue.BuildDashboard. Output is
 // plain text (no ANSI, non-interactive) so it stays greppable/pipeable and
 // serves as the Queue run baseline.
-func RenderStatus(out io.Writer, snap StatusSnapshot, rows []DashboardRow) {
+// kinds is the same wiring list the dashboard renders through: the STATUS cell
+// is composed by the kind that owns each row, so the static table and the TUI
+// print the same text (ADR-0173).
+func RenderStatus(out io.Writer, kinds []work.Kind, snap StatusSnapshot, rows []DashboardRow) {
 	view := BuildRunView(snap, time.Now())
 	RenderRunSummary(out, view)
-	renderStatusTable(out, rows)
+	renderStatusTable(out, newWorkKinds(kinds), rows)
 	renderStatusScanErrors(out, view.ScanErrors)
 }
 
@@ -172,17 +175,17 @@ func RenderStatus(out io.Writer, snap StatusSnapshot, rows []DashboardRow) {
 // natural widths (no terminal-fit shrink) so nothing is truncated, and each line
 // is right-trimmed so the empty trailing indicator leaves no dangling
 // whitespace.
-func renderStatusTable(out io.Writer, rows []DashboardRow) {
+func renderStatusTable(out io.Writer, kinds workKinds, rows []DashboardRow) {
 	fmt.Fprintln(out)
 	if len(rows) == 0 {
 		fmt.Fprintln(out, "No queue-actionable task sets.")
 		return
 	}
-	widths := dashboardColumnWidths(rows)
+	widths := dashboardColumnWidths(kinds, rows)
 	fmt.Fprintln(out, strings.TrimRight(dashboardTableLine(dashboardTableHeaders(), widths), " "))
 	fmt.Fprintln(out, strings.TrimRight(dashboardTableSeparator(widths), " "))
 	for _, row := range rows {
-		fmt.Fprintln(out, strings.TrimRight(dashboardTableLine(statusRowValues(row), widths), " "))
+		fmt.Fprintln(out, strings.TrimRight(dashboardTableLine(statusRowValues(kinds, row), widths), " "))
 	}
 }
 
@@ -191,11 +194,11 @@ func renderStatusTable(out io.Writer, rows []DashboardRow) {
 // which style the WORKTREE destination badge for the TUI — every cell here is
 // plain text: the composed STATUS cell (already un-styled) and the plain
 // destination label keep the status surface ANSI-free and greppable.
-func statusRowValues(row DashboardRow) []string {
+func statusRowValues(kinds workKinds, row DashboardRow) []string {
 	return []string{
 		row.Project,
 		row.SetID,
-		dashboardStatusCellText(row),
+		dashboardStatusCellText(kinds, row),
 		work.WorktreeLabel(row.DestKind, row.Worktree),
 		dashboardActivityCluster(row, livePaneCache{}, false),
 	}

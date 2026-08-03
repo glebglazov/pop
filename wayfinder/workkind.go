@@ -116,7 +116,7 @@ func (k *MapKind) Summary(containers []work.Container) []string {
 // are the only verbs a Map has in common with a task set.
 func (k *MapKind) Actions(c work.Container) []work.Action {
 	var actions []work.Action
-	if c.Row.MapFrontier > 0 {
+	if c.MapFrontier > 0 {
 		actions = append(actions, work.Action{Verb: VerbWork, Key: "I", Label: "work frontier ticket"})
 	}
 	return append(actions,
@@ -255,7 +255,17 @@ func (k *MapKind) groups() ([]repogroup.Group, error) {
 func containerFor(g repogroup.Group, m Map) work.Container {
 	counts := CountTickets(m.Tickets)
 	frontier := len(Frontier(m.Tickets))
-	row := work.Row{
+	return work.Container{
+		Kind:           ref.KindMap,
+		ID:             m.ID,
+		Project:        g.ProjectName,
+		Status:         mapStatusLabel,
+		Checkout:       g.CheckoutPath(),
+		CursorKey:      g.ProjectName + "\x00map\x00" + m.ID,
+		Broken:         m.Broken,
+		BrokenReason:   m.BrokenReason,
+		Items:          itemsFor(m),
+		DetailSections: sectionsFor(m),
 		SetRef: work.SetRef{
 			SetID:         m.ID,
 			DefPath:       g.DefPath,
@@ -265,25 +275,18 @@ func containerFor(g repogroup.Group, m Map) work.Container {
 			ProjectPath:   g.CheckoutPath(),
 			ProjectName:   g.ProjectName,
 		},
-		Project:     g.ProjectName,
-		IsMap:       true,
 		MapOpen:     counts.Open,
 		MapFrontier: frontier,
-		CursorKey:   g.ProjectName + "\x00map\x00" + m.ID,
 	}
-	return work.Container{
-		Kind:           ref.KindMap,
-		ID:             m.ID,
-		Project:        g.ProjectName,
-		Status:         mapStatusLabel,
-		StatusCell:     fmt.Sprintf("%s · %d open / %d frontier", mapStatusLabel, counts.Open, frontier),
-		Checkout:       g.CheckoutPath(),
-		CursorKey:      row.CursorKey,
-		Broken:         m.Broken,
-		BrokenReason:   m.BrokenReason,
-		Items:          itemsFor(m),
-		DetailSections: sectionsFor(m),
-		Row:            row,
+}
+
+// StatusCell composes a Map's STATUS cell: the one label a Map shows, then its
+// ticket tallies (ADR-0130). The tallies are plain — how much thinking is left is
+// a quantity, not an alarm — so only the label carries a tone.
+func (k *MapKind) StatusCell(c work.Container) []work.StatusSegment {
+	return []work.StatusSegment{
+		{Text: mapStatusLabel, Tone: work.ToneLabel},
+		{Text: fmt.Sprintf("%d open / %d frontier", c.MapOpen, c.MapFrontier), Tone: work.TonePlain},
 	}
 }
 
@@ -350,8 +353,8 @@ func visible(m Map) bool {
 // storageDirFor derives a Map container's Task-storage directory from the
 // definition path its repository group carried.
 func storageDirFor(c work.Container) string {
-	if c.Row.DefPath == "" {
+	if c.DefPath == "" {
 		return ""
 	}
-	return filepath.Dir(c.Row.DefPath)
+	return filepath.Dir(c.DefPath)
 }

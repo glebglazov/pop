@@ -112,6 +112,15 @@ transitional artefacts pay for that: `work.SetStatus`, of which
 importing the kind that owns the vocabulary, and the composed-cell dispatch the
 TUI keeps until it reads containers. Both are deleted with `Row`.
 
+*Amended when the dashboard's rows moved onto `Container`.* Two details recorded
+above landed differently. `work.Row` became an alias of `Container` rather than a
+struct derived from it — the Task-set-only cells were absorbed into the container
+instead of hung off it, so there is no second row model to derive, and the
+`IsMap` boolean was deleted outright. And `StatusCell` is a method on `Kind`, not
+a field on `Container`: the styled render needs the cell as tone-tagged segments
+rather than one string, and a stored copy beside the composer that produces it
+would be a second source of truth for the same text.
+
 A conformance test in `work` drives the real adapters through every method of the
 interface, so a fourth kind earns its coverage by being named in one table rather
 than by growing a suite. Because every kind imports `work`, that test lives in an

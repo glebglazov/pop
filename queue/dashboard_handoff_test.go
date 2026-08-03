@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/glebglazov/pop/project"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
+	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
 )
 

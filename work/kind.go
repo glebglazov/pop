@@ -35,6 +35,13 @@ type Kind interface {
 	// across kinds: kind precedence decides that, and this comparator only ever
 	// sees containers it produced.
 	Less(a, b Container) bool
+	// StatusCell composes one container's STATUS cell as un-styled, tone-tagged
+	// segments: the kind's status label first, then whatever kind-local suffixes
+	// belong beside it. It is a method rather than a container field because the
+	// facts behind those suffixes are the kind's own — `work` could not compose
+	// the cell if it wanted to — and because a stored copy beside a composer
+	// would be a second source of truth for the same string.
+	StatusCell(Container) []StatusSegment
 	// Actions returns the container-level verbs that apply right now. It is called
 	// when a menu opens over one container, not per container at build time, so it
 	// may consult state that moved since the snapshot.
@@ -77,12 +84,9 @@ type Container struct {
 	// every read surface groups by.
 	Project string
 	// Status is the kind's own status label (`READY`, `WAYFINDING`, …). `work`
-	// never interprets it.
+	// never interprets it. The composed STATUS cell is Kind.StatusCell's, not a
+	// field here.
 	Status string
-	// StatusCell is the composed, un-styled STATUS cell: the label plus whatever
-	// kind-local suffixes belong beside it. Styling stays TUI-side (ADR-0143), so
-	// this is what column-width math measures.
-	StatusCell string
 	// Checkout is the filesystem directory a shell or handoff verb runs in, empty
 	// when the kind resolves none.
 	Checkout string
@@ -100,11 +104,33 @@ type Container struct {
 	// DetailSections are the kind-authored prose blocks a detail view renders
 	// above the item list.
 	DetailSections []Section
-	// Row is the transitional legacy Work-dashboard row this container derives.
-	// It exists so the expand half of the refactor keeps every existing consumer
-	// compiling while the contract slices migrate them one surface at a time; it
-	// is deleted with Row itself.
-	Row Row
+
+	// ── Transitional Task-set-only cells ───────────────────────────────────────
+	// What follows is the legacy Work-dashboard row, absorbed into the container
+	// rather than hung off it: `Row` is an alias of `Container`, so the dashboard
+	// row has no parallel model left to drift from. The Task-set kind is what
+	// fills these — a Map leaves all but the tally pair blank — and the consumers
+	// that still read them (the Queue write path, livepane, Map spawning) are the
+	// ones the contract slices have yet to migrate. The block is deleted whole
+	// once they are.
+	SetRef
+	// Started mirrors tasks.Row.Started: a started READY set renders as
+	// "IN PROGRESS". It is a presentational input to the STATUS composition,
+	// never a schedulability fact — logic keys on RawStatus.
+	Started bool
+	// VerifiedAtSHA is the short SHA of the episode's PASS verdict when the set is
+	// terminal and cleared, and VerifiedAtDrifted reports HEAD having moved past
+	// it. DeriveVerifiedAtBadge maps the pair to the STATUS badge (ADR-0156).
+	VerifiedAtSHA     string
+	VerifiedAtDrifted bool
+	Worktree          string
+	// MapOpen and MapFrontier are the Map ticket tallies its STATUS cell reports.
+	// Zero on Task-set rows.
+	MapOpen, MapFrontier int
+	// DestKind selects how the destination column is styled; Worktree holds the
+	// plain label (branch name, "[managed wt]", or "needs bind"). It is the
+	// style-selection fact the queue-side wrappers read (ADR-0143).
+	DestKind DestKind
 }
 
 // Ref names the container independently of the kind that produced it.
