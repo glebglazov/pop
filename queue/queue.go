@@ -1010,16 +1010,29 @@ func (d *Deps) checkoutClaimLookup(bindings map[string]WorktreeBinding, repoKey 
 		return nil
 	}
 	return func(setID string) *store.CheckoutClaim {
-		runtimePath := binding.RuntimeForSet(bindings, repoKey, setID)
-		if strings.TrimSpace(runtimePath) == "" {
-			return nil
-		}
-		claim, err := tasks.ReadCheckoutClaim(d.Tasks, runtimePath)
-		if err != nil {
-			return nil
-		}
-		return claim
+		return d.checkoutClaimAt(binding.RuntimeForSet(bindings, repoKey, setID))
 	}
+}
+
+// checkoutClaimAt reads the live Checkout claim on one runtime path, or nil when
+// nothing claims it, no path was named, or the read failed (never blocking on a
+// transient store problem — the transactional BeginDrain chokepoint still refuses
+// a genuine double-spawn).
+//
+// It is the single read behind both enforcements of checkout occupancy: the
+// Task-set adapter's own deferral display resolves a set to its checkout and
+// calls this, and the supervisor's cross-kind backstop calls it over
+// Candidate.Checkout. Those are not two sources of truth — the store's claim
+// union is the truth and both are pure reads of it through here.
+func (d *Deps) checkoutClaimAt(runtimePath string) *store.CheckoutClaim {
+	if d == nil || d.Tasks == nil || strings.TrimSpace(runtimePath) == "" {
+		return nil
+	}
+	claim, err := tasks.ReadCheckoutClaim(d.Tasks, runtimePath)
+	if err != nil {
+		return nil
+	}
+	return claim
 }
 
 // selectReadySets is the single queue-side readiness selector: it returns the

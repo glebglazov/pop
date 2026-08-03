@@ -105,10 +105,18 @@ pure reads of it.
 - **Reporting generalizes; the view diff does not.** The Task-set run-output diff
   is thoroughly Task-set-shaped — it diffs a snapshot to avoid re-announcing state
   each tick — and stays kind-local, driven by the Task-set adapter. Generalizing
-  it would make every kind grow a snapshot type. Until the supervisor emits
-  structured per-advance events, a Task-set refusal is reported only by that diff,
-  which is why advancing one prints nothing: the alternative is printing every
-  deferral twice, every tick.
+  it would make every kind grow a snapshot type. A Task-set refusal is reported
+  only by that diff, which is why advancing one prints nothing: the alternative is
+  printing every deferral twice, every tick.
+- **As landed, the phases split and the reporting is structured.** Every dispatch
+  decision is an `AdvanceEvent` — kind, ref, outcome, error — rendered through one
+  call, which adds no prefix of its own because each kind's message and error
+  already name themselves. `Reconcile` and `Candidates` fan out one goroutine per
+  kind, which the purity above is what makes safe; dispatch stays serial and
+  ordered because it mutates the occupancy ledger. That ledger is the half of
+  checkout occupancy the claim union cannot supply: a drain dispatched seconds ago
+  holds no claim yet, so the tick also remembers what it already handed out, and
+  "first wins, rest defer" is why the order has to be defined at all.
 - **A candidate is not durable.** It describes the tick it was read in, and the
   kind that produced it is what resolves it back to its own coordinates at
   dispatch — a candidate replayed into a later pass is refused as not that pass's.

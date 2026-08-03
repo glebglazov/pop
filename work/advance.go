@@ -80,6 +80,38 @@ func Advance() Verdict { return Verdict{Advance: true} }
 // Refuse is the verdict that does not, naming why.
 func Refuse(reason string) Verdict { return Verdict{Reason: reason} }
 
+// AdvanceEvent is one dispatch decision a supervisor tick made, structured so
+// that every kind reports through one path instead of each printing its own
+// lines. It is what generalizes about supervisor reporting: the kind, the item,
+// what the advance produced and what it failed with. What does *not* generalize
+// rides beside it — the Task-set run-output view diff is a Task-set snapshot
+// type, and folding it in here would make every kind grow one.
+type AdvanceEvent struct {
+	// Kind is the Work kind whose candidate this was.
+	Kind KindID
+	// Ref addresses the candidate.
+	Ref ref.WorkRef
+	// Label is the candidate's human phrase, the same one the kind reports by.
+	Label string
+	// Outcome is what the advance produced. It is the zero Outcome when the
+	// supervisor ruled on the candidate itself and never asked the kind.
+	Outcome Outcome
+	// Err is the failure the kind reported, already worded as the line a human
+	// reads — the supervisor renders what it is handed.
+	Err error
+}
+
+// Line renders the event for the supervisor's output, empty when the decision
+// has nothing to say. The render adds no prefix of its own: a kind's message and
+// a kind's error already name themselves, and a uniform wrapper would double
+// every "queue:" the existing lines carry.
+func (e AdvanceEvent) Line() string {
+	if e.Err != nil {
+		return e.Err.Error()
+	}
+	return e.Outcome.Message
+}
+
 // Advancers returns the advanceable kinds of a wiring list in kind precedence
 // order — the order dispatch runs in, because dispatch mutates the shared
 // checkout ledger and "first wins, rest defer" needs a defined one.

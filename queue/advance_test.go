@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -293,16 +294,35 @@ func supervisorTestDeps(t *testing.T, kind work.Kind) *Deps {
 }
 
 // recordingAdvancer is a Work kind that also advances, recording the order the
-// supervisor drives its phases in.
+// supervisor drives its phases in. The phase hooks let a test hold one kind
+// inside a phase while another enters it, which is how the concurrent phases are
+// told apart from a serial loop.
 type recordingAdvancer struct {
+	id            work.KindID
 	candidates    []work.Candidate
 	candidatesErr error
 	message       func(work.Candidate) string
 	err           func(work.Candidate) error
-	calls         []string
+	onReconcile   func()
+	onCandidates  func()
+	onAdvance     func(work.Candidate)
+
+	mu    sync.Mutex
+	calls []string
 }
 
-func (k *recordingAdvancer) ID() work.KindID                 { return ref.KindTaskSet }
+func (k *recordingAdvancer) record(call string) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.calls = append(k.calls, call)
+}
+
+func (k *recordingAdvancer) ID() work.KindID {
+	if k.id == "" {
+		return ref.KindTaskSet
+	}
+	return k.id
+}
 func (k *recordingAdvancer) Load() ([]work.Container, error) { return nil, nil }
 func (k *recordingAdvancer) Less(a, b work.Container) bool   { return a.ID < b.ID }
 func (k *recordingAdvancer) StatusCell(work.Container) []work.StatusSegment {
@@ -316,12 +336,18 @@ func (k *recordingAdvancer) Perform(work.Container, *work.Item, work.Verb) (work
 func (k *recordingAdvancer) Summary([]work.Container) []string { return nil }
 
 func (k *recordingAdvancer) Reconcile() error {
-	k.calls = append(k.calls, "reconcile")
+	k.record("reconcile")
+	if k.onReconcile != nil {
+		k.onReconcile()
+	}
 	return nil
 }
 
 func (k *recordingAdvancer) Candidates() ([]work.Candidate, error) {
-	k.calls = append(k.calls, "candidates")
+	k.record("candidates")
+	if k.onCandidates != nil {
+		k.onCandidates()
+	}
 	if k.candidatesErr != nil {
 		return nil, k.candidatesErr
 	}
@@ -329,7 +355,10 @@ func (k *recordingAdvancer) Candidates() ([]work.Candidate, error) {
 }
 
 func (k *recordingAdvancer) Advance(c work.Candidate) (work.Outcome, error) {
-	k.calls = append(k.calls, "advance "+c.Ref.String())
+	k.record("advance " + c.Ref.String())
+	if k.onAdvance != nil {
+		k.onAdvance(c)
+	}
 	if k.err != nil {
 		if err := k.err(c); err != nil {
 			return work.Outcome{}, err

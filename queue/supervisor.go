@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/glebglazov/pop/config"
@@ -58,10 +59,10 @@ func Run(d *Deps, interval time.Duration, out io.Writer, sigCh <-chan os.Signal)
 // Work kind. Errors resolving or spawning a single project are reported and
 // skipped; one bad project never halts the supervisor.
 //
-// The three phases are the seam's: the kinds are reconciled, then asked what they
-// would advance (a pure read), then driven one candidate at a time. Refusals ride
-// the same dispatch call as advances, because a kind that must persist why it
-// refused writes on exactly that path.
+// The phases are the seam's: the kinds are reconciled and asked what they would
+// advance (both pure enough to run concurrently across kinds), then driven one
+// candidate at a time. Refusals ride the same dispatch call as advances, because
+// a kind that must persist why it refused writes on exactly that path.
 func tick(d *Deps, out io.Writer, runOut *runOutputState) {
 	cfg, err := d.LoadConfig(config.DefaultConfigPath())
 	if err != nil {
@@ -73,31 +74,14 @@ func tick(d *Deps, out io.Writer, runOut *runOutputState) {
 	// list is what keeps that state tick-scoped.
 	advancers := work.Advancers(d.WorkKinds(cfg))
 
-	// Reconcile phase — the explicit pass that replaced the opportunistic reconcile
-	// every read used to run (ADR-0055). A failure is already reported by the kind
-	// and never fails the tick: the candidates below then read the pre-reconcile
-	// snapshot, which is no worse than before the pass existed.
-	for _, adv := range advancers {
-		_ = adv.Reconcile()
-	}
 	// Routines are not behind the seam yet, so their reconcile stays an explicit
-	// call beside the loop rather than riding it.
+	// serial call beside the phases rather than riding them.
 	d.reconcileRoutineRuns()
 
-	// Candidate phase — pure reads, so nothing here can leave state behind if the
-	// tick returns early.
-	type kindPass struct {
-		adv        work.Advancer
-		candidates []work.Candidate
-	}
-	passes := make([]kindPass, 0, len(advancers))
-	for _, adv := range advancers {
-		candidates, err := adv.Candidates()
-		if err != nil {
-			runOut.emitScanError(out, err.Error())
-			return
-		}
-		passes = append(passes, kindPass{adv: adv, candidates: candidates})
+	passes, err := readPasses(advancers)
+	if err != nil {
+		runOut.emitScanError(out, err.Error())
+		return
 	}
 	runOut.lastScan = ""
 
@@ -109,17 +93,13 @@ func tick(d *Deps, out io.Writer, runOut *runOutputState) {
 	}
 
 	// Dispatch phase — serial, in kind precedence order, because it mutates the
-	// shared checkout ledger.
+	// shared checkout ledger and "first wins, rest defer" needs a defined order.
+	occupancy := newCheckoutOccupancy(d)
 	var spawned []PickedUpSet
 	for _, pass := range passes {
 		for _, candidate := range pass.candidates {
-			outcome, err := pass.adv.Advance(candidate)
-			if err != nil {
-				fmt.Fprintln(out, err)
-				continue
-			}
-			if outcome.Message != "" {
-				fmt.Fprintln(out, outcome.Message)
+			if line := dispatch(pass, candidate, occupancy).Line(); line != "" {
+				fmt.Fprintln(out, line)
 			}
 		}
 		if reporter, ok := pass.adv.(spawnedSetsReporter); ok {
@@ -139,6 +119,77 @@ func tick(d *Deps, out io.Writer, runOut *runOutputState) {
 	}
 
 	tickRoutines(d, out)
+}
+
+// kindPass is one kind's half of a supervisor tick: the advancer, the kind it
+// answers for, and what it said it would advance.
+type kindPass struct {
+	kind       work.KindID
+	adv        work.Advancer
+	candidates []work.Candidate
+}
+
+// readPasses runs the reconcile and candidate phases, one goroutine per kind.
+// They fan out because candidates are pure now: a kind's Candidates() performs
+// no writes, so no ordering between kinds is observable and the slowest kind no
+// longer delays the rest. Within a kind the two stay ordered — candidates are
+// meant to see the healed state their own reconcile produced.
+//
+// A reconcile failure is already reported by the kind and never fails the tick:
+// that kind's candidates then read the pre-reconcile snapshot, which is no worse
+// than before the pass existed. A *candidate* failure does fail it, returning the
+// first in kind precedence order — the pre-seam behaviour of reporting the scan
+// error once and dispatching nothing.
+func readPasses(advancers []work.Advancer) ([]kindPass, error) {
+	passes := make([]kindPass, len(advancers))
+	errs := make([]error, len(advancers))
+	var wg sync.WaitGroup
+	for i, adv := range advancers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = adv.Reconcile()
+			candidates, err := adv.Candidates()
+			passes[i] = kindPass{kind: advancerKindID(adv), adv: adv, candidates: candidates}
+			errs[i] = err
+		}()
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			return nil, err
+		}
+	}
+	return passes, nil
+}
+
+// dispatch drives one candidate and reports what happened as a structured event.
+// The supervisor rules on checkout occupancy first — the one invariant it owns —
+// and the kind is not asked at all about a candidate it may not start, so an
+// adapter that omits its own check is still held to it.
+func dispatch(pass kindPass, c work.Candidate, occupancy *checkoutOccupancy) work.AdvanceEvent {
+	event := work.AdvanceEvent{Kind: pass.kind, Ref: c.Ref, Label: c.Label}
+	if !c.Refused() {
+		if reason := occupancy.refusal(c); reason != "" {
+			event.Outcome = work.Outcome{Kind: work.OutcomeMessage, Message: fmt.Sprintf("queue: %s: skip; %s", c.Label, reason)}
+			return event
+		}
+	}
+	event.Outcome, event.Err = pass.adv.Advance(c)
+	if event.Err == nil && !c.Refused() {
+		occupancy.occupy(c)
+	}
+	return event
+}
+
+// advancerKindID names the kind behind an advancer. Every advancer is obtained by
+// asserting a wired Kind, so the id is always there; a hand-built advancer that
+// is not one answers the zero kind rather than failing the tick.
+func advancerKindID(adv work.Advancer) work.KindID {
+	if k, ok := adv.(work.Kind); ok {
+		return k.ID()
+	}
+	return work.KindID("")
 }
 
 // prepareWorktreeDrain routes an actionable drain to its checkout (ADR-0070/0072).
