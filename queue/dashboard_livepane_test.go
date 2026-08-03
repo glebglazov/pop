@@ -14,7 +14,7 @@ import (
 // the cached live-pane state, and that shell stays dark (ADR-0158).
 func TestLivePaneMenuKeyColours(t *testing.T) {
 	setID := "2026-07-31-live"
-	row := DashboardRow{SetRef: SetRef{SetID: setID, Bound: true, RuntimePath: "/wt"}}
+	row := DashboardRow{ID: setID, Bound: true, RuntimePath: "/wt"}
 	live := livePaneCache{}
 	live.set(tmuxmod.TagSet, setID, livePaneRunning)
 	live.set(tmuxmod.TagAssist, setID, livePaneIdle)
@@ -41,13 +41,13 @@ func TestLivePaneMenuKeyColours(t *testing.T) {
 
 // TestLivePanePreviewVerbGone asserts the preview verb and its key are unbound.
 func TestLivePanePreviewVerbGone(t *testing.T) {
-	for _, item := range dashboardMenuItems(testKinds(), DashboardRow{SetRef: SetRef{SetID: "x"}}) {
+	for _, item := range dashboardMenuItems(testKinds(), DashboardRow{ID: "x"}) {
 		if item.key == "p" || item.label == "preview" {
 			t.Fatalf("preview must be gone, found %+v", item)
 		}
 	}
-	m := newQueueDashboard(&Deps{}, nil, DashboardSnapshot{Rows: []DashboardRow{
-		{CursorKey: "p\x00x", SetRef: SetRef{SetID: "x"}},
+	m := newQueueDashboard(&Deps{}, nil, DashboardSnapshot{Containers: []DashboardRow{
+		{CursorKey: "p\x00x", ID: "x"},
 	}})
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
@@ -73,7 +73,7 @@ func TestLivePaneGreenKeyJumpsWithoutResend(t *testing.T) {
 		"%5": {Session: "proj", Command: "node"},
 	}
 
-	result, err := LaunchAssist(d, cfg, row.SetRef)
+	result, err := LaunchAssist(d, cfg, row)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestLivePaneGreyKeyRespawns(t *testing.T) {
 	}
 	rt.Fake.PaneCwd = map[string]string{"%5": repo}
 
-	result, err := LaunchAssist(d, cfg, row.SetRef)
+	result, err := LaunchAssist(d, cfg, row)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,15 +146,15 @@ func TestLivePaneCacheFromTmux(t *testing.T) {
 // state colours the open menu from the cache.
 func TestLivePaneMenuReloadUsesCache(t *testing.T) {
 	setID := "set-cache"
-	row := DashboardRow{CursorKey: "p\x00" + setID, Project: "p", SetRef: SetRef{SetID: setID}}
-	m := newQueueDashboard(&Deps{}, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
+	row := DashboardRow{CursorKey: "p\x00" + setID, Project: "p", ID: setID}
+	m := newQueueDashboard(&Deps{}, nil, DashboardSnapshot{Containers: []DashboardRow{row}})
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
 
 	live := livePaneCache{}
 	live.set(tmuxmod.TagAssist, setID, livePaneRunning)
 	updated, _ = got.Update(dashboardRowsMsg{
-		snap: DashboardSnapshot{Rows: []DashboardRow{row}},
+		snap: DashboardSnapshot{Containers: []DashboardRow{row}},
 		live: live,
 	})
 	got = updated.(QueueDashboard)
@@ -176,7 +176,7 @@ func TestLivePaneDarkSpawnsFresh(t *testing.T) {
 	row.RuntimePath = repo
 	row.ProjectPath = repo
 
-	if _, err := LaunchAssist(d, cfg, row.SetRef); err != nil {
+	if _, err := LaunchAssist(d, cfg, row); err != nil {
 		t.Fatal(err)
 	}
 	if rt.countCommand("send-keys") != 1 {
@@ -185,7 +185,7 @@ func TestLivePaneDarkSpawnsFresh(t *testing.T) {
 }
 
 func TestLivePaneShellAlwaysDarkInMenu(t *testing.T) {
-	row := DashboardRow{SetRef: SetRef{SetID: "s", RuntimePath: "/wt", Bound: true}}
+	row := DashboardRow{ID: "s", RuntimePath: "/wt", Bound: true}
 	live := livePaneCache{}
 	live.set(tmuxmod.TagSet, "s", livePaneRunning)
 	menu := newDashboardMenu(testKinds(), row, false)
@@ -223,7 +223,7 @@ func TestLivePaneReloadFillsCache(t *testing.T) {
 // same dark/grey/green scheme as the action-menu handoff keys (ADR-0158).
 func TestLivePaneRowClusterMatchesMenu(t *testing.T) {
 	setID := "2026-07-31-cluster"
-	row := DashboardRow{SetRef: SetRef{SetID: setID, Bound: true, RuntimePath: "/wt"}}
+	row := DashboardRow{ID: setID, Bound: true, RuntimePath: "/wt"}
 	live := livePaneCache{}
 	live.set(tmuxmod.TagSet, setID, livePaneRunning)
 	live.set(tmuxmod.TagVerify, setID, livePaneIdle)
@@ -250,14 +250,14 @@ func TestLivePaneRowClusterMatchesMenu(t *testing.T) {
 // cluster from the cached per-poll liveness without an extra tmux query.
 func TestLivePaneRowClusterInView(t *testing.T) {
 	setID := "set-row-cluster"
-	row := DashboardRow{CursorKey: "p\x00" + setID, Project: "p", SetRef: SetRef{SetID: setID}}
-	m := newQueueDashboard(&Deps{}, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
+	row := DashboardRow{CursorKey: "p\x00" + setID, Project: "p", ID: setID}
+	m := newQueueDashboard(&Deps{}, nil, DashboardSnapshot{Containers: []DashboardRow{row}})
 
 	live := livePaneCache{}
 	live.set(tmuxmod.TagSet, setID, livePaneRunning)
 	live.set(tmuxmod.TagAssist, setID, livePaneIdle)
 	updated, _ := m.Update(dashboardRowsMsg{
-		snap: DashboardSnapshot{Rows: []DashboardRow{row}},
+		snap: DashboardSnapshot{Containers: []DashboardRow{row}},
 		live: live,
 	})
 	got := updated.(QueueDashboard)
@@ -274,13 +274,13 @@ func TestLivePaneRowClusterInView(t *testing.T) {
 // row by the next poll — the cluster goes dark when tmux no longer reports it.
 func TestLivePaneRowClusterClearsOnReload(t *testing.T) {
 	setID := "set-died"
-	row := DashboardRow{CursorKey: "p\x00" + setID, Project: "p", SetRef: SetRef{SetID: setID}}
-	m := newQueueDashboard(&Deps{}, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
+	row := DashboardRow{CursorKey: "p\x00" + setID, Project: "p", ID: setID}
+	m := newQueueDashboard(&Deps{}, nil, DashboardSnapshot{Containers: []DashboardRow{row}})
 
 	live := livePaneCache{}
 	live.set(tmuxmod.TagSet, setID, livePaneRunning)
 	updated, _ := m.Update(dashboardRowsMsg{
-		snap: DashboardSnapshot{Rows: []DashboardRow{row}},
+		snap: DashboardSnapshot{Containers: []DashboardRow{row}},
 		live: live,
 	})
 	got := updated.(QueueDashboard)
@@ -289,7 +289,7 @@ func TestLivePaneRowClusterClearsOnReload(t *testing.T) {
 	}
 
 	updated, _ = got.Update(dashboardRowsMsg{
-		snap: DashboardSnapshot{Rows: []DashboardRow{row}},
+		snap: DashboardSnapshot{Containers: []DashboardRow{row}},
 		live: livePaneCache{},
 	})
 	got = updated.(QueueDashboard)

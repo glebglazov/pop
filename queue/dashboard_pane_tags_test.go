@@ -43,16 +43,16 @@ func TestActivityPaneTagsDistinct(t *testing.T) {
 		setScopedKey(repoKey, setID): {RuntimePath: bound, Branch: "pane-tags", Project: "pop", Provisioned: false},
 	})
 
-	if _, err := LaunchDrain(d, cfg, row.SetRef); err != nil {
+	if _, err := LaunchDrain(d, cfg, row); err != nil {
 		t.Fatalf("LaunchDrain: %v", err)
 	}
 	rt.hasSession = true
 	rt.windowNames["pop-queue"] = true
-	if _, err := LaunchVerify(d, cfg, row.SetRef); err != nil {
+	if _, err := LaunchVerify(d, cfg, row); err != nil {
 		t.Fatalf("LaunchVerify: %v", err)
 	}
 	row.RawStatus = tasks.StatusDone
-	if _, err := LaunchAssist(d, cfg, row.SetRef); err != nil {
+	if _, err := LaunchAssist(d, cfg, row); err != nil {
 		t.Fatalf("LaunchAssist: %v", err)
 	}
 
@@ -125,7 +125,7 @@ func TestVerifyWhileDrainLiveSpawnsSecondPane(t *testing.T) {
 		setScopedKey(repoKey, setID): {RuntimePath: bound, Branch: "verify-with-drain", Project: "pop", Provisioned: false},
 	})
 
-	drainResult, err := LaunchDrain(d, cfg, row.SetRef)
+	drainResult, err := LaunchDrain(d, cfg, row)
 	if err != nil {
 		t.Fatalf("LaunchDrain: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestVerifyWhileDrainLiveSpawnsSecondPane(t *testing.T) {
 	rt.windowNames["pop-queue"] = true
 	drainSendKeys := rt.countCommand("send-keys")
 
-	if _, err := LaunchVerify(d, cfg, row.SetRef); err != nil {
+	if _, err := LaunchVerify(d, cfg, row); err != nil {
 		t.Fatalf("LaunchVerify: %v", err)
 	}
 	if rt.countCommand("send-keys") != drainSendKeys+1 {
@@ -177,22 +177,22 @@ func TestHandoffPaneTitles(t *testing.T) {
 		setScopedKey(repoKey, setID): {RuntimePath: bound, Branch: "pane-titles", Project: "pop", Provisioned: false},
 	})
 
-	drainResult, err := LaunchDrain(d, cfg, row.SetRef)
+	drainResult, err := LaunchDrain(d, cfg, row)
 	if err != nil {
 		t.Fatalf("LaunchDrain: %v", err)
 	}
 	rt.hasSession = true
 	rt.windowNames["pop-queue"] = true
-	verifyResult, err := LaunchVerify(d, cfg, row.SetRef)
+	verifyResult, err := LaunchVerify(d, cfg, row)
 	if err != nil {
 		t.Fatalf("LaunchVerify: %v", err)
 	}
 	row.RawStatus = tasks.StatusDone
-	assistResult, err := LaunchAssist(d, cfg, row.SetRef)
+	assistResult, err := LaunchAssist(d, cfg, row)
 	if err != nil {
 		t.Fatalf("LaunchAssist: %v", err)
 	}
-	foldResult, err := LaunchFold(d, cfg, row.SetRef)
+	foldResult, err := LaunchFold(d, cfg, row)
 	if err != nil {
 		t.Fatalf("LaunchFold: %v", err)
 	}
@@ -221,7 +221,7 @@ func TestShellVerbSpawnsNothingTagged(t *testing.T) {
 	row.ProjectPath = repo
 	rt.Fake.Inside = true
 
-	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
 	_, cmd := got.Update(tea.KeyPressMsg{Code: 'O', Text: "O"})
@@ -257,13 +257,13 @@ func TestShellVerbTwiceYieldsTwoPanes(t *testing.T) {
 	row.ProjectPath = repo
 	rt.Fake.Inside = true
 
-	first, err := LaunchShell(d, cfg, row.SetRef)
+	first, err := LaunchShell(d, cfg, row)
 	if err != nil {
 		t.Fatalf("first LaunchShell: %v", err)
 	}
 	rt.hasSession = true
 	rt.windowNames["pop-queue"] = true
-	second, err := LaunchShell(d, cfg, row.SetRef)
+	second, err := LaunchShell(d, cfg, row)
 	if err != nil {
 		t.Fatalf("second LaunchShell: %v", err)
 	}

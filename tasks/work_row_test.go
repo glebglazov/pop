@@ -37,13 +37,13 @@ func TestShowRow(t *testing.T) {
 }
 
 func TestSortOrder(t *testing.T) {
-	rows := []work.Row{
-		{Project: "zeta", SetRef: work.SetRef{SetID: "2026-01-01-old"}},
-		{Project: "alpha", SetRef: work.SetRef{SetID: "2026-01-01-old"}},
-		{Project: "alpha", SetRef: work.SetRef{SetID: "2026-06-18-new"}},
+	rows := []work.Container{
+		{Project: "zeta", ID: "2026-01-01-old"},
+		{Project: "alpha", ID: "2026-01-01-old"},
+		{Project: "alpha", ID: "2026-06-18-new"},
 	}
 	SortWorkRows(rows)
-	got := []string{rows[0].Project + "/" + rows[0].SetID, rows[1].Project + "/" + rows[1].SetID, rows[2].Project + "/" + rows[2].SetID}
+	got := []string{rows[0].Project + "/" + rows[0].ID, rows[1].Project + "/" + rows[1].ID, rows[2].Project + "/" + rows[2].ID}
 	want := []string{"alpha/2026-06-18-new", "alpha/2026-01-01-old", "zeta/2026-01-01-old"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("order = %v, want %v", got, want)
@@ -58,29 +58,29 @@ func TestSortOrder(t *testing.T) {
 // then every remaining status per-project by the explicit status order; SetID
 // descending is the tiebreak throughout.
 func TestTieredSortOrder(t *testing.T) {
-	rows := []work.Row{
+	rows := []work.Container{
 		// Rest tier, rest band — alphabetically-early project with a needs-you status.
-		{Project: "alpha", SetRef: work.SetRef{SetID: "2026-02-01-blk", RawStatus: StatusBlocked}},
+		{Project: "alpha", ID: "2026-02-01-blk", RawStatus: StatusBlocked},
 		// Rest tier, READY band — floats above alpha's BLOCKED even though bravo sorts later.
-		{Project: "bravo", SetRef: work.SetRef{SetID: "2026-02-02-rdy", RawStatus: StatusReady}},
-		{Project: "alpha", SetRef: work.SetRef{SetID: "2026-02-03-rdy", RawStatus: StatusReady}},
+		{Project: "bravo", ID: "2026-02-02-rdy", RawStatus: StatusReady},
+		{Project: "alpha", ID: "2026-02-03-rdy", RawStatus: StatusReady},
 		// Rest tier, IN PROGRESS band (started READY) — floats above the READY band.
-		{Project: "bravo", Started: true, SetRef: work.SetRef{SetID: "2026-02-04-inp", RawStatus: StatusReady}},
+		{Project: "bravo", Started: true, ID: "2026-02-04-inp", RawStatus: StatusReady},
 		// Rest tier, rest band — DONE and AWAITING-APPROVAL, project-first then status order.
-		{Project: "bravo", SetRef: work.SetRef{SetID: "2026-02-05-done", RawStatus: StatusDone}},
-		{Project: "charlie", SetRef: work.SetRef{SetID: "2026-02-06-aa", RawStatus: StatusAwaitingApproval}},
+		{Project: "bravo", ID: "2026-02-05-done", RawStatus: StatusDone},
+		{Project: "charlie", ID: "2026-02-06-aa", RawStatus: StatusAwaitingApproval},
 		// Orphaned tier.
-		{Project: "zoo", SetRef: work.SetRef{SetID: "2026-04-01-orph", RawStatus: StatusReady, Orphaned: true}},
+		{Project: "zoo", ID: "2026-04-01-orph", RawStatus: StatusReady, Orphaned: true},
 		// Auto-drain tier — the orphaned+auto-drain set belongs here, not orphaned.
-		{Project: "kilo", SetRef: work.SetRef{SetID: "2026-05-01-ad", RawStatus: StatusReady, AutoDrain: true}},
-		{Project: "kilo", SetRef: work.SetRef{SetID: "2026-05-02-ado", RawStatus: StatusReady, AutoDrain: true, Orphaned: true}},
+		{Project: "kilo", ID: "2026-05-01-ad", RawStatus: StatusReady, AutoDrain: true},
+		{Project: "kilo", ID: "2026-05-02-ado", RawStatus: StatusReady, AutoDrain: true, Orphaned: true},
 		// Running tier — highest precedence even over an auto-drain BLOCKED set.
-		{Project: "delta", SetRef: work.SetRef{SetID: "2026-06-01-run", RawStatus: StatusBlocked, AutoDrain: true, LiveDrain: true}},
+		{Project: "delta", ID: "2026-06-01-run", RawStatus: StatusBlocked, AutoDrain: true, LiveDrain: true},
 	}
 	SortWorkRows(rows)
 	got := make([]string, len(rows))
 	for i, r := range rows {
-		got[i] = r.Project + "/" + r.SetID
+		got[i] = r.Project + "/" + r.ID
 	}
 	want := []string{
 		// Tier 1: running (floats above the whole status scheme, BLOCKED and all).
@@ -107,16 +107,16 @@ func TestTieredSortOrder(t *testing.T) {
 // (ADR-0121): every READY row floats above the rest band regardless of project,
 // rather than each project's rows clustering together.
 func TestReadyBandInterleavesProjects(t *testing.T) {
-	rows := []work.Row{
-		{Project: "alpha", SetRef: work.SetRef{SetID: "2026-01-01-blk", RawStatus: StatusBlocked}},
-		{Project: "bravo", SetRef: work.SetRef{SetID: "2026-01-02-rdy", RawStatus: StatusReady}},
-		{Project: "alpha", SetRef: work.SetRef{SetID: "2026-01-03-rdy", RawStatus: StatusReady}},
-		{Project: "bravo", SetRef: work.SetRef{SetID: "2026-01-04-blk", RawStatus: StatusBlocked}},
+	rows := []work.Container{
+		{Project: "alpha", ID: "2026-01-01-blk", RawStatus: StatusBlocked},
+		{Project: "bravo", ID: "2026-01-02-rdy", RawStatus: StatusReady},
+		{Project: "alpha", ID: "2026-01-03-rdy", RawStatus: StatusReady},
+		{Project: "bravo", ID: "2026-01-04-blk", RawStatus: StatusBlocked},
 	}
 	SortWorkRows(rows)
 	got := make([]string, len(rows))
 	for i, r := range rows {
-		got[i] = r.Project + "/" + r.SetID
+		got[i] = r.Project + "/" + r.ID
 	}
 	// READY band (cross-project, Project asc) first, then the rest band. If the
 	// order were project-grouped it would read alpha/rdy, alpha/blk, bravo/rdy,
@@ -138,12 +138,12 @@ func TestReadyBandInterleavesProjects(t *testing.T) {
 // even though both carry raw status READY and the IN PROGRESS row's project sorts
 // later alphabetically.
 func TestBandKeysOnDisplayedLabel(t *testing.T) {
-	rows := []work.Row{
-		{Project: "alpha", SetRef: work.SetRef{SetID: "2026-01-01-rdy", RawStatus: StatusReady}},
-		{Project: "zeta", Started: true, SetRef: work.SetRef{SetID: "2026-01-02-inp", RawStatus: StatusReady}},
+	rows := []work.Container{
+		{Project: "alpha", ID: "2026-01-01-rdy", RawStatus: StatusReady},
+		{Project: "zeta", Started: true, ID: "2026-01-02-inp", RawStatus: StatusReady},
 	}
 	SortWorkRows(rows)
-	got := []string{rows[0].Project + "/" + rows[0].SetID, rows[1].Project + "/" + rows[1].SetID}
+	got := []string{rows[0].Project + "/" + rows[0].ID, rows[1].Project + "/" + rows[1].ID}
 	want := []string{"zeta/2026-01-02-inp", "alpha/2026-01-01-rdy"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("order = %v, want %v", got, want)
@@ -157,22 +157,22 @@ func TestBandKeysOnDisplayedLabel(t *testing.T) {
 // drain coinciding with a non-READY status leaves that status' label untouched —
 // needs-you outranks liveness.
 func TestWorkRowStatusLabelRefinesReadyToInProgress(t *testing.T) {
-	liveReady := work.Row{SetRef: work.SetRef{RawStatus: StatusReady, LiveDrain: true}}
+	liveReady := work.Container{RawStatus: StatusReady, LiveDrain: true}
 	if got := WorkRowStatusLabel(liveReady); got != "IN PROGRESS" {
 		t.Errorf("live READY label = %q, want IN PROGRESS", got)
 	}
-	startedReady := work.Row{SetRef: work.SetRef{RawStatus: StatusReady}, Started: true}
+	startedReady := work.Container{RawStatus: StatusReady, Started: true}
 	if got := WorkRowStatusLabel(startedReady); got != "IN PROGRESS" {
 		t.Errorf("started READY label = %q, want IN PROGRESS", got)
 	}
-	idleReady := work.Row{SetRef: work.SetRef{RawStatus: StatusReady}}
+	idleReady := work.Container{RawStatus: StatusReady}
 	if got := WorkRowStatusLabel(idleReady); got != string(StatusReady) {
 		t.Errorf("idle READY label = %q, want READY", got)
 	}
 	// The refinement is READY-only: a live drain on a non-READY set keeps its real
 	// label, and the live indicator never rewrites it either.
 	for _, status := range []TaskSetStatus{StatusAwaitingApproval, StatusNeedsVerify, StatusBlocked} {
-		row := work.Row{SetRef: work.SetRef{RawStatus: status, LiveDrain: true}}
+		row := work.Container{RawStatus: status, LiveDrain: true}
 		if got := WorkRowStatusLabel(row); got != string(status) {
 			t.Errorf("live %s label = %q, want %s (needs-you outranks liveness)", status, got, status)
 		}
@@ -189,7 +189,7 @@ func TestWorkRowStatusLabelMirrorsStatusLabel(t *testing.T) {
 		StatusDone, StatusMissing, StatusMalformed, StatusAwaitingApproval,
 		StatusNeedsVerify,
 	} {
-		row := work.Row{SetRef: work.SetRef{RawStatus: status}}
+		row := work.Container{RawStatus: status}
 		want := StatusLabel(Row{Status: status})
 		if got := WorkRowStatusLabel(row); got != want {
 			t.Errorf("status %s label = %q, want %q (mirror of StatusLabel)", status, got, want)
@@ -203,21 +203,21 @@ func TestWorkRowStatusLabelMirrorsStatusLabel(t *testing.T) {
 func TestWorkRowStatusCellComposition(t *testing.T) {
 	cases := []struct {
 		name string
-		row  work.Row
+		row  work.Container
 		want string
 	}{
-		{"plain", work.Row{SetRef: work.SetRef{RawStatus: StatusBlocked}}, "BLOCKED"},
-		{"verified drifted", work.Row{VerifiedAtSHA: "abc123", VerifiedAtDrifted: true, SetRef: work.SetRef{RawStatus: StatusAwaitingApproval}}, "AWAITING-APPROVAL · verified @ abc123"},
-		{"unverified", work.Row{SetRef: work.SetRef{RawStatus: StatusNeedsVerify}}, "NEEDS-VERIFY · unverified"},
-		{"auto-drain waiting", work.Row{SetRef: work.SetRef{RawStatus: StatusReady, AutoDrain: true}}, "READY · auto-drain"},
-		{"auto-drain silenced by live drain", work.Row{SetRef: work.SetRef{RawStatus: StatusReady, AutoDrain: true, LiveDrain: true}}, "IN PROGRESS"},
-		{"auto-drain then orphaned", work.Row{SetRef: work.SetRef{RawStatus: StatusBlocked, AutoDrain: true, Orphaned: true}}, "BLOCKED · auto-drain · orphaned"},
-		{"parked alone", work.Row{SetRef: work.SetRef{RawStatus: StatusBlocked, Parked: true}}, "BLOCKED · parked"},
-		{"config error alone", work.Row{SetRef: work.SetRef{RawStatus: StatusReady, ConfigError: "no trunk worktree configured"}}, "READY · config error: no trunk worktree configured"},
-		{"orphaned then parked then config", work.Row{SetRef: work.SetRef{RawStatus: StatusBlocked, Orphaned: true, Parked: true, ConfigError: "no trunk"}}, "BLOCKED · orphaned · parked · config error: no trunk"},
+		{"plain", work.Container{RawStatus: StatusBlocked}, "BLOCKED"},
+		{"verified drifted", work.Container{VerifiedAtSHA: "abc123", VerifiedAtDrifted: true, RawStatus: StatusAwaitingApproval}, "AWAITING-APPROVAL · verified @ abc123"},
+		{"unverified", work.Container{RawStatus: StatusNeedsVerify}, "NEEDS-VERIFY · unverified"},
+		{"auto-drain waiting", work.Container{RawStatus: StatusReady, AutoDrain: true}, "READY · auto-drain"},
+		{"auto-drain silenced by live drain", work.Container{RawStatus: StatusReady, AutoDrain: true, LiveDrain: true}, "IN PROGRESS"},
+		{"auto-drain then orphaned", work.Container{RawStatus: StatusBlocked, AutoDrain: true, Orphaned: true}, "BLOCKED · auto-drain · orphaned"},
+		{"parked alone", work.Container{RawStatus: StatusBlocked, Parked: true}, "BLOCKED · parked"},
+		{"config error alone", work.Container{RawStatus: StatusReady, ConfigError: "no trunk worktree configured"}, "READY · config error: no trunk worktree configured"},
+		{"orphaned then parked then config", work.Container{RawStatus: StatusBlocked, Orphaned: true, Parked: true, ConfigError: "no trunk"}, "BLOCKED · orphaned · parked · config error: no trunk"},
 		{
 			"full suffix order",
-			work.Row{VerifiedAtSHA: "abcdef123456", VerifiedAtDrifted: true, SetRef: work.SetRef{RawStatus: StatusAwaitingApproval, AutoDrain: true, Orphaned: true, Parked: true, ConfigError: "no trunk"}},
+			work.Container{VerifiedAtSHA: "abcdef123456", VerifiedAtDrifted: true, RawStatus: StatusAwaitingApproval, AutoDrain: true, Orphaned: true, Parked: true, ConfigError: "no trunk"},
 			"AWAITING-APPROVAL · verified @ abcdef123456 · auto-drain · orphaned · parked · config error: no trunk",
 		},
 	}

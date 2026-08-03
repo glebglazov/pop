@@ -11,13 +11,13 @@ import "testing"
 // TestAutoDrainWaiting pins the display predicate: a consented set counts while
 // idle and is silenced once a live drain holds the checkout (ADR-0108).
 func TestAutoDrainWaiting(t *testing.T) {
-	if !AutoDrainWaiting(Row{SetRef: SetRef{AutoDrain: true}}) {
+	if !AutoDrainWaiting(Container{AutoDrain: true}) {
 		t.Errorf("idle auto-drain should be waiting")
 	}
-	if AutoDrainWaiting(Row{SetRef: SetRef{AutoDrain: true, LiveDrain: true}}) {
+	if AutoDrainWaiting(Container{AutoDrain: true, LiveDrain: true}) {
 		t.Errorf("live-drained auto-drain should be silenced")
 	}
-	if AutoDrainWaiting(Row{SetRef: SetRef{}}) {
+	if AutoDrainWaiting(Container{}) {
 		t.Errorf("non-consenting set should not be waiting")
 	}
 }
@@ -26,11 +26,11 @@ func TestAutoDrainWaiting(t *testing.T) {
 // live-drained row and blank otherwise, regardless of STATUS (ADR-0111): the
 // indicator is driven by LiveDrain alone.
 func TestLiveIndicator(t *testing.T) {
-	if got := LiveIndicator(Row{SetRef: SetRef{RawStatus: "READY"}}); got != "" {
+	if got := LiveIndicator(Container{RawStatus: "READY"}); got != "" {
 		t.Fatalf("idle indicator = %q, want blank", got)
 	}
 	for _, status := range []SetStatus{"READY", "AWAITING-APPROVAL", "NEEDS-VERIFY", "BLOCKED"} {
-		row := Row{SetRef: SetRef{RawStatus: status, LiveDrain: true}}
+		row := Container{RawStatus: status, LiveDrain: true}
 		if got := LiveIndicator(row); got != LiveDrainGlyph {
 			t.Fatalf("status %s live indicator = %q, want %q", status, got, LiveDrainGlyph)
 		}

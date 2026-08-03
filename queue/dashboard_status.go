@@ -14,9 +14,9 @@ func applyDashboardStatusVerb(d *Deps, row DashboardRow, verb string) error {
 	d = ensureQueueDeps(d)
 	switch verb {
 	case "archive":
-		return d.archiveSet(row.DefPath, row.SetID)
+		return d.archiveSet(row.DefPath, row.ID)
 	case "unarchive":
-		return d.unarchiveSet(row.DefPath, row.SetID)
+		return d.unarchiveSet(row.DefPath, row.ID)
 	case "complete", "open", "skip":
 		return applyDashboardStatusBatch(d, row, verb)
 	default:
@@ -36,36 +36,36 @@ func applyDashboardStatusBatch(d *Deps, row DashboardRow, verb string) error {
 	)
 	switch verb {
 	case "complete":
-		ctx, loadErr := tasks.LoadCompleteSelectionWith(td, pd, loadConfig, in, row.SetID)
+		ctx, loadErr := tasks.LoadCompleteSelectionWith(td, pd, loadConfig, in, row.ID)
 		if loadErr != nil {
 			return loadErr
 		}
 		ids = unlockedSelectionIDs(ctx.Rows)
 		_, err = tasks.CompleteTasksWith(td, pd, loadConfig, tasks.CompleteTasksOptions{
 			ResolveInput:    in,
-			TaskSetTarget:   row.SetID,
+			TaskSetTarget:   row.ID,
 			SelectedTaskIDs: ids,
 		})
 	case "open":
-		ctx, loadErr := tasks.LoadOpenSelectionWith(td, pd, loadConfig, in, row.SetID)
+		ctx, loadErr := tasks.LoadOpenSelectionWith(td, pd, loadConfig, in, row.ID)
 		if loadErr != nil {
 			return loadErr
 		}
 		ids = unlockedSelectionIDs(ctx.Rows)
 		_, err = tasks.OpenTasksWith(td, pd, loadConfig, tasks.OpenTasksOptions{
 			ResolveInput:    in,
-			TaskSetTarget:   row.SetID,
+			TaskSetTarget:   row.ID,
 			SelectedTaskIDs: ids,
 		})
 	case "skip":
-		ctx, loadErr := tasks.LoadSkipSelectionWith(td, pd, loadConfig, in, row.SetID)
+		ctx, loadErr := tasks.LoadSkipSelectionWith(td, pd, loadConfig, in, row.ID)
 		if loadErr != nil {
 			return loadErr
 		}
 		ids = unlockedSelectionIDs(ctx.Rows)
 		_, err = tasks.SkipTasksWith(td, pd, loadConfig, tasks.SkipTasksOptions{
 			ResolveInput:    in,
-			TaskSetTarget:   row.SetID,
+			TaskSetTarget:   row.ID,
 			SelectedTaskIDs: ids,
 		})
 	default:

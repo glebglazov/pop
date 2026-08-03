@@ -33,16 +33,13 @@ const dashboardPollInterval = 2 * time.Second
 // pre-ADR-0167 drain latency was experienced (ADR-0167).
 const dashboardHandoffPending = "handing off…"
 
-// The Work dashboard's row model and pure derivation live in the top-level work
-// package (ADR-0143); queue keeps these aliases so its row building, TUI model,
-// and static status render read one set of types. The exports drop the Dashboard
-// prefix on the way into work (work.Row / work.Snapshot / work.SetRef); the
+// A dashboard row is a Work container — there is no row model beside it — and
+// the seam's data types live in the top-level work package (ADR-0143). These
 // aliases preserve queue's local vocabulary and its exported surface
-// (queue.DashboardRow / DashboardSnapshot / SetRef) for consumers like
-// dashboardshell and cmd.
+// (queue.DashboardRow / DashboardSnapshot) for consumers like dashboardshell and
+// cmd; the names on the other side drop the Dashboard prefix.
 type (
-	SetRef            = work.SetRef
-	DashboardRow      = work.Row
+	DashboardRow      = work.Container
 	DashboardSnapshot = work.Snapshot
 )
 
@@ -235,6 +232,7 @@ func (m QueueDashboard) liveCache() livePaneCache {
 	}
 	return *m.live
 }
+
 type dashboardToggleMsg struct {
 	key       string
 	autoDrain bool
@@ -701,12 +699,12 @@ type QueueDashboard struct {
 	// kinds is the wired Work-kind list indexed by id: every cell a row renders
 	// and every verb its menu offers is asked of the kind that owns the row, so
 	// the dashboard branches on no kind of its own (ADR-0173).
-	kinds     workKinds
-	snap      DashboardSnapshot
-	allRows   []DashboardRow // source of truth; snap.Rows is the filtered view
-	list      *ui.List[DashboardRow]
-	cols      *dashboardColumns
-	err       error
+	kinds   workKinds
+	snap    DashboardSnapshot
+	allRows []DashboardRow // source of truth; snap.Containers is the filtered view
+	list    *ui.List[DashboardRow]
+	cols    *dashboardColumns
+	err     error
 	// actionErr holds the error from a row verb (unbind, drain, bind, auto-drain
 	// toggle, …). Unlike err — the refresh error, which each reload re-evaluates —
 	// actionErr is sticky: the periodic reload never touches it, so a refused
@@ -758,7 +756,7 @@ func (m QueueDashboard) clipboardCopy() func(string) error {
 // rowCopyNamePayload is the bare identifier the copy-name verb writes for a
 // dashboard row: the task-set directory name or the Wayfinder map id.
 func rowCopyNamePayload(row DashboardRow) string {
-	return row.SetID
+	return row.ID
 }
 
 // copyClipboard writes payload via Clipboard copy and returns a transient status
@@ -776,17 +774,16 @@ func (m QueueDashboard) copyRowName(row DashboardRow) string {
 	return m.copyClipboard(rowCopyNamePayload(row))
 }
 
-// TestDashboardRow builds a minimal dashboard row for tests outside the queue
-// package. The cursor key mirrors production derivation from project and set ID.
-func TestDashboardRow(project, setID string, ref SetRef) DashboardRow {
-	if ref.SetID == "" {
-		ref.SetID = setID
+// TestDashboardRow completes a partially filled dashboard row for tests outside
+// the queue package: it fills in the identity cells a row is never without. The
+// cursor key mirrors production derivation from project and set ID.
+func TestDashboardRow(project, setID string, row DashboardRow) DashboardRow {
+	if row.ID == "" {
+		row.ID = setID
 	}
-	return DashboardRow{
-		Project:   project,
-		CursorKey: project + "\x00" + ref.SetID,
-		SetRef:    ref,
-	}
+	row.Project = project
+	row.CursorKey = project + "\x00" + row.ID
+	return row
 }
 
 // NewDashboard constructs a Work dashboard model from a snapshot.
@@ -800,10 +797,10 @@ func newQueueDashboard(d *Deps, cfg *config.Config, snap DashboardSnapshot) Queu
 	}
 	kinds := newWorkKinds(d.WorkKinds(cfg))
 	cols := &dashboardColumns{}
-	cols.syncNatural(kinds, snap.Rows)
+	cols.syncNatural(kinds, snap.Containers)
 	live := &livePaneCache{}
 	var list *ui.List[DashboardRow]
-	list = ui.NewList(snap.Rows, ui.Opts[DashboardRow]{
+	list = ui.NewList(snap.Containers, ui.Opts[DashboardRow]{
 		Key:    func(r DashboardRow) string { return r.CursorKey },
 		Anchor: ui.AnchorTop,
 		Cell: func(r DashboardRow, rs ui.RowState) string {
@@ -822,13 +819,13 @@ func newQueueDashboard(d *Deps, cfg *config.Config, snap DashboardSnapshot) Queu
 			return ui.TruncateString(dashboardTableLine(dashboardRowValues(kinds, r, cache), cols.widths), budget)
 		},
 	})
-	return QueueDashboard{d: d, cfg: cfg, kinds: kinds, snap: snap, allRows: snap.Rows, list: list, cols: cols, live: live}
+	return QueueDashboard{d: d, cfg: cfg, kinds: kinds, snap: snap, allRows: snap.Containers, list: list, cols: cols, live: live}
 }
 
 // dashboardChromeLines returns the chrome height above the List rows for the
 // current render mode.
 func (m QueueDashboard) dashboardChromeLines() int {
-	if dashboardTwoLineMode(m.snap.Rows, m.width, m.height) {
+	if dashboardTwoLineMode(m.snap.Containers, m.width, m.height) {
 		return dashboardTwoLineChromeLines
 	}
 	return dashboardTableChromeLines
@@ -837,8 +834,8 @@ func (m QueueDashboard) dashboardChromeLines() int {
 // syncListRows feeds the current filtered rows to the List (re-anchoring the
 // cursor by CursorKey) and recomputes the column widths over them.
 func (m QueueDashboard) syncListRows() {
-	m.list.ReplaceItems(m.snap.Rows)
-	m.cols.syncNatural(m.kinds, m.snap.Rows)
+	m.list.ReplaceItems(m.snap.Containers)
+	m.cols.syncNatural(m.kinds, m.snap.Containers)
 }
 
 // resizeMainList sizes the List to the body budget the Frame leaves, minus the
@@ -850,7 +847,7 @@ func (m QueueDashboard) resizeMainList() {
 	if listH < 1 {
 		listH = 1
 	}
-	if dashboardTwoLineMode(m.snap.Rows, m.width, m.height) {
+	if dashboardTwoLineMode(m.snap.Containers, m.width, m.height) {
 		m.list.SetLinesPerItem(2)
 	} else {
 		m.list.SetLinesPerItem(1)
@@ -961,7 +958,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "k", "up":
 			m.list.MoveUp()
 		case "G":
-			m.list.SetCursor(len(m.snap.Rows) - 1)
+			m.list.SetCursor(len(m.snap.Containers) - 1)
 		case "ctrl+g":
 			// Open the highlighted row's bound checkout in pop (task 02). A row
 			// with a bound checkout surfaces its path on quit so the command
@@ -1044,21 +1041,21 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dashboardRowsMsg:
 		m.err = msg.err
 		if msg.err == nil {
-			m.allRows = msg.snap.Rows
+			m.allRows = msg.snap.Containers
 			m.snap = msg.snap
 			if m.live == nil {
 				m.live = &livePaneCache{}
 			}
 			*m.live = msg.live
 			if m.filterMode {
-				m.snap.Rows = filterDashboardRows(m.allRows, m.filterInput.Value())
+				m.snap.Containers = filterDashboardRows(m.allRows, m.filterInput.Value())
 			}
 			m.syncListRows()
 			if m.detail != nil {
 				// The detail view reads the container the table just rebuilt: one
 				// data path, so an item status that moved on disk shows up in the
 				// detail and the row it was opened from at the same tick.
-				for _, row := range m.snap.Rows {
+				for _, row := range m.snap.Containers {
 					if row.CursorKey == m.detail.row.CursorKey {
 						m.detail.sync(row)
 						break
@@ -1072,7 +1069,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.menu.list = ui.NewList(dashboardMenuItems(m.kinds, row), ui.Opts[dashboardMenuItem]{Wrap: true})
 					}
 				} else {
-					for _, row := range m.snap.Rows {
+					for _, row := range m.snap.Containers {
 						if row.CursorKey == m.menu.row.CursorKey {
 							m.menu.row = row
 							break
@@ -1086,13 +1083,13 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.actionErr = msg.err
 			return m, m.reload()
 		}
-		for i := range m.snap.Rows {
-			if m.snap.Rows[i].CursorKey == msg.key {
-				m.snap.Rows[i].AutoDrain = msg.autoDrain
+		for i := range m.snap.Containers {
+			if m.snap.Containers[i].CursorKey == msg.key {
+				m.snap.Containers[i].AutoDrain = msg.autoDrain
 				break
 			}
 		}
-		m.cols.syncNatural(m.kinds, m.snap.Rows)
+		m.cols.syncNatural(m.kinds, m.snap.Containers)
 	case dashboardHandoffMsg:
 		m.drainPick = nil
 		if msg.err != nil {
@@ -1132,7 +1129,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if len(msg.entries) == 0 {
-			m.actionErr = fmt.Errorf("no drain target available for %s", msg.row.SetID)
+			m.actionErr = fmt.Errorf("no drain target available for %s", msg.row.ID)
 			return m, nil
 		}
 		m.drainPick = newDashboardDrainModal(msg.row, msg.entries)
@@ -1459,13 +1456,13 @@ func (m QueueDashboard) dispatchVerb(verb work.Verb, row DashboardRow) (tea.Mode
 		if row.Orphaned {
 			return m, nil
 		}
-		for i := range m.snap.Rows {
-			if m.snap.Rows[i].CursorKey == row.CursorKey {
-				m.snap.Rows[i].AutoDrain = !m.snap.Rows[i].AutoDrain
+		for i := range m.snap.Containers {
+			if m.snap.Containers[i].CursorKey == row.CursorKey {
+				m.snap.Containers[i].AutoDrain = !m.snap.Containers[i].AutoDrain
 				break
 			}
 		}
-		m.cols.syncNatural(m.kinds, m.snap.Rows)
+		m.cols.syncNatural(m.kinds, m.snap.Containers)
 		return m, m.toggleAutoDrain(row)
 	case setkind.VerbAssist:
 		m.statusMsg = dashboardHandoffPending
@@ -1474,7 +1471,7 @@ func (m QueueDashboard) dispatchVerb(verb work.Verb, row DashboardRow) (tea.Mode
 		if !dashboardFoldEligible(row) {
 			return m, nil
 		}
-		if err := PreflightFold(m.d, m.cfg, row.SetRef); err != nil {
+		if err := PreflightFold(m.d, m.cfg, row); err != nil {
 			m.actionErr = err
 			return m, nil
 		}
@@ -1745,7 +1742,7 @@ func (m QueueDashboard) applyDetailOverride(row work.Container, item work.Item, 
 	if d == nil {
 		d = DefaultDeps()
 	}
-	taskPath := setkind.TaskRef(row.SetID, item)
+	taskPath := setkind.TaskRef(row.ID, item)
 	return func() tea.Msg {
 		var err error
 		switch verb {
@@ -1767,7 +1764,7 @@ func (m QueueDashboard) updateFilterMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.filterMode = false
 		m.filterInput = ui.TextField{}
-		m.snap.Rows = m.allRows
+		m.snap.Containers = m.allRows
 		m.syncListRows()
 		return m, nil
 	case "j", "down":
@@ -1778,7 +1775,7 @@ func (m QueueDashboard) updateFilterMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	default:
 		m.filterInput.Update(msg)
-		m.snap.Rows = filterDashboardRows(m.allRows, m.filterInput.Value())
+		m.snap.Containers = filterDashboardRows(m.allRows, m.filterInput.Value())
 		m.syncListRows()
 		return m, nil
 	}
@@ -1816,7 +1813,7 @@ func (m QueueDashboard) itemTextPeekPageSize() int {
 	return itemTextPeekPageSize(m.height, m.detail.peek.path)
 }
 
-// filterDashboardRows returns rows whose Project or SetID contain query
+// filterDashboardRows returns rows whose Project or id contain query
 // (case-insensitive). Returns allRows unchanged when query is empty.
 func filterDashboardRows(rows []DashboardRow, query string) []DashboardRow {
 	if query == "" {
@@ -1826,7 +1823,7 @@ func filterDashboardRows(rows []DashboardRow, query string) []DashboardRow {
 	var filtered []DashboardRow
 	for _, row := range rows {
 		if strings.Contains(strings.ToLower(row.Project), q) ||
-			strings.Contains(strings.ToLower(row.SetID), q) {
+			strings.Contains(strings.ToLower(row.ID), q) {
 			filtered = append(filtered, row)
 		}
 	}
@@ -1885,8 +1882,8 @@ func (m QueueDashboard) reload() tea.Cmd {
 // selected parked set so the daemon may auto-spawn it again (ADR-0055).
 func (m QueueDashboard) unparkSet(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
-		err := UnparkSet(m.d, row.SetRef)
-		return dashboardUnparkMsg{setID: row.SetID, err: err}
+		err := UnparkSet(m.d, row)
+		return dashboardUnparkMsg{setID: row.ID, err: err}
 	}
 }
 
@@ -1897,14 +1894,14 @@ func (m QueueDashboard) unparkSet(row DashboardRow) tea.Cmd {
 // confirmation is required (ADR cleanup path for Done and Orphaned sets alike).
 func (m QueueDashboard) archiveSet(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
-		err := m.d.archiveSet(row.DefPath, row.SetID)
-		return dashboardArchiveMsg{setID: row.SetID, err: err}
+		err := m.d.archiveSet(row.DefPath, row.ID)
+		return dashboardArchiveMsg{setID: row.ID, err: err}
 	}
 }
 
 func (m QueueDashboard) toggleAutoDrain(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
-		result, err := m.d.toggleAutoDrain(row.DefPath, row.StatePath, row.SetID)
+		result, err := m.d.toggleAutoDrain(row.DefPath, row.StatePath, row.ID)
 		if err != nil {
 			return dashboardToggleMsg{key: row.CursorKey, err: err}
 		}
@@ -1918,15 +1915,15 @@ func (m QueueDashboard) toggleAutoDrain(row DashboardRow) tea.Cmd {
 // and confirmed picker drains both finish through the shared handoff path.
 func (m QueueDashboard) launchDrain(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
-		bound, err := dashboardSetBound(m.d, m.cfg, row.SetRef)
+		bound, err := dashboardSetBound(m.d, m.cfg, row)
 		if err != nil {
 			return dashboardDrainListMsg{row: row, err: err}
 		}
 		if bound {
-			result, err := LaunchDrain(m.d, m.cfg, row.SetRef)
+			result, err := LaunchDrain(m.d, m.cfg, row)
 			return handoffAfterLaunch(m.d, result, err)
 		}
-		entries, err := DrainTargetEntries(m.d, m.cfg, row.SetRef)
+		entries, err := DrainTargetEntries(m.d, m.cfg, row)
 		return dashboardDrainListMsg{row: row, entries: entries, err: err}
 	}
 }
@@ -1969,7 +1966,7 @@ func (m QueueDashboard) confirmDrainModal() (tea.Model, tea.Cmd) {
 // for trunk) and drains in one action, then hands off through the shared path.
 func (m QueueDashboard) launchDrainTarget(row DashboardRow, target dashboardDrainEntry) tea.Cmd {
 	return func() tea.Msg {
-		result, err := LaunchDrainTarget(m.d, m.cfg, row.SetRef, target)
+		result, err := LaunchDrainTarget(m.d, m.cfg, row, target)
 		return handoffAfterLaunch(m.d, result, err)
 	}
 }
@@ -1992,7 +1989,7 @@ func defaultDrainCursor(entries []dashboardDrainEntry) int {
 // ApplyVerifyVerdicts re-derivation when the dashboard stays open.
 func (m QueueDashboard) launchVerify(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
-		result, err := LaunchVerify(m.d, m.cfg, row.SetRef)
+		result, err := LaunchVerify(m.d, m.cfg, row)
 		return handoffAfterLaunch(m.d, result, err)
 	}
 }
@@ -2010,21 +2007,21 @@ func dashboardWayfinderEmptyFrontierMessage() string {
 
 func (m QueueDashboard) launchAssist(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
-		result, err := LaunchAssist(m.d, m.cfg, row.SetRef)
+		result, err := LaunchAssist(m.d, m.cfg, row)
 		return handoffAfterLaunch(m.d, result, err)
 	}
 }
 
 func (m QueueDashboard) launchFold(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
-		result, err := LaunchFold(m.d, m.cfg, row.SetRef)
+		result, err := LaunchFold(m.d, m.cfg, row)
 		return handoffAfterLaunch(m.d, result, err)
 	}
 }
 
 func (m QueueDashboard) launchShell(row DashboardRow, dir string) tea.Cmd {
 	return func() tea.Msg {
-		result, err := LaunchShellIn(m.d, m.cfg, row.SetRef, dir)
+		result, err := LaunchShellIn(m.d, m.cfg, row, dir)
 		return handoffAfterLaunch(m.d, result, err)
 	}
 }
@@ -2068,7 +2065,7 @@ func handoffAfterLaunch(d *Deps, result DashboardDrainResult, err error) dashboa
 func (m QueueDashboard) launchStatusVerb(row DashboardRow, verb string) tea.Cmd {
 	return func() tea.Msg {
 		err := applyDashboardStatusVerb(m.d, row, verb)
-		return dashboardStatusMsg{setID: row.SetID, verb: verb, err: err}
+		return dashboardStatusMsg{setID: row.ID, verb: verb, err: err}
 	}
 }
 
@@ -2106,42 +2103,42 @@ func (m QueueDashboard) loadItemText(item work.Item) tea.Cmd {
 
 func (m QueueDashboard) loadBindWorktrees(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
-		entries, err := BindWorktreeEntries(m.d, m.cfg, row.SetRef)
+		entries, err := BindWorktreeEntries(m.d, m.cfg, row)
 		return dashboardBindListMsg{row: row, entries: entries, err: err}
 	}
 }
 
 func (m QueueDashboard) loadBindRefs(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
-		refs, err := BindBaseRefs(m.d, m.cfg, row.SetRef)
+		refs, err := BindBaseRefs(m.d, m.cfg, row)
 		return dashboardBindRefsMsg{refs: refs, err: err}
 	}
 }
 
 func (m QueueDashboard) adoptBindWorktree(row DashboardRow, checkoutPath string) tea.Cmd {
 	return func() tea.Msg {
-		_, err := AdoptWorktree(m.d, m.cfg, row.SetRef, checkoutPath)
+		_, err := AdoptWorktree(m.d, m.cfg, row, checkoutPath)
 		return dashboardBindMsg{err: err}
 	}
 }
 
 func (m QueueDashboard) bindManagedWorktree(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
-		_, err := BindManagedWorktree(m.d, m.cfg, row.SetRef)
+		_, err := BindManagedWorktree(m.d, m.cfg, row)
 		return dashboardBindMsg{err: err}
 	}
 }
 
 func (m QueueDashboard) createBindWorktree(row DashboardRow, baseRef, name string) tea.Cmd {
 	return func() tea.Msg {
-		_, err := CreateWorktree(m.d, m.cfg, row.SetRef, baseRef, name)
+		_, err := CreateWorktree(m.d, m.cfg, row, baseRef, name)
 		return dashboardBindMsg{err: err}
 	}
 }
 
 func (m QueueDashboard) abandonWorktree(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
-		_, err := UnbindWorktree(m.d, m.cfg, row.SetRef)
+		_, err := UnbindWorktree(m.d, m.cfg, row)
 		return dashboardAbandonMsg{err: err}
 	}
 }
@@ -2149,17 +2146,17 @@ func (m QueueDashboard) abandonWorktree(row DashboardRow) tea.Cmd {
 // dashboardSetBound reports whether the row's set already holds a Worktree
 // binding. The Drain target picker only opens for unbound sets; a bound set
 // resumes in its binding (ADR-0052).
-func dashboardSetBound(d *Deps, cfg *config.Config, ref SetRef) (bool, error) {
+func dashboardSetBound(d *Deps, cfg *config.Config, row DashboardRow) (bool, error) {
 	d = ensureQueueDeps(d)
-	repoKey := ref.RepoKey
+	repoKey := row.RepoKey
 	if repoKey == "" {
-		_, rk, err := dashboardBindContext(d, cfg, ref)
+		_, rk, err := dashboardBindContext(d, cfg, row)
 		if err != nil {
 			return false, err
 		}
 		repoKey = rk
 	}
-	b, ok := bindingForSet(d.Tasks, repoKey, ref.SetID)
+	b, ok := bindingForSet(d.Tasks, repoKey, row.ID)
 	return ok && strings.TrimSpace(b.RuntimePath) != "", nil
 }
 
@@ -2508,8 +2505,8 @@ func (m QueueDashboard) frameSpec() ui.Frame {
 		warnings = append(warnings, dashboardActionErrorLine(m.actionErr))
 	}
 	header := ""
-	if len(m.snap.Rows) > 0 {
-		header = "Queue · " + dashboardSummary(m.kinds, m.snap.Rows)
+	if len(m.snap.Containers) > 0 {
+		header = "Queue · " + dashboardSummary(m.kinds, m.snap.Containers)
 	}
 	inputBox := ""
 	if m.filterMode {
@@ -2561,7 +2558,7 @@ func formatModelSkipFootnote(skips []work.ModelSkip, now time.Time) string {
 
 // mainHint returns the footer hint for the main (non-modal, non-menu) view.
 func (m QueueDashboard) mainHint() string {
-	if len(m.snap.Rows) == 0 {
+	if len(m.snap.Containers) == 0 {
 		if m.filterMode {
 			return "esc clear filter · v routines · C-h help"
 		}
@@ -2577,15 +2574,15 @@ func (m QueueDashboard) mainHint() string {
 // separator, then the List's scroll window) or the empty-state message. It is
 // the body the Frame composes its chrome around.
 func (m QueueDashboard) mainBody() string {
-	if len(m.snap.Rows) == 0 {
+	if len(m.snap.Containers) == 0 {
 		if m.filterMode {
 			return "No matching task sets."
 		}
 		return "No queue-actionable task sets."
 	}
 	var parts []string
-	if dashboardTwoLineMode(m.snap.Rows, m.width, m.height) {
-		line1Widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths(m.snap.Rows), dashboardTableBodyBudget(m.width))
+	if dashboardTwoLineMode(m.snap.Containers, m.width, m.height) {
+		line1Widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths(m.snap.Containers), dashboardTableBodyBudget(m.width))
 		parts = []string{
 			"",
 			ui.TruncateString("  "+dashboardTwoLineTableHeader(line1Widths), m.width),
@@ -2615,9 +2612,9 @@ func (m QueueDashboard) viewWithMenu() string {
 	if m.actionErr != nil {
 		fmt.Fprintf(&body, "%s\n", dashboardActionErrorLine(m.actionErr))
 	}
-	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.kinds, m.snap.Rows))
+	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.kinds, m.snap.Containers))
 	fmt.Fprintln(&body)
-	renderDashboardTableWithMenu(&body, m.kinds, m.snap.Rows, m.list.Cursor(), m.width, m.height, m.menu, m.liveCache())
+	renderDashboardTableWithMenu(&body, m.kinds, m.snap.Containers, m.list.Cursor(), m.width, m.height, m.menu, m.liveCache())
 	if m.statusMsg != "" {
 		fmt.Fprintf(&body, "  %s\n", m.statusMsg)
 	}
@@ -2647,9 +2644,9 @@ func (m QueueDashboard) viewWithFilterMenu() string {
 	if m.actionErr != nil {
 		fmt.Fprintf(&body, "%s\n", dashboardActionErrorLine(m.actionErr))
 	}
-	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.kinds, m.snap.Rows))
+	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.kinds, m.snap.Containers))
 	fmt.Fprintln(&body)
-	renderDashboardTable(&body, m.kinds, m.snap.Rows, m.list.Cursor(), m.width, m.height, m.liveCache())
+	renderDashboardTable(&body, m.kinds, m.snap.Containers, m.list.Cursor(), m.width, m.height, m.liveCache())
 	for _, ml := range m.dashboardFilterMenuLines() {
 		fmt.Fprintf(&body, "%s\n", ml)
 	}
@@ -2694,9 +2691,9 @@ func (m QueueDashboard) viewWithModal() string {
 	if m.actionErr != nil {
 		fmt.Fprintf(&body, "%s\n", dashboardActionErrorLine(m.actionErr))
 	}
-	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.kinds, m.snap.Rows))
+	fmt.Fprintf(&body, "Queue · %s\n", dashboardSummary(m.kinds, m.snap.Containers))
 	fmt.Fprintln(&body)
-	renderDashboardTable(&body, m.kinds, m.snap.Rows, m.list.Cursor(), m.width, m.height, m.liveCache())
+	renderDashboardTable(&body, m.kinds, m.snap.Containers, m.list.Cursor(), m.width, m.height, m.liveCache())
 	// avail is the number of body lines left for the modal below the table, so
 	// its scroll window clamps long worktree/ref lists instead of overflowing.
 	// A non-positive avail (no WindowSizeMsg yet) means "don't clamp".
@@ -3122,7 +3119,7 @@ func renderDashboardDrainModal(w io.Writer, modal *dashboardDrainModal, avail, w
 	if modal == nil {
 		return
 	}
-	fmt.Fprintln(w, ui.TruncateString(fmt.Sprintf("Drain target for %s", modal.row.SetID), width))
+	fmt.Fprintln(w, ui.TruncateString(fmt.Sprintf("Drain target for %s", modal.row.ID), width))
 	if modal.loading {
 		fmt.Fprintln(w, ui.TruncateString("  draining...", width))
 		return
@@ -3151,7 +3148,7 @@ func renderDashboardAbandonModal(w io.Writer, modal *dashboardAbandonModal, widt
 	if modal == nil {
 		return
 	}
-	fmt.Fprintln(w, ui.TruncateString(fmt.Sprintf("Unbind worktree for %s", modal.row.SetID), width))
+	fmt.Fprintln(w, ui.TruncateString(fmt.Sprintf("Unbind worktree for %s", modal.row.ID), width))
 	if modal.loading {
 		fmt.Fprintln(w, ui.TruncateString("  unbinding...", width))
 		return

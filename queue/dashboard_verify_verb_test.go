@@ -25,7 +25,7 @@ func TestDashboardVerifyVerbConditionalInclusion(t *testing.T) {
 
 	eligible := []tasks.TaskSetStatus{tasks.StatusNeedsVerify, tasks.StatusVerifyFailed}
 	for _, st := range eligible {
-		if !has(DashboardRow{SetRef: SetRef{SetID: "s", RawStatus: st}}) {
+		if !has(DashboardRow{ID: "s", RawStatus: st}) {
 			t.Fatalf("verify verb missing on a %s row", st)
 		}
 	}
@@ -35,7 +35,7 @@ func TestDashboardVerifyVerbConditionalInclusion(t *testing.T) {
 		tasks.StatusBlocked, tasks.StatusAwaitingApproval, tasks.StatusDeferred,
 	}
 	for _, st := range ineligible {
-		if has(DashboardRow{SetRef: SetRef{SetID: "s", RawStatus: st}}) {
+		if has(DashboardRow{ID: "s", RawStatus: st}) {
 			t.Fatalf("verify verb present on a %s row", st)
 		}
 	}
@@ -43,7 +43,7 @@ func TestDashboardVerifyVerbConditionalInclusion(t *testing.T) {
 	// A live drain hides the verb even on an otherwise-eligible row: a plain verify
 	// is not quiescence-gated, so the running drain verifies itself.
 	for _, st := range eligible {
-		if has(DashboardRow{SetRef: SetRef{SetID: "s", RawStatus: st, LiveDrain: true}}) {
+		if has(DashboardRow{ID: "s", RawStatus: st, LiveDrain: true}) {
 			t.Fatalf("verify verb present on a live-drained %s row", st)
 		}
 	}
@@ -79,7 +79,7 @@ func TestDashboardVerifyLaunchPinsRuntimePath(t *testing.T) {
 	row.RuntimePath = repo
 	row.RawStatus = tasks.StatusNeedsVerify
 
-	if _, err := LaunchVerify(d, cfg, row.SetRef); err != nil {
+	if _, err := LaunchVerify(d, cfg, row); err != nil {
 		t.Fatalf("LaunchVerify: %v", err)
 	}
 
@@ -106,7 +106,7 @@ func TestDashboardVerifyLaunchOmitsFlagWithoutRuntimePath(t *testing.T) {
 	row.RawStatus = tasks.StatusVerifyFailed
 	// RuntimePath left blank: no resolvable checkout.
 
-	if _, err := LaunchVerify(d, cfg, row.SetRef); err != nil {
+	if _, err := LaunchVerify(d, cfg, row); err != nil {
 		t.Fatalf("LaunchVerify: %v", err)
 	}
 
@@ -146,7 +146,7 @@ func TestDashboardLaunchVerifyBoundCheckoutUsesProjectSession(t *testing.T) {
 	row.ProjectPath = repo
 	row.RawStatus = tasks.StatusNeedsVerify
 
-	if _, err := LaunchVerify(d, cfg, row.SetRef); err != nil {
+	if _, err := LaunchVerify(d, cfg, row); err != nil {
 		t.Fatalf("LaunchVerify: %v", err)
 	}
 	assertSetPaneProjectSessionAndCheckout(t, rt, repo, bound)

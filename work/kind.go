@@ -1,3 +1,12 @@
+// Package work is the Work seam: one `Kind` interface that every Work kind
+// complies with, the plain data structs its methods pass around (Container,
+// Item, Action, Outcome, Section), and the snapshot builder that walks a wired
+// list of kinds. It imports no kind package — adapters live kind-side and `cmd`
+// wires them — and it imports neither bubbletea nor lipgloss, so the styled
+// render layer stays TUI-side (ADR-0143); guard tests enforce both boundaries.
+//
+// There is no row model beside the container: a dashboard row is a `Container`,
+// and the cells the Task-set columns show are fields on it.
 package work
 
 import (
@@ -111,15 +120,64 @@ type Container struct {
 	// line.
 	Headline string
 
-	// ── Transitional Task-set-only cells ───────────────────────────────────────
-	// What follows is the legacy Work-dashboard row, absorbed into the container
-	// rather than hung off it: `Row` is an alias of `Container`, so the dashboard
-	// row has no parallel model left to drift from. The Task-set kind is what
-	// fills these — a Map leaves all but the tally pair blank — and the consumers
-	// that still read them (the Queue write path, livepane, Map spawning) are the
-	// ones the contract slices have yet to migrate. The block is deleted whole
-	// once they are.
-	SetRef
+	// ── Repository-group coordinates ───────────────────────────────────────────
+	// Where the container's repository group is, resolved once per build and
+	// carried rather than re-derived: nothing downstream forks git to find them
+	// again, which is what keeps the build fork-free (ADR-0060). Every kind fills
+	// them — a container always belongs to a repository group — and the write
+	// verbs act on them.
+	DefPath, StatePath     string
+	RepoKey, RepoCommonDir string
+	// ProjectPath is the repository-group checkout the container was found
+	// through, which is not always where a verb runs: a bound task set runs in its
+	// worktree (Checkout), while its registration still lives here.
+	ProjectPath string
+
+	// ── Task-set cells ─────────────────────────────────────────────────────────
+	// The Work dashboard's columns are the Task-set columns, and a container of
+	// any kind fills them (a Map fills the tally pair and leaves the rest blank),
+	// so they are fields on the container rather than the Task-set kind's private
+	// state. Everything here is derived per build — a filesystem stat or a store
+	// read, never a git fork — and none of it is a persisted status.
+	//
+	// RuntimePath is the dedicated checkout the set's Worktree binding names,
+	// blank when it holds none.
+	RuntimePath string
+	// Parked is true when the set's repeated abnormal terminals have parked it
+	// (derived from Drain history); unpark writes a park-clear event (ADR-0055).
+	// Bound is true when the set holds a Worktree binding with a non-blank
+	// runtime path — the dedicated-checkout fact the action menu gates unbind
+	// on, mirroring dashboardSetBound.
+	// Orphaned is true when that binding points at a checkout that no longer
+	// exists on disk. It is orthogonal to Task-set status — a set of any status
+	// may be orphaned — and a set with no binding can never be orphaned.
+	Parked, Bound, Orphaned bool
+	AutoDrain               bool
+	// ConfigError is the message for a config-class defect that keeps the set
+	// from routing to an integration target — a bare repo with no declared trunk
+	// or an unsatisfiable worktree directive (ADR-0059/0060). Non-blank only when
+	// the set is neither live-drained nor parked, preserving the mutual exclusion
+	// the retired single-string DRAIN cell enforced. Rendered as the plain
+	// ` · config error: <msg>` STATUS suffix (ADR-0111).
+	ConfigError string
+	// RawStatus is the underlying derived Task-set status, kept beside the
+	// displayed Status so display relabels never leak into logic.
+	RawStatus SetStatus
+	// DoneStillManagedBound is true when a Done set still holds a
+	// pop-provisioned (managed) Worktree binding. The dashboard keeps such a
+	// row visible as a clean-up reminder until archived or unbound (ADR-0070).
+	DoneStillManagedBound bool
+	// PaneID is the tmux pane recorded for a drain of this set, empty if none
+	// was recorded. Audit/bookkeeping only — the live-pane affordance reads tmux
+	// (ADR-0158), not this store field.
+	PaneID string
+	// LiveDrain is true when a live (PID-alive) Runtime execution lock holds
+	// this set's checkout — the structured fact that replaced the retired DRAIN
+	// column (ADR-0111). It lights the trailing ● live-drain indicator across every
+	// status, and drives Less's running tier, the header "N running" count, the
+	// auto-drain suffix silencing (ADR-0108), and the READY→IN PROGRESS
+	// refinement.
+	LiveDrain bool
 	// Started mirrors tasks.Row.Started: a started READY set renders as
 	// "IN PROGRESS". It is a presentational input to the STATUS composition,
 	// never a schedulability fact — logic keys on RawStatus.

@@ -35,14 +35,11 @@ func wayfinderSpawnFixture(t *testing.T) (*Deps, *config.Config, DashboardRow, *
 	d.Project = project.DefaultDeps()
 	d.Tmux = f
 	row := DashboardRow{
-		Kind:    ref.KindMap,
-		Project: "pop",
-		SetRef: SetRef{
-			SetID:       "2026-07-01-active",
-			DefPath:     filepath.Join(storageDir, "repo.json"),
-			ProjectPath: repo,
-			ProjectName: "pop",
-		},
+		Kind:        ref.KindMap,
+		ID:          "2026-07-01-active",
+		Project:     "pop",
+		DefPath:     filepath.Join(storageDir, "repo.json"),
+		ProjectPath: repo,
 		MapOpen:     2,
 		MapFrontier: 1,
 	}
@@ -212,7 +209,7 @@ func TestLaunchWayfinderSessionReusesRunningWithoutResend(t *testing.T) {
 func TestDashboardMapRowISpawnsFocusesAndQuits(t *testing.T) {
 	d, cfg, row, f, _ := wayfinderSpawnFixture(t)
 	f.Inside = true
-	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'I', Text: "I"})
 	if cmd == nil {
 		t.Fatal("I on map row did not return a command")
@@ -255,7 +252,7 @@ func TestDashboardMapRowIEmptyFrontierMessage(t *testing.T) {
 	}
 	withWayfinderMaps(t, d, storageDir, files)
 	row.MapFrontier = 0
-	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'I', Text: "I"})
 	if cmd == nil {
 		t.Fatal("expected spawn command")
@@ -273,7 +270,7 @@ func TestDashboardMapRowIReusesRunningWithoutResend(t *testing.T) {
 	seedWayfinderWindow(f, "01-frontier", "%9", "claude")
 	f.Inside = true
 
-	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'I', Text: "I"})
 	if cmd == nil {
 		t.Fatal("I did not return a command")
@@ -311,7 +308,7 @@ func TestDashboardMapDetailWorksFrontierTicketFromItemMenu(t *testing.T) {
 	m.d = d
 	got := openMapDetail(t, m)
 	got.detail.row.ProjectPath = repo
-	got.detail.row.SetRef.ProjectPath = repo
+	got.detail.row.ProjectPath = repo
 
 	updated, _ := got.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got = updated.(QueueDashboard)
@@ -361,7 +358,7 @@ func TestLivePaneCacheWayfinderWindow(t *testing.T) {
 	if cache.wayfinderState(wayfinderMapID) != livePaneRunning {
 		t.Fatalf("map window state = %v, want running", cache.wayfinderState(wayfinderMapID))
 	}
-	styled := dashboardActivityCluster(DashboardRow{Kind: ref.KindMap, SetRef: SetRef{SetID: wayfinderMapID}}, cache, true)
+	styled := dashboardActivityCluster(DashboardRow{Kind: ref.KindMap, ID: wayfinderMapID}, cache, true)
 	if !strings.Contains(styled, livePaneRunningStyle.Render("I")) {
 		t.Fatalf("map row cluster = %q, want green I", styled)
 	}

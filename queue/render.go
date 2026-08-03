@@ -75,7 +75,6 @@ func detailStatusStyled(kinds workKinds, row DashboardRow) string {
 // dashboardManagedWtStyle colors the [managed wt] destination badge.
 var dashboardManagedWtStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
 
-
 // dashboardVerifiedAtBadgeStyled renders the Verified-at SHA badge with the
 // three-state colour rule (ADR-0156): green at HEAD, yellow when drifted, red
 // unverified.
@@ -309,7 +308,7 @@ func dashboardTwoLineMode(rows []DashboardRow, termWidth, termHeight int) bool {
 		return true
 	}
 	for _, row := range rows {
-		if len(row.SetID) > dashboardTwoLineSetIDThreshold {
+		if len(row.ID) > dashboardTwoLineSetIDThreshold {
 			return true
 		}
 	}
@@ -354,7 +353,7 @@ func dashboardTwoLineStatusHeader(line1Widths []int) string {
 func dashboardTwoLineRowValuesLine1(row DashboardRow, live livePaneCache) []string {
 	return []string{
 		row.Project,
-		row.SetID,
+		row.ID,
 		renderDashboardDest(row.DestKind, row.Worktree),
 		dashboardActivityCluster(row, live, true),
 	}
@@ -465,7 +464,7 @@ const dashboardTwoLineChromeLines = dashboardTableChromeLines + 1
 func dashboardRowValues(kinds workKinds, row DashboardRow, live livePaneCache) []string {
 	return []string{
 		row.Project,
-		row.SetID,
+		row.ID,
 		dashboardStatusCellStyled(kinds, row),
 		renderDashboardDest(row.DestKind, row.Worktree),
 		dashboardActivityCluster(row, live, true),
@@ -478,7 +477,7 @@ func dashboardRowValues(kinds workKinds, row DashboardRow, live livePaneCache) [
 func dashboardRowNaturalValues(kinds workKinds, row DashboardRow) []string {
 	return []string{
 		row.Project,
-		row.SetID,
+		row.ID,
 		dashboardStatusCellText(kinds, row),
 		renderDashboardDest(row.DestKind, row.Worktree),
 		dashboardActivityCluster(row, livePaneCache{}, false),

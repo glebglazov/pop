@@ -16,12 +16,12 @@ import (
 // consequence of counting per kind rather than over one row list.
 func TestKindSummariesComposeTheHeader(t *testing.T) {
 	setRows := []DashboardRow{
-		{Project: "pop", SetRef: SetRef{SetID: "2026-07-01-a", RawStatus: tasks.StatusReady}},
-		{Project: "pop", SetRef: SetRef{SetID: "2026-07-02-b", RawStatus: tasks.StatusBlocked, LiveDrain: true}},
-		{Project: "pop", SetRef: SetRef{SetID: "2026-07-03-c", RawStatus: tasks.StatusBlocked, AutoDrain: true}},
+		{Project: "pop", ID: "2026-07-01-a", RawStatus: tasks.StatusReady},
+		{Project: "pop", ID: "2026-07-02-b", RawStatus: tasks.StatusBlocked, LiveDrain: true},
+		{Project: "pop", ID: "2026-07-03-c", RawStatus: tasks.StatusBlocked, AutoDrain: true},
 	}
 	mapRows := []DashboardRow{
-		{Project: "pop", Kind: ref.KindMap, SetRef: SetRef{SetID: "2026-07-04-chart"}, MapOpen: 2, MapFrontier: 1},
+		{Project: "pop", Kind: ref.KindMap, ID: "2026-07-04-chart", MapOpen: 2, MapFrontier: 1},
 	}
 
 	if got, want := dashboardSummary(testKinds(), setRows), "3 task sets · 1 ready · 1 running · 1 auto-drain"; got != want {
@@ -44,11 +44,11 @@ func TestKindSummariesComposeTheHeader(t *testing.T) {
 // through: a row's STATUS cell is composed by its own kind, so no surface
 // branches on what a row is, and the styled form is the plain one plus ANSI.
 func TestStatusCellComesFromTheOwningKind(t *testing.T) {
-	set := DashboardRow{Project: "pop", SetRef: SetRef{SetID: "2026-07-01-a", RawStatus: tasks.StatusReady, AutoDrain: true}}
+	set := DashboardRow{Project: "pop", ID: "2026-07-01-a", RawStatus: tasks.StatusReady, AutoDrain: true}
 	if got, want := dashboardStatusCellText(testKinds(), set), "READY · auto-drain"; got != want {
 		t.Fatalf("task-set cell = %q, want %q", got, want)
 	}
-	wfMap := DashboardRow{Project: "pop", Kind: ref.KindMap, SetRef: SetRef{SetID: "2026-07-04-chart"}, MapOpen: 2, MapFrontier: 1}
+	wfMap := DashboardRow{Project: "pop", Kind: ref.KindMap, ID: "2026-07-04-chart", MapOpen: 2, MapFrontier: 1}
 	if got, want := dashboardStatusCellText(testKinds(), wfMap), "WAYFINDING · 2 open / 1 frontier"; got != want {
 		t.Fatalf("map cell = %q, want %q", got, want)
 	}

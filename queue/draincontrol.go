@@ -18,44 +18,44 @@ import (
 // UnparkSet clears the park on a dashboard row's Task set by appending a
 // park-clear event keyed by the repository's common dir and set id. The row must
 // carry a resolved common dir (parked rows always do).
-func UnparkSet(d *Deps, ref SetRef) error {
+func UnparkSet(d *Deps, row DashboardRow) error {
 	if d == nil || d.Tasks == nil {
 		return fmt.Errorf("missing task dependencies")
 	}
-	commonDir := ref.RepoCommonDir
+	commonDir := row.RepoCommonDir
 	if strings.TrimSpace(commonDir) == "" {
-		id, err := tasks.ResolveRepositoryIdentity(d.Tasks, ref.RuntimePath)
+		id, err := tasks.ResolveRepositoryIdentity(d.Tasks, row.RuntimePath)
 		if err != nil {
 			return err
 		}
 		commonDir = id.CommonDir
 	}
-	return tasks.RecordParkClear(d.Tasks, commonDir, ref.SetID)
+	return tasks.RecordParkClear(d.Tasks, commonDir, row.ID)
 }
 
 // StatusDetailLines renders the same per-set task status detail as
 // `pop tasks status <set>` for a dashboard row.
-func StatusDetailLines(d *Deps, ref SetRef) ([]string, error) {
+func StatusDetailLines(d *Deps, row DashboardRow) ([]string, error) {
 	if d == nil {
 		d = DefaultDeps()
 	}
 	if d.Tasks == nil {
 		d.Tasks = tasks.DefaultDeps()
 	}
-	refresh, err := d.refresh(ref.DefPath)
+	refresh, err := d.refresh(row.DefPath)
 	if err != nil {
 		return nil, err
 	}
-	detailRow := tasks.FindRow(refresh, ref.SetID)
+	detailRow := tasks.FindRow(refresh, row.ID)
 	var buf bytes.Buffer
-	tasks.RenderTaskSetDetail(&buf, ref.SetID, detailRow, refresh.Manifests[ref.SetID])
+	tasks.RenderTaskSetDetail(&buf, row.ID, detailRow, refresh.Manifests[row.ID])
 	text := strings.TrimRight(buf.String(), "\n")
 	if text == "" {
-		text = fmt.Sprintf("%s: no status detail available", ref.SetID)
+		text = fmt.Sprintf("%s: no status detail available", row.ID)
 	}
 	lines := strings.Split(text, "\n")
-	if strings.TrimSpace(ref.RuntimePath) != "" {
-		lines = append([]string{"checkout: " + ref.RuntimePath, ""}, lines...)
+	if strings.TrimSpace(row.RuntimePath) != "" {
+		lines = append([]string{"checkout: " + row.RuntimePath, ""}, lines...)
 	}
 	return lines, nil
 }
@@ -70,7 +70,7 @@ type DashboardDrainResult struct {
 // Task-set pane opened from the dashboard. The pane lives in the project's
 // session (the integration-target checkout), with cwd at checkout — matching
 // supervisor-spawned drains.
-func dashboardSetPaneCoords(d *Deps, cfg *config.Config, scans []projectScan, ref SetRef, checkout string) (session, dir string, err error) {
+func dashboardSetPaneCoords(d *Deps, cfg *config.Config, scans []projectScan, row DashboardRow, checkout string) (session, dir string, err error) {
 	if d == nil {
 		d = DefaultDeps()
 	}
@@ -79,12 +79,12 @@ func dashboardSetPaneCoords(d *Deps, cfg *config.Config, scans []projectScan, re
 	}
 	dir = strings.TrimSpace(checkout)
 	if dir == "" {
-		dir = strings.TrimSpace(ref.RuntimePath)
+		dir = strings.TrimSpace(row.RuntimePath)
 	}
 	if dir == "" && len(scans) > 0 {
 		dir = strings.TrimSpace(scans[0].ProjectPath)
 	}
-	projectPath := strings.TrimSpace(ref.ProjectPath)
+	projectPath := strings.TrimSpace(row.ProjectPath)
 	if projectPath == "" && len(scans) > 0 {
 		projectPath = strings.TrimSpace(scans[0].ProjectPath)
 	}
@@ -105,7 +105,7 @@ func dashboardSetPaneCoords(d *Deps, cfg *config.Config, scans []projectScan, re
 
 // LaunchDrain manually launches the highlighted dashboard row through
 // the same Queue provisioning and tmux spawn path used by the supervisor.
-func LaunchDrain(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult, error) {
+func LaunchDrain(d *Deps, cfg *config.Config, row DashboardRow) (DashboardDrainResult, error) {
 	if d == nil {
 		d = DefaultDeps()
 	}
@@ -116,20 +116,20 @@ func LaunchDrain(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult,
 		d.Project = project.DefaultDeps()
 	}
 	// Bound-set drains — every resume of a live or parked set — resolve entirely
-	// from the SetRef's carried coordinates, forking no git (ADR-0167). Only the
+	// from the row's carried coordinates, forking no git (ADR-0167). Only the
 	// unbound branch below, which must choose a trunk among the repo's checkouts,
 	// earns the project scan fan-out.
-	scans, repoKey, err := dashboardBindContext(d, cfg, ref)
+	scans, repoKey, err := dashboardBindContext(d, cfg, row)
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
-	dec := Decision{TaskSetID: ref.SetID}
-	if b, ok := bindingForSet(d.Tasks, repoKey, ref.SetID); ok && strings.TrimSpace(b.RuntimePath) != "" {
+	dec := Decision{TaskSetID: row.ID}
+	if b, ok := bindingForSet(d.Tasks, repoKey, row.ID); ok && strings.TrimSpace(b.RuntimePath) != "" {
 		dec.Project = repoName(scans, nil)
 		if err := validateBoundWorktree(d, scans[0].ProjectPath, b); err != nil {
-			return DashboardDrainResult{}, fmt.Errorf("bound worktree for %s is invalid (%v); repair git state or run `pop tasks unbind-worktree`", ref.SetID, err)
+			return DashboardDrainResult{}, fmt.Errorf("bound worktree for %s is invalid (%v); repair git state or run `pop tasks unbind-worktree`", row.ID, err)
 		}
-		session, checkout, err := dashboardSetPaneCoords(d, cfg, scans, ref, b.RuntimePath)
+		session, checkout, err := dashboardSetPaneCoords(d, cfg, scans, row, b.RuntimePath)
 		if err != nil {
 			return DashboardDrainResult{}, err
 		}
@@ -147,12 +147,12 @@ func LaunchDrain(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult,
 		// the one question a single carried scan cannot answer. Provisioning a
 		// managed worktree or adopting an existing one is the Drain target picker's
 		// job (LaunchDrainTarget), which binds before this runs.
-		allScans, err := dashboardScansForDefinition(d, cfg, ref.DefPath)
+		allScans, err := dashboardScansForDefinition(d, cfg, row.DefPath)
 		if err != nil {
 			return DashboardDrainResult{}, err
 		}
 		if len(allScans) == 0 {
-			return DashboardDrainResult{}, fmt.Errorf("task set %s is no longer in a registered queue project", ref.SetID)
+			return DashboardDrainResult{}, fmt.Errorf("task set %s is no longer in a registered queue project", row.ID)
 		}
 		rep, bare, err := resolveRepresentative(d, cfg, allScans)
 		if err != nil {
@@ -178,7 +178,7 @@ func LaunchDrain(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult,
 	// An already-running drain pane for this set is a jump target: focus it
 	// rather than re-sending implement into the live process (ADR-0158). An
 	// idle tagged pane (bare shell) falls through so EnsureTaggedPane respawns.
-	paneID, err := runningTaggedPane(d.Tmux, dec.scan.SessionName, tmuxmod.TagSet, ref.SetID)
+	paneID, err := runningTaggedPane(d.Tmux, dec.scan.SessionName, tmuxmod.TagSet, row.ID)
 	if err != nil {
 		return DashboardDrainResult{}, err
 	} else if paneID != "" {
@@ -202,7 +202,7 @@ func LaunchDrain(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult,
 // verify is not a drain, so the `●` live-drain indicator must stay dark. An
 // empty runtime path omits the flag and lets `pop tasks verify` default to the
 // project root, matching the drain when no worktree is ready.
-func LaunchVerify(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult, error) {
+func LaunchVerify(d *Deps, cfg *config.Config, row DashboardRow) (DashboardDrainResult, error) {
 	if d == nil {
 		d = DefaultDeps()
 	}
@@ -212,7 +212,7 @@ func LaunchVerify(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult
 	if d.Project == nil {
 		d.Project = project.DefaultDeps()
 	}
-	scans, _, err := dashboardBindContext(d, cfg, ref)
+	scans, _, err := dashboardBindContext(d, cfg, row)
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
@@ -220,7 +220,7 @@ func LaunchVerify(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult
 	// path when it resolves to one (a bound worktree or trunk), else the project
 	// root. EnsureTaggedPane reuses this set's existing tagged pane, so verify
 	// lands in the same session the set's drain would.
-	session, checkout, err := dashboardSetPaneCoords(d, cfg, scans, ref, ref.RuntimePath)
+	session, checkout, err := dashboardSetPaneCoords(d, cfg, scans, row, row.RuntimePath)
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
@@ -230,23 +230,23 @@ func LaunchVerify(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult
 	// An already-running verify pane for this set is a jump target: focus it
 	// rather than re-sending verify into the live process (ADR-0158). An idle
 	// tagged pane (bare shell) falls through so EnsureTaggedPane respawns.
-	if paneID, err := runningTaggedPane(d.Tmux, session, tmuxmod.TagVerify, ref.SetID); err != nil {
+	if paneID, err := runningTaggedPane(d.Tmux, session, tmuxmod.TagVerify, row.ID); err != nil {
 		return DashboardDrainResult{}, err
 	} else if paneID != "" {
-		return DashboardDrainResult{PaneID: paneID, Session: session, RuntimePath: ref.RuntimePath}, nil
+		return DashboardDrainResult{PaneID: paneID, Session: session, RuntimePath: row.RuntimePath}, nil
 	}
-	command := fmt.Sprintf("pop tasks verify %s", shellQuote(ref.SetID))
-	if strings.TrimSpace(ref.RuntimePath) != "" {
-		command += " --task-runtime-path " + shellQuote(ref.RuntimePath)
+	command := fmt.Sprintf("pop tasks verify %s", shellQuote(row.ID))
+	if strings.TrimSpace(row.RuntimePath) != "" {
+		command += " --task-runtime-path " + shellQuote(row.RuntimePath)
 	}
-	paneID, err := tmuxmod.EnsureTaggedPane(d.Tmux, tmuxmod.TagVerify, session, checkout, ref.SetID, command)
+	paneID, err := tmuxmod.EnsureTaggedPane(d.Tmux, tmuxmod.TagVerify, session, checkout, row.ID, command)
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
-	if err := d.Tmux.SetPaneTitle(paneID, verifyPaneTitle(ref.SetID)); err != nil {
+	if err := d.Tmux.SetPaneTitle(paneID, verifyPaneTitle(row.ID)); err != nil {
 		return DashboardDrainResult{}, err
 	}
-	return DashboardDrainResult{PaneID: paneID, Session: session, RuntimePath: ref.RuntimePath}, nil
+	return DashboardDrainResult{PaneID: paneID, Session: session, RuntimePath: row.RuntimePath}, nil
 }
 
 func dashboardScansForDefinition(d *Deps, cfg *config.Config, defPath string) ([]projectScan, error) {
@@ -294,7 +294,7 @@ func dashboardScansForDefinition(d *Deps, cfg *config.Config, defPath string) ([
 // an idle tagged pane (bare shell) is respawned. Otherwise a fresh pane runs
 // `pop tasks assist` pinned to the row's binding-first runtime checkout. Focus
 // and quit belong to the dashboard handoff path (ADR-0158).
-func LaunchAssist(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult, error) {
+func LaunchAssist(d *Deps, cfg *config.Config, row DashboardRow) (DashboardDrainResult, error) {
 	if d == nil {
 		d = DefaultDeps()
 	}
@@ -307,18 +307,18 @@ func LaunchAssist(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult
 	if d.Tmux == nil {
 		d.Tmux = tmuxmod.New()
 	}
-	scans, _, err := dashboardBindContext(d, cfg, ref)
+	scans, _, err := dashboardBindContext(d, cfg, row)
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
 	projectPath := scans[0].ProjectPath
-	if strings.TrimSpace(ref.ProjectPath) != "" {
-		projectPath = ref.ProjectPath
+	if strings.TrimSpace(row.ProjectPath) != "" {
+		projectPath = row.ProjectPath
 	}
-	runtimeOverride := strings.TrimSpace(ref.RuntimePath)
+	runtimeOverride := strings.TrimSpace(row.RuntimePath)
 	if runtimeOverride == "" {
 		var resolveErr error
-		runtimeOverride, resolveErr = binding.ResolveCommandRuntime(d.Tasks, projectPath, ref.SetID, "")
+		runtimeOverride, resolveErr = binding.ResolveCommandRuntime(d.Tasks, projectPath, row.ID, "")
 		if resolveErr != nil {
 			return DashboardDrainResult{}, resolveErr
 		}
@@ -332,32 +332,32 @@ func LaunchAssist(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult
 			CWD:             projectPath,
 			RuntimeOverride: runtimeOverride,
 		},
-		TaskSetID: ref.SetID,
+		TaskSetID: row.ID,
 	})
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
 
-	session, checkout, err := dashboardSetPaneCoords(d, cfg, scans, ref, runtimePath)
+	session, checkout, err := dashboardSetPaneCoords(d, cfg, scans, row, runtimePath)
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
 
-	if paneID, err := runningTaggedPane(d.Tmux, session, tmuxmod.TagAssist, ref.SetID); err != nil {
+	if paneID, err := runningTaggedPane(d.Tmux, session, tmuxmod.TagAssist, row.ID); err != nil {
 		return DashboardDrainResult{}, err
 	} else if paneID != "" {
 		return DashboardDrainResult{PaneID: paneID, Session: session, RuntimePath: runtimePath}, nil
 	}
 
-	command := fmt.Sprintf("pop tasks assist %s", shellQuote(ref.SetID))
+	command := fmt.Sprintf("pop tasks assist %s", shellQuote(row.ID))
 	if strings.TrimSpace(runtimePath) != "" {
 		command += " --task-runtime-path " + shellQuote(runtimePath)
 	}
-	paneID, err := tmuxmod.EnsureTaggedPane(d.Tmux, tmuxmod.TagAssist, session, checkout, ref.SetID, command)
+	paneID, err := tmuxmod.EnsureTaggedPane(d.Tmux, tmuxmod.TagAssist, session, checkout, row.ID, command)
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
-	if err := d.Tmux.SetPaneTitle(paneID, assistPaneTitle(ref.SetID)); err != nil {
+	if err := d.Tmux.SetPaneTitle(paneID, assistPaneTitle(row.ID)); err != nil {
 		return DashboardDrainResult{}, err
 	}
 	return DashboardDrainResult{PaneID: paneID, Session: session, RuntimePath: runtimePath}, nil
@@ -389,7 +389,7 @@ func assistPaneTitle(setID string) string {
 // jump target — focus it rather than re-sending fold into the live process.
 // An idle tagged pane (bare shell) is respawned. Dashboard-side PreflightFold
 // still refuses ineligible rows before this runs.
-func LaunchFold(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult, error) {
+func LaunchFold(d *Deps, cfg *config.Config, row DashboardRow) (DashboardDrainResult, error) {
 	if d == nil {
 		d = DefaultDeps()
 	}
@@ -402,42 +402,42 @@ func LaunchFold(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult, 
 	if d.Tmux == nil {
 		d.Tmux = tmuxmod.New()
 	}
-	scans, _, err := dashboardBindContext(d, cfg, ref)
+	scans, _, err := dashboardBindContext(d, cfg, row)
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
-	session, checkout, err := dashboardSetPaneCoords(d, cfg, scans, ref, ref.RuntimePath)
+	session, checkout, err := dashboardSetPaneCoords(d, cfg, scans, row, row.RuntimePath)
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
-	if paneID, err := runningTaggedPane(d.Tmux, session, tmuxmod.TagFold, ref.SetID); err != nil {
+	if paneID, err := runningTaggedPane(d.Tmux, session, tmuxmod.TagFold, row.ID); err != nil {
 		return DashboardDrainResult{}, err
 	} else if paneID != "" {
-		return DashboardDrainResult{PaneID: paneID, Session: session, RuntimePath: ref.RuntimePath}, nil
+		return DashboardDrainResult{PaneID: paneID, Session: session, RuntimePath: row.RuntimePath}, nil
 	}
-	command := fmt.Sprintf("pop tasks fold %s", shellQuote(ref.SetID))
-	paneID, err := tmuxmod.EnsureTaggedPane(d.Tmux, tmuxmod.TagFold, session, checkout, ref.SetID, command)
+	command := fmt.Sprintf("pop tasks fold %s", shellQuote(row.ID))
+	paneID, err := tmuxmod.EnsureTaggedPane(d.Tmux, tmuxmod.TagFold, session, checkout, row.ID, command)
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
-	if err := d.Tmux.SetPaneTitle(paneID, foldPaneTitle(ref.SetID)); err != nil {
+	if err := d.Tmux.SetPaneTitle(paneID, foldPaneTitle(row.ID)); err != nil {
 		return DashboardDrainResult{}, err
 	}
-	return DashboardDrainResult{PaneID: paneID, Session: session, RuntimePath: ref.RuntimePath}, nil
+	return DashboardDrainResult{PaneID: paneID, Session: session, RuntimePath: row.RuntimePath}, nil
 }
 
 // LaunchShell opens a fresh untagged Runtime shell pane in the set's checkout
 // (ADR-0158). Every press yields a new pane — shells are never tagged or
 // reused — so the operator's process outlives the dashboard exiting.
-func LaunchShell(d *Deps, cfg *config.Config, ref SetRef) (DashboardDrainResult, error) {
-	return LaunchShellIn(d, cfg, ref, ref.RuntimePath)
+func LaunchShell(d *Deps, cfg *config.Config, row DashboardRow) (DashboardDrainResult, error) {
+	return LaunchShellIn(d, cfg, row, row.RuntimePath)
 }
 
 // LaunchShellIn is the same spawn into an explicitly named directory: the shell
 // verb's working directory is the Work kind's answer (a task set's bound
 // checkout, a Map's repository), not something the launcher re-derives from the
 // Task-set binding it was handed.
-func LaunchShellIn(d *Deps, cfg *config.Config, ref SetRef, dir string) (DashboardDrainResult, error) {
+func LaunchShellIn(d *Deps, cfg *config.Config, row DashboardRow, dir string) (DashboardDrainResult, error) {
 	if d == nil {
 		d = DefaultDeps()
 	}
@@ -451,11 +451,11 @@ func LaunchShellIn(d *Deps, cfg *config.Config, ref SetRef, dir string) (Dashboa
 	if checkout == "" {
 		return DashboardDrainResult{}, fmt.Errorf("no checkout bound to this task set")
 	}
-	scans, _, err := dashboardBindContext(d, cfg, ref)
+	scans, _, err := dashboardBindContext(d, cfg, row)
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
-	session, dir, err := dashboardSetPaneCoords(d, cfg, scans, ref, checkout)
+	session, dir, err := dashboardSetPaneCoords(d, cfg, scans, row, checkout)
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
@@ -470,12 +470,12 @@ func LaunchShellIn(d *Deps, cfg *config.Config, ref SetRef, dir string) (Dashboa
 // through the same unbind implementation used by `pop tasks unbind-worktree`.
 // The dashboard supplies its own inline confirmation, so the command-level
 // prompt is skipped here.
-func UnbindWorktree(d *Deps, cfg *config.Config, ref SetRef) (AbandonResult, error) {
+func UnbindWorktree(d *Deps, cfg *config.Config, row DashboardRow) (AbandonResult, error) {
 	key := ""
-	if strings.TrimSpace(ref.RepoKey) != "" {
-		key = setScopedKey(ref.RepoKey, ref.SetID)
+	if strings.TrimSpace(row.RepoKey) != "" {
+		key = setScopedKey(row.RepoKey, row.ID)
 	}
-	return AbandonBindingWithOptions(d, cfg, key, ref.SetID, io.Discard, AbandonOptions{Yes: true, In: tasks.NonInteractiveReader{}})
+	return AbandonBindingWithOptions(d, cfg, key, row.ID, io.Discard, AbandonOptions{Yes: true, In: tasks.NonInteractiveReader{}})
 }
 
 // BindWorktreeEntries returns the inline bind picker entries for the
@@ -483,8 +483,8 @@ func UnbindWorktree(d *Deps, cfg *config.Config, ref SetRef) (AbandonResult, err
 // followed by the managed-intent entry and the pop-native creation entry. The
 // managed entry forks a new worktree from the Trunk worktree and binds it
 // immediately (ADR-0147), with no drain required.
-func BindWorktreeEntries(d *Deps, cfg *config.Config, ref SetRef) ([]dashboardBindEntry, error) {
-	scans, _, err := dashboardBindContext(d, cfg, ref)
+func BindWorktreeEntries(d *Deps, cfg *config.Config, row DashboardRow) ([]dashboardBindEntry, error) {
+	scans, _, err := dashboardBindContext(d, cfg, row)
 	if err != nil {
 		return nil, err
 	}
@@ -508,8 +508,8 @@ func BindWorktreeEntries(d *Deps, cfg *config.Config, ref SetRef) ([]dashboardBi
 
 // BindBaseRefs lists local and remote branch refs for the create-new
 // flow, with main/master variants first.
-func BindBaseRefs(d *Deps, cfg *config.Config, ref SetRef) ([]string, error) {
-	scans, _, err := dashboardBindContext(d, cfg, ref)
+func BindBaseRefs(d *Deps, cfg *config.Config, row DashboardRow) ([]string, error) {
+	scans, _, err := dashboardBindContext(d, cfg, row)
 	if err != nil {
 		return nil, err
 	}
@@ -524,29 +524,29 @@ func BindBaseRefs(d *Deps, cfg *config.Config, ref SetRef) ([]string, error) {
 	return refs, nil
 }
 
-// AdoptWorktree binds ref.SetID to an existing checkout. The dashboard
+// AdoptWorktree binds the row's set to an existing checkout. The dashboard
 // action is deliberate, so idle re-pointing uses Force without a second prompt.
-func AdoptWorktree(d *Deps, cfg *config.Config, ref SetRef, checkoutPath string) (BindWorktreeResult, error) {
-	if err := refuseDashboardBindWhileLocked(d, ref); err != nil {
+func AdoptWorktree(d *Deps, cfg *config.Config, row DashboardRow, checkoutPath string) (BindWorktreeResult, error) {
+	if err := refuseDashboardBindWhileLocked(d, row); err != nil {
 		return BindWorktreeResult{}, err
 	}
-	return BindWorktree(d, cfg, ref.SetID, checkoutPath, BindWorktreeOptions{Force: true, ProjectName: ref.ProjectName}, io.Discard)
+	return BindWorktree(d, cfg, row.ID, checkoutPath, BindWorktreeOptions{Force: true, ProjectName: row.Project}, io.Discard)
 }
 
-// BindManagedWorktree provisions a managed worktree for ref.SetID eagerly —
+// BindManagedWorktree provisions a managed worktree for the row's set eagerly —
 // the interactive twin of `bind-worktree --managed` (ADR-0147). The dashboard
 // action is deliberate, so a set already bound elsewhere is re-pointed without
 // a second prompt (Force), dropping the old binding forget-only before
 // provisioning the new checkout — exactly like AdoptWorktree.
-func BindManagedWorktree(d *Deps, cfg *config.Config, ref SetRef) (BindWorktreeResult, error) {
-	if err := refuseDashboardBindWhileLocked(d, ref); err != nil {
+func BindManagedWorktree(d *Deps, cfg *config.Config, row DashboardRow) (BindWorktreeResult, error) {
+	if err := refuseDashboardBindWhileLocked(d, row); err != nil {
 		return BindWorktreeResult{}, err
 	}
-	scans, _, err := dashboardBindContext(d, cfg, ref)
+	scans, _, err := dashboardBindContext(d, cfg, row)
 	if err != nil {
 		return BindWorktreeResult{}, err
 	}
-	return BindWorktree(d, cfg, ref.SetID, scans[0].ProjectPath, BindWorktreeOptions{Managed: true, Force: true, ProjectName: ref.ProjectName}, io.Discard)
+	return BindWorktree(d, cfg, row.ID, scans[0].ProjectPath, BindWorktreeOptions{Managed: true, Force: true, ProjectName: row.Project}, io.Discard)
 }
 
 type DashboardCreateWorktreeResult struct {
@@ -559,7 +559,7 @@ type DashboardCreateWorktreeResult struct {
 // CreateWorktree creates a pop-managed worktree on a fresh branch and records
 // a binding whose Provisioned bit is derived from its location under the
 // managed-worktree root. It never opens or attaches a tmux session.
-func CreateWorktree(d *Deps, cfg *config.Config, ref SetRef, baseRef, name string) (DashboardCreateWorktreeResult, error) {
+func CreateWorktree(d *Deps, cfg *config.Config, row DashboardRow, baseRef, name string) (DashboardCreateWorktreeResult, error) {
 	baseRef = strings.TrimSpace(baseRef)
 	name = strings.TrimSpace(name)
 	if baseRef == "" {
@@ -568,11 +568,11 @@ func CreateWorktree(d *Deps, cfg *config.Config, ref SetRef, baseRef, name strin
 	if name == "" {
 		return DashboardCreateWorktreeResult{}, fmt.Errorf("worktree name is required")
 	}
-	scans, repoKey, err := dashboardBindContext(d, cfg, ref)
+	scans, repoKey, err := dashboardBindContext(d, cfg, row)
 	if err != nil {
 		return DashboardCreateWorktreeResult{}, err
 	}
-	if err := refuseDashboardBindWhileLocked(d, ref); err != nil {
+	if err := refuseDashboardBindWhileLocked(d, row); err != nil {
 		return DashboardCreateWorktreeResult{}, err
 	}
 	branch := name
@@ -587,11 +587,11 @@ func CreateWorktree(d *Deps, cfg *config.Config, ref SetRef, baseRef, name strin
 	if rep, _, err := resolveRepresentative(d, cfg, scans); err == nil {
 		proj = repoName(scans, rep)
 	}
-	key := setScopedKey(repoKey, ref.SetID)
+	key := setScopedKey(repoKey, row.ID)
 	if err := binding.Put(d.Tasks, key, binding.Adopt(d.Tasks, path, branch, proj)); err != nil {
 		return DashboardCreateWorktreeResult{}, err
 	}
-	return DashboardCreateWorktreeResult{SetID: ref.SetID, RuntimePath: path, Branch: branch, BaseRef: baseRef}, nil
+	return DashboardCreateWorktreeResult{SetID: row.ID, RuntimePath: path, Branch: branch, BaseRef: baseRef}, nil
 }
 
 // DrainTargetEntries builds the Drain target picker options for an
@@ -601,8 +601,8 @@ func CreateWorktree(d *Deps, cfg *config.Config, ref SetRef, baseRef, name strin
 // trunk resolves (an unconfigured bare repo). Managed worktrees, the trunk, and
 // any worktree already bound to another set are excluded from the adopt list to
 // preserve the 1:1 checkout↔set mapping.
-func DrainTargetEntries(d *Deps, cfg *config.Config, ref SetRef) ([]dashboardDrainEntry, error) {
-	scans, _, err := dashboardBindContext(d, cfg, ref)
+func DrainTargetEntries(d *Deps, cfg *config.Config, row DashboardRow) ([]dashboardDrainEntry, error) {
+	scans, _, err := dashboardBindContext(d, cfg, row)
 	if err != nil {
 		return nil, err
 	}
@@ -656,14 +656,14 @@ func DrainTargetEntries(d *Deps, cfg *config.Config, ref SetRef) ([]dashboardDra
 // worktree" provisions a managed checkout forked from the trunk, and trunk leaves
 // the set unbound so LaunchDrain routes it to the trunk. Once bound (or
 // for trunk, immediately), it reuses LaunchDrain to spawn the drain.
-func LaunchDrainTarget(d *Deps, cfg *config.Config, ref SetRef, target dashboardDrainEntry) (DashboardDrainResult, error) {
+func LaunchDrainTarget(d *Deps, cfg *config.Config, row DashboardRow, target dashboardDrainEntry) (DashboardDrainResult, error) {
 	switch target.Kind {
 	case drainTargetWorktree:
-		if _, err := AdoptWorktree(d, cfg, ref, target.Path); err != nil {
+		if _, err := AdoptWorktree(d, cfg, row, target.Path); err != nil {
 			return DashboardDrainResult{}, err
 		}
 	case drainTargetNewManaged:
-		if _, err := ProvisionManagedWorktree(d, cfg, ref); err != nil {
+		if _, err := ProvisionManagedWorktree(d, cfg, row); err != nil {
 			return DashboardDrainResult{}, err
 		}
 	case drainTargetTrunk:
@@ -672,23 +672,23 @@ func LaunchDrainTarget(d *Deps, cfg *config.Config, ref SetRef, target dashboard
 	default:
 		return DashboardDrainResult{}, fmt.Errorf("unknown drain target")
 	}
-	return LaunchDrain(d, cfg, ref)
+	return LaunchDrain(d, cfg, row)
 }
 
 // ProvisionManagedWorktree provisions a pop-managed worktree forked
 // from the Trunk worktree's HEAD and records a provisioned binding, reusing the
 // shared provisioning path (ADR-0052). It refuses a repo with no resolvable
 // trunk and never opens or attaches a tmux session.
-func ProvisionManagedWorktree(d *Deps, cfg *config.Config, ref SetRef) (DashboardCreateWorktreeResult, error) {
-	scans, repoKey, err := dashboardBindContext(d, cfg, ref)
+func ProvisionManagedWorktree(d *Deps, cfg *config.Config, row DashboardRow) (DashboardCreateWorktreeResult, error) {
+	scans, repoKey, err := dashboardBindContext(d, cfg, row)
 	if err != nil {
 		return DashboardCreateWorktreeResult{}, err
 	}
-	if err := refuseDashboardBindWhileLocked(d, ref); err != nil {
+	if err := refuseDashboardBindWhileLocked(d, row); err != nil {
 		return DashboardCreateWorktreeResult{}, err
 	}
-	if b, ok := bindingForSet(d.Tasks, repoKey, ref.SetID); ok && strings.TrimSpace(b.RuntimePath) != "" {
-		return DashboardCreateWorktreeResult{}, fmt.Errorf("task set %s is already bound; unbind first to retarget", ref.SetID)
+	if b, ok := bindingForSet(d.Tasks, repoKey, row.ID); ok && strings.TrimSpace(b.RuntimePath) != "" {
+		return DashboardCreateWorktreeResult{}, fmt.Errorf("task set %s is already bound; unbind first to retarget", row.ID)
 	}
 	trunkPath, bare, err := binding.ResolveTrunkPath(d.Tasks, cfg, scans[0].ProjectPath)
 	if err != nil {
@@ -697,7 +697,7 @@ func ProvisionManagedWorktree(d *Deps, cfg *config.Config, ref SetRef) (Dashboar
 	if bare || strings.TrimSpace(trunkPath) == "" {
 		return DashboardCreateWorktreeResult{}, fmt.Errorf("no Trunk worktree configured; set trunk = true in a global [repo.\"<path>\"] block")
 	}
-	b, err := binding.ProvisionWorktree(d.Tasks, binding.ManagedWorktreesRoot(d.Tasks), trunkPath, ref.SetID, "HEAD", d.now())
+	b, err := binding.ProvisionWorktree(d.Tasks, binding.ManagedWorktreesRoot(d.Tasks), trunkPath, row.ID, "HEAD", d.now())
 	if err != nil {
 		return DashboardCreateWorktreeResult{}, err
 	}
@@ -706,14 +706,14 @@ func ProvisionManagedWorktree(d *Deps, cfg *config.Config, ref SetRef) (Dashboar
 		proj = repoName(scans, rep)
 	}
 	b.Project = proj
-	key := setScopedKey(repoKey, ref.SetID)
+	key := setScopedKey(repoKey, row.ID)
 	if err := binding.Put(d.Tasks, key, b); err != nil {
 		return DashboardCreateWorktreeResult{}, err
 	}
-	return DashboardCreateWorktreeResult{SetID: ref.SetID, RuntimePath: b.RuntimePath, Branch: b.Branch}, nil
+	return DashboardCreateWorktreeResult{SetID: row.ID, RuntimePath: b.RuntimePath, Branch: b.Branch}, nil
 }
 
-func dashboardBindContext(d *Deps, cfg *config.Config, ref SetRef) ([]projectScan, string, error) {
+func dashboardBindContext(d *Deps, cfg *config.Config, row DashboardRow) ([]projectScan, string, error) {
 	if d == nil {
 		d = DefaultDeps()
 	}
@@ -723,32 +723,32 @@ func dashboardBindContext(d *Deps, cfg *config.Config, ref SetRef) ([]projectSca
 	if d.Project == nil {
 		d.Project = project.DefaultDeps()
 	}
-	// Fast path: a SetRef built by the live dashboard already carries its repo
+	// Fast path: a row built by the live dashboard already carries its repo
 	// group's resolved coordinates (the integration target checkout and repo
 	// key), derived fork-free at build time (ADR-0060). Every bind/drain
 	// sub-action consumes only scans[0].ProjectPath and the repo key, so reuse
 	// them directly instead of re-forking `git rev-parse` across every registered
 	// project — the sequential rescan that left the inline bind picker stuck on
 	// "loading...".
-	if ref.ProjectPath != "" && ref.RepoKey != "" {
+	if row.ProjectPath != "" && row.RepoKey != "" {
 		scan := projectScan{
-			Name:           ref.ProjectName,
-			ProjectPath:    ref.ProjectPath,
-			DefinitionPath: ref.DefPath,
-			RuntimePath:    ref.ProjectPath,
-			SessionName:    project.SessionNameWith(d.Project, ref.ProjectPath),
-			RepoKey:        ref.RepoKey,
+			Name:           row.Project,
+			ProjectPath:    row.ProjectPath,
+			DefinitionPath: row.DefPath,
+			RuntimePath:    row.ProjectPath,
+			SessionName:    project.SessionNameWith(d.Project, row.ProjectPath),
+			RepoKey:        row.RepoKey,
 		}
-		return []projectScan{scan}, ref.RepoKey, nil
+		return []projectScan{scan}, row.RepoKey, nil
 	}
-	scans, err := dashboardScansForDefinition(d, cfg, ref.DefPath)
+	scans, err := dashboardScansForDefinition(d, cfg, row.DefPath)
 	if err != nil {
 		return nil, "", err
 	}
 	if len(scans) == 0 {
-		return nil, "", fmt.Errorf("task set %s is no longer in a registered queue project", ref.SetID)
+		return nil, "", fmt.Errorf("task set %s is no longer in a registered queue project", row.ID)
 	}
-	repoKey := ref.RepoKey
+	repoKey := row.RepoKey
 	if repoKey == "" {
 		repoKey, err = scanRepoKey(d, scans[0])
 		if err != nil {
@@ -758,7 +758,7 @@ func dashboardBindContext(d *Deps, cfg *config.Config, ref SetRef) ([]projectSca
 	return scans, repoKey, nil
 }
 
-func refuseDashboardBindWhileLocked(d *Deps, ref SetRef) error {
+func refuseDashboardBindWhileLocked(d *Deps, row DashboardRow) error {
 	if d == nil {
 		d = DefaultDeps()
 	}
@@ -766,11 +766,11 @@ func refuseDashboardBindWhileLocked(d *Deps, ref SetRef) error {
 		d.Tasks = tasks.DefaultDeps()
 	}
 	paths := map[string]bool{}
-	if strings.TrimSpace(ref.RuntimePath) != "" {
-		paths[ref.RuntimePath] = true
+	if strings.TrimSpace(row.RuntimePath) != "" {
+		paths[row.RuntimePath] = true
 	}
-	if ref.RepoKey != "" {
-		if b, ok := bindingForSet(d.Tasks, ref.RepoKey, ref.SetID); ok && b.RuntimePath != "" {
+	if row.RepoKey != "" {
+		if b, ok := bindingForSet(d.Tasks, row.RepoKey, row.ID); ok && b.RuntimePath != "" {
 			paths[b.RuntimePath] = true
 		}
 	}
@@ -779,8 +779,8 @@ func refuseDashboardBindWhileLocked(d *Deps, ref SetRef) error {
 		if lock == nil || !lock.Locked {
 			continue
 		}
-		if lock.Metadata == nil || lock.Metadata.SetID == "" || lock.Metadata.SetID == ref.SetID {
-			return fmt.Errorf("refusing bind-worktree: %s is currently executing", ref.SetID)
+		if lock.Metadata == nil || lock.Metadata.SetID == "" || lock.Metadata.SetID == row.ID {
+			return fmt.Errorf("refusing bind-worktree: %s is currently executing", row.ID)
 		}
 	}
 	return nil

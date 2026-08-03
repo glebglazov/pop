@@ -17,7 +17,7 @@ import (
 // TestDashboardAssistMenuPlacement asserts Assist sits with status and shell,
 // not among the drain/verify work verbs.
 func TestDashboardAssistMenuPlacement(t *testing.T) {
-	items := dashboardMenuItems(testKinds(), DashboardRow{SetRef: SetRef{SetID: "demo"}})
+	items := dashboardMenuItems(testKinds(), DashboardRow{ID: "demo"})
 	var keys []string
 	for _, item := range items {
 		keys = append(keys, item.key)
@@ -47,8 +47,8 @@ func TestDashboardAssistMenuPlacement(t *testing.T) {
 		t.Fatalf("assist must not follow verify, got keys %v", keys)
 	}
 
-	m := newQueueDashboard(nil, nil, DashboardSnapshot{Rows: []DashboardRow{
-		{SetRef: SetRef{SetID: "demo"}},
+	m := newQueueDashboard(nil, nil, DashboardSnapshot{Containers: []DashboardRow{
+		{ID: "demo"},
 	}})
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
@@ -85,7 +85,7 @@ func TestDashboardLaunchAssistSpawnsTaggedPane(t *testing.T) {
 	row.RuntimePath = repo
 	row.ProjectPath = repo
 
-	if _, err := LaunchAssist(d, cfg, row.SetRef); err != nil {
+	if _, err := LaunchAssist(d, cfg, row); err != nil {
 		t.Fatalf("LaunchAssist: %v", err)
 	}
 
@@ -129,7 +129,7 @@ func TestDashboardLaunchAssistBoundCheckoutUsesProjectSession(t *testing.T) {
 	row.RuntimePath = bound
 	row.ProjectPath = repo
 
-	if _, err := LaunchAssist(d, cfg, row.SetRef); err != nil {
+	if _, err := LaunchAssist(d, cfg, row); err != nil {
 		t.Fatalf("LaunchAssist: %v", err)
 	}
 	assertSetPaneProjectSessionAndCheckout(t, rt, repo, bound)
@@ -148,7 +148,7 @@ func TestDashboardLaunchAssistReusesPane(t *testing.T) {
 	rt.windowNames["pop-queue"] = true
 	seedTaggedPane(rt, "%5", tmuxmod.TagAssist, setID)
 
-	result, err := LaunchAssist(d, cfg, row.SetRef)
+	result, err := LaunchAssist(d, cfg, row)
 	if err != nil {
 		t.Fatalf("LaunchAssist reuse: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestLaunchAssistRefusesLiveDrain(t *testing.T) {
 		t.Fatalf("StartDrain: %v", err)
 	}
 
-	_, err = LaunchAssist(d, cfg, row.SetRef)
+	_, err = LaunchAssist(d, cfg, row)
 	if err == nil {
 		t.Fatal("LaunchAssist must refuse while drain is live")
 	}
@@ -219,8 +219,8 @@ func TestLaunchAssistRefusesLiveDrain(t *testing.T) {
 // dashboard action error.
 func TestDashboardAssistRefusalSticky(t *testing.T) {
 	const refusal = `task set "demo" has a live drain (pid 9 on /repo)`
-	row := TestDashboardRow("proj", "demo", SetRef{SetID: "demo", RuntimePath: "/repo/wt"})
-	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{row}})
+	row := TestDashboardRow("proj", "demo", DashboardRow{ID: "demo", RuntimePath: "/repo/wt"})
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{row}})
 	m.width, m.height = 120, 40
 
 	updated, _ := m.Update(dashboardHandoffMsg{err: errors.New(refusal)})

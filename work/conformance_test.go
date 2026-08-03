@@ -261,14 +261,6 @@ func TestSnapshotOrdersByKindPrecedenceThenKindLess(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("snapshot order = %v, want %v", got, want)
 	}
-	if len(snap.Rows) != len(snap.Containers) {
-		t.Fatalf("rows = %d, containers = %d — every row must derive from a container", len(snap.Rows), len(snap.Containers))
-	}
-	for i, row := range snap.Rows {
-		if row.SetID != snap.Containers[i].ID {
-			t.Fatalf("row %d = %q, want the projection of container %q", i, row.SetID, snap.Containers[i].ID)
-		}
-	}
 	// Header text: every kind's phrases, joined with · in kind order.
 	if want := "2 task sets · 1 ready · 1 map"; snap.SummaryLine() != want {
 		t.Fatalf("summary line = %q, want %q", snap.SummaryLine(), want)

@@ -395,8 +395,8 @@ func TestUnparkSetClearsPark(t *testing.T) {
 	}
 
 	d := &Deps{Tasks: td}
-	ref := SetRef{SetID: "set-1", RepoCommonDir: commonDir, RuntimePath: repo}
-	if err := UnparkSet(d, ref); err != nil {
+	row := DashboardRow{ID: "set-1", RepoCommonDir: commonDir, RuntimePath: repo}
+	if err := UnparkSet(d, row); err != nil {
 		t.Fatalf("UnparkSet: %v", err)
 	}
 

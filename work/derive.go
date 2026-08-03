@@ -13,7 +13,7 @@ package work
 // (row.LiveDrain) the IN-PROGRESS refinement already signals the activity, so the
 // marker is silenced and the set drops out of the "still needs picking up" count.
 // The persisted consent bit is untouched — this is display-only.
-func AutoDrainWaiting(row Row) bool {
+func AutoDrainWaiting(row Container) bool {
 	return row.AutoDrain && !row.LiveDrain
 }
 
@@ -29,7 +29,7 @@ const LiveDrainGlyph = "⠋"
 // otherwise. Returning the fixed-width stand-in keeps ANSI out of column math and
 // the measured width constant across frames; the animated, coloured variant is a
 // queue-side wrapper.
-func LiveIndicator(row Row) string {
+func LiveIndicator(row Container) string {
 	if !row.LiveDrain {
 		return ""
 	}

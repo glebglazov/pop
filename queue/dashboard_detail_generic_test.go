@@ -54,7 +54,6 @@ func (k *itemVerbKind) Summary([]work.Container) []string { return nil }
 func genericDetailRow() DashboardRow {
 	return DashboardRow{
 		Project: "pop", CursorKey: "pop\x00thing", ID: "thing", Kind: ref.KindTaskSet,
-		SetRef:   SetRef{SetID: "thing"},
 		Headline: "2 of 3",
 		DetailSections: []work.Section{
 			{Title: "Destination", Body: "Somewhere worth going"},
@@ -69,7 +68,7 @@ func genericDetailRow() DashboardRow {
 
 func genericDetailDashboard(kind work.Kind) QueueDashboard {
 	d := &Deps{Kinds: func(*config.Config) []work.Kind { return []work.Kind{kind} }}
-	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{genericDetailRow()}})
+	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{genericDetailRow()}})
 	m.width, m.height = 120, 24
 	return m
 }
@@ -107,7 +106,7 @@ func TestDetailWithSectionsClampsToBodyHeight(t *testing.T) {
 	row := genericDetailRow()
 	row.DetailSections = []work.Section{{Title: "Destination", Body: strings.Repeat("a long thought\n", 30)}}
 	d := &Deps{Kinds: func(*config.Config) []work.Kind { return []work.Kind{&itemVerbKind{}} }}
-	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{row}})
 	m.width, m.height = 120, 12
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
 	got := updated.(QueueDashboard)
@@ -186,8 +185,8 @@ func TestItemCopyNamePayloadComesFromTheKind(t *testing.T) {
 // ticket's grilling handoff, sharing only copy-name.
 func TestItemMenuVerbsAreTheOwningKindsOwn(t *testing.T) {
 	kinds := testKinds()
-	set := DashboardRow{ID: "2026-07-01-a", SetRef: SetRef{SetID: "2026-07-01-a", RawStatus: tasks.StatusReady}}
-	wfMap := DashboardRow{ID: "2026-07-02-chart", Kind: ref.KindMap, SetRef: SetRef{SetID: "2026-07-02-chart"}}
+	set := DashboardRow{ID: "2026-07-01-a", RawStatus: tasks.StatusReady}
+	wfMap := DashboardRow{ID: "2026-07-02-chart", Kind: ref.KindMap}
 
 	task := work.Item{ID: "01-a", Status: string(tasks.TaskOpen), File: "/repo/tasks/2026-07-01-a/01-a.md"}
 	verbs := func(row DashboardRow, item work.Item) []work.Verb {
@@ -230,7 +229,7 @@ func TestDetailFollowsTheRebuiltContainer(t *testing.T) {
 	refreshed := genericDetailRow()
 	refreshed.Items[0].Status = "done"
 	refreshed.Items[0].StatusLabel = ""
-	updated, _ = got.Update(dashboardRowsMsg{snap: DashboardSnapshot{Rows: []DashboardRow{refreshed}}})
+	updated, _ = got.Update(dashboardRowsMsg{snap: DashboardSnapshot{Containers: []DashboardRow{refreshed}}})
 	got = updated.(QueueDashboard)
 
 	item, ok := got.detail.list.Selected()

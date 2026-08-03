@@ -23,22 +23,22 @@ func TestDashboardActionMenuFoldFiltering(t *testing.T) {
 		return keys
 	}
 
-	doneBound := keysFor(DashboardRow{SetRef: SetRef{SetID: "done", RawStatus: tasks.StatusDone, Bound: true}})
+	doneBound := keysFor(DashboardRow{ID: "done", RawStatus: tasks.StatusDone, Bound: true})
 	if !contains(doneBound, "F") {
 		t.Fatalf("DONE bound row missing fold: %v", doneBound)
 	}
 
-	awaitingBound := keysFor(DashboardRow{SetRef: SetRef{SetID: "await", RawStatus: tasks.StatusAwaitingApproval, Bound: true}})
+	awaitingBound := keysFor(DashboardRow{ID: "await", RawStatus: tasks.StatusAwaitingApproval, Bound: true})
 	if !contains(awaitingBound, "F") {
 		t.Fatalf("AWAITING-APPROVAL bound row missing fold: %v", awaitingBound)
 	}
 
-	readyBound := keysFor(DashboardRow{SetRef: SetRef{SetID: "ready", RawStatus: tasks.StatusReady, Bound: true}})
+	readyBound := keysFor(DashboardRow{ID: "ready", RawStatus: tasks.StatusReady, Bound: true})
 	if contains(readyBound, "F") {
 		t.Fatalf("READY bound row should not offer fold: %v", readyBound)
 	}
 
-	doneUnbound := keysFor(DashboardRow{SetRef: SetRef{SetID: "done", RawStatus: tasks.StatusDone}})
+	doneUnbound := keysFor(DashboardRow{ID: "done", RawStatus: tasks.StatusDone})
 	if contains(doneUnbound, "F") {
 		t.Fatalf("DONE unbound row should not offer fold: %v", doneUnbound)
 	}
@@ -66,17 +66,15 @@ func TestDashboardFoldRefusalSticky(t *testing.T) {
 		LoadConfig: func(string) (*config.Config, error) { return cfg, nil },
 	}
 	row := DashboardRow{
-		Project: "pop",
-		SetRef: SetRef{
-			SetID:       setID,
-			DefPath:     tasksDirForRepo(t, td, repo),
-			StatePath:   statePathForRepo(t, td, repo),
-			RuntimePath: b.RuntimePath,
-			RawStatus:   tasks.StatusDone,
-			Bound:       true,
-		},
+		Project:     "pop",
+		ID:          setID,
+		DefPath:     tasksDirForRepo(t, td, repo),
+		StatePath:   statePathForRepo(t, td, repo),
+		RuntimePath: b.RuntimePath,
+		RawStatus:   tasks.StatusDone,
+		Bound:       true,
 	}
-	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 	m.width, m.height = 120, 40
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
@@ -114,7 +112,7 @@ func TestDashboardHandoffFoldSpawnsFocusesAndQuits(t *testing.T) {
 	})
 	rt.Fake.Inside = true
 
-	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
 	_, cmd := got.Update(tea.KeyPressMsg{Code: 'F', Text: "F"})
@@ -195,7 +193,7 @@ func TestDashboardHandoffFoldReusesConflictPane(t *testing.T) {
 	seedTaggedPane(rt, "%11", tmuxmod.TagFold, setID)
 	rt.Fake.Inside = true
 
-	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
 	_, cmd := got.Update(tea.KeyPressMsg{Code: 'F', Text: "F"})

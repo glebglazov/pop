@@ -18,11 +18,6 @@ import (
 // test that wants tasks on screen puts them there — through the kind's own
 // projection, never a second one.
 func detailRowWithTasks(row DashboardRow, manifest *tasks.Manifest, taskRow *tasks.Row) DashboardRow {
-	// A hand-built row names only the set; a loaded container carries the same
-	// name as its kind-agnostic id, which is what the detail view reads.
-	if row.ID == "" {
-		row.ID = row.SetID
-	}
 	row.Items = setkind.ItemsFromManifest(manifest)
 	if manifest != nil && !manifest.Valid {
 		row.Broken, row.BrokenReason = true, strings.Join(manifest.Errors, "; ")

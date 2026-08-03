@@ -18,9 +18,9 @@ import (
 func TestQueueDashboardCopyTaskSetRow(t *testing.T) {
 	row := DashboardRow{
 		Project: "pop", CursorKey: "pop\x00my-set",
-		SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "my-set", DefPath: "/repo/tasks", StatePath: "/repo/state.json"},
+		RawStatus: tasks.StatusReady, ID: "my-set", DefPath: "/repo/tasks", StatePath: "/repo/state.json",
 	}
-	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{row}})
 	m.width, m.height = 120, 24
 
 	var captured string
@@ -49,9 +49,9 @@ func TestQueueDashboardCopyTaskSetRow(t *testing.T) {
 func TestQueueDashboardCopyMapRow(t *testing.T) {
 	row := DashboardRow{
 		Project: "pop", Kind: ref.KindMap, CursorKey: "pop\x00map\x00demo-map",
-		SetRef: SetRef{SetID: "demo-map"}, MapOpen: 1, MapFrontier: 1,
+		ID: "demo-map", MapOpen: 1, MapFrontier: 1,
 	}
-	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{row}})
 	m.width, m.height = 120, 24
 
 	var captured string
@@ -79,9 +79,9 @@ func TestQueueDashboardCopyViaMenu(t *testing.T) {
 	t.Run("task set row", func(t *testing.T) {
 		row := DashboardRow{
 			Project: "pop", CursorKey: "pop\x00set-menu",
-			SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-menu"},
+			RawStatus: tasks.StatusReady, ID: "set-menu",
 		}
-		m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{row}})
+		m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{row}})
 		m.width, m.height = 120, 24
 		if !menuHasKey(newDashboardMenu(testKinds(), row, false), "y") {
 			t.Fatal("task-set menu missing copy name bound to y")
@@ -111,9 +111,9 @@ func TestQueueDashboardCopyViaMenu(t *testing.T) {
 	t.Run("map row", func(t *testing.T) {
 		row := DashboardRow{
 			Project: "pop", Kind: ref.KindMap, CursorKey: "pop\x00map\x00map-menu",
-			SetRef: SetRef{SetID: "map-menu"}, MapOpen: 1, MapFrontier: 1,
+			ID: "map-menu", MapOpen: 1, MapFrontier: 1,
 		}
-		m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{row}})
+		m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{row}})
 		m.width, m.height = 120, 24
 		items := dashboardMenuItems(testKinds(), row)
 		if last := items[len(items)-1]; last.label != "copy name" || last.key != "y" {
@@ -144,9 +144,9 @@ func TestQueueDashboardCopyViaMenu(t *testing.T) {
 func TestQueueDashboardCopyErrorSurfaces(t *testing.T) {
 	row := DashboardRow{
 		Project: "pop", CursorKey: "pop\x00fail-set",
-		SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "fail-set"},
+		RawStatus: tasks.StatusReady, ID: "fail-set",
 	}
-	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{row}})
 	m.copyFunc = func(string) error { return errors.New("boom") }
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
@@ -164,9 +164,9 @@ func TestQueueDashboardCopyErrorSurfaces(t *testing.T) {
 func TestQueueDashboardCopyHintAdvertisesY(t *testing.T) {
 	row := DashboardRow{
 		Project: "pop", CursorKey: "pop\x00hint-set",
-		SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "hint-set"},
+		RawStatus: tasks.StatusReady, ID: "hint-set",
 	}
-	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{row}})
 	m.width, m.height = 120, 24
 	hint := m.mainHint()
 	if !strings.Contains(hint, "y copy name") {
@@ -176,9 +176,9 @@ func TestQueueDashboardCopyHintAdvertisesY(t *testing.T) {
 
 // detailCopyModel builds a QueueDashboard with a loaded task-set detail view.
 func detailCopyModel(setID string, task tasks.Task) QueueDashboard {
-	row := DashboardRow{SetRef: SetRef{SetID: setID, DefPath: "/def"}}
+	row := DashboardRow{ID: setID, DefPath: "/def"}
 	manifest := &tasks.Manifest{Valid: true, Tasks: []tasks.Task{task}}
-	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{row}})
 	m.width, m.height = 120, 24
 	dv := newTaskDetailView(row, manifest, nil)
 	m.detail = dv

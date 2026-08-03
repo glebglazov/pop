@@ -15,9 +15,9 @@ import (
 // Effort model skips.
 func modelSkipDashboard(height int, skips []work.ModelSkip) QueueDashboard {
 	rows := []DashboardRow{
-		{Project: "pop", Worktree: "main", CursorKey: "pop\x00set", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set"}},
+		{Project: "pop", Worktree: "main", CursorKey: "pop\x00set", RawStatus: tasks.StatusReady, ID: "set"},
 	}
-	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows, ModelSkips: skips})
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Containers: rows, ModelSkips: skips})
 	m.width = 120
 	m.height = height
 	return m
@@ -88,10 +88,10 @@ func TestDashboardFooterReservesItsLine(t *testing.T) {
 	rows := make([]DashboardRow, 40)
 	for i := range rows {
 		id := string(rune('a' + i%26))
-		rows[i] = DashboardRow{Project: "pop", Worktree: "main", CursorKey: "pop\x00" + id, SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: id}}
+		rows[i] = DashboardRow{Project: "pop", Worktree: "main", CursorKey: "pop\x00" + id, RawStatus: tasks.StatusReady, ID: id}
 	}
 	sized := func(skips []work.ModelSkip) QueueDashboard {
-		m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows, ModelSkips: skips})
+		m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Containers: rows, ModelSkips: skips})
 		m.width = 200
 		m.height = 30
 		return m

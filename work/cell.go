@@ -47,3 +47,28 @@ func StatusCellText(segments []StatusSegment) string {
 	}
 	return strings.Join(parts, " · ")
 }
+
+// SetStatus is the Task-set status vocabulary a container's RawStatus carries.
+// It is declared here, with no constants, so the seam can hold that cell without
+// importing the kind that owns the statuses: `tasks.TaskSetStatus` is an alias of
+// it, and the kind keeps its own name and its own constants.
+type SetStatus string
+
+// DestKind selects how the WORKTREE destination column is styled. The plain
+// label lives on Container.Worktree; the styled wrapper lives queue-side
+// (ADR-0143).
+type DestKind int
+
+const (
+	DestBound DestKind = iota
+	DestManagedDirective
+	DestNeedsBind
+	DestDoneManagedBound
+)
+
+// Destination-column plain labels. WorktreeLabel composes the unstyled cell from
+// these; the styled variants that colour them stay queue-side.
+const (
+	DestLabelManagedWt = "[managed wt]"
+	DestLabelNeedsBind = "needs bind"
+)

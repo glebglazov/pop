@@ -26,12 +26,12 @@ import (
 
 // rowsForStatic renders one hand-built repo group's containers and hands back
 // their row projections — the shape these tests were written against.
-func rowsForStatic(d *Deps, cfg *config.Config, g repogroup.Group) ([]work.Row, error) {
+func rowsForStatic(d *Deps, cfg *config.Config, g repogroup.Group) ([]work.Container, error) {
 	containers, err := containersForGroup(d, cfg, g)
 	if err != nil {
 		return nil, err
 	}
-	rows := make([]work.Row, 0, len(containers))
+	rows := make([]work.Container, 0, len(containers))
 	for _, c := range containers {
 		rows = append(rows, c)
 	}
@@ -148,7 +148,7 @@ func staticForScan(scan scanFixture, repBranch string, bare bool) repogroup.Grou
 		RepoCommonDir: scan.RepoCommonDir,
 		ProjectName:   scan.Name,
 		Rep:           rep,
-		Branch:     repBranch,
+		Branch:        repBranch,
 		Bare:          bare,
 	}
 }
@@ -306,7 +306,7 @@ func TestShowRuleFiltering(t *testing.T) {
 	}
 	var ids []string
 	for _, row := range got {
-		ids = append(ids, row.SetID)
+		ids = append(ids, row.ID)
 	}
 	want := []string{"ready", "failed", "blocked", "deferred", "missing", "malformed"}
 	if !reflect.DeepEqual(ids, want) {
@@ -319,10 +319,10 @@ func TestShowRuleFiltering(t *testing.T) {
 		t.Fatal(err)
 	}
 	ids = nil
-	byID := map[string]work.Row{}
+	byID := map[string]work.Container{}
 	for _, row := range got {
-		ids = append(ids, row.SetID)
-		byID[row.SetID] = row
+		ids = append(ids, row.ID)
+		byID[row.ID] = row
 	}
 	wantInclude := []string{"ready", "failed", "blocked", "deferred", "missing", "malformed", "done-integrating", "done-concluded"}
 	if !reflect.DeepEqual(ids, wantInclude) {
@@ -357,9 +357,9 @@ func TestColumnDerivation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	byID := map[string]work.Row{}
+	byID := map[string]work.Container{}
 	for _, row := range got {
-		byID[row.SetID] = row
+		byID[row.ID] = row
 	}
 	if !strings.HasPrefix(tasks.WorkRowStatusCell(byID["done"]), "DONE") || byID["done"].Worktree != "done-branch" || byID["done"].DestKind != work.DestDoneManagedBound {
 		t.Fatalf("done row = %+v", byID["done"])
@@ -405,9 +405,9 @@ func TestPickedUpIndicator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	byID := map[string]work.Row{}
+	byID := map[string]work.Container{}
 	for _, row := range got {
-		byID[row.SetID] = row
+		byID[row.ID] = row
 	}
 	if !byID["ready"].LiveDrain {
 		t.Fatalf("ready LiveDrain = false, want true (held by a live drain)")
@@ -462,9 +462,9 @@ func TestOrphanedIndicator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	byID := map[string]work.Row{}
+	byID := map[string]work.Container{}
 	for _, row := range got {
-		byID[row.SetID] = row
+		byID[row.ID] = row
 	}
 	if !byID["missing"].Orphaned {
 		t.Fatalf("missing set should be orphaned: %+v", byID["missing"])
@@ -483,6 +483,7 @@ func TestOrphanedIndicator(t *testing.T) {
 		t.Fatalf("non-orphaned rows must not carry the suffix")
 	}
 }
+
 // TestBareWithoutTrunkRendersConfigError covers ADR-0060's bare-without-trunk
 // rule: an unbound set in such a repo shows a config-class error as a STATUS
 // suffix and needs bind for its worktree, derived fork-free (no git probe).
@@ -496,7 +497,7 @@ func TestBareWithoutTrunkRendersConfigError(t *testing.T) {
 		ProjectName: "bare",
 		Rep:         nil,
 		Bare:        true,
-		ConfigError:   repogroup.ScanReason,
+		ConfigError: repogroup.ScanReason,
 	}
 	got, err := rowsForStatic(d, &config.Config{}, st)
 	if err != nil {
@@ -537,16 +538,16 @@ func TestBranchColumnSources(t *testing.T) {
 		RepoKey:     "repo-key",
 		ProjectName: "pop",
 		Rep:         &repogroup.Checkout{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main"},
-		Branch:   "trunk-branch",
+		Branch:      "trunk-branch",
 		Bare:        false,
 	}
 	got, err := rowsForStatic(d, &config.Config{}, st)
 	if err != nil {
 		t.Fatal(err)
 	}
-	byID := map[string]work.Row{}
+	byID := map[string]work.Container{}
 	for _, row := range got {
-		byID[row.SetID] = row
+		byID[row.ID] = row
 	}
 	if byID["bound"].Worktree != "bound-branch" || byID["bound"].DestKind != work.DestBound {
 		t.Fatalf("bound worktree = %+v, want binding-row branch", byID["bound"])
@@ -620,9 +621,9 @@ func TestDoneHiddenUniformly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	byID := map[string]work.Row{}
+	byID := map[string]work.Container{}
 	for _, row := range got {
-		byID[row.SetID] = row
+		byID[row.ID] = row
 	}
 	if row, ok := byID["done-adopted"]; !ok {
 		t.Fatal("adopted Done binding should be revealed with include-done")
@@ -650,6 +651,7 @@ func TestNeedsBindLabel(t *testing.T) {
 		t.Fatalf("worktree label = %q, want needs bind", label)
 	}
 }
+
 // withDataDir rewraps a tasks.Deps' mock FS with a temp XDG data dir and real
 // file ops so the binding store can be seeded and read, preserving the original
 // symlink/stat seams. It mirrors the FS-swap the relocated tests did inline.

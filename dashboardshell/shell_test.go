@@ -13,9 +13,9 @@ import (
 
 func queueRows() []queue.DashboardRow {
 	return []queue.DashboardRow{
-		queue.TestDashboardRow("alpha", "set-a", queue.SetRef{RawStatus: tasks.StatusReady, DefPath: "/a/tasks", StatePath: "/a/state.json"}),
-		queue.TestDashboardRow("beta", "set-b", queue.SetRef{RawStatus: tasks.StatusReady, DefPath: "/b/tasks", StatePath: "/b/state.json"}),
-		queue.TestDashboardRow("gamma", "set-g", queue.SetRef{RawStatus: tasks.StatusReady, DefPath: "/g/tasks", StatePath: "/g/state.json"}),
+		queue.TestDashboardRow("alpha", "set-a", queue.DashboardRow{RawStatus: tasks.StatusReady, DefPath: "/a/tasks", StatePath: "/a/state.json"}),
+		queue.TestDashboardRow("beta", "set-b", queue.DashboardRow{RawStatus: tasks.StatusReady, DefPath: "/b/tasks", StatePath: "/b/state.json"}),
+		queue.TestDashboardRow("gamma", "set-g", queue.DashboardRow{RawStatus: tasks.StatusReady, DefPath: "/g/tasks", StatePath: "/g/state.json"}),
 	}
 }
 
@@ -29,7 +29,7 @@ func routineRows() []routine.DashboardRow {
 func newTestShell(start View) Shell {
 	return Shell{
 		active:  start,
-		queue:   queue.NewDashboard(&queue.Deps{}, &config.Config{}, queue.DashboardSnapshot{Rows: queueRows()}),
+		queue:   queue.NewDashboard(&queue.Deps{}, &config.Config{}, queue.DashboardSnapshot{Containers: queueRows()}),
 		routine: routine.NewDashboard(&routine.Deps{}, routine.DashboardSnapshot{Rows: routineRows()}),
 	}
 }

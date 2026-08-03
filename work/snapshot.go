@@ -4,7 +4,33 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
+
+// Snapshot is the data model for `pop work dashboard`.
+type Snapshot struct {
+	// Containers are every loaded Work container in snapshot order — kind
+	// precedence, then each kind's own comparator. There is no second list beside
+	// it: a dashboard row is one of these.
+	Containers []Container
+	// Summary is every kind's header phrases in kind order, already pluralised.
+	// SummaryLine joins them.
+	Summary []string
+	// ModelSkips are the Effort model skips in force at build time (ADR-0168),
+	// ordered by preset then model. They are machine-global rather than
+	// per-container, which is why they ride the snapshot and render as a footer
+	// one-liner rather than as a cell. Empty is the steady state.
+	ModelSkips []ModelSkip
+}
+
+// ModelSkip is one Effort model skip still in force: the preset whose ladder
+// entry pop is walking past, the `--model` token that entry pins, and when the
+// skip lifts. A zero Until is a permanent skip (ADR-0168).
+type ModelSkip struct {
+	Preset string
+	Model  string
+	Until  time.Time
+}
 
 // BuildSnapshot builds one point-in-time Work snapshot from a wired list of
 // kinds. It is the whole of the builder: every read of the filesystem and of
@@ -41,7 +67,6 @@ func BuildSnapshot(kinds []Kind) (Snapshot, error) {
 		}
 		snap.ModelSkips = append(snap.ModelSkips, skips...)
 	}
-	snap.Rows = snap.Containers
 	return snap, nil
 }
 

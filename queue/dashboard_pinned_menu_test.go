@@ -11,9 +11,9 @@ import (
 
 func TestDashboardPinnedActionMenuOpen(t *testing.T) {
 	rows := []DashboardRow{
-		{Project: "pop", CursorKey: "pop\x00set-a", SetRef: SetRef{RawStatus: tasks.StatusReady, SetID: "set-a", RuntimePath: "/repo/wt-a"}},
+		{Project: "pop", CursorKey: "pop\x00set-a", RawStatus: tasks.StatusReady, ID: "set-a", RuntimePath: "/repo/wt-a"},
 	}
-	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Containers: rows})
 	m.width = 120
 	m.height = 20
 
@@ -36,11 +36,11 @@ func TestDashboardPinnedActionMenuOpen(t *testing.T) {
 
 func TestDashboardPinnedActionMenuRowCursorAndRefilter(t *testing.T) {
 	rows := []DashboardRow{
-		{Project: "pop", CursorKey: "pop\x00plain", SetRef: SetRef{SetID: "plain", RuntimePath: "/wt"}},
-		{Project: "pop", CursorKey: "pop\x00bound", SetRef: SetRef{SetID: "bound", Bound: true, RuntimePath: "/wt"}},
-		{Project: "pop", CursorKey: "pop\x00parked", SetRef: SetRef{SetID: "parked", Parked: true, RuntimePath: "/wt"}},
+		{Project: "pop", CursorKey: "pop\x00plain", ID: "plain", RuntimePath: "/wt"},
+		{Project: "pop", CursorKey: "pop\x00bound", ID: "bound", Bound: true, RuntimePath: "/wt"},
+		{Project: "pop", CursorKey: "pop\x00parked", ID: "parked", Parked: true, RuntimePath: "/wt"},
 	}
-	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: rows})
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Containers: rows})
 	m.width = 120
 	m.height = 24
 
@@ -58,8 +58,8 @@ func TestDashboardPinnedActionMenuRowCursorAndRefilter(t *testing.T) {
 	if got.ListCursor() != 1 {
 		t.Fatalf("J cursor = %d, want 1", got.ListCursor())
 	}
-	if got.menu.row.SetID != "bound" {
-		t.Fatalf("menu row = %q, want bound", got.menu.row.SetID)
+	if got.menu.row.ID != "bound" {
+		t.Fatalf("menu row = %q, want bound", got.menu.row.ID)
 	}
 	if !contains(menuKeys(got.menu), "u") {
 		t.Fatalf("bound row should offer unbind after J: %v", got.menu.list.Items())
@@ -76,8 +76,8 @@ func TestDashboardPinnedActionMenuRowCursorAndRefilter(t *testing.T) {
 
 	updated, _ = got.Update(tea.KeyPressMsg{Code: 'K', Text: "K"})
 	got = updated.(QueueDashboard)
-	if got.ListCursor() != 1 || got.menu.row.SetID != "bound" {
-		t.Fatalf("K did not move back to bound row: cursor=%d row=%q", got.ListCursor(), got.menu.row.SetID)
+	if got.ListCursor() != 1 || got.menu.row.ID != "bound" {
+		t.Fatalf("K did not move back to bound row: cursor=%d row=%q", got.ListCursor(), got.menu.row.ID)
 	}
 }
 
@@ -90,10 +90,10 @@ func TestDashboardPinnedActionMenuInPlaceVerbStaysOpen(t *testing.T) {
 		},
 	}
 	rows := []DashboardRow{
-		{Project: "pop", CursorKey: "pop\x00one", SetRef: SetRef{RawStatus: tasks.StatusDone, SetID: "one", DefPath: "/tasks", RuntimePath: "/wt", Bound: true}},
-		{Project: "pop", CursorKey: "pop\x00two", SetRef: SetRef{RawStatus: tasks.StatusDone, SetID: "two", DefPath: "/tasks", RuntimePath: "/wt", Bound: true}},
+		{Project: "pop", CursorKey: "pop\x00one", RawStatus: tasks.StatusDone, ID: "one", DefPath: "/tasks", RuntimePath: "/wt", Bound: true},
+		{Project: "pop", CursorKey: "pop\x00two", RawStatus: tasks.StatusDone, ID: "two", DefPath: "/tasks", RuntimePath: "/wt", Bound: true},
 	}
-	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Rows: rows})
+	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Containers: rows})
 	m.width = 120
 	m.height = 24
 
@@ -140,7 +140,7 @@ func TestDashboardPinnedActionMenuHandoffQuits(t *testing.T) {
 	row.ProjectPath = repo
 	rt.Fake.Inside = true
 
-	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 	m.width = 120
 	m.height = 24
 
@@ -171,8 +171,8 @@ func TestDashboardPinnedActionMenuHandoffQuits(t *testing.T) {
 }
 
 func TestDashboardPinnedActionMenuEscapeCloses(t *testing.T) {
-	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
-		{Project: "pop", CursorKey: "pop\x00set", SetRef: SetRef{SetID: "set", RuntimePath: "/wt"}},
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{
+		{Project: "pop", CursorKey: "pop\x00set", ID: "set", RuntimePath: "/wt"},
 	}})
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'A', Text: "A"})
 	got := updated.(QueueDashboard)
@@ -210,12 +210,12 @@ func TestDashboardPinnedActionMenuHelp(t *testing.T) {
 }
 
 func TestDashboardPinnedActionMenuFooterHint(t *testing.T) {
-	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{
-		{Project: "pop", CursorKey: "pop\x00set", SetRef: SetRef{SetID: "set", RuntimePath: "/wt"}},
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{
+		{Project: "pop", CursorKey: "pop\x00set", ID: "set", RuntimePath: "/wt"},
 	}})
 	m.width = 120
 	m.height = 20
-	m.menu = newDashboardMenu(testKinds(), m.snap.Rows[0], true)
+	m.menu = newDashboardMenu(testKinds(), m.snap.Containers[0], true)
 	view := m.View().Content
 	if !strings.Contains(view, "J/K row") {
 		t.Fatalf("pinned menu footer missing J/K row hint:\n%s", view)

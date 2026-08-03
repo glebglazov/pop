@@ -52,8 +52,8 @@ func (k *countingKind) ModelSkips() ([]work.ModelSkip, error)        { return k.
 func TestActionMenuIsBuiltOnOpenFromTheKind(t *testing.T) {
 	kind := &countingKind{}
 	d := &Deps{Kinds: func(*config.Config) []work.Kind { return []work.Kind{kind} }}
-	row := DashboardRow{Project: "pop", CursorKey: "pop\x00set", Kind: ref.KindTaskSet, ID: "set", SetRef: SetRef{SetID: "set"}}
-	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{row}})
+	row := DashboardRow{Project: "pop", CursorKey: "pop\x00set", Kind: ref.KindTaskSet, ID: "set"}
+	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{row}})
 	m.width, m.height = 120, 24
 	m.View()
 	if kind.asked != 0 {
@@ -85,8 +85,8 @@ func TestActionMenuIsBuiltOnOpenFromTheKind(t *testing.T) {
 // shared: copy-name and shell come back on the same key from every kind, while
 // everything else in a menu is that kind's own.
 func TestSharedVerbsKeepOneKeyOnEveryKind(t *testing.T) {
-	set := DashboardRow{Project: "pop", SetRef: SetRef{SetID: "2026-07-01-a", RawStatus: tasks.StatusReady, RuntimePath: "/repo/wt"}}
-	wfMap := DashboardRow{Project: "pop", Kind: ref.KindMap, SetRef: SetRef{SetID: "2026-07-02-chart"}, MapOpen: 1, MapFrontier: 1}
+	set := DashboardRow{Project: "pop", ID: "2026-07-01-a", RawStatus: tasks.StatusReady, RuntimePath: "/repo/wt"}
+	wfMap := DashboardRow{Project: "pop", Kind: ref.KindMap, ID: "2026-07-02-chart", MapOpen: 1, MapFrontier: 1}
 
 	keyOf := func(row DashboardRow, verb work.Verb) string {
 		for _, item := range dashboardMenuItems(testKinds(), row) {
@@ -123,9 +123,9 @@ func TestSharedVerbsKeepOneKeyOnEveryKind(t *testing.T) {
 func TestModalTaskSetVerbsDispatchByVerbID(t *testing.T) {
 	row := DashboardRow{
 		Project: "pop", CursorKey: "pop\x00set",
-		SetRef: SetRef{SetID: "set", RawStatus: tasks.StatusReady, Bound: true, DefPath: "/repo/tasks"},
+		ID: "set", RawStatus: tasks.StatusReady, Bound: true, DefPath: "/repo/tasks",
 	}
-	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m := newQueueDashboard(&Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{row}})
 	m.width, m.height = 120, 24
 
 	cases := []struct {

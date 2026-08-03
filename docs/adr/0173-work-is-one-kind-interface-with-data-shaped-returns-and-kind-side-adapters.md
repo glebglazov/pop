@@ -133,6 +133,19 @@ Map-only affordances were spent on that generality: the ticket table's
 frontier/dim colouring and the flat Enter-to-grill shortcut, both now reached
 through the item menu the kind fills.
 
+*Amended when the row model was deleted.* `work.Row` and `SetRef` are gone
+outright, one slice after the dashboard moved onto `Container`: a row is the
+container, so the alias had nothing left to name, and `SetRef`'s coordinates —
+definition and state paths, repo key and common dir, the project checkout — are
+container fields every kind fills, because a container of any kind belongs to a
+repository group and the Queue write verbs now take the container itself. The
+duplicate identity cells the merge would have created (`SetID` beside `ID`,
+`ProjectName` beside `Project`) were collapsed rather than carried, and
+`Snapshot.Rows` went with them: `Containers` is the one list. What survives on
+the container is the Task-set cell block, kept because page A's columns are the
+Task-set columns and a Map fills them too; it dies when a page takes its columns
+from its primary kind.
+
 A conformance test in `work` drives the real adapters through every method of the
 interface, so a fourth kind earns its coverage by being named in one table rather
 than by growing a suite. Because every kind imports `work`, that test lives in an

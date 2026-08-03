@@ -37,11 +37,11 @@ func LaunchWayfinderSession(d *Deps, cfg *config.Config, row DashboardRow, ticke
 	}
 	storageDir := dashboardRowStorageDir(row)
 	if storageDir == "" {
-		return DashboardDrainResult{}, fmt.Errorf("no storage dir for map %q", row.SetID)
+		return DashboardDrainResult{}, fmt.Errorf("no storage dir for map %q", row.ID)
 	}
 	base := strings.TrimSpace(row.ProjectPath)
 	if base == "" {
-		return DashboardDrainResult{}, fmt.Errorf("no project path for map %q", row.SetID)
+		return DashboardDrainResult{}, fmt.Errorf("no project path for map %q", row.ID)
 	}
 	wd := &wayfinder.Deps{
 		FS:    d.Tasks.FS,
@@ -55,14 +55,14 @@ func LaunchWayfinderSession(d *Deps, cfg *config.Config, row DashboardRow, ticke
 	}
 	var wfMap *wayfinder.Map
 	for i := range maps {
-		if maps[i].ID == row.SetID {
+		if maps[i].ID == row.ID {
 			cp := maps[i]
 			wfMap = &cp
 			break
 		}
 	}
 	if wfMap == nil {
-		return DashboardDrainResult{}, fmt.Errorf("map %q not found", row.SetID)
+		return DashboardDrainResult{}, fmt.Errorf("map %q not found", row.ID)
 	}
 	ticket, err := wayfinder.TargetTicket(*wfMap, ticketID)
 	if err != nil {

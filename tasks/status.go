@@ -9,7 +9,7 @@ import (
 )
 
 // TaskSetStatus is a derived task status for one Task-set row. It is an alias of
-// work.SetStatus so the transitional Work row model can carry the field without
+// work.SetStatus so a Work container can carry the field without
 // `work` importing this package — the Work seam's import direction is one-way,
 // kinds comply and `work` imports no kind. The vocabulary itself stays here: the
 // constants below are the Task-set kind's own, and no other kind reads them.

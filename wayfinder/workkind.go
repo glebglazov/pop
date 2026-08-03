@@ -266,17 +266,13 @@ func containerFor(g repogroup.Group, m Map) work.Container {
 		BrokenReason:   m.BrokenReason,
 		Items:          itemsFor(m),
 		DetailSections: sectionsFor(m),
-		SetRef: work.SetRef{
-			SetID:         m.ID,
-			DefPath:       g.DefPath,
-			StatePath:     g.StatePath,
-			RepoKey:       g.RepoKey,
-			RepoCommonDir: g.RepoCommonDir,
-			ProjectPath:   g.CheckoutPath(),
-			ProjectName:   g.ProjectName,
-		},
-		MapOpen:     counts.Open,
-		MapFrontier: frontier,
+		DefPath:        g.DefPath,
+		StatePath:      g.StatePath,
+		RepoKey:        g.RepoKey,
+		RepoCommonDir:  g.RepoCommonDir,
+		ProjectPath:    g.CheckoutPath(),
+		MapOpen:        counts.Open,
+		MapFrontier:    frontier,
 	}
 }
 

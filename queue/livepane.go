@@ -190,7 +190,7 @@ var rowActivityCluster = []rowActivityClusterItem{
 // coloured by the cached live-pane state using the same rules as the action menu.
 func dashboardActivityCluster(row DashboardRow, live livePaneCache, styled bool) string {
 	if mapRow(row) {
-		state := live.wayfinderState(row.SetID)
+		state := live.wayfinderState(row.ID)
 		if styled {
 			return styleHandoffKey(dashboardMapWayfinderKeyPlain, state)
 		}
@@ -198,7 +198,7 @@ func dashboardActivityCluster(row DashboardRow, live livePaneCache, styled bool)
 	}
 	var b strings.Builder
 	for _, item := range rowActivityCluster {
-		state := live.state(item.tag, row.SetID)
+		state := live.state(item.tag, row.ID)
 		if styled {
 			b.WriteString(styleHandoffKey(item.key, state))
 		} else {
@@ -216,17 +216,17 @@ func menuItemLiveState(item dashboardMenuItem, row DashboardRow, live livePaneCa
 	}
 	switch item.verb {
 	case setkind.VerbDrain:
-		return live.state(tmuxmod.TagSet, row.SetID)
+		return live.state(tmuxmod.TagSet, row.ID)
 	case setkind.VerbVerify:
-		return live.state(tmuxmod.TagVerify, row.SetID)
+		return live.state(tmuxmod.TagVerify, row.ID)
 	case setkind.VerbFold:
-		return live.state(tmuxmod.TagFold, row.SetID)
+		return live.state(tmuxmod.TagFold, row.ID)
 	case setkind.VerbAssist:
-		return live.state(tmuxmod.TagAssist, row.SetID)
+		return live.state(tmuxmod.TagAssist, row.ID)
 	case wayfinder.VerbWork:
 		// The Map's frontier verb reads the same window liveness its activity-cluster
 		// key does, so the menu and the row agree about whether a session is running.
-		return live.wayfinderState(row.SetID)
+		return live.wayfinderState(row.ID)
 	default:
 		return livePaneNone
 	}

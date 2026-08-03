@@ -14,7 +14,7 @@ import (
 )
 
 func TestDashboardActionMenuStatusAndAssistKeys(t *testing.T) {
-	row := DashboardRow{SetRef: SetRef{SetID: "demo", RawStatus: tasks.StatusReady, Bound: true}}
+	row := DashboardRow{ID: "demo", RawStatus: tasks.StatusReady, Bound: true}
 	keys := make(map[string]string)
 	for _, item := range dashboardMenuItems(testKinds(), row) {
 		keys[item.key] = item.label
@@ -29,7 +29,7 @@ func TestDashboardActionMenuStatusAndAssistKeys(t *testing.T) {
 		t.Fatal("top-level archive shortcut x missing")
 	}
 
-	mapKeys := dashboardMenuItems(testKinds(), DashboardRow{Kind: ref.KindMap, SetRef: SetRef{SetID: "map-1"}})
+	mapKeys := dashboardMenuItems(testKinds(), DashboardRow{Kind: ref.KindMap, ID: "map-1"})
 	for _, item := range mapKeys {
 		if item.key == "s" || item.key == "S" {
 			t.Fatalf("map row should not offer status or assist: %v", mapKeys)
@@ -49,8 +49,8 @@ func TestDashboardStatusSubmenuItems(t *testing.T) {
 }
 
 func TestDashboardStatusSubmenuEscNavigation(t *testing.T) {
-	row := DashboardRow{SetRef: SetRef{SetID: "demo"}}
-	m := newQueueDashboard(nil, nil, DashboardSnapshot{Rows: []DashboardRow{row}})
+	row := DashboardRow{ID: "demo"}
+	m := newQueueDashboard(nil, nil, DashboardSnapshot{Containers: []DashboardRow{row}})
 	m.menu = newDashboardMenu(testKinds(), row, false)
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
@@ -78,10 +78,10 @@ func TestDashboardStatusSubmenuEscNavigation(t *testing.T) {
 func TestDashboardStatusMsgReloadsOnError(t *testing.T) {
 	td := queueDataDeps(t)
 	row := DashboardRow{
-		SetRef:    SetRef{SetID: "demo"},
+		ID:        "demo",
 		CursorKey: "pop\x00demo",
 	}
-	m := newQueueDashboard(&Deps{Tasks: td}, &config.Config{}, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m := newQueueDashboard(&Deps{Tasks: td}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{row}})
 
 	updated, cmd := m.Update(dashboardStatusMsg{setID: "demo", verb: "complete", err: errors.New("refused")})
 	got := updated.(QueueDashboard)
@@ -131,7 +131,7 @@ func TestDashboardStatusSubmenuDispatchInProcess(t *testing.T) {
 	})
 	d, cfg, row, _ := dashboardLaunchFixture(t, repo, setID)
 	row.ProjectPath = repo
-	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 	m.menu = newDashboardMenu(testKinds(), row, false)
 	m.menu.status = newDashboardStatusMenu(row)
 
@@ -188,7 +188,7 @@ func TestDashboardStatusArchiveInProcess(t *testing.T) {
 		},
 		Tasks: queueDataDeps(t),
 	}
-	row := DashboardRow{SetRef: SetRef{SetID: "demo", DefPath: "/repo/tasks"}}
+	row := DashboardRow{ID: "demo", DefPath: "/repo/tasks"}
 	if err := applyDashboardStatusVerb(d, row, "archive"); err != nil {
 		t.Fatalf("archive: %v", err)
 	}

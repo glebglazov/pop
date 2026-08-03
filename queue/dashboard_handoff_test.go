@@ -22,7 +22,7 @@ func TestDashboardHandoffAssistSpawnsFocusesAndQuits(t *testing.T) {
 	row.ProjectPath = repo
 	rt.Fake.Inside = true
 
-	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
 	_, cmd := got.Update(tea.KeyPressMsg{Code: 'S', Text: "S"})
@@ -70,7 +70,7 @@ func TestDashboardHandoffAssistReusesWithoutResend(t *testing.T) {
 	seedTaggedPane(rt, "%5", tmuxmod.TagAssist, setID)
 	rt.Fake.Inside = true
 
-	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
 	_, cmd := got.Update(tea.KeyPressMsg{Code: 'S', Text: "S"})
@@ -104,7 +104,7 @@ func TestDashboardHandoffAssistOutsideTmuxStays(t *testing.T) {
 	row.ProjectPath = repo
 	// Fake.Inside defaults false — outside tmux.
 
-	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 	m.width, m.height = 120, 40
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
@@ -159,7 +159,7 @@ func TestDashboardHandoffVerifySpawnsFocusesAndQuits(t *testing.T) {
 	row.RawStatus = tasks.StatusNeedsVerify
 	rt.Fake.Inside = true
 
-	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
 	_, cmd := got.Update(tea.KeyPressMsg{Code: 'V', Text: "V"})
@@ -202,7 +202,7 @@ func TestDashboardHandoffVerifyReusesWithoutResend(t *testing.T) {
 	seedTaggedPane(rt, "%9", tmuxmod.TagVerify, setID)
 	rt.Fake.Inside = true
 
-	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
 	_, cmd := got.Update(tea.KeyPressMsg{Code: 'V', Text: "V"})
@@ -243,7 +243,7 @@ func TestDashboardHandoffDrainSpawnsFocusesAndQuits(t *testing.T) {
 	})
 	rt.Fake.Inside = true
 
-	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
 	_, cmd := got.Update(tea.KeyPressMsg{Code: 'I', Text: "I"})
@@ -295,7 +295,7 @@ func TestDashboardHandoffDrainReusesWithoutResend(t *testing.T) {
 	seedTaggedPane(rt, "%4", tmuxmod.TagSet, setID)
 	rt.Fake.Inside = true
 
-	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
 	_, cmd := got.Update(tea.KeyPressMsg{Code: 'I', Text: "I"})
@@ -334,7 +334,7 @@ func TestDashboardHandoffDrainOutsideTmuxStays(t *testing.T) {
 		setScopedKey(repoKey, setID): {RuntimePath: bound, Branch: "handoff-drain-out", Project: "pop", Provisioned: false},
 	})
 
-	m := newQueueDashboard(d, cfg, DashboardSnapshot{Rows: []DashboardRow{row}})
+	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 	m.width, m.height = 120, 40
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)

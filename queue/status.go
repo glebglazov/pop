@@ -197,7 +197,7 @@ func renderStatusTable(out io.Writer, kinds workKinds, rows []DashboardRow) {
 func statusRowValues(kinds workKinds, row DashboardRow) []string {
 	return []string{
 		row.Project,
-		row.SetID,
+		row.ID,
 		dashboardStatusCellText(kinds, row),
 		work.WorktreeLabel(row.DestKind, row.Worktree),
 		dashboardActivityCluster(row, livePaneCache{}, false),

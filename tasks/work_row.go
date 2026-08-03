@@ -34,7 +34,7 @@ const (
 // sortTier returns a row's membership tier (see the tier* constants). The order
 // of these checks encodes the precedence: a row that is both orphaned and
 // auto-drain qualifies for the auto-drain tier first.
-func sortTier(r work.Row) int {
+func sortTier(r work.Container) int {
 	switch {
 	case r.LiveDrain:
 		return tierRunning
@@ -61,7 +61,7 @@ const (
 // statusBand returns a row's status band, keyed on its displayed label so the
 // READY→IN PROGRESS refinement (WorkRowStatusLabel) lands in the IN PROGRESS band
 // rather than the READY band.
-func statusBand(r work.Row) int {
+func statusBand(r work.Container) int {
 	switch WorkRowStatusLabel(r) {
 	case "IN PROGRESS":
 		return bandInProgress
@@ -103,14 +103,14 @@ func statusOrder(s TaskSetStatus) int {
 // source of the total order both `pop work dashboard` and `pop queue status`
 // read. Rows float by membership tier (live-drain → auto-drain → orphaned), then
 // fall through to the status scheme: the IN PROGRESS and READY bands read
-// cross-project (Project asc, then SetID desc), and every remaining status reads
-// per-project (Project asc, then the explicit status order, then SetID desc).
+// cross-project (Project asc, then ID desc), and every remaining status reads
+// per-project (Project asc, then the explicit status order, then ID desc).
 // Bands key on the displayed label, so a started or live-drained READY set sorts
 // as IN PROGRESS even though its raw status is READY. The membership tiers float
 // above the whole status scheme — an auto-drain BLOCKED set outranks a plain
 // IN PROGRESS set — and fall through to the same band/status/SetID tiebreak
 // within a tier.
-func WorkRowLess(a, b work.Row) bool {
+func WorkRowLess(a, b work.Container) bool {
 	if ta, tb := sortTier(a), sortTier(b); ta != tb {
 		return ta < tb
 	}
@@ -122,19 +122,19 @@ func WorkRowLess(a, b work.Row) bool {
 		return a.Project < b.Project
 	}
 	// The explicit status order breaks ties only within bandRest; the IN PROGRESS
-	// and READY bands are single-status, so they go straight to the SetID tiebreak
+	// and READY bands are single-status, so they go straight to the ID tiebreak
 	// after project name.
 	if ba == bandRest {
 		if ra, rb := statusOrder(a.RawStatus), statusOrder(b.RawStatus); ra != rb {
 			return ra < rb
 		}
 	}
-	return a.SetID > b.SetID
+	return a.ID > b.ID
 }
 
 // SortWorkRows applies the shared Queue surface order (WorkRowLess) to a set of
 // Work rows.
-func SortWorkRows(rows []work.Row) {
+func SortWorkRows(rows []work.Container) {
 	sort.SliceStable(rows, func(i, j int) bool {
 		return WorkRowLess(rows[i], rows[j])
 	})
@@ -147,7 +147,7 @@ func SortWorkRows(rows []work.Row) {
 // drain coinciding with a non-READY status leaves that label untouched (needs-you
 // outranks liveness). It reads RawStatus/Started/LiveDrain so the label is
 // recomposed on each render pass rather than baked in at row-build time.
-func WorkRowStatusLabel(row work.Row) string {
+func WorkRowStatusLabel(row work.Container) string {
 	if row.RawStatus == StatusReady && (row.Started || row.LiveDrain) {
 		return "IN PROGRESS"
 	}
@@ -161,7 +161,7 @@ func WorkRowStatusLabel(row work.Row) string {
 // fixed order. Column width-fitting measures this plain form, so no ANSI leaks
 // into column math; the queue-side styled wrapper layers styling for the rendered
 // output.
-func WorkRowStatusCell(row work.Row) string {
+func WorkRowStatusCell(row work.Container) string {
 	return work.StatusCellText(WorkRowStatusSegments(row))
 }
 
@@ -170,7 +170,7 @@ func WorkRowStatusCell(row work.Row) string {
 // and the verified-at badge by verdict age while leaving every other suffix
 // plain. Plain and styled therefore differ only by ANSI: both walk this one
 // sequence.
-func WorkRowStatusSegments(row work.Row) []work.StatusSegment {
+func WorkRowStatusSegments(row work.Container) []work.StatusSegment {
 	segments := []work.StatusSegment{{Text: WorkRowStatusLabel(row), Tone: work.ToneLabel}}
 	badge := DeriveVerifiedAtBadge(Row{
 		Status:            row.RawStatus,
