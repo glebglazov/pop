@@ -2,11 +2,13 @@ package wayfinder
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -251,6 +253,163 @@ func TestScanMapsFoldsDirectoryForTicketlessMap(t *testing.T) {
 	// Nothing to mint from, so no manifest is invented for a Map still being charted.
 	if _, err := os.Stat(MapManifestPath(filepath.Join(storageDir, "maps", "2026-07-01-map"))); !os.IsNotExist(err) {
 		t.Fatalf("manifest minted for a ticketless map: %v", err)
+	}
+}
+
+// TestScanMapsFoldRegistersTheMap covers the follow-up defect: a Map charted
+// before registration existed scans fine but had no work_containers row, so
+// pop map archive/next/claim refused it forever. The fold is the only place
+// left that ever sees such a Map, so it is the fold's job to register it.
+func TestScanMapsFoldRegistersTheMap(t *testing.T) {
+	d, _ := registryFixture(t, map[string]string{
+		"wayfinder/2026-07-01-map/map.md":             "Status: active\n\n## Destination\nShip it\n",
+		"wayfinder/2026-07-01-map/issues/01-first.md": "Type: research\nStatus: open\n\n## Question\nA\n",
+	})
+
+	maps, err := ScanMaps(d, "")
+	if err != nil {
+		t.Fatalf("ScanMaps: %v", err)
+	}
+	if len(maps) != 1 || maps[0].Broken {
+		t.Fatalf("maps = %+v, want one well-formed map", maps)
+	}
+
+	s, err := openWorkRegistry(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, registered, err := s.FindWorkContainer(MapRef("2026-07-01-map"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !registered {
+		t.Fatal("folded map has no work_containers row")
+	}
+
+	// The workaround this slice exists to remove: `pop map register` should not
+	// be needed before archive, next or claim work on a folded Map.
+	if _, err := NextTicket(d, "", "2026-07-01-map"); err != nil {
+		t.Fatalf("NextTicket after fold: %v", err)
+	}
+	if _, err := ArchiveMap(d, "", "2026-07-01-map"); err != nil {
+		t.Fatalf("ArchiveMap after fold: %v", err)
+	}
+}
+
+// TestScanMapsFoldRegistersBeforeWritingManifest pins the ordering the task
+// calls out: registering after the mint would leave a crash between the two
+// writes unrecoverable — a Map that never folds again (no manifest to trigger
+// a second attempt) and never registers (the row was never written). Making
+// registration idempotent and first means the same crash instead leaves a
+// registered Map the next scan folds cleanly.
+func TestScanMapsFoldRegistersBeforeWritingManifest(t *testing.T) {
+	storageDir := t.TempDir()
+	files := map[string]string{
+		"maps/2026-07-01-map/map.md":             "Status: active\n\n## Destination\nShip it\n",
+		"maps/2026-07-01-map/issues/01-first.md": "Type: research\nStatus: open\n\n## Question\nA\n",
+	}
+	for rel, content := range files {
+		path := filepath.Join(storageDir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir for %s: %v", rel, err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+
+	dataHome := filepath.Join(storageDir, "xdg")
+	workingFS := realFSWithDataHome(dataHome)
+	td := &tasks.Deps{FS: workingFS}
+	t.Cleanup(func() { _ = td.CloseStore() })
+
+	// The manifest write goes through a same-directory temp file and rename
+	// (WriteAtomicWith); failing every write to such a temp file fails the mint
+	// without touching anything else, including the registry, which never reads
+	// d.FS's content — only Tasks.FS's Getenv, still wired to the working fs.
+	failingFS := realFSWithDataHome(dataHome)
+	if mfs, ok := failingFS.(*deps.MockFileSystem); ok {
+		real := mfs.WriteFileFunc
+		mfs.WriteFileFunc = func(path string, data []byte, perm os.FileMode) error {
+			if strings.Contains(filepath.Base(path), ".task-tmp-") {
+				return fmt.Errorf("simulated write failure")
+			}
+			return real(path, data, perm)
+		}
+	} else {
+		t.Fatal("realFSWithDataHome did not return *deps.MockFileSystem")
+	}
+
+	// A failed mint surfaces as a BROKEN row, not a scan-level error: ScanMapsInStorage
+	// never fails the whole scan over one bad folder.
+	first := &Deps{FS: failingFS, Tasks: td}
+	maps, err := ScanMapsInStorage(first, storageDir)
+	if err != nil {
+		t.Fatalf("ScanMapsInStorage: %v", err)
+	}
+	if len(maps) != 1 || !maps[0].Broken {
+		t.Fatalf("maps = %+v, want the simulated manifest-write failure to surface as BROKEN", maps)
+	}
+
+	mapDir := filepath.Join(storageDir, "maps", "2026-07-01-map")
+	if _, err := os.Stat(MapManifestPath(mapDir)); !os.IsNotExist(err) {
+		t.Fatalf("manifest present despite the failed write: %v", err)
+	}
+
+	s, err := openWorkRegistry(&Deps{FS: workingFS, Tasks: td})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, registered, err := s.FindWorkContainer(MapRef("2026-07-01-map"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !registered {
+		t.Fatal("registration did not survive the failed mint that followed it")
+	}
+
+	second := &Deps{FS: workingFS, Tasks: td}
+	maps, err = ScanMapsInStorage(second, storageDir)
+	if err != nil {
+		t.Fatalf("second ScanMapsInStorage: %v", err)
+	}
+	if len(maps) != 1 || maps[0].Broken || len(maps[0].Tickets) != 1 {
+		t.Fatalf("second scan = %+v, want a clean fold this time", maps)
+	}
+	if _, err := os.Stat(MapManifestPath(mapDir)); err != nil {
+		t.Fatalf("manifest still missing after the clean scan: %v", err)
+	}
+}
+
+// TestScanMapsWithManifestNeverOpensRegistry pins the read-purity criterion: a
+// Map that already carries a manifest never triggers the fold, so a scan over
+// it opens no store. dataHome points at a real, read-only-for-mkdir path (no
+// XDG dir exists and none is creatable under it), so if the fold's registry
+// open ever fired here it would fail loudly rather than being silently skipped.
+func TestScanMapsWithManifestNeverOpensRegistry(t *testing.T) {
+	dataHome := "/nonexistent-readonly-marker/xdg"
+	commonDir := "/repo/.git"
+	t.Setenv("XDG_DATA_HOME", dataHome)
+	id, err := tasks.IdentityFromCommonDir(&tasks.Deps{FS: deps.NewRealFileSystem()}, commonDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mapDir := filepath.Join(id.StorageDir, "maps", "2026-07-01-map")
+	files := map[string]string{
+		filepath.Join(mapDir, "map.md"):                "Status: active\n\n## Destination\nShip it\n",
+		filepath.Join(mapDir, "issues", "01-first.md"): "## Question\nA\n",
+		filepath.Join(mapDir, MapManifestFileName): `{"tickets":[` +
+			`{"id":"01","file":"01-first.md","title":"First","type":"research","status":"open","blocked_by":[]}` +
+			`],"spawned_sets":[]}`,
+	}
+	d := wayfinderTestDeps(t, dataHome, commonDir, files)
+
+	maps, err := ScanMaps(d, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(maps) != 1 || maps[0].Broken || len(maps[0].Tickets) != 1 {
+		t.Fatalf("maps = %+v, want the one manifest-backed map", maps)
 	}
 }
 

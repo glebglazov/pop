@@ -51,7 +51,10 @@ func TestMapCommandTree(t *testing.T) {
 
 func TestMapShowRendersMap(t *testing.T) {
 	t.Parallel()
-	dataHome := "/data"
+	// A real, writable data dir: the legacy header Map below has no manifest, so
+	// showing it folds one, and that fold registers the Map in pop.db — a
+	// real-disk-only store that a fake "/data" home cannot open.
+	dataHome := filepath.Join(t.TempDir(), "xdg")
 	commonDir := "/repo/.git"
 	setCmdLayerDeps(t, newTestCmdDeps(t, "/mock/cwd", dataHome, ""))
 	fs := cmdTestFS(dataHome, "")

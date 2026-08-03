@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/glebglazov/pop/tasks"
 )
@@ -56,7 +57,13 @@ func dirExists(d *Deps, path string) bool {
 // A ticket sitting at claimed drops to open — claims live in pop.db keyed by owner,
 // and the file format names none, so a synthesized claim would be a lock nothing
 // can release by identity.
-func foldMapManifest(d *Deps, dir string) ([]Ticket, error) {
+//
+// A Map whose manifest pop had to synthesize predates registration too, so the
+// mint also writes the Map's Work registry row — before the manifest, not after.
+// RegisterWorkContainer is idempotent, so a crash between the two leaves a
+// registered Map the next scan folds cleanly; the other order would leave a Map
+// that never folds again and never registers.
+func foldMapManifest(d *Deps, id, dir string) ([]Ticket, error) {
 	issuesDir := filepath.Join(dir, issuesDirName)
 	names, err := ticketMarkdownNames(d, issuesDir)
 	if err != nil {
@@ -121,6 +128,14 @@ func foldMapManifest(d *Deps, dir string) ([]Ticket, error) {
 		return parsed, nil
 	}
 	manifest.Valid = true
+
+	s, err := openWorkRegistry(d)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.RegisterWorkContainer(MapRef(id), time.Now().UTC()); err != nil {
+		return nil, err
+	}
 
 	if err := WriteMapManifest(d, manifest); err != nil {
 		return nil, fmt.Errorf("write %s: %w", MapManifestFileName, err)

@@ -36,6 +36,11 @@ func mkdirDrainStoreDir(t *testing.T, td *tasks.Deps) {
 
 func dashboardTestDeps(t *testing.T, rows []tasks.Row, locks map[string]*tasks.RuntimeLockStatus) *drain.Deps {
 	t.Helper()
+	// The Work registry (pop.db) is real-disk-only and opens off this Getenv, so a
+	// Map fold's registration write (this package's Map fixtures are pre-manifest
+	// header maps) lands in a disposable per-test directory rather than failing
+	// against the unwritable default mock home.
+	dataHome := t.TempDir()
 	fs := &deps.MockFileSystem{
 		EvalSymlinksFunc: func(path string) (string, error) { return path, nil },
 		ReadFileFunc: func(path string) ([]byte, error) {
@@ -43,6 +48,12 @@ func dashboardTestDeps(t *testing.T, rows []tasks.Row, locks map[string]*tasks.R
 		},
 		StatFunc: func(path string) (os.FileInfo, error) {
 			return nil, os.ErrNotExist
+		},
+		GetenvFunc: func(key string) string {
+			if key == "XDG_DATA_HOME" {
+				return dataHome
+			}
+			return ""
 		},
 	}
 	git := &deps.MockGit{

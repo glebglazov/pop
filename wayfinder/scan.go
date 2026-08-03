@@ -87,7 +87,7 @@ func loadMap(d *Deps, id, dir string) (Map, error) {
 		return Map{}, err
 	}
 
-	tickets, spawned, err := loadMapContents(d, dir)
+	tickets, spawned, err := loadMapContents(d, id, dir)
 	if err != nil {
 		return Map{}, err
 	}
@@ -109,7 +109,7 @@ func loadMap(d *Deps, id, dir string) (Map, error) {
 // and the fold is what makes it exist for Maps charted before the manifest. A
 // folded Map has spawned nothing yet, because the field the ids live in is the
 // one the fold is minting.
-func loadMapContents(d *Deps, dir string) ([]Ticket, []string, error) {
+func loadMapContents(d *Deps, id, dir string) ([]Ticket, []string, error) {
 	manifest, err := LoadMapManifest(d, dir)
 	if err == nil {
 		if !manifest.Valid {
@@ -120,7 +120,7 @@ func loadMapContents(d *Deps, dir string) ([]Ticket, []string, error) {
 	if !os.IsNotExist(err) {
 		return nil, nil, err
 	}
-	tickets, err := foldMapManifest(d, dir)
+	tickets, err := foldMapManifest(d, id, dir)
 	return tickets, nil, err
 }
 

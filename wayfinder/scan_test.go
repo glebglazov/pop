@@ -92,20 +92,12 @@ func TestScanMapsEmptyDirectory(t *testing.T) {
 }
 
 func TestScanMapsParsesMapAndTickets(t *testing.T) {
-	dataHome := "/data"
-	commonDir := "/repo/.git"
-	t.Setenv("XDG_DATA_HOME", dataHome)
-	id, err := tasks.IdentityFromCommonDir(&tasks.Deps{FS: deps.NewRealFileSystem()}, commonDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	mapDir := filepath.Join(id.StorageDir, "maps", "2026-07-19-demo")
 	files := map[string]string{
-		filepath.Join(mapDir, "map.md"): "Status: active\n\n## Destination\nShip it",
-		filepath.Join(mapDir, "issues", "01-first.md"):  "Type: research\nStatus: resolved\n",
-		filepath.Join(mapDir, "issues", "02-second.md"): "Type: task\nBlocked by: 01\n",
+		"maps/2026-07-19-demo/map.md":              "Status: active\n\n## Destination\nShip it",
+		"maps/2026-07-19-demo/issues/01-first.md":  "Type: research\nStatus: resolved\n",
+		"maps/2026-07-19-demo/issues/02-second.md": "Type: task\nBlocked by: 01\n",
 	}
-	d := wayfinderTestDeps(t, dataHome, commonDir, files)
+	d, _ := registryFixture(t, files)
 
 	maps, err := ScanMaps(d, "")
 	if err != nil {
