@@ -146,7 +146,7 @@ func (d *Deps) WorkKinds(cfg *config.Config) []work.Kind {
 	}
 	groups := d.RepoGroups(cfg)
 	return []work.Kind{
-		setkind.New(d.SetKindDeps(cfg, groups)),
+		d.TaskSetKind(cfg, groups),
 		wayfinder.NewMapKind(d.MapKindDeps(cfg, groups)),
 	}
 }
@@ -165,8 +165,6 @@ func (d *Deps) SetKindDeps(cfg *config.Config, groups func() ([]repogroup.Group,
 		Groups:         groups,
 		Refresh:        d.Refresh,
 		LiveDrains:     d.LiveDrains,
-		Reconcile:      d.Reconcile,
-		ReconcileOut:   d.ReconcileOut,
 		Now:            d.Now,
 		ProbeDirective: d.ProbeDirective,
 	}

@@ -12,7 +12,6 @@ package setkind
 
 import (
 	"fmt"
-	"io"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -60,13 +59,6 @@ type Deps struct {
 	// The load reads it once per pass into its snapshot. Defaults to
 	// tasks.LiveRunningDrains.
 	LiveDrains func() ([]tasks.RunningDrain, error)
-	// Reconcile runs the opportunistic crash-detection pass before a read,
-	// transitioning dead-PID running Drains to crashed. Defaults to
-	// tasks.ReconcileDrains.
-	Reconcile func() (int, error)
-	// ReconcileOut receives a message when the opportunistic reconcile pass fails.
-	// Defaults to os.Stderr.
-	ReconcileOut io.Writer
 	// Now returns the current time. Defaults to time.Now.
 	Now func() time.Time
 	// ProbeDirective reports a config/registration-class error message when a
@@ -109,14 +101,12 @@ func New(d *Deps) *Kind {
 func (k *Kind) ID() work.KindID { return ref.KindTaskSet }
 
 // Load reads every registered task set worth showing, as Work containers. It is
-// read-only except for the same opportunistic reconcile `pop queue status` runs,
+// a pure read — the crash-detection pass it used to run before reading is the
+// Work supervisor's explicit phase now, so rendering a task set writes nothing —
 // and it forks no git (identity, integration target and branch all derive from
 // each repo's repo.json marker plus config, ADR-0060).
 func (k *Kind) Load() ([]work.Container, error) {
 	d := k.d
-	// Reconcile-then-read: heal dead-PID running Drains into crashed before the
-	// volatile overlay below reads locks from them (ADR-0055).
-	d.reconcile()
 	cfg := d.config()
 	groups, err := d.groups(cfg)
 	if err != nil {

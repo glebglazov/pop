@@ -4,6 +4,8 @@ status: accepted
 
 # Drain execution lifecycle is a durable store; Drain is the first-class entity
 
+> ⚠️ **One clause below is AMENDED BY [ADR-0176](0176-the-work-supervisor-drives-a-second-seam-advancer.md).** Reconciliation is no longer run by *every layer-2 reader*: it is the Work supervisor's explicit phase before it reads advance candidates, so `pop queue status` and the Work dashboard write nothing. The pass itself, its content and its opportunism are unchanged; only who runs it moved.
+
 Pop's execution and integration state — currently scattered across drain-outcome
 records keyed by runtime path, three flavours of file lock, a mergeability
 record, a binding store, an append-only queue journal, and per-repo `state.json`

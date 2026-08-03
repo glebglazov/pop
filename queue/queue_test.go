@@ -1035,7 +1035,7 @@ func TestPrepareWorktreeDrainReusesBindingWithoutWorktreeAdd(t *testing.T) {
 	dec.scan.RuntimePath = "/repo"
 	dec.scan.ProjectPath = "/repo"
 
-	got := prepareWorktreeDrain(d, &bytes.Buffer{}, dec)
+	got, _ := prepareWorktreeDrain(d, dec)
 
 	if worktreeAddCalls != 0 {
 		t.Fatalf("git worktree add calls = %d, want 0 when binding is valid", worktreeAddCalls)
@@ -1082,15 +1082,14 @@ func TestPrepareWorktreeDrainRefusesInvalidBinding(t *testing.T) {
 	dec := actionableDecision()
 	dec.scan.RuntimePath = "/repo"
 	dec.scan.ProjectPath = "/repo"
-	var out bytes.Buffer
 
-	got := prepareWorktreeDrain(d, &out, dec)
+	got, refusal := prepareWorktreeDrain(d, dec)
 
 	if got.Actionable() {
 		t.Fatalf("invalid binding must refuse spawn, got actionable %+v", got)
 	}
-	if !strings.Contains(out.String(), "pop tasks unbind-worktree") {
-		t.Fatalf("output must mention unbind: %q", out.String())
+	if !strings.Contains(refusal, "pop tasks unbind-worktree") {
+		t.Fatalf("refusal must mention unbind: %q", refusal)
 	}
 	if got.scan.RuntimePath != "/repo" {
 		t.Fatalf("must not fall back in-place, got runtime %q", got.scan.RuntimePath)

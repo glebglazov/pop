@@ -58,7 +58,6 @@ func conformanceCases() []conformanceCase {
 					Config:     f.cfg,
 					Groups:     f.groups,
 					LiveDrains: func() ([]tasks.RunningDrain, error) { return nil, nil },
-					Reconcile:  func() (int, error) { return 0, nil },
 					Refresh: func(string) (*tasks.RefreshResult, error) {
 						return &tasks.RefreshResult{
 							Rows: []tasks.Row{{ID: "2026-07-01-demo", Status: tasks.StatusReady}},
@@ -225,7 +224,6 @@ func TestSnapshotOrdersByKindPrecedenceThenKindLess(t *testing.T) {
 		Config:     f.cfg,
 		Groups:     f.groups,
 		LiveDrains: func() ([]tasks.RunningDrain, error) { return nil, nil },
-		Reconcile:  func() (int, error) { return 0, nil },
 		Refresh: func(string) (*tasks.RefreshResult, error) {
 			return &tasks.RefreshResult{Rows: []tasks.Row{
 				{ID: "2026-07-01-demo", Status: tasks.StatusReady},

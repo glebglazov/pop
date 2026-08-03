@@ -12,6 +12,7 @@ import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
+	"github.com/glebglazov/pop/work"
 )
 
 // Run starts the foreground supervisor loop: it acquires the single-instance
@@ -53,9 +54,14 @@ func Run(d *Deps, interval time.Duration, out io.Writer, sigCh <-chan os.Signal)
 	}
 }
 
-// tick performs one scan-and-spawn pass across all registered projects. Errors
-// resolving or spawning a single project are reported and skipped; one bad
-// project never halts the supervisor.
+// tick performs one reconcile-candidate-dispatch pass over every advanceable
+// Work kind. Errors resolving or spawning a single project are reported and
+// skipped; one bad project never halts the supervisor.
+//
+// The three phases are the seam's: the kinds are reconciled, then asked what they
+// would advance (a pure read), then driven one candidate at a time. Refusals ride
+// the same dispatch call as advances, because a kind that must persist why it
+// refused writes on exactly that path.
 func tick(d *Deps, out io.Writer, runOut *runOutputState) {
 	cfg, err := d.LoadConfig(config.DefaultConfigPath())
 	if err != nil {
@@ -63,10 +69,35 @@ func tick(d *Deps, out io.Writer, runOut *runOutputState) {
 		return
 	}
 
-	decisions, err := Scan(d, cfg)
-	if err != nil {
-		runOut.emitScanError(out, fmt.Sprintf("queue: scan: %v", err))
-		return
+	// One kind list per tick: an adapter carries this pass's candidates, so a fresh
+	// list is what keeps that state tick-scoped.
+	advancers := work.Advancers(d.WorkKinds(cfg))
+
+	// Reconcile phase — the explicit pass that replaced the opportunistic reconcile
+	// every read used to run (ADR-0055). A failure is already reported by the kind
+	// and never fails the tick: the candidates below then read the pre-reconcile
+	// snapshot, which is no worse than before the pass existed.
+	for _, adv := range advancers {
+		_ = adv.Reconcile()
+	}
+	// Routines are not behind the seam yet, so their reconcile stays an explicit
+	// call beside the loop rather than riding it.
+	d.reconcileRoutineRuns()
+
+	// Candidate phase — pure reads, so nothing here can leave state behind if the
+	// tick returns early.
+	type kindPass struct {
+		adv        work.Advancer
+		candidates []work.Candidate
+	}
+	passes := make([]kindPass, 0, len(advancers))
+	for _, adv := range advancers {
+		candidates, err := adv.Candidates()
+		if err != nil {
+			runOut.emitScanError(out, err.Error())
+			return
+		}
+		passes = append(passes, kindPass{adv: adv, candidates: candidates})
 	}
 	runOut.lastScan = ""
 
@@ -77,40 +108,22 @@ func tick(d *Deps, out io.Writer, runOut *runOutputState) {
 		fmt.Fprintf(out, "queue: status: %v\n", err)
 	}
 
-	// Per-checkout dispatch (ADR-0070/0072): each drain routes to its own
-	// checkout, so several of a repo's Ready sets dispatch in one tick. Two drains
-	// routed to the *same* checkout in one tick would race two implements into it,
-	// so the first wins and the rest defer to a later tick — distinct bound and
-	// freshly provisioned managed worktrees each dispatch.
-	spawnedCheckouts := map[string]bool{}
+	// Dispatch phase — serial, in kind precedence order, because it mutates the
+	// shared checkout ledger.
 	var spawned []PickedUpSet
-	for _, dec := range decisions {
-		switch {
-		case dec.Err != nil:
-		case dec.Actionable():
-			repoLabel := repoLabelFromScan(dec.scan)
-			dec = prepareWorktreeDrain(d, out, dec)
-			if !dec.Actionable() {
-				continue // routing refused (invalid binding, provision failure); already reported.
-			}
-			if path := dec.scan.RuntimePath; path != "" {
-				if spawnedCheckouts[path] {
-					fmt.Fprintf(out, "queue: %s: skip %s; another set already dispatched to %s this tick\n", repoLabel, dec.TaskSetID, path)
-					continue
-				}
-				spawnedCheckouts[path] = true
-			}
-			spawn, err := SpawnWithResult(d, dec)
+	for _, pass := range passes {
+		for _, candidate := range pass.candidates {
+			outcome, err := pass.adv.Advance(candidate)
 			if err != nil {
-				fmt.Fprintf(out, "queue: %s: spawn %s: %v\n", repoLabel, dec.TaskSetID, err)
+				fmt.Fprintln(out, err)
 				continue
 			}
-			if err := recordDrainPane(d, dec, spawn.PaneID, "supervisor"); err != nil {
-				fmt.Fprintf(out, "queue: %s: record drain pane %s: %v\n", repoLabel, dec.TaskSetID, err)
+			if outcome.Message != "" {
+				fmt.Fprintln(out, outcome.Message)
 			}
-			label := statusProjectLabel(repoLabel, dec.ProjectConfigError)
-			fmt.Fprintf(out, "queue: %s: spawned drain for %s\n", label, dec.TaskSetID)
-			spawned = append(spawned, PickedUpSet{Project: dec.Project, RepoLabel: repoLabel, SetID: dec.TaskSetID, ProjectConfigError: dec.ProjectConfigError})
+		}
+		if reporter, ok := pass.adv.(spawnedSetsReporter); ok {
+			spawned = append(spawned, reporter.SpawnedSets()...)
 		}
 	}
 
@@ -134,9 +147,13 @@ func tick(d *Deps, out io.Writer, runOut *runOutputState) {
 // Trunk worktree and binds it — the one place routing provisions. Unbound sets
 // with no intent never reach here: the queue-drainable check faults them before
 // dispatch, so routing has no in-place fallback to invent a checkout.
-func prepareWorktreeDrain(d *Deps, out io.Writer, dec Decision) Decision {
+//
+// It provisions, so it belongs to the dispatch phase and not the candidate read.
+// A refusal comes back as a non-actionable Decision plus the line explaining it,
+// for the caller to report — routing never prints on its own.
+func prepareWorktreeDrain(d *Deps, dec Decision) (Decision, string) {
 	if !dec.Actionable() {
-		return dec
+		return dec, ""
 	}
 	var cfg *config.Config
 	if d.LoadConfig != nil {
@@ -152,21 +169,19 @@ func prepareWorktreeDrain(d *Deps, out io.Writer, dec Decision) Decision {
 		Trigger:         binding.TriggerQueueSpawn,
 	})
 	if err != nil {
-		if errors.Is(err, binding.ErrBoundWorktreeInvalid) {
-			fmt.Fprintf(out, "queue: %s: bound worktree for %s is invalid (%v); repair git state or run `pop tasks unbind-worktree`\n", dec.Project, dec.TaskSetID, err)
-			dec.TaskSetID = ""
-			dec.Reason = "bound worktree invalid"
-			return dec
-		}
-		fmt.Fprintf(out, "queue: %s: route drain for %s: %v\n", dec.Project, dec.TaskSetID, err)
+		setID := dec.TaskSetID
 		dec.TaskSetID = ""
+		if errors.Is(err, binding.ErrBoundWorktreeInvalid) {
+			dec.Reason = "bound worktree invalid"
+			return dec, fmt.Sprintf("queue: %s: bound worktree for %s is invalid (%v); repair git state or run `pop tasks unbind-worktree`", dec.Project, setID, err)
+		}
 		dec.Reason = "route"
-		return dec
+		return dec, fmt.Sprintf("queue: %s: route drain for %s: %v", dec.Project, setID, err)
 	}
 	dec.scan.ProjectPath = route.RuntimePath
 	dec.scan.RuntimePath = route.RuntimePath
 	dec.pinRuntimePath = true
-	return dec
+	return dec, ""
 }
 
 func validateBoundWorktree(d *Deps, projectPath string, b WorktreeBinding) error {

@@ -189,15 +189,16 @@ func (d *Deps) liveDrains() ([]tasks.RunningDrain, error) {
 	return tasks.LiveRunningDrains(d.Tasks)
 }
 
-// reconcile runs the opportunistic crash-detection pass before a read pass,
-// healing dead-PID running Drains into crashed (ADR-0055). It defaults to
-// tasks.ReconcileDrains. The result count is advisory; reconciliation never
-// blocks a read, so a reconcile error never fails the pass — the read still
+// reconcile runs the crash-detection pass, healing dead-PID running Drains into
+// crashed (ADR-0055). It defaults to tasks.ReconcileDrains. It is the Task-set
+// advancer's reconcile phase and no longer rides any read: the result count is
+// advisory, and a failure never blocks the pass that follows — that pass then
 // reflects the pre-reconcile truth, which is no worse than before this pass
-// existed. The error is not silently discarded, though: it is logged to
+// existed. The error is neither silently discarded nor fatal: it is logged to
 // ReconcileOut (default os.Stderr) so a human watching queue output notices a
-// transient store failure instead of unknowingly acting on stale liveness.
-func (d *Deps) reconcile() {
+// transient store failure instead of unknowingly acting on stale liveness, and
+// returned so the seam's caller can report it too.
+func (d *Deps) reconcile() error {
 	var err error
 	if d.Reconcile != nil {
 		_, err = d.Reconcile()
@@ -205,13 +206,14 @@ func (d *Deps) reconcile() {
 		_, err = tasks.ReconcileDrains(d.Tasks)
 	}
 	if err == nil {
-		return
+		return nil
 	}
 	out := d.ReconcileOut
 	if out == nil {
 		out = os.Stderr
 	}
 	fmt.Fprintf(out, "queue: reconcile: %v (continuing with pre-reconcile snapshot)\n", err)
+	return err
 }
 
 func (d *Deps) reconcileRoutineRuns() {
@@ -375,6 +377,11 @@ type Decision struct {
 	Err        error
 	scan       projectScan
 	lockStatus *tasks.RuntimeLockStatus
+	// boundCheckout is the checkout this set's Worktree binding names, blank when
+	// it holds none. It is the occupancy the advance would take — an unbound set
+	// provisions a fresh worktree and so occupies nothing yet — and is carried
+	// rather than re-derived because only the decision phase holds the bindings.
+	boundCheckout string
 	// pinRuntimePath is set once a drain has been routed to a definite checkout
 	// (prepareWorktreeDrain → RouteDrainCheckout): the spawn then pins the inner
 	// implement to that checkout with --task-runtime-path so a reused pane can
@@ -413,13 +420,12 @@ func (d *Deps) now() time.Time {
 // expands into. Drain routing runs unconditionally (ADR-0070/0072): a repo may
 // return one busy Decision per live worktree drain plus one actionable Decision
 // per queue-drainable Ready set not already running, each routed to its own
-// checkout. It performs no tmux side effects.
+// checkout.
+//
+// It is a pure read: no tmux side effects, and no crash-detection pass either —
+// reconciliation is the supervisor's explicit phase, so `pop queue status` and
+// the dashboard no longer mutate state to render.
 func Scan(d *Deps, cfg *config.Config) ([]Decision, error) {
-	// Reconcile-then-read: heal dead-PID running Drains into crashed before the
-	// lock/outcome reads below project from them (ADR-0055). This covers
-	// `pop queue status` (BuildStatus → Scan) and each daemon tick (tick → Scan).
-	d.reconcile()
-	d.reconcileRoutineRuns()
 	projects, err := tasks.ListPickerProjectsWith(d.Project, cfg)
 	if err != nil {
 		return nil, err
@@ -831,6 +837,7 @@ func decideProjectDispatches(d *Deps, scan projectScan, delays []time.Duration, 
 		}
 		action := dec
 		action.TaskSetID = id
+		action.boundCheckout = binding.RuntimeForSet(bindings, repoKey, id)
 		decisions = append(decisions, action)
 	}
 	if len(decisions) == 0 {

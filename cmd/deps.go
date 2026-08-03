@@ -16,7 +16,6 @@ import (
 	"github.com/glebglazov/pop/queue"
 	"github.com/glebglazov/pop/routine"
 	"github.com/glebglazov/pop/tasks"
-	"github.com/glebglazov/pop/tasks/setkind"
 	"github.com/glebglazov/pop/wayfinder"
 	"github.com/glebglazov/pop/work"
 )
@@ -199,7 +198,10 @@ func workKinds(qd *queue.Deps) func(cfg *config.Config) []work.Kind {
 		// One repository-group resolution, shared by every kind of this build.
 		groups := qd.RepoGroups(cfg)
 		return []work.Kind{
-			setkind.New(qd.SetKindDeps(cfg, groups)),
+			// The Task-set entry is built through queue because it wears the advance
+			// seam as well as the read one: the supervisor drives whatever list it is
+			// handed, so the list must not hand it a task-set kind that cannot advance.
+			qd.TaskSetKind(cfg, groups),
 			wayfinder.NewMapKind(qd.MapKindDeps(cfg, groups)),
 		}
 	}

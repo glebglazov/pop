@@ -2,8 +2,6 @@ package setkind
 
 import (
 	"errors"
-	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -52,28 +50,6 @@ func (d *Deps) liveDrains() ([]tasks.RunningDrain, error) {
 		return d.LiveDrains()
 	}
 	return tasks.LiveRunningDrains(d.Tasks)
-}
-
-// reconcile runs the opportunistic crash-detection pass before a read pass,
-// healing dead-PID running Drains into crashed (ADR-0055). Reconciliation never
-// blocks a read: an error is logged to ReconcileOut (default os.Stderr) instead
-// of failing the load, so a human notices a transient store failure while the
-// read still reflects the pre-reconcile truth.
-func (d *Deps) reconcile() {
-	var err error
-	if d.Reconcile != nil {
-		_, err = d.Reconcile()
-	} else {
-		_, err = tasks.ReconcileDrains(d.Tasks)
-	}
-	if err == nil {
-		return
-	}
-	out := d.ReconcileOut
-	if out == nil {
-		out = os.Stderr
-	}
-	fmt.Fprintf(out, "work: reconcile: %v (continuing with pre-reconcile snapshot)\n", err)
 }
 
 // probeDirective resolves the ProbeDirective seam, defaulting to a read-only
