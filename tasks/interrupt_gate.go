@@ -1,7 +1,6 @@
 package tasks
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -71,7 +70,7 @@ func handleInteractiveInterruptGate(env gateEnv, m *Manifest, interrupted *Task,
 		in = os.Stdin
 	}
 	if reader == nil {
-		reader = bufio.NewReader(in)
+		reader = newPromptReader(in)
 	}
 
 	prompt := BuildInterruptAssistancePrompt(d, taskSetID, m, *interrupted, runtimePath)
@@ -118,7 +117,7 @@ func handleInteractiveInterruptGate(env gateEnv, m *Manifest, interrupted *Task,
 	}
 }
 
-func promptInterruptGateAction(out io.Writer, reader *bufio.Reader, sigCh <-chan os.Signal, taskSetID string, interrupted *Task, invocation *AgentAssistanceInvocation) (interruptGateAction, error) {
+func promptInterruptGateAction(out io.Writer, reader *promptReader, sigCh <-chan os.Signal, taskSetID string, interrupted *Task, invocation *AgentAssistanceInvocation) (interruptGateAction, error) {
 	display := outputFor(out)
 	fmt.Fprintln(display)
 	display.line(ansiYellow, "Interrupted: %s/%s was stopped mid-run.", taskSetID, interrupted.ID)
@@ -147,7 +146,7 @@ func promptInterruptGateAction(out io.Writer, reader *bufio.Reader, sigCh <-chan
 	// force-quits rather than waiting for a line that may never come.
 	lineCh := make(chan interruptReadResult, 1)
 	go func() {
-		answer, err := readPromptLine(reader, "0")
+		answer, err := readPromptLine(reader, out, "0")
 		lineCh <- interruptReadResult{answer: answer, err: err}
 	}()
 

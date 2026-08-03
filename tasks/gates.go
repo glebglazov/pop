@@ -1,7 +1,6 @@
 package tasks
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -24,7 +23,7 @@ type gateEnv struct {
 	d              *Deps
 	out            io.Writer
 	in             io.Reader
-	reader         *bufio.Reader
+	reader         *promptReader
 	yes            bool
 	agentPreset    string
 	agentCmd       string
@@ -35,22 +34,19 @@ type gateEnv struct {
 	taskSetID      string
 }
 
-// ensurePromptReader returns a single bufio.Reader reused across every gate
+// ensurePromptReader returns a single prompt reader reused across every gate
 // prompt in one run. Reusing one reader matters: a fresh bufio.Reader buffers
 // ahead on its first read, so making a new one per gate would swallow the input
 // queued for later gates. Returns nil — and the caller falls back to static
 // advice — when prompting is impossible (--yes or a non-interactive input).
-func ensurePromptReader(existing *bufio.Reader, in io.Reader, yes bool) *bufio.Reader {
+func ensurePromptReader(existing *promptReader, in io.Reader, yes bool) *promptReader {
 	if existing != nil {
 		return existing
 	}
 	if yes || !canPrompt(in) {
 		return nil
 	}
-	if in == nil {
-		in = os.Stdin
-	}
-	return bufio.NewReader(in)
+	return newPromptReader(in)
 }
 
 type hitlGateAction int
@@ -83,7 +79,7 @@ func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverif
 		in = os.Stdin
 	}
 	if reader == nil {
-		reader = bufio.NewReader(in)
+		reader = newPromptReader(in)
 	}
 
 	prompt := BuildHITLAssistancePrompt(d, taskSetID, m, *hitl, runtimePath)
@@ -295,7 +291,7 @@ func gateReverifyEnabled(rv *reverifyGateContext, m *Manifest) bool {
 	return rv != nil && verifyEnabled(rv.cfg) && m != nil && !m.VerifyOptedOut()
 }
 
-func promptHITLGateAction(out io.Writer, d *Deps, runtimePath string, reader *bufio.Reader, taskSetID string, m *Manifest, hitl *Task, body string, invocation *AgentAssistanceInvocation, showReverify bool) (hitlGateAction, error) {
+func promptHITLGateAction(out io.Writer, d *Deps, runtimePath string, reader *promptReader, taskSetID string, m *Manifest, hitl *Task, body string, invocation *AgentAssistanceInvocation, showReverify bool) (hitlGateAction, error) {
 	display := outputFor(out)
 	fmt.Fprintln(display)
 	renderBlockedWaiterCount(display, d, runtimePath)
@@ -318,7 +314,7 @@ func promptHITLGateAction(out io.Writer, d *Deps, runtimePath string, reader *bu
 	fmt.Fprintln(display, "  0. Exit")
 	fmt.Fprintf(display, "%s", display.styled(ansiCyan, "Choose [1]: "))
 
-	answer, err := readPromptLine(reader, "0")
+	answer, err := readPromptLine(reader, out, "0")
 	if err != nil {
 		return hitlGateExit, err
 	}
@@ -350,9 +346,10 @@ func promptHITLGateAction(out io.Writer, d *Deps, runtimePath string, reader *bu
 // readPromptLine reads one menu selection. eofDefault is returned when the
 // input source closes with nothing pending, so a closed pipe resolves to a
 // definite choice (each gate passes the number of its Exit option) instead of
-// looping forever on empty reads.
-func readPromptLine(reader *bufio.Reader, eofDefault string) (string, error) {
-	answer, err := reader.ReadString('\n')
+// looping forever on empty reads. out is where the reader reports a terminal it
+// had to wrestle the foreground away from, or could not.
+func readPromptLine(reader *promptReader, out io.Writer, eofDefault string) (string, error) {
+	answer, err := reader.ReadLine(promptWarner(out))
 	if err != nil && err != io.EOF {
 		return "", exitErr(ExitOperational, "read gate selection: %v", err)
 	}
@@ -398,7 +395,7 @@ func handleInteractiveFailedGate(env gateEnv, m *Manifest, failed *Task) (bool, 
 		in = os.Stdin
 	}
 	if reader == nil {
-		reader = bufio.NewReader(in)
+		reader = newPromptReader(in)
 	}
 
 	prompt := BuildFailedAssistancePrompt(d, taskSetID, m, *failed, runtimePath)
@@ -468,7 +465,7 @@ func handleInteractiveFailedGate(env gateEnv, m *Manifest, failed *Task) (bool, 
 	}
 }
 
-func promptFailedGateAction(out io.Writer, d *Deps, runtimePath string, reader *bufio.Reader, taskSetID string, failed *Task, body string, invocation *AgentAssistanceInvocation) (failedGateAction, error) {
+func promptFailedGateAction(out io.Writer, d *Deps, runtimePath string, reader *promptReader, taskSetID string, failed *Task, body string, invocation *AgentAssistanceInvocation) (failedGateAction, error) {
 	display := outputFor(out)
 	fmt.Fprintln(display)
 	renderBlockedWaiterCount(display, d, runtimePath)
@@ -487,7 +484,7 @@ func promptFailedGateAction(out io.Writer, d *Deps, runtimePath string, reader *
 	fmt.Fprintln(display, "  0. Exit")
 	fmt.Fprintf(display, "%s", display.styled(ansiCyan, "Choose [1]: "))
 
-	answer, err := readPromptLine(reader, "0")
+	answer, err := readPromptLine(reader, out, "0")
 	if err != nil {
 		return failedGateExit, err
 	}
@@ -546,7 +543,7 @@ func handleInteractiveVerifyFailedGate(env gateEnv, repo string, m *Manifest, wo
 		in = os.Stdin
 	}
 	if reader == nil {
-		reader = bufio.NewReader(in)
+		reader = newPromptReader(in)
 	}
 
 	prompt := BuildVerifyFailedAssistancePrompt(d, taskSetID, m, workSHA, findings, runtimePath)
@@ -615,7 +612,7 @@ func handleInteractiveVerifyFailedGate(env gateEnv, repo string, m *Manifest, wo
 	}
 }
 
-func promptVerifyFailedGateAction(out io.Writer, d *Deps, runtimePath string, reader *bufio.Reader, taskSetID string, m *Manifest, findings string, invocation *AgentAssistanceInvocation) (verifyFailedGateAction, error) {
+func promptVerifyFailedGateAction(out io.Writer, d *Deps, runtimePath string, reader *promptReader, taskSetID string, m *Manifest, findings string, invocation *AgentAssistanceInvocation) (verifyFailedGateAction, error) {
 	display := outputFor(out)
 	fmt.Fprintln(display)
 	renderBlockedWaiterCount(display, d, runtimePath)
@@ -635,7 +632,7 @@ func promptVerifyFailedGateAction(out io.Writer, d *Deps, runtimePath string, re
 	fmt.Fprintln(display, "  0. Exit")
 	fmt.Fprintf(display, "%s", display.styled(ansiCyan, "Choose [0]: "))
 
-	answer, err := readPromptLine(reader, "0")
+	answer, err := readPromptLine(reader, out, "0")
 	if err != nil {
 		return verifyFailedGateExit, err
 	}
@@ -671,10 +668,10 @@ func renderVerifyGateFindings(display *output, findings string) {
 // readGateNote prompts for a single-line note at a gate. It returns "" on an
 // empty answer or a closed input, so Accept / Remediate remain usable without a
 // note (both trim and tolerate an empty rationale).
-func readGateNote(out io.Writer, reader *bufio.Reader, label string) (string, error) {
+func readGateNote(out io.Writer, reader *promptReader, label string) (string, error) {
 	display := outputFor(out)
 	fmt.Fprintf(display, "%s", display.styled(ansiCyan, label))
-	answer, err := readPromptLine(reader, "")
+	answer, err := readPromptLine(reader, out, "")
 	if err != nil {
 		return "", err
 	}

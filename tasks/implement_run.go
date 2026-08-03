@@ -1,7 +1,6 @@
 package tasks
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -63,7 +62,7 @@ type implementRun struct {
 	// sharedPromptReader is the single gate prompt reader reused across every gate
 	// in one run (see ensurePromptReader). Seeded here when the run starts at a
 	// gate; the loop continues to (re)seed it.
-	sharedPromptReader *bufio.Reader
+	sharedPromptReader *promptReader
 	result             *RunTaskSetResult
 
 	agentProbeMemo *agentAvailabilityProbeMemo

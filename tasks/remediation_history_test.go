@@ -1,7 +1,6 @@
 package tasks
 
 import (
-	"bufio"
 	"os"
 	"path/filepath"
 	"strings"
@@ -311,7 +310,7 @@ func TestHITLGatePrintsRemediationReviewBlock(t *testing.T) {
 	writeRemediationProgress(t, m.Dir, "2026-06-10T09:00:00Z [02-remediation.md] DONE\nraised the retry cap to three")
 
 	var out strings.Builder
-	_, err := promptHITLGateAction(&out, d, "/rt", bufio.NewReader(strings.NewReader("0\n")), "demo", m, &m.Tasks[2], "## Acceptance criteria\n\n- [ ] ok\n", nil, false)
+	_, err := promptHITLGateAction(&out, d, "/rt", newPromptReader(strings.NewReader("0\n")), "demo", m, &m.Tasks[2], "## Acceptance criteria\n\n- [ ] ok\n", nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -346,7 +345,7 @@ func TestVerifyFailedGatePrintsRemediationReviewBlock(t *testing.T) {
 	writeRemediationProgress(t, m.Dir, "2026-06-10T09:00:00Z [02-remediation.md] DONE\nnormalized the retry policy")
 
 	var out strings.Builder
-	_, err := promptVerifyFailedGateAction(&out, d, "/rt", bufio.NewReader(strings.NewReader("0\n")), "demo", m, "still flaky on CI", nil)
+	_, err := promptVerifyFailedGateAction(&out, d, "/rt", newPromptReader(strings.NewReader("0\n")), "demo", m, "still flaky on CI", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

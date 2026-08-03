@@ -1,7 +1,6 @@
 package routine
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/glebglazov/pop/internal/frontmatter"
+	"github.com/glebglazov/pop/internal/tty"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -142,7 +142,7 @@ func refineProjectRoutine(d *Deps, id, agentOverride string) error {
 	if in == nil {
 		in = os.Stdin
 	}
-	reader := bufio.NewReader(in)
+	reader := tty.NewReader(in)
 
 	key := checkoutKey(pr.Dir)
 	storeID := projectStoreID(key, name)
@@ -155,7 +155,7 @@ func refineProjectRoutine(d *Deps, id, agentOverride string) error {
 		}
 		renderProjectRefineMenu(out, name, lastRunSummary(d, storeID))
 		fmt.Fprintf(out, "Choose [1]: ")
-		answer, err := readRoutineGateLine(reader, "0")
+		answer, err := readRoutineGateLine(reader, out, "0")
 		if err != nil {
 			return err
 		}

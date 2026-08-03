@@ -1,7 +1,6 @@
 package tasks
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -80,7 +79,7 @@ func HandleFoldConflict(d *Deps, cfg *config.Config, ctx FoldConflictContext, op
 		return fmt.Errorf("fold refused: %w", err)
 	}
 
-	reader := bufio.NewReader(in)
+	reader := newPromptReader(in)
 	for {
 		badge := foldConflictVerifiedBadge(d, cfg, ctx.SetID, ctx.RuntimePath)
 		action, err := promptFoldConflictAction(out, reader, ctx.SetID, badge, invocation)
@@ -147,7 +146,7 @@ const (
 	foldConflictExit
 )
 
-func promptFoldConflictAction(out io.Writer, reader *bufio.Reader, setID string, badge VerifiedAtBadge, invocation *AgentAssistanceInvocation) (foldConflictAction, error) {
+func promptFoldConflictAction(out io.Writer, reader *promptReader, setID string, badge VerifiedAtBadge, invocation *AgentAssistanceInvocation) (foldConflictAction, error) {
 	display := outputFor(out)
 	fmt.Fprintln(display)
 	display.line(ansiCyan, "Fold conflict: %s needs its branch rebased onto trunk.", setID)
@@ -167,7 +166,7 @@ func promptFoldConflictAction(out io.Writer, reader *bufio.Reader, setID string,
 	fmt.Fprintln(display, "  0. Exit")
 	fmt.Fprintf(display, "%s", display.styled(ansiCyan, "Choose [1]: "))
 
-	answer, err := readPromptLine(reader, "0")
+	answer, err := readPromptLine(reader, out, "0")
 	if err != nil {
 		return foldConflictExit, err
 	}
@@ -290,12 +289,12 @@ func foldResumeRebase(d *Deps, setPath string, out io.Writer) error {
 	return nil
 }
 
-func offerFoldPostResolveVerify(d *Deps, cfg *config.Config, ctx FoldConflictContext, opts FoldConflictAssistanceOptions, out io.Writer, reader *bufio.Reader) error {
+func offerFoldPostResolveVerify(d *Deps, cfg *config.Config, ctx FoldConflictContext, opts FoldConflictAssistanceOptions, out io.Writer, reader *promptReader) error {
 	display := outputFor(out)
 	fmt.Fprintln(display)
 	fmt.Fprintln(display, "Rebase resolved. Verify the set before fast-forwarding trunk?")
 	fmt.Fprintf(display, "%s", display.styled(ansiCyan, "Verify set? [y/N]: "))
-	answer, err := readPromptLine(reader, "n")
+	answer, err := readPromptLine(reader, out, "n")
 	if err != nil {
 		return err
 	}

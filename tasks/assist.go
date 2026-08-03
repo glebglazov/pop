@@ -1,7 +1,6 @@
 package tasks
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -118,7 +117,7 @@ func AssistTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 		}
 	}()
 
-	reader := bufio.NewReader(in)
+	reader := newPromptReader(in)
 	env := gateEnv{
 		d:              d,
 		out:            out,
@@ -320,7 +319,7 @@ func handleGenericAssistMenu(env gateEnv, m *Manifest, status TaskSetStatus, fin
 		in = os.Stdin
 	}
 	if reader == nil {
-		reader = bufio.NewReader(in)
+		reader = newPromptReader(in)
 	}
 
 	prompt := BuildAssistPrompt(d, taskSetID, m, status, runtimePath, findings)
@@ -374,7 +373,7 @@ func handleGenericAssistMenu(env gateEnv, m *Manifest, status TaskSetStatus, fin
 	}
 }
 
-func promptGenericAssistAction(out io.Writer, reader *bufio.Reader, taskSetID string, status TaskSetStatus, invocation *AgentAssistanceInvocation, offerFold bool) (genericAssistAction, error) {
+func promptGenericAssistAction(out io.Writer, reader *promptReader, taskSetID string, status TaskSetStatus, invocation *AgentAssistanceInvocation, offerFold bool) (genericAssistAction, error) {
 	display := outputFor(out)
 	fmt.Fprintln(display)
 	display.line(ansiCyan, "Assist: %s is %s.", taskSetID, status)
@@ -392,7 +391,7 @@ func promptGenericAssistAction(out io.Writer, reader *bufio.Reader, taskSetID st
 	fmt.Fprintln(display, "  0. Exit")
 	fmt.Fprintf(display, "%s", display.styled(ansiCyan, "Choose [1]: "))
 
-	answer, err := readPromptLine(reader, "0")
+	answer, err := readPromptLine(reader, out, "0")
 	if err != nil {
 		return genericAssistExit, err
 	}

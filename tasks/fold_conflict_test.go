@@ -1,7 +1,6 @@
 package tasks
 
 import (
-	"bufio"
 	"bytes"
 	"os"
 	"path/filepath"
@@ -78,7 +77,7 @@ func TestHandleFoldConflictRefusesWithoutTTY(t *testing.T) {
 
 func TestPromptFoldConflictActionMenuOptions(t *testing.T) {
 	var out bytes.Buffer
-	reader := bufio.NewReader(strings.NewReader("0\n"))
+	reader := newPromptReader(strings.NewReader("0\n"))
 	action, err := promptFoldConflictAction(&out, reader, "demo", VerifiedAtBadge{
 		State: VerifiedAtAtHead,
 		SHA:   "abc123def456",
@@ -107,7 +106,7 @@ func TestPromptFoldConflictActionMenuOptions(t *testing.T) {
 
 func TestPromptFoldConflictActionDefaultsToAgent(t *testing.T) {
 	var out bytes.Buffer
-	reader := bufio.NewReader(strings.NewReader("\n"))
+	reader := newPromptReader(strings.NewReader("\n"))
 	action, err := promptFoldConflictAction(&out, reader, "demo", VerifiedAtBadge{}, nil)
 	if err != nil {
 		t.Fatalf("prompt: %v", err)
@@ -128,7 +127,7 @@ func TestPromptFoldConflictActionSelectsResumeRetryVerify(t *testing.T) {
 	}
 	for _, tc := range cases {
 		var out bytes.Buffer
-		reader := bufio.NewReader(strings.NewReader(tc.in))
+		reader := newPromptReader(strings.NewReader(tc.in))
 		got, err := promptFoldConflictAction(&out, reader, "demo", VerifiedAtBadge{}, nil)
 		if err != nil {
 			t.Fatalf("input %q: %v", tc.in, err)
@@ -142,7 +141,7 @@ func TestPromptFoldConflictActionSelectsResumeRetryVerify(t *testing.T) {
 func TestOfferFoldPostResolveVerifyDeclineProceeds(t *testing.T) {
 	d := newTestDeps(t)
 	var out bytes.Buffer
-	reader := bufio.NewReader(strings.NewReader("\n"))
+	reader := newPromptReader(strings.NewReader("\n"))
 	err := offerFoldPostResolveVerify(d, nil, FoldConflictContext{SetID: "demo"}, FoldConflictAssistanceOptions{}, &out, reader)
 	if err != nil {
 		t.Fatalf("decline verify: %v", err)
@@ -155,7 +154,7 @@ func TestOfferFoldPostResolveVerifyDeclineProceeds(t *testing.T) {
 func TestOfferFoldPostResolveVerifyFailStops(t *testing.T) {
 	d := newTestDeps(t)
 	var out bytes.Buffer
-	reader := bufio.NewReader(strings.NewReader("y\n"))
+	reader := newPromptReader(strings.NewReader("y\n"))
 	err := offerFoldPostResolveVerify(d, &config.Config{}, FoldConflictContext{
 		SetID:       "missing-set",
 		RuntimePath: t.TempDir(),

@@ -1,13 +1,13 @@
 package routine
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/glebglazov/pop/internal/tty"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -60,7 +60,7 @@ func RefineWith(d *Deps, id, agentOverride string) error {
 	if in == nil {
 		in = os.Stdin
 	}
-	reader := bufio.NewReader(in)
+	reader := tty.NewReader(in)
 
 	for {
 		r, err := loadManifest(d, id)
@@ -69,7 +69,7 @@ func RefineWith(d *Deps, id, agentOverride string) error {
 		}
 		renderRefineMenu(out, id, r, lastRunSummary(d, id))
 		fmt.Fprintf(out, "Choose [1]: ")
-		answer, err := readRoutineGateLine(reader, "0")
+		answer, err := readRoutineGateLine(reader, out, "0")
 		if err != nil {
 			return err
 		}
@@ -191,10 +191,10 @@ func viewLastReport(d *Deps, out io.Writer, storeID, runsDir string) {
 // editScheduleFromGate reads a schedule expression and validates it through the
 // schedule parser (via UpdateScheduleWith), re-prompting on a parse error. A
 // blank line cancels, leaving the schedule unchanged.
-func editScheduleFromGate(d *Deps, out io.Writer, reader *bufio.Reader, id string) {
+func editScheduleFromGate(d *Deps, out io.Writer, reader *tty.Reader, id string) {
 	for {
 		fmt.Fprintf(out, "New schedule (blank to cancel): ")
-		line, err := readRoutineGateLine(reader, "")
+		line, err := readRoutineGateLine(reader, out, "")
 		if err != nil {
 			fmt.Fprintf(out, "Could not read the schedule: %v\n", err)
 			return
@@ -216,9 +216,13 @@ func editScheduleFromGate(d *Deps, out io.Writer, reader *bufio.Reader, id strin
 
 // readRoutineGateLine reads one gate line, mirroring the tasks-package prompt
 // reader: a closed input with nothing pending resolves to eofDefault so the loop
-// terminates instead of spinning on empty reads.
-func readRoutineGateLine(reader *bufio.Reader, eofDefault string) (string, error) {
-	answer, err := reader.ReadString('\n')
+// terminates instead of spinning on empty reads. Like the tasks gates, the read
+// asserts that Pop owns the terminal foreground first — these menus re-prompt
+// after an attended authoring session, whose leftovers may hold the terminal.
+func readRoutineGateLine(reader *tty.Reader, out io.Writer, eofDefault string) (string, error) {
+	answer, err := reader.ReadLine(func(format string, args ...any) {
+		fmt.Fprintf(out, format+"\n", args...)
+	})
 	if err != nil && err != io.EOF {
 		return "", fmt.Errorf("read gate selection: %w", err)
 	}

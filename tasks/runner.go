@@ -2,14 +2,14 @@ package tasks
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
-	"os/signal"
 	"syscall"
 	"time"
 
-	"golang.org/x/sys/unix"
+	"github.com/glebglazov/pop/internal/tty"
 )
 
 // signalGracePeriod is how long a SIGTERMed agent gets to exit before the
@@ -76,17 +76,16 @@ func (RealCommandRunner) RunAttended(ctx context.Context, dir string, stdin io.R
 	// isolates the agent in its own group so Pop can signal it as a unit. So we
 	// only take over the foreground when stdin is a real terminal; otherwise we
 	// exec plainly with no job control.
-	ttyFd, isTTY := terminalFd(stdin)
+	ttyFd, isTTY := tty.TerminalFd(stdin)
 	var savedPgrp int
+	var savedPgrpErr error
 	if isTTY {
 		// Foreground:true makes the child its own process group and hands it the
 		// terminal foreground via tcsetpgrp(Ctty). Ctty must be the resolved tty
 		// fd in this process — not fd 0, which may be a different (non-tty) stream
 		// when the caller redirected stdin.
 		cmd.SysProcAttr = &syscall.SysProcAttr{Foreground: true, Ctty: ttyFd}
-		if pgrp, err := unix.IoctlGetInt(ttyFd, unix.TIOCGPGRP); err == nil {
-			savedPgrp = pgrp
-		}
+		savedPgrp, savedPgrpErr = tty.ForegroundPgrp(ttyFd)
 	}
 
 	if err := cmd.Start(); err != nil {
@@ -111,33 +110,28 @@ func (RealCommandRunner) RunAttended(ctx context.Context, dir string, stdin io.R
 	exitCode, waitErr := proc.Wait()
 
 	// The child's group owned the terminal foreground and is now gone, leaving
-	// Pop a background process: the next tty read/write (the gate re-prompt)
-	// would draw SIGTTIN/SIGTTOU and stop Pop in turn. Reclaim the foreground for
-	// Pop's saved group, ignoring SIGTTOU during the handover because tcsetpgrp
-	// from a background group raises it.
-	if isTTY && savedPgrp != 0 {
-		signal.Ignore(syscall.SIGTTOU)
-		_ = unix.IoctlSetPointerInt(ttyFd, unix.TIOCSPGRP, savedPgrp)
-		signal.Reset(syscall.SIGTTOU)
+	// Pop a background process: the next tty read (the gate re-prompt) would draw
+	// SIGTTIN and the kernel would stop Pop in turn. Hand the foreground back to
+	// the group that held it before the launch.
+	//
+	// This hand-back is a courtesy, not the guarantee the prompts rely on — a
+	// descendant the agent left behind can take the foreground again a moment
+	// later, which is why each prompt re-asserts ownership (see promptReader).
+	// What matters here is that a hand-back which could not happen is said out
+	// loud, since its consequence surfaces far from its cause.
+	if isTTY {
+		switch {
+		case savedPgrpErr != nil:
+			fmt.Fprintf(stderr, "Could not read the terminal foreground process group before launching %s (%v); the terminal was not handed back.\n", name, savedPgrpErr)
+		case savedPgrp == 0:
+			fmt.Fprintf(stderr, "The terminal reported no foreground process group before launching %s; the terminal was not handed back.\n", name)
+		default:
+			if err := tty.SetForeground(ttyFd, savedPgrp); err != nil {
+				fmt.Fprintf(stderr, "Could not hand the terminal foreground back to process group %d: %v\n", savedPgrp, err)
+			}
+		}
 	}
 	return exitCode, waitErr
-}
-
-// terminalFd reports the file descriptor of r when r is a real terminal, so an
-// attended child can be placed in that terminal's foreground process group.
-func terminalFd(r io.Reader) (int, bool) {
-	f, ok := r.(*os.File)
-	if !ok {
-		return 0, false
-	}
-	info, err := f.Stat()
-	if err != nil {
-		return 0, false
-	}
-	if info.Mode()&os.ModeCharDevice == 0 {
-		return 0, false
-	}
-	return int(f.Fd()), true
 }
 
 func (RealCommandRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
