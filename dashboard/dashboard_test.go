@@ -4777,9 +4777,9 @@ func TestDashboardMapDetailRendersSectionsAndTickets(t *testing.T) {
 // TestDashboardMapDetailTitleFallsBackToSlugWhenManifestTitleEmpty covers a
 // folded legacy Map, whose manifest tickets carry "title": "" because the
 // pre-manifest header lines never named one: the detail view's TITLE column
-// must fall back to the ticket's NN-slug display name, the same fallback
-// ticketLinkLabel already used for map.md and `pop map show`. A ticket that
-// does carry a manifest title renders it unchanged.
+// must fall back to the ticket's slug. It is the slug alone and not the NN-slug
+// display name map.md uses, because this table prints the id in its own column
+// already. A ticket that does carry a manifest title renders it unchanged.
 func TestDashboardMapDetailTitleFallsBackToSlugWhenManifestTitleEmpty(t *testing.T) {
 	storageDir := "/data/repos/repo-map-title-fallback"
 	activeMap := filepath.Join(storageDir, "maps", "2026-07-01-active")
@@ -4828,8 +4828,11 @@ func TestDashboardMapDetailTitleFallsBackToSlugWhenManifestTitleEmpty(t *testing
 			line02 = line
 		}
 	}
-	if !strings.Contains(line01, "01-frontier") {
-		t.Fatalf("empty manifest title should render the NN-slug fallback in TITLE:\n%q\nfull view:\n%s", line01, view)
+	if !strings.Contains(line01, "frontier") {
+		t.Fatalf("empty manifest title should render the slug fallback in TITLE:\n%q\nfull view:\n%s", line01, view)
+	}
+	if strings.Contains(line01, "01-frontier") {
+		t.Fatalf("slug fallback must not repeat the id already in the ID column:\n%q\nfull view:\n%s", line01, view)
 	}
 	if !strings.Contains(line02, "Custom title") {
 		t.Fatalf("manifest title should render unchanged in TITLE:\n%q\nfull view:\n%s", line02, view)

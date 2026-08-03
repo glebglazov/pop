@@ -319,6 +319,19 @@ func spawnedSetLines(manifest *MapManifest) []string {
 	return lines
 }
 
+// ticketItemTitle is the label for a surface that already prints the ticket id
+// in its own column. The link-label fallback (NN-slug) would repeat the id
+// there, so this one drops the prefix and leaves just the slug.
+func ticketItemTitle(t Ticket) string {
+	if title := strings.TrimSpace(t.Title); title != "" {
+		return title
+	}
+	if t.Slug != "" {
+		return t.Slug
+	}
+	return t.ID
+}
+
 func ticketLinkLabel(t Ticket) string {
 	if strings.TrimSpace(t.Title) != "" {
 		return strings.TrimSpace(t.Title)
