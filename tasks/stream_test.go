@@ -467,7 +467,7 @@ func installClaudeStreamAgent(t *testing.T, root string, tick bool) {
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\n")
 	b.WriteString("for arg in \"$@\"; do LAST=$arg; done\n")
-	b.WriteString("TASK=$(printf '%s' \"$LAST\" | sed -n 's|^You are implementing the task at: ||p' | head -1)\n")
+	b.WriteString("TASK=$(cat \"$(printf '%s' \"$*\" | sed -n 's|.*Read the file \\([^ ]*\\) in full:.*|\\1|p' | head -1)\" | sed -n 's|^You are implementing the task at: ||p' | head -1)\n")
 	if tick {
 		b.WriteString("if [ -n \"$TASK\" ] && [ -f \"$TASK\" ]; then\n")
 		b.WriteString("  sed -i '' 's/- \\[ \\]/- [x]/g' \"$TASK\" 2>/dev/null || sed -i 's/- \\[ \\]/- [x]/g' \"$TASK\"\n")
@@ -605,7 +605,7 @@ func TestRunTaskPlainOutputWritesNoStream(t *testing.T) {
 	}
 	script := "#!/bin/sh\n" +
 		"for arg in \"$@\"; do LAST=$arg; done\n" +
-		"TASK=$(printf '%s' \"$LAST\" | sed -n 's|^You are implementing the task at: ||p' | head -1)\n" +
+		"TASK=$(cat \"$(printf '%s' \"$*\" | sed -n 's|.*Read the file \\([^ ]*\\) in full:.*|\\1|p' | head -1)\" | sed -n 's|^You are implementing the task at: ||p' | head -1)\n" +
 		"if [ -n \"$TASK\" ] && [ -f \"$TASK\" ]; then\n" +
 		"  sed -i '' 's/- \\[ \\]/- [x]/g' \"$TASK\" 2>/dev/null || sed -i 's/- \\[ \\]/- [x]/g' \"$TASK\"\n" +
 		"fi\n" +

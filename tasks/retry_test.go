@@ -525,7 +525,7 @@ func writeRealShimAttemptAgent(t *testing.T, root string, scripts []attemptScrip
 			fmt.Fprintf(&b, "sleep %f\n", script.sleep.Seconds())
 		}
 		if script.checkTask {
-			b.WriteString("TASK=$(printf '%s' \"$1\" | sed -n 's|^You are implementing the task at: ||p' | head -1)\n")
+			b.WriteString("TASK=$(cat \"$(printf '%s' \"$*\" | sed -n 's|.*Read the file \\([^ ]*\\) in full:.*|\\1|p' | head -1)\" | sed -n 's|^You are implementing the task at: ||p' | head -1)\n")
 			b.WriteString("if [ -n \"$TASK\" ] && [ -f \"$TASK\" ]; then sed -i '' 's/- \\[ \\]/- [x]/g' \"$TASK\" 2>/dev/null || sed -i 's/- \\[ \\]/- [x]/g' \"$TASK\"; fi\n")
 		}
 		summary := script.summary
@@ -689,16 +689,6 @@ type writeOrderTracker struct {
 	last   string
 }
 
-// customAgentPrompt extracts the prompt from a custom-agent invocation captured
-// by captureAgentRunner. Custom agents are invoked as:
-//   sh -c '<agentCmd> "$@"' task-agent <prompt>
-func customAgentPrompt(args []string) string {
-	if len(args) >= 4 {
-		return args[3]
-	}
-	return ""
-}
-
 func TestRunTaskResumesInterruptedAttemptOnFirstTry(t *testing.T) {
 	env := setupExecutorFixture(t, false)
 	streamDir := taskStreamDir(env.demoDir(), "01-a.md")
@@ -721,7 +711,7 @@ func TestRunTaskResumesInterruptedAttemptOnFirstTry(t *testing.T) {
 	if len(runner.argLists) != 1 {
 		t.Fatalf("expected 1 attempt, got %d", len(runner.argLists))
 	}
-	prompt := customAgentPrompt(runner.argLists[0])
+	prompt := runner.attemptPrompt(0)
 	if !strings.Contains(prompt, lessonResume) {
 		t.Fatalf("attempt 1 prompt missing resume lesson:\n%s", prompt)
 	}
@@ -752,7 +742,7 @@ func TestRunTaskResumesQuotaPausedAttemptOnFirstTry(t *testing.T) {
 	if len(runner.argLists) != 1 {
 		t.Fatalf("expected 1 attempt, got %d", len(runner.argLists))
 	}
-	prompt := customAgentPrompt(runner.argLists[0])
+	prompt := runner.attemptPrompt(0)
 	if !strings.Contains(prompt, lessonResume) {
 		t.Fatalf("attempt 1 prompt missing resume lesson:\n%s", prompt)
 	}
@@ -776,7 +766,7 @@ func TestRunTaskFreshTaskPromptHasNoCarry(t *testing.T) {
 	if len(runner.argLists) != 1 {
 		t.Fatalf("expected 1 attempt, got %d", len(runner.argLists))
 	}
-	prompt := customAgentPrompt(runner.argLists[0])
+	prompt := runner.attemptPrompt(0)
 	if strings.Contains(prompt, "Prior attempts on THIS task") {
 		t.Fatalf("fresh task prompt should not contain prior-attempt digest:\n%s", prompt)
 	}
@@ -813,7 +803,7 @@ func TestRunTaskPromptCarriesRemediationHistory(t *testing.T) {
 	if len(runner.argLists) != 1 {
 		t.Fatalf("expected 1 attempt, got %d", len(runner.argLists))
 	}
-	prompt := customAgentPrompt(runner.argLists[0])
+	prompt := runner.attemptPrompt(0)
 	for _, want := range []string{
 		"Remediation history",
 		"not work for you to do",
@@ -855,7 +845,7 @@ func TestRunTaskRemediationAttemptCarriesPriorRemediationHistory(t *testing.T) {
 	if len(runner.argLists) != 1 {
 		t.Fatalf("expected 1 attempt, got %d", len(runner.argLists))
 	}
-	prompt := customAgentPrompt(runner.argLists[0])
+	prompt := runner.attemptPrompt(0)
 	for _, want := range []string{
 		"Remediation history",
 		"Remediation 1: first",
@@ -896,7 +886,7 @@ func TestRunTaskReopenedTaskPromptHasNoPriorDigest(t *testing.T) {
 	if len(runner.argLists) != 1 {
 		t.Fatalf("expected 1 attempt, got %d", len(runner.argLists))
 	}
-	prompt := customAgentPrompt(runner.argLists[0])
+	prompt := runner.attemptPrompt(0)
 	if strings.Contains(prompt, "Prior attempts on THIS task") {
 		t.Fatalf("reopened task prompt should not contain pre-reset digest:\n%s", prompt)
 	}

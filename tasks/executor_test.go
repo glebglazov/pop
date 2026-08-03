@@ -885,7 +885,7 @@ func writeRealShimAgent(t *testing.T, root string, cfg fakeAgentConfig) string {
 	}
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\n")
-	b.WriteString("TASK=$(printf '%s' \"$1\" | sed -n 's|^You are implementing the task at: ||p' | head -1)\n")
+	b.WriteString("TASK=$(cat \"$(printf '%s' \"$*\" | sed -n 's|.*Read the file \\([^ ]*\\) in full:.*|\\1|p' | head -1)\" | sed -n 's|^You are implementing the task at: ||p' | head -1)\n")
 	if cfg.changeFile != "" {
 		fmt.Fprintf(&b, "printf %q >> %q\n", cfg.changeData, cfg.changeFile)
 	}
@@ -1048,6 +1048,19 @@ func assertExitCode(t *testing.T, err error, code int) {
 type captureAgentRunner struct {
 	names    []string
 	argLists [][]string
+	// prompts holds each attempt's generated prompt, read at spawn time: the
+	// prompt rides in a spill file that only exists while the attempt runs.
+	prompts []string
+}
+
+// attemptPrompt returns the generated prompt one captured attempt was handed.
+// It is read at spawn time and kept here because the prompt itself lives in a
+// spill file the attempt removes when it ends (see promptFileInstruction).
+func (r *captureAgentRunner) attemptPrompt(i int) string {
+	if i < 0 || i >= len(r.prompts) {
+		return ""
+	}
+	return r.prompts[i]
 }
 
 func (r *captureAgentRunner) Run(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (int, error) {
@@ -1067,6 +1080,7 @@ func (r *captureAgentRunner) Start(ctx context.Context, dir string, stdout, stde
 	}
 	r.names = append(r.names, name)
 	r.argLists = append(r.argLists, append([]string{}, args...))
+	r.prompts = append(r.prompts, resolveSpilledArgs(args))
 	proc := &ManagedProcess{done: make(chan waitResult, 1)}
 	proc.done <- waitResult{exitCode: 0}
 	return proc, nil

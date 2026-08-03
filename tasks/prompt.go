@@ -235,16 +235,22 @@ func BuildVerifyFailedAssistancePrompt(d *Deps, taskSetID string, m *Manifest, w
 		fmt.Fprintf(&b, "Recorded Verifier findings: none were recorded for this verdict.\n\n")
 	}
 
-	diff := verifyWorkDiff(d, runtimePath, taskSetID)
+	// The diff bodies stay out of the prompt for the same reason the Verifier's
+	// do (see workDiffView): the assisting agent is in the checkout and can read
+	// what the human asks about, while an inlined diff of a large set overflows
+	// both argv and the context window.
+	work := verifyWorkDiff(d, runtimePath, taskSetID)
 	fmt.Fprintf(&b, "Accumulated work diff")
 	if workSHA != "" {
 		fmt.Fprintf(&b, " (at %s)", workSHA)
 	}
 	fmt.Fprintf(&b, "\n")
-	if strings.TrimSpace(diff) == "" {
+	if work.Empty() {
 		fmt.Fprintf(&b, "(no committed changes for this set)\n\n")
 	} else {
-		fmt.Fprintf(&b, "```diff\n%s\n```\n\n", diff)
+		fmt.Fprintf(&b, "Commit range: %s\n", work.Range)
+		fmt.Fprintf(&b, "The `git diff --stat` below is complete; fetch any file's diff yourself with `git diff %s -- <path>`.\n", work.Range)
+		fmt.Fprintf(&b, "```\n%s\n```\n\n", work.Stat)
 	}
 
 	fmt.Fprintf(&b, "Task set context:\n")

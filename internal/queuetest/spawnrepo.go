@@ -94,7 +94,7 @@ func WriteSpawnTestAgent(t *testing.T, root string) string {
 		t.Fatal(err)
 	}
 	script := "#!/bin/sh\n" +
-		"TASK=$(printf '%s' \"$1\" | sed -n 's|^You are implementing the task at: ||p' | head -1)\n" +
+		"TASK=$(cat \"$(printf '%s' \"$*\" | sed -n 's|.*Read the file \\([^ ]*\\) in full:.*|\\1|p' | head -1)\" | sed -n 's|^You are implementing the task at: ||p' | head -1)\n" +
 		"if [ -n \"$TASK\" ] && [ -f \"$TASK\" ]; then\n" +
 		"  sed -i '' 's/- \\[ \\]/- [x]/g' \"$TASK\" 2>/dev/null || sed -i 's/- \\[ \\]/- [x]/g' \"$TASK\"\n" +
 		"fi\n" +

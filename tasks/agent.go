@@ -60,6 +60,14 @@ type AgentInvocation struct {
 	OutputFormat   AgentOutputFormat
 	RequestedAgent string
 	adapter        AgentAdapter
+	// promptArg is the index into Args of the generated prompt, so the run seam
+	// can spill it to a file instead of handing execve a megabyte of argv
+	// (see agent_prompt_spill.go). Zero means this invocation carries no
+	// generated prompt — a prompt is never argv[0].
+	promptArg int
+	// promptFile is the spill file backing promptArg while an attempt runs, and
+	// empty when the prompt is still inline.
+	promptFile string
 }
 
 // AgentPreset returns the owning adapter's preset name.
@@ -504,9 +512,11 @@ func (a *presetAgentAdapter) HeadlessInvocation(req AgentHeadlessRequest) (*Agen
 	args := []string{a.headlessPrefix[0]}
 	args = append(args, extraArgs...)
 	args = append(args, a.headlessPrefix[1:]...)
+	promptArg := 0
 	// A flag-value prompt must stay adjacent to the flag it belongs to, so it
 	// lands before pop's owned output flags instead of at the very end.
 	if a.promptDelivery == promptAsPrefixFlagValue {
+		promptArg = len(args)
 		args = append(args, req.Prompt)
 	}
 	format := AgentOutputPlain
@@ -521,6 +531,7 @@ func (a *presetAgentAdapter) HeadlessInvocation(req AgentHeadlessRequest) (*Agen
 		args = append(args, "--workspace", req.RuntimePath)
 	}
 	if a.promptDelivery == promptAsFinalArg {
+		promptArg = len(args)
 		args = append(args, req.Prompt)
 	}
 	return &AgentInvocation{
@@ -529,6 +540,8 @@ func (a *presetAgentAdapter) HeadlessInvocation(req AgentHeadlessRequest) (*Agen
 		Env:          append(append([]string(nil), a.env...), extraEnv...),
 		OutputFormat: format,
 		adapter:      a,
+		// Args drops argv[0], so the recorded index shifts with it.
+		promptArg: max(promptArg-1, 0),
 	}, nil
 }
 
@@ -823,6 +836,7 @@ func ResolveAgentInvocationWithMode(preset, agentCmd, prompt, runtimePath string
 			OutputFormat:   AgentOutputPlain,
 			RequestedAgent: requestedAgentSpec(preset, adapter.Preset()),
 			adapter:        adapter,
+			promptArg:      3,
 		}, nil
 	}
 	_, extraArgs, err := parseAgentPresetSpec(preset)

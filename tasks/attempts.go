@@ -536,6 +536,13 @@ func startAgentInvocation(ctx context.Context, runner CommandRunner, runtimePath
 }
 
 func runAgentAttempt(d *Deps, runtimePath string, liveOut io.Writer, timeout time.Duration, invocation *AgentInvocation) (string, *attemptOutcome, error) {
+	// The prompt leaves argv here, for the length of this attempt only: argv has
+	// an execve ceiling a generated prompt can exceed, a file has none.
+	if err := invocation.spillPrompt(); err != nil {
+		return "", nil, err
+	}
+	defer invocation.cleanupPrompt()
+
 	var capture bytes.Buffer
 	var agentOut io.Writer = &capture
 	var recorder *streamRecorder

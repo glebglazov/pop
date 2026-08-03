@@ -85,7 +85,7 @@ func TestBuildVerifierPromptScopesToDoneAFK(t *testing.T) {
 	}
 	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), mixed, nil)
 
-	prompt := buildVerifierPrompt(d, m, "sha1", "", "")
+	prompt := buildVerifierPrompt(d, m, "sha1", workDiffView{}, "")
 
 	if !strings.Contains(prompt, "01-afk-done") {
 		t.Fatalf("prompt must include the done AFK task:\n%s", prompt)

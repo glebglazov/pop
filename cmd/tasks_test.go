@@ -1291,7 +1291,7 @@ func writeRunTaskFakeAgent(t *testing.T, root string) string {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "fake-agent.sh")
-	script := "#!/bin/sh\nTASK=$(printf '%s' \"$1\" | sed -n 's|^You are implementing the task at: ||p' | head -1)\n" +
+	script := "#!/bin/sh\nTASK=$(cat \"$(printf '%s' \"$*\" | sed -n 's|.*Read the file \\([^ ]*\\) in full:.*|\\1|p' | head -1)\" | sed -n 's|^You are implementing the task at: ||p' | head -1)\n" +
 		"if [ -n \"$TASK\" ] && [ -f \"$TASK\" ]; then sed -i '' 's/- \\[ \\]/- [x]/g' \"$TASK\" 2>/dev/null || sed -i 's/- \\[ \\]/- [x]/g' \"$TASK\"; fi\n" +
 		"printf 'SUMMARY_START\\ncmd test\\nSUMMARY_END\\nTASK_COMPLETE\\n'\n"
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {

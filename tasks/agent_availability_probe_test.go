@@ -278,7 +278,7 @@ printf 'should not run\n'
 exit 1
 `, attemptCount))
 	installAgentShim(t, env.root, "claude", `#!/bin/sh
-TASK=$(printf '%s' "$*" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
+TASK=$(cat "$(printf '%s' "$*" | sed -n 's|.*Read the file \([^ ]*\) in full:.*|\1|p' | head -1)" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
 if [ -n "$TASK" ] && [ -f "$TASK" ]; then sed -i '' 's/- \[ \]/- [x]/g' "$TASK" 2>/dev/null || sed -i 's/- \[ \]/- [x]/g' "$TASK"; fi
 printf 'SUMMARY_START\nclaude done\nSUMMARY_END\nTASK_COMPLETE\n'
 `)
@@ -342,7 +342,7 @@ printf '%%s\n' %q
 exit 1
 `, authLine))
 	installAgentShim(t, env.root, "claude", `#!/bin/sh
-TASK=$(printf '%s' "$*" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
+TASK=$(cat "$(printf '%s' "$*" | sed -n 's|.*Read the file \([^ ]*\) in full:.*|\1|p' | head -1)" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
 if [ -n "$TASK" ] && [ -f "$TASK" ]; then sed -i '' 's/- \[ \]/- [x]/g' "$TASK" 2>/dev/null || sed -i 's/- \[ \]/- [x]/g' "$TASK"; fi
 printf 'SUMMARY_START\nclaude done\nSUMMARY_END\nTASK_COMPLETE\n'
 `)

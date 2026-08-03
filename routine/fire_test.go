@@ -24,6 +24,10 @@ while [ $# -gt 1 ]; do
   shift
 done
 prompt=$1
+# The generated prompt rides in a file, not in argv (tasks.promptFileInstruction).
+case "$prompt" in
+  "Read the file "*) f=${prompt#Read the file }; f=${f%% in full:*}; prompt=$(cat "$f");;
+esac
 if [ -n "$FAKE_PROMPT_FILE" ]; then
   printf '%s' "$prompt" > "$FAKE_PROMPT_FILE"
 fi
@@ -76,6 +80,10 @@ while [ $# -gt 1 ]; do
   shift
 done
 prompt=$1
+# The generated prompt rides in a file, not in argv (tasks.promptFileInstruction).
+case "$prompt" in
+  "Read the file "*) f=${prompt#Read the file }; f=${f%% in full:*}; prompt=$(cat "$f");;
+esac
 ` + writeBlock + sentinelLine + "exit 0\n"
 	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
 		t.Fatal(err)

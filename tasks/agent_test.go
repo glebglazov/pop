@@ -1531,7 +1531,7 @@ func TestBuildFailedAssistancePromptWithoutRecordedReason(t *testing.T) {
 	}
 }
 
-func TestBuildVerifyFailedAssistancePromptIncludesFindingsAndDiff(t *testing.T) {
+func TestBuildVerifyFailedAssistancePromptIncludesFindingsAndDiffStat(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "tasks", "demo")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -1546,7 +1546,7 @@ func TestBuildVerifyFailedAssistancePromptIncludesFindingsAndDiff(t *testing.T) 
 		},
 	}
 
-	git := stubGit("shaHEAD\n", "shaHEAD\nshaEARLY\n", "diff --git a/foo.go\n+added line\n")
+	git := stubGit("shaHEAD\n", "shaHEAD\nshaEARLY\n", " foo.go | 1 +\n")
 	d := realFSDeps()
 	d.Git = git
 
@@ -1559,7 +1559,9 @@ func TestBuildVerifyFailedAssistancePromptIncludesFindingsAndDiff(t *testing.T) 
 		"Recorded Verifier findings:",
 		"the retry looks flaky",
 		"Accumulated work diff (at shaHEAD)",
-		"added line",
+		"Commit range: shaEARLY^..HEAD",
+		"foo.go | 1 +",
+		"git diff shaEARLY^..HEAD -- <path>",
 		"- 01-a [AFK done] Build storage",
 		"accept:",
 		"remediate:",

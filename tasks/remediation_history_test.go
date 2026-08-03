@@ -271,7 +271,7 @@ func TestBuildVerifierPromptCarriesRemediationHistory(t *testing.T) {
 	}, nil)
 	writeRemediationProgress(t, m.Dir, "2026-06-10T09:00:00Z [02-remediation.md] DONE\nraised the retry cap")
 
-	prompt := buildVerifierPrompt(d, m, "sha1", "DIFF", "")
+	prompt := buildVerifierPrompt(d, m, "sha1", workDiffView{Range: "aaa^..HEAD", Stat: " f.go | 2 +-"}, "")
 	for _, want := range []string{
 		"## Remediation history (implementer's unverified claims — the diff remains authoritative)",
 		"do not accept a claim you cannot see in the diff",
@@ -294,7 +294,7 @@ func TestBuildVerifierPromptCarriesRemediationHistory(t *testing.T) {
 	}
 
 	dNone, mNone := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), doneAFKSet(), nil)
-	without := buildVerifierPrompt(dNone, mNone, "sha1", "", "")
+	without := buildVerifierPrompt(dNone, mNone, "sha1", workDiffView{}, "")
 	if strings.Contains(without, "Remediation history") {
 		t.Fatalf("prompt must omit history when no remediations:\n%s", without)
 	}

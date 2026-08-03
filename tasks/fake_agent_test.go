@@ -138,7 +138,9 @@ func registerFakeAgent(t *testing.T, b *fakeAgentBehavior) string {
 // lookupFakeAgent finds the registered behavior an invocation encodes, if any.
 // Custom-command invocations wrap the agent command as
 // `sh -c '<token> "$@"' task-agent <prompt>`, so the token is the first field
-// of one of the args and the prompt is the final arg.
+// of one of the args and the prompt is the final arg — which by then is the
+// instruction naming the spill file, so the fake reads it the way a real agent
+// would (see promptFileInstruction).
 func lookupFakeAgent(args []string) (*fakeAgentBehavior, string, bool) {
 	fakeAgentMu.Lock()
 	defer fakeAgentMu.Unlock()
@@ -153,7 +155,7 @@ func lookupFakeAgent(args []string) (*fakeAgentBehavior, string, bool) {
 		if b, ok := fakeAgentRegistry[fields[0]]; ok {
 			prompt := ""
 			if len(args) > 0 {
-				prompt = args[len(args)-1]
+				prompt = readSpilledPrompt(args[len(args)-1])
 			}
 			return b, prompt, true
 		}
@@ -277,6 +279,25 @@ func (b *fakeAgentBehavior) play(dir string, stdout io.Writer, prompt string) in
 	return cfg.exitCode
 }
 
+// readSpilledPrompt turns the argv instruction back into the prompt it names.
+// An argument that is not such an instruction is returned as-is, so a caller
+// passing a literal prompt still works.
+func readSpilledPrompt(arg string) string {
+	const prefix = "Read the file "
+	if !strings.HasPrefix(arg, prefix) {
+		return arg
+	}
+	path, _, found := strings.Cut(strings.TrimPrefix(arg, prefix), " in full:")
+	if !found {
+		return arg
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return arg
+	}
+	return string(body)
+}
+
 // parseFakeAgentTaskPath extracts the task path from the agent prompt, the same
 // way the shim did with `sed -n 's|^You are implementing the task at: ||p'`.
 func parseFakeAgentTaskPath(prompt string) string {
@@ -346,4 +367,15 @@ func writeAttemptAgent(t *testing.T, _ string, scripts []attemptScript) string {
 		}
 	}
 	return registerFakeAgent(t, &fakeAgentBehavior{attempts: append([]attemptScript(nil), scripts...)})
+}
+
+// resolveSpilledArgs renders one invocation's argv with the spilled prompt read
+// back in, so a test runner that records args at spawn time keeps the prompt
+// after the attempt removed its file.
+func resolveSpilledArgs(args []string) string {
+	resolved := make([]string, 0, len(args))
+	for _, arg := range args {
+		resolved = append(resolved, readSpilledPrompt(arg))
+	}
+	return strings.Join(resolved, " ")
 }

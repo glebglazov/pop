@@ -246,9 +246,26 @@ func TestVerifyResolvedSetMalformedResponseParksNeedsHuman(t *testing.T) {
 	}
 }
 
-func TestVerifyResolvedSetIncludesWorkDiffInPrompt(t *testing.T) {
+// TestVerifyResolvedSetCarriesWorkStatAndRangeNotTheDiff: the prompt hands the
+// Verifier the commit range and the complete stat, says the stat is complete, and
+// names the command that fetches a file's diff — the diff bodies themselves are
+// never inlined (they run to megabytes on a large set).
+func TestVerifyResolvedSetCarriesWorkStatAndRangeNotTheDiff(t *testing.T) {
 	t.Parallel()
-	d, defPath := setupVerifyFixture(t, stubGit("sha1\n", "commitHash1\n", "DIFF-BODY-MARKER"))
+	var diffArgs [][]string
+	git := &deps.MockGit{CommandInDirFunc: func(dir string, args ...string) (string, error) {
+		switch {
+		case len(args) >= 2 && args[0] == "rev-parse" && args[1] == "HEAD":
+			return "sha1\n", nil
+		case len(args) >= 1 && args[0] == "log":
+			return "commitHash1\n", nil
+		case len(args) >= 1 && args[0] == "diff":
+			diffArgs = append(diffArgs, args)
+			return " tasks/verify.go | 12 ++++---\n 1 file changed\n", nil
+		}
+		return "", nil
+	}}
+	d, defPath := setupVerifyFixture(t, git)
 	var gotPrompt string
 	if _, err := verifyResolvedSet(d, nil, verifyCoreOptions{
 		Repo: "/repo/.git", DefPath: defPath, RuntimePath: "/rt", SetID: "demo",
@@ -260,8 +277,22 @@ func TestVerifyResolvedSetIncludesWorkDiffInPrompt(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("verifyResolvedSet: %v", err)
 	}
-	if !strings.Contains(gotPrompt, "DIFF-BODY-MARKER") || !strings.Contains(gotPrompt, "```diff") {
-		t.Fatalf("prompt missing work diff:\n%s", gotPrompt)
+	for _, want := range []string{
+		"Commit range: commitHash1^..HEAD",
+		"tasks/verify.go | 12 ++++---",
+		"is complete",
+		"not evidence of missing work",
+		"git diff commitHash1^..HEAD -- <path>",
+	} {
+		if !strings.Contains(gotPrompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, gotPrompt)
+		}
+	}
+	if strings.Contains(gotPrompt, "```diff") {
+		t.Fatalf("prompt must not inline the diff:\n%s", gotPrompt)
+	}
+	if len(diffArgs) != 1 || diffArgs[0][1] != "--stat" {
+		t.Fatalf("git diff calls = %v, want exactly one `diff --stat`", diffArgs)
 	}
 }
 
@@ -806,7 +837,7 @@ func TestBuildVerifierPromptForwardFeedsAcceptedNote(t *testing.T) {
 	t.Parallel()
 	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), doneAFKSet(), nil)
 
-	withNote := buildVerifierPrompt(d, m, "sha1", "", "the retry cap is deliberate")
+	withNote := buildVerifierPrompt(d, m, "sha1", workDiffView{}, "the retry cap is deliberate")
 	if !strings.Contains(withNote, "Prior human note") {
 		t.Fatalf("prompt must carry a prior-human-note section:\n%s", withNote)
 	}
@@ -817,7 +848,7 @@ func TestBuildVerifierPromptForwardFeedsAcceptedNote(t *testing.T) {
 		t.Fatalf("prompt must frame the note as context, not suppression:\n%s", withNote)
 	}
 
-	withoutNote := buildVerifierPrompt(d, m, "sha1", "", "")
+	withoutNote := buildVerifierPrompt(d, m, "sha1", workDiffView{}, "")
 	if strings.Contains(withoutNote, "Prior human note") {
 		t.Fatalf("prompt must omit the note section when no note is given:\n%s", withoutNote)
 	}
@@ -826,7 +857,7 @@ func TestBuildVerifierPromptForwardFeedsAcceptedNote(t *testing.T) {
 func TestBuildVerifierPromptAsksForOptionalSummary(t *testing.T) {
 	t.Parallel()
 	d, m := setupDrainVerifyFixture(t, stubGit("sha1\n", "", ""), doneAFKSet(), nil)
-	prompt := buildVerifierPrompt(d, m, "sha1", "", "")
+	prompt := buildVerifierPrompt(d, m, "sha1", workDiffView{}, "")
 	for _, want := range []string{
 		"SUMMARY:",
 		"what needs fixing",

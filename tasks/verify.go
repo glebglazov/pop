@@ -437,8 +437,8 @@ func loadVerifiableManifest(d *Deps, opts verifyCoreOptions) (*Manifest, error) 
 // human-accepted non-issue is not re-flagged, without suppressing fresh
 // judgment; the freshly recorded verdict is agent-authored (not human-authored).
 func runAndStoreVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *Manifest, workSHA, priorNote string) (*store.VerifyVerdict, error) {
-	diff := verifyWorkDiff(d, opts.RuntimePath, opts.SetID)
-	prompt := buildVerifierPrompt(d, m, workSHA, diff, priorNote)
+	work := verifyWorkDiff(d, opts.RuntimePath, opts.SetID)
+	prompt := buildVerifierPrompt(d, m, workSHA, work, priorNote)
 
 	run := opts.runVerifier
 	if run == nil {
@@ -987,32 +987,52 @@ func invalidateVerifyVerdicts(d *Deps, repo, setID string) {
 	_ = s.CaptureNoteThenInvalidate(repo, setID)
 }
 
-// verifyWorkDiff returns the accumulated diff of the set's committed work. The
-// drain commits every task as a `tasks(<slug>): <id>` commit, so the set's work
-// is the range from the parent of its earliest such commit to HEAD. Absent set
-// commits (nothing drained yet) yields an empty diff — the Verifier still judges
-// the criteria, just against no changes. Diff computation is best-effort: any git
-// failure yields an empty diff rather than aborting the verification.
-func verifyWorkDiff(d *Deps, runtimePath, setID string) string {
+// workDiffView is what the Verifier is handed about the set's accumulated work:
+// the commit range and its complete `git diff --stat`, never the diff bodies. A
+// large set's diff runs to megabytes — on the order of hundreds of thousands of
+// tokens — so inlining it fails at the model even once argv is out of the way,
+// while the stat is complete and small. The Verifier runs in the checkout under
+// verification with tools of its own, so fetching the diffs it decides to read is
+// strictly better than being handed all of them (see buildVerifierPrompt).
+type workDiffView struct {
+	// Range is a git revision range, empty when the set has no commits yet.
+	Range string
+	// Stat is `git diff --stat <Range>`, complete for that range.
+	Stat string
+}
+
+// Empty reports whether the set has any committed work to judge.
+func (v workDiffView) Empty() bool { return strings.TrimSpace(v.Range) == "" }
+
+// verifyWorkDiff returns the range and complete stat of the set's committed
+// work. The drain commits every task as a `tasks(<slug>): <id>` commit, so the
+// set's work is the range from the parent of its earliest such commit to HEAD.
+// Absent set commits (nothing drained yet) yields an empty view — the Verifier
+// still judges the criteria, just against no changes. Computation is
+// best-effort: any git failure yields an empty view rather than aborting the
+// verification.
+func verifyWorkDiff(d *Deps, runtimePath, setID string) workDiffView {
 	prefix := commitSubjectPrefix(setID)
 	out, err := d.Git.CommandInDir(runtimePath, "log", "--format=%H", "--fixed-strings", "--grep", prefix, "HEAD")
 	if err != nil {
-		return ""
+		return workDiffView{}
 	}
 	hashes := strings.Fields(strings.TrimSpace(out))
 	if len(hashes) == 0 {
-		return ""
+		return workDiffView{}
 	}
 	earliest := hashes[len(hashes)-1]
-	if diff, err := d.Git.CommandInDir(runtimePath, "diff", earliest+"^..HEAD"); err == nil {
-		return strings.TrimSpace(diff)
+	rng := earliest + "^..HEAD"
+	if stat, err := d.Git.CommandInDir(runtimePath, "diff", "--stat", rng); err == nil {
+		return workDiffView{Range: rng, Stat: strings.TrimSpace(stat)}
 	}
 	// The earliest set commit is a root commit (no parent); diff from the empty tree.
-	diff, err := d.Git.CommandInDir(runtimePath, "diff", emptyTreeSHA+".."+earliest)
+	rng = emptyTreeSHA + ".." + earliest
+	stat, err := d.Git.CommandInDir(runtimePath, "diff", "--stat", rng)
 	if err != nil {
-		return ""
+		return workDiffView{}
 	}
-	return strings.TrimSpace(diff)
+	return workDiffView{Range: rng, Stat: strings.TrimSpace(stat)}
 }
 
 // commitSubjectPrefix is the leading text every implementation commit for a set
@@ -1029,7 +1049,8 @@ const specFileName = "spec.md"
 
 // buildVerifierPrompt assembles the Verifier's input: the authoritative
 // acceptance criteria and task bodies for the set's `done` AFK tasks only, plus
-// the accumulated work diff at the current SHA, and the exact response format
+// the commit range and complete stat of the accumulated work (the diff bodies
+// are the Verifier's to fetch, see workDiffView), and the exact response format
 // the parser expects. Open/not-`done` AFK tasks and HITL tasks of any status are
 // excluded (ADR-0102): an agent cannot judge a human sign-off, and a not-yet-run
 // task is not an unmet criterion — emitting either made a still-open terminal
@@ -1043,7 +1064,7 @@ const specFileName = "spec.md"
 // at that spot must still fail. Done Remediation history is folded in the same
 // way when present (ADR-0154): unverified claims with the diff authoritative;
 // verdict scope remains done AFK work judged against the criteria and the diff.
-func buildVerifierPrompt(d *Deps, m *Manifest, workSHA, diff, priorNote string) string {
+func buildVerifierPrompt(d *Deps, m *Manifest, workSHA string, work workDiffView, priorNote string) string {
 	var b strings.Builder
 	b.WriteString("You are an independent Verifier. A separate agent has already implemented this Task set; ")
 	b.WriteString("your job is to confirm reality, not to trust its self-report.\n\n")
@@ -1097,11 +1118,17 @@ func buildVerifierPrompt(d *Deps, m *Manifest, workSHA, diff, priorNote string) 
 		b.WriteString(fmt.Sprintf(" (at %s)", workSHA))
 	}
 	b.WriteString("\n")
-	if strings.TrimSpace(diff) == "" {
+	if work.Empty() {
 		b.WriteString("(no committed changes for this set)\n")
 	} else {
-		b.WriteString("```diff\n")
-		b.WriteString(diff)
+		b.WriteString(fmt.Sprintf("Commit range: %s\n", work.Range))
+		b.WriteString("The `git diff --stat` below is complete: every file this set changed is listed, with nothing truncated or omitted. ")
+		b.WriteString("A file you have not fetched is therefore not evidence of missing work — if a criterion turns on a file listed below, read its diff before judging it.\n")
+		b.WriteString("The diff bodies are deliberately not inlined; you are in the checkout under verification, so fetch what you decide to look at:\n")
+		b.WriteString(fmt.Sprintf("  git diff %s -- <path>   # one file's diff\n", work.Range))
+		b.WriteString(fmt.Sprintf("  git log --oneline %s    # the commits in the range\n", work.Range))
+		b.WriteString("```\n")
+		b.WriteString(work.Stat)
 		b.WriteString("\n```\n")
 	}
 

@@ -1895,7 +1895,7 @@ printf '%s\n' '429 Weekly usage limit reached. Resets in 9hr 4min. To continue u
 exit 1
 `)
 	installAgentShim(t, env.root, "claude", `#!/bin/sh
-TASK=$(printf '%s' "$*" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
+TASK=$(cat "$(printf '%s' "$*" | sed -n 's|.*Read the file \([^ ]*\) in full:.*|\1|p' | head -1)" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
 if [ -n "$TASK" ] && [ -f "$TASK" ]; then sed -i '' 's/- \[ \]/- [x]/g' "$TASK" 2>/dev/null || sed -i 's/- \[ \]/- [x]/g' "$TASK"; fi
 printf 'SUMMARY_START\nclaude done\nSUMMARY_END\nTASK_COMPLETE\n'
 `)
@@ -1942,7 +1942,7 @@ printf '%%s\n' %q
 exit 1
 `, cursorCount, authLine))
 	installAgentShim(t, env.root, "claude", `#!/bin/sh
-TASK=$(printf '%s' "$*" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
+TASK=$(cat "$(printf '%s' "$*" | sed -n 's|.*Read the file \([^ ]*\) in full:.*|\1|p' | head -1)" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
 if [ -n "$TASK" ] && [ -f "$TASK" ]; then sed -i '' 's/- \[ \]/- [x]/g' "$TASK" 2>/dev/null || sed -i 's/- \[ \]/- [x]/g' "$TASK"; fi
 printf 'SUMMARY_START\nclaude done\nSUMMARY_END\nTASK_COMPLETE\n'
 `)
@@ -2016,7 +2016,7 @@ func TestRunTaskSetAgentFallbackAdvancesOnMissingBinary(t *testing.T) {
 	})
 	cursorCount := filepath.Join(env.root, ".agent-bin", "cursor-agent.count")
 	installAgentShim(t, env.root, "claude", `#!/bin/sh
-TASK=$(printf '%s' "$*" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
+TASK=$(cat "$(printf '%s' "$*" | sed -n 's|.*Read the file \([^ ]*\) in full:.*|\1|p' | head -1)" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
 if [ -n "$TASK" ] && [ -f "$TASK" ]; then sed -i '' 's/- \[ \]/- [x]/g' "$TASK" 2>/dev/null || sed -i 's/- \[ \]/- [x]/g' "$TASK"; fi
 printf 'SUMMARY_START\nclaude done\nSUMMARY_END\nTASK_COMPLETE\n'
 `)
@@ -2108,7 +2108,7 @@ exit 1
 func installCompletingClaudeShim(t *testing.T, root string) {
 	t.Helper()
 	installAgentShim(t, root, "claude", `#!/bin/sh
-TASK=$(printf '%s' "$*" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
+TASK=$(cat "$(printf '%s' "$*" | sed -n 's|.*Read the file \([^ ]*\) in full:.*|\1|p' | head -1)" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
 if [ -n "$TASK" ] && [ -f "$TASK" ]; then sed -i '' 's/- \[ \]/- [x]/g' "$TASK" 2>/dev/null || sed -i 's/- \[ \]/- [x]/g' "$TASK"; fi
 printf 'SUMMARY_START\nclaude done\nSUMMARY_END\nTASK_COMPLETE\n'
 `)
@@ -2275,7 +2275,7 @@ case " $* " in
     exit 1
     ;;
 esac
-TASK=$(printf '%%s' "$*" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
+TASK=$(cat "$(printf '%%s' "$*" | sed -n 's|.*Read the file \([^ ]*\) in full:.*|\1|p' | head -1)" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
 if [ -n "$TASK" ] && [ -f "$TASK" ]; then sed -i '' 's/- \[ \]/- [x]/g' "$TASK" 2>/dev/null || sed -i 's/- \[ \]/- [x]/g' "$TASK"; fi
 printf '%%s\n' '{"role":"assistant","content":"SUMMARY_START\nkimi tail done\nSUMMARY_END\nTASK_COMPLETE"}'
 `, count, gatedModel, gateLine))
@@ -2588,7 +2588,7 @@ exit 2
 `, claudeCount))
 	installAgentShim(t, env.root, "codex", fmt.Sprintf(`#!/bin/sh
 printf 'called\n' >> %[1]q
-TASK=$(printf '%%s' "$*" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
+TASK=$(cat "$(printf '%%s' "$*" | sed -n 's|.*Read the file \([^ ]*\) in full:.*|\1|p' | head -1)" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
 if [ -n "$TASK" ] && [ -f "$TASK" ]; then sed -i '' 's/- \[ \]/- [x]/g' "$TASK" 2>/dev/null || sed -i 's/- \[ \]/- [x]/g' "$TASK"; fi
 printf 'SUMMARY_START\ncodex done\nSUMMARY_END\nTASK_COMPLETE\n'
 `, codexCount))
@@ -2683,7 +2683,7 @@ func TestRunTaskSetAgentFallbackSkipsCoolingAgentBeforeSpawn(t *testing.T) {
 printf 'called\n' >> %[1]q
 `, codexCount))
 	installAgentShim(t, env.root, "claude", `#!/bin/sh
-TASK=$(printf '%s' "$*" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
+TASK=$(cat "$(printf '%s' "$*" | sed -n 's|.*Read the file \([^ ]*\) in full:.*|\1|p' | head -1)" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
 if [ -n "$TASK" ] && [ -f "$TASK" ]; then sed -i '' 's/- \[ \]/- [x]/g' "$TASK" 2>/dev/null || sed -i 's/- \[ \]/- [x]/g' "$TASK"; fi
 printf 'SUMMARY_START\nclaude done\nSUMMARY_END\nTASK_COMPLETE\n'
 `)
@@ -2930,7 +2930,7 @@ func TestRunTaskSetDefaultAgentsConfigAndFlagOverride(t *testing.T) {
 			{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 		})
 		installAgentShim(t, env.root, "codex", `#!/bin/sh
-TASK=$(printf '%s' "$*" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
+TASK=$(cat "$(printf '%s' "$*" | sed -n 's|.*Read the file \([^ ]*\) in full:.*|\1|p' | head -1)" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
 if [ -n "$TASK" ] && [ -f "$TASK" ]; then sed -i '' 's/- \[ \]/- [x]/g' "$TASK" 2>/dev/null || sed -i 's/- \[ \]/- [x]/g' "$TASK"; fi
 printf 'SUMMARY_START\ncodex done\nSUMMARY_END\nTASK_COMPLETE\n'
 `)
@@ -2952,7 +2952,7 @@ printf 'SUMMARY_START\ncodex done\nSUMMARY_END\nTASK_COMPLETE\n'
 			{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 		})
 		installAgentShim(t, env.root, "claude", `#!/bin/sh
-TASK=$(printf '%s' "$*" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
+TASK=$(cat "$(printf '%s' "$*" | sed -n 's|.*Read the file \([^ ]*\) in full:.*|\1|p' | head -1)" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
 if [ -n "$TASK" ] && [ -f "$TASK" ]; then sed -i '' 's/- \[ \]/- [x]/g' "$TASK" 2>/dev/null || sed -i 's/- \[ \]/- [x]/g' "$TASK"; fi
 printf 'SUMMARY_START\nclaude done\nSUMMARY_END\nTASK_COMPLETE\n'
 `)
@@ -3546,7 +3546,7 @@ func writeSequentialRealShimAgent(t *testing.T, root string, steps []fakeAgentSt
 	b.WriteString("#!/bin/sh\n")
 	b.WriteString("COUNT=0\n")
 	b.WriteString("if [ -f " + counterPath + " ]; then COUNT=$(cat " + counterPath + "); fi\n")
-	b.WriteString("TASK=$(printf '%s' \"$1\" | sed -n 's|^You are implementing the task at: ||p' | head -1)\n")
+	b.WriteString("TASK=$(cat \"$(printf '%s' \"$*\" | sed -n 's|.*Read the file \\([^ ]*\\) in full:.*|\\1|p' | head -1)\" | sed -n 's|^You are implementing the task at: ||p' | head -1)\n")
 	b.WriteString("if [ -n \"$TASK\" ] && [ -f \"$TASK\" ]; then sed -i '' 's/- \\[ \\]/- [x]/g' \"$TASK\" 2>/dev/null || sed -i 's/- \\[ \\]/- [x]/g' \"$TASK\"; fi\n")
 	for i, step := range steps {
 		summary := step.summary
