@@ -41,8 +41,11 @@ func GroupTickets(tickets []Ticket) TicketGroups {
 	return groups
 }
 
-// RenderShow prints one map's detail as plain text.
-func RenderShow(out io.Writer, m Map) error {
+// RenderShow prints one map's detail as plain text. The spawned sets arrive
+// already resolved (ResolveSpawnedSets) rather than being read here, so this
+// stays a pure render and the agent-session path prints the same block the
+// dashboard's detail pane does.
+func RenderShow(out io.Writer, m Map, spawned []SpawnedSet) error {
 	status := string(m.Status)
 	if m.Broken {
 		status = string(MapBroken)
@@ -72,7 +75,21 @@ func RenderShow(out io.Writer, m Map) error {
 	writeTicketGroup(out, "Blocked", groups.Blocked, true)
 	writeTicketGroup(out, "Claimed", groups.Claimed, false)
 	writeTicketGroup(out, "Resolved", groups.Resolved, false)
+	writeSpawnedSets(out, spawned)
 	return nil
+}
+
+// writeSpawnedSets prints the lineage block: what this Map handed off, and where
+// each of those sets has got to.
+func writeSpawnedSets(out io.Writer, spawned []SpawnedSet) {
+	fmt.Fprint(out, "\nSpawned sets:\n")
+	if len(spawned) == 0 {
+		fmt.Fprintln(out, "  (none)")
+		return
+	}
+	for _, s := range spawned {
+		fmt.Fprintf(out, "  %s\n", s.Line())
+	}
 }
 
 func writeTicketGroup(out io.Writer, title string, tickets []Ticket, showBlockers bool) {
@@ -111,5 +128,5 @@ func ShowWith(d *Deps, out io.Writer, cwd, mapID string) error {
 	if err != nil {
 		return err
 	}
-	return RenderShow(out, m)
+	return RenderShow(out, m, ResolveSpawnedSets(d, m))
 }

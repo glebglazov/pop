@@ -30,6 +30,11 @@ type Deps struct {
 	Trunk func() (string, error)
 	// Exe locates the pop binary the session's overview window re-invokes.
 	Exe func() (string, error)
+	// SetStatuses returns the live status of every Task set registered under a
+	// definition path, keyed by set id — what a Map's spawned ids resolve to. Left
+	// nil it reads through the Task-set refresh; injectable because a test wants to
+	// name a set's status rather than lay out and register one.
+	SetStatuses func(defPath string) (map[string]SpawnedSet, error)
 }
 
 // DefaultDeps returns dependencies using real implementations.

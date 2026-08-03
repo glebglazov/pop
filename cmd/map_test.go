@@ -397,6 +397,18 @@ func TestMapSpawnedRecordsTheHandoff(t *testing.T) {
 			t.Fatalf("map.md missing %q:\n%s", want, mapMD)
 		}
 	}
+
+	// `pop map show` prints the lineage block with the set's status read fresh. No
+	// such set exists in this fixture's storage, and the id still renders: the Map
+	// records what the effort spawned, so a set that resolves to nothing is
+	// reported, never dropped.
+	var shown bytes.Buffer
+	if err := runMapShowWith(d, &shown, "demo"); err != nil {
+		t.Fatalf("show: %v", err)
+	}
+	if !strings.Contains(shown.String(), "Spawned sets:\n  2026-08-05-implementing — (missing)") {
+		t.Fatalf("show output missing the lineage block:\n%s", shown.String())
+	}
 }
 
 func TestMapClaimCompletionOffersUnresolvedTickets(t *testing.T) {

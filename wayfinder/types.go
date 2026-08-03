@@ -77,7 +77,11 @@ type Map struct {
 	DecisionsSoFar  string
 	Archived        bool
 	Tickets         []Ticket
-	Broken          bool
+	// SpawnedSets holds the ids of the Task sets this Map handed off, in the
+	// order they were recorded. Ids only: what each one is doing right now is read
+	// fresh from the sets themselves at render time (ResolveSpawnedSets).
+	SpawnedSets []string
+	Broken      bool
 	// BrokenReason is set when Broken is true, and carries the corrective: what a
 	// human has to change in the Map's files to make pop able to read it again.
 	BrokenReason string

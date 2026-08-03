@@ -81,11 +81,14 @@ func (k *MapKind) Load() ([]work.Container, error) {
 		if err != nil {
 			return nil, err
 		}
+		// One table per group: every Map of a repository spawns into that
+		// repository's Task storage, so the sets are read once for all of them.
+		sets := newSetStatusTable(k.d.Wayfinder, g.DefPath)
 		for _, m := range maps {
 			if !visible(m) {
 				continue
 			}
-			containers = append(containers, containerFor(g, m))
+			containers = append(containers, containerFor(g, m, sets.resolve(m.SpawnedSets)))
 		}
 	}
 	return containers, nil
@@ -252,7 +255,7 @@ func (k *MapKind) groups() ([]repogroup.Group, error) {
 // containerFor projects one Map onto a Work container. The status cell is the
 // Map's ticket tallies, which is the only status a Map has ever shown on a read
 // surface: `WAYFINDING · N open / M frontier` (ADR-0130).
-func containerFor(g repogroup.Group, m Map) work.Container {
+func containerFor(g repogroup.Group, m Map, spawned []SpawnedSet) work.Container {
 	counts := CountTickets(m.Tickets)
 	frontier := len(Frontier(m.Tickets))
 	return work.Container{
@@ -265,7 +268,7 @@ func containerFor(g repogroup.Group, m Map) work.Container {
 		Broken:         m.Broken,
 		BrokenReason:   m.BrokenReason,
 		Items:          itemsFor(m),
-		DetailSections: sectionsFor(m),
+		DetailSections: sectionsFor(m, spawned),
 		DefPath:        g.DefPath,
 		StatePath:      g.StatePath,
 		RepoKey:        g.RepoKey,
@@ -324,16 +327,25 @@ func itemsFor(m Map) []work.Item {
 	return items
 }
 
-// sectionsFor is the Map's prose for a detail view: where it is going, and what
-// it has settled so far. Both come off map.md; an empty one is omitted rather
-// than rendered as an empty heading.
-func sectionsFor(m Map) []work.Section {
+// sectionsFor is the Map's prose for a detail view: where it is going, what it
+// has settled so far, and what the effort spawned. The first two come off map.md;
+// an empty one is omitted rather than rendered as an empty heading. The spawned
+// sets are the resolved lineage lines — the payoff of recording the ids, which is
+// seeing from the Map whether the work it handed off has landed.
+func sectionsFor(m Map, spawned []SpawnedSet) []work.Section {
 	var sections []work.Section
 	if strings.TrimSpace(m.Destination) != "" {
 		sections = append(sections, work.Section{Title: "Destination", Body: m.Destination})
 	}
 	if strings.TrimSpace(m.DecisionsSoFar) != "" {
 		sections = append(sections, work.Section{Title: "Decisions so far", Body: m.DecisionsSoFar})
+	}
+	if len(spawned) > 0 {
+		lines := make([]string, 0, len(spawned))
+		for _, s := range spawned {
+			lines = append(lines, s.Line())
+		}
+		sections = append(sections, work.Section{Title: "Spawned sets", Body: strings.Join(lines, "\n")})
 	}
 	return sections
 }

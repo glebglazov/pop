@@ -24,7 +24,7 @@ func TestRenderShowGroupsTickets(t *testing.T) {
 		},
 	}
 	var buf strings.Builder
-	if err := RenderShow(&buf, m); err != nil {
+	if err := RenderShow(&buf, m, nil); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()

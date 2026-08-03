@@ -47,7 +47,10 @@ appended to the manifest's ` + "`spawned_sets`" + ` and ` + "`## Spawned sets`" 
 re-rendered from it. It is idempotent, and it is the only writer of that section —
 appending a set there by hand is lost on the next resolve. There is no reverse
 flag on ` + "`pop tasks register`" + `; the set's own index.json carries
-` + "`source_map`" + ` as the other half of the link.
+` + "`source_map`" + ` as the other half of the link. ` + "`pop map show`" + ` prints
+those sets back with their live status and task tally — the same block the Work
+dashboard's detail pane shows, read fresh from the sets and stored nowhere. A set
+that resolves to nothing renders ` + "`(missing)`" + ` rather than disappearing.
 
 Every Map gets a tmux session of its own, ` + "`pop-map-<map-id>`" + `, rooted at the
 Trunk worktree: window 1 runs ` + "`pop map show`" + ` and ` + "`pop map next`" + ` spawns a

@@ -87,7 +87,7 @@ func loadMap(d *Deps, id, dir string) (Map, error) {
 		return Map{}, err
 	}
 
-	tickets, err := loadMapTickets(d, dir)
+	tickets, spawned, err := loadMapContents(d, dir)
 	if err != nil {
 		return Map{}, err
 	}
@@ -99,24 +99,29 @@ func loadMap(d *Deps, id, dir string) (Map, error) {
 		Destination:    destination,
 		DecisionsSoFar: ParseDecisionsSoFar(string(data)),
 		Tickets:        tickets,
+		SpawnedSets:    spawned,
 	}, nil
 }
 
-// loadMapTickets prefers the manifest and folds a Map that has none — index.json
-// is the single source of a ticket's status, type and blocking wherever it exists,
-// and the fold is what makes it exist for Maps charted before the manifest.
-func loadMapTickets(d *Deps, dir string) ([]Ticket, error) {
+// loadMapContents reads everything index.json owns — the tickets and the spawned
+// set ids. It prefers the manifest and folds a Map that has none: index.json is
+// the single source of a ticket's status, type and blocking wherever it exists,
+// and the fold is what makes it exist for Maps charted before the manifest. A
+// folded Map has spawned nothing yet, because the field the ids live in is the
+// one the fold is minting.
+func loadMapContents(d *Deps, dir string) ([]Ticket, []string, error) {
 	manifest, err := LoadMapManifest(d, dir)
 	if err == nil {
 		if !manifest.Valid {
-			return nil, fmt.Errorf("%s: %s", MapManifestFileName, manifest.MalformedReason())
+			return nil, nil, fmt.Errorf("%s: %s", MapManifestFileName, manifest.MalformedReason())
 		}
-		return manifest.ToTickets(), nil
+		return manifest.ToTickets(), manifest.SpawnedSets, nil
 	}
 	if !os.IsNotExist(err) {
-		return nil, err
+		return nil, nil, err
 	}
-	return foldMapManifest(d, dir)
+	tickets, err := foldMapManifest(d, dir)
+	return tickets, nil, err
 }
 
 // sortTickets orders tickets by number, falling back to id for the numberless.
