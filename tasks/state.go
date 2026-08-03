@@ -73,9 +73,11 @@ type TaskEntry struct {
 }
 
 // GlobalState is the in-memory view of Task set registration. It mirrors the
-// store's sets table, keyed by definition path; load reads the whole (tiny)
-// table and save rewrites it. The store is the durable home (ADR-0055); the JSON
-// tags survive only to parse the retired state.json files during migration.
+// store's Task-set registrations — a row in the cross-kind Work container
+// registry plus the task-set-side row beside it — keyed by definition path; load
+// reads them all (they are few) and save reconciles them against this view. The
+// store is the durable home (ADR-0055); the JSON tags survive only to parse the
+// retired state.json files during migration.
 type GlobalState struct {
 	Version int                   `json:"version"`
 	Tasks   map[string]*TaskEntry `json:"workloads"`
@@ -111,7 +113,7 @@ func LoadGlobalState(path string) (*GlobalState, error) {
 
 // LoadGlobalStateWith reads registration from the global store. It first folds
 // any surviving per-repository state.json files into the store and retires them,
-// then reads the whole sets table into the keyed-by-def-path view. The path
+// then reads every registration into the keyed-by-def-path view. The path
 // argument is the retired state.json path; it is ignored for reads (the store is
 // global) and kept only for call-site compatibility. A reader with no legacy
 // files and no store yields an empty state without materialising the database.
@@ -153,10 +155,10 @@ func (s *GlobalState) Save() error {
 	return s.SaveWith(defaultDeps)
 }
 
-// SaveWith rewrites the store's sets table from this view, creating the store on
-// first write. The whole-table rewrite is atomic (single writer) and serialised
-// by the global state lock held across UpdateGlobalStateWith, so a concurrent
-// update to another repository is never lost.
+// SaveWith reconciles the store's Task-set registrations against this view,
+// creating the store on first write. The reconcile is atomic (single writer) and
+// serialised by the global state lock held across UpdateGlobalStateWith, so a
+// concurrent update to another repository is never lost.
 func (s *GlobalState) SaveWith(d *Deps) error {
 	st, err := openDrainStore(d)
 	if err != nil {

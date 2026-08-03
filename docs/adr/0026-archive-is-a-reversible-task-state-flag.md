@@ -4,7 +4,7 @@ status: accepted
 
 # Archive is a reversible Task-state flag
 
-> **Relates:** extends ADR 0039's per-repository Task state and ADR 0020's whole-set Multi-task selection. Amended by [ADR-0071](0071-managed-worktree-teardown-happens-only-at-archive-unbind-is-forget-only.md): the "reversible" guarantee holds for the set's metadata and artifacts, but Archive gains one confirm-gated destructive branch — deleting a managed Worktree binding's worktree, which Unarchive cannot restore.
+> **Relates:** extends ADR 0039's per-repository Task state and ADR 0020's whole-set Multi-task selection. Amended by [ADR-0071](0071-managed-worktree-teardown-happens-only-at-archive-unbind-is-forget-only.md): the "reversible" guarantee holds for the set's metadata and artifacts, but Archive gains one confirm-gated destructive branch — deleting a managed Worktree binding's worktree, which Unarchive cannot restore. Amended by [ADR-0174](0174-store-migration-folds-on-first-read.md): the flag is unchanged in meaning, but its column moved off the tombstoned `sets` table onto the cross-kind Work container registry, where a Map archives through the same bit.
 
 Done Task sets never leave the **Status table** — they pile up at the top of `pop tasks status` and stay in `pop tasks timings` completion forever, even after the work is long finished. There was no way to say "I'm done with this set, get it out of my way" short of deleting its directory. Users wanted a declutter affordance: review the finished sets, file them away, and have them stop surfacing in status and completion — most of the time, every Done set at once.
 

@@ -94,6 +94,7 @@ message naming the new status (loud-failure preference). Current embedded templa
 | `prds/` directory — full retirement | pending the PRD co-location feature (ADR-0088) | Co-location moves PRDs to `tasks/<set>/prd.md` and ships a `prds/<slug>.md` → set-folder migration. This cleanup **fully retires the `prds/` directory**: remove the sibling `prds/` read-path, the to-prd/to-tasks fallbacks, and the migration itself, once every repo's PRDs have moved. Verify no `<data-dir>/pop/**/prds/` remain (mirror of the `workloads/` storage check). Blocked on ADR-0088 landing first. |
 | Map manifest fold + `wayfinder/` → `maps/` storage rename | `wayfinder/fold.go` (+ `fold_test.go`); the legacy-name probe in `tasks/storage_doctor.go` (`storageHasDashboardWork`) | Auto-runs per Map on the first scan that finds no `index.json`: mints the manifest from the retired `Status:` / `Type:` / `Blocked by:` header lines, strips those lines from each ticket markdown, and renames the storage directory. Removing it also deletes `StripTicketHeaders`, the header walk it shares with `ParseTicketMarkdown`, and the ticket-status/type/blocking parsing in `wayfinder/parse.go` — after removal a Map without a manifest is simply BROKEN. Sign-off check: item 6 below. |
 | `wayfinder-archive.json` → registry `archived` bit | `foldLegacyArchiveState` in `wayfinder/archive.go` (+ `archive_test.go`) | Auto-runs per repository on the first Map scan that finds the side-file: registers each id it names and sets the registry's `archived` bit, then deletes the file. Removing it also deletes `legacyArchiveState` and the `legacyArchiveStateFile` constant — after removal a leftover file is ignored and its Maps come back visible. Sign-off check: item 6 below. |
+| Tombstoned `sets` table — drop it | migration list in `store/store.go` (#8/#9 create it, #28 copies it out) | Read-dead and write-dead from #28, which copies every row onto the **Work container registry** (`work_containers` + `task_set_registrations`) and never dual-writes. Kept only so a pre-cut binary still boots: its migrate loop is bounded by its own migration count, so the newer `user_version` is a no-op and it reads its own frozen rows. Dropping it is a `DROP TABLE sets` appended as a new migration (never an edit to a shipped one) plus deleting `legacySetRows` in `store/sets_test.go` and the two `sets`-seeding test helpers. After the drop, rolling back to a pre-cut binary loses every registration — so this row goes last, once no tester needs the rollback. Sign-off check: item 7 below. |
 | Legacy `bindings.json` → store migration | `migrateLegacyBindingsFile` (moving to `tasks/binding` in the store-seam refactor; currently `tasks/bindings_store.go:101`) | One-time fold of the retired standalone binding file into the execution-state store (ADR-0055). Every machine that ran a post-ADR-0055 build has migrated; sign-off check: no `<data-dir>/pop/bindings.json` remains. |
 
 ### D2. Internal code aliases (compile-time only, no user impact — remove in a quiet pass)
@@ -155,10 +156,19 @@ Per tester, before removal lands:
    before the side-file went. `Status: done` in a `map.md` is a **hard cut with no
    fold**: such a Map shows as `BROKEN` with the fix on its row, and the line must
    be edited to `arrived` (or the Map arrived through `pop map arrive`) by hand.
+7. **Every Task set on the registry, and no rollback pending** — the copy runs once
+   per machine, when pop.db reaches migration #28. Run `pop tasks status` in each repo
+   that has task sets and confirm every set still shows with its priority, its
+   auto-drain mark and its worktree binding, and that `pop tasks status --archived`
+   still lists the archived ones. A set id registered under two repositories collapses
+   to one registry row (the registry keys `(kind, id)`, with no def_path): check for a
+   set that vanished from one repo's status table and re-register it under a distinct
+   id. Then confirm you have no reason left to run a pre-#28 binary — dropping `sets`
+   removes the frozen snapshot that made rolling back survivable.
 
-| Tester | 1 config | 2 [tasks] | 3 storage | 4 re-integrate | 5 scripts | 6 maps | Signed off |
-|---|---|---|---|---|---|---|---|
-| _(fill in)_ | | | | | | | |
+| Tester | 1 config | 2 [tasks] | 3 storage | 4 re-integrate | 5 scripts | 6 maps | 7 registry | Signed off |
+|---|---|---|---|---|---|---|---|---|
+| _(fill in)_ | | | | | | | | |
 
 ## Questions for beta testers (before cleanup)
 

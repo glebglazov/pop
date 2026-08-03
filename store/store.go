@@ -181,7 +181,9 @@ var migrations = []string{
 	// the files are folded in at the tasks boundary on first read, then retired.
 	// The autoincrement seq preserves registration order, which the status table
 	// renders by. Layer-1 Task set status stays manifest-derived (ADR-0006/0056);
-	// only this machine-local registration moves.
+	// only this machine-local registration moves. Tombstoned by #28, which copies
+	// these rows onto the cross-kind registry: read-dead and write-dead from there
+	// on, kept only so a pre-cut binary still boots.
 	`CREATE TABLE sets (
 		seq        INTEGER PRIMARY KEY AUTOINCREMENT,
 		def_path   TEXT    NOT NULL,
@@ -408,9 +410,9 @@ var migrations = []string{
 	// derivation is cheap and a status cache is a second source of truth that
 	// drifts (ADR-0006/0056). Kind-local registration (priority, auto_drain, the
 	// worktree directive) stays on its kind's own table. The autoincrement seq
-	// preserves registration order, which listings render by. Copying the `sets`
-	// rows in as kind='task-set' rides a later slice; this migration only creates
-	// the table so `pop map` can register against it first.
+	// preserves registration order, which listings render by. This migration only
+	// creates the table, so `pop map` can register against it first; #28 copies the
+	// `sets` rows in as kind='task-set'.
 	`CREATE TABLE work_containers (
 		seq           INTEGER PRIMARY KEY AUTOINCREMENT,
 		kind          TEXT    NOT NULL,
@@ -437,6 +439,46 @@ var migrations = []string{
 		claimed_at   TEXT NOT NULL,
 		PRIMARY KEY (kind, container_id, item_id)
 	);`,
+	// 28: task_set_registrations, and the `sets` copy that moves Task sets onto
+	// the cross-kind registry. Every `sets` row becomes a work_containers row
+	// keyed ('task-set', set_id) carrying the cross-kind `archived` bit, and its
+	// kind-local registration — the repository's def_path, priority, auto_drain
+	// and the ADR-0059 worktree directive — moves here, keyed by the registry
+	// row's seq. Columns rather than a per-kind JSON blob on the registry:
+	// auto_drain is a daemon candidate filter, and JSON in SQLite turns a column
+	// read into a table scan plus a parse.
+	//
+	// `sets` is tombstoned, not dropped: read-dead and write-dead from here on and
+	// never dual-written, but left in place, which buys one real property. A
+	// pre-cut binary's migrate loop is bounded by its own migration count, so this
+	// user_version reads as a no-op and that binary still boots and still reads
+	// its own rows against a frozen snapshot — rolling back a bad release stays
+	// survivable. CLEANUP.md carries the drop under the beta-tester sign-off gate.
+	//
+	// The copy is OR IGNORE and ordered by the old seq, so the registry's own seq
+	// inherits registration order and, since the registry keys ('task-set', id)
+	// with no def_path, one set id registered under two repositories collapses to
+	// its earliest registration — the same machine-wide uniqueness of a set id
+	// that recovery_waiters has assumed since ADR-0100. registered_at is stamped
+	// at the fold: the source table never recorded one, and the fold instant is
+	// the earliest moment this machine can actually name.
+	`CREATE TABLE task_set_registrations (
+		container_seq    INTEGER PRIMARY KEY REFERENCES work_containers(seq) ON DELETE CASCADE,
+		def_path         TEXT    NOT NULL,
+		priority         INTEGER NOT NULL DEFAULT 0,
+		auto_drain       INTEGER NOT NULL DEFAULT 0,
+		worktree_managed INTEGER NOT NULL DEFAULT 0,
+		worktree_name    TEXT    NOT NULL DEFAULT ''
+	);
+	CREATE INDEX idx_task_set_registrations_def ON task_set_registrations(def_path);
+	INSERT OR IGNORE INTO work_containers (kind, id, archived, registered_at)
+		SELECT 'task-set', set_id, archived, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+		  FROM sets ORDER BY seq;
+	INSERT OR IGNORE INTO task_set_registrations
+		(container_seq, def_path, priority, auto_drain, worktree_managed, worktree_name)
+		SELECT c.seq, s.def_path, s.priority, s.auto_drain, s.worktree_managed, s.worktree_name
+		  FROM sets s JOIN work_containers c ON c.kind = 'task-set' AND c.id = s.set_id
+		 ORDER BY s.seq;`,
 }
 
 func (s *Store) migrate() error {
