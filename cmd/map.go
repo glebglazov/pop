@@ -32,7 +32,14 @@ the pid) that took it, never a file state; it frees itself after four hours.
 entry and re-renders map.md's generated index in one re-runnable call, and
 ` + "`pop map out-of-scope`" + ` does the same into the Out of scope section. pop is the
 only writer of those regions — they carry pop:generated markers and are rebuilt
-from the manifest on every resolve, so hand-edits inside them are lost.`,
+from the manifest on every resolve, so hand-edits inside them are lost.
+
+` + "`--adr`" + ` and ` + "`--context`" + ` (both repeatable, resolve only) declare
+draft files a decision produced; pop never parses the answer for links, so a
+draft is verified to exist and recorded on the manifest entry, or the resolve
+refuses naming the missing path. A dirty repository working tree only warns —
+pop cannot tell an unrelated in-flight change from a stray fragment a grilling
+session left behind.`,
 }
 
 var mapStatusCmd = &cobra.Command{
@@ -98,8 +105,10 @@ var mapOutOfScopeCmd = &cobra.Command{
 }
 
 var (
-	mapResolveAnswerFile string
-	mapOutOfScopeReason  string
+	mapResolveAnswerFile    string
+	mapResolveADRDrafts     []string
+	mapResolveContextDrafts []string
+	mapOutOfScopeReason     string
 )
 
 var mapArchiveCmd = &cobra.Command{
@@ -130,6 +139,8 @@ func init() {
 	mapStatusCmd.Flags().BoolVar(&mapStatusAll, "all", false, "include done, abandoned, and archived maps")
 	mapResolveCmd.Flags().StringVar(&mapResolveAnswerFile, "answer-file", "", "file holding the answer body written under ## Answer")
 	_ = mapResolveCmd.MarkFlagRequired("answer-file")
+	mapResolveCmd.Flags().StringArrayVar(&mapResolveADRDrafts, "adr", nil, "path to an ADR draft this decision produced; repeat for more than one")
+	mapResolveCmd.Flags().StringArrayVar(&mapResolveContextDrafts, "context", nil, "path to a CONTEXT.md glossary draft this decision produced; repeat for more than one")
 	mapOutOfScopeCmd.Flags().StringVar(&mapOutOfScopeReason, "reason", "", "why the ticket is beyond the destination")
 	_ = mapOutOfScopeCmd.MarkFlagRequired("reason")
 }
@@ -224,9 +235,11 @@ func renderClaim(w io.Writer, result *wayfinder.ClaimResult) {
 
 func runMapResolve(cmd *cobra.Command, args []string) {
 	err := runMapResolveWith(cmdLayerDeps().wayfinderDeps(), os.Stdout, wayfinder.ResolveRequest{
-		MapID:      args[0],
-		Ticket:     args[1],
-		AnswerFile: mapResolveAnswerFile,
+		MapID:         args[0],
+		Ticket:        args[1],
+		AnswerFile:    mapResolveAnswerFile,
+		ADRDrafts:     mapResolveADRDrafts,
+		ContextDrafts: mapResolveContextDrafts,
 	})
 	handleTaskExit(err)
 }
@@ -273,6 +286,9 @@ func renderResolution(w io.Writer, result *wayfinder.ResolveResult) {
 	}
 	if result.ReleasedClaim != "" {
 		fmt.Fprintf(w, "released the claim held by %s\n", result.ReleasedClaim)
+	}
+	if result.DirtyRepo {
+		fmt.Fprintln(w, "warning: the repository working tree is dirty")
 	}
 }
 

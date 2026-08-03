@@ -165,7 +165,7 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 	// so the Runtime execution lock is not held while a human sits at the prompt.
 	// A declined confirmation returns here having claimed no Drain and held no
 	// lock.
-	dirty, err := runtimeIsDirty(d, runtimePath)
+	dirty, err := RuntimeIsDirty(d, runtimePath)
 	if err != nil {
 		return nil, exitErr(ExitSetup, "runtime git status: %v", err)
 	}

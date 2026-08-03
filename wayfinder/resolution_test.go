@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/glebglazov/pop/internal/deps"
 )
 
 const resolveMapID = "2026-08-03-resolving"
@@ -40,10 +42,13 @@ func resolveFixture(t *testing.T) (*Deps, string) {
 	t.Helper()
 	dir := "maps/" + resolveMapID + "/"
 	d, storageDir := registryFixture(t, map[string]string{
-		dir + "map.md":              resolveMapMarkdown,
-		dir + "issues/01-first.md":  "## Question\n\nWhich database?\n",
-		dir + "issues/02-second.md": "## Question\n\nWhich schema?\n",
-		dir + "issues/03-third.md":  "## Question\n\nWhich client?\n",
+		dir + "map.md":                 resolveMapMarkdown,
+		dir + "issues/01-first.md":     "## Question\n\nWhich database?\n",
+		dir + "issues/02-second.md":    "## Question\n\nWhich schema?\n",
+		dir + "issues/03-third.md":     "## Question\n\nWhich client?\n",
+		dir + "adrs/978d65fd-slug.md":  "# Decision\n\nUse Postgres.\n",
+		dir + "adrs/aaaa1111-other.md": "# Decision\n\nUse SQLite.\n",
+		dir + "context/09-database.md": "+ Database — the relational store.\n",
 		dir + "index.json": `{"tickets":[` +
 			`{"id":"01","file":"01-first.md","title":"Database","type":"grilling","status":"open","blocked_by":[]},` +
 			`{"id":"02","file":"02-second.md","title":"Schema","type":"grilling","status":"open","blocked_by":["01"]},` +
@@ -208,6 +213,8 @@ func TestResolveRefusalTouchesNothing(t *testing.T) {
 		{"missing answer file", ResolveRequest{MapID: resolveMapID, Ticket: "01", AnswerFile: "/nowhere/answer.md"}, "read answer file"},
 		{"unknown ticket", ResolveRequest{MapID: resolveMapID, Ticket: "77", AnswerFile: "keep"}, "no ticket"},
 		{"unknown map", ResolveRequest{MapID: "2026-01-01-nope", Ticket: "01", AnswerFile: "keep"}, "unknown wayfinder map"},
+		{"missing adr draft", ResolveRequest{MapID: resolveMapID, Ticket: "01", AnswerFile: "keep", ADRDrafts: []string{"adrs/nope.md"}}, "--adr adrs/nope.md"},
+		{"missing context draft", ResolveRequest{MapID: resolveMapID, Ticket: "01", AnswerFile: "keep", ContextDrafts: []string{"context/nope.md"}}, "--context context/nope.md"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -397,4 +404,153 @@ func regionBody(t *testing.T, content, name string) string {
 		t.Fatalf("map.md has no %q region:\n%s", name, content)
 	}
 	return content[start+len(open) : end]
+}
+
+// assertDrafts compares recorded draft lists, treating nil and an empty slice
+// as the same "nothing recorded".
+func assertDrafts(t *testing.T, got, want []string, label string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("%s = %v, want %v", label, got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("%s = %v, want %v", label, got, want)
+		}
+	}
+}
+
+// TestResolveRecordsDraftPaths: --adr/--context are verified to exist and
+// recorded on the manifest entry relative to the Map folder, whichever way the
+// path was given.
+func TestResolveRecordsDraftPaths(t *testing.T) {
+	t.Parallel()
+	d, storageDir := resolveFixture(t)
+	mapDir := filepath.Join(storageDir, "maps", resolveMapID)
+
+	result, err := ResolveTicket(d, "", ResolveRequest{
+		MapID:         resolveMapID,
+		Ticket:        "01",
+		AnswerFile:    answerFile(t, "Postgres.\n"),
+		ADRDrafts:     []string{filepath.Join(mapDir, "adrs", "978d65fd-slug.md")},
+		ContextDrafts: []string{"context/09-database.md"},
+	})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	assertDrafts(t, result.Ticket.ADRDrafts, []string{"adrs/978d65fd-slug.md"}, "result ADRDrafts")
+	assertDrafts(t, result.Ticket.ContextDrafts, []string{"context/09-database.md"}, "result ContextDrafts")
+
+	entry := manifestEntry(t, d, mapDir, "01")
+	assertDrafts(t, entry.ADRDrafts, []string{"adrs/978d65fd-slug.md"}, "manifest ADRDrafts")
+	assertDrafts(t, entry.ContextDrafts, []string{"context/09-database.md"}, "manifest ContextDrafts")
+}
+
+// TestResolveReplacesDraftListsRatherThanAccumulating: a re-run overwrites the
+// declared lists instead of appending to them, matching how the answer itself
+// is replaced rather than accumulated.
+func TestResolveReplacesDraftListsRatherThanAccumulating(t *testing.T) {
+	t.Parallel()
+	d, storageDir := resolveFixture(t)
+	mapDir := filepath.Join(storageDir, "maps", resolveMapID)
+
+	if _, err := ResolveTicket(d, "", ResolveRequest{
+		MapID: resolveMapID, Ticket: "01", AnswerFile: answerFile(t, "Postgres.\n"),
+		ADRDrafts: []string{"adrs/978d65fd-slug.md", "adrs/aaaa1111-other.md"},
+	}); err != nil {
+		t.Fatalf("first resolve: %v", err)
+	}
+	if entry := manifestEntry(t, d, mapDir, "01"); len(entry.ADRDrafts) != 2 {
+		t.Fatalf("manifest ADRDrafts after the first resolve = %v, want 2 entries", entry.ADRDrafts)
+	}
+
+	if _, err := ResolveTicket(d, "", ResolveRequest{
+		MapID: resolveMapID, Ticket: "01", AnswerFile: answerFile(t, "Postgres, revised.\n"),
+		ADRDrafts: []string{"adrs/aaaa1111-other.md"},
+	}); err != nil {
+		t.Fatalf("second resolve: %v", err)
+	}
+	assertDrafts(t, manifestEntry(t, d, mapDir, "01").ADRDrafts, []string{"adrs/aaaa1111-other.md"}, "manifest ADRDrafts after rerun")
+
+	// A third run with no --adr at all clears the list rather than leaving the
+	// previous one in place.
+	if _, err := ResolveTicket(d, "", ResolveRequest{
+		MapID: resolveMapID, Ticket: "01", AnswerFile: answerFile(t, "Postgres, final.\n"),
+	}); err != nil {
+		t.Fatalf("third resolve: %v", err)
+	}
+	assertDrafts(t, manifestEntry(t, d, mapDir, "01").ADRDrafts, nil, "manifest ADRDrafts after clearing")
+}
+
+// TestResolveNeverParsesTheAnswerBodyForDrafts: a draft-shaped link inside the
+// answer prose is not enough to record it — only a declared --adr/--context
+// flag is.
+func TestResolveNeverParsesTheAnswerBodyForDrafts(t *testing.T) {
+	t.Parallel()
+	d, storageDir := resolveFixture(t)
+	mapDir := filepath.Join(storageDir, "maps", resolveMapID)
+
+	if _, err := ResolveTicket(d, "", ResolveRequest{
+		MapID: resolveMapID, Ticket: "01",
+		AnswerFile: answerFile(t, "Postgres. See [adrs/978d65fd-slug.md](adrs/978d65fd-slug.md).\n"),
+	}); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	entry := manifestEntry(t, d, mapDir, "01")
+	if len(entry.ADRDrafts) != 0 {
+		t.Fatalf("a draft-shaped link in the answer body was recorded as a declared draft: %v", entry.ADRDrafts)
+	}
+}
+
+// gitStatusMock wraps a fixture's Git seam so "status --porcelain" reports the
+// given porcelain output while every other invocation (repository identity
+// resolution) keeps behaving exactly as the fixture set it up.
+func gitStatusMock(t *testing.T, d *Deps, porcelain string) {
+	t.Helper()
+	original := d.Tasks.Git
+	d.Tasks.Git = &deps.MockGit{
+		CommandInDirFunc: func(dir string, args ...string) (string, error) {
+			if len(args) == 2 && args[0] == "status" && args[1] == "--porcelain" {
+				return porcelain, nil
+			}
+			return original.CommandInDir(dir, args...)
+		},
+	}
+}
+
+// TestResolveWarnsButProceedsOnDirtyTree: refusing on a dirty tree was rejected
+// (ADR-0171) because pop cannot tell an unrelated in-flight change from a stray
+// fragment a grilling session left behind — so a dirty tree only ever warns.
+func TestResolveWarnsButProceedsOnDirtyTree(t *testing.T) {
+	t.Parallel()
+	d, _ := resolveFixture(t)
+	gitStatusMock(t, d, " M some/unrelated/file.go\n")
+
+	result, err := ResolveTicket(d, "", ResolveRequest{
+		MapID: resolveMapID, Ticket: "01", AnswerFile: answerFile(t, "Postgres.\n"),
+	})
+	if err != nil {
+		t.Fatalf("resolve on a dirty tree refused: %v", err)
+	}
+	if !result.DirtyRepo {
+		t.Fatal("result.DirtyRepo = false, want true on a dirty working tree")
+	}
+}
+
+// TestResolveReportsACleanTree: the counterpart to the dirty case, pinning that
+// the warning is conditional rather than unconditional.
+func TestResolveReportsACleanTree(t *testing.T) {
+	t.Parallel()
+	d, _ := resolveFixture(t)
+	gitStatusMock(t, d, "")
+
+	result, err := ResolveTicket(d, "", ResolveRequest{
+		MapID: resolveMapID, Ticket: "01", AnswerFile: answerFile(t, "Postgres.\n"),
+	})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if result.DirtyRepo {
+		t.Fatal("result.DirtyRepo = true on a clean working tree")
+	}
 }

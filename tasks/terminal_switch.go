@@ -162,7 +162,7 @@ func (r *implementRun) hitlGate(m *Manifest, hitl *Task) (bool, error) {
 // blocking the gate on a git failure.
 func (r *implementRun) failedGate(m *Manifest) (bool, error) {
 	r.sharedPromptReader = ensurePromptReader(r.sharedPromptReader, r.opts.ConfirmIn, r.opts.Yes)
-	dirty, _ := runtimeIsDirty(r.d, r.runtimePath)
+	dirty, _ := RuntimeIsDirty(r.d, r.runtimePath)
 	r.parkAtGate(m, FailedTask(m), dirty)
 	handled, err := handleInteractiveFailedGate(r.newGateEnv(), m, FailedTask(m))
 	r.releaseGateHold()

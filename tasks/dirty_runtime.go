@@ -39,7 +39,11 @@ func ValidDirtyRuntimeStrategies() []string {
 	}
 }
 
-func runtimeIsDirty(d *Deps, runtimePath string) (bool, error) {
+// RuntimeIsDirty reports whether the working tree at runtimePath carries any
+// uncommitted change. Exported so callers outside this package (e.g. `pop map
+// resolve`'s dirty-tree warning) reuse the same git-status check rather than
+// shelling out afresh.
+func RuntimeIsDirty(d *Deps, runtimePath string) (bool, error) {
 	out, err := d.Git.CommandInDir(runtimePath, "status", "--porcelain")
 	if err != nil {
 		return false, err

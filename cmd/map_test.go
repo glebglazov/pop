@@ -281,6 +281,70 @@ func TestMapResolveAndOutOfScopeCloseTickets(t *testing.T) {
 	}
 }
 
+// TestMapResolveDraftFlagsRecordAndWarnOnDirtyTree drives the CLI-facing pieces
+// slice 09 adds: a declared draft is verified and recorded on the manifest, a
+// missing one refuses by name, and a dirty repository only ever warns.
+func TestMapResolveDraftFlagsRecordAndWarnOnDirtyTree(t *testing.T) {
+	t.Parallel()
+	files := oneTicketMapFiles("demo")
+	files["maps/demo/adrs/978d65fd-slug.md"] = "# Decision\n\nShip it.\n"
+	d, storageDir, _ := mapRegistryTestDeps(t, files)
+	if err := runMapRegisterWith(d, &bytes.Buffer{}, "demo"); err != nil {
+		t.Fatal(err)
+	}
+	mapDir := filepath.Join(storageDir, "maps", "demo")
+
+	answerPath := filepath.Join(t.TempDir(), "answer.md")
+	if err := os.WriteFile(answerPath, []byte("Ship it.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// mapRegistryTestDeps' Git mock ignores its arguments and always answers with
+	// the git-common-dir path, so `status --porcelain` reads as non-empty: dirty
+	// by default. That is exactly the case this resolve should warn on, not
+	// refuse.
+	var resolved bytes.Buffer
+	err := runMapResolveWith(d, &resolved, wayfinder.ResolveRequest{
+		MapID: "demo", Ticket: "01", AnswerFile: answerPath,
+		ADRDrafts: []string{"adrs/978d65fd-slug.md"},
+	})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if !strings.Contains(resolved.String(), "warning: the repository working tree is dirty") {
+		t.Fatalf("resolve output missing the dirty-tree warning:\n%s", resolved.String())
+	}
+
+	manifest, err := wayfinder.LoadMapManifest(d, mapDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !manifest.Valid || len(manifest.Tickets) == 0 || len(manifest.Tickets[0].ADRDrafts) != 1 ||
+		manifest.Tickets[0].ADRDrafts[0] != "adrs/978d65fd-slug.md" {
+		t.Fatalf("manifest does not record the declared draft: %+v", manifest.Tickets)
+	}
+	before, err := os.ReadFile(filepath.Join(mapDir, "index.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A declared draft that does not exist refuses by name, writing nothing.
+	err = runMapResolveWith(d, &bytes.Buffer{}, wayfinder.ResolveRequest{
+		MapID: "demo", Ticket: "01", AnswerFile: answerPath,
+		ADRDrafts: []string{"adrs/nope.md"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "--adr adrs/nope.md") {
+		t.Fatalf("resolve with a missing draft = %v, want a refusal naming it", err)
+	}
+	after, err := os.ReadFile(filepath.Join(mapDir, "index.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Fatalf("a refused resolve modified the manifest:\nbefore: %s\nafter: %s", before, after)
+	}
+}
+
 func TestMapClaimCompletionOffersUnresolvedTickets(t *testing.T) {
 	t.Parallel()
 	d, _, _ := mapRegistryTestDeps(t, threeTicketMapFiles("demo"))

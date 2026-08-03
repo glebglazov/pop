@@ -25,6 +25,13 @@ type ResolveRequest struct {
 	// Reason is the out-of-scope verdict, given inline: a scope boundary is one
 	// sentence.
 	Reason string
+	// ADRDrafts and ContextDrafts name draft files this decision produced,
+	// declared as flags rather than parsed from the answer body: pop never reads
+	// prose looking for links, so a draft is either declared or it does not exist
+	// as far as the tooling is concerned. Repeatable; replaces whatever a
+	// previous resolve recorded rather than accumulating.
+	ADRDrafts     []string
+	ContextDrafts []string
 }
 
 // ResolveResult reports one completed resolution.
@@ -39,6 +46,11 @@ type ResolveResult struct {
 	Replaced bool
 	// ReleasedClaim names the grilling window that held the ticket, if any.
 	ReleasedClaim string
+	// DirtyRepo reports that the repository working tree carried an uncommitted
+	// change at resolution. pop cannot tell an unrelated in-flight change from a
+	// stray fragment a grilling session left behind, so this only ever warns —
+	// resolving still proceeds.
+	DirtyRepo bool
 }
 
 // ResolveTicket records a decision: it writes the ticket's `## Answer`, flips its
@@ -87,16 +99,64 @@ func resolve(d *Deps, cwd string, req ResolveRequest, body string, outOfScope bo
 		return nil, fmt.Errorf("map %q has no ticket %q; valid: %s", m.ID, ticketID, ticketIDList(m.Tickets))
 	}
 
+	adrDrafts, err := validateDraftPaths(d, m.Dir, "--adr", req.ADRDrafts)
+	if err != nil {
+		return nil, err
+	}
+	contextDrafts, err := validateDraftPaths(d, m.Dir, "--context", req.ContextDrafts)
+	if err != nil {
+		return nil, err
+	}
+
+	// Advisory only (ADR-0171): pop cannot tell an unrelated in-flight change
+	// from a stray fragment a grilling session left behind, so a git error or a
+	// dirty tree never blocks the write — it only warns.
+	dirty, _ := tasks.RuntimeIsDirty(d.taskDeps(), m.Dir)
+
 	var result *ResolveResult
 	err = withMapLock(d, m.ID, func() error {
 		var inner error
-		result, inner = writeResolution(d, m, ticketID, body, outOfScope)
+		result, inner = writeResolution(d, m, ticketID, body, outOfScope, adrDrafts, contextDrafts)
 		return inner
 	})
 	if err != nil {
 		return nil, err
 	}
+	result.DirtyRepo = dirty
 	return result, nil
+}
+
+// validateDraftPaths verifies each declared draft file exists before anything is
+// written — a typo in --adr/--context is a mistake caught immediately, not a
+// dangling manifest entry. Recorded paths are relative to the Map folder, where
+// grill-with-map actually writes them; an absolute path is accepted but recorded
+// relative to the same root.
+func validateDraftPaths(d *Deps, mapDir, flag string, paths []string) ([]string, error) {
+	recorded := make([]string, 0, len(paths))
+	for _, raw := range paths {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		abs := raw
+		rel := filepath.ToSlash(filepath.Clean(raw))
+		if filepath.IsAbs(raw) {
+			if r, err := filepath.Rel(mapDir, raw); err == nil {
+				rel = filepath.ToSlash(r)
+			}
+		} else {
+			abs = filepath.Join(mapDir, raw)
+		}
+		info, err := d.FS.Stat(abs)
+		if err != nil {
+			return nil, fmt.Errorf("%s %s does not exist", flag, raw)
+		}
+		if info.IsDir() {
+			return nil, fmt.Errorf("%s %s is a directory, not a draft file", flag, raw)
+		}
+		recorded = append(recorded, rel)
+	}
+	return recorded, nil
 }
 
 // withMapLock serialises a Map's three-file write across processes. Several
@@ -114,7 +174,7 @@ func withMapLock(d *Deps, mapID string, fn func() error) error {
 // concurrent window's predecessor — and writes the ticket markdown before the
 // manifest, so an interrupted resolve leaves an unresolved ticket carrying its
 // answer rather than a resolved ticket carrying none.
-func writeResolution(d *Deps, m Map, ticketID, body string, outOfScope bool) (*ResolveResult, error) {
+func writeResolution(d *Deps, m Map, ticketID, body string, outOfScope bool, adrDrafts, contextDrafts []string) (*ResolveResult, error) {
 	manifest, err := LoadMapManifest(d, m.Dir)
 	if os.IsNotExist(err) {
 		return nil, fmt.Errorf("map %q has no %s; run `pop map register %s` first", m.ID, MapManifestFileName, m.ID)
@@ -151,6 +211,8 @@ func writeResolution(d *Deps, m Map, ticketID, body string, outOfScope bool) (*R
 	}
 	manifest.Tickets[index].Status = TicketResolved
 	manifest.Tickets[index].OutOfScope = outOfScope
+	manifest.Tickets[index].ADRDrafts = adrDrafts
+	manifest.Tickets[index].ContextDrafts = contextDrafts
 	if err := WriteMapManifest(d, manifest); err != nil {
 		return nil, err
 	}
@@ -164,6 +226,8 @@ func writeResolution(d *Deps, m Map, ticketID, body string, outOfScope bool) (*R
 	}
 	ticket.Status = TicketResolved
 	ticket.OutOfScope = outOfScope
+	ticket.ADRDrafts = adrDrafts
+	ticket.ContextDrafts = contextDrafts
 	return &ResolveResult{
 		MapID:         m.ID,
 		Ticket:        ticket,

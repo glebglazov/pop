@@ -215,7 +215,7 @@ func (r *implementRun) setup() error {
 		}
 	}
 
-	dirty, err := runtimeIsDirty(d, r.runtimePath)
+	dirty, err := RuntimeIsDirty(d, r.runtimePath)
 	if err != nil {
 		return exitErr(ExitSetup, "runtime git status: %v", err)
 	}
