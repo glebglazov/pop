@@ -176,6 +176,7 @@ type AgentAdapter interface {
 	NormalizeOutput(raw string, format AgentOutputFormat) AgentResult
 	RenderOutput(w io.Writer, raw string, format AgentOutputFormat)
 	AssistanceCapability() AgentAssistanceCapability
+	AttendedArgsCapability() AgentAttendedArgsCapability
 	AvailabilityProbeCapability() AgentAvailabilityProbeCapability
 	UsageCapability() AgentUsageCapability
 	CostCapability() AgentCostCapability
@@ -202,6 +203,7 @@ var agentAdapters = map[string]AgentAdapter{
 		autoFormat:     AgentOutputClaudeStreamJSON,
 		autoArgs:       []string{"--output-format", "stream-json", "--verbose"},
 		assistance:     AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "claude"}},
+		attendedArgs:   AgentAttendedArgsCapability{Kind: CapabilitySupported, Args: []string{"--dangerously-skip-permissions"}},
 		availability: AgentAvailabilityProbeCapability{
 			Kind:                 CapabilitySupported,
 			Command:              &AgentCommand{Name: "claude", Args: []string{"auth", "status"}},
@@ -238,6 +240,7 @@ var agentAdapters = map[string]AgentAdapter{
 		autoFormat:     AgentOutputOpenCodeJSON,
 		autoArgs:       []string{"--format", "json"},
 		assistance:     AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "opencode"}},
+		attendedArgs:   AgentAttendedArgsCapability{Kind: CapabilityBlind, Reason: "opencode's CLI carries no auto-approval flag, so its attended session launches bare"},
 		availability: AgentAvailabilityProbeCapability{
 			Kind:   CapabilityBlind,
 			Reason: "opencode ships no read-only auth status command",
@@ -265,6 +268,7 @@ var agentAdapters = map[string]AgentAdapter{
 		autoFormat:     AgentOutputCursorStreamJSON,
 		autoArgs:       []string{"--output-format", "stream-json"},
 		assistance:     AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "cursor-agent"}},
+		attendedArgs:   AgentAttendedArgsCapability{Kind: CapabilitySupported, Args: []string{"--force", "--trust"}},
 		availability: AgentAvailabilityProbeCapability{
 			Kind:                 CapabilitySupported,
 			Command:              &AgentCommand{Name: "cursor-agent", Args: []string{"status", "--format", "json"}},
@@ -306,6 +310,7 @@ var agentAdapters = map[string]AgentAdapter{
 		autoFormat:     AgentOutputCodexJSONL,
 		autoArgs:       []string{"--json"},
 		assistance:     AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "codex"}},
+		attendedArgs:   AgentAttendedArgsCapability{Kind: CapabilitySupported, Args: []string{"--dangerously-bypass-approvals-and-sandbox"}},
 		availability: AgentAvailabilityProbeCapability{
 			Kind:                 CapabilitySupported,
 			Command:              &AgentCommand{Name: "codex", Args: []string{"login", "status"}},
@@ -342,6 +347,7 @@ var agentAdapters = map[string]AgentAdapter{
 		autoFormat:     AgentOutputPiJSONL,
 		autoArgs:       []string{"--mode", "json"},
 		assistance:     AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "pi"}},
+		attendedArgs:   AgentAttendedArgsCapability{Kind: CapabilityBlind, Reason: "pi's CLI carries no auto-approval flag — not even its headless drains pass one"},
 		availability: AgentAvailabilityProbeCapability{
 			Kind:   CapabilityBlind,
 			Reason: "pi ships no read-only auth status command",
@@ -381,6 +387,7 @@ var agentAdapters = map[string]AgentAdapter{
 		autoArgs:        []string{"--output-format", "stream-json"},
 		env:             []string{"KIMI_CODE_NO_AUTO_UPDATE=1"},
 		assistance:      AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "kimi"}},
+		attendedArgs:    AgentAttendedArgsCapability{Kind: CapabilityBlind, Reason: "kimi's -p is its own auto-permission and it rejects --yolo/--auto, so its attended session launches bare (ADR-0164)"},
 		availability: AgentAvailabilityProbeCapability{
 			Kind:   CapabilityBlind,
 			Reason: "kimi ships no read-only auth status command",
@@ -438,6 +445,7 @@ type presetAgentSpec struct {
 	// else (ADR-0164).
 	env []string
 	assistance      AgentAssistanceCapability
+	attendedArgs    AgentAttendedArgsCapability
 	availability    AgentAvailabilityProbeCapability
 	usage           AgentUsageCapability
 	cost            AgentCostCapability
@@ -478,6 +486,7 @@ func (s presetAgentSpec) validate() error {
 		{s.effortLadder.validate(preset)},
 		{s.executable.validate(preset)},
 		{s.availability.validate(preset)},
+		{s.attendedArgs.validate(preset)},
 	} {
 		if check.err != nil {
 			return check.err
@@ -494,6 +503,7 @@ func newPresetAgentAdapter(spec presetAgentSpec) AgentAdapter {
 	spec.autoArgs = append([]string{}, spec.autoArgs...)
 	spec.env = append([]string{}, spec.env...)
 	spec.availability = cloneAvailabilityProbeCapability(spec.availability)
+	spec.attendedArgs.Args = append([]string{}, spec.attendedArgs.Args...)
 	spec.models = append([]string{}, spec.models...)
 	return &presetAgentAdapter{presetAgentSpec: spec}
 }
@@ -590,6 +600,12 @@ func (a *presetAgentAdapter) AssistanceCapability() AgentAssistanceCapability {
 	return cloneAssistanceCapability(a.assistance)
 }
 
+func (a *presetAgentAdapter) AttendedArgsCapability() AgentAttendedArgsCapability {
+	capability := a.attendedArgs
+	capability.Args = append([]string{}, a.attendedArgs.Args...)
+	return capability
+}
+
 func (a *presetAgentAdapter) AvailabilityProbeCapability() AgentAvailabilityProbeCapability {
 	return cloneAvailabilityProbeCapability(a.availability)
 }
@@ -654,6 +670,10 @@ func (a *presetAgentAdapter) AssistanceInvocation(req AgentAssistanceRequest) (*
 	extraArgs, _ := a.splitEnvAssignments(req.ExtraArgs)
 	command.Args = append(command.Args, extraArgs...)
 	command.Args = append(command.Args, capability.Command.Args...)
+	// A session pop opens for a human to work in launches auto-approved, the same
+	// posture the headless drains beside it have always had; the flag that says so
+	// is per-preset and a preset with none launches bare (ADR-0187).
+	command.Args = append(command.Args, a.attendedArgs.attendedArgs()...)
 	// A preset with no positional prompt form (kimi) launches bare; its briefing
 	// reaches the human another way (ADR-0164).
 	clipboardPrompt := ""
@@ -693,6 +713,10 @@ func (a customAgentAdapter) RenderOutput(w io.Writer, raw string, format AgentOu
 
 func (a customAgentAdapter) AssistanceCapability() AgentAssistanceCapability {
 	return AgentAssistanceCapability{Mode: AgentAssistanceUnavailable}
+}
+
+func (a customAgentAdapter) AttendedArgsCapability() AgentAttendedArgsCapability {
+	return AgentAttendedArgsCapability{Kind: CapabilityBlind, Reason: "a custom agent command is a headless command with no attended form"}
 }
 
 func (a customAgentAdapter) AvailabilityProbeCapability() AgentAvailabilityProbeCapability {

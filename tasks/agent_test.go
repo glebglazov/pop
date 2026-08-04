@@ -938,10 +938,10 @@ func TestResolveAgentAssistanceInvocationNative(t *testing.T) {
 	if invocation.Command.Name != "claude" {
 		t.Fatalf("command name = %q, want claude", invocation.Command.Name)
 	}
-	if !reflect.DeepEqual(invocation.Command.Args, []string{"assist prompt"}) {
+	if !reflect.DeepEqual(invocation.Command.Args, []string{"--dangerously-skip-permissions", "assist prompt"}) {
 		t.Fatalf("command args = %#v", invocation.Command.Args)
 	}
-	if invocation.Display != "claude <HITL assistance prompt>" {
+	if invocation.Display != "claude --dangerously-skip-permissions <HITL assistance prompt>" {
 		t.Fatalf("display = %q", invocation.Display)
 	}
 	if !strings.Contains(invocation.Detail, "native") || strings.Contains(invocation.Detail, "fallback") {
@@ -960,10 +960,10 @@ func TestResolveAgentAssistanceInvocationCursorLaunchesOwnBinary(t *testing.T) {
 	if invocation.Command.Name != "cursor-agent" {
 		t.Fatalf("command name = %q, want cursor-agent", invocation.Command.Name)
 	}
-	if !reflect.DeepEqual(invocation.Command.Args, []string{"assist prompt"}) {
+	if !reflect.DeepEqual(invocation.Command.Args, []string{"--force", "--trust", "assist prompt"}) {
 		t.Fatalf("command args = %#v", invocation.Command.Args)
 	}
-	if invocation.Display != "cursor-agent <HITL assistance prompt>" {
+	if invocation.Display != "cursor-agent --force --trust <HITL assistance prompt>" {
 		t.Fatalf("display = %q", invocation.Display)
 	}
 	if !strings.Contains(invocation.Detail, "native") || strings.Contains(invocation.Detail, "fallback") {
@@ -979,7 +979,7 @@ func TestResolveAgentAssistanceInvocationCarriesExtraArgsNative(t *testing.T) {
 	if invocation.Mode != AgentAssistanceNative || invocation.Command.Name != "claude" {
 		t.Fatalf("invocation = %#v, want claude native", invocation)
 	}
-	want := []string{"--model", "opus4.8", "assist prompt"}
+	want := []string{"--model", "opus4.8", "--dangerously-skip-permissions", "assist prompt"}
 	if !reflect.DeepEqual(invocation.Command.Args, want) {
 		t.Fatalf("command args = %#v, want %#v", invocation.Command.Args, want)
 	}
@@ -993,9 +993,47 @@ func TestResolveAgentAssistanceInvocationCarriesExtraArgsForNonClaudePreset(t *t
 	if invocation.Mode != AgentAssistanceNative || invocation.Command.Name != "cursor-agent" {
 		t.Fatalf("invocation = %#v, want cursor-agent native", invocation)
 	}
-	want := []string{"--model", "gpt-5", "assist prompt"}
+	want := []string{"--model", "gpt-5", "--force", "--trust", "assist prompt"}
 	if !reflect.DeepEqual(invocation.Command.Args, want) {
 		t.Fatalf("command args = %#v, want %#v", invocation.Command.Args, want)
+	}
+}
+
+// TestAttendedAssistanceLaunchesAutoApproved pins the per-preset auto-approval
+// posture of ADR-0187: the flag differs per agent, a preset with none launches
+// exactly as it did before, and a custom --agent-cmd gains no attended form.
+func TestAttendedAssistanceLaunchesAutoApproved(t *testing.T) {
+	for _, tc := range []struct {
+		preset string
+		want   []string
+	}{
+		{"claude", []string{"--dangerously-skip-permissions", "assist prompt"}},
+		{"cursor", []string{"--force", "--trust", "assist prompt"}},
+		{"codex", []string{"--dangerously-bypass-approvals-and-sandbox", "assist prompt"}},
+		{"opencode", []string{"assist prompt"}},
+		{"pi", []string{"assist prompt"}},
+		// kimi takes no positional prompt and declares no flag, so it launches bare.
+		{"kimi", nil},
+	} {
+		t.Run(tc.preset, func(t *testing.T) {
+			invocation, err := ResolveAgentAssistanceInvocation(tc.preset, "", "assist prompt", "/tmp/runtime")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(invocation.Command.Args) == 0 && len(tc.want) == 0 {
+				return
+			}
+			if !reflect.DeepEqual(invocation.Command.Args, tc.want) {
+				t.Fatalf("attended args = %#v, want %#v", invocation.Command.Args, tc.want)
+			}
+		})
+	}
+
+	if _, err := (customAgentAdapter{}).AssistanceInvocation(AgentAssistanceRequest{Prompt: "assist prompt"}); err == nil {
+		t.Fatal("a custom agent command must report attended assistance unavailable, not gain an attended form")
+	}
+	if capability := (customAgentAdapter{}).AttendedArgsCapability(); capability.Kind != CapabilityBlind {
+		t.Fatalf("custom attended-args capability = %#v, want Blind", capability)
 	}
 }
 

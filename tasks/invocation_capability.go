@@ -22,6 +22,16 @@ func (c AgentEffortLadderCapability) modelsForTier(effort string) []config.Effor
 	return c.Ladder[effort]
 }
 
+// attendedArgs returns what this preset adds to an attended launch. A Blind
+// preset has no auto-approval flag of its own, so it contributes nothing and its
+// interactive command stays byte-identical to the bare binary (ADR-0187).
+func (c AgentAttendedArgsCapability) attendedArgs() []string {
+	if c.Kind != CapabilitySupported {
+		return nil
+	}
+	return append([]string{}, c.Args...)
+}
+
 func (c AgentExecutableCapability) executableName() string {
 	if c.Kind != CapabilitySupported {
 		return ""

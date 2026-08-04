@@ -312,6 +312,37 @@ func (c AgentEffortLadderCapability) validate(preset string) error {
 	}
 }
 
+// AgentAttendedArgsCapability is a preset's declared stance on the arguments an
+// attended session launches with — the auto-approval posture its headless prefix
+// already asserts, spelled the way its interactive binary spells it (ADR-0187).
+// Supported carries those arguments; Blind carries a sentence naming why the CLI
+// has none, and a Blind preset launches bare rather than refusing to launch.
+type AgentAttendedArgsCapability struct {
+	Kind   CapabilityKind
+	Args   []string // required iff Supported
+	Reason string   // required iff Blind
+}
+
+// validate reports whether this attended-args stance is a complete declaration.
+func (c AgentAttendedArgsCapability) validate(preset string) error {
+	switch c.Kind {
+	case CapabilitySupported:
+		if len(c.Args) == 0 {
+			return fmt.Errorf("agent preset %q: attended-args capability is Supported but Args is empty", preset)
+		}
+		return nil
+	case CapabilityBlind:
+		if strings.TrimSpace(c.Reason) == "" {
+			return fmt.Errorf("agent preset %q: attended-args capability is Blind but Reason is empty", preset)
+		}
+		return nil
+	case capabilityUnset:
+		return fmt.Errorf("agent preset %q: attended-args capability is unset", preset)
+	default:
+		return fmt.Errorf("agent preset %q: attended-args capability has unknown kind %d", preset, c.Kind)
+	}
+}
+
 // AgentExecutableCapability is a preset's declared CLI executable basename
 // (ADR-0166).
 type AgentExecutableCapability struct {

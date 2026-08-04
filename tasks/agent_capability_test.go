@@ -368,6 +368,9 @@ func TestPresetUsageAndCostCapabilitiesDeclared(t *testing.T) {
 		if err := adapter.AvailabilityProbeCapability().validate(preset); err != nil {
 			t.Fatalf("%s availability-probe: %v", preset, err)
 		}
+		if err := adapter.AttendedArgsCapability().validate(preset); err != nil {
+			t.Fatalf("%s attended-args: %v", preset, err)
+		}
 	}
 }
 
@@ -411,6 +414,9 @@ func validTestPresetAgentSpec() presetAgentSpec {
 		availability: AgentAvailabilityProbeCapability{
 			Kind: CapabilityBlind, Reason: reason,
 		},
+		attendedArgs: AgentAttendedArgsCapability{
+			Kind: CapabilityBlind, Reason: reason,
+		},
 	}
 }
 
@@ -437,6 +443,7 @@ func TestPresetAgentSpecValidateRejectsMissingCapability(t *testing.T) {
 		{"effort-ladder", func(s *presetAgentSpec) { s.effortLadder = AgentEffortLadderCapability{} }, "effort-ladder"},
 		{"executable", func(s *presetAgentSpec) { s.executable = AgentExecutableCapability{} }, "executable"},
 		{"availability-probe", func(s *presetAgentSpec) { s.availability = AgentAvailabilityProbeCapability{} }, "availability-probe"},
+		{"attended-args", func(s *presetAgentSpec) { s.attendedArgs = AgentAttendedArgsCapability{} }, "attended-args"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
