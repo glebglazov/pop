@@ -248,3 +248,39 @@ declarations, not by the number of rows.
   the membership rule after worktrees would be wrong on arrival. The config key
   keeps its `worktree_display` name deliberately — renaming a key to match a
   glossary term is churn.
+
+## Amendment (2026-08-04): expanding jumps the cursor to the group's last child
+
+Opening a group showed only as much of it as already happened to fit. The picker's
+list has exactly one piece of offset math — `adjustScroll(cursor, scroll, height,
+itemCount, margin)` — and it is pure cursor-follow plus clamp, with no notion of
+rows appearing. Expanding leaves the cursor on the parent, so the scroll never
+moves and children inserted below the last visible line stay off-screen. With
+`Anchor: AnchorBottom` a collapse also re-inserts blank lines above, shifting the
+rows you were looking at.
+
+Amended:
+
+- **Expanding moves the cursor to the group's last child.** Cursor-follow then
+  scrolls the whole group into view for free, and because quick-access digits
+  number visible rows, every child becomes reachable by hotkey — the point of
+  opening the group in the first place.
+- **The parent may scroll off the top** when a group is taller than the viewport.
+  Pinning the parent was considered and rejected: `left` already collapses the
+  group and lands the cursor on the parent, so the way back is one key, and
+  reserving the top line costs a child on every overflowing group.
+- **The `ScrollMargin: 9` context reserve is suppressed for that jump**, so the
+  last child lands on the bottom line. Honouring the margin would scroll nine rows
+  further than needed and evict nine more rows above for no gain.
+- **Collapsing keeps the rows below the group on their screen lines**, landing the
+  parent where its last visible child sat — the literal reversal of the expand.
+  It is computed from the current offset, not from a remembered pre-expand one, so
+  moving around while expanded cannot make the collapse jump somewhere stale.
+- **The clamp still wins.** If the collapsed list is shorter than the viewport,
+  `scroll` clamps to 0 and `AnchorBottom` pads above; the parent cannot sit on the
+  old line and does not try to. Padding rows to preserve the illusion was rejected.
+
+The shared `adjustScroll` is untouched and no opt-in reveal method is added: the
+whole behaviour is a cursor move plus one suppressed margin in `setExpanded` /
+`collapseRow`. That matters because the same function backs roughly fifteen lists,
+every Work dashboard modal among them.
