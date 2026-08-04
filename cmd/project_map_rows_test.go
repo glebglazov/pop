@@ -160,18 +160,18 @@ func TestMapRowRendersOneGlyph(t *testing.T) {
 	nested := buildProjectRows(rows, mapMeta, config.WorktreeDisplayNested, map[string]bool{"/src/hawk": true})
 
 	child := rowByPath(t, nested, tmuxSessionPathPrefix+"pop-map-2026-08-03-demo")
-	if child.Icon != iconNestedMapSession || child.Marker != "" {
+	if child.Icon != iconHollowMapSession || child.Marker != "" {
 		t.Errorf("Map row glyphs = Icon %q / Marker %q, want %q and nothing else",
-			child.Icon, child.Marker, iconNestedMapSession)
+			child.Icon, child.Marker, iconHollowMapSession)
 	}
 
 	// The unattributed Map is the same row at depth 0, so the glyph does not depend
 	// on attribution succeeding.
 	rows, mapMeta = attributeMapSessions(items, mapWorkSessions("2026-08-03-demo", "/elsewhere"), meta)
 	top := rowByPath(t, buildProjectRows(rows, mapMeta, config.WorktreeDisplayNested, nil), tmuxSessionPathPrefix+"pop-map-2026-08-03-demo")
-	if top.Icon != iconNestedMapSession || top.Marker != "" || top.Depth != 0 {
+	if top.Icon != iconHollowMapSession || top.Marker != "" || top.Depth != 0 {
 		t.Errorf("fallback Map row = Icon %q / Marker %q / Depth %d, want %q at depth 0",
-			top.Icon, top.Marker, top.Depth, iconNestedMapSession)
+			top.Icon, top.Marker, top.Depth, iconHollowMapSession)
 	}
 }
 

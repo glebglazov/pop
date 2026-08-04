@@ -423,21 +423,23 @@ func RunProject(d *ProjectDeps) error {
 		items := buildProjectRows(sessionRows, mapAwareMeta, worktreeDisplay, expandedRows)
 
 		quickAccessModifier := cfg.GetQuickAccessModifier()
+		// Both modes render one fused glyph column, so each legend names that mode's
+		// own vocabulary and nothing else. Flat keeps every distinction it can draw;
+		// the filled Map diamond is in neither, because neither renders it.
 		iconLegends := []ui.IconLegend{
 			{Icon: iconDirSession, Desc: "Directory with tmux session"},
 			{Icon: iconStandaloneSession, Desc: "Standalone tmux session"},
-			{Icon: iconMapSession, Desc: "Map session"},
+			{Icon: iconHollowMapSession, Desc: "Map session"},
 			{Icon: iconTaskSetSession, Desc: "Task-set session"},
 			{Icon: iconRoutineSession, Desc: "Routine session"},
 		}
 		var treeOpts []ui.PickerOption
 		if worktreeDisplay == config.WorktreeDisplayNested {
-			// The legend names what can actually appear: nested mode renders one
-			// fused column, so the Work-kind badges are not in this list's
-			// vocabulary at all.
+			// Nested answers the narrower "what can I attach to", so every live
+			// session reads alike and only a Map stands out.
 			iconLegends = []ui.IconLegend{
 				{Icon: iconDirSession, Desc: "Live session"},
-				{Icon: iconNestedMapSession, Desc: "Map session"},
+				{Icon: iconHollowMapSession, Desc: "Map session"},
 			}
 			// The arrows drive the tree over this iteration's session state, and
 			// write expansion into the loop's own map so it outlives every reopen

@@ -101,9 +101,11 @@ func rowByPath(t *testing.T, rows []ui.Item, path string) ui.Item {
 	return ui.Item{}
 }
 
-// Flat mode is today's list: every worktree is a row of its own under its full
-// "<project>/<worktree>" name, session or not, with both glyph columns intact.
-func TestBuildProjectRowsFlatIsUnchanged(t *testing.T) {
+// Flat mode's row set is today's list: every worktree is a row of its own under
+// its full "<project>/<worktree>" name, session or not, in the incoming order,
+// with no indentation and no disclosure triangle. Fusing the glyph column is the
+// only thing that changed, and it changes a copy.
+func TestBuildProjectRowsFlatFusesGlyphsOnly(t *testing.T) {
 	t.Parallel()
 	items, meta := fixtureRows(
 		coldProject("hawk", "/src/hawk", "hawk"),
@@ -115,8 +117,21 @@ func TestBuildProjectRowsFlatIsUnchanged(t *testing.T) {
 
 	for _, display := range []config.WorktreeDisplay{config.WorktreeDisplayFlat, config.WorktreeDisplay(""), config.WorktreeDisplay("nested-ish")} {
 		rows := buildProjectRows(items, meta, display, nil)
-		if !reflect.DeepEqual(rows, before) {
-			t.Errorf("display %q: rows changed:\n got %+v\nwant %+v", display, rows, before)
+		assertRowNames(t, rows, "hawk", "hawk/cold", "hawk/hot", "pop-map-2026-08-03-demo")
+		for i, r := range rows {
+			bare := r
+			bare.Icon, bare.Marker = before[i].Icon, before[i].Marker
+			if !reflect.DeepEqual(bare, before[i]) {
+				t.Errorf("display %q row %d changed beyond its glyphs:\n got %+v\nwant %+v", display, i, bare, before[i])
+			}
+			if r.Marker != "" {
+				t.Errorf("display %q: %s carries Marker %q — flat renders one column too", display, r.Path, r.Marker)
+			}
+		}
+		// The caller's slice is reused by the next iteration of the picker loop, so
+		// fusing must not have written back into it.
+		if !reflect.DeepEqual(items, before) {
+			t.Errorf("display %q: the caller's rows were mutated:\n got %+v\nwant %+v", display, items, before)
 		}
 	}
 }
@@ -139,42 +154,71 @@ func TestBuildProjectRowsNestedMembershipIsLiveSessionsOnly(t *testing.T) {
 	assertRowNames(t, expanded, "hawk ▾", "  hot")
 }
 
-// One glyph column: every live session reads the same, a Map session is the only
-// kind distinction, and the Work-kind badges are gone from this list entirely.
-func TestBuildProjectRowsFusesGlyphColumn(t *testing.T) {
+// The whole glyph precedence, both modes in one place: what the modes agree on
+// (unread outranks everything, a session-less row is blank, a kind glyph replaces
+// the session glyph rather than joining it, a Map is hollow) and where they part on
+// purpose — flat is the inventory and keeps every distinction it can draw, nested
+// answers "what can I attach to" and flattens all Work kinds but a Map.
+func TestFuseGlyphColumnPrecedenceInBothModes(t *testing.T) {
 	t.Parallel()
-	items, meta := fixtureRows(
-		coldProject("cold", "/src/cold", "cold"),
-		liveProject("dir", "/src/dir", "dir"),
-		rowFixture{name: "set", path: "/src/set", session: "set", icon: iconDirSession, marker: iconTaskSetSession, repo: "set", label: "set"},
-		rowFixture{name: "routine", path: "/src/routine", session: "routine", icon: iconDirSession, marker: iconRoutineSession, repo: "routine", label: "routine"},
-		rowFixture{name: "map", path: "tmux:pop-map-demo", icon: iconStandaloneSession, marker: iconMapSession},
-		rowFixture{name: "scratch", path: "tmux:scratch", icon: iconStandaloneSession},
-		rowFixture{name: "unread", path: "/src/unread", session: "unread", icon: iconAttention, marker: iconTaskSetSession, repo: "unread", label: "unread"},
-	)
-
-	rows := buildProjectRows(items, meta, config.WorktreeDisplayNested, nil)
-
-	wantIcon := map[string]string{
-		"/src/cold":         "",
-		"/src/dir":          iconDirSession,
-		"/src/set":          iconDirSession,
-		"/src/routine":      iconDirSession,
-		"tmux:pop-map-demo": iconNestedMapSession,
-		"tmux:scratch":      iconDirSession,
-		"/src/unread":       iconAttention,
+	cases := []struct {
+		name       string
+		row        rowFixture
+		wantFlat   string
+		wantNested string
+	}{
+		{"no session", coldProject("cold", "/src/cold", "cold"), "", ""},
+		{"live checkout", liveProject("dir", "/src/dir", "dir"), iconDirSession, iconDirSession},
+		{
+			"standalone session",
+			rowFixture{name: "scratch", path: "tmux:scratch", icon: iconStandaloneSession},
+			iconStandaloneSession, iconDirSession,
+		},
+		{
+			"map session",
+			rowFixture{name: "map", path: "tmux:pop-map-demo", icon: iconStandaloneSession, marker: iconMapSession},
+			iconHollowMapSession, iconHollowMapSession,
+		},
+		{
+			"task-set session",
+			rowFixture{name: "set", path: "/src/set", session: "set", icon: iconDirSession, marker: iconTaskSetSession, repo: "set", label: "set"},
+			iconTaskSetSession, iconDirSession,
+		},
+		{
+			"routine session",
+			rowFixture{name: "routine", path: "/src/routine", session: "routine", icon: iconDirSession, marker: iconRoutineSession, repo: "routine", label: "routine"},
+			iconRoutineSession, iconDirSession,
+		},
+		{
+			"unread outranks the work kind",
+			rowFixture{name: "unread", path: "/src/unread", session: "unread", icon: iconAttention, marker: iconTaskSetSession, repo: "unread", label: "unread"},
+			iconAttention, iconAttention,
+		},
 	}
-	for path, want := range wantIcon {
-		if got := rowByPath(t, rows, path).Icon; got != want {
-			t.Errorf("%s: Icon = %q, want %q", path, got, want)
+
+	fx := make([]rowFixture, 0, len(cases))
+	for _, tc := range cases {
+		fx = append(fx, tc.row)
+	}
+	items, meta := fixtureRows(fx...)
+	flat := buildProjectRows(items, meta, config.WorktreeDisplayFlat, nil)
+	nested := buildProjectRows(items, meta, config.WorktreeDisplayNested, nil)
+
+	for _, tc := range cases {
+		if got := rowByPath(t, flat, tc.row.path).Icon; got != tc.wantFlat {
+			t.Errorf("%s: flat Icon = %q, want %q", tc.name, got, tc.wantFlat)
+		}
+		if got := rowByPath(t, nested, tc.row.path).Icon; got != tc.wantNested {
+			t.Errorf("%s: nested Icon = %q, want %q", tc.name, got, tc.wantNested)
 		}
 	}
-	for _, r := range rows {
+
+	for _, r := range append(append([]ui.Item(nil), flat...), nested...) {
 		if r.Marker != "" {
-			t.Errorf("%s: Marker = %q, want none — nested mode has one column", r.Path, r.Marker)
+			t.Errorf("%s: Marker = %q, want none — both modes render one column", r.Path, r.Marker)
 		}
-		if r.Icon == iconTaskSetSession || r.Icon == iconRoutineSession {
-			t.Errorf("%s: Icon = %q — Work-kind badges are not rendered in this list", r.Path, r.Icon)
+		if r.Icon == iconMapSession {
+			t.Errorf("%s: Icon = %q — the filled Map diamond belongs to the Work dashboard", r.Path, r.Icon)
 		}
 		// No colour carries meaning, here or on an accent border that no longer
 		// exists: a glyph is either there or it is not, so nothing a row renders

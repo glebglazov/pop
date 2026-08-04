@@ -40,8 +40,8 @@ func TestProjectRowTreeQueryFlattensTheUniverse(t *testing.T) {
 	}
 	// Same glyph vocabulary as the browse view: typing unfolds the list, it does
 	// not switch to a different one.
-	if got := rowByPath(t, rows, "tmux:pop-map-2026-08-03-demo"); got.Icon != iconNestedMapSession || got.Marker != "" {
-		t.Errorf("Map session row = icon %q marker %q, want the fused %q", got.Icon, got.Marker, iconNestedMapSession)
+	if got := rowByPath(t, rows, "tmux:pop-map-2026-08-03-demo"); got.Icon != iconHollowMapSession || got.Marker != "" {
+		t.Errorf("Map session row = icon %q marker %q, want the fused %q", got.Icon, got.Marker, iconHollowMapSession)
 	}
 	// Identity is untouched by the flattening, as it is by the nesting.
 	if got := rowByPath(t, rows, "/wt/hawk/hot"); got.SessionName != "hawk/hot" {

@@ -179,17 +179,28 @@ type projectRowNode struct {
 	weakRank int
 }
 
-// buildProjectRows arranges the session-aware rows for display. Flat mode hands
-// the rows straight back — every worktree, session or not, under its full
-// "<project>/<worktree>" name, which is what makes a flat list legible. Nested
-// mode returns a different row set, not a rearrangement of the same one: a
-// project's live worktree sessions become its children and its session-less
-// worktrees drop out, reachable by typing a query instead.
+// buildProjectRows arranges the session-aware rows for display. Flat mode lists
+// the same rows it always did — every worktree, session or not, under its full
+// "<project>/<worktree>" name, which is what makes a flat list legible — and only
+// fuses their glyphs. Nested mode returns a different row set, not a rearrangement
+// of the same one: a project's live worktree sessions become its children and its
+// session-less worktrees drop out, reachable by typing a query instead.
 func buildProjectRows(items []ui.Item, meta map[string]projectRowMeta, display config.WorktreeDisplay, expanded map[string]bool) []ui.Item {
 	if display != config.WorktreeDisplayNested {
-		return items
+		return fuseGlyphColumns(items, display)
 	}
 	return flattenProjectRows(nestProjectRows(items, meta), expanded)
+}
+
+// fuseGlyphColumns fuses a whole row slice, into a new slice: the rows it is given
+// are the caller's, reused by projectRowTree and by the next iteration of the
+// picker loop, so display work must never write into them.
+func fuseGlyphColumns(items []ui.Item, display config.WorktreeDisplay) []ui.Item {
+	rows := make([]ui.Item, len(items))
+	for i, it := range items {
+		rows[i] = fuseGlyphColumn(it, display)
+	}
+	return rows
 }
 
 // projectRowTree wires nested mode into the picker's arrow gestures: which rows a
@@ -226,14 +237,9 @@ func projectRowTree(sessionRows []ui.Item, meta map[string]projectRowMeta, expan
 // so this flat pass is what keeps a cold worktree reachable at all — and, because
 // the names carry their prefix here, a query can match on it.
 func queryProjectRows(items []ui.Item) []ui.Item {
-	rows := make([]ui.Item, len(items))
-	for i, it := range items {
-		// The glyph column is the one nested mode renders throughout: typing is not
-		// a different list with a different vocabulary, it is the same list
-		// unfolded.
-		rows[i] = fuseNestedGlyph(it)
-	}
-	return rows
+	// The glyph column is the one nested mode renders throughout: typing is not a
+	// different list with a different vocabulary, it is the same list unfolded.
+	return fuseGlyphColumns(items, config.WorktreeDisplayNested)
 }
 
 // nestProjectRows folds worktree rows into their project's row, in the order the
@@ -314,7 +320,7 @@ func nestProjectRows(items []ui.Item, meta map[string]projectRowMeta) []projectR
 func flattenProjectRows(nodes []projectRowNode, expanded map[string]bool) []ui.Item {
 	rows := make([]ui.Item, 0, len(nodes))
 	for _, n := range nodes {
-		row := fuseNestedGlyph(n.Row)
+		row := fuseGlyphColumn(n.Row, config.WorktreeDisplayNested)
 		if len(n.Children) > 0 {
 			row.Disclosure = iconRowCollapsed
 			if expanded[n.Row.Path] {
@@ -326,7 +332,7 @@ func flattenProjectRows(nodes []projectRowNode, expanded map[string]bool) []ui.I
 			continue
 		}
 		for _, c := range n.Children {
-			child := fuseNestedGlyph(c)
+			child := fuseGlyphColumn(c, config.WorktreeDisplayNested)
 			child.Depth = 1
 			child.Name = nestedChildLabel(c.Name)
 			rows = append(rows, child)
@@ -335,21 +341,37 @@ func flattenProjectRows(nodes []projectRowNode, expanded map[string]bool) []ui.I
 	return rows
 }
 
-// fuseNestedGlyph collapses the icon and marker columns into the one glyph
-// column nested mode renders. Every live session reads the same, whatever it
-// hosts: which kind of Work that is belongs to the Work dashboard, and this list
-// answers "what can I attach to". A Map session is the single exception, because
-// you enter it to decide rather than to sit in a checkout. Unread output outranks
-// both — it is the row you are being asked to look at.
-func fuseNestedGlyph(item ui.Item) ui.Item {
+// fuseGlyphColumn collapses the icon and marker columns into the one glyph column
+// the project dashboard renders. The precedence is shared by both display modes —
+// unread output, then Work kind, then session presence — and the kind glyph
+// *replaces* the live-session glyph rather than sitting beside it, since a row
+// cannot host Work without hosting a session.
+//
+// What the middle rank says is where the modes part, deliberately. Flat is the
+// whole inventory and keeps every distinction it can draw: a Map, a Task set, a
+// Routine, a bare standalone session and a live checkout each read as themselves.
+// Nested answers the narrower "what can I attach to", so every live session reads
+// alike and only a Map stands out — you enter one to decide rather than to sit in a
+// checkout. Both spell a Map hollow, keeping the filled diamond off this surface.
+func fuseGlyphColumn(item ui.Item, display config.WorktreeDisplay) ui.Item {
 	switch {
+	case item.Icon == "":
+		// No session, no glyph. This arm also refuses to promote a stray kind badge
+		// into the one column: without a live session there is nothing for a badge
+		// to be about.
 	case item.Icon == iconAttention:
 		// Kept as it is — the kind of session matters less than being told to
 		// look at this one.
+	case display == config.WorktreeDisplayNested:
+		if item.Marker == iconMapSession {
+			item.Icon = iconHollowMapSession
+		} else {
+			item.Icon = iconDirSession
+		}
 	case item.Marker == iconMapSession:
-		item.Icon = iconNestedMapSession
-	case item.Icon != "":
-		item.Icon = iconDirSession
+		item.Icon = iconHollowMapSession
+	case item.Marker != "":
+		item.Icon = item.Marker
 	}
 	item.Marker = ""
 	return item

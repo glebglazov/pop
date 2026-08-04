@@ -36,7 +36,8 @@ row, opt-in, and render every row through a single glyph column.**
    invocation. No tmux session is renamed and no path changes; a nested row is
    the same row with its `<project>/` prefix left unrendered.
 
-2. **One glyph column, no colour carrying meaning.** `■` for any live session,
+2. **One glyph column, no colour carrying meaning** (nested mode's vocabulary;
+   the column itself is mode-independent — see the amendment). `■` for any live session,
    `◇` for a **Map session**, nothing for a row with no session. The Task-set and
    Routine markers (`▲`, `●`) are not rendered on this surface at all. Which kind
    of Work a session hosts is the Work dashboard's question; this list answers
@@ -48,7 +49,8 @@ row, opt-in, and render every row through a single glyph column.**
    folded-glyph summary of the hidden children, no count.
 
 4. **The two modes list different rows, deliberately.** Flat shows every
-   worktree, session or not — today's behaviour, unchanged. Nested shows only
+   worktree, session or not — today's **row set**, unchanged (its glyphs are
+   fused too; see the amendment). Nested shows only
    worktrees with a live session: a session-less worktree is not something you
    attach to from here, and it stays reachable by typing a query, and in
    `pop worktree dashboard`, which is the checkout list.
@@ -116,6 +118,30 @@ this needs to reach:** `StampWorkSession` has one caller today
 Task set's panes live in its bound checkout's session — already a project or
 worktree row. A Routine that later spawns a checkout-less session of its own
 inherits this rule rather than reopening it.
+
+## Amendment (2026-08-04): the single glyph column is mode-independent
+
+The original decision fused the two columns as part of nested mode, and read
+"flat is unchanged" as covering its glyphs as well as its rows. That left the
+`◆`/`◇` collision fixed in one mode only: in flat a live Map session still
+rendered `□ ◆`, two glyphs for one fact, and every row of the list paid a
+permanent marker gutter to say it.
+
+**Both modes render one glyph column.** The precedence is shared — unread output,
+then Work kind, then session presence — and the kind glyph *replaces* the
+live-session glyph rather than sitting beside it, since a row cannot host Work
+without hosting a session. A row with no session is blank in both.
+
+**The vocabularies stay different, and that is the point.** Flat is the whole
+inventory and loses no distinction it had: a Map, a Task set, a Routine, a bare
+standalone session and a live checkout each keep their own glyph in the one
+column. Nested's vocabulary — `■` for any live session, `◇` for a Map — was
+settled by a human against a live prototype and does not move. **A Map is the
+hollow diamond in both**, so `◆` is off this surface entirely and stays ADR-0138's.
+
+Point 4's "unchanged" is accordingly narrowed to the **row set**: flat still
+lists exactly the rows it listed, in the same order, under full prefixed names,
+with no grouping, no indentation and no disclosure triangle.
 
 ## Considered options
 

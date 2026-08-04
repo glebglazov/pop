@@ -35,13 +35,13 @@ const (
 	iconMapSession     = "◆"
 	iconTaskSetSession = "▲"
 	iconRoutineSession = "●"
-	// The project dashboard's nested mode fuses the two columns above into one:
-	// the list answers "what can I attach to", and which kind of Work a session
-	// hosts is the Work dashboard's question. Every live session reads as
-	// iconDirSession; a Map session is the single kind distinction worth making
-	// here, because you enter it to decide rather than to sit in a checkout. No
-	// colour carries meaning — a glyph is either there or it is not.
-	iconNestedMapSession = "◇"
+	// The project dashboard fuses the two columns above into one, in both display
+	// modes: a kind badge already implies a live session, so the two glyphs beside
+	// each other spent a permanent gutter on one fact. The hollow diamond is what a
+	// Map session reads as there, in either mode — the filled one stays out of that
+	// surface entirely so it remains free for the Work dashboard's Project-routine
+	// badge. No colour carries meaning — a glyph is either there or it is not.
+	iconHollowMapSession = "◇"
 	// The disclosure pair says "there is more here" without an accent colour.
 	iconRowCollapsed = "▸"
 	iconRowExpanded  = "▾"
