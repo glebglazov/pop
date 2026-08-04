@@ -470,7 +470,7 @@ func (f *Fake) StampWorkSession(session, kind, id string) error {
 	if f.WorkStamps == nil {
 		f.WorkStamps = map[string]tmux.WorkSession{}
 	}
-	f.WorkStamps[session] = tmux.WorkSession{Session: session, Kind: kind, ID: id}
+	f.WorkStamps[session] = tmux.WorkSession{Session: session, Kind: kind, ID: id, Dir: f.Live[session]}
 	return nil
 }
 
@@ -485,7 +485,13 @@ func (f *Fake) WorkSessions() ([]tmux.WorkSession, error) {
 	sort.Strings(names)
 	out := make([]tmux.WorkSession, 0, len(names))
 	for _, name := range names {
-		out = append(out, f.WorkStamps[name])
+		ws := f.WorkStamps[name]
+		if ws.Dir == "" {
+			// Real tmux reports the session's start directory alongside the stamp, so
+			// a test that arranged the session in Live gets it without restating it.
+			ws.Dir = f.Live[name]
+		}
+		out = append(out, ws)
 	}
 	return out, nil
 }

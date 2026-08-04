@@ -1,12 +1,16 @@
 package cmd
 
 import (
+	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/glebglazov/pop/config"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/ui"
+	"github.com/glebglazov/pop/wayfinder"
+	"github.com/glebglazov/pop/work/ref"
 )
 
 // The project dashboard's nested row model. Everything here is a pure function
@@ -57,6 +61,108 @@ func projectRowMetaFor(expanded []project.ExpandedProject) map[string]projectRow
 		}
 	}
 	return meta
+}
+
+// attributeMapSessions gives every live Map session a project and a name. A Map
+// session is a standalone row today — it is not a checkout, so nothing in the
+// project walk knows about it — and it arrives as the one long unattributed row
+// in an otherwise grouped list (ADR-0185).
+//
+// A Map is rooted at the Trunk worktree of exactly one repository, so tmux's own
+// start directory for the session says which project it belongs to. The fact
+// rides on the list-sessions call the stamp already costs, so attribution adds no
+// process spawn and no filesystem I/O here. The directory is matched to a project
+// *group*, never to the individual row it names: a bare repo's Trunk is itself one
+// of the worktree rows, and matching that row would invent a third level for one
+// row type.
+//
+// The returned rows and metadata are the caller's inputs plus these facts. Rows
+// keep their Path, so the session a row attaches to and the recency it sorts by
+// are both untouched; only the label and the grouping change. A directory
+// resolving to no configured project is the honest fallback, not an error: the
+// start directory is mutable, so an attribution can go stale, and the map that
+// happens to degrades to the top-level row it has today.
+func attributeMapSessions(items []ui.Item, workSessions map[string]tmuxmod.WorkSession, projectMeta map[string]projectRowMeta) ([]ui.Item, map[string]projectRowMeta) {
+	rows := make([]ui.Item, len(items))
+	copy(rows, items)
+	meta := projectMeta
+	ownMeta := false
+	var byDir map[string]projectRowMeta
+	for i, it := range rows {
+		id, ok := mapSessionID(it, workSessions)
+		if !ok {
+			continue
+		}
+		if byDir == nil {
+			byDir = projectMetaByDir(projectMeta)
+		}
+		group, attributed := byDir[filepath.Clean(workSessions[standaloneSessionName(it)].Dir)]
+		if !attributed {
+			rows[i].Name = id
+			continue
+		}
+		// The prefixed name is what flat mode and a typed query render, and it is
+		// what nestedChildLabel strips back down to the id one level in — the same
+		// rule a worktree row follows.
+		rows[i].Name = projectGroupLabel(group) + "/" + id
+		if !ownMeta {
+			// Copied before the first write: the project metadata is computed once per
+			// invocation, while Work sessions are re-read every picker iteration, so
+			// this pass must not leave last iteration's attributions behind.
+			meta = cloneProjectRowMeta(projectMeta)
+			ownMeta = true
+		}
+		meta[it.Path] = projectRowMeta{IsWorktree: true, Repo: group.Repo, RepoLabel: group.RepoLabel}
+	}
+	return rows, meta
+}
+
+// mapSessionID reports the map id a row's session hosts, reading the Work stamp
+// rather than the session name: the name is pop's convention, the stamp is the
+// session's own answer. The name is the fallback for a session stamped with a kind
+// but no id, which is a session pop could badge but not resolve.
+func mapSessionID(item ui.Item, workSessions map[string]tmuxmod.WorkSession) (string, bool) {
+	if !isStandaloneSession(item) {
+		return "", false
+	}
+	session := standaloneSessionName(item)
+	ws, ok := workSessions[session]
+	if !ok || ref.Kind(ws.Kind) != ref.KindMap {
+		return "", false
+	}
+	id := ws.ID
+	if id == "" {
+		id = wayfinder.MapIDFromSession(session)
+	}
+	return id, id != ""
+}
+
+// projectMetaByDir keys the row metadata by cleaned directory, which is what a
+// tmux start directory is matched against. Paths are compared as written — no
+// symlink resolution, because that is the filesystem I/O this derivation exists to
+// avoid, and a start directory pop itself created is the path pop was configured
+// with.
+func projectMetaByDir(projectMeta map[string]projectRowMeta) map[string]projectRowMeta {
+	byDir := make(map[string]projectRowMeta, len(projectMeta))
+	for path, m := range projectMeta {
+		byDir[filepath.Clean(path)] = m
+	}
+	return byDir
+}
+
+func projectGroupLabel(m projectRowMeta) string {
+	if m.RepoLabel != "" {
+		return m.RepoLabel
+	}
+	return m.Repo
+}
+
+func cloneProjectRowMeta(meta map[string]projectRowMeta) map[string]projectRowMeta {
+	out := make(map[string]projectRowMeta, len(meta)+1)
+	for k, v := range meta {
+		out[k] = v
+	}
+	return out
 }
 
 // projectRowNode is a top-level row and the child rows hanging under it. Only

@@ -24,20 +24,20 @@ func TestStampWorkSessionBuildsArgs(t *testing.T) {
 // Unstamped sessions drop out, so a consumer asking for Work sessions never has
 // to filter the whole server's session list itself.
 func TestWorkSessionsParsesStampedOnly(t *testing.T) {
-	r := &recordingRunner{out: "pop-map-demo\tmap\tdemo\npop\t\t\nrails (work)\ttask-set\t2026-08-03-thing"}
+	r := &recordingRunner{out: "pop-map-demo\tmap\tdemo\t/src/hawk\npop\t\t\t/src/pop\nrails (work)\ttask-set\t2026-08-03-thing\t/wt/rails/work"}
 	tm := &realTmux{run: r}
 
 	sessions, err := tm.WorkSessions()
 	if err != nil {
 		t.Fatalf("WorkSessions: %v", err)
 	}
-	wantArgs := [][]string{{"list-sessions", "-F", "#{session_name}\t#{@pop_work_kind}\t#{@pop_work_id}"}}
+	wantArgs := [][]string{{"list-sessions", "-F", "#{session_name}\t#{@pop_work_kind}\t#{@pop_work_id}\t#{session_path}"}}
 	if !reflect.DeepEqual(r.calls, wantArgs) {
 		t.Fatalf("args = %v, want %v", r.calls, wantArgs)
 	}
 	want := []WorkSession{
-		{Session: "pop-map-demo", Kind: "map", ID: "demo"},
-		{Session: "rails (work)", Kind: "task-set", ID: "2026-08-03-thing"},
+		{Session: "pop-map-demo", Kind: "map", ID: "demo", Dir: "/src/hawk"},
+		{Session: "rails (work)", Kind: "task-set", ID: "2026-08-03-thing", Dir: "/wt/rails/work"},
 	}
 	if !reflect.DeepEqual(sessions, want) {
 		t.Fatalf("sessions = %v, want %v", sessions, want)

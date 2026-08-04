@@ -23,6 +23,14 @@ type WorkSession struct {
 	Session string
 	Kind    string
 	ID      string
+	// Dir is tmux's own start directory for the session (`#{session_path}`) — the
+	// directory it was created in, which for a Map session is the repository's
+	// Trunk worktree. It rides along on the same list-sessions format string as
+	// the stamp, so a consumer that has to place a Work session in a project tree
+	// gets the fact for no extra process spawn and no filesystem I/O. It is
+	// tmux's mutable start directory, not a durable record: `attach -c` rewrites
+	// it, so a consumer must have an answer for "this resolves to nothing".
+	Dir string
 }
 
 // NewSessionWithWindow creates a detached session named name rooted at dir whose
@@ -60,17 +68,17 @@ func (t *realTmux) StampWorkSession(session, kind, id string) error {
 // wants the Work sessions, and an empty kind is the honest "not one".
 func (t *realTmux) WorkSessions() ([]WorkSession, error) {
 	out, err := t.run.output("list-sessions", "-F",
-		"#{session_name}\t#{"+optWorkKind+"}\t#{"+optWorkID+"}")
+		"#{session_name}\t#{"+optWorkKind+"}\t#{"+optWorkID+"}\t#{session_path}")
 	if err != nil {
 		return nil, err
 	}
 	var sessions []WorkSession
 	for _, line := range strings.Split(out, "\n") {
-		parts := strings.SplitN(line, "\t", 3)
-		if len(parts) != 3 || parts[0] == "" || parts[1] == "" {
+		parts := strings.SplitN(line, "\t", 4)
+		if len(parts) != 4 || parts[0] == "" || parts[1] == "" {
 			continue
 		}
-		sessions = append(sessions, WorkSession{Session: parts[0], Kind: parts[1], ID: parts[2]})
+		sessions = append(sessions, WorkSession{Session: parts[0], Kind: parts[1], ID: parts[2], Dir: parts[3]})
 	}
 	return sessions, nil
 }

@@ -415,7 +415,12 @@ func RunProject(d *ProjectDeps) error {
 			workSessions = d.WorkSessions()
 		}
 		sessionRows := buildSessionAwareItemsWith(baseItems, hist, d.SessionActivity(), excludedSessionNames, attention, workSessions)
-		items := buildProjectRows(sessionRows, rowMeta, worktreeDisplay, expandedRows)
+		// A Map session is not a checkout, so it reaches here as a standalone row
+		// with no project; this is where it gets one, from the directory tmux started
+		// it in. It runs after the recency sort and touches no Path, so a Map keeps
+		// sorting by its own session activity wherever it lands (ADR-0185).
+		sessionRows, mapAwareMeta := attributeMapSessions(sessionRows, workSessions, rowMeta)
+		items := buildProjectRows(sessionRows, mapAwareMeta, worktreeDisplay, expandedRows)
 
 		quickAccessModifier := cfg.GetQuickAccessModifier()
 		iconLegends := []ui.IconLegend{
@@ -437,7 +442,7 @@ func RunProject(d *ProjectDeps) error {
 			// The arrows drive the tree over this iteration's session state, and
 			// write expansion into the loop's own map so it outlives every reopen
 			// below.
-			treeOpts = append(treeOpts, ui.WithTree(projectRowTree(sessionRows, rowMeta, expandedRows)))
+			treeOpts = append(treeOpts, ui.WithTree(projectRowTree(sessionRows, mapAwareMeta, expandedRows)))
 		}
 		if cfg.UnreadNotificationsEnabled("project") {
 			iconLegends = append(iconLegends, ui.IconLegend{Icon: iconAttention, Desc: "Agent has unread output"})
