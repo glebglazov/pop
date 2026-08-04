@@ -38,6 +38,12 @@ type projectRowMeta struct {
 	// IsWorktree marks a row as a non-trunk worktree — the rows that become the
 	// nested level.
 	IsWorktree bool
+	// IsTrunk marks a worktree row that was declared its repository's Trunk. A
+	// bare repository has no row of its own — every one of its checkouts is a
+	// worktree row — so without this the trunk sits at the nested level under a
+	// grouping header nothing can open, and the checkout the operator reaches for
+	// most is the one they cannot click.
+	IsTrunk bool
 	// Repo is the grouping key: the repository's directory basename, which every
 	// row of one repository carries alike — a configured checkout, a bare repo's
 	// worktree, and a pop-managed worktree (whose repo key hands the basename
@@ -61,6 +67,92 @@ func projectRowMetaFor(expanded []project.ExpandedProject) map[string]projectRow
 		}
 	}
 	return meta
+}
+
+// markTrunkRows flags the rows whose checkout was declared its repository's
+// Trunk, from the config-declared paths alone (config.DeclaredTrunkPathsWith) —
+// no git fork, and no per-row work in the common case: declarations are keyed by
+// path and so is the row metadata, so the whole pass is one map lookup per
+// declared trunk.
+//
+// The later passes are the mismatch case. A declaration names the same checkout
+// by a different route than the project glob that produced the row — a
+// "~/Dev/work/x/main" declaration against rows built from a "/private/Dev"
+// symlink resolution — and then no key matches. Resolving costs an lstat per path
+// component, so it is spent in the narrowest place that can still answer: first
+// on the declarations that missed, which is one resolution each and another map
+// lookup; only if that misses too on the rows themselves, and then only for rows
+// in repositories that ended up with no trunk at all.
+func markTrunkRows(meta map[string]projectRowMeta, declared []string, evalSymlinks func(string) (string, error)) {
+	if len(meta) == 0 || len(declared) == 0 {
+		return
+	}
+	mark := func(path string) bool {
+		m, ok := meta[path]
+		if !ok {
+			return false
+		}
+		m.IsTrunk = true
+		meta[path] = m
+		return true
+	}
+
+	var unmatched []string
+	for _, path := range declared {
+		if !mark(path) {
+			unmatched = append(unmatched, path)
+		}
+	}
+	if len(unmatched) == 0 || evalSymlinks == nil {
+		return
+	}
+
+	stillMissing := make(map[string]bool, len(unmatched))
+	for _, path := range unmatched {
+		resolved, err := evalSymlinks(path)
+		if err != nil {
+			continue
+		}
+		if !mark(resolved) {
+			stillMissing[resolved] = true
+		}
+	}
+	if len(stillMissing) == 0 {
+		return
+	}
+
+	// Which repositories still have no trunk row. A repository with one already is
+	// not worth an lstat, and neither is a repository with no worktree rows: it has
+	// a row of its own to be the parent.
+	trunkless := make(map[string]bool)
+	for _, m := range meta {
+		if m.Repo == "" || !m.IsWorktree {
+			continue
+		}
+		if _, ok := trunkless[m.Repo]; !ok {
+			trunkless[m.Repo] = true
+		}
+	}
+	for _, m := range meta {
+		if m.IsTrunk {
+			delete(trunkless, m.Repo)
+		}
+	}
+	if len(trunkless) == 0 {
+		return
+	}
+
+	for path, m := range meta {
+		if !m.IsWorktree || !trunkless[m.Repo] {
+			continue
+		}
+		resolved, err := evalSymlinks(path)
+		if err != nil || !stillMissing[resolved] {
+			continue
+		}
+		m.IsTrunk = true
+		meta[path] = m
+	}
 }
 
 // attributeMapSessions gives every live Map session a project and a name. A Map
@@ -252,7 +344,7 @@ func nestProjectRows(items []ui.Item, meta map[string]projectRowMeta) []projectR
 	// it to the wrong project is worse than leaving it at the top level.
 	parentsByRepo := make(map[string]int)
 	for _, it := range items {
-		if m, ok := meta[it.Path]; ok && !m.IsWorktree && m.Repo != "" {
+		if m, ok := meta[it.Path]; ok && rowCanParent(m) && m.Repo != "" {
 			parentsByRepo[m.Repo]++
 		}
 	}
@@ -265,19 +357,20 @@ func nestProjectRows(items []ui.Item, meta map[string]projectRowMeta) []projectR
 		m, known := meta[it.Path]
 		groupable := known && m.Repo != "" && parentsByRepo[m.Repo] <= 1
 		switch {
-		case groupable && !m.IsWorktree:
+		case groupable && rowCanParent(m):
+			parent := parentRowFor(it, m)
 			if idx, ok := nodeByRepo[m.Repo]; ok {
 				// The repository's own row arrives after one of its worktrees —
 				// it is the older of the two. It takes over the parent that was
 				// synthesized for the worktree, so one repository never grows two
 				// parent rows.
-				nodes[idx].Row = it
+				nodes[idx].Row = parent
 				nodes[idx].rank = max(nodes[idx].rank, i)
 				nodes[idx].weakRank = max(nodes[idx].weakRank, i)
 				continue
 			}
 			nodeByRepo[m.Repo] = len(nodes)
-			nodes = append(nodes, projectRowNode{Row: it, rank: i, weakRank: i})
+			nodes = append(nodes, projectRowNode{Row: parent, rank: i, weakRank: i})
 		case groupable && m.IsWorktree:
 			idx, ok := nodeByRepo[m.Repo]
 			if !ok {
@@ -386,6 +479,29 @@ func nestedChildLabel(name string) string {
 		return name[i+1:]
 	}
 	return name
+}
+
+// rowCanParent reports whether a row can be its repository's top-level row: the
+// repository's own checkout, or the worktree declared its Trunk. Two of them in
+// one repository is the ambiguity nestProjectRows refuses to guess at, which is
+// why this is the same predicate on both sides of that count.
+func rowCanParent(m projectRowMeta) bool {
+	return !m.IsWorktree || m.IsTrunk
+}
+
+// parentRowFor is the row a node renders at the top level. A trunk worktree reads
+// as its repository there — the level says which repository it is, so the
+// "<project>/" prefix its label carries in flat mode and in a query would only
+// repeat it — while its Path, SessionName and glyph stay the trunk checkout's, so
+// the row opens the trunk session and sorts by the trunk's own recency.
+func parentRowFor(item ui.Item, m projectRowMeta) ui.Item {
+	if !m.IsTrunk || !m.IsWorktree {
+		return item
+	}
+	if label := projectGroupLabel(m); label != "" {
+		item.Name = label
+	}
+	return item
 }
 
 // synthesizedProjectRow is the parent nested mode invents for a repository with

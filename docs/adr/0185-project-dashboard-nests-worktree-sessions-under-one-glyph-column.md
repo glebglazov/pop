@@ -143,6 +143,37 @@ Point 4's "unchanged" is accordingly narrowed to the **row set**: flat still
 lists exactly the rows it listed, in the same order, under full prefixed names,
 with no grouping, no indentation and no disclosure triangle.
 
+## Amendment (2026-08-04): a bare repository's parent row is its declared Trunk
+
+The original decision gave a repository with no row of its own — a bare repo,
+whose checkouts are all worktree rows — a **synthesized grouping header** named
+after the repository, deliberately openable by nothing. For a bare repo that is
+every checkout including its Trunk, so the checkout the operator reaches for most
+sat one level in, under a row that refuses to open, while flat mode had listed it
+as a clickable row all along. Nested mode was a reachability regression for
+exactly the layout the synthesized parent was invented for.
+
+**Where a checkout is declared its repository's Trunk, that row is the
+repository's top-level row.** The Trunk keeps its `Path`, `SessionName` and glyph,
+so the row opens the Trunk's own session and sorts by the Trunk's own recency;
+only its label drops to the repository's name, because the level it now sits on is
+what the `<project>/` prefix was saying. Its siblings nest under it. A synthesized
+header remains the arrangement for a repository pop has **not** been told the Trunk
+of — an invented parent is still better than a half-nested list — and two
+candidates in one repository (a configured checkout *and* a worktree declared
+Trunk) fall back to no grouping, the same refusal-to-guess as an ambiguous
+basename.
+
+**The declaration is read path-first, never resolved per checkout.** `[repo."<path>"]
+trunk = true` and runtime layer 5 are both keyed by the checkout path, so asking
+"was this row declared the Trunk" is a set membership test —
+`config.DeclaredTrunkPathsWith` — not a call to `binding.ResolveTrunkPathWith`,
+which needs a repo key and therefore a git fork per candidate. Symlink resolution
+is spent only after a plain comparison misses: first on the declarations, then, only
+for a repository still without a Trunk, on its rows. ADR-0110's zero-git-call
+invariant for the picker is intact and the added cost is bounded by the number of
+declarations, not by the number of rows.
+
 ## Considered options
 
 - **Keep the flat prefixed list.** Rejected at the prototype: nesting read

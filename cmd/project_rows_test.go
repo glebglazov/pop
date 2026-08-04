@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -485,4 +486,242 @@ func TestRunProjectWorktreeDisplayWiring(t *testing.T) {
 			t.Errorf("rows = %q, want the flat prefixed list", rows)
 		}
 	})
+}
+
+// A bare repository's Trunk is the checkout the operator reaches for most, and it
+// arrives as one worktree row among many. Nested mode makes it the repository's
+// top-level row rather than hanging it under a header nothing can open: the row
+// reads as the repository, opens the trunk's own session, and its siblings nest
+// under it.
+func TestBuildProjectRowsPromotesDeclaredTrunkToParent(t *testing.T) {
+	t.Parallel()
+	items, meta := fixtureRows(
+		rowFixture{name: "code/kestrel/hotfix", path: "/wt/kestrel/hotfix", session: "kestrel/hotfix", icon: iconDirSession, worktree: true, repo: "kestrel", label: "code/kestrel"},
+		rowFixture{name: "code/kestrel/main", path: "/wt/kestrel/main", session: "kestrel/main", icon: iconDirSession, worktree: true, repo: "kestrel", label: "code/kestrel"},
+	)
+	markTrunkRows(meta, []string{"/wt/kestrel/main"}, nil)
+
+	rows := buildProjectRows(items, meta, config.WorktreeDisplayNested, map[string]bool{"/wt/kestrel/main": true})
+	assertRowNames(t, rows, "code/kestrel ▾", "  hotfix")
+
+	parent := rows[0]
+	if isSynthesizedProjectRow(parent) {
+		t.Errorf("parent Path = %q, want the trunk checkout — a header cannot be opened", parent.Path)
+	}
+	if parent.Path != "/wt/kestrel/main" || parent.SessionName != "kestrel/main" {
+		t.Errorf("parent = {Path %q, SessionName %q}, want the trunk's own", parent.Path, parent.SessionName)
+	}
+	if parent.Icon != iconDirSession {
+		t.Errorf("parent Icon = %q, want the trunk's live-session glyph", parent.Icon)
+	}
+	for _, r := range rows[1:] {
+		if r.Path == "/wt/kestrel/main" {
+			t.Error("trunk row rendered as a child as well as the parent")
+		}
+	}
+
+	// A cold trunk is still the parent — that is the whole point, since a
+	// session-less worktree is otherwise unreachable without typing a query.
+	items, meta = fixtureRows(
+		rowFixture{name: "code/kestrel/main", path: "/wt/kestrel/main", session: "kestrel/main", worktree: true, repo: "kestrel", label: "code/kestrel"},
+	)
+	markTrunkRows(meta, []string{"/wt/kestrel/main"}, nil)
+	rows = buildProjectRows(items, meta, config.WorktreeDisplayNested, nil)
+	assertRowNames(t, rows, "code/kestrel")
+	if rows[0].Path != "/wt/kestrel/main" {
+		t.Errorf("cold trunk parent Path = %q, want the checkout", rows[0].Path)
+	}
+
+	// Undeclared, and the header comes back: nothing about the arrangement changed
+	// for a bare repo pop has not been told the trunk of.
+	items, meta = fixtureRows(
+		rowFixture{name: "code/kestrel/main", path: "/wt/kestrel/main", session: "kestrel/main", icon: iconDirSession, worktree: true, repo: "kestrel", label: "code/kestrel"},
+	)
+	rows = buildProjectRows(items, meta, config.WorktreeDisplayNested, map[string]bool{projectGroupPathPrefix + "kestrel": true})
+	assertRowNames(t, rows, "code/kestrel ▾", "  main")
+
+	// Flat mode is untouched: every worktree keeps its own row under its full
+	// prefixed name, trunk included.
+	items, meta = fixtureRows(
+		rowFixture{name: "code/kestrel/main", path: "/wt/kestrel/main", session: "kestrel/main", icon: iconDirSession, worktree: true, repo: "kestrel", label: "code/kestrel"},
+		rowFixture{name: "code/kestrel/hotfix", path: "/wt/kestrel/hotfix", session: "kestrel/hotfix", icon: iconDirSession, worktree: true, repo: "kestrel", label: "code/kestrel"},
+	)
+	markTrunkRows(meta, []string{"/wt/kestrel/main"}, nil)
+	rows = buildProjectRows(items, meta, config.WorktreeDisplayFlat, nil)
+	assertRowNames(t, rows, "code/kestrel/main", "code/kestrel/hotfix")
+}
+
+// A non-bare repository already has a row of its own. A declaration naming one of
+// its worktrees as well would leave two candidates for one top-level row, and
+// guessing between them is worse than leaving the worktrees where they were.
+func TestNestProjectRowsRefusesTwoTrunkCandidates(t *testing.T) {
+	t.Parallel()
+	items, meta := fixtureRows(
+		liveProject("hawk", "/src/hawk", "hawk"),
+		liveWorktree("hawk/fix", "/wt/hawk/fix", "hawk"),
+	)
+	markTrunkRows(meta, []string{"/wt/hawk/fix"}, nil)
+
+	rows := buildProjectRows(items, meta, config.WorktreeDisplayNested, nil)
+	assertRowNames(t, rows, "hawk", "hawk/fix")
+}
+
+// The trunk lookup is a set membership test over paths, so the common case costs
+// one map lookup per declaration and touches the filesystem not at all. Symlinks
+// are resolved only when a plain comparison has already missed, and rows are
+// resolved only when resolving the declaration missed too.
+func TestMarkTrunkRowsResolvesSymlinksOnlyOnAMiss(t *testing.T) {
+	t.Parallel()
+
+	newMeta := func() map[string]projectRowMeta {
+		return map[string]projectRowMeta{
+			"/private/src/kestrel/main":   {IsWorktree: true, Repo: "kestrel"},
+			"/private/src/kestrel/hotfix": {IsWorktree: true, Repo: "kestrel"},
+			"/src/hawk":                   {Repo: "hawk"},
+		}
+	}
+
+	t.Run("direct hit resolves nothing", func(t *testing.T) {
+		t.Parallel()
+		meta := newMeta()
+		calls := 0
+		markTrunkRows(meta, []string{"/private/src/kestrel/main"}, func(p string) (string, error) {
+			calls++
+			return p, nil
+		})
+		if !meta["/private/src/kestrel/main"].IsTrunk {
+			t.Error("declared trunk not marked")
+		}
+		if calls != 0 {
+			t.Errorf("EvalSymlinks called %d times on a direct hit, want 0", calls)
+		}
+	})
+
+	t.Run("the declaration is resolved once", func(t *testing.T) {
+		t.Parallel()
+		meta := newMeta()
+		var resolved []string
+		markTrunkRows(meta, []string{"/src/kestrel/main"}, func(p string) (string, error) {
+			resolved = append(resolved, p)
+			return strings.Replace(p, "/src/", "/private/src/", 1), nil
+		})
+		if !meta["/private/src/kestrel/main"].IsTrunk {
+			t.Error("trunk declared through a symlinked path not marked")
+		}
+		if !reflect.DeepEqual(resolved, []string{"/src/kestrel/main"}) {
+			t.Errorf("resolved %q, want the declaration alone — no row needed resolving", resolved)
+		}
+	})
+
+	t.Run("rows are resolved only for a repository with no trunk", func(t *testing.T) {
+		t.Parallel()
+		meta := newMeta()
+		meta["/private/src/kestrel/hotfix"] = projectRowMeta{IsWorktree: true, Repo: "kestrel", IsTrunk: true}
+		var resolved []string
+		markTrunkRows(meta, []string{"/elsewhere/kestrel/main"}, func(p string) (string, error) {
+			resolved = append(resolved, p)
+			return p, nil
+		})
+		if !reflect.DeepEqual(resolved, []string{"/elsewhere/kestrel/main"}) {
+			t.Errorf("resolved %q, want the declaration alone — kestrel already had a trunk", resolved)
+		}
+
+		// With no trunk anywhere, the rows of the trunkless repository are the last
+		// resort — and only those rows.
+		meta = newMeta()
+		resolved = nil
+		markTrunkRows(meta, []string{"/link/kestrel/main"}, func(p string) (string, error) {
+			resolved = append(resolved, p)
+			if p == "/link/kestrel/main" {
+				return "/real/kestrel/main", nil
+			}
+			if strings.HasSuffix(p, "/kestrel/main") {
+				return "/real/kestrel/main", nil
+			}
+			return p, nil
+		})
+		if !meta["/private/src/kestrel/main"].IsTrunk {
+			t.Error("row matching the resolved declaration not marked")
+		}
+		if slices.Contains(resolved, "/src/hawk") {
+			t.Errorf("resolved %q, want no row of a repository that has a parent already", resolved)
+		}
+	})
+
+	t.Run("no declarations is no work", func(t *testing.T) {
+		t.Parallel()
+		meta := newMeta()
+		markTrunkRows(meta, nil, func(string) (string, error) {
+			t.Error("EvalSymlinks called with nothing declared")
+			return "", nil
+		})
+		for path, m := range meta {
+			if m.IsTrunk {
+				t.Errorf("row %q marked trunk with nothing declared", path)
+			}
+		}
+	})
+}
+
+// The wiring, end to end: a [repo."<path>"] trunk = true declaration — the same
+// one that names the fork base for managed worktrees — is what promotes a bare
+// repository's trunk to its top-level row. Nothing in the picker resolves a trunk
+// per checkout, so without this read the declaration went unhonoured here.
+func TestRunProjectPromotesDeclaredTrunkOfABareRepo(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	projectDir := filepath.Join(root, "hawk")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	repoRoot := filepath.Join(root, "worktrees", "kestrel-0123456789ab")
+	trunk := filepath.Join(repoRoot, "main")
+	hotfix := filepath.Join(repoRoot, "hotfix")
+
+	declareTrunk := true
+	d := testProjectDeps(t)
+	d.LoadConfig = func() (*config.Config, error) {
+		return &config.Config{
+			Projects: []config.ProjectEntry{{Path: projectDir}},
+			Project:  &config.ProjectConfig{WorktreeDisplay: string(config.WorktreeDisplayNested)},
+			Repo: map[string]config.RepoOverrideConfig{
+				trunk: {Trunk: &declareTrunk},
+			},
+		}, nil
+	}
+	d.ManagedWorktrees = func() []project.ExpandedProject {
+		return []project.ExpandedProject{
+			{Name: "kestrel/main", Path: trunk, ProjectName: "kestrel", IsWorktree: true, SessionName: "kestrel/main"},
+			{Name: "kestrel/hotfix", Path: hotfix, ProjectName: "kestrel", IsWorktree: true, SessionName: "kestrel/hotfix"},
+		}
+	}
+	d.SessionActivity = func() map[string]int64 {
+		return map[string]int64{"kestrel/hotfix": time.Now().Unix()}
+	}
+
+	var rows []ui.Item
+	d.RunPicker = func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {
+		rows = items
+		return ui.Result{Action: ui.ActionCancel}, nil
+	}
+	if err := RunProject(d); err != nil {
+		t.Fatalf("RunProject: %v", err)
+	}
+
+	parent := rowByPath(t, rows, trunk)
+	if parent.Depth != 0 {
+		t.Errorf("trunk row Depth = %d, want 0 — the trunk is the repository's row", parent.Depth)
+	}
+	if parent.Name != "kestrel" {
+		t.Errorf("trunk row Name = %q, want the repository's name", parent.Name)
+	}
+	if parent.SessionName != "kestrel/main" {
+		t.Errorf("trunk row SessionName = %q, want the trunk's own session", parent.SessionName)
+	}
+	for _, r := range rows {
+		if isSynthesizedProjectRow(r) {
+			t.Errorf("row %q is a grouping header, want the trunk in its place", r.Name)
+		}
+	}
 }

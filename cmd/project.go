@@ -369,6 +369,11 @@ func RunProject(d *ProjectDeps) error {
 	// belongs to — is metadata the ui.Item drops. Captured once here, beside the
 	// rows it describes, so the nested row builder stays a function over rows.
 	rowMeta := projectRowMetaFor(sortedExpanded)
+	// Which of those rows is a repository's Trunk, read from the path-keyed
+	// declarations alone so the picker still forks no git (ADR-0110). Done once
+	// here, outside the picker loop, since a declaration cannot change under a
+	// running picker.
+	markTrunkRows(rowMeta, cfg.DeclaredTrunkPathsWith(cmdLayerDeps().configDeps()), d.Project.FS.EvalSymlinks)
 
 	// Load custom commands for project picker mode
 	var customCommands []ui.UserDefinedCommand
