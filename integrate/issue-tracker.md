@@ -10,6 +10,16 @@ present. Absent that, skills read the user-level `~/.agents/docs/issue-tracker.m
 — which is where *this* file is reached from. To change publish behaviour for one
 repository, write the repo doc at `docs/agents/issue-tracker.md`.
 
+**The override is skill convention, not something pop's Go reads.** No code
+consults the repo doc; only a skill resolving "which issue-tracker doc applies"
+does. It governs **store choice and behavioural convention** — which register
+flags a repository defaults to, how the report-and-suggest step is worded, and
+so on — never authoring shape. It never really governed shape either: a
+validator compiled into the binary enforces the file templates and enums
+regardless of what any doc says, so a repo doc that redefined one only ever
+produced a validation error. Authoring shape now has one owner and it isn't this
+file — see the pointers below.
+
 All paths resolve through one command. Run it once per session:
 
 ```bash
@@ -26,204 +36,36 @@ show-path` prints that same `tasks/` directory directly (ADR-0130 alias).
 ## Publishing a spec
 
 A spec is co-located inside its own task-set folder, so the set's whole context
-lives in one directory:
-
-```
-<tasks-dir>/<task-set-name>/spec.md
-```
-
-- `<task-set-name>` is `<timestamp>-<slug>`. `<slug>` is a short hyphen-delimited
-  descriptive name (e.g. `user-auth`); it carries over to the task breakdown, so
-  the spec and its tasks share one folder and one name.
-- `<timestamp>` is a human-readable local date/time prefix so task sets sort
-  chronologically:
-  - Default: `YYYY-MM-DD` (e.g. `2026-05-31`).
-  - If a folder with the same date and slug already exists: `YYYY-MM-DD-HHMM`
-    (24-hour local time, e.g. `2026-05-31-2036`).
-  - Examples: `2026-05-31-user-auth/spec.md`, `2026-05-31-2036-user-auth/spec.md`.
-
-Create the `<tasks-dir>/<task-set-name>/` directory now and write `spec.md` into
-it. At this stage the folder holds only `spec.md`; the set is **inert** —
-invisible to the dashboard and never scheduled — until it is later registered
-with `pop tasks register` (see *Publishing tickets*). The spec artifact is named
-`spec.md`; there is no backward-compatible read of any other filename.
-
-**Map back-link (ADR-0129).** When the source is a Wayfinder Map, include
-`Source map: <map-id>` as the **first line** of `spec.md`, before the template
-headings. That line is human-facing prose — nothing parses it, and nothing
-derives from it. The machine-readable halves of the link are written at ticket
-time, by *Publishing tickets* → *Map-sourced sets*: `source_map` on the set's
-`index.json`, and the map's own record written by `pop map spawned`. Never append
-to `## Spawned sets` in `map.md` by hand; it is generated.
+lives in one directory. Run `pop tasks authoring-guide` for the folder layout,
+the `<task-set-name>` naming convention, and the `spec.md` template — including
+the `Source map:` back-link line for a Map-sourced spec. Write the folder now;
+at this stage it holds only `spec.md`, and the set stays **inert** — invisible
+to the dashboard and never scheduled — until it is registered (see *Publishing
+tickets*).
 
 ---
 
 ## Publishing tickets
 
 Tickets are the task markdown files plus a sidecar `index.json` manifest, all
-inside the same `<tasks-dir>/<task-set-name>/` folder. When breaking down a
-co-located `spec.md`, reuse that folder and its `<task-set-name>` — write the
-task files alongside the spec, do not mint a new folder. Write files in
-dependency order (blockers first) so "Blocked by" can name real identifiers.
+inside the same `<tasks-dir>/<task-set-name>/` folder — reuse a co-located
+spec's folder rather than minting a new one. Run `pop tasks authoring-guide` for
+the file template, the manifest field list and allowed values, the HITL/AFK
+typing rules (including the split-the-slice rule and both legitimate HITL
+positions), the effort heuristic, the vertical-slice framing, and the
+Orientation rule. It is authoritative for all of it, generated from the same
+constants `pop tasks register` enforces, so it cannot disagree with what gets
+validated.
 
 When the work came from a Wayfinder Map — directly or through its `spec.md` —
 read *Map-sourced sets* at the end of this section **before** writing the
 slices: it adds acceptance criteria to some of them.
-
-### Task markdown template
-
-Each slice is one file named `<number>-<task-name>.md` (e.g. `01-login-form.md`).
-The set-relative target reference is `<task-set-name>/<number>-<task-name>.md`.
-
-```markdown
-## Parent
-
-A reference to the parent item (omit this section if there is no parent file).
-
-## What to build
-
-A concise description of this vertical slice — the end-to-end behavior, not a
-layer-by-layer implementation. Avoid specific file paths or code snippets; they
-go stale fast. Exception: a prototype-derived snippet that encodes a decision
-more precisely than prose (state machine, reducer, schema, type shape) may be
-inlined, trimmed to the decision-rich parts, noting it came from a prototype.
-
-## Orientation
-
-Perishable pointers, as of authoring: the files to touch, the symbols and types
-involved, and the exact build/test command that proves the slice. Verify before
-trusting — anything here may have moved.
-
-## Type
-
-HITL or AFK.
-
-## Acceptance criteria
-
-- [ ] Criterion 1
-- [ ] Criterion 2
-
-## Blocked by
-
-- A reference to the blocking item (if any)
-
-Or "None - can start immediately" if no blockers.
-```
-
-Do NOT close or modify any parent (spec or source) file while writing tickets.
-
-**Orientation is the one place paths belong.** "What to build" stays path-free
-because durable intent outlives the tree; Orientation is explicitly the opposite
-— a hint, stamped and labelled as stale-able, so the executor stops re-deriving a
-map the author already had. Unattended drains spend a large share of their tool
-calls on that rediscovery, and the author writes it for free from the context they
-just used to slice the work. Fill it from what you actually know: name only the
-files and symbols you touched or read while planning, plus the command that
-verifies the slice. Omit the section only for a slice with no code surface (a
-HITL sign-off); never pad it with guesses, because a wrong pointer costs more
-than a missing one.
-
-### HITL / AFK typing rules
-
-Every slice is either **HITL** or **AFK**; prefer AFK wherever possible.
-
-- **AFK** slices can be implemented and merged without human interaction.
-- **HITL** slices contain ONLY human work — verification, decisions, manual
-  testing; the executor never runs them. Write the body as instructions to the
-  human: the exact steps to perform. A HITL slice whose "What to build"
-  describes software is mis-typed.
-
-If a HITL slice needs an artifact built first (a report command, test data, a
-harness), split it: the build goes in an AFK slice, and the HITL slice depends on
-it via "Blocked by" and holds only the human steps.
-
-HITL slices have two roles, at opposite ends of a set:
-
-- **Approval at the end** — agents are done and have verified their own work; the
-  human signs off. Nothing depends on it, so the set reaches `AWAITING-APPROVAL`.
-  This is the common, expected HITL.
-- **Setup at the bottom** — the human provisions something the agent genuinely
-  cannot (mainly accounts and secrets the agent can't self-issue) before agents
-  can run; AFK slices depend on it and the set sits `BLOCKED` until the human
-  acts. Create a setup HITL only when *absolutely necessary* — never for things
-  the model can discover or do itself (devices, environment details, readable
-  config).
-
-A HITL in the middle is valid (a genuine mid-flow human decision) but parks the
-set at `BLOCKED` mid-drain — the correct signal that agent work waits behind a
-human.
-
-### Effort named-signal heuristic
-
-Assign an `effort` to every slice, written explicitly:
-
-- `heavy` — architectural or cross-cutting refactors, or genuinely tricky
-  algorithms.
-- `light` — large but mechanical work: renames, codemods, config, boilerplate.
-- `standard` — everything else. The default when no named signal clearly applies.
-
-Effort is model-strength intent, not an agent choice; do not consult
-`pop tasks agents` in the default flow.
 
 > **Artifacts must already be committed.** Task sets are often worked in a fresh
 > worktree forked from the current branch's HEAD, so any CONTEXT/ADR/code a prior
 > session generated must already be on HEAD for the worktree to carry it. Publishing
 > does **not** commit — committing belongs to the session that produced the
 > artifacts. If you spot uncommitted session artifacts, flag them; don't commit.
-
-### `index.json` manifest
-
-Write `<tasks-dir>/<task-set-name>/index.json` alongside the markdown, one entry
-per file. The manifest carries the `tasks` array, plus `source_map` for a
-Map-sourced set (see below) — and no `worktree` or `auto_drain` key (ADR-0115);
-binding and auto-drain are `register` flags (below), never written here.
-
-```json
-{
-  "tasks": [
-    {
-      "id": "01-login-form",
-      "file": "01-login-form.md",
-      "title": "Login form",
-      "type": "AFK",
-      "effort": "standard",
-      "status": "open",
-      "blocked_by": []
-    }
-  ]
-}
-```
-
-Field rules:
-
-- `id` — the filename stem (`<number>-<task-name>`); the stable identifier
-  referenced by `blocked_by`.
-- `file` — the task's markdown filename.
-- `title` — a short human label.
-- `type` — `HITL` or `AFK`, matching the markdown.
-- `effort` — `light` | `standard` | `heavy`, per the heuristic above. Absent in
-  an existing manifest means `standard`.
-- `status` — `open` | `done` | `failed` | `skipped`. Always initialize to `open`.
-  Never write `in_progress`; a persisted `in_progress` is malformed.
-- `blocked_by` — array of blocker `id`s; empty array if none.
-- `agent` — optional escape hatch (ADR-0018). Fill it only when the user
-  explicitly asks for a specific agent or model; not part of the default flow.
-- `failed_after` — optional integer; attempts after which a runner gave up.
-  Written only when `status` becomes `failed`.
-
-Set-level key:
-
-- `source_map` — the map id this set was spawned from. Written on **every**
-  Map-sourced set, spec or no spec, so the back-link is never half-built for a
-  spec-less one. Absent otherwise.
-
-The JSON is the source of truth for automation. The eligibility condition
-(`status == "open"` and every `blocked_by` id is satisfied by a task whose status
-is `done` or `skipped`, preferring `AFK` over `HITL` among eligible tasks), the
-done-condition (all `## Acceptance criteria` boxes checked), and the commit format
-`tasks(<task-set-slug>): <id>` (the set name without its timestamp prefix) are the
-contract implemented by `pop tasks implement`. Keep `index.json` and the markdown
-in 1:1 sync — every markdown file has exactly one manifest entry and vice versa.
 
 ### Register the set
 
@@ -306,12 +148,12 @@ Semantics:
 pop prints `Registered new task set(s): <task-set-name>` on first registration.
 Reads like `pop tasks status` never register.
 
-### The MALFORMED fix loop
-
 Check the output. The set should appear with status `READY` (or `DEFERRED` if
 every open task is HITL) — **not** `MALFORMED` or `MISSING`. If `MALFORMED`, read
-the diagnostics, fix the markdown/manifest issues they name, and re-run
-`pop tasks register <task-set-name>` until the set is `READY` or `DEFERRED`.
+the diagnostics it prints, fix what they name, and re-run
+`pop tasks register <task-set-name>` until the set is `READY` or `DEFERRED`; run
+`pop tasks authoring-guide` (or `pop tasks register -h`) for the full contract
+being enforced.
 
 ### Report and suggest the whole-set drain
 
@@ -378,101 +220,11 @@ written by the two sides that own them.
 
 A Wayfinder Map is plain markdown in Task storage — no issue tracker, no labels,
 no `/setup-matt-pocock-skills`. A map exists because its folder exists; there is
-no registration step.
-
-### Storage layout
-
-Maps live under a `maps/` sibling of `tasks/`:
-
-```
-$(pop work show-path)/maps/<YYYY-MM-DD-slug>/
-├── map.md
-└── issues/
-    ├── 01-<slug>.md
-    ├── 02-<slug>.md
-    └── ...
-```
-
-`<YYYY-MM-DD-slug>` is the map id (e.g. `2026-07-19-wayfinder-work-dashboard`).
-Ticket files are `NN-<slug>.md`, where `NN` is a zero-padded ticket number.
-
-`map.md` follows the upstream section shape with pop additions at top and bottom:
-
-```markdown
-Status: active
-
-## Destination
-
-<one or two lines — every session orients here first>
-
-## Notes
-
-<domain; skills to consult; standing preferences>
-
-## Decisions so far
-
-<!-- pop:generated decisions -->
-
-- [01-first-ticket](issues/01-first-ticket.md) — one-line gist of the answer
-
-<!-- /pop:generated decisions -->
-
-## Not yet specified
-
-<fog — graduates into tickets as the frontier advances>
-
-## Out of scope
-
-<!-- pop:generated out-of-scope -->
-<!-- /pop:generated out-of-scope -->
-
-## Spawned sets
-
-<!-- pop:generated spawned-sets -->
-<!-- /pop:generated spawned-sets -->
-```
-
-**`map.md` has two writers.** `Destination`, `Notes` and `Not yet specified` are
-yours. `Decisions so far`, `Out of scope` and `Spawned sets` are pop's: it
-rebuilds everything between the `pop:generated` markers from `index.json` and the
-ticket answers on every resolve, so anything you write inside a region is lost on
-the next one. Write prose outside the markers — it survives — and never hand-edit
-a decision line.
-
-The `Status:` line (top of `map.md`, before headings) is `active` (default while
-wayfinding), `arrived` (destination reached — written by `pop map arrive`, never by
-hand), or `abandoned` (closed without reaching the destination). Any other value
-renders the Map BROKEN with the fix printed; `done` is retired and does not fold.
-Charting writes `Status: active` and ends with
-`pop map register <map-id>`, which validates the Map's `index.json` and makes it
-registered Work; it prints every problem it finds and is re-runnable until clean.
-Open tickets are **not** listed in `map.md`; they are files under `issues/`,
-discovered by reading the directory.
-
-Ticket files (`issues/NN-<slug>.md`) hold prose only — id, title, type, status
-and blockers live in the Map's `index.json`, which every consumer reads:
-
-```markdown
-## Question
-
-<the decision or investigation this ticket resolves>
-
-## Answer
-
-<!-- pop:generated answer -->
-
-<written by `pop map resolve` — prose answer, links to assets>
-
-<!-- /pop:generated answer -->
-```
-
-The answer body between those markers is pop's: `pop map resolve` replaces it
-whole on every run, headings and all, so edit the answer file and resolve again
-rather than hand-editing the ticket.
-
-Per ticket, `index.json` carries `id`, `file`, `title`, `type`
-(`research|prototype|grilling|task`), `status` (`open|resolved`), `blocked_by`
-(blocker ids, e.g. `["01"]`) and `out_of_scope`.
+no registration step. Run `pop map authoring-guide` for the folder layout, the
+`map.md` and ticket templates, the `Status:` vocabulary, the `pop:generated`
+region markers and which sections they cover, and the `index.json` field list —
+it is generated from the same constants `pop map register` enforces, so it
+cannot disagree with what gets validated.
 
 ### Claiming
 
@@ -550,12 +302,12 @@ stop. `pop map out-of-scope` is the one exception, and it is not a resolution: i
 is a scoping act, it renders under `Out of scope` and never into the decision
 index, and "that is past the destination" is exactly the ticketless realisation
 assist exists for. Redrawing the map's `Destination` is the same act one level up,
-so an assist session may do that too.
+so an assist session may do that too. Run `pop map authoring-guide` for what an
+assist session may write.
 
 **An assist session closes by re-validating.** Its writes are hand-written files,
 so end the session with `pop map register <map-id>` and work the fix list it
-prints until it is clean — the same re-runnable loop charting ends on. For what
-those files may contain, run `pop map authoring-guide`.
+prints until it is clean — the same re-runnable loop charting ends on.
 
 One pane per map, reused: a second `pop map assist` for the same map lands in the
 first pane rather than opening a second session, so two conversations never race

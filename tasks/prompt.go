@@ -513,7 +513,7 @@ func BuildAssistPrompt(d *Deps, taskSetID string, m *Manifest, status TaskSetSta
 
 	fmt.Fprintf(&b, "Task contract to respect:\n")
 	fmt.Fprintf(&b, "- Each task file has \"What to build\" and \"## Acceptance criteria\" checkboxes.\n")
-	fmt.Fprintf(&b, "- Do not modify index.json's task list shape carelessly; keep id/file/title/type/status/effort/blocked_by coherent.\n")
+	fmt.Fprintf(&b, "- Do not modify index.json's task list shape carelessly; run `pop tasks authoring-guide` for what must stay coherent.\n")
 	fmt.Fprintf(&b, "- Do not make git commits — the human owns commits and drain assessment.\n")
 	fmt.Fprintf(&b, "- Do not start a Drain and do not run the Verifier.\n\n")
 

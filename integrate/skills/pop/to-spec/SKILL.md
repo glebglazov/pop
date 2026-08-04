@@ -113,9 +113,10 @@ Resolve the issue-tracker doc two-layer instead:
    configured — there is no further fallback.
 
 Publish the spec per the resolved doc's **"Publishing a spec"** section. That
-section owns every publish mechanic — the co-located `spec.md` path, the
-`<task-set-name>` naming convention, the inert-until-registered rule, and the
-Map back-link. None of it is restated here; consult the doc.
+section owns store resolution and the two-layer doc override; run
+`pop tasks authoring-guide` for the file's shape — the co-located `spec.md`
+path, the `<task-set-name>` naming convention, and the template including the
+Map back-link line. None of it is restated here; consult the doc and the guide.
 
 ## Wayfinder Map source
 
