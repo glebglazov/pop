@@ -601,7 +601,35 @@ func (p *Picker) expandRow() {
 	if p.filtered[idx].Disclosure == "" {
 		return
 	}
-	p.setExpanded(p.filtered[idx].Path, true, p.filtered[idx].Path)
+	path := p.filtered[idx].Path
+	p.setExpanded(path, true, path)
+	p.jumpToLastChild(path)
+}
+
+// jumpToLastChild lands the cursor on the bottom of the group just opened, which
+// is what pulls the whole group into view: the list follows its cursor, so asking
+// for the last child asks for every row above it too. The margin is suppressed
+// for the jump — honouring it would settle the last child nine rows above the
+// bottom line and scroll past rows the operator just asked to see. A group taller
+// than the viewport pushes its parent off the top; `left` collapses and lands
+// back on it, so the way back is one key.
+func (p *Picker) jumpToLastChild(parentPath string) {
+	idx := -1
+	for i, it := range p.filtered {
+		if it.Path == parentPath {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return
+	}
+	last := idx
+	for i := idx + 1; i < len(p.filtered) && p.filtered[i].Depth > p.filtered[idx].Depth; i++ {
+		last = i
+	}
+	p.list.JumpTo(last)
+	p.syncFromList()
 }
 
 // collapseRow closes the row under the cursor, or — from a child — closes the
@@ -614,7 +642,7 @@ func (p *Picker) collapseRow() {
 	}
 	row := p.filtered[idx]
 	if p.rowExpanded(idx) {
-		p.setExpanded(row.Path, false, row.Path)
+		p.collapseAt(idx)
 		return
 	}
 	if row.Depth == 0 {
@@ -622,10 +650,26 @@ func (p *Picker) collapseRow() {
 	}
 	for i := idx - 1; i >= 0; i-- {
 		if p.filtered[i].Depth < row.Depth {
-			p.setExpanded(p.filtered[i].Path, false, p.filtered[i].Path)
+			p.collapseAt(i)
 			return
 		}
 	}
+}
+
+// collapseAt closes the group at parentIdx, reversing the expand literally: every
+// row below the group keeps the screen line it was on, which puts the parent
+// where its last visible child sat. The offset is read now rather than remembered
+// from the expand, so moving around inside an open group cannot make the collapse
+// jump somewhere stale. When the collapsed list no longer fills the viewport the
+// clamp in SetScroll wins and the bottom anchor pads above — no row is invented
+// to hold a line that no longer exists.
+func (p *Picker) collapseAt(parentIdx int) {
+	before := len(p.filtered)
+	scroll := p.list.Scroll()
+	path := p.filtered[parentIdx].Path
+	p.setExpanded(path, false, path)
+	p.list.SetScroll(scroll - (before - len(p.filtered)))
+	p.syncFromList()
 }
 
 // setExpanded records the change, re-lists through the caller, and keeps the

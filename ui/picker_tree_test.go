@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -117,24 +118,26 @@ func typeQuery(p *Picker, s string) {
 	}
 }
 
-// Right is one gesture doing two things in sequence: it opens a closed row, and
-// on an open one it walks into the first child.
+// Right is one gesture doing two things in sequence: it opens a closed row and
+// lands on the bottom of the group it opened, and from an open parent it walks
+// into the first child.
 func TestTreeRightExpandsThenDescends(t *testing.T) {
 	p, tree := newTreePicker(t)
 	focusRow(p, "/hawk")
 
 	pressRight(p)
 	assertListed(t, p, "old", "hawk "+testExpanded, "  fix", "  spike")
-	if got := p.filtered[p.cursor].Path; got != "/hawk" {
-		t.Fatalf("cursor after expand = %q, want the row that was opened", got)
+	if got := p.filtered[p.cursor].Path; got != "/wt/spike" {
+		t.Fatalf("cursor after expand = %q, want the last child of the group", got)
 	}
 	if !tree.expanded["/hawk"] {
 		t.Error("expansion was not recorded with the caller")
 	}
 
+	focusRow(p, "/hawk")
 	pressRight(p)
 	if got := p.filtered[p.cursor].Path; got != "/wt/fix" {
-		t.Errorf("cursor after second right = %q, want the first child", got)
+		t.Errorf("cursor after right on an open parent = %q, want the first child", got)
 	}
 
 	// A childless row has nothing to open and nothing to descend into.
@@ -293,5 +296,156 @@ func TestPickerWithoutTreeLeavesArrowsToTheQuery(t *testing.T) {
 	}
 	if p.treeActive() {
 		t.Error("a picker with no tree reported the tree gestures active")
+	}
+}
+
+// groupTree is the fixture for the scrolling gestures: a group of arbitrary size
+// with plain rows above and below it, so a viewport can be smaller than the group
+// and rows below it can be watched for movement.
+type groupTree struct {
+	before, children, after int
+	expanded                bool
+}
+
+func (g *groupTree) rows(string) []Item {
+	var rows []Item
+	for i := range g.before {
+		rows = append(rows, Item{Name: fmt.Sprintf("a%d", i), Path: fmt.Sprintf("/a%d", i)})
+	}
+	parent := Item{Name: "hawk", Path: "/hawk", Disclosure: testCollapsed}
+	if g.expanded {
+		parent.Disclosure = testExpanded
+	}
+	rows = append(rows, parent)
+	if g.expanded {
+		for i := range g.children {
+			rows = append(rows, Item{Name: fmt.Sprintf("c%d", i), Path: fmt.Sprintf("/wt/c%d", i), Depth: 1})
+		}
+	}
+	for i := range g.after {
+		rows = append(rows, Item{Name: fmt.Sprintf("b%d", i), Path: fmt.Sprintf("/b%d", i)})
+	}
+	return rows
+}
+
+func newGroupPicker(t *testing.T, g *groupTree, height int, quickAccess bool) *Picker {
+	t.Helper()
+	tree := Tree{
+		Rows:        g.rows,
+		SetExpanded: func(_ string, expand bool) { g.expanded = expand },
+	}
+	opts := []PickerOption{WithTree(tree)}
+	if quickAccess {
+		opts = append(opts, WithQuickAccess("alt"))
+	}
+	p := NewPicker(g.rows(""), opts...)
+	p.width = 60
+	p.height = height
+	p.list.Resize(height)
+	p.Init()
+	return p
+}
+
+// rowIndex and screenLine read where a path sits in the list and on the screen;
+// -1 means it is not on screen at all.
+func rowIndex(p *Picker, path string) int {
+	for i, it := range p.filtered {
+		if it.Path == path {
+			return i
+		}
+	}
+	return -1
+}
+
+func screenLine(p *Picker, path string) int {
+	idx := rowIndex(p, path)
+	if idx < 0 {
+		return -1
+	}
+	line := idx - p.list.Scroll()
+	if line < 0 || line >= p.height {
+		return -1
+	}
+	return line
+}
+
+// Opening a group is a request to see it, so the cursor lands on the group's last
+// child: the list follows the cursor and the whole group scrolls in behind it. The
+// last child sits on the bottom line — the expand jump ignores the quick-access
+// context margin — and the nine children above it carry the quick-access digits.
+// A group taller than the viewport pushes its parent off the top; left collapses
+// and lands the cursor back on it.
+func TestTreeExpandRevealsTheWholeGroup(t *testing.T) {
+	g := &groupTree{before: 3, children: 12}
+	p := newGroupPicker(t, g, 10, true)
+	focusRow(p, "/hawk")
+
+	pressRight(p)
+	if got := p.filtered[p.cursor].Path; got != "/wt/c11" {
+		t.Fatalf("cursor after expand = %q, want the group's last child", got)
+	}
+	if got := screenLine(p, "/wt/c11"); got != p.height-1 {
+		t.Errorf("last child on screen line %d, want the bottom line %d", got, p.height-1)
+	}
+	if got := screenLine(p, "/hawk"); got != -1 {
+		t.Errorf("parent still on screen at line %d; a group taller than the viewport pushes it off", got)
+	}
+	for line, want := range map[int]string{0: "/wt/c2", 9: "/wt/c11"} {
+		if got := screenLine(p, want); got != line {
+			t.Errorf("%s on screen line %d, want %d — the group did not scroll in whole", want, got, line)
+		}
+	}
+
+	// Every child on screen above the cursor is one alt+digit away.
+	for dist := 1; dist <= 9; dist++ {
+		want := fmt.Sprintf("/wt/c%d", 11-dist)
+		if got := quickAccessTarget(p, dist); got != want {
+			t.Errorf("alt+%d = %q, want %q", dist, got, want)
+		}
+	}
+
+	pressLeft(p)
+	if got := p.filtered[p.cursor].Path; got != "/hawk" {
+		t.Errorf("cursor after collapsing = %q, want the parent back", got)
+	}
+	// The collapsed list no longer fills the viewport: the clamp wins, the bottom
+	// anchor pads above, and no row is invented to hold the parent's old line.
+	if p.list.Scroll() != 0 || len(p.filtered) != 4 {
+		t.Errorf("after collapsing: scroll %d over %d rows, want 0 over 4", p.list.Scroll(), len(p.filtered))
+	}
+}
+
+// Collapsing reverses the expand literally: the rows below the group keep their
+// screen lines and the parent lands where its last visible child sat. The offset
+// is read at collapse time, so moving around inside the open group cannot make the
+// landing stale.
+func TestTreeCollapseKeepsRowsBelowOnTheirLines(t *testing.T) {
+	g := &groupTree{before: 12, children: 3, after: 12}
+	p := newGroupPicker(t, g, 10, false)
+	focusRow(p, "/hawk")
+	pressRight(p)
+
+	// Wander inside the open group: down past its end, then back onto a child.
+	p.list.SetCursor(rowIndex(p, "/b1"))
+	p.syncFromList()
+	focusRow(p, "/wt/c1")
+
+	lastVisibleChild := screenLine(p, "/wt/c2")
+	below := map[string]int{"/b0": screenLine(p, "/b0"), "/b1": screenLine(p, "/b1")}
+	if lastVisibleChild < 0 || below["/b0"] < 0 || below["/b1"] < 0 {
+		t.Fatalf("fixture is off screen: last child %d, rows below %v", lastVisibleChild, below)
+	}
+
+	pressLeft(p)
+	if got := p.filtered[p.cursor].Path; got != "/hawk" {
+		t.Fatalf("cursor after collapsing = %q, want the parent", got)
+	}
+	if got := screenLine(p, "/hawk"); got != lastVisibleChild {
+		t.Errorf("parent landed on line %d, want %d — where its last visible child sat", got, lastVisibleChild)
+	}
+	for path, want := range below {
+		if got := screenLine(p, path); got != want {
+			t.Errorf("%s moved from line %d to %d; rows below the group must hold their lines", path, want, got)
+		}
 	}
 }

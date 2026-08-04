@@ -351,3 +351,53 @@ func TestListMultilineAnchorBottom(t *testing.T) {
 		}
 	}
 }
+
+// JumpTo scrolls the target into view without the context margin: a deliberate
+// jump lands where it was aimed, where SetCursor would pull the viewport back to
+// keep nine rows of context above the cursor.
+func TestListJumpToIgnoresScrollMargin(t *testing.T) {
+	l := newTestList(strItems(30), AnchorBottom, false, 9, nil)
+	l.Resize(20)
+	l.SetCursor(29)
+	if l.Scroll() != 10 {
+		t.Fatalf("scroll after moving to the last item = %d, want 10", l.Scroll())
+	}
+
+	l.JumpTo(12)
+	if l.Cursor() != 12 || l.Scroll() != 10 {
+		t.Errorf("JumpTo(12) = cursor %d scroll %d, want 12/10 (the row was already on screen)", l.Cursor(), l.Scroll())
+	}
+
+	l.SetCursor(12)
+	if l.Scroll() != 3 {
+		t.Errorf("SetCursor(12) = scroll %d, want 3 — the margin should still apply to ordinary moves", l.Scroll())
+	}
+}
+
+// SetScroll places the viewport where the caller says, clamped so the list keeps
+// filling it and the cursor stays on screen.
+func TestListSetScrollClampsToBoundsAndCursor(t *testing.T) {
+	l := newTestList(strItems(30), AnchorBottom, false, 0, nil)
+	l.Resize(10)
+	l.SetCursor(20)
+
+	l.SetScroll(15)
+	if l.Scroll() != 15 {
+		t.Errorf("SetScroll(15) = %d, want 15", l.Scroll())
+	}
+	l.SetScroll(-4)
+	if l.Scroll() != 11 {
+		t.Errorf("SetScroll(-4) = %d, want 11 — clamped to keep the cursor on screen", l.Scroll())
+	}
+	l.SetScroll(99)
+	if l.Scroll() != 20 {
+		t.Errorf("SetScroll(99) = %d, want 20 — clamped to the cursor's own row", l.Scroll())
+	}
+
+	// A list shorter than the viewport has nowhere to scroll to.
+	l.SetItems(strItems(4))
+	l.SetScroll(3)
+	if l.Scroll() != 0 {
+		t.Errorf("SetScroll on a short list = %d, want 0", l.Scroll())
+	}
+}

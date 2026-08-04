@@ -208,6 +208,49 @@ func (l *List[T]) SetCursorToKey(key string) bool {
 	return false
 }
 
+// JumpTo moves the cursor to index i and scrolls just far enough to bring it on
+// screen, ignoring ScrollMargin. It serves deliberate jumps to a chosen row,
+// where the margin's context lines would push the target away from the very edge
+// the jump was aiming at.
+func (l *List[T]) JumpTo(i int) {
+	if len(l.items) == 0 {
+		l.cursor = 0
+		l.adjustScroll()
+		return
+	}
+	l.cursor = min(max(i, 0), len(l.items)-1)
+	l.scroll = adjustScroll(l.cursor, l.scroll, l.visibleItems(), len(l.items), 0)
+}
+
+// SetScroll places the viewport at the given offset, clamped so the list still
+// fills the viewport and the cursor stays on screen. It lets a caller that knows
+// where rows should land say so directly, instead of inferring an offset from
+// cursor movement.
+func (l *List[T]) SetScroll(scroll int) {
+	visible := l.visibleItems()
+	if visible <= 0 {
+		l.scroll = 0
+		return
+	}
+	if scroll > l.cursor {
+		scroll = l.cursor
+	}
+	if scroll <= l.cursor-visible {
+		scroll = l.cursor - visible + 1
+	}
+	l.scroll = min(max(scroll, 0), max(len(l.items)-visible, 0))
+}
+
+// visibleItems is how many logical items the viewport can show at once — the
+// unit both the scroll offset and the clamp are counted in.
+func (l *List[T]) visibleItems() int {
+	lpi := l.opts.LinesPerItem
+	if lpi <= 0 {
+		lpi = 1
+	}
+	return min(l.height/lpi, len(l.items))
+}
+
 // VisibleRows returns exactly bodyHeight rendered lines. List owns the █
 // indicator, quick-access prefix column, padding, and anchor blank lines. When
 // LinesPerItem > 1, each logical item is rendered over that many physical lines;
