@@ -87,6 +87,14 @@ func (k *Kind) Actions(c work.Container) []work.Action {
 	return append(actions, work.Action{Verb: work.VerbCopyName, Key: "y", Label: "copy name"})
 }
 
+// StatusActions returns nothing: a Routine has no status to write. Its one
+// enable/disable state is the pause bit, which is a row verb on `a` because
+// pausing is the act itself and not a submenu of variants (ADR-0138), and a
+// Routine is never archived — an obsolete Routine is deleted. A kind that offers
+// no status verb also offers no status opener, so `s` stays a dead key on a
+// Routine row rather than opening an empty submenu.
+func (k *Kind) StatusActions(c work.Container) []work.Action { return nil }
+
 // ItemActions returns the verbs for one run. A run is a record, not a thing to
 // act on: what a reader wants from it is where its report is — the same
 // copy-report-path verb the row offers over the newest run — and its name.

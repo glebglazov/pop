@@ -32,7 +32,7 @@ func TestActionsOrderSpawningFirst(t *testing.T) {
 	}
 	want := []work.Verb{
 		VerbDrain, VerbVerify, VerbFold, VerbAssist, work.VerbShell,
-		VerbBind, VerbUnbind, VerbAutoDrain, VerbStatus, VerbUnpark,
+		VerbBind, VerbUnbind, VerbAutoDrain, work.VerbStatus, VerbUnpark,
 		VerbArchive, work.VerbCopyName, VerbCopyPath,
 	}
 	if got := verbsOffered(k.Actions(c)); !slices.Equal(got, want) {

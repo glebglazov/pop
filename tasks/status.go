@@ -76,6 +76,11 @@ type Row struct {
 	// ResolveVerifiedStatus. On a human-completed set it is the only place the
 	// verdict shows: the status stays DONE.
 	VerifyMark VerifyMark
+	// Archived reports the registration's reversible archived flag. It is on the row
+	// rather than implied by which refresh produced it because a view may hold both
+	// kinds of row at once (RefreshIncludingArchivedWith), and then the row is the
+	// only thing that can say which it is.
+	Archived bool
 }
 
 // StatusLabel returns a row's display label. A started Ready set (one that

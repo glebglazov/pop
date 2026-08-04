@@ -38,6 +38,7 @@ func (k *countingKind) Actions(c work.Container) []work.Action {
 	return actions
 }
 
+func (k *countingKind) StatusActions(work.Container) []work.Action          { return nil }
 func (k *countingKind) ItemActions(work.Container, work.Item) []work.Action { return nil }
 func (k *countingKind) Perform(work.Container, *work.Item, work.Verb) (work.Outcome, error) {
 	return work.Outcome{}, nil
@@ -136,7 +137,7 @@ func TestModalTaskSetVerbsDispatchByVerbID(t *testing.T) {
 	}{
 		{setkind.VerbBind, func(m QueueDashboard) bool { return m.bind != nil }},
 		{setkind.VerbUnbind, func(m QueueDashboard) bool { return m.abandon != nil }},
-		{setkind.VerbStatus, func(m QueueDashboard) bool { return m.menu != nil && m.menu.status != nil }},
+		{work.VerbStatus, func(m QueueDashboard) bool { return m.menu != nil && m.menu.status != nil }},
 	}
 	for _, c := range cases {
 		t.Run(string(c.verb), func(t *testing.T) {

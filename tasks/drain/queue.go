@@ -54,6 +54,14 @@ type Deps struct {
 	// consent — Archive (ADR-0071/0116) stays independent and always hides.
 	IncludeDone bool
 
+	// IncludeArchived is the show-archived view flag (ADR-0186): archived
+	// containers of every kind are hidden unless this is true, and when it is they
+	// are listed beside the active ones. Like IncludeDone it is a view filter the
+	// dashboard's `f` menu flips at runtime and nothing persists — but unlike it,
+	// nothing seeds it from a command-line flag: the reason to see archived work is
+	// to unarchive it, which only happens on the surface that offers the verb.
+	IncludeArchived bool
+
 	// Refresh returns the Task-set rows registered under a definition path.
 	// Defaults to tasks.RefreshWith.
 	Refresh func(defPath string) (*tasks.RefreshResult, error)
@@ -76,10 +84,11 @@ type Deps struct {
 	// ToggleAutoDrain flips a registered Task-set auto-drain bit in Task state.
 	// Defaults to tasks.ToggleAutoDrainWith.
 	ToggleAutoDrain func(defPath, statePath, setID string) (*tasks.AutoDrainResult, error)
-	// ArchiveSet sets the reversible archived flag on one registered Task set in
-	// Task state, leaving its Worktree binding untouched. Defaults to
-	// tasks.SetTaskSetArchived.
-	ArchiveSet func(defPath, setID string) error
+	// SetArchived writes the reversible archived flag on one registered Task set in
+	// Task state — both directions, since archive and unarchive are one flag —
+	// leaving its Worktree binding untouched. It is forwarded to the Task-set kind,
+	// which performs both verbs (ADR-0186). Defaults to tasks.SetTaskSetArchived.
+	SetArchived func(defPath, setID string, archived bool) error
 	// AcquireRuntimeLock serializes human-triggered integration with normal
 	// runtime execution. Defaults to tasks.AcquireRuntimeLock.
 	AcquireRuntimeLock func(runtimePath string) (runtimeLock, error)
@@ -230,20 +239,6 @@ func (d *Deps) ToggleSetAutoDrain(defPath, statePath, setID string) (*tasks.Auto
 		return d.ToggleAutoDrain(defPath, statePath, setID)
 	}
 	return tasks.ToggleAutoDrainWith(d.Tasks, defPath, statePath, setID)
-}
-
-// archiveSet resolves the ArchiveSet seam, defaulting to tasks.SetTaskSetArchived.
-// It writes only the archived flag; the set's Worktree binding is never touched.
-func (d *Deps) ArchiveTaskSet(defPath, setID string) error {
-	if d.ArchiveSet != nil {
-		return d.ArchiveSet(defPath, setID)
-	}
-	return tasks.SetTaskSetArchived(d.Tasks, defPath, []string{setID}, true)
-}
-
-// unarchiveSet clears the archived flag on one registered Task set.
-func (d *Deps) UnarchiveTaskSet(defPath, setID string) error {
-	return tasks.SetTaskSetArchived(d.Tasks, defPath, []string{setID}, false)
 }
 
 func (d *Deps) acquireRuntimeLock(runtimePath string) (runtimeLock, error) {

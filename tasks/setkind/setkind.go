@@ -46,6 +46,13 @@ type Deps struct {
 	// unless this is true.
 	IncludeDone bool
 
+	// IncludeArchived is the show-archived view flag (ADR-0186): archived sets are
+	// hidden unless this is true, and when it is they are listed *beside* the
+	// active ones rather than instead of them. It selects which refresh the default
+	// seam runs, so a caller that injects its own Refresh answers for archived rows
+	// itself.
+	IncludeArchived bool
+
 	// Groups resolves the repository groups to scan for task sets. Defaults to
 	// repogroup.Resolve over Tasks and Project — injectable because a test wants to
 	// name its groups rather than lay out a machine, and because a caller building
@@ -67,6 +74,9 @@ type Deps struct {
 	// binding.ProbeWorktreeDirective probe surfacing only the two directive
 	// sentinels.
 	ProbeDirective func(checkout, setID string) string
+	// SetArchived writes one registered set's reversible archived flag, both
+	// directions. Defaults to tasks.SetTaskSetArchived.
+	SetArchived func(defPath, setID string, archived bool) error
 }
 
 // DefaultDeps returns Task-set kind dependencies backed by real implementations.
@@ -260,7 +270,10 @@ func containersFromGroup(d *Deps, cfg *config.Config, snap *snapshot, delays []t
 		bound := hasBinding && strings.TrimSpace(bnd.RuntimePath) != ""
 		doneStillManagedBound := taskRow.Status == tasks.StatusDone && bound && bnd.Provisioned
 		orphanedSet := orphaned(d, bnd, hasBinding)
-		if !tasks.ShowRow(taskRow, d.IncludeDone) {
+		// An archived row is on screen because the operator turned archived rows on;
+		// the Done-hiding rule (ADR-0121) gets no second veto over it, or the toggle
+		// would reveal almost nothing — a set is usually archived because it is done.
+		if !taskRow.Archived && !tasks.ShowRow(taskRow, d.IncludeDone) {
 			continue
 		}
 		wt := worktree(d, snap, intents, g.RepoKey, taskRow.ID, taskRow.Status, bnd, bound)
@@ -297,6 +310,7 @@ func containersFromGroup(d *Deps, cfg *config.Config, snap *snapshot, delays []t
 			Project:               g.ProjectName,
 			RawStatus:             taskRow.Status,
 			AutoDrain:             taskRow.AutoDrain,
+			Archived:              taskRow.Archived,
 			DefPath:               g.DefPath,
 			StatePath:             g.StatePath,
 			RepoKey:               g.RepoKey,

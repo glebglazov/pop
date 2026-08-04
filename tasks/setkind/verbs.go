@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/work"
 )
@@ -19,18 +18,23 @@ const (
 	VerbBind      work.Verb = "bind"
 	VerbUnbind    work.Verb = "unbind"
 	VerbAutoDrain work.Verb = "auto-drain"
-	VerbStatus    work.Verb = "status"
 	VerbAssist    work.Verb = "assist"
 	VerbFold      work.Verb = "fold"
 	VerbUnpark    work.Verb = "unpark"
 	VerbArchive   work.Verb = "archive"
+	// VerbUnarchive restores an archived set to the default view. It is offered in
+	// the status submenu only: the row-level `x` is the archive half, and a row
+	// reachable to unarchive is one the show-archived filter is already on for.
+	VerbUnarchive work.Verb = "unarchive"
 	// VerbCopyPath copies the bound worktree's path to the clipboard. In-place
 	// (lowercase) like copy-name, and hidden rather than shown-and-erroring on an
 	// unbound set — the same gate unbind uses.
 	VerbCopyPath work.Verb = "copy-path"
 
-	// Item verbs, filtered to a task's status the way the task action menu has
-	// always filtered them.
+	// The three task-status writes, offered twice over: as item verbs filtered to
+	// one task's status the way the task action menu has always filtered them, and
+	// as status-submenu verbs over the whole set. Which one Perform runs is which
+	// one it was handed — an item, or the container alone.
 	VerbComplete work.Verb = "complete"
 	VerbOpen     work.Verb = "open"
 	VerbSkip     work.Verb = "skip"
@@ -72,7 +76,7 @@ func (k *Kind) Actions(c work.Container) []work.Action {
 	if !c.Orphaned {
 		actions = append(actions, work.Action{Verb: VerbAutoDrain, Key: "a", Label: "auto-drain"})
 	}
-	actions = append(actions, work.Action{Verb: VerbStatus, Key: "s", Label: "status ▸"})
+	actions = append(actions, work.Action{Verb: work.VerbStatus, Key: "s", Label: "status ▸"})
 	if c.Parked {
 		actions = append(actions, work.Action{Verb: VerbUnpark, Key: "r", Label: "unpark"})
 	}
@@ -84,6 +88,22 @@ func (k *Kind) Actions(c work.Container) []work.Action {
 		actions = append(actions, work.Action{Verb: VerbCopyPath, Key: "p", Label: "copy path"})
 	}
 	return actions
+}
+
+// StatusActions returns the set's status submenu — the five writes it has always
+// carried, on the same keys, in the same order: complete, open and skip over every
+// unlocked task in the set, then the archive pair. They live here rather than on
+// the dashboard because they are this kind's status vocabulary and no other's
+// (ADR-0186); the keys and labels are unchanged from the hardcoded list they
+// replace, because an operator's fingers are part of the interface.
+func (k *Kind) StatusActions(c work.Container) []work.Action {
+	return []work.Action{
+		{Verb: VerbComplete, Key: "c", Label: "complete"},
+		{Verb: VerbOpen, Key: "o", Label: "open"},
+		{Verb: VerbSkip, Key: "s", Label: "skip"},
+		{Verb: VerbArchive, Key: "x", Label: "archive"},
+		{Verb: VerbUnarchive, Key: "u", Label: "unarchive"},
+	}
 }
 
 // ItemActions returns the verbs applicable to one task, filtered to its status:
@@ -122,11 +142,11 @@ func foldEligible(row work.Container) bool {
 	return row.Bound && tasks.FoldEligibleStatus(row.RawStatus)
 }
 
-// Perform runs one verb. The shared verbs and the per-task status writes complete
-// here; the set's own menu verbs hand back to the caller, which still owns their
-// dispatch — the drain picker, the bind picker and the abandon confirm are modal,
-// and moving them behind Perform needs a modal-capable Outcome (deferred by
-// decision, not by accident).
+// Perform runs one verb. The shared verbs, every status write (per task, per set,
+// and the archive pair) complete here; the set's remaining menu verbs hand back to
+// the caller, which still owns their dispatch — the drain picker, the bind picker
+// and the abandon confirm are modal, and moving them behind Perform needs a
+// modal-capable Outcome (deferred by decision, not by accident).
 func (k *Kind) Perform(c work.Container, item *work.Item, verb work.Verb) (work.Outcome, error) {
 	switch verb {
 	case work.VerbCopyName:
@@ -155,14 +175,30 @@ func (k *Kind) Perform(c work.Container, item *work.Item, verb work.Verb) (work.
 			Message: "shell in " + dir,
 		}, nil
 	case VerbComplete, VerbOpen, VerbSkip:
+		// One task when the caller named one, the whole set when it did not: the
+		// status submenu's complete/open/skip have always written every unlocked task
+		// in the set, and that is what "no item" means here.
 		if item == nil {
-			return work.Outcome{}, fmt.Errorf("setkind: %s is an item verb and needs a task", verb)
+			if err := k.applySetVerb(c, verb); err != nil {
+				return work.Outcome{}, err
+			}
+			return work.Outcome{Kind: work.OutcomeRefresh, Message: fmt.Sprintf("%s %s", verb, c.ID)}, nil
 		}
 		if err := k.applyTaskVerb(c, *item, verb); err != nil {
 			return work.Outcome{}, err
 		}
 		return work.Outcome{Kind: work.OutcomeRefresh, Message: fmt.Sprintf("%s %s/%s", verb, c.ID, item.ID)}, nil
-	case VerbDrain, VerbVerify, VerbBind, VerbUnbind, VerbAutoDrain, VerbStatus, VerbAssist, VerbFold, VerbUnpark, VerbArchive:
+	case VerbArchive, VerbUnarchive:
+		archived := verb == VerbArchive
+		if err := k.setArchived(c, archived); err != nil {
+			return work.Outcome{}, err
+		}
+		word := "archived"
+		if !archived {
+			word = "unarchived"
+		}
+		return work.Outcome{Kind: work.OutcomeRefresh, Message: fmt.Sprintf("%s %s", word, c.ID)}, nil
+	case VerbDrain, VerbVerify, VerbBind, VerbUnbind, VerbAutoDrain, work.VerbStatus, VerbAssist, VerbFold, VerbUnpark:
 		return work.Outcome{Kind: work.OutcomeCallerModal, Message: string(verb)}, nil
 	default:
 		return work.Outcome{}, work.UnknownVerb(k.ID(), verb)
@@ -182,10 +218,7 @@ func TaskRef(setID string, item work.Item) string {
 // the write lands in the same repository the container was read from.
 func (k *Kind) applyTaskVerb(c work.Container, item work.Item, verb work.Verb) error {
 	d := k.d
-	loadConfig := d.LoadConfig
-	if loadConfig == nil {
-		loadConfig = config.Load
-	}
+	loadConfig := k.loadConfig()
 	in := resolveInput(c)
 	ids := []string{item.ID}
 	var err error

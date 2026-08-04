@@ -191,6 +191,12 @@ func WorkRowStatusSegments(row work.Container) []work.StatusSegment {
 	if row.ConfigError != "" {
 		segments = append(segments, work.StatusSegment{Text: "config error: " + row.ConfigError, Tone: work.TonePlain})
 	}
+	// Last, and only ever present with the show-archived view on (ADR-0186): it is
+	// what tells the operator this row is in the filing cabinet rather than the
+	// table, which is the difference between pressing archive and unarchive.
+	if row.Archived {
+		segments = append(segments, work.StatusSegment{Text: "archived", Tone: work.TonePlain})
+	}
 	return segments
 }
 

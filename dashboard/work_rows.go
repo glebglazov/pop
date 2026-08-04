@@ -76,6 +76,17 @@ func (w workKinds) actionsFor(row DashboardRow) []work.Action {
 	return k.Actions(row)
 }
 
+// statusActionsFor is the status-submenu verbs the kind offers over row. Asked
+// when the submenu opens, like actionsFor: the vocabulary is the kind's and the
+// surface only lays it out (ADR-0186).
+func (w workKinds) statusActionsFor(row DashboardRow) []work.Action {
+	k := w.kindFor(row)
+	if k == nil {
+		return nil
+	}
+	return k.StatusActions(row)
+}
+
 // itemActionsFor is the verb list the kind offers over one of row's items right
 // now. Like actionsFor it is asked when the menu opens, never carried on the
 // item: a task completed in another pane must not still offer "complete".

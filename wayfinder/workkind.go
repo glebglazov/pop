@@ -41,6 +41,35 @@ const (
 	VerbAssist work.Verb = "assist-map"
 )
 
+// The Map's status verbs: the four writes that decide whether a Map row is on the
+// dashboard at all (ADR-0186). Two write map.md's Status: word and two flip the
+// cross-kind archived bit; all four are in-place (lowercase) because a status
+// write moves nobody anywhere.
+//
+// `arrive` is deliberately absent. It is not a status write: it ends the effort,
+// tears the Map's tmux session down and renders an arrival report the human is
+// meant to read — a ceremony that belongs at a command line, where the report has
+// somewhere to go. VerbReopen reverses it from here, so arrival is still not a
+// one-way door.
+//
+// Each id carries the `-map` suffix the assist verb already does: a verb id is
+// kind-local but the surface dispatches on the id alone, so two kinds sharing the
+// string "archive" would be one dashboard case away from performing the wrong
+// kind's verb.
+const (
+	// VerbArchive files a Map away, hiding it from the dashboard. It needs the Map
+	// registered, and says so when it is not.
+	VerbArchive work.Verb = "archive-map"
+	// VerbUnarchive restores an archived Map to the default view.
+	VerbUnarchive work.Verb = "unarchive-map"
+	// VerbAbandon writes `Status: abandoned`: the effort is dropped, and the row
+	// leaves the dashboard without pretending the destination was reached.
+	VerbAbandon work.Verb = "abandon-map"
+	// VerbReopen returns a Map to `active` from arrived or abandoned. It writes the
+	// word only — the Map's session is what the spawning verbs above are for.
+	VerbReopen work.Verb = "open-map"
+)
+
 // MapKindDeps holds what the Map kind reads. The wayfinder deps carry the Map
 // side (filesystem, store, tmux, Trunk); Project and Config are what repository
 // group resolution needs.
@@ -52,6 +81,9 @@ type MapKindDeps struct {
 	// repogroup.Resolve over Wayfinder.Tasks and Project — injectable because a
 	// test wants to name the groups rather than lay out a machine.
 	Groups func() ([]repogroup.Group, error)
+	// IncludeArchived is the show-archived view flag (ADR-0186): archived Maps are
+	// hidden unless this is true.
+	IncludeArchived bool
 }
 
 // MapKind is the Map Work kind.
@@ -81,8 +113,9 @@ func (k *MapKind) ID() work.KindID { return ref.KindMap }
 
 // Load reads every Map still worth looking at, per repository group: active and
 // arrived. An arrived Map stays — it is the lineage view for the sets it spawned,
-// and Archive is the hide mechanism (ADR-0172). Abandoned, archived and BROKEN
-// Maps are hidden.
+// and Archive is the hide mechanism (ADR-0172). Abandoned and BROKEN Maps are
+// hidden, and archived ones are hidden unless the reader turned the show-archived
+// view on (ADR-0186).
 func (k *MapKind) Load() ([]work.Container, error) {
 	groups, err := k.groups()
 	if err != nil {
@@ -102,7 +135,7 @@ func (k *MapKind) Load() ([]work.Container, error) {
 		// repository's Task storage, so the sets are read once for all of them.
 		sets := newSetStatusTable(k.d.Wayfinder, g.DefPath)
 		for _, m := range maps {
-			if !visible(m) {
+			if !visible(m, k.d.IncludeArchived) {
 				continue
 			}
 			containers = append(containers, containerFor(g, m, sets.resolve(m.SpawnedSets)))
@@ -141,10 +174,14 @@ func (k *MapKind) Columns() []string {
 
 // Actions returns the container-level verbs for a Map: work one frontier ticket
 // or fan out the whole frontier when it has one, assist the Map itself, a shell in
-// the repository, and copy-name. Spawning verbs come before in-place ones, and all
-// four frontier keys are gated on a frontier — a Map with none offers no dead key.
+// the repository, its status submenu, and copy-name. Spawning verbs come before
+// in-place ones, and all four frontier keys are gated on a frontier — a Map with
+// none offers no dead key.
+//
 // Assist is **not** gated: a Map whose frontier is empty or fully claimed is when a
-// session scoped to the Map itself is most needed (ADR-0184). The Task-set verbs
+// session scoped to the Map itself is most needed (ADR-0184). Neither is the status
+// opener: it is the operator's only way off a Map row, and a Map with nothing left
+// to grill is precisely the one being archived or abandoned (ADR-0186). The Task-set verbs
 // (drain/bind/…) have never applied to a Map and still do not — the shared two are
 // the only verbs a Map has in common with a task set.
 func (k *MapKind) Actions(c work.Container) []work.Action {
@@ -165,7 +202,30 @@ func (k *MapKind) Actions(c work.Container) []work.Action {
 			work.Action{Verb: VerbFanOutHere, Key: "a", Label: "fan out frontier"},
 		)
 	}
-	return append(actions, work.Action{Verb: work.VerbCopyName, Key: "y", Label: "copy name"})
+	return append(actions,
+		work.Action{Verb: work.VerbStatus, Key: "s", Label: "status ▸"},
+		work.Action{Verb: work.VerbCopyName, Key: "y", Label: "copy name"},
+	)
+}
+
+// StatusActions returns the Map's status submenu: reopen, abandon, archive,
+// unarchive. The two map.md writes come first and the two registry writes after,
+// because that is the order a human thinks about a Map they are done with — is
+// this effort over, and should I still see it? — and it mirrors the Task set's
+// submenu, whose own writes precede its archive pair.
+//
+// None of the four is gated. Every one is idempotent or reversible, and the
+// refusals that do exist are the writers' own: archiving an unregistered Map
+// reports the same `pop map register` corrective the command line gives, and
+// unarchiving a Map that was never archived says so. Gating them here would mean
+// reproducing those rules on a read surface.
+func (k *MapKind) StatusActions(c work.Container) []work.Action {
+	return []work.Action{
+		{Verb: VerbReopen, Key: "o", Label: "open (reopen)"},
+		{Verb: VerbAbandon, Key: "a", Label: "abandon"},
+		{Verb: VerbArchive, Key: "x", Label: "archive"},
+		{Verb: VerbUnarchive, Key: "u", Label: "unarchive"},
+	}
 }
 
 // ItemActions returns the verbs for one Decision ticket: work it — going or
@@ -214,9 +274,65 @@ func (k *MapKind) Perform(c work.Container, item *work.Item, verb work.Verb) (wo
 		return k.fanOutFrontier(c, verb == VerbFanOut)
 	case VerbAssist:
 		return k.assistMap(c)
+	case VerbArchive, VerbUnarchive, VerbAbandon, VerbReopen:
+		return k.writeStatus(c, verb)
+	case work.VerbStatus:
+		// The submenu itself is the surface's modal; its items come back here one at
+		// a time as the four verbs above.
+		return work.Outcome{Kind: work.OutcomeCallerModal, Message: string(verb)}, nil
 	default:
 		return work.Outcome{}, work.UnknownVerb(k.ID(), verb)
 	}
+}
+
+// writeStatus performs one status verb in-process (ADR-0158): no subprocess, no
+// TUI suspend, and no session touched — the row reflects the write on the next
+// poll, because a Map row is nothing but its directory re-read. Every one of the
+// four goes through the writer the command line uses, so a Map archived from the
+// dashboard and one archived from a shell are the same act with the same
+// refusals.
+func (k *MapKind) writeStatus(c work.Container, verb work.Verb) (work.Outcome, error) {
+	checkout := strings.TrimSpace(c.Checkout)
+	if checkout == "" {
+		return work.Outcome{}, fmt.Errorf("wayfinder: no checkout for map %q", c.ID)
+	}
+	d := k.d.Wayfinder
+	switch verb {
+	case VerbArchive:
+		if _, err := ArchiveMap(d, checkout, c.ID); err != nil {
+			return work.Outcome{}, err
+		}
+		return work.Outcome{Kind: work.OutcomeRefresh, Message: "archived " + c.ID}, nil
+	case VerbUnarchive:
+		if _, err := UnarchiveMap(d, checkout, c.ID); err != nil {
+			return work.Outcome{}, err
+		}
+		return work.Outcome{Kind: work.OutcomeRefresh, Message: "unarchived " + c.ID}, nil
+	case VerbAbandon:
+		result, err := AbandonMap(d, checkout, c.ID)
+		if err != nil {
+			return work.Outcome{}, err
+		}
+		return work.Outcome{Kind: work.OutcomeRefresh, Message: statusWriteMessage(result)}, nil
+	case VerbReopen:
+		result, err := ReopenMap(d, checkout, c.ID)
+		if err != nil {
+			return work.Outcome{}, err
+		}
+		return work.Outcome{Kind: work.OutcomeRefresh, Message: statusWriteMessage(result)}, nil
+	default:
+		return work.Outcome{}, work.UnknownVerb(k.ID(), verb)
+	}
+}
+
+// statusWriteMessage reports a map.md status write the way the command line's
+// arrival report opens: the word the Map now carries, and whether it already
+// carried it.
+func statusWriteMessage(result *ArrivalResult) string {
+	if result.Unchanged {
+		return fmt.Sprintf("%s is already %s", result.MapID, result.Status)
+	}
+	return fmt.Sprintf("%s is %s (was %s)", result.MapID, result.Status, result.Previous)
 }
 
 // workTicket opens the Grilling pane for a Map's ticket inside the Map's own tmux
@@ -368,6 +484,7 @@ func containerFor(g repogroup.Group, m Map, spawned []SpawnedSet) work.Container
 		CursorKey:      g.ProjectName + "\x00map\x00" + m.ID,
 		Broken:         m.Broken,
 		BrokenReason:   m.BrokenReason,
+		Archived:       m.Archived,
 		Items:          itemsFor(m),
 		DetailSections: sectionsFor(m, spawned),
 		DefPath:        g.DefPath,
@@ -384,10 +501,17 @@ func containerFor(g repogroup.Group, m Map, spawned []SpawnedSet) work.Container
 // ticket tallies (ADR-0130). The tallies are plain — how much thinking is left is
 // a quantity, not an alarm — so only the label carries a tone.
 func (k *MapKind) StatusCell(c work.Container) []work.StatusSegment {
-	return []work.StatusSegment{
+	segments := []work.StatusSegment{
 		{Text: mapStatusLabel, Tone: work.ToneLabel},
 		{Text: fmt.Sprintf("%d open / %d frontier", c.MapOpen, c.MapFrontier), Tone: work.TonePlain},
 	}
+	// Only ever present with show-archived on, and then it is the whole reason the
+	// row is on screen: without it an archived Map is indistinguishable from an
+	// active one, and the operator cannot tell which of archive/unarchive to press.
+	if c.Archived {
+		segments = append(segments, work.StatusSegment{Text: "archived", Tone: work.TonePlain})
+	}
+	return segments
 }
 
 // mapStatusLabel is the one status label a Map shows on a read surface. A Map's
@@ -458,9 +582,15 @@ func sectionsFor(m Map, spawned []SpawnedSet) []work.Section {
 }
 
 // visible reports whether a Map should appear as a Work container (ADR-0130,
-// ADR-0172).
-func visible(m Map) bool {
-	if m.Archived || m.Broken {
+// ADR-0172). includeArchived is the reader's show-archived view flag: an archived
+// Map is listed only when it is on, which is what makes unarchiving reachable from
+// the surface that offers it (ADR-0186). Abandoned and BROKEN Maps are hidden
+// either way — the flag is about filing, not about status.
+func visible(m Map, includeArchived bool) bool {
+	if m.Broken {
+		return false
+	}
+	if m.Archived && !includeArchived {
 		return false
 	}
 	return m.Status == MapActive || m.Status == MapArrived

@@ -33,7 +33,8 @@ func (k *itemVerbKind) Less(a, b work.Container) bool   { return a.ID < b.ID }
 func (k *itemVerbKind) StatusCell(work.Container) []work.StatusSegment {
 	return []work.StatusSegment{{Text: "READY", Tone: work.ToneLabel}}
 }
-func (k *itemVerbKind) Actions(work.Container) []work.Action { return nil }
+func (k *itemVerbKind) Actions(work.Container) []work.Action       { return nil }
+func (k *itemVerbKind) StatusActions(work.Container) []work.Action { return nil }
 
 func (k *itemVerbKind) ItemActions(work.Container, work.Item) []work.Action {
 	k.asked++

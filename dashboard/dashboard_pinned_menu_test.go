@@ -86,7 +86,10 @@ func TestDashboardPinnedActionMenuRowCursorAndRefilter(t *testing.T) {
 func TestDashboardPinnedActionMenuInPlaceVerbStaysOpen(t *testing.T) {
 	var archived []string
 	d := &drain.Deps{
-		ArchiveSet: func(defPath, setID string) error {
+		SetArchived: func(defPath, setID string, on bool) error {
+			if !on {
+				t.Fatalf("archive verb wrote archived=false for %s", setID)
+			}
 			archived = append(archived, setID)
 			return nil
 		},
@@ -110,7 +113,7 @@ func TestDashboardPinnedActionMenuInPlaceVerbStaysOpen(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("archive should dispatch")
 	}
-	updated, _ = got.Update(cmd().(dashboardArchiveMsg))
+	updated, _ = got.Update(cmd().(dashboardKindVerbMsg))
 	got = updated.(QueueDashboard)
 	if len(archived) != 1 || archived[0] != "one" {
 		t.Fatalf("archived = %v, want [one]", archived)
@@ -126,7 +129,7 @@ func TestDashboardPinnedActionMenuInPlaceVerbStaysOpen(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("second archive should dispatch")
 	}
-	updated, _ = got.Update(cmd().(dashboardArchiveMsg))
+	updated, _ = got.Update(cmd().(dashboardKindVerbMsg))
 	got = updated.(QueueDashboard)
 	if len(archived) != 2 || archived[1] != "two" {
 		t.Fatalf("archived = %v, want [one two]", archived)

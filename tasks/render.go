@@ -18,12 +18,12 @@ type RefreshResult struct {
 	// pure reads and re-registers, so re-register never rebinds.
 	NewRegistrationIDs []string
 	Rows               []Row
-	Manifests        map[string]*Manifest
-	NeedsSave        bool
-	RuntimeLock      *RuntimeLockStatus
-	Checkout         *CheckoutStatus
-	ArchivedCount    int
-	ShowArchived     bool
+	Manifests          map[string]*Manifest
+	NeedsSave          bool
+	RuntimeLock        *RuntimeLockStatus
+	Checkout           *CheckoutStatus
+	ArchivedCount      int
+	ShowArchived       bool
 }
 
 // CheckoutStatus describes where a whole-set implement started here would run.
@@ -42,17 +42,38 @@ func Refresh(defPath string) (*RefreshResult, error) {
 	return RefreshWith(defaultDeps, defPath, StatePathFor(defPath))
 }
 
+// archivedRows is which registered sets a refresh builds rows for. It is three
+// answers rather than a bool because the three views are genuinely different
+// questions: the default table (active work), `pop tasks status --archived` (the
+// filing cabinet on its own), and the Work dashboard's show-archived toggle, which
+// wants both at once so an archived row can be unarchived beside the live ones.
+type archivedRows int
+
+const (
+	archivedHidden   archivedRows = iota // active sets only
+	archivedOnly                         // archived sets only
+	archivedIncluded                     // both, archived rows carrying Archived
+)
+
 // RefreshWith performs a pure-read refresh using injected dependencies and
 // state path. It never writes Task state — discovered-but-unregistered sets
 // are inert (ADR-0061).
 func RefreshWith(d *Deps, defPath, statePath string) (*RefreshResult, error) {
-	return refreshWith(d, defPath, statePath, false, false, false)
+	return refreshWith(d, defPath, statePath, false, false, archivedHidden)
 }
 
 // RefreshArchivedWith performs a pure-read refresh and returns only Archived
 // Task sets. Like RefreshWith, it never registers.
 func RefreshArchivedWith(d *Deps, defPath, statePath string) (*RefreshResult, error) {
-	return refreshWith(d, defPath, statePath, false, false, true)
+	return refreshWith(d, defPath, statePath, false, false, archivedOnly)
+}
+
+// RefreshIncludingArchivedWith performs a pure-read refresh over archived and
+// active sets together, each row saying which it is. It backs the Work dashboard's
+// show-archived view (ADR-0186), where the point is to act on an archived row
+// without losing sight of the live ones.
+func RefreshIncludingArchivedWith(d *Deps, defPath, statePath string) (*RefreshResult, error) {
+	return refreshWith(d, defPath, statePath, false, false, archivedIncluded)
 }
 
 // RegisterWith is the sole writer of Task-set registration (ADR-0061): it
@@ -62,17 +83,17 @@ func RefreshArchivedWith(d *Deps, defPath, statePath string) (*RefreshResult, er
 // materialized eagerly by the register command. It must be run from inside the
 // repo so its cwd is a valid checkout.
 func RegisterWith(d *Deps, defPath, statePath string) (*RefreshResult, error) {
-	return refreshWith(d, defPath, statePath, true, false, false)
+	return refreshWith(d, defPath, statePath, true, false, archivedHidden)
 }
 
 // RegisterManagedWith registers newly discovered sets like RegisterWith. Managed
 // worktrees are provisioned eagerly by the register command (ADR-0147); this
 // helper exists for tests and callers that provision bindings separately.
 func RegisterManagedWith(d *Deps, defPath, statePath string) (*RefreshResult, error) {
-	return refreshWith(d, defPath, statePath, true, false, false)
+	return refreshWith(d, defPath, statePath, true, false, archivedHidden)
 }
 
-func refreshWith(d *Deps, defPath, statePath string, register, managed, showArchived bool) (*RefreshResult, error) {
+func refreshWith(d *Deps, defPath, statePath string, register, managed bool, archived archivedRows) (*RefreshResult, error) {
 	canon, err := CanonicalDefinitionPathWith(d, defPath)
 	if err != nil {
 		return nil, err
@@ -145,11 +166,27 @@ func refreshWith(d *Deps, defPath, statePath string, register, managed, showArch
 		Manifests:          manifests,
 		NeedsSave:          needsSave,
 		ArchivedCount:      archivedCount(state, canon),
-		ShowArchived:       showArchived,
+		// ShowArchived means "this is the archive view", which the included view is
+		// not: it is the active table with the archived rows let in, so the callers
+		// that skip work on an archive view (the Verify verdict pass, the "N archived
+		// hidden" footer) go on treating it as the ordinary table.
+		ShowArchived: archived == archivedOnly,
 	}
-	result.Rows = buildRows(state, canon, disc, manifests, showArchived)
+	result.Rows = buildRows(state, canon, disc, manifests, archived)
 	MarkNextPick(result.Rows)
 	return result, nil
+}
+
+// includeRegistration reports whether one registration belongs in the view.
+func includeRegistration(rowArchived bool, view archivedRows) bool {
+	switch view {
+	case archivedOnly:
+		return rowArchived
+	case archivedIncluded:
+		return true
+	default:
+		return !rowArchived
+	}
 }
 
 func archivedCount(state *GlobalState, defPath string) int {
@@ -166,14 +203,14 @@ func archivedCount(state *GlobalState, defPath string) int {
 	return count
 }
 
-func buildRows(state *GlobalState, defPath string, disc *Discovery, manifests map[string]*Manifest, showArchived bool) []Row {
+func buildRows(state *GlobalState, defPath string, disc *Discovery, manifests map[string]*Manifest, archived archivedRows) []Row {
 	var rows []Row
 
 	entry := state.Tasks[defPath]
 
 	if entry != nil {
 		for i, reg := range entry.TaskSets {
-			if reg.Archived != showArchived {
+			if !includeRegistration(reg.Archived, archived) {
 				continue
 			}
 			if _, ok := disc.Manifests[reg.ID]; !ok {
@@ -183,6 +220,7 @@ func buildRows(state *GlobalState, defPath string, disc *Discovery, manifests ma
 					Priority:     reg.Priority,
 					PriorityShow: fmt.Sprintf("%d", reg.Priority),
 					AutoDrain:    reg.AutoDrain,
+					Archived:     reg.Archived,
 					RegIndex:     i,
 				})
 				continue
@@ -237,6 +275,7 @@ func buildTaskSetRow(reg RegisteredTaskSet, m *Manifest, regIndex int) Row {
 		Priority:     reg.Priority,
 		PriorityShow: fmt.Sprintf("%d", reg.Priority),
 		AutoDrain:    reg.AutoDrain,
+		Archived:     reg.Archived,
 		RegIndex:     regIndex,
 		Started:      anyDone(m),
 	}

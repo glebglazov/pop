@@ -30,6 +30,7 @@ func TestMapCommandTree(t *testing.T) {
 		{"map", "out-of-scope"},
 		{"map", "spawned"},
 		{"map", "arrive"},
+		{"map", "abandon"},
 		{"map", "open"},
 		{"map", "archive"},
 		{"map", "unarchive"},
@@ -48,7 +49,7 @@ func TestMapCommandTree(t *testing.T) {
 	if cmd, _, _ := rootCmd.Find([]string{"map", "show"}); cmd.CommandPath() != "pop map" {
 		t.Fatalf("pop map show should not exist; Find resolved %q", cmd.CommandPath())
 	}
-	for _, cmd := range []*cobra.Command{mapCmd, mapStatusCmd, mapRegisterCmd, mapNextCmd, mapFanOutCmd, mapAssistCmd, mapClaimCmd, mapResolveCmd, mapOutOfScopeCmd, mapSpawnedCmd, mapArriveCmd, mapOpenCmd, mapArchiveCmd, mapUnarchiveCmd} {
+	for _, cmd := range []*cobra.Command{mapCmd, mapStatusCmd, mapRegisterCmd, mapNextCmd, mapFanOutCmd, mapAssistCmd, mapClaimCmd, mapResolveCmd, mapOutOfScopeCmd, mapSpawnedCmd, mapArriveCmd, mapAbandonCmd, mapOpenCmd, mapArchiveCmd, mapUnarchiveCmd} {
 		if strings.Contains(cmd.CommandPath(), "wayfinder") {
 			t.Fatalf("command path still says wayfinder: %q", cmd.CommandPath())
 		}
@@ -758,6 +759,61 @@ func TestMapArriveAndOpenDeclareArrival(t *testing.T) {
 	}
 }
 
+// TestMapAbandonAndReopenFromTheCLI walks the other ending: the effort dropped
+// rather than reached, the Map gone from the default table, its session left alone,
+// and the same `open` that reverses arrival bringing it back.
+func TestMapAbandonAndReopenFromTheCLI(t *testing.T) {
+	t.Parallel()
+	d, storageDir, _ := mapRegistryTestDeps(t, oneTicketMapFiles("demo"))
+	fake := &tmuxtest.Fake{Live: map[string]string{wayfinder.MapSessionName("demo"): "/repo"}}
+	d.Tmux = fake
+	if err := runMapRegisterWith(d, &bytes.Buffer{}, "demo"); err != nil {
+		t.Fatal(err)
+	}
+
+	var abandonBuf bytes.Buffer
+	if err := runMapAbandonWith(d, &abandonBuf, "demo"); err != nil {
+		t.Fatal(err)
+	}
+	if out := abandonBuf.String(); !strings.Contains(out, "Map demo is abandoned (was active)") {
+		t.Fatalf("abandon output = %q", out)
+	}
+	// Abandonment is not arrival: the session it may have been typed from survives.
+	if !fake.HasSession(wayfinder.MapSessionName("demo")) {
+		t.Fatal("abandon tore down the map's tmux session")
+	}
+	body, err := os.ReadFile(filepath.Join(storageDir, "maps", "demo", "map.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "Status: abandoned") {
+		t.Fatalf("map.md missing the abandoned status:\n%s", body)
+	}
+
+	var statusBuf bytes.Buffer
+	if err := runMapStatusWith(d, &statusBuf, false); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(statusBuf.String(), "demo") {
+		t.Fatalf("abandoned map still on the default table:\n%s", statusBuf.String())
+	}
+
+	var openBuf bytes.Buffer
+	if err := runMapOpenWith(d, &openBuf, "demo"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(openBuf.String(), "Map demo is active (was abandoned)") {
+		t.Fatalf("open output = %q", openBuf.String())
+	}
+	var afterBuf bytes.Buffer
+	if err := runMapStatusWith(d, &afterBuf, false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(afterBuf.String(), "demo") {
+		t.Fatalf("reopened map missing from the default table:\n%s", afterBuf.String())
+	}
+}
+
 func TestMapArchiveRoundTrip(t *testing.T) {
 	t.Parallel()
 	d, storageDir, _ := mapRegistryTestDeps(t, oneTicketMapFiles("demo"))
@@ -820,7 +876,7 @@ func TestMapShellCompletionOffersMapIDs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, cmd := range []*cobra.Command{mapStatusCmd, mapRegisterCmd, mapArchiveCmd} {
+	for _, cmd := range []*cobra.Command{mapStatusCmd, mapRegisterCmd, mapArchiveCmd, mapAbandonCmd} {
 		got, directive := cmd.ValidArgsFunction(cmd, nil, "")
 		if !slices.Equal(got, []string{"visible"}) {
 			t.Fatalf("%s completion = %v, want [visible]", cmd.Name(), got)

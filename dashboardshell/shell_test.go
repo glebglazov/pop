@@ -29,6 +29,7 @@ func (k *pageKind) Load() ([]work.Container, error)                     { return
 func (k *pageKind) Less(a, b work.Container) bool                       { return a.ID < b.ID }
 func (k *pageKind) Columns() []string                                   { return k.columns }
 func (k *pageKind) Actions(work.Container) []work.Action                { return nil }
+func (k *pageKind) StatusActions(work.Container) []work.Action          { return nil }
 func (k *pageKind) ItemActions(work.Container, work.Item) []work.Action { return nil }
 
 func (k *pageKind) StatusCell(c work.Container) []work.StatusSegment {

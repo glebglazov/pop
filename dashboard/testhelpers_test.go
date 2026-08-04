@@ -36,3 +36,9 @@ func newTaskDetailView(row DashboardRow, manifest *tasks.Manifest, taskRow *task
 func testKinds() workKinds {
 	return newWorkKinds((&drain.Deps{}).WorkKinds(nil))
 }
+
+// testRoutineKinds is the Routine page's wiring list, for a test that asks what
+// that kind offers over one of its own rows.
+func testRoutineKinds() workKinds {
+	return newWorkKinds((&drain.Deps{}).RoutinePageKinds(nil))
+}

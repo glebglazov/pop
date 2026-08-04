@@ -1,5 +1,6 @@
 ---
 status: accepted
+relates: "extended by [ADR-0186](0186-status-submenu-is-kind-owned-and-a-maps-status-is-operator-writable.md), which moves the last kind vocabulary — the status submenu — behind this seam"
 ---
 
 # `work` is one `Kind` interface with data-shaped returns and kind-side adapters

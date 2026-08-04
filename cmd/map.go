@@ -85,8 +85,12 @@ A Map ends at ` + "`pop map arrive`" + `, which writes ` + "`Status: arrived`" +
 the Map's tmux session; ` + "`pop map open`" + ` reverses it, reopening the Map and putting
 you back in its session. The gate is
 the destination, not empty fog — a Map may carry non-prerequisite fog forever — so
-arrival warns about open or claimed tickets and proceeds. An arrived Map stays
-visible; ` + "`pop map archive`" + ` is what hides one. A ` + "`Status:`" + ` line outside
+arrival warns about open or claimed tickets and proceeds. ` + "`pop map abandon`" + ` is
+the other ending: the effort dropped rather than reached, gated on nothing, the
+session left standing, and reversed by the same ` + "`pop map open`" + `. An arrived Map
+stays visible; ` + "`pop map archive`" + ` is what hides one, and an abandoned Map is
+hidden by the word itself. Every one of those writes is also a keypress in the Work
+dashboard's status submenu, except ` + "`arrive`" + `, which prints a report. A ` + "`Status:`" + ` line outside
 ` + "`active | arrived | abandoned`" + ` renders the Map BROKEN with the fix printed.`,
 }
 
@@ -224,6 +228,16 @@ var mapOpenCmd = &cobra.Command{
 	Run:   runMapOpen,
 }
 
+// mapAbandonCmd is the other way an effort ends: dropped rather than reached. It
+// writes the status word the loader has always understood and leaves the session
+// standing — `pop map open` reverses it, so nothing here is final.
+var mapAbandonCmd = &cobra.Command{
+	Use:   "abandon MAP",
+	Short: "Declare a map's effort dropped without reaching its destination",
+	Args:  cobra.ExactArgs(1),
+	Run:   runMapAbandon,
+}
+
 var mapArchiveCmd = &cobra.Command{
 	Use:   "archive MAP",
 	Short: "Hide a map from default views",
@@ -251,6 +265,7 @@ func init() {
 	mapCmd.AddCommand(mapSpawnedCmd)
 	mapCmd.AddCommand(mapArriveCmd)
 	mapCmd.AddCommand(mapOpenCmd)
+	mapCmd.AddCommand(mapAbandonCmd)
 	mapCmd.AddCommand(mapArchiveCmd)
 	mapCmd.AddCommand(mapUnarchiveCmd)
 	mapStatusCmd.Flags().BoolVar(&mapStatusAll, "all", false, "include abandoned and archived maps")
@@ -661,6 +676,20 @@ func renderArrival(w io.Writer, result *wayfinder.ArrivalResult) {
 			fmt.Fprintf(w, "attached tmux session %s\n", result.Session.Name)
 		}
 	}
+}
+
+func runMapAbandon(cmd *cobra.Command, args []string) {
+	err := runMapAbandonWith(cmdLayerDeps().wayfinderDeps(), os.Stdout, args[0])
+	handleTaskExit(err)
+}
+
+func runMapAbandonWith(d *wayfinder.Deps, w io.Writer, mapID string) error {
+	result, err := wayfinder.AbandonMap(d, cmdLayerDeps().WorkDir(), mapID)
+	if err != nil {
+		return err
+	}
+	renderArrival(w, result)
+	return nil
 }
 
 func runMapArchive(cmd *cobra.Command, args []string) {

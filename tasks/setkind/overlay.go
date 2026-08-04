@@ -36,12 +36,18 @@ func (d *Deps) config() *config.Config {
 	return nil
 }
 
-// refresh resolves the Refresh seam, defaulting to tasks.RefreshWith.
+// refresh resolves the Refresh seam, defaulting to tasks.RefreshWith — or, with
+// the show-archived flag on, to the refresh that returns archived and active sets
+// together (ADR-0186).
 func (d *Deps) refresh(defPath string) (*tasks.RefreshResult, error) {
 	if d.Refresh != nil {
 		return d.Refresh(defPath)
 	}
-	return tasks.RefreshWith(d.Tasks, defPath, tasks.StatePathFor(defPath))
+	statePath := tasks.StatePathFor(defPath)
+	if d.IncludeArchived {
+		return tasks.RefreshIncludingArchivedWith(d.Tasks, defPath, statePath)
+	}
+	return tasks.RefreshWith(d.Tasks, defPath, statePath)
 }
 
 // liveDrains resolves the LiveDrains seam, defaulting to tasks.LiveRunningDrains.

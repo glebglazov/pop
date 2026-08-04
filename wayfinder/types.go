@@ -12,7 +12,11 @@ const (
 	// `done` outright — the Work dashboard hides DONE work by default, and a Map's
 	// terminal state must not inherit a hiding rule written for Task sets
 	// (ADR-0172).
-	MapArrived   MapStatus = "arrived"
+	MapArrived MapStatus = "arrived"
+	// MapAbandoned is the terminal status of an effort dropped rather than
+	// finished, written by `pop map abandon` and the dashboard's status submenu and
+	// reversed by `pop map open`. Unlike arrival it hides the Map: an abandoned Map
+	// is not a lineage record anybody reads, it is a decision to stop.
 	MapAbandoned MapStatus = "abandoned"
 	// MapBroken is pop's verdict for a Map it cannot read: an unrecognised Status:
 	// word, an unreadable map.md, a manifest that does not validate. Uppercase
@@ -59,13 +63,13 @@ const (
 
 // Ticket is one Decision ticket under a Map's issues/ directory.
 type Ticket struct {
-	Number    int
-	Slug      string
-	ID        string // zero-padded ticket number, e.g. "01"
-	File      string // markdown filename under issues/, e.g. "01-first.md"
-	Title     string // manifest-only; empty on header-parsed tickets
-	Type      TicketType
-	Status    TicketStatus
+	Number int
+	Slug   string
+	ID     string // zero-padded ticket number, e.g. "01"
+	File   string // markdown filename under issues/, e.g. "01-first.md"
+	Title  string // manifest-only; empty on header-parsed tickets
+	Type   TicketType
+	Status TicketStatus
 	// OutOfScope marks a ticket resolved by being ruled beyond the destination
 	// rather than answered. It decides which generated section of map.md the
 	// ticket renders into.
@@ -86,13 +90,13 @@ type Ticket struct {
 
 // Map is a parsed Wayfinder map folder.
 type Map struct {
-	ID              string
-	Dir             string
-	Status          MapStatus
-	Destination     string
-	DecisionsSoFar  string
-	Archived        bool
-	Tickets         []Ticket
+	ID             string
+	Dir            string
+	Status         MapStatus
+	Destination    string
+	DecisionsSoFar string
+	Archived       bool
+	Tickets        []Ticket
 	// SpawnedSets holds the ids of the Task sets this Map handed off, in the
 	// order they were recorded. Ids only: what each one is doing right now is read
 	// fresh from the sets themselves at render time (ResolveSpawnedSets).

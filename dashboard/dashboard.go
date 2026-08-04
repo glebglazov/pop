@@ -89,15 +89,6 @@ type dashboardUnparkMsg struct {
 	setID string
 	err   error
 }
-type dashboardArchiveMsg struct {
-	setID string
-	err   error
-}
-type dashboardStatusMsg struct {
-	setID string
-	verb  string
-	err   error
-}
 
 // dashboardItemTextMsg carries one Work item's text back to the detail peek.
 type dashboardItemTextMsg struct {
@@ -221,47 +212,24 @@ type dashboardMenuItem struct {
 	verb  work.Verb
 }
 
-// dashboardStatusAction identifies a task-set status verb in the status submenu.
-type dashboardStatusAction int
-
-const (
-	statusActionComplete dashboardStatusAction = iota
-	statusActionOpen
-	statusActionSkip
-	statusActionArchive
-	statusActionUnarchive
-)
-
-// dashboardStatusMenuItem is one verb in the status submenu.
-type dashboardStatusMenuItem struct {
-	key    string
-	label  string
-	action dashboardStatusAction
-	verb   string // pop tasks subcommand
-}
-
 // dashboardStatusMenu is the nested status overlay opened with `s` from the
-// action menu. Status verbs write in-process (ADR-0158) — complete/open/skip
-// apply every unlocked task in the set; archive/unarchive flip the set flag.
+// action menu. Its items are the row's own kind's StatusActions — a task set's
+// five task/archive writes, a Map's four lifecycle writes (ADR-0186) — so this
+// file holds no status vocabulary of any kind. Every one of them writes
+// in-process (ADR-0158) and is performed through the kind's own Perform, like any
+// other verb the dashboard dispatches.
 type dashboardStatusMenu struct {
 	row  DashboardRow
-	list *ui.List[dashboardStatusMenuItem]
+	list *ui.List[work.Action]
 }
 
-func dashboardStatusMenuItems() []dashboardStatusMenuItem {
-	return []dashboardStatusMenuItem{
-		{key: "c", label: "complete", action: statusActionComplete, verb: "complete"},
-		{key: "o", label: "open", action: statusActionOpen, verb: "open"},
-		{key: "s", label: "skip", action: statusActionSkip, verb: "skip"},
-		{key: "x", label: "archive", action: statusActionArchive, verb: "archive"},
-		{key: "u", label: "unarchive", action: statusActionUnarchive, verb: "unarchive"},
-	}
-}
-
-func newDashboardStatusMenu(row DashboardRow) *dashboardStatusMenu {
+// newDashboardStatusMenu opens the status submenu over row with the verbs its
+// kind offers right now. A kind that offers none never gets here: it does not
+// offer the opener either.
+func newDashboardStatusMenu(kinds workKinds, row DashboardRow) *dashboardStatusMenu {
 	return &dashboardStatusMenu{
 		row:  row,
-		list: ui.NewList(dashboardStatusMenuItems(), ui.Opts[dashboardStatusMenuItem]{Wrap: true}),
+		list: ui.NewList(kinds.statusActionsFor(row), ui.Opts[work.Action]{Wrap: true}),
 	}
 }
 
@@ -361,13 +329,15 @@ func (m QueueDashboard) syncPinnedMenuRow() (tea.Model, tea.Cmd) {
 }
 
 // dashboardFilterToggle identifies one row-inclusion view filter the filter
-// menu flips. Today the menu carries a single toggle (Show done, wired to the
-// ADR-0121 Done-inclusion flag); the enum and the item list are the extension
-// point for future inclusion filters (by status, by project).
+// menu flips. Both of today's toggles are cross-kind view flags on the model's
+// deps — Show done (ADR-0121) and Show archived (ADR-0186) — and the enum and the
+// item list are the extension point for future inclusion filters (by status, by
+// project).
 type dashboardFilterToggle int
 
 const (
 	filterToggleShowDone dashboardFilterToggle = iota
+	filterToggleShowArchived
 )
 
 // dashboardFilterItem is one toggle in the filter menu: the flat shortcut letter
@@ -392,6 +362,10 @@ type dashboardFilterMenu struct {
 func dashboardFilterItems() []dashboardFilterItem {
 	return []dashboardFilterItem{
 		{key: "d", label: "show done", toggle: filterToggleShowDone},
+		// Archived rows are how unarchive is reachable at all: the verb is in the
+		// row's own status submenu, and an archived row is off screen by default
+		// (ADR-0186). Like show done it is session-only and starts off.
+		{key: "a", label: "show archived", toggle: filterToggleShowArchived},
 	}
 }
 
@@ -987,13 +961,6 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = fmt.Sprintf("%s unparked", msg.setID)
 		}
 		return m, m.reload()
-	case dashboardArchiveMsg:
-		if msg.err != nil {
-			m.actionErr = msg.err
-		} else {
-			m.statusMsg = fmt.Sprintf("%s archived", msg.setID)
-		}
-		return m, m.reload()
 	case dashboardDrainListMsg:
 		if msg.err != nil {
 			m.actionErr = msg.err
@@ -1005,13 +972,6 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.drainPick = newDashboardDrainModal(msg.row, msg.entries)
 		return m, nil
-	case dashboardStatusMsg:
-		if msg.err != nil {
-			m.actionErr = msg.err
-		} else {
-			m.statusMsg = fmt.Sprintf("%s: %s applied", msg.setID, msg.verb)
-		}
-		return m, m.reload()
 	case dashboardBindListMsg:
 		if msg.err != nil {
 			m.actionErr = msg.err
@@ -1182,7 +1142,7 @@ func (m QueueDashboard) updateStatusMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.invokeStatusMenuItem(m.menu.status.list.Cursor())
 	}
 	for i, item := range m.menu.status.list.Items() {
-		if msg.String() == item.key {
+		if msg.String() == item.Key {
 			return m.invokeStatusMenuItem(i)
 		}
 	}
@@ -1201,8 +1161,8 @@ func (m QueueDashboard) invokeMenuItem(idx int) (tea.Model, tea.Cmd) {
 	}
 	item := items[idx]
 	row := m.menu.row
-	if item.verb == setkind.VerbStatus {
-		m.menu.status = newDashboardStatusMenu(row)
+	if item.verb == work.VerbStatus {
+		m.menu.status = newDashboardStatusMenu(m.kinds, row)
 		return m, nil
 	}
 	pinned := m.menu.pinned && !dashboardMenuItemHandoff(item)
@@ -1212,8 +1172,9 @@ func (m QueueDashboard) invokeMenuItem(idx int) (tea.Model, tea.Cmd) {
 	return m.dispatchVerb(item.verb, row)
 }
 
-// invokeStatusMenuItem closes both menus and applies the status verb at idx
-// in-process (ADR-0158).
+// invokeStatusMenuItem closes the submenu and dispatches the status verb at idx
+// down the one path every row verb takes — no status-specific dispatch of its own
+// (ADR-0186). A status write is in-place, so a pinned menu survives it.
 func (m QueueDashboard) invokeStatusMenuItem(idx int) (tea.Model, tea.Cmd) {
 	if m.menu == nil || m.menu.status == nil {
 		return m, nil
@@ -1229,7 +1190,7 @@ func (m QueueDashboard) invokeStatusMenuItem(idx int) (tea.Model, tea.Cmd) {
 	} else {
 		m.menu = nil
 	}
-	return m, m.launchStatusVerb(row, item.verb)
+	return m.dispatchVerb(item.Verb, row)
 }
 
 // updateFilterMenu drives the row-inclusion filter modal: esc/ctrl+c/f close it,
@@ -1282,6 +1243,9 @@ func (m QueueDashboard) invokeFilterItem(idx int) (tea.Model, tea.Cmd) {
 	case filterToggleShowDone:
 		m.d.IncludeDone = !m.d.IncludeDone
 		return m, m.reload()
+	case filterToggleShowArchived:
+		m.d.IncludeArchived = !m.d.IncludeArchived
+		return m, m.reload()
 	}
 	return m, nil
 }
@@ -1292,6 +1256,8 @@ func (m QueueDashboard) filterToggleOn(toggle dashboardFilterToggle) bool {
 	switch toggle {
 	case filterToggleShowDone:
 		return m.d != nil && m.d.IncludeDone
+	case filterToggleShowArchived:
+		return m.d != nil && m.d.IncludeArchived
 	}
 	return false
 }
@@ -1357,9 +1323,6 @@ func (m QueueDashboard) dispatchVerb(verb work.Verb, row DashboardRow) (tea.Mode
 		}
 		m.statusMsg = ""
 		return m, m.unparkSet(row)
-	case setkind.VerbArchive:
-		m.statusMsg = ""
-		return m, m.ArchiveTaskSet(row)
 	case wayfinder.VerbWork:
 		m.statusMsg = dashboardHandoffPending
 		return m, m.launchWayfinderSession(row, "")
@@ -1784,18 +1747,6 @@ func (m QueueDashboard) unparkSet(row DashboardRow) tea.Cmd {
 	}
 }
 
-// archiveSet sets the reversible archived flag on the cursored set through the
-// existing archive flag-write path. It touches only Task state, leaving the
-// set's Worktree binding intact; the archived row drops out on the next build,
-// which excludes Archived sets. Archiving is fully reversible, so no
-// confirmation is required (ADR cleanup path for Done and Orphaned sets alike).
-func (m QueueDashboard) ArchiveTaskSet(row DashboardRow) tea.Cmd {
-	return func() tea.Msg {
-		err := m.d.ArchiveTaskSet(row.DefPath, row.ID)
-		return dashboardArchiveMsg{setID: row.ID, err: err}
-	}
-}
-
 func (m QueueDashboard) ToggleSetAutoDrain(row DashboardRow) tea.Cmd {
 	return func() tea.Msg {
 		result, err := m.d.ToggleSetAutoDrain(row.DefPath, row.StatePath, row.ID)
@@ -1999,13 +1950,6 @@ func handoffAfterLaunch(d *drain.Deps, result drain.DashboardDrainResult, err er
 	return dashboardHandoffMsg{quit: true}
 }
 
-func (m QueueDashboard) launchStatusVerb(row DashboardRow, verb string) tea.Cmd {
-	return func() tea.Msg {
-		err := applyDashboardStatusVerb(m.d, row, verb)
-		return dashboardStatusMsg{setID: row.ID, verb: verb, err: err}
-	}
-}
-
 // dashboardRowStorageDir derives a container's Task-storage directory from the
 // definition path its repository group carried.
 func dashboardRowStorageDir(row DashboardRow) string {
@@ -2154,16 +2098,19 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			ui.HelpEntry{Key: "esc", Desc: "close menu"},
 		)
 	case m.menu != nil && m.menu.status != nil:
-		return []ui.HelpEntry{
-			{Key: "c", Desc: "complete"},
-			{Key: "o", Desc: "open (reopen)"},
-			{Key: "s", Desc: "skip"},
-			{Key: "x", Desc: "archive"},
-			{Key: "u", Desc: "unarchive"},
-			{Key: "j/k", Desc: "navigate"},
-			{Key: "enter", Desc: "run action"},
-			{Key: "esc", Desc: "back to action menu"},
+		// The status submenu's verbs are the focused row's own kind's, so the help
+		// lists the submenu that is actually open rather than one kind's vocabulary
+		// written out here — a Map row's keys would otherwise be a lie.
+		items := m.menu.status.list.Items()
+		entries := make([]ui.HelpEntry, 0, len(items)+3)
+		for _, action := range items {
+			entries = append(entries, ui.HelpEntry{Key: action.Key, Desc: action.Label})
 		}
+		return append(entries,
+			ui.HelpEntry{Key: "j/k", Desc: "navigate"},
+			ui.HelpEntry{Key: "enter", Desc: "run action"},
+			ui.HelpEntry{Key: "esc", Desc: "back to action menu"},
+		)
 	case m.menu != nil:
 		// Dashboard action menu. Its verbs are the focused row's own kind's, so the
 		// help lists the menu that is actually open rather than one kind's vocabulary
@@ -2186,6 +2133,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 		// Row-inclusion filter menu
 		return []ui.HelpEntry{
 			{Key: "d", Desc: "toggle show done"},
+			{Key: "a", Desc: "toggle show archived"},
 			{Key: "j/k", Desc: "navigate"},
 			{Key: "enter/space", Desc: "toggle filter"},
 			{Key: "esc", Desc: "close menu"},
@@ -3157,7 +3105,7 @@ func dashboardStatusMenuLines(status *dashboardStatusMenu, width int) []string {
 		if i == cursor {
 			marker = ui.IndicatorStyle.Render("█") + " "
 		}
-		line := fmt.Sprintf("    %s%s  %s", marker, item.key, item.label)
+		line := fmt.Sprintf("    %s%s  %s", marker, item.Key, item.Label)
 		lines = append(lines, ui.TruncateString(line, width))
 	}
 	return lines

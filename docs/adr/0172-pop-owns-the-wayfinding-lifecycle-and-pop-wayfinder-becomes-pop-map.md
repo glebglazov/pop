@@ -1,5 +1,6 @@
 ---
 status: accepted
+relates: "the operator-writable Map status this ADR left to the command line is now also a dashboard submenu, arrival excepted — [ADR-0186](0186-status-submenu-is-kind-owned-and-a-maps-status-is-operator-writable.md)"
 ---
 
 # pop owns the wayfinding lifecycle; `pop wayfinder` becomes `pop map`

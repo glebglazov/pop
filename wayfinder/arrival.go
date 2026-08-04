@@ -58,13 +58,36 @@ func ArriveMap(d *Deps, cwd, mapID string) (*ArrivalResult, error) {
 	return result, nil
 }
 
+// AbandonMap declares a Map's effort dropped: it writes `Status: abandoned`
+// through the same writer arrival uses, and leaves the session alone. Abandonment
+// is a judgment about the effort, not about the tickets, so it is gated on
+// nothing — a Map with a full frontier is exactly the one a human gives up on —
+// and it is reversible by ReopenMap, so the word on disk is never a dead end.
+//
+// It does not tear the session down the way arrival does: arrival ends the
+// grilling the session existed for, whereas abandonment is often typed *from* one
+// of those panes, and killing the caller's own session mid-verb would be a worse
+// surprise than a session left to be closed by hand.
+func AbandonMap(d *Deps, cwd, mapID string) (*ArrivalResult, error) {
+	return setMapStatus(d, cwd, mapID, MapAbandoned)
+}
+
+// ReopenMap is the status half of `open`: it returns a Map to `active` from
+// whatever terminal word it carried — arrived or abandoned — and touches no
+// session. It exists apart from OpenMap because reopening and attaching are two
+// acts a caller wants separately: the dashboard's status submenu writes the word
+// without moving the operator anywhere, and the command line does both.
+func ReopenMap(d *Deps, cwd, mapID string) (*ArrivalResult, error) {
+	return setMapStatus(d, cwd, mapID, MapActive)
+}
+
 // OpenMap reverses arrival: fog reopened, so the Map goes back to `active` and
 // is grillable again, and the caller lands in the Map's tmux session. It never
 // refuses a Map that is already active — `open` is also how you get back to a
 // Map you never left, so the status write and the attach are independent halves
 // of one verb.
 func OpenMap(d *Deps, cwd, mapID string) (*ArrivalResult, error) {
-	result, err := setMapStatus(d, cwd, mapID, MapActive)
+	result, err := ReopenMap(d, cwd, mapID)
 	if err != nil {
 		return nil, err
 	}

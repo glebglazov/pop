@@ -40,6 +40,9 @@ type conformanceCase struct {
 	// over its first item.
 	wantActions     []work.Verb
 	wantItemActions []work.Verb
+	// wantStatusActions is the kind's status submenu over the container, empty for
+	// a kind whose containers carry no writable status.
+	wantStatusActions []work.Verb
 	// wantSummary is the kind's header phrases for its own containers.
 	wantSummary []string
 	// callerModal is a verb the kind hands back for the caller to dispatch, or
@@ -78,11 +81,15 @@ func conformanceCases() []conformanceCase {
 			},
 			wantActions: []work.Verb{
 				setkind.VerbDrain, setkind.VerbAssist, work.VerbShell, setkind.VerbBind,
-				setkind.VerbAutoDrain, setkind.VerbStatus, setkind.VerbArchive, work.VerbCopyName,
+				setkind.VerbAutoDrain, work.VerbStatus, setkind.VerbArchive, work.VerbCopyName,
 			},
 			wantItemActions: []work.Verb{setkind.VerbComplete, setkind.VerbSkip, work.VerbCopyName},
-			wantSummary:     []string{"1 task set", "1 ready"},
-			callerModal:     setkind.VerbDrain,
+			wantStatusActions: []work.Verb{
+				setkind.VerbComplete, setkind.VerbOpen, setkind.VerbSkip,
+				setkind.VerbArchive, setkind.VerbUnarchive,
+			},
+			wantSummary: []string{"1 task set", "1 ready"},
+			callerModal: setkind.VerbDrain,
 		},
 		{
 			name:      "map",
@@ -99,10 +106,14 @@ func conformanceCases() []conformanceCase {
 			},
 			wantActions: []work.Verb{
 				wayfinder.VerbWork, wayfinder.VerbFanOut, wayfinder.VerbAssist, work.VerbShell,
-				wayfinder.VerbWorkHere, wayfinder.VerbFanOutHere, work.VerbCopyName,
+				wayfinder.VerbWorkHere, wayfinder.VerbFanOutHere, work.VerbStatus, work.VerbCopyName,
 			},
 			wantItemActions: []work.Verb{wayfinder.VerbWork, wayfinder.VerbWorkHere, work.VerbCopyName},
-			wantSummary:     []string{"1 map"},
+			wantStatusActions: []work.Verb{
+				wayfinder.VerbReopen, wayfinder.VerbAbandon,
+				wayfinder.VerbArchive, wayfinder.VerbUnarchive,
+			},
+			wantSummary: []string{"1 map"},
 		},
 		{
 			name:      "routine",
@@ -208,6 +219,23 @@ func TestKindConformance(t *testing.T) {
 			}
 			if got := verbsOf(k.ItemActions(c, item)); !slices.Equal(got, tc.wantItemActions) {
 				t.Fatalf("ItemActions = %v, want %v", got, tc.wantItemActions)
+			}
+			// A kind's status verbs are its own vocabulary (ADR-0186), and a kind that
+			// offers any of them must offer the shared opener, or the submenu is
+			// unreachable. What each one writes is the owning kind's own test to make —
+			// performing them here would archive the fixture.
+			status := k.StatusActions(c)
+			if got := verbsOf(status); !slices.Equal(got, tc.wantStatusActions) {
+				t.Fatalf("StatusActions = %v, want %v", got, tc.wantStatusActions)
+			}
+			offersOpener := slices.Contains(verbsOf(k.Actions(c)), work.VerbStatus)
+			if len(status) > 0 != offersOpener {
+				t.Fatalf("status verbs = %v but status opener offered = %v", verbsOf(status), offersOpener)
+			}
+			for _, action := range status {
+				if action.Key == "" || action.Label == "" {
+					t.Fatalf("status verb %+v needs a key and a label", action)
+				}
 			}
 
 			// Perform: the two shared verbs behave the same on every kind, an unknown

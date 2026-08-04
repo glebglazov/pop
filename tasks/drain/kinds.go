@@ -105,16 +105,18 @@ func (d *Deps) WithGitMemo() *Deps {
 // (ADR-0140).
 func (d *Deps) SetKindDeps(cfg *config.Config, groups func() ([]repogroup.Group, error)) *setkind.Deps {
 	return &setkind.Deps{
-		Tasks:          d.Tasks,
-		Project:        d.Project,
-		LoadConfig:     d.LoadConfig,
-		Config:         cfg,
-		IncludeDone:    d.IncludeDone,
-		Groups:         groups,
-		Refresh:        d.Refresh,
-		LiveDrains:     d.LiveDrains,
-		Now:            d.Now,
-		ProbeDirective: d.ProbeDirective,
+		Tasks:           d.Tasks,
+		Project:         d.Project,
+		LoadConfig:      d.LoadConfig,
+		Config:          cfg,
+		IncludeDone:     d.IncludeDone,
+		IncludeArchived: d.IncludeArchived,
+		Groups:          groups,
+		SetArchived:     d.SetArchived,
+		Refresh:         d.Refresh,
+		LiveDrains:      d.LiveDrains,
+		Now:             d.Now,
+		ProbeDirective:  d.ProbeDirective,
 	}
 }
 
@@ -130,10 +132,11 @@ func (d *Deps) MapKindDeps(cfg *config.Config, groups func() ([]repogroup.Group,
 		td = tasks.DefaultDeps()
 	}
 	return &wayfinder.MapKindDeps{
-		Wayfinder: &wayfinder.Deps{FS: td.FS, Tasks: td, Tmux: d.Tmux},
-		Project:   d.Project,
-		Config:    cfg,
-		Groups:    groups,
+		Wayfinder:       &wayfinder.Deps{FS: td.FS, Tasks: td, Tmux: d.Tmux},
+		Project:         d.Project,
+		Config:          cfg,
+		Groups:          groups,
+		IncludeArchived: d.IncludeArchived,
 	}
 }
 

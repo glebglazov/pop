@@ -462,7 +462,10 @@ func TestDashboardActionMenuVerbDispatch(t *testing.T) {
 func TestDashboardActionMenuArchiveDispatch(t *testing.T) {
 	var archivedDef, archivedSet string
 	d := &drain.Deps{
-		ArchiveSet: func(defPath, setID string) error {
+		SetArchived: func(defPath, setID string, archived bool) error {
+			if !archived {
+				t.Fatalf("row-level archive wrote archived=false for %s", setID)
+			}
 			archivedDef, archivedSet = defPath, setID
 			return nil
 		},
@@ -496,9 +499,9 @@ func TestDashboardActionMenuArchiveDispatch(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("archive dispatch returned no command")
 	}
-	msg, ok := cmd().(dashboardArchiveMsg)
+	msg, ok := cmd().(dashboardKindVerbMsg)
 	if !ok {
-		t.Fatalf("archive cmd produced %T, want dashboardArchiveMsg", msg)
+		t.Fatalf("archive cmd produced %T, want dashboardKindVerbMsg", cmd())
 	}
 	if msg.err != nil {
 		t.Fatalf("archive msg err = %v", msg.err)
@@ -557,7 +560,7 @@ func TestDashboardArchiveRetainsBinding(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("archive dispatch returned no command")
 	}
-	msg, ok := cmd().(dashboardArchiveMsg)
+	msg, ok := cmd().(dashboardKindVerbMsg)
 	if !ok {
 		t.Fatalf("archive msg type = %T", cmd())
 	}
@@ -3329,11 +3332,16 @@ func TestDashboardMenusReserveMovementKeys(t *testing.T) {
 		check("action menu ("+row.ID+")", keys)
 	}
 
-	var statusKeys []string
-	for _, item := range dashboardStatusMenuItems() {
-		statusKeys = append(statusKeys, item.key)
+	for _, row := range rows {
+		var statusKeys []string
+		for _, item := range testKinds().statusActionsFor(row) {
+			statusKeys = append(statusKeys, item.Key)
+		}
+		if len(statusKeys) == 0 {
+			continue
+		}
+		check("status submenu ("+row.ID+")", statusKeys)
 	}
-	check("status submenu", statusKeys)
 
 	kinds := testKinds()
 	for _, status := range []tasks.TaskStatus{tasks.TaskOpen, tasks.TaskDone, "failed", "skipped"} {
@@ -4583,21 +4591,22 @@ func TestDashboardMapRowQueueVerbsInert(t *testing.T) {
 	m.list.SetCursor(0)
 
 	// A Map's menu is its own kind's: the four frontier verbs (going and staying),
-	// the Map-scoped assist session, and the two shared ones — spawning keys before
-	// in-place ones. Every Task-set verb stays absent — queue verbs have never
-	// applied to a Map.
+	// the Map-scoped assist session, its own status submenu, and the two shared ones
+	// — spawning keys before in-place ones. Every Task-set verb stays absent — queue
+	// verbs have never applied to a Map, and the status opener it shares with a task
+	// set is the surface's verb, not that kind's.
 	items := dashboardMenuItems(testKinds(), mapRow)
 	var keys []string
 	for _, item := range items {
 		keys = append(keys, item.key)
 	}
-	if want := []string{"I", "A", "S", "O", "i", "a", "y"}; !reflect.DeepEqual(keys, want) {
+	if want := []string{"I", "A", "S", "O", "i", "a", "s", "y"}; !reflect.DeepEqual(keys, want) {
 		t.Fatalf("map menu keys = %v, want %v", keys, want)
 	}
 	for _, item := range items {
 		switch item.verb {
 		case setkind.VerbDrain, setkind.VerbBind, setkind.VerbUnbind, setkind.VerbAutoDrain,
-			setkind.VerbStatus, setkind.VerbAssist, setkind.VerbArchive:
+			setkind.VerbAssist, setkind.VerbArchive:
 			t.Fatalf("map menu offers the Task-set verb %q", item.verb)
 		}
 	}
@@ -4960,7 +4969,7 @@ func TestDashboardActionErrorSticky(t *testing.T) {
 
 	// A newer action error replaces the message.
 	const newer = "no drain target available for set-1"
-	updated, _ = got.Update(dashboardArchiveMsg{err: errors.New(newer)})
+	updated, _ = got.Update(dashboardKindVerbMsg{row: row, verb: setkind.VerbArchive, err: errors.New(newer)})
 	got = updated.(QueueDashboard)
 	if got.actionErr == nil || got.actionErr.Error() != newer {
 		t.Fatalf("newer error did not replace: %v", got.actionErr)

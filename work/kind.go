@@ -55,6 +55,16 @@ type Kind interface {
 	// when a menu opens over one container, not per container at build time, so it
 	// may consult state that moved since the snapshot.
 	Actions(Container) []Action
+	// StatusActions returns the verbs that write this container's status, for the
+	// surface that offers them behind VerbStatus. It is a second list rather than
+	// part of Actions because a status write is a different act from a row verb — a
+	// reader opens the submenu to change what a container *is*, not to run
+	// something on it — and it is the kind's own because no two kinds share a
+	// status vocabulary: a task set completes and skips tasks, a Map is abandoned
+	// and reopened. A kind whose containers carry no writable status returns none
+	// and offers no opener; every verb here is performed through Perform like any
+	// other, so there is no second dispatch anywhere.
+	StatusActions(Container) []Action
 	// ItemActions returns the verbs that apply to one item of a container.
 	ItemActions(Container, Item) []Action
 	// Perform runs a verb. The item is nil for a container-level verb.
@@ -116,6 +126,12 @@ type Container struct {
 	// fixing.
 	Broken       bool
 	BrokenReason string
+	// Archived reports that the human filed this container away. It is the one
+	// cross-kind status fact — every kind's archived bit is the same registry
+	// bit — and it is on the container because a surface that lists archived rows
+	// has to say which ones they are; a row that looked active but refused to be
+	// archived again would be the whole point of the field missing.
+	Archived bool
 	// Items are the container's Work items in the kind's own order.
 	Items []Item
 	// DetailSections are the kind-authored prose blocks a detail view renders
@@ -303,6 +319,11 @@ const (
 	VerbCopyName Verb = "copy-name"
 	// VerbShell opens a shell in the container's checkout.
 	VerbShell Verb = "shell"
+	// VerbStatus opens the container's status submenu. It is shared because
+	// opening the submenu is the *surface's* act — the items inside it are the
+	// kind's StatusActions — so a surface can recognise the opener without naming
+	// a kind, and every kind that has a status to write offers it on one key.
+	VerbStatus Verb = "status"
 )
 
 // Action is one verb offered over a container or an item. Keys follow ADR-0158's
