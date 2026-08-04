@@ -435,6 +435,12 @@ func itemsFor(m Map) []work.Item {
 // seeing from the Map whether the work it handed off has landed.
 func sectionsFor(m Map, spawned []SpawnedSet) []work.Section {
 	var sections []work.Section
+	// First, and above the prose: the dashboard is the surface an operator has
+	// open without having asked anything, which is what makes it the one that
+	// catches a draft nothing references.
+	if len(m.Warnings) > 0 {
+		sections = append(sections, work.Section{Title: "Warnings", Body: strings.Join(m.Warnings, "\n")})
+	}
 	if strings.TrimSpace(m.Destination) != "" {
 		sections = append(sections, work.Section{Title: "Destination", Body: m.Destination})
 	}

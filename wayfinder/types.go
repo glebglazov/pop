@@ -101,6 +101,11 @@ type Map struct {
 	// BrokenReason is set when Broken is true, and carries the corrective: what a
 	// human has to change in the Map's files to make pop able to read it again.
 	BrokenReason string
+	// Warnings are the manifest's advisory problems, carried on every Map every
+	// surface reads — the point of validating on load rather than in one verb is
+	// that a problem introduced after charting is visible without re-registering.
+	// They never make a Map BROKEN and never refuse a write.
+	Warnings []string
 }
 
 // TicketCounts tallies tickets by workflow status.
@@ -120,6 +125,9 @@ type StatusRow struct {
 	Archived        bool
 	Broken          bool
 	BrokenSummary   string
+	// Warnings are the Map's advisory manifest problems. They have no column —
+	// they are prose, not a tally — so the table prints them under it.
+	Warnings []string
 }
 
 // StatusSnapshot is the pure data model for pop map status.

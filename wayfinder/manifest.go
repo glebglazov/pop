@@ -26,6 +26,19 @@ const (
 	ticketFileShape        = "NN-<slug>.md"
 )
 
+// The two draft directories of a Map folder: the repo-facing artifacts a
+// decision produces, which a resolution records in adr_drafts / context_drafts.
+// The validator walks them, the authoring guide names them, and `--adr` /
+// `--context` record paths under them.
+const (
+	adrDraftsDirName     = "adrs"
+	contextDraftsDirName = "context"
+)
+
+// mapDraftDirs are the directories every draft file must live in to be reachable
+// from a manifest entry, in the order a report reads best.
+var mapDraftDirs = []string{adrDraftsDirName, contextDraftsDirName}
+
 var (
 	manifestTicketStatuses = ticketStatusSet(manifestTicketStatusOrder)
 	manifestTicketTypes    = ticketTypeSet(manifestTicketTypeOrder)
@@ -78,7 +91,14 @@ type MapManifest struct {
 	// Unknown preserves keys pop does not read so a rewrite never strips them.
 	Unknown map[string]json.RawMessage
 	Errors  []string
-	Valid   bool
+	// Warnings are manifest problems that are reported but never refused over:
+	// today, draft files no ticket claims. They are advisory because pop cannot
+	// tell an artifact somebody forgot to record from one still being written, and
+	// because the sessions that leave them behind — assist above all — resolve
+	// nothing, so there is no write to withhold that would help (ADR-0171's
+	// dirty-tree precedent). Valid is a function of Errors alone.
+	Warnings []string
+	Valid    bool
 }
 
 // MapManifestPath returns the manifest path for a Map folder.
@@ -217,6 +237,78 @@ func validateMapManifest(d *Deps, m *MapManifest) {
 	for _, name := range orphans {
 		m.Errors = append(m.Errors, fmt.Sprintf("%s: no manifest entry", name))
 	}
+
+	validateDraftRegistration(d, m)
+}
+
+// validateDraftRegistration runs the orphan check in the direction resolution
+// cannot: validateDraftPaths proves a declared draft exists, and this proves an
+// existing draft is declared. Without it a draft written during grilling and
+// never passed to `resolve --adr/--context` is a file nothing references, and the
+// handoff — which mints checkboxes from the manifest arrays — drops it silently.
+func validateDraftRegistration(d *Deps, m *MapManifest) {
+	declared := make(map[string]bool)
+	for _, t := range m.Tickets {
+		for _, list := range [][]string{t.ADRDrafts, t.ContextDrafts} {
+			for _, path := range list {
+				declared[normalizeDraftPath(path)] = true
+			}
+		}
+	}
+
+	for _, dir := range mapDraftDirs {
+		names, err := listDraftFiles(d, filepath.Join(m.Dir, dir))
+		if err != nil {
+			m.Warnings = append(m.Warnings, fmt.Sprintf("list %s/: %v", dir, err))
+			continue
+		}
+		for _, name := range names {
+			rel := dir + "/" + name
+			if declared[rel] {
+				continue
+			}
+			m.Warnings = append(m.Warnings, fmt.Sprintf(
+				"%s: no ticket names this draft; record it with `pop map resolve --%s`",
+				rel, draftFlagFor(dir)))
+		}
+	}
+}
+
+// draftFlagFor names the resolve flag that records a draft in the directory it
+// belongs to, so the warning carries the corrective rather than the fact alone.
+func draftFlagFor(dir string) string {
+	if dir == adrDraftsDirName {
+		return "adr"
+	}
+	return "context"
+}
+
+// normalizeDraftPath reduces a recorded draft to the map-relative slash path the
+// directory walk produces, so `./adrs/x.md` and `adrs/x.md` name one file.
+func normalizeDraftPath(path string) string {
+	return filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))
+}
+
+// listDraftFiles lists one draft directory, sorted. Every file counts, not only
+// markdown: a draft is whatever a decision produced, and a stray non-markdown
+// artifact is exactly as droppable at handoff as a stray .md.
+func listDraftFiles(d *Deps, dir string) ([]string, error) {
+	entries, err := d.FS.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var names []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		names = append(names, entry.Name())
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 func listTicketMarkdown(d *Deps, issuesDir string) (map[string]bool, error) {

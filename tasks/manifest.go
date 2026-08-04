@@ -21,6 +21,11 @@ const (
 	// SpecFileName is the optional co-located enrichment file: the spec a set was
 	// broken down from, and the one non-task markdown a set folder holds.
 	SpecFileName = "spec.md"
+	// legacySpecFileName is the retired name of the spec file. Nothing reads it —
+	// there is no fallback — but a set folder that still carries one is not
+	// malformed, on the same reasoning as the retired manifest keys (ADR-0115):
+	// a rename must not turn every pre-rename set on a machine into a fix list.
+	legacySpecFileName = "prd.md"
 	// AcceptanceCriteriaHeading names the one section every task markdown must
 	// carry, with at least one checkbox under it.
 	AcceptanceCriteriaHeading = "Acceptance criteria"
@@ -339,6 +344,44 @@ func validateManifest(d *Deps, m *Manifest) {
 				m.Errors = append(m.Errors, fmt.Sprintf("task %q: unresolved blocker %q", task.ID, blocker))
 			}
 		}
+	}
+
+	validateNoOrphanMarkdown(d, m, files)
+}
+
+// validateNoOrphanMarkdown closes the 1:1 sync in the direction the per-task
+// check cannot: every entry names a file that exists, and this proves every file
+// has an entry. Without it a slice written but never listed registers as READY
+// and is invisible — never drained, never counted, never reported missing.
+//
+// The set folder is pop's storage rather than scratch space, so the only markdown
+// exempt is the co-located spec; anything else is a stray file to move out or a
+// slice to list.
+func validateNoOrphanMarkdown(d *Deps, m *Manifest, listed map[string]int) {
+	entries, err := d.FS.ReadDir(m.Dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return
+		}
+		m.Errors = append(m.Errors, fmt.Sprintf("list set folder: %v", err))
+		return
+	}
+	var orphans []string
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(strings.ToLower(name), ".md") {
+			continue
+		}
+		if name == SpecFileName || name == legacySpecFileName || listed[name] > 0 {
+			continue
+		}
+		orphans = append(orphans, name)
+	}
+	sort.Strings(orphans)
+	for _, name := range orphans {
+		m.Errors = append(m.Errors, fmt.Sprintf(
+			"%s: no manifest entry; every markdown in a set folder but %s is a task",
+			name, SpecFileName))
 	}
 }
 

@@ -63,6 +63,7 @@ func RenderShow(out io.Writer, m Map, spawned []SpawnedSet) error {
 		return nil
 	}
 
+	writeMapWarnings(out, m.Warnings)
 	fmt.Fprintf(out, "Destination: %s\n", m.Destination)
 	decisions := DestinationGist(m.DecisionsSoFar, decisionsSoFarGistMaxLen)
 	if decisions == "" {
@@ -77,6 +78,16 @@ func RenderShow(out io.Writer, m Map, spawned []SpawnedSet) error {
 	writeTicketGroup(out, "Resolved", groups.Resolved, false)
 	writeSpawnedSets(out, spawned)
 	return nil
+}
+
+// writeMapWarnings prints the advisory problems validation found, in the one
+// shape every surface says them: `warning: ` then the manifest's own line. It
+// sits above the Map's content because an artifact nobody references is a thing
+// to act on, not a footnote.
+func writeMapWarnings(out io.Writer, warnings []string) {
+	for _, warning := range warnings {
+		fmt.Fprintf(out, "warning: %s\n", warning)
+	}
 }
 
 // writeSpawnedSets prints the lineage block: what this Map handed off, and where

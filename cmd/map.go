@@ -367,6 +367,7 @@ func runMapRegisterWith(d *wayfinder.Deps, w io.Writer, mapID string) error {
 	} else {
 		fmt.Fprintf(w, "Registered map %s\n", result.MapID)
 	}
+	printMapWarnings(w, result.Warnings)
 	reportMapSession(w, d, result.MapID)
 	return nil
 }
@@ -570,6 +571,16 @@ func renderResolution(w io.Writer, result *wayfinder.ResolveResult) {
 	if result.DirtyRepo {
 		fmt.Fprintln(w, "warning: the repository working tree is dirty")
 	}
+	printMapWarnings(w, result.Warnings)
+}
+
+// printMapWarnings prints a Map's advisory manifest problems in the one shape
+// every verb says them. Advisory throughout: the verb has already done its work
+// by the time these are printed.
+func printMapWarnings(w io.Writer, warnings []string) {
+	for _, warning := range warnings {
+		fmt.Fprintf(w, "warning: %s\n", warning)
+	}
 }
 
 func runMapSpawned(cmd *cobra.Command, args []string) {
@@ -639,6 +650,7 @@ func renderArrival(w io.Writer, result *wayfinder.ArrivalResult) {
 			fmt.Fprintln(w, line)
 		}
 	}
+	printMapWarnings(w, result.Warnings)
 	if result.KilledSession != "" {
 		fmt.Fprintf(w, "tore down tmux session %s\n", result.KilledSession)
 	}

@@ -461,22 +461,26 @@ func TestManifestRecordsSourceMap(t *testing.T) {
 
 func TestAcceptanceCriteriaValidation(t *testing.T) {
 	root := t.TempDir()
-	taskDir := filepath.Join(root, "thoughts/issues/demo")
 
-	writeTaskMD(t, taskDir, "no-section.md", "# Task\n")
-	writeTaskMD(t, taskDir, "no-boxes.md", "## Acceptance criteria\n\nNothing here\n")
-	writeTaskMD(t, taskDir, "good.md", "## Acceptance criteria\n\n- [ ] ok\n")
-
-	cases := map[string]bool{
-		"no-section.md": false,
-		"no-boxes.md":   false,
-		"good.md":       true,
+	// One folder per case: a set folder holds only its own listed markdown, so
+	// laying all three out side by side would fail the orphan check instead of the
+	// acceptance-criteria one under test.
+	cases := map[string]struct {
+		body      string
+		wantValid bool
+	}{
+		"no-section.md": {"# Task\n", false},
+		"no-boxes.md":   {"## Acceptance criteria\n\nNothing here\n", false},
+		"good.md":       {"## Acceptance criteria\n\n- [ ] ok\n", true},
 	}
 
 	d := DefaultDeps()
-	for file, wantValid := range cases {
+	for file, tc := range cases {
+		taskDir := filepath.Join(root, "thoughts/issues", strings.TrimSuffix(file, ".md"))
+		writeTaskMD(t, taskDir, file, tc.body)
+		wantValid := tc.wantValid
 		manifest := `{"tasks":[{"id":"x","file":"` + file + `","title":"T","type":"AFK","status":"open","blocked_by":[]}]}`
-		path := filepath.Join(taskDir, "index-"+file+".json")
+		path := filepath.Join(taskDir, ManifestFileName)
 		if err := os.WriteFile(path, []byte(manifest), 0o644); err != nil {
 			t.Fatal(err)
 		}

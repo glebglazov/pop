@@ -208,7 +208,10 @@ item, and is re-runnable until the set reads `+"`READY`"+` (or
   with at least one checkbox under it;
 - every `+"`type`"+`, `+"`effort`"+` and `+"`status`"+` is one of the words
   above, and no status is `+"`in_progress`"+`;
-- every `+"`blocked_by`"+` id names a task in the manifest.
+- every `+"`blocked_by`"+` id names a task in the manifest;
+- every markdown file in the folder has an entry — %s aside, a file
+  nothing lists is reported rather than silently ignored, because an unlisted
+  slice is one that never runs.
 
 A task is **done** when every box under its `+"`## %s`"+` section is
 checked; that is the condition `+"`pop tasks implement`"+` reads back, and it is
@@ -227,7 +230,7 @@ why the section is mandatory.
 		enumList(taskTypeOrder),
 		enumList(ValidEfforts()), DefaultTaskEffort,
 		enumList(taskStatusWords()), TaskOpen,
-		AcceptanceCriteriaHeading,
+		AcceptanceCriteriaHeading, SpecFileName,
 		AcceptanceCriteriaHeading,
 	)
 

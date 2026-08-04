@@ -51,6 +51,11 @@ type ResolveResult struct {
 	// stray fragment a grilling session left behind, so this only ever warns —
 	// resolving still proceeds.
 	DirtyRepo bool
+	// Warnings carries the manifest's advisory problems as they stood at the write
+	// — chiefly drafts no ticket names, which this very resolve may have left
+	// behind by not passing --adr/--context. Advisory for the same reason DirtyRepo
+	// is: the write is never withheld over one.
+	Warnings []string
 }
 
 // ResolveTicket records a decision: it writes the ticket's `## Answer`, flips its
@@ -220,6 +225,12 @@ func writeResolution(d *Deps, m Map, ticketID, body string, outOfScope bool, adr
 		return nil, err
 	}
 
+	// Re-run the draft check against the manifest as written: the drafts this
+	// resolve just recorded are no longer orphans, and reporting the pre-write
+	// state would name the very files the session did the right thing with.
+	manifest.Warnings = nil
+	validateDraftRegistration(d, manifest)
+
 	released, err := releaseTicketClaim(d, m.ID, ticketID)
 	if err != nil {
 		return nil, err
@@ -235,6 +246,7 @@ func writeResolution(d *Deps, m Map, ticketID, body string, outOfScope bool, adr
 		OutOfScope:    outOfScope,
 		Replaced:      entry.Status == TicketResolved,
 		ReleasedClaim: released,
+		Warnings:      manifest.Warnings,
 	}, nil
 }
 

@@ -43,6 +43,7 @@ func mapToStatusRow(m Map) StatusRow {
 		ID:              m.ID,
 		DestinationGist: DestinationGist(m.Destination, destinationGistMaxLen),
 		Archived:        m.Archived,
+		Warnings:        m.Warnings,
 	}
 	if m.Broken {
 		row.Broken = true
@@ -92,6 +93,13 @@ func RenderStatus(out io.Writer, snap StatusSnapshot) error {
 	}
 	if err := tw.Flush(); err != nil {
 		return err
+	}
+	// Under the table rather than in it: a warning is a sentence with a corrective
+	// in it, and the row it belongs to is named on the line.
+	for _, row := range snap.Rows {
+		for _, warning := range row.Warnings {
+			fmt.Fprintf(out, "warning: %s: %s\n", row.ID, warning)
+		}
 	}
 	return nil
 }

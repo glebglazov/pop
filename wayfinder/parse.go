@@ -8,13 +8,13 @@ import (
 )
 
 var (
-	ticketFilePattern = regexp.MustCompile(`^(\d+)-.+\.md$`)
-	statusLinePattern = regexp.MustCompile(`(?i)^Status:\s*(.+)$`)
-	typeLinePattern   = regexp.MustCompile(`(?i)^Type:\s*(.+)$`)
-	blockedByPattern  = regexp.MustCompile(`(?i)^Blocked by:\s*(.+)$`)
-	destinationHeader     = regexp.MustCompile(`(?i)^##\s+` + regexp.QuoteMeta(destinationSectionName) + `\s*$`)
-	decisionsSoFarHeader  = regexp.MustCompile(`(?i)^##\s+Decisions so far\s*$`)
-	answerHeader          = regexp.MustCompile(`(?i)^##\s+Answer\s*$`)
+	ticketFilePattern    = regexp.MustCompile(`^(\d+)-.+\.md$`)
+	statusLinePattern    = regexp.MustCompile(`(?i)^Status:\s*(.+)$`)
+	typeLinePattern      = regexp.MustCompile(`(?i)^Type:\s*(.+)$`)
+	blockedByPattern     = regexp.MustCompile(`(?i)^Blocked by:\s*(.+)$`)
+	destinationHeader    = regexp.MustCompile(`(?i)^##\s+` + regexp.QuoteMeta(destinationSectionName) + `\s*$`)
+	decisionsSoFarHeader = regexp.MustCompile(`(?i)^##\s+Decisions so far\s*$`)
+	answerHeader         = regexp.MustCompile(`(?i)^##\s+Answer\s*$`)
 )
 
 // answerSectionName is the one section of a Decision ticket pop writes;

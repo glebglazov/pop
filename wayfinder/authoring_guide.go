@@ -41,9 +41,11 @@ exists; there is no separate create step.
     $(pop work show-path)/maps/<map-id>/
     ├── %s
     ├── %s
-    └── %s/
-        ├── 01-<slug>.md
-        └── 02-<slug>.md
+    ├── %s/
+    │   ├── 01-<slug>.md
+    │   └── 02-<slug>.md
+    ├── %s/             (ADR drafts, <8hex>-<slug>.md)
+    └── %s/          (glossary-op drafts, NN-<slug>.md)
 
 - `+"`<map-id>`"+` is `+"`<YYYY-MM-DD-slug>`"+` (e.g. `+"`2026-07-19-work-dashboard`"+`),
   and it is the id every `+"`pop map`"+` verb takes.
@@ -110,8 +112,19 @@ Per-ticket fields:
 - `+"`out_of_scope`"+` — set by `+"`pop map out-of-scope`"+`, never at authoring
   time. It decides which generated section a resolved ticket renders into.
 - `+"`adr_drafts`"+` / `+"`context_drafts`"+` — draft files a resolution
-  produced, relative to the Map folder. Written by
-  `+"`pop map resolve --adr/--context`"+`, never by hand.
+  produced, relative to the Map folder (under `+"`%s/`"+` and
+  `+"`%s/`"+`). Written by `+"`pop map resolve --adr/--context`"+`, never by
+  hand.
+
+**Every draft must be named by some ticket.** The registration is what carries a
+draft through handoff — the spawned set mints its checkboxes from these arrays —
+so a file under `+"`%s/`"+` or `+"`%s/`"+` that no ticket claims is
+dropped at handoff with nothing said. Validation runs the check on every read of
+the Map and reports each unclaimed draft; it is a warning rather than a refusal,
+because a draft still being written is indistinguishable from one forgotten. The
+fix is to resolve again with the draft passed to
+`+"`--adr`"+` / `+"`--context`"+` — a re-resolve replaces the recorded set
+rather than appending to it.
 
 Set-level key:
 
@@ -163,7 +176,7 @@ the one-non-research-ticket-per-session rule it protects.
   nothing claims is reported as an orphan rather than silently ignored.
 `,
 		mapFileName, MapManifestFileName,
-		mapFileName, MapManifestFileName, issuesDirName,
+		mapFileName, MapManifestFileName, issuesDirName, adrDraftsDirName, contextDraftsDirName,
 		ticketFileShape, issuesDirName, ticketFilePattern.String(),
 		mapFileName,
 		mapFileName,
@@ -179,6 +192,8 @@ the one-non-research-ticket-per-session rule it protects.
 		enumList(ticketTypeWords()),
 		enumList(ticketStatusWords()), TicketOpen,
 		TicketResolved,
+		adrDraftsDirName, contextDraftsDirName,
+		adrDraftsDirName, contextDraftsDirName,
 		fogSectionName, issuesDirName,
 		mapFileName, proseSectionList(),
 		mapFileName, answerSectionName, MapManifestFileName,

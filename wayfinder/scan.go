@@ -87,7 +87,7 @@ func loadMap(d *Deps, id, dir string) (Map, error) {
 		return Map{}, err
 	}
 
-	tickets, spawned, err := loadMapContents(d, id, dir)
+	contents, err := loadMapContents(d, id, dir)
 	if err != nil {
 		return Map{}, err
 	}
@@ -98,9 +98,18 @@ func loadMap(d *Deps, id, dir string) (Map, error) {
 		Status:         status,
 		Destination:    destination,
 		DecisionsSoFar: ParseDecisionsSoFar(string(data)),
-		Tickets:        tickets,
-		SpawnedSets:    spawned,
+		Tickets:        contents.tickets,
+		SpawnedSets:    contents.spawnedSets,
+		Warnings:       contents.warnings,
 	}, nil
+}
+
+// mapContents is everything the manifest answers for: the tickets, the ids of
+// the sets this Map handed off, and the advisory problems validation found.
+type mapContents struct {
+	tickets     []Ticket
+	spawnedSets []string
+	warnings    []string
 }
 
 // loadMapContents reads everything index.json owns — the tickets and the spawned
@@ -109,19 +118,23 @@ func loadMap(d *Deps, id, dir string) (Map, error) {
 // and the fold is what makes it exist for Maps charted before the manifest. A
 // folded Map has spawned nothing yet, because the field the ids live in is the
 // one the fold is minting.
-func loadMapContents(d *Deps, id, dir string) ([]Ticket, []string, error) {
+func loadMapContents(d *Deps, id, dir string) (mapContents, error) {
 	manifest, err := LoadMapManifest(d, dir)
 	if err == nil {
 		if !manifest.Valid {
-			return nil, nil, fmt.Errorf("%s: %s", MapManifestFileName, manifest.MalformedReason())
+			return mapContents{}, fmt.Errorf("%s: %s", MapManifestFileName, manifest.MalformedReason())
 		}
-		return manifest.ToTickets(), manifest.SpawnedSets, nil
+		return mapContents{
+			tickets:     manifest.ToTickets(),
+			spawnedSets: manifest.SpawnedSets,
+			warnings:    manifest.Warnings,
+		}, nil
 	}
 	if !os.IsNotExist(err) {
-		return nil, nil, err
+		return mapContents{}, err
 	}
 	tickets, err := foldMapManifest(d, id, dir)
-	return tickets, nil, err
+	return mapContents{tickets: tickets}, err
 }
 
 // sortTickets orders tickets by number, falling back to id for the numberless.

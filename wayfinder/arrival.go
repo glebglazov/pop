@@ -27,6 +27,10 @@ type ArrivalResult struct {
 	// Unfinished lists the tickets that were open or claimed at arrival. Arrival is
 	// gated on the destination, not on an empty frontier, so these only ever warn.
 	Unfinished []Ticket
+	// Warnings are the Map's advisory manifest problems, carried here because
+	// arrival is the last moment anybody looks at a Map: a draft nothing references
+	// is dropped for good once the effort is declared finished.
+	Warnings []string
 	// KilledSession names the tmux session torn down, empty when the Map had none.
 	KilledSession string
 	// Session is the Map's session as `open` left it, nil for `arrive`.
@@ -88,6 +92,7 @@ func setMapStatus(d *Deps, cwd, mapID string, status MapStatus) (*ArrivalResult,
 		Previous:   m.Status,
 		Unchanged:  m.Status == status,
 		Unfinished: unfinishedTickets(m.Tickets),
+		Warnings:   m.Warnings,
 	}
 	if result.Unchanged {
 		return result, nil

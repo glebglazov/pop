@@ -14,6 +14,10 @@ type RegisterResult struct {
 	// idempotent so the MALFORMED fix loop can be re-run until it comes back
 	// clean without a second run being an error.
 	AlreadyRegistered bool
+	// Warnings are the manifest's advisory problems. They are reported rather than
+	// refused over — registration's fix list is the set of things that stop pop
+	// reading the Map, and a draft nothing references does not.
+	Warnings []string
 }
 
 // MapMalformedError refuses registration and names every problem separately, so
@@ -46,7 +50,8 @@ func RegisterMap(d *Deps, cwd, mapID string) (*RegisterResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	if problems := mapRegistrationProblems(d, m); len(problems) > 0 {
+	problems, warnings := mapRegistrationProblems(d, m)
+	if len(problems) > 0 {
 		return nil, &MapMalformedError{MapID: m.ID, Problems: problems}
 	}
 	s, err := openWorkRegistry(d)
@@ -60,33 +65,37 @@ func RegisterMap(d *Deps, cwd, mapID string) (*RegisterResult, error) {
 	if err := s.RegisterWorkContainer(MapRef(m.ID), time.Now().UTC()); err != nil {
 		return nil, err
 	}
-	return &RegisterResult{MapID: m.ID, AlreadyRegistered: already}, nil
+	return &RegisterResult{MapID: m.ID, AlreadyRegistered: already, Warnings: warnings}, nil
 }
 
 // mapRegistrationProblems is the registration gate: every consumer downstream of
 // charting reads the Map through its manifest, so registration is where a Map
-// that cannot be read that way is caught and handed back as a fix list.
-func mapRegistrationProblems(d *Deps, m Map) []string {
+// that cannot be read that way is caught and handed back as a fix list. It runs
+// the same validation the load path runs, plus the two conditions only
+// registration cares about — a missing manifest and an empty one — and returns
+// the manifest's advisory warnings alongside, to be printed rather than refused
+// over.
+func mapRegistrationProblems(d *Deps, m Map) (problems, warnings []string) {
 	manifest, err := LoadMapManifest(d, m.Dir)
 	switch {
 	case os.IsNotExist(err):
 		return []string{fmt.Sprintf(
 			"%s: missing; a Map registers from its manifest, so chart its Decision tickets first",
-			MapManifestFileName)}
+			MapManifestFileName)}, nil
 	case err != nil:
-		return []string{fmt.Sprintf("%s: %v", MapManifestFileName, err)}
+		return []string{fmt.Sprintf("%s: %v", MapManifestFileName, err)}, nil
 	case !manifest.Valid:
-		return manifest.Errors
+		return manifest.Errors, manifest.Warnings
 	}
 	// The manifest reads, so anything still rendering the Map BROKEN is a map.md
 	// problem — an unreadable file or an unrecognised Status: line.
 	if m.Broken {
-		return []string{m.BrokenReason}
+		return []string{m.BrokenReason}, manifest.Warnings
 	}
 	if len(manifest.Tickets) == 0 {
 		return []string{fmt.Sprintf(
 			"%s: no Decision tickets; charting has produced nothing to register",
-			MapManifestFileName)}
+			MapManifestFileName)}, manifest.Warnings
 	}
-	return nil
+	return nil, manifest.Warnings
 }

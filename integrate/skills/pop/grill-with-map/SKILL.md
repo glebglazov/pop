@@ -116,6 +116,13 @@ A prototype run during the session goes to `prototypes/NN-<slug>/` under the Map
 directory, not into the repository, with its path and verdict recorded in the
 answer.
 
+**Every draft you write must also be declared to the resolve verb** — each
+`adrs/` file through `--adr` and each `context/` file through `--context`. The
+manifest arrays are what carry a draft through handoff, so a draft that is only a
+file is dropped when the Map spawns its Task set. pop reports an undeclared draft
+on every read of the Map, but the report is a reminder; declaring it as you
+resolve is the discipline.
+
 ## Closing the session
 
 The session closes when the ticket's question is settled and its answer, drafts
