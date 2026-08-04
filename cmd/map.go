@@ -14,6 +14,14 @@ import (
 
 var mapStatusAll bool
 
+// mapNextFocus and mapFanOutFocus are the opt-in move. Both spawning verbs leave
+// the operator where they were by default: a fan-out is often typed to get agents
+// running, not to be taken to one of them (ADR-0182).
+var (
+	mapNextFocus   bool
+	mapFanOutFocus bool
+)
+
 var mapCmd = &cobra.Command{
 	Use:   "map",
 	Short: "Browse and manage Maps",
@@ -25,9 +33,10 @@ with ` + "`pop map register`" + `, which validates that manifest and makes the
 Map registered Work.
 
 Grilling then draws from the frontier: ` + "`pop map next`" + ` claims the first
-open, unblocked, unclaimed ticket and prints where to read it, so several windows
-can grill one Map at once. A claim is a pop.db row owned by the tmux pane (else
-the pid) that took it, never a file state; it frees itself after four hours.
+open, unblocked, unclaimed ticket, grills it in a pane and prints where to read it,
+so several panes can grill one Map at once, and ` + "`pop map fan-out`" + ` does that
+for every frontier ticket in one act. A claim is a pop.db row owned by the pane
+running the agent, never a file state; it frees itself after four hours.
 
 ` + "`pop map resolve`" + ` closes a ticket: it writes the answer, flips the manifest
 entry and re-renders map.md's generated index in one re-runnable call, and
@@ -53,8 +62,12 @@ dashboard's detail pane shows, read fresh from the sets and stored nowhere. A se
 that resolves to nothing renders ` + "`(missing)`" + ` rather than disappearing.
 
 Every Map gets a tmux session of its own, ` + "`pop-map-<map-id>`" + `, rooted at the
-Trunk worktree: window 1 runs ` + "`pop map status <map-id>`" + ` and ` + "`pop map next`" + ` spawns a
-grilling window per ticket and switches you there. The other writes auto-open —
+Trunk worktree. It has one window, ` + "`map`" + `, holding one tiled pane per ticket
+being grilled — tagged with the ticket id, titled with the ticket file's stem, and
+spawned by ` + "`next`" + ` or ` + "`fan-out`" + `. There is no overview pane:
+` + "`pop map status <map-id>`" + ` is a verb you type. Neither spawning verb moves you
+unless you pass ` + "`--focus`" + `, and a pane whose agent is still alive is a jump
+target that is never sent work twice. The other writes auto-open —
 ` + "`register`" + `, ` + "`claim`" + `, ` + "`resolve`" + `, ` + "`out-of-scope`" + ` and ` + "`spawned`" + ` run
 in place, ensure the session exists and report where it is, so a verb called from
 a Task-set pane never relocates you. ` + "`status`" + ` creates no
@@ -87,15 +100,26 @@ var mapRegisterCmd = &cobra.Command{
 	Run:   runMapRegister,
 }
 
-// mapNextCmd is the parallel-grilling primitive: several windows run it against
-// the same Map and each gets a different ticket, because the pick and the claim
-// are one transaction. The map argument is optional — a repository wayfinding one
-// Map needs no id.
+// mapNextCmd is the parallel-grilling primitive: several panes run it against the
+// same Map and each gets a different ticket, because each claim is one transaction
+// taken for the pane that got the ticket. The map argument is optional — a
+// repository wayfinding one Map needs no id.
 var mapNextCmd = &cobra.Command{
 	Use:   "next [MAP]",
-	Short: "Claim the first frontier ticket and print where it lives",
+	Short: "Claim the first frontier ticket, grill it in a pane, and print where it lives",
 	Args:  cobra.MaximumNArgs(1),
 	Run:   runMapNext,
+}
+
+// mapFanOutCmd is `next` over the whole frontier: one Grilling pane per ticket in
+// one act, so a wayfinding sitting is walked in parallel rather than one question
+// at a time. It is a loop over the same spawn, so a ticket a parallel session takes
+// mid-loop costs one pane and nothing else.
+var mapFanOutCmd = &cobra.Command{
+	Use:   "fan-out [MAP]",
+	Short: "Grill every frontier ticket, one tiled pane each",
+	Args:  cobra.MaximumNArgs(1),
+	Run:   runMapFanOut,
 }
 
 var mapClaimCmd = &cobra.Command{
@@ -182,6 +206,7 @@ func init() {
 	mapCmd.AddCommand(mapStatusCmd)
 	mapCmd.AddCommand(mapRegisterCmd)
 	mapCmd.AddCommand(mapNextCmd)
+	mapCmd.AddCommand(mapFanOutCmd)
 	mapCmd.AddCommand(mapClaimCmd)
 	mapCmd.AddCommand(mapResolveCmd)
 	mapCmd.AddCommand(mapOutOfScopeCmd)
@@ -197,10 +222,12 @@ func init() {
 	mapResolveCmd.Flags().StringArrayVar(&mapResolveContextDrafts, "context", nil, "path to a CONTEXT.md glossary draft this decision produced; repeat for more than one")
 	mapOutOfScopeCmd.Flags().StringVar(&mapOutOfScopeReason, "reason", "", "why the ticket is beyond the destination")
 	_ = mapOutOfScopeCmd.MarkFlagRequired("reason")
-	// --trunk goes on the two verbs that refuse without a Trunk. The in-place
-	// writes only ever warn about the session, and the read verbs create none, so
-	// a flag there would advertise a side effect they do not have.
-	for _, c := range []*cobra.Command{mapNextCmd, mapOpenCmd} {
+	mapNextCmd.Flags().BoolVar(&mapNextFocus, "focus", false, "switch to the map's window after spawning")
+	mapFanOutCmd.Flags().BoolVar(&mapFanOutFocus, "focus", false, "switch to the map's window after spawning")
+	// --trunk goes on the verbs that refuse without a Trunk. The in-place writes
+	// only ever warn about the session, and the read verbs create none, so a flag
+	// there would advertise a side effect they do not have.
+	for _, c := range []*cobra.Command{mapNextCmd, mapFanOutCmd, mapOpenCmd} {
 		c.Flags().StringVar(&mapTrunk, "trunk", "", "Trunk worktree to root the map's tmux session at")
 	}
 }
@@ -310,47 +337,78 @@ func runMapNext(cmd *cobra.Command, args []string) {
 	if len(args) > 0 {
 		mapID = args[0]
 	}
-	err := runMapNextWith(mapVerbDeps(), os.Stdout, mapID)
+	err := runMapNextWith(mapVerbDeps(), os.Stdout, mapID, mapNextFocus)
 	handleTaskExit(err)
 }
 
-// runMapNextWith resolves the Trunk before it claims anything, so a Trunk that
-// cannot be named refuses while the frontier is still untouched — refusing after
-// the claim would strand the ticket for the length of its TTL.
-func runMapNextWith(d *wayfinder.Deps, w io.Writer, mapID string) error {
-	var trunk string
-	if d.Trunk != nil {
-		resolved, err := d.Trunk()
-		if err != nil {
-			return err
-		}
-		trunk = resolved
-	}
-	result, err := wayfinder.NextTicket(d, cmdLayerDeps().WorkDir(), mapID)
+// runMapNextWith spawns the ticket's pane and then claims for it, which is why
+// nothing here resolves the Trunk first: a Trunk that cannot be named refuses
+// inside the spawn, before any claim exists to strand.
+func runMapNextWith(d *wayfinder.Deps, w io.Writer, mapID string, focus bool) error {
+	out, err := wayfinder.NextFrontierTicket(d, mapVerbConfig(), cmdLayerDeps().WorkDir(), mapID)
 	if err != nil {
 		return err
 	}
-	renderClaim(w, result)
-	command, err := wayfinder.GrillingInvocation(mapVerbConfig(), result.MapID, result.Ticket.ID, trunk)
-	if err != nil {
-		return err
-	}
-	win, err := wayfinder.OpenGrillingWindow(d, result.MapID, result.Ticket, command)
-	if err != nil {
-		return err
-	}
-	renderGrillingWindow(w, win)
-	return wayfinder.FocusGrillingWindow(d, win)
+	renderSpawnedTickets(w, out)
+	return focusMapSession(d, out, focus)
 }
 
-// renderGrillingWindow names where the work is now happening. `next` is the one
-// verb that moves the human, so it says so.
-func renderGrillingWindow(w io.Writer, win *wayfinder.GrillingWindow) {
+func runMapFanOut(cmd *cobra.Command, args []string) {
+	var mapID string
+	if len(args) > 0 {
+		mapID = args[0]
+	}
+	err := runMapFanOutWith(mapVerbDeps(), os.Stdout, mapID, mapFanOutFocus)
+	handleTaskExit(err)
+}
+
+// runMapFanOutWith walks the whole frontier through the same spawn `next` uses. An
+// empty frontier is a message and exit 0, not a refusal, so fan-out is safe to
+// type speculatively at the top of a sitting.
+func runMapFanOutWith(d *wayfinder.Deps, w io.Writer, mapID string, focus bool) error {
+	out, err := wayfinder.FanOutFrontier(d, mapVerbConfig(), cmdLayerDeps().WorkDir(), mapID)
+	if err != nil {
+		return err
+	}
+	renderSpawnedTickets(w, out)
+	return focusMapSession(d, out, focus)
+}
+
+// renderSpawnedTickets prints one claim-shaped block per spawned ticket and then a
+// total. The first field of the first line of each block is the ticket id and the
+// second its path, exactly as the single-ticket verb has always printed them, so a
+// skill parsing `next` parses a fan-out N times over.
+func renderSpawnedTickets(w io.Writer, out *wayfinder.FrontierSpawn) {
+	for i := range out.Spawned {
+		renderClaim(w, out.Spawned[i].Claim)
+		renderGrillingPane(w, out.Spawned[i].Pane)
+	}
+	if len(out.Spawned) == 0 {
+		fmt.Fprintf(w, "map %s: no frontier ticket to grill — every Decision ticket is resolved, blocked, or claimed\n", out.MapID)
+		return
+	}
+	fmt.Fprintf(w, "%d of %d frontier tickets grilling in %s\n", len(out.Spawned), out.Frontier, out.Session.Name)
+	if out.Lost > 0 {
+		fmt.Fprintf(w, "%d went to another session mid-fan-out, leaving an idle pane each\n", out.Lost)
+	}
+}
+
+// renderGrillingPane names the pane the work is now happening in.
+func renderGrillingPane(w io.Writer, pane *wayfinder.GrillingPane) {
 	verb := "opened"
-	if win.Reused {
+	if pane.Reused {
 		verb = "returned to"
 	}
-	fmt.Fprintf(w, "%s grilling window %s:%s\n", verb, win.Session.Name, win.Window)
+	fmt.Fprintf(w, "%s grilling pane %s in %s:%s\n", verb, pane.Title, pane.Session.Name, pane.Window)
+}
+
+// focusMapSession moves the operator only when asked, and only when there is a
+// session to move to.
+func focusMapSession(d *wayfinder.Deps, out *wayfinder.FrontierSpawn, focus bool) error {
+	if !focus || len(out.Spawned) == 0 {
+		return nil
+	}
+	return wayfinder.FocusMapSession(d, out.Session)
 }
 
 func runMapClaim(cmd *cobra.Command, args []string) {

@@ -508,6 +508,15 @@ func (f *Fake) addWindowPane(session, name, id string) {
 		f.Windows[session] = map[string][]string{}
 	}
 	f.Windows[session][name] = append(f.Windows[session][name], id)
+	// A pane tmux has just created is running its login shell, which is what
+	// callers asking "is this pane busy?" see. A test that wants a busy pane seeds
+	// PaneInfos itself and this never overwrites it.
+	if _, seeded := f.PaneInfos[id]; !seeded {
+		if f.PaneInfos == nil {
+			f.PaneInfos = map[string]tmux.PaneInfo{}
+		}
+		f.PaneInfos[id] = tmux.PaneInfo{Session: session, Command: "zsh"}
+	}
 }
 
 func (f *Fake) setPaneCwd(paneID, dir string) {
@@ -605,8 +614,18 @@ func (f *Fake) TagPane(paneID string, tag tmux.PaneTag, value string) error {
 	return nil
 }
 
-func (f *Fake) FindTaggedPane(session string, tag tmux.PaneTag, value string) (string, error) {
-	for _, panes := range f.Windows[session] {
+func (f *Fake) PaneTagValue(paneID string, tag tmux.PaneTag) (string, error) {
+	if f.PaneTagValues == nil {
+		return "", nil
+	}
+	return f.PaneTagValues[paneID][tag], nil
+}
+
+func (f *Fake) FindTaggedPane(session, window string, tag tmux.PaneTag, value string) (string, error) {
+	for name, panes := range f.Windows[session] {
+		if name != window {
+			continue
+		}
 		for _, id := range panes {
 			if f.PaneTagValues[id] != nil && f.PaneTagValues[id][tag] == value {
 				return id, nil

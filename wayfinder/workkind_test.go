@@ -157,14 +157,22 @@ func TestMapKindVerbsFollowTheFrontier(t *testing.T) {
 		}
 		return out
 	}
-	if got, want := verbs(k.Actions(active)), []work.Verb{VerbWork, work.VerbShell, work.VerbCopyName}; !slices.Equal(got, want) {
-		t.Fatalf("map actions = %v, want %v", got, want)
+	wantActions := []work.Verb{VerbWork, VerbFanOut, work.VerbShell, VerbWorkHere, VerbFanOutHere, work.VerbCopyName}
+	if got := verbs(k.Actions(active)); !slices.Equal(got, wantActions) {
+		t.Fatalf("map actions = %v, want %v", got, wantActions)
 	}
-	if got, want := verbs(k.ItemActions(active, active.Items[0])), []work.Verb{VerbWork, work.VerbCopyName}; !slices.Equal(got, want) {
+	if got, want := verbs(k.ItemActions(active, active.Items[0])), []work.Verb{VerbWork, VerbWorkHere, work.VerbCopyName}; !slices.Equal(got, want) {
 		t.Fatalf("frontier ticket actions = %v, want %v", got, want)
 	}
 	if got, want := verbs(k.ItemActions(active, active.Items[1])), []work.Verb{work.VerbCopyName}; !slices.Equal(got, want) {
 		t.Fatalf("blocked ticket actions = %v, want %v", got, want)
+	}
+	// All four frontier keys are gated on a frontier: a Map with none offers no
+	// dead key, going or staying.
+	frontierless := active
+	frontierless.MapFrontier = 0
+	if got, want := verbs(k.Actions(frontierless)), []work.Verb{work.VerbShell, work.VerbCopyName}; !slices.Equal(got, want) {
+		t.Fatalf("frontierless map actions = %v, want %v", got, want)
 	}
 
 	// copy-name copies the map id for a row and the bare ticket id for a ticket,
@@ -183,16 +191,15 @@ func TestMapKindVerbsFollowTheFrontier(t *testing.T) {
 	}
 }
 
-// TestMapKindWorkVerbOpensTheGrillingWindow pins the container-level work verb: it
-// runs the same composite `pop map next` runs — one window per ticket inside the
-// Map's own session — and hands the caller that session to switch to, rather than
-// switching on its own (ADR-0158).
-func TestMapKindWorkVerbOpensTheGrillingWindow(t *testing.T) {
+// TestMapKindWorkVerbOpensTheGrillingPane pins the container-level work verb: it
+// runs the same spawn `pop map next` runs — one tagged pane per ticket in the Map
+// session's single window — and hands the caller that session to switch to, rather
+// than switching on its own (ADR-0158).
+func TestMapKindWorkVerbOpensTheGrillingPane(t *testing.T) {
 	k, _ := mapKindFixture(t)
 	fake := &tmuxtest.Fake{}
 	k.d.Wayfinder.Tmux = fake
 	k.d.Wayfinder.Trunk = func() (string, error) { return "/repo/trunk", nil }
-	k.d.Wayfinder.Exe = func() (string, error) { return "/opt/pop/bin/pop", nil }
 
 	containers, err := k.Load()
 	if err != nil {
@@ -212,8 +219,8 @@ func TestMapKindWorkVerbOpensTheGrillingWindow(t *testing.T) {
 	if out.Kind != work.OutcomeHandoff || out.Handoff.Kind != work.HandoffTmux || out.Handoff.Target != session {
 		t.Fatalf("outcome = %+v, want a tmux handoff to %q", out, session)
 	}
-	if _, ok := fake.Windows[session]["01-research"]; !ok {
-		t.Fatalf("windows = %v, want one named after the frontier ticket", fake.Windows[session])
+	if panes := fake.Windows[session]["map"]; len(panes) != 1 || fake.PaneTitles[panes[0]] != "01-research" {
+		t.Fatalf("windows = %v (titles %v), want one pane titled after the frontier ticket", fake.Windows[session], fake.PaneTitles)
 	}
 	if len(fake.Switched) != 0 {
 		t.Fatalf("the verb moved the caller itself: %v", fake.Switched)

@@ -72,7 +72,6 @@ func registryFixture(t *testing.T, files map[string]string) (*Deps, string) {
 		FS:    fs,
 		Tasks: td,
 		Trunk: func() (string, error) { return trunk, nil },
-		Exe:   func() (string, error) { return "/bin/pop", nil },
 	}, id.StorageDir
 }
 

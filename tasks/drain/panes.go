@@ -22,7 +22,7 @@ func runningTaggedPane(t tmuxmod.Tmux, session string, tag tmuxmod.PaneTag, setI
 	if t == nil || session == "" || setID == "" {
 		return "", nil
 	}
-	paneID, err := t.FindTaggedPane(session, tag, setID)
+	paneID, err := t.FindTaggedPane(session, tmuxmod.DrainWindow, tag, setID)
 	if err != nil || paneID == "" {
 		return paneID, err
 	}

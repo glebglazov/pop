@@ -29,6 +29,11 @@ const dashboardPollInterval = 2 * time.Second
 // pre-ADR-0167 drain latency was experienced (ADR-0167).
 const dashboardHandoffPending = "handing off…"
 
+// dashboardSpawnPending is the same reassurance for a spawn that does not move the
+// operator: the dashboard stays open, so the key has to say it did something while
+// the agent starts.
+const dashboardSpawnPending = "spawning…"
+
 // A dashboard row is a Work container — there is no row model beside it — and
 // the seam's data types live in the top-level work package (ADR-0143). These
 // aliases preserve queue's local vocabulary and its exported surface
@@ -1358,6 +1363,15 @@ func (m QueueDashboard) dispatchVerb(verb work.Verb, row DashboardRow) (tea.Mode
 	case wayfinder.VerbWork:
 		m.statusMsg = dashboardHandoffPending
 		return m, m.launchWayfinderSession(row, "")
+	case wayfinder.VerbWorkHere:
+		m.statusMsg = dashboardSpawnPending
+		return m, m.spawnWayfinderSession(row, "")
+	case wayfinder.VerbFanOut:
+		m.statusMsg = dashboardHandoffPending
+		return m, m.launchWayfinderFanOut(row)
+	case wayfinder.VerbFanOutHere:
+		m.statusMsg = dashboardSpawnPending
+		return m, m.spawnWayfinderFanOut(row)
 	case work.VerbShell:
 		// The directory is the kind's answer, not the dashboard's: a task set opens
 		// in its bound checkout, a Map in its repository, and a kind that resolves
@@ -1590,6 +1604,9 @@ func (m QueueDashboard) dispatchItemVerb(verb work.Verb, row work.Container, ite
 	case wayfinder.VerbWork:
 		m.detail.statusMsg = ""
 		return m, m.launchWayfinderSession(row, item.ID)
+	case wayfinder.VerbWorkHere:
+		m.detail.statusMsg = dashboardSpawnPending
+		return m, m.spawnWayfinderSession(row, item.ID)
 	case setkind.VerbComplete, setkind.VerbOpen, setkind.VerbSkip:
 		m.detail.statusMsg = ""
 		return m, m.applyDetailOverride(row, item, verb)
@@ -1875,6 +1892,36 @@ func (m QueueDashboard) launchWayfinderSession(row DashboardRow, ticketID string
 	return func() tea.Msg {
 		result, err := LaunchWayfinderSession(m.d, m.cfg, row, ticketID)
 		return handoffAfterLaunch(m.d, result, err)
+	}
+}
+
+// spawnWayfinderSession is launchWayfinderSession without the move: the same
+// spawn, reported as a status line so the operator stays on the dashboard
+// (ADR-0182's lowercase half).
+func (m QueueDashboard) spawnWayfinderSession(row DashboardRow, ticketID string) tea.Cmd {
+	return func() tea.Msg {
+		result, err := LaunchWayfinderSession(m.d, m.cfg, row, ticketID)
+		if err != nil {
+			return dashboardHandoffMsg{err: err}
+		}
+		return dashboardHandoffMsg{status: fmt.Sprintf("grilling pane spawned in %s", result.Session)}
+	}
+}
+
+func (m QueueDashboard) launchWayfinderFanOut(row DashboardRow) tea.Cmd {
+	return func() tea.Msg {
+		result, _, err := LaunchWayfinderFanOut(m.d, m.cfg, row)
+		return handoffAfterLaunch(m.d, result, err)
+	}
+}
+
+func (m QueueDashboard) spawnWayfinderFanOut(row DashboardRow) tea.Cmd {
+	return func() tea.Msg {
+		result, count, err := LaunchWayfinderFanOut(m.d, m.cfg, row)
+		if err != nil {
+			return dashboardHandoffMsg{err: err}
+		}
+		return dashboardHandoffMsg{status: fmt.Sprintf("fanned out %d frontier tickets into %s", count, result.Session)}
 	}
 }
 

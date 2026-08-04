@@ -96,7 +96,7 @@ func TestAttachExistingSessionOutsideTmux(t *testing.T) {
 func TestEnsureTaggedPaneFreshWindowReusesInitialPane(t *testing.T) {
 	f := &tmuxtest.Fake{}
 
-	pane, err := tmux.EnsureTaggedPane(f, tmux.TagSet, "work", "/proj", "set-1", "run it")
+	pane, err := tmux.EnsureTaggedPane(f, tmux.TagSet, "work", tmux.DrainWindow, "/proj", "set-1", "run it")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestEnsureTaggedPaneExistingWindowSplitsAndRetiles(t *testing.T) {
 		Windows: map[string]map[string][]string{"work": {"pop-work": {"%1"}}},
 	}
 
-	pane, err := tmux.EnsureTaggedPane(f, tmux.TagRoutine, "work", "/proj", "r1", "fire")
+	pane, err := tmux.EnsureTaggedPane(f, tmux.TagRoutine, "work", tmux.DrainWindow, "/proj", "r1", "fire")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -142,11 +142,11 @@ func TestEnsureTaggedPaneExistingWindowSplitsAndRetiles(t *testing.T) {
 func TestEnsureTaggedPaneReusesTaggedPane(t *testing.T) {
 	f := &tmuxtest.Fake{}
 
-	first, err := tmux.EnsureTaggedPane(f, tmux.TagSet, "work", "/proj", "set-1", "one")
+	first, err := tmux.EnsureTaggedPane(f, tmux.TagSet, "work", tmux.DrainWindow, "/proj", "set-1", "one")
 	if err != nil {
 		t.Fatalf("first: %v", err)
 	}
-	second, err := tmux.EnsureTaggedPane(f, tmux.TagSet, "work", "/proj", "set-1", "two")
+	second, err := tmux.EnsureTaggedPane(f, tmux.TagSet, "work", tmux.DrainWindow, "/proj", "set-1", "two")
 	if err != nil {
 		t.Fatalf("second: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestEnsureTaggedPaneReusesTaggedPane(t *testing.T) {
 func TestEnsureTaggedPaneReusedPaneCorrectsDirectory(t *testing.T) {
 	f := &tmuxtest.Fake{}
 
-	pane, err := tmux.EnsureTaggedPane(f, tmux.TagSet, "work", "/trunk", "set-1", "one")
+	pane, err := tmux.EnsureTaggedPane(f, tmux.TagSet, "work", tmux.DrainWindow, "/trunk", "set-1", "one")
 	if err != nil {
 		t.Fatalf("first: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestEnsureTaggedPaneReusedPaneCorrectsDirectory(t *testing.T) {
 		t.Fatalf("initial pane cwd = %q, want /trunk", f.PaneCwd[pane])
 	}
 
-	reused, err := tmux.EnsureTaggedPane(f, tmux.TagSet, "work", "/worktree/set-1", "set-1", "two")
+	reused, err := tmux.EnsureTaggedPane(f, tmux.TagSet, "work", tmux.DrainWindow, "/worktree/set-1", "set-1", "two")
 	if err != nil {
 		t.Fatalf("second: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestEnsureTaggedPaneReusedPaneEmptyDirSkipsCorrection(t *testing.T) {
 		},
 	}
 
-	pane, err := tmux.EnsureTaggedPane(f, tmux.TagSet, "work", "", "set-1", "run")
+	pane, err := tmux.EnsureTaggedPane(f, tmux.TagSet, "work", tmux.DrainWindow, "", "set-1", "run")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

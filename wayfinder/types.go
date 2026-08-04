@@ -57,7 +57,7 @@ type Ticket struct {
 	BlockedBy  []string // blocker ticket numbers, e.g. "01"
 	// ClaimOwner and ClaimedAt carry the live claim on this ticket, overlaid from
 	// pop.db at scan time. They are the only ticket state no file holds: a claim
-	// belongs to a grilling window, and the TTL that frees an abandoned one can
+	// belongs to a grilling pane, and the TTL that frees an abandoned one can
 	// only run against a timestamp pop writes.
 	ClaimOwner string
 	ClaimedAt  time.Time

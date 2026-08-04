@@ -1231,7 +1231,7 @@ func SpawnWithResult(d *Deps, dec Decision) (SpawnResult, error) {
 	if dec.pinRuntimePath && dec.scan.RuntimePath != "" {
 		command += " --task-runtime-path " + shellQuote(dec.scan.RuntimePath)
 	}
-	paneID, err := tmuxmod.EnsureTaggedPane(d.Tmux, tmuxmod.TagSet, dec.scan.SessionName, dec.scan.ProjectPath, dec.TaskSetID, command)
+	paneID, err := tmuxmod.EnsureTaggedPane(d.Tmux, tmuxmod.TagSet, dec.scan.SessionName, tmuxmod.DrainWindow, dec.scan.ProjectPath, dec.TaskSetID, command)
 	if err != nil {
 		return SpawnResult{}, err
 	}

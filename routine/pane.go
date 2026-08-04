@@ -24,7 +24,7 @@ func FirePaneWith(d *Deps, routineID string) (string, error) {
 	}
 	session, paneDir := sessionAndDir(d, dir)
 	command := fmt.Sprintf("pop routine fire %s", shellQuote(routineID))
-	return tmuxmod.EnsureTaggedPane(tmuxDeps(d), tmuxmod.TagRoutine, session, paneDir, routineID, command)
+	return tmuxmod.EnsureTaggedPane(tmuxDeps(d), tmuxmod.TagRoutine, session, tmuxmod.DrainWindow, paneDir, routineID, command)
 }
 
 // RunPaneWith returns the pane tagged for the routine, empty when the routine has
@@ -36,7 +36,7 @@ func RunPaneWith(d *Deps, routineID string) (string, error) {
 		return "", err
 	}
 	session, _ := sessionAndDir(d, dir)
-	paneID, err := tmuxDeps(d).FindTaggedPane(session, tmuxmod.TagRoutine, routineID)
+	paneID, err := tmuxDeps(d).FindTaggedPane(session, tmuxmod.DrainWindow, tmuxmod.TagRoutine, routineID)
 	if err != nil {
 		return "", err
 	}

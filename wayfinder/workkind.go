@@ -19,10 +19,22 @@ import (
 // one-way — kinds comply and `work` imports no kind — and because every verb it
 // offers is a call the Map lifecycle already owns.
 
-// VerbWork claims a Map's frontier ticket (or the named one) and opens its
-// grilling window — the same composite `pop map next` runs. Uppercase because it
-// hands off (ADR-0158).
-const VerbWork work.Verb = "work-ticket"
+// The Map's four frontier verbs are two acts — one ticket or the whole frontier —
+// each offered twice, going and staying. Spawning a Grilling pane never moves the
+// operator on its own (ADR-0182), so the move is what the key says: uppercase
+// hands off, lowercase acts in place (ADR-0158's case rule, unchanged).
+const (
+	// VerbWork claims a Map's frontier ticket (or the named one), opens its
+	// Grilling pane, and takes the operator there.
+	VerbWork work.Verb = "work-ticket"
+	// VerbWorkHere is VerbWork without the move.
+	VerbWorkHere work.Verb = "work-ticket-here"
+	// VerbFanOut spawns a Grilling pane for every frontier ticket and takes the
+	// operator to the Map's window.
+	VerbFanOut work.Verb = "fan-out-frontier"
+	// VerbFanOutHere is VerbFanOut without the move.
+	VerbFanOutHere work.Verb = "fan-out-frontier-here"
+)
 
 // MapKindDeps holds what the Map kind reads. The wayfinder deps carry the Map
 // side (filesystem, store, tmux, Trunk); Project and Config are what repository
@@ -122,27 +134,41 @@ func (k *MapKind) Columns() []string {
 	return []string{"PROJECT", "TASK SET", "STATUS", "WORKTREE", ""}
 }
 
-// Actions returns the container-level verbs for a Map: work its frontier when it
-// has one, a shell in the repository, and copy-name. The Task-set verbs
-// (drain/bind/…) have never applied to a Map and still do not — the shared two
-// are the only verbs a Map has in common with a task set.
+// Actions returns the container-level verbs for a Map: work one frontier ticket
+// or fan out the whole frontier when it has one, a shell in the repository, and
+// copy-name. Spawning verbs come before in-place ones, and all four frontier keys
+// are gated on a frontier — a Map with none offers no dead key. The Task-set verbs
+// (drain/bind/…) have never applied to a Map and still do not — the shared two are
+// the only verbs a Map has in common with a task set.
 func (k *MapKind) Actions(c work.Container) []work.Action {
 	var actions []work.Action
 	if c.MapFrontier > 0 {
-		actions = append(actions, work.Action{Verb: VerbWork, Key: "I", Label: "work frontier ticket"})
+		actions = append(actions,
+			work.Action{Verb: VerbWork, Key: "I", Label: "work frontier ticket and go"},
+			work.Action{Verb: VerbFanOut, Key: "A", Label: "fan out frontier and go"},
+		)
 	}
-	return append(actions,
-		work.Action{Verb: work.VerbShell, Key: "O", Label: "shell"},
-		work.Action{Verb: work.VerbCopyName, Key: "y", Label: "copy name"},
-	)
+	actions = append(actions, work.Action{Verb: work.VerbShell, Key: "O", Label: "shell"})
+	if c.MapFrontier > 0 {
+		actions = append(actions,
+			work.Action{Verb: VerbWorkHere, Key: "i", Label: "work frontier ticket"},
+			work.Action{Verb: VerbFanOutHere, Key: "a", Label: "fan out frontier"},
+		)
+	}
+	return append(actions, work.Action{Verb: work.VerbCopyName, Key: "y", Label: "copy name"})
 }
 
-// ItemActions returns the verbs for one Decision ticket: work it when it is on
-// the frontier — a resolved or blocked ticket cannot be worked — and copy-name.
+// ItemActions returns the verbs for one Decision ticket: work it — going or
+// staying — when it is on the frontier, since a resolved or blocked ticket cannot
+// be worked, and copy-name. Fanning out is a container act and is offered nowhere
+// else.
 func (k *MapKind) ItemActions(c work.Container, item work.Item) []work.Action {
 	var actions []work.Action
 	if item.Status == string(TicketOpen) && !item.Blocked {
-		actions = append(actions, work.Action{Verb: VerbWork, Key: "I", Label: "work ticket"})
+		actions = append(actions,
+			work.Action{Verb: VerbWork, Key: "I", Label: "work ticket and go"},
+			work.Action{Verb: VerbWorkHere, Key: "i", Label: "work ticket"},
+		)
 	}
 	return append(actions, work.Action{Verb: work.VerbCopyName, Key: "y", Label: "copy name"})
 }
@@ -168,67 +194,100 @@ func (k *MapKind) Perform(c work.Container, item *work.Item, verb work.Verb) (wo
 			Handoff: work.Handoff{Kind: work.HandoffTmux, Dir: dir},
 			Message: "shell in " + dir,
 		}, nil
-	case VerbWork:
+	case VerbWork, VerbWorkHere:
 		ticketID := ""
 		if item != nil {
 			ticketID = item.ID
 		}
-		return k.workTicket(c, ticketID)
+		return k.workTicket(c, ticketID, verb == VerbWork)
+	case VerbFanOut, VerbFanOutHere:
+		return k.fanOutFrontier(c, verb == VerbFanOut)
 	default:
 		return work.Outcome{}, work.UnknownVerb(k.ID(), verb)
 	}
 }
 
-// workTicket opens the grilling window for a Map's ticket inside the Map's own
-// tmux session. An empty ticketID targets the next frontier ticket; a named one
-// must be on the frontier. Pop writes no ticket file here — the session
-// self-claims. A running window is a jump target, focused rather than re-sent
-// (ADR-0158).
-func (k *MapKind) workTicket(c work.Container, ticketID string) (work.Outcome, error) {
-	storage := storageDirFor(c)
-	if storage == "" {
-		return work.Outcome{}, fmt.Errorf("wayfinder: no storage dir for map %q", c.ID)
-	}
-	checkout := strings.TrimSpace(c.Checkout)
-	if checkout == "" {
-		return work.Outcome{}, fmt.Errorf("wayfinder: no checkout for map %q", c.ID)
-	}
-	wd := k.sessionDeps(checkout)
-	maps, err := ScanMapsInStorage(wd, storage)
+// workTicket opens the Grilling pane for a Map's ticket inside the Map's own tmux
+// session. An empty ticketID targets the next frontier ticket; a named one must be
+// on the frontier. A running pane is a jump target, reported rather than re-sent
+// (ADR-0158). focus decides whether the operator is taken there at all.
+func (k *MapKind) workTicket(c work.Container, ticketID string, focus bool) (work.Outcome, error) {
+	target, wd, checkout, err := k.resolveMapForSpawn(c)
 	if err != nil {
 		return work.Outcome{}, err
-	}
-	var target *Map
-	for i := range maps {
-		if maps[i].ID == c.ID {
-			target = &maps[i]
-			break
-		}
-	}
-	if target == nil {
-		return work.Outcome{}, fmt.Errorf("wayfinder: map %q not found", c.ID)
 	}
 	ticket, err := TargetTicket(*target, ticketID)
 	if err != nil {
 		return work.Outcome{}, err
 	}
-	command, err := GrillingInvocation(k.d.Config, target.ID, ticket.ID, checkout)
+	spawned, err := SpawnTicket(wd, k.d.Config, *target, ticket)
 	if err != nil {
 		return work.Outcome{}, err
 	}
-	win, err := OpenGrillingWindow(wd, target.ID, ticket, command)
+	message := fmt.Sprintf("grilling %s/%s in %s", target.ID, ticket.ID, spawned.Pane.Session.Name)
+	return spawnOutcome(spawned.Pane.Session.Name, checkout, message, focus), nil
+}
+
+// fanOutFrontier spawns one Grilling pane per frontier ticket. An empty frontier
+// reads as ErrEmptyFrontier, the same answer the single-ticket verb gives, so the
+// dashboard reports it as a status line rather than as a failure.
+func (k *MapKind) fanOutFrontier(c work.Container, focus bool) (work.Outcome, error) {
+	target, wd, checkout, err := k.resolveMapForSpawn(c)
 	if err != nil {
 		return work.Outcome{}, err
+	}
+	out, err := SpawnFrontier(wd, k.d.Config, *target, 0)
+	if err != nil {
+		return work.Outcome{}, err
+	}
+	if len(out.Spawned) == 0 {
+		return work.Outcome{}, ErrEmptyFrontier
+	}
+	message := fmt.Sprintf("fanned out %d of %s into %s", len(out.Spawned), target.ID, out.Session.Name)
+	return spawnOutcome(out.Session.Name, checkout, message, focus), nil
+}
+
+// spawnOutcome is the fork the case rule turns on: a focusing verb hands the
+// session off, a staying one reports the same sentence and leaves the operator
+// where they were.
+func spawnOutcome(session, checkout, message string, focus bool) work.Outcome {
+	if !focus {
+		return work.Outcome{Kind: work.OutcomeMessage, Message: message}
 	}
 	return work.Outcome{
 		Kind: work.OutcomeHandoff,
 		Handoff: work.Handoff{
 			Kind:   work.HandoffTmux,
-			Target: win.Session.Name,
+			Target: session,
 			Dir:    checkout,
 		},
-		Message: fmt.Sprintf("grilling %s/%s in %s", target.ID, ticket.ID, win.Session.Name),
-	}, nil
+		Message: message,
+	}
+}
+
+// resolveMapForSpawn reads the Map a spawn verb acts on off the container row,
+// along with the deps its session is rooted through and the checkout the row
+// names.
+func (k *MapKind) resolveMapForSpawn(c work.Container) (*Map, *Deps, string, error) {
+	storage := storageDirFor(c)
+	if storage == "" {
+		return nil, nil, "", fmt.Errorf("wayfinder: no storage dir for map %q", c.ID)
+	}
+	checkout := strings.TrimSpace(c.Checkout)
+	if checkout == "" {
+		return nil, nil, "", fmt.Errorf("wayfinder: no checkout for map %q", c.ID)
+	}
+	wd := k.sessionDeps(checkout)
+	maps, err := ScanMapsInStorage(wd, storage)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	for i := range maps {
+		if maps[i].ID == c.ID {
+			return &maps[i], wd, checkout, nil
+		}
+	}
+	return nil, nil, "", fmt.Errorf("wayfinder: map %q not found", c.ID)
 }
 
 // sessionDeps returns the Map deps a session verb runs with, resolving the Trunk

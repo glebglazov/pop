@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 )
 
 const claimMapID = "2026-08-03-parallel"
@@ -42,38 +44,70 @@ func asWindow(d *Deps, owner string, now time.Time) {
 	d.Clock = func() time.Time { return now }
 }
 
+// atTime gives a claim fixture a clock and a tmux to spawn panes into, which is
+// what the spawn path needs beyond the store: a claim's owner is no longer
+// injected, it is whichever pane the agent landed in.
+func atTime(d *Deps, now time.Time) *tmuxtest.Fake {
+	fake, ok := d.Tmux.(*tmuxtest.Fake)
+	if !ok {
+		fake = &tmuxtest.Fake{}
+		d.Tmux = fake
+	}
+	d.Clock = func() time.Time { return now }
+	return fake
+}
+
+// nextSpawn is `pop map next`: the whole spawn path, pane before claim.
+func nextSpawn(t *testing.T, d *Deps) (*SpawnedTicket, error) {
+	t.Helper()
+	out, err := NextFrontierTicket(d, nil, "", claimMapID)
+	if err != nil {
+		return nil, err
+	}
+	if len(out.Spawned) != 1 {
+		t.Fatalf("next spawned %d panes, want exactly one", len(out.Spawned))
+	}
+	return &out.Spawned[0], nil
+}
+
 // TestNextHandsOutTheFrontierInOrderThenRefuses is the parallel-grilling loop as
-// two windows live it: each `next` returns a different frontier ticket in
-// manifest order, the blocked one is never offered, and the empty frontier is an
-// error rather than a silent success.
+// two panes live it: each `next` returns a different frontier ticket in manifest
+// order, the blocked one is never offered, the claim lands on the pane that was
+// spawned for it, and the empty frontier is an error rather than a silent success.
 func TestNextHandsOutTheFrontierInOrderThenRefuses(t *testing.T) {
 	t.Parallel()
 	d, storageDir := claimFixture(t)
+	atTime(d, at(9))
 
-	asWindow(d, "pane:%1", at(9))
-	first, err := NextTicket(d, "", claimMapID)
+	first, err := nextSpawn(t, d)
 	if err != nil {
 		t.Fatalf("first next: %v", err)
 	}
 	wantPath := filepath.Join(storageDir, "maps", claimMapID, "issues", "01-first.md")
-	if first.Ticket.ID != "01" || first.Path != wantPath || first.Owner != "pane:%1" {
-		t.Fatalf("first next = %+v, want ticket 01 at %s", first, wantPath)
+	if first.Ticket.ID != "01" || first.Claim.Path != wantPath {
+		t.Fatalf("first next = %+v, want ticket 01 at %s", first.Claim, wantPath)
 	}
-	if first.Stole != nil {
-		t.Fatalf("a free ticket reported a steal: %+v", first.Stole)
+	if first.Claim.Owner != "pane:"+first.Pane.PaneID {
+		t.Fatalf("claim owner = %q, want the spawned pane %q", first.Claim.Owner, first.Pane.PaneID)
+	}
+	if first.Claim.Stole != nil {
+		t.Fatalf("a free ticket reported a steal: %+v", first.Claim.Stole)
 	}
 
-	asWindow(d, "pane:%2", at(9).Add(time.Minute))
-	second, err := NextTicket(d, "", claimMapID)
+	atTime(d, at(9).Add(time.Minute))
+	second, err := nextSpawn(t, d)
 	if err != nil {
 		t.Fatalf("second next: %v", err)
 	}
 	if second.Ticket.ID != "03" {
 		t.Fatalf("second next took %q, want 03 — 02 is blocked by an unresolved 01", second.Ticket.ID)
 	}
+	if second.Pane.PaneID == first.Pane.PaneID || second.Claim.Owner == first.Claim.Owner {
+		t.Fatalf("second ticket shares the first's pane: %+v", second.Pane)
+	}
 
-	asWindow(d, "pane:%3", at(9).Add(2*time.Minute))
-	_, err = NextTicket(d, "", claimMapID)
+	atTime(d, at(9).Add(2*time.Minute))
+	_, err = nextSpawn(t, d)
 	if !errors.Is(err, ErrFrontierEmpty) {
 		t.Fatalf("third next error = %v, want ErrFrontierEmpty", err)
 	}
@@ -92,7 +126,9 @@ func TestClaimsLiveOnlyInTheStore(t *testing.T) {
 	before := snapshotDir(t, mapDir)
 
 	asWindow(d, "pane:%1", at(9))
-	if _, err := NextTicket(d, "", claimMapID); err != nil {
+	atTime(d, at(9))
+	spawned, err := nextSpawn(t, d)
+	if err != nil {
 		t.Fatalf("next: %v", err)
 	}
 	if _, err := ClaimTicket(d, "", claimMapID, "3"); err != nil {
@@ -118,42 +154,43 @@ func TestClaimsLiveOnlyInTheStore(t *testing.T) {
 			claimed[ticket.ID] = ticket.ClaimOwner
 		}
 	}
-	if len(claimed) != 2 || claimed["01"] != "pane:%1" || claimed["03"] != "pane:%1" {
-		t.Fatalf("scanned claims = %v, want 01 and 03 held by pane:%%1", claimed)
+	if len(claimed) != 2 || claimed["01"] != "pane:"+spawned.Pane.PaneID || claimed["03"] != "pane:%1" {
+		t.Fatalf("scanned claims = %v, want 01 held by the spawned pane and 03 by pane:%%1", claimed)
 	}
 	if counts := CountTickets(m.Tickets); counts.Claimed != 2 || counts.Open != 1 {
 		t.Fatalf("counts = %+v, want 2 claimed and 1 open", counts)
 	}
 }
 
-// TestNextStealsAnExpiredClaim: a grilling window that died would otherwise hold
-// its ticket forever, so the TTL hands it back — loudly.
+// TestNextStealsAnExpiredClaim: a grilling pane that died would otherwise hold its
+// ticket forever, so the TTL hands it back — loudly.
 func TestNextStealsAnExpiredClaim(t *testing.T) {
 	t.Parallel()
 	d, _ := claimFixture(t)
+	atTime(d, at(9))
 
-	asWindow(d, "pane:%dead", at(9))
-	if _, err := NextTicket(d, "", claimMapID); err != nil {
+	dead, err := nextSpawn(t, d)
+	if err != nil {
 		t.Fatalf("first next: %v", err)
 	}
 
-	// Still held while the claim is fresh: the next window gets 03 instead.
-	asWindow(d, "pane:%live", at(11))
-	fresh, err := NextTicket(d, "", claimMapID)
+	// Still held while the claim is fresh: the next pane gets 03 instead.
+	atTime(d, at(11))
+	fresh, err := nextSpawn(t, d)
 	if err != nil || fresh.Ticket.ID != "03" {
 		t.Fatalf("next over a live claim = %+v (%v), want 03", fresh, err)
 	}
 
-	asWindow(d, "pane:%new", at(9).Add(5*time.Hour))
-	stolen, err := NextTicket(d, "", claimMapID)
+	atTime(d, at(9).Add(5*time.Hour))
+	stolen, err := nextSpawn(t, d)
 	if err != nil {
 		t.Fatalf("next after the TTL: %v", err)
 	}
 	if stolen.Ticket.ID != "01" {
 		t.Fatalf("next after the TTL took %q, want the abandoned 01", stolen.Ticket.ID)
 	}
-	if stolen.Stole == nil || stolen.Stole.Owner != "pane:%dead" {
-		t.Fatalf("steal was not reported: %+v", stolen.Stole)
+	if stolen.Claim.Stole == nil || stolen.Claim.Stole.Owner != "pane:"+dead.Pane.PaneID {
+		t.Fatalf("steal was not reported: %+v", stolen.Claim.Stole)
 	}
 }
 
@@ -213,7 +250,8 @@ func TestClaimRefusesResolvedAndUnregisteredMaps(t *testing.T) {
 		t.Fatalf("claiming a resolved ticket = %v", err)
 	}
 	// With 01 resolved, 02 is unblocked and leads the frontier.
-	next, err := NextTicket(d, "", claimMapID)
+	atTime(d, at(9))
+	next, err := nextSpawn(t, d)
 	if err != nil || next.Ticket.ID != "02" {
 		t.Fatalf("next after resolving 01 = %+v (%v), want 02", next, err)
 	}
@@ -228,7 +266,7 @@ func TestClaimRefusesResolvedAndUnregisteredMaps(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	_, err = NextTicket(d, "", "2026-08-03-charting")
+	_, err = NextFrontierTicket(d, nil, "", "2026-08-03-charting")
 	if err == nil || !strings.Contains(err.Error(), "pop map register 2026-08-03-charting") {
 		t.Fatalf("next on an unregistered map = %v", err)
 	}
@@ -241,8 +279,9 @@ func TestNextWithoutAMapIDTakesTheOneBeingWayfound(t *testing.T) {
 	d, storageDir := claimFixture(t)
 	asWindow(d, "pane:%1", at(9))
 
-	sole, err := NextTicket(d, "", "")
-	if err != nil || sole.Ticket.ID != "01" {
+	atTime(d, at(9))
+	sole, err := NextFrontierTicket(d, nil, "", "")
+	if err != nil || len(sole.Spawned) != 1 || sole.Spawned[0].Ticket.ID != "01" {
 		t.Fatalf("bare next = %+v (%v), want ticket 01 of the sole active map", sole, err)
 	}
 
@@ -258,7 +297,7 @@ func TestNextWithoutAMapIDTakesTheOneBeingWayfound(t *testing.T) {
 	if _, err := RegisterMap(d, "", "2026-08-03-other"); err != nil {
 		t.Fatal(err)
 	}
-	_, err = NextTicket(d, "", "")
+	_, err = NextFrontierTicket(d, nil, "", "")
 	if err == nil || !strings.Contains(err.Error(), "several active maps") {
 		t.Fatalf("bare next with two active maps = %v", err)
 	}

@@ -153,49 +153,50 @@ func TestMapNextAndClaimDriveParallelGrilling(t *testing.T) {
 	}
 	nine := time.Date(2026, 8, 3, 9, 0, 0, 0, time.UTC)
 	d.Clock = func() time.Time { return nine }
-	d.Owner = func() string { return "pane:%1" }
 
 	var first bytes.Buffer
-	if err := runMapNextWith(d, &first, "demo"); err != nil {
+	if err := runMapNextWith(d, &first, "demo", false); err != nil {
 		t.Fatalf("next: %v", err)
 	}
 	wantPath := filepath.Join(storageDir, "maps", "demo", "issues", "01-first.md")
 	if got := strings.SplitN(first.String(), "\n", 2)[0]; got != "01\t"+wantPath {
 		t.Fatalf("next headline = %q, want the id and path", got)
 	}
-	if !strings.Contains(first.String(), "claimed by pane:%1") {
-		t.Fatalf("next output = %q", first.String())
+	// The claim belongs to the pane the agent was spawned into, never to the pane
+	// that typed the verb (ADR-0182).
+	firstOwner := claimedOwner(t, first.String())
+	if firstOwner != "pane:"+onlyGrillingPane(t, d, "demo") {
+		t.Fatalf("next claimed for %q, want the spawned pane", firstOwner)
 	}
 
-	d.Owner = func() string { return "pane:%2" }
 	var second bytes.Buffer
-	if err := runMapNextWith(d, &second, "demo"); err != nil {
+	if err := runMapNextWith(d, &second, "demo", false); err != nil {
 		t.Fatalf("second next: %v", err)
 	}
 	if !strings.HasPrefix(second.String(), "03\t") {
 		t.Fatalf("second window got %q, want ticket 03 (02 is blocked)", second.String())
 	}
 
-	if err := runMapNextWith(d, &bytes.Buffer{}, "demo"); err == nil {
+	if err := runMapNextWith(d, &bytes.Buffer{}, "demo", false); err == nil {
 		t.Fatal("expected an exhausted frontier to fail")
 	} else if !strings.Contains(err.Error(), "frontier is empty") {
 		t.Fatalf("empty-frontier error = %v", err)
 	}
 
 	if err := runMapClaimWith(d, &bytes.Buffer{}, "demo", "01"); err == nil {
-		t.Fatal("expected claim to refuse a ticket held by another window")
-	} else if !strings.Contains(err.Error(), "pane:%1") {
-		t.Fatalf("claim refusal = %v", err)
+		t.Fatal("expected claim to refuse a ticket held by another pane")
+	} else if !strings.Contains(err.Error(), firstOwner) {
+		t.Fatalf("claim refusal = %v, want it to name %s", err, firstOwner)
 	}
 
 	// Four hours on, the first window is gone and its ticket comes back — with
 	// the steal on the record.
 	d.Clock = func() time.Time { return nine.Add(5 * time.Hour) }
 	var stolen bytes.Buffer
-	if err := runMapNextWith(d, &stolen, "demo"); err != nil {
+	if err := runMapNextWith(d, &stolen, "demo", false); err != nil {
 		t.Fatalf("next after the TTL: %v", err)
 	}
-	if !strings.HasPrefix(stolen.String(), "01\t") || !strings.Contains(stolen.String(), "stole an expired claim held by pane:%1") {
+	if !strings.HasPrefix(stolen.String(), "01\t") || !strings.Contains(stolen.String(), "stole an expired claim held by "+firstOwner) {
 		t.Fatalf("steal output = %q", stolen.String())
 	}
 
@@ -205,7 +206,7 @@ func TestMapNextAndClaimDriveParallelGrilling(t *testing.T) {
 	if err := runMapShowWith(d, &shown, "demo"); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(shown.String(), "claimed by pane:%2") {
+	if !strings.Contains(shown.String(), "claimed by pane:%") {
 		t.Fatalf("show output does not report the live claim:\n%s", shown.String())
 	}
 	manifest, err := os.ReadFile(filepath.Join(storageDir, "maps", "demo", "index.json"))
@@ -284,7 +285,7 @@ func TestMapResolveAndOutOfScopeCloseTickets(t *testing.T) {
 	// Both resolutions move the frontier on: 01 is gone from it and 02, which
 	// waited on 01, is what the next window is handed.
 	var next bytes.Buffer
-	if err := runMapNextWith(d, &next, "demo"); err != nil {
+	if err := runMapNextWith(d, &next, "demo", false); err != nil {
 		t.Fatalf("next after resolving: %v", err)
 	}
 	if !strings.HasPrefix(next.String(), "02\t") {
@@ -436,10 +437,93 @@ func TestMapClaimCompletionOffersUnresolvedTickets(t *testing.T) {
 	}
 }
 
+// TestMapFanOutGrillsTheWholeFrontierThenTopsUp walks the fan-out surface: one
+// claim-shaped block per ticket plus a total, a tiled pane each in the Map's one
+// window, the operator left where they were, and a re-run that says there is
+// nothing left instead of failing.
+func TestMapFanOutGrillsTheWholeFrontierThenTopsUp(t *testing.T) {
+	t.Parallel()
+	d, storageDir, _ := mapRegistryTestDeps(t, threeTicketMapFiles("demo"))
+	if err := runMapRegisterWith(d, &bytes.Buffer{}, "demo"); err != nil {
+		t.Fatal(err)
+	}
+	fake := d.Tmux.(*tmuxtest.Fake)
+	fake.Inside = true
+	session := wayfinder.MapSessionName("demo")
+
+	var out bytes.Buffer
+	if err := runMapFanOutWith(d, &out, "demo", false); err != nil {
+		t.Fatalf("fan-out: %v", err)
+	}
+	// The first field of each block is the ticket id and the second its path —
+	// exactly what `next` prints, N times over.
+	var claimLines []string
+	for _, line := range strings.Split(out.String(), "\n") {
+		if strings.Contains(line, "\t") {
+			claimLines = append(claimLines, line)
+		}
+	}
+	wantFirst := "01\t" + filepath.Join(storageDir, "maps", "demo", "issues", "01-first.md")
+	wantSecond := "03\t" + filepath.Join(storageDir, "maps", "demo", "issues", "03-third.md")
+	if len(claimLines) != 2 || claimLines[0] != wantFirst || claimLines[1] != wantSecond {
+		t.Fatalf("claim lines = %v, want 01 then 03 (02 is blocked)", claimLines)
+	}
+	if !strings.Contains(out.String(), "2 of 2 frontier tickets grilling in "+session) {
+		t.Fatalf("fan-out printed no total:\n%s", out.String())
+	}
+	if panes := fake.Windows[session]["map"]; len(panes) != 2 {
+		t.Fatalf("panes = %v, want one per frontier ticket in the map window", fake.Windows[session])
+	}
+	if len(fake.Windows[session]) != 1 {
+		t.Fatalf("session windows = %v, want the single map window", fake.Windows[session])
+	}
+	if len(fake.Switched) != 0 || len(fake.Attached) != 0 {
+		t.Fatalf("fan-out moved the operator without --focus: switched=%v attached=%v", fake.Switched, fake.Attached)
+	}
+
+	// An exhausted frontier is a message and exit 0, so fan-out is safe to re-run.
+	var again bytes.Buffer
+	if err := runMapFanOutWith(d, &again, "demo", false); err != nil {
+		t.Fatalf("re-run over an empty frontier = %v, want success", err)
+	}
+	if !strings.Contains(again.String(), "no frontier ticket to grill") {
+		t.Fatalf("re-run output = %q", again.String())
+	}
+	if panes := fake.Windows[session]["map"]; len(panes) != 2 {
+		t.Fatalf("re-run changed the pane wall: %v", panes)
+	}
+	if mapFanOutCmd.Flags().Lookup("focus") == nil || mapNextCmd.Flags().Lookup("focus") == nil {
+		t.Fatal("both spawning verbs must offer --focus")
+	}
+}
+
+// claimedOwner reads the owner off a rendered claim block.
+func claimedOwner(t *testing.T, out string) string {
+	t.Helper()
+	for _, line := range strings.Split(out, "\n") {
+		if _, owner, ok := strings.Cut(line, "claimed by "); ok {
+			return owner
+		}
+	}
+	t.Fatalf("no claim owner in %q", out)
+	return ""
+}
+
+// onlyGrillingPane is the single pane of a Map session's one window.
+func onlyGrillingPane(t *testing.T, d *wayfinder.Deps, mapID string) string {
+	t.Helper()
+	fake := d.Tmux.(*tmuxtest.Fake)
+	panes := fake.Windows[wayfinder.MapSessionName(mapID)]["map"]
+	if len(panes) != 1 {
+		t.Fatalf("map window panes = %v, want exactly one", panes)
+	}
+	return panes[0]
+}
+
 // TestMapSessionPerMapAutoOpensWithoutRelocatingTheCaller walks the session
-// contract from the CLI: `next` spawns a grilling window and moves you there,
-// the in-place writes ensure the session and merely say where it is, and the
-// read verbs touch tmux not at all.
+// contract from the CLI: `next --focus` spawns a grilling pane and moves you to the
+// Map's window, the in-place writes ensure the session and merely say where it is,
+// and the read verbs touch tmux not at all.
 func TestMapSessionPerMapAutoOpensWithoutRelocatingTheCaller(t *testing.T) {
 	t.Parallel()
 	d, _, _ := mapRegistryTestDeps(t, threeTicketMapFiles("demo"))
@@ -462,21 +546,21 @@ func TestMapSessionPerMapAutoOpensWithoutRelocatingTheCaller(t *testing.T) {
 	}
 
 	var next bytes.Buffer
-	if err := runMapNextWith(d, &next, "demo"); err != nil {
+	if err := runMapNextWith(d, &next, "demo", true); err != nil {
 		t.Fatalf("next: %v", err)
 	}
-	if !strings.Contains(next.String(), "opened grilling window "+session+":01-first") {
-		t.Fatalf("next did not report its window:\n%s", next.String())
+	if !strings.Contains(next.String(), "opened grilling pane 01-first in "+session+":map") {
+		t.Fatalf("next did not report its pane:\n%s", next.String())
 	}
-	panes := fake.Windows[session]["01-first"]
-	if len(panes) != 1 {
-		t.Fatalf("grilling windows = %v, want one named after the ticket", fake.Windows[session])
+	panes := fake.Windows[session]["map"]
+	if len(panes) != 1 || fake.PaneTitles[panes[0]] != "01-first" {
+		t.Fatalf("grilling panes = %v (titles %v), want one titled after the ticket", fake.Windows[session], fake.PaneTitles)
 	}
 	if got := strings.Join(fake.SentCommands[panes[0]], " "); !strings.Contains(got, "/pop-wayfinder work demo 01") {
-		t.Fatalf("grilling window runs %q, want the work-mode invocation", got)
+		t.Fatalf("grilling pane runs %q, want the work-mode invocation", got)
 	}
-	if len(fake.Switched) != 1 || fake.Switched[0] != panes[0] {
-		t.Fatalf("next did not switch to the grilling window: %v", fake.Switched)
+	if len(fake.Switched) != 1 || fake.Switched[0] != session {
+		t.Fatalf("--focus did not switch to the map window: %v", fake.Switched)
 	}
 
 	// An in-place write from anywhere reports the session and leaves the caller
@@ -538,14 +622,14 @@ func TestMapNextRefusesAnUnresolvableTrunk(t *testing.T) {
 	}
 	d.Trunk = func() (string, error) { return "", wayfinder.ErrNoTrunk }
 
-	err := runMapNextWith(d, &bytes.Buffer{}, "demo")
+	err := runMapNextWith(d, &bytes.Buffer{}, "demo", false)
 	if err == nil || !strings.Contains(err.Error(), "--trunk <path>") {
 		t.Fatalf("err = %v, want a refusal naming --trunk <path>", err)
 	}
 	// The frontier is untouched, so the ticket is still there once a Trunk is named.
 	d.Trunk = func() (string, error) { return t.TempDir(), nil }
 	var next bytes.Buffer
-	if err := runMapNextWith(d, &next, "demo"); err != nil {
+	if err := runMapNextWith(d, &next, "demo", false); err != nil {
 		t.Fatalf("next after naming a trunk: %v", err)
 	}
 	if !strings.HasPrefix(next.String(), "01\t") {
@@ -780,7 +864,6 @@ func mapRegistryTestDeps(t *testing.T, files map[string]string) (*wayfinder.Deps
 		Tasks: td,
 		Tmux:  &tmuxtest.Fake{},
 		Trunk: func() (string, error) { return trunk, nil },
-		Exe:   func() (string, error) { return "/bin/pop", nil },
 	}
 	setCmdLayerDeps(t, &Deps{Dir: trunk, FS: fs, Tasks: td, Wayfinder: wd})
 

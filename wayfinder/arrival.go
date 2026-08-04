@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 )
 
-// MapSessionName is the tmux session one Map's grilling windows live in. The
+// MapSessionName is the tmux session one Map's grilling panes live in. The
 // naming is a shared fact rather than a private one: `arrive` tears the session
 // down and `open` brings it back, so both ends have to agree on the name without
 // consulting the other.
@@ -107,7 +107,7 @@ func setMapStatus(d *Deps, cwd, mapID string, status MapStatus) (*ArrivalResult,
 }
 
 // unfinishedTickets is what arrival warns about: everything still open or held by
-// a grilling window when the human declared the destination reached.
+// a grilling pane when the human declared the destination reached.
 func unfinishedTickets(tickets []Ticket) []Ticket {
 	var out []Ticket
 	for _, t := range tickets {

@@ -33,7 +33,7 @@ func TestFindTaggedPaneBuildsArgsAndMatches(t *testing.T) {
 	r := &recordingRunner{out: "other-set\t%1\n2026-06-14-queue\t%7\n"}
 	tm := &realTmux{run: r}
 
-	id, err := tm.FindTaggedPane("proj", TagSet, "2026-06-14-queue")
+	id, err := tm.FindTaggedPane("proj", DrainWindow, TagSet, "2026-06-14-queue")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestFindTaggedPaneMissingWindowIsNoPaneNotError(t *testing.T) {
 	// An absent window makes list-panes fail; the lookup reports "no pane" so a
 	// preview/lookup never creates the window as a side effect.
 	tm := &realTmux{run: &recordingRunner{err: errNoWindow}}
-	id, err := tm.FindTaggedPane("proj", TagRoutine, "r1")
+	id, err := tm.FindTaggedPane("proj", DrainWindow, TagRoutine, "r1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

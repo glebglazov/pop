@@ -11,10 +11,12 @@ import (
 	"github.com/glebglazov/pop/work/ref"
 )
 
-// mapOverviewWindow is window 1 of a Map's session. It runs `pop map status
-// <map-id>`, so attaching to a Map opens on what the Map is deciding rather than
-// on a bare shell, and every later window in the session is a grilling window.
-const mapOverviewWindow = "map"
+// mapWindow is the one window of a Map's session. Every ticket being grilled is
+// a tiled pane in it, tagged with the ticket id, so one window shows the whole
+// frontier in flight (ADR-0182). There is no overview pane: `pop map status` is a
+// verb the human types, and a session with nothing running holds a bare shell at
+// the Trunk.
+const mapWindow = "map"
 
 // ErrNoTrunk refuses to root a Map's session anywhere but the Trunk worktree.
 // Wayfinding writes nothing into the repository, so the session has no checkout
@@ -33,7 +35,7 @@ func MapIDFromSession(session string) string {
 	return strings.TrimPrefix(session, mapSessionPrefix)
 }
 
-// MapSession is the tmux session one Map's windows live in.
+// MapSession is the tmux session one Map's grilling panes live in.
 type MapSession struct {
 	Name string
 	// Dir is the Trunk worktree the session was rooted at, empty when the session
@@ -42,15 +44,25 @@ type MapSession struct {
 	// Created distinguishes the two halves of create-or-attach, which is the only
 	// thing a report line has to say that the session name does not.
 	Created bool
+	// InitialPane is the pane tmux gave the session's `map` window on creation,
+	// set only when this call created the session. Nothing has been sent to it, so
+	// the first spawn claims it instead of splitting a second pane and leaving a
+	// bare shell beside the agent.
+	InitialPane string
 }
 
-// GrillingWindow is one Decision ticket's window inside a Map's session.
-type GrillingWindow struct {
+// GrillingPane is one Decision ticket's pane inside a Map's session: tagged with
+// the ticket id and titled after the ticket file's stem, tiled beside the rest of
+// the frontier in the single `map` window.
+type GrillingPane struct {
 	Session MapSession
 	Window  string
 	PaneID  string
-	// Reused reports that a live grilling process was already in the window, so
-	// it became a jump target rather than being sent the command again (ADR-0158).
+	// Title is the pane title, the ticket file's stem — the only thing in the
+	// window that reads as which question the pane is deciding.
+	Title string
+	// Reused reports that a live grilling process was already in the pane, so it
+	// became a jump target rather than being sent the command again (ADR-0158).
 	Reused bool
 }
 
@@ -78,17 +90,14 @@ func EnsureMapSession(d *Deps, mapID string) (*MapSession, error) {
 	if exists {
 		return &MapSession{Name: name, Dir: dir}, nil
 	}
-	paneID, err := t.NewSessionWithWindow(name, dir, mapOverviewWindow)
+	paneID, err := t.NewSessionWithWindow(name, dir, mapWindow)
 	if err != nil {
 		return nil, err
 	}
 	if err := t.StampWorkSession(name, string(ref.KindMap), mapID); err != nil {
 		return nil, err
 	}
-	if err := t.SendKeys(paneID, mapOverviewCommand(d, mapID), "Enter"); err != nil {
-		return nil, fmt.Errorf("run the map overview in %s: %w", name, err)
-	}
-	return &MapSession{Name: name, Dir: dir, Created: true}, nil
+	return &MapSession{Name: name, Dir: dir, Created: true, InitialPane: paneID}, nil
 }
 
 // AttachMapSession is `pop map open`'s second half: ensure the session, then put
@@ -104,54 +113,60 @@ func AttachMapSession(d *Deps, mapID string) (*MapSession, error) {
 	return session, nil
 }
 
-// OpenGrillingWindow lands command in ticket's window of the Map's session,
-// creating the session when it has to. A window whose process is still alive is
-// left alone and becomes a jump target (ADR-0158); an idle one (bare shell) is
-// respawned. Focusing is the caller's call — the Work dashboard focuses on its
-// way out, while `pop map next` focuses immediately.
-func OpenGrillingWindow(d *Deps, mapID string, ticket Ticket, command string) (*GrillingWindow, error) {
-	session, err := EnsureMapSession(d, mapID)
-	if err != nil {
-		return nil, err
-	}
+// openGrillingPane lands command in ticket's pane of the Map's `map` window,
+// splitting and re-tiling one when the ticket has none. The ticket tag is the
+// reuse key: a pane whose process is still alive is left alone and becomes a jump
+// target (ADR-0158), while an idle one (bare shell) is respawned. Focusing is the
+// caller's call — neither spawn verb moves the operator unless asked.
+//
+// session must be one EnsureMapSession just returned: a freshly created session's
+// own first pane is adopted for this ticket rather than left as a bare shell
+// beside the agent.
+func openGrillingPane(d *Deps, session MapSession, ticket Ticket, command string) (*GrillingPane, error) {
 	if session.Dir == "" {
 		return nil, ErrNoTrunk
 	}
 	t := d.tmux()
-	window := grillingWindowName(ticket)
-	paneID, created, err := tmux.EnsureWindow(t, session.Name, window, session.Dir)
+	title := grillingPaneTitle(ticket)
+	existing, err := t.FindTaggedPane(session.Name, mapWindow, tmux.TagTicket, ticket.ID)
 	if err != nil {
 		return nil, err
 	}
-	out := &GrillingWindow{Session: *session, Window: window, PaneID: paneID}
-	if !created && liveGrillingPane(t, paneID) {
-		out.Reused = true
-		return out, nil
+	if existing != "" && liveGrillingPane(t, existing) {
+		return &GrillingPane{Session: session, Window: mapWindow, PaneID: existing, Title: title, Reused: true}, nil
 	}
-	if err := t.SendKeys(paneID, command, "Enter"); err != nil {
-		return nil, fmt.Errorf("send the grilling command: %w", err)
+	if existing == "" {
+		if err := adoptIdleMapPane(t, session, ticket); err != nil {
+			return nil, err
+		}
 	}
-	return out, nil
+	paneID, err := tmux.EnsureTaggedPane(t, tmux.TagTicket, session.Name, mapWindow, session.Dir, ticket.ID, command)
+	if err != nil {
+		return nil, err
+	}
+	if err := t.SetPaneTitle(paneID, title); err != nil {
+		return nil, fmt.Errorf("title the grilling pane: %w", err)
+	}
+	return &GrillingPane{Session: session, Window: mapWindow, PaneID: paneID, Title: title}, nil
 }
 
-// FocusGrillingWindow puts the caller in a grilling window: switch-client from
-// inside tmux, attach from outside.
-func FocusGrillingWindow(d *Deps, win *GrillingWindow) error {
-	t := d.tmux()
-	if err := t.SelectPane(win.PaneID); err != nil {
-		return err
-	}
-	if err := tmux.SwitchTarget(t, win.PaneID); err != nil {
-		return fmt.Errorf("switch to %s:%s: %w", win.Session.Name, win.Window, err)
+// FocusMapSession puts the caller in a Map's `map` window: switch-client from
+// inside tmux, attach from outside. It selects no particular pane — the window is
+// the destination, and choosing one agent out of a tiled frontier for the human
+// would be a guess.
+func FocusMapSession(d *Deps, session MapSession) error {
+	if err := tmux.SwitchToWindow(d.tmux(), session.Name, mapWindow); err != nil {
+		return fmt.Errorf("switch to %s:%s: %w", session.Name, mapWindow, err)
 	}
 	return nil
 }
 
-// GrillingInvocation is the attended agent command a grilling window runs: the
+// GrillingInvocation is the attended agent command a grilling pane runs: the
 // configured interactive agent, opened on the wayfinding skill in work mode for
-// one ticket. Both entry points into a grilling window — `pop map next` and the
-// Work dashboard's map row — build it here, so a session started from either
-// looks the same.
+// one ticket. Every entry point — `pop map next`, `pop map fan-out`, and the Work
+// dashboard's map row — builds it here, so a session started from any of them
+// looks the same. It names exactly one ticket, which is what keeps the
+// one-non-research-ticket-per-session rule intact across a fanned-out frontier.
 func GrillingInvocation(cfg *config.Config, mapID, ticketID, dir string) (string, error) {
 	skillsPrefix := config.DefaultSkillsPrefix
 	if cfg != nil {
@@ -169,6 +184,32 @@ func GrillingInvocation(cfg *config.Config, mapID, ticketID, dir string) (string
 	return strings.Join(parts, " "), nil
 }
 
+// adoptIdleMapPane gives this ticket the bare shell a Map session is born with,
+// by tagging it before the shared primitive looks. A Map session is created by
+// whichever write needed it first — `open`, or an auto-opening `register` — and its
+// window comes with one pane; without this the first spawn would split a second and
+// leave that shell sitting beside the agent forever.
+//
+// Adoption is deliberately narrow: exactly one pane in the window, carrying no
+// ticket tag, running no process. Anything else is somebody's pane.
+func adoptIdleMapPane(t tmux.Tmux, session MapSession, ticket Ticket) error {
+	panes, err := t.WindowPanes(session.Name, mapWindow)
+	if err != nil || len(panes) != 1 {
+		return nil
+	}
+	tagged, err := t.PaneTagValue(panes[0], tmux.TagTicket)
+	if err != nil || tagged != "" {
+		return nil
+	}
+	if session.InitialPane != panes[0] && liveGrillingPane(t, panes[0]) {
+		return nil
+	}
+	if err := t.TagPane(panes[0], tmux.TagTicket, ticket.ID); err != nil {
+		return fmt.Errorf("claim the map window's idle pane: %w", err)
+	}
+	return nil
+}
+
 // liveGrillingPane reports whether a pane still holds a running process. A pane
 // pop cannot read is treated as live, so an unreadable pane is never sent keys
 // on top of whatever it is running.
@@ -180,20 +221,14 @@ func liveGrillingPane(t tmux.Tmux, paneID string) bool {
 	return !tmux.IsBareShell(info.Command)
 }
 
-// grillingWindowName names a window after the ticket file's stem, so the window
-// list of a Map session reads as the questions being decided in it.
-func grillingWindowName(ticket Ticket) string {
+// grillingPaneTitle titles a pane with the ticket file's stem, so a wall of tiled
+// panes reads as the questions being decided in it. The tag carries the identity;
+// the title is what a human reads.
+func grillingPaneTitle(ticket Ticket) string {
 	if stem := strings.TrimSuffix(strings.TrimSpace(ticket.File), ".md"); stem != "" {
 		return stem
 	}
 	return ticket.ID
-}
-
-// mapOverviewCommand is what window 1 runs. It re-invokes this same binary
-// rather than whatever `pop` resolves to on PATH, so a session opened by a
-// development build shows that build's view of the Map.
-func mapOverviewCommand(d *Deps, mapID string) string {
-	return shellQuote(d.exe()) + " map status " + shellQuote(mapID)
 }
 
 func shellQuote(s string) string {

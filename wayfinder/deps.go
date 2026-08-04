@@ -1,7 +1,6 @@
 package wayfinder
 
 import (
-	"os"
 	"strings"
 	"time"
 
@@ -28,8 +27,6 @@ type Deps struct {
 	// from the repository config and the caller's --trunk override, both of which
 	// live at the CLI edge. Left nil, opening a session refuses with ErrNoTrunk.
 	Trunk func() (string, error)
-	// Exe locates the pop binary the session's overview window re-invokes.
-	Exe func() (string, error)
 	// SetStatuses returns the live status of every Task set registered under a
 	// definition path, keyed by set id — what a Map's spawned ids resolve to. Left
 	// nil it reads through the Task-set refresh; injectable because a test wants to
@@ -68,7 +65,7 @@ func (d *Deps) tmux() tmux.Tmux {
 }
 
 // trunk resolves the Trunk worktree, refusing rather than guessing a directory:
-// a Map session rooted at the wrong checkout would put every grilling window in
+// a Map session rooted at the wrong checkout would put every grilling pane in
 // the wrong tree.
 func (d *Deps) trunk() (string, error) {
 	if d.Trunk == nil {
@@ -82,19 +79,6 @@ func (d *Deps) trunk() (string, error) {
 		return "", ErrNoTrunk
 	}
 	return dir, nil
-}
-
-// exe falls back to the bare name on PATH: a pop that cannot locate its own
-// binary should still leave a session with a working overview window.
-func (d *Deps) exe() string {
-	resolve := d.Exe
-	if resolve == nil {
-		resolve = os.Executable
-	}
-	if path, err := resolve(); err == nil && strings.TrimSpace(path) != "" {
-		return path
-	}
-	return "pop"
 }
 
 func (d *Deps) owner() string {

@@ -102,9 +102,9 @@ func loadLivePaneCache(d *drain.Deps) livePaneCache {
 	}
 	windows, err := tmux.ListWindowPanes()
 	if err == nil {
-		// A Map's liveness is its session's, not one window's: grilling windows are
-		// named after tickets and come and go, while the Map is running as long as
-		// any window in `pop-map-<id>` still holds a process.
+		// A Map's liveness is its session's, not one pane's: grilling panes come and
+		// go with the tickets, while the Map is running as long as anything in
+		// `pop-map-<id>` still holds a process.
 		for _, w := range windows {
 			mapID := wayfinder.MapIDFromSession(w.Session)
 			if mapID == "" {
@@ -201,8 +201,8 @@ func menuItemLiveState(item dashboardMenuItem, row DashboardRow, live livePaneCa
 		return live.state(tmuxmod.TagFold, row.ID)
 	case setkind.VerbAssist:
 		return live.state(tmuxmod.TagAssist, row.ID)
-	case wayfinder.VerbWork:
-		// The Map's frontier verb reads the same window liveness its activity-cluster
+	case wayfinder.VerbWork, wayfinder.VerbWorkHere, wayfinder.VerbFanOut, wayfinder.VerbFanOutHere:
+		// The Map's frontier verbs read the same session liveness its activity-cluster
 		// key does, so the menu and the row agree about whether a session is running.
 		return live.wayfinderState(row.ID)
 	default:

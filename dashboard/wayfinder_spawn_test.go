@@ -49,32 +49,27 @@ func wayfinderSpawnFixture(t *testing.T) (*drain.Deps, *config.Config, Dashboard
 
 const (
 	wayfinderMapID = "2026-07-01-active"
-	// mapOverviewWindow mirrors wayfinder's window 1: it runs `pop map status
-	// <map-id>`, not a grilling agent, so the assertions below step over it.
-	mapOverviewWindow = "map"
+	// mapPaneWindow mirrors wayfinder's single Map window: every ticket agent is a
+	// tiled pane in it, and there is no overview pane to step over (ADR-0182).
+	mapPaneWindow = "map"
 )
 
 func wayfinderMapSession() string { return wayfinder.MapSessionName(wayfinderMapID) }
 
-// wayfinderPaneCommand returns the command sent into the Map session's grilling
-// window — whichever ticket it is for.
+// wayfinderPaneCommand returns the command sent into a grilling pane of the Map
+// session's one window — whichever ticket it is for.
 func wayfinderPaneCommand(f *tmuxtest.Fake) (string, bool) {
-	for name, panes := range f.Windows[wayfinderMapSession()] {
-		if name == mapOverviewWindow || len(panes) == 0 {
-			continue
+	for _, pane := range f.Windows[wayfinderMapSession()][mapPaneWindow] {
+		if cmds := f.SentCommands[pane]; len(cmds) > 0 {
+			return strings.Join(cmds, " "), true
 		}
-		cmds := f.SentCommands[panes[0]]
-		if len(cmds) == 0 {
-			continue
-		}
-		return strings.Join(cmds, " "), true
 	}
 	return "", false
 }
 
-// seedWayfinderWindow arranges a live Map session already grilling window, so the
-// reuse path (ADR-0158) has something to find.
-func seedWayfinderWindow(f *tmuxtest.Fake, window, paneID, command string) {
+// seedWayfinderPane arranges a Map session already grilling one ticket in a tagged
+// pane, so the reuse path (ADR-0158) has something to find.
+func seedWayfinderPane(f *tmuxtest.Fake, ticketID, paneID, command string) {
 	session := wayfinderMapSession()
 	if f.Live == nil {
 		f.Live = map[string]string{}
@@ -86,11 +81,15 @@ func seedWayfinderWindow(f *tmuxtest.Fake, window, paneID, command string) {
 	if f.Windows[session] == nil {
 		f.Windows[session] = map[string][]string{}
 	}
-	f.Windows[session][window] = []string{paneID}
+	f.Windows[session][mapPaneWindow] = []string{paneID}
 	if f.PaneInfos == nil {
 		f.PaneInfos = map[string]tmuxmod.PaneInfo{}
 	}
 	f.PaneInfos[paneID] = tmuxmod.PaneInfo{Session: session, Command: command}
+	if f.PaneTagValues == nil {
+		f.PaneTagValues = map[string]map[tmuxmod.PaneTag]string{}
+	}
+	f.PaneTagValues[paneID] = map[tmuxmod.PaneTag]string{tmuxmod.TagTicket: ticketID}
 }
 
 func TestLaunchWayfinderSessionTargetsNextFrontier(t *testing.T) {
@@ -149,11 +148,11 @@ func TestLaunchWayfinderSessionSpawnsIntoTheMapSession(t *testing.T) {
 		t.Fatalf("session = %q, want %q", result.Session, wayfinderMapSession())
 	}
 	windows := f.Windows[wayfinderMapSession()]
-	if _, ok := windows["01-frontier"]; !ok {
-		t.Fatalf("expected a window named after the ticket, windows=%v", windows)
+	if len(windows) != 1 || len(windows[mapPaneWindow]) != 1 {
+		t.Fatalf("expected one pane in the single map window, windows=%v", windows)
 	}
-	if _, ok := windows[mapOverviewWindow]; !ok {
-		t.Fatalf("expected window 1 to be the map overview, windows=%v", windows)
+	if got := f.PaneTitles[windows[mapPaneWindow][0]]; got != "01-frontier" {
+		t.Fatalf("pane title = %q, want the ticket stem", got)
 	}
 	for session, ws := range f.Windows {
 		if _, ok := ws[drain.DrainWindowName]; ok {
@@ -193,7 +192,7 @@ func TestLaunchWayfinderSessionEmptyFrontier(t *testing.T) {
 
 func TestLaunchWayfinderSessionReusesRunningWithoutResend(t *testing.T) {
 	d, cfg, row, f, _ := wayfinderSpawnFixture(t)
-	seedWayfinderWindow(f, "01-frontier", "%9", "claude")
+	seedWayfinderPane(f, "01", "%9", "claude")
 
 	result, err := LaunchWayfinderSession(d, cfg, row, "")
 	if err != nil {
@@ -245,6 +244,43 @@ func TestDashboardMapRowISpawnsFocusesAndQuits(t *testing.T) {
 	}
 }
 
+// The dashboard's two fan-out verbs differ only in whether they move the operator:
+// the uppercase one hands off and quits, the lowercase one reports and stays, and
+// both spawn the same wall of panes (ADR-0182).
+func TestDashboardMapRowFanOutGoesOrStays(t *testing.T) {
+	d, cfg, row, f, storageDir := wayfinderSpawnFixture(t)
+	// Two frontier tickets, so a fan-out is visibly more than one pane.
+	withWayfinderMaps(t, d, storageDir, map[string]string{
+		filepath.Join(storageDir, "repo.json"): `{"common_dir":"/repo/.git"}`,
+		filepath.Join(storageDir, "maps", wayfinderMapID, "map.md"):                "Status: active\n\n## Destination\nShip it\n",
+		filepath.Join(storageDir, "maps", wayfinderMapID, "issues/01-frontier.md"): "Type: research\nStatus: open\n\n## Question\nA\n",
+		filepath.Join(storageDir, "maps", wayfinderMapID, "issues/02-blocked.md"):  "Type: research\nStatus: open\n\n## Question\nB\n",
+	})
+	f.Inside = true
+	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
+
+	stayed, ok := m.spawnWayfinderFanOut(row)().(dashboardHandoffMsg)
+	if !ok || stayed.err != nil {
+		t.Fatalf("stay fan-out = %+v", stayed)
+	}
+	if stayed.quit {
+		t.Fatalf("the lowercase fan-out quit the dashboard: %+v", stayed)
+	}
+	if !strings.Contains(stayed.status, "fanned out 2 frontier tickets into "+wayfinderMapSession()) {
+		t.Fatalf("stay status = %q", stayed.status)
+	}
+	if panes := f.Windows[wayfinderMapSession()][mapPaneWindow]; len(panes) != 2 {
+		t.Fatalf("panes = %v, want one per frontier ticket", f.Windows[wayfinderMapSession()])
+	}
+
+	// Everything is claimed now, so the focusing verb reports the empty frontier
+	// the same way the single-ticket verb does.
+	went, ok := m.launchWayfinderFanOut(row)().(dashboardHandoffMsg)
+	if !ok || !errors.Is(went.err, wayfinder.ErrEmptyFrontier) {
+		t.Fatalf("fan-out over an exhausted frontier = %+v, want ErrEmptyFrontier", went)
+	}
+}
+
 func TestDashboardMapRowIEmptyFrontierMessage(t *testing.T) {
 	d, cfg, row, _, storageDir := wayfinderSpawnFixture(t)
 	files := map[string]string{
@@ -268,7 +304,7 @@ func TestDashboardMapRowIEmptyFrontierMessage(t *testing.T) {
 
 func TestDashboardMapRowIReusesRunningWithoutResend(t *testing.T) {
 	d, cfg, row, f, _ := wayfinderSpawnFixture(t)
-	seedWayfinderWindow(f, "01-frontier", "%9", "claude")
+	seedWayfinderPane(f, "01", "%9", "claude")
 	f.Inside = true
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
@@ -299,7 +335,7 @@ func TestDashboardMapRowIReusesRunningWithoutResend(t *testing.T) {
 // TestDashboardMapDetailWorksFrontierTicketFromItemMenu covers the Map's item
 // verb through the generic detail: the menu the kind fills over a frontier
 // ticket carries `work ticket`, and running it hands the operator off to the
-// Map's grilling window.
+// Map's grilling pane.
 func TestDashboardMapDetailWorksFrontierTicketFromItemMenu(t *testing.T) {
 	m, d := newMapDetailDashboard(t)
 	repo := "/repo/checkout"
@@ -344,8 +380,7 @@ func TestLivePaneCacheWayfinderWindow(t *testing.T) {
 	f := &tmuxtest.Fake{
 		Windows: map[string]map[string][]string{
 			wayfinderMapSession(): {
-				"01-frontier":     {"%3"},
-				mapOverviewWindow: {"%2"},
+				mapPaneWindow: {"%3", "%2"},
 			},
 			"pop": {"pop-work": {"%1"}},
 		},

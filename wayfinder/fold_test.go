@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/glebglazov/pop/internal/deps"
+	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -288,8 +289,9 @@ func TestScanMapsFoldRegistersTheMap(t *testing.T) {
 
 	// The workaround this slice exists to remove: `pop map register` should not
 	// be needed before archive, next or claim work on a folded Map.
-	if _, err := NextTicket(d, "", "2026-07-01-map"); err != nil {
-		t.Fatalf("NextTicket after fold: %v", err)
+	d.Tmux = &tmuxtest.Fake{}
+	if _, err := NextFrontierTicket(d, nil, "", "2026-07-01-map"); err != nil {
+		t.Fatalf("NextFrontierTicket after fold: %v", err)
 	}
 	if _, err := ArchiveMap(d, "", "2026-07-01-map"); err != nil {
 		t.Fatalf("ArchiveMap after fold: %v", err)

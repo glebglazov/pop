@@ -478,15 +478,20 @@ Per ticket, `index.json` carries `id`, `file`, `title`, `type`
 
 Take a ticket with `pop map next [<map-id>]` — it claims the first frontier
 ticket atomically and prints `<id>\t<path>` — or `pop map claim <map-id> <NN>`
-when you are naming one. A claim is a pop.db row owned by your tmux pane, not a
-file state, so never write one into the markdown; it frees itself after four
-hours. A ticket is **unblocked** when every blocker is `resolved`; the
-**frontier** is the open, unblocked, unclaimed tickets — the edge of the known,
-and the only thing `next` hands out.
+when you are naming one. `pop map fan-out [<map-id>]` does `next` for every
+frontier ticket at once and prints the same block per ticket plus a total; an
+empty frontier is a message and exit 0. A claim is a pop.db row owned by the tmux
+pane running the agent, not a file state, so never write one into the markdown; it
+frees itself after four hours. A ticket is **unblocked** when every blocker is
+`resolved`; the **frontier** is the open, unblocked, unclaimed tickets — the edge
+of the known, and the only thing `next` and `fan-out` hand out.
 
-`next` also spawns the ticket's grilling window inside the map's own tmux session
-`pop-map-<map-id>` — window 1 there runs `pop map status <map-id>` — and switches you to it.
-`pop map open <map-id>` creates or attaches that session on its own. The other
+Both spawn the ticket's grilling pane inside the map's own tmux session
+`pop-map-<map-id>`, whose single `map` window holds one tiled pane per ticket
+tagged with the ticket id. Neither moves you unless you pass `--focus`, and a pane
+whose agent is still alive is a jump target rather than being sent work twice.
+`pop map status <map-id>` is the render you type when you want to see the Map;
+`pop map open <map-id>` creates or attaches the session on its own. The other
 writes (`register`, `claim`, `resolve`, `out-of-scope`) run **in place**: they
 ensure the session exists, tell you where it is, and never move you, so calling
 one from a task-set pane is safe. Reads create no tmux state at all. The session

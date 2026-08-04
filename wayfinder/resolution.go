@@ -44,7 +44,7 @@ type ResolveResult struct {
 	// Replaced reports that the ticket was already resolved and this run replaced
 	// its answer — the re-run that fixes a mistake, not a second answer.
 	Replaced bool
-	// ReleasedClaim names the grilling window that held the ticket, if any.
+	// ReleasedClaim names the grilling pane that held the ticket, if any.
 	ReleasedClaim string
 	// DirtyRepo reports that the repository working tree carried an uncommitted
 	// change at resolution. pop cannot tell an unrelated in-flight change from a
@@ -160,7 +160,7 @@ func validateDraftPaths(d *Deps, mapDir, flag string, paths []string) ([]string,
 }
 
 // withMapLock serialises a Map's three-file write across processes. Several
-// grilling windows resolve into one map.md, and each resolve is a read of the
+// grilling panes resolve into one map.md, and each resolve is a read of the
 // manifest followed by a rewrite of it and of the index — a sequence no atomic
 // rename can make safe on its own, because the second writer must see the first
 // writer's entry to re-render it.
@@ -240,7 +240,7 @@ func writeResolution(d *Deps, m Map, ticketID, body string, outOfScope bool, adr
 
 // releaseTicketClaim hands a resolved ticket's claim back. A resolution is
 // terminal, so the hold has nothing left to protect; leaving it would keep a
-// dead grilling window's name on the ticket until the TTL swept it.
+// dead grilling pane's name on the ticket until the TTL swept it.
 func releaseTicketClaim(d *Deps, mapID, ticketID string) (string, error) {
 	s, err := openWorkRegistry(d)
 	if err != nil {

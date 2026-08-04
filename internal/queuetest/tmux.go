@@ -86,8 +86,8 @@ func (rt *RecordingTmux) WindowPanes(session, name string) ([]string, error) {
 	return PaneIDs(rt.PaneList), nil
 }
 
-func (rt *RecordingTmux) FindTaggedPane(session string, tag tmuxmod.PaneTag, value string) (string, error) {
-	rt.record("list-panes", "-t", session+":"+drainWindowName)
+func (rt *RecordingTmux) FindTaggedPane(session, window string, tag tmuxmod.PaneTag, value string) (string, error) {
+	rt.record("list-panes", "-t", session+":"+window)
 	for paneID, tags := range rt.PaneTagValues {
 		if tags[tag] == value {
 			return paneID, nil

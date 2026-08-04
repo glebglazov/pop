@@ -6,7 +6,7 @@ import (
 )
 
 // A Work session is a tmux session pop opened for one Work container: a Map's
-// grilling windows, later a Task set's or a Routine's. The container it belongs
+// grilling panes, later a Task set's or a Routine's. The container it belongs
 // to is stamped on the session as pop-owned user options rather than recorded in
 // pop.db, because the fact describes a *live* session — tying its lifetime to
 // tmux's means there is never a stale row to reconcile. As with every other
@@ -27,8 +27,9 @@ type WorkSession struct {
 
 // NewSessionWithWindow creates a detached session named name rooted at dir whose
 // first window is named window, and returns that window's pane id. It differs
-// from NewSession in returning somewhere to send a command: a session whose
-// window 1 must run something needs the pane id tmux only reports at creation.
+// from NewSession in returning somewhere to send a command: a caller that has to
+// run something in, or lay claim to, the session's first pane needs the pane id
+// tmux only reports at creation.
 func (t *realTmux) NewSessionWithWindow(name, dir, window string) (string, error) {
 	out, err := t.run.output("new-session", "-d", "-s", name, "-c", dir, "-n", window, "-P", "-F", "#{pane_id}")
 	if err != nil {

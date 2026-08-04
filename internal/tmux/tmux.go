@@ -108,13 +108,16 @@ type Tmux interface {
 	// SelectWindow makes session's window name the current window.
 	SelectWindow(session, name string) error
 
-	// --- tagged panes (@pop_routine / @pop_set; the shared drain window) ---
+	// --- tagged panes (@pop_routine / @pop_set / @pop_ticket; the drain and Map
+	// windows) ---
 
 	// TagPane sets a pane's @pop_* tag (selected by PaneTag) to value.
 	TagPane(paneID string, tag PaneTag, value string) error
-	// FindTaggedPane returns the pane in session's drain window tagged
-	// tag=value, or "" when none (an absent window included).
-	FindTaggedPane(session string, tag PaneTag, value string) (string, error)
+	// FindTaggedPane returns the pane in session's window tagged tag=value, or ""
+	// when none (an absent window included).
+	FindTaggedPane(session, window string, tag PaneTag, value string) (string, error)
+	// PaneTagValue reads one pane's @pop_* tag, empty when it carries none.
+	PaneTagValue(paneID string, tag PaneTag) (string, error)
 	// ListActivityPanes returns every pane across all sessions that carries at
 	// least one Work-dashboard activity tag, with its current foreground
 	// command — one list-panes -a round-trip for the live-pane affordance.

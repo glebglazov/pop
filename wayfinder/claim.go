@@ -29,15 +29,20 @@ func MapTicketRef(mapID, ticketID string) ref.WorkRef {
 
 // DefaultClaimOwner is who a claim belongs to: the tmux pane the command runs in
 // when there is one, else this process. A pane outlives the command that took the
-// claim, which is what makes it the right identity for a grilling window; the pid
+// claim, which is what makes it the right identity for a grilling pane; the pid
 // is the honest fallback for a claim taken from a plain shell. There is no
 // configuration and no login — an owner is only ever compared for equality.
 func DefaultClaimOwner() string {
 	if pane := tmux.PaneIDFromEnv(); pane != "" {
-		return "pane:" + pane
+		return paneOwner(pane)
 	}
 	return fmt.Sprintf("pid:%d", os.Getpid())
 }
+
+// paneOwner is the one place a pane id becomes a claim owner, so the identity a
+// spawned pane is claimed for and the one that pane computes for itself are the
+// same string.
+func paneOwner(paneID string) string { return "pane:" + paneID }
 
 // ClaimResult is one taken claim: which ticket, where its markdown lives, and
 // what the claim displaced.
@@ -57,37 +62,38 @@ type ClaimResult struct {
 	UnresolvedBlockers []string
 }
 
-// NextTicket claims the first frontier ticket of a Map in manifest order. The
-// pick and the claim are one store transaction, so two grilling windows racing
-// the same Map get two different tickets: the loser of the write lock sees the
-// winner's row and moves on to the next candidate.
-func NextTicket(d *Deps, cwd, mapID string) (*ClaimResult, error) {
-	m, err := findClaimableMap(d, cwd, mapID)
-	if err != nil {
-		return nil, err
-	}
-	frontier := Frontier(m.Tickets)
-	if len(frontier) == 0 {
-		return nil, emptyFrontier(m)
-	}
-	candidates := make([]string, 0, len(frontier))
-	for _, t := range frontier {
-		candidates = append(candidates, t.ID)
-	}
+// ClaimTicketForPane claims one ticket for the pane now grilling it, in a single
+// store transaction. It is the second half of the spawn path (ADR-0182): the pane
+// exists before the claim does, so the claim ages out against the pane actually
+// doing the work and that pane's own `pop map claim` renews rather than being
+// refused.
+//
+// A live claim held elsewhere is not an error but a nil result: the ticket was on
+// the frontier when the scan read it and went to a parallel session since, which
+// the caller reports as one idle pane. An expired claim is taken over and reported
+// as a steal.
+func ClaimTicketForPane(d *Deps, m Map, ticket Ticket, paneID string) (*ClaimResult, error) {
 	s, err := openWorkRegistry(d)
 	if err != nil {
 		return nil, err
 	}
-	res, err := s.ClaimFirstWorkItem(MapRef(m.ID), candidates, d.owner(), d.now())
+	res, err := s.ClaimFirstWorkItem(MapRef(m.ID), []string{ticket.ID}, spawnedPaneOwner(d, paneID), d.now())
 	if errors.Is(err, store.ErrNoClaimableWorkItem) {
-		// Every candidate went to a concurrent window between the scan and the
-		// transaction. That is the same answer as an empty frontier.
-		return nil, emptyFrontier(m)
+		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
 	return claimResult(m, res), nil
+}
+
+// spawnedPaneOwner names the pane a claim is taken for. A pane id pop could not
+// read falls back to the caller's own identity, so a claim is never ownerless.
+func spawnedPaneOwner(d *Deps, paneID string) string {
+	if id := strings.TrimSpace(paneID); id != "" {
+		return paneOwner(id)
+	}
+	return d.owner()
 }
 
 // ClaimTicket claims one named ticket — the override for when the human, not

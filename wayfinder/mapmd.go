@@ -7,7 +7,7 @@ import (
 
 // map.md has two writers. The prose sections belong to the grilling session; the
 // index sections belong to pop, which rebuilds them from the manifest on every
-// resolve. Under parallel grilling windows that split is what makes concurrent
+// resolve. Under parallel grilling panes that split is what makes concurrent
 // appends safe — a generated region is never merged, only replaced — so the
 // markers exist to tell a session exactly which lines it must not touch.
 const (

@@ -91,16 +91,16 @@ func TestActivityPaneTagsDistinct(t *testing.T) {
 		t.Fatalf("activities must not share a pane: drain=%s verify=%s assist=%s", drainPane, verifyPane, assistPane)
 	}
 
-	if got, _ := d.Tmux.FindTaggedPane(project.SessionNameWith(d.Project, repo), tmuxmod.TagSet, setID); got != drainPane {
+	if got, _ := d.Tmux.FindTaggedPane(project.SessionNameWith(d.Project, repo), tmuxmod.DrainWindow, tmuxmod.TagSet, setID); got != drainPane {
 		t.Fatalf("TagSet lookup = %q, want drain pane %q", got, drainPane)
 	}
-	if got, _ := d.Tmux.FindTaggedPane(project.SessionNameWith(d.Project, repo), tmuxmod.TagVerify, setID); got != verifyPane {
+	if got, _ := d.Tmux.FindTaggedPane(project.SessionNameWith(d.Project, repo), tmuxmod.DrainWindow, tmuxmod.TagVerify, setID); got != verifyPane {
 		t.Fatalf("TagVerify lookup = %q, want verify pane %q", got, verifyPane)
 	}
-	if got, _ := d.Tmux.FindTaggedPane(project.SessionNameWith(d.Project, repo), tmuxmod.TagAssist, setID); got != assistPane {
+	if got, _ := d.Tmux.FindTaggedPane(project.SessionNameWith(d.Project, repo), tmuxmod.DrainWindow, tmuxmod.TagAssist, setID); got != assistPane {
 		t.Fatalf("TagAssist lookup = %q, want assist pane %q", got, assistPane)
 	}
-	if got, _ := d.Tmux.FindTaggedPane(project.SessionNameWith(d.Project, repo), tmuxmod.TagFold, setID); got != "" {
+	if got, _ := d.Tmux.FindTaggedPane(project.SessionNameWith(d.Project, repo), tmuxmod.DrainWindow, tmuxmod.TagFold, setID); got != "" {
 		t.Fatalf("TagFold lookup = %q, want empty before fold spawns", got)
 	}
 }

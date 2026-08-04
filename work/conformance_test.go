@@ -97,8 +97,11 @@ func conformanceCases() []conformanceCase {
 					Groups:    f.groups,
 				})
 			},
-			wantActions:     []work.Verb{wayfinder.VerbWork, work.VerbShell, work.VerbCopyName},
-			wantItemActions: []work.Verb{wayfinder.VerbWork, work.VerbCopyName},
+			wantActions: []work.Verb{
+				wayfinder.VerbWork, wayfinder.VerbFanOut, work.VerbShell,
+				wayfinder.VerbWorkHere, wayfinder.VerbFanOutHere, work.VerbCopyName,
+			},
+			wantItemActions: []work.Verb{wayfinder.VerbWork, wayfinder.VerbWorkHere, work.VerbCopyName},
 			wantSummary:     []string{"1 map"},
 		},
 		{

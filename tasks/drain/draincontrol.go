@@ -260,7 +260,7 @@ func LaunchVerify(d *Deps, cfg *config.Config, row DashboardRow) (DashboardDrain
 	if strings.TrimSpace(row.RuntimePath) != "" {
 		command += " --task-runtime-path " + shellQuote(row.RuntimePath)
 	}
-	paneID, err := tmuxmod.EnsureTaggedPane(d.Tmux, tmuxmod.TagVerify, session, checkout, row.ID, command)
+	paneID, err := tmuxmod.EnsureTaggedPane(d.Tmux, tmuxmod.TagVerify, session, tmuxmod.DrainWindow, checkout, row.ID, command)
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
@@ -377,7 +377,7 @@ func LaunchAssist(d *Deps, cfg *config.Config, row DashboardRow) (DashboardDrain
 	if strings.TrimSpace(runtimePath) != "" {
 		command += " --task-runtime-path " + shellQuote(runtimePath)
 	}
-	paneID, err := tmuxmod.EnsureTaggedPane(d.Tmux, tmuxmod.TagAssist, session, checkout, row.ID, command)
+	paneID, err := tmuxmod.EnsureTaggedPane(d.Tmux, tmuxmod.TagAssist, session, tmuxmod.DrainWindow, checkout, row.ID, command)
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
@@ -443,7 +443,7 @@ func LaunchFold(d *Deps, cfg *config.Config, row DashboardRow) (DashboardDrainRe
 		return DashboardDrainResult{PaneID: paneID, Session: session, RuntimePath: row.RuntimePath}, nil
 	}
 	command := fmt.Sprintf("pop tasks fold %s", shellQuote(row.ID))
-	paneID, err := tmuxmod.EnsureTaggedPane(d.Tmux, tmuxmod.TagFold, session, checkout, row.ID, command)
+	paneID, err := tmuxmod.EnsureTaggedPane(d.Tmux, tmuxmod.TagFold, session, tmuxmod.DrainWindow, checkout, row.ID, command)
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}

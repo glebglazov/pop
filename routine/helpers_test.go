@@ -123,7 +123,7 @@ func (rt *recordingTmux) WindowPanes(session, name string) ([]string, error) {
 	return recorderPaneIDs(rt.paneList), nil
 }
 
-func (rt *recordingTmux) FindTaggedPane(session string, _ tmuxmod.PaneTag, value string) (string, error) {
+func (rt *recordingTmux) FindTaggedPane(session, window string, _ tmuxmod.PaneTag, value string) (string, error) {
 	rt.record("list-panes", "-t", session+":pop-work")
 	return recorderTaggedPane(rt.paneList, value), nil
 }

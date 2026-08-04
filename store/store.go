@@ -424,7 +424,7 @@ var migrations = []string{
 	CREATE INDEX idx_work_containers_kind ON work_containers(kind);`,
 	// 27: work_item_claims — who is working one item of one Work container right
 	// now. A Map's Decision ticket claims here rather than in its markdown or its
-	// manifest: a claim belongs to a live grilling window, and a file-borne claim
+	// manifest: a claim belongs to a live grilling pane, and a file-borne claim
 	// outlives the window that took it with nothing able to release it. Keyed by
 	// the whole item ref so the table is cross-kind from the start — a Task set's
 	// item claims the same way. owner is a tmux pane id when the claimer runs

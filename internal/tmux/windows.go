@@ -139,6 +139,18 @@ func (t *realTmux) SelectWindow(session, name string) error {
 	return err
 }
 
+// SwitchToWindow puts the caller in session's window name without selecting a
+// pane inside it: select-window, then the session-level switch-client/attach.
+// It is the focus a caller asks for when the window is the destination and the
+// pane it lands on is none of pop's business — a tiled wall of grilling panes,
+// where picking one for the human would be a guess.
+func SwitchToWindow(t Tmux, session, name string) error {
+	if err := t.SelectWindow(session, name); err != nil {
+		return err
+	}
+	return SwitchTarget(t, session)
+}
+
 // EnsureWindow ensures session (created detached at dir when absent) owns a
 // window named name, returning that window's target pane id and whether the
 // window was freshly created. Callers that run one command per named window
