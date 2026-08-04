@@ -120,6 +120,36 @@ Set-level key:
 
 Keys pop does not read ride through a rewrite untouched.
 
+## What a session may write
+
+One flat contract, and every wayfinding session holds it: charting a fresh Map,
+`+"`pop map assist <map-id>`"+` on a live one, and a session graduating fog out of
+`+"`%s`"+` all write the same set. There is no permission one of them holds
+alone.
+
+Writable:
+
+- ticket files under `+"`%s/`"+` — new ones, and an existing ticket's
+  `+"`## Question`"+` amended in place;
+- the manifest's authoring fields, `+"`blocked_by`"+` edges included — wired and
+  unwired;
+- %s's prose sections (%s) — the
+  human-owned half of the file.
+
+Off limits:
+
+- **everything between the `+"`pop:generated`"+` markers**, in %s and in a
+  ticket's `+"`## %s`"+` alike. pop rebuilds those regions from %s on
+  every resolve, so a hand-edit there is not wrong so much as lost.
+- **the repository under study.** Wayfinding produces decisions, not code: no
+  source edit, no commit, no branch. Drafts a decision produces belong in the
+  Map's own folder and are recorded by
+  `+"`pop map resolve --adr/--context`"+`.
+
+Which sessions may *resolve* a ticket is a workflow rule rather than a fact about
+these files, so it lives in the Work-store doc's `+"`Resolution`"+` section beside
+the one-non-research-ticket-per-session rule it protects.
+
 ## What registration enforces
 
 `+"`pop map register`"+` reports the whole fix list at once, not the first item:
@@ -149,6 +179,9 @@ Keys pop does not read ride through a rewrite untouched.
 		enumList(ticketTypeWords()),
 		enumList(ticketStatusWords()), TicketOpen,
 		TicketResolved,
+		fogSectionName, issuesDirName,
+		mapFileName, proseSectionList(),
+		mapFileName, answerSectionName, MapManifestFileName,
 		ticketFileShape, issuesDirName, issuesDirName,
 	)
 
@@ -166,7 +199,7 @@ func mapMarkdownTemplate() string {
 		"",
 		"<one or two lines — every session orients here first>",
 		"",
-		"## Notes",
+		"## " + notesSectionName,
 		"",
 		"<domain; skills to consult; standing preferences>",
 		"",
@@ -176,7 +209,7 @@ func mapMarkdownTemplate() string {
 		lines = append(lines, "## "+region.heading, "", open, close, "")
 		if region.name == regionDecisions.name {
 			lines = append(lines,
-				"## Not yet specified",
+				"## "+fogSectionName,
 				"",
 				"<fog — graduates into tickets as the frontier advances>",
 				"")
@@ -273,6 +306,19 @@ func ticketStatusWords() []string {
 		words = append(words, string(s))
 	}
 	return words
+}
+
+// proseSectionList names map.md's human-owned sections as a sentence, from the
+// same constants the template lays out.
+func proseSectionList() string {
+	quoted := make([]string, 0, len(mapProseSections))
+	for _, name := range mapProseSections {
+		quoted = append(quoted, "`"+name+"`")
+	}
+	if len(quoted) < 2 {
+		return strings.Join(quoted, "")
+	}
+	return strings.Join(quoted[:len(quoted)-1], ", ") + " and " + quoted[len(quoted)-1]
 }
 
 // enumList renders an enum the way both guides say one: `a` | `b` | `c`.

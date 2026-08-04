@@ -157,7 +157,7 @@ func TestMapKindVerbsFollowTheFrontier(t *testing.T) {
 		}
 		return out
 	}
-	wantActions := []work.Verb{VerbWork, VerbFanOut, work.VerbShell, VerbWorkHere, VerbFanOutHere, work.VerbCopyName}
+	wantActions := []work.Verb{VerbWork, VerbFanOut, VerbAssist, work.VerbShell, VerbWorkHere, VerbFanOutHere, work.VerbCopyName}
 	if got := verbs(k.Actions(active)); !slices.Equal(got, wantActions) {
 		t.Fatalf("map actions = %v, want %v", got, wantActions)
 	}
@@ -168,10 +168,12 @@ func TestMapKindVerbsFollowTheFrontier(t *testing.T) {
 		t.Fatalf("blocked ticket actions = %v, want %v", got, want)
 	}
 	// All four frontier keys are gated on a frontier: a Map with none offers no
-	// dead key, going or staying.
+	// dead key, going or staying. Assist survives the gate — a Map whose frontier
+	// is empty or fully claimed is when a Map-scoped session is most needed
+	// (ADR-0184).
 	frontierless := active
 	frontierless.MapFrontier = 0
-	if got, want := verbs(k.Actions(frontierless)), []work.Verb{work.VerbShell, work.VerbCopyName}; !slices.Equal(got, want) {
+	if got, want := verbs(k.Actions(frontierless)), []work.Verb{VerbAssist, work.VerbShell, work.VerbCopyName}; !slices.Equal(got, want) {
 		t.Fatalf("frontierless map actions = %v, want %v", got, want)
 	}
 

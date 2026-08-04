@@ -182,6 +182,39 @@ ticket-file shapes, claiming, resolution and its ticket-type overrides, the
 out-of-scope rule, the one-non-research-ticket-per-session rule, and handoff to
 `to-spec` / `to-tasks`. None of it is restated here; consult the doc.
 
+## Assist the map — a third mode
+
+*(Upstream has two modes, chart and work. pop adds a third, seeded by
+`pop map assist [<map-id>]`, for the idea that arrives about the **map itself**
+with no ticket in hand: new scope for an existing ticket, a fresh ticket, a patch
+of fog, or the realisation that something sits past the destination.)*
+
+User invokes as `assist <map-id>`. The session is scoped to the whole map and
+holds **no ticket**.
+
+1. Load the map — the low-res view — and read the frontier. Zoom into any ticket
+   body on demand.
+2. Have the conversation, then write what it settles: create tickets (graduating
+   fog out of **Not yet specified** as you go), amend an existing ticket's
+   `## Question`, wire and unwire blocking edges, edit the map's prose sections,
+   and `pop map out-of-scope` anything the conversation puts past the
+   destination — including redrawing the **Destination** itself. This is the same
+   write surface *Chart the map* has; run `pop map authoring-guide` for the file
+   shapes, and see the tracker doc's **Resolution** section for the workflow
+   rules.
+3. Close by running `pop map register <map-id>` and working its fix list until
+   clean. Your writes are hand-written files; this is what stops a structural
+   edit leaving the map broken.
+
+**Assist resolves nothing.** Step 4 of *Work through the map* — post the answer,
+close the ticket, append to Decisions-so-far — is **fenced off from this mode**,
+and so is `pop map resolve`. A session with no ticket in hand has no ticket to
+resolve, and that is what keeps one non-research ticket per session traceable to
+the conversation that decided it. When the conversation turns out to want a
+decision made, hand the human `pop map next <map-id> <NN>` and stop.
+`pop map out-of-scope` is not an exception to this: it is a scoping act, and it
+renders under **Out of scope**, never into the decision index.
+
 ## Skill and invocation deltas
 
 *(Irreducible pop bits: these live in upstream's `## Invocation` flow, not behind
@@ -196,5 +229,9 @@ the tracker-doc seam, so the resolved doc has no place to carry them.)*
   write their findings into the ticket's `## Answer` (per the doc's research
   override), **not** onto a throwaway `research/<name>` branch.
 - **Invocation form.** `/wayfinder` charts a new map from a bare loose idea
-  (no map id), and works an existing one as `work <map-id> [<ticket-id>]` — the
-  ticket id optional, defaulting to the first frontier ticket.
+  (no map id), works an existing one as `work <map-id> [<ticket-id>]` — the
+  ticket id optional, defaulting to the first frontier ticket — and assists one as
+  `assist <map-id>`, which names no ticket at all.
+- **Mode fencing.** The three modes share this file, so read only the one you were
+  invoked in: work mode's resolve flow belongs to work mode, and an assist session
+  running it breaks the one-non-research-ticket-per-session rule silently.

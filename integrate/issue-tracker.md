@@ -488,7 +488,8 @@ of the known, and the only thing `next` and `fan-out` hand out.
 
 Both spawn the ticket's grilling pane inside the map's own tmux session
 `pop-map-<map-id>`, whose single `map` window holds one tiled pane per ticket
-tagged with the ticket id. Neither moves you unless you pass `--focus`, and a pane
+tagged with the ticket id — the same window the map's own `assist` pane sits in.
+Neither moves you unless you pass `--focus`, and a pane
 whose agent is still alive is a jump target rather than being sent work twice.
 `pop map status <map-id>` is the render you type when you want to see the Map;
 `pop map open <map-id>` creates or attaches the session on its own. The other
@@ -536,6 +537,30 @@ same way but renders it under `Out of scope`, never into the decision index.
 Never resolve more than one non-research ticket per session; research tickets may
 be burned down in parallel. Expect parallel sessions — re-read ticket status
 before claiming.
+
+**An assist session resolves nothing.** `pop map assist [<map-id>]` opens a
+session scoped to the whole map rather than to a ticket — for the idea that
+arrives with no ticket in hand: new scope for an existing ticket, a fresh ticket,
+a patch of fog, or the realisation that something sits past the destination. It
+claims nothing, and it must not run `pop map resolve`: resolving belongs to the
+ticket's own claimed session, which is what makes the
+one-non-research-ticket-per-session rule above traceable. When a decision is what
+the conversation actually wants, hand the human `pop map next <map-id> <NN>` and
+stop. `pop map out-of-scope` is the one exception, and it is not a resolution: it
+is a scoping act, it renders under `Out of scope` and never into the decision
+index, and "that is past the destination" is exactly the ticketless realisation
+assist exists for. Redrawing the map's `Destination` is the same act one level up,
+so an assist session may do that too.
+
+**An assist session closes by re-validating.** Its writes are hand-written files,
+so end the session with `pop map register <map-id>` and work the fix list it
+prints until it is clean — the same re-runnable loop charting ends on. For what
+those files may contain, run `pop map authoring-guide`.
+
+One pane per map, reused: a second `pop map assist` for the same map lands in the
+first pane rather than opening a second session, so two conversations never race
+on the map's prose. Assist is reachable whatever the frontier looks like — an
+empty or fully-claimed frontier is when it is most needed.
 
 ### Handoff to implementation
 

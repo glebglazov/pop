@@ -1372,6 +1372,9 @@ func (m QueueDashboard) dispatchVerb(verb work.Verb, row DashboardRow) (tea.Mode
 	case wayfinder.VerbFanOutHere:
 		m.statusMsg = dashboardSpawnPending
 		return m, m.spawnWayfinderFanOut(row)
+	case wayfinder.VerbAssist:
+		m.statusMsg = dashboardHandoffPending
+		return m, m.launchWayfinderAssist(row)
 	case work.VerbShell:
 		// The directory is the kind's answer, not the dashboard's: a task set opens
 		// in its bound checkout, a Map in its repository, and a kind that resolves
@@ -1922,6 +1925,16 @@ func (m QueueDashboard) spawnWayfinderFanOut(row DashboardRow) tea.Cmd {
 			return dashboardHandoffMsg{err: err}
 		}
 		return dashboardHandoffMsg{status: fmt.Sprintf("fanned out %d frontier tickets into %s", count, result.Session)}
+	}
+}
+
+// launchWayfinderAssist opens the Map-scoped assist pane and hands off to it. It
+// has no staying twin: an assist session is one pane you asked for in order to go
+// talk to it (ADR-0184).
+func (m QueueDashboard) launchWayfinderAssist(row DashboardRow) tea.Cmd {
+	return func() tea.Msg {
+		result, err := LaunchWayfinderAssist(m.d, m.cfg, row)
+		return handoffAfterLaunch(m.d, result, err)
 	}
 }
 

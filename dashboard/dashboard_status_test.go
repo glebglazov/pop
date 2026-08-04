@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/wayfinder"
 	"github.com/glebglazov/pop/work/ref"
 )
 
@@ -31,11 +32,24 @@ func TestDashboardActionMenuStatusAndAssistKeys(t *testing.T) {
 		t.Fatal("top-level archive shortcut x missing")
 	}
 
+	// A Map has no status submenu — its status is its ticket tallies — but it does
+	// carry an assist session of its own on the same `S` the Task set uses
+	// (ADR-0184), so only the lowercase key is absent.
 	mapKeys := dashboardMenuItems(testKinds(), DashboardRow{Kind: ref.KindMap, ID: "map-1"})
+	var mapAssist bool
 	for _, item := range mapKeys {
-		if item.key == "s" || item.key == "S" {
-			t.Fatalf("map row should not offer status or assist: %v", mapKeys)
+		if item.key == "s" {
+			t.Fatalf("map row should not offer a status submenu: %v", mapKeys)
 		}
+		if item.key == "S" {
+			if item.verb != wayfinder.VerbAssist {
+				t.Fatalf("map S = %q, want the Map's own assist verb", item.verb)
+			}
+			mapAssist = true
+		}
+	}
+	if !mapAssist {
+		t.Fatalf("map row should offer assist on S: %v", mapKeys)
 	}
 }
 

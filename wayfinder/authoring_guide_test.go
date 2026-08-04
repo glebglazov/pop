@@ -165,6 +165,53 @@ func TestMapGuideStatesTheOnePassRule(t *testing.T) {
 	}
 }
 
+// TestMapGuideCarriesTheArtifactHalfOfTheWriteSurface pins ADR-0184's split from
+// the guide's side: the guide says which files and regions a session may write —
+// one flat contract, charting and assist alike, generated from the same section
+// constants the template lays out — and leaves the workflow rules (who may
+// resolve, re-validating on close) to the Work-store doc.
+func TestMapGuideCarriesTheArtifactHalfOfTheWriteSurface(t *testing.T) {
+	t.Parallel()
+	guide := AuthoringGuide()
+	idx := strings.Index(guide, "## What a session may write")
+	if idx < 0 {
+		t.Fatalf("guide has no write-surface section:\n%s", guide)
+	}
+	section := guide[idx:]
+	if end := strings.Index(section, "\n## "); end > 0 {
+		section = section[:end]
+	}
+	for _, want := range []string{
+		"pop map assist",
+		"There is no permission one of them holds",
+		"`## Question`",
+		"`blocked_by`",
+		"pop:generated",
+		"the repository under study",
+	} {
+		if !strings.Contains(section, want) {
+			t.Errorf("the write-surface section is missing %q", want)
+		}
+	}
+	// Every prose section of map.md is named as writable, from the constants the
+	// template is laid out from — a section added there cannot go unmentioned here.
+	for _, name := range mapProseSections {
+		if !strings.Contains(section, "`"+name+"`") {
+			t.Errorf("the write-surface section does not name the prose section %q", name)
+		}
+	}
+	// The workflow half belongs to the doc. The guide may point at it; it must not
+	// carry it.
+	if !strings.Contains(section, "Work-store doc") {
+		t.Error("the guide must point at the doc for the workflow rules")
+	}
+	for _, doctrine := range []string{"never resolves", "hands the human", "closes by"} {
+		if strings.Contains(section, doctrine) {
+			t.Errorf("the guide carries the workflow rule %q, which belongs to the doc", doctrine)
+		}
+	}
+}
+
 // fencedBlock returns the nth fenced block of the given language from a guide.
 func fencedBlock(t *testing.T, guide, lang string, n int) string {
 	t.Helper()

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/internal/deps"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/wayfinder"
@@ -22,6 +23,8 @@ func TestMapCommandTree(t *testing.T) {
 		{"map", "status"},
 		{"map", "register"},
 		{"map", "next"},
+		{"map", "fan-out"},
+		{"map", "assist"},
 		{"map", "claim"},
 		{"map", "resolve"},
 		{"map", "out-of-scope"},
@@ -45,7 +48,7 @@ func TestMapCommandTree(t *testing.T) {
 	if cmd, _, _ := rootCmd.Find([]string{"map", "show"}); cmd.CommandPath() != "pop map" {
 		t.Fatalf("pop map show should not exist; Find resolved %q", cmd.CommandPath())
 	}
-	for _, cmd := range []*cobra.Command{mapCmd, mapStatusCmd, mapRegisterCmd, mapNextCmd, mapClaimCmd, mapResolveCmd, mapOutOfScopeCmd, mapSpawnedCmd, mapArriveCmd, mapOpenCmd, mapArchiveCmd, mapUnarchiveCmd} {
+	for _, cmd := range []*cobra.Command{mapCmd, mapStatusCmd, mapRegisterCmd, mapNextCmd, mapFanOutCmd, mapAssistCmd, mapClaimCmd, mapResolveCmd, mapOutOfScopeCmd, mapSpawnedCmd, mapArriveCmd, mapOpenCmd, mapArchiveCmd, mapUnarchiveCmd} {
 		if strings.Contains(cmd.CommandPath(), "wayfinder") {
 			t.Fatalf("command path still says wayfinder: %q", cmd.CommandPath())
 		}
@@ -494,6 +497,66 @@ func TestMapFanOutGrillsTheWholeFrontierThenTopsUp(t *testing.T) {
 	}
 	if mapFanOutCmd.Flags().Lookup("focus") == nil || mapNextCmd.Flags().Lookup("focus") == nil {
 		t.Fatal("both spawning verbs must offer --focus")
+	}
+}
+
+// TestMapAssistOpensTheMapScopedPaneAndStays walks assist from the CLI: it lands
+// one pane in the Map's window whatever the frontier looks like, says so without
+// moving the operator, and a second call returns to that same pane.
+func TestMapAssistOpensTheMapScopedPaneAndStays(t *testing.T) {
+	t.Parallel()
+	d, _, _ := mapRegistryTestDeps(t, threeTicketMapFiles("demo"))
+	if err := runMapRegisterWith(d, &bytes.Buffer{}, "demo"); err != nil {
+		t.Fatal(err)
+	}
+	fake := d.Tmux.(*tmuxtest.Fake)
+	fake.Inside = true
+	session := wayfinder.MapSessionName("demo")
+
+	var out bytes.Buffer
+	if err := runMapAssistWith(d, &out, "demo", false); err != nil {
+		t.Fatalf("assist: %v", err)
+	}
+	if !strings.Contains(out.String(), "opened assist pane assist in "+session+":map") {
+		t.Fatalf("assist did not report its pane:\n%s", out.String())
+	}
+	// The one rule an unclaimed session never sees enforced is the one the verb
+	// prints back at it.
+	if !strings.Contains(out.String(), "resolves none") {
+		t.Fatalf("assist did not state the write boundary:\n%s", out.String())
+	}
+	pane := onlyGrillingPane(t, d, "demo")
+	if got := strings.Join(fake.SentCommands[pane], " "); !strings.Contains(got, "/pop-wayfinder assist demo") {
+		t.Fatalf("assist pane runs %q, want the assist-mode invocation for the map", got)
+	}
+	if len(fake.Switched) != 0 || len(fake.Attached) != 0 {
+		t.Fatalf("assist moved the operator without --focus: switched=%v attached=%v", fake.Switched, fake.Attached)
+	}
+	if mapAssistCmd.Flags().Lookup("focus") == nil || mapAssistCmd.Flags().Lookup("trunk") == nil {
+		t.Fatal("assist must offer --focus and --trunk, like the other spawning verbs")
+	}
+
+	// Nothing was claimed, so the frontier verbs still have the whole frontier.
+	var next bytes.Buffer
+	if err := runMapNextWith(d, &next, "demo", false); err != nil {
+		t.Fatalf("next after assist: %v", err)
+	}
+	if !strings.HasPrefix(next.String(), "01\t") {
+		t.Fatalf("next after assist = %q, want the first frontier ticket still free", next.String())
+	}
+
+	// A second assist call is the same pane, not a second conversation on the
+	// Map's prose.
+	fake.PaneInfos = map[string]tmuxmod.PaneInfo{pane: {Session: session, Command: "claude"}}
+	var again bytes.Buffer
+	if err := runMapAssistWith(d, &again, "demo", false); err != nil {
+		t.Fatalf("second assist: %v", err)
+	}
+	if !strings.Contains(again.String(), "returned to assist pane assist in "+session+":map") {
+		t.Fatalf("second assist = %q, want a return to the first pane", again.String())
+	}
+	if got, _ := fake.PaneTagValue(pane, tmuxmod.TagAssist); got != "demo" {
+		t.Fatalf("assist pane tag = %q, want the map id", got)
 	}
 }
 

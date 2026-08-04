@@ -20,6 +20,7 @@ var mapStatusAll bool
 var (
 	mapNextFocus   bool
 	mapFanOutFocus bool
+	mapAssistFocus bool
 )
 
 var mapCmd = &cobra.Command{
@@ -37,6 +38,11 @@ open, unblocked, unclaimed ticket, grills it in a pane and prints where to read 
 so several panes can grill one Map at once, and ` + "`pop map fan-out`" + ` does that
 for every frontier ticket in one act. A claim is a pop.db row owned by the pane
 running the agent, never a file state; it frees itself after four hours.
+
+` + "`pop map assist`" + ` is the way in that holds no ticket: a session scoped to the
+whole Map, for an idea about the Map's own shape. It claims nothing and resolves
+nothing, it is reachable whatever the frontier looks like, and a second call lands
+in the first pane rather than racing it on the Map's prose.
 
 ` + "`pop map resolve`" + ` closes a ticket: it writes the answer, flips the manifest
 entry and re-renders map.md's generated index in one re-runnable call, and
@@ -64,8 +70,9 @@ that resolves to nothing renders ` + "`(missing)`" + ` rather than disappearing.
 Every Map gets a tmux session of its own, ` + "`pop-map-<map-id>`" + `, rooted at the
 Trunk worktree. It has one window, ` + "`map`" + `, holding one tiled pane per ticket
 being grilled — tagged with the ticket id, titled with the ticket file's stem, and
-spawned by ` + "`next`" + ` or ` + "`fan-out`" + `. There is no overview pane:
-` + "`pop map status <map-id>`" + ` is a verb you type. Neither spawning verb moves you
+spawned by ` + "`next`" + ` or ` + "`fan-out`" + ` — plus the Map's own ` + "`assist`" + `
+pane beside them. There is no overview pane:
+` + "`pop map status <map-id>`" + ` is a verb you type. No spawning verb moves you
 unless you pass ` + "`--focus`" + `, and a pane whose agent is still alive is a jump
 target that is never sent work twice. The other writes auto-open —
 ` + "`register`" + `, ` + "`claim`" + `, ` + "`resolve`" + `, ` + "`out-of-scope`" + ` and ` + "`spawned`" + ` run
@@ -127,6 +134,29 @@ var mapFanOutCmd = &cobra.Command{
 	Short: "Grill every frontier ticket, one tiled pane each",
 	Args:  cobra.MaximumNArgs(1),
 	Run:   runMapFanOut,
+}
+
+// mapAssistCmd is the way in that holds no ticket: a session scoped to the Map
+// itself, for the idea that arrives about the Map's own shape. It is deliberately
+// ungated by the frontier — an empty or fully-claimed frontier is when it is most
+// needed (ADR-0184).
+var mapAssistCmd = &cobra.Command{
+	Use:   "assist [MAP]",
+	Short: "Open a session scoped to the whole map — no ticket, no claim, no resolve",
+	Long: `Open a session scoped to the whole map — no ticket, no claim, no resolve.
+
+An idea about the map itself — new scope for a ticket, a fresh ticket, a patch of
+fog, something past the destination — belongs in an assist session rather than in
+whichever ticket happened to be open. It claims nothing and resolves nothing:
+` + "`pop map resolve`" + ` belongs to the ticket's own claimed session.
+
+One pane per map, reused: a second call lands in the first pane rather than
+racing it on the map's prose. The frontier is not consulted, so assist is
+reachable when every ticket is resolved, blocked or claimed.
+
+For what an assist session may write, run ` + "`pop map authoring-guide`" + `.`,
+	Args: cobra.MaximumNArgs(1),
+	Run:  runMapAssist,
 }
 
 var mapClaimCmd = &cobra.Command{
@@ -214,6 +244,7 @@ func init() {
 	mapCmd.AddCommand(mapRegisterCmd)
 	mapCmd.AddCommand(mapNextCmd)
 	mapCmd.AddCommand(mapFanOutCmd)
+	mapCmd.AddCommand(mapAssistCmd)
 	mapCmd.AddCommand(mapClaimCmd)
 	mapCmd.AddCommand(mapResolveCmd)
 	mapCmd.AddCommand(mapOutOfScopeCmd)
@@ -231,10 +262,11 @@ func init() {
 	_ = mapOutOfScopeCmd.MarkFlagRequired("reason")
 	mapNextCmd.Flags().BoolVar(&mapNextFocus, "focus", false, "switch to the map's window after spawning")
 	mapFanOutCmd.Flags().BoolVar(&mapFanOutFocus, "focus", false, "switch to the map's window after spawning")
+	mapAssistCmd.Flags().BoolVar(&mapAssistFocus, "focus", false, "switch to the map's window after spawning")
 	// --trunk goes on the verbs that refuse without a Trunk. The in-place writes
 	// only ever warn about the session, and the read verbs create none, so a flag
 	// there would advertise a side effect they do not have.
-	for _, c := range []*cobra.Command{mapNextCmd, mapFanOutCmd, mapOpenCmd} {
+	for _, c := range []*cobra.Command{mapNextCmd, mapFanOutCmd, mapAssistCmd, mapOpenCmd} {
 		c.Flags().StringVar(&mapTrunk, "trunk", "", "Trunk worktree to root the map's tmux session at")
 	}
 }
@@ -416,6 +448,36 @@ func focusMapSession(d *wayfinder.Deps, out *wayfinder.FrontierSpawn, focus bool
 		return nil
 	}
 	return wayfinder.FocusMapSession(d, out.Session)
+}
+
+func runMapAssist(cmd *cobra.Command, args []string) {
+	var mapID string
+	if len(args) > 0 {
+		mapID = args[0]
+	}
+	err := runMapAssistWith(mapVerbDeps(), os.Stdout, mapID, mapAssistFocus)
+	handleTaskExit(err)
+}
+
+// runMapAssistWith opens the Map's own session. It prints the write boundary
+// alongside the pane, because the one rule an unclaimed, unscoped session has to
+// hold is the one it never sees enforced: resolving belongs to the ticket's own
+// claimed session.
+func runMapAssistWith(d *wayfinder.Deps, w io.Writer, mapID string, focus bool) error {
+	pane, err := wayfinder.AssistMap(d, mapVerbConfig(), cmdLayerDeps().WorkDir(), mapID)
+	if err != nil {
+		return err
+	}
+	verb := "opened"
+	if pane.Reused {
+		verb = "returned to"
+	}
+	fmt.Fprintf(w, "%s assist pane %s in %s:%s\n", verb, pane.Title, pane.Session.Name, pane.Window)
+	fmt.Fprintf(w, "map %s: scoped to the whole map — no ticket claimed, and this session resolves none\n", pane.MapID)
+	if !focus {
+		return nil
+	}
+	return wayfinder.FocusMapSession(d, pane.Session)
 }
 
 func runMapClaim(cmd *cobra.Command, args []string) {

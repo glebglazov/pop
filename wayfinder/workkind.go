@@ -34,6 +34,11 @@ const (
 	VerbFanOut work.Verb = "fan-out-frontier"
 	// VerbFanOutHere is VerbFanOut without the move.
 	VerbFanOutHere work.Verb = "fan-out-frontier-here"
+	// VerbAssist opens the Map's own attended session — no ticket, no claim — and
+	// takes the operator there. It has no staying twin: fanning out N tickets is
+	// followed by more triage, whereas an assist pane is one session you asked for
+	// in order to go talk to it (ADR-0184).
+	VerbAssist work.Verb = "assist-map"
 )
 
 // MapKindDeps holds what the Map kind reads. The wayfinder deps carry the Map
@@ -135,9 +140,11 @@ func (k *MapKind) Columns() []string {
 }
 
 // Actions returns the container-level verbs for a Map: work one frontier ticket
-// or fan out the whole frontier when it has one, a shell in the repository, and
-// copy-name. Spawning verbs come before in-place ones, and all four frontier keys
-// are gated on a frontier — a Map with none offers no dead key. The Task-set verbs
+// or fan out the whole frontier when it has one, assist the Map itself, a shell in
+// the repository, and copy-name. Spawning verbs come before in-place ones, and all
+// four frontier keys are gated on a frontier — a Map with none offers no dead key.
+// Assist is **not** gated: a Map whose frontier is empty or fully claimed is when a
+// session scoped to the Map itself is most needed (ADR-0184). The Task-set verbs
 // (drain/bind/…) have never applied to a Map and still do not — the shared two are
 // the only verbs a Map has in common with a task set.
 func (k *MapKind) Actions(c work.Container) []work.Action {
@@ -148,7 +155,10 @@ func (k *MapKind) Actions(c work.Container) []work.Action {
 			work.Action{Verb: VerbFanOut, Key: "A", Label: "fan out frontier and go"},
 		)
 	}
-	actions = append(actions, work.Action{Verb: work.VerbShell, Key: "O", Label: "shell"})
+	actions = append(actions,
+		work.Action{Verb: VerbAssist, Key: "S", Label: "assist the map and go"},
+		work.Action{Verb: work.VerbShell, Key: "O", Label: "shell"},
+	)
 	if c.MapFrontier > 0 {
 		actions = append(actions,
 			work.Action{Verb: VerbWorkHere, Key: "i", Label: "work frontier ticket"},
@@ -202,6 +212,8 @@ func (k *MapKind) Perform(c work.Container, item *work.Item, verb work.Verb) (wo
 		return k.workTicket(c, ticketID, verb == VerbWork)
 	case VerbFanOut, VerbFanOutHere:
 		return k.fanOutFrontier(c, verb == VerbFanOut)
+	case VerbAssist:
+		return k.assistMap(c)
 	default:
 		return work.Outcome{}, work.UnknownVerb(k.ID(), verb)
 	}
@@ -245,6 +257,27 @@ func (k *MapKind) fanOutFrontier(c work.Container, focus bool) (work.Outcome, er
 	}
 	message := fmt.Sprintf("fanned out %d of %s into %s", len(out.Spawned), target.ID, out.Session.Name)
 	return spawnOutcome(out.Session.Name, checkout, message, focus), nil
+}
+
+// assistMap opens the Map's own attended session and hands it off. It reads no
+// frontier and takes no claim, so it is the one Map verb that works on a Map in
+// any state (ADR-0184). A live assist pane is a jump target rather than a second
+// session, which is what keeps two conversations off one Map's prose.
+func (k *MapKind) assistMap(c work.Container) (work.Outcome, error) {
+	target, wd, checkout, err := k.resolveMapForSpawn(c)
+	if err != nil {
+		return work.Outcome{}, err
+	}
+	pane, err := SpawnAssist(wd, k.d.Config, *target)
+	if err != nil {
+		return work.Outcome{}, err
+	}
+	verb := "assisting"
+	if pane.Reused {
+		verb = "returning to the assist session for"
+	}
+	message := fmt.Sprintf("%s %s in %s", verb, target.ID, pane.Session.Name)
+	return spawnOutcome(pane.Session.Name, checkout, message, true), nil
 }
 
 // spawnOutcome is the fork the case rule turns on: a focusing verb hands the

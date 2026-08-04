@@ -57,6 +57,22 @@ func LaunchWayfinderFanOut(d *drain.Deps, cfg *config.Config, row DashboardRow) 
 	return drain.DashboardDrainResult{PaneID: first.PaneID, Session: first.Session.Name}, len(out.Spawned), nil
 }
 
+// LaunchWayfinderAssist opens the Map's own attended session — no ticket, no
+// claim — through the same composite `pop map assist` uses. It reads no frontier,
+// so it is the one map-row launch that works whatever the frontier looks like
+// (ADR-0184). A live assist pane is a jump target rather than a second session.
+func LaunchWayfinderAssist(d *drain.Deps, cfg *config.Config, row DashboardRow) (drain.DashboardDrainResult, error) {
+	wd, wfMap, _, err := wayfinderSpawnTarget(d, cfg, row)
+	if err != nil {
+		return drain.DashboardDrainResult{}, err
+	}
+	pane, err := wayfinder.SpawnAssist(wd, cfg, *wfMap)
+	if err != nil {
+		return drain.DashboardDrainResult{}, err
+	}
+	return drain.DashboardDrainResult{PaneID: pane.PaneID, Session: pane.Session.Name}, nil
+}
+
 // wayfinderSpawnTarget resolves what both spawn verbs need off a map row: the
 // wayfinder deps its session is rooted through, the Map itself, and the checkout
 // the row names.

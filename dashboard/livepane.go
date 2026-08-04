@@ -199,7 +199,9 @@ func menuItemLiveState(item dashboardMenuItem, row DashboardRow, live livePaneCa
 		return live.state(tmuxmod.TagVerify, row.ID)
 	case setkind.VerbFold:
 		return live.state(tmuxmod.TagFold, row.ID)
-	case setkind.VerbAssist:
+	case setkind.VerbAssist, wayfinder.VerbAssist:
+		// A Map's assist pane carries the same @pop_assist tag a Task set's does,
+		// keyed by the container id either way, so one lookup answers both kinds.
 		return live.state(tmuxmod.TagAssist, row.ID)
 	case wayfinder.VerbWork, wayfinder.VerbWorkHere, wayfinder.VerbFanOut, wayfinder.VerbFanOutHere:
 		// The Map's frontier verbs read the same session liveness its activity-cluster

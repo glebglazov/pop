@@ -98,7 +98,7 @@ func conformanceCases() []conformanceCase {
 				})
 			},
 			wantActions: []work.Verb{
-				wayfinder.VerbWork, wayfinder.VerbFanOut, work.VerbShell,
+				wayfinder.VerbWork, wayfinder.VerbFanOut, wayfinder.VerbAssist, work.VerbShell,
 				wayfinder.VerbWorkHere, wayfinder.VerbFanOutHere, work.VerbCopyName,
 			},
 			wantItemActions: []work.Verb{wayfinder.VerbWork, wayfinder.VerbWorkHere, work.VerbCopyName},

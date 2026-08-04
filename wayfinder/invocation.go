@@ -20,6 +20,15 @@ func WorkModeInvocation(skillsPrefix, mapID, ticketID string) string {
 	return inv
 }
 
+// AssistModeInvocation returns the slash-command prompt that invokes the embedded
+// wayfinder skill in assist mode for mapID. It names no ticket, because assist is
+// scoped to the whole Map: the mode word is what tells the session it holds no
+// claim and must not resolve (ADR-0184).
+func AssistModeInvocation(skillsPrefix, mapID string) string {
+	skill := strings.TrimSpace(skillsPrefix) + SkillBaseName
+	return "/" + skill + " assist " + strings.TrimSpace(mapID)
+}
+
 // ErrEmptyFrontier is returned when a spawn is requested but no frontier ticket
 // is available (every open ticket is blocked or claimed).
 var ErrEmptyFrontier = fmt.Errorf("no frontier tickets to work")

@@ -13,7 +13,8 @@ import (
 
 // mapWindow is the one window of a Map's session. Every ticket being grilled is
 // a tiled pane in it, tagged with the ticket id, so one window shows the whole
-// frontier in flight (ADR-0182). There is no overview pane: `pop map status` is a
+// frontier in flight (ADR-0182), and the Map's own assist session is one more
+// pane beside them (ADR-0184). There is no overview pane: `pop map status` is a
 // verb the human types, and a session with nothing running holds a bare shell at
 // the Trunk.
 const mapWindow = "map"
@@ -123,31 +124,50 @@ func AttachMapSession(d *Deps, mapID string) (*MapSession, error) {
 // own first pane is adopted for this ticket rather than left as a bare shell
 // beside the agent.
 func openGrillingPane(d *Deps, session MapSession, ticket Ticket, command string) (*GrillingPane, error) {
+	title := grillingPaneTitle(ticket)
+	paneID, reused, err := openMapPane(d, session, tmux.TagTicket, ticket.ID, title, command)
+	if err != nil {
+		return nil, err
+	}
+	return &GrillingPane{Session: session, Window: mapWindow, PaneID: paneID, Title: title, Reused: reused}, nil
+}
+
+// openMapPane lands command in the pane of a Map's `map` window tagged
+// tag=value, splitting and re-tiling one when none exists. Every pane in the
+// window comes through here — one per ticket being grilled, one for the Map's
+// assist session — so they tile beside each other and share one reuse rule: a
+// pane whose process is still alive is left alone and becomes a jump target
+// (ADR-0158), while an idle one (bare shell) is respawned. Focusing is the
+// caller's call — no spawn verb moves the operator unless asked.
+//
+// session must be one EnsureMapSession just returned: a freshly created
+// session's own first pane is adopted rather than left as a bare shell beside
+// the agent.
+func openMapPane(d *Deps, session MapSession, tag tmux.PaneTag, value, title, command string) (string, bool, error) {
 	if session.Dir == "" {
-		return nil, ErrNoTrunk
+		return "", false, ErrNoTrunk
 	}
 	t := d.tmux()
-	title := grillingPaneTitle(ticket)
-	existing, err := t.FindTaggedPane(session.Name, mapWindow, tmux.TagTicket, ticket.ID)
+	existing, err := t.FindTaggedPane(session.Name, mapWindow, tag, value)
 	if err != nil {
-		return nil, err
+		return "", false, err
 	}
 	if existing != "" && liveGrillingPane(t, existing) {
-		return &GrillingPane{Session: session, Window: mapWindow, PaneID: existing, Title: title, Reused: true}, nil
+		return existing, true, nil
 	}
 	if existing == "" {
-		if err := adoptIdleMapPane(t, session, ticket); err != nil {
-			return nil, err
+		if err := adoptIdleMapPane(t, session, tag, value); err != nil {
+			return "", false, err
 		}
 	}
-	paneID, err := tmux.EnsureTaggedPane(t, tmux.TagTicket, session.Name, mapWindow, session.Dir, ticket.ID, command)
+	paneID, err := tmux.EnsureTaggedPane(t, tag, session.Name, mapWindow, session.Dir, value, command)
 	if err != nil {
-		return nil, err
+		return "", false, err
 	}
 	if err := t.SetPaneTitle(paneID, title); err != nil {
-		return nil, fmt.Errorf("title the grilling pane: %w", err)
+		return "", false, fmt.Errorf("title the map pane: %w", err)
 	}
-	return &GrillingPane{Session: session, Window: mapWindow, PaneID: paneID, Title: title}, nil
+	return paneID, false, nil
 }
 
 // FocusMapSession puts the caller in a Map's `map` window: switch-client from
@@ -168,11 +188,23 @@ func FocusMapSession(d *Deps, session MapSession) error {
 // looks the same. It names exactly one ticket, which is what keeps the
 // one-non-research-ticket-per-session rule intact across a fanned-out frontier.
 func GrillingInvocation(cfg *config.Config, mapID, ticketID, dir string) (string, error) {
-	skillsPrefix := config.DefaultSkillsPrefix
-	if cfg != nil {
-		skillsPrefix = cfg.ResolveSkillsPrefix()
+	return agentPaneCommand(cfg, WorkModeInvocation(skillsPrefixOf(cfg), mapID, ticketID), dir)
+}
+
+// skillsPrefixOf resolves the configured skills prefix, falling back to the
+// default for a machine that configured none.
+func skillsPrefixOf(cfg *config.Config) string {
+	if cfg == nil {
+		return config.DefaultSkillsPrefix
 	}
-	prompt := WorkModeInvocation(skillsPrefix, mapID, ticketID)
+	return cfg.ResolveSkillsPrefix()
+}
+
+// agentPaneCommand renders the shell command a Map's pane runs: the configured
+// interactive agent, opened on prompt at dir. Both wayfinding entry points —
+// grilling one ticket, assisting a whole Map — build their command here, so a
+// pane looks the same whichever mode seeded it.
+func agentPaneCommand(cfg *config.Config, prompt, dir string) (string, error) {
 	inv, err := tasks.ResolveAgentAssistanceInvocation(tasks.ResolveDefaultInteractiveAgentPreset(cfg), "", prompt, dir)
 	if err != nil {
 		return "", fmt.Errorf("resolve interactive agent: %w", err)
@@ -184,31 +216,39 @@ func GrillingInvocation(cfg *config.Config, mapID, ticketID, dir string) (string
 	return strings.Join(parts, " "), nil
 }
 
-// adoptIdleMapPane gives this ticket the bare shell a Map session is born with,
+// adoptIdleMapPane gives this spawn the bare shell a Map session is born with,
 // by tagging it before the shared primitive looks. A Map session is created by
 // whichever write needed it first — `open`, or an auto-opening `register` — and its
 // window comes with one pane; without this the first spawn would split a second and
 // leave that shell sitting beside the agent forever.
 //
-// Adoption is deliberately narrow: exactly one pane in the window, carrying no
-// ticket tag, running no process. Anything else is somebody's pane.
-func adoptIdleMapPane(t tmux.Tmux, session MapSession, ticket Ticket) error {
+// Adoption is deliberately narrow: exactly one pane in the window, carrying none
+// of the tags a Map's panes are spoken for by, running no process. Anything else
+// is somebody's pane.
+func adoptIdleMapPane(t tmux.Tmux, session MapSession, tag tmux.PaneTag, value string) error {
 	panes, err := t.WindowPanes(session.Name, mapWindow)
 	if err != nil || len(panes) != 1 {
 		return nil
 	}
-	tagged, err := t.PaneTagValue(panes[0], tmux.TagTicket)
-	if err != nil || tagged != "" {
-		return nil
+	for _, other := range mapPaneTags {
+		tagged, err := t.PaneTagValue(panes[0], other)
+		if err != nil || tagged != "" {
+			return nil
+		}
 	}
 	if session.InitialPane != panes[0] && liveGrillingPane(t, panes[0]) {
 		return nil
 	}
-	if err := t.TagPane(panes[0], tmux.TagTicket, ticket.ID); err != nil {
+	if err := t.TagPane(panes[0], tag, value); err != nil {
 		return fmt.Errorf("claim the map window's idle pane: %w", err)
 	}
 	return nil
 }
+
+// mapPaneTags are the tags that say a pane in a Map's window is spoken for: a
+// ticket being grilled, or the Map's own assist session. A pane carrying either
+// is never adopted by a spawn for something else.
+var mapPaneTags = []tmux.PaneTag{tmux.TagTicket, tmux.TagAssist}
 
 // liveGrillingPane reports whether a pane still holds a running process. A pane
 // pop cannot read is treated as live, so an unreadable pane is never sent keys

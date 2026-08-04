@@ -399,3 +399,57 @@ func TestLivePaneCacheWayfinderWindow(t *testing.T) {
 		t.Fatalf("map row cluster = %q, want green I", styled)
 	}
 }
+
+// `S` on a map row opens the Map-scoped assist session and quits to it — and it
+// does so with the frontier resolved away, which is the state the frontier keys
+// disappear in and assist is most wanted in (ADR-0184).
+func TestDashboardMapRowSAssistsWithNoFrontier(t *testing.T) {
+	d, cfg, row, f, storageDir := wayfinderSpawnFixture(t)
+	withWayfinderMaps(t, d, storageDir, map[string]string{
+		filepath.Join(storageDir, "repo.json"): `{"common_dir":"/repo/.git"}`,
+		filepath.Join(storageDir, "maps", wayfinderMapID, "map.md"):                "Status: active\n\n## Destination\nShip it\n",
+		filepath.Join(storageDir, "maps", wayfinderMapID, "issues/01-frontier.md"): "Type: research\nStatus: resolved\n\n## Question\nA\n",
+	})
+	row.MapFrontier = 0
+	f.Inside = true
+	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
+
+	opened, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, cmd := opened.(QueueDashboard).Update(tea.KeyPressMsg{Code: 'S', Text: "S"})
+	if cmd == nil {
+		t.Fatal("S on a map row with no frontier did not return a command")
+	}
+	msg := cmd()
+	handoff, ok := msg.(dashboardHandoffMsg)
+	if !ok {
+		t.Fatalf("msg = %T, want dashboardHandoffMsg", msg)
+	}
+	if handoff.err != nil || !handoff.quit {
+		t.Fatalf("handoff = %+v, want a successful quit to the assist session", handoff)
+	}
+	panes := f.Windows[wayfinderMapSession()][mapPaneWindow]
+	if len(panes) != 1 {
+		t.Fatalf("panes = %v, want the single assist pane", f.Windows[wayfinderMapSession()])
+	}
+	if got, _ := f.PaneTagValue(panes[0], tmuxmod.TagAssist); got != wayfinderMapID {
+		t.Fatalf("assist pane tag = %q, want the map id", got)
+	}
+	if got := strings.Join(f.SentCommands[panes[0]], " "); !strings.Contains(got, "assist "+wayfinderMapID) {
+		t.Fatalf("assist pane runs %q, want the assist-mode invocation", got)
+	}
+
+	// A second press returns to the same pane rather than opening a second
+	// conversation on the Map's prose.
+	f.PaneInfos = map[string]tmuxmod.PaneInfo{panes[0]: {Session: wayfinderMapSession(), Command: "claude"}}
+	sentBefore := len(f.SentCommands[panes[0]])
+	again, ok := updated.(QueueDashboard).launchWayfinderAssist(row)().(dashboardHandoffMsg)
+	if !ok || again.err != nil {
+		t.Fatalf("second assist = %+v", again)
+	}
+	if got := f.Windows[wayfinderMapSession()][mapPaneWindow]; len(got) != 1 {
+		t.Fatalf("second assist opened another pane: %v", got)
+	}
+	if got := len(f.SentCommands[panes[0]]); got != sentBefore {
+		t.Fatalf("second assist re-sent work into a live pane (%d sends, was %d)", got, sentBefore)
+	}
+}

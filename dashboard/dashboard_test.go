@@ -4582,15 +4582,16 @@ func TestDashboardMapRowQueueVerbsInert(t *testing.T) {
 	m.width, m.height = 120, 40
 	m.list.SetCursor(0)
 
-	// A Map's menu is its own kind's: the four frontier verbs (going and staying)
-	// and the two shared ones, spawning keys before in-place ones. Every Task-set
-	// verb stays absent — queue verbs have never applied to a Map.
+	// A Map's menu is its own kind's: the four frontier verbs (going and staying),
+	// the Map-scoped assist session, and the two shared ones — spawning keys before
+	// in-place ones. Every Task-set verb stays absent — queue verbs have never
+	// applied to a Map.
 	items := dashboardMenuItems(testKinds(), mapRow)
 	var keys []string
 	for _, item := range items {
 		keys = append(keys, item.key)
 	}
-	if want := []string{"I", "A", "O", "i", "a", "y"}; !reflect.DeepEqual(keys, want) {
+	if want := []string{"I", "A", "S", "O", "i", "a", "y"}; !reflect.DeepEqual(keys, want) {
 		t.Fatalf("map menu keys = %v, want %v", keys, want)
 	}
 	for _, item := range items {

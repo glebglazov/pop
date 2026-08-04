@@ -26,7 +26,18 @@ const (
 	// the gist every status render leads with — so the authoring guide prints the
 	// heading from here rather than transcribing it.
 	destinationSectionName = "Destination"
+	// notesSectionName and fogSectionName are the other two prose sections of
+	// map.md. pop never reads them, but the authoring guide names them as the
+	// human-owned half of the file, so they are constants rather than two
+	// transcriptions that could drift from the template beside them.
+	notesSectionName = "Notes"
+	fogSectionName   = "Not yet specified"
 )
+
+// mapProseSections are the sections of map.md a session owns: everything outside
+// the pop:generated regions. The authoring guide prints this list as the write
+// surface, and the template lays the same sections out.
+var mapProseSections = []string{destinationSectionName, notesSectionName, fogSectionName}
 
 // ParseMapMarkdown extracts map status and destination from map.md contents.
 func ParseMapMarkdown(content string) (MapStatus, string, error) {

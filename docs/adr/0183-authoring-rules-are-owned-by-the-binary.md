@@ -1,6 +1,6 @@
 ---
 status: accepted
-relates: "narrows [ADR-0169](0169-the-issue-tracker-doc-resolves-at-a-vendor-neutral-user-path.md) — the seeded doc keeps behavioural rules and loses authoring shape"
+relates: "narrows [ADR-0169](0169-the-issue-tracker-doc-resolves-at-a-vendor-neutral-user-path.md) — the seeded doc keeps behavioural rules and loses authoring shape; [ADR-0184](0184-map-assist-and-the-authoring-contract.md) splits Map assist's rules across this seam"
 ---
 
 # Authoring rules are owned by the binary, not the installed doc
