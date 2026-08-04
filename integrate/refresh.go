@@ -21,8 +21,7 @@ type appState struct {
 }
 
 // appStatePath returns the path to state.json, respecting XDG_DATA_HOME through
-// the cmd-layer FS seam. Mirrors the pattern used by history.DefaultHistoryPath
-// and monitor.DefaultStatePath.
+// the cmd-layer FS seam. Mirrors the pattern used by monitor.DefaultStatePath.
 func appStatePath(d *Deps) string {
 	if d != nil && d.getenv != nil {
 		if xdg := d.getenv("XDG_DATA_HOME"); xdg != "" {

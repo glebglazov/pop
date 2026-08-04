@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -197,78 +196,77 @@ func TestBuildWorktreeItemsDistinguishesBoundManagedWorktree(t *testing.T) {
 	}
 }
 
-func TestRemoveFromHistoryWith(t *testing.T) {
-	t.Parallel()
-	histJSON := `{"entries":[
+// historyTestDeps builds a cmd history seam whose store lives under an isolated
+// data dir, seeded with the two entries the removal cases work against. It seeds
+// them through the legacy-file fold, which is also the shape a real machine's
+// first read after this migration has.
+func historyTestDeps(t *testing.T) *history.Deps {
+	t.Helper()
+	dataHome := t.TempDir()
+	legacy := filepath.Join(dataHome, "pop", "history.json")
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, []byte(`{"entries":[
 		{"path":"/repo/feature","last_access":"2026-06-01T10:00:00Z"},
 		{"path":"/repo/main","last_access":"2026-06-02T10:00:00Z"}
-	]}`
+	]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cd := newTestCmdDeps(t, "", dataHome, filepath.Join(dataHome, "config"))
+	t.Cleanup(func() { _ = cd.Tasks.CloseStore() })
+	return cd.historyDeps()
+}
 
-	t.Run("removes deleted worktree entry and saves", func(t *testing.T) {
-		var written []byte
-		d := &history.Deps{
-			FS: &deps.MockFileSystem{
-				ReadFileFunc: func(path string) ([]byte, error) { return []byte(histJSON), nil },
-				WriteFileFunc: func(path string, data []byte, perm os.FileMode) error {
-					written = data
-					return nil
-				},
-			},
-		}
+func historyEntryPaths(t *testing.T, d *history.Deps) []string {
+	t.Helper()
+	hist, err := history.LoadWith(d)
+	if err != nil {
+		t.Fatalf("load history: %v", err)
+	}
+	out := make([]string, 0, len(hist.Entries))
+	for _, e := range hist.Entries {
+		out = append(out, e.Path)
+	}
+	return out
+}
 
-		removeFromHistoryWith(d, "/mock/history.json", "/repo/feature")
+func TestRemoveFromHistoryWith(t *testing.T) {
+	t.Parallel()
 
-		if written == nil {
-			t.Fatal("history was not saved")
-		}
-		var saved history.History
-		if err := json.Unmarshal(written, &saved); err != nil {
-			t.Fatal(err)
-		}
-		if len(saved.Entries) != 1 || saved.Entries[0].Path != "/repo/main" {
-			t.Errorf("saved entries = %+v, want only /repo/main", saved.Entries)
-		}
-	})
+	t.Run("removes deleted worktree entry", func(t *testing.T) {
+		d := historyTestDeps(t)
 
-	t.Run("load failure skips save", func(t *testing.T) {
-		var saveCalled bool
-		d := &history.Deps{
-			FS: &deps.MockFileSystem{
-				ReadFileFunc: func(path string) ([]byte, error) { return nil, os.ErrPermission },
-				WriteFileFunc: func(path string, data []byte, perm os.FileMode) error {
-					saveCalled = true
-					return nil
-				},
-			},
-		}
+		removeFromHistoryWith(d, "/repo/feature")
 
-		removeFromHistoryWith(d, "/mock/history.json", "/repo/feature")
-
-		if saveCalled {
-			t.Error("history saved despite load failure")
+		if got := historyEntryPaths(t, d); len(got) != 1 || got[0] != "/repo/main" {
+			t.Errorf("entries = %v, want only /repo/main", got)
 		}
 	})
 
-	t.Run("missing entry still saves without change", func(t *testing.T) {
-		var written []byte
-		d := &history.Deps{
-			FS: &deps.MockFileSystem{
-				ReadFileFunc: func(path string) ([]byte, error) { return []byte(histJSON), nil },
-				WriteFileFunc: func(path string, data []byte, perm os.FileMode) error {
-					written = data
-					return nil
-				},
-			},
+	t.Run("load failure leaves the entry alone", func(t *testing.T) {
+		d := historyTestDeps(t)
+		// Fold first, so the rows exist independently of the file.
+		if got := historyEntryPaths(t, d); len(got) != 2 {
+			t.Fatalf("entries before failure = %v, want both", got)
 		}
+		d.FS.(*deps.MockFileSystem).ReadFileFunc = func(string) ([]byte, error) { return nil, os.ErrPermission }
 
-		removeFromHistoryWith(d, "/mock/history.json", "/repo/unknown")
+		removeFromHistoryWith(d, "/repo/feature")
 
-		var saved history.History
-		if err := json.Unmarshal(written, &saved); err != nil {
-			t.Fatal(err)
+		d.FS.(*deps.MockFileSystem).ReadFileFunc = deps.NewRealFileSystem().ReadFile
+		if got := historyEntryPaths(t, d); len(got) != 2 {
+			t.Errorf("entries = %v, want both untouched despite the load failure", got)
 		}
-		if len(saved.Entries) != 2 {
-			t.Errorf("saved %d entries, want 2 untouched", len(saved.Entries))
+	})
+
+	t.Run("missing entry is a no-op", func(t *testing.T) {
+		d := historyTestDeps(t)
+
+		removeFromHistoryWith(d, "/repo/unknown")
+
+		if got := historyEntryPaths(t, d); len(got) != 2 {
+			t.Errorf("entries = %v, want both untouched", got)
 		}
 	})
 }

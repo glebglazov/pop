@@ -38,7 +38,6 @@ type SwitchDeps struct {
 
 	SessionName func(path string) string
 	LoadHistory func() (*history.History, error)
-	SaveHistory func(h *history.History) error
 }
 
 // DefaultSwitchDeps returns SwitchDeps wired to real production implementations.
@@ -48,9 +47,8 @@ func DefaultSwitchDeps() *SwitchDeps {
 		Tmux:        defaultTmuxMod,
 		SessionName: checkoutSessionName,
 		LoadHistory: func() (*history.History, error) {
-			return history.Load(history.DefaultHistoryPath())
+			return history.LoadWith(cmdHistoryDeps())
 		},
-		SaveHistory: func(h *history.History) error { return h.Save() },
 	}
 }
 
@@ -74,9 +72,8 @@ func RunProjectSwitch(d *SwitchDeps, dir string) error {
 	if hist == nil {
 		hist = &history.History{}
 	}
-	hist.Record(path)
-	if err := d.SaveHistory(hist); err != nil {
-		debug.Error("project switch: save history: %v", err)
+	if err := hist.Record(path); err != nil {
+		debug.Error("project switch: record history: %v", err)
 	}
 
 	return tmuxmod.Attach(d.Tmux, d.SessionName(path), path)

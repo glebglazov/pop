@@ -161,7 +161,7 @@ func DefaultProjectDeps() *ProjectDeps {
 			return config.Load(cfgPath)
 		},
 		LoadHistory: func() (*history.History, error) {
-			return history.Load(history.DefaultHistoryPath())
+			return history.LoadWith(cmdHistoryDeps())
 		},
 
 		ManagedWorktrees: func() []project.ExpandedProject {
@@ -517,9 +517,8 @@ func RunProject(d *ProjectDeps) error {
 				if d.NoHistory {
 					return
 				}
-				hist.Record(result.Selected.Path)
-				if err := hist.Save(); err != nil {
-					debug.Error("project: save history: %v", err)
+				if err := hist.Record(result.Selected.Path); err != nil {
+					debug.Error("project: record history: %v", err)
 				}
 			}
 			if d.TMuxCDPane != "" {
@@ -574,9 +573,8 @@ func RunProject(d *ProjectDeps) error {
 				continue
 			}
 			if !d.NoHistory {
-				hist.Record(result.Selected.Path)
-				if err := hist.Save(); err != nil {
-					debug.Error("project: save history: %v", err)
+				if err := hist.Record(result.Selected.Path); err != nil {
+					debug.Error("project: record history: %v", err)
 				}
 			}
 			return d.OpenWindow(result.Selected)
@@ -611,9 +609,8 @@ func RunProject(d *ProjectDeps) error {
 
 		case ui.ActionReset:
 			if result.Selected != nil && !isStandaloneSession(*result.Selected) && !isSynthesizedProjectRow(*result.Selected) {
-				hist.Remove(result.Selected.Path)
-				if err := hist.Save(); err != nil {
-					debug.Error("project: save history: %v", err)
+				if err := hist.Remove(result.Selected.Path); err != nil {
+					debug.Error("project: remove history entry: %v", err)
 				}
 				baseItems = sortBaseItemsByHistory(baseItems, hist)
 			}

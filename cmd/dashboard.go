@@ -205,16 +205,15 @@ func handleDashboardSwitch(result ui.MonitorDashboardResult, dismissUnread bool)
 	if result.Selected == nil {
 		return ""
 	}
-	hist, err := history.Load(cmdHistoryPath())
+	hist, err := history.LoadWith(cmdHistoryDeps())
 	if err != nil {
 		debug.Error("dashboard: load history: %v", err)
 	}
 	if hist == nil {
 		hist = &history.History{}
 	}
-	hist.Record(sessionHistoryPath(result.Selected.Session, hist))
-	if err := hist.Save(); err != nil {
-		debug.Error("dashboard: save history: %v", err)
+	if err := hist.Record(sessionHistoryPath(result.Selected.Session, hist)); err != nil {
+		debug.Error("dashboard: record history: %v", err)
 	}
 	if dismissUnread {
 		store := monitor.NewStore(cmdMonitorStatePath(), nil)
@@ -306,7 +305,7 @@ func buildDashboardPanesWithCursor(currentPaneID, currentPaneSession, cursorPosi
 	}
 
 	// Build per-session last-visit timestamps from pop history
-	hist, err := history.Load(cmdHistoryPath())
+	hist, err := history.LoadWith(cmdHistoryDeps())
 	if err != nil {
 		debug.Error("buildDashboardPanes: load history: %v", err)
 	}

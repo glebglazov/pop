@@ -3,7 +3,8 @@ package history
 import (
 	"fmt"
 	"os"
-	"strings"
+	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,7 +12,59 @@ import (
 	"github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 	"github.com/glebglazov/pop/project"
+	"github.com/glebglazov/pop/tasks"
 )
+
+// storeDeps builds history deps rooted at dataHome, so the rows land in a
+// throwaway pop.db instead of the developer's real machine store (the tasks
+// package panics on the latter). Each call gets its own store handle, which is
+// what lets a test drive two independent recorders against one database.
+func storeDeps(t *testing.T, dataHome string) *Deps {
+	t.Helper()
+	real := deps.NewRealFileSystem()
+	fs := &deps.MockFileSystem{
+		GetenvFunc: func(key string) string {
+			if key == "XDG_DATA_HOME" {
+				return dataHome
+			}
+			return ""
+		},
+		UserHomeDirFunc:  func() (string, error) { return dataHome, nil },
+		StatFunc:         real.Stat,
+		ReadDirFunc:      real.ReadDir,
+		ReadFileFunc:     real.ReadFile,
+		WriteFileFunc:    real.WriteFile,
+		MkdirAllFunc:     real.MkdirAll,
+		RenameFunc:       real.Rename,
+		RemoveAllFunc:    real.RemoveAll,
+		DirFSFunc:        real.DirFS,
+		EvalSymlinksFunc: real.EvalSymlinks,
+	}
+	td := &tasks.Deps{FS: fs, Git: deps.NewRealGit(), Runner: tasks.RealCommandRunner{}}
+	t.Cleanup(func() { _ = td.CloseStore() })
+	return &Deps{FS: fs, Tmux: &tmuxtest.Fake{}, Tasks: td}
+}
+
+// writeLegacyFile plants a pre-store history.json under dataHome.
+func writeLegacyFile(t *testing.T, dataHome, contents string) string {
+	t.Helper()
+	path := filepath.Join(dataHome, "pop", legacyHistoryFile)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func entryPaths(h *History) []string {
+	out := make([]string, 0, len(h.Entries))
+	for _, e := range h.Entries {
+		out = append(out, e.Path)
+	}
+	return out
+}
 
 func TestSortByRecency(t *testing.T) {
 	now := time.Now()
@@ -169,7 +222,7 @@ func TestSortByRecency_DoesNotMutateOriginal(t *testing.T) {
 	}
 }
 
-func TestDefaultHistoryPathWith(t *testing.T) {
+func TestLegacyHistoryPathWith(t *testing.T) {
 	tests := []struct {
 		name     string
 		xdgData  string
@@ -206,10 +259,10 @@ func TestDefaultHistoryPathWith(t *testing.T) {
 				},
 			}
 
-			result := DefaultHistoryPathWith(d)
+			result := LegacyHistoryPathWith(d)
 
 			if result != tt.expected {
-				t.Errorf("DefaultHistoryPathWith() = %q, want %q", result, tt.expected)
+				t.Errorf("LegacyHistoryPathWith() = %q, want %q", result, tt.expected)
 			}
 		})
 	}
@@ -258,7 +311,7 @@ func TestLoadWith(t *testing.T) {
 				},
 			}
 
-			h, err := LoadWith(d, "/test/history.json")
+			h, err := LoadWith(d)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("LoadWith() error = %v, wantErr %v", err, tt.wantErr)
@@ -272,42 +325,138 @@ func TestLoadWith(t *testing.T) {
 	}
 }
 
-func TestSaveWith(t *testing.T) {
-	var savedData []byte
-	var savedPath string
+// TestLoadWithFoldsLegacyFile pins the whole storage move end to end: a
+// surviving history.json becomes rows, the file is not deleted, and — the part
+// the fold marker exists for — an entry the human removes afterwards is not
+// resurrected from the file that still holds it.
+func TestLoadWithFoldsLegacyFile(t *testing.T) {
+	t.Parallel()
+	dataHome := t.TempDir()
+	legacy := writeLegacyFile(t, dataHome, `{"entries":[
+		{"path":"/repo/main","last_access":"2026-06-01T10:00:00Z"},
+		{"path":"/repo/feature","last_access":"2026-06-02T10:00:00Z"}
+	]}`)
+	d := storeDeps(t, dataHome)
 
-	d := &Deps{
-		FS: &deps.MockFileSystem{
-			MkdirAllFunc: func(path string, perm os.FileMode) error {
-				return nil
-			},
-			WriteFileFunc: func(path string, data []byte, perm os.FileMode) error {
-				savedPath = path
-				savedData = data
-				return nil
-			},
-		},
-	}
-
-	h := &History{
-		path: "/test/dir/history.json",
-		Entries: []Entry{
-			{Path: "/project1", LastAccess: time.Now()},
-		},
-	}
-
-	err := h.SaveWith(d)
-
+	h, err := LoadWith(d)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("LoadWith: %v", err)
+	}
+	if got := entryPaths(h); len(got) != 2 {
+		t.Fatalf("entries after fold = %v, want both legacy paths", got)
+	}
+	// The migrated timestamps are what the dashboard's sort key and `pop pane
+	// status` read, so they must survive the move, not just the paths.
+	for _, e := range h.Entries {
+		want := "2026-06-01T10:00:00Z"
+		if e.Path == "/repo/feature" {
+			want = "2026-06-02T10:00:00Z"
+		}
+		if got := e.LastAccess.UTC().Format(time.RFC3339); got != want {
+			t.Errorf("%s last access = %s, want %s", e.Path, got, want)
+		}
+	}
+	if _, err := os.Stat(legacy); err != nil {
+		t.Errorf("legacy file was not left on disk: %v", err)
 	}
 
-	if savedPath != "/test/dir/history.json" {
-		t.Errorf("saved to wrong path: %s", savedPath)
+	if err := h.Remove("/repo/feature"); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	reloaded, err := LoadWith(d)
+	if err != nil {
+		t.Fatalf("LoadWith after remove: %v", err)
+	}
+	if got := entryPaths(reloaded); len(got) != 1 || got[0] != "/repo/main" {
+		t.Errorf("entries after remove = %v, want only /repo/main — the fold re-ran", got)
+	}
+	if _, err := os.Stat(legacy); err != nil {
+		t.Errorf("legacy file was removed by a later load: %v", err)
+	}
+}
+
+func TestRecordPersistsAcrossLoads(t *testing.T) {
+	t.Parallel()
+	dataHome := t.TempDir()
+
+	h, err := LoadWith(storeDeps(t, dataHome))
+	if err != nil {
+		t.Fatalf("LoadWith: %v", err)
+	}
+	if err := h.Record("/repo/feature"); err != nil {
+		t.Fatalf("Record: %v", err)
 	}
 
-	if !strings.Contains(string(savedData), "/project1") {
-		t.Error("saved data doesn't contain expected content")
+	// A second Deps is a second store handle against the same database — the
+	// shape another pop process has.
+	reloaded, err := LoadWith(storeDeps(t, dataHome))
+	if err != nil {
+		t.Fatalf("LoadWith (second handle): %v", err)
+	}
+	if got := entryPaths(reloaded); len(got) != 1 || got[0] != "/repo/feature" {
+		t.Fatalf("entries = %v, want [/repo/feature]", got)
+	}
+	if reloaded.Entries[0].LastAccess.IsZero() {
+		t.Error("recorded entry came back with a zero timestamp")
+	}
+}
+
+// TestConcurrentRecordersDoNotLoseWrites is the reason History moved into the
+// store: the whole-file rewrite it replaces took no lock, so the last writer to
+// finish erased every landing recorded while it held its in-memory copy.
+func TestConcurrentRecordersDoNotLoseWrites(t *testing.T) {
+	t.Parallel()
+	dataHome := t.TempDir()
+	const perRecorder = 12
+
+	// Two recorders, each with its own store handle, each loaded before either
+	// writes — so both start from the same empty snapshot.
+	first, err := LoadWith(storeDeps(t, dataHome))
+	if err != nil {
+		t.Fatalf("LoadWith (first recorder): %v", err)
+	}
+	second, err := LoadWith(storeDeps(t, dataHome))
+	if err != nil {
+		t.Fatalf("LoadWith (second recorder): %v", err)
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2*perRecorder)
+	record := func(h *History, prefix string) {
+		defer wg.Done()
+		for i := 0; i < perRecorder; i++ {
+			if err := h.Record(fmt.Sprintf("%s/%d", prefix, i)); err != nil {
+				errs <- err
+			}
+		}
+	}
+	wg.Add(2)
+	go record(first, "/first")
+	go record(second, "/second")
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Errorf("Record: %v", err)
+	}
+
+	reloaded, err := LoadWith(storeDeps(t, dataHome))
+	if err != nil {
+		t.Fatalf("LoadWith after concurrent recording: %v", err)
+	}
+	got := make(map[string]bool, len(reloaded.Entries))
+	for _, e := range reloaded.Entries {
+		got[e.Path] = true
+	}
+	for i := 0; i < perRecorder; i++ {
+		for _, prefix := range []string{"/first", "/second"} {
+			path := fmt.Sprintf("%s/%d", prefix, i)
+			if !got[path] {
+				t.Errorf("%s is missing — a concurrent write was lost", path)
+			}
+		}
+	}
+	if len(got) != 2*perRecorder {
+		t.Errorf("got %d entries, want %d", len(got), 2*perRecorder)
 	}
 }
 
@@ -363,7 +512,7 @@ func TestRecord(t *testing.T) {
 	})
 }
 
-func TestRemoveWith(t *testing.T) {
+func TestRemove(t *testing.T) {
 	tests := []struct {
 		name     string
 		entries  []Entry
@@ -410,7 +559,9 @@ func TestRemoveWith(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := &History{Entries: tt.entries}
-			h.RemoveWith(DefaultDeps(), tt.remove)
+			if err := h.Remove(tt.remove); err != nil {
+				t.Fatalf("Remove: %v", err)
+			}
 
 			if len(h.Entries) != len(tt.expected) {
 				t.Fatalf("got %d entries, want %d", len(h.Entries), len(tt.expected))

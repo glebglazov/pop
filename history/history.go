@@ -1,3 +1,9 @@
+// Package history is pop's record of where its human has been: one row per path
+// with the instant they last landed there, which is what the project picker, the
+// worktree picker and the monitor dashboard order by. The rows live in the
+// execution-state store, borrowed through tasks.Deps like every other layer-2
+// fact (ADR-0140/0188); the standalone history.json this replaces is folded in
+// once on first read and then ignored.
 package history
 
 import (
@@ -11,23 +17,37 @@ import (
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/project"
+	"github.com/glebglazov/pop/store"
+	"github.com/glebglazov/pop/tasks"
 )
 
 // Deps holds external dependencies for the history package
 type Deps struct {
 	FS   deps.FileSystem
 	Tmux tmux.Tmux
+
+	// Tasks carries the process-cached execution-state store handle the rows live
+	// in (ADR-0140). A nil holder means no store is wired: History then loads to
+	// whatever the legacy file holds and nothing persists, which is what a Deps
+	// built for the filesystem or tmux seam alone wants.
+	Tasks *tasks.Deps
 }
 
 // DefaultDeps returns dependencies using real implementations
 func DefaultDeps() *Deps {
 	return &Deps{
-		FS:   deps.NewRealFileSystem(),
-		Tmux: tmux.New(),
+		FS:    deps.NewRealFileSystem(),
+		Tmux:  tmux.New(),
+		Tasks: tasks.DefaultDeps(),
 	}
 }
 
 var defaultDeps = DefaultDeps()
+
+// legacyHistoryFile is the standalone recency file History lived in before its
+// rows moved into the execution-state store. It is read once per load and never
+// written; the fold that consumes it leaves it on disk (ADR-0188).
+const legacyHistoryFile = "history.json"
 
 // Entry represents a history entry for a project
 type Entry struct {
@@ -35,55 +55,109 @@ type Entry struct {
 	LastAccess time.Time `json:"last_access"`
 }
 
-// History manages project access history
+// History is a loaded snapshot of the recency rows plus the seam they came from.
+// Entries is what every reader sorts by; Record and Remove write through to the
+// store and update the snapshot in step, so a picker that records mid-loop
+// re-sorts against what it just wrote. The store handle is resolved per write
+// rather than held, because it is process-cached anyway and a load that found no
+// database yet must still be able to record the landing that creates one.
+//
+// A History built as a bare literal — a test, or the empty fallback a caller
+// substitutes when the load failed — carries no seam, and its Record and Remove
+// mutate the snapshot only.
 type History struct {
 	Entries []Entry `json:"entries"`
-	path    string
+	tasks   *tasks.Deps
 }
 
-// DefaultHistoryPath returns the default history file path
-func DefaultHistoryPath() string {
-	return DefaultHistoryPathWith(defaultDeps)
+// LegacyHistoryPath returns the path of the pre-store history.json.
+func LegacyHistoryPath() string {
+	return LegacyHistoryPathWith(defaultDeps)
 }
 
-// DefaultHistoryPathWith returns the default history file path using provided dependencies
-func DefaultHistoryPathWith(d *Deps) string {
+// LegacyHistoryPathWith returns the path of the pre-store history.json using
+// provided dependencies.
+func LegacyHistoryPathWith(d *Deps) string {
 	if xdgData := d.FS.Getenv("XDG_DATA_HOME"); xdgData != "" {
-		return filepath.Join(xdgData, "pop", "history.json")
+		return filepath.Join(xdgData, "pop", legacyHistoryFile)
 	}
 	home, err := d.FS.UserHomeDir()
 	if err != nil {
-		debug.Error("DefaultHistoryPath: UserHomeDir: %v", err)
+		debug.Error("LegacyHistoryPath: UserHomeDir: %v", err)
 	}
-	return filepath.Join(home, ".local", "share", "pop", "history.json")
+	return filepath.Join(home, ".local", "share", "pop", legacyHistoryFile)
 }
 
-// Load reads history from the given path
-func Load(path string) (*History, error) {
-	return LoadWith(defaultDeps, path)
+// Load reads history using the package default dependencies
+func Load() (*History, error) {
+	return LoadWith(defaultDeps)
 }
 
-// LoadWith reads history using provided dependencies
-func LoadWith(d *Deps, path string) (*History, error) {
-	h := &History{path: path}
+// LoadWith reads history from the execution-state store, folding a surviving
+// history.json in first. The fold is once-only against a marker row rather than
+// against the file's absence, because the file is deliberately left on disk as
+// the only rollback for a store with no other copy of these rows (ADR-0188): a
+// path the human has since reset must not be resurrected from it.
+func LoadWith(d *Deps) (*History, error) {
+	legacy, err := legacyEntries(d)
+	if err != nil {
+		return nil, err
+	}
+	if d.Tasks == nil {
+		return &History{Entries: legacy}, nil
+	}
+	// The fold is a write, so it needs the database created; a load with nothing
+	// to fold stays a pure reader and never materialises an empty one.
+	s, ok, err := d.Tasks.Store(len(legacy) > 0)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return &History{tasks: d.Tasks}, nil
+	}
+	if len(legacy) > 0 {
+		rows := make([]store.HistoryEntry, 0, len(legacy))
+		for _, e := range legacy {
+			rows = append(rows, store.HistoryEntry{Path: e.Path, LastAccess: e.LastAccess})
+		}
+		if _, err := s.FoldHistoryEntries(LegacyHistoryPathWith(d), rows, time.Now()); err != nil {
+			return nil, err
+		}
+	}
+	rows, err := s.AllHistoryEntries()
+	if err != nil {
+		return nil, err
+	}
+	h := &History{tasks: d.Tasks, Entries: make([]Entry, 0, len(rows))}
+	for _, r := range rows {
+		h.Entries = append(h.Entries, Entry{Path: r.Path, LastAccess: r.LastAccess})
+	}
+	return h, nil
+}
 
+// legacyEntries reads and canonicalises the pre-store history.json. A missing
+// file is the steady state once a machine has folded; an unparseable one is
+// logged and treated as empty, since the store is the source of truth and a
+// corrupt rollback file must not stop a picker from rendering.
+func legacyEntries(d *Deps) ([]Entry, error) {
+	path := LegacyHistoryPathWith(d)
 	data, err := d.FS.ReadFile(path)
 	if os.IsNotExist(err) {
-		return h, nil
+		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-
-	if err := json.Unmarshal(data, h); err != nil {
-		debug.Error("history.Load %s: unmarshal: %v", path, err)
-		return h, nil // Return empty history on parse error
+	var file History
+	if err := json.Unmarshal(data, &file); err != nil {
+		debug.Error("history: parse legacy file %s: %v", path, err)
+		return nil, nil
 	}
-
-	// Dedupe entries by resolved path, keeping most recent timestamp
-	h.dedupeEntriesBy(d.FS.EvalSymlinks)
-
-	return h, nil
+	// The file accumulated symlink-aliased spellings of the same checkout over
+	// years of writes; the store is keyed by path, so the aliases have to collapse
+	// before they become rows.
+	file.dedupeEntriesBy(d.FS.EvalSymlinks)
+	return file.Entries, nil
 }
 
 // dedupeEntriesBy merges entries that resolve to the same canonical path,
@@ -129,29 +203,12 @@ func (h *History) dedupeEntriesBy(evalSymlinks func(string) (string, error)) {
 	})
 }
 
-// Save writes history to disk
-func (h *History) Save() error {
-	return h.SaveWith(defaultDeps)
-}
-
-// SaveWith writes history using provided dependencies
-func (h *History) SaveWith(d *Deps) error {
-	dir := filepath.Dir(h.path)
-	if err := d.FS.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
-
-	data, err := json.MarshalIndent(h, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	return d.FS.WriteFile(h.path, data, 0644)
-}
-
-// Record marks a project as accessed
-func (h *History) Record(path string) {
-	now := time.Now()
+// Record marks a project as accessed: a single-row upsert in the store, plus the
+// same update on the loaded snapshot so a caller that sorts after recording sees
+// its own write. Callers treat the error as best-effort — recency bookkeeping
+// never blocks the landing it describes.
+func (h *History) Record(path string) error {
+	now := time.Now().UTC()
 
 	// Update existing or add new
 	found := false
@@ -169,21 +226,37 @@ func (h *History) Record(path string) {
 			LastAccess: now,
 		})
 	}
+
+	if h.tasks == nil {
+		return nil
+	}
+	// A landing is worth creating the database for: this is the write that makes
+	// the picker's first ordering possible on a fresh machine.
+	s, _, err := h.tasks.Store(true)
+	if err != nil {
+		return err
+	}
+	return s.PutHistoryEntry(path, now)
 }
 
-// Remove deletes a project from history
-func (h *History) Remove(path string) {
-	h.RemoveWith(defaultDeps, path)
-}
-
-// RemoveWith deletes a project from history using provided dependencies
-func (h *History) RemoveWith(d *Deps, path string) {
+// Remove deletes a project from history, dropping its row and its place in the
+// loaded snapshot.
+func (h *History) Remove(path string) error {
 	for i := range h.Entries {
 		if h.Entries[i].Path == path {
 			h.Entries = append(h.Entries[:i], h.Entries[i+1:]...)
-			return
+			break
 		}
 	}
+	if h.tasks == nil {
+		return nil
+	}
+	// A removal never needs to create anything: with no database there is no row.
+	s, ok, err := h.tasks.Store(false)
+	if err != nil || !ok {
+		return err
+	}
+	return s.DeleteHistoryEntry(path)
 }
 
 // SortByRecency sorts projects by recency (oldest first, most recent last)
@@ -254,4 +327,3 @@ func TmuxSessionActivityWith(d *Deps) map[string]int64 {
 
 	return activity
 }
-

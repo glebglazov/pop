@@ -212,7 +212,7 @@ func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefine
 	}
 
 	// Load history and sort by recency (oldest first, most recent last)
-	hist, err := history.Load(history.DefaultHistoryPath())
+	hist, err := history.LoadWith(cmdHistoryDeps())
 	if err != nil {
 		hist = &history.History{}
 	}
@@ -601,13 +601,13 @@ func handleWorktreeSelect(ctx *project.RepoContext, item *ui.Item) error {
 // propagating) failures — history bookkeeping must never block attaching to the
 // new session. Shared by the flat and Workbench create paths.
 func recordWorktreeHistory(path string) {
-	hist, err := history.Load(history.DefaultHistoryPath())
+	hist, err := history.LoadWith(cmdHistoryDeps())
 	if err != nil {
 		debug.Error("worktree: load history: %v", err)
+		return
 	}
-	hist.Record(path)
-	if err := hist.Save(); err != nil {
-		debug.Error("worktree: save history: %v", err)
+	if err := hist.Record(path); err != nil {
+		debug.Error("worktree: record history: %v", err)
 	}
 }
 
@@ -661,18 +661,17 @@ func removePreferredWorkbenchWith(d *config.Deps, path string) {
 // removeFromHistory deletes path from project history, logging (not
 // propagating) failures — history cleanup must never block the picker loop.
 func removeFromHistory(path string) {
-	removeFromHistoryWith(history.DefaultDeps(), history.DefaultHistoryPath(), path)
+	removeFromHistoryWith(cmdHistoryDeps(), path)
 }
 
-func removeFromHistoryWith(d *history.Deps, histPath, path string) {
-	hist, err := history.LoadWith(d, histPath)
+func removeFromHistoryWith(d *history.Deps, path string) {
+	hist, err := history.LoadWith(d)
 	if err != nil {
 		debug.Error("worktree: load history: %v", err)
 		return
 	}
-	hist.RemoveWith(d, path)
-	if err := hist.SaveWith(d); err != nil {
-		debug.Error("worktree: save history: %v", err)
+	if err := hist.Remove(path); err != nil {
+		debug.Error("worktree: remove history entry: %v", err)
 	}
 }
 

@@ -250,6 +250,11 @@ func (d *Deps) historyDeps() *history.Deps {
 	if d != nil && d.FS != nil {
 		hd.FS = d.FS
 	}
+	// History rows live in the execution-state store, so the seam has to carry the
+	// same store handle the rest of the cmd layer borrows — otherwise a test's
+	// isolated data dir would be read through the cmd FS and written through the
+	// real one (ADR-0140/0188).
+	hd.Tasks = d.tasksDeps()
 	return hd
 }
 
@@ -261,6 +266,8 @@ func cmdMonitorPIDPath() string {
 	return monitor.DefaultPIDPathWith(cmdLayerDeps().monitorDeps())
 }
 
-func cmdHistoryPath() string {
-	return history.DefaultHistoryPathWith(cmdLayerDeps().historyDeps())
+// cmdHistoryDeps resolves the history seam for a verb entrypoint, so a History
+// read or write lands in the same data dir the rest of the cmd layer routes to.
+func cmdHistoryDeps() *history.Deps {
+	return cmdLayerDeps().historyDeps()
 }

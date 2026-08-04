@@ -21,7 +21,6 @@ func mockSwitchDeps() (*SwitchDeps, *history.History, *tmuxtest.Fake) {
 		Tmux:        fake,
 		SessionName: func(path string) string { return "session-name" },
 		LoadHistory: func() (*history.History, error) { return hist, nil },
-		SaveHistory: func(h *history.History) error { return nil },
 	}
 	return d, hist, fake
 }
@@ -111,16 +110,15 @@ func TestRunProjectSwitch(t *testing.T) {
 	})
 
 	t.Run("nil history from failed load is tolerated", func(t *testing.T) {
-		d, _, _ := mockSwitchDeps()
+		d, _, fake := mockSwitchDeps()
 		d.LoadHistory = func() (*history.History, error) { return nil, os.ErrPermission }
-		var saved *history.History
-		d.SaveHistory = func(h *history.History) error { saved = h; return nil }
 
 		if err := RunProjectSwitch(d, "/repo/feature"); err != nil {
 			t.Fatal(err)
 		}
-		if saved == nil || len(saved.Entries) != 1 {
-			t.Errorf("saved history = %+v, want single entry", saved)
+		// Recency bookkeeping must never block the landing it describes.
+		if len(fake.Switched) != 1 || fake.Switched[0] != "session-name" {
+			t.Errorf("switched = %v, want [session-name] despite the history failure", fake.Switched)
 		}
 	})
 }

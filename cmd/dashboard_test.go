@@ -407,6 +407,26 @@ func TestDashboardInitialPaneID(t *testing.T) {
 	})
 }
 
+// TestSessionAccessTimeReadsMigratedHistory pins the dashboard's
+// session-last-visit sort key — the same column `pop pane status` prints —
+// against a timestamp that arrived through the legacy-file fold rather than a
+// fresh landing, which is what every machine's first read after ADR-0188 sees.
+func TestSessionAccessTimeReadsMigratedHistory(t *testing.T) {
+	t.Parallel()
+	d := historyTestDeps(t)
+	hist, err := history.LoadWith(d)
+	if err != nil {
+		t.Fatalf("load history: %v", err)
+	}
+
+	// historyTestDeps folds /repo/feature at 2026-06-01T10:00:00Z; the dashboard
+	// matches it by the session name that path derives.
+	want := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC).Unix()
+	if got := sessionAccessTime("feature", hist); got != want {
+		t.Errorf("sessionAccessTime = %d, want the migrated %d", got, want)
+	}
+}
+
 func TestSessionAccessTime(t *testing.T) {
 	t.Parallel()
 	now := time.Now()

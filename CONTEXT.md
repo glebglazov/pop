@@ -321,7 +321,7 @@ The **Doctor status** of the `pop worktree` command family. It depends on being 
 _Avoid_: Worktree count health
 
 **History**:
-The persisted record of projects you've switched to, with timestamps. Recorded only when a Switch (or window open / cd-to-pane landing) actually happens — a picker selection abandoned before that point (e.g. Esc at the Workbench prompt) leaves no entry.
+The persisted record of projects you've switched to, with timestamps. Recorded only when a Switch (or window open / cd-to-pane landing) actually happens — a picker selection abandoned before that point (e.g. Esc at the Workbench prompt) leaves no entry. The rows live in the execution-state store (`history_entries`), one per path, and recording is a single-row upsert in a transaction, so two recorders cannot lose each other's writes; the pre-store `history.json` is folded in once on first read and then left on disk as its own rollback (ADR-0188).
 _Avoid_: Recents, access log
 
 **Switch**:

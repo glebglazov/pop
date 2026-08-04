@@ -479,6 +479,27 @@ var migrations = []string{
 		SELECT c.seq, s.def_path, s.priority, s.auto_drain, s.worktree_managed, s.worktree_name
 		  FROM sets s JOIN work_containers c ON c.kind = 'task-set' AND c.id = s.set_id
 		 ORDER BY s.seq;`,
+	// 29: history_entries + history_folds — History moves off the standalone
+	// history.json into the store (ADR-0188). One row per path holding the last
+	// instant a human landed there, which is what the project picker, the worktree
+	// picker and the dashboard's session-last-visit key all order by. Recording is
+	// a single-row upsert in a transaction, so two recorders can no longer lose
+	// each other's writes the way the lock-free whole-file rewrite could.
+	//
+	// history_folds is the once-only gate on the legacy file's fold. Unlike the
+	// bindings fold this one must not delete its source — history.json is the only
+	// rollback for a file with no other copy — so "already folded" cannot be read
+	// off the file's absence and needs a marker of its own. Without it, a path the
+	// human reset in the picker would be resurrected from the surviving file on
+	// the very next read.
+	`CREATE TABLE history_entries (
+		path        TEXT PRIMARY KEY,
+		last_access TEXT NOT NULL
+	);
+	CREATE TABLE history_folds (
+		source    TEXT PRIMARY KEY,
+		folded_at TEXT NOT NULL
+	);`,
 }
 
 func (s *Store) migrate() error {

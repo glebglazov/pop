@@ -504,6 +504,33 @@ func TestSortByUnifiedRecency(t *testing.T) {
 	})
 }
 
+// TestSortBaseItemsByHistoryFromStore drives the picker's recency ordering off
+// rows read out of the execution-state store instead of a hand-built snapshot,
+// so the move of History's storage cannot silently change what the picker shows.
+func TestSortBaseItemsByHistoryFromStore(t *testing.T) {
+	t.Parallel()
+	hist, err := history.LoadWith(historyTestDeps(t))
+	if err != nil {
+		t.Fatalf("load history: %v", err)
+	}
+
+	items := []ui.Item{
+		{Name: "main", Path: "/repo/main"},
+		{Name: "unvisited", Path: "/repo/unvisited"},
+		{Name: "feature", Path: "/repo/feature"},
+	}
+	sorted := sortBaseItemsByHistory(items, hist)
+
+	// No history at the top, then oldest landing to most recent: feature is
+	// 2026-06-01, main 2026-06-02.
+	want := []string{"/repo/unvisited", "/repo/feature", "/repo/main"}
+	for i, w := range want {
+		if sorted[i].Path != w {
+			t.Errorf("position %d = %q, want %q", i, sorted[i].Path, w)
+		}
+	}
+}
+
 func TestSortBaseItemsByHistory(t *testing.T) {
 	t.Parallel()
 	now := time.Now()
@@ -1029,8 +1056,9 @@ func testProjectDeps(t *testing.T) *ProjectDeps {
 			}, nil
 		},
 		LoadHistory: func() (*history.History, error) {
-			// Bind to a sandbox path so any hist.Save() writes to the tmpdir.
-			return history.Load(filepath.Join(xdg, "pop", "history.json"))
+			// Routed through the cmd seam, whose data dir is the tmpdir above, so
+			// recorded landings write to a throwaway store.
+			return history.LoadWith(cmdHistoryDeps())
 		},
 
 		RunPicker: func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error) {

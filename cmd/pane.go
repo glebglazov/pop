@@ -1312,7 +1312,7 @@ func runPaneStatus(cmd *cobra.Command, args []string) error {
 	entries := state.PanesAll()
 
 	// Also load pop history for session_last_visit_at
-	hist, err := history.Load(cmdHistoryPath())
+	hist, err := history.LoadWith(cmdHistoryDeps())
 	if err != nil {
 		debug.Error("pane status: load history: %v", err)
 	}
