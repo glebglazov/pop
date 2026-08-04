@@ -86,6 +86,50 @@ func buildProjectRows(items []ui.Item, meta map[string]projectRowMeta, display c
 	return flattenProjectRows(nestProjectRows(items, meta), expanded)
 }
 
+// projectRowTree wires nested mode into the picker's arrow gestures: which rows a
+// browse lists, which rows a query searches, and where expansion is remembered.
+// The rows it hands back come from the session state the picker was opened with —
+// nothing here rediscovers projects, reads config or forks git, so a gesture costs
+// one re-arrangement of a slice.
+//
+// expanded is the caller's own map, so the tree writes into state that outlives
+// the picker: the project loop closes and reopens the picker for some actions, and
+// the operator must not lose the tree they opened. It is process memory only,
+// deliberately persisted nowhere — a fresh dashboard opens collapsed.
+func projectRowTree(sessionRows []ui.Item, meta map[string]projectRowMeta, expanded map[string]bool) ui.Tree {
+	return ui.Tree{
+		Rows: func(query string) []ui.Item {
+			if query != "" {
+				return queryProjectRows(sessionRows)
+			}
+			return buildProjectRows(sessionRows, meta, config.WorktreeDisplayNested, expanded)
+		},
+		SetExpanded: func(path string, expand bool) {
+			if expand {
+				expanded[path] = true
+				return
+			}
+			delete(expanded, path)
+		},
+	}
+}
+
+// queryProjectRows is what a typed query searches in nested mode: the whole
+// universe at depth zero under the full "<project>/<worktree>" names, with no
+// grouping and nothing auto-expanded. Nested membership holds live sessions only,
+// so this flat pass is what keeps a cold worktree reachable at all — and, because
+// the names carry their prefix here, a query can match on it.
+func queryProjectRows(items []ui.Item) []ui.Item {
+	rows := make([]ui.Item, len(items))
+	for i, it := range items {
+		// The glyph column is the one nested mode renders throughout: typing is not
+		// a different list with a different vocabulary, it is the same list
+		// unfolded.
+		rows[i] = fuseNestedGlyph(it)
+	}
+	return rows
+}
+
 // nestProjectRows folds worktree rows into their project's row, in the order the
 // incoming rows already carry: they arrive from sortByUnifiedRecency, so reusing
 // their positions is the same comparator and the same direction at both levels

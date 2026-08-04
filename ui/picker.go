@@ -100,6 +100,8 @@ type Picker struct {
 	cursorMemory map[string]string
 	lastQuery    string
 
+	tree *Tree
+
 	customCommands   []UserDefinedKeyBinding
 	iconLegend       []iconLegendEntry
 	initialCursorIdx int
@@ -255,6 +257,35 @@ func WithWarnings(warnings []string) PickerOption {
 func WithUpdateNotice(text string) PickerOption {
 	return func(p *Picker) {
 		p.updateNotice = text
+	}
+}
+
+// Tree wires nested-list gestures into the picker. The picker owns no tree of its
+// own: it reads a row's place from Item.Depth — a row is expanded when the row
+// below it sits deeper — and asks the caller for rows whenever the shape has to
+// change. So the arrangement rules (what nests under what, what a query lists)
+// stay with the caller that knows the domain, and the picker contributes only the
+// keys.
+type Tree struct {
+	// Rows returns the rows to list for a query. An empty query gets the tree as
+	// the caller currently has it expanded; a non-empty query gets whatever the
+	// caller wants searched — for the project list, the flat universe, which is how
+	// rows that nesting folds away stay reachable.
+	Rows func(query string) []Item
+	// SetExpanded records a row's new expansion state. The picker re-lists through
+	// Rows immediately afterwards, so this only has to remember the bit.
+	SetExpanded func(path string, expand bool)
+}
+
+// WithTree turns the left/right arrows into tree gestures while the query is
+// empty, and hands re-listing to the caller. Without it the arrows are the query
+// textfield's cursor keys, as they have always been.
+func WithTree(t Tree) PickerOption {
+	return func(p *Picker) {
+		if t.Rows == nil || t.SetExpanded == nil {
+			return
+		}
+		p.tree = &t
 	}
 }
 
@@ -488,6 +519,17 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return p, tea.Quit
 			}
 
+		// The tree gestures sit below the paging keys on purpose: ctrl+b and
+		// ctrl+f are matched above and never reach here, so paging works the same
+		// in both states.
+		case p.treeActive() && key.Matches(msg, keys.TreeExpand):
+			p.expandRow()
+			return p, nil
+
+		case p.treeActive() && key.Matches(msg, keys.TreeCollapse):
+			p.collapseRow()
+			return p, nil
+
 		case key.Matches(msg, keys.ClearInput):
 			p.input.SetValue("")
 			p.filter()
@@ -523,6 +565,85 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return p, nil
 }
 
+// treeActive reports whether the arrows drive the tree rather than the query. A
+// typed query flattens the list, and editing a query must never be hijacked by
+// the tree — which is what makes the two behaviours coexist with no mode to
+// learn.
+func (p *Picker) treeActive() bool {
+	return p.tree != nil && p.input.Value() == ""
+}
+
+// rowExpanded reads expansion off the rendered list itself: a row is open exactly
+// when the row under it sits deeper. There is no second copy of the state to
+// disagree with what is on screen.
+func (p *Picker) rowExpanded(idx int) bool {
+	if idx < 0 || idx+1 >= len(p.filtered) {
+		return false
+	}
+	return p.filtered[idx+1].Depth > p.filtered[idx].Depth
+}
+
+// expandRow opens the row under the cursor, or walks into its first child when it
+// is already open. Opening and descending are the same gesture, so a second press
+// carries on inward instead of doing nothing.
+func (p *Picker) expandRow() {
+	idx := p.list.Cursor()
+	if idx < 0 || idx >= len(p.filtered) {
+		return
+	}
+	if p.rowExpanded(idx) {
+		p.list.MoveDown()
+		p.syncFromList()
+		return
+	}
+	// Disclosure is the caller's own "this row holds children" mark; a row without
+	// one has nothing to open.
+	if p.filtered[idx].Disclosure == "" {
+		return
+	}
+	p.setExpanded(p.filtered[idx].Path, true, p.filtered[idx].Path)
+}
+
+// collapseRow closes the row under the cursor, or — from a child — closes the
+// parent and lands the cursor on it, so the operator never watches the row under
+// the cursor vanish out from under them.
+func (p *Picker) collapseRow() {
+	idx := p.list.Cursor()
+	if idx < 0 || idx >= len(p.filtered) {
+		return
+	}
+	row := p.filtered[idx]
+	if p.rowExpanded(idx) {
+		p.setExpanded(row.Path, false, row.Path)
+		return
+	}
+	if row.Depth == 0 {
+		return
+	}
+	for i := idx - 1; i >= 0; i-- {
+		if p.filtered[i].Depth < row.Depth {
+			p.setExpanded(p.filtered[i].Path, false, p.filtered[i].Path)
+			return
+		}
+	}
+}
+
+// setExpanded records the change, re-lists through the caller, and keeps the
+// cursor on cursorPath — the row the gesture was about, which after a collapse is
+// the parent rather than the child that is now hidden.
+func (p *Picker) setExpanded(path string, expand bool, cursorPath string) {
+	p.tree.SetExpanded(path, expand)
+	// The query is empty whenever this runs (treeActive gates it), so the listed
+	// rows are the tree itself with no filtering in between.
+	p.items = p.tree.Rows("")
+	p.filtered = p.items
+	p.list.SetItems(p.filtered)
+	if !p.list.SetCursorToKey(cursorPath) && len(p.filtered) > 0 {
+		p.list.SetCursor(min(p.list.Cursor(), len(p.filtered)-1))
+	}
+	p.syncFromList()
+}
+
 // fzfMatch holds an item with its fuzzy match score
 type fzfMatch struct {
 	item  Item
@@ -538,6 +659,14 @@ func (p *Picker) filter() {
 		path := p.filtered[p.cursor].Path
 		p.cursorMemory[p.lastQuery] = path
 		debug.Log("filter: query %q -> %q, saving cursor for %q: path=%q", p.lastQuery, query, p.lastQuery, path)
+	}
+
+	// A nested list searches a different row set than it browses: the first
+	// keystroke of a query asks the caller for the flat universe, and clearing the
+	// query asks for the tree back. Re-listing only on the transition keeps the
+	// no-tree picker's filter path untouched.
+	if p.tree != nil && queryChanged && (query == "") != (p.lastQuery == "") {
+		p.items = p.tree.Rows(query)
 	}
 
 	// Build filtered list
@@ -752,9 +881,14 @@ func (p *Picker) helpEntries() []HelpEntry {
 		{"↑/↓ C-p/C-n", "Navigate"},
 		{"C-b/C-f", "Page up / down"},
 		{"C-u", "Clear filter"},
-		{"Enter", "Select"},
-		{"Esc", "Quit"},
 	}
+	if p.tree != nil {
+		entries = append(entries, HelpEntry{"→/←", "Expand / collapse (empty filter)"})
+	}
+	entries = append(entries,
+		HelpEntry{"Enter", "Select"},
+		HelpEntry{"Esc", "Quit"},
+	)
 
 	if p.showKillSession && !p.isKeyOverridden("ctrl+k") {
 		entries = append(entries, HelpEntry{"C-k", "Kill tmux session"})
@@ -858,6 +992,8 @@ type keyMap struct {
 	CreateWorktree        key.Binding
 	CreateManagedWorktree key.Binding
 	SetPreferred          key.Binding
+	TreeExpand            key.Binding
+	TreeCollapse          key.Binding
 }
 
 var keys = keyMap{
@@ -908,5 +1044,13 @@ var keys = keyMap{
 	),
 	SetPreferred: key.NewBinding(
 		key.WithKeys("ctrl+w"),
+	),
+	// Bare arrows only: ctrl+f and ctrl+b stay paging, and the emacs cursor keys
+	// the textfield owns keep their meaning when a query is typed.
+	TreeExpand: key.NewBinding(
+		key.WithKeys("right"),
+	),
+	TreeCollapse: key.NewBinding(
+		key.WithKeys("left"),
 	),
 }

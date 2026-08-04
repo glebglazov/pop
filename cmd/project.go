@@ -414,10 +414,8 @@ func RunProject(d *ProjectDeps) error {
 		if d.WorkSessions != nil {
 			workSessions = d.WorkSessions()
 		}
-		items := buildProjectRows(
-			buildSessionAwareItemsWith(baseItems, hist, d.SessionActivity(), excludedSessionNames, attention, workSessions),
-			rowMeta, worktreeDisplay, expandedRows,
-		)
+		sessionRows := buildSessionAwareItemsWith(baseItems, hist, d.SessionActivity(), excludedSessionNames, attention, workSessions)
+		items := buildProjectRows(sessionRows, rowMeta, worktreeDisplay, expandedRows)
 
 		quickAccessModifier := cfg.GetQuickAccessModifier()
 		iconLegends := []ui.IconLegend{
@@ -427,6 +425,7 @@ func RunProject(d *ProjectDeps) error {
 			{Icon: iconTaskSetSession, Desc: "Task-set session"},
 			{Icon: iconRoutineSession, Desc: "Routine session"},
 		}
+		var treeOpts []ui.PickerOption
 		if worktreeDisplay == config.WorktreeDisplayNested {
 			// The legend names what can actually appear: nested mode renders one
 			// fused column, so the Work-kind badges are not in this list's
@@ -435,6 +434,10 @@ func RunProject(d *ProjectDeps) error {
 				{Icon: iconDirSession, Desc: "Live session"},
 				{Icon: iconNestedMapSession, Desc: "Map session"},
 			}
+			// The arrows drive the tree over this iteration's session state, and
+			// write expansion into the loop's own map so it outlives every reopen
+			// below.
+			treeOpts = append(treeOpts, ui.WithTree(projectRowTree(sessionRows, rowMeta, expandedRows)))
 		}
 		if cfg.UnreadNotificationsEnabled("project") {
 			iconLegends = append(iconLegends, ui.IconLegend{Icon: iconAttention, Desc: "Agent has unread output"})
@@ -447,6 +450,7 @@ func RunProject(d *ProjectDeps) error {
 			ui.WithQuickAccess(quickAccessModifier),
 			ui.WithIconLegend(iconLegends...),
 		}
+		opts = append(opts, treeOpts...)
 		if inTmux {
 			opts = append(opts, ui.WithOpenWindow())
 		}
