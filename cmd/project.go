@@ -365,6 +365,10 @@ func RunProject(d *ProjectDeps) error {
 			SessionName: ep.SessionName,
 		}
 	}
+	// What a row is — a checkout or one of its worktrees, and which repository it
+	// belongs to — is metadata the ui.Item drops. Captured once here, beside the
+	// rows it describes, so the nested row builder stays a function over rows.
+	rowMeta := projectRowMetaFor(sortedExpanded)
 
 	// Load custom commands for project picker mode
 	var customCommands []ui.UserDefinedCommand
@@ -388,6 +392,15 @@ func RunProject(d *ProjectDeps) error {
 		updateNotice = d.UpdateNotice()
 	}
 
+	// Read once, here where the picker is constructed: a change to
+	// [project] worktree_display takes effect on the next invocation, so nothing
+	// has to re-read config or re-render mid-session.
+	worktreeDisplay := cfg.ProjectWorktreeDisplay()
+	// Expansion lives in the process and is persisted nowhere, so it survives the
+	// picker's in-loop reopens — some actions close the picker, act, and reopen it
+	// with fresh rows — and a fresh dashboard opens collapsed.
+	expandedRows := map[string]bool{}
+
 	// Run picker loop
 	inTmux := d.InTmux()
 	restoreCursorIdx := -1
@@ -401,7 +414,10 @@ func RunProject(d *ProjectDeps) error {
 		if d.WorkSessions != nil {
 			workSessions = d.WorkSessions()
 		}
-		items := buildSessionAwareItemsWith(baseItems, hist, d.SessionActivity(), excludedSessionNames, attention, workSessions)
+		items := buildProjectRows(
+			buildSessionAwareItemsWith(baseItems, hist, d.SessionActivity(), excludedSessionNames, attention, workSessions),
+			rowMeta, worktreeDisplay, expandedRows,
+		)
 
 		quickAccessModifier := cfg.GetQuickAccessModifier()
 		iconLegends := []ui.IconLegend{
@@ -410,6 +426,15 @@ func RunProject(d *ProjectDeps) error {
 			{Icon: iconMapSession, Desc: "Map session"},
 			{Icon: iconTaskSetSession, Desc: "Task-set session"},
 			{Icon: iconRoutineSession, Desc: "Routine session"},
+		}
+		if worktreeDisplay == config.WorktreeDisplayNested {
+			// The legend names what can actually appear: nested mode renders one
+			// fused column, so the Work-kind badges are not in this list's
+			// vocabulary at all.
+			iconLegends = []ui.IconLegend{
+				{Icon: iconDirSession, Desc: "Live session"},
+				{Icon: iconNestedMapSession, Desc: "Map session"},
+			}
 		}
 		if cfg.UnreadNotificationsEnabled("project") {
 			iconLegends = append(iconLegends, ui.IconLegend{Icon: iconAttention, Desc: "Agent has unread output"})
@@ -455,6 +480,13 @@ func RunProject(d *ProjectDeps) error {
 		case ui.ActionConfirm:
 			if result.Selected == nil {
 				return nil
+			}
+			// A synthesized parent row groups a bare repository's worktrees and
+			// names no checkout, so there is nothing to open, record or attach:
+			// the selection returns to the list with the cursor where it was.
+			if isSynthesizedProjectRow(*result.Selected) {
+				restoreCursorIdx = result.CursorIndex
+				continue
 			}
 			if isStandaloneSession(*result.Selected) {
 				return d.SwitchToTarget(standaloneSessionName(*result.Selected))
@@ -522,7 +554,7 @@ func RunProject(d *ProjectDeps) error {
 			return d.OpenSession(result.Selected)
 
 		case ui.ActionOpenWindow:
-			if result.Selected == nil || isStandaloneSession(*result.Selected) {
+			if result.Selected == nil || isStandaloneSession(*result.Selected) || isSynthesizedProjectRow(*result.Selected) {
 				continue
 			}
 			if !d.NoHistory {
@@ -537,6 +569,10 @@ func RunProject(d *ProjectDeps) error {
 			if result.Selected == nil {
 				return nil
 			}
+			if isSynthesizedProjectRow(*result.Selected) {
+				restoreCursorIdx = result.CursorIndex
+				continue
+			}
 			paneID := d.YankTarget
 			if paneID == "" {
 				paneID = os.Getenv("TMUX_PANE")
@@ -547,7 +583,7 @@ func RunProject(d *ProjectDeps) error {
 			return d.YankPathToPane(paneID, result.Selected.Path)
 
 		case ui.ActionKillSession:
-			if result.Selected != nil {
+			if result.Selected != nil && !isSynthesizedProjectRow(*result.Selected) {
 				restoreCursorIdx = result.CursorIndex
 				if isStandaloneSession(*result.Selected) {
 					d.KillSession(standaloneSessionName(*result.Selected))
@@ -558,7 +594,7 @@ func RunProject(d *ProjectDeps) error {
 			// Continue loop — session state refreshes automatically
 
 		case ui.ActionReset:
-			if result.Selected != nil && !isStandaloneSession(*result.Selected) {
+			if result.Selected != nil && !isStandaloneSession(*result.Selected) && !isSynthesizedProjectRow(*result.Selected) {
 				hist.Remove(result.Selected.Path)
 				if err := hist.Save(); err != nil {
 					debug.Error("project: save history: %v", err)
@@ -574,7 +610,7 @@ func RunProject(d *ProjectDeps) error {
 		case ui.ActionSetPreferredWorkbench:
 			// Sets the per-checkout Preferred workbench (ADR-0078); never touches
 			// a running session. Skip standalone sessions (no real checkout).
-			if result.Selected != nil && !isStandaloneSession(*result.Selected) {
+			if result.Selected != nil && !isStandaloneSession(*result.Selected) && !isSynthesizedProjectRow(*result.Selected) {
 				warnPreferredWorkbenchErr("project", setPreferredWorkbench(defaultPreferredPickerDeps(), result.Selected.Path))
 			}
 			restoreCursorIdx = result.CursorIndex

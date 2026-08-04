@@ -38,6 +38,10 @@ projects = [
 # ]
 # Show desktop notifications when a pane becomes unread while in the project picker
 # unread_notifications_enabled = false
+# How the project dashboard arranges a repository's worktree rows
+# "flat" (default): every worktree is its own row, named "<project>/<worktree>"
+# "nested": a project's live worktree sessions hang under it as a second level
+# worktree_display = "flat"
 
 # [worktree]
 # Worktree-specific custom keybindings (override global commands matched by key)

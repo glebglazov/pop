@@ -22,6 +22,16 @@ type Item struct {
 	Icon        string // Optional icon displayed to the left of name
 	Marker      string // Optional leading marker, independent of Icon (e.g. Unbound managed worktree)
 	SessionName string // Pre-computed tmux session name
+
+	// Depth is how deep the row sits in a nested list: 0 for a top-level row, 1
+	// for a child. Display only — the whole row shifts right, glyph columns
+	// included, because indenting the name alone leaves the nesting nearly
+	// invisible. Nothing about the row's identity changes with it.
+	Depth int
+	// Disclosure is the glyph trailing the name of a row that holds children —
+	// the colourless "there is more here" signal. The caller supplies both forms
+	// (collapsed and expanded); an empty string renders nothing.
+	Disclosure string
 }
 
 func (i Item) FilterValue() string {
@@ -687,12 +697,17 @@ func (p *Picker) pickerCell(item Item, _ RowState) string {
 	hasIcons := p.pickerHasIcons()
 	hasMarkers := p.pickerHasMarkers()
 
+	name := item.Name
+	if item.Disclosure != "" {
+		name += " " + item.Disclosure
+	}
+
 	var line string
 	if p.showContext && item.Context != "" {
 		contextPadding := maxContextLen - len(item.Context)
-		line = " [" + item.Context + "]" + strings.Repeat(" ", contextPadding) + " " + item.Name
+		line = " [" + item.Context + "]" + strings.Repeat(" ", contextPadding) + " " + name
 	} else {
-		line = " " + item.Name
+		line = " " + name
 	}
 
 	if hasIcons {
@@ -714,7 +729,9 @@ func (p *Picker) pickerCell(item Item, _ RowState) string {
 		}
 	}
 
-	return line
+	// The indent goes outside every column, so a child row's glyph moves with its
+	// name. A depth-0 row is byte-identical to a list that never nests.
+	return strings.Repeat("  ", item.Depth) + line
 }
 
 func (p *Picker) View() tea.View {

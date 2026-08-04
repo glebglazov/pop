@@ -134,7 +134,26 @@ type ProjectConfig struct {
 	// Deprecated: use UnreadNotificationsEnabled. The old key is read for
 	// backwards compat; a warning is emitted when it is present.
 	AttentionNotificationsEnabled bool `toml:"attention_notifications_enabled" desc:"Deprecated: use unread_notifications_enabled."`
+	// WorktreeDisplay selects how the project dashboard arranges a repository's
+	// worktree rows. Absent or "flat" is today's list; "nested" hangs a
+	// project's live worktree sessions under it as a second level. Read through
+	// Config.ProjectWorktreeDisplay, never off this field.
+	WorktreeDisplay string `toml:"worktree_display" desc:"How the project dashboard arranges worktree rows (flat|nested)."`
 }
+
+// WorktreeDisplay is how the project dashboard arranges a repository's worktree
+// rows: flat (every worktree as its own top-level row, under its full
+// "<project>/<worktree>" name) or nested (a project's live worktree sessions
+// hung under it). Nested is a preference and flat is the permanent default —
+// this is not a migration.
+type WorktreeDisplay string
+
+const (
+	// WorktreeDisplayFlat is the default: one top-level row per worktree.
+	WorktreeDisplayFlat WorktreeDisplay = "flat"
+	// WorktreeDisplayNested hangs a project's live worktree sessions under it.
+	WorktreeDisplayNested WorktreeDisplay = "nested"
+)
 
 // Integration skill alias values for optional integration components.
 const (
@@ -1154,6 +1173,49 @@ func (c *Config) GetDisambiguationStrategy() string {
 	return "first_unique_segment"
 }
 
+// ProjectWorktreeDisplay returns how the project dashboard should arrange
+// worktree rows. An absent key, an empty value or a value the vocabulary does
+// not contain resolves to WorktreeDisplayFlat: an unreadable preference must not
+// change which rows the dashboard lists, and the rejected value is already
+// surfaced as a load-time finding (worktreeDisplayFindings). The deprecated
+// [select] table is honored like every other project key.
+func (c *Config) ProjectWorktreeDisplay() WorktreeDisplay {
+	if c == nil {
+		return WorktreeDisplayFlat
+	}
+	pc := c.projectConfig()
+	if pc == nil {
+		return WorktreeDisplayFlat
+	}
+	if WorktreeDisplay(pc.WorktreeDisplay) == WorktreeDisplayNested {
+		return WorktreeDisplayNested
+	}
+	return WorktreeDisplayFlat
+}
+
+// worktreeDisplayFindings rejects a [project] worktree_display value outside the
+// two-word vocabulary. Per ADR 0054 it is collected, not thrown: the dashboard
+// still opens — flat — and names the offending value in its warning banner
+// rather than silently arranging rows the way the operator did not ask for. Only
+// the main config is checked, because [project] is not on the include whitelist:
+// an included table is dropped and warned about as a whole.
+func worktreeDisplayFindings(path string, pc *ProjectConfig) []Finding {
+	if pc == nil || pc.WorktreeDisplay == "" {
+		return nil
+	}
+	switch WorktreeDisplay(pc.WorktreeDisplay) {
+	case WorktreeDisplayFlat, WorktreeDisplayNested:
+		return nil
+	}
+	return []Finding{{
+		Path: "project.worktree_display",
+		Message: fmt.Sprintf(
+			"%s: [project] worktree_display = %q is not one of %q, %q; using %q",
+			path, pc.WorktreeDisplay, WorktreeDisplayFlat, WorktreeDisplayNested, WorktreeDisplayFlat,
+		),
+	}}
+}
+
 // GetQuickAccessModifier returns the configured quick access modifier.
 // Defaults to "alt" when not set or invalid.
 func (c *Config) GetQuickAccessModifier() string {
@@ -1452,6 +1514,11 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 			Path:    "deprecated.worktree.attention_notifications_enabled",
 			Message: "[worktree] attention_notifications_enabled is deprecated; rename to unread_notifications_enabled",
 		})
+	}
+	// Runs after the [select] alias is folded in, so the finding is raised once
+	// for whichever table actually carried the value.
+	for _, f := range worktreeDisplayFindings(path, cfg.projectConfig()) {
+		cfg.recordFinding(f)
 	}
 
 	configDir := filepath.Dir(path)

@@ -35,6 +35,16 @@ const (
 	iconMapSession     = "◆"
 	iconTaskSetSession = "▲"
 	iconRoutineSession = "●"
+	// The project dashboard's nested mode fuses the two columns above into one:
+	// the list answers "what can I attach to", and which kind of Work a session
+	// hosts is the Work dashboard's question. Every live session reads as
+	// iconDirSession; a Map session is the single kind distinction worth making
+	// here, because you enter it to decide rather than to sit in a checkout. No
+	// colour carries meaning — a glyph is either there or it is not.
+	iconNestedMapSession = "◇"
+	// The disclosure pair says "there is more here" without an accent colour.
+	iconRowCollapsed = "▸"
+	iconRowExpanded  = "▾"
 )
 
 // checkoutSessionName is the naming call for surfaces that open a session for a

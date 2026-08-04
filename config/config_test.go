@@ -5263,3 +5263,92 @@ windows = [{name = "main", layout = {name = "editor", command = "vim"}}]
 		}
 	})
 }
+
+// [project] worktree_display is a two-word vocabulary with a permanent default:
+// nested is a preference, so anything unreadable arranges rows the way pop always
+// has and says so in the warning banner instead of guessing.
+func TestProjectWorktreeDisplay(t *testing.T) {
+	tests := []struct {
+		name        string
+		toml        string
+		want        WorktreeDisplay
+		wantFinding bool
+	}{
+		{name: "absent", toml: "projects = []", want: WorktreeDisplayFlat},
+		{name: "flat", toml: "projects = []\n[project]\nworktree_display = \"flat\"", want: WorktreeDisplayFlat},
+		{name: "nested", toml: "projects = []\n[project]\nworktree_display = \"nested\"", want: WorktreeDisplayNested},
+		{
+			name: "deprecated [select] table honored",
+			toml: "projects = []\n[select]\nworktree_display = \"nested\"",
+			want: WorktreeDisplayNested,
+		},
+		{
+			name:        "unknown value rejected",
+			toml:        "projects = []\n[project]\nworktree_display = \"tree\"",
+			want:        WorktreeDisplayFlat,
+			wantFinding: true,
+		},
+		{
+			name:        "capitalised value rejected",
+			toml:        "projects = []\n[project]\nworktree_display = \"Nested\"",
+			want:        WorktreeDisplayFlat,
+			wantFinding: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			configPath := filepath.Join(t.TempDir(), "config.toml")
+			if err := os.WriteFile(configPath, []byte(tt.toml), 0644); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			cfg, err := Load(configPath)
+			if err != nil {
+				t.Fatalf("Load(): %v", err)
+			}
+			if got := cfg.ProjectWorktreeDisplay(); got != tt.want {
+				t.Errorf("ProjectWorktreeDisplay() = %q, want %q", got, tt.want)
+			}
+
+			var finding *Finding
+			for i := range cfg.Findings {
+				if cfg.Findings[i].Path == "project.worktree_display" {
+					finding = &cfg.Findings[i]
+				}
+			}
+			if tt.wantFinding {
+				if finding == nil {
+					t.Fatalf("no finding for project.worktree_display; findings = %+v", cfg.Findings)
+				}
+				if !strings.Contains(finding.Message, configPath) {
+					t.Errorf("finding %q does not name the config file %q", finding.Message, configPath)
+				}
+				// The banner is the only place the rejection surfaces, so the
+				// message has to reach it.
+				found := false
+				for _, w := range cfg.Warnings {
+					if w == finding.Message {
+						found = true
+					}
+				}
+				if !found {
+					t.Errorf("finding %q missing from Warnings %q", finding.Message, cfg.Warnings)
+				}
+			} else if finding != nil {
+				t.Errorf("unexpected finding %+v", *finding)
+			}
+		})
+	}
+}
+
+// A nil receiver and a config with no [project] table both resolve to the
+// default, so the getter is safe on every path that reaches it.
+func TestProjectWorktreeDisplayZeroValues(t *testing.T) {
+	var nilCfg *Config
+	if got := nilCfg.ProjectWorktreeDisplay(); got != WorktreeDisplayFlat {
+		t.Errorf("nil config: %q, want %q", got, WorktreeDisplayFlat)
+	}
+	if got := (&Config{}).ProjectWorktreeDisplay(); got != WorktreeDisplayFlat {
+		t.Errorf("empty config: %q, want %q", got, WorktreeDisplayFlat)
+	}
+}
