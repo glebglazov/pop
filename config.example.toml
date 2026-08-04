@@ -171,6 +171,27 @@ projects = [
 # standard = [{ model = "kimi-code/k3", reasoning = "high" }]
 # light = [{ model = "kimi-code/k2.7-code" }]
 
+# Per-agent attended-session settings: the sessions pop opens for you to sit in
+# front of (HITL and assist menus, map grilling, routine authoring), never a
+# headless drain. Includable, merged per preset, so a machine-local include can
+# set one agent's block without erasing another's (ADR-0187).
+#
+# attended_args REPLACES pop's own attended arguments for that preset instead of
+# adding to them — pop's defaults are the per-preset auto-approval flag (claude
+# --dangerously-skip-permissions, cursor --force --trust, codex
+# --dangerously-bypass-approvals-and-sandbox; opencode, pi and kimi have none and
+# launch bare). An empty list launches the bare binary; omit the key to keep
+# pop's default.
+# [agents.claude]
+# attended_args = ["--permission-mode", "acceptEdits"]
+#
+# attended_model is the model an attended session names. Left unset, pop passes
+# no model flag at all and the agent's own configuration decides — a --model in
+# [tasks.implement].agents tunes unattended drains only and never reaches an
+# interactive session.
+# [agents.codex]
+# attended_model = "gpt-5.5"
+
 # [tasks]
 # Task attempt retry schedule and caps (ADR-0099). Delays apply between
 # retry-eligible failures for both implement and verify; attempt 1 still starts

@@ -388,6 +388,30 @@ type EffortConfig struct {
 	Light    []EffortModel `toml:"light" desc:"Light-tier model/reasoning ladder (array)."`
 }
 
+// AgentConfig holds one agent preset's attended-session settings — the sessions
+// pop opens for a human to sit in front of (HITL and assist menus, map grilling,
+// routine authoring), never a headless drain (ADR-0187).
+type AgentConfig struct {
+	// AttendedArgs replaces the adapter's declared attended arguments wholesale
+	// rather than appending to them: an attended session has no output protocol
+	// for pop to protect, so the human at the terminal owns their own permission
+	// posture. A pointer so `attended_args = []` (launch bare) is distinguishable
+	// from the key being absent (keep pop's defaults).
+	AttendedArgs *[]string `toml:"attended_args" include:"replace" desc:"Arguments for this preset's attended sessions; replaces pop's defaults ([] launches bare)."`
+	// AttendedModel is the model an attended session names. Unset means pop names
+	// no model at all and the agent's own configuration decides.
+	AttendedModel string `toml:"attended_model" include:"replace" desc:"Model an attended session of this preset names (unset: the agent's own configuration decides)."`
+}
+
+// AgentSettingsFor returns the [agents.<preset>] block for a preset name, or the
+// zero block when the user declared none.
+func (c *Config) AgentSettingsFor(preset string) AgentConfig {
+	if c == nil || c.Agents == nil {
+		return AgentConfig{}
+	}
+	return c.Agents[strings.TrimSpace(preset)]
+}
+
 // ResolveCommitConfigOverrides validates the [tasks.git]
 // commit_config_overrides entries and returns them as `key=value` strings ready
 // to be prepended as `-c key=value` pairs to Pop's commit invocations. Each
@@ -617,6 +641,9 @@ type Config struct {
 	// (not 1:1). Removal is gated in CLEANUP.md.
 	Workload *WorkloadConfig         `toml:"workload" desc:"Deprecated: use [tasks] (ADR-0092)."`
 	Effort   map[string]EffortConfig `toml:"effort" include:"map-first-wins" desc:"Per-agent reasoning-effort ladders ([effort.<agent>] tables)."`
+	// Agents holds [agents.<preset>] blocks: the attended-session settings for one
+	// agent preset, read by every session pop opens for a human (ADR-0187).
+	Agents map[string]AgentConfig `toml:"agents" include:"map-fields" desc:"Per-agent attended-session settings ([agents.<preset>] tables)."`
 	// Workbenches is the canonical TOML key for session blueprints.
 	Workbenches []Workbench `toml:"workbenches" include:"append" desc:"Global session blueprints (templates)."`
 	// WorkbenchOpts holds the [workbench] options table (pick_on_create, order).
@@ -1458,6 +1485,9 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 	for _, f := range effortConfigFindings(path, md) {
 		cfg.recordFinding(f)
 	}
+	for _, f := range agentConfigFindings(path, md) {
+		cfg.recordFinding(f)
+	}
 	for _, f := range projectEntryFindings(path, cfg.Projects) {
 		cfg.recordFinding(f)
 	}
@@ -1555,6 +1585,9 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 		for _, f := range effortConfigFindings(expanded, includedMD) {
 			cfg.recordFinding(f)
 		}
+		for _, f := range agentConfigFindings(expanded, includedMD) {
+			cfg.recordFinding(f)
+		}
 		for _, f := range projectEntryFindings(expanded, included.Projects) {
 			cfg.recordFinding(f)
 		}
@@ -1633,6 +1666,18 @@ func seedIncludeClaims(policy *mergePolicy, cfg *Config, md toml.MetaData) {
 			policy.claim("tasks.verify")
 		}
 	}
+	// [agents.<preset>] merges per field, so each field the parent set is claimed
+	// on its own. Claims are value-driven, like the task ones above: an unset
+	// attended field is a nil argument list or an empty model, never a meaningful
+	// value an include should lose to.
+	for preset, block := range cfg.Agents {
+		if block.AttendedArgs != nil {
+			policy.claim("agents." + preset + ".attended_args")
+		}
+		if strings.TrimSpace(block.AttendedModel) != "" {
+			policy.claim("agents." + preset + ".attended_model")
+		}
+	}
 	if md.IsDefined("workbench", "pick_on_create") {
 		policy.claim("workbench.pick_on_create")
 	}
@@ -1673,6 +1718,14 @@ func includeCollisionMessage(path, keyPath string) string {
 	}
 	if agent, ok := strings.CutPrefix(keyPath, "effort."); ok {
 		return fmt.Sprintf("%s: [effort.%s] skipped, already defined (first definition wins)", path, agent)
+	}
+	if rest, ok := strings.CutPrefix(keyPath, "agents."); ok {
+		// [agents.<preset>] merges per field, so the reported collision names the
+		// field rather than the whole block.
+		if preset, field, found := strings.Cut(rest, "."); found {
+			return fmt.Sprintf("%s: [agents.%s] %s skipped, already defined (first definition wins)", path, preset, field)
+		}
+		return fmt.Sprintf("%s: [agents.%s] skipped, already defined (first definition wins)", path, rest)
 	}
 	if preset, ok := strings.CutPrefix(keyPath, "tasks.presets."); ok {
 		return fmt.Sprintf("%s: [tasks.presets.%s] skipped, already defined (first definition wins)", path, preset)
@@ -1856,6 +1909,31 @@ func effortConfigFindings(path string, md toml.MetaData) []Finding {
 				Message: fmt.Sprintf("%s: [effort.%s] tier %q entry has unknown key %q; valid entry keys: model, reasoning", path, key[1], key[2], key[3]),
 			})
 		}
+	}
+	return findings
+}
+
+// agentConfigFindings reports an unknown key inside an [agents.<preset>] block,
+// so a typo'd attended setting is surfaced rather than silently ignored. The
+// preset name itself is not validated here: config does not know the agent
+// adapter registry, and an unknown preset simply never matches a session.
+func agentConfigFindings(path string, md toml.MetaData) []Finding {
+	validKeys := map[string]bool{"attended_args": true, "attended_model": true}
+	var findings []Finding
+	seen := make(map[string]bool)
+	for _, key := range md.Undecoded() {
+		if len(key) < 3 || key[0] != "agents" || validKeys[key[2]] {
+			continue
+		}
+		f := Finding{
+			Path:    fmt.Sprintf("agents.%s.%s", key[1], key[2]),
+			Message: fmt.Sprintf("%s: [agents.%s] unknown key %q; valid keys: attended_args, attended_model", path, key[1], key[2]),
+		}
+		if seen[f.Path] {
+			continue
+		}
+		seen[f.Path] = true
+		findings = append(findings, f)
 	}
 	return findings
 }
@@ -2196,6 +2274,7 @@ func includeFileWarnings(path string, cfg *Config, d *Deps) []string {
 		"tasks":       true,
 		"workload":    true, // deprecated alias for tasks (ADR-0092)
 		"effort":      true,
+		"agents":      true, // [agents.<preset>] attended-session settings (ADR-0187)
 		"includes":    true, // mentioned in includes, so we track it for warning above
 	}
 
@@ -2205,7 +2284,7 @@ func includeFileWarnings(path string, cfg *Config, d *Deps) []string {
 		if !whitelisted[key] && !seen[key] {
 			seen[key] = true
 			warnings = append(warnings, fmt.Sprintf(
-				"%s: %q ignored (includes only support projects, workbenches, workbench, repo, tasks, and effort blocks)",
+				"%s: %q ignored (includes only support projects, workbenches, workbench, repo, tasks, effort, and agents blocks)",
 				path, key,
 			))
 		}

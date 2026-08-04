@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -24,13 +25,13 @@ func authoringSessionFromGate(d *Deps, out io.Writer, id, agentOverride string) 
 		fmt.Fprintf(out, "Could not load the routine: %v\n", err)
 		return
 	}
-	spec, err := resolveAuthoringAgentSpec(d, agentOverride)
+	spec, cfg, err := resolveAuthoringAgentSpec(d, agentOverride)
 	if err != nil {
 		fmt.Fprintf(out, "Could not resolve the authoring agent: %v\n", err)
 		return
 	}
 	prompt := buildAuthoringPrompt(d, id, r)
-	invocation, err := tasks.ResolveAgentAssistanceInvocation(spec, "", prompt, r.Manifest.BoundDirectory)
+	invocation, err := tasks.ResolveAgentAssistanceInvocation(cfg, spec, "", prompt, r.Manifest.BoundDirectory)
 	if err != nil {
 		fmt.Fprintf(out, "Could not prepare the authoring agent: %v\n", err)
 		return
@@ -53,19 +54,19 @@ func authoringSessionFromGate(d *Deps, out io.Writer, id, agentOverride string) 
 // runs (ResolveRoutineAgentPresets), taking the highest-priority preset. The
 // session is interactive with a human present, so there is no headless quota
 // fall-through — the human switches agents by hand if one is unavailable.
-func resolveAuthoringAgentSpec(d *Deps, override string) (string, error) {
-	if strings.TrimSpace(override) != "" {
-		return override, nil
-	}
+func resolveAuthoringAgentSpec(d *Deps, override string) (string, *config.Config, error) {
 	cfg, err := d.LoadConfig()
 	if err != nil {
-		return "", fmt.Errorf("load config: %w", err)
+		return "", nil, fmt.Errorf("load config: %w", err)
+	}
+	if strings.TrimSpace(override) != "" {
+		return override, cfg, nil
 	}
 	specs := ResolveRoutineAgentPresets(nil, cfg)
 	if len(specs) == 0 {
-		return "", fmt.Errorf("no agent preset is configured")
+		return "", nil, fmt.Errorf("no agent preset is configured")
 	}
-	return specs[0], nil
+	return specs[0], cfg, nil
 }
 
 // runRoutineAttendedAgent runs the resolved attended agent command in the bound

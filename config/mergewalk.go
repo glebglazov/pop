@@ -24,6 +24,7 @@ import (
 //	fields            descend into a sub-struct, recursing on its own tags
 //	map               per-key merge honouring the policy's collision mode
 //	map-first-wins    per-key merge, first source's key always wins
+//	map-fields        per-key merge descending into struct values per field
 //	append            concatenate the source slice onto the destination
 //	list-by-key=<f>   keyed union of a slice, collisions resolved by policy
 //
@@ -42,6 +43,7 @@ const (
 	kindFields       = "fields"
 	kindMap          = "map"
 	kindMapFirstWins = "map-first-wins"
+	kindMapFields    = "map-fields"
 	kindAppend       = "append"
 	kindListByKey    = "list-by-key"
 )
@@ -53,6 +55,7 @@ var knownKinds = map[string]bool{
 	kindFields:       true,
 	kindMap:          true,
 	kindMapFirstWins: true,
+	kindMapFields:    true,
 	kindAppend:       true,
 	kindListByKey:    true,
 }
@@ -200,6 +203,8 @@ func mergeField(dst, src reflect.Value, md toml.MetaData, path []string, kind me
 		mergeMapKind(dst, src, path, policy, false)
 	case kindMapFirstWins:
 		mergeMapKind(dst, src, path, policy, true)
+	case kindMapFields:
+		mergeMapFieldsKind(dst, src, md, path, policy)
 	case kindAppend:
 		mergeAppendKind(dst, src)
 	case kindListByKey:
@@ -267,6 +272,35 @@ func mergeMapKind(dst, src reflect.Value, path []string, policy *mergePolicy, fo
 			continue
 		}
 		dst.SetMapIndex(k, deepCloneValue(it.Value()))
+	}
+}
+
+// mergeMapFieldsKind merges a map of structs per key and, within a key both
+// sources define, per field: a later source may set one field of a key the
+// earlier source also configured without erasing the fields it set. Keys present
+// in only one source are cloned whole, and keys present only in the destination
+// are preserved. Map values are unaddressable, so the merge runs on a copy that
+// is written back.
+func mergeMapFieldsKind(dst, src reflect.Value, md toml.MetaData, path []string, policy *mergePolicy) {
+	if src.Kind() != reflect.Map || src.IsNil() || src.Len() == 0 {
+		return
+	}
+	if dst.IsNil() {
+		dst.Set(reflect.MakeMapWithSize(dst.Type(), src.Len()))
+	}
+	it := src.MapRange()
+	for it.Next() {
+		k := it.Key()
+		existing := dst.MapIndex(k)
+		if !existing.IsValid() {
+			dst.SetMapIndex(k, deepCloneValue(it.Value()))
+			continue
+		}
+		merged := reflect.New(dst.Type().Elem()).Elem()
+		merged.Set(existing)
+		keyPath := append(append([]string{}, path...), fmt.Sprintf("%v", k.Interface()))
+		mergeStruct(merged, it.Value(), md, keyPath, policy)
+		dst.SetMapIndex(k, merged)
 	}
 }
 
@@ -490,7 +524,7 @@ func checkOneTag(f reflect.StructField, key, tagName, tagVal string, problems *[
 		if base.Kind() != reflect.Struct {
 			*problems = append(*problems, fmt.Sprintf("%s: %s:%q needs a struct, got %s", key, tagName, tagVal, base.Kind()))
 		}
-	case kindMap, kindMapFirstWins:
+	case kindMap, kindMapFirstWins, kindMapFields:
 		if base.Kind() != reflect.Map {
 			*problems = append(*problems, fmt.Sprintf("%s: %s:%q needs a map, got %s", key, tagName, tagVal, base.Kind()))
 		}

@@ -45,6 +45,18 @@ enabled = false
 # Use "text" as a compatibility fallback if an agent's structured output fails.
 output = "auto"
 
+[agents.claude]
+# Per-agent settings for the *attended* sessions pop opens for you (HITL and
+# assist menus, map grilling, routine authoring) — never a headless drain.
+# attended_args replaces pop's own attended arguments for this preset rather than
+# adding to them; pop's default is the preset's auto-approval flag, and an empty
+# list launches the bare binary.
+# attended_args = ["--permission-mode", "acceptEdits"]
+# Model an attended session names. Unset ⇒ pop passes no model flag and the
+# agent's own configuration decides; a --model in [tasks.implement].agents tunes
+# unattended drains only and never reaches an interactive session.
+# attended_model = "opus"
+
 [tasks.git]
 # Commit-time git config applied only to pop's own commits during a task drain.
 # Each entry is a git `-c`-style `key=value` pair. Disable GPG signing so an

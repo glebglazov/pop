@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/clipboard"
 )
 
@@ -20,13 +21,16 @@ import (
 // functions over it — deliberately not implementRun methods — so both callers
 // share them.
 type gateEnv struct {
-	d              *Deps
-	out            io.Writer
-	in             io.Reader
-	reader         *promptReader
-	yes            bool
-	agentPreset    string
-	agentCmd       string
+	d           *Deps
+	out         io.Writer
+	in          io.Reader
+	reader      *promptReader
+	yes         bool
+	agentPreset string
+	agentCmd    string
+	// cfg is the loaded config the attended gates read their [agents.<preset>]
+	// settings from (ADR-0187). Nil is legal: the adapter's declared defaults apply.
+	cfg            *config.Config
 	cwd            string
 	runtimePath    string
 	definitionPath string
@@ -85,7 +89,7 @@ func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverif
 
 	prompt := BuildHITLAssistancePrompt(d, taskSetID, m, *hitl, runtimePath)
 	body := gateTaskBody(d, m, hitl)
-	invocation, err := ResolveAgentAssistanceInvocation(agentPreset, agentCmd, prompt, runtimePath)
+	invocation, err := ResolveAgentAssistanceInvocation(env.cfg, agentPreset, agentCmd, prompt, runtimePath)
 	if err != nil {
 		return false, exitErr(ExitSetup, "%v", err)
 	}
@@ -127,7 +131,7 @@ func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverif
 			hitl = BlockingHITLTask(m)
 			body = gateTaskBody(d, m, hitl)
 			prompt = BuildHITLAssistancePrompt(d, taskSetID, m, *hitl, runtimePath)
-			invocation, err = ResolveAgentAssistanceInvocation(agentPreset, agentCmd, prompt, runtimePath)
+			invocation, err = ResolveAgentAssistanceInvocation(env.cfg, agentPreset, agentCmd, prompt, runtimePath)
 			if err != nil {
 				return true, exitErr(ExitSetup, "%v", err)
 			}
@@ -158,7 +162,7 @@ func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverif
 			}
 			m = afterManifest
 			prompt = BuildHITLAssistancePrompt(d, taskSetID, m, *BlockingHITLTask(m), runtimePath)
-			invocation, err = ResolveAgentAssistanceInvocation(agentPreset, agentCmd, prompt, runtimePath)
+			invocation, err = ResolveAgentAssistanceInvocation(env.cfg, agentPreset, agentCmd, prompt, runtimePath)
 			if err != nil {
 				return true, exitErr(ExitSetup, "%v", err)
 			}
@@ -401,7 +405,7 @@ func handleInteractiveFailedGate(env gateEnv, m *Manifest, failed *Task) (bool, 
 
 	prompt := BuildFailedAssistancePrompt(d, taskSetID, m, *failed, runtimePath)
 	body := gateTaskBody(d, m, failed)
-	invocation, err := ResolveAgentAssistanceInvocation(agentPreset, agentCmd, prompt, runtimePath)
+	invocation, err := ResolveAgentAssistanceInvocation(env.cfg, agentPreset, agentCmd, prompt, runtimePath)
 	if err != nil {
 		return false, exitErr(ExitSetup, "%v", err)
 	}
@@ -445,7 +449,7 @@ func handleInteractiveFailedGate(env gateEnv, m *Manifest, failed *Task) (bool, 
 			failed = FailedTask(m)
 			prompt = BuildFailedAssistancePrompt(d, taskSetID, m, *failed, runtimePath)
 			body = gateTaskBody(d, m, failed)
-			invocation, err = ResolveAgentAssistanceInvocation(agentPreset, agentCmd, prompt, runtimePath)
+			invocation, err = ResolveAgentAssistanceInvocation(env.cfg, agentPreset, agentCmd, prompt, runtimePath)
 			if err != nil {
 				return true, exitErr(ExitSetup, "%v", err)
 			}
@@ -548,7 +552,7 @@ func handleInteractiveVerifyFailedGate(env gateEnv, repo string, m *Manifest, wo
 	}
 
 	prompt := BuildVerifyFailedAssistancePrompt(d, taskSetID, m, workSHA, findings, runtimePath)
-	invocation, err := ResolveAgentAssistanceInvocation(agentPreset, agentCmd, prompt, runtimePath)
+	invocation, err := ResolveAgentAssistanceInvocation(env.cfg, agentPreset, agentCmd, prompt, runtimePath)
 	if err != nil {
 		return false, exitErr(ExitSetup, "%v", err)
 	}

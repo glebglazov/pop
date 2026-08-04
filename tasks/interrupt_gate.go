@@ -74,7 +74,7 @@ func handleInteractiveInterruptGate(env gateEnv, m *Manifest, interrupted *Task,
 	}
 
 	prompt := BuildInterruptAssistancePrompt(d, taskSetID, m, *interrupted, runtimePath)
-	invocation, err := ResolveAgentAssistanceInvocation(agentPreset, agentCmd, prompt, runtimePath)
+	invocation, err := ResolveAgentAssistanceInvocation(env.cfg, agentPreset, agentCmd, prompt, runtimePath)
 	if err != nil {
 		return false, exitErr(ExitSetup, "%v", err)
 	}

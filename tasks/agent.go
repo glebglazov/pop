@@ -122,8 +122,10 @@ type AgentHeadlessRequest struct {
 type AgentAssistanceRequest struct {
 	Prompt      string
 	RuntimePath string
-	// ExtraArgs ride into attended assistance for the selected agent (ADR-0017).
-	ExtraArgs []string
+	// Settings are the user's [agents.<preset>] attended overrides. An attended
+	// launch reads its arguments and model from here and never from the extra
+	// arguments of an --agent spec (ADR-0187).
+	Settings AttendedAgentSettings
 }
 
 // AgentAssistanceMode describes how an adapter can offer attended HITL help.
@@ -665,15 +667,15 @@ func (a *presetAgentAdapter) AssistanceInvocation(req AgentAssistanceRequest) (*
 	}
 	command := *capability.Command
 	command.Args = []string{}
-	// An attended launch inherits the human's own shell environment and has no
-	// env channel of its own, so a spec's env assignments are simply not argv.
-	extraArgs, _ := a.splitEnvAssignments(req.ExtraArgs)
-	command.Args = append(command.Args, extraArgs...)
 	command.Args = append(command.Args, capability.Command.Args...)
 	// A session pop opens for a human to work in launches auto-approved, the same
 	// posture the headless drains beside it have always had; the flag that says so
-	// is per-preset and a preset with none launches bare (ADR-0187).
-	command.Args = append(command.Args, a.attendedArgs.attendedArgs()...)
+	// is per-preset, a preset with none launches bare, and the user's
+	// [agents.<preset>].attended_args replaces the lot (ADR-0187).
+	command.Args = append(command.Args, req.Settings.attendedArgsWith(a.attendedArgs)...)
+	// An attended session names a model only when the user asked for one; left
+	// unset, the agent's own configuration decides.
+	command.Args = append(command.Args, req.Settings.modelArgs()...)
 	// A preset with no positional prompt form (kimi) launches bare; its briefing
 	// reaches the human another way (ADR-0164).
 	clipboardPrompt := ""
@@ -1085,8 +1087,14 @@ func ResolveAgentAssistanceCapability(preset, agentCmd string) (AgentAssistanceC
 // ResolveAgentAssistanceInvocation returns the attended command owned by the selected adapter.
 // agentCmd is accepted for call-site symmetry with headless invocation but is intentionally ignored:
 // custom --agent-cmd only applies to unattended issue attempts.
-func ResolveAgentAssistanceInvocation(preset, agentCmd, prompt, runtimePath string) (*AgentAssistanceInvocation, error) {
-	_, extraArgs, err := parseAgentPresetSpec(preset)
+//
+// Only the preset *name* is taken from the spec: an attended session's arguments
+// and model come from the user's [agents.<preset>] block, so a --model tuned for
+// unattended drains in [tasks.implement].agents no longer steers the interactive
+// sessions pop opens (ADR-0187). It is the one chokepoint every attended call
+// site passes through, which is why the policy lives here and not per call site.
+func ResolveAgentAssistanceInvocation(cfg *config.Config, preset, agentCmd, prompt, runtimePath string) (*AgentAssistanceInvocation, error) {
+	name, err := AgentPresetName(preset)
 	if err != nil {
 		return nil, err
 	}
@@ -1097,7 +1105,7 @@ func ResolveAgentAssistanceInvocation(preset, agentCmd, prompt, runtimePath stri
 	return adapter.AssistanceInvocation(AgentAssistanceRequest{
 		Prompt:      prompt,
 		RuntimePath: runtimePath,
-		ExtraArgs:   extraArgs,
+		Settings:    attendedAgentSettingsFor(cfg, name),
 	})
 }
 

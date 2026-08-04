@@ -213,7 +213,7 @@ func TestKimiIsOptInOnlyAndNeverADefault(t *testing.T) {
 }
 
 func TestKimiAssistanceLaunchesBareInteractiveBinary(t *testing.T) {
-	invocation, err := ResolveAgentAssistanceInvocation("kimi --model moonshot-ai/kimi-k3", "", "briefing text", "/tmp/runtime")
+	invocation, err := ResolveAgentAssistanceInvocation(nil, "kimi --model moonshot-ai/kimi-k3", "", "briefing text", "/tmp/runtime")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,10 +224,10 @@ func TestKimiAssistanceLaunchesBareInteractiveBinary(t *testing.T) {
 		t.Fatalf("command = %q, want kimi", invocation.Command.Name)
 	}
 	// kimi's interactive mode accepts no initial prompt, so the briefing is
-	// never an argv item (ADR-0164).
-	want := []string{"--model", "moonshot-ai/kimi-k3"}
-	if !reflect.DeepEqual(invocation.Command.Args, want) {
-		t.Fatalf("args = %#v, want %#v", invocation.Command.Args, want)
+	// never an argv item (ADR-0164); it declares no auto-approval flag and the
+	// spec's model is not an attended concern (ADR-0187), so argv is empty.
+	if len(invocation.Command.Args) != 0 {
+		t.Fatalf("args = %#v, want none", invocation.Command.Args)
 	}
 	if invocation.ClipboardPrompt != "briefing text" {
 		t.Fatalf("ClipboardPrompt = %q, want the briefing (delivered via clipboard, ADR-0164)", invocation.ClipboardPrompt)
@@ -241,7 +241,7 @@ func TestKimiAssistanceLaunchesBareInteractiveBinary(t *testing.T) {
 // with every preset whose interactive binary takes the briefing positionally:
 // the prompt rides in argv, so ClipboardPrompt must stay empty.
 func TestClaudeAssistanceCarriesNoClipboardPrompt(t *testing.T) {
-	invocation, err := ResolveAgentAssistanceInvocation("claude", "", "briefing text", "/tmp/runtime")
+	invocation, err := ResolveAgentAssistanceInvocation(nil, "claude", "", "briefing text", "/tmp/runtime")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -556,19 +556,6 @@ func TestArgChannelPresetKeepsEqualsArgsInArgv(t *testing.T) {
 	joined := strings.Join(invocation.Args, " ")
 	if !strings.Contains(joined, `-c model_reasoning_effort="high"`) {
 		t.Fatalf("args lost the reasoning config: %#v", invocation.Args)
-	}
-}
-
-func TestKimiAssistanceKeepsEnvAssignmentsOutOfArgv(t *testing.T) {
-	unsetEnvForTest(t, "KIMI_MODEL_THINKING_EFFORT")
-	spec := resolveTaskAgentSpecForEffort("kimi", "heavy", true)
-	invocation, err := ResolveAgentAssistanceInvocation(spec, "", "briefing text", "/tmp/runtime")
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []string{"--model", "moonshot-ai/kimi-k3"}
-	if !reflect.DeepEqual(invocation.Command.Args, want) {
-		t.Fatalf("args = %#v, want %#v", invocation.Command.Args, want)
 	}
 }
 
@@ -928,7 +915,7 @@ func TestAgentAssistanceCapabilityNativeForEveryPreset(t *testing.T) {
 }
 
 func TestResolveAgentAssistanceInvocationNative(t *testing.T) {
-	invocation, err := ResolveAgentAssistanceInvocation("claude", "", "assist prompt", "/tmp/runtime")
+	invocation, err := ResolveAgentAssistanceInvocation(nil, "claude", "", "assist prompt", "/tmp/runtime")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -950,7 +937,7 @@ func TestResolveAgentAssistanceInvocationNative(t *testing.T) {
 }
 
 func TestResolveAgentAssistanceInvocationCursorLaunchesOwnBinary(t *testing.T) {
-	invocation, err := ResolveAgentAssistanceInvocation("cursor", "", "assist prompt", "/tmp/runtime")
+	invocation, err := ResolveAgentAssistanceInvocation(nil, "cursor", "", "assist prompt", "/tmp/runtime")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -971,30 +958,92 @@ func TestResolveAgentAssistanceInvocationCursorLaunchesOwnBinary(t *testing.T) {
 	}
 }
 
-func TestResolveAgentAssistanceInvocationCarriesExtraArgsNative(t *testing.T) {
-	invocation, err := ResolveAgentAssistanceInvocation("claude --model opus4.8", "", "assist prompt", "/tmp/runtime")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if invocation.Mode != AgentAssistanceNative || invocation.Command.Name != "claude" {
-		t.Fatalf("invocation = %#v, want claude native", invocation)
-	}
-	want := []string{"--model", "opus4.8", "--dangerously-skip-permissions", "assist prompt"}
-	if !reflect.DeepEqual(invocation.Command.Args, want) {
-		t.Fatalf("command args = %#v, want %#v", invocation.Command.Args, want)
+// TestAttendedAssistanceIgnoresImplementListExtraArgs pins decision 4 of
+// ADR-0187: an attended session takes the preset name from the implement agent
+// list and nothing else, so a --model tuned for unattended drains no longer
+// steers the interactive sessions pop opens.
+func TestAttendedAssistanceIgnoresImplementListExtraArgs(t *testing.T) {
+	for _, tc := range []struct {
+		spec string
+		name string
+		want []string
+	}{
+		{"claude --model opus4.8", "claude", []string{"--dangerously-skip-permissions", "assist prompt"}},
+		{"cursor --model gpt-5", "cursor-agent", []string{"--force", "--trust", "assist prompt"}},
+	} {
+		t.Run(tc.spec, func(t *testing.T) {
+			invocation, err := ResolveAgentAssistanceInvocation(nil, tc.spec, "", "assist prompt", "/tmp/runtime")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if invocation.Mode != AgentAssistanceNative || invocation.Command.Name != tc.name {
+				t.Fatalf("invocation = %#v, want %s native", invocation, tc.name)
+			}
+			if !reflect.DeepEqual(invocation.Command.Args, tc.want) {
+				t.Fatalf("command args = %#v, want %#v", invocation.Command.Args, tc.want)
+			}
+		})
 	}
 }
 
-func TestResolveAgentAssistanceInvocationCarriesExtraArgsForNonClaudePreset(t *testing.T) {
-	invocation, err := ResolveAgentAssistanceInvocation("cursor --model gpt-5", "", "assist prompt", "/tmp/runtime")
+// TestAttendedArgsConfigReplacesDeclaredDefaults pins decision 2 of ADR-0187:
+// [agents.<preset>].attended_args replaces the adapter's declared list wholesale
+// rather than appending to it — an empty list launches the bare binary — and
+// attended_model is the only way a model reaches an attended command.
+func TestAttendedArgsConfigReplacesDeclaredDefaults(t *testing.T) {
+	bare := []string{}
+	for _, tc := range []struct {
+		name  string
+		block config.AgentConfig
+		want  []string
+	}{
+		{
+			name:  "replaces",
+			block: config.AgentConfig{AttendedArgs: &[]string{"--permission-mode", "acceptEdits"}},
+			want:  []string{"--permission-mode", "acceptEdits", "assist prompt"},
+		},
+		{
+			name:  "empty list launches bare",
+			block: config.AgentConfig{AttendedArgs: &bare},
+			want:  []string{"assist prompt"},
+		},
+		{
+			name:  "model only",
+			block: config.AgentConfig{AttendedModel: "opus"},
+			want:  []string{"--dangerously-skip-permissions", "--model", "opus", "assist prompt"},
+		},
+		{
+			name:  "args and model together",
+			block: config.AgentConfig{AttendedArgs: &[]string{"--permission-mode", "plan"}, AttendedModel: "sonnet"},
+			want:  []string{"--permission-mode", "plan", "--model", "sonnet", "assist prompt"},
+		},
+		{
+			name:  "unset keeps the declared default and names no model",
+			block: config.AgentConfig{},
+			want:  []string{"--dangerously-skip-permissions", "assist prompt"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &config.Config{Agents: map[string]config.AgentConfig{"claude": tc.block}}
+			// The preset arrives as the implement list writes it; only its name may
+			// select the [agents.<preset>] block.
+			invocation, err := ResolveAgentAssistanceInvocation(cfg, "claude --model from-implement-list", "", "assist prompt", "/tmp/runtime")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(invocation.Command.Args, tc.want) {
+				t.Fatalf("command args = %#v, want %#v", invocation.Command.Args, tc.want)
+			}
+		})
+	}
+
+	// A block for another preset must not reach this one.
+	cfg := &config.Config{Agents: map[string]config.AgentConfig{"cursor": {AttendedModel: "composer-2.5"}}}
+	invocation, err := ResolveAgentAssistanceInvocation(cfg, "claude", "", "assist prompt", "/tmp/runtime")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if invocation.Mode != AgentAssistanceNative || invocation.Command.Name != "cursor-agent" {
-		t.Fatalf("invocation = %#v, want cursor-agent native", invocation)
-	}
-	want := []string{"--model", "gpt-5", "--force", "--trust", "assist prompt"}
-	if !reflect.DeepEqual(invocation.Command.Args, want) {
+	if want := []string{"--dangerously-skip-permissions", "assist prompt"}; !reflect.DeepEqual(invocation.Command.Args, want) {
 		t.Fatalf("command args = %#v, want %#v", invocation.Command.Args, want)
 	}
 }
@@ -1016,7 +1065,7 @@ func TestAttendedAssistanceLaunchesAutoApproved(t *testing.T) {
 		{"kimi", nil},
 	} {
 		t.Run(tc.preset, func(t *testing.T) {
-			invocation, err := ResolveAgentAssistanceInvocation(tc.preset, "", "assist prompt", "/tmp/runtime")
+			invocation, err := ResolveAgentAssistanceInvocation(nil, tc.preset, "", "assist prompt", "/tmp/runtime")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1046,7 +1095,7 @@ func TestAgentCmdIgnoredForAttendedAssistance(t *testing.T) {
 		t.Fatalf("capability = %#v, want native despite --agent-cmd", capability)
 	}
 
-	invocation, err := ResolveAgentAssistanceInvocation("cursor", "fake-agent --verbose", "assist prompt", "/tmp/runtime")
+	invocation, err := ResolveAgentAssistanceInvocation(nil, "cursor", "fake-agent --verbose", "assist prompt", "/tmp/runtime")
 	if err != nil {
 		t.Fatal(err)
 	}

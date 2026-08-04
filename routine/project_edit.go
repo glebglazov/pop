@@ -194,13 +194,13 @@ func renderProjectRefineMenu(out io.Writer, name, lastRun string) {
 // authoringSessionFromGate but runs in the checkout and front-loads a
 // project-aware briefing: manual-only, no schedule, and pop never commits.
 func projectAuthoringSessionFromGate(d *Deps, out io.Writer, pr *ProjectRoutine, agentOverride string) {
-	spec, err := resolveAuthoringAgentSpec(d, agentOverride)
+	spec, cfg, err := resolveAuthoringAgentSpec(d, agentOverride)
 	if err != nil {
 		fmt.Fprintf(out, "Could not resolve the authoring agent: %v\n", err)
 		return
 	}
 	prompt := buildProjectAuthoringPrompt(d, pr)
-	invocation, err := tasks.ResolveAgentAssistanceInvocation(spec, "", prompt, pr.Dir)
+	invocation, err := tasks.ResolveAgentAssistanceInvocation(cfg, spec, "", prompt, pr.Dir)
 	if err != nil {
 		fmt.Fprintf(out, "Could not prepare the authoring agent: %v\n", err)
 		return

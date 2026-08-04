@@ -140,19 +140,19 @@ func newImplementRun(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 	}
 
 	return &implementRun{
-		d:            d,
-		loadConfig:   loadConfig,
-		opts:         opts,
-		plan:         plan,
-		resolved:     resolved,
-		runtimePath:  runtimePath,
-		statePath:    statePath,
-		taskSetID:    taskSetID,
-		hitlFallback: hitlFallback,
-		confirmOut:   confirmOut,
-		out:          out,
-		refresh:      refresh,
-		drain:        drain,
+		d:              d,
+		loadConfig:     loadConfig,
+		opts:           opts,
+		plan:           plan,
+		resolved:       resolved,
+		runtimePath:    runtimePath,
+		statePath:      statePath,
+		taskSetID:      taskSetID,
+		hitlFallback:   hitlFallback,
+		confirmOut:     confirmOut,
+		out:            out,
+		refresh:        refresh,
+		drain:          drain,
 		agentProbeMemo: newAgentAvailabilityProbeMemo(),
 	}, nil
 }
@@ -316,6 +316,7 @@ func (r *implementRun) newGateEnv() gateEnv {
 		definitionPath: r.resolved.DefinitionPath,
 		statePath:      r.statePath,
 		taskSetID:      r.taskSetID,
+		cfg:            r.plan.cfg,
 	}
 }
 

@@ -1530,7 +1530,7 @@ func TestResolveAttemptRetryDelays(t *testing.T) {
 		{name: "empty list", cfg: &Config{Task: &TasksConfig{AttemptRetryDelays: []string{}}}, want: []time.Duration{}},
 		{
 			name: "custom list",
-			cfg: &Config{Task: &TasksConfig{AttemptRetryDelays: []string{"10s", "1m"}}},
+			cfg:  &Config{Task: &TasksConfig{AttemptRetryDelays: []string{"10s", "1m"}}},
 			want: []time.Duration{10 * time.Second, time.Minute},
 		},
 	}
@@ -3013,6 +3013,134 @@ heavy = [{ model = "opus", reasoning = "high" }]
 		}
 		if !found {
 			t.Fatalf("expected effort collision warning, got: %v", cfg.Warnings)
+		}
+	})
+
+	t.Run("included agents table merges per preset", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		writeFile := func(name, content string) string {
+			p := filepath.Join(tmpDir, name)
+			if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			return p
+		}
+
+		writeFile("private.toml", `
+[agents.codex]
+attended_args = ["--full-auto"]
+attended_model = "gpt-5.5"
+
+[agents.claude]
+attended_args = ["--from-the-include"]
+attended_model = "from-the-include"
+`)
+		configPath := writeFile("config.toml", `
+includes = ["private.toml"]
+
+[agents.claude]
+attended_args = []
+attended_model = "opus"
+`)
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		// The include set a preset the parent never mentions, and the parent's own
+		// preset survives untouched: the merge is per preset, not whole-table.
+		codex := cfg.AgentSettingsFor("codex")
+		if codex.AttendedArgs == nil || !reflect.DeepEqual(*codex.AttendedArgs, []string{"--full-auto"}) {
+			t.Fatalf("agents.codex attended_args = %#v, want [--full-auto]", codex.AttendedArgs)
+		}
+		if codex.AttendedModel != "gpt-5.5" {
+			t.Fatalf("agents.codex attended_model = %q, want gpt-5.5", codex.AttendedModel)
+		}
+		claude := cfg.AgentSettingsFor("claude")
+		if claude.AttendedModel != "opus" {
+			t.Fatalf("agents.claude attended_model = %q, want the parent's opus", claude.AttendedModel)
+		}
+		// An explicitly empty list is a real setting (launch bare), not an absent key.
+		if claude.AttendedArgs == nil || len(*claude.AttendedArgs) != 0 {
+			t.Fatalf("agents.claude attended_args = %#v, want an empty list", claude.AttendedArgs)
+		}
+		found := false
+		for _, w := range cfg.Warnings {
+			if strings.Contains(w, "[agents.claude] attended_model skipped") {
+				found = true
+			}
+			if strings.Contains(w, `"agents" ignored`) {
+				t.Fatalf("agents must be include-whitelisted, got: %v", cfg.Warnings)
+			}
+		}
+		if !found {
+			t.Fatalf("expected a per-field [agents.claude] collision warning, got: %v", cfg.Warnings)
+		}
+	})
+
+	t.Run("include fills one field of a preset the parent also sets", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		writeFile := func(name, content string) string {
+			p := filepath.Join(tmpDir, name)
+			if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			return p
+		}
+
+		writeFile("private.toml", `
+[agents.claude]
+attended_model = "from-the-include"
+`)
+		configPath := writeFile("config.toml", `
+includes = ["private.toml"]
+
+[agents.claude]
+attended_args = ["--permission-mode", "acceptEdits"]
+`)
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		// The block merges per field: the parent's args survive and the include
+		// supplies the model the parent never set.
+		claude := cfg.AgentSettingsFor("claude")
+		if claude.AttendedArgs == nil || !reflect.DeepEqual(*claude.AttendedArgs, []string{"--permission-mode", "acceptEdits"}) {
+			t.Fatalf("agents.claude attended_args = %#v, want the parent's list", claude.AttendedArgs)
+		}
+		if claude.AttendedModel != "from-the-include" {
+			t.Fatalf("agents.claude attended_model = %q, want from-the-include", claude.AttendedModel)
+		}
+		for _, w := range cfg.Warnings {
+			if strings.Contains(w, "[agents.claude]") {
+				t.Fatalf("no collision expected, got: %v", cfg.Warnings)
+			}
+		}
+	})
+
+	t.Run("unknown key in included agents block produces finding", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		if err := os.WriteFile(configPath, []byte(`
+[agents.claude]
+attended_flags = ["--nope"]
+`), 0644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		found := false
+		for _, f := range cfg.Findings {
+			if f.Path == "agents.claude.attended_flags" &&
+				strings.Contains(f.Message, `[agents.claude] unknown key "attended_flags"`) {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("expected an unknown-key finding, got: %#v", cfg.Findings)
 		}
 	})
 

@@ -138,6 +138,7 @@ func AssistTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 		definitionPath: resolved.DefinitionPath,
 		statePath:      statePath,
 		taskSetID:      setID,
+		cfg:            cfg,
 		fold:           opts.Fold,
 	}
 
@@ -335,7 +336,7 @@ func handleGenericAssistMenu(env gateEnv, m *Manifest, status TaskSetStatus, fin
 	}
 
 	prompt := BuildAssistPrompt(d, taskSetID, m, status, runtimePath, findings)
-	invocation, err := ResolveAgentAssistanceInvocation(env.agentPreset, env.agentCmd, prompt, runtimePath)
+	invocation, err := ResolveAgentAssistanceInvocation(env.cfg, env.agentPreset, env.agentCmd, prompt, runtimePath)
 	if err != nil {
 		return false, exitErr(ExitSetup, "%v", err)
 	}
@@ -365,7 +366,7 @@ func handleGenericAssistMenu(env gateEnv, m *Manifest, status TaskSetStatus, fin
 				}
 			}
 			prompt = BuildAssistPrompt(d, taskSetID, m, status, runtimePath, findings)
-			invocation, err = ResolveAgentAssistanceInvocation(env.agentPreset, env.agentCmd, prompt, runtimePath)
+			invocation, err = ResolveAgentAssistanceInvocation(env.cfg, env.agentPreset, env.agentCmd, prompt, runtimePath)
 			if err != nil {
 				return false, exitErr(ExitSetup, "%v", err)
 			}
@@ -457,4 +458,3 @@ func stillHasWorktreeBinding(d *Deps, setID string) bool {
 	}
 	return false
 }
-
