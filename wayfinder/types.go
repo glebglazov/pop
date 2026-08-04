@@ -22,6 +22,13 @@ const (
 	MapBroken MapStatus = "BROKEN"
 )
 
+// authorableMapStatuses is map.md's whole Status: vocabulary, in lifecycle
+// order. The parser accepts these words and nothing else, and the authoring
+// guide prints this same slice — one list, so a printed status is always a
+// status pop reads back. MapBroken is absent by construction: it is pop's
+// verdict on a Map it cannot read, never a word a session writes.
+var authorableMapStatuses = []MapStatus{MapActive, MapArrived, MapAbandoned}
+
 // TicketType classifies a Decision ticket.
 type TicketType string
 
@@ -30,6 +37,15 @@ const (
 	TicketPrototype TicketType = "prototype"
 	TicketGrilling  TicketType = "grilling"
 	TicketTask      TicketType = "task"
+)
+
+// manifestTicketTypeOrder and manifestTicketStatusOrder are the manifest's two
+// enums in the order a guide reads best. The validator's lookup maps are built
+// from these slices (see manifest.go), so there is one list per enum rather than
+// a set to enforce against and a list to print.
+var (
+	manifestTicketTypeOrder   = []TicketType{TicketResearch, TicketPrototype, TicketGrilling, TicketTask}
+	manifestTicketStatusOrder = []TicketStatus{TicketOpen, TicketResolved}
 )
 
 // TicketStatus is the workflow state of a Decision ticket.

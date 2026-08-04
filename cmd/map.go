@@ -96,8 +96,15 @@ var mapStatusCmd = &cobra.Command{
 var mapRegisterCmd = &cobra.Command{
 	Use:   "register MAP",
 	Short: "End charting: validate a map's manifest and register it as Work",
-	Args:  cobra.ExactArgs(1),
-	Run:   runMapRegister,
+	Long: `End charting: validate a map's manifest and register it as Work.
+
+A MALFORMED map is a fix loop, not a failure — the diagnostics name every
+problem at once, so fix what they name and run this again.
+
+For the shape of the files themselves — layout, templates and manifest fields —
+run "pop map authoring-guide".`,
+	Args: cobra.ExactArgs(1),
+	Run:  runMapRegister,
 }
 
 // mapNextCmd is the parallel-grilling primitive: several panes run it against the

@@ -1041,11 +1041,11 @@ func commitSubjectPrefix(taskSetID string) string {
 	return fmt.Sprintf("tasks(%s):", taskSetSlug(taskSetID))
 }
 
-// specFileName is the optional co-located enrichment file a Verifier prompt
-// includes when present (see buildVerifierPrompt). There is no backward-compat
-// read of the retired prd.md filename (ADR-0136): a set folder holding only a
-// legacy prd.md is treated as spec-less, not as an error.
-const specFileName = "spec.md"
+// The Verifier prompt includes the co-located spec when present (see
+// buildVerifierPrompt). There is no backward-compat read of the retired prd.md
+// filename (ADR-0136): a set folder holding only a legacy prd.md is treated as
+// spec-less, not as an error.
+const specFileName = SpecFileName
 
 // buildVerifierPrompt assembles the Verifier's input: the authoritative
 // acceptance criteria and task bodies for the set's `done` AFK tasks only, plus

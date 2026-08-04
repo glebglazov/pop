@@ -10,18 +10,57 @@ import (
 	"strings"
 )
 
-var (
-	allowedTaskTypes    = map[string]bool{"AFK": true, "HITL": true}
-	allowedTaskStatuses = map[TaskStatus]bool{TaskOpen: true, TaskDone: true, TaskFailed: true, TaskSkipped: true}
-	allowedTaskEfforts  = map[string]bool{"light": true, "standard": true, "heavy": true}
-	acHeaderPattern     = regexp.MustCompile(`(?i)^##\s+Acceptance criteria\s*$`)
-	checkboxPattern     = regexp.MustCompile(`^-\s+\[[ xX]\]`)
+// The manifest's three enums, each in the order a reader wants them, plus the
+// two file names and the acceptance-criteria heading. The validator's lookup
+// maps and patterns are built from these, and the authoring guide prints the
+// same values, so a printed rule is always the enforced one.
+const (
+	// ManifestFileName is the machine-readable half of a Task set, sitting beside
+	// the task markdown it indexes.
+	ManifestFileName = "index.json"
+	// SpecFileName is the optional co-located enrichment file: the spec a set was
+	// broken down from, and the one non-task markdown a set folder holds.
+	SpecFileName = "spec.md"
+	// AcceptanceCriteriaHeading names the one section every task markdown must
+	// carry, with at least one checkbox under it.
+	AcceptanceCriteriaHeading = "Acceptance criteria"
+	// manifestTasksKey is the manifest's only required top-level key.
+	manifestTasksKey = "tasks"
+
+	DefaultTaskEffort = "standard"
 )
 
-const DefaultTaskEffort = "standard"
+var (
+	taskTypeOrder   = []string{"AFK", "HITL"}
+	taskStatusOrder = []TaskStatus{TaskOpen, TaskDone, TaskFailed, TaskSkipped}
+	taskEffortOrder = []string{"light", DefaultTaskEffort, "heavy"}
+
+	allowedTaskTypes    = stringSet(taskTypeOrder)
+	allowedTaskStatuses = statusSet(taskStatusOrder)
+	allowedTaskEfforts  = stringSet(taskEffortOrder)
+
+	acHeaderPattern = regexp.MustCompile(`(?i)^##\s+` + regexp.QuoteMeta(AcceptanceCriteriaHeading) + `\s*$`)
+	checkboxPattern = regexp.MustCompile(`^-\s+\[[ xX]\]`)
+)
+
+func stringSet(values []string) map[string]bool {
+	set := make(map[string]bool, len(values))
+	for _, v := range values {
+		set[v] = true
+	}
+	return set
+}
+
+func statusSet(values []TaskStatus) map[TaskStatus]bool {
+	set := make(map[TaskStatus]bool, len(values))
+	for _, v := range values {
+		set[v] = true
+	}
+	return set
+}
 
 // ValidEfforts returns the accepted effort tier names in ladder order.
-func ValidEfforts() []string { return []string{"light", "standard", "heavy"} }
+func ValidEfforts() []string { return append([]string(nil), taskEffortOrder...) }
 
 // IsValidEffort reports whether effort names an accepted model-strength tier.
 func IsValidEffort(effort string) bool { return allowedTaskEfforts[effort] }
@@ -183,7 +222,7 @@ func parseManifestJSON(data []byte, m *Manifest) error {
 		return fmt.Errorf("parse JSON: %w", err)
 	}
 
-	tasksRaw, ok := raw["tasks"]
+	tasksRaw, ok := raw[manifestTasksKey]
 	if !ok {
 		return fmt.Errorf("missing tasks array")
 	}
@@ -194,7 +233,7 @@ func parseManifestJSON(data []byte, m *Manifest) error {
 	m.Unknown = make(map[string]json.RawMessage)
 	for k, v := range raw {
 		switch k {
-		case "tasks":
+		case manifestTasksKey:
 			continue
 		case "auto_drain", "worktree":
 			// Retired set-level keys (ADR-0115): no longer read as registration
@@ -353,7 +392,7 @@ func WriteManifestAtomic(d *Deps, m *Manifest) error {
 	if err != nil {
 		return err
 	}
-	out["tasks"] = tasksData
+	out[manifestTasksKey] = tasksData
 	if m.SourceMap != "" {
 		sourceMap, err := json.Marshal(m.SourceMap)
 		if err != nil {

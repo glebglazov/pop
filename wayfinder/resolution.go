@@ -271,24 +271,9 @@ func renderMapIndex(d *Deps, m Map, manifest *MapManifest) error {
 		return fmt.Errorf("read %s: %w", path, err)
 	}
 	sections := []generatedSection{
-		{
-			name:    "decisions",
-			heading: "Decisions so far",
-			header:  decisionsSoFarHeader,
-			body:    resolvedTicketLines(d, m.Dir, manifest, false),
-		},
-		{
-			name:    "out-of-scope",
-			heading: "Out of scope",
-			header:  outOfScopeHeader,
-			body:    resolvedTicketLines(d, m.Dir, manifest, true),
-		},
-		{
-			name:    "spawned-sets",
-			heading: "Spawned sets",
-			header:  spawnedSetsHeader,
-			body:    spawnedSetLines(manifest),
-		},
+		{generatedRegion: regionDecisions, body: resolvedTicketLines(d, m.Dir, manifest, false)},
+		{generatedRegion: regionOutOfScope, body: resolvedTicketLines(d, m.Dir, manifest, true)},
+		{generatedRegion: regionSpawnedSets, body: spawnedSetLines(manifest)},
 	}
 	return writeMapFile(d, path, renderGeneratedSections(string(content), sections))
 }

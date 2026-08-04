@@ -210,7 +210,7 @@ func ImportWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Conf
 	// the entire archive; nothing is written.
 	var malformed []string
 	for _, archiveID := range archiveIDs {
-		manifestPath := filepath.Join(tempDir, archiveID, "index.json")
+		manifestPath := filepath.Join(tempDir, archiveID, ManifestFileName)
 		manifest := LoadManifest(d, archiveID, manifestPath)
 		if manifest.Valid {
 			continue

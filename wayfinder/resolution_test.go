@@ -318,10 +318,8 @@ The old answer.
 func TestGeneratedRegionSurvivesAHeadingInItsBody(t *testing.T) {
 	t.Parallel()
 	section := generatedSection{
-		name:    "decisions",
-		heading: "Decisions so far",
-		header:  decisionsSoFarHeader,
-		body:    []string{"- [Database](issues/01-first.md) — Postgres.", "", "## A heading inside the region", "", "- [Client](issues/03-third.md) — Go."},
+		generatedRegion: regionDecisions,
+		body:            []string{"- [Database](issues/01-first.md) — Postgres.", "", "## A heading inside the region", "", "- [Client](issues/03-third.md) — Go."},
 	}
 	first := renderGeneratedSections(resolveMapMarkdown, []generatedSection{section})
 	if got := strings.TrimSpace(regionBody(t, first, "decisions")); got != strings.TrimSpace(strings.Join(section.body, "\n")) {
@@ -334,8 +332,8 @@ func TestGeneratedRegionSurvivesAHeadingInItsBody(t *testing.T) {
 	}
 
 	shrunk := renderGeneratedSections(second, []generatedSection{{
-		name: "decisions", heading: "Decisions so far", header: decisionsSoFarHeader,
-		body: []string{"- [Database](issues/01-first.md) — Postgres."},
+		generatedRegion: regionDecisions,
+		body:            []string{"- [Database](issues/01-first.md) — Postgres."},
 	}})
 	if strings.Contains(shrunk, "A heading inside the region") {
 		t.Fatalf("a heading in the old body survived the rewrite:\n%s", shrunk)

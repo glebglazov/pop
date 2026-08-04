@@ -70,7 +70,7 @@ func scanManifests(d *Deps, taskDir string, result *Discovery) error {
 		if !ent.IsDir() {
 			continue
 		}
-		manifestPath := filepath.Join(taskDir, ent.Name(), "index.json")
+		manifestPath := filepath.Join(taskDir, ent.Name(), ManifestFileName)
 		if _, err := d.FS.Stat(manifestPath); os.IsNotExist(err) {
 			continue
 		} else if err != nil {

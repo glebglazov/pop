@@ -17,15 +17,35 @@ import (
 // metadata from here instead of hand-parsing N ticket markdown files.
 const MapManifestFileName = "index.json"
 
-var (
-	manifestTicketStatuses = map[TicketStatus]bool{TicketOpen: true, TicketResolved: true}
-	manifestTicketTypes    = map[TicketType]bool{
-		TicketResearch:  true,
-		TicketPrototype: true,
-		TicketGrilling:  true,
-		TicketTask:      true,
-	}
+// The manifest's two top-level keys, and the shape a ticket filename must take.
+// The parser, the writer, the validator's diagnostics and the authoring guide
+// all say them from here, so a printed rule is the enforced one.
+const (
+	manifestTicketsKey     = "tickets"
+	manifestSpawnedSetsKey = "spawned_sets"
+	ticketFileShape        = "NN-<slug>.md"
 )
+
+var (
+	manifestTicketStatuses = ticketStatusSet(manifestTicketStatusOrder)
+	manifestTicketTypes    = ticketTypeSet(manifestTicketTypeOrder)
+)
+
+func ticketStatusSet(values []TicketStatus) map[TicketStatus]bool {
+	set := make(map[TicketStatus]bool, len(values))
+	for _, v := range values {
+		set[v] = true
+	}
+	return set
+}
+
+func ticketTypeSet(values []TicketType) map[TicketType]bool {
+	set := make(map[TicketType]bool, len(values))
+	for _, v := range values {
+		set[v] = true
+	}
+	return set
+}
 
 // ManifestTicket is one Decision ticket entry in a Map's index.json. Status is
 // open | resolved only: a claim is an owner plus a timestamp in pop.db, not a
@@ -103,7 +123,7 @@ func parseMapManifestJSON(data []byte, m *MapManifest) error {
 		return fmt.Errorf("parse JSON: %w", err)
 	}
 
-	ticketsRaw, ok := raw["tickets"]
+	ticketsRaw, ok := raw[manifestTicketsKey]
 	if !ok {
 		return fmt.Errorf("missing tickets array")
 	}
@@ -111,7 +131,7 @@ func parseMapManifestJSON(data []byte, m *MapManifest) error {
 		return fmt.Errorf("parse tickets: %w", err)
 	}
 
-	if spawnedRaw, ok := raw["spawned_sets"]; ok {
+	if spawnedRaw, ok := raw[manifestSpawnedSetsKey]; ok {
 		var spawned []string
 		if err := json.Unmarshal(spawnedRaw, &spawned); err != nil {
 			return fmt.Errorf("parse spawned_sets: %w", err)
@@ -124,7 +144,7 @@ func parseMapManifestJSON(data []byte, m *MapManifest) error {
 	}
 
 	for k, v := range raw {
-		if k == "tickets" || k == "spawned_sets" {
+		if k == manifestTicketsKey || k == manifestSpawnedSetsKey {
 			continue
 		}
 		m.Unknown[k] = v
@@ -158,7 +178,7 @@ func validateMapManifest(d *Deps, m *MapManifest) {
 		case strings.ContainsAny(t.File, `/\`):
 			m.Errors = append(m.Errors, fmt.Sprintf("ticket %q: file must be a name under issues/, got %q", t.ID, t.File))
 		case !ticketFilePattern.MatchString(t.File):
-			m.Errors = append(m.Errors, fmt.Sprintf("ticket %q: file %q does not match NN-<slug>.md", t.ID, t.File))
+			m.Errors = append(m.Errors, fmt.Sprintf("ticket %q: file %q does not match %s", t.ID, t.File, ticketFileShape))
 		default:
 			if files[t.File] {
 				m.Errors = append(m.Errors, fmt.Sprintf("duplicate ticket file %q", t.File))
@@ -236,7 +256,7 @@ func WriteMapManifest(d *Deps, m *MapManifest) error {
 	if err != nil {
 		return err
 	}
-	out["tickets"] = ticketsData
+	out[manifestTicketsKey] = ticketsData
 
 	spawned := m.SpawnedSets
 	if spawned == nil {
@@ -246,7 +266,7 @@ func WriteMapManifest(d *Deps, m *MapManifest) error {
 	if err != nil {
 		return err
 	}
-	out["spawned_sets"] = spawnedData
+	out[manifestSpawnedSetsKey] = spawnedData
 
 	data, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {

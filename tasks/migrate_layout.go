@@ -79,7 +79,7 @@ func MigrateStorageLayout(d *Deps, tasksDir string) (*StorageLayoutMigration, er
 
 	moved := readTaskSetIDs(d, tasksDir)
 	for _, setID := range moved {
-		manifestPath := filepath.Join(tasksDir, setID, "index.json")
+		manifestPath := filepath.Join(tasksDir, setID, ManifestFileName)
 		if err := rewriteManifestTaskKey(d, manifestPath); err != nil {
 			return nil, exitErr(ExitOperational, "rewrite manifest for task set %q: %v", setID, err)
 		}

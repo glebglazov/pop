@@ -20,14 +20,28 @@ var (
 	spawnedSetsHeader = regexp.MustCompile(`(?i)^##\s+Spawned sets\s*$`)
 )
 
-// generatedSection is one pop-owned region of map.md: the heading it lives
-// under, the marker name that delimits it, and the lines to put between the
-// markers.
-type generatedSection struct {
+// generatedRegion is one pop-owned region of map.md: the heading it lives under
+// and the marker name that delimits it. The resolve render fills these; the
+// authoring guide prints them, so the regions a session is told not to touch are
+// exactly the regions pop rebuilds.
+type generatedRegion struct {
 	name    string
 	heading string
 	header  *regexp.Regexp
-	body    []string
+}
+
+var (
+	regionDecisions   = generatedRegion{name: "decisions", heading: "Decisions so far", header: decisionsSoFarHeader}
+	regionOutOfScope  = generatedRegion{name: "out-of-scope", heading: "Out of scope", header: outOfScopeHeader}
+	regionSpawnedSets = generatedRegion{name: "spawned-sets", heading: "Spawned sets", header: spawnedSetsHeader}
+
+	mapGeneratedRegions = []generatedRegion{regionDecisions, regionOutOfScope, regionSpawnedSets}
+)
+
+// generatedSection is a region plus the lines to put between its markers.
+type generatedSection struct {
+	generatedRegion
+	body []string
 }
 
 func generatedRegionMarkers(name string) (string, string) {

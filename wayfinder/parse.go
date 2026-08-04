@@ -12,7 +12,7 @@ var (
 	statusLinePattern = regexp.MustCompile(`(?i)^Status:\s*(.+)$`)
 	typeLinePattern   = regexp.MustCompile(`(?i)^Type:\s*(.+)$`)
 	blockedByPattern  = regexp.MustCompile(`(?i)^Blocked by:\s*(.+)$`)
-	destinationHeader     = regexp.MustCompile(`(?i)^##\s+Destination\s*$`)
+	destinationHeader     = regexp.MustCompile(`(?i)^##\s+` + regexp.QuoteMeta(destinationSectionName) + `\s*$`)
 	decisionsSoFarHeader  = regexp.MustCompile(`(?i)^##\s+Decisions so far\s*$`)
 	answerHeader          = regexp.MustCompile(`(?i)^##\s+Answer\s*$`)
 )
@@ -22,6 +22,10 @@ var (
 const (
 	answerSectionName = "Answer"
 	answerRegionName  = "answer"
+	// destinationSectionName is the one prose section of map.md pop reads back —
+	// the gist every status render leads with — so the authoring guide prints the
+	// heading from here rather than transcribing it.
+	destinationSectionName = "Destination"
 )
 
 // ParseMapMarkdown extracts map status and destination from map.md contents.
@@ -59,17 +63,21 @@ func ParseMapMarkdown(content string) (MapStatus, string, error) {
 // the corrective a reader of a BROKEN Map acts on, so it names the replacement
 // rather than just rejecting the word.
 func parseMapStatus(raw string) (MapStatus, error) {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case string(MapActive):
-		return MapActive, nil
-	case string(MapArrived):
-		return MapArrived, nil
-	case string(MapAbandoned):
-		return MapAbandoned, nil
-	default:
-		return "", fmt.Errorf("unknown map status %q: map.md's Status: line takes active | arrived | abandoned "+
-			"(a Map that reached its destination is `arrived` — write it with `pop map arrive <map-id>`)", raw)
+	word := strings.ToLower(strings.TrimSpace(raw))
+	for _, status := range authorableMapStatuses {
+		if word == string(status) {
+			return status, nil
+		}
 	}
+	return "", fmt.Errorf("unknown map status %q: map.md's Status: line takes %s "+
+		"(a Map that reached its destination is `arrived` — write it with `pop map arrive <map-id>`)",
+		raw, mapStatusVocabulary())
+}
+
+// mapStatusVocabulary renders the accepted Status: words the way both the parse
+// error and the authoring guide say them: `active | arrived | abandoned`.
+func mapStatusVocabulary() string {
+	return strings.Join(mapStatusWords(), " | ")
 }
 
 // ReplaceMapStatus writes status onto map.md's Status: line. Only the metadata
@@ -127,7 +135,7 @@ func ParseTicketMarkdown(filename, content string) (Ticket, error) {
 	base := filepathBase(filename)
 	m := ticketFilePattern.FindStringSubmatch(base)
 	if m == nil {
-		return Ticket{}, fmt.Errorf("ticket filename %q does not match NN-<slug>.md", filename)
+		return Ticket{}, fmt.Errorf("ticket filename %q does not match %s", filename, ticketFileShape)
 	}
 	number, err := strconv.Atoi(m[1])
 	if err != nil {

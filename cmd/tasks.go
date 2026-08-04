@@ -73,11 +73,36 @@ var taskStatusCmd = &cobra.Command{
 	RunE:  runTaskStatus,
 }
 
+// taskRegisterCmd's help is a flag reference and nothing more. Authoring
+// doctrine — templates, typing, effort, slicing — is `pop tasks authoring-guide`,
+// read once per authoring session by a machine, where -h is hit constantly by a
+// human wanting flag syntax (ADR-0183).
 var taskRegisterCmd = &cobra.Command{
 	Use:   "register [TASK_SET]",
 	Short: "Register newly authored task sets so they become visible and schedulable, then show status",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runTaskRegister,
+	Long: `Register newly authored task sets so they become visible and schedulable, then
+show status. Writing a set's files only drafts it; this is the verb that makes
+it Work.
+
+With no flags the set is bound to the current checkout as it stands. --managed
+instead forks an isolated worktree from the Trunk worktree and binds the set to
+that, refusing when no trunk resolves (--trunk <path> names one, needed once per
+bare repo). --auto-drain is independent of both: it sets the set's consent bit
+so the Work daemon may drain the set unattended, and "pop tasks auto-drain" and
+the dashboard's "a" toggle remain authoritative afterwards.
+
+Re-registering an already-registered set never rebinds it; move it with
+"pop tasks bind-worktree <task-set-name> --force" from inside the target
+checkout.
+
+A set that comes back MALFORMED is a fix loop, not a failure: the diagnostics
+name every problem at once, so fix what they name and re-run until the set reads
+READY (or DEFERRED, when every open task is HITL).
+
+For the shape of the files themselves — layout, templates, manifest fields and
+the typing rules — run "pop tasks authoring-guide".`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runTaskRegister,
 }
 
 var taskArchiveCmd = &cobra.Command{

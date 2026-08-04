@@ -22,7 +22,7 @@ func BuildAgentPrompt(taskPath, runtimePath string) string {
 	fmt.Fprintf(&b, "satisfy every box under \"Acceptance criteria\". As you complete each\n")
 	fmt.Fprintf(&b, "criterion, check its box (`- [ ]` → `- [x]`) in %s.\n\n", taskPath)
 	fmt.Fprintf(&b, "Do NOT modify %s. Do NOT modify other task files in %s.\n",
-		filepath.Join(tasksDir, "index.json"), tasksDir)
+		filepath.Join(tasksDir, ManifestFileName), tasksDir)
 	fmt.Fprintf(&b, "Do NOT make git commits — the runner handles assessment and committing.\n\n")
 	fmt.Fprintf(&b, "Runtime checkout: %s\n\n", runtimePath)
 	fmt.Fprintf(&b, "Implementation edits belong only beneath the runtime checkout.\n\n")
