@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/internal/deps"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
@@ -1123,4 +1124,68 @@ func dirEntriesForCmd(path string, files map[string]string) []os.DirEntry {
 		out = append(out, deps.MockDirEntry{NameVal: name, IsDirVal: isDir || dirs[name]})
 	}
 	return out
+}
+
+// TestMapVerbsRecordTheMapsTrunkInHistory pins the CLI side of ADR-0188's
+// recording: the Map verbs that put you in a session record where that session is
+// rooted. A Map has no checkout of its own, so the Trunk worktree is the landing —
+// which is how a trunk you have been living in through a Map session all week stops
+// ageing out of the project picker. None of them grows a flag for it: `--no-history`
+// stays the project picker's own.
+func TestMapVerbsRecordTheMapsTrunkInHistory(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		run  func(*wayfinder.Deps) error
+	}{
+		{name: "open", run: func(d *wayfinder.Deps) error {
+			return runMapOpenWith(d, &bytes.Buffer{}, "demo")
+		}},
+		{name: "assist", run: func(d *wayfinder.Deps) error {
+			return runMapAssistWith(d, &bytes.Buffer{}, "demo", false)
+		}},
+		{name: "next", run: func(d *wayfinder.Deps) error {
+			return runMapNextWith(d, &bytes.Buffer{}, "demo", false)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, _, _ := mapRegistryTestDeps(t, oneTicketMapFiles("demo"))
+			if err := runMapRegisterWith(d, &bytes.Buffer{}, "demo"); err != nil {
+				t.Fatal(err)
+			}
+			// Registration only reports where the session is; nothing has landed yet.
+			if paths := recordedHistoryPaths(t); len(paths) != 0 {
+				t.Fatalf("history before the verb = %v, want empty", paths)
+			}
+			if err := tc.run(d); err != nil {
+				t.Fatalf("%s: %v", tc.name, err)
+			}
+			trunk := d.Tmux.(*tmuxtest.Fake).Live[wayfinder.MapSessionName("demo")]
+			if trunk == "" {
+				t.Fatal("the map session was rooted nowhere")
+			}
+			if paths := recordedHistoryPaths(t); len(paths) != 1 || paths[0] != trunk {
+				t.Fatalf("history = %v, want the map's trunk %s alone", paths, trunk)
+			}
+		})
+	}
+	for _, cmd := range []*cobra.Command{mapOpenCmd, mapAssistCmd, mapNextCmd, mapFanOutCmd} {
+		if cmd.Flags().Lookup("no-history") != nil {
+			t.Fatalf("%s grew a --no-history flag; the gate belongs to the project picker alone", cmd.CommandPath())
+		}
+	}
+}
+
+// recordedHistoryPaths reads the landing rows through the same seam the pickers
+// read them through.
+func recordedHistoryPaths(t *testing.T) []string {
+	t.Helper()
+	hist, err := history.LoadWith(cmdHistoryDeps())
+	if err != nil {
+		t.Fatalf("load history: %v", err)
+	}
+	var paths []string
+	for _, e := range hist.Entries {
+		paths = append(paths, e.Path)
+	}
+	return paths
 }

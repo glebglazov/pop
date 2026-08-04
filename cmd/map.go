@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/debug"
+	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/wayfinder"
 	"github.com/spf13/cobra"
 )
@@ -341,6 +343,21 @@ func reportMapSession(w io.Writer, d *wayfinder.Deps, mapID string) {
 	fmt.Fprintf(w, "tmux session %s is live\n", session.Name)
 }
 
+// recordMapLanding records where a Map verb just put the human: the Trunk
+// worktree the Map's session is rooted at, since a Map has no checkout of its own
+// (ADR-0188). Best-effort like every other recording site — the landing has
+// already happened by the time this runs — and silent for a session that reported
+// no Trunk, which is one that was already live and never needed one resolved.
+func recordMapLanding(verb string, session wayfinder.MapSession) {
+	dir := strings.TrimSpace(session.Dir)
+	if dir == "" {
+		return
+	}
+	if err := history.RecordWith(cmdHistoryDeps(), dir); err != nil {
+		debug.Error("%s: record history: %v", verb, err)
+	}
+}
+
 // runMapStatus is `pop map status [MAP]`: bare, it lists every map; given a map
 // id it prints that one map's detail, folding the former `pop map show` verb in
 // (ADR-0181's sibling consistency fix — `pop tasks status` already carries both
@@ -404,6 +421,7 @@ func runMapNextWith(d *wayfinder.Deps, w io.Writer, mapID string, focus bool) er
 	if err != nil {
 		return err
 	}
+	recordSpawnLanding("map next", out)
 	renderSpawnedTickets(w, out)
 	return focusMapSession(d, out, focus)
 }
@@ -425,8 +443,20 @@ func runMapFanOutWith(d *wayfinder.Deps, w io.Writer, mapID string, focus bool) 
 	if err != nil {
 		return err
 	}
+	recordSpawnLanding("map fan-out", out)
 	renderSpawnedTickets(w, out)
 	return focusMapSession(d, out, focus)
+}
+
+// recordSpawnLanding records the landing behind a frontier spawn. An empty
+// frontier spawned nothing and created no session, so there is nowhere to have
+// landed; one or more panes means the operator now has grilling running in that
+// Map's session, whether or not --focus took them there.
+func recordSpawnLanding(verb string, out *wayfinder.FrontierSpawn) {
+	if out == nil || len(out.Spawned) == 0 {
+		return
+	}
+	recordMapLanding(verb, out.Session)
 }
 
 // renderSpawnedTickets prints one claim-shaped block per spawned ticket and then a
@@ -489,6 +519,7 @@ func runMapAssistWith(d *wayfinder.Deps, w io.Writer, mapID string, focus bool) 
 		verb = "returned to"
 	}
 	fmt.Fprintf(w, "%s assist pane %s in %s:%s\n", verb, pane.Title, pane.Session.Name, pane.Window)
+	recordMapLanding("map assist", pane.Session)
 	fmt.Fprintf(w, "map %s: scoped to the whole map — no ticket claimed, and this session resolves none\n", pane.MapID)
 	if !focus {
 		return nil
@@ -641,6 +672,9 @@ func runMapOpenWith(d *wayfinder.Deps, w io.Writer, mapID string) error {
 	result, err := wayfinder.OpenMap(d, cmdLayerDeps().WorkDir(), mapID)
 	if err != nil {
 		return err
+	}
+	if result.Session != nil {
+		recordMapLanding("map open", *result.Session)
 	}
 	renderArrival(w, result)
 	return nil

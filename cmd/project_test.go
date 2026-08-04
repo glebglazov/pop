@@ -1137,6 +1137,54 @@ func TestRunProject_ActionConfirmRecordsHistory(t *testing.T) {
 	}
 }
 
+// TestRunProject_NoHistorySuppressesTheRecord pins the one gate on recording:
+// `--no-history` is the project picker's own flag and still silences its record,
+// while the landing itself happens exactly as it would otherwise. Recording spread
+// to every handoff site in ADR-0188 and no site grew a second gate, so this is the
+// only place the flag has to hold.
+func TestRunProject_NoHistorySuppressesTheRecord(t *testing.T) {
+	t.Parallel()
+	var openedItem *ui.Item
+	var hist *history.History
+
+	d := testProjectDeps(t)
+	d.NoHistory = true
+	origLoadHistory := d.LoadHistory
+	d.LoadHistory = func() (*history.History, error) {
+		h, err := origLoadHistory()
+		hist = h
+		return h, err
+	}
+	d.RunPicker = scriptedPicker(func(items []ui.Item) ui.Result {
+		return ui.Result{Action: ui.ActionConfirm, Selected: &items[0], CursorIndex: 0}
+	})
+	d.OpenSession = func(item *ui.Item) error {
+		openedItem = item
+		return nil
+	}
+
+	if err := RunProject(d); err != nil {
+		t.Fatalf("RunProject: %v", err)
+	}
+
+	if openedItem == nil {
+		t.Fatal("--no-history must still open the session")
+	}
+	if hist == nil {
+		t.Fatal("LoadHistory was not called")
+	}
+	if len(hist.Entries) != 0 {
+		t.Fatalf("--no-history recorded %+v, want nothing", hist.Entries)
+	}
+	stored, err := history.LoadWith(cmdHistoryDeps())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Entries) != 0 {
+		t.Fatalf("--no-history wrote %+v to the store, want nothing", stored.Entries)
+	}
+}
+
 func TestRunProject_ActionKillSessionContinuesLoop(t *testing.T) {
 	t.Parallel()
 	var killedNames []string

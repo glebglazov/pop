@@ -239,6 +239,18 @@ func (h *History) Record(path string) error {
 	return s.PutHistoryEntry(path, now)
 }
 
+// RecordWith records a landing at path for a caller that only ever writes: a
+// dashboard handoff verb, a Map session verb. They hold no snapshot to sort, so
+// the load exists only to reach the store seam, and the whole call is best-effort
+// like Record itself — recency bookkeeping never blocks the landing it describes.
+func RecordWith(d *Deps, path string) error {
+	h, err := LoadWith(d)
+	if err != nil {
+		return err
+	}
+	return h.Record(path)
+}
+
 // Remove deletes a project from history, dropping its row and its place in the
 // loaded snapshot.
 func (h *History) Remove(path string) error {

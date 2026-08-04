@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/internal/deps"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
@@ -974,6 +975,31 @@ func TestSpawnCreatesQueueWindowWhenAbsent(t *testing.T) {
 	assertFakeSentImplement(t, f, pane, "2026-06-14-queue")
 	if len(f.WindowRetiled) != 0 {
 		t.Fatalf("a fresh single-pane drain window must not be retiled, got %v", f.WindowRetiled)
+	}
+}
+
+// TestDaemonSpawnedDrainRecordsNoHistory pins the line History draws: what the
+// Work daemon spawns unattended is not a landing. Overnight machine work must not
+// reorder the project picker — the record answers "where have I been", not "where
+// has pop opened something" (ADR-0188). The manual counterpart records in the
+// dashboard's own handoff path, which this spawn never reaches.
+func TestDaemonSpawnedDrainRecordsNoHistory(t *testing.T) {
+	td := queuetest.DataDeps(t)
+	f := &tmuxtest.Fake{}
+	d := &Deps{Tmux: f, Tasks: td}
+	dec := actionableDecision()
+	dec.scan.ProjectPath = queuetest.InitGitRepoWithBase(t)
+
+	if err := Spawn(d, dec); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	hist, err := history.LoadWith(&history.Deps{FS: td.FS, Tmux: f, Tasks: td})
+	if err != nil {
+		t.Fatalf("load history: %v", err)
+	}
+	if len(hist.Entries) != 0 {
+		t.Fatalf("an unattended drain recorded %+v, want history untouched", hist.Entries)
 	}
 }
 

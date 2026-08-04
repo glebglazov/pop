@@ -34,7 +34,9 @@ func LaunchWayfinderSession(d *drain.Deps, cfg *config.Config, row DashboardRow,
 	if err != nil {
 		return drain.DashboardDrainResult{}, err
 	}
-	return drain.DashboardDrainResult{PaneID: spawned.Pane.PaneID, Session: spawned.Pane.Session.Name}, nil
+	// A Map has no checkout of its own, so the checkout this handoff lands in — the
+	// one History records — is the Trunk its session is rooted at (ADR-0188).
+	return drain.DashboardDrainResult{PaneID: spawned.Pane.PaneID, Session: spawned.Pane.Session.Name, RuntimePath: spawned.Pane.Session.Dir}, nil
 }
 
 // LaunchWayfinderFanOut spawns one Grilling pane per frontier ticket — the same
@@ -54,7 +56,7 @@ func LaunchWayfinderFanOut(d *drain.Deps, cfg *config.Config, row DashboardRow) 
 		return drain.DashboardDrainResult{}, 0, wayfinder.ErrEmptyFrontier
 	}
 	first := out.Spawned[0].Pane
-	return drain.DashboardDrainResult{PaneID: first.PaneID, Session: first.Session.Name}, len(out.Spawned), nil
+	return drain.DashboardDrainResult{PaneID: first.PaneID, Session: first.Session.Name, RuntimePath: first.Session.Dir}, len(out.Spawned), nil
 }
 
 // LaunchWayfinderAssist opens the Map's own attended session — no ticket, no
@@ -70,7 +72,7 @@ func LaunchWayfinderAssist(d *drain.Deps, cfg *config.Config, row DashboardRow) 
 	if err != nil {
 		return drain.DashboardDrainResult{}, err
 	}
-	return drain.DashboardDrainResult{PaneID: pane.PaneID, Session: pane.Session.Name}, nil
+	return drain.DashboardDrainResult{PaneID: pane.PaneID, Session: pane.Session.Name, RuntimePath: pane.Session.Dir}, nil
 }
 
 // wayfinderSpawnTarget resolves what both spawn verbs need off a map row: the

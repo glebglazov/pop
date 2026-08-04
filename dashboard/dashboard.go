@@ -11,6 +11,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/debug"
+	"github.com/glebglazov/pop/history"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/setkind"
@@ -1947,7 +1949,44 @@ func handoffAfterLaunch(d *drain.Deps, result drain.DashboardDrainResult, err er
 	if ferr := tmuxmod.FocusPane(d.Tmux, result.PaneID); ferr != nil {
 		return dashboardHandoffMsg{err: ferr}
 	}
+	recordHandoffLanding(d, result)
 	return dashboardHandoffMsg{quit: true}
+}
+
+// recordHandoffLanding writes the checkout tmux has just moved the operator into
+// into History (ADR-0188). It sits behind the focus, so it records only the
+// handoffs that actually went somewhere, and it covers every verb at once because
+// they all end here — a manually launched drain, verify or fold included: the line
+// History draws is manual versus daemon, not human work versus machine work.
+//
+// The launcher's own answer for where the pane lives comes first — a task set's
+// binding-resolved runtime path, a Map's Trunk worktree — and a launcher that
+// named none is one whose pane is all it has to offer (a Routine's refinement or
+// prompt-edit window), so the pane's own working directory is the landing.
+//
+// Best-effort throughout, and silent when no store is wired: a Deps built as a
+// bare literal must not reach for the machine-global store to record a test's
+// handoff.
+func recordHandoffLanding(d *drain.Deps, result drain.DashboardDrainResult) {
+	if d == nil || d.Tasks == nil {
+		return
+	}
+	path := strings.TrimSpace(result.RuntimePath)
+	if path == "" {
+		paneDir, err := d.Tmux.PaneCurrentPath(result.PaneID)
+		if err != nil {
+			debug.Error("dashboard: pane directory for history: %v", err)
+			return
+		}
+		path = strings.TrimSpace(paneDir)
+	}
+	if path == "" {
+		return
+	}
+	hd := &history.Deps{FS: d.Tasks.FS, Tmux: d.Tmux, Tasks: d.Tasks}
+	if err := history.RecordWith(hd, path); err != nil {
+		debug.Error("dashboard: record history: %v", err)
+	}
 }
 
 // dashboardRowStorageDir derives a container's Task-storage directory from the
