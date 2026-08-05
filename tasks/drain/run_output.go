@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/glebglazov/pop/config"
@@ -30,10 +31,43 @@ type RunView struct {
 	Queued           []IdleProject
 	Blocked          []BlockedItem
 	AwaitingApproval []AwaitingApprovalItem
-	WorktreeBindings []WorktreeBindingView
 	Skipped          []SkippedRepo
 	IdleCount        int
 	ScanErrors       map[string]string
+
+	// worktreeBindings carries the work behind the Active-worktrees section rather
+	// than its result: deriving it refreshes the whole definition path of every
+	// bound checkout, and the only surface that renders it is the daemon's
+	// one-time run baseline (ADR-0189). Read it through WorktreeBindings.
+	worktreeBindings *lazyWorktreeBindings
+}
+
+// WorktreeBindings returns the provisioned checkouts of the Active-worktrees
+// section, deriving them on first read. A view built by hand rather than by
+// BuildRunView carries no section and lists nothing.
+func (v RunView) WorktreeBindings() []WorktreeBindingView {
+	if v.worktreeBindings == nil {
+		return nil
+	}
+	return v.worktreeBindings.items()
+}
+
+// lazyWorktreeBindings is the deferred Active-worktrees section: the derivation
+// runs at most once, and because the view holds it by pointer every copy of the
+// view — the daemon's swallow snapshot included — shares that one answer.
+type lazyWorktreeBindings struct {
+	once     sync.Once
+	build    func() []WorktreeBindingView
+	resolved []WorktreeBindingView
+}
+
+func (s *lazyWorktreeBindings) items() []WorktreeBindingView {
+	s.once.Do(func() {
+		if s.build != nil {
+			s.resolved = s.build()
+		}
+	})
+	return s.resolved
 }
 
 // WorktreeBindingView is one provisioned checkout tracked in queue daemon state.
@@ -159,7 +193,14 @@ func BuildRunView(snap StatusSnapshot, now time.Time) RunView {
 
 	view.Blocked = append(view.Blocked, blockedItemsFromState(snap.Tasks, snap.CrashRetryDelays, now, blockedProjects)...)
 	view.Blocked = append(view.Blocked, blockedItemsFromRecoveryWaiters(snap.Tasks, snap.RecoveryWaiters, blockedProjects)...)
-	view.WorktreeBindings = buildWorktreeBindingViews(snap.Tasks, view, snap.IncludeDone)
+	// The Active-worktrees section is deferred rather than built: no caller here
+	// reads it, and one that does pays for it then (ADR-0189). Running is captured
+	// by value so the section answers for the scan this view was built from, even
+	// though SeedSpawnedRunning may append to a later copy of the view.
+	running := view.Running
+	view.worktreeBindings = &lazyWorktreeBindings{build: func() []WorktreeBindingView {
+		return buildWorktreeBindingViews(snap.Tasks, snap.Config, running, snap.IncludeDone)
+	}}
 	view.Blocked = append(view.Blocked, blockedItemsFromAgentCooldowns(snap.ActiveAgentCooldowns, now)...)
 
 	sort.SliceStable(view.Queued, func(i, j int) bool { return view.Queued[i].Project < view.Queued[j].Project })
@@ -421,12 +462,15 @@ func RenderRunBaseline(out io.Writer, view RunView) {
 		}
 	}
 
+	// The baseline is the one surface that renders Active worktrees, so it is the
+	// one place the deferred section is paid for (ADR-0189).
+	worktrees := view.WorktreeBindings()
 	fmt.Fprintln(out, "Active worktrees:")
-	if len(view.WorktreeBindings) == 0 {
+	if len(worktrees) == 0 {
 		fmt.Fprintln(out, "  none")
 	} else {
-		for _, binding := range view.WorktreeBindings {
-			fmt.Fprintf(out, "  %s\n", formatWorktreeBindingLine(binding))
+		for _, wt := range worktrees {
+			fmt.Fprintf(out, "  %s\n", formatWorktreeBindingLine(wt))
 		}
 	}
 
@@ -516,13 +560,13 @@ func formatRunningLine(p PickedUpSet) string {
 	return fmt.Sprintf("%s: %s%s%s", projectLabel, setID, pid, started)
 }
 
-func buildWorktreeBindingViews(d *tasks.Deps, view RunView, includeDone bool) []WorktreeBindingView {
+func buildWorktreeBindingViews(d *tasks.Deps, cfg *config.Config, running []PickedUpSet, includeDone bool) []WorktreeBindingView {
 	bindings, err := binding.AllBindings(d)
 	if err != nil || len(bindings) == 0 {
 		return nil
 	}
-	runningBySet := make(map[string]PickedUpSet, len(view.Running))
-	for _, p := range view.Running {
+	runningBySet := make(map[string]PickedUpSet, len(running))
+	for _, p := range running {
 		if p.SetID != "" {
 			runningBySet[p.SetID] = p
 		}
@@ -536,20 +580,18 @@ func buildWorktreeBindingViews(d *tasks.Deps, view RunView, includeDone bool) []
 
 	// Done inclusion (ADR-0121): a DONE set's binding is hidden from Active
 	// worktrees by default — the status-surface half of the uniform DONE hide the
-	// dashboard row layer applies. doneCache memoizes per-checkout status probes so
-	// this stays a bounded read even in the supervisor's per-tick run view. cfg is
-	// loaded once so the DONE status matches the dashboard's Verify overlay.
-	doneCache := map[string]bool{}
-	var doneCfg *config.Config
+	// dashboard row layer applies. cfg is the configuration the snapshot was
+	// derived under, so the DONE status matches the dashboard's Verify overlay.
+	var done *bindingDoneCache
 	if !includeDone {
-		doneCfg, _ = config.Load(config.DefaultConfigPath())
+		done = newBindingDoneCache(d, cfg)
 	}
 
 	items := make([]WorktreeBindingView, 0, len(keys))
 	for _, key := range keys {
 		b := bindings[key]
 		setID := binding.SetIDFromKey(key)
-		if !includeDone && bindingSetDone(d, doneCfg, doneCache, b.RuntimePath, setID) {
+		if done.setDone(b.RuntimePath, setID) {
 			continue
 		}
 		project := b.Project
@@ -578,32 +620,68 @@ func buildWorktreeBindingViews(d *tasks.Deps, view RunView, includeDone bool) []
 	return items
 }
 
-// bindingSetDone reports whether the set bound to runtimePath is DONE, applying
-// the same SHA-gated Verify overlay the dashboard row layer uses so a set that
-// is done-in-manifest but VERIFY-FAILED at the current SHA is not treated as
-// DONE. Results memoize per (checkout, set); resolution failures (a stale or
-// vanished checkout) report not-DONE so the binding stays visible.
-func bindingSetDone(d *tasks.Deps, cfg *config.Config, cache map[string]bool, runtimePath, setID string) bool {
-	if d == nil || runtimePath == "" || setID == "" {
+// bindingDoneCache answers "is the set bound to this checkout DONE?" for the
+// Active-worktrees filter, applying the same SHA-gated Verify overlay the
+// dashboard row layer uses so a set that is done-in-manifest but VERIFY-FAILED at
+// the current SHA is not treated as DONE. A resolution failure (a stale or
+// vanished checkout) reports not-DONE, so the binding stays visible.
+//
+// It caches at two levels because the question has two shapes (ADR-0189). The
+// answer is per set, but the work behind it — refreshing a checkout's whole
+// definition path, every registered set's manifest loaded and every task markdown
+// re-validated — is per checkout. One cache keyed by (checkout, set) therefore ran
+// that refresh once per binding: K bindings sharing a checkout scanned it K times.
+type bindingDoneCache struct {
+	d   *tasks.Deps
+	cfg *config.Config
+	// refreshes holds one overlaid refresh per checkout. A nil entry records a
+	// checkout that could not be resolved, so the failure is not retried per set.
+	refreshes map[string]*tasks.RefreshResult
+	done      map[string]bool
+}
+
+func newBindingDoneCache(d *tasks.Deps, cfg *config.Config) *bindingDoneCache {
+	return &bindingDoneCache{d: d, cfg: cfg, refreshes: map[string]*tasks.RefreshResult{}, done: map[string]bool{}}
+}
+
+// setDone is the per-set level. A nil cache means Done inclusion is on and no
+// binding is hidden, so the caller can ask unconditionally.
+func (c *bindingDoneCache) setDone(runtimePath, setID string) bool {
+	if c == nil || c.d == nil || runtimePath == "" || setID == "" {
 		return false
 	}
-	cacheKey := runtimePath + "\x00" + setID
-	if done, ok := cache[cacheKey]; ok {
+	key := runtimePath + "\x00" + setID
+	if done, ok := c.done[key]; ok {
 		return done
 	}
 	done := false
-	if id, err := tasks.ResolveRepositoryIdentity(d, runtimePath); err == nil {
-		if defPath, err := tasks.CanonicalDefinitionPathWith(d, id.TasksDir); err == nil {
-			if refresh, err := tasks.RefreshWith(d, defPath, tasks.StatePathFor(defPath)); err == nil {
-				tasks.ApplyVerifyVerdictsWith(d, refresh, cfg, func(string) string { return runtimePath })
-				if row := tasks.FindRow(refresh, setID); row != nil {
-					done = row.Status == tasks.StatusDone
-				}
+	if refresh := c.refresh(runtimePath); refresh != nil {
+		if row := tasks.FindRow(refresh, setID); row != nil {
+			done = row.Status == tasks.StatusDone
+		}
+	}
+	c.done[key] = done
+	return done
+}
+
+// refresh is the per-checkout level: the definition-path scan every set bound to
+// this checkout shares. The overlay's per-set runtime resolver is a constant
+// here — one checkout, so one HEAD gating every verdict in this refresh.
+func (c *bindingDoneCache) refresh(runtimePath string) *tasks.RefreshResult {
+	if refresh, ok := c.refreshes[runtimePath]; ok {
+		return refresh
+	}
+	var refresh *tasks.RefreshResult
+	if id, err := tasks.ResolveRepositoryIdentity(c.d, runtimePath); err == nil {
+		if defPath, err := tasks.CanonicalDefinitionPathWith(c.d, id.TasksDir); err == nil {
+			if result, err := tasks.RefreshWith(c.d, defPath, tasks.StatePathFor(defPath)); err == nil {
+				tasks.ApplyVerifyVerdictsWith(c.d, result, c.cfg, func(string) string { return runtimePath })
+				refresh = result
 			}
 		}
 	}
-	cache[cacheKey] = done
-	return done
+	c.refreshes[runtimePath] = refresh
+	return refresh
 }
 
 func formatWorktreeBindingLine(binding WorktreeBindingView) string {

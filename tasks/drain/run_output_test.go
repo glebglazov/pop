@@ -393,14 +393,14 @@ func TestRunViewHidesDoneManagedWorktreeBinding(t *testing.T) {
 
 	// Default: the DONE set's managed binding is hidden.
 	hidden := BuildRunView(StatusSnapshot{Tasks: td}, time.Now().UTC())
-	if len(hidden.WorktreeBindings) != 0 {
-		t.Fatalf("Active worktrees = %+v, want empty (DONE binding hidden by default)", hidden.WorktreeBindings)
+	if len(hidden.WorktreeBindings()) != 0 {
+		t.Fatalf("Active worktrees = %+v, want empty (DONE binding hidden by default)", hidden.WorktreeBindings())
 	}
 
 	// Done inclusion reveals it.
 	shown := BuildRunView(StatusSnapshot{Tasks: td, IncludeDone: true}, time.Now().UTC())
-	if len(shown.WorktreeBindings) != 1 || shown.WorktreeBindings[0].SetID != setID {
-		t.Fatalf("Active worktrees = %+v, want the DONE binding revealed with include-done", shown.WorktreeBindings)
+	if len(shown.WorktreeBindings()) != 1 || shown.WorktreeBindings()[0].SetID != setID {
+		t.Fatalf("Active worktrees = %+v, want the DONE binding revealed with include-done", shown.WorktreeBindings())
 	}
 }
 
