@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 )
 
 // legacyStorageParent is the retired data-dir parent for per-repository storage,
@@ -25,6 +26,15 @@ type StorageLayoutMigration struct {
 	MovedSets []string
 }
 
+// migrateStorageMu serializes the storage-layout migration process-wide. Every
+// other read a Work load makes can run beside its neighbours; this one writes —
+// it moves a tree, rewrites manifests and rekeys registration through pop's
+// single store connection (ADR-0140) — and two repository groups migrating at
+// once is the one way a fanned-out load could corrupt rather than merely fail to
+// help (ADR-0189). A load hoists it ahead of its fan-out; the lock is what makes
+// that hoist a guarantee rather than a convention.
+var migrateStorageMu sync.Mutex
+
 // MigrateStorageLayout moves a pre-rename storage layout into the current one on
 // first touch. Given the current tasks directory (repos/<repo>-<hash>/tasks), it
 // looks for the retired layout (workloads/<repo>-<hash>/tasks, task-keyed
@@ -36,6 +46,9 @@ type StorageLayoutMigration struct {
 // colliding identifiers are never merged. It reports what moved via a notice and
 // the returned summary; a nil summary means nothing was migrated.
 func MigrateStorageLayout(d *Deps, tasksDir string) (*StorageLayoutMigration, error) {
+	migrateStorageMu.Lock()
+	defer migrateStorageMu.Unlock()
+
 	newStorageDir := filepath.Dir(tasksDir)
 	base := filepath.Base(newStorageDir)
 	oldStorageDir := filepath.Join(popDataDirWith(d), legacyStorageParent, base)

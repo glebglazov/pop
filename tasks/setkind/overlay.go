@@ -50,6 +50,56 @@ func (d *Deps) refresh(defPath string) (*tasks.RefreshResult, error) {
 	return tasks.RefreshWith(d.Tasks, defPath, statePath)
 }
 
+// prepareGroups takes the write-side and store-side half of every group's
+// refresh up front, serially, and pairs each group with it (ADR-0189). An
+// injected Refresh seam owns the whole read, so there is nothing to prepare for
+// it: each group is paired with nil, which every reader of a prepared value
+// already answers for.
+func (d *Deps) prepareGroups(groups []repogroup.Group) ([]groupLoad, error) {
+	loads := make([]groupLoad, 0, len(groups))
+	if d.Refresh != nil {
+		for _, g := range groups {
+			loads = append(loads, groupLoad{group: g})
+		}
+		return loads, nil
+	}
+	defPaths := make([]string, 0, len(groups))
+	for _, g := range groups {
+		defPaths = append(defPaths, g.DefPath)
+	}
+	prepared, err := tasks.PrepareRefreshes(d.Tasks, defPaths)
+	if err != nil {
+		return nil, err
+	}
+	for i, g := range groups {
+		loads = append(loads, groupLoad{group: g, prepared: prepared[i]})
+	}
+	return loads, nil
+}
+
+// refreshPrepared reads one group's rows from its prepared half. This is the
+// call a load fans out: with the seam injected it is the seam, and otherwise it
+// is discovery plus manifest loading, which touch no store and write nothing.
+func (d *Deps) refreshPrepared(prep *tasks.PreparedRefresh, defPath string) (*tasks.RefreshResult, error) {
+	if d.Refresh != nil {
+		return d.Refresh(defPath)
+	}
+	if d.IncludeArchived {
+		return prep.RefreshIncludingArchived(d.Tasks)
+	}
+	return prep.Refresh(d.Tasks)
+}
+
+// worktreeIntentsFor is the seeded worktree directives for one group, served from
+// the prepared registration when the load has one and read from the store when it
+// does not (the injected-seam path, which prepares nothing).
+func (d *Deps) worktreeIntentsFor(prep *tasks.PreparedRefresh, defPath string) map[string]*tasks.WorktreeDirective {
+	if prep != nil {
+		return prep.WorktreeIntents()
+	}
+	return worktreeIntents(d, defPath)
+}
+
 // rendersRow reports whether a refresh row survives this pass's row filter. It is
 // the single answer both the verify-overlay narrowing and the container loop read,
 // which is what makes "rendered" and "resolved" one set of rows (ADR-0189).

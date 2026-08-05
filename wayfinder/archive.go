@@ -34,13 +34,12 @@ func MapRef(mapID string) ref.WorkRef {
 }
 
 // archivedMapIDs returns the ids of the Maps the human has filed away, read from
-// the Work registry once any legacy side-file has been folded into it. A machine
-// with no pop.db has archived nothing, so a missing store is an empty set rather
-// than an error — a pure read never materialises the database.
-func archivedMapIDs(d *Deps, storageDir string) (map[string]bool, error) {
-	if err := foldLegacyArchiveState(d, storageDir); err != nil {
-		return nil, err
-	}
+// the Work registry. It answers for the whole machine rather than one storage, so
+// a load walking many of them reads it once; the per-storage fold of the retired
+// side-file is its caller's, and must already have run. A machine with no pop.db
+// has archived nothing, so a missing store is an empty set rather than an error —
+// a pure read never materialises the database.
+func archivedMapIDs(d *Deps) (map[string]bool, error) {
 	out := map[string]bool{}
 	s, ok, err := d.taskDeps().Store(false)
 	if err != nil || !ok {

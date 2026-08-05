@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/internal/fanout"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/repogroup"
 	"github.com/glebglazov/pop/tasks"
@@ -121,20 +122,39 @@ func (k *MapKind) Load() ([]work.Container, error) {
 	if err != nil {
 		return nil, err
 	}
-	var containers []work.Container
+	// A group with no Task storage has nowhere to keep a Map, so it is dropped
+	// before anything is prepared for it rather than being carried as a hole
+	// through both phases below.
+	scanned := make([]repogroup.Group, 0, len(groups))
+	storages := make([]string, 0, len(groups))
 	for _, g := range groups {
-		storage := g.Storage()
-		if storage == "" {
-			continue
+		if storage := g.Storage(); storage != "" {
+			scanned = append(scanned, g)
+			storages = append(storages, storage)
 		}
-		maps, err := ScanMapsInStorage(k.d.Wayfinder, storage)
-		if err != nil {
-			return nil, err
-		}
+	}
+	// Serially first: the read-path folds, which write, and the two machine-global
+	// reads of pop.db every group's scan would otherwise repeat (ADR-0189).
+	prepared, err := PrepareScans(k.d.Wayfinder, storages)
+	if err != nil {
+		return nil, err
+	}
+	// Then the walk of each storage's Maps at once, bounded by the machine rather
+	// than by the number of groups.
+	scans, err := fanout.Map(prepared, func(p *PreparedScan) ([]Map, error) {
+		return p.Scan(k.d.Wayfinder)
+	})
+	if err != nil {
+		return nil, err
+	}
+	// Serially again, in group order: resolving a Map's spawned sets refreshes the
+	// repository's Task storage, which reads the store.
+	var containers []work.Container
+	for i, g := range scanned {
 		// One table per group: every Map of a repository spawns into that
 		// repository's Task storage, so the sets are read once for all of them.
 		sets := newSetStatusTable(k.d.Wayfinder, g.DefPath)
-		for _, m := range maps {
+		for _, m := range scans[i] {
 			if !visible(m, k.d.IncludeArchived) {
 				continue
 			}

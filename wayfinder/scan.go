@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/glebglazov/pop/store"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -30,19 +31,50 @@ func ScanMaps(d *Deps, cwd string) ([]Map, error) {
 // empty slice, never an error; a store still carrying the pre-rename wayfinder/
 // directory, or the retired archive side-file, is folded here.
 func ScanMapsInStorage(d *Deps, storageDir string) ([]Map, error) {
-	root, err := mapsDir(d, storageDir)
+	prepared, err := PrepareScans(d, []string{storageDir})
 	if err != nil {
 		return nil, err
 	}
-	entries, err := d.FS.ReadDir(root)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
+	return prepared[0].Scan(d)
+}
 
-	archived, err := archivedMapIDs(d, storageDir)
+// PreparedScan is one storage directory with the halves of a Map scan that must
+// not run beside another storage's already taken: the read-path folds, which
+// write, and the two machine-global reads of pop.db behind a Map's archived bit
+// and its live ticket claims. What is left is a walk of the maps directory, which
+// is what a Work read surface fans out per repository group (ADR-0189).
+//
+// The archived ids and the claims are not per storage — both answer for every Map
+// on the machine — so one preparation reads them once for a whole batch of
+// storages rather than once per storage, as a scan per group did.
+type PreparedScan struct {
+	root     string
+	archived map[string]bool
+	claims   map[string]map[string]store.WorkClaim
+}
+
+// PrepareScans takes the write-side and store-side half of a Map scan for every
+// storage directory a load is about to read, serially and to completion, and
+// returns one prepared value per storage in the order given.
+func PrepareScans(d *Deps, storageDirs []string) ([]*PreparedScan, error) {
+	prepared := make([]*PreparedScan, 0, len(storageDirs))
+	for _, storageDir := range storageDirs {
+		// Both folds write: one renames the pre-rename maps directory, the other
+		// moves the retired archive side-file onto the registry's archived bit — and
+		// the archived read below must see what they wrote.
+		root, err := mapsDir(d, storageDir)
+		if err != nil {
+			return nil, err
+		}
+		if err := foldLegacyArchiveState(d, storageDir); err != nil {
+			return nil, err
+		}
+		prepared = append(prepared, &PreparedScan{root: root})
+	}
+	if len(prepared) == 0 {
+		return nil, nil
+	}
+	archived, err := archivedMapIDs(d)
 	if err != nil {
 		return nil, err
 	}
@@ -50,6 +82,28 @@ func ScanMapsInStorage(d *Deps, storageDir string) ([]Map, error) {
 	if err != nil {
 		return nil, err
 	}
+	for _, p := range prepared {
+		p.archived = archived
+		p.claims = claims
+	}
+	return prepared, nil
+}
+
+// Scan reads this storage's Maps from the prepared half: a walk of the maps
+// directory and each Map's own files, and nothing else. It opens no store, so
+// several prepared storages may be scanned at the same time. A missing maps
+// directory yields an empty slice, never an error; an unparseable Map folder
+// comes back as a malformed row rather than failing the scan.
+func (p *PreparedScan) Scan(d *Deps) ([]Map, error) {
+	root := p.root
+	entries, err := d.FS.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	archived, claims := p.archived, p.claims
 
 	var maps []Map
 	for _, entry := range entries {

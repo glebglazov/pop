@@ -94,28 +94,14 @@ func RegisterManagedWith(d *Deps, defPath, statePath string) (*RefreshResult, er
 }
 
 func refreshWith(d *Deps, defPath, statePath string, register, managed bool, archived archivedRows) (*RefreshResult, error) {
-	canon, err := CanonicalDefinitionPathWith(d, defPath)
+	canon, err := migrateForRefresh(d, defPath)
 	if err != nil {
 		return nil, err
 	}
 
-	if _, err := MigrateStorageLayout(d, canon); err != nil {
-		return nil, err
-	}
-	// Migration may have created the tasks directory for the first time, so
-	// re-canonicalize: a path that did not exist resolves symlinks once it does,
-	// and the state key must match what migration wrote and future calls resolve.
-	canon, err = CanonicalDefinitionPathWith(d, canon)
+	disc, err := discoverForRefresh(d, canon)
 	if err != nil {
 		return nil, err
-	}
-
-	disc, err := DiscoverWith(d, canon)
-	if err != nil {
-		return nil, err
-	}
-	if disc.TaskDirErr != nil {
-		return nil, disc.TaskDirErr
 	}
 
 	state, err := LoadGlobalStateWith(d, statePath)
@@ -154,18 +140,56 @@ func refreshWith(d *Deps, defPath, statePath string, register, managed bool, arc
 		}
 	}
 
+	result := buildRefreshResult(d, canon, disc, state, archived)
+	result.NewRegistrations = newRegs
+	result.NewRegistrationIDs = newIDs
+	result.NeedsSave = needsSave
+	return result, nil
+}
+
+// migrateForRefresh is the write half of a refresh: the one-shot storage-layout
+// migration, plus the canonicalization on either side of it. Migration may have
+// created the tasks directory for the first time, so the path is re-canonicalized
+// after it — a path that did not exist resolves symlinks once it does, and the
+// state key must match what migration wrote and what future calls resolve.
+func migrateForRefresh(d *Deps, defPath string) (string, error) {
+	canon, err := CanonicalDefinitionPathWith(d, defPath)
+	if err != nil {
+		return "", err
+	}
+	if _, err := MigrateStorageLayout(d, canon); err != nil {
+		return "", err
+	}
+	return CanonicalDefinitionPathWith(d, canon)
+}
+
+// discoverForRefresh scans a canonical definition path, treating an unreadable
+// task directory as the refresh's own error rather than an empty discovery.
+func discoverForRefresh(d *Deps, canon string) (*Discovery, error) {
+	disc, err := DiscoverWith(d, canon)
+	if err != nil {
+		return nil, err
+	}
+	if disc.TaskDirErr != nil {
+		return nil, disc.TaskDirErr
+	}
+	return disc, nil
+}
+
+// buildRefreshResult is the pure half of a refresh: load every discovered
+// manifest and project the registrations onto rows. It reads the filesystem and
+// the state it is handed, and touches neither the store nor anything writable —
+// which is what lets several definition paths run through it at once (ADR-0189).
+func buildRefreshResult(d *Deps, canon string, disc *Discovery, state *GlobalState, archived archivedRows) *RefreshResult {
 	manifests := make(map[string]*Manifest)
 	for stem, manifestPath := range disc.Manifests {
 		manifests[stem] = LoadManifest(d, stem, manifestPath)
 	}
 
 	result := &RefreshResult{
-		DefinitionPath:     canon,
-		NewRegistrations:   newRegs,
-		NewRegistrationIDs: newIDs,
-		Manifests:          manifests,
-		NeedsSave:          needsSave,
-		ArchivedCount:      archivedCount(state, canon),
+		DefinitionPath: canon,
+		Manifests:      manifests,
+		ArchivedCount:  archivedCount(state, canon),
 		// ShowArchived means "this is the archive view", which the included view is
 		// not: it is the active table with the archived rows let in, so the callers
 		// that skip work on an archive view (the Verify verdict pass, the "N archived
@@ -174,7 +198,7 @@ func refreshWith(d *Deps, defPath, statePath string, register, managed bool, arc
 	}
 	result.Rows = buildRows(state, canon, disc, manifests, archived)
 	MarkNextPick(result.Rows)
-	return result, nil
+	return result
 }
 
 // includeRegistration reports whether one registration belongs in the view.

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/internal/fanout"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/repogroup"
 	"github.com/glebglazov/pop/tasks"
@@ -133,16 +134,45 @@ func (k *Kind) Load() ([]work.Container, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Three phases, and the split between them is what a group may do beside
+	// another group (ADR-0189). First, serially: the storage-layout migration,
+	// which writes, and the one registration read — both on the single store
+	// connection, and both complete before anything below starts.
+	loads, err := d.prepareGroups(groups)
+	if err != nil {
+		return nil, err
+	}
+	// Then the filesystem-bound half of each group's read, bounded by the machine
+	// rather than by the number of groups: discovery, manifest loading and row
+	// building, over per-group state each goroutine owns alone.
+	refreshes, err := fanout.Map(loads, func(load groupLoad) (*tasks.RefreshResult, error) {
+		return d.refreshPrepared(load.prepared, load.group.DefPath)
+	})
+	if err != nil {
+		return nil, err
+	}
+	// Serially again, and in group order: everything below reads the store — the
+	// Verify verdicts, the abnormal-backoff history, the worktree-directive probe —
+	// so it stays off the fan-out, and the containers come out in the order the
+	// groups did.
 	now := d.now().UTC()
 	var containers []work.Container
-	for _, g := range groups {
-		got, err := containersFromGroup(d, cfg, snap, delays, now, g)
+	for i, load := range loads {
+		got, err := containersFromGroup(d, cfg, snap, delays, now, load.group, refreshes[i], load.prepared)
 		if err != nil {
 			return nil, err
 		}
 		containers = append(containers, got...)
 	}
 	return containers, nil
+}
+
+// groupLoad is one repository group with its prepared refresh — the pairing the
+// fan-out and the container loop both read, so neither has to match a group back
+// to a prepared path by name.
+type groupLoad struct {
+	group    repogroup.Group
+	prepared *tasks.PreparedRefresh
 }
 
 // Less orders two task-set containers by the shared Queue surface comparator
@@ -247,18 +277,22 @@ func containersForGroup(d *Deps, cfg *config.Config, g repogroup.Group) ([]work.
 	if err != nil {
 		return nil, err
 	}
-	return containersFromGroup(d, cfg, snap, delays, d.now().UTC(), g)
-}
-
-// containersFromGroup builds a repo group's containers from its static resolution
-// plus the current volatile state: task statuses (refresh), runtime locks, and
-// daemon-state columns. It forks no git — the static side is marker/config
-// derived (ADR-0060) and this overlay is cheap file/store reads.
-func containersFromGroup(d *Deps, cfg *config.Config, snap *snapshot, delays []time.Duration, now time.Time, g repogroup.Group) ([]work.Container, error) {
 	refresh, err := d.refresh(g.DefPath)
 	if err != nil {
 		return nil, err
 	}
+	return containersFromGroup(d, cfg, snap, delays, d.now().UTC(), g, refresh, nil)
+}
+
+// containersFromGroup builds a repo group's containers from its static resolution
+// plus the current volatile state: the group's already-read task statuses, runtime
+// locks, and daemon-state columns. It forks no git — the static side is
+// marker/config derived (ADR-0060) and this overlay is cheap file/store reads.
+//
+// The refresh arrives read rather than being read here, because reading it is the
+// one part of a group's load that runs beside the other groups' (ADR-0189); what
+// is left touches the store and so runs serially, one group after another.
+func containersFromGroup(d *Deps, cfg *config.Config, snap *snapshot, delays []time.Duration, now time.Time, g repogroup.Group, refresh *tasks.RefreshResult, prepared *tasks.PreparedRefresh) ([]work.Container, error) {
 	// The verdict overlay is narrowed to the rows this pass will render (ADR-0189),
 	// through the very predicate the container loop filters on below — so every
 	// container carries a resolved verdict and no aggregate over containers can mix
@@ -266,7 +300,7 @@ func containersFromGroup(d *Deps, cfg *config.Config, snap *snapshot, delays []t
 	tasks.ApplyVerifyVerdictsForRendered(d.Tasks, refresh, cfg, func(setID string) string {
 		return binding.RuntimeForSet(snap.bindings, g.RepoKey, setID)
 	}, d.rendersRow)
-	intents := worktreeIntents(d, g.DefPath)
+	intents := d.worktreeIntentsFor(prepared, g.DefPath)
 	backoff := d.setBackoffLookup(g.RepoCommonDir, delays, now)
 	var containers []work.Container
 	for _, taskRow := range refresh.Rows {
@@ -296,9 +330,11 @@ func containersFromGroup(d *Deps, cfg *config.Config, snap *snapshot, delays []t
 				configErr = g.ConfigError
 			} else if taskRow.Status == tasks.StatusReady {
 				// An unsatisfiable worktree directive is a static config defect
-				// (ADR-0059). Read the registration intent first (a store read, no git);
-				// only a set that carries a directive pays the read-only probe.
-				if intent, _ := tasks.RegisteredWorktreeIntent(d.Tasks, g.DefPath, taskRow.ID); intent != nil {
+				// (ADR-0059). Read the registration intent first — from the same
+				// per-group map the destination column reads, so a page pays one
+				// registration read rather than one per Ready row; only a set that
+				// carries a directive pays the read-only probe.
+				if intent := intents[taskRow.ID]; intent != nil {
 					if msg := d.probeDirective(g.CheckoutPath(), taskRow.ID); msg != "" {
 						configErr = msg
 					}

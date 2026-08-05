@@ -121,6 +121,15 @@ func LoadGlobalStateWith(d *Deps, path string) (*GlobalState, error) {
 	if err := foldLegacyStateFile(d, path); err != nil {
 		return nil, err
 	}
+	return readGlobalState(d, path)
+}
+
+// readGlobalState is LoadGlobalStateWith's store half: every registration the
+// store holds, without the legacy fold that precedes it. The two are split
+// because the fold is keyed by the path whose file it retires while this read is
+// machine-global — so a caller reading many definition paths folds per path and
+// reads once (ADR-0189).
+func readGlobalState(d *Deps, path string) (*GlobalState, error) {
 	gs := &GlobalState{
 		Version: StateVersion,
 		Tasks:   make(map[string]*TaskEntry),
