@@ -195,6 +195,16 @@ type WorktreeDirective struct {
 }
 
 // LoadManifest reads and validates an task manifest.
+//
+// The load is a pure function of the set directory's files — no store, no git, no
+// config, no clock — so its answer is memoized for the life of the process under
+// a key naming that content (manifestMemo, ADR-0189). Every surface that walks the
+// same definition path therefore validates it once: a poll that finds an unchanged
+// set pays a manifest read and a directory listing instead of a read, a
+// line-split and two regexes per line for every task markdown in it.
+//
+// A read error is not memoized, only a parsed answer: an unreadable manifest is a
+// question about a moment, not about content.
 func LoadManifest(d *Deps, stem, manifestPath string) *Manifest {
 	m := &Manifest{
 		Stem: stem,
@@ -207,16 +217,35 @@ func LoadManifest(d *Deps, stem, manifestPath string) *Manifest {
 		m.Errors = append(m.Errors, fmt.Sprintf("read manifest: %v", err))
 		return m
 	}
-	m.Raw = append(json.RawMessage(nil), data...)
 
-	if err := parseManifestJSON(data, m); err != nil {
-		m.Errors = append(m.Errors, err.Error())
-		return m
+	// One listing serves both the memo key and the orphan check below, so keying
+	// on the directory's names costs no extra syscall.
+	entries, listErr := d.FS.ReadDir(m.Dir)
+	key, keyed := "", false
+	if listErr == nil {
+		key, keyed = manifestContentKey(manifestPath, data, entries)
+	}
+	if keyed {
+		if cached, hit := manifestMemo.Get(key); hit {
+			served := cached.clone()
+			// The stem is the caller's name for the set, not something the directory
+			// says, so it is the one field a hit must not inherit.
+			served.Stem = stem
+			return served
+		}
 	}
 
-	validateManifest(d, m)
-	if len(m.Errors) == 0 {
-		m.Valid = true
+	m.Raw = append(json.RawMessage(nil), data...)
+	if parseErr := parseManifestJSON(data, m); parseErr != nil {
+		m.Errors = append(m.Errors, parseErr.Error())
+	} else {
+		validateManifest(d, m, entries, listErr)
+		if len(m.Errors) == 0 {
+			m.Valid = true
+		}
+	}
+	if keyed {
+		manifestMemo.Put(key, m.clone())
 	}
 	return m
 }
@@ -273,7 +302,11 @@ func parseManifestJSON(data []byte, m *Manifest) error {
 	return nil
 }
 
-func validateManifest(d *Deps, m *Manifest) {
+// validateManifest validates the parsed manifest against the set directory. The
+// directory listing is passed in rather than read here because the caller already
+// took it to key its memo; listErr is that listing's error, handled below exactly
+// as a listing taken here would be.
+func validateManifest(d *Deps, m *Manifest, entries []os.DirEntry, listErr error) {
 	if len(m.Tasks) == 0 {
 		m.Errors = append(m.Errors, "tasks array is empty")
 	}
@@ -346,7 +379,7 @@ func validateManifest(d *Deps, m *Manifest) {
 		}
 	}
 
-	validateNoOrphanMarkdown(d, m, files)
+	validateNoOrphanMarkdown(m, entries, listErr, files)
 }
 
 // validateNoOrphanMarkdown closes the 1:1 sync in the direction the per-task
@@ -357,13 +390,12 @@ func validateManifest(d *Deps, m *Manifest) {
 // The set folder is pop's storage rather than scratch space, so the only markdown
 // exempt is the co-located spec; anything else is a stray file to move out or a
 // slice to list.
-func validateNoOrphanMarkdown(d *Deps, m *Manifest, listed map[string]int) {
-	entries, err := d.FS.ReadDir(m.Dir)
-	if err != nil {
-		if os.IsNotExist(err) {
+func validateNoOrphanMarkdown(m *Manifest, entries []os.DirEntry, listErr error, listed map[string]int) {
+	if listErr != nil {
+		if os.IsNotExist(listErr) {
 			return
 		}
-		m.Errors = append(m.Errors, fmt.Sprintf("list set folder: %v", err))
+		m.Errors = append(m.Errors, fmt.Sprintf("list set folder: %v", listErr))
 		return
 	}
 	var orphans []string
