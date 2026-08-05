@@ -26,7 +26,7 @@ func NewRealGit() *RealGit {
 }
 
 func (g *RealGit) Command(args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+	cmd := exec.Command(GitBinary(), args...)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", outputError(err)
@@ -35,7 +35,7 @@ func (g *RealGit) Command(args ...string) (string, error) {
 }
 
 func (g *RealGit) CommandInDir(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd := exec.Command(GitBinary(), append([]string{"-C", dir}, args...)...)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", outputError(err)

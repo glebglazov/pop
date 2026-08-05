@@ -58,6 +58,7 @@ func withFakeCommand(t *testing.T, name, stderr string) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	resetGitBinary(t)
 }
 
 func shellQuote(s string) string {
