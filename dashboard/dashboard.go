@@ -600,6 +600,17 @@ func NewDashboardOn(d *drain.Deps, cfg *config.Config, snap DashboardSnapshot, p
 	return newQueueDashboardOn(d, cfg, snap, pageSpec(page))
 }
 
+// OpenPage builds one page's snapshot and returns the model showing it. A failed
+// build is the page's own error chrome, not a returned error: the entry shell
+// opens a page the first time the operator asks for it, and a Routines page that
+// will not build must not take the Task sets down with it (ADR-0189).
+func OpenPage(d *drain.Deps, cfg *config.Config, page Page) QueueDashboard {
+	snap, err := BuildPageSnapshot(d, cfg, page)
+	m := NewDashboardOn(d, cfg, snap, page)
+	m.err = err
+	return m
+}
+
 // BuildPageSnapshot builds one page's snapshot: only the kinds that page lists,
 // so kind precedence orders that page alone and every Kind.Summary counts only
 // the containers on it.

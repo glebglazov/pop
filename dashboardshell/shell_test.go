@@ -1,6 +1,7 @@
 package dashboardshell
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -16,16 +17,28 @@ import (
 // pageKind is a wired Work kind standing in for one page's real adapter: it loads
 // the containers the test declares and answers the seam's questions from them, so
 // the shell's paging is exercised through production wiring without touching a
-// data dir.
+// data dir. loads counts every scan of it and loadErr fails them, so a test can
+// pin which pages a shell paid for and what an unbuildable page does to startup.
 type pageKind struct {
 	id         work.KindID
 	containers []work.Container
 	columns    []string
 	noun       string
+	loads      *int
+	loadErr    error
 }
 
-func (k *pageKind) ID() work.KindID                                     { return k.id }
-func (k *pageKind) Load() ([]work.Container, error)                     { return k.containers, nil }
+func (k *pageKind) ID() work.KindID { return k.id }
+
+func (k *pageKind) Load() ([]work.Container, error) {
+	if k.loads != nil {
+		*k.loads++
+	}
+	if k.loadErr != nil {
+		return nil, k.loadErr
+	}
+	return k.containers, nil
+}
 func (k *pageKind) Less(a, b work.Container) bool                       { return a.ID < b.ID }
 func (k *pageKind) Columns() []string                                   { return k.columns }
 func (k *pageKind) Actions(work.Container) []work.Action                { return nil }
@@ -62,19 +75,30 @@ func routineRows() []work.Container {
 }
 
 func testDeps() *drain.Deps {
+	return countedDeps(nil, nil, nil)
+}
+
+// countedDeps wires both pages' kinds, optionally counting each page's scans and
+// failing the routine page's.
+func countedDeps(workLoads, routineLoads *int, routineErr error) *drain.Deps {
 	return &drain.Deps{
 		Kinds: func(*drain.Deps, *config.Config) []work.Kind {
-			return []work.Kind{&pageKind{id: ref.KindTaskSet, containers: setRows(), columns: []string{"PROJECT", "TASK SET", "STATUS", "WORKTREE", ""}, noun: "task set"}}
+			return []work.Kind{&pageKind{id: ref.KindTaskSet, containers: setRows(), columns: []string{"PROJECT", "TASK SET", "STATUS", "WORKTREE", ""}, noun: "task set", loads: workLoads}}
 		},
 		RoutineKinds: func(*drain.Deps, *config.Config) []work.Kind {
-			return []work.Kind{&pageKind{id: ref.KindRoutine, containers: routineRows(), columns: []string{"ROUTINE", "DIRECTORY", "SCHEDULE", "LAST RUN", "STATUS"}, noun: "routine"}}
+			return []work.Kind{&pageKind{id: ref.KindRoutine, containers: routineRows(), columns: []string{"ROUTINE", "DIRECTORY", "SCHEDULE", "LAST RUN", "STATUS"}, noun: "routine", loads: routineLoads, loadErr: routineErr}}
 		},
 	}
 }
 
 func newTestShell(t *testing.T, start Page) Shell {
 	t.Helper()
-	s, err := newShell(start, testDeps(), &config.Config{})
+	return newShellWith(t, start, testDeps())
+}
+
+func newShellWith(t *testing.T, start Page, d *drain.Deps) Shell {
+	t.Helper()
+	s, err := newShell(start, d, &config.Config{})
 	if err != nil {
 		t.Fatalf("newShell: %v", err)
 	}
@@ -186,6 +210,65 @@ func TestShellHelpNamesThePageTheToggleLeadsTo(t *testing.T) {
 	view = s.View().Content
 	if !strings.Contains(view, "Help · Routines") || !strings.Contains(view, "work view") {
 		t.Fatalf("routine page help missing the toggle:\n%s", view)
+	}
+}
+
+// TestShellOpenScansOnlyThePageItOpens is the point of the lazy page (ADR-0189):
+// the open pays for one project scan, and the page not opened is not scanned at
+// all until the operator asks for it — at which moment it lands on rows, without
+// waiting for a poll.
+func TestShellOpenScansOnlyThePageItOpens(t *testing.T) {
+	var workLoads, routineLoads int
+	s := newShellWith(t, PageWork, countedDeps(&workLoads, &routineLoads, nil))
+	if workLoads != 1 || routineLoads != 0 {
+		t.Fatalf("opening the work page scanned work=%d routines=%d, want 1 and 0", workLoads, routineLoads)
+	}
+
+	s = pressV(t, s)
+	if routineLoads != 1 {
+		t.Fatalf("the switch scanned routines %d times, want 1", routineLoads)
+	}
+	if workLoads != 1 {
+		t.Fatalf("the switch rescanned the work page (%d scans), want 1", workLoads)
+	}
+	view := s.View().Content
+	for _, want := range []string{"daily", "hourly"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("expected %q listed right after the switch, got:\n%s", want, view)
+		}
+	}
+	s.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	if got := s.PageDashboard(PageRoutines).ListCursor(); got != 1 {
+		t.Fatalf("routine cursor after j = %d, want 1 — the fresh page must be sized and filled", got)
+	}
+
+	// Switching back reuses the model built at open rather than scanning again.
+	if s = pressV(t, s); workLoads != 1 {
+		t.Fatalf("switching back scanned work %d times, want 1", workLoads)
+	}
+
+	var openedOnRoutines int
+	newShellWith(t, PageRoutines, countedDeps(&openedOnRoutines, nil, nil))
+	if openedOnRoutines != 0 {
+		t.Fatalf("opening the routine page scanned the work page %d times, want 0", openedOnRoutines)
+	}
+}
+
+// TestShellUnbuildablePageDoesNotAbortTheOpen: a page that will not build used to
+// take startup down with it. Built lazily it is that page's own error chrome, so
+// the operator still reads their Task sets.
+func TestShellUnbuildablePageDoesNotAbortTheOpen(t *testing.T) {
+	s := newShellWith(t, PageWork, countedDeps(nil, nil, errors.New("routine store unreadable")))
+	if !strings.Contains(s.View().Content, "set-a") {
+		t.Fatalf("the work page must open with its rows:\n%s", s.View().Content)
+	}
+
+	s = pressV(t, s)
+	if s.ActivePage() != PageRoutines {
+		t.Fatalf("after v active = %v, want routines", s.ActivePage())
+	}
+	if view := s.View().Content; !strings.Contains(view, "routine store unreadable") {
+		t.Fatalf("expected the build error as the routine page's chrome, got:\n%s", view)
 	}
 }
 

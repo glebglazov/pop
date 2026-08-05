@@ -27,9 +27,15 @@ const (
 )
 
 // Shell is the Work dashboard's two pages with one of them in focus.
+//
+// Only the page being looked at exists. A page is built the first time the
+// operator switches to it, so opening the dashboard pays for one project scan
+// instead of two (ADR-0189); the deps and config are kept for that later build.
 type Shell struct {
 	active Page
 	pages  map[Page]dashboard.QueueDashboard
+	d      *drain.Deps
+	cfg    *config.Config
 	width  int
 	height int
 }
@@ -70,15 +76,14 @@ func newShell(start Page, d *drain.Deps, cfg *config.Config) (Shell, error) {
 			return Shell{}, err
 		}
 	}
-	pages := make(map[Page]dashboard.QueueDashboard, 2)
-	for _, id := range []Page{PageWork, PageRoutines} {
-		snap, err := dashboard.BuildPageSnapshot(d, cfg, id)
-		if err != nil {
-			return Shell{}, err
-		}
-		pages[id] = dashboard.NewDashboardOn(d, cfg, snap, id)
+	// The entry page is the one command the operator ran, so its build failure is
+	// that command failing. The other page has no model at all yet.
+	snap, err := dashboard.BuildPageSnapshot(d, cfg, start)
+	if err != nil {
+		return Shell{}, err
 	}
-	return Shell{active: start, pages: pages}, nil
+	pages := map[Page]dashboard.QueueDashboard{start: dashboard.NewDashboardOn(d, cfg, snap, start)}
+	return Shell{active: start, pages: pages, d: d, cfg: cfg}, nil
 }
 
 func runShell(s Shell) (Shell, error) {
@@ -103,7 +108,9 @@ func (s Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		s.height = msg.Height
 		var cmds []tea.Cmd
 		for _, id := range []Page{PageWork, PageRoutines} {
-			cmds = append(cmds, s.updatePage(id, msg))
+			if _, built := s.pages[id]; built {
+				cmds = append(cmds, s.updatePage(id, msg))
+			}
 		}
 		return s, tea.Batch(cmds...)
 	}
@@ -111,7 +118,8 @@ func (s Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
 		if keyMsg.String() == "v" && s.activePageToggleAllowed() {
 			s.active = s.page(s.active).OtherPage()
-			return s, s.initActivePage()
+			sized := s.buildActivePage()
+			return s, tea.Batch(sized, s.initActivePage())
 		}
 	}
 
@@ -141,6 +149,21 @@ func (s Shell) page(id Page) dashboard.QueueDashboard {
 
 func (s Shell) activePageToggleAllowed() bool {
 	return s.page(s.active).ViewToggleAllowed()
+}
+
+// buildActivePage builds the page in focus if the operator has just switched to it
+// for the first time. The build is synchronous, so the switch lands on rows
+// instead of on an empty table waiting for the first poll, and it hands the fresh
+// page the terminal size it missed while it did not exist.
+func (s Shell) buildActivePage() tea.Cmd {
+	if _, built := s.pages[s.active]; built {
+		return nil
+	}
+	s.pages[s.active] = dashboard.OpenPage(s.d, s.cfg, s.active)
+	if s.width == 0 && s.height == 0 {
+		return nil
+	}
+	return s.updatePage(s.active, tea.WindowSizeMsg{Width: s.width, Height: s.height})
 }
 
 func (s Shell) initActivePage() tea.Cmd {
