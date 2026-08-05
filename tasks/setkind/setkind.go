@@ -259,9 +259,13 @@ func containersFromGroup(d *Deps, cfg *config.Config, snap *snapshot, delays []t
 	if err != nil {
 		return nil, err
 	}
-	tasks.ApplyVerifyVerdictsWith(d.Tasks, refresh, cfg, func(setID string) string {
+	// The verdict overlay is narrowed to the rows this pass will render (ADR-0189),
+	// through the very predicate the container loop filters on below — so every
+	// container carries a resolved verdict and no aggregate over containers can mix
+	// resolved rows with unresolved ones.
+	tasks.ApplyVerifyVerdictsForRendered(d.Tasks, refresh, cfg, func(setID string) string {
 		return binding.RuntimeForSet(snap.bindings, g.RepoKey, setID)
-	})
+	}, d.rendersRow)
 	intents := worktreeIntents(d, g.DefPath)
 	backoff := d.setBackoffLookup(g.RepoCommonDir, delays, now)
 	var containers []work.Container
@@ -270,10 +274,7 @@ func containersFromGroup(d *Deps, cfg *config.Config, snap *snapshot, delays []t
 		bound := hasBinding && strings.TrimSpace(bnd.RuntimePath) != ""
 		doneStillManagedBound := taskRow.Status == tasks.StatusDone && bound && bnd.Provisioned
 		orphanedSet := orphaned(d, bnd, hasBinding)
-		// An archived row is on screen because the operator turned archived rows on;
-		// the Done-hiding rule (ADR-0121) gets no second veto over it, or the toggle
-		// would reveal almost nothing — a set is usually archived because it is done.
-		if !taskRow.Archived && !tasks.ShowRow(taskRow, d.IncludeDone) {
+		if !d.rendersRow(taskRow) {
 			continue
 		}
 		wt := worktree(d, snap, intents, g.RepoKey, taskRow.ID, taskRow.Status, bnd, bound)

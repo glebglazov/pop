@@ -121,3 +121,49 @@ func TestRenderStatusMapOnlyTaskSetTableIsEmpty(t *testing.T) {
 		t.Fatalf("Map-only status rendered a Task-set header:\n%s", text)
 	}
 }
+
+// TestStatusHeadlineDerivesFromTheScanNotThePageRows pins the invariant the
+// verdict narrowing owes (ADR-0189): a verdict-derived aggregate may only be
+// computed over rows whose verdicts were resolved. The page's rows are narrowed —
+// a hidden terminal row carries no verdict — so the headline must not be a
+// roll-up of them. It is the daemon scan's own snapshot, which resolves every set,
+// and it therefore reads the same whatever the page happens to be rendering.
+func TestStatusHeadlineDerivesFromTheScanNotThePageRows(t *testing.T) {
+	snap := drain.StatusSnapshot{
+		Tasks: queuetest.DataDeps(t),
+		Idle: []drain.IdleProject{{
+			Project:               "pop",
+			RepoLabel:             "pop",
+			AwaitingApprovalSetID: "2026-01-01-awaiting",
+		}},
+	}
+	// Page A once with the terminal row hidden by the row filter (the ordinary
+	// open), once with it revealed and resolved. Only the tables may differ.
+	hidden := []DashboardRow{
+		{Kind: ref.KindTaskSet, Project: "pop", ID: "2026-01-02-rdy", RawStatus: tasks.StatusReady, DestKind: work.DestNeedsBind},
+	}
+	revealed := append([]DashboardRow(nil), hidden...)
+	revealed = append(revealed, DashboardRow{
+		Kind: ref.KindTaskSet, Project: "pop", ID: "2026-01-01-awaiting",
+		RawStatus: tasks.StatusAwaitingApproval, VerifyMark: tasks.VerifyMarkVerified, DestKind: work.DestNeedsBind,
+	})
+
+	headline := func(rows []DashboardRow) string {
+		var out strings.Builder
+		RenderStatus(&out, snap, statusTables(t, rows, nil))
+		text := out.String()
+		at := strings.Index(text, statusTaskSetsCaption)
+		if at < 0 {
+			t.Fatalf("status missing the task-set caption:\n%s", text)
+		}
+		return text[:at]
+	}
+
+	got := headline(hidden)
+	if !strings.Contains(got, "1 awaiting approval") {
+		t.Fatalf("headline lost the scan's awaiting-approval tally:\n%s", got)
+	}
+	if other := headline(revealed); other != got {
+		t.Fatalf("headline changed with the page's rows:\n%q\nvs\n%q", got, other)
+	}
+}

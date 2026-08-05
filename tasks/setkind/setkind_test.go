@@ -161,6 +161,10 @@ func TestBuildRowsVerifyFailedStatus(t *testing.T) {
 	rows := []tasks.Row{{ID: "demo", Status: tasks.StatusDone}}
 	td := workDataDeps(t)
 	d := testDeps(t, rows)
+	// The subject here is the VERIFY-FAILED status cell, so the row has to be on
+	// screen: a DONE row hidden by the filter is never asked for its verdict
+	// (ADR-0189), which TestVerdictsResolveOnlyForRenderedRows covers instead.
+	d.IncludeDone = true
 	d.Tasks = td
 	d.Refresh = func(string) (*tasks.RefreshResult, error) {
 		return &tasks.RefreshResult{

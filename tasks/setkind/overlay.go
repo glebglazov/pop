@@ -50,6 +50,22 @@ func (d *Deps) refresh(defPath string) (*tasks.RefreshResult, error) {
 	return tasks.RefreshWith(d.Tasks, defPath, statePath)
 }
 
+// rendersRow reports whether a refresh row survives this pass's row filter. It is
+// the single answer both the verify-overlay narrowing and the container loop read,
+// which is what makes "rendered" and "resolved" one set of rows (ADR-0189).
+//
+// An archived row is on screen because the operator turned archived rows on; the
+// Done-hiding rule (ADR-0121) gets no second veto over it, or the toggle would
+// reveal almost nothing — a set is usually archived because it is done.
+//
+// The two readings agree even though the overlay sits between them: the overlay
+// moves only a terminal row's status, and only away from DONE, so a row this
+// predicate admits still passes after the overlay and a DONE row it rejects was
+// never resolved and so still reads DONE.
+func (d *Deps) rendersRow(row tasks.Row) bool {
+	return row.Archived || tasks.ShowRow(row, d.IncludeDone)
+}
+
 // liveDrains resolves the LiveDrains seam, defaulting to tasks.LiveRunningDrains.
 func (d *Deps) liveDrains() ([]tasks.RunningDrain, error) {
 	if d.LiveDrains != nil {

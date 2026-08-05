@@ -54,8 +54,33 @@ func ApplyVerifyVerdicts(d *Deps, result *RefreshResult, cfg *config.Config, run
 // RefreshArchivedWith sets ShowArchived; the active, register, and queue
 // callers all leave it false.
 func ApplyVerifyVerdictsWith(d *Deps, result *RefreshResult, cfg *config.Config, runtimeForSet func(setID string) string) {
+	ApplyVerifyVerdictsForRendered(d, result, cfg, runtimeForSet, nil)
+}
+
+// ApplyVerifyVerdictsForRendered is ApplyVerifyVerdictsWith narrowed to the rows
+// a page will actually render. renders reports whether a row survives the
+// surface's own row filter; a row it rejects is left at its manifest-derived
+// status carrying no verdict-derived field, resolving nothing and forking no git
+// (ADR-0189). A nil renders resolves every row, which is what every surface
+// without a row filter wants.
+//
+// The narrowing owes one invariant in return for the forks it saves: a
+// verdict-derived aggregate may only be computed over rows whose verdicts were
+// resolved, since a roll-up mixing resolved and unresolved rows would report a
+// wrong count silently. A caller keeps that invariant by passing the same
+// predicate it filters its rows with, so "rendered" and "resolved" name one set
+// of rows rather than two that can drift apart.
+//
+// The cost of narrowing is lateness, not wrongness: a DONE row the filter hides
+// is never asked for its verdict, so a set that would have regressed to
+// NEEDS-VERIFY stays hidden until the filter reveals DONE rows — and the toggle
+// that reveals them reloads, which resolves them.
+func ApplyVerifyVerdictsForRendered(d *Deps, result *RefreshResult, cfg *config.Config, runtimeForSet func(setID string) string, renders func(row Row) bool) {
 	if result == nil || result.ShowArchived || !verifyEnabled(cfg) {
 		return
+	}
+	if renders == nil {
+		renders = func(Row) bool { return true }
 	}
 	if runtimeForSet == nil {
 		runtimeForSet = func(string) string { return "" }
@@ -93,6 +118,15 @@ func ApplyVerifyVerdictsWith(d *Deps, result *RefreshResult, cfg *config.Config,
 	changed := false
 	for i := range result.Rows {
 		row := &result.Rows[i]
+		// A row the page will not render is worth no verdict: nothing reads its
+		// status, and asking would fork git for a checkout resolution nothing
+		// displays. It keeps its manifest-derived status with every verdict-derived
+		// field cleared, so an unresolved row can never pass a stale badge to a
+		// reader or a roll-up.
+		if !renders(*row) {
+			clearVerifyDecoration(row)
+			continue
+		}
 		// Only a terminal row (DONE/AWAITING-APPROVAL) consults the verdict;
 		// decorateRowWithVerdict is a no-op for every other status. Skip the
 		// git-forking checkout resolution and store lookup for non-terminal rows
