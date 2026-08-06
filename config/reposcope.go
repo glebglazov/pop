@@ -160,6 +160,16 @@ func (e *repoScopeEnumerator) resolveRepoConfig() (RepoConfig, error) {
 		mergeWalk(&result.RepoScopeConfig, &src, repoScopeMetadata(src), repoScopePolicy())
 		result.Findings = append(result.Findings, cfg.Findings...)
 	}
+	// The pop-written layer sits under every hand-authored source: it is read
+	// first so a [repo."<path>"] block declaring the same key overwrites it below,
+	// never the reverse (ADR-0150, ADR-0191). It is keyed by repository identity,
+	// so one recorded bound serves every worktree. A broken runtime file degrades
+	// to "pop recorded nothing" rather than failing the whole resolution.
+	if stored, _, err := runtimeRepoSettingsWith(e.d, e.identity); err != nil {
+		debug.Error("config: read pop-written repo settings for %s: %v", e.identity, err)
+	} else if stored.TurnCap != nil && *stored.TurnCap > 0 {
+		result.TurnCap = *stored.TurnCap
+	}
 	if e.overrideFound {
 		src := e.override.RepoScopeConfig
 		mergeWalk(&result.RepoScopeConfig, &src, repoScopeMetadata(src), repoScopePolicy())
@@ -170,9 +180,13 @@ func (e *repoScopeEnumerator) resolveRepoConfig() (RepoConfig, error) {
 		// exact-checkout gate: the block was matched by repository identity, so every
 		// worktree of the repository reads the one bound (ADR-0191). A non-positive
 		// number bounds nothing, so it reads as "declares no cap" rather than as a
-		// cap of zero turns.
-		if e.override.TurnCap != nil && *e.override.TurnCap > 0 {
-			result.TurnCap = *e.override.TurnCap
+		// cap of zero turns — and a hand-written one still overrides a bound pop
+		// recorded, which is what makes the hand-authored layer the higher one.
+		if e.override.TurnCap != nil {
+			result.TurnCap = 0
+			if *e.override.TurnCap > 0 {
+				result.TurnCap = *e.override.TurnCap
+			}
 		}
 	}
 	return result, popErr
