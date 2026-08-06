@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-// streamShapeCapability names one of the six stream-shape adapter capabilities
-// gated by captured-run fixtures (ADR-0165).
+// streamShapeCapability names one of the stream-shape adapter capabilities gated
+// by captured-run fixtures (ADR-0165).
 type streamShapeCapability int
 
 const (
@@ -20,6 +20,7 @@ const (
 	streamShapeActualModel
 	streamShapeStreamRender
 	streamShapeTurn
+	streamShapeTurnCapExhaustion
 )
 
 var streamShapeCapabilityOrder = []streamShapeCapability{
@@ -29,6 +30,7 @@ var streamShapeCapabilityOrder = []streamShapeCapability{
 	streamShapeActualModel,
 	streamShapeStreamRender,
 	streamShapeTurn,
+	streamShapeTurnCapExhaustion,
 }
 
 func (c streamShapeCapability) String() string {
@@ -45,6 +47,8 @@ func (c streamShapeCapability) String() string {
 		return "stream-render"
 	case streamShapeTurn:
 		return "turn"
+	case streamShapeTurnCapExhaustion:
+		return "turn-cap-exhaustion"
 	default:
 		return fmt.Sprintf("stream-shape-capability(%d)", c)
 	}
@@ -63,15 +67,26 @@ type streamRenderGolden struct {
 	TypeCounts map[string]int
 }
 
+// turnCapExhaustionGolden is the pair of answers a Turn-cap exhaustion rule
+// gives on one captured ending. Both halves are pinned because recognition is
+// two claims at once: the stream says the run ended at its cap, and the process
+// agreed by exiting non-zero. A rule that answered yes on a clean exit would be
+// reading the ending out of the stream alone.
+type turnCapExhaustionGolden struct {
+	AtNonZeroExit bool
+	AtCleanExit   bool
+}
+
 // streamShapeGolden holds expected extraction output for one capability on a
 // preset's trimmed captured stream. A nil pointer means no golden is registered.
 type streamShapeGolden struct {
-	usage        *TokenUsage
-	cost         *PartialCost
-	toolTimings  []toolTimingGolden
-	actualModel  *string
-	streamRender *streamRenderGolden
-	turn         *TurnCount
+	usage             *TokenUsage
+	cost              *PartialCost
+	toolTimings       []toolTimingGolden
+	actualModel       *string
+	streamRender      *streamRenderGolden
+	turn              *TurnCount
+	turnCapExhaustion *turnCapExhaustionGolden
 }
 
 func (g *streamShapeGolden) hasGolden(cap streamShapeCapability) bool {
@@ -91,6 +106,8 @@ func (g *streamShapeGolden) hasGolden(cap streamShapeCapability) bool {
 		return g.streamRender != nil
 	case streamShapeTurn:
 		return g.turn != nil
+	case streamShapeTurnCapExhaustion:
+		return g.turnCapExhaustion != nil
 	default:
 		return false
 	}
@@ -101,13 +118,37 @@ func streamFixturePath(preset string) string {
 	return filepath.Join("testdata", "streams", preset+".events.jsonl.gz")
 }
 
+// streamShapeFixturePath returns the captured stream one capability is proved
+// against. Most capabilities read whatever a run happens to produce, so the
+// preset's ordinary capture answers for them. Turn-cap exhaustion is a claim
+// about one particular ending, and an uncapped run cannot witness it either way,
+// so it reads a capture of that ending instead (ADR-0190).
+func streamShapeFixturePath(preset string, cap streamShapeCapability) string {
+	if cap == streamShapeTurnCapExhaustion {
+		return filepath.Join("testdata", "streams", preset+".max-turns.events.jsonl.gz")
+	}
+	return streamFixturePath(preset)
+}
+
 func streamFixtureExists(preset string) bool {
 	_, err := os.Stat(streamFixturePath(preset))
 	return err == nil
 }
 
+func streamShapeFixtureExists(preset string, cap streamShapeCapability) bool {
+	_, err := os.Stat(streamShapeFixturePath(preset, cap))
+	return err == nil
+}
+
 func loadStreamFixture(preset string) ([]streamEventRecord, error) {
-	path := streamFixturePath(preset)
+	return loadStreamFixtureFile(streamFixturePath(preset))
+}
+
+func loadStreamShapeFixture(preset string, cap streamShapeCapability) ([]streamEventRecord, error) {
+	return loadStreamFixtureFile(streamShapeFixturePath(preset, cap))
+}
+
+func loadStreamFixtureFile(path string) ([]streamEventRecord, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -144,6 +185,8 @@ func streamShapeCapabilityKind(adapter AgentAdapter, cap streamShapeCapability) 
 		return adapter.StreamRenderCapability().Kind
 	case streamShapeTurn:
 		return adapter.TurnCapability().Kind
+	case streamShapeTurnCapExhaustion:
+		return adapter.TurnCapExhaustionCapability().Kind
 	default:
 		return capabilityUnset
 	}
@@ -164,6 +207,11 @@ func extractStreamShapeOutput(preset string, cap streamShapeCapability, events [
 		return summarizeStreamRender(renderStreamEvents(preset, events)), nil
 	case streamShapeTurn:
 		return extractTurnCount(preset, events), nil
+	case streamShapeTurnCapExhaustion:
+		return turnCapExhaustionGolden{
+			AtNonZeroExit: attemptExhaustedTurnCap(preset, events, 1),
+			AtCleanExit:   attemptExhaustedTurnCap(preset, events, 0),
+		}, nil
 	default:
 		return nil, fmt.Errorf("unknown stream-shape capability %v", cap)
 	}
@@ -192,6 +240,8 @@ func streamShapeGoldenMismatch(cap streamShapeCapability, want, got any) string 
 		return fmt.Sprintf("stream-render: got %+v, want %+v", got.(streamRenderGolden), want.(streamRenderGolden))
 	case streamShapeTurn:
 		return fmt.Sprintf("turn: got %+v, want %+v", got.(TurnCount), want.(TurnCount))
+	case streamShapeTurnCapExhaustion:
+		return fmt.Sprintf("turn-cap-exhaustion: got %+v, want %+v", got.(turnCapExhaustionGolden), want.(turnCapExhaustionGolden))
 	default:
 		return fmt.Sprintf("mismatch for %s", cap)
 	}
@@ -251,6 +301,8 @@ func streamShapeGoldenValue(g *streamShapeGolden, cap streamShapeCapability) any
 		return *g.streamRender
 	case streamShapeTurn:
 		return *g.turn
+	case streamShapeTurnCapExhaustion:
+		return *g.turnCapExhaustion
 	default:
 		return nil
 	}
@@ -270,6 +322,8 @@ func streamShapeOutputsMatch(cap streamShapeCapability, want, got any) bool {
 		return streamRenderGoldensMatch(got.(streamRenderGolden), want.(streamRenderGolden))
 	case streamShapeTurn:
 		return got.(TurnCount) == want.(TurnCount)
+	case streamShapeTurnCapExhaustion:
+		return got.(turnCapExhaustionGolden) == want.(turnCapExhaustionGolden)
 	default:
 		return false
 	}
@@ -305,6 +359,8 @@ func streamShapeOutputPresent(cap streamShapeCapability, got any) bool {
 		return true
 	case streamShapeTurn:
 		return got.(TurnCount).HasTurn
+	case streamShapeTurnCapExhaustion:
+		return got.(turnCapExhaustionGolden).AtNonZeroExit
 	default:
 		return false
 	}
@@ -403,6 +459,13 @@ var streamShapeFixtureGoldens = map[string]*streamShapeGolden{
 			TypeCounts: map[string]int{"assistant": 1, "raw": 10, "system": 1, "tool_use": 10},
 		},
 		turn: &TurnCount{Count: 8, HasTurn: true},
+		// Measured against claude.max-turns.events.jsonl.gz: the same captured run
+		// as above, cut off after three assistant turns and closed with the
+		// terminal record a live `claude --max-turns 3` produced on 2026-08-06 —
+		// subtype error_max_turns, terminal_reason max_turns, is_error true, no
+		// result text, and num_turns 4. The rule reads it as exhausted only when the
+		// process agreed by exiting non-zero.
+		turnCapExhaustion: &turnCapExhaustionGolden{AtNonZeroExit: true, AtCleanExit: false},
 	},
 	"cursor": {
 		usage: &TokenUsage{

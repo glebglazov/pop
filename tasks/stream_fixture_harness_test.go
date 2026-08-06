@@ -15,20 +15,22 @@ func TestStreamShapeFixtureHarness(t *testing.T) {
 			}
 
 			goldens := streamShapeFixtureGoldens[preset]
-			fixtureExists := streamFixtureExists(preset)
-
-			var events []streamEventRecord
-			if fixtureExists {
-				var err error
-				events, err = loadStreamFixture(preset)
-				if err != nil {
-					t.Fatalf("load stream fixture: %v", err)
-				}
-			}
 
 			for _, cap := range streamShapeCapabilityOrder {
 				cap := cap
 				t.Run(cap.String(), func(t *testing.T) {
+					// Each capability is proved against the capture that can witness
+					// it: the preset's ordinary run for most, a captured capped
+					// ending for turn-cap exhaustion (ADR-0190).
+					fixtureExists := streamShapeFixtureExists(preset, cap)
+					var events []streamEventRecord
+					if fixtureExists {
+						var err error
+						events, err = loadStreamShapeFixture(preset, cap)
+						if err != nil {
+							t.Fatalf("load stream fixture: %v", err)
+						}
+					}
 					kind := streamShapeCapabilityKind(adapter, cap)
 					if violation := checkStreamShapeFixture(preset, cap, kind, fixtureExists, goldens, events); violation != nil {
 						t.Fatal(violation.Description)

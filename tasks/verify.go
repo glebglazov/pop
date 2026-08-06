@@ -578,6 +578,12 @@ type verifierSelection struct {
 
 // verifyAttemptOutcome maps an attempt outcome to the persisted stream outcome
 // for a Verifier run.
+//
+// Turn-cap exhaustion is deliberately absent: a Verifier runs uncapped even in a
+// repository that declares a bound (ADR-0190 decision 2), so a cap-exhausted
+// ending is not one of the endings a verification attempt has. If a human sets
+// `--max-turns` on the Verifier's own spec, that run reads here as the non-zero
+// exit it is — his number, not pop's, and not a retry the Verifier reasons about.
 func verifyAttemptOutcome(outcome *attemptOutcome) string {
 	if outcome == nil {
 		return streamOutcomeFailed
