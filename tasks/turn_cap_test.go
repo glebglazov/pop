@@ -274,3 +274,35 @@ func TestResolveRepoTurnCapReadsOneBoundPerRepository(t *testing.T) {
 		t.Fatalf("turn cap with no declaration = %d, want 0", got)
 	}
 }
+
+// TestResolveRepoTurnCapReadsThePopWrittenBound proves the bound `pop config repo
+// set` writes arrives at the resolver the drain itself calls, from a worktree the
+// human never named — and that a hand-authored block still outranks it.
+func TestResolveRepoTurnCapReadsThePopWrittenBound(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	bareRoot := filepath.Join(root, "kestrel")
+	main := filepath.Join(bareRoot, "main")
+	feature := filepath.Join(bareRoot, "feature")
+	for _, dir := range []string{filepath.Join(bareRoot, ".bare"), main, feature} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d := DefaultDeps()
+	d.FS = testFSWithDataHome(filepath.Join(root, "xdg-data"))
+
+	if _, err := config.SetRepoSettingWith(&config.Deps{FS: d.FS}, main, "turn_cap", "18"); err != nil {
+		t.Fatalf("set turn_cap: %v", err)
+	}
+	if got := resolveRepoTurnCap(d, &config.Config{}, feature); got != 18 {
+		t.Fatalf("turn cap at the sibling worktree = %d, want the 18 pop wrote", got)
+	}
+
+	handAuthored := &config.Config{Repo: map[string]config.RepoOverrideConfig{
+		main: {TurnCap: intPtr(6)},
+	}}
+	if got := resolveRepoTurnCap(d, handAuthored, feature); got != 6 {
+		t.Fatalf("turn cap = %d, want the hand-authored 6 to win", got)
+	}
+}

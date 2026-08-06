@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"text/tabwriter"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/spf13/cobra"
@@ -79,10 +81,59 @@ without shell TOML-parsing).`,
 	RunE: runConfigShow,
 }
 
+// configRepoCmd groups the settings pop keeps per repository — the ones it
+// writes itself, as opposed to the ones a human hand-authors.
+var configRepoCmd = &cobra.Command{
+	Use:   "repo",
+	Short: "Read and set the settings pop keeps per repository",
+	Long: `Read and set the settings pop keeps per repository.
+
+These are repo-scoped settings pop writes for you. A value set from any checkout
+of a repository is read by every worktree of it, because it is filed under the
+repository, not under the directory you happened to run in.
+
+Pop writes them to its own runtime state (config.runtime.toml), never into your
+hand-authored config.toml. A [repo."<path>"] block you write therefore always
+overrides a value pop wrote, and never the other way around — to take a setting
+back into your own hands, write the key in config.toml.
+
+The settable keys are derived from the config schema itself, so what this command
+can set never drifts from what the config accepts.`,
+}
+
+var configRepoSetCmd = &cobra.Command{
+	Use:   "set <key> <value>",
+	Short: "Set a repo-scoped setting for the current repository",
+	Long: `Set a repo-scoped setting for the repository of the current directory.
+
+Examples:
+  pop config repo set turn_cap 40   # bound one implementation attempt to 40 turns
+  pop config repo set turn_cap 0    # give the bound back (0 stores no bound)`,
+	Args:              cobra.ExactArgs(2),
+	RunE:              runConfigRepoSet,
+	ValidArgsFunction: completeRepoSettingKey,
+}
+
+var configRepoGetCmd = &cobra.Command{
+	Use:   "get [key]",
+	Short: "Show the repo-scoped settings in effect here, and where each came from",
+	Long: `Show the repo-scoped settings in effect for the current repository.
+
+Each key is reported with the value in effect and the layer that supplied it:
+your hand-authored config.toml, the value pop wrote, or unset. With a key
+argument, only that key is printed.`,
+	Args:              cobra.MaximumNArgs(1),
+	RunE:              runConfigRepoGet,
+	ValidArgsFunction: completeRepoSettingKey,
+}
+
 func init() {
 	rootCmd.AddCommand(configCmd)
 	configCmd.AddCommand(configKeysCmd)
 	configCmd.AddCommand(configShowCmd)
+	configCmd.AddCommand(configRepoCmd)
+	configRepoCmd.AddCommand(configRepoSetCmd)
+	configRepoCmd.AddCommand(configRepoGetCmd)
 	configShowCmd.Flags().BoolVar(&configShowJSON, "json", false, "emit the effective config as JSON instead of TOML")
 	configKeysCmd.Flags().StringVar(&configKeysScope, "scope", "",
 		"limit to one surface: global | pop-toml | repo (default: all)")
@@ -138,6 +189,113 @@ func runConfigShow(cmd *cobra.Command, _ []string) error {
 	}
 	fmt.Fprint(cmd.OutOrStdout(), out)
 	return nil
+}
+
+// completeRepoSettingKey completes the first argument of the repo verbs with the
+// settable key set, taken from the schema so completion cannot list a key the
+// command would refuse.
+func completeRepoSettingKey(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return config.RepoSettableKeys(), cobra.ShellCompDirectiveNoFileComp
+}
+
+func runConfigRepoSet(cmd *cobra.Command, args []string) error {
+	d := cmdLayerDeps()
+	checkout, err := d.DirOrGetwd()
+	if err != nil {
+		return err
+	}
+	return runConfigRepoSetWith(d.configDeps(), configRepoConfig(d), cmd.OutOrStdout(), checkout, args[0], args[1])
+}
+
+func runConfigRepoGet(cmd *cobra.Command, args []string) error {
+	d := cmdLayerDeps()
+	checkout, err := d.DirOrGetwd()
+	if err != nil {
+		return err
+	}
+	key := ""
+	if len(args) == 1 {
+		key = args[0]
+	}
+	return runConfigRepoGetWith(d.configDeps(), configRepoConfig(d), cmd.OutOrStdout(), checkout, key)
+}
+
+// configRepoConfig loads the global config for the repo verbs. A missing or
+// broken config.toml is not fatal here: the pop-written layer is readable
+// without it, and the hand-authored layer it would supply is then simply empty.
+func configRepoConfig(d *Deps) *config.Config {
+	path := cfgFile
+	if path == "" {
+		path = config.DefaultConfigPathWith(d.configDeps())
+	}
+	cfg, err := config.LoadWith(d.configDeps(), path)
+	if err != nil {
+		debug.Error("config repo: load %s: %v", path, err)
+		return nil
+	}
+	return cfg
+}
+
+// runConfigRepoSetWith writes one repo-scoped setting and reports what it did:
+// which repository the value was filed under, and which file now holds it. When
+// a hand-authored block declares the same key, the write still happens (it is
+// the lower layer, and the human may remove the block later) but the reply says
+// plainly that it is not the value in effect.
+func runConfigRepoSetWith(cd *config.Deps, cfg *config.Config, out io.Writer, checkout, key, value string) error {
+	identity, err := config.SetRepoSettingWith(cd, checkout, key, value)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "%s = %s for repository %s\n", key, value, identity)
+	fmt.Fprintf(out, "written to %s\n", config.DefaultRuntimeConfigPathWith(cd))
+
+	settings, err := cfg.ResolveRepoSettings(cd, checkout)
+	if err != nil {
+		return err
+	}
+	for _, setting := range settings {
+		if setting.Key != key || setting.Source != config.RepoSettingOverride {
+			continue
+		}
+		fmt.Fprintf(out, "note: %s in your config.toml declares %s = %s and still wins\n",
+			setting.Locus, key, setting.Value)
+	}
+	return nil
+}
+
+// runConfigRepoGetWith prints the settable keys with the value in effect for
+// this repository and the layer that supplied it.
+func runConfigRepoGetWith(cd *config.Deps, cfg *config.Config, out io.Writer, checkout, key string) error {
+	if key != "" {
+		if !slices.Contains(config.RepoSettableKeys(), key) {
+			return config.UnknownRepoSettingError(key)
+		}
+	}
+	settings, err := cfg.ResolveRepoSettings(cd, checkout)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "repository %s\n", config.RepoIdentity(cd, checkout))
+	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintf(tw, "  KEY\tVALUE\tSOURCE\n")
+	for _, setting := range settings {
+		if key != "" && setting.Key != key {
+			continue
+		}
+		value := setting.Value
+		if value == "" {
+			value = "-"
+		}
+		source := string(setting.Source)
+		if setting.Locus != "" {
+			source = fmt.Sprintf("%s (%s)", source, setting.Locus)
+		}
+		fmt.Fprintf(tw, "  %s\t%s\t%s\n", setting.Key, value, source)
+	}
+	return tw.Flush()
 }
 
 // currentRepoTrunk resolves the current repo's effective Trunk worktree for

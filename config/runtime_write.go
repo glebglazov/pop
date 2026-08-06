@@ -332,8 +332,9 @@ func setRuntimeRepoTrunk(doc map[string]any, checkoutPath string) {
 }
 
 var runtimeDocumentReservedKeys = map[string]bool{
-	"integrations": true,
-	"workbench":    true,
+	"integrations":             true,
+	"workbench":                true,
+	runtimeRepoSettingsSection: true,
 }
 
 func runtimeRepoTrunkPaths(doc map[string]any) []string {
