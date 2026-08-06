@@ -105,6 +105,7 @@ If evidence is thin (blind axes, refused tool detail), say so and narrow the aud
 | Wrong exploration strategy | **Attempt prompt** — the task file's "What to build", orientation links, or acceptance criteria; tighten what to read before acting |
 | Task too large / unfocused | **Task sizing** — split the task set, narrow scope, add a prerequisite task, or reduce parallel surface area |
 | Tool misuse (ranges, duplicates) | **Attempt prompt** first (explicit read constraints, "do not re-run X"); repo docs second if the pattern is recurring |
+| One task iterated far past its peers, repeatedly | **Configuration** — recommend bounding the repository's implementation turns: `pop config repo set turn_cap <N>`, with `<N>` your suggested bound. Recommend it; do not run it yourself |
 | Agent / adapter blind spot | Note the blind axis or refusal; fix may belong in pop's adapter capabilities, not the repo — escalate separately from repo changes |
 
 Present the human a short summary:
@@ -112,9 +113,9 @@ Present the human a short summary:
 1. **Which run** (set, task, attempt, agent if mixed)
 2. **Facts** (turns, peak-in, suspect markers, top tool-detail findings)
 3. **Your bucket label** — explicitly yours, not pop's
-4. **Proposed route** — which file or task change, with a concrete draft when the fix is repo-side
+4. **Proposed route** — which file or task change, with a concrete draft when the fix is repo-side; when the route is configuration, the exact `pop config repo set` command instead of a draft
 
-Wait for confirmation before editing repo instructions or task files.
+Wait for confirmation before editing repo instructions or task files, or before the human runs a proposed configuration command — the skill only names it.
 
 ## Done
 
