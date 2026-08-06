@@ -21,6 +21,11 @@ const (
 	lessonContinue = "continue — your approach stood, finish and close out the sentinel"
 	lessonReassess = "reassess"
 	lessonResume   = "resume — this attempt was cut off mid-flight (not a failure). The runtime checkout already holds the partial changes; read the uncommitted working-tree diff first and continue from it."
+	// lessonTurnCapExhausted is the retry's whole reason to know a Turn cap
+	// exists: the previous attempt ran out of turns rather than out of ideas, so
+	// the approach stands and the budget is the thing to spend differently
+	// (ADR-0190).
+	lessonTurnCapExhausted = "resume — the previous attempt was cut short at its turn cap (not a failure): it ran out of turns before it could finish. Its changes are already in the runtime checkout; read the uncommitted working-tree diff first, continue from it, and spend your own turns on the remaining work rather than re-deriving what it did."
 )
 
 // priorAttempt is one in-scope prior attempt of the same task, summarized for
@@ -42,6 +47,8 @@ type priorAttempt struct {
 func attemptLesson(outcome, reason string, exitCode int) string {
 	r := strings.TrimSpace(reason)
 	switch {
+	case outcome == streamOutcomeTurnCapExhausted:
+		return lessonTurnCapExhausted
 	case outcome == streamOutcomeInterrupted || outcome == streamOutcomeQuotaPaused || outcome == streamOutcomeAgentUnusable:
 		return lessonResume
 	case outcome == streamOutcomeTimedOut:
@@ -95,14 +102,16 @@ func buildPriorAttemptDigest(d *Deps, taskSetDir, taskFile string) string {
 			continue
 		}
 		// Captured attempts from failed, timed-out, interrupted, and quota-
-		// paused runs all feed a retry. Completed attempts are intentionally
+		// paused runs all feed a retry, and so does one cut short at its Turn cap:
+		// the retry needs told that the work stopped for want of turns rather than
+		// for want of an approach (ADR-0190). Completed attempts are intentionally
 		// excluded: they have no lesson to teach (ADR 0040/ADR 0089). So is a
 		// model-skipped run: the provider refused the model before the agent
 		// said anything about the task, so carrying it forward would teach the
 		// next attempt a lesson about a failure that never happened (ADR-0168).
 		if run.meta.Outcome != streamOutcomeFailed && run.meta.Outcome != streamOutcomeTimedOut &&
 			run.meta.Outcome != streamOutcomeInterrupted && run.meta.Outcome != streamOutcomeQuotaPaused &&
-			run.meta.Outcome != streamOutcomeAgentUnusable {
+			run.meta.Outcome != streamOutcomeAgentUnusable && run.meta.Outcome != streamOutcomeTurnCapExhausted {
 			continue
 		}
 		attempts = append(attempts, priorAttempt{

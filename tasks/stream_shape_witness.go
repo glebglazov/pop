@@ -22,9 +22,40 @@ func streamShapeBytesWitness(cap streamShapeCapability, events []streamEventReco
 		return witnessStreamRenderBytes(events)
 	case streamShapeTurn:
 		return witnessTurnBytes(events)
+	case streamShapeTurnCapExhaustion:
+		return witnessTurnCapExhaustionBytes(events)
 	default:
 		return false
 	}
+}
+
+// witnessTurnCapExhaustionBytes reports whether a capture carries any terminal
+// record naming a cap as the reason the run ended, in any adapter's spelling. It
+// is the gate that would catch a Blind declaration on an adapter whose stream
+// says so after all — and it can only fire on a capture of a capped ending,
+// which is why the exhaustion capability reads its own fixture.
+func witnessTurnCapExhaustionBytes(events []streamEventRecord) bool {
+	for _, ev := range events {
+		var probe struct {
+			Subtype        string `json:"subtype"`
+			TerminalReason string `json:"terminal_reason"`
+			StopReason     string `json:"stop_reason"`
+			Error          string `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(ev.Raw), &probe); err != nil {
+			continue
+		}
+		for _, field := range []string{probe.Subtype, probe.TerminalReason, probe.StopReason, probe.Error} {
+			if field == "" {
+				continue
+			}
+			lowered := strings.ToLower(field)
+			if strings.Contains(lowered, "max_turns") || strings.Contains(lowered, "max_steps") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func witnessUsageBytes(events []streamEventRecord) bool {

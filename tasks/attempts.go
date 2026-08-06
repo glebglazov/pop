@@ -19,8 +19,23 @@ type attemptOutcome struct {
 	exitCode    int
 	timedOut    bool
 	interrupted bool
-	runErr      error
-	stream      *streamRecorder
+	// turnCapExhausted is set when the agent's own stream and exit status say it
+	// stopped because it reached its Turn cap (ADR-0190). Only an adapter that
+	// declares the ending recognisable can set it, and only an implementation
+	// attempt is ever capped, so a Verifier's outcome carries it never.
+	turnCapExhausted bool
+	runErr           error
+	stream           *streamRecorder
+}
+
+// turnCapExhaustedReason phrases why an attempt stopped, naming the bound when
+// pop is the one that set it. A hand-written cap leaves pop no number to name,
+// so the sentence names the cap without one rather than inventing it.
+func turnCapExhaustedReason(turnCap int) string {
+	if turnCap > 0 {
+		return fmt.Sprintf("stopped at its %d-turn cap", turnCap)
+	}
+	return "stopped at its turn cap"
 }
 
 // buildAgentInvocationFactory returns the per-agentSpec invocation builder
@@ -140,7 +155,7 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 			} else {
 				display.line(ansiDim, "── Agent finished for %s/%s ───────────────────────────", sel.TaskSetID, sel.TaskID)
 			}
-			if outcome.interrupted || outcome.timedOut || outcome.runErr != nil {
+			if outcome.interrupted || outcome.timedOut || outcome.turnCapExhausted || outcome.runErr != nil {
 				break
 			}
 			agentResult = invocation.NormalizeOutput(agentOut)
@@ -191,6 +206,28 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 			}
 			printAttemptBreakdown(d, out, streamPaths)
 			summary := fmt.Sprintf("timed out after %s on attempt %d", timeout, attempt)
+			if err := finalizeTaskFailed(d, sel, attempt, summary); err != nil {
+				return nil, taskExitErr(sel, ExitOperational, "%v", err)
+			}
+			return nil, taskExitErr(sel, ExitOperational, "%s", summary)
+		}
+		if outcome.turnCapExhausted {
+			// The agent stopped itself at the repository's bound, so the attempt
+			// answered nothing about the task and everything it committed is on
+			// disk. That spends the try — unlike an Effort model skip — and the
+			// digest carried forward at the top of this loop tells the next attempt
+			// it was cut short, which is the whole point of recording the ending
+			// separately (ADR-0190 decision 6). Like a timeout, there is nothing to
+			// wait for: the retry fires instantly on the compact digest.
+			reason := turnCapExhaustedReason(invocation.turnCap)
+			persist(outcome.stream, attempt, streamOutcomeTurnCapExhausted, reason, outcome.exitCode)
+			display.line(ansiRed, "✗ Attempt %d/%d %s", attempt, maxTries, reason)
+			if attempt < maxTries {
+				display.line(ansiYellow, "↻ Retrying instantly with preserved changes...")
+				continue
+			}
+			printAttemptBreakdown(d, out, streamPaths)
+			summary := fmt.Sprintf("%s on attempt %d", reason, attempt)
 			if err := finalizeTaskFailed(d, sel, attempt, summary); err != nil {
 				return nil, taskExitErr(sel, ExitOperational, "%v", err)
 			}
@@ -625,6 +662,13 @@ func runAgentAttempt(d *Deps, runtimePath string, liveOut io.Writer, timeout tim
 	if recorder != nil {
 		recorder.finish()
 		outcome.stream = recorder
+		// Read the ending out of what the agent said and how it exited, through the
+		// adapter's declared exhaustion capability — never off a turn count
+		// (ADR-0190). A killed attempt is pop's own doing and is already named by
+		// its own outcome, so it is not re-read as the agent stopping itself.
+		if !outcome.interrupted && !outcome.timedOut {
+			outcome.turnCapExhausted = attemptExhaustedTurnCap(invocation.AgentPreset(), recorder.events, outcome.exitCode)
+		}
 	}
 
 	raw := capture.String()

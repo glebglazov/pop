@@ -292,6 +292,42 @@ func (c AgentTurnCapEnforcementCapability) validate(preset string) error {
 	}
 }
 
+// AgentTurnCapExhaustionCapability is a preset's declared stance on recognising
+// that a run ended because it reached its Turn cap (ADR-0190). Stream-shape, so
+// a captured run backs it (ADR-0165), and deliberately separate from
+// AgentTurnCapEnforcementCapability: being able to set a cap and being able to
+// see one hit are different answers per adapter — kimi would accept a cap whose
+// exhaustion appears only on stderr, which is neither capability's seam.
+//
+// Exhausted reads the ending out of the agent's own stream and exit status. It
+// is never given a turn count, because a count is pop's measurement of the run
+// and not the agent's statement about why it stopped.
+type AgentTurnCapExhaustionCapability struct {
+	Kind      CapabilityKind
+	Exhausted func(events []streamEventRecord, exitCode int) bool // required iff Supported
+	Reason    string                                              // required iff Blind
+}
+
+// validate reports whether this turn-cap exhaustion stance is a complete declaration.
+func (c AgentTurnCapExhaustionCapability) validate(preset string) error {
+	switch c.Kind {
+	case CapabilitySupported:
+		if c.Exhausted == nil {
+			return fmt.Errorf("agent preset %q: turn-cap exhaustion capability is Supported but Exhausted is nil", preset)
+		}
+		return nil
+	case CapabilityBlind:
+		if strings.TrimSpace(c.Reason) == "" {
+			return fmt.Errorf("agent preset %q: turn-cap exhaustion capability is Blind but Reason is empty", preset)
+		}
+		return nil
+	case capabilityUnset:
+		return fmt.Errorf("agent preset %q: turn-cap exhaustion capability is unset", preset)
+	default:
+		return fmt.Errorf("agent preset %q: turn-cap exhaustion capability has unknown kind %d", preset, c.Kind)
+	}
+}
+
 // AgentQuotaResetCapability is a preset's declared stance on deriving PauseResetAt
 // from quota diagnostics (ADR-0166).
 type AgentQuotaResetCapability struct {

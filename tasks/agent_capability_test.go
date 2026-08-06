@@ -408,6 +408,9 @@ func validTestPresetAgentSpec() presetAgentSpec {
 		turnCapEnforcement: AgentTurnCapEnforcementCapability{
 			Kind: CapabilityBlind, Reason: reason,
 		},
+		turnCapExhaustion: AgentTurnCapExhaustionCapability{
+			Kind: CapabilityBlind, Reason: reason,
+		},
 		quotaReset: AgentQuotaResetCapability{
 			Kind: CapabilityBlind, Reason: reason,
 		},
@@ -446,6 +449,7 @@ func TestPresetAgentSpecValidateRejectsMissingCapability(t *testing.T) {
 		{"peak-input", func(s *presetAgentSpec) { s.peakInput = AgentPeakInputCapability{} }, "peak-input"},
 		{"reasoning", func(s *presetAgentSpec) { s.reasoning = AgentReasoningCapability{} }, "reasoning"},
 		{"turn-cap enforcement", func(s *presetAgentSpec) { s.turnCapEnforcement = AgentTurnCapEnforcementCapability{} }, "turn-cap enforcement"},
+		{"turn-cap exhaustion", func(s *presetAgentSpec) { s.turnCapExhaustion = AgentTurnCapExhaustionCapability{} }, "turn-cap exhaustion"},
 		{"quota-reset", func(s *presetAgentSpec) { s.quotaReset = AgentQuotaResetCapability{} }, "quota-reset"},
 		{"effort-ladder", func(s *presetAgentSpec) { s.effortLadder = AgentEffortLadderCapability{} }, "effort-ladder"},
 		{"executable", func(s *presetAgentSpec) { s.executable = AgentExecutableCapability{} }, "executable"},

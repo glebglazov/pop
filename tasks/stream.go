@@ -41,6 +41,14 @@ const (
 	// failure — nothing about the task was answered — nor an unusable agent, the
 	// CLI kept running fine.
 	streamOutcomeModelSkipped = "model_skipped"
+	// streamOutcomeTurnCapExhausted is the terminal outcome of an attempt the
+	// agent stopped itself because it reached the repository's Turn cap
+	// (ADR-0190). It is not a failure — nothing about the approach was judged —
+	// and not a timeout, which is pop's own wall clock killing a process that was
+	// still running. Unlike an Effort model skip it spends the try and carries
+	// into the next attempt's digest, because being cut short mid-flight is
+	// exactly what the retry needs told.
+	streamOutcomeTurnCapExhausted = "turn_cap_exhausted"
 )
 
 // streamHeaderRecord opens a Captured attempt stream file.
