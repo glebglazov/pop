@@ -162,7 +162,7 @@ func TestVerifyFailedGateAgentAssistanceAdvisory(t *testing.T) {
 	if runner.attendedCalls != 1 || runner.runCalls != 0 {
 		t.Fatalf("runner calls: attended=%d run=%d, want attended only", runner.attendedCalls, runner.runCalls)
 	}
-	if len(runner.args) != 2 || runner.args[0] != "--dangerously-skip-permissions" || !strings.Contains(runner.args[1], "You are assisting a human at a Verify-failed gate") {
+	if len(runner.args) != 3 || runner.args[0] != "--permission-mode" || runner.args[1] != "auto" || !strings.Contains(runner.args[2], "You are assisting a human at a Verify-failed gate") {
 		t.Fatalf("assistance prompt = %v", runner.args)
 	}
 	if strings.Count(outStr, "Choose [0]:") < 2 {

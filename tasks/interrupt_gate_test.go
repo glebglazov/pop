@@ -132,7 +132,7 @@ func TestInterruptGateAssistDispatchesToSharedHandler(t *testing.T) {
 		t.Fatalf("assistance must dispatch once via the attended handler: calls=%d attended=%d run=%d",
 			runner.calls, runner.attendedCalls, runner.runCalls)
 	}
-	if len(runner.args) != 2 || runner.args[0] != "--dangerously-skip-permissions" || !strings.Contains(runner.args[1], "You are assisting a human with an interrupted task") {
+	if len(runner.args) != 3 || runner.args[0] != "--permission-mode" || runner.args[1] != "auto" || !strings.Contains(runner.args[2], "You are assisting a human with an interrupted task") {
 		t.Fatalf("assistance must carry the interrupt prompt, got %s %v", runner.name, runner.args)
 	}
 	if !strings.Contains(out.String(), "Starting interrupt assistance:") {

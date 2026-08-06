@@ -205,7 +205,7 @@ var agentAdapters = map[string]AgentAdapter{
 		autoFormat:     AgentOutputClaudeStreamJSON,
 		autoArgs:       []string{"--output-format", "stream-json", "--verbose"},
 		assistance:     AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "claude"}},
-		attendedArgs:   AgentAttendedArgsCapability{Kind: CapabilitySupported, Args: []string{"--dangerously-skip-permissions"}},
+		attendedArgs:   AgentAttendedArgsCapability{Kind: CapabilitySupported, Args: []string{"--permission-mode", "auto"}},
 		availability: AgentAvailabilityProbeCapability{
 			Kind:                 CapabilitySupported,
 			Command:              &AgentCommand{Name: "claude", Args: []string{"auth", "status"}},

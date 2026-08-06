@@ -177,13 +177,14 @@ projects = [
 # set one agent's block without erasing another's (ADR-0187).
 #
 # attended_args REPLACES pop's own attended arguments for that preset instead of
-# adding to them — pop's defaults are the per-preset auto-approval flag (claude
-# --dangerously-skip-permissions, cursor --force --trust, codex
-# --dangerously-bypass-approvals-and-sandbox; opencode, pi and kimi have none and
-# launch bare). An empty list launches the bare binary; omit the key to keep
-# pop's default.
+# adding to them — pop's defaults are the least-restrictive posture each agent
+# offers (claude --permission-mode auto, whose classifier allows ordinary in-repo
+# work and asks about the rest; cursor --force --trust, codex
+# --dangerously-bypass-approvals-and-sandbox, which bypass outright; opencode, pi
+# and kimi have nothing of the kind and launch bare). An empty list launches the
+# bare binary; omit the key to keep pop's default.
 # [agents.claude]
-# attended_args = ["--permission-mode", "acceptEdits"]
+# attended_args = ["--dangerously-skip-permissions"]
 #
 # attended_model is the model an attended session names. Left unset, pop passes
 # no model flag at all and the agent's own configuration decides — a --model in

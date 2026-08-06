@@ -49,9 +49,9 @@ output = "auto"
 # Per-agent settings for the *attended* sessions pop opens for you (HITL and
 # assist menus, map grilling, routine authoring) — never a headless drain.
 # attended_args replaces pop's own attended arguments for this preset rather than
-# adding to them; pop's default is the preset's auto-approval flag, and an empty
-# list launches the bare binary.
-# attended_args = ["--permission-mode", "acceptEdits"]
+# adding to them; pop's default is the least-restrictive posture the agent offers
+# (claude: --permission-mode auto), and an empty list launches the bare binary.
+# attended_args = ["--dangerously-skip-permissions"]
 # Model an attended session names. Unset ⇒ pop passes no model flag and the
 # agent's own configuration decides; a --model in [tasks.implement].agents tunes
 # unattended drains only and never reaches an interactive session.

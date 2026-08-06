@@ -925,10 +925,10 @@ func TestResolveAgentAssistanceInvocationNative(t *testing.T) {
 	if invocation.Command.Name != "claude" {
 		t.Fatalf("command name = %q, want claude", invocation.Command.Name)
 	}
-	if !reflect.DeepEqual(invocation.Command.Args, []string{"--dangerously-skip-permissions", "assist prompt"}) {
+	if !reflect.DeepEqual(invocation.Command.Args, []string{"--permission-mode", "auto", "assist prompt"}) {
 		t.Fatalf("command args = %#v", invocation.Command.Args)
 	}
-	if invocation.Display != "claude --dangerously-skip-permissions <HITL assistance prompt>" {
+	if invocation.Display != "claude --permission-mode auto <HITL assistance prompt>" {
 		t.Fatalf("display = %q", invocation.Display)
 	}
 	if !strings.Contains(invocation.Detail, "native") || strings.Contains(invocation.Detail, "fallback") {
@@ -968,7 +968,7 @@ func TestAttendedAssistanceIgnoresImplementListExtraArgs(t *testing.T) {
 		name string
 		want []string
 	}{
-		{"claude --model opus4.8", "claude", []string{"--dangerously-skip-permissions", "assist prompt"}},
+		{"claude --model opus4.8", "claude", []string{"--permission-mode", "auto", "assist prompt"}},
 		{"cursor --model gpt-5", "cursor-agent", []string{"--force", "--trust", "assist prompt"}},
 	} {
 		t.Run(tc.spec, func(t *testing.T) {
@@ -1010,7 +1010,7 @@ func TestAttendedArgsConfigReplacesDeclaredDefaults(t *testing.T) {
 		{
 			name:  "model only",
 			block: config.AgentConfig{AttendedModel: "opus"},
-			want:  []string{"--dangerously-skip-permissions", "--model", "opus", "assist prompt"},
+			want:  []string{"--permission-mode", "auto", "--model", "opus", "assist prompt"},
 		},
 		{
 			name:  "args and model together",
@@ -1020,7 +1020,7 @@ func TestAttendedArgsConfigReplacesDeclaredDefaults(t *testing.T) {
 		{
 			name:  "unset keeps the declared default and names no model",
 			block: config.AgentConfig{},
-			want:  []string{"--dangerously-skip-permissions", "assist prompt"},
+			want:  []string{"--permission-mode", "auto", "assist prompt"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1043,20 +1043,21 @@ func TestAttendedArgsConfigReplacesDeclaredDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"--dangerously-skip-permissions", "assist prompt"}; !reflect.DeepEqual(invocation.Command.Args, want) {
+	if want := []string{"--permission-mode", "auto", "assist prompt"}; !reflect.DeepEqual(invocation.Command.Args, want) {
 		t.Fatalf("command args = %#v, want %#v", invocation.Command.Args, want)
 	}
 }
 
-// TestAttendedAssistanceLaunchesAutoApproved pins the per-preset auto-approval
-// posture of ADR-0187: the flag differs per agent, a preset with none launches
-// exactly as it did before, and a custom --agent-cmd gains no attended form.
+// TestAttendedAssistanceLaunchesAutoApproved pins the per-preset hands-off
+// posture of ADR-0187: each preset gets the least-restrictive posture it offers
+// — claude its `auto` permission mode, the others their bypass flag — a preset
+// with none launches bare, and a custom --agent-cmd gains no attended form.
 func TestAttendedAssistanceLaunchesAutoApproved(t *testing.T) {
 	for _, tc := range []struct {
 		preset string
 		want   []string
 	}{
-		{"claude", []string{"--dangerously-skip-permissions", "assist prompt"}},
+		{"claude", []string{"--permission-mode", "auto", "assist prompt"}},
 		{"cursor", []string{"--force", "--trust", "assist prompt"}},
 		{"codex", []string{"--dangerously-bypass-approvals-and-sandbox", "assist prompt"}},
 		{"opencode", []string{"assist prompt"}},
