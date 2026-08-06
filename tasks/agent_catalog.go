@@ -3,6 +3,8 @@ package tasks
 import (
 	"os/exec"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/glebglazov/pop/config"
@@ -13,12 +15,19 @@ const DefaultAgentPreset = "claude"
 var agentCatalogOrder = []string{"claude", "opencode", "cursor", "codex", "pi", "kimi"}
 
 // AgentCatalogRow describes Pop's recognition, PATH availability, attended
-// assistance, curated models, and resolved effort ladder for one agent row.
+// assistance, declared capability support, curated models, and resolved effort
+// ladder for one agent row.
 type AgentCatalogRow struct {
 	Agent        string
 	Binary       string
 	Found        bool
 	Assistance   bool
+	// TurnCap and AttendedArgs carry the adapter's own declarations, so a human
+	// setting a repository turn cap or opening an attended session sees which
+	// presets can honour it instead of discovering the gap by getting nothing
+	// (ADR-0190, ADR-0187).
+	TurnCap      AgentCatalogSupport
+	AttendedArgs AgentCatalogSupport
 	EffortLadder []AgentCatalogEffortTier
 	// Models is the preset's curated, recommended-first alias list — advisory
 	// only, never a validation gate (ADR-0019).
@@ -33,6 +42,16 @@ type AgentCatalogRow struct {
 	// skip; an absent key is runnable. This is the store's own encoding
 	// (store.AgentModelCooldown.Until).
 	ModelSkips map[string]time.Time
+}
+
+// AgentCatalogSupport is one declared capability flattened for display:
+// whether the preset supports it, and the sentence that says what a reader gets
+// — the argv shape when Supported, the adapter's stated reason when Blind. It
+// keeps the catalog free of capability structs while leaving no answer only
+// readable in the source.
+type AgentCatalogSupport struct {
+	Supported bool
+	Detail    string
 }
 
 // AgentCatalogEffortTier describes one resolved effort tier for display.
@@ -71,6 +90,8 @@ func AgentCatalogWithConfig(d *Deps, cfg *config.Config) []AgentCatalogRow {
 			Binary:                 binary,
 			Found:                  err == nil,
 			Assistance:             adapter.AssistanceCapability().Available(),
+			TurnCap:                turnCapSupport(adapter),
+			AttendedArgs:           attendedArgsSupport(adapter),
 			EffortLadder:           effortLadderForCatalog(cfg, preset),
 			Models:                 adapter.Models(),
 			ModelsInstallDependent: modelsInstallDependent(adapter),
@@ -79,12 +100,17 @@ func AgentCatalogWithConfig(d *Deps, cfg *config.Config) []AgentCatalogRow {
 		seen[preset] = true
 	}
 
+	// A config-only effort agent is run as a custom agent command, so its
+	// declarations are the custom adapter's — not blanks.
+	custom := customAgentAdapter{}
 	for _, agent := range configuredEffortAgents(cfg, seen) {
 		_, err := lookPath(agent)
 		rows = append(rows, AgentCatalogRow{
 			Agent:        agent,
 			Binary:       agent,
 			Found:        err == nil,
+			TurnCap:      turnCapSupport(custom),
+			AttendedArgs: attendedArgsSupport(custom),
 			EffortLadder: effortLadderForCatalog(cfg, agent),
 			ModelSkips:   skips[agent],
 		})
@@ -112,6 +138,37 @@ func catalogModelSkips(d *Deps, now time.Time) map[string]map[string]time.Time {
 		skips[row.Preset][row.Model] = row.Until
 	}
 	return skips
+}
+
+// turnCapSample is the bound turnCapSupport asks a Supported adapter to spell,
+// so the catalog can show the flag shape without a run's cap in hand. It is
+// swapped back out for "N" in the rendered detail.
+const turnCapSample = 7
+
+// turnCapSupport flattens an adapter's turn-cap enforcement stance. A Supported
+// preset shows the argv it emits with the bound left as N; a Blind one shows
+// the sentence the adapter already carries about why a cap cannot reach it.
+func turnCapSupport(adapter AgentAdapter) AgentCatalogSupport {
+	cap := adapter.TurnCapEnforcementCapability()
+	if cap.Kind != CapabilitySupported || cap.SpecTokens == nil {
+		return AgentCatalogSupport{Detail: cap.Reason}
+	}
+	shape := strings.Join(cap.SpecTokens(turnCapSample), " ")
+	return AgentCatalogSupport{
+		Supported: true,
+		Detail:    strings.ReplaceAll(shape, strconv.Itoa(turnCapSample), "N"),
+	}
+}
+
+// attendedArgsSupport flattens an adapter's attended-argument stance: the
+// auto-approval arguments an attended session launches with, or why the CLI has
+// none and launches bare (ADR-0187).
+func attendedArgsSupport(adapter AgentAdapter) AgentCatalogSupport {
+	cap := adapter.AttendedArgsCapability()
+	if cap.Kind != CapabilitySupported || len(cap.Args) == 0 {
+		return AgentCatalogSupport{Detail: cap.Reason}
+	}
+	return AgentCatalogSupport{Supported: true, Detail: strings.Join(cap.Args, " ")}
 }
 
 func AgentBinary(adapter AgentAdapter) string {

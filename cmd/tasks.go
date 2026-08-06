@@ -59,6 +59,7 @@ var (
 	taskStreamToolDetail      bool
 	taskSpendJSON             bool
 	taskAgentsModels          bool
+	taskAgentsWhy             bool
 )
 
 var taskCmd = &cobra.Command{
@@ -229,7 +230,7 @@ var taskMigrateCmd = &cobra.Command{
 
 var taskAgentsCmd = &cobra.Command{
 	Use:   "agents",
-	Short: "List agent PATH availability, attended assistance, and resolved effort ladders",
+	Short: "List agent PATH availability, attended assistance, turn-cap and attended-argument support, and resolved effort ladders",
 	Args:  cobra.NoArgs,
 	RunE:  runTaskAgents,
 }
@@ -319,6 +320,7 @@ func init() {
 	taskTransferCmd.AddCommand(taskImportCmd)
 	taskCmd.AddCommand(taskMigrateCmd)
 	taskAgentsCmd.Flags().BoolVar(&taskAgentsModels, "models", false, "Also list each preset's curated model aliases, recommended first")
+	taskAgentsCmd.Flags().BoolVar(&taskAgentsWhy, "why", false, "Also explain each preset's turn-cap and attended-argument support, with the reason where it has none")
 	taskCmd.AddCommand(taskAgentsCmd)
 	taskBindWorktreeCmd.Flags().BoolVar(&taskBindWorktreeForce, "force", false, "Re-point a set already bound elsewhere")
 	taskBindWorktreeCmd.Flags().BoolVarP(&taskRunYes, "yes", "y", false, "Skip managed-worktree delete confirmation when rebinding")
@@ -1565,10 +1567,20 @@ func runTaskMigrateWith(d *tasks.Deps, w io.Writer) error {
 }
 
 func runTaskAgents(cmd *cobra.Command, args []string) error {
-	return runTaskAgentsWith(cmdLayerDeps().tasksDeps(), os.Stdout, taskAgentsModels)
+	return runTaskAgentsWith(cmdLayerDeps().tasksDeps(), os.Stdout, taskAgentsOptions{
+		Models: taskAgentsModels,
+		Why:    taskAgentsWhy,
+	})
 }
 
-func runTaskAgentsWith(d *tasks.Deps, w io.Writer, models bool) error {
+// taskAgentsOptions names the detail sections the agent lens prints beyond its
+// default table.
+type taskAgentsOptions struct {
+	Models bool
+	Why    bool
+}
+
+func runTaskAgentsWith(d *tasks.Deps, w io.Writer, opts taskAgentsOptions) error {
 	cfg, err := taskConfigLoad(config.DefaultConfigPath())
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("tasks agents: load config: %w", err)
@@ -1577,18 +1589,55 @@ func runTaskAgentsWith(d *tasks.Deps, w io.Writer, models bool) error {
 		cfg = nil
 	}
 	rows := tasks.AgentCatalogWithConfig(d, cfg)
-	renderTaskAgents(w, rows)
-	if models {
+	renderTaskAgents(w, rows, !opts.Why)
+	if opts.Why {
+		renderTaskAgentSupport(w, rows)
+	}
+	if opts.Models {
 		renderTaskAgentModels(w, rows)
 	}
 	return nil
 }
 
-func renderTaskAgents(w io.Writer, rows []tasks.AgentCatalogRow) {
-	fmt.Fprintf(w, "%-9s %-14s %-5s %-6s %s\n", "agent", "binary", "found", "assist", "effort ladder")
+func renderTaskAgents(w io.Writer, rows []tasks.AgentCatalogRow, hint bool) {
+	fmt.Fprintf(w, "%-9s %-14s %-5s %-6s %-8s %-8s %s\n", "agent", "binary", "found", "assist", "turn cap", "attended", "effort ladder")
+	unsupported := false
 	for _, row := range rows {
-		fmt.Fprintf(w, "%-9s %-14s %-5s %-6s %s\n", row.Agent, row.Binary, yesNo(row.Found), yesNo(row.Assistance), renderEffortLadder(row.Agent, row.EffortLadder, row.ModelSkips))
+		fmt.Fprintf(w, "%-9s %-14s %-5s %-6s %-8s %-8s %s\n", row.Agent, row.Binary, yesNo(row.Found), yesNo(row.Assistance), yesNo(row.TurnCap.Supported), yesNo(row.AttendedArgs.Supported), renderEffortLadder(row.Agent, row.EffortLadder, row.ModelSkips))
+		unsupported = unsupported || !row.TurnCap.Supported || !row.AttendedArgs.Supported
 	}
+	// A "no" here is a decision some adapter already wrote a sentence about; the
+	// table points at where that sentence is instead of ending the trail.
+	if hint && unsupported {
+		fmt.Fprintln(w, "\nrun with --why for what a turn cap or attended session actually gets per agent")
+	}
+}
+
+// renderTaskAgentSupport prints, per preset, the argv a supported capability
+// emits and the adapter's own reason where it is unsupported. It is the answer
+// to "I set a turn cap and nothing happened", so it stays off the default render
+// and appears only when asked for.
+func renderTaskAgentSupport(w io.Writer, rows []tasks.AgentCatalogRow) {
+	fmt.Fprintf(w, "\n%-9s %-14s %s\n", "agent", "capability", "declared support")
+	for _, row := range rows {
+		for _, capability := range []struct {
+			name    string
+			support tasks.AgentCatalogSupport
+		}{
+			{"turn cap", row.TurnCap},
+			{"attended args", row.AttendedArgs},
+		} {
+			fmt.Fprintf(w, "%-9s %-14s %s\n", row.Agent, capability.name, renderAgentSupport(capability.support))
+		}
+	}
+}
+
+func renderAgentSupport(support tasks.AgentCatalogSupport) string {
+	detail := support.Detail
+	if strings.TrimSpace(detail) == "" {
+		detail = "no reason declared"
+	}
+	return yesNo(support.Supported) + ": " + detail
 }
 
 // renderTaskAgentModels prints each preset's curated model aliases, recommended

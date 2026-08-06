@@ -693,7 +693,7 @@ The preset-specific bridge between Pop and a supported agent. An adapter may pro
 _Avoid_: Universal JSON protocol, agent integration
 
 **Agent catalog**:
-The readout of `pop tasks agents`: every recognized **Agent preset** with its binary, whether that binary is on PATH, which preset is the default, and notes such as attended-assistance availability. It reports what Pop owns by PATH lookup only and never execs agents. Authentication belongs to **Doctor**, which runs each preset's **Agent availability probe** — the promise this entry has always made, now kept. Its audience is a planner choosing an **Agent preset** as much as a human. Model details come from each preset's **Model source**, surfaced only on request.
+The readout of `pop tasks agents`: every recognized **Agent preset** with its binary, whether that binary is on PATH, which preset is the default, and notes such as attended-assistance availability. It reports what Pop owns by PATH lookup only and never execs agents. Authentication belongs to **Doctor**, which runs each preset's **Agent availability probe** — the promise this entry has always made, now kept. Its audience is a planner choosing an **Agent preset** as much as a human. It also states, per preset, whether the preset can be told to enforce a turn cap (ADR-0190) and whether it has attended auto-approval arguments, so a bound or a posture that cannot reach the agent is visible before it is set rather than silently discarded. Model details come from each preset's **Model source**, and the argv a supported capability emits together with the adapter's stated reason where it has none, are surfaced only on request.
 _Avoid_: Supported agents matrix, doctor, model catalog
 
 **Model source**:
