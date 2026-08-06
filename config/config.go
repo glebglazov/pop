@@ -743,6 +743,15 @@ type RepoConfig struct {
 	// cannot name a machine-specific trunk, so this is never decoded (toml:"-").
 	Trunk bool `toml:"-"`
 
+	// TurnCap is the resolved Turn cap for this checkout's repository: how many
+	// Turns one implementation attempt may spend (ADR-0190). Zero means the
+	// repository declares none and an attempt runs unbounded, as before. Like
+	// trunk it is [repo."<path>"]-only — bounding a repository's drains must not
+	// require committing a pop artifact into it (ADR-0191) — so it is never
+	// decoded from .pop/config.toml (toml:"-") and is populated only by
+	// resolution.
+	TurnCap int `toml:"-"`
+
 	// Findings holds non-fatal scope-legality problems collected while loading
 	// this .pop/config.toml (ADR-0054, ADR-0083): top-level keys that are not repo-scope
 	// keys (global/machine-only settings, or the [repo]-only trunk) are ignored
@@ -752,12 +761,18 @@ type RepoConfig struct {
 
 // RepoOverrideConfig is the shape of a [repo."<path>"] block in global
 // config.toml. It accepts the shared repo-scope key set plus the [repo]-only
-// trunk key; global-only settings (project registry, daemon knobs, etc.) are not.
+// trunk and turn_cap keys; global-only settings (project registry, daemon knobs,
+// etc.) are not.
 type RepoOverrideConfig struct {
 	RepoScopeConfig
 	// Trunk is meaningful only for the specific checkout path that keys this
 	// block; it is not propagated to other worktrees of the same repo.
 	Trunk *bool `toml:"trunk" desc:"Mark this exact checkout as the repo's Trunk (fork base for managed worktrees)."`
+	// TurnCap bounds how many Turns one implementation attempt in this repository
+	// may spend (ADR-0190). Unlike trunk it is matched by repository identity, not
+	// by the exact checkout that keys the block, because a bound describes the
+	// repository rather than one worktree of it (ADR-0191).
+	TurnCap *int `toml:"turn_cap" desc:"Max Turns one implementation attempt in this repo may spend (claude only; other presets cannot be told)."`
 }
 
 // LoadRepoConfig reads repo-root .pop/config.toml. A missing file is not an error and
@@ -2141,8 +2156,11 @@ func popTOMLScopeFindings(path string, md toml.MetaData) []Finding {
 		}
 		seen[name] = true
 		msg := fmt.Sprintf("%s: %q is not valid in .pop/config.toml and was ignored (only repo-scope keys are accepted)", path, name)
-		if name == "trunk" {
-			msg = fmt.Sprintf("%s: trunk is only valid in a global [repo.%q] override block and was ignored", path, "<path>")
+		// The two [repo]-only keys get a message naming their real home instead of
+		// the generic one: both are machine-side, and turn_cap is deliberately not
+		// shared so bounding a repository's drains never needs a commit (ADR-0191).
+		if name == "trunk" || name == "turn_cap" {
+			msg = fmt.Sprintf("%s: %s is only valid in a global [repo.%q] override block and was ignored", path, name, "<path>")
 		}
 		findings = append(findings, Finding{Path: "repo_scope.unknown_key", Message: msg})
 	}
@@ -2151,12 +2169,14 @@ func popTOMLScopeFindings(path string, md toml.MetaData) []Finding {
 
 // repoBlockWarnings returns load-time findings for unknown keys inside
 // [repo."<path>"] blocks. Only the shared repo-scope key set (plus the
-// [repo]-only trunk) is valid there; any other key is silently degraded but
-// surfaced as a finding. The valid set is derived from the shared schema
-// (repoScopeLegalKeys), so it stays in sync with .pop/config.toml scope-legality.
+// [repo]-only trunk and turn_cap) is valid there; any other key is silently
+// degraded but surfaced as a finding. The shared part of the valid set is derived
+// from the shared schema (repoScopeLegalKeys), so it stays in sync with
+// .pop/config.toml scope-legality.
 func repoBlockWarnings(path string, md toml.MetaData) []Finding {
 	validRepoKeys := repoScopeLegalKeys()
-	validRepoKeys["trunk"] = true // [repo]-only machine topology, not shared
+	validRepoKeys["trunk"] = true    // [repo]-only machine topology, not shared
+	validRepoKeys["turn_cap"] = true // [repo]-only run bound, not shared (ADR-0191)
 	var findings []Finding
 	seen := make(map[string]bool)
 	for _, key := range md.Undecoded() {
@@ -2176,7 +2196,7 @@ func repoBlockWarnings(path string, md toml.MetaData) []Finding {
 		findings = append(findings, Finding{
 			Path: "config.unknown_repo_key",
 			Message: fmt.Sprintf(
-				"%s: [repo.%q] unknown key %q ignored (only trunk, workbenches, and preferred_workbench are accepted)",
+				"%s: [repo.%q] unknown key %q ignored (only trunk, turn_cap, workbenches, and preferred_workbench are accepted)",
 				path, key[1], fieldName,
 			),
 		})

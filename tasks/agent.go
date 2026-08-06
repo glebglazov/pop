@@ -117,6 +117,11 @@ type AgentHeadlessRequest struct {
 	// ExtraArgs are user-supplied arguments augmenting the preset (ADR-0017).
 	// They precede pop's owned flags so owned flags stay authoritative.
 	ExtraArgs []string
+	// TurnCap is the repository's bound on how many Turns this attempt may spend,
+	// and zero when it declares none. Only an implementation attempt sets it: a
+	// Verifier reads and judges where an Implementer builds, and one number cannot
+	// mean both (ADR-0190). An adapter that cannot be told about a cap ignores it.
+	TurnCap int
 }
 
 // AgentAssistanceRequest describes one attended HITL assistance invocation.
@@ -189,6 +194,7 @@ type AgentAdapter interface {
 	TurnCapability() AgentTurnCapability
 	PeakInputCapability() AgentPeakInputCapability
 	ReasoningCapability() AgentReasoningCapability
+	TurnCapEnforcementCapability() AgentTurnCapEnforcementCapability
 	QuotaResetCapability() AgentQuotaResetCapability
 	EffortLadderCapability() AgentEffortLadderCapability
 	ExecutableCapability() AgentExecutableCapability
@@ -235,6 +241,11 @@ var agentAdapters = map[string]AgentAdapter{
 			SpecTokens: claudeReasoningSpecTokens,
 			Contains:   claudeArgsContainReasoning,
 		},
+		turnCapEnforcement: AgentTurnCapEnforcementCapability{
+			Kind:       CapabilitySupported,
+			SpecTokens: claudeTurnCapSpecTokens,
+			Contains:   claudeArgsContainTurnCap,
+		},
 		models:      []string{"opus", "sonnet", "haiku", "fable"},
 	}),
 	"opencode": newPresetAgentAdapter(presetAgentSpec{
@@ -262,6 +273,7 @@ var agentAdapters = map[string]AgentAdapter{
 		turns:          AgentTurnCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no message boundary"},
 		peakInput:      AgentPeakInputCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no per-call usage block"},
 		reasoning:      AgentReasoningCapability{Kind: CapabilityBlind, Reason: "opencode's CLI carries no reasoning or thinking level parameter"},
+		turnCapEnforcement: AgentTurnCapEnforcementCapability{Kind: CapabilityBlind, Reason: "opencode's turn cap is its per-agent `steps` key, reachable only from its own config file, which pop never writes"},
 		models:         []string{"opencode/kimi-k2.6", "opencode/gpt-5.5", "opencode/claude-opus-4-8", "opencode/claude-sonnet-4-6"},
 		modelsInstallDependent: true,
 	}),
@@ -301,6 +313,7 @@ var agentAdapters = map[string]AgentAdapter{
 			Reason:   "cursor selects a full model name per effort tier instead of a separate reasoning parameter",
 			Contains: cursorArgsContainReasoning,
 		},
+		turnCapEnforcement: AgentTurnCapEnforcementCapability{Kind: CapabilityBlind, Reason: "cursor-agent has no turn cap of any kind"},
 		models:                 []string{"auto", "composer-2.5", "gpt-5.3-codex"},
 		modelsInstallDependent: true,
 	}),
@@ -338,6 +351,7 @@ var agentAdapters = map[string]AgentAdapter{
 			SpecTokens: codexReasoningSpecTokens,
 			Contains:   codexArgsContainReasoning,
 		},
+		turnCapEnforcement: AgentTurnCapEnforcementCapability{Kind: CapabilityBlind, Reason: "codex has no turn cap; a turn there is one HTTP request carrying many iterations"},
 		models:                 []string{"gpt-5.5", "gpt-5.4-mini"},
 		modelsInstallDependent: true,
 	}),
@@ -374,6 +388,7 @@ var agentAdapters = map[string]AgentAdapter{
 			SpecTokens: piReasoningSpecTokens,
 			Contains:   piArgsContainReasoning,
 		},
+		turnCapEnforcement: AgentTurnCapEnforcementCapability{Kind: CapabilityBlind, Reason: "pi has no turn cap, and no token or dollar budget either"},
 		models:         []string{"opencode-go/kimi-k2.6", "opencode-go/qwen3.7-max", "opencode-go/minimax-m3", "opencode-go/deepseek-v4-flash"},
 		modelsInstallDependent: true,
 	}),
@@ -415,6 +430,7 @@ var agentAdapters = map[string]AgentAdapter{
 			SpecTokens: kimiReasoningSpecTokens,
 			Contains:   kimiArgsContainReasoning,
 		},
+		turnCapEnforcement: AgentTurnCapEnforcementCapability{Kind: CapabilityBlind, Reason: "kimi's turn cap is loop_control.max_steps_per_turn, reachable only from its own config file, which pop never writes"},
 		models:          []string{"moonshot-ai/kimi-k3", "moonshot-ai/kimi-k2.7-code", "moonshot-ai/kimi-k2.7-code-highspeed"},
 		modelsInstallDependent: true,
 	}),
@@ -455,6 +471,10 @@ type presetAgentSpec struct {
 	turns           AgentTurnCapability
 	peakInput       AgentPeakInputCapability
 	reasoning       AgentReasoningCapability
+	// turnCapEnforcement says whether this preset can be told, in argv, to stop
+	// after a number of Turns — the repository's bound on one implementation
+	// attempt (ADR-0190).
+	turnCapEnforcement AgentTurnCapEnforcementCapability
 	quotaReset      AgentQuotaResetCapability
 	effortLadder    AgentEffortLadderCapability
 	executable      AgentExecutableCapability
@@ -482,6 +502,7 @@ func (s presetAgentSpec) validate() error {
 		{s.turns.validate(preset)},
 		{s.peakInput.validate(preset)},
 		{s.reasoning.validate(preset)},
+		{s.turnCapEnforcement.validate(preset)},
 		{s.quotaReset.validate(preset)},
 		{s.effortLadder.validate(preset)},
 		{s.executable.validate(preset)},
@@ -539,6 +560,13 @@ func (a *presetAgentAdapter) HeadlessInvocation(req AgentHeadlessRequest) (*Agen
 			args = append(args, "--output-format", "text")
 		}
 		args = append(args, "--workspace", req.RuntimePath)
+	}
+	// The repository's Turn cap rides in argv where the adapter can enforce one —
+	// pop's own flag, so it lands after the augmenting spec's arguments. A cap the
+	// human already wrote into that spec wins and pop emits nothing of its own,
+	// the same detect-and-defer a hand-set reasoning flag gets (ADR-0190).
+	if !a.turnCapEnforcement.argsContainTurnCap(extraArgs) {
+		args = append(args, a.turnCapEnforcement.specTokens(req.TurnCap)...)
 	}
 	if a.promptDelivery == promptAsFinalArg {
 		promptArg = len(args)
@@ -640,6 +668,10 @@ func (a *presetAgentAdapter) PeakInputCapability() AgentPeakInputCapability {
 
 func (a *presetAgentAdapter) ReasoningCapability() AgentReasoningCapability {
 	return a.reasoning
+}
+
+func (a *presetAgentAdapter) TurnCapEnforcementCapability() AgentTurnCapEnforcementCapability {
+	return a.turnCapEnforcement
 }
 
 func (a *presetAgentAdapter) QuotaResetCapability() AgentQuotaResetCapability {
@@ -755,6 +787,10 @@ func (a customAgentAdapter) ReasoningCapability() AgentReasoningCapability {
 	return AgentReasoningCapability{Kind: CapabilityBlind, Reason: "custom agent commands carry no reasoning parameter"}
 }
 
+func (a customAgentAdapter) TurnCapEnforcementCapability() AgentTurnCapEnforcementCapability {
+	return AgentTurnCapEnforcementCapability{Kind: CapabilityBlind, Reason: "a custom agent command is an opaque shell command with no cap flag pop can know"}
+}
+
 func (a customAgentAdapter) QuotaResetCapability() AgentQuotaResetCapability {
 	return AgentQuotaResetCapability{Kind: CapabilityBlind, Reason: "custom agent commands carry no quota reset parsing"}
 }
@@ -844,8 +880,22 @@ func ResolveAgentInvocation(preset, agentCmd, prompt, runtimePath string) (*Agen
 	return ResolveAgentInvocationWithMode(preset, agentCmd, prompt, runtimePath, AgentOutputAuto)
 }
 
-// ResolveAgentInvocationWithMode applies an explicit output-mode override.
+// ResolveAgentInvocationWithMode applies an explicit output-mode override. The
+// command it resolves carries no Turn cap: every uncapped verb (verification,
+// Routine work) resolves through here, and the cap is implement-only (ADR-0190).
 func ResolveAgentInvocationWithMode(preset, agentCmd, prompt, runtimePath string, mode AgentOutputMode) (*AgentInvocation, error) {
+	return resolveAgentInvocation(preset, agentCmd, prompt, runtimePath, mode, 0)
+}
+
+// ResolveImplementAgentInvocation resolves the command for one implementation
+// attempt, bounded by the repository's Turn cap. turnCap is zero when the
+// repository declares none, and a preset that cannot be told to cap turns is
+// invoked exactly as it would be without one (ADR-0190).
+func ResolveImplementAgentInvocation(preset, agentCmd, prompt, runtimePath string, mode AgentOutputMode, turnCap int) (*AgentInvocation, error) {
+	return resolveAgentInvocation(preset, agentCmd, prompt, runtimePath, mode, turnCap)
+}
+
+func resolveAgentInvocation(preset, agentCmd, prompt, runtimePath string, mode AgentOutputMode, turnCap int) (*AgentInvocation, error) {
 	if err := validateAgentOutputMode(mode); err != nil {
 		return nil, err
 	}
@@ -876,6 +926,7 @@ func ResolveAgentInvocationWithMode(preset, agentCmd, prompt, runtimePath string
 		RuntimePath: runtimePath,
 		OutputMode:  mode,
 		ExtraArgs:   extraArgs,
+		TurnCap:     turnCap,
 	})
 	if err != nil {
 		return nil, err
