@@ -1,10 +1,10 @@
 <!--
-base: mattpocock/skills skills/engineering/setup-matt-pocock-skills/issue-tracker-gitlab.md@ed37663
+base: mattpocock/skills skills/engineering/setup-matt-pocock-skills/issue-tracker-gitlab.md@8b36d4f
 
 This file is a marked overlay. Everything from here down to the "POP OVERLAY"
 marker is a byte-verbatim copy of upstream
 skills/engineering/setup-matt-pocock-skills/issue-tracker-gitlab.md at the
-pinned ref mattpocock/skills@ed37663cc5fbef691ddfecd080dff42f7e7e350d. Pop
+pinned ref mattpocock/skills@8b36d4f. Pop
 inlines the seed templates rather than delegating to Matt's skills
 (ADR-0009); GitLab stays a selectable Section A tracker choice and needs its
 seed. To review upstream drift, diff the region between this header and the
@@ -14,7 +14,7 @@ skills/engineering/setup-matt-pocock-skills/issue-tracker-gitlab.md@<newref>.
 
 # Issue tracker: GitLab
 
-Issues and PRDs for this repo live as GitLab issues. Use the [`glab`](https://gitlab.com/gitlab-org/cli) CLI for all operations.
+Issues and specs for this repo live as GitLab issues. Use the [`glab`](https://gitlab.com/gitlab-org/cli) CLI for all operations.
 
 ## Conventions
 

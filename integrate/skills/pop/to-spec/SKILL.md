@@ -5,7 +5,7 @@ disable-model-invocation: true
 ---
 
 <!--
-base: mattpocock/skills engineering/to-spec@ed37663cc5fbef691ddfecd080dff42f7e7e350d
+base: mattpocock/skills engineering/to-spec@8b36d4f
 
 This file is a marked overlay. Everything from here down to the "POP OVERLAY"
 marker is a byte-verbatim copy of upstream engineering/to-spec/SKILL.md body at
@@ -23,7 +23,7 @@ ADR-0169). To review upstream drift, diff the region between this header and
 the marker against engineering/to-spec@<newref>.
 -->
 
-This skill takes the current conversation context and codebase understanding and produces a spec (you may know this document as a PRD). Do NOT interview the user — just synthesize what you already know.
+This skill takes the current conversation context and codebase understanding and produces a spec. Do NOT interview the user — just synthesize what you already know.
 
 The issue tracker and triage label vocabulary should have been provided to you — run `/setup-matt-pocock-skills` if not.
 

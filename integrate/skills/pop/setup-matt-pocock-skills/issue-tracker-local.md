@@ -1,10 +1,10 @@
 <!--
-base: mattpocock/skills skills/engineering/setup-matt-pocock-skills/issue-tracker-local.md@ed37663
+base: mattpocock/skills skills/engineering/setup-matt-pocock-skills/issue-tracker-local.md@8b36d4f
 
 This file is a marked overlay. Everything from here down to the "POP OVERLAY"
 marker is a byte-verbatim copy of upstream
 skills/engineering/setup-matt-pocock-skills/issue-tracker-local.md at the
-pinned ref mattpocock/skills@ed37663cc5fbef691ddfecd080dff42f7e7e350d. Pop
+pinned ref mattpocock/skills@8b36d4f. Pop
 inlines the seed templates rather than delegating to Matt's skills
 (ADR-0009); local markdown stays a selectable Section A tracker choice and
 needs its seed. To review upstream drift, diff the region between this header
@@ -14,7 +14,7 @@ skills/engineering/setup-matt-pocock-skills/issue-tracker-local.md@<newref>.
 
 # Issue tracker: Local Markdown
 
-Issues and specs (you may know a spec as a PRD) for this repo live as markdown files in `.scratch/`.
+Issues and specs for this repo live as markdown files in `.scratch/`.
 
 ## Conventions
 

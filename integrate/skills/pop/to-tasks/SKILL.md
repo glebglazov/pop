@@ -5,7 +5,7 @@ disable-model-invocation: true
 ---
 
 <!--
-base: mattpocock/skills engineering/to-tickets@ed37663cc5fbef691ddfecd080dff42f7e7e350d
+base: mattpocock/skills engineering/to-tickets@8b36d4f
 
 This file is a marked overlay. Everything from here down to the "POP OVERLAY"
 marker is a byte-verbatim copy of upstream engineering/to-tickets/SKILL.md body

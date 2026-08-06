@@ -4,7 +4,7 @@ description: Investigate a question against high-trust primary sources and captu
 ---
 
 <!--
-base: mattpocock/skills engineering/research@9603c1cc8118d08bc1b3bf34cf714f62178dea3b
+base: mattpocock/skills engineering/research@8b36d4f
 
 This file is a verbatim copy of upstream engineering/research/SKILL.md at the
 pinned ref above. Pop inlines rather than delegating to Matt's skills, per

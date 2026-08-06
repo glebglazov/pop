@@ -5,7 +5,7 @@ disable-model-invocation: true
 ---
 
 <!--
-base: mattpocock/skills domain-modeling@391a2701
+base: mattpocock/skills domain-modeling@8b36d4f
 
 This file is a marked overlay. Everything from here down to the "POP OVERLAY"
 marker is a verbatim copy of domain-modeling/SKILL.md at the pinned ref above —

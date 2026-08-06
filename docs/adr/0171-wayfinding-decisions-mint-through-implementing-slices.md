@@ -41,6 +41,18 @@ own destination.**
   the map directory; never the repo, never a commit. This is the skill a
   wayfinding grilling ticket loads.
 
+**Amended by the upstream re-pin of the interview primitive:** `batch-grill-me`
+is now a 1-1 overlay of upstream `productivity/grilling`, not
+`in-progress/batch-grill-me@fde4cd5`. This ADR pinned the in-progress experiment
+on the reading that upstream's shipped grilling was committed to
+one-question-at-a-time, leaving the batch variant abandoned and its pin frozen.
+The reverse happened: upstream reworked shipped `grilling` to the round-by-round
+frontier model and deleted the experiment, so the primitive this decision
+extracts is now upstream's shipped skill, and the pin tracks a live source again.
+The extraction itself — one interview primitive, each composing skill stating its
+own destination — is unchanged, as is the primitive's content beyond a question
+format upstream added. The local name stays `batch-grill-me` per ADR-0141.
+
 The union rule (glossary = base `CONTEXT.md` + `.grill-context/**`) and the
 `+`/`~`/`-` op syntax are shared, so they live in **one pop-owned source**,
 `integrate/skills/pop/_shared/CONTEXT-FORMAT.md`, copied into each skill
