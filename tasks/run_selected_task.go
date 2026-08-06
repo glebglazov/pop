@@ -89,7 +89,7 @@ func (r *implementRun) runSelectedTask(currentRefresh *RefreshResult, sel *Selec
 	}
 
 	basePrompt := BuildAgentPrompt(sel.TaskPath, runtimePath)
-	buildForAgent := buildAgentInvocationFactory(loadConfig, runtimePath, baseAgentPreset, opts.AgentCmd, agentOutput, opts.AgentOutput)
+	buildForAgent := buildAgentInvocationFactory(loadConfig, runtimePath, baseAgentPreset, opts.AgentCmd, agentOutput, opts.AgentOutput, r.turnCap)
 
 	resolveSpec := newEffortSpecResolver(opts.AgentCmd, sel.Task.Effort, sel.Task.EffortExplicit, cfg)
 	taskResult, execErr := executeTaskAttemptsWithAgentFallback(d, sel, runtimePath, out, confirmOut, basePrompt, baseAgentPresets, resolveSpec, buildForAgent, maxTries, timeout, commitOverrides, agentQuotaRetryAfter, retryDelays, r.agentProbeMemo)

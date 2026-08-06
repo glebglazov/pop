@@ -26,8 +26,11 @@ type attemptOutcome struct {
 // buildAgentInvocationFactory returns the per-agentSpec invocation builder
 // shared by both drain entry points (RunTaskWith and runSelectedTask): the base
 // preset reuses the already-resolved agentOutput, while any other preset in the
-// fallback chain re-resolves its own output mode.
-func buildAgentInvocationFactory(loadConfig func(string) (*config.Config, error), runtimePath, baseAgentPreset, agentCmd string, agentOutput, optAgentOutput AgentOutputMode) func(agentSpec string) (func(string) (*AgentInvocation, error), error) {
+// fallback chain re-resolves its own output mode. Every command it builds is an
+// implementation attempt, so the repository's turnCap rides along — 0 when the
+// repository declares none, and ignored by a preset that cannot be told to cap
+// turns (ADR-0190).
+func buildAgentInvocationFactory(loadConfig func(string) (*config.Config, error), runtimePath, baseAgentPreset, agentCmd string, agentOutput, optAgentOutput AgentOutputMode, turnCap int) func(agentSpec string) (func(string) (*AgentInvocation, error), error) {
 	return func(agentSpec string) (func(string) (*AgentInvocation, error), error) {
 		attemptOutput := agentOutput
 		if agentSpec != baseAgentPreset {
@@ -38,7 +41,7 @@ func buildAgentInvocationFactory(loadConfig func(string) (*config.Config, error)
 			}
 		}
 		return func(prompt string) (*AgentInvocation, error) {
-			return ResolveAgentInvocationWithMode(agentSpec, agentCmd, prompt, runtimePath, attemptOutput)
+			return ResolveImplementAgentInvocation(agentSpec, agentCmd, prompt, runtimePath, attemptOutput, turnCap)
 		}, nil
 	}
 }

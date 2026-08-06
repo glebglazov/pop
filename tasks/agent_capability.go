@@ -255,6 +255,43 @@ func (c AgentReasoningCapability) validate(preset string) error {
 	}
 }
 
+// AgentTurnCapEnforcementCapability is a preset's declared stance on being told
+// to cap the Turns one implementation attempt may spend (ADR-0190). Invocation
+// shape, so no fixture backs it (ADR-0166). Emitting the flag and detecting a
+// hand-written one are a matched pair on one struct, as with reasoning, so they
+// cannot drift apart. Only claude is Supported; a Blind preset carries a sentence
+// saying why its cap is out of argv's reach, and a bound pop cannot put on the
+// command line is never pretended to be in effect.
+type AgentTurnCapEnforcementCapability struct {
+	Kind       CapabilityKind
+	SpecTokens func(limit int) []string // required iff Supported
+	Contains   func(args []string) bool // required iff Supported; optional for Blind
+	Reason     string                   // required iff Blind
+}
+
+// validate reports whether this turn-cap enforcement stance is a complete declaration.
+func (c AgentTurnCapEnforcementCapability) validate(preset string) error {
+	switch c.Kind {
+	case CapabilitySupported:
+		if c.SpecTokens == nil {
+			return fmt.Errorf("agent preset %q: turn-cap enforcement capability is Supported but SpecTokens is nil", preset)
+		}
+		if c.Contains == nil {
+			return fmt.Errorf("agent preset %q: turn-cap enforcement capability is Supported but Contains is nil", preset)
+		}
+		return nil
+	case CapabilityBlind:
+		if strings.TrimSpace(c.Reason) == "" {
+			return fmt.Errorf("agent preset %q: turn-cap enforcement capability is Blind but Reason is empty", preset)
+		}
+		return nil
+	case capabilityUnset:
+		return fmt.Errorf("agent preset %q: turn-cap enforcement capability is unset", preset)
+	default:
+		return fmt.Errorf("agent preset %q: turn-cap enforcement capability has unknown kind %d", preset, c.Kind)
+	}
+}
+
 // AgentQuotaResetCapability is a preset's declared stance on deriving PauseResetAt
 // from quota diagnostics (ADR-0166).
 type AgentQuotaResetCapability struct {
@@ -289,7 +326,7 @@ func (c AgentQuotaResetCapability) validate(preset string) error {
 type AgentEffortLadderCapability struct {
 	Kind   CapabilityKind
 	Ladder map[string][]config.EffortModel // required iff Supported
-	Reason string                            // required iff Blind
+	Reason string                          // required iff Blind
 }
 
 // validate reports whether this effort-ladder stance is a complete declaration.

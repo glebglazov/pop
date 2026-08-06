@@ -54,6 +54,10 @@ type implementRun struct {
 	maxTries    int
 	retryDelays []time.Duration
 	timeout     time.Duration
+	// turnCap is the repository's bound on the Turns one implementation attempt
+	// may spend, resolved once per run because it describes the repository the run
+	// drains rather than any one task (ADR-0190/ADR-0191). Zero means unbounded.
+	turnCap int
 
 	// drain is the live Drain handle — nil while parked at a gate or a
 	// quota-recovery wait. parkDrain/ensureDrain mutate it and the deferred
@@ -153,6 +157,7 @@ func newImplementRun(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 		out:            out,
 		refresh:        refresh,
 		drain:          drain,
+		turnCap:        resolveRepoTurnCap(d, plan.cfg, runtimePath),
 		agentProbeMemo: newAgentAvailabilityProbeMemo(),
 	}, nil
 }

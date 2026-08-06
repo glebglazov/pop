@@ -166,6 +166,14 @@ func (e *repoScopeEnumerator) resolveRepoConfig() (RepoConfig, error) {
 		if e.override.Trunk != nil && e.overrideExact {
 			result.Trunk = *e.override.Trunk
 		}
+		// turn_cap is the other [repo]-only key, and it deliberately skips trunk's
+		// exact-checkout gate: the block was matched by repository identity, so every
+		// worktree of the repository reads the one bound (ADR-0191). A non-positive
+		// number bounds nothing, so it reads as "declares no cap" rather than as a
+		// cap of zero turns.
+		if e.override.TurnCap != nil && *e.override.TurnCap > 0 {
+			result.TurnCap = *e.override.TurnCap
+		}
 	}
 	return result, popErr
 }
