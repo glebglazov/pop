@@ -465,6 +465,13 @@ func runTaskRegisterWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 		// worktree from the Trunk worktree instead (ADR-0147).
 		if !taskRegisterManaged {
 			eagerBindNewRegistrations(d, cfg, runtimePath, result.NewRegistrationIDs, w)
+			// Said once, right after the bind that provokes it: a set that both
+			// consents to unattended draining and just bound to the Trunk
+			// worktree is the one consequential shape the here-by-default rule
+			// produces (ADR-0192).
+			if taskRegisterAutoDrain && len(result.NewRegistrationIDs) > 0 {
+				warnTrunkAutoDrain(d, w, runtimePath)
+			}
 		}
 	}
 
@@ -531,6 +538,23 @@ func applyRegisterAutoDrain(d *tasks.Deps, defPath string, newSetIDs []string, w
 			fmt.Fprintf(w, "warning: could not enable auto-drain for %s: %v\n", setID, err)
 		}
 	}
+}
+
+// warnTrunkAutoDrain names the hazard the here-by-default registration rule
+// deliberately makes ordinary (ADR-0192): the set now consents to unattended
+// draining and is bound to the Trunk worktree, so the Work daemon may commit and
+// open panes on the branch the human is standing on. Callers gate on the consent
+// bit and on no managed worktree having been asked for; this adds the locality
+// half, read through checkoutLocality — the same predicate `pop tasks checkout`
+// renders, so the warning cannot disagree with the binding it describes. A
+// checkout whose locality will not resolve is silent: this is output, never a
+// reason to fail a registration.
+func warnTrunkAutoDrain(d *tasks.Deps, w io.Writer, checkoutPath string) {
+	locality, _, err := checkoutLocality(d, checkoutPath)
+	if err != nil || locality != localityTrunk {
+		return
+	}
+	fmt.Fprintf(w, "warning: auto-drain is on and this set is bound to the Trunk worktree at %s: the Work daemon may drain it unattended here, committing and opening panes on the branch you are standing on; re-register with 'managed' (--managed) for an isolated worktree instead\n", checkoutPath)
 }
 
 // warnDeprecatedManifestKeys prints a deprecation warning for each set whose

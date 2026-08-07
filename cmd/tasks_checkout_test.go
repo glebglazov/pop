@@ -264,6 +264,12 @@ func TestTaskRegisterFromWorktreeBindsInPlaceAndAutoDrains(t *testing.T) {
 		t.Fatalf("register failed: %v", err)
 	}
 
+	// The trunk auto-drain warning (ADR-0192) has no business here: this
+	// registration drains unattended in a checkout the human is not standing on.
+	if warnings := trunkAutoDrainWarnings(out.String()); len(warnings) != 0 {
+		t.Fatalf("registering from a linked worktree must be quiet, got:\n%s", strings.Join(warnings, "\n"))
+	}
+
 	wantPath, err := tasks.ResolveRuntimePathWith(td, worktree, "")
 	if err != nil {
 		t.Fatalf("resolve runtime path: %v", err)

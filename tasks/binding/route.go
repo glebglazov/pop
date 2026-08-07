@@ -243,9 +243,13 @@ func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult
 
 	// 4. Otherwise the first no-directive drain persists a default Worktree binding
 	// to the current checkout and resumes there on later drains (ADR-0062), rather
-	// than running transiently. In practice only a foreground implement reaches this
-	// step: the Queue faults an unbound, no-intent set as needs-bind before dispatch
-	// (ADR-0070/0072), so it never routes here to land on the trunk. The Provisioned
+	// than running transiently. What reaches this step is a set nothing has bound
+	// yet: a foreground implement, or a Queue spawn whose set carries no `managed`
+	// intent — the Queue faults that one as needs-bind before dispatch
+	// (ADR-0070/0072), so a Queue drain reaching here is rare rather than
+	// impossible. Landing on the trunk is not ruled out either: register binds the
+	// current checkout eagerly (ADR-0115/0192), so a trunk-default set arrives at
+	// drain already bound and resumes at step 1 above. The Provisioned
 	// bit is derived from the checkout's location (ADR-0152): a checkout under the
 	// managed-worktree root is recorded as provisioned even though routing did not
 	// create it, and a checkout elsewhere is adopted. It records the branch too, so

@@ -95,15 +95,42 @@ func runTaskCheckoutWith(cd *config.Deps, td *tasks.Deps, cfg *config.Config, w 
 	return nil
 }
 
-// resolveCheckoutReport derives the whole report from dir.
+// checkoutLocality answers, for one already-normalized path, the only question
+// the locality vocabulary encodes: trunk or worktree. It also hands back
+// bareness, which the caller would otherwise re-probe for.
 //
-// Locality reuses binding.IsLinkedWorktree — the single predicate deciding where
-// a `pop tasks implement` run lands — so the verb and the drain agree by
+// It reuses binding.IsLinkedWorktree — the single predicate deciding where a
+// `pop tasks implement` run lands — so every caller and the drain agree by
 // construction. Bareness is checked first because that predicate has a known
 // false negative on a bare repository's own directory, where --git-dir and
 // --git-common-dir are both "."; a bare repo has no trunk to stand in, so every
-// checkout of one reads "worktree". Closing it here rather than in the skill
-// body leaves the caller no ambiguous branch to handle.
+// checkout of one reads "worktree". Closing it here rather than in each caller
+// leaves them no ambiguous branch to handle.
+//
+// This is the one copy of the answer: `pop tasks checkout` renders it, and
+// register reads it to decide whether an auto-drained set is about to be
+// unattended-drained on the trunk.
+func checkoutLocality(td *tasks.Deps, path string) (locality string, bare bool, err error) {
+	// GitMainWorktree doubles as the in-repo probe (it errors outside a repo)
+	// and as the bareness source, exactly as pop config show uses it.
+	_, bare, err = binding.GitMainWorktree(td, path)
+	if err != nil {
+		return "", false, fmt.Errorf("not inside a git repository (run from a checkout of the target repo)")
+	}
+	if bare {
+		return localityWorktree, true, nil
+	}
+	linked, err := binding.IsLinkedWorktree(td, path)
+	if err != nil {
+		return "", false, err
+	}
+	if linked {
+		return localityWorktree, false, nil
+	}
+	return localityTrunk, false, nil
+}
+
+// resolveCheckoutReport derives the whole report from dir.
 func resolveCheckoutReport(cd *config.Deps, td *tasks.Deps, cfg *config.Config, dir string) (checkoutReport, error) {
 	// Bare repositories have no top level, so this falls back to the canonical
 	// directory rather than refusing; the git probe below is what rejects a
@@ -113,22 +140,9 @@ func resolveCheckoutReport(cd *config.Deps, td *tasks.Deps, cfg *config.Config, 
 		return checkoutReport{}, fmt.Errorf("tasks checkout: %w", err)
 	}
 
-	// GitMainWorktree doubles as the in-repo probe (it errors outside a repo)
-	// and as the bareness source, exactly as pop config show uses it.
-	_, bare, err := binding.GitMainWorktree(td, path)
+	locality, bare, err := checkoutLocality(td, path)
 	if err != nil {
-		return checkoutReport{}, fmt.Errorf("tasks checkout: not inside a git repository (run from a checkout of the target repo)")
-	}
-
-	locality := localityWorktree
-	if !bare {
-		linked, err := binding.IsLinkedWorktree(td, path)
-		if err != nil {
-			return checkoutReport{}, fmt.Errorf("tasks checkout: %w", err)
-		}
-		if !linked {
-			locality = localityTrunk
-		}
+		return checkoutReport{}, fmt.Errorf("tasks checkout: %w", err)
 	}
 
 	report := checkoutReport{

@@ -118,7 +118,13 @@ Semantics:
   sets the set's consent bit, letting the Work daemon drain the set unattended,
   and is independent of `--managed`. An unattended drain therefore runs in the
   checkout the set is bound to — the Trunk worktree included, which is the
-  deliberate consequence of binding here by default.
+  deliberate consequence of binding here by default. Because that consequence is
+  worth saying out loud, registering with `--auto-drain` while standing on the
+  Trunk worktree, without `--managed`, prints one `warning:` line naming the
+  unattended drain in this checkout and pointing at `managed` / `isolated`. It is
+  a warning, not a refusal: the registration succeeds. A registration from a
+  linked worktree, one without `--auto-drain`, and one with `--managed` are all
+  quiet.
 - Re-registering an already-registered set never rebinds it. To move it to a
   different checkout, run `pop tasks bind-worktree <task-set-name> --force` from
   inside the target checkout.
