@@ -76,48 +76,30 @@ until registered). Run:
 pop tasks register <task-set-name>
 ```
 
-#### The default routes on where you are standing
+#### The default binds the current checkout
 
-With no invocation arguments at all, the flags depend on the **checkout
-locality** — whether the current directory is the Trunk worktree or a linked
-worktree. Ask pop, do not derive it:
+With no invocation arguments at all, the flags are the same in every checkout:
+plain `register` plus `--auto-drain`. The set binds to the checkout you are
+standing in — no new worktree — and the Work daemon may drain it unattended.
 
-```bash
-pop tasks checkout --locality      # prints exactly one word: trunk | worktree
-```
+The rule is that a human who breaks work down is asking for the work to happen
+*here*. That holds standing on the Trunk worktree exactly as it holds in a linked
+worktree, so the default does not read where you are standing at all. Isolation
+is a thing to ask for, not a thing to receive: a managed worktree is provisioned
+only when someone types `managed` / `isolated`.
 
-| locality | default flags | effect |
-| --- | --- | --- |
-| `trunk` | `--managed --auto-drain` | forks an isolated worktree from the Trunk worktree, drained unattended |
-| `worktree` | `--auto-drain` | plain register bound to **this** checkout — no new worktree — drained unattended |
-
-The rule is that a human who has already switched into a worktree and then
-breaks work down there is asking for the work to happen *here*. Stacking a
-managed worktree on top of the checkout they chose would open the set's panes
-somewhere they are not.
-
-`pop tasks checkout` is read-only and needs no registered set, so it answers in
-a repository that has never published one. Its `--locality` word is derived from
-git alone — the same linked-worktree predicate a drain routes on — so it can
-never disagree with where the work lands. A checkout declared trunk in config
-that is nonetheless a linked worktree reads `worktree`, and **a bare repository
-reads `worktree` in every checkout**, including the bare directory itself.
-`--json` adds `path`, `branch`, `trunk_path` (omitted when unresolvable), `bare`
-and `managed` for a caller that wants more than the branch.
-
-Registering from the `worktree` branch may bind into a checkout that already
-holds another set — including another set's managed worktree. That is allowed:
-the second set binds alongside the first, and teardown stays reference-counted.
+Registering may bind into a checkout that already holds another set — including
+another set's managed worktree. That is allowed: the second set binds alongside
+the first, and teardown stays reference-counted.
 
 #### Keywords override the default
 
-- `managed` / `isolated` → `--managed`. **Beats detection**: typed from inside a
-  worktree it still provisions a fresh worktree forked from the Trunk worktree.
-- `auto-drain` / `drain` → `--auto-drain`. Agrees with the default in both
-  localities, so it changes nothing on its own.
-- `no-drain` / `manual` → drops `--auto-drain` in both localities. From `trunk`
-  that leaves `--managed` alone; from `worktree`, plain register with no flags.
-  Combined with `managed` / `isolated` anywhere, it registers `--managed` only.
+- `managed` / `isolated` → adds `--managed`.
+- `auto-drain` / `drain` → adds `--auto-drain`. The default already passes it, so
+  it changes nothing on its own.
+- `no-drain` / `manual` → drops `--auto-drain`. Typed alone it leaves a plain
+  register with no flags; combined with `managed` / `isolated` it registers
+  `--managed` only.
 
 `managed` / `auto-drain` / `no-drain` / `manual` are **pop-store-only**. (When
 the resolved Work store is not pop, a skill warns and ignores all of them, then
@@ -131,16 +113,12 @@ Semantics:
   the Trunk worktree and binds the set to it the moment it registers. A repo with
   no resolvable trunk refuses the registration; `--trunk <path>` names one (needed
   once per bare repo).
-- **The trunk-less fallback is reachable only in the `trunk` branch.** When the
-  default asked for `--managed` and no trunk resolves, retry the registration
-  plain and warn the user. It cannot fire in the `worktree` branch, where the
-  default is already plain and no trunk is resolved at all. Against an *explicit*
-  `managed`/`isolated`, the refusal is reported as-is in either locality.
-- `--auto-drain` lets the Work daemon drain the set unattended. It is independent
-  of `--managed` — it only sets the set's consent bit — and is the default in
-  both localities. Standing in a deliberately-chosen non-trunk worktree is the
-  isolation an unattended drain needs; the case worth avoiding is draining the
-  Trunk worktree unattended, which the `trunk` branch's `--managed` prevents.
+- **`--auto-drain` is on unless `no-drain` / `manual` turns it off.** No other
+  keyword affects it: `managed` / `isolated` explicitly keeps it. The flag only
+  sets the set's consent bit, letting the Work daemon drain the set unattended,
+  and is independent of `--managed`. An unattended drain therefore runs in the
+  checkout the set is bound to — the Trunk worktree included, which is the
+  deliberate consequence of binding here by default.
 - Re-registering an already-registered set never rebinds it. To move it to a
   different checkout, run `pop tasks bind-worktree <task-set-name> --force` from
   inside the target checkout.

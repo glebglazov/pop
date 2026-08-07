@@ -193,9 +193,9 @@ to `pop tasks register` flags:
 
 That is the whole mapping. What each flag *means* at register time, what runs
 when no keyword is typed at all, and how a keyword interacts with the default all
-belong to the doc's "Publishing tickets" → "Register the set" section — the
-default is checkout-dependent and is stated there once, so this skill carries
-none of its own. Read that section before registering.
+belong to the doc's "Publishing tickets" → "Register the set" section, which
+states the default once, so this skill carries none of its own. Read that section
+before registering.
 
 **Non-pop stores.** These arguments are pop-store-only. When the resolved Work
 store is **not** pop (a repo `docs/agents/issue-tracker.md` points at a real

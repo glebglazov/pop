@@ -44,6 +44,36 @@ func TestIssueTrackerDoc_EmbeddedContent(t *testing.T) {
 	}
 }
 
+// TestIssueTrackerDoc_RegistrationDefault pins ADR-0192: one registration
+// default in every checkout, and auto-drain as a standing invariant stated in
+// the semantics rather than as a keyword-table row. A keyword-table edit that
+// re-scopes auto-drain to a keyword, or that reinstates the locality branch,
+// fails here.
+func TestIssueTrackerDoc_RegistrationDefault(t *testing.T) {
+	t.Parallel()
+	body := string(issueTrackerDoc)
+
+	for _, required := range []string{
+		"`--auto-drain` is on unless `no-drain` / `manual` turns it off",
+		"No other\n  keyword affects it: `managed` / `isolated` explicitly keeps it.",
+		"the flags are the same in every checkout",
+	} {
+		if !strings.Contains(body, required) {
+			t.Errorf("embedded doc must state the auto-drain invariant: missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"| `trunk` |",
+		"--managed --auto-drain",
+		"Beats detection",
+		"trunk-less fallback",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("embedded doc must not restate the retired locality branch: found %q", forbidden)
+		}
+	}
+}
+
 func issueTrackerDataPath(home string) string {
 	return filepath.Join(home, ".local", "share", "pop", "agents", "docs", "issue-tracker.md")
 }
