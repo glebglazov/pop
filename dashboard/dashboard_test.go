@@ -1444,7 +1444,7 @@ func TestDashboardDrainModalClampsToBodyHeight(t *testing.T) {
 	}})
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 12})
 	m = updated.(QueueDashboard)
-	m.drainPick = newDashboardDrainModal(m.snap.Containers[0], entries)
+	m.drainPick = newDashboardDrainModal(m.d, m.snap.Containers[0], entries, "")
 
 	view := m.View().Content
 	lines := strings.Split(view, "\n")
@@ -4311,10 +4311,10 @@ func TestDashboardDrainModalTwoLineOverlay(t *testing.T) {
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
 	m = updated.(QueueDashboard)
 
-	m.drainPick = newDashboardDrainModal(rows[0], []drain.DrainEntry{
+	m.drainPick = newDashboardDrainModal(m.d, rows[0], []drain.DrainEntry{
 		{Label: "new managed worktree"},
 		{Label: "trunk"},
-	})
+	}, "")
 
 	view := m.View().Content
 	lines := strings.Split(view, "\n")

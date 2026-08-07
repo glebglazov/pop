@@ -13,6 +13,7 @@ import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/history"
+	"github.com/glebglazov/pop/project"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/setkind"
@@ -112,9 +113,10 @@ type dashboardBindMsg struct {
 	err error
 }
 type dashboardDrainListMsg struct {
-	row     DashboardRow
-	entries []drain.DrainEntry
-	err     error
+	row      DashboardRow
+	entries  []drain.DrainEntry
+	checkout string
+	err      error
 }
 type dashboardAbandonMsg struct {
 	err error
@@ -174,9 +176,10 @@ func bindRefEntries(refs []string) []drain.BindEntry {
 
 // dashboardDrainModal is the Drain target picker shown when `i` is pressed on an
 // unbound set: pick an existing worktree to adopt, a new managed worktree to
-// provision off the trunk (the default cursor), or the trunk itself — then bind
-// (or stay unbound for trunk) and drain in one action. A bound set skips the
-// picker and resumes in its binding (ADR-0052).
+// provision off the trunk, or the trunk itself — then bind (or stay unbound for
+// trunk) and drain in one action. The cursor opens on the checkout the dashboard
+// runs in (ADR-0192). A bound set skips the picker and resumes in its binding
+// (ADR-0052).
 type dashboardDrainModal struct {
 	row     DashboardRow
 	list    *ui.List[drain.DrainEntry]
@@ -184,8 +187,10 @@ type dashboardDrainModal struct {
 }
 
 // newDashboardDrainModal builds the Drain target picker with a wrapping list,
-// positioning the cursor on "new managed worktree" — the frictionless default.
-func newDashboardDrainModal(row DashboardRow, entries []drain.DrainEntry) *dashboardDrainModal {
+// positioning the cursor on the entry that is currentCheckout — the checkout the
+// dashboard is running in — so the picker and registration answer "where does
+// this set drain" the same way (ADR-0192).
+func newDashboardDrainModal(d *drain.Deps, row DashboardRow, entries []drain.DrainEntry, currentCheckout string) *dashboardDrainModal {
 	list := ui.NewList(entries, ui.Opts[drain.DrainEntry]{
 		Wrap: true,
 		Cell: func(e drain.DrainEntry, _ ui.RowState) string {
@@ -195,7 +200,7 @@ func newDashboardDrainModal(row DashboardRow, entries []drain.DrainEntry) *dashb
 			return e.Path
 		},
 	})
-	list.SetCursor(defaultDrainCursor(entries))
+	list.SetCursor(defaultDrainCursor(d, entries, currentCheckout))
 	return &dashboardDrainModal{row: row, list: list}
 }
 
@@ -983,7 +988,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.actionErr = fmt.Errorf("no drain target available for %s", msg.row.ID)
 			return m, nil
 		}
-		m.drainPick = newDashboardDrainModal(msg.row, msg.entries)
+		m.drainPick = newDashboardDrainModal(m.d, msg.row, msg.entries, msg.checkout)
 		return m, nil
 	case dashboardBindListMsg:
 		if msg.err != nil {
@@ -1785,7 +1790,7 @@ func (m QueueDashboard) launchDrain(row DashboardRow) tea.Cmd {
 			return handoffAfterLaunch(m.d, result, err)
 		}
 		entries, err := drain.DrainTargetEntries(m.d, m.cfg, row)
-		return dashboardDrainListMsg{row: row, entries: entries, err: err}
+		return dashboardDrainListMsg{row: row, entries: entries, checkout: currentDrainCheckout(m.d), err: err}
 	}
 }
 
@@ -1832,16 +1837,39 @@ func (m QueueDashboard) launchDrainTarget(row DashboardRow, target drain.DrainEn
 	}
 }
 
-// defaultDrainCursor positions the picker on "new managed worktree" — the
-// frictionless default that provisions an isolated checkout. It falls back to the
-// first entry when no trunk is resolvable (the option is absent).
-func defaultDrainCursor(entries []drain.DrainEntry) int {
+// defaultDrainCursor positions the picker on the checkout the dashboard is
+// already running in, so pressing enter does what registering here does
+// (ADR-0192): the adoptable entry whose path is this checkout, or the trunk
+// entry when this checkout is the Trunk worktree. It falls back to the first
+// entry when nothing matches — an unresolvable checkout, a bare repository where
+// both trunk-derived options are absent, or a checkout the picker excluded.
+// "New managed worktree" is never the default: isolation is now chosen, not
+// received.
+func defaultDrainCursor(d *drain.Deps, entries []drain.DrainEntry, currentCheckout string) int {
+	if strings.TrimSpace(currentCheckout) == "" {
+		return 0
+	}
+	canon := drain.CanonCheckoutPath(d, currentCheckout)
 	for i, e := range entries {
-		if e.Kind == drain.DrainTargetNewManaged {
+		if strings.TrimSpace(e.Path) == "" {
+			continue // "new managed worktree" carries no path and never matches
+		}
+		if drain.CanonCheckoutPath(d, e.Path) == canon {
 			return i
 		}
 	}
 	return 0
+}
+
+// currentDrainCheckout is the checkout the dashboard is running in, or "" when
+// it cannot be resolved. A failure is not an error the picker reports: it only
+// costs the cursor its preferred landing spot.
+func currentDrainCheckout(d *drain.Deps) string {
+	path, err := project.CurrentCheckoutPathWith(d.Project)
+	if err != nil {
+		return ""
+	}
+	return path
 }
 
 // launchVerify spawns a Verifier pane on the focused set (ADR-0123) and hands

@@ -111,6 +111,14 @@ func boundCheckoutPaths(d *Deps) (map[string]bool, error) {
 	return out, nil
 }
 
+// CanonCheckoutPath canonicalizes a checkout path the way this package compares
+// them internally, so a caller outside the package — the dashboard matching the
+// checkout it runs in against DrainEntry.Path — asks the same question of the
+// same strings.
+func CanonCheckoutPath(d *Deps, path string) string {
+	return bestEffortCanon(d, path)
+}
+
 // bestEffortCanon canonicalizes path for reliable comparison, falling back to a
 // cleaned absolute path when the target does not exist (so EvalSymlinks fails).
 func bestEffortCanon(d *Deps, path string) string {

@@ -14,8 +14,10 @@ import (
 
 // TestDrainTargetEntriesOrderAndExclusions asserts the Drain target
 // picker for an unbound set lists, in order, the repo's adoptable worktrees, a
-// "new managed worktree" option (the default cursor), and the trunk — excluding
-// the trunk itself, pop-managed worktrees, and worktrees bound to other sets.
+// "new managed worktree" option, and the trunk — excluding the trunk itself,
+// pop-managed worktrees, and worktrees bound to other sets. It also pins the
+// cursor default (ADR-0192): opened from an adoptable checkout it lands on that
+// checkout's own entry, never on "new managed worktree".
 func TestDrainTargetEntriesOrderAndExclusions(t *testing.T) {
 	repo, setID, _ := queuetest.SetupSpawnRepo(t, "drain-target", []queuetest.SpawnTask{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
@@ -58,8 +60,11 @@ func TestDrainTargetEntriesOrderAndExclusions(t *testing.T) {
 	if entries[2].Kind != drain.DrainTargetTrunk {
 		t.Fatalf("entries[2] = %+v, want trunk", entries[2])
 	}
-	if got := defaultDrainCursor(entries); got != 1 {
-		t.Fatalf("default cursor = %d, want 1 (new managed worktree)", got)
+	if got := defaultDrainCursor(d, entries, wt1); got != 0 {
+		t.Fatalf("default cursor from %s = %d, want 0 (that checkout's own entry)", wt1, got)
+	}
+	if got := defaultDrainCursor(d, entries, wt1); entries[got].Kind == drain.DrainTargetNewManaged {
+		t.Fatalf("default cursor landed on new managed worktree (index %d)", got)
 	}
 	for _, e := range entries {
 		if e.Kind == drain.DrainTargetWorktree {
@@ -198,11 +203,39 @@ func TestDashboardDrainTargetBareHidesTrunkOptions(t *testing.T) {
 			t.Fatalf("bare repo must hide trunk-dependent options, got %+v", e)
 		}
 	}
+	// With no trunk entry to prefer and a checkout the picker does not list, the
+	// cursor keeps its first-entry fallback.
+	if got := defaultDrainCursor(d, entries, filepath.Join(t.TempDir(), "elsewhere")); got != 0 {
+		t.Fatalf("bare-repo fallback cursor = %d, want 0", got)
+	}
+	if got := defaultDrainCursor(d, entries, ""); got != 0 {
+		t.Fatalf("unresolvable-checkout cursor = %d, want 0", got)
+	}
+}
+
+// TestDrainTargetCursorOnTrunkPicksTrunkEntry asserts the picker opened from the
+// Trunk worktree lands on "Trunk worktree (drain inline)" — drain here — rather
+// than on the new-managed option that precedes it (ADR-0192).
+func TestDrainTargetCursorOnTrunkPicksTrunkEntry(t *testing.T) {
+	repo, setID, _ := queuetest.SetupSpawnRepo(t, "drain-cursor-trunk", []queuetest.SpawnTask{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	d, cfg, row, _ := dashboardLaunchFixture(t, repo, setID)
+
+	entries, err := drain.DrainTargetEntries(d, cfg, row)
+	if err != nil {
+		t.Fatalf("drain.DrainTargetEntries: %v", err)
+	}
+	got := defaultDrainCursor(d, entries, repo)
+	if got < 0 || got >= len(entries) || entries[got].Kind != drain.DrainTargetTrunk {
+		t.Fatalf("cursor from trunk = %d of %+v, want the trunk entry", got, entries)
+	}
 }
 
 // TestDashboardIKeyUnboundOpensPicker asserts that `i` on an unbound set opens
-// the Drain target picker (default cursor on "new managed worktree"), while `i`
-// on a bound set drains its binding directly with no picker.
+// the Drain target picker with the cursor on the checkout the dashboard runs in
+// — here the trunk, so the trunk entry — while `i` on a bound set drains its
+// binding directly with no picker.
 func TestDashboardIKeyUnboundOpensPicker(t *testing.T) {
 	repo, setID, _ := queuetest.SetupSpawnRepo(t, "i-key", []queuetest.SpawnTask{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
@@ -214,6 +247,8 @@ func TestDashboardIKeyUnboundOpensPicker(t *testing.T) {
 	}
 	row.RepoKey = repoKey
 	row.CursorKey = "pop\x00" + setID
+	// The cursor default is read off the checkout the dashboard is standing in.
+	t.Chdir(repo)
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 	// Drain now lives behind the action menu: open with `a`, then `i`.
@@ -238,8 +273,8 @@ func TestDashboardIKeyUnboundOpensPicker(t *testing.T) {
 		t.Fatal("i on unbound set did not open the drain target picker")
 	}
 	selected, ok := got.drainPick.list.Selected()
-	if !ok || selected.Kind != drain.DrainTargetNewManaged {
-		t.Fatalf("default cursor entry = %+v (ok=%v), want new managed worktree", selected, ok)
+	if !ok || selected.Kind != drain.DrainTargetTrunk {
+		t.Fatalf("default cursor entry = %+v (ok=%v), want the trunk entry", selected, ok)
 	}
 }
 
