@@ -105,3 +105,98 @@ just its own contract.
 The fork ceiling is now a property worth defending rather than an accident. It
 is the read-path counterpart to ADR-0060: what cannot be derived from a marker
 is at least only forked for a row somebody is looking at.
+
+## Amendment (2026-08-08): the budget is met, and a persisted memo is declined
+
+The decision above set a ~100ms first paint as the budget. Re-measured on the
+authoring machine — 4 repo groups, 92 sets on disk, 522 task markdowns, 96 rows
+in `work_containers` — against a copy of the real Work store, with a throwaway
+harness since deleted:
+
+| | |
+| --- | --- |
+| page A first paint (memo-cold, page cache warm) | **54.4ms** |
+| page A rebuild (memo warm — what the 2s poll pays) | **8.6ms** |
+| `pop work status` end to end, warm | ~100ms (was 4.6s) |
+| process floor (`pop -v`) | ~10ms |
+
+The budget holds with room. What follows is the reasoning that keeps it held,
+recorded because the obvious next move is the wrong one.
+
+**The memo ladder is three tiers, and a cost belongs to exactly one.** Naming
+them together, because the profile above only makes sense against the ladder:
+
+- **Per-load** — the **Git fact memo**. Answers a question about a *moment*, so
+  it may not outlive one load. `WithGitMemo` owns that scope.
+- **Process-lifetime** — the **Manifest memo**. Answers a question about
+  *content*, named entirely by its key, so it cannot go stale and is bounded
+  (LRU) rather than expiring.
+- **Persisted across processes** — declined; see below.
+
+A cost that repeats *within* one load belongs in tier one and is a defect, not a
+caching opportunity. A cost that repeats *across* loads in one process belongs in
+tier two, which is the tier that makes the poll nearly free.
+
+**A persisted (SQLite-backed) Manifest memo is declined at this inventory**, and
+the refusal is measured rather than principled. Its ceiling is real: because
+`manifestContentKey` is stat-based (size and mtime per dirent) rather than a hash
+of file bodies, a hit never opens the 522 task markdowns at all, which is why cold
+and warm differ by 6×. So persisting the memo genuinely would carry most of that
+gap into a fresh process. It is declined anyway, for three reasons:
+
+- **The floor is not zero.** A cross-process memo must still validate its key
+  before serving — ~92 `ReadFile` plus ~92 `ReadDir` plus ~614 `lstat` — which is
+  approximately the whole 8.6ms warm figure. It could claim ~45ms of a 54ms
+  paint, on a surface already under the threshold where anyone can tell.
+- **The cheap key is unsound.** A directory-mtime key would collapse validation
+  to one stat per set, but directory mtime tracks the *name set* only: measured
+  on APFS, editing or appending to a file in place leaves the containing
+  directory's mtime untouched, while create, delete and rename move it. A task
+  markdown rewritten in place — which flips set validity through the
+  acceptance-criteria check — would be served stale indefinitely. The stat storm
+  is the price of "the first paint stays fresh", and it cannot be negotiated down.
+- **Its value scales with inventory, and this inventory is small.** Four repo
+  groups is not the machine that would justify a cache database, an invalidation
+  contract and a migration path.
+
+**Trigger to revisit:** a first paint above **100ms** on a real inventory — double
+today's, and the point where the delay becomes perceptible. The shape is settled
+in advance so the next reader inherits it rather than re-deriving it: persist the
+**Manifest memo** and nothing else; a separate cache database, not `pop.db`, so
+that `rm` is a valid repair (it must never be one for the **Execution state
+store**) and so read-path writes never contend with authoritative ones on the one
+process-cached connection of ADR-0140; the content key unchanged. The repo-group
+half is explicitly *not* a candidate — a stale entry there would list a project
+that no longer exists, and its repetition is within one load, which is tier one's
+problem.
+
+**The glossary is unchanged by this amendment.** In particular **Manifest memo**
+keeps `avoid: manifest cache (nothing persists across processes)`, which stays
+true precisely because persistence was declined.
+
+**One tier-one defect is open.** `repogroup.Resolve` calls
+`tasks.ListPickerProjectsWith`, which re-expands every configured project path and
+runs `project.HasWorktreesWith` — a `Stat` plus a full read and parse of each
+repository's `.git/config` — on all of them; `canonicalCheckoutPath` and
+`EvalSymlinks` follow per project. The `repogroup` package holds no memo of any
+kind, and `Resolve` runs per kind per load, so page A pays it twice and
+`pop work status` again for `drain.Scan`. This is the three-passes-over-one-repo-group
+pattern this ADR removed for manifests, reproduced one layer up for project
+expansion: `config.ExpandProjectsWith` caches the *glob*, but nothing caches the
+per-path repo-shape probe behind it. On a cold-page-cache profile it was ~30% of
+samples (`HasWorktreesWith` 15%, `EvalSymlinks` 10%, `ResolveRepoConfig` plus
+`canonicalPath` 10%); with the page cache warm those reads are cheap, so the real
+saving is expected in the 5-15ms band and must be re-profiled rather than
+predicted. It is worth fixing regardless of what it costs, because repeated work
+inside one load is a defect on its own terms. Handed to a Task set rather than
+fixed here; the fix is a per-load memo, tier one, with no staleness to reason
+about.
+
+**`pop project dashboard` was audited in the same pass and needs nothing.** It is
+fork-free (ADR-0110, held by ADR-0185's path-keyed trunk test), its glob expansion
+is cached in `~/.cache/pop/glob_cache.json` under per-directory mtimes, and its
+per-iteration cost is one `list-sessions -F`. Its trade-offs are consistency, not
+latency — the row set and History recency are read once and frozen for the
+picker's lifetime, session state refreshes only per picker-loop iteration, and Map
+attribution rides tmux's mutable `#{session_path}`. Recorded here so a future
+performance pass starts by reading this line and stopping.
