@@ -174,7 +174,7 @@ problem.
 keeps `avoid: manifest cache (nothing persists across processes)`, which stays
 true precisely because persistence was declined.
 
-**One tier-one defect is open.** `repogroup.Resolve` calls
+**One tier-one defect was open, and is now closed.** `repogroup.Resolve` calls
 `tasks.ListPickerProjectsWith`, which re-expands every configured project path and
 runs `project.HasWorktreesWith` — a `Stat` plus a full read and parse of each
 repository's `.git/config` — on all of them; `canonicalCheckoutPath` and
@@ -185,12 +185,18 @@ pattern this ADR removed for manifests, reproduced one layer up for project
 expansion: `config.ExpandProjectsWith` caches the *glob*, but nothing caches the
 per-path repo-shape probe behind it. On a cold-page-cache profile it was ~30% of
 samples (`HasWorktreesWith` 15%, `EvalSymlinks` 10%, `ResolveRepoConfig` plus
-`canonicalPath` 10%); with the page cache warm those reads are cheap, so the real
-saving is expected in the 5-15ms band and must be re-profiled rather than
-predicted. It is worth fixing regardless of what it costs, because repeated work
-inside one load is a defect on its own terms. Handed to a Task set rather than
-fixed here; the fix is a per-load memo, tier one, with no staleness to reason
-about.
+`canonicalPath` 10%); with the page cache warm those reads are cheap, and the
+measured saving is far below the band this paragraph originally predicted.
+Re-measured on the authoring machine (60 picker projects, 3 repo groups, against a
+copy of the real Work store, with a throwaway harness since deleted): page A's
+first paint is **unchanged** — 10.7ms warm, 175-226ms on the cold copy either way,
+because a page build already shared one group resolution across its kinds — and
+the `pop work status` load, which scopes two builders inside one load and so paid
+the expansion twice, went from **23.2ms to 22.6ms**. It was worth fixing regardless
+of what it cost, because repeated work inside one load is a defect on its own
+terms. The fix is a per-load memo, tier one, with no staleness to reason about:
+`project.ShapeMemo`, scoped by `WithGitMemo` beside the Git fact memo, and free to
+nest so an inner builder keeps its caller's answer.
 
 **`pop project dashboard` was audited in the same pass and needs nothing.** It is
 fork-free (ADR-0110, held by ADR-0185's path-keyed trunk test), its glob expansion

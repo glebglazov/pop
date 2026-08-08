@@ -14,6 +14,9 @@ import (
 type Deps struct {
 	Git deps.Git
 	FS  deps.FileSystem
+	// Shape memoizes the per-path repository-shape probe for one load. Nil means
+	// no load has claimed a scope and every probe reads the filesystem.
+	Shape *ShapeMemo
 }
 
 // DefaultDeps returns dependencies using real implementations
@@ -549,8 +552,13 @@ func HasWorktrees(path string) bool {
 	return HasWorktreesWith(defaultDeps, path)
 }
 
-// HasWorktreesWith checks if a directory is a bare repo with worktrees using provided dependencies
+// HasWorktreesWith checks if a directory is a bare repo with worktrees using
+// provided dependencies, served from the load's shape memo when one is scoped.
 func HasWorktreesWith(d *Deps, path string) bool {
+	return d.Shape.hasWorktrees(path, func() bool { return hasWorktreesProbe(d, path) })
+}
+
+func hasWorktreesProbe(d *Deps, path string) bool {
 	// Check if .bare directory exists - this indicates a bare repo with worktrees
 	bareDir := filepath.Join(path, ".bare")
 	if info, err := d.FS.Stat(bareDir); err == nil && info.IsDir() {
@@ -624,8 +632,13 @@ func ListWorktreesForPath(path string) ([]Worktree, error) {
 	return ListWorktreesForPathWith(defaultDeps, path)
 }
 
-// ListWorktreesForPathWith returns worktrees using provided dependencies
+// ListWorktreesForPathWith returns worktrees using provided dependencies, served
+// from the load's shape memo when one is scoped.
 func ListWorktreesForPathWith(d *Deps, path string) ([]Worktree, error) {
+	return d.Shape.listWorktrees(path, func() ([]Worktree, error) { return listWorktreesProbe(d, path) })
+}
+
+func listWorktreesProbe(d *Deps, path string) ([]Worktree, error) {
 	var worktrees []Worktree
 
 	entries, err := d.FS.ReadDir(path)

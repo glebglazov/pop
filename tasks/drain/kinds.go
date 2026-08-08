@@ -69,16 +69,17 @@ func (d *Deps) kinds(cfg *config.Config) []work.Kind {
 // untouched. Task and Project deps share one memo when they share one seam, so
 // the common dir a project resolution and a task resolution both ask for is
 // forked once rather than twice.
+//
+// It scopes the load's project-shape memo too (project.ShapeMemo): the
+// repository-shape probe behind configured-path expansion is asked once per
+// caller that needs the picker projects, and a Work load has several. Both memos
+// answer questions about a moment, so both belong to exactly this scope.
 func (d *Deps) WithGitMemo() *Deps {
 	if d == nil {
 		return nil
 	}
 	td, pd := d.Tasks, d.Project
 	tasksGit := td != nil && td.Git != nil
-	projectGit := pd != nil && pd.Git != nil
-	if !tasksGit && !projectGit {
-		return d
-	}
 	out := *d
 	var shared *deps.MemoGit
 	if tasksGit {
@@ -87,13 +88,21 @@ func (d *Deps) WithGitMemo() *Deps {
 		cp.Git = shared
 		out.Tasks = &cp
 	}
-	if projectGit {
-		memo := shared
-		if memo == nil || memo.Inner() != pd.Git {
-			memo = deps.NewMemoGit(pd.Git)
-		}
+	if pd != nil {
 		cp := *pd
-		cp.Git = memo
+		if pd.Git != nil {
+			memo := shared
+			if memo == nil || memo.Inner() != pd.Git {
+				memo = deps.NewMemoGit(pd.Git)
+			}
+			cp.Git = memo
+		}
+		// Nesting must be free, as it is for the git memo: an inner builder that
+		// scopes its own load inside an outer one keeps the outer memo, so the
+		// repository shape the outer load already probed is not probed again.
+		if cp.Shape == nil {
+			cp.Shape = project.NewShapeMemo()
+		}
 		out.Project = &cp
 	}
 	return &out
