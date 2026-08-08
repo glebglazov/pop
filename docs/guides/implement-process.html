@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>How a Task set drains — pop tasks implement</title>
+<style>
+  :root {
+    --fg: #1c1c1c;
+    --dim: #666;
+    --rule: #ddd;
+    --accent: #0b6;
+    --code-bg: #f6f6f4;
+  }
+  html { font-size: 16px; }
+  body {
+    margin: 0 auto;
+    padding: 3rem 1.5rem 6rem;
+    max-width: 62rem;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    line-height: 1.6;
+    color: var(--fg);
+  }
+  h1 { font-size: 2rem; margin-bottom: 0.25rem; }
+  h2 { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--rule); }
+  h3 { margin-top: 2rem; }
+  .lede { color: var(--dim); margin-top: 0; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.875em; }
+  code { background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 3px; }
+  pre { background: var(--code-bg); padding: 1rem; border-radius: 6px; overflow-x: auto; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 1.5rem 0; }
+  th, td { border: 1px solid var(--rule); padding: 0.5rem 0.7rem; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); }
+  .mermaid { margin: 2rem 0; text-align: center; }
+  .note {
+    border-left: 3px solid var(--accent);
+    padding: 0.6rem 1rem;
+    background: #f4fbf8;
+    margin: 1.5rem 0;
+  }
+  .src { color: var(--dim); font-size: 0.85rem; }
+  nav ol { padding-left: 1.2rem; }
+  nav { background: var(--code-bg); padding: 1rem 1.5rem; border-radius: 6px; }
+</style>
+</head>
+<body>
+
+<h1>How a Task set drains</h1>
+<p class="lede">The full path from a supervisor tick to one agent process and back to disk — what
+runs where, which loop owns which decision, and what actually crosses a process boundary.
+Diagrams render with Mermaid from a CDN, so open this with a network connection.</p>
+
+<nav>
+<ol>
+  <li><a href="#shape">The overall shape</a></li>
+  <li><a href="#daemon">Layer 1 — the supervisor tick</a></li>
+  <li><a href="#run">Layer 2 — the Implement run loop</a></li>
+  <li><a href="#drain">Drain segments and the runtime execution lock</a></li>
+  <li><a href="#attempts">Layer 3 — the three nested attempt loops</a></li>
+  <li><a href="#skips">Skips: preset and model</a></li>
+  <li><a href="#stream">Layer 4 — one agent process</a></li>
+  <li><a href="#seams">Seams: who declares, who implements</a></li>
+  <li><a href="#state">What crosses a boundary</a></li>
+</ol>
+</nav>
+
+<h2 id="shape">1. The overall shape</h2>
+
+<p>Three processes, no messaging between them. The supervisor spawns a drain into a tmux pane and
+never hears from it again; coordination is entirely <strong>poll + pure read + diff</strong> over
+<code>pop.db</code>, the manifest files on disk, and tmux pane options.</p>
+
+<div class="mermaid">
+flowchart TB
+  subgraph P1["process: pop work daemon"]
+    T["tick loop, every poll interval"]
+  end
+  subgraph P2["process: pop tasks implement &lt;set&gt; — one tmux pane"]
+    L["Implement run loop"]
+    A["agent process, one attempt"]
+  end
+  subgraph P3["process: pop work dashboard / pop work status"]
+    D["periodic rebuild"]
+  end
+
+  DB[("pop.db")]
+  MD[["manifest .md files"]]
+  TM(["tmux @pop_* options"])
+
+  T -- "spawn, fire and forget" --> L
+  L --> A
+  A -- "stdout bytes" --> L
+
+  L -- "drain rows, cooldowns, waiters,<br/>gate holds, captured runs" --> DB
+  L -- "task status transitions" --> MD
+  L -- "topic, pane status" --> TM
+
+  DB -- "polled" --> T
+  MD -- "re-read" --> T
+  DB -- "read" --> D
+  MD -- "read" --> D
+
+  style P2 stroke-width:3px
+</div>
+
+<div class="note">
+<strong>There is no event bus.</strong> The only genuine byte stream in the system is agent stdout,
+consumed inside one attempt. Everything called an "event" elsewhere —
+<code>work.AdvanceEvent</code>, <code>streamEventRecord</code> — is a record produced and consumed
+within a single call stack, never delivered to a subscriber.
+</div>
+
+<h2 id="daemon">2. Layer 1 — the supervisor tick</h2>
+
+<p class="src"><code>supervisor/supervisor.go:22</code> (<code>Run</code>),
+<code>:63</code> (<code>tick</code>), <code>:141</code> (<code>readPasses</code>),
+<code>:168</code> (<code>dispatch</code>)</p>
+
+<p>Three phases per tick. The split exists because <code>Candidates()</code> is a
+<strong>pure read</strong> — that purity is the licence to fan it out across kinds.</p>
+
+<div class="mermaid">
+flowchart TB
+  S["Run: acquire supervisor.lock<br/>single instance"] --> TK
+
+  subgraph TK["tick"]
+    C1["LoadConfig"] --> C2["build advancer list, fresh per tick"]
+    C2 --> RP
+
+    subgraph RP["phase 1+2 — readPasses, one goroutine per kind"]
+      direction LR
+      K1["Task set kind<br/>Reconcile then Candidates"]
+      K2["Routine kind<br/>Reconcile then Candidates"]
+    end
+
+    RP --> PRE["BuildStatus, BuildRunView<br/>emit-on-change diff"]
+    PRE --> DSP
+
+    subgraph DSP["phase 3 — dispatch, SERIAL in kind precedence"]
+      direction TB
+      O["supervisor rules on checkout<br/>occupancy first — its own invariant"]
+      O -->|"occupied"| SKIP["skip; reason printed"]
+      O -->|"free"| ADV["Advance(candidate)"]
+      ADV --> OCC["mark checkout occupied"]
+    end
+
+    DSP --> POST["BuildRunView again,<br/>seed spawned sets into swallow snapshot"]
+  end
+
+  TK --> W{"signal?"}
+  W -->|"no"| TK
+  W -->|"yes"| X["shut down; in-flight drains<br/>keep running, tmux owns them"]
+</div>
+
+<p>Why dispatch is serial while reads fan out: dispatch mutates the shared checkout ledger, and
+"first wins, rest defer" needs a defined order. Reads observe nothing of each other.</p>
+
+<p>Reconcile failure never fails the tick — that kind's candidates then read pre-reconcile state,
+no worse than before the phase existed. A <em>candidate</em> failure does fail it.</p>
+
+<h3>What <code>Advance</code> actually does for a Task set</h3>
+
+<p class="src"><code>tasks/drain/advance.go</code></p>
+
+<div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant SUP as supervisor
+  participant K as taskSetKind
+  participant SCAN as drain.Scan
+  participant TMUX as internal/tmux
+  participant DB as pop.db
+
+  SUP->>K: Reconcile()
+  K->>DB: sweep dead-PID drains, orphaned<br/>gate holds, spawn intents, waiters
+  SUP->>K: Candidates()
+  K->>SCAN: scan every repo group<br/>fanout.Map, bounded GOMAXPROCS
+  SCAN-->>K: []Decision
+  Note over K: candidateFor: actionable → Advance verdict,<br/>deferred → Refuse with the deferral's own words,<br/>anything else → no candidate at all
+  K-->>SUP: []work.Candidate
+  SUP->>SUP: occupancy check
+  SUP->>K: Advance(candidate)
+  K->>K: route to checkout / provision worktree
+  K->>DB: write spawn intent (double-spawn guard)
+  K->>TMUX: spawn pane: pop tasks implement &lt;set&gt;
+  K-->>SUP: work.Outcome
+  Note over SUP: wrapped in AdvanceEvent, .Line() printed, discarded
+</div>
+
+<h2 id="run">3. Layer 2 — the Implement run loop</h2>
+
+<p class="src"><code>cmd/tasks.go:1063</code> → <code>implement.RunWholeSetWith</code> →
+<code>tasks.RunTaskSetWith</code> (<code>tasks/run_tasks.go:102</code>)</p>
+
+<pre><code>run, err := newImplementRun(...)   // plan + paths + the opening BeginDrain
+defer run.finalize(&amp;err)           // registered right here, before BindCheckout
+run.setup()
+run.loop()</code></pre>
+
+<p>The deferred <code>finalize</code> sits at exactly that point so a failure in <em>later</em>
+setup — checkout bind, dirty check — still writes the Drain row's exit terminal. Failing at or
+before <code>BeginDrain</code> leaves no live Drain, so there is nothing to finalize.</p>
+
+<h3>The <code>implementRun</code> object</h3>
+
+<p class="src"><code>tasks/implement_run.go:26</code></p>
+
+<p>One Implement run is the whole invocation; a Drain is the per-segment runtime execution lock it
+re-acquires. The name is deliberately neither "session" (a tmux word) nor "drain" (the store-row
+word). It carries the state the loop branches and the deferred finalize share:</p>
+
+<table>
+  <tr><th>Field</th><th>Why it lives on the run, not in a loop local</th></tr>
+  <tr><td><code>drain *DrainHandle</code></td><td><strong>nil while parked</strong> at a gate or quota wait; <code>finalize</code> must read the latest value</td></tr>
+  <tr><td><code>sharedPromptReader</code></td><td>stdin cannot be re-wrapped per gate — one reader for every gate in the run</td></tr>
+  <tr><td><code>dirtyStrategyApplied</code></td><td>at most once per run; must survive the gate parks that re-enter the loop</td></tr>
+  <tr><td><code>agentProbeMemo</code></td><td>one-way availability memo: a preset marked unavailable stays skipped for the whole process</td></tr>
+  <tr><td><code>result</code></td><td>accumulates across iterations; read by <code>finalize</code> for the exit terminal</td></tr>
+</table>
+
+<h3>The loop itself</h3>
+
+<p class="src"><code>tasks/run_tasks.go:132</code></p>
+
+<p>Pure orchestration. Each branch owns its choreography and hands back a small directive enum; the
+loop never inspects why. State between iterations lives <strong>on disk</strong>, not in memory —
+a gate that completes a task writes the manifest, and the next <code>RefreshWith</code> sees it.</p>
+
+<div class="mermaid">
+flowchart TB
+  START(["loop entry"]) --> R["RefreshWith(definitionPath, statePath)<br/>re-read manifests from disk"]
+  R --> SEL{"SelectTaskInSet"}
+
+  SEL -->|"eligible AFK task"| RST["runSelectedTask"]
+  SEL -->|"selErr — nothing runnable"| VP["verifyPhase<br/>pre-approval Verifier, ADR-0086"]
+
+  VP -->|"verifyContinue"| R
+  VP -->|"verifyReturn"| RET(["return (result, err)"])
+  VP -->|"fall through"| TS["terminalStatus<br/>DONE / DEFERRED / BLOCKED /<br/>AWAITING-APPROVAL / FAILED + gates"]
+
+  TS -->|"terminalContinue"| R
+  TS -->|"otherwise"| RET
+
+  RST -->|"runTaskContinue"| R
+  RST -->|"runTaskReturn"| RET
+
+  RET --> FIN["deferred finalize:<br/>record exit terminal on the latest Drain<br/>(no-op if parked, cancel if declined)"]
+</div>
+
+<h3>Inside <code>runSelectedTask</code></h3>
+
+<p class="src"><code>tasks/run_selected_task.go:46</code></p>
+
+<div class="mermaid">
+flowchart TB
+  A["ensureDrain — re-acquire the runtime<br/>execution lock, no-op if held"] --> B{"collision?"}
+  B -->|"yes"| RTN["runTaskReturn — refuse cleanly,<br/>manifest state untouched"]
+  B -->|"no"| C{"dirty and strategy<br/>not yet applied?"}
+  C -->|"yes"| D["applyDirtyRuntimeStrategy, once per run"]
+  C -->|"no"| E
+  D --> E["PreSeedTopic from task Title, ADR-0058"]
+  E --> F["BuildAgentPrompt + invocation factory<br/>+ newEffortSpecResolver"]
+  F --> G["executeTaskAttemptsWithAgentFallback"]
+
+  G --> H{"execErr?"}
+  H -->|"SIGINT"| I["interruptGate — task still open,<br/>no failed transition was written"]
+  H -->|"other"| J["park the lock, then failedGate menu"]
+  I -->|"continue"| CONT(["runTaskContinue"])
+  I -->|"exit"| RTN
+  J -->|"handled"| CONT
+  J -->|"not handled"| K["printFailedStopAdvice"] --> RTN
+
+  H -->|"no error"| L{"ProceedVerdict?"}
+  L -->|"human-healing<br/>every preset exhausted"| M["ExitSetup with each preset's<br/>provider diagnostic — never enter the wait"]
+  M --> RTN
+  L -->|"time-healing"| N["ParkAndWaitForQuotaRecovery:<br/>park drain, register waiter, poll,<br/>ensureDrain callback on resume"]
+  N -->|"recovered"| CONT
+  N -->|"registration failed"| O["clean exit, pause fields on result"] --> RTN
+  L -->|"none"| P["append to result.Completed"] --> CONT
+</div>
+
+<h2 id="drain">4. Drain segments and the runtime execution lock</h2>
+
+<p class="src"><code>tasks/implement_run.go:273</code> (<code>parkDrain</code>),
+<code>:287</code> (<code>parkAtGate</code>), <code>:329</code> (<code>ensureDrain</code>) — ADR-0067</p>
+
+<p>One run holds <strong>at most one</strong> Drain and may span several. Every human-wait gate parks
+the lock, so the menu, the assist session and the runtime shell all run lock-free — otherwise a
+human staring at a prompt would hold a checkout hostage indefinitely.</p>
+
+<div class="mermaid">
+stateDiagram-v2
+  [*] --> Held: newImplementRun — opening BeginDrain
+  Held --> Held: ensureDrain (no-op)
+  Held --> Parked: parkDrain — Finish(StateFinished), drain = nil
+  Held --> Parked: parkAtGate — park + RegisterCheckoutGateHold
+  Parked --> Held: ensureDrain — fresh BeginDrain
+  Parked --> Parked: gate menu / assist session / quota poll
+  Held --> [*]: finalize records the exit terminal
+  Parked --> [*]: finalize is a no-op — the park already<br/>recorded that segment's terminal
+
+  note right of Parked
+    gateWillPrompt guards parkAtGate:
+    a --yes fall-through keeps the
+    normal terminal and parks nothing.
+    claim=true only for the Failed gate
+    over a dirty tree (ADR-0135).
+  end note
+</div>
+
+<h2 id="attempts">5. Layer 3 — the three nested attempt loops</h2>
+
+<p class="src"><code>tasks/attempts.go:254</code> (fallback), <code>:60</code>-ish
+(<code>executeTaskAttempts</code>), <code>tasks/effort_model_skip.go</code> (the tier walk)</p>
+
+<div class="mermaid">
+flowchart TB
+  subgraph OUTER["outer — Agent fallback: the preset list"]
+    direction TB
+    subgraph MID["middle — attempt 1..maxTries"]
+      direction TB
+      subgraph INNER["inner — Effort tier entries"]
+        direction TB
+        RUN["runAgentAttempt: one process"]
+      end
+    end
+  end
+
+  OUTER -.->|"preset-scoped verdict:<br/>abandons the rest of the retry cap,<br/>hands the turn to the next preset"| OUTER
+  MID -.->|"ordinary failure:<br/>spends one try, waits the retry delay<br/>(timeout retries instantly)"| MID
+  INNER -.->|"model-scoped verdict:<br/>retire the entry, restart here<br/>WITHOUT spending a try"| INNER
+</div>
+
+<p>The list of presets, the retry cap, and the tier are three different budgets, and the scope of a
+verdict picks which one is spent. That is the whole dispatch rule.</p>
+
+<h2 id="skips">6. Skips: preset and model</h2>
+
+<p class="src"><code>tasks/attempts.go:259-320</code>,
+<code>tasks/effort_model_skip.go</code>, <code>tasks/agent_proceed_verdict.go</code> — ADR-0153, ADR-0168</p>
+
+<h3>Before a preset is ever spawned</h3>
+
+<div class="mermaid">
+flowchart TB
+  P["next preset in the Agent fallback list"] --> C1{"active preset cooldown<br/>in pop.db?"}
+  C1 -->|"yes"| SK["skip — quota pause verdict"]
+  C1 -->|"no"| C2{"binary on PATH?"}
+  C2 -->|"no"| SK
+  C2 -->|"yes"| C3{"availability probe<br/>says unauthenticated?"}
+  C3 -->|"yes"| SK
+  C3 -->|"unknown / no probe / timeout"| C4
+  C3 -->|"authenticated"| C4{"every model in the<br/>Effort tier skipped?"}
+  C4 -->|"yes"| SKT["skip — TierExhausted,<br/>preset never spawned"]
+  C4 -->|"no"| SPAWN["run the attempts"]
+  SK --> P
+  SKT --> P
+</div>
+
+<p>The probe is memoised one-way per process: probed at most once, and a preset marked unavailable
+stays skipped until the process ends. Only an <em>explicit</em> negative skips —
+a non-zero exit, unparseable output or a 5s timeout reads as <em>unknown</em> and proceeds, because
+a probe must never block real work on its own parse failure.</p>
+
+<h3>The verdict grid</h3>
+
+<p>Every adapter answers with one type, <code>AgentProceedVerdict</code>. Dispatch reads
+<strong>Scope × Recovery only</strong>; <code>Kind</code> is explicitly descriptive and picks
+human-facing wording, never a branch. That is what lets a new kind land without editing the
+orchestrator.</p>
+
+<table>
+  <tr><th></th><th>Recovery = time</th><th>Recovery = human</th><th>Recovery = permanent</th></tr>
+  <tr>
+    <th>Scope = preset</th>
+    <td>write the machine-global preset cooldown, enter the quota recovery wait</td>
+    <td>no cooldown; if every preset lands here, exit <code>ExitSetup</code> and leave the task Open</td>
+    <td>no cooldown, no wait</td>
+  </tr>
+  <tr>
+    <th>Scope = model</th>
+    <td colspan="2">record a timed Effort model skip for <code>(preset, model)</code>, restart on the tier's next entry</td>
+    <td>record a permanent skip — zero <code>Until</code>, renders as <code>∞</code></td>
+  </tr>
+</table>
+
+<p>A model-scoped verdict with no surviving tier entry <code>escalateToPreset()</code>s: same cause,
+same recovery, but condemning the whole preset so Agent fallback advances.</p>
+
+<div class="mermaid">
+flowchart LR
+  V["model-scoped verdict<br/>e.g. kimi: 'does not have access to'"] --> S["stampDetectedVerdict:<br/>pop's pinned alias outranks<br/>the provider's wire name"]
+  S --> R["walk.retire"]
+  R --> W["write (preset, model) skip to pop.db"]
+  W --> Q{"another tier<br/>entry survives?"}
+  Q -->|"yes"| RESTART["persist a skipped attempt stream,<br/>restart the attempt on it"]
+  Q -->|"no"| ESC["escalateToPreset — outer loop advances"]
+</div>
+
+<h2 id="stream">7. Layer 4 — one agent process</h2>
+
+<p class="src"><code>tasks/attempts.go:538</code> (<code>runAgentAttempt</code>),
+<code>tasks/stream.go:164</code> (<code>streamRecorder.Write</code>)</p>
+
+<p>This is the only concurrency in the whole drain process: one goroutine on
+<code>proc.Wait()</code> and a <code>select</code> over three channels.</p>
+
+<div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant EX as executeTaskAttempts
+  participant RA as runAgentAttempt
+  participant W as writer chain
+  participant AG as agent CLI process
+  participant FS as disk / pop.db
+
+  EX->>RA: invocation
+  RA->>FS: spillPrompt — prompt leaves argv<br/>for this attempt only (execve ceiling)
+  RA->>W: liveRenderWriter → streamRecorder → capture buffer
+  RA->>AG: startAgentInvocation, own process group
+  RA->>RA: signal.Notify before start —<br/>a signal must never hit the default action
+
+  loop while running
+    AG-->>W: stdout bytes
+    W->>W: split on newline, stamp AtMS,<br/>append streamEventRecord
+    W->>W: adapter Render(event) → live prose + tool ticks
+  end
+
+  Note over RA: select over sigCh / done / timeoutCh
+  AG-->>RA: exit
+  RA->>FS: cleanupPrompt (deferred)
+  RA-->>EX: raw capture + outcome
+
+  EX->>EX: NormalizeOutput(raw) — verdict scan over the WHOLE capture
+  alt ProceedVerdict present
+    EX->>FS: persist stream as quota-paused / agent-unusable
+  else
+    EX->>FS: re-read task .md
+    EX->>EX: assessAttempt(output, exitCode, taskData)
+    EX->>FS: persist stream (completed / failed) as JSONL.gz + Captured run row
+    opt complete
+      EX->>FS: completeSuccessfulTask — commit + transition write
+    end
+  end
+</div>
+
+<p>Two ordering facts that are load-bearing:</p>
+<ul>
+  <li><strong>Timestamps live at the bytes.</strong> <code>streamRecorder</code> stamps each line as
+  it arrives, before any rendering, so a render bug or an unrecognised event type can never distort
+  the persisted record (ADR-0016). Live rendering is cosmetic; the capture is the source of truth.</li>
+  <li><strong>The verdict check precedes assessment.</strong> An agent that could not run is never
+  graded as a failed attempt.</li>
+</ul>
+
+<p>Plain-output and <code>--agent-cmd</code> attempts bypass both writers —
+<code>io.MultiWriter(liveOut, &amp;capture)</code>, no records, no adapter capabilities.</p>
+
+<h2 id="seams">8. Seams: who declares, who implements</h2>
+
+<div class="mermaid">
+classDiagram
+  class Kind {
+    <<interface — work/kind.go:37>>
+    ID() KindID
+    Load() []Container
+    StatusCell(Container)
+    Actions(Container)
+    StatusActions(Container)
+    ItemActions(Container, Item)
+    Perform(Container, *Item, Verb)
+    Columns() []string
+  }
+  class Advancer {
+    <<interface — work/advance.go:21>>
+    Reconcile() error
+    Candidates() []Candidate
+    Advance(Candidate) Outcome
+  }
+  class SkipSource {
+    <<interface — work/kind.go:92>>
+    ModelSkips() []ModelSkip
+  }
+  class AgentAdapter {
+    <<interface — tasks/agent.go:175>>
+    HeadlessInvocation()
+    NormalizeOutput()
+    AvailabilityProbeCapability()
+    EffortLadderCapability()
+    plus 13 capability stances
+  }
+
+  Kind <|.. setkind : Task set
+  Kind <|.. mapkind : Map
+  Kind <|.. routinekind : Routine
+  Advancer <|.. taskSetKind : embeds setkind
+  Advancer <|.. routineAdvancer
+  SkipSource <|.. setkind : Effort model skips<br/>are machine-global
+  AgentAdapter <|.. presetAgentAdapter : one struct,<br/>data-configured per preset
+
+  note for mapkind "implements Kind and NOT Advancer:<br/>every Decision ticket needs a human session.<br/>That asymmetry is what makes the split load-bearing."
+</div>
+
+<p>The supervisor obtains an advancer by <strong>type-asserting</strong> a kind it already holds
+(<code>work.Advancers</code>), so a kind that cannot be advanced answers nothing and is never asked
+again. Same trick for <code>SkipSource</code> and for the consumer-side
+<code>spawnedSetsReporter</code> declared in <code>supervisor.go:196</code> — which lets the
+supervisor ask for spawn seeding without naming the Task-set package.</p>
+
+<p><code>work/</code> imports no kind and no TUI; two guard tests hold that.
+<code>supervisor/</code> imports <code>tasks/drain</code> and nothing imports it back.</p>
+
+<div class="note">
+Agent capabilities are deliberately <strong>not</strong> Go interfaces. Each is a struct carrying a
+<code>CapabilityKind</code> stance — <code>Supported</code> (must carry the func) or
+<code>Blind</code> (must carry a reason) — validated at init, with the zero value
+<code>capabilityUnset</code> a hard error. A Go interface can only be satisfied or not; this makes
+"this adapter is blind to token usage, and here is why" a declarable, checked state.
+</div>
+
+<h2 id="state">9. What crosses a boundary</h2>
+
+<p>Nothing is pushed back to the daemon. The run writes, and other processes poll.</p>
+
+<table>
+  <tr><th>Channel</th><th>Written by</th><th>Read by</th></tr>
+  <tr>
+    <td>manifest <code>.md</code> files</td>
+    <td>gates, <code>completeSuccessfulTask</code>, the <code>transition.go</code> chokepoint</td>
+    <td>the run's own next <code>RefreshWith</code>; supervisor scan; dashboard</td>
+  </tr>
+  <tr>
+    <td><code>pop.db</code> — drain rows, preset + model cooldowns, recovery waiters, gate holds, checkout claims, Captured runs, work container registry</td>
+    <td><code>BeginDrain</code> / <code>Finish</code>, verdict handling, <code>walk.retire</code>, waiter registration</td>
+    <td>supervisor reconcile and occupancy; <code>pop tasks agents</code>; dashboard footer</td>
+  </tr>
+  <tr>
+    <td>tmux <code>@pop_topic</code>, <code>@pop_work_kind</code>, <code>@pop_work_id</code>, pane status</td>
+    <td><code>PreSeedTopic</code>; agent CLI hooks installed by <code>integrate/</code></td>
+    <td><code>monitor/</code> pane daemon; the dashboard's pane handoff</td>
+  </tr>
+</table>
+
+<p>The one genuine push channel anywhere in pop is the last row: agent CLI hooks fire into the
+<code>monitor/</code> pane status daemon. Everything else is polled.</p>
+
+<h3>Where to read next</h3>
+<ul>
+  <li><code>docs/agents/navigation.md</code> — package map and the files worth reading in ranges</li>
+  <li><code>CONTEXT.md</code> — the glossary; grep it for a term rather than reading it whole</li>
+  <li><code>docs/adr/</code> — ADR-0067 (drain segments), ADR-0100 (quota recovery), ADR-0153
+      (proceed verdicts), ADR-0168 (Effort model skips), ADR-0173 (the Work seam)</li>
+</ul>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'neutral',
+    flowchart: { curve: 'basis', useMaxWidth: true },
+    sequence: { useMaxWidth: true },
+    themeVariables: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '14px' }
+  });
+</script>
+
+</body>
+</html>
