@@ -2,6 +2,8 @@ package tmux
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -89,5 +91,123 @@ func TestKillSessionPropagatesError(t *testing.T) {
 	tm := &realTmux{run: &recordingRunner{err: fmt.Errorf("boom")}}
 	if err := tm.KillSession("work"); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+// TestInConfiguredServer covers ADR-0199 decision 2: InTmux is a
+// socket-identity comparison, with the unset-socket case preserving the
+// pre-socket-key "$TMUX != \"\"" behaviour.
+func TestInConfiguredServer(t *testing.T) {
+	t.Run("empty TMUX is outside", func(t *testing.T) {
+		if inConfiguredServer("", "") {
+			t.Fatal("empty $TMUX must be outside")
+		}
+		if inConfiguredServer("", "pop") {
+			t.Fatal("empty $TMUX must be outside even with a configured socket")
+		}
+	})
+
+	t.Run("unset socket with TMUX is inside", func(t *testing.T) {
+		if !inConfiguredServer("/tmp/tmux-501/default,1,0", "") {
+			t.Fatal("unset socket must treat any $TMUX as inside")
+		}
+	})
+
+	t.Run("foreign socket is outside", func(t *testing.T) {
+		root := t.TempDir()
+		t.Setenv("TMUX_TMPDIR", root)
+		uid := os.Getuid()
+		defaultSock := filepath.Join(root, fmt.Sprintf("tmux-%d", uid), "default")
+		if err := os.MkdirAll(filepath.Dir(defaultSock), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if inConfiguredServer(defaultSock+",1,0", "pop") {
+			t.Fatal("inside default while configured for pop must be outside")
+		}
+	})
+
+	t.Run("matching socket is inside", func(t *testing.T) {
+		root := t.TempDir()
+		t.Setenv("TMUX_TMPDIR", root)
+		uid := os.Getuid()
+		popSock := filepath.Join(root, fmt.Sprintf("tmux-%d", uid), "pop")
+		if err := os.MkdirAll(filepath.Dir(popSock), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if !inConfiguredServer(popSock+",1,0", "pop") {
+			t.Fatal("matching socket must be inside")
+		}
+	})
+}
+
+// TestInConfiguredServerSymlinkResolved proves the macOS /tmp vs /private/tmp
+// case: constructing the configured path yields the unresolved side while
+// $TMUX reports the resolved side, so a naive string compare fails toward
+// "always outside".
+func TestInConfiguredServerSymlinkResolved(t *testing.T) {
+	root := t.TempDir()
+	privateTmp := filepath.Join(root, "private", "tmp")
+	if err := os.MkdirAll(privateTmp, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tmpLink := filepath.Join(root, "tmp")
+	if err := os.Symlink(privateTmp, tmpLink); err != nil {
+		t.Fatal(err)
+	}
+
+	uid := os.Getuid()
+	sockDirName := fmt.Sprintf("tmux-%d", uid)
+	sockName := "default"
+	if err := os.MkdirAll(filepath.Join(tmpLink, sockDirName), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	resolvedSock := filepath.Join(privateTmp, sockDirName, sockName)
+	if err := os.WriteFile(resolvedSock, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("TMUX_TMPDIR", tmpLink)
+	configured := configuredSocketPath(sockName)
+	envPath := resolvedSock
+	if configured == envPath {
+		t.Fatalf("precondition failed: configured %q already equals env path — naive compare would pass", configured)
+	}
+	tmuxEnv := envPath + ",1234,0"
+	if !inConfiguredServer(tmuxEnv, sockName) {
+		t.Fatalf("resolved paths must match: configured=%q env=%q resolvedConfigured=%q resolvedEnv=%q",
+			configured, envPath, resolvePath(configured), resolvePath(envPath))
+	}
+}
+
+func TestRealTmuxInTmuxUsesSocket(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("TMUX_TMPDIR", root)
+	uid := os.Getuid()
+	popSock := filepath.Join(root, fmt.Sprintf("tmux-%d", uid), "pop")
+	if err := os.MkdirAll(filepath.Dir(popSock), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	tm := New("pop").(*realTmux)
+
+	t.Setenv("TMUX", "")
+	if tm.InTmux() {
+		t.Fatal("empty $TMUX must be outside")
+	}
+
+	t.Setenv("TMUX", popSock+",1,0")
+	if !tm.InTmux() {
+		t.Fatal("matching configured socket must be inside")
+	}
+
+	t.Setenv("TMUX", filepath.Join(root, fmt.Sprintf("tmux-%d", uid), "default")+",1,0")
+	if tm.InTmux() {
+		t.Fatal("foreign socket must be outside")
+	}
+
+	unset := New("").(*realTmux)
+	t.Setenv("TMUX", "/anywhere,1,0")
+	if !unset.InTmux() {
+		t.Fatal("unset socket must treat any $TMUX as inside")
 	}
 }

@@ -3,6 +3,8 @@ package tmux
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 )
 
 // Session-lifecycle primitives. These mirror the tmux subcommands one-to-one;
@@ -35,8 +37,79 @@ func (t *realTmux) KillSession(name string) error {
 	return err
 }
 
+// InTmux reports whether the caller is inside the configured tmux server
+// (ADR-0199 decision 2). $TMUX is "<socket-path>,<pid>,<session>"; the
+// predicate compares its first field to the configured socket as
+// symlink-resolved paths. An unset socket keeps the pre-socket-key
+// behaviour: any non-empty $TMUX counts as inside.
 func (t *realTmux) InTmux() bool {
-	return os.Getenv("TMUX") != ""
+	return inConfiguredServer(os.Getenv("TMUX"), t.socket)
+}
+
+// inConfiguredServer is the pure half of InTmux: given $TMUX's value and the
+// configured socket name, report whether the caller is inside that server.
+func inConfiguredServer(tmuxEnv, socket string) bool {
+	if tmuxEnv == "" {
+		return false
+	}
+	if socket == "" {
+		return true
+	}
+	envPath := tmuxEnvSocketPath(tmuxEnv)
+	if envPath == "" {
+		return false
+	}
+	return sameResolvedPath(envPath, configuredSocketPath(socket))
+}
+
+// tmuxEnvSocketPath returns the socket path field of a $TMUX value.
+func tmuxEnvSocketPath(tmuxEnv string) string {
+	path, _, _ := strings.Cut(tmuxEnv, ",")
+	return path
+}
+
+// configuredSocketPath builds the filesystem path for a -L socket name using
+// tmux's documented rule: $TMUX_TMPDIR or /tmp, then tmux-<uid>/<name>.
+func configuredSocketPath(name string) string {
+	base := os.Getenv("TMUX_TMPDIR")
+	if base == "" {
+		base = "/tmp"
+	}
+	return filepath.Join(base, fmt.Sprintf("tmux-%d", os.Getuid()), name)
+}
+
+// sameResolvedPath reports whether a and b name the same path after symlink
+// resolution. A naive string compare fails on macOS where constructing the
+// configured path yields /tmp/... while $TMUX reports /private/tmp/... .
+func sameResolvedPath(a, b string) bool {
+	return resolvePath(a) == resolvePath(b)
+}
+
+// resolvePath returns path with as many leading symlinks evaluated as exist.
+// The final socket file need not exist — peels missing trailing components
+// so /tmp/tmux-UID/name still resolves through /tmp → /private/tmp on macOS.
+func resolvePath(path string) string {
+	path = filepath.Clean(path)
+	if path == "" || path == "." {
+		return path
+	}
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	var missing []string
+	cur := path
+	for {
+		dir := filepath.Dir(cur)
+		if dir == cur {
+			break
+		}
+		missing = append([]string{filepath.Base(cur)}, missing...)
+		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+			return filepath.Join(append([]string{resolved}, missing...)...)
+		}
+		cur = dir
+	}
+	return path
 }
 
 // PaneIDFromEnv returns the id of the pane the caller is running in, empty when

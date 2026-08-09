@@ -225,7 +225,7 @@ func DefaultProjectDeps() *ProjectDeps {
 			return cfg.ResolvePreferredWorkbench(preferredResolverConfigDeps(cfg), path)
 		},
 
-		InTmux:         func() bool { return os.Getenv("TMUX") != "" },
+		InTmux:         func() bool { return defaultTmuxMod.InTmux() },
 		CurrentSession: func() string { return currentTmuxSessionWith(defaultTmuxMod) },
 		HasSession:     func(name string) bool { return defaultTmuxMod.HasSession(name) },
 	}

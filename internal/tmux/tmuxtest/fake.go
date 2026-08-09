@@ -27,8 +27,8 @@ type Fake struct {
 	// arrange it to model pre-existing sessions and assert on it afterwards.
 	Live map[string]string
 
-	// Inside is the arranged inside-tmux state returned by InTmux; it drives
-	// SwitchTarget's switch-vs-attach choice.
+	// Inside is the arranged inside-configured-server state returned by
+	// InTmux; it drives SwitchTarget's switch-vs-attach choice (ADR-0199).
 	Inside bool
 
 	// Switched, Attached and Killed record verb targets in call order so

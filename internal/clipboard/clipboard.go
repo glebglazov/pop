@@ -26,7 +26,7 @@ func Copy(text string) error {
 // CopyWith is Copy with an injectable tmux module handle, so tests can assert
 // against the tmuxtest fake instead of a real tmux server.
 func CopyWith(mod tmuxmod.Tmux, text string) error {
-	if os.Getenv("TMUX") != "" {
+	if mod != nil && mod.InTmux() {
 		if err := mod.LoadBuffer(text); err == nil {
 			return nil
 		}

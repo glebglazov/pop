@@ -6,6 +6,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/project"
@@ -41,7 +42,7 @@ func DefaultDeps() *Deps {
 		OpenEditor:     defaultOpenEditor,
 		OpenPager:      defaultOpenPager,
 		IsInteractive:  defaultIsInteractive,
-		InTmux:         func() bool { return os.Getenv("TMUX") != "" },
+		InTmux:         func() bool { return tmuxmod.New(config.ConfiguredTmuxSocket()).InTmux() },
 		Executable:     os.Executable,
 		Now:            time.Now,
 		Stdin:          os.Stdin,

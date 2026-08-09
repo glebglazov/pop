@@ -31,7 +31,10 @@ type Tmux interface {
 	AttachSession(target string) error
 	// KillSession kills the session named name.
 	KillSession(name string) error
-	// InTmux reports whether the caller is running inside a tmux client.
+	// InTmux reports whether the caller is running inside the configured
+	// tmux server — a socket-identity comparison against $TMUX (ADR-0199).
+	// With no socket configured it is whether $TMUX is set, identical to
+	// pre-socket-key pop.
 	InTmux() bool
 
 	// --- Work sessions (@pop_work_kind / @pop_work_id; glossary: Work session) ---
@@ -201,7 +204,8 @@ type Tmux interface {
 
 // realTmux implements Tmux against the tmux binary via the runner seam.
 type realTmux struct {
-	run runner
+	run    runner
+	socket string
 }
 
 // New returns a Tmux backed by the real tmux binary, addressing the named
@@ -209,5 +213,5 @@ type realTmux struct {
 // to pre-socket-key pop. Callers hand the value from config.TmuxSocket /
 // config.ConfiguredTmuxSocket at construction; the module never loads config.
 func New(socket string) Tmux {
-	return &realTmux{run: execRunner{socket: socket}}
+	return &realTmux{run: execRunner{socket: socket}, socket: socket}
 }

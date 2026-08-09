@@ -24,7 +24,7 @@ func RefinePaneWith(d *Deps, routineID, refineAgent string) (string, error) {
 	}
 	inTmux := d.InTmux
 	if inTmux == nil {
-		inTmux = func() bool { return os.Getenv("TMUX") != "" }
+		inTmux = func() bool { return tmuxDeps(d).InTmux() }
 	}
 	if !inTmux() {
 		return "", fmt.Errorf("refine requires tmux; run: %s", refineCLICommand("pop", routineID, refineAgent))

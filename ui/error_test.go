@@ -208,9 +208,7 @@ func TestErrorModelViewShowsCopyFailure(t *testing.T) {
 }
 
 func TestCopyToClipboardWithLoadsTmuxBufferInsideTmux(t *testing.T) {
-	t.Setenv("TMUX", "/tmp/tmux-1000/default,1234,0")
-
-	fake := &tmuxtest.Fake{}
+	fake := &tmuxtest.Fake{Inside: true}
 	if err := CopyToClipboardWith(fake, "boom\n\nstack trace"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -220,9 +218,8 @@ func TestCopyToClipboardWithLoadsTmuxBufferInsideTmux(t *testing.T) {
 }
 
 func TestCopyToClipboardWithFallsBackOutsideTmux(t *testing.T) {
-	t.Setenv("TMUX", "")
-
 	fake := &tmuxtest.Fake{
+		Inside: false,
 		LoadBufferFunc: func(text string) error {
 			t.Fatal("LoadBuffer should not be called outside tmux")
 			return nil
@@ -236,9 +233,8 @@ func TestCopyToClipboardWithFallsBackOutsideTmux(t *testing.T) {
 }
 
 func TestCopyToClipboardWithFallsBackWhenLoadBufferFails(t *testing.T) {
-	t.Setenv("TMUX", "/tmp/tmux-1000/default,1234,0")
-
 	fake := &tmuxtest.Fake{
+		Inside: true,
 		LoadBufferFunc: func(text string) error {
 			return errors.New("no tmux server")
 		},
