@@ -53,6 +53,17 @@ write.
    own socket while the user sits in a personal tmux would read as "inside" and
    issue `switch-client` against a server with no attached client.
 
+   **Both sides must be compared as resolved paths.** The configured socket is a
+   name, and constructing its path from tmux's own rule (`$TMUX_TMPDIR` or
+   `/tmp`, then `tmux-UID/<name>`) yields `/tmp/tmux-501/default` on macOS while
+   `$TMUX` and `#{socket_path}` both report the symlink-resolved
+   `/private/tmp/tmux-501/default`. A naive string compare therefore fails on
+   every macOS machine with `TMUX_TMPDIR` unset — and fails in the direction that
+   reports "outside tmux" always, which turns every `switch-client` into an
+   `attach-session` that tmux refuses as nesting. Resolve both sides
+   (`filepath.EvalSymlinks`, or ask tmux for `#{socket_path}`) and test it: the
+   naive version passes on Linux.
+
 3. **Three states, and the third refuses.** Inside the configured socket →
    `switch-client`. Inside no tmux → `attach-session`. Inside a **foreign**
    server → pop refuses with a message naming both sockets and both fixes. Pop
@@ -72,12 +83,21 @@ write.
 6. **A tmux config include is the customization seam.** A config key holds the
    path to a user-authored file that pop sources and never writes.
 
-7. **Servers pop started are version-stamped and re-sourced.** Pop stamps its
-   version as a server option at start. On a later run whose version exceeds the
-   stamp, pop re-sources the regenerated base config and re-stamps. **An
-   unstamped server is one pop did not start, so pop never touches it.** The
-   base config must therefore stay re-sourceable: `set-option` and `bind-key`
-   only, nothing with side effects.
+7. **Servers pop supplied the base config to are version-stamped and
+   re-sourced.** Pop stamps its version as a server option when — and only
+   when — it started the server *and* passed `-f` with the base config. On a
+   later run whose version exceeds the stamp, pop re-sources the regenerated base
+   config and re-stamps. **An unstamped server is one whose config pop did not
+   supply, so pop never touches it.** The base config must therefore stay
+   re-sourceable: `set-option` and `bind-key` only, nothing with side effects.
+
+   The stamp records *"pop's config is what runs here"*, not *"pop started
+   this"*. The two coincide for a user with no tmux config of their own and
+   diverge for everyone else: a user with their own config whose server happens
+   to be started by a pop command (after a reboot, say) is correctly given no
+   `-f` under decision 4 — stamping on start alone would then let a later
+   upgrade source pop's bindings on top of their config without asking, which is
+   the behaviour this decision rejected under *Considered Options*.
 
 8. **The server is lazy and immortal.** Any pop command that needs tmux starts
    the server if absent; pop never reaps it. Detached unattended work —
@@ -128,6 +148,13 @@ write.
   the server process starts. A fresh user with no tmux config who types `tmux`
   before ever running a pop command gets a bare server, and pop's base config
   does not reach them until that server dies. Accepted over writing to `~`.
+- **Config detection must check both search paths, and the classic one is often
+  absent.** A user whose tmux config lives at `$XDG_CONFIG_HOME/tmux/tmux.conf`
+  frequently has no `~/.tmux.conf` at all, so a detection that checks only the
+  classic path concludes they have no tmux config. The damage is latent — their
+  server is usually already running, so `-f` cannot fire — until the day a pop
+  command is what restarts it, at which point pop brings up their tmux under
+  pop's base config instead of their own, silently.
 - **Isolation and a personal tmux are mutually exclusive.** `tmux.socket = "pop"`
   while attached to a `default` server hits decision 3's refusal. The supported
   configurations are: pop in your tmux with your sessions; or pop on its own
