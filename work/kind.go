@@ -382,8 +382,10 @@ const (
 // Handoff describes a process handoff a verb could not complete on its own.
 type Handoff struct {
 	Kind HandoffKind
-	// Target is the tmux session (or session:window) to switch to, for
-	// HandoffTmux.
+	// Target is the tmux target to switch to, for HandoffTmux. A pane id is the
+	// precise form and the one to prefer: the surface focuses the target before
+	// switching to it, so a session or window name lands the operator on whatever
+	// pane that target already had active.
 	Target string
 	// Dir is the working directory the command runs in.
 	Dir string

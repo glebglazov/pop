@@ -222,11 +222,15 @@ func TestMapKindWorkVerbOpensTheGrillingPane(t *testing.T) {
 		t.Fatalf("work verb: %v", err)
 	}
 	session := MapSessionName(active.ID)
-	if out.Kind != work.OutcomeHandoff || out.Handoff.Kind != work.HandoffTmux || out.Handoff.Target != session {
-		t.Fatalf("outcome = %+v, want a tmux handoff to %q", out, session)
-	}
-	if panes := fake.Windows[session]["map"]; len(panes) != 1 || fake.PaneTitles[panes[0]] != "01-research" {
+	panes := fake.Windows[session]["map"]
+	if len(panes) != 1 || fake.PaneTitles[panes[0]] != "01-research" {
 		t.Fatalf("windows = %v (titles %v), want one pane titled after the frontier ticket", fake.Windows[session], fake.PaneTitles)
+	}
+	// The ticket's own pane, not the session: a Map session tiles every ticket in
+	// one window, so a session-named handoff would land the caller wherever that
+	// window was last left.
+	if out.Kind != work.OutcomeHandoff || out.Handoff.Kind != work.HandoffTmux || out.Handoff.Target != panes[0] {
+		t.Fatalf("outcome = %+v, want a tmux handoff to pane %q", out, panes[0])
 	}
 	if len(fake.Switched) != 0 {
 		t.Fatalf("the verb moved the caller itself: %v", fake.Switched)

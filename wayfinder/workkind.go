@@ -377,7 +377,7 @@ func (k *MapKind) workTicket(c work.Container, ticketID string, focus bool) (wor
 	if note := reclaimNote(spawned.Claim); note != "" {
 		message += "; " + note
 	}
-	return spawnOutcome(spawned.Pane.Session.Name, checkout, message, focus), nil
+	return spawnOutcome(spawned.Pane.PaneID, checkout, message, focus), nil
 }
 
 // reclaimNote is the one thing a takeover carries that the human can read
@@ -414,7 +414,10 @@ func (k *MapKind) fanOutFrontier(c work.Container, focus bool) (work.Outcome, er
 			message += "; " + note
 		}
 	}
-	return spawnOutcome(out.Session.Name, checkout, message, focus), nil
+	// The first spawned pane is the frontier's first ticket: fanning out lands the
+	// operator at the head of the work it just made, not on whichever pane the
+	// window happened to leave active.
+	return spawnOutcome(out.Spawned[0].Pane.PaneID, checkout, message, focus), nil
 }
 
 // assistMap opens the Map's own attended session and hands it off. It reads no
@@ -435,13 +438,19 @@ func (k *MapKind) assistMap(c work.Container) (work.Outcome, error) {
 		verb = "returning to the assist session for"
 	}
 	message := fmt.Sprintf("%s %s in %s", verb, target.ID, pane.Session.Name)
-	return spawnOutcome(pane.Session.Name, checkout, message, true), nil
+	return spawnOutcome(pane.PaneID, checkout, message, true), nil
 }
 
 // spawnOutcome is the fork the case rule turns on: a focusing verb hands the
-// session off, a staying one reports the same sentence and leaves the operator
+// pane off, a staying one reports the same sentence and leaves the operator
 // where they were.
-func spawnOutcome(session, checkout, message string, focus bool) work.Outcome {
+//
+// The handoff names the pane, not the Map's session. A Map session holds one
+// `map` window with every ticket's Grilling pane tiled in it, so a session-named
+// handoff switches the client and then leaves it on whichever pane was last
+// active — the ticket the operator asked for stays unvisited, and a reused pane,
+// which is sent no keys, shows no sign of having been asked for at all.
+func spawnOutcome(paneID, checkout, message string, focus bool) work.Outcome {
 	if !focus {
 		return work.Outcome{Kind: work.OutcomeMessage, Message: message}
 	}
@@ -449,7 +458,7 @@ func spawnOutcome(session, checkout, message string, focus bool) work.Outcome {
 		Kind: work.OutcomeHandoff,
 		Handoff: work.Handoff{
 			Kind:   work.HandoffTmux,
-			Target: session,
+			Target: paneID,
 			Dir:    checkout,
 		},
 		Message: message,
