@@ -75,7 +75,7 @@ func TestUserHasTmuxConfig(t *testing.T) {
 func TestRenderBaseConfigWritesUnderDataDirNotHome(t *testing.T) {
 	home, configHome, dataHome := withIsolatedXDG(t)
 
-	path, err := renderBaseConfig()
+	path, err := renderBaseConfig("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,8 +87,8 @@ func TestRenderBaseConfigWritesUnderDataDirNotHome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(body, baseConfSource) {
-		t.Fatal("rendered bytes differ from embed")
+	if !strings.HasPrefix(string(body), string(baseConfSource)) {
+		t.Fatal("rendered body must start with the embed")
 	}
 	// Decision 5: nothing under the user's home / config tree.
 	if entries, err := os.ReadDir(home); err != nil {
@@ -266,5 +266,83 @@ func TestNewSessionWithWindowPassesBaseConfigWhenStartingWithoutUserConfig(t *te
 	}
 	if !reflect.DeepEqual(r.calls, want) {
 		t.Fatalf("args = %v, want %v", r.calls, want)
+	}
+}
+
+func TestRenderBaseConfigSourcesIncludeLastGuarded(t *testing.T) {
+	_, configHome, _ := withIsolatedXDG(t)
+	wantInclude := filepath.Join(configHome, "pop", "tmux.conf")
+
+	path, err := renderBaseConfig("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	if !strings.HasPrefix(text, string(baseConfSource)) {
+		t.Fatal("embed must come first")
+	}
+	idx := strings.Index(text, "if-shell -F")
+	if idx < 0 {
+		t.Fatal("rendered base must contain if-shell -F existence guard")
+	}
+	if idx < len(baseConfSource) {
+		t.Fatal("include stanza must follow the embed, not sit inside it")
+	}
+	if !strings.Contains(text[idx:], "source-file -q '"+wantInclude+"'") {
+		t.Fatalf("include stanza must source-file -q the default path %q; body:\n%s", wantInclude, text[idx:])
+	}
+}
+
+func TestRenderBaseConfigHonoursCustomIncludePath(t *testing.T) {
+	withIsolatedXDG(t)
+	custom := filepath.Join(t.TempDir(), "chezmoi", "pop-tmux.conf")
+	path, err := renderBaseConfig(custom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "source-file -q '"+custom+"'") {
+		t.Fatalf("custom include path missing from render:\n%s", body)
+	}
+}
+
+func TestRenderBaseConfigNeverWritesIncludeFile(t *testing.T) {
+	_, configHome, _ := withIsolatedXDG(t)
+	includePath := filepath.Join(configHome, "pop", "tmux.conf")
+
+	if _, err := renderBaseConfig(""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(includePath); !os.IsNotExist(err) {
+		t.Fatalf("render must not create the include file; stat err = %v", err)
+	}
+
+	// Pre-existing include content must survive regeneration.
+	if err := os.MkdirAll(filepath.Dir(includePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := "bind-key X display-message 'mine'\n"
+	if err := os.WriteFile(includePath, []byte(marker), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := renderBaseConfig(""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := renderBaseConfig(""); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(includePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != marker {
+		t.Fatalf("regenerating base must leave include untouched; got %q", got)
 	}
 }

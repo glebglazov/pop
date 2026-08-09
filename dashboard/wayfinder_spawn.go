@@ -89,7 +89,7 @@ func wayfinderSpawnTarget(d *drain.Deps, cfg *config.Config, row DashboardRow) (
 		d.Project = project.DefaultDeps()
 	}
 	if d.Tmux == nil {
-		d.Tmux = tmuxmod.New(config.ConfiguredTmuxSocket())
+		d.Tmux = tmuxmod.New(config.ConfiguredTmuxSocket(), config.ConfiguredTmuxInclude())
 	}
 	if !mapRow(row) {
 		return nil, nil, "", fmt.Errorf("not a wayfinder map row")

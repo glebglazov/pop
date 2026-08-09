@@ -203,7 +203,16 @@ type TmuxConfig struct {
 	// Socket is the tmux server socket name every pop command addresses
 	// (-L <name>). Empty/unset means no -L flag (tmux's own default server).
 	Socket string `toml:"socket" desc:"Tmux server socket name (-L); empty addresses tmux's default server with no -L flag."`
+	// Include is the path to a user-authored tmux config file that the Base
+	// tmux config sources last (ADR-0199 decision 6). Pop never creates or
+	// writes this file. Empty/unset means the documented default path.
+	Include string `toml:"include" desc:"Path to a user-authored tmux config the Base tmux config sources last (default \"~/.config/pop/tmux.conf\"). Pop never writes this file."`
 }
+
+// DefaultTmuxIncludePath is the documented default for tmux.include — under
+// pop's own config tree, not tmux's search paths, so a user running pop's
+// Base tmux config can still keep personal bindings without suppressing -f.
+const DefaultTmuxIncludePath = "~/.config/pop/tmux.conf"
 
 // DefaultTaskMaxTries is the default started-attempt cap for implement and verify
 // when neither config nor an explicit CLI flag names a value (ADR-0099).
@@ -649,9 +658,10 @@ type Config struct {
 	Work          *WorkConfig         `toml:"work" include:"fields" desc:"Work settings ([work] table; one sub-table per kind of work)."`
 	Updates       *UpdatesConfig      `toml:"updates" desc:"Auto-update behavior ([updates] table)."`
 	Integrations  *IntegrationsConfig `toml:"integrations" merge:"fields" desc:"AI-agent integration settings ([integrations] table)."`
-	// Tmux holds global tmux-server addressing ([tmux] table). Global-scope only
-	// (ADR-0199): no include: tag, not on the include whitelist, not repo-scope.
-	Tmux *TmuxConfig `toml:"tmux" desc:"Tmux server addressing ([tmux] table)."`
+	// Tmux holds global tmux-server addressing and the Tmux config include
+	// ([tmux] table). Global-scope only (ADR-0199): no include: tag, not on
+	// the include whitelist, not repo-scope.
+	Tmux *TmuxConfig `toml:"tmux" desc:"Tmux server addressing and config include ([tmux] table)."`
 	// Repo holds [repo."<path>"] override blocks keyed by any checkout path.
 	// The key is canonicalized (~ expanded, symlinks resolved) at resolution
 	// time; any worktree path or bare dir of the same repo resolves to the
@@ -1150,6 +1160,27 @@ func ConfiguredTmuxSocket() string {
 		return ""
 	}
 	return cfg.TmuxSocket()
+}
+
+// TmuxInclude returns the configured Tmux config include path (tmux.include).
+// Empty/unset yields DefaultTmuxIncludePath. The receiver may be nil.
+func (c *Config) TmuxInclude() string {
+	if c == nil || c.Tmux == nil || c.Tmux.Include == "" {
+		return DefaultTmuxIncludePath
+	}
+	return c.Tmux.Include
+}
+
+// ConfiguredTmuxInclude returns tmux.include from the default config path, or
+// DefaultTmuxIncludePath when unset or unloadable. Callers hand the result to
+// tmux.New alongside the socket so every production construction shares one
+// resolution; the tmux module never loads config itself.
+func ConfiguredTmuxInclude() string {
+	cfg, err := Load(DefaultConfigPath())
+	if err != nil || cfg == nil {
+		return DefaultTmuxIncludePath
+	}
+	return cfg.TmuxInclude()
 }
 
 // WorkbenchPickOnCreate reports whether the picker create-path should prompt for

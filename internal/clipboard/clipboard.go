@@ -15,7 +15,7 @@ import (
 
 // defaultTmuxMod is the production tmux module handle used by Copy's
 // inside-tmux path (ADR-0142).
-var defaultTmuxMod tmuxmod.Tmux = tmuxmod.New(config.ConfiguredTmuxSocket())
+var defaultTmuxMod tmuxmod.Tmux = tmuxmod.New(config.ConfiguredTmuxSocket(), config.ConfiguredTmuxInclude())
 
 // Copy copies text to the system clipboard.
 // Prefers `tmux load-buffer` when inside tmux, falls back to OSC 52 otherwise.

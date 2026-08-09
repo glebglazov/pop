@@ -136,7 +136,7 @@ func DefaultDeps() *Deps {
 	d := &Deps{
 		Tasks:      tasks.DefaultDeps(),
 		Project:    project.DefaultDeps(),
-		Tmux:       tmuxmod.New(config.ConfiguredTmuxSocket()),
+		Tmux:       tmuxmod.New(config.ConfiguredTmuxSocket(), config.ConfiguredTmuxInclude()),
 		LoadConfig: config.Load,
 	}
 	return d

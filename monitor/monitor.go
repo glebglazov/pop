@@ -89,7 +89,7 @@ type Deps struct {
 func DefaultDeps() *Deps {
 	return &Deps{
 		FS:   deps.NewRealFileSystem(),
-		Tmux: tmuxmod.New(config.ConfiguredTmuxSocket()),
+		Tmux: tmuxmod.New(config.ConfiguredTmuxSocket(), config.ConfiguredTmuxInclude()),
 	}
 }
 

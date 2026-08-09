@@ -2016,7 +2016,7 @@ func handoffAfterLaunch(d *drain.Deps, result drain.DashboardDrainResult, err er
 		d = drain.DefaultDeps()
 	}
 	if d.Tmux == nil {
-		d.Tmux = tmuxmod.New(config.ConfiguredTmuxSocket())
+		d.Tmux = tmuxmod.New(config.ConfiguredTmuxSocket(), config.ConfiguredTmuxInclude())
 	}
 	session := strings.TrimSpace(result.Session)
 	if session == "" {

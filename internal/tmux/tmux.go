@@ -205,14 +205,18 @@ type Tmux interface {
 
 // realTmux implements Tmux against the tmux binary via the runner seam.
 type realTmux struct {
-	run    runner
-	socket string
+	run     runner
+	socket  string
+	include string // Tmux config include path (ADR-0199 decision 6); empty → default
 }
 
 // New returns a Tmux backed by the real tmux binary, addressing the named
 // server socket (ADR-0199). An empty socket emits no -L flag — identical argv
-// to pre-socket-key pop. Callers hand the value from config.TmuxSocket /
-// config.ConfiguredTmuxSocket at construction; the module never loads config.
-func New(socket string) Tmux {
-	return &realTmux{run: execRunner{socket: socket}, socket: socket}
+// to pre-socket-key pop. include is the Tmux config include path the Base
+// tmux config sources last; empty means the documented default
+// (~/.config/pop/tmux.conf). Callers hand both values from
+// config.ConfiguredTmuxSocket / config.ConfiguredTmuxInclude at construction;
+// the module never loads config.
+func New(socket, include string) Tmux {
+	return &realTmux{run: execRunner{socket: socket}, socket: socket, include: include}
 }

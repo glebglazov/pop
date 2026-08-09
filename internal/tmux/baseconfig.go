@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // baseConfSource is pop's Base tmux config (ADR-0199 decisions 4–5). Embedded
 // so a first-time user gets a working, pop-aware server without writing a
 // config file of their own. Restricted to set-option / bind-key so a later
-// upgrade can re-source it into a live stamped server (decision 7).
+// upgrade can re-source it into a live stamped server (decision 7). The
+// Tmux config include stanza is appended at render time (decision 6), not
+// embedded, so the embed stays re-sourceable without a baked-in path.
 //
 //go:embed base.conf
 var baseConfSource []byte
@@ -19,6 +22,11 @@ var baseConfSource []byte
 // data dir. Named deliberately not "tmux.conf" — that name belongs to the
 // user's own file (glossary: Base tmux config).
 const baseConfigRelPath = "tmux/base.conf"
+
+// defaultTmuxIncludePath is the documented default for the Tmux config
+// include, matching config.DefaultTmuxIncludePath. Kept as a tilde form so
+// expandIncludePath resolves it against the current HOME / XDG_CONFIG_HOME.
+const defaultTmuxIncludePath = "~/.config/pop/tmux.conf"
 
 // userHasTmuxConfig reports whether a user-authored tmux config exists at
 // either of tmux's search paths. Existence only — the file is never read
@@ -61,11 +69,47 @@ func popDataDir() (string, error) {
 	return filepath.Join(home, ".local", "share", "pop"), nil
 }
 
-// renderBaseConfig writes the embedded base config into the pop data dir and
-// returns its absolute path. Regenerated on every call so the on-disk bytes
-// always match the binary (ADR-0011). Never writes under the user's home
-// config tree (ADR-0199 decision 5).
-func renderBaseConfig() (string, error) {
+// expandIncludePath turns a configured include path (possibly ~-prefixed or
+// empty) into an absolute path for the rendered source-file line. Empty
+// means the documented default. Prefer $XDG_CONFIG_HOME/pop/tmux.conf when
+// the default is requested and XDG_CONFIG_HOME is set.
+func expandIncludePath(configured string) string {
+	path := strings.TrimSpace(configured)
+	if path == "" || path == defaultTmuxIncludePath {
+		if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+			return filepath.Join(xdg, "pop", "tmux.conf")
+		}
+		path = defaultTmuxIncludePath
+	}
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return path
+		}
+		return filepath.Join(home, path[2:])
+	}
+	return path
+}
+
+// includeStanza is the Base tmux config's customization seam (ADR-0199
+// decision 6): source the user-authored include last, guarded so an absent
+// file is not a startup error. Pop never creates this file.
+func includeStanza(absPath string) string {
+	// Quote for tmux: single-quoted path with embedded singles broken out.
+	q := "'" + strings.ReplaceAll(absPath, "'", "'\"'\"'") + "'"
+	// if-shell -F (format condition) wrapping source-file -q: -q is the
+	// existence guard — an absent path produces no error and does not
+	// block the rest of the config.
+	return "\n# Tmux config include (ADR-0199 decision 6) — sourced last; absent file is not an error.\n" +
+		"if-shell -F '1' { source-file -q " + q + " }\n"
+}
+
+// renderBaseConfig writes the embedded base config plus the include stanza
+// into the pop data dir and returns its absolute path. Regenerated on every
+// call so the on-disk bytes always match the binary (ADR-0011). Never writes
+// under the user's home config tree (ADR-0199 decision 5) and never creates
+// or rewrites the include file (decision 6).
+func renderBaseConfig(include string) (string, error) {
 	dir, err := popDataDir()
 	if err != nil {
 		return "", err
@@ -74,7 +118,10 @@ func renderBaseConfig() (string, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", fmt.Errorf("create pop tmux data dir: %w", err)
 	}
-	if err := os.WriteFile(path, baseConfSource, 0o644); err != nil {
+	absInclude := expandIncludePath(include)
+	body := append([]byte{}, baseConfSource...)
+	body = append(body, []byte(includeStanza(absInclude))...)
+	if err := os.WriteFile(path, body, 0o644); err != nil {
 		return "", fmt.Errorf("render base tmux config: %w", err)
 	}
 	return path, nil
@@ -99,7 +146,11 @@ func (t *realTmux) withBaseConfigIfStarting(args []string) ([]string, error) {
 	if !t.serverAbsent() {
 		return args, nil
 	}
-	path, err := renderBaseConfig()
+	include := ""
+	if t != nil {
+		include = t.include
+	}
+	path, err := renderBaseConfig(include)
 	if err != nil {
 		return nil, err
 	}

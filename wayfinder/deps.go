@@ -65,7 +65,7 @@ func (d *Deps) tmux() tmux.Tmux {
 	if d.Tmux != nil {
 		return d.Tmux
 	}
-	d.Tmux = tmux.New(config.ConfiguredTmuxSocket())
+	d.Tmux = tmux.New(config.ConfiguredTmuxSocket(), config.ConfiguredTmuxInclude())
 	return d.Tmux
 }
 

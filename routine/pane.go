@@ -69,7 +69,7 @@ func tmuxDeps(d *Deps) tmuxmod.Tmux {
 	if d != nil && d.Tmux != nil {
 		return d.Tmux
 	}
-	return tmuxmod.New(config.ConfiguredTmuxSocket())
+	return tmuxmod.New(config.ConfiguredTmuxSocket(), config.ConfiguredTmuxInclude())
 }
 
 func projectDeps(d *Deps) *project.Deps {

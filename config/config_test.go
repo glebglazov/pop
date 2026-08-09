@@ -2272,6 +2272,128 @@ socket = "pop"
 	})
 }
 
+// TestTmuxIncludeKey covers ADR-0199 decision 6: the global tmux.include key
+// holds the Tmux config include path, documents its default, appears in the
+// keys catalog, and is rejected from includes and non-global scopes.
+func TestTmuxIncludeKey(t *testing.T) {
+	t.Run("loads from global config", func(t *testing.T) {
+		configPath := filepath.Join(t.TempDir(), "config.toml")
+		if err := os.WriteFile(configPath, []byte(`
+[tmux]
+include = "~/dotfiles/pop-tmux.conf"
+`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := cfg.TmuxInclude(); got != "~/dotfiles/pop-tmux.conf" {
+			t.Fatalf("TmuxInclude() = %q, want ~/dotfiles/pop-tmux.conf", got)
+		}
+	})
+
+	t.Run("unset means documented default", func(t *testing.T) {
+		configPath := filepath.Join(t.TempDir(), "config.toml")
+		if err := os.WriteFile(configPath, []byte(`projects = [{ path = "~/Dev" }]`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := cfg.TmuxInclude(); got != DefaultTmuxIncludePath {
+			t.Fatalf("TmuxInclude() = %q, want %q", got, DefaultTmuxIncludePath)
+		}
+		if (*Config)(nil).TmuxInclude() != DefaultTmuxIncludePath {
+			t.Fatal("nil Config TmuxInclude() must be the documented default")
+		}
+	})
+
+	t.Run("appears in global keys catalog with documented default", func(t *testing.T) {
+		docs, ok := ScopeKeyDocsRecursive(ScopeGlobal)
+		if !ok {
+			t.Fatal("ScopeGlobal unknown")
+		}
+		found := false
+		for _, d := range docs {
+			if d.Key == "tmux.include" {
+				found = true
+				if d.Desc == "" {
+					t.Fatal("tmux.include must carry a desc tag")
+				}
+				if !strings.Contains(d.Desc, DefaultTmuxIncludePath) {
+					t.Fatalf("desc must document default path %q, got %q", DefaultTmuxIncludePath, d.Desc)
+				}
+				break
+			}
+		}
+		if !found {
+			t.Fatal("tmux.include missing from global keys catalog")
+		}
+	})
+
+	t.Run("rejected from include", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		includePath := filepath.Join(tmpDir, "extra.toml")
+		if err := os.WriteFile(includePath, []byte(`
+[tmux]
+include = "/from/include.conf"
+projects = [{ path = "/extra" }]
+`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		configPath := filepath.Join(tmpDir, "config.toml")
+		if err := os.WriteFile(configPath, []byte(`
+includes = ["extra.toml"]
+projects = [{ path = "/main" }]
+`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := cfg.TmuxInclude(); got != DefaultTmuxIncludePath {
+			t.Fatalf("include must not set tmux.include, got %q", got)
+		}
+		warned := false
+		for _, w := range cfg.Warnings {
+			if strings.Contains(w, "tmux") && strings.Contains(w, "ignored") {
+				warned = true
+				break
+			}
+		}
+		if !warned {
+			t.Fatalf("expected include warning about tmux, got: %v", cfg.Warnings)
+		}
+	})
+
+	t.Run("rejected from pop-toml repo scope", func(t *testing.T) {
+		root := t.TempDir()
+		if err := os.WriteFile(popConfigPath(t, root), []byte(`
+[tmux]
+include = "/repo.conf"
+`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := LoadRepoConfig(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, f := range cfg.Findings {
+			if strings.Contains(f.Message, "tmux") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected repo-scope finding for tmux, got: %+v", cfg.Findings)
+		}
+	})
+}
+
 func TestDashboardZoomOnSwitch(t *testing.T) {
 	tests := []struct {
 		name     string

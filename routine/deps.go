@@ -42,7 +42,7 @@ func DefaultDeps() *Deps {
 		OpenEditor:     defaultOpenEditor,
 		OpenPager:      defaultOpenPager,
 		IsInteractive:  defaultIsInteractive,
-		InTmux:         func() bool { return tmuxmod.New(config.ConfiguredTmuxSocket()).InTmux() },
+		InTmux:         func() bool { return tmuxmod.New(config.ConfiguredTmuxSocket(), config.ConfiguredTmuxInclude()).InTmux() },
 		Executable:     os.Executable,
 		Now:            time.Now,
 		Stdin:          os.Stdin,

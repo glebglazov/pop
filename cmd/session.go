@@ -17,7 +17,7 @@ import (
 
 // defaultTmuxMod is the production tmux module handle used by all tmux
 // side effects in cmd (ADR-0142).
-var defaultTmuxMod tmuxmod.Tmux = tmuxmod.New(config.ConfiguredTmuxSocket())
+var defaultTmuxMod tmuxmod.Tmux = tmuxmod.New(config.ConfiguredTmuxSocket(), config.ConfiguredTmuxInclude())
 
 const (
 	tmuxSessionPathPrefix = "tmux:"

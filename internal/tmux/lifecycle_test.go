@@ -192,7 +192,7 @@ func TestRealTmuxInTmuxUsesSocket(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tm := New("pop").(*realTmux)
+	tm := New("pop", "").(*realTmux)
 
 	t.Setenv("TMUX", "")
 	if tm.InTmux() {
@@ -209,7 +209,7 @@ func TestRealTmuxInTmuxUsesSocket(t *testing.T) {
 		t.Fatal("foreign socket must be outside")
 	}
 
-	unset := New("").(*realTmux)
+	unset := New("", "").(*realTmux)
 	t.Setenv("TMUX", "/anywhere,1,0")
 	if !unset.InTmux() {
 		t.Fatal("unset socket must treat any $TMUX as inside")

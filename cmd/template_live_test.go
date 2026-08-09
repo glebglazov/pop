@@ -20,7 +20,7 @@ func requireTmux(t *testing.T) tmuxmod.Tmux {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux not in PATH")
 	}
-	return tmuxmod.New(config.ConfiguredTmuxSocket())
+	return tmuxmod.New(config.ConfiguredTmuxSocket(), config.ConfiguredTmuxInclude())
 }
 
 func liveSessionName(t *testing.T, label string) string {
