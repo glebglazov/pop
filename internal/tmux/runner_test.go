@@ -10,6 +10,16 @@ type recordingRunner struct {
 	inputCalls  []inputCall
 	out         string
 	err         error
+	// responses, when non-nil, are consumed one per output() call before
+	// falling back to out/err — for verbs that probe then act (e.g. base
+	// config's list-sessions then new-session).
+	responses []runnerResponse
+}
+
+// runnerResponse is one canned output() result for a scripted recordingRunner.
+type runnerResponse struct {
+	out string
+	err error
 }
 
 // inputCall records one input() invocation: the text streamed to tmux's
@@ -21,6 +31,11 @@ type inputCall struct {
 
 func (r *recordingRunner) output(args ...string) (string, error) {
 	r.calls = append(r.calls, args)
+	if len(r.responses) > 0 {
+		step := r.responses[0]
+		r.responses = r.responses[1:]
+		return step.out, step.err
+	}
 	return r.out, r.err
 }
 

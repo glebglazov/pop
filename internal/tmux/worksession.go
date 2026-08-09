@@ -39,7 +39,13 @@ type WorkSession struct {
 // run something in, or lay claim to, the session's first pane needs the pane id
 // tmux only reports at creation.
 func (t *realTmux) NewSessionWithWindow(name, dir, window string) (string, error) {
-	out, err := t.run.output("new-session", "-d", "-s", name, "-c", dir, "-n", window, "-P", "-F", "#{pane_id}")
+	args, err := t.withBaseConfigIfStarting([]string{
+		"new-session", "-d", "-s", name, "-c", dir, "-n", window, "-P", "-F", "#{pane_id}",
+	})
+	if err != nil {
+		return "", fmt.Errorf("create session %q: %w", name, err)
+	}
+	out, err := t.run.output(args...)
 	if err != nil {
 		return "", fmt.Errorf("create session %q: %w", name, err)
 	}

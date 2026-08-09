@@ -1,0 +1,270 @@
+package tmux
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+)
+
+// withIsolatedXDG points HOME / XDG_CONFIG_HOME / XDG_DATA_HOME at empty
+// temp dirs so base-config tests never see the developer's real tmux files
+// or write into a real data dir.
+func withIsolatedXDG(t *testing.T) (home, configHome, dataHome string) {
+	t.Helper()
+	root := t.TempDir()
+	home = filepath.Join(root, "home")
+	configHome = filepath.Join(root, "config")
+	dataHome = filepath.Join(root, "data")
+	for _, dir := range []string{home, configHome, dataHome} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	t.Setenv("XDG_DATA_HOME", dataHome)
+	return home, configHome, dataHome
+}
+
+// withUserTmuxConfig isolates XDG and drops a classic ~/.tmux.conf so NewSession
+// argv assertions stay free of -f / list-sessions probes.
+func withUserTmuxConfig(t *testing.T) {
+	t.Helper()
+	home, _, _ := withIsolatedXDG(t)
+	if err := os.WriteFile(filepath.Join(home, ".tmux.conf"), []byte("set -g status on\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUserHasTmuxConfig(t *testing.T) {
+	t.Run("neither path", func(t *testing.T) {
+		withIsolatedXDG(t)
+		if userHasTmuxConfig() {
+			t.Fatal("expected no user config")
+		}
+	})
+
+	t.Run("classic ~/.tmux.conf", func(t *testing.T) {
+		home, _, _ := withIsolatedXDG(t)
+		if err := os.WriteFile(filepath.Join(home, ".tmux.conf"), []byte("#\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if !userHasTmuxConfig() {
+			t.Fatal("expected classic path to count")
+		}
+	})
+
+	t.Run("XDG tmux/tmux.conf without classic", func(t *testing.T) {
+		_, configHome, _ := withIsolatedXDG(t)
+		dir := filepath.Join(configHome, "tmux")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "tmux.conf"), []byte("#\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if !userHasTmuxConfig() {
+			t.Fatal("expected XDG path to count even when ~/.tmux.conf is absent")
+		}
+	})
+}
+
+func TestRenderBaseConfigWritesUnderDataDirNotHome(t *testing.T) {
+	home, configHome, dataHome := withIsolatedXDG(t)
+
+	path, err := renderBaseConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(dataHome, "pop", baseConfigRelPath)
+	if path != want {
+		t.Fatalf("path = %q, want %q", path, want)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(body, baseConfSource) {
+		t.Fatal("rendered bytes differ from embed")
+	}
+	// Decision 5: nothing under the user's home / config tree.
+	if entries, err := os.ReadDir(home); err != nil {
+		t.Fatal(err)
+	} else if len(entries) != 0 {
+		t.Fatalf("home entries = %v, want empty", entries)
+	}
+	if entries, err := os.ReadDir(configHome); err != nil {
+		t.Fatal(err)
+	} else if len(entries) != 0 {
+		t.Fatalf("config home entries = %v, want empty", entries)
+	}
+}
+
+func TestBaseConfigOnlySetOptionAndBindKey(t *testing.T) {
+	for i, line := range strings.Split(string(baseConfSource), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "set-option ") || strings.HasPrefix(line, "bind-key ") {
+			continue
+		}
+		t.Fatalf("line %d %q: base config may only contain set-option and bind-key", i+1, line)
+	}
+}
+
+func TestBaseConfigShipsPopBindingsAndNoviceDefaults(t *testing.T) {
+	body := string(baseConfSource)
+	for _, want := range []string{
+		"set-option -g prefix ",
+		"set-option -g mouse on",
+		"set-option -g mode-keys vi",
+		"set-option -g status",
+		"detach",
+		"bind-key p display-popup",
+		"pop project dashboard",
+		"bind-key P display-popup",
+		"pop worktree dashboard",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("base config missing %q", want)
+		}
+	}
+}
+
+func TestNewSessionPassesBaseConfigWhenStartingWithoutUserConfig(t *testing.T) {
+	_, _, dataHome := withIsolatedXDG(t)
+	r := &recordingRunner{
+		responses: []runnerResponse{
+			{err: fmt.Errorf("no server running on /tmp/tmux-501/default")},
+			{out: ""},
+		},
+	}
+	tm := &realTmux{run: r}
+
+	if err := tm.NewSession("work", "/proj"); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	rendered := filepath.Join(dataHome, "pop", baseConfigRelPath)
+	want := [][]string{
+		{"list-sessions"},
+		{"-f", rendered, "new-session", "-ds", "work", "-c", "/proj"},
+	}
+	if !reflect.DeepEqual(r.calls, want) {
+		t.Fatalf("args = %v, want %v", r.calls, want)
+	}
+	if _, err := os.Stat(rendered); err != nil {
+		t.Fatalf("expected rendered base config at %s: %v", rendered, err)
+	}
+}
+
+func TestNewSessionOmitsBaseConfigWhenUserConfigExists(t *testing.T) {
+	withUserTmuxConfig(t)
+	r := &recordingRunner{}
+	tm := &realTmux{run: r}
+
+	if err := tm.NewSession("work", "/proj"); err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{{"new-session", "-ds", "work", "-c", "/proj"}}
+	if !reflect.DeepEqual(r.calls, want) {
+		t.Fatalf("args = %v, want %v", r.calls, want)
+	}
+}
+
+func TestNewSessionOmitsBaseConfigWhenXDGUserConfigExists(t *testing.T) {
+	_, configHome, _ := withIsolatedXDG(t)
+	dir := filepath.Join(configHome, "tmux")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tmux.conf"), []byte("set -g mouse on\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := &recordingRunner{}
+	tm := &realTmux{run: r}
+
+	if err := tm.NewSession("work", "/proj"); err != nil {
+		t.Fatal(err)
+	}
+	for _, call := range r.calls {
+		for _, arg := range call {
+			if arg == "-f" {
+				t.Fatalf("must not pass -f when XDG user config exists; calls = %v", r.calls)
+			}
+		}
+	}
+}
+
+func TestNewSessionOmitsBaseConfigWhenServerAlreadyListening(t *testing.T) {
+	withIsolatedXDG(t)
+	r := &recordingRunner{
+		responses: []runnerResponse{
+			{out: "other\t1"}, // list-sessions → server live
+			{out: ""},
+		},
+	}
+	tm := &realTmux{run: r}
+
+	if err := tm.NewSession("work", "/proj"); err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{
+		{"list-sessions"},
+		{"new-session", "-ds", "work", "-c", "/proj"},
+	}
+	if !reflect.DeepEqual(r.calls, want) {
+		t.Fatalf("args = %v, want %v", r.calls, want)
+	}
+}
+
+func TestNewSessionDoesNotReadUserConfig(t *testing.T) {
+	// A user config that is unreadable must still suppress -f via existence
+	// alone — Stat succeeds on a mode-0000 file we own; we must not Open it.
+	home, _, _ := withIsolatedXDG(t)
+	path := filepath.Join(home, ".tmux.conf")
+	if err := os.WriteFile(path, []byte("this must not be read\n"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
+
+	r := &recordingRunner{}
+	tm := &realTmux{run: r}
+	if err := tm.NewSession("work", "/proj"); err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{{"new-session", "-ds", "work", "-c", "/proj"}}
+	if !reflect.DeepEqual(r.calls, want) {
+		t.Fatalf("args = %v, want %v (existence must suppress -f without reading)", r.calls, want)
+	}
+}
+
+func TestNewSessionWithWindowPassesBaseConfigWhenStartingWithoutUserConfig(t *testing.T) {
+	_, _, dataHome := withIsolatedXDG(t)
+	r := &recordingRunner{
+		responses: []runnerResponse{
+			{err: fmt.Errorf("error connecting to /tmp/tmux-501/pop")},
+			{out: "%9\n"},
+		},
+	}
+	tm := &realTmux{run: r}
+
+	paneID, err := tm.NewSessionWithWindow("s", "/repo", "map")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paneID != "%9" {
+		t.Fatalf("paneID = %q, want %%9", paneID)
+	}
+	rendered := filepath.Join(dataHome, "pop", baseConfigRelPath)
+	want := [][]string{
+		{"list-sessions"},
+		{"-f", rendered, "new-session", "-d", "-s", "s", "-c", "/repo", "-n", "map", "-P", "-F", "#{pane_id}"},
+	}
+	if !reflect.DeepEqual(r.calls, want) {
+		t.Fatalf("args = %v, want %v", r.calls, want)
+	}
+}

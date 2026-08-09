@@ -19,7 +19,11 @@ func (t *realTmux) HasSession(name string) bool {
 }
 
 func (t *realTmux) NewSession(name, dir string) error {
-	_, err := t.run.output("new-session", "-ds", name, "-c", dir)
+	args, err := t.withBaseConfigIfStarting([]string{"new-session", "-ds", name, "-c", dir})
+	if err != nil {
+		return err
+	}
+	_, err = t.run.output(args...)
 	return err
 }
 

@@ -33,6 +33,9 @@ func TestHasSessionFalseOnError(t *testing.T) {
 }
 
 func TestNewSessionBuildsArgs(t *testing.T) {
+	// A user-authored config means pop contributes nothing — including no
+	// list-sessions probe — so this stays a single new-session argv.
+	withUserTmuxConfig(t)
 	r := &recordingRunner{}
 	tm := &realTmux{run: r}
 

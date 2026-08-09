@@ -57,6 +57,7 @@ func TestWorkSessionsAbsentServerReportsEmpty(t *testing.T) {
 }
 
 func TestNewSessionWithWindowBuildsArgs(t *testing.T) {
+	withUserTmuxConfig(t)
 	r := &recordingRunner{out: "%12\n"}
 	tm := &realTmux{run: r}
 
