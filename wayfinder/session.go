@@ -123,8 +123,8 @@ func AttachMapSession(d *Deps, mapID string) (*MapSession, error) {
 // session must be one EnsureMapSession just returned: a freshly created session's
 // own first pane is adopted for this ticket rather than left as a bare shell
 // beside the agent.
-func openGrillingPane(d *Deps, session MapSession, ticket Ticket, command string) (*GrillingPane, error) {
-	title := grillingPaneTitle(ticket)
+func openGrillingPane(d *Deps, session MapSession, ticket Ticket, command, entryLabel string) (*GrillingPane, error) {
+	title := grillingPaneTitle(ticket, entryLabel)
 	paneID, reused, err := openMapPane(d, session, tmux.TagTicket, ticket.ID, title, command)
 	if err != nil {
 		return nil, err
@@ -265,12 +265,28 @@ func liveGrillingPane(t tmux.Tmux, paneID string) bool {
 
 // grillingPaneTitle titles a pane with the ticket file's stem, so a wall of tiled
 // panes reads as the questions being decided in it. The tag carries the identity;
-// the title is what a human reads.
-func grillingPaneTitle(ticket Ticket) string {
+// the title is what a human reads. When entryLabel is set it names the attended
+// entry that will run (ADR-0196).
+func grillingPaneTitle(ticket Ticket, entryLabel string) string {
+	base := ticket.ID
 	if stem := strings.TrimSuffix(strings.TrimSpace(ticket.File), ".md"); stem != "" {
-		return stem
+		base = stem
 	}
-	return ticket.ID
+	entryLabel = strings.TrimSpace(entryLabel)
+	if entryLabel == "" {
+		return base
+	}
+	return base + " · " + entryLabel
+}
+
+func attendedEntryLabel(d *Deps, cfg *config.Config) string {
+	var overrides *tasks.AgentOverrides
+	if d != nil {
+		if td := d.taskDeps(); td != nil {
+			overrides = td.AgentOverrides
+		}
+	}
+	return tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(cfg, overrides))
 }
 
 func shellQuote(s string) string {

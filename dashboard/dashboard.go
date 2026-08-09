@@ -264,13 +264,30 @@ type dashboardMenu struct {
 // unbind only when bound, unpark only when parked; a Map shows its frontier verb
 // only when it has a frontier — and the dashboard neither knows nor reproduces
 // those rules. `copy-name` and `shell` come back on the same key from every kind.
+// Keys reserved for the surface (movement, the agent-override chord) are dropped
+// so no kind can claim them (ADR-0196).
 func dashboardMenuItems(kinds workKinds, row DashboardRow) []dashboardMenuItem {
+	return dashboardMenuItemsWith(kinds, row, nil)
+}
+
+func dashboardMenuItemsWith(kinds workKinds, row DashboardRow, enrich func(work.Verb, string) string) []dashboardMenuItem {
 	actions := kinds.actionsFor(row)
 	items := make([]dashboardMenuItem, 0, len(actions))
 	for _, a := range actions {
-		items = append(items, dashboardMenuItem{key: a.Key, label: a.Label, verb: a.Verb})
+		if actionKeyReserved(a.Key) {
+			continue
+		}
+		label := a.Label
+		if enrich != nil {
+			label = enrich(a.Verb, label)
+		}
+		items = append(items, dashboardMenuItem{key: a.Key, label: label, verb: a.Verb})
 	}
 	return items
+}
+
+func (m QueueDashboard) menuItemsFor(row DashboardRow) []dashboardMenuItem {
+	return dashboardMenuItemsWith(m.kinds, row, m.enrichAttendedActionLabel)
 }
 
 // dashboardVerifyEligible reports whether the verify verb applies to row: a set
@@ -307,14 +324,27 @@ func (menu *dashboardMenu) items() []dashboardMenuItem {
 	return menu.list.Items()
 }
 
-// newDashboardMenu opens the action overlay on row, wrapping the kind's verbs in
-// a ui.List with j/k wrap-around navigation. When pinned is true the menu
-// survives in-place verbs and J/K move the row cursor beneath it.
+// newDashboardMenu opens the action overlay on row without attended-entry
+// enrichment. Tests and call sites that lack a live model use this; the
+// production path goes through QueueDashboard.newDashboardMenu so attended
+// verb rows name the entry that will run.
 func newDashboardMenu(kinds workKinds, row DashboardRow, pinned bool) *dashboardMenu {
 	return &dashboardMenu{
 		row:    row,
 		pinned: pinned,
 		list:   ui.NewList(dashboardMenuItems(kinds, row), ui.Opts[dashboardMenuItem]{Wrap: true}),
+	}
+}
+
+// newDashboardMenu opens the action overlay on row, wrapping the kind's verbs in
+// a ui.List with j/k wrap-around navigation. When pinned is true the menu
+// survives in-place verbs and J/K move the row cursor beneath it. Attended
+// verbs carry the entry that will run (ADR-0196).
+func (m QueueDashboard) newDashboardMenu(row DashboardRow, pinned bool) *dashboardMenu {
+	return &dashboardMenu{
+		row:    row,
+		pinned: pinned,
+		list:   ui.NewList(m.menuItemsFor(row), ui.Opts[dashboardMenuItem]{Wrap: true}),
 	}
 }
 
@@ -324,7 +354,7 @@ func (m QueueDashboard) syncPinnedMenuRow() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	row, ok := m.list.Selected()
-	items := dashboardMenuItems(m.kinds, row)
+	items := m.menuItemsFor(row)
 	if !ok || len(items) == 0 {
 		m.menu = nil
 		return m, nil
@@ -527,6 +557,10 @@ type QueueDashboard struct {
 	menu      *dashboardMenu
 	itemMenu  *itemMenu
 	filter    *dashboardFilterMenu
+	// agentPick is the session-lived agent-override picker (ADR-0196). It is a
+	// sibling of the filter menu: not row-anchored, closed by esc/enter-unchanged,
+	// and inert while any other picker or menu is open.
+	agentPick *ui.AgentOverridePicker
 
 	filterMode  bool
 	filterInput ui.TextField
@@ -634,6 +668,12 @@ func newQueueDashboardOn(d *drain.Deps, cfg *config.Config, snap DashboardSnapsh
 	if d == nil {
 		d = drain.DefaultDeps()
 	}
+	if d.Tasks == nil {
+		d.Tasks = tasks.DefaultDeps()
+	}
+	if d.Tasks.AgentOverrides == nil {
+		d.Tasks.AgentOverrides = tasks.NewAgentOverrides()
+	}
 	kinds := newWorkKinds(page.kinds(d, cfg))
 	cols := &dashboardColumns{page: page}
 	cols.syncNatural(kinds, snap.Containers)
@@ -699,7 +739,8 @@ func (m QueueDashboard) resizeMainList() {
 // the keyboard, so v means whatever that overlay says it means.
 func (m QueueDashboard) ViewToggleAllowed() bool {
 	return m.bind == nil && m.drainPick == nil && m.abandon == nil &&
-		m.detail == nil && m.menu == nil && m.itemMenu == nil && m.filter == nil
+		m.detail == nil && m.menu == nil && m.itemMenu == nil && m.filter == nil &&
+		m.agentPick == nil
 }
 
 // ActivePage reports which page this model shows.
@@ -772,6 +813,10 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pendingG = false
 			return m.updateAbandonModal(msg)
 		}
+		if m.agentPick != nil {
+			m.pendingG = false
+			return m.updateAgentOverridePicker(msg)
+		}
 		if m.detail != nil {
 			return m.updateDetailView(msg)
 		}
@@ -786,6 +831,12 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.filterMode {
 			m.pendingG = false
 			return m.updateFilterMode(msg)
+		}
+		// Agent override (ADR-0196): live on the main list only — inert inside
+		// another picker/menu, including the override picker itself.
+		if kpm, ok := msg.(tea.KeyPressMsg); ok && ui.IsAgentOverrideKey(kpm) {
+			m.pendingG = false
+			return m.openAgentOverridePicker(), nil
 		}
 		if msg.String() == "g" {
 			if m.pendingG {
@@ -832,10 +883,10 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !ok {
 				return m, nil
 			}
-			if len(dashboardMenuItems(m.kinds, row)) == 0 {
+			if len(m.menuItemsFor(row)) == 0 {
 				return m, nil
 			}
-			m.menu = newDashboardMenu(m.kinds, row, msg.String() == "A")
+			m.menu = m.newDashboardMenu(row, msg.String() == "A")
 			m.err = nil
 			m.statusMsg = ""
 			return m, nil
@@ -929,7 +980,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.menu.pinned {
 					if row, ok := m.list.Selected(); ok {
 						m.menu.row = row
-						m.menu.list = ui.NewList(dashboardMenuItems(m.kinds, row), ui.Opts[dashboardMenuItem]{Wrap: true})
+						m.menu.list = ui.NewList(m.menuItemsFor(row), ui.Opts[dashboardMenuItem]{Wrap: true})
 					}
 				} else {
 					for _, row := range m.snap.Containers {
@@ -1418,7 +1469,7 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if !ok {
 				return m, nil
 			}
-			actions := m.kinds.itemActionsFor(m.detail.row, item)
+			actions := m.enrichItemActions(m.kinds.itemActionsFor(m.detail.row, item))
 			if len(actions) == 0 {
 				return m, nil
 			}
@@ -1496,7 +1547,7 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !ok {
 			return m, nil
 		}
-		actions := m.kinds.itemActionsFor(m.detail.row, item)
+		actions := m.enrichItemActions(m.kinds.itemActionsFor(m.detail.row, item))
 		if len(actions) == 0 {
 			return m, nil
 		}
@@ -2216,6 +2267,14 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "enter/space", Desc: "toggle filter"},
 			{Key: "esc", Desc: "close menu"},
 		}
+	case m.agentPick != nil:
+		return []ui.HelpEntry{
+			{Key: "1-9", Desc: "open / pick that row"},
+			{Key: "0", Desc: "back a level / exit"},
+			{Key: "enter", Desc: "leave unchanged (or pick past nine)"},
+			{Key: "j/k", Desc: "navigate"},
+			{Key: "esc", Desc: "leave unchanged"},
+		}
 	case m.detail != nil && m.detail.peek != nil:
 		// Detail peek view (task set or Map ticket)
 		entries := []ui.HelpEntry{
@@ -2266,6 +2325,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			entries = append(entries, ui.HelpEntry{Key: "f", Desc: "filter menu"})
 		}
 		entries = append(entries,
+			ui.HelpEntry{Key: tasks.AgentOverrideKeyLabel, Desc: "override agent"},
 			ui.HelpEntry{Key: "v", Desc: m.page.toggleWord + " view"},
 			ui.HelpEntry{Key: "h/esc", Desc: "quit"},
 		)
@@ -2297,6 +2357,8 @@ func (m QueueDashboard) View() tea.View {
 			title = "Help · " + page + " · action menu"
 		} else if m.filter != nil {
 			title = "Help · " + page + " · filter menu"
+		} else if m.agentPick != nil {
+			title = "Help · " + page + " · agent override"
 		} else if m.itemMenu != nil {
 			title = "Help · " + page + " · item menu"
 		} else if m.bind != nil {
@@ -2324,6 +2386,8 @@ func (m QueueDashboard) View() tea.View {
 
 	var content string
 	switch {
+	case m.agentPick != nil:
+		content = m.viewWithAgentOverridePicker()
 	case m.menu != nil:
 		content = m.viewWithMenu()
 	case m.filter != nil:
@@ -2368,15 +2432,20 @@ func (m QueueDashboard) frameSpec() ui.Frame {
 	if m.filterMode {
 		inputBox = m.filterInput.View()
 	}
+	subheader := ""
+	if line := m.agentOverrideStatusLine(); line != "" {
+		subheader = ui.TruncateString(line, m.width-2)
+	}
 	return ui.Frame{
-		Width:    m.width,
-		TermH:    m.height,
-		Header:   header,
-		InputBox: inputBox,
-		Warnings: warnings,
-		Status:   m.statusMsg,
-		Footnote: m.modelSkipFootnote(),
-		Hints:    m.mainHint(),
+		Width:     m.width,
+		TermH:     m.height,
+		Header:    header,
+		Subheader: subheader,
+		InputBox:  inputBox,
+		Warnings:  warnings,
+		Status:    m.statusMsg,
+		Footnote:  m.modelSkipFootnote(),
+		Hints:     m.mainHint(),
 	}
 }
 
@@ -2484,6 +2553,9 @@ func (m QueueDashboard) viewWithMenu() string {
 		fmt.Fprintf(&body, "%s\n", dashboardActionErrorLine(m.actionErr))
 	}
 	fmt.Fprintf(&body, "%s\n", m.pageHeader())
+	if line := m.agentOverrideStatusLine(); line != "" {
+		fmt.Fprintf(&body, "%s\n", ui.HintStyle.Render(line))
+	}
 	fmt.Fprintln(&body)
 	renderDashboardTableWithMenu(&body, m.page, m.kinds, m.snap.Containers, m.list.Cursor(), m.width, m.height, m.menu, m.liveCache())
 	if m.statusMsg != "" {
@@ -2516,6 +2588,9 @@ func (m QueueDashboard) viewWithFilterMenu() string {
 		fmt.Fprintf(&body, "%s\n", dashboardActionErrorLine(m.actionErr))
 	}
 	fmt.Fprintf(&body, "%s\n", m.pageHeader())
+	if line := m.agentOverrideStatusLine(); line != "" {
+		fmt.Fprintf(&body, "%s\n", ui.HintStyle.Render(line))
+	}
 	fmt.Fprintln(&body)
 	renderDashboardTable(&body, m.page, m.kinds, m.snap.Containers, m.list.Cursor(), m.width, m.height, m.liveCache())
 	for _, ml := range m.dashboardFilterMenuLines() {

@@ -3,12 +3,23 @@ package wayfinder
 import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/tmux"
+	"github.com/glebglazov/pop/tasks"
 )
 
 // assistPaneTitle titles the Map-scoped pane. A wall of tiled panes reads as the
 // ticket stems being grilled; this one reads as the session that holds no ticket
 // at all.
 const assistPaneTitle = "assist"
+
+func assistPaneTitleFor(d *Deps, cfg *config.Config) string {
+	var overrides *tasks.AgentOverrides
+	if d != nil {
+		if td := d.taskDeps(); td != nil {
+			overrides = td.AgentOverrides
+		}
+	}
+	return assistPaneTitle + " · " + tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(cfg, overrides))
+}
 
 // AssistPane is the Map's own attended session: one pane per Map in its `map`
 // window, holding a conversation about the Map itself rather than about any one
@@ -61,7 +72,7 @@ func SpawnAssist(d *Deps, cfg *config.Config, m Map) (*AssistPane, error) {
 	if err != nil {
 		return nil, err
 	}
-	paneID, reused, err := openMapPane(d, *session, tmux.TagAssist, m.ID, assistPaneTitle, command)
+	paneID, reused, err := openMapPane(d, *session, tmux.TagAssist, m.ID, assistPaneTitleFor(d, cfg), command)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +81,7 @@ func SpawnAssist(d *Deps, cfg *config.Config, m Map) (*AssistPane, error) {
 		Session: *session,
 		Window:  mapWindow,
 		PaneID:  paneID,
-		Title:   assistPaneTitle,
+		Title:   assistPaneTitleFor(d, cfg),
 		Reused:  reused,
 	}, nil
 }

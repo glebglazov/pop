@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/glebglazov/pop/internal/tmux"
+	"github.com/glebglazov/pop/tasks"
 )
 
 // The whole of assist's mechanics: one pane per Map, tagged and titled as the
@@ -27,8 +28,9 @@ func TestAssistOpensOneReusedPanePerMap(t *testing.T) {
 	if got, _ := fake.PaneTagValue(pane.PaneID, tmux.TagAssist); got != claimMapID {
 		t.Fatalf("pane tag = %q, want the map id under @pop_assist", got)
 	}
-	if fake.PaneTitles[pane.PaneID] != "assist" {
-		t.Fatalf("pane titles = %v, want the assist pane titled for the Map, not a ticket", fake.PaneTitles)
+	wantAssistTitle := "assist · " + tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(nil, nil))
+	if fake.PaneTitles[pane.PaneID] != wantAssistTitle {
+		t.Fatalf("pane titles = %v, want %q", fake.PaneTitles, wantAssistTitle)
 	}
 	command := strings.Join(fake.SentCommands[pane.PaneID], " ")
 	if !strings.Contains(command, "assist "+claimMapID) {

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/glebglazov/pop/internal/tmux"
+	"github.com/glebglazov/pop/tasks"
 )
 
 // The wall a fan-out leaves behind: one tiled pane per frontier ticket in the
@@ -36,8 +37,8 @@ func TestFanOutSpawnsOnePanePerFrontierTicketInOneWindow(t *testing.T) {
 		if got, _ := fake.PaneTagValue(pane.PaneID, tmux.TagTicket); got != spawned.Ticket.ID {
 			t.Fatalf("pane %s tagged %q, want ticket %s", pane.PaneID, got, spawned.Ticket.ID)
 		}
-		if fake.PaneTitles[pane.PaneID] != strings.TrimSuffix(spawned.Ticket.File, ".md") {
-			t.Fatalf("pane titles = %v, want the ticket file stems", fake.PaneTitles)
+		if fake.PaneTitles[pane.PaneID] != strings.TrimSuffix(spawned.Ticket.File, ".md")+" · "+tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(nil, nil)) {
+			t.Fatalf("pane titles = %v, want the ticket file stems with attended entry", fake.PaneTitles)
 		}
 		if spawned.Claim.Owner != ownerOfPane(fake, pane.PaneID) {
 			t.Fatalf("claim owner = %q, want the spawned pane %q", spawned.Claim.Owner, pane.PaneID)

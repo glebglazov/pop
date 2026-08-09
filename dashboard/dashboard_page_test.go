@@ -132,12 +132,12 @@ func TestRoutinePageRendersRowsWithNoTierChrome(t *testing.T) {
 	view := m.View().Content
 
 	lines := bodyRows(t, view)
-	// summary + header + separator + one line per row + the footer hint.
-	if want := len(containers) + 4; len(lines) != want {
+	// summary + agent subheader + header + separator + one line per row + the footer hint.
+	if want := len(containers) + 5; len(lines) != want {
 		t.Fatalf("routine page rendered %d non-blank lines, want %d (no tier chrome):\n%s", len(lines), want, view)
 	}
 	for _, term := range []string{"tier", "here:", "elsewhere:", "── "} {
-		for _, line := range lines[3 : 3+len(containers)] {
+		for _, line := range lines[4 : 4+len(containers)] {
 			if strings.Contains(line, term) {
 				t.Fatalf("row line %q carries tier chrome %q", line, term)
 			}

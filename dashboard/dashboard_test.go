@@ -801,7 +801,7 @@ func TestDashboardViewUsesTaskTableHeaderAndBottomShortcutLegend(t *testing.T) {
 	if !strings.Contains(lines[len(lines)-1], "j/k move") {
 		t.Fatalf("shortcut legend should be on bottom line:\n%s", view)
 	}
-	if got, want := dashboardTestLineIndex(lines, "PROJECT"), 2; got != want {
+	if got, want := dashboardTestLineIndex(lines, "PROJECT"), 3; got != want {
 		t.Fatalf("task-set table header line = %d, want %d:\n%s", got, want, view)
 	}
 }
@@ -3304,16 +3304,16 @@ func TestStatusSubmenuKMovesCursor(t *testing.T) {
 	}
 }
 
-// TestDashboardMenusReserveMovementKeys keeps j/k/J/K movement-only: no menu
-// item in any dashboard table may bind them, so a new verb cannot shadow
-// navigation.
+// TestDashboardMenusReserveMovementKeys keeps j/k/J/K movement-only and the
+// agent-override chord surface-owned: no menu item in any dashboard table may
+// bind them, so a new verb cannot shadow navigation or alt+a (ADR-0196).
 func TestDashboardMenusReserveMovementKeys(t *testing.T) {
-	reserved := []string{"j", "k", "J", "K"}
+	reserved := []string{"j", "k", "J", "K", tasks.AgentOverrideKey}
 	check := func(table string, keys []string) {
 		t.Helper()
 		for _, key := range keys {
 			if slices.Contains(reserved, key) {
-				t.Errorf("%s binds reserved movement key %q", table, key)
+				t.Errorf("%s binds reserved key %q", table, key)
 			}
 		}
 	}

@@ -16,9 +16,13 @@ type Frame struct {
 	TermH    int      // terminal height; 0 = unknown, disables bottom-anchor padding
 	Notice   string   // "" = absent (rendered via renderUpdateNotice)
 	Header   string   // "" = absent
-	InputBox string   // "" = absent; content when present (e.g. input.View() or " Help")
-	Warnings []string // reserved AND rendered; nil/empty = none
-	Status   string   // "" = absent; transient action feedback, distinct from Warnings
+	// Subheader is a standing one-liner under Header (e.g. the agent currently
+	// in force). Unlike Status it persists across refreshes; unlike Footnote it
+	// sits above the body so the choice is visible before the rows.
+	Subheader string // "" = absent
+	InputBox  string   // "" = absent; content when present (e.g. input.View() or " Help")
+	Warnings  []string // reserved AND rendered; nil/empty = none
+	Status    string   // "" = absent; transient action feedback, distinct from Warnings
 	// Footnote is a dim standing one-liner about the environment the view runs
 	// in, sitting between Status and Hints. Unlike Status it is derived from the
 	// snapshot rather than from a keypress, so it persists across refreshes;
@@ -28,15 +32,18 @@ type Frame struct {
 }
 
 // BodyHeight returns the body row budget for a terminal of height termH: termH
-// minus every present region (1 for Notice, 1 for Header, 3 for InputBox,
-// len(Warnings) for warnings, 1 for Status, 1 for Footnote, 1 for Hints),
-// floored at >= 3.
+// minus every present region (1 for Notice, 1 for Header, 1 for Subheader, 3 for
+// InputBox, len(Warnings) for warnings, 1 for Status, 1 for Footnote, 1 for
+// Hints), floored at >= 3.
 func (f Frame) BodyHeight(termH int) int {
 	h := termH
 	if f.Notice != "" {
 		h--
 	}
 	if f.Header != "" {
+		h--
+	}
+	if f.Subheader != "" {
 		h--
 	}
 	if f.InputBox != "" {
@@ -59,21 +66,24 @@ func (f Frame) BodyHeight(termH int) int {
 }
 
 // Render composes the frame's regions around body in the fixed order notice
-// -> header -> body -> input box -> warnings -> status -> footnote -> hints,
-// omitting absent ones. When TermH is known, a short body is padded to the full
-// BodyHeight budget so trailing regions sit at the bottom of the screen.
+// -> header -> subheader -> body -> input box -> warnings -> status -> footnote
+// -> hints, omitting absent ones. When TermH is known, a short body is padded to
+// the full BodyHeight budget so trailing regions sit at the bottom of the screen.
 func (f Frame) Render(body string) string {
 	if f.TermH > 0 {
 		body = f.padBody(body)
 	}
 
-	parts := make([]string, 0, 8)
+	parts := make([]string, 0, 9)
 
 	if f.Notice != "" {
 		parts = append(parts, renderUpdateNotice(f.Width, f.Notice))
 	}
 	if f.Header != "" {
 		parts = append(parts, headerStyle.Render(f.Header))
+	}
+	if f.Subheader != "" {
+		parts = append(parts, hintStyle.Render(f.Subheader))
 	}
 
 	parts = append(parts, body)

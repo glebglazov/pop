@@ -1139,6 +1139,9 @@ func ResolveAgentAssistanceCapability(preset, agentCmd string) (AgentAssistanceC
 // entry. When every entry is unusable the session refuses with that same
 // information.
 func ResolveAgentAssistanceInvocation(d *Deps, cfg *config.Config, override, agentCmd, prompt, runtimePath string) (*AgentAssistanceInvocation, error) {
+	if strings.TrimSpace(override) == "" {
+		override = sessionAttendedOverride(d)
+	}
 	candidates := attendedLaunchCandidates(cfg, override)
 
 	// Cooling is a best-effort pre-flight read. A missing Deps/FS seam — or a

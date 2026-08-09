@@ -49,7 +49,7 @@ func SpawnTicket(d *Deps, cfg *config.Config, m Map, ticket Ticket) (*SpawnedTic
 	if err != nil {
 		return nil, err
 	}
-	pane, err := openGrillingPane(d, *session, ticket, command)
+	pane, err := openGrillingPane(d, *session, ticket, command, attendedEntryLabel(d, cfg))
 	if err != nil {
 		return nil, err
 	}

@@ -223,8 +223,9 @@ func TestMapKindWorkVerbOpensTheGrillingPane(t *testing.T) {
 	}
 	session := MapSessionName(active.ID)
 	panes := fake.Windows[session]["map"]
-	if len(panes) != 1 || fake.PaneTitles[panes[0]] != "01-research" {
-		t.Fatalf("windows = %v (titles %v), want one pane titled after the frontier ticket", fake.Windows[session], fake.PaneTitles)
+	wantTitle := "01-research · " + tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(nil, nil))
+	if len(panes) != 1 || fake.PaneTitles[panes[0]] != wantTitle {
+		t.Fatalf("windows = %v (titles %v), want one pane titled %q", fake.Windows[session], fake.PaneTitles, wantTitle)
 	}
 	// The ticket's own pane, not the session: a Map session tiles every ticket in
 	// one window, so a session-named handoff would land the caller wherever that

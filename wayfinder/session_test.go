@@ -103,7 +103,7 @@ func TestOpenGrillingPanePerTicketInOneWindow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsureMapSession: %v", err)
 	}
-	pane, err := openGrillingPane(d, *session, Ticket{ID: "01", File: "01-first.md"}, "claude --prompt grill")
+	pane, err := openGrillingPane(d, *session, Ticket{ID: "01", File: "01-first.md"}, "claude --prompt grill", "")
 	if err != nil {
 		t.Fatalf("openGrillingPane: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestOpenGrillingPanePerTicketInOneWindow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second EnsureMapSession: %v", err)
 	}
-	other, err := openGrillingPane(d, *again, Ticket{ID: "02", File: "02-second.md"}, "claude")
+	other, err := openGrillingPane(d, *again, Ticket{ID: "02", File: "02-second.md"}, "claude", "")
 	if err != nil {
 		t.Fatalf("second openGrillingPane: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestOpenGrillingPaneReusesLiveAndRespawnsIdle(t *testing.T) {
 		t.Fatalf("EnsureMapSession: %v", err)
 	}
 
-	pane, err := openGrillingPane(d, *session, ticket, "claude --prompt grill")
+	pane, err := openGrillingPane(d, *session, ticket, "claude --prompt grill", "")
 	if err != nil {
 		t.Fatalf("openGrillingPane: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestOpenGrillingPaneReusesLiveAndRespawnsIdle(t *testing.T) {
 	}
 
 	fake.PaneInfos["%9"] = tmux.PaneInfo{Session: name, Command: "zsh"}
-	idle, err := openGrillingPane(d, *session, ticket, "claude --prompt grill")
+	idle, err := openGrillingPane(d, *session, ticket, "claude --prompt grill", "")
 	if err != nil {
 		t.Fatalf("openGrillingPane on an idle pane: %v", err)
 	}

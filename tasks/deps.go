@@ -62,6 +62,12 @@ type Deps struct {
 	// fake to assert delivery and failure messaging without a real clipboard.
 	ClipboardCopy func(text string) error
 
+	// AgentOverrides is the session-lived promotion of one entry to the head of
+	// each Work agent group (ADR-0196). Nil means no overrides. The dashboard
+	// (and later the gates) write here for the rest of this OS process; nothing
+	// persists it.
+	AgentOverrides *AgentOverrides
+
 	// store is the lazily-opened, process-cached execution-state store handle
 	// holder. DefaultDeps pre-allocates it so production copies of Deps share one
 	// handle; a Deps built from a bare literal (tests) gets its holder lazily on

@@ -13,6 +13,7 @@ import (
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 	"github.com/glebglazov/pop/project"
+	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/wayfinder"
 	"github.com/glebglazov/pop/work/ref"
 )
@@ -151,8 +152,8 @@ func TestLaunchWayfinderSessionSpawnsIntoTheMapSession(t *testing.T) {
 	if len(windows) != 1 || len(windows[mapPaneWindow]) != 1 {
 		t.Fatalf("expected one pane in the single map window, windows=%v", windows)
 	}
-	if got := f.PaneTitles[windows[mapPaneWindow][0]]; got != "01-frontier" {
-		t.Fatalf("pane title = %q, want the ticket stem", got)
+	if got := f.PaneTitles[windows[mapPaneWindow][0]]; got != "01-frontier · "+tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(cfg, nil)) {
+		t.Fatalf("pane title = %q, want the ticket stem with attended entry", got)
 	}
 	for session, ws := range f.Windows {
 		if _, ok := ws[drain.DrainWindowName]; ok {
