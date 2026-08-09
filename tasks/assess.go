@@ -9,11 +9,9 @@ import (
 var (
 	summaryStartRE = regexp.MustCompile(`(?m)^SUMMARY_START\s*$`)
 	summaryEndRE   = regexp.MustCompile(`(?m)^SUMMARY_END\s*$`)
-	// taskCompleteRE matches the completion sentinel anywhere in the output.
-	// Leading \b only (no trailing) so a sentinel glued to prose by some
-	// agents (e.g. Cursor emitting "TASK_COMPLETEThe work is done.") still
-	// counts, while "FOOTASK_COMPLETE" does not.
-	taskCompleteRE = regexp.MustCompile(`\bTASK_COMPLETE`)
+	// taskCompleteRE matches the completion sentinel only when it stands alone
+	// on a line, same contract as SUMMARY_START / SUMMARY_END.
+	taskCompleteRE = regexp.MustCompile(`(?m)^TASK_COMPLETE\s*$`)
 )
 
 // Assessment holds the outcome of verifying agent output and task markdown.

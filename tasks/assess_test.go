@@ -14,6 +14,22 @@ func TestAssessCompletionSuccess(t *testing.T) {
 	}
 }
 
+func TestAssessCompletionRequiresOwnLineSentinel(t *testing.T) {
+	md := []byte("## Acceptance criteria\n\n- [x] ok\n")
+	ok := AssessCompletion("SUMMARY_START\nok\nSUMMARY_END\nTASK_COMPLETE\n", md)
+	if !ok.Complete {
+		t.Fatalf("own-line sentinel rejected: %#v", ok)
+	}
+	buried := AssessCompletion("SUMMARY_START\nok\nSUMMARY_END\nAll done TASK_COMPLETE for real.\n", md)
+	if buried.Complete || buried.FailedReason != "missing TASK_COMPLETE sentinel" {
+		t.Fatalf("buried sentinel accepted: %#v", buried)
+	}
+	glued := AssessCompletion("SUMMARY_START\nok\nSUMMARY_END\nTASK_COMPLETEThe work is done.\n", md)
+	if glued.Complete || glued.FailedReason != "missing TASK_COMPLETE sentinel" {
+		t.Fatalf("trailing-glued sentinel accepted: %#v", glued)
+	}
+}
+
 func TestAssessCompletionMissingSentinel(t *testing.T) {
 	a := AssessCompletion("done\n", []byte("- [x] ok\n"))
 	if a.Complete || a.FailedReason == "" {

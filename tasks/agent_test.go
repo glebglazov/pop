@@ -1492,6 +1492,19 @@ func TestNormalizeOpenCodeJSONExtractsTextParts(t *testing.T) {
 	}
 }
 
+func TestNormalizeOpenCodeJSONFramesTextPartsSoSentinelStillAssesses(t *testing.T) {
+	raw := "{\"type\":\"text\",\"sessionID\":\"1\",\"part\":{\"text\":\"working\"}}\n" +
+		"{\"type\":\"text\",\"sessionID\":\"1\",\"part\":{\"text\":\"SUMMARY_START\\nopencode\\nSUMMARY_END\\nTASK_COMPLETE\"}}\n"
+	result := NormalizeAgentOutput(AgentOutputOpenCodeJSON, raw)
+	if result.Output != "working\nSUMMARY_START\nopencode\nSUMMARY_END\nTASK_COMPLETE\n" {
+		t.Fatalf("output = %q", result.Output)
+	}
+	assessment := AssessCompletion(result.Output, []byte("## Acceptance criteria\n\n- [x] ok\n"))
+	if !assessment.Complete {
+		t.Fatalf("assessment failed: %q", assessment.FailedReason)
+	}
+}
+
 func TestNormalizePiJSONLExtractsLastAssistantMessage(t *testing.T) {
 	raw := "{\"type\":\"session\",\"version\":3}\n" +
 		"{\"type\":\"message_end\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"working\"}]}}\n" +

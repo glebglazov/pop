@@ -25,6 +25,16 @@ func normalizeOpenCodeJSON(raw string) AgentResult {
 		}
 		switch event.Type {
 		case "text":
+			if event.Part.Text == "" {
+				break
+			}
+			// Each text event is a whole-message chunk (same framing the live
+			// renderer applies). Join without a separator and a later message
+			// that opens on SUMMARY_START / TASK_COMPLETE arrives glued to the
+			// previous tail — the line-anchored completion readers miss it.
+			if transcript.Len() > 0 && !strings.HasSuffix(transcript.String(), "\n") {
+				transcript.WriteString("\n")
+			}
 			transcript.WriteString(event.Part.Text)
 		case "error":
 			detail := agentJSONDiagnostic(event.Error)
