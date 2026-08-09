@@ -440,7 +440,10 @@ type WorkConfig struct {
 	// Attended is the group every human-facing session shares — gate assistance,
 	// an Assist session, Map assist, map grilling, a Routine refinement session.
 	Attended *AgentGroupConfig `toml:"attended" include:"replace" desc:"Attended-session Work group ([work.attended] table)."`
-	Daemon   *WorkDaemonConfig `toml:"daemon" desc:"Work supervisor timing ([work.daemon] table)."`
+	// Dashboard holds Work-read-surface settings (view presets). Distinct from
+	// the root [dashboard] table, which configures the monitor/pane dashboard.
+	Dashboard *WorkDashboardConfig `toml:"dashboard" include:"fields" desc:"Work read-surface settings ([work.dashboard] table)."`
+	Daemon    *WorkDaemonConfig    `toml:"daemon" desc:"Work supervisor timing ([work.daemon] table)."`
 }
 
 // WorkDaemonConfig holds `pop work daemon` supervisor configuration. Durations
@@ -1692,6 +1695,14 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 		mergeWalk(&cfg, &included, includedMD, includePol)
 	}
 
+	// Preset findings run after includes so a roster that arrived only via an
+	// include is validated against the final list. Materialize the resolved
+	// roster (shipped defaults when undeclared) so config show surfaces it.
+	for _, f := range workViewPresetFindings(path, &cfg) {
+		cfg.recordFinding(f)
+	}
+	materializeWorkViewPresets(&cfg)
+
 	return &cfg, nil
 }
 
@@ -1728,6 +1739,9 @@ func seedIncludeClaims(policy *mergePolicy, cfg *Config, md toml.MetaData) {
 		}
 		if cfg.Work.Attended != nil {
 			policy.claim("work.attended")
+		}
+		if md.IsDefined("work", "dashboard", "tasks", "presets") {
+			policy.claim("work.dashboard.tasks.presets")
 		}
 	}
 	// [agents.<preset>] merges per field, so each field the parent set is claimed
