@@ -97,50 +97,47 @@ func TestMapRowStatusRefusalSurfacesTheCorrective(t *testing.T) {
 	}
 }
 
-// The show-archived toggle sits beside show done and behaves like it: off at
-// launch, flipped by its own letter, rebuilding the view, and carried nowhere —
-// a fresh model starts off again.
-func TestDashboardFilterMenuShowArchivedToggle(t *testing.T) {
+// The filter menu is a single-select numbered preset list (ADR-0197): exactly
+// one preset is active, digits activate by position, and a fresh model resets
+// to the default — the show-archived / show-done toggles are gone.
+func TestDashboardFilterMenuSingleSelectPresets(t *testing.T) {
 	m := filterMenuTestModel()
-	if m.filterToggleOn(filterToggleShowArchived) {
-		t.Fatal("show archived must start off")
+	if got := m.activeViewPreset().Name; got != "active" {
+		t.Fatalf("launch preset = %q, want active", got)
 	}
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
 	m = updated.(QueueDashboard)
 	view := m.View().Content
-	for _, want := range []string{"show done", "show archived"} {
+	for _, want := range []string{"active", "unfolded", "all"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("filter menu missing %q:\n%s", want, view)
 		}
 	}
-
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	m = updated.(QueueDashboard)
-	if !m.filterToggleOn(filterToggleShowArchived) {
-		t.Fatal("toggling show archived did not engage an archived-admitting preset")
+	if strings.Contains(view, "show done") || strings.Contains(view, "show archived") {
+		t.Fatalf("retired toggles still present:\n%s", view)
 	}
-	if m.filterToggleOn(filterToggleShowDone) {
-		t.Fatal("show archived flipped the show-done filter too")
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: '2', Text: "2"})
+	m = updated.(QueueDashboard)
+	if m.d.ViewPreset.Name != "unfolded" {
+		t.Fatalf("digit 2 preset = %q, want unfolded", m.d.ViewPreset.Name)
 	}
 	if cmd == nil {
-		t.Fatal("toggling show archived must trigger a rebuild")
+		t.Fatal("selecting a preset must trigger a rebuild")
 	}
 	if m.filter == nil {
-		t.Fatal("toggle should leave the filter menu open")
+		t.Fatal("selection should leave the filter menu open")
 	}
-	if !strings.Contains(m.View().Content, "[x] show archived") {
-		t.Fatalf("checkbox not checked after toggle-on:\n%s", m.View().Content)
+	if !strings.Contains(m.View().Content, "[x] unfolded") {
+		t.Fatalf("active mark not on unfolded:\n%s", m.View().Content)
 	}
-
-	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	m = updated.(QueueDashboard)
-	if m.filterToggleOn(filterToggleShowArchived) {
-		t.Fatal("second press did not turn show archived back off")
+	if strings.Count(m.View().Content, "[x]") != 1 {
+		t.Fatalf("exactly one preset must be marked:\n%s", m.View().Content)
 	}
 
 	// Nothing is persisted: the preset lives on the model's deps for the session.
-	if fresh := filterMenuTestModel(); fresh.filterToggleOn(filterToggleShowArchived) {
-		t.Fatal("a fresh dashboard inherited a show-archived state")
+	if fresh := filterMenuTestModel(); fresh.activeViewPreset().Name != "active" {
+		t.Fatal("a fresh dashboard inherited a non-default preset")
 	}
 }

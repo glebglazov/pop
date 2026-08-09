@@ -66,10 +66,10 @@ type dashboardPage struct {
 	// twoLineCapable marks a page that may fold a row onto two lines in a narrow
 	// pane (ADR-0107). Only the Task-set columns have ever done so.
 	twoLineCapable bool
-	// rowFilters marks a page with row-inclusion toggles behind `f`. The one toggle
-	// there is — show DONE task sets — is a Task-set view flag on shared deps, so on
-	// a page it means nothing to it would be a dead key that quietly changed the
-	// other page.
+	// rowFilters marks a page with a Work view preset list behind `f`
+	// (ADR-0197). Presets are Task-set / Map vocabulary on shared deps, so a page
+	// they mean nothing to must not offer the key — it would quietly change the
+	// other page's view.
 	rowFilters bool
 	// toggleWord is what the footer hint and the help overlay say `v` switches to.
 	toggleWord string

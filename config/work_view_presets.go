@@ -71,6 +71,15 @@ type WorkViewPreset struct {
 	problems []string
 }
 
+// DisplayLabel returns the preset's human-facing label, falling back to Name
+// when Label is empty (ADR-0197).
+func (p WorkViewPreset) DisplayLabel() string {
+	if s := strings.TrimSpace(p.Label); s != "" {
+		return s
+	}
+	return p.Name
+}
+
 // WorkDashboardConfig holds [work.dashboard] settings for Work read surfaces.
 type WorkDashboardConfig struct {
 	Tasks *WorkDashboardTasksConfig `toml:"tasks" include:"fields" desc:"Task-set view settings ([work.dashboard.tasks] table)."`

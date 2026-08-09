@@ -784,7 +784,7 @@ func TestDashboardViewUsesTaskTableHeaderAndBottomShortcutLegend(t *testing.T) {
 	}
 	// The auto-drain set here is Picked-up, so per ADR-0108 it drops out of the
 	// waiting-only auto-drain tally (the live-drain indicator already signals it).
-	if !strings.Contains(view, "Work · 2 task sets · 1 ready · 1 running") {
+	if !strings.Contains(view, "Work · active · 2 task sets · 1 ready · 1 running") {
 		t.Fatalf("task-set list should render useful summary:\n%s", view)
 	}
 	if strings.Contains(view, "auto-drain") {
@@ -2571,9 +2571,8 @@ func filterTestModel() QueueDashboard {
 	return m
 }
 
-// filterMenuTestModel builds a model with two non-done rows plus one DONE row,
-// with Done inclusion off (the launch default), so allRows/snap.Containers initially
-// hide the DONE set — the state the filter menu's Show-done toggle flips.
+// filterMenuTestModel builds a model with two non-done rows under the default
+// (active) Work view preset — the launch default the filter menu selects from.
 func filterMenuTestModel() QueueDashboard {
 	rows := []DashboardRow{
 		{Project: "alpha", CursorKey: "alpha\x00set-one", RawStatus: tasks.StatusReady, ID: "set-one"},
@@ -2585,7 +2584,8 @@ func filterMenuTestModel() QueueDashboard {
 	return m
 }
 
-// doneRow is the DONE task set the reload delivers once Show-done is toggled on.
+// doneRow is a DONE task set a reload may deliver once an admitting preset
+// (e.g. all) is selected.
 func doneRow() DashboardRow {
 	return DashboardRow{Project: "gamma", CursorKey: "gamma\x00done-set", RawStatus: tasks.StatusDone, ID: "done-set"}
 }
@@ -2606,9 +2606,14 @@ func TestDashboardFilterMenuOpenAndClose(t *testing.T) {
 		t.Fatal("f must not enter the fuzzy filter mode")
 	}
 	view := got.View().Content
-	for _, want := range []string{"filters", "show done", "[ ]", "enter/space toggle · esc close"} {
+	for _, want := range []string{"filters", "active", "[x]", "1 ", "enter select · esc close"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("filter menu view missing %q:\n%s", want, view)
+		}
+	}
+	for _, name := range []string{"unfolded", "recent-7d", "recent-30d", "all"} {
+		if !strings.Contains(view, name) {
+			t.Fatalf("filter menu missing preset %q:\n%s", name, view)
 		}
 	}
 
@@ -2637,7 +2642,7 @@ func TestDashboardFilterMenuOpenAndClose(t *testing.T) {
 
 // TestDashboardFilterMenuVisibleOnTallTable is the overflow regression for
 // ADR-0197 decision 9: with more rows than the pane can show, opening `f` must
-// still render every toggle line and the footer — the Frame reserves the block
+// still render every preset line and the footer — the Frame reserves the block
 // height so the table shrinks instead of pushing the menu off-screen.
 func TestDashboardFilterMenuVisibleOnTallTable(t *testing.T) {
 	rows := make([]DashboardRow, 40)
@@ -2656,15 +2661,15 @@ func TestDashboardFilterMenuVisibleOnTallTable(t *testing.T) {
 	}
 
 	view := m.View().Content
-	for _, item := range dashboardFilterItems() {
+	for _, item := range dashboardFilterItems(m.cfg.ResolveWorkViewPresets()) {
 		if !strings.Contains(view, item.label) {
-			t.Fatalf("filter menu missing toggle %q on a tall table:\n%s", item.label, view)
+			t.Fatalf("filter menu missing preset %q on a tall table:\n%s", item.label, view)
 		}
 	}
 	if !strings.Contains(view, "filters") {
 		t.Fatalf("filter menu missing caption on a tall table:\n%s", view)
 	}
-	if !strings.Contains(view, "enter/space toggle · esc close") {
+	if !strings.Contains(view, "1-9/enter select · esc close") {
 		t.Fatalf("filter menu missing footer hint on a tall table:\n%s", view)
 	}
 	lines := strings.Split(view, "\n")
@@ -2701,7 +2706,7 @@ func TestDashboardFilterMenuFullScreenOnShortPane(t *testing.T) {
 	updated, _ = m.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
 	m = updated.(QueueDashboard)
 	view := m.View().Content
-	for _, want := range []string{"filters", "show done", "show archived", "enter/space toggle · esc close"} {
+	for _, want := range []string{"filters", "active", "all", "1-9/enter select · esc close"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("short-pane filter view missing %q:\n%s", want, view)
 		}
@@ -2711,33 +2716,36 @@ func TestDashboardFilterMenuFullScreenOnShortPane(t *testing.T) {
 	}
 }
 
-func TestDashboardFilterMenuShowDoneTogglesLive(t *testing.T) {
+func TestDashboardFilterMenuDigitSelectsPreset(t *testing.T) {
 	m := filterMenuTestModel()
 	if len(m.snap.Containers) != 2 {
-		t.Fatalf("initial rows = %d, want 2 (done hidden)", len(m.snap.Containers))
+		t.Fatalf("initial rows = %d, want 2", len(m.snap.Containers))
+	}
+	if got := m.activeViewPreset().Name; got != "active" {
+		t.Fatalf("initial preset = %q, want active", got)
 	}
 
-	// Open the menu and flip Show done on via its letter shortcut.
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
 	m = updated.(QueueDashboard)
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	// Digit 5 selects shipped "all" (position 5) and rebuilds.
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: '5', Text: "5"})
 	m = updated.(QueueDashboard)
-	if !m.filterToggleOn(filterToggleShowDone) {
-		t.Fatal("toggling Show done did not engage a show-done preset")
+	if got := m.d.ViewPreset.Name; got != "all" {
+		t.Fatalf("digit 5 preset = %q, want all", got)
 	}
 	if cmd == nil {
-		t.Fatal("toggling Show done must trigger a rebuild")
+		t.Fatal("selecting a preset must trigger a rebuild")
 	}
 	if m.filter == nil {
-		t.Fatal("toggle should leave the filter menu open")
+		t.Fatal("selection should leave the filter menu open")
 	}
-	if !strings.Contains(m.View().Content, "[x]") {
-		t.Fatalf("checkbox should render checked after toggle-on:\n%s", m.View().Content)
+	if !strings.Contains(m.View().Content, "[x] all") {
+		t.Fatalf("active mark should move to all:\n%s", m.View().Content)
+	}
+	if strings.Count(m.View().Content, "[x]") != 1 {
+		t.Fatalf("exactly one preset must be marked active:\n%s", m.View().Content)
 	}
 
-	// Simulate the reload the toggle triggered: BuildDashboard now includes the
-	// DONE set and re-sorts (proven by task 02's BuildDashboard tests). The
-	// rebuilt rows flow into the view.
 	updated, _ = m.Update(dashboardRowsMsg{snap: DashboardSnapshot{Containers: []DashboardRow{
 		{Project: "alpha", CursorKey: "alpha\x00set-one", RawStatus: tasks.StatusReady, ID: "set-one"},
 		{Project: "beta", CursorKey: "beta\x00set-two", RawStatus: tasks.StatusFailed, ID: "set-two"},
@@ -2745,52 +2753,82 @@ func TestDashboardFilterMenuShowDoneTogglesLive(t *testing.T) {
 	}}})
 	m = updated.(QueueDashboard)
 	if len(m.snap.Containers) != 3 {
-		t.Fatalf("after toggle-on reload: rows = %d, want 3", len(m.snap.Containers))
+		t.Fatalf("after all reload: rows = %d, want 3", len(m.snap.Containers))
 	}
 	if !strings.Contains(m.View().Content, "done-set") {
-		t.Fatalf("DONE set should be visible after toggle-on:\n%s", m.View().Content)
+		t.Fatalf("DONE set should be visible under all:\n%s", m.View().Content)
 	}
 
-	// Flip Show done back off: the flag clears and the rebuilt (done-excluded)
-	// rows hide the DONE set again.
-	updated, _ = m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	// Digit 1 restores active.
+	updated, _ = m.Update(tea.KeyPressMsg{Code: '1', Text: "1"})
 	m = updated.(QueueDashboard)
-	if m.filterToggleOn(filterToggleShowDone) {
-		t.Fatal("toggling Show done again did not clear show-done")
-	}
-	if strings.Contains(m.View().Content, "[x]") {
-		t.Fatalf("checkbox should render unchecked after toggle-off:\n%s", m.View().Content)
-	}
-	updated, _ = m.Update(dashboardRowsMsg{snap: DashboardSnapshot{Containers: []DashboardRow{
-		{Project: "alpha", CursorKey: "alpha\x00set-one", RawStatus: tasks.StatusReady, ID: "set-one"},
-		{Project: "beta", CursorKey: "beta\x00set-two", RawStatus: tasks.StatusFailed, ID: "set-two"},
-	}}})
-	m = updated.(QueueDashboard)
-	if len(m.snap.Containers) != 2 {
-		t.Fatalf("after toggle-off reload: rows = %d, want 2", len(m.snap.Containers))
-	}
-	if strings.Contains(m.View().Content, "done-set") {
-		t.Fatalf("DONE set should be hidden after toggle-off:\n%s", m.View().Content)
+	if got := m.d.ViewPreset.Name; got != "active" {
+		t.Fatalf("digit 1 preset = %q, want active", got)
 	}
 }
 
-func TestDashboardFilterMenuEnterTogglesHighlighted(t *testing.T) {
+func TestDashboardFilterMenuEnterSelectsHighlighted(t *testing.T) {
 	m := filterMenuTestModel()
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
 	m = updated.(QueueDashboard)
-	// Enter flips the highlighted toggle just like its letter shortcut.
+	// Move to unfolded (position 2) and activate with Enter.
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	m = updated.(QueueDashboard)
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	got := updated.(QueueDashboard)
-	if !got.filterToggleOn(filterToggleShowDone) {
-		t.Fatal("enter did not toggle the highlighted filter")
+	if got.d.ViewPreset.Name != "unfolded" {
+		t.Fatalf("enter preset = %q, want unfolded", got.d.ViewPreset.Name)
 	}
 	if cmd == nil {
-		t.Fatal("enter toggle must trigger a rebuild")
+		t.Fatal("enter select must trigger a rebuild")
 	}
 }
 
-func TestDashboardFilterMenuSeedsFromIncludeDone(t *testing.T) {
-	// `--include-done` seeds the all preset at launch; the menu opens checked.
+func TestDashboardFilterMenuTenthPresetViaJKEnter(t *testing.T) {
+	// Ten presets: positions 1–9 keep digit keys; the tenth is j/k + Enter only.
+	presets := make([]config.WorkViewPreset, 10)
+	for i := range presets {
+		presets[i] = config.WorkViewPreset{Name: fmt.Sprintf("p%d", i+1)}
+	}
+	cfg := &config.Config{Work: &config.WorkConfig{
+		Dashboard: &config.WorkDashboardConfig{
+			Tasks: &config.WorkDashboardTasksConfig{Presets: presets},
+		},
+	}}
+	m := newQueueDashboard(&drain.Deps{ViewPreset: cfg.DefaultWorkViewPreset()}, cfg, DashboardSnapshot{Containers: []DashboardRow{
+		{Project: "alpha", CursorKey: "alpha\x00set-one", RawStatus: tasks.StatusReady, ID: "set-one"},
+	}})
+	m.width = 120
+	m.height = 24
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
+	m = updated.(QueueDashboard)
+	items := m.filter.list.Items()
+	if len(items) != 10 {
+		t.Fatalf("items = %d, want 10", len(items))
+	}
+	if items[9].key != "" {
+		t.Fatalf("tenth preset key = %q, want empty", items[9].key)
+	}
+	for i := 0; i < 9; i++ {
+		updated, _ = m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+		m = updated.(QueueDashboard)
+	}
+	if m.filter.list.Cursor() != 9 {
+		t.Fatalf("cursor = %d, want 9 after nine j presses", m.filter.list.Cursor())
+	}
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	got := updated.(QueueDashboard)
+	if got.d.ViewPreset.Name != "p10" {
+		t.Fatalf("enter on tenth = %q, want p10", got.d.ViewPreset.Name)
+	}
+	if cmd == nil {
+		t.Fatal("enter on tenth must rebuild")
+	}
+}
+
+func TestDashboardFilterMenuSeedsActiveMark(t *testing.T) {
+	// `--include-done` seeds the all preset at launch; the menu opens with all marked.
 	all, _ := config.ShippedWorkViewPreset("all")
 	m := newQueueDashboard(&drain.Deps{ViewPreset: all}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{
 		{Project: "alpha", CursorKey: "alpha\x00set-one", RawStatus: tasks.StatusReady, ID: "set-one"},
@@ -2799,8 +2837,38 @@ func TestDashboardFilterMenuSeedsFromIncludeDone(t *testing.T) {
 	m.height = 20
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
 	got := updated.(QueueDashboard)
-	if !strings.Contains(got.View().Content, "[x]") {
-		t.Fatalf("Show done should seed checked from --include-done:\n%s", got.View().Content)
+	if !strings.Contains(got.View().Content, "[x] all") {
+		t.Fatalf("all should seed marked from --include-done:\n%s", got.View().Content)
+	}
+	if got.filter.list.Cursor() != 4 {
+		t.Fatalf("cursor = %d, want 4 (all)", got.filter.list.Cursor())
+	}
+}
+
+func TestDashboardFilterMenuSessionOnly(t *testing.T) {
+	m := filterMenuTestModel()
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
+	m = updated.(QueueDashboard)
+	updated, _ = m.Update(tea.KeyPressMsg{Code: '5', Text: "5"})
+	m = updated.(QueueDashboard)
+	if m.d.ViewPreset.Name != "all" {
+		t.Fatalf("preset = %q, want all", m.d.ViewPreset.Name)
+	}
+	// Nothing is persisted: a fresh model starts on the default again.
+	if fresh := filterMenuTestModel(); fresh.activeViewPreset().Name != "active" {
+		t.Fatalf("fresh dashboard preset = %q, want active", fresh.activeViewPreset().Name)
+	}
+}
+
+func TestDashboardPageHeaderNamesActivePreset(t *testing.T) {
+	m := filterMenuTestModel()
+	if !strings.Contains(m.pageHeader(), "Work · active ·") {
+		t.Fatalf("header missing default preset name: %q", m.pageHeader())
+	}
+	all, _ := config.ShippedWorkViewPreset("all")
+	m.d.ViewPreset = all
+	if !strings.Contains(m.pageHeader(), "Work · all ·") {
+		t.Fatalf("header missing selected preset name: %q", m.pageHeader())
 	}
 }
 
@@ -2824,7 +2892,7 @@ func TestDashboardFilterMenuIndependentOfSlash(t *testing.T) {
 		t.Fatal("fuzzy filtering must not open the filter menu")
 	}
 
-	// A rebuild triggered while the fuzzy query is active (as the Show-done toggle
+	// A rebuild triggered while the fuzzy query is active (as a preset pick
 	// would trigger) re-applies the query rather than dropping it.
 	updated, _ = m.Update(dashboardRowsMsg{snap: DashboardSnapshot{Containers: []DashboardRow{
 		{Project: "alpha", CursorKey: "alpha\x00set-one", RawStatus: tasks.StatusReady, ID: "set-one"},
@@ -3440,7 +3508,7 @@ func TestDashboardMenusReserveMovementKeys(t *testing.T) {
 	}
 
 	var filterKeys []string
-	for _, item := range dashboardFilterItems() {
+	for _, item := range dashboardFilterItems((&config.Config{}).ResolveWorkViewPresets()) {
 		filterKeys = append(filterKeys, item.key)
 	}
 	check("filter menu", filterKeys)
@@ -3921,6 +3989,25 @@ func TestQueueDashboardHelpContent(t *testing.T) {
 		}
 		if !found["esc"] {
 			t.Error("filter mode help missing 'esc'")
+		}
+	})
+
+	t.Run("filter menu shows preset bindings", func(t *testing.T) {
+		m := filterMenuTestModel()
+		updated, _ := m.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
+		m = updated.(QueueDashboard)
+		entries := m.helpEntries()
+		found := map[string]bool{}
+		for _, e := range entries {
+			found[e.Key] = true
+		}
+		for _, key := range []string{"1-9", "j/k", "enter/space", "esc"} {
+			if !found[key] {
+				t.Errorf("filter menu help missing key: %s", key)
+			}
+		}
+		if found["d"] || found["a"] {
+			t.Error("filter menu help still lists retired toggle letters")
 		}
 	})
 

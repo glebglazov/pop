@@ -1291,15 +1291,21 @@ An optional `SUMMARY: <one line>` in the **Verifier**'s response contract, namin
 _Avoid_: findings headline, verdict summary
 
 **Done inclusion**:
-The hidden-by-default treatment of DONE **Task set**s on both **Work supervision** read surfaces. A DONE set — any, including one still holding a managed **Worktree binding** — is omitted from `pop work status` and the **Work dashboard** unless included via the `--include-done` flag (both surfaces; sets the initial state) or, in the dashboard, the **Show done** toggle in the **Work dashboard filter menu** (a session-only view state). It hides only DONE and is a view filter, not persisted consent — distinct from **Archive**, which persists on **Task state** and hides a set in every status. Replaces the earlier rule that kept DONE sets holding a managed Worktree binding visible as a teardown reminder; that reminder now lives behind Done inclusion, with teardown still gated at **Archive**.
+_Retired by ADR-0197._ The Work read surfaces no longer expose a composable
+show-done toggle; row selection is a **Work view preset**. `--include-done`
+remains as a deprecated alias for `--preset all`.
 _Avoid_: done carve-out, show-done flag, done filter, done reminder
 
 **Work surface sort order**:
 The row ordering shared by `pop work status` and the **Work dashboard** when the active **Work view preset** declares no `sort`. Precedence: (1) a **live-drain** tier, then (2) an **auto-drain** tier, then (3) an **orphaned** tier — each floating above the status scheme; then (4) the status scheme itself. In the status scheme, **IN Progress** and **READY** rows float cross-project as two leading bands (each ordered by Project ascending, then Task set identifier descending), and every remaining status groups by **Project** first, then by status in the order AWAITING-APPROVAL, NEEDS-VERIFY, VERIFY-FAILED, FAILED, BLOCKED, DEFERRED, DONE, MISSING/MALFORMED, then Task set identifier descending. A preset's `sort` replaces the status scheme only — the three membership tiers float above every preset, because a live drain is the one row a human always needs to see whatever they asked for.
 _Avoid_: Queue surface sort order, dashboard sort tiers, running tier, project-grouped sort
 
+**Work view preset**:
+A named, self-contained answer to "which rows, in what order" on the Work read surfaces — selected one at a time from `[[work.dashboard.tasks.presets]]` (or the shipped roster when undeclared). Declares optional `label`, `status`, `unfolded`, `archived`, `created_within`, `sort`, and one `hide` clause. The first resolved entry is the default; positions `1`–`9` are digit shortcuts in the **Work dashboard filter menu**. Session-only on the dashboard; `pop work status --preset <name>` names one by name.
+_Avoid_: view filter preset, inclusion preset, dashboard filter preset
+
 **Work dashboard filter menu**:
-The modal popup opened with `f` on the **Work dashboard**, holding row-inclusion filter toggles — currently a single **Show done** toggle (see **Done inclusion**), extensible to future inclusion filters (by status, by project). A sibling of the `a` action menu. Its state is a session-only view setting, reset to default (done hidden) on relaunch. Distinct from `/`, the fuzzy text filter, which is a transient query over already-included rows rather than an inclusion setting.
+The modal popup opened with `f` on the **Work dashboard** (page A), holding a single-select numbered list of **Work view preset**s. Pressing `1`–`9` or j/k plus Enter activates one preset and rebuilds the rows immediately; exactly one is active, and its name is always shown in the page header. Session-only — resets to the default preset on relaunch. Distinct from `/`, the fuzzy text filter, which is a transient query over already-included rows. Page B (Routines) does not offer it.
 _Avoid_: Queue dashboard filter menu, filter dialog, search popup, done toggle key, Show-done key
 
 **Dashboard verify verb**:
@@ -1507,7 +1513,7 @@ _Avoid_: work table, container index, map registry, sets table
 _Avoid_: chart complete, map create, lazy registration
 
 **Map archive**:
-`pop map archive` / `pop map unarchive` — the reversible act of hiding a Map from default views and restoring it, written as the `archived` bit on the Map's **Work container registry** row, so a Map is filed away through the same mechanism a Task set is. Archiving is idempotent; unarchiving a Map that is not archived is an error. Both refuse an unregistered Map and name **Map registration**, since the bit rides a registration — including when performed from the Work dashboard's status submenu, which reports the same corrective rather than failing quietly. An archived container of any kind is reachable again through the dashboard filter menu's **show-archived** toggle: session-only, off by default, and listing archived rows beside the active ones with an `archived` suffix on the status cell (ADR-0186). The retired `wayfinder-archive.json` side-file folds into this bit on an ordinary read and is then deleted — the fold registers the ids it archives, because the bit exists nowhere else.
+`pop map archive` / `pop map unarchive` — the reversible act of hiding a Map from default views and restoring it, written as the `archived` bit on the Map's **Work container registry** row, so a Map is filed away through the same mechanism a Task set is. Archiving is idempotent; unarchiving a Map that is not archived is an error. Both refuse an unregistered Map and name **Map registration**, since the bit rides a registration — including when performed from the Work dashboard's status submenu, which reports the same corrective rather than failing quietly. An archived container of any kind is reachable again through a **Work view preset** whose `archived` field admits it (for example the shipped `all` preset): listing archived rows beside the active ones with an `archived` suffix on the status cell (ADR-0186, ADR-0197). The retired `wayfinder-archive.json` side-file folds into this bit on an ordinary read and is then deleted — the fold registers the ids it archives, because the bit exists nowhere else.
 _Avoid_: hide map, delete map, archive file
 
 **Ticket resolution**:

@@ -366,53 +366,63 @@ func (m QueueDashboard) syncPinnedMenuRow() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// dashboardFilterToggle identifies one row-inclusion view filter the filter
-// menu flips. Both of today's toggles are cross-kind view flags on the model's
-// deps — Show done (ADR-0121) and Show archived (ADR-0186) — and the enum and the
-// item list are the extension point for future inclusion filters (by status, by
-// project).
-type dashboardFilterToggle int
-
-const (
-	filterToggleShowDone dashboardFilterToggle = iota
-	filterToggleShowArchived
-)
-
-// dashboardFilterItem is one toggle in the filter menu: the flat shortcut letter
-// it keeps, the label shown beside its checkbox, and the view filter it flips.
+// dashboardFilterItem is one Work view preset in the filter menu: its digit
+// shortcut (1–9; empty past nine), the display label, and the resolved preset
+// selecting it installs on the session (ADR-0197).
 type dashboardFilterItem struct {
 	key    string
 	label  string
-	toggle dashboardFilterToggle
+	preset config.WorkViewPreset
 }
 
 // dashboardFilterMenu is the modal opened with `f` over the Work dashboard. It
-// is a sibling of the `a` action menu but holds row-inclusion toggles rather
-// than row verbs, so it is not anchored to the cursored row. The toggle state
-// is derived from the model's ViewPreset (m.d.ViewPreset) — the menu only
-// renders it and dispatches flips — so the checkbox reflects the live view
-// every frame.
+// is a sibling of the `a` action menu but holds a single-select numbered list of
+// Work view presets rather than row verbs, so it is not anchored to the
+// cursored row. Exactly one preset is active; the mark is derived from the
+// model's ViewPreset every frame (ADR-0197).
 type dashboardFilterMenu struct {
 	list *ui.List[dashboardFilterItem]
 }
 
-// dashboardFilterItems returns the inclusion toggles, in a stable order. New
-// inclusion filters append here.
-func dashboardFilterItems() []dashboardFilterItem {
-	return []dashboardFilterItem{
-		{key: "d", label: "show done", toggle: filterToggleShowDone},
-		// Archived rows are how unarchive is reachable at all: the verb is in the
-		// row's own status submenu, and an archived row is off screen by default
-		// (ADR-0186). Like show done it is session-only and starts off.
-		{key: "a", label: "show archived", toggle: filterToggleShowArchived},
+// dashboardFilterItems builds the numbered preset roster for the filter menu.
+// Positions 1–9 keep digit shortcuts; a tenth or later preset is reachable by
+// j/k plus Enter only.
+func dashboardFilterItems(presets []config.WorkViewPreset) []dashboardFilterItem {
+	items := make([]dashboardFilterItem, 0, len(presets))
+	for _, p := range presets {
+		item := dashboardFilterItem{
+			label:  p.DisplayLabel(),
+			preset: p,
+		}
+		if p.Number >= 1 && p.Number <= 9 {
+			item.key = fmt.Sprintf("%d", p.Number)
+		}
+		items = append(items, item)
 	}
+	return items
 }
 
-// newDashboardFilterMenu opens the filter modal with j/k wrap-around navigation.
-func newDashboardFilterMenu() *dashboardFilterMenu {
-	return &dashboardFilterMenu{
-		list: ui.NewList(dashboardFilterItems(), ui.Opts[dashboardFilterItem]{Wrap: true}),
+// newDashboardFilterMenu opens the filter modal over the resolved preset roster
+// with j/k wrap-around navigation, cursor seeded on the active preset.
+func (m QueueDashboard) newDashboardFilterMenu() *dashboardFilterMenu {
+	items := dashboardFilterItems(m.cfg.ResolveWorkViewPresets())
+	list := ui.NewList(items, ui.Opts[dashboardFilterItem]{Wrap: true})
+	active := m.activeViewPreset().Name
+	for i, item := range items {
+		if item.preset.Name == active {
+			list.SetCursor(i)
+			break
+		}
 	}
+	return &dashboardFilterMenu{list: list}
+}
+
+// activeViewPreset returns the session's effective Work view preset.
+func (m QueueDashboard) activeViewPreset() config.WorkViewPreset {
+	if m.d != nil {
+		return m.d.EffectiveViewPreset()
+	}
+	return config.WorkViewPreset{}
 }
 
 // itemMenu is the action overlay opened with `a` over a single Work item — in
@@ -893,13 +903,13 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = ""
 			return m, nil
 		case "f":
-			// Open the row-inclusion filter menu (ADR-0121). Unlike `/` (a transient
-			// fuzzy query over the already-included rows) this modal flips which rows
-			// are included at all; the two are independent concepts.
+			// Open the Work view preset list (ADR-0197). Unlike `/` (a transient
+			// fuzzy query over the already-included rows) this modal picks which
+			// preset selects the rows; the two are independent concepts.
 			if !m.page.rowFilters {
 				return m, nil
 			}
-			m.filter = newDashboardFilterMenu()
+			m.filter = m.newDashboardFilterMenu()
 			m.err = nil
 			m.statusMsg = ""
 			return m, nil
@@ -1264,12 +1274,12 @@ func (m QueueDashboard) invokeStatusMenuItem(idx int) (tea.Model, tea.Cmd) {
 	return m.dispatchVerb(item.Verb, row)
 }
 
-// updateFilterMenu drives the row-inclusion filter modal: esc/ctrl+c/f close it,
-// j/k move the highlight, Enter/space toggles the highlighted filter, and any
-// matching toggle letter flips that filter directly. The menu stays open across
-// a toggle so the checkbox flip is visible and successive toggles are cheap;
-// non-matching keys are inert while it is open (v is gated off by
-// ViewToggleAllowed, so it lands here and is ignored).
+// updateFilterMenu drives the Work view preset modal: esc/ctrl+c/f close it,
+// j/k move the highlight, Enter/space activates the highlighted preset, and
+// digits 1–9 activate that numbered preset directly. The menu stays open across
+// a selection so successive picks are cheap; non-matching keys are inert while
+// it is open (v is gated off by ViewToggleAllowed, so it lands here and is
+// ignored).
 func (m QueueDashboard) updateFilterMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.filter == nil {
 		return m, nil
@@ -1288,20 +1298,20 @@ func (m QueueDashboard) updateFilterMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.invokeFilterItem(m.filter.list.Cursor())
 	}
 	for i, item := range m.filter.list.Items() {
-		if msg.String() == item.key {
+		if item.key != "" && msg.String() == item.key {
 			return m.invokeFilterItem(i)
 		}
 	}
 	return m, nil
 }
 
-// invokeFilterItem flips the inclusion filter at idx and rebuilds the row set.
-// The menu stays open. Flipping recomposes the session ViewPreset on the model's
-// drain.Deps (ADR-0197) and returns a reload: BuildDashboard re-derives the rows
-// honoring the new preset and re-sorts them (ADR-0121), and the reload's
-// dashboardRowsMsg re-applies any active `/` fuzzy query, so the two filters
-// stay independent. The preset is session-only — a fresh drain.Deps on relaunch
-// resets it to the launch seed (`--include-done` → all, else the default).
+// invokeFilterItem activates the preset at idx and rebuilds the row set. The
+// menu stays open. Activating installs that preset on the model's drain.Deps
+// (ADR-0197) and returns a reload: BuildDashboard re-derives the rows honoring
+// the new preset and re-sorts them, and the reload's dashboardRowsMsg
+// re-applies any active `/` fuzzy query, so the two filters stay independent.
+// The selection is session-only — a fresh drain.Deps on relaunch resets it to
+// the launch seed (`--include-done` → all, else the default).
 func (m QueueDashboard) invokeFilterItem(idx int) (tea.Model, tea.Cmd) {
 	if m.filter == nil {
 		return m, nil
@@ -1310,62 +1320,10 @@ func (m QueueDashboard) invokeFilterItem(idx int) (tea.Model, tea.Cmd) {
 	if idx < 0 || idx >= len(items) {
 		return m, nil
 	}
-	showDone := m.filterToggleOn(filterToggleShowDone)
-	showArchived := m.filterToggleOn(filterToggleShowArchived)
-	switch items[idx].toggle {
-	case filterToggleShowDone:
-		showDone = !showDone
-	case filterToggleShowArchived:
-		showArchived = !showArchived
-	default:
-		return m, nil
-	}
 	if m.d != nil {
-		m.d.ViewPreset = sessionViewPreset(showDone, showArchived)
+		m.d.ViewPreset = items[idx].preset
 	}
 	return m, m.reload()
-}
-
-// filterToggleOn reports the current on/off state of an inclusion filter, derived
-// from the live ViewPreset so the menu checkbox tracks the actual view.
-func (m QueueDashboard) filterToggleOn(toggle dashboardFilterToggle) bool {
-	if m.d == nil {
-		return false
-	}
-	p := m.d.EffectiveViewPreset()
-	now := time.Now()
-	switch toggle {
-	case filterToggleShowDone:
-		return tasks.MatchesPreset(tasks.ViewFacts{ID: "x", Status: string(tasks.StatusDone), Unfolded: false}, p, now)
-	case filterToggleShowArchived:
-		return tasks.MatchesPreset(tasks.ViewFacts{ID: "x", Status: string(tasks.StatusReady), Archived: true}, p, now)
-	}
-	return false
-}
-
-// sessionViewPreset maps the dashboard's interim toggle pair onto a ViewPreset
-// until the filter menu becomes a numbered preset list. Neither on → shipped
-// active; show-done alone → every non-archived row; show-archived alone →
-// archived-only; both → shipped all.
-func sessionViewPreset(showDone, showArchived bool) config.WorkViewPreset {
-	switch {
-	case !showDone && !showArchived:
-		if p, ok := config.ShippedWorkViewPreset("active"); ok {
-			return p
-		}
-	case showDone && !showArchived:
-		return config.WorkViewPreset{Name: "_session"}
-	case !showDone && showArchived:
-		return config.WorkViewPreset{
-			Name: "_session",
-			WorkViewPresetFilter: config.WorkViewPresetFilter{Archived: config.ArchivedOnly},
-		}
-	default:
-		if p, ok := config.ShippedWorkViewPreset("all"); ok {
-			return p
-		}
-	}
-	return config.WorkViewPreset{}
 }
 
 // dispatchVerb runs the verb the menu (or a flat shortcut) selected, keyed by
@@ -2296,12 +2254,11 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 		}
 		return entries
 	case m.filter != nil:
-		// Row-inclusion filter menu
+		// Work view preset list (ADR-0197)
 		return []ui.HelpEntry{
-			{Key: "d", Desc: "toggle show done"},
-			{Key: "a", Desc: "toggle show archived"},
+			{Key: "1-9", Desc: "select that preset"},
 			{Key: "j/k", Desc: "navigate"},
-			{Key: "enter/space", Desc: "toggle filter"},
+			{Key: "enter/space", Desc: "select preset"},
 			{Key: "esc", Desc: "close menu"},
 		}
 	case m.agentPick != nil:
@@ -2480,7 +2437,7 @@ func (m QueueDashboard) frameSpec() ui.Frame {
 		// cannot drift (ADR-0197 decision 9); BodyHeight shrinks the table by
 		// exactly len(block).
 		block = m.dashboardFilterMenuLines()
-		hints = "j/k move · enter/space toggle · esc close"
+		hints = "j/k move · 1-9/enter select · esc close"
 	}
 	return ui.Frame{
 		Width:     m.width,
@@ -2529,12 +2486,20 @@ func formatModelSkipFootnote(skips []work.ModelSkip, now time.Time) string {
 	return "skipped: " + strings.Join(groups, " · ")
 }
 
-// pageHeader is the summary line over the rows on screen: this page's noun, then
-// each of its kinds' own phrases. The counts are the page's alone — a page never
-// reports the other page's containers, so the Routine page's "M here" tally
-// cannot be diluted by task sets.
+// pageHeader is the summary line over the rows on screen: this page's noun, the
+// active Work view preset name when the page has presets (ADR-0197 decision 8),
+// then each of its kinds' own phrases. The counts are the page's alone — a page
+// never reports the other page's containers, so the Routine page's "M here"
+// tally cannot be diluted by task sets.
 func (m QueueDashboard) pageHeader() string {
-	return m.page.title + " · " + dashboardSummary(m.kinds, m.snap.Containers)
+	summary := dashboardSummary(m.kinds, m.snap.Containers)
+	if !m.page.rowFilters {
+		return m.page.title + " · " + summary
+	}
+	if name := m.activeViewPreset().DisplayLabel(); name != "" {
+		return m.page.title + " · " + name + " · " + summary
+	}
+	return m.page.title + " · " + summary
 }
 
 // mainHint returns the footer hint for the main (non-modal, non-menu) view.
@@ -2622,9 +2587,9 @@ func (m QueueDashboard) viewWithMenu() string {
 	return body.String()
 }
 
-// viewWithFilterMenu renders the row-inclusion filter modal through the shared
+// viewWithFilterMenu renders the Work view preset modal through the shared
 // Frame: the filter block is a reserved-and-rendered region, so the table body
-// shrinks by exactly its height and the toggles cannot render past the pane
+// shrinks by exactly its height and the list cannot render past the pane
 // (ADR-0197 decision 9). Below the short-pane height floor there is no useful
 // table to keep behind a pick list, so the filter view takes the whole screen
 // the way the help overlay does.
@@ -2634,33 +2599,37 @@ func (m QueueDashboard) viewWithFilterMenu() string {
 			Width: m.width,
 			TermH: m.height,
 			Block: m.dashboardFilterMenuLines(),
-			Hints: "j/k move · enter/space toggle · esc close",
+			Hints: "j/k move · 1-9/enter select · esc close",
 		}.Render("")
 	}
 	return m.frameSpec().Render(m.mainBody())
 }
 
 // dashboardFilterMenuLines renders the filter overlay as a block of lines: a
-// dimmed "filters" caption, then one checkbox line per toggle with the
-// highlighted item carrying the shared cursor block. The checkbox state is read
-// live from the model's view flags (filterToggleOn), so it always reflects the
-// current view.
+// dimmed "filters" caption, then one numbered line per resolved preset with the
+// highlighted item carrying the shared cursor block. The active preset is
+// marked with [x]; exactly one is ever marked (ADR-0197).
 func (m QueueDashboard) dashboardFilterMenuLines() []string {
 	if m.filter == nil {
 		return nil
 	}
 	lines := []string{ui.TruncateString("    "+ui.HintStyle.Render("filters"), m.width)}
 	cursor := m.filter.list.Cursor()
+	active := m.activeViewPreset().Name
 	for i, item := range m.filter.list.Items() {
 		marker := "  "
 		if i == cursor {
 			marker = ui.IndicatorStyle.Render("█") + " "
 		}
 		box := "[ ]"
-		if m.filterToggleOn(item.toggle) {
+		if item.preset.Name == active {
 			box = "[x]"
 		}
-		line := fmt.Sprintf("    %s%s %s %s", marker, item.key, box, item.label)
+		key := item.key
+		if key == "" {
+			key = " "
+		}
+		line := fmt.Sprintf("    %s%s %s %s", marker, key, box, item.label)
 		lines = append(lines, ui.TruncateString(line, m.width))
 	}
 	return lines

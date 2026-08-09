@@ -123,6 +123,27 @@ func TestRoutinePageHeaderAndSummaryComeFromTheRoutineKind(t *testing.T) {
 	}
 }
 
+// TestRoutinePageOffersNoPresetList pins ADR-0197 decision 10: page B keeps its
+// current behaviour and gains no Work view preset menu — `f` is inert and the
+// header never names a preset.
+func TestRoutinePageOffersNoPresetList(t *testing.T) {
+	m := openPage(t, routinePageDeps(routinePageContainers()), PageRoutines)
+	if m.page.rowFilters {
+		t.Fatal("routine page must not enable rowFilters")
+	}
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
+	got := updated.(QueueDashboard)
+	if got.filter != nil {
+		t.Fatal("f opened a filter menu on the routines page")
+	}
+	if cmd != nil {
+		t.Fatal("f on routines page should not dispatch")
+	}
+	if strings.Contains(got.mainHint(), "f filters") {
+		t.Fatalf("routines hint must not offer f filters: %q", got.mainHint())
+	}
+}
+
 // TestRoutinePageRendersRowsWithNoTierChrome pins that tier boundaries are
 // ordering only: one line per Routine, no separator between tiers and no badge
 // naming a tier. The Directory cell already carries where a Routine belongs.
