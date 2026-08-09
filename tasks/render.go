@@ -201,6 +201,37 @@ func buildRefreshResult(d *Deps, canon string, disc *Discovery, state *GlobalSta
 	return result
 }
 
+// AttachBound stamps each row's Bound flag from the Worktree bindings already in
+// the store — one AllBindings read, no git. Call before rendering `pop tasks
+// status` so Unfolded can ride beside the status the way Container.Bound does on
+// the Work dashboard (ADR-0197). Best-effort: a missing store leaves Bound false.
+func AttachBound(d *Deps, rows []Row) {
+	if d == nil || len(rows) == 0 {
+		return
+	}
+	s, ok, err := d.Store(false)
+	if err != nil || !ok {
+		return
+	}
+	all, err := s.AllBindings()
+	if err != nil {
+		return
+	}
+	bound := make(map[string]bool, len(all))
+	for key, b := range all {
+		if strings.TrimSpace(b.RuntimePath) == "" {
+			continue
+		}
+		parts := strings.Split(key, "\x00")
+		if len(parts) == 2 {
+			bound[parts[1]] = true
+		}
+	}
+	for i := range rows {
+		rows[i].Bound = bound[rows[i].ID]
+	}
+}
+
 // includeRegistration reports whether one registration belongs in the view.
 func includeRegistration(rowArchived bool, view archivedRows) bool {
 	switch view {
@@ -387,10 +418,15 @@ func formatTable(rows []Row) string {
 func formatTableWithOutput(out *output, rows []Row) string {
 	const (
 		idW     = 28
-		stW     = 17 // widest label is "AWAITING-APPROVAL" (17)
 		prW     = 5
 		detailW = 96
 	)
+	stW := len("STATUS")
+	for _, row := range rows {
+		if n := len(statusColumnText(row)); n > stW {
+			stW = n
+		}
+	}
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "%-*s  %-*s  %-*s  %s\n", idW, "TASK SET", stW, "STATUS", prW, "PRI", "DETAILS")
@@ -405,7 +441,7 @@ func formatTableWithOutput(out *output, rows []Row) string {
 		if row.RunTarget {
 			id = "▶ " + id
 		}
-		line := fmt.Sprintf("%-*s  %-*s  %-*s  %s", idW, id, stW, StatusLabel(row), prW, row.PriorityShow, detail)
+		line := fmt.Sprintf("%-*s  %-*s  %-*s  %s", idW, id, stW, statusColumnText(row), prW, row.PriorityShow, detail)
 		if row.RunTarget {
 			line = out.styled(ansiBold+ansiCyan, line)
 		} else {
@@ -414,6 +450,18 @@ func formatTableWithOutput(out *output, rows []Row) string {
 		fmt.Fprintln(&b, line)
 	}
 	return b.String()
+}
+
+// statusColumnText is the STATUS cell `pop tasks status` prints: the display
+// label plus the unfolded mark when the shared Unfolded predicate holds
+// (ADR-0197). Verification badges stay in DETAILS; unfolded rides beside the
+// status the way WorkRowStatusSegments does on the Work dashboard.
+func statusColumnText(row Row) string {
+	label := StatusLabel(row)
+	if Unfolded(row.Bound, row.Status) {
+		return label + " · " + UnfoldedMark
+	}
+	return label
 }
 
 func rowDetail(out *output, row Row) string {
@@ -631,12 +679,18 @@ func RenderTaskSetDetail(w io.Writer, taskSetID string, row *Row, m *Manifest) {
 func renderTaskSetDetail(out *output, taskSetID string, row *Row, m *Manifest) {
 	status := DeriveStatus(m)
 	progress := ""
+	bound := false
 	if row != nil {
 		status = row.Status
 		progress = row.Progress
+		bound = row.Bound
 	}
 
-	header := fmt.Sprintf("%s  [%s]", taskSetID, status)
+	statusText := string(status)
+	if Unfolded(bound, status) {
+		statusText += " · " + UnfoldedMark
+	}
+	header := fmt.Sprintf("%s  [%s]", taskSetID, statusText)
 	if progress != "" {
 		header += "  " + progress
 	}

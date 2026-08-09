@@ -302,10 +302,11 @@ func dashboardVerifyEligible(row DashboardRow) bool {
 	return row.VerifyMark == tasks.VerifyMarkUnverified || row.VerifyMark == tasks.VerifyMarkFailed
 }
 
-// dashboardFoldEligible reports whether the fold verb applies to row: a bound DONE
-// or AWAITING-APPROVAL set (ADR-0148, ADR-0156).
+// dashboardFoldEligible reports whether the fold verb applies to row: the shared
+// Unfolded condition (bound DONE or AWAITING-APPROVAL — ADR-0148, ADR-0156,
+// ADR-0197).
 func dashboardFoldEligible(row DashboardRow) bool {
-	return row.Bound && tasks.FoldEligibleStatus(row.RawStatus)
+	return tasks.Unfolded(row.Bound, row.RawStatus)
 }
 
 // dashboardMenuItemHandoff reports whether a menu item hands off. The key's case

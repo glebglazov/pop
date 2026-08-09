@@ -157,10 +157,10 @@ func WorkRowStatusLabel(row work.Container) string {
 // WorkRowStatusCell composes a Task-set row's STATUS cell from its live fields —
 // the single source of truth every render path and the header count read
 // (ADR-0108). It returns the plain, un-styled text: the display label followed by
-// the verified-at, auto-drain, orphaned, parked, and config-error suffixes in that
-// fixed order. Column width-fitting measures this plain form, so no ANSI leaks
-// into column math; the queue-side styled wrapper layers styling for the rendered
-// output.
+// the verified-at, unfolded, auto-drain, orphaned, parked, and config-error
+// suffixes in that fixed order. Column width-fitting measures this plain form, so
+// no ANSI leaks into column math; the queue-side styled wrapper layers styling for
+// the rendered output.
 func WorkRowStatusCell(row work.Container) string {
 	return work.StatusCellText(WorkRowStatusSegments(row))
 }
@@ -175,6 +175,11 @@ func WorkRowStatusSegments(row work.Container) []work.StatusSegment {
 	badge := VerifiedAtBadgeFor(row)
 	if text := VerifiedAtBadgeText(badge); text != "" {
 		segments = append(segments, work.StatusSegment{Text: text, Tone: verifiedAtTone(badge.State)})
+	}
+	// Unfolded rides beside the status the way the Verification mark does
+	// (ADR-0197): derived from Bound plus FoldEligibleStatus, never persisted.
+	if Unfolded(row.Bound, row.RawStatus) {
+		segments = append(segments, work.StatusSegment{Text: UnfoldedMark, Tone: work.TonePlain})
 	}
 	if work.AutoDrainWaiting(row) {
 		segments = append(segments, work.StatusSegment{Text: "auto-drain", Tone: work.TonePlain})

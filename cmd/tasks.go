@@ -482,6 +482,7 @@ func runTaskRegisterWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 		if err != nil {
 			return fmt.Errorf("tasks register: %w", err)
 		}
+		tasks.AttachBound(d, result.Rows)
 		tasks.RenderTaskSetDetail(w, id, tasks.FindRow(result, id), result.Manifests[id])
 		return nil
 	}
@@ -499,7 +500,7 @@ func runTaskRegisterWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 
 	attachWorktreeDirectiveErrors(d, resolved.ProjectPath, result.Rows)
 
-	tasks.Render(w, result)
+	renderTaskRefresh(d, w, result)
 	return nil
 }
 
@@ -623,6 +624,7 @@ func runTaskStatusWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 		if err != nil {
 			return fmt.Errorf("tasks status: %w", err)
 		}
+		tasks.AttachBound(d, result.Rows)
 		tasks.RenderTaskSetDetail(w, id, tasks.FindRow(result, id), result.Manifests[id])
 		return nil
 	}
@@ -640,8 +642,17 @@ func runTaskStatusWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 
 	attachWorktreeDirectiveErrors(d, resolved.ProjectPath, result.Rows)
 
-	tasks.Render(w, result)
+	renderTaskRefresh(d, w, result)
 	return nil
+}
+
+// renderTaskRefresh stamps Bound from the store then prints the status table so
+// Unfolded rides beside STATUS on every CLI refresh path (ADR-0197).
+func renderTaskRefresh(d *tasks.Deps, w io.Writer, result *tasks.RefreshResult) {
+	if result != nil {
+		tasks.AttachBound(d, result.Rows)
+	}
+	tasks.Render(w, result)
 }
 
 // attachWorktreeDirectiveErrors surfaces an unsatisfiable worktree directive
@@ -694,7 +705,7 @@ func runTaskArchiveWithConfirm(d *tasks.Deps, w io.Writer, stdin io.Reader, yes 
 		return fmt.Errorf("tasks archive: %w", err)
 	}
 	fmt.Fprintf(w, "Archived task set %s\n\n", result.TaskSetID)
-	tasks.Render(w, result.Refresh)
+	renderTaskRefresh(d, w, result.Refresh)
 	return nil
 }
 
@@ -766,7 +777,7 @@ func runTaskArchiveSelectionWith(d *tasks.Deps, w io.Writer, stdin io.Reader, ye
 		fmt.Fprint(w, "s")
 	}
 	fmt.Fprintf(w, " %s\n\n", strings.Join(result.TaskSetIDs, ", "))
-	tasks.Render(w, result.Refresh)
+	renderTaskRefresh(d, w, result.Refresh)
 	return nil
 }
 
@@ -787,7 +798,7 @@ func runTaskUnarchiveWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 		return fmt.Errorf("tasks unarchive: %w", err)
 	}
 	fmt.Fprintf(w, "Unarchived task set %s\n\n", result.TaskSetID)
-	tasks.Render(w, result.Refresh)
+	renderTaskRefresh(d, w, result.Refresh)
 	return nil
 }
 
@@ -838,7 +849,7 @@ func runTaskUnarchiveSelectionWith(d *tasks.Deps, w io.Writer, stdin io.Reader) 
 		fmt.Fprint(w, "s")
 	}
 	fmt.Fprintf(w, " %s\n\n", strings.Join(result.TaskSetIDs, ", "))
-	tasks.Render(w, result.Refresh)
+	renderTaskRefresh(d, w, result.Refresh)
 	return nil
 }
 
@@ -859,7 +870,7 @@ func runTaskSetPriorityWith(d *tasks.Deps, w io.Writer, taskSetID, priorityArg s
 
 	tasks.RenderPriorityUpdate(w, result.TaskSetID, result.OldPriority, result.NewPriority)
 	fmt.Fprintln(w)
-	tasks.Render(w, result.Refresh)
+	renderTaskRefresh(d, w, result.Refresh)
 	return nil
 }
 
@@ -875,7 +886,7 @@ func runTaskAutoDrainWith(d *tasks.Deps, w io.Writer, taskSetID string, enabled 
 
 	tasks.RenderAutoDrainUpdate(w, result.TaskSetID, result.AutoDrain)
 	fmt.Fprintln(w)
-	tasks.Render(w, result.Refresh)
+	renderTaskRefresh(d, w, result.Refresh)
 	return nil
 }
 
@@ -1154,7 +1165,7 @@ func runTaskResetTaskWith(d *tasks.Deps, w io.Writer, taskPath string) error {
 	}
 	tasks.RenderTaskReset(w, result.TaskSetID, result.TaskID)
 	fmt.Fprintln(w)
-	tasks.Render(w, result.Refresh)
+	renderTaskRefresh(d, w, result.Refresh)
 	return nil
 }
 
@@ -1209,7 +1220,7 @@ func runTaskOpenTasksWith(d *tasks.Deps, w io.Writer, stdin io.Reader, target st
 
 	tasks.RenderTaskOpenBatch(w, result.TaskSetID, result.Transitions)
 	fmt.Fprintln(w)
-	tasks.Render(w, result.Refresh)
+	renderTaskRefresh(d, w, result.Refresh)
 	return nil
 }
 
@@ -1236,7 +1247,7 @@ func runTaskCompleteTaskWith(d *tasks.Deps, w io.Writer, taskPath string) error 
 	}
 	tasks.RenderTaskComplete(w, result.TaskSetID, result.TaskID)
 	fmt.Fprintln(w)
-	tasks.Render(w, result.Refresh)
+	renderTaskRefresh(d, w, result.Refresh)
 	return nil
 }
 
@@ -1358,7 +1369,7 @@ func runTaskCompleteTasksWith(d *tasks.Deps, w io.Writer, stdin io.Reader, targe
 
 	tasks.RenderTaskCompleteBatch(w, result.TaskSetID, result.Transitions)
 	fmt.Fprintln(w)
-	tasks.Render(w, result.Refresh)
+	renderTaskRefresh(d, w, result.Refresh)
 	return nil
 }
 
@@ -1385,7 +1396,7 @@ func runTaskSkipTaskWith(d *tasks.Deps, w io.Writer, taskPath string) error {
 	}
 	tasks.RenderTaskSkip(w, result.TaskSetID, result.TaskID)
 	fmt.Fprintln(w)
-	tasks.Render(w, result.Refresh)
+	renderTaskRefresh(d, w, result.Refresh)
 	return nil
 }
 
@@ -1440,7 +1451,7 @@ func runTaskSkipTasksWith(d *tasks.Deps, w io.Writer, stdin io.Reader, target st
 
 	tasks.RenderTaskSkipBatch(w, result.TaskSetID, result.Transitions)
 	fmt.Fprintln(w)
-	tasks.Render(w, result.Refresh)
+	renderTaskRefresh(d, w, result.Refresh)
 	return nil
 }
 

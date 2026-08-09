@@ -76,6 +76,11 @@ type Row struct {
 	// ResolveVerifiedStatus. On a human-completed set it is the only place the
 	// verdict shows: the status stays DONE.
 	VerifyMark VerifyMark
+	// Bound is true when the set holds a Worktree binding with a non-blank
+	// runtime path. Populated at refresh from the store (no git); Unfolded reads
+	// it with Status so `pop tasks status` can show the same mark the Work
+	// dashboard derives from Container.Bound.
+	Bound bool
 	// Archived reports the registration's reversible archived flag. It is on the row
 	// rather than implied by which refresh produced it because a view may hold both
 	// kinds of row at once (RefreshIncludingArchivedWith), and then the row is the

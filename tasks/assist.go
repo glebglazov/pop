@@ -425,7 +425,7 @@ func promptGenericAssistAction(out io.Writer, in io.Reader, reader *promptReader
 }
 
 func assistFoldEligible(d *Deps, setID string, status TaskSetStatus) bool {
-	return FoldEligibleStatus(status) && stillHasWorktreeBinding(d, setID)
+	return Unfolded(stillHasWorktreeBinding(d, setID), status)
 }
 
 func stillHasWorktreeBinding(d *Deps, setID string) bool {
