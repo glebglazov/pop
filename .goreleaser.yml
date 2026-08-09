@@ -18,7 +18,7 @@ builds:
       - amd64
     # Same injection point as the Makefile; buildVersion strips the v prefix.
     ldflags:
-      - -s -w -X github.com/glebglazov/pop/cmd.version={{ .Tag }}
+      - -s -w -X github.com/glebglazov/pop/cmd.version={{ .Tag }} -X github.com/glebglazov/pop/internal/tmux.Version={{ .Tag }}
 
 archives:
   - formats: [tar.gz]

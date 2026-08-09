@@ -19,12 +19,17 @@ func (t *realTmux) HasSession(name string) bool {
 }
 
 func (t *realTmux) NewSession(name, dir string) error {
-	args, err := t.withBaseConfigIfStarting([]string{"new-session", "-ds", name, "-c", dir})
+	args, supplied, err := t.withBaseConfigIfStarting([]string{"new-session", "-ds", name, "-c", dir})
 	if err != nil {
 		return err
 	}
-	_, err = t.run.output(args...)
-	return err
+	if _, err := t.run.output(args...); err != nil {
+		return err
+	}
+	if supplied {
+		return t.writeVersionStamp()
+	}
+	return nil
 }
 
 func (t *realTmux) SwitchClient(target string) error {
@@ -151,7 +156,14 @@ func PaneIDFromEnv() string {
 // exist. A no-op when the session is already live. This is the session-creating
 // chokepoint that brings a tmux server up when absent (ADR-0199 decision 8) —
 // read surfaces must never call it; they report an empty world instead.
+// Before creating or attaching, a realTmux refreshes a stale base-config stamp
+// (decision 7) so an upgrade picks up regenerated bindings without a restart.
 func Ensure(t Tmux, name, dir string) error {
+	if rt, ok := t.(*realTmux); ok {
+		if err := rt.refreshBaseConfigIfStale(); err != nil {
+			return err
+		}
+	}
 	if t.HasSession(name) {
 		return nil
 	}

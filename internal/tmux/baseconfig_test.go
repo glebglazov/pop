@@ -137,10 +137,13 @@ func TestBaseConfigShipsPopBindingsAndNoviceDefaults(t *testing.T) {
 
 func TestNewSessionPassesBaseConfigWhenStartingWithoutUserConfig(t *testing.T) {
 	_, _, dataHome := withIsolatedXDG(t)
+	Version = "2026.8.0"
+	t.Cleanup(func() { Version = "" })
 	r := &recordingRunner{
 		responses: []runnerResponse{
 			{err: fmt.Errorf("no server running on /tmp/tmux-501/default")},
 			{out: ""},
+			{out: ""}, // set-option -s @pop_version
 		},
 	}
 	tm := &realTmux{run: r}
@@ -152,6 +155,7 @@ func TestNewSessionPassesBaseConfigWhenStartingWithoutUserConfig(t *testing.T) {
 	want := [][]string{
 		{"list-sessions"},
 		{"-f", rendered, "new-session", "-ds", "work", "-c", "/proj"},
+		{"set-option", "-s", optBaseVersion, "2026.8.0"},
 	}
 	if !reflect.DeepEqual(r.calls, want) {
 		t.Fatalf("args = %v, want %v", r.calls, want)
@@ -201,10 +205,13 @@ func TestNewSessionOmitsBaseConfigWhenXDGUserConfigExists(t *testing.T) {
 
 func TestNewSessionOmitsBaseConfigWhenServerAlreadyListening(t *testing.T) {
 	withIsolatedXDG(t)
+	Version = "2026.8.0"
+	t.Cleanup(func() { Version = "" })
 	r := &recordingRunner{
 		responses: []runnerResponse{
-			{out: "other\t1"}, // list-sessions → server live
-			{out: ""},
+			{out: "other\t1"},                        // list-sessions → server live
+			{err: fmt.Errorf("invalid option: @pop_version")}, // unstamped
+			{out: ""}, // new-session
 		},
 	}
 	tm := &realTmux{run: r}
@@ -214,6 +221,7 @@ func TestNewSessionOmitsBaseConfigWhenServerAlreadyListening(t *testing.T) {
 	}
 	want := [][]string{
 		{"list-sessions"},
+		{"show-options", "-sv", optBaseVersion},
 		{"new-session", "-ds", "work", "-c", "/proj"},
 	}
 	if !reflect.DeepEqual(r.calls, want) {
@@ -244,10 +252,13 @@ func TestNewSessionDoesNotReadUserConfig(t *testing.T) {
 
 func TestNewSessionWithWindowPassesBaseConfigWhenStartingWithoutUserConfig(t *testing.T) {
 	_, _, dataHome := withIsolatedXDG(t)
+	Version = "2026.8.1"
+	t.Cleanup(func() { Version = "" })
 	r := &recordingRunner{
 		responses: []runnerResponse{
 			{err: fmt.Errorf("error connecting to /tmp/tmux-501/pop")},
 			{out: "%9\n"},
+			{out: ""}, // stamp
 		},
 	}
 	tm := &realTmux{run: r}
@@ -263,6 +274,7 @@ func TestNewSessionWithWindowPassesBaseConfigWhenStartingWithoutUserConfig(t *te
 	want := [][]string{
 		{"list-sessions"},
 		{"-f", rendered, "new-session", "-d", "-s", "s", "-c", "/repo", "-n", "map", "-P", "-F", "#{pane_id}"},
+		{"set-option", "-s", optBaseVersion, "2026.8.1"},
 	}
 	if !reflect.DeepEqual(r.calls, want) {
 		t.Fatalf("args = %v, want %v", r.calls, want)
@@ -344,5 +356,150 @@ func TestRenderBaseConfigNeverWritesIncludeFile(t *testing.T) {
 	}
 	if string(got) != marker {
 		t.Fatalf("regenerating base must leave include untouched; got %q", got)
+	}
+}
+
+func TestNewSessionStampsOnlyWhenBaseConfigSupplied(t *testing.T) {
+	Version = "2026.8.0"
+	t.Cleanup(func() { Version = "" })
+
+	t.Run("stamps after -f start", func(t *testing.T) {
+		withIsolatedXDG(t)
+		r := &recordingRunner{
+			responses: []runnerResponse{
+				{err: fmt.Errorf("no server running")},
+				{out: ""},
+				{out: ""},
+			},
+		}
+		tm := &realTmux{run: r}
+		if err := tm.NewSession("work", "/proj"); err != nil {
+			t.Fatal(err)
+		}
+		last := r.calls[len(r.calls)-1]
+		want := []string{"set-option", "-s", optBaseVersion, "2026.8.0"}
+		if !reflect.DeepEqual(last, want) {
+			t.Fatalf("last call = %v, want stamp %v", last, want)
+		}
+	})
+
+	t.Run("started with user config stays unstamped", func(t *testing.T) {
+		withUserTmuxConfig(t)
+		r := &recordingRunner{}
+		tm := &realTmux{run: r}
+		if err := tm.NewSession("work", "/proj"); err != nil {
+			t.Fatal(err)
+		}
+		for _, call := range r.calls {
+			if len(call) >= 3 && call[0] == "set-option" && call[2] == optBaseVersion {
+				t.Fatalf("must not stamp when user config suppressed -f; calls = %v", r.calls)
+			}
+			for _, arg := range call {
+				if arg == "source-file" {
+					t.Fatalf("must not source-file when user has own config; calls = %v", r.calls)
+				}
+			}
+		}
+	})
+}
+
+func TestRefreshResourcesWhenVersionExceedsStamp(t *testing.T) {
+	_, _, dataHome := withIsolatedXDG(t)
+	Version = "2026.9.0"
+	t.Cleanup(func() { Version = "" })
+	rendered := filepath.Join(dataHome, "pop", baseConfigRelPath)
+	r := &recordingRunner{
+		responses: []runnerResponse{
+			{out: "other\t1"},     // list-sessions → live
+			{out: "2026.8.0"},     // show-options stamp
+			{out: ""},             // source-file
+			{out: ""},             // re-stamp
+			{out: ""},             // new-session
+		},
+	}
+	tm := &realTmux{run: r}
+	if err := tm.NewSession("work", "/proj"); err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{
+		{"list-sessions"},
+		{"show-options", "-sv", optBaseVersion},
+		{"source-file", rendered},
+		{"set-option", "-s", optBaseVersion, "2026.9.0"},
+		{"new-session", "-ds", "work", "-c", "/proj"},
+	}
+	if !reflect.DeepEqual(r.calls, want) {
+		t.Fatalf("args = %v, want %v", r.calls, want)
+	}
+}
+
+func TestRefreshSkipsEqualStamp(t *testing.T) {
+	withIsolatedXDG(t)
+	Version = "2026.8.0"
+	t.Cleanup(func() { Version = "" })
+	r := &recordingRunner{
+		responses: []runnerResponse{
+			{out: "other\t1"},
+			{out: "2026.8.0"},
+			{out: ""},
+		},
+	}
+	tm := &realTmux{run: r}
+	if err := tm.NewSession("work", "/proj"); err != nil {
+		t.Fatal(err)
+	}
+	for _, call := range r.calls {
+		if len(call) > 0 && call[0] == "source-file" {
+			t.Fatalf("equal stamp must not re-source; calls = %v", r.calls)
+		}
+	}
+}
+
+func TestUnstampedLiveServerNeverSourced(t *testing.T) {
+	// Started-but-not-configured: pop started the server for a user who has
+	// their own tmux config (no -f, no stamp). A later run must not source
+	// pop's bindings into that server (ADR-0199 decision 7).
+	withIsolatedXDG(t)
+	Version = "2026.9.0"
+	t.Cleanup(func() { Version = "" })
+	r := &recordingRunner{
+		responses: []runnerResponse{
+			{out: "other\t1"},
+			{err: fmt.Errorf("invalid option: @pop_version")},
+			{out: ""},
+		},
+	}
+	tm := &realTmux{run: r}
+	if err := tm.NewSession("work", "/proj"); err != nil {
+		t.Fatal(err)
+	}
+	for _, call := range r.calls {
+		if len(call) > 0 && call[0] == "source-file" {
+			t.Fatalf("unstamped server must never be sourced into; calls = %v", r.calls)
+		}
+		if len(call) >= 3 && call[0] == "set-option" && call[2] == optBaseVersion {
+			t.Fatalf("unstamped live server must not gain a stamp on later new-session; calls = %v", r.calls)
+		}
+	}
+}
+
+func TestVersionExceeds(t *testing.T) {
+	cases := []struct {
+		current, stamped string
+		want             bool
+	}{
+		{"2026.9.0", "2026.8.0", true},
+		{"2026.8.0", "2026.8.0", false},
+		{"2026.8.0", "2026.9.0", false},
+		{"2026.10.0", "2026.9.0", true},
+		{"abc", "def", true},
+		{"dev", "dev", false},
+		{"", "2026.8.0", false},
+		{"2026.8.0", "", false},
+	}
+	for _, c := range cases {
+		if got := versionExceeds(c.current, c.stamped); got != c.want {
+			t.Errorf("versionExceeds(%q, %q) = %v, want %v", c.current, c.stamped, got, c.want)
+		}
 	}
 }

@@ -5,7 +5,7 @@ PREFIX ?= ~/.local
 # changes. Falls back to the bare SHA before the first tag exists.
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null)
 
-LDFLAGS := -X github.com/glebglazov/pop/cmd.version=$(VERSION)
+LDFLAGS := -X github.com/glebglazov/pop/cmd.version=$(VERSION) -X github.com/glebglazov/pop/internal/tmux.Version=$(VERSION)
 ifdef DEBUG
 	LDFLAGS += -X github.com/glebglazov/pop/debug.defaultLogPath=$(HOME)/.local/share/pop/debug.log
 endif

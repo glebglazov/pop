@@ -5,6 +5,10 @@
 // no "name\tactivity" strings cross this boundary.
 package tmux
 
+import (
+	"sync"
+)
+
 // SessionActivity is a live tmux session with its last-activity timestamp
 // (tmux's #{session_activity}, a unix time in seconds).
 type SessionActivity struct {
@@ -208,6 +212,11 @@ type realTmux struct {
 	run     runner
 	socket  string
 	include string // Tmux config include path (ADR-0199 decision 6); empty → default
+
+	// refreshOnce gates the decision-7 base-config re-source so Ensure →
+	// NewSession (and repeated verbs on one instance) probe the stamp once.
+	refreshOnce sync.Once
+	refreshErr  error
 }
 
 // New returns a Tmux backed by the real tmux binary, addressing the named

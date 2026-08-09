@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/glebglazov/pop/debug"
+	"github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/ui"
 	"github.com/spf13/cobra"
 )
@@ -113,4 +114,10 @@ func Execute() {
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is ~/.config/pop/config.toml)")
+	// Hand the running version to internal/tmux so a server pop configured
+	// can be stamped / refreshed (ADR-0199 decision 7). ldflags may already
+	// have set it; buildVersion covers go run / plain go build.
+	if tmux.Version == "" {
+		tmux.Version = buildVersion()
+	}
 }
