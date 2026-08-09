@@ -85,7 +85,7 @@ func TestSupervisorSpawnPlainImplementDrain(t *testing.T) {
 		"2. Complete task",
 		"3. Defer task",
 		"0. Exit",
-		"Choose [1]:",
+		"enter select · digit jump",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("HITL gate menu missing %q:\n%s", want, out)
