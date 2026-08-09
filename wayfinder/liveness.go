@@ -54,11 +54,7 @@ func (l *ownerLiveness) live(owner string) bool {
 // holding every claim in the one case where the human has visibly ended
 // everything is exactly the wedge liveness removes.
 func (l *ownerLiveness) livePane(paneID string, panePID int) bool {
-	l.once.Do(func() {
-		panes, err := l.tmux.AllPanes()
-		l.panes, l.served = panes, err == nil
-	})
-	pane, found := l.panes[paneID]
+	pane, found := l.pane(paneID)
 	if !livePaneCommand(pane.Command, found && l.served) {
 		return false
 	}
@@ -66,6 +62,26 @@ func (l *ownerLiveness) livePane(paneID string, panePID int) bool {
 	// pane's pid is only live in the pane it actually named. An owner from before
 	// the pid was recorded carries none, and is probed by the rest of the rule.
 	return panePID == 0 || pane.PID == 0 || pane.PID == panePID
+}
+
+// pane reads one pane out of the memoized whole-server listing, taking the
+// listing the first time anyone asks.
+func (l *ownerLiveness) pane(paneID string) (tmux.PaneProcess, bool) {
+	l.once.Do(func() {
+		panes, err := l.tmux.AllPanes()
+		l.panes, l.served = panes, err == nil
+	})
+	pane, found := l.panes[paneID]
+	return pane, found && l.served
+}
+
+// paneOwner names a pane as a claim owner, carrying the pid tmux reports for it
+// so a pane id reused after a server restart is not mistaken for this holder. A
+// pane pop cannot read a pid for is named bare, which the liveness rule reads as
+// "pid unknown" rather than dead.
+func (l *ownerLiveness) paneOwner(paneID string) string {
+	pane, _ := l.pane(paneID)
+	return paneOwner(paneID, pane.PID)
 }
 
 // livePaneCommand is the one pane-liveness predicate in pop: a pane pop can
@@ -121,9 +137,16 @@ func pidAlive(pid int) bool {
 // A fresh one per call is the memo's whole scope: it forks tmux at most once,
 // and never replays a listing into a later load.
 func (d *Deps) ownerLive() store.OwnerLive {
+	return d.ownerLiveness().live
+}
+
+// ownerLiveness builds the one pane listing a read or a claim verb gets. A claim
+// verb wants the object rather than the predicate: it also names an owner, and
+// that name reads the same listing.
+func (d *Deps) ownerLiveness() *ownerLiveness {
 	l := &ownerLiveness{tmux: d.tmux(), pidLive: pidAlive}
 	if d.PIDAlive != nil {
 		l.pidLive = d.PIDAlive
 	}
-	return l.live
+	return l
 }

@@ -2,6 +2,7 @@ package wayfinder
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -209,6 +210,80 @@ func TestLivenessForksTmuxOncePerRead(t *testing.T) {
 	}
 	if fake.AllPanesCalls != 1 {
 		t.Fatalf("a read over 3 claims forked list-panes %d times, want 1", fake.AllPanesCalls)
+	}
+}
+
+// TestASpawnedPaneRenewsItsOwnClaim is the bug ADR-0182 fixed once and the pid
+// in the owner string could reintroduce: the owner `next` records for the pane
+// it spawns must be the string that pane computes for itself, or the agent's
+// first `pop map claim` is refused as somebody else's.
+func TestASpawnedPaneRenewsItsOwnClaim(t *testing.T) {
+	d, _ := claimFixture(t)
+	fake := atTime(d, at(9))
+
+	spawned, err := nextSpawn(t, d)
+	if err != nil {
+		t.Fatalf("next: %v", err)
+	}
+	wantOwner := "pane:" + spawned.Pane.PaneID + "/" + strconv.Itoa(fake.PanePIDs[spawned.Pane.PaneID])
+	if spawned.Claim.Owner != wantOwner {
+		t.Fatalf("spawn claimed for %q, want the pane and its pid %q", spawned.Claim.Owner, wantOwner)
+	}
+
+	// Now the agent in that pane runs `pop map claim` on its own ticket: no
+	// injected owner, just the pane it finds itself in.
+	d.Owner = nil
+	t.Setenv("TMUX_PANE", spawned.Pane.PaneID)
+	renewed, err := ClaimTicket(d, "", claimMapID, spawned.Ticket.ID)
+	if err != nil {
+		t.Fatalf("the spawned pane re-claiming its own ticket: %v", err)
+	}
+	if renewed.Owner != wantOwner || renewed.Reclaimed != nil {
+		t.Fatalf("re-claim = %+v, want a renewal for %q", renewed, wantOwner)
+	}
+}
+
+// TestAStaleOwnerOnAReusedPaneIDFreesItsTicket is why the pid is in the string
+// at all: tmux hands the same pane ids out again after a server restart, and
+// with no TTL left a stale owner mistaken for the pane's current occupant would
+// wedge its ticket forever.
+func TestAStaleOwnerOnAReusedPaneIDFreesItsTicket(t *testing.T) {
+	t.Parallel()
+	d, _ := claimFixture(t)
+	fake := atTime(d, at(9))
+	grillingPane(fake, "%7")
+	fake.PanePIDs = map[string]int{"%7": 28405}
+	claimAs(t, d, "pane:%7/17", "01")
+
+	frontier, claimed := claimedTickets(t, d)
+	if len(claimed) != 0 {
+		t.Fatalf("claims = %v, want none — pane %%7 belongs to another process now", claimed)
+	}
+	if strings.Join(frontier, ",") != "01,03" {
+		t.Fatalf("frontier = %v, want the freed 01 back beside 03", frontier)
+	}
+}
+
+// TestNamingAPaneOwnerAddsNoTmuxFork: the pid in an owner string comes out of
+// the listing the claim is already taking to probe the owners it meets, so a
+// claim that names its own pane costs exactly what one with an owner handed to
+// it costs.
+func TestNamingAPaneOwnerAddsNoTmuxFork(t *testing.T) {
+	t.Parallel()
+	fake := &tmuxtest.Fake{
+		PaneInfos: map[string]tmux.PaneInfo{"%7": {Command: "claude"}, "%9": {Command: "claude"}},
+		PanePIDs:  map[string]int{"%7": 28405, "%9": 31000},
+	}
+	l := (&Deps{Tmux: fake}).ownerLiveness()
+
+	if got := l.paneOwner("%9"); got != "pane:%9/31000" {
+		t.Fatalf("paneOwner(%%9) = %q, want pane:%%9/31000", got)
+	}
+	if !l.live("pane:%7/28405") || l.live("pane:%7/17") {
+		t.Fatal("the shared listing answers liveness differently than it names owners")
+	}
+	if fake.AllPanesCalls != 1 {
+		t.Fatalf("naming an owner and probing two more forked list-panes %d times, want 1", fake.AllPanesCalls)
 	}
 }
 

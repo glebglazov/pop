@@ -35,6 +35,12 @@ func claimFixture(t *testing.T) (*Deps, string) {
 	return d, storageDir
 }
 
+// ownerOfPane is the owner string a claim taken for one of the fake's panes
+// carries: the pane and the process tmux reports in it.
+func ownerOfPane(fake *tmuxtest.Fake, paneID string) string {
+	return paneOwner(paneID, fake.PanePIDs[paneID])
+}
+
 func at(hour int) time.Time {
 	return time.Date(2026, 8, 3, hour, 0, 0, 0, time.UTC)
 }
@@ -94,7 +100,7 @@ func TestNextHandsOutTheFrontierInOrderThenRefuses(t *testing.T) {
 	if first.Ticket.ID != "01" || first.Claim.Path != wantPath {
 		t.Fatalf("first next = %+v, want ticket 01 at %s", first.Claim, wantPath)
 	}
-	if first.Claim.Owner != "pane:"+first.Pane.PaneID {
+	if first.Claim.Owner != ownerOfPane(d.Tmux.(*tmuxtest.Fake), first.Pane.PaneID) {
 		t.Fatalf("claim owner = %q, want the spawned pane %q", first.Claim.Owner, first.Pane.PaneID)
 	}
 	if first.Claim.Reclaimed != nil {
@@ -161,7 +167,7 @@ func TestClaimsLiveOnlyInTheStore(t *testing.T) {
 			claimed[ticket.ID] = ticket.ClaimOwner
 		}
 	}
-	if len(claimed) != 2 || claimed["01"] != "pane:"+spawned.Pane.PaneID || claimed["03"] != "pane:%1" {
+	if len(claimed) != 2 || claimed["01"] != ownerOfPane(d.Tmux.(*tmuxtest.Fake), spawned.Pane.PaneID) || claimed["03"] != "pane:%1" {
 		t.Fatalf("scanned claims = %v, want 01 held by the spawned pane and 03 by pane:%%1", claimed)
 	}
 	if counts := CountTickets(m.Tickets); counts.Claimed != 2 || counts.Open != 1 {
@@ -318,17 +324,31 @@ func TestNextWithoutAMapIDTakesTheOneBeingWayfound(t *testing.T) {
 }
 
 // TestDefaultClaimOwnerPrefersThePane pins the identity rule: the pane the
-// command runs in when there is one, the pid otherwise. No configuration either
-// way.
+// command runs in and the process running it when there is one, the pid
+// otherwise. No configuration either way.
 func TestDefaultClaimOwnerPrefersThePane(t *testing.T) {
+	fake := &tmuxtest.Fake{
+		PaneCommandMap: map[string]string{"%17": "claude"},
+		PanePIDs:       map[string]int{"%17": 4242},
+	}
 	t.Setenv("TMUX_PANE", "%17")
-	if got := DefaultClaimOwner(); got != "pane:%17" {
-		t.Fatalf("DefaultClaimOwner() = %q inside tmux, want pane:%%17", got)
+	if got := DefaultClaimOwner(fake); got != "pane:%17/4242" {
+		t.Fatalf("DefaultClaimOwner() = %q inside tmux, want pane:%%17/4242", got)
 	}
 	t.Setenv("TMUX_PANE", "")
 	want := "pid:" + strconv.Itoa(os.Getpid())
-	if got := DefaultClaimOwner(); got != want {
+	if got := DefaultClaimOwner(fake); got != want {
 		t.Fatalf("DefaultClaimOwner() = %q outside tmux, want %q", got, want)
+	}
+}
+
+// TestPaneOwnerWithoutAPIDNamesThePaneBare pins the fallback: a pane pop cannot
+// read a pid for is still owned, by pane id alone.
+func TestPaneOwnerWithoutAPIDNamesThePaneBare(t *testing.T) {
+	fake := &tmuxtest.Fake{PaneCommandMap: map[string]string{"%17": "claude"}}
+	t.Setenv("TMUX_PANE", "%17")
+	if got := DefaultClaimOwner(fake); got != "pane:%17" {
+		t.Fatalf("DefaultClaimOwner() with no pane pid = %q, want pane:%%17", got)
 	}
 }
 

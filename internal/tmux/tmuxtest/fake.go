@@ -580,6 +580,14 @@ func (f *Fake) addWindowPane(session, name, id string) {
 		}
 		f.PaneInfos[id] = tmux.PaneInfo{Session: session, Command: "zsh"}
 	}
+	// Every real pane has a pane_pid, so a created one gets a distinct made-up
+	// pid: a caller that records the pane's process must see one here too.
+	if _, seeded := f.PanePIDs[id]; !seeded {
+		if f.PanePIDs == nil {
+			f.PanePIDs = map[string]int{}
+		}
+		f.PanePIDs[id] = 9000 + len(f.PanePIDs)
+	}
 }
 
 func (f *Fake) setPaneCwd(paneID, dir string) {

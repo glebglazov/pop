@@ -31,18 +31,33 @@ func MapTicketRef(mapID, ticketID string) ref.WorkRef {
 // when there is one, else this process. A pane outlives the command that took the
 // claim, which is what makes it the right identity for a grilling pane; the pid
 // is the honest fallback for a claim taken from a plain shell. There is no
-// configuration and no login — an owner is only ever compared for equality.
-func DefaultClaimOwner() string {
-	if pane := tmux.PaneIDFromEnv(); pane != "" {
-		return paneOwner(pane)
-	}
-	return fmt.Sprintf("pid:%d", os.Getpid())
+// configuration and no login — an owner is only ever compared for equality and
+// probed for life.
+func DefaultClaimOwner(t tmux.Tmux) string {
+	return (&ownerLiveness{tmux: t, pidLive: pidAlive}).selfOwner()
 }
 
 // paneOwner is the one place a pane id becomes a claim owner, so the identity a
 // spawned pane is claimed for and the one that pane computes for itself are the
-// same string.
-func paneOwner(paneID string) string { return "pane:" + paneID }
+// same string. The pane's pid rides along because tmux hands the same pane ids
+// out again after a server restart, and with no TTL left a stale owner naming a
+// reused id would wedge its ticket forever.
+func paneOwner(paneID string, pid int) string {
+	if pid <= 0 {
+		return "pane:" + paneID
+	}
+	return fmt.Sprintf("pane:%s/%d", paneID, pid)
+}
+
+// selfOwner is what this process calls itself: its pane when it runs in one,
+// else its pid. It hangs off ownerLiveness so the pane's pid comes from the
+// listing that read is already making, not a second fork.
+func (l *ownerLiveness) selfOwner() string {
+	if pane := tmux.PaneIDFromEnv(); pane != "" {
+		return l.paneOwner(pane)
+	}
+	return fmt.Sprintf("pid:%d", os.Getpid())
+}
 
 // ClaimResult is one taken claim: which ticket, where its markdown lives, and
 // what the claim displaced.
@@ -77,7 +92,10 @@ func ClaimTicketForPane(d *Deps, m Map, ticket Ticket, paneID string) (*ClaimRes
 	if err != nil {
 		return nil, err
 	}
-	res, err := s.ClaimFirstWorkItem(MapRef(m.ID), []string{ticket.ID}, spawnedPaneOwner(d, paneID), d.now(), d.ownerLive())
+	// One liveness object serves both halves of the claim: the owner it records
+	// and the owners it probes read the same pane listing, one fork.
+	l := d.ownerLiveness()
+	res, err := s.ClaimFirstWorkItem(MapRef(m.ID), []string{ticket.ID}, spawnedPaneOwner(d, l, paneID), d.now(), l.live)
 	if errors.Is(err, store.ErrNoClaimableWorkItem) {
 		return nil, nil
 	}
@@ -89,11 +107,11 @@ func ClaimTicketForPane(d *Deps, m Map, ticket Ticket, paneID string) (*ClaimRes
 
 // spawnedPaneOwner names the pane a claim is taken for. A pane id pop could not
 // read falls back to the caller's own identity, so a claim is never ownerless.
-func spawnedPaneOwner(d *Deps, paneID string) string {
+func spawnedPaneOwner(d *Deps, l *ownerLiveness, paneID string) string {
 	if id := strings.TrimSpace(paneID); id != "" {
-		return paneOwner(id)
+		return l.paneOwner(id)
 	}
-	return d.owner()
+	return d.ownerWith(l)
 }
 
 // ClaimTicket claims one named ticket — the override for when the human, not
@@ -119,7 +137,8 @@ func ClaimTicket(d *Deps, cwd, mapID, rawTicket string) (*ClaimResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	res, err := s.ClaimWorkItem(MapTicketRef(m.ID, ticket.ID), d.owner(), d.now(), d.ownerLive())
+	l := d.ownerLiveness()
+	res, err := s.ClaimWorkItem(MapTicketRef(m.ID, ticket.ID), d.ownerWith(l), d.now(), l.live)
 	var claimed *store.WorkItemClaimedError
 	if errors.As(err, &claimed) {
 		return nil, fmt.Errorf("ticket %s of map %q is claimed by %s since %s; it frees itself when that session ends",

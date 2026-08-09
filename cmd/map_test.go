@@ -170,8 +170,9 @@ func TestMapNextAndClaimDriveParallelGrilling(t *testing.T) {
 	// The claim belongs to the pane the agent was spawned into, never to the pane
 	// that typed the verb (ADR-0182).
 	firstOwner := claimedOwner(t, first.String())
-	if firstOwner != "pane:"+onlyGrillingPane(t, d, "demo") {
-		t.Fatalf("next claimed for %q, want the spawned pane", firstOwner)
+	firstPane := onlyGrillingPane(t, d, "demo")
+	if !strings.HasPrefix(firstOwner, "pane:"+firstPane+"/") {
+		t.Fatalf("next claimed for %q, want the spawned pane %s and its pid", firstOwner, firstPane)
 	}
 
 	var second bytes.Buffer
@@ -197,7 +198,6 @@ func TestMapNextAndClaimDriveParallelGrilling(t *testing.T) {
 	// The human closes the first grilling session: its pane drops back to a
 	// shell. The very next `next` — same minute, no verb in between — hands 01
 	// back out and respawns into that idle pane, saying what it took over.
-	firstPane := strings.TrimPrefix(firstOwner, "pane:")
 	fake := d.Tmux.(*tmuxtest.Fake)
 	fake.PaneInfos[firstPane] = tmuxmod.PaneInfo{Session: wayfinder.MapSessionName("demo"), Command: "zsh"}
 	var reclaimed bytes.Buffer

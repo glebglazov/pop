@@ -39,7 +39,7 @@ func TestFanOutSpawnsOnePanePerFrontierTicketInOneWindow(t *testing.T) {
 		if fake.PaneTitles[pane.PaneID] != strings.TrimSuffix(spawned.Ticket.File, ".md") {
 			t.Fatalf("pane titles = %v, want the ticket file stems", fake.PaneTitles)
 		}
-		if spawned.Claim.Owner != "pane:"+pane.PaneID {
+		if spawned.Claim.Owner != ownerOfPane(fake, pane.PaneID) {
 			t.Fatalf("claim owner = %q, want the spawned pane %q", spawned.Claim.Owner, pane.PaneID)
 		}
 		if cmd := strings.Join(fake.SentCommands[pane.PaneID], " "); !strings.Contains(cmd, claimMapID+" "+spawned.Ticket.ID) {

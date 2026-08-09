@@ -86,8 +86,14 @@ func (d *Deps) trunk() (string, error) {
 }
 
 func (d *Deps) owner() string {
+	return d.ownerWith(d.ownerLiveness())
+}
+
+// ownerWith names this process against a liveness object already in hand, so a
+// claim verb's owner and its liveness probe share one pane listing.
+func (d *Deps) ownerWith(l *ownerLiveness) string {
 	if d.Owner != nil {
 		return d.Owner()
 	}
-	return DefaultClaimOwner()
+	return l.selfOwner()
 }
