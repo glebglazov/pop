@@ -172,6 +172,12 @@ write.
 
 ## Consequences
 
+- **For an existing tmux user the upgrade is a no-op, by construction.** They
+  gain no config key, so pop emits no `-L` and runs the command it already ran;
+  their server is already up so nothing is started; they have their own tmux
+  config so `-f` never applies; their server is unstamped so it is never sourced
+  into. Same socket as a first-time user, opposite relationship — pop configures
+  the newcomer's server and is merely a tenant in theirs.
 - **`-f` is start-order dependent.** tmux loads a configuration file once, when
   the server process starts. A fresh user with no tmux config who types `tmux`
   before ever running a pop command gets a bare server, and pop's base config
