@@ -194,15 +194,21 @@ func TestMapNextAndClaimDriveParallelGrilling(t *testing.T) {
 		t.Fatalf("claim refusal = %v, want it to name %s", err, firstOwner)
 	}
 
-	// Four hours on, the first window is gone and its ticket comes back — with
-	// the steal on the record.
-	d.Clock = func() time.Time { return nine.Add(5 * time.Hour) }
-	var stolen bytes.Buffer
-	if err := runMapNextWith(d, &stolen, "demo", false); err != nil {
-		t.Fatalf("next after the TTL: %v", err)
+	// The human closes the first grilling session: its pane drops back to a
+	// shell. The very next `next` — same minute, no verb in between — hands 01
+	// back out and respawns into that idle pane, saying what it took over.
+	firstPane := strings.TrimPrefix(firstOwner, "pane:")
+	fake := d.Tmux.(*tmuxtest.Fake)
+	fake.PaneInfos[firstPane] = tmuxmod.PaneInfo{Session: wayfinder.MapSessionName("demo"), Command: "zsh"}
+	var reclaimed bytes.Buffer
+	if err := runMapNextWith(d, &reclaimed, "demo", false); err != nil {
+		t.Fatalf("next after the session died: %v", err)
 	}
-	if !strings.HasPrefix(stolen.String(), "01\t") || !strings.Contains(stolen.String(), "stole an expired claim held by "+firstOwner) {
-		t.Fatalf("steal output = %q", stolen.String())
+	if !strings.HasPrefix(reclaimed.String(), "01\t") {
+		t.Fatalf("next after the session died = %q, want the abandoned ticket 01 back", reclaimed.String())
+	}
+	if got := claimedOwner(t, reclaimed.String()); got != firstOwner {
+		t.Fatalf("reclaim spawned into %q, want the dead session's idle pane %q", got, firstOwner)
 	}
 
 	// `pop map status <map-id>` is where a human sees who holds what; the files

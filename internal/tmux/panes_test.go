@@ -126,6 +126,37 @@ func TestPaneCommandsPropagatesRunnerError(t *testing.T) {
 	}
 }
 
+func TestAllPanesBuildsArgsAndParses(t *testing.T) {
+	// A pane with no pid column is still a pane: the listing is one fork for the
+	// whole server, so one odd row must not lose the rest of it.
+	r := &recordingRunner{out: "%1 zsh 28405\n%2 claude 28406\n%3 vim"}
+	tm := &realTmux{run: r}
+
+	panes, err := tm.AllPanes()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	wantArgs := [][]string{{"list-panes", "-a", "-F", "#{pane_id} #{pane_current_command} #{pane_pid}"}}
+	if !reflect.DeepEqual(r.calls, wantArgs) {
+		t.Fatalf("args = %v, want %v", r.calls, wantArgs)
+	}
+	want := map[string]PaneProcess{
+		"%1": {Command: "zsh", PID: 28405},
+		"%2": {Command: "claude", PID: 28406},
+		"%3": {Command: "vim"},
+	}
+	if !reflect.DeepEqual(panes, want) {
+		t.Fatalf("panes = %v, want %v", panes, want)
+	}
+}
+
+func TestAllPanesPropagatesRunnerError(t *testing.T) {
+	tm := &realTmux{run: &recordingRunner{err: fmt.Errorf("no server running")}}
+	if _, err := tm.AllPanes(); err == nil {
+		t.Fatal("expected an error, so a caller can tell no server from an empty one")
+	}
+}
+
 func TestCapturePreviewBuildsArgs(t *testing.T) {
 	r := &recordingRunner{out: "line 1\nline 2"}
 	tm := &realTmux{run: r}

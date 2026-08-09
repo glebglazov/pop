@@ -15,10 +15,14 @@ type Deps struct {
 	Tasks *tasks.Deps
 	// Clock and Owner are the two inputs a claim needs beyond the store: when it
 	// was taken, and who took it. Both are injectable because a claim's whole
-	// behaviour — TTL expiry, refusing another window, renewing your own — is a
-	// function of them, and neither is reproducible from a test process.
+	// behaviour — refusing another window, re-claiming your own — is a function
+	// of them, and neither is reproducible from a test process.
 	Clock func() time.Time
 	Owner func() string
+	// PIDAlive is the liveness probe behind a `pid:` claim owner. Left nil it is
+	// a zero-signal probe; injectable because a test cannot conjure a pid it
+	// knows to be dead without racing whoever the kernel hands it to next.
+	PIDAlive func(pid int) bool
 	// Tmux is the Map's session surface — `arrive` tears one down. Left nil it
 	// resolves lazily to the real tmux, so a read verb never shells out.
 	Tmux tmux.Tmux

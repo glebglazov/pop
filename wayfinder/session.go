@@ -250,15 +250,13 @@ func adoptIdleMapPane(t tmux.Tmux, session MapSession, tag tmux.PaneTag, value s
 // is never adopted by a spawn for something else.
 var mapPaneTags = []tmux.PaneTag{tmux.TagTicket, tmux.TagAssist}
 
-// liveGrillingPane reports whether a pane still holds a running process. A pane
-// pop cannot read is treated as live, so an unreadable pane is never sent keys
-// on top of whatever it is running.
+// liveGrillingPane reports whether a pane still holds a running grilling
+// process, asking one pane the predicate claim liveness asks of the whole
+// server. A pane pop cannot read is gone, which is the same answer both callers
+// need: nothing is running there to jump to, and nothing is holding a ticket.
 func liveGrillingPane(t tmux.Tmux, paneID string) bool {
 	info, err := t.PaneInfo(paneID)
-	if err != nil {
-		return true
-	}
-	return !tmux.IsBareShell(info.Command)
+	return livePaneCommand(info.Command, err == nil)
 }
 
 // grillingPaneTitle titles a pane with the ticket file's stem, so a wall of tiled

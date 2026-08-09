@@ -80,7 +80,7 @@ func TestFanOutLosesATicketMidLoopAndKeepsGoing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d.Owner = func() string { return "pane:%rival" }
+	asWindow(d, "pane:%rival", at(9))
 	if _, err := ClaimTicket(d, "", claimMapID, "03"); err != nil {
 		t.Fatalf("rival claim: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestFanOutOnAnEmptyFrontierSpawnsNothingAndSucceeds(t *testing.T) {
 	t.Parallel()
 	d, _ := claimFixture(t)
 	fake := atTime(d, at(9))
-	d.Owner = func() string { return "pane:%elsewhere" }
+	asWindow(d, "pane:%elsewhere", at(9))
 	for _, ticket := range []string{"01", "03"} {
 		if _, err := ClaimTicket(d, "", claimMapID, ticket); err != nil {
 			t.Fatalf("claim %s: %v", ticket, err)

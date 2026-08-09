@@ -52,10 +52,10 @@ type ClaimResult struct {
 	Path      string
 	Owner     string
 	ClaimedAt time.Time
-	// Stole carries the expired claim this one took over, nil when the ticket was
-	// free. A steal is reported, never silent: the window that lost the ticket may
-	// still be looking at it.
-	Stole *store.WorkClaim
+	// Reclaimed carries the dead owner's claim this one took over, nil when the
+	// ticket was free. It is reported, never silent: the session that died may
+	// have left half-written drafts on the ticket.
+	Reclaimed *store.WorkClaim
 	// UnresolvedBlockers names the blockers still open on an explicitly claimed
 	// ticket. `next` never produces any — it hands out frontier tickets only —
 	// but a human naming a ticket is allowed past the ordering, warned.
@@ -64,20 +64,20 @@ type ClaimResult struct {
 
 // ClaimTicketForPane claims one ticket for the pane now grilling it, in a single
 // store transaction. It is the second half of the spawn path (ADR-0182): the pane
-// exists before the claim does, so the claim ages out against the pane actually
-// doing the work and that pane's own `pop map claim` renews rather than being
-// refused.
+// exists before the claim does, so the claim lives exactly as long as the pane
+// actually doing the work and that pane's own `pop map claim` re-claims rather
+// than being refused.
 //
 // A live claim held elsewhere is not an error but a nil result: the ticket was on
 // the frontier when the scan read it and went to a parallel session since, which
-// the caller reports as one idle pane. An expired claim is taken over and reported
-// as a steal.
+// the caller reports as one idle pane. A dead owner's claim is taken over and
+// reported as a reclaim.
 func ClaimTicketForPane(d *Deps, m Map, ticket Ticket, paneID string) (*ClaimResult, error) {
 	s, err := openWorkRegistry(d)
 	if err != nil {
 		return nil, err
 	}
-	res, err := s.ClaimFirstWorkItem(MapRef(m.ID), []string{ticket.ID}, spawnedPaneOwner(d, paneID), d.now())
+	res, err := s.ClaimFirstWorkItem(MapRef(m.ID), []string{ticket.ID}, spawnedPaneOwner(d, paneID), d.now(), d.ownerLive())
 	if errors.Is(err, store.ErrNoClaimableWorkItem) {
 		return nil, nil
 	}
@@ -119,12 +119,12 @@ func ClaimTicket(d *Deps, cwd, mapID, rawTicket string) (*ClaimResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	res, err := s.ClaimWorkItem(MapTicketRef(m.ID, ticket.ID), d.owner(), d.now())
+	res, err := s.ClaimWorkItem(MapTicketRef(m.ID, ticket.ID), d.owner(), d.now(), d.ownerLive())
 	var claimed *store.WorkItemClaimedError
 	if errors.As(err, &claimed) {
-		return nil, fmt.Errorf("ticket %s of map %q is claimed by %s since %s; it frees itself after %s",
+		return nil, fmt.Errorf("ticket %s of map %q is claimed by %s since %s; it frees itself when that session ends",
 			ticket.ID, m.ID, claimed.Claim.Owner,
-			claimed.Claim.ClaimedAt.Format(time.RFC3339), store.WorkClaimTTL)
+			claimed.Claim.ClaimedAt.Format(time.RFC3339))
 	}
 	if err != nil {
 		return nil, err
@@ -142,7 +142,7 @@ func claimResult(m Map, res store.WorkClaimResult) *ClaimResult {
 		Path:      ticketPath(m, ticket),
 		Owner:     res.Claim.Owner,
 		ClaimedAt: res.Claim.ClaimedAt,
-		Stole:     res.Stole,
+		Reclaimed: res.Reclaimed,
 	}
 }
 
@@ -230,14 +230,16 @@ func registeredMapIDs(d *Deps) (map[string]bool, error) {
 }
 
 // liveMapClaims returns every Map's live claims by map id and ticket id, for the
-// scan that overlays them onto tickets read from disk.
+// scan that overlays them onto tickets read from disk. A claim whose grilling
+// session has died is not among them, so its ticket is back on the frontier at
+// this read — one liveness probe serves the whole scan.
 func liveMapClaims(d *Deps) (map[string]map[string]store.WorkClaim, error) {
 	out := map[string]map[string]store.WorkClaim{}
 	s, ok, err := d.taskDeps().Store(false)
 	if err != nil || !ok {
 		return out, err
 	}
-	claims, err := s.LiveWorkClaimsOfKind(ref.KindMap, d.now())
+	claims, err := s.LiveWorkClaimsOfKind(ref.KindMap, d.ownerLive())
 	if err != nil {
 		return nil, err
 	}

@@ -9,15 +9,6 @@ import (
 	"github.com/glebglazov/pop/work/ref"
 )
 
-// WorkClaimTTL is how long a claim on a Work item stays live. It is a timeout
-// rather than the store's process-liveness policy because a claim's owner is
-// usually a tmux pane, not a process pop can ask about: the window that took the
-// claim may be sitting idle at a prompt, and the shell that ran the claiming
-// command exited long ago. Four hours is longer than a grilling session and
-// shorter than a working day, so an abandoned claim frees itself before it
-// strands the ticket while a live one is never pulled out from under its window.
-const WorkClaimTTL = 4 * time.Hour
-
 // WorkClaim is one live hold on one item of a Work container — a Map's Decision
 // ticket, and later a Task set's task. Owner is opaque here: the claiming layer
 // resolves it (a tmux pane id, else a pid) and the store only compares it.
@@ -27,20 +18,28 @@ type WorkClaim struct {
 	ClaimedAt time.Time
 }
 
-// Expired reports whether the claim has aged past the TTL and so may be taken
-// over by another owner.
-func (c WorkClaim) Expired(now time.Time) bool {
-	return !now.Before(c.ClaimedAt.Add(WorkClaimTTL))
-}
+// OwnerLive reports whether a claim's owner still has the process that took the
+// claim running in it. A claim lives exactly that long (ADR-0193), so this is
+// the whole of the store's claim-ending policy beside resolution.
+//
+// It arrives per call rather than at Open because the knowledge it needs — what
+// a tmux pane id means, whether a pid answers — belongs to the claiming layer;
+// the store learns nothing about tmux and only asks the question.
+type OwnerLive func(owner string) bool
 
 // WorkClaimResult is the outcome of taking a claim: the claim now held, and the
-// expired claim it displaced when there was one. Callers report the steal —
-// silently taking a ticket another window still believes it owns is how two
-// sessions end up grilling the same question.
+// dead owner's claim it took over when there was one. Callers report the
+// reclaim — a session that died may have left half-written drafts behind, and
+// that is the one cost of picking its ticket back up.
 type WorkClaimResult struct {
-	Claim WorkClaim
-	Stole *WorkClaim
+	Claim     WorkClaim
+	Reclaimed *WorkClaim
 }
+
+// errOwnerLivenessRequired refuses a claim read or write with no liveness
+// policy, the way Open refuses a nil process liveness: a missing predicate must
+// fail loudly rather than quietly hold every dead owner's claim forever.
+var errOwnerLivenessRequired = errors.New("store: an owner-liveness predicate is required")
 
 // ErrWorkItemClaimed reports that an item is already held by a live claim
 // belonging to someone else. A *WorkItemClaimedError carries that claim and
@@ -65,16 +64,19 @@ func (e *WorkItemClaimedError) Is(target error) bool { return target == ErrWorkI
 
 func (e *WorkItemClaimedError) Unwrap() error { return ErrWorkItemClaimed }
 
-// ClaimWorkItem takes the claim on one named item for owner. An owner renewing
-// its own claim resets the TTL rather than being refused, so a long grilling
-// session can hold a ticket by re-claiming it; a live claim held by anyone else
-// refuses; an expired one is taken over and reported as a steal.
-func (s *Store) ClaimWorkItem(r ref.WorkRef, owner string, now time.Time) (WorkClaimResult, error) {
+// ClaimWorkItem takes the claim on one named item for owner. An owner
+// re-claiming its own item is refreshed rather than refused, so a long grilling
+// session can re-claim its ticket; a claim whose owner is still live refuses; a
+// dead owner's claim is taken over and reported as a reclaim.
+func (s *Store) ClaimWorkItem(r ref.WorkRef, owner string, now time.Time, live OwnerLive) (WorkClaimResult, error) {
 	if err := validItemRef(r); err != nil {
 		return WorkClaimResult{}, err
 	}
 	if owner == "" {
 		return WorkClaimResult{}, errors.New("store: a work claim needs an owner")
+	}
+	if live == nil {
+		return WorkClaimResult{}, errOwnerLivenessRequired
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -86,13 +88,13 @@ func (s *Store) ClaimWorkItem(r ref.WorkRef, owner string, now time.Time) (WorkC
 	if err != nil {
 		return WorkClaimResult{}, err
 	}
-	var stole *WorkClaim
+	var reclaimed *WorkClaim
 	if found && held.Owner != owner {
-		if !held.Expired(now) {
+		if live(held.Owner) {
 			return WorkClaimResult{}, &WorkItemClaimedError{Claim: held}
 		}
-		displaced := held
-		stole = &displaced
+		dead := held
+		reclaimed = &dead
 	}
 	if err := writeWorkClaim(tx, r, owner, now); err != nil {
 		return WorkClaimResult{}, err
@@ -101,8 +103,8 @@ func (s *Store) ClaimWorkItem(r ref.WorkRef, owner string, now time.Time) (WorkC
 		return WorkClaimResult{}, err
 	}
 	return WorkClaimResult{
-		Claim: WorkClaim{Ref: r, Owner: owner, ClaimedAt: now.UTC()},
-		Stole: stole,
+		Claim:     WorkClaim{Ref: r, Owner: owner, ClaimedAt: now.UTC()},
+		Reclaimed: reclaimed,
 	}, nil
 }
 
@@ -112,12 +114,15 @@ func (s *Store) ClaimWorkItem(r ref.WorkRef, owner string, now time.Time) (WorkC
 // BEGIN IMMEDIATE, so two windows racing the same container serialise: the second
 // sees the first's row and moves to the next candidate rather than handing out the
 // same item twice.
-func (s *Store) ClaimFirstWorkItem(container ref.WorkRef, itemIDs []string, owner string, now time.Time) (WorkClaimResult, error) {
+func (s *Store) ClaimFirstWorkItem(container ref.WorkRef, itemIDs []string, owner string, now time.Time, live OwnerLive) (WorkClaimResult, error) {
 	if err := validContainerRef(container); err != nil {
 		return WorkClaimResult{}, err
 	}
 	if owner == "" {
 		return WorkClaimResult{}, errors.New("store: a work claim needs an owner")
+	}
+	if live == nil {
+		return WorkClaimResult{}, errOwnerLivenessRequired
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -133,13 +138,16 @@ func (s *Store) ClaimFirstWorkItem(container ref.WorkRef, itemIDs []string, owne
 		if itemID == "" {
 			continue
 		}
-		var stole *WorkClaim
-		if existing, ok := held[itemID]; ok {
-			if !existing.Expired(now) {
+		var reclaimed *WorkClaim
+		// An owner that already holds the item is refreshed, not skipped: a spawn
+		// verb re-run into the same pane is re-taking its own ticket, and refusing
+		// it there would leave the pane grilling something it does not hold.
+		if existing, ok := held[itemID]; ok && existing.Owner != owner {
+			if live(existing.Owner) {
 				continue
 			}
-			displaced := existing
-			stole = &displaced
+			dead := existing
+			reclaimed = &dead
 		}
 		r := ref.WorkRef{Kind: container.Kind, ContainerID: container.ContainerID, ItemID: itemID}
 		if err := writeWorkClaim(tx, r, owner, now); err != nil {
@@ -149,8 +157,8 @@ func (s *Store) ClaimFirstWorkItem(container ref.WorkRef, itemIDs []string, owne
 			return WorkClaimResult{}, err
 		}
 		return WorkClaimResult{
-			Claim: WorkClaim{Ref: r, Owner: owner, ClaimedAt: now.UTC()},
-			Stole: stole,
+			Claim:     WorkClaim{Ref: r, Owner: owner, ClaimedAt: now.UTC()},
+			Reclaimed: reclaimed,
 		}, nil
 	}
 	return WorkClaimResult{}, ErrNoClaimableWorkItem
@@ -171,12 +179,17 @@ func (s *Store) ReleaseWorkItem(r ref.WorkRef) error {
 	return err
 }
 
-// LiveWorkClaimsOfKind returns every unexpired claim on one kind's items. One
-// query serves a whole scan: the Map listing overlays claims onto tickets it read
-// from disk, and asking per Map would put a query behind every row.
-func (s *Store) LiveWorkClaimsOfKind(kind ref.Kind, now time.Time) ([]WorkClaim, error) {
+// LiveWorkClaimsOfKind returns every claim on one kind's items whose owner is
+// still live. One query serves a whole scan: the Map listing overlays claims
+// onto tickets it read from disk, and asking per Map would put a query behind
+// every row. A row whose owner has died is simply not returned — the ticket is
+// back on the frontier from the next read, with no sweep and no timer.
+func (s *Store) LiveWorkClaimsOfKind(kind ref.Kind, live OwnerLive) ([]WorkClaim, error) {
 	if !kind.Valid() {
 		return nil, fmt.Errorf("store: unknown work kind %q", string(kind))
+	}
+	if live == nil {
+		return nil, errOwnerLivenessRequired
 	}
 	rows, err := s.db.Query(
 		`SELECT container_id, item_id, owner, claimed_at FROM work_item_claims WHERE kind = ?`,
@@ -197,7 +210,7 @@ func (s *Store) LiveWorkClaimsOfKind(kind ref.Kind, now time.Time) ([]WorkClaim,
 			Owner:     owner,
 			ClaimedAt: parseTime(claimedAt.String),
 		}
-		if claim.Expired(now) {
+		if !live(claim.Owner) {
 			continue
 		}
 		out = append(out, claim)
@@ -205,8 +218,9 @@ func (s *Store) LiveWorkClaimsOfKind(kind ref.Kind, now time.Time) ([]WorkClaim,
 	return out, rows.Err()
 }
 
-// FindWorkClaim returns the claim recorded for one item, expired or not, so a
-// caller can say how long a stale hold has been sitting there.
+// FindWorkClaim returns the claim row recorded for one item whether or not its
+// owner is still live, so a caller can say who last held a ticket and since
+// when.
 func (s *Store) FindWorkClaim(r ref.WorkRef) (WorkClaim, bool, error) {
 	if err := validItemRef(r); err != nil {
 		return WorkClaim{}, false, err

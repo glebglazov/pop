@@ -100,7 +100,7 @@ func TestArriveWarnsAboutUnfinishedTicketsAndProceeds(t *testing.T) {
 		`],"spawned_sets":[]}`
 	d, storageDir := registryFixture(t, files)
 	d.Tmux = &tmuxtest.Fake{}
-	d.Owner = func() string { return "pane:%9" }
+	asWindow(d, "pane:%9", at(9))
 	mustRegister(t, d, "fog-map")
 	if _, err := ClaimTicket(d, "", "fog-map", "02"); err != nil {
 		t.Fatalf("ClaimTicket: %v", err)

@@ -62,6 +62,16 @@ type Fake struct {
 	// PaneCommandMap is the pane id -> current command map returned by
 	// PaneCommands.
 	PaneCommandMap map[string]string
+	// PanePIDs is the pane id -> pane_pid map AllPanes reports. A pane with no
+	// arranged pid reports 0, which reads as "tmux told us nothing about the
+	// pane's process".
+	PanePIDs map[string]int
+	// AllPanesErr, when set, is what AllPanes returns instead of the arranged
+	// panes — a machine with no tmux server at all.
+	AllPanesErr error
+	// AllPanesCalls counts AllPanes calls, so a test can pin how many times a
+	// read forks the whole-server listing.
+	AllPanesCalls int
 	// PreviewContent is the text CapturePreview returns per pane id.
 	PreviewContent map[string]string
 	// CapturePreviewFunc, when set, replaces CapturePreview entirely — used to
@@ -311,6 +321,23 @@ func (f *Fake) PaneCommands() (map[string]string, error) {
 	return f.PaneCommandMap, nil
 }
 
+// AllPanes reports the panes the fake knows about: the ones arranged (or
+// created) in PaneInfos, plus anything a test only named in PaneCommandMap.
+func (f *Fake) AllPanes() (map[string]tmux.PaneProcess, error) {
+	f.AllPanesCalls++
+	if f.AllPanesErr != nil {
+		return nil, f.AllPanesErr
+	}
+	panes := map[string]tmux.PaneProcess{}
+	for id, cmd := range f.PaneCommandMap {
+		panes[id] = tmux.PaneProcess{Command: cmd, PID: f.PanePIDs[id]}
+	}
+	for id, info := range f.PaneInfos {
+		panes[id] = tmux.PaneProcess{Command: info.Command, PID: f.PanePIDs[id]}
+	}
+	return panes, nil
+}
+
 func (f *Fake) CapturePreview(paneID string) (string, error) {
 	if f.CapturePreviewFunc != nil {
 		return f.CapturePreviewFunc(paneID)
@@ -367,7 +394,36 @@ func (f *Fake) SendKeys(paneID string, keys ...string) error {
 		f.SentCommands = map[string][]string{}
 	}
 	f.SentCommands[paneID] = append(f.SentCommands[paneID], strings.Join(keys, " "))
+	f.runInPane(paneID, keys)
 	return nil
+}
+
+// runInPane models what sending a command line to a pane does to the pane: it
+// is now running that command, not its shell. Without it a pane the fake just
+// spawned an agent into would still read as a bare shell, and every predicate
+// that asks "is this pane busy?" — pane reuse, claim liveness — would see the
+// opposite of what the spawn just arranged.
+func (f *Fake) runInPane(paneID string, keys []string) {
+	if len(keys) < 2 || keys[len(keys)-1] != "Enter" {
+		return
+	}
+	fields := strings.Fields(keys[0])
+	if len(fields) == 0 {
+		return
+	}
+	command := strings.Trim(fields[0], `'"`)
+	if i := strings.LastIndex(command, "/"); i >= 0 {
+		command = command[i+1:]
+	}
+	if command == "" {
+		return
+	}
+	if f.PaneInfos == nil {
+		f.PaneInfos = map[string]tmux.PaneInfo{}
+	}
+	info := f.PaneInfos[paneID]
+	info.Command = command
+	f.PaneInfos[paneID] = info
 }
 
 func (f *Fake) KillPane(paneID string) error {
@@ -390,6 +446,7 @@ func (f *Fake) KillPane(paneID string) error {
 		}
 	}
 	delete(f.PaneTitles, paneID)
+	delete(f.PaneInfos, paneID)
 	return nil
 }
 

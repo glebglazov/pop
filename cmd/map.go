@@ -548,9 +548,9 @@ func runMapClaimWith(d *wayfinder.Deps, w io.Writer, mapID, ticket string) error
 func renderClaim(w io.Writer, result *wayfinder.ClaimResult) {
 	fmt.Fprintf(w, "%s\t%s\n", result.Ticket.ID, result.Path)
 	fmt.Fprintf(w, "map %s, claimed by %s\n", result.MapID, result.Owner)
-	if result.Stole != nil {
-		fmt.Fprintf(w, "stole an expired claim held by %s since %s\n",
-			result.Stole.Owner, result.Stole.ClaimedAt.Format(time.RFC3339))
+	if result.Reclaimed != nil {
+		fmt.Fprintf(w, "reclaimed ticket %s from dead owner %s (claimed %s) — check it for a previous session's drafts\n",
+			result.Ticket.ID, result.Reclaimed.Owner, result.Reclaimed.ClaimedAt.Format(time.RFC3339))
 	}
 	if len(result.UnresolvedBlockers) > 0 {
 		fmt.Fprintf(w, "warning: blocked by %s, still unresolved\n",

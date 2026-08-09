@@ -39,9 +39,16 @@ func at(hour int) time.Time {
 	return time.Date(2026, 8, 3, hour, 0, 0, 0, time.UTC)
 }
 
+// asWindow is the test speaking as one grilling window: the owner its claims
+// carry, the clock it claims at, and — since a claim lives exactly as long as
+// the process in its owner — a pane with an agent running in it for that owner
+// to be alive in. A test that wants the window gone says so afterwards.
 func asWindow(d *Deps, owner string, now time.Time) {
+	fake := atTime(d, now)
 	d.Owner = func() string { return owner }
-	d.Clock = func() time.Time { return now }
+	if paneID, _, ok := parsePaneOwner(owner); ok {
+		grillingPane(fake, paneID)
+	}
 }
 
 // atTime gives a claim fixture a clock and a tmux to spawn panes into, which is
@@ -90,8 +97,8 @@ func TestNextHandsOutTheFrontierInOrderThenRefuses(t *testing.T) {
 	if first.Claim.Owner != "pane:"+first.Pane.PaneID {
 		t.Fatalf("claim owner = %q, want the spawned pane %q", first.Claim.Owner, first.Pane.PaneID)
 	}
-	if first.Claim.Stole != nil {
-		t.Fatalf("a free ticket reported a steal: %+v", first.Claim.Stole)
+	if first.Claim.Reclaimed != nil {
+		t.Fatalf("a free ticket reported a reclaim: %+v", first.Claim.Reclaimed)
 	}
 
 	atTime(d, at(9).Add(time.Minute))
@@ -162,35 +169,42 @@ func TestClaimsLiveOnlyInTheStore(t *testing.T) {
 	}
 }
 
-// TestNextStealsAnExpiredClaim: a grilling pane that died would otherwise hold its
-// ticket forever, so the TTL hands it back — loudly.
-func TestNextStealsAnExpiredClaim(t *testing.T) {
+// TestNextRespawnsIntoADeadSessionsIdlePane is the whole recovery story: the
+// human closes a grilling session, and the ordinary spawn verb hands the ticket
+// back and respawns into the pane it left behind. No release verb, no timer, and
+// the clock never moves.
+func TestNextRespawnsIntoADeadSessionsIdlePane(t *testing.T) {
 	t.Parallel()
 	d, _ := claimFixture(t)
-	atTime(d, at(9))
+	fake := atTime(d, at(9))
 
 	dead, err := nextSpawn(t, d)
 	if err != nil {
 		t.Fatalf("first next: %v", err)
 	}
 
-	// Still held while the claim is fresh: the next pane gets 03 instead.
-	atTime(d, at(11))
+	// Still held while the agent is running: the next pane gets 03 instead.
 	fresh, err := nextSpawn(t, d)
 	if err != nil || fresh.Ticket.ID != "03" {
 		t.Fatalf("next over a live claim = %+v (%v), want 03", fresh, err)
 	}
 
-	atTime(d, at(9).Add(5*time.Hour))
-	stolen, err := nextSpawn(t, d)
+	dropToShell(fake, dead.Pane.PaneID)
+	reclaimed, err := nextSpawn(t, d)
 	if err != nil {
-		t.Fatalf("next after the TTL: %v", err)
+		t.Fatalf("next after the session died: %v", err)
 	}
-	if stolen.Ticket.ID != "01" {
-		t.Fatalf("next after the TTL took %q, want the abandoned 01", stolen.Ticket.ID)
+	if reclaimed.Ticket.ID != "01" {
+		t.Fatalf("next after the session died took %q, want the abandoned 01", reclaimed.Ticket.ID)
 	}
-	if stolen.Claim.Stole == nil || stolen.Claim.Stole.Owner != "pane:"+dead.Pane.PaneID {
-		t.Fatalf("steal was not reported: %+v", stolen.Claim.Stole)
+	if reclaimed.Pane.PaneID != dead.Pane.PaneID {
+		t.Fatalf("reclaim spawned pane %q, want the dead session's idle pane %q",
+			reclaimed.Pane.PaneID, dead.Pane.PaneID)
+	}
+	// Nothing was taken from anybody: the respawned pane is the same pane, so it
+	// re-takes its own row rather than displacing a competitor.
+	if reclaimed.Claim.Reclaimed != nil {
+		t.Fatalf("respawning into its own pane reported a reclaim: %+v", reclaimed.Claim.Reclaimed)
 	}
 }
 

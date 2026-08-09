@@ -14,24 +14,39 @@ func mapTicket(container, item string) ref.WorkRef {
 	return ref.WorkRef{Kind: ref.KindMap, ContainerID: container, ItemID: item}
 }
 
-// TestWorkClaimHoldsRenewsAndExpires walks one ticket's whole claim life: taken,
-// refused to a second window, renewed by its owner, then stealable once the TTL
-// has run out.
-func TestWorkClaimHoldsRenewsAndExpires(t *testing.T) {
+// grilling names the owners whose grilling process is still running. Liveness is
+// the store's only claim-ending rule beside resolution, so every claim test says
+// which sessions are alive rather than which clock it is.
+func grilling(owners ...string) OwnerLive {
+	live := map[string]bool{}
+	for _, owner := range owners {
+		live[owner] = true
+	}
+	return func(owner string) bool { return live[owner] }
+}
+
+func allOwnersLive(string) bool { return true }
+
+// TestWorkClaimHoldsUntilItsOwnerDies walks one ticket's whole claim life: taken,
+// refused to a second window while the first is grilling, re-claimed by its own
+// owner, and reclaimed by anyone once that owner's session is gone. No clock is
+// advanced anywhere — a claim ends when its process does, not on a timer.
+func TestWorkClaimHoldsUntilItsOwnerDies(t *testing.T) {
 	t.Parallel()
 	s := openTestStore(t)
 	at := time.Date(2026, 8, 3, 9, 0, 0, 0, time.UTC)
 	ticket := mapTicket("2026-08-03-demo", "01")
+	alive := grilling("pane:%3")
 
-	first, err := s.ClaimWorkItem(ticket, "pane:%3", at)
+	first, err := s.ClaimWorkItem(ticket, "pane:%3", at, alive)
 	if err != nil {
 		t.Fatalf("ClaimWorkItem: %v", err)
 	}
-	if first.Stole != nil || !first.Claim.ClaimedAt.Equal(at) || first.Claim.Owner != "pane:%3" {
+	if first.Reclaimed != nil || !first.Claim.ClaimedAt.Equal(at) || first.Claim.Owner != "pane:%3" {
 		t.Fatalf("first claim = %+v", first)
 	}
 
-	_, err = s.ClaimWorkItem(ticket, "pid:4242", at.Add(time.Minute))
+	_, err = s.ClaimWorkItem(ticket, "pid:4242", at.Add(time.Minute), alive)
 	if !errors.Is(err, ErrWorkItemClaimed) {
 		t.Fatalf("second window's claim error = %v, want ErrWorkItemClaimed", err)
 	}
@@ -40,43 +55,40 @@ func TestWorkClaimHoldsRenewsAndExpires(t *testing.T) {
 		t.Fatalf("refusal does not name the holder: %v", err)
 	}
 
-	renewed, err := s.ClaimWorkItem(ticket, "pane:%3", at.Add(3*time.Hour))
+	renewed, err := s.ClaimWorkItem(ticket, "pane:%3", at.Add(3*time.Hour), alive)
 	if err != nil {
-		t.Fatalf("owner renewing its own claim: %v", err)
+		t.Fatalf("owner re-claiming its own ticket: %v", err)
 	}
-	if renewed.Stole != nil || !renewed.Claim.ClaimedAt.Equal(at.Add(3*time.Hour)) {
-		t.Fatalf("renewal = %+v, want the TTL reset with no steal", renewed)
+	if renewed.Reclaimed != nil || !renewed.Claim.ClaimedAt.Equal(at.Add(3*time.Hour)) {
+		t.Fatalf("re-claim = %+v, want the same owner and nothing reclaimed", renewed)
 	}
 
-	// Still held four hours after the *renewal*, not after the original claim.
-	if _, err := s.ClaimWorkItem(ticket, "pid:4242", at.Add(6*time.Hour)); !errors.Is(err, ErrWorkItemClaimed) {
-		t.Fatalf("renewed claim expired early: %v", err)
-	}
-
-	stealAt := at.Add(3*time.Hour + WorkClaimTTL)
-	stolen, err := s.ClaimWorkItem(ticket, "pid:4242", stealAt)
+	// The pane's agent dies. The very next claim attempt — same minute — takes
+	// the ticket over and names who left it behind.
+	reclaimed, err := s.ClaimWorkItem(ticket, "pid:4242", at.Add(3*time.Hour), grilling("pid:4242"))
 	if err != nil {
-		t.Fatalf("stealing an expired claim: %v", err)
+		t.Fatalf("reclaiming a dead owner's ticket: %v", err)
 	}
-	if stolen.Stole == nil || stolen.Stole.Owner != "pane:%3" {
-		t.Fatalf("steal did not report the displaced claim: %+v", stolen)
+	if reclaimed.Reclaimed == nil || reclaimed.Reclaimed.Owner != "pane:%3" {
+		t.Fatalf("reclaim did not report the dead owner: %+v", reclaimed)
 	}
-	if stolen.Claim.Owner != "pid:4242" {
-		t.Fatalf("claim after steal = %+v", stolen.Claim)
+	if reclaimed.Claim.Owner != "pid:4242" {
+		t.Fatalf("claim after reclaim = %+v", reclaimed.Claim)
 	}
 }
 
 // TestClaimFirstWorkItemWalksCandidateOrder pins the pick rule `pop map next`
-// leans on: first candidate not held by a live claim, expired holds taken over
-// and reported, and a clear refusal when everything is held.
+// leans on: first candidate whose owner is not still grilling, dead owners taken
+// over and reported, and a clear refusal when every candidate is held.
 func TestClaimFirstWorkItemWalksCandidateOrder(t *testing.T) {
 	t.Parallel()
 	s := openTestStore(t)
 	at := time.Date(2026, 8, 3, 9, 0, 0, 0, time.UTC)
 	demo := ref.WorkRef{Kind: ref.KindMap, ContainerID: "2026-08-03-demo"}
 	candidates := []string{"01", "02", "03"}
+	alive := grilling("pane:%1", "pane:%2", "pane:%3", "pane:%4")
 
-	first, err := s.ClaimFirstWorkItem(demo, candidates, "pane:%1", at)
+	first, err := s.ClaimFirstWorkItem(demo, candidates, "pane:%1", at, alive)
 	if err != nil {
 		t.Fatalf("first next: %v", err)
 	}
@@ -84,7 +96,7 @@ func TestClaimFirstWorkItemWalksCandidateOrder(t *testing.T) {
 		t.Fatalf("first next took %q, want 01", first.Claim.Ref.ItemID)
 	}
 
-	second, err := s.ClaimFirstWorkItem(demo, candidates, "pane:%2", at.Add(time.Second))
+	second, err := s.ClaimFirstWorkItem(demo, candidates, "pane:%2", at.Add(time.Second), alive)
 	if err != nil {
 		t.Fatalf("second next: %v", err)
 	}
@@ -92,23 +104,24 @@ func TestClaimFirstWorkItemWalksCandidateOrder(t *testing.T) {
 		t.Fatalf("second next took %q, want 02", second.Claim.Ref.ItemID)
 	}
 
-	third, err := s.ClaimFirstWorkItem(demo, candidates, "pane:%3", at.Add(2*time.Second))
+	third, err := s.ClaimFirstWorkItem(demo, candidates, "pane:%3", at.Add(2*time.Second), alive)
 	if err != nil || third.Claim.Ref.ItemID != "03" {
 		t.Fatalf("third next = %+v (%v), want 03", third.Claim, err)
 	}
 
-	if _, err := s.ClaimFirstWorkItem(demo, candidates, "pane:%4", at.Add(3*time.Second)); !errors.Is(err, ErrNoClaimableWorkItem) {
+	if _, err := s.ClaimFirstWorkItem(demo, candidates, "pane:%4", at.Add(3*time.Second), alive); !errors.Is(err, ErrNoClaimableWorkItem) {
 		t.Fatalf("fourth next error = %v, want ErrNoClaimableWorkItem", err)
 	}
 
-	// Once 01's claim ages out it is the first candidate again, and the steal
-	// names the window that abandoned it.
-	stolen, err := s.ClaimFirstWorkItem(demo, candidates, "pane:%4", at.Add(WorkClaimTTL))
+	// 01's pane dies, so it leads the candidate order again and the reclaim names
+	// the session that abandoned it.
+	reclaimed, err := s.ClaimFirstWorkItem(demo, candidates, "pane:%4", at.Add(4*time.Second),
+		grilling("pane:%2", "pane:%3", "pane:%4"))
 	if err != nil {
-		t.Fatalf("steal through next: %v", err)
+		t.Fatalf("reclaim through next: %v", err)
 	}
-	if stolen.Claim.Ref.ItemID != "01" || stolen.Stole == nil || stolen.Stole.Owner != "pane:%1" {
-		t.Fatalf("steal through next = %+v, stole %+v", stolen.Claim, stolen.Stole)
+	if reclaimed.Claim.Ref.ItemID != "01" || reclaimed.Reclaimed == nil || reclaimed.Reclaimed.Owner != "pane:%1" {
+		t.Fatalf("reclaim through next = %+v, reclaimed %+v", reclaimed.Claim, reclaimed.Reclaimed)
 	}
 }
 
@@ -141,7 +154,7 @@ func TestConcurrentClaimFirstWorkItemNeverHandsOutTheSameItem(t *testing.T) {
 			defer func() { _ = s.Close() }()
 			owner := "pane:%" + string(rune('a'+i))
 			<-start
-			res, err := s.ClaimFirstWorkItem(demo, candidates, owner, at)
+			res, err := s.ClaimFirstWorkItem(demo, candidates, owner, at, allOwnersLive)
 			if err != nil {
 				errs[i] = err
 				return
@@ -167,7 +180,11 @@ func TestConcurrentClaimFirstWorkItemNeverHandsOutTheSameItem(t *testing.T) {
 	}
 }
 
-func TestLiveWorkClaimsOfKindDropsExpiredAndOtherKinds(t *testing.T) {
+// TestLiveWorkClaimsOfKindDropsDeadOwnersAndOtherKinds: the read that overlays
+// claims onto a Map listing returns only the rows whose session is still there.
+// A dead owner's row stays on disk and simply stops being live, which is how the
+// ticket reappears on the frontier with nothing swept.
+func TestLiveWorkClaimsOfKindDropsDeadOwnersAndOtherKinds(t *testing.T) {
 	t.Parallel()
 	s := openTestStore(t)
 	at := time.Date(2026, 8, 3, 9, 0, 0, 0, time.UTC)
@@ -176,15 +193,15 @@ func TestLiveWorkClaimsOfKindDropsExpiredAndOtherKinds(t *testing.T) {
 		mapTicket("other", "02"),
 		{Kind: ref.KindTaskSet, ContainerID: "2026-08-02-foo", ItemID: "01"},
 	} {
-		if _, err := s.ClaimWorkItem(r, "pane:%1", at); err != nil {
+		if _, err := s.ClaimWorkItem(r, "pane:%1", at, allOwnersLive); err != nil {
 			t.Fatalf("ClaimWorkItem(%s): %v", r, err)
 		}
 	}
-	if _, err := s.ClaimWorkItem(mapTicket("demo", "09"), "pane:%2", at.Add(-WorkClaimTTL)); err != nil {
+	if _, err := s.ClaimWorkItem(mapTicket("demo", "09"), "pane:%2", at, allOwnersLive); err != nil {
 		t.Fatal(err)
 	}
 
-	live, err := s.LiveWorkClaimsOfKind(ref.KindMap, at.Add(time.Hour))
+	live, err := s.LiveWorkClaimsOfKind(ref.KindMap, grilling("pane:%1"))
 	if err != nil {
 		t.Fatalf("LiveWorkClaimsOfKind: %v", err)
 	}
@@ -197,25 +214,32 @@ func TestLiveWorkClaimsOfKindDropsExpiredAndOtherKinds(t *testing.T) {
 	}
 
 	claim, found, err := s.FindWorkClaim(mapTicket("demo", "09"))
-	if err != nil || !found || !claim.Expired(at) {
-		t.Fatalf("FindWorkClaim(expired) = %+v, %v, %v", claim, found, err)
+	if err != nil || !found || claim.Owner != "pane:%2" {
+		t.Fatalf("FindWorkClaim(dead owner) = %+v, %v, %v", claim, found, err)
 	}
 }
 
 // TestWorkClaimRefusesContainerRefs keeps the table's key honest: a claim names
-// an item, never the whole container.
+// an item, never the whole container. A missing liveness policy is refused the
+// same way, rather than quietly holding every dead owner's claim forever.
 func TestWorkClaimRefusesContainerRefs(t *testing.T) {
 	t.Parallel()
 	s := openTestStore(t)
 	at := time.Now().UTC()
 	container := ref.WorkRef{Kind: ref.KindMap, ContainerID: "demo"}
-	if _, err := s.ClaimWorkItem(container, "pane:%1", at); err == nil {
+	if _, err := s.ClaimWorkItem(container, "pane:%1", at, allOwnersLive); err == nil {
 		t.Fatal("claiming a container ref was accepted")
 	}
-	if _, err := s.ClaimWorkItem(mapTicket("demo", "01"), "", at); err == nil {
+	if _, err := s.ClaimWorkItem(mapTicket("demo", "01"), "", at, allOwnersLive); err == nil {
 		t.Fatal("an ownerless claim was accepted")
 	}
-	if _, err := s.ClaimFirstWorkItem(mapTicket("demo", "01"), []string{"01"}, "pane:%1", at); err == nil {
+	if _, err := s.ClaimFirstWorkItem(mapTicket("demo", "01"), []string{"01"}, "pane:%1", at, allOwnersLive); err == nil {
 		t.Fatal("ClaimFirstWorkItem accepted an item ref as its container")
+	}
+	if _, err := s.ClaimWorkItem(mapTicket("demo", "01"), "pane:%1", at, nil); err == nil {
+		t.Fatal("a claim with no liveness policy was accepted")
+	}
+	if _, err := s.LiveWorkClaimsOfKind(ref.KindMap, nil); err == nil {
+		t.Fatal("a live-claim read with no liveness policy was accepted")
 	}
 }

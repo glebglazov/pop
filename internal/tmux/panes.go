@@ -2,6 +2,7 @@ package tmux
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -61,6 +62,42 @@ func (t *realTmux) PaneCommands() (map[string]string, error) {
 		}
 	}
 	return result, nil
+}
+
+// PaneProcess is what one live pane is running: its foreground command and the
+// pid of the pane's process. The pid distinguishes a pane id that tmux reused
+// across server restarts from the pane a caller remembered.
+type PaneProcess struct {
+	Command string
+	PID     int
+}
+
+// AllPanes lists every live pane across every session with what it is running,
+// in one fork. It is the whole-server answer callers memoize instead of probing
+// pane by pane. An error means no reachable tmux server, which is not the same
+// as an empty server — callers decide what to make of it.
+func (t *realTmux) AllPanes() (map[string]PaneProcess, error) {
+	out, err := t.run.output("list-panes", "-a", "-F", "#{pane_id} #{pane_current_command} #{pane_pid}")
+	if err != nil {
+		return nil, err
+	}
+	panes := map[string]PaneProcess{}
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		pane := PaneProcess{Command: fields[1]}
+		if len(fields) >= 3 {
+			pid, err := strconv.Atoi(fields[2])
+			if err != nil {
+				return nil, fmt.Errorf("unexpected list-panes pid: %q", line)
+			}
+			pane.PID = pid
+		}
+		panes[fields[0]] = pane
+	}
+	return panes, nil
 }
 
 // CapturePreview captures a pane's visible content plus 50 lines of scrollback

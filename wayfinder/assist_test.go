@@ -118,8 +118,7 @@ func TestAssistClaimsNothing(t *testing.T) {
 func TestAssistReachableWithAFullyClaimedFrontier(t *testing.T) {
 	t.Parallel()
 	d, _ := claimFixture(t)
-	atTime(d, at(9))
-	d.Owner = func() string { return "pane:%elsewhere" }
+	asWindow(d, "pane:%elsewhere", at(9))
 	for _, ticket := range []string{"01", "03"} {
 		if _, err := ClaimTicket(d, "", claimMapID, ticket); err != nil {
 			t.Fatalf("claim %s: %v", ticket, err)

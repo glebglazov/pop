@@ -74,6 +74,10 @@ type Tmux interface {
 	// PaneCommands maps every live pane id to its current foreground command,
 	// across all sessions (list-panes -a).
 	PaneCommands() (map[string]string, error)
+	// AllPanes lists every live pane across all sessions with its current
+	// foreground command and pane pid (list-panes -a), in one fork. An error
+	// means no reachable tmux server.
+	AllPanes() (map[string]PaneProcess, error)
 	// CapturePreview captures a pane's visible content plus 50 lines of
 	// scrollback with escape sequences preserved (capture-pane -e), for
 	// coloured preview display. It differs from CapturePane, which strips them.
