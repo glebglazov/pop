@@ -267,7 +267,9 @@ func runConfigRepoSetWith(cd *config.Deps, cfg *config.Config, out io.Writer, ch
 }
 
 // runConfigRepoGetWith prints the settable keys with the value in effect for
-// this repository and the layer that supplied it.
+// this repository and the layer that supplied it. Keys that declare a reach
+// (ADR-0198) list each actor's shape or reason under the value row; a key with
+// no declared reach prints exactly the KEY / VALUE / SOURCE line it always did.
 func runConfigRepoGetWith(cd *config.Deps, cfg *config.Config, out io.Writer, checkout, key string) error {
 	if key != "" {
 		if !slices.Contains(config.RepoSettableKeys(), key) {
@@ -294,6 +296,11 @@ func runConfigRepoGetWith(cd *config.Deps, cfg *config.Config, out io.Writer, ch
 			source = fmt.Sprintf("%s (%s)", source, setting.Locus)
 		}
 		fmt.Fprintf(tw, "  %s\t%s\t%s\n", setting.Key, value, source)
+		if reach, ok := config.ConfigKeyReachFor(setting.Key); ok {
+			for _, line := range reach.Lines {
+				fmt.Fprintf(tw, "    %s\t%s\t\n", line.Actor, line.Detail)
+			}
+		}
 	}
 	return tw.Flush()
 }

@@ -161,8 +161,20 @@ func TestConfigRepoSetSaysWhenAHandAuthoredBlockStillWins(t *testing.T) {
 	if !strings.Contains(got, "9") || !strings.Contains(got, string(config.RepoSettingOverride)) {
 		t.Errorf("get = %q, want 9 from the hand-authored layer", got)
 	}
-	if strings.Contains(got, "40") {
-		t.Errorf("get = %q, want the pop-written 40 not to be reported as in effect", got)
+	// The VALUE cell is the second tab-separated field of the turn_cap row —
+	// do not search the whole buffer for "40", because the temp path or a reach
+	// line can contain those digits without the pop-written value being in effect.
+	for _, line := range strings.Split(got, "\n") {
+		if !strings.HasPrefix(line, "  turn_cap") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			t.Fatalf("turn_cap row %q has no value cell", line)
+		}
+		if fields[1] != "9" {
+			t.Errorf("turn_cap value = %q, want 9 (hand-authored); pop-written 40 must not win", fields[1])
+		}
 	}
 }
 
@@ -202,5 +214,63 @@ func TestConfigRepoGetReportsUnsetKeys(t *testing.T) {
 	}
 	if !strings.Contains(got, string(config.RepoSettingUnset)) {
 		t.Errorf("get = %q, want unset keys reported as unset", got)
+	}
+}
+
+// TestConfigRepoGetShowsTurnCapReach pins ADR-0198 at the command surface: the
+// effective value and source are joined by what the key actually reaches —
+// every registered actor line appears beside the set value.
+func TestConfigRepoGetShowsTurnCapReach(t *testing.T) {
+	fx := newConfigRepoFixture(t, "")
+	if _, err := fx.set(t, fx.main, "turn_cap", "40"); err != nil {
+		t.Fatalf("config repo set: %v", err)
+	}
+	got := fx.get(t, fx.feature, "turn_cap")
+	if !strings.Contains(got, "turn_cap") || !strings.Contains(got, "40") {
+		t.Errorf("get = %q, want turn_cap 40", got)
+	}
+	reach, ok := config.ConfigKeyReachFor("turn_cap")
+	if !ok {
+		t.Fatal("turn_cap reach is not registered")
+	}
+	for _, line := range reach.Lines {
+		if !strings.Contains(got, line.Actor) || !strings.Contains(got, line.Detail) {
+			t.Errorf("get = %q, want reach line %s / %s", got, line.Actor, line.Detail)
+		}
+	}
+	if !strings.Contains(got, "--max-turns N") {
+		t.Errorf("get = %q, want claude's argv shape with the bound as N", got)
+	}
+}
+
+// TestConfigRepoGetWithoutReachKeepsPriorRowShape proves a key that declares no
+// reach still prints only KEY / VALUE / SOURCE — the pre-reach row, unchanged.
+func TestConfigRepoGetWithoutReachKeepsPriorRowShape(t *testing.T) {
+	prior, had := config.ConfigKeyReachFor("turn_cap")
+	config.ClearConfigKeyReach("turn_cap")
+	t.Cleanup(func() {
+		if had {
+			config.RegisterConfigKeyReach("turn_cap", prior)
+		}
+	})
+
+	fx := newConfigRepoFixture(t, "")
+	got := fx.get(t, fx.main, "turn_cap")
+	if strings.Contains(got, "--max-turns") || strings.Contains(got, "claude") {
+		t.Errorf("get = %q, want no reach lines when turn_cap declares none", got)
+	}
+	if !strings.Contains(got, "turn_cap") || !strings.Contains(got, string(config.RepoSettingUnset)) {
+		t.Errorf("get = %q, want the unset KEY/VALUE/SOURCE row", got)
+	}
+	// Exactly one data row under the header: the key itself, not actor lines.
+	lines := strings.Split(strings.TrimRight(got, "\n"), "\n")
+	dataRows := 0
+	for _, line := range lines {
+		if strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "  KEY") {
+			dataRows++
+		}
+	}
+	if dataRows != 1 {
+		t.Errorf("get has %d data rows, want 1 (no reach continuations):\n%s", dataRows, got)
 	}
 }
