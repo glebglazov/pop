@@ -428,9 +428,9 @@ var migrations = []string{
 	// outlives the window that took it with nothing able to release it. Keyed by
 	// the whole item ref so the table is cross-kind from the start — a Task set's
 	// item claims the same way. owner is a tmux pane id when the claimer runs
-	// inside tmux and a pid otherwise, both opaque here; claimed_at drives the TTL
-	// that makes an abandoned claim stealable, which is the only liveness policy
-	// available when the owner may be a pane rather than a process.
+	// inside tmux and a pid otherwise, both opaque here; claimed_at is what a
+	// reclaim reports, not a deadline — whether the owner still lives is a
+	// question the caller answers (ADR-0193).
 	`CREATE TABLE work_item_claims (
 		kind         TEXT NOT NULL,
 		container_id TEXT NOT NULL,

@@ -210,6 +210,28 @@ func TestMapNextAndClaimDriveParallelGrilling(t *testing.T) {
 	if got := claimedOwner(t, reclaimed.String()); got != firstOwner {
 		t.Fatalf("reclaim spawned into %q, want the dead session's idle pane %q", got, firstOwner)
 	}
+	if strings.Contains(first.String(), "reclaim") {
+		t.Fatalf("claiming a free ticket reported a reclaim:\n%s", first.String())
+	}
+
+	// The session dies once more, and this time tmux has handed the pane's id to
+	// a new process, so the claim that takes 01 over names an owner the dead one
+	// did not. That takeover is reported: the human's only clue that an earlier
+	// session left drafts behind in the Map's folder.
+	fake.PaneInfos[firstPane] = tmuxmod.PaneInfo{Session: wayfinder.MapSessionName("demo"), Command: "zsh"}
+	fake.PanePIDs[firstPane] = fake.PanePIDs[firstPane] + 1
+	var reported bytes.Buffer
+	if err := runMapNextWith(d, &reported, "demo", false); err != nil {
+		t.Fatalf("next after the pane id was reused: %v", err)
+	}
+	if want := "reclaimed ticket 01 from dead owner " + firstOwner; !strings.Contains(reported.String(), want) {
+		t.Fatalf("next did not report the reclaim (%q):\n%s", want, reported.String())
+	}
+	for _, forbidden := range []string{"stole", "stolen", "steal", "expire", "frees itself"} {
+		if strings.Contains(reported.String(), forbidden) {
+			t.Fatalf("the reclaim report says %q:\n%s", forbidden, reported.String())
+		}
+	}
 
 	// `pop map status <map-id>` is where a human sees who holds what; the files
 	// never say.

@@ -39,7 +39,8 @@ Grilling then draws from the frontier: ` + "`pop map next`" + ` claims the first
 open, unblocked, unclaimed ticket, grills it in a pane and prints where to read it,
 so several panes can grill one Map at once, and ` + "`pop map fan-out`" + ` does that
 for every frontier ticket in one act. A claim is a pop.db row owned by the pane
-running the agent, never a file state; it frees itself after four hours.
+running the agent, never a file state; it lasts exactly as long as that agent, so
+killing the pane puts the ticket back on the frontier.
 
 ` + "`pop map assist`" + ` is the way in that holds no ticket: a session scoped to the
 whole Map, for an idea about the Map's own shape. It claims nothing and resolves

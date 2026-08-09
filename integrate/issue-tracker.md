@@ -218,7 +218,11 @@ when you are naming one. `pop map fan-out [<map-id>]` does `next` for every
 frontier ticket at once and prints the same block per ticket plus a total; an
 empty frontier is a message and exit 0. A claim is a pop.db row owned by the tmux
 pane running the agent, not a file state, so never write one into the markdown; it
-frees itself after four hours. A ticket is **unblocked** when every blocker is
+lasts exactly as long as that agent, so killing the pane puts the ticket back on
+the frontier — there is no release verb and no timer. Taking over a ticket whose
+session died is the ordinary path: the spawn reports the reclaim and names the dead
+owner, so you know to look in the Map folder for its half-written drafts. A ticket
+is **unblocked** when every blocker is
 `resolved`; the **frontier** is the open, unblocked, unclaimed tickets — the edge
 of the known, and the only thing `next` and `fan-out` hand out.
 

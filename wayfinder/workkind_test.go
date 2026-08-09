@@ -3,9 +3,12 @@ package wayfinder
 import (
 	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/glebglazov/pop/config"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 	"github.com/glebglazov/pop/repogroup"
 	"github.com/glebglazov/pop/tasks"
@@ -228,6 +231,34 @@ func TestMapKindWorkVerbOpensTheGrillingPane(t *testing.T) {
 	if len(fake.Switched) != 0 {
 		t.Fatalf("the verb moved the caller itself: %v", fake.Switched)
 	}
+	if strings.Contains(out.Message, "reclaim") {
+		t.Fatalf("working a free ticket reported a reclaim: %q", out.Message)
+	}
+
+	// The grilling session ends and tmux hands that pane's id to a new process:
+	// the ticket is back on the frontier, and the spawn that takes it over says
+	// so on the dashboard's own outcome line, naming the dead owner and when it
+	// claimed — the human's only clue that drafts may be lying in the Map folder.
+	pane := fake.Windows[session]["map"][0]
+	deadOwner := "pane:" + pane + "/" + strconv.Itoa(fake.PanePIDs[pane])
+	fake.PaneInfos[pane] = tmuxmod.PaneInfo{Session: session, Command: "zsh"}
+	fake.PanePIDs[pane] = fake.PanePIDs[pane] + 1
+	again, err := k.Perform(active, nil, VerbWork)
+	if err != nil {
+		t.Fatalf("work verb after the session died: %v", err)
+	}
+	if !strings.Contains(again.Message, "reclaimed 01 from dead owner "+deadOwner) {
+		t.Fatalf("outcome message = %q, want it to report the reclaim from %s", again.Message, deadOwner)
+	}
+	if !strings.Contains(again.Message, "(claimed ") {
+		t.Fatalf("outcome message = %q, want it to say when the dead owner claimed", again.Message)
+	}
+	for _, forbidden := range []string{"stole", "stolen", "steal", "expire", "warning"} {
+		if strings.Contains(again.Message, forbidden) {
+			t.Fatalf("outcome message says %q: %s", forbidden, again.Message)
+		}
+	}
+
 	// The arrived Map has no frontier, so there is nothing to work and the verb
 	// says so instead of opening an empty window.
 	for _, c := range containers {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/fanout"
@@ -373,7 +374,23 @@ func (k *MapKind) workTicket(c work.Container, ticketID string, focus bool) (wor
 		return work.Outcome{}, err
 	}
 	message := fmt.Sprintf("grilling %s/%s in %s", target.ID, ticket.ID, spawned.Pane.Session.Name)
+	if note := reclaimNote(spawned.Claim); note != "" {
+		message += "; " + note
+	}
 	return spawnOutcome(spawned.Pane.Session.Name, checkout, message, focus), nil
+}
+
+// reclaimNote is the one thing a takeover carries that the human can read
+// nowhere else: an earlier session ended without resolving, so the Map's folder
+// may hold its half-written ADR and glossary drafts. It is a report, not a
+// warning — reclaiming a dead session's ticket is the ordinary path — and a free
+// ticket adds nothing.
+func reclaimNote(claim *ClaimResult) string {
+	if claim == nil || claim.Reclaimed == nil {
+		return ""
+	}
+	return fmt.Sprintf("reclaimed %s from dead owner %s (claimed %s) — check the Map folder for its drafts",
+		claim.Ticket.ID, claim.Reclaimed.Owner, claim.Reclaimed.ClaimedAt.Format(time.RFC3339))
 }
 
 // fanOutFrontier spawns one Grilling pane per frontier ticket. An empty frontier
@@ -392,6 +409,11 @@ func (k *MapKind) fanOutFrontier(c work.Container, focus bool) (work.Outcome, er
 		return work.Outcome{}, ErrEmptyFrontier
 	}
 	message := fmt.Sprintf("fanned out %d of %s into %s", len(out.Spawned), target.ID, out.Session.Name)
+	for i := range out.Spawned {
+		if note := reclaimNote(out.Spawned[i].Claim); note != "" {
+			message += "; " + note
+		}
+	}
 	return spawnOutcome(out.Session.Name, checkout, message, focus), nil
 }
 
