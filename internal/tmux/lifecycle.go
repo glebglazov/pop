@@ -49,17 +49,38 @@ func (t *realTmux) InTmux() bool {
 // inConfiguredServer is the pure half of InTmux: given $TMUX's value and the
 // configured socket name, report whether the caller is inside that server.
 func inConfiguredServer(tmuxEnv, socket string) bool {
+	return classifyPresence(tmuxEnv, socket) == presenceInside
+}
+
+// presence is the caller's relationship to the configured tmux server
+// (ADR-0199 decision 3): inside it, outside tmux entirely, or inside a
+// foreign server.
+type presence int
+
+const (
+	presenceOutside presence = iota
+	presenceInside
+	presenceForeign
+)
+
+// classifyPresence is the pure three-state classifier behind InTmux and the
+// nest refusal: empty $TMUX → outside; matching (or unset) socket → inside;
+// $TMUX set against a different configured socket → foreign.
+func classifyPresence(tmuxEnv, socket string) presence {
 	if tmuxEnv == "" {
-		return false
+		return presenceOutside
 	}
 	if socket == "" {
-		return true
+		return presenceInside
 	}
 	envPath := tmuxEnvSocketPath(tmuxEnv)
 	if envPath == "" {
-		return false
+		return presenceOutside
 	}
-	return sameResolvedPath(envPath, configuredSocketPath(socket))
+	if sameResolvedPath(envPath, configuredSocketPath(socket)) {
+		return presenceInside
+	}
+	return presenceForeign
 }
 
 // tmuxEnvSocketPath returns the socket path field of a $TMUX value.
@@ -135,13 +156,45 @@ func Ensure(t Tmux, name, dir string) error {
 }
 
 // SwitchTarget jumps to an existing session or pane id without creating
-// anything: switch-client when already inside tmux, attach-session (stdio
-// wired) when outside.
+// anything: switch-client when already inside the configured server,
+// attach-session (stdio wired) when outside tmux entirely, and a refusal
+// when the caller sits in a foreign server (ADR-0199 decision 3). Pop never
+// clears $TMUX to force a nested attach.
 func SwitchTarget(t Tmux, target string) error {
 	if t.InTmux() {
 		return t.SwitchClient(target)
 	}
+	if err := refuseIfForeignServer(t); err != nil {
+		return err
+	}
 	return t.AttachSession(target)
+}
+
+// refuseIfForeignServer returns a nest-refusal error when the caller is
+// inside a tmux server other than the one pop is configured for. Non-real
+// Tmux implementations arrange the foreign case themselves (or never hit
+// it): only *realTmux carries a configured socket name to compare.
+func refuseIfForeignServer(t Tmux) error {
+	rt, ok := t.(*realTmux)
+	if !ok {
+		return nil
+	}
+	return foreignServerError(os.Getenv("TMUX"), rt.socket)
+}
+
+// foreignServerError is the pure half of the nest refusal: when $TMUX names
+// a different socket than the configured one, return an error that names
+// both sockets and both ways out (detach, or change tmux.socket). Nil when
+// the caller is not foreign — including when no socket is configured.
+func foreignServerError(tmuxEnv, socket string) error {
+	if classifyPresence(tmuxEnv, socket) != presenceForeign {
+		return nil
+	}
+	caller := filepath.Base(tmuxEnvSocketPath(tmuxEnv))
+	return fmt.Errorf(
+		"refusing to nest tmux: pop is configured for socket %q (tmux.socket), but you are attached to %q. Detach from the current server first, or change tmux.socket to match the server you are in",
+		socket, caller,
+	)
 }
 
 // Attach ensures the session for name at dir exists, then switches to or

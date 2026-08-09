@@ -45,6 +45,9 @@ func SwitchAndZoom(t Tmux, target string) error {
 		}
 		return t.ZoomPane(target)
 	}
+	if err := refuseIfForeignServer(t); err != nil {
+		return err
+	}
 	if !zoomed {
 		if err := t.ZoomPane(target); err != nil {
 			debug.Error("SwitchAndZoom: pre-attach zoom: %v", err)

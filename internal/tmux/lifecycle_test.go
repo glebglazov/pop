@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -210,4 +211,136 @@ func TestRealTmuxInTmuxUsesSocket(t *testing.T) {
 	if !unset.InTmux() {
 		t.Fatal("unset socket must treat any $TMUX as inside")
 	}
+}
+
+// TestClassifyPresence covers ADR-0199 decision 3's three states.
+func TestClassifyPresence(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("TMUX_TMPDIR", root)
+	uid := os.Getuid()
+	sockDir := filepath.Join(root, fmt.Sprintf("tmux-%d", uid))
+	if err := os.MkdirAll(sockDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := classifyPresence("", "pop"); got != presenceOutside {
+		t.Fatalf("empty $TMUX = %v, want outside", got)
+	}
+	if got := classifyPresence("", ""); got != presenceOutside {
+		t.Fatalf("empty $TMUX with unset socket = %v, want outside", got)
+	}
+
+	popSock := filepath.Join(sockDir, "pop")
+	if got := classifyPresence(popSock+",1,0", "pop"); got != presenceInside {
+		t.Fatalf("matching socket = %v, want inside", got)
+	}
+	if got := classifyPresence("/anywhere,1,0", ""); got != presenceInside {
+		t.Fatalf("unset socket with $TMUX = %v, want inside", got)
+	}
+
+	defaultSock := filepath.Join(sockDir, "default")
+	if got := classifyPresence(defaultSock+",1,0", "pop"); got != presenceForeign {
+		t.Fatalf("foreign socket = %v, want foreign", got)
+	}
+}
+
+// TestForeignServerErrorNamesBothSocketsAndFixes proves the nest-refusal
+// message names the configured socket, the caller's socket, and both ways out.
+func TestForeignServerErrorNamesBothSocketsAndFixes(t *testing.T) {
+	err := foreignServerError("/tmp/tmux-501/default,1,0", "pop")
+	if err == nil {
+		t.Fatal("expected foreign refusal")
+	}
+	msg := err.Error()
+	for _, want := range []string{"pop", "default", "tmux.socket", "Detach"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("refusal %q missing %q", msg, want)
+		}
+	}
+	if err := foreignServerError("", "pop"); err != nil {
+		t.Errorf("outside must not refuse: %v", err)
+	}
+	if err := foreignServerError("/tmp/tmux-501/pop,1,0", "pop"); err != nil {
+		t.Errorf("matching socket must not refuse: %v", err)
+	}
+	if err := foreignServerError("/anywhere,1,0", ""); err != nil {
+		t.Errorf("unset socket must not refuse: %v", err)
+	}
+}
+
+// TestSwitchTargetForeignRefusesWithoutTouchingTMUX proves ADR-0199 decision
+// 3: a foreign server is refused, $TMUX is left alone, and neither switch nor
+// attach runs.
+func TestSwitchTargetForeignRefusesWithoutTouchingTMUX(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("TMUX_TMPDIR", root)
+	uid := os.Getuid()
+	sockDir := filepath.Join(root, fmt.Sprintf("tmux-%d", uid))
+	if err := os.MkdirAll(sockDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	foreign := filepath.Join(sockDir, "default") + ",1,0"
+	t.Setenv("TMUX", foreign)
+
+	rec := &recordingRunner{}
+	tm := &realTmux{run: rec, socket: "pop"}
+	err := SwitchTarget(tm, "work")
+	if err == nil {
+		t.Fatal("expected foreign refusal")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "pop") || !strings.Contains(msg, "default") {
+		t.Errorf("refusal must name both sockets, got %q", msg)
+	}
+	if !strings.Contains(msg, "tmux.socket") || !strings.Contains(msg, "Detach") {
+		t.Errorf("refusal must name both fixes, got %q", msg)
+	}
+	if got := os.Getenv("TMUX"); got != foreign {
+		t.Errorf("$TMUX rewritten to %q, want left as %q", got, foreign)
+	}
+	if len(rec.calls) != 0 || len(rec.attachCalls) != 0 {
+		t.Errorf("tmux must not be invoked on refusal, got calls=%v attach=%v", rec.calls, rec.attachCalls)
+	}
+}
+
+// TestSwitchTargetInsideAndOutsideUnchanged pins decision 3's non-foreign
+// paths: configured-socket → switch-client, no-tmux → attach-session.
+func TestSwitchTargetInsideAndOutsideUnchanged(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("TMUX_TMPDIR", root)
+	uid := os.Getuid()
+	sockDir := filepath.Join(root, fmt.Sprintf("tmux-%d", uid))
+	if err := os.MkdirAll(sockDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("inside configured switches", func(t *testing.T) {
+		t.Setenv("TMUX", filepath.Join(sockDir, "pop")+",1,0")
+		rec := &recordingRunner{}
+		tm := &realTmux{run: rec, socket: "pop"}
+		if err := SwitchTarget(tm, "work"); err != nil {
+			t.Fatal(err)
+		}
+		if len(rec.calls) != 1 || rec.calls[0][0] != "switch-client" {
+			t.Fatalf("calls = %v, want switch-client", rec.calls)
+		}
+		if len(rec.attachCalls) != 0 {
+			t.Fatalf("attachCalls = %v, want none", rec.attachCalls)
+		}
+	})
+
+	t.Run("outside attaches", func(t *testing.T) {
+		t.Setenv("TMUX", "")
+		rec := &recordingRunner{}
+		tm := &realTmux{run: rec, socket: "pop"}
+		if err := SwitchTarget(tm, "work"); err != nil {
+			t.Fatal(err)
+		}
+		if len(rec.attachCalls) != 1 || rec.attachCalls[0][0] != "attach-session" {
+			t.Fatalf("attachCalls = %v, want attach-session", rec.attachCalls)
+		}
+		if len(rec.calls) != 0 {
+			t.Fatalf("calls = %v, want none", rec.calls)
+		}
+	})
 }
