@@ -58,6 +58,21 @@ many days, and the repository must stay clean for all of it. The decisions
 reach the repo later, minted by the slice that implements them (see *Closing*
 below).
 
+## Resume what a prior session already wrote
+
+Before the first round, read whatever this ticket has already produced in the
+Map directory: the ticket's own `## Answer` section, an `adrs/<8hex>-<slug>.md`
+draft, a `context/NN-<slug>.md` op draft, and a `prototypes/NN-<slug>/`
+directory. A ticket you are opening may be a reclaim of a session that died
+mid-interview and left any of these half-written.
+
+Treat what you find as the state of the conversation so far, not as prior art
+to consult — resume the interview from the frontier it leaves open, and
+continue each file you find in place rather than minting a fresh one beside
+it. A second ADR draft or a second context op file for the same ticket is the
+one failure mode this step exists to prevent: the claim it inherits is fresh,
+but the work the claim protects is not, and idempotence has to cover both.
+
 ## Read the glossary, draft your ops into the Map
 
 Read the project's glossary before the first round and challenge the user's
