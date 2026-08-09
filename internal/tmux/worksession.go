@@ -65,11 +65,15 @@ func (t *realTmux) StampWorkSession(session, kind, id string) error {
 
 // WorkSessions lists every live session pop stamped, in one list-sessions
 // round-trip. Unstamped sessions are omitted: a consumer asking this question
-// wants the Work sessions, and an empty kind is the honest "not one".
+// wants the Work sessions, and an empty kind is the honest "not one". An
+// absent server is an empty list, not an error (ADR-0199 decision 8).
 func (t *realTmux) WorkSessions() ([]WorkSession, error) {
 	out, err := t.run.output("list-sessions", "-F",
 		"#{session_name}\t#{"+optWorkKind+"}\t#{"+optWorkID+"}\t#{session_path}")
 	if err != nil {
+		if absentServer(err) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	var sessions []WorkSession

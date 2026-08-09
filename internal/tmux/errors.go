@@ -24,3 +24,16 @@ func outputError(err error) error {
 	}
 	return err
 }
+
+// absentServer reports whether err is tmux saying no server is listening on
+// the addressed socket. tmux itself does not start a server for list-* reads
+// (ADR-0199 decision 8); the wording varies by version and by whether the
+// socket file is missing ("error connecting to …") or the server has already
+// exited ("no server running on …").
+func absentServer(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "no server") || strings.Contains(msg, "error connecting to")
+}

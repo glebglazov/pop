@@ -50,6 +50,42 @@ func TestEnsureCreatesWhenMissing(t *testing.T) {
 	}
 }
 
+// TestReadSurfacesNeverStartAServer covers ADR-0199 decision 8: listing verbs
+// and the Ensure-free read path leave Fake.Live empty. Session-creating
+// commands still populate it on demand.
+func TestReadSurfacesNeverStartAServer(t *testing.T) {
+	f := &tmuxtest.Fake{}
+
+	if _, err := f.Sessions(); err != nil {
+		t.Fatalf("Sessions: %v", err)
+	}
+	if _, err := f.WorkSessions(); err != nil {
+		t.Fatalf("WorkSessions: %v", err)
+	}
+	if _, err := f.ListActivityPanes(); err != nil {
+		t.Fatalf("ListActivityPanes: %v", err)
+	}
+	if _, err := f.ListWindowPanes(); err != nil {
+		t.Fatalf("ListWindowPanes: %v", err)
+	}
+	if _, err := f.PaneCommands(); err != nil {
+		t.Fatalf("PaneCommands: %v", err)
+	}
+	if _, err := f.AllPanes(); err != nil {
+		t.Fatalf("AllPanes: %v", err)
+	}
+	if len(f.Live) != 0 {
+		t.Fatalf("Live = %v after reads, want empty (no server started)", f.Live)
+	}
+
+	if err := tmux.Ensure(f, "work", "/proj"); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	if f.Live["work"] != "/proj" {
+		t.Fatalf("Live[work] = %q after Ensure, want /proj (session-creating path starts the server)", f.Live["work"])
+	}
+}
+
 func TestEnsureNoopWhenPresent(t *testing.T) {
 	f := &tmuxtest.Fake{Live: map[string]string{"work": "/old"}}
 

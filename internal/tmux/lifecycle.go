@@ -144,7 +144,9 @@ func PaneIDFromEnv() string {
 }
 
 // Ensure creates the session for name rooted at dir if it does not already
-// exist. A no-op when the session is already live.
+// exist. A no-op when the session is already live. This is the session-creating
+// chokepoint that brings a tmux server up when absent (ADR-0199 decision 8) —
+// read surfaces must never call it; they report an empty world instead.
 func Ensure(t Tmux, name, dir string) error {
 	if t.HasSession(name) {
 		return nil

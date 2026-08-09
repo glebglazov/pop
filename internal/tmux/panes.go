@@ -52,6 +52,9 @@ func (t *realTmux) IsActivePane(paneID string) bool {
 func (t *realTmux) PaneCommands() (map[string]string, error) {
 	out, err := t.run.output("list-panes", "-a", "-F", "#{pane_id} #{pane_current_command}")
 	if err != nil {
+		if absentServer(err) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	result := make(map[string]string)

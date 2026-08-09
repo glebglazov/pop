@@ -13,7 +13,8 @@ type WindowPane struct {
 
 // ListWindowPanes returns every live pane across all sessions with its window
 // name and foreground command — one list-panes -a round-trip for wayfinder
-// window liveness on the Work dashboard (ADR-0158).
+// window liveness on the Work dashboard (ADR-0158). An absent server is an
+// empty list, not an error (ADR-0199 decision 8).
 func (t *realTmux) ListWindowPanes() ([]WindowPane, error) {
 	format := strings.Join([]string{
 		"#{session_name}",
@@ -23,6 +24,9 @@ func (t *realTmux) ListWindowPanes() ([]WindowPane, error) {
 	}, "\t")
 	out, err := t.run.output("list-panes", "-a", "-F", format)
 	if err != nil {
+		if absentServer(err) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	var panes []WindowPane

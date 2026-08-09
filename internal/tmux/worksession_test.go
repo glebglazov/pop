@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 )
@@ -41,6 +42,17 @@ func TestWorkSessionsParsesStampedOnly(t *testing.T) {
 	}
 	if !reflect.DeepEqual(sessions, want) {
 		t.Fatalf("sessions = %v, want %v", sessions, want)
+	}
+}
+
+func TestWorkSessionsAbsentServerReportsEmpty(t *testing.T) {
+	tm := &realTmux{run: &recordingRunner{err: fmt.Errorf("no server running")}}
+	sessions, err := tm.WorkSessions()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("sessions = %v, want empty", sessions)
 	}
 }
 

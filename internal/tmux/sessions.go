@@ -7,9 +7,15 @@ import (
 	"github.com/glebglazov/pop/debug"
 )
 
+// Sessions lists live sessions with activity timestamps. An absent server is
+// an empty list, not an error — read surfaces must not fail or create a server
+// just to learn that nothing is running (ADR-0199 decision 8).
 func (t *realTmux) Sessions() ([]SessionActivity, error) {
 	out, err := t.run.output("list-sessions", "-F", "#{session_name}\t#{session_activity}")
 	if err != nil {
+		if absentServer(err) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return parseSessions(out), nil

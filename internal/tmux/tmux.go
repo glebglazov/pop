@@ -19,6 +19,7 @@ type SessionActivity struct {
 // lifecycle.go.
 type Tmux interface {
 	// Sessions lists live tmux sessions with their last-activity timestamps.
+	// An absent server is an empty list, not an error (ADR-0199 decision 8).
 	Sessions() ([]SessionActivity, error)
 	// HasSession reports whether a session named name exists.
 	HasSession(name string) bool

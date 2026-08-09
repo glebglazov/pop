@@ -33,6 +33,17 @@ func TestListActivityPanesPropagatesRunnerError(t *testing.T) {
 	}
 }
 
+func TestListActivityPanesAbsentServerReportsEmpty(t *testing.T) {
+	tm := &realTmux{run: &recordingRunner{err: errors.New("no server running")}}
+	panes, err := tm.ListActivityPanes()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(panes) != 0 {
+		t.Fatalf("panes = %v, want empty", panes)
+	}
+}
+
 func TestIsBareShell(t *testing.T) {
 	cases := []struct {
 		cmd  string

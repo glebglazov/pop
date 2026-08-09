@@ -43,8 +43,27 @@ func TestSessionsEmptyOutput(t *testing.T) {
 	}
 }
 
-func TestSessionsPropagatesRunnerError(t *testing.T) {
-	tm := &realTmux{run: &recordingRunner{err: fmt.Errorf("no server running")}}
+// TestSessionsAbsentServerReportsEmpty covers ADR-0199 decision 8: list-sessions
+// against a socket with no server must read as "no sessions", never as a failure
+// that could push a caller toward Ensure.
+func TestSessionsAbsentServerReportsEmpty(t *testing.T) {
+	for _, msg := range []string{
+		"no server running on /tmp/tmux-501/default",
+		"error connecting to /private/tmp/tmux-501/pop (No such file or directory)",
+	} {
+		tm := &realTmux{run: &recordingRunner{err: fmt.Errorf("%s", msg)}}
+		sessions, err := tm.Sessions()
+		if err != nil {
+			t.Fatalf("%q: unexpected error %v", msg, err)
+		}
+		if len(sessions) != 0 {
+			t.Fatalf("%q: sessions = %v, want empty", msg, sessions)
+		}
+	}
+}
+
+func TestSessionsPropagatesNonAbsentError(t *testing.T) {
+	tm := &realTmux{run: &recordingRunner{err: fmt.Errorf("permission denied")}}
 
 	if _, err := tm.Sessions(); err == nil {
 		t.Fatal("expected error")

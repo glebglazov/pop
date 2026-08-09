@@ -29,3 +29,14 @@ func TestListWindowPanesPropagatesRunnerError(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestListWindowPanesAbsentServerReportsEmpty(t *testing.T) {
+	tm := &realTmux{run: &recordingRunner{err: errors.New("error connecting to /tmp/tmux-501/pop")}}
+	panes, err := tm.ListWindowPanes()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(panes) != 0 {
+		t.Fatalf("panes = %v, want empty", panes)
+	}
+}

@@ -120,9 +120,20 @@ func TestPaneCommandsBuildsArgsAndParses(t *testing.T) {
 }
 
 func TestPaneCommandsPropagatesRunnerError(t *testing.T) {
-	tm := &realTmux{run: &recordingRunner{err: fmt.Errorf("no server")}}
+	tm := &realTmux{run: &recordingRunner{err: fmt.Errorf("permission denied")}}
 	if _, err := tm.PaneCommands(); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestPaneCommandsAbsentServerReportsEmpty(t *testing.T) {
+	tm := &realTmux{run: &recordingRunner{err: fmt.Errorf("no server running")}}
+	commands, err := tm.PaneCommands()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(commands) != 0 {
+		t.Fatalf("commands = %v, want empty", commands)
 	}
 }
 

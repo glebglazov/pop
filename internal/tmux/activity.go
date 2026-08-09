@@ -18,7 +18,8 @@ type ActivityPane struct {
 
 // ListActivityPanes returns every pane across all sessions that carries at least
 // one activity tag, with its current foreground command — one list-panes -a
-// round-trip for the Work dashboard live-pane affordance (ADR-0158).
+// round-trip for the Work dashboard live-pane affordance (ADR-0158). An absent
+// server is an empty list, not an error (ADR-0199 decision 8).
 func (t *realTmux) ListActivityPanes() ([]ActivityPane, error) {
 	format := strings.Join([]string{
 		"#{session_name}",
@@ -31,6 +32,9 @@ func (t *realTmux) ListActivityPanes() ([]ActivityPane, error) {
 	}, "\t")
 	out, err := t.run.output("list-panes", "-a", "-F", format)
 	if err != nil {
+		if absentServer(err) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	var panes []ActivityPane
