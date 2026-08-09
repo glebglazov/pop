@@ -32,11 +32,11 @@ func manifestWithVerifier(t *testing.T, agents []string, effort string) *Manifes
 func TestResolveVerifierPrecedence(t *testing.T) {
 	verifyCfg := func(agents []string, effort string) *config.Config {
 		return &config.Config{Work: &config.WorkConfig{
-			Verify: &config.VerifyConfig{Enabled: true, Agents: agents, Effort: effort},
+			Verify: &config.VerifyConfig{Enabled: true, Agents: config.AgentEntriesFromCommands(agents...), Effort: effort},
 		}}
 	}
 	defaultAgentsCfg := func(defaults []string, v *config.VerifyConfig) *config.Config {
-		return &config.Config{Work: &config.WorkConfig{Implement: &config.ImplementConfig{Agents: defaults}, Verify: v}}
+		return &config.Config{Work: &config.WorkConfig{Implement: &config.ImplementConfig{Agents: config.AgentEntriesFromCommands(defaults...)}, Verify: v}}
 	}
 
 	tests := []struct {

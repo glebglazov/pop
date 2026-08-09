@@ -207,6 +207,14 @@ projects = [
 # under [work] (ADR-0194). There are no shared defaults at the [work] root: each
 # kind that retries declares its own cap and schedule.
 #
+# Every group's agents list takes the same entry type: a table with a
+# display_name (what pop calls the entry) and a cmd (the whole agent-CLI command,
+# passed through untouched). A bare string is sugar for { cmd = "<string>" }, so
+# the two spellings below are the same list. `pop tasks agents` names each entry,
+# the preset it selects, and the model its command pins.
+# agents = ["claude --model opus"]
+# agents = [{ display_name = "Claude Usual", cmd = "claude --model opus" }]
+#
 # [work.implement]
 # The unattended coding drain. Delays apply between retry-eligible failures;
 # attempt 1 still starts immediately. Omitted attempt_retry_delays ⇒

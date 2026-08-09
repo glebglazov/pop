@@ -46,8 +46,8 @@ func TestManifestRoundTripsAgentsAndEffort(t *testing.T) {
 func TestResolveRoutineRunSpecsOrderAndEffort(t *testing.T) {
 	cfg := &config.Config{
 		Work: &config.WorkConfig{
-			Routine:   &config.AgentGroupConfig{Agents: []string{"cursor"}},
-			Implement: &config.ImplementConfig{Agents: []string{"pi"}},
+			Routine:   &config.AgentGroupConfig{Agents: config.AgentEntriesFromCommands("cursor")},
+			Implement: &config.ImplementConfig{Agents: config.AgentEntriesFromCommands("pi")},
 		},
 	}
 

@@ -229,7 +229,7 @@ var taskMigrateCmd = &cobra.Command{
 
 var taskAgentsCmd = &cobra.Command{
 	Use:   "agents",
-	Short: "List agent PATH availability, attended assistance, and resolved effort ladders",
+	Short: "List agent PATH availability, attended assistance, resolved effort ladders, and each Work group's configured entries",
 	Args:  cobra.NoArgs,
 	RunE:  runTaskAgents,
 }
@@ -1602,10 +1602,36 @@ func runTaskAgentsWith(d *tasks.Deps, w io.Writer, models bool) error {
 	}
 	rows := tasks.AgentCatalogWithConfig(d, cfg)
 	renderTaskAgents(w, rows)
+	renderTaskAgentGroups(w, tasks.AgentGroupCatalogs(cfg))
 	if models {
 		renderTaskAgentModels(w, rows)
 	}
 	return nil
+}
+
+// renderTaskAgentGroups prints each Work group's configured agent list in
+// configured order: what the entry is called, which preset it selects, and
+// which model it names. An entry that names no model says the agent's own
+// configuration decides — pop never guesses a model name.
+func renderTaskAgentGroups(w io.Writer, catalogs []tasks.AgentGroupCatalog) {
+	fmt.Fprintf(w, "\n%-10s %-3s %-28s %-9s %s\n", "group", "#", "entry", "preset", "model")
+	for _, catalog := range catalogs {
+		if len(catalog.Entries) == 0 {
+			fmt.Fprintf(w, "%-10s %-3s %s\n", catalog.Group, "-", "none configured")
+			continue
+		}
+		for _, entry := range catalog.Entries {
+			if entry.Problem != "" {
+				fmt.Fprintf(w, "%-10s %-3d %s\n", catalog.Group, entry.Position, "malformed entry ("+entry.Problem+"); skipped")
+				continue
+			}
+			preset := entry.Preset
+			if preset == "" {
+				preset = "-"
+			}
+			fmt.Fprintf(w, "%-10s %-3d %-28s %-9s %s\n", catalog.Group, entry.Position, entry.Label(), preset, entry.ModelLabel())
+		}
+	}
 }
 
 func renderTaskAgents(w io.Writer, rows []tasks.AgentCatalogRow) {

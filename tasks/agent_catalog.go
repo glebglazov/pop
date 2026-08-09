@@ -3,6 +3,7 @@ package tasks
 import (
 	"os/exec"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/glebglazov/pop/config"
@@ -112,6 +113,117 @@ func catalogModelSkips(d *Deps, now time.Time) map[string]map[string]time.Time {
 		skips[row.Preset][row.Model] = row.Until
 	}
 	return skips
+}
+
+// AgentGroupOrder lists the Work groups the catalog renders, in display order.
+var AgentGroupOrder = []string{"implement", "verify", "routine", "attended"}
+
+// AgentGroupCatalog is one Work group's agent list, resolved for display.
+type AgentGroupCatalog struct {
+	Group   string
+	Entries []AgentGroupEntry
+}
+
+// AgentGroupEntry is one agent list entry resolved for display: what to call
+// it, which preset it selects, and which model its command names.
+type AgentGroupEntry struct {
+	// Position is the entry's 1-based place in the configured list.
+	Position int
+	// DisplayName is the configured display_name, empty when none was given.
+	DisplayName string
+	// Cmd is the entry's command as configured.
+	Cmd string
+	// Preset is the agent preset the command's first token selects.
+	Preset string
+	// Model is the model the command names through `--model`. Empty means the
+	// entry names no model, and the agent's own configuration decides — pop
+	// never guesses one (CONTEXT.md, Model source).
+	Model string
+	// Problem is non-empty for a malformed entry, carrying why it was skipped.
+	Problem string
+}
+
+// Label is what a human-facing surface calls this entry: its display name where
+// one is given, otherwise the command itself.
+func (e AgentGroupEntry) Label() string {
+	if strings.TrimSpace(e.DisplayName) != "" {
+		return e.DisplayName
+	}
+	if strings.TrimSpace(e.Cmd) != "" {
+		return e.Cmd
+	}
+	return "(malformed entry)"
+}
+
+// AgentEntryNoModelLabel is how an entry that names no model reads. Pop has no
+// catalog of what an agent defaults to, so it says who decides instead of
+// guessing a name.
+const AgentEntryNoModelLabel = "agent's own configuration"
+
+// ModelLabel names the model this entry resolves to, deferring honestly when
+// the command names none.
+func (e AgentGroupEntry) ModelLabel() string {
+	if strings.TrimSpace(e.Model) == "" {
+		return AgentEntryNoModelLabel
+	}
+	return e.Model
+}
+
+// AgentGroupCatalogs resolves every Work group's configured agent list for
+// display, in configured order. Groups with no configured list render empty
+// rather than being dropped, so the catalog shows the whole shape of [work].
+func AgentGroupCatalogs(cfg *config.Config) []AgentGroupCatalog {
+	lists := map[string]config.AgentEntries{
+		"implement": cfg.ImplementAgentEntries(),
+		"verify":    cfg.VerifyAgentEntries(),
+		"routine":   cfg.RoutineAgentEntries(),
+		"attended":  cfg.AttendedAgentEntries(),
+	}
+	catalogs := make([]AgentGroupCatalog, 0, len(AgentGroupOrder))
+	for _, group := range AgentGroupOrder {
+		entries := lists[group]
+		rows := make([]AgentGroupEntry, 0, len(entries))
+		for i, entry := range entries {
+			row := AgentGroupEntry{
+				Position:    i + 1,
+				DisplayName: entry.DisplayName,
+				Cmd:         entry.Cmd,
+				Problem:     entry.Problem(),
+			}
+			if row.Problem == "" {
+				if preset, err := AgentPresetName(entry.Cmd); err == nil {
+					row.Preset = preset
+				}
+				row.Model = AgentSpecModel(entry.Cmd)
+			}
+			rows = append(rows, row)
+		}
+		catalogs = append(catalogs, AgentGroupCatalog{Group: group, Entries: rows})
+	}
+	return catalogs
+}
+
+// AgentSpecModel returns the model an agent command names through `--model`,
+// in either the separate-argument or `--model=` form. Every other argument is
+// left alone: this reads the spec, it never rewrites it. An empty result means
+// the command names no model.
+func AgentSpecModel(spec string) string {
+	_, args, err := parseAgentPresetSpec(spec)
+	if err != nil {
+		return ""
+	}
+	for i, arg := range args {
+		if arg == "--model" {
+			if i+1 < len(args) {
+				return args[i+1]
+			}
+			return ""
+		}
+		if value, ok := strings.CutPrefix(arg, "--model="); ok {
+			return value
+		}
+	}
+	return ""
 }
 
 func AgentBinary(adapter AgentAdapter) string {

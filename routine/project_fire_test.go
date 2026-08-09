@@ -23,7 +23,7 @@ func projectFireDeps(t *testing.T, dataHome, checkout string, out io.Writer) *De
 	d := checkoutDeps(t, dataHome, checkout)
 	d.Tasks = tasks.DefaultDeps()
 	d.LoadConfig = func() (*config.Config, error) {
-		return &config.Config{Work: &config.WorkConfig{Routine: &config.AgentGroupConfig{Agents: []string{"claude"}}}}, nil
+		return &config.Config{Work: &config.WorkConfig{Routine: &config.AgentGroupConfig{Agents: config.AgentEntriesFromCommands("claude")}}}, nil
 	}
 	d.Stdout = out
 	d.IsInteractive = func() bool { return false }

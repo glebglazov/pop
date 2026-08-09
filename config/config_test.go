@@ -135,7 +135,7 @@ agents = ["claude --model opus", "cursor"]
 		want []string
 	}{
 		{"implement", cfg.ImplementAgents(), []string{"claude --model opus4.8", "codex"}},
-		{"verify", cfg.VerifySettings().Agents, []string{"codex", "claude"}},
+		{"verify", cfg.VerifyAgents(), []string{"codex", "claude"}},
 		{"routine", cfg.RoutineAgents(), []string{"codex", "claude"}},
 		{"attended", cfg.AttendedAgents(), []string{"claude --model opus", "cursor"}},
 	}

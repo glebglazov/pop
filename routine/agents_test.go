@@ -12,8 +12,8 @@ import (
 func TestResolveRoutineAgentPresetsPrefersRoutinesConfig(t *testing.T) {
 	cfg := &config.Config{
 		Work: &config.WorkConfig{
-			Routine:   &config.AgentGroupConfig{Agents: []string{"codex", "claude"}},
-			Implement: &config.ImplementConfig{Agents: []string{"cursor"}},
+			Routine:   &config.AgentGroupConfig{Agents: config.AgentEntriesFromCommands("codex", "claude")},
+			Implement: &config.ImplementConfig{Agents: config.AgentEntriesFromCommands("cursor")},
 		},
 	}
 	got := ResolveRoutineAgentPresets(nil, cfg)
@@ -31,7 +31,7 @@ func TestResolveRoutineAgentPresetsPrefersRoutinesConfig(t *testing.T) {
 func TestResolveRoutineAgentPresetsFallsBackToImplementList(t *testing.T) {
 	cfg := &config.Config{
 		Work: &config.WorkConfig{
-			Implement: &config.ImplementConfig{Agents: []string{"cursor", "claude"}},
+			Implement: &config.ImplementConfig{Agents: config.AgentEntriesFromCommands("cursor", "claude")},
 		},
 	}
 	got := ResolveRoutineAgentPresets(nil, cfg)
@@ -47,7 +47,7 @@ func TestRunRoutineWithAgentFallbackQuotaFallthrough(t *testing.T) {
 	d := routineDeps(t, dataHome)
 	d.LoadConfig = func() (*config.Config, error) {
 		return &config.Config{
-			Work: &config.WorkConfig{Routine: &config.AgentGroupConfig{Agents: []string{"claude", "codex"}}},
+			Work: &config.WorkConfig{Routine: &config.AgentGroupConfig{Agents: config.AgentEntriesFromCommands("claude", "codex")}},
 		}, nil
 	}
 	taskDeps := tasks.DefaultDeps()
@@ -93,7 +93,7 @@ func TestRunRoutineWithAgentFallbackSkipsCooldownedPreset(t *testing.T) {
 	d := routineDeps(t, dataHome)
 	d.LoadConfig = func() (*config.Config, error) {
 		return &config.Config{
-			Work: &config.WorkConfig{Routine: &config.AgentGroupConfig{Agents: []string{"claude", "codex"}}},
+			Work: &config.WorkConfig{Routine: &config.AgentGroupConfig{Agents: config.AgentEntriesFromCommands("claude", "codex")}},
 		}, nil
 	}
 	taskDeps := tasks.DefaultDeps()
@@ -127,7 +127,7 @@ func TestRunRoutineWithAgentFallbackSkipsCooldownedPreset(t *testing.T) {
 func TestRunRoutineWithAgentFallbackAllQuotaPausedFails(t *testing.T) {
 	d := routineDeps(t, t.TempDir())
 	cfg := &config.Config{
-		Work: &config.WorkConfig{Routine: &config.AgentGroupConfig{Agents: []string{"claude"}}},
+		Work: &config.WorkConfig{Routine: &config.AgentGroupConfig{Agents: config.AgentEntriesFromCommands("claude")}},
 	}
 	attempt := func(agentSpec string) (*tasks.RoutineAgentAttempt, error) {
 		return &tasks.RoutineAgentAttempt{

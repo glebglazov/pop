@@ -22,7 +22,7 @@ func projectEditDeps(t *testing.T, dataHome, checkout, input string, out io.Writ
 	t.Helper()
 	d := checkoutDeps(t, dataHome, checkout)
 	d.LoadConfig = func() (*config.Config, error) {
-		return &config.Config{Work: &config.WorkConfig{Routine: &config.AgentGroupConfig{Agents: []string{"claude"}}}}, nil
+		return &config.Config{Work: &config.WorkConfig{Routine: &config.AgentGroupConfig{Agents: config.AgentEntriesFromCommands("claude")}}}, nil
 	}
 	d.IsInteractive = func() bool { return true }
 	d.Stdin = strings.NewReader(input)

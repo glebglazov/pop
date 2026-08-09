@@ -66,8 +66,9 @@ func TestTaskAgentsCatalogListsPresetsWithEffortLadders(t *testing.T) {
 	for _, r := range rows {
 		fmt.Fprintf(&want, "%-9s %-14s %-5s %-6s %s\n", r[0], r[1], r[2], r[3], r[4])
 	}
-	if buf.String() != want.String() {
-		t.Fatalf("catalog output mismatch\nwant:\n%sgot:\n%s", want.String(), buf.String())
+	// The preset table comes first; the configured agent lists follow it.
+	if !strings.HasPrefix(buf.String(), want.String()) {
+		t.Fatalf("catalog output mismatch\nwant prefix:\n%sgot:\n%s", want.String(), buf.String())
 	}
 
 	wantLookups := []string{"claude", "opencode", "cursor-agent", "codex", "pi", "kimi"}
@@ -183,6 +184,46 @@ func TestTaskAgentsCatalogMarksSkippedLadderEntries(t *testing.T) {
 	}
 	if strings.Contains(got, "moonshot-ai/kimi-k3[reasoning=high] (skipped") {
 		t.Fatalf("kimi heavy marked from a light-tier skip:\n%s", got)
+	}
+}
+
+// TestTaskAgentsCatalogListsConfiguredGroups pins the group render ADR-0194
+// decision 5 pays out at: every group's entries in configured order, named by
+// display name where one is given, with the preset and model each resolves to —
+// and an honest deferral where an entry names no model.
+func TestTaskAgentsCatalogListsConfiguredGroups(t *testing.T) {
+	d := &tasks.Deps{
+		FS:       cmdTestFS(filepath.Join(t.TempDir(), "xdg"), ""),
+		LookPath: func(file string) (string, error) { return "/mock/bin/" + file, nil },
+	}
+	oldLoad := taskConfigLoad
+	taskConfigLoad = func(string) (*config.Config, error) {
+		return &config.Config{Work: &config.WorkConfig{
+			Attended: &config.AgentGroupConfig{Agents: config.AgentEntries{
+				{DisplayName: "Claude Usual", Cmd: "claude --model opus"},
+				{Cmd: "cursor"},
+			}},
+			Implement: &config.ImplementConfig{Agents: config.AgentEntriesFromCommands("codex --model gpt-5.5")},
+		}}, nil
+	}
+	t.Cleanup(func() { taskConfigLoad = oldLoad })
+
+	var buf bytes.Buffer
+	if err := runTaskAgentsWith(d, &buf, false); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{
+		"group      #   entry                        preset    model\n",
+		"implement  1   codex --model gpt-5.5        codex     gpt-5.5\n",
+		"verify     -   none configured\n",
+		"routine    -   none configured\n",
+		"attended   1   Claude Usual                 claude    opus\n",
+		"attended   2   cursor                       cursor    agent's own configuration\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("group section missing\nwant contains:\n%sgot:\n%s", want, got)
+		}
 	}
 }
 

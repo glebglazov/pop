@@ -2923,7 +2923,7 @@ printf 'called\n' >> %[1]q
 
 func TestRunTaskSetDefaultAgentsConfigAndFlagOverride(t *testing.T) {
 	loadConfig := func(string) (*config.Config, error) {
-		return &config.Config{Work: &config.WorkConfig{Implement: &config.ImplementConfig{Agents: []string{"codex"}}}}, nil
+		return &config.Config{Work: &config.WorkConfig{Implement: &config.ImplementConfig{Agents: config.AgentEntriesFromCommands("codex")}}}, nil
 	}
 	t.Run("config default", func(t *testing.T) {
 		env := setupRunTaskSetFixture(t, "demo", []Task{

@@ -668,7 +668,7 @@ func resolveVerifier(cliAgents []string, cliEffort string, m *Manifest, cfg *con
 	}
 	if v := cfg.VerifySettings(); v != nil {
 		if len(agents) == 0 {
-			agents = nonEmptyStrings(v.Agents)
+			agents = v.Agents.Commands()
 		}
 		if effort == "" {
 			effort = strings.TrimSpace(v.Effort)

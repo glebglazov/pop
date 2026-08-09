@@ -220,7 +220,7 @@ type TasksConfig struct {
 type ImplementConfig struct {
 	// Agents is the ordered in-process fallback list used by
 	// `pop tasks implement` for unpinned tasks when --agent is absent.
-	Agents []string `toml:"agents" include:"replace" desc:"Ordered fallback agent list for unpinned tasks."`
+	Agents AgentEntries `toml:"agents" include:"replace" desc:"Ordered fallback agent list for unpinned tasks (strings or {display_name, cmd} tables)."`
 	// MaxTries is the started-attempt cap for implement. Zero/unset ⇒
 	// DefaultTaskMaxTries. An explicit --max-tries flag still wins.
 	MaxTries *int `toml:"max_tries" include:"replace" desc:"Implement started-attempt cap (default 3)."`
@@ -240,7 +240,7 @@ type ImplementConfig struct {
 type AgentGroupConfig struct {
 	// Agents is the ordered fallback list for this kind of work. When empty,
 	// resolution falls through to the kind's documented fallback.
-	Agents []string `toml:"agents" include:"replace" desc:"Ordered fallback agent list for this kind of work."`
+	Agents AgentEntries `toml:"agents" include:"replace" desc:"Ordered fallback agent list for this kind of work (strings or {display_name, cmd} tables)."`
 }
 
 // VerifyConfig holds Agent-verification settings (ADR-0086). It is the
@@ -256,7 +256,7 @@ type VerifyConfig struct {
 	// mirroring [work.implement].agents: it falls through to the next agent on
 	// a quota pause or a missing binary. An empty list falls back to
 	// [work.implement].agents (and, failing that, the built-in default agent).
-	Agents []string `toml:"agents" desc:"Ordered fallback agent list for the Verifier (falls back to [work.implement].agents when omitted)."`
+	Agents AgentEntries `toml:"agents" desc:"Ordered fallback agent list for the Verifier, falling back to [work.implement].agents when omitted (strings or {display_name, cmd} tables)."`
 	// Effort selects the Verifier's model-strength tier (light, standard, or
 	// heavy). Absent ⇒ heavy — verification runs at the strongest tier by default.
 	Effort string `toml:"effort" desc:"Verifier model-strength tier: light, standard, or heavy (default heavy)."`
@@ -1006,12 +1006,34 @@ func (c *Config) ResolveVerifyMaxTries() int {
 	return DefaultTaskMaxTries
 }
 
-// ImplementAgents returns the [work.implement].agents list as declared, or nil.
+// ImplementAgents returns the commands of the [work.implement].agents list, in
+// configured order, or nil.
 func (c *Config) ImplementAgents() []string {
+	return c.ImplementAgentEntries().Commands()
+}
+
+// ImplementAgentEntries returns the [work.implement].agents entries as
+// declared, malformed ones included, for surfaces that name entries rather than
+// run them.
+func (c *Config) ImplementAgentEntries() AgentEntries {
 	if c == nil || c.Work == nil || c.Work.Implement == nil {
 		return nil
 	}
 	return c.Work.Implement.Agents
+}
+
+// VerifyAgents returns the commands of the [work.verify].agents list, in
+// configured order, or nil.
+func (c *Config) VerifyAgents() []string {
+	return c.VerifyAgentEntries().Commands()
+}
+
+// VerifyAgentEntries returns the [work.verify].agents entries as declared.
+func (c *Config) VerifyAgentEntries() AgentEntries {
+	if v := c.VerifySettings(); v != nil {
+		return v.Agents
+	}
+	return nil
 }
 
 // VerifySettings returns the [work.verify] block, or nil when undeclared.
@@ -1022,18 +1044,28 @@ func (c *Config) VerifySettings() *VerifyConfig {
 	return c.Work.Verify
 }
 
-// RoutineAgents returns the [work.routine].agents list as declared, or nil.
+// RoutineAgents returns the commands of the [work.routine].agents list, or nil.
 // An empty list leaves the caller to fall through to the implement group.
 func (c *Config) RoutineAgents() []string {
+	return c.RoutineAgentEntries().Commands()
+}
+
+// RoutineAgentEntries returns the [work.routine].agents entries as declared.
+func (c *Config) RoutineAgentEntries() AgentEntries {
 	if c == nil || c.Work == nil || c.Work.Routine == nil {
 		return nil
 	}
 	return c.Work.Routine.Agents
 }
 
-// AttendedAgents returns the [work.attended].agents list as declared, or nil.
-// Every human-facing session pop opens shares this one group (ADR-0194).
+// AttendedAgents returns the commands of the [work.attended].agents list, or
+// nil. Every human-facing session pop opens shares this one group (ADR-0194).
 func (c *Config) AttendedAgents() []string {
+	return c.AttendedAgentEntries().Commands()
+}
+
+// AttendedAgentEntries returns the [work.attended].agents entries as declared.
+func (c *Config) AttendedAgentEntries() AgentEntries {
 	if c == nil || c.Work == nil || c.Work.Attended == nil {
 		return nil
 	}
@@ -1520,6 +1552,9 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 	for _, f := range agentConfigFindings(path, md) {
 		cfg.recordFinding(f)
 	}
+	for _, f := range agentEntryFindings(path, &cfg) {
+		cfg.recordFinding(f)
+	}
 	for _, f := range projectEntryFindings(path, cfg.Projects) {
 		cfg.recordFinding(f)
 	}
@@ -1618,6 +1653,9 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 			cfg.recordFinding(f)
 		}
 		for _, f := range agentConfigFindings(expanded, includedMD) {
+			cfg.recordFinding(f)
+		}
+		for _, f := range agentEntryFindings(expanded, &included) {
 			cfg.recordFinding(f)
 		}
 		for _, f := range projectEntryFindings(expanded, included.Projects) {

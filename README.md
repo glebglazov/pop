@@ -60,6 +60,16 @@ enabled = false
 # refinement session.
 # agents = ["claude", "codex"]
 
+# Every group's agents list takes the same entry type: a table naming the entry
+# and carrying the whole agent-CLI command, with a bare string as sugar for
+# { cmd = "<string>" }. `pop tasks agents` lists each group's entries in order
+# with the preset and model each resolves to.
+# [work.attended]
+# agents = [
+#   { display_name = "Claude Usual", cmd = "claude --model opus" },
+#   "codex",
+# ]
+
 [agents.claude]
 # Settings keyed by agent preset rather than by kind of work.
 # Output mode: use "text" as a compatibility fallback if an agent's structured
