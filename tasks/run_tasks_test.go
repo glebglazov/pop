@@ -824,7 +824,7 @@ func TestRunTaskSetInteractiveHITLGateShowsNumberedMenu(t *testing.T) {
 		"3. Defer task",
 		"4. Open a shell in the checkout",
 		"0. Exit",
-		"Choose [1]:",
+		"enter select · digit jump",
 		"claude --permission-mode auto <HITL assistance prompt>",
 		"using claude native attended assistance",
 	} {
@@ -857,7 +857,7 @@ func TestRunTaskSetHITLGateShellOptionDispatch(t *testing.T) {
 		t.Fatalf("shell calls = %d, want 1", runner.shellCalls)
 	}
 	// Gate re-displayed after shell returned (two Choose [1]: prompts).
-	if strings.Count(out, "Choose [1]:") < 2 {
+	if strings.Count(out, "Human-blocked:") < 2 {
 		t.Fatalf("gate must re-display after shell exits:\n%s", out)
 	}
 	// No task state changed.
@@ -1035,7 +1035,7 @@ func TestRunTaskSetInteractiveHITLGateAssistanceStartFailureReprompts(t *testing
 	if !strings.Contains(out, "Could not start HITL assistance: exec: claude: not found") {
 		t.Fatalf("missing start-failure message:\n%s", out)
 	}
-	if strings.Count(out, "Choose [1]:") < 2 {
+	if strings.Count(out, "Human-blocked:") < 2 {
 		t.Fatalf("start failure did not return to gate prompt:\n%s", out)
 	}
 	if runner.calls != 1 {
@@ -1101,7 +1101,7 @@ func TestRunTaskSetInteractiveHITLGateAssistanceStillBlockedReprompts(t *testing
 	_, err := RunTaskSetWith(d, nil, nil, opts)
 	assertExitCode(t, err, ExitNoRunnable)
 	out := buf.String()
-	if strings.Count(out, "Choose [1]:") < 2 {
+	if strings.Count(out, "Human-blocked:") < 2 {
 		t.Fatalf("still-blocked assistance did not return to gate prompt:\n%s", out)
 	}
 	if runner.calls != 1 {
@@ -1221,7 +1221,7 @@ func TestRunTaskSetHITLGateNonInteractiveKeepsAdvice(t *testing.T) {
 	assertExitCode(t, err, ExitNoRunnable)
 
 	out := buf.String()
-	if strings.Contains(out, "Get agent assistance") || strings.Contains(out, "Choose [1]:") {
+	if strings.Contains(out, "Get agent assistance") || strings.Contains(out, "enter select · digit jump") {
 		t.Fatalf("non-interactive run prompted:\n%s", out)
 	}
 	// After AFK completes, set is AWAITING-APPROVAL → terminal framing.
@@ -1245,7 +1245,7 @@ func TestRunTaskSetHITLGateYesKeepsAdvice(t *testing.T) {
 	assertExitCode(t, err, ExitNoRunnable)
 
 	out := buf.String()
-	if strings.Contains(out, "Get agent assistance") || strings.Contains(out, "Choose [1]:") {
+	if strings.Contains(out, "Get agent assistance") || strings.Contains(out, "enter select · digit jump") {
 		t.Fatalf("--yes run prompted:\n%s", out)
 	}
 	// After AFK completes, set is AWAITING-APPROVAL → terminal framing.
@@ -1734,7 +1734,7 @@ func TestRunTaskSetFailedGateAgentAssistanceRefreshesAndReprompts(t *testing.T) 
 	if !strings.Contains(out, "Starting Failed assistance: claude") {
 		t.Fatalf("missing assistance start detail:\n%s", out)
 	}
-	if strings.Count(out, "Choose [1]:") < 2 {
+	if strings.Count(out, "Failed:") < 2 {
 		t.Fatalf("assistance did not refresh and re-show the Failed gate:\n%s", out)
 	}
 	// The assist agent did not change task state; the task is still failed.
@@ -1766,8 +1766,8 @@ func TestRunTaskSetFailedGateShellOptionDispatch(t *testing.T) {
 	if runner.shellCalls != 1 {
 		t.Fatalf("shell calls = %d, want 1", runner.shellCalls)
 	}
-	// Gate re-displayed after shell returned (two Choose [1]: prompts).
-	if strings.Count(out, "Choose [1]:") < 2 {
+	// Gate re-displayed after shell returned (two Failed: prompts).
+	if strings.Count(out, "Failed:") < 2 {
 		t.Fatalf("gate must re-display after shell exits:\n%s", out)
 	}
 	// No task state changed.

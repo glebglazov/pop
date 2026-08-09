@@ -5,8 +5,9 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
+
+	"github.com/glebglazov/pop/ui"
 )
 
 // interruptGateExit terminates the process on the interrupt gate's force-quit — a
@@ -33,11 +34,6 @@ const (
 	// immediately, bypassing the clean park-and-resume choreography.
 	interruptGateForceQuit
 )
-
-type interruptReadResult struct {
-	answer string
-	err    error
-}
 
 // handleInteractiveInterruptGate is the fourth sibling of the HITL / Failed /
 // Verify-fail gate menus (ADR-0163): when a live AFK attempt is torn down by
@@ -80,7 +76,7 @@ func handleInteractiveInterruptGate(env gateEnv, m *Manifest, interrupted *Task,
 	}
 
 	for {
-		action, err := promptInterruptGateAction(out, reader, sigCh, taskSetID, interrupted, invocation)
+		action, err := promptInterruptGateAction(out, in, reader, sigCh, taskSetID, interrupted, invocation)
 		if err != nil {
 			return false, err
 		}
@@ -117,59 +113,34 @@ func handleInteractiveInterruptGate(env gateEnv, m *Manifest, interrupted *Task,
 	}
 }
 
-func promptInterruptGateAction(out io.Writer, reader *promptReader, sigCh <-chan os.Signal, taskSetID string, interrupted *Task, invocation *AgentAssistanceInvocation) (interruptGateAction, error) {
-	display := outputFor(out)
-	fmt.Fprintln(display)
-	display.line(ansiYellow, "Interrupted: %s/%s was stopped mid-run.", taskSetID, interrupted.ID)
-	fmt.Fprintln(display, "  1. Continue draining (default)")
-	fmt.Fprintln(display, "  2. Agent assistance")
-	if invocation != nil {
-		fmt.Fprintf(display, "     %s\n", invocation.Display)
-		if invocation.Detail != "" {
-			fmt.Fprintf(display, "     %s\n", invocation.Detail)
-		}
+func promptInterruptGateAction(out io.Writer, in io.Reader, reader *promptReader, sigCh <-chan os.Signal, taskSetID string, interrupted *Task, invocation *AgentAssistanceInvocation) (interruptGateAction, error) {
+	spec := ui.GateMenuSpec{
+		Headline: fmt.Sprintf("Interrupted: %s/%s was stopped mid-run.", taskSetID, interrupted.ID),
+		Tone:     ui.GateMenuToneWarn,
+		Items: []ui.GateMenuItem{
+			{Key: "1", Label: "Continue draining (default)", Default: true},
+			{Key: "2", Label: "Agent assistance", Details: gateInvocationDetails(invocation)},
+			{Key: "3", Label: "Open a shell in the checkout"},
+			{Key: "0", Label: "Exit"},
+		},
+		Footnote: "(press Ctrl-C again to force-quit)",
 	}
-	fmt.Fprintln(display, "  3. Open a shell in the checkout")
-	fmt.Fprintln(display, "  0. Exit")
-	fmt.Fprintln(display, "  (press Ctrl-C again to force-quit)")
-	fmt.Fprintf(display, "%s", display.styled(ansiCyan, "Choose [1]: "))
-
-	// A second SIGINT while the menu is up is the force-quit escape hatch: catch
-	// one already pending before blocking on input.
-	select {
-	case <-sigCh:
+	choice, forceQuit, err := promptGateMenu(out, in, reader, spec, sigCh)
+	if err != nil {
+		return interruptGateExitChoice, err
+	}
+	if forceQuit {
 		return interruptGateForceQuit, nil
+	}
+	switch choice {
+	case "1":
+		return interruptGateContinueChoice, nil
+	case "2":
+		return interruptGateAssistChoice, nil
+	case "3":
+		return interruptGateShellChoice, nil
 	default:
-	}
-
-	// Read the selection in a goroutine so a SIGINT arriving mid-read still
-	// force-quits rather than waiting for a line that may never come.
-	lineCh := make(chan interruptReadResult, 1)
-	go func() {
-		answer, err := readPromptLine(reader, out, "0")
-		lineCh <- interruptReadResult{answer: answer, err: err}
-	}()
-
-	select {
-	case <-sigCh:
-		return interruptGateForceQuit, nil
-	case res := <-lineCh:
-		if res.err != nil {
-			return interruptGateExitChoice, res.err
-		}
-		switch strings.ToLower(strings.TrimSpace(res.answer)) {
-		case "", "1", "c", "continue":
-			return interruptGateContinueChoice, nil
-		case "2":
-			return interruptGateAssistChoice, nil
-		case "3":
-			return interruptGateShellChoice, nil
-		case "0", "q", "quit", "exit":
-			return interruptGateExitChoice, nil
-		default:
-			fmt.Fprintln(display, "Choose 1, 2, 3, or 0.")
-			return promptInterruptGateAction(out, reader, sigCh, taskSetID, interrupted, invocation)
-		}
+		return interruptGateExitChoice, nil
 	}
 }
 

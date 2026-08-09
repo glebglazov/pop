@@ -141,7 +141,7 @@ func TestInterruptGateAssistDispatchesToSharedHandler(t *testing.T) {
 		t.Fatalf("missing assistance start detail:\n%s", out.String())
 	}
 	// The gate re-displays after assistance returns (two menu prompts).
-	if strings.Count(out.String(), "Choose [1]:") < 2 {
+	if strings.Count(out.String(), "Interrupted:") < 2 {
 		t.Fatalf("gate must re-display after assistance exits:\n%s", out.String())
 	}
 }
@@ -176,7 +176,7 @@ func TestInterruptGateShellDispatchesToSharedHandler(t *testing.T) {
 		t.Fatalf("shell must root at the Runtime path, got %q", runner.shellDir)
 	}
 	// The gate re-displays after the shell returns (two menu prompts).
-	if strings.Count(out.String(), "Choose [1]:") < 2 {
+	if strings.Count(out.String(), "Interrupted:") < 2 {
 		t.Fatalf("gate must re-display after shell exits:\n%s", out.String())
 	}
 }

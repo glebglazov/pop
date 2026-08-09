@@ -77,8 +77,9 @@ func TestHandleFoldConflictRefusesWithoutTTY(t *testing.T) {
 
 func TestPromptFoldConflictActionMenuOptions(t *testing.T) {
 	var out bytes.Buffer
-	reader := newPromptReader(strings.NewReader("0\n"))
-	action, err := promptFoldConflictAction(&out, reader, "demo", VerifiedAtBadge{
+	in := strings.NewReader("0\n")
+	reader := newPromptReader(in)
+	action, err := promptFoldConflictAction(&out, in, reader, "demo", VerifiedAtBadge{
 		State: VerifiedAtAtHead,
 		SHA:   "abc123def456",
 	}, nil)
@@ -106,8 +107,9 @@ func TestPromptFoldConflictActionMenuOptions(t *testing.T) {
 
 func TestPromptFoldConflictActionDefaultsToAgent(t *testing.T) {
 	var out bytes.Buffer
-	reader := newPromptReader(strings.NewReader("\n"))
-	action, err := promptFoldConflictAction(&out, reader, "demo", VerifiedAtBadge{}, nil)
+	in := strings.NewReader("\n")
+	reader := newPromptReader(in)
+	action, err := promptFoldConflictAction(&out, in, reader, "demo", VerifiedAtBadge{}, nil)
 	if err != nil {
 		t.Fatalf("prompt: %v", err)
 	}
@@ -127,8 +129,9 @@ func TestPromptFoldConflictActionSelectsResumeRetryVerify(t *testing.T) {
 	}
 	for _, tc := range cases {
 		var out bytes.Buffer
-		reader := newPromptReader(strings.NewReader(tc.in))
-		got, err := promptFoldConflictAction(&out, reader, "demo", VerifiedAtBadge{}, nil)
+		in := strings.NewReader(tc.in)
+		reader := newPromptReader(in)
+		got, err := promptFoldConflictAction(&out, in, reader, "demo", VerifiedAtBadge{}, nil)
 		if err != nil {
 			t.Fatalf("input %q: %v", tc.in, err)
 		}

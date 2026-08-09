@@ -165,7 +165,7 @@ func TestVerifyFailedGateAgentAssistanceAdvisory(t *testing.T) {
 	if len(runner.args) != 3 || runner.args[0] != "--permission-mode" || runner.args[1] != "auto" || !strings.Contains(runner.args[2], "You are assisting a human at a Verify-failed gate") {
 		t.Fatalf("assistance prompt = %v", runner.args)
 	}
-	if strings.Count(outStr, "Choose [0]:") < 2 {
+	if strings.Count(outStr, "Verify-failed:") < 2 {
 		t.Fatalf("assistance did not re-show the gate menu:\n%s", outStr)
 	}
 	// Verdict untouched — assistance is advisory.

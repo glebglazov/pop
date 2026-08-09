@@ -10,6 +10,7 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/clipboard"
+	"github.com/glebglazov/pop/ui"
 )
 
 // gateEnv is the shared context the three interactive gate menus (HITL, Failed,
@@ -103,7 +104,7 @@ func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverif
 		// this set (ADR-0086/ADR-0012); the option force-re-runs the Verifier so a
 		// human who edited the work inline can re-check it without a fresh drain.
 		showReverify := gateReverifyEnabled(rv, m)
-		action, err := promptHITLGateAction(out, d, runtimePath, reader, taskSetID, m, hitl, body, invocation, showReverify)
+		action, err := promptHITLGateAction(out, in, d, runtimePath, reader, taskSetID, m, hitl, body, invocation, showReverify)
 		if err != nil {
 			return true, err
 		}
@@ -280,19 +281,6 @@ func gateTaskBody(d *Deps, m *Manifest, task *Task) string {
 	return strings.TrimRight(string(data), "\n")
 }
 
-// renderGateTaskBody prints the blocking task's full body above a gate menu so a
-// human electing to finish by hand can see every action point in place.
-func renderGateTaskBody(display *output, taskFile, body string) {
-	if body == "" {
-		return
-	}
-	heading := fmt.Sprintf("--- %s ---", taskFile)
-	fmt.Fprintln(display)
-	fmt.Fprintln(display, heading)
-	fmt.Fprintln(display, body)
-	fmt.Fprintln(display, strings.Repeat("-", len(heading)))
-}
-
 // gateReverifyEnabled reports whether the HITL gate should offer the Re-verify
 // option for the current set: only when a Verifier context is present, Agent
 // verification is enabled in config, and the set has not opted out (ADR-0086).
@@ -300,39 +288,34 @@ func gateReverifyEnabled(rv *reverifyGateContext, m *Manifest) bool {
 	return rv != nil && verifyEnabled(rv.cfg) && m != nil && !m.VerifyOptedOut()
 }
 
-func promptHITLGateAction(out io.Writer, d *Deps, runtimePath string, reader *promptReader, taskSetID string, m *Manifest, hitl *Task, body string, invocation *AgentAssistanceInvocation, showReverify bool) (hitlGateAction, error) {
-	display := outputFor(out)
-	fmt.Fprintln(display)
-	renderBlockedWaiterCount(display, d, runtimePath)
-	display.line(ansiYellow, "Human-blocked: %s/%s needs human work before the set can continue.", taskSetID, hitl.ID)
-	renderGateTaskBody(display, hitl.File, body)
-	renderRemediationReviewBlockFromManifest(display, d, taskSetID, m)
-	fmt.Fprintln(display, "  1. Get agent assistance (default)")
-	if invocation != nil {
-		fmt.Fprintf(display, "     %s\n", invocation.Display)
-		if invocation.Detail != "" {
-			fmt.Fprintf(display, "     %s\n", invocation.Detail)
-		}
+func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, runtimePath string, reader *promptReader, taskSetID string, m *Manifest, hitl *Task, body string, invocation *AgentAssistanceInvocation, showReverify bool) (hitlGateAction, error) {
+	items := []ui.GateMenuItem{
+		{Key: "1", Label: "Get agent assistance (default)", Details: gateInvocationDetails(invocation), Default: true},
+		{Key: "2", Label: "Complete task"},
+		{Key: "3", Label: "Defer task"},
+		{Key: "4", Label: "Open a shell in the checkout"},
 	}
-	fmt.Fprintln(display, "  2. Complete task")
-	fmt.Fprintln(display, "  3. Defer task")
-	fmt.Fprintln(display, "  4. Open a shell in the checkout")
 	if showReverify {
-		fmt.Fprintln(display, "  5. Re-verify (re-run the Verifier against the current work)")
+		items = append(items, ui.GateMenuItem{Key: "5", Label: "Re-verify (re-run the Verifier against the current work)"})
 	}
-	fmt.Fprintln(display, "  0. Exit")
-	fmt.Fprintf(display, "%s", display.styled(ansiCyan, "Choose [1]: "))
+	items = append(items, ui.GateMenuItem{Key: "0", Label: "Exit"})
 
-	answer, err := readPromptLine(reader, out, "0")
+	spec := ui.GateMenuSpec{
+		Headline: fmt.Sprintf("Human-blocked: %s/%s needs human work before the set can continue.", taskSetID, hitl.ID),
+		Tone:     ui.GateMenuToneWarn,
+		Preamble: joinPreamble(
+			gateWaiterPreamble(d, runtimePath),
+			gateTaskBodyPreamble(hitl.File, body),
+			gateRemediationPreamble(d, taskSetID, m),
+		),
+		Items: items,
+	}
+	choice, _, err := promptGateMenu(out, in, reader, spec, nil)
 	if err != nil {
 		return hitlGateExit, err
 	}
-	choice := strings.ToLower(strings.TrimSpace(answer))
-	if choice == "5" && showReverify {
-		return hitlGateReverify, nil
-	}
 	switch choice {
-	case "", "1":
+	case "1":
 		return hitlGateAssist, nil
 	case "2":
 		return hitlGateComplete, nil
@@ -340,15 +323,13 @@ func promptHITLGateAction(out io.Writer, d *Deps, runtimePath string, reader *pr
 		return hitlGateDefer, nil
 	case "4":
 		return hitlGateShell, nil
-	case "0", "q", "quit", "exit":
+	case "5":
+		if showReverify {
+			return hitlGateReverify, nil
+		}
 		return hitlGateExit, nil
 	default:
-		if showReverify {
-			fmt.Fprintln(display, "Choose 1, 2, 3, 4, 5, or 0.")
-		} else {
-			fmt.Fprintln(display, "Choose 1, 2, 3, 4, or 0.")
-		}
-		return promptHITLGateAction(out, d, runtimePath, reader, taskSetID, m, hitl, body, invocation, showReverify)
+		return hitlGateExit, nil
 	}
 }
 
@@ -415,7 +396,7 @@ func handleInteractiveFailedGate(env gateEnv, m *Manifest, failed *Task) (bool, 
 	}
 
 	for {
-		action, err := promptFailedGateAction(out, d, runtimePath, reader, taskSetID, failed, body, invocation)
+		action, err := promptFailedGateAction(out, in, d, runtimePath, reader, taskSetID, failed, body, invocation)
 		if err != nil {
 			return true, err
 		}
@@ -474,31 +455,28 @@ func handleInteractiveFailedGate(env gateEnv, m *Manifest, failed *Task) (bool, 
 	}
 }
 
-func promptFailedGateAction(out io.Writer, d *Deps, runtimePath string, reader *promptReader, taskSetID string, failed *Task, body string, invocation *AgentAssistanceInvocation) (failedGateAction, error) {
-	display := outputFor(out)
-	fmt.Fprintln(display)
-	renderBlockedWaiterCount(display, d, runtimePath)
-	display.line(ansiRed, "Failed: %s/%s failed before the set could continue.", taskSetID, failed.ID)
-	renderGateTaskBody(display, failed.File, body)
-	fmt.Fprintln(display, "  1. Re-run (default)")
-	fmt.Fprintln(display, "  2. Agent assistance")
-	if invocation != nil {
-		fmt.Fprintf(display, "     %s\n", invocation.Display)
-		if invocation.Detail != "" {
-			fmt.Fprintf(display, "     %s\n", invocation.Detail)
-		}
+func promptFailedGateAction(out io.Writer, in io.Reader, d *Deps, runtimePath string, reader *promptReader, taskSetID string, failed *Task, body string, invocation *AgentAssistanceInvocation) (failedGateAction, error) {
+	spec := ui.GateMenuSpec{
+		Headline: fmt.Sprintf("Failed: %s/%s failed before the set could continue.", taskSetID, failed.ID),
+		Tone:     ui.GateMenuToneError,
+		Preamble: joinPreamble(
+			gateWaiterPreamble(d, runtimePath),
+			gateTaskBodyPreamble(failed.File, body),
+		),
+		Items: []ui.GateMenuItem{
+			{Key: "1", Label: "Re-run (default)", Default: true},
+			{Key: "2", Label: "Agent assistance", Details: gateInvocationDetails(invocation)},
+			{Key: "3", Label: "Finish by hand"},
+			{Key: "4", Label: "Open a shell in the checkout"},
+			{Key: "0", Label: "Exit"},
+		},
 	}
-	fmt.Fprintln(display, "  3. Finish by hand")
-	fmt.Fprintln(display, "  4. Open a shell in the checkout")
-	fmt.Fprintln(display, "  0. Exit")
-	fmt.Fprintf(display, "%s", display.styled(ansiCyan, "Choose [1]: "))
-
-	answer, err := readPromptLine(reader, out, "0")
+	choice, _, err := promptGateMenu(out, in, reader, spec, nil)
 	if err != nil {
 		return failedGateExit, err
 	}
-	switch strings.ToLower(strings.TrimSpace(answer)) {
-	case "", "1":
+	switch choice {
+	case "1":
 		return failedGateRerun, nil
 	case "2":
 		return failedGateAssist, nil
@@ -506,11 +484,8 @@ func promptFailedGateAction(out io.Writer, d *Deps, runtimePath string, reader *
 		return failedGateComplete, nil
 	case "4":
 		return failedGateShell, nil
-	case "0", "q", "quit", "exit":
-		return failedGateExit, nil
 	default:
-		fmt.Fprintln(display, "Choose 1, 2, 3, 4, or 0.")
-		return promptFailedGateAction(out, d, runtimePath, reader, taskSetID, failed, body, invocation)
+		return failedGateExit, nil
 	}
 }
 
@@ -562,7 +537,7 @@ func handleInteractiveVerifyFailedGate(env gateEnv, repo string, m *Manifest, wo
 	}
 
 	for {
-		action, err := promptVerifyFailedGateAction(out, d, runtimePath, reader, taskSetID, m, findings, invocation)
+		action, err := promptVerifyFailedGateAction(out, in, d, runtimePath, reader, taskSetID, m, findings, invocation)
 		if err != nil {
 			return true, err
 		}
@@ -621,31 +596,28 @@ func handleInteractiveVerifyFailedGate(env gateEnv, repo string, m *Manifest, wo
 	}
 }
 
-func promptVerifyFailedGateAction(out io.Writer, d *Deps, runtimePath string, reader *promptReader, taskSetID string, m *Manifest, findings string, invocation *AgentAssistanceInvocation) (verifyFailedGateAction, error) {
-	display := outputFor(out)
-	fmt.Fprintln(display)
-	renderBlockedWaiterCount(display, d, runtimePath)
-	display.line(ansiRed, "Verify-failed: %s did not clear the Verifier and needs a human decision.", taskSetID)
-	renderVerifyGateFindings(display, findings)
-	renderRemediationReviewBlockFromManifest(display, d, taskSetID, m)
-	fmt.Fprintln(display, "  1. Accept (record a human-authored PASS)")
-	fmt.Fprintln(display, "  2. Remediate (spawn a fix task)")
-	fmt.Fprintln(display, "  3. Agent assistance")
-	if invocation != nil {
-		fmt.Fprintf(display, "     %s\n", invocation.Display)
-		if invocation.Detail != "" {
-			fmt.Fprintf(display, "     %s\n", invocation.Detail)
-		}
+func promptVerifyFailedGateAction(out io.Writer, in io.Reader, d *Deps, runtimePath string, reader *promptReader, taskSetID string, m *Manifest, findings string, invocation *AgentAssistanceInvocation) (verifyFailedGateAction, error) {
+	spec := ui.GateMenuSpec{
+		Headline: fmt.Sprintf("Verify-failed: %s did not clear the Verifier and needs a human decision.", taskSetID),
+		Tone:     ui.GateMenuToneError,
+		Preamble: joinPreamble(
+			gateWaiterPreamble(d, runtimePath),
+			gateFindingsPreamble(findings),
+			gateRemediationPreamble(d, taskSetID, m),
+		),
+		Items: []ui.GateMenuItem{
+			{Key: "1", Label: "Accept (record a human-authored PASS)"},
+			{Key: "2", Label: "Remediate (spawn a fix task)"},
+			{Key: "3", Label: "Agent assistance", Details: gateInvocationDetails(invocation)},
+			{Key: "4", Label: "Open a shell in the checkout"},
+			{Key: "0", Label: "Exit", Default: true},
+		},
 	}
-	fmt.Fprintln(display, "  4. Open a shell in the checkout")
-	fmt.Fprintln(display, "  0. Exit")
-	fmt.Fprintf(display, "%s", display.styled(ansiCyan, "Choose [0]: "))
-
-	answer, err := readPromptLine(reader, out, "0")
+	choice, _, err := promptGateMenu(out, in, reader, spec, nil)
 	if err != nil {
 		return verifyFailedGateExit, err
 	}
-	switch strings.ToLower(strings.TrimSpace(answer)) {
+	switch choice {
 	case "1":
 		return verifyFailedGateAccept, nil
 	case "2":
@@ -654,23 +626,8 @@ func promptVerifyFailedGateAction(out io.Writer, d *Deps, runtimePath string, re
 		return verifyFailedGateAssist, nil
 	case "4":
 		return verifyFailedGateShell, nil
-	case "", "0", "q", "quit", "exit":
-		return verifyFailedGateExit, nil
 	default:
-		fmt.Fprintln(display, "Choose 1, 2, 3, 4, or 0.")
-		return promptVerifyFailedGateAction(out, d, runtimePath, reader, taskSetID, m, findings, invocation)
-	}
-}
-
-// renderVerifyGateFindings prints the recorded Verifier findings above the gate
-// menu so the human reads what failed before choosing a disposition.
-func renderVerifyGateFindings(display *output, findings string) {
-	if strings.TrimSpace(findings) == "" {
-		return
-	}
-	display.line(ansiBold, "  Findings:")
-	for _, line := range strings.Split(strings.TrimRight(findings, "\n"), "\n") {
-		fmt.Fprintf(display, "    %s\n", line)
+		return verifyFailedGateExit, nil
 	}
 }
 

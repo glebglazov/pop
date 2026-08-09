@@ -598,8 +598,8 @@ func TestRunTaskSetHITLGateReverifyRefreshesLabel(t *testing.T) {
 	if !strings.Contains(out, "VERIFY-FAILED") {
 		t.Fatalf("re-verify NEEDS-HUMAN verdict must refresh the label to VERIFY-FAILED:\n%s", out)
 	}
-	// The gate re-displayed after the re-verify (two Choose [1]: prompts).
-	if strings.Count(out, "Choose [1]:") < 2 {
+	// The gate re-displayed after the re-verify (two Human-blocked: prompts).
+	if strings.Count(out, "Human-blocked:") < 2 {
 		t.Fatalf("gate must re-display after re-verify:\n%s", out)
 	}
 	if calls != 2 {

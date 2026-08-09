@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/ui"
 )
 
 // ErrFoldRetry signals that the operator chose "Retry fold from scratch" at the
@@ -81,7 +82,7 @@ func HandleFoldConflict(d *Deps, cfg *config.Config, ctx FoldConflictContext, op
 	reader := newPromptReader(in)
 	for {
 		badge := foldConflictVerifiedBadge(d, cfg, ctx.SetID, ctx.RuntimePath)
-		action, err := promptFoldConflictAction(out, reader, ctx.SetID, badge, invocation)
+		action, err := promptFoldConflictAction(out, in, reader, ctx.SetID, badge, invocation)
 		if err != nil {
 			return err
 		}
@@ -145,32 +146,29 @@ const (
 	foldConflictExit
 )
 
-func promptFoldConflictAction(out io.Writer, reader *promptReader, setID string, badge VerifiedAtBadge, invocation *AgentAssistanceInvocation) (foldConflictAction, error) {
-	display := outputFor(out)
-	fmt.Fprintln(display)
-	display.line(ansiCyan, "Fold conflict: %s needs its branch rebased onto trunk.", setID)
+func promptFoldConflictAction(out io.Writer, in io.Reader, reader *promptReader, setID string, badge VerifiedAtBadge, invocation *AgentAssistanceInvocation) (foldConflictAction, error) {
+	var preamble []string
 	if text := VerifiedAtBadgeText(badge); text != "" {
-		fmt.Fprintf(display, "  %s\n", display.styled(verifiedAtBadgeANSI(badge), text))
+		preamble = append(preamble, "  "+text)
 	}
-	fmt.Fprintln(display, "  1. Agent assistance (default)")
-	if invocation != nil {
-		fmt.Fprintf(display, "     %s\n", invocation.Display)
-		if invocation.Detail != "" {
-			fmt.Fprintf(display, "     %s\n", invocation.Detail)
-		}
+	spec := ui.GateMenuSpec{
+		Headline: fmt.Sprintf("Fold conflict: %s needs its branch rebased onto trunk.", setID),
+		Tone:     ui.GateMenuToneDefault,
+		Preamble: preamble,
+		Items: []ui.GateMenuItem{
+			{Key: "1", Label: "Agent assistance (default)", Details: gateInvocationDetails(invocation), Default: true},
+			{Key: "2", Label: "Resume fold"},
+			{Key: "3", Label: "Retry fold from scratch"},
+			{Key: "4", Label: "Verify set"},
+			{Key: "0", Label: "Exit"},
+		},
 	}
-	fmt.Fprintln(display, "  2. Resume fold")
-	fmt.Fprintln(display, "  3. Retry fold from scratch")
-	fmt.Fprintln(display, "  4. Verify set")
-	fmt.Fprintln(display, "  0. Exit")
-	fmt.Fprintf(display, "%s", display.styled(ansiCyan, "Choose [1]: "))
-
-	answer, err := readPromptLine(reader, out, "0")
+	choice, _, err := promptGateMenu(out, in, reader, spec, nil)
 	if err != nil {
 		return foldConflictExit, err
 	}
-	switch strings.ToLower(strings.TrimSpace(answer)) {
-	case "", "1":
+	switch choice {
+	case "1":
 		return foldConflictAgent, nil
 	case "2":
 		return foldConflictResume, nil
@@ -178,11 +176,8 @@ func promptFoldConflictAction(out io.Writer, reader *promptReader, setID string,
 		return foldConflictRetry, nil
 	case "4":
 		return foldConflictVerify, nil
-	case "0", "q", "quit", "exit":
-		return foldConflictExit, nil
 	default:
-		fmt.Fprintln(display, "Choose 1, 2, 3, 4, or 0.")
-		return promptFoldConflictAction(out, reader, setID, badge, invocation)
+		return foldConflictExit, nil
 	}
 }
 

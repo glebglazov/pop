@@ -11,6 +11,7 @@ import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/store"
+	"github.com/glebglazov/pop/ui"
 )
 
 // AssistOptions configures a `pop tasks assist <set>` session.
@@ -342,7 +343,7 @@ func handleGenericAssistMenu(env gateEnv, m *Manifest, status TaskSetStatus, fin
 	offerFold := env.fold != nil && assistFoldEligible(d, taskSetID, status)
 
 	for {
-		action, err := promptGenericAssistAction(out, reader, taskSetID, status, invocation, offerFold)
+		action, err := promptGenericAssistAction(out, in, reader, taskSetID, status, invocation, offerFold)
 		if err != nil {
 			return false, err
 		}
@@ -385,48 +386,37 @@ func handleGenericAssistMenu(env gateEnv, m *Manifest, status TaskSetStatus, fin
 	}
 }
 
-func promptGenericAssistAction(out io.Writer, reader *promptReader, taskSetID string, status TaskSetStatus, invocation *AgentAssistanceInvocation, offerFold bool) (genericAssistAction, error) {
-	display := outputFor(out)
-	fmt.Fprintln(display)
-	display.line(ansiCyan, "Assist: %s is %s.", taskSetID, status)
-	fmt.Fprintln(display, "  1. Agent assistance (default)")
-	if invocation != nil {
-		fmt.Fprintf(display, "     %s\n", invocation.Display)
-		if invocation.Detail != "" {
-			fmt.Fprintf(display, "     %s\n", invocation.Detail)
-		}
+func promptGenericAssistAction(out io.Writer, in io.Reader, reader *promptReader, taskSetID string, status TaskSetStatus, invocation *AgentAssistanceInvocation, offerFold bool) (genericAssistAction, error) {
+	items := []ui.GateMenuItem{
+		{Key: "1", Label: "Agent assistance (default)", Details: gateInvocationDetails(invocation), Default: true},
+		{Key: "2", Label: "Open a shell in the checkout"},
 	}
-	fmt.Fprintln(display, "  2. Open a shell in the checkout")
 	if offerFold {
-		fmt.Fprintln(display, "  3. Fold branch back into Trunk and release checkout")
+		items = append(items, ui.GateMenuItem{Key: "3", Label: "Fold branch back into Trunk and release checkout"})
 	}
-	fmt.Fprintln(display, "  0. Exit")
-	fmt.Fprintf(display, "%s", display.styled(ansiCyan, "Choose [1]: "))
+	items = append(items, ui.GateMenuItem{Key: "0", Label: "Exit"})
 
-	answer, err := readPromptLine(reader, out, "0")
+	spec := ui.GateMenuSpec{
+		Headline: fmt.Sprintf("Assist: %s is %s.", taskSetID, status),
+		Tone:     ui.GateMenuToneDefault,
+		Items:    items,
+	}
+	choice, _, err := promptGateMenu(out, in, reader, spec, nil)
 	if err != nil {
 		return genericAssistExit, err
 	}
-	switch strings.ToLower(strings.TrimSpace(answer)) {
-	case "", "1":
+	switch choice {
+	case "1":
 		return genericAssistAgent, nil
 	case "2":
 		return genericAssistShell, nil
 	case "3":
-		if !offerFold {
-			fmt.Fprintln(display, "Choose 1, 2, or 0.")
-			return promptGenericAssistAction(out, reader, taskSetID, status, invocation, offerFold)
+		if offerFold {
+			return genericAssistFold, nil
 		}
-		return genericAssistFold, nil
-	case "0", "q", "quit", "exit":
 		return genericAssistExit, nil
 	default:
-		if offerFold {
-			fmt.Fprintln(display, "Choose 1, 2, 3, or 0.")
-		} else {
-			fmt.Fprintln(display, "Choose 1, 2, or 0.")
-		}
-		return promptGenericAssistAction(out, reader, taskSetID, status, invocation, offerFold)
+		return genericAssistExit, nil
 	}
 }
 
