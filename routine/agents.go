@@ -11,17 +11,15 @@ import (
 )
 
 // ResolveRoutineAgentPresets returns the ordered agent preset list for a Routine run.
-// The Routine's own manifest list wins when set; else [routines].agents; else
-// resolution falls through to [tasks.implement].agents and the built-in default
-// agent. Effort is not applied here — see resolveRoutineRunSpecs.
+// The Routine's own manifest list wins when set; else [work.routine].agents;
+// else resolution falls through to [work.implement].agents and the built-in
+// default agent. Effort is not applied here — see resolveRoutineRunSpecs.
 func ResolveRoutineAgentPresets(manifestAgents []string, cfg *config.Config) []string {
 	if agents := nonEmptyAgentSpecs(manifestAgents); len(agents) > 0 {
 		return agents
 	}
-	if cfg != nil && cfg.Routines != nil {
-		if agents := nonEmptyAgentSpecs(cfg.Routines.Agents); len(agents) > 0 {
-			return agents
-		}
+	if agents := nonEmptyAgentSpecs(cfg.RoutineAgents()); len(agents) > 0 {
+		return agents
 	}
 	return tasks.ResolveDefaultAgentPresets(nil, "", false, cfg)
 }

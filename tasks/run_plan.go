@@ -45,7 +45,7 @@ type runPlanInput struct {
 
 // newRunPlan resolves the shared config bundle. Every failure is an ExitSetup
 // error with the same message text and in the same order both entry points used
-// inline, so a malformed [tasks.git] entry (commit overrides) still fails before
+// inline, so a malformed [work.implement.git] entry (commit overrides) still fails before
 // any commit could happen and setup-failure behavior stays byte-identical.
 func newRunPlan(loadConfig func(string) (*config.Config, error), in runPlanInput) (*runPlan, error) {
 	cfg, err := loadConfigIfPresent(loadConfig)
@@ -67,7 +67,7 @@ func newRunPlan(loadConfig func(string) (*config.Config, error), in runPlanInput
 	strategy := resolveDirtyRuntimeStrategy(in.allowDirty)
 
 	// Resolve commit-config overrides up front (the lazy validation point) so a
-	// malformed [tasks.git] entry fails the drain hard before any commit —
+	// malformed [work.implement.git] entry fails the drain hard before any commit —
 	// including the per-task dirty-runtime checkpoint, which commits earliest.
 	commitOverrides, err := resolveCommitConfigOverrides(loadConfig)
 	if err != nil {
@@ -102,7 +102,7 @@ func (p *runPlan) maxTries(explicit bool, flagValue int) (int, error) {
 // retryDelays resolves the between-attempt delay schedule from config. Lazy for
 // the same reason as maxTries.
 func (p *runPlan) retryDelays() ([]time.Duration, error) {
-	return resolveAttemptRetryDelays(p.cfg)
+	return resolveImplementAttemptRetryDelays(p.cfg)
 }
 
 // resolveAttemptTimeout applies the default attempt timeout when the caller did

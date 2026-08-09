@@ -329,7 +329,7 @@ func TestManifestVerifyOptedOut(t *testing.T) {
 
 // verifyEnabledConfig returns a config with Agent verification switched on.
 func verifyEnabledConfig() *config.Config {
-	return &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
+	return &config.Config{Work: &config.WorkConfig{Verify: &config.VerifyConfig{Enabled: true}}}
 }
 
 // setupRunTaskSetFixtureWithKeys mirrors setupRunTaskSetFixture but writes
@@ -687,7 +687,7 @@ func TestVerifyEnabledGate(t *testing.T) {
 	if verifyEnabled(&config.Config{}) {
 		t.Fatal("empty config should be disabled")
 	}
-	if verifyEnabled(&config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: false}}}) {
+	if verifyEnabled(&config.Config{Work: &config.WorkConfig{Verify: &config.VerifyConfig{Enabled: false}}}) {
 		t.Fatal("enabled=false should be disabled")
 	}
 	if !verifyEnabled(verifyEnabledConfig()) {

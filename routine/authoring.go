@@ -50,7 +50,7 @@ func authoringSessionFromGate(d *Deps, out io.Writer, id, agentOverride string) 
 
 // resolveAuthoringAgentSpec picks the agent preset spec for a gate authoring
 // session. An explicit --agent override wins for the session; otherwise
-// resolution follows [routines].agents with the same fall-through as scheduled
+// resolution follows [work.routine].agents with the same fall-through as scheduled
 // runs (ResolveRoutineAgentPresets), taking the highest-priority preset. The
 // session is interactive with a human present, so there is no headless quota
 // fall-through — the human switches agents by hand if one is unavailable.

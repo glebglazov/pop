@@ -927,7 +927,7 @@ func AgentPresetName(spec string) (string, error) {
 
 // ResolveDefaultInteractiveAgentPreset returns the default Interactive agent
 // preset for attended sessions (wayfinder work, HITL assistance, routine
-// authoring). It follows [tasks.implement].agents when set, otherwise claude.
+// authoring). It follows [work.implement].agents when set, otherwise claude.
 func ResolveDefaultInteractiveAgentPreset(cfg *config.Config) string {
 	specs := ResolveDefaultAgentPresets(nil, "", false, cfg)
 	if len(specs) == 0 {
@@ -937,14 +937,14 @@ func ResolveDefaultInteractiveAgentPreset(cfg *config.Config) string {
 }
 
 // ResolveDefaultAgentPresets returns the ordered agent preset list for a run.
-// Explicit CLI --agent flags win; otherwise [tasks.implement].agents applies;
+// Explicit CLI --agent flags win; otherwise [work.implement].agents applies;
 // the final fallback is claude.
 func ResolveDefaultAgentPresets(cliPresets []string, cliPreset string, agentExplicit bool, cfg *config.Config) []string {
 	if agentExplicit {
 		return nonEmptyAgentSpecs(cliPresets, cliPreset)
 	}
-	if cfg != nil && cfg.Task != nil && cfg.Task.Implement != nil && len(cfg.Task.Implement.Agents) > 0 {
-		return nonEmptyAgentSpecs(cfg.Task.Implement.Agents, DefaultAgentPreset)
+	if agents := cfg.ImplementAgents(); len(agents) > 0 {
+		return nonEmptyAgentSpecs(agents, DefaultAgentPreset)
 	}
 	return nonEmptyAgentSpecs(nil, cliPreset)
 }
@@ -1090,7 +1090,7 @@ func ResolveAgentAssistanceCapability(preset, agentCmd string) (AgentAssistanceC
 //
 // Only the preset *name* is taken from the spec: an attended session's arguments
 // and model come from the user's [agents.<preset>] block, so a --model tuned for
-// unattended drains in [tasks.implement].agents no longer steers the interactive
+// unattended drains in [work.implement].agents no longer steers the interactive
 // sessions pop opens (ADR-0187). It is the one chokepoint every attended call
 // site passes through, which is why the policy lives here and not per call site.
 func ResolveAgentAssistanceInvocation(cfg *config.Config, preset, agentCmd, prompt, runtimePath string) (*AgentAssistanceInvocation, error) {
@@ -1180,7 +1180,7 @@ func resolveAgentOutputMode(loadConfig func(string) (*config.Config, error), pre
 	}
 	mode := AgentOutputMode(cfg.TaskAgentOutput(name))
 	if err := validateAgentOutputMode(mode); err != nil {
-		return "", fmt.Errorf("[tasks.presets.%s] output: %w", name, err)
+		return "", fmt.Errorf("[agents.%s] output: %w", name, err)
 	}
 	return mode, nil
 }

@@ -103,7 +103,7 @@ func containerByID(containers []work.Container, id string) *work.Container {
 // work SHA — because no row it would gate is on screen. The one rendered row is
 // the READY set, which never consults a verdict.
 func TestVerdictsResolveOnlyForRenderedRows(t *testing.T) {
-	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
+	enabled := &config.Config{Work: &config.WorkConfig{Verify: &config.VerifyConfig{Enabled: true}}}
 	d, forks, _ := newVerdictFixture(t)
 
 	got, err := rowsForStatic(d, enabled, verdictFixtureGroup())
@@ -126,7 +126,7 @@ func TestVerdictsResolveOnlyForRenderedRows(t *testing.T) {
 // build over the same deps — resolves what the first one skipped. The revealed
 // rows carry the verdict-derived status, mark and findings, with nothing missing.
 func TestRevealingDoneRowsResolvesTheirVerdicts(t *testing.T) {
-	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
+	enabled := &config.Config{Work: &config.WorkConfig{Verify: &config.VerifyConfig{Enabled: true}}}
 	d, forks, refreshOf := newVerdictFixture(t)
 
 	if _, err := rowsForStatic(d, enabled, verdictFixtureGroup()); err != nil {
@@ -187,7 +187,7 @@ func TestRevealingDoneRowsResolvesTheirVerdicts(t *testing.T) {
 // the overlay resolved — so the unresolved DONE sets are outside every tally
 // rather than silently inflating one.
 func TestKindSummaryAggregatesOnlyResolvedRows(t *testing.T) {
-	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
+	enabled := &config.Config{Work: &config.WorkConfig{Verify: &config.VerifyConfig{Enabled: true}}}
 	d, _, _ := newVerdictFixture(t)
 
 	got, err := rowsForStatic(d, enabled, verdictFixtureGroup())

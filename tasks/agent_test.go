@@ -1110,9 +1110,9 @@ func TestAgentCmdIgnoredForAttendedAssistance(t *testing.T) {
 
 func TestResolveAgentOutputModePrecedence(t *testing.T) {
 	loadText := func(string) (*config.Config, error) {
-		return &config.Config{Task: &config.TasksConfig{
-			Presets: map[string]config.TaskAgentConfig{"claude": {Output: "text"}},
-		}}, nil
+		return &config.Config{
+			Agents: map[string]config.AgentConfig{"claude": {Output: "text"}},
+		}, nil
 	}
 	mode, err := resolveAgentOutputMode(loadText, "claude", "")
 	if err != nil || mode != AgentOutputText {
@@ -1134,12 +1134,12 @@ func TestResolveAgentOutputModePrecedence(t *testing.T) {
 
 func TestResolveAgentOutputModeRejectsInvalidConfig(t *testing.T) {
 	loadInvalid := func(string) (*config.Config, error) {
-		return &config.Config{Task: &config.TasksConfig{
-			Presets: map[string]config.TaskAgentConfig{"claude": {Output: "structured-ish"}},
-		}}, nil
+		return &config.Config{
+			Agents: map[string]config.AgentConfig{"claude": {Output: "structured-ish"}},
+		}, nil
 	}
 	_, err := resolveAgentOutputMode(loadInvalid, "claude", "")
-	if err == nil || !strings.Contains(err.Error(), "[tasks.presets.claude] output") {
+	if err == nil || !strings.Contains(err.Error(), "[agents.claude] output") {
 		t.Fatalf("err = %v", err)
 	}
 }

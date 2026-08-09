@@ -338,8 +338,8 @@ func DetectAgentIntent(d *Deps, home string, loadConfig func(string) (*config.Co
 			if !errors.Is(err, os.ErrNotExist) {
 				return nil, fmt.Errorf("load task config for agent intent: %w", err)
 			}
-		} else if cfg != nil && cfg.Task != nil {
-			for agent := range cfg.Task.Presets {
+		} else if cfg != nil {
+			for agent := range cfg.Agents {
 				addIntent(agent, "task config")
 			}
 		}

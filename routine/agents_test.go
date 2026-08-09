@@ -11,8 +11,8 @@ import (
 
 func TestResolveRoutineAgentPresetsPrefersRoutinesConfig(t *testing.T) {
 	cfg := &config.Config{
-		Routines: &config.RoutinesConfig{Agents: []string{"codex", "claude"}},
-		Task: &config.TasksConfig{
+		Work: &config.WorkConfig{
+			Routine:   &config.AgentGroupConfig{Agents: []string{"codex", "claude"}},
 			Implement: &config.ImplementConfig{Agents: []string{"cursor"}},
 		},
 	}
@@ -30,7 +30,7 @@ func TestResolveRoutineAgentPresetsPrefersRoutinesConfig(t *testing.T) {
 
 func TestResolveRoutineAgentPresetsFallsBackToImplementList(t *testing.T) {
 	cfg := &config.Config{
-		Task: &config.TasksConfig{
+		Work: &config.WorkConfig{
 			Implement: &config.ImplementConfig{Agents: []string{"cursor", "claude"}},
 		},
 	}
@@ -47,7 +47,7 @@ func TestRunRoutineWithAgentFallbackQuotaFallthrough(t *testing.T) {
 	d := routineDeps(t, dataHome)
 	d.LoadConfig = func() (*config.Config, error) {
 		return &config.Config{
-			Routines: &config.RoutinesConfig{Agents: []string{"claude", "codex"}},
+			Work: &config.WorkConfig{Routine: &config.AgentGroupConfig{Agents: []string{"claude", "codex"}}},
 		}, nil
 	}
 	taskDeps := tasks.DefaultDeps()
@@ -93,7 +93,7 @@ func TestRunRoutineWithAgentFallbackSkipsCooldownedPreset(t *testing.T) {
 	d := routineDeps(t, dataHome)
 	d.LoadConfig = func() (*config.Config, error) {
 		return &config.Config{
-			Routines: &config.RoutinesConfig{Agents: []string{"claude", "codex"}},
+			Work: &config.WorkConfig{Routine: &config.AgentGroupConfig{Agents: []string{"claude", "codex"}}},
 		}, nil
 	}
 	taskDeps := tasks.DefaultDeps()
@@ -127,7 +127,7 @@ func TestRunRoutineWithAgentFallbackSkipsCooldownedPreset(t *testing.T) {
 func TestRunRoutineWithAgentFallbackAllQuotaPausedFails(t *testing.T) {
 	d := routineDeps(t, t.TempDir())
 	cfg := &config.Config{
-		Routines: &config.RoutinesConfig{Agents: []string{"claude"}},
+		Work: &config.WorkConfig{Routine: &config.AgentGroupConfig{Agents: []string{"claude"}}},
 	}
 	attempt := func(agentSpec string) (*tasks.RoutineAgentAttempt, error) {
 		return &tasks.RoutineAgentAttempt{

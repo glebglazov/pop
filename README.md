@@ -24,40 +24,57 @@ projects = [
     { path = "~/.local/share/chezmoi" },
 ]
 
-[tasks.implement]
+[work.implement]
 # Ordered fallback agent list for `pop tasks implement` when no --agent flag
 # is given. The first live agent runs the task; on a quota pause the next is
 # tried. Defaults to ["claude"].
 # agents = ["claude", "codex"]
+# Started-attempt cap and the wait schedule between retries (default 3 and
+# ["1m", "5m", "15m"]; an empty list restores instant retries).
+# max_tries = 3
+# attempt_retry_delays = ["1m", "5m", "15m"]
 
-[tasks.verify]
+[work.verify]
 # Enable Agent verification as a pre-approval Done gate (default false).
 enabled = false
 # Ordered fallback agent list for the Verifier (falls back to
-# [tasks.implement].agents when omitted).
+# [work.implement].agents when omitted).
 # agents = ["claude"]
 # Verifier model-strength tier: light, standard, or heavy (default heavy).
 # effort = "heavy"
 # Max verify→remediate cycles before parking at VERIFY-FAILED (default 3).
 # max_remediation_depth = 3
+# Verify declares its own retry loop; the caps are not shared with implement.
+# max_tries = 3
+# attempt_retry_delays = ["1m", "5m", "15m"]
 
-[tasks.presets.claude]
-# Use "text" as a compatibility fallback if an agent's structured output fails.
-output = "auto"
+[work.routine]
+# Ordered fallback agent list for Routine runs. A Routine manifest's own
+# `agents` beats this group; an empty list falls through to
+# [work.implement].agents.
+# agents = ["claude"]
+
+[work.attended]
+# Ordered fallback agent list shared by every session pop opens for a human —
+# gate assistance, an Assist session, Map assist, map grilling, a Routine
+# refinement session.
+# agents = ["claude", "codex"]
 
 [agents.claude]
-# Per-agent settings for the *attended* sessions pop opens for you (HITL and
-# assist menus, map grilling, routine authoring) — never a headless drain.
+# Settings keyed by agent preset rather than by kind of work.
+# Output mode: use "text" as a compatibility fallback if an agent's structured
+# output fails.
+output = "auto"
 # attended_args replaces pop's own attended arguments for this preset rather than
 # adding to them; pop's default is the least-restrictive posture the agent offers
 # (claude: --permission-mode auto), and an empty list launches the bare binary.
 # attended_args = ["--dangerously-skip-permissions"]
 # Model an attended session names. Unset ⇒ pop passes no model flag and the
-# agent's own configuration decides; a --model in [tasks.implement].agents tunes
+# agent's own configuration decides; a --model in [work.implement].agents tunes
 # unattended drains only and never reaches an interactive session.
 # attended_model = "opus"
 
-[tasks.git]
+[work.implement.git]
 # Commit-time git config applied only to pop's own commits during a task drain.
 # Each entry is a git `-c`-style `key=value` pair. Disable GPG signing so an
 # unattended `pop work daemon` drain never blocks on a 1Password presence prompt:

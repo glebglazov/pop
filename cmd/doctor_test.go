@@ -290,9 +290,9 @@ func TestDoctorDerivesIntendedAgentsFromTaskConfiguration(t *testing.T) {
 	d := fakeDeps(installerHome, fs, nil)
 
 	intent, err := integrate.DetectAgentIntent(d, installerHome, func(string) (*config.Config, error) {
-		return &config.Config{Task: &config.TasksConfig{Presets: map[string]config.TaskAgentConfig{
+		return &config.Config{Agents: map[string]config.AgentConfig{
 			"cursor": {Output: "text"},
-		}}}, nil
+		}}, nil
 	}, nil, func(string) bool { return false })
 	if err != nil {
 		t.Fatalf("DetectAgentIntent: %v", err)

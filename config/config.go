@@ -1,7 +1,6 @@
 package config
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -201,39 +200,47 @@ type UpdatesConfig struct {
 const DefaultTaskMaxTries = 3
 
 // DefaultTaskAttemptRetryDelays is the default inter-attempt wait schedule when
-// [tasks] attempt_retry_delays is omitted (ADR-0099).
+// a retrying Work group omits attempt_retry_delays (ADR-0099).
 var DefaultTaskAttemptRetryDelays = []time.Duration{time.Minute, 5 * time.Minute, 15 * time.Minute}
 
-// TasksConfig holds task-execution configuration under the [tasks] TOML table.
+// TasksConfig holds what is left of the retired [tasks] table (ADR-0194). Every
+// kind-scoped key moved to its Work group under [work]; only [tasks.git]
+// survives, as the single read-compat exception recorded in CLEANUP.md —
+// [work.implement].git wins when both are set. Any other [tasks.*] table is
+// reported at load by retiredTasksSectionFindings rather than read.
 type TasksConfig struct {
-	// MaxTries is the default started-attempt cap for both implement and verify.
-	// Zero/unset ⇒ DefaultTaskMaxTries. [tasks.implement] and [tasks.verify] may
-	// each override their side independently.
-	MaxTries *int `toml:"max_tries" include:"replace" desc:"Default started-attempt cap for implement and verify (default 3)."`
-	// AttemptRetryDelays is the ordered inter-attempt wait schedule shared by
-	// implement and verify retries. Omitted ⇒ DefaultTaskAttemptRetryDelays; an
-	// explicit empty array ⇒ zero delay (instant retries).
-	AttemptRetryDelays []string `toml:"attempt_retry_delays" include:"replace" desc:"Inter-attempt retry delay schedule (array of duration strings); shared by implement and verify."`
-	// Implement holds the ordered worker fallback list for `pop tasks implement`.
-	Implement *ImplementConfig `toml:"implement" include:"fields" desc:"Implement sub-command settings ([tasks.implement] table)."`
-	// Presets is the per-preset settings map (e.g. output mode). Keyed by agent
-	// preset name. Renamed from [workload.agents] so "agents" no longer means
-	// both an ordered list and a settings map.
-	Presets map[string]TaskAgentConfig `toml:"presets" include:"map-first-wins" desc:"Per-agent preset settings ([tasks.presets.<name>] tables)."`
-	// Git holds commit-time git overrides for Pop's own commits.
-	Git *TaskGitConfig `toml:"git" include:"replace" desc:"Commit-time git overrides for Pop's commits ([tasks.git] table)."`
-	// Verify holds Agent-verification settings (ADR-0086).
-	Verify *VerifyConfig `toml:"verify" include:"replace" desc:"Agent-verification settings ([tasks.verify] table)."`
+	// Git holds commit-time git overrides for Pop's own commits, at its pre-cut
+	// address.
+	Git *TaskGitConfig `toml:"git" include:"replace" desc:"Deprecated: use [work.implement].git."`
 }
 
-// ImplementConfig holds settings for the `pop tasks implement` sub-command.
+// ImplementConfig holds the implement Work group ([work.implement], ADR-0194):
+// the agents an unattended coding drain walks and the retry loop that governs
+// them.
 type ImplementConfig struct {
 	// Agents is the ordered in-process fallback list used by
 	// `pop tasks implement` for unpinned tasks when --agent is absent.
 	Agents []string `toml:"agents" include:"replace" desc:"Ordered fallback agent list for unpinned tasks."`
-	// MaxTries overrides [tasks].max_tries for implement only. Zero/unset falls
-	// through to the root cap. An explicit --max-tries flag still wins.
-	MaxTries *int `toml:"max_tries" include:"replace" desc:"Implement started-attempt cap override (falls back to [tasks].max_tries)."`
+	// MaxTries is the started-attempt cap for implement. Zero/unset ⇒
+	// DefaultTaskMaxTries. An explicit --max-tries flag still wins.
+	MaxTries *int `toml:"max_tries" include:"replace" desc:"Implement started-attempt cap (default 3)."`
+	// AttemptRetryDelays is the ordered inter-attempt wait schedule for
+	// implement retries. Omitted ⇒ DefaultTaskAttemptRetryDelays; an explicit
+	// empty array ⇒ zero delay (instant retries).
+	AttemptRetryDelays []string `toml:"attempt_retry_delays" include:"replace" desc:"Implement inter-attempt retry delay schedule (array of duration strings)."`
+	// Git holds commit-time git overrides for the commits the drain makes. It
+	// sits here, not at the [work] root, because the drain's commit path is the
+	// only reader.
+	Git *TaskGitConfig `toml:"git" include:"replace" desc:"Commit-time git overrides for Pop's commits ([work.implement.git] table)."`
+}
+
+// AgentGroupConfig is a Work group whose only setting is its ordered agent
+// list — a kind with no retry loop of its own ([work.routine],
+// [work.attended]).
+type AgentGroupConfig struct {
+	// Agents is the ordered fallback list for this kind of work. When empty,
+	// resolution falls through to the kind's documented fallback.
+	Agents []string `toml:"agents" include:"replace" desc:"Ordered fallback agent list for this kind of work."`
 }
 
 // VerifyConfig holds Agent-verification settings (ADR-0086). It is the
@@ -246,10 +253,10 @@ type VerifyConfig struct {
 	// feature (ADR-0086/0087).
 	Enabled bool `toml:"enabled" desc:"Enable Agent verification as a Done gate (default false)."`
 	// Agents is the ordered fallback list of agent presets the Verifier walks,
-	// mirroring [tasks.implement].agents: it falls through to the next agent on
+	// mirroring [work.implement].agents: it falls through to the next agent on
 	// a quota pause or a missing binary. An empty list falls back to
-	// [tasks.implement].agents (and, failing that, the built-in default agent).
-	Agents []string `toml:"agents" desc:"Ordered fallback agent list for the Verifier (falls back to [tasks.implement].agents when omitted)."`
+	// [work.implement].agents (and, failing that, the built-in default agent).
+	Agents []string `toml:"agents" desc:"Ordered fallback agent list for the Verifier (falls back to [work.implement].agents when omitted)."`
 	// Effort selects the Verifier's model-strength tier (light, standard, or
 	// heavy). Absent ⇒ heavy — verification runs at the strongest tier by default.
 	Effort string `toml:"effort" desc:"Verifier model-strength tier: light, standard, or heavy (default heavy)."`
@@ -259,45 +266,13 @@ type VerifyConfig struct {
 	// built-in default; a value ≤ 0 disables remediation (a FIXABLE verdict parks
 	// immediately).
 	MaxRemediationDepth *int `toml:"max_remediation_depth" desc:"Max verify→remediate cycles before parking at VERIFY-FAILED (default 3)."`
-	// MaxTries overrides [tasks].max_tries for verify only. Zero/unset falls
-	// through to the root cap.
-	MaxTries *int `toml:"max_tries" desc:"Verify started-attempt cap override (falls back to [tasks].max_tries)."`
-}
-
-// WorkloadConfig is the deprecated [workload] table, the predecessor of
-// [tasks] (ADR-0092). Old configs using [workload] still load and behave
-// identically to their [tasks.*] equivalent; a load-time deprecation warning
-// names the replacement. The structural mapping is:
-//
-//	[workload] default_agents  → [tasks.implement].agents
-//	[workload.verify]          → [tasks.verify]
-//	[workload.git]             → [tasks.git]
-//	[workload.agents.<name>]   → [tasks.presets.<name>]
-type WorkloadConfig struct {
-	DefaultAgents []string                       `toml:"default_agents" desc:"Deprecated: use [tasks.implement].agents."`
-	Verify        *WorkloadVerifyConfig          `toml:"verify" desc:"Deprecated: use [tasks.verify]."`
-	Git           *TaskGitConfig                 `toml:"git" desc:"Deprecated: use [tasks.git]."`
-	Agents        map[string]WorkloadAgentConfig `toml:"agents" desc:"Deprecated: use [tasks.presets]."`
-}
-
-// WorkloadVerifyConfig is the deprecated [workload.verify] table. Fields match
-// the old shape; MaxRetries is the pre-rename name for MaxRemediationDepth.
-type WorkloadVerifyConfig struct {
-	Enabled    bool     `toml:"enabled" desc:"Deprecated: use [tasks.verify].enabled."`
-	Agents     []string `toml:"agents" desc:"Deprecated: use [tasks.verify].agents."`
-	Effort     string   `toml:"effort" desc:"Deprecated: use [tasks.verify].effort."`
-	MaxRetries int      `toml:"max_retries" desc:"Deprecated: use [tasks.verify].max_remediation_depth."`
-}
-
-// WorkloadAgentConfig is the deprecated [workload.agents.<name>] table,
-// renamed to [tasks.presets.<name>] in ADR-0092.
-type WorkloadAgentConfig struct {
-	Output string `toml:"output" desc:"Deprecated: use [tasks.presets.<name>].output."`
-}
-
-// TaskAgentConfig holds configuration for one task agent preset.
-type TaskAgentConfig struct {
-	Output string `toml:"output" desc:"Output mode for this agent preset."`
+	// MaxTries is the started-attempt cap for verify. Zero/unset ⇒
+	// DefaultTaskMaxTries.
+	MaxTries *int `toml:"max_tries" desc:"Verify started-attempt cap (default 3)."`
+	// AttemptRetryDelays is the ordered inter-attempt wait schedule for verify
+	// retries. Omitted ⇒ DefaultTaskAttemptRetryDelays; an explicit empty array
+	// ⇒ zero delay (instant retries).
+	AttemptRetryDelays []string `toml:"attempt_retry_delays" desc:"Verify inter-attempt retry delay schedule (array of duration strings)."`
 }
 
 // TaskGitConfig holds commit-time git configuration applied to Pop's own
@@ -388,10 +363,16 @@ type EffortConfig struct {
 	Light    []EffortModel `toml:"light" desc:"Light-tier model/reasoning ladder (array)."`
 }
 
-// AgentConfig holds one agent preset's attended-session settings — the sessions
-// pop opens for a human to sit in front of (HITL and assist menus, map grilling,
-// routine authoring), never a headless drain (ADR-0187).
+// AgentConfig holds the settings keyed by agent preset rather than by kind of
+// work: the attended-session arguments pop uses for the sessions it opens for a
+// human to sit in front of (ADR-0187), and the output mode that decides how pop
+// parses this agent's stream in any kind of run (ADR-0194).
 type AgentConfig struct {
+	// Output selects how pop reads this preset's stream. Empty ⇒ "auto"; "text"
+	// suppresses the adapter's stream-JSON flags entirely, and with them usage,
+	// cost, turn counts and Agent proceed verdict detection — the in-config
+	// workaround when a vendor changes a stream shape and pop's parser breaks.
+	Output string `toml:"output" include:"replace" desc:"Output mode for this agent preset (auto|text|json)."`
 	// AttendedArgs replaces the adapter's declared attended arguments wholesale
 	// rather than appending to them: an attended session has no output protocol
 	// for pop to protect, so the human at the terminal owns their own permission
@@ -412,23 +393,31 @@ func (c *Config) AgentSettingsFor(preset string) AgentConfig {
 	return c.Agents[strings.TrimSpace(preset)]
 }
 
-// ResolveCommitConfigOverrides validates the [tasks.git]
+// ResolveCommitConfigOverrides validates the [work.implement.git]
 // commit_config_overrides entries and returns them as `key=value` strings ready
 // to be prepended as `-c key=value` pairs to Pop's commit invocations. Each
 // entry must split into a non-empty key on the first `=` (an empty value is
 // legal git, e.g. "user.signingkey=").
 //
+// The pre-cut [tasks.git] address is still read — the single read-compat
+// exception to ADR-0194's hard cut, kept because the key was added on request
+// and its user should not lose it silently. The new address wins when both are
+// set.
+//
 // Validation is deliberately lazy — this is called only from the task drain
 // path, never at global config load — so a typo never breaks the picker or
 // dashboard. A malformed entry is a hard error: callers must fail the drain
 // rather than silently proceed (proceeding could re-trigger the very signing
-// hang this feature exists to prevent). The receiver may be nil (no [tasks]
-// or [tasks.git] section), in which case no overrides apply.
+// hang this feature exists to prevent). The receiver may be nil, in which case
+// no overrides apply.
 func (c *Config) ResolveCommitConfigOverrides() ([]string, error) {
-	if c == nil || c.Task == nil || c.Task.Git == nil {
-		return nil, nil
+	section, raw := "work.implement.git", []string(nil)
+	if c != nil && c.Work != nil && c.Work.Implement != nil && c.Work.Implement.Git != nil {
+		raw = c.Work.Implement.Git.CommitConfigOverrides
 	}
-	raw := c.Task.Git.CommitConfigOverrides
+	if len(raw) == 0 && c != nil && c.Task != nil && c.Task.Git != nil {
+		section, raw = "tasks.git", c.Task.Git.CommitConfigOverrides
+	}
 	if len(raw) == 0 {
 		return nil, nil
 	}
@@ -436,26 +425,29 @@ func (c *Config) ResolveCommitConfigOverrides() ([]string, error) {
 	for i, entry := range raw {
 		key, _, found := strings.Cut(entry, "=")
 		if !found || strings.TrimSpace(key) == "" {
-			return nil, fmt.Errorf("[tasks.git] commit_config_overrides[%d]: %q must be in key=value form with a non-empty key", i, entry)
+			return nil, fmt.Errorf("[%s] commit_config_overrides[%d]: %q must be in key=value form with a non-empty key", section, i, entry)
 		}
 		overrides = append(overrides, entry)
 	}
 	return overrides, nil
 }
 
-// RoutinesConfig holds settings for recurring Routine runs under [routines].
-type RoutinesConfig struct {
-	// Agents is the ordered fallback list for Routine runs. When empty, resolution
-	// falls through to [tasks.implement].agents (and, failing that, the built-in
-	// default agent).
-	Agents []string `toml:"agents" desc:"Ordered fallback agent list for routine runs (falls back to [tasks.implement].agents when omitted)."`
-}
-
-// WorkConfig holds the [work] table. It is deliberately a container: the
-// supervisor's timing lives one level down under [work.daemon], leaving [work]
-// free for later non-daemon Work keys.
+// WorkConfig holds the [work] table: one sub-table per kind of work, plus the
+// supervisor's timing under [work.daemon]. Every agent list and every
+// task-execution setting is kind-scoped here (ADR-0194) — the root itself holds
+// no shared defaults, so each key belongs to exactly the thing that reads it.
 type WorkConfig struct {
-	Daemon *WorkDaemonConfig `toml:"daemon" desc:"Work supervisor timing ([work.daemon] table)."`
+	// Implement is the unattended coding drain's group.
+	Implement *ImplementConfig `toml:"implement" include:"fields" desc:"Implement Work group ([work.implement] table)."`
+	// Verify is the Verifier's group (ADR-0086).
+	Verify *VerifyConfig `toml:"verify" include:"replace" desc:"Agent-verification settings ([work.verify] table)."`
+	// Routine is the recurring-Routine group. An empty list falls through to
+	// [work.implement].agents; a Routine manifest's own agents still beats both.
+	Routine *AgentGroupConfig `toml:"routine" include:"replace" desc:"Routine Work group ([work.routine] table)."`
+	// Attended is the group every human-facing session shares — gate assistance,
+	// an Assist session, Map assist, map grilling, a Routine refinement session.
+	Attended *AgentGroupConfig `toml:"attended" include:"replace" desc:"Attended-session Work group ([work.attended] table)."`
+	Daemon   *WorkDaemonConfig `toml:"daemon" desc:"Work supervisor timing ([work.daemon] table)."`
 }
 
 // WorkDaemonConfig holds `pop work daemon` supervisor configuration. Durations
@@ -635,21 +627,19 @@ type Config struct {
 	Select         *ProjectConfig        `toml:"select" desc:"Deprecated: use [project]."`
 	PaneMonitoring *PaneMonitoringConfig `toml:"pane_monitoring" desc:"Pane attention/status monitoring daemon settings ([pane_monitoring] table)."`
 	Dashboard      *DashboardConfig      `toml:"dashboard" desc:"Shared dashboard and cursor behavior ([dashboard] table)."`
-	Task           *TasksConfig          `toml:"tasks" include:"fields" desc:"Task-set execution defaults ([tasks] table)."`
-	// Deprecated: use Task. The [workload] table was renamed to [tasks] in
-	// ADR-0092. Old configs still load and warn; the alias is structural
-	// (not 1:1). Removal is gated in CLEANUP.md.
-	Workload *WorkloadConfig         `toml:"workload" desc:"Deprecated: use [tasks] (ADR-0092)."`
-	Effort   map[string]EffortConfig `toml:"effort" include:"map-first-wins" desc:"Per-agent reasoning-effort ladders ([effort.<agent>] tables)."`
-	// Agents holds [agents.<preset>] blocks: the attended-session settings for one
-	// agent preset, read by every session pop opens for a human (ADR-0187).
-	Agents map[string]AgentConfig `toml:"agents" include:"map-fields" desc:"Per-agent attended-session settings ([agents.<preset>] tables)."`
+	// Task holds the retired [tasks] table's one honored key, [tasks.git]
+	// (ADR-0194). Everything else moved to [work.<kind>].
+	Task   *TasksConfig            `toml:"tasks" include:"fields" desc:"Deprecated: use [work] (only [tasks.git] is still read)."`
+	Effort map[string]EffortConfig `toml:"effort" include:"map-first-wins" desc:"Per-agent reasoning-effort ladders ([effort.<agent>] tables)."`
+	// Agents holds [agents.<preset>] blocks: the settings keyed by agent preset
+	// rather than by kind of work — attended-session arguments (ADR-0187) and
+	// the preset's output mode (ADR-0194).
+	Agents map[string]AgentConfig `toml:"agents" include:"map-fields" desc:"Per-agent preset settings ([agents.<preset>] tables)."`
 	// Workbenches is the canonical TOML key for session blueprints.
 	Workbenches []Workbench `toml:"workbenches" include:"append" desc:"Global session blueprints (templates)."`
 	// WorkbenchOpts holds the [workbench] options table (pick_on_create, order).
 	WorkbenchOpts *WorkbenchOptions   `toml:"workbench" include:"fields" desc:"Workbench options ([workbench] table)."`
-	Routines      *RoutinesConfig     `toml:"routines" desc:"Routine settings ([routines] table)."`
-	Work          *WorkConfig         `toml:"work" include:"fields" desc:"Work settings ([work] table; supervisor timing under [work.daemon])."`
+	Work          *WorkConfig         `toml:"work" include:"fields" desc:"Work settings ([work] table; one sub-table per kind of work)."`
 	Updates       *UpdatesConfig      `toml:"updates" desc:"Auto-update behavior ([updates] table)."`
 	Integrations  *IntegrationsConfig `toml:"integrations" merge:"fields" desc:"AI-agent integration settings ([integrations] table)."`
 	// Repo holds [repo."<path>"] override blocks keyed by any checkout path.
@@ -957,63 +947,107 @@ func (c *Config) ResolveWorkbenchesWith(d *Deps, checkoutPath string) ([]Workben
 	return merged.Workbenches, warnings
 }
 
-// ResolveAttemptRetryDelays parses [tasks].attempt_retry_delays, applying
-// defaults for an omitted key. An explicit empty array yields zero delay
-// (instant retries). The receiver may be nil.
-func (c *Config) ResolveAttemptRetryDelays() ([]time.Duration, error) {
-	if c == nil || c.Task == nil || c.Task.AttemptRetryDelays == nil {
+// parseAttemptRetryDelays parses one Work group's attempt_retry_delays,
+// applying the default schedule for an omitted key. An explicit empty array
+// yields zero delay (instant retries).
+func parseAttemptRetryDelays(section string, raw []string) ([]time.Duration, error) {
+	if raw == nil {
 		return append([]time.Duration(nil), DefaultTaskAttemptRetryDelays...), nil
 	}
-	delays := make([]time.Duration, 0, len(c.Task.AttemptRetryDelays))
-	for i, raw := range c.Task.AttemptRetryDelays {
-		d, err := time.ParseDuration(raw)
+	delays := make([]time.Duration, 0, len(raw))
+	for i, entry := range raw {
+		d, err := time.ParseDuration(entry)
 		if err != nil {
-			return nil, fmt.Errorf("[tasks] attempt_retry_delays[%d]: %w", i, err)
+			return nil, fmt.Errorf("[%s] attempt_retry_delays[%d]: %w", section, i, err)
 		}
 		delays = append(delays, d)
 	}
 	return delays, nil
 }
 
-func (c *Config) resolveTaskMaxTries() int {
-	if c != nil && c.Task != nil && c.Task.MaxTries != nil && *c.Task.MaxTries > 0 {
-		return *c.Task.MaxTries
+// ResolveImplementAttemptRetryDelays parses [work.implement].attempt_retry_delays.
+// The receiver may be nil.
+func (c *Config) ResolveImplementAttemptRetryDelays() ([]time.Duration, error) {
+	var raw []string
+	if c != nil && c.Work != nil && c.Work.Implement != nil {
+		raw = c.Work.Implement.AttemptRetryDelays
+	}
+	return parseAttemptRetryDelays("work.implement", raw)
+}
+
+// ResolveVerifyAttemptRetryDelays parses [work.verify].attempt_retry_delays.
+// The receiver may be nil.
+func (c *Config) ResolveVerifyAttemptRetryDelays() ([]time.Duration, error) {
+	var raw []string
+	if c != nil && c.Work != nil && c.Work.Verify != nil {
+		raw = c.Work.Verify.AttemptRetryDelays
+	}
+	return parseAttemptRetryDelays("work.verify", raw)
+}
+
+// ResolveImplementMaxTries returns the started-attempt cap for implement from
+// config: [work.implement].max_tries, else DefaultTaskMaxTries. An explicit
+// --max-tries flag is resolved by the caller.
+func (c *Config) ResolveImplementMaxTries() int {
+	if c != nil && c.Work != nil && c.Work.Implement != nil &&
+		c.Work.Implement.MaxTries != nil && *c.Work.Implement.MaxTries > 0 {
+		return *c.Work.Implement.MaxTries
 	}
 	return DefaultTaskMaxTries
 }
 
-// ResolveImplementMaxTries returns the started-attempt cap for implement from
-// config: [tasks.implement].max_tries, else [tasks].max_tries, else
-// DefaultTaskMaxTries. An explicit --max-tries flag is resolved by the caller.
-func (c *Config) ResolveImplementMaxTries() int {
-	if c != nil && c.Task != nil && c.Task.Implement != nil &&
-		c.Task.Implement.MaxTries != nil && *c.Task.Implement.MaxTries > 0 {
-		return *c.Task.Implement.MaxTries
-	}
-	return c.resolveTaskMaxTries()
-}
-
 // ResolveVerifyMaxTries returns the started-attempt cap for verify from config:
-// [tasks.verify].max_tries, else [tasks].max_tries, else DefaultTaskMaxTries.
+// [work.verify].max_tries, else DefaultTaskMaxTries.
 func (c *Config) ResolveVerifyMaxTries() int {
-	if c != nil && c.Task != nil && c.Task.Verify != nil &&
-		c.Task.Verify.MaxTries != nil && *c.Task.Verify.MaxTries > 0 {
-		return *c.Task.Verify.MaxTries
+	if c != nil && c.Work != nil && c.Work.Verify != nil &&
+		c.Work.Verify.MaxTries != nil && *c.Work.Verify.MaxTries > 0 {
+		return *c.Work.Verify.MaxTries
 	}
-	return c.resolveTaskMaxTries()
+	return DefaultTaskMaxTries
 }
 
-// TaskAgentOutput returns the configured output mode for one agent preset.
-// Defaults to "auto"; validation is owned by the task executor.
+// ImplementAgents returns the [work.implement].agents list as declared, or nil.
+func (c *Config) ImplementAgents() []string {
+	if c == nil || c.Work == nil || c.Work.Implement == nil {
+		return nil
+	}
+	return c.Work.Implement.Agents
+}
+
+// VerifySettings returns the [work.verify] block, or nil when undeclared.
+func (c *Config) VerifySettings() *VerifyConfig {
+	if c == nil || c.Work == nil {
+		return nil
+	}
+	return c.Work.Verify
+}
+
+// RoutineAgents returns the [work.routine].agents list as declared, or nil.
+// An empty list leaves the caller to fall through to the implement group.
+func (c *Config) RoutineAgents() []string {
+	if c == nil || c.Work == nil || c.Work.Routine == nil {
+		return nil
+	}
+	return c.Work.Routine.Agents
+}
+
+// AttendedAgents returns the [work.attended].agents list as declared, or nil.
+// Every human-facing session pop opens shares this one group (ADR-0194).
+func (c *Config) AttendedAgents() []string {
+	if c == nil || c.Work == nil || c.Work.Attended == nil {
+		return nil
+	}
+	return c.Work.Attended.Agents
+}
+
+// TaskAgentOutput returns the configured output mode for one agent preset,
+// from [agents.<preset>].output. Defaults to "auto"; validation is owned by the
+// task executor.
 func (c *Config) TaskAgentOutput(agent string) string {
-	if c == nil || c.Task == nil {
-		return "auto"
+	if out := c.AgentSettingsFor(agent).Output; out != "" {
+		return out
 	}
-	agentConfig, ok := c.Task.Presets[agent]
-	if !ok || agentConfig.Output == "" {
-		return "auto"
-	}
-	return agentConfig.Output
+	return "auto"
 }
 
 // IntegrationsSkills returns the merged [integrations] skills list. The error
@@ -1477,9 +1511,7 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 	if err := applyConfigLayerMerge(d, &cfg, path, md); err != nil {
 		return nil, err
 	}
-	// Migrate deprecated [workload] → [tasks] (ADR-0092). This runs after
-	// layer merge so it sees the merged workload/tasks state.
-	for _, f := range workloadMigrationFindings(&cfg, path) {
+	for _, f := range retiredTasksSectionFindings(path, md) {
 		cfg.recordFinding(f)
 	}
 	for _, f := range effortConfigFindings(path, md) {
@@ -1597,12 +1629,7 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 		for _, f := range repoBlockWarnings(expanded, includedMD) {
 			cfg.recordFinding(f)
 		}
-		// Migrate deprecated [workload] → [tasks] in included file (ADR-0092).
-		// This resolves included.Task before the merge so [workload]-sourced
-		// fields participate; it carries no [tasks.*] keys in includedMD, so the
-		// task subtree merges from metadata synthesized off the resolved struct.
-		hadWorkload := included.Workload != nil
-		for _, f := range workloadMigrationFindings(&included, expanded) {
+		for _, f := range retiredTasksSectionFindings(expanded, includedMD) {
 			cfg.recordFinding(f)
 		}
 		cfg.Warnings = append(cfg.Warnings, includeFileWarnings(expanded, &included, d)...)
@@ -1615,21 +1642,7 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 			included.Workbenches = validTemplates
 		}
 
-		if hadWorkload {
-			// Merge every whitelisted section except tasks off the include's own
-			// metadata, then the resolved task config off synthesized metadata so
-			// [workload]-migrated fields land too.
-			savedTask := included.Task
-			included.Task = nil
-			mergeWalk(&cfg, &included, includedMD, includePol)
-			included.Task = savedTask
-			if savedTask != nil {
-				taskSrc := Config{Task: savedTask}
-				mergeWalk(&cfg, &taskSrc, taskConfigMetadata(savedTask), includePol)
-			}
-		} else {
-			mergeWalk(&cfg, &included, includedMD, includePol)
-		}
+		mergeWalk(&cfg, &included, includedMD, includePol)
 	}
 
 	return &cfg, nil
@@ -1638,37 +1651,41 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 // seedIncludeClaims marks every first-wins include field the parent config
 // already set as claimed, so a later include loses the collision to it. Map and
 // append sections need no seeding — they collide off the destination's live
-// keys/order. Task claims are value-driven (mirroring the pre-walker
-// mergeIncludedTask checks, so a parent [workload]-migrated field also blocks an
-// include); [workbench] claims are metadata-driven off the parent file, since a
-// runtime [workbench.preferred] table can leave WorkbenchOpts non-nil with
-// pick_on_create/order unset.
+// keys/order. Work-group claims are value-driven; [workbench] claims are
+// metadata-driven off the parent file, since a runtime [workbench.preferred]
+// table can leave WorkbenchOpts non-nil with pick_on_create/order unset.
 func seedIncludeClaims(policy *mergePolicy, cfg *Config, md toml.MetaData) {
-	if cfg.Task != nil {
-		if cfg.Task.MaxTries != nil {
-			policy.claim("tasks.max_tries")
-		}
-		if cfg.Task.AttemptRetryDelays != nil {
-			policy.claim("tasks.attempt_retry_delays")
-		}
-		if cfg.Task.Implement != nil {
-			if len(cfg.Task.Implement.Agents) > 0 {
-				policy.claim("tasks.implement.agents")
+	if cfg.Task != nil && cfg.Task.Git != nil {
+		policy.claim("tasks.git")
+	}
+	if cfg.Work != nil {
+		if impl := cfg.Work.Implement; impl != nil {
+			if len(impl.Agents) > 0 {
+				policy.claim("work.implement.agents")
 			}
-			if cfg.Task.Implement.MaxTries != nil {
-				policy.claim("tasks.implement.max_tries")
+			if impl.MaxTries != nil {
+				policy.claim("work.implement.max_tries")
+			}
+			if impl.AttemptRetryDelays != nil {
+				policy.claim("work.implement.attempt_retry_delays")
+			}
+			if impl.Git != nil {
+				policy.claim("work.implement.git")
 			}
 		}
-		if cfg.Task.Git != nil {
-			policy.claim("tasks.git")
+		if cfg.Work.Verify != nil {
+			policy.claim("work.verify")
 		}
-		if cfg.Task.Verify != nil {
-			policy.claim("tasks.verify")
+		if cfg.Work.Routine != nil {
+			policy.claim("work.routine")
+		}
+		if cfg.Work.Attended != nil {
+			policy.claim("work.attended")
 		}
 	}
 	// [agents.<preset>] merges per field, so each field the parent set is claimed
-	// on its own. Claims are value-driven, like the task ones above: an unset
-	// attended field is a nil argument list or an empty model, never a meaningful
+	// on its own. Claims are value-driven, like the Work-group ones above: an
+	// unset field is a nil argument list or an empty string, never a meaningful
 	// value an include should lose to.
 	for preset, block := range cfg.Agents {
 		if block.AttendedArgs != nil {
@@ -1677,6 +1694,9 @@ func seedIncludeClaims(policy *mergePolicy, cfg *Config, md toml.MetaData) {
 		if strings.TrimSpace(block.AttendedModel) != "" {
 			policy.claim("agents." + preset + ".attended_model")
 		}
+		if strings.TrimSpace(block.Output) != "" {
+			policy.claim("agents." + preset + ".output")
+		}
 	}
 	if md.IsDefined("workbench", "pick_on_create") {
 		policy.claim("workbench.pick_on_create")
@@ -1684,27 +1704,6 @@ func seedIncludeClaims(policy *mergePolicy, cfg *Config, md toml.MetaData) {
 	if md.IsDefined("workbench", "order") {
 		policy.claim("workbench.order")
 	}
-}
-
-// taskConfigMetadata synthesizes a toml.MetaData whose defined keys mirror the
-// non-nil fields of a resolved [tasks] config, by round-tripping it through the
-// encoder. It lets the walker merge a [workload]-migrated task subtree, whose
-// fields never appear in the include file's own metadata. Nil pointers and nil
-// slices are omitted by the encoder, so only fields the config actually sets
-// are reported defined.
-func taskConfigMetadata(task *TasksConfig) toml.MetaData {
-	var buf bytes.Buffer
-	if err := toml.NewEncoder(&buf).Encode(struct {
-		Tasks *TasksConfig `toml:"tasks"`
-	}{Tasks: task}); err != nil {
-		return toml.MetaData{}
-	}
-	var probe Config
-	md, err := toml.Decode(buf.String(), &probe)
-	if err != nil {
-		return toml.MetaData{}
-	}
-	return md
 }
 
 // includeCollisionMessage rebuilds the byte-identical first-wins skip warning
@@ -1727,22 +1726,23 @@ func includeCollisionMessage(path, keyPath string) string {
 		}
 		return fmt.Sprintf("%s: [agents.%s] skipped, already defined (first definition wins)", path, rest)
 	}
-	if preset, ok := strings.CutPrefix(keyPath, "tasks.presets."); ok {
-		return fmt.Sprintf("%s: [tasks.presets.%s] skipped, already defined (first definition wins)", path, preset)
-	}
 	switch keyPath {
-	case "tasks.implement.agents":
-		return fmt.Sprintf("%s: [tasks.implement].agents skipped, already defined (first definition wins)", path)
-	case "tasks.implement.max_tries":
-		return fmt.Sprintf("%s: [tasks.implement].max_tries skipped, already defined (first definition wins)", path)
-	case "tasks.max_tries":
-		return fmt.Sprintf("%s: [tasks].max_tries skipped, already defined (first definition wins)", path)
-	case "tasks.attempt_retry_delays":
-		return fmt.Sprintf("%s: [tasks].attempt_retry_delays skipped, already defined (first definition wins)", path)
+	case "work.implement.agents":
+		return fmt.Sprintf("%s: [work.implement].agents skipped, already defined (first definition wins)", path)
+	case "work.implement.max_tries":
+		return fmt.Sprintf("%s: [work.implement].max_tries skipped, already defined (first definition wins)", path)
+	case "work.implement.attempt_retry_delays":
+		return fmt.Sprintf("%s: [work.implement].attempt_retry_delays skipped, already defined (first definition wins)", path)
+	case "work.implement.git":
+		return fmt.Sprintf("%s: [work.implement.git] skipped, already defined (first definition wins)", path)
+	case "work.verify":
+		return fmt.Sprintf("%s: [work.verify] skipped, already defined (first definition wins)", path)
+	case "work.routine":
+		return fmt.Sprintf("%s: [work.routine] skipped, already defined (first definition wins)", path)
+	case "work.attended":
+		return fmt.Sprintf("%s: [work.attended] skipped, already defined (first definition wins)", path)
 	case "tasks.git":
 		return fmt.Sprintf("%s: [tasks.git] skipped, already defined (first definition wins)", path)
-	case "tasks.verify":
-		return fmt.Sprintf("%s: [tasks.verify] skipped, already defined (first definition wins)", path)
 	case "workbench.pick_on_create":
 		return fmt.Sprintf("%s: [workbench] pick_on_create skipped, already defined (first definition wins)", path)
 	case "workbench.order":
@@ -1918,7 +1918,7 @@ func effortConfigFindings(path string, md toml.MetaData) []Finding {
 // preset name itself is not validated here: config does not know the agent
 // adapter registry, and an unknown preset simply never matches a session.
 func agentConfigFindings(path string, md toml.MetaData) []Finding {
-	validKeys := map[string]bool{"attended_args": true, "attended_model": true}
+	validKeys := map[string]bool{"attended_args": true, "attended_model": true, "output": true}
 	var findings []Finding
 	seen := make(map[string]bool)
 	for _, key := range md.Undecoded() {
@@ -1927,7 +1927,7 @@ func agentConfigFindings(path string, md toml.MetaData) []Finding {
 		}
 		f := Finding{
 			Path:    fmt.Sprintf("agents.%s.%s", key[1], key[2]),
-			Message: fmt.Sprintf("%s: [agents.%s] unknown key %q; valid keys: attended_args, attended_model", path, key[1], key[2]),
+			Message: fmt.Sprintf("%s: [agents.%s] unknown key %q; valid keys: attended_args, attended_model, output", path, key[1], key[2]),
 		}
 		if seen[f.Path] {
 			continue
@@ -1992,137 +1992,47 @@ func validateRepoConfigMetadata(path string, md toml.MetaData) error {
 	return nil
 }
 
-// workloadMigrationFindings detects the deprecated [workload] table and
-// migrates its fields into the canonical [tasks] structure (ADR-0092). When
-// both are present, [tasks] wins per-key; [workload] fills gaps and emits a
-// deprecation warning naming the replacement. The mapping is structural:
-//
-//	[workload] default_agents  → [tasks.implement].agents
-//	[workload.verify]          → [tasks.verify]
-//	[workload.git]             → [tasks.git]
-//	[workload.agents.<name>]   → [tasks.presets.<name>]
-//
-// Returns findings for each aliased key present; the caller records them.
-func workloadMigrationFindings(cfg *Config, path string) []Finding {
-	if cfg.Workload == nil {
-		return nil
+// retiredTasksSectionFindings returns load-time findings when a config file
+// still carries the pre-cut [tasks] or [workload] tables. ADR-0194 moved every
+// kind-scoped key onto its Work group and cut the old addresses rather than
+// aliasing them, so an unread key would otherwise degrade silently to the
+// built-in default agent. Each finding names the new address for the table it
+// found. [tasks.git] is exempt: it is the one honored read-compat key.
+func retiredTasksSectionFindings(path string, md toml.MetaData) []Finding {
+	replacements := map[string]string{
+		"tasks.implement":            "[work.implement]",
+		"tasks.verify":               "[work.verify]",
+		"tasks.presets":              "[agents.<preset>]",
+		"tasks.max_tries":            "[work.implement].max_tries and [work.verify].max_tries",
+		"tasks.attempt_retry_delays": "[work.implement].attempt_retry_delays and [work.verify].attempt_retry_delays",
+		"workload":                   "[work]",
+		"routines":                   "[work.routine]",
 	}
-
-	// Emit deprecation warnings for the deprecated [workload] table and each
-	// aliased sub-key present. Each warning names the [tasks.*] replacement.
+	seen := make(map[string]bool)
 	var findings []Finding
-	findings = append(findings, Finding{
-		Path:    "deprecated.workload",
-		Message: fmt.Sprintf("%s: [workload] is deprecated; rename to [tasks]", path),
-	})
-	if len(cfg.Workload.DefaultAgents) > 0 {
+	add := func(key, replacement string) {
+		if seen[key] {
+			return
+		}
+		seen[key] = true
 		findings = append(findings, Finding{
-			Path:    "deprecated.workload.default_agents",
-			Message: fmt.Sprintf("%s: [workload] default_agents is deprecated; rename to [tasks.implement].agents", path),
+			Path:    "retired_section." + key,
+			Message: fmt.Sprintf("%s: [%s] is no longer read; agent lists and task-execution settings are grouped by kind of work — use %s", path, key, replacement),
 		})
 	}
-	if cfg.Workload.Verify != nil {
-		findings = append(findings, Finding{
-			Path:    "deprecated.workload.verify",
-			Message: fmt.Sprintf("%s: [workload.verify] is deprecated; rename to [tasks.verify]", path),
-		})
-	}
-	if cfg.Workload.Git != nil {
-		findings = append(findings, Finding{
-			Path:    "deprecated.workload.git",
-			Message: fmt.Sprintf("%s: [workload.git] is deprecated; rename to [tasks.git]", path),
-		})
-	}
-	if len(cfg.Workload.Agents) > 0 {
-		findings = append(findings, Finding{
-			Path:    "deprecated.workload.agents",
-			Message: fmt.Sprintf("%s: [workload.agents] is deprecated; rename to [tasks.presets]", path),
-		})
-	}
-
-	// Migrate [workload] → [tasks], honoring per-key precedence: [tasks] wins
-	// when both set the same field; [workload] fills gaps.
-	if cfg.Task == nil {
-		cfg.Task = &TasksConfig{}
-	}
-
-	// [workload] default_agents → [tasks.implement].agents
-	if len(cfg.Workload.DefaultAgents) > 0 {
-		if cfg.Task.Implement == nil {
-			cfg.Task.Implement = &ImplementConfig{
-				Agents: append([]string(nil), cfg.Workload.DefaultAgents...),
+	for _, key := range md.Undecoded() {
+		switch {
+		case len(key) >= 2 && key[0] == "tasks":
+			if replacement, ok := replacements["tasks."+key[1]]; ok {
+				add("tasks."+key[1], replacement)
+			} else {
+				add("tasks."+key[1], "[work]")
 			}
-		} else if len(cfg.Task.Implement.Agents) == 0 {
-			cfg.Task.Implement.Agents = append([]string(nil), cfg.Workload.DefaultAgents...)
-		}
-		// else: [tasks.implement].agents already set, [tasks] wins
-	}
-
-	// [workload.verify] → [tasks.verify]
-	if cfg.Workload.Verify != nil {
-		if cfg.Task.Verify == nil {
-			cfg.Task.Verify = cloneWorkloadVerifyAsVerify(cfg.Workload.Verify)
-		} else {
-			// Merge per-field: [tasks.verify] wins when set
-			wv := cfg.Workload.Verify
-			tv := cfg.Task.Verify
-			if !tv.Enabled && wv.Enabled {
-				tv.Enabled = true
-			}
-			if len(tv.Agents) == 0 && len(wv.Agents) > 0 {
-				tv.Agents = append([]string(nil), wv.Agents...)
-			}
-			if tv.Effort == "" && wv.Effort != "" {
-				tv.Effort = wv.Effort
-			}
-			if tv.MaxRemediationDepth == nil && wv.MaxRetries > 0 {
-				v := wv.MaxRetries
-				tv.MaxRemediationDepth = &v
-			}
+		case len(key) >= 1 && (key[0] == "workload" || key[0] == "routines"):
+			add(key[0], replacements[key[0]])
 		}
 	}
-
-	// [workload.git] → [tasks.git]
-	if cfg.Workload.Git != nil {
-		if cfg.Task.Git == nil {
-			cfg.Task.Git = cloneTaskGitConfig(cfg.Workload.Git)
-		} else if len(cfg.Task.Git.CommitConfigOverrides) == 0 &&
-			len(cfg.Workload.Git.CommitConfigOverrides) > 0 {
-			cfg.Task.Git.CommitConfigOverrides = append([]string(nil), cfg.Workload.Git.CommitConfigOverrides...)
-		}
-	}
-
-	// [workload.agents.<name>] → [tasks.presets.<name>]
-	if len(cfg.Workload.Agents) > 0 {
-		if cfg.Task.Presets == nil {
-			cfg.Task.Presets = make(map[string]TaskAgentConfig, len(cfg.Workload.Agents))
-		}
-		for name, wac := range cfg.Workload.Agents {
-			if _, exists := cfg.Task.Presets[name]; !exists {
-				cfg.Task.Presets[name] = TaskAgentConfig{Output: wac.Output}
-			}
-		}
-	}
-
 	return findings
-}
-
-// cloneWorkloadVerifyAsVerify converts a deprecated WorkloadVerifyConfig into
-// the canonical VerifyConfig, mapping MaxRetries → MaxRemediationDepth.
-func cloneWorkloadVerifyAsVerify(src *WorkloadVerifyConfig) *VerifyConfig {
-	if src == nil {
-		return nil
-	}
-	dst := &VerifyConfig{
-		Enabled: src.Enabled,
-		Agents:  append([]string(nil), src.Agents...),
-		Effort:  src.Effort,
-	}
-	if src.MaxRetries > 0 {
-		v := src.MaxRetries
-		dst.MaxRemediationDepth = &v
-	}
-	return dst
 }
 
 // retiredQueueSectionFindings returns a load-time finding when a config file
@@ -2130,7 +2040,7 @@ func cloneWorkloadVerifyAsVerify(src *WorkloadVerifyConfig) *VerifyConfig {
 // became `pop work` and its timing moved to [work.daemon], so a leftover [queue]
 // is an unknown section whose keys are read by nothing (fail-soft, ADR-0054). The
 // message keeps the [queue].agents pointer alive for files that set that key,
-// since agent fallback lives somewhere else again ([tasks.implement].agents).
+// since agent fallback lives somewhere else again ([work.implement].agents).
 func retiredQueueSectionFindings(path string, md toml.MetaData) []Finding {
 	found, agents := false, false
 	for _, key := range md.Undecoded() {
@@ -2149,7 +2059,7 @@ func retiredQueueSectionFindings(path string, md toml.MetaData) []Finding {
 		path,
 	)
 	if agents {
-		msg += "; configure agent fallback under [tasks.implement].agents"
+		msg += "; configure agent fallback under [work.implement].agents"
 	}
 	return []Finding{{Path: "unknown_section.queue", Message: msg}}
 }
@@ -2240,8 +2150,8 @@ func repoBlockWarnings(path string, md toml.MetaData) []Finding {
 
 // includeFileWarnings returns load-time warnings for non-whitelisted top-level
 // keys and nested includes in an included file. Includes carry a fixed whitelist:
-// `projects`, `workbenches`, `[workbench]`, `[tasks]`, `[effort.<agent>]`, and
-// `[repo."<path>"]`.
+// `projects`, `workbenches`, `[workbench]`, `[tasks.git]`, `[work]`,
+// `[effort.<agent>]`, `[agents.<preset>]`, and `[repo."<path>"]`.
 func includeFileWarnings(path string, cfg *Config, d *Deps) []string {
 	var warnings []string
 
@@ -2271,10 +2181,10 @@ func includeFileWarnings(path string, cfg *Config, d *Deps) []string {
 		"workbenches": true,
 		"workbench":   true, // [workbench] options block (pick_on_create, order)
 		"repo":        true,
-		"tasks":       true,
-		"workload":    true, // deprecated alias for tasks (ADR-0092)
+		"tasks":       true, // only [tasks.git] is still read (ADR-0194)
+		"work":        true, // [work.<kind>] Work groups (ADR-0194)
 		"effort":      true,
-		"agents":      true, // [agents.<preset>] attended-session settings (ADR-0187)
+		"agents":      true, // [agents.<preset>] per-preset settings (ADR-0187, ADR-0194)
 		"includes":    true, // mentioned in includes, so we track it for warning above
 	}
 
@@ -2284,33 +2194,13 @@ func includeFileWarnings(path string, cfg *Config, d *Deps) []string {
 		if !whitelisted[key] && !seen[key] {
 			seen[key] = true
 			warnings = append(warnings, fmt.Sprintf(
-				"%s: %q ignored (includes only support projects, workbenches, workbench, repo, tasks, effort, and agents blocks)",
+				"%s: %q ignored (includes only support projects, workbenches, workbench, repo, tasks, work, effort, and agents blocks)",
 				path, key,
 			))
 		}
 	}
 
-	// Emit deprecation warning if deprecated [workload] key is present
-	if _, hasWorkload := rawInclude["workload"]; hasWorkload {
-		warnings = append(warnings, fmt.Sprintf(
-			"%s: [workload] is deprecated; rename to [tasks]",
-			path,
-		))
-	}
-
 	return warnings
-}
-
-// cloneTaskGitConfig deep-copies a [tasks.git] block. It survives the ADR-0122
-// walker migration because the [workload] → [tasks] alias migration still needs
-// a hand clone off the deprecated schema.
-func cloneTaskGitConfig(src *TaskGitConfig) *TaskGitConfig {
-	if src == nil {
-		return nil
-	}
-	return &TaskGitConfig{
-		CommitConfigOverrides: append([]string(nil), src.CommitConfigOverrides...),
-	}
 }
 
 // ExpandProjects resolves all project paths from the config

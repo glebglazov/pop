@@ -14,7 +14,7 @@ import (
 // DefaultMaxRemediationDepth bounds the verify→remediate→re-verify loop when
 // user config sets no explicit cap (ADR-0086): after this many Verifier-produced
 // Remediation tasks, a set that still returns FIXABLE parks at VERIFY-FAILED
-// rather than spawning another. The configurable `[tasks.verify]
+// rather than spawning another. The configurable `[work.verify]
 // .max_remediation_depth` overrides it.
 const DefaultMaxRemediationDepth = 3
 
@@ -51,8 +51,8 @@ var taskNumberPattern = regexp.MustCompile(`^(\d+)-`)
 // maxRemediationDepth resolves the per-set remediation depth cap from user
 // config, falling back to DefaultMaxRemediationDepth when unconfigured (ADR-0086).
 func maxRemediationDepth(cfg *config.Config) int {
-	if cfg != nil && cfg.Task != nil && cfg.Task.Verify != nil && cfg.Task.Verify.MaxRemediationDepth != nil {
-		return *cfg.Task.Verify.MaxRemediationDepth
+	if v := cfg.VerifySettings(); v != nil && v.MaxRemediationDepth != nil {
+		return *v.MaxRemediationDepth
 	}
 	return DefaultMaxRemediationDepth
 }

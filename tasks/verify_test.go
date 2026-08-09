@@ -946,9 +946,8 @@ func (r *probeNeutralRunner) Start(ctx context.Context, dir string, stdout, stde
 
 func instantVerifyRetryConfig(maxTries int) *config.Config {
 	v := maxTries
-	return &config.Config{Task: &config.TasksConfig{
-		MaxTries:           &v,
-		AttemptRetryDelays: []string{},
+	return &config.Config{Work: &config.WorkConfig{
+		Verify: &config.VerifyConfig{MaxTries: &v, AttemptRetryDelays: []string{}},
 	}}
 }
 
@@ -1017,9 +1016,8 @@ func TestRunConfiguredVerifierFallsThroughAfterRetryExhausted(t *testing.T) {
 	}
 	d := verifyRetryDeps(t, runner)
 	two := 2
-	cfg := &config.Config{Task: &config.TasksConfig{
-		MaxTries:           &two,
-		AttemptRetryDelays: []string{},
+	cfg := &config.Config{Work: &config.WorkConfig{
+		Verify: &config.VerifyConfig{MaxTries: &two, AttemptRetryDelays: []string{}},
 	}}
 
 	raw, err := runConfiguredVerifier(d, cfg, verifierSelection{
@@ -1097,12 +1095,9 @@ func TestRunConfiguredVerifierUsesVerifyMaxTriesOverride(t *testing.T) {
 		},
 	}
 	d := verifyRetryDeps(t, runner)
-	root := 3
 	verify := 2
-	cfg := &config.Config{Task: &config.TasksConfig{
-		MaxTries:           &root,
-		Verify:             &config.VerifyConfig{MaxTries: &verify},
-		AttemptRetryDelays: []string{},
+	cfg := &config.Config{Work: &config.WorkConfig{
+		Verify: &config.VerifyConfig{MaxTries: &verify, AttemptRetryDelays: []string{}},
 	}}
 
 	_, err := runConfiguredVerifier(d, cfg, verifierSelection{
@@ -1337,7 +1332,9 @@ func kimiVerifyLadderConfig(maxTries int, models ...string) *config.Config {
 	tries := maxTries
 	return &config.Config{
 		Effort: map[string]config.EffortConfig{"kimi": {Light: entries}},
-		Task:   &config.TasksConfig{MaxTries: &tries, AttemptRetryDelays: []string{}},
+		Work: &config.WorkConfig{
+			Verify: &config.VerifyConfig{MaxTries: &tries, AttemptRetryDelays: []string{}},
+		},
 	}
 }
 

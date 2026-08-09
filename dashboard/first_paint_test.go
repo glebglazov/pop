@@ -72,7 +72,7 @@ func TestFirstPaintForksUnderCeiling(t *testing.T) {
 	d, cfg, _, _ := dashboardLaunchFixture(t, repo, setID)
 	// Verification on is the expensive wiring: with it off the overlay is a no-op
 	// and the ceiling would hold for the wrong reason.
-	cfg.Task = &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}
+	cfg.Work = &config.WorkConfig{Verify: &config.VerifyConfig{Enabled: true}}
 	stems := registerDoneSets(t, repo, 6)
 	bindSetsToOwnCheckouts(t, d, repo, stems)
 

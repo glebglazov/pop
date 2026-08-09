@@ -74,7 +74,7 @@ type StatusSnapshot struct {
 	// Config is the configuration this snapshot was derived under, carried so the
 	// run view's Verify overlay reads what the scan read instead of loading the
 	// default config path behind the injected seam's back. Nil (a snapshot built by
-	// hand) leaves verification off, exactly as an absent [tasks.verify] does.
+	// hand) leaves verification off, exactly as an absent [work.verify] does.
 	Config *config.Config
 }
 

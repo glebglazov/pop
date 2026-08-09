@@ -47,11 +47,12 @@ func resolveImplementMaxTries(cfg *config.Config, explicit bool, flagValue int) 
 	return config.DefaultTaskMaxTries, nil
 }
 
-func resolveAttemptRetryDelays(cfg *config.Config) ([]time.Duration, error) {
-	if cfg == nil {
-		return append([]time.Duration(nil), config.DefaultTaskAttemptRetryDelays...), nil
-	}
-	return cfg.ResolveAttemptRetryDelays()
+func resolveImplementAttemptRetryDelays(cfg *config.Config) ([]time.Duration, error) {
+	return cfg.ResolveImplementAttemptRetryDelays()
+}
+
+func resolveVerifyAttemptRetryDelays(cfg *config.Config) ([]time.Duration, error) {
+	return cfg.ResolveVerifyAttemptRetryDelays()
 }
 
 type retryWaiter struct {

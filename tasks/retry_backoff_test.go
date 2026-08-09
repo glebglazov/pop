@@ -37,8 +37,7 @@ func TestResolveImplementMaxTries(t *testing.T) {
 	t.Parallel()
 	five := 5
 	ten := 10
-	cfg := &config.Config{Task: &config.TasksConfig{
-		MaxTries: &ten,
+	cfg := &config.Config{Work: &config.WorkConfig{
 		Implement: &config.ImplementConfig{MaxTries: &five},
 	}}
 
@@ -48,8 +47,9 @@ func TestResolveImplementMaxTries(t *testing.T) {
 	if got, err := resolveImplementMaxTries(cfg, false, 0); err != nil || got != 5 {
 		t.Fatalf("config implement override = (%d, %v), want (5, nil)", got, err)
 	}
-	if got, err := resolveImplementMaxTries(&config.Config{Task: &config.TasksConfig{MaxTries: &ten}}, false, 0); err != nil || got != 10 {
-		t.Fatalf("config root cap = (%d, %v), want (10, nil)", got, err)
+	tenCfg := &config.Config{Work: &config.WorkConfig{Implement: &config.ImplementConfig{MaxTries: &ten}}}
+	if got, err := resolveImplementMaxTries(tenCfg, false, 0); err != nil || got != 10 {
+		t.Fatalf("config implement cap = (%d, %v), want (10, nil)", got, err)
 	}
 	if got, err := resolveImplementMaxTries(nil, false, 7); err != nil || got != 7 {
 		t.Fatalf("no config with flag value = (%d, %v), want (7, nil)", got, err)
@@ -61,17 +61,12 @@ func TestResolveImplementMaxTries(t *testing.T) {
 
 func TestResolveVerifyMaxTries(t *testing.T) {
 	t.Parallel()
-	root := 4
 	verify := 6
-	cfg := &config.Config{Task: &config.TasksConfig{
-		MaxTries: &root,
-		Verify:   &config.VerifyConfig{MaxTries: &verify},
+	cfg := &config.Config{Work: &config.WorkConfig{
+		Verify: &config.VerifyConfig{MaxTries: &verify},
 	}}
 	if got, err := resolveVerifyMaxTries(cfg); err != nil || got != 6 {
-		t.Fatalf("verify override = (%d, %v), want (6, nil)", got, err)
-	}
-	if got, err := resolveVerifyMaxTries(&config.Config{Task: &config.TasksConfig{MaxTries: &root}}); err != nil || got != 4 {
-		t.Fatalf("root cap = (%d, %v), want (4, nil)", got, err)
+		t.Fatalf("verify cap = (%d, %v), want (6, nil)", got, err)
 	}
 	if got, err := resolveVerifyMaxTries(nil); err != nil || got != config.DefaultTaskMaxTries {
 		t.Fatalf("default = (%d, %v), want (%d, nil)", got, err, config.DefaultTaskMaxTries)
@@ -80,8 +75,8 @@ func TestResolveVerifyMaxTries(t *testing.T) {
 
 func TestResolveAttemptRetryDelaysFromConfig(t *testing.T) {
 	t.Parallel()
-	got, err := resolveAttemptRetryDelays(&config.Config{Task: &config.TasksConfig{
-		AttemptRetryDelays: []string{},
+	got, err := resolveImplementAttemptRetryDelays(&config.Config{Work: &config.WorkConfig{
+		Implement: &config.ImplementConfig{AttemptRetryDelays: []string{}},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -91,7 +86,7 @@ func TestResolveAttemptRetryDelaysFromConfig(t *testing.T) {
 	}
 
 	want := append([]time.Duration(nil), config.DefaultTaskAttemptRetryDelays...)
-	got, err = resolveAttemptRetryDelays(nil)
+	got, err = resolveImplementAttemptRetryDelays(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,8 +132,8 @@ func TestRunTaskInterruptedDuringRetryWait(t *testing.T) {
 	}
 
 	loadConfig := func(string) (*config.Config, error) {
-		return &config.Config{Task: &config.TasksConfig{
-			AttemptRetryDelays: []string{"1m"},
+		return &config.Config{Work: &config.WorkConfig{
+			Implement: &config.ImplementConfig{AttemptRetryDelays: []string{"1m"}},
 		}}, nil
 	}
 
@@ -165,8 +160,8 @@ func TestRunTaskInstantRetriesWithEmptyDelayList(t *testing.T) {
 	d.Runner = runner
 
 	loadConfig := func(string) (*config.Config, error) {
-		return &config.Config{Task: &config.TasksConfig{
-			AttemptRetryDelays: []string{},
+		return &config.Config{Work: &config.WorkConfig{
+			Implement: &config.ImplementConfig{AttemptRetryDelays: []string{}},
 		}}, nil
 	}
 
@@ -198,9 +193,8 @@ func TestRunTaskConfigMaxTriesWithoutExplicitFlag(t *testing.T) {
 
 	five := 5
 	loadConfig := func(string) (*config.Config, error) {
-		return &config.Config{Task: &config.TasksConfig{
-			Implement: &config.ImplementConfig{MaxTries: &five},
-			AttemptRetryDelays: []string{},
+		return &config.Config{Work: &config.WorkConfig{
+			Implement: &config.ImplementConfig{MaxTries: &five, AttemptRetryDelays: []string{}},
 		}}, nil
 	}
 

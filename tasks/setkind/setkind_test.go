@@ -153,7 +153,7 @@ func staticForScan(scan scanFixture, repBranch string, bare bool) repogroup.Grou
 	}
 }
 func TestBuildRowsVerifyFailedStatus(t *testing.T) {
-	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
+	enabled := &config.Config{Work: &config.WorkConfig{Verify: &config.VerifyConfig{Enabled: true}}}
 	doneManifest := &tasks.Manifest{
 		Valid: true,
 		Tasks: []tasks.Task{{ID: "01-a", File: "01-a.md", Type: "AFK", Status: "done"}},
@@ -223,7 +223,7 @@ func TestBuildRowsVerifyFailedStatus(t *testing.T) {
 // manifest status and empty RuntimePath — a trunk HEAD verdict must not stand in
 // for an unplaced set (ADR-0147).
 func TestBuildRowsUnplacedSkipsTrunkVerdict(t *testing.T) {
-	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
+	enabled := &config.Config{Work: &config.WorkConfig{Verify: &config.VerifyConfig{Enabled: true}}}
 	doneManifest := &tasks.Manifest{
 		Valid: true,
 		Tasks: []tasks.Task{{ID: "01-a", File: "01-a.md", Type: "AFK", Status: "done"}},

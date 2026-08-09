@@ -830,7 +830,7 @@ func TestFoldRefusesPreconditions(t *testing.T) {
 		}
 		cfg := &config.Config{
 			Projects: []config.ProjectEntry{{Path: repo}},
-			Task:     &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}},
+			Work:     &config.WorkConfig{Verify: &config.VerifyConfig{Enabled: true}},
 		}
 		_, err := Fold(td, nil, cfg, "set-nv", FoldOptions{Yes: true, In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, io.Discard)
 		if err == nil || !strings.Contains(err.Error(), "NEEDS-VERIFY") {
@@ -854,7 +854,7 @@ func TestFoldRefusesPreconditions(t *testing.T) {
 		}
 		cfg := &config.Config{
 			Projects: []config.ProjectEntry{{Path: repo}},
-			Task:     &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}},
+			Work:     &config.WorkConfig{Verify: &config.VerifyConfig{Enabled: true}},
 		}
 		if _, err := Fold(td, nil, cfg, "set-hc", FoldOptions{Yes: true, In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, io.Discard); err != nil {
 			t.Fatalf("fold of a human-completed set = %v, want it to proceed", err)
@@ -1387,7 +1387,7 @@ func TestFoldRefusesAwaitingApprovalStatuses(t *testing.T) {
 		}
 		cfg := &config.Config{
 			Projects: []config.ProjectEntry{{Path: repo}},
-			Task:     &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}},
+			Work:     &config.WorkConfig{Verify: &config.VerifyConfig{Enabled: true}},
 		}
 		_, err = Fold(td, nil, cfg, "set-vf", FoldOptions{Yes: true, In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, io.Discard)
 		if err == nil || !strings.Contains(err.Error(), "VERIFY-FAILED") {

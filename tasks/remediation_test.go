@@ -291,7 +291,7 @@ func TestMaxRemediationDepth(t *testing.T) {
 	}
 	five := 5
 	cfg := verifyEnabledConfig()
-	cfg.Task.Verify.MaxRemediationDepth = &five
+	cfg.Work.Verify.MaxRemediationDepth = &five
 	if got := maxRemediationDepth(cfg); got != 5 {
 		t.Fatalf("configured cap = %d, want 5", got)
 	}
@@ -387,7 +387,7 @@ func TestRunTaskSetRemediationDepthCapParks(t *testing.T) {
 
 	depthCap := 1
 	cfg := verifyEnabledConfig()
-	cfg.Task.Verify.MaxRemediationDepth = &depthCap
+	cfg.Work.Verify.MaxRemediationDepth = &depthCap
 
 	verify := func(string) (string, error) { return "VERDICT: FIXABLE\nFINDINGS: still failing\n", nil }
 

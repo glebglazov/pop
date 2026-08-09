@@ -37,7 +37,7 @@ type Manifest struct {
 	Schedule       string
 	// Agents is the Routine's own ordered runtime agent-preset list (ADR-0128).
 	// When set it becomes the head of fire-time resolution, ahead of
-	// [routines].agents and the resolved implement list. Absent ⇒ config
+	// [work.routine].agents and the resolved implement list. Absent ⇒ config
 	// resolution, exactly as before this field existed.
 	Agents []string
 	// Effort selects the Routine's model-strength tier (light, standard, heavy)

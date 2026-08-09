@@ -54,13 +54,7 @@ week of 2026-06-08, after beta-tester sign-off.
 | `attention_notifications_enabled` (in `[worktree]`, `[project]`, `[select]`) | `unread_notifications_enabled` | `config/config.go:81,90`, warnings `config.go:374-380` |
 | `current_pane_always_under_cursor` | `cursor_position` | `DashboardConfig`, resolution ~`config.go:223` |
 | sort value `pane_last_visit_at` | `pane_last_active_at` | `config/config.go:69` (`SortByPaneLastVisitAt`) |
-| `[workload]` section (whole tree) | `[tasks]` | `config/config.go` (`Task *TaskConfig \`toml:"workload"\``) — see restructure rows below (ADR-0092) |
-| `[workload] default_agents` | `[tasks.implement].agents` | `TaskConfig.DefaultAgents`; resolution `ResolveDefaultAgentPresets` (`tasks/agent.go:551`); includes-merge `config.go:1857` |
-| `[workload.verify]` | `[tasks.verify]` | `TaskConfig.Verify`; includes-merge `config.go:1890` |
-| `[workload.git]` | `[tasks.git]` | `TaskConfig.Git`; includes-merge `config.go:1880` |
-| `[workload.agents.<name>]` (per-preset map) | `[tasks.presets.<name>]` | `TaskConfig.Agents`; includes-merge `config.go:1867` |
-| `[queue]` section (whole table) | `[work.daemon]` (`poll_interval`, `agent_quota_retry_after`, `crash_retry_delays`) | `retiredQueueSectionFindings` in `config/config.go` — the finding that reports a leftover `[queue]` as an unknown section (and still points `agents` at `[tasks.implement].agents`). A **hard cut, not an alias**: nothing reads `[queue]`, so removal here means dropping the finding, after which the table is silently ignored. |
-| includes whitelist enumerates `workload` | accept both `workload` (deprecated) + `tasks` | `config/config.go:1840` |
+| `[workload]` section (whole tree) | — | **Done (ADR-0194).** The alias pointed at the `[tasks.*]` addresses that ADR-0194 cut, so it went with them rather than surviving as an alias to dead keys. A leftover `[workload]` table is reported at load by `retiredTasksSectionFindings` and read by nothing; no tombstone. |
 | `[tasks.git].commit_config_overrides` | `[work.implement].git.commit_config_overrides` | `TaskGitConfig`; read at `tasks/run_plan.go:72`. The one **read-compat exception** to ADR-0194's hard cut: kept because it was added on request and its user should not lose it silently. New key wins when both are set. Everything else under `[tasks.*]` is unread after ADR-0194 — see the note below. |
 
 Tombstone behavior: presence of any old key → config load fails with
@@ -68,20 +62,21 @@ Tombstone behavior: presence of any old key → config load fails with
 field solely for detection; mark each with a comment `// Tombstone: delete after
 <date/condition>` so the second-phase delete is greppable.
 
-Note (ADR-0194): the `[tasks.*]` tree itself moves to `[work.*]` —
+Note (ADR-0194, landed): the `[tasks.*]` tree moved to `[work.*]` —
 `[work.implement]`, `[work.verify]`, `[work.routine]`, `[work.attended]`, with
 `max_tries` / `attempt_retry_delays` declared per retrying kind and
 `[tasks.presets.<name>].output` becoming `[agents.<preset>].output`. That move
 is a **hard cut**: the old keys are simply unread, with the single `tasks.git`
-exception rowed above. A stale `[tasks.implement].agents` therefore falls back
+exception rowed above. A leftover `[tasks.*]`, `[workload]` or `[routines]`
+table is reported at load as a retired section naming its new address. A stale `[tasks.implement].agents` therefore falls back
 to the built-in `claude` silently, which is why the unknown-key warning at load
 matters more after this change than before it. `[agents.<preset>].attended_args`
 and `.attended_model` are removed outright (ADR-0195) with no alias.
 
-Note: `[tasks]` and its restructured sub-tables ship with `[workload]` kept as an
-honored read-compat alias first (ADR-0092); this cleanup flips `[workload]` to the
-hard-error tombstone. README must document `[tasks.implement].agents`,
-`[tasks.verify]`, and `[tasks.presets.<name>]` from the alias-removal commit.
+Note: superseded by ADR-0194 — `[workload]` and the `[tasks.*]` tree it aliased
+are both gone, so there is no tombstone to flip. README documents
+`[work.implement].agents`, `[work.verify]`, `[work.routine]`, `[work.attended]`
+and `[agents.<preset>]`.
 
 ### C. Status aliases (sent by integration hooks)
 
@@ -128,7 +123,7 @@ message naming the new status (loud-failure preference). Current embedded templa
 | Item | Location | Action |
 |---|---|---|
 | Doctor "auto-migrated on next tasks command" message | `cmd/doctor.go:391-414` | Message becomes a lie once migration is gone. Repurpose: detect leftover `workloads/` dirs and warn "stranded pre-rename storage; migrate by hand" — or delete the check |
-| README documents `[workload.agents.claude]` | `README.md:27` | Rewrite to `[tasks.presets.claude]` (per-preset map renamed, ADR-0092) |
+| README documents `[workload.agents.claude]` | `README.md:27` | Done: README documents `[agents.claude]` (per-preset settings root, ADR-0194) |
 | Smoke script carries retired name | `scripts/live-workload-agent-smoke.sh` (referenced at `README.md:81`) | Rename script + README reference |
 | CONTEXT.md "Deprecated aliases" section | `CONTEXT.md:412` | Prune removed aliases after cleanup lands — glossary describes current language; git history keeps the past |
 | CONTEXT.md `pop select` entry says "remove at the next major release" | `CONTEXT.md:12` | Already updated to point here |
@@ -151,7 +146,10 @@ Per tester, before removal lands:
    `current_pane_always_under_cursor`, `pane_last_visit_at` in
    `~/.config/pop/config.toml`. (`pop` currently prints warnings for these on load —
    "no warnings at startup" is the check.)
-2. **`[workload]` → `[tasks]`** — once the new key ships, rename the section.
+2. **`[workload]`/`[tasks]` → `[work]`** — move the agent lists and retry caps to
+   `[work.implement]`, `[work.verify]`, `[work.routine]` and `[work.attended]`,
+   and per-preset `output` to `[agents.<preset>]` (ADR-0194). A leftover table is
+   reported at load, never read; only `[tasks.git]` still resolves.
 3. **Task storage migrated in *every* repo** — auto-migration runs per-repository on
    first touch. Run `pop tasks status` in each repo that has task sets. Verify: no
    directories left under `<data-dir>/pop/workloads/` and no
@@ -227,8 +225,9 @@ Per tester, before removal lands:
 
 ## Execution order (for task-set generation)
 
-1. Introduce `[tasks]` config section (alias `[workload]` still read) + README update
-   — **ships before sign-off**, testers need it for checklist item 2.
+1. Done (ADR-0194): the Work config tree `[work.<kind>]` + `[agents.<preset>]`
+   replaced `[tasks]`/`[workload]` outright, with README updated — testers need
+   it for checklist item 2.
 2. Collect sign-offs (checklist above).
 3. Remove CLI aliases (inventory A).
 4. Remove config read-compat, add hard-error tombstones (B) — including `[workload]`.

@@ -45,8 +45,8 @@ func TestManifestRoundTripsAgentsAndEffort(t *testing.T) {
 // order (manifest list wins) and that effort pins the model on each spec.
 func TestResolveRoutineRunSpecsOrderAndEffort(t *testing.T) {
 	cfg := &config.Config{
-		Routines: &config.RoutinesConfig{Agents: []string{"cursor"}},
-		Task: &config.TasksConfig{
+		Work: &config.WorkConfig{
+			Routine:   &config.AgentGroupConfig{Agents: []string{"cursor"}},
 			Implement: &config.ImplementConfig{Agents: []string{"pi"}},
 		},
 	}

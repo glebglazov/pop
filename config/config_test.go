@@ -82,16 +82,16 @@ func TestTaskAgentOutput(t *testing.T) {
 	}{
 		{name: "nil config", want: "auto"},
 		{name: "missing section", cfg: &Config{}, want: "auto"},
-		{name: "empty value", cfg: &Config{Task: &TasksConfig{}}, want: "auto"},
+		{name: "empty value", cfg: &Config{Agents: map[string]AgentConfig{}}, want: "auto"},
 		{
 			name:  "configured text",
-			cfg:   &Config{Task: &TasksConfig{Presets: map[string]TaskAgentConfig{"claude": {Output: "text"}}}},
+			cfg:   &Config{Agents: map[string]AgentConfig{"claude": {Output: "text"}}},
 			agent: "claude",
 			want:  "text",
 		},
 		{
 			name:  "other agent remains auto",
-			cfg:   &Config{Task: &TasksConfig{Presets: map[string]TaskAgentConfig{"claude": {Output: "text"}}}},
+			cfg:   &Config{Agents: map[string]AgentConfig{"claude": {Output: "text"}}},
 			agent: "cursor",
 			want:  "auto",
 		},
@@ -105,33 +105,22 @@ func TestTaskAgentOutput(t *testing.T) {
 	}
 }
 
-func TestLoadRoutinesAgents(t *testing.T) {
+// TestLoadWorkAgentGroups covers the four kind-scoped agent lists ADR-0194
+// parented under [work], including the attended group nothing consumes yet.
+func TestLoadWorkAgentGroups(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`
-[routines]
-agents = ["codex", "claude"]
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, err := Load(configPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Routines == nil {
-		t.Fatal("expected [routines] section to parse")
-	}
-	want := []string{"codex", "claude"}
-	if !reflect.DeepEqual(cfg.Routines.Agents, want) {
-		t.Fatalf("routines agents = %#v, want %#v", cfg.Routines.Agents, want)
-	}
-}
-
-func TestLoadTasksImplementAgents(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "config.toml")
-	if err := os.WriteFile(configPath, []byte(`
-[tasks.implement]
+[work.implement]
 agents = ["claude --model opus4.8", "codex"]
+
+[work.verify]
+agents = ["codex", "claude"]
+
+[work.routine]
+agents = ["codex", "claude"]
+
+[work.attended]
+agents = ["claude --model opus", "cursor"]
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -140,20 +129,29 @@ agents = ["claude --model opus4.8", "codex"]
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Task == nil || cfg.Task.Implement == nil {
-		t.Fatal("expected [tasks.implement] section to parse")
+	cases := []struct {
+		name string
+		got  []string
+		want []string
+	}{
+		{"implement", cfg.ImplementAgents(), []string{"claude --model opus4.8", "codex"}},
+		{"verify", cfg.VerifySettings().Agents, []string{"codex", "claude"}},
+		{"routine", cfg.RoutineAgents(), []string{"codex", "claude"}},
+		{"attended", cfg.AttendedAgents(), []string{"claude --model opus", "cursor"}},
 	}
-	want := []string{"claude --model opus4.8", "codex"}
-	if !reflect.DeepEqual(cfg.Task.Implement.Agents, want) {
-		t.Fatalf("implement agents = %#v, want %#v", cfg.Task.Implement.Agents, want)
+	for _, tt := range cases {
+		if !reflect.DeepEqual(tt.got, tt.want) {
+			t.Fatalf("%s agents = %#v, want %#v", tt.name, tt.got, tt.want)
+		}
 	}
 }
 
-func TestLoadWorkloadVerifyEnabled(t *testing.T) {
+func TestLoadWorkVerifySettings(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`
-[tasks.verify]
+[work.verify]
 enabled = true
+effort = "standard"
 max_remediation_depth = 2
 `), 0o644); err != nil {
 		t.Fatal(err)
@@ -162,40 +160,18 @@ max_remediation_depth = 2
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Task == nil || cfg.Task.Verify == nil {
-		t.Fatal("expected [tasks.verify] section to parse")
+	v := cfg.VerifySettings()
+	if v == nil {
+		t.Fatal("expected [work.verify] section to parse")
 	}
-	if !cfg.Task.Verify.Enabled {
-		t.Fatal("expected [tasks.verify] enabled = true to load as enabled")
+	if !v.Enabled {
+		t.Fatal("expected [work.verify] enabled = true to load as enabled")
 	}
-	if cfg.Task.Verify.MaxRemediationDepth == nil || *cfg.Task.Verify.MaxRemediationDepth != 2 {
-		t.Fatalf("expected max_remediation_depth = 2, got %v", cfg.Task.Verify.MaxRemediationDepth)
+	if v.Effort != "standard" {
+		t.Fatalf("verify effort = %q, want standard", v.Effort)
 	}
-}
-
-func TestLoadTasksVerifyAgentsEffort(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "config.toml")
-	if err := os.WriteFile(configPath, []byte(`
-[tasks.verify]
-enabled = true
-agents = ["codex", "claude"]
-effort = "standard"
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := Load(configPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Task == nil || cfg.Task.Verify == nil {
-		t.Fatal("expected [tasks.verify] section to parse")
-	}
-	want := []string{"codex", "claude"}
-	if !reflect.DeepEqual(cfg.Task.Verify.Agents, want) {
-		t.Fatalf("verify agents = %#v, want %#v", cfg.Task.Verify.Agents, want)
-	}
-	if cfg.Task.Verify.Effort != "standard" {
-		t.Fatalf("verify effort = %q, want standard", cfg.Task.Verify.Effort)
+	if v.MaxRemediationDepth == nil || *v.MaxRemediationDepth != 2 {
+		t.Fatalf("expected max_remediation_depth = 2, got %v", v.MaxRemediationDepth)
 	}
 }
 
@@ -272,10 +248,10 @@ order = ["minimal", "<reset>"]
 func TestLoadTaskAgentOutput(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`
-[tasks.presets.claude]
+[agents.claude]
 output = "text"
 
-[tasks.presets.cursor]
+[agents.cursor]
 output = "auto"
 `), 0o644); err != nil {
 		t.Fatal(err)
@@ -1142,6 +1118,67 @@ commit_config_overrides = ["commit.gpgsign=false"]
 	}
 }
 
+// The drain's commit overrides are the one read-compat exception to ADR-0194's
+// hard cut: the pre-cut [tasks.git] address still resolves, and the new
+// [work.implement.git] address wins when both are set.
+func TestLoadCommitConfigOverridesPrefersWorkImplementGit(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+[tasks.git]
+commit_config_overrides = ["commit.gpgsign=true"]
+
+[work.implement.git]
+commit_config_overrides = ["commit.gpgsign=false"]
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := cfg.ResolveCommitConfigOverrides()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, []string{"commit.gpgsign=false"}) {
+		t.Fatalf("got %v, want the [work.implement.git] value", got)
+	}
+}
+
+// A stale [tasks.*] table must announce itself rather than degrade silently to
+// the built-in default agent, so it loads with a finding naming its new address.
+func TestRetiredTasksSectionFinding(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+[tasks.implement]
+agents = ["codex"]
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agents := cfg.ImplementAgents(); agents != nil {
+		t.Fatalf("[tasks.implement].agents must not be read, got %#v", agents)
+	}
+	var found string
+	for _, f := range cfg.Findings {
+		if f.Path == "retired_section.tasks.implement" {
+			found = f.Message
+		}
+	}
+	if found == "" {
+		t.Fatalf("expected a retired-section finding, got %+v", cfg.Findings)
+	}
+	if !strings.Contains(found, "[work.implement]") {
+		t.Fatalf("finding = %q, want it to name [work.implement]", found)
+	}
+	if len(cfg.Warnings) == 0 {
+		t.Fatal("expected the finding mirrored into Warnings")
+	}
+}
+
 func TestLoadWorkDaemonConfig(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`
@@ -1460,7 +1497,7 @@ poll_interval = "30s"
 		t.Fatalf("expected exactly 1 finding for the leftover [queue] table, got %d: %v", len(cfg.Warnings), cfg.Warnings)
 	}
 	w := cfg.Warnings[0]
-	for _, want := range []string{"[queue] is not a config section", "[work.daemon]", "[tasks.implement].agents"} {
+	for _, want := range []string{"[queue] is not a config section", "[work.daemon]", "[work.implement].agents"} {
 		if !strings.Contains(w, want) {
 			t.Fatalf("finding = %q, want it to contain %q", w, want)
 		}
@@ -1527,16 +1564,20 @@ func TestResolveAttemptRetryDelays(t *testing.T) {
 	}{
 		{name: "nil config", cfg: nil, want: DefaultTaskAttemptRetryDelays},
 		{name: "missing section", cfg: &Config{}, want: DefaultTaskAttemptRetryDelays},
-		{name: "empty list", cfg: &Config{Task: &TasksConfig{AttemptRetryDelays: []string{}}}, want: []time.Duration{}},
+		{
+			name: "empty list",
+			cfg:  &Config{Work: &WorkConfig{Implement: &ImplementConfig{AttemptRetryDelays: []string{}}}},
+			want: []time.Duration{},
+		},
 		{
 			name: "custom list",
-			cfg:  &Config{Task: &TasksConfig{AttemptRetryDelays: []string{"10s", "1m"}}},
+			cfg:  &Config{Work: &WorkConfig{Implement: &ImplementConfig{AttemptRetryDelays: []string{"10s", "1m"}}}},
 			want: []time.Duration{10 * time.Second, time.Minute},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := tt.cfg.ResolveAttemptRetryDelays()
+			got, err := tt.cfg.ResolveImplementAttemptRetryDelays()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1547,27 +1588,51 @@ func TestResolveAttemptRetryDelays(t *testing.T) {
 	}
 }
 
+// Each retrying kind declares its own schedule, so a verify delay list is read
+// only by verify and never by implement (ADR-0194 decision 3).
+func TestResolveAttemptRetryDelaysAreKindScoped(t *testing.T) {
+	cfg := &Config{Work: &WorkConfig{
+		Verify: &VerifyConfig{AttemptRetryDelays: []string{"10s"}},
+	}}
+	got, err := cfg.ResolveVerifyAttemptRetryDelays()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, []time.Duration{10 * time.Second}) {
+		t.Fatalf("verify delays = %#v, want [10s]", got)
+	}
+	got, err = cfg.ResolveImplementAttemptRetryDelays()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, DefaultTaskAttemptRetryDelays) {
+		t.Fatalf("implement delays = %#v, want the defaults", got)
+	}
+}
+
 func TestResolveAttemptRetryDelaysError(t *testing.T) {
-	_, err := (&Config{Task: &TasksConfig{AttemptRetryDelays: []string{"bad"}}}).ResolveAttemptRetryDelays()
-	if err == nil || !strings.Contains(err.Error(), "[tasks] attempt_retry_delays[0]") {
+	cfg := &Config{Work: &WorkConfig{Implement: &ImplementConfig{AttemptRetryDelays: []string{"bad"}}}}
+	_, err := cfg.ResolveImplementAttemptRetryDelays()
+	if err == nil || !strings.Contains(err.Error(), "[work.implement] attempt_retry_delays[0]") {
 		t.Fatalf("error = %v", err)
 	}
 }
 
-func TestResolveImplementMaxTriesFromConfig(t *testing.T) {
-	root := 4
+func TestResolveMaxTriesFromConfig(t *testing.T) {
 	impl := 7
+	verify := 9
 	tests := []struct {
 		name string
 		cfg  *Config
 		want int
 	}{
 		{name: "nil config", cfg: nil, want: DefaultTaskMaxTries},
-		{name: "root cap", cfg: &Config{Task: &TasksConfig{MaxTries: &root}}, want: 4},
-		{name: "implement override", cfg: &Config{Task: &TasksConfig{
-			MaxTries:  &root,
-			Implement: &ImplementConfig{MaxTries: &impl},
-		}}, want: 7},
+		{name: "missing section", cfg: &Config{}, want: DefaultTaskMaxTries},
+		{
+			name: "implement cap",
+			cfg:  &Config{Work: &WorkConfig{Implement: &ImplementConfig{MaxTries: &impl}}},
+			want: 7,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1576,32 +1641,26 @@ func TestResolveImplementMaxTriesFromConfig(t *testing.T) {
 			}
 		})
 	}
-}
 
-func TestResolveVerifyMaxTriesFromConfig(t *testing.T) {
-	root := 4
-	verify := 9
-	cfg := &Config{Task: &TasksConfig{
-		MaxTries: &root,
-		Verify:   &VerifyConfig{MaxTries: &verify},
-	}}
+	// The two caps are independent: a verify cap leaves implement at the default.
+	cfg := &Config{Work: &WorkConfig{Verify: &VerifyConfig{MaxTries: &verify}}}
 	if got := cfg.ResolveVerifyMaxTries(); got != verify {
 		t.Fatalf("verify max tries = %d, want %d", got, verify)
 	}
-	if got := cfg.ResolveImplementMaxTries(); got != root {
-		t.Fatalf("implement max tries = %d, want root cap %d", got, root)
+	if got := cfg.ResolveImplementMaxTries(); got != DefaultTaskMaxTries {
+		t.Fatalf("implement max tries = %d, want the default %d", got, DefaultTaskMaxTries)
 	}
 }
 
-func TestLoadTasksRetryConfig(t *testing.T) {
+func TestLoadWorkRetryConfig(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`
-[tasks]
-max_tries = 5
+[work.implement]
+max_tries = 8
 attempt_retry_delays = ["10s", "30s"]
 
-[tasks.implement]
-max_tries = 8
+[work.verify]
+max_tries = 2
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1612,7 +1671,10 @@ max_tries = 8
 	if got := cfg.ResolveImplementMaxTries(); got != 8 {
 		t.Fatalf("implement max tries = %d, want 8", got)
 	}
-	delays, err := cfg.ResolveAttemptRetryDelays()
+	if got := cfg.ResolveVerifyMaxTries(); got != 2 {
+		t.Fatalf("verify max tries = %d, want 2", got)
+	}
+	delays, err := cfg.ResolveImplementAttemptRetryDelays()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2867,7 +2929,7 @@ includes = ["first.toml", "second.toml"]
 		}
 	})
 
-	t.Run("include-only tasks implement agents is merged", func(t *testing.T) {
+	t.Run("include-only work implement agents is merged", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		writeFile := func(name, content string) string {
 			p := filepath.Join(tmpDir, name)
@@ -2878,7 +2940,7 @@ includes = ["first.toml", "second.toml"]
 		}
 
 		writeFile("private.toml", `
-[tasks.implement]
+[work.implement]
 agents = ["codex", "claude"]
 `)
 		configPath := writeFile("config.toml", `
@@ -2890,20 +2952,17 @@ projects = [{ path = "/main" }]
 		if err != nil {
 			t.Fatalf("Load() error: %v", err)
 		}
-		if cfg.Task == nil || cfg.Task.Implement == nil {
-			t.Fatal("expected [tasks.implement] to be merged from include")
-		}
-		if got, want := cfg.Task.Implement.Agents, []string{"codex", "claude"}; !reflect.DeepEqual(got, want) {
+		if got, want := cfg.ImplementAgents(), []string{"codex", "claude"}; !reflect.DeepEqual(got, want) {
 			t.Fatalf("implement agents = %#v, want %#v", got, want)
 		}
 		for _, w := range cfg.Warnings {
-			if strings.Contains(w, "tasks") && strings.Contains(w, "ignored") {
-				t.Fatalf("unexpected tasks warning: %q", w)
+			if strings.Contains(w, "work") && strings.Contains(w, "ignored") {
+				t.Fatalf("unexpected work warning: %q", w)
 			}
 		}
 	})
 
-	t.Run("parent tasks implement agents wins over include collision", func(t *testing.T) {
+	t.Run("parent work implement agents wins over include collision", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		writeFile := func(name, content string) string {
 			p := filepath.Join(tmpDir, name)
@@ -2914,13 +2973,13 @@ projects = [{ path = "/main" }]
 		}
 
 		writeFile("private.toml", `
-[tasks.implement]
+[work.implement]
 agents = ["codex"]
 `)
 		configPath := writeFile("config.toml", `
 includes = ["private.toml"]
 
-[tasks.implement]
+[work.implement]
 agents = ["claude"]
 `)
 
@@ -2928,7 +2987,7 @@ agents = ["claude"]
 		if err != nil {
 			t.Fatalf("Load() error: %v", err)
 		}
-		if got, want := cfg.Task.Implement.Agents, []string{"claude"}; !reflect.DeepEqual(got, want) {
+		if got, want := cfg.ImplementAgents(), []string{"claude"}; !reflect.DeepEqual(got, want) {
 			t.Fatalf("implement agents = %#v, want %#v", got, want)
 		}
 		found := false

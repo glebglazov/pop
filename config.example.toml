@@ -140,7 +140,7 @@ projects = [
 
 # [work.daemon]
 # Supervisor timing for `pop work daemon`. Agent selection is configured under
-# [tasks.implement].agents (see above), not in this section.
+# [work.implement].agents (see below), not in this section.
 # poll_interval = "60s"
 # agent_quota_retry_after = "1h"
 # crash_retry_delays = ["1m", "5m", "15m"]
@@ -171,10 +171,20 @@ projects = [
 # standard = [{ model = "kimi-code/k3", reasoning = "high" }]
 # light = [{ model = "kimi-code/k2.7-code" }]
 
-# Per-agent attended-session settings: the sessions pop opens for you to sit in
+# Settings keyed by agent preset rather than by kind of work. Includable, merged
+# per preset, so a machine-local include can set one agent's block without
+# erasing another's (ADR-0187).
+#
+# output selects how pop reads this preset's stream ("auto" by default). "text"
+# suppresses the adapter's stream-JSON flags entirely, and with them usage, cost,
+# turn counts and Agent proceed verdict detection — it is the in-config
+# workaround when a vendor changes a stream shape and pop's parser breaks.
+# [agents.claude]
+# output = "auto"
+#
+# The remaining keys steer the *attended* sessions pop opens for you to sit in
 # front of (HITL and assist menus, map grilling, routine authoring), never a
-# headless drain. Includable, merged per preset, so a machine-local include can
-# set one agent's block without erasing another's (ADR-0187).
+# headless drain.
 #
 # attended_args REPLACES pop's own attended arguments for that preset instead of
 # adding to them — pop's defaults are the least-restrictive posture each agent
@@ -188,25 +198,42 @@ projects = [
 #
 # attended_model is the model an attended session names. Left unset, pop passes
 # no model flag at all and the agent's own configuration decides — a --model in
-# [tasks.implement].agents tunes unattended drains only and never reaches an
+# [work.implement].agents tunes unattended drains only and never reaches an
 # interactive session.
 # [agents.codex]
 # attended_model = "gpt-5.5"
 
-# [tasks]
-# Task attempt retry schedule and caps (ADR-0099). Delays apply between
-# retry-eligible failures for both implement and verify; attempt 1 still starts
-# immediately. Omitted attempt_retry_delays ⇒ ["1m", "5m", "15m"]; an empty list
-# restores instant retries (useful for tests/local dev). The last delay repeats
-# when retries exceed the list length.
+# Every agent list and every task-execution setting is grouped by kind of work
+# under [work] (ADR-0194). There are no shared defaults at the [work] root: each
+# kind that retries declares its own cap and schedule.
+#
+# [work.implement]
+# The unattended coding drain. Delays apply between retry-eligible failures;
+# attempt 1 still starts immediately. Omitted attempt_retry_delays ⇒
+# ["1m", "5m", "15m"]; an empty list restores instant retries (useful for
+# tests/local dev). The last delay repeats when retries exceed the list length.
+# agents = ["claude", "codex"]
 # max_tries = 3
 # attempt_retry_delays = ["1m", "5m", "15m"]
 #
-# [tasks.implement]
-# max_tries = 5                         # optional implement override
+# [work.verify]
+# The Verifier (ADR-0086). An omitted agents list falls back to
+# [work.implement].agents.
+# agents = ["claude"]
+# max_tries = 3
+# attempt_retry_delays = ["1m", "5m", "15m"]
+#
+# [work.routine]
+# Recurring Routine runs. A Routine manifest's own agents beats this group; an
+# empty list falls through to [work.implement].agents.
+# agents = ["claude"]
+#
+# [work.attended]
+# Every session pop opens for a human shares this one list — gate assistance, an
+# Assist session, Map assist, map grilling, a Routine refinement session.
 # agents = ["claude", "codex"]
 
-# [tasks.git]
+# [work.implement.git]
 # Commit-time git config applied ONLY to pop's own commits during a task drain
 # (the implementation commit and the commit-and-continue dirty checkpoint). Each
 # entry is a git `-c`-style `key=value` string, prepended as a `-c key=value`

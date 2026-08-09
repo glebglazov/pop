@@ -97,7 +97,7 @@ func fireDeps(t *testing.T, dataHome string) *Deps {
 	d.Tasks = tasks.DefaultDeps()
 	d.LoadConfig = func() (*config.Config, error) {
 		return &config.Config{
-			Routines: &config.RoutinesConfig{Agents: []string{"claude"}},
+			Work: &config.WorkConfig{Routine: &config.AgentGroupConfig{Agents: []string{"claude"}}},
 		}, nil
 	}
 	d.Stdout = io.Discard

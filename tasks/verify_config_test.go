@@ -27,16 +27,16 @@ func manifestWithVerifier(t *testing.T, agents []string, effort string) *Manifes
 }
 
 // TestResolveVerifierPrecedence covers the Verifier precedence chain (ADR-0086),
-// highest first: CLI flags → per-set manifest override → [tasks.verify] →
-// [tasks.implement].agents / heavy, with agents and effort resolving independently.
+// highest first: CLI flags → per-set manifest override → [work.verify] →
+// [work.implement].agents / heavy, with agents and effort resolving independently.
 func TestResolveVerifierPrecedence(t *testing.T) {
 	verifyCfg := func(agents []string, effort string) *config.Config {
-		return &config.Config{Task: &config.TasksConfig{
+		return &config.Config{Work: &config.WorkConfig{
 			Verify: &config.VerifyConfig{Enabled: true, Agents: agents, Effort: effort},
 		}}
 	}
 	defaultAgentsCfg := func(defaults []string, v *config.VerifyConfig) *config.Config {
-		return &config.Config{Task: &config.TasksConfig{Implement: &config.ImplementConfig{Agents: defaults}, Verify: v}}
+		return &config.Config{Work: &config.WorkConfig{Implement: &config.ImplementConfig{Agents: defaults}, Verify: v}}
 	}
 
 	tests := []struct {

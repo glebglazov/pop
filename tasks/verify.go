@@ -65,7 +65,7 @@ const (
 const emptyTreeSHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 // DefaultVerifyEffort is the model-strength tier the Verifier runs at when
-// neither a CLI flag, a per-set override, nor [tasks.verify].effort names one
+// neither a CLI flag, a per-set override, nor [work.verify].effort names one
 // (ADR-0086): verification defaults to the strongest tier.
 const DefaultVerifyEffort = "heavy"
 
@@ -76,7 +76,7 @@ type VerifyOptions struct {
 	TaskSetID string
 	// Agents is the ordered CLI Verifier fallback list (`--agent`, repeatable).
 	// Empty ⇒ resolution falls through to the per-set override, then
-	// [tasks.verify].agents, then [tasks.implement].agents.
+	// [work.verify].agents, then [work.implement].agents.
 	Agents []string
 	// Effort is the CLI Verifier effort override (`--effort`). Empty ⇒ resolution
 	// falls through to the per-set override, then config, then DefaultVerifyEffort.
@@ -119,7 +119,7 @@ type verifyCoreOptions struct {
 	SetID       string
 	// Agents and Effort are the CLI-level Verifier overrides (highest
 	// precedence). Empty ⇒ resolution falls through to the per-set manifest
-	// override, then [tasks.verify], then [tasks.implement].agents / DefaultVerifyEffort.
+	// override, then [work.verify], then [work.implement].agents / DefaultVerifyEffort.
 	Agents  []string
 	Effort  string
 	Timeout time.Duration
@@ -649,10 +649,10 @@ func verifyAttemptReason(outcome *attemptOutcome) string {
 
 // resolveVerifier applies the Verifier precedence chain (ADR-0086), highest
 // first: CLI flags (cliAgents / cliEffort) → the per-set manifest `verifier`
-// override → [tasks.verify] config → [tasks.implement].agents / DefaultVerifyEffort.
+// override → [work.verify] config → [work.implement].agents / DefaultVerifyEffort.
 // Agents and effort resolve independently, so a CLI effort can steer a
 // config-listed agent list, and vice versa. When no layer names an agent list it
-// falls back to [tasks.implement].agents (ResolveDefaultAgentPresets), so the
+// falls back to [work.implement].agents (ResolveDefaultAgentPresets), so the
 // Verifier always has at least one agent to walk.
 func resolveVerifier(cliAgents []string, cliEffort string, m *Manifest, cfg *config.Config) verifierSelection {
 	agents := nonEmptyStrings(cliAgents)
@@ -666,8 +666,7 @@ func resolveVerifier(cliAgents []string, cliEffort string, m *Manifest, cfg *con
 			effort = strings.TrimSpace(over.Effort)
 		}
 	}
-	if cfg != nil && cfg.Task != nil && cfg.Task.Verify != nil {
-		v := cfg.Task.Verify
+	if v := cfg.VerifySettings(); v != nil {
 		if len(agents) == 0 {
 			agents = nonEmptyStrings(v.Agents)
 		}
@@ -723,7 +722,7 @@ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, t
 	if err != nil {
 		return "", exitErr(ExitSetup, "%v", err)
 	}
-	retryDelays, err := resolveAttemptRetryDelays(cfg)
+	retryDelays, err := resolveVerifyAttemptRetryDelays(cfg)
 	if err != nil {
 		return "", exitErr(ExitSetup, "%v", err)
 	}

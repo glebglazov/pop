@@ -50,7 +50,7 @@ type RunTaskSetOptions struct {
 	// independently of the implementing agents (`--verify-agent`, repeatable, and
 	// `--verify-effort`): they are the highest-precedence Verifier overrides.
 	// Empty ⇒ resolution falls through to the per-set override, then
-	// [tasks.verify], then [tasks.implement].agents / DefaultVerifyEffort.
+	// [work.verify], then [work.implement].agents / DefaultVerifyEffort.
 	VerifyAgents []string
 	VerifyEffort string
 	// verifyRunner overrides the pre-approval Verifier's agent spawn, mirroring

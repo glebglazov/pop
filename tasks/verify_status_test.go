@@ -177,7 +177,7 @@ func TestApplyVerifyVerdictsDisabledIsNoOp(t *testing.T) {
 
 func TestApplyVerifyVerdictsEnabledGatesOnVerdict(t *testing.T) {
 	t.Parallel()
-	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
+	enabled := &config.Config{Work: &config.WorkConfig{Verify: &config.VerifyConfig{Enabled: true}}}
 
 	cases := []struct {
 		name         string
@@ -233,7 +233,7 @@ func TestApplyVerifyVerdictsEnabledGatesOnVerdict(t *testing.T) {
 // VERIFY-FAILED / NEEDS-VERIFY.
 func TestApplyVerifyVerdictsSkipsArchivedView(t *testing.T) {
 	t.Parallel()
-	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
+	enabled := &config.Config{Work: &config.WorkConfig{Verify: &config.VerifyConfig{Enabled: true}}}
 	d := setupVerifyStatusDeps(t, "/repo/.git\n", "shaCUR\n")
 	putStatusVerdict(t, d, "/repo/.git", "demo", "shaCUR", "NEEDS-HUMAN", "would fail if graded")
 
@@ -251,7 +251,7 @@ func TestApplyVerifyVerdictsSkipsArchivedView(t *testing.T) {
 // per row, and a non-terminal row forks no git at all.
 func TestApplyVerifyVerdictsMemoizesCheckoutResolution(t *testing.T) {
 	t.Parallel()
-	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
+	enabled := &config.Config{Work: &config.WorkConfig{Verify: &config.VerifyConfig{Enabled: true}}}
 	var commonDirCalls, headCalls int
 	git := &deps.MockGit{CommandInDirFunc: func(dir string, args ...string) (string, error) {
 		switch {
@@ -301,7 +301,7 @@ func TestApplyVerifyVerdictsMemoizesCheckoutResolution(t *testing.T) {
 
 func TestApplyVerifyVerdictsWithPerSetRuntime(t *testing.T) {
 	t.Parallel()
-	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
+	enabled := &config.Config{Work: &config.WorkConfig{Verify: &config.VerifyConfig{Enabled: true}}}
 	d := setupVerifyStatusDeps(t, "/repo/.git\n", "shaCUR\n")
 	putStatusVerdict(t, d, "/repo/.git", "bound", "shaCUR", "NEEDS-HUMAN", "bound set failed")
 
@@ -326,7 +326,7 @@ func TestApplyVerifyVerdictsWithPerSetRuntime(t *testing.T) {
 // verdict (ADR-0147).
 func TestApplyVerifyVerdictsWithUnplacedSkipsTrunkHEAD(t *testing.T) {
 	t.Parallel()
-	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
+	enabled := &config.Config{Work: &config.WorkConfig{Verify: &config.VerifyConfig{Enabled: true}}}
 	d := setupVerifyStatusDeps(t, "/repo/.git\n", "shaCUR\n")
 	putStatusVerdict(t, d, "/repo/.git", "unplaced", "shaCUR", "NEEDS-HUMAN", "trunk-only")
 
@@ -346,7 +346,7 @@ func TestApplyVerifyVerdictsWithUnplacedSkipsTrunkHEAD(t *testing.T) {
 // feature enabled, so re-derivation never corrupts a MISSING set into MALFORMED.
 func TestApplyVerifyVerdictsLeavesNonTerminalRows(t *testing.T) {
 	t.Parallel()
-	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
+	enabled := &config.Config{Work: &config.WorkConfig{Verify: &config.VerifyConfig{Enabled: true}}}
 	d := setupVerifyStatusDeps(t, "/repo/.git\n", "shaCUR\n")
 
 	readyM := &Manifest{Valid: true, Stem: "live", Tasks: []Task{{ID: "01-a", File: "01-a.md", Type: "AFK", Status: "open"}}}
@@ -372,7 +372,7 @@ func TestApplyVerifyVerdictsLeavesNonTerminalRows(t *testing.T) {
 // the Done group, and that `pop tasks status` renders the new label.
 func TestApplyVerifyVerdictsSurfacesFindingsAndReorders(t *testing.T) {
 	t.Parallel()
-	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
+	enabled := &config.Config{Work: &config.WorkConfig{Verify: &config.VerifyConfig{Enabled: true}}}
 	d := setupVerifyStatusDeps(t, "/repo/.git\n", "shaCUR\n")
 	putStatusVerdict(t, d, "/repo/.git", "demo", "shaCUR", "NEEDS-HUMAN", "the API contract drifted\nsecond line")
 
@@ -401,7 +401,7 @@ func TestApplyVerifyVerdictsSurfacesFindingsAndReorders(t *testing.T) {
 // and that fresh PASS, non-PASS, and non-immunized rows leave it empty.
 func TestApplyVerifyVerdictsSetsVerifiedAtSHA(t *testing.T) {
 	t.Parallel()
-	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
+	enabled := &config.Config{Work: &config.WorkConfig{Verify: &config.VerifyConfig{Enabled: true}}}
 
 	cases := []struct {
 		name          string
@@ -446,7 +446,7 @@ func TestApplyVerifyVerdictsSetsVerifiedAtSHA(t *testing.T) {
 // AWAITING-APPROVAL set immunized at a different SHA also carries VerifiedAtSHA.
 func TestApplyVerifyVerdictsAwaitingApprovalVerifiedAtSHA(t *testing.T) {
 	t.Parallel()
-	enabled := &config.Config{Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}}}
+	enabled := &config.Config{Work: &config.WorkConfig{Verify: &config.VerifyConfig{Enabled: true}}}
 	d := setupVerifyStatusDeps(t, "/repo/.git\n", "shaCUR\n")
 	putStatusVerdict(t, d, "/repo/.git", "demo", "shaOLD", "PASS", "")
 
