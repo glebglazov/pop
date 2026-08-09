@@ -2634,6 +2634,82 @@ func TestDashboardFilterMenuOpenAndClose(t *testing.T) {
 	}
 }
 
+// TestDashboardFilterMenuVisibleOnTallTable is the overflow regression for
+// ADR-0197 decision 9: with more rows than the pane can show, opening `f` must
+// still render every toggle line and the footer — the Frame reserves the block
+// height so the table shrinks instead of pushing the menu off-screen.
+func TestDashboardFilterMenuVisibleOnTallTable(t *testing.T) {
+	rows := make([]DashboardRow, 40)
+	for i := range rows {
+		id := fmt.Sprintf("set-%02d", i)
+		rows[i] = DashboardRow{Project: "pop", CursorKey: "pop\x00" + id, RawStatus: tasks.StatusReady, ID: id}
+	}
+	m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: rows})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 12})
+	m = updated.(QueueDashboard)
+
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
+	m = updated.(QueueDashboard)
+	if m.filter == nil {
+		t.Fatal("f did not open the filter menu")
+	}
+
+	view := m.View().Content
+	for _, item := range dashboardFilterItems() {
+		if !strings.Contains(view, item.label) {
+			t.Fatalf("filter menu missing toggle %q on a tall table:\n%s", item.label, view)
+		}
+	}
+	if !strings.Contains(view, "filters") {
+		t.Fatalf("filter menu missing caption on a tall table:\n%s", view)
+	}
+	if !strings.Contains(view, "enter/space toggle · esc close") {
+		t.Fatalf("filter menu missing footer hint on a tall table:\n%s", view)
+	}
+	lines := strings.Split(view, "\n")
+	if got, want := len(lines), m.height; got != want {
+		t.Fatalf("view line count = %d, want %d (frame-clamped):\n%s", got, want, view)
+	}
+	// BodyHeight must shrink by exactly the reserved block — the same Frame
+	// description drives budget and render.
+	frame := m.frameSpec()
+	blockLines := len(frame.Block)
+	if blockLines == 0 {
+		t.Fatal("frameSpec with open filter must reserve a Block region")
+	}
+	without := frame
+	without.Block = nil
+	if got, want := without.BodyHeight(m.height)-frame.BodyHeight(m.height), blockLines; got != want {
+		t.Fatalf("BodyHeight shrink = %d, want %d (reserved Block height)", got, want)
+	}
+}
+
+// TestDashboardFilterMenuFullScreenOnShortPane covers ADR-0197 decision 9's
+// short-pane branch: below the two-line height floor the filter view takes the
+// whole screen with no table behind it.
+func TestDashboardFilterMenuFullScreenOnShortPane(t *testing.T) {
+	rows := make([]DashboardRow, 10)
+	for i := range rows {
+		id := fmt.Sprintf("set-%02d", i)
+		rows[i] = DashboardRow{Project: "pop", CursorKey: "pop\x00" + id, RawStatus: tasks.StatusReady, ID: id}
+	}
+	m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: rows})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: dashboardTwoLineHeightFloor - 1})
+	m = updated.(QueueDashboard)
+
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
+	m = updated.(QueueDashboard)
+	view := m.View().Content
+	for _, want := range []string{"filters", "show done", "show archived", "enter/space toggle · esc close"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("short-pane filter view missing %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "PROJECT") || strings.Contains(view, "TASK SET") {
+		t.Fatalf("short-pane filter view must not keep the table behind it:\n%s", view)
+	}
+}
+
 func TestDashboardFilterMenuShowDoneTogglesLive(t *testing.T) {
 	m := filterMenuTestModel()
 	if len(m.snap.Containers) != 2 {

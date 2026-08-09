@@ -2436,6 +2436,15 @@ func (m QueueDashboard) frameSpec() ui.Frame {
 	if line := m.agentOverrideStatusLine(); line != "" {
 		subheader = ui.TruncateString(line, m.width-2)
 	}
+	hints := m.mainHint()
+	var block []string
+	if m.filter != nil {
+		// The filter block is a Frame region so its reserved height and render
+		// cannot drift (ADR-0197 decision 9); BodyHeight shrinks the table by
+		// exactly len(block).
+		block = m.dashboardFilterMenuLines()
+		hints = "j/k move · enter/space toggle · esc close"
+	}
 	return ui.Frame{
 		Width:     m.width,
 		TermH:     m.height,
@@ -2445,7 +2454,8 @@ func (m QueueDashboard) frameSpec() ui.Frame {
 		Warnings:  warnings,
 		Status:    m.statusMsg,
 		Footnote:  m.modelSkipFootnote(),
-		Hints:     m.mainHint(),
+		Block:     block,
+		Hints:     hints,
 	}
 }
 
@@ -2575,29 +2585,22 @@ func (m QueueDashboard) viewWithMenu() string {
 	return body.String()
 }
 
-// viewWithFilterMenu renders the row-inclusion filter modal: the summary, the
-// full table, and the filter toggles below it, replacing the footer. It mirrors
-// viewWithMenu's chrome — a sibling modal — but the menu is not row-anchored, so
-// it sits below the table rather than splicing next to the cursor.
+// viewWithFilterMenu renders the row-inclusion filter modal through the shared
+// Frame: the filter block is a reserved-and-rendered region, so the table body
+// shrinks by exactly its height and the toggles cannot render past the pane
+// (ADR-0197 decision 9). Below the short-pane height floor there is no useful
+// table to keep behind a pick list, so the filter view takes the whole screen
+// the way the help overlay does.
 func (m QueueDashboard) viewWithFilterMenu() string {
-	var body strings.Builder
-	if m.err != nil {
-		fmt.Fprintf(&body, "refresh error: %v\n", m.err)
+	if m.height > 0 && m.height < dashboardTwoLineHeightFloor {
+		return ui.Frame{
+			Width: m.width,
+			TermH: m.height,
+			Block: m.dashboardFilterMenuLines(),
+			Hints: "j/k move · enter/space toggle · esc close",
+		}.Render("")
 	}
-	if m.actionErr != nil {
-		fmt.Fprintf(&body, "%s\n", dashboardActionErrorLine(m.actionErr))
-	}
-	fmt.Fprintf(&body, "%s\n", m.pageHeader())
-	if line := m.agentOverrideStatusLine(); line != "" {
-		fmt.Fprintf(&body, "%s\n", ui.HintStyle.Render(line))
-	}
-	fmt.Fprintln(&body)
-	renderDashboardTable(&body, m.page, m.kinds, m.snap.Containers, m.list.Cursor(), m.width, m.height, m.liveCache())
-	for _, ml := range m.dashboardFilterMenuLines() {
-		fmt.Fprintf(&body, "%s\n", ml)
-	}
-	writeDashboardFooter(&body, m.height, ui.HintStyle.Render("j/k move · enter/space toggle · esc close"))
-	return body.String()
+	return m.frameSpec().Render(m.mainBody())
 }
 
 // dashboardFilterMenuLines renders the filter overlay as a block of lines: a

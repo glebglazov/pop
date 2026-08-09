@@ -28,13 +28,18 @@ type Frame struct {
 	// snapshot rather than from a keypress, so it persists across refreshes;
 	// unlike Warnings it reports a condition the operator need not act on.
 	Footnote string // "" = absent
-	Hints    string // "" = absent
+	// Block is a multi-line region reserved and rendered between Footnote and
+	// Hints. Unlike Warnings it is drawn verbatim — no amber prefix — so the
+	// caller styles its own lines. Used by the Work dashboard's filter menu
+	// (ADR-0197). nil/empty = absent.
+	Block []string
+	Hints string // "" = absent
 }
 
 // BodyHeight returns the body row budget for a terminal of height termH: termH
 // minus every present region (1 for Notice, 1 for Header, 1 for Subheader, 3 for
-// InputBox, len(Warnings) for warnings, 1 for Status, 1 for Footnote, 1 for
-// Hints), floored at >= 3.
+// InputBox, len(Warnings) for warnings, 1 for Status, 1 for Footnote,
+// len(Block) for Block, 1 for Hints), floored at >= 3.
 func (f Frame) BodyHeight(termH int) int {
 	h := termH
 	if f.Notice != "" {
@@ -56,6 +61,7 @@ func (f Frame) BodyHeight(termH int) int {
 	if f.Footnote != "" {
 		h--
 	}
+	h -= len(f.Block)
 	if f.Hints != "" {
 		h--
 	}
@@ -67,14 +73,15 @@ func (f Frame) BodyHeight(termH int) int {
 
 // Render composes the frame's regions around body in the fixed order notice
 // -> header -> subheader -> body -> input box -> warnings -> status -> footnote
-// -> hints, omitting absent ones. When TermH is known, a short body is padded to
-// the full BodyHeight budget so trailing regions sit at the bottom of the screen.
+// -> block -> hints, omitting absent ones. When TermH is known, a short body is
+// padded to the full BodyHeight budget so trailing regions sit at the bottom of
+// the screen.
 func (f Frame) Render(body string) string {
 	if f.TermH > 0 {
 		body = f.padBody(body)
 	}
 
-	parts := make([]string, 0, 9)
+	parts := make([]string, 0, 10)
 
 	if f.Notice != "" {
 		parts = append(parts, renderUpdateNotice(f.Width, f.Notice))
@@ -110,6 +117,10 @@ func (f Frame) Render(body string) string {
 
 	if f.Footnote != "" {
 		parts = append(parts, hintStyle.Render("  "+f.Footnote))
+	}
+
+	if len(f.Block) > 0 {
+		parts = append(parts, strings.Join(f.Block, "\n"))
 	}
 
 	if f.Hints != "" {

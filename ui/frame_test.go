@@ -62,6 +62,12 @@ func TestFrameBodyHeight(t *testing.T) {
 			want:  17,
 		},
 		{
+			name:  "block reserves N lines",
+			frame: Frame{Block: []string{"filters", "show done", "show archived"}},
+			termH: 20,
+			want:  17,
+		},
+		{
 			name: "all regions combine",
 			frame: Frame{
 				Notice:   "Update available",
@@ -69,11 +75,12 @@ func TestFrameBodyHeight(t *testing.T) {
 				InputBox: "> ",
 				Warnings: []string{"one", "two"},
 				Status:   "Copied",
+				Block:    []string{"filters", "show done"},
 				Hints:    "  Esc back",
 			},
 			termH: 20,
-			// 20 - 1 (notice) - 1 (header) - 3 (input box) - 2 (warnings) - 1 (status) - 1 (hints) = 11
-			want: 11,
+			// 20 - 1 (notice) - 1 (header) - 3 (input box) - 2 (warnings) - 1 (status) - 2 (block) - 1 (hints) = 9
+			want: 9,
 		},
 		{
 			name: "floors at 3 on a short terminal",
@@ -114,6 +121,7 @@ func TestFrameRenderOrderAndOmission(t *testing.T) {
 		InputBox: " Help",
 		Warnings: []string{"low disk space"},
 		Status:   "Copied to clipboard",
+		Block:    []string{"filters", "show done"},
 		Hints:    "  Esc back",
 	}
 
@@ -125,11 +133,12 @@ func TestFrameRenderOrderAndOmission(t *testing.T) {
 	inputBox := indexOf(t, out, "Help")
 	warning := indexOf(t, out, "low disk space")
 	status := indexOf(t, out, "Copied to clipboard")
+	block := indexOf(t, out, "filters")
 	hints := indexOf(t, out, "Esc back")
 
-	if !(notice < header && header < body && body < inputBox && inputBox < warning && warning < status && status < hints) {
-		t.Fatalf("regions out of order: notice=%d header=%d body=%d inputBox=%d warning=%d status=%d hints=%d",
-			notice, header, body, inputBox, warning, status, hints)
+	if !(notice < header && header < body && body < inputBox && inputBox < warning && warning < status && status < block && block < hints) {
+		t.Fatalf("regions out of order: notice=%d header=%d body=%d inputBox=%d warning=%d status=%d block=%d hints=%d",
+			notice, header, body, inputBox, warning, status, block, hints)
 	}
 }
 
@@ -212,6 +221,7 @@ func TestFrameRenderPadBudgetTracksRegions(t *testing.T) {
 				InputBox: "> ",
 				Warnings: []string{"warn"},
 				Status:   "Copied",
+				Block:    []string{"filters", "show done"},
 				Hints:    "  q",
 			},
 		},
