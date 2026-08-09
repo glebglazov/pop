@@ -3,7 +3,9 @@ package tasks
 import (
 	"reflect"
 	"testing"
+	"time"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/work"
 )
 
@@ -11,28 +13,41 @@ import (
 // Work seam took shape: the filter, the order and the STATUS cell all read this
 // kind's statuses, so they are this kind's tests.
 
-// TestShowRow pins the shared Done-inclusion row filter (ADR-0121): DONE sets are
-// hidden by default and revealed under include-done; every other status always
-// shows.
-func TestShowRow(t *testing.T) {
+// TestMatchesPresetViaShowRowReplacement pins the Work view preset row filter
+// (ADR-0197): the shipped active preset hides done-and-folded work and keeps
+// every other status (including unfolded DONE); all reveals folded DONE too.
+func TestMatchesPresetActiveAndAll(t *testing.T) {
+	active, ok := config.ShippedWorkViewPreset("active")
+	if !ok {
+		t.Fatal("shipped active missing")
+	}
+	all, ok := config.ShippedWorkViewPreset("all")
+	if !ok {
+		t.Fatal("shipped all missing")
+	}
+	now := time.Now()
 	for _, status := range []TaskSetStatus{
 		StatusReady, StatusFailed, StatusBlocked, StatusDeferred,
 		StatusMissing, StatusMalformed, StatusAwaitingApproval, StatusNeedsVerify,
 	} {
 		row := Row{Status: status}
-		if !ShowRow(row, false) {
-			t.Errorf("%s hidden by default, want shown", status)
+		if !MatchesPreset(RowViewFacts(row), active, now) {
+			t.Errorf("%s hidden by active, want shown", status)
 		}
-		if !ShowRow(row, true) {
-			t.Errorf("%s hidden under include-done, want shown", status)
+		if !MatchesPreset(RowViewFacts(row), all, now) {
+			t.Errorf("%s hidden by all, want shown", status)
 		}
 	}
-	done := Row{Status: StatusDone}
-	if ShowRow(done, false) {
-		t.Errorf("DONE shown by default, want hidden")
+	folded := Row{Status: StatusDone, Bound: false}
+	if MatchesPreset(RowViewFacts(folded), active, now) {
+		t.Errorf("folded DONE shown by active, want hidden")
 	}
-	if !ShowRow(done, true) {
-		t.Errorf("DONE hidden under include-done, want shown")
+	if !MatchesPreset(RowViewFacts(folded), all, now) {
+		t.Errorf("folded DONE hidden by all, want shown")
+	}
+	unfolded := Row{Status: StatusDone, Bound: true}
+	if !MatchesPreset(RowViewFacts(unfolded), active, now) {
+		t.Errorf("unfolded DONE hidden by active, want shown")
 	}
 }
 

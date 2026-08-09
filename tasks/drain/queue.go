@@ -44,23 +44,13 @@ type Deps struct {
 	Tmux       tmuxmod.Tmux
 	LoadConfig func(string) (*config.Config, error)
 
-	// IncludeDone is the Done-inclusion view flag (ADR-0121): the single
-	// inclusion state that threads through the shared row layer both Queue read
-	// surfaces (`pop work status` and `pop work dashboard`) consume. Default
-	// false hides every DONE Task set — including a DONE set that still holds a
-	// managed Worktree binding (the old teardown-reminder carve-out is retired).
-	// `--include-done` on either command sets it true; the dashboard's `f` filter
-	// menu (task 04) flips it at runtime. It is a view filter, not persisted
-	// consent — Archive (ADR-0071/0116) stays independent and always hides.
-	IncludeDone bool
-
-	// IncludeArchived is the show-archived view flag (ADR-0186): archived
-	// containers of every kind are hidden unless this is true, and when it is they
-	// are listed beside the active ones. Like IncludeDone it is a view filter the
-	// dashboard's `f` menu flips at runtime and nothing persists — but unlike it,
-	// nothing seeds it from a command-line flag: the reason to see archived work is
-	// to unarchive it, which only happens on the surface that offers the verb.
-	IncludeArchived bool
+	// ViewPreset is the Work view preset that selects which rows both Queue read
+	// surfaces (`pop work status` and `pop work dashboard`) render (ADR-0197).
+	// Empty falls back to the shipped active definition — the daemon's machine
+	// baseline — at evaluation time. Human surfaces set it from the resolved
+	// roster (default, `--preset <name>`, or the deprecated `--include-done`
+	// alias for `all`); the dashboard's `f` menu may replace it for the session.
+	ViewPreset config.WorkViewPreset
 
 	// Refresh returns the Task-set rows registered under a definition path.
 	// Defaults to tasks.RefreshWith.
@@ -121,6 +111,20 @@ type Deps struct {
 	// separate pages: the supervisor and `pop work status` read Kinds, and neither
 	// wants a Routine folded into it.
 	RoutineKinds func(d *Deps, cfg *config.Config) []work.Kind
+}
+
+// EffectiveViewPreset returns the Work view preset this Deps evaluates, falling
+// back to the shipped active definition when unset (ADR-0197). The daemon's run
+// baseline always wants that shipped definition; human surfaces set ViewPreset
+// from the resolved roster before calling in.
+func (d *Deps) EffectiveViewPreset() config.WorkViewPreset {
+	if d != nil && strings.TrimSpace(d.ViewPreset.Name) != "" {
+		return d.ViewPreset
+	}
+	if p, ok := config.ShippedWorkViewPreset("active"); ok {
+		return p
+	}
+	return config.WorkViewPreset{}
 }
 
 type runtimeLock interface {

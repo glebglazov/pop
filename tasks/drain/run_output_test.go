@@ -368,11 +368,11 @@ func TestRepoIdentityLabelAcrossSpawnAndBackoff(t *testing.T) {
 	}
 }
 
-// TestRunViewHidesDoneManagedWorktreeBinding pins the status-surface half of the
-// ADR-0121 uniform DONE hide: a DONE set that still holds a managed Worktree
-// binding is omitted from Active worktrees by default (the old teardown reminder
-// is retired) and revealed by Done inclusion (`--include-done`).
-func TestRunViewHidesDoneManagedWorktreeBinding(t *testing.T) {
+// TestRunViewShowsUnfoldedDoneManagedWorktreeBinding pins the status-surface
+// half of ADR-0197's active preset: a DONE set that still holds a managed
+// Worktree binding stays in Active worktrees by default (the teardown reminder),
+// and the all preset still reveals every binding the status surface can see.
+func TestRunViewShowsUnfoldedDoneManagedWorktreeBinding(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	repo, setID, _ := queuetest.SetupSpawnRepo(t, "done-set", []queuetest.SpawnTask{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
@@ -391,16 +391,17 @@ func TestRunViewHidesDoneManagedWorktreeBinding(t *testing.T) {
 		t.Fatalf("binding.Put: %v", err)
 	}
 
-	// Default: the DONE set's managed binding is hidden.
-	hidden := BuildRunView(StatusSnapshot{Tasks: td}, time.Now().UTC())
-	if len(hidden.WorktreeBindings()) != 0 {
-		t.Fatalf("Active worktrees = %+v, want empty (DONE binding hidden by default)", hidden.WorktreeBindings())
+	active, _ := config.ShippedWorkViewPreset("active")
+	// Default active: the DONE set's managed binding stays visible (unfolded).
+	shown := BuildRunView(StatusSnapshot{Tasks: td, ViewPreset: active}, time.Now().UTC())
+	if len(shown.WorktreeBindings()) != 1 || shown.WorktreeBindings()[0].SetID != setID {
+		t.Fatalf("Active worktrees = %+v, want the DONE binding under active", shown.WorktreeBindings())
 	}
 
-	// Done inclusion reveals it.
-	shown := BuildRunView(StatusSnapshot{Tasks: td, IncludeDone: true}, time.Now().UTC())
-	if len(shown.WorktreeBindings()) != 1 || shown.WorktreeBindings()[0].SetID != setID {
-		t.Fatalf("Active worktrees = %+v, want the DONE binding revealed with include-done", shown.WorktreeBindings())
+	all, _ := config.ShippedWorkViewPreset("all")
+	shownAll := BuildRunView(StatusSnapshot{Tasks: td, ViewPreset: all}, time.Now().UTC())
+	if len(shownAll.WorktreeBindings()) != 1 || shownAll.WorktreeBindings()[0].SetID != setID {
+		t.Fatalf("Active worktrees = %+v, want the DONE binding with preset all", shownAll.WorktreeBindings())
 	}
 }
 

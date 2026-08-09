@@ -164,7 +164,7 @@ func TestBuildRowsVerifyFailedStatus(t *testing.T) {
 	// The subject here is the VERIFY-FAILED status cell, so the row has to be on
 	// screen: a DONE row hidden by the filter is never asked for its verdict
 	// (ADR-0189), which TestVerdictsResolveOnlyForRenderedRows covers instead.
-	d.IncludeDone = true
+	d.ViewPreset, _ = config.ShippedWorkViewPreset("all")
 	d.Tasks = td
 	d.Refresh = func(string) (*tasks.RefreshResult, error) {
 		return &tasks.RefreshResult{
@@ -231,7 +231,7 @@ func TestBuildRowsUnplacedSkipsTrunkVerdict(t *testing.T) {
 	rows := []tasks.Row{{ID: "unplaced", Status: tasks.StatusDone}}
 	td := workDataDeps(t)
 	d := testDeps(t, rows)
-	d.IncludeDone = true
+	d.ViewPreset, _ = config.ShippedWorkViewPreset("all")
 	d.Tasks = td
 	d.Refresh = func(string) (*tasks.RefreshResult, error) {
 		return &tasks.RefreshResult{
@@ -312,12 +312,12 @@ func TestShowRuleFiltering(t *testing.T) {
 	for _, row := range got {
 		ids = append(ids, row.ID)
 	}
-	want := []string{"ready", "failed", "blocked", "deferred", "missing", "malformed"}
+	want := []string{"ready", "failed", "blocked", "deferred", "missing", "malformed", "done-integrating"}
 	if !reflect.DeepEqual(ids, want) {
-		t.Fatalf("default ids = %v, want %v (both DONE sets hidden)", ids, want)
+		t.Fatalf("default ids = %v, want %v (folded DONE hidden; unfolded DONE shown)", ids, want)
 	}
 
-	d.IncludeDone = true
+	d.ViewPreset, _ = config.ShippedWorkViewPreset("all")
 	got, err = rowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false))
 	if err != nil {
 		t.Fatal(err)
@@ -356,7 +356,7 @@ func TestColumnDerivation(t *testing.T) {
 	})
 	scan := scanFixture{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: "/def", RepoKey: "repo-key"}
 
-	d.IncludeDone = true
+	d.ViewPreset, _ = config.ShippedWorkViewPreset("all")
 	got, err := rowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false))
 	if err != nil {
 		t.Fatal(err)
@@ -597,12 +597,14 @@ func TestManagedDirectiveDestColumn(t *testing.T) {
 
 // TestDoneHiddenUniformly pins the ADR-0121 uniform DONE hide: a DONE set is
 // omitted by default whether its Worktree binding is adopted or managed. Done
-// inclusion reveals both, and the managed one still carries its clean-up
-// DestKind.
-func TestDoneHiddenUniformly(t *testing.T) {
+// TestDoneVisibleWhenUnfolded pins ADR-0197's active preset: a DONE set that
+// still holds a binding (unfolded) stays on the default view as the teardown
+// reminder; the all preset still reveals every DONE row including folded ones.
+func TestDoneVisibleWhenUnfolded(t *testing.T) {
 	rows := []tasks.Row{
 		{ID: "done-adopted", Status: tasks.StatusDone},
 		{ID: "done-managed", Status: tasks.StatusDone},
+		{ID: "done-folded", Status: tasks.StatusDone},
 	}
 	d := testDeps(t, rows)
 	d.Tasks = withDataDir(t, d.Tasks)
@@ -616,26 +618,43 @@ func TestDoneHiddenUniformly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("default rows = %+v, want both DONE sets hidden", got)
-	}
-
-	d.IncludeDone = true
-	got, err = rowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false))
-	if err != nil {
-		t.Fatal(err)
-	}
 	byID := map[string]work.Container{}
 	for _, row := range got {
 		byID[row.ID] = row
 	}
+	if _, ok := byID["done-folded"]; ok {
+		t.Fatalf("folded DONE shown by active: %+v", got)
+	}
 	if row, ok := byID["done-adopted"]; !ok {
-		t.Fatal("adopted Done binding should be revealed with include-done")
+		t.Fatal("adopted Done binding should stay visible under active")
 	} else if row.Worktree != "adopted-branch" {
 		t.Fatalf("done-adopted row = %+v", row)
 	}
 	if row, ok := byID["done-managed"]; !ok {
-		t.Fatal("managed Done binding should be revealed with include-done")
+		t.Fatal("managed Done binding should stay visible under active")
+	} else if row.DestKind != work.DestDoneManagedBound || row.Worktree != "managed-branch" {
+		t.Fatalf("done-managed row = %+v", row)
+	}
+
+	d.ViewPreset, _ = config.ShippedWorkViewPreset("all")
+	got, err = rowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID = map[string]work.Container{}
+	for _, row := range got {
+		byID[row.ID] = row
+	}
+	if _, ok := byID["done-folded"]; !ok {
+		t.Fatal("folded DONE should be revealed with preset all")
+	}
+	if row, ok := byID["done-adopted"]; !ok {
+		t.Fatal("adopted Done binding should be revealed with preset all")
+	} else if row.Worktree != "adopted-branch" {
+		t.Fatalf("done-adopted row = %+v", row)
+	}
+	if row, ok := byID["done-managed"]; !ok {
+		t.Fatal("managed Done binding should be revealed with preset all")
 	} else if row.DestKind != work.DestDoneManagedBound || row.Worktree != "managed-branch" {
 		t.Fatalf("done-managed row = %+v", row)
 	}

@@ -125,6 +125,12 @@ func ShippedWorkViewPresets() []WorkViewPreset {
 	}
 }
 
+// ShippedWorkViewPreset returns a deep copy of the named shipped preset, or
+// ok=false when the name is not a shipped preset.
+func ShippedWorkViewPreset(name string) (WorkViewPreset, bool) {
+	return shippedPresetByName(name)
+}
+
 // shippedPresetByName returns a deep copy of the named shipped preset, or
 // ok=false when the name is not a shipped preset.
 func shippedPresetByName(name string) (WorkViewPreset, bool) {
@@ -134,6 +140,31 @@ func shippedPresetByName(name string) (WorkViewPreset, bool) {
 		}
 	}
 	return WorkViewPreset{}, false
+}
+
+// WorkViewPresetNamed returns the resolved preset with the given name, or
+// ok=false when the roster has no such entry.
+func (c *Config) WorkViewPresetNamed(name string) (WorkViewPreset, bool) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return WorkViewPreset{}, false
+	}
+	for _, p := range c.ResolveWorkViewPresets() {
+		if p.Name == name {
+			return cloneWorkViewPreset(p), true
+		}
+	}
+	return WorkViewPreset{}, false
+}
+
+// WorkViewPresetNames returns the names of the resolved roster, in order.
+func (c *Config) WorkViewPresetNames() []string {
+	presets := c.ResolveWorkViewPresets()
+	names := make([]string, len(presets))
+	for i, p := range presets {
+		names[i] = p.Name
+	}
+	return names
 }
 
 // ResolveWorkViewPresets returns the effective Work view preset roster: the
@@ -377,6 +408,12 @@ func stringList(v interface{}) ([]string, error) {
 	default:
 		return nil, fmt.Errorf("status must be an array of strings, got %T", v)
 	}
+}
+
+// ParsePresetDuration accepts Go duration strings and a trailing day unit
+// ("7d", "30d") so recency presets can be written in day terms.
+func ParsePresetDuration(s string) (time.Duration, error) {
+	return parsePresetDuration(s)
 }
 
 // parsePresetDuration accepts Go duration strings and a trailing day unit

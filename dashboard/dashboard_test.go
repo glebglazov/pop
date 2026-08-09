@@ -2721,8 +2721,8 @@ func TestDashboardFilterMenuShowDoneTogglesLive(t *testing.T) {
 	m = updated.(QueueDashboard)
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
 	m = updated.(QueueDashboard)
-	if !m.d.IncludeDone {
-		t.Fatal("toggling Show done did not set IncludeDone")
+	if !m.filterToggleOn(filterToggleShowDone) {
+		t.Fatal("toggling Show done did not engage a show-done preset")
 	}
 	if cmd == nil {
 		t.Fatal("toggling Show done must trigger a rebuild")
@@ -2754,8 +2754,8 @@ func TestDashboardFilterMenuShowDoneTogglesLive(t *testing.T) {
 	// rows hide the DONE set again.
 	updated, _ = m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
 	m = updated.(QueueDashboard)
-	if m.d.IncludeDone {
-		t.Fatal("toggling Show done again did not clear IncludeDone")
+	if m.filterToggleOn(filterToggleShowDone) {
+		t.Fatal("toggling Show done again did not clear show-done")
 	}
 	if strings.Contains(m.View().Content, "[x]") {
 		t.Fatalf("checkbox should render unchecked after toggle-off:\n%s", m.View().Content)
@@ -2780,7 +2780,7 @@ func TestDashboardFilterMenuEnterTogglesHighlighted(t *testing.T) {
 	// Enter flips the highlighted toggle just like its letter shortcut.
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	got := updated.(QueueDashboard)
-	if !got.d.IncludeDone {
+	if !got.filterToggleOn(filterToggleShowDone) {
 		t.Fatal("enter did not toggle the highlighted filter")
 	}
 	if cmd == nil {
@@ -2789,8 +2789,9 @@ func TestDashboardFilterMenuEnterTogglesHighlighted(t *testing.T) {
 }
 
 func TestDashboardFilterMenuSeedsFromIncludeDone(t *testing.T) {
-	// `--include-done` seeds IncludeDone true at launch; the menu opens checked.
-	m := newQueueDashboard(&drain.Deps{IncludeDone: true}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{
+	// `--include-done` seeds the all preset at launch; the menu opens checked.
+	all, _ := config.ShippedWorkViewPreset("all")
+	m := newQueueDashboard(&drain.Deps{ViewPreset: all}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{
 		{Project: "alpha", CursorKey: "alpha\x00set-one", RawStatus: tasks.StatusReady, ID: "set-one"},
 	}})
 	m.width = 120

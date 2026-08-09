@@ -80,11 +80,12 @@ func TestSetKindArchivePairWritesTheFlag(t *testing.T) {
 		t.Fatalf("archived set still listed by default: %v", ids)
 	}
 
-	// With the show-archived view on the row comes back, says it is archived, and
-	// can be unarchived — which is the whole reason the view exists. It comes back
-	// even though the set is DONE and Done-inclusion is off: an archived row is on
-	// screen because the operator asked for archived rows.
-	d.IncludeArchived = true
+	// With an archived-only view the row comes back, says it is archived, and
+	// can be unarchived — which is the whole reason the view exists.
+	d.ViewPreset = config.WorkViewPreset{
+		Name:                 "_test",
+		WorkViewPresetFilter: config.WorkViewPresetFilter{Archived: config.ArchivedOnly},
+	}
 	containers, err := containersForGroup(d, d.config(), g)
 	if err != nil {
 		t.Fatal(err)
@@ -98,17 +99,20 @@ func TestSetKindArchivePairWritesTheFlag(t *testing.T) {
 	if _, err := k.Perform(containers[0], nil, VerbUnarchive); err != nil {
 		t.Fatalf("unarchive: %v", err)
 	}
-	d.IncludeArchived = false
+	d.ViewPreset = config.WorkViewPreset{}
 	if ids := setIDs(t, d, g); !slices.Contains(ids, "2026-07-01-demo") {
 		t.Fatalf("unarchived set missing from the default view: %v", ids)
 	}
 }
 
-// A DONE set that was never archived stays hidden with only show-archived on: the
-// two view flags are independent, and show-archived is not a second show-done.
+// A DONE set that was never archived stays hidden with only archived-only on:
+// archived-only is not a second show-done.
 func TestShowArchivedDoesNotRevealPlainDoneSets(t *testing.T) {
 	d, g := archiveFixture(t)
-	d.IncludeArchived = true
+	d.ViewPreset = config.WorkViewPreset{
+		Name:                 "_test",
+		WorkViewPresetFilter: config.WorkViewPresetFilter{Archived: config.ArchivedOnly},
+	}
 	d.Refresh = func(string) (*tasks.RefreshResult, error) {
 		return &tasks.RefreshResult{Rows: []tasks.Row{
 			{ID: "done-set", Status: tasks.StatusDone},

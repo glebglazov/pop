@@ -199,7 +199,7 @@ func BuildRunView(snap StatusSnapshot, now time.Time) RunView {
 	// though SeedSpawnedRunning may append to a later copy of the view.
 	running := view.Running
 	view.worktreeBindings = &lazyWorktreeBindings{build: func() []WorktreeBindingView {
-		return buildWorktreeBindingViews(snap.Tasks, snap.Config, running, snap.IncludeDone)
+		return buildWorktreeBindingViews(snap.Tasks, snap.Config, running, snap.ViewPreset, now)
 	}}
 	view.Blocked = append(view.Blocked, blockedItemsFromAgentCooldowns(snap.ActiveAgentCooldowns, now)...)
 
@@ -560,7 +560,7 @@ func formatRunningLine(p PickedUpSet) string {
 	return fmt.Sprintf("%s: %s%s%s", projectLabel, setID, pid, started)
 }
 
-func buildWorktreeBindingViews(d *tasks.Deps, cfg *config.Config, running []PickedUpSet, includeDone bool) []WorktreeBindingView {
+func buildWorktreeBindingViews(d *tasks.Deps, cfg *config.Config, running []PickedUpSet, preset config.WorkViewPreset, now time.Time) []WorktreeBindingView {
 	bindings, err := binding.AllBindings(d)
 	if err != nil || len(bindings) == 0 {
 		return nil
@@ -578,20 +578,23 @@ func buildWorktreeBindingViews(d *tasks.Deps, cfg *config.Config, running []Pick
 	}
 	sort.Strings(keys)
 
-	// Done inclusion (ADR-0121): a DONE set's binding is hidden from Active
-	// worktrees by default — the status-surface half of the uniform DONE hide the
-	// dashboard row layer applies. cfg is the configuration the snapshot was
-	// derived under, so the DONE status matches the dashboard's Verify overlay.
-	var done *bindingDoneCache
-	if !includeDone {
-		done = newBindingDoneCache(d, cfg)
+	// View preset (ADR-0197): a binding is omitted when its set does not survive
+	// the same preset the dashboard row layer applies. cfg is the configuration
+	// the snapshot was derived under, so the status matches the dashboard's
+	// Verify overlay. An empty preset name falls back to shipped active.
+	if strings.TrimSpace(preset.Name) == "" {
+		if p, ok := config.ShippedWorkViewPreset("active"); ok {
+			preset = p
+		}
 	}
+	facts := newBindingFactsCache(d, cfg)
 
 	items := make([]WorktreeBindingView, 0, len(keys))
 	for _, key := range keys {
 		b := bindings[key]
 		setID := binding.SetIDFromKey(key)
-		if done.setDone(b.RuntimePath, setID) {
+		rowFacts := facts.facts(b.RuntimePath, setID)
+		if !tasks.MatchesPreset(rowFacts, preset, now) {
 			continue
 		}
 		project := b.Project
@@ -620,54 +623,54 @@ func buildWorktreeBindingViews(d *tasks.Deps, cfg *config.Config, running []Pick
 	return items
 }
 
-// bindingDoneCache answers "is the set bound to this checkout DONE?" for the
-// Active-worktrees filter, applying the same SHA-gated Verify overlay the
-// dashboard row layer uses so a set that is done-in-manifest but VERIFY-FAILED at
-// the current SHA is not treated as DONE. A resolution failure (a stale or
-// vanished checkout) reports not-DONE, so the binding stays visible.
+// bindingFactsCache answers ViewFacts for a bound set, applying the same
+// SHA-gated Verify overlay the dashboard row layer uses so a set that is
+// done-in-manifest but VERIFY-FAILED at the current SHA is not treated as DONE.
+// A resolution failure (a stale or vanished checkout) reports empty status with
+// Unfolded false, so the binding stays visible under the default active preset
+// (an unknown set is not done-and-folded).
 //
 // It caches at two levels because the question has two shapes (ADR-0189). The
 // answer is per set, but the work behind it — refreshing a checkout's whole
 // definition path, every registered set's manifest loaded and every task markdown
 // re-validated — is per checkout. One cache keyed by (checkout, set) therefore ran
 // that refresh once per binding: K bindings sharing a checkout scanned it K times.
-type bindingDoneCache struct {
-	d   *tasks.Deps
-	cfg *config.Config
-	// refreshes holds one overlaid refresh per checkout. A nil entry records a
-	// checkout that could not be resolved, so the failure is not retried per set.
+type bindingFactsCache struct {
+	d         *tasks.Deps
+	cfg       *config.Config
 	refreshes map[string]*tasks.RefreshResult
-	done      map[string]bool
+	factsBy   map[string]tasks.ViewFacts
 }
 
-func newBindingDoneCache(d *tasks.Deps, cfg *config.Config) *bindingDoneCache {
-	return &bindingDoneCache{d: d, cfg: cfg, refreshes: map[string]*tasks.RefreshResult{}, done: map[string]bool{}}
+func newBindingFactsCache(d *tasks.Deps, cfg *config.Config) *bindingFactsCache {
+	return &bindingFactsCache{d: d, cfg: cfg, refreshes: map[string]*tasks.RefreshResult{}, factsBy: map[string]tasks.ViewFacts{}}
 }
 
-// setDone is the per-set level. A nil cache means Done inclusion is on and no
-// binding is hidden, so the caller can ask unconditionally.
-func (c *bindingDoneCache) setDone(runtimePath, setID string) bool {
+func (c *bindingFactsCache) facts(runtimePath, setID string) tasks.ViewFacts {
 	if c == nil || c.d == nil || runtimePath == "" || setID == "" {
-		return false
+		return tasks.ViewFacts{ID: setID, Unfolded: true}
 	}
 	key := runtimePath + "\x00" + setID
-	if done, ok := c.done[key]; ok {
-		return done
+	if f, ok := c.factsBy[key]; ok {
+		return f
 	}
-	done := false
+	f := tasks.ViewFacts{ID: setID, Unfolded: true}
 	if refresh := c.refresh(runtimePath); refresh != nil {
 		if row := tasks.FindRow(refresh, setID); row != nil {
-			done = row.Status == tasks.StatusDone
+			// The set still holds this binding, so Bound is true even if the
+			// refresh row has not stamped it yet.
+			row.Bound = true
+			f = tasks.RowViewFacts(*row)
 		}
 	}
-	c.done[key] = done
-	return done
+	c.factsBy[key] = f
+	return f
 }
 
 // refresh is the per-checkout level: the definition-path scan every set bound to
 // this checkout shares. The overlay's per-set runtime resolver is a constant
 // here — one checkout, so one HEAD gating every verdict in this refresh.
-func (c *bindingDoneCache) refresh(runtimePath string) *tasks.RefreshResult {
+func (c *bindingFactsCache) refresh(runtimePath string) *tasks.RefreshResult {
 	if refresh, ok := c.refreshes[runtimePath]; ok {
 		return refresh
 	}

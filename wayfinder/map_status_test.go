@@ -149,9 +149,12 @@ func TestMapKindStatusVerbsWriteAndTakeEffectOnTheNextLoad(t *testing.T) {
 		t.Fatalf("archived map still listed by default: %v", ids)
 	}
 
-	// Unarchiving is reachable only because the show-archived view lists the row at
-	// all, so that is the state the verb is performed from.
-	k.d.IncludeArchived = true
+	// Unarchiving is reachable only because an archived-admitting view lists the
+	// row at all, so that is the state the verb is performed from.
+	k.d.ViewPreset = config.WorkViewPreset{
+		Name:                 "_test",
+		WorkViewPresetFilter: config.WorkViewPresetFilter{Archived: config.ArchivedOnly},
+	}
 	archivedRow := mapContainer(t, k, "demo-map")
 	if !archivedRow.Archived {
 		t.Fatal("archived row does not say it is archived")
@@ -165,7 +168,7 @@ func TestMapKindStatusVerbsWriteAndTakeEffectOnTheNextLoad(t *testing.T) {
 	if archivedInRegistry(t, d, "demo-map") {
 		t.Fatal("unarchive verb left the registry bit set")
 	}
-	k.d.IncludeArchived = false
+	k.d.ViewPreset = config.WorkViewPreset{}
 	if ids := loadedMapIDs(t, k); !slices.Contains(ids, "demo-map") {
 		t.Fatalf("unarchived map missing from the default view: %v", ids)
 	}
@@ -212,18 +215,21 @@ func TestMapKindArchiveOfUnregisteredMapReportsTheCorrective(t *testing.T) {
 	}
 }
 
-// The show-archived flag is about filing, not about status: it reveals an archived
-// Map and nothing else the default view hides.
+// An archived-admitting preset is about filing, not about status: it reveals an
+// archived Map and nothing else the default view hides.
 func TestShowArchivedRevealsOnlyArchivedMaps(t *testing.T) {
 	k, _ := mapKindFixture(t)
-	k.d.IncludeArchived = true
+	k.d.ViewPreset = config.WorkViewPreset{
+		Name:                 "_test",
+		WorkViewPresetFilter: config.WorkViewPresetFilter{Archived: config.ArchivedOnly},
+	}
 	ids := loadedMapIDs(t, k)
 	if !slices.Contains(ids, "2026-07-04-archived") {
-		t.Fatalf("archived map missing with show-archived on: %v", ids)
+		t.Fatalf("archived map missing with archived-only on: %v", ids)
 	}
 	for _, stillHidden := range []string{"2026-07-03-abandoned", "2026-07-05-broken"} {
 		if slices.Contains(ids, stillHidden) {
-			t.Fatalf("show-archived revealed %q: %v", stillHidden, ids)
+			t.Fatalf("archived-only revealed %q: %v", stillHidden, ids)
 		}
 	}
 }

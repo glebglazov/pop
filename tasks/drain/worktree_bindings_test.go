@@ -86,8 +86,8 @@ func TestRunViewDefersWorktreeBindingsUntilRead(t *testing.T) {
 		t.Fatalf("build + summary read %d definition files, want 0 (the section is not computed unless read): %v", counting.total, counting.reads)
 	}
 
-	if got := view.WorktreeBindings(); len(got) != 0 {
-		t.Fatalf("Active worktrees = %+v, want empty (the DONE binding stays hidden)", got)
+	if got := view.WorktreeBindings(); len(got) != 1 || got[0].SetID != setID {
+		t.Fatalf("Active worktrees = %+v, want the unfolded DONE binding under active", got)
 	}
 	if counting.total == 0 {
 		t.Fatal("reading the section read no definition file, so this fixture cannot tell deferral from a section with nothing to do")

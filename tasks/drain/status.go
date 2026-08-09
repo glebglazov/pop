@@ -66,11 +66,11 @@ type StatusSnapshot struct {
 	// length is the park threshold). The run view derives each set's parked /
 	// backed-off status from Drain history against it (ADR-0055).
 	CrashRetryDelays []time.Duration
-	// IncludeDone is the Done-inclusion view flag (ADR-0121) carried from the
-	// Deps so the run view applies the same uniform DONE hide the dashboard row
-	// layer does: a DONE set's managed Worktree binding is omitted from the
-	// Active-worktrees view by default, revealed by `--include-done`.
-	IncludeDone bool
+	// ViewPreset is the Work view preset (ADR-0197) carried from the Deps so the
+	// run view applies the same row selection the dashboard row layer does: a
+	// set's managed Worktree binding is omitted from the Active-worktrees view
+	// when the preset excludes the set.
+	ViewPreset config.WorkViewPreset
 	// Config is the configuration this snapshot was derived under, carried so the
 	// run view's Verify overlay reads what the scan read instead of loading the
 	// default config path behind the injected seam's back. Nil (a snapshot built by
@@ -100,7 +100,7 @@ func BuildStatus(d *Deps, cfg *config.Config) (StatusSnapshot, error) {
 	snap.ActiveAgentCooldowns = cooldowns
 	snap.RecoveryWaiters = loadRecoveryWaiters(d)
 	snap.Tasks = d.Tasks
-	snap.IncludeDone = d.IncludeDone
+	snap.ViewPreset = d.EffectiveViewPreset()
 	snap.Config = cfg
 	if qcfg, qerr := resolvedWorkDaemonConfig(cfg); qerr == nil {
 		snap.CrashRetryDelays = qcfg.CrashRetryDelays

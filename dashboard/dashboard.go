@@ -389,8 +389,9 @@ type dashboardFilterItem struct {
 // dashboardFilterMenu is the modal opened with `f` over the Work dashboard. It
 // is a sibling of the `a` action menu but holds row-inclusion toggles rather
 // than row verbs, so it is not anchored to the cursored row. The toggle state
-// lives on the model (m.d.IncludeDone), not the menu — the menu only renders it
-// and dispatches flips — so the checkbox reflects the live view every frame.
+// is derived from the model's ViewPreset (m.d.ViewPreset) — the menu only
+// renders it and dispatches flips — so the checkbox reflects the live view
+// every frame.
 type dashboardFilterMenu struct {
 	list *ui.List[dashboardFilterItem]
 }
@@ -1295,12 +1296,12 @@ func (m QueueDashboard) updateFilterMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // invokeFilterItem flips the inclusion filter at idx and rebuilds the row set.
-// The menu stays open. Flipping mutates the session view flag on the model's
-// drain.Deps (m.d.IncludeDone) and returns a reload: BuildDashboard re-derives the
-// rows honoring the new flag and re-sorts them (ADR-0121), and the reload's
+// The menu stays open. Flipping recomposes the session ViewPreset on the model's
+// drain.Deps (ADR-0197) and returns a reload: BuildDashboard re-derives the rows
+// honoring the new preset and re-sorts them (ADR-0121), and the reload's
 // dashboardRowsMsg re-applies any active `/` fuzzy query, so the two filters
-// stay independent. The flag is session-only — a fresh drain.Deps on relaunch resets
-// it to the launch seed (`--include-done`).
+// stay independent. The preset is session-only — a fresh drain.Deps on relaunch
+// resets it to the launch seed (`--include-done` → all, else the default).
 func (m QueueDashboard) invokeFilterItem(idx int) (tea.Model, tea.Cmd) {
 	if m.filter == nil {
 		return m, nil
@@ -1309,27 +1310,62 @@ func (m QueueDashboard) invokeFilterItem(idx int) (tea.Model, tea.Cmd) {
 	if idx < 0 || idx >= len(items) {
 		return m, nil
 	}
+	showDone := m.filterToggleOn(filterToggleShowDone)
+	showArchived := m.filterToggleOn(filterToggleShowArchived)
 	switch items[idx].toggle {
 	case filterToggleShowDone:
-		m.d.IncludeDone = !m.d.IncludeDone
-		return m, m.reload()
+		showDone = !showDone
 	case filterToggleShowArchived:
-		m.d.IncludeArchived = !m.d.IncludeArchived
-		return m, m.reload()
+		showArchived = !showArchived
+	default:
+		return m, nil
 	}
-	return m, nil
+	if m.d != nil {
+		m.d.ViewPreset = sessionViewPreset(showDone, showArchived)
+	}
+	return m, m.reload()
 }
 
-// filterToggleOn reports the current on/off state of an inclusion filter, read
-// from the live view flags so the menu checkbox tracks the actual view.
+// filterToggleOn reports the current on/off state of an inclusion filter, derived
+// from the live ViewPreset so the menu checkbox tracks the actual view.
 func (m QueueDashboard) filterToggleOn(toggle dashboardFilterToggle) bool {
+	if m.d == nil {
+		return false
+	}
+	p := m.d.EffectiveViewPreset()
+	now := time.Now()
 	switch toggle {
 	case filterToggleShowDone:
-		return m.d != nil && m.d.IncludeDone
+		return tasks.MatchesPreset(tasks.ViewFacts{ID: "x", Status: string(tasks.StatusDone), Unfolded: false}, p, now)
 	case filterToggleShowArchived:
-		return m.d != nil && m.d.IncludeArchived
+		return tasks.MatchesPreset(tasks.ViewFacts{ID: "x", Status: string(tasks.StatusReady), Archived: true}, p, now)
 	}
 	return false
+}
+
+// sessionViewPreset maps the dashboard's interim toggle pair onto a ViewPreset
+// until the filter menu becomes a numbered preset list. Neither on → shipped
+// active; show-done alone → every non-archived row; show-archived alone →
+// archived-only; both → shipped all.
+func sessionViewPreset(showDone, showArchived bool) config.WorkViewPreset {
+	switch {
+	case !showDone && !showArchived:
+		if p, ok := config.ShippedWorkViewPreset("active"); ok {
+			return p
+		}
+	case showDone && !showArchived:
+		return config.WorkViewPreset{Name: "_session"}
+	case !showDone && showArchived:
+		return config.WorkViewPreset{
+			Name: "_session",
+			WorkViewPresetFilter: config.WorkViewPresetFilter{Archived: config.ArchivedOnly},
+		}
+	default:
+		if p, ok := config.ShippedWorkViewPreset("all"); ok {
+			return p
+		}
+	}
+	return config.WorkViewPreset{}
 }
 
 // dispatchVerb runs the verb the menu (or a flat shortcut) selected, keyed by

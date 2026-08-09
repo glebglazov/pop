@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/glebglazov/pop/config"
@@ -48,16 +49,21 @@ var workLogCmd = &cobra.Command{
 	RunE:  runWorkLog,
 }
 
-// workStatusIncludeDone backs the `--include-done` flag on `pop work status`.
-// The Work dashboard owns the same flag on `pop work dashboard`.
+// workStatusIncludeDone backs the deprecated `--include-done` flag on
+// `pop work status` — an alias for `--preset all` (ADR-0197).
 var workStatusIncludeDone bool
+
+// workStatusPreset backs the `--preset` flag on `pop work status`. Empty means
+// the configured default preset.
+var workStatusPreset string
 
 func init() {
 	workCmd.AddCommand(workDaemonCmd)
 	workCmd.AddCommand(workStatusCmd)
 	workCmd.AddCommand(workLogCmd)
 
-	workStatusCmd.Flags().BoolVar(&workStatusIncludeDone, "include-done", false, "include DONE task sets (hidden by default)")
+	workStatusCmd.Flags().StringVar(&workStatusPreset, "preset", "", "Work view preset name (default: first configured preset)")
+	workStatusCmd.Flags().BoolVar(&workStatusIncludeDone, "include-done", false, "deprecated: alias for --preset all")
 }
 
 var (
@@ -116,7 +122,13 @@ func runWorkDaemon(cmd *cobra.Command, args []string) error {
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
 
-	err = supervisorRun(cmdLayerDeps().queueDeps(), resolved.PollInterval, os.Stdout, sigCh)
+	d := cmdLayerDeps().queueDeps()
+	// The daemon's run baseline is the shipped active definition on every
+	// machine — never the human's configured default (ADR-0197).
+	if p, ok := config.ShippedWorkViewPreset("active"); ok {
+		d.ViewPreset = p
+	}
+	err = supervisorRun(d, resolved.PollInterval, os.Stdout, sigCh)
 	if err != nil {
 		var exitErr *tasks.ExitError
 		if errors.As(err, &exitErr) {
@@ -139,9 +151,13 @@ func runWorkStatus(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	preset, err := resolveWorkStatusPreset(cfg, workStatusPreset, workStatusIncludeDone, cmd.ErrOrStderr())
+	if err != nil {
+		return err
+	}
 	d := cmdLayerDeps().queueDeps()
 	d.LoadConfig = workConfigLoad
-	d.IncludeDone = workStatusIncludeDone
+	d.ViewPreset = preset
 	// The verb is one load across two builders — the status snapshot and the two
 	// tables — so the git memo is derived once here and threaded through both.
 	// Each builder memoizes for itself as well; nesting is free, and what it buys
@@ -162,6 +178,41 @@ func runWorkStatus(cmd *cobra.Command, args []string) error {
 	}
 	dashboard.RenderStatus(cmdOut(cmd), snap, tables)
 	return nil
+}
+
+// resolveWorkStatusPreset picks the Work view preset for `pop work status`
+// (ADR-0197): `--include-done` is a deprecated alias for `--preset all`; an
+// explicit `--preset` names an entry in the resolved roster; otherwise the
+// configured default (first entry) is used.
+func resolveWorkStatusPreset(cfg *config.Config, presetName string, includeDone bool, warn io.Writer) (config.WorkViewPreset, error) {
+	if includeDone {
+		if warn != nil {
+			fmt.Fprintln(warn, "warning: --include-done is deprecated; use --preset all")
+		}
+		if p, ok := config.ShippedWorkViewPreset("all"); ok {
+			return p, nil
+		}
+		if cfg != nil {
+			if p, ok := cfg.WorkViewPresetNamed("all"); ok {
+				return p, nil
+			}
+		}
+		return config.WorkViewPreset{Name: "all", WorkViewPresetFilter: config.WorkViewPresetFilter{Archived: config.ArchivedInclude}}, nil
+	}
+	if name := strings.TrimSpace(presetName); name != "" {
+		if cfg == nil {
+			cfg = &config.Config{}
+		}
+		if p, ok := cfg.WorkViewPresetNamed(name); ok {
+			return p, nil
+		}
+		names := cfg.WorkViewPresetNames()
+		return config.WorkViewPreset{}, fmt.Errorf("unknown work view preset %q (available: %s)", name, strings.Join(names, ", "))
+	}
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+	return cfg.DefaultWorkViewPreset(), nil
 }
 
 func runWorkLog(cmd *cobra.Command, args []string) error {

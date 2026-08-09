@@ -53,11 +53,10 @@ poll_interval = "2s"
 	}
 }
 
-// TestWorkReadSurfacesThreadIncludeDone pins the ADR-0121 Done-inclusion flag
-// wiring: `--include-done` on both `pop work status` and `pop work dashboard`
-// sets the single inclusion flag (drain.Deps.IncludeDone) the shared row layer
-// reads, and it defaults off (DONE hidden).
-func TestWorkReadSurfacesThreadIncludeDone(t *testing.T) {
+// TestWorkReadSurfacesThreadViewPreset pins ADR-0197 preset wiring: default
+// surfaces get the configured default preset, and `--include-done` seeds the
+// shipped all preset on both `pop work status` and `pop work dashboard`.
+func TestWorkReadSurfacesThreadViewPreset(t *testing.T) {
 	path := writeDaemonConfig(t, "")
 
 	oldCfgFile := cfgFile
@@ -67,6 +66,7 @@ func TestWorkReadSurfacesThreadIncludeDone(t *testing.T) {
 	oldDash := workRunDashboard
 	oldStatusInc := workStatusIncludeDone
 	oldDashInc := workDashboardIncludeDone
+	oldStatusPreset := workStatusPreset
 	defer func() {
 		cfgFile = oldCfgFile
 		workConfigLoad = oldLoad
@@ -75,6 +75,7 @@ func TestWorkReadSurfacesThreadIncludeDone(t *testing.T) {
 		workRunDashboard = oldDash
 		workStatusIncludeDone = oldStatusInc
 		workDashboardIncludeDone = oldDashInc
+		workStatusPreset = oldStatusPreset
 	}()
 
 	setCmdLayerDeps(t, newTestCmdDeps(t, "", t.TempDir(), ""))
@@ -82,9 +83,9 @@ func TestWorkReadSurfacesThreadIncludeDone(t *testing.T) {
 	cfgFile = path
 	workConfigLoad = func(string) (*config.Config, error) { return &config.Config{}, nil }
 
-	var statusInclude, dashInclude bool
+	var statusPreset, dashPreset string
 	workBuildStatus = func(d *drain.Deps, _ *config.Config) (drain.StatusSnapshot, error) {
-		statusInclude = d.IncludeDone
+		statusPreset = d.ViewPreset.Name
 		return drain.StatusSnapshot{Tasks: cmdLayerDeps().tasksDeps()}, nil
 	}
 	// `pop work status` renders the dashboard pages' rows as its tables
@@ -93,24 +94,25 @@ func TestWorkReadSurfacesThreadIncludeDone(t *testing.T) {
 		return dashboard.StatusTables{}, nil
 	}
 	workRunDashboard = func(d *drain.Deps, _ *config.Config) (string, error) {
-		dashInclude = d.IncludeDone
+		dashPreset = d.ViewPreset.Name
 		return "", nil
 	}
 
-	// Default: both surfaces hide DONE.
+	// Default: both surfaces use the configured default (shipped active).
 	workStatusIncludeDone = false
 	workDashboardIncludeDone = false
+	workStatusPreset = ""
 	if err := runWorkStatus(workStatusCmd, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := runWorkDashboard(workDashboardCmd, nil); err != nil {
 		t.Fatal(err)
 	}
-	if statusInclude || dashInclude {
-		t.Fatalf("default IncludeDone: status=%v dashboard=%v, want both false", statusInclude, dashInclude)
+	if statusPreset != "active" || dashPreset != "active" {
+		t.Fatalf("default ViewPreset: status=%q dashboard=%q, want both active", statusPreset, dashPreset)
 	}
 
-	// --include-done: both surfaces set the inclusion flag.
+	// --include-done: both surfaces seed the all preset.
 	workStatusIncludeDone = true
 	workDashboardIncludeDone = true
 	if err := runWorkStatus(workStatusCmd, nil); err != nil {
@@ -119,8 +121,18 @@ func TestWorkReadSurfacesThreadIncludeDone(t *testing.T) {
 	if err := runWorkDashboard(workDashboardCmd, nil); err != nil {
 		t.Fatal(err)
 	}
-	if !statusInclude || !dashInclude {
-		t.Fatalf("--include-done IncludeDone: status=%v dashboard=%v, want both true", statusInclude, dashInclude)
+	if statusPreset != "all" || dashPreset != "all" {
+		t.Fatalf("--include-done ViewPreset: status=%q dashboard=%q, want both all", statusPreset, dashPreset)
+	}
+
+	// --preset unfolded on status.
+	workStatusIncludeDone = false
+	workStatusPreset = "unfolded"
+	if err := runWorkStatus(workStatusCmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	if statusPreset != "unfolded" {
+		t.Fatalf("--preset unfolded ViewPreset = %q, want unfolded", statusPreset)
 	}
 }
 
@@ -133,10 +145,71 @@ func TestWorkReadSurfacesRegisterIncludeDoneFlag(t *testing.T) {
 	} else if f.DefValue != "false" {
 		t.Fatalf("work status --include-done default = %q, want false", f.DefValue)
 	}
+	if f := workStatusCmd.Flags().Lookup("preset"); f == nil {
+		t.Fatal("work status missing --preset flag")
+	}
 	if f := workDashboardCmd.Flags().Lookup("include-done"); f == nil {
 		t.Fatal("work dashboard missing --include-done flag")
 	} else if f.DefValue != "false" {
 		t.Fatalf("work dashboard --include-done default = %q, want false", f.DefValue)
+	}
+}
+
+func TestWorkStatusUnknownPresetRefused(t *testing.T) {
+	path := writeDaemonConfig(t, "")
+	oldCfgFile := cfgFile
+	oldLoad := workConfigLoad
+	oldPreset := workStatusPreset
+	oldInc := workStatusIncludeDone
+	defer func() {
+		cfgFile = oldCfgFile
+		workConfigLoad = oldLoad
+		workStatusPreset = oldPreset
+		workStatusIncludeDone = oldInc
+	}()
+	cfgFile = path
+	workConfigLoad = func(string) (*config.Config, error) { return &config.Config{}, nil }
+	workStatusPreset = "nope"
+	workStatusIncludeDone = false
+	err := runWorkStatus(workStatusCmd, nil)
+	if err == nil {
+		t.Fatal("unknown preset must be refused")
+	}
+	if !strings.Contains(err.Error(), `unknown work view preset "nope"`) {
+		t.Fatalf("error = %q, want unknown preset message", err)
+	}
+	for _, name := range []string{"active", "unfolded", "recent-7d", "recent-30d", "all"} {
+		if !strings.Contains(err.Error(), name) {
+			t.Fatalf("error missing available preset %q: %v", name, err)
+		}
+	}
+}
+
+func TestWorkDaemonUsesShippedActivePreset(t *testing.T) {
+	path := writeDaemonConfig(t, `
+[work.daemon]
+poll_interval = "2s"
+
+[[work.dashboard.tasks.presets]]
+name = "custom-default"
+`)
+	oldCfgFile := cfgFile
+	oldRun := supervisorRun
+	defer func() {
+		cfgFile = oldCfgFile
+		supervisorRun = oldRun
+	}()
+	cfgFile = path
+	var got string
+	supervisorRun = func(d *drain.Deps, interval time.Duration, out io.Writer, sigCh <-chan os.Signal) error {
+		got = d.ViewPreset.Name
+		return nil
+	}
+	if err := runWorkDaemon(nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got != "active" {
+		t.Fatalf("daemon ViewPreset = %q, want shipped active", got)
 	}
 }
 

@@ -60,11 +60,12 @@ func (g *countingGit) forks() []string {
 }
 
 // TestFirstPaintForksUnderCeiling pins the first paint's git budget. The fixture
-// is the authoring machine in miniature: six registered sets, all DONE and so all
-// hidden by the default row filter, each bound to a checkout of its own — the
-// shape that made the overlay's two forks per checkout into twelve. The paint
-// renders no terminal row, so it must resolve no verdict and start no git process
-// at all.
+// is the authoring machine in miniature: six registered sets, all DONE, each
+// bound to a checkout of its own — the shape that made the overlay's two forks
+// per checkout into twelve. With a preset that hides every DONE row the paint
+// renders no terminal row, so it must resolve no verdict and start no git
+// process at all. (The shipped active preset would keep unfolded DONE visible;
+// this test isolates the narrowing budget, not the default roster.)
 func TestFirstPaintForksUnderCeiling(t *testing.T) {
 	repo, setID, _ := queuetest.SetupSpawnRepo(t, "2026-01-01-done-1", []queuetest.SpawnTask{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
@@ -75,6 +76,10 @@ func TestFirstPaintForksUnderCeiling(t *testing.T) {
 	cfg.Work = &config.WorkConfig{Verify: &config.VerifyConfig{Enabled: true}}
 	stems := registerDoneSets(t, repo, 6)
 	bindSetsToOwnCheckouts(t, d, repo, stems)
+	d.ViewPreset = config.WorkViewPreset{
+		Name: "_hide-done",
+		Hide: &config.WorkViewPresetFilter{Status: []string{"done"}},
+	}
 
 	counter := &countingGit{inner: d.Tasks.Git}
 	td := *d.Tasks
@@ -102,7 +107,7 @@ func TestFirstPaintForksUnderCeiling(t *testing.T) {
 	// the paint declined to resolve, and unless resolving them really costs. With the
 	// filter revealing them the same build lists all six — and pays per checkout for
 	// it, which is exactly the bill the narrowed paint does not receive.
-	d.IncludeDone = true
+	d.ViewPreset, _ = config.ShippedWorkViewPreset("all")
 	revealed, err := BuildPageSnapshot(d, cfg, PageWork)
 	if err != nil {
 		t.Fatalf("BuildPageSnapshot(include done): %v", err)

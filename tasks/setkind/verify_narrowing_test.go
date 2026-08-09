@@ -105,6 +105,12 @@ func containerByID(containers []work.Container, id string) *work.Container {
 func TestVerdictsResolveOnlyForRenderedRows(t *testing.T) {
 	enabled := &config.Config{Work: &config.WorkConfig{Verify: &config.VerifyConfig{Enabled: true}}}
 	d, forks, _ := newVerdictFixture(t)
+	// Hide every DONE row so the narrowing budget is measurable; the shipped
+	// active preset would keep these bound DONE sets visible (ADR-0197).
+	d.ViewPreset = config.WorkViewPreset{
+		Name: "_hide-done",
+		Hide: &config.WorkViewPresetFilter{Status: []string{"done"}},
+	}
 
 	got, err := rowsForStatic(d, enabled, verdictFixtureGroup())
 	if err != nil {
@@ -128,14 +134,18 @@ func TestVerdictsResolveOnlyForRenderedRows(t *testing.T) {
 func TestRevealingDoneRowsResolvesTheirVerdicts(t *testing.T) {
 	enabled := &config.Config{Work: &config.WorkConfig{Verify: &config.VerifyConfig{Enabled: true}}}
 	d, forks, refreshOf := newVerdictFixture(t)
+	d.ViewPreset = config.WorkViewPreset{
+		Name: "_hide-done",
+		Hide: &config.WorkViewPresetFilter{Status: []string{"done"}},
+	}
 
 	if _, err := rowsForStatic(d, enabled, verdictFixtureGroup()); err != nil {
 		t.Fatal(err)
 	}
 	before := *forks
 
-	// The toggle's reload: the same deps with the session flag flipped.
-	d.IncludeDone = true
+	// The toggle's reload: the same deps with the session preset flipped to all.
+	d.ViewPreset, _ = config.ShippedWorkViewPreset("all")
 	got, err := rowsForStatic(d, enabled, verdictFixtureGroup())
 	if err != nil {
 		t.Fatal(err)
@@ -189,6 +199,10 @@ func TestRevealingDoneRowsResolvesTheirVerdicts(t *testing.T) {
 func TestKindSummaryAggregatesOnlyResolvedRows(t *testing.T) {
 	enabled := &config.Config{Work: &config.WorkConfig{Verify: &config.VerifyConfig{Enabled: true}}}
 	d, _, _ := newVerdictFixture(t)
+	d.ViewPreset = config.WorkViewPreset{
+		Name: "_hide-done",
+		Hide: &config.WorkViewPresetFilter{Status: []string{"done"}},
+	}
 
 	got, err := rowsForStatic(d, enabled, verdictFixtureGroup())
 	if err != nil {

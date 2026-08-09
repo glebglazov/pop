@@ -43,16 +43,10 @@ type Deps struct {
 	// with its dependencies captured, so the config it reads is the caller's.
 	Config *config.Config
 
-	// IncludeDone is the Done-inclusion view flag (ADR-0121): DONE sets are hidden
-	// unless this is true.
-	IncludeDone bool
-
-	// IncludeArchived is the show-archived view flag (ADR-0186): archived sets are
-	// hidden unless this is true, and when it is they are listed *beside* the
-	// active ones rather than instead of them. It selects which refresh the default
-	// seam runs, so a caller that injects its own Refresh answers for archived rows
-	// itself.
-	IncludeArchived bool
+	// ViewPreset is the Work view preset that selects which rows this pass
+	// renders (ADR-0197). Empty falls back to the shipped active preset at
+	// evaluation time.
+	ViewPreset config.WorkViewPreset
 
 	// Groups resolves the repository groups to scan for task sets. Defaults to
 	// repogroup.Resolve over Tasks and Project — injectable because a test wants to
@@ -293,6 +287,15 @@ func containersForGroup(d *Deps, cfg *config.Config, g repogroup.Group) ([]work.
 // one part of a group's load that runs beside the other groups' (ADR-0189); what
 // is left touches the store and so runs serially, one group after another.
 func containersFromGroup(d *Deps, cfg *config.Config, snap *snapshot, delays []time.Duration, now time.Time, g repogroup.Group, refresh *tasks.RefreshResult, prepared *tasks.PreparedRefresh) ([]work.Container, error) {
+	// Stamp Bound from the pass's binding snapshot before preset evaluation so
+	// Unfolded (and the active preset's hide clause) see the same bound fact the
+	// container loop derives below (ADR-0197).
+	if refresh != nil {
+		for i := range refresh.Rows {
+			bnd, hasBinding := snap.bindingFor(g.RepoKey, refresh.Rows[i].ID)
+			refresh.Rows[i].Bound = hasBinding && strings.TrimSpace(bnd.RuntimePath) != ""
+		}
+	}
 	// The verdict overlay is narrowed to the rows this pass will render (ADR-0189),
 	// through the very predicate the container loop filters on below — so every
 	// container carries a resolved verdict and no aggregate over containers can mix

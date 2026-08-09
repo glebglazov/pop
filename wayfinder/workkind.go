@@ -88,9 +88,12 @@ type MapKindDeps struct {
 	// repogroup.Resolve over Wayfinder.Tasks and Project — injectable because a
 	// test wants to name the groups rather than lay out a machine.
 	Groups func() ([]repogroup.Group, error)
-	// IncludeArchived is the show-archived view flag (ADR-0186): archived Maps are
-	// hidden unless this is true.
-	IncludeArchived bool
+	// ViewPreset is the Work view preset that selects which Maps this pass
+	// renders (ADR-0197). Empty falls back to the shipped active preset.
+	ViewPreset config.WorkViewPreset
+	// Now returns the current time for created_within evaluation. Defaults to
+	// time.Now.
+	Now func() time.Time
 }
 
 // MapKind is the Map Work kind.
@@ -121,8 +124,8 @@ func (k *MapKind) ID() work.KindID { return ref.KindMap }
 // Load reads every Map still worth looking at, per repository group: active and
 // arrived. An arrived Map stays — it is the lineage view for the sets it spawned,
 // and Archive is the hide mechanism (ADR-0172). Abandoned and BROKEN Maps are
-// hidden, and archived ones are hidden unless the reader turned the show-archived
-// view on (ADR-0186).
+// hidden, and archived ones survive only when the active view preset admits them
+// (ADR-0197).
 func (k *MapKind) Load() ([]work.Container, error) {
 	groups, err := k.groups()
 	if err != nil {
@@ -161,7 +164,7 @@ func (k *MapKind) Load() ([]work.Container, error) {
 		// repository's Task storage, so the sets are read once for all of them.
 		sets := newSetStatusTable(k.d.Wayfinder, g.DefPath)
 		for _, m := range scans[i] {
-			if !visible(m, k.d.IncludeArchived) {
+			if !visible(m, k.d.viewPreset(), k.d.now()) {
 				continue
 			}
 			containers = append(containers, containerFor(g, m, sets.resolve(m.SpawnedSets)))
@@ -686,18 +689,39 @@ func sectionsFor(m Map, spawned []SpawnedSet) []work.Section {
 }
 
 // visible reports whether a Map should appear as a Work container (ADR-0130,
-// ADR-0172). includeArchived is the reader's show-archived view flag: an archived
-// Map is listed only when it is on, which is what makes unarchiving reachable from
-// the surface that offers it (ADR-0186). Abandoned and BROKEN Maps are hidden
-// either way — the flag is about filing, not about status.
-func visible(m Map, includeArchived bool) bool {
+// ADR-0172, ADR-0197). Abandoned and BROKEN Maps are hidden either way — the
+// preset is about filing and recency, not about status. Archived Maps survive
+// only when the preset's archived mode admits them.
+func visible(m Map, preset config.WorkViewPreset, now time.Time) bool {
 	if m.Broken {
 		return false
 	}
-	if m.Archived && !includeArchived {
+	if m.Status != MapActive && m.Status != MapArrived {
 		return false
 	}
-	return m.Status == MapActive || m.Status == MapArrived
+	return tasks.MatchesPreset(tasks.ViewFacts{
+		ID:       m.ID,
+		Status:   string(m.Status),
+		Archived: m.Archived,
+		Unfolded: false,
+	}, preset, now)
+}
+
+func (d *MapKindDeps) viewPreset() config.WorkViewPreset {
+	if d != nil && strings.TrimSpace(d.ViewPreset.Name) != "" {
+		return d.ViewPreset
+	}
+	if p, ok := config.ShippedWorkViewPreset("active"); ok {
+		return p
+	}
+	return config.WorkViewPreset{}
+}
+
+func (d *MapKindDeps) now() time.Time {
+	if d != nil && d.Now != nil {
+		return d.Now()
+	}
+	return time.Now()
 }
 
 // storageDirFor derives a Map container's Task-storage directory from the

@@ -102,7 +102,7 @@ func TestMapRowStatusRefusalSurfacesTheCorrective(t *testing.T) {
 // a fresh model starts off again.
 func TestDashboardFilterMenuShowArchivedToggle(t *testing.T) {
 	m := filterMenuTestModel()
-	if m.d.IncludeArchived {
+	if m.filterToggleOn(filterToggleShowArchived) {
 		t.Fatal("show archived must start off")
 	}
 
@@ -117,11 +117,11 @@ func TestDashboardFilterMenuShowArchivedToggle(t *testing.T) {
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	m = updated.(QueueDashboard)
-	if !m.d.IncludeArchived {
-		t.Fatal("toggling show archived did not set IncludeArchived")
+	if !m.filterToggleOn(filterToggleShowArchived) {
+		t.Fatal("toggling show archived did not engage an archived-admitting preset")
 	}
-	if m.d.IncludeDone {
-		t.Fatal("show archived flipped the show-done flag too")
+	if m.filterToggleOn(filterToggleShowDone) {
+		t.Fatal("show archived flipped the show-done filter too")
 	}
 	if cmd == nil {
 		t.Fatal("toggling show archived must trigger a rebuild")
@@ -135,12 +135,12 @@ func TestDashboardFilterMenuShowArchivedToggle(t *testing.T) {
 
 	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	m = updated.(QueueDashboard)
-	if m.d.IncludeArchived {
+	if m.filterToggleOn(filterToggleShowArchived) {
 		t.Fatal("second press did not turn show archived back off")
 	}
 
-	// Nothing is persisted: the flag lives on the model's deps for the session.
-	if fresh := filterMenuTestModel(); fresh.d.IncludeArchived {
+	// Nothing is persisted: the preset lives on the model's deps for the session.
+	if fresh := filterMenuTestModel(); fresh.filterToggleOn(filterToggleShowArchived) {
 		t.Fatal("a fresh dashboard inherited a show-archived state")
 	}
 }

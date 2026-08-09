@@ -45,15 +45,15 @@ var workDashboardCmd = &cobra.Command{
 	RunE:  runWorkDashboard,
 }
 
-// workDashboardIncludeDone backs the `--include-done` flag on the Work
-// dashboard read surface (ADR-0121): off by default hides every DONE Task set.
+// workDashboardIncludeDone backs the deprecated `--include-done` flag on the
+// Work dashboard — an alias for seeding the `all` view preset (ADR-0197).
 var workDashboardIncludeDone bool
 
 func init() {
 	rootCmd.AddCommand(workCmd)
 	workCmd.AddCommand(workShowPathCmd)
 	workCmd.AddCommand(workDashboardCmd)
-	workDashboardCmd.Flags().BoolVar(&workDashboardIncludeDone, "include-done", false, "include DONE task sets (hidden by default)")
+	workDashboardCmd.Flags().BoolVar(&workDashboardIncludeDone, "include-done", false, "deprecated: alias for seeding the all view preset")
 }
 
 func runWorkShowPath(cmd *cobra.Command, args []string) {
@@ -81,7 +81,11 @@ func runWorkDashboard(cmd *cobra.Command, args []string) error {
 	}
 	d := cmdLayerDeps().queueDeps()
 	d.LoadConfig = workConfigLoad
-	d.IncludeDone = workDashboardIncludeDone
+	preset, err := resolveWorkStatusPreset(cfg, "", workDashboardIncludeDone, cmd.ErrOrStderr())
+	if err != nil {
+		return err
+	}
+	d.ViewPreset = preset
 	checkout, err := workRunDashboard(d, cfg)
 	if err != nil {
 		return err

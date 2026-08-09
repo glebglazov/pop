@@ -7,19 +7,12 @@ import (
 )
 
 // The Task-set kind's half of the Work row derivation. These read this kind's
-// status vocabulary — the Done-inclusion filter, the ADR-0121 membership tiers,
-// status bands and intra-project status order, and the STATUS-cell composition —
-// so they live with the kind that owns those statuses rather than in the `work`
-// seam, which names no kind's statuses. The Work-kind adapter in tasks/setkind
-// orders its containers through WorkRowLess, so the seam's ordering and the
-// legacy comparator are one comparator, not two.
-
-// ShowRow is the shared Done-inclusion row filter (ADR-0121). Every read surface
-// hides DONE sets by default and reveals them under `--include-done`; nothing
-// else is filtered here.
-func ShowRow(row Row, includeDone bool) bool {
-	return includeDone || row.Status != StatusDone
-}
+// status vocabulary — the Work view preset filter (ADR-0197), the ADR-0121
+// membership tiers, status bands and intra-project status order, and the
+// STATUS-cell composition — so they live with the kind that owns those statuses
+// rather than in the `work` seam, which names no kind's statuses. The Work-kind
+// adapter in tasks/setkind orders its containers through WorkRowLess, so the
+// seam's ordering and the legacy comparator are one comparator, not two.
 
 // Membership tiers float rows above the whole status scheme (ADR-0121). A row
 // takes the first tier it qualifies for, so an orphaned + auto-drain set sorts

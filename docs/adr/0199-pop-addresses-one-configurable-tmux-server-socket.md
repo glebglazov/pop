@@ -46,6 +46,16 @@ write.
    include is content pop reads from a repository, and a repository that could
    redirect the socket could start a server pop then treats as the user's.
 
+   **An unset key emits no `-L` flag at all** — not `-L default`. The two reach
+   the same server, but only the first does so by being the same command pop
+   already runs. Emitting `-L default` reaches it through a chain of reasoning
+   (the default socket name happens to be `default`; `-L` resolves through
+   `$TMUX_TMPDIR`-or-`/tmp` identically; the zero value of a Go string is mapped
+   to the right constant), and every link is somewhere an upgrade can silently
+   move an existing user onto a second server. No flag has no links. This also
+   leaves room to accept a full socket path (`-S`) later, which `-L` cannot
+   express.
+
 2. **`InTmux()` is replaced by a socket-identity comparison.** `$TMUX` is
    `<socket-path>,<pid>,<session>`; the predicate is whether its first field
    matches the configured socket. This is load-bearing, not cosmetic — a bare
@@ -99,11 +109,19 @@ write.
    upgrade source pop's bindings on top of their config without asking, which is
    the behaviour this decision rejected under *Considered Options*.
 
-8. **The server is lazy and immortal.** Any pop command that needs tmux starts
-   the server if absent; pop never reaps it. Detached unattended work —
-   supervisor drains, fan-out panes, background agent sessions — means "no
-   sessions left" and "nothing running" are different questions, and a reaper
-   would race the daemon.
+8. **The server is lazy and immortal, and only session-creating commands start
+   it.** A command that needs a *session* — attach, spawn, drain — starts the
+   server if absent. A command that only *reads* — the Work dashboard, status,
+   the pickers — must never ensure one: it reports no sessions and creates
+   nothing. tmux itself already behaves this way (`list-sessions` against an
+   absent server errors rather than starting one), so the phantom server can only
+   come from pop's own ensure logic. Without this, a first-time user whose first
+   command happens to be `pop work dashboard` gets a tmux server started,
+   configured, stamped and kept alive forever solely to render an empty table.
+
+   Pop never reaps. Detached unattended work — supervisor drains, fan-out panes,
+   background agent sessions — means "no sessions left" and "nothing running" are
+   different questions, and a reaper would race the daemon.
 
 9. **A user with their own tmux config is told what they are missing**, via a
    Project readiness finding and a command that prints pop's binding fragment
@@ -122,6 +140,16 @@ write.
 - **An adaptive socket** (pop's own, but adopt the ambient server when `$TMUX`
   is set) — rejected: it makes a command's target depend on where it was typed,
   so the same command addresses two different session universes.
+- **Detecting whether a `default` server exists and using it, else `pop`** —
+  rejected, and redundant once the default is `default`: nobody reaches the `pop`
+  socket without typing it. Its failure is a reboot boundary. No server exists
+  after boot, so a pop command that runs before the user opens tmux — a routine,
+  the supervisor, or plain curiosity — finds no `default` and starts building on
+  `pop`; the user then opens tmux, creating `default`, and pop's sessions are
+  stranded in a server their prefix key cannot reach. "A default server exists
+  right now" means only "someone ran tmux since boot", which is not a statement
+  of intent. It also costs decision 2 its meaning: an identity comparison against
+  a socket chosen per-process answers differently at different times.
 - **An `integrate` component installing the keybindings** into the user's
   `tmux.conf` (ADR-0010's shape) — rejected for now. Deferred rather than
   refused; it remains the only path that reaches a server pop did not start,

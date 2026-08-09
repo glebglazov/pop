@@ -36,15 +36,15 @@ func (d *Deps) config() *config.Config {
 	return nil
 }
 
-// refresh resolves the Refresh seam, defaulting to tasks.RefreshWith — or, with
-// the show-archived flag on, to the refresh that returns archived and active sets
-// together (ADR-0186).
+// refresh resolves the Refresh seam, defaulting to tasks.RefreshWith — or, when
+// the active view preset wants archived rows, to the refresh that returns
+// archived and active sets together (ADR-0197).
 func (d *Deps) refresh(defPath string) (*tasks.RefreshResult, error) {
 	if d.Refresh != nil {
 		return d.Refresh(defPath)
 	}
 	statePath := tasks.StatePathFor(defPath)
-	if d.IncludeArchived {
+	if tasks.PresetWantsArchived(d.viewPreset()) {
 		return tasks.RefreshIncludingArchivedWith(d.Tasks, defPath, statePath)
 	}
 	return tasks.RefreshWith(d.Tasks, defPath, statePath)
@@ -84,7 +84,7 @@ func (d *Deps) refreshPrepared(prep *tasks.PreparedRefresh, defPath string) (*ta
 	if d.Refresh != nil {
 		return d.Refresh(defPath)
 	}
-	if d.IncludeArchived {
+	if tasks.PresetWantsArchived(d.viewPreset()) {
 		return prep.RefreshIncludingArchived(d.Tasks)
 	}
 	return prep.Refresh(d.Tasks)
@@ -100,20 +100,29 @@ func (d *Deps) worktreeIntentsFor(prep *tasks.PreparedRefresh, defPath string) m
 	return worktreeIntents(d, defPath)
 }
 
-// rendersRow reports whether a refresh row survives this pass's row filter. It is
-// the single answer both the verify-overlay narrowing and the container loop read,
-// which is what makes "rendered" and "resolved" one set of rows (ADR-0189).
-//
-// An archived row is on screen because the operator turned archived rows on; the
-// Done-hiding rule (ADR-0121) gets no second veto over it, or the toggle would
-// reveal almost nothing — a set is usually archived because it is done.
+// rendersRow reports whether a refresh row survives this pass's view preset. It
+// is the single answer both the verify-overlay narrowing and the container loop
+// read, which is what makes "rendered" and "resolved" one set of rows
+// (ADR-0189).
 //
 // The two readings agree even though the overlay sits between them: the overlay
 // moves only a terminal row's status, and only away from DONE, so a row this
 // predicate admits still passes after the overlay and a DONE row it rejects was
 // never resolved and so still reads DONE.
 func (d *Deps) rendersRow(row tasks.Row) bool {
-	return row.Archived || tasks.ShowRow(row, d.IncludeDone)
+	return tasks.MatchesPreset(tasks.RowViewFacts(row), d.viewPreset(), d.now())
+}
+
+// viewPreset returns the Work view preset this pass evaluates, falling back to
+// the shipped active definition when unset (ADR-0197).
+func (d *Deps) viewPreset() config.WorkViewPreset {
+	if d != nil && strings.TrimSpace(d.ViewPreset.Name) != "" {
+		return d.ViewPreset
+	}
+	if p, ok := config.ShippedWorkViewPreset("active"); ok {
+		return p
+	}
+	return config.WorkViewPreset{}
 }
 
 // liveDrains resolves the LiveDrains seam, defaulting to tasks.LiveRunningDrains.
