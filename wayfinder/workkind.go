@@ -41,6 +41,11 @@ const (
 	// followed by more triage, whereas an assist pane is one session you asked for
 	// in order to go talk to it (ADR-0184).
 	VerbAssist work.Verb = "assist-map"
+	// VerbVisit takes the operator to the pane already grilling a claimed ticket.
+	// A claim lives exactly as long as its owner's grilling process (ADR-0193), so
+	// a claimed ticket is one with a live pane and nothing to spawn — which is also
+	// why it has no staying twin: there is no act to perform in place.
+	VerbVisit work.Verb = "visit-ticket"
 )
 
 // The Map's status verbs: the four writes that decide whether a Map row is on the
@@ -253,13 +258,22 @@ func (k *MapKind) StatusActions(c work.Container) []work.Action {
 // staying — when it is on the frontier, since a resolved or blocked ticket cannot
 // be worked, and copy-name. Fanning out is a container act and is offered nowhere
 // else.
+//
+// A claimed ticket takes `I` too, and means the other half of the same wish. It
+// is off the frontier and cannot be worked, but the claim says a pane is grilling
+// it right now, and going to that conversation is the one thing the operator can
+// want from the row. Without this the row offers copy-name alone, and a Map's
+// live sessions are reachable from the dashboard only by first killing them.
 func (k *MapKind) ItemActions(c work.Container, item work.Item) []work.Action {
 	var actions []work.Action
-	if item.Status == string(TicketOpen) && !item.Blocked {
+	switch {
+	case item.Status == string(TicketOpen) && !item.Blocked:
 		actions = append(actions,
 			work.Action{Verb: VerbWork, Key: "I", Label: "work ticket and go"},
 			work.Action{Verb: VerbWorkHere, Key: "i", Label: "work ticket"},
 		)
+	case item.Status == string(TicketClaimed):
+		actions = append(actions, work.Action{Verb: VerbVisit, Key: "I", Label: "go to its grilling pane"})
 	}
 	return append(actions, work.Action{Verb: work.VerbCopyName, Key: "y", Label: "copy name"})
 }
@@ -291,6 +305,11 @@ func (k *MapKind) Perform(c work.Container, item *work.Item, verb work.Verb) (wo
 			ticketID = item.ID
 		}
 		return k.workTicket(c, ticketID, verb == VerbWork)
+	case VerbVisit:
+		if item == nil {
+			return work.Outcome{}, fmt.Errorf("wayfinder: %s names no ticket to visit", verb)
+		}
+		return k.visitTicket(c, item.ID)
 	case VerbFanOut, VerbFanOutHere:
 		return k.fanOutFrontier(c, verb == VerbFanOut)
 	case VerbAssist:
@@ -377,7 +396,41 @@ func (k *MapKind) workTicket(c work.Container, ticketID string, focus bool) (wor
 	if note := reclaimNote(spawned.Claim); note != "" {
 		message += "; " + note
 	}
-	return spawnOutcome(spawned.Pane.PaneID, checkout, message, focus), nil
+	return paneOutcome(spawned.Pane.PaneID, checkout, message, focus), nil
+}
+
+// visitTicket takes the operator to the pane already grilling a claimed ticket.
+// It is the read-only twin of workTicket: no session ensured, no pane opened, no
+// keys sent and no claim touched, because the claim it reads is the assertion
+// that all of that has already happened and is still running.
+//
+// The pane comes out of the claim owner rather than out of a tmux lookup by
+// ticket tag. The owner is what liveness was decided on when the row was drawn,
+// so visiting it can never land the operator in a pane that is not the one
+// holding the ticket.
+func (k *MapKind) visitTicket(c work.Container, ticketID string) (work.Outcome, error) {
+	target, _, checkout, err := k.resolveMapForSpawn(c)
+	if err != nil {
+		return work.Outcome{}, err
+	}
+	ticket, ok := findTicket(target.Tickets, ticketID)
+	if !ok {
+		return work.Outcome{}, fmt.Errorf("wayfinder: map %q has no ticket %q", target.ID, ticketID)
+	}
+	if ticket.Status != TicketClaimed {
+		return work.Outcome{}, fmt.Errorf("wayfinder: ticket %s of map %q is %s, not claimed — nothing is grilling it",
+			ticket.ID, target.ID, ticket.Status)
+	}
+	paneID, _, isPane := parsePaneOwner(ticket.ClaimOwner)
+	if !isPane {
+		// A claim taken by a bare process rather than a pane — a command line's own
+		// claim — is held by something with no window to visit. Naming the owner is
+		// the only useful answer, since it is what the human has to go find.
+		return work.Outcome{}, fmt.Errorf("wayfinder: ticket %s of map %q is claimed by %s, which is not a pane to go to",
+			ticket.ID, target.ID, ticket.ClaimOwner)
+	}
+	message := fmt.Sprintf("going to %s/%s in %s", target.ID, ticket.ID, paneID)
+	return paneOutcome(paneID, checkout, message, true), nil
 }
 
 // reclaimNote is the one thing a takeover carries that the human can read
@@ -417,7 +470,7 @@ func (k *MapKind) fanOutFrontier(c work.Container, focus bool) (work.Outcome, er
 	// The first spawned pane is the frontier's first ticket: fanning out lands the
 	// operator at the head of the work it just made, not on whichever pane the
 	// window happened to leave active.
-	return spawnOutcome(out.Spawned[0].Pane.PaneID, checkout, message, focus), nil
+	return paneOutcome(out.Spawned[0].Pane.PaneID, checkout, message, focus), nil
 }
 
 // assistMap opens the Map's own attended session and hands it off. It reads no
@@ -438,10 +491,10 @@ func (k *MapKind) assistMap(c work.Container) (work.Outcome, error) {
 		verb = "returning to the assist session for"
 	}
 	message := fmt.Sprintf("%s %s in %s", verb, target.ID, pane.Session.Name)
-	return spawnOutcome(pane.PaneID, checkout, message, true), nil
+	return paneOutcome(pane.PaneID, checkout, message, true), nil
 }
 
-// spawnOutcome is the fork the case rule turns on: a focusing verb hands the
+// paneOutcome is the fork the case rule turns on: a focusing verb hands the
 // pane off, a staying one reports the same sentence and leaves the operator
 // where they were.
 //
@@ -450,7 +503,7 @@ func (k *MapKind) assistMap(c work.Container) (work.Outcome, error) {
 // handoff switches the client and then leaves it on whichever pane was last
 // active — the ticket the operator asked for stays unvisited, and a reused pane,
 // which is sent no keys, shows no sign of having been asked for at all.
-func spawnOutcome(paneID, checkout, message string, focus bool) work.Outcome {
+func paneOutcome(paneID, checkout, message string, focus bool) work.Outcome {
 	if !focus {
 		return work.Outcome{Kind: work.OutcomeMessage, Message: message}
 	}

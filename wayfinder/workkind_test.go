@@ -273,3 +273,72 @@ func TestMapKindWorkVerbOpensTheGrillingPane(t *testing.T) {
 		}
 	}
 }
+
+// TestMapKindClaimedTicketIsVisitable drives the whole path a live grilling
+// session leaves behind: work a ticket, and the row it becomes must lead back to
+// the pane doing the work. A claim lives exactly as long as its owner's process
+// (ADR-0193), so a claimed ticket is off the frontier and unworkable — before
+// this verb its row offered copy-name alone, and the session grilling it was
+// reachable from the dashboard only by killing it.
+func TestMapKindClaimedTicketIsVisitable(t *testing.T) {
+	k, _ := mapKindFixture(t)
+	fake := &tmuxtest.Fake{}
+	k.d.Wayfinder.Tmux = fake
+	k.d.Wayfinder.Trunk = func() (string, error) { return "/repo/trunk", nil }
+
+	activeMap := func() work.Container {
+		t.Helper()
+		containers, err := k.Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range containers {
+			if c.ID == "2026-07-01-active" {
+				return c
+			}
+		}
+		t.Fatal("the active map went missing")
+		return work.Container{}
+	}
+
+	if _, err := k.Perform(activeMap(), nil, VerbWork); err != nil {
+		t.Fatalf("work verb: %v", err)
+	}
+	pane := fake.Windows[MapSessionName("2026-07-01-active")]["map"][0]
+
+	active := activeMap()
+	ticket := active.Items[0]
+	if ticket.ID != "01" || ticket.Status != string(TicketClaimed) {
+		t.Fatalf("ticket after working it = %+v, want 01 claimed", ticket)
+	}
+	verbs := []work.Verb{VerbVisit, work.VerbCopyName}
+	var got []work.Verb
+	for _, a := range k.ItemActions(active, ticket) {
+		got = append(got, a.Verb)
+	}
+	if !slices.Equal(got, verbs) {
+		t.Fatalf("claimed ticket actions = %v, want %v", got, verbs)
+	}
+
+	out, err := k.Perform(active, &ticket, VerbVisit)
+	if err != nil {
+		t.Fatalf("visit verb: %v", err)
+	}
+	if out.Kind != work.OutcomeHandoff || out.Handoff.Target != pane {
+		t.Fatalf("outcome = %+v, want a handoff to the grilling pane %q", out, pane)
+	}
+	// Visiting is navigation: the pane already grilling the ticket is the whole
+	// answer, so nothing is split beside it and nothing is typed into it.
+	if panes := fake.Windows[MapSessionName("2026-07-01-active")]["map"]; len(panes) != 1 {
+		t.Fatalf("panes after a visit = %v, want the one pane the work verb opened", panes)
+	}
+	if sent := fake.SentCommands[pane]; len(sent) != 1 {
+		t.Fatalf("keys sent to the pane = %v, want only the spawn's own command", sent)
+	}
+
+	// The ticket the operator can still work is the one nothing holds, and a
+	// resolved or blocked ticket remains a dead row.
+	if _, err := k.Perform(active, &active.Items[1], VerbVisit); err == nil {
+		t.Fatal("visiting an unclaimed ticket should be refused")
+	}
+}
