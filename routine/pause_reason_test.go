@@ -1,7 +1,6 @@
 package routine
 
 import (
-	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -207,14 +206,13 @@ func TestDashboardIdleStatusRendersReason(t *testing.T) {
 }
 
 func TestRefineMenuHeaderShowsPauseReason(t *testing.T) {
-	var out bytes.Buffer
 	r := &Routine{
 		ID:       "daily",
 		Manifest: Manifest{Paused: true, PauseReason: PauseReasonFailure, Schedule: "every 6h"},
 	}
-	renderRefineMenu(&out, "daily", r, "no runs yet")
-	if !strings.Contains(out.String(), "paused (failed)") {
-		t.Fatalf("refine header missing pause reason:\n%s", out.String())
+	spec := refineGateSpec("daily", r, "no runs yet")
+	if !strings.Contains(spec.Headline, "paused (failed)") {
+		t.Fatalf("refine header missing pause reason:\n%s", spec.Headline)
 	}
 }
 

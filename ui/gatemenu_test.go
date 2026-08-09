@@ -180,6 +180,89 @@ func TestGateMenuInvalidDigitIgnored(t *testing.T) {
 	}
 }
 
+func TestGateMenuViewGoldenRoutineRefine(t *testing.T) {
+	m := NewGateMenu(GateMenuSpec{
+		Headline: `Refine routine "gate" — paused, schedule "every 6h", no runs yet`,
+		Tone:     GateMenuToneDefault,
+		Items: []GateMenuItem{
+			{Key: "1", Label: "Agent session (default)", Default: true},
+			{Key: "2", Label: "Fire test run", Aliases: []string{"fire"}},
+			{Key: "3", Label: "View last report"},
+			{Key: "4", Label: "Edit prompt"},
+			{Key: "5", Label: "Edit schedule"},
+			{Key: "6", Label: "Resume routine & exit", Aliases: []string{"resume"}},
+			{Key: "0", Label: "Exit (stay paused)"},
+		},
+	})
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	got := StripANSI(m.ViewContent())
+	for _, want := range []string{
+		`Refine routine "gate"`,
+		"1. Agent session (default)",
+		"2. Fire test run",
+		"3. View last report",
+		"4. Edit prompt",
+		"5. Edit schedule",
+		"6. Resume routine & exit",
+		"0. Exit (stay paused)",
+		"enter select · digit jump",
+		"▸",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("view missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestGateMenuViewGoldenProjectRefine(t *testing.T) {
+	m := NewGateMenu(GateMenuSpec{
+		Headline: `Refine Project routine "project:audit" — manual-fire-only, no runs yet`,
+		Tone:     GateMenuToneDefault,
+		Items: []GateMenuItem{
+			{Key: "1", Label: "Agent session (default)", Default: true},
+			{Key: "2", Label: "Fire test run", Aliases: []string{"fire"}},
+			{Key: "3", Label: "View last report"},
+			{Key: "4", Label: "Edit prompt"},
+			{Key: "0", Label: "Exit"},
+		},
+	})
+	got := StripANSI(m.ViewContent())
+	for _, want := range []string{
+		`Refine Project routine "project:audit"`,
+		"manual-fire-only",
+		"1. Agent session (default)",
+		"2. Fire test run",
+		"4. Edit prompt",
+		"0. Exit",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("view missing %q:\n%s", want, got)
+		}
+	}
+	for _, absent := range []string{"Edit schedule", "Resume routine"} {
+		if strings.Contains(got, absent) {
+			t.Fatalf("project refine must not offer %q:\n%s", absent, got)
+		}
+	}
+}
+
+func TestGateMenuAliasSelectsItem(t *testing.T) {
+	m := NewGateMenu(GateMenuSpec{
+		Items: []GateMenuItem{
+			{Key: "1", Label: "Agent session", Default: true},
+			{Key: "2", Label: "Fire test run", Aliases: []string{"fire"}},
+			{Key: "0", Label: "Exit"},
+		},
+	})
+	_, cmd := m.Update(tea.KeyPressMsg{Text: "fire"})
+	if cmd == nil {
+		t.Fatal("alias should quit")
+	}
+	if m.Chosen() != "2" {
+		t.Fatalf("chosen = %q, want 2", m.Chosen())
+	}
+}
+
 func TestInvalidGateChoiceHint(t *testing.T) {
 	got := invalidGateChoiceHint([]GateMenuItem{
 		{Key: "1"}, {Key: "2"}, {Key: "3"}, {Key: "0"},

@@ -36,6 +36,10 @@ type GateMenuItem struct {
 	Details []string
 	// Default marks the Enter / empty-line choice.
 	Default bool
+	// Aliases are optional word forms accepted as the same choice (e.g. "fire"
+	// for key "2"). Matched case-insensitively on digit-jump and the non-TTY
+	// line path.
+	Aliases []string
 }
 
 // GateMenuSpec describes one inline gate menu frame.
@@ -166,6 +170,9 @@ func (m *GateMenu) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if idx := m.indexForKey(s); idx >= 0 {
 		return m.selectIndex(idx)
 	}
+	if idx := m.indexForAlias(s); idx >= 0 {
+		return m.selectIndex(idx)
+	}
 	return nil
 }
 
@@ -181,6 +188,17 @@ func (m *GateMenu) indexForKey(key string) int {
 	for i, it := range m.spec.Items {
 		if it.Key == key {
 			return i
+		}
+	}
+	return -1
+}
+
+func (m *GateMenu) indexForAlias(alias string) int {
+	for i, it := range m.spec.Items {
+		for _, a := range it.Aliases {
+			if strings.EqualFold(a, alias) {
+				return i
+			}
 		}
 	}
 	return -1
@@ -459,6 +477,9 @@ func runGateMenuLine(m *GateMenu, in io.Reader, out io.Writer, cfg GateMenuRunCo
 			if m.indexForKey("1") >= 0 {
 				choice = "1"
 			}
+		}
+		if idx := m.indexForAlias(choice); idx >= 0 {
+			choice = m.spec.Items[idx].Key
 		}
 		if m.indexForKey(choice) >= 0 {
 			return GateMenuResult{Key: choice}, nil

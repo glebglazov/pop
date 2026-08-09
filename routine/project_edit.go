@@ -109,11 +109,12 @@ func writeProjectRuntime(d *Deps, id string, agents []string, agentsSet bool, ef
 }
 
 // refineProjectRoutine runs the HITL refinement loop for a Project routine
-// (ADR-0138). Its gate mirrors the authored loop but drops the schedule-edit and
-// resume items — a Project routine is manual-fire-only and has no pause state —
-// and its authoring session runs in the checkout with a project-aware briefing
-// that states pop never commits. The loop is interactive-only; a non-interactive
-// call names the prompt path so the caller can edit it directly.
+// (ADR-0138). Its gate is the shared inline GateMenu (ADR-0196) mirroring the
+// authored loop but dropping the schedule-edit and resume items — a Project
+// routine is manual-fire-only and has no pause state — and its authoring session
+// runs in the checkout with a project-aware briefing that states pop never
+// commits. The loop is interactive-only; a non-interactive call names the
+// prompt path so the caller can edit it directly.
 func refineProjectRoutine(d *Deps, id, agentOverride string) error {
 	name := projectRoutineName(id)
 	pr, err := findProjectRoutine(d, name)
@@ -153,16 +154,14 @@ func refineProjectRoutine(d *Deps, id, agentOverride string) error {
 		if err != nil {
 			return err
 		}
-		renderProjectRefineMenu(out, name, lastRunSummary(d, storeID))
-		fmt.Fprintf(out, "Choose [1]: ")
-		answer, err := readRoutineGateLine(reader, out, "0")
+		choice, err := promptRoutineGateMenu(out, in, reader, projectRefineGateSpec(name, lastRunSummary(d, storeID)))
 		if err != nil {
 			return err
 		}
-		switch strings.ToLower(strings.TrimSpace(answer)) {
-		case "", "1":
+		switch choice {
+		case "1":
 			projectAuthoringSessionFromGate(d, out, pr, agentOverride)
-		case "2", "fire":
+		case "2":
 			fireFromGate(d, out, ProjectOrigin+name)
 		case "3":
 			viewLastReport(d, out, storeID, runsDir)
@@ -170,23 +169,11 @@ func refineProjectRoutine(d *Deps, id, agentOverride string) error {
 			if _, err := EditWith(d, ProjectOrigin+name, "", false); err != nil {
 				fmt.Fprintf(out, "Could not open the prompt: %v\n", err)
 			}
-		case "0", "q", "quit", "exit":
+		case "0", "":
 			fmt.Fprintf(out, "Leaving Project routine %q.\n", ProjectOrigin+name)
 			return nil
-		default:
-			fmt.Fprintln(out, "Choose 1, 2, 3, 4, or 0.")
 		}
 	}
-}
-
-func renderProjectRefineMenu(out io.Writer, name, lastRun string) {
-	fmt.Fprintln(out)
-	fmt.Fprintf(out, "Refine Project routine %q — manual-fire-only, %s\n", ProjectOrigin+name, lastRun)
-	fmt.Fprintln(out, "  1. Agent session (default)")
-	fmt.Fprintln(out, "  2. Fire test run")
-	fmt.Fprintln(out, "  3. View last report")
-	fmt.Fprintln(out, "  4. Edit prompt")
-	fmt.Fprintln(out, "  0. Exit")
 }
 
 // projectAuthoringSessionFromGate spawns the interactive authoring agent for a

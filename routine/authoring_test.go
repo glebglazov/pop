@@ -272,7 +272,7 @@ func TestRefineAgentSessionSpawnsInBoundDirWithFrontLoadedRules(t *testing.T) {
 	if !strings.Contains(text, "Authoring session ended") {
 		t.Fatalf("expected return-to-menu line:\n%s", text)
 	}
-	if strings.Count(text, "Choose [1]: ") < 2 {
+	if strings.Count(text, `Refine routine "gate"`) < 2 {
 		t.Fatalf("gate should re-render after the session:\n%s", text)
 	}
 }
@@ -292,7 +292,7 @@ func TestRefineAgentSessionSpawnFailureLoopsBack(t *testing.T) {
 	if !strings.Contains(text, "Could not start the authoring session") {
 		t.Fatalf("expected spawn failure report:\n%s", text)
 	}
-	if strings.Count(text, "Choose [1]: ") < 2 {
+	if strings.Count(text, `Refine routine "gate"`) < 2 {
 		t.Fatalf("gate should loop back after a spawn failure:\n%s", text)
 	}
 }

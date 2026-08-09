@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/glebglazov/pop/store"
+	"github.com/glebglazov/pop/ui"
 )
 
 // refineDeps builds injected deps for the gate: a fake claude on PATH (so Fire
@@ -58,7 +59,7 @@ func TestRefineMenuRendersHouseGrammar(t *testing.T) {
 		"5. Edit schedule",
 		"6. Resume routine & exit",
 		"0. Exit (stay paused)",
-		"Choose [1]: ",
+		"enter select · digit jump",
 		"Leaving routine \"gate\" paused.",
 	} {
 		if !strings.Contains(text, want) {
@@ -81,7 +82,7 @@ func TestRefineInvalidInputReprompts(t *testing.T) {
 	if !strings.Contains(text, "Choose 1, 2, 3, 4, 5, 6, or 0.") {
 		t.Fatalf("expected reprompt naming valid choices:\n%s", text)
 	}
-	if strings.Count(text, "Choose [1]: ") < 2 {
+	if strings.Count(text, `Refine routine "gate"`) < 2 {
 		t.Fatalf("menu should re-render after invalid input:\n%s", text)
 	}
 }
@@ -142,7 +143,7 @@ func TestRefineFireFailureLoopsBack(t *testing.T) {
 	if !strings.Contains(text, "Fire failed:") {
 		t.Fatalf("expected fire failure report:\n%s", text)
 	}
-	if strings.Count(text, "Choose [1]: ") < 2 {
+	if strings.Count(text, `Refine routine "gate"`) < 2 {
 		t.Fatalf("gate should loop back after a failed fire:\n%s", text)
 	}
 }
@@ -291,6 +292,9 @@ func TestRefineNonInteractiveErrors(t *testing.T) {
 	if !strings.Contains(err.Error(), promptPath) {
 		t.Fatalf("error should name the prompt path %q, got %v", promptPath, err)
 	}
+	if out.Len() != 0 {
+		t.Fatalf("non-interactive refine must not draw a menu:\n%s", out.String())
+	}
 }
 
 func TestRefineUnknownIDErrors(t *testing.T) {
@@ -301,6 +305,98 @@ func TestRefineUnknownIDErrors(t *testing.T) {
 	if err := RefineWith(d, "ghost", ""); err == nil {
 		t.Fatal("expected unknown id error")
 	}
+}
+
+func TestRefineGateSpecGoldenFrame(t *testing.T) {
+	r := &Routine{Manifest: Manifest{Paused: true, Schedule: "every 6h"}}
+	got := ui.StripANSI(ui.NewGateMenu(refineGateSpec("gate", r, "no runs yet")).ViewContent())
+	for _, want := range []string{
+		`Refine routine "gate" — paused, schedule "every 6h", no runs yet`,
+		"1. Agent session (default)",
+		"2. Fire test run",
+		"3. View last report",
+		"4. Edit prompt",
+		"5. Edit schedule",
+		"6. Resume routine & exit",
+		"0. Exit (stay paused)",
+		"enter select · digit jump",
+		"▸",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("golden frame missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestProjectRefineGateSpecGoldenFrame(t *testing.T) {
+	got := ui.StripANSI(ui.NewGateMenu(projectRefineGateSpec("audit", "no runs yet")).ViewContent())
+	for _, want := range []string{
+		`Refine Project routine "project:audit" — manual-fire-only, no runs yet`,
+		"1. Agent session (default)",
+		"2. Fire test run",
+		"3. View last report",
+		"4. Edit prompt",
+		"0. Exit",
+		"enter select · digit jump",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("golden frame missing %q:\n%s", want, got)
+		}
+	}
+	for _, absent := range []string{"Edit schedule", "Resume routine"} {
+		if strings.Contains(got, absent) {
+			t.Fatalf("project golden frame must not offer %q:\n%s", absent, got)
+		}
+	}
+}
+
+func TestRefineWordAliasesStillWork(t *testing.T) {
+	t.Run("fire", func(t *testing.T) {
+		root := t.TempDir()
+		dataHome := filepath.Join(root, "data")
+		installFakeClaude(t, root, 0)
+		var out bytes.Buffer
+		d := refineDeps(t, dataHome, "fire\n0\n", &out)
+		addRoutineForGate(t, d, "gate", filepath.Join(root, "home"))
+		if err := RefineWith(d, "gate", ""); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out.String(), "Fire succeeded") {
+			t.Fatalf("fire alias should run a test fire:\n%s", out.String())
+		}
+	})
+	t.Run("resume", func(t *testing.T) {
+		root := t.TempDir()
+		dataHome := filepath.Join(root, "data")
+		var out bytes.Buffer
+		d := refineDeps(t, dataHome, "resume\n", &out)
+		addRoutineForGate(t, d, "gate", filepath.Join(root, "home"))
+		if err := RefineWith(d, "gate", ""); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out.String(), "Resumed routine") {
+			t.Fatalf("resume alias should unpause and exit:\n%s", out.String())
+		}
+		if paused := manifestPaused(t, dataHome, "gate"); paused {
+			t.Fatal("resume alias should clear the pause bit")
+		}
+	})
+	t.Run("quit", func(t *testing.T) {
+		root := t.TempDir()
+		dataHome := filepath.Join(root, "data")
+		var out bytes.Buffer
+		d := refineDeps(t, dataHome, "quit\n", &out)
+		addRoutineForGate(t, d, "gate", filepath.Join(root, "home"))
+		if err := RefineWith(d, "gate", ""); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out.String(), `Leaving routine "gate" paused.`) {
+			t.Fatalf("quit alias should exit staying paused:\n%s", out.String())
+		}
+		if paused := manifestPaused(t, dataHome, "gate"); !paused {
+			t.Fatal("quit alias should leave the routine paused")
+		}
+	})
 }
 
 func manifestPaused(t *testing.T, dataHome, id string) bool {

@@ -20,12 +20,11 @@ func Refine(id, agentOverride string) error {
 
 // RefineWith runs the HITL refinement loop for a Routine (ADR-0125). It is the
 // gate `pop routine new` drops into after scaffolding on a TTY and the gate bare
-// `pop routine edit <id>` opens. The menu follows the house numbered gate
-// grammar — line-based items, a `Choose [1]:` prompt read through a shared
-// reader, word aliases accepted, static default 1 — not the dashboards'
-// single-key TUI grammar. The loop only makes sense on an interactive session,
-// so a non-interactive call errors and names the prompt path so the caller can
-// edit it directly (or use `pop routine edit --schedule`).
+// `pop routine edit <id>` opens. The menu is the shared inline GateMenu
+// (ADR-0196) — same keys and feel as the Task-set gates. The loop only makes
+// sense on an interactive session, so a non-interactive call errors and names
+// the prompt path so the caller can edit it directly (or use
+// `pop routine edit --schedule`).
 func RefineWith(d *Deps, id, agentOverride string) error {
 	// A Project routine is a committed prompt refined in its checkout, not an
 	// authored manifest in pop's data dir (ADR-0138): it has no schedule and no
@@ -67,16 +66,14 @@ func RefineWith(d *Deps, id, agentOverride string) error {
 		if err != nil {
 			return err
 		}
-		renderRefineMenu(out, id, r, lastRunSummary(d, id))
-		fmt.Fprintf(out, "Choose [1]: ")
-		answer, err := readRoutineGateLine(reader, out, "0")
+		choice, err := promptRoutineGateMenu(out, in, reader, refineGateSpec(id, r, lastRunSummary(d, id)))
 		if err != nil {
 			return err
 		}
-		switch strings.ToLower(strings.TrimSpace(answer)) {
-		case "", "1":
+		switch choice {
+		case "1":
 			authoringSessionFromGate(d, out, id, agentOverride)
-		case "2", "fire":
+		case "2":
 			fireFromGate(d, out, id)
 		case "3":
 			viewLastReport(d, out, id, filepath.Join(routineDir(d, id), runsDirName))
@@ -86,7 +83,7 @@ func RefineWith(d *Deps, id, agentOverride string) error {
 			}
 		case "5":
 			editScheduleFromGate(d, out, reader, id)
-		case "6", "resume":
+		case "6":
 			res, err := ResumeWith(d, id)
 			if err != nil {
 				return err
@@ -97,29 +94,11 @@ func RefineWith(d *Deps, id, agentOverride string) error {
 				fmt.Fprintf(out, "Resumed routine %q; scheduled firing is now armed.\n", id)
 			}
 			return nil
-		case "0", "q", "quit", "exit":
+		case "0", "":
 			fmt.Fprintf(out, "Leaving routine %q paused.\n", id)
 			return nil
-		default:
-			fmt.Fprintln(out, "Choose 1, 2, 3, 4, 5, 6, or 0.")
 		}
 	}
-}
-
-func renderRefineMenu(out io.Writer, id string, r *Routine, lastRun string) {
-	state := "resumed"
-	if r.Manifest.Paused {
-		state = pausedStatusLabel(r.Manifest.PauseReason)
-	}
-	fmt.Fprintln(out)
-	fmt.Fprintf(out, "Refine routine %q — %s, schedule %q, %s\n", id, state, r.Manifest.Schedule, lastRun)
-	fmt.Fprintln(out, "  1. Agent session (default)")
-	fmt.Fprintln(out, "  2. Fire test run")
-	fmt.Fprintln(out, "  3. View last report")
-	fmt.Fprintln(out, "  4. Edit prompt")
-	fmt.Fprintln(out, "  5. Edit schedule")
-	fmt.Fprintln(out, "  6. Resume routine & exit")
-	fmt.Fprintln(out, "  0. Exit (stay paused)")
 }
 
 // lastRunSummary describes the routine's most recent run for the gate header, or
