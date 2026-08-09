@@ -1290,12 +1290,39 @@ func TestNormalizePlainOutputDoesNotDetectClaudeQuotaPause(t *testing.T) {
 	}
 }
 
-func TestNormalizeCursorStreamJSONExtractsResult(t *testing.T) {
+func TestNormalizeCursorStreamJSONFramesAssistantMessages(t *testing.T) {
 	raw := "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"working\"}]}}\n" +
-		"{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"SUMMARY_START\\ncursor\\nSUMMARY_END\\nTASK_COMPLETE\"}\n"
+		"{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"SUMMARY_START\\ncursor\\nSUMMARY_END\\nTASK_COMPLETE\"}]}}\n" +
+		"{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"workingSUMMARY_START\\ncursor\\nSUMMARY_END\\nTASK_COMPLETE\"}\n"
 	result := NormalizeAgentOutput(AgentOutputCursorStreamJSON, raw)
-	if !strings.Contains(result.Output, "SUMMARY_START\ncursor\nSUMMARY_END\nTASK_COMPLETE") {
+	if result.Output != "working\nSUMMARY_START\ncursor\nSUMMARY_END\nTASK_COMPLETE\n" {
 		t.Fatalf("output = %q", result.Output)
+	}
+}
+
+// A cursor run whose closing message opens on SUMMARY_START: the terminal result
+// event glues it to the previous message, which failed the whole run on "missing
+// or empty summary block" (captured 2026-08-09, run 43c78b42, attempt 3 of
+// 04-attended-launch-time-skip). The transcript must carry the sentinel on its
+// own line, and the assessment must complete.
+func TestNormalizeCursorStreamJSONGluedSummarySentinelStillAssesses(t *testing.T) {
+	raw := "{\"type\":\"system\",\"subtype\":\"init\",\"model\":\"Grok 4.5\"}\n" +
+		"{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Acceptance criteria are already checked. Verifying the implementation and re-running package tests.\"}]}}\n" +
+		"{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"SUMMARY_START\\nADR-0195 decision 6 is already landed.\\nSUMMARY_END\\nTASK_COMPLETE\"}]}}\n" +
+		"{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"Acceptance criteria are already checked. Verifying the implementation and re-running package tests.SUMMARY_START\\nADR-0195 decision 6 is already landed.\\nSUMMARY_END\\nTASK_COMPLETE\"}\n"
+
+	result := NormalizeAgentOutput(AgentOutputCursorStreamJSON, raw)
+	if !strings.Contains(result.Output, "\nSUMMARY_START\n") {
+		t.Fatalf("summary sentinel not on its own line: %q", result.Output)
+	}
+
+	taskMarkdown := []byte("## Acceptance criteria\n\n- [x] done\n")
+	assessment := AssessCompletion(result.Output, taskMarkdown)
+	if !assessment.Complete {
+		t.Fatalf("assessment failed: %q", assessment.FailedReason)
+	}
+	if assessment.Summary != "ADR-0195 decision 6 is already landed." {
+		t.Fatalf("summary = %q", assessment.Summary)
 	}
 }
 

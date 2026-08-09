@@ -32,7 +32,61 @@ func normalizeCursorStreamJSON(raw string) AgentResult {
 	if v := cursorSpentAllowanceReason(raw, time.Now()); v != nil {
 		return AgentResult{ProceedVerdict: v}
 	}
-	return normalizeResultStreamJSON(raw, nil)
+	return normalizedTranscript(cursorTranscript(raw), nil)
+}
+
+// cursorTranscript rebuilds the run's prose from the assistant events instead of
+// the terminal result event, which is the reading the completion contract is
+// assessed against.
+//
+// cursor builds `result` by concatenating the same assistant texts with NO
+// separator, so a message that opens on a sentinel arrives glued to the tail of
+// the previous one — "…re-running package tests.SUMMARY_START" — and the
+// line-anchored sentinel readers in assess.go never see it. Framing each message
+// onto its own line restores the lines the model actually emitted. The result
+// event is kept only as a fallback for runs that carry no assistant text at all.
+func cursorTranscript(raw string) string {
+	var b strings.Builder
+	var resultText string
+	scanAgentJSONLines(raw, nil, func(line []byte) bool {
+		var event struct {
+			Type    string `json:"type"`
+			Result  string `json:"result"`
+			Message struct {
+				Content []struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal(line, &event); err != nil {
+			return false
+		}
+		switch event.Type {
+		case "assistant":
+			for _, content := range event.Message.Content {
+				if content.Type != "text" || content.Text == "" {
+					continue
+				}
+				// Some models stream a message per event ending without a
+				// newline, others end with one; frame only where a boundary is
+				// missing so a text already broken into lines is left as it is.
+				if b.Len() > 0 && !strings.HasSuffix(b.String(), "\n") {
+					b.WriteString("\n")
+				}
+				b.WriteString(content.Text)
+			}
+		case "result":
+			if event.Result != "" {
+				resultText = event.Result
+			}
+		}
+		return true
+	})
+	if b.Len() == 0 {
+		return resultText
+	}
+	return b.String()
 }
 
 // cursorSpentAllowanceReason scans the raw capture for cursor-agent's
