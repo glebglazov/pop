@@ -1,6 +1,6 @@
 ---
 status: accepted
-relates: "adds two capabilities in the shape [ADR-0166](0166-invocation-shape-capabilities-move-onto-the-preset-spec.md) and [ADR-0165](0165-stream-shape-capabilities-are-declared-and-fixture-backed.md) established, carves a second exception out of the flags-come-last rule of [ADR-0017](0017-agent-preset-augmentation-rides-on-agent-flag.md) after [ADR-0187](0187-attended-agent-arguments-are-per-preset-defaults-under-an-agents-config-root.md), and is configured through [ADR-0191](0191-repo-scoped-settings-pop-writes-live-in-an-identity-keyed-runtime-layer.md)"
+relates: "adds two capabilities in the shape [ADR-0166](0166-invocation-shape-capabilities-move-onto-the-preset-spec.md) and [ADR-0165](0165-stream-shape-capabilities-are-declared-and-fixture-backed.md) established, carves a second exception out of the flags-come-last rule of [ADR-0017](0017-agent-preset-augmentation-rides-on-agent-flag.md) after [ADR-0187](0187-attended-agent-arguments-are-per-preset-defaults-under-an-agents-config-root.md), and is configured through [ADR-0191](0191-repo-scoped-settings-pop-writes-live-in-an-identity-keyed-runtime-layer.md); its Blind presets are made legible by [ADR-0198](0198-a-config-key-declares-its-own-reach.md), which amends the consequence that named `pop tasks agents`"
 ---
 
 # A turn cap bounds one implementation attempt, and only claude can enforce it
@@ -103,9 +103,16 @@ at a synthetic `KIMI_CODE_HOME`.
   to. Accepted knowingly rather than dialled away.
 - **Work already committed by a cap-exhausted attempt stays on disk**, confirmed
   by observation. That matches the timeout path, which also kills mid-flight.
-- Five of six presets declare enforcement Blind. `pop tasks agents` is where that
-  should be legible, and it is still the surface ADR-0187 left without an
-  `attended_args` column — the same gap now twice over.
+- Five of six presets declare enforcement Blind, and that has to be legible
+  somewhere. This bullet first named `pop tasks agents`, reasoning that the same
+  lens was already missing an `attended_args` column from ADR-0187 — "the same
+  gap now twice over". Half that premise has since dissolved:
+  [ADR-0195](0195-an-attended-entry-owns-its-whole-invocation.md) retired
+  `attended_args` and `attended_model`, so no per-preset attended setting remains
+  for a column to report. The turn-cap half moved instead to where the cap is
+  set, per [ADR-0198](0198-a-config-key-declares-its-own-reach.md): `turn_cap`
+  declares a reach, rendered by `pop config keys --why` and `pop config repo
+  get`. The agents lens gains nothing.
 - The word "ralph" stays out of pop's vocabulary. It names a self-repeating outer
   loop in kimi's sense, which is the loop this decision does *not* cap, so
   importing it would name the wrong thing.
