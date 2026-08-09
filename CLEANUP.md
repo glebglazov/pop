@@ -61,11 +61,22 @@ week of 2026-06-08, after beta-tester sign-off.
 | `[workload.agents.<name>]` (per-preset map) | `[tasks.presets.<name>]` | `TaskConfig.Agents`; includes-merge `config.go:1867` |
 | `[queue]` section (whole table) | `[work.daemon]` (`poll_interval`, `agent_quota_retry_after`, `crash_retry_delays`) | `retiredQueueSectionFindings` in `config/config.go` — the finding that reports a leftover `[queue]` as an unknown section (and still points `agents` at `[tasks.implement].agents`). A **hard cut, not an alias**: nothing reads `[queue]`, so removal here means dropping the finding, after which the table is silently ignored. |
 | includes whitelist enumerates `workload` | accept both `workload` (deprecated) + `tasks` | `config/config.go:1840` |
+| `[tasks.git].commit_config_overrides` | `[work.implement].git.commit_config_overrides` | `TaskGitConfig`; read at `tasks/run_plan.go:72`. The one **read-compat exception** to ADR-0194's hard cut: kept because it was added on request and its user should not lose it silently. New key wins when both are set. Everything else under `[tasks.*]` is unread after ADR-0194 — see the note below. |
 
 Tombstone behavior: presence of any old key → config load fails with
 `"<old key> was removed; use <new key>"`. Implementation keeps the old struct
 field solely for detection; mark each with a comment `// Tombstone: delete after
 <date/condition>` so the second-phase delete is greppable.
+
+Note (ADR-0194): the `[tasks.*]` tree itself moves to `[work.*]` —
+`[work.implement]`, `[work.verify]`, `[work.routine]`, `[work.attended]`, with
+`max_tries` / `attempt_retry_delays` declared per retrying kind and
+`[tasks.presets.<name>].output` becoming `[agents.<preset>].output`. That move
+is a **hard cut**: the old keys are simply unread, with the single `tasks.git`
+exception rowed above. A stale `[tasks.implement].agents` therefore falls back
+to the built-in `claude` silently, which is why the unknown-key warning at load
+matters more after this change than before it. `[agents.<preset>].attended_args`
+and `.attended_model` are removed outright (ADR-0195) with no alias.
 
 Note: `[tasks]` and its restructured sub-tables ship with `[workload]` kept as an
 honored read-compat alias first (ADR-0092); this cleanup flips `[workload]` to the

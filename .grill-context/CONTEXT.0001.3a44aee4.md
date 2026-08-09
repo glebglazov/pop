@@ -59,3 +59,50 @@ branch: master
     implement` rather than by a group, and ending "When attended Integration
     conflict assistance needs an agent, it uses only the first entry of the
     implement list" — the coupling this session removed.
+
++ Agent override
+  A session-lived promotion of one **Attended agent entry** to the head of its
+  **Work agent group**, opened with `alt+a` from any gate menu or dashboard page
+  and applied for one OS process — a dashboard, an **Assist session**, a drain —
+  never persisted. It promotes rather than pins: the configured remainder of the
+  group stays behind the picked entry, so an unattended group keeps the ordering
+  its **Agent fallback** depends on. The picker is two numeric levels, group then
+  entry, `0` back and `Enter` exiting unchanged, and it is inert inside another
+  picker because `alt` is already the quick-access modifier there.
+  avoid: agent pin, model switch, session agent, per-row agent
+  under: Agents
+
+~ Interactive agent preset
+  A named attended-assistance command known to an Agent adapter, separate from
+  an **Agent preset** because assisting a human is an attended conversation
+  rather than a headless attempt. Its invocation comes from an **Attended agent
+  entry**'s `cmd`, plus the preset's **Attended argument defaults** appended only
+  where that `cmd` does not already name the same flag, plus the generated
+  briefing as the final positional argument. kimi's interactive mode accepts no
+  initial-prompt argument, so its launch is the bare binary and the briefing is
+  delivered on the clipboard for the human to paste.
+  was: The same term, but with the invocation sourced from the preset name alone
+    plus `[agents.<preset>].attended_args` (replacing the declared list
+    wholesale) and `.attended_model` (the only way a model could be named) —
+    both retired with the entry's cmd.
+
+~ Attended argument defaults
+  The per-**Agent preset** argument list pop adds to an attended agent session,
+  each preset declaring the least-restrictive posture that agent offers: claude
+  `--permission-mode auto`, whose classifier allows ordinary in-repo work and
+  asks about the rest; cursor `--force --trust` and codex
+  `--dangerously-bypass-approvals-and-sandbox`, which bypass outright; opencode
+  and kimi none. The posture is deliberately not uniform — only claude can
+  mediate rather than bypass, and pop prefers mediation where it exists. They
+  are defaults, not pop-owned flags: an **Attended agent entry** overrides one by
+  naming that flag in its `cmd`, which is how the human at the terminal keeps
+  the last word on their own permission posture without a config key for it.
+  was: The same list, but overridden by replacing it wholesale through the
+    Agents config root's `attended_args`.
+
+~ Agents config root
+  `[agents.<preset>]` — the home for agent settings keyed by *preset* rather
+  than by kind of work, as against the kind-keyed **Work agent group**s beside
+  it. It holds `output`, the **Agent output mode** governing how pop parses that
+  preset's stream, which means the same thing to every kind that runs the agent.
+  avoid: [tasks.presets], per-verb agent flags, attended settings
