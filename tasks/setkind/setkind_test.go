@@ -699,3 +699,39 @@ func withDataDir(t *testing.T, td *tasks.Deps) *tasks.Deps {
 	}
 	return td
 }
+
+// TestLessThreadsPresetSort proves the Task-set kind's Less is the shared
+// WorkRowLess comparator with ViewPreset.Sort threaded through (ADR-0197):
+// dashboard BuildSnapshot and pop work status therefore order identically.
+func TestLessThreadsPresetSort(t *testing.T) {
+	older := work.Container{Project: "p", ID: "2026-01-01-old", RawStatus: tasks.StatusBlocked}
+	newer := work.Container{Project: "p", ID: "2026-06-01-new", RawStatus: tasks.StatusReady}
+	live := work.Container{Project: "p", ID: "2026-02-01-run", RawStatus: tasks.StatusDone, LiveDrain: true}
+
+	statusKind := New(&Deps{})
+	if !statusKind.Less(newer, older) {
+		// Under the status scheme READY floats above BLOCKED regardless of date.
+		t.Fatal("empty-sort Less: READY should precede BLOCKED")
+	}
+	if statusKind.Less(older, live) {
+		t.Fatal("empty-sort Less: live-drain must float above rest")
+	}
+
+	recent, _ := config.ShippedWorkViewPreset("recent-30d")
+	recencyKind := New(&Deps{ViewPreset: recent})
+	if !recencyKind.Less(newer, older) || recencyKind.Less(older, newer) {
+		t.Fatal("created_desc Less: newer id must precede older")
+	}
+	if recencyKind.Less(newer, live) {
+		t.Fatal("created_desc Less: live-drain must still float above dated rest")
+	}
+	// Kind.Less and SortWorkRows must agree — one comparator.
+	rows := []work.Container{older, newer, live}
+	tasks.SortWorkRows(rows, recent.Sort)
+	if rows[0].ID != live.ID || rows[1].ID != newer.ID || rows[2].ID != older.ID {
+		t.Fatalf("SortWorkRows(%q) = %v/%v/%v, want live/newer/older", recent.Sort, rows[0].ID, rows[1].ID, rows[2].ID)
+	}
+	if !recencyKind.Less(rows[0], rows[1]) || !recencyKind.Less(rows[1], rows[2]) {
+		t.Fatal("Kind.Less disagrees with SortWorkRows under recent-30d")
+	}
+}

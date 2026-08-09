@@ -108,12 +108,14 @@ func ShippedWorkViewPresets() []WorkViewPreset {
 			Name: "recent-7d",
 			WorkViewPresetFilter: WorkViewPresetFilter{
 				CreatedWithin: "168h",
+				Sort:          PresetSortCreatedDesc,
 			},
 		},
 		{
 			Name: "recent-30d",
 			WorkViewPresetFilter: WorkViewPresetFilter{
 				CreatedWithin: "720h",
+				Sort:          PresetSortCreatedDesc,
 			},
 		},
 		{

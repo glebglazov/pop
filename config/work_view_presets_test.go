@@ -39,6 +39,9 @@ func TestShippedWorkViewPresetsVocabulary(t *testing.T) {
 	if presets[2].CreatedWithin != "168h" || presets[3].CreatedWithin != "720h" {
 		t.Fatalf("recency windows = %q / %q", presets[2].CreatedWithin, presets[3].CreatedWithin)
 	}
+	if presets[2].Sort != PresetSortCreatedDesc || presets[3].Sort != PresetSortCreatedDesc {
+		t.Fatalf("recency sorts = %q / %q, want created_desc", presets[2].Sort, presets[3].Sort)
+	}
 	if presets[4].Archived != ArchivedInclude {
 		t.Fatalf("all archived = %q, want include", presets[4].Archived)
 	}

@@ -168,9 +168,10 @@ func dashboardStatusCellText(kinds workKinds, row DashboardRow) string {
 
 // sortDashboardRows applies the shared Queue surface order to a set of dashboard
 // rows. The comparator — the ADR-0121 membership tiers, status bands,
-// intra-project status order and SetID tiebreak — is the Task-set kind's own
-// (ADR-0121); the snapshot builder reaches it through that kind's Less, and this
-// is the queue-side seam the static status render keys on.
-func sortDashboardRows(rows []DashboardRow) {
-	tasks.SortWorkRows(rows)
+// intra-project status order and SetID tiebreak, optionally displaced by a
+// preset's sort (ADR-0197) — is the Task-set kind's own; the snapshot builder
+// reaches it through that kind's Less, and this is the queue-side seam the
+// static status render keys on. sortMode empty keeps the status scheme.
+func sortDashboardRows(rows []DashboardRow, sortMode string) {
+	tasks.SortWorkRows(rows, sortMode)
 }

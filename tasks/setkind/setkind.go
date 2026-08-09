@@ -170,11 +170,12 @@ type groupLoad struct {
 }
 
 // Less orders two task-set containers by the shared Queue surface comparator
-// (ADR-0121) over their row projections — the same total order `pop work
-// dashboard` and `pop work status` have always read, ported wholesale rather
-// than re-derived, so the seam's ordering is that comparator and not a second one.
+// (ADR-0121 / ADR-0197) over their row projections — the same total order `pop
+// work dashboard` and `pop work status` read. The active ViewPreset's sort
+// displaces the status scheme under the membership tiers; absent sort keeps
+// today's ADR-0121 order.
 func (k *Kind) Less(a, b work.Container) bool {
-	return tasks.WorkRowLess(a, b)
+	return tasks.WorkRowLess(a, b, k.d.ViewPreset.Sort)
 }
 
 // StatusCell composes a task set's STATUS cell: the display label with the

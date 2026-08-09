@@ -3,6 +3,7 @@ package tasks
 import (
 	"sort"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/work"
 )
 
@@ -92,21 +93,31 @@ func statusOrder(s TaskSetStatus) int {
 	}
 }
 
-// WorkRowLess is the shared Queue surface comparator (ADR-0121), the single
-// source of the total order both `pop work dashboard` and `pop work status`
-// read. Rows float by membership tier (live-drain → auto-drain → orphaned), then
-// fall through to the status scheme: the IN PROGRESS and READY bands read
-// cross-project (Project asc, then ID desc), and every remaining status reads
-// per-project (Project asc, then the explicit status order, then ID desc).
-// Bands key on the displayed label, so a started or live-drained READY set sorts
-// as IN PROGRESS even though its raw status is READY. The membership tiers float
-// above the whole status scheme — an auto-drain BLOCKED set outranks a plain
-// IN PROGRESS set — and fall through to the same band/status/SetID tiebreak
-// within a tier.
-func WorkRowLess(a, b work.Container) bool {
+// WorkRowLess is the shared Queue surface comparator (ADR-0121 / ADR-0197), the
+// single source of the total order both `pop work dashboard` and `pop work
+// status` read. Rows float by membership tier (live-drain → auto-drain →
+// orphaned) under every preset. Below the tiers, an empty sortMode keeps the
+// ADR-0121 status scheme; a preset's created_desc / created_asc replaces that
+// scheme only (ADR-0197 decision 6).
+func WorkRowLess(a, b work.Container, sortMode string) bool {
 	if ta, tb := sortTier(a), sortTier(b); ta != tb {
 		return ta < tb
 	}
+	switch sortMode {
+	case config.PresetSortCreatedDesc, config.PresetSortCreatedAsc:
+		return createdSortLess(a, b, sortMode)
+	default:
+		return statusSchemeLess(a, b)
+	}
+}
+
+// statusSchemeLess is the ADR-0121 status scheme under the membership tiers:
+// IN PROGRESS and READY bands read cross-project (Project asc, then ID desc);
+// every remaining status reads per-project (Project asc, then the explicit
+// status order, then ID desc). Bands key on the displayed label, so a started
+// or live-drained READY set sorts as IN PROGRESS even though its raw status is
+// READY.
+func statusSchemeLess(a, b work.Container) bool {
 	ba, bb := statusBand(a), statusBand(b)
 	if ba != bb {
 		return ba < bb
@@ -125,11 +136,35 @@ func WorkRowLess(a, b work.Container) bool {
 	return a.ID > b.ID
 }
 
+// createdSortLess orders by identifier date prefix under the membership tiers.
+// Ids with no parseable date always sort after every dated id (both directions),
+// then by ID descending among themselves — a defined position rather than an
+// arbitrary one (ADR-0197). Equal dates break on ID descending.
+func createdSortLess(a, b work.Container, sortMode string) bool {
+	ta, oka := IDCreatedAt(a.ID)
+	tb, okb := IDCreatedAt(b.ID)
+	switch {
+	case !oka && !okb:
+		return a.ID > b.ID
+	case !oka:
+		return false
+	case !okb:
+		return true
+	}
+	if !ta.Equal(tb) {
+		if sortMode == config.PresetSortCreatedAsc {
+			return ta.Before(tb)
+		}
+		return ta.After(tb)
+	}
+	return a.ID > b.ID
+}
+
 // SortWorkRows applies the shared Queue surface order (WorkRowLess) to a set of
-// Work rows.
-func SortWorkRows(rows []work.Container) {
+// Work rows. sortMode is the active preset's sort (empty = status scheme).
+func SortWorkRows(rows []work.Container, sortMode string) {
 	sort.SliceStable(rows, func(i, j int) bool {
-		return WorkRowLess(rows[i], rows[j])
+		return WorkRowLess(rows[i], rows[j], sortMode)
 	})
 }
 

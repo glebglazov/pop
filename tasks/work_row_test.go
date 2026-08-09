@@ -57,7 +57,7 @@ func TestSortOrder(t *testing.T) {
 		{Project: "alpha", ID: "2026-01-01-old"},
 		{Project: "alpha", ID: "2026-06-18-new"},
 	}
-	SortWorkRows(rows)
+	SortWorkRows(rows, "")
 	got := []string{rows[0].Project + "/" + rows[0].ID, rows[1].Project + "/" + rows[1].ID, rows[2].Project + "/" + rows[2].ID}
 	want := []string{"alpha/2026-06-18-new", "alpha/2026-01-01-old", "zeta/2026-01-01-old"}
 	if !reflect.DeepEqual(got, want) {
@@ -92,7 +92,7 @@ func TestTieredSortOrder(t *testing.T) {
 		// Running tier — highest precedence even over an auto-drain BLOCKED set.
 		{Project: "delta", ID: "2026-06-01-run", RawStatus: StatusBlocked, AutoDrain: true, LiveDrain: true},
 	}
-	SortWorkRows(rows)
+	SortWorkRows(rows, "")
 	got := make([]string, len(rows))
 	for i, r := range rows {
 		got[i] = r.Project + "/" + r.ID
@@ -128,7 +128,7 @@ func TestReadyBandInterleavesProjects(t *testing.T) {
 		{Project: "alpha", ID: "2026-01-03-rdy", RawStatus: StatusReady},
 		{Project: "bravo", ID: "2026-01-04-blk", RawStatus: StatusBlocked},
 	}
-	SortWorkRows(rows)
+	SortWorkRows(rows, "")
 	got := make([]string, len(rows))
 	for i, r := range rows {
 		got[i] = r.Project + "/" + r.ID
@@ -157,7 +157,7 @@ func TestBandKeysOnDisplayedLabel(t *testing.T) {
 		{Project: "alpha", ID: "2026-01-01-rdy", RawStatus: StatusReady},
 		{Project: "zeta", Started: true, ID: "2026-01-02-inp", RawStatus: StatusReady},
 	}
-	SortWorkRows(rows)
+	SortWorkRows(rows, "")
 	got := []string{rows[0].Project + "/" + rows[0].ID, rows[1].Project + "/" + rows[1].ID}
 	want := []string{"zeta/2026-01-02-inp", "alpha/2026-01-01-rdy"}
 	if !reflect.DeepEqual(got, want) {
@@ -261,4 +261,137 @@ func TestWorkRowStatusCellComposition(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestPresetCreatedSortOrdersByIdentifierDate pins ADR-0197 decision 6: a
+// preset's created_desc / created_asc replaces the status scheme under the
+// membership tiers. recent-30d's shipped sort is created_desc (newest-first);
+// created_asc is the reverse. Live-drain, auto-drain and orphaned rows still
+// float above every dated rest-tier row.
+func TestPresetCreatedSortOrdersByIdentifierDate(t *testing.T) {
+	recent, ok := config.ShippedWorkViewPreset("recent-30d")
+	if !ok {
+		t.Fatal("shipped recent-30d missing")
+	}
+	if recent.Sort != config.PresetSortCreatedDesc {
+		t.Fatalf("recent-30d sort = %q, want created_desc", recent.Sort)
+	}
+
+	rows := []work.Container{
+		{Project: "alpha", ID: "2026-01-01-old", RawStatus: StatusBlocked},
+		{Project: "bravo", ID: "2026-03-15-mid", RawStatus: StatusReady},
+		{Project: "charlie", ID: "2026-06-01-new", RawStatus: StatusDone},
+		{Project: "zoo", ID: "2026-02-01-orph", RawStatus: StatusReady, Orphaned: true},
+		{Project: "kilo", ID: "2026-01-15-ad", RawStatus: StatusBlocked, AutoDrain: true},
+		{Project: "delta", ID: "2026-01-10-run", RawStatus: StatusDone, LiveDrain: true},
+	}
+
+	desc := append([]work.Container(nil), rows...)
+	SortWorkRows(desc, config.PresetSortCreatedDesc)
+	gotDesc := idsOf(desc)
+	wantDesc := []string{
+		"2026-01-10-run", // live-drain tier
+		"2026-01-15-ad",  // auto-drain tier
+		"2026-02-01-orph", // orphaned tier
+		"2026-06-01-new", // rest: newest first
+		"2026-03-15-mid",
+		"2026-01-01-old",
+	}
+	if !reflect.DeepEqual(gotDesc, wantDesc) {
+		t.Fatalf("created_desc = %v, want %v", gotDesc, wantDesc)
+	}
+
+	asc := append([]work.Container(nil), rows...)
+	SortWorkRows(asc, config.PresetSortCreatedAsc)
+	gotAsc := idsOf(asc)
+	wantAsc := []string{
+		"2026-01-10-run",
+		"2026-01-15-ad",
+		"2026-02-01-orph",
+		"2026-01-01-old", // rest: oldest first
+		"2026-03-15-mid",
+		"2026-06-01-new",
+	}
+	if !reflect.DeepEqual(gotAsc, wantAsc) {
+		t.Fatalf("created_asc = %v, want %v", gotAsc, wantAsc)
+	}
+}
+
+// TestPresetCreatedSortUndatedPosition pins a defined place for identifiers
+// with no parseable date: after every dated rest-tier row under both
+// created_desc and created_asc, then ID descending among themselves.
+func TestPresetCreatedSortUndatedPosition(t *testing.T) {
+	rows := []work.Container{
+		{Project: "a", ID: "no-prefix-z"},
+		{Project: "b", ID: "2026-05-01-dated"},
+		{Project: "c", ID: "no-prefix-a"},
+		{Project: "d", ID: "2026-01-01-older"},
+	}
+
+	desc := append([]work.Container(nil), rows...)
+	SortWorkRows(desc, config.PresetSortCreatedDesc)
+	if got := idsOf(desc); !reflect.DeepEqual(got, []string{
+		"2026-05-01-dated",
+		"2026-01-01-older",
+		"no-prefix-z",
+		"no-prefix-a",
+	}) {
+		t.Fatalf("created_desc undated = %v", got)
+	}
+
+	asc := append([]work.Container(nil), rows...)
+	SortWorkRows(asc, config.PresetSortCreatedAsc)
+	if got := idsOf(asc); !reflect.DeepEqual(got, []string{
+		"2026-01-01-older",
+		"2026-05-01-dated",
+		"no-prefix-z",
+		"no-prefix-a",
+	}) {
+		t.Fatalf("created_asc undated = %v", got)
+	}
+}
+
+// TestEmptySortMatchesStatusSchemeByteForByte proves a preset with no sort
+// keeps today's ADR-0121 order exactly — the status-scheme path is unchanged.
+func TestEmptySortMatchesStatusSchemeByteForByte(t *testing.T) {
+	base := []work.Container{
+		{Project: "alpha", ID: "2026-02-01-blk", RawStatus: StatusBlocked},
+		{Project: "bravo", ID: "2026-02-02-rdy", RawStatus: StatusReady},
+		{Project: "alpha", ID: "2026-02-03-rdy", RawStatus: StatusReady},
+		{Project: "bravo", Started: true, ID: "2026-02-04-inp", RawStatus: StatusReady},
+		{Project: "bravo", ID: "2026-02-05-done", RawStatus: StatusDone},
+		{Project: "charlie", ID: "2026-02-06-aa", RawStatus: StatusAwaitingApproval},
+		{Project: "zoo", ID: "2026-04-01-orph", RawStatus: StatusReady, Orphaned: true},
+		{Project: "kilo", ID: "2026-05-01-ad", RawStatus: StatusReady, AutoDrain: true},
+		{Project: "delta", ID: "2026-06-01-run", RawStatus: StatusBlocked, AutoDrain: true, LiveDrain: true},
+	}
+	viaEmpty := append([]work.Container(nil), base...)
+	viaDefault := append([]work.Container(nil), base...)
+	SortWorkRows(viaEmpty, "")
+	SortWorkRows(viaDefault, "not-a-sort") // unknown modes fall through to status scheme
+	if !reflect.DeepEqual(idsOf(viaEmpty), idsOf(viaDefault)) {
+		t.Fatalf("empty vs unknown sort diverge: %v vs %v", idsOf(viaEmpty), idsOf(viaDefault))
+	}
+	want := []string{
+		"2026-06-01-run",
+		"2026-05-01-ad",
+		"2026-04-01-orph",
+		"2026-02-04-inp",
+		"2026-02-03-rdy",
+		"2026-02-02-rdy",
+		"2026-02-01-blk",
+		"2026-02-05-done",
+		"2026-02-06-aa",
+	}
+	if !reflect.DeepEqual(idsOf(viaEmpty), want) {
+		t.Fatalf("empty sort = %v, want status-scheme %v", idsOf(viaEmpty), want)
+	}
+}
+
+func idsOf(rows []work.Container) []string {
+	out := make([]string, len(rows))
+	for i, r := range rows {
+		out[i] = r.ID
+	}
+	return out
 }

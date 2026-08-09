@@ -104,12 +104,13 @@ func dashboardTestDeps(t *testing.T, rows []tasks.Row, locks map[string]*tasks.R
 }
 
 // TestRenderStatusMirrorsDashboardRows proves `pop work status` renders the
-// same rows in the same order as the Work dashboard (ADR-0121): both consume the
-// one comparator (tasks.SortWorkRows / sortDashboardRows) over the one row set, so the
-// static status table's TASK SET order equals the sorted dashboard rows' order,
-// under the Summary headline and without any retired inventory section. The row
-// derivation itself lives in work's tests now (ADR-0143); here the rows are the
-// build's output, fed to the same sort and the status render.
+// same rows in the same order as the Work dashboard (ADR-0121 / ADR-0197): both
+// consume the one comparator (tasks.SortWorkRows / sortDashboardRows / Kind.Less)
+// over the one row set, so the static status table's TASK SET order equals the
+// sorted dashboard rows' order, under the Summary headline and without any
+// retired inventory section. The row derivation itself lives in work's tests now
+// (ADR-0143); here the rows are the build's output, fed to the same sort and the
+// status render.
 func TestRenderStatusMirrorsDashboardRows(t *testing.T) {
 	td := queuetest.DataDeps(t)
 	got := []DashboardRow{
@@ -119,7 +120,7 @@ func TestRenderStatusMirrorsDashboardRows(t *testing.T) {
 	}
 	// The shared comparator orders the full set exactly as the build does. The
 	// status table must render these same rows in this same order.
-	sortDashboardRows(got)
+	sortDashboardRows(got, "")
 	wantOrder := make([]string, len(got))
 	for i, r := range got {
 		wantOrder[i] = r.ID
@@ -174,7 +175,7 @@ func TestRenderStatusTableColumnsAndIndicator(t *testing.T) {
 		{Project: "alpha", Started: true, ID: "2026-03-01-inp", RawStatus: tasks.StatusReady, LiveDrain: true, DestKind: work.DestManagedDirective},
 		{Project: "bravo", ID: "2026-03-02-blk", RawStatus: tasks.StatusBlocked, DestKind: work.DestNeedsBind},
 	}
-	sortDashboardRows(rows)
+	sortDashboardRows(rows, "")
 
 	var out strings.Builder
 	RenderStatus(&out, drain.StatusSnapshot{Tasks: td}, StatusTables{TaskSets: StatusTable{Kinds: (&drain.Deps{}).WorkKinds(nil), Rows: rows}})
