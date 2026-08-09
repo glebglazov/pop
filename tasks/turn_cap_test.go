@@ -180,7 +180,7 @@ func TestDrainCarriesRepoTurnCapToImplementerNotVerifier(t *testing.T) {
 		t.Fatalf("resolve runtime path: %v", err)
 	}
 	cfg := &config.Config{
-		Task: &config.TasksConfig{Verify: &config.VerifyConfig{Enabled: true}},
+		Work: &config.WorkConfig{Verify: &config.VerifyConfig{Enabled: true}},
 		Repo: map[string]config.RepoOverrideConfig{
 			runtimePath: {TurnCap: intPtr(9)},
 		},
