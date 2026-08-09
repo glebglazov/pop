@@ -57,7 +57,7 @@ func SpawnAssist(d *Deps, cfg *config.Config, m Map) (*AssistPane, error) {
 	if session.Dir == "" {
 		return nil, ErrNoTrunk
 	}
-	command, err := AssistInvocation(cfg, m.ID, session.Dir)
+	command, err := AssistInvocation(d, cfg, m.ID, session.Dir)
 	if err != nil {
 		return nil, err
 	}
@@ -80,6 +80,6 @@ func SpawnAssist(d *Deps, cfg *config.Config, m Map) (*AssistPane, error) {
 // one Map and no ticket. Naming no ticket is what keeps the
 // one-non-research-ticket-per-session rule intact — a session with no ticket in
 // hand has none to resolve.
-func AssistInvocation(cfg *config.Config, mapID, dir string) (string, error) {
-	return agentPaneCommand(cfg, AssistModeInvocation(skillsPrefixOf(cfg), mapID), dir)
+func AssistInvocation(d *Deps, cfg *config.Config, mapID, dir string) (string, error) {
+	return agentPaneCommand(d, cfg, AssistModeInvocation(skillsPrefixOf(cfg), mapID), dir)
 }

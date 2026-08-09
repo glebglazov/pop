@@ -45,7 +45,7 @@ func SpawnTicket(d *Deps, cfg *config.Config, m Map, ticket Ticket) (*SpawnedTic
 	if session.Dir == "" {
 		return nil, ErrNoTrunk
 	}
-	command, err := GrillingInvocation(cfg, m.ID, ticket.ID, session.Dir)
+	command, err := GrillingInvocation(d, cfg, m.ID, ticket.ID, session.Dir)
 	if err != nil {
 		return nil, err
 	}

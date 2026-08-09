@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/glebglazov/pop/config"
 )
@@ -928,16 +929,45 @@ func AgentPresetName(spec string) (string, error) {
 // head of [work.attended].agents, and failing that the built-in claude. The
 // implement list is deliberately not consulted: a list built for unattended
 // drains is not what a human sits in front of (ADR-0194, ADR-0195).
+//
+// Cool-down and PATH awareness live one layer up in
+// ResolveAgentAssistanceInvocation (ADR-0195 decision 6); this helper names the
+// configured head only.
 func ResolveAttendedAgentSpec(cfg *config.Config, override string) string {
-	if spec := strings.TrimSpace(override); spec != "" {
-		return spec
+	candidates := attendedLaunchCandidates(cfg, override)
+	if len(candidates) == 0 {
+		return DefaultAgentPreset
 	}
+	return candidates[0]
+}
+
+// attendedLaunchCandidates is the ordered attended-agent list a launch walks:
+// a session-lived override promoted to the head with the configured remainder
+// behind it, else [work.attended].agents, else the built-in default. It does
+// not consult cooling or PATH — that is the pre-flight walk in
+// ResolveAgentAssistanceInvocation.
+func attendedLaunchCandidates(cfg *config.Config, override string) []string {
+	var configured []string
 	for _, entry := range cfg.AttendedAgents() {
 		if spec := strings.TrimSpace(entry); spec != "" {
-			return spec
+			configured = append(configured, spec)
 		}
 	}
-	return DefaultAgentPreset
+	override = strings.TrimSpace(override)
+	if override == "" {
+		if len(configured) == 0 {
+			return []string{DefaultAgentPreset}
+		}
+		return configured
+	}
+	out := []string{override}
+	for _, spec := range configured {
+		if spec == override {
+			continue
+		}
+		out = append(out, spec)
+	}
+	return out
 }
 
 // ResolveDefaultAgentPresets returns the ordered agent preset list for a run.
@@ -1099,21 +1129,78 @@ func ResolveAgentAssistanceCapability(preset, agentCmd string) (AgentAssistanceC
 // the entry did not name that flag (ADR-0195). No attended path reads a drain's
 // agent list. It is the one chokepoint every attended call site passes through,
 // which is why the policy lives here and not per call site.
-func ResolveAgentAssistanceInvocation(cfg *config.Config, override, agentCmd, prompt, runtimePath string) (*AgentAssistanceInvocation, error) {
-	spec := ResolveAttendedAgentSpec(cfg, override)
-	_, entryArgs, err := parseAgentPresetSpec(spec)
-	if err != nil {
-		return nil, err
+//
+// Before launching it walks the attended candidates and takes the first entry
+// whose preset is not on a machine-global quota cooldown and whose binary is on
+// PATH (ADR-0195 decision 6). Skipped entries are named in Detail with why —
+// cooling until a time, or binary missing — and never with wording that implies
+// a mid-session switch. A store it cannot read is treated as empty cooling
+// rather than a refusal: the launch still proceeds on the first PATH-reachable
+// entry. When every entry is unusable the session refuses with that same
+// information.
+func ResolveAgentAssistanceInvocation(d *Deps, cfg *config.Config, override, agentCmd, prompt, runtimePath string) (*AgentAssistanceInvocation, error) {
+	candidates := attendedLaunchCandidates(cfg, override)
+
+	// Cooling is a best-effort pre-flight read. A missing Deps/FS seam — or a
+	// store that will not open — must not refuse the session (ADR-0195 decision 6):
+	// treat cooling as empty and keep walking on PATH alone. Never fall back to
+	// defaultDeps here: under `go test` that points at the real machine store.
+	var cooldowns map[string]time.Time
+	if d != nil && d.FS != nil {
+		if loaded, err := ActiveAgentCooldownsWith(d, time.Now().UTC()); err == nil {
+			cooldowns = loaded
+		}
 	}
-	adapter, err := ResolveAgentAdapter(spec)
-	if err != nil {
-		return nil, err
+
+	var skips []string
+	for _, spec := range candidates {
+		preset, err := AgentPresetName(spec)
+		if err != nil {
+			return nil, err
+		}
+		if cooldowns != nil {
+			if until, cooling := cooldowns[preset]; cooling {
+				skips = append(skips, formatAttendedSkipCooling(preset, until))
+				continue
+			}
+		}
+		if !AgentExecutableAvailableWith(d, preset) {
+			skips = append(skips, formatAttendedSkipMissingBinary(preset))
+			continue
+		}
+		_, entryArgs, err := parseAgentPresetSpec(spec)
+		if err != nil {
+			return nil, err
+		}
+		adapter, err := ResolveAgentAdapter(spec)
+		if err != nil {
+			return nil, err
+		}
+		invocation, err := adapter.AssistanceInvocation(AgentAssistanceRequest{
+			Prompt:      prompt,
+			RuntimePath: runtimePath,
+			EntryArgs:   entryArgs,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if len(skips) > 0 {
+			invocation.Detail = strings.Join(skips, "; ") + "; " + invocation.Detail
+		}
+		return invocation, nil
 	}
-	return adapter.AssistanceInvocation(AgentAssistanceRequest{
-		Prompt:      prompt,
-		RuntimePath: runtimePath,
-		EntryArgs:   entryArgs,
-	})
+	if len(skips) == 0 {
+		return nil, fmt.Errorf("no usable attended agent")
+	}
+	return nil, fmt.Errorf("no usable attended agent: %s", strings.Join(skips, "; "))
+}
+
+func formatAttendedSkipCooling(preset string, until time.Time) string {
+	return fmt.Sprintf("skipped %s (cooling until %s)", preset, until.Local().Format(time.RFC3339))
+}
+
+func formatAttendedSkipMissingBinary(preset string) string {
+	return fmt.Sprintf("skipped %s (binary missing)", preset)
 }
 
 func displayAgentCommand(command AgentCommand, prompt string) string {

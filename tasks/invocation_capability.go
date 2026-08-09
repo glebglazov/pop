@@ -89,6 +89,13 @@ func (c AgentExecutableCapability) executableName() string {
 
 // AgentExecutableAvailable reports whether a preset's CLI executable is on PATH.
 func AgentExecutableAvailable(preset string) bool {
+	return AgentExecutableAvailableWith(defaultDeps, preset)
+}
+
+// AgentExecutableAvailableWith reports whether a preset's CLI executable is on
+// PATH, using d.LookPath when set so tests can inject availability without
+// touching the real PATH.
+func AgentExecutableAvailableWith(d *Deps, preset string) bool {
 	adapter, err := ResolveAgentAdapter(strings.ToLower(preset))
 	if err != nil {
 		return false
@@ -97,7 +104,11 @@ func AgentExecutableAvailable(preset string) bool {
 	if name == "" {
 		return false
 	}
-	_, err = exec.LookPath(name)
+	lookPath := exec.LookPath
+	if d != nil && d.LookPath != nil {
+		lookPath = d.LookPath
+	}
+	_, err = lookPath(name)
 	return err == nil
 }
 

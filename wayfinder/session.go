@@ -187,8 +187,8 @@ func FocusMapSession(d *Deps, session MapSession) error {
 // dashboard's map row — builds it here, so a session started from any of them
 // looks the same. It names exactly one ticket, which is what keeps the
 // one-non-research-ticket-per-session rule intact across a fanned-out frontier.
-func GrillingInvocation(cfg *config.Config, mapID, ticketID, dir string) (string, error) {
-	return agentPaneCommand(cfg, WorkModeInvocation(skillsPrefixOf(cfg), mapID, ticketID), dir)
+func GrillingInvocation(d *Deps, cfg *config.Config, mapID, ticketID, dir string) (string, error) {
+	return agentPaneCommand(d, cfg, WorkModeInvocation(skillsPrefixOf(cfg), mapID, ticketID), dir)
 }
 
 // skillsPrefixOf resolves the configured skills prefix, falling back to the
@@ -204,8 +204,12 @@ func skillsPrefixOf(cfg *config.Config) string {
 // interactive agent, opened on prompt at dir. Both wayfinding entry points —
 // grilling one ticket, assisting a whole Map — build their command here, so a
 // pane looks the same whichever mode seeded it.
-func agentPaneCommand(cfg *config.Config, prompt, dir string) (string, error) {
-	inv, err := tasks.ResolveAgentAssistanceInvocation(cfg, "", "", prompt, dir)
+func agentPaneCommand(d *Deps, cfg *config.Config, prompt, dir string) (string, error) {
+	var taskDeps *tasks.Deps
+	if d != nil {
+		taskDeps = d.taskDeps()
+	}
+	inv, err := tasks.ResolveAgentAssistanceInvocation(taskDeps, cfg, "", "", prompt, dir)
 	if err != nil {
 		return "", fmt.Errorf("resolve interactive agent: %w", err)
 	}

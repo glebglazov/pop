@@ -93,7 +93,7 @@ func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverif
 
 	prompt := BuildHITLAssistancePrompt(d, taskSetID, m, *hitl, runtimePath)
 	body := gateTaskBody(d, m, hitl)
-	invocation, err := ResolveAgentAssistanceInvocation(env.cfg, agentOverride, agentCmd, prompt, runtimePath)
+	invocation, err := ResolveAgentAssistanceInvocation(d, env.cfg, agentOverride, agentCmd, prompt, runtimePath)
 	if err != nil {
 		return false, exitErr(ExitSetup, "%v", err)
 	}
@@ -135,7 +135,7 @@ func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverif
 			hitl = BlockingHITLTask(m)
 			body = gateTaskBody(d, m, hitl)
 			prompt = BuildHITLAssistancePrompt(d, taskSetID, m, *hitl, runtimePath)
-			invocation, err = ResolveAgentAssistanceInvocation(env.cfg, agentOverride, agentCmd, prompt, runtimePath)
+			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg, agentOverride, agentCmd, prompt, runtimePath)
 			if err != nil {
 				return true, exitErr(ExitSetup, "%v", err)
 			}
@@ -166,7 +166,7 @@ func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverif
 			}
 			m = afterManifest
 			prompt = BuildHITLAssistancePrompt(d, taskSetID, m, *BlockingHITLTask(m), runtimePath)
-			invocation, err = ResolveAgentAssistanceInvocation(env.cfg, agentOverride, agentCmd, prompt, runtimePath)
+			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg, agentOverride, agentCmd, prompt, runtimePath)
 			if err != nil {
 				return true, exitErr(ExitSetup, "%v", err)
 			}
@@ -409,7 +409,7 @@ func handleInteractiveFailedGate(env gateEnv, m *Manifest, failed *Task) (bool, 
 
 	prompt := BuildFailedAssistancePrompt(d, taskSetID, m, *failed, runtimePath)
 	body := gateTaskBody(d, m, failed)
-	invocation, err := ResolveAgentAssistanceInvocation(env.cfg, agentOverride, agentCmd, prompt, runtimePath)
+	invocation, err := ResolveAgentAssistanceInvocation(d, env.cfg, agentOverride, agentCmd, prompt, runtimePath)
 	if err != nil {
 		return false, exitErr(ExitSetup, "%v", err)
 	}
@@ -453,7 +453,7 @@ func handleInteractiveFailedGate(env gateEnv, m *Manifest, failed *Task) (bool, 
 			failed = FailedTask(m)
 			prompt = BuildFailedAssistancePrompt(d, taskSetID, m, *failed, runtimePath)
 			body = gateTaskBody(d, m, failed)
-			invocation, err = ResolveAgentAssistanceInvocation(env.cfg, agentOverride, agentCmd, prompt, runtimePath)
+			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg, agentOverride, agentCmd, prompt, runtimePath)
 			if err != nil {
 				return true, exitErr(ExitSetup, "%v", err)
 			}
@@ -556,7 +556,7 @@ func handleInteractiveVerifyFailedGate(env gateEnv, repo string, m *Manifest, wo
 	}
 
 	prompt := BuildVerifyFailedAssistancePrompt(d, taskSetID, m, workSHA, findings, runtimePath)
-	invocation, err := ResolveAgentAssistanceInvocation(env.cfg, agentOverride, agentCmd, prompt, runtimePath)
+	invocation, err := ResolveAgentAssistanceInvocation(d, env.cfg, agentOverride, agentCmd, prompt, runtimePath)
 	if err != nil {
 		return false, exitErr(ExitSetup, "%v", err)
 	}

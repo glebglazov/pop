@@ -200,7 +200,7 @@ func projectAuthoringSessionFromGate(d *Deps, out io.Writer, pr *ProjectRoutine,
 		return
 	}
 	prompt := buildProjectAuthoringPrompt(d, pr)
-	invocation, err := tasks.ResolveAgentAssistanceInvocation(cfg, spec, "", prompt, pr.Dir)
+	invocation, err := tasks.ResolveAgentAssistanceInvocation(d.taskDeps(), cfg, spec, "", prompt, pr.Dir)
 	if err != nil {
 		fmt.Fprintf(out, "Could not prepare the authoring agent: %v\n", err)
 		return

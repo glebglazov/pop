@@ -3,6 +3,7 @@ package tasks
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -213,7 +214,7 @@ func TestKimiIsOptInOnlyAndNeverADefault(t *testing.T) {
 }
 
 func TestKimiAssistanceLaunchesBareInteractiveBinary(t *testing.T) {
-	invocation, err := ResolveAgentAssistanceInvocation(nil, "kimi --model moonshot-ai/kimi-k3", "", "briefing text", "/tmp/runtime")
+	invocation, err := ResolveAgentAssistanceInvocation(attendedTestDeps(t), nil, "kimi --model moonshot-ai/kimi-k3", "", "briefing text", "/tmp/runtime")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +242,7 @@ func TestKimiAssistanceLaunchesBareInteractiveBinary(t *testing.T) {
 // with every preset whose interactive binary takes the briefing positionally:
 // the prompt rides in argv, so ClipboardPrompt must stay empty.
 func TestClaudeAssistanceCarriesNoClipboardPrompt(t *testing.T) {
-	invocation, err := ResolveAgentAssistanceInvocation(nil, "claude", "", "briefing text", "/tmp/runtime")
+	invocation, err := ResolveAgentAssistanceInvocation(attendedTestDeps(t), nil, "claude", "", "briefing text", "/tmp/runtime")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -915,7 +916,7 @@ func TestAgentAssistanceCapabilityNativeForEveryPreset(t *testing.T) {
 }
 
 func TestResolveAgentAssistanceInvocationNative(t *testing.T) {
-	invocation, err := ResolveAgentAssistanceInvocation(nil, "claude", "", "assist prompt", "/tmp/runtime")
+	invocation, err := ResolveAgentAssistanceInvocation(attendedTestDeps(t), nil, "claude", "", "assist prompt", "/tmp/runtime")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -937,7 +938,7 @@ func TestResolveAgentAssistanceInvocationNative(t *testing.T) {
 }
 
 func TestResolveAgentAssistanceInvocationCursorLaunchesOwnBinary(t *testing.T) {
-	invocation, err := ResolveAgentAssistanceInvocation(nil, "cursor", "", "assist prompt", "/tmp/runtime")
+	invocation, err := ResolveAgentAssistanceInvocation(attendedTestDeps(t), nil, "cursor", "", "assist prompt", "/tmp/runtime")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -966,13 +967,23 @@ func attendedGroupConfig(cmds ...string) *config.Config {
 	}}
 }
 
+// attendedTestDeps isolates the cooldown store and treats every agent binary as
+// on PATH, so ResolveAgentAssistanceInvocation tests exercise selection without
+// depending on the machine's real PATH or pop.db.
+func attendedTestDeps(t *testing.T) *Deps {
+	t.Helper()
+	d := newTestDeps(t)
+	d.LookPath = func(file string) (string, error) { return "/bin/" + file, nil }
+	return d
+}
+
 // TestAttendedSessionLaunchesFromTheAttendedGroup pins ADR-0195: an attended
 // session resolves its agent from [work.attended].agents and never from the list
 // a drain walks, and the entry's own arguments — its model included — reach the
 // launched command as written.
 func TestAttendedSessionLaunchesFromTheAttendedGroup(t *testing.T) {
 	cfg := attendedGroupConfig("claude --model opus", "claude --model haiku")
-	invocation, err := ResolveAgentAssistanceInvocation(cfg, "", "", "assist prompt", "/tmp/runtime")
+	invocation, err := ResolveAgentAssistanceInvocation(attendedTestDeps(t), cfg, "", "", "assist prompt", "/tmp/runtime")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -986,7 +997,7 @@ func TestAttendedSessionLaunchesFromTheAttendedGroup(t *testing.T) {
 
 	// Two entries naming the same preset at different models each launch with
 	// their own — the case a per-preset attended key could never express.
-	second, err := ResolveAgentAssistanceInvocation(cfg, cfg.AttendedAgents()[1], "", "assist prompt", "/tmp/runtime")
+	second, err := ResolveAgentAssistanceInvocation(attendedTestDeps(t), cfg, cfg.AttendedAgents()[1], "", "assist prompt", "/tmp/runtime")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -997,7 +1008,7 @@ func TestAttendedSessionLaunchesFromTheAttendedGroup(t *testing.T) {
 
 	// An empty attended group falls back to the built-in agent, still never to
 	// the drain's list.
-	bare, err := ResolveAgentAssistanceInvocation(attendedGroupConfig(), "", "", "assist prompt", "/tmp/runtime")
+	bare, err := ResolveAgentAssistanceInvocation(attendedTestDeps(t), attendedGroupConfig(), "", "", "assist prompt", "/tmp/runtime")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1024,7 +1035,7 @@ func TestAttendedEntryOwnsItsPosture(t *testing.T) {
 		{"codex --dangerously-bypass-approvals-and-sandbox", []string{"--dangerously-bypass-approvals-and-sandbox", "assist prompt"}},
 	} {
 		t.Run(tc.cmd, func(t *testing.T) {
-			invocation, err := ResolveAgentAssistanceInvocation(attendedGroupConfig(tc.cmd), "", "", "assist prompt", "/tmp/runtime")
+			invocation, err := ResolveAgentAssistanceInvocation(attendedTestDeps(t), attendedGroupConfig(tc.cmd), "", "", "assist prompt", "/tmp/runtime")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1053,7 +1064,7 @@ func TestAttendedAssistanceLaunchesAutoApproved(t *testing.T) {
 		{"kimi", nil},
 	} {
 		t.Run(tc.preset, func(t *testing.T) {
-			invocation, err := ResolveAgentAssistanceInvocation(nil, tc.preset, "", "assist prompt", "/tmp/runtime")
+			invocation, err := ResolveAgentAssistanceInvocation(attendedTestDeps(t), nil, tc.preset, "", "assist prompt", "/tmp/runtime")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1074,6 +1085,115 @@ func TestAttendedAssistanceLaunchesAutoApproved(t *testing.T) {
 	}
 }
 
+// TestAttendedLaunchTimeSkip pins ADR-0195 decision 6: an attended launch takes
+// the first entry whose preset is not cooling and whose binary is on PATH,
+// names each skipped entry and why in Detail, and never implies a mid-session
+// switch. When every entry is unusable the session refuses with that same
+// information; a store it cannot read still proceeds on the first entry.
+func TestAttendedLaunchTimeSkip(t *testing.T) {
+	cfg := attendedGroupConfig("claude", "cursor", "codex")
+
+	t.Run("skips cooling preset and names it", func(t *testing.T) {
+		d := attendedTestDeps(t)
+		until := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
+		if err := updateAgentCooldown(d, "claude", until); err != nil {
+			t.Fatal(err)
+		}
+		inv, err := ResolveAgentAssistanceInvocation(d, cfg, "", "", "assist prompt", "/tmp/runtime")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if inv.AgentPreset != "cursor" {
+			t.Fatalf("preset = %q, want cursor after skipping cooling claude", inv.AgentPreset)
+		}
+		wantSkip := formatAttendedSkipCooling("claude", until)
+		if !strings.Contains(inv.Detail, wantSkip) {
+			t.Fatalf("Detail = %q, want %q", inv.Detail, wantSkip)
+		}
+		if !strings.Contains(inv.Detail, "native") {
+			t.Fatalf("Detail = %q, want native launch wording kept", inv.Detail)
+		}
+		for _, banned := range []string{"fallback", "trying next", "switch"} {
+			if strings.Contains(strings.ToLower(inv.Detail), banned) {
+				t.Fatalf("Detail = %q implies mid-session switch (%q)", inv.Detail, banned)
+			}
+		}
+	})
+
+	t.Run("skips missing binary and names it", func(t *testing.T) {
+		d := attendedTestDeps(t)
+		d.LookPath = func(file string) (string, error) {
+			if file == "claude" {
+				return "", exec.ErrNotFound
+			}
+			return "/bin/" + file, nil
+		}
+		inv, err := ResolveAgentAssistanceInvocation(d, cfg, "", "", "assist prompt", "/tmp/runtime")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if inv.AgentPreset != "cursor" {
+			t.Fatalf("preset = %q, want cursor after skipping missing claude", inv.AgentPreset)
+		}
+		wantSkip := formatAttendedSkipMissingBinary("claude")
+		if !strings.Contains(inv.Detail, wantSkip) {
+			t.Fatalf("Detail = %q, want %q", inv.Detail, wantSkip)
+		}
+	})
+
+	t.Run("refuses when every entry is unusable", func(t *testing.T) {
+		d := attendedTestDeps(t)
+		until := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+		if err := updateAgentCooldown(d, "claude", until); err != nil {
+			t.Fatal(err)
+		}
+		d.LookPath = func(file string) (string, error) {
+			if file == "claude" {
+				return "/bin/claude", nil
+			}
+			return "", exec.ErrNotFound
+		}
+		_, err := ResolveAgentAssistanceInvocation(d, cfg, "", "", "assist prompt", "/tmp/runtime")
+		if err == nil {
+			t.Fatal("expected refusal when every attended entry is unusable")
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, formatAttendedSkipCooling("claude", until)) {
+			t.Fatalf("error = %q, want cooling skip for claude", msg)
+		}
+		if !strings.Contains(msg, formatAttendedSkipMissingBinary("cursor")) {
+			t.Fatalf("error = %q, want missing-binary skip for cursor", msg)
+		}
+		if !strings.Contains(msg, formatAttendedSkipMissingBinary("codex")) {
+			t.Fatalf("error = %q, want missing-binary skip for codex", msg)
+		}
+		if strings.Contains(strings.ToLower(msg), "fallback") || strings.Contains(msg, "trying next") {
+			t.Fatalf("error = %q implies mid-session switch", msg)
+		}
+	})
+
+	t.Run("store unreadable still launches first entry", func(t *testing.T) {
+		d := attendedTestDeps(t)
+		path := DrainStorePathWith(d)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("not a sqlite database"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		inv, err := ResolveAgentAssistanceInvocation(d, cfg, "", "", "assist prompt", "/tmp/runtime")
+		if err != nil {
+			t.Fatalf("unreadable store must not refuse: %v", err)
+		}
+		if inv.AgentPreset != "claude" {
+			t.Fatalf("preset = %q, want first entry when store cannot be read", inv.AgentPreset)
+		}
+		if strings.Contains(inv.Detail, "skipped") {
+			t.Fatalf("Detail = %q, want no skip notes when cooling could not be read", inv.Detail)
+		}
+	})
+}
+
 func TestAgentCmdIgnoredForAttendedAssistance(t *testing.T) {
 	capability, err := ResolveAgentAssistanceCapability("claude", "fake-agent --verbose")
 	if err != nil {
@@ -1083,7 +1203,7 @@ func TestAgentCmdIgnoredForAttendedAssistance(t *testing.T) {
 		t.Fatalf("capability = %#v, want native despite --agent-cmd", capability)
 	}
 
-	invocation, err := ResolveAgentAssistanceInvocation(nil, "cursor", "fake-agent --verbose", "assist prompt", "/tmp/runtime")
+	invocation, err := ResolveAgentAssistanceInvocation(attendedTestDeps(t), nil, "cursor", "fake-agent --verbose", "assist prompt", "/tmp/runtime")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -31,7 +31,7 @@ func authoringSessionFromGate(d *Deps, out io.Writer, id, agentOverride string) 
 		return
 	}
 	prompt := buildAuthoringPrompt(d, id, r)
-	invocation, err := tasks.ResolveAgentAssistanceInvocation(cfg, spec, "", prompt, r.Manifest.BoundDirectory)
+	invocation, err := tasks.ResolveAgentAssistanceInvocation(d.taskDeps(), cfg, spec, "", prompt, r.Manifest.BoundDirectory)
 	if err != nil {
 		fmt.Fprintf(out, "Could not prepare the authoring agent: %v\n", err)
 		return

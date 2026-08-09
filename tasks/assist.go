@@ -335,7 +335,7 @@ func handleGenericAssistMenu(env gateEnv, m *Manifest, status TaskSetStatus, fin
 	}
 
 	prompt := BuildAssistPrompt(d, taskSetID, m, status, runtimePath, findings)
-	invocation, err := ResolveAgentAssistanceInvocation(env.cfg, env.agentOverride, env.agentCmd, prompt, runtimePath)
+	invocation, err := ResolveAgentAssistanceInvocation(d, env.cfg, env.agentOverride, env.agentCmd, prompt, runtimePath)
 	if err != nil {
 		return false, exitErr(ExitSetup, "%v", err)
 	}
@@ -365,7 +365,7 @@ func handleGenericAssistMenu(env gateEnv, m *Manifest, status TaskSetStatus, fin
 				}
 			}
 			prompt = BuildAssistPrompt(d, taskSetID, m, status, runtimePath, findings)
-			invocation, err = ResolveAgentAssistanceInvocation(env.cfg, env.agentOverride, env.agentCmd, prompt, runtimePath)
+			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg, env.agentOverride, env.agentCmd, prompt, runtimePath)
 			if err != nil {
 				return false, exitErr(ExitSetup, "%v", err)
 			}

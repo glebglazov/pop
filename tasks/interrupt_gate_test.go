@@ -114,9 +114,11 @@ func TestInterruptGateReprompt(t *testing.T) {
 func TestInterruptGateAssistDispatchesToSharedHandler(t *testing.T) {
 	m, task := stubInterruptTask()
 	runner := &configurableHITLAssistanceRunner{t: t}
+	d := attendedTestDeps(t)
+	d.Runner = runner
 	var out bytes.Buffer
 	env := gateEnv{
-		d:         &Deps{Runner: runner},
+		d:         d,
 		out:       &out,
 		in:        strings.NewReader("2\n0\n"),
 		taskSetID: "demo",
@@ -150,9 +152,11 @@ func TestInterruptGateAssistDispatchesToSharedHandler(t *testing.T) {
 func TestInterruptGateShellDispatchesToSharedHandler(t *testing.T) {
 	m, task := stubInterruptTask()
 	runner := &shellSpawnRunner{}
+	d := attendedTestDeps(t)
+	d.Runner = runner
 	var out bytes.Buffer
 	env := gateEnv{
-		d:           &Deps{Runner: runner},
+		d:           d,
 		out:         &out,
 		in:          strings.NewReader("3\n0\n"),
 		runtimePath: "/runtime/checkout",
