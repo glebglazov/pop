@@ -64,7 +64,7 @@ type Deps struct {
 
 	// AgentOverrides is the session-lived promotion of one entry to the head of
 	// each Work agent group (ADR-0196). Nil means no overrides. The dashboard
-	// (and later the gates) write here for the rest of this OS process; nothing
+	// and gate menus write here for the rest of this OS process; nothing
 	// persists it.
 	AgentOverrides *AgentOverrides
 

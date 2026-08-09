@@ -2,10 +2,13 @@ package ui
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"github.com/glebglazov/pop/internal/tty"
 )
 
 // AgentOverrideGroup is one Work agent group in the override picker (ADR-0196).
@@ -286,6 +289,45 @@ func IsAgentOverrideKey(msg tea.KeyPressMsg) bool {
 		return false
 	}
 	return msg.Mod.Contains(tea.ModAlt) && !msg.Mod.Contains(tea.ModCtrl)
+}
+
+// RunAgentOverridePicker runs the two-level override picker as an inline tea
+// program (no altscreen). Returns the confirmed choice, or nil when the human
+// left unchanged. On a non-TTY input it prints ViewContent once and returns
+// nil — digit-line picking is not offered; gates never reach here without a
+// promptable terminal.
+func RunAgentOverridePicker(groups []AgentOverrideGroup, in io.Reader, out io.Writer, warn func(string, ...any)) (*AgentOverrideChoice, error) {
+	if out == nil {
+		out = os.Stdout
+	}
+	if in == nil {
+		in = os.Stdin
+	}
+	p := NewAgentOverridePicker(groups)
+	if fd, ok := tty.TerminalFd(in); ok {
+		claimTerminal(fd, warn)
+		return runAgentOverridePickerInteractive(p, in, out)
+	}
+	fmt.Fprintln(out)
+	fmt.Fprint(out, p.ViewContent())
+	return nil, nil
+}
+
+func runAgentOverridePickerInteractive(p *AgentOverridePicker, in io.Reader, out io.Writer) (*AgentOverrideChoice, error) {
+	opts := []tea.ProgramOption{
+		tea.WithInput(in),
+		tea.WithOutput(out),
+		tea.WithoutSignalHandler(),
+	}
+	final, err := tea.NewProgram(p, opts...).Run()
+	if err != nil {
+		return nil, err
+	}
+	fp, ok := final.(*AgentOverridePicker)
+	if !ok || fp == nil {
+		return nil, fmt.Errorf("agent override picker: unexpected model type %T", final)
+	}
+	return fp.Choice(), nil
 }
 
 var agentOverrideKeys = struct {

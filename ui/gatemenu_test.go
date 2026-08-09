@@ -106,6 +106,35 @@ func TestGateMenuViewGoldenInterruptFootnote(t *testing.T) {
 	}
 }
 
+func TestGateMenuAltAOpensOverride(t *testing.T) {
+	m := NewGateMenu(sampleHITLSpec())
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 'a', Mod: tea.ModAlt})
+	if !m.OpenOverride() {
+		t.Fatal("alt+a should signal OpenOverride")
+	}
+	if m.Chosen() != "" {
+		t.Fatalf("chosen = %q, want empty on override", m.Chosen())
+	}
+	if cmd == nil {
+		t.Fatal("expected tea.Quit")
+	}
+}
+
+func TestGateMenuAssistsAppendsAttendedLabel(t *testing.T) {
+	spec := GateMenuSpec{
+		Headline:      "Assist",
+		AttendedLabel: "claude · agent's own configuration",
+		Items: []GateMenuItem{
+			{Key: "1", Label: "Agent assistance (default)", Default: true, Assists: true},
+			{Key: "0", Label: "Exit"},
+		},
+	}
+	got := StripANSI(NewGateMenu(spec).ViewContent())
+	if !strings.Contains(got, "1. Agent assistance (default) · claude · agent's own configuration") {
+		t.Fatalf("missing attended label:\n%s", got)
+	}
+}
+
 func TestGateMenuDigitSelectsAndQuits(t *testing.T) {
 	m := NewGateMenu(sampleHITLSpec())
 	_, cmd := m.Update(tea.KeyPressMsg{Code: '4', Text: "4"})

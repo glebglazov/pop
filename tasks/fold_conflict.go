@@ -82,12 +82,16 @@ func HandleFoldConflict(d *Deps, cfg *config.Config, ctx FoldConflictContext, op
 	reader := newPromptReader(in)
 	for {
 		badge := foldConflictVerifiedBadge(d, cfg, ctx.SetID, ctx.RuntimePath)
-		action, err := promptFoldConflictAction(out, in, reader, ctx.SetID, badge, invocation)
+		action, err := promptFoldConflictAction(out, in, reader, d, cfg, ctx.SetID, badge, invocation)
 		if err != nil {
 			return err
 		}
 		switch action {
 		case foldConflictAgent:
+			invocation, err = ResolveAgentAssistanceInvocation(d, cfg, agentOverride, opts.AgentCmd, prompt, ctx.RuntimePath)
+			if err != nil {
+				return fmt.Errorf("fold refused: %w", err)
+			}
 			fmt.Fprintf(outputFor(out), "Starting fold conflict assistance: %s\n", invocation.Display)
 			exitCode, err := runAttendedAssistanceCommand(d, in, ctx.RuntimePath, out, invocation)
 			if err != nil {
@@ -146,7 +150,7 @@ const (
 	foldConflictExit
 )
 
-func promptFoldConflictAction(out io.Writer, in io.Reader, reader *promptReader, setID string, badge VerifiedAtBadge, invocation *AgentAssistanceInvocation) (foldConflictAction, error) {
+func promptFoldConflictAction(out io.Writer, in io.Reader, reader *promptReader, d *Deps, cfg *config.Config, setID string, badge VerifiedAtBadge, invocation *AgentAssistanceInvocation) (foldConflictAction, error) {
 	var preamble []string
 	if text := VerifiedAtBadgeText(badge); text != "" {
 		preamble = append(preamble, "  "+text)
@@ -156,14 +160,14 @@ func promptFoldConflictAction(out io.Writer, in io.Reader, reader *promptReader,
 		Tone:     ui.GateMenuToneDefault,
 		Preamble: preamble,
 		Items: []ui.GateMenuItem{
-			{Key: "1", Label: "Agent assistance (default)", Details: gateInvocationDetails(invocation), Default: true},
+			{Key: "1", Label: "Agent assistance (default)", Details: gateInvocationDetails(invocation), Default: true, Assists: true},
 			{Key: "2", Label: "Resume fold"},
 			{Key: "3", Label: "Retry fold from scratch"},
 			{Key: "4", Label: "Verify set"},
 			{Key: "0", Label: "Exit"},
 		},
 	}
-	choice, _, err := promptGateMenu(out, in, reader, spec, nil)
+	choice, _, err := promptGateMenu(out, in, reader, spec, nil, d, cfg)
 	if err != nil {
 		return foldConflictExit, err
 	}

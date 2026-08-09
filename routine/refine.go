@@ -66,7 +66,7 @@ func RefineWith(d *Deps, id, agentOverride string) error {
 		if err != nil {
 			return err
 		}
-		choice, err := promptRoutineGateMenu(out, in, reader, refineGateSpec(id, r, lastRunSummary(d, id)))
+		choice, err := promptRoutineGateMenu(out, in, reader, refineGateSpec(id, r, lastRunSummary(d, id)), d)
 		if err != nil {
 			return err
 		}

@@ -343,12 +343,16 @@ func handleGenericAssistMenu(env gateEnv, m *Manifest, status TaskSetStatus, fin
 	offerFold := env.fold != nil && assistFoldEligible(d, taskSetID, status)
 
 	for {
-		action, err := promptGenericAssistAction(out, in, reader, taskSetID, status, invocation, offerFold)
+		action, err := promptGenericAssistAction(out, in, reader, d, env.cfg, taskSetID, status, invocation, offerFold)
 		if err != nil {
 			return false, err
 		}
 		switch action {
 		case genericAssistAgent:
+			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg, env.agentOverride, env.agentCmd, prompt, runtimePath)
+			if err != nil {
+				return false, exitErr(ExitSetup, "%v", err)
+			}
 			fmt.Fprintf(outputFor(out), "Starting Assist session assistance: %s\n", invocation.Display)
 			exitCode, err := runAttendedAssistanceCommand(d, in, runtimePath, out, invocation)
 			if err != nil {
@@ -386,9 +390,9 @@ func handleGenericAssistMenu(env gateEnv, m *Manifest, status TaskSetStatus, fin
 	}
 }
 
-func promptGenericAssistAction(out io.Writer, in io.Reader, reader *promptReader, taskSetID string, status TaskSetStatus, invocation *AgentAssistanceInvocation, offerFold bool) (genericAssistAction, error) {
+func promptGenericAssistAction(out io.Writer, in io.Reader, reader *promptReader, d *Deps, cfg *config.Config, taskSetID string, status TaskSetStatus, invocation *AgentAssistanceInvocation, offerFold bool) (genericAssistAction, error) {
 	items := []ui.GateMenuItem{
-		{Key: "1", Label: "Agent assistance (default)", Details: gateInvocationDetails(invocation), Default: true},
+		{Key: "1", Label: "Agent assistance (default)", Details: gateInvocationDetails(invocation), Default: true, Assists: true},
 		{Key: "2", Label: "Open a shell in the checkout"},
 	}
 	if offerFold {
@@ -401,7 +405,7 @@ func promptGenericAssistAction(out io.Writer, in io.Reader, reader *promptReader
 		Tone:     ui.GateMenuToneDefault,
 		Items:    items,
 	}
-	choice, _, err := promptGateMenu(out, in, reader, spec, nil)
+	choice, _, err := promptGateMenu(out, in, reader, spec, nil, d, cfg)
 	if err != nil {
 		return genericAssistExit, err
 	}

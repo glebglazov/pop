@@ -547,7 +547,7 @@ func TestMapAssistOpensTheMapScopedPaneAndStays(t *testing.T) {
 	if err := runMapAssistWith(d, &out, "demo", false); err != nil {
 		t.Fatalf("assist: %v", err)
 	}
-	if !strings.Contains(out.String(), "opened assist pane assist in "+session+":map") {
+	if !strings.Contains(out.String(), "opened assist pane assist · "+tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(nil, nil))+" in "+session+":map") {
 		t.Fatalf("assist did not report its pane:\n%s", out.String())
 	}
 	// The one rule an unclaimed session never sees enforced is the one the verb
@@ -582,7 +582,7 @@ func TestMapAssistOpensTheMapScopedPaneAndStays(t *testing.T) {
 	if err := runMapAssistWith(d, &again, "demo", false); err != nil {
 		t.Fatalf("second assist: %v", err)
 	}
-	if !strings.Contains(again.String(), "returned to assist pane assist in "+session+":map") {
+	if !strings.Contains(again.String(), "returned to assist pane assist · "+tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(nil, nil))+" in "+session+":map") {
 		t.Fatalf("second assist = %q, want a return to the first pane", again.String())
 	}
 	if got, _ := fake.PaneTagValue(pane, tmuxmod.TagAssist); got != "demo" {
@@ -642,11 +642,12 @@ func TestMapSessionPerMapAutoOpensWithoutRelocatingTheCaller(t *testing.T) {
 	if err := runMapNextWith(d, &next, "demo", true); err != nil {
 		t.Fatalf("next: %v", err)
 	}
-	if !strings.Contains(next.String(), "opened grilling pane 01-first in "+session+":map") {
+	wantPane := "01-first · " + tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(nil, nil))
+	if !strings.Contains(next.String(), "opened grilling pane "+wantPane+" in "+session+":map") {
 		t.Fatalf("next did not report its pane:\n%s", next.String())
 	}
 	panes := fake.Windows[session]["map"]
-	if len(panes) != 1 || fake.PaneTitles[panes[0]] != "01-first" {
+	if len(panes) != 1 || fake.PaneTitles[panes[0]] != wantPane {
 		t.Fatalf("grilling panes = %v (titles %v), want one titled after the ticket", fake.Windows[session], fake.PaneTitles)
 	}
 	if got := strings.Join(fake.SentCommands[panes[0]], " "); !strings.Contains(got, "/pop-wayfinder work demo 01") {

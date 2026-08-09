@@ -48,24 +48,7 @@ func (m QueueDashboard) openAgentOverridePicker() QueueDashboard {
 }
 
 func agentOverridePickerGroups(cfg *config.Config, _ *tasks.AgentOverrides) []ui.AgentOverrideGroup {
-	// The picker shows the configured list; promoting is what a pick does. The
-	// persistent block names the effective head after promotion.
-	catalogs := tasks.AgentGroupCatalogs(cfg)
-	out := make([]ui.AgentOverrideGroup, 0, len(catalogs))
-	for _, catalog := range catalogs {
-		g := ui.AgentOverrideGroup{ID: catalog.Group, Label: catalog.Group}
-		for _, entry := range catalog.Entries {
-			if entry.Problem != "" {
-				continue
-			}
-			g.Entries = append(g.Entries, ui.AgentOverrideEntry{
-				ID:    entry.Cmd,
-				Label: tasks.FormatAgentEntry(entry),
-			})
-		}
-		out = append(out, g)
-	}
-	return out
+	return tasks.AgentOverridePickerGroups(cfg)
 }
 
 // updateAgentOverridePicker drives the overlay: esc/ctrl+c leave unchanged;

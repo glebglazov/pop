@@ -6,35 +6,104 @@ import (
 	"os"
 	"strings"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/ui"
 )
 
 // runGateMenu is the seam every gate prompt calls. Production points at
-// ui.RunGateMenu; tests may swap it. Kept as a package var so a future override
-// picker (ADR-0196) can wrap the same call site.
+// ui.RunGateMenu; tests may swap it. Kept as a package var so the override
+// picker (ADR-0196) wraps the same call site.
 var runGateMenu = ui.RunGateMenu
+
+// runAgentOverridePicker is the seam for the gate-side override picker.
+var runAgentOverridePicker = ui.RunAgentOverridePicker
 
 // promptGateMenu runs the shared inline gate menu and returns the chosen key.
 // forceQuit is set when the interrupt gate's second SIGINT wins. reader is the
 // shared per-run prompt reader used on the non-TTY line path so queued input
 // across gates is not lost.
-func promptGateMenu(out io.Writer, in io.Reader, reader *promptReader, spec ui.GateMenuSpec, interrupt <-chan os.Signal) (key string, forceQuit bool, err error) {
+//
+// alt+a opens the same two-level agent-override picker as the dashboard; a pick
+// promotes into d.AgentOverrides for the rest of this process, then the menu
+// re-opens with an updated AttendedLabel (ADR-0196 decisions 5 and 9).
+func promptGateMenu(out io.Writer, in io.Reader, reader *promptReader, spec ui.GateMenuSpec, interrupt <-chan os.Signal, d *Deps, cfg *config.Config) (key string, forceQuit bool, err error) {
 	if in == nil {
 		in = os.Stdin
 	}
-	cfg := ui.GateMenuRunConfig{
-		Interrupt:  interrupt,
-		LineReader: reader,
-		Warn:       promptWarner(out),
+	ensureAgentOverrides(d)
+	for {
+		spec.AttendedLabel = FormatAgentEntry(EffectiveAttendedEntry(cfg, agentOverridesOf(d)))
+		cfgRun := ui.GateMenuRunConfig{
+			Interrupt:  interrupt,
+			LineReader: reader,
+			Warn:       promptWarner(out),
+		}
+		res, err := runGateMenu(spec, in, out, cfgRun)
+		if err != nil {
+			return "", false, exitErr(ExitOperational, "read gate selection: %v", err)
+		}
+		if res.ForceQuit {
+			return "", true, nil
+		}
+		if res.OpenOverride {
+			if err := promptGateAgentOverride(out, in, d, cfg); err != nil {
+				return "", false, err
+			}
+			continue
+		}
+		return res.Key, false, nil
 	}
-	res, err := runGateMenu(spec, in, out, cfg)
+}
+
+func promptGateAgentOverride(out io.Writer, in io.Reader, d *Deps, cfg *config.Config) error {
+	overrides := ensureAgentOverrides(d)
+	choice, err := runAgentOverridePicker(AgentOverridePickerGroups(cfg), in, out, promptWarner(out))
 	if err != nil {
-		return "", false, exitErr(ExitOperational, "read gate selection: %v", err)
+		return exitErr(ExitOperational, "read agent override: %v", err)
 	}
-	if res.ForceQuit {
-		return "", true, nil
+	if choice != nil {
+		overrides.Promote(choice.Group, choice.Cmd)
 	}
-	return res.Key, false, nil
+	return nil
+}
+
+func ensureAgentOverrides(d *Deps) *AgentOverrides {
+	if d == nil {
+		return NewAgentOverrides()
+	}
+	if d.AgentOverrides == nil {
+		d.AgentOverrides = NewAgentOverrides()
+	}
+	return d.AgentOverrides
+}
+
+func agentOverridesOf(d *Deps) *AgentOverrides {
+	if d == nil {
+		return nil
+	}
+	return d.AgentOverrides
+}
+
+// AgentOverridePickerGroups builds the four Work groups for the shared
+// override picker from config. Empty groups stay listed so the picker shape
+// matches the dashboard (ADR-0196).
+func AgentOverridePickerGroups(cfg *config.Config) []ui.AgentOverrideGroup {
+	catalogs := AgentGroupCatalogs(cfg)
+	out := make([]ui.AgentOverrideGroup, 0, len(catalogs))
+	for _, catalog := range catalogs {
+		g := ui.AgentOverrideGroup{ID: catalog.Group, Label: catalog.Group}
+		for _, entry := range catalog.Entries {
+			if entry.Problem != "" {
+				continue
+			}
+			g.Entries = append(g.Entries, ui.AgentOverrideEntry{
+				ID:    entry.Cmd,
+				Label: FormatAgentEntry(entry),
+			})
+		}
+		out = append(out, g)
+	}
+	return out
 }
 
 func gateInvocationDetails(invocation *AgentAssistanceInvocation) []string {

@@ -40,6 +40,9 @@ type GateMenuItem struct {
 	// for key "2"). Matched case-insensitively on digit-jump and the non-TTY
 	// line path.
 	Aliases []string
+	// Assists marks the item whose launch uses the attended entry. When set,
+	// ViewContent appends Spec.AttendedLabel (ADR-0196 decision 9).
+	Assists bool
 }
 
 // GateMenuSpec describes one inline gate menu frame.
@@ -52,15 +55,21 @@ type GateMenuSpec struct {
 	Items    []GateMenuItem
 	// Footnote is an optional dim line under the choices (e.g. force-quit hint).
 	Footnote string
+	// AttendedLabel is the shared one-line render of the attended entry the
+	// Assists item will launch (FormatAgentEntry). Empty skips the append.
+	AttendedLabel string
 }
 
 // GateMenuResult is the outcome of RunGateMenu.
 type GateMenuResult struct {
-	// Key is the selected item's Key. Empty when ForceQuit is set.
+	// Key is the selected item's Key. Empty when ForceQuit or OpenOverride is set.
 	Key string
 	// ForceQuit is set when a second interrupt arrived while the menu was up
 	// (interrupt gate) or the tea program was killed by that signal.
 	ForceQuit bool
+	// OpenOverride is set when the human pressed alt+a. Callers run the agent
+	// override picker then re-show this menu (ADR-0196 decision 5).
+	OpenOverride bool
 }
 
 // GateMenuRunConfig holds optional RunGateMenu knobs.
@@ -85,13 +94,14 @@ type LineReader interface {
 // GateMenu is the bubbletea model behind RunGateMenu. Exported so tests can
 // drive Update/View without starting a Program.
 type GateMenu struct {
-	spec     GateMenuSpec
-	cursor   int
-	width    int
-	height   int
-	showHelp bool
-	chosen   string
-	quit     bool
+	spec         GateMenuSpec
+	cursor       int
+	width        int
+	height       int
+	showHelp     bool
+	chosen       string
+	quit         bool
+	openOverride bool
 }
 
 // NewGateMenu builds a menu model with the cursor on the default item (or the
@@ -109,6 +119,9 @@ func NewGateMenu(spec GateMenuSpec) *GateMenu {
 
 // Chosen returns the selected key after the model has quit, or "".
 func (m *GateMenu) Chosen() string { return m.chosen }
+
+// OpenOverride reports whether the model quit to open the agent-override picker.
+func (m *GateMenu) OpenOverride() bool { return m.openOverride }
 
 // Init implements tea.Model.
 func (m *GateMenu) Init() tea.Cmd { return nil }
@@ -131,6 +144,11 @@ func (m *GateMenu) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *GateMenu) handleKey(msg tea.KeyPressMsg) tea.Cmd {
+	if IsAgentOverrideKey(msg) {
+		m.openOverride = true
+		m.quit = true
+		return tea.Quit
+	}
 	switch {
 	case key.Matches(msg, gateMenuKeys.Up):
 		m.moveCursor(-1)
@@ -243,6 +261,7 @@ func (m *GateMenu) helpEntries() []HelpEntry {
 		{"Enter", "Select the highlighted (default) option"},
 		{"↑/↓ j/k", "Move highlight"},
 		{"Esc", "Exit (option 0)"},
+		{"A-a", "Override agent"},
 		{"C-h", "Toggle this help"},
 	}
 }
@@ -266,7 +285,11 @@ func (m *GateMenu) ViewContent() string {
 
 	for i, it := range m.spec.Items {
 		prefix := "  "
-		label := fmt.Sprintf("%s. %s", it.Key, it.Label)
+		itemLabel := it.Label
+		if it.Assists && m.spec.AttendedLabel != "" {
+			itemLabel = it.Label + " · " + m.spec.AttendedLabel
+		}
+		label := fmt.Sprintf("%s. %s", it.Key, itemLabel)
 		if i == m.cursor {
 			prefix = IndicatorStyle.Render("▸ ")
 			label = selectedGateItemStyle.Render(label)
@@ -287,7 +310,7 @@ func (m *GateMenu) ViewContent() string {
 		b.WriteString(hintStyle.Render("  " + m.spec.Footnote))
 		b.WriteString("\n")
 	}
-	b.WriteString(hintStyle.Render("  enter select · digit jump · ↑/↓ move · C-h help"))
+	b.WriteString(hintStyle.Render("  enter select · digit jump · ↑/↓ move · A-a agent · C-h help"))
 	b.WriteString("\n")
 	return b.String()
 }
@@ -402,6 +425,9 @@ func runGateMenuInteractive(m *GateMenu, in io.Reader, out io.Writer, interrupt 
 	fm, ok := final.(*GateMenu)
 	if !ok || fm == nil {
 		return GateMenuResult{}, fmt.Errorf("gate menu: unexpected model type %T", final)
+	}
+	if fm.openOverride {
+		return GateMenuResult{OpenOverride: true}, nil
 	}
 	return GateMenuResult{Key: fm.chosen}, nil
 }

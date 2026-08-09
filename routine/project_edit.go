@@ -154,7 +154,7 @@ func refineProjectRoutine(d *Deps, id, agentOverride string) error {
 		if err != nil {
 			return err
 		}
-		choice, err := promptRoutineGateMenu(out, in, reader, projectRefineGateSpec(name, lastRunSummary(d, storeID)))
+		choice, err := promptRoutineGateMenu(out, in, reader, projectRefineGateSpec(name, lastRunSummary(d, storeID)), d)
 		if err != nil {
 			return err
 		}

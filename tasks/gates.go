@@ -104,7 +104,7 @@ func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverif
 		// this set (ADR-0086/ADR-0012); the option force-re-runs the Verifier so a
 		// human who edited the work inline can re-check it without a fresh drain.
 		showReverify := gateReverifyEnabled(rv, m)
-		action, err := promptHITLGateAction(out, in, d, runtimePath, reader, taskSetID, m, hitl, body, invocation, showReverify)
+		action, err := promptHITLGateAction(out, in, d, env.cfg, runtimePath, reader, taskSetID, m, hitl, body, invocation, showReverify)
 		if err != nil {
 			return true, err
 		}
@@ -148,6 +148,10 @@ func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverif
 			RenderTaskComplete(out, result.TaskSetID, result.TaskID)
 			return true, nil
 		case hitlGateAssist:
+			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg, agentOverride, agentCmd, prompt, runtimePath)
+			if err != nil {
+				return true, exitErr(ExitSetup, "%v", err)
+			}
 			fmt.Fprintf(outputFor(out), "Starting HITL assistance: %s\n", invocation.Display)
 			exitCode, err := runAttendedAssistanceCommand(d, in, runtimePath, out, invocation)
 			if err != nil {
@@ -288,9 +292,9 @@ func gateReverifyEnabled(rv *reverifyGateContext, m *Manifest) bool {
 	return rv != nil && verifyEnabled(rv.cfg) && m != nil && !m.VerifyOptedOut()
 }
 
-func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, runtimePath string, reader *promptReader, taskSetID string, m *Manifest, hitl *Task, body string, invocation *AgentAssistanceInvocation, showReverify bool) (hitlGateAction, error) {
+func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, cfg *config.Config, runtimePath string, reader *promptReader, taskSetID string, m *Manifest, hitl *Task, body string, invocation *AgentAssistanceInvocation, showReverify bool) (hitlGateAction, error) {
 	items := []ui.GateMenuItem{
-		{Key: "1", Label: "Get agent assistance (default)", Details: gateInvocationDetails(invocation), Default: true},
+		{Key: "1", Label: "Get agent assistance (default)", Details: gateInvocationDetails(invocation), Default: true, Assists: true},
 		{Key: "2", Label: "Complete task"},
 		{Key: "3", Label: "Defer task"},
 		{Key: "4", Label: "Open a shell in the checkout"},
@@ -310,7 +314,7 @@ func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, runtimePath stri
 		),
 		Items: items,
 	}
-	choice, _, err := promptGateMenu(out, in, reader, spec, nil)
+	choice, _, err := promptGateMenu(out, in, reader, spec, nil, d, cfg)
 	if err != nil {
 		return hitlGateExit, err
 	}
@@ -396,7 +400,7 @@ func handleInteractiveFailedGate(env gateEnv, m *Manifest, failed *Task) (bool, 
 	}
 
 	for {
-		action, err := promptFailedGateAction(out, in, d, runtimePath, reader, taskSetID, failed, body, invocation)
+		action, err := promptFailedGateAction(out, in, d, env.cfg, runtimePath, reader, taskSetID, failed, body, invocation)
 		if err != nil {
 			return true, err
 		}
@@ -409,6 +413,10 @@ func handleInteractiveFailedGate(env gateEnv, m *Manifest, failed *Task) (bool, 
 			RenderTaskReset(out, result.TaskSetID, result.TaskID)
 			return true, nil
 		case failedGateAssist:
+			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg, agentOverride, agentCmd, prompt, runtimePath)
+			if err != nil {
+				return true, exitErr(ExitSetup, "%v", err)
+			}
 			fmt.Fprintf(outputFor(out), "Starting Failed assistance: %s\n", invocation.Display)
 			exitCode, err := runAttendedAssistanceCommand(d, in, runtimePath, out, invocation)
 			if err != nil {
@@ -455,7 +463,7 @@ func handleInteractiveFailedGate(env gateEnv, m *Manifest, failed *Task) (bool, 
 	}
 }
 
-func promptFailedGateAction(out io.Writer, in io.Reader, d *Deps, runtimePath string, reader *promptReader, taskSetID string, failed *Task, body string, invocation *AgentAssistanceInvocation) (failedGateAction, error) {
+func promptFailedGateAction(out io.Writer, in io.Reader, d *Deps, cfg *config.Config, runtimePath string, reader *promptReader, taskSetID string, failed *Task, body string, invocation *AgentAssistanceInvocation) (failedGateAction, error) {
 	spec := ui.GateMenuSpec{
 		Headline: fmt.Sprintf("Failed: %s/%s failed before the set could continue.", taskSetID, failed.ID),
 		Tone:     ui.GateMenuToneError,
@@ -465,13 +473,13 @@ func promptFailedGateAction(out io.Writer, in io.Reader, d *Deps, runtimePath st
 		),
 		Items: []ui.GateMenuItem{
 			{Key: "1", Label: "Re-run (default)", Default: true},
-			{Key: "2", Label: "Agent assistance", Details: gateInvocationDetails(invocation)},
+			{Key: "2", Label: "Agent assistance", Details: gateInvocationDetails(invocation), Assists: true},
 			{Key: "3", Label: "Finish by hand"},
 			{Key: "4", Label: "Open a shell in the checkout"},
 			{Key: "0", Label: "Exit"},
 		},
 	}
-	choice, _, err := promptGateMenu(out, in, reader, spec, nil)
+	choice, _, err := promptGateMenu(out, in, reader, spec, nil, d, cfg)
 	if err != nil {
 		return failedGateExit, err
 	}
@@ -537,7 +545,7 @@ func handleInteractiveVerifyFailedGate(env gateEnv, repo string, m *Manifest, wo
 	}
 
 	for {
-		action, err := promptVerifyFailedGateAction(out, in, d, runtimePath, reader, taskSetID, m, findings, invocation)
+		action, err := promptVerifyFailedGateAction(out, in, d, env.cfg, runtimePath, reader, taskSetID, m, findings, invocation)
 		if err != nil {
 			return true, err
 		}
@@ -575,6 +583,10 @@ func handleInteractiveVerifyFailedGate(env gateEnv, repo string, m *Manifest, wo
 			}
 			return true, nil
 		case verifyFailedGateAssist:
+			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg, agentOverride, agentCmd, prompt, runtimePath)
+			if err != nil {
+				return true, exitErr(ExitSetup, "%v", err)
+			}
 			fmt.Fprintf(outputFor(out), "Starting Verify-failed assistance: %s\n", invocation.Display)
 			exitCode, err := runAttendedAssistanceCommand(d, in, runtimePath, out, invocation)
 			if err != nil {
@@ -585,6 +597,11 @@ func handleInteractiveVerifyFailedGate(env gateEnv, repo string, m *Manifest, wo
 				fmt.Fprintf(outputFor(out), "Verify-failed assistance exited with status %d.\n", exitCode)
 			}
 			// Advisory only: no verdict or manifest change — loop back to the gate menu.
+			prompt = BuildVerifyFailedAssistancePrompt(d, taskSetID, m, workSHA, findings, runtimePath)
+			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg, agentOverride, agentCmd, prompt, runtimePath)
+			if err != nil {
+				return true, exitErr(ExitSetup, "%v", err)
+			}
 		case verifyFailedGateShell:
 			if err := spawnRuntimeShell(d, in, runtimePath, out); err != nil {
 				fmt.Fprintf(outputFor(out), "Could not start shell: %v\n", err)
@@ -596,7 +613,7 @@ func handleInteractiveVerifyFailedGate(env gateEnv, repo string, m *Manifest, wo
 	}
 }
 
-func promptVerifyFailedGateAction(out io.Writer, in io.Reader, d *Deps, runtimePath string, reader *promptReader, taskSetID string, m *Manifest, findings string, invocation *AgentAssistanceInvocation) (verifyFailedGateAction, error) {
+func promptVerifyFailedGateAction(out io.Writer, in io.Reader, d *Deps, cfg *config.Config, runtimePath string, reader *promptReader, taskSetID string, m *Manifest, findings string, invocation *AgentAssistanceInvocation) (verifyFailedGateAction, error) {
 	spec := ui.GateMenuSpec{
 		Headline: fmt.Sprintf("Verify-failed: %s did not clear the Verifier and needs a human decision.", taskSetID),
 		Tone:     ui.GateMenuToneError,
@@ -608,12 +625,12 @@ func promptVerifyFailedGateAction(out io.Writer, in io.Reader, d *Deps, runtimeP
 		Items: []ui.GateMenuItem{
 			{Key: "1", Label: "Accept (record a human-authored PASS)"},
 			{Key: "2", Label: "Remediate (spawn a fix task)"},
-			{Key: "3", Label: "Agent assistance", Details: gateInvocationDetails(invocation)},
+			{Key: "3", Label: "Agent assistance", Details: gateInvocationDetails(invocation), Assists: true},
 			{Key: "4", Label: "Open a shell in the checkout"},
 			{Key: "0", Label: "Exit", Default: true},
 		},
 	}
-	choice, _, err := promptGateMenu(out, in, reader, spec, nil)
+	choice, _, err := promptGateMenu(out, in, reader, spec, nil, d, cfg)
 	if err != nil {
 		return verifyFailedGateExit, err
 	}

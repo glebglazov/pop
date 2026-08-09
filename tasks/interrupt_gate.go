@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/ui"
 )
 
@@ -76,7 +77,7 @@ func handleInteractiveInterruptGate(env gateEnv, m *Manifest, interrupted *Task,
 	}
 
 	for {
-		action, err := promptInterruptGateAction(out, in, reader, sigCh, taskSetID, interrupted, invocation)
+		action, err := promptInterruptGateAction(out, in, reader, sigCh, d, env.cfg, taskSetID, interrupted, invocation)
 		if err != nil {
 			return false, err
 		}
@@ -87,6 +88,10 @@ func handleInteractiveInterruptGate(env gateEnv, m *Manifest, interrupted *Task,
 			// Reuse the shared attended-assistance handler (same as HITL/Failed).
 			// The agent advises/edits by hand only: no state change and no refresh,
 			// so we loop straight back to the interrupt menu on exit.
+			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg, agentOverride, agentCmd, prompt, runtimePath)
+			if err != nil {
+				return false, exitErr(ExitSetup, "%v", err)
+			}
 			fmt.Fprintf(outputFor(out), "Starting interrupt assistance: %s\n", invocation.Display)
 			exitCode, err := runAttendedAssistanceCommand(d, in, runtimePath, out, invocation)
 			if err != nil {
@@ -95,6 +100,11 @@ func handleInteractiveInterruptGate(env gateEnv, m *Manifest, interrupted *Task,
 			}
 			if exitCode != 0 {
 				fmt.Fprintf(outputFor(out), "Interrupt assistance exited with status %d.\n", exitCode)
+			}
+			prompt = BuildInterruptAssistancePrompt(d, taskSetID, m, *interrupted, runtimePath)
+			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg, agentOverride, agentCmd, prompt, runtimePath)
+			if err != nil {
+				return false, exitErr(ExitSetup, "%v", err)
 			}
 		case interruptGateShellChoice:
 			// Reuse the shared shell side-trip (same as HITL/Failed/Verify-fail):
@@ -113,19 +123,19 @@ func handleInteractiveInterruptGate(env gateEnv, m *Manifest, interrupted *Task,
 	}
 }
 
-func promptInterruptGateAction(out io.Writer, in io.Reader, reader *promptReader, sigCh <-chan os.Signal, taskSetID string, interrupted *Task, invocation *AgentAssistanceInvocation) (interruptGateAction, error) {
+func promptInterruptGateAction(out io.Writer, in io.Reader, reader *promptReader, sigCh <-chan os.Signal, d *Deps, cfg *config.Config, taskSetID string, interrupted *Task, invocation *AgentAssistanceInvocation) (interruptGateAction, error) {
 	spec := ui.GateMenuSpec{
 		Headline: fmt.Sprintf("Interrupted: %s/%s was stopped mid-run.", taskSetID, interrupted.ID),
 		Tone:     ui.GateMenuToneWarn,
 		Items: []ui.GateMenuItem{
 			{Key: "1", Label: "Continue draining (default)", Default: true},
-			{Key: "2", Label: "Agent assistance", Details: gateInvocationDetails(invocation)},
+			{Key: "2", Label: "Agent assistance", Details: gateInvocationDetails(invocation), Assists: true},
 			{Key: "3", Label: "Open a shell in the checkout"},
 			{Key: "0", Label: "Exit"},
 		},
 		Footnote: "(press Ctrl-C again to force-quit)",
 	}
-	choice, forceQuit, err := promptGateMenu(out, in, reader, spec, sigCh)
+	choice, forceQuit, err := promptGateMenu(out, in, reader, spec, sigCh, d, cfg)
 	if err != nil {
 		return interruptGateExitChoice, err
 	}
