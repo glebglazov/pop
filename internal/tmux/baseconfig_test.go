@@ -135,6 +135,23 @@ func TestBaseConfigShipsPopBindingsAndNoviceDefaults(t *testing.T) {
 	}
 }
 
+func TestBindingFragmentIsEmbeddedBaseConfig(t *testing.T) {
+	got := BindingFragment()
+	if got != string(baseConfSource) {
+		t.Fatalf("BindingFragment must equal the embedded base config source")
+	}
+	for _, want := range []string{
+		"bind-key p display-popup",
+		"pop project dashboard",
+		"bind-key P display-popup",
+		"pop worktree dashboard",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("BindingFragment missing %q", want)
+		}
+	}
+}
+
 func TestNewSessionPassesBaseConfigWhenStartingWithoutUserConfig(t *testing.T) {
 	_, _, dataHome := withIsolatedXDG(t)
 	Version = "2026.8.0"

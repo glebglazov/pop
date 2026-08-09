@@ -50,9 +50,21 @@ func stampVersion() string {
 	return v
 }
 
-// userHasTmuxConfig reports whether a user-authored tmux config exists at
+// BindingFragment returns pop's embedded Base tmux config source (ADR-0199
+// decision 9): the same bytes NewSession renders when supplying -f. Suitable
+// for pasting into a user-owned tmux.conf or sourcing into a live server. Pop
+// never installs this into a server it did not configure.
+func BindingFragment() string {
+	return string(baseConfSource)
+}
+
+// UserHasTmuxConfig reports whether a user-authored tmux config exists at
 // either of tmux's search paths. Existence only — the file is never read
 // (ADR-0199 decision 4): a user with their own config is left completely alone.
+func UserHasTmuxConfig() bool {
+	return userHasTmuxConfig()
+}
+
 func userHasTmuxConfig() bool {
 	home, err := os.UserHomeDir()
 	if err != nil {

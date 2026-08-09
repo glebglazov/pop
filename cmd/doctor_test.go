@@ -657,6 +657,77 @@ func TestDoctorProjectReadinessReportsSelectableSourcesOK(t *testing.T) {
 	}
 }
 
+func TestDoctorProjectTmuxConfigOwnershipFinding(t *testing.T) {
+	t.Parallel()
+
+	t.Run("fires informational for user-owned config", func(t *testing.T) {
+		d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
+		d.userHasTmuxConfig = func() bool { return true }
+
+		report, err := buildDoctorReport(d)
+		if err != nil {
+			t.Fatalf("buildDoctorReport: %v", err)
+		}
+		family, ok := familyByCommand(report, "pop project")
+		if !ok {
+			t.Fatalf("missing pop project family")
+		}
+		if family.status != doctorStatusOK {
+			t.Fatalf("project status = %s, want %s (ownership finding must not degrade readiness)", family.status, doctorStatusOK)
+		}
+		check, ok := checkByLabel(family, "tmux config ownership")
+		if !ok {
+			t.Fatalf("missing tmux config ownership check")
+		}
+		if check.status != doctorStatusNA {
+			t.Fatalf("ownership status = %s, want %s", check.status, doctorStatusNA)
+		}
+		if check.status == doctorStatusBlocked {
+			t.Fatal("ownership finding must never be Blocked")
+		}
+		if !strings.Contains(check.detail, "pop contributed nothing") {
+			t.Fatalf("detail should say pop contributed nothing: %q", check.detail)
+		}
+		if check.nextAction != "pop project tmux-bindings" {
+			t.Fatalf("nextAction = %q, want pop project tmux-bindings", check.nextAction)
+		}
+	})
+
+	t.Run("does not fire when pop would configure the server", func(t *testing.T) {
+		d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
+		d.userHasTmuxConfig = func() bool { return false }
+
+		report, err := buildDoctorReport(d)
+		if err != nil {
+			t.Fatalf("buildDoctorReport: %v", err)
+		}
+		family, ok := familyByCommand(report, "pop project")
+		if !ok {
+			t.Fatalf("missing pop project family")
+		}
+		if _, found := checkByLabel(family, "tmux config ownership"); found {
+			t.Fatal("ownership finding must not fire when pop configures the server")
+		}
+	})
+
+	t.Run("does not fire when seam unset", func(t *testing.T) {
+		d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)
+		// readOnlyDoctorDeps leaves userHasTmuxConfig nil — treated as pop-configured.
+
+		report, err := buildDoctorReport(d)
+		if err != nil {
+			t.Fatalf("buildDoctorReport: %v", err)
+		}
+		family, ok := familyByCommand(report, "pop project")
+		if !ok {
+			t.Fatalf("missing pop project family")
+		}
+		if _, found := checkByLabel(family, "tmux config ownership"); found {
+			t.Fatal("ownership finding must not fire when seam is unset")
+		}
+	})
+}
+
 func TestDoctorProjectMissingConfigUsesFirstRunConfigurePath(t *testing.T) {
 	t.Parallel()
 	d := readOnlyDoctorDeps(t, newFakeFS(), true, true, true)

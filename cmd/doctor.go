@@ -12,6 +12,7 @@ import (
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/integrate"
 	"github.com/glebglazov/pop/monitor"
+	"github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/release"
 	"github.com/glebglazov/pop/tasks"
@@ -39,6 +40,7 @@ import (
 type doctorDeps struct {
 	integrate                 *integrate.Deps
 	tmuxAvailable             func() bool
+	userHasTmuxConfig         func() bool
 	loadProjectConfig         func() (*config.Config, error)
 	projectConfigureAvailable func() bool
 	expandProjectConfig       func(*config.Config) ([]config.ExpandedPath, error)
@@ -71,6 +73,7 @@ func defaultDoctorDeps() *doctorDeps {
 			_, err := exec.LookPath("tmux")
 			return err == nil
 		},
+		userHasTmuxConfig: tmux.UserHasTmuxConfig,
 		loadProjectConfig: func() (*config.Config, error) {
 			path := config.DefaultConfigPath()
 			return config.Load(path)
@@ -280,6 +283,9 @@ func doctorProjectChecks(d *doctorDeps) []doctorCheck {
 	checks := []doctorCheck{
 		doctorBoolCheck("tmux available", d.tmuxAvailable(), "tmux executable was not found", "", ""),
 	}
+	if check, ok := doctorProjectTmuxConfigOwnershipCheck(d); ok {
+		checks = append(checks, check)
+	}
 
 	cfg, err := d.loadProjectConfig()
 	if err != nil {
@@ -337,6 +343,22 @@ func doctorProjectChecks(d *doctorDeps) []doctorCheck {
 		detail: detail,
 	})
 	return checks
+}
+
+// doctorProjectTmuxConfigOwnershipCheck surfaces ADR-0199 decision 9: a user
+// with their own tmux config is told pop contributed nothing, and pointed at
+// `pop project tmux-bindings`. Informational (N/A) so it never drives the
+// family to Blocked; omitted when pop would configure the server itself.
+func doctorProjectTmuxConfigOwnershipCheck(d *doctorDeps) (doctorCheck, bool) {
+	if d.userHasTmuxConfig == nil || !d.userHasTmuxConfig() {
+		return doctorCheck{}, false
+	}
+	return doctorCheck{
+		label:      "tmux config ownership",
+		status:     doctorStatusNA,
+		detail:     "tmux config is your own; pop contributed nothing",
+		nextAction: "pop project tmux-bindings",
+	}, true
 }
 
 func doctorWorktreeChecks(d *doctorDeps) []doctorCheck {
