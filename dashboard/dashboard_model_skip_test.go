@@ -125,3 +125,19 @@ func TestFormatModelSkipRemaining(t *testing.T) {
 		})
 	}
 }
+
+// TestDashboardFooterShowsStatedResetBesideCappedExpiry pins that a skip whose
+// stated reset outruns the 24 hour cap (ADR-0168) reports both numbers: the
+// footer would otherwise misreport what the provider actually said.
+func TestDashboardFooterShowsStatedResetBesideCappedExpiry(t *testing.T) {
+	now := time.Now()
+	m := modelSkipDashboard(30, []work.ModelSkip{
+		{Preset: "cursor", Model: "claude-opus-5-thinking-medium", Until: now.Add(24*time.Hour + time.Minute), StatedUntil: now.Add(26*24*time.Hour + time.Minute)},
+	})
+
+	got := m.View().Content
+	want := "skipped: cursor/claude-opus-5-thinking-medium 24h0m (stated 26d0h)"
+	if !strings.Contains(got, want) {
+		t.Fatalf("view missing footer %q:\n%s", want, got)
+	}
+}

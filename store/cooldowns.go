@@ -52,22 +52,28 @@ type AgentModelCooldown struct {
 	Preset string
 	Model  string
 	Until  time.Time
+	// StatedUntil is the reset instant the provider's refusal named, kept as the
+	// message gave it. Until is capped independently of it, so the two disagree
+	// whenever the stated reset is further out than the cap; zero when the
+	// refusal named no reset.
+	StatedUntil time.Time
 }
 
 // PutAgentModelCooldown upserts the skip for one (preset, model) pair. A zero
 // until records a permanent skip that never expires; a non-zero until is the
-// instant the skip lifts. An empty preset or model is a no-op. The latest
+// instant the skip lifts. stated is what the provider's message claimed, zero
+// when it claimed nothing. An empty preset or model is a no-op. The latest
 // write for a (preset, model) pair wins, mirroring PutAgentCooldown
 // (ADR-0055/0168). This table is separate from agent_cooldowns so a spent
 // model never renders as a paused preset.
-func (s *Store) PutAgentModelCooldown(preset, model string, until time.Time) error {
+func (s *Store) PutAgentModelCooldown(preset, model string, until, stated time.Time) error {
 	if preset == "" || model == "" {
 		return nil
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO agent_model_cooldowns (preset, model, until) VALUES (?, ?, ?)
-		 ON CONFLICT(preset, model) DO UPDATE SET until = excluded.until`,
-		preset, model, nullTime(until))
+		`INSERT INTO agent_model_cooldowns (preset, model, until, stated_until) VALUES (?, ?, ?, ?)
+		 ON CONFLICT(preset, model) DO UPDATE SET until = excluded.until, stated_until = excluded.stated_until`,
+		preset, model, nullTime(until), nullTime(stated))
 	return err
 }
 
@@ -75,7 +81,7 @@ func (s *Store) PutAgentModelCooldown(preset, model string, until time.Time) err
 // at now: a permanent skip (zero Until) always qualifies, and a timed skip
 // qualifies while now is before its Until.
 func (s *Store) ActiveAgentModelCooldowns(now time.Time) ([]AgentModelCooldown, error) {
-	rows, err := s.db.Query(`SELECT preset, model, until FROM agent_model_cooldowns`)
+	rows, err := s.db.Query(`SELECT preset, model, until, stated_until FROM agent_model_cooldowns`)
 	if err != nil {
 		return nil, err
 	}
@@ -84,15 +90,15 @@ func (s *Store) ActiveAgentModelCooldowns(now time.Time) ([]AgentModelCooldown, 
 	var out []AgentModelCooldown
 	for rows.Next() {
 		var preset, model string
-		var until sql.NullString
-		if err := rows.Scan(&preset, &model, &until); err != nil {
+		var until, stated sql.NullString
+		if err := rows.Scan(&preset, &model, &until, &stated); err != nil {
 			return nil, err
 		}
 		u := parseTime(until.String)
 		if !u.IsZero() && !u.After(now) {
 			continue
 		}
-		out = append(out, AgentModelCooldown{Preset: preset, Model: model, Until: u})
+		out = append(out, AgentModelCooldown{Preset: preset, Model: model, Until: u, StatedUntil: parseTime(stated.String)})
 	}
 	return out, rows.Err()
 }

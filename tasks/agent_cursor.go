@@ -3,17 +3,84 @@ package tasks
 import (
 	"bufio"
 	"encoding/json"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 )
 
 const cursorAuthenticationRequiredPrefix = "Error: Authentication required."
+
+// cursorSpentAllowancePrefix opens the diagnostic cursor-agent prints when the
+// login's allowance for the requested model is spent; the usage-limit phrase
+// distinguishes it from every other ActionRequiredError.
+const (
+	cursorSpentAllowancePrefix = "ActionRequiredError:"
+	cursorSpentAllowancePhrase = "usage limit"
+)
+
+// cursorResetDatePattern matches the bare calendar date cursor's spent-allowance
+// diagnostic names as the reset ("… ends on 9/4/2026."). It carries no time of
+// day and no timezone, so it can only be read as a local date.
+var cursorResetDatePattern = regexp.MustCompile(`\b(\d{1,2})/(\d{1,2})/(\d{4})\b`)
 
 func normalizeCursorStreamJSON(raw string) AgentResult {
 	if v := cursorAuthFailureReason(raw); v != nil {
 		return AgentResult{ProceedVerdict: v}
 	}
+	if v := cursorSpentAllowanceReason(raw, time.Now()); v != nil {
+		return AgentResult{ProceedVerdict: v}
+	}
 	return normalizeResultStreamJSON(raw, nil)
+}
+
+// cursorSpentAllowanceReason scans the raw capture for cursor-agent's
+// spent-allowance refusal (ADR-0168). Confirmed shape, captured 2026-08-09: one
+// bare non-JSON line after system/init and the prompt echo, exit 1, the model
+// never engaged — the same raw-line shape as the logged-out diagnostic.
+//
+// The refusal condemns the model, not the login: the same cursor-agent on the
+// same account runs the tier's next entry, so the verdict is model-scoped and
+// the Effort ladder walks down rather than surrendering the preset. It heals
+// with time, carrying the message's own reset when it named one; the caller caps
+// how long the resulting skip actually holds.
+func cursorSpentAllowanceReason(raw string, now time.Time) *AgentProceedVerdict {
+	scanner := bufio.NewScanner(strings.NewReader(raw))
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, cursorSpentAllowancePrefix) || !strings.Contains(line, cursorSpentAllowancePhrase) {
+			continue
+		}
+		// The model is left for the caller to stamp: the message names the family
+		// ("Opus"), and what must be skipped is the ladder entry that was pinned.
+		v := NewModelRefusedVerdict("", "", line, ProceedRecoveryTime).WithResetAt(cursorQuotaResetAt(line, now))
+		return &v
+	}
+	return nil
+}
+
+// cursorQuotaResetAt reads the reset instant out of a cursor diagnostic. The
+// message states a bare M/D/YYYY billing-cycle date, so the instant is that
+// local date's start; a date already behind now, or no date at all, is no
+// instant.
+func cursorQuotaResetAt(reason string, now time.Time) time.Time {
+	m := cursorResetDatePattern.FindStringSubmatch(reason)
+	if m == nil {
+		return time.Time{}
+	}
+	month, err1 := strconv.Atoi(m[1])
+	day, err2 := strconv.Atoi(m[2])
+	year, err3 := strconv.Atoi(m[3])
+	if err1 != nil || err2 != nil || err3 != nil || month < 1 || month > 12 || day < 1 || day > 31 {
+		return time.Time{}
+	}
+	reset := time.Date(year, time.Month(month), day, 0, 0, 0, 0, now.Location())
+	if !reset.After(now) {
+		return time.Time{}
+	}
+	return reset
 }
 
 // cursorAuthFailureReason scans the raw capture for the logged-out cursor-agent

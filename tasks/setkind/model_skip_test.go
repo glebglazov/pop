@@ -16,7 +16,7 @@ func seedModelSkip(t *testing.T, d *Deps, preset, model string, until time.Time)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.PutAgentModelCooldown(preset, model, until); err != nil {
+	if err := s.PutAgentModelCooldown(preset, model, until, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 }

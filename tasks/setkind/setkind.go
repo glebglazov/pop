@@ -219,7 +219,7 @@ func (k *Kind) ModelSkips() ([]work.ModelSkip, error) {
 	}
 	skips := make([]work.ModelSkip, 0, len(rows))
 	for _, row := range rows {
-		skips = append(skips, work.ModelSkip{Preset: row.Preset, Model: row.Model, Until: row.Until})
+		skips = append(skips, work.ModelSkip{Preset: row.Preset, Model: row.Model, Until: row.Until, StatedUntil: row.StatedUntil})
 	}
 	sort.Slice(skips, func(i, j int) bool {
 		if skips[i].Preset != skips[j].Preset {

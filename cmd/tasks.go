@@ -1670,7 +1670,7 @@ func yesNo(v bool) string {
 // currently walking past carries its Effort model skip's remaining time —
 // "(skipped 47m)", or "(skipped ∞)" for a permanent one (ADR-0168) — so the
 // catalog answers why a drain is running the tier's tail.
-func renderEffortLadder(agent string, ladder []tasks.AgentCatalogEffortTier, skips map[string]time.Time) string {
+func renderEffortLadder(agent string, ladder []tasks.AgentCatalogEffortTier, skips map[string]tasks.ModelSkipHorizon) string {
 	if len(ladder) == 0 {
 		return "none"
 	}
@@ -1685,8 +1685,8 @@ func renderEffortLadder(agent string, ladder []tasks.AgentCatalogEffortTier, ski
 				if agent != "cursor" && entry.Reasoning != "" {
 					model += "[reasoning=" + entry.Reasoning + "]"
 				}
-				if until, ok := skips[entry.Model]; ok {
-					model += " (skipped " + tasks.FormatModelSkipRemaining(until, now) + ")"
+				if horizon, ok := skips[entry.Model]; ok {
+					model += " (skipped " + tasks.FormatModelSkipHorizon(horizon, now) + ")"
 				}
 				rendered = append(rendered, model)
 			}

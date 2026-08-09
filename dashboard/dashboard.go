@@ -2405,7 +2405,8 @@ func formatModelSkipFootnote(skips []work.ModelSkip, now time.Time) string {
 		preset := skips[i].Preset
 		var entries []string
 		for ; i < len(skips) && skips[i].Preset == preset; i++ {
-			entries = append(entries, skips[i].Model+" "+tasks.FormatModelSkipRemaining(skips[i].Until, now))
+			horizon := tasks.ModelSkipHorizon{Until: skips[i].Until, StatedUntil: skips[i].StatedUntil}
+			entries = append(entries, skips[i].Model+" "+tasks.FormatModelSkipHorizon(horizon, now))
 		}
 		groups = append(groups, preset+"/"+strings.Join(entries, ", "))
 	}

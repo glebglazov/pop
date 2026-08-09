@@ -30,10 +30,10 @@ type AgentCatalogRow struct {
 	ModelsInstallDependent bool
 	// ModelSkips carries the Effort model skips still in force for this preset
 	// (ADR-0168), keyed by the ladder `--model` token, so a reader can see which
-	// entries the ladder is currently walking past. A zero instant is a permanent
+	// entries the ladder is currently walking past. A zero Until is a permanent
 	// skip; an absent key is runnable. This is the store's own encoding
-	// (store.AgentModelCooldown.Until).
-	ModelSkips map[string]time.Time
+	// (store.AgentModelCooldown).
+	ModelSkips map[string]ModelSkipHorizon
 }
 
 // AgentCatalogEffortTier describes one resolved effort tier for display.
@@ -97,7 +97,7 @@ func AgentCatalogWithConfig(d *Deps, cfg *config.Config) []AgentCatalogRow {
 // preset. The catalog is a display surface with no error channel, so a store it
 // cannot read yields no annotations: the ladder still renders, unmarked, which
 // is exactly what a machine that has never skipped a model shows.
-func catalogModelSkips(d *Deps, now time.Time) map[string]map[string]time.Time {
+func catalogModelSkips(d *Deps, now time.Time) map[string]map[string]ModelSkipHorizon {
 	if d == nil {
 		return nil
 	}
@@ -105,12 +105,12 @@ func catalogModelSkips(d *Deps, now time.Time) map[string]map[string]time.Time {
 	if err != nil {
 		return nil
 	}
-	skips := map[string]map[string]time.Time{}
+	skips := map[string]map[string]ModelSkipHorizon{}
 	for _, row := range rows {
 		if skips[row.Preset] == nil {
-			skips[row.Preset] = map[string]time.Time{}
+			skips[row.Preset] = map[string]ModelSkipHorizon{}
 		}
-		skips[row.Preset][row.Model] = row.Until
+		skips[row.Preset][row.Model] = ModelSkipHorizon{Until: row.Until, StatedUntil: row.StatedUntil}
 	}
 	return skips
 }

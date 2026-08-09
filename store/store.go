@@ -500,6 +500,14 @@ var migrations = []string{
 		source    TEXT PRIMARY KEY,
 		folded_at TEXT NOT NULL
 	);`,
+	// 30: agent_model_cooldowns.stated_until — what the provider's refusal said,
+	// kept beside the expiry pop actually enforces. An Effort model skip is capped
+	// at 24 hours however distant the stated reset is (ADR-0168), because a
+	// spent-allowance probe costs seconds and a month-long park would sit blind
+	// through a top-up or a plan change. The two instants therefore disagree by
+	// design, and a read surface that showed only the capped one would misreport
+	// the refusal; NULL when the message named no reset.
+	`ALTER TABLE agent_model_cooldowns ADD COLUMN stated_until TEXT;`,
 }
 
 func (s *Store) migrate() error {

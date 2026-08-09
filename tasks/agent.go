@@ -278,10 +278,7 @@ var agentAdapters = map[string]AgentAdapter{
 			Interpret:            interpretCursorAvailabilityProbe,
 			ReportsAuthenticated: reportsCursorAuthenticated,
 		},
-		quotaReset: AgentQuotaResetCapability{
-			Kind:   CapabilityBlind,
-			Reason: "cursor quota diagnostics carry no parseable reset time",
-		},
+		quotaReset: AgentQuotaResetCapability{Kind: CapabilitySupported, ResetAt: cursorQuotaResetAt},
 		effortLadder: AgentEffortLadderCapability{
 			Kind: CapabilitySupported,
 			Ladder: map[string][]config.EffortModel{

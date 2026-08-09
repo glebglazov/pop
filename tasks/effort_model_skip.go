@@ -73,7 +73,38 @@ func FormatModelSkipRemaining(until, now time.Time) string {
 	if remaining < time.Hour {
 		return fmt.Sprintf("%dm", int(remaining.Minutes()))
 	}
+	// Days only past two of them: the skip horizon caps at 24 hours, so the
+	// common long value is the cap itself and reads better as "24h0m" than as
+	// "1d0h". Beyond that the value is a stated reset weeks out, where hours are
+	// unreadable.
+	if remaining >= 48*time.Hour {
+		return fmt.Sprintf("%dd%dh", int(remaining.Hours())/24, int(remaining.Hours())%24)
+	}
 	return fmt.Sprintf("%dh%dm", int(remaining.Hours()), int(remaining.Minutes())%60)
+}
+
+// ModelSkipHorizon is one Effort model skip's two instants: the expiry pop
+// enforces and the reset the provider's refusal stated. They disagree whenever
+// the stated reset is further out than the 24 hour cap (ADR-0168), which is the
+// case the read surfaces must not hide.
+type ModelSkipHorizon struct {
+	Until       time.Time
+	StatedUntil time.Time
+}
+
+// FormatModelSkipHorizon renders a skip for both read surfaces: the enforced
+// remaining time, and — only when the provider claimed a different one — what it
+// claimed, so a capped skip reads as a deliberate re-probe rather than as pop
+// misreporting the refusal.
+func FormatModelSkipHorizon(h ModelSkipHorizon, now time.Time) string {
+	enforced := FormatModelSkipRemaining(h.Until, now)
+	if h.StatedUntil.IsZero() || h.Until.IsZero() {
+		return enforced
+	}
+	if diff := h.StatedUntil.Sub(h.Until); diff > -time.Minute && diff < time.Minute {
+		return enforced
+	}
+	return enforced + " (stated " + FormatModelSkipRemaining(h.StatedUntil, now) + ")"
 }
 
 // effortModelResolution is what one Agent fallback entry's Effort tier resolves

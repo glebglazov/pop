@@ -154,10 +154,10 @@ func TestTaskAgentsCatalogMarksSkippedLadderEntries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.PutAgentModelCooldown("claude", "opus", time.Now().Add(47*time.Minute+30*time.Second)); err != nil {
+	if err := s.PutAgentModelCooldown("claude", "opus", time.Now().Add(47*time.Minute+30*time.Second), time.Time{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.PutAgentModelCooldown("kimi", "moonshot-ai/kimi-k2.7-code-highspeed", time.Time{}); err != nil {
+	if err := s.PutAgentModelCooldown("kimi", "moonshot-ai/kimi-k2.7-code-highspeed", time.Time{}, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	oldLoad := taskConfigLoad
@@ -248,5 +248,33 @@ func TestTaskAgentsCommandRegisteredAndHelpVisible(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "\n  agents ") {
 		t.Fatalf("tasks help missing agents command:\n%s", out.String())
+	}
+}
+
+// TestTaskAgentsCatalogShowsStatedResetBesideCappedExpiry pins the catalog half
+// of the same rule: a skip capped below the reset the provider stated names both.
+func TestTaskAgentsCatalogShowsStatedResetBesideCappedExpiry(t *testing.T) {
+	d := &tasks.Deps{
+		FS:       cmdTestFS(filepath.Join(t.TempDir(), "xdg"), ""),
+		LookPath: func(file string) (string, error) { return "/mock/bin/" + file, nil },
+	}
+	s, _, err := d.Store(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err := s.PutAgentModelCooldown("claude", "opus", now.Add(24*time.Hour+time.Minute), now.Add(26*24*time.Hour+time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	oldLoad := taskConfigLoad
+	taskConfigLoad = func(string) (*config.Config, error) { return nil, nil }
+	t.Cleanup(func() { taskConfigLoad = oldLoad })
+
+	var buf bytes.Buffer
+	if err := runTaskAgentsWith(d, &buf, false); err != nil {
+		t.Fatal(err)
+	}
+	if want := "opus[reasoning=high] (skipped 24h0m (stated 26d0h))"; !strings.Contains(buf.String(), want) {
+		t.Fatalf("catalog missing %q:\n%s", want, buf.String())
 	}
 }

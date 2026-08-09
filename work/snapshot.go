@@ -30,6 +30,9 @@ type ModelSkip struct {
 	Preset string
 	Model  string
 	Until  time.Time
+	// StatedUntil is the reset the provider's refusal claimed, which the capped
+	// Until may deliberately fall short of (ADR-0168). Zero when it claimed none.
+	StatedUntil time.Time
 }
 
 // BuildSnapshot builds one point-in-time Work snapshot from a wired list of

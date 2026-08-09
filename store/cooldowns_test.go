@@ -16,7 +16,7 @@ func TestAgentModelCooldownSurvivesRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	if err := s.PutAgentModelCooldown("cursor", "claude-opus-5-thinking-high", until); err != nil {
+	if err := s.PutAgentModelCooldown("cursor", "claude-opus-5-thinking-high", until, time.Time{}); err != nil {
 		t.Fatalf("PutAgentModelCooldown: %v", err)
 	}
 	if err := s.Close(); err != nil {
@@ -47,7 +47,7 @@ func TestAgentModelCooldownPermanentNeverExpires(t *testing.T) {
 	s := openTestStore(t)
 	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
 
-	if err := s.PutAgentModelCooldown("kimi", "k2.7-code-highspeed", time.Time{}); err != nil {
+	if err := s.PutAgentModelCooldown("kimi", "k2.7-code-highspeed", time.Time{}, time.Time{}); err != nil {
 		t.Fatalf("PutAgentModelCooldown: %v", err)
 	}
 
@@ -69,10 +69,10 @@ func TestAgentModelCooldownReadsFilterToInForce(t *testing.T) {
 	s := openTestStore(t)
 	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
 
-	if err := s.PutAgentModelCooldown("cursor", "composer-2.5", now.Add(time.Hour)); err != nil {
+	if err := s.PutAgentModelCooldown("cursor", "composer-2.5", now.Add(time.Hour), time.Time{}); err != nil {
 		t.Fatalf("put active: %v", err)
 	}
-	if err := s.PutAgentModelCooldown("cursor", "gpt-5.6", now.Add(-time.Minute)); err != nil {
+	if err := s.PutAgentModelCooldown("cursor", "gpt-5.6", now.Add(-time.Minute), time.Time{}); err != nil {
 		t.Fatalf("put expired: %v", err)
 	}
 
@@ -99,10 +99,10 @@ func TestAgentModelCooldownLatestWriteWins(t *testing.T) {
 	s := openTestStore(t)
 	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
 
-	if err := s.PutAgentModelCooldown("cursor", "composer-2.5", now.Add(time.Hour)); err != nil {
+	if err := s.PutAgentModelCooldown("cursor", "composer-2.5", now.Add(time.Hour), time.Time{}); err != nil {
 		t.Fatalf("first put: %v", err)
 	}
-	if err := s.PutAgentModelCooldown("cursor", "composer-2.5", now.Add(2*time.Hour)); err != nil {
+	if err := s.PutAgentModelCooldown("cursor", "composer-2.5", now.Add(2*time.Hour), time.Time{}); err != nil {
 		t.Fatalf("second put: %v", err)
 	}
 
@@ -123,10 +123,10 @@ func TestAgentModelCooldownDoesNotAffectPresetCooldownReads(t *testing.T) {
 	if err := s.PutAgentCooldown("cursor", now.Add(time.Hour)); err != nil {
 		t.Fatalf("PutAgentCooldown: %v", err)
 	}
-	if err := s.PutAgentModelCooldown("cursor", "composer-2.5", now.Add(time.Hour)); err != nil {
+	if err := s.PutAgentModelCooldown("cursor", "composer-2.5", now.Add(time.Hour), time.Time{}); err != nil {
 		t.Fatalf("PutAgentModelCooldown: %v", err)
 	}
-	if err := s.PutAgentModelCooldown("claude", "opus", time.Time{}); err != nil {
+	if err := s.PutAgentModelCooldown("claude", "opus", time.Time{}, time.Time{}); err != nil {
 		t.Fatalf("PutAgentModelCooldown permanent: %v", err)
 	}
 

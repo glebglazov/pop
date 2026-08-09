@@ -17,6 +17,9 @@ const (
 	agentQuotaResetSkew         = 2 * time.Minute
 	maxAgentQuotaResetHorizon   = 8 * 24 * time.Hour
 	defaultAgentQuotaRetryAfter = time.Hour
+	// maxModelSkipHorizon caps how long one Effort model skip holds, whatever
+	// reset the refusal claimed (ADR-0168).
+	maxModelSkipHorizon = 24 * time.Hour
 )
 
 // AgentCooldownEntry records when one subscription-level agent preset may be
@@ -174,10 +177,38 @@ func updateAgentModelCooldown(d *Deps, preset, model string, resetAt time.Time, 
 		return err
 	}
 	if permanent {
-		return s.PutAgentModelCooldown(preset, model, time.Time{})
+		return s.PutAgentModelCooldown(preset, model, time.Time{}, time.Time{})
 	}
-	until := agentQuotaCooldownUntil(resetAt, time.Now(), defaultAgentQuotaRetryAfter)
-	return s.PutAgentModelCooldown(preset, model, until)
+	now := time.Now().UTC()
+	return s.PutAgentModelCooldown(preset, model, modelSkipCooldownUntil(resetAt, now), resetAt.UTC())
+}
+
+// modelSkipCooldownUntil is the Effort model skip's own expiry policy: the
+// parsed reset when the adapter named one, the one hour default when it did
+// not, and never more than maxModelSkipHorizon out (ADR-0168).
+//
+// It diverges from agentQuotaCooldownUntil, which a preset cooldown uses,
+// because the two are paying for different things. A paused preset costs a whole
+// drain to re-test, so a distant reset is worth honouring; a skipped model costs
+// one refusal that exits before the model is engaged, so re-probing daily is
+// close to free and buys back every case where the stated date is stale — a
+// top-up, a plan change, or a billing-cycle boundary that was never the moment
+// the block lifts.
+func modelSkipCooldownUntil(resetAt, now time.Time) time.Time {
+	now = now.UTC()
+	capped := now.Add(maxModelSkipHorizon)
+	if resetAt.IsZero() {
+		return now.Add(defaultAgentQuotaRetryAfter)
+	}
+	resetAt = resetAt.UTC()
+	if !resetAt.After(now) {
+		return now.Add(defaultAgentQuotaRetryAfter)
+	}
+	until := resetAt.Add(agentQuotaResetSkew)
+	if until.After(capped) {
+		return capped
+	}
+	return until
 }
 
 // ActiveAgentModelCooldownsWith returns every Effort model skip (ADR-0168)
