@@ -205,7 +205,7 @@ func skillsPrefixOf(cfg *config.Config) string {
 // grilling one ticket, assisting a whole Map — build their command here, so a
 // pane looks the same whichever mode seeded it.
 func agentPaneCommand(cfg *config.Config, prompt, dir string) (string, error) {
-	inv, err := tasks.ResolveAgentAssistanceInvocation(cfg, tasks.ResolveDefaultInteractiveAgentPreset(cfg), "", prompt, dir)
+	inv, err := tasks.ResolveAgentAssistanceInvocation(cfg, "", "", prompt, dir)
 	if err != nil {
 		return "", fmt.Errorf("resolve interactive agent: %w", err)
 	}

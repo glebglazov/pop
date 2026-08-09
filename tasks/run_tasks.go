@@ -260,7 +260,6 @@ type targetedHITLGateOptions struct {
 	out            io.Writer
 	in             io.Reader
 	yes            bool
-	agentPreset    string
 	agentCmd       string
 	cwd            string
 	runtimePath    string
@@ -318,13 +317,13 @@ func runTargetedHITLGate(d *Deps, opts targetedHITLGateOptions) (*RunTaskResult,
 		out:            out,
 		in:             opts.in,
 		yes:            opts.yes,
-		agentPreset:    opts.agentPreset,
 		agentCmd:       opts.agentCmd,
 		cwd:            opts.cwd,
 		runtimePath:    opts.runtimePath,
 		definitionPath: opts.definitionPath,
 		statePath:      opts.statePath,
 		taskSetID:      taskSetID,
+		cfg:            opts.cfg,
 	}
 	handled, err := handleInteractiveHITLGate(env, m, hitl, rv)
 	if willPrompt {

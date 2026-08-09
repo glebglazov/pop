@@ -48,25 +48,19 @@ func authoringSessionFromGate(d *Deps, out io.Writer, id, agentOverride string) 
 	fmt.Fprintln(out, "Authoring session ended; returning to the menu.")
 }
 
-// resolveAuthoringAgentSpec picks the agent preset spec for a gate authoring
-// session. An explicit --agent override wins for the session; otherwise
-// resolution follows [work.routine].agents with the same fall-through as scheduled
-// runs (ResolveRoutineAgentPresets), taking the highest-priority preset. The
-// session is interactive with a human present, so there is no headless quota
-// fall-through — the human switches agents by hand if one is unavailable.
+// resolveAuthoringAgentSpec picks the attended agent override for a gate
+// authoring session and loads the config the invocation resolves against. A
+// refinement session is a human-facing session like any other, so it launches
+// from [work.attended].agents rather than from the [work.routine].agents list
+// scheduled Fires walk (ADR-0195); an explicit --agent still wins for the
+// session. There is no headless quota fall-through — the human switches agents
+// by hand if one is unavailable.
 func resolveAuthoringAgentSpec(d *Deps, override string) (string, *config.Config, error) {
 	cfg, err := d.LoadConfig()
 	if err != nil {
 		return "", nil, fmt.Errorf("load config: %w", err)
 	}
-	if strings.TrimSpace(override) != "" {
-		return override, cfg, nil
-	}
-	specs := ResolveRoutineAgentPresets(nil, cfg)
-	if len(specs) == 0 {
-		return "", nil, fmt.Errorf("no agent preset is configured")
-	}
-	return specs[0], cfg, nil
+	return strings.TrimSpace(override), cfg, nil
 }
 
 // runRoutineAttendedAgent runs the resolved attended agent command in the bound

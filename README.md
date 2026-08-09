@@ -55,34 +55,30 @@ enabled = false
 # agents = ["claude"]
 
 [work.attended]
-# Ordered fallback agent list shared by every session pop opens for a human —
-# gate assistance, an Assist session, Map assist, map grilling, a Routine
-# refinement session.
+# Every session pop opens for a human shares this one list — gate assistance, an
+# Assist session, Map assist, map grilling, a Routine refinement session. The
+# entry's cmd is the whole invocation (model included); pop appends the preset's
+# declared posture flag only where cmd does not already name it (ADR-0195).
 # agents = ["claude", "codex"]
 
 # Every group's agents list takes the same entry type: a table naming the entry
 # and carrying the whole agent-CLI command, with a bare string as sugar for
 # { cmd = "<string>" }. `pop tasks agents` lists each group's entries in order
-# with the preset and model each resolves to.
+# with the preset and model each resolves to. Two attended entries may name the
+# same preset at different models.
 # [work.attended]
 # agents = [
 #   { display_name = "Claude Usual", cmd = "claude --model opus" },
+#   { display_name = "Claude Cheap", cmd = "claude --model haiku" },
 #   "codex",
 # ]
 
 [agents.claude]
-# Settings keyed by agent preset rather than by kind of work.
-# Output mode: use "text" as a compatibility fallback if an agent's structured
-# output fails.
+# Settings keyed by agent preset rather than by kind of work. The only key left
+# is output (ADR-0195): use "text" as a compatibility fallback if an agent's
+# structured output fails. An attended session's whole invocation — model and
+# arguments — lives in its [work.attended].agents entry.
 output = "auto"
-# attended_args replaces pop's own attended arguments for this preset rather than
-# adding to them; pop's default is the least-restrictive posture the agent offers
-# (claude: --permission-mode auto), and an empty list launches the bare binary.
-# attended_args = ["--dangerously-skip-permissions"]
-# Model an attended session names. Unset ⇒ pop passes no model flag and the
-# agent's own configuration decides; a --model in [work.implement].agents tunes
-# unattended drains only and never reaches an interactive session.
-# attended_model = "opus"
 
 [work.implement.git]
 # Commit-time git config applied only to pop's own commits during a task drain.

@@ -32,50 +32,52 @@ func (c AgentAttendedArgsCapability) attendedArgs() []string {
 	return append([]string{}, c.Args...)
 }
 
-// AttendedAgentSettings is one preset's user-owned attended overrides, read from
-// [agents.<preset>] (ADR-0187). It is what an attended launch consults instead of
-// the extra arguments of an --agent spec: an attended session takes the preset
-// name from the implement agent list and nothing else.
-type AttendedAgentSettings struct {
-	// Args replaces the adapter's declared attended arguments wholesale when
-	// ArgsSet is true — including replacing them with nothing, which is how a user
-	// asks for a bare interactive binary.
-	Args    []string
-	ArgsSet bool
-	// Model is named on the attended command as `--model <value>`. Empty means pop
-	// names no model and the agent's own configuration decides.
-	Model string
-}
-
-// attendedAgentSettingsFor reads one preset's [agents.<preset>] block.
-func attendedAgentSettingsFor(cfg *config.Config, preset string) AttendedAgentSettings {
-	block := cfg.AgentSettingsFor(preset)
-	settings := AttendedAgentSettings{Model: strings.TrimSpace(block.AttendedModel)}
-	if block.AttendedArgs != nil {
-		settings.Args = append([]string{}, (*block.AttendedArgs)...)
-		settings.ArgsSet = true
-	}
-	return settings
-}
-
-// attendedArgsWith resolves the argument list an attended launch carries: the
-// user's list when they set one, otherwise the adapter's declared default. The
-// user's list replaces rather than appends, the deliberate attended exception to
-// ADR-0017's flags-come-last rule (ADR-0187).
-func (s AttendedAgentSettings) attendedArgsWith(declared AgentAttendedArgsCapability) []string {
-	if s.ArgsSet {
-		return append([]string{}, s.Args...)
-	}
-	return declared.attendedArgs()
-}
-
-// modelArgs returns the model flag an attended command carries, or nothing when
-// the user named no model.
-func (s AttendedAgentSettings) modelArgs() []string {
-	if strings.TrimSpace(s.Model) == "" {
+// attendedArgsBeside returns the declared posture arguments an attended launch
+// still needs beside the entry's own: every declared flag the entry does not
+// already name, with the values that belong to it. A flag the entry names wins
+// outright, which is how the human sitting at the terminal keeps the last word
+// on their permission posture without a config key for it (ADR-0195). The match
+// is by exact flag name — no preset declares more than two flags, so there is
+// nothing here to guess at.
+func (c AgentAttendedArgsCapability) attendedArgsBeside(entryArgs []string) []string {
+	declared := c.attendedArgs()
+	if len(declared) == 0 {
 		return nil
 	}
-	return []string{"--model", strings.TrimSpace(s.Model)}
+	named := namedFlags(entryArgs)
+	var out []string
+	keep := false
+	for _, arg := range declared {
+		if flag, isFlag := flagName(arg); isFlag {
+			keep = !named[flag]
+		}
+		if keep {
+			out = append(out, arg)
+		}
+	}
+	return out
+}
+
+// namedFlags is the set of flag names an argument list names, in either the
+// `--flag value` or the `--flag=value` spelling.
+func namedFlags(args []string) map[string]bool {
+	named := make(map[string]bool, len(args))
+	for _, arg := range args {
+		if flag, ok := flagName(arg); ok {
+			named[flag] = true
+		}
+	}
+	return named
+}
+
+// flagName reports the flag one argument names, stripping any `=value` tail. A
+// non-flag argument (a value, a positional) reports false.
+func flagName(arg string) (string, bool) {
+	if !strings.HasPrefix(arg, "-") || arg == "-" || arg == "--" {
+		return "", false
+	}
+	name, _, _ := strings.Cut(arg, "=")
+	return name, true
 }
 
 func (c AgentExecutableCapability) executableName() string {

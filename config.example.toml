@@ -173,7 +173,8 @@ projects = [
 
 # Settings keyed by agent preset rather than by kind of work. Includable, merged
 # per preset, so a machine-local include can set one agent's block without
-# erasing another's (ADR-0187).
+# erasing another's. After ADR-0195 the only key left is output — an attended
+# session's whole invocation lives in its [work.attended].agents entry.
 #
 # output selects how pop reads this preset's stream ("auto" by default). "text"
 # suppresses the adapter's stream-JSON flags entirely, and with them usage, cost,
@@ -181,27 +182,6 @@ projects = [
 # workaround when a vendor changes a stream shape and pop's parser breaks.
 # [agents.claude]
 # output = "auto"
-#
-# The remaining keys steer the *attended* sessions pop opens for you to sit in
-# front of (HITL and assist menus, map grilling, routine authoring), never a
-# headless drain.
-#
-# attended_args REPLACES pop's own attended arguments for that preset instead of
-# adding to them — pop's defaults are the least-restrictive posture each agent
-# offers (claude --permission-mode auto, whose classifier allows ordinary in-repo
-# work and asks about the rest; cursor --force --trust, codex
-# --dangerously-bypass-approvals-and-sandbox, which bypass outright; opencode, pi
-# and kimi have nothing of the kind and launch bare). An empty list launches the
-# bare binary; omit the key to keep pop's default.
-# [agents.claude]
-# attended_args = ["--dangerously-skip-permissions"]
-#
-# attended_model is the model an attended session names. Left unset, pop passes
-# no model flag at all and the agent's own configuration decides — a --model in
-# [work.implement].agents tunes unattended drains only and never reaches an
-# interactive session.
-# [agents.codex]
-# attended_model = "gpt-5.5"
 
 # Every agent list and every task-execution setting is grouped by kind of work
 # under [work] (ADR-0194). There are no shared defaults at the [work] root: each
@@ -238,8 +218,15 @@ projects = [
 #
 # [work.attended]
 # Every session pop opens for a human shares this one list — gate assistance, an
-# Assist session, Map assist, map grilling, a Routine refinement session.
-# agents = ["claude", "codex"]
+# Assist session, Map assist, map grilling, a Routine refinement session. The
+# entry's cmd is the whole invocation (model included); pop appends the preset's
+# declared posture flag only where cmd does not already name it (ADR-0195). Two
+# entries may name the same preset at different models.
+# agents = [
+#   { display_name = "Claude Usual", cmd = "claude --model opus" },
+#   { display_name = "Claude Cheap", cmd = "claude --model haiku" },
+#   "codex",
+# ]
 
 # [work.implement.git]
 # Commit-time git config applied ONLY to pop's own commits during a task drain

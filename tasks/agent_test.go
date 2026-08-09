@@ -202,7 +202,7 @@ func TestKimiIsOptInOnlyAndNeverADefault(t *testing.T) {
 	for _, specs := range [][]string{
 		ResolveDefaultAgentPresets(nil, "", false, nil),
 		ResolveDefaultAgentPresets(nil, "", false, &config.Config{}),
-		{ResolveDefaultInteractiveAgentPreset(nil)},
+		{ResolveAttendedAgentSpec(nil, "")},
 	} {
 		for _, spec := range specs {
 			if spec == "kimi" {
@@ -224,10 +224,10 @@ func TestKimiAssistanceLaunchesBareInteractiveBinary(t *testing.T) {
 		t.Fatalf("command = %q, want kimi", invocation.Command.Name)
 	}
 	// kimi's interactive mode accepts no initial prompt, so the briefing is
-	// never an argv item (ADR-0164); it declares no auto-approval flag and the
-	// spec's model is not an attended concern (ADR-0187), so argv is empty.
-	if len(invocation.Command.Args) != 0 {
-		t.Fatalf("args = %#v, want none", invocation.Command.Args)
+	// never an argv item (ADR-0164); it declares no auto-approval flag of its
+	// own, so argv is the entry's own arguments and nothing else (ADR-0195).
+	if want := []string{"--model", "moonshot-ai/kimi-k3"}; !reflect.DeepEqual(invocation.Command.Args, want) {
+		t.Fatalf("args = %#v, want %#v", invocation.Command.Args, want)
 	}
 	if invocation.ClipboardPrompt != "briefing text" {
 		t.Fatalf("ClipboardPrompt = %q, want the briefing (delivered via clipboard, ADR-0164)", invocation.ClipboardPrompt)
@@ -958,93 +958,80 @@ func TestResolveAgentAssistanceInvocationCursorLaunchesOwnBinary(t *testing.T) {
 	}
 }
 
-// TestAttendedAssistanceIgnoresImplementListExtraArgs pins decision 4 of
-// ADR-0187: an attended session takes the preset name from the implement agent
-// list and nothing else, so a --model tuned for unattended drains no longer
-// steers the interactive sessions pop opens.
-func TestAttendedAssistanceIgnoresImplementListExtraArgs(t *testing.T) {
-	for _, tc := range []struct {
-		spec string
-		name string
-		want []string
-	}{
-		{"claude --model opus4.8", "claude", []string{"--permission-mode", "auto", "assist prompt"}},
-		{"cursor --model gpt-5", "cursor-agent", []string{"--force", "--trust", "assist prompt"}},
-	} {
-		t.Run(tc.spec, func(t *testing.T) {
-			invocation, err := ResolveAgentAssistanceInvocation(nil, tc.spec, "", "assist prompt", "/tmp/runtime")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if invocation.Mode != AgentAssistanceNative || invocation.Command.Name != tc.name {
-				t.Fatalf("invocation = %#v, want %s native", invocation, tc.name)
-			}
-			if !reflect.DeepEqual(invocation.Command.Args, tc.want) {
-				t.Fatalf("command args = %#v, want %#v", invocation.Command.Args, tc.want)
-			}
-		})
-	}
+// attendedGroupConfig is a config whose only agent list is the attended one.
+func attendedGroupConfig(cmds ...string) *config.Config {
+	return &config.Config{Work: &config.WorkConfig{
+		Implement: &config.ImplementConfig{Agents: config.AgentEntriesFromCommands("codex --model from-the-drain")},
+		Attended:  &config.AgentGroupConfig{Agents: config.AgentEntriesFromCommands(cmds...)},
+	}}
 }
 
-// TestAttendedArgsConfigReplacesDeclaredDefaults pins decision 2 of ADR-0187:
-// [agents.<preset>].attended_args replaces the adapter's declared list wholesale
-// rather than appending to it — an empty list launches the bare binary — and
-// attended_model is the only way a model reaches an attended command.
-func TestAttendedArgsConfigReplacesDeclaredDefaults(t *testing.T) {
-	bare := []string{}
-	for _, tc := range []struct {
-		name  string
-		block config.AgentConfig
-		want  []string
-	}{
-		{
-			name:  "replaces",
-			block: config.AgentConfig{AttendedArgs: &[]string{"--permission-mode", "acceptEdits"}},
-			want:  []string{"--permission-mode", "acceptEdits", "assist prompt"},
-		},
-		{
-			name:  "empty list launches bare",
-			block: config.AgentConfig{AttendedArgs: &bare},
-			want:  []string{"assist prompt"},
-		},
-		{
-			name:  "model only",
-			block: config.AgentConfig{AttendedModel: "opus"},
-			want:  []string{"--permission-mode", "auto", "--model", "opus", "assist prompt"},
-		},
-		{
-			name:  "args and model together",
-			block: config.AgentConfig{AttendedArgs: &[]string{"--permission-mode", "plan"}, AttendedModel: "sonnet"},
-			want:  []string{"--permission-mode", "plan", "--model", "sonnet", "assist prompt"},
-		},
-		{
-			name:  "unset keeps the declared default and names no model",
-			block: config.AgentConfig{},
-			want:  []string{"--permission-mode", "auto", "assist prompt"},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			cfg := &config.Config{Agents: map[string]config.AgentConfig{"claude": tc.block}}
-			// The preset arrives as the implement list writes it; only its name may
-			// select the [agents.<preset>] block.
-			invocation, err := ResolveAgentAssistanceInvocation(cfg, "claude --model from-implement-list", "", "assist prompt", "/tmp/runtime")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !reflect.DeepEqual(invocation.Command.Args, tc.want) {
-				t.Fatalf("command args = %#v, want %#v", invocation.Command.Args, tc.want)
-			}
-		})
-	}
-
-	// A block for another preset must not reach this one.
-	cfg := &config.Config{Agents: map[string]config.AgentConfig{"cursor": {AttendedModel: "composer-2.5"}}}
-	invocation, err := ResolveAgentAssistanceInvocation(cfg, "claude", "", "assist prompt", "/tmp/runtime")
+// TestAttendedSessionLaunchesFromTheAttendedGroup pins ADR-0195: an attended
+// session resolves its agent from [work.attended].agents and never from the list
+// a drain walks, and the entry's own arguments — its model included — reach the
+// launched command as written.
+func TestAttendedSessionLaunchesFromTheAttendedGroup(t *testing.T) {
+	cfg := attendedGroupConfig("claude --model opus", "claude --model haiku")
+	invocation, err := ResolveAgentAssistanceInvocation(cfg, "", "", "assist prompt", "/tmp/runtime")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"--permission-mode", "auto", "assist prompt"}; !reflect.DeepEqual(invocation.Command.Args, want) {
+	if invocation.AgentPreset != "claude" {
+		t.Fatalf("preset = %q, want the attended group's claude, not the drain's codex", invocation.AgentPreset)
+	}
+	want := []string{"--model", "opus", "--permission-mode", "auto", "assist prompt"}
+	if !reflect.DeepEqual(invocation.Command.Args, want) {
 		t.Fatalf("command args = %#v, want %#v", invocation.Command.Args, want)
+	}
+
+	// Two entries naming the same preset at different models each launch with
+	// their own — the case a per-preset attended key could never express.
+	second, err := ResolveAgentAssistanceInvocation(cfg, cfg.AttendedAgents()[1], "", "assist prompt", "/tmp/runtime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = []string{"--model", "haiku", "--permission-mode", "auto", "assist prompt"}
+	if !reflect.DeepEqual(second.Command.Args, want) {
+		t.Fatalf("second entry args = %#v, want %#v", second.Command.Args, want)
+	}
+
+	// An empty attended group falls back to the built-in agent, still never to
+	// the drain's list.
+	bare, err := ResolveAgentAssistanceInvocation(attendedGroupConfig(), "", "", "assist prompt", "/tmp/runtime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bare.AgentPreset != DefaultAgentPreset {
+		t.Fatalf("preset = %q, want the built-in %s", bare.AgentPreset, DefaultAgentPreset)
+	}
+}
+
+// TestAttendedEntryOwnsItsPosture pins decision 4 of ADR-0195: the preset's
+// declared posture argument is appended only where the entry does not already
+// name that flag, in either spelling.
+func TestAttendedEntryOwnsItsPosture(t *testing.T) {
+	for _, tc := range []struct {
+		cmd  string
+		want []string
+	}{
+		{"claude", []string{"--permission-mode", "auto", "assist prompt"}},
+		{"claude --model opus", []string{"--model", "opus", "--permission-mode", "auto", "assist prompt"}},
+		{"claude --permission-mode plan", []string{"--permission-mode", "plan", "assist prompt"}},
+		{"claude --permission-mode=plan", []string{"--permission-mode=plan", "assist prompt"}},
+		// cursor declares two flags; naming one keeps the other.
+		{"cursor --force", []string{"--force", "--trust", "assist prompt"}},
+		{"cursor --force --trust", []string{"--force", "--trust", "assist prompt"}},
+		{"codex --dangerously-bypass-approvals-and-sandbox", []string{"--dangerously-bypass-approvals-and-sandbox", "assist prompt"}},
+	} {
+		t.Run(tc.cmd, func(t *testing.T) {
+			invocation, err := ResolveAgentAssistanceInvocation(attendedGroupConfig(tc.cmd), "", "", "assist prompt", "/tmp/runtime")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(invocation.Command.Args, tc.want) {
+				t.Fatalf("command args = %#v, want %#v", invocation.Command.Args, tc.want)
+			}
+		})
 	}
 }
 

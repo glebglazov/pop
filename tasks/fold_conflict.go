@@ -63,10 +63,9 @@ func HandleFoldConflict(d *Deps, cfg *config.Config, ctx FoldConflictContext, op
 		return foldConflictRefusal(d, ctx.RuntimePath)
 	}
 
-	agentPreset := strings.TrimSpace(opts.AgentPreset)
-	if agentPreset == "" {
-		agentPreset = ResolveDefaultInteractiveAgentPreset(cfg)
-	}
+	// An explicit --agent on the fold is the human naming their own attended
+	// agent for this session; empty resolves to the attended group (ADR-0195).
+	agentOverride := strings.TrimSpace(opts.AgentPreset)
 
 	conflicted, err := listConflictedPaths(d, ctx.RuntimePath)
 	if err != nil {
@@ -74,7 +73,7 @@ func HandleFoldConflict(d *Deps, cfg *config.Config, ctx FoldConflictContext, op
 	}
 
 	prompt := BuildFoldConflictPrompt(d, ctx, conflicted)
-	invocation, err := ResolveAgentAssistanceInvocation(cfg, agentPreset, opts.AgentCmd, prompt, ctx.RuntimePath)
+	invocation, err := ResolveAgentAssistanceInvocation(cfg, agentOverride, opts.AgentCmd, prompt, ctx.RuntimePath)
 	if err != nil {
 		return fmt.Errorf("fold refused: %w", err)
 	}
@@ -102,7 +101,7 @@ func HandleFoldConflict(d *Deps, cfg *config.Config, ctx FoldConflictContext, op
 				return fmt.Errorf("fold refused: list conflicted paths: %w", err)
 			}
 			prompt = BuildFoldConflictPrompt(d, ctx, conflicted)
-			invocation, err = ResolveAgentAssistanceInvocation(cfg, agentPreset, opts.AgentCmd, prompt, ctx.RuntimePath)
+			invocation, err = ResolveAgentAssistanceInvocation(cfg, agentOverride, opts.AgentCmd, prompt, ctx.RuntimePath)
 			if err != nil {
 				return fmt.Errorf("fold refused: %w", err)
 			}

@@ -3087,19 +3087,16 @@ heavy = [{ model = "opus", reasoning = "high" }]
 
 		writeFile("private.toml", `
 [agents.codex]
-attended_args = ["--full-auto"]
-attended_model = "gpt-5.5"
+output = "text"
 
 [agents.claude]
-attended_args = ["--from-the-include"]
-attended_model = "from-the-include"
+output = "text"
 `)
 		configPath := writeFile("config.toml", `
 includes = ["private.toml"]
 
 [agents.claude]
-attended_args = []
-attended_model = "opus"
+output = "auto"
 `)
 
 		cfg, err := Load(configPath)
@@ -3108,24 +3105,15 @@ attended_model = "opus"
 		}
 		// The include set a preset the parent never mentions, and the parent's own
 		// preset survives untouched: the merge is per preset, not whole-table.
-		codex := cfg.AgentSettingsFor("codex")
-		if codex.AttendedArgs == nil || !reflect.DeepEqual(*codex.AttendedArgs, []string{"--full-auto"}) {
-			t.Fatalf("agents.codex attended_args = %#v, want [--full-auto]", codex.AttendedArgs)
+		if got := cfg.AgentSettingsFor("codex").Output; got != "text" {
+			t.Fatalf("agents.codex output = %q, want text", got)
 		}
-		if codex.AttendedModel != "gpt-5.5" {
-			t.Fatalf("agents.codex attended_model = %q, want gpt-5.5", codex.AttendedModel)
-		}
-		claude := cfg.AgentSettingsFor("claude")
-		if claude.AttendedModel != "opus" {
-			t.Fatalf("agents.claude attended_model = %q, want the parent's opus", claude.AttendedModel)
-		}
-		// An explicitly empty list is a real setting (launch bare), not an absent key.
-		if claude.AttendedArgs == nil || len(*claude.AttendedArgs) != 0 {
-			t.Fatalf("agents.claude attended_args = %#v, want an empty list", claude.AttendedArgs)
+		if got := cfg.AgentSettingsFor("claude").Output; got != "auto" {
+			t.Fatalf("agents.claude output = %q, want the parent's auto", got)
 		}
 		found := false
 		for _, w := range cfg.Warnings {
-			if strings.Contains(w, "[agents.claude] attended_model skipped") {
+			if strings.Contains(w, "[agents.claude] output skipped") {
 				found = true
 			}
 			if strings.Contains(w, `"agents" ignored`) {
@@ -3137,43 +3125,37 @@ attended_model = "opus"
 		}
 	})
 
-	t.Run("include fills one field of a preset the parent also sets", func(t *testing.T) {
+	// The two attended keys were read until ADR-0195 moved the whole invocation
+	// onto the attended entry, so a file still setting one is pointed at its new
+	// address rather than told it made a typo.
+	t.Run("retired attended keys report their new address", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		writeFile := func(name, content string) string {
-			p := filepath.Join(tmpDir, name)
-			if err := os.WriteFile(p, []byte(content), 0644); err != nil {
-				t.Fatal(err)
-			}
-			return p
-		}
-
-		writeFile("private.toml", `
-[agents.claude]
-attended_model = "from-the-include"
-`)
-		configPath := writeFile("config.toml", `
-includes = ["private.toml"]
-
+		configPath := filepath.Join(tmpDir, "config.toml")
+		if err := os.WriteFile(configPath, []byte(`
 [agents.claude]
 attended_args = ["--permission-mode", "acceptEdits"]
-`)
-
+attended_model = "opus"
+`), 0644); err != nil {
+			t.Fatal(err)
+		}
 		cfg, err := Load(configPath)
 		if err != nil {
 			t.Fatalf("Load() error: %v", err)
 		}
-		// The block merges per field: the parent's args survive and the include
-		// supplies the model the parent never set.
-		claude := cfg.AgentSettingsFor("claude")
-		if claude.AttendedArgs == nil || !reflect.DeepEqual(*claude.AttendedArgs, []string{"--permission-mode", "acceptEdits"}) {
-			t.Fatalf("agents.claude attended_args = %#v, want the parent's list", claude.AttendedArgs)
-		}
-		if claude.AttendedModel != "from-the-include" {
-			t.Fatalf("agents.claude attended_model = %q, want from-the-include", claude.AttendedModel)
-		}
-		for _, w := range cfg.Warnings {
-			if strings.Contains(w, "[agents.claude]") {
-				t.Fatalf("no collision expected, got: %v", cfg.Warnings)
+		for _, key := range []string{"attended_args", "attended_model"} {
+			found := false
+			for _, f := range cfg.Findings {
+				if f.Path != "agents.claude."+key {
+					continue
+				}
+				if !strings.Contains(f.Message, key+" is no longer read") ||
+					!strings.Contains(f.Message, "[work.attended].agents") {
+					t.Fatalf("finding for %s does not name the new address: %q", key, f.Message)
+				}
+				found = true
+			}
+			if !found {
+				t.Fatalf("expected a retired-key finding for %s, got: %#v", key, cfg.Findings)
 			}
 		}
 	})

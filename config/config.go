@@ -364,24 +364,17 @@ type EffortConfig struct {
 }
 
 // AgentConfig holds the settings keyed by agent preset rather than by kind of
-// work: the attended-session arguments pop uses for the sessions it opens for a
-// human to sit in front of (ADR-0187), and the output mode that decides how pop
-// parses this agent's stream in any kind of run (ADR-0194).
+// work. Only the output mode is left: it decides how pop parses this agent's
+// stream in any kind of run (ADR-0194). The attended argument and model keys the
+// block used to carry were cut by ADR-0195 — a per-preset key can hold only one
+// attended configuration per agent, so the whole invocation moved onto the
+// [work.attended].agents entry.
 type AgentConfig struct {
 	// Output selects how pop reads this preset's stream. Empty ⇒ "auto"; "text"
 	// suppresses the adapter's stream-JSON flags entirely, and with them usage,
 	// cost, turn counts and Agent proceed verdict detection — the in-config
 	// workaround when a vendor changes a stream shape and pop's parser breaks.
 	Output string `toml:"output" include:"replace" desc:"Output mode for this agent preset (auto|text|json)."`
-	// AttendedArgs replaces the adapter's declared attended arguments wholesale
-	// rather than appending to them: an attended session has no output protocol
-	// for pop to protect, so the human at the terminal owns their own permission
-	// posture. A pointer so `attended_args = []` (launch bare) is distinguishable
-	// from the key being absent (keep pop's defaults).
-	AttendedArgs *[]string `toml:"attended_args" include:"replace" desc:"Arguments for this preset's attended sessions; replaces pop's defaults ([] launches bare)."`
-	// AttendedModel is the model an attended session names. Unset means pop names
-	// no model at all and the agent's own configuration decides.
-	AttendedModel string `toml:"attended_model" include:"replace" desc:"Model an attended session of this preset names (unset: the agent's own configuration decides)."`
 }
 
 // AgentSettingsFor returns the [agents.<preset>] block for a preset name, or the
@@ -632,8 +625,9 @@ type Config struct {
 	Task   *TasksConfig            `toml:"tasks" include:"fields" desc:"Deprecated: use [work] (only [tasks.git] is still read)."`
 	Effort map[string]EffortConfig `toml:"effort" include:"map-first-wins" desc:"Per-agent reasoning-effort ladders ([effort.<agent>] tables)."`
 	// Agents holds [agents.<preset>] blocks: the settings keyed by agent preset
-	// rather than by kind of work — attended-session arguments (ADR-0187) and
-	// the preset's output mode (ADR-0194).
+	// rather than by kind of work. After ADR-0195 the only key left is the
+	// preset's output mode (ADR-0194); attended invocation lives on the
+	// [work.attended].agents entry.
 	Agents map[string]AgentConfig `toml:"agents" include:"map-fields" desc:"Per-agent preset settings ([agents.<preset>] tables)."`
 	// Workbenches is the canonical TOML key for session blueprints.
 	Workbenches []Workbench `toml:"workbenches" include:"append" desc:"Global session blueprints (templates)."`
@@ -1726,12 +1720,6 @@ func seedIncludeClaims(policy *mergePolicy, cfg *Config, md toml.MetaData) {
 	// unset field is a nil argument list or an empty string, never a meaningful
 	// value an include should lose to.
 	for preset, block := range cfg.Agents {
-		if block.AttendedArgs != nil {
-			policy.claim("agents." + preset + ".attended_args")
-		}
-		if strings.TrimSpace(block.AttendedModel) != "" {
-			policy.claim("agents." + preset + ".attended_model")
-		}
 		if strings.TrimSpace(block.Output) != "" {
 			policy.claim("agents." + preset + ".output")
 		}
@@ -1952,11 +1940,15 @@ func effortConfigFindings(path string, md toml.MetaData) []Finding {
 }
 
 // agentConfigFindings reports an unknown key inside an [agents.<preset>] block,
-// so a typo'd attended setting is surfaced rather than silently ignored. The
-// preset name itself is not validated here: config does not know the agent
+// so a typo'd setting is surfaced rather than silently ignored. The two attended
+// keys ADR-0195 cut are named specially: they were read until this release and
+// their replacement is an address in another table, so a file still carrying one
+// is told where its invocation now lives rather than being told it made a typo.
+// The preset name itself is not validated here: config does not know the agent
 // adapter registry, and an unknown preset simply never matches a session.
 func agentConfigFindings(path string, md toml.MetaData) []Finding {
-	validKeys := map[string]bool{"attended_args": true, "attended_model": true, "output": true}
+	validKeys := map[string]bool{"output": true}
+	retiredKeys := map[string]bool{"attended_args": true, "attended_model": true}
 	var findings []Finding
 	seen := make(map[string]bool)
 	for _, key := range md.Undecoded() {
@@ -1965,7 +1957,13 @@ func agentConfigFindings(path string, md toml.MetaData) []Finding {
 		}
 		f := Finding{
 			Path:    fmt.Sprintf("agents.%s.%s", key[1], key[2]),
-			Message: fmt.Sprintf("%s: [agents.%s] unknown key %q; valid keys: attended_args, attended_model, output", path, key[1], key[2]),
+			Message: fmt.Sprintf("%s: [agents.%s] unknown key %q; valid keys: output", path, key[1], key[2]),
+		}
+		if retiredKeys[key[2]] {
+			f.Message = fmt.Sprintf(
+				"%s: [agents.%s] %s is no longer read; an attended session's whole invocation lives in its [work.attended].agents entry — use cmd = \"%s …\"",
+				path, key[1], key[2], key[1],
+			)
 		}
 		if seen[f.Path] {
 			continue

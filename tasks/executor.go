@@ -147,7 +147,6 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 			out:            out,
 			in:             opts.ConfirmIn,
 			yes:            opts.Yes,
-			agentPreset:    opts.AgentPreset,
 			agentCmd:       opts.AgentCmd,
 			cwd:            opts.CWD,
 			runtimePath:    runtimePath,

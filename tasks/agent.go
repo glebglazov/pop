@@ -122,10 +122,10 @@ type AgentHeadlessRequest struct {
 type AgentAssistanceRequest struct {
 	Prompt      string
 	RuntimePath string
-	// Settings are the user's [agents.<preset>] attended overrides. An attended
-	// launch reads its arguments and model from here and never from the extra
-	// arguments of an --agent spec (ADR-0187).
-	Settings AttendedAgentSettings
+	// EntryArgs are the arguments of the attended entry's cmd, everything after
+	// the token that named the preset. They are passed through as written: the
+	// entry owns its whole invocation, model included (ADR-0195).
+	EntryArgs []string
 }
 
 // AgentAssistanceMode describes how an adapter can offer attended HITL help.
@@ -665,14 +665,14 @@ func (a *presetAgentAdapter) AssistanceInvocation(req AgentAssistanceRequest) (*
 	command := *capability.Command
 	command.Args = []string{}
 	command.Args = append(command.Args, capability.Command.Args...)
+	// The entry's own arguments come first and unread — its cmd is the invocation,
+	// model and all (ADR-0195).
+	command.Args = append(command.Args, req.EntryArgs...)
 	// A session pop opens for a human to work in launches auto-approved, the same
 	// posture the headless drains beside it have always had; the flag that says so
-	// is per-preset, a preset with none launches bare, and the user's
-	// [agents.<preset>].attended_args replaces the lot (ADR-0187).
-	command.Args = append(command.Args, req.Settings.attendedArgsWith(a.attendedArgs)...)
-	// An attended session names a model only when the user asked for one; left
-	// unset, the agent's own configuration decides.
-	command.Args = append(command.Args, req.Settings.modelArgs()...)
+	// is per-preset, a preset with none launches bare, and an entry naming that
+	// flag itself keeps its own value.
+	command.Args = append(command.Args, a.attendedArgs.attendedArgsBeside(req.EntryArgs)...)
 	// A preset with no positional prompt form (kimi) launches bare; its briefing
 	// reaches the human another way (ADR-0164).
 	clipboardPrompt := ""
@@ -922,15 +922,22 @@ func AgentPresetName(spec string) (string, error) {
 	return name, nil
 }
 
-// ResolveDefaultInteractiveAgentPreset returns the default Interactive agent
-// preset for attended sessions (wayfinder work, HITL assistance, routine
-// authoring). It follows [work.implement].agents when set, otherwise claude.
-func ResolveDefaultInteractiveAgentPreset(cfg *config.Config) string {
-	specs := ResolveDefaultAgentPresets(nil, "", false, cfg)
-	if len(specs) == 0 {
-		return DefaultAgentPreset
+// ResolveAttendedAgentSpec returns the command an attended session launches —
+// gate assistance, an Assist session, Map assist, map grilling, a Routine
+// refinement session. A human's session-lived override wins; otherwise it is the
+// head of [work.attended].agents, and failing that the built-in claude. The
+// implement list is deliberately not consulted: a list built for unattended
+// drains is not what a human sits in front of (ADR-0194, ADR-0195).
+func ResolveAttendedAgentSpec(cfg *config.Config, override string) string {
+	if spec := strings.TrimSpace(override); spec != "" {
+		return spec
 	}
-	return specs[0]
+	for _, entry := range cfg.AttendedAgents() {
+		if spec := strings.TrimSpace(entry); spec != "" {
+			return spec
+		}
+	}
+	return DefaultAgentPreset
 }
 
 // ResolveDefaultAgentPresets returns the ordered agent preset list for a run.
@@ -1085,24 +1092,27 @@ func ResolveAgentAssistanceCapability(preset, agentCmd string) (AgentAssistanceC
 // agentCmd is accepted for call-site symmetry with headless invocation but is intentionally ignored:
 // custom --agent-cmd only applies to unattended issue attempts.
 //
-// Only the preset *name* is taken from the spec: an attended session's arguments
-// and model come from the user's [agents.<preset>] block, so a --model tuned for
-// unattended drains in [work.implement].agents no longer steers the interactive
-// sessions pop opens (ADR-0187). It is the one chokepoint every attended call
-// site passes through, which is why the policy lives here and not per call site.
-func ResolveAgentAssistanceInvocation(cfg *config.Config, preset, agentCmd, prompt, runtimePath string) (*AgentAssistanceInvocation, error) {
-	name, err := AgentPresetName(preset)
+// override is the attended agent a human named for this one session, empty when
+// they named none; either way the spec it resolves to is an attended entry, and
+// the entry's whole cmd is the invocation — arguments and model passed through
+// as written, with the preset's declared posture arguments appended only where
+// the entry did not name that flag (ADR-0195). No attended path reads a drain's
+// agent list. It is the one chokepoint every attended call site passes through,
+// which is why the policy lives here and not per call site.
+func ResolveAgentAssistanceInvocation(cfg *config.Config, override, agentCmd, prompt, runtimePath string) (*AgentAssistanceInvocation, error) {
+	spec := ResolveAttendedAgentSpec(cfg, override)
+	_, entryArgs, err := parseAgentPresetSpec(spec)
 	if err != nil {
 		return nil, err
 	}
-	adapter, err := ResolveAgentAdapter(preset)
+	adapter, err := ResolveAgentAdapter(spec)
 	if err != nil {
 		return nil, err
 	}
 	return adapter.AssistanceInvocation(AgentAssistanceRequest{
 		Prompt:      prompt,
 		RuntimePath: runtimePath,
-		Settings:    attendedAgentSettingsFor(cfg, name),
+		EntryArgs:   entryArgs,
 	})
 }
 

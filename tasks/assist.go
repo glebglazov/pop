@@ -88,10 +88,9 @@ func AssistTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 	}
 
 	cfg, _ := loadConfig(config.DefaultConfigPath())
-	agentPreset := strings.TrimSpace(opts.AgentPreset)
-	if agentPreset == "" {
-		agentPreset = ResolveDefaultInteractiveAgentPreset(cfg)
-	}
+	// `pop tasks assist --agent` is the human naming their own attended agent for
+	// this session; empty resolves to the attended group (ADR-0195).
+	agentOverride := strings.TrimSpace(opts.AgentPreset)
 
 	if err := RegisterCheckoutGateHold(d, setID, runtimePath, false); err != nil {
 		return err
@@ -131,7 +130,7 @@ func AssistTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 		out:            out,
 		in:             in,
 		reader:         reader,
-		agentPreset:    agentPreset,
+		agentOverride:  agentOverride,
 		agentCmd:       opts.AgentCmd,
 		cwd:            resolved.ProjectPath,
 		runtimePath:    runtimePath,
@@ -336,7 +335,7 @@ func handleGenericAssistMenu(env gateEnv, m *Manifest, status TaskSetStatus, fin
 	}
 
 	prompt := BuildAssistPrompt(d, taskSetID, m, status, runtimePath, findings)
-	invocation, err := ResolveAgentAssistanceInvocation(env.cfg, env.agentPreset, env.agentCmd, prompt, runtimePath)
+	invocation, err := ResolveAgentAssistanceInvocation(env.cfg, env.agentOverride, env.agentCmd, prompt, runtimePath)
 	if err != nil {
 		return false, exitErr(ExitSetup, "%v", err)
 	}
@@ -366,7 +365,7 @@ func handleGenericAssistMenu(env gateEnv, m *Manifest, status TaskSetStatus, fin
 				}
 			}
 			prompt = BuildAssistPrompt(d, taskSetID, m, status, runtimePath, findings)
-			invocation, err = ResolveAgentAssistanceInvocation(env.cfg, env.agentPreset, env.agentCmd, prompt, runtimePath)
+			invocation, err = ResolveAgentAssistanceInvocation(env.cfg, env.agentOverride, env.agentCmd, prompt, runtimePath)
 			if err != nil {
 				return false, exitErr(ExitSetup, "%v", err)
 			}

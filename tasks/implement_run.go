@@ -309,7 +309,6 @@ func (r *implementRun) newGateEnv() gateEnv {
 		in:             r.opts.ConfirmIn,
 		reader:         r.sharedPromptReader,
 		yes:            r.opts.Yes,
-		agentPreset:    r.opts.AgentPreset,
 		agentCmd:       r.opts.AgentCmd,
 		cwd:            r.opts.CWD,
 		runtimePath:    r.runtimePath,

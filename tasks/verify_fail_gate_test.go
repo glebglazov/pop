@@ -135,7 +135,7 @@ func TestVerifyFailedGateAgentAssistanceAdvisory(t *testing.T) {
 
 	var out bytes.Buffer
 	in := strings.NewReader("3\n0\n")
-	handled, err := handleInteractiveVerifyFailedGate(gateEnv{d: d, out: &out, in: in, agentPreset: "claude", runtimePath: "/rt", taskSetID: "demo"}, "/repo/.git", m, "shaGATE", "the retry looks flaky")
+	handled, err := handleInteractiveVerifyFailedGate(gateEnv{d: d, out: &out, in: in, agentOverride: "claude", runtimePath: "/rt", taskSetID: "demo"}, "/repo/.git", m, "shaGATE", "the retry looks flaky")
 	if err != nil {
 		t.Fatalf("handleInteractiveVerifyFailedGate: %v", err)
 	}
