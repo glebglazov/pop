@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/glebglazov/pop/config"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/project"
 )
@@ -68,7 +69,7 @@ func tmuxDeps(d *Deps) tmuxmod.Tmux {
 	if d != nil && d.Tmux != nil {
 		return d.Tmux
 	}
-	return tmuxmod.New()
+	return tmuxmod.New(config.ConfiguredTmuxSocket())
 }
 
 func projectDeps(d *Deps) *project.Deps {

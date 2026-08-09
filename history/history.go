@@ -13,6 +13,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/internal/tmux"
@@ -37,7 +38,7 @@ type Deps struct {
 func DefaultDeps() *Deps {
 	return &Deps{
 		FS:    deps.NewRealFileSystem(),
-		Tmux:  tmux.New(),
+		Tmux:  tmux.New(config.ConfiguredTmuxSocket()),
 		Tasks: tasks.DefaultDeps(),
 	}
 }

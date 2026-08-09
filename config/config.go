@@ -195,6 +195,16 @@ type UpdatesConfig struct {
 	NoticeEnabled *bool `toml:"notice_enabled" desc:"Enable the update notice and daily background update check (default true)."`
 }
 
+// TmuxConfig holds global tmux-server addressing settings (ADR-0199).
+// Global-scope only: excluded from the include whitelist (ADR-0037) and from
+// repo-scope surfaces (ADR-0083). An empty Socket is meaningful — it means
+// emit no -L flag, not "default".
+type TmuxConfig struct {
+	// Socket is the tmux server socket name every pop command addresses
+	// (-L <name>). Empty/unset means no -L flag (tmux's own default server).
+	Socket string `toml:"socket" desc:"Tmux server socket name (-L); empty addresses tmux's default server with no -L flag."`
+}
+
 // DefaultTaskMaxTries is the default started-attempt cap for implement and verify
 // when neither config nor an explicit CLI flag names a value (ADR-0099).
 const DefaultTaskMaxTries = 3
@@ -639,6 +649,9 @@ type Config struct {
 	Work          *WorkConfig         `toml:"work" include:"fields" desc:"Work settings ([work] table; one sub-table per kind of work)."`
 	Updates       *UpdatesConfig      `toml:"updates" desc:"Auto-update behavior ([updates] table)."`
 	Integrations  *IntegrationsConfig `toml:"integrations" merge:"fields" desc:"AI-agent integration settings ([integrations] table)."`
+	// Tmux holds global tmux-server addressing ([tmux] table). Global-scope only
+	// (ADR-0199): no include: tag, not on the include whitelist, not repo-scope.
+	Tmux *TmuxConfig `toml:"tmux" desc:"Tmux server addressing ([tmux] table)."`
 	// Repo holds [repo."<path>"] override blocks keyed by any checkout path.
 	// The key is canonicalized (~ expanded, symlinks resolved) at resolution
 	// time; any worktree path or bare dir of the same repo resolves to the
@@ -1116,6 +1129,27 @@ func (c *Config) UpdateNoticeEnabled() bool {
 		return true
 	}
 	return *c.Updates.NoticeEnabled
+}
+
+// TmuxSocket returns the configured tmux server socket name (tmux.socket).
+// Empty means unset: callers must emit no -L flag (ADR-0199). The receiver
+// may be nil.
+func (c *Config) TmuxSocket() string {
+	if c == nil || c.Tmux == nil {
+		return ""
+	}
+	return c.Tmux.Socket
+}
+
+// ConfiguredTmuxSocket returns tmux.socket from the default config path, or ""
+// when the key is unset or the config cannot be loaded. Callers hand the
+// result to tmux.New so every production construction shares one resolution.
+func ConfiguredTmuxSocket() string {
+	cfg, err := Load(DefaultConfigPath())
+	if err != nil || cfg == nil {
+		return ""
+	}
+	return cfg.TmuxSocket()
 }
 
 // WorkbenchPickOnCreate reports whether the picker create-path should prompt for

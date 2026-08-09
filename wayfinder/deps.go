@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/tasks"
@@ -64,7 +65,7 @@ func (d *Deps) tmux() tmux.Tmux {
 	if d.Tmux != nil {
 		return d.Tmux
 	}
-	d.Tmux = tmux.New()
+	d.Tmux = tmux.New(config.ConfiguredTmuxSocket())
 	return d.Tmux
 }
 

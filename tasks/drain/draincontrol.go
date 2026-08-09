@@ -191,7 +191,7 @@ func LaunchDrain(d *Deps, cfg *config.Config, row DashboardRow) (DashboardDrainR
 	dec.pinRuntimePath = true
 
 	if d.Tmux == nil {
-		d.Tmux = tmuxmod.New()
+		d.Tmux = tmuxmod.New(config.ConfiguredTmuxSocket())
 	}
 	// An already-running drain pane for this set is a jump target: focus it
 	// rather than re-sending implement into the live process (ADR-0158). An
@@ -246,7 +246,7 @@ func LaunchVerify(d *Deps, cfg *config.Config, row DashboardRow) (DashboardDrain
 		return DashboardDrainResult{}, err
 	}
 	if d.Tmux == nil {
-		d.Tmux = tmuxmod.New()
+		d.Tmux = tmuxmod.New(config.ConfiguredTmuxSocket())
 	}
 	// An already-running verify pane for this set is a jump target: focus it
 	// rather than re-sending verify into the live process (ADR-0158). An idle
@@ -326,7 +326,7 @@ func LaunchAssist(d *Deps, cfg *config.Config, row DashboardRow) (DashboardDrain
 		d.Project = project.DefaultDeps()
 	}
 	if d.Tmux == nil {
-		d.Tmux = tmuxmod.New()
+		d.Tmux = tmuxmod.New(config.ConfiguredTmuxSocket())
 	}
 	scans, repoKey, err := dashboardBindContext(d, cfg, row)
 	if err != nil {
@@ -454,7 +454,7 @@ func LaunchFold(d *Deps, cfg *config.Config, row DashboardRow) (DashboardDrainRe
 		d.Project = project.DefaultDeps()
 	}
 	if d.Tmux == nil {
-		d.Tmux = tmuxmod.New()
+		d.Tmux = tmuxmod.New(config.ConfiguredTmuxSocket())
 	}
 	scans, repoKey, err := dashboardBindContext(d, cfg, row)
 	if err != nil {
@@ -502,7 +502,7 @@ func LaunchShellIn(d *Deps, cfg *config.Config, row DashboardRow, dir string) (D
 		d.Project = project.DefaultDeps()
 	}
 	if d.Tmux == nil {
-		d.Tmux = tmuxmod.New()
+		d.Tmux = tmuxmod.New(config.ConfiguredTmuxSocket())
 	}
 	checkout := strings.TrimSpace(dir)
 	if checkout == "" {

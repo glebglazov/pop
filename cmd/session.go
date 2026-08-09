@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/history"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
@@ -16,7 +17,7 @@ import (
 
 // defaultTmuxMod is the production tmux module handle used by all tmux
 // side effects in cmd (ADR-0142).
-var defaultTmuxMod tmuxmod.Tmux = tmuxmod.New()
+var defaultTmuxMod tmuxmod.Tmux = tmuxmod.New(config.ConfiguredTmuxSocket())
 
 const (
 	tmuxSessionPathPrefix = "tmux:"

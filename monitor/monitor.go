@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/internal/deps"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
@@ -88,7 +89,7 @@ type Deps struct {
 func DefaultDeps() *Deps {
 	return &Deps{
 		FS:   deps.NewRealFileSystem(),
-		Tmux: tmuxmod.New(),
+		Tmux: tmuxmod.New(config.ConfiguredTmuxSocket()),
 	}
 }
 

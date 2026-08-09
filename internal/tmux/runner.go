@@ -28,10 +28,26 @@ type runner interface {
 }
 
 // execRunner is the real adapter: it shells out to the tmux binary.
-type execRunner struct{}
+// socket is the -L name handed at construction (ADR-0199). Empty means emit
+// no socket flag — identical argv to pre-socket-key pop.
+type execRunner struct {
+	socket string
+}
 
-func (execRunner) output(args ...string) (string, error) {
-	cmd := exec.Command("tmux", args...)
+// withSocket prepends -L <socket> when a socket name is configured. An empty
+// socket returns args unchanged so an upgrade with the key unset changes no
+// argv at all.
+func (r execRunner) withSocket(args []string) []string {
+	if r.socket == "" {
+		return args
+	}
+	out := make([]string, 0, len(args)+2)
+	out = append(out, "-L", r.socket)
+	return append(out, args...)
+}
+
+func (r execRunner) output(args ...string) (string, error) {
+	cmd := exec.Command("tmux", r.withSocket(args)...)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", outputError(err)
@@ -39,8 +55,8 @@ func (execRunner) output(args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-func (execRunner) attach(args ...string) error {
-	cmd := exec.Command("tmux", args...)
+func (r execRunner) attach(args ...string) error {
+	cmd := exec.Command("tmux", r.withSocket(args)...)
 	var stderr bytes.Buffer
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -51,8 +67,8 @@ func (execRunner) attach(args ...string) error {
 	return nil
 }
 
-func (execRunner) input(text string, args ...string) error {
-	cmd := exec.Command("tmux", args...)
+func (r execRunner) input(text string, args ...string) error {
+	cmd := exec.Command("tmux", r.withSocket(args)...)
 	cmd.Stdin = strings.NewReader(text)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

@@ -204,7 +204,10 @@ type realTmux struct {
 	run runner
 }
 
-// New returns a Tmux backed by the real tmux binary.
-func New() Tmux {
-	return &realTmux{run: execRunner{}}
+// New returns a Tmux backed by the real tmux binary, addressing the named
+// server socket (ADR-0199). An empty socket emits no -L flag — identical argv
+// to pre-socket-key pop. Callers hand the value from config.TmuxSocket /
+// config.ConfiguredTmuxSocket at construction; the module never loads config.
+func New(socket string) Tmux {
+	return &realTmux{run: execRunner{socket: socket}}
 }

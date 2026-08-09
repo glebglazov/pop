@@ -2138,6 +2138,140 @@ func TestUpdateNoticeEnabled(t *testing.T) {
 	}
 }
 
+// TestTmuxSocketKey covers ADR-0199 decision 1: the global tmux.socket key
+// loads, appears in the keys catalog, stays empty when unset, and is rejected
+// from includes and non-global scopes.
+func TestTmuxSocketKey(t *testing.T) {
+	t.Run("loads from global config", func(t *testing.T) {
+		configPath := filepath.Join(t.TempDir(), "config.toml")
+		if err := os.WriteFile(configPath, []byte(`
+[tmux]
+socket = "pop"
+`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := cfg.TmuxSocket(); got != "pop" {
+			t.Fatalf("TmuxSocket() = %q, want pop", got)
+		}
+	})
+
+	t.Run("unset means empty string", func(t *testing.T) {
+		configPath := filepath.Join(t.TempDir(), "config.toml")
+		if err := os.WriteFile(configPath, []byte(`projects = [{ path = "~/Dev" }]`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := cfg.TmuxSocket(); got != "" {
+			t.Fatalf("TmuxSocket() = %q, want empty", got)
+		}
+		if (*Config)(nil).TmuxSocket() != "" {
+			t.Fatal("nil Config TmuxSocket() must be empty")
+		}
+	})
+
+	t.Run("appears in global keys catalog", func(t *testing.T) {
+		docs, ok := ScopeKeyDocsRecursive(ScopeGlobal)
+		if !ok {
+			t.Fatal("ScopeGlobal unknown")
+		}
+		found := false
+		for _, d := range docs {
+			if d.Key == "tmux.socket" {
+				found = true
+				if d.Desc == "" {
+					t.Fatal("tmux.socket must carry a desc tag")
+				}
+				break
+			}
+		}
+		if !found {
+			t.Fatal("tmux.socket missing from global keys catalog")
+		}
+	})
+
+	t.Run("rejected from include", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		includePath := filepath.Join(tmpDir, "extra.toml")
+		if err := os.WriteFile(includePath, []byte(`
+[tmux]
+socket = "pop"
+projects = [{ path = "/extra" }]
+`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		configPath := filepath.Join(tmpDir, "config.toml")
+		if err := os.WriteFile(configPath, []byte(`
+includes = ["extra.toml"]
+projects = [{ path = "/main" }]
+`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := cfg.TmuxSocket(); got != "" {
+			t.Fatalf("include must not set tmux.socket, got %q", got)
+		}
+		warned := false
+		for _, w := range cfg.Warnings {
+			if strings.Contains(w, "tmux") && strings.Contains(w, "ignored") {
+				warned = true
+				break
+			}
+		}
+		if !warned {
+			t.Fatalf("expected include warning about tmux, got: %v", cfg.Warnings)
+		}
+	})
+
+	t.Run("rejected from pop-toml repo scope", func(t *testing.T) {
+		root := t.TempDir()
+		if err := os.WriteFile(popConfigPath(t, root), []byte(`
+[tmux]
+socket = "pop"
+`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := LoadRepoConfig(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, f := range cfg.Findings {
+			if strings.Contains(f.Message, "tmux") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected repo-scope finding for tmux, got: %+v", cfg.Findings)
+		}
+	})
+
+	t.Run("not in repo-scope legal keys", func(t *testing.T) {
+		if repoScopeLegalKeys()["tmux"] {
+			t.Fatal("tmux must not be repo-scope-legal")
+		}
+		docs, ok := ScopeKeyDocs(ScopePopTOML)
+		if !ok {
+			t.Fatal("ScopePopTOML unknown")
+		}
+		for _, d := range docs {
+			if d.Key == "tmux" || strings.HasPrefix(d.Key, "tmux.") {
+				t.Fatalf("pop-toml catalog must not expose %q", d.Key)
+			}
+		}
+	})
+}
+
 func TestDashboardZoomOnSwitch(t *testing.T) {
 	tests := []struct {
 		name     string
