@@ -48,6 +48,13 @@ type Attribution struct {
 	// Label is the kind's own phrase for the container ("task set 04-foo"), for
 	// the one line a surface prints when the row it names cannot be shown.
 	Label string
+	// Note is what the surface must say even when the cursor lands: the kind had
+	// more than one candidate and chose this one, so the choice is named along
+	// with how many there were and why. Empty for an unambiguous attribution,
+	// which is the silent case — placing a cursor is not an action, but a
+	// plausible near miss that says nothing looks like a bug (ADR-0201 decision
+	// 2).
+	Note string
 }
 
 // PaneAttributor is the optional seam a kind implements when a pane may belong to
@@ -63,25 +70,47 @@ type PaneAttributor interface {
 	AttributePane(PaneFacts) (Attribution, bool)
 }
 
-// AttributePane walks the wired kinds in precedence order and returns the first
-// attribution one of them makes, or nil when the pane belongs to nothing here.
+// PaneNeighbourhoodAttributor is the weak half of the same seam: a kind answers it
+// when a pane pop never opened may still *sit* somewhere its work lives — a
+// directory work is running or bound in. It is a second method rather than more
+// rungs inside AttributePane because the two halves mean different things, and the
+// ladder interleaves kinds across the boundary: a session stamped for a Map beats
+// any kind's mere locality, however deep the checkout the pane is standing in
+// (ADR-0201 decision 1).
 //
-// Precedence is the ladder (ADR-0201 decision 1). A pane pop opened for a Task
-// set is that set's whatever session it sits in, so the Task-set kind is asked
-// before the kind that has only a session stamp to go on; the rungs a single kind
-// owns are ordered inside it. A kind not wired onto this page is not asked at
-// all, which is how a Routine pane leaves a page-A cursor alone.
+// A kind answering here owes the surface a Note whenever it had to choose between
+// candidates.
+type PaneNeighbourhoodAttributor interface {
+	AttributePaneNeighbourhood(PaneFacts) (Attribution, bool)
+}
+
+// AttributePane walks the wired kinds and returns the first attribution one of
+// them makes, or nil when the pane belongs to nothing here.
+//
+// It walks them twice, which is the ladder (ADR-0201 decision 1). The first pass
+// asks every kind what pane pop opened this is: a pane pop opened for a Task set
+// is that set's whatever session it sits in, so the Task-set kind is asked before
+// the kind that has only a session stamp to go on. Only once no kind recognises
+// the pane as its own does the second pass ask where the pane is standing, in the
+// same kind order. A kind not wired onto this page is asked in neither pass, which
+// is how a Routine pane leaves a page-A cursor alone.
 func AttributePane(kinds []Kind, facts PaneFacts) *Attribution {
 	if facts.Empty() {
 		return nil
 	}
-	for _, k := range kindsInPrecedence(kinds) {
-		attributor, ok := k.(PaneAttributor)
-		if !ok {
-			continue
+	ordered := kindsInPrecedence(kinds)
+	for _, k := range ordered {
+		if attributor, ok := k.(PaneAttributor); ok {
+			if att, hit := attributor.AttributePane(facts); hit {
+				return &att
+			}
 		}
-		if att, hit := attributor.AttributePane(facts); hit {
-			return &att
+	}
+	for _, k := range ordered {
+		if attributor, ok := k.(PaneNeighbourhoodAttributor); ok {
+			if att, hit := attributor.AttributePaneNeighbourhood(facts); hit {
+				return &att
+			}
 		}
 	}
 	return nil

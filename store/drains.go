@@ -283,6 +283,37 @@ func (s *Store) LatestTerminalByRuntimePath(runtimePath string) (*Drain, error) 
 	return scanDrain(row)
 }
 
+// LatestDrainStartsByRepo returns, per set of one repository identity, the most
+// recent instant a Drain started for it — the only per-set recency pop records,
+// which is what ranks several sets bound to one checkout (ADR-0201 decision 2).
+// It reads under idx_drains_repo_set and ignores sets that never drained.
+//
+// The maximum is taken in Go rather than by SQL MAX because started_at is stored
+// as RFC3339Nano text: a whole second is spelled without a fractional part, so
+// text ordering puts "…:00.5Z" before "…:00Z" and MAX would answer the wrong row.
+func (s *Store) LatestDrainStartsByRepo(repo string) (map[string]time.Time, error) {
+	rows, err := s.db.Query(`SELECT set_id, started_at FROM drains WHERE repo = ?`, repo)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]time.Time{}
+	for rows.Next() {
+		var setID, started string
+		if err := rows.Scan(&setID, &started); err != nil {
+			return nil, err
+		}
+		at := parseTime(started)
+		if at.IsZero() {
+			continue
+		}
+		if prev, seen := out[setID]; !seen || at.After(prev) {
+			out[setID] = at
+		}
+	}
+	return out, rows.Err()
+}
+
 // AllDrains returns every Drain row (running and terminal) ordered oldest-first
 // by id. It is the source for the Queue journal view (ADR-0055): each row
 // contributes a "spawned" event at started_at and, once terminal, an outcome

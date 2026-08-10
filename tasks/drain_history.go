@@ -104,6 +104,23 @@ func LiveRunningDrains(d *Deps) ([]RunningDrain, error) {
 	return out, nil
 }
 
+// LatestDrainStarts returns the most recent Drain start per set within one
+// repository identity (keyed by its common dir), keyed by set id. It is the only
+// per-set recency pop records: bindings carry no timestamp and landing history is
+// keyed by path, so N sets on one checkout share one history row (ADR-0201
+// decision 2). Sets that never drained are absent. It opens the store only when
+// it already exists.
+func LatestDrainStarts(d *Deps, repoCommonDir string) (map[string]time.Time, error) {
+	if repoCommonDir == "" {
+		return nil, nil
+	}
+	s, ok, err := openDrainStoreIfExists(d)
+	if err != nil || !ok {
+		return nil, err
+	}
+	return s.LatestDrainStartsByRepo(repoCommonDir)
+}
+
 // AllParkClears returns every park-clear (unpark) event, oldest-first. It opens
 // the store only when it already exists.
 func AllParkClears(d *Deps) ([]ParkClearRecord, error) {

@@ -746,7 +746,10 @@ func (m QueueDashboard) seedCursorFromPane() string {
 		return ""
 	}
 	if m.list.SetCursorToKey(att.CursorKey) {
-		return ""
+		// A landed cursor is silent unless the kind had to choose which container the
+		// pane meant, in which case its Note is the choice: which one, out of how
+		// many, and why (ADR-0201 decision 2).
+		return att.Note
 	}
 	return attributionHiddenLine(*att, m.activeViewPreset().DisplayLabel(), m.filterInput.Value())
 }

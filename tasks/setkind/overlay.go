@@ -228,6 +228,20 @@ func newSnapshot(d *Deps) (*snapshot, error) {
 	return snap, nil
 }
 
+// liveDrainList is the pass's live Drains as a list, which is how attribution
+// reads them: it asks which drain's checkout contains a directory, not which drain
+// holds a known path.
+func (s *snapshot) liveDrainList() []tasks.RunningDrain {
+	if s == nil || len(s.liveDrains) == 0 {
+		return nil
+	}
+	out := make([]tasks.RunningDrain, 0, len(s.liveDrains))
+	for _, dr := range s.liveDrains {
+		out = append(out, dr)
+	}
+	return out
+}
+
 // bindingFor returns the snapshot binding for (repoKey, setID).
 func (s *snapshot) bindingFor(repoKey, setID string) (binding.Binding, bool) {
 	b, ok := s.bindings[binding.ScopedKey(repoKey, setID)]
