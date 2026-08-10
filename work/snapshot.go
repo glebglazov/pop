@@ -21,6 +21,12 @@ type Snapshot struct {
 	// per-container, which is why they ride the snapshot and render as a footer
 	// one-liner rather than as a cell. Empty is the steady state.
 	ModelSkips []ModelSkip
+	// Attribution is the container the pane this build was launched from belongs
+	// to, nil when it belongs to none of the kinds on this page. Only a build
+	// handed pane facts can carry one: a rebuild is not a launch, so a poll's
+	// snapshot can never re-seed a cursor the human has since moved (ADR-0201
+	// decision 4).
+	Attribution *Attribution
 }
 
 // ModelSkip is one Effort model skip still in force: the preset whose ladder
@@ -44,6 +50,16 @@ type ModelSkip struct {
 // kind's own comparator. Nothing compares across kinds, which is the point: with
 // no shared status taxonomy there is no cross-kind ranking to derive.
 func BuildSnapshot(kinds []Kind) (Snapshot, error) {
+	return BuildSnapshotForPane(kinds, PaneFacts{})
+}
+
+// BuildSnapshotForPane is BuildSnapshot plus the facts of the pane the surface
+// was launched from: once every load is in hand, the kinds are asked which
+// container that pane belongs to. Asking here rather than before the build is
+// what keeps the answer kind-side — a caller resolving it up front would need a
+// switch over kinds in exactly the layer the seam exists to keep free of them
+// (ADR-0201 decision 3).
+func BuildSnapshotForPane(kinds []Kind, facts PaneFacts) (Snapshot, error) {
 	ordered := kindsInPrecedence(kinds)
 	loaded := make([][]Container, len(ordered))
 	for i, k := range ordered {
@@ -70,6 +86,7 @@ func BuildSnapshot(kinds []Kind) (Snapshot, error) {
 		}
 		snap.ModelSkips = append(snap.ModelSkips, skips...)
 	}
+	snap.Attribution = AttributePane(ordered, facts)
 	return snap, nil
 }
 

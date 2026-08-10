@@ -672,10 +672,20 @@ func OpenPage(d *drain.Deps, cfg *config.Config, page Page) QueueDashboard {
 // so kind precedence orders that page alone and every Kind.Summary counts only
 // the containers on it.
 func BuildPageSnapshot(d *drain.Deps, cfg *config.Config, page Page) (DashboardSnapshot, error) {
+	return BuildSeededPageSnapshot(d, cfg, page, work.PaneFacts{})
+}
+
+// BuildSeededPageSnapshot is the launch build: the same snapshot, plus the facts
+// of the pane the dashboard is being opened from, so the kinds on this page may
+// attribute that pane to one of their containers (ADR-0201). Only the entry layer
+// calls it — every rebuild goes through BuildPageSnapshot and attributes nothing,
+// which is what makes the seeded cursor a one-shot rather than a target that
+// chases the human's own navigation.
+func BuildSeededPageSnapshot(d *drain.Deps, cfg *config.Config, page Page, pane work.PaneFacts) (DashboardSnapshot, error) {
 	if d == nil {
 		d = drain.DefaultDeps()
 	}
-	return work.BuildSnapshot(pageSpec(page).kinds(d, cfg))
+	return work.BuildSnapshotForPane(pageSpec(page).kinds(d, cfg), pane)
 }
 
 func newQueueDashboard(d *drain.Deps, cfg *config.Config, snap DashboardSnapshot) QueueDashboard {
@@ -716,7 +726,45 @@ func newQueueDashboardOn(d *drain.Deps, cfg *config.Config, snap DashboardSnapsh
 			return ui.TruncateString(dashboardTableLine(page.styledCells(kinds, r, cache), cols.widths), budget)
 		},
 	})
-	return QueueDashboard{d: d, cfg: cfg, page: page, kinds: kinds, snap: snap, allRows: snap.Containers, list: list, cols: cols, live: live}
+	m := QueueDashboard{d: d, cfg: cfg, page: page, kinds: kinds, snap: snap, allRows: snap.Containers, list: list, cols: cols, live: live}
+	m.statusMsg = m.seedCursorFromPane()
+	return m
+}
+
+// seedCursorFromPane places the cursor on the row the launching pane was
+// attributed to and returns the line the surface should say about it — empty for
+// the two silent cases, a landed cursor and a pane that belongs to nothing
+// (ADR-0201 decision 6).
+//
+// It runs here, in the constructor, because that is the one moment that is
+// unambiguously before the first paint and after the rows exist. There is no
+// pending target kept afterwards: a cursor that outlives the human's own
+// navigation is one that fights them.
+func (m QueueDashboard) seedCursorFromPane() string {
+	att := m.snap.Attribution
+	if att == nil {
+		return ""
+	}
+	if m.list.SetCursorToKey(att.CursorKey) {
+		return ""
+	}
+	return attributionHiddenLine(*att, m.activeViewPreset().DisplayLabel(), m.filterInput.Value())
+}
+
+// attributionHiddenLine words the miss: the container was attributed, but no row
+// on screen carries its key. Naming both the container and what is hiding it is
+// the point — a cursor resting at row one with no explanation is indistinguishable
+// from a broken feature. The view is never widened to reveal the row; the preset
+// is a deliberate choice and a launch does not overrule it.
+func attributionHiddenLine(att work.Attribution, preset, query string) string {
+	switch {
+	case query != "":
+		return fmt.Sprintf("%s is hidden by the /%s filter", att.Label, query)
+	case preset != "":
+		return fmt.Sprintf("%s is hidden by the %s view", att.Label, preset)
+	default:
+		return att.Label + " is hidden by the active view"
+	}
 }
 
 // dashboardChromeLines returns the chrome height above the List rows for the

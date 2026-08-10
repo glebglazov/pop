@@ -78,6 +78,10 @@ type Tmux interface {
 	// displaying the caller (display-message -p #{pane_id}). An error means no
 	// pane (e.g. no attached client).
 	CurrentPane() (string, error)
+	// CurrentPaneFacts reads the caller's own pane in one display-message
+	// round-trip: pane id, session name, directory, every @pop_* tag, and the
+	// session's Work stamp. Outside tmux it answers zero facts and no error.
+	CurrentPaneFacts() (PaneFacts, error)
 
 	// PaneCommands maps every live pane id to its current foreground command,
 	// across all sessions (list-panes -a).

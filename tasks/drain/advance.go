@@ -31,7 +31,14 @@ func (d *Deps) TaskSetKind(cfg *config.Config, groups func() ([]repogroup.Group,
 // into. A fresh kind list is built per tick, which is what keeps that state
 // tick-scoped; one pass drives it at a time, so it takes no lock.
 type taskSetKind struct {
-	work.Kind
+	// The read half is embedded by its concrete type, not as a work.Kind. Every
+	// optional seam behind the Work interface — the machine-global model skips, the
+	// pane attribution ladder — is reached by type-asserting the kind a surface
+	// holds, and an embedded *interface* satisfies none of them however the value
+	// inside it is written: the assertion would be against this wrapper. Embedding
+	// the type promotes each one instead, so composing the advance half onto a kind
+	// cannot quietly cost it a capability.
+	*setkind.Kind
 	d   *Deps
 	cfg *config.Config
 

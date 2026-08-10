@@ -5,6 +5,7 @@ import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/dashboard"
 	"github.com/glebglazov/pop/tasks/drain"
+	"github.com/glebglazov/pop/work"
 )
 
 // The Work dashboard's entry layer: it opens the dashboard on one of its two
@@ -78,12 +79,24 @@ func newShell(start Page, d *drain.Deps, cfg *config.Config) (Shell, error) {
 	}
 	// The entry page is the one command the operator ran, so its build failure is
 	// that command failing. The other page has no model at all yet.
-	snap, err := dashboard.BuildPageSnapshot(d, cfg, start)
+	snap, err := dashboard.BuildSeededPageSnapshot(d, cfg, start, launchPaneFacts(start, d))
 	if err != nil {
 		return Shell{}, err
 	}
 	pages := map[Page]dashboard.QueueDashboard{start: dashboard.NewDashboardOn(d, cfg, snap, start)}
 	return Shell{active: start, pages: pages, d: d, cfg: cfg}, nil
+}
+
+// launchPaneFacts reads the launching pane's facts for page A and nothing else.
+// The dashboard opens on its usual page: a pane attributed to a Routine resolves
+// to a row on the other page and is simply not seeded, rather than the launch
+// following the answer across the toggle (ADR-0201 decision 5). Page B, built
+// later by the toggle, is not a launch at all.
+func launchPaneFacts(start Page, d *drain.Deps) work.PaneFacts {
+	if start != PageWork {
+		return work.PaneFacts{}
+	}
+	return dashboard.LaunchPaneFacts(d.Tmux)
 }
 
 func runShell(s Shell) (Shell, error) {

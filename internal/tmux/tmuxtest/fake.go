@@ -55,9 +55,13 @@ type Fake struct {
 	CurrentSessionName string
 	CurrentSessionErr  error
 
-	// CurrentPaneID / CurrentPaneErr drive CurrentPane.
+	// CurrentPaneID / CurrentPaneErr drive CurrentPane, and the pane
+	// CurrentPaneFacts composes its answer about.
 	CurrentPaneID  string
 	CurrentPaneErr error
+	// CurrentPaneFactsCalls counts CurrentPaneFacts calls, so a test can pin that
+	// the launching pane's facts are read once and carried rather than re-read.
+	CurrentPaneFactsCalls int
 
 	// PaneCommandMap is the pane id -> current command map returned by
 	// PaneCommands.
@@ -315,6 +319,39 @@ func (f *Fake) CurrentPane() (string, error) {
 		return "", f.CurrentPaneErr
 	}
 	return f.CurrentPaneID, nil
+}
+
+// CurrentPaneFacts composes the facts real tmux reads in one round-trip out of
+// the state a test already arranges: the current pane and session, that pane's
+// tags, and the session's Work stamp. Composing rather than taking a fourth
+// arranged field is what keeps a test from describing a pane two ways and
+// asserting on the one production never reads.
+func (f *Fake) CurrentPaneFacts() (tmux.PaneFacts, error) {
+	f.CurrentPaneFactsCalls++
+	if f.CurrentPaneErr != nil {
+		return tmux.PaneFacts{}, f.CurrentPaneErr
+	}
+	if f.CurrentPaneID == "" {
+		return tmux.PaneFacts{}, nil
+	}
+	facts := tmux.PaneFacts{PaneID: f.CurrentPaneID, Session: f.CurrentSessionName}
+	if info, ok := f.PaneInfos[f.CurrentPaneID]; ok && facts.Session == "" {
+		facts.Session = info.Session
+	}
+	facts.Directory = f.PaneCwd[f.CurrentPaneID]
+	for tag, value := range f.PaneTagValues[f.CurrentPaneID] {
+		if value == "" {
+			continue
+		}
+		if facts.Tags == nil {
+			facts.Tags = map[tmux.PaneTag]string{}
+		}
+		facts.Tags[tag] = value
+	}
+	if stamp, ok := f.WorkStamps[facts.Session]; ok {
+		facts.WorkKind, facts.WorkID = stamp.Kind, stamp.ID
+	}
+	return facts, nil
 }
 
 func (f *Fake) PaneCommands() (map[string]string, error) {

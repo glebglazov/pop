@@ -99,6 +99,10 @@ type MapKindDeps struct {
 // MapKind is the Map Work kind.
 type MapKind struct {
 	d *MapKindDeps
+	// panes is what the pass that just ran remembers for Pane work attribution:
+	// every Map it read and every ticket in them, hidden rows included. It belongs
+	// to one Load and is replaced by the next (see attribute.go).
+	panes mapPaneIndex
 }
 
 // NewMapKind returns the Map kind over d. A nil d resolves to real dependencies.
@@ -160,11 +164,13 @@ func (k *MapKind) Load() ([]work.Container, error) {
 	// repository's Task storage, which reads the store.
 	now := k.d.now()
 	var containers []work.Container
+	k.panes = mapPaneIndex{}
 	for i, g := range scanned {
 		// One table per group: every Map of a repository spawns into that
 		// repository's Task storage, so the sets are read once for all of them.
 		sets := newSetStatusTable(k.d.Wayfinder, g.DefPath)
 		for _, m := range scans[i] {
+			k.panes.recordPanes(g, m)
 			if !visible(m, k.d.viewPreset(), now) {
 				continue
 			}
@@ -602,7 +608,7 @@ func containerFor(g repogroup.Group, m Map, spawned []SpawnedSet, now time.Time)
 		Project:        g.ProjectName,
 		Status:         mapStatusLabel,
 		Checkout:       g.CheckoutPath(),
-		CursorKey:      g.ProjectName + "\x00map\x00" + m.ID,
+		CursorKey:      mapCursorKey(g, m.ID),
 		Broken:         m.Broken,
 		BrokenReason:   m.BrokenReason,
 		Archived:       m.Archived,

@@ -86,6 +86,10 @@ func DefaultDeps() *Deps {
 // Kind is the Task-set Work kind.
 type Kind struct {
 	d *Deps
+	// panes is what the pass that just ran remembers for Pane work attribution:
+	// every set id it read, hidden rows included. It belongs to one Load and is
+	// replaced by the next (see attribute.go).
+	panes paneIndex
 }
 
 // New returns the Task-set kind over d. A nil d resolves to DefaultDeps.
@@ -151,7 +155,9 @@ func (k *Kind) Load() ([]work.Container, error) {
 	// groups did.
 	now := d.now().UTC()
 	var containers []work.Container
+	k.panes = nil
 	for i, load := range loads {
+		k.recordPanes(load.group, refreshes[i])
 		got, err := containersFromGroup(d, cfg, snap, delays, now, load.group, refreshes[i], load.prepared)
 		if err != nil {
 			return nil, err
@@ -377,7 +383,7 @@ func containersFromGroup(d *Deps, cfg *config.Config, snap *snapshot, delays []t
 			VerifiedAtDrifted:     taskRow.VerifiedAtDrifted,
 			VerifyMark:            taskRow.VerifyMark,
 			Worktree:              wt.label,
-			CursorKey:             g.ProjectName + "\x00" + taskRow.ID,
+			CursorKey:             setCursorKey(g, taskRow.ID),
 			DestKind:              wt.DestKind,
 			Items:                 itemsFor(refresh, taskRow.ID),
 			Headline:              taskRow.Progress,
