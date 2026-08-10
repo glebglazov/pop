@@ -300,3 +300,37 @@ func TestInvalidGateChoiceHint(t *testing.T) {
 		t.Fatalf("hint = %q", got)
 	}
 }
+
+// A gate's preamble carries a whole task body, which can dwarf the pane. It
+// must stay out of the repainting frame: an inline frame taller than the
+// terminal cannot be redrawn in place, so every keypress appends another copy
+// to scrollback and evicts the drain log above it.
+func TestGateMenuFrameExcludesPreambleAndFitsThePane(t *testing.T) {
+	spec := sampleHITLSpec()
+	spec.Preamble = make([]string, 200)
+	for i := range spec.Preamble {
+		spec.Preamble[i] = fmt.Sprintf("body line %d", i)
+	}
+
+	m := NewGateMenu(spec)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	frame := StripANSI(m.ViewChoices())
+	if strings.Contains(frame, "body line") || strings.Contains(frame, spec.Headline) {
+		t.Fatalf("context leaked into the live frame:\n%s", frame)
+	}
+	if got := strings.Count(clampToPane(m.ViewChoices(), 24), "\n"); got > 24 {
+		t.Fatalf("frame is %d lines in a 24-line pane", got)
+	}
+
+	// The context is still rendered, just above the frame and only once.
+	ctx := StripANSI(m.ViewContext())
+	if !strings.Contains(ctx, "body line 199") || !strings.Contains(ctx, spec.Headline) {
+		t.Fatalf("context lost the preamble or headline:\n%s", ctx)
+	}
+	// The non-TTY line path and the golden tests still see one whole render.
+	if whole := StripANSI(m.ViewContent()); !strings.Contains(whole, "body line 0") ||
+		!strings.Contains(whole, "2. Complete task") {
+		t.Fatalf("ViewContent should still be context+choices:\n%s", whole)
+	}
+}

@@ -83,6 +83,11 @@ type GateMenuRunConfig struct {
 	LineReader LineReader
 	// Warn reports terminal-foreground diagnostics (ClaimForeground surprises).
 	Warn func(string, ...any)
+	// SkipContext suppresses the one-time print of headline and preamble above
+	// the frame. Set it when re-opening the same menu after a side-trip that
+	// changed only the choices — an agent override — so the task body is not
+	// repeated directly under the copy already on screen.
+	SkipContext bool
 }
 
 // LineReader is the line-oriented read the non-TTY path needs. *tty.Reader
@@ -233,13 +238,15 @@ func (m *GateMenu) selectIndex(i int) tea.Cmd {
 }
 
 // View implements tea.Model. AltScreen stays false so the drain log above the
-// menu remains visible (ADR-0196 decision 1).
+// menu remains visible (ADR-0196 decision 1). Only the choices are in the frame
+// — the context was printed above it before the program started — and the frame
+// is clamped to the pane so it can always be repainted in place.
 func (m *GateMenu) View() tea.View {
-	var content string
-	if m.showHelp {
-		content = m.viewHelp()
-	} else {
-		content = m.ViewContent()
+	// The help overlay sizes itself and is left alone; the clamp guards the
+	// choices, which is where a spec's content reaches the frame.
+	content := m.viewHelp()
+	if !m.showHelp {
+		content = clampToPane(m.ViewChoices(), m.height)
 	}
 	v := tea.NewView(content)
 	v.AltScreen = false
@@ -266,11 +273,22 @@ func (m *GateMenu) helpEntries() []HelpEntry {
 	}
 }
 
-// ViewContent renders the menu body without the help overlay. Tests and the
-// non-TTY line path share this exact render with the interactive View.
+// ViewContent renders the whole menu — context above choices — without the help
+// overlay. The non-TTY line path prints exactly this once, and golden tests
+// assert against it. The interactive path splits the two halves apart; see
+// ViewContext.
 func (m *GateMenu) ViewContent() string {
-	var b strings.Builder
+	return m.ViewContext() + m.ViewChoices()
+}
 
+// ViewContext is the static half: the headline and the preamble, which carry a
+// whole task body, findings block or remediation history. It is printed once,
+// above the live frame, and never repainted. A repainting frame taller than the
+// pane cannot reposition above the viewport top, so the inline renderer appends
+// a fresh copy of it on every keypress — thousands of scrollback lines per
+// keystroke, evicting the drain log this gate exists to keep readable.
+func (m *GateMenu) ViewContext() string {
+	var b strings.Builder
 	if m.spec.Headline != "" {
 		b.WriteString(m.headlineStyle().Render(m.spec.Headline))
 		b.WriteString("\n")
@@ -282,7 +300,13 @@ func (m *GateMenu) ViewContent() string {
 	if len(m.spec.Preamble) > 0 || m.spec.Headline != "" {
 		b.WriteString("\n")
 	}
+	return b.String()
+}
 
+// ViewChoices is the live half: the items, their details, the footnote and the
+// hint line. Its height is bounded by the number of options a gate offers.
+func (m *GateMenu) ViewChoices() string {
+	var b strings.Builder
 	for i, it := range m.spec.Items {
 		prefix := "  "
 		itemLabel := it.Label
@@ -313,6 +337,23 @@ func (m *GateMenu) ViewContent() string {
 	b.WriteString(hintStyle.Render("  enter select · digit jump · ↑/↓ move · A-a agent · C-h help"))
 	b.WriteString("\n")
 	return b.String()
+}
+
+// clampToPane is the last-resort guarantee that an inline frame never exceeds
+// the pane it repaints into. Nothing should reach it — the context lives above
+// the frame and a gate offers a handful of options — but the failure mode it
+// guards is a scrollback flood, not a clipped line, so it is worth the check.
+func clampToPane(content string, height int) string {
+	if height <= 0 {
+		return content
+	}
+	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
+	if len(lines) <= height {
+		return content
+	}
+	kept := append([]string{}, lines[:height-1]...)
+	kept = append(kept, hintStyle.Render("  … clipped to fit the pane"))
+	return strings.Join(kept, "\n") + "\n"
 }
 
 func (m *GateMenu) headlineStyle() lipgloss.Style {
@@ -347,9 +388,10 @@ var gateMenuKeys = gateMenuKeyMap{
 }
 
 // RunGateMenu draws an inline (no altscreen) gate menu and returns the chosen
-// item key. On a real terminal it runs a bubbletea Program; otherwise it prints
-// the same ViewContent once and reads a line — one renderer, two input paths
-// (ADR-0196 decision 2). A non-promptable caller never reaches here.
+// item key. On a real terminal it prints the context once and runs a bubbletea
+// Program over the choices; otherwise it prints the same ViewContent once and
+// reads a line — one renderer, two input paths (ADR-0196 decision 2). A
+// non-promptable caller never reaches here.
 func RunGateMenu(spec GateMenuSpec, in io.Reader, out io.Writer, cfg GateMenuRunConfig) (GateMenuResult, error) {
 	if out == nil {
 		out = os.Stdout
@@ -361,6 +403,11 @@ func RunGateMenu(spec GateMenuSpec, in io.Reader, out io.Writer, cfg GateMenuRun
 
 	if fd, ok := tty.TerminalFd(in); ok {
 		claimTerminal(fd, cfg.Warn)
+		// The context scrolls into history like ordinary output; only the
+		// choices below it are a repainting frame.
+		if !cfg.SkipContext {
+			fmt.Fprint(out, m.ViewContext())
+		}
 		return runGateMenuInteractive(m, in, out, cfg.Interrupt)
 	}
 	return runGateMenuLine(m, in, out, cfg)

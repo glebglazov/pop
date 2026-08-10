@@ -211,11 +211,9 @@ func (p *AgentOverridePicker) exitUnchanged() tea.Cmd {
 // the picker remains visible; the dashboard embeds ViewContent into its own
 // altscreen frame instead.
 func (p *AgentOverridePicker) View() tea.View {
-	var content string
-	if p.showHelp {
-		content = p.viewHelp()
-	} else {
-		content = p.ViewContent()
+	content := p.viewHelp()
+	if !p.showHelp {
+		content = clampToPane(p.ViewContent(), p.height)
 	}
 	v := tea.NewView(content)
 	v.AltScreen = false

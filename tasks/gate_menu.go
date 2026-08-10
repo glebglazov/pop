@@ -31,12 +31,14 @@ func promptGateMenu(out io.Writer, in io.Reader, reader *promptReader, spec ui.G
 		in = os.Stdin
 	}
 	ensureAgentOverrides(d)
+	reopened := false
 	for {
 		spec.AttendedLabel = FormatAgentEntry(EffectiveAttendedEntry(cfg, agentOverridesOf(d)))
 		cfgRun := ui.GateMenuRunConfig{
-			Interrupt:  interrupt,
-			LineReader: reader,
-			Warn:       promptWarner(out),
+			Interrupt:   interrupt,
+			LineReader:  reader,
+			Warn:        promptWarner(out),
+			SkipContext: reopened,
 		}
 		res, err := runGateMenu(spec, in, out, cfgRun)
 		if err != nil {
@@ -49,6 +51,7 @@ func promptGateMenu(out io.Writer, in io.Reader, reader *promptReader, spec ui.G
 			if err := promptGateAgentOverride(out, in, d, cfg); err != nil {
 				return "", false, err
 			}
+			reopened = true
 			continue
 		}
 		return res.Key, false, nil

@@ -34,11 +34,13 @@ func promptRoutineGateMenu(out io.Writer, in io.Reader, reader *tty.Reader, spec
 	}
 	taskDeps := ensureRoutineAgentOverrides(d)
 	cfg, _ := d.LoadConfig()
+	reopened := false
 	for {
 		spec.AttendedLabel = tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(cfg, taskDeps.AgentOverrides))
 		cfgRun := ui.GateMenuRunConfig{
-			LineReader: reader,
-			Warn:       warn,
+			LineReader:  reader,
+			Warn:        warn,
+			SkipContext: reopened,
 		}
 		res, err := runGateMenu(spec, in, out, cfgRun)
 		if err != nil {
@@ -49,6 +51,7 @@ func promptRoutineGateMenu(out io.Writer, in io.Reader, reader *tty.Reader, spec
 				return "", err
 			}
 			cfg, _ = d.LoadConfig()
+			reopened = true
 			continue
 		}
 		return res.Key, nil
