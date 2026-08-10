@@ -37,7 +37,9 @@ type taskSetKind struct {
 	// holds, and an embedded *interface* satisfies none of them however the value
 	// inside it is written: the assertion would be against this wrapper. Embedding
 	// the type promotes each one instead, so composing the advance half onto a kind
-	// cannot quietly cost it a capability.
+	// cannot quietly cost it a capability. The rule is enforced rather than
+	// remembered: work's wired-kinds guard drives this list and fails a kind that
+	// offers the mute pair without satisfying work.Muter.
 	*setkind.Kind
 	d   *Deps
 	cfg *config.Config
