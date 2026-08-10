@@ -72,24 +72,42 @@ because filing implies the work is finished; "no time for this right now" is a c
 thing to say about a set that is mid-drain, and refusing would disable mute in the exact
 moment a noisy set is what the human wants out of their view.
 
-**4. The Mute window is a fixed, surface-owned, numbered list, and a named window lands on
-a working instant.** Six entries: the default random window, three days, one week, two
-weeks, one month, unmute. A duration is not kind knowledge, so three kinds returning the
-identical six actions would be the copy-paste the Work seam exists to prevent; and a config
-roster would buy tunability for a list that is already specified, at the cost of a
-validation surface and ADR-0198's reach question.
+**4. A Mute window is a date the human picks, not a duration.** The menu offers **six
+entries, always**: the random default at digit 1, then five weekday mornings at digits 2–6.
+Every dated entry lands at **09:00 UTC** on its day, so no arithmetic and no normalization
+rule is needed — the list enumerates only instants that are already working mornings. It is
+surface-owned: a date is not kind knowledge, so three kinds returning the identical six
+actions would be the copy-paste the Work seam exists to prevent, and a config roster would
+buy tunability for a list that is already specified, at the cost of a validation surface and
+ADR-0198's reach question.
 
-A named window does not resurface at "now plus the duration". It normalizes to **09:00 UTC
-of the first weekday at or after the raw arithmetic** — a set muted at 23:40 on a Wednesday
-for three days comes back at the start of a working day, not late on a Saturday night.
-Normalization only ever moves **forward**: a Saturday or Sunday landing goes to Monday, not
-back to Friday. Every window is therefore a floor, never returning work sooner than the
-human asked, which is the property the random default already has explicitly. The cost is
-that a Friday mute and a Saturday mute of the same length resurface together on Monday;
-that is preferable to the alternative, where the shortest window in the list is also the one
-most likely to end early. UTC rather than local time is deliberate: the instant is stored
-and compared machine-side, and a fixed meridian keeps a mute meaning the same thing on two
-machines in two timezones.
+Which five days appear is derived from today. This week's remaining weekdays take absolute
+precedence over next week's, and within each week a preference ladder decides who makes the
+cut — **this week `Fri > Wed > Mon > Tue > Thu`, next week `Mon > Wed > Fri > Tue > Thu`**.
+At least one entry always comes from next week, so "not this week at all" is available every
+day; since this week can contribute at most four days, that guarantee never displaces a
+this-week entry. The chosen five are then displayed **chronologically**, which keeps the
+digits monotonic in time — `3` is always sooner than `5`. The random default is the one
+exception to chronological order: it is pinned to digit 1.
+
+The ladders are not arbitrary. Friday leads this week because "deal with it before the week
+ends" is the common intent, and Thursday trails because it is nearly the same answer as
+Friday; next week inverts to Monday-first because inside a week you are not pushing past
+anything, so the near days are the useful ones. Worked out, the menu is: Monday →
+`Tue, Wed, Thu, Fri, Mon next`; Tuesday → `Wed, Thu, Fri, Mon, Wed next`; Wednesday →
+`Thu, Fri, Mon, Wed, Fri next`; Thursday → `Fri, Mon, Tue, Wed, Fri next`; Friday → all
+five of next week.
+
+Entries are labelled by day and date — `Fri 14 Aug`, `Fri 21 Aug` — except the one that is
+tomorrow, which reads `Tomorrow`. The invariant hour is stated once in the submenu's footer
+rather than repeated on five entries, and in full on the row afterwards. Weekend behaviour
+is out of scope for now: weekends are never *offered* as resurfacing days, and what the menu
+should do when opened *on* a Saturday is undecided (it falls out of the rules as next week's
+five, which is a consequence rather than a decision).
+
+**Unmute** sits outside all of this: it is offered only on an already-muted row, keyed `u`
+rather than a digit, and does not count against the six. It is not a window, so it should
+neither compete for a window's digit nor make the date list change length with state.
 
 **5. The submenu is the `VerbStatus` pattern, reused.** A kind cannot ask the surface to
 open a modal — `work.Outcome` has no modal-capable kind, deliberately — so nesting
@@ -106,8 +124,8 @@ every secret mute at 09:00 UTC would hand back most of what the secret hides, an
 guarantee that matters is the floor (never sooner than three days), not the hour.
 
 A random mute renders `unmuted on [?]`, which discloses that a secret exists rather than
-concealing that there is one; a named mute renders its working instant plainly, because a
-duration the human chose from a list was never secret. The secret binds every read
+concealing that there is one; a dated mute renders `unmuted on Fri 14 Aug, 09:00 UTC`,
+because a day the human picked off a list was never secret. The secret binds every read
 surface equally — the status cell, the detail view one `l` away, and `pop work status` —
 and it binds **sort order** too: no preset may order muted rows by resurfacing instant,
 because position in a list of six muted rows discloses the roll as surely as a date. The
@@ -159,24 +177,39 @@ space from "some instant in a four-day span" to one of four or five mornings, wh
 close enough to disclosure to defeat the point. The asymmetry is the decision, not an
 oversight — named windows are normalized precisely *because* they are not secret.
 
-**Closest weekday in either direction.** The literal reading of "closest": Saturday back to
-Friday, Sunday forward to Monday. Rejected — it makes a three-day mute the window most
-likely to end early, and a mute that returns work sooner than asked is the surprise that
-stops the human trusting the feature.
+**Duration-labelled windows — three days, one week, two weeks, one month.** The first
+design, and the one this ADR moved away from. Two problems. It makes the human do the
+arithmetic pop can do for them ("if I mute for three days on Wednesday evening, when does
+it come back?"), and a duration lands wherever it lands — including Saturday night, which is
+no use to anyone. Fixing the second needed a normalize-forward-to-a-weekday-morning rule
+that the dated menu makes unnecessary, since it can only offer working mornings in the first
+place. What was lost is reach: durations went out a month, the dated list stops at next
+week (see Consequences).
 
-**Rendering a named mute as a relative countdown (`muted 4d`) rather than a date.** The
-original choice, made when a named window could land at any second and an absolute date was
-therefore ambiguous at the edges. Superseded by the working-instant rule: once a named
-window lands at 09:00 UTC on a named weekday, the date is unambiguous and answers "will I
-be at my desk when this returns", which a countdown does not.
+**Rendering a dated mute as a relative countdown (`muted 4d`).** Considered while windows
+were durations and an absolute date was ambiguous at the edges. Rejected once entries became
+dates: `unmuted on Fri 14 Aug` answers "will I be at my desk when this returns", which a
+countdown does not, and the row should read back the same words the menu offered.
+
+**Fixed digit slots so a day always keeps its number.** Rejected because the six-entry cap
+already stabilises the menu's *shape*, and gaps would make the list look broken. The list is
+one you read rather than one you fire from memory, since the dates change daily.
 
 ## Consequences
 
 - A muted row still holds its checkout, its binding and its panes. Mute is scheduling and
   display only, so occupancy is never filtered by it — the same rule Archive states.
-- Unmute is reachable only through the `muted` preset. That is acceptable because the
+- **The furthest a mute now reaches is next Friday.** The dated menu tops out inside next
+  week, so "not this month" is no longer expressible — Archive is the only thing beyond it,
+  and Archive says the work is over. This is the price of decision 4 and the most likely
+  thing to want changing later; the fix is a seventh entry (a dated Monday two or four weeks
+  out), not a wider random default, which must stay the anti-clustering option rather than
+  become the long one.
+- Unmute is reachable only through the `muted` preset, on `u`. That is acceptable because the
   preset ships numbered, but it does mean "what did I mute?" is a preset switch, not a
   glance.
+- The menu's content depends on the day it is opened, so any test of it must fix the clock —
+  the same injected clock the random roll already needs.
 - A mute expiring while the dashboard is open resurfaces the row on the next rebuild, with
   no event and no notification. The human is not told a mute ended; the row simply comes
   back.

@@ -55,28 +55,41 @@ branch: master
   under: Language
 
 + Mute window
-  How long a Mute lasts, chosen from a fixed numbered list at mute time: three days, one
-  week, two weeks, one month, the random default, and unmute. A named window lands on a
-  **working instant** — 09:00 UTC of the first weekday at or after the raw arithmetic — so
-  work resurfaces at the start of a day someone is going to look at it rather than at
-  whatever second the human happened to press the key. Every window is a floor and never
-  returns work sooner than asked, which is why a weekend landing moves forward to Monday
-  rather than back to Friday. The random default takes no such
-  normalization: it is an unrounded instant between three and seven days out, because
-  landing every secret mute on the same hour would hand back most of what the secret
-  hides. The list is the same for every mutable kind — a duration is not kind knowledge
-  — so the surface owns it rather than the kinds.
+  When a Mute ends, picked as a date rather than a duration: the human chooses a weekday
+  morning off a list, so pop does the arithmetic instead of them. Always six entries — the
+  random default first, then five weekday mornings at 09:00 UTC, labelled by day and date
+  except the one that is tomorrow. Which five is derived from today by the Weekday
+  preference ladder. Unmute stands outside the six, offered only on a row that is already
+  muted, since it is not a window. The list is the same for every mutable kind — a date is
+  not kind knowledge — so the surface owns it rather than the kinds, and it never reaches
+  past next week: anything further away is what Archive is for.
+  avoid: mute duration, snooze period
+  under: Language
+
++ Weekday preference ladder
+  How the five dated Mute windows are chosen from the days available. This week's remaining
+  weekdays take absolute precedence over next week's; within this week the order is
+  Fri, Wed, Mon, Tue, Thu, and within next week it inverts to Mon, Wed, Fri, Tue, Thu. At
+  least one entry always comes from next week, so "not this week at all" can be said on any
+  day — a guarantee that never costs a this-week entry, because this week can offer four
+  days at most. Friday leads this week because finishing before the week ends is the common
+  intent and Thursday is nearly the same answer; next week leads with Monday because inside
+  a week nothing is being pushed past, so the near days are the useful ones. The chosen five
+  are displayed chronologically, which keeps the numbering monotonic in time; the random
+  default is the sole exception, pinned first.
+  under: Language
 
 + Secret resurfacing
   The rule that a Mute taken with the random Mute window never displays when it ends.
   Such a row reads `unmuted on [?]` — it discloses that a secret exists, which is the
-  honest form, rather than hiding that there is one. A named window shows its working
-  instant plainly, since a stated duration is not a secret. The randomness exists so a
-  batch muted in one triage pass does not all return together, which only works while
-  the human cannot read the roll — so no read surface prints it and no Work view preset
-  may order rows by it, since position in a list of muted rows would disclose it as
-  surely as a date. The instant is legible in pop.db, which is not the glance the
-  secret protects against.
+  honest form, rather than hiding that there is one. A dated window shows its instant
+  plainly, since a day picked off a list was never a secret. The random default is also the
+  one window that lands at an unrounded instant, because rounding every secret mute to the
+  same morning would hand back most of what the secret hides. It exists so a batch muted in
+  one triage pass does not all return together, which only works while the human cannot read
+  the roll — so no read surface prints it and no Work view preset may order rows by it, since
+  position in a list of muted rows would disclose it as surely as a date. The instant is
+  legible in pop.db, which is not the glance the secret protects against.
   avoid: hidden mute, blind snooze
   under: Language
 
