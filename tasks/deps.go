@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"io"
+	"math/rand"
 	"os/exec"
 	"sync"
 	"time"
@@ -62,6 +63,15 @@ type Deps struct {
 	// fake to assert delivery and failure messaging without a real clipboard.
 	ClipboardCopy func(text string) error
 
+	// Clock and Rand are the two non-deterministic inputs of the mute-window
+	// derivation (ADR-0200 decision 4/6): which weekdays the menu offers depends
+	// on today, and the default window's instant is a roll no read surface
+	// discloses. Both ride the bag so a test fixes a weekday and a seed. Nil
+	// falls back to the wall clock and the global source — see Deps.Now and
+	// Deps.Int63n.
+	Clock deps.Clock
+	Rand  deps.Rand
+
 	// AgentOverrides is the session-lived promotion of one entry to the head of
 	// each Work agent group (ADR-0196). Nil means no overrides. The dashboard
 	// and gate menus write here for the rest of this OS process; nothing
@@ -80,6 +90,8 @@ func DefaultDeps() *Deps {
 	return &Deps{
 		FS:                           deps.NewRealFileSystem(),
 		Git:                          deps.NewRealGit(),
+		Clock:                        deps.NewRealClock(),
+		Rand:                         deps.NewRealRand(),
 		Runner:                       RealCommandRunner{},
 		LookPath:                     exec.LookPath,
 		RecoveryFastCheckInterval:    defaultRecoveryFastCheckInterval,
@@ -90,3 +102,20 @@ func DefaultDeps() *Deps {
 }
 
 var defaultDeps = DefaultDeps()
+
+// Now is the current instant as the bag's clock reports it. A bag built from a
+// bare literal (tests that care about nothing else) still gets a working clock.
+func (d *Deps) Now() time.Time {
+	if d == nil || d.Clock == nil {
+		return time.Now()
+	}
+	return d.Clock.Now()
+}
+
+// Int63n rolls a uniform value in [0, n) from the bag's source.
+func (d *Deps) Int63n(n int64) int64 {
+	if d == nil || d.Rand == nil {
+		return rand.Int63n(n)
+	}
+	return d.Rand.Int63n(n)
+}
