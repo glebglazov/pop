@@ -7,7 +7,8 @@ import (
 
 // FoldEligibleStatus reports whether a bound task set's status may be folded
 // (ADR-0156). The full foldable / unfolded condition is Unfolded — this half
-// plus bound — so Fold and every read surface share one derivation.
+// plus a provisioned binding — so Fold and every read surface share one
+// derivation.
 func FoldEligibleStatus(status TaskSetStatus) bool {
 	return status == StatusDone || status == StatusAwaitingApproval
 }

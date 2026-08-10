@@ -25,17 +25,22 @@ func TestDashboardActionMenuFoldFiltering(t *testing.T) {
 		return keys
 	}
 
-	doneBound := keysFor(DashboardRow{ID: "done", RawStatus: tasks.StatusDone, Bound: true})
+	doneBound := keysFor(DashboardRow{ID: "done", RawStatus: tasks.StatusDone, Bound: true, Provisioned: true})
 	if !contains(doneBound, "F") {
-		t.Fatalf("DONE bound row missing fold: %v", doneBound)
+		t.Fatalf("DONE managed row missing fold: %v", doneBound)
 	}
 
-	awaitingBound := keysFor(DashboardRow{ID: "await", RawStatus: tasks.StatusAwaitingApproval, Bound: true})
+	awaitingBound := keysFor(DashboardRow{ID: "await", RawStatus: tasks.StatusAwaitingApproval, Bound: true, Provisioned: true})
 	if !contains(awaitingBound, "F") {
-		t.Fatalf("AWAITING-APPROVAL bound row missing fold: %v", awaitingBound)
+		t.Fatalf("AWAITING-APPROVAL managed row missing fold: %v", awaitingBound)
 	}
 
-	readyBound := keysFor(DashboardRow{ID: "ready", RawStatus: tasks.StatusReady, Bound: true})
+	doneAdopted := keysFor(DashboardRow{ID: "done", RawStatus: tasks.StatusDone, Bound: true, Provisioned: false})
+	if contains(doneAdopted, "F") {
+		t.Fatalf("DONE adopted row should not offer fold: %v", doneAdopted)
+	}
+
+	readyBound := keysFor(DashboardRow{ID: "ready", RawStatus: tasks.StatusReady, Bound: true, Provisioned: true})
 	if contains(readyBound, "F") {
 		t.Fatalf("READY bound row should not offer fold: %v", readyBound)
 	}
@@ -75,6 +80,7 @@ func TestDashboardFoldRefusalSticky(t *testing.T) {
 		RuntimePath: b.RuntimePath,
 		RawStatus:   tasks.StatusDone,
 		Bound:       true,
+		Provisioned: true,
 	}
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 	m.width, m.height = 120, 40
@@ -108,9 +114,10 @@ func TestDashboardHandoffFoldSpawnsFocusesAndQuits(t *testing.T) {
 	row.RuntimePath = bound
 	row.ProjectPath = repo
 	row.Bound = true
+	row.Provisioned = true
 	row.RawStatus = tasks.StatusDone
 	queuetest.SeedBindingStore(t, d.Tasks, map[string]drain.WorktreeBinding{
-		drain.SetScopedKey(repoKey, setID): {RuntimePath: bound, Branch: "handoff-fold", Project: "pop", Provisioned: false},
+		drain.SetScopedKey(repoKey, setID): {RuntimePath: bound, Branch: "handoff-fold", Project: "pop", Provisioned: true},
 	})
 	rt.Fake.Inside = true
 
@@ -186,9 +193,10 @@ func TestDashboardHandoffFoldReusesConflictPane(t *testing.T) {
 	row.RuntimePath = bound
 	row.ProjectPath = repo
 	row.Bound = true
+	row.Provisioned = true
 	row.RawStatus = tasks.StatusDone
 	queuetest.SeedBindingStore(t, d.Tasks, map[string]drain.WorktreeBinding{
-		drain.SetScopedKey(repoKey, setID): {RuntimePath: bound, Branch: "handoff-fold-reuse", Project: "pop", Provisioned: false},
+		drain.SetScopedKey(repoKey, setID): {RuntimePath: bound, Branch: "handoff-fold-reuse", Project: "pop", Provisioned: true},
 	})
 	rt.SessionLive = true
 	rt.WindowNames["pop-work"] = true

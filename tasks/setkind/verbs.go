@@ -137,10 +137,10 @@ func verifyEligible(row work.Container) bool {
 }
 
 // foldEligible reports whether the fold verb applies to a set: the shared
-// Unfolded condition (bound DONE or AWAITING-APPROVAL — ADR-0148, ADR-0156,
-// ADR-0197).
+// Unfolded condition (provisioned binding, DONE or AWAITING-APPROVAL —
+// ADR-0148, ADR-0156, ADR-0197).
 func foldEligible(row work.Container) bool {
-	return tasks.Unfolded(row.Bound, row.RawStatus)
+	return tasks.Unfolded(row.Bound, row.Provisioned, row.RawStatus)
 }
 
 // Perform runs one verb. The shared verbs, every status write (per task, per set,

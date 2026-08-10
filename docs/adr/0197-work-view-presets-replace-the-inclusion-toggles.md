@@ -12,14 +12,15 @@ second, independent toggle for archived rows. Two composable booleans is the
 whole filtering vocabulary the surfaces have.
 
 That vocabulary cannot express the one question an operator actually asks about
-finished work. A **Task set** that is DONE but still holds its checkout — bound,
-not yet folded — is not filed away; pop is holding a worktree for the human and
-nothing says so. ADR-0121 saw this and recorded it as an accepted trade-off:
-"the uniform DONE-hide drops the dashboard's standing managed-worktree teardown
-reminder." In practice the reminder is unreachable, because the only way to ask
-for it is **Show done**, which is all-or-nothing: turning it on floods the table
-with every set ever completed, and the handful that need folding are invisible in
-the flood. The filter that reveals the signal also buries it.
+finished work. A **Task set** that is DONE but still holds a *managed* checkout —
+bound to a pop-provisioned worktree, not yet folded — is not filed away; pop is
+holding a worktree for the human and nothing says so. ADR-0121 saw this and
+recorded it as an accepted trade-off: "the uniform DONE-hide drops the
+dashboard's standing managed-worktree teardown reminder." In practice the
+reminder is unreachable, because the only way to ask for it is **Show done**,
+which is all-or-nothing: turning it on floods the table with every set ever
+completed, and the handful that need folding are invisible in the flood. The
+filter that reveals the signal also buries it.
 
 The same all-or-nothing shape defeats "what was I working on recently" — a view
 with no expression at all today.
@@ -62,9 +63,12 @@ retired.
    same chronological prefix `pop tasks transfer export` completion already sorts
    on. No new persisted state, and no lifecycle instants.
 
-5. **`unfolded` is derived.** A set is unfolded when it is bound and DONE or
-   Awaiting-approval — exactly the foldable condition. Bindings are already loaded
-   per row for the worktree column, so the predicate is free.
+5. **`unfolded` is derived.** A set is unfolded when it holds a *managed*
+   (provisioned) Worktree binding and is DONE or Awaiting-approval — exactly the
+   foldable condition, and exactly the checkout pop will tear down. An adopted
+   binding (the main checkout on master, or any path outside the managed-worktree
+   root) is bound but not unfolded: there is nothing to fold. Bindings are
+   already loaded per row for the worktree column, so the predicate is free.
 
 6. **A preset may carry its own sort, above which the tiers still float.** Absent
    `sort`, rows order by the ADR-0121 status scheme. A declared `sort` replaces

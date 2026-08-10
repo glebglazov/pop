@@ -598,8 +598,9 @@ func TestManagedDirectiveDestColumn(t *testing.T) {
 // TestDoneHiddenUniformly pins the ADR-0121 uniform DONE hide: a DONE set is
 // omitted by default whether its Worktree binding is adopted or managed. Done
 // TestDoneVisibleWhenUnfolded pins ADR-0197's active preset: a DONE set that
-// still holds a binding (unfolded) stays on the default view as the teardown
-// reminder; the all preset still reveals every DONE row including folded ones.
+// still holds a managed binding (unfolded) stays on the default view as the
+// teardown reminder; an adopted DONE binding is not unfolded and is hidden;
+// the all preset still reveals every DONE row including folded ones.
 func TestDoneVisibleWhenUnfolded(t *testing.T) {
 	rows := []tasks.Row{
 		{ID: "done-adopted", Status: tasks.StatusDone},
@@ -625,15 +626,15 @@ func TestDoneVisibleWhenUnfolded(t *testing.T) {
 	if _, ok := byID["done-folded"]; ok {
 		t.Fatalf("folded DONE shown by active: %+v", got)
 	}
-	if row, ok := byID["done-adopted"]; !ok {
-		t.Fatal("adopted Done binding should stay visible under active")
-	} else if row.Worktree != "adopted-branch" {
-		t.Fatalf("done-adopted row = %+v", row)
+	if _, ok := byID["done-adopted"]; ok {
+		t.Fatalf("adopted DONE shown by active (not unfolded): %+v", got)
 	}
 	if row, ok := byID["done-managed"]; !ok {
 		t.Fatal("managed Done binding should stay visible under active")
 	} else if row.DestKind != work.DestDoneManagedBound || row.Worktree != "managed-branch" {
 		t.Fatalf("done-managed row = %+v", row)
+	} else if !row.Provisioned || !strings.Contains(tasks.WorkRowStatusCell(row), tasks.UnfoldedMark) {
+		t.Fatalf("done-managed should read unfolded: %+v status=%q", row, tasks.WorkRowStatusCell(row))
 	}
 
 	d.ViewPreset, _ = config.ShippedWorkViewPreset("all")
@@ -652,6 +653,8 @@ func TestDoneVisibleWhenUnfolded(t *testing.T) {
 		t.Fatal("adopted Done binding should be revealed with preset all")
 	} else if row.Worktree != "adopted-branch" {
 		t.Fatalf("done-adopted row = %+v", row)
+	} else if strings.Contains(tasks.WorkRowStatusCell(row), tasks.UnfoldedMark) {
+		t.Fatalf("adopted DONE must not read unfolded: %q", tasks.WorkRowStatusCell(row))
 	}
 	if row, ok := byID["done-managed"]; !ok {
 		t.Fatal("managed Done binding should be revealed with preset all")

@@ -183,6 +183,7 @@ func TestAssistGenericMenuOffersFoldForDoneBoundSet(t *testing.T) {
 		RuntimePath: root,
 		Branch:      "demo",
 		Project:     "demo",
+		Provisioned: true,
 	}); err != nil {
 		t.Fatalf("PutBinding: %v", err)
 	}
@@ -209,7 +210,7 @@ func TestAssistGenericMenuOffersFoldForDoneBoundSet(t *testing.T) {
 		t.Fatalf("expected generic DONE menu:\n%s", out.String())
 	}
 	if !strings.Contains(out.String(), "3. Fold branch back into Trunk and release checkout") {
-		t.Fatalf("DONE bound menu missing fold:\n%s", out.String())
+		t.Fatalf("DONE managed menu missing fold:\n%s", out.String())
 	}
 }
 
@@ -227,6 +228,7 @@ func TestAssistFoldRefusalReasonReachesTheMenu(t *testing.T) {
 		RuntimePath: root,
 		Branch:      "demo",
 		Project:     "demo",
+		Provisioned: true,
 	}); err != nil {
 		t.Fatalf("PutBinding: %v", err)
 	}

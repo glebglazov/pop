@@ -205,8 +205,9 @@ func WorkRowStatusSegments(row work.Container) []work.StatusSegment {
 		segments = append(segments, work.StatusSegment{Text: text, Tone: verifiedAtTone(badge.State)})
 	}
 	// Unfolded rides beside the status the way the Verification mark does
-	// (ADR-0197): derived from Bound plus FoldEligibleStatus, never persisted.
-	if Unfolded(row.Bound, row.RawStatus) {
+	// (ADR-0197): derived from a provisioned binding plus FoldEligibleStatus,
+	// never persisted.
+	if Unfolded(row.Bound, row.Provisioned, row.RawStatus) {
 		segments = append(segments, work.StatusSegment{Text: UnfoldedMark, Tone: work.TonePlain})
 	}
 	if work.AutoDrainWaiting(row) {

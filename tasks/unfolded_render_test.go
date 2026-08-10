@@ -15,11 +15,12 @@ func TestStatusColumnTextUnfolded(t *testing.T) {
 		row  Row
 		want string
 	}{
-		{"bound DONE", Row{Status: StatusDone, Bound: true}, "DONE · unfolded"},
-		{"bound AWAITING-APPROVAL", Row{Status: StatusAwaitingApproval, Bound: true}, "AWAITING-APPROVAL · unfolded"},
+		{"managed DONE", Row{Status: StatusDone, Bound: true, Provisioned: true}, "DONE · unfolded"},
+		{"managed AWAITING-APPROVAL", Row{Status: StatusAwaitingApproval, Bound: true, Provisioned: true}, "AWAITING-APPROVAL · unfolded"},
+		{"adopted DONE", Row{Status: StatusDone, Bound: true, Provisioned: false}, "DONE"},
 		{"unbound DONE", Row{Status: StatusDone}, "DONE"},
-		{"bound READY", Row{Status: StatusReady, Bound: true}, "READY"},
-		{"started READY", Row{Status: StatusReady, Started: true, Bound: true}, "IN PROGRESS"},
+		{"managed READY", Row{Status: StatusReady, Bound: true, Provisioned: true}, "READY"},
+		{"started READY", Row{Status: StatusReady, Started: true, Bound: true, Provisioned: true}, "IN PROGRESS"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -39,8 +40,16 @@ func TestAttachBound(t *testing.T) {
 		t.Fatalf("Store: ok=%v err=%v", ok, err)
 	}
 	if err := s.PutBinding(store.Binding{
-		ScopedKey:   "repo\x00bound-done",
-		RuntimePath: "/wt/bound-done",
+		ScopedKey:   "repo\x00managed-done",
+		RuntimePath: "/wt/managed-done",
+		Provisioned: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutBinding(store.Binding{
+		ScopedKey:   "repo\x00adopted-done",
+		RuntimePath: "/repo/adopted-done",
+		Provisioned: false,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -51,18 +60,22 @@ func TestAttachBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := []Row{
-		{ID: "bound-done", Status: StatusDone},
+		{ID: "managed-done", Status: StatusDone},
+		{ID: "adopted-done", Status: StatusDone},
 		{ID: "blank", Status: StatusDone},
 		{ID: "unbound", Status: StatusDone},
 	}
 	AttachBound(d, rows)
-	if !rows[0].Bound {
-		t.Fatal("bound-done should be Bound")
+	if !rows[0].Bound || !rows[0].Provisioned {
+		t.Fatal("managed-done should be Bound and Provisioned")
 	}
-	if rows[1].Bound {
-		t.Fatal("blank runtime path should not be Bound")
+	if !rows[1].Bound || rows[1].Provisioned {
+		t.Fatal("adopted-done should be Bound but not Provisioned")
 	}
 	if rows[2].Bound {
+		t.Fatal("blank runtime path should not be Bound")
+	}
+	if rows[3].Bound {
 		t.Fatal("unbound should not be Bound")
 	}
 	table := formatTable(rows)
@@ -70,6 +83,6 @@ func TestAttachBound(t *testing.T) {
 		t.Fatalf("table missing unfolded mark:\n%s", table)
 	}
 	if strings.Count(table, "unfolded") != 1 {
-		t.Fatalf("want exactly one unfolded mark:\n%s", table)
+		t.Fatalf("want exactly one unfolded mark (managed only):\n%s", table)
 	}
 }

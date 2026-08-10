@@ -110,6 +110,7 @@ func TestDashboardHandoffVerbsRecordTheSetsCheckout(t *testing.T) {
 		}},
 		{name: "fold", key: "F", rows: doneTask, arrange: func(row *DashboardRow) {
 			row.RawStatus = tasks.StatusDone
+			row.Provisioned = true
 		}},
 		{name: "assist", key: "S", rows: doneTask},
 		{name: "shell", key: "O", rows: doneTask},
@@ -132,7 +133,7 @@ func TestDashboardHandoffVerbsRecordTheSetsCheckout(t *testing.T) {
 				tc.arrange(&row)
 			}
 			queuetest.SeedBindingStore(t, d.Tasks, map[string]drain.WorktreeBinding{
-				drain.SetScopedKey(repoKey, setID): {RuntimePath: bound, Branch: "history-" + tc.name, Project: "pop", Provisioned: false},
+				drain.SetScopedKey(repoKey, setID): {RuntimePath: bound, Branch: "history-" + tc.name, Project: "pop", Provisioned: row.Provisioned},
 			})
 			rt.Fake.Inside = true
 

@@ -201,10 +201,11 @@ func buildRefreshResult(d *Deps, canon string, disc *Discovery, state *GlobalSta
 	return result
 }
 
-// AttachBound stamps each row's Bound flag from the Worktree bindings already in
-// the store — one AllBindings read, no git. Call before rendering `pop tasks
-// status` so Unfolded can ride beside the status the way Container.Bound does on
-// the Work dashboard (ADR-0197). Best-effort: a missing store leaves Bound false.
+// AttachBound stamps each row's Bound and Provisioned flags from the Worktree
+// bindings already in the store — one AllBindings read, no git. Call before
+// rendering `pop tasks status` so Unfolded can ride beside the status the way
+// Container.Bound/Provisioned does on the Work dashboard (ADR-0197). Best-effort:
+// a missing store leaves Bound and Provisioned false.
 func AttachBound(d *Deps, rows []Row) {
 	if d == nil || len(rows) == 0 {
 		return
@@ -217,18 +218,25 @@ func AttachBound(d *Deps, rows []Row) {
 	if err != nil {
 		return
 	}
-	bound := make(map[string]bool, len(all))
+	type stamp struct {
+		bound       bool
+		provisioned bool
+	}
+	byID := make(map[string]stamp, len(all))
 	for key, b := range all {
 		if strings.TrimSpace(b.RuntimePath) == "" {
 			continue
 		}
 		parts := strings.Split(key, "\x00")
 		if len(parts) == 2 {
-			bound[parts[1]] = true
+			byID[parts[1]] = stamp{bound: true, provisioned: b.Provisioned}
 		}
 	}
 	for i := range rows {
-		rows[i].Bound = bound[rows[i].ID]
+		if s, ok := byID[rows[i].ID]; ok {
+			rows[i].Bound = s.bound
+			rows[i].Provisioned = s.provisioned
+		}
 	}
 }
 
@@ -458,7 +466,7 @@ func formatTableWithOutput(out *output, rows []Row) string {
 // status the way WorkRowStatusSegments does on the Work dashboard.
 func statusColumnText(row Row) string {
 	label := StatusLabel(row)
-	if Unfolded(row.Bound, row.Status) {
+	if Unfolded(row.Bound, row.Provisioned, row.Status) {
 		return label + " · " + UnfoldedMark
 	}
 	return label
@@ -680,14 +688,16 @@ func renderTaskSetDetail(out *output, taskSetID string, row *Row, m *Manifest) {
 	status := DeriveStatus(m)
 	progress := ""
 	bound := false
+	provisioned := false
 	if row != nil {
 		status = row.Status
 		progress = row.Progress
 		bound = row.Bound
+		provisioned = row.Provisioned
 	}
 
 	statusText := string(status)
-	if Unfolded(bound, status) {
+	if Unfolded(bound, provisioned, status) {
 		statusText += " · " + UnfoldedMark
 	}
 	header := fmt.Sprintf("%s  [%s]", taskSetID, statusText)

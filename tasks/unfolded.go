@@ -1,12 +1,14 @@
 package tasks
 
 // Unfolded reports whether a Task set is unfolded: its work is finished but
-// the checkout is still held — bound, and DONE or Awaiting-approval. It is
-// exactly the foldable condition (FoldEligibleStatus plus bound), named so a
-// read surface can show it (ADR-0197). Derived at read time from fields already
-// loaded for the worktree column; never persisted.
-func Unfolded(bound bool, status TaskSetStatus) bool {
-	return bound && FoldEligibleStatus(status)
+// pop is still holding a checkout it will tear down — a managed (provisioned)
+// Worktree binding, and DONE or Awaiting-approval. It is exactly the foldable
+// condition (FoldEligibleStatus plus a provisioned binding), named so a read
+// surface can show it (ADR-0197). An adopted binding is not unfolded: there is
+// nothing to fold. Derived at read time from fields already loaded for the
+// worktree column; never persisted.
+func Unfolded(bound, provisioned bool, status TaskSetStatus) bool {
+	return bound && provisioned && FoldEligibleStatus(status)
 }
 
 // UnfoldedMark is the plain STATUS-cell suffix for an Unfolded Task set — an

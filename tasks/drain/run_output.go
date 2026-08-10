@@ -593,7 +593,7 @@ func buildWorktreeBindingViews(d *tasks.Deps, cfg *config.Config, running []Pick
 	for _, key := range keys {
 		b := bindings[key]
 		setID := binding.SetIDFromKey(key)
-		rowFacts := facts.facts(b.RuntimePath, setID)
+		rowFacts := facts.facts(b.RuntimePath, setID, b.Provisioned)
 		if !tasks.MatchesPreset(rowFacts, preset, now) {
 			continue
 		}
@@ -646,7 +646,7 @@ func newBindingFactsCache(d *tasks.Deps, cfg *config.Config) *bindingFactsCache 
 	return &bindingFactsCache{d: d, cfg: cfg, refreshes: map[string]*tasks.RefreshResult{}, factsBy: map[string]tasks.ViewFacts{}}
 }
 
-func (c *bindingFactsCache) facts(runtimePath, setID string) tasks.ViewFacts {
+func (c *bindingFactsCache) facts(runtimePath, setID string, provisioned bool) tasks.ViewFacts {
 	if c == nil || c.d == nil || runtimePath == "" || setID == "" {
 		return tasks.ViewFacts{ID: setID, Unfolded: true}
 	}
@@ -658,8 +658,10 @@ func (c *bindingFactsCache) facts(runtimePath, setID string) tasks.ViewFacts {
 	if refresh := c.refresh(runtimePath); refresh != nil {
 		if row := tasks.FindRow(refresh, setID); row != nil {
 			// The set still holds this binding, so Bound is true even if the
-			// refresh row has not stamped it yet.
+			// refresh row has not stamped it yet. Provisioned rides from the
+			// binding itself (ADR-0197).
 			row.Bound = true
+			row.Provisioned = provisioned
 			f = tasks.RowViewFacts(*row)
 		}
 	}

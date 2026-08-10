@@ -178,7 +178,12 @@ type Container struct {
 	// exists on disk. It is orthogonal to Task-set status — a set of any status
 	// may be orphaned — and a set with no binding can never be orphaned.
 	Parked, Bound, Orphaned bool
-	AutoDrain               bool
+	// Provisioned is the Worktree binding's managed bit when Bound is true —
+	// true when the checkout lives under the managed-worktree root. Unfolded
+	// (and DoneStillManagedBound) read it; an adopted checkout is Bound but not
+	// Provisioned.
+	Provisioned bool
+	AutoDrain   bool
 	// ConfigError is the message for a config-class defect that keeps the set
 	// from routing to an integration target — a bare repo with no declared trunk
 	// or an unsatisfiable worktree directive (ADR-0059/0060). Non-blank only when
@@ -189,9 +194,10 @@ type Container struct {
 	// RawStatus is the underlying derived Task-set status, kept beside the
 	// displayed Status so display relabels never leak into logic.
 	RawStatus SetStatus
-	// DoneStillManagedBound is true when a Done set still holds a
-	// pop-provisioned (managed) Worktree binding. The dashboard keeps such a
-	// row visible as a clean-up reminder until archived or unbound (ADR-0070).
+	// DoneStillManagedBound is true when a Done set is Unfolded — the Done-only
+	// special case of the shared Unfolded predicate (managed binding still held).
+	// The dashboard keeps such a row visible as a clean-up reminder until
+	// archived or unbound (ADR-0070, ADR-0197).
 	DoneStillManagedBound bool
 	// PaneID is the tmux pane recorded for a drain of this set, empty if none
 	// was recorded. Audit/bookkeeping only — the live-pane affordance reads tmux

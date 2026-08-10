@@ -45,7 +45,11 @@ func TestMatchesPresetActiveAndAll(t *testing.T) {
 	if !MatchesPreset(RowViewFacts(folded), all, now) {
 		t.Errorf("folded DONE hidden by all, want shown")
 	}
-	unfolded := Row{Status: StatusDone, Bound: true}
+	adopted := Row{Status: StatusDone, Bound: true, Provisioned: false}
+	if MatchesPreset(RowViewFacts(adopted), active, now) {
+		t.Errorf("adopted DONE shown by active, want hidden (not unfolded)")
+	}
+	unfolded := Row{Status: StatusDone, Bound: true, Provisioned: true}
 	if !MatchesPreset(RowViewFacts(unfolded), active, now) {
 		t.Errorf("unfolded DONE hidden by active, want shown")
 	}
@@ -231,11 +235,12 @@ func TestWorkRowStatusCellComposition(t *testing.T) {
 		{"human-completed unverified", work.Container{RawStatus: StatusDone, VerifyMark: VerifyMarkUnverified}, "DONE · unverified"},
 		{"human-completed verify-failed", work.Container{RawStatus: StatusDone, VerifyMark: VerifyMarkFailed}, "DONE · verify-failed"},
 		{"terminal, verification off", work.Container{RawStatus: StatusDone}, "DONE"},
-		{"bound DONE unfolded", work.Container{RawStatus: StatusDone, Bound: true}, "DONE · unfolded"},
-		{"bound AWAITING-APPROVAL unfolded", work.Container{RawStatus: StatusAwaitingApproval, Bound: true}, "AWAITING-APPROVAL · unfolded"},
+		{"managed DONE unfolded", work.Container{RawStatus: StatusDone, Bound: true, Provisioned: true}, "DONE · unfolded"},
+		{"managed AWAITING-APPROVAL unfolded", work.Container{RawStatus: StatusAwaitingApproval, Bound: true, Provisioned: true}, "AWAITING-APPROVAL · unfolded"},
+		{"adopted DONE not unfolded", work.Container{RawStatus: StatusDone, Bound: true, Provisioned: false}, "DONE"},
 		{"unbound DONE not unfolded", work.Container{RawStatus: StatusDone, Bound: false}, "DONE"},
-		{"bound READY not unfolded", work.Container{RawStatus: StatusReady, Bound: true}, "READY"},
-		{"unfolded after verified badge", work.Container{VerifyMark: VerifyMarkVerified, VerifiedAtSHA: "abc123", VerifiedAtDrifted: true, RawStatus: StatusAwaitingApproval, Bound: true}, "AWAITING-APPROVAL · verified @ abc123 · unfolded"},
+		{"bound READY not unfolded", work.Container{RawStatus: StatusReady, Bound: true, Provisioned: true}, "READY"},
+		{"unfolded after verified badge", work.Container{VerifyMark: VerifyMarkVerified, VerifiedAtSHA: "abc123", VerifiedAtDrifted: true, RawStatus: StatusAwaitingApproval, Bound: true, Provisioned: true}, "AWAITING-APPROVAL · verified @ abc123 · unfolded"},
 		{"auto-drain waiting", work.Container{RawStatus: StatusReady, AutoDrain: true}, "READY · auto-drain"},
 		{"auto-drain silenced by live drain", work.Container{RawStatus: StatusReady, AutoDrain: true, LiveDrain: true}, "IN PROGRESS"},
 		{"auto-drain then orphaned", work.Container{RawStatus: StatusBlocked, AutoDrain: true, Orphaned: true}, "BLOCKED · auto-drain · orphaned"},
@@ -244,7 +249,7 @@ func TestWorkRowStatusCellComposition(t *testing.T) {
 		{"orphaned then parked then config", work.Container{RawStatus: StatusBlocked, Orphaned: true, Parked: true, ConfigError: "no trunk"}, "BLOCKED · orphaned · parked · config error: no trunk"},
 		{
 			"full suffix order",
-			work.Container{VerifyMark: VerifyMarkVerified, VerifiedAtSHA: "abcdef123456", VerifiedAtDrifted: true, RawStatus: StatusAwaitingApproval, Bound: true, AutoDrain: true, Orphaned: true, Parked: true, ConfigError: "no trunk"},
+			work.Container{VerifyMark: VerifyMarkVerified, VerifiedAtSHA: "abcdef123456", VerifiedAtDrifted: true, RawStatus: StatusAwaitingApproval, Bound: true, Provisioned: true, AutoDrain: true, Orphaned: true, Parked: true, ConfigError: "no trunk"},
 			"AWAITING-APPROVAL · verified @ abcdef123456 · unfolded · auto-drain · orphaned · parked · config error: no trunk",
 		},
 	}

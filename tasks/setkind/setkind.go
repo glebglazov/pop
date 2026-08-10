@@ -288,13 +288,15 @@ func containersForGroup(d *Deps, cfg *config.Config, g repogroup.Group) ([]work.
 // one part of a group's load that runs beside the other groups' (ADR-0189); what
 // is left touches the store and so runs serially, one group after another.
 func containersFromGroup(d *Deps, cfg *config.Config, snap *snapshot, delays []time.Duration, now time.Time, g repogroup.Group, refresh *tasks.RefreshResult, prepared *tasks.PreparedRefresh) ([]work.Container, error) {
-	// Stamp Bound from the pass's binding snapshot before preset evaluation so
-	// Unfolded (and the active preset's hide clause) see the same bound fact the
-	// container loop derives below (ADR-0197).
+	// Stamp Bound/Provisioned from the pass's binding snapshot before preset
+	// evaluation so Unfolded (and the active preset's hide clause) see the same
+	// managed-binding fact the container loop derives below (ADR-0197).
 	if refresh != nil {
 		for i := range refresh.Rows {
 			bnd, hasBinding := snap.bindingFor(g.RepoKey, refresh.Rows[i].ID)
-			refresh.Rows[i].Bound = hasBinding && strings.TrimSpace(bnd.RuntimePath) != ""
+			bound := hasBinding && strings.TrimSpace(bnd.RuntimePath) != ""
+			refresh.Rows[i].Bound = bound
+			refresh.Rows[i].Provisioned = bound && bnd.Provisioned
 		}
 	}
 	// The verdict overlay is narrowed to the rows this pass will render (ADR-0189),
@@ -310,7 +312,8 @@ func containersFromGroup(d *Deps, cfg *config.Config, snap *snapshot, delays []t
 	for _, taskRow := range refresh.Rows {
 		bnd, hasBinding := snap.bindingFor(g.RepoKey, taskRow.ID)
 		bound := hasBinding && strings.TrimSpace(bnd.RuntimePath) != ""
-		doneStillManagedBound := taskRow.Status == tasks.StatusDone && bound && bnd.Provisioned
+		provisioned := bound && bnd.Provisioned
+		doneStillManagedBound := taskRow.Status == tasks.StatusDone && tasks.Unfolded(bound, provisioned, taskRow.Status)
 		orphanedSet := orphaned(d, bnd, hasBinding)
 		if !d.rendersRow(taskRow) {
 			continue
@@ -363,6 +366,7 @@ func containersFromGroup(d *Deps, cfg *config.Config, snap *snapshot, delays []t
 			ConfigError:           configErr,
 			Orphaned:              orphanedSet,
 			Bound:                 bound,
+			Provisioned:           provisioned,
 			PaneID:                paneID(snap, g.RepoKey, taskRow.ID),
 			LiveDrain:             liveDrainSet,
 			Started:               taskRow.Started,

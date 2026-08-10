@@ -22,7 +22,7 @@ func RowViewFacts(row Row) ViewFacts {
 		ID:       row.ID,
 		Status:   string(row.Status),
 		Archived: row.Archived,
-		Unfolded: Unfolded(row.Bound, row.Status),
+		Unfolded: Unfolded(row.Bound, row.Provisioned, row.Status),
 	}
 }
 

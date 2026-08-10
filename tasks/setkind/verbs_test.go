@@ -23,12 +23,13 @@ func verbsOffered(actions []work.Action) []work.Verb {
 func TestActionsOrderSpawningFirst(t *testing.T) {
 	k := New(nil)
 	c := work.Container{
-		ID:         "2026-07-01-demo",
-		Bound:      true,
-		Orphaned:   false,
-		Parked:     true,
-		VerifyMark: tasks.VerifyMarkUnverified,
-		RawStatus:  tasks.StatusDone,
+		ID:          "2026-07-01-demo",
+		Bound:       true,
+		Provisioned: true,
+		Orphaned:    false,
+		Parked:      true,
+		VerifyMark:  tasks.VerifyMarkUnverified,
+		RawStatus:   tasks.StatusDone,
 	}
 	want := []work.Verb{
 		VerbDrain, VerbVerify, VerbFold, VerbAssist, work.VerbShell,

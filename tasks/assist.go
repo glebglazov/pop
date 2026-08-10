@@ -425,20 +425,24 @@ func promptGenericAssistAction(out io.Writer, in io.Reader, reader *promptReader
 }
 
 func assistFoldEligible(d *Deps, setID string, status TaskSetStatus) bool {
-	return Unfolded(stillHasWorktreeBinding(d, setID), status)
+	bound, provisioned := worktreeBindingFlags(d, setID)
+	return Unfolded(bound, provisioned, status)
 }
 
-func stillHasWorktreeBinding(d *Deps, setID string) bool {
+// worktreeBindingFlags reports whether setID holds a Worktree binding with a
+// non-blank runtime path, and that binding's Provisioned bit. One AllBindings
+// read, no git.
+func worktreeBindingFlags(d *Deps, setID string) (bound, provisioned bool) {
 	if d == nil {
-		return false
+		return false, false
 	}
 	s, ok, err := d.Store(false)
 	if err != nil || !ok {
-		return false
+		return false, false
 	}
 	all, err := s.AllBindings()
 	if err != nil {
-		return false
+		return false, false
 	}
 	for key, b := range all {
 		parts := strings.Split(key, "\x00")
@@ -446,8 +450,8 @@ func stillHasWorktreeBinding(d *Deps, setID string) bool {
 			continue
 		}
 		if strings.TrimSpace(b.RuntimePath) != "" {
-			return true
+			return true, b.Provisioned
 		}
 	}
-	return false
+	return false, false
 }
