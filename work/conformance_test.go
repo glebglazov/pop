@@ -108,8 +108,12 @@ func conformanceCases() []conformanceCase {
 					Groups:    f.groups,
 				})
 			},
+			// The fixture's Map is not muted, so it offers the mute opener and not its
+			// unmute half, the same eligibility-by-omission a Task set's row follows
+			// (ADR-0200 decision 7: Task sets and Maps are mutable, a Routine is not —
+			// see the "routine" case below, whose wantActions names no mute verb at all).
 			wantActions: []work.Verb{
-				wayfinder.VerbWork, wayfinder.VerbFanOut, wayfinder.VerbAssist, work.VerbShell,
+				wayfinder.VerbWork, wayfinder.VerbFanOut, wayfinder.VerbAssist, work.VerbShell, work.VerbMute,
 				wayfinder.VerbWorkHere, wayfinder.VerbFanOutHere, work.VerbStatus, work.VerbCopyName,
 			},
 			wantItemActions: []work.Verb{wayfinder.VerbWork, wayfinder.VerbWorkHere, work.VerbCopyName},

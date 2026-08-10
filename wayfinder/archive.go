@@ -33,14 +33,16 @@ func MapRef(mapID string) ref.WorkRef {
 	return ref.WorkRef{Kind: ref.KindMap, ContainerID: mapID}
 }
 
-// archivedMapIDs returns the ids of the Maps the human has filed away, read from
-// the Work registry. It answers for the whole machine rather than one storage, so
-// a load walking many of them reads it once; the per-storage fold of the retired
-// side-file is its caller's, and must already have run. A machine with no pop.db
-// has archived nothing, so a missing store is an empty set rather than an error —
-// a pure read never materialises the database.
-func archivedMapIDs(d *Deps) (map[string]bool, error) {
-	out := map[string]bool{}
+// mapRegistryFacts returns every registered Map's registry row, keyed by id —
+// the archived bit and the Mute (ADR-0200 decision 7) alike, both cross-kind
+// registration facts read the one way every kind reads them. It answers for the
+// whole machine rather than one storage, so a load walking many of them reads it
+// once; the per-storage fold of the retired side-file is its caller's, and must
+// already have run. A machine with no pop.db has registered nothing, so a
+// missing store is an empty map rather than an error — a pure read never
+// materialises the database.
+func mapRegistryFacts(d *Deps) (map[string]store.WorkContainer, error) {
+	out := map[string]store.WorkContainer{}
 	s, ok, err := d.taskDeps().Store(false)
 	if err != nil || !ok {
 		return out, err
@@ -50,9 +52,7 @@ func archivedMapIDs(d *Deps) (map[string]bool, error) {
 		return nil, err
 	}
 	for _, row := range rows {
-		if row.Archived {
-			out[row.Ref.ContainerID] = true
-		}
+		out[row.Ref.ContainerID] = row
 	}
 	return out, nil
 }

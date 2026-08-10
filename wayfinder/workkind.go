@@ -158,16 +158,17 @@ func (k *MapKind) Load() ([]work.Container, error) {
 	}
 	// Serially again, in group order: resolving a Map's spawned sets refreshes the
 	// repository's Task storage, which reads the store.
+	now := k.d.now()
 	var containers []work.Container
 	for i, g := range scanned {
 		// One table per group: every Map of a repository spawns into that
 		// repository's Task storage, so the sets are read once for all of them.
 		sets := newSetStatusTable(k.d.Wayfinder, g.DefPath)
 		for _, m := range scans[i] {
-			if !visible(m, k.d.viewPreset(), k.d.now()) {
+			if !visible(m, k.d.viewPreset(), now) {
 				continue
 			}
-			containers = append(containers, containerFor(g, m, sets.resolve(m.SpawnedSets)))
+			containers = append(containers, containerFor(g, m, sets.resolve(m.SpawnedSets), now))
 		}
 	}
 	return containers, nil
@@ -203,7 +204,7 @@ func (k *MapKind) Columns() []string {
 
 // Actions returns the container-level verbs for a Map: work one frontier ticket
 // or fan out the whole frontier when it has one, assist the Map itself, a shell in
-// the repository, its status submenu, and copy-name. Spawning verbs come before
+// the repository, mute, its status submenu, and copy-name. Spawning verbs come before
 // in-place ones, and all four frontier keys are gated on a frontier — a Map with
 // none offers no dead key.
 //
@@ -212,7 +213,10 @@ func (k *MapKind) Columns() []string {
 // opener: it is the operator's only way off a Map row, and a Map with nothing left
 // to grill is precisely the one being archived or abandoned (ADR-0186). The Task-set verbs
 // (drain/bind/…) have never applied to a Map and still do not — the shared two are
-// the only verbs a Map has in common with a task set.
+// the only verbs a Map has in common with a task set. Mute is a third: a Map is
+// mutable on the same terms as a Task set (ADR-0200 decision 7), offered on the
+// same `m` opener and, on an already-muted row, `u` for unmute — eligibility by
+// omission, the way every conditional verb here works.
 func (k *MapKind) Actions(c work.Container) []work.Action {
 	var actions []work.Action
 	if c.MapFrontier > 0 {
@@ -224,7 +228,11 @@ func (k *MapKind) Actions(c work.Container) []work.Action {
 	actions = append(actions,
 		work.Action{Verb: VerbAssist, Key: "S", Label: "assist the map and go"},
 		work.Action{Verb: work.VerbShell, Key: "O", Label: "shell"},
+		work.Action{Verb: work.VerbMute, Key: "m", Label: "mute ▸"},
 	)
+	if !c.MutedUntil.IsZero() {
+		actions = append(actions, work.Action{Verb: work.VerbUnmute, Key: "u", Label: "unmute"})
+	}
 	if c.MapFrontier > 0 {
 		actions = append(actions,
 			work.Action{Verb: VerbWorkHere, Key: "i", Label: "work frontier ticket"},
@@ -319,9 +327,11 @@ func (k *MapKind) Perform(c work.Container, item *work.Item, verb work.Verb) (wo
 		return k.assistMap(c)
 	case VerbArchive, VerbUnarchive, VerbAbandon, VerbReopen:
 		return k.writeStatus(c, verb)
-	case work.VerbStatus:
-		// The submenu itself is the surface's modal; its items come back here one at
-		// a time as the four verbs above.
+	case work.VerbStatus, work.VerbMute, work.VerbUnmute:
+		// The status submenu and the mute pair are all caller-dispatched: a verb id
+		// carries no payload, so the status submenu's choice and the mute window come
+		// back through the caller instead — the status verbs one at a time as the
+		// four above, the mute pair through work.Muter (ADR-0200 decision 5).
 		return work.Outcome{Kind: work.OutcomeCallerModal, Message: string(verb)}, nil
 	default:
 		return work.Outcome{}, work.UnknownVerb(k.ID(), verb)
@@ -578,10 +588,14 @@ func (k *MapKind) groups() ([]repogroup.Group, error) {
 
 // containerFor projects one Map onto a Work container. The status cell is the
 // Map's ticket tallies, which is the only status a Map has ever shown on a read
-// surface: `WAYFINDING · N open / M frontier` (ADR-0130).
-func containerFor(g repogroup.Group, m Map, spawned []SpawnedSet) work.Container {
+// surface: `WAYFINDING · N open / M frontier` (ADR-0130). The Mute carried onto
+// the container is the live one — zero once its window has passed — mirroring
+// the Task-set kind's liveMute (ADR-0200 decision 1): a row's Unmute action and
+// status suffix must vanish the moment a mute lapses, with nothing rewritten.
+func containerFor(g repogroup.Group, m Map, spawned []SpawnedSet, now time.Time) work.Container {
 	counts := CountTickets(m.Tickets)
 	frontier := len(Frontier(m.Tickets))
+	mutedUntil, muteSecret := liveMapMute(m, now)
 	return work.Container{
 		Kind:           ref.KindMap,
 		ID:             m.ID,
@@ -592,6 +606,8 @@ func containerFor(g repogroup.Group, m Map, spawned []SpawnedSet) work.Container
 		Broken:         m.Broken,
 		BrokenReason:   m.BrokenReason,
 		Archived:       m.Archived,
+		MutedUntil:     mutedUntil,
+		MuteSecret:     muteSecret,
 		Items:          itemsFor(m),
 		DetailSections: sectionsFor(m, spawned),
 		DefPath:        g.DefPath,
@@ -611,6 +627,11 @@ func (k *MapKind) StatusCell(c work.Container) []work.StatusSegment {
 	segments := []work.StatusSegment{
 		{Text: mapStatusLabel, Tone: work.ToneLabel},
 		{Text: fmt.Sprintf("%d open / %d frontier", c.MapOpen, c.MapFrontier), Tone: work.TonePlain},
+	}
+	// The mute reads back the words the submenu offered, exactly as a Task set's
+	// row does — the one rendering every read surface shares (ADR-0200 decision 6).
+	if suffix := work.MuteSuffix(c); suffix != "" {
+		segments = append(segments, work.StatusSegment{Text: suffix, Tone: work.TonePlain})
 	}
 	// Only ever present with show-archived on, and then it is the whole reason the
 	// row is on screen: without it an archived Map is indistinguishable from an
@@ -704,11 +725,10 @@ func visible(m Map, preset config.WorkViewPreset, now time.Time) bool {
 		Status:   string(m.Status),
 		Archived: m.Archived,
 		Unfolded: false,
-		// Maps are a mutable kind, but no Map surface writes a Mute yet, so every
-		// Map reads as unmuted. Stated rather than left to the zero value: these
-		// facts are hand-built, so a field nobody names is a field nobody notices
-		// when the Map mute verb lands.
-		MutedUntil: time.Time{},
+		// The raw stored end, with no expiry applied — the same fact
+		// tasks.RowViewFacts carries for a Task set, since the instant the preset
+		// matches against belongs to the match, not to the row (ADR-0200 decision 8).
+		MutedUntil: m.MutedUntil,
 	}, preset, now)
 }
 

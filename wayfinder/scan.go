@@ -40,16 +40,17 @@ func ScanMapsInStorage(d *Deps, storageDir string) ([]Map, error) {
 
 // PreparedScan is one storage directory with the halves of a Map scan that must
 // not run beside another storage's already taken: the read-path folds, which
-// write, and the two machine-global reads of pop.db behind a Map's archived bit
-// and its live ticket claims. What is left is a walk of the maps directory, which
-// is what a Work read surface fans out per repository group (ADR-0189).
+// write, and the two machine-global reads of pop.db behind a Map's registry row
+// (its archived bit and its Mute) and its live ticket claims. What is left is a
+// walk of the maps directory, which is what a Work read surface fans out per
+// repository group (ADR-0189).
 //
-// The archived ids and the claims are not per storage — both answer for every Map
-// on the machine — so one preparation reads them once for a whole batch of
+// The registry rows and the claims are not per storage — both answer for every
+// Map on the machine — so one preparation reads them once for a whole batch of
 // storages rather than once per storage, as a scan per group did.
 type PreparedScan struct {
 	root     string
-	archived map[string]bool
+	registry map[string]store.WorkContainer
 	claims   map[string]map[string]store.WorkClaim
 }
 
@@ -74,7 +75,7 @@ func PrepareScans(d *Deps, storageDirs []string) ([]*PreparedScan, error) {
 	if len(prepared) == 0 {
 		return nil, nil
 	}
-	archived, err := archivedMapIDs(d)
+	registry, err := mapRegistryFacts(d)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +84,7 @@ func PrepareScans(d *Deps, storageDirs []string) ([]*PreparedScan, error) {
 		return nil, err
 	}
 	for _, p := range prepared {
-		p.archived = archived
+		p.registry = registry
 		p.claims = claims
 	}
 	return prepared, nil
@@ -103,7 +104,7 @@ func (p *PreparedScan) Scan(d *Deps) ([]Map, error) {
 		}
 		return nil, err
 	}
-	archived, claims := p.archived, p.claims
+	registry, claims := p.registry, p.claims
 
 	var maps []Map
 	for _, entry := range entries {
@@ -122,7 +123,10 @@ func (p *PreparedScan) Scan(d *Deps) ([]Map, error) {
 			})
 			continue
 		}
-		m.Archived = archived[m.ID]
+		row := registry[m.ID]
+		m.Archived = row.Archived
+		m.MutedUntil = row.MutedUntil
+		m.MuteSecret = row.MuteSecret
 		applyClaims(m.Tickets, claims[m.ID])
 		maps = append(maps, m)
 	}

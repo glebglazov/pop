@@ -96,7 +96,12 @@ type Map struct {
 	Destination    string
 	DecisionsSoFar string
 	Archived       bool
-	Tickets        []Ticket
+	// MutedUntil and MuteSecret carry the Map's Mute exactly as stored, with no
+	// expiry applied (ADR-0200 decision 1) — the same raw registry fact a Task
+	// set's row carries, overlaid from pop.db at scan time like Archived.
+	MutedUntil time.Time
+	MuteSecret bool
+	Tickets    []Ticket
 	// SpawnedSets holds the ids of the Task sets this Map handed off, in the
 	// order they were recorded. Ids only: what each one is doing right now is read
 	// fresh from the sets themselves at render time (ResolveSpawnedSets).

@@ -160,7 +160,7 @@ func TestMapKindVerbsFollowTheFrontier(t *testing.T) {
 		}
 		return out
 	}
-	wantActions := []work.Verb{VerbWork, VerbFanOut, VerbAssist, work.VerbShell, VerbWorkHere, VerbFanOutHere, work.VerbStatus, work.VerbCopyName}
+	wantActions := []work.Verb{VerbWork, VerbFanOut, VerbAssist, work.VerbShell, work.VerbMute, VerbWorkHere, VerbFanOutHere, work.VerbStatus, work.VerbCopyName}
 	if got := verbs(k.Actions(active)); !slices.Equal(got, wantActions) {
 		t.Fatalf("map actions = %v, want %v", got, wantActions)
 	}
@@ -177,7 +177,7 @@ func TestMapKindVerbsFollowTheFrontier(t *testing.T) {
 	// row (ADR-0186).
 	frontierless := active
 	frontierless.MapFrontier = 0
-	if got, want := verbs(k.Actions(frontierless)), []work.Verb{VerbAssist, work.VerbShell, work.VerbStatus, work.VerbCopyName}; !slices.Equal(got, want) {
+	if got, want := verbs(k.Actions(frontierless)), []work.Verb{VerbAssist, work.VerbShell, work.VerbMute, work.VerbStatus, work.VerbCopyName}; !slices.Equal(got, want) {
 		t.Fatalf("frontierless map actions = %v, want %v", got, want)
 	}
 
