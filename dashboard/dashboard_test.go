@@ -2918,6 +2918,21 @@ func TestDashboardPageHeaderNamesActivePreset(t *testing.T) {
 	if !strings.Contains(m.pageHeader(), "Work · all ·") {
 		t.Fatalf("header missing selected preset name: %q", m.pageHeader())
 	}
+
+	// An empty list must still name the active preset in the Frame header —
+	// otherwise "nothing here" is indistinguishable from "you filtered it away"
+	// (ADR-0197 decision 8). pageHeader() alone is not enough: frameSpec used
+	// to gate the Header on row count.
+	empty := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{})
+	empty.width = 120
+	empty.height = 30
+	view := empty.View().Content
+	if !strings.Contains(view, "Work · active ·") {
+		t.Fatalf("empty list view missing default preset name:\n%s", view)
+	}
+	if !strings.Contains(view, "No work-actionable task sets.") {
+		t.Fatalf("empty list view missing empty message:\n%s", view)
+	}
 }
 
 func TestDashboardFilterMenuIndependentOfSlash(t *testing.T) {

@@ -2418,8 +2418,12 @@ func (m QueueDashboard) frameSpec() ui.Frame {
 	if m.actionErr != nil {
 		warnings = append(warnings, dashboardActionErrorLine(m.actionErr))
 	}
+	// On a rowFilters page the active preset must stay named even when the
+	// list is empty — otherwise "nothing here" looks like "you filtered it
+	// away" (ADR-0197 decision 8). Other pages still hide the header over
+	// nothing.
 	header := ""
-	if len(m.snap.Containers) > 0 {
+	if m.page.rowFilters || len(m.snap.Containers) > 0 {
 		header = m.pageHeader()
 	}
 	inputBox := ""
