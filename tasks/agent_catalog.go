@@ -158,7 +158,7 @@ func (e AgentGroupEntry) Label() string {
 // AgentEntryNoModelLabel is how an entry that names no model reads. Pop has no
 // catalog of what an agent defaults to, so it says who decides instead of
 // guessing a name.
-const AgentEntryNoModelLabel = "agent's own configuration"
+const AgentEntryNoModelLabel = "agent decides"
 
 // ModelLabel names the model this entry resolves to, deferring honestly when
 // the command names none.

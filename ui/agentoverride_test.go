@@ -43,25 +43,55 @@ func TestAgentOverridePickerDigitOpensGroupAndPicksEntry(t *testing.T) {
 	}
 }
 
-func TestAgentOverridePickerZeroGoesBackEnterExits(t *testing.T) {
+// Enter carries a human forward through both levels without touching a digit,
+// and esc walks the same path back out.
+func TestAgentOverridePickerEnterAdvancesEscStepsBack(t *testing.T) {
+	p := NewAgentOverridePicker(testOverrideGroups())
+	for i := 0; i < 3; i++ {
+		p.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	}
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if p.level != 1 || p.groupIdx != 3 || p.Done() {
+		t.Fatalf("enter at group level should open it: level=%d groupIdx=%d done=%v", p.level, p.groupIdx, p.Done())
+	}
+
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if p.level != 0 || p.Done() {
+		t.Fatalf("esc in a group should return to the group list, level=%d done=%v", p.level, p.Done())
+	}
+	if p.cursor != 3 {
+		t.Fatalf("esc should restore the highlight to the group it left, cursor=%d", p.cursor)
+	}
+
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	p.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	_, cmd := p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if p.Choice() == nil || p.Choice().Group != "attended" || p.Choice().Cmd != "cursor" {
+		t.Fatalf("enter on an entry should pick it, got %+v", p.Choice())
+	}
+	if cmd == nil {
+		t.Fatal("expected tea.Quit cmd")
+	}
+}
+
+func TestAgentOverridePickerEscAtGroupListExitsUnchanged(t *testing.T) {
+	p := NewAgentOverridePicker(testOverrideGroups())
+	p.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if !p.Done() || p.Choice() != nil || !p.Cancelled() {
+		t.Fatalf("esc at group level should exit unchanged: done=%v choice=%v cancelled=%v", p.Done(), p.Choice(), p.Cancelled())
+	}
+}
+
+func TestAgentOverridePickerZeroStepsBackLikeEsc(t *testing.T) {
 	p := NewAgentOverridePicker(testOverrideGroups())
 	p.Update(tea.KeyPressMsg{Code: '4', Text: "4"})
 	p.Update(tea.KeyPressMsg{Code: '0', Text: "0"})
 	if p.level != 0 || p.Done() {
 		t.Fatalf("0 should return to groups, level=%d done=%v", p.level, p.Done())
 	}
-	p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if !p.Done() || p.Choice() != nil || !p.Cancelled() {
-		t.Fatalf("enter at group level should exit unchanged: done=%v choice=%v cancelled=%v", p.Done(), p.Choice(), p.Cancelled())
-	}
-}
-
-func TestAgentOverridePickerEnterOnEntryExitsWhenFew(t *testing.T) {
-	p := NewAgentOverridePicker(testOverrideGroups())
-	p.Update(tea.KeyPressMsg{Code: '4', Text: "4"})
-	p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	p.Update(tea.KeyPressMsg{Code: '0', Text: "0"})
 	if !p.Done() || p.Choice() != nil {
-		t.Fatalf("enter with ≤9 entries should exit unchanged, got choice=%v", p.Choice())
+		t.Fatalf("0 at group level should exit unchanged: done=%v choice=%v", p.Done(), p.Choice())
 	}
 }
 

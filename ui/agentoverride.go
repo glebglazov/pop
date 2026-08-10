@@ -37,9 +37,10 @@ type AgentOverrideChoice struct {
 
 // AgentOverridePicker is the two-level numeric agent-override picker
 // (ADR-0196 decisions 5–6). Level one lists groups; a digit opens that group's
-// entries; a digit there applies and closes. 0 steps back a level; Enter leaves
-// without changing anything. Past nine entries, arrow/j/k navigation with
-// Enter-on-cursor takes over; digits still select the first nine.
+// entries; a digit there applies and closes. Enter always moves forward on the
+// highlighted row — open at the group level, pick at the entry level — so the
+// same key carries a human through both steps. Esc and 0 step back one level,
+// and leave the picker unchanged when there is no level to step back to.
 //
 // Alt+a is inert while this picker is open — callers must not re-open it on
 // that chord from the picker's own Update.
@@ -109,15 +110,10 @@ func (p *AgentOverridePicker) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case key.Matches(msg, agentOverrideKeys.Submit):
 		return p.activateCursor()
-	case key.Matches(msg, agentOverrideKeys.Cancel):
+	case key.Matches(msg, agentOverrideKeys.Quit):
 		return p.exitUnchanged()
 	case key.Matches(msg, agentOverrideKeys.Back):
-		if p.level == 1 {
-			p.level = 0
-			p.cursor = p.groupIdx
-			return nil
-		}
-		return p.exitUnchanged()
+		return p.stepBack()
 	}
 
 	s := strings.TrimSpace(msg.String())
@@ -125,14 +121,20 @@ func (p *AgentOverridePicker) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return p.activateDigit(int(s[0] - '0'))
 	}
 	if s == "0" {
-		if p.level == 1 {
-			p.level = 0
-			p.cursor = p.groupIdx
-			return nil
-		}
-		return p.exitUnchanged()
+		return p.stepBack()
 	}
 	return nil
+}
+
+// stepBack returns to the group list from an open group, and leaves the picker
+// unchanged when the group list is already what's showing.
+func (p *AgentOverridePicker) stepBack() tea.Cmd {
+	if p.level == 1 {
+		p.level = 0
+		p.cursor = p.groupIdx
+		return nil
+	}
+	return p.exitUnchanged()
 }
 
 func (p *AgentOverridePicker) items() []string {
@@ -171,16 +173,10 @@ func (p *AgentOverridePicker) activateDigit(digit int) tea.Cmd {
 }
 
 func (p *AgentOverridePicker) activateCursor() tea.Cmd {
-	// Enter leaves unchanged at the group level, and at the entry level when
-	// digits cover every row. Past nine entries, Enter selects the cursor —
-	// the only way to reach row 10+ (ADR-0196 decision 6).
-	if p.level == 0 {
-		return p.exitUnchanged()
-	}
-	if len(p.items()) > 9 {
-		return p.activateIndex(p.cursor)
-	}
-	return p.exitUnchanged()
+	// Enter commits the highlighted row at either level, so a human who never
+	// reaches for the digits still gets group → entry → done. Past nine entries
+	// it is the only way to reach row 10+ (ADR-0196 decision 6).
+	return p.activateIndex(p.cursor)
 }
 
 func (p *AgentOverridePicker) activateIndex(idx int) tea.Cmd {
@@ -238,10 +234,9 @@ func (p *AgentOverridePicker) viewHelp() string {
 func (p *AgentOverridePicker) helpEntries() []HelpEntry {
 	return []HelpEntry{
 		{"1-9", "Open / pick that row"},
-		{"0", "Back a level / exit"},
-		{"Enter", "Open / pick the highlighted row (exit unchanged at group level)"},
+		{"Enter", "Open / pick the highlighted row"},
 		{"↑/↓ j/k", "Move highlight"},
-		{"Esc", "Exit unchanged"},
+		{"Esc / 0", "Back a level, or exit unchanged from the group list"},
 		{"C-h", "Toggle this help"},
 	}
 }
@@ -278,9 +273,18 @@ func (p *AgentOverridePicker) ViewContent() string {
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
-	b.WriteString(HintStyle.Render("  1-9 jump · 0 back · enter select · esc leave unchanged"))
+	b.WriteString(HintStyle.Render(p.hint()))
 	b.WriteString("\n")
 	return b.String()
+}
+
+// hint names what esc does here, which is the half of the key map that changes
+// between the two levels.
+func (p *AgentOverridePicker) hint() string {
+	if p.level == 1 {
+		return "  1-9 jump · enter pick · esc back"
+	}
+	return "  1-9 jump · enter open · esc leave unchanged"
 }
 
 // IsAgentOverrideKey reports whether msg is the ADR-0196 override chord (alt+a).
@@ -334,12 +338,13 @@ var agentOverrideKeys = struct {
 	Up     key.Binding
 	Down   key.Binding
 	Submit key.Binding
-	Cancel key.Binding
+	Quit   key.Binding
 	Back   key.Binding
 }{
 	Up:     key.NewBinding(key.WithKeys("up", "k")),
 	Down:   key.NewBinding(key.WithKeys("down", "j")),
 	Submit: key.NewBinding(key.WithKeys("enter")),
-	Cancel: key.NewBinding(key.WithKeys("esc", "ctrl+c")),
-	Back:   key.NewBinding(key.WithKeys("left", "h")),
+	// ctrl+c abandons the whole picker from either level; esc is a level step.
+	Quit: key.NewBinding(key.WithKeys("ctrl+c")),
+	Back: key.NewBinding(key.WithKeys("esc", "left", "h")),
 }

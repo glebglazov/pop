@@ -50,10 +50,19 @@ as they change.
    agent while picking something else is not a flow.
 6. **The picker is two levels, numeric.** Level one lists the four groups in
    declared order; a digit opens that group's entries; a digit there applies the
-   override and closes. `0` goes back a level, `Enter` exits changing nothing —
-   so the default entry is what you get by not choosing, which is the same thing
-   "Enter takes the default" always meant. Past nine entries, arrow/`j`/`k`
-   navigation with Enter-on-cursor takes over; the digits stay the fast path.
+   override and closes. `Enter` commits the highlighted row at both levels —
+   open at the group list, pick in a group — so a human who never reaches for
+   the digits still gets group → entry → done. `Esc` and `0` step back one
+   level, and exit changing nothing from the group list, where there is no
+   level to step back to. Past nine entries, arrow/`j`/`k` navigation with
+   Enter-on-cursor takes over; the digits stay the fast path.
+
+   *Amended at the ADR-0194/0195/0196 sign-off.* This decision first read
+   `Enter` as exit-unchanged, on the reasoning that "Enter takes the default"
+   is what Enter has always meant. In the hand it read as a dead key: a picker
+   opened on purpose has no default to take, and the highlight the arrows move
+   asks to be committed. Forward on `Enter`, back on `Esc`, is the shape every
+   other two-level picker already has.
 7. **An override promotes, it does not pin.** The picked entry moves to the head
    of that group's list for the session; the configured remainder stays behind
    it. For implement, verify and routine that ordering carries the quota
@@ -68,9 +77,13 @@ as they change.
    one shared one-line render in the gate menu, in the dashboard's action-menu
    row for every attended verb, in the pane title, and as a persistent dashboard
    block naming the current entry and the key that changes it. Where pop cannot
-   know the model — an entry whose `cmd` names none — it says so rather than
-   guessing: pop does not read the agents' own config files, and inventing a
-   model name is worse than admitting the agent decides.
+   know the model — an entry whose `cmd` names none — it never guesses one: pop
+   does not read the agents' own config files, and inventing a model name is
+   worse than admitting the agent decides. The one-line render names the entry
+   alone in that case; only the **Agent catalog**, which has a column for it,
+   spells out that the agent decides. A clause repeated on every pane title and
+   menu row to say nothing new is width spent against the drain log the inline
+   gate exists to keep visible.
 
 ## Consequences
 

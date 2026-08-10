@@ -219,7 +219,7 @@ func TestTaskAgentsCatalogListsConfiguredGroups(t *testing.T) {
 		"verify     -   none configured\n",
 		"routine    -   none configured\n",
 		"attended   1   Claude Usual                 claude    opus\n",
-		"attended   2   cursor                       cursor    agent's own configuration\n",
+		"attended   2   cursor                       cursor    agent decides\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("group section missing\nwant contains:\n%sgot:\n%s", want, got)

@@ -27,12 +27,15 @@ func TestPromoteGroupEntriesOrdersRemainder(t *testing.T) {
 	}
 }
 
-func TestFormatAgentEntryDefersWhenNoModel(t *testing.T) {
+// Inline renders drop the model clause entirely when the entry pins none; only
+// the catalog's own column says who decides.
+func TestFormatAgentEntryNamesOnlyTheEntryWhenNoModel(t *testing.T) {
 	e := AgentGroupEntry{DisplayName: "Cursor Usual", Cmd: "cursor"}
-	got := FormatAgentEntry(e)
-	want := "Cursor Usual · " + AgentEntryNoModelLabel
-	if got != want {
-		t.Fatalf("FormatAgentEntry = %q, want %q", got, want)
+	if got := FormatAgentEntry(e); got != "Cursor Usual" {
+		t.Fatalf("FormatAgentEntry = %q, want %q", got, "Cursor Usual")
+	}
+	if got := e.ModelLabel(); got != AgentEntryNoModelLabel {
+		t.Fatalf("ModelLabel = %q, want %q", got, AgentEntryNoModelLabel)
 	}
 }
 
@@ -49,11 +52,11 @@ func TestEffectiveAttendedEntryUsesOverride(t *testing.T) {
 	if got.Cmd != "cursor" {
 		t.Fatalf("cmd = %q, want cursor", got.Cmd)
 	}
-	if FormatAgentEntry(got) != "Cursor · "+AgentEntryNoModelLabel {
+	if FormatAgentEntry(got) != "Cursor" {
 		t.Fatalf("render = %q", FormatAgentEntry(got))
 	}
 	status := FormatAgentOverrideStatus(got)
-	if status != "agent Cursor · "+AgentEntryNoModelLabel+" · "+AgentOverrideKeyLabel {
+	if status != "agent Cursor · "+AgentOverrideKeyLabel {
 		t.Fatalf("status = %q", status)
 	}
 }

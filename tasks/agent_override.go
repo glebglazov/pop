@@ -64,10 +64,15 @@ func (o *AgentOverrides) AttendedCmd() string {
 }
 
 // FormatAgentEntry is the shared one-line render of an agent entry: its label
-// and the model it names, or an honest deferral when the cmd pins none
-// (ADR-0196 decision 9).
+// and the model it names (ADR-0196 decision 9). An entry that pins no model
+// renders as the label alone — inline surfaces are pane titles and menu rows,
+// where naming the absence costs more width than it carries meaning. The agent
+// catalog still says so in full, in its own column.
 func FormatAgentEntry(e AgentGroupEntry) string {
-	return e.Label() + " · " + e.ModelLabel()
+	if strings.TrimSpace(e.Model) == "" {
+		return e.Label()
+	}
+	return e.Label() + " · " + e.Model
 }
 
 // FormatAgentOverrideStatus is the persistent dashboard block naming the entry
