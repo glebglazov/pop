@@ -118,6 +118,9 @@ func ShippedWorkViewPresets() []WorkViewPreset {
 			WorkViewPresetFilter: WorkViewPresetFilter{
 				CreatedWithin: "168h",
 				Sort:          PresetSortCreatedDesc,
+				// A window is a time question, not a state question: a set created
+				// inside it belongs there whether or not it was later filed away.
+				Archived: ArchivedInclude,
 			},
 		},
 		{
@@ -125,6 +128,7 @@ func ShippedWorkViewPresets() []WorkViewPreset {
 			WorkViewPresetFilter: WorkViewPresetFilter{
 				CreatedWithin: "720h",
 				Sort:          PresetSortCreatedDesc,
+				Archived:      ArchivedInclude,
 			},
 		},
 		{

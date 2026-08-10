@@ -56,6 +56,16 @@ func TestMatchesPresetUnfoldedAndRecency(t *testing.T) {
 	if MatchesPreset(ViewFacts{ID: "no-date-slug", Status: string(StatusReady)}, recent7d, now) {
 		t.Fatal("recent-7d admitted undated id")
 	}
+	// The asymmetry a refactor would flatten: a window includes archived rows,
+	// a state-scoped preset still files them away.
+	archivedFresh := ViewFacts{ID: "2026-08-08-fresh", Status: string(StatusDone), Archived: true}
+	if !MatchesPreset(archivedFresh, recent7d, now) {
+		t.Fatal("recent-7d hid archived in-window id")
+	}
+	active, _ := config.ShippedWorkViewPreset("active")
+	if MatchesPreset(archivedFresh, active, now) {
+		t.Fatal("archived shown by active")
+	}
 
 	if !MatchesPreset(ViewFacts{ID: "x", Status: string(StatusDone), Archived: true}, all, now) {
 		t.Fatal("all missed archived DONE")

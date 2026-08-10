@@ -50,7 +50,11 @@ retired.
    `unfolded`, `recent-7d`, `recent-30d`, `all`. A system preset pop cannot
    express in the user's language is proof the vocabulary is too weak — this is
    what forced the `hide` clause, since `active` is "NOT (done AND folded)", a
-   negated conjunction no AND-only field set can state.
+   negated conjunction no AND-only field set can state. The two `recent-Nd`
+   presets carry `archived: include`: a window asks a time question, so a set
+   created inside it belongs there whether or not it was later filed away, and
+   the `exclude` default belongs to the state-scoped presets. The window still
+   reads creation only — an old set archived yesterday stays out.
 
 3. **Config shape.** `[[work.dashboard.tasks.presets]]`, `include:"replace"`: a
    user's list replaces the shipped one wholesale, and `{ system = "<name>" }`
