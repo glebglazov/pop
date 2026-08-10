@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/repogroup"
 	"github.com/glebglazov/pop/store"
 	"github.com/glebglazov/pop/tasks"
@@ -28,19 +29,79 @@ func muteFixture(t *testing.T) (*Deps, repogroup.Group, work.Container) {
 	return d, g, row
 }
 
+// muteLoad reads the set back through the container path under `all` — the
+// shipped preset that asks nothing about mute — so these tests see the set
+// whether or not it is muted. Which presets admit a muted row is the subject of
+// TestMutedRowsLeaveTheDefaultViewAndComeBackWhenTheWindowEnds.
 func muteLoad(t *testing.T, d *Deps, g repogroup.Group) work.Container {
 	t.Helper()
-	containers, err := containersForGroup(d, d.config(), g)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, c := range containers {
+	for _, c := range muteLoadUnder(t, d, g, "all") {
 		if c.ID == muteSetID {
 			return c
 		}
 	}
-	t.Fatalf("set %s missing from load: %+v", muteSetID, containers)
+	t.Fatalf("set %s missing from load under the all preset", muteSetID)
 	return work.Container{}
+}
+
+func muteLoadUnder(t *testing.T, d *Deps, g repogroup.Group, presetName string) []work.Container {
+	t.Helper()
+	preset, ok := config.ShippedWorkViewPreset(presetName)
+	if !ok {
+		t.Fatalf("no shipped preset named %q", presetName)
+	}
+	prev := d.ViewPreset
+	d.ViewPreset = preset
+	defer func() { d.ViewPreset = prev }()
+	containers, err := containersForGroup(d, d.config(), g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return containers
+}
+
+func muteHolds(containers []work.Container) bool {
+	for _, c := range containers {
+		if c.ID == muteSetID {
+			return true
+		}
+	}
+	return false
+}
+
+// Decision 8, both halves at once: muting takes the row out of the view the
+// human sits in, the shipped `muted` preset is where it went, and when the
+// window elapses the row is simply back in the default view on the next load —
+// no write, no notification, nothing but a later `now`.
+func TestMutedRowsLeaveTheDefaultViewAndComeBackWhenTheWindowEnds(t *testing.T) {
+	d, g, row := muteFixture(t)
+	k := New(d)
+	until := time.Date(2026, time.August, 14, 9, 0, 0, 0, time.UTC)
+
+	if !muteHolds(muteLoadUnder(t, d, g, "active")) {
+		t.Fatal("fixture set is not in the default view before muting")
+	}
+	if muteHolds(muteLoadUnder(t, d, g, "muted")) {
+		t.Fatal("an unmuted set showed up in the muted preset")
+	}
+
+	if _, err := k.Mute(row, until, false); err != nil {
+		t.Fatalf("Mute: %v", err)
+	}
+	if muteHolds(muteLoadUnder(t, d, g, "active")) {
+		t.Fatal("a muted set is still in the default view")
+	}
+	if !muteHolds(muteLoadUnder(t, d, g, "muted")) {
+		t.Fatal("the muted preset does not hold the muted set; nothing could unmute it")
+	}
+
+	d.Now = func() time.Time { return until.Add(time.Second) }
+	if !muteHolds(muteLoadUnder(t, d, g, "active")) {
+		t.Fatal("the row did not return to the default view once its window had passed")
+	}
+	if muteHolds(muteLoadUnder(t, d, g, "muted")) {
+		t.Fatal("an elapsed window still reads as muted")
+	}
 }
 
 // The whole of mute's reach into supervision, and its deliberate asymmetry:

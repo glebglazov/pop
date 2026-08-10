@@ -34,11 +34,11 @@ var (
 	presetEntryKeys = map[string]bool{
 		"name": true, "label": true, "status": true, "unfolded": true,
 		"archived": true, "created_within": true, "sort": true, "hide": true,
-		"system": true,
+		"system": true, "muted": true,
 	}
 	presetFilterKeys = map[string]bool{
 		"status": true, "unfolded": true, "archived": true,
-		"created_within": true, "sort": true,
+		"created_within": true, "sort": true, "muted": true,
 	}
 )
 
@@ -51,6 +51,10 @@ type WorkViewPresetFilter struct {
 	Archived      string   `toml:"archived,omitempty" desc:"Archived-row mode: exclude|include|only (default exclude)."`
 	CreatedWithin string   `toml:"created_within,omitempty" desc:"Only rows whose id date prefix falls within this duration."`
 	Sort          string   `toml:"sort,omitempty" desc:"Row sort under the membership tiers: created_desc|created_asc."`
+	// Muted matches on a live Mute (ADR-0200 decision 8). Unset admits both, so
+	// a preset that says nothing about mute keeps showing muted rows; the mute
+	// expires against the evaluation instant, not against a stored flag.
+	Muted *bool `toml:"muted,omitempty" desc:"Match muted (true) or unmuted (false) rows."`
 }
 
 // WorkViewPreset is one Work view preset entry at [[work.dashboard.tasks.presets]]
@@ -99,9 +103,19 @@ type WorkDashboardTasksConfig struct {
 func ShippedWorkViewPresets() []WorkViewPreset {
 	folded := false
 	unfolded := true
+	muted := true
+	unmuted := false
 	return []WorkViewPreset{
 		{
 			Name: "active",
+			WorkViewPresetFilter: WorkViewPresetFilter{
+				// Mute means the human said "not now" about this row, so the view
+				// they sit in is the one it has to leave (ADR-0200 decision 8). It
+				// is a positive field rather than another clause on hide, because
+				// hide is a conjunction: muted-and-done-and-folded would be a
+				// different, much weaker rule.
+				Muted: &unmuted,
+			},
 			Hide: &WorkViewPresetFilter{
 				Status:   []string{"done"},
 				Unfolded: &folded,
@@ -135,6 +149,23 @@ func ShippedWorkViewPresets() []WorkViewPreset {
 			Name: "all",
 			WorkViewPresetFilter: WorkViewPresetFilter{
 				Archived: ArchivedInclude,
+			},
+		},
+		{
+			Name: "muted",
+			WorkViewPresetFilter: WorkViewPresetFilter{
+				Muted: &muted,
+				// A muted row is invisible everywhere else, so this preset is the
+				// only route back to one — and the only route to unmute. It admits
+				// archived rows for the same reason: a muted archived row would
+				// otherwise have no surface at all.
+				Archived: ArchivedInclude,
+				// Creation date, never resurfacing instant. In a list where every
+				// row is muted, position under a resurfacing sort would rank the
+				// secret windows against each other and so disclose the roll as
+				// surely as printing its date (ADR-0200 decision 6). No such sort
+				// mode may be added.
+				Sort: PresetSortCreatedDesc,
 			},
 		},
 	}
@@ -279,6 +310,10 @@ func cloneWorkViewPreset(p WorkViewPreset) WorkViewPreset {
 		v := *p.Unfolded
 		out.Unfolded = &v
 	}
+	if p.Muted != nil {
+		v := *p.Muted
+		out.Muted = &v
+	}
 	if p.Hide != nil {
 		h := *p.Hide
 		if p.Hide.Status != nil {
@@ -287,6 +322,10 @@ func cloneWorkViewPreset(p WorkViewPreset) WorkViewPreset {
 		if p.Hide.Unfolded != nil {
 			v := *p.Hide.Unfolded
 			h.Unfolded = &v
+		}
+		if p.Hide.Muted != nil {
+			v := *p.Hide.Muted
+			h.Muted = &v
 		}
 		out.Hide = &h
 	}
@@ -372,6 +411,14 @@ func decodePresetFilter(m map[string]interface{}, f *WorkViewPresetFilter, probl
 			*problems = append(*problems, fmt.Sprintf("%sunfolded must be a bool, got %T", prefix, raw))
 		} else {
 			f.Unfolded = &b
+		}
+	}
+	if raw, ok := m["muted"]; ok {
+		b, ok := raw.(bool)
+		if !ok {
+			*problems = append(*problems, fmt.Sprintf("%smuted must be a bool, got %T", prefix, raw))
+		} else {
+			f.Muted = &b
 		}
 	}
 	if raw, ok := m["archived"]; ok {

@@ -14,15 +14,22 @@ type ViewFacts struct {
 	Status   string
 	Archived bool
 	Unfolded bool
+	// MutedUntil is the container's Mute as stored, with no expiry applied. The
+	// fact the preset asks about — "is this row muted?" — is only answerable
+	// against an instant, and the instant belongs to the match, not to the row:
+	// carrying the raw end here is what lets a mute lapse mid-session and the row
+	// return on the next rebuild with nothing written (ADR-0200 decision 8).
+	MutedUntil time.Time
 }
 
 // RowViewFacts projects a Task-set refresh row into ViewFacts.
 func RowViewFacts(row Row) ViewFacts {
 	return ViewFacts{
-		ID:       row.ID,
-		Status:   string(row.Status),
-		Archived: row.Archived,
-		Unfolded: Unfolded(row.Bound, row.Provisioned, row.Status),
+		ID:         row.ID,
+		Status:     string(row.Status),
+		Archived:   row.Archived,
+		Unfolded:   Unfolded(row.Bound, row.Provisioned, row.Status),
+		MutedUntil: row.MutedUntil,
 	}
 }
 
@@ -54,6 +61,14 @@ func matchesViewFilter(facts ViewFacts, filter config.WorkViewPresetFilter, now 
 	}
 	if filter.Unfolded != nil && facts.Unfolded != *filter.Unfolded {
 		return false
+	}
+	if filter.Muted != nil {
+		if now.IsZero() {
+			now = time.Now()
+		}
+		if facts.MutedUntil.After(now) != *filter.Muted {
+			return false
+		}
 	}
 	mode := filter.Archived
 	if mode == "" {

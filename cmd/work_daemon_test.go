@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -133,6 +134,30 @@ func TestWorkReadSurfacesThreadViewPreset(t *testing.T) {
 	}
 	if statusPreset != "unfolded" {
 		t.Fatalf("--preset unfolded ViewPreset = %q, want unfolded", statusPreset)
+	}
+
+	// `--preset muted` lists what the dashboard's muted preset lists (ADR-0200
+	// decision 8). The two surfaces share one row selector, so equality of the
+	// threaded preset with the entry the filter menu activates is equality of
+	// the rows — there is no second definition anywhere for them to disagree on.
+	workStatusPreset = "muted"
+	if err := runWorkStatus(workStatusCmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	if statusPreset != "muted" {
+		t.Fatalf("--preset muted ViewPreset = %q, want muted", statusPreset)
+	}
+	threaded, err := resolveWorkStatusPreset(&config.Config{}, "muted", false, io.Discard)
+	if err != nil {
+		t.Fatalf("resolveWorkStatusPreset(muted): %v", err)
+	}
+	fromRoster, ok := (&config.Config{}).WorkViewPresetNamed("muted")
+	if !ok {
+		t.Fatal("muted is not in the resolved roster the dashboard filter menu reads")
+	}
+	threaded.Number = fromRoster.Number
+	if !reflect.DeepEqual(threaded, fromRoster) {
+		t.Fatalf("--preset muted threads %#v, dashboard activates %#v", threaded, fromRoster)
 	}
 }
 

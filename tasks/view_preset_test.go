@@ -33,6 +33,40 @@ func TestMatchesPresetShippedActive(t *testing.T) {
 	}
 }
 
+// The mute fact is a comparison against the matching instant, not a stored
+// flag: one set of facts reads muted before its window and unmuted after, with
+// nothing in between having been written (ADR-0200 decision 8).
+func TestMatchesPresetMutedIsEvaluatedAgainstNow(t *testing.T) {
+	t.Parallel()
+	active, _ := config.ShippedWorkViewPreset("active")
+	muted, _ := config.ShippedWorkViewPreset("muted")
+	all, _ := config.ShippedWorkViewPreset("all")
+
+	until := time.Date(2026, 8, 14, 9, 0, 0, 0, time.UTC)
+	facts := ViewFacts{ID: "2026-08-01-set", Status: string(StatusReady), MutedUntil: until}
+	during := until.Add(-time.Hour)
+	after := until.Add(time.Second)
+
+	if MatchesPreset(facts, active, during) {
+		t.Fatal("a live mute is still in the default view")
+	}
+	if !MatchesPreset(facts, muted, during) {
+		t.Fatal("a live mute is missing from the muted preset")
+	}
+	if !MatchesPreset(facts, active, after) {
+		t.Fatal("an elapsed mute did not return to the default view")
+	}
+	if MatchesPreset(facts, muted, after) {
+		t.Fatal("an elapsed mute still reads as muted")
+	}
+
+	// A preset that says nothing about mute admits both — the tri-state's unset
+	// arm, which is why only `active` had to change.
+	if !MatchesPreset(facts, all, during) || !MatchesPreset(facts, all, after) {
+		t.Fatal("all must be indifferent to mute")
+	}
+}
+
 func TestMatchesPresetUnfoldedAndRecency(t *testing.T) {
 	t.Parallel()
 	unfolded, _ := config.ShippedWorkViewPreset("unfolded")

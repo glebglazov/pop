@@ -2651,7 +2651,10 @@ func TestDashboardFilterMenuVisibleOnTallTable(t *testing.T) {
 		rows[i] = DashboardRow{Project: "pop", CursorKey: "pop\x00" + id, RawStatus: tasks.StatusReady, ID: id}
 	}
 	m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: rows})
-	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 12})
+	// One line taller than the reserved block, so the table still has a body to
+	// shrink: below that the body floor absorbs part of the reservation and the
+	// arithmetic this test pins stops being the thing under test.
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 13})
 	m = updated.(QueueDashboard)
 
 	updated, _ = m.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
@@ -2805,6 +2808,18 @@ func TestDashboardFilterMenuDigitSelectsPreset(t *testing.T) {
 	}
 	if !strings.Contains(m.View().Content, "done-set") {
 		t.Fatalf("DONE set should be visible under all:\n%s", m.View().Content)
+	}
+
+	// Digit 6 reaches the muted preset — the only route back to a muted row, so
+	// it has to be reachable by the same one-keystroke gesture as the rest
+	// (ADR-0200 decision 8).
+	updated, _ = m.Update(tea.KeyPressMsg{Code: '6', Text: "6"})
+	m = updated.(QueueDashboard)
+	if got := m.d.ViewPreset.Name; got != "muted" {
+		t.Fatalf("digit 6 preset = %q, want muted", got)
+	}
+	if p := m.d.ViewPreset; p.Muted == nil || !*p.Muted {
+		t.Fatalf("muted preset threaded without its muted filter: %#v", p.Muted)
 	}
 
 	// Digit 1 restores active.

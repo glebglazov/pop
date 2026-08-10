@@ -704,6 +704,11 @@ func visible(m Map, preset config.WorkViewPreset, now time.Time) bool {
 		Status:   string(m.Status),
 		Archived: m.Archived,
 		Unfolded: false,
+		// Maps are a mutable kind, but no Map surface writes a Mute yet, so every
+		// Map reads as unmuted. Stated rather than left to the zero value: these
+		// facts are hand-built, so a field nobody names is a field nobody notices
+		// when the Map mute verb lands.
+		MutedUntil: time.Time{},
 	}, preset, now)
 }
 

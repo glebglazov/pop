@@ -1305,7 +1305,7 @@ The row ordering shared by `pop work status` and the **Work dashboard** when the
 _Avoid_: Queue surface sort order, dashboard sort tiers, running tier, project-grouped sort
 
 **Work view preset**:
-A named, self-contained answer to "which rows, in what order" on the Work read surfaces — selected one at a time from `[[work.dashboard.tasks.presets]]` (or the shipped roster when undeclared). Declares optional `label`, `status`, `unfolded`, `archived`, `created_within`, `sort`, and one `hide` clause. The first resolved entry is the default; positions `1`–`9` are digit shortcuts in the **Work dashboard filter menu**. Session-only on the dashboard; `pop work status --preset <name>` names one by name.
+A named, self-contained answer to "which rows, in what order" on the Work read surfaces — selected one at a time from `[[work.dashboard.tasks.presets]]` (or the shipped roster when undeclared). Declares optional `label`, `status`, `unfolded`, `archived`, `muted`, `created_within`, `sort`, and one `hide` clause. The first resolved entry is the default; positions `1`–`9` are digit shortcuts in the **Work dashboard filter menu**. Session-only on the dashboard; `pop work status --preset <name>` names one by name.
 _Avoid_: view filter preset, inclusion preset, dashboard filter preset
 
 **Work dashboard filter menu**:

@@ -627,8 +627,9 @@ func buildWorktreeBindingViews(d *tasks.Deps, cfg *config.Config, running []Pick
 // SHA-gated Verify overlay the dashboard row layer uses so a set that is
 // done-in-manifest but VERIFY-FAILED at the current SHA is not treated as DONE.
 // A resolution failure (a stale or vanished checkout) reports empty status with
-// Unfolded false, so the binding stays visible under the default active preset
-// (an unknown set is not done-and-folded).
+// Unfolded false and no mute, so the binding stays visible under the default
+// active preset (an unknown set is neither done-and-folded nor muted). Every
+// resolved set takes its mute from the row through RowViewFacts.
 //
 // It caches at two levels because the question has two shapes (ADR-0189). The
 // answer is per set, but the work behind it — refreshing a checkout's whole

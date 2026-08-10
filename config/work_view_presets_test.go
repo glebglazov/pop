@@ -10,7 +10,7 @@ import (
 
 func TestShippedWorkViewPresetsVocabulary(t *testing.T) {
 	presets := ShippedWorkViewPresets()
-	wantNames := []string{"active", "unfolded", "recent-7d", "recent-30d", "all"}
+	wantNames := []string{"active", "unfolded", "recent-7d", "recent-30d", "all", "muted"}
 	if len(presets) != len(wantNames) {
 		t.Fatalf("shipped count = %d, want %d", len(presets), len(wantNames))
 	}
@@ -44,6 +44,24 @@ func TestShippedWorkViewPresetsVocabulary(t *testing.T) {
 	}
 	if presets[4].Archived != ArchivedInclude {
 		t.Fatalf("all archived = %q, want include", presets[4].Archived)
+	}
+
+	// The two halves of ADR-0200 decision 8: the view the human sits in loses
+	// muted rows, and one preset gets them all back. The muted preset's sort is
+	// pinned here because it is a secrecy rule, not a taste: ordering muted rows
+	// by resurfacing instant would leak the secret window through position.
+	if active.Muted == nil || *active.Muted {
+		t.Fatalf("active muted = %#v, want false", active.Muted)
+	}
+	muted := presets[5]
+	if muted.Muted == nil || !*muted.Muted {
+		t.Fatalf("muted preset muted = %#v, want true", muted.Muted)
+	}
+	if muted.Archived != ArchivedInclude {
+		t.Fatalf("muted archived = %q, want include", muted.Archived)
+	}
+	if muted.Sort != PresetSortCreatedDesc {
+		t.Fatalf("muted sort = %q, want created_desc (never a resurfacing sort)", muted.Sort)
 	}
 }
 
