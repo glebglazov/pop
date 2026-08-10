@@ -2714,6 +2714,54 @@ func TestDashboardFilterMenuFullScreenOnShortPane(t *testing.T) {
 	if strings.Contains(view, "PROJECT") || strings.Contains(view, "TASK SET") {
 		t.Fatalf("short-pane filter view must not keep the table behind it:\n%s", view)
 	}
+	lines := strings.Split(view, "\n")
+	if got, want := len(lines), m.height; got != want {
+		t.Fatalf("short-pane filter view line count = %d, want %d:\n%s", got, want, view)
+	}
+}
+
+// TestDashboardFilterMenuFitsAtHeightFloor is the above-floor band that task 01
+// left unguarded: a nine-preset roster (caption + 9 lines) at exactly
+// dashboardTwoLineHeightFloor must keep the footer hint on-screen and never
+// paint past the pane.
+func TestDashboardFilterMenuFitsAtHeightFloor(t *testing.T) {
+	presets := make([]config.WorkViewPreset, 9)
+	for i := range presets {
+		presets[i] = config.WorkViewPreset{Name: fmt.Sprintf("preset-%d", i+1), Label: fmt.Sprintf("Preset %d", i+1)}
+	}
+	cfg := &config.Config{Work: &config.WorkConfig{
+		Dashboard: &config.WorkDashboardConfig{
+			Tasks: &config.WorkDashboardTasksConfig{Presets: presets},
+		},
+	}}
+	rows := make([]DashboardRow, 20)
+	for i := range rows {
+		id := fmt.Sprintf("set-%02d", i)
+		rows[i] = DashboardRow{Project: "pop", CursorKey: "pop\x00" + id, RawStatus: tasks.StatusReady, ID: id}
+	}
+	m := newQueueDashboard(&drain.Deps{ViewPreset: cfg.DefaultWorkViewPreset()}, cfg, DashboardSnapshot{Containers: rows})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: dashboardTwoLineHeightFloor})
+	m = updated.(QueueDashboard)
+
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
+	m = updated.(QueueDashboard)
+	if m.filter == nil {
+		t.Fatal("f did not open the filter menu")
+	}
+	view := m.View().Content
+	lines := strings.Split(view, "\n")
+	if got, want := len(lines), m.height; got != want {
+		t.Fatalf("view line count = %d, want %d (must not overflow the pane):\n%s", got, want, view)
+	}
+	if !strings.Contains(lines[len(lines)-1], "1-9/enter select · esc close") {
+		t.Fatalf("footer hint missing from last line %q:\n%s", lines[len(lines)-1], view)
+	}
+	if strings.Contains(view, "clipped to fit the pane") {
+		// Nine presets + caption = 10 block lines; at height 16 with ordinary
+		// chrome (header + hints) the block still fits — a clip here would mean
+		// the floor path is cutting content it does not need to.
+		t.Fatalf("unexpected block clip at the height floor with nine presets:\n%s", view)
+	}
 }
 
 func TestDashboardFilterMenuDigitSelectsPreset(t *testing.T) {

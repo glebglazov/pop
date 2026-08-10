@@ -83,7 +83,7 @@ func TestFrameBodyHeight(t *testing.T) {
 			want: 9,
 		},
 		{
-			name: "floors at 3 on a short terminal",
+			name: "yields floor on a short terminal so chrome fits",
 			frame: Frame{
 				Notice:   "Update available",
 				Header:   "Projects",
@@ -92,14 +92,28 @@ func TestFrameBodyHeight(t *testing.T) {
 				Hints:    "  Esc back",
 			},
 			termH: 10,
-			// 10 - 1 - 1 - 3 - 3 - 1 = 1, floored to 3
-			want: 3,
+			// 10 - 1 - 1 - 3 - 3 - 1 = 1; flooring to 3 would push past TermH
+			want: 1,
 		},
 		{
-			name:  "floors at 3 with no regions on a tiny terminal",
+			name:  "yields floor on a tiny terminal",
 			frame: Frame{},
 			termH: 1,
-			want:  3,
+			want:  1,
+		},
+		{
+			name: "clips block so body floor still fits",
+			frame: Frame{
+				Header:    "Work",
+				Subheader: "agent",
+				Status:    "ok",
+				Footnote:  "skip",
+				Block:     []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"},
+				Hints:     "  q",
+			},
+			termH: 16,
+			// fixed chrome 5 + body floor 3 = 8; block clipped to 8 → body 3
+			want: 3,
 		},
 	}
 
@@ -180,25 +194,45 @@ func TestFrameRenderPadsShortBody(t *testing.T) {
 	}
 }
 
-// TestFrameRenderLeavesFullBodyUnchanged: a body that exactly fills or overfills
-// the budget renders byte-identical to the no-height (unpadded) path.
+// TestFrameRenderLeavesFullBodyUnchanged: a body that exactly fills the budget
+// renders byte-identical to the no-height (unpadded) path.
 func TestFrameRenderLeavesFullBodyUnchanged(t *testing.T) {
 	base := Frame{Width: 20, TermH: 20, Header: "H", Status: "S", Hints: "  q"}
 	budget := base.BodyHeight(20)
 
-	for _, extra := range []int{0, 5} { // exact-fit and overfull
-		rows := make([]string, budget+extra)
-		for i := range rows {
-			rows[i] = fmt.Sprintf("row%d", i)
-		}
-		body := strings.Join(rows, "\n")
+	rows := make([]string, budget)
+	for i := range rows {
+		rows[i] = fmt.Sprintf("row%d", i)
+	}
+	body := strings.Join(rows, "\n")
 
-		unpadded := base
-		unpadded.TermH = 0
-		if got, want := base.Render(body), unpadded.Render(body); got != want {
-			t.Fatalf("body of %d lines (budget %d): padded render differs from unpadded\n got=%q\nwant=%q",
-				budget+extra, budget, got, want)
-		}
+	unpadded := base
+	unpadded.TermH = 0
+	if got, want := base.Render(body), unpadded.Render(body); got != want {
+		t.Fatalf("exact-fit body of %d lines: padded render differs from unpadded\n got=%q\nwant=%q",
+			budget, got, want)
+	}
+}
+
+// TestFrameRenderTruncatesOverfullBody: a body longer than the budget is cut so
+// the frame still fits in TermH (the symmetric half of padBody's short-body pad).
+func TestFrameRenderTruncatesOverfullBody(t *testing.T) {
+	f := Frame{Width: 20, TermH: 20, Header: "H", Status: "S", Hints: "  q"}
+	budget := f.BodyHeight(20)
+	rows := make([]string, budget+5)
+	for i := range rows {
+		rows[i] = fmt.Sprintf("row%d", i)
+	}
+	out := f.Render(strings.Join(rows, "\n"))
+	lines := strings.Split(out, "\n")
+	if len(lines) != 20 {
+		t.Fatalf("got %d lines, want 20", len(lines))
+	}
+	if !strings.Contains(lines[len(lines)-1], "q") {
+		t.Fatalf("last line = %q, want hints", lines[len(lines)-1])
+	}
+	if strings.Contains(out, fmt.Sprintf("row%d", budget+4)) {
+		t.Fatalf("overfull body rows survived truncation:\n%s", out)
 	}
 }
 
@@ -238,6 +272,130 @@ func TestFrameRenderPadBudgetTracksRegions(t *testing.T) {
 				t.Fatalf("last line = %q, want hints on the bottom row", lines[len(lines)-1])
 			}
 		})
+	}
+}
+
+// TestFrameRenderNeverExceedsTermH is the ADR-0197 overflow spine: across a
+// sweep of region combinations and block heights, Render's line count never
+// exceeds TermH when TermH is known.
+func TestFrameRenderNeverExceedsTermH(t *testing.T) {
+	termHeights := []int{8, 12, 16, 20, 24}
+	blockHeights := []int{0, 1, 2, 5, 10, 20}
+	type opts struct {
+		notice, header, subheader, input, status, footnote, hints bool
+		warnings                                                    int
+	}
+	var cases []opts
+	for _, notice := range []bool{false, true} {
+		for _, header := range []bool{false, true} {
+			for _, subheader := range []bool{false, true} {
+				for _, input := range []bool{false, true} {
+					for _, status := range []bool{false, true} {
+						for _, footnote := range []bool{false, true} {
+							for _, hints := range []bool{false, true} {
+								for _, warnings := range []int{0, 1, 2} {
+									cases = append(cases, opts{
+										notice: notice, header: header, subheader: subheader,
+										input: input, status: status, footnote: footnote,
+										hints: hints, warnings: warnings,
+									})
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	for _, termH := range termHeights {
+		for _, blockH := range blockHeights {
+			for _, c := range cases {
+				f := Frame{Width: 40, TermH: termH}
+				if c.notice {
+					f.Notice = "Update available"
+				}
+				if c.header {
+					f.Header = "Header"
+				}
+				if c.subheader {
+					f.Subheader = "Subheader"
+				}
+				if c.input {
+					f.InputBox = "> "
+				}
+				if c.warnings > 0 {
+					f.Warnings = make([]string, c.warnings)
+					for i := range f.Warnings {
+						f.Warnings[i] = fmt.Sprintf("warn%d", i)
+					}
+				}
+				if c.status {
+					f.Status = "status"
+				}
+				if c.footnote {
+					f.Footnote = "footnote"
+				}
+				if blockH > 0 {
+					f.Block = make([]string, blockH)
+					for i := range f.Block {
+						f.Block[i] = fmt.Sprintf("block-%d", i)
+					}
+				}
+				if c.hints {
+					f.Hints = "  esc close"
+				}
+
+				out := f.Render("body")
+				lines := strings.Split(out, "\n")
+				if len(lines) > termH {
+					t.Fatalf("TermH=%d block=%d opts=%+v: Render produced %d lines:\n%s",
+						termH, blockH, c, len(lines), out)
+				}
+				if c.hints && !strings.Contains(lines[len(lines)-1], "esc close") {
+					t.Fatalf("TermH=%d block=%d: hints lost from last line %q",
+						termH, blockH, lines[len(lines)-1])
+				}
+			}
+		}
+	}
+}
+
+// TestFrameRenderClipsBlockAtTermH16 is the measured reproduction: TermH=16 with
+// header+subheader+status+footnote+hints and a ten-line block used to paint 18
+// lines. After the fix it fits in 16, the block cut is visible, and hints survive.
+func TestFrameRenderClipsBlockAtTermH16(t *testing.T) {
+	block := make([]string, 10)
+	for i := range block {
+		block[i] = fmt.Sprintf("block-%d", i)
+	}
+	f := Frame{
+		Width:     40,
+		TermH:     16,
+		Header:    "Work · active · 1 here",
+		Subheader: "agent: cursor",
+		Status:    "selected",
+		Footnote:  "skipped: none",
+		Block:     block,
+		Hints:     "j/k move · 1-9/enter select · esc close",
+	}
+	out := f.Render("BODY")
+	lines := strings.Split(out, "\n")
+	if len(lines) != 16 {
+		t.Fatalf("got %d lines, want 16:\n%s", len(lines), out)
+	}
+	if !strings.Contains(lines[len(lines)-1], "esc close") {
+		t.Fatalf("last line lost hints: %q", lines[len(lines)-1])
+	}
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "clipped to fit the pane") {
+		t.Fatalf("clipped block missing visible cut marker:\n%s", out)
+	}
+	if strings.Contains(joined, "block-9") {
+		t.Fatalf("full block still present after clip:\n%s", out)
+	}
+	if f.BodyHeight(16) != 3 {
+		t.Fatalf("BodyHeight(16) = %d, want 3", f.BodyHeight(16))
 	}
 }
 
