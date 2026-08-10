@@ -55,11 +55,13 @@ branch: master
   under: Language
 
 + Mute window
-  When a Mute ends, picked as a date rather than a duration: the human chooses a weekday
-  morning off a list, so pop does the arithmetic instead of them. Always six entries — the
-  random default first, then five weekday mornings at 09:00 UTC, labelled by day and date
-  except the one that is tomorrow. Which five is derived from today by the Weekday
-  preference ladder. Unmute stands outside the six, offered only on a row that is already
+  When a Mute ends, picked as a date rather than a duration: the human chooses a morning off
+  a list, so pop does the arithmetic instead of them. Always six entries — the random default
+  first, then tomorrow, then four weekday mornings, every one at 09:00 UTC and labelled by
+  day and date except tomorrow. Tomorrow is offered whatever day it falls on, weekend
+  included, because a one-day postponement must not vanish two days a week; it is the only
+  entry that may land on a weekend, and being the earliest date it always holds the same
+  position. The other four come from today by the Weekday preference ladder. Unmute stands outside the six, offered only on a row that is already
   muted, since it is not a window. The list is the same for every mutable kind — a date is
   not kind knowledge — so the surface owns it rather than the kinds, and it never reaches
   past next week: anything further away is what Archive is for.
@@ -67,16 +69,19 @@ branch: master
   under: Language
 
 + Weekday preference ladder
-  How the five dated Mute windows are chosen from the days available. This week's remaining
+  How the dated Mute windows after tomorrow are chosen. This week's remaining
   weekdays take absolute precedence over next week's; within this week the order is
   Fri, Wed, Mon, Tue, Thu, and within next week it inverts to Mon, Wed, Fri, Tue, Thu. At
   least one entry always comes from next week, so "not this week at all" can be said on any
   day — a guarantee that never costs a this-week entry, because this week can offer four
   days at most. Friday leads this week because finishing before the week ends is the common
   intent and Thursday is nearly the same answer; next week leads with Monday because inside
-  a week nothing is being pushed past, so the near days are the useful ones. The chosen five
+  a week nothing is being pushed past, so the near days are the useful ones. The chosen dates
   are displayed chronologically, which keeps the numbering monotonic in time; the random
-  default is the sole exception, pinned first.
+  default is the sole exception, pinned first. The this-week half of the ladder does not bind
+  while the list holds six entries — this week never offers more weekdays than there are
+  slots, so their order is inert — and it is stated because it starts selecting the moment
+  the list gets shorter.
   under: Language
 
 + Secret resurfacing

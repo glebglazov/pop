@@ -73,37 +73,59 @@ thing to say about a set that is mid-drain, and refusing would disable mute in t
 moment a noisy set is what the human wants out of their view.
 
 **4. A Mute window is a date the human picks, not a duration.** The menu offers **six
-entries, always**: the random default at digit 1, then five weekday mornings at digits 2–6.
-Every dated entry lands at **09:00 UTC** on its day, so no arithmetic and no normalization
-rule is needed — the list enumerates only instants that are already working mornings. It is
+entries, always**: the random default at digit 1, then five dates at digits 2–6. Every dated
+entry lands at **09:00 UTC** on its day, so no arithmetic and no normalization rule is
+needed — the list enumerates only instants that are already mornings. It is
 surface-owned: a date is not kind knowledge, so three kinds returning the identical six
 actions would be the copy-paste the Work seam exists to prevent, and a config roster would
 buy tunability for a list that is already specified, at the cost of a validation surface and
 ADR-0198's reach question.
 
-Which five days appear is derived from today. This week's remaining weekdays take absolute
-precedence over next week's, and within each week a preference ladder decides who makes the
-cut — **this week `Fri > Wed > Mon > Tue > Thu`, next week `Mon > Wed > Fri > Tue > Thu`**.
-At least one entry always comes from next week, so "not this week at all" is available every
-day; since this week can contribute at most four days, that guarantee never displaces a
-this-week entry. The chosen five are then displayed **chronologically**, which keeps the
-digits monotonic in time — `3` is always sooner than `5`. The random default is the one
-exception to chronological order: it is pinned to digit 1.
+Which five days appear is derived from today. **The first is always tomorrow, whatever day
+tomorrow is** — including a weekend. Every other entry is a weekday morning: this week's
+remaining weekdays take absolute precedence over next week's, and within each week a
+preference ladder decides who makes the cut — **this week `Fri > Wed > Mon > Tue > Thu`,
+next week `Mon > Wed > Fri > Tue > Thu`**. At least one entry always comes from next week, so
+"not this week at all" is available every day; since this week can contribute at most four
+days, that guarantee never displaces a this-week entry. The chosen five are then displayed
+**chronologically**, which keeps the digits monotonic in time — `3` is always sooner than
+`5`. The random default is the one exception to chronological order: it is pinned to digit 1.
+
+Tomorrow is the exception to weekday-only because a one-day postponement is the most common
+thing a human wants and it must not vanish two days a week — from Friday you can say
+Saturday, and from Saturday you can say Sunday. Since tomorrow is by definition the earliest
+date, this also fixes it at **digit 2 every day of the week**, so the most-used entry is the
+one entry with a stable key. It is deliberately the *only* weekend-capable entry: making
+Saturday and Sunday ordinary offerable days would have them compete for slots with next
+week's weekdays, and then nothing about the list is a working morning any more.
+
+Note that the this-week ladder does **not** bind at six entries: this week never offers more
+future weekdays than the slots available, so every remaining weekday of this week is always
+taken and the ordering among them is inert. It is written down because it becomes
+load-bearing the moment the cap changes — at five entries, Monday would drop Tuesday. Only
+the next-week ladder actually selects today.
 
 The ladders are not arbitrary. Friday leads this week because "deal with it before the week
 ends" is the common intent, and Thursday trails because it is nearly the same answer as
 Friday; next week inverts to Monday-first because inside a week you are not pushing past
-anything, so the near days are the useful ones. Worked out, the menu is: Monday →
-`Tue, Wed, Thu, Fri, Mon next`; Tuesday → `Wed, Thu, Fri, Mon, Wed next`; Wednesday →
-`Thu, Fri, Mon, Wed, Fri next`; Thursday → `Fri, Mon, Tue, Wed, Fri next`; Friday → all
-five of next week.
+anything, so the near days are the useful ones. Worked out, every day of the week:
 
-Entries are labelled by day and date — `Fri 14 Aug`, `Fri 21 Aug` — except the one that is
-tomorrow, which reads `Tomorrow`. The invariant hour is stated once in the submenu's footer
-rather than repeated on five entries, and in full on the row afterwards. Weekend behaviour
-is out of scope for now: weekends are never *offered* as resurfacing days, and what the menu
-should do when opened *on* a Saturday is undecided (it falls out of the rules as next week's
-five, which is a consequence rather than a decision).
+| Today | Dated entries, digits 2–6 |
+| --- | --- |
+| Mon | Tomorrow (Tue), Wed, Thu, Fri, Mon next |
+| Tue | Tomorrow (Wed), Thu, Fri, Mon, Wed next |
+| Wed | Tomorrow (Thu), Fri, Mon, Wed, Fri next |
+| Thu | Tomorrow (Fri), Mon, Tue, Wed, Fri next |
+| Fri | Tomorrow (Sat), Mon, Tue, Wed, Fri next |
+| Sat | Tomorrow (Sun), Mon, Tue, Wed, Fri |
+| Sun | Tomorrow (Mon), Tue, Wed, Thu, Fri |
+
+Opening the menu on a weekend needs no special case: Saturday and Sunday fall out of the same
+rules, with the upcoming Monday-to-Friday as the next-week pool.
+
+Entries are labelled by day and date — `Fri 14 Aug`, `Fri 21 Aug` — except the first, which
+reads `Tomorrow`. The invariant hour is stated once in the submenu's footer rather than
+repeated on five entries, and in full on the row afterwards.
 
 **Unmute** sits outside all of this: it is offered only on an already-muted row, keyed `u`
 rather than a digit, and does not count against the six. It is not a window, so it should
@@ -209,7 +231,11 @@ one you read rather than one you fire from memory, since the dates change daily.
   preset ships numbered, but it does mean "what did I mute?" is a preset switch, not a
   glance.
 - The menu's content depends on the day it is opened, so any test of it must fix the clock —
-  the same injected clock the random roll already needs.
+  the same injected clock the random roll already needs, and it wants a case per weekday
+  including Saturday and Sunday.
+- **A mute can end on a weekend.** "Muted work resurfaces on a working morning" is therefore
+  true of every entry except the one the human explicitly picked as tomorrow. That is the
+  accepted price of a one-day postponement that works on a Friday and a Saturday.
 - A mute expiring while the dashboard is open resurfaces the row on the next rebuild, with
   no event and no notification. The human is not told a mute ended; the row simply comes
   back.
