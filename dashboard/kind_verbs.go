@@ -56,6 +56,39 @@ func (m QueueDashboard) performKind(row DashboardRow, item *work.Item, inPeek bo
 	}
 }
 
+// muteRow records the chosen window on the row's kind. It reports through the
+// same message the verb seam does, so a mute's outcome refreshes the table and
+// lands on the status line exactly as an archive does — the only difference is
+// which interface produced it.
+func (m QueueDashboard) muteRow(row DashboardRow, window MuteWindow) tea.Cmd {
+	kinds := m.kinds
+	return func() tea.Msg {
+		msg := dashboardKindVerbMsg{row: row, verb: work.VerbMute}
+		muter := kinds.muterFor(row)
+		if muter == nil {
+			msg.err = fmt.Errorf("%s cannot be muted", row.ID)
+			return msg
+		}
+		msg.outcome, msg.err = muter.Mute(row, window.Until, window.Secret)
+		return msg
+	}
+}
+
+// unmuteRow clears the row's mute through the same seam.
+func (m QueueDashboard) unmuteRow(row DashboardRow) tea.Cmd {
+	kinds := m.kinds
+	return func() tea.Msg {
+		msg := dashboardKindVerbMsg{row: row, verb: work.VerbUnmute}
+		muter := kinds.muterFor(row)
+		if muter == nil {
+			msg.err = fmt.Errorf("%s cannot be muted", row.ID)
+			return msg
+		}
+		msg.outcome, msg.err = muter.Unmute(row)
+		return msg
+	}
+}
+
 // applyKindVerb carries out a performed verb's outcome. It is the one place the
 // four outcome kinds are interpreted, so a kind that returns a refresh, a
 // clipboard write, a detail view or a pane handoff gets the same treatment

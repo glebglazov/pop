@@ -114,6 +114,15 @@ func (w workKinds) itemCopyPayload(row DashboardRow, item work.Item) (string, er
 	return outcome.Clipboard, nil
 }
 
+// muterFor is the row's kind as a Muter, or nil when that kind has no mute. The
+// assertion is the eligibility check: a kind that cannot be muted implements
+// nothing and is never asked (ADR-0200 decision 7), the way the supervisor
+// obtains an Advancer.
+func (w workKinds) muterFor(row DashboardRow) work.Muter {
+	muter, _ := w.kindFor(row).(work.Muter)
+	return muter
+}
+
 // offers reports whether the kind currently offers verb over row.
 func (w workKinds) offers(row DashboardRow, verb work.Verb) bool {
 	for _, a := range w.actionsFor(row) {

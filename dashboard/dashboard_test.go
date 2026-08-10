@@ -357,7 +357,7 @@ func TestDashboardActionMenuOpenAndClose(t *testing.T) {
 }
 
 func TestDashboardFormerDirectKeysInertAtTopLevel(t *testing.T) {
-	for _, key := range []string{"i", "I", "b", "u", "U", "p", "P", "O", "d"} {
+	for _, key := range []string{"i", "I", "b", "u", "U", "p", "P", "O", "d", "m"} {
 		m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{{Project: "pop", Worktree: "/repo/wt (main)", CursorKey: "pop\x00set", RawStatus: tasks.StatusReady, ID: "set", DefPath: "/repo/tasks", StatePath: "/repo/state.json", RuntimePath: "/repo/wt", Bound: true, Parked: true}}})
 		updated, cmd := m.Update(tea.KeyPressMsg{Code: []rune(key)[0], Text: key})
 		got := updated.(QueueDashboard)
@@ -385,7 +385,7 @@ func TestDashboardActionMenuContextFiltering(t *testing.T) {
 
 	// A plain ready set: only the unconditional verbs plus auto-drain (non-orphaned).
 	plain := keysFor(DashboardRow{ID: "plain", RuntimePath: "/wt"})
-	if want := []string{"I", "S", "O", "b", "a", "s", "x", "y"}; !reflect.DeepEqual(plain, want) {
+	if want := []string{"I", "S", "O", "m", "b", "a", "s", "x", "y"}; !reflect.DeepEqual(plain, want) {
 		t.Fatalf("plain row verbs = %v, want %v", plain, want)
 	}
 

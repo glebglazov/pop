@@ -79,9 +79,13 @@ func conformanceCases() []conformanceCase {
 					},
 				})
 			},
+			// The fixture's set is not muted, so it offers the mute opener and not its
+			// unmute half — eligibility by omission, the way every conditional verb
+			// works (ADR-0200 decision 7).
 			wantActions: []work.Verb{
-				setkind.VerbDrain, setkind.VerbAssist, work.VerbShell, setkind.VerbBind,
-				setkind.VerbAutoDrain, work.VerbStatus, setkind.VerbArchive, work.VerbCopyName,
+				setkind.VerbDrain, setkind.VerbAssist, work.VerbShell, work.VerbMute,
+				setkind.VerbBind, setkind.VerbAutoDrain, work.VerbStatus,
+				setkind.VerbArchive, work.VerbCopyName,
 			},
 			wantItemActions: []work.Verb{setkind.VerbComplete, setkind.VerbSkip, work.VerbCopyName},
 			wantStatusActions: []work.Verb{

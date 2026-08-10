@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/glebglazov/pop/work"
 )
@@ -90,6 +91,12 @@ type Row struct {
 	// kinds of row at once (RefreshIncludingArchivedWith), and then the row is the
 	// only thing that can say which it is.
 	Archived bool
+	// MutedUntil and MuteSecret are the registration's Mute exactly as stored,
+	// with no expiry comparison applied — a row is a read of the registration,
+	// and whether the mute has run out depends on a `now` only the caller holds
+	// (ADR-0200 decision 1).
+	MutedUntil time.Time
+	MuteSecret bool
 }
 
 // StatusLabel returns a row's display label. A started Ready set (one that

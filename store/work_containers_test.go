@@ -195,7 +195,7 @@ func TestWorkContainersCachesNoDerivedStatus(t *testing.T) {
 		t.Fatalf("table_info rows: %v", err)
 	}
 	sort.Strings(cols)
-	want := "archived id kind registered_at seq"
+	want := "archived id kind mute_secret muted_until registered_at seq"
 	if got := fmt.Sprint(cols); got != "["+want+"]" {
 		t.Fatalf("work_containers columns = %v, want [%s]", cols, want)
 	}
@@ -287,5 +287,71 @@ func writePreRegistryDatabase(t *testing.T, path string) {
 		if _, err := db.Exec(stmt); err != nil {
 			t.Fatalf("seed pre-migration row: %v", err)
 		}
+	}
+}
+
+// TestMuteRefusedAgainstARoutineReference is the durable half of ADR-0200
+// decision 7. The Routine kind not offering the verb keeps the dashboard honest;
+// this keeps every other writer honest, so no future CLI or test can leave a
+// muted row that no verb is able to clear. It rides on the store rather than on
+// a Kind member because eligibility here is a property of the ref, and the ref
+// is all the SQL boundary has.
+func TestMuteRefusedAgainstARoutineReference(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t)
+	at := time.Date(2026, 8, 10, 9, 0, 0, 0, time.UTC)
+	until := time.Date(2026, 8, 14, 9, 0, 0, 0, time.UTC)
+
+	routine := ref.WorkRef{Kind: ref.KindRoutine, ContainerID: "nightly"}
+	if err := s.RegisterWorkContainer(routine, at); err != nil {
+		t.Fatalf("RegisterWorkContainer(routine): %v", err)
+	}
+	err := s.MuteWorkContainer(routine, until, false)
+	if !errors.Is(err, ErrWorkContainerNotMutable) {
+		t.Fatalf("muting a routine = %v, want ErrWorkContainerNotMutable", err)
+	}
+	got, _, err := s.FindWorkContainer(routine)
+	if err != nil {
+		t.Fatalf("FindWorkContainer: %v", err)
+	}
+	if !got.MutedUntil.IsZero() {
+		t.Fatalf("refused mute still wrote %s", got.MutedUntil)
+	}
+
+	// Both mutable kinds go through, and unmute clears the pair rather than only
+	// the instant — a cleared mute that kept its secret bit would render the next
+	// mute as `[?]`.
+	for _, r := range []ref.WorkRef{
+		{Kind: ref.KindTaskSet, ContainerID: "2026-08-02-foo"},
+		{Kind: ref.KindMap, ContainerID: "generalize-work"},
+	} {
+		if err := s.RegisterWorkContainer(r, at); err != nil {
+			t.Fatalf("RegisterWorkContainer(%s): %v", r, err)
+		}
+		if err := s.MuteWorkContainer(r, until, true); err != nil {
+			t.Fatalf("MuteWorkContainer(%s): %v", r, err)
+		}
+		got, _, err := s.FindWorkContainer(r)
+		if err != nil {
+			t.Fatalf("FindWorkContainer(%s): %v", r, err)
+		}
+		if !got.MutedUntil.Equal(until) || !got.MuteSecret {
+			t.Fatalf("%s reads back %s secret=%v, want %s secret=true", r, got.MutedUntil, got.MuteSecret, until)
+		}
+		if err := s.UnmuteWorkContainer(r); err != nil {
+			t.Fatalf("UnmuteWorkContainer(%s): %v", r, err)
+		}
+		got, _, err = s.FindWorkContainer(r)
+		if err != nil {
+			t.Fatalf("FindWorkContainer(%s) after unmute: %v", r, err)
+		}
+		if !got.MutedUntil.IsZero() || got.MuteSecret {
+			t.Fatalf("%s still muted after unmute: %s secret=%v", r, got.MutedUntil, got.MuteSecret)
+		}
+	}
+
+	unregistered := ref.WorkRef{Kind: ref.KindTaskSet, ContainerID: "never-registered"}
+	if err := s.MuteWorkContainer(unregistered, until, false); !errors.Is(err, ErrWorkContainerUnregistered) {
+		t.Fatalf("muting an unregistered set = %v, want ErrWorkContainerUnregistered", err)
 	}
 }

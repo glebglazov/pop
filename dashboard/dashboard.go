@@ -250,8 +250,14 @@ type dashboardMenu struct {
 	row    DashboardRow
 	list   *ui.List[dashboardMenuItem]
 	status *dashboardStatusMenu
+	mute   *dashboardMuteMenu
 	pinned bool
 }
+
+// nested reports whether a submenu is open over the action menu. The two nest
+// the same way and only one can be open at a time, so every place that asks
+// "is the action menu itself taking keys" asks here.
+func (m *dashboardMenu) nested() bool { return m.status != nil || m.mute != nil }
 
 // Row-verb key case (ADR-0158): uppercase = handoff (spawns/focuses a pane, quits
 // the dashboard); lowercase = in-place (acts and leaves the dashboard standing).
@@ -1170,6 +1176,9 @@ func (m QueueDashboard) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.menu.status != nil {
 		return m.updateStatusMenu(msg)
 	}
+	if m.menu.mute != nil {
+		return m.updateMuteMenu(msg)
+	}
 	switch msg.String() {
 	case "esc", "ctrl+c":
 		m.menu = nil
@@ -1230,6 +1239,56 @@ func (m QueueDashboard) updateStatusMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// updateMuteMenu drives the nested mute submenu: esc returns to the action menu,
+// j/k move the highlight, Enter mutes with the highlighted window, and digits
+// 1–6 mute with that window directly. Navigation resolves before the digits for
+// the same reason the status submenu resolves it before verb letters.
+func (m QueueDashboard) updateMuteMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.menu == nil || m.menu.mute == nil {
+		return m, nil
+	}
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		m.menu.mute = nil
+		return m, nil
+	case "j", "down":
+		m.menu.mute.list.MoveDown()
+		return m, nil
+	case "k", "up":
+		m.menu.mute.list.MoveUp()
+		return m, nil
+	case "enter":
+		return m.invokeMuteMenuItem(m.menu.mute.list.Cursor())
+	}
+	for i := range m.menu.mute.list.Items() {
+		if msg.String() == muteWindowKey(i) {
+			return m.invokeMuteMenuItem(i)
+		}
+	}
+	return m, nil
+}
+
+// invokeMuteMenuItem closes the submenu and mutes the row until the chosen
+// window. Muting is in-place, so a pinned menu survives it, exactly as a status
+// write does.
+func (m QueueDashboard) invokeMuteMenuItem(idx int) (tea.Model, tea.Cmd) {
+	if m.menu == nil || m.menu.mute == nil {
+		return m, nil
+	}
+	windows := m.menu.mute.list.Items()
+	if idx < 0 || idx >= len(windows) {
+		return m, nil
+	}
+	row := m.menu.row
+	if m.menu.pinned {
+		m.menu.mute = nil
+	} else {
+		m.menu = nil
+	}
+	m.err = nil
+	return m, m.muteRow(row, windows[idx])
+}
+
 // invokeMenuItem closes the menu and dispatches the verb at idx against the row
 // the menu was opened on, except for the status submenu opener which nests.
 func (m QueueDashboard) invokeMenuItem(idx int) (tea.Model, tea.Cmd) {
@@ -1244,6 +1303,13 @@ func (m QueueDashboard) invokeMenuItem(idx int) (tea.Model, tea.Cmd) {
 	row := m.menu.row
 	if item.verb == work.VerbStatus {
 		m.menu.status = newDashboardStatusMenu(m.kinds, row)
+		return m, nil
+	}
+	// The two shared openers nest instead of dispatching: neither names a kind,
+	// and neither has anything to perform until the human picks from the list
+	// underneath it.
+	if item.verb == work.VerbMute {
+		m.menu.mute = newDashboardMuteMenu(m.taskDeps(), row)
 		return m, nil
 	}
 	pinned := m.menu.pinned && !dashboardMenuItemHandoff(item)
@@ -1380,6 +1446,15 @@ func (m QueueDashboard) dispatchVerb(verb work.Verb, row DashboardRow) (tea.Mode
 		}
 		m.statusMsg = dashboardHandoffPending
 		return m, m.launchFold(row)
+	case work.VerbUnmute:
+		// Unmute goes to the Muter seam rather than to Perform: a verb id carries no
+		// payload and mute's pair had to leave the verb seam for the mute half, so
+		// both halves land on one interface (ADR-0200 decision 5).
+		if row.MutedUntil.IsZero() {
+			m.statusMsg = "not muted"
+			return m, nil
+		}
+		return m, m.unmuteRow(row)
 	case setkind.VerbUnpark:
 		if !row.Parked {
 			m.statusMsg = "task set is not parked"
@@ -2221,6 +2296,21 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			ui.HelpEntry{Key: "enter", Desc: "run action"},
 			ui.HelpEntry{Key: "esc", Desc: "close menu"},
 		)
+	case m.menu != nil && m.menu.mute != nil:
+		// The mute submenu's entries are dates derived from today, so the help lists
+		// the windows actually on offer rather than a fixed roster that would be
+		// wrong by tomorrow.
+		items := m.menu.mute.list.Items()
+		entries := make([]ui.HelpEntry, 0, len(items)+4)
+		for i, window := range items {
+			entries = append(entries, ui.HelpEntry{Key: muteWindowKey(i), Desc: window.Label})
+		}
+		return append(entries,
+			ui.HelpEntry{Key: "", Desc: muteMenuFooter()},
+			ui.HelpEntry{Key: "j/k", Desc: "navigate"},
+			ui.HelpEntry{Key: "enter", Desc: "mute"},
+			ui.HelpEntry{Key: "esc", Desc: "back"},
+		)
 	case m.menu != nil && m.menu.status != nil:
 		// The status submenu's verbs are the focused row's own kind's, so the help
 		// lists the submenu that is actually open rather than one kind's vocabulary
@@ -2343,6 +2433,8 @@ func (m QueueDashboard) View() tea.View {
 			title = "Help · " + page + " · peek"
 		} else if m.detail != nil {
 			title = "Help · " + page + " · detail"
+		} else if m.menu != nil && m.menu.mute != nil {
+			title = "Help · " + page + " · mute submenu"
 		} else if m.menu != nil && m.menu.status != nil {
 			title = "Help · " + page + " · status submenu"
 		} else if m.menu != nil && m.menu.pinned {
@@ -2581,7 +2673,7 @@ func (m QueueDashboard) viewWithMenu() string {
 	if m.menu.pinned {
 		hint = "j/k move · J/K row · enter/letter run · esc close"
 	}
-	if m.menu.status != nil {
+	if m.menu.nested() {
 		hint = "j/k move · enter/letter run · esc back"
 		if m.menu.pinned {
 			hint = "j/k move · J/K row · enter/letter run · esc back"
@@ -3246,6 +3338,9 @@ func dashboardMenuLines(menu *dashboardMenu, width int, live livePaneCache) []st
 	if menu.status != nil {
 		return dashboardStatusMenuLines(menu.status, width)
 	}
+	if menu.mute != nil {
+		return dashboardMuteMenuLines(menu.mute, width)
+	}
 	lines := []string{ui.TruncateString("    "+ui.HintStyle.Render("actions"), width)}
 	cursor := menu.list.Cursor()
 	for i, item := range menu.list.Items() {
@@ -3276,6 +3371,26 @@ func dashboardStatusMenuLines(status *dashboardStatusMenu, width int) []string {
 		lines = append(lines, ui.TruncateString(line, width))
 	}
 	return lines
+}
+
+// dashboardMuteMenuLines renders the nested mute submenu: six numbered windows,
+// then one dimmed footer stating the hour they all land at. The footer is why no
+// entry carries the hour itself.
+func dashboardMuteMenuLines(mute *dashboardMuteMenu, width int) []string {
+	if mute == nil {
+		return nil
+	}
+	lines := []string{ui.TruncateString("    "+ui.HintStyle.Render("mute"), width)}
+	cursor := mute.list.Cursor()
+	for i, window := range mute.list.Items() {
+		marker := "  "
+		if i == cursor {
+			marker = ui.IndicatorStyle.Render("█") + " "
+		}
+		line := fmt.Sprintf("    %s%s  %s", marker, muteWindowKey(i), window.Label)
+		lines = append(lines, ui.TruncateString(line, width))
+	}
+	return append(lines, ui.TruncateString("      "+ui.HintStyle.Render(muteMenuFooter()), width))
 }
 
 func writeDashboardFooter(b *strings.Builder, height int, hint string) {

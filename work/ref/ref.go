@@ -42,6 +42,25 @@ func (k Kind) Valid() bool {
 	return false
 }
 
+// Mutable reports whether a Mute may be written against this kind (ADR-0200
+// decision 7). Task sets and Maps are; a Routine is not, because it already
+// carries an indefinite human-authored pause bit and a second human-set
+// suppression beside it would be two vocabularies for one intent.
+//
+// It lives on the enum rather than on the `work.Kind` interface so the leaf
+// package `store` can refuse the write at the SQL boundary. Declaring
+// eligibility by omission — a kind simply never offering the verb — is how the
+// seam works everywhere else, but omission alone would leave the durable
+// invariant unenforced: a future CLI or test could mute a Routine and produce a
+// row no verb can clear.
+func (k Kind) Mutable() bool {
+	switch k {
+	case KindTaskSet, KindMap:
+		return true
+	}
+	return false
+}
+
 func (k Kind) String() string { return string(k) }
 
 // ParseKind converts s to a Kind, refusing anything outside the enum.

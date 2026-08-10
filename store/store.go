@@ -508,6 +508,23 @@ var migrations = []string{
 	// design, and a read surface that showed only the capped one would misreport
 	// the refusal; NULL when the message named no reset.
 	`ALTER TABLE agent_model_cooldowns ADD COLUMN stated_until TEXT;`,
+	// 31: work_containers.muted_until + mute_secret — a human's Mute, beside the
+	// archived bit for the same reason (ADR-0200 decision 1): both are
+	// registration-level, both mean the same thing for every kind that carries
+	// them, and neither travels with the repository. There is no sweeper — a mute
+	// ends by a read comparing muted_until against now, so nothing ever writes
+	// when one expires and there is no state to reconcile.
+	//
+	// mute_secret marks the random default window, whose instant no read surface
+	// discloses (decision 6). It is a column rather than a convention over the
+	// instant because "the human picked this date off a list" is a fact about how
+	// the mute was authored, and no arithmetic on the instant can recover it.
+	//
+	// Only a mutable kind may hold a value here — ref.Kind.Mutable is the rule and
+	// MuteWorkContainer enforces it. SQLite has no partial CHECK worth the
+	// migration here, so the guard is the accessor's.
+	`ALTER TABLE work_containers ADD COLUMN muted_until TEXT NOT NULL DEFAULT '';
+	 ALTER TABLE work_containers ADD COLUMN mute_secret INTEGER NOT NULL DEFAULT 0;`,
 }
 
 func (s *Store) migrate() error {

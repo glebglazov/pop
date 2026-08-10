@@ -284,6 +284,8 @@ func buildRows(state *GlobalState, defPath string, disc *Discovery, manifests ma
 					PriorityShow: fmt.Sprintf("%d", reg.Priority),
 					AutoDrain:    reg.AutoDrain,
 					Archived:     reg.Archived,
+					MutedUntil:   reg.MutedUntil,
+					MuteSecret:   reg.MuteSecret,
 					RegIndex:     i,
 				})
 				continue
@@ -339,6 +341,8 @@ func buildTaskSetRow(reg RegisteredTaskSet, m *Manifest, regIndex int) Row {
 		PriorityShow: fmt.Sprintf("%d", reg.Priority),
 		AutoDrain:    reg.AutoDrain,
 		Archived:     reg.Archived,
+		MutedUntil:   reg.MutedUntil,
+		MuteSecret:   reg.MuteSecret,
 		RegIndex:     regIndex,
 		Started:      anyDone(m),
 	}

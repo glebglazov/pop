@@ -324,6 +324,7 @@ func containersFromGroup(d *Deps, cfg *config.Config, snap *snapshot, delays []t
 			parked = backoff(taskRow.ID)
 		}
 		liveDrainSet := liveDrain(snap, g.RepoKey, taskRow.ID, wt.runtimePath)
+		mutedUntil, muteSecret := liveMute(taskRow, now)
 		// A live drain lights the trailing ● indicator (ADR-0111); parked and
 		// config-error ride the STATUS cell. The mutual exclusion the retired
 		// single-string DRAIN cell enforced is preserved by gating the config-error
@@ -355,6 +356,8 @@ func containersFromGroup(d *Deps, cfg *config.Config, snap *snapshot, delays []t
 			RawStatus:             taskRow.Status,
 			AutoDrain:             taskRow.AutoDrain,
 			Archived:              taskRow.Archived,
+			MutedUntil:            mutedUntil,
+			MuteSecret:            muteSecret,
 			DefPath:               g.DefPath,
 			StatePath:             g.StatePath,
 			RepoKey:               g.RepoKey,
@@ -385,6 +388,18 @@ func containersFromGroup(d *Deps, cfg *config.Config, snap *snapshot, delays []t
 		containers = append(containers, container)
 	}
 	return containers, nil
+}
+
+// liveMute is the whole of how a Mute expires (ADR-0200 decision 1): one
+// comparison on the load that renders the row. A window that has passed answers
+// the zero instant — the same answer a set that was never muted gives — so the
+// row simply comes back on the next rebuild, with nothing written, no sweeper
+// and nothing to reconcile.
+func liveMute(row tasks.Row, now time.Time) (time.Time, bool) {
+	if row.MutedUntil.After(now) {
+		return row.MutedUntil, row.MuteSecret
+	}
+	return time.Time{}, false
 }
 
 // itemsFor projects a set's manifest tasks onto Work items. The manifest is

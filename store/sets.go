@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"sort"
+	"time"
 
 	"github.com/glebglazov/pop/work/ref"
 )
@@ -38,14 +39,21 @@ type SetReg struct {
 	// lazy — these record intent only.
 	WorktreeManaged bool
 	WorktreeName    string
+	// MutedUntil and MuteSecret are the container's Mute, read from the registry
+	// row beside Archived (ADR-0200 decision 1). They are read-only here: a mute
+	// is written by MuteWorkContainer alone, never as a side effect of restating a
+	// registration, so a registration round-trip through PutSet leaves an existing
+	// mute exactly where it was.
+	MutedUntil time.Time
+	MuteSecret bool
 }
 
 // AllSets returns every registration grouped by def_path, each slice ordered by
 // registration order (the registry's seq autoincrement).
 func (s *Store) AllSets() (map[string][]SetReg, error) {
 	rows, err := s.db.Query(
-		`SELECT t.def_path, c.id, t.priority, c.archived, t.auto_drain,
-		        t.worktree_managed, t.worktree_name
+		`SELECT t.def_path, c.id, t.priority, c.archived, c.muted_until, c.mute_secret,
+		        t.auto_drain, t.worktree_managed, t.worktree_name
 		   FROM work_containers c
 		   JOIN task_set_registrations t ON t.container_seq = c.seq
 		  WHERE c.kind = ?
@@ -57,11 +65,15 @@ func (s *Store) AllSets() (map[string][]SetReg, error) {
 	out := map[string][]SetReg{}
 	for rows.Next() {
 		var r SetReg
-		var archived, autoDrain, worktreeManaged int
-		if err := rows.Scan(&r.DefPath, &r.SetID, &r.Priority, &archived, &autoDrain, &worktreeManaged, &r.WorktreeName); err != nil {
+		var archived, muteSecret, autoDrain, worktreeManaged int
+		var mutedUntil sql.NullString
+		if err := rows.Scan(&r.DefPath, &r.SetID, &r.Priority, &archived, &mutedUntil, &muteSecret,
+			&autoDrain, &worktreeManaged, &r.WorktreeName); err != nil {
 			return nil, err
 		}
 		r.Archived = archived != 0
+		r.MutedUntil = parseTime(mutedUntil.String)
+		r.MuteSecret = muteSecret != 0
 		r.AutoDrain = autoDrain != 0
 		r.WorktreeManaged = worktreeManaged != 0
 		out[r.DefPath] = append(out[r.DefPath], r)
@@ -133,7 +145,9 @@ func (s *Store) ReplaceAllSets(all map[string][]SetReg) error {
 // (kind, id) so its seq and registered_at survive an update — a set's place in
 // the status table, and the day this machine took it on, are not the caller's to
 // restate — while archived, the one cross-kind bit, is written there and
-// everything kind-local goes to the task-set-side row.
+// everything kind-local goes to the task-set-side row. The mute columns are
+// absent from the DO UPDATE list for the same reason the seq is: a mute outlives
+// any one view of a registration, and MuteWorkContainer is its only writer.
 func putSetTx(tx *sql.Tx, r SetReg) error {
 	if _, err := tx.Exec(
 		`INSERT INTO work_containers (kind, id, archived, registered_at)

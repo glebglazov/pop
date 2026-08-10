@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/glebglazov/pop/store"
 )
@@ -41,6 +42,12 @@ type RegisteredTaskSet struct {
 	// provisioning happens here — and is never re-read from the manifest on later
 	// refreshes.
 	WorktreeIntent *WorktreeDirective `json:"worktree_intent,omitempty"`
+	// MutedUntil and MuteSecret carry the container's Mute as stored, before any
+	// comparison against now: a reader decides whether it is still live
+	// (ADR-0200 decision 1). They are store-only — the retired state.json never
+	// held a mute and never will, so they never serialise.
+	MutedUntil time.Time `json:"-"`
+	MuteSecret bool      `json:"-"`
 }
 
 // worktreeIntentToStore flattens a seeded worktree directive into the store's
@@ -151,6 +158,8 @@ func readGlobalState(d *Deps, path string) (*GlobalState, error) {
 				Priority:       r.Priority,
 				Archived:       r.Archived,
 				AutoDrain:      r.AutoDrain,
+				MutedUntil:     r.MutedUntil,
+				MuteSecret:     r.MuteSecret,
 				WorktreeIntent: worktreeIntentFromStore(r.WorktreeManaged, r.WorktreeName),
 			})
 		}

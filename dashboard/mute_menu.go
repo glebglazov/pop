@@ -1,10 +1,12 @@
 package dashboard
 
 import (
+	"fmt"
 	"sort"
 	"time"
 
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/ui"
 )
 
 // The mute submenu's content (ADR-0200 decision 4). A mute window is a date the
@@ -146,6 +148,46 @@ func pickWeekdays(monday time.Time, ladder []time.Weekday, today, tomorrow time.
 func muteMorning(date time.Time) time.Time {
 	y, m, d := date.Date()
 	return time.Date(y, m, d, muteWindowHour, 0, 0, 0, time.UTC)
+}
+
+// dashboardMuteMenu is the nested mute overlay opened with `m` from the action
+// menu. Unlike the status submenu its items are the surface's own — a date is
+// not kind knowledge — and what the kind receives is the instant behind the
+// digit the human pressed, through work.Muter.
+type dashboardMuteMenu struct {
+	row  DashboardRow
+	list *ui.List[MuteWindow]
+}
+
+// taskDeps is the dependency bag the window derivation reads its clock and its
+// roll from. A dashboard built without one still opens the menu: the bag's own
+// accessors fall back to the wall clock and the global source.
+func (m QueueDashboard) taskDeps() *tasks.Deps {
+	if m.d == nil {
+		return nil
+	}
+	return m.d.Tasks
+}
+
+// newDashboardMuteMenu opens the mute submenu over row with the windows derived
+// from right now. The list is derived per opening rather than cached: the dates
+// change with the day, and a menu built at launch would offer yesterday.
+func newDashboardMuteMenu(td *tasks.Deps, row DashboardRow) *dashboardMuteMenu {
+	return &dashboardMuteMenu{
+		row:  row,
+		list: ui.NewList(MuteWindows(td), ui.Opts[MuteWindow]{Wrap: true}),
+	}
+}
+
+// muteWindowKey is the digit one entry answers to. The digits are monotonic in
+// time after the random default at 1, so `3` is always sooner than `5`.
+func muteWindowKey(idx int) string { return fmt.Sprintf("%d", idx+1) }
+
+// muteMenuFooter states the invariant hour once, which is why no dated entry
+// repeats it: five entries each ending in "09:00 UTC" would spend a fifth of the
+// menu's width on a constant.
+func muteMenuFooter() string {
+	return fmt.Sprintf("every date resurfaces at %02d:00 UTC", muteWindowHour)
 }
 
 func startOfDay(t time.Time) time.Time {

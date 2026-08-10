@@ -225,6 +225,13 @@ func WorkRowStatusSegments(row work.Container) []work.StatusSegment {
 	if row.ConfigError != "" {
 		segments = append(segments, work.StatusSegment{Text: "config error: " + row.ConfigError, Tone: work.TonePlain})
 	}
+	// The mute reads back the words the submenu offered — `unmuted on Fri 14 Aug,
+	// 09:00 UTC` — or `[?]` for the random window, whose instant no read surface
+	// discloses (ADR-0200 decision 6). The row only ever carries a live mute, so
+	// this suffix vanishing is how a human sees that one ended.
+	if suffix := work.MuteSuffix(row); suffix != "" {
+		segments = append(segments, work.StatusSegment{Text: suffix, Tone: work.TonePlain})
+	}
 	// Last, and only ever present with the show-archived view on (ADR-0186): it is
 	// what tells the operator this row is in the filing cabinet rather than the
 	// table, which is the difference between pressing archive and unarchive.

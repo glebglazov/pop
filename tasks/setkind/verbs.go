@@ -68,8 +68,18 @@ func (k *Kind) Actions(c work.Container) []work.Action {
 	actions = append(actions,
 		work.Action{Verb: VerbAssist, Key: "S", Label: "assist"},
 		work.Action{Verb: work.VerbShell, Key: "O", Label: "shell"},
-		work.Action{Verb: VerbBind, Key: "b", Label: "bind worktree"},
+		work.Action{Verb: work.VerbMute, Key: "m", Label: "mute ▸"},
 	)
+	// Unmute precedes unbind deliberately: both want `u`, and on a row that
+	// carries a mute *and* a worktree the mute is what `u` clears (ADR-0200
+	// decision 4 keys unmute rather than leaving it to a digit). Unbind keeps its
+	// place in the list and stays one Enter away — mute is the fresher gesture on
+	// a row the human just pulled out of the archive-of-attention, and unbinding
+	// a muted set is not something anyone does by hotkey.
+	if !c.MutedUntil.IsZero() {
+		actions = append(actions, work.Action{Verb: work.VerbUnmute, Key: "u", Label: "unmute"})
+	}
+	actions = append(actions, work.Action{Verb: VerbBind, Key: "b", Label: "bind worktree"})
 	if c.Bound {
 		actions = append(actions, work.Action{Verb: VerbUnbind, Key: "u", Label: "unbind worktree"})
 	}
@@ -199,7 +209,11 @@ func (k *Kind) Perform(c work.Container, item *work.Item, verb work.Verb) (work.
 			word = "unarchived"
 		}
 		return work.Outcome{Kind: work.OutcomeRefresh, Message: fmt.Sprintf("%s %s", word, c.ID)}, nil
-	case VerbDrain, VerbVerify, VerbBind, VerbUnbind, VerbAutoDrain, work.VerbStatus, VerbAssist, VerbFold, VerbUnpark:
+	case VerbDrain, VerbVerify, VerbBind, VerbUnbind, VerbAutoDrain, work.VerbStatus,
+		work.VerbMute, work.VerbUnmute, VerbAssist, VerbFold, VerbUnpark:
+		// The mute pair is caller-dispatched for the same reason the status opener
+		// is, and one more: the window is a date the surface derived, and a verb id
+		// carries no payload. Both arrive back through work.Muter instead.
 		return work.Outcome{Kind: work.OutcomeCallerModal, Message: string(verb)}, nil
 	default:
 		return work.Outcome{}, work.UnknownVerb(k.ID(), verb)

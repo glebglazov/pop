@@ -12,6 +12,7 @@ package work
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/glebglazov/pop/work/ref"
 )
@@ -132,6 +133,17 @@ type Container struct {
 	// has to say which ones they are; a row that looked active but refused to be
 	// archived again would be the whole point of the field missing.
 	Archived bool
+	// MutedUntil is when a live Mute on this container ends, zero when nothing
+	// mutes it right now. An expired mute reads exactly like no mute at all,
+	// which is the whole of how a mute ends: the kind compares the stored instant
+	// against the load's `now` and carries the answer, so no sweeper and no
+	// cleanup job ever writes when a mute runs out (ADR-0200 decision 1).
+	MutedUntil time.Time
+	// MuteSecret marks a mute taken with the random default window. Every read
+	// surface must render such a mute as `[?]` rather than its instant, and no
+	// preset may sort by it: position in a list of six muted rows discloses the
+	// roll as surely as a date does (ADR-0200 decision 6).
+	MuteSecret bool
 	// Items are the container's Work items in the kind's own order.
 	Items []Item
 	// DetailSections are the kind-authored prose blocks a detail view renders
@@ -330,6 +342,18 @@ const (
 	// kind's StatusActions — so a surface can recognise the opener without naming
 	// a kind, and every kind that has a status to write offers it on one key.
 	VerbStatus Verb = "status"
+	// VerbMute opens the container's mute submenu. Shared for the same reason
+	// VerbStatus is, and for one more: the submenu's entries are dates derived
+	// from today, which is not kind knowledge — three kinds returning the
+	// identical six actions would be the copy-paste the seam exists to prevent
+	// (ADR-0200 decisions 4 and 5). A kind never performs it; the surface owns
+	// the submenu and calls Muter with the instant the human chose.
+	VerbMute Verb = "mute"
+	// VerbUnmute clears a container's mute. It is offered only on an
+	// already-muted row and never occupies one of the submenu's numbered slots:
+	// it is not a window, so it should neither compete for a window's digit nor
+	// make the date list change length with state.
+	VerbUnmute Verb = "unmute"
 )
 
 // Action is one verb offered over a container or an item. Keys follow ADR-0158's
