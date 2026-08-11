@@ -93,6 +93,8 @@ Add a tmux binding for quick access:
 # ~/.tmux.conf
 bind-key p display-popup -E -w 60% -h 60% 'pop project dashboard'
 bind-key P display-popup -E -w 60% -h 60% 'cd "$(pop worktree dashboard)" && exec $SHELL'
+# The Config dashboard pairs a key list with a preview, so give it more room:
+bind-key C display-popup -E -w 80% -h 80% 'pop config dashboard'
 ```
 
 ## Commands
@@ -122,6 +124,25 @@ Fuzzy-pick a worktree in the current repo. Prints the selected path (useful for 
 | `ctrl-n` | Create new worktree |
 
 Flag: `-s, --switch` — switch tmux session instead of printing path.
+
+### `pop config dashboard`
+
+Browse the config keys you can override, and what each one resolves to. The left
+pane lists every override-exposed key (the ones `pop config keys` marks
+`[override: <scope>]`) with its description beneath and a `●` on keys that
+carry an override today; the right pane previews the highlighted key in config
+format — the effective value as TOML, the layer that produced it, and the value
+an override is standing on.
+
+| Key | Action |
+|-----|--------|
+| type | Filter over key path and description |
+| `↑`/`↓` | Move highlight |
+| `esc` | Close |
+| `C-h` | Help |
+
+Read-only for now, and it needs a terminal: with stdout redirected it refuses
+rather than printing something that is not the dashboard.
 
 ### `pop layout`
 

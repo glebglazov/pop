@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,8 +12,10 @@ import (
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/debug"
+	"github.com/glebglazov/pop/internal/tty"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
+	"github.com/glebglazov/pop/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -143,10 +146,38 @@ argument, only that key is printed.`,
 	ValidArgsFunction: completeRepoSettingKey,
 }
 
+// configDashboardCmd runs the Config dashboard as a top-level program. The same
+// component opens inside pop's other TUIs, so what a human learns here carries
+// over (ADR-0202 decision 10).
+var configDashboardCmd = &cobra.Command{
+	Use:   "dashboard",
+	Short: "Browse the config keys you can override",
+	Long: `Browse the config keys you can override, and what each one resolves to.
+
+The left pane lists every override-exposed key — the keys pop config keys marks
+[override: <scope>] — with its description beneath. Type to filter over the key
+path and the description together. A marked row carries an override today.
+
+The right pane previews the highlighted key in config format: the effective
+value as TOML, the layer that produced it (the override layer, your config.toml,
+a built-in default, or a fallthrough to another key), and, where an override is
+in force, the value it is standing on.
+
+This pass is read-only — no key edits anything yet.
+
+It needs a terminal, so it refuses when stdout is redirected. A roomier popup
+than the other dashboards suits it:
+
+  bind-key C display-popup -E -w 80% -h 80% 'pop config dashboard'`,
+	Args: cobra.NoArgs,
+	RunE: runConfigDashboard,
+}
+
 func init() {
 	rootCmd.AddCommand(configCmd)
 	configCmd.AddCommand(configKeysCmd)
 	configCmd.AddCommand(configShowCmd)
+	configCmd.AddCommand(configDashboardCmd)
 	configCmd.AddCommand(configRepoCmd)
 	configRepoCmd.AddCommand(configRepoSetCmd)
 	configRepoCmd.AddCommand(configRepoGetCmd)
@@ -207,6 +238,64 @@ func runConfigShow(cmd *cobra.Command, _ []string) error {
 	}
 	fmt.Fprint(cmd.OutOrStdout(), out)
 	return nil
+}
+
+func runConfigDashboard(cmd *cobra.Command, _ []string) error {
+	d := cmdLayerDeps()
+	path := cfgFile
+	if path == "" {
+		path = config.DefaultConfigPathWith(d.configDeps())
+	}
+	views, err := config.OverrideKeyViewsWith(d.configDeps(), path)
+	if err != nil {
+		return err
+	}
+	_, isTTY := tty.TerminalFd(os.Stdout)
+	return runConfigDashboardWith(configDashboardRows(views), os.Stdin, os.Stdout, isTTY)
+}
+
+// runConfigDashboardWith refuses a non-terminal stdout rather than degrading to
+// a listing: the TUI is the only surface this feature has in this pass, and a
+// human who redirected it needs to be told that, not handed something else. The
+// deferred `pop config override set` is what a script will use (ADR-0202
+// decision 15).
+func runConfigDashboardWith(rows []ui.ConfigDashboardRow, in io.Reader, out io.Writer, isTTY bool) error {
+	if !isTTY {
+		return errors.New("pop config dashboard needs a terminal: stdout is not a TTY. " +
+			"Run it in a terminal (or a tmux popup); use `pop config keys` and `pop config show` for piped output")
+	}
+	return ui.RunConfigDashboard(rows, in, out)
+}
+
+// configDashboardRows adapts the resolved override views to the component's
+// rows. The component holds no config knowledge — provenance and the words that
+// tell two empty-looking states apart are decided in config, so `pop config
+// dashboard` and every host that embeds the component say the same thing.
+func configDashboardRows(views []config.OverrideKeyView) []ui.ConfigDashboardRow {
+	rows := make([]ui.ConfigDashboardRow, 0, len(views))
+	for _, view := range views {
+		reach := make([]ui.ConfigDashboardReachLine, 0, len(view.Reach))
+		for _, line := range view.Reach {
+			reach = append(reach, ui.ConfigDashboardReachLine{Actor: line.Actor, Detail: line.Detail})
+		}
+		if len(reach) == 0 {
+			reach = nil
+		}
+		rows = append(rows, ui.ConfigDashboardRow{
+			Key:        view.Key,
+			Desc:       view.Desc,
+			Overridden: view.Overridden,
+			Preview: ui.ConfigDashboardPreview{
+				ValueTOML:        view.EffectiveTOML,
+				Provenance:       view.Provenance(),
+				Note:             view.Note,
+				SourceTOML:       view.SourceTOML,
+				SourceProvenance: view.SourceProvenance(),
+				Reach:            reach,
+			},
+		})
+	}
+	return rows
 }
 
 // completeRepoSettingKey completes the first argument of the repo verbs with the
