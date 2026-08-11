@@ -282,6 +282,21 @@ func runConfigDashboardWith(rows []ui.ConfigDashboardRow, opts ui.ConfigDashboar
 // contract every embedding program owes the component: `pop config dashboard` is
 // one host of three, and the other two are TUIs that cannot import cmd.
 
+// configDashboardOpener builds the seam a picker host hands to
+// ui.WithConfigDashboard. The path is resolved once — the same file the command
+// itself loaded, --config included — and the layers are re-resolved on every
+// press, so the modal shows what is on disk now rather than at launch.
+func configDashboardOpener() func() *ui.ConfigDashboard {
+	d := cmdLayerDeps()
+	path := cfgFile
+	if path == "" {
+		path = config.DefaultConfigPathWith(d.configDeps())
+	}
+	return func() *ui.ConfigDashboard {
+		return confighost.Open(d.configDeps(), path)
+	}
+}
+
 // completeRepoSettingKey completes the first argument of the repo verbs with the
 // settable key set, taken from the schema so completion cannot list a key the
 // command would refuse.

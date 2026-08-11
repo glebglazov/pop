@@ -5,9 +5,9 @@
 // 11).
 //
 // It exists because the component itself holds no config knowledge and the
-// hosts are unrelated programs — the Work dashboard's shell today, the project
-// and worktree pickers next. Everything they would each have to re-derive is
-// here once.
+// hosts are unrelated programs — the Work dashboard's shell, the project picker
+// and the worktree picker. Everything they would each have to re-derive is here
+// once.
 //
 // # The host contract
 //

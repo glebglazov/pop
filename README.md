@@ -109,6 +109,7 @@ Fuzzy-pick a project and switch to its tmux session. Bare git repos are automati
 | `ctrl-k` | Kill tmux session |
 | `ctrl-r` | Remove from history |
 | `ctrl-u` | Clear filter |
+| `alt-c` | Config overrides |
 
 Flag: `--tmux-cd <pane>` — send `cd` to a tmux pane instead of switching session.
 
@@ -122,6 +123,7 @@ Fuzzy-pick a worktree in the current repo. Prints the selected path (useful for 
 | `ctrl-d` | Delete worktree |
 | `ctrl-x` | Force delete worktree |
 | `ctrl-n` | Create new worktree |
+| `alt-c` | Config overrides |
 
 Flag: `-s, --switch` — switch tmux session instead of printing path.
 
@@ -157,9 +159,17 @@ It needs a terminal: with stdout redirected it refuses rather than printing
 something that is not the dashboard.
 
 The same dashboard opens with `alt+c` from either page of `pop work dashboard`,
-as a modal over the page you are on. While it is open the dashboard's own keys
-do nothing, and closing it puts you back on the page exactly as you left it —
-with any override you just wrote already in force in what the page reports.
+from `pop project dashboard` and from `pop worktree dashboard`, as a modal over
+what you are on. While it is open the host's own keys do nothing — in the
+worktree picker that is what keeps `C-x` meaning "remove the override" rather
+than "force delete this worktree" — and nothing is printed, so the picker's own
+result is still the only thing on stdout for `cd "$(pop worktree dashboard)"`.
+Closing it puts you back exactly as you left it: the work dashboard on the same
+page, with any override you just wrote already in force in what it reports, and
+a picker with its filter text and cursor untouched.
+
+The pickers are usually bound to a 60% popup, which is cramped for this
+dashboard; the `bind-key C` binding above gives it a roomier one of its own.
 
 ### `pop layout`
 

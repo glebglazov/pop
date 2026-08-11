@@ -40,10 +40,20 @@ Keybindings:
   enter    - switch to worktree (prints path or switches tmux session)
   ctrl-d   - delete worktree
   ctrl-x   - force delete worktree
+  alt-c    - open the Config dashboard over the picker
   esc      - cancel
 
+While the Config dashboard is open it owns the keyboard: no picker key does
+anything, ctrl-x included, so removing an override there cannot delete a
+worktree here. Closing it returns to the picker with the filter and cursor
+untouched.
+
 Example tmux binding:
-  bind-key P display-popup -E -w 60% -h 60% 'cd "$(pop worktree dashboard)" && exec $SHELL'`,
+  bind-key P display-popup -E -w 60% -h 60% 'cd "$(pop worktree dashboard)" && exec $SHELL'
+
+The Config dashboard wants more room than this picker does, so its own
+standalone binding is roomier:
+  bind-key C display-popup -E -w 80% -h 80% 'pop config dashboard'`,
 	RunE: runWorktree,
 }
 
@@ -255,6 +265,12 @@ func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefine
 			}
 		}
 	}
+	return ui.Run(items, worktreePickerOptions(customCommands, quickAccessModifier, initialCursorIdx, warnings, iconLegends, updateNoticeEnabled)...)
+}
+
+// worktreePickerOptions is the worktree picker's key set and chrome, apart from
+// the items, so a test can put the same picker together and press a key at it.
+func worktreePickerOptions(customCommands []ui.UserDefinedCommand, quickAccessModifier string, initialCursorIdx int, warnings []string, iconLegends []ui.IconLegend, updateNoticeEnabled bool) []ui.PickerOption {
 	opts := []ui.PickerOption{
 		ui.WithDelete(),
 		ui.WithContext(),
@@ -265,6 +281,10 @@ func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefine
 		ui.WithSetPreferredWorkbench(),
 		ui.WithQuickAccess(quickAccessModifier),
 		ui.WithIconLegend(iconLegends...),
+		// While the Config dashboard is open every key above is suspended, which
+		// is what keeps ctrl+x meaning "remove the override" there and "force
+		// delete this worktree" here (ADR-0202 decision 11).
+		ui.WithConfigDashboard(configDashboardOpener()),
 	}
 	if initialCursorIdx >= 0 {
 		opts = append(opts, ui.WithInitialCursorIndex(initialCursorIdx))
@@ -283,7 +303,7 @@ func showWorktreePicker(ctx *project.RepoContext, customCommands []ui.UserDefine
 		}
 	}
 
-	return ui.Run(items, opts...)
+	return opts
 }
 
 // buildWorktreeItems converts worktrees to picker items, applying the session

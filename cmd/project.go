@@ -47,8 +47,19 @@ var projectDashboardCmd = &cobra.Command{
 Projects with git worktrees are expanded to show individual worktrees.
 Choosing a project opens or switches to a tmux session.
 
+Keybindings:
+  alt-c    - open the Config dashboard over the picker
+
+While the Config dashboard is open it owns the keyboard: no picker key does
+anything. Closing it returns to the picker with the filter and cursor
+untouched.
+
 Example tmux binding:
-  bind-key p display-popup -E -w 60% -h 60% 'pop project dashboard'`,
+  bind-key p display-popup -E -w 60% -h 60% 'pop project dashboard'
+
+The Config dashboard wants more room than this picker does, so its own
+standalone binding is roomier:
+  bind-key C display-popup -E -w 80% -h 80% 'pop config dashboard'`,
 	RunE: runProject,
 }
 
@@ -461,6 +472,10 @@ func RunProject(d *ProjectDeps) error {
 			ui.WithSetPreferredWorkbench(),
 			ui.WithQuickAccess(quickAccessModifier),
 			ui.WithIconLegend(iconLegends...),
+			// The same global chord as the Work dashboard and the worktree
+			// picker, and while it is open no picker key does anything
+			// (ADR-0202 decision 11).
+			ui.WithConfigDashboard(configDashboardOpener()),
 		}
 		opts = append(opts, treeOpts...)
 		if inTmux {

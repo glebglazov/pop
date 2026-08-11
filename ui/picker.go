@@ -83,6 +83,15 @@ type Picker struct {
 	width    int
 	result   Result
 
+	// windowHeight is the terminal height as reported, before the frame takes its
+	// share. The Config modal renders its own whole frame, so it needs the window
+	// rather than this picker's body.
+	windowHeight int
+	// openConfig builds the Config dashboard when the global chord is pressed,
+	// and configModal holds it while it is open. See picker_config.go.
+	openConfig  func() *ConfigDashboard
+	configModal *ConfigDashboard
+
 	showHelp           bool
 	showDelete         bool
 	showContext        bool
@@ -371,10 +380,27 @@ func (p *Picker) Init() tea.Cmd {
 func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	p.syncToList()
 
+	// While the Config modal is open it owns the keyboard outright (ADR-0202
+	// decision 11): no selection, no yank, no delete, not even esc. Nothing below
+	// runs, including the query and the filter, so the picker comes back exactly
+	// as it was left. A resize still reaches the picker underneath, so it returns
+	// to a frame sized for the terminal it is now in.
+	if p.configModal != nil {
+		if size, ok := msg.(tea.WindowSizeMsg); ok {
+			p.resize(size)
+		}
+		return p, p.updateConfigModal(msg)
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		// Help overlay: toggle, dismiss, or swallow keys while open.
 		if ToggleHelp(&p.showHelp, msg) {
+			return p, nil
+		}
+
+		if p.configDashboardBound() && IsConfigDashboardKey(msg) {
+			p.openConfigModal()
 			return p, nil
 		}
 
@@ -550,10 +576,7 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.WindowSizeMsg:
-		p.width = msg.Width
-		p.height = p.frameSpec().BodyHeight(msg.Height)
-		p.list.Resize(p.height)
-		p.syncFromList()
+		p.resize(msg)
 	}
 
 	// Update text input
@@ -563,6 +586,16 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	p.filter()
 
 	return p, nil
+}
+
+// resize lays the list out for a terminal of this size, and keeps the raw window
+// height for anything that renders its own frame over the picker.
+func (p *Picker) resize(msg tea.WindowSizeMsg) {
+	p.width = msg.Width
+	p.windowHeight = msg.Height
+	p.height = p.frameSpec().BodyHeight(msg.Height)
+	p.list.Resize(p.height)
+	p.syncFromList()
 }
 
 // treeActive reports whether the arrows drive the tree rather than the query. A
@@ -908,6 +941,17 @@ func (p *Picker) pickerCell(item Item, _ RowState) string {
 }
 
 func (p *Picker) View() tea.View {
+	// The modal renders its whole own frame over the list rather than a panel
+	// inside it: it is the same component `pop config dashboard` runs, so what a
+	// human learns in one place reads the same in the other. Only the terminal
+	// settings stay the picker's, so opening it does not renegotiate the
+	// keyboard mid-program.
+	if p.configModal != nil {
+		v := p.configModal.View()
+		v.KeyboardEnhancements = tea.KeyboardEnhancements{}
+		return v
+	}
+
 	var content string
 	if p.showHelp {
 		content = p.viewHelp()
@@ -960,6 +1004,9 @@ func (p *Picker) helpEntries() []HelpEntry {
 	}
 	if p.showDelete && !p.isKeyOverridden("ctrl+x") {
 		entries = append(entries, HelpEntry{"C-x", "Force delete"})
+	}
+	if p.configDashboardBound() {
+		entries = append(entries, HelpEntry{ConfigDashboardKeyLabel, "Config overrides"})
 	}
 	switch p.quickAccessModifier {
 	case "alt":
