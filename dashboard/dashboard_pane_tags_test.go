@@ -202,7 +202,7 @@ func TestHandoffPaneTitles(t *testing.T) {
 	want := map[string]string{
 		drainResult.PaneID:  drain.DrainPaneTitle(setID),
 		verifyResult.PaneID: drain.VerifyPaneTitle(setID),
-		assistResult.PaneID: drain.AssistPaneTitle(setID, tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(cfg, nil))),
+		assistResult.PaneID: drain.AssistPaneTitle(setID, tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(cfg))),
 		foldResult.PaneID:   drain.FoldPaneTitle(setID),
 	}
 	for paneID, wantTitle := range want {

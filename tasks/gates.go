@@ -314,7 +314,7 @@ func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, cfg *config.Conf
 		),
 		Items: items,
 	}
-	choice, _, err := promptGateMenu(out, in, reader, spec, nil, d, cfg)
+	choice, _, err := promptGateMenu(out, in, reader, spec, nil, cfg)
 	if err != nil {
 		return hitlGateExit, err
 	}
@@ -479,7 +479,7 @@ func promptFailedGateAction(out io.Writer, in io.Reader, d *Deps, cfg *config.Co
 			{Key: "0", Label: "Exit"},
 		},
 	}
-	choice, _, err := promptGateMenu(out, in, reader, spec, nil, d, cfg)
+	choice, _, err := promptGateMenu(out, in, reader, spec, nil, cfg)
 	if err != nil {
 		return failedGateExit, err
 	}
@@ -630,7 +630,7 @@ func promptVerifyFailedGateAction(out io.Writer, in io.Reader, d *Deps, cfg *con
 			{Key: "0", Label: "Exit", Default: true},
 		},
 	}
-	choice, _, err := promptGateMenu(out, in, reader, spec, nil, d, cfg)
+	choice, _, err := promptGateMenu(out, in, reader, spec, nil, cfg)
 	if err != nil {
 		return verifyFailedGateExit, err
 	}

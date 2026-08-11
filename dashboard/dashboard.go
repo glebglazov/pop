@@ -575,10 +575,6 @@ type QueueDashboard struct {
 	menu      *dashboardMenu
 	itemMenu  *itemMenu
 	filter    *dashboardFilterMenu
-	// agentPick is the session-lived agent-override picker (ADR-0196). It is a
-	// sibling of the filter menu: not row-anchored, closed by esc/enter-unchanged,
-	// and inert while any other picker or menu is open.
-	agentPick *ui.AgentOverridePicker
 
 	filterMode  bool
 	filterInput ui.TextField
@@ -699,9 +695,6 @@ func newQueueDashboardOn(d *drain.Deps, cfg *config.Config, snap DashboardSnapsh
 	if d.Tasks == nil {
 		d.Tasks = tasks.DefaultDeps()
 	}
-	if d.Tasks.AgentOverrides == nil {
-		d.Tasks.AgentOverrides = tasks.NewAgentOverrides()
-	}
 	kinds := newWorkKinds(page.kinds(d, cfg))
 	cols := &dashboardColumns{page: page}
 	cols.syncNatural(kinds, snap.Containers)
@@ -808,8 +801,7 @@ func (m QueueDashboard) resizeMainList() {
 // the keyboard, so v means whatever that overlay says it means.
 func (m QueueDashboard) ViewToggleAllowed() bool {
 	return m.bind == nil && m.drainPick == nil && m.abandon == nil &&
-		m.detail == nil && m.menu == nil && m.itemMenu == nil && m.filter == nil &&
-		m.agentPick == nil
+		m.detail == nil && m.menu == nil && m.itemMenu == nil && m.filter == nil
 }
 
 // ActivePage reports which page this model shows.
@@ -882,10 +874,6 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pendingG = false
 			return m.updateAbandonModal(msg)
 		}
-		if m.agentPick != nil {
-			m.pendingG = false
-			return m.updateAgentOverridePicker(msg)
-		}
 		if m.detail != nil {
 			return m.updateDetailView(msg)
 		}
@@ -900,12 +888,6 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.filterMode {
 			m.pendingG = false
 			return m.updateFilterMode(msg)
-		}
-		// Agent override (ADR-0196): live on the main list only — inert inside
-		// another picker/menu, including the override picker itself.
-		if kpm, ok := msg.(tea.KeyPressMsg); ok && ui.IsAgentOverrideKey(kpm) {
-			m.pendingG = false
-			return m.openAgentOverridePicker(), nil
 		}
 		if msg.String() == "g" {
 			if m.pendingG {
@@ -2402,14 +2384,6 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "enter/space", Desc: "select preset"},
 			{Key: "esc", Desc: "close menu"},
 		}
-	case m.agentPick != nil:
-		return []ui.HelpEntry{
-			{Key: "1-9", Desc: "open / pick that row"},
-			{Key: "0", Desc: "back a level / exit"},
-			{Key: "enter", Desc: "leave unchanged (or pick past nine)"},
-			{Key: "j/k", Desc: "navigate"},
-			{Key: "esc", Desc: "leave unchanged"},
-		}
 	case m.detail != nil && m.detail.peek != nil:
 		// Detail peek view (task set or Map ticket)
 		entries := []ui.HelpEntry{
@@ -2460,7 +2434,6 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			entries = append(entries, ui.HelpEntry{Key: "f", Desc: "filter menu"})
 		}
 		entries = append(entries,
-			ui.HelpEntry{Key: tasks.AgentOverrideKeyLabel, Desc: "override agent"},
 			ui.HelpEntry{Key: "v", Desc: m.page.toggleWord + " view"},
 			ui.HelpEntry{Key: "h/esc", Desc: "quit"},
 		)
@@ -2494,8 +2467,6 @@ func (m QueueDashboard) View() tea.View {
 			title = "Help · " + page + " · action menu"
 		} else if m.filter != nil {
 			title = "Help · " + page + " · filter menu"
-		} else if m.agentPick != nil {
-			title = "Help · " + page + " · agent override"
 		} else if m.itemMenu != nil {
 			title = "Help · " + page + " · item menu"
 		} else if m.bind != nil {
@@ -2523,8 +2494,6 @@ func (m QueueDashboard) View() tea.View {
 
 	var content string
 	switch {
-	case m.agentPick != nil:
-		content = m.viewWithAgentOverridePicker()
 	case m.menu != nil:
 		content = m.viewWithMenu()
 	case m.filter != nil:
@@ -2574,7 +2543,7 @@ func (m QueueDashboard) frameSpec() ui.Frame {
 		inputBox = m.filterInput.View()
 	}
 	subheader := ""
-	if line := m.agentOverrideStatusLine(); line != "" {
+	if line := m.attendedAgentStatusLine(); line != "" {
 		subheader = ui.TruncateString(line, m.width-2)
 	}
 	hints := m.mainHint()
@@ -2712,7 +2681,7 @@ func (m QueueDashboard) viewWithMenu() string {
 		fmt.Fprintf(&body, "%s\n", dashboardActionErrorLine(m.actionErr))
 	}
 	fmt.Fprintf(&body, "%s\n", m.pageHeader())
-	if line := m.agentOverrideStatusLine(); line != "" {
+	if line := m.attendedAgentStatusLine(); line != "" {
 		fmt.Fprintf(&body, "%s\n", ui.HintStyle.Render(line))
 	}
 	fmt.Fprintln(&body)

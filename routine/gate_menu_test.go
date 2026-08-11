@@ -12,11 +12,13 @@ import (
 	"github.com/glebglazov/pop/ui"
 )
 
-func TestPromptRoutineGateMenuOverridePromotes(t *testing.T) {
+// A Routine gate names the attended entry its default choice will launch, read
+// from the merged config — the override layer included (ADR-0202 decision 5).
+func TestPromptRoutineGateMenuNamesTheAttendedEntry(t *testing.T) {
 	cfg := &config.Config{Work: &config.WorkConfig{
 		Attended: &config.AgentGroupConfig{Agents: config.AgentEntries{
-			{DisplayName: "Claude Usual", Cmd: "claude --model opus"},
 			{DisplayName: "Cursor", Cmd: "cursor"},
+			{DisplayName: "Claude Usual", Cmd: "claude --model opus"},
 		}},
 	}}
 	d := &Deps{
@@ -24,26 +26,15 @@ func TestPromptRoutineGateMenuOverridePromotes(t *testing.T) {
 		Tasks:      &tasks.Deps{},
 	}
 
-	origMenu := runGateMenu
-	origPicker := runAgentOverridePicker
-	defer func() {
-		runGateMenu = origMenu
-		runAgentOverridePicker = origPicker
-	}()
-
+	orig := runGateMenu
+	defer func() { runGateMenu = orig }()
 	calls := 0
-	runGateMenu = func(spec ui.GateMenuSpec, in io.Reader, out io.Writer, cfg ui.GateMenuRunConfig) (ui.GateMenuResult, error) {
+	runGateMenu = func(spec ui.GateMenuSpec, in io.Reader, out io.Writer, _ ui.GateMenuRunConfig) (ui.GateMenuResult, error) {
 		calls++
-		if calls == 1 {
-			return ui.GateMenuResult{OpenOverride: true}, nil
-		}
 		if !strings.Contains(spec.AttendedLabel, "Cursor") {
-			t.Fatalf("label after override = %q", spec.AttendedLabel)
+			t.Fatalf("label = %q, want the merged head", spec.AttendedLabel)
 		}
 		return ui.GateMenuResult{Key: "0"}, nil
-	}
-	runAgentOverridePicker = func(groups []ui.AgentOverrideGroup, in io.Reader, out io.Writer, warn func(string, ...any)) (*ui.AgentOverrideChoice, error) {
-		return &ui.AgentOverrideChoice{Group: "attended", Cmd: "cursor"}, nil
 	}
 
 	var out bytes.Buffer
@@ -55,7 +46,8 @@ func TestPromptRoutineGateMenuOverridePromotes(t *testing.T) {
 	if key != "0" {
 		t.Fatalf("key = %q", key)
 	}
-	if d.Tasks.AgentOverrides == nil || d.Tasks.AgentOverrides.AttendedCmd() != "cursor" {
-		t.Fatalf("override = %#v", d.Tasks.AgentOverrides)
+	// One pass: there is no side-trip to re-open the menu for any more.
+	if calls != 1 {
+		t.Fatalf("gate menu shown %d times, want 1", calls)
 	}
 }

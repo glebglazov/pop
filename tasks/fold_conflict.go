@@ -167,7 +167,7 @@ func promptFoldConflictAction(out io.Writer, in io.Reader, reader *promptReader,
 			{Key: "0", Label: "Exit"},
 		},
 	}
-	choice, _, err := promptGateMenu(out, in, reader, spec, nil, d, cfg)
+	choice, _, err := promptGateMenu(out, in, reader, spec, nil, cfg)
 	if err != nil {
 		return foldConflictExit, err
 	}

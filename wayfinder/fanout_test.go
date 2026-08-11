@@ -37,7 +37,7 @@ func TestFanOutSpawnsOnePanePerFrontierTicketInOneWindow(t *testing.T) {
 		if got, _ := fake.PaneTagValue(pane.PaneID, tmux.TagTicket); got != spawned.Ticket.ID {
 			t.Fatalf("pane %s tagged %q, want ticket %s", pane.PaneID, got, spawned.Ticket.ID)
 		}
-		if fake.PaneTitles[pane.PaneID] != strings.TrimSuffix(spawned.Ticket.File, ".md")+" · "+tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(nil, nil)) {
+		if fake.PaneTitles[pane.PaneID] != strings.TrimSuffix(spawned.Ticket.File, ".md")+" · "+tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(nil)) {
 			t.Fatalf("pane titles = %v, want the ticket file stems with attended entry", fake.PaneTitles)
 		}
 		if spawned.Claim.Owner != ownerOfPane(fake, pane.PaneID) {

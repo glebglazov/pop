@@ -11,14 +11,8 @@ import (
 // at all.
 const assistPaneTitle = "assist"
 
-func assistPaneTitleFor(d *Deps, cfg *config.Config) string {
-	var overrides *tasks.AgentOverrides
-	if d != nil {
-		if td := d.taskDeps(); td != nil {
-			overrides = td.AgentOverrides
-		}
-	}
-	return assistPaneTitle + " · " + tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(cfg, overrides))
+func assistPaneTitleFor(cfg *config.Config) string {
+	return assistPaneTitle + " · " + tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(cfg))
 }
 
 // AssistPane is the Map's own attended session: one pane per Map in its `map`
@@ -72,7 +66,7 @@ func SpawnAssist(d *Deps, cfg *config.Config, m Map) (*AssistPane, error) {
 	if err != nil {
 		return nil, err
 	}
-	paneID, reused, err := openMapPane(d, *session, tmux.TagAssist, m.ID, assistPaneTitleFor(d, cfg), command)
+	paneID, reused, err := openMapPane(d, *session, tmux.TagAssist, m.ID, assistPaneTitleFor(cfg), command)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +75,7 @@ func SpawnAssist(d *Deps, cfg *config.Config, m Map) (*AssistPane, error) {
 		Session: *session,
 		Window:  mapWindow,
 		PaneID:  paneID,
-		Title:   assistPaneTitleFor(d, cfg),
+		Title:   assistPaneTitleFor(cfg),
 		Reused:  reused,
 	}, nil
 }

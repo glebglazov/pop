@@ -1204,8 +1204,9 @@ func ResolveAgentAssistanceCapability(preset, agentCmd string) (AgentAssistanceC
 // agentCmd is accepted for call-site symmetry with headless invocation but is intentionally ignored:
 // custom --agent-cmd only applies to unattended issue attempts.
 //
-// override is the attended agent a human named for this one session, empty when
-// they named none; either way the spec it resolves to is an attended entry, and
+// override is the attended agent a --agent flag named for this one invocation,
+// empty when none was given; either way the spec it resolves to is an attended
+// entry, and
 // the entry's whole cmd is the invocation — arguments and model passed through
 // as written, with the preset's declared posture arguments appended only where
 // the entry did not name that flag (ADR-0195). No attended path reads a drain's
@@ -1221,9 +1222,6 @@ func ResolveAgentAssistanceCapability(preset, agentCmd string) (AgentAssistanceC
 // entry. When every entry is unusable the session refuses with that same
 // information.
 func ResolveAgentAssistanceInvocation(d *Deps, cfg *config.Config, override, agentCmd, prompt, runtimePath string) (*AgentAssistanceInvocation, error) {
-	if strings.TrimSpace(override) == "" {
-		override = sessionAttendedOverride(d)
-	}
 	candidates := attendedLaunchCandidates(cfg, override)
 
 	// Cooling is a best-effort pre-flight read. A missing Deps/FS seam — or a

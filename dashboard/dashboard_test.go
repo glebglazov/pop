@@ -3528,11 +3528,12 @@ func TestStatusSubmenuKMovesCursor(t *testing.T) {
 	}
 }
 
-// TestDashboardMenusReserveMovementKeys keeps j/k/J/K movement-only and the
-// agent-override chord surface-owned: no menu item in any dashboard table may
-// bind them, so a new verb cannot shadow navigation or alt+a (ADR-0196).
+// TestDashboardMenusReserveMovementKeys keeps j/k/J/K movement-only: no menu
+// item in any dashboard table may bind them, so a new verb cannot shadow
+// navigation. Nothing else is reserved — ADR-0202 decision 5 returned alt+a to
+// kind key space with the picker it opened.
 func TestDashboardMenusReserveMovementKeys(t *testing.T) {
-	reserved := []string{"j", "k", "J", "K", tasks.AgentOverrideKey}
+	reserved := []string{"j", "k", "J", "K"}
 	check := func(table string, keys []string) {
 		t.Helper()
 		for _, key := range keys {

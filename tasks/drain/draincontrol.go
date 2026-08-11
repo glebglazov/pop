@@ -377,12 +377,11 @@ func LaunchAssist(d *Deps, cfg *config.Config, row DashboardRow) (DashboardDrain
 	if strings.TrimSpace(runtimePath) != "" {
 		command += " --task-runtime-path " + shellQuote(runtimePath)
 	}
-	command += attendedOverrideFlag(d)
 	paneID, err := tmuxmod.EnsureTaggedPane(d.Tmux, tmuxmod.TagAssist, session, tmuxmod.DrainWindow, checkout, row.ID, command)
 	if err != nil {
 		return DashboardDrainResult{}, err
 	}
-	if err := d.Tmux.SetPaneTitle(paneID, AssistPaneTitle(row.ID, attendedEntryLabel(d, cfg))); err != nil {
+	if err := d.Tmux.SetPaneTitle(paneID, AssistPaneTitle(row.ID, attendedEntryLabel(cfg))); err != nil {
 		return DashboardDrainResult{}, err
 	}
 	return DashboardDrainResult{PaneID: paneID, Session: session, RuntimePath: runtimePath}, nil
@@ -413,28 +412,12 @@ func AssistPaneTitle(setID string, entryLabel string) string {
 	return base + " · " + entryLabel
 }
 
-// attendedEntryLabel is the shared one-line render of the attended entry in
-// force for this process (ADR-0196).
-func attendedEntryLabel(d *Deps, cfg *config.Config) string {
-	var overrides *tasks.AgentOverrides
-	if d != nil && d.Tasks != nil {
-		overrides = d.Tasks.AgentOverrides
-	}
-	return tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(cfg, overrides))
-}
-
-// attendedOverrideFlag returns --agent <cmd> when this process holds an
-// attended override, so a spawned `pop tasks assist` inherits the promotion
-// across the process boundary.
-func attendedOverrideFlag(d *Deps) string {
-	if d == nil || d.Tasks == nil || d.Tasks.AgentOverrides == nil {
-		return ""
-	}
-	cmd := strings.TrimSpace(d.Tasks.AgentOverrides.AttendedCmd())
-	if cmd == "" {
-		return ""
-	}
-	return " --agent " + shellQuote(cmd)
+// attendedEntryLabel is the shared one-line render of the attended entry the
+// merged config resolves to (ADR-0196 decision 9). The spawned session resolves
+// the same merged config for itself, so the title and the launch agree without
+// this process passing anything across the boundary.
+func attendedEntryLabel(cfg *config.Config) string {
+	return tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(cfg))
 }
 
 // LaunchFold spawns `pop tasks fold <set>` under TagFold in the project's

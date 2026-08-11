@@ -547,7 +547,7 @@ func TestMapAssistOpensTheMapScopedPaneAndStays(t *testing.T) {
 	if err := runMapAssistWith(d, &out, "demo", false); err != nil {
 		t.Fatalf("assist: %v", err)
 	}
-	if !strings.Contains(out.String(), "opened assist pane assist · "+tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(nil, nil))+" in "+session+":map") {
+	if !strings.Contains(out.String(), "opened assist pane assist · "+tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(nil))+" in "+session+":map") {
 		t.Fatalf("assist did not report its pane:\n%s", out.String())
 	}
 	// The one rule an unclaimed session never sees enforced is the one the verb
@@ -582,7 +582,7 @@ func TestMapAssistOpensTheMapScopedPaneAndStays(t *testing.T) {
 	if err := runMapAssistWith(d, &again, "demo", false); err != nil {
 		t.Fatalf("second assist: %v", err)
 	}
-	if !strings.Contains(again.String(), "returned to assist pane assist · "+tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(nil, nil))+" in "+session+":map") {
+	if !strings.Contains(again.String(), "returned to assist pane assist · "+tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(nil))+" in "+session+":map") {
 		t.Fatalf("second assist = %q, want a return to the first pane", again.String())
 	}
 	if got, _ := fake.PaneTagValue(pane, tmuxmod.TagAssist); got != "demo" {
@@ -642,7 +642,7 @@ func TestMapSessionPerMapAutoOpensWithoutRelocatingTheCaller(t *testing.T) {
 	if err := runMapNextWith(d, &next, "demo", true); err != nil {
 		t.Fatalf("next: %v", err)
 	}
-	wantPane := "01-first · " + tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(nil, nil))
+	wantPane := "01-first · " + tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(nil))
 	if !strings.Contains(next.String(), "opened grilling pane "+wantPane+" in "+session+":map") {
 		t.Fatalf("next did not report its pane:\n%s", next.String())
 	}

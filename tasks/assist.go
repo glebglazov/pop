@@ -405,7 +405,7 @@ func promptGenericAssistAction(out io.Writer, in io.Reader, reader *promptReader
 		Tone:     ui.GateMenuToneDefault,
 		Items:    items,
 	}
-	choice, _, err := promptGateMenu(out, in, reader, spec, nil, d, cfg)
+	choice, _, err := promptGateMenu(out, in, reader, spec, nil, cfg)
 	if err != nil {
 		return genericAssistExit, err
 	}

@@ -279,14 +279,10 @@ func grillingPaneTitle(ticket Ticket, entryLabel string) string {
 	return base + " · " + entryLabel
 }
 
-func attendedEntryLabel(d *Deps, cfg *config.Config) string {
-	var overrides *tasks.AgentOverrides
-	if d != nil {
-		if td := d.taskDeps(); td != nil {
-			overrides = td.AgentOverrides
-		}
-	}
-	return tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(cfg, overrides))
+// attendedEntryLabel is the shared one-line render of the attended entry the
+// merged config resolves to, for the pane title a grilling session opens under.
+func attendedEntryLabel(cfg *config.Config) string {
+	return tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(cfg))
 }
 
 func shellQuote(s string) string {

@@ -72,12 +72,6 @@ type Deps struct {
 	Clock deps.Clock
 	Rand  deps.Rand
 
-	// AgentOverrides is the session-lived promotion of one entry to the head of
-	// each Work agent group (ADR-0196). Nil means no overrides. The dashboard
-	// and gate menus write here for the rest of this OS process; nothing
-	// persists it.
-	AgentOverrides *AgentOverrides
-
 	// store is the lazily-opened, process-cached execution-state store handle
 	// holder. DefaultDeps pre-allocates it so production copies of Deps share one
 	// handle; a Deps built from a bare literal (tests) gets its holder lazily on

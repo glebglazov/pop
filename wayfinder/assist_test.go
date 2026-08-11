@@ -28,7 +28,7 @@ func TestAssistOpensOneReusedPanePerMap(t *testing.T) {
 	if got, _ := fake.PaneTagValue(pane.PaneID, tmux.TagAssist); got != claimMapID {
 		t.Fatalf("pane tag = %q, want the map id under @pop_assist", got)
 	}
-	wantAssistTitle := "assist · " + tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(nil, nil))
+	wantAssistTitle := "assist · " + tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(nil))
 	if fake.PaneTitles[pane.PaneID] != wantAssistTitle {
 		t.Fatalf("pane titles = %v, want %q", fake.PaneTitles, wantAssistTitle)
 	}

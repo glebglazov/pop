@@ -108,7 +108,7 @@ func TestDashboardLaunchAssistSpawnsTaggedPane(t *testing.T) {
 	if pane != setID {
 		t.Fatalf("@pop_assist = %q, want %q", pane, setID)
 	}
-	if title := rt.Fake.PaneTitles["%3"]; title != drain.AssistPaneTitle(setID, tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(cfg, nil))) {
+	if title := rt.Fake.PaneTitles["%3"]; title != drain.AssistPaneTitle(setID, tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(cfg))) {
 		t.Fatalf("pane title = %q, want default attended entry", title)
 	}
 }

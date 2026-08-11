@@ -135,7 +135,7 @@ func promptInterruptGateAction(out io.Writer, in io.Reader, reader *promptReader
 		},
 		Footnote: "(press Ctrl-C again to force-quit)",
 	}
-	choice, forceQuit, err := promptGateMenu(out, in, reader, spec, sigCh, d, cfg)
+	choice, forceQuit, err := promptGateMenu(out, in, reader, spec, sigCh, cfg)
 	if err != nil {
 		return interruptGateExitChoice, err
 	}

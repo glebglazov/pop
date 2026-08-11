@@ -106,17 +106,24 @@ func TestGateMenuViewGoldenInterruptFootnote(t *testing.T) {
 	}
 }
 
-func TestGateMenuAltAOpensOverride(t *testing.T) {
+// alt+a opened the retired agent-override picker (ADR-0202 decision 5). It must
+// now do nothing at all rather than quietly select an option: muscle memory for
+// it points at a surface that no longer exists.
+func TestGateMenuRetiredOverrideChordDoesNothing(t *testing.T) {
 	m := NewGateMenu(sampleHITLSpec())
+	before := StripANSI(m.ViewChoices())
 	_, cmd := m.Update(tea.KeyPressMsg{Code: 'a', Mod: tea.ModAlt})
-	if !m.OpenOverride() {
-		t.Fatal("alt+a should signal OpenOverride")
+	if cmd != nil {
+		t.Fatal("alt+a must not quit the menu")
 	}
 	if m.Chosen() != "" {
-		t.Fatalf("chosen = %q, want empty on override", m.Chosen())
+		t.Fatalf("chosen = %q, want empty", m.Chosen())
 	}
-	if cmd == nil {
-		t.Fatal("expected tea.Quit")
+	if got := StripANSI(m.ViewChoices()); got != before {
+		t.Fatalf("alt+a moved the menu:\n%s", got)
+	}
+	if strings.Contains(before, "A-a") {
+		t.Fatalf("hint still offers the retired chord:\n%s", before)
 	}
 }
 

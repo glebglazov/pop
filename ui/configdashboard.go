@@ -32,6 +32,12 @@ import (
 // override layer itself is reached through the injected ConfigOverrideWriter,
 // so this package still holds no config knowledge.
 
+// ConfigDashboardKeyLabel is how the chord that opens this component from a host
+// reads in chrome — `alt+c` (ADR-0202 decision 10), in ui's A- prefix form. Any
+// surface that tells a human where a setting is changed points here rather than
+// spelling the chord itself.
+const ConfigDashboardKeyLabel = "A-c"
+
 // configOverrideMarker marks a row whose key currently carries an override, so
 // the list answers "what have I changed" without arrowing through every preview.
 const configOverrideMarker = "●"

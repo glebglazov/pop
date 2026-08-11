@@ -223,7 +223,7 @@ func TestMapKindWorkVerbOpensTheGrillingPane(t *testing.T) {
 	}
 	session := MapSessionName(active.ID)
 	panes := fake.Windows[session]["map"]
-	wantTitle := "01-research · " + tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(nil, nil))
+	wantTitle := "01-research · " + tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(nil))
 	if len(panes) != 1 || fake.PaneTitles[panes[0]] != wantTitle {
 		t.Fatalf("windows = %v (titles %v), want one pane titled %q", fake.Windows[session], fake.PaneTitles, wantTitle)
 	}

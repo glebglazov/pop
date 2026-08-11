@@ -152,7 +152,7 @@ func TestLaunchWayfinderSessionSpawnsIntoTheMapSession(t *testing.T) {
 	if len(windows) != 1 || len(windows[mapPaneWindow]) != 1 {
 		t.Fatalf("expected one pane in the single map window, windows=%v", windows)
 	}
-	if got := f.PaneTitles[windows[mapPaneWindow][0]]; got != "01-frontier · "+tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(cfg, nil)) {
+	if got := f.PaneTitles[windows[mapPaneWindow][0]]; got != "01-frontier · "+tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(cfg)) {
 		t.Fatalf("pane title = %q, want the ticket stem with attended entry", got)
 	}
 	for session, ws := range f.Windows {
