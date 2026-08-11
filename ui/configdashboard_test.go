@@ -67,7 +67,11 @@ func sampleConfigDashboardRows() []ConfigDashboardRow {
 }
 
 func newSizedConfigDashboard(rows []ConfigDashboardRow, width, height int) *ConfigDashboard {
-	m := NewConfigDashboard(rows)
+	return newSizedConfigDashboardWith(rows, ConfigDashboardOpts{}, width, height)
+}
+
+func newSizedConfigDashboardWith(rows []ConfigDashboardRow, opts ConfigDashboardOpts, width, height int) *ConfigDashboard {
+	m := NewConfigDashboard(rows, opts)
 	m.Update(tea.WindowSizeMsg{Width: width, Height: height})
 	return m
 }
@@ -251,8 +255,7 @@ func TestConfigDashboardPreviewProvenanceStates(t *testing.T) {
 	}
 }
 
-// TestConfigDashboardEscCloses keeps the component's one binding honest: it
-// closes, and nothing in this read-only pass writes anything.
+// TestConfigDashboardEscCloses keeps the closing binding honest.
 func TestConfigDashboardEscCloses(t *testing.T) {
 	m := newSizedConfigDashboard(sampleConfigDashboardRows(), 100, 30)
 	if _, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape}); cmd == nil {

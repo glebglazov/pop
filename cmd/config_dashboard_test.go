@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/ui"
 )
 
 // TestConfigDashboardRefusesWithoutATTY pins ADR-0202 decision 15: the TUI is
@@ -13,7 +14,7 @@ import (
 // rather than handed a listing that is not the dashboard.
 func TestConfigDashboardRefusesWithoutATTY(t *testing.T) {
 	t.Parallel()
-	err := runConfigDashboardWith(nil, strings.NewReader(""), io.Discard, false)
+	err := runConfigDashboardWith(nil, ui.ConfigDashboardOpts{}, strings.NewReader(""), io.Discard, false)
 	if err == nil {
 		t.Fatal("no error with stdout redirected, want a refusal")
 	}

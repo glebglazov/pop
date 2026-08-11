@@ -163,7 +163,16 @@ value as TOML, the layer that produced it (the override layer, your config.toml,
 a built-in default, or a fallthrough to another key), and, where an override is
 in force, the value it is standing on.
 
-This pass is read-only — no key edits anything yet.
+Three keys write the override layer for the highlighted key:
+
+  enter  edit the value in $EDITOR, seeded with the whole key = value line in
+         force today. Handing back an empty buffer cancels; an explicitly empty
+         collection is a real value, which is how a group's fallthrough is
+         disabled on purpose. A value that would produce a config finding
+         re-opens the editor with the problem instead of being written.
+  C-y    copy the source value down as the override, without an editor.
+  C-x    remove the override, restoring the source. There is no confirmation:
+         C-y puts the source value back.
 
 It needs a terminal, so it refuses when stdout is redirected. A roomier popup
 than the other dashboards suits it:
@@ -246,12 +255,13 @@ func runConfigDashboard(cmd *cobra.Command, _ []string) error {
 	if path == "" {
 		path = config.DefaultConfigPathWith(d.configDeps())
 	}
-	views, err := config.OverrideKeyViewsWith(d.configDeps(), path)
+	writer := configOverrideWriter{deps: d.configDeps(), configPath: path}
+	rows, err := writer.Rows()
 	if err != nil {
 		return err
 	}
 	_, isTTY := tty.TerminalFd(os.Stdout)
-	return runConfigDashboardWith(configDashboardRows(views), os.Stdin, os.Stdout, isTTY)
+	return runConfigDashboardWith(rows, ui.ConfigDashboardOpts{Writer: writer}, os.Stdin, os.Stdout, isTTY)
 }
 
 // runConfigDashboardWith refuses a non-terminal stdout rather than degrading to
@@ -259,12 +269,40 @@ func runConfigDashboard(cmd *cobra.Command, _ []string) error {
 // human who redirected it needs to be told that, not handed something else. The
 // deferred `pop config override set` is what a script will use (ADR-0202
 // decision 15).
-func runConfigDashboardWith(rows []ui.ConfigDashboardRow, in io.Reader, out io.Writer, isTTY bool) error {
+func runConfigDashboardWith(rows []ui.ConfigDashboardRow, opts ui.ConfigDashboardOpts, in io.Reader, out io.Writer, isTTY bool) error {
 	if !isTTY {
 		return errors.New("pop config dashboard needs a terminal: stdout is not a TTY. " +
 			"Run it in a terminal (or a tmux popup); use `pop config keys` and `pop config show` for piped output")
 	}
-	return ui.RunConfigDashboard(rows, in, out)
+	return ui.RunConfigDashboard(rows, opts, in, out)
+}
+
+// configOverrideWriter is the Config dashboard's write side over the real
+// override layer. It is the whole of what the component knows about config: the
+// three actions and the re-read that follows each of them.
+type configOverrideWriter struct {
+	deps       *config.Deps
+	configPath string
+}
+
+func (w configOverrideWriter) Store(key, buffer string) (string, error) {
+	return config.StoreOverrideBufferWith(w.deps, key, buffer)
+}
+
+func (w configOverrideWriter) CopySource(key string) error {
+	return config.CopyOverrideFromSourceWith(w.deps, w.configPath, key)
+}
+
+func (w configOverrideWriter) Remove(key string) error {
+	return config.DeleteOverrideValueWith(w.deps, key)
+}
+
+func (w configOverrideWriter) Rows() ([]ui.ConfigDashboardRow, error) {
+	views, err := config.OverrideKeyViewsWith(w.deps, w.configPath)
+	if err != nil {
+		return nil, err
+	}
+	return configDashboardRows(views), nil
 }
 
 // configDashboardRows adapts the resolved override views to the component's

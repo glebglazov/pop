@@ -56,10 +56,13 @@ type overrideFallthrough struct {
 // it in routine/agents.go; implement and attended have nowhere to walk on to.
 //
 // The second half of ADR-0202 decision 6 — that an override of `agents = []`
-// *disables* the fallthrough — is what the preview words below promise. Agent
-// resolution does not yet distinguish an override-authored empty list from any
-// other empty list; the slice that makes the editor write this file is where that
-// distinction has to land.
+// *disables* the fallthrough — is what the preview words below promise. The
+// editor stores that emptiness as a real value and the ladder read here tells it
+// from an absent key, so the preview is right about what is stored. Agent
+// resolution is not: resolveVerifier (tasks/verify.go) and
+// ResolveRoutineAgentPresets (routine/agents.go) still walk on from any empty
+// list, whoever wrote it. Closing that means giving both run paths a way to ask
+// who wrote the emptiness, which is a change to them and not to this file.
 var overrideFallthroughs = map[string]overrideFallthrough{
 	"work.verify.agents":  {Key: "work.implement.agents", Phrase: "the implement list"},
 	"work.routine.agents": {Key: "work.implement.agents", Phrase: "the implement list"},
@@ -348,6 +351,8 @@ func isEmptyTOMLValue(value any) bool {
 		return v == ""
 	case []any:
 		return len(v) == 0
+	case []map[string]any:
+		return len(v) == 0
 	case map[string]any:
 		return len(v) == 0
 	default:
@@ -382,18 +387,16 @@ func renderTOMLValue(value any, indent string) string {
 	case time.Time:
 		return v.Format(time.RFC3339)
 	case []any:
-		if len(v) == 0 {
-			return "[]"
-		}
-		var b strings.Builder
-		b.WriteString("[\n")
+		return renderTOMLArray(v, indent)
+	// An array of tables written as [[work.verify.agents]] blocks decodes to a
+	// typed slice rather than the generic one, and it is the same array: the
+	// preview shows one entry per line either way.
+	case []map[string]any:
+		elems := make([]any, 0, len(v))
 		for _, elem := range v {
-			b.WriteString(indent + "  ")
-			b.WriteString(renderTOMLValue(elem, indent+"  "))
-			b.WriteString(",\n")
+			elems = append(elems, elem)
 		}
-		b.WriteString(indent + "]")
-		return b.String()
+		return renderTOMLArray(elems, indent)
 	case map[string]any:
 		if len(v) == 0 {
 			return "{}"
@@ -411,4 +414,19 @@ func renderTOMLValue(value any, indent string) string {
 	default:
 		return fmt.Sprintf("%v", v)
 	}
+}
+
+func renderTOMLArray(elems []any, indent string) string {
+	if len(elems) == 0 {
+		return "[]"
+	}
+	var b strings.Builder
+	b.WriteString("[\n")
+	for _, elem := range elems {
+		b.WriteString(indent + "  ")
+		b.WriteString(renderTOMLValue(elem, indent+"  "))
+		b.WriteString(",\n")
+	}
+	b.WriteString(indent + "]")
+	return b.String()
 }

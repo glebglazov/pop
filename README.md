@@ -138,11 +138,23 @@ an override is standing on.
 |-----|--------|
 | type | Filter over key path and description |
 | `↑`/`↓` | Move highlight |
+| `enter` | Edit this key's override in `$EDITOR` |
+| `C-y` | Copy the source value down as the override |
+| `C-x` | Remove the override, restoring the source |
 | `esc` | Close |
 | `C-h` | Help |
 
-Read-only for now, and it needs a terminal: with stdout redirected it refuses
-rather than printing something that is not the dashboard.
+`enter` opens your editor on the whole `key = value` line in force today.
+Handing back an empty buffer cancels — `C-x` is how an override is removed —
+while an explicitly empty collection is a real value, which is how the verify
+and routine groups' fallthrough to `work.implement.agents` is disabled on
+purpose. A value that would produce a config finding re-opens the editor with
+the problem instead of being written: a file pop wrote itself is never the
+source of a finding. Neither `C-y` nor `C-x` asks for confirmation, because each
+undoes the other.
+
+It needs a terminal: with stdout redirected it refuses rather than printing
+something that is not the dashboard.
 
 ### `pop layout`
 

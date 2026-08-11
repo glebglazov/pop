@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -26,7 +27,10 @@ import (
 // path, because in the picker hosts stdout is a data channel. Errors surface as
 // a row in this view instead.
 //
-// This pass is read-only: no editing keys are bound, and nothing here writes.
+// It is also the editor. Enter opens $EDITOR on the selected key in place,
+// ctrl+y copies the source value down and ctrl+x removes the override; the
+// override layer itself is reached through the injected ConfigOverrideWriter,
+// so this package still holds no config knowledge.
 
 // configOverrideMarker marks a row whose key currently carries an override, so
 // the list answers "what have I changed" without arrowing through every preview.
@@ -75,12 +79,47 @@ type ConfigDashboardRow struct {
 	Preview    ConfigDashboardPreview
 }
 
+// ConfigOverrideWriter is the override layer as this component needs it: the
+// three actions a row offers, and a re-read of every row. The host injects it
+// because provenance, validation and the file itself are config's business, not
+// this package's.
+type ConfigOverrideWriter interface {
+	// Store makes buffer the whole value of key. The problem string is what the
+	// human must fix — unparseable TOML, the wrong key, a value the schema
+	// refuses — and it re-opens the editor rather than failing the component
+	// (ADR-0202 decision 8); an error is the write itself going wrong.
+	Store(key, buffer string) (problem string, err error)
+	// CopySource writes the value below the override as the override.
+	CopySource(key string) error
+	// Remove deletes key's override, restoring the source. On a key with no
+	// override it does nothing.
+	Remove(key string) error
+	// Rows re-resolves every row against the layers as they now stand, so a
+	// write shows up in the marker and the provenance line at once.
+	Rows() ([]ConfigDashboardRow, error)
+}
+
+// ConfigDashboardOpts wires the component's write side.
+type ConfigDashboardOpts struct {
+	// Writer is the override layer this dashboard edits. Left nil the component
+	// is read-only: the editing keys are unbound and unadvertised.
+	Writer ConfigOverrideWriter
+	// Editor hands a temp file to the human's editor and calls done when it
+	// exits. Nil means $EDITOR in place through tea.ExecProcess, which is what
+	// every host wants (ADR-0202 decision 13); a caller with no terminal
+	// substitutes it to drive the same loop.
+	Editor func(path string, done tea.ExecCallback) tea.Cmd
+}
+
 // ConfigDashboard is the component model.
 type ConfigDashboard struct {
 	rows     []ConfigDashboardRow
 	filtered []ConfigDashboardRow
 	list     *List[ConfigDashboardRow]
 	input    TextField
+
+	writer ConfigOverrideWriter
+	editor func(path string, done tea.ExecCallback) tea.Cmd
 
 	width    int
 	height   int
@@ -93,8 +132,17 @@ type ConfigDashboard struct {
 
 // NewConfigDashboard builds the component over the override-exposed keys, in the
 // order the caller listed them.
-func NewConfigDashboard(rows []ConfigDashboardRow) *ConfigDashboard {
-	m := &ConfigDashboard{rows: rows, filtered: rows, input: NewTextField()}
+func NewConfigDashboard(rows []ConfigDashboardRow, opts ConfigDashboardOpts) *ConfigDashboard {
+	m := &ConfigDashboard{
+		rows:     rows,
+		filtered: rows,
+		input:    NewTextField(),
+		writer:   opts.Writer,
+		editor:   opts.Editor,
+	}
+	if m.editor == nil {
+		m.editor = execEditorInPlace
+	}
 	m.input.Focus()
 	m.list = NewList(rows, Opts[ConfigDashboardRow]{
 		Key:  func(r ConfigDashboardRow) string { return r.Key },
@@ -130,6 +178,8 @@ func (m *ConfigDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.SetSize(msg.Width, msg.Height)
 		return m, nil
+	case configEditorDoneMsg:
+		return m, m.editorReturned(msg)
 	case tea.KeyPressMsg:
 		if ToggleHelp(&m.showHelp, msg) {
 			return m, nil
@@ -154,6 +204,16 @@ func (m *ConfigDashboard) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.list.MoveDown()
 		return nil
 	}
+	if m.writer != nil {
+		switch {
+		case key.Matches(msg, configDashboardKeys.Edit):
+			return m.edit()
+		case key.Matches(msg, configDashboardKeys.CopySource):
+			return m.act("copy the source value down", m.writer.CopySource)
+		case key.Matches(msg, configDashboardKeys.Remove):
+			return m.act("remove the override", m.writer.Remove)
+		}
+	}
 	// Everything else edits the query, so the search field needs no focus key
 	// and a human can start typing the moment the component opens.
 	m.input.Update(msg)
@@ -167,23 +227,194 @@ func (m *ConfigDashboard) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 // a handful of keys, reordering by score moves rows under a human's fingers for
 // nothing.
 func (m *ConfigDashboard) filter() {
+	m.filtered = m.matchingRows()
+	m.list.SetItems(m.filtered)
+}
+
+func (m *ConfigDashboard) matchingRows() []ConfigDashboardRow {
 	query := strings.TrimSpace(m.input.Value())
 	if query == "" {
-		m.filtered = m.rows
-	} else {
-		pattern := []rune(strings.ToLower(query))
-		slab := util.MakeSlab(100*1024, 2048)
-		matched := make([]ConfigDashboardRow, 0, len(m.rows))
-		for _, row := range m.rows {
-			chars := util.ToChars([]byte(strings.ToLower(row.Key + " " + row.Desc)))
-			result, _ := algo.FuzzyMatchV2(false, true, true, &chars, pattern, false, slab)
-			if result.Score > 0 {
-				matched = append(matched, row)
-			}
-		}
-		m.filtered = matched
+		return m.rows
 	}
-	m.list.SetItems(m.filtered)
+	pattern := []rune(strings.ToLower(query))
+	slab := util.MakeSlab(100*1024, 2048)
+	matched := make([]ConfigDashboardRow, 0, len(m.rows))
+	for _, row := range m.rows {
+		chars := util.ToChars([]byte(strings.ToLower(row.Key + " " + row.Desc)))
+		result, _ := algo.FuzzyMatchV2(false, true, true, &chars, pattern, false, slab)
+		if result.Score > 0 {
+			matched = append(matched, row)
+		}
+	}
+	return matched
+}
+
+// act performs one of the two keystroke actions on the selected row and shows
+// the result immediately. Neither asks for confirmation: a removed override is
+// one copy-from-source away from being back (ADR-0202 decision 6).
+func (m *ConfigDashboard) act(what string, do func(key string) error) tea.Cmd {
+	row, ok := m.list.Selected()
+	if !ok {
+		return nil
+	}
+	if err := do(row.Key); err != nil {
+		m.failure = fmt.Sprintf("Could not %s for %s: %v", what, row.Key, err)
+		return nil
+	}
+	m.refresh()
+	return nil
+}
+
+// edit opens the selected key in $EDITOR. The buffer is seeded with the whole
+// `key = value` line that is in force — the override where there is one, the
+// source value copied down where there is not — so the human edits a real value
+// rather than an empty file (ADR-0202 decision 7).
+func (m *ConfigDashboard) edit() tea.Cmd {
+	row, ok := m.list.Selected()
+	if !ok {
+		return nil
+	}
+	return m.openEditor(row.Key, row.Preview.ValueTOML)
+}
+
+// configEditorDoneMsg reports that the editor process for one key has exited.
+type configEditorDoneMsg struct {
+	key  string
+	path string
+	err  error
+}
+
+func (m *ConfigDashboard) openEditor(key, buffer string) tea.Cmd {
+	path, err := writeEditorBuffer(buffer)
+	if err != nil {
+		m.failure = fmt.Sprintf("Could not open an editor buffer for %s: %v", key, err)
+		return nil
+	}
+	m.failure = ""
+	return m.editor(path, func(err error) tea.Msg {
+		return configEditorDoneMsg{key: key, path: path, err: err}
+	})
+}
+
+// editorReturned decides what the text the human handed back means: nothing at
+// all, a value to store, or a problem to go back and fix.
+func (m *ConfigDashboard) editorReturned(msg configEditorDoneMsg) tea.Cmd {
+	defer func() { _ = os.Remove(msg.path) }()
+	if msg.err != nil {
+		m.failure = fmt.Sprintf("Editor for %s: %v", msg.key, msg.err)
+		return nil
+	}
+	data, err := os.ReadFile(msg.path)
+	if err != nil {
+		m.failure = fmt.Sprintf("Could not read the edited buffer for %s: %v", msg.key, err)
+		return nil
+	}
+	buffer := string(data)
+	// An empty buffer is a cancel, not a deletion: leaving nothing behind is how
+	// a human backs out of an edit, and ctrl+x is how they remove an override
+	// (ADR-0202 decision 7). Pop's own notes do not count as content.
+	if strings.TrimSpace(stripEditorNotes(buffer)) == "" {
+		return nil
+	}
+	problem, err := m.writer.Store(msg.key, buffer)
+	switch {
+	case err != nil:
+		m.failure = fmt.Sprintf("Could not store the override for %s: %v", msg.key, err)
+		return nil
+	case problem != "":
+		// A file pop wrote itself must never be the source of a finding, so the
+		// human goes back to the buffer with the problem on top of it rather
+		// than having it written and complained about later.
+		return m.openEditor(msg.key, editorBufferWithProblem(problem, buffer))
+	}
+	m.refresh()
+	return nil
+}
+
+// refresh re-resolves every row after a write, so the marker and the provenance
+// line tell the truth the moment the editor closes. The highlight stays on the
+// key it was on.
+func (m *ConfigDashboard) refresh() {
+	rows, err := m.writer.Rows()
+	if err != nil {
+		m.failure = fmt.Sprintf("Wrote the override, but could not re-read the config: %v", err)
+		return
+	}
+	m.rows = rows
+	m.filtered = m.matchingRows()
+	m.list.ReplaceItems(m.filtered)
+}
+
+// configEditorNote prefixes every line pop writes into the buffer. It is a TOML
+// comment, so a human who leaves it alone changes nothing, and it is distinct
+// enough that stripping pop's notes never touches a comment they wrote.
+const configEditorNote = "# pop: "
+
+// editorBufferWithProblem puts the problem above the text that caused it and
+// says what the two ways out are. Previous notes are dropped, so a second
+// mistake reads as one problem rather than a growing pile.
+func editorBufferWithProblem(problem, buffer string) string {
+	var b strings.Builder
+	b.WriteString(configEditorNote + "this value was not stored.\n")
+	for _, line := range strings.Split(strings.TrimRight(problem, "\n"), "\n") {
+		b.WriteString(configEditorNote + line + "\n")
+	}
+	b.WriteString(configEditorNote + "Fix the value below, or empty this buffer to leave the override as it was.\n")
+	b.WriteString(stripEditorNotes(buffer))
+	return b.String()
+}
+
+// stripEditorNotes removes the lines pop wrote into the buffer, leaving the
+// human's own text — including their own comments.
+func stripEditorNotes(buffer string) string {
+	lines := strings.Split(buffer, "\n")
+	kept := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if strings.HasPrefix(line, configEditorNote) {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
+}
+
+// writeEditorBuffer stages the buffer as a .toml temp file, so an editor that
+// keys its syntax highlighting off the extension helps the human get the value
+// right the first time.
+func writeEditorBuffer(buffer string) (string, error) {
+	f, err := os.CreateTemp("", "pop-override-*.toml")
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	if !strings.HasSuffix(buffer, "\n") {
+		buffer += "\n"
+	}
+	if _, err := f.WriteString(buffer); err != nil {
+		_ = os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
+}
+
+// execEditorInPlace runs $EDITOR on this program's own terminal: bubbletea
+// releases the terminal, the editor takes it, and the program repaints when it
+// exits. A popup host makes for a cramped editor window, which is the human's
+// own layout choice — a component that behaved differently depending on how it
+// was launched would be harder to reason about (ADR-0202 decision 13).
+//
+// The editor inherits pop's process group, so the terminal foreground never
+// moves and the claim made when the program started still holds on return. What
+// it does inherit is the program's own output writer, which is why a host whose
+// stdout is a data channel has to run the program on another writer, exactly as
+// the pickers already do.
+func execEditorInPlace(path string, done tea.ExecCallback) tea.Cmd {
+	editor := strings.TrimSpace(os.Getenv("EDITOR"))
+	if editor == "" {
+		editor = "vi"
+	}
+	fields := strings.Fields(editor)
+	return tea.ExecProcess(exec.Command(fields[0], append(fields[1:], path)...), done)
 }
 
 // View implements tea.Model. AltScreen is on: run as a top-level program this is
@@ -199,12 +430,21 @@ func (m *ConfigDashboard) View() tea.View {
 }
 
 func (m *ConfigDashboard) helpEntries() []HelpEntry {
-	return []HelpEntry{
+	entries := []HelpEntry{
 		{"type", "Filter over key path and description"},
 		{"↑/↓", "Move highlight"},
-		{"Esc", "Close"},
-		{"C-h", "Toggle this help"},
 	}
+	if m.writer != nil {
+		entries = append(entries,
+			HelpEntry{"Enter", "Edit this key's override in $EDITOR (empty buffer cancels)"},
+			HelpEntry{"C-y", "Copy the source value down as the override"},
+			HelpEntry{"C-x", "Remove the override, restoring the source"},
+		)
+	}
+	return append(entries,
+		HelpEntry{"Esc", "Close"},
+		HelpEntry{"C-h", "Toggle this help"},
+	)
 }
 
 // ViewContent renders the component body. The standalone program and any host
@@ -219,13 +459,17 @@ func (m *ConfigDashboard) frameSpec() Frame {
 	if m.failure != "" {
 		warnings = []string{m.failure}
 	}
+	hints := "  type to filter · ↑/↓ move · esc close · C-h help"
+	if m.writer != nil {
+		hints = "  type to filter · ↑/↓ move · enter edit · C-y copy source · C-x remove · esc close · C-h help"
+	}
 	return Frame{
 		Width:    m.viewWidth(),
 		TermH:    m.viewHeight(),
 		Header:   "  Config · keys you can override",
 		InputBox: m.input.View(),
 		Warnings: warnings,
-		Hints:    "  type to filter · ↑/↓ move · esc close · C-h help",
+		Hints:    hints,
 	}
 }
 
@@ -383,14 +627,14 @@ func (m *ConfigDashboard) viewHeight() int {
 // RunConfigDashboard runs the component as a top-level tea program. The caller
 // has already established that out is a terminal: this never prints to it
 // outside the program's own frame (ADR-0202 decision 11).
-func RunConfigDashboard(rows []ConfigDashboardRow, in io.Reader, out io.Writer) error {
+func RunConfigDashboard(rows []ConfigDashboardRow, opts ConfigDashboardOpts, in io.Reader, out io.Writer) error {
 	if in == nil {
 		in = os.Stdin
 	}
 	if out == nil {
 		out = os.Stdout
 	}
-	m := NewConfigDashboard(rows)
+	m := NewConfigDashboard(rows, opts)
 	if fd, ok := tty.TerminalFd(in); ok {
 		claimTerminal(fd, nil)
 	}
@@ -409,13 +653,19 @@ func RunConfigDashboard(rows []ConfigDashboardRow, in io.Reader, out io.Writer) 
 }
 
 var configDashboardKeys = struct {
-	Up   key.Binding
-	Down key.Binding
-	Quit key.Binding
+	Up         key.Binding
+	Down       key.Binding
+	Edit       key.Binding
+	CopySource key.Binding
+	Remove     key.Binding
+	Quit       key.Binding
 }{
-	// The query owns every printable key, so movement lives on the arrows and
-	// the ctrl chords the pickers already use.
-	Up:   key.NewBinding(key.WithKeys("up", "ctrl+p")),
-	Down: key.NewBinding(key.WithKeys("down", "ctrl+n")),
-	Quit: key.NewBinding(key.WithKeys("esc", "ctrl+c")),
+	// The query owns every printable key, so movement and the actions live on
+	// the arrows and the ctrl chords the pickers already use.
+	Up:         key.NewBinding(key.WithKeys("up", "ctrl+p")),
+	Down:       key.NewBinding(key.WithKeys("down", "ctrl+n")),
+	Edit:       key.NewBinding(key.WithKeys("enter")),
+	CopySource: key.NewBinding(key.WithKeys("ctrl+y")),
+	Remove:     key.NewBinding(key.WithKeys("ctrl+x")),
+	Quit:       key.NewBinding(key.WithKeys("esc", "ctrl+c")),
 }
