@@ -86,7 +86,7 @@ func runWorkDashboard(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	d.ViewPreset = preset
-	checkout, err := workRunDashboard(d, cfg)
+	checkout, err := workRunDashboard(d, cfg, cfgPath)
 	if err != nil {
 		return err
 	}

@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/confighost"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/ui"
 )
@@ -19,7 +20,7 @@ import (
 type overrideEditFixture struct {
 	deps     *config.Deps
 	userPath string
-	writer   configOverrideWriter
+	writer   confighost.Writer
 	// seeds is what pop put in front of the human on each editor open.
 	seeds []string
 }
@@ -53,7 +54,7 @@ func newOverrideEditFixture(t *testing.T, configTOML string) *overrideEditFixtur
 	return &overrideEditFixture{
 		deps:     d,
 		userPath: userPath,
-		writer:   configOverrideWriter{deps: d, configPath: userPath},
+		writer:   confighost.NewWriter(d, userPath),
 	}
 }
 

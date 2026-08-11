@@ -5,6 +5,7 @@ import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/dashboard"
 	"github.com/glebglazov/pop/tasks/drain"
+	"github.com/glebglazov/pop/ui"
 	"github.com/glebglazov/pop/work"
 )
 
@@ -37,14 +38,26 @@ type Shell struct {
 	pages  map[Page]dashboard.QueueDashboard
 	d      *drain.Deps
 	cfg    *config.Config
-	width  int
-	height int
+	// cfgPath is the hand-authored config this shell loaded, kept so the Config
+	// modal edits and re-reads the same file the pages were built from.
+	cfgPath string
+	width   int
+	height  int
+
+	// configModal is the Config dashboard when it is open over the page in focus.
+	// While it is set it owns the keyboard: see config_modal.go.
+	configModal *ui.ConfigDashboard
+	// openConfig builds that modal, and reloadConfig re-reads config after it
+	// writes. Both are seams a test substitutes to drive the modal without a
+	// config dir; nil is the real override layer and the real load.
+	openConfig   func() *ui.ConfigDashboard
+	reloadConfig func() (*config.Config, error)
 }
 
 // RunFromQueue opens the dashboard on page A. It returns the bound checkout path
 // chosen with Ctrl-g (empty otherwise), matching dashboard.RunDashboard.
-func RunFromQueue(d *drain.Deps, cfg *config.Config) (string, error) {
-	s, err := newShell(PageWork, d, cfg)
+func RunFromQueue(d *drain.Deps, cfg *config.Config, cfgPath string) (string, error) {
+	s, err := newShell(PageWork, d, cfg, cfgPath)
 	if err != nil {
 		return "", err
 	}
@@ -57,8 +70,8 @@ func RunFromQueue(d *drain.Deps, cfg *config.Config) (string, error) {
 
 // RunFromRoutine opens the same dashboard on page B — the whole of what
 // `pop routine dashboard` is now.
-func RunFromRoutine(d *drain.Deps, cfg *config.Config) error {
-	s, err := newShell(PageRoutines, d, cfg)
+func RunFromRoutine(d *drain.Deps, cfg *config.Config, cfgPath string) error {
+	s, err := newShell(PageRoutines, d, cfg, cfgPath)
 	if err != nil {
 		return err
 	}
@@ -66,13 +79,20 @@ func RunFromRoutine(d *drain.Deps, cfg *config.Config) error {
 	return err
 }
 
-func newShell(start Page, d *drain.Deps, cfg *config.Config) (Shell, error) {
+// newShell builds the shell on its entry page. cfgPath is the file cfg was read
+// from — the caller's `--config` where there is one — so the Config modal and
+// the re-read that follows a write both work on the config the pages hold, not
+// on whatever the default path resolves to.
+func newShell(start Page, d *drain.Deps, cfg *config.Config, cfgPath string) (Shell, error) {
 	if d == nil {
 		d = drain.DefaultDeps()
 	}
+	if cfgPath == "" {
+		cfgPath = config.DefaultConfigPath()
+	}
 	if cfg == nil {
 		var err error
-		cfg, err = d.LoadConfig(config.DefaultConfigPath())
+		cfg, err = d.LoadConfig(cfgPath)
 		if err != nil {
 			return Shell{}, err
 		}
@@ -84,7 +104,7 @@ func newShell(start Page, d *drain.Deps, cfg *config.Config) (Shell, error) {
 		return Shell{}, err
 	}
 	pages := map[Page]dashboard.QueueDashboard{start: dashboard.NewDashboardOn(d, cfg, snap, start)}
-	return Shell{active: start, pages: pages, d: d, cfg: cfg}, nil
+	return Shell{active: start, pages: pages, d: d, cfg: cfg, cfgPath: cfgPath}, nil
 }
 
 // launchPaneFacts reads the launching pane's facts for page A and nothing else.
@@ -119,6 +139,9 @@ func (s Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if msg, ok := msg.(tea.WindowSizeMsg); ok {
 		s.width = msg.Width
 		s.height = msg.Height
+		if s.configModal != nil {
+			s.configModal.SetSize(msg.Width, msg.Height)
+		}
 		var cmds []tea.Cmd
 		for _, id := range []Page{PageWork, PageRoutines} {
 			if _, built := s.pages[id]; built {
@@ -129,6 +152,16 @@ func (s Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		// While the Config modal is open it owns the keyboard outright (ADR-0202
+		// decision 11): no page toggle, no kind's action verb, nothing. It is the
+		// only branch here that consumes a key without the page ever seeing it.
+		if s.configModal != nil {
+			s, cmd := s.updateConfigModal(msg)
+			return s, cmd
+		}
+		if kpm, ok := keyMsg.(tea.KeyPressMsg); ok && ui.IsConfigDashboardKey(kpm) {
+			return s.openConfigModal(), nil
+		}
 		if keyMsg.String() == "v" && s.activePageToggleAllowed() {
 			s.active = s.page(s.active).OtherPage()
 			sized := s.buildActivePage()
@@ -140,12 +173,30 @@ func (s Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// stamped on the poll messages, so a reload in flight when the operator pressed
 	// v is dropped by the page that receives it rather than landing in the wrong
 	// table.
+	//
+	// Non-key messages reach both while the modal is open: the page keeps polling,
+	// so it is current rather than stale when the modal closes, and the modal gets
+	// the editor's own callback. Neither reads the other's messages.
+	if s.configModal != nil {
+		s, cmd := s.updateConfigModal(msg)
+		return s, tea.Batch(cmd, s.updatePage(s.active, msg))
+	}
 	return s, s.updatePage(s.active, msg)
 }
 
+// View shows the page in focus, or the Config modal over it while that is open.
+// The modal renders its whole own frame rather than a panel inside the page's:
+// it is the same component `pop config dashboard` runs, so what a human learns
+// in one place reads the same in the other.
 func (s Shell) View() tea.View {
+	if s.configModal != nil {
+		return s.configModal.View()
+	}
 	return s.page(s.active).View()
 }
+
+// ConfigModalOpen reports whether the Config modal is showing, for tests.
+func (s Shell) ConfigModalOpen() bool { return s.configModal != nil }
 
 // updatePage hands msg to one page and keeps the model it returns.
 func (s Shell) updatePage(id Page, msg tea.Msg) tea.Cmd {

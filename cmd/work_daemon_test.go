@@ -94,7 +94,7 @@ func TestWorkReadSurfacesThreadViewPreset(t *testing.T) {
 	workBuildStatusTables = func(d *drain.Deps, _ *config.Config) (dashboard.StatusTables, error) {
 		return dashboard.StatusTables{}, nil
 	}
-	workRunDashboard = func(d *drain.Deps, _ *config.Config) (string, error) {
+	workRunDashboard = func(d *drain.Deps, _ *config.Config, _ string) (string, error) {
 		dashPreset = d.ViewPreset.Name
 		return "", nil
 	}

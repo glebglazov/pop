@@ -98,7 +98,7 @@ func newTestShell(t *testing.T, start Page) Shell {
 
 func newShellWith(t *testing.T, start Page, d *drain.Deps) Shell {
 	t.Helper()
-	s, err := newShell(start, d, &config.Config{})
+	s, err := newShell(start, d, &config.Config{}, "")
 	if err != nil {
 		t.Fatalf("newShell: %v", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/confighost"
 	"github.com/glebglazov/pop/ui"
 )
 
@@ -30,7 +31,7 @@ func TestConfigDashboardRefusesWithoutATTY(t *testing.T) {
 // every word it renders has to arrive through here.
 func TestConfigDashboardRowsCarryTheView(t *testing.T) {
 	t.Parallel()
-	rows := configDashboardRows([]config.OverrideKeyView{{
+	rows := confighost.Rows([]config.OverrideKeyView{{
 		Key:           "work.verify.agents",
 		Desc:          "Ordered fallback agent list for the Verifier.",
 		Overridden:    true,
@@ -76,7 +77,7 @@ func TestConfigDashboardAgentKeysDeclareNoReach(t *testing.T) {
 		}
 		views = append(views, config.OverrideKeyView{Key: key.Key, Desc: key.Desc})
 	}
-	for _, row := range configDashboardRows(views) {
+	for _, row := range confighost.Rows(views) {
 		if row.Preview.Reach != nil {
 			t.Errorf("row %s carries a reach block: %+v", row.Key, row.Preview.Reach)
 		}

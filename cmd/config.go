@@ -11,6 +11,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/confighost"
 	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/internal/tty"
 	"github.com/glebglazov/pop/tasks"
@@ -255,7 +256,7 @@ func runConfigDashboard(cmd *cobra.Command, _ []string) error {
 	if path == "" {
 		path = config.DefaultConfigPathWith(d.configDeps())
 	}
-	writer := configOverrideWriter{deps: d.configDeps(), configPath: path}
+	writer := confighost.NewWriter(d.configDeps(), path)
 	rows, err := writer.Rows()
 	if err != nil {
 		return err
@@ -277,64 +278,9 @@ func runConfigDashboardWith(rows []ui.ConfigDashboardRow, opts ui.ConfigDashboar
 	return ui.RunConfigDashboard(rows, opts, in, out)
 }
 
-// configOverrideWriter is the Config dashboard's write side over the real
-// override layer. It is the whole of what the component knows about config: the
-// three actions and the re-read that follows each of them.
-type configOverrideWriter struct {
-	deps       *config.Deps
-	configPath string
-}
-
-func (w configOverrideWriter) Store(key, buffer string) (string, error) {
-	return config.StoreOverrideBufferWith(w.deps, key, buffer)
-}
-
-func (w configOverrideWriter) CopySource(key string) error {
-	return config.CopyOverrideFromSourceWith(w.deps, w.configPath, key)
-}
-
-func (w configOverrideWriter) Remove(key string) error {
-	return config.DeleteOverrideValueWith(w.deps, key)
-}
-
-func (w configOverrideWriter) Rows() ([]ui.ConfigDashboardRow, error) {
-	views, err := config.OverrideKeyViewsWith(w.deps, w.configPath)
-	if err != nil {
-		return nil, err
-	}
-	return configDashboardRows(views), nil
-}
-
-// configDashboardRows adapts the resolved override views to the component's
-// rows. The component holds no config knowledge — provenance and the words that
-// tell two empty-looking states apart are decided in config, so `pop config
-// dashboard` and every host that embeds the component say the same thing.
-func configDashboardRows(views []config.OverrideKeyView) []ui.ConfigDashboardRow {
-	rows := make([]ui.ConfigDashboardRow, 0, len(views))
-	for _, view := range views {
-		reach := make([]ui.ConfigDashboardReachLine, 0, len(view.Reach))
-		for _, line := range view.Reach {
-			reach = append(reach, ui.ConfigDashboardReachLine{Actor: line.Actor, Detail: line.Detail})
-		}
-		if len(reach) == 0 {
-			reach = nil
-		}
-		rows = append(rows, ui.ConfigDashboardRow{
-			Key:        view.Key,
-			Desc:       view.Desc,
-			Overridden: view.Overridden,
-			Preview: ui.ConfigDashboardPreview{
-				ValueTOML:        view.EffectiveTOML,
-				Provenance:       view.Provenance(),
-				Note:             view.Note,
-				SourceTOML:       view.SourceTOML,
-				SourceProvenance: view.SourceProvenance(),
-				Reach:            reach,
-			},
-		})
-	}
-	return rows
-}
+// The write side and the row adapter live in confighost, beside the host
+// contract every embedding program owes the component: `pop config dashboard` is
+// one host of three, and the other two are TUIs that cannot import cmd.
 
 // completeRepoSettingKey completes the first argument of the repo verbs with the
 // settable key set, taken from the schema so completion cannot list a key the

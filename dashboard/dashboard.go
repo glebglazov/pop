@@ -2434,6 +2434,10 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			entries = append(entries, ui.HelpEntry{Key: "f", Desc: "filter menu"})
 		}
 		entries = append(entries,
+			// The Config dashboard is opened by the entry shell rather than by this
+			// model, but it is one chord away from every page, and the help page is
+			// where a human looks for what a chord does.
+			ui.HelpEntry{Key: ui.ConfigDashboardKeyLabel, Desc: "config overrides"},
 			ui.HelpEntry{Key: "v", Desc: m.page.toggleWord + " view"},
 			ui.HelpEntry{Key: "h/esc", Desc: "quit"},
 		)

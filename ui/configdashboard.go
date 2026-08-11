@@ -38,6 +38,20 @@ import (
 // spelling the chord itself.
 const ConfigDashboardKeyLabel = "A-c"
 
+// ConfigDashboardKey is that same chord as a key string, for a host that names
+// its bindings in text rather than matching them.
+const ConfigDashboardKey = "alt+c"
+
+// IsConfigDashboardKey reports whether msg is the chord that opens this
+// component from a host (ADR-0202 decision 10). Hosts match through this rather
+// than spelling the chord, so the three of them cannot drift apart.
+func IsConfigDashboardKey(msg tea.KeyPressMsg) bool {
+	if msg.Code != 'c' && msg.Code != 'C' {
+		return false
+	}
+	return msg.Mod.Contains(tea.ModAlt) && !msg.Mod.Contains(tea.ModCtrl)
+}
+
 // configOverrideMarker marks a row whose key currently carries an override, so
 // the list answers "what have I changed" without arrowing through every preview.
 const configOverrideMarker = "●"
@@ -131,6 +145,11 @@ type ConfigDashboard struct {
 	height   int
 	showHelp bool
 	done     bool
+	// wrote records that the override layer changed while this component was
+	// open. A host loads config once and hands that value to what it renders, so
+	// it needs to know whether closing this component means re-reading (ADR-0202
+	// decision 14).
+	wrote bool
 	// failure is the error row decision 11 requires instead of a write to
 	// stdout. Hosts and the standalone runner set it through Fail.
 	failure string
@@ -159,6 +178,10 @@ func NewConfigDashboard(rows []ConfigDashboardRow, opts ConfigDashboardOpts) *Co
 
 // Done reports whether the human has closed the component.
 func (m *ConfigDashboard) Done() bool { return m.done }
+
+// Wrote reports whether any action changed the override layer while this
+// component was open, so a host knows whether to re-read config on close.
+func (m *ConfigDashboard) Wrote() bool { return m.wrote }
 
 // Selected returns the highlighted row, or false when the filter matches none.
 func (m *ConfigDashboard) Selected() (ConfigDashboardRow, bool) { return m.list.Selected() }
@@ -341,6 +364,9 @@ func (m *ConfigDashboard) editorReturned(msg configEditorDoneMsg) tea.Cmd {
 // line tell the truth the moment the editor closes. The highlight stays on the
 // key it was on.
 func (m *ConfigDashboard) refresh() {
+	// Every caller has just written the layer, which is exactly what a host has to
+	// re-read for.
+	m.wrote = true
 	rows, err := m.writer.Rows()
 	if err != nil {
 		m.failure = fmt.Sprintf("Wrote the override, but could not re-read the config: %v", err)

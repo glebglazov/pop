@@ -315,7 +315,7 @@ func runRoutineDashboard(cmd *cobra.Command, args []string) error {
 	}
 	d := cmdLayerDeps().queueDeps()
 	d.LoadConfig = workConfigLoad
-	return routineRunDashboard(d, cfg)
+	return routineRunDashboard(d, cfg, cfgPath)
 }
 
 func runRoutineMigrateManifests(cmd *cobra.Command, args []string) error {

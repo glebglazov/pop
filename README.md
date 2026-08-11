@@ -156,6 +156,11 @@ undoes the other.
 It needs a terminal: with stdout redirected it refuses rather than printing
 something that is not the dashboard.
 
+The same dashboard opens with `alt+c` from either page of `pop work dashboard`,
+as a modal over the page you are on. While it is open the dashboard's own keys
+do nothing, and closing it puts you back on the page exactly as you left it —
+with any override you just wrote already in force in what the page reports.
+
 ### `pop layout`
 
 Apply a named [session template](#session-templates) to shape the current tmux session.
