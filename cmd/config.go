@@ -60,6 +60,10 @@ listing — it sits over it.
 In the repo scope, keys pop can write itself (via pop config repo set) are marked
 [settable], from the same reflection that backs the setter.
 
+A key a human may override from pop itself is marked [override: <scope>], naming
+the scope the override lands at. The mark comes from the key's own override tag,
+so the catalog lists exactly the overridable keys.
+
 Examples:
   pop config keys                      # top-level keys, all surfaces
   pop config keys --scope pop-toml     # top-level keys of .pop/config.toml
@@ -398,8 +402,20 @@ func renderTableKeys(out io.Writer, scope config.ConfigScope, path string, recur
 // that backs pop config repo set — so the two surfaces cannot disagree.
 const repoSettableMarker = " [settable]"
 
+// overrideMarker labels a key a human may override from pop, naming the scope
+// the override lands at (ADR-0202 decision 3). Read off the row's own override
+// tag, so the catalog and the override registry cannot disagree.
+func overrideMarker(d config.ConfigKeyDoc) string {
+	scope, ok := d.OverrideExposure()
+	if !ok {
+		return ""
+	}
+	return " [override: " + string(scope) + "]"
+}
+
 // writeKeyTable renders docs as an aligned KEY / TYPE / DESCRIPTION table.
-// In the repo scope, keys in RepoSettableKeys carry repoSettableMarker. When
+// In the repo scope, keys in RepoSettableKeys carry repoSettableMarker, and an
+// override-exposed key carries overrideMarker in every scope. When
 // why is set, keys that declare a reach list each actor line under the row.
 // Schema column widths come only from the schema rows, so a key that declares
 // none is listed identically with and without why.
@@ -420,8 +436,9 @@ func writeKeyTable(out io.Writer, scope config.ConfigScope, docs []config.Config
 		}
 		key := d.Key
 		if settable[d.Key] {
-			key = d.Key + repoSettableMarker
+			key += repoSettableMarker
 		}
+		key += overrideMarker(d)
 		fmt.Fprintf(tw, "  %s\t%s\t%s\n", key, d.Type, desc)
 		if why {
 			if reach, ok := config.ConfigKeyReachFor(d.Key); ok {

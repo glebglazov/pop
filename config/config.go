@@ -239,7 +239,7 @@ type TasksConfig struct {
 type ImplementConfig struct {
 	// Agents is the ordered in-process fallback list used by
 	// `pop tasks implement` for unpinned tasks when --agent is absent.
-	Agents AgentEntries `toml:"agents" include:"replace" desc:"Ordered fallback agent list for unpinned tasks (strings or {display_name, cmd} tables)."`
+	Agents AgentEntries `toml:"agents" include:"replace" override:"global" desc:"Ordered fallback agent list for unpinned tasks (strings or {display_name, cmd} tables)."`
 	// MaxTries is the started-attempt cap for implement. Zero/unset ⇒
 	// DefaultTaskMaxTries. An explicit --max-tries flag still wins.
 	MaxTries *int `toml:"max_tries" include:"replace" desc:"Implement started-attempt cap (default 3)."`
@@ -259,7 +259,7 @@ type ImplementConfig struct {
 type AgentGroupConfig struct {
 	// Agents is the ordered fallback list for this kind of work. When empty,
 	// resolution falls through to the kind's documented fallback.
-	Agents AgentEntries `toml:"agents" include:"replace" desc:"Ordered fallback agent list for this kind of work (strings or {display_name, cmd} tables)."`
+	Agents AgentEntries `toml:"agents" include:"replace" override:"global" desc:"Ordered fallback agent list for this kind of work (strings or {display_name, cmd} tables)."`
 }
 
 // VerifyConfig holds Agent-verification settings (ADR-0086). It is the
@@ -275,7 +275,7 @@ type VerifyConfig struct {
 	// mirroring [work.implement].agents: it falls through to the next agent on
 	// a quota pause or a missing binary. An empty list falls back to
 	// [work.implement].agents (and, failing that, the built-in default agent).
-	Agents AgentEntries `toml:"agents" desc:"Ordered fallback agent list for the Verifier, falling back to [work.implement].agents when omitted (strings or {display_name, cmd} tables)."`
+	Agents AgentEntries `toml:"agents" override:"global" desc:"Ordered fallback agent list for the Verifier, falling back to [work.implement].agents when omitted (strings or {display_name, cmd} tables)."`
 	// Effort selects the Verifier's model-strength tier (light, standard, or
 	// heavy). Absent ⇒ heavy — verification runs at the strongest tier by default.
 	Effort string `toml:"effort" desc:"Verifier model-strength tier: light, standard, or heavy (default heavy)."`

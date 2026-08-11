@@ -42,6 +42,11 @@ type ConfigKeyDoc struct {
 	Key  string // TOML key name (dotted when nested, e.g. "worktree.commands.key")
 	Type string // human-readable TOML type
 	Desc string // one-line description from the `desc` struct tag ("" if none)
+	// Override is the raw `override` struct tag: the scope a human may override
+	// this key at, "" when the key declares no exposure (ADR-0202 decision 3).
+	// It is carried unvalidated so the override registry — the one place that
+	// knows the legal scope words — is the one place that rejects a typo.
+	Override string
 }
 
 // scopeType maps a scope to the Go struct that decodes it.
@@ -166,9 +171,10 @@ func structDocs(prefix string, t reflect.Type, recursive bool, ancestors map[ref
 			key = prefix + "." + name
 		}
 		docs = append(docs, ConfigKeyDoc{
-			Key:  key,
-			Type: tomlTypeName(f.Type),
-			Desc: f.Tag.Get("desc"),
+			Key:      key,
+			Type:     tomlTypeName(f.Type),
+			Desc:     f.Tag.Get("desc"),
+			Override: f.Tag.Get("override"),
 		})
 		if !recursive {
 			continue
