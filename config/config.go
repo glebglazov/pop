@@ -448,17 +448,21 @@ func (c *Config) ResolveCommitConfigOverrides() ([]string, error) {
 // supervisor's timing under [work.daemon]. Every agent list and every
 // task-execution setting is kind-scoped here (ADR-0194) — the root itself holds
 // no shared defaults, so each key belongs to exactly the thing that reads it.
+//
+// Every group merges field-by-field across config layers: the override layer
+// carries one key at a time (ADR-0202 decision 2), so a whole-table replace
+// would silently drop the hand-authored keys sitting beside the overridden one.
 type WorkConfig struct {
 	// Implement is the unattended coding drain's group.
-	Implement *ImplementConfig `toml:"implement" include:"fields" desc:"Implement Work group ([work.implement] table)."`
+	Implement *ImplementConfig `toml:"implement" merge:"fields" include:"fields" desc:"Implement Work group ([work.implement] table)."`
 	// Verify is the Verifier's group (ADR-0086).
-	Verify *VerifyConfig `toml:"verify" include:"replace" desc:"Agent-verification settings ([work.verify] table)."`
+	Verify *VerifyConfig `toml:"verify" merge:"fields" include:"replace" desc:"Agent-verification settings ([work.verify] table)."`
 	// Routine is the recurring-Routine group. An empty list falls through to
 	// [work.implement].agents; a Routine manifest's own agents still beats both.
-	Routine *AgentGroupConfig `toml:"routine" include:"replace" desc:"Routine Work group ([work.routine] table)."`
+	Routine *AgentGroupConfig `toml:"routine" merge:"fields" include:"replace" desc:"Routine Work group ([work.routine] table)."`
 	// Attended is the group every human-facing session shares — gate assistance,
 	// an Assist session, Map assist, map grilling, a Routine refinement session.
-	Attended *AgentGroupConfig `toml:"attended" include:"replace" desc:"Attended-session Work group ([work.attended] table)."`
+	Attended *AgentGroupConfig `toml:"attended" merge:"fields" include:"replace" desc:"Attended-session Work group ([work.attended] table)."`
 	// Dashboard holds Work-read-surface settings (view presets). Distinct from
 	// the root [dashboard] table, which configures the monitor/pane dashboard.
 	Dashboard *WorkDashboardConfig `toml:"dashboard" include:"fields" desc:"Work read-surface settings ([work.dashboard] table)."`
@@ -655,7 +659,7 @@ type Config struct {
 	Workbenches []Workbench `toml:"workbenches" include:"append" desc:"Global session blueprints (templates)."`
 	// WorkbenchOpts holds the [workbench] options table (pick_on_create, order).
 	WorkbenchOpts *WorkbenchOptions   `toml:"workbench" include:"fields" desc:"Workbench options ([workbench] table)."`
-	Work          *WorkConfig         `toml:"work" include:"fields" desc:"Work settings ([work] table; one sub-table per kind of work)."`
+	Work          *WorkConfig         `toml:"work" merge:"fields" include:"fields" desc:"Work settings ([work] table; one sub-table per kind of work)."`
 	Updates       *UpdatesConfig      `toml:"updates" desc:"Auto-update behavior ([updates] table)."`
 	Integrations  *IntegrationsConfig `toml:"integrations" merge:"fields" desc:"AI-agent integration settings ([integrations] table)."`
 	// Tmux holds global tmux-server addressing and the Tmux config include
@@ -1617,7 +1621,8 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := applyConfigLayerMerge(d, &cfg, path, md); err != nil {
+	overrideMD, err := applyConfigLayerMerge(d, &cfg, path, md)
+	if err != nil {
 		return nil, err
 	}
 	for _, f := range retiredTasksSectionFindings(path, md) {
@@ -1709,7 +1714,7 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 	includePol := includePolicy(func(keyPath string) {
 		cfg.Warnings = append(cfg.Warnings, includeCollisionMessage(currentInclude, keyPath))
 	}, nil)
-	seedIncludeClaims(includePol, &cfg, md)
+	seedIncludeClaims(includePol, &cfg, md, overrideMD)
 	for _, include := range cfg.Includes {
 		expanded := expandHomeWith(d, include)
 		if !filepath.IsAbs(expanded) {
@@ -1777,7 +1782,10 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 // keys/order. Work-group claims are value-driven; [workbench] claims are
 // metadata-driven off the parent file, since a runtime [workbench.preferred]
 // table can leave WorkbenchOpts non-nil with pick_on_create/order unset.
-func seedIncludeClaims(policy *mergePolicy, cfg *Config, md toml.MetaData) {
+// overrideMD adds the claims of the override layer, which outranks every
+// hand-authored file including an include.
+func seedIncludeClaims(policy *mergePolicy, cfg *Config, md, overrideMD toml.MetaData) {
+	claimOverrideKeys(policy, overrideMD)
 	if cfg.Task != nil && cfg.Task.Git != nil {
 		policy.claim("tasks.git")
 	}

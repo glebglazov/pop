@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 	"github.com/glebglazov/pop/debug"
@@ -27,6 +28,16 @@ func DefaultRuntimeConfigPath() string {
 // DefaultRuntimeConfigPathWith returns config.runtime.toml under the pop data dir.
 func DefaultRuntimeConfigPathWith(d *Deps) string {
 	return filepath.Join(dataDirWith(d), "config.runtime.toml")
+}
+
+// DefaultOverrideConfigPath returns the override config path.
+func DefaultOverrideConfigPath() string {
+	return DefaultOverrideConfigPathWith(defaultDeps)
+}
+
+// DefaultOverrideConfigPathWith returns config.override.toml under the pop data dir.
+func DefaultOverrideConfigPathWith(d *Deps) string {
+	return filepath.Join(dataDirWith(d), "config.override.toml")
 }
 
 func dataDirWith(d *Deps) string {
@@ -67,13 +78,37 @@ func decodeConfigLayer(d *Deps, path string) (*configLayer, error) {
 	return &configLayer{path: path, cfg: &cfg, md: md}, nil
 }
 
-// applyConfigLayerMerge resolves effective config as embedded defaults, then
-// config.runtime.toml (when present), then the user file — later layers override
-// earlier ones field-by-field (ADR 0065).
-func applyConfigLayerMerge(d *Deps, userCfg *Config, userPath string, userMD toml.MetaData) error {
+// applyConfigLayerMerge resolves effective config from four layers, lowest rank
+// first: embedded defaults, config.runtime.toml, the user's hand-authored
+// config.toml, then config.override.toml. A later layer overrides an earlier one
+// field-by-field (ADR-0065, ADR-0202).
+//
+// Two of those files are written by pop itself, and they sit on opposite sides of
+// the hand-authored file on purpose:
+//
+//	config.runtime.toml   BELOW config.toml — the gap-filler. It records what
+//	                      pop's own surfaces happened to pick (a ctrl+w Preferred
+//	                      workbench, a Trunk checkout, an integrate skills list),
+//	                      so anything a human wrote must beat it. That low rank is
+//	                      load-bearing, not incidental: preferred_workbench's
+//	                      three-valued explicit-none logic exists precisely
+//	                      because a runtime entry can no longer outrank a
+//	                      hand-authored value (see ResolvePreferredWorkbench).
+//	config.override.toml  ABOVE config.toml — the override layer. It records whole
+//	                      keys a human deliberately overrode through pop's own
+//	                      editor, so it has to beat the very file being
+//	                      overridden; a layer that lost to config.toml would be
+//	                      inert for everyone who has configured anything
+//	                      (ADR-0202 decision 1).
+//
+// It returns the override layer's MetaData, which the caller needs to keep
+// hand-authored include files from winning over an override.
+func applyConfigLayerMerge(d *Deps, userCfg *Config, userPath string, userMD toml.MetaData) (toml.MetaData, error) {
+	var overrideMD toml.MetaData
+
 	defaults, err := loadEmbeddedDefaults()
 	if err != nil {
-		return err
+		return overrideMD, err
 	}
 
 	layers := []configLayer{{path: "<embedded defaults>", cfg: defaults, md: toml.MetaData{}}}
@@ -81,13 +116,23 @@ func applyConfigLayerMerge(d *Deps, userCfg *Config, userPath string, userMD tom
 	runtimePath := DefaultRuntimeConfigPathWith(d)
 	if layer, err := decodeConfigLayer(d, runtimePath); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("loading runtime config %q: %w", runtimePath, err)
+			return overrideMD, fmt.Errorf("loading runtime config %q: %w", runtimePath, err)
 		}
 	} else {
 		layers = append(layers, *layer)
 	}
 
 	layers = append(layers, configLayer{path: userPath, cfg: userCfg, md: userMD})
+
+	overridePath := DefaultOverrideConfigPathWith(d)
+	if layer, err := decodeConfigLayer(d, overridePath); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return overrideMD, fmt.Errorf("loading override config %q: %w", overridePath, err)
+		}
+	} else {
+		layers = append(layers, *layer)
+		overrideMD = layer.md
+	}
 
 	merged := *defaults
 	policy := overlayPolicy()
@@ -100,7 +145,21 @@ func applyConfigLayerMerge(d *Deps, userCfg *Config, userPath string, userMD tom
 	}
 
 	*userCfg = merged
-	return nil
+	return overrideMD, nil
+}
+
+// claimOverrideKeys marks every key config.override.toml defines as already
+// claimed for the first-wins include walk, so a hand-authored include file can
+// never win over the layer that outranks it. Ancestors are claimed too because
+// the include walk tests a whole-value field at the field's own path: an include
+// that redefines all of [work.verify] would otherwise wipe an agent list the
+// override set inside it.
+func claimOverrideKeys(policy *mergePolicy, overrideMD toml.MetaData) {
+	for _, key := range overrideMD.Keys() {
+		for i := 1; i <= len(key); i++ {
+			policy.claim(strings.Join([]string(key[:i]), "."))
+		}
+	}
 }
 
 func integrationsSkillsFindings(path string, integrations *IntegrationsConfig, md toml.MetaData) []Finding {

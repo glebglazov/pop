@@ -1,10 +1,6 @@
 package config
 
 import (
-	"fmt"
-	"os"
-	"path/filepath"
-
 	"github.com/BurntSushi/toml"
 )
 
@@ -170,23 +166,7 @@ func pruneRuntimePreferred(doc map[string]any) {
 }
 
 func loadRuntimeDocument(d *Deps) (map[string]any, toml.MetaData, error) {
-	path := DefaultRuntimeConfigPathWith(d)
-	data, err := d.FS.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return map[string]any{}, toml.MetaData{}, nil
-		}
-		return nil, toml.MetaData{}, fmt.Errorf("read runtime config %q: %w", path, err)
-	}
-	var doc map[string]any
-	md, err := toml.Decode(string(data), &doc)
-	if err != nil {
-		return nil, toml.MetaData{}, fmt.Errorf("parse runtime config %q: %w", path, err)
-	}
-	if doc == nil {
-		doc = map[string]any{}
-	}
-	return doc, md, nil
+	return runtimeConfigFile(d).load(d)
 }
 
 func runtimeSkillsBaseline(doc map[string]any, md toml.MetaData) []string {
@@ -238,35 +218,10 @@ func setRuntimeIntegrationsSkills(doc map[string]any, skills []string) {
 	doc["integrations"] = map[string]any{"skills": raw}
 }
 
+// saveRuntimeDocument commits the runtime document atomically, deleting
+// config.runtime.toml when the document has emptied out.
 func saveRuntimeDocument(d *Deps, doc map[string]any) error {
-	path := DefaultRuntimeConfigPathWith(d)
-	if len(doc) == 0 {
-		if err := d.FS.RemoveAll(path); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("remove runtime config %q: %w", path, err)
-		}
-		return nil
-	}
-	data, err := toml.Marshal(doc)
-	if err != nil {
-		return fmt.Errorf("encode runtime config: %w", err)
-	}
-	return writeRuntimeConfigAtomic(d, path, data)
-}
-
-func writeRuntimeConfigAtomic(d *Deps, path string, data []byte) error {
-	dir := filepath.Dir(path)
-	if err := d.FS.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("create runtime config dir: %w", err)
-	}
-	tmpPath := filepath.Join(dir, fmt.Sprintf(".config.runtime.tmp-%d", os.Getpid()))
-	if err := d.FS.WriteFile(tmpPath, data, 0o644); err != nil {
-		return fmt.Errorf("write runtime config temp file: %w", err)
-	}
-	if err := d.FS.Rename(tmpPath, path); err != nil {
-		_ = d.FS.RemoveAll(tmpPath)
-		return fmt.Errorf("commit runtime config: %w", err)
-	}
-	return nil
+	return runtimeConfigFile(d).save(d, doc)
 }
 
 // RuntimeIntegrationsSkills reads the skills list stored in config.runtime.toml
