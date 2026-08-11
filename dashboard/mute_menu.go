@@ -33,9 +33,9 @@ const (
 	randomMuteSpan  = 4 * 24 * time.Hour
 )
 
-// randomMuteLabel names the default window without disclosing its instant. It is
-// the one entry whose date no read surface ever shows.
-const randomMuteLabel = "Default (date not shown)"
+// randomMuteLabel names the default window by its bounds, never its instant. It
+// is the one entry whose date no read surface ever shows.
+const randomMuteLabel = "Surprise (between 3 and 7 days)"
 
 // muteWindowLabelFormat is the day-and-date form every dated entry reads as —
 // `Fri 14 Aug`.
