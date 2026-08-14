@@ -149,6 +149,40 @@ manifest, the effort heuristic, HITL/AFK typing, `pop tasks register`, the
 MALFORMED fix loop, and the whole-set drain suggestion. None of it is restated
 here; consult the doc.
 
+## Commit convention
+
+*(Irreducible pop bit: the convention is resolved while the work is broken down,
+not when a task commits. pop commits each task's work under the subject written
+here **verbatim** — it renders nothing and reformats nothing at commit time — so
+if this step is skipped the repository's grammar is lost for the whole set.)*
+
+Resolve the convention once, before publishing, in this order:
+
+1. **A Commit format doc wins.** If the repo has `docs/commit-format.md`, read it
+   and take the grammar from it. Stop here — do not sample the log.
+2. **Otherwise infer it from the last 5 commits.** **Discard pop-generated
+   commits before sampling** — pop's own default subjects (`tasks(...)`) and
+   pop's skill-commit shapes — and infer from the non-pop commits that remain.
+   Walk further back if the last 5 are all pop's. Without this guard pop learns
+   its own accent back from the log and the convention degenerates.
+3. **Nothing usable → write neither field.** No format doc and no readable
+   grammar in the non-pop log means the set carries no convention, and each task
+   commits under pop's built-in default format. Do not guess one.
+
+When a convention resolves, write both fields into the set's `index.json`:
+
+- each task's **`commit_subject`** — the final, literal subject line for that
+  task's work, rendered *now* from that task's intent under the convention;
+- the set-level **`commit_convention`** — the convention text itself, which is
+  what renders a subject for a task spawned mid-drain (a Remediation).
+
+This section owns the **discovery contract** only. Where those keys sit, how they
+are spelled and what pop does when one is absent belong to `pop tasks
+authoring-guide`; read it before writing the manifest.
+
+**Non-pop stores.** Both fields are pop-manifest keys. When the resolved Work
+store is not pop, skip this step entirely.
+
 ## No quiz
 
 Skip upstream's **"### 4. Quiz the user"** step entirely — do not present the
