@@ -124,6 +124,10 @@ func TestBaseConfigShipsPopBindingsAndNoviceDefaults(t *testing.T) {
 		"set-option -g mode-keys vi",
 		"set-option -g status",
 		"detach",
+		// The prefix-free way out, and the status bar that advertises it: a user
+		// pop attached into tmux may not know a prefix sequence exists.
+		"bind-key -n F12 detach-client",
+		"F12 to leave",
 		"bind-key p display-popup",
 		"pop project dashboard",
 		"bind-key P display-popup",
