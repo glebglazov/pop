@@ -51,7 +51,17 @@ frontier model and deleted the experiment, so the primitive this decision
 extracts is now upstream's shipped skill, and the pin tracks a live source again.
 The extraction itself — one interview primitive, each composing skill stating its
 own destination — is unchanged, as is the primitive's content beyond a question
-format upstream added. The local name stays `batch-grill-me` per ADR-0141.
+format upstream added.
+
+**Further amended by the rename:** the primitive now ships under upstream's own
+name, `grilling`. The earlier reading — keep `batch-grill-me` per ADR-0141 —
+credited an origin that no longer exists: upstream absorbed the in-progress
+experiment into shipped `productivity/grilling` and deleted it, so the local
+name pointed at nothing while the pin tracked a differently-named live skill.
+Renaming converges the two. Read every `batch-grill-me` in this ADR as
+`grilling`; the installed name is `<Skills prefix>grilling` (`pop-grilling` by
+default, ADR-0063), so a hand-installed upstream `grilling` only collides under
+the bare-prefix option.
 
 The union rule (glossary = base `CONTEXT.md` + `.grill-context/**`) and the
 `+`/`~`/`-` op syntax are shared, so they live in **one pop-owned source**,

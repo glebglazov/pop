@@ -11,7 +11,7 @@ Pop's `grill-with-docs` / `grill-consolidate` began as a 112-line self-contained
 
 ## Consequences
 
-- Drift review reduces to `diff <pop base-portion> <domain-modeling@newpin>`; the base already matches the vendored `domain-modeling@391a2701` byte-for-byte, so adopting this shape is mostly drawing the marker where the seam already is.
+- Drift review reduces to `diff <pop base-portion> <domain-modeling@newpin>`; the base already matches its vendored upstream byte-for-byte, so adopting this shape is mostly drawing the marker where the seam already is. The live pin lives in exactly two places — each overlay file's provenance header and `overlayPinnedFiles` in `integrate/grill_overlay_drift_test.go` — never in an ADR, which would date the moment it is bumped.
 - Pop's cosmetic edits to the `ADR-FORMAT.md` base are reverted to upstream verbatim so the above-marker region diffs clean; all genuinely-pop content moves below the marker.
 - `grill-consolidate` and the fragment appendix have no upstream twin — they are irreducibly pop-only and live entirely in the overlay.
-- The three post-copy `grilling` refinements (confirmation gate, fact/decision split, anti-self-grill guard) arrive for free when the base is refreshed to the current primitive.
+- The three post-copy `grilling` refinements (confirmation gate, fact/decision split, anti-self-grill guard) arrived for free with the first base refresh, which is what this shape was for.
