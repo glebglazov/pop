@@ -17,12 +17,12 @@ func TestAttemptLessonMapsEachOutcomeReasonClass(t *testing.T) {
 		want     string
 	}{
 		{"timeout is a contract failure on a sound approach", streamOutcomeTimedOut, "timed out after 1h0m0s", -1, lessonContinue},
-		{"missing sentinel continues", streamOutcomeFailed, "missing TASK_COMPLETE sentinel", 0, lessonContinue},
-		{"missing summary continues", streamOutcomeFailed, "missing or empty summary block", 0, lessonContinue},
-		{"unchecked acceptance continues", streamOutcomeFailed, "acceptance criteria not all checked", 0, lessonContinue},
-		{"generic contract verdict continues", streamOutcomeFailed, "agent output did not satisfy completion contract", 0, lessonContinue},
+		{"missing sentinel continues and names the sentinel", streamOutcomeFailed, reasonMissingSentinel, 0, lessonMissingSentinel},
+		{"missing summary continues and names the summary block", streamOutcomeFailed, reasonMissingSummary, 0, lessonMissingSummary},
+		{"unchecked acceptance continues and names the boxes", streamOutcomeFailed, reasonUncheckedBoxes, 0, lessonUncheckedBoxes},
+		{"generic contract verdict continues carrying its reason", streamOutcomeFailed, reasonContractUnmet, 0, lessonContinue + " — the attempt failed the completion contract: " + reasonContractUnmet},
 		{"crash exit reassesses", streamOutcomeFailed, "agent exited with status 2", 2, lessonReassess},
-		{"empty output reassesses", streamOutcomeFailed, "empty agent output", 0, lessonReassess},
+		{"empty output reassesses", streamOutcomeFailed, reasonEmptyOutput, 0, lessonReassess},
 		{"no reason reassesses", streamOutcomeFailed, "", 0, lessonReassess},
 		{"agent TASK_FAILED pivots with its reason", streamOutcomeFailed, "schema migration is incompatible", 0, "pivot/reassess: schema migration is incompatible"},
 		{"interrupted attempt resumes", streamOutcomeInterrupted, "", 0, lessonResume},
@@ -108,7 +108,7 @@ func TestBuildPriorAttemptDigestScopesSinceLastReset(t *testing.T) {
 	if !strings.Contains(digest, "Fresh approach after the human reopened") {
 		t.Fatalf("post-reset attempt should be included, got:\n%s", digest)
 	}
-	if !strings.Contains(digest, "Attempt 2 — "+lessonContinue) {
+	if !strings.Contains(digest, "Attempt 2 — "+lessonMissingSentinel) {
 		t.Fatalf("expected post-reset attempt 2 with continue lesson, got:\n%s", digest)
 	}
 }

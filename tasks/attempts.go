@@ -449,7 +449,7 @@ func assessAttempt(agentOut string, exitCode int, taskData []byte) (Assessment, 
 	}
 	reason := assessment.FailedReason
 	if reason == "" {
-		reason = "agent output did not satisfy completion contract"
+		reason = reasonContractUnmet
 	}
 	return assessment, reason
 }

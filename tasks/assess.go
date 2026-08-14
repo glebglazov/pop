@@ -14,6 +14,18 @@ var (
 	taskCompleteRE = regexp.MustCompile(`(?m)^TASK_COMPLETE\s*$`)
 )
 
+// The completion-contract failure reasons the harness itself records, as
+// opposed to the agent's own TASK_FAILED text. The retry digest reads these
+// back to pick a lesson (digest.go), so they are named rather than spelled
+// twice.
+const (
+	reasonEmptyOutput     = "empty agent output"
+	reasonMissingSentinel = "missing TASK_COMPLETE sentinel"
+	reasonMissingSummary  = "missing or empty summary block"
+	reasonUncheckedBoxes  = "acceptance criteria not all checked"
+	reasonContractUnmet   = "agent output did not satisfy completion contract"
+)
+
 // Assessment holds the outcome of verifying agent output and task markdown.
 type Assessment struct {
 	Summary      string
@@ -27,7 +39,7 @@ func AssessCompletion(output string, taskMarkdown []byte) Assessment {
 	a := Assessment{}
 	trimmed := strings.TrimRight(output, " \t\r\n")
 	if trimmed == "" {
-		a.FailedReason = "empty agent output"
+		a.FailedReason = reasonEmptyOutput
 		return a
 	}
 
@@ -43,13 +55,13 @@ func AssessCompletion(output string, taskMarkdown []byte) Assessment {
 	}
 
 	if !taskCompleteRE.MatchString(trimmed) {
-		a.FailedReason = "missing TASK_COMPLETE sentinel"
+		a.FailedReason = reasonMissingSentinel
 		return a
 	}
 
 	summary, ok := extractSummary(trimmed)
 	if !ok || strings.TrimSpace(summary) == "" {
-		a.FailedReason = "missing or empty summary block"
+		a.FailedReason = reasonMissingSummary
 		return a
 	}
 	a.Summary = strings.TrimSpace(summary)
@@ -57,7 +69,7 @@ func AssessCompletion(output string, taskMarkdown []byte) Assessment {
 	a.AllChecked = allAcceptanceChecked(taskMarkdown)
 	if !a.AllChecked {
 		a.Complete = false
-		a.FailedReason = "acceptance criteria not all checked"
+		a.FailedReason = reasonUncheckedBoxes
 	}
 	return a
 }

@@ -1574,6 +1574,12 @@ func TestBuildAgentPromptAbsolutePaths(t *testing.T) {
 		"completion sentinel (TASK_COMPLETE or TASK_FAILED) is recorded as a",
 		"keep polling it across successive",
 		"tool timeout",
+		// The task file is the one edit outside the runtime checkout, and the
+		// close-out block says so — an attempt that reads only "edits belong
+		// beneath the checkout" leaves the acceptance boxes unticked and fails.
+		"The task file\nabove is the one file you also edit",
+		"tick every box under \"Acceptance criteria\"",
+		"unticked is recorded as failed even when the work itself landed",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("missing %q in prompt:\n%s", want, prompt)

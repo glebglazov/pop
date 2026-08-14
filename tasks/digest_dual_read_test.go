@@ -66,8 +66,8 @@ func TestDigestReadsNewFormatRunOnly(t *testing.T) {
 	if !strings.Contains(digest, "Attempt 1") {
 		t.Fatal("expected Attempt 1 in digest")
 	}
-	if !strings.Contains(digest, lessonContinue) {
-		t.Fatalf("expected continue lesson in digest, got:\n%s", digest)
+	if !strings.Contains(digest, lessonMissingSentinel) {
+		t.Fatalf("expected missing-sentinel continue lesson in digest, got:\n%s", digest)
 	}
 	if !strings.Contains(digest, "I tried to fix the flaky test") {
 		t.Fatalf("expected narrative text in digest, got:\n%s", digest)

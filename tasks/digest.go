@@ -17,10 +17,16 @@ import (
 // completion sentinel (a backgrounded suite, a timeout), where "try a different
 // angle" is exactly the wrong instruction (ADR 0040). The reassess lesson is
 // for a crash or an empty session, where there is no approach to stand on.
+// A contract failure keeps the approach but names what the contract wanted:
+// the harness knows exactly which clause the attempt missed, and a lesson that
+// withholds it sends the retry back over ground that was already sound.
 const (
-	lessonContinue = "continue — your approach stood, finish and close out the sentinel"
-	lessonReassess = "reassess"
-	lessonResume   = "resume — this attempt was cut off mid-flight (not a failure). The runtime checkout already holds the partial changes; read the uncommitted working-tree diff first and continue from it."
+	lessonContinue        = "continue — your approach stood, finish and close out the sentinel"
+	lessonUncheckedBoxes  = "continue — your approach stood and the work landed; the attempt failed only because the task file still had unticked acceptance boxes. Tick every `- [ ]` under \"Acceptance criteria\" to `- [x]` in the task file, then print the summary block and TASK_COMPLETE."
+	lessonMissingSentinel = "continue — your approach stood; the attempt ended without TASK_COMPLETE standing alone on its own final line. Do the remaining work, then close out with the sentinel exactly as the prompt spells it."
+	lessonMissingSummary  = "continue — your approach stood; the attempt printed no usable SUMMARY_START…SUMMARY_END block. Close out with a non-empty summary block above TASK_COMPLETE."
+	lessonReassess        = "reassess"
+	lessonResume          = "resume — this attempt was cut off mid-flight (not a failure). The runtime checkout already holds the partial changes; read the uncommitted working-tree diff first and continue from it."
 	// lessonTurnCapExhausted is the retry's whole reason to know a Turn cap
 	// exists: the previous attempt ran out of turns rather than out of ideas, so
 	// the approach stands and the budget is the thing to spend differently
@@ -56,8 +62,8 @@ func attemptLesson(outcome, reason string, exitCode int) string {
 	case exitCode != 0:
 		return lessonReassess
 	case isContractReason(r):
-		return lessonContinue
-	case r == "" || r == "empty agent output":
+		return contractLesson(r)
+	case r == "" || r == reasonEmptyOutput:
 		return lessonReassess
 	default:
 		return "pivot/reassess: " + r
@@ -70,13 +76,27 @@ func attemptLesson(outcome, reason string, exitCode int) string {
 // finishing-line failures, so they keep the approach and continue.
 func isContractReason(reason string) bool {
 	switch reason {
-	case "missing TASK_COMPLETE sentinel",
-		"missing or empty summary block",
-		"acceptance criteria not all checked",
-		"agent output did not satisfy completion contract":
+	case reasonMissingSentinel, reasonMissingSummary, reasonUncheckedBoxes, reasonContractUnmet:
 		return true
 	}
 	return false
+}
+
+// contractLesson picks the continue-lesson for one contract failure. Each
+// harness-recorded reason has its own actionable form; anything else that
+// reaches the contract bucket (the generic verdict, a reason recorded by an
+// older pop) keeps the approach and carries its reason forward verbatim.
+func contractLesson(reason string) string {
+	switch reason {
+	case reasonUncheckedBoxes:
+		return lessonUncheckedBoxes
+	case reasonMissingSentinel:
+		return lessonMissingSentinel
+	case reasonMissingSummary:
+		return lessonMissingSummary
+	default:
+		return lessonContinue + " — the attempt failed the completion contract: " + reason
+	}
 }
 
 // buildPriorAttemptDigest derives the prompt section that carries this task's
