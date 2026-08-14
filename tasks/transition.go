@@ -65,6 +65,12 @@ type TransitionOp struct {
 	// AttemptCount is the recorded attempt count written when To == TaskFailed.
 	// It is ignored for every other target status, which clear the count.
 	AttemptCount int
+	// Commit is the implementation commit this transition reports, when the
+	// executor made one. Its SHA and verbatim subject land on the task, and its
+	// parent becomes the set's Set base commit if the set has none yet (ADR-0207).
+	// Nil on every transition that commits nothing — a failure, a skip, a verified
+	// no-op, any human verb.
+	Commit *ImplementationCommit
 }
 
 // ApplyTransitions is the single Task-transition chokepoint through which
@@ -127,6 +133,7 @@ func ApplyTransitions(d *Deps, m *Manifest, projectPath string, ops []Transition
 		} else {
 			m.Tasks[idx].FailedAfter = nil
 		}
+		recordCommit(m, idx, op.Commit)
 	}
 	// Record the human-completion bit when a human's own completion is what carried
 	// the set into the terminal zone (ADR-0086's gate then reports a mark instead of
@@ -164,6 +171,25 @@ func ApplyTransitions(d *Deps, m *Manifest, projectPath string, ops []Transition
 		}
 	}
 	return nil
+}
+
+// recordCommit writes an implementation commit's identity onto the task and, on
+// the set's first one, its parent onto the set as the Set base commit (ADR-0207).
+// The base is written once and never moved: it names where the set's work starts,
+// and a later commit re-deriving it would shrink the range to the last task.
+//
+// A commit whose SHA git did not report is recorded as nothing at all: a base of
+// "" is the root-commit edge, a real claim, and a missing SHA must not be able to
+// make that claim.
+func recordCommit(m *Manifest, idx int, commit *ImplementationCommit) {
+	if commit == nil || commit.SHA == "" {
+		return
+	}
+	m.Tasks[idx].Commit = &TaskCommit{SHA: commit.SHA, Subject: commit.Subject}
+	if !m.BaseCommitRecorded {
+		m.BaseCommit = commit.Parent
+		m.BaseCommitRecorded = true
+	}
 }
 
 // humanCarriedTerminal reports whether this batch is a human completing work

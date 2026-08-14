@@ -90,6 +90,24 @@ type Task struct {
 	// reads as auto so old sets keep their prior depth-cap behavior. It rides
 	// through as `origin`, omitted when empty so unrelated rewrites stay quiet.
 	Origin string `json:"-"`
+	// Commit records the implementation commit pop made for this task — its SHA
+	// and the verbatim subject line it was committed with (ADR-0207). Together
+	// with the set's BaseCommit it is what a later reader uses to find the set's
+	// commit range, and the recorded subjects are the rewrite detector: a rebase
+	// changes every SHA but keeps subjects, so a subject search recovers the range
+	// a SHA lookup lost. Nil until the task's commit is made, and on tasks that
+	// completed as a verified no-op (nothing to commit). A re-run of an already
+	// committed task overwrites it: the latest commit is the reachable one. It
+	// rides through as `commit`, omitted when nil.
+	Commit *TaskCommit `json:"-"`
+}
+
+// TaskCommit is the recorded identity of one implementation commit: the SHA it
+// landed as, and the subject line it was written with, byte-for-byte as handed
+// to git.
+type TaskCommit struct {
+	SHA     string `json:"sha"`
+	Subject string `json:"subject"`
 }
 
 type taskJSON struct {
@@ -100,8 +118,9 @@ type taskJSON struct {
 	Status      TaskStatus `json:"status"`
 	BlockedBy   []string   `json:"blocked_by"`
 	FailedAfter *int       `json:"failed_after,omitempty"`
-	Effort      *string    `json:"effort,omitempty"`
-	Origin      string     `json:"origin,omitempty"`
+	Effort      *string     `json:"effort,omitempty"`
+	Origin      string      `json:"origin,omitempty"`
+	Commit      *TaskCommit `json:"commit,omitempty"`
 }
 
 // UnmarshalJSON preserves the difference between an absent effort key and an
@@ -119,6 +138,7 @@ func (t *Task) UnmarshalJSON(data []byte) error {
 	t.BlockedBy = raw.BlockedBy
 	t.FailedAfter = raw.FailedAfter
 	t.Origin = raw.Origin
+	t.Commit = raw.Commit
 	t.Effort = DefaultTaskEffort
 	t.EffortExplicit = false
 	if raw.Effort != nil {
@@ -140,6 +160,7 @@ func (t Task) MarshalJSON() ([]byte, error) {
 		BlockedBy:   t.BlockedBy,
 		FailedAfter: t.FailedAfter,
 		Origin:      t.Origin,
+		Commit:      t.Commit,
 	}
 	if t.EffortExplicit || (t.Effort != "" && t.Effort != DefaultTaskEffort) {
 		effort := t.Effort
@@ -166,6 +187,25 @@ type Manifest struct {
 	// it: `spec.md`'s `Source map:` line stays human-facing prose and is never
 	// parsed.
 	SourceMap string
+	// BaseCommit is the Set base commit: the parent of the set's *first*
+	// implementation commit, read from and written back as the set-level
+	// `base_commit` key. It is what lets a later reader reconstruct the set's
+	// commit range (`base..HEAD`) without grepping history for a subject format
+	// (ADR-0207). It is recorded at first-commit time, not at set creation, so
+	// commits that land between planning and draining stay outside the range, and
+	// it is written exactly once — later commits never move it.
+	//
+	// The empty string with BaseCommitRecorded set is the root-commit edge: the
+	// set's first implementation commit *is* the repository's first commit and has
+	// no parent, persisted as an explicit JSON null (not the empty-tree hash, which
+	// is not a commit and cannot stand on the left of a `base..HEAD` range). A
+	// reader must therefore distinguish "no base recorded" (legacy set) from
+	// "recorded, and the range starts at the root of history".
+	BaseCommit string
+	// BaseCommitRecorded reports whether the set carries a base at all. False for
+	// every set authored before the field existed and for any set that has not yet
+	// made its first implementation commit.
+	BaseCommitRecorded bool
 	// HumanCompleted records that a human's own `complete` is what carried this set
 	// terminal, read from and written back as the set-level `human_completed` key.
 	// It lives in the manifest rather than the store because it is an assertion
@@ -284,6 +324,25 @@ func parseManifestJSON(data []byte, m *Manifest) error {
 				m.Errors = append(m.Errors, "source_map: must be a map id string")
 				m.Unknown[k] = v
 			}
+		case "base_commit":
+			// Machine-written, so a malformed value means something outside pop edited
+			// it. It reads as absent rather than MALFORMED — a reader that cannot trust
+			// the base falls back to its pre-base path, which is strictly safer than
+			// refusing to load the set — and the raw value rides through Unknown so the
+			// rewrite that follows does not eat the evidence.
+			if string(v) == "null" {
+				// An explicit null is the root-commit edge: recorded, with no parent.
+				m.BaseCommit = ""
+				m.BaseCommitRecorded = true
+				continue
+			}
+			if err := json.Unmarshal(v, &m.BaseCommit); err != nil || m.BaseCommit == "" {
+				m.BaseCommit = ""
+				m.BaseCommitRecorded = false
+				m.Unknown[k] = v
+				continue
+			}
+			m.BaseCommitRecorded = true
 		case "human_completed":
 			// A malformed value reads as absent rather than MALFORMED: this key is
 			// hand-editable, and a typo in it must not hide what the set's tasks say.
@@ -474,6 +533,20 @@ func WriteManifestAtomic(d *Deps, m *Manifest) error {
 			return err
 		}
 		out["source_map"] = sourceMap
+	}
+	// A recorded base is written every time, so the key never depends on which
+	// rewrite path ran; an unrecorded one leaves whatever Unknown carries (an
+	// absent key, or a malformed value preserved verbatim) untouched.
+	if m.BaseCommitRecorded {
+		if m.BaseCommit == "" {
+			out["base_commit"] = json.RawMessage("null")
+		} else {
+			base, err := json.Marshal(m.BaseCommit)
+			if err != nil {
+				return err
+			}
+			out["base_commit"] = base
+		}
 	}
 	// The human-completion bit never outlives the terminal it describes. Every
 	// path that changes a set's tasks — the transition chokepoint, a spawned

@@ -465,17 +465,21 @@ func completeSuccessfulTask(d *Deps, sel *Selection, runtimePath, summary string
 		AgentSummary: summary,
 	}
 
+	var commit *ImplementationCommit
 	if hasChanges {
-		sha, err := createImplementationCommit(d, runtimePath, sel.TaskSetID, sel.TaskID, summary, commitOverrides)
+		made, err := createImplementationCommit(d, runtimePath, sel.TaskSetID, sel.TaskID, summary, commitOverrides)
 		if err != nil {
 			return nil, exitErr(ExitOperational, "implementation commit: %v", err)
 		}
-		result.CommitSHA = sha
+		commit = made
+		if made != nil {
+			result.CommitSHA = made.SHA
+		}
 	} else {
 		result.NoOp = true
 	}
 
-	if err := finalizeTaskDone(d, sel, runtimePath, summary); err != nil {
+	if err := finalizeTaskDone(d, sel, runtimePath, summary, commit); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -489,26 +493,53 @@ func runtimeHasChanges(d *Deps, runtimePath string) (bool, error) {
 	return strings.TrimSpace(out) != "", nil
 }
 
-func createImplementationCommit(d *Deps, runtimePath, taskSetID, taskID, summary string, commitOverrides []string) (string, error) {
+// ImplementationCommit is the commit an attempt just made, in the shape the
+// manifest needs to reconstruct the set's commit range later (ADR-0207): the
+// commit itself, and the parent that becomes the Set base commit when this is
+// the set's first one.
+type ImplementationCommit struct {
+	SHA string
+	// Subject is the subject line as handed to git, kept verbatim so a later
+	// fixed-string search of history finds this commit again after a rebase has
+	// changed its SHA.
+	Subject string
+	// Parent is the commit's first parent, empty when the commit is the
+	// repository's own root commit and therefore has none.
+	Parent string
+}
+
+func createImplementationCommit(d *Deps, runtimePath, taskSetID, taskID, summary string, commitOverrides []string) (*ImplementationCommit, error) {
 	if _, err := d.Git.CommandInDir(runtimePath, "add", "-A"); err != nil {
-		return "", err
+		return nil, err
 	}
 	staged, err := d.Git.CommandInDir(runtimePath, "diff", "--cached", "--name-only")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if strings.TrimSpace(staged) == "" {
-		return "", nil
+		return nil, nil
 	}
 	subject := CommitSubject(taskSetID, taskID)
 	if _, err := d.Git.CommandInDir(runtimePath, commitGitArgs(commitOverrides, "commit", "-m", subject, "-m", summary)...); err != nil {
-		return "", err
+		return nil, err
 	}
-	sha, err := d.Git.CommandInDir(runtimePath, "rev-parse", "HEAD")
+	// One call answers both questions: `--parents` prints the new commit's SHA
+	// followed by its parents, so a root commit — which has none, and for which
+	// `rev-parse HEAD^` would simply fail — is a line with a single field rather
+	// than an error to tell apart from a real git failure.
+	out, err := d.Git.CommandInDir(runtimePath, "rev-list", "--parents", "-n", "1", "HEAD")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return sha, nil
+	fields := strings.Fields(out)
+	if len(fields) == 0 {
+		return nil, nil
+	}
+	made := &ImplementationCommit{SHA: fields[0], Subject: subject}
+	if len(fields) > 1 {
+		made.Parent = fields[1]
+	}
+	return made, nil
 }
 
 func finalizeTaskFailed(d *Deps, sel *Selection, attemptsStarted int, summary string) error {
@@ -527,19 +558,23 @@ func finalizeTaskFailed(d *Deps, sel *Selection, attemptsStarted int, summary st
 	}})
 }
 
-func finalizeTaskDone(d *Deps, sel *Selection, runtimePath, summary string) error {
+func finalizeTaskDone(d *Deps, sel *Selection, runtimePath, summary string, commit *ImplementationCommit) error {
 	// Route the open→done write through the Task-transition chokepoint as
 	// Executor; the chokepoint owns the DONE progress record, clearing the
 	// attempt count under its uniform rule, and the atomic manifest write. This
 	// open→done flows through the same ADR-0109 invalidation rule as a manual
 	// completion — a no-op mid-drain, since the set has no cached verdicts until
 	// it goes fully done.
+	// The commit rides along so its SHA, subject and the set's base land in the
+	// same atomic manifest write as the →done status: a crash can leave a commit
+	// with no record, but never a record of a task that is not done.
 	return ApplyTransitions(d, sel.Manifest, runtimePath, []TransitionOp{{
 		TaskID:  sel.TaskID,
 		To:      TaskDone,
 		Actor:   ActorExecutor,
 		Marker:  "DONE",
 		Summary: summary,
+		Commit:  commit,
 	}})
 }
 

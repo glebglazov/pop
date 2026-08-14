@@ -92,6 +92,10 @@ func (m *Manifest) clone() *Manifest {
 			failedAfter := *task.FailedAfter
 			task.FailedAfter = &failedAfter
 		}
+		if task.Commit != nil {
+			commit := *task.Commit
+			task.Commit = &commit
+		}
 		copied.Tasks[i] = task
 	}
 	if m.Tasks == nil {

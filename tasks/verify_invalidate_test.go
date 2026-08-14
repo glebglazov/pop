@@ -213,7 +213,7 @@ func TestFinalizeTaskDoneAFKNoOpMidDrain(t *testing.T) {
 		t.Fatal("refresh missing demo manifest")
 	}
 	sel := &Selection{TaskSetID: "demo", TaskID: "01-a", Manifest: m}
-	if err := finalizeTaskDone(d, sel, env.root, "done"); err != nil {
+	if err := finalizeTaskDone(d, sel, env.root, "done", nil); err != nil {
 		t.Fatalf("finalizeTaskDone: %v", err)
 	}
 
