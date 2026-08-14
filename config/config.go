@@ -115,6 +115,10 @@ type MonitorDashboardConfig struct {
 	CursorPosition string   `toml:"cursor_position" desc:"Initial cursor strategy (current_registered|current_any|first_active)."`
 	SortCriteria   []string `toml:"sort_criteria" desc:"Dashboard sort order (array of status|pane_last_active_at|session_last_visit_at|alphabetical)."`
 	ZoomOnSwitch   *bool    `toml:"zoom_on_switch" desc:"Zoom the target pane when switching to it."`
+	// KillPanePromptEnabled gates the y/N confirmation C-x asks before it
+	// destroys a pane. It has no alias in the deprecated [dashboard] table: the
+	// setting is newer than the move (ADR-0205/ADR-0206).
+	KillPanePromptEnabled *bool `toml:"kill_pane_prompt_enabled" desc:"Ask y/N before C-x kills the cursored pane."`
 }
 
 // Valid dashboard cursor position strategies.
@@ -1538,6 +1542,18 @@ func (c *Config) DashboardZoomOnSwitch() bool {
 		return true
 	}
 	return *md.ZoomOnSwitch
+}
+
+// DashboardKillPanePromptEnabled reports whether C-x on the monitor dashboard
+// asks y/N before it destroys the cursored pane. Defaults to true: the prompt is
+// the only mitigation for killing a pane whose agent outlives it (ADR-0205), so
+// turning it off is an explicit acceptance of that risk.
+func (c *Config) DashboardKillPanePromptEnabled() bool {
+	md := c.monitorDashboardConfig()
+	if md == nil || md.KillPanePromptEnabled == nil {
+		return true
+	}
+	return *md.KillPanePromptEnabled
 }
 
 // DashboardSortCriteria returns the configured sort criteria for the dashboard.

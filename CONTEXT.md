@@ -79,7 +79,7 @@ A pane currently visible to the user in tmux. A pane may be **Active** regardles
 _Avoid_: Working pane, focused pane
 
 **Dashboard**:
-The presentation of the monitored set of panes — a browsable view of registered panes, their status, and visit times. `pop monitor dashboard` opens this view; `pop dashboard` is only a hidden compatibility alias.
+The presentation of the monitored set of panes — a browsable view of registered panes, their status, and visit times. `pop monitor dashboard` opens this view; `pop dashboard` is only a hidden compatibility alias. It is also where a monitored pane is destroyed: the monitored set is the whole target set, so what the view lists is what `ctrl+x` may kill. Configured by the `[monitor.dashboard]` table.
 _Avoid_: Monitor (when you mean the tracking mechanism, not the view)
 
 **Monitor**:

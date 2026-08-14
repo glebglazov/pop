@@ -4101,6 +4101,37 @@ func TestMonitorDashboardAlias(t *testing.T) {
 	}
 }
 
+func TestDashboardKillPanePromptEnabled(t *testing.T) {
+	tests := []struct {
+		name string
+		toml string
+		want bool
+	}{
+		{"unset: the prompt is on", "projects = [{ path = \"~/Dev\" }]", true},
+		{"turned off explicitly", "projects = [{ path = \"~/Dev\" }]\n[monitor.dashboard]\nkill_pane_prompt_enabled = false", false},
+		{"turned on explicitly", "projects = [{ path = \"~/Dev\" }]\n[monitor.dashboard]\nkill_pane_prompt_enabled = true", true},
+		// The setting is newer than the [dashboard] move, so a config that only
+		// uses the deprecated table still gets the safe default.
+		{"deprecated table only: still on", "projects = [{ path = \"~/Dev\" }]\n[dashboard]\ncursor_position = \"current_any\"", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			configPath := filepath.Join(t.TempDir(), "config.toml")
+			if err := os.WriteFile(configPath, []byte(tt.toml), 0644); err != nil {
+				t.Fatalf("failed to write config: %v", err)
+			}
+			cfg, err := Load(configPath)
+			if err != nil {
+				t.Fatalf("Load() error: %v", err)
+			}
+			if got := cfg.DashboardKillPanePromptEnabled(); got != tt.want {
+				t.Errorf("DashboardKillPanePromptEnabled() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // boolPtr returns a pointer to b for use in RepoOverrideConfig fields.
 func boolPtr(b bool) *bool { return &b }
 

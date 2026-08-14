@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -72,6 +73,10 @@ type AttentionCallbacks struct {
 	MarkUnread   func(paneID string)        // marks a pane as unread
 	ToggleFollow func(paneID string)        // toggles following flag
 	Unmonitor    func(paneID string)        // removes a pane from monitor state
+	// KillPane destroys a pane's tmux pane and drops it from the monitored set
+	// in one action (ADR-0205). The error is what the dashboard reports when the
+	// kill fails, and is the signal that the row must stay.
+	KillPane func(paneID string) error
 }
 
 // MonitorDashboardAction represents what action the user wants to take in the dashboard
@@ -117,6 +122,19 @@ type MonitorDashboard struct {
 	markUnreadFunc   func(paneID string)
 	toggleFollowFunc func(paneID string)
 	unmonitorFunc    func(paneID string)
+	killPaneFunc     func(paneID string) error
+
+	// flash reports what a verb just did on the bottom line. The kill is the
+	// only verb with an outcome — above all a failure — that has nowhere else to
+	// appear (ADR-0204, ADR-0205).
+	flash Flash
+	// currentPaneID is the pane the dashboard itself runs in. The kill key
+	// refuses it, so the guard never depends on the cursor-position setting.
+	currentPaneID string
+	// killPromptEnabled gates the y/N confirmation before a kill; true unless a
+	// caller passes WithMonitorDashboardKillPrompt(false).
+	killPromptEnabled bool
+	killPrompt        *killPanePrompt
 
 	warnings []string
 
@@ -130,6 +148,15 @@ type MonitorDashboard struct {
 	pickerMode          bool
 	quickAccessModifier string
 	quickAccess         *QuickAccess
+}
+
+// killPanePrompt is the y/N confirmation the kill key opens by default. It
+// remembers the row it names, and while it is open every key outside its own
+// grammar is inert — so `y` can only ever destroy the pane the prompt asked
+// about, never a row the cursor moved to in between.
+type killPanePrompt struct {
+	paneID string
+	label  string
 }
 
 // MonitorDashboardOption configures the dashboard
@@ -172,6 +199,22 @@ func WithEmptyNote(note string) MonitorDashboardOption {
 	}
 }
 
+// WithMonitorDashboardCurrentPaneID names the pane the dashboard is running in,
+// which the kill key refuses to destroy.
+func WithMonitorDashboardCurrentPaneID(paneID string) MonitorDashboardOption {
+	return func(d *MonitorDashboard) {
+		d.currentPaneID = paneID
+	}
+}
+
+// WithMonitorDashboardKillPrompt turns the kill key's y/N confirmation off.
+// Without it the prompt is on, matching the config default.
+func WithMonitorDashboardKillPrompt(enabled bool) MonitorDashboardOption {
+	return func(d *MonitorDashboard) {
+		d.killPromptEnabled = enabled
+	}
+}
+
 // WithMonitorDashboardPickerMode makes the dashboard a pure selection UI.
 func WithMonitorDashboardPickerMode(quickAccessModifier string) MonitorDashboardOption {
 	return func(d *MonitorDashboard) {
@@ -192,6 +235,10 @@ func NewMonitorDashboard(panes []AttentionPane, cb AttentionCallbacks, reloadFn 
 		markUnreadFunc:   cb.MarkUnread,
 		toggleFollowFunc: cb.ToggleFollow,
 		unmonitorFunc:    cb.Unmonitor,
+		killPaneFunc:     cb.KillPane,
+		// Options may turn the prompt off; nothing turns it on, so the safe
+		// answer is the one a caller that says nothing gets.
+		killPromptEnabled: true,
 	}
 	copy(d.panes, panes)
 	for _, opt := range opts {
@@ -281,8 +328,23 @@ func (d *MonitorDashboard) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// Update implements tea.Model
+// Update implements tea.Model. It wraps the dashboard's own update loop with
+// the single place a flash's expiry reaches bubbletea: a verb deep in the key
+// switch only has to set the message, and the timer that takes it away again is
+// armed here (ADR-0204).
 func (d *MonitorDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if expired, ok := msg.(FlashExpiredMsg); ok {
+		d.flash.Expired(expired)
+		return d, nil
+	}
+	model, cmd := d.update(msg)
+	if timer := d.flash.Timer(); timer != nil {
+		return model, tea.Batch(cmd, timer)
+	}
+	return model, cmd
+}
+
+func (d *MonitorDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	d.syncToList()
 
 	switch msg.(type) {
@@ -307,6 +369,12 @@ func (d *MonitorDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
+		// The kill prompt swallows the whole keyboard, help included: the pane
+		// it names must not move under the answer.
+		if d.killPrompt != nil {
+			return d.updateKillPrompt(msg)
+		}
+
 		// Help overlay: toggle, dismiss, or swallow keys while open.
 		if ToggleHelp(&d.showHelp, msg) {
 			return d, nil
@@ -496,6 +564,14 @@ func (d *MonitorDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return d, nil
 
+		case key.Matches(msg, dashboardKeys.KillPane):
+			// Picker mode promises callers it mutates nothing, and destroying a
+			// pane is the largest mutation the view has.
+			if d.pickerMode {
+				return d, nil
+			}
+			return d, d.startKillPane()
+
 		case d.isQuickAccessKey(msg):
 			targetIdx := d.list.Cursor() - d.quickAccessDigit(msg)
 			if targetIdx >= 0 && targetIdx < len(d.panes) {
@@ -531,6 +607,94 @@ func (d *MonitorDashboard) isQuickAccessKey(msg tea.KeyPressMsg) bool {
 
 func (d *MonitorDashboard) quickAccessDigit(msg tea.KeyPressMsg) int {
 	return d.quickAccess.Digit(pickerKeyPress(msg))
+}
+
+// startKillPane answers the kill key: it refuses the dashboard's own pane, opens
+// the confirmation when the prompt is enabled, and otherwise kills at once.
+func (d *MonitorDashboard) startKillPane() tea.Cmd {
+	if len(d.panes) == 0 || d.killPaneFunc == nil {
+		return nil
+	}
+	pane := d.panes[d.cursor]
+	if d.currentPaneID != "" && pane.PaneID == d.currentPaneID {
+		d.flash.Set("cannot kill the pane the dashboard is running in")
+		return nil
+	}
+	if d.killPromptEnabled {
+		// A prompt that a stale message covered would be answered blind.
+		d.flash.Set("")
+		d.killPrompt = &killPanePrompt{paneID: pane.PaneID, label: killPaneLabel(pane)}
+		return nil
+	}
+	return d.killPane(pane.PaneID)
+}
+
+// updateKillPrompt runs the confirmation's grammar — y kills, enter/n/esc/C-c
+// cancel, everything else is ignored — and returns the dashboard to normal.
+func (d *MonitorDashboard) updateKillPrompt(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, dashboardKeys.KillConfirm):
+		paneID := d.killPrompt.paneID
+		d.killPrompt = nil
+		return d, d.killPane(paneID)
+	case key.Matches(msg, dashboardKeys.KillCancel):
+		d.killPrompt = nil
+	}
+	return d, nil
+}
+
+// killPane destroys a pane and takes its row out of the view. A failed kill
+// leaves the row alone and says so; a successful one drops the row immediately
+// because the only other cleanup is the daemon's five-second sweep, which does
+// not run at all when the daemon is down (ADR-0205).
+func (d *MonitorDashboard) killPane(paneID string) tea.Cmd {
+	idx := -1
+	for i, pane := range d.panes {
+		if pane.PaneID == paneID {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return nil
+	}
+	label := killPaneLabel(d.panes[idx])
+
+	if err := d.killPaneFunc(paneID); err != nil {
+		d.flash.Set(fmt.Sprintf("kill failed: %v", err))
+		return nil
+	}
+	d.flash.Set("killed " + label)
+	d.dirty = true
+
+	for i := range d.allPanes {
+		if d.allPanes[i].PaneID == paneID {
+			d.allPanes = append(d.allPanes[:i], d.allPanes[i+1:]...)
+			break
+		}
+	}
+	d.panes = append(d.panes[:idx], d.panes[idx+1:]...)
+	if len(d.panes) == 0 {
+		d.result = MonitorDashboardResult{Action: MonitorDashboardActionCancel}
+		return tea.Quit
+	}
+	if d.cursor >= len(d.panes) {
+		d.cursor = len(d.panes) - 1
+	}
+	d.list.SetItems(d.panes)
+	d.list.SetCursor(d.cursor)
+	d.syncFromList()
+	d.fetchPreview()
+	return nil
+}
+
+// killPaneLabel names a pane in a prompt or a flash, falling back to the tmux
+// pane id for a row whose name has not been derived yet.
+func killPaneLabel(pane AttentionPane) string {
+	if pane.Name != "" {
+		return pane.Name
+	}
+	return pane.PaneID
 }
 
 // reloadPanes refreshes the pane list from the reload function,
@@ -692,12 +856,18 @@ func (d *MonitorDashboard) frameSpec() Frame {
 		Notice:   d.updateNotice,
 		Warnings: d.warnings,
 		Hints:    d.buildHints(),
+		Flash:    d.flash,
 	}
 }
 
 // buildHints returns the hints string based on the current mode.
 func (d *MonitorDashboard) buildHints() string {
-	hints := "  Enter open and clear · Shift+Enter open · r toggle unread/clear · f follow · x unmonitor · F follow view · ← back · Esc cancel · C-h help"
+	// The prompt takes the bottom line the same way a flash does — one line
+	// either way, and the question sits where the answer's report will land.
+	if d.killPrompt != nil {
+		return "  Kill " + d.killPrompt.label + "? y/N"
+	}
+	hints := "  Enter open and clear · Shift+Enter open · r toggle unread/clear · f follow · x unmonitor · C-x kill · F follow view · ← back · Esc cancel · C-h help"
 	if d.pickerMode {
 		hints = "  Enter select · F follow view · Esc cancel · C-h help"
 		switch d.quickAccessModifier {
@@ -800,6 +970,7 @@ func (d *MonitorDashboard) helpEntries() []HelpEntry {
 		{"f", "Follow pane"},
 		{"F", "Toggle follow view"},
 		{"x", "Unmonitor pane"},
+		{"C-x", "Kill pane"},
 		{"← / h", "Back / quit"},
 		{"Esc / C-c", "Cancel"},
 	}
@@ -849,6 +1020,12 @@ func (d *MonitorDashboard) viewDashboard() string {
 			eb.WriteString(hintStyle.Render("  " + d.emptyNote))
 		}
 		eb.WriteString("\n")
+		// This footer is built by hand rather than by Frame, so it repeats
+		// Frame's rule: a live flash takes the bottom line from the hints.
+		if line := d.flash.Line(); line != "" {
+			eb.WriteString(line)
+			return eb.String()
+		}
 		hint := "  F toggle view · Enter or Esc to dismiss"
 		if d.reloadFunc != nil {
 			hint += " · r to reload"
@@ -983,6 +1160,12 @@ type dashboardKeyMap struct {
 	ToggleClearUnread key.Binding
 	Back              key.Binding
 	MarkUnread        key.Binding
+	KillPane          key.Binding
+	// KillConfirm and KillCancel are the confirmation's own grammar, matching
+	// the Work dashboard's abandon modal. They are read only while the prompt is
+	// open, which is why they may reuse keys the dashboard binds elsewhere.
+	KillConfirm key.Binding
+	KillCancel  key.Binding
 }
 
 var dashboardKeys = dashboardKeyMap{
@@ -1018,5 +1201,14 @@ var dashboardKeys = dashboardKeyMap{
 	),
 	MarkUnread: key.NewBinding(
 		key.WithKeys("ctrl+a"),
+	),
+	KillPane: key.NewBinding(
+		key.WithKeys("ctrl+x"),
+	),
+	KillConfirm: key.NewBinding(
+		key.WithKeys("y"),
+	),
+	KillCancel: key.NewBinding(
+		key.WithKeys("esc", "ctrl+c", "n", "enter"),
 	),
 }

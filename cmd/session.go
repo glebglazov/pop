@@ -294,6 +294,18 @@ func attentionCallbacks() ui.AttentionCallbacks {
 				debug.Error("unmonitorPane %s: %v", paneID, err)
 			}
 		},
+		KillPane: func(paneID string) error {
+			if err := defaultTmuxMod.KillPane(paneID); err != nil {
+				return err
+			}
+			// The pane is gone either way, so a failed deregistration is not a
+			// failed kill: the entry it leaves behind is what the daemon's sweep
+			// is for. The kill is reported as the success it was.
+			if err := store.Remove(paneID); err != nil {
+				debug.Error("killPane deregister %s: %v", paneID, err)
+			}
+			return nil
+		},
 	}
 }
 

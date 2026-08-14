@@ -66,18 +66,21 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 	}
 
 	cursorPosition := cfg.DashboardCursorPosition()
+	// The current pane is resolved whatever the cursor strategy is: the kill
+	// key's refusal to destroy the terminal you are looking at must not depend
+	// on an unrelated setting (ADR-0205).
 	var currentPaneID, currentPaneSession string
-	if dashboardPick || cursorPosition == config.DashboardCursorCurrentRegistered || cursorPosition == config.DashboardCursorCurrentAny {
-		var err error
-		currentPaneID, err = defaultTmuxMod.CurrentPane()
-		if err != nil {
-			if dashboardPick {
-				return fmt.Errorf("cannot determine current tmux session")
-			}
-			debug.Error("dashboard: get current pane ID: %v", err)
+	currentPaneID, err = defaultTmuxMod.CurrentPane()
+	if err != nil {
+		if dashboardPick {
+			return fmt.Errorf("cannot determine current tmux session")
 		}
+		debug.Error("dashboard: get current pane ID: %v", err)
+	}
+	if dashboardPick || cursorPosition == config.DashboardCursorCurrentRegistered || cursorPosition == config.DashboardCursorCurrentAny {
 		if currentPaneID != "" {
-			currentPaneSession, err = defaultTmuxMod.PaneSession(currentPaneID)
+			session, err := defaultTmuxMod.PaneSession(currentPaneID)
+			currentPaneSession = session
 			if err != nil {
 				if dashboardPick {
 					return fmt.Errorf("cannot determine current tmux session")
@@ -101,7 +104,10 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 	}
 
 	// Restore following mode from monitor state
-	var opts []ui.MonitorDashboardOption
+	opts := []ui.MonitorDashboardOption{
+		ui.WithMonitorDashboardCurrentPaneID(currentPaneID),
+		ui.WithMonitorDashboardKillPrompt(cfg.DashboardKillPanePromptEnabled()),
+	}
 	state := loadMonitorStateAlways()
 	if state != nil && state.DashboardFollowing {
 		opts = append(opts, ui.WithFollowing(true))

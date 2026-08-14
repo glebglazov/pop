@@ -252,6 +252,12 @@ projects = [
 # its window. Set this to false to focus the pane in place instead, keeping the
 # window's split layout visible (e.g. an editor above, an agent below).
 # zoom_on_switch = true
+#
+# C-x on the dashboard destroys the cursored pane and drops it from the
+# monitored set. It asks y/N first; set this to false to make the key kill
+# immediately. The prompt is what stands between you and killing a pane whose
+# agent keeps running without it, so turn it off knowingly.
+# kill_pane_prompt_enabled = true
 
 # [dashboard]
 # Deprecated: use [monitor.dashboard] above instead. Still read when
