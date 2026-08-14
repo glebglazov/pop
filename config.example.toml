@@ -237,7 +237,7 @@ projects = [
 # prompt. Your own `~/.gitconfig` and pop's other git calls are unaffected.
 # commit_config_overrides = ["commit.gpgsign=false"]
 
-# [dashboard]
+# [monitor.dashboard]
 # Initial cursor strategy. Available: "current_registered", "current_any",
 # "first_active". "current_any" adds the current pane as a virtual clear entry
 # when it is not monitored, without registering it in the monitor state.
@@ -252,3 +252,7 @@ projects = [
 # its window. Set this to false to focus the pane in place instead, keeping the
 # window's split layout visible (e.g. an editor above, an agent below).
 # zoom_on_switch = true
+
+# [dashboard]
+# Deprecated: use [monitor.dashboard] above instead. Still read when
+# [monitor.dashboard] is absent; a key set in both wins from [monitor.dashboard].

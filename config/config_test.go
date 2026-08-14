@@ -4041,6 +4041,66 @@ func TestDashboardCursorPosition(t *testing.T) {
 	}
 }
 
+// TestMonitorDashboardAlias pins ADR-0206: [monitor.dashboard] supersedes the
+// deprecated [dashboard] table, which is still read as its alias, and when a
+// config file sets the same key in both, [monitor.dashboard] wins.
+func TestMonitorDashboardAlias(t *testing.T) {
+	tests := []struct {
+		name             string
+		toml             string
+		wantCursor       string
+		wantSort         []string
+		wantZoomOnSwitch bool
+	}{
+		{
+			name:             "only the deprecated table set: still read",
+			toml:             "projects = [{ path = \"~/Dev\" }]\n[dashboard]\ncursor_position = \"current_any\"\nsort_criteria = [\"alphabetical\"]\nzoom_on_switch = false",
+			wantCursor:       DashboardCursorCurrentAny,
+			wantSort:         []string{"alphabetical"},
+			wantZoomOnSwitch: false,
+		},
+		{
+			name:             "only the new table set",
+			toml:             "projects = [{ path = \"~/Dev\" }]\n[monitor.dashboard]\ncursor_position = \"first_active\"\nsort_criteria = [\"status\"]\nzoom_on_switch = false",
+			wantCursor:       DashboardCursorFirstActive,
+			wantSort:         []string{"status"},
+			wantZoomOnSwitch: false,
+		},
+		{
+			name: "both set: the new table wins key for key",
+			toml: "projects = [{ path = \"~/Dev\" }]\n" +
+				"[dashboard]\ncursor_position = \"current_any\"\nsort_criteria = [\"alphabetical\"]\nzoom_on_switch = false\n" +
+				"[monitor.dashboard]\ncursor_position = \"first_active\"\nsort_criteria = [\"status\"]\nzoom_on_switch = true",
+			wantCursor:       DashboardCursorFirstActive,
+			wantSort:         []string{"status"},
+			wantZoomOnSwitch: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "config.toml")
+			if err := os.WriteFile(configPath, []byte(tt.toml), 0644); err != nil {
+				t.Fatalf("failed to write config: %v", err)
+			}
+			cfg, err := Load(configPath)
+			if err != nil {
+				t.Fatalf("Load() error: %v", err)
+			}
+			if got := cfg.DashboardCursorPosition(); got != tt.wantCursor {
+				t.Errorf("DashboardCursorPosition() = %q, want %q", got, tt.wantCursor)
+			}
+			if got := cfg.DashboardSortCriteria(); !reflect.DeepEqual(got, tt.wantSort) {
+				t.Errorf("DashboardSortCriteria() = %v, want %v", got, tt.wantSort)
+			}
+			if got := cfg.DashboardZoomOnSwitch(); got != tt.wantZoomOnSwitch {
+				t.Errorf("DashboardZoomOnSwitch() = %v, want %v", got, tt.wantZoomOnSwitch)
+			}
+		})
+	}
+}
+
 // boolPtr returns a pointer to b for use in RepoOverrideConfig fields.
 func boolPtr(b bool) *bool { return &b }
 

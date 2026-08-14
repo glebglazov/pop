@@ -87,12 +87,34 @@ const DefaultTopicWords = 5
 // 30s gives a multi-GB local model room to cold-load before pop falls through.
 const DefaultTopicDerivationTimeoutSeconds = 30
 
-// DashboardConfig holds dashboard-specific configuration
+// DashboardConfig holds the deprecated [dashboard] table (ADR-0206): the
+// monitor dashboard's cursor, sort and zoom settings now live in
+// [monitor.dashboard] (MonitorDashboardConfig) and this table is read only as
+// its alias, through monitorDashboardConfig().
 type DashboardConfig struct {
 	CurrentPaneAlwaysUnderCursor bool     `toml:"current_pane_always_under_cursor" desc:"Deprecated: place the current pane under the cursor (use cursor_position)."`
-	CursorPosition               string   `toml:"cursor_position" desc:"Initial cursor strategy (current_registered|current_any|first_active)."`
-	SortCriteria                 []string `toml:"sort_criteria" desc:"Dashboard sort order (array of status|pane_last_active_at|session_last_visit_at|alphabetical)."`
-	ZoomOnSwitch                 *bool    `toml:"zoom_on_switch" desc:"Zoom the target pane when switching to it."`
+	CursorPosition               string   `toml:"cursor_position" desc:"Deprecated: use [monitor.dashboard]."`
+	SortCriteria                 []string `toml:"sort_criteria" desc:"Deprecated: use [monitor.dashboard]."`
+	ZoomOnSwitch                 *bool    `toml:"zoom_on_switch" desc:"Deprecated: use [monitor.dashboard]."`
+}
+
+// MonitorConfig holds the [monitor] table: the monitor/pane dashboard's own
+// settings, one nested table per concern (house style, e.g. [work.dashboard]).
+type MonitorConfig struct {
+	// Dashboard holds the monitor dashboard's cursor, sort and zoom settings
+	// (ADR-0206). Supersedes the root [dashboard] table kept above as its
+	// deprecated alias.
+	Dashboard *MonitorDashboardConfig `toml:"dashboard" desc:"Monitor dashboard cursor, sort and zoom behavior ([monitor.dashboard] table)."`
+}
+
+// MonitorDashboardConfig holds the monitor dashboard's cursor-position,
+// sort-criteria and zoom-on-switch settings (ADR-0206). Read through
+// Config.monitorDashboardConfig(), which aliases the deprecated [dashboard]
+// table: present here, this table wins key-for-key over [dashboard].
+type MonitorDashboardConfig struct {
+	CursorPosition string   `toml:"cursor_position" desc:"Initial cursor strategy (current_registered|current_any|first_active)."`
+	SortCriteria   []string `toml:"sort_criteria" desc:"Dashboard sort order (array of status|pane_last_active_at|session_last_visit_at|alphabetical)."`
+	ZoomOnSwitch   *bool    `toml:"zoom_on_switch" desc:"Zoom the target pane when switching to it."`
 }
 
 // Valid dashboard cursor position strategies.
@@ -645,7 +667,9 @@ type Config struct {
 	// Deprecated: use Project. TODO: remove at next major release.
 	Select         *ProjectConfig        `toml:"select" desc:"Deprecated: use [project]."`
 	PaneMonitoring *PaneMonitoringConfig `toml:"pane_monitoring" desc:"Pane attention/status monitoring daemon settings ([pane_monitoring] table)."`
-	Dashboard      *DashboardConfig      `toml:"dashboard" desc:"Shared dashboard and cursor behavior ([dashboard] table)."`
+	// Deprecated: use Monitor.Dashboard. TODO: remove at next major release.
+	Dashboard *DashboardConfig `toml:"dashboard" desc:"Deprecated: use [monitor.dashboard]."`
+	Monitor   *MonitorConfig   `toml:"monitor" desc:"Monitor dashboard settings ([monitor] table; [monitor.dashboard] holds cursor, sort and zoom behavior)."`
 	// Task holds the retired [tasks] table's one honored key, [tasks.git]
 	// (ADR-0194). Everything else moved to [work.<kind>].
 	Task   *TasksConfig            `toml:"tasks" include:"fields" desc:"Deprecated: use [work] (only [tasks.git] is still read)."`
@@ -1439,14 +1463,15 @@ func (c *Config) CurrentPaneAlwaysUnderCursor() bool {
 // Defaults to current_registered. The deprecated current_pane_always_under_cursor
 // boolean maps to current_any only when cursor_position is not set.
 func (c *Config) DashboardCursorPosition() string {
-	if c.Dashboard == nil {
+	md := c.monitorDashboardConfig()
+	if md == nil {
 		return DashboardCursorCurrentRegistered
 	}
-	switch c.Dashboard.CursorPosition {
+	switch md.CursorPosition {
 	case DashboardCursorCurrentRegistered, DashboardCursorCurrentAny, DashboardCursorFirstActive:
-		return c.Dashboard.CursorPosition
+		return md.CursorPosition
 	case "":
-		if c.Dashboard.CurrentPaneAlwaysUnderCursor {
+		if c.Dashboard != nil && c.Dashboard.CurrentPaneAlwaysUnderCursor {
 			return DashboardCursorCurrentAny
 		}
 	}
@@ -1505,22 +1530,24 @@ func (c *Config) PaneMonitoringTopicDerivationTimeout() time.Duration {
 
 // DashboardZoomOnSwitch reports whether selecting a pane from the dashboard
 // maximizes (zooms) it within its window. Defaults to true; set
-// [dashboard] zoom_on_switch = false to focus the pane in place, preserving
-// the window's split layout (e.g. nvim above, agent below).
+// [monitor.dashboard] zoom_on_switch = false to focus the pane in place,
+// preserving the window's split layout (e.g. nvim above, agent below).
 func (c *Config) DashboardZoomOnSwitch() bool {
-	if c == nil || c.Dashboard == nil || c.Dashboard.ZoomOnSwitch == nil {
+	md := c.monitorDashboardConfig()
+	if md == nil || md.ZoomOnSwitch == nil {
 		return true
 	}
-	return *c.Dashboard.ZoomOnSwitch
+	return *md.ZoomOnSwitch
 }
 
 // DashboardSortCriteria returns the configured sort criteria for the dashboard.
 // Defaults to [status, pane_last_active_at, alphabetical].
 func (c *Config) DashboardSortCriteria() []string {
-	if c.Dashboard == nil || len(c.Dashboard.SortCriteria) == 0 {
+	md := c.monitorDashboardConfig()
+	if md == nil || len(md.SortCriteria) == 0 {
 		return DefaultSortCriteria
 	}
-	return c.Dashboard.SortCriteria
+	return md.SortCriteria
 }
 
 func (c *Config) projectConfig() *ProjectConfig {
@@ -1528,6 +1555,28 @@ func (c *Config) projectConfig() *ProjectConfig {
 		return c.Project
 	}
 	return c.Select
+}
+
+// monitorDashboardConfig resolves the effective [monitor.dashboard] settings,
+// aliasing the deprecated [dashboard] table (ADR-0206): returns the new table
+// when present, else the deprecated one recast into the new shape. The
+// precedence mirrors projectConfig()'s for [project]/[select] — present, the
+// new table wins whole, key for key, over the old one.
+func (c *Config) monitorDashboardConfig() *MonitorDashboardConfig {
+	if c == nil {
+		return nil
+	}
+	if c.Monitor != nil && c.Monitor.Dashboard != nil {
+		return c.Monitor.Dashboard
+	}
+	if c.Dashboard == nil {
+		return nil
+	}
+	return &MonitorDashboardConfig{
+		CursorPosition: c.Dashboard.CursorPosition,
+		SortCriteria:   c.Dashboard.SortCriteria,
+		ZoomOnSwitch:   c.Dashboard.ZoomOnSwitch,
+	}
 }
 
 // UnreadNotificationsEnabled returns whether unread notifications are
