@@ -9,7 +9,7 @@ drift, diff the region between this header and the marker against
 domain-modeling@<newref>.
 
 Pop keeps exactly one copy of this file, here in `_shared/`. Every skill that
-reads or writes the glossary — batch-grill-me reads the union, grill-with-docs
+reads or writes the glossary — grilling reads the union, grill-with-docs
 writes fragments into it — receives a copy in its installed directory at
 install time, so the union rule and the op syntax cannot drift between them and
 each skill's `./CONTEXT-FORMAT.md` reference still resolves. Only the

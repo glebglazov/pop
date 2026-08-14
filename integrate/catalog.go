@@ -26,7 +26,7 @@ const (
 	ComponentPaneSkill ComponentID = "pane-skills"
 
 	// ComponentTaskSkills is the opt-in task planning skill set
-	// (batch-grill-me, grill-with-docs, grill-with-map, grill-consolidate,
+	// (grilling, grill-with-docs, grill-with-map, grill-consolidate,
 	// to-spec, to-tasks,
 	// wayfinder, prototype, research, setup-matt-pocock-skills, spend-audit).
 	ComponentTaskSkills ComponentID = "task-skills"
@@ -97,7 +97,7 @@ var catalog = []Component{
 		// documents several skills share, which is where both grilling skills
 		// get their two format documents.
 		sources: []string{
-			"skills/pop/batch-grill-me",
+			"skills/pop/grilling",
 			"skills/pop/grill-with-docs",
 			"skills/pop/grill-with-map",
 			"skills/pop/grill-consolidate",
@@ -121,7 +121,7 @@ const sharedSkillDocDir = "skills/pop/_shared"
 // sharedSkillDocs maps a skill's base name to the shared documents its
 // installed directory receives a copy of. One source of truth, several
 // destinations: the glossary union rule and the `+`/`~`/`-` op syntax are the
-// same text for the skill that only reads the union (batch-grill-me), the one
+// same text for the skill that only reads the union (grilling), the one
 // that writes fragments into it (grill-with-docs) and the one that drafts the
 // same ops into a Map (grill-with-map), so they cannot be allowed to drift
 // apart. The ADR template is shared the same way by the two skills that
@@ -129,7 +129,7 @@ const sharedSkillDocDir = "skills/pop/_shared"
 // Each copy lands beside the skill body, so a body's `./CONTEXT-FORMAT.md`
 // link resolves wherever the skill is installed.
 var sharedSkillDocs = map[string][]string{
-	"batch-grill-me":  {"CONTEXT-FORMAT.md"},
+	"grilling":        {"CONTEXT-FORMAT.md"},
 	"grill-with-docs": {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
 	"grill-with-map":  {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
 }

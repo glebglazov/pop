@@ -11,17 +11,17 @@ import (
 // to. Per ADR-0112/ADR-0136, drift review reduces to diffing this region
 // against the pinned upstream source; this test makes that diff mechanical
 // instead of archaeological. It covers the grill-with-docs body and the shared
-// format documents (pinned to domain-modeling@8b78b53), the batch-grill-me
+// format documents (pinned to domain-modeling@8b78b53), the grilling
 // interview primitive (pinned to productivity/grilling@8b78b53 — upstream
-// absorbed the in-progress batch-grill-me experiment into its shipped grilling
-// skill, so this pin tracks a live upstream), and the setup-matt-pocock-skills
+// absorbed the in-progress experiment it was first pinned to into its shipped
+// grilling skill, so this pin tracks a live upstream), and the setup-matt-pocock-skills
 // seed templates (pinned to mattpocock/skills@8b78b53).
 //
 // grill-with-docs' verbatim region is the domain-modeling half alone: the
-// interview half it used to inline is now batch-grill-me, composed over rather
+// interview half it used to inline is now grilling, composed over rather
 // than concatenated, so each upstream skill is pinned in exactly one place.
 var overlayPinnedFiles = map[string]string{
-	"skills/pop/batch-grill-me/SKILL.md":                          "testdata/grilling-pin/SKILL.md",
+	"skills/pop/grilling/SKILL.md":                                "testdata/grilling-pin/SKILL.md",
 	"skills/pop/grill-with-docs/SKILL.md":                         "testdata/domain-modeling-pin/SKILL.md",
 	"skills/pop/_shared/CONTEXT-FORMAT.md":                        "testdata/domain-modeling-pin/CONTEXT-FORMAT.md",
 	"skills/pop/_shared/ADR-FORMAT.md":                            "testdata/domain-modeling-pin/ADR-FORMAT.md",

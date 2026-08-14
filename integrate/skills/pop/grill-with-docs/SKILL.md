@@ -13,7 +13,7 @@ the glossary/ADR discipline on its own. Pop inlines it rather than delegating to
 `/domain-modeling`, per ADR-0009 (skills are embedded in the binary and ship to
 machines without Matt's skills installed).
 
-The interview half is no longer inlined here. It is pop's own `batch-grill-me`
+The interview half is no longer inlined here. It is pop's own `grilling`
 skill — the same upstream primitive, installed alongside this one by the same
 component — and the overlay below composes over it rather than restating it, so
 one copy of the interview rules serves both this skill and the wayfinding
@@ -98,7 +98,7 @@ Only offer to create an ADR when all three are true:
 If any of the three is missing, skip the ADR. Use the format in [ADR-FORMAT.md](./ADR-FORMAT.md).
 <!-- ═══════════════════════════════ POP OVERLAY ═══════════════════════════════
 Everything below is pop-specific and has no upstream twin. It names the
-interview primitive this skill composes over (batch-grill-me), and carries the
+interview primitive this skill composes over (grilling), and carries the
 behavioural overrides of the base — replacing domain-modeling's "Update
 CONTEXT.md inline" single-writer instruction with per-session fragments written
 once a round, and collapsing the base's scattered fact-finding into one rule —
@@ -108,9 +108,9 @@ the verbatim upstream region, the line below wins; the upstream text is kept
 byte-intact only so drift stays diffable.
 -->
 
-## Composed over batch-grill-me
+## Composed over grilling
 
-Run the `batch-grill-me` skill for the conversation itself: map the design tree,
+Run the `grilling` skill for the conversation itself: map the design tree,
 ask the whole settled frontier one round at a time, find every fact yourself,
 and stop when the frontier is empty. That skill is the interview and nothing
 else — it deliberately writes nothing, and asks which skill records the

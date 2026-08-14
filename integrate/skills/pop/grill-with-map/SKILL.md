@@ -4,7 +4,7 @@ description: Wayfinding grilling session for one Decision ticket on a Map — in
 ---
 
 <!--
-No upstream base: this skill is pop-original, composing batch-grill-me's
+No upstream base: this skill is pop-original, composing grilling's
 interview primitive with the wayfinding answer discipline (Map-directory-only
 writes, no commit). Agent-loaded: it is the skill a wayfinding ticket loads to
 resolve itself, so the agent working that ticket must be able to invoke it
@@ -22,9 +22,9 @@ plus the wayfinding answer discipline: every artifact the session produces lands
 inside the Map's own directory, and the repository is left exactly as it was
 found.
 
-## Composed over batch-grill-me
+## Composed over grilling
 
-Run the `batch-grill-me` skill for the conversation itself: map the design tree,
+Run the `grilling` skill for the conversation itself: map the design tree,
 ask the whole settled frontier one round at a time, find every fact yourself,
 and stop when the frontier is empty. That skill is the interview and nothing
 else — it writes nothing and asks which skill records the decisions. This one is

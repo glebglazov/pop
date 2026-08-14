@@ -9,7 +9,7 @@ import (
 // renders, with the companion files each one is expected to carry alongside its
 // SKILL.md body.
 var taskSkillDirs = map[string][]string{
-	"pop-batch-grill-me":           {"CONTEXT-FORMAT.md"},
+	"pop-grilling":                 {"CONTEXT-FORMAT.md"},
 	"pop-grill-with-docs":          {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
 	"pop-grill-with-map":           {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
 	"pop-grill-consolidate":        {},

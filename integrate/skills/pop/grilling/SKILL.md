@@ -1,5 +1,5 @@
 ---
-name: batch-grill-me
+name: grilling
 description: Interview the user relentlessly about a plan or design until you reach a shared understanding — map the design tree, ask the whole settled frontier one round at a time, and find every fact yourself. Reads the project glossary as input and writes nothing. Use when a plan needs stress-testing without anything on disk being touched.
 ---
 
@@ -12,7 +12,7 @@ ref above — the interview primitive on its own: design tree, frontier, rounds,
 question format, find-facts-yourself. Pop inlines it rather than delegating to
 `/grilling`, per ADR-0009 (skills are embedded in the binary and ship to
 machines without Matt's skills installed). Upstream's frontmatter is replaced by
-pop's, and the local name stays `batch-grill-me`: **agent-loaded**. This is the
+pop's; the local name is `grilling`, upstream's own: **agent-loaded**. This is the
 interview primitive alone, and pop's `grill-with-map` composes over it for every
 wayfinding ticket — a wayfinding session must be able to load both without a
 human re-opening each one by hand, or every grilling ticket needs a manual
@@ -21,20 +21,21 @@ decisions to the repo (`grill-with-docs`, `wayfinder`, and the handoff skills
 that close a map), not to the shared interview step underneath them.
 
 **The upstream twin is `productivity/grilling`, not the in-progress experiment
-this skill was first pinned to.** It was pinned to
-`in-progress/batch-grill-me@fde4cd5` on the reading that upstream's shipped
-grilling was committed to one-question-at-a-time, so the batch variant looked
-abandoned and the pin was treated as frozen. The opposite happened: upstream
-`a4b2009` reworked shipped `grilling` to the round-by-round frontier model and
-deleted the experiment, so the primitive pop inlines is now upstream's shipped
-skill. The pin tracks a **live** upstream again — a new commit on
-`productivity/grilling` is a real drift signal, not noise. To review drift, diff
-the region between this header and the marker against
-productivity/grilling@<newref>.
+this skill was first pinned to.** It was pinned to that in-progress experiment
+(ref `fde4cd5`) on the reading that upstream's shipped grilling was committed
+to one-question-at-a-time, so the batch variant looked abandoned and the pin
+was treated as frozen. The opposite happened: upstream `a4b2009` reworked
+shipped `grilling` to the round-by-round frontier model and deleted the
+experiment, so the primitive pop inlines is now upstream's shipped skill. The
+pin tracks a **live** upstream again — a new commit on `productivity/grilling`
+is a real drift signal, not noise. To review drift, diff the region between
+this header and the marker against productivity/grilling@<newref>.
 
-The local name is kept (ADR-0141 honors a flow's origin, and `batch-grill-me`
-is the name pop's catalog, installer, and composing skills already resolve);
-only the pin's target moved.
+The local name now matches upstream's own, `grilling` (ADR-0141's amendment):
+the old local name credited that in-progress experiment, and the experiment no
+longer exists — upstream absorbed it into shipped `productivity/grilling` and
+deleted it. A local name that points at nothing is renamed to the live skill
+it actually tracks.
 -->
 
 Interview the user relentlessly until you reach a shared understanding. Map this as a **design tree**: every decision branches into the decisions that hang off it.

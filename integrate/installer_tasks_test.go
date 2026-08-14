@@ -51,7 +51,7 @@ func taskAgents() []taskAgent {
 
 // taskSkillNames is the set of skill directory names the task-skills
 // component installs.
-var taskSkillNames = []string{"pop-batch-grill-me", "pop-grill-with-docs", "pop-grill-with-map", "pop-grill-consolidate", "pop-to-spec", "pop-to-tasks", "pop-wayfinder", "pop-prototype", "pop-research", "pop-setup-matt-pocock-skills", "pop-spend-audit"}
+var taskSkillNames = []string{"pop-grilling", "pop-grill-with-docs", "pop-grill-with-map", "pop-grill-consolidate", "pop-to-spec", "pop-to-tasks", "pop-wayfinder", "pop-prototype", "pop-research", "pop-setup-matt-pocock-skills", "pop-spend-audit"}
 
 // TestInstallTaskSkillsAllAgents covers the clean install for claude, codex,
 // pi, and cursor: all seven planning skills land as render trees under the data
@@ -88,7 +88,7 @@ func TestInstallTaskSkillsAllAgents(t *testing.T) {
 			// grill-with-docs and prototype companions ride alongside their bodies
 			// in the render tree so their relative references resolve.
 			for skill, companions := range map[string][]string{
-				"pop-batch-grill-me":           {"CONTEXT-FORMAT.md"},
+				"pop-grilling":                 {"CONTEXT-FORMAT.md"},
 				"pop-grill-with-docs":          {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
 				"pop-grill-with-map":           {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
 				"pop-prototype":                {"LOGIC.md", "UI.md"},
@@ -272,12 +272,12 @@ func TestTaskSkillsDoctorSeesMissingSkillOrSharedDoc(t *testing.T) {
 	}{
 		{
 			name:   "skill body absent",
-			damage: func(fs *fakeFS) { delete(fs.files, filepath.Join(renderDir, "pop-batch-grill-me", "SKILL.md")) },
+			damage: func(fs *fakeFS) { delete(fs.files, filepath.Join(renderDir, "pop-grilling", "SKILL.md")) },
 		},
 		{
 			name: "shared doc absent",
 			damage: func(fs *fakeFS) {
-				delete(fs.files, filepath.Join(renderDir, "pop-batch-grill-me", "CONTEXT-FORMAT.md"))
+				delete(fs.files, filepath.Join(renderDir, "pop-grilling", "CONTEXT-FORMAT.md"))
 			},
 		},
 		{
