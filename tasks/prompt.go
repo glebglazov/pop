@@ -244,13 +244,15 @@ func BuildVerifyFailedAssistancePrompt(d *Deps, taskSetID string, m *Manifest, w
 	// do (see workDiffView): the assisting agent is in the checkout and can read
 	// what the human asks about, while an inlined diff of a large set overflows
 	// both argv and the context window.
-	work := verifyWorkDiff(d, runtimePath, taskSetID)
+	work := verifyWorkDiff(d, runtimePath, taskSetID, m)
 	fmt.Fprintf(&b, "Accumulated work diff")
 	if workSHA != "" {
 		fmt.Fprintf(&b, " (at %s)", workSHA)
 	}
 	fmt.Fprintf(&b, "\n")
-	if work.Empty() {
+	if work.Undetermined {
+		fmt.Fprintf(&b, "(the set's commit range could not be determined — helping the human establish what this set actually landed is the task at this gate)\n\n")
+	} else if work.Empty() {
 		fmt.Fprintf(&b, "(no committed changes for this set)\n\n")
 	} else {
 		fmt.Fprintf(&b, "Commit range: %s\n", work.Range)

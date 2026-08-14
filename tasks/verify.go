@@ -437,7 +437,21 @@ func loadVerifiableManifest(d *Deps, opts verifyCoreOptions) (*Manifest, error) 
 // human-accepted non-issue is not re-flagged, without suppressing fresh
 // judgment; the freshly recorded verdict is agent-authored (not human-authored).
 func runAndStoreVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *Manifest, workSHA, priorNote string) (*store.VerifyVerdict, error) {
-	work := verifyWorkDiff(d, opts.RuntimePath, opts.SetID)
+	work := verifyWorkDiff(d, opts.RuntimePath, opts.SetID, m)
+	if work.Undetermined {
+		// Judging the wrong range is worse than not judging: the Verifier is not
+		// invoked at all, and the set parks on a verdict that says so (ADR-0207).
+		return storeVerdict(d, store.VerifyVerdict{
+			Repo:       opts.Repo,
+			SetID:      opts.SetID,
+			WorkSHA:    workSHA,
+			Verdict:    string(VerdictNeedsHuman),
+			Findings:   rangeUndeterminedFindings,
+			Summary:    "The set's commit range could not be determined; no work was reviewed.",
+			Scope:      afkTaskCount(m),
+			ComputedAt: time.Now().UTC(),
+		})
+	}
 	prompt := buildVerifierPrompt(d, m, workSHA, work, priorNote)
 
 	run := opts.runVerifier
@@ -467,6 +481,14 @@ func runAndStoreVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *
 		ComputedAt: time.Now().UTC(),
 	}
 
+	return storeVerdict(d, v)
+}
+
+// storeVerdict upserts one verdict into the Drain store and hands back the
+// stored record, so every verdict the verify core produces — the Verifier's own
+// and the range-undetermined one it stands in for — reaches the cache the same
+// way and is reused at the same work SHA.
+func storeVerdict(d *Deps, v store.VerifyVerdict) (*store.VerifyVerdict, error) {
 	s, err := openDrainStore(d)
 	if err != nil {
 		return nil, err
@@ -1004,19 +1026,154 @@ type workDiffView struct {
 	Range string
 	// Stat is `git diff --stat <Range>`, complete for that range.
 	Stat string
+	// Undetermined marks the one case that is not "no work": the set recorded a
+	// base and commits, and none of them can be found in this checkout's history
+	// (see resolveVerifyRange). It is louder than an empty view because the set
+	// demonstrably committed something — reviewing a guessed range would judge
+	// other people's commits, so the verification parks for a human instead.
+	Undetermined bool
 }
 
 // Empty reports whether the set has any committed work to judge.
 func (v workDiffView) Empty() bool { return strings.TrimSpace(v.Range) == "" }
 
+// rangeUndeterminedFindings is what a NEEDS-HUMAN verdict says when the set's
+// commit range could not be resolved. It is the Verifier's own voice for a run
+// that never happened, so it must say that plainly: nothing was reviewed.
+const rangeUndeterminedFindings = "The set's commit range could not be determined. " +
+	"Neither the recorded Set base commit and task commits nor any recorded commit subject is present in this checkout's history " +
+	"(the branch was likely rebased with the commits reworded, or the work lives on another branch). " +
+	"The Verifier was not run and nothing was reviewed — a human must confirm what this set landed."
+
 // verifyWorkDiff returns the range and complete stat of the set's committed
-// work. The drain commits every task as a `tasks(<slug>): <id>` commit, so the
-// set's work is the range from the parent of its earliest such commit to HEAD.
-// Absent set commits (nothing drained yet) yields an empty view — the Verifier
-// still judges the criteria, just against no changes. Computation is
-// best-effort: any git failure yields an empty view rather than aborting the
-// verification.
-func verifyWorkDiff(d *Deps, runtimePath, setID string) workDiffView {
+// work, or a view marked Undetermined when the range cannot be resolved.
+// Computation is best-effort otherwise: any git failure yields an empty view
+// rather than aborting the verification, and a set that has not committed
+// anything yields an empty view too — the Verifier still judges the criteria,
+// just against no changes.
+func verifyWorkDiff(d *Deps, runtimePath, setID string, m *Manifest) workDiffView {
+	if m == nil || !m.BaseCommitRecorded {
+		// A set drained before the base was recorded (ADR-0207) has nothing but the
+		// old subject format to go on.
+		return legacyPrefixWorkDiff(d, runtimePath, setID)
+	}
+	rng, ok := resolveVerifyRange(d, runtimePath, m)
+	if !ok {
+		return workDiffView{Undetermined: true}
+	}
+	stat, err := d.Git.CommandInDir(runtimePath, "diff", "--stat", rng)
+	if err != nil {
+		return workDiffView{}
+	}
+	return workDiffView{Range: rng, Stat: strings.TrimSpace(stat)}
+}
+
+// resolveVerifyRange names the set's commit range from what the executor
+// recorded, in the two layers ADR-0207 allows — and never a third, guessed one.
+//
+// Layer one is the recorded Set base commit: with it and every recorded task
+// commit still reachable from HEAD, the range is exactly `base..HEAD`. The task
+// commits are what makes this safe rather than merely plausible: a rebase onto a
+// newer trunk leaves the old base an ancestor, so a reachable base alone would
+// happily name a range swallowing every commit others landed on trunk meanwhile.
+// A rewritten task SHA is the signal that the base no longer means what it did.
+//
+// Layer two recovers from that rewrite through the recorded commit *subjects*,
+// which a rebase keeps by default: the earliest commit whose message matches one
+// of them starts the range at `match^..HEAD`, which begins after the foreign
+// commits the rebase moved the set on top of.
+//
+// Nothing found is not a range. The caller parks the set for a human.
+func resolveVerifyRange(d *Deps, runtimePath string, m *Manifest) (string, bool) {
+	if commitReachable(d, runtimePath, m.BaseCommit) && recordedCommitsReachable(d, runtimePath, m) {
+		return rangeToHEADFrom(m.BaseCommit), true
+	}
+	if sha, ok := earliestRecordedSubjectCommit(d, runtimePath, m); ok {
+		return rangeToHEADFrom(parentOf(d, runtimePath, sha)), true
+	}
+	return "", false
+}
+
+// rangeToHEADFrom builds the range that ends at HEAD and starts just after
+// start. An empty start is the root-of-history case — the set's first commit had
+// no parent — where the empty tree stands in for a commit that does not exist.
+func rangeToHEADFrom(start string) string {
+	if start == "" {
+		return emptyTreeSHA + "..HEAD"
+	}
+	return start + "..HEAD"
+}
+
+// parentOf resolves a commit's first parent, returning the empty string for a
+// root commit so the caller can fall back to the empty tree.
+func parentOf(d *Deps, runtimePath, sha string) string {
+	out, err := d.Git.CommandInDir(runtimePath, "rev-parse", "--verify", "--quiet", sha+"^")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
+// commitReachable reports whether sha is an ancestor of HEAD in the runtime
+// checkout. The empty SHA is the recorded root-of-history base, which no
+// checkout can have lost; a missing object answers false through the same error
+// path as a commit that exists but sits outside HEAD's history.
+func commitReachable(d *Deps, runtimePath, sha string) bool {
+	if sha == "" {
+		return true
+	}
+	_, err := d.Git.CommandInDir(runtimePath, "merge-base", "--is-ancestor", sha, "HEAD")
+	return err == nil
+}
+
+// recordedCommitsReachable reports whether every implementation commit the set
+// recorded is still reachable from HEAD — the rewrite detector.
+func recordedCommitsReachable(d *Deps, runtimePath string, m *Manifest) bool {
+	for _, task := range m.Tasks {
+		if task.Commit == nil || task.Commit.SHA == "" {
+			continue
+		}
+		if !commitReachable(d, runtimePath, task.Commit.SHA) {
+			return false
+		}
+	}
+	return true
+}
+
+// earliestRecordedSubjectCommit finds the oldest commit reachable from HEAD
+// whose message contains one of the set's recorded commit subjects. The search
+// is fixed-string — a planned subject is arbitrary prose and must never be read
+// as a regular expression — and git ORs the repeated --grep patterns, so one
+// walk answers for every subject at once.
+func earliestRecordedSubjectCommit(d *Deps, runtimePath string, m *Manifest) (string, bool) {
+	args := []string{"log", "--format=%H", "--fixed-strings"}
+	seen := map[string]bool{}
+	for _, task := range m.Tasks {
+		if task.Commit == nil || strings.TrimSpace(task.Commit.Subject) == "" || seen[task.Commit.Subject] {
+			continue
+		}
+		seen[task.Commit.Subject] = true
+		args = append(args, "--grep", task.Commit.Subject)
+	}
+	if len(seen) == 0 {
+		return "", false
+	}
+	out, err := d.Git.CommandInDir(runtimePath, append(args, "HEAD")...)
+	if err != nil {
+		return "", false
+	}
+	hashes := strings.Fields(strings.TrimSpace(out))
+	if len(hashes) == 0 {
+		return "", false
+	}
+	return hashes[len(hashes)-1], true
+}
+
+// legacyPrefixWorkDiff is the pre-ADR-0207 range detection, kept for sets that
+// drained before the base was recorded: the drain committed every task as a
+// `tasks(<slug>): <id>` commit, so the set's work is the range from the parent
+// of its earliest such commit to HEAD.
+func legacyPrefixWorkDiff(d *Deps, runtimePath, setID string) workDiffView {
 	prefix := commitSubjectPrefix(setID)
 	out, err := d.Git.CommandInDir(runtimePath, "log", "--format=%H", "--fixed-strings", "--grep", prefix, "HEAD")
 	if err != nil {
