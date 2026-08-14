@@ -21,7 +21,7 @@ func TestAutoRemediationSpawnForwardFeedsAcceptedNote(t *testing.T) {
 		HumanAuthored: true, Note: "the widget gap is deliberate",
 	})
 
-	if _, err := spawnRemediationTask(d, m, repo, "shaB", "criterion 2 unmet", "", "", RemediationOriginAuto); err != nil {
+	if _, err := spawnRemediationTask(d, m, repo, remediationSpawn{WorkSHA: "shaB", Findings: "criterion 2 unmet", Origin: RemediationOriginAuto}); err != nil {
 		t.Fatalf("spawnRemediationTask: %v", err)
 	}
 

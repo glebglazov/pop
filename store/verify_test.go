@@ -20,13 +20,14 @@ func TestPutGetVerifyVerdictRoundTrip(t *testing.T) {
 	s := openTestStore(t)
 	now := time.Now().UTC().Truncate(time.Second)
 	v := VerifyVerdict{
-		Repo:       "/repo/.git",
-		SetID:      "set-a",
-		WorkSHA:    "sha1",
-		Verdict:    "FIXABLE",
-		Findings:   "criterion 2 unmet",
-		Summary:    "widget never renders",
-		ComputedAt: now,
+		Repo:          "/repo/.git",
+		SetID:         "set-a",
+		WorkSHA:       "sha1",
+		Verdict:       "FIXABLE",
+		Findings:      "criterion 2 unmet",
+		Summary:       "widget never renders",
+		CommitSubject: "fix(ui): render the widget",
+		ComputedAt:    now,
 	}
 	if err := s.PutVerifyVerdict(v); err != nil {
 		t.Fatalf("PutVerifyVerdict: %v", err)
@@ -40,6 +41,11 @@ func TestPutGetVerifyVerdictRoundTrip(t *testing.T) {
 	}
 	if got.Verdict != "FIXABLE" || got.Findings != "criterion 2 unmet" || got.Summary != "widget never renders" {
 		t.Fatalf("GetVerifyVerdict = %+v, want FIXABLE / criterion 2 unmet / widget never renders", got)
+	}
+	// The subject the Verifier rendered for the fix rides with the verdict, so a
+	// spawn off a cache hit commits under it (ADR-0207).
+	if got.CommitSubject != "fix(ui): render the widget" {
+		t.Fatalf("CommitSubject = %q, want it persisted with the verdict", got.CommitSubject)
 	}
 	if !got.ComputedAt.Equal(now) {
 		t.Fatalf("ComputedAt = %v, want %v", got.ComputedAt, now)

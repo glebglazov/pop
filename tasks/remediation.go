@@ -217,6 +217,31 @@ func neutralizeACHeaders(findings string) string {
 	return strings.Join(lines, "\n")
 }
 
+// remediationSpawn is everything one Remediation task is born with: the work it
+// is a response to, the reasons, and the provenance that decides how the task
+// reads. The fields travel together through the spawn path — a Remediation task
+// is written from exactly one of these, whether the Verifier produced it or a
+// human authorised it.
+type remediationSpawn struct {
+	// WorkSHA is the runtime HEAD the findings were judged at; empty when unknown.
+	WorkSHA string
+	// Findings are the Verifier's untrusted, human-facing reasons the criteria are
+	// unmet — the body of the task.
+	Findings string
+	// HumanNote is a human's rationale for authorising the fix (ADR-0103), and its
+	// presence is what makes the spawn human-triggered. Empty on the auto path.
+	HumanNote string
+	// VerifierSummary is the Verifier's optional one-line SUMMARY, used as the
+	// title summary of an auto-origin task.
+	VerifierSummary string
+	// CommitSubject is the Planned commit subject the Verifier rendered for this
+	// fix under the set's Commit convention (ADR-0207). Empty means none was
+	// rendered, and the executor falls back to pop's default subject format.
+	CommitSubject string
+	// Origin tags provenance (auto or human), which the depth cap counts by.
+	Origin string
+}
+
 // spawnRemediationTask writes a new AFK Remediation task into the set (ADR-0086):
 // a markdown body carrying the findings plus an atomically-appended index.json
 // entry at the next number. The markdown is written first — the manifest entry
@@ -235,8 +260,8 @@ func neutralizeACHeaders(findings string) string {
 // human's rationale is carried into the task body alongside the findings and the
 // framing reflects that a human authorised the fix (the auto FIXABLE path passes
 // an empty note).
-func spawnRemediationTask(d *Deps, m *Manifest, repo, workSHA, findings, humanNote, verifierSummary, origin string) (string, error) {
-	id, err := writeRemediationTask(d, m, workSHA, findings, humanNote, verifierSummary, origin)
+func spawnRemediationTask(d *Deps, m *Manifest, repo string, s remediationSpawn) (string, error) {
+	id, err := writeRemediationTask(d, m, s)
 	if err != nil {
 		return "", err
 	}
@@ -285,7 +310,7 @@ func restoreHITLGatesBlockedBy(m *Manifest, snap []hitlBlockedBySnapshot) {
 // half of spawning — the caller invalidates the set's cached verdicts. The human
 // out-of-band Remediate path (ADR-0104) drives this directly so the manifest
 // append and the verdict invalidation ride one quiescence-gated transaction.
-func writeRemediationTask(d *Deps, m *Manifest, workSHA, findings, humanNote, verifierSummary, origin string) (string, error) {
+func writeRemediationTask(d *Deps, m *Manifest, s remediationSpawn) (string, error) {
 	if m == nil {
 		return "", exitErr(ExitOperational, "spawn remediation task: nil manifest")
 	}
@@ -294,18 +319,22 @@ func writeRemediationTask(d *Deps, m *Manifest, workSHA, findings, humanNote, ve
 	file := id + ".md"
 
 	mdPath := filepath.Join(m.Dir, file)
-	if err := WriteAtomicWith(d, mdPath, []byte(remediationBody(workSHA, findings, humanNote, cycle)), 0o644); err != nil {
+	if err := WriteAtomicWith(d, mdPath, []byte(remediationBody(s.WorkSHA, s.Findings, s.HumanNote, cycle)), 0o644); err != nil {
 		return "", exitErr(ExitOperational, "write remediation task body: %v", err)
 	}
 
 	m.Tasks = append(m.Tasks, Task{
 		ID:        id,
 		File:      file,
-		Title:     remediationTitle(cycle, remediationTitleSummary(origin, humanNote, verifierSummary)),
+		Title:     remediationTitle(cycle, remediationTitleSummary(s.Origin, s.HumanNote, s.VerifierSummary)),
 		Type:      "AFK",
 		Status:    TaskOpen,
 		BlockedBy: []string{},
-		Origin:    origin,
+		Origin:    s.Origin,
+		// Born mid-drain, so the Verifier rendered this task's Planned commit
+		// subject at spawn time (ADR-0207); the executor uses it verbatim like any
+		// plan-time one, and an empty one falls back to the default format.
+		CommitSubject: s.CommitSubject,
 	})
 	hitlSnap := wireRemediationIntoOpenHITLGates(m, id)
 	if err := WriteManifestAtomic(d, m); err != nil {
@@ -325,11 +354,13 @@ func writeRemediationTask(d *Deps, m *Manifest, workSHA, findings, humanNote, ve
 // completion moves the work SHA so the cached verdict goes stale and the Verifier
 // re-fires, closing the loop. At or over the cap it writes nothing and returns
 // spawned=false, so the caller parks the set at VERIFY-FAILED.
-func spawnRemediationIfUnderCap(d *Deps, m *Manifest, repo, workSHA, findings, verifierSummary string, maxDepth int) (spawned bool, id string, err error) {
+func spawnRemediationIfUnderCap(d *Deps, m *Manifest, repo string, s remediationSpawn, maxDepth int) (spawned bool, id string, err error) {
 	if remediationDepth(m) >= maxDepth {
 		return false, "", nil
 	}
-	id, err = spawnRemediationTask(d, m, repo, workSHA, findings, "", verifierSummary, RemediationOriginAuto)
+	s.HumanNote = ""
+	s.Origin = RemediationOriginAuto
+	id, err = spawnRemediationTask(d, m, repo, s)
 	if err != nil {
 		return false, "", err
 	}

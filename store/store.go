@@ -525,6 +525,15 @@ var migrations = []string{
 	// migration here, so the guard is the accessor's.
 	`ALTER TABLE work_containers ADD COLUMN muted_until TEXT NOT NULL DEFAULT '';
 	 ALTER TABLE work_containers ADD COLUMN mute_secret INTEGER NOT NULL DEFAULT 0;`,
+	// 32: verify_verdicts.commit_subject — the Planned commit subject the Verifier
+	// rendered for the fix it is asking for (ADR-0207), under the set's commit
+	// convention. It rides with the verdict for the same reason the summary does: a
+	// FIXABLE spawn that reads a cached verdict (a re-drain at an unchanged work
+	// SHA) must write the same subject the Verifier authored, and re-rendering it
+	// would need a second Verifier run. Empty when the set carries no convention or
+	// the Verifier rendered nothing usable — the commit then falls back to pop's
+	// default format.
+	`ALTER TABLE verify_verdicts ADD COLUMN commit_subject TEXT NOT NULL DEFAULT '';`,
 }
 
 func (s *Store) migrate() error {

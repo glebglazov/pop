@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
@@ -258,7 +259,11 @@ func acceptResolvedSet(d *Deps, opts verifyCoreOptions, m *Manifest, workSHA str
 // findings (the verdict recorded at the work SHA, when any) plus the human note.
 func remediateResolvedSet(d *Deps, opts verifyCoreOptions, m *Manifest, workSHA string) (*VerifyResult, error) {
 	note := strings.TrimSpace(opts.RemediateNote)
-	findings := latestVerdictFindings(d, opts.Repo, opts.SetID, workSHA)
+	recorded := latestVerdict(d, opts.Repo, opts.SetID, workSHA)
+	findings := ""
+	if recorded != nil {
+		findings = recorded.Findings
+	}
 	// A human Remediate appends to the manifest and invalidates the set's cached
 	// verdicts out of band, so it is refused unless the checkout is quiescent — a
 	// live drain must not race the manifest append (ADR-0104). The manifest write
@@ -271,7 +276,16 @@ func remediateResolvedSet(d *Deps, opts verifyCoreOptions, m *Manifest, workSHA 
 	var id string
 	if err := mutateWithCheckoutQuiescence(d, s, opts.RuntimePath, func(ctx context.Context, ex store.Execer) error {
 		var werr error
-		if id, werr = writeRemediationTask(d, m, workSHA, findings, note, "", RemediationOriginHuman); werr != nil {
+		spawn := remediationSpawn{
+			WorkSHA:   workSHA,
+			Findings:  findings,
+			HumanNote: note,
+			// The human is authorising the fix the Verifier described, so the subject
+			// it rendered for those findings is this task's planned subject too.
+			CommitSubject: remediationCommitSubject(m, recorded),
+			Origin:        RemediationOriginHuman,
+		}
+		if id, werr = writeRemediationTask(d, m, spawn); werr != nil {
 			return werr
 		}
 		return store.CaptureNoteThenInvalidateExec(ctx, ex, opts.Repo, m.Stem)
@@ -282,23 +296,24 @@ func remediateResolvedSet(d *Deps, opts verifyCoreOptions, m *Manifest, workSHA 
 	return &VerifyResult{SetID: opts.SetID, WorkSHA: workSHA, Findings: findings}, nil
 }
 
-// latestVerdictFindings returns the findings of the verdict recorded for
-// (repo, set) at workSHA, or "" when none exists or the store is unavailable. It
-// is best-effort: a human-triggered Remediation carries the findings as context
-// for the fixing agent, but the human note is the authoritative directive, so an
-// absent or unreadable verdict simply yields no findings rather than an error.
-func latestVerdictFindings(d *Deps, repo, setID, workSHA string) string {
+// latestVerdict returns the verdict recorded for (repo, set) at workSHA, or nil
+// when none exists or the store is unavailable. It is best-effort: a
+// human-triggered Remediation carries the verdict's findings as context for the
+// fixing agent — and the commit subject the Verifier rendered for them — but the
+// human note is the authoritative directive, so an absent or unreadable verdict
+// simply yields nothing rather than an error.
+func latestVerdict(d *Deps, repo, setID, workSHA string) *store.VerifyVerdict {
 	if d == nil || repo == "" || setID == "" {
-		return ""
+		return nil
 	}
 	s, ok, err := openDrainStoreIfExists(d)
 	if err != nil || !ok {
-		return ""
+		return nil
 	}
 	if v, err := s.GetVerifyVerdict(repo, setID, workSHA); err == nil && v != nil {
-		return v.Findings
+		return v
 	}
-	return ""
+	return nil
 }
 
 // latestAcceptedNote returns the most recent human-authored Accept note for
@@ -471,14 +486,18 @@ func runAndStoreVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *
 
 	verdict, findings, summary := ParseVerdict(raw)
 	v := store.VerifyVerdict{
-		Repo:       opts.Repo,
-		SetID:      opts.SetID,
-		WorkSHA:    workSHA,
-		Verdict:    string(verdict),
-		Findings:   findings,
-		Summary:    summary,
-		Scope:      afkTaskCount(m),
-		ComputedAt: time.Now().UTC(),
+		Repo:     opts.Repo,
+		SetID:    opts.SetID,
+		WorkSHA:  workSHA,
+		Verdict:  string(verdict),
+		Findings: findings,
+		Summary:  summary,
+		// Rendered under the set's Commit convention and stored with the verdict, so
+		// a spawn off a cached FIXABLE commits the fix under the subject the
+		// Verifier that found it wrote (ADR-0207).
+		CommitSubject: parseVerifierCommitSubject(raw),
+		Scope:         afkTaskCount(m),
+		ComputedAt:    time.Now().UTC(),
 	}
 
 	return storeVerdict(d, v)
@@ -1294,6 +1313,13 @@ func buildVerifierPrompt(d *Deps, m *Manifest, workSHA string, work workDiffView
 		b.WriteString("\n```\n")
 	}
 
+	convention := strings.TrimSpace(m.CommitConvention)
+	if convention != "" {
+		b.WriteString("\n## This repository's commit convention\n")
+		b.WriteString(convention)
+		b.WriteString("\n")
+	}
+
 	b.WriteString("\n## Respond in exactly this format\n")
 	b.WriteString("On the first line, one of:\n")
 	b.WriteString("VERDICT: PASS\n")
@@ -1301,12 +1327,101 @@ func buildVerifierPrompt(d *Deps, m *Manifest, workSHA string, work workDiffView
 	b.WriteString("VERDICT: NEEDS-HUMAN\n")
 	b.WriteString("Then, on the following lines:\n")
 	b.WriteString("SUMMARY: <in one line, what needs fixing — optional; omit for PASS>\n")
+	if convention != "" {
+		b.WriteString("COMMIT-SUBJECT: <one line — the commit subject the fix should be committed under>\n")
+	}
 	b.WriteString("FINDINGS: <what fails a criterion and why — leave empty for PASS>\n\n")
 	b.WriteString("PASS = every acceptance criterion is met. ")
 	b.WriteString("FIXABLE = criteria are unmet but an agent could resolve the findings. ")
 	b.WriteString("NEEDS-HUMAN = the findings need a human decision. ")
 	b.WriteString("SUMMARY names, in one line, what needs fixing when remediation is warranted — it is optional and must not affect the verdict.\n")
+	if convention != "" {
+		b.WriteString("COMMIT-SUBJECT is the final, literal subject line the fix work will be committed under, written in the convention above — ")
+		b.WriteString("a real message describing the fix, not a template or a placeholder. Write it only when remediation is warranted; ")
+		b.WriteString("it is optional, must not affect the verdict, and must be a single line with no surrounding quotes or backticks.\n")
+	}
 	return b.String()
+}
+
+// verifierCommitSubjectMaxLen bounds a rendered subject at the length past which
+// a line has stopped being a commit subject and become prose — a signal the
+// Verifier answered the wrong question, so the spawn drops it rather than
+// committing a paragraph as a subject.
+const verifierCommitSubjectMaxLen = 120
+
+// remediationCommitSubject resolves the Planned commit subject a Remediation
+// task is spawned with (ADR-0207). A set with no Commit convention gets none —
+// the Verifier was never asked for one, so any line that looks like one is not
+// something the set's repository asked for — and neither does an absent or
+// unusable rendering. Empty means the executor falls back to pop's default
+// subject format, which is why nothing here can fail the spawn.
+func remediationCommitSubject(m *Manifest, v *store.VerifyVerdict) string {
+	if m == nil || v == nil || strings.TrimSpace(m.CommitConvention) == "" {
+		return ""
+	}
+	return sanitizeVerifierCommitSubject(v.CommitSubject)
+}
+
+// sanitizeVerifierCommitSubject normalizes the Verifier's rendered subject into
+// something committable, or returns "" when it is not one. The text is untrusted
+// agent output: it is reduced to its first line with whitespace collapsed and
+// the decoration agents habitually wrap a subject in (quotes, backticks)
+// stripped. An unrendered placeholder (`<type>(scope): summary`) and an
+// over-long line are both dropped — a malformed rendering degrades to the
+// default format and never blocks the remediation.
+func sanitizeVerifierCommitSubject(raw string) string {
+	line := strings.TrimSpace(raw)
+	if i := strings.IndexAny(line, "\r\n"); i >= 0 {
+		line = line[:i]
+	}
+	line = strings.Join(strings.Fields(line), " ")
+	line = strings.Trim(line, "`\"' \t")
+	if line == "" || utf8.RuneCountInString(line) > verifierCommitSubjectMaxLen {
+		return ""
+	}
+	if strings.HasPrefix(line, "<") && strings.HasSuffix(line, ">") {
+		return ""
+	}
+	return line
+}
+
+// parseVerifierCommitSubject extracts the optional `COMMIT-SUBJECT:` line from a
+// Verifier's raw response. It is read beside ParseVerdict rather than inside it:
+// the subject is a side-channel the verdict does not depend on, and a response
+// carrying none is not thereby malformed.
+func parseVerifierCommitSubject(raw string) string {
+	for _, line := range strings.Split(strings.TrimSpace(raw), "\n") {
+		if strings.HasPrefix(strings.ToUpper(stripMarkdown(line)), "FINDINGS") {
+			break
+		}
+		if value, ok := commitSubjectLabelValue(line); ok {
+			return sanitizeVerifierCommitSubject(value)
+		}
+	}
+	return ""
+}
+
+// commitSubjectLabelValue reports whether a line is the `COMMIT-SUBJECT:` label
+// line and, if so, returns the text after the label. Markdown decoration and the
+// separator variants an agent reaches for (`COMMIT SUBJECT`, `COMMIT_SUBJECT`)
+// are tolerated; a colon delimiter is required so prose that opens with the word
+// is not read as the label.
+func commitSubjectLabelValue(line string) (string, bool) {
+	stripped := stripMarkdown(line)
+	up := strings.ToUpper(stripped)
+	if !strings.HasPrefix(up, "COMMIT") {
+		return "", false
+	}
+	rest := stripped[len("COMMIT"):]
+	rest = strings.TrimLeft(rest, "-_ \t")
+	if !strings.HasPrefix(strings.ToUpper(rest), "SUBJECT") {
+		return "", false
+	}
+	rest = rest[len("SUBJECT"):]
+	if rest == "" || (rest[0] != ':' && rest[0] != '*') {
+		return "", false
+	}
+	return strings.TrimLeft(rest, "*: \t"), true
 }
 
 // readSpec returns the trimmed content of the set folder's co-located spec.md
@@ -1497,6 +1612,9 @@ func extractFindings(lines []string, verdictIdx int) string {
 		var rest []string
 		for _, line := range lines[verdictIdx+1:] {
 			if _, ok := summaryLabelValue(line); ok {
+				continue
+			}
+			if _, ok := commitSubjectLabelValue(line); ok {
 				continue
 			}
 			rest = append(rest, line)
