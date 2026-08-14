@@ -252,9 +252,9 @@ func TestDashboardIKeyUnboundOpensPicker(t *testing.T) {
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 	// Drain now lives behind the action menu: open with `a`, then `i`.
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
-	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'I', Text: "I"})
+	updated, cmd := got.update(tea.KeyPressMsg{Code: 'I', Text: "I"})
 	got = updated.(QueueDashboard)
 	if cmd == nil {
 		t.Fatal("i did not return a command")
@@ -267,7 +267,7 @@ func TestDashboardIKeyUnboundOpensPicker(t *testing.T) {
 	if listMsg.err != nil {
 		t.Fatalf("drain target list err = %v", listMsg.err)
 	}
-	updated, _ = got.Update(listMsg)
+	updated, _ = got.update(listMsg)
 	got = updated.(QueueDashboard)
 	if got.drainPick == nil {
 		t.Fatal("i on unbound set did not open the drain target picker")
@@ -298,9 +298,9 @@ func TestDashboardIKeyBoundDrainsWithoutPicker(t *testing.T) {
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 	// Drain now lives behind the action menu: open with `a`, then `i`.
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
-	_, cmd := got.Update(tea.KeyPressMsg{Code: 'I', Text: "I"})
+	_, cmd := got.update(tea.KeyPressMsg{Code: 'I', Text: "I"})
 	if cmd == nil {
 		t.Fatal("i did not return a command")
 	}

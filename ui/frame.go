@@ -12,21 +12,21 @@ import (
 // which regions are present drives both BodyHeight and Render, so the
 // reserved-line count can never drift from what's actually drawn.
 type Frame struct {
-	Width    int
-	TermH    int      // terminal height; 0 = unknown, disables bottom-anchor padding
-	Notice   string   // "" = absent (rendered via renderUpdateNotice)
-	Header   string   // "" = absent
+	Width  int
+	TermH  int    // terminal height; 0 = unknown, disables bottom-anchor padding
+	Notice string // "" = absent (rendered via renderUpdateNotice)
+	Header string // "" = absent
 	// Subheader is a standing one-liner under Header (e.g. the agent currently
-	// in force). Unlike Status it persists across refreshes; unlike Footnote it
+	// in force). Unlike a Flash it persists across refreshes; unlike Footnote it
 	// sits above the body so the choice is visible before the rows.
-	Subheader string // "" = absent
+	Subheader string   // "" = absent
 	InputBox  string   // "" = absent; content when present (e.g. input.View() or " Help")
 	Warnings  []string // reserved AND rendered; nil/empty = none
-	Status    string   // "" = absent; transient action feedback, distinct from Warnings
 	// Footnote is a dim standing one-liner about the environment the view runs
-	// in, sitting between Status and Hints. Unlike Status it is derived from the
-	// snapshot rather than from a keypress, so it persists across refreshes;
-	// unlike Warnings it reports a condition the operator need not act on.
+	// in, sitting between the warnings and the bottom line. Unlike a Flash it is
+	// derived from the snapshot rather than from a keypress, so it persists
+	// across refreshes; unlike Warnings it reports a condition the operator need
+	// not act on.
 	Footnote string // "" = absent
 	// Block is a multi-line region reserved and rendered between Footnote and
 	// Hints. Unlike Warnings it is drawn verbatim — no amber prefix — so the
@@ -35,7 +35,24 @@ type Frame struct {
 	// block, fittedBlock clips it with an explicit indicator so Render never
 	// exceeds TermH.
 	Block []string
+	// Flash and Hints share the bottom line. A live Flash takes it for three
+	// seconds and the hints stay hidden until it expires (ADR-0204) — one line
+	// either way, so a message costs no layout shift.
+	Flash Flash
 	Hints string // "" = absent
+}
+
+// bottomLine is the rendered bottom line: the live flash when there is one,
+// otherwise the hints, and "" when the view has neither. One accessor so the
+// budget and the paint cannot disagree about whether that line is present.
+func (f Frame) bottomLine() string {
+	if line := f.Flash.Line(); line != "" {
+		return line
+	}
+	if f.Hints == "" {
+		return ""
+	}
+	return hintStyle.Render(f.Hints)
 }
 
 // frameClipLine is the last Block row when the pane cannot hold the full list.
@@ -59,13 +76,10 @@ func (f Frame) fixedChromeLines() int {
 		n += 3
 	}
 	n += len(f.Warnings)
-	if f.Status != "" {
-		n++
-	}
 	if f.Footnote != "" {
 		n++
 	}
-	if f.Hints != "" {
+	if f.bottomLine() != "" {
 		n++
 	}
 	return n
@@ -111,8 +125,8 @@ func (f Frame) fittedBlock(termH int) []string {
 
 // BodyHeight returns the body row budget for a terminal of height termH: termH
 // minus every present region (1 for Notice, 1 for Header, 1 for Subheader, 3 for
-// InputBox, len(Warnings) for warnings, 1 for Status, 1 for Footnote,
-// len(fitted Block) for Block, 1 for Hints). When the pane is tall enough the
+// InputBox, len(Warnings) for warnings, 1 for Footnote, len(fitted Block) for
+// Block, 1 for the flash-or-hints bottom line). When the pane is tall enough the
 // body is floored at 3; on a shorter pane the floor yields so chrome (and a
 // clipped Block) still fit — BodyHeight and Render stay in agreement.
 func (f Frame) BodyHeight(termH int) int {
@@ -134,8 +148,8 @@ func (f Frame) BodyHeight(termH int) int {
 }
 
 // Render composes the frame's regions around body in the fixed order notice
-// -> header -> subheader -> body -> input box -> warnings -> status -> footnote
-// -> block -> hints, omitting absent ones. When TermH is known, a short body is
+// -> header -> subheader -> body -> input box -> warnings -> footnote -> block
+// -> flash-or-hints, omitting absent ones. When TermH is known, a short body is
 // padded to the full BodyHeight budget so trailing regions sit at the bottom of
 // the screen, a long Block is clipped to the same budget, and the result never
 // exceeds TermH lines.
@@ -181,11 +195,6 @@ func (f Frame) Render(body string) string {
 		parts = append(parts, strings.Join(lines, "\n"))
 	}
 
-	if f.Status != "" {
-		statusStyle := lipgloss.NewStyle().Foreground(colorAccent)
-		parts = append(parts, statusStyle.Render("  "+f.Status))
-	}
-
 	if f.Footnote != "" {
 		parts = append(parts, hintStyle.Render("  "+f.Footnote))
 	}
@@ -194,22 +203,23 @@ func (f Frame) Render(body string) string {
 		parts = append(parts, strings.Join(block, "\n"))
 	}
 
-	if f.Hints != "" {
-		parts = append(parts, hintStyle.Render(f.Hints))
+	if bottom := f.bottomLine(); bottom != "" {
+		parts = append(parts, bottom)
 	}
 
 	out := strings.Join(parts, "\n")
 	if f.TermH > 0 {
-		out = clampFrameToTermH(out, f.TermH, f.Hints != "")
+		out = clampFrameToTermH(out, f.TermH, f.bottomLine() != "")
 	}
 	return out
 }
 
 // clampFrameToTermH is the last-resort guarantee that a Frame never exceeds the
 // pane. fittedBlock should already have absorbed surplus via Block; this catches
-// overfull bodies or other multi-line regions. When hints are present they stay
-// on the last row — the cut lands above them with an explicit clip marker.
-func clampFrameToTermH(content string, termH int, hasHints bool) string {
+// overfull bodies or other multi-line regions. When the bottom line (flash or
+// hints) is present it stays on the last row — the cut lands above it with an
+// explicit clip marker.
+func clampFrameToTermH(content string, termH int, hasBottomLine bool) string {
 	if termH <= 0 {
 		return content
 	}
@@ -218,13 +228,13 @@ func clampFrameToTermH(content string, termH int, hasHints bool) string {
 		return content
 	}
 	indicator := hintStyle.Render(frameClipLine)
-	if hasHints {
-		hints := lines[len(lines)-1]
+	if hasBottomLine {
+		bottom := lines[len(lines)-1]
 		if termH == 1 {
-			return hints
+			return bottom
 		}
 		kept := append([]string{}, lines[:termH-2]...)
-		kept = append(kept, indicator, hints)
+		kept = append(kept, indicator, bottom)
 		return strings.Join(kept, "\n")
 	}
 	if termH == 1 {

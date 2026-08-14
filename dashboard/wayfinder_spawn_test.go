@@ -298,8 +298,8 @@ func TestDashboardMapRowIEmptyFrontierMessage(t *testing.T) {
 	got := updated.(QueueDashboard)
 	updated, _ = got.Update(cmd())
 	got = updated.(QueueDashboard)
-	if got.statusMsg != dashboardWayfinderEmptyFrontierMessage() {
-		t.Fatalf("statusMsg = %q, want empty-frontier explanation", got.statusMsg)
+	if got.flash.Text() != dashboardWayfinderEmptyFrontierMessage() {
+		t.Fatalf("flash = %q, want empty-frontier explanation", got.flash.Text())
 	}
 }
 
@@ -415,8 +415,8 @@ func TestDashboardMapRowSAssistsWithNoFrontier(t *testing.T) {
 	f.Inside = true
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 
-	opened, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	updated, cmd := opened.(QueueDashboard).Update(tea.KeyPressMsg{Code: 'S', Text: "S"})
+	opened, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, cmd := opened.(QueueDashboard).update(tea.KeyPressMsg{Code: 'S', Text: "S"})
 	if cmd == nil {
 		t.Fatal("S on a map row with no frontier did not return a command")
 	}

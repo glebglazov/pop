@@ -219,8 +219,8 @@ func TestDashboardStatusSubmenuDispatchInProcess(t *testing.T) {
 	if reloadCmd == nil {
 		t.Fatal("expected reload after in-process status write")
 	}
-	if got.statusMsg == "" || !strings.Contains(got.statusMsg, "complete") {
-		t.Fatalf("statusMsg = %q, want complete confirmation", got.statusMsg)
+	if got.flash.Text() == "" || !strings.Contains(got.flash.Text(), "complete") {
+		t.Fatalf("flash = %q, want complete confirmation", got.flash.Text())
 	}
 
 	result, err := tasks.RefreshWith(d.Tasks, row.DefPath, row.StatePath)

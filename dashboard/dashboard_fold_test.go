@@ -122,9 +122,9 @@ func TestDashboardHandoffFoldSpawnsFocusesAndQuits(t *testing.T) {
 	rt.Fake.Inside = true
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
-	_, cmd := got.Update(tea.KeyPressMsg{Code: 'F', Text: "F"})
+	_, cmd := got.update(tea.KeyPressMsg{Code: 'F', Text: "F"})
 	if cmd == nil {
 		t.Fatal("f did not return a command")
 	}
@@ -164,7 +164,7 @@ func TestDashboardHandoffFoldSpawnsFocusesAndQuits(t *testing.T) {
 		t.Fatalf("fold must send pop tasks fold, commands=%v", rt.Commands)
 	}
 
-	updated, quitCmd := got.Update(handoff)
+	updated, quitCmd := got.update(handoff)
 	if _, ok := updated.(QueueDashboard); !ok {
 		t.Fatalf("Update returned %T", updated)
 	}
@@ -204,9 +204,9 @@ func TestDashboardHandoffFoldReusesConflictPane(t *testing.T) {
 	rt.Fake.Inside = true
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
-	_, cmd := got.Update(tea.KeyPressMsg{Code: 'F', Text: "F"})
+	_, cmd := got.update(tea.KeyPressMsg{Code: 'F', Text: "F"})
 	if cmd == nil {
 		t.Fatal("f did not return a command")
 	}

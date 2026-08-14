@@ -166,20 +166,20 @@ func TestItemMenuIsBuiltOnOpenFromTheKind(t *testing.T) {
 // the kind's answer rather than a shape the dashboard assumes.
 func TestItemCopyNamePayloadComesFromTheKind(t *testing.T) {
 	m := genericDetailDashboard(&itemVerbKind{})
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'l', Text: "l"})
 	got := updated.(QueueDashboard)
 	var captured string
 	got.copyFunc = func(s string) error { captured = s; return nil }
 
-	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	updated, cmd := got.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	if cmd != nil {
 		t.Fatal("y should not schedule a command")
 	}
 	if captured != "thing#01" {
 		t.Fatalf("copied %q, want the kind's own reference thing#01", captured)
 	}
-	if msg := updated.(QueueDashboard).detail.statusMsg; msg != "copied thing#01" {
-		t.Fatalf("statusMsg = %q, want the copy confirmation", msg)
+	if msg := updated.(QueueDashboard).detail.flash.Text(); msg != "copied thing#01" {
+		t.Fatalf("flash = %q, want the copy confirmation", msg)
 	}
 }
 

@@ -224,9 +224,9 @@ func TestShellVerbSpawnsNothingTagged(t *testing.T) {
 	rt.Fake.Inside = true
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
-	_, cmd := got.Update(tea.KeyPressMsg{Code: 'O', Text: "O"})
+	_, cmd := got.update(tea.KeyPressMsg{Code: 'O', Text: "O"})
 	if cmd == nil {
 		t.Fatal("shell verb must return a command")
 	}

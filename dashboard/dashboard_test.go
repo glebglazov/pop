@@ -516,8 +516,8 @@ func TestDashboardActionMenuArchiveDispatch(t *testing.T) {
 	if got.err != nil {
 		t.Fatalf("archive result err = %v", got.err)
 	}
-	if !strings.Contains(got.statusMsg, "archived") {
-		t.Fatalf("status = %q, want archived confirmation", got.statusMsg)
+	if !strings.Contains(got.flash.Text(), "archived") {
+		t.Fatalf("status = %q, want archived confirmation", got.flash.Text())
 	}
 }
 
@@ -745,8 +745,8 @@ func TestDashboardCtrlGOpensBoundCheckout(t *testing.T) {
 	if _, ok := cmd().(tea.QuitMsg); !ok {
 		t.Fatalf("Ctrl-g command = %T, want tea.QuitMsg", cmd())
 	}
-	if got.statusMsg != "" {
-		t.Fatalf("statusMsg = %q, want empty on bound open", got.statusMsg)
+	if got.flash.Text() != "" {
+		t.Fatalf("flash = %q, want empty on bound open", got.flash.Text())
 	}
 }
 
@@ -757,7 +757,7 @@ func TestDashboardCtrlGUnboundRowShowsStatusAndDoesNotQuit(t *testing.T) {
 		{Project: "pop", CursorKey: "pop\x00unbound", RawStatus: tasks.StatusReady, ID: "unbound"},
 	}})
 
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
+	updated, cmd := m.update(tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl})
 	got := updated.(QueueDashboard)
 	if cmd != nil {
 		t.Fatalf("Ctrl-g on unbound row should not quit, got cmd %T", cmd())
@@ -765,8 +765,8 @@ func TestDashboardCtrlGUnboundRowShowsStatusAndDoesNotQuit(t *testing.T) {
 	if got.openCheckout != "" {
 		t.Fatalf("openCheckout = %q, want empty on unbound row", got.openCheckout)
 	}
-	if got.statusMsg != "no checkout bound to this task set" {
-		t.Fatalf("statusMsg = %q, want 'no checkout bound to this task set'", got.statusMsg)
+	if got.flash.Text() != "no checkout bound to this task set" {
+		t.Fatalf("flash = %q, want 'no checkout bound to this task set'", got.flash.Text())
 	}
 }
 
@@ -3334,8 +3334,8 @@ func TestDetailTaskMenuCompleteVerb(t *testing.T) {
 	}
 	updated, _ = got.Update(msg)
 	got = updated.(QueueDashboard)
-	if !strings.Contains(got.detail.statusMsg, "complete") {
-		t.Fatalf("C confirmation = %q, want 'complete'", got.detail.statusMsg)
+	if !strings.Contains(got.detail.flash.Text(), "complete") {
+		t.Fatalf("C confirmation = %q, want 'complete'", got.detail.flash.Text())
 	}
 
 	// Done task: Complete does not apply, but Open (reopen) does — the menu
@@ -3387,8 +3387,8 @@ func TestDetailTaskMenuOpenVerb(t *testing.T) {
 	}
 	updated, _ = got.Update(msg)
 	got = updated.(QueueDashboard)
-	if !strings.Contains(got.detail.statusMsg, "open") {
-		t.Fatalf("O confirmation = %q, want 'open'", got.detail.statusMsg)
+	if !strings.Contains(got.detail.flash.Text(), "open") {
+		t.Fatalf("O confirmation = %q, want 'open'", got.detail.flash.Text())
 	}
 
 	// Open on skipped task: also offered.
@@ -3445,8 +3445,8 @@ func TestDetailTaskMenuSkipVerb(t *testing.T) {
 	}
 	updated, _ = got.Update(msg)
 	got = updated.(QueueDashboard)
-	if !strings.Contains(got.detail.statusMsg, "skip") {
-		t.Fatalf("s confirmation = %q, want 'skip'", got.detail.statusMsg)
+	if !strings.Contains(got.detail.flash.Text(), "skip") {
+		t.Fatalf("s confirmation = %q, want 'skip'", got.detail.flash.Text())
 	}
 
 	// Skip is NOT offered for a failed task (requires open).
@@ -3653,8 +3653,8 @@ func TestDetailTaskMenuErrorSurfaced(t *testing.T) {
 	msg := cmd()
 	updated, _ = got.Update(msg)
 	got = updated.(QueueDashboard)
-	if !strings.Contains(got.detail.statusMsg, "error") {
-		t.Fatalf("error not surfaced in statusMsg: %q", got.detail.statusMsg)
+	if !strings.Contains(got.detail.flash.Text(), "error") {
+		t.Fatalf("error not surfaced in flash: %q", got.detail.flash.Text())
 	}
 }
 
@@ -3668,16 +3668,22 @@ func TestDetailViewActionsHintRendered(t *testing.T) {
 	}})
 	m.width = 80
 	m.height = 12
-	d := newTaskDetailView(m.snap.Containers[0], manifest, nil)
-	d.statusMsg = "completed 01-a"
-	m.detail = d
+	m.detail = newTaskDetailView(m.snap.Containers[0], manifest, nil)
 
 	out := m.viewDetail()
-	if !strings.Contains(out, "completed 01-a") {
-		t.Fatalf("statusMsg not rendered:\n%s", out)
-	}
 	if !strings.Contains(out, "a actions") {
 		t.Fatalf("hint line missing actions key:\n%s", out)
+	}
+
+	// A live flash takes that same line for its three seconds (ADR-0204), so the
+	// message is what the operator reads and the hints stand down.
+	m.detail.flash.Set("completed 01-a")
+	out = m.viewDetail()
+	if !strings.Contains(out, "completed 01-a") {
+		t.Fatalf("flash not rendered:\n%s", out)
+	}
+	if strings.Contains(out, "a actions") {
+		t.Fatalf("hints still shown under a live flash:\n%s", out)
 	}
 }
 
@@ -3810,42 +3816,42 @@ func TestDetailTaskMenuRendersOverlay(t *testing.T) {
 func TestMainListRuntimeShell(t *testing.T) {
 	// runtimeShell opens the action menu and dispatches the shell verb (`O`).
 	runtimeShell := func(m QueueDashboard) (QueueDashboard, tea.Cmd) {
-		updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+		updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 		got := updated.(QueueDashboard)
 		if got.menu == nil {
 			t.Fatal("a did not open the action menu")
 		}
-		updated, cmd := got.Update(tea.KeyPressMsg{Code: 'O', Text: "O"})
+		updated, cmd := got.update(tea.KeyPressMsg{Code: 'O', Text: "O"})
 		return updated.(QueueDashboard), cmd
 	}
 
-	t.Run("O with empty runtimePath is no-op with statusMsg hint", func(t *testing.T) {
+	t.Run("O with empty runtimePath is no-op with flash hint", func(t *testing.T) {
 		row := DashboardRow{ID: "set-x", DefPath: "/def", RuntimePath: ""}
 		m := newQueueDashboard(nil, nil, DashboardSnapshot{Containers: []DashboardRow{row}})
 		got, cmd := runtimeShell(m)
 		if cmd != nil {
 			t.Fatal("O with empty runtimePath: expected no cmd")
 		}
-		if got.statusMsg == "" {
-			t.Fatal("O with empty runtimePath: expected statusMsg hint")
+		if got.flash.Text() == "" {
+			t.Fatal("O with empty runtimePath: expected flash hint")
 		}
 	})
 
-	t.Run("O with whitespace-only runtimePath is no-op with statusMsg hint", func(t *testing.T) {
+	t.Run("O with whitespace-only runtimePath is no-op with flash hint", func(t *testing.T) {
 		row := DashboardRow{ID: "set-y", DefPath: "/def", RuntimePath: "   "}
 		m := newQueueDashboard(nil, nil, DashboardSnapshot{Containers: []DashboardRow{row}})
 		got, cmd := runtimeShell(m)
 		if cmd != nil {
 			t.Fatal("O with whitespace runtimePath: expected no cmd")
 		}
-		if got.statusMsg == "" {
-			t.Fatal("O with whitespace runtimePath: expected statusMsg hint")
+		if got.flash.Text() == "" {
+			t.Fatal("O with whitespace runtimePath: expected flash hint")
 		}
 	})
 
 	t.Run("a with no rows does not open the menu", func(t *testing.T) {
 		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
-		updated, cmd := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+		updated, cmd := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 		got := updated.(QueueDashboard)
 		if cmd != nil {
 			t.Fatal("a with no rows: expected no cmd")
@@ -3853,25 +3859,25 @@ func TestMainListRuntimeShell(t *testing.T) {
 		if got.menu != nil {
 			t.Fatal("a with no rows: menu must not open")
 		}
-		if got.statusMsg != "" {
-			t.Fatalf("a with no rows: expected no statusMsg, got %q", got.statusMsg)
+		if got.flash.Text() != "" {
+			t.Fatalf("a with no rows: expected no flash, got %q", got.flash.Text())
 		}
 	})
 
-	t.Run("statusMsg hint rendered in view", func(t *testing.T) {
+	t.Run("flash hint rendered in view", func(t *testing.T) {
 		row := DashboardRow{ID: "set-z", DefPath: "/def", RuntimePath: ""}
 		m := newQueueDashboard(nil, nil, DashboardSnapshot{Containers: []DashboardRow{row}})
-		m.statusMsg = "no checkout bound to this task set"
+		m.flash.Set("no checkout bound to this task set")
 		v := m.View()
 		if !strings.Contains(v.Content, "no checkout bound to this task set") {
-			t.Fatalf("statusMsg not rendered in view:\n%s", v.Content)
+			t.Fatalf("flash not rendered in view:\n%s", v.Content)
 		}
 	})
 
 	t.Run("menu offers the shell verb", func(t *testing.T) {
 		row := DashboardRow{ID: "set-hint", DefPath: "/def"}
 		m := newQueueDashboard(nil, nil, DashboardSnapshot{Containers: []DashboardRow{row}})
-		updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+		updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 		got := updated.(QueueDashboard)
 		view := got.View().Content
 		if !menuHasKey(got.menu, "O") {

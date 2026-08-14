@@ -80,8 +80,8 @@ func TestBareShellInACheckoutBoundToOneSetSeedsIt(t *testing.T) {
 	if got := cursorRow(t, m); got != stems[1] {
 		t.Fatalf("cursor on %q, want the one set bound to the checkout the shell is in (%q)", got, stems[1])
 	}
-	if m.statusMsg != "" {
-		t.Fatalf("status = %q, want silence when only one set was a candidate", m.statusMsg)
+	if m.flash.Text() != "" {
+		t.Fatalf("status = %q, want silence when only one set was a candidate", m.flash.Text())
 	}
 }
 
@@ -100,8 +100,8 @@ func TestLiveDrainAtThePaneDirectoryBeatsTheBindingFallback(t *testing.T) {
 	if got := cursorRow(t, m); got != stems[1] {
 		t.Fatalf("cursor on %q, want the set the live drain is running (%q)", got, stems[1])
 	}
-	if m.statusMsg != "" {
-		t.Fatalf("status = %q, want silence: a live drain names its set outright", m.statusMsg)
+	if m.flash.Text() != "" {
+		t.Fatalf("status = %q, want silence: a live drain names its set outright", m.flash.Text())
 	}
 }
 
@@ -117,8 +117,8 @@ func TestCheckoutClaimDecidesAmongSeveralBoundSets(t *testing.T) {
 		t.Fatalf("cursor on %q, want the claim holder (%q)", got, stems[0])
 	}
 	for _, want := range []string{stems[0], "3", store.ClaimFailedGate.Phrase()} {
-		if !strings.Contains(m.statusMsg, want) {
-			t.Fatalf("status = %q, want it to carry %q", m.statusMsg, want)
+		if !strings.Contains(m.flash.Text(), want) {
+			t.Fatalf("status = %q, want it to carry %q", m.flash.Text(), want)
 		}
 	}
 }
@@ -137,8 +137,8 @@ func TestBoundTieBreaksOnDrainRecencyThenSortOrder(t *testing.T) {
 		if got := cursorRow(t, m); got != stems[1] {
 			t.Fatalf("cursor on %q, want the most recently drained set (%q)", got, stems[1])
 		}
-		if !strings.Contains(m.statusMsg, stems[1]) || !strings.Contains(m.statusMsg, "recently") {
-			t.Fatalf("status = %q, want it to name %q and the recency it was chosen by", m.statusMsg, stems[1])
+		if !strings.Contains(m.flash.Text(), stems[1]) || !strings.Contains(m.flash.Text(), "recently") {
+			t.Fatalf("status = %q, want it to name %q and the recency it was chosen by", m.flash.Text(), stems[1])
 		}
 	})
 
@@ -151,8 +151,8 @@ func TestBoundTieBreaksOnDrainRecencyThenSortOrder(t *testing.T) {
 		if got := cursorRow(t, m); got != want {
 			t.Fatalf("cursor on %q, want the topmost row under the current sort (%q)", got, want)
 		}
-		if !strings.Contains(m.statusMsg, want) || !strings.Contains(m.statusMsg, "topmost") {
-			t.Fatalf("status = %q, want it to name %q and the sort it was chosen by", m.statusMsg, want)
+		if !strings.Contains(m.flash.Text(), want) || !strings.Contains(m.flash.Text(), "topmost") {
+			t.Fatalf("status = %q, want it to name %q and the sort it was chosen by", m.flash.Text(), want)
 		}
 	})
 }
@@ -167,8 +167,8 @@ func TestShellInADirectoryWithNoBoundWorkIsSilent(t *testing.T) {
 	if m.snap.Attribution != nil {
 		t.Fatalf("attribution = %+v from %s, want none", *m.snap.Attribution, checkout)
 	}
-	if m.statusMsg != "" {
-		t.Fatalf("status = %q, want silence", m.statusMsg)
+	if m.flash.Text() != "" {
+		t.Fatalf("status = %q, want silence", m.flash.Text())
 	}
 	if m.ListCursor() != 0 {
 		t.Fatalf("cursor = %d, want the untouched first row", m.ListCursor())

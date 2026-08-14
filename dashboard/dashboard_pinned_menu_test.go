@@ -149,9 +149,9 @@ func TestDashboardPinnedActionMenuHandoffQuits(t *testing.T) {
 	m.width = 120
 	m.height = 24
 
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'A', Text: "A"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'A', Text: "A"})
 	got := updated.(QueueDashboard)
-	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'S', Text: "S"})
+	updated, cmd := got.update(tea.KeyPressMsg{Code: 'S', Text: "S"})
 	got = updated.(QueueDashboard)
 	if got.menu != nil {
 		t.Fatal("handoff from pinned menu should close the menu")
@@ -166,7 +166,7 @@ func TestDashboardPinnedActionMenuHandoffQuits(t *testing.T) {
 	if !handoff.quit {
 		t.Fatalf("handoff = %+v, want quit", handoff)
 	}
-	_, quitCmd := got.Update(handoff)
+	_, quitCmd := got.update(handoff)
 	if quitCmd == nil {
 		t.Fatal("successful handoff must quit the dashboard")
 	}

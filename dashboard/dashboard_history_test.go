@@ -66,9 +66,9 @@ func canonical(t *testing.T, path string) string {
 // into the handoff, so the chain is walked rather than read one message deep.
 func handoffVerb(t *testing.T, m QueueDashboard, key string) dashboardHandoffMsg {
 	t.Helper()
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	m = updated.(QueueDashboard)
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: rune(key[0]), Text: key})
+	updated, cmd := m.update(tea.KeyPressMsg{Code: rune(key[0]), Text: key})
 	m = updated.(QueueDashboard)
 	for cmd != nil {
 		msg := cmd()
@@ -81,10 +81,10 @@ func handoffVerb(t *testing.T, m QueueDashboard, key string) dashboardHandoffMsg
 		if msg == nil {
 			break
 		}
-		updated, cmd = m.Update(msg)
+		updated, cmd = m.update(msg)
 		m = updated.(QueueDashboard)
 	}
-	t.Fatalf("%s never handed off; status = %q, err = %v", key, m.statusMsg, m.actionErr)
+	t.Fatalf("%s never handed off; status = %q, err = %v", key, m.flash.Text(), m.actionErr)
 	return dashboardHandoffMsg{}
 }
 

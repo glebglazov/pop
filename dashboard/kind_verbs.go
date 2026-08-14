@@ -162,17 +162,17 @@ func (m *QueueDashboard) reportVerbStatus(msg dashboardKindVerbMsg, status strin
 	}
 	switch {
 	case msg.item != nil && msg.inPeek && m.detail != nil && m.detail.peek != nil:
-		m.detail.peek.statusMsg = status
+		m.detail.peek.flash.Set(status)
 	case msg.item != nil && m.detail != nil:
-		m.detail.statusMsg = status
+		m.detail.flash.Set(status)
 	default:
-		m.statusMsg = status
+		m.flash.Set(status)
 	}
 }
 
 // reportVerbError surfaces a refused verb. A row verb's failure is sticky on the
 // dashboard's action-error line; an item verb's stays inside the detail it was run
-// from, the way the detail's own status writes already report.
+// from, the way the detail's own flash messages already report.
 func (m *QueueDashboard) reportVerbError(msg dashboardKindVerbMsg, err error) {
 	if msg.item != nil && m.detail != nil {
 		m.reportVerbStatus(msg, fmt.Sprintf("error: %v", err))

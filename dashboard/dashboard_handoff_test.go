@@ -25,9 +25,9 @@ func TestDashboardHandoffAssistSpawnsFocusesAndQuits(t *testing.T) {
 	rt.Fake.Inside = true
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
-	_, cmd := got.Update(tea.KeyPressMsg{Code: 'S', Text: "S"})
+	_, cmd := got.update(tea.KeyPressMsg{Code: 'S', Text: "S"})
 	if cmd == nil {
 		t.Fatal("S did not return a command")
 	}
@@ -46,7 +46,7 @@ func TestDashboardHandoffAssistSpawnsFocusesAndQuits(t *testing.T) {
 		t.Fatalf("assist handoff must focus spawned pane, commands=%v", rt.Commands)
 	}
 
-	updated, quitCmd := got.Update(handoff)
+	updated, quitCmd := got.update(handoff)
 	if _, ok := updated.(QueueDashboard); !ok {
 		t.Fatalf("Update returned %T", updated)
 	}
@@ -73,9 +73,9 @@ func TestDashboardHandoffAssistReusesWithoutResend(t *testing.T) {
 	rt.Fake.Inside = true
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
-	_, cmd := got.Update(tea.KeyPressMsg{Code: 'S', Text: "S"})
+	_, cmd := got.update(tea.KeyPressMsg{Code: 'S', Text: "S"})
 	if cmd == nil {
 		t.Fatal("S did not return a command")
 	}
@@ -108,9 +108,9 @@ func TestDashboardHandoffAssistOutsideTmuxStays(t *testing.T) {
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 	m.width, m.height = 120, 40
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
-	_, cmd := got.Update(tea.KeyPressMsg{Code: 'S', Text: "S"})
+	_, cmd := got.update(tea.KeyPressMsg{Code: 'S', Text: "S"})
 	if cmd == nil {
 		t.Fatal("S did not return a command")
 	}
@@ -136,13 +136,13 @@ func TestDashboardHandoffAssistOutsideTmuxStays(t *testing.T) {
 		t.Fatalf("outside tmux must not switch-client, commands=%v", rt.Commands)
 	}
 
-	updated, quitCmd := got.Update(handoff)
+	updated, quitCmd := got.update(handoff)
 	after := updated.(QueueDashboard)
 	if quitCmd != nil {
 		t.Fatalf("outside tmux handoff must leave the dashboard open, got %T", quitCmd())
 	}
-	if after.statusMsg != handoff.status {
-		t.Fatalf("statusMsg = %q, want %q", after.statusMsg, handoff.status)
+	if after.flash.Text() != handoff.status {
+		t.Fatalf("flash = %q, want %q", after.flash.Text(), handoff.status)
 	}
 	if view := after.View().Content; !strings.Contains(view, wantSession) {
 		t.Fatalf("view missing session status:\n%s", view)
@@ -163,9 +163,9 @@ func TestDashboardHandoffVerifySpawnsFocusesAndQuits(t *testing.T) {
 	rt.Fake.Inside = true
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
-	_, cmd := got.Update(tea.KeyPressMsg{Code: 'V', Text: "V"})
+	_, cmd := got.update(tea.KeyPressMsg{Code: 'V', Text: "V"})
 	if cmd == nil {
 		t.Fatal("v did not return a command")
 	}
@@ -180,7 +180,7 @@ func TestDashboardHandoffVerifySpawnsFocusesAndQuits(t *testing.T) {
 	if !rt.FindSwitched("%3") {
 		t.Fatalf("verify handoff must focus spawned pane, commands=%v", rt.Commands)
 	}
-	updated, quitCmd := got.Update(handoff)
+	updated, quitCmd := got.update(handoff)
 	_ = updated
 	if quitCmd == nil {
 		t.Fatal("successful verify handoff must quit")
@@ -207,9 +207,9 @@ func TestDashboardHandoffVerifyReusesWithoutResend(t *testing.T) {
 	rt.Fake.Inside = true
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
-	_, cmd := got.Update(tea.KeyPressMsg{Code: 'V', Text: "V"})
+	_, cmd := got.update(tea.KeyPressMsg{Code: 'V', Text: "V"})
 	msg := cmd()
 	handoff, ok := msg.(dashboardHandoffMsg)
 	if !ok {
@@ -248,9 +248,9 @@ func TestDashboardHandoffDrainSpawnsFocusesAndQuits(t *testing.T) {
 	rt.Fake.Inside = true
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
-	_, cmd := got.Update(tea.KeyPressMsg{Code: 'I', Text: "I"})
+	_, cmd := got.update(tea.KeyPressMsg{Code: 'I', Text: "I"})
 	if cmd == nil {
 		t.Fatal("i did not return a command")
 	}
@@ -265,7 +265,7 @@ func TestDashboardHandoffDrainSpawnsFocusesAndQuits(t *testing.T) {
 	if !rt.FindSwitched("%3") {
 		t.Fatalf("drain handoff must focus spawned pane, commands=%v", rt.Commands)
 	}
-	updated, quitCmd := got.Update(handoff)
+	updated, quitCmd := got.update(handoff)
 	_ = updated
 	if quitCmd == nil {
 		t.Fatal("successful drain handoff must quit")
@@ -300,9 +300,9 @@ func TestDashboardHandoffDrainReusesWithoutResend(t *testing.T) {
 	rt.Fake.Inside = true
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
-	_, cmd := got.Update(tea.KeyPressMsg{Code: 'I', Text: "I"})
+	_, cmd := got.update(tea.KeyPressMsg{Code: 'I', Text: "I"})
 	msg := cmd()
 	handoff, ok := msg.(dashboardHandoffMsg)
 	if !ok {
@@ -340,9 +340,9 @@ func TestDashboardHandoffDrainOutsideTmuxStays(t *testing.T) {
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 	m.width, m.height = 120, 40
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
-	_, cmd := got.Update(tea.KeyPressMsg{Code: 'I', Text: "I"})
+	_, cmd := got.update(tea.KeyPressMsg{Code: 'I', Text: "I"})
 	msg := cmd()
 	handoff, ok := msg.(dashboardHandoffMsg)
 	if !ok {
@@ -356,13 +356,13 @@ func TestDashboardHandoffDrainOutsideTmuxStays(t *testing.T) {
 		t.Fatalf("status = %q, want session %q outside tmux", handoff.status, wantSession)
 	}
 
-	updated, quitCmd := got.Update(handoff)
+	updated, quitCmd := got.update(handoff)
 	after := updated.(QueueDashboard)
 	if quitCmd != nil {
 		t.Fatalf("outside tmux must leave dashboard open, got %T", quitCmd())
 	}
-	if after.statusMsg != handoff.status {
-		t.Fatalf("statusMsg = %q, want %q", after.statusMsg, handoff.status)
+	if after.flash.Text() != handoff.status {
+		t.Fatalf("flash = %q, want %q", after.flash.Text(), handoff.status)
 	}
 }
 
@@ -378,12 +378,12 @@ func TestDashboardHandoffNothingSpawnedStays(t *testing.T) {
 	if msg.status != "nothing to hand off to" {
 		t.Fatalf("status = %q, want nothing-to-hand-off", msg.status)
 	}
-	updated, cmd := m.Update(msg)
+	updated, cmd := m.update(msg)
 	got := updated.(QueueDashboard)
 	if cmd != nil {
 		t.Fatalf("empty handoff must not dispatch a command, got %T", cmd())
 	}
-	if got.statusMsg != "nothing to hand off to" {
-		t.Fatalf("statusMsg = %q, want nothing-to-hand-off", got.statusMsg)
+	if got.flash.Text() != "nothing to hand off to" {
+		t.Fatalf("flash = %q, want nothing-to-hand-off", got.flash.Text())
 	}
 }

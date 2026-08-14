@@ -38,20 +38,29 @@ func TestFrameBodyHeight(t *testing.T) {
 			want:  17,
 		},
 		{
-			name:  "status reserves one line",
-			frame: Frame{Status: "Copied to clipboard"},
+			name:  "flash reserves one line",
+			frame: Frame{Flash: flashOf("Copied to clipboard")},
 			termH: 20,
 			want:  19,
 		},
 		{
-			name:  "empty status reserves nothing",
-			frame: Frame{Status: ""},
+			name:  "empty flash reserves nothing",
+			frame: Frame{},
 			termH: 20,
 			want:  20,
 		},
 		{
 			name:  "hints reserve one line",
 			frame: Frame{Hints: "  Esc back"},
+			termH: 20,
+			want:  19,
+		},
+		{
+			// The no-layout-shift property, in the budget: a flash takes the hint
+			// line rather than one of its own, so showing a message costs the body
+			// nothing and its expiry gives nothing back.
+			name:  "flash and hints share one line",
+			frame: Frame{Flash: flashOf("Copied to clipboard"), Hints: "  Esc back"},
 			termH: 20,
 			want:  19,
 		},
@@ -74,13 +83,12 @@ func TestFrameBodyHeight(t *testing.T) {
 				Header:   "Projects",
 				InputBox: "> ",
 				Warnings: []string{"one", "two"},
-				Status:   "Copied",
 				Block:    []string{"filters", "show done"},
 				Hints:    "  Esc back",
 			},
 			termH: 20,
-			// 20 - 1 (notice) - 1 (header) - 3 (input box) - 2 (warnings) - 1 (status) - 2 (block) - 1 (hints) = 9
-			want: 9,
+			// 20 - 1 (notice) - 1 (header) - 3 (input box) - 2 (warnings) - 2 (block) - 1 (hints) = 10
+			want: 10,
 		},
 		{
 			name: "yields floor on a short terminal so chrome fits",
@@ -106,13 +114,12 @@ func TestFrameBodyHeight(t *testing.T) {
 			frame: Frame{
 				Header:    "Work",
 				Subheader: "agent",
-				Status:    "ok",
 				Footnote:  "skip",
 				Block:     []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"},
 				Hints:     "  q",
 			},
 			termH: 16,
-			// fixed chrome 5 + body floor 3 = 8; block clipped to 8 → body 3
+			// fixed chrome 4 + body floor 3 = 7; block clipped to 9 → body 3
 			want: 3,
 		},
 	}
@@ -134,7 +141,7 @@ func TestFrameRenderOrderAndOmission(t *testing.T) {
 		Header:   "Projects",
 		InputBox: " Help",
 		Warnings: []string{"low disk space"},
-		Status:   "Copied to clipboard",
+		Footnote: "skipped: none",
 		Block:    []string{"filters", "show done"},
 		Hints:    "  Esc back",
 	}
@@ -146,23 +153,13 @@ func TestFrameRenderOrderAndOmission(t *testing.T) {
 	body := indexOf(t, out, "BODY")
 	inputBox := indexOf(t, out, "Help")
 	warning := indexOf(t, out, "low disk space")
-	status := indexOf(t, out, "Copied to clipboard")
+	footnote := indexOf(t, out, "skipped: none")
 	block := indexOf(t, out, "filters")
 	hints := indexOf(t, out, "Esc back")
 
-	if !(notice < header && header < body && body < inputBox && inputBox < warning && warning < status && status < block && block < hints) {
-		t.Fatalf("regions out of order: notice=%d header=%d body=%d inputBox=%d warning=%d status=%d block=%d hints=%d",
-			notice, header, body, inputBox, warning, status, block, hints)
-	}
-}
-
-func TestFrameRenderOmitsAbsentStatus(t *testing.T) {
-	f := Frame{Width: 20, Hints: "  Esc back"}
-	out := f.Render("BODY")
-
-	// With no Status set, only body and hints render — no status line between.
-	if out != "BODY\n"+hintStyle.Render("  Esc back") {
-		t.Fatalf("Render() with absent status = %q", out)
+	if !(notice < header && header < body && body < inputBox && inputBox < warning && warning < footnote && footnote < block && block < hints) {
+		t.Fatalf("regions out of order: notice=%d header=%d body=%d inputBox=%d warning=%d footnote=%d block=%d hints=%d",
+			notice, header, body, inputBox, warning, footnote, block, hints)
 	}
 }
 
@@ -197,7 +194,7 @@ func TestFrameRenderPadsShortBody(t *testing.T) {
 // TestFrameRenderLeavesFullBodyUnchanged: a body that exactly fills the budget
 // renders byte-identical to the no-height (unpadded) path.
 func TestFrameRenderLeavesFullBodyUnchanged(t *testing.T) {
-	base := Frame{Width: 20, TermH: 20, Header: "H", Status: "S", Hints: "  q"}
+	base := Frame{Width: 20, TermH: 20, Header: "H", Footnote: "F", Hints: "  q"}
 	budget := base.BodyHeight(20)
 
 	rows := make([]string, budget)
@@ -217,7 +214,7 @@ func TestFrameRenderLeavesFullBodyUnchanged(t *testing.T) {
 // TestFrameRenderTruncatesOverfullBody: a body longer than the budget is cut so
 // the frame still fits in TermH (the symmetric half of padBody's short-body pad).
 func TestFrameRenderTruncatesOverfullBody(t *testing.T) {
-	f := Frame{Width: 20, TermH: 20, Header: "H", Status: "S", Hints: "  q"}
+	f := Frame{Width: 20, TermH: 20, Header: "H", Footnote: "F", Hints: "  q"}
 	budget := f.BodyHeight(20)
 	rows := make([]string, budget+5)
 	for i := range rows {
@@ -254,7 +251,6 @@ func TestFrameRenderPadBudgetTracksRegions(t *testing.T) {
 				Header:   "Header",
 				InputBox: "> ",
 				Warnings: []string{"warn"},
-				Status:   "Copied",
 				Block:    []string{"filters", "show done"},
 				Hints:    "  q",
 			},
@@ -282,21 +278,21 @@ func TestFrameRenderNeverExceedsTermH(t *testing.T) {
 	termHeights := []int{8, 12, 16, 20, 24}
 	blockHeights := []int{0, 1, 2, 5, 10, 20}
 	type opts struct {
-		notice, header, subheader, input, status, footnote, hints bool
-		warnings                                                    int
+		notice, header, subheader, input, flash, footnote, hints bool
+		warnings                                                 int
 	}
 	var cases []opts
 	for _, notice := range []bool{false, true} {
 		for _, header := range []bool{false, true} {
 			for _, subheader := range []bool{false, true} {
 				for _, input := range []bool{false, true} {
-					for _, status := range []bool{false, true} {
+					for _, flash := range []bool{false, true} {
 						for _, footnote := range []bool{false, true} {
 							for _, hints := range []bool{false, true} {
 								for _, warnings := range []int{0, 1, 2} {
 									cases = append(cases, opts{
 										notice: notice, header: header, subheader: subheader,
-										input: input, status: status, footnote: footnote,
+										input: input, flash: flash, footnote: footnote,
 										hints: hints, warnings: warnings,
 									})
 								}
@@ -330,8 +326,8 @@ func TestFrameRenderNeverExceedsTermH(t *testing.T) {
 						f.Warnings[i] = fmt.Sprintf("warn%d", i)
 					}
 				}
-				if c.status {
-					f.Status = "status"
+				if c.flash {
+					f.Flash = flashOf("flashing")
 				}
 				if c.footnote {
 					f.Footnote = "footnote"
@@ -352,7 +348,11 @@ func TestFrameRenderNeverExceedsTermH(t *testing.T) {
 					t.Fatalf("TermH=%d block=%d opts=%+v: Render produced %d lines:\n%s",
 						termH, blockH, c, len(lines), out)
 				}
-				if c.hints && !strings.Contains(lines[len(lines)-1], "esc close") {
+				switch {
+				case c.flash && !strings.Contains(lines[len(lines)-1], "flashing"):
+					t.Fatalf("TermH=%d block=%d: flash lost from last line %q",
+						termH, blockH, lines[len(lines)-1])
+				case !c.flash && c.hints && !strings.Contains(lines[len(lines)-1], "esc close"):
 					t.Fatalf("TermH=%d block=%d: hints lost from last line %q",
 						termH, blockH, lines[len(lines)-1])
 				}
@@ -362,7 +362,7 @@ func TestFrameRenderNeverExceedsTermH(t *testing.T) {
 }
 
 // TestFrameRenderClipsBlockAtTermH16 is the measured reproduction: TermH=16 with
-// header+subheader+status+footnote+hints and a ten-line block used to paint 18
+// header+subheader+footnote+hints and a ten-line block used to paint 18
 // lines. After the fix it fits in 16, the block cut is visible, and hints survive.
 func TestFrameRenderClipsBlockAtTermH16(t *testing.T) {
 	block := make([]string, 10)
@@ -374,7 +374,6 @@ func TestFrameRenderClipsBlockAtTermH16(t *testing.T) {
 		TermH:     16,
 		Header:    "Work · active · 1 here",
 		Subheader: "agent: cursor",
-		Status:    "selected",
 		Footnote:  "skipped: none",
 		Block:     block,
 		Hints:     "j/k move · 1-9/enter select · esc close",
@@ -408,4 +407,12 @@ func indexOf(t *testing.T, haystack, needle string) int {
 	}
 	t.Fatalf("expected %q to contain %q", haystack, needle)
 	return -1
+}
+
+// flashOf builds the flash for a table entry. A flash is only ever filled
+// through Set, which is also what arms its expiry.
+func flashOf(text string) Flash {
+	var f Flash
+	f.Set(text)
+	return f
 }

@@ -99,8 +99,8 @@ func TestPaneTaggedForATaskSetSeedsItsRow(t *testing.T) {
 			if got := cursorRow(t, m); got != want {
 				t.Fatalf("cursor on %q, want the tagged set %q", got, want)
 			}
-			if m.statusMsg != "" {
-				t.Fatalf("status = %q, want silence when the cursor landed", m.statusMsg)
+			if m.flash.Text() != "" {
+				t.Fatalf("status = %q, want silence when the cursor landed", m.flash.Text())
 			}
 		})
 	}
@@ -136,8 +136,8 @@ func TestUnattributedPaneSeedsNothingAndSaysNothing(t *testing.T) {
 			if m.ListCursor() != 0 {
 				t.Fatalf("cursor = %d, want the untouched first row", m.ListCursor())
 			}
-			if m.statusMsg != "" {
-				t.Fatalf("status = %q, want silence", m.statusMsg)
+			if m.flash.Text() != "" {
+				t.Fatalf("status = %q, want silence", m.flash.Text())
 			}
 		})
 	}
@@ -166,8 +166,8 @@ func TestHiddenAttributedSetIsNamedAndThePresetIsNotWidened(t *testing.T) {
 	if m.snap.Attribution == nil {
 		t.Fatal("attribution = none: a hidden row must still be attributed, or nothing can be said about it")
 	}
-	if !strings.Contains(m.statusMsg, hidden) || !strings.Contains(m.statusMsg, "in flight") {
-		t.Fatalf("status = %q, want it to name %q and the view hiding it", m.statusMsg, hidden)
+	if !strings.Contains(m.flash.Text(), hidden) || !strings.Contains(m.flash.Text(), "in flight") {
+		t.Fatalf("status = %q, want it to name %q and the view hiding it", m.flash.Text(), hidden)
 	}
 	if d.ViewPreset.Name != "_hide-done" {
 		t.Fatalf("preset = %q, want the human's own choice untouched", d.ViewPreset.Name)

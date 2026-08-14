@@ -32,7 +32,7 @@ func TestQueueDashboardCopyTaskSetRow(t *testing.T) {
 		return nil
 	}
 
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	updated, cmd := m.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	if cmd != nil {
 		t.Fatal("y should not schedule a command")
 	}
@@ -40,8 +40,8 @@ func TestQueueDashboardCopyTaskSetRow(t *testing.T) {
 	if callCount != 1 || captured != "my-set" {
 		t.Fatalf("copyFunc called %d times with %q, want my-set", callCount, captured)
 	}
-	if got.statusMsg != "copied my-set" {
-		t.Fatalf("statusMsg = %q, want copied confirmation", got.statusMsg)
+	if got.flash.Text() != "copied my-set" {
+		t.Fatalf("flash = %q, want copied confirmation", got.flash.Text())
 	}
 }
 
@@ -61,7 +61,7 @@ func TestQueueDashboardCopyMapRow(t *testing.T) {
 		return nil
 	}
 
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	updated, cmd := m.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	if cmd != nil {
 		t.Fatal("y should not schedule a command")
 	}
@@ -69,8 +69,8 @@ func TestQueueDashboardCopyMapRow(t *testing.T) {
 	if captured != "demo-map" {
 		t.Fatalf("copyFunc captured %q, want demo-map", captured)
 	}
-	if got.statusMsg != "copied demo-map" {
-		t.Fatalf("statusMsg = %q, want copied confirmation", got.statusMsg)
+	if got.flash.Text() != "copied demo-map" {
+		t.Fatalf("flash = %q, want copied confirmation", got.flash.Text())
 	}
 }
 
@@ -91,9 +91,9 @@ func TestQueueDashboardCopyViaMenu(t *testing.T) {
 		var captured string
 		m.copyFunc = func(s string) error { captured = s; return nil }
 
-		updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+		updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 		got := updated.(QueueDashboard)
-		updated, cmd := got.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+		updated, cmd := got.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 		if cmd != nil {
 			t.Fatal("y in menu should not schedule a command")
 		}
@@ -104,8 +104,8 @@ func TestQueueDashboardCopyViaMenu(t *testing.T) {
 		if captured != "set-menu" {
 			t.Fatalf("copyFunc captured %q, want set-menu", captured)
 		}
-		if got.statusMsg != "copied set-menu" {
-			t.Fatalf("statusMsg = %q, want copied confirmation", got.statusMsg)
+		if got.flash.Text() != "copied set-menu" {
+			t.Fatalf("flash = %q, want copied confirmation", got.flash.Text())
 		}
 	})
 
@@ -124,18 +124,18 @@ func TestQueueDashboardCopyViaMenu(t *testing.T) {
 		var captured string
 		m.copyFunc = func(s string) error { captured = s; return nil }
 
-		updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+		updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 		got := updated.(QueueDashboard)
 		if got.menu == nil {
 			t.Fatal("a on map row did not open action menu")
 		}
-		updated, _ = got.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+		updated, _ = got.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 		got = updated.(QueueDashboard)
 		if captured != "map-menu" {
 			t.Fatalf("copyFunc captured %q, want map-menu", captured)
 		}
-		if got.statusMsg != "copied map-menu" {
-			t.Fatalf("statusMsg = %q, want copied confirmation", got.statusMsg)
+		if got.flash.Text() != "copied map-menu" {
+			t.Fatalf("flash = %q, want copied confirmation", got.flash.Text())
 		}
 	})
 }
@@ -150,13 +150,13 @@ func TestQueueDashboardCopyErrorSurfaces(t *testing.T) {
 	m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{row}})
 	m.copyFunc = func(string) error { return errors.New("boom") }
 
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	updated, cmd := m.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	if cmd != nil {
 		t.Fatal("y should not schedule a command on copy failure")
 	}
 	got := updated.(QueueDashboard)
-	if got.statusMsg != "copy failed: boom" {
-		t.Fatalf("statusMsg = %q, want copy failed message", got.statusMsg)
+	if got.flash.Text() != "copy failed: boom" {
+		t.Fatalf("flash = %q, want copy failed message", got.flash.Text())
 	}
 }
 
@@ -198,7 +198,7 @@ func TestQueueDashboardCopyDetailTask(t *testing.T) {
 		return nil
 	}
 
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	updated, cmd := m.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	if cmd != nil {
 		t.Fatal("y should not schedule a command")
 	}
@@ -206,8 +206,8 @@ func TestQueueDashboardCopyDetailTask(t *testing.T) {
 	if captured != "my-set/01-a.md" {
 		t.Fatalf("copyFunc captured %q, want my-set/01-a.md", captured)
 	}
-	if got.detail.statusMsg != "copied my-set/01-a.md" {
-		t.Fatalf("statusMsg = %q, want copied confirmation", got.detail.statusMsg)
+	if got.detail.flash.Text() != "copied my-set/01-a.md" {
+		t.Fatalf("flash = %q, want copied confirmation", got.detail.flash.Text())
 	}
 }
 
@@ -224,9 +224,9 @@ func TestQueueDashboardCopyDetailTaskViaMenu(t *testing.T) {
 	var captured string
 	m.copyFunc = func(s string) error { captured = s; return nil }
 
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
-	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	updated, cmd := got.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	if cmd != nil {
 		t.Fatal("y in task menu should not schedule a command")
 	}
@@ -237,8 +237,8 @@ func TestQueueDashboardCopyDetailTaskViaMenu(t *testing.T) {
 	if captured != "set-menu/01-a.md" {
 		t.Fatalf("copyFunc captured %q, want set-menu/01-a.md", captured)
 	}
-	if got.detail.statusMsg != "copied set-menu/01-a.md" {
-		t.Fatalf("statusMsg = %q, want copied confirmation", got.detail.statusMsg)
+	if got.detail.flash.Text() != "copied set-menu/01-a.md" {
+		t.Fatalf("flash = %q, want copied confirmation", got.detail.flash.Text())
 	}
 }
 
@@ -251,7 +251,7 @@ func TestQueueDashboardCopyPeekTask(t *testing.T) {
 	var captured string
 	m.copyFunc = func(s string) error { captured = s; return nil }
 
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	updated, cmd := m.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	if cmd != nil {
 		t.Fatal("y should not schedule a command")
 	}
@@ -259,8 +259,8 @@ func TestQueueDashboardCopyPeekTask(t *testing.T) {
 	if captured != "set-peek/02-b.md" {
 		t.Fatalf("copyFunc captured %q, want set-peek/02-b.md", captured)
 	}
-	if got.detail.peek.statusMsg != "copied set-peek/02-b.md" {
-		t.Fatalf("peek statusMsg = %q, want copied confirmation", got.detail.peek.statusMsg)
+	if got.detail.peek.flash.Text() != "copied set-peek/02-b.md" {
+		t.Fatalf("peek flash = %q, want copied confirmation", got.detail.peek.flash.Text())
 	}
 	view := got.View().Content
 	if !strings.Contains(view, "copied set-peek/02-b.md") {
@@ -277,9 +277,9 @@ func TestQueueDashboardCopyPeekTaskViaMenu(t *testing.T) {
 	var captured string
 	m.copyFunc = func(s string) error { captured = s; return nil }
 
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
-	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	updated, cmd := got.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	if cmd != nil {
 		t.Fatal("y in peek menu should not schedule a command")
 	}
@@ -287,8 +287,8 @@ func TestQueueDashboardCopyPeekTaskViaMenu(t *testing.T) {
 	if captured != "set-peek-menu/02-b.md" {
 		t.Fatalf("copyFunc captured %q, want set-peek-menu/02-b.md", captured)
 	}
-	if got.detail.peek.statusMsg != "copied set-peek-menu/02-b.md" {
-		t.Fatalf("peek statusMsg = %q, want copied confirmation", got.detail.peek.statusMsg)
+	if got.detail.peek.flash.Text() != "copied set-peek-menu/02-b.md" {
+		t.Fatalf("peek flash = %q, want copied confirmation", got.detail.peek.flash.Text())
 	}
 }
 
@@ -301,7 +301,7 @@ func TestQueueDashboardCopyMapDetailTicket(t *testing.T) {
 	var captured string
 	got.copyFunc = func(s string) error { captured = s; return nil }
 
-	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	updated, cmd := got.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	if cmd != nil {
 		t.Fatal("y should not schedule a command")
 	}
@@ -309,8 +309,8 @@ func TestQueueDashboardCopyMapDetailTicket(t *testing.T) {
 	if captured != "01" {
 		t.Fatalf("copyFunc captured %q, want bare ticket id 01", captured)
 	}
-	if result.detail.statusMsg != "copied 01" {
-		t.Fatalf("statusMsg = %q, want copied confirmation", result.detail.statusMsg)
+	if result.detail.flash.Text() != "copied 01" {
+		t.Fatalf("flash = %q, want copied confirmation", result.detail.flash.Text())
 	}
 }
 
@@ -324,7 +324,7 @@ func TestQueueDashboardCopyMapPeekTicket(t *testing.T) {
 	var captured string
 	got.copyFunc = func(s string) error { captured = s; return nil }
 
-	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	updated, cmd := got.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	if cmd != nil {
 		t.Fatal("y should not schedule a command")
 	}
@@ -332,8 +332,8 @@ func TestQueueDashboardCopyMapPeekTicket(t *testing.T) {
 	if captured != "01" {
 		t.Fatalf("copyFunc captured %q, want bare ticket id 01", captured)
 	}
-	if result.detail.peek.statusMsg != "copied 01" {
-		t.Fatalf("peek statusMsg = %q, want copied confirmation", result.detail.peek.statusMsg)
+	if result.detail.peek.flash.Text() != "copied 01" {
+		t.Fatalf("peek flash = %q, want copied confirmation", result.detail.peek.flash.Text())
 	}
 }
 

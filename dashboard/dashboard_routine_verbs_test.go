@@ -38,14 +38,14 @@ func firedRoutineContainer() work.Container {
 func pressKeys(t *testing.T, m QueueDashboard, keys ...string) QueueDashboard {
 	t.Helper()
 	for _, key := range keys {
-		updated, cmd := m.Update(tea.KeyPressMsg{Code: rune(key[0]), Text: key})
+		updated, cmd := m.update(tea.KeyPressMsg{Code: rune(key[0]), Text: key})
 		m = updated.(QueueDashboard)
 		for cmd != nil {
 			msg := cmd()
 			if msg == nil {
 				break
 			}
-			updated, cmd = m.Update(msg)
+			updated, cmd = m.update(msg)
 			m = updated.(QueueDashboard)
 		}
 	}
@@ -80,8 +80,8 @@ func TestRoutineVerbsComeFromTheKindAndDispatchToIt(t *testing.T) {
 	if copied != container.RoutineLastReport {
 		t.Fatalf("clipboard = %q, want the newest run's report %q", copied, container.RoutineLastReport)
 	}
-	if m.statusMsg != "copied report path" {
-		t.Fatalf("status = %q, want the kind's own confirmation", m.statusMsg)
+	if m.flash.Text() != "copied report path" {
+		t.Fatalf("status = %q, want the kind's own confirmation", m.flash.Text())
 	}
 	if m.menu != nil {
 		t.Fatal("a one-shot menu must close behind the verb")
@@ -114,7 +114,7 @@ func TestRoutineVerbBehavesTheSameOnEitherPage(t *testing.T) {
 		m = pressKeys(t, m, "a")
 		got := result{keys: menuKeys(m.menu)}
 		m = pressKeys(t, m, "c")
-		got.copied, got.status = copied, m.statusMsg
+		got.copied, got.status = copied, m.flash.Text()
 		// The runs verb opens the same generic detail from either page.
 		m = pressKeys(t, m, "a", "l")
 		got.detail = m.detail != nil
@@ -165,8 +165,8 @@ func TestRoutineRunItemVerbsComeFromTheKind(t *testing.T) {
 	if copied != container.Items[0].File {
 		t.Fatalf("clipboard = %q, want the run's report %q", copied, container.Items[0].File)
 	}
-	if m.detail == nil || m.detail.statusMsg != "copied report path" {
-		t.Fatalf("detail status = %q, want the kind's confirmation", m.detail.statusMsg)
+	if m.detail == nil || m.detail.flash.Text() != "copied report path" {
+		t.Fatalf("detail status = %q, want the kind's confirmation", m.detail.flash.Text())
 	}
 }
 
@@ -209,23 +209,23 @@ func TestKindVerbOutcomesAreCarriedOutGenerically(t *testing.T) {
 		k := fixed(work.Outcome{Kind: work.OutcomeMessage, Clipboard: "payload", Message: "copied a thing"}, nil)
 		m, copied := open(t, k)
 		m = pressKeys(t, m, "a", "z")
-		if *copied != "payload" || m.statusMsg != "copied a thing" {
-			t.Fatalf("clipboard = %q, status = %q", *copied, m.statusMsg)
+		if *copied != "payload" || m.flash.Text() != "copied a thing" {
+			t.Fatalf("clipboard = %q, status = %q", *copied, m.flash.Text())
 		}
 	})
 
 	t.Run("refresh reloads the page", func(t *testing.T) {
 		k := fixed(work.Outcome{Kind: work.OutcomeRefresh, Message: "paused delta"}, nil)
 		m, _ := open(t, k)
-		updated, cmd := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+		updated, cmd := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 		m = updated.(QueueDashboard)
-		updated, cmd = m.Update(tea.KeyPressMsg{Code: 'z', Text: "z"})
+		updated, cmd = m.update(tea.KeyPressMsg{Code: 'z', Text: "z"})
 		m = updated.(QueueDashboard)
 		msg := cmd()
-		updated, cmd = m.Update(msg)
+		updated, cmd = m.update(msg)
 		m = updated.(QueueDashboard)
-		if m.statusMsg != "paused delta" {
-			t.Fatalf("status = %q", m.statusMsg)
+		if m.flash.Text() != "paused delta" {
+			t.Fatalf("status = %q", m.flash.Text())
 		}
 		if cmd == nil {
 			t.Fatal("a refresh outcome must reload the page")
@@ -267,8 +267,8 @@ func TestKindVerbOutcomesAreCarriedOutGenerically(t *testing.T) {
 		if m.actionErr == nil {
 			t.Fatal("a refused verb must surface")
 		}
-		if m.statusMsg != "" {
-			t.Fatalf("status = %q, want the refusal on the action line alone", m.statusMsg)
+		if m.flash.Text() != "" {
+			t.Fatalf("status = %q, want the refusal on the action line alone", m.flash.Text())
 		}
 	})
 }

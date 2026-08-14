@@ -466,9 +466,10 @@ type detailView struct {
 	list *ui.List[work.Item]
 	cols *detailColumns
 	peek *itemTextPeek
-	// statusMsg is a transient one-line message shown above the hint bar.
-	// Set to a hint on invalid transition; set to confirmation on success.
-	statusMsg string
+	// flash is the detail view's transient feedback: a hint on an invalid
+	// transition, a confirmation on success. It takes the hint line for three
+	// seconds and expires itself (ADR-0204).
+	flash ui.Flash
 }
 
 // detailColumns holds the detail item list's ID-column width, precomputed over the
@@ -534,8 +535,9 @@ type itemTextPeek struct {
 	loading bool
 	err     error
 	scroll  int
-	// statusMsg is a transient one-line message shown above the hint bar.
-	statusMsg string
+	// flash is the peek's own transient feedback, on the same three-second
+	// lifetime as every other flash (ADR-0204).
+	flash ui.Flash
 }
 
 // dashboardColumns holds the task-set table's natural column widths (derived from
@@ -579,7 +581,7 @@ type QueueDashboard struct {
 	filterMode  bool
 	filterInput ui.TextField
 	pendingG    bool
-	statusMsg   string
+	flash       ui.Flash
 	showHelp    bool
 	// openCheckout is the bound checkout path chosen with Ctrl-g on the main
 	// list. It is set alongside a tea.Quit so RunDashboard can surface it out of
@@ -720,7 +722,7 @@ func newQueueDashboardOn(d *drain.Deps, cfg *config.Config, snap DashboardSnapsh
 		},
 	})
 	m := QueueDashboard{d: d, cfg: cfg, page: page, kinds: kinds, snap: snap, allRows: snap.Containers, list: list, cols: cols, live: live}
-	m.statusMsg = m.seedCursorFromPane()
+	m.flash.Set(m.seedCursorFromPane())
 	return m
 }
 
@@ -835,8 +837,13 @@ func (m QueueDashboard) FilterActive() bool {
 // key spawns" about a set whose pane is already running, and only correcting
 // itself a poll later. The priming is one tmux list query, not a snapshot
 // rebuild, so it costs the open nothing measurable.
+// It also starts the timer for the message the constructor's cursor seeding may
+// have flashed, which is the one message set before any update runs. bubbletea
+// calls Init on a copy, so the first Update arms the same message again; the
+// expiry carries the message's token and is idempotent, so the duplicate timer
+// changes nothing.
 func (m QueueDashboard) Init() tea.Cmd {
-	return tea.Batch(dashboardTick(m.page.id), m.primeLiveCache())
+	return tea.Batch(dashboardTick(m.page.id), m.primeLiveCache(), m.flash.Timer())
 }
 
 // primeLiveCache loads the live-pane cache without rebuilding the snapshot,
@@ -847,7 +854,61 @@ func (m QueueDashboard) primeLiveCache() tea.Cmd {
 	}
 }
 
+// Update runs the dashboard's own update and then starts the timer of any flash
+// message it set. Arming the timers here, in one place, is what gives every
+// message a lifetime: a verb only says what happened, and cannot forget to make
+// its words go away again (ADR-0204).
 func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	model, cmd := m.update(msg)
+	next, ok := model.(QueueDashboard)
+	if !ok {
+		return model, cmd
+	}
+	if timers := next.flashTimers(); timers != nil {
+		return next, tea.Batch(cmd, timers)
+	}
+	return next, cmd
+}
+
+// flashTimers collects the expiry timers of the flashes the update just set:
+// the table's, the detail view's and the peek's.
+func (m *QueueDashboard) flashTimers() tea.Cmd {
+	var cmds []tea.Cmd
+	for _, flash := range m.flashes() {
+		if cmd := flash.Timer(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+	if len(cmds) == 0 {
+		return nil
+	}
+	return tea.Batch(cmds...)
+}
+
+// expireFlash hands an expiry to every flash on the model. Each one keeps its
+// own message's token, so the fan-out is safe: only the flash whose message the
+// timer was set for clears, and the others ignore it.
+func (m *QueueDashboard) expireFlash(msg ui.FlashExpiredMsg) {
+	for _, flash := range m.flashes() {
+		flash.Expired(msg)
+	}
+}
+
+// flashes returns every flash the model owns, main view first. The detail view
+// and its peek hold their own so a message set inside one stays with the view
+// that produced it.
+func (m *QueueDashboard) flashes() []*ui.Flash {
+	out := []*ui.Flash{&m.flash}
+	if m.detail != nil {
+		out = append(out, &m.detail.flash)
+		if m.detail.peek != nil {
+			out = append(out, &m.detail.peek.flash)
+		}
+	}
+	return out
+}
+
+func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		// Any keypress is a deliberate interaction, so it clears the sticky action
@@ -923,10 +984,9 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if strings.TrimSpace(row.RuntimePath) == "" {
-				m.statusMsg = "no checkout bound to this task set"
+				m.flash.Set("no checkout bound to this task set")
 				return m, nil
 			}
-			m.statusMsg = ""
 			m.openCheckout = row.RuntimePath
 			return m, tea.Quit
 		case "a", "A":
@@ -939,7 +999,6 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.menu = m.newDashboardMenu(row, msg.String() == "A")
 			m.err = nil
-			m.statusMsg = ""
 			return m, nil
 		case "f":
 			// Open the Work view preset list (ADR-0197). Unlike `/` (a transient
@@ -950,7 +1009,6 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.filter = m.newDashboardFilterMenu()
 			m.err = nil
-			m.statusMsg = ""
 			return m, nil
 		case "I":
 			// The wayfinding shortcut is anchored to the Map kind rather than to the
@@ -975,7 +1033,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !ok {
 				return m, nil
 			}
-			m.statusMsg = m.copyRowName(row)
+			m.flash.Set(m.copyRowName(row))
 			return m, nil
 		}
 	case tea.WindowSizeMsg:
@@ -993,6 +1051,9 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(dashboardTick(m.page.id), m.reload())
 	case ui.SpinnerTickMsg:
+		return m, nil
+	case ui.FlashExpiredMsg:
+		m.expireFlash(msg)
 		return m, nil
 	case dashboardLivePrimeMsg:
 		if m.live == nil {
@@ -1059,7 +1120,7 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.drainPick = nil
 		if msg.err != nil {
 			if errors.Is(msg.err, wayfinder.ErrEmptyFrontier) {
-				m.statusMsg = dashboardWayfinderEmptyFrontierMessage()
+				m.flash.Set(dashboardWayfinderEmptyFrontierMessage())
 				return m, nil
 			}
 			m.actionErr = msg.err
@@ -1071,14 +1132,14 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		if msg.status != "" {
-			m.statusMsg = msg.status
+			m.flash.Set(msg.status)
 		}
 		return m, nil
 	case dashboardUnparkMsg:
 		if msg.err != nil {
 			m.actionErr = msg.err
 		} else {
-			m.statusMsg = fmt.Sprintf("%s unparked", msg.setID)
+			m.flash.Set(fmt.Sprintf("%s unparked", msg.setID))
 		}
 		return m, m.reload()
 	case dashboardDrainListMsg:
@@ -1132,9 +1193,9 @@ func (m QueueDashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.err != nil {
-			m.detail.statusMsg = fmt.Sprintf("error: %v", msg.err)
+			m.detail.flash.Set(fmt.Sprintf("error: %v", msg.err))
 		} else {
-			m.detail.statusMsg = fmt.Sprintf("%s applied to %s", msg.verb, msg.taskID)
+			m.detail.flash.Set(fmt.Sprintf("%s applied to %s", msg.verb, msg.taskID))
 		}
 		return m, m.reload()
 	case dashboardKindVerbMsg:
@@ -1437,13 +1498,13 @@ func (m QueueDashboard) dispatchVerb(verb work.Verb, row DashboardRow) (tea.Mode
 	m.err = nil
 	switch verb {
 	case setkind.VerbDrain:
-		m.statusMsg = dashboardHandoffPending
+		m.flash.Set(dashboardHandoffPending)
 		return m, m.launchDrain(row)
 	case setkind.VerbVerify:
 		if !dashboardVerifyEligible(row) {
 			return m, nil
 		}
-		m.statusMsg = dashboardHandoffPending
+		m.flash.Set(dashboardHandoffPending)
 		return m, m.launchVerify(row)
 	case setkind.VerbBind:
 		m.bind = &dashboardBindModal{row: row, loading: true}
@@ -1467,7 +1528,7 @@ func (m QueueDashboard) dispatchVerb(verb work.Verb, row DashboardRow) (tea.Mode
 		m.cols.syncNatural(m.kinds, m.snap.Containers)
 		return m, m.ToggleSetAutoDrain(row)
 	case setkind.VerbAssist:
-		m.statusMsg = dashboardHandoffPending
+		m.flash.Set(dashboardHandoffPending)
 		return m, m.launchAssist(row)
 	case setkind.VerbFold:
 		if !dashboardFoldEligible(row) {
@@ -1477,38 +1538,37 @@ func (m QueueDashboard) dispatchVerb(verb work.Verb, row DashboardRow) (tea.Mode
 			m.actionErr = err
 			return m, nil
 		}
-		m.statusMsg = dashboardHandoffPending
+		m.flash.Set(dashboardHandoffPending)
 		return m, m.launchFold(row)
 	case work.VerbUnmute:
 		// Unmute goes to the Muter seam rather than to Perform: a verb id carries no
 		// payload and mute's pair had to leave the verb seam for the mute half, so
 		// both halves land on one interface (ADR-0200 decision 5).
 		if row.MutedUntil.IsZero() {
-			m.statusMsg = "not muted"
+			m.flash.Set("not muted")
 			return m, nil
 		}
 		return m, m.unmuteRow(row)
 	case setkind.VerbUnpark:
 		if !row.Parked {
-			m.statusMsg = "task set is not parked"
+			m.flash.Set("task set is not parked")
 			return m, nil
 		}
-		m.statusMsg = ""
 		return m, m.unparkSet(row)
 	case wayfinder.VerbWork:
-		m.statusMsg = dashboardHandoffPending
+		m.flash.Set(dashboardHandoffPending)
 		return m, m.launchWayfinderSession(row, "")
 	case wayfinder.VerbWorkHere:
-		m.statusMsg = dashboardSpawnPending
+		m.flash.Set(dashboardSpawnPending)
 		return m, m.spawnWayfinderSession(row, "")
 	case wayfinder.VerbFanOut:
-		m.statusMsg = dashboardHandoffPending
+		m.flash.Set(dashboardHandoffPending)
 		return m, m.launchWayfinderFanOut(row)
 	case wayfinder.VerbFanOutHere:
-		m.statusMsg = dashboardSpawnPending
+		m.flash.Set(dashboardSpawnPending)
 		return m, m.spawnWayfinderFanOut(row)
 	case wayfinder.VerbAssist:
-		m.statusMsg = dashboardHandoffPending
+		m.flash.Set(dashboardHandoffPending)
 		return m, m.launchWayfinderAssist(row)
 	case work.VerbShell:
 		// The directory is the kind's answer, not the dashboard's: a task set opens
@@ -1520,19 +1580,18 @@ func (m QueueDashboard) dispatchVerb(verb work.Verb, row DashboardRow) (tea.Mode
 			dir = strings.TrimSpace(row.RuntimePath)
 		}
 		if dir == "" {
-			m.statusMsg = "no checkout bound to this task set"
+			m.flash.Set("no checkout bound to this task set")
 			return m, nil
 		}
-		m.statusMsg = dashboardHandoffPending
+		m.flash.Set(dashboardHandoffPending)
 		return m, m.launchShell(row, dir)
 	case work.VerbCopyName:
-		m.statusMsg = m.copyRowName(row)
+		m.flash.Set(m.copyRowName(row))
 		return m, nil
 	}
 	// Every other verb is the kind's own to run: it performs it and the dashboard
 	// carries out the outcome, so a kind whose verbs need no dashboard-owned modal
 	// needs no case here (ADR-0173).
-	m.statusMsg = ""
 	return m, m.performKindVerb(row, verb)
 }
 
@@ -1582,7 +1641,7 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if !ok {
 				return m, nil
 			}
-			m.detail.peek.statusMsg = m.copyItemName(m.detail.row, item)
+			m.detail.peek.flash.Set(m.copyItemName(m.detail.row, item))
 			return m, nil
 		}
 		return m, nil
@@ -1614,10 +1673,9 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if strings.TrimSpace(m.detail.row.RuntimePath) == "" {
-			m.detail.statusMsg = "no checkout bound to this task set"
+			m.detail.flash.Set("no checkout bound to this task set")
 			return m, nil
 		}
-		m.detail.statusMsg = ""
 		m.openCheckout = m.detail.row.RuntimePath
 		return m, tea.Quit
 	case "j", "down":
@@ -1654,7 +1712,6 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(actions) == 0 {
 			return m, nil
 		}
-		m.detail.statusMsg = ""
 		m.itemMenu = newItemMenu(item, actions, false)
 		return m, nil
 	case "y":
@@ -1665,7 +1722,7 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !ok {
 			return m, nil
 		}
-		m.detail.statusMsg = m.copyItemName(m.detail.row, item)
+		m.detail.flash.Set(m.copyItemName(m.detail.row, item))
 		return m, nil
 	}
 	return m, nil
@@ -1734,22 +1791,19 @@ func (m QueueDashboard) dispatchItemVerb(verb work.Verb, row work.Container, ite
 	case work.VerbCopyName:
 		msg := m.copyItemName(row, item)
 		if inPeek && m.detail.peek != nil {
-			m.detail.peek.statusMsg = msg
+			m.detail.peek.flash.Set(msg)
 		} else {
-			m.detail.statusMsg = msg
+			m.detail.flash.Set(msg)
 		}
 		return m, nil
 	case wayfinder.VerbWork:
-		m.detail.statusMsg = ""
 		return m, m.launchWayfinderSession(row, item.ID)
 	case wayfinder.VerbWorkHere:
-		m.detail.statusMsg = dashboardSpawnPending
+		m.detail.flash.Set(dashboardSpawnPending)
 		return m, m.spawnWayfinderSession(row, item.ID)
 	case setkind.VerbComplete, setkind.VerbOpen, setkind.VerbSkip:
-		m.detail.statusMsg = ""
 		return m, m.applyDetailOverride(row, item, verb)
 	}
-	m.detail.statusMsg = ""
 	return m, m.performKindItemVerb(row, item, inPeek, verb)
 }
 
@@ -2514,7 +2568,7 @@ func (m QueueDashboard) View() tea.View {
 
 // frameSpec builds the Frame describing the main task-set view's chrome: the
 // Queue · N summary (Header), the filter input (InputBox), the refresh error
-// (Warnings), the transient statusMsg (Status), and the footer hint (Hints). The
+// (Warnings), the transient flash (Flash), and the footer hint (Hints). The
 // same Frame drives both the body-height budget and the render, so the reserved
 // line count can never drift from what is drawn (ADR-0079).
 // dashboardActionErrorLine formats a sticky row-verb error for display. It keeps
@@ -2566,7 +2620,7 @@ func (m QueueDashboard) frameSpec() ui.Frame {
 		Subheader: subheader,
 		InputBox:  inputBox,
 		Warnings:  warnings,
-		Status:    m.statusMsg,
+		Flash:     m.flash,
 		Footnote:  m.modelSkipFootnote(),
 		Block:     block,
 		Hints:     hints,
@@ -2690,9 +2744,6 @@ func (m QueueDashboard) viewWithMenu() string {
 	}
 	fmt.Fprintln(&body)
 	renderDashboardTableWithMenu(&body, m.page, m.kinds, m.snap.Containers, m.list.Cursor(), m.width, m.height, m.menu, m.liveCache())
-	if m.statusMsg != "" {
-		fmt.Fprintf(&body, "  %s\n", m.statusMsg)
-	}
 	hint := "j/k move · enter/letter run · esc close"
 	if m.menu.pinned {
 		hint = "j/k move · J/K row · enter/letter run · esc close"
@@ -2703,7 +2754,7 @@ func (m QueueDashboard) viewWithMenu() string {
 			hint = "j/k move · J/K row · enter/letter run · esc back"
 		}
 	}
-	writeDashboardFooter(&body, m.height, ui.HintStyle.Render(hint))
+	writeDashboardFooter(&body, m.height, dashboardFooterLine(m.flash, hint))
 	return body.String()
 }
 
@@ -2836,7 +2887,7 @@ func (m QueueDashboard) detailFrame() (ui.Frame, string) {
 		Width:  m.width,
 		TermH:  m.height,
 		Header: header,
-		Status: d.statusMsg,
+		Flash:  d.flash,
 		Hints:  "j/k · gg/G top/bottom · l/enter peek · a actions · y copy name · h/esc back",
 	}
 	budget := frame.BodyHeight(m.height)
@@ -3016,14 +3067,11 @@ func (m QueueDashboard) renderDetailContent(b *strings.Builder, d *detailView, h
 	}
 
 	fmt.Fprintln(b)
-	if d.statusMsg != "" {
-		fmt.Fprintf(b, "  %s\n", d.statusMsg)
-	}
 	hint := "  j/k · gg/G top/bottom · l/enter peek · a actions · y copy name · h/esc back"
 	if menu != nil {
 		hint = "  j/k move · enter/letter run · esc close"
 	}
-	writeDashboardFooter(b, height, ui.HintStyle.Render(hint))
+	writeDashboardFooter(b, height, dashboardFooterLine(d.flash, hint))
 }
 
 // itemMenuLines renders the item-level action overlay as a block of lines,
@@ -3099,9 +3147,6 @@ func renderItemTextPeek(b *strings.Builder, d *detailView, height, width int, me
 		}
 	}
 	fmt.Fprintln(b)
-	if p.statusMsg != "" {
-		fmt.Fprintf(b, "  %s\n", p.statusMsg)
-	}
 	position := ""
 	if maxScroll > 0 {
 		position = fmt.Sprintf(" · %d/%d", p.scroll+1, len(lines))
@@ -3110,7 +3155,7 @@ func renderItemTextPeek(b *strings.Builder, d *detailView, height, width int, me
 	if menu != nil && menu.inPeek {
 		hint = "  j/k move · enter/letter run · esc close"
 	}
-	writeDashboardFooter(b, height, ui.HintStyle.Render(hint))
+	writeDashboardFooter(b, height, dashboardFooterLine(p.flash, hint))
 }
 
 func itemTextPeekLines(text string) []string {
@@ -3415,6 +3460,17 @@ func dashboardMuteMenuLines(mute *dashboardMuteMenu, width int) []string {
 		lines = append(lines, ui.TruncateString(line, width))
 	}
 	return append(lines, ui.TruncateString("      "+ui.HintStyle.Render(muteMenuFooter()), width))
+}
+
+// dashboardFooterLine is the bottom line of the views that compose their own
+// footer instead of a Frame — the menu overlays and the item peek. It follows
+// the Frame's rule so the whole dashboard behaves alike: a live flash takes the
+// line, and the hints come back when it expires (ADR-0204).
+func dashboardFooterLine(flash ui.Flash, hint string) string {
+	if line := flash.Line(); line != "" {
+		return line
+	}
+	return ui.HintStyle.Render(hint)
 }
 
 func writeDashboardFooter(b *strings.Builder, height int, hint string) {
