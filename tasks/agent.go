@@ -232,7 +232,7 @@ var agentAdapters = map[string]AgentAdapter{
 			Ladder: map[string][]config.EffortModel{
 				"heavy":    {{Model: "opus", Reasoning: "high"}},
 				"standard": {{Model: "sonnet", Reasoning: "high"}},
-				"light":    {{Model: "haiku", Reasoning: "high"}},
+				"light":    {{Model: "sonnet", Reasoning: "low"}},
 			},
 		},
 		executable: AgentExecutableCapability{Kind: CapabilitySupported, Name: "claude"},

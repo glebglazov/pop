@@ -312,7 +312,7 @@ func TestResolveTaskAgentSpecForEffortClaudeModels(t *testing.T) {
 	}{
 		{name: "heavy", agentSpec: "claude", effort: "heavy", want: "claude --model opus --effort high"},
 		{name: "standard", agentSpec: "claude", effort: "standard", want: "claude --model sonnet --effort high"},
-		{name: "light", agentSpec: "claude", effort: "light", want: "claude --model haiku --effort high"},
+		{name: "light", agentSpec: "claude", effort: "light", want: "claude --model sonnet --effort low"},
 		{name: "preserves explicit model", agentSpec: "claude --model custom", effort: "heavy", want: "claude --model custom"},
 		{name: "preserves quoted extra arg", agentSpec: `claude --append-system-prompt "be nice"`, effort: "heavy", want: "claude --append-system-prompt 'be nice' --model opus --effort high"},
 		{name: "preserves explicit reasoning", agentSpec: "claude --effort low", effort: "heavy", want: "claude --effort low --model opus"},

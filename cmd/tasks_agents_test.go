@@ -53,7 +53,7 @@ func TestTaskAgentsCatalogListsPresetsWithEffortLadders(t *testing.T) {
 
 	rows := [][5]string{
 		{"agent", "binary", "found", "assist", "effort ladder"},
-		{"claude", "claude", "yes", "yes", "heavy: opus[reasoning=high] (built-in); standard: sonnet[reasoning=high] (built-in); light: haiku[reasoning=high] (built-in)"},
+		{"claude", "claude", "yes", "yes", "heavy: opus[reasoning=high] (built-in); standard: sonnet[reasoning=high] (built-in); light: sonnet[reasoning=low] (built-in)"},
 		{"opencode", "opencode", "yes", "yes", "heavy: opencode/claude-opus-4-8[reasoning=high], opencode/kimi-k2.6 (configured); standard: opencode/claude-sonnet-4-6[reasoning=medium] (configured); light: opencode/kimi-k2.6 (configured)"},
 		{"cursor", "cursor-agent", "no", "yes", "heavy: composer-2.5 (built-in); standard: composer-2.5 (built-in); light: composer-2.5-fast (built-in)"},
 		{"codex", "codex", "yes", "yes", "heavy: gpt-5.5[reasoning=high] (built-in); standard: gpt-5.5[reasoning=medium] (built-in); light: gpt-5.4-mini[reasoning=low] (built-in)"},
