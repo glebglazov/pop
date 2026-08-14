@@ -4,7 +4,7 @@ description: Build a throwaway prototype to answer a design question. Use when t
 ---
 
 <!--
-base: mattpocock/skills engineering/prototype@8b36d4f
+base: mattpocock/skills engineering/prototype@8b78b53
 
 This file is a verbatim copy of upstream engineering/prototype/SKILL.md at the
 pinned ref above. Pop inlines rather than delegating to Matt's skills, per

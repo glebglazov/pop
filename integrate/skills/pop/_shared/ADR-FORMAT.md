@@ -1,5 +1,5 @@
 <!--
-base: mattpocock/skills domain-modeling@8b36d4f
+base: mattpocock/skills domain-modeling@8b78b53
 
 This file is a marked overlay. Everything from here down to the "POP OVERLAY"
 marker is a verbatim copy of domain-modeling/ADR-FORMAT.md at the pinned ref

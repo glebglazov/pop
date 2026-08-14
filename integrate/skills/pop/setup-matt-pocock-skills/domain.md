@@ -1,10 +1,10 @@
 <!--
-base: mattpocock/skills skills/engineering/setup-matt-pocock-skills/domain.md@8b36d4f
+base: mattpocock/skills skills/engineering/setup-matt-pocock-skills/domain.md@8b78b53
 
 This file is a marked overlay. Everything from here down to the "POP OVERLAY"
 marker is a byte-verbatim copy of upstream
 skills/engineering/setup-matt-pocock-skills/domain.md at the pinned ref
-mattpocock/skills@8b36d4f. Pop inlines the
+mattpocock/skills@8b78b53. Pop inlines the
 seed templates rather than delegating to Matt's skills (ADR-0009). The pop
 overlay in SKILL.md keeps upstream's `docs/agents/domain.md` write, so this
 seed is load-bearing on every run. To review upstream drift, diff the region

@@ -4,7 +4,7 @@ description: Interview the user relentlessly about a plan or design until you re
 ---
 
 <!--
-base: mattpocock/skills productivity/grilling@8b36d4f
+base: mattpocock/skills productivity/grilling@8b78b53
 
 This file is a marked overlay. Everything from here down to the "POP OVERLAY"
 marker is a verbatim copy of productivity/grilling/SKILL.md at the pinned

@@ -11,11 +11,11 @@ import (
 // to. Per ADR-0112/ADR-0136, drift review reduces to diffing this region
 // against the pinned upstream source; this test makes that diff mechanical
 // instead of archaeological. It covers the grill-with-docs body and the shared
-// format documents (pinned to domain-modeling@8b36d4f), the batch-grill-me
-// interview primitive (pinned to productivity/grilling@8b36d4f — upstream
+// format documents (pinned to domain-modeling@8b78b53), the batch-grill-me
+// interview primitive (pinned to productivity/grilling@8b78b53 — upstream
 // absorbed the in-progress batch-grill-me experiment into its shipped grilling
 // skill, so this pin tracks a live upstream), and the setup-matt-pocock-skills
-// seed templates (pinned to mattpocock/skills@8b36d4f).
+// seed templates (pinned to mattpocock/skills@8b78b53).
 //
 // grill-with-docs' verbatim region is the domain-modeling half alone: the
 // interview half it used to inline is now batch-grill-me, composed over rather

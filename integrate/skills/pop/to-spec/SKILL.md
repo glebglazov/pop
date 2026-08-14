@@ -5,7 +5,7 @@ disable-model-invocation: true
 ---
 
 <!--
-base: mattpocock/skills engineering/to-spec@8b36d4f
+base: mattpocock/skills engineering/to-spec@8b78b53
 
 This file is a marked overlay. Everything from here down to the "POP OVERLAY"
 marker is a byte-verbatim copy of upstream engineering/to-spec/SKILL.md body at
