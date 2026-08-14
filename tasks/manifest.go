@@ -100,6 +100,15 @@ type Task struct {
 	// committed task overwrites it: the latest commit is the reachable one. It
 	// rides through as `commit`, omitted when nil.
 	Commit *TaskCommit `json:"-"`
+	// CommitSubject is the task's Planned commit subject: the final, literal
+	// subject line the executor commits this task's work under, written at plan
+	// time by whoever resolved the set's Commit convention (ADR-0207). It is used
+	// **verbatim** — nothing renders, substitutes or reformats it — so the agent
+	// that wrote it is the only author of the message. Empty means no subject was
+	// planned, and the commit falls back to pop's built-in default format (see
+	// CommitSubject, the function). It rides through as `commit_subject`, omitted
+	// when empty.
+	CommitSubject string `json:"-"`
 }
 
 // TaskCommit is the recorded identity of one implementation commit: the SHA it
@@ -111,16 +120,17 @@ type TaskCommit struct {
 }
 
 type taskJSON struct {
-	ID          string     `json:"id"`
-	File        string     `json:"file"`
-	Title       string     `json:"title"`
-	Type        string     `json:"type"`
-	Status      TaskStatus `json:"status"`
-	BlockedBy   []string   `json:"blocked_by"`
-	FailedAfter *int       `json:"failed_after,omitempty"`
-	Effort      *string     `json:"effort,omitempty"`
-	Origin      string      `json:"origin,omitempty"`
-	Commit      *TaskCommit `json:"commit,omitempty"`
+	ID            string      `json:"id"`
+	File          string      `json:"file"`
+	Title         string      `json:"title"`
+	Type          string      `json:"type"`
+	Status        TaskStatus  `json:"status"`
+	BlockedBy     []string    `json:"blocked_by"`
+	FailedAfter   *int        `json:"failed_after,omitempty"`
+	Effort        *string     `json:"effort,omitempty"`
+	Origin        string      `json:"origin,omitempty"`
+	Commit        *TaskCommit `json:"commit,omitempty"`
+	CommitSubject string      `json:"commit_subject,omitempty"`
 }
 
 // UnmarshalJSON preserves the difference between an absent effort key and an
@@ -139,6 +149,7 @@ func (t *Task) UnmarshalJSON(data []byte) error {
 	t.FailedAfter = raw.FailedAfter
 	t.Origin = raw.Origin
 	t.Commit = raw.Commit
+	t.CommitSubject = raw.CommitSubject
 	t.Effort = DefaultTaskEffort
 	t.EffortExplicit = false
 	if raw.Effort != nil {
@@ -152,15 +163,16 @@ func (t *Task) UnmarshalJSON(data []byte) error {
 // avoiding churn when older manifests are rewritten for unrelated state.
 func (t Task) MarshalJSON() ([]byte, error) {
 	raw := taskJSON{
-		ID:          t.ID,
-		File:        t.File,
-		Title:       t.Title,
-		Type:        t.Type,
-		Status:      t.Status,
-		BlockedBy:   t.BlockedBy,
-		FailedAfter: t.FailedAfter,
-		Origin:      t.Origin,
-		Commit:      t.Commit,
+		ID:            t.ID,
+		File:          t.File,
+		Title:         t.Title,
+		Type:          t.Type,
+		Status:        t.Status,
+		BlockedBy:     t.BlockedBy,
+		FailedAfter:   t.FailedAfter,
+		Origin:        t.Origin,
+		Commit:        t.Commit,
+		CommitSubject: t.CommitSubject,
 	}
 	if t.EffortExplicit || (t.Effort != "" && t.Effort != DefaultTaskEffort) {
 		effort := t.Effort
@@ -206,6 +218,14 @@ type Manifest struct {
 	// every set authored before the field existed and for any set that has not yet
 	// made its first implementation commit.
 	BaseCommitRecorded bool
+	// CommitConvention is the set's resolved Commit convention: the prose
+	// description of this repository's commit grammar, resolved once at plan time
+	// and read from and written back as the set-level `commit_convention` key
+	// (ADR-0207). Nothing in the commit path reads it — the per-task Planned
+	// commit subjects are already rendered — it is carried for the agents that
+	// render a subject later, chiefly the Verifier spawning a Remediation task
+	// mid-drain. Empty when the convention did not resolve.
+	CommitConvention string
 	// HumanCompleted records that a human's own `complete` is what carried this set
 	// terminal, read from and written back as the set-level `human_completed` key.
 	// It lives in the manifest rather than the store because it is an assertion
@@ -343,6 +363,15 @@ func parseManifestJSON(data []byte, m *Manifest) error {
 				continue
 			}
 			m.BaseCommitRecorded = true
+		case "commit_convention":
+			// Advisory prose, not machinery: a malformed value reads as absent rather
+			// than MALFORMED, because a set whose convention text is unusable still has
+			// perfectly good tasks — the commits simply fall back to the default
+			// format. The raw value rides through Unknown so a rewrite never eats it.
+			if err := json.Unmarshal(v, &m.CommitConvention); err != nil {
+				m.CommitConvention = ""
+				m.Unknown[k] = v
+			}
 		case "human_completed":
 			// A malformed value reads as absent rather than MALFORMED: this key is
 			// hand-editable, and a typo in it must not hide what the set's tasks say.
@@ -533,6 +562,13 @@ func WriteManifestAtomic(d *Deps, m *Manifest) error {
 			return err
 		}
 		out["source_map"] = sourceMap
+	}
+	if m.CommitConvention != "" {
+		convention, err := json.Marshal(m.CommitConvention)
+		if err != nil {
+			return err
+		}
+		out["commit_convention"] = convention
 	}
 	// A recorded base is written every time, so the key never depends on which
 	// rewrite path ran; an unrecorded one leaves whatever Unknown carries (an

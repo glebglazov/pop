@@ -467,7 +467,7 @@ func completeSuccessfulTask(d *Deps, sel *Selection, runtimePath, summary string
 
 	var commit *ImplementationCommit
 	if hasChanges {
-		made, err := createImplementationCommit(d, runtimePath, sel.TaskSetID, sel.TaskID, summary, commitOverrides)
+		made, err := createImplementationCommit(d, runtimePath, implementationSubject(sel), summary, commitOverrides)
 		if err != nil {
 			return nil, exitErr(ExitOperational, "implementation commit: %v", err)
 		}
@@ -508,7 +508,23 @@ type ImplementationCommit struct {
 	Parent string
 }
 
-func createImplementationCommit(d *Deps, runtimePath, taskSetID, taskID, summary string, commitOverrides []string) (*ImplementationCommit, error) {
+// implementationSubject picks the subject this task's commit is written under:
+// the Planned commit subject the manifest carries, used verbatim, or pop's
+// built-in default format when the set was planned without one (ADR-0207).
+// Resolving it here rather than inside the commit keeps the commit a pure
+// git operation and leaves one place that knows the fallback rule.
+func implementationSubject(sel *Selection) string {
+	if sel.Manifest != nil {
+		for _, task := range sel.Manifest.Tasks {
+			if task.ID == sel.TaskID && strings.TrimSpace(task.CommitSubject) != "" {
+				return task.CommitSubject
+			}
+		}
+	}
+	return CommitSubject(sel.TaskSetID, sel.TaskID)
+}
+
+func createImplementationCommit(d *Deps, runtimePath, subject, summary string, commitOverrides []string) (*ImplementationCommit, error) {
 	if _, err := d.Git.CommandInDir(runtimePath, "add", "-A"); err != nil {
 		return nil, err
 	}
@@ -519,7 +535,6 @@ func createImplementationCommit(d *Deps, runtimePath, taskSetID, taskID, summary
 	if strings.TrimSpace(staged) == "" {
 		return nil, nil
 	}
-	subject := CommitSubject(taskSetID, taskID)
 	if _, err := d.Git.CommandInDir(runtimePath, commitGitArgs(commitOverrides, "commit", "-m", subject, "-m", summary)...); err != nil {
 		return nil, err
 	}

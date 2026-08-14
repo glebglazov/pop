@@ -183,12 +183,24 @@ Per-task fields:
   never at authoring time.
 - `+"`agent`"+` — optional escape hatch (ADR-0018). Fill it only when the user
   explicitly asks for a specific agent or model.
+- `+"`commit_subject`"+` — optional Planned commit subject: the final, literal
+  subject line pop commits this task's work under. It is used **verbatim** — pop
+  renders nothing, substitutes nothing and reformats nothing — so write the whole
+  line in the repository's own commit grammar (e.g.
+  `+"`feat(auth): add token refresh`"+`). The body stays the agent's summary.
+  Omit it and the commit falls back to pop's default format,
+  `+"`tasks(<set-slug>): <task-id>`"+`.
 
 Set-level keys:
 
 - `+"`source_map`"+` — the id of the Map this set was spawned from. Written on
   **every** Map-sourced set, spec or no spec, so the back-link is never
   half-built.
+- `+"`commit_convention`"+` — optional prose describing this repository's commit
+  grammar, resolved once when the set was planned. Nothing in the commit path
+  reads it (the per-task subjects are already written); it is what an agent
+  spawning a task mid-drain renders a new `+"`commit_subject`"+` from. Omit it
+  when no convention resolved.
 - No `+"`worktree`"+` and no `+"`auto_drain`"+` (ADR-0115): binding and
   auto-drain are `+"`register`"+` flags and dashboard toggles, never manifest
   keys. A legacy set carrying them is not malformed; they are ignored.
@@ -287,6 +299,7 @@ func taskManifestExample() string {
 			BlockedBy:      []string{},
 			Effort:         DefaultTaskEffort,
 			EffortExplicit: true,
+			CommitSubject:  "feat(auth): add the login form",
 		},
 		{
 			ID:             "02-sign-off",
