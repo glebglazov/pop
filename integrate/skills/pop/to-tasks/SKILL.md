@@ -156,18 +156,26 @@ not when a task commits. pop commits each task's work under the subject written
 here **verbatim** — it renders nothing and reformats nothing at commit time — so
 if this step is skipped the repository's grammar is lost for the whole set.)*
 
-Resolve the convention once, before publishing, in this order:
+Resolve the convention once, before publishing, by asking pop:
 
-1. **A Commit format doc wins.** If the repo has `docs/commit-format.md`, read it
-   and take the grammar from it. Stop here — do not sample the log.
-2. **Otherwise infer it from the last 5 commits.** **Discard pop-generated
-   commits before sampling** — pop's own default subjects (`tasks(...)`) and
-   pop's skill-commit shapes — and infer from the non-pop commits that remain.
-   Walk further back if the last 5 are all pop's. Without this guard pop learns
-   its own accent back from the log and the convention degenerates.
-3. **Nothing usable → write neither field.** No format doc and no readable
-   grammar in the non-pop log means the set carries no convention, and each task
-   commits under pop's built-in default format. Do not guess one.
+```
+pop repo conventions get commits
+```
+
+Do not derive the grammar yourself. The command composes every layer that answers
+the question for this repository — the repository's own `docs/agents/commits.md`
+among them — and prints the resolved convention with the layer it came from.
+
+- **Exit 0** — take the printed convention as resolved. The highest-ranked layer
+  wins; the command has already applied that precedence, so read its output as
+  the answer rather than re-weighing the layers.
+- **Exit 1** — nothing answers `commits` yet. The command prints the paths it
+  consulted and a **recipe**: the method for deriving the convention, including
+  which layer to record the result in. Follow it, then resolve again.
+
+If what resolves is that the repository has **no discernible** commit convention,
+write neither field: the set carries no convention and each task commits under
+pop's built-in default format. Do not guess one.
 
 When a convention resolves, write both fields into the set's `index.json`:
 
