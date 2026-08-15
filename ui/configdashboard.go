@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -56,6 +57,17 @@ func IsConfigDashboardKey(msg tea.KeyPressMsg) bool {
 // the list answers "what have I changed" without arrowing through every preview.
 const configOverrideMarker = "●"
 
+// configContestedMarker marks a row whose key more than one layer states a value
+// for. It is the other half of the same question: what is quietly fighting the
+// value in force (ADR-0212 decision 8). The two markers occupy their own columns,
+// because a contested key is usually also an overridden one and a reader loses
+// nothing by seeing both.
+const configContestedMarker = "◆"
+
+// configContestedStyle colours that marker apart from the override dot: the two
+// say different things and sit in adjacent columns.
+var configContestedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+
 // ConfigDashboardReachLine is one actor's line of a key's declared reach
 // (ADR-0198), already resolved by the caller.
 type ConfigDashboardReachLine struct {
@@ -96,7 +108,10 @@ type ConfigDashboardRow struct {
 	Desc string
 	// Overridden marks the row.
 	Overridden bool
-	Preview    ConfigDashboardPreview
+	// Contested reports that more than one layer states a value for this key. It
+	// marks the row and sorts it to the top of the list.
+	Contested bool
+	Preview   ConfigDashboardPreview
 }
 
 // ConfigOverrideWriter is the override layer as this component needs it: the
@@ -155,9 +170,10 @@ type ConfigDashboard struct {
 	failure string
 }
 
-// NewConfigDashboard builds the component over the overridable keys, in the
-// order the caller listed them.
+// NewConfigDashboard builds the component over the overridable keys: the
+// contested ones first, and within each group the order the caller listed them.
 func NewConfigDashboard(rows []ConfigDashboardRow, opts ConfigDashboardOpts) *ConfigDashboard {
+	rows = contestedFirst(rows)
 	m := &ConfigDashboard{
 		rows:     rows,
 		filtered: rows,
@@ -248,6 +264,24 @@ func (m *ConfigDashboard) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	m.input.Update(msg)
 	m.filter()
 	return nil
+}
+
+// contestedFirst lifts the keys more than one layer states a value for to the
+// top of the list (ADR-0212 decision 8), leaving every other row where the caller
+// put it. The list is what a human opens the dashboard on, so the rows that
+// answer "what did I customize, and what is quietly fighting it" are the rows
+// they meet first, with no second view to reach for.
+//
+// The sort is stable and touches order alone: no row is dropped, so the filter —
+// which runs over the whole list, not over what is on screen — still reaches
+// every key whatever the order.
+func contestedFirst(rows []ConfigDashboardRow) []ConfigDashboardRow {
+	sorted := make([]ConfigDashboardRow, len(rows))
+	copy(sorted, rows)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return sorted[i].Contested && !sorted[j].Contested
+	})
+	return sorted
 }
 
 // filter narrows the list over the dotted path and the description text
@@ -372,7 +406,7 @@ func (m *ConfigDashboard) refresh() {
 		m.failure = fmt.Sprintf("Wrote the override, but could not re-read the config: %v", err)
 		return
 	}
-	m.rows = rows
+	m.rows = contestedFirst(rows)
 	m.filtered = m.matchingRows()
 	m.list.ReplaceItems(m.filtered)
 }
@@ -465,6 +499,8 @@ func (m *ConfigDashboard) helpEntries() []HelpEntry {
 	entries := []HelpEntry{
 		{"type", "Filter over key path and description"},
 		{"↑/↓", "Move highlight"},
+		{configOverrideMarker, "This key carries an override"},
+		{configContestedMarker, "More than one layer sets this key — listed first"},
 	}
 	if m.writer != nil {
 		entries = append(entries,
@@ -548,8 +584,8 @@ func (m *ConfigDashboard) linesPerItem(height int) int {
 	return 1
 }
 
-// renderRow draws one list row: the marker column, the dotted path, and — on the
-// second line, when there is one — the description dimmed.
+// renderRow draws one list row: the two marker columns, the dotted path, and —
+// on the second line, when there is one — the description dimmed.
 func (m *ConfigDashboard) renderRow(row ConfigDashboardRow, state RowState) string {
 	width := m.listWidth() - 2 // the list owns a two-column cursor prefix
 	if state.LineIndex > 0 {
@@ -558,11 +594,17 @@ func (m *ConfigDashboard) renderRow(row ConfigDashboardRow, state RowState) stri
 		}
 		return dimStyle.Render(TruncateString("    "+row.Desc, width))
 	}
-	marker := "  "
+	marker := " "
 	if row.Overridden {
-		marker = IndicatorStyle.Render(configOverrideMarker) + " "
+		marker = IndicatorStyle.Render(configOverrideMarker)
 	}
-	text := TruncateString(row.Key, width-2)
+	if row.Contested {
+		marker = configContestedStyle.Render(configContestedMarker) + marker
+	} else {
+		marker = " " + marker
+	}
+	marker += " "
+	text := TruncateString(row.Key, width-3)
 	if state.Selected {
 		text = selectedGateItemStyle.Render(text)
 	}

@@ -165,8 +165,10 @@ var configDashboardCmd = &cobra.Command{
 
 The left pane lists every overridable key — every config leaf except the ones
 pop config keys marks [override: never] — with its description beneath. Type to
-filter over the key path and the description together. A marked row carries an
-override today.
+filter over the key path and the description together. A row marked ● carries an
+override today; one marked ◆ is contested — more than one layer states a value
+for it — and every contested key sorts to the top of the list. The filter runs
+over the whole list, so it reaches every key whatever the order.
 
 Below them sit the keys of the repository you are standing in, spelled
 repo.<key> — the leaves pop config keys --scope repo lists. Editing one states

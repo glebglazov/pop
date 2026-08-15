@@ -86,6 +86,10 @@ type OverrideKeyView struct {
 	// Overridden reports that config.override.toml carries this key, which is
 	// what the list marks and what gives the copy and remove actions a target.
 	Overridden bool
+	// Contested reports that more than one layer states a value for this key, so
+	// one of them is quietly losing (ADR-0212 decision 8). The Config dashboard
+	// sorts these rows to the top and marks them.
+	Contested bool
 	// Layer is the source that produced the effective value.
 	Layer OverrideLayer
 	// Locus qualifies Layer: the include file for a hand-authored include, or
@@ -253,6 +257,7 @@ func overrideKeyView(key OverrideKey, tomlType string, layers []overrideValueLay
 
 	value, idx := topmostValue(key.Key, layers)
 	view.Overridden = idx == 0 && layers[0].layer == OverrideLayerOverride
+	view.Contested = statingLayers(key.Key, layers) > 1
 	if idx >= 0 {
 		view.EffectiveTOML = renderKeyTOML(key.Key, value)
 	} else {
@@ -304,6 +309,27 @@ func topmostValue(key string, layers []overrideValueLayer) (any, int) {
 		}
 	}
 	return nil, -1
+}
+
+// statingLayers counts the layers that state a value for key — how a contest is
+// detected, one layer holding the answer and the others still saying something
+// else underneath it.
+//
+// The built-in defaults are not one of the counting layers. They state every key
+// of the surface, so counting them would make a contest of any key a human has
+// ever written and mark the whole list; a default is what a key falls back to,
+// never something fighting a stated value.
+func statingLayers(key string, layers []overrideValueLayer) int {
+	n := 0
+	for _, layer := range layers {
+		if layer.layer == OverrideLayerDefault {
+			continue
+		}
+		if _, ok := documentValue(layer.doc, key); ok {
+			n++
+		}
+	}
+	return n
 }
 
 // globalKeyTypes maps every key of the global surface to its TOML type, so a key

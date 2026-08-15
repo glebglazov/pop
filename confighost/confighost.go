@@ -126,6 +126,7 @@ func Rows(views []config.OverrideKeyView) []ui.ConfigDashboardRow {
 			Key:        view.Key,
 			Desc:       view.Desc,
 			Overridden: view.Overridden,
+			Contested:  view.Contested,
 			Preview: ui.ConfigDashboardPreview{
 				ValueTOML:        view.EffectiveTOML,
 				Provenance:       view.Provenance(),

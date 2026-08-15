@@ -303,3 +303,28 @@ func TestConfigDashboardWithoutARepositoryOffersNoRepoRows(t *testing.T) {
 		}
 	}
 }
+
+// TestConfigDashboardContestedKeySortsFirst is ADR-0212 decision 8 through the
+// real layers: overriding a key config.toml already states puts two layers on it,
+// so the row marks itself contested and rises to the top of the list the moment
+// the editor closes.
+func TestConfigDashboardContestedKeySortsFirst(t *testing.T) {
+	f := newOverrideEditFixture(t, overrideEditConfigTOML)
+	m := f.dashboard(t, `work.verify.agents = ["codex --model gpt"]`)
+	selectKey(t, m, "work.verify.agents")
+
+	pressConfigDashboard(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	row, _ := m.Selected()
+	if !row.Contested {
+		t.Fatalf("row = %+v, want it contested by the override and config.toml", row)
+	}
+	// The highlight follows its key, so walking to the top of the list and
+	// finding the same key there is the sort.
+	for i := 0; i < len(config.OverrideKeys()); i++ {
+		m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	}
+	if top, _ := m.Selected(); top.Key != "work.verify.agents" {
+		t.Errorf("first row = %s, want the contested work.verify.agents", top.Key)
+	}
+}
