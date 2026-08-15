@@ -84,11 +84,71 @@ outside a repository as well as inside one.`,
 	ValidArgsFunction: completeConventionKind,
 }
 
+var repoConventionsSetCmd = &cobra.Command{
+	Use:   "set <kind>",
+	Short: "Remember a convention for this repository",
+	Long: `Write the pop memory layer of a convention stack for this repository.
+
+The body is read from stdin, because the writer is an agent that has just worked
+out the convention, not a human at a terminal. ` + "`--file`" + ` reads the same body from
+a path instead. There is no editor mode.
+
+  pop repo conventions recipe commits            # the method
+  ... | pop repo conventions set commits --derived-from "the last 20 commits"
+
+` + "`--derived-from`" + ` is required: it names the evidence the convention was derived
+from, is stored in the file's frontmatter with the time of the write, and is
+what the provenance line of a later ` + "`get`" + ` quotes. A remembered convention whose
+origin nobody can state is worse than no memory at all.
+
+The file is filed under the repository, not the checkout, so a convention
+written in the trunk is the same convention in every worktree of it. Writing
+again replaces what is there.
+
+This is one rank of four. It is where a convention pop derived from evidence
+belongs; a convention a human states in session belongs in the repository's
+` + "`docs/agents/<kind>.md`" + `, which outranks this layer and which the team owns.`,
+	Args:              cobra.ExactArgs(1),
+	RunE:              runRepoConventionsSet,
+	ValidArgsFunction: completeConventionKind,
+}
+
+var repoConventionsUnsetCmd = &cobra.Command{
+	Use:   "unset <kind>",
+	Short: "Forget the convention pop remembered for this repository",
+	Long: `Remove the pop memory layer of a convention stack for this repository.
+
+Only pop's own layer goes: the user's documents and the repository's committed
+document are untouched, so the kind usually keeps answering. The output says
+what still answers it, printed exactly as ` + "`get`" + ` would print it, so the verb
+cannot be read as silencing the kind.
+
+A kind pop holds no memory for is reported as such and is not a failure.`,
+	Args:              cobra.ExactArgs(1),
+	RunE:              runRepoConventionsUnset,
+	ValidArgsFunction: completeConventionKind,
+}
+
+var (
+	repoConventionsSetFile        string
+	repoConventionsSetDerivedFrom string
+)
+
 func init() {
 	rootCmd.AddCommand(repoCmd)
 	repoCmd.AddCommand(repoConventionsCmd)
 	repoConventionsCmd.AddCommand(repoConventionsGetCmd)
 	repoConventionsCmd.AddCommand(repoConventionsRecipeCmd)
+	repoConventionsCmd.AddCommand(repoConventionsSetCmd)
+	repoConventionsCmd.AddCommand(repoConventionsUnsetCmd)
+
+	repoConventionsSetCmd.Flags().StringVar(&repoConventionsSetFile, "file", "",
+		"read the convention body from this file instead of stdin")
+	repoConventionsSetCmd.Flags().StringVar(&repoConventionsSetDerivedFrom, "derived-from", "",
+		"what the convention was derived from, recorded as its provenance")
+	if err := repoConventionsSetCmd.MarkFlagRequired("derived-from"); err != nil {
+		panic(err)
+	}
 }
 
 func completeConventionKind(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
@@ -126,6 +186,65 @@ func runRepoConventionsGetWith(cd *conventions.Deps, w io.Writer, dir string, ar
 		kinds = []conventions.Kind{kind}
 	}
 	return conventions.Get(cd, w, dir, kinds...)
+}
+
+func runRepoConventionsSet(cmd *cobra.Command, args []string) error {
+	dir, err := cmdLayerDeps().DirOrGetwd()
+	if err != nil {
+		return fmt.Errorf("repo conventions set: %w", err)
+	}
+	body, err := readConventionBody(cmd.InOrStdin(), repoConventionsSetFile)
+	if err != nil {
+		return fmt.Errorf("repo conventions set: %w", err)
+	}
+	return runRepoConventionsSetWith(cmdLayerDeps().conventionsDeps(), cmd.OutOrStdout(), dir,
+		args[0], body, repoConventionsSetDerivedFrom)
+}
+
+// readConventionBody resolves the two ways in, which are one path: --file is an
+// alias for stdin, not a second mode, so nothing downstream branches on which
+// one the caller used.
+func readConventionBody(stdin io.Reader, file string) (string, error) {
+	if file != "" {
+		raw, err := cmdLayerDeps().FS.ReadFile(file)
+		if err != nil {
+			return "", err
+		}
+		return string(raw), nil
+	}
+	raw, err := io.ReadAll(stdin)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+// runRepoConventionsSetWith is the seam tests drive: the refusal, the write and
+// its report without a process or a terminal.
+func runRepoConventionsSetWith(cd *conventions.Deps, w io.Writer, dir, name, body, derivedFrom string) error {
+	kind, err := conventions.ParseKind(name)
+	if err != nil {
+		return err
+	}
+	return conventions.Set(cd, w, kind, dir, body, derivedFrom)
+}
+
+func runRepoConventionsUnset(cmd *cobra.Command, args []string) error {
+	dir, err := cmdLayerDeps().DirOrGetwd()
+	if err != nil {
+		return fmt.Errorf("repo conventions unset: %w", err)
+	}
+	return runRepoConventionsUnsetWith(cmdLayerDeps().conventionsDeps(), cmd.OutOrStdout(), dir, args[0])
+}
+
+// runRepoConventionsUnsetWith is the seam tests drive, so the removal and the
+// stack that survives it are exercised together.
+func runRepoConventionsUnsetWith(cd *conventions.Deps, w io.Writer, dir, name string) error {
+	kind, err := conventions.ParseKind(name)
+	if err != nil {
+		return err
+	}
+	return conventions.Unset(cd, w, kind, dir)
 }
 
 func runRepoConventionsRecipe(cmd *cobra.Command, args []string) error {

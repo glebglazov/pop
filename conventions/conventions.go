@@ -10,6 +10,8 @@
 package conventions
 
 import (
+	"time"
+
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/tasks"
 )
@@ -37,6 +39,11 @@ func (d *Deps) fs() deps.FileSystem {
 	}
 	return d.FS
 }
+
+// now is when a write says it happened. It rides the tasks bag rather than a
+// clock of this package's own: that bag already answers Repository identity for
+// the same write, so a test that fixes one fixes both.
+func (d *Deps) now() time.Time { return d.tasksDeps().Now() }
 
 func (d *Deps) tasksDeps() *tasks.Deps {
 	if d != nil && d.Tasks != nil {

@@ -89,6 +89,41 @@ func RenderStack(w io.Writer, s Stack) error {
 	return nil
 }
 
+// RenderSet confirms a write of the Convention memory layer: which file holds
+// it now, the provenance stored beside it, and the reminder that this is one
+// rank of four rather than the repository's answer — a writer who thinks it is
+// the answer would never look at the document the team committed above it.
+func RenderSet(w io.Writer, kind Kind, path, derivedFrom, derivedAt string, replaced bool) error {
+	verb := "WROTE"
+	if replaced {
+		verb = "REPLACED"
+	}
+	fmt.Fprintf(w, "%s pop memory for %s\n\n", verb, kind)
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintf(tw, "path\t%s\n", path)
+	fmt.Fprintf(tw, "derived from\t%s\n", derivedFrom)
+	fmt.Fprintf(tw, "derived at\t%s\n", derivedAt)
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "\nThis is the pop memory rank, not the whole convention. Run\n"+
+		"`pop repo conventions get %s` for the stack it now composes into.\n", kind)
+	return nil
+}
+
+// RenderUnset reports a removal together with what still answers the kind. The
+// stack is printed through the same renderer `get` uses, so the two surfaces
+// cannot disagree about what is in effect.
+func RenderUnset(w io.Writer, kind Kind, path string, removed bool, remaining Stack) error {
+	if removed {
+		fmt.Fprintf(w, "REMOVED pop memory for %s\n%s\n\n", kind, path)
+	} else {
+		fmt.Fprintf(w, "NO pop memory for %s — nothing to remove.\n%s\n\n", kind, path)
+	}
+	fmt.Fprintf(w, "Still in effect:\n\n")
+	return RenderStack(w, remaining)
+}
+
 // Provenance is the ready-made one-line disclosure a reading agent surfaces:
 // which layer is on top, and — whenever pop's own layer is in play — what pop
 // derived it from. Pop emits it rather than leaving each skill to phrase it, so
