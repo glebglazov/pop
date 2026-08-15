@@ -583,11 +583,18 @@ type QueueDashboard struct {
 	itemMenu  *itemMenu
 	filter    *dashboardFilterMenu
 
-	filterMode  bool
-	filterInput ui.TextField
-	pendingG    bool
-	flash       ui.Flash
-	showHelp    bool
+	// searchTyping is the Work dashboard search's typing phase: a Text entry mode,
+	// so while it is on the keyboard belongs to searchInput and only Enter, Esc and
+	// ctrl+c are reserved (ADR-0213). searchTerm is the applied query, which
+	// outlives the typing — it keeps narrowing the rows through polls, preset
+	// changes and page switches until an empty query clears it. Splitting the two
+	// is what lets the whole keymap come back with a search still in force.
+	searchTyping bool
+	searchInput  ui.TextField
+	searchTerm   string
+	pendingG     bool
+	flash        ui.Flash
+	showHelp     bool
 	// openCheckout is the bound checkout path chosen with Ctrl-g on the main
 	// list. It is set alongside a tea.Quit so RunDashboard can surface it out of
 	// the program and the command layer runs the workbench-aware open after the
@@ -772,9 +779,12 @@ func (m QueueDashboard) resizeMainList() {
 
 // ViewToggleAllowed reports whether v may switch to the other page. The rule is
 // unchanged from when the toggle swapped two TUIs: a modal, menu or detail owns
-// the keyboard, so v means whatever that overlay says it means.
+// the keyboard, so v means whatever that overlay says it means. The search's
+// typing phase owns it the same way — there `v` is the letter v, typed into a
+// project name, and never the page toggle (ADR-0213).
 func (m QueueDashboard) ViewToggleAllowed() bool {
-	return m.bind == nil && m.drainPick == nil && m.abandon == nil &&
+	return !m.searchTyping &&
+		m.bind == nil && m.drainPick == nil && m.abandon == nil &&
 		m.detail == nil && m.menu == nil && m.itemMenu == nil && m.filter == nil
 }
 
@@ -798,9 +808,14 @@ func (m QueueDashboard) ListCursor() int {
 	return m.list.Cursor()
 }
 
-// FilterActive reports whether the main-list filter is engaged.
-func (m QueueDashboard) FilterActive() bool {
-	return m.filterMode
+// SearchTyping reports whether the search's typing phase owns the keyboard.
+func (m QueueDashboard) SearchTyping() bool {
+	return m.searchTyping
+}
+
+// SearchTerm returns the applied search term, empty when no search is in force.
+func (m QueueDashboard) SearchTerm() string {
+	return m.searchTerm
 }
 
 // Init starts the poll and, alongside it, primes the live-pane affordance cache.
@@ -918,9 +933,9 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pendingG = false
 			return m.updateFilterMenu(msg)
 		}
-		if m.filterMode {
+		if m.searchTyping {
 			m.pendingG = false
-			return m.updateFilterMode(msg)
+			return m.updateSearchTyping(msg)
 		}
 		if msg.String() == "g" {
 			if m.pendingG {
@@ -936,8 +951,13 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "esc", "h", "left":
 			return m, tea.Quit
 		case "/":
-			m.filterMode = true
-			m.filterInput = ui.NewTextField()
+			// Opening the search always starts from an empty buffer, so the rows
+			// widen back to the whole preset the moment the key is pressed: what is
+			// on screen is what the buffer says, and typing narrows from there.
+			// Applying that empty buffer is how a search is cleared.
+			m.searchTyping = true
+			m.searchInput = ui.NewTextField()
+			m.applySearch("")
 			return m, nil
 		case "j", "down":
 			m.list.MoveDown()
@@ -973,9 +993,9 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = nil
 			return m, nil
 		case "f":
-			// Open the Work view preset list (ADR-0197). Unlike `/` (a transient
-			// fuzzy query over the already-included rows) this modal picks which
-			// preset selects the rows; the two are independent concepts.
+			// Open the Work view preset list (ADR-0197). Unlike `/` (a search that
+			// subtracts by name from the rows already included) this modal picks
+			// which preset selects the rows; the two are independent concepts.
 			if !m.page.rowFilters {
 				return m, nil
 			}
@@ -1045,10 +1065,7 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.live = &livePaneCache{}
 			}
 			*m.live = msg.live
-			if m.filterMode {
-				m.snap.Containers = filterDashboardRows(m.allRows, m.filterInput.Value())
-			}
-			m.syncListRows()
+			m.applySearch(m.activeQuery())
 			if m.detail != nil {
 				// The detail view reads the container the table just rebuilt: one
 				// data path, so an item status that moved on disk shows up in the
@@ -1440,8 +1457,9 @@ func (m QueueDashboard) updateFilterMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // invokeFilterItem activates the preset at idx and rebuilds the row set. The
 // menu stays open. Activating installs that preset on the model's drain.Deps
 // (ADR-0197) and returns a reload: BuildDashboard re-derives the rows honoring
-// the new preset and re-sorts them, and the reload's dashboardRowsMsg
-// re-applies any active `/` fuzzy query, so the two filters stay independent.
+// the new preset and re-sorts them, and the reload's dashboardRowsMsg re-applies
+// any search term in force, so the preset survives the search and the search
+// survives the preset.
 // The selection is session-only — a fresh drain.Deps on relaunch resets it to
 // the launch seed (`--include-done` → all, else the default).
 func (m QueueDashboard) invokeFilterItem(idx int) (tea.Model, tea.Cmd) {
@@ -1812,27 +1830,61 @@ func (m QueueDashboard) applyDetailOverride(row work.Container, item work.Item, 
 	}
 }
 
-func (m QueueDashboard) updateFilterMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+// updateSearchTyping is the keyboard of the search's typing phase. It reserves
+// the three keys that produce no text — Enter (apply), Esc (abandon) and ctrl+c
+// (quit) — and hands everything else to the field, so `j`, `k`, `v`, `q` and the
+// digits are typed rather than interpreted and a project called `jj` is
+// searchable (ADR-0213). Nothing here navigates: the whole keymap comes back on
+// Enter, over the narrowed rows.
+func (m QueueDashboard) updateSearchTyping(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit
+	case "enter":
+		m.searchTerm = m.searchInput.Value()
+		m.searchTyping = false
+		m.searchInput = ui.TextField{}
+		m.applySearch(m.searchTerm)
+		return m, nil
 	case "esc":
-		m.filterMode = false
-		m.filterInput = ui.TextField{}
-		m.snap.Containers = m.allRows
-		m.syncListRows()
-		return m, nil
-	case "j", "down":
-		m.list.MoveDown()
-		return m, nil
-	case "k", "up":
-		m.list.MoveUp()
+		// Abandoning the edit puts back the term that was in force when `/` was
+		// pressed — which is no term at all when there was none.
+		m.searchTyping = false
+		m.searchInput = ui.TextField{}
+		m.applySearch(m.searchTerm)
 		return m, nil
 	default:
-		m.filterInput.Update(msg)
-		m.snap.Containers = filterDashboardRows(m.allRows, m.filterInput.Value())
-		m.syncListRows()
+		m.searchInput.Update(msg)
+		m.applySearch(m.searchInput.Value())
 		return m, nil
+	}
+}
+
+// activeQuery is the query the rows on screen answer to: the live buffer while
+// the operator types, and the applied term the rest of the time. A poll landing
+// mid-type therefore redraws the rows the half-typed query selects rather than
+// widening the table under the typing.
+func (m QueueDashboard) activeQuery() string {
+	if m.searchTyping {
+		return m.searchInput.Value()
+	}
+	return m.searchTerm
+}
+
+// applySearch narrows the preset's rows by query and feeds them to the List,
+// keeping the cursor on the container it was on. The search subtracts from
+// allRows — the rows the active Work view preset selected — so it can never widen
+// the view. A cursored row the query excludes has nowhere to stay, and only then
+// does the cursor fall back to the top.
+func (m *QueueDashboard) applySearch(query string) {
+	cursorKey := ""
+	if row, ok := m.list.Selected(); ok {
+		cursorKey = row.CursorKey
+	}
+	m.snap.Containers = filterDashboardRows(m.allRows, query)
+	m.syncListRows()
+	if cursorKey != "" && !m.list.SetCursorToKey(cursorKey) {
+		m.list.SetCursor(0)
 	}
 }
 
@@ -1868,8 +1920,9 @@ func (m QueueDashboard) itemTextPeekPageSize() int {
 	return itemTextPeekPageSize(m.height, m.detail.peek.path)
 }
 
-// filterDashboardRows returns rows whose Project or id contain query
-// (case-insensitive). Returns allRows unchanged when query is empty.
+// filterDashboardRows returns rows whose Project or id contain query as a
+// case-insensitive substring — a plain substring match, never a fuzzy one.
+// Returns the rows unchanged when query is empty.
 func filterDashboardRows(rows []DashboardRow, query string) []DashboardRow {
 	if query == "" {
 		return rows
@@ -2440,13 +2493,13 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "ctrl+g", Desc: "open worktree"},
 			{Key: "h/esc", Desc: "back to list"},
 		}
-	case m.filterMode:
-		// Filter mode
+	case m.searchTyping:
+		// Search, typing phase. Every other key is text, so there is nothing else
+		// to list (ADR-0213).
 		return []ui.HelpEntry{
-			{Key: "typing", Desc: "filter rows"},
-			{Key: "j/k", Desc: "navigate filtered"},
-			{Key: "v", Desc: m.page.toggleWord + " view"},
-			{Key: "esc", Desc: "clear filter"},
+			{Key: "typing", Desc: "narrow rows by name"},
+			{Key: "enter", Desc: "apply search"},
+			{Key: "esc", Desc: "cancel"},
 		}
 	default:
 		// Main list view
@@ -2459,7 +2512,10 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "a", Desc: "action menu"},
 			{Key: "A", Desc: "pinned action menu"},
 			{Key: "ctrl+g", Desc: "open worktree"},
-			{Key: "/", Desc: "filter"},
+			{Key: "/", Desc: "search"},
+		}
+		if m.searchTerm != "" {
+			entries = append(entries, ui.HelpEntry{Key: "/ enter", Desc: "clear search"})
 		}
 		if m.page.rowFilters {
 			entries = append(entries, ui.HelpEntry{Key: "f", Desc: "filter menu"})
@@ -2486,8 +2542,8 @@ func (m QueueDashboard) View() tea.View {
 		// pressed v cannot mistake one page's key list for the other's.
 		page := m.page.title
 		title := "Help · " + page
-		if m.filterMode {
-			title = "Help · " + page + " · filter"
+		if m.searchTyping {
+			title = "Help · " + page + " · search"
 		} else if m.detail != nil && m.detail.peek != nil {
 			title = "Help · " + page + " · peek"
 		} else if m.detail != nil {
@@ -2574,8 +2630,8 @@ func (m QueueDashboard) frameSpec() ui.Frame {
 		header = m.pageHeader()
 	}
 	inputBox := ""
-	if m.filterMode {
-		inputBox = m.filterInput.View()
+	if m.searchTyping {
+		inputBox = m.searchInput.View()
 	}
 	subheader := ""
 	if line := m.attendedAgentStatusLine(); line != "" {
@@ -2639,37 +2695,45 @@ func formatModelSkipFootnote(skips []work.ModelSkip, now time.Time) string {
 
 // pageHeader is the summary line over the rows on screen: this page's noun, the
 // active Work view preset name when the page has presets (ADR-0197 decision 8),
-// then each of its kinds' own phrases. The counts are the page's alone — a page
-// never reports the other page's containers, so the Routine page's "M here"
-// tally cannot be diluted by task sets.
+// the applied search term beside it, then each of its kinds' own phrases. The
+// counts are the page's alone — a page never reports the other page's
+// containers, so the Routine page's "M here" tally cannot be diluted by task
+// sets. A search that is only being typed is left out: its input box is on
+// screen with the live buffer in it, and the term it will replace is not what
+// the rows beneath are answering to.
 func (m QueueDashboard) pageHeader() string {
-	summary := dashboardSummary(m.kinds, m.snap.Containers)
-	if !m.page.rowFilters {
-		return m.page.title + " · " + summary
+	parts := []string{m.page.title}
+	if m.page.rowFilters {
+		if name := m.activeViewPreset().DisplayLabel(); name != "" {
+			parts = append(parts, name)
+		}
 	}
-	if name := m.activeViewPreset().DisplayLabel(); name != "" {
-		return m.page.title + " · " + name + " · " + summary
+	if !m.searchTyping && m.searchTerm != "" {
+		parts = append(parts, fmt.Sprintf("search %q", m.searchTerm))
 	}
-	return m.page.title + " · " + summary
+	parts = append(parts, dashboardSummary(m.kinds, m.snap.Containers))
+	return strings.Join(parts, " · ")
 }
 
 // mainHint returns the footer hint for the main (non-modal, non-menu) view.
 func (m QueueDashboard) mainHint() string {
 	toggle := "v " + m.page.toggleWord
+	if m.searchTyping {
+		// The three reserved keys, and nothing about j/k or v: while typing those
+		// are letters (ADR-0213).
+		return "enter apply search · esc cancel · C-h help"
+	}
 	if len(m.snap.Containers) == 0 {
-		if m.filterMode {
-			return "esc clear filter · " + toggle + " · C-h help"
+		if m.searchTerm != "" {
+			return "/ search · " + toggle + " · C-h help · h/esc quit"
 		}
 		return toggle + " · C-h help · h/esc quit"
-	}
-	if m.filterMode {
-		return "esc clear filter · j/k navigate · " + toggle + " · C-h help"
 	}
 	filters := ""
 	if m.page.rowFilters {
 		filters = "f filters · "
 	}
-	return "j/k move · gg/G top/bottom · l/enter status · y copy name · a actions · / filter · " + filters + toggle + " · C-h help · h/esc quit"
+	return "j/k move · gg/G top/bottom · l/enter status · y copy name · a actions · / search · " + filters + toggle + " · C-h help · h/esc quit"
 }
 
 // mainBody renders the table body (a blank line, the column header, the
@@ -2677,7 +2741,7 @@ func (m QueueDashboard) mainHint() string {
 // the body the Frame composes its chrome around.
 func (m QueueDashboard) mainBody() string {
 	if len(m.snap.Containers) == 0 {
-		if m.filterMode {
+		if m.activeQuery() != "" {
 			return m.page.emptyFiltered
 		}
 		return m.page.empty
@@ -2818,7 +2882,7 @@ func (m QueueDashboard) viewWithModal() string {
 // dashboardSummary is the header line over the rows currently on screen: each
 // kind's own phrases over its own rows, in kind precedence order (ADR-0173). It
 // counts the displayed rows rather than reusing the snapshot's phrases so a
-// fuzzy filter narrows the header with the table.
+// search narrows the header with the table.
 func dashboardSummary(kinds workKinds, rows []DashboardRow) string {
 	return strings.Join(kinds.summary(rows), " · ")
 }

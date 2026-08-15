@@ -33,8 +33,8 @@ func TestKindSummariesComposeTheHeader(t *testing.T) {
 	if mixed != want {
 		t.Fatalf("mixed header = %q, want %q", mixed, want)
 	}
-	// The header narrows with the fuzzy filter: it counts the rows on screen, not
-	// the rows the snapshot was built from.
+	// The header narrows with the search: it counts the rows on screen, not the
+	// rows the snapshot was built from.
 	if got, want := dashboardSummary(testKinds(), mapRows), "1 map"; got != want {
 		t.Fatalf("map-only header = %q, want %q", got, want)
 	}

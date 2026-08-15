@@ -74,7 +74,7 @@ type dashboardPage struct {
 	// toggleWord is what the footer hint and the help overlay say `v` switches to.
 	toggleWord string
 	// empty and emptyFiltered are the body text for a page with no rows at all and
-	// for one whose fuzzy filter matched nothing.
+	// for one whose search matched nothing.
 	empty, emptyFiltered string
 }
 

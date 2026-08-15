@@ -208,9 +208,8 @@ func assertNothingPinned(t *testing.T, s Shell) {
 	}
 }
 
-// A pinned row the human filters away is simply gone: the fuzzy filter is the
-// active view on page B, and a launch does not widen it (ADR-0209 decisions 7
-// and 8).
+// A pinned row the human searches away is simply gone: the search is the active
+// view on page B, and a launch does not widen it (ADR-0209 decisions 7 and 8).
 func TestFilteringAwayAPinnedRoutineRowIsSilent(t *testing.T) {
 	d, _ := routinePaneDeps("hourly")
 	s := newShellWith(t, PageRoutines, d)

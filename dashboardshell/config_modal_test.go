@@ -135,8 +135,8 @@ func TestConfigModalSuspendsEveryHostKey(t *testing.T) {
 	if page := press(t, live(), tea.KeyPressMsg{Code: 'a', Text: "a"}).PageDashboard(PageWork); page.ViewToggleAllowed() {
 		t.Fatal("`a` opens no action menu on this page — the fixture proves nothing")
 	}
-	if !press(t, live(), tea.KeyPressMsg{Code: '/', Text: "/"}).PageDashboard(PageWork).FilterActive() {
-		t.Fatal("`/` engages no filter on this page — the fixture proves nothing")
+	if !press(t, live(), tea.KeyPressMsg{Code: '/', Text: "/"}).PageDashboard(PageWork).SearchTyping() {
+		t.Fatal("`/` starts no search on this page — the fixture proves nothing")
 	}
 	if press(t, live(), tea.KeyPressMsg{Code: 'v', Text: "v"}).ActivePage() != PageRoutines {
 		t.Fatal("`v` does not page this shell — the fixture proves nothing")
@@ -150,7 +150,7 @@ func TestConfigModalSuspendsEveryHostKey(t *testing.T) {
 		{Code: 'v', Text: "v"}, // the shell's page toggle
 		{Code: 'a', Text: "a"}, // the action menu, a kind's verbs
 		{Code: 'j', Text: "j"}, // movement on the table
-		{Code: '/', Text: "/"}, // the row filter
+		{Code: '/', Text: "/"}, // the row search
 		{Code: 'g', Text: "g"}, // half of the jump-to-top pair
 		{Code: 'g', Text: "g"},
 	} {
@@ -172,8 +172,8 @@ func TestConfigModalSuspendsEveryHostKey(t *testing.T) {
 	if !page.ViewToggleAllowed() {
 		t.Fatal("a key reached the page and opened an overlay on it")
 	}
-	if page.FilterActive() {
-		t.Fatal("`/` reached the page and engaged its filter")
+	if page.SearchTyping() {
+		t.Fatal("`/` reached the page and started a search on it")
 	}
 	if got := page.ListCursor(); got != cursor {
 		t.Fatalf("cursor = %d, want the %d it had before the modal opened", got, cursor)

@@ -2602,8 +2602,8 @@ func TestDashboardFilterMenuOpenAndClose(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("opening the filter menu should not dispatch a command")
 	}
-	if got.filterMode {
-		t.Fatal("f must not enter the fuzzy filter mode")
+	if got.searchTyping {
+		t.Fatal("f must not start typing a search")
 	}
 	view := got.View().Content
 	for _, want := range []string{"filters", "active", "[x]", "1 ", "enter select · esc close"} {
@@ -2951,50 +2951,53 @@ func TestDashboardPageHeaderNamesActivePreset(t *testing.T) {
 }
 
 func TestDashboardFilterMenuIndependentOfSlash(t *testing.T) {
-	// `/` fuzzy filtering is a distinct concept from the filter menu. Opening the
-	// menu never enters fuzzy mode, and a rebuild the menu triggers preserves an
-	// active fuzzy query.
+	// The `/` search is a distinct concept from the filter menu. Opening the menu
+	// never starts a search, and a rebuild the menu triggers preserves the applied
+	// search term.
 	m := filterTestModel()
 
-	// A fuzzy query narrows the visible rows.
+	// A search narrows the visible rows.
 	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
 	m = updated.(QueueDashboard)
 	for _, ch := range "beta" {
 		updated, _ = m.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)})
 		m = updated.(QueueDashboard)
 	}
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(QueueDashboard)
 	if len(m.snap.Containers) != 1 {
 		t.Fatalf("after 'beta' query: rows = %d, want 1", len(m.snap.Containers))
 	}
 	if m.filter != nil {
-		t.Fatal("fuzzy filtering must not open the filter menu")
+		t.Fatal("searching must not open the filter menu")
 	}
 
-	// A rebuild triggered while the fuzzy query is active (as a preset pick
-	// would trigger) re-applies the query rather than dropping it.
+	// A rebuild triggered while the search is applied (as a preset pick would
+	// trigger) re-applies the term rather than dropping it.
 	updated, _ = m.Update(dashboardRowsMsg{snap: DashboardSnapshot{Containers: []DashboardRow{
 		{Project: "alpha", CursorKey: "alpha\x00set-one", RawStatus: tasks.StatusReady, ID: "set-one"},
 		{Project: "beta", CursorKey: "beta\x00set-two", RawStatus: tasks.StatusFailed, ID: "set-two"},
 		{Project: "gamma", CursorKey: "gamma\x00feature", RawStatus: tasks.StatusFailed, ID: "feature"},
 	}}})
 	m = updated.(QueueDashboard)
-	if !m.filterMode {
-		t.Fatal("rebuild dropped the fuzzy filter mode")
+	if m.searchTerm != "beta" {
+		t.Fatalf("rebuild dropped the search term: %q", m.searchTerm)
 	}
 	if len(m.snap.Containers) != 1 || m.snap.Containers[0].Project != "beta" {
 		t.Fatalf("rebuild did not preserve the 'beta' query: rows = %d", len(m.snap.Containers))
 	}
 
-	// The `f` menu opens independently once out of fuzzy mode.
-	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	m = updated.(QueueDashboard)
+	// The `f` menu opens with a search in force, and opening it starts no typing.
 	updated, _ = m.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
 	got := updated.(QueueDashboard)
 	if got.filter == nil {
-		t.Fatal("f did not open the filter menu after clearing the fuzzy query")
+		t.Fatal("f did not open the filter menu with a search applied")
 	}
-	if got.filterMode {
-		t.Fatal("opening the filter menu must not re-enter fuzzy mode")
+	if got.searchTyping {
+		t.Fatal("opening the filter menu must not start typing a search")
+	}
+	if got.searchTerm != "beta" {
+		t.Fatalf("opening the filter menu dropped the search term: %q", got.searchTerm)
 	}
 }
 
@@ -3010,121 +3013,260 @@ func TestDashboardFilterMenuBlocksViewToggle(t *testing.T) {
 	}
 }
 
-func TestDashboardFilterMode_SlashEntersFilterMode(t *testing.T) {
-	m := filterTestModel()
-	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
-	got := updated.(QueueDashboard)
-	if !got.filterMode {
-		t.Fatal("expected filterMode = true after /")
-	}
-	if len(got.snap.Containers) != 3 {
-		t.Fatalf("rows = %d, want 3 (no filter applied yet)", len(got.snap.Containers))
-	}
-}
-
-func TestDashboardFilterMode_EscExitsAndClearsFilter(t *testing.T) {
-	m := filterTestModel()
-	// Enter filter mode
+// typeSearch drives the model through `/`, the query's characters and, when
+// apply is set, the Enter that commits it — the way a human reaches a narrowed
+// list.
+func typeSearch(m QueueDashboard, query string, apply bool) QueueDashboard {
 	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
 	m = updated.(QueueDashboard)
-	// Type a filter
-	updated, _ = m.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
-	m = updated.(QueueDashboard)
-	if len(m.snap.Containers) != 1 {
-		t.Fatalf("after 'b' filter: rows = %d, want 1", len(m.snap.Containers))
-	}
-	// Esc exits filter mode and restores all rows
-	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	got := updated.(QueueDashboard)
-	if got.filterMode {
-		t.Fatal("expected filterMode = false after esc")
-	}
-	if len(got.snap.Containers) != 3 {
-		t.Fatalf("after esc: rows = %d, want 3 (filter cleared)", len(got.snap.Containers))
-	}
-	if got.filterInput.Value() != "" {
-		t.Fatalf("filterInput value = %q, want empty after esc", got.filterInput.Value())
-	}
-}
-
-func TestDashboardFilterMode_TypingNarrowsRows(t *testing.T) {
-	m := filterTestModel()
-	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
-	m = updated.(QueueDashboard)
-
-	// Type "alpha" — matches Project "alpha"
-	for _, ch := range "alpha" {
+	for _, ch := range query {
 		updated, _ = m.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)})
 		m = updated.(QueueDashboard)
 	}
+	if apply {
+		updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		m = updated.(QueueDashboard)
+	}
+	return m
+}
+
+func TestDashboardSearch_SlashStartsTypingFromAnEmptyBuffer(t *testing.T) {
+	m := typeSearch(filterTestModel(), "alpha", true)
 	if len(m.snap.Containers) != 1 {
-		t.Fatalf("after 'alpha': rows = %d, want 1", len(m.snap.Containers))
+		t.Fatalf("applied 'alpha': rows = %d, want 1", len(m.snap.Containers))
+	}
+
+	// Reopening starts empty, so the rows widen back to the whole preset before a
+	// single character is typed.
+	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	got := updated.(QueueDashboard)
+	if !got.searchTyping {
+		t.Fatal("expected the typing phase after /")
+	}
+	if got.searchInput.Value() != "" {
+		t.Fatalf("buffer = %q, want empty on open", got.searchInput.Value())
+	}
+	if len(got.snap.Containers) != 3 {
+		t.Fatalf("rows = %d, want 3 (widened on open)", len(got.snap.Containers))
+	}
+}
+
+func TestDashboardSearch_EmptyQueryClearsTheSearch(t *testing.T) {
+	m := typeSearch(filterTestModel(), "alpha", true)
+	// `/` then Enter applies the empty query, which is how a search is cleared.
+	m = typeSearch(m, "", true)
+	if m.searchTerm != "" {
+		t.Fatalf("search term = %q, want empty", m.searchTerm)
+	}
+	if len(m.snap.Containers) != 3 {
+		t.Fatalf("after clearing: rows = %d, want 3", len(m.snap.Containers))
+	}
+}
+
+func TestDashboardSearch_EscRestoresThePreviousTerm(t *testing.T) {
+	m := typeSearch(filterTestModel(), "set", true)
+	if len(m.snap.Containers) != 2 {
+		t.Fatalf("applied 'set': rows = %d, want 2", len(m.snap.Containers))
+	}
+
+	// Abandon an edit that would have narrowed further: the term in force comes
+	// back, rows and all.
+	m = typeSearch(m, "alpha", false)
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	got := updated.(QueueDashboard)
+	if got.searchTyping {
+		t.Fatal("esc must leave the typing phase")
+	}
+	if got.searchTerm != "set" {
+		t.Fatalf("search term = %q, want the 'set' that was in force", got.searchTerm)
+	}
+	if got.searchInput.Value() != "" {
+		t.Fatalf("buffer = %q, want empty after esc", got.searchInput.Value())
+	}
+	if len(got.snap.Containers) != 2 {
+		t.Fatalf("after esc: rows = %d, want the 2 'set' matched", len(got.snap.Containers))
+	}
+
+	// With no term in force, abandoning applies none.
+	fresh := typeSearch(filterTestModel(), "alpha", false)
+	updated, _ = fresh.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	fresh = updated.(QueueDashboard)
+	if fresh.searchTerm != "" {
+		t.Fatalf("search term = %q, want none", fresh.searchTerm)
+	}
+	if len(fresh.snap.Containers) != 3 {
+		t.Fatalf("after esc: rows = %d, want all 3 back", len(fresh.snap.Containers))
+	}
+}
+
+func TestDashboardSearch_EscQuitsWhenNotTyping(t *testing.T) {
+	m := typeSearch(filterTestModel(), "set", true)
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if cmd == nil {
+		t.Fatal("esc on the applied list did not quit")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatalf("esc command = %T, want tea.QuitMsg", cmd())
+	}
+}
+
+func TestDashboardSearch_TypingNarrowsRows(t *testing.T) {
+	m := filterTestModel()
+	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	m = updated.(QueueDashboard)
+
+	// The rows narrow on each keystroke, before anything is applied: "alph" is
+	// already down to the one project, and the final "a" keeps it there.
+	for i, ch := range "alpha" {
+		updated, _ = m.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)})
+		m = updated.(QueueDashboard)
+		want := 3
+		switch i {
+		case 1, 2, 3, 4: // "al", "alp", "alph", "alpha"
+			want = 1
+		}
+		if len(m.snap.Containers) != want {
+			t.Fatalf("after %q: rows = %d, want %d", "alpha"[:i+1], len(m.snap.Containers), want)
+		}
 	}
 	if m.snap.Containers[0].Project != "alpha" {
-		t.Fatalf("filtered row project = %q, want alpha", m.snap.Containers[0].Project)
+		t.Fatalf("narrowed row project = %q, want alpha", m.snap.Containers[0].Project)
 	}
 }
 
-func TestDashboardFilterMode_MatchesSetID(t *testing.T) {
-	m := filterTestModel()
-	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
-	m = updated.(QueueDashboard)
-
+func TestDashboardSearch_MatchesSetID(t *testing.T) {
 	// "feature" matches SetID "feature" in project "gamma"
-	for _, ch := range "feature" {
-		updated, _ = m.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)})
-		m = updated.(QueueDashboard)
-	}
+	m := typeSearch(filterTestModel(), "feature", true)
 	if len(m.snap.Containers) != 1 {
 		t.Fatalf("after 'feature': rows = %d, want 1", len(m.snap.Containers))
 	}
 	if m.snap.Containers[0].ID != "feature" {
-		t.Fatalf("filtered row setID = %q, want feature", m.snap.Containers[0].ID)
+		t.Fatalf("matched row setID = %q, want feature", m.snap.Containers[0].ID)
 	}
 }
 
-func TestDashboardFilterMode_CursorClampedToFilteredRows(t *testing.T) {
+func TestDashboardSearch_CursorClampedToFilteredRows(t *testing.T) {
 	m := filterTestModel()
 	m.list.SetCursor(2) // on gamma/feature
-	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
-	m = updated.(QueueDashboard)
 
-	// Type "alpha" — only alpha/set-one matches; cursor must move within bounds
-	for _, ch := range "alpha" {
-		updated, _ = m.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)})
-		m = updated.(QueueDashboard)
-	}
+	// Only alpha/set-one matches; the cursored row is gone, so the cursor must
+	// land in bounds rather than off the end of the narrowed list.
+	m = typeSearch(m, "alpha", true)
 	if c := m.list.Cursor(); c < 0 || c >= len(m.snap.Containers) {
-		t.Fatalf("cursor = %d, out of bounds for %d filtered rows", c, len(m.snap.Containers))
+		t.Fatalf("cursor = %d, out of bounds for %d narrowed rows", c, len(m.snap.Containers))
 	}
 }
 
-func TestDashboardFilterMode_NavigationWorksInsideFilter(t *testing.T) {
+func TestDashboardSearch_CursorStaysOnTheSameContainer(t *testing.T) {
 	m := filterTestModel()
+	m.list.SetCursor(2) // on gamma/feature
+
+	// Applying a search does not move the human off the row they were hunting
+	// for, even though its index changed.
+	m = typeSearch(m, "gamma", true)
+	row, ok := m.list.Selected()
+	if !ok || row.CursorKey != "gamma\x00feature" {
+		t.Fatalf("after applying: cursor on %+v, want gamma/feature", row)
+	}
+
+	// Neither does clearing it.
+	m = typeSearch(m, "", true)
+	row, ok = m.list.Selected()
+	if !ok || row.CursorKey != "gamma\x00feature" {
+		t.Fatalf("after clearing: cursor on %+v, want gamma/feature", row)
+	}
+
+	// Only a search that excludes the cursored row moves it, and then to the top.
+	m.list.SetCursor(2)
+	m = typeSearch(m, "alpha", true)
+	if got := m.list.Cursor(); got != 0 {
+		t.Fatalf("cursor = %d, want the top row when the cursored one is gone", got)
+	}
+}
+
+// TestDashboardSearch_EveryPrintableKeyIsText pins the rule the typing phase is
+// built to (ADR-0213): the navigation keys, the quit key, the page toggle and
+// the digits are all just characters, so a set called "jj" or "k8s" can be
+// searched for.
+func TestDashboardSearch_EveryPrintableKeyIsText(t *testing.T) {
+	m := filterTestModel()
+	m.list.SetCursor(0)
 	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
 	m = updated.(QueueDashboard)
-	// Type "set" to match two rows
-	for _, ch := range "set" {
+
+	for _, ch := range "jkvq19" {
 		updated, _ = m.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)})
 		m = updated.(QueueDashboard)
+	}
+	if m.searchInput.Value() != "jkvq19" {
+		t.Fatalf("buffer = %q, want every key typed", m.searchInput.Value())
+	}
+	if !m.searchTyping {
+		t.Fatal("q must not quit the typing phase")
+	}
+	if m.list.Cursor() != 0 {
+		t.Fatalf("cursor = %d: j/k navigated instead of typing", m.list.Cursor())
+	}
+	if m.ViewToggleAllowed() {
+		t.Fatal("the page toggle must be off while typing, so v is typeable")
+	}
+	if m.filter != nil || m.menu != nil || m.detail != nil {
+		t.Fatal("no overlay may open from a printable key while typing")
+	}
+}
+
+// TestDashboardSearch_ApplyRestoresTheWholeKeymap is the other half of the rule:
+// what typing costs, Enter gives back. Over the narrowed rows every key means
+// what it means on the main list, and the search does not drop.
+func TestDashboardSearch_ApplyRestoresTheWholeKeymap(t *testing.T) {
+	copied := ""
+	m := filterTestModel()
+	m.copyFunc = func(s string) error { copied = s; return nil }
+	m = typeSearch(m, "set", true)
+	if m.searchTyping {
+		t.Fatal("enter must leave the typing phase")
+	}
+	if m.searchTerm != "set" {
+		t.Fatalf("search term = %q, want 'set'", m.searchTerm)
 	}
 	if len(m.snap.Containers) != 2 {
 		t.Fatalf("after 'set': rows = %d, want 2", len(m.snap.Containers))
 	}
+
 	m.list.SetCursor(0)
-	updated, _ = m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	got := updated.(QueueDashboard)
-	if got.list.Cursor() != 1 {
-		t.Fatalf("j in filter mode: cursor = %d, want 1", got.list.Cursor())
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	m = updated.(QueueDashboard)
+	if m.list.Cursor() != 1 {
+		t.Fatalf("j over the narrowed rows: cursor = %d, want 1", m.list.Cursor())
 	}
-	updated, _ = got.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
-	got = updated.(QueueDashboard)
-	if got.list.Cursor() != 0 {
-		t.Fatalf("k in filter mode: cursor = %d, want 0", got.list.Cursor())
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	m = updated.(QueueDashboard)
+	if m.list.Cursor() != 0 {
+		t.Fatalf("k over the narrowed rows: cursor = %d, want 0", m.list.Cursor())
+	}
+
+	// An action key runs its verb on the narrowed row.
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	m = updated.(QueueDashboard)
+	if copied != "set-one" {
+		t.Fatalf("y copied %q, want set-one", copied)
+	}
+
+	// Enter opens the detail view rather than being swallowed by a field.
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(QueueDashboard)
+	if m.detail == nil {
+		t.Fatal("enter did not open the detail view")
+	}
+	if m.searchTerm != "set" || len(m.snap.Containers) != 2 {
+		t.Fatalf("the search dropped while acting on a row: term %q over %d rows", m.searchTerm, len(m.snap.Containers))
 	}
 }
 
-func TestDashboardFilterMode_BareActionsInertInFilterMode(t *testing.T) {
+// TestDashboardSearch_BareActionsAreTextWhileTyping keeps the verbs off the
+// keyboard for exactly as long as the field owns it: a letter that would unbind
+// or drain a set is a letter, and Enter applies rather than acting.
+func TestDashboardSearch_BareActionsAreTextWhileTyping(t *testing.T) {
 	called := false
 	d := &drain.Deps{
 		ToggleAutoDrain: func(defPath, statePath, setID string) (*tasks.AutoDrainResult, error) {
@@ -3137,10 +3279,8 @@ func TestDashboardFilterMode_BareActionsInertInFilterMode(t *testing.T) {
 	}
 	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Containers: rows})
 	m.list.SetCursor(0)
-	// Enter filter mode
 	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
 	m = updated.(QueueDashboard)
-	// Action keys should NOT trigger actions — they go to the filter input
 	for _, key := range []tea.KeyPressMsg{
 		{Code: 'i', Text: "i"},
 		{Code: 'I', Text: "I"},
@@ -3151,61 +3291,86 @@ func TestDashboardFilterMode_BareActionsInertInFilterMode(t *testing.T) {
 		{Code: 'p', Text: "p"},
 		{Code: 's', Text: "s"},
 		{Code: 'l', Text: "l"},
-		{Code: tea.KeyEnter},
 	} {
 		updated, _ = m.Update(key)
 		m = updated.(QueueDashboard)
 	}
 	if called {
-		t.Fatal("bare-letter actions must be inert in filter mode")
+		t.Fatal("bare-letter actions must be text while typing")
 	}
 	if m.bind != nil || m.abandon != nil || m.detail != nil || m.menu != nil {
-		t.Fatal("modals must not open while in filter mode")
+		t.Fatal("modals must not open while typing")
+	}
+	if m.searchInput.Value() != "iIbUuapsl" {
+		t.Fatalf("buffer = %q, want every action letter typed", m.searchInput.Value())
+	}
+
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(QueueDashboard)
+	if m.detail != nil {
+		t.Fatal("the applying enter must not also open a row")
+	}
+	if m.searchTerm != "iIbUuapsl" {
+		t.Fatalf("search term = %q, want the typed buffer", m.searchTerm)
 	}
 }
 
-func TestDashboardFilterMode_QKeyGoesToInputNotQuit(t *testing.T) {
-	m := filterTestModel()
-	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
-	m = updated.(QueueDashboard)
-	// 'q' in filter mode goes to the input box, not quit
-	updated, _ = m.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
-	got := updated.(QueueDashboard)
-	if !got.filterMode {
-		t.Fatal("q in filter mode must not exit filter mode")
-	}
-	if got.filterInput.Value() != "q" {
-		t.Fatalf("filter input = %q after q, want 'q'", got.filterInput.Value())
-	}
-}
-
-func TestDashboardFilterMode_ReloadPreservesFilter(t *testing.T) {
-	m := filterTestModel()
-	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
-	m = updated.(QueueDashboard)
-	for _, ch := range "alpha" {
-		updated, _ = m.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)})
-		m = updated.(QueueDashboard)
-	}
+func TestDashboardSearch_SurvivesReloadAndPresetChange(t *testing.T) {
+	m := typeSearch(filterTestModel(), "alpha", true)
 	if len(m.snap.Containers) != 1 {
 		t.Fatalf("before reload: rows = %d, want 1", len(m.snap.Containers))
 	}
 
-	// Simulate a reload with new rows that still include alpha
+	// A background poll delivers new rows; the term is re-applied to them.
 	newRows := []DashboardRow{
 		{Project: "alpha", CursorKey: "alpha\x00set-one", RawStatus: tasks.StatusBlocked, ID: "set-one"},
 		{Project: "beta", CursorKey: "beta\x00set-two", RawStatus: tasks.StatusReady, ID: "set-two"},
 		{Project: "delta", CursorKey: "delta\x00alpha-task", RawStatus: tasks.StatusReady, ID: "alpha-task"},
 	}
-	updated, _ = m.Update(dashboardRowsMsg{snap: DashboardSnapshot{Containers: newRows}})
-	got := updated.(QueueDashboard)
-
-	if !got.filterMode {
-		t.Fatal("filter mode must persist across reload")
+	updated, _ := m.Update(dashboardRowsMsg{snap: DashboardSnapshot{Containers: newRows}})
+	m = updated.(QueueDashboard)
+	if m.searchTerm != "alpha" {
+		t.Fatalf("search term = %q, want it to survive the poll", m.searchTerm)
 	}
-	// Filter "alpha" should match "alpha" project and "alpha-task" set
-	if len(got.snap.Containers) != 2 {
-		t.Fatalf("after reload with filter 'alpha': rows = %d, want 2", len(got.snap.Containers))
+	// "alpha" matches the alpha project and the alpha-task set.
+	if len(m.snap.Containers) != 2 {
+		t.Fatalf("after the poll: rows = %d, want 2", len(m.snap.Containers))
+	}
+
+	// A preset pick reloads through the same message, so the search survives it
+	// too — and still only subtracts from what the new preset selected.
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
+	m = updated.(QueueDashboard)
+	updated, _ = m.Update(tea.KeyPressMsg{Code: '4', Text: "4"}) // a preset by number
+	m = updated.(QueueDashboard)
+	updated, _ = m.Update(dashboardRowsMsg{snap: DashboardSnapshot{Containers: append(newRows, doneRow())}})
+	m = updated.(QueueDashboard)
+	if m.searchTerm != "alpha" {
+		t.Fatalf("search term = %q, want it to survive the preset change", m.searchTerm)
+	}
+	if len(m.snap.Containers) != 2 {
+		t.Fatalf("after the preset change: rows = %d, want the 2 'alpha' matched", len(m.snap.Containers))
+	}
+	for _, row := range m.snap.Containers {
+		if row.ID == "done-set" {
+			t.Fatal("the search must subtract from the preset's rows, never widen past them")
+		}
+	}
+}
+
+// TestDashboardSearch_HeaderNamesTheAppliedTerm covers the chrome: with the
+// typing over, the term is what tells the human why rows are missing.
+func TestDashboardSearch_HeaderNamesTheAppliedTerm(t *testing.T) {
+	m := filterTestModel()
+	m.width = 120
+	m.height = 24
+	m = typeSearch(m, "beta", true)
+	if view := m.View().Content; !strings.Contains(view, `search "beta"`) {
+		t.Fatalf("header does not name the applied search:\n%s", view)
+	}
+	m = typeSearch(m, "", true)
+	if view := m.View().Content; strings.Contains(view, "search \"") {
+		t.Fatalf("cleared search still named in the header:\n%s", view)
 	}
 }
 
@@ -3944,17 +4109,17 @@ func TestQueueDashboardHelpOverlay(t *testing.T) {
 		}
 	})
 
-	t.Run("help works in filter mode", func(t *testing.T) {
+	t.Run("help works while typing a search", func(t *testing.T) {
 		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
 		updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
 		got := updated.(QueueDashboard)
-		if !got.filterMode {
-			t.Fatal("/ should enter filter mode")
+		if !got.searchTyping {
+			t.Fatal("/ should start the typing phase")
 		}
 		updated, _ = got.Update(ctrlH)
 		got = updated.(QueueDashboard)
 		if !got.showHelp {
-			t.Error("C-h should open help in filter mode")
+			t.Error("C-h should open help while typing a search")
 		}
 	})
 
@@ -4058,22 +4223,24 @@ func TestQueueDashboardHelpContent(t *testing.T) {
 		}
 	})
 
-	t.Run("filter mode shows filter bindings", func(t *testing.T) {
+	t.Run("search typing lists only the keys that are not text", func(t *testing.T) {
 		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
-		m.filterMode = true
+		m.searchTyping = true
 		entries := m.helpEntries()
 		found := map[string]bool{}
 		for _, e := range entries {
 			found[e.Key] = true
 		}
-		if !found["typing"] {
-			t.Error("filter mode help missing 'typing'")
+		for _, key := range []string{"typing", "enter", "esc"} {
+			if !found[key] {
+				t.Errorf("search help missing %q", key)
+			}
 		}
-		if !found["j/k"] {
-			t.Error("filter mode help missing 'j/k'")
-		}
-		if !found["esc"] {
-			t.Error("filter mode help missing 'esc'")
+		// j/k and v are letters here, so promising them would be a lie.
+		for _, key := range []string{"j/k", "v"} {
+			if found[key] {
+				t.Errorf("search help still offers %q, which is text while typing", key)
+			}
 		}
 	})
 
@@ -4592,11 +4759,11 @@ func TestDashboardDrainModalTwoLineOverlay(t *testing.T) {
 	}
 }
 
-// TestDashboardFilterReevaluatesTwoLineMode verifies that filter mode re-evaluates
-// two-line mode against the filtered row set: starting with a mix that triggers
-// two-line mode and filtering down to short ids deactivates it; clearing the
-// filter reactivates it.
-func TestDashboardFilterReevaluatesTwoLineMode(t *testing.T) {
+// TestDashboardSearchReevaluatesTwoLineMode verifies that a search re-evaluates
+// two-line mode against the narrowed row set: starting with a mix that triggers
+// two-line mode and searching down to short ids deactivates it; clearing the
+// search reactivates it.
+func TestDashboardSearchReevaluatesTwoLineMode(t *testing.T) {
 	longID := strings.Repeat("a", 37)
 	rows := []DashboardRow{
 		{Project: "pop", Worktree: "main", CursorKey: "pop\x00short", RawStatus: tasks.StatusReady, ID: "short"},
@@ -4615,22 +4782,11 @@ func TestDashboardFilterReevaluatesTwoLineMode(t *testing.T) {
 		t.Fatalf("LinesPerItem = %d, want 2 before filter", m.list.LinesPerItem())
 	}
 
-	// Enter filter mode and type a query that matches only the short id.
-	updated, _ = m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
-	m = updated.(QueueDashboard)
-	if !m.filterMode {
-		t.Fatal("/ did not enter filter mode")
+	// Search for a query that matches only the short id.
+	m = typeSearch(m, "short", true)
+	if m.searchTerm != "short" {
+		t.Fatalf("search term = %q, want 'short'", m.searchTerm)
 	}
-	updated, _ = m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
-	m = updated.(QueueDashboard)
-	updated, _ = m.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
-	m = updated.(QueueDashboard)
-	updated, _ = m.Update(tea.KeyPressMsg{Code: 'o', Text: "o"})
-	m = updated.(QueueDashboard)
-	updated, _ = m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
-	m = updated.(QueueDashboard)
-	updated, _ = m.Update(tea.KeyPressMsg{Code: 't', Text: "t"})
-	m = updated.(QueueDashboard)
 
 	if len(m.snap.Containers) != 1 {
 		t.Fatalf("filtered rows = %d, want 1", len(m.snap.Containers))
@@ -4645,11 +4801,10 @@ func TestDashboardFilterReevaluatesTwoLineMode(t *testing.T) {
 		t.Fatalf("LinesPerItem = %d, want 1 after filtering to short id", m.list.LinesPerItem())
 	}
 
-	// Clear the filter: two-line mode must return because the long id is back.
-	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	m = updated.(QueueDashboard)
-	if m.filterMode {
-		t.Fatal("esc did not clear filter mode")
+	// Clear the search: two-line mode must return because the long id is back.
+	m = typeSearch(m, "", true)
+	if m.searchTerm != "" {
+		t.Fatalf("search term = %q, want it cleared", m.searchTerm)
 	}
 	if !dashboardTwoLineMode(m.snap.Containers, m.width, m.height) {
 		t.Fatalf("expected two-line mode after clearing filter")

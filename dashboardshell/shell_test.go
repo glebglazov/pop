@@ -166,7 +166,7 @@ func TestShellVTogglesPagesFromEitherSide(t *testing.T) {
 	}
 }
 
-func TestShellTogglePreservesEachPagesCursorAndFilter(t *testing.T) {
+func TestShellTogglePreservesEachPagesCursorAndSearch(t *testing.T) {
 	s := newTestShell(t, PageWork)
 	for i := 0; i < 2; i++ {
 		s.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
@@ -174,9 +174,15 @@ func TestShellTogglePreservesEachPagesCursorAndFilter(t *testing.T) {
 	if got := s.PageDashboard(PageWork).ListCursor(); got != 2 {
 		t.Fatalf("work cursor = %d, want 2", got)
 	}
+	// A search every row matches, applied with Enter: the term is the page's to
+	// keep, and the cursor has no reason to move.
 	s.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
-	if !s.PageDashboard(PageWork).FilterActive() {
-		t.Fatal("expected the work page filter to engage")
+	for _, ch := range "set" {
+		s.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)})
+	}
+	s.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if got := s.PageDashboard(PageWork).SearchTerm(); got != "set" {
+		t.Fatalf("work search term = %q, want 'set'", got)
 	}
 
 	s = pressV(t, s)
@@ -184,16 +190,44 @@ func TestShellTogglePreservesEachPagesCursorAndFilter(t *testing.T) {
 	if got := s.PageDashboard(PageRoutines).ListCursor(); got != 1 {
 		t.Fatalf("routine cursor = %d, want 1", got)
 	}
+	if got := s.PageDashboard(PageRoutines).SearchTerm(); got != "" {
+		t.Fatalf("routine search term = %q: the search is per-page", got)
+	}
 
 	s = pressV(t, s)
 	if got := s.PageDashboard(PageWork).ListCursor(); got != 2 {
 		t.Fatalf("restored work cursor = %d, want 2", got)
 	}
-	if !s.PageDashboard(PageWork).FilterActive() {
-		t.Fatal("expected the work page filter to survive the switch")
+	if got := s.PageDashboard(PageWork).SearchTerm(); got != "set" {
+		t.Fatalf("work search term = %q, want it to survive the switch", got)
 	}
 	if got := s.PageDashboard(PageRoutines).ListCursor(); got != 1 {
 		t.Fatalf("restored routine cursor = %d, want 1", got)
+	}
+}
+
+// TestShellVIsTypedIntoASearchNotAPageToggle is the shell's half of ADR-0213:
+// the page toggle is the host key a text entry mode most needs suppressed,
+// because `v` is a letter in a project name.
+func TestShellVIsTypedIntoASearchNotAPageToggle(t *testing.T) {
+	s := newTestShell(t, PageWork)
+	s.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	s = pressV(t, s)
+	if s.ActivePage() != PageWork {
+		t.Fatalf("v paged the shell to %v while a search was being typed", s.ActivePage())
+	}
+	if _, built := s.pages[PageRoutines]; built {
+		t.Fatal("v built the other page while a search was being typed")
+	}
+
+	s.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if got := s.PageDashboard(PageWork).SearchTerm(); got != "v" {
+		t.Fatalf("search term = %q, want the typed 'v'", got)
+	}
+
+	// With the typing over, the toggle is the toggle again.
+	if s = pressV(t, s); s.ActivePage() != PageRoutines {
+		t.Fatalf("v after applying = %v, want the routine page", s.ActivePage())
 	}
 }
 
