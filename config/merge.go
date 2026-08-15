@@ -89,7 +89,7 @@ func decodeConfigLayer(d *Deps, path string) (*configLayer, error) {
 // the other states what a human wants.
 //
 //	config.runtime.toml   BELOW config.toml — the gap-filler. It records what
-//	                      pop's own surfaces happened to pick (a ctrl+w Preferred
+//	                      pop's own surfaces happened to pick (a Preferred
 //	                      workbench, a Trunk checkout, an integrate skills list),
 //	                      so a declaration at the same scope must beat it. That low
 //	                      rank is load-bearing, not incidental: preferred_workbench's

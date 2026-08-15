@@ -68,7 +68,6 @@ const (
 	ActionYankPath
 	ActionCreateWorktree
 	ActionCreateManagedWorktree
-	ActionSetPreferredWorkbench
 )
 
 // Picker is a fuzzy-searchable list picker
@@ -99,7 +98,6 @@ type Picker struct {
 	showReset          bool
 	showOpenWindow     bool
 	showCreateWorktree bool
-	showSetPreferred   bool
 	cursorAtEnd        bool
 
 	quickAccessModifier string
@@ -185,15 +183,6 @@ func WithOpenWindow() PickerOption {
 func WithCreateWorktree() PickerOption {
 	return func(p *Picker) {
 		p.showCreateWorktree = true
-	}
-}
-
-// WithSetPreferredWorkbench enables the set-preferred-workbench keybinding
-// (ctrl+w). It is the feature flag gating the Workbench-preference picker
-// surface (ADR-0078); both the project picker and the worktree dashboard opt in.
-func WithSetPreferredWorkbench() PickerOption {
-	return func(p *Picker) {
-		p.showSetPreferred = true
 	}
 }
 
@@ -523,17 +512,6 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					p.result.Selected = item
 				}
 				return p, tea.Quit
-			}
-
-		case key.Matches(msg, keys.SetPreferred):
-			if p.showSetPreferred {
-				if item, ok := p.selectedItem(); ok {
-					p.result = Result{
-						Selected: item,
-						Action:   ActionSetPreferredWorkbench,
-					}
-					return p, tea.Quit
-				}
 			}
 
 		case key.Matches(msg, keys.YankPath):
@@ -993,9 +971,6 @@ func (p *Picker) helpEntries() []HelpEntry {
 	if p.showCreateWorktree && !p.isKeyOverridden("ctrl+t") {
 		entries = append(entries, HelpEntry{"C-t", "Create managed worktree"})
 	}
-	if p.showSetPreferred && !p.isKeyOverridden("ctrl+w") {
-		entries = append(entries, HelpEntry{"C-w", "Set preferred workbench"})
-	}
 	if p.showDelete && !p.isKeyOverridden("ctrl+d") {
 		entries = append(entries, HelpEntry{"C-d", "Delete"})
 	}
@@ -1082,7 +1057,6 @@ type keyMap struct {
 	YankPath              key.Binding
 	CreateWorktree        key.Binding
 	CreateManagedWorktree key.Binding
-	SetPreferred          key.Binding
 	TreeExpand            key.Binding
 	TreeCollapse          key.Binding
 }
@@ -1132,9 +1106,6 @@ var keys = keyMap{
 	),
 	CreateManagedWorktree: key.NewBinding(
 		key.WithKeys("ctrl+t"),
-	),
-	SetPreferred: key.NewBinding(
-		key.WithKeys("ctrl+w"),
 	),
 	// Bare arrows only: ctrl+f and ctrl+b stay paging, and the emacs cursor keys
 	// the textfield owns keep their meaning when a query is typed.

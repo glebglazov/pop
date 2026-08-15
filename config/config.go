@@ -1246,7 +1246,7 @@ func (c *Config) WorkbenchOrder() []string {
 //	config.toml [repo."<path>"]        declaration · keyed to this checkout
 //	./.pop/config.toml                 declaration · committed, this worktree
 //	<trunk>/.pop/config.toml (→ id-root)  declaration · committed, inherited
-//	config.runtime.toml[<wt-path>]     gap-filler · what pop recorded here (ctrl+w)
+//	config.runtime.toml[<wt-path>]     gap-filler · what pop recorded here
 //	config.runtime.toml[<trunk-path>]  gap-filler · recorded for the Trunk
 //	→ none
 //

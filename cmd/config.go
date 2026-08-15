@@ -167,6 +167,10 @@ pop config keys marks [override: never] — with its description beneath. Type t
 filter over the key path and the description together. A marked row carries an
 override today.
 
+Below them sit the keys of the repository you are standing in, spelled
+repo.<key> — the leaves pop config keys --scope repo lists. Editing one states
+it for that repository, so every worktree of it reads the one answer.
+
 The right pane previews the highlighted key in config format: the effective
 value as TOML, the layer that produced it (the override layer, your config.toml,
 a built-in default, or a fallthrough to another key), and, where an override is
@@ -264,7 +268,8 @@ func runConfigDashboard(cmd *cobra.Command, _ []string) error {
 	if path == "" {
 		path = config.DefaultConfigPathWith(d.configDeps())
 	}
-	writer := confighost.NewWriter(d.configDeps(), path)
+	checkout, _ := d.DirOrGetwd()
+	writer := confighost.NewWriter(d.configDeps(), path, checkout)
 	rows, err := writer.Rows()
 	if err != nil {
 		return err
@@ -300,8 +305,9 @@ func configDashboardOpener() func() *ui.ConfigDashboard {
 	if path == "" {
 		path = config.DefaultConfigPathWith(d.configDeps())
 	}
+	checkout, _ := d.DirOrGetwd()
 	return func() *ui.ConfigDashboard {
-		return confighost.Open(d.configDeps(), path)
+		return confighost.Open(d.configDeps(), path, checkout)
 	}
 }
 

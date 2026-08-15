@@ -19,6 +19,7 @@ import (
 // config dashboard` hands the component.
 type overrideEditFixture struct {
 	deps     *config.Deps
+	root     string
 	userPath string
 	writer   confighost.Writer
 	// seeds is what pop put in front of the human on each editor open.
@@ -53,9 +54,27 @@ func newOverrideEditFixture(t *testing.T, configTOML string) *overrideEditFixtur
 	}}
 	return &overrideEditFixture{
 		deps:     d,
+		root:     root,
 		userPath: userPath,
-		writer:   confighost.NewWriter(d, userPath),
+		writer:   confighost.NewWriter(d, userPath, ""),
 	}
+}
+
+// inRepository lays out a bare repository with two worktrees and re-points the
+// writer at one of them, the way a host opens the dashboard in the checkout pop
+// is running in. It returns both worktrees, so a test can ask whether a value
+// stated at one is what the other reads.
+func (f *overrideEditFixture) inRepository(t *testing.T) (main, feature string) {
+	t.Helper()
+	repo := filepath.Join(f.root, "repo")
+	main, feature = filepath.Join(repo, "main"), filepath.Join(repo, "feature")
+	for _, dir := range []string{filepath.Join(repo, ".bare"), main, feature} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("create %s: %v", dir, err)
+		}
+	}
+	f.writer = confighost.NewWriter(f.deps, f.userPath, main)
+	return main, feature
 }
 
 // dashboard opens the component exactly as runConfigDashboard does, with a
@@ -103,7 +122,7 @@ func pressConfigDashboard(m *ui.ConfigDashboard, msg tea.KeyPressMsg) {
 // longer lists it.
 func selectKey(t *testing.T, m *ui.ConfigDashboard, key string) {
 	t.Helper()
-	for i := 0; i < len(config.OverrideKeys()); i++ {
+	for i := 0; i < len(config.OverrideKeys())+len(config.RepoScopeKeyDocs()); i++ {
 		if row, ok := m.Selected(); ok && row.Key == key {
 			return
 		}
@@ -239,5 +258,48 @@ func TestConfigDashboardCopyThenRemoveRoundTrips(t *testing.T) {
 	}
 	if _, err := os.Stat(config.DefaultOverrideConfigPathWith(f.deps)); !os.IsNotExist(err) {
 		t.Error("the override file outlived its last key")
+	}
+}
+
+// The Preferred workbench is chosen here now that the chord that opened a picker
+// for it is gone (ADR-0212 decision 6): the dashboard offers it as a row of the
+// repository in scope, and what a human edits there is what every worktree of
+// that repository resolves.
+func TestConfigDashboardSetsThePreferredWorkbench(t *testing.T) {
+	f := newOverrideEditFixture(t, "[[workbenches]]\nname = \"solo\"\n")
+	main, feature := f.inRepository(t)
+
+	key := config.RepoScopeKey("preferred_workbench")
+	m := f.dashboard(t, key+` = "solo"`)
+	selectKey(t, m, key)
+	pressConfigDashboard(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if !m.Wrote() {
+		t.Fatal("the dashboard reports no write")
+	}
+	cfg, err := config.LoadWith(f.deps, f.userPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	for _, checkout := range []string{main, feature} {
+		if name, _ := cfg.ResolvePreferredWorkbench(f.deps, checkout); name != "solo" {
+			t.Errorf("preferred workbench at %s = %q, want solo", checkout, name)
+		}
+	}
+}
+
+// With no repository in scope the dashboard is the global surface alone: a host
+// opened outside a checkout offers no repository row rather than filing one
+// against whatever directory pop happened to be started in.
+func TestConfigDashboardWithoutARepositoryOffersNoRepoRows(t *testing.T) {
+	f := newOverrideEditFixture(t, overrideEditConfigTOML)
+	rows, err := f.writer.Rows()
+	if err != nil {
+		t.Fatalf("Rows() error: %v", err)
+	}
+	for _, row := range rows {
+		if _, ok := config.RepoScopeKeyLeaf(row.Key); ok {
+			t.Errorf("row %s offered with no repository in scope", row.Key)
+		}
 	}
 }

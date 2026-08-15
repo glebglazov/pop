@@ -29,7 +29,7 @@ func worktreePickerOpts() []PickerOption {
 }
 
 func projectPickerOpts() []PickerOption {
-	return []PickerOption{WithKillSession(), WithReset(), WithSetPreferredWorkbench()}
+	return []PickerOption{WithKillSession(), WithReset()}
 }
 
 // pickerHosting builds a picker that hosts the component over a fake layer. The

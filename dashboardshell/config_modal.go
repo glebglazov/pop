@@ -31,7 +31,8 @@ func (s Shell) buildConfigModal() *ui.ConfigDashboard {
 	if s.openConfig != nil {
 		return s.openConfig()
 	}
-	return confighost.Open(config.DefaultDeps(), s.cfgPath)
+	deps := config.DefaultDeps()
+	return confighost.Open(deps, s.cfgPath, confighost.WorkingCheckout(deps))
 }
 
 // updateConfigModal drives the open modal. Its tea.Quit is how it says it is

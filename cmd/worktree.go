@@ -159,15 +159,6 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 			restoreCursorIdx = result.CursorIndex
 			// Continue loop — items rebuild with fresh attention state
 
-		case ui.ActionSetPreferredWorkbench:
-			// Sets the highlighted worktree's Preferred workbench (ADR-0078);
-			// never touches a running session.
-			if result.Selected != nil {
-				warnPreferredWorkbenchErr("worktree", setPreferredWorkbench(defaultPreferredPickerDeps(), result.Selected.Path))
-			}
-			restoreCursorIdx = result.CursorIndex
-			// Continue loop to show picker again
-
 		case ui.ActionCreateWorktree:
 			if err := createWorktree(ctx); err != nil {
 				debug.Error("worktree: create: %v", err)
@@ -278,7 +269,6 @@ func worktreePickerOptions(customCommands []ui.UserDefinedCommand, quickAccessMo
 		ui.WithKillSession(),
 		ui.WithReset(),
 		ui.WithCreateWorktree(),
-		ui.WithSetPreferredWorkbench(),
 		ui.WithQuickAccess(quickAccessModifier),
 		ui.WithIconLegend(iconLegends...),
 		// While the Config dashboard is open every key above is suspended, which

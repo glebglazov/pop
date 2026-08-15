@@ -31,6 +31,10 @@ const (
 	// OverrideLayerInclude is a file config.toml includes; it ranks with the
 	// hand-authored file that pulled it in, below an override.
 	OverrideLayerInclude OverrideLayer = "config.toml include"
+	// OverrideLayerRepoTOML is a committed .pop/config.toml. It defines repo-scope
+	// keys only, and its locus is the checkout whose tree it sits in — this
+	// worktree, or the one it inherits from.
+	OverrideLayerRepoTOML OverrideLayer = ".pop/config.toml"
 	// OverrideLayerRuntime is config.runtime.toml, the pop-written gap-filler
 	// that records what pop's surfaces picked, so every declaration of the same
 	// scope beats it.

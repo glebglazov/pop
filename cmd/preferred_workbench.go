@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"fmt"
-	"os"
 	"strings"
 
 	"github.com/glebglazov/pop/config"
@@ -43,9 +41,9 @@ const (
 	preferredResetLabel       = "<reset>"
 )
 
-// preferredPickerDeps carries the seams for the ctrl+w Workbench-preference
-// picker so the write/clear/none branches are unit-testable without a real
-// terminal, config, or runtime file.
+// preferredPickerDeps carries the seams for the Workbench-preference picker
+// `pop workbench prefer` opens, so the write/clear/none branches are
+// unit-testable without a real terminal, config, or runtime file.
 type preferredPickerDeps struct {
 	RunPicker          func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error)
 	ResolveWorkbenches func(path string) []config.Workbench
@@ -110,6 +108,10 @@ func defaultPreferredPickerDeps() *preferredPickerDeps {
 // exists, "<reset>" (deletes the entry). It writes the runtime
 // preference for that checkout only — it never touches any running session. Esc
 // leaves the preference untouched.
+//
+// `pop workbench prefer` with no name is its only door: the picker hosts opened
+// it through a chord of their own until ADR-0212 decision 6 retired that in
+// favour of the Config dashboard, which every host already opens.
 func setPreferredWorkbench(d *preferredPickerDeps, checkoutPath string) error {
 	workbenches := d.ResolveWorkbenches(checkoutPath)
 	_, hasEntry := d.CurrentEntry(checkoutPath)
@@ -151,14 +153,5 @@ func setPreferredWorkbench(d *preferredPickerDeps, checkoutPath string) error {
 		return d.ClearPreferred(checkoutPath)
 	default:
 		return d.SetPreferred(checkoutPath, result.Selected.Name)
-	}
-}
-
-// warnPreferredWorkbenchErr logs a set-preference failure without aborting the
-// picker loop — a failed write must not kick the user out of the dashboard.
-func warnPreferredWorkbenchErr(surface string, err error) {
-	if err != nil {
-		debug.Error("%s: set preferred workbench: %v", surface, err)
-		fmt.Fprintf(os.Stderr, "Failed to set preferred workbench: %v\n", err)
 	}
 }

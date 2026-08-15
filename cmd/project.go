@@ -469,7 +469,6 @@ func RunProject(d *ProjectDeps) error {
 			ui.WithCursorAtEnd(),
 			ui.WithKillSession(),
 			ui.WithReset(),
-			ui.WithSetPreferredWorkbench(),
 			ui.WithQuickAccess(quickAccessModifier),
 			ui.WithIconLegend(iconLegends...),
 			// The same global chord as the Work dashboard and the worktree
@@ -634,15 +633,6 @@ func RunProject(d *ProjectDeps) error {
 		case ui.ActionRefresh:
 			restoreCursorIdx = result.CursorIndex
 			// Continue loop — items rebuild with fresh attention state
-
-		case ui.ActionSetPreferredWorkbench:
-			// Sets the per-checkout Preferred workbench (ADR-0078); never touches
-			// a running session. Skip standalone sessions (no real checkout).
-			if result.Selected != nil && !isStandaloneSession(*result.Selected) && !isSynthesizedProjectRow(*result.Selected) {
-				warnPreferredWorkbenchErr("project", setPreferredWorkbench(defaultPreferredPickerDeps(), result.Selected.Path))
-			}
-			restoreCursorIdx = result.CursorIndex
-			// Continue loop — preference set, session state unchanged.
 
 		case ui.ActionUserDefinedCommand:
 			if result.UserDefinedCommand != nil && result.Selected != nil {

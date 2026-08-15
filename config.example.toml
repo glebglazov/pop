@@ -59,7 +59,7 @@ projects = [
 # pick_on_create = true
 #
 # order fixes the display sequence of the interactive Workbench lists (the create
-# prompt and the ctrl+w Preferred-workbench picker). Tokens are the literal
+# prompt and the `pop workbench prefer` picker). Tokens are the literal
 # on-screen labels: Workbench names plus the special options "<empty>" and
 # "<reset>". Named tokens front-load in this order; everything unnamed follows in
 # the default order ("<empty>", Workbenches in resolution order, "<reset>"). A

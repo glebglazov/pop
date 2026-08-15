@@ -213,51 +213,62 @@ func TestHelpViewShowsCreateManagedWorktree(t *testing.T) {
 	}
 }
 
-func TestSetPreferredWorkbenchKey(t *testing.T) {
+// ctrl+w opened the retired Workbench-preference picker (ADR-0212 decision 6).
+// In every host that carried it the chord now does nothing at all: a preferred
+// workbench is chosen in the Config dashboard, which the same hosts open.
+func TestRetiredPreferredWorkbenchChordDoesNothing(t *testing.T) {
 	items := []Item{{Name: "wt", Path: "/wt"}}
 
-	// Disabled: ctrl+w is a no-op (feature flag off).
-	picker := NewPicker(items)
-	picker.Init()
-	picker.Update(tea.KeyPressMsg{Code: 'w', Mod: tea.ModCtrl})
-	if picker.result.Action == ActionSetPreferredWorkbench {
-		t.Error("ctrl+w should not fire when WithSetPreferredWorkbench is disabled")
-	}
+	for _, tc := range []struct {
+		name string
+		opts []PickerOption
+	}{
+		{"worktree host", worktreePickerOpts()},
+		{"project host", projectPickerOpts()},
+	} {
+		picker := NewPicker(items, tc.opts...)
+		picker.Init()
+		picker.width, picker.height = 60, 20
+		before := picker.View().Content
 
-	// Enabled: ctrl+w fires ActionSetPreferredWorkbench with the selection.
-	picker = NewPicker(items, WithSetPreferredWorkbench())
-	picker.Init()
-	_, cmd := picker.Update(tea.KeyPressMsg{Code: 'w', Mod: tea.ModCtrl})
-	if picker.result.Action != ActionSetPreferredWorkbench {
-		t.Errorf("ctrl+w should fire ActionSetPreferredWorkbench, got %v", picker.result.Action)
-	}
-	if picker.result.Selected == nil || picker.result.Selected.Path != "/wt" {
-		t.Errorf("ctrl+w result should carry the highlighted row, got %+v", picker.result.Selected)
-	}
-	if cmd == nil {
-		t.Error("ctrl+w should return tea.Quit cmd")
+		_, cmd := picker.Update(tea.KeyPressMsg{Code: 'w', Mod: tea.ModCtrl})
+		if cmd != nil {
+			t.Errorf("%s: ctrl+w must not quit the picker", tc.name)
+		}
+		if picker.result.Selected != nil {
+			t.Errorf("%s: ctrl+w must produce no result, got %+v", tc.name, picker.result.Selected)
+		}
+		if got := picker.View().Content; got != before {
+			t.Errorf("%s: ctrl+w changed the view:\n%s", tc.name, got)
+		}
+
+		picker.showHelp = true
+		if containsSubstring(picker.viewHelp(), "Set preferred workbench") {
+			t.Errorf("%s: help still offers the retired chord", tc.name)
+		}
 	}
 }
 
-func TestHelpViewShowsSetPreferredWorkbench(t *testing.T) {
-	items := []Item{{Name: "test", Path: "/test"}}
+// The chord's carve-out from kind-supplied key space goes with the picker, so a
+// user-defined command may claim ctrl+w and be the only thing it runs.
+func TestRetiredPreferredWorkbenchChordIsClaimable(t *testing.T) {
+	items := []Item{{Name: "wt", Path: "/wt"}}
+	picker := NewPicker(items, append(worktreePickerOpts(), WithUserDefinedCommands([]UserDefinedCommand{
+		{Key: "ctrl+w", Label: "mine", Command: "true"},
+	}))...)
+	picker.Init()
 
-	// Absent when the feature flag is off.
-	off := NewPicker(items)
-	off.width, off.height, off.showHelp = 60, 20, true
-	if containsSubstring(off.viewHelp(), "Set preferred workbench") {
-		t.Error("help view should omit the ctrl+w hint when disabled")
+	picker.Update(tea.KeyPressMsg{Code: 'w', Mod: tea.ModCtrl})
+	if picker.result.Action != ActionUserDefinedCommand {
+		t.Fatalf("ctrl+w should run the user's command, got action %v", picker.result.Action)
+	}
+	if picker.result.UserDefinedCommand == nil || picker.result.UserDefinedCommand.Command != "true" {
+		t.Fatalf("ctrl+w should carry the user's command, got %+v", picker.result.UserDefinedCommand)
 	}
 
-	// Present when enabled.
-	on := NewPicker(items, WithSetPreferredWorkbench())
-	on.width, on.height, on.showHelp = 60, 20, true
-	view := on.viewHelp()
-	if !containsSubstring(view, "C-w") {
-		t.Error("help view should contain the C-w key hint")
-	}
-	if !containsSubstring(view, "Set preferred workbench") {
-		t.Error("help view should contain the ctrl+w label")
+	picker.width, picker.height, picker.showHelp = 60, 20, true
+	if !containsSubstring(picker.viewHelp(), "mine") {
+		t.Error("help view should advertise the user's ctrl+w command")
 	}
 }
 

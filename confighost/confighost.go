@@ -43,27 +43,56 @@ import (
 // Writer is the Config dashboard's write side over the real override layer. It
 // is the whole of what the component knows about config: the three actions and
 // the re-read that follows each of them.
+//
+// It answers for both scopes an override lands at (ADR-0212 decision 3). A key
+// of the global surface is read and written whole; a `repo.<key>` row is read
+// against the repository the dashboard was opened in and written into the
+// layer's block for it — which is how a Preferred workbench, a key with no
+// global spelling, is chosen here at all (decision 6).
 type Writer struct {
 	deps       *config.Deps
 	configPath string
+	// checkout is the directory the dashboard was opened in, and through it the
+	// repository the repo-scope rows are about. Empty means no repository is in
+	// scope: the rows are absent and every key is global.
+	checkout string
 }
 
-// NewWriter builds the write side against one hand-authored config path. The
-// override layer's own path is derived from deps, not from configPath: the two
-// pop-written files sit beside the config dir rather than in it.
-func NewWriter(deps *config.Deps, configPath string) Writer {
-	return Writer{deps: deps, configPath: configPath}
+// NewWriter builds the write side against one hand-authored config path and the
+// checkout the dashboard is open in. The override layer's own path is derived
+// from deps, not from configPath: the two pop-written files sit beside the config
+// dir rather than in it.
+func NewWriter(deps *config.Deps, configPath, checkout string) Writer {
+	return Writer{deps: deps, configPath: configPath, checkout: checkout}
+}
+
+// repoScope reports the repo-block leaf a row key names, and false for a key of
+// the global surface — or for any key when no repository is in scope.
+func (w Writer) repoScope(key string) (string, bool) {
+	if w.checkout == "" {
+		return "", false
+	}
+	return config.RepoScopeKeyLeaf(key)
 }
 
 func (w Writer) Store(key, buffer string) (string, error) {
+	if _, ok := w.repoScope(key); ok {
+		return config.StoreRepoOverrideBufferWith(w.deps, w.checkout, key, buffer)
+	}
 	return config.StoreOverrideBufferWith(w.deps, key, buffer)
 }
 
 func (w Writer) CopySource(key string) error {
+	if _, ok := w.repoScope(key); ok {
+		return config.CopyRepoOverrideFromSourceWith(w.deps, w.configPath, w.checkout, key)
+	}
 	return config.CopyOverrideFromSourceWith(w.deps, w.configPath, key)
 }
 
 func (w Writer) Remove(key string) error {
+	if leaf, ok := w.repoScope(key); ok {
+		return config.DeleteRepoOverrideValueWith(w.deps, w.checkout, leaf)
+	}
 	return config.DeleteOverrideValueWith(w.deps, key)
 }
 
@@ -72,7 +101,11 @@ func (w Writer) Rows() ([]ui.ConfigDashboardRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	return Rows(views), nil
+	repoViews, err := config.RepoOverrideKeyViews(w.deps, w.configPath, w.checkout)
+	if err != nil {
+		return nil, err
+	}
+	return Rows(append(views, repoViews...)), nil
 }
 
 // Rows adapts the resolved override views to the component's rows. The
@@ -106,12 +139,26 @@ func Rows(views []config.OverrideKeyView) []ui.ConfigDashboardRow {
 	return rows
 }
 
+// WorkingCheckout is the checkout a host with no directory of its own opens the
+// dashboard in — where pop is running. A host that knows better (a command with
+// its own --dir) passes that instead.
+func WorkingCheckout(deps *config.Deps) string {
+	if deps == nil || deps.FS == nil {
+		return ""
+	}
+	cwd, err := deps.FS.Getwd()
+	if err != nil {
+		return ""
+	}
+	return cwd
+}
+
 // Open builds the component a host embeds, over the overridable keys as
 // they stand now. It never fails: a config that will not resolve becomes the
 // component's own error row, because a host may have nowhere safe to print and
 // an opened modal saying why is better than a chord that appears to do nothing.
-func Open(deps *config.Deps, configPath string) *ui.ConfigDashboard {
-	writer := NewWriter(deps, configPath)
+func Open(deps *config.Deps, configPath, checkout string) *ui.ConfigDashboard {
+	writer := NewWriter(deps, configPath, checkout)
 	rows, err := writer.Rows()
 	m := ui.NewConfigDashboard(rows, ui.ConfigDashboardOpts{Writer: writer})
 	if err != nil {
