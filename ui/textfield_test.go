@@ -161,6 +161,120 @@ func TestTextFieldClear(t *testing.T) {
 	}
 }
 
+func TestTextFieldDeleteWordBack(t *testing.T) {
+	f := NewTextField()
+	typeInto(&f, "one two three")
+	f.Update(ctrlKey('w'))
+	if f.Value() != "one two " || f.Cursor() != 8 {
+		t.Errorf("after ctrl+w: value=%q cursor=%d, want %q/8", f.Value(), f.Cursor(), "one two ")
+	}
+
+	// Trailing spaces behind the cursor go with the word.
+	sp := NewTextField()
+	typeInto(&sp, "café 本語   ")
+	sp.Update(ctrlKey('w'))
+	if sp.Value() != "café " || sp.Cursor() != 5 {
+		t.Errorf("after ctrl+w over spaces: value=%q cursor=%d, want %q/5", sp.Value(), sp.Cursor(), "café ")
+	}
+
+	// Mid-buffer: only the text behind the cursor is removed.
+	mid := NewTextField()
+	typeInto(&mid, "alpha beta")
+	mid.SetCursor(9)
+	mid.Update(ctrlKey('w'))
+	if mid.Value() != "alpha a" || mid.Cursor() != 6 {
+		t.Errorf("mid-buffer ctrl+w: value=%q cursor=%d, want %q/6", mid.Value(), mid.Cursor(), "alpha a")
+	}
+
+	// At position 0 it is a no-op.
+	edge := NewTextField()
+	typeInto(&edge, "abc")
+	edge.SetCursor(0)
+	edge.Update(ctrlKey('w'))
+	if edge.Value() != "abc" || edge.Cursor() != 0 {
+		t.Errorf("ctrl+w at 0: value=%q cursor=%d, want %q/0", edge.Value(), edge.Cursor(), "abc")
+	}
+}
+
+func TestTextFieldWordMotion(t *testing.T) {
+	f := NewTextField()
+	typeInto(&f, "one two three")
+	f.Update(altKey('b'))
+	if f.Cursor() != 8 || f.Value() != "one two three" {
+		t.Errorf("after alt+b: cursor=%d value=%q, want 8 and buffer unchanged", f.Cursor(), f.Value())
+	}
+	f.Update(altKey('b'))
+	if f.Cursor() != 4 {
+		t.Errorf("after second alt+b: cursor=%d, want 4", f.Cursor())
+	}
+	f.Update(altKey('f'))
+	if f.Cursor() != 7 || f.Value() != "one two three" {
+		t.Errorf("after alt+f: cursor=%d value=%q, want 7 and buffer unchanged", f.Cursor(), f.Value())
+	}
+	f.Update(altKey('f'))
+	if f.Cursor() != 13 {
+		t.Errorf("after second alt+f: cursor=%d, want 13", f.Cursor())
+	}
+	// alt+f at the end and alt+b at the start stay put.
+	f.Update(altKey('f'))
+	if f.Cursor() != 13 {
+		t.Errorf("alt+f at end: cursor=%d, want 13", f.Cursor())
+	}
+	f.SetCursor(0)
+	f.Update(altKey('b'))
+	if f.Cursor() != 0 {
+		t.Errorf("alt+b at start: cursor=%d, want 0", f.Cursor())
+	}
+}
+
+func TestTextFieldDeleteWordForward(t *testing.T) {
+	f := NewTextField()
+	typeInto(&f, "one two three")
+	f.SetCursor(4)
+	f.Update(altKey('d'))
+	if f.Value() != "one  three" || f.Cursor() != 4 {
+		t.Errorf("after alt+d: value=%q cursor=%d, want %q/4", f.Value(), f.Cursor(), "one  three")
+	}
+
+	// Leading spaces ahead of the cursor go with the word.
+	sp := NewTextField()
+	typeInto(&sp, "本語   café")
+	sp.SetCursor(2)
+	sp.Update(altKey('d'))
+	if sp.Value() != "本語" || sp.Cursor() != 2 {
+		t.Errorf("alt+d over spaces: value=%q cursor=%d, want %q/2", sp.Value(), sp.Cursor(), "本語")
+	}
+
+	// At the end of the buffer it is a no-op.
+	edge := NewTextField()
+	typeInto(&edge, "abc")
+	edge.Update(altKey('d'))
+	if edge.Value() != "abc" || edge.Cursor() != 3 {
+		t.Errorf("alt+d at end: value=%q cursor=%d, want %q/3", edge.Value(), edge.Cursor(), "abc")
+	}
+}
+
+func TestTextFieldKillLine(t *testing.T) {
+	f := NewTextField()
+	typeInto(&f, "café 日本語")
+	f.SetCursor(3)
+	f.Update(ctrlKey('k'))
+	if f.Value() != "caf" || f.Cursor() != 3 {
+		t.Errorf("after ctrl+k: value=%q cursor=%d, want %q/3", f.Value(), f.Cursor(), "caf")
+	}
+	// At the end it is a no-op.
+	f.Update(ctrlKey('k'))
+	if f.Value() != "caf" || f.Cursor() != 3 {
+		t.Errorf("ctrl+k at end: value=%q cursor=%d, want %q/3", f.Value(), f.Cursor(), "caf")
+	}
+	// From position 0 it empties the buffer.
+	f.SetCursor(0)
+	f.Update(ctrlKey('k'))
+	if f.Value() != "" || f.Cursor() != 0 {
+		t.Errorf("ctrl+k at 0: value=%q cursor=%d, want empty/0", f.Value(), f.Cursor())
+	}
+}
+
 func TestTextFieldSetValueClampsCursor(t *testing.T) {
 	f := NewTextField()
 	typeInto(&f, "abcdef")
