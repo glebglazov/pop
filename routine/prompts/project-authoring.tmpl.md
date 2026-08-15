@@ -9,21 +9,7 @@ routine is a prompt committed to this repo — everyone who checks it out gets
 it. This session changes its committed prompt file.
 {{end}}
 
-## Framework contract
-
-When the routine fires, pop wraps your prompt — it does NOT run it verbatim. The
-wrapping is:
-  - PREAMBLE: "Before starting, read the routine memory directory at {{.MemoryDir}} and
-    incorporate any prior context."
-  - then the verbatim contents of the prompt file's body
-  - POSTAMBLE: "When finished, write your report to <runs>/<timestamp>.md and
-    update the routine memory directory at {{.MemoryDir}} with what you learned."
-  - SENTINEL: the postamble also requires the run to end its output with
-    {{.CompleteSentinel}} (report written, run done) or {{.FailedSentinel}}: <reason>. A run that exits
-    cleanly without {{.CompleteSentinel}} is recorded FAILED, so do not have the prompt
-    fight this — leave the sentinel to the framework.
-So the prompt should assume the memory has already been read and a report will be
-written for it; write it as the routine's task, not as setup/teardown.
+{{template "framework-contract.tmpl.md" .}}
 
 ## This routine is a Project routine
 

@@ -102,6 +102,8 @@ func isCreateModePrompt(content string) bool {
 // `pop routine edit --schedule` so the parser's validation is never bypassed.
 func buildAuthoringPrompt(d *Deps, id string, r *Routine) string {
 	dir := routineDir(d, id)
+	memoryDir := filepath.Join(dir, memoryDirName)
+	runsDir := filepath.Join(dir, runsDirName)
 
 	// The frontmatter carries settings (ADR-0139); the authoring agent edits and
 	// reasons about the body, so create-mode detection and the "current prompt"
@@ -116,14 +118,14 @@ func buildAuthoringPrompt(d *Deps, id string, r *Routine) string {
 		ReviseMode:       !createMode,
 		BoundDirectory:   r.Manifest.BoundDirectory,
 		PromptPath:       filepath.Join(dir, promptFileName),
-		MemoryDir:        filepath.Join(dir, memoryDirName),
-		RunsDir:          filepath.Join(dir, runsDirName),
+		MemoryDir:        memoryDir,
+		RunsDir:          runsDir,
 		ScheduleGrammar:  ScheduleGrammar,
 		ScheduleLabel:    ScheduleLabel(r.Manifest.Schedule),
 		Unscheduled:      !r.Manifest.IsScheduled(),
 		PromptBody:       endWithNewline(promptBody),
-		CompleteSentinel: routineCompleteSentinel,
-		FailedSentinel:   routineFailedSentinel,
+		PromptNoun:       "your prompt.md",
+		WrappedExample:   frameworkContractExample(memoryDir, runsDir),
 	})
 }
 
@@ -148,9 +150,13 @@ type authoringPromptView struct {
 	ScheduleLabel   string
 	Unscheduled     bool
 
-	PromptBody       string
-	CompleteSentinel string
-	FailedSentinel   string
+	PromptBody string
+
+	// PromptNoun and WrappedExample feed the shared framework-contract partial:
+	// the noun each prompt uses for the file being authored, and the real
+	// wrapper's output rendered with placeholders.
+	PromptNoun     string
+	WrappedExample string
 }
 
 // endWithNewline keeps an echoed prompt body from running into the heading that

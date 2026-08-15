@@ -9,22 +9,7 @@ directory-bound schedules that fire an unattended agent run over time. This
 routine already exists; this session changes its prompt.md.
 {{end}}
 
-## Framework contract
-
-When the routine fires, pop wraps your prompt.md — it does NOT run prompt.md
-verbatim. The wrapping is:
-  - PREAMBLE: "Before starting, read the routine memory directory at {{.MemoryDir}} and
-    incorporate any prior context."
-  - then the verbatim contents of prompt.md
-  - POSTAMBLE: "When finished, write your report to <runs>/<timestamp>.md and
-    update the routine memory directory at {{.MemoryDir}} with what you learned."
-  - SENTINEL: the postamble also requires the run to end its output with
-    {{.CompleteSentinel}} (report written, run done) or {{.FailedSentinel}}: <reason>. A run that exits
-    cleanly without {{.CompleteSentinel}} is recorded FAILED, so do not have prompt.md
-    fight this — leave the sentinel to the framework and don't tell the run to
-    emit a conflicting end marker.
-So prompt.md should assume the memory has already been read and a report will be
-written for it; write it as the routine's task, not as setup/teardown.
+{{template "framework-contract.tmpl.md" .}}
 
   - Memory directory: {{.MemoryDir}} (persists across runs; you define its format)
   - Reports directory: {{.RunsDir}} (one timestamped .md report per run)

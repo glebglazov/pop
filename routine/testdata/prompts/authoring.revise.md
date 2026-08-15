@@ -4,20 +4,27 @@ routine already exists; this session changes its prompt.md.
 
 ## Framework contract
 
-When the routine fires, pop wraps your prompt.md — it does NOT run prompt.md
-verbatim. The wrapping is:
-  - PREAMBLE: "Before starting, read the routine memory directory at /pop/data/pop/routines/triage/memory and
-    incorporate any prior context."
-  - then the verbatim contents of prompt.md
-  - POSTAMBLE: "When finished, write your report to <runs>/<timestamp>.md and
-    update the routine memory directory at /pop/data/pop/routines/triage/memory with what you learned."
-  - SENTINEL: the postamble also requires the run to end its output with
-    ROUTINE_COMPLETE (report written, run done) or ROUTINE_FAILED: <reason>. A run that exits
-    cleanly without ROUTINE_COMPLETE is recorded FAILED, so do not have prompt.md
-    fight this — leave the sentinel to the framework and don't tell the run to
-    emit a conflicting end marker.
-So prompt.md should assume the memory has already been read and a report will be
-written for it; write it as the routine's task, not as setup/teardown.
+When the routine fires, pop wraps your prompt.md — it does NOT run it verbatim. Below
+is the exact prompt a run receives, produced by the same wrapper the daemon uses,
+with placeholders for your body and for the run's timestamped report:
+
+```
+Before starting, read the routine memory directory at /pop/data/pop/routines/triage/memory and incorporate any prior context.
+
+<the body of your prompt file, verbatim>
+
+When finished, write your report to /pop/data/pop/routines/triage/runs/<timestamp>.md and update the routine memory directory at /pop/data/pop/routines/triage/memory with what you learned.
+
+End your output with a completion sentinel on its own line, exactly one of:
+  ROUTINE_COMPLETE   (the run completed and the report was written)
+  ROUTINE_FAILED: <reason>   (the run could not be completed)
+Without ROUTINE_COMPLETE the run is recorded failed even if you exit cleanly.
+```
+
+So your prompt.md should assume the memory has already been read and a report will be
+written for it; write it as the routine's task, not as setup/teardown. Do not have
+your prompt.md fight the framework — leave the sentinel to it, and don't tell the run
+to emit a conflicting end marker.
 
   - Memory directory: /pop/data/pop/routines/triage/memory (persists across runs; you define its format)
   - Reports directory: /pop/data/pop/routines/triage/runs (one timestamped .md report per run)

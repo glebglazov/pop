@@ -2,6 +2,7 @@ package routine
 
 import (
 	"embed"
+	"path/filepath"
 	"strings"
 
 	"github.com/glebglazov/pop/internal/prompt"
@@ -34,4 +35,22 @@ func wrapRoutinePrompt(memoryDir, reportPath, domainPrompt string) string {
 		CompleteSentinel: routineCompleteSentinel,
 		FailedSentinel:   routineFailedSentinel,
 	})
+}
+
+// The two things the wrapper needs that do not exist yet while a routine is
+// being authored: no body is written, and no run has fired to stamp a report.
+const (
+	placeholderRoutineBody = "<the body of your prompt file, verbatim>"
+	placeholderReportName  = "<timestamp>.md"
+)
+
+// frameworkContractExample is what the authoring prompts show instead of
+// describing the wrapper in prose: the real wrapper's output, called with
+// placeholders. An edit to wrap.tmpl.md reaches both authoring prompts on the
+// next render, so the contract they teach cannot drift from the one a run gets.
+func frameworkContractExample(memoryDir, runsDir string) string {
+	wrapped := wrapRoutinePrompt(memoryDir, filepath.Join(runsDir, placeholderReportName), placeholderRoutineBody)
+	// The render carries its own trailing newline; the template that embeds it
+	// supplies the one before the closing fence.
+	return strings.TrimRight(wrapped, "\n")
 }

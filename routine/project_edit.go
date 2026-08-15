@@ -214,18 +214,20 @@ func projectAuthoringSessionFromGate(d *Deps, out io.Writer, pr *ProjectRoutine,
 func buildProjectAuthoringPrompt(d *Deps, pr *ProjectRoutine) string {
 	dataDir := projectRoutineDataDir(d, checkoutKey(pr.Dir), pr.Name)
 	createMode := isCreateModePrompt(pr.Prompt)
+	memoryDir := filepath.Join(dataDir, memoryDirName)
+	runsDir := filepath.Join(dataDir, runsDirName)
 
 	return prompt.MustRender(promptTemplates, "project-authoring.tmpl.md", projectAuthoringPromptView{
-		QuotedID:         strconv.Quote(ProjectOrigin + pr.Name),
-		CreateMode:       createMode,
-		ReviseMode:       !createMode,
-		CheckoutDir:      pr.Dir,
-		PromptPath:       filepath.Join(pr.Dir, ".pop", projectRoutinesDirName, pr.Name+projectRoutineExt),
-		MemoryDir:        filepath.Join(dataDir, memoryDirName),
-		RunsDir:          filepath.Join(dataDir, runsDirName),
-		PromptBody:       endWithNewline(pr.Prompt),
-		CompleteSentinel: routineCompleteSentinel,
-		FailedSentinel:   routineFailedSentinel,
+		QuotedID:       strconv.Quote(ProjectOrigin + pr.Name),
+		CreateMode:     createMode,
+		ReviseMode:     !createMode,
+		CheckoutDir:    pr.Dir,
+		PromptPath:     filepath.Join(pr.Dir, ".pop", projectRoutinesDirName, pr.Name+projectRoutineExt),
+		MemoryDir:      memoryDir,
+		RunsDir:        runsDir,
+		PromptBody:     endWithNewline(pr.Prompt),
+		PromptNoun:     "your prompt",
+		WrappedExample: frameworkContractExample(memoryDir, runsDir),
 	})
 }
 
@@ -243,7 +245,10 @@ type projectAuthoringPromptView struct {
 	MemoryDir   string
 	RunsDir     string
 
-	PromptBody       string
-	CompleteSentinel string
-	FailedSentinel   string
+	PromptBody string
+
+	// The framework contract is one shared partial across both authoring
+	// prompts (ADR-0208), so both views carry its two fields.
+	PromptNoun     string
+	WrappedExample string
 }
