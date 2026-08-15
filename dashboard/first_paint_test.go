@@ -13,6 +13,7 @@ import (
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/tasks/drain"
+	"github.com/glebglazov/pop/work"
 )
 
 // firstPaintForkCeiling is the number of git processes one page-A snapshot build
@@ -89,7 +90,7 @@ func TestFirstPaintForksUnderCeiling(t *testing.T) {
 	pd.Git = counter
 	d.Project = &pd
 
-	snap, err := BuildPageSnapshot(d, cfg, PageWork)
+	snap, err := BuildPageSnapshot(d, cfg, PageWork, work.PaneFacts{})
 	if err != nil {
 		t.Fatalf("BuildPageSnapshot: %v", err)
 	}
@@ -108,7 +109,7 @@ func TestFirstPaintForksUnderCeiling(t *testing.T) {
 	// filter revealing them the same build lists all six — and pays per checkout for
 	// it, which is exactly the bill the narrowed paint does not receive.
 	d.ViewPreset, _ = config.ShippedWorkViewPreset("all")
-	revealed, err := BuildPageSnapshot(d, cfg, PageWork)
+	revealed, err := BuildPageSnapshot(d, cfg, PageWork, work.PaneFacts{})
 	if err != nil {
 		t.Fatalf("BuildPageSnapshot(include done): %v", err)
 	}

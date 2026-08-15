@@ -99,7 +99,7 @@ func newShell(start Page, d *drain.Deps, cfg *config.Config, cfgPath string) (Sh
 	}
 	// The entry page is the one command the operator ran, so its build failure is
 	// that command failing. The other page has no model at all yet.
-	snap, err := dashboard.BuildSeededPageSnapshot(d, cfg, start, launchPaneFacts(start, d))
+	snap, err := dashboard.BuildPageSnapshot(d, cfg, start, launchPaneFacts(start, d))
 	if err != nil {
 		return Shell{}, err
 	}
@@ -108,6 +108,9 @@ func newShell(start Page, d *drain.Deps, cfg *config.Config, cfgPath string) (Sh
 }
 
 // launchPaneFacts reads the launching pane's facts for page A and nothing else.
+// It is the session's one tmux round-trip for them: the entry build puts them on
+// the snapshot, the page model keeps them, and every rebuild re-derives its pins
+// from the copy it holds.
 // The dashboard opens on its usual page: a pane attributed to a Routine resolves
 // to a row on the other page and is simply not seeded, rather than the launch
 // following the answer across the toggle (ADR-0201 decision 5). Page B, built

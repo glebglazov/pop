@@ -18,18 +18,33 @@ import (
 // Pane work attribution end to end (ADR-0209): the pane facts a launch reads, the
 // kind-side ladder over them during the snapshot build, and the rows the dashboard
 // lifts to the top of its list. Every test here drives the whole path — a fake tmux
-// pane through BuildSeededPageSnapshot into a real model — because the seam is only
+// pane through BuildPageSnapshot into a real model — because the seam is only
 // worth anything if all three halves agree about one container's identity.
 
 // openFromPane is the launch: read the pane the fake says the caller is in, build
 // page A through it, and construct the model that would take the first paint.
 func openFromPane(t *testing.T, d *drain.Deps, cfg *config.Config) QueueDashboard {
 	t.Helper()
-	snap, err := BuildSeededPageSnapshot(d, cfg, PageWork, LaunchPaneFacts(d.Tmux))
+	snap, err := BuildPageSnapshot(d, cfg, PageWork, LaunchPaneFacts(d.Tmux))
 	if err != nil {
-		t.Fatalf("BuildSeededPageSnapshot: %v", err)
+		t.Fatalf("BuildPageSnapshot: %v", err)
 	}
 	return NewDashboardOn(d, cfg, snap, PageWork)
+}
+
+// rebuild is one poll: the model's own reload command and the message it produces,
+// which is the only path a running dashboard ever takes to new rows.
+func rebuild(t *testing.T, m QueueDashboard) QueueDashboard {
+	t.Helper()
+	msg, ok := m.reload()().(dashboardRowsMsg)
+	if !ok {
+		t.Fatal("reload did not produce a rows message")
+	}
+	if msg.err != nil {
+		t.Fatalf("reload: %v", msg.err)
+	}
+	updated, _ := m.Update(msg)
+	return updated.(QueueDashboard)
 }
 
 // inPane arranges the fake so the caller is sitting in one pane of one session.
@@ -82,7 +97,7 @@ func rowIDs(m QueueDashboard) []string {
 // every pinning launch must leave untouched beneath its block.
 func unpinnedOrder(t *testing.T, d *drain.Deps, cfg *config.Config) []string {
 	t.Helper()
-	snap, err := BuildPageSnapshot(d, cfg, PageWork)
+	snap, err := BuildPageSnapshot(d, cfg, PageWork, work.PaneFacts{})
 	if err != nil {
 		t.Fatalf("BuildPageSnapshot: %v", err)
 	}
@@ -317,12 +332,7 @@ func TestAttributionNeverMovesTheCursor(t *testing.T) {
 		t.Fatalf("could not move the cursor to %q", moved)
 	}
 
-	rebuilt, err := BuildPageSnapshot(d, cfg, PageWork)
-	if err != nil {
-		t.Fatalf("BuildPageSnapshot: %v", err)
-	}
-	updated, _ := m.Update(dashboardRowsMsg{page: PageWork, snap: rebuilt})
-	after := updated.(QueueDashboard)
+	after := rebuild(t, m)
 	if got := cursorRow(t, after); got != moved {
 		t.Fatalf("cursor after a rebuild = %q, want the row the human moved to (%q)", got, moved)
 	}

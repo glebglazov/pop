@@ -68,7 +68,7 @@ func routinePageDeps(containers []work.Container) *drain.Deps {
 func openPage(t *testing.T, d *drain.Deps, page Page) QueueDashboard {
 	t.Helper()
 	cfg := &config.Config{}
-	snap, err := BuildPageSnapshot(d, cfg, page)
+	snap, err := BuildPageSnapshot(d, cfg, page, work.PaneFacts{})
 	if err != nil {
 		t.Fatalf("BuildPageSnapshot(%v): %v", page, err)
 	}

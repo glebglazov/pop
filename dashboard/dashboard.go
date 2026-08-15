@@ -556,7 +556,12 @@ type QueueDashboard struct {
 	// kinds is the wired Work-kind list indexed by id: every cell a row renders
 	// and every verb its menu offers is asked of the kind that owns the row, so
 	// the dashboard branches on no kind of its own (ADR-0173).
-	kinds   workKinds
+	kinds workKinds
+	// pane is what the dashboard's own pane showed at launch, read once and kept.
+	// The pane does not move while the dashboard runs, so every rebuild re-asks
+	// the kinds with these same facts and pins whatever the answer is now
+	// (ADR-0209 decision 5).
+	pane    work.PaneFacts
 	snap    DashboardSnapshot
 	allRows []DashboardRow // source of truth; snap.Containers is the filtered view
 	list    *ui.List[DashboardRow]
@@ -660,7 +665,7 @@ func NewDashboardOn(d *drain.Deps, cfg *config.Config, snap DashboardSnapshot, p
 // opens a page the first time the operator asks for it, and a Routines page that
 // will not build must not take the Task sets down with it (ADR-0189).
 func OpenPage(d *drain.Deps, cfg *config.Config, page Page) QueueDashboard {
-	snap, err := BuildPageSnapshot(d, cfg, page)
+	snap, err := BuildPageSnapshot(d, cfg, page, work.PaneFacts{})
 	m := NewDashboardOn(d, cfg, snap, page)
 	m.err = err
 	return m
@@ -669,17 +674,14 @@ func OpenPage(d *drain.Deps, cfg *config.Config, page Page) QueueDashboard {
 // BuildPageSnapshot builds one page's snapshot: only the kinds that page lists,
 // so kind precedence orders that page alone and every Kind.Summary counts only
 // the containers on it.
-func BuildPageSnapshot(d *drain.Deps, cfg *config.Config, page Page) (DashboardSnapshot, error) {
-	return BuildSeededPageSnapshot(d, cfg, page, work.PaneFacts{})
-}
-
-// BuildSeededPageSnapshot is the launch build: the same snapshot, plus the facts
-// of the pane the dashboard is being opened from, so the kinds on this page may
-// attribute that pane to one of their containers (ADR-0201). Only the entry layer
-// calls it — every rebuild goes through BuildPageSnapshot and attributes nothing,
-// which is what makes the seeded cursor a one-shot rather than a target that
-// chases the human's own navigation.
-func BuildSeededPageSnapshot(d *drain.Deps, cfg *config.Config, page Page, pane work.PaneFacts) (DashboardSnapshot, error) {
+//
+// pane is what the caller knows about the pane the dashboard lives in, so the
+// kinds on this page may attribute it to containers of theirs (ADR-0201). It is
+// the same argument on the entry build and on every rebuild: the facts are read
+// once and carried on the snapshot, and each build re-derives the answer from
+// the containers it just loaded (ADR-0209 decision 5). Zero facts attribute
+// nothing.
+func BuildPageSnapshot(d *drain.Deps, cfg *config.Config, page Page, pane work.PaneFacts) (DashboardSnapshot, error) {
 	if d == nil {
 		d = drain.DefaultDeps()
 	}
@@ -727,7 +729,7 @@ func newQueueDashboardOn(d *drain.Deps, cfg *config.Config, snap DashboardSnapsh
 	// Attribution has already had its say — it pinned its rows to the top of the
 	// snapshot. Nothing is printed about it, and the cursor rests where it always
 	// does, on the first row (ADR-0209 decision 8).
-	return QueueDashboard{d: d, cfg: cfg, page: page, kinds: kinds, snap: snap, allRows: snap.Containers, list: list, cols: cols, live: live}
+	return QueueDashboard{d: d, cfg: cfg, page: page, kinds: kinds, pane: snap.Pane, snap: snap, allRows: snap.Containers, list: list, cols: cols, live: live}
 }
 
 // dashboardChromeLines returns the chrome height above the List rows for the
@@ -1921,9 +1923,14 @@ func (m QueueDashboard) confirmBindModal() (tea.Model, tea.Cmd) {
 // reload rebuilds this page's snapshot: only its own kinds, so the poll never
 // pays for the other page's scan and the header it recomputes counts only what is
 // on screen.
+//
+// It carries the pane facts the model has held since launch, so the pinned block
+// is whatever the pane belongs to now: a drain that has just gone live in the
+// pane's checkout pins on this poll, and one that has ended un-pins on it. No
+// tmux round-trip happens here — only the answer is re-derived.
 func (m QueueDashboard) reload() tea.Cmd {
 	return func() tea.Msg {
-		snap, err := work.BuildSnapshot(m.page.kinds(m.d, m.cfg))
+		snap, err := work.BuildSnapshotForPane(m.page.kinds(m.d, m.cfg), m.pane)
 		live := loadLivePaneCache(m.d)
 		return dashboardRowsMsg{page: m.page.id, snap: snap, live: live, err: err}
 	}

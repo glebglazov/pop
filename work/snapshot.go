@@ -27,6 +27,11 @@ type Snapshot struct {
 	// handed pane facts can carry one; the containers it names that this page
 	// actually shows are the pinned rows at the head of Containers.
 	Attribution *Attribution
+	// Pane is what the surface knows about its own pane, carried on the build it
+	// produced. A surface that rebuilds itself reads the facts once and passes
+	// these back into the next build: the pane does not move, so the answer is
+	// what is re-derived, not the question (ADR-0209 decision 5).
+	Pane PaneFacts
 }
 
 // ModelSkip is one Effort model skip still in force: the preset whose ladder
@@ -59,6 +64,10 @@ func BuildSnapshot(kinds []Kind) (Snapshot, error) {
 // what keeps the answer kind-side — a caller resolving it up front would need a
 // switch over kinds in exactly the layer the seam exists to keep free of them
 // (ADR-0201 decision 3).
+//
+// Every build asks again, not just the first. A pin is current: the containers
+// change between builds — a drain goes live, a set becomes bound — so the answer
+// derived from the same facts changes with them (ADR-0209 decision 5).
 func BuildSnapshotForPane(kinds []Kind, facts PaneFacts) (Snapshot, error) {
 	ordered := kindsInPrecedence(kinds)
 	loaded := make([][]Container, len(ordered))
@@ -76,7 +85,7 @@ func BuildSnapshotForPane(kinds []Kind, facts PaneFacts) (Snapshot, error) {
 		loaded[i] = containers
 	}
 
-	snap := Snapshot{}
+	snap := Snapshot{Pane: facts}
 	for i, k := range ordered {
 		snap.Containers = append(snap.Containers, loaded[i]...)
 		snap.Summary = append(snap.Summary, k.Summary(loaded[i])...)
