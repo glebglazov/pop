@@ -127,6 +127,24 @@ func (d *Deps) EffectiveViewPreset() config.WorkViewPreset {
 	return config.WorkViewPreset{}
 }
 
+// WorkOrdering translates the active preset's sort into the snapshot builder's
+// ordering value (ADR-0210). It lives on the deps because this is the layer that
+// already resolves which preset is active and already imports config, which lets
+// the `work` seam keep taking an ordering it is handed rather than a preset it
+// would have to read. Absent sort is created_desc: the status scheme is reached
+// only by asking for it, and asking for it means the pre-ADR-0210 page —
+// kind-precedence blocks ordered by each kind's own comparator.
+func (d *Deps) WorkOrdering() work.Ordering {
+	switch d.EffectiveViewPreset().Sort {
+	case config.PresetSortStatus:
+		return work.OrderByKindPrecedence
+	case config.PresetSortCreatedAsc:
+		return work.OrderByCreatedAsc
+	default:
+		return work.OrderByCreatedDesc
+	}
+}
+
 type runtimeLock interface {
 	Release() error
 }

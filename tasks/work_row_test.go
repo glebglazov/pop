@@ -55,13 +55,15 @@ func TestMatchesPresetActiveAndAll(t *testing.T) {
 	}
 }
 
+// TestSortOrder pins the status scheme's project-then-id tiebreak, which is now
+// what `sort = "status"` asks for rather than what an unset sort implies.
 func TestSortOrder(t *testing.T) {
 	rows := []work.Container{
 		{Project: "zeta", ID: "2026-01-01-old"},
 		{Project: "alpha", ID: "2026-01-01-old"},
 		{Project: "alpha", ID: "2026-06-18-new"},
 	}
-	SortWorkRows(rows, "")
+	SortWorkRows(rows, config.PresetSortStatus)
 	got := []string{rows[0].Project + "/" + rows[0].ID, rows[1].Project + "/" + rows[1].ID, rows[2].Project + "/" + rows[2].ID}
 	want := []string{"alpha/2026-06-18-new", "alpha/2026-01-01-old", "zeta/2026-01-01-old"}
 	if !reflect.DeepEqual(got, want) {
@@ -70,7 +72,8 @@ func TestSortOrder(t *testing.T) {
 }
 
 // TestTieredSortOrder drives the full Queue surface order (ADR-0121) across a
-// mixed fixture that exercises every membership tier and the status scheme. Tier
+// mixed fixture that exercises every membership tier and the status scheme,
+// which `sort = "status"` is now the way to ask for (ADR-0210). Tier
 // precedence is running → auto-drain → orphaned → the rest; the orphaned +
 // auto-drain set lands in the auto-drain tier; within the rest tier the status
 // scheme floats the IN PROGRESS band, then the READY band (both cross-project),
@@ -96,7 +99,7 @@ func TestTieredSortOrder(t *testing.T) {
 		// Running tier — highest precedence even over an auto-drain BLOCKED set.
 		{Project: "delta", ID: "2026-06-01-run", RawStatus: StatusBlocked, AutoDrain: true, LiveDrain: true},
 	}
-	SortWorkRows(rows, "")
+	SortWorkRows(rows, config.PresetSortStatus)
 	got := make([]string, len(rows))
 	for i, r := range rows {
 		got[i] = r.Project + "/" + r.ID
@@ -132,7 +135,7 @@ func TestReadyBandInterleavesProjects(t *testing.T) {
 		{Project: "alpha", ID: "2026-01-03-rdy", RawStatus: StatusReady},
 		{Project: "bravo", ID: "2026-01-04-blk", RawStatus: StatusBlocked},
 	}
-	SortWorkRows(rows, "")
+	SortWorkRows(rows, config.PresetSortStatus)
 	got := make([]string, len(rows))
 	for i, r := range rows {
 		got[i] = r.Project + "/" + r.ID
@@ -161,7 +164,7 @@ func TestBandKeysOnDisplayedLabel(t *testing.T) {
 		{Project: "alpha", ID: "2026-01-01-rdy", RawStatus: StatusReady},
 		{Project: "zeta", Started: true, ID: "2026-01-02-inp", RawStatus: StatusReady},
 	}
-	SortWorkRows(rows, "")
+	SortWorkRows(rows, config.PresetSortStatus)
 	got := []string{rows[0].Project + "/" + rows[0].ID, rows[1].Project + "/" + rows[1].ID}
 	want := []string{"zeta/2026-01-02-inp", "alpha/2026-01-01-rdy"}
 	if !reflect.DeepEqual(got, want) {
@@ -356,9 +359,11 @@ func TestPresetCreatedSortUndatedPosition(t *testing.T) {
 	}
 }
 
-// TestEmptySortMatchesStatusSchemeByteForByte proves a preset with no sort
-// keeps today's ADR-0121 order exactly — the status-scheme path is unchanged.
-func TestEmptySortMatchesStatusSchemeByteForByte(t *testing.T) {
+// TestAbsentSortMeansCreatedDescAndStatusIsTheOptIn pins the ADR-0210 flip on
+// the shared comparator: a preset that declares no sort orders by creation date
+// newest first, and the ADR-0121 status scheme is reached only by declaring
+// `status`, where it reproduces the pre-change sequence exactly.
+func TestAbsentSortMeansCreatedDescAndStatusIsTheOptIn(t *testing.T) {
 	base := []work.Container{
 		{Project: "alpha", ID: "2026-02-01-blk", RawStatus: StatusBlocked},
 		{Project: "bravo", ID: "2026-02-02-rdy", RawStatus: StatusReady},
@@ -370,14 +375,34 @@ func TestEmptySortMatchesStatusSchemeByteForByte(t *testing.T) {
 		{Project: "kilo", ID: "2026-05-01-ad", RawStatus: StatusReady, AutoDrain: true},
 		{Project: "delta", ID: "2026-06-01-run", RawStatus: StatusBlocked, AutoDrain: true, LiveDrain: true},
 	}
-	viaEmpty := append([]work.Container(nil), base...)
-	viaDefault := append([]work.Container(nil), base...)
-	SortWorkRows(viaEmpty, "")
-	SortWorkRows(viaDefault, "not-a-sort") // unknown modes fall through to status scheme
-	if !reflect.DeepEqual(idsOf(viaEmpty), idsOf(viaDefault)) {
-		t.Fatalf("empty vs unknown sort diverge: %v vs %v", idsOf(viaEmpty), idsOf(viaDefault))
+
+	viaAbsent := append([]work.Container(nil), base...)
+	viaDeclared := append([]work.Container(nil), base...)
+	SortWorkRows(viaAbsent, "")
+	SortWorkRows(viaDeclared, config.PresetSortCreatedDesc)
+	if !reflect.DeepEqual(idsOf(viaAbsent), idsOf(viaDeclared)) {
+		t.Fatalf("absent sort %v differs from declared created_desc %v", idsOf(viaAbsent), idsOf(viaDeclared))
 	}
-	want := []string{
+	wantCreated := []string{
+		// The membership tiers still float above the date key.
+		"2026-06-01-run",
+		"2026-05-01-ad",
+		"2026-04-01-orph",
+		// Then the rest tier, newest first, with no regard for status.
+		"2026-02-06-aa",
+		"2026-02-05-done",
+		"2026-02-04-inp",
+		"2026-02-03-rdy",
+		"2026-02-02-rdy",
+		"2026-02-01-blk",
+	}
+	if !reflect.DeepEqual(idsOf(viaAbsent), wantCreated) {
+		t.Fatalf("absent sort = %v, want created_desc %v", idsOf(viaAbsent), wantCreated)
+	}
+
+	viaStatus := append([]work.Container(nil), base...)
+	SortWorkRows(viaStatus, config.PresetSortStatus)
+	wantStatus := []string{
 		"2026-06-01-run",
 		"2026-05-01-ad",
 		"2026-04-01-orph",
@@ -388,8 +413,8 @@ func TestEmptySortMatchesStatusSchemeByteForByte(t *testing.T) {
 		"2026-02-05-done",
 		"2026-02-06-aa",
 	}
-	if !reflect.DeepEqual(idsOf(viaEmpty), want) {
-		t.Fatalf("empty sort = %v, want status-scheme %v", idsOf(viaEmpty), want)
+	if !reflect.DeepEqual(idsOf(viaStatus), wantStatus) {
+		t.Fatalf("status sort = %v, want the pre-change scheme %v", idsOf(viaStatus), wantStatus)
 	}
 }
 

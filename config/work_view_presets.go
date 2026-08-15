@@ -14,11 +14,18 @@ const (
 	ArchivedOnly    = "only"
 )
 
-// Sort modes a Work view preset may declare. Absent sort leaves the ADR-0121
-// status scheme in place under the membership tiers.
+// Sort modes a Work view preset may declare. Absent sort means
+// PresetSortCreatedDesc: creation date is the ordering key on every Work read
+// surface, and the ADR-0121 status scheme is the explicit PresetSortStatus
+// opt-in rather than the implied default (ADR-0210).
 const (
 	PresetSortCreatedDesc = "created_desc"
 	PresetSortCreatedAsc  = "created_asc"
+	// PresetSortStatus is the ordering pop had before ADR-0210: kind-precedence
+	// blocks, each kind's own comparator inside its block, Maps trailing. Nothing
+	// shipped declares it; it exists so whoever wants the old ranking back asks
+	// for it in one line.
+	PresetSortStatus = "status"
 )
 
 var (
@@ -30,6 +37,7 @@ var (
 	validPresetSorts = map[string]bool{
 		PresetSortCreatedDesc: true,
 		PresetSortCreatedAsc:  true,
+		PresetSortStatus:      true,
 	}
 	presetEntryKeys = map[string]bool{
 		"name": true, "label": true, "status": true, "unfolded": true,
@@ -50,7 +58,7 @@ type WorkViewPresetFilter struct {
 	Unfolded      *bool    `toml:"unfolded,omitempty" desc:"Match unfolded (true) or folded (false) rows."`
 	Archived      string   `toml:"archived,omitempty" desc:"Archived-row mode: exclude|include|only (default exclude)."`
 	CreatedWithin string   `toml:"created_within,omitempty" desc:"Only rows whose id date prefix falls within this duration."`
-	Sort          string   `toml:"sort,omitempty" desc:"Row sort under the membership tiers: created_desc|created_asc."`
+	Sort          string   `toml:"sort,omitempty" desc:"Row sort under the membership tiers: created_desc|created_asc|status (default created_desc)."`
 	// Muted matches on a live Mute (ADR-0200 decision 8). Unset admits both, so
 	// a preset that says nothing about mute keeps showing muted rows; the mute
 	// expires against the evaluation instant, not against a stored flag.
@@ -446,7 +454,7 @@ func decodePresetFilter(m map[string]interface{}, f *WorkViewPresetFilter, probl
 		if !ok {
 			*problems = append(*problems, fmt.Sprintf("%ssort must be a string, got %T", prefix, raw))
 		} else if !validPresetSorts[s] {
-			*problems = append(*problems, fmt.Sprintf("%ssort %q is not created_desc|created_asc", prefix, s))
+			*problems = append(*problems, fmt.Sprintf("%ssort %q is not created_desc|created_asc|status", prefix, s))
 		} else {
 			f.Sort = s
 		}

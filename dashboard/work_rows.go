@@ -3,7 +3,6 @@ package dashboard
 import (
 	"fmt"
 
-	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/work"
 	"github.com/glebglazov/pop/work/ref"
 )
@@ -173,14 +172,4 @@ func mapRow(row DashboardRow) bool {
 // leaks into column math.
 func dashboardStatusCellText(kinds workKinds, row DashboardRow) string {
 	return work.StatusCellText(kinds.statusSegments(row))
-}
-
-// sortDashboardRows applies the shared Queue surface order to a set of dashboard
-// rows. The comparator — the ADR-0121 membership tiers, status bands,
-// intra-project status order and SetID tiebreak, optionally displaced by a
-// preset's sort (ADR-0197) — is the Task-set kind's own; the snapshot builder
-// reaches it through that kind's Less, and this is the queue-side seam the
-// static status render keys on. sortMode empty keeps the status scheme.
-func sortDashboardRows(rows []DashboardRow, sortMode string) {
-	tasks.SortWorkRows(rows, sortMode)
 }

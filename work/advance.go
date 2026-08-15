@@ -112,10 +112,16 @@ func (e AdvanceEvent) Line() string {
 	return e.Outcome.Message
 }
 
-// Advancers returns the advanceable kinds of a wiring list in kind precedence
-// order — the order dispatch runs in, because dispatch mutates the shared
-// checkout ledger and "first wins, rest defer" needs a defined one.
-func Advancers(kinds []Kind) []Advancer {
+// AdvancersInKindPrecedence returns the advanceable kinds of a wiring list in
+// kind precedence order — the order dispatch runs in, because dispatch mutates
+// the shared checkout ledger and "first wins, rest defer" needs a defined one.
+//
+// The order is in the name because scheduling is the one caller that may not
+// take a Work read surface's ordering: read surfaces order by creation date now
+// and a preset can flip that at will (ADR-0210), so a scheduler that inherited
+// the display default would have the ledger's tiebreak moved under it by a
+// config edit.
+func AdvancersInKindPrecedence(kinds []Kind) []Advancer {
 	var advancers []Advancer
 	for _, k := range kindsInPrecedence(kinds) {
 		if adv, ok := k.(Advancer); ok {

@@ -63,6 +63,54 @@ func TestShippedWorkViewPresetsVocabulary(t *testing.T) {
 	if muted.Sort != PresetSortCreatedDesc {
 		t.Fatalf("muted sort = %q, want created_desc (never a resurfacing sort)", muted.Sort)
 	}
+
+	// ADR-0210 flipped what an absent sort means, not what the roster declares:
+	// active, unfolded, all and muted keep saying nothing about ordering and so
+	// become date-ordered, and nothing shipped pins the status scheme back.
+	for _, p := range presets {
+		if p.Sort == PresetSortStatus {
+			t.Fatalf("shipped preset %q declares sort = status; the pre-change ordering is opt-in only", p.Name)
+		}
+	}
+	for _, name := range []string{"active", "unfolded", "all"} {
+		p, ok := shippedPresetByName(name)
+		if !ok {
+			t.Fatalf("shipped %s missing", name)
+		}
+		if p.Sort != "" {
+			t.Fatalf("%s sort = %q, want unset (created_desc by default)", name, p.Sort)
+		}
+	}
+}
+
+// TestStatusSortIsAcceptedByPresetValidation pins the third sort value at the
+// config edge (ADR-0210): `status` decodes into the preset, and an unknown value
+// is still refused with the whole vocabulary named.
+func TestStatusSortIsAcceptedByPresetValidation(t *testing.T) {
+	cfg, err := Load(writeConfig(t, `
+[[work.dashboard.tasks.presets]]
+name = "old-ranking"
+sort = "status"
+
+[[work.dashboard.tasks.presets]]
+name = "nonsense"
+sort = "by-vibes"
+`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got := cfg.ResolveWorkViewPresets()
+	if len(got) == 0 || got[0].Name != "old-ranking" || got[0].Sort != PresetSortStatus {
+		t.Fatalf("resolved presets = %#v, want old-ranking carrying sort = status", got)
+	}
+	if !containsSubstring(cfg.Warnings, `sort "by-vibes" is not created_desc|created_asc|status`) {
+		t.Fatalf("Warnings missing the unknown-sort rejection; got: %v", cfg.Warnings)
+	}
+	for _, p := range got {
+		if p.Name == "nonsense" && p.Sort != "" {
+			t.Fatalf("rejected sort survived onto %#v", p)
+		}
+	}
 }
 
 func TestResolveWorkViewPresetsDefaultShipped(t *testing.T) {

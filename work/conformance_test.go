@@ -297,12 +297,12 @@ func TestKindConformance(t *testing.T) {
 	}
 }
 
-// TestSnapshotOrdersByKindPrecedenceThenKindLess pins the seam's whole ordering
-// rule over both real adapters: containers arrive in kind order — task sets, then
-// Maps — and inside a kind in that kind's own order. This is the ordering change
-// the seam makes deliberately: a Map can no longer interleave between two
-// projects' task sets, which is the accepted cost of having no shared status
-// taxonomy to rank kinds against.
+// TestSnapshotOrdersByKindPrecedenceThenKindLess pins what OrderByKindPrecedence
+// still means over both real adapters: containers arrive in kind order — task
+// sets, then Maps — and inside a kind in that kind's own order, so a Map can
+// never interleave between two projects' task sets. It is the pre-ADR-0210 page,
+// which scheduling pins and which `sort = "status"` asks a read surface for; the
+// date-ordered default lives in ordering_test.go.
 func TestSnapshotOrdersByKindPrecedenceThenKindLess(t *testing.T) {
 	f := newFixture(t)
 
@@ -317,10 +317,11 @@ func TestSnapshotOrdersByKindPrecedenceThenKindLess(t *testing.T) {
 		got = append(got, string(c.Kind)+":"+c.ID)
 	}
 	want := []string{
-		// Task sets first, in the Task-set comparator's order (READY band above the
-		// rest band).
-		"task-set:2026-07-01-demo",
+		// Task sets first, in the Task-set comparator's order — newest first, since
+		// this fixture's preset declares no sort and absent sort is created_desc
+		// (ADR-0210). Only the block boundary is precedence's doing.
 		"task-set:2026-07-02-later",
+		"task-set:2026-07-01-demo",
 		// Then Maps.
 		"map:2026-07-01-chart",
 	}
@@ -385,8 +386,8 @@ func TestAnAttributedMapRowPinsAboveTheWholeTaskSetBlock(t *testing.T) {
 	}
 	want := []string{
 		"▸map:2026-07-01-chart",
-		" task-set:2026-07-01-demo",
 		" task-set:2026-07-02-later",
+		" task-set:2026-07-01-demo",
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("snapshot order = %v, want %v — the attributed Map first and marked, once, the rest as they were", got, want)

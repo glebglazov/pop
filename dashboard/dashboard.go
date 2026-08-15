@@ -690,7 +690,7 @@ func BuildPageSnapshot(d *drain.Deps, cfg *config.Config, page Page, pane work.P
 	if d == nil {
 		d = drain.DefaultDeps()
 	}
-	return work.BuildSnapshotForPane(pageSpec(page).kinds(d, cfg), pane, work.OrderByKindPrecedence)
+	return work.BuildSnapshotForPane(pageSpec(page).kinds(d, cfg), pane, d.WorkOrdering())
 }
 
 func newQueueDashboard(d *drain.Deps, cfg *config.Config, snap DashboardSnapshot) QueueDashboard {
@@ -1935,7 +1935,7 @@ func (m QueueDashboard) confirmBindModal() (tea.Model, tea.Cmd) {
 // tmux round-trip happens here — only the answer is re-derived.
 func (m QueueDashboard) reload() tea.Cmd {
 	return func() tea.Msg {
-		snap, err := work.BuildSnapshotForPane(m.page.kinds(m.d, m.cfg), m.pane, work.OrderByKindPrecedence)
+		snap, err := work.BuildSnapshotForPane(m.page.kinds(m.d, m.cfg), m.pane, m.d.WorkOrdering())
 		live := loadLivePaneCache(m.d)
 		return dashboardRowsMsg{page: m.page.id, snap: snap, live: live, err: err}
 	}
@@ -3471,7 +3471,7 @@ func writeDashboardFooter(b *strings.Builder, height int, hint string) {
 // quit for any other reason), leaving the workbench-aware open to the command
 // layer (task 02).
 func RunDashboard(d *drain.Deps, cfg *config.Config) (string, error) {
-	snap, err := work.BuildSnapshot(d.WorkKinds(cfg))
+	snap, err := work.BuildSnapshotForPane(d.WorkKinds(cfg), work.PaneFacts{}, d.WorkOrdering())
 	if err != nil {
 		return "", err
 	}

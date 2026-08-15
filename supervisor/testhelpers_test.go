@@ -29,7 +29,7 @@ func bindSetInPlace(t *testing.T, d *drain.Deps, repo, setID string) {
 // taskSetAdvancer is the Task-set entry of the wiring list the supervisor drives.
 func taskSetAdvancer(t *testing.T, d *drain.Deps, cfg *config.Config) work.Advancer {
 	t.Helper()
-	advs := work.Advancers(d.WorkKinds(cfg))
+	advs := work.AdvancersInKindPrecedence(d.WorkKinds(cfg))
 	if len(advs) == 0 {
 		t.Fatal("no advancers wired")
 	}

@@ -72,16 +72,19 @@ var (
 	workBuildStatus = drain.BuildStatus
 	// workBuildStatusTables builds the two tables `pop work status` prints through
 	// the work data core (ADR-0143): the command surface is a consumer of
-	// work.BuildSnapshot, so status renders the same rows the dashboard's two pages
-	// derive — page A's, then page B's.
+	// work.BuildSnapshotForPane, so status renders the same rows the dashboard's
+	// two pages derive — page A's, then page B's. It reads the same ordering off
+	// the same active preset the dashboard does (ADR-0210), which is what keeps
+	// the two surfaces row-for-row identical rather than merely similar.
 	workBuildStatusTables = func(d *drain.Deps, cfg *config.Config) (dashboard.StatusTables, error) {
+		order := d.WorkOrdering()
 		setKinds := d.WorkKinds(cfg)
-		sets, err := work.BuildSnapshot(setKinds)
+		sets, err := work.BuildSnapshotForPane(setKinds, work.PaneFacts{}, order)
 		if err != nil {
 			return dashboard.StatusTables{}, err
 		}
 		routineKinds := d.RoutinePageKinds(cfg)
-		routines, err := work.BuildSnapshot(routineKinds)
+		routines, err := work.BuildSnapshotForPane(routineKinds, work.PaneFacts{}, order)
 		if err != nil {
 			return dashboard.StatusTables{}, err
 		}

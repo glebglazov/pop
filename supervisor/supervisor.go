@@ -115,8 +115,14 @@ func tick(d *drain.Deps, out io.Writer, runOut *runOutputState) {
 // list yet — the Routine dashboard page it belongs to arrives next. Appending is
 // precedence-correct, routine being last in the closed enum, and the special case
 // dies the moment the read list carries it.
+//
+// The daemon pins kind precedence here and takes no ordering from the active
+// preset, which is why it names it: every Work read surface orders by creation
+// date now and a preset may flip that (ADR-0210), but this list feeds the serial
+// dispatch that writes the checkout occupancy ledger, where "first wins, rest
+// defer" must not be re-ranked by a display setting.
 func advancers(d *drain.Deps, cfg *config.Config) []work.Advancer {
-	return append(work.Advancers(d.AdvanceKinds(cfg)), d.RoutineAdvancer(cfg))
+	return append(work.AdvancersInKindPrecedence(d.AdvanceKinds(cfg)), d.RoutineAdvancer(cfg))
 }
 
 // kindPass is one kind's half of a supervisor tick: the advancer, the kind it

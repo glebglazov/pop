@@ -75,6 +75,11 @@ func (o Ordering) createdOrder() bool {
 // kinds, in kind-precedence order. It is the whole of the builder: every read of
 // the filesystem and of pop.db happens inside a kind's Load, so `work` itself
 // scans nothing and knows nothing about what a task set or a Map is.
+//
+// It is the convenience for callers with no active preset in hand — wiring
+// checks and tests. A read surface calls BuildSnapshotForPane and passes the
+// ordering its preset asked for (ADR-0210), because a page that took the
+// kind-precedence default from here would silently ignore the human's sort.
 func BuildSnapshot(kinds []Kind) (Snapshot, error) {
 	return BuildSnapshotForPane(kinds, PaneFacts{}, OrderByKindPrecedence)
 }

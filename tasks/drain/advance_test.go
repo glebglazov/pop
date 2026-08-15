@@ -34,8 +34,8 @@ func TestOnlyTheTaskSetKindAdvances(t *testing.T) {
 	if advanceable[ref.KindMap] {
 		t.Fatal("the Map kind must not satisfy work.Advancer: Maps are never advanced unattended")
 	}
-	if got := len(work.Advancers(kinds)); got != 1 {
-		t.Fatalf("work.Advancers over the wired list = %d, want only the Task-set kind", got)
+	if got := len(work.AdvancersInKindPrecedence(kinds)); got != 1 {
+		t.Fatalf("work.AdvancersInKindPrecedence over the wired list = %d, want only the Task-set kind", got)
 	}
 }
 
@@ -177,7 +177,7 @@ func statusReads(t *testing.T, d *Deps, cfg *config.Config) {
 // taskSetAdvancer returns the wired Task-set kind's advance seam.
 func taskSetAdvancer(t *testing.T, d *Deps, cfg *config.Config) work.Advancer {
 	t.Helper()
-	advancers := work.Advancers(d.WorkKinds(cfg))
+	advancers := work.AdvancersInKindPrecedence(d.WorkKinds(cfg))
 	if len(advancers) != 1 {
 		t.Fatalf("advanceable kinds = %d, want the Task-set kind alone", len(advancers))
 	}

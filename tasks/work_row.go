@@ -70,19 +70,18 @@ func statusOrder(s TaskSetStatus) int {
 // WorkRowLess is the shared Queue surface comparator (ADR-0121 / ADR-0197), the
 // single source of the total order both `pop work dashboard` and `pop work
 // status` read. Rows float by membership tier (live-drain → auto-drain →
-// orphaned) under every preset. Below the tiers, an empty sortMode keeps the
-// ADR-0121 status scheme; a preset's created_desc / created_asc replaces that
-// scheme only (ADR-0197 decision 6).
+// orphaned) under every preset. Below the tiers, creation date is what orders
+// them: an empty sortMode means created_desc, the same as declaring it
+// (ADR-0210). Only the explicit `status` sort reaches the ADR-0121 scheme, which
+// is now an opt-in rather than the implied default.
 func WorkRowLess(a, b work.Container, sortMode string) bool {
 	if ta, tb := work.Tier(a), work.Tier(b); ta != tb {
 		return ta < tb
 	}
-	switch sortMode {
-	case config.PresetSortCreatedDesc, config.PresetSortCreatedAsc:
-		return createdSortLess(a, b, sortMode)
-	default:
+	if sortMode == config.PresetSortStatus {
 		return statusSchemeLess(a, b)
 	}
+	return createdSortLess(a, b, sortMode)
 }
 
 // statusSchemeLess is the ADR-0121 status scheme under the membership tiers:
@@ -113,7 +112,9 @@ func statusSchemeLess(a, b work.Container) bool {
 // createdSortLess orders by identifier date prefix under the membership tiers.
 // Ids with no parseable date always sort after every dated id (both directions),
 // then by ID descending among themselves — a defined position rather than an
-// arbitrary one (ADR-0197). Equal dates break on ID descending.
+// arbitrary one (ADR-0197). Equal dates break on ID descending. Every sortMode
+// but created_asc reads as newest-first, which is what makes an absent sort mean
+// created_desc.
 func createdSortLess(a, b work.Container, sortMode string) bool {
 	ta, oka := IDCreatedAt(a.ID)
 	tb, okb := IDCreatedAt(b.ID)
@@ -149,7 +150,7 @@ func StampWorkCreatedAt(containers []work.Container) {
 }
 
 // SortWorkRows applies the shared Queue surface order (WorkRowLess) to a set of
-// Work rows. sortMode is the active preset's sort (empty = status scheme).
+// Work rows. sortMode is the active preset's sort (empty = created_desc).
 func SortWorkRows(rows []work.Container, sortMode string) {
 	sort.SliceStable(rows, func(i, j int) bool {
 		return WorkRowLess(rows[i], rows[j], sortMode)
