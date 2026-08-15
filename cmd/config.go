@@ -160,8 +160,8 @@ With a key argument, only that key is printed.`,
 // over (ADR-0202 decision 10).
 var configDashboardCmd = &cobra.Command{
 	Use:   "dashboard",
-	Short: "Browse the config keys you can override",
-	Long: `Browse the config keys you can override, and what each one resolves to.
+	Short: "Browse everything in force here — config keys and conventions",
+	Long: `Browse what is in force in this directory, and where each answer comes from.
 
 The left pane lists every overridable key — every config leaf except the ones
 pop config keys marks [override: never] — with its description beneath. Type to
@@ -174,19 +174,28 @@ Below them sit the keys of the repository you are standing in, spelled
 repo.<key> — the leaves pop config keys --scope repo lists. Editing one states
 it for that repository, so every worktree of it reads the one answer.
 
+Last come that repository's conventions, spelled conventions.<kind> — the prose
+pop conventions get prints in full. A convention resolves to a stack of layers
+rather than to one value, so its preview is every layer that speaks, labelled
+with its origin, lowest rank first.
+
 The right pane previews the highlighted key in config format: the effective
 value as TOML, the layer that produced it (the override layer, your config.toml,
 a built-in default, or a fallthrough to another key), and, where an override is
 in force, the value it is standing on.
 
-Three keys write the override layer for the highlighted key:
+Three keys write the layer that is yours for the highlighted row — the override
+layer for a config key, your ~/.agents/docs/<kind>.overlay.md for a convention:
 
-  enter  edit the value in $EDITOR, seeded with the whole key = value line in
-         force today. Handing back an empty buffer cancels; an explicitly empty
-         collection is a real value, which is how a group's fallthrough is
-         disabled on purpose. A value that would produce a config finding
-         re-opens the editor with the problem instead of being written.
-  C-y    copy the source value down as the override, without an editor.
+  enter  edit in $EDITOR. A config key is seeded with the whole key = value line
+         in force today; a convention with your overlay, which composes on top of
+         the layers below rather than replacing them. Handing back an empty
+         buffer cancels; an explicitly empty collection is a real value, which is
+         how a group's fallthrough is disabled on purpose. A value that would
+         produce a config finding re-opens the editor with the problem instead of
+         being written.
+  C-y    copy the source value down as the override, without an editor. A
+         convention has no single value below to copy, and says so.
   C-x    remove the override, restoring the source. There is no confirmation:
          C-y puts the source value back.
 
@@ -272,7 +281,10 @@ func runConfigDashboard(cmd *cobra.Command, _ []string) error {
 		path = config.DefaultConfigPathWith(d.configDeps())
 	}
 	checkout, _ := d.DirOrGetwd()
-	writer := confighost.NewWriter(d.configDeps(), path, checkout)
+	// The convention rows resolve through the cmd layer's own seam, so the
+	// Convention memory layer is read out of the data dir every other verb routes
+	// to rather than one derived here.
+	writer := confighost.NewWriter(d.configDeps(), path, checkout).WithConventions(d.conventionsDeps())
 	rows, err := writer.Rows()
 	if err != nil {
 		return err

@@ -117,52 +117,94 @@ func MemoryPath(d *Deps, kind Kind, cwd string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(id.StorageDir, "conventions", string(kind)+".md"), nil
+	return memoryPathIn(id.StorageDir, kind), nil
 }
 
-// stackPaths derives the four layer paths for kind, lowest rank first, reading
-// nothing. Both git-derived paths resolve from cwd, so a caller outside a
-// repository is refused here rather than silently getting a two-layer stack.
-func stackPaths(d *Deps, kind Kind, cwd string) ([]Layer, error) {
+// memoryPathIn is where Convention memory sits under a repository's storage
+// directory. The write side reaches it through MemoryPath and the stack builds
+// it from roots it already holds; both spell it here so they cannot drift.
+func memoryPathIn(storageDir string, kind Kind) string {
+	return filepath.Join(storageDir, "conventions", string(kind)+".md")
+}
+
+// stackRoots is everything a stack's paths derive from that is about the
+// repository rather than about the kind: the human's documents directory, the
+// repository's Task storage directory and the checkout's top level. Resolving
+// it costs two git questions, so it is resolved once and every kind's paths are
+// built from it — a caller asking for all the kinds at once pays for one
+// repository, not one per kind.
+type stackRoots struct {
+	agentsDocs string
+	storageDir string
+	topLevel   string
+}
+
+// resolveStackRoots answers those three for the repository owning cwd. Both
+// git-derived roots resolve from cwd, so a caller outside a repository is
+// refused here rather than silently getting a two-layer stack.
+func resolveStackRoots(d *Deps, cwd string) (stackRoots, error) {
 	home, err := d.fs().UserHomeDir()
 	if err != nil {
-		return nil, err
+		return stackRoots{}, err
 	}
-	agentsDocs := filepath.Join(home, ".agents", "docs")
-
-	memory, err := MemoryPath(d, kind, cwd)
+	id, err := tasks.ResolveRepositoryIdentity(d.tasksDeps(), cwd)
 	if err != nil {
-		return nil, err
+		return stackRoots{}, err
 	}
-
 	// The repository's document is read from the checkout the caller stands in,
 	// not from the main worktree: it is version-controlled, so the copy in front
 	// of you is the one your branch is working against.
 	topLevel, err := tasks.NormalizeProjectPathWith(d.tasksDeps(), cwd)
 	if err != nil {
-		return nil, err
+		return stackRoots{}, err
 	}
-
-	return []Layer{
-		{Origin: OriginUserDefaults, Path: filepath.Join(agentsDocs, string(kind)+".md")},
-		{Origin: OriginMemory, Path: memory},
-		{Origin: OriginRepository, Path: filepath.Join(topLevel, "docs", "agents", string(kind)+".md")},
-		{Origin: OriginOverlay, Path: filepath.Join(agentsDocs, string(kind)+".overlay.md")},
+	return stackRoots{
+		agentsDocs: filepath.Join(home, ".agents", "docs"),
+		storageDir: id.StorageDir,
+		topLevel:   topLevel,
 	}, nil
+}
+
+// layers derives the four layer paths for kind, lowest rank first, reading
+// nothing.
+func (r stackRoots) layers(kind Kind) []Layer {
+	return []Layer{
+		{Origin: OriginUserDefaults, Path: filepath.Join(r.agentsDocs, string(kind)+".md")},
+		{Origin: OriginMemory, Path: memoryPathIn(r.storageDir, kind)},
+		{Origin: OriginRepository, Path: filepath.Join(r.topLevel, "docs", "agents", string(kind)+".md")},
+		{Origin: OriginOverlay, Path: overlayPathIn(r.agentsDocs, kind)},
+	}
 }
 
 // Resolve reads the whole Convention stack for kind in the repository owning
 // cwd. Every rank is returned whether or not it holds something: a caller that
 // found nothing still needs to be told where pop looked.
 func Resolve(d *Deps, kind Kind, cwd string) (Stack, error) {
-	layers, err := stackPaths(d, kind, cwd)
+	stacks, err := ResolveAll(d, cwd, kind)
 	if err != nil {
 		return Stack{}, err
 	}
-	for i := range layers {
-		readLayer(d, &layers[i])
+	return stacks[0], nil
+}
+
+// ResolveAll reads several kinds' stacks in one pass over one repository, in the
+// order asked for. Every caller that shows more than one kind — `get` with no
+// kind, the Config dashboard's rows — goes through here, because the repository
+// each stack is about is the same one.
+func ResolveAll(d *Deps, cwd string, kinds ...Kind) ([]Stack, error) {
+	roots, err := resolveStackRoots(d, cwd)
+	if err != nil {
+		return nil, err
 	}
-	return Stack{Kind: kind, Layers: layers}, nil
+	stacks := make([]Stack, 0, len(kinds))
+	for _, kind := range kinds {
+		layers := roots.layers(kind)
+		for i := range layers {
+			readLayer(d, &layers[i])
+		}
+		stacks = append(stacks, Stack{Kind: kind, Layers: layers})
+	}
+	return stacks, nil
 }
 
 // readLayer fills in what is on disk at a layer's path. An unreadable path is

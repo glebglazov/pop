@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/confighost"
+	"github.com/glebglazov/pop/conventions"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/ui"
 )
@@ -122,7 +123,7 @@ func pressConfigDashboard(m *ui.ConfigDashboard, msg tea.KeyPressMsg) {
 // longer lists it.
 func selectKey(t *testing.T, m *ui.ConfigDashboard, key string) {
 	t.Helper()
-	for i := 0; i < len(config.OverrideKeys())+len(config.RepoScopeKeyDocs()); i++ {
+	for i := 0; i < len(config.OverrideKeys())+len(config.RepoScopeKeyDocs())+len(conventions.Kinds()); i++ {
 		if row, ok := m.Selected(); ok && row.Key == key {
 			return
 		}

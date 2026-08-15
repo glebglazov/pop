@@ -38,7 +38,7 @@ A derivation nobody records is one the next agent pays for again.
 - **Derived from history** — by you, from the log, in the step above — goes to
   the **pop memory** layer. It is pop's inference about one repository on one
   machine, held at pop's own rank, and it records what it was derived from so a
-  reader can weigh it. `pop repo conventions get commits` names that layer's
+  reader can weigh it. `pop conventions get commits` names that layer's
   path.
 - **Stated by the human in session** — "we write our scopes as the package
   name" — is a fact the team owns, so offer to put it in the repository's

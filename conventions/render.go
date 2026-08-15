@@ -14,18 +14,19 @@ import (
 const overrideRule = `These layers compose: read every one of them. They are printed lowest rank
 first, and where two of them directly contradict, the later one wins.`
 
+// overrideRuleLine is the same statement for a surface that has one line to say
+// it in — a preview pane a narrow column wide, where the two-line rule above
+// would be truncated rather than read.
+const overrideRuleLine = "These layers compose; where two contradict, the later one wins."
+
 // Get resolves and prints the Convention stack for each kind in turn. It
 // returns ErrNoConvention when every kind asked about was empty — the miss the
 // CLI turns into exit 1 — after the output is already written, so the caller
 // has been told where pop looked either way.
 func Get(d *Deps, w io.Writer, cwd string, kinds ...Kind) error {
-	stacks := make([]Stack, 0, len(kinds))
-	for _, kind := range kinds {
-		stack, err := Resolve(d, kind, cwd)
-		if err != nil {
-			return err
-		}
-		stacks = append(stacks, stack)
+	stacks, err := ResolveAll(d, cwd, kinds...)
+	if err != nil {
+		return err
 	}
 	if err := RenderStacks(w, stacks); err != nil {
 		return err
@@ -89,6 +90,54 @@ func RenderStack(w io.Writer, s Stack) error {
 	return nil
 }
 
+// StackPreview renders one kind's stack for a surface that shows it in a pane
+// beside values of another sort: every layer that speaks, labelled with its
+// origin and how far that origin reaches, in the same rank order and under the
+// same rule `get` prints, then the provenance line and where the layer an editor
+// writes lives.
+//
+// It returns a string rather than writing to an io.Writer because its consumer
+// is a pane and not a stream, and it lives here rather than in that consumer
+// because resolution and every rendering of a stack are this package's: a
+// preview that labelled the layers itself could disagree with what `pop
+// conventions get` prints for the same repository (ADR-0212 decision 8).
+func StackPreview(s Stack) string {
+	var b strings.Builder
+	present := s.Present()
+	if len(present) == 0 {
+		fmt.Fprintf(&b, "%s — no layer speaks.\n\nPop consulted, lowest rank first:\n", s.Kind)
+		for _, l := range s.Layers {
+			fmt.Fprintf(&b, "  %-14s %s\n", l.Origin, l.Path)
+		}
+	} else {
+		fmt.Fprintf(&b, "%s — %d of %d layers speak, lowest rank first.\n%s\n",
+			s.Kind, len(present), len(s.Layers), overrideRuleLine)
+		for i, l := range present {
+			fmt.Fprintf(&b, "\n%d. %s — %s\n%s\n\n%s\n",
+				i+1, strings.ToUpper(string(l.Origin)), l.Origin.Scope(), l.Path, l.Body)
+		}
+		fmt.Fprintf(&b, "\n%s\n", s.Provenance())
+	}
+	fmt.Fprintf(&b, "\n%s\n", s.overlayNote())
+	return b.String()
+}
+
+// overlayNote says where the human's own layer is and whether it holds
+// anything. An editing surface writes that one layer, so a reader deciding
+// whether to edit needs to know which of the four they would be changing.
+func (s Stack) overlayNote() string {
+	for _, l := range s.Layers {
+		if l.Origin != OriginOverlay {
+			continue
+		}
+		if l.Present {
+			return "your overlay, edited here:\n" + l.Path
+		}
+		return "your overlay — not written yet — would be:\n" + l.Path
+	}
+	return ""
+}
+
 // RenderSet confirms a write of the Convention memory layer: which file holds
 // it now, the provenance stored beside it, and the reminder that this is one
 // rank of four rather than the repository's answer — a writer who thinks it is
@@ -107,7 +156,7 @@ func RenderSet(w io.Writer, kind Kind, path, derivedFrom, derivedAt string, repl
 		return err
 	}
 	fmt.Fprintf(w, "\nThis is the pop memory rank, not the whole convention. Run\n"+
-		"`pop repo conventions get %s` for the stack it now composes into.\n", kind)
+		"`pop conventions get %s` for the stack it now composes into.\n", kind)
 	return nil
 }
 

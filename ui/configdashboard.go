@@ -16,12 +16,16 @@ import (
 	"github.com/junegunn/fzf/src/util"
 )
 
-// The Config dashboard: a searchable list of overridable config keys on the
-// left, a config-format preview of the highlighted key on the right (ADR-0202
-// decisions 10 and 12). It is a self-contained component rather than a page of
-// any one program, because the three hosts it must open from — the Work
-// dashboard, the project picker and the worktree picker — are unrelated tea
-// programs. `pop config dashboard` runs this same model as a top-level program.
+// The Config dashboard: a searchable list of the things in force where it was
+// opened on the left, a preview of the highlighted one on the right (ADR-0202
+// decisions 10 and 12). Most rows are overridable config keys and preview as
+// config; a row may instead hold prose composed from several layers, which
+// previews as the caller's own text and edits as Markdown (ADR-0212 decision 8).
+// Either way this component holds no knowledge of what a row means. It is a
+// self-contained component rather than a page of any one program, because the
+// three hosts it must open from — the Work dashboard, the project picker and the
+// worktree picker — are unrelated tea programs. `pop config dashboard` runs this
+// same model as a top-level program.
 //
 // Two contracts bind every host (ADR-0202 decision 11): while this model is open
 // the host suspends its own keys, and this model never writes to stdout on any
@@ -96,7 +100,22 @@ type ConfigDashboardPreview struct {
 	// Reach is the key's declared reach; nil for a key that declares none, which
 	// renders no reach block at all.
 	Reach []ConfigDashboardReachLine
+	// Layers, when set, is the whole preview: text the caller has already
+	// rendered, shown instead of every field above. It is how a row whose value is
+	// a composed stack of prose — rather than one value with one provenance line —
+	// says what is in force (ADR-0212 decision 8). This component decides where it
+	// goes on screen and nothing about what it says.
+	Layers string
+	// EditSeed is what the editor opens on for such a row, and it is not what
+	// Layers shows: the stack composes many layers and an edit writes exactly one
+	// of them, so seeding the buffer with the whole preview would have the human
+	// hand back layers they never wrote. Ignored unless Layers is set.
+	EditSeed string
 }
+
+// prose reports a row whose value is written prose rather than a config value:
+// the preview is the caller's own text and the editor buffer is Markdown.
+func (p ConfigDashboardPreview) prose() bool { return p.Layers != "" }
 
 // ConfigDashboardRow is one overridable key as the list shows it.
 type ConfigDashboardRow struct {
@@ -331,31 +350,38 @@ func (m *ConfigDashboard) act(what string, do func(key string) error) tea.Cmd {
 // edit opens the selected key in $EDITOR. The buffer is seeded with the whole
 // `key = value` line that is in force — the override where there is one, the
 // source value copied down where there is not — so the human edits a real value
-// rather than an empty file (ADR-0202 decision 7).
+// rather than an empty file (ADR-0202 decision 7). A prose row seeds its own
+// buffer instead, holding the one layer an edit there writes.
 func (m *ConfigDashboard) edit() tea.Cmd {
 	row, ok := m.list.Selected()
 	if !ok {
 		return nil
 	}
-	return m.openEditor(row.Key, row.Preview.ValueTOML)
+	if row.Preview.prose() {
+		return m.openEditor(row.Key, row.Preview.EditSeed, ".md")
+	}
+	return m.openEditor(row.Key, row.Preview.ValueTOML, ".toml")
 }
 
 // configEditorDoneMsg reports that the editor process for one key has exited.
+// It carries the buffer's suffix so a re-open after a refusal lands the human
+// back in the same kind of file they were just editing.
 type configEditorDoneMsg struct {
-	key  string
-	path string
-	err  error
+	key    string
+	path   string
+	suffix string
+	err    error
 }
 
-func (m *ConfigDashboard) openEditor(key, buffer string) tea.Cmd {
-	path, err := writeEditorBuffer(buffer)
+func (m *ConfigDashboard) openEditor(key, buffer, suffix string) tea.Cmd {
+	path, err := writeEditorBuffer(buffer, suffix)
 	if err != nil {
 		m.failure = fmt.Sprintf("Could not open an editor buffer for %s: %v", key, err)
 		return nil
 	}
 	m.failure = ""
 	return m.editor(path, func(err error) tea.Msg {
-		return configEditorDoneMsg{key: key, path: path, err: err}
+		return configEditorDoneMsg{key: key, path: path, suffix: suffix, err: err}
 	})
 }
 
@@ -372,11 +398,15 @@ func (m *ConfigDashboard) editorReturned(msg configEditorDoneMsg) tea.Cmd {
 		m.failure = fmt.Sprintf("Could not read the edited buffer for %s: %v", msg.key, err)
 		return nil
 	}
-	buffer := string(data)
+	// Pop's notes come back out here rather than at each reader: for a config key
+	// they are TOML comments the parser would drop anyway, but a prose row's
+	// buffer *is* the value, so a note that survived would be written into the
+	// human's own document.
+	buffer := stripEditorNotes(string(data))
 	// An empty buffer is a cancel, not a deletion: leaving nothing behind is how
 	// a human backs out of an edit, and ctrl+x is how they remove an override
-	// (ADR-0202 decision 7). Pop's own notes do not count as content.
-	if strings.TrimSpace(stripEditorNotes(buffer)) == "" {
+	// (ADR-0202 decision 7).
+	if strings.TrimSpace(buffer) == "" {
 		return nil
 	}
 	problem, err := m.writer.Store(msg.key, buffer)
@@ -388,7 +418,7 @@ func (m *ConfigDashboard) editorReturned(msg configEditorDoneMsg) tea.Cmd {
 		// A file pop wrote itself must never be the source of a finding, so the
 		// human goes back to the buffer with the problem on top of it rather
 		// than having it written and complained about later.
-		return m.openEditor(msg.key, editorBufferWithProblem(problem, buffer))
+		return m.openEditor(msg.key, editorBufferWithProblem(problem, buffer), msg.suffix)
 	}
 	m.refresh()
 	return nil
@@ -444,11 +474,28 @@ func stripEditorNotes(buffer string) string {
 	return strings.Join(kept, "\n")
 }
 
-// writeEditorBuffer stages the buffer as a .toml temp file, so an editor that
-// keys its syntax highlighting off the extension helps the human get the value
-// right the first time.
-func writeEditorBuffer(buffer string) (string, error) {
-	f, err := os.CreateTemp("", "pop-override-*.toml")
+// ConfigEditorNote prefixes each line of text with the comment marker this
+// component writes into an editor buffer and takes back out of it, so a caller
+// seeding a buffer can put guidance in front of the human that storing will
+// never keep. It is exported because the seed for a row belongs to whoever knows
+// what the row holds, and only this package knows which lines are pop's.
+func ConfigEditorNote(text string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
+		b.WriteString(configEditorNote + line + "\n")
+	}
+	return b.String()
+}
+
+// writeEditorBuffer stages the buffer as a temp file under the caller's suffix,
+// so an editor that keys its syntax highlighting off the extension helps the
+// human get the value right the first time — TOML for a config key, Markdown for
+// a row whose value is prose.
+func writeEditorBuffer(buffer, suffix string) (string, error) {
+	if suffix == "" {
+		suffix = ".toml"
+	}
+	f, err := os.CreateTemp("", "pop-override-*"+suffix)
 	if err != nil {
 		return "", err
 	}
@@ -504,7 +551,7 @@ func (m *ConfigDashboard) helpEntries() []HelpEntry {
 	}
 	if m.writer != nil {
 		entries = append(entries,
-			HelpEntry{"Enter", "Edit this key's override in $EDITOR (empty buffer cancels)"},
+			HelpEntry{"Enter", "Edit this row's own layer in $EDITOR (empty buffer cancels)"},
 			HelpEntry{"C-y", "Copy the source value down as the override"},
 			HelpEntry{"C-x", "Remove the override, restoring the source"},
 		)
@@ -534,7 +581,7 @@ func (m *ConfigDashboard) frameSpec() Frame {
 	return Frame{
 		Width:    m.viewWidth(),
 		TermH:    m.viewHeight(),
-		Header:   "  Config · keys you can override",
+		Header:   "  Config · what is in force here",
 		InputBox: m.input.View(),
 		Warnings: warnings,
 		Hints:    hints,
@@ -634,6 +681,13 @@ func (m *ConfigDashboard) previewLines(height int) []string {
 	}
 	plain := lipgloss.NewStyle().Foreground(colorPreview)
 
+	// A prose row's preview is the caller's whole text: the layers that speak are
+	// its provenance, so there is no separate line to name one.
+	if row.Preview.prose() {
+		add(plain, strings.TrimRight(row.Preview.Layers, "\n"))
+		return clipPreview(lines, height)
+	}
+
 	add(plain, row.Preview.ValueTOML)
 	if row.Preview.Provenance != "" {
 		lines = append(lines, "")
@@ -657,6 +711,12 @@ func (m *ConfigDashboard) previewLines(height int) []string {
 		}
 	}
 
+	return clipPreview(lines, height)
+}
+
+// clipPreview keeps the preview inside its pane and says that it did, so a
+// reader knows the value continues past the last line they can see.
+func clipPreview(lines []string, height int) []string {
 	if len(lines) > height {
 		lines = append(lines[:height-1:height-1], hintStyle.Render("  … clipped to fit the pane"))
 	}

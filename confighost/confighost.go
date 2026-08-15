@@ -1,8 +1,8 @@
 // Package confighost opens the Config dashboard inside a program that is not
-// `pop config dashboard`: it holds the write side over the real override layer,
-// the adapter from resolved override views to the component's rows, and the one
-// call a host makes to get a component it can drive (ADR-0202 decisions 10 and
-// 11).
+// `pop config dashboard`: it holds the write side over the real override layer
+// and over the Convention overlay, the adapter from resolved override views to
+// the component's rows, and the one call a host makes to get a component it can
+// drive (ADR-0202 decisions 10 and 11; ADR-0212 decision 8).
 //
 // It exists because the component itself holds no config knowledge and the
 // hosts are unrelated programs — the Work dashboard's shell, the project picker
@@ -37,6 +37,7 @@ import (
 	"fmt"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/conventions"
 	"github.com/glebglazov/pop/ui"
 )
 
@@ -48,14 +49,19 @@ import (
 // of the global surface is read and written whole; a `repo.<key>` row is read
 // against the repository the dashboard was opened in and written into the
 // layer's block for it — which is how a Preferred workbench, a key with no
-// global spelling, is chosen here at all (decision 6).
+// global spelling, is chosen here at all (decision 6). A `conventions.<kind>` row
+// is neither: it holds prose, and writing it states the human's Convention
+// overlay (decision 8, and conventions.go beside this file).
 type Writer struct {
 	deps       *config.Deps
 	configPath string
 	// checkout is the directory the dashboard was opened in, and through it the
-	// repository the repo-scope rows are about. Empty means no repository is in
-	// scope: the rows are absent and every key is global.
+	// repository the repo-scope rows and the convention rows are about. Empty
+	// means no repository is in scope: those rows are absent and every key is
+	// global.
 	checkout string
+	// conventions is the seam the convention rows resolve and write through.
+	conventions *conventions.Deps
 }
 
 // NewWriter builds the write side against one hand-authored config path and the
@@ -63,7 +69,24 @@ type Writer struct {
 // from deps, not from configPath: the two pop-written files sit beside the config
 // dir rather than in it.
 func NewWriter(deps *config.Deps, configPath, checkout string) Writer {
-	return Writer{deps: deps, configPath: configPath, checkout: checkout}
+	return Writer{
+		deps:        deps,
+		configPath:  configPath,
+		checkout:    checkout,
+		conventions: conventionsDeps(deps),
+	}
+}
+
+// WithConventions points the convention rows at a caller's own seam. A host that
+// already resolves conventions for its other verbs passes that one, so the
+// dashboard reads the Convention memory layer out of the same data dir the rest
+// of the program routes to; a host that has no seam of its own keeps the one
+// derived from the config deps.
+func (w Writer) WithConventions(cd *conventions.Deps) Writer {
+	if cd != nil {
+		w.conventions = cd
+	}
+	return w
 }
 
 // repoScope reports the repo-block leaf a row key names, and false for a key of
@@ -76,6 +99,9 @@ func (w Writer) repoScope(key string) (string, bool) {
 }
 
 func (w Writer) Store(key, buffer string) (string, error) {
+	if kind, ok := conventions.RowKind(key); ok {
+		return w.storeConvention(kind, buffer)
+	}
 	if _, ok := w.repoScope(key); ok {
 		return config.StoreRepoOverrideBufferWith(w.deps, w.checkout, key, buffer)
 	}
@@ -83,6 +109,9 @@ func (w Writer) Store(key, buffer string) (string, error) {
 }
 
 func (w Writer) CopySource(key string) error {
+	if kind, ok := conventions.RowKind(key); ok {
+		return copySourceConvention(kind)
+	}
 	if _, ok := w.repoScope(key); ok {
 		return config.CopyRepoOverrideFromSourceWith(w.deps, w.configPath, w.checkout, key)
 	}
@@ -90,12 +119,19 @@ func (w Writer) CopySource(key string) error {
 }
 
 func (w Writer) Remove(key string) error {
+	if kind, ok := conventions.RowKind(key); ok {
+		return conventions.ClearOverlay(w.conventions, kind)
+	}
 	if leaf, ok := w.repoScope(key); ok {
 		return config.DeleteRepoOverrideValueWith(w.deps, w.checkout, leaf)
 	}
 	return config.DeleteOverrideValueWith(w.deps, key)
 }
 
+// Rows is the whole list: the keys of the global surface, the repository's own
+// keys, then its conventions. Conventions come last because they are the rows a
+// reader is least often after; a contested key rises above all of them anyway,
+// and the search reaches every row whatever the order.
 func (w Writer) Rows() ([]ui.ConfigDashboardRow, error) {
 	views, err := config.OverrideKeyViewsWith(w.deps, w.configPath)
 	if err != nil {
@@ -105,7 +141,7 @@ func (w Writer) Rows() ([]ui.ConfigDashboardRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	return Rows(append(views, repoViews...)), nil
+	return append(Rows(append(views, repoViews...)), w.conventionRows()...), nil
 }
 
 // Rows adapts the resolved override views to the component's rows. The

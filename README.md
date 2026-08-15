@@ -129,24 +129,32 @@ Flag: `-s, --switch` — switch tmux session instead of printing path.
 
 ### `pop config dashboard`
 
-Browse the config keys you can override, and what each one resolves to. The left
-pane lists every overridable key — every config leaf except the ones `pop config
-keys` marks `[override: never]` — with its description beneath and a `●` on keys that
-carry an override today; the right pane previews the highlighted key in config
-format — the effective value as TOML, the layer that produced it, and the value
-an override is standing on.
+Browse what is in force where you are standing, and where each answer comes
+from. The left pane lists every overridable key — every config leaf except the
+ones `pop config keys` marks `[override: never]` — then the current repository's
+own `repo.<key>` leaves, then its `conventions.<kind>` rows, each with its
+description beneath and a `●` where your own layer is in force today. The right
+pane previews the highlighted row: a config key in config format — the effective
+value as TOML, the layer that produced it, and the value an override is standing
+on — and a convention as its whole stack, every layer that speaks labelled with
+its origin, lowest rank first.
 
 | Key | Action |
 |-----|--------|
 | type | Filter over key path and description |
 | `↑`/`↓` | Move highlight |
-| `enter` | Edit this key's override in `$EDITOR` |
+| `enter` | Edit this row's own layer in `$EDITOR` |
 | `C-y` | Copy the source value down as the override |
 | `C-x` | Remove the override, restoring the source |
 | `esc` | Close |
 | `C-h` | Help |
 
-`enter` opens your editor on the whole `key = value` line in force today.
+For a convention, the layer that is yours is the overlay —
+`~/.agents/docs/<kind>.overlay.md` — which composes on top of the layers below
+rather than replacing one of them, so `enter` opens your editor on it as
+Markdown and `C-y` says there is no single value to copy down.
+
+For a config key, `enter` opens your editor on the whole `key = value` line in force today.
 Handing back an empty buffer cancels — `C-x` is how an override is removed —
 while an explicitly empty collection is a real value, which is how the verify
 and routine groups' fallthrough to `work.implement.agents` is disabled on

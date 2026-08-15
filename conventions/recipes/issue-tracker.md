@@ -37,7 +37,7 @@ already publishing into, in this order:
 
 - **Derived by you** from the repository's tooling goes to the **pop memory**
   layer — pop's inference about one repository on one machine.
-  `pop repo conventions get issue-tracker` names that layer's path.
+  `pop conventions get issue-tracker` names that layer's path.
 - **Stated by the human**, or true for every repository on this machine, belongs
   further out: offer `docs/agents/issue-tracker.md` when the store is the team's
   and version control should carry it, and prefer refreshing integration when

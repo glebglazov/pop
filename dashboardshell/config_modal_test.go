@@ -100,7 +100,7 @@ func TestConfigModalOpensFromEitherPageAndReturnsToIt(t *testing.T) {
 		if !s.ConfigModalOpen() {
 			t.Fatalf("alt+c on page %v opened no modal", start)
 		}
-		if view := s.View().Content; !strings.Contains(view, "Config · keys you can override") {
+		if view := s.View().Content; !strings.Contains(view, "Config · what is in force here") {
 			t.Fatalf("modal view on page %v:\n%s", start, view)
 		}
 		if s.ActivePage() != start {

@@ -93,7 +93,7 @@ func TestConfigDashboardViewGoldenList(t *testing.T) {
 	got := configDashboardView(m)
 
 	for _, want := range []string{
-		"Config · keys you can override",
+		"Config · what is in force here",
 		"work.implement.agents",
 		"work.verify.agents",
 		"work.routine.agents",

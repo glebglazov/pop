@@ -27,6 +27,44 @@ const (
 // with.
 func Kinds() []Kind { return []Kind{KindCommits, KindIssueTracker} }
 
+// Desc is the one-line description of what a kind answers, for a surface that
+// lists kinds beside things of another sort and has to say what each one is. It
+// is the counterpart of a config key's schema description, and it is here rather
+// than in that surface so two surfaces cannot describe a kind differently.
+func (k Kind) Desc() string {
+	switch k {
+	case KindCommits:
+		return "How this repository writes commits — types, scopes, subject and body style."
+	case KindIssueTracker:
+		return "Which Work store this repository files issues in, and how a skill publishes into it."
+	}
+	return ""
+}
+
+// rowKeyPrefix is how a kind is addressed where it sits beside config keys in
+// one list. It is the command a reader would type to see the same stack in full,
+// so the row's own text says where it came from (ADR-0212 decision 8).
+const rowKeyPrefix = "conventions."
+
+// RowKey spells one kind as a row of that list addresses it.
+func RowKey(kind Kind) string { return rowKeyPrefix + string(kind) }
+
+// RowKind reads a row key back as the kind it names, and false for anything
+// else. It is how a writer holding one key tells a convention row from a config
+// key before it decides what a write to it means.
+func RowKind(key string) (Kind, bool) {
+	name, ok := strings.CutPrefix(key, rowKeyPrefix)
+	if !ok {
+		return "", false
+	}
+	for _, k := range Kinds() {
+		if string(k) == name {
+			return k, true
+		}
+	}
+	return "", false
+}
+
 // KindNames returns the kinds as the strings a caller types.
 func KindNames() []string {
 	kinds := Kinds()

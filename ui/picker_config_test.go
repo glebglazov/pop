@@ -102,7 +102,7 @@ func TestPickerConfigDashboardOpensOnTheGlobalChord(t *testing.T) {
 			if !p.ConfigModalOpen() {
 				t.Fatal("alt+c opened no Config dashboard")
 			}
-			if view := p.View().Content; !strings.Contains(view, "Config · keys you can override") {
+			if view := p.View().Content; !strings.Contains(view, "Config · what is in force here") {
 				t.Fatalf("view over the picker:\n%s", view)
 			}
 		})

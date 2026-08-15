@@ -117,3 +117,67 @@ func TestSplitFrontmatterOnlyTakesAWellFormedFence(t *testing.T) {
 		t.Errorf("unterminated fence was treated as frontmatter: %v / %q", fields, body)
 	}
 }
+
+// TestStackPreviewLabelsEveryLayerThatSpeaks pins what a surface showing a
+// convention beside values of another sort gets: the layers that speak, each
+// labelled with its origin and reach, in rank order, plus where the layer an
+// editor writes lives. Silent layers are not listed — they are what the empty
+// case names.
+func TestStackPreviewLabelsEveryLayerThatSpeaks(t *testing.T) {
+	stack := Stack{Kind: KindCommits, Layers: []Layer{
+		{Origin: OriginUserDefaults, Path: "/h/.agents/docs/commits.md", Present: true, Body: "Imperative subjects."},
+		{Origin: OriginMemory, Path: "/d/conventions/commits.md"},
+		{Origin: OriginRepository, Path: "/r/docs/agents/commits.md", Present: true, Body: "Conventional commits."},
+		{Origin: OriginOverlay, Path: "/h/.agents/docs/commits.overlay.md"},
+	}}
+
+	got := StackPreview(stack)
+
+	defaults := strings.Index(got, "USER DEFAULTS")
+	repository := strings.Index(got, "REPOSITORY")
+	if defaults < 0 || repository < 0 || defaults > repository {
+		t.Fatalf("the two layers that speak are not labelled in rank order:\n%s", got)
+	}
+	for _, want := range []string{
+		"2 of 4 layers speak",
+		"yours, every repository",
+		"the team's, in version control",
+		"Imperative subjects.",
+		"Conventional commits.",
+		"Provenance:",
+		// The layer an editor here would write, named whether or not it holds
+		// anything: a reader deciding to edit needs to know which of the four
+		// they would be changing.
+		"not written yet",
+		"/h/.agents/docs/commits.overlay.md",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("preview missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "/d/conventions/commits.md") {
+		t.Errorf("a silent layer is listed as one that speaks:\n%s", got)
+	}
+}
+
+// An empty stack previews as the places pop looked, the same fact `get` gives a
+// miss — without the recipe, which is a page of method and not a pane of state.
+func TestStackPreviewOfAnEmptyStackNamesWherePopLooked(t *testing.T) {
+	stack := Stack{Kind: KindIssueTracker, Layers: []Layer{
+		{Origin: OriginUserDefaults, Path: "/h/.agents/docs/issue-tracker.md"},
+		{Origin: OriginMemory, Path: "/d/conventions/issue-tracker.md"},
+		{Origin: OriginRepository, Path: "/r/docs/agents/issue-tracker.md"},
+		{Origin: OriginOverlay, Path: "/h/.agents/docs/issue-tracker.overlay.md"},
+	}}
+
+	got := StackPreview(stack)
+
+	if !strings.Contains(got, "no layer speaks") {
+		t.Fatalf("an empty stack does not say so:\n%s", got)
+	}
+	for _, l := range stack.Layers {
+		if !strings.Contains(got, l.Path) {
+			t.Errorf("consulted path %q missing:\n%s", l.Path, got)
+		}
+	}
+}
