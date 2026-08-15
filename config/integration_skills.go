@@ -66,3 +66,20 @@ func ClearIntegrationSkillsDecline() error {
 func ClearIntegrationSkillsDeclineWith(d *Deps) error {
 	return DeleteOverrideValueWith(d, integrationSkillsKey)
 }
+
+// removeIntegrationSkillAliases is the subtraction itself, over the list in
+// force: the aliases dropped, the rest left in the order the layers below put
+// them in.
+func removeIntegrationSkillAliases(skills []string, aliases []string) []string {
+	remove := make(map[string]bool, len(aliases))
+	for _, alias := range aliases {
+		remove[alias] = true
+	}
+	out := skills[:0]
+	for _, skill := range skills {
+		if !remove[skill] {
+			out = append(out, skill)
+		}
+	}
+	return out
+}

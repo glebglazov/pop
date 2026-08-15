@@ -11,13 +11,13 @@ import (
 	"github.com/glebglazov/pop/internal/deps"
 )
 
-// overrideFixture wires a pop data dir (home of both pop-written files) beside a
-// hand-authored config.toml over a real temp tree, so one test can write any of
-// the three layers and read the merge that comes out.
+// overrideFixture wires a pop data dir (home of the one file pop writes, and of
+// the retired record it folds) beside a hand-authored config.toml over a real
+// temp tree, so one test can write any layer and read the merge that comes out.
 type overrideFixture struct {
 	d            *Deps
 	userPath     string
-	runtimePath  string
+	runtimePath  string // the retired record, written only to exercise the fold
 	overridePath string
 }
 
@@ -138,69 +138,6 @@ agents = ["codex"]
 			t.Fatalf("ImplementAgents() = %#v, want the hand-authored list back", got)
 		}
 	})
-}
-
-// TestRuntimeLayerKeepsItsGapFillerRank pins the two pop-written files to
-// opposite ranks in one merge: the runtime layer still loses to the
-// hand-authored file, and the override layer still beats it.
-func TestRuntimeLayerKeepsItsGapFillerRank(t *testing.T) {
-	f := newOverrideFixture(t)
-	writeConfigFile(t, f.runtimePath, `
-[work.implement]
-agents = ["runtime-agent"]
-
-[integrations]
-skills = ["pane"]
-`)
-	writeConfigFile(t, f.userPath, `
-projects = [{ path = "/main" }]
-
-[work.implement]
-agents = ["user-agent"]
-
-[integrations]
-skills = ["tasks"]
-`)
-
-	cfg := f.load(t)
-	if got := cfg.ImplementAgents(); !reflect.DeepEqual(got, []string{"user-agent"}) {
-		t.Fatalf("ImplementAgents() = %#v, want the hand-authored list (runtime is a gap-filler)", got)
-	}
-	skills, err := cfg.IntegrationsSkills()
-	if err != nil {
-		t.Fatalf("IntegrationsSkills() error: %v", err)
-	}
-	if !reflect.DeepEqual(skills, []string{"tasks"}) {
-		t.Fatalf("IntegrationsSkills() = %#v, want [tasks] (runtime loses to the user file)", skills)
-	}
-
-	writeConfigFile(t, f.overridePath, `
-[work.implement]
-agents = ["override-agent"]
-`)
-	if got := f.load(t).ImplementAgents(); !reflect.DeepEqual(got, []string{"override-agent"}) {
-		t.Fatalf("ImplementAgents() = %#v, want the override layer's list", got)
-	}
-}
-
-// TestRuntimePreferredWorkbenchSentinelSurvivesSharedDocument guards the
-// three-valued explicit-none entry (ADR-0078) now that both pop-written files
-// share one document reader: an empty name must still read back as present.
-func TestRuntimePreferredWorkbenchSentinelSurvivesSharedDocument(t *testing.T) {
-	f := newOverrideFixture(t)
-	if err := SetRuntimePreferredWorkbenchWith(f.d, "/repo/app", ""); err != nil {
-		t.Fatalf("SetRuntimePreferredWorkbenchWith() error: %v", err)
-	}
-	name, present, err := RuntimePreferredWorkbenchWith(f.d, "/repo/app")
-	if err != nil {
-		t.Fatalf("RuntimePreferredWorkbenchWith() error: %v", err)
-	}
-	if name != "" || !present {
-		t.Fatalf("name=%q present=%v, want explicit none (present with an empty name)", name, present)
-	}
-	if _, present, _ := RuntimePreferredWorkbenchWith(f.d, "/repo/other"); present {
-		t.Fatal("an unrecorded checkout must read as absent, not explicit none")
-	}
 }
 
 func TestOverrideWriteSetsOnePruneAndDeletesTheFile(t *testing.T) {

@@ -385,15 +385,14 @@ func ResolveTrunkPath(td *tasks.Deps, cfg *config.Config, checkoutPath string) (
 // ResolveTrunkPathWith resolves the Trunk worktree, using cd for the config reads
 // a trunk may come from. A trunk is a path stated at repository scope (ADR-0212
 // decision 3), so every source here names a checkout — the retired `trunk = true`
-// spelling folding to the checkout it marked, whether it sits in a config.toml
-// block or in a runtime record.
+// spelling in a config.toml block folding to the checkout it marked.
 //
 // Order: the override layer's entry for this repository, which is laid over the
-// resolution ladder and so wins outright; then a [repo."<path>"] declaration in
-// config.toml; then what an older pop recorded in config.runtime.toml; then the
-// git main worktree for a non-bare repository. No source is trunk-anchored — a
-// trunk that had to be known before it could be read would never resolve at all
-// (ADR-0150).
+// resolution ladder and so wins outright — and where a trunk an older pop
+// recorded for itself now lives, its record having folded there (decision 5);
+// then a [repo."<path>"] declaration in config.toml; then the git main worktree
+// for a non-bare repository. No source is trunk-anchored — a trunk that had to be
+// known before it could be read would never resolve at all (ADR-0150).
 //
 // Returns (path, false, nil) on success; (_, true, nil) when the repo is bare
 // with no trunk stated (caller must refuse and name a trunk).
@@ -440,13 +439,6 @@ func ResolveTrunkPathWith(cd *config.Deps, td *tasks.Deps, cfg *config.Config, c
 			}
 			return candidate, false, nil
 		}
-	}
-	runtimePaths, err := config.RuntimeRepoTrunkPathsWith(cd)
-	if err != nil {
-		return "", false, err
-	}
-	if candidate, ok := matchCheckoutOfRepo(td, repoKey, runtimePaths); ok {
-		return candidate, false, nil
 	}
 	mainPath, bare, err := GitMainWorktree(td, checkoutPath)
 	if err != nil || bare || mainPath == "" {

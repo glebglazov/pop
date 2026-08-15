@@ -110,28 +110,33 @@ func TestTrunkResolvesForEveryWorktree(t *testing.T) {
 
 // TestRecordedTrunkStillResolves pins the other half of the fold: a machine whose
 // trunk was recorded by an older `--trunk` holds a path-keyed `trunk = true`
-// record, and it must keep resolving to that checkout with no operator action.
+// record, and it must keep resolving to that checkout with no operator action —
+// through the override layer the record folds into (ADR-0212 decision 5), where
+// it is a stated path rather than a flag on a block.
 func TestRecordedTrunkStillResolves(t *testing.T) {
 	f := newOverrideScopeFixture(t)
 	writeConfigFile(t, filepath.Join(filepath.Dir(f.overridePath), "config.runtime.toml"),
 		"["+quoted(f.main)+"]\ntrunk = true\n")
+	if _, err := foldRetiredRuntimeRecordWith(f.d); err != nil {
+		t.Fatalf("fold: %v", err)
+	}
 
 	got, err := (&Config{}).ResolveRepoConfig(f.d, f.feature)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !got.IsTrunk(f.d, f.main) {
-		t.Errorf("trunk from the retired record = %q, want %s", got.Trunk, f.main)
+		t.Errorf("trunk from the folded record = %q, want %s", got.Trunk, f.main)
 	}
 
-	// A declaration is more specific than what pop recorded, so it takes over.
+	// Folded, it is a statement: it now beats the declaration it used to lose to.
 	cfg := &Config{Repo: map[string]RepoOverrideConfig{f.main: {Trunk: trunkPtr(f.feature)}}}
 	got, err = cfg.ResolveRepoConfig(f.d, f.main)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.IsTrunk(f.d, f.feature) {
-		t.Errorf("trunk = %q, want the declared %s to beat the record", got.Trunk, f.feature)
+	if !got.IsTrunk(f.d, f.main) {
+		t.Errorf("trunk = %q, want the folded %s over the declared one", got.Trunk, f.main)
 	}
 }
 

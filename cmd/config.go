@@ -148,8 +148,8 @@ var configRepoGetCmd = &cobra.Command{
 	Long: `Show the repo-scoped settings in effect for the current repository.
 
 Each key is reported with the value in effect and the layer that supplied it:
-the override layer you state into, your hand-authored config.toml, a value pop
-recorded before, or unset. With a key argument, only that key is printed.`,
+the override layer you state into, your hand-authored config.toml, or unset.
+With a key argument, only that key is printed.`,
 	Args:              cobra.MaximumNArgs(1),
 	RunE:              runConfigRepoGet,
 	ValidArgsFunction: completeRepoSettingKey,

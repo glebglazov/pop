@@ -35,10 +35,6 @@ const (
 	// keys only, and its locus is the checkout whose tree it sits in — this
 	// worktree, or the one it inherits from.
 	OverrideLayerRepoTOML OverrideLayer = ".pop/config.toml"
-	// OverrideLayerRuntime is config.runtime.toml, the pop-written gap-filler
-	// that records what pop's surfaces picked, so every declaration of the same
-	// scope beats it.
-	OverrideLayerRuntime OverrideLayer = "config.runtime.toml"
 	// OverrideLayerDefault means no layer defines the key and the built-in
 	// default stands.
 	OverrideLayerDefault OverrideLayer = "built-in default"
@@ -185,10 +181,6 @@ func overrideValueLayers(d *Deps, configPath string) ([]overrideValueLayer, erro
 	if err != nil {
 		return nil, err
 	}
-	runtimeDoc, _, err := runtimeConfigFile(d).load(d)
-	if err != nil {
-		return nil, err
-	}
 	userDoc, err := genericTOMLFile(d, configPath)
 	if err != nil {
 		return nil, err
@@ -209,10 +201,7 @@ func overrideValueLayers(d *Deps, configPath string) ([]overrideValueLayer, erro
 		}
 		layers = append(layers, overrideValueLayer{layer: OverrideLayerInclude, locus: include, doc: doc})
 	}
-	layers = append(layers,
-		overrideValueLayer{layer: OverrideLayerRuntime, doc: runtimeDoc},
-		overrideValueLayer{layer: OverrideLayerDefault, doc: defaultsDoc},
-	)
+	layers = append(layers, overrideValueLayer{layer: OverrideLayerDefault, doc: defaultsDoc})
 	return layers, nil
 }
 

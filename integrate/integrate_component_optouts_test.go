@@ -274,8 +274,9 @@ func TestIntegrateOptOut_VariadicNoFlagsOncePerInvocation(t *testing.T) {
 }
 
 // TestIntegrateOptOut_NoPaneSkillOverAnExistingRecord runs the decline on a
-// machine that still holds the retired runtime record: the list it states is the
-// merged one minus the declined alias, and the record itself is left alone.
+// machine that still holds the retired runtime record: the record folds into the
+// override layer on the config load the decline does, the list it then states is
+// that folded one minus the declined alias, and the file itself is retired.
 func TestIntegrateOptOut_NoPaneSkillOverAnExistingRecord(t *testing.T) {
 	t.Parallel()
 	setupIntegrateConfigLayer(t)
@@ -295,12 +296,7 @@ enabled = true
 	if skills := readIntegrateStatedSkills(t); !reflect.DeepEqual(skills, []string{"tasks"}) {
 		t.Fatalf("stated skills = %#v, want the pane skill declined", skills)
 	}
-	data, err := os.ReadFile(integrateRuntimePath(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := string(data)
-	if !strings.Contains(body, `skills = ["tasks", "pane"]`) || !strings.Contains(body, "[future]") {
-		t.Fatalf("the existing record was written to: %q", body)
+	if _, err := os.Stat(integrateRuntimePath(t)); !os.IsNotExist(err) {
+		t.Fatalf("the record is still at the path pop reads: %v", err)
 	}
 }

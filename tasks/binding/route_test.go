@@ -767,14 +767,15 @@ func canonTrunk(t *testing.T, path string) string {
 }
 
 // A machine that named its trunk before decision 3 holds a path-keyed record;
-// the resolver still folds it to that checkout, with no operator action.
+// it folds into the override layer on the first config load and the resolver
+// still answers with that checkout, with no operator action.
 func TestResolveTrunkPathUsesRecordedTrunk(t *testing.T) {
 	t.Parallel()
 	td := routeTestDeps(t)
 	main := initAdoptRepo(t)
 	base := addLinkedWorktree(t, main, "runtime-trunk")
 	d, dataDir := trunkStoreDeps(t)
-	writeRecordedTrunk(t, dataDir, base)
+	writeRecordedTrunk(t, d, dataDir, base)
 	path, bare, err := ResolveTrunkPathWith(d, td, nil, main)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -792,15 +793,16 @@ func TestResolveTrunkPathUsesRecordedTrunk(t *testing.T) {
 	}
 }
 
-// A declaration is more specific than what pop recorded, so it takes over.
-func TestResolveTrunkPathDeclarationBeatsRecord(t *testing.T) {
+// A folded record is a stated trunk, so it beats the [repo."<path>"] declaration
+// it used to lose to — the rank inversion ADR-0212 decision 5 accepts.
+func TestResolveTrunkPathFoldedRecordBeatsDeclaration(t *testing.T) {
 	t.Parallel()
 	td := routeTestDeps(t)
 	main := initAdoptRepo(t)
 	hand := addLinkedWorktree(t, main, "hand-trunk")
 	runtime := addLinkedWorktree(t, main, "runtime-trunk")
 	d, dataDir := trunkStoreDeps(t)
-	writeRecordedTrunk(t, dataDir, runtime)
+	writeRecordedTrunk(t, d, dataDir, runtime)
 	cfg := &config.Config{
 		Repo: map[string]config.RepoOverrideConfig{
 			hand: {Trunk: trunkPtr(hand)},
@@ -810,16 +812,16 @@ func TestResolveTrunkPathDeclarationBeatsRecord(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	want, err := filepath.EvalSymlinks(hand)
+	want, err := filepath.EvalSymlinks(runtime)
 	if err != nil {
-		want = hand
+		want = runtime
 	}
 	gotPath, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		gotPath = path
 	}
 	if bare || gotPath != want {
-		t.Fatalf("path = %q bare = %v, want hand-authored %q false", gotPath, bare, want)
+		t.Fatalf("path = %q bare = %v, want the folded %q false", gotPath, bare, want)
 	}
 }
 
@@ -969,9 +971,10 @@ func trunkPtr(path string) *config.TrunkPath {
 }
 
 // writeRecordedTrunk lays down the retired `[<checkout>] trunk = true` record an
-// older pop wrote, so the resolver's fold can be exercised on a machine shaped
-// like one that already has one.
-func writeRecordedTrunk(t *testing.T, dataDir, checkout string) {
+// older pop wrote and folds it, so the resolver is exercised on a machine shaped
+// like one that already had one. The fold hangs off the config load (ADR-0212
+// decision 5), so loading is how a test reaches it.
+func writeRecordedTrunk(t *testing.T, d *config.Deps, dataDir, checkout string) {
 	t.Helper()
 	dir := filepath.Join(dataDir, "pop")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -980,6 +983,16 @@ func writeRecordedTrunk(t *testing.T, dataDir, checkout string) {
 	body := "[" + strconv.Quote(checkout) + "]\ntrunk = true\n"
 	if err := os.WriteFile(filepath.Join(dir, "config.runtime.toml"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
+	}
+	configPath := config.DefaultConfigPathWith(d)
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte("[worktree]\nauto_open = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.LoadWith(d, configPath); err != nil {
+		t.Fatalf("load config (folds the record): %v", err)
 	}
 }
 

@@ -1,13 +1,10 @@
 package config
 
 import (
-	"bytes"
 	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
-
-	"github.com/BurntSushi/toml"
 )
 
 // This file is `pop config repo set` and its read-back: the repo-scoped
@@ -18,28 +15,18 @@ import (
 //   - Setting one is a human stating intent, so it lands in the override layer's
 //     block for the repository (ADR-0212 decision 5) and beats every declaration
 //     the ladder resolves — the same destination, and the same gate, the Config
-//     dashboard's repository rows write through. The identity-keyed runtime
-//     record below is what an existing machine already holds and is read, never
-//     written.
+//     dashboard's repository rows write through.
 //   - What may be set is derived from a schema by reflection, exactly as
 //     repoScopeLegalKeys derives what may be read, so the setter cannot drift
 //     from what the config accepts.
 
-// runtimeRepoSettingsSection is the top-level table of config.runtime.toml that
-// holds the retired record: what `pop config repo set` wrote before it stated
-// intent. It is keyed by repository identity — the divergence from
-// [workbench.preferred], which keys by exact checkout because it describes a
-// checkout rather than a repository.
-const runtimeRepoSettingsSection = "repo_settings"
-
-// RepoRuntimeConfig is the schema of one [repo_settings."<identity>"] block: the
-// repo-scoped keys a machine may already hold a record of, and — reflected as
-// RepoSettableKeyDocs — the keys `pop config repo set` states. Every field
-// mirrors a key of RepoOverrideConfig, so this struct is a subset of the
+// RepoSettableConfig is the schema of what `pop config repo set` may state:
+// reflected as RepoSettableKeyDocs, it is the settable key set itself. Every
+// field mirrors a key of RepoOverrideConfig, so this struct is a subset of the
 // hand-authored surface and never a surface of its own; the shared repo scope
 // (RepoScopeConfig, legal in a committed .pop/config.toml too) is deliberately
 // not included, because pop must not write into a repository's tree.
-type RepoRuntimeConfig struct {
+type RepoSettableConfig struct {
 	// TurnCap is the repository's bound on how many Turns one implementation
 	// attempt may spend (ADR-0190). Nil means pop has recorded none.
 	TurnCap *int `toml:"turn_cap" desc:"Max Turns one implementation attempt in this repo may spend (claude only; other presets cannot be told)."`
@@ -48,7 +35,7 @@ type RepoRuntimeConfig struct {
 // repoSettingKind carries the per-key behaviour reflection cannot supply: how to
 // read the raw string a human typed, and how to pull that key out of each layer
 // that can answer for it. The map is pinned against the reflected schema by
-// test, in both directions, so a field added to RepoRuntimeConfig cannot become
+// test, in both directions, so a field added to RepoSettableConfig cannot become
 // settable without its parser or be declared here without existing in the
 // schema.
 //
@@ -56,9 +43,8 @@ type RepoRuntimeConfig struct {
 // a hand-authored config.toml declaration or the override layer's entry for this
 // repository — because the two share one shape (ADR-0212 decision 7).
 type repoSettingKind struct {
-	parse   func(raw string) (any, error)
-	block   func(RepoOverrideConfig) (any, bool)
-	runtime func(RepoRuntimeConfig) (any, bool)
+	parse func(raw string) (any, error)
+	block func(RepoOverrideConfig) (any, bool)
 }
 
 var repoSettingKinds = map[string]repoSettingKind{
@@ -69,12 +55,6 @@ var repoSettingKinds = map[string]repoSettingKind{
 				return nil, false
 			}
 			return *o.TurnCap, true
-		},
-		runtime: func(r RepoRuntimeConfig) (any, bool) {
-			if r.TurnCap == nil {
-				return nil, false
-			}
-			return *r.TurnCap, true
 		},
 	},
 }
@@ -94,11 +74,11 @@ func parseTurnCapSetting(raw string) (any, error) {
 }
 
 // RepoSettableKeyDocs returns the keys pop may set for a repository, reflected
-// from RepoRuntimeConfig in declaration order with their TOML types and
+// from RepoSettableConfig in declaration order with their TOML types and
 // descriptions — the same reflection that backs `pop config keys`, so the
 // settable set is generated rather than listed.
 func RepoSettableKeyDocs() []ConfigKeyDoc {
-	return structDocs("", reflect.TypeOf(RepoRuntimeConfig{}), false, nil)
+	return structDocs("", reflect.TypeOf(RepoSettableConfig{}), false, nil)
 }
 
 // RepoSettableKeys returns just the settable key names, in declaration order.
@@ -163,9 +143,6 @@ type RepoSettingSource string
 const (
 	// RepoSettingUnset means no layer declares the key.
 	RepoSettingUnset RepoSettingSource = "unset"
-	// RepoSettingRuntime is the retired gap-filler: what `pop config repo set`
-	// wrote before it stated intent, still read on a machine that holds one.
-	RepoSettingRuntime RepoSettingSource = "pop (recorded)"
 	// RepoSettingOverride is the hand-authored [repo."<path>"] block, the most
 	// specific declaration of the ladder.
 	RepoSettingOverride RepoSettingSource = "hand-authored config.toml"
@@ -187,28 +164,18 @@ type RepoSetting struct {
 // ResolveRepoSettings reports every settable key's effective value for the
 // repository owning checkoutPath, in the same precedence resolution itself uses:
 // the override layer's entry for this repository beats a hand-authored
-// [repo."<path>"] block matched by repository identity, which beats the
-// pop-written runtime layer, which beats unset.
+// [repo."<path>"] block matched by repository identity, which beats unset.
 func (c *Config) ResolveRepoSettings(d *Deps, checkoutPath string) ([]RepoSetting, error) {
 	if d == nil {
 		d = defaultDeps
 	}
 	e := c.newRepoScope(d, checkoutPath)
-	stored, _, err := runtimeRepoSettingsWith(d, e.identity)
-	if err != nil {
-		return nil, err
-	}
 	overridden, hasOverride := e.overrideLayer().repoBlock(d, e.identity)
 	docs := RepoSettableKeyDocs()
 	settings := make([]RepoSetting, 0, len(docs))
 	for _, doc := range docs {
 		kind := repoSettingKinds[doc.Key]
 		setting := RepoSetting{Key: doc.Key, Source: RepoSettingUnset}
-		if value, ok := kind.runtime(stored); ok {
-			setting.Value = fmt.Sprint(value)
-			setting.Source = RepoSettingRuntime
-			setting.Locus = DefaultRuntimeConfigPathWith(d)
-		}
 		if e.declaredFound {
 			if value, ok := kind.block(e.declared); ok {
 				setting.Value = fmt.Sprint(value)
@@ -226,49 +193,4 @@ func (c *Config) ResolveRepoSettings(d *Deps, checkoutPath string) ([]RepoSettin
 		settings = append(settings, setting)
 	}
 	return settings, nil
-}
-
-// runtimeRepoSettingsWith reads the pop-written block for one repository
-// identity. The bool distinguishes "no block" from "a block declaring nothing".
-func runtimeRepoSettingsWith(d *Deps, identity string) (RepoRuntimeConfig, bool, error) {
-	doc, _, err := loadRuntimeDocument(d)
-	if err != nil {
-		return RepoRuntimeConfig{}, false, err
-	}
-	return runtimeRepoSettingsFromDoc(doc, identity)
-}
-
-// runtimeRepoSettingsFromDoc is the same read against an already-loaded document,
-// for a caller that needs more than one section of it and must not pay a second
-// file read to get them.
-func runtimeRepoSettingsFromDoc(doc map[string]any, identity string) (RepoRuntimeConfig, bool, error) {
-	section, ok := doc[runtimeRepoSettingsSection].(map[string]any)
-	if !ok || section == nil {
-		return RepoRuntimeConfig{}, false, nil
-	}
-	block, ok := section[identity].(map[string]any)
-	if !ok || block == nil {
-		return RepoRuntimeConfig{}, false, nil
-	}
-	cfg, err := decodeRepoRuntimeBlock(block)
-	if err != nil {
-		return RepoRuntimeConfig{}, false, err
-	}
-	return cfg, true, nil
-}
-
-// decodeRepoRuntimeBlock re-encodes one stored block and decodes it through
-// RepoRuntimeConfig, so a stored value is read by the same struct tags that
-// decide what may be written — adding a key needs no second decoder, and a key
-// that left the schema stops being read.
-func decodeRepoRuntimeBlock(block map[string]any) (RepoRuntimeConfig, error) {
-	var buf bytes.Buffer
-	if err := toml.NewEncoder(&buf).Encode(block); err != nil {
-		return RepoRuntimeConfig{}, fmt.Errorf("encode repo settings: %w", err)
-	}
-	var cfg RepoRuntimeConfig
-	if _, err := toml.Decode(buf.String(), &cfg); err != nil {
-		return RepoRuntimeConfig{}, fmt.Errorf("decode repo settings: %w", err)
-	}
-	return cfg, nil
 }

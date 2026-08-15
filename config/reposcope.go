@@ -11,18 +11,19 @@ import (
 // This file is the shared repo-scope source enumerator (ADR-0122, folding in the
 // architecture-review triplication of repo-scope resolution). One enumerator maps
 // a checkout to its ordered repo-scope sources — the global config's own values
-// for repo-scope keys, the settings pop recorded for the repository, the in-tree
-// .pop/config.toml anchor(s), and the identity-matched [repo."<path>"] block —
-// doing the repo-identity walk, canonicalization, and .pop/config.toml reads once
+// for repo-scope keys, the in-tree .pop/config.toml anchor(s), and the
+// identity-matched [repo."<path>"] block — doing the repo-identity walk,
+// canonicalization, and .pop/config.toml reads once
 // (caching each anchor by its canonical path, the read-once guard).
 // ResolveRepoConfig, ResolveWorkbenchesWith, and ResolvePreferredWorkbench consume
 // it instead of each hand-walking identity and re-reading .pop/config.toml.
 //
 // The order it hands over is the scope-first law (ADR-0212 decision 1), spelled
-// out on scopeLadder: the most specific scope wins, and within one scope a
-// declaration — hand-authored or committed — beats a gap-filler pop wrote.
-// Nothing here ranks a source by who authored its file, which is what ADR-0083's
-// superseded law did; the walker that consumes the order is unchanged.
+// out on scopeLadder: the most specific scope wins, and every source it lists is
+// a declaration — hand-authored or committed — config's one gap-filler having
+// retired with the runtime record (decision 5). Nothing here ranks a source by
+// who authored its file, which is what ADR-0083's superseded law did; the walker
+// that consumes the order is unchanged.
 //
 // The override layer is not in that order at all (ADR-0212 decision 2). It is a
 // second, shorter list — overrideSources — laid over whatever the ladder
@@ -72,7 +73,8 @@ type popTOMLRead struct {
 
 // newRepoScope builds the enumerator for checkoutPath, doing the repo-identity
 // walk and the [repo."<path>"] match up front (both cheap, filesystem-stat only)
-// and deferring the .pop/config.toml and runtime reads until a resolver asks for them.
+// and deferring the .pop/config.toml and override-layer reads until a resolver
+// asks for them.
 func (c *Config) newRepoScope(d *Deps, checkoutPath string) *repoScopeEnumerator {
 	e := &repoScopeEnumerator{
 		d:            d,
@@ -188,12 +190,6 @@ type repoScopeSource struct {
 	// banner rather than being swallowed by the merge.
 	findings []Finding
 	err      error
-	// gapFiller marks the one rung that is not a declaration: the settings pop
-	// recorded for this repository. Everything pop records today is a [repo]-only
-	// key (turn_cap), which lives outside RepoScopeConfig, so this rung's scope is
-	// empty and only resolveRepoConfig acts on it — reading it lazily, so
-	// resolving workbenches costs no extra file read.
-	gapFiller bool
 }
 
 // scopeLadder returns this checkout's repo-scope sources in merge order (lowest
@@ -201,7 +197,6 @@ type repoScopeSource struct {
 // one list, and it is the only place the order lives:
 //
 //	global     · declaration   config.toml's own values for repo-scope keys
-//	repository · gap-filler    the settings pop recorded for this repository
 //	repository · declaration   <trunk-or-id-root>/.pop/config.toml   (inherited)
 //	repository · declaration   ./.pop/config.toml                    (this worktree)
 //	repository · declaration   config.toml [repo."<path>"]           (this checkout)
@@ -209,19 +204,19 @@ type repoScopeSource struct {
 // The most specific scope wins, so a team's committed .pop/config.toml now beats
 // a personal global value for the same key — the reversal of ADR-0083, which
 // ranked by authorship and let the general statement shadow the specific one.
-// Within one scope a declaration beats the gap-filler, which is why a turn cap
-// written by hand still wins over one pop recorded. The checkout-keyed
-// [repo."<path>"] block is the most specific declaration there is and so still
-// beats every source below it.
+// The checkout-keyed [repo."<path>"] block is the most specific declaration there
+// is and so still beats every source below it.
+//
+// Every rung is a declaration: the one gap-filler config had was the runtime
+// record, and it is gone (ADR-0212 decision 5). Convention memory, the gap-filler
+// pop still holds, is no rung of this ladder — a convention resolves through its
+// own composed stack (ADR-0211).
 //
 // Only keys that have a global home carry a value on the global rung;
 // preferred_workbench has none, so for that key the ladder simply starts at the
 // repository.
 func (e *repoScopeEnumerator) scopeLadder() []repoScopeSource {
-	ladder := []repoScopeSource{
-		{label: "global config", scope: e.globalScope()},
-		{label: "pop-written repo settings", gapFiller: true},
-	}
+	ladder := []repoScopeSource{{label: "global config", scope: e.globalScope()}}
 	// The committed anchors merge inherited-first (trunk then worktree) so the
 	// worktree's own .pop/config.toml outranks the one it inherits (ADR-0083's
 	// surviving two-anchor law).
@@ -287,10 +282,6 @@ func (e *repoScopeEnumerator) resolveRepoConfig() (RepoConfig, error) {
 	var result RepoConfig
 	var popErr error
 	for _, src := range e.scopeLadder() {
-		if src.gapFiller {
-			e.applyRecordedSettings(&result)
-			continue
-		}
 		if src.err != nil {
 			popErr = src.err
 		}
@@ -338,79 +329,27 @@ func (e *repoScopeEnumerator) applyBlockOnlyKeys(result *RepoConfig, block RepoO
 	}
 }
 
-// applyRecordedSettings folds in the repository gap-filler: the settings pop
-// recorded for this repository, keyed by repository identity so one record serves
-// every worktree (ADR-0191). It is applied at its rung of the ladder — above the
-// global declarations, below every repository declaration — so a declaration of
-// the same key, wherever in the repository it was made, overwrites it. A broken
-// runtime file degrades to "pop recorded nothing" rather than failing the whole
-// resolution.
-//
-// The retired path-keyed trunk record is read from the same document, so a
-// machine whose trunk was named before it became a path value resolves one here
-// exactly as it did before, with no operator action.
-func (e *repoScopeEnumerator) applyRecordedSettings(result *RepoConfig) {
-	doc, _, err := loadRuntimeDocument(e.d)
-	if err != nil {
-		debug.Error("config: read pop-written repo settings for %s: %v", e.identity, err)
-		return
-	}
-	if path, ok := e.recordedTrunk(doc); ok {
-		result.Trunk = path
-	}
-	stored, _, err := runtimeRepoSettingsFromDoc(doc, e.identity)
-	if err != nil {
-		debug.Error("config: read pop-written repo settings for %s: %v", e.identity, err)
-		return
-	}
-	if stored.TurnCap != nil && *stored.TurnCap > 0 {
-		result.TurnCap = *stored.TurnCap
-	}
-}
-
-// recordedTrunk finds a retired `[<checkout>] trunk = true` record belonging to
-// this repository. Such a record is keyed by the checkout it marked, so the fold
-// to a path value is the key itself — matched by identity, which is how the
-// repository-scoped value it becomes is keyed.
-func (e *repoScopeEnumerator) recordedTrunk(doc map[string]any) (string, bool) {
-	for _, path := range runtimeRepoTrunkPaths(doc) {
-		if repoIdentity(e.d, path) == e.identity {
-			return canonicalPath(e.d, path), true
-		}
-	}
-	return "", false
-}
-
 // preferredSource is one rung of the preferred_workbench chain, highest
 // precedence first. A declaration rung carries a resolved name and falls through
 // when it is empty; a stated rung is the override layer's entry, where presence
-// rather than emptiness decides; a runtime rung carries the path to read and
-// honours the same three-valued sentinel from the record it reads.
+// rather than emptiness decides.
 type preferredSource struct {
-	runtime bool
 	// stated marks the override layer's entry: it is in the chain only when the
 	// layer holds one, so an empty name here is an explicit none rather than
 	// "says nothing" (ADR-0078's three-valued entry, kept at its new home).
-	stated      bool
-	name        string // hand-authored: the value ("" means unset, fall through)
-	runtimePath string // runtime: path whose entry to read
-	debugLabel  string // runtime: message stem for a read-error debug log
+	stated bool
+	name   string // declaration: the value ("" means unset, fall through)
 }
 
 // preferredSources returns the ordered preferred_workbench chain for the
-// checkout — the override layer, then scopeLadder's law read from the top, for
-// the one key whose runtime rungs are keyed by checkout rather than by
-// repository identity. The .pop/config.toml anchors are read here (cached), so
-// the consider-chain iterates a flat list instead of hand-walking anchors; the
-// runtime rungs stay descriptors read in the chain so their three-valued
-// semantics and per-rung debug logs are preserved. Highest precedence first:
+// checkout — the override layer, then scopeLadder's law read from the top. The
+// .pop/config.toml anchors are read here (cached), so the consider-chain iterates
+// a flat list instead of hand-walking anchors. Highest precedence first:
 //
 //	override                   config.override.toml [repo."<id>"]  this repository
 //	repository · declaration   config.toml [repo."<path>"]        this checkout
 //	repository · declaration   ./.pop/config.toml                 this worktree
 //	repository · declaration   <trunk-or-id-root>/.pop/config.toml  inherited
-//	repository · gap-filler    config.runtime.toml[<wt-path>]     what pop recorded here
-//	repository · gap-filler    config.runtime.toml[<trunk-path>]  inherited from the Trunk
 //
 // The override entry heads the chain because it is not a rung of it: it is the
 // layer laid over whatever the rest resolves (ADR-0212 decision 2), and reading
@@ -419,12 +358,12 @@ type preferredSource struct {
 // both write, so an explicit none stated there stops the walk rather than
 // falling through as an empty declaration would. The key has no global home, so
 // neither the ladder's global rung nor a global override of it exists — a
-// repository is the only scope that can state it. The runtime rungs record what pop's own picker happened to pick, which
-// makes them gap-fillers under every declaration of the same scope — not a
-// checkout scope of their own (ADR-0212 decision 3 admits only two scopes).
+// repository is the only scope that can state it. The per-checkout entries pop
+// once recorded for itself are gone with the record that held them (ADR-0212
+// decisions 5 and 6): a preference is stated for the repository now, so every
+// worktree of it reads the one answer instead of inheriting the Trunk's.
 //
-// The inherited anchor is dropped when it is this very checkout, and the trunk
-// runtime rung when the trunk is absent or is this checkout — the read-once
+// The inherited anchor is dropped when it is this very checkout — the read-once
 // guard, so a stale name is never double-warned by re-reading the same anchor.
 func (e *repoScopeEnumerator) preferredSources() []preferredSource {
 	var sources []preferredSource
@@ -438,23 +377,6 @@ func (e *repoScopeEnumerator) preferredSources() []preferredSource {
 
 	if anchor := e.inheritedAnchor(); canonicalPath(e.d, anchor) != e.canon {
 		sources = append(sources, preferredSource{name: e.popPreferred(anchor)}) // inherited .pop/config.toml
-	}
-
-	sources = append(sources, preferredSource{ // what pop recorded for this worktree
-		runtime:     true,
-		runtimePath: e.checkoutPath,
-		debugLabel:  "runtime preferred workbench",
-	})
-
-	if e.d.Trunk != nil {
-		if trunkPath, ok := e.d.Trunk(e.checkoutPath); ok && trunkPath != "" &&
-			canonicalPath(e.d, trunkPath) != e.canon {
-			sources = append(sources, preferredSource{ // what pop recorded for the Trunk
-				runtime:     true,
-				runtimePath: trunkPath,
-				debugLabel:  "trunk preferred workbench",
-			})
-		}
 	}
 
 	return sources

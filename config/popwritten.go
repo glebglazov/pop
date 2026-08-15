@@ -9,12 +9,14 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// Pop writes two config files under its data dir — config.runtime.toml and
-// config.override.toml — and this file holds what the two share: reading one as
-// a generic TOML document, addressing a whole key inside it by dotted path, and
-// committing it back atomically or deleting it once its last key goes. What they
-// do not share is their rank in the merge; that split is documented where the
-// layers are loaded (applyConfigLayerMerge in merge.go).
+// Pop writes one config file under its data dir — config.override.toml
+// (ADR-0212 decisions 5 and 7) — and this file is how it is handled: reading it
+// as a generic TOML document, addressing a whole key inside it by dotted path,
+// and committing it back atomically or deleting it once its last key goes. The
+// shape is kept general because the value of a pop-written file is decided by
+// what it says rather than by which struct field it lands in; where it ranks in
+// the merge is documented where the layers are loaded (applyConfigLayerMerge in
+// merge.go).
 
 // popWrittenFile is the identity of one pop-written config file: where it lives,
 // the temp name its atomic rename passes through, and the stem its errors read
@@ -23,16 +25,6 @@ type popWrittenFile struct {
 	path    string
 	tmpBase string
 	label   string
-}
-
-// runtimeConfigFile is config.runtime.toml, the gap-filler layer that records
-// what pop's surfaces picked and so loses to every declaration of its scope.
-func runtimeConfigFile(d *Deps) popWrittenFile {
-	return popWrittenFile{
-		path:    DefaultRuntimeConfigPathWith(d),
-		tmpBase: ".config.runtime.tmp",
-		label:   "runtime config",
-	}
 }
 
 // overrideConfigFile is config.override.toml, the override layer that holds what

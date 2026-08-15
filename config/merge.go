@@ -20,16 +20,6 @@ var validIntegrationSkillAliases = map[string]bool{
 	IntegrationSkillTasks: true,
 }
 
-// DefaultRuntimeConfigPath returns the integration runtime config path.
-func DefaultRuntimeConfigPath() string {
-	return DefaultRuntimeConfigPathWith(defaultDeps)
-}
-
-// DefaultRuntimeConfigPathWith returns config.runtime.toml under the pop data dir.
-func DefaultRuntimeConfigPathWith(d *Deps) string {
-	return filepath.Join(dataDirWith(d), "config.runtime.toml")
-}
-
 // DefaultOverrideConfigPath returns the override config path.
 func DefaultOverrideConfigPath() string {
 	return DefaultOverrideConfigPathWith(defaultDeps)
@@ -78,30 +68,18 @@ func decodeConfigLayer(d *Deps, path string) (*configLayer, error) {
 	return &configLayer{path: path, cfg: &cfg, md: md}, nil
 }
 
-// applyConfigLayerMerge resolves effective config from four layers, lowest rank
-// first: embedded defaults, config.runtime.toml, the user's hand-authored
-// config.toml, then config.override.toml. A later layer overrides an earlier one
-// field-by-field (ADR-0065, ADR-0202).
+// applyConfigLayerMerge resolves effective config from three layers, lowest rank
+// first: embedded defaults, the user's hand-authored config.toml, then
+// config.override.toml. A later layer overrides an earlier one field-by-field
+// (ADR-0065, ADR-0202).
 //
-// Two of those files are written by pop itself, and they sit on opposite sides of
-// the hand-authored file on purpose. What separates them is not that pop wrote
-// both but what each one says (ADR-0212 decision 5): one records what happened,
-// the other states what a human wants.
-//
-//	config.runtime.toml   BELOW config.toml — the gap-filler. It records what
-//	                      pop's own surfaces happened to pick (a Preferred
-//	                      workbench, a Trunk checkout, an integrate skills list),
-//	                      so a declaration at the same scope must beat it. That low
-//	                      rank is load-bearing, not incidental: preferred_workbench's
-//	                      three-valued explicit-none logic exists precisely
-//	                      because a runtime entry cannot outrank a declaration
-//	                      above it (see ResolvePreferredWorkbench).
-//	config.override.toml  ABOVE config.toml — the override layer. It records whole
-//	                      keys a human deliberately overrode through pop's own
-//	                      editor, so it has to beat the very file being
-//	                      overridden; a layer that lost to config.toml would be
-//	                      inert for everyone who has configured anything
-//	                      (ADR-0202 decision 1).
+// One file here is written by pop itself, and it sits above the hand-authored one
+// on purpose: the override layer holds whole keys a human deliberately stated
+// through pop, so it has to beat the very file being overridden; a layer that
+// lost to config.toml would be inert for everyone who has configured anything
+// (ADR-0202 decision 1). The gap-filler that used to sit below config.toml is
+// gone with the file that held it (ADR-0212 decision 5) — what pop writes now
+// always states intent, so there is nothing left to rank underneath.
 //
 // Only the override file's global half takes part in this merge. Its
 // [repo."<identity>"] blocks are the repository-scoped half of the same layer,
@@ -119,18 +97,10 @@ func applyConfigLayerMerge(d *Deps, userCfg *Config, userPath string, userMD tom
 		return overrideMD, err
 	}
 
-	layers := []configLayer{{path: "<embedded defaults>", cfg: defaults, md: toml.MetaData{}}}
-
-	runtimePath := DefaultRuntimeConfigPathWith(d)
-	if layer, err := decodeConfigLayer(d, runtimePath); err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return overrideMD, fmt.Errorf("loading runtime config %q: %w", runtimePath, err)
-		}
-	} else {
-		layers = append(layers, *layer)
+	layers := []configLayer{
+		{path: "<embedded defaults>", cfg: defaults, md: toml.MetaData{}},
+		{path: userPath, cfg: userCfg, md: userMD},
 	}
-
-	layers = append(layers, configLayer{path: userPath, cfg: userCfg, md: userMD})
 
 	overridePath := DefaultOverrideConfigPathWith(d)
 	if layer, err := decodeConfigLayer(d, overridePath); err != nil {
@@ -201,4 +171,3 @@ func integrationsSkillsFindings(path string, integrations *IntegrationsConfig, m
 	}
 	return findings
 }
-

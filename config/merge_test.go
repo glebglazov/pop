@@ -80,17 +80,14 @@ skills = ["tasks"]
 	}
 }
 
-func TestLoadIntegrationsThreeLayerPrecedence(t *testing.T) {
+// TestLoadIntegrationsTwoLayerPrecedence pins what is left of ADR-0065's merge
+// now that the runtime tier is gone: the user's own list beats the embedded
+// defaults, and nothing pop wrote sits between them.
+func TestLoadIntegrationsTwoLayerPrecedence(t *testing.T) {
 	root := t.TempDir()
 	dataDir := filepath.Join(root, "data")
-	configDir := filepath.Join(root, "config")
-	userPath := filepath.Join(configDir, "config.toml")
-	runtimePath := filepath.Join(dataDir, "pop", "config.runtime.toml")
+	userPath := filepath.Join(root, "config", "config.toml")
 
-	writeConfigFile(t, runtimePath, `
-[integrations]
-skills = ["pane"]
-`)
 	writeConfigFile(t, userPath, `
 projects = [{ path = "/main" }]
 
@@ -119,44 +116,7 @@ skills = ["tasks"]
 		t.Fatalf("IntegrationsSkills() error: %v", err)
 	}
 	if !reflect.DeepEqual(skills, []string{"tasks"}) {
-		t.Fatalf("IntegrationsSkills() = %#v, want [tasks] (user wins over runtime and defaults)", skills)
-	}
-}
-
-func TestLoadIntegrationsRuntimeBetweenDefaultsAndUser(t *testing.T) {
-	root := t.TempDir()
-	dataDir := filepath.Join(root, "data")
-	userPath := filepath.Join(root, "config.toml")
-	runtimePath := filepath.Join(dataDir, "pop", "config.runtime.toml")
-
-	writeConfigFile(t, runtimePath, `
-[integrations]
-skills = ["pane"]
-`)
-	writeConfigFile(t, userPath, `projects = [{ path = "/main" }]`)
-
-	d := &Deps{FS: &deps.MockFileSystem{
-		GetenvFunc: func(key string) string {
-			if key == "XDG_DATA_HOME" {
-				return dataDir
-			}
-			return ""
-		},
-		UserHomeDirFunc: func() (string, error) { return filepath.Join(root, "home"), nil },
-		ReadFileFunc:    os.ReadFile,
-		StatFunc:        os.Stat,
-	}}
-
-	cfg, err := LoadWith(d, userPath)
-	if err != nil {
-		t.Fatalf("LoadWith() error: %v", err)
-	}
-	skills, err := cfg.IntegrationsSkills()
-	if err != nil {
-		t.Fatalf("IntegrationsSkills() error: %v", err)
-	}
-	if !reflect.DeepEqual(skills, []string{"pane"}) {
-		t.Fatalf("IntegrationsSkills() = %#v, want [pane] (runtime overrides defaults)", skills)
+		t.Fatalf("IntegrationsSkills() = %#v, want [tasks] (the user's list over the defaults)", skills)
 	}
 }
 
@@ -183,45 +143,6 @@ skills = ["bogus"]
 	}
 }
 
-func TestLoadIntegrationsInvalidAliasInRuntimeConfig(t *testing.T) {
-	root := t.TempDir()
-	dataDir := filepath.Join(root, "data")
-	userPath := filepath.Join(root, "config.toml")
-	runtimePath := filepath.Join(dataDir, "pop", "config.runtime.toml")
-
-	writeConfigFile(t, runtimePath, `
-[integrations]
-skills = ["nope"]
-`)
-	writeConfigFile(t, userPath, `projects = [{ path = "/main" }]`)
-
-	d := &Deps{FS: &deps.MockFileSystem{
-		GetenvFunc: func(key string) string {
-			if key == "XDG_DATA_HOME" {
-				return dataDir
-			}
-			return ""
-		},
-		UserHomeDirFunc: func() (string, error) { return filepath.Join(root, "home"), nil },
-		ReadFileFunc:    os.ReadFile,
-		StatFunc:        os.Stat,
-	}}
-
-	cfg, err := LoadWith(d, userPath)
-	if err != nil {
-		t.Fatalf("LoadWith() error: %v", err)
-	}
-	if len(cfg.Findings) != 1 {
-		t.Fatalf("expected 1 finding, got %d: %+v", len(cfg.Findings), cfg.Findings)
-	}
-	if !strings.Contains(cfg.Findings[0].Message, runtimePath) {
-		t.Errorf("finding should name runtime file, got %q", cfg.Findings[0].Message)
-	}
-	if _, err := cfg.IntegrationsSkills(); err == nil {
-		t.Fatal("IntegrationsSkills() = nil error, want blocking finding")
-	}
-}
-
 // TestConfigSchemaTagsAreLegal walks the whole Config type tree with the
 // slice-01 drift check, so any merge:/include: tag naming an unknown kind, a
 // malformed list-by-key, or a kind the field's Go type cannot support fails the
@@ -242,21 +163,5 @@ func TestConfigSchemaTagsAreLegal(t *testing.T) {
 func TestRepoScopeConfigSchemaTagsAreLegal(t *testing.T) {
 	if problems := checkSchemaTags(reflect.TypeOf(RepoScopeConfig{})); len(problems) != 0 {
 		t.Fatalf("RepoScopeConfig has illegal schema tags:\n%s", strings.Join(problems, "\n"))
-	}
-}
-
-func TestDefaultRuntimeConfigPathWith(t *testing.T) {
-	d := &Deps{FS: &deps.MockFileSystem{
-		GetenvFunc: func(key string) string {
-			if key == "XDG_DATA_HOME" {
-				return "/custom/data"
-			}
-			return ""
-		},
-	}}
-	got := DefaultRuntimeConfigPathWith(d)
-	want := "/custom/data/pop/config.runtime.toml"
-	if got != want {
-		t.Fatalf("DefaultRuntimeConfigPathWith() = %q, want %q", got, want)
 	}
 }

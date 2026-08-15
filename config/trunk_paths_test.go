@@ -11,9 +11,9 @@ import (
 
 // The declared-trunk set is what the project picker reads instead of resolving a
 // trunk per checkout: every source that can state one without knowing it first —
-// blocks, the override layer, the retired records — home-expanded, cleaned,
-// sorted, and no git anywhere near it. A block states a path; the retired boolean
-// states the block's own key, and both arrive here as the checkout meant.
+// blocks and the override layer — home-expanded, cleaned, sorted, and no git
+// anywhere near it. A block states a path; the retired boolean states the block's
+// own key, and both arrive here as the checkout meant.
 func TestDeclaredTrunkPaths(t *testing.T) {
 	t.Parallel()
 
@@ -21,10 +21,6 @@ func TestDeclaredTrunkPaths(t *testing.T) {
 	dataHome := filepath.Join(home, ".local", "share")
 	if err := os.MkdirAll(filepath.Join(dataHome, "pop"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
-	}
-	runtimeFile := filepath.Join(dataHome, "pop", "config.runtime.toml")
-	if err := os.WriteFile(runtimeFile, []byte("[\"/srv/kestrel/main\"]\ntrunk = true\n\n[\"/srv/other/wt\"]\nworkbench = \"x\"\n"), 0o644); err != nil {
-		t.Fatalf("write runtime: %v", err)
 	}
 	overrideFile := filepath.Join(dataHome, "pop", "config.override.toml")
 	if err := os.WriteFile(overrideFile, []byte("[repo.\"/srv/wren\"]\ntrunk = \"/srv/wren/main\"\n"), 0o644); err != nil {
@@ -49,7 +45,6 @@ func TestDeclaredTrunkPaths(t *testing.T) {
 	got := cfg.DeclaredTrunkPathsWith(d)
 	want := []string{
 		"/srv/hawk/trunk",
-		"/srv/kestrel/main",
 		"/srv/legacy",
 		"/srv/wren/main",
 		filepath.Join(home, "Dev", "work", "game_server", "main"),
@@ -61,8 +56,8 @@ func TestDeclaredTrunkPaths(t *testing.T) {
 	// A nil Config is the zero-declaration case, not a panic: the picker asks
 	// before it knows whether config loaded.
 	var nilCfg *Config
-	want = []string{"/srv/kestrel/main", "/srv/wren/main"}
+	want = []string{"/srv/wren/main"}
 	if got := nilCfg.DeclaredTrunkPathsWith(d); !reflect.DeepEqual(got, want) {
-		t.Errorf("nil Config = %q, want the pop-written sources alone (%q)", got, want)
+		t.Errorf("nil Config = %q, want the override layer's entry alone (%q)", got, want)
 	}
 }

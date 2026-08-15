@@ -172,50 +172,7 @@ func (e *repoScopeEnumerator) repoScopeLayers() []overrideValueLayer {
 		})
 	}
 
-	return append(layers, e.recordedLayers()...)
-}
-
-// recordedLayers are the gap-filler rungs: what pop recorded for this repository
-// and for the checkouts of it. They sit under every declaration of the same
-// scope, so they come last.
-func (e *repoScopeEnumerator) recordedLayers() []overrideValueLayer {
-	recorded := map[string]any{}
-	if doc, _, err := loadRuntimeDocument(e.d); err == nil {
-		if path, ok := e.recordedTrunk(doc); ok {
-			recorded["trunk"] = path
-		}
-		if stored, _, err := runtimeRepoSettingsFromDoc(doc, e.identity); err == nil && stored.TurnCap != nil {
-			recorded["turn_cap"] = int64(*stored.TurnCap)
-		}
-	}
-	// A preferred workbench is recorded per checkout rather than per repository,
-	// this one first and the Trunk worktree's after it — the inheritance a
-	// checkout with no entry of its own reads through.
-	layers := []overrideValueLayer{{
-		layer: OverrideLayerRuntime,
-		doc:   repoScopeDocument(e.recordedPreferred(recorded, e.checkoutPath)),
-	}}
-	if e.d != nil && e.d.Trunk != nil {
-		if trunk, ok := e.d.Trunk(e.checkoutPath); ok && trunk != "" && canonicalPath(e.d, trunk) != e.canon {
-			layers = append(layers, overrideValueLayer{
-				layer: OverrideLayerRuntime,
-				locus: trunk,
-				doc:   repoScopeDocument(e.recordedPreferred(map[string]any{}, trunk)),
-			})
-		}
-	}
 	return layers
-}
-
-// recordedPreferred adds one checkout's recorded Preferred workbench to a block.
-// The entry is three-valued, so presence rather than emptiness decides: an entry
-// recorded as "" is an explicit none and a real value, not an absent key.
-func (e *repoScopeEnumerator) recordedPreferred(block map[string]any, checkout string) map[string]any {
-	name, present, err := RuntimePreferredWorkbenchWith(e.d, checkout)
-	if err == nil && present {
-		block["preferred_workbench"] = name
-	}
-	return block
 }
 
 // repoScopeDocument nests one block's leaves under the row spelling, so a key

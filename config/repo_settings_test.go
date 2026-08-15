@@ -50,7 +50,7 @@ func newPopRepoFixture(t *testing.T) popRepoFixture {
 }
 
 // TestRepoSettableKeysComeFromTheSchema pins ADR-0191 decision 5: the settable
-// key set is generated from RepoRuntimeConfig, and the per-key behaviour that
+// key set is generated from RepoSettableConfig, and the per-key behaviour that
 // reflection cannot supply is pinned against it in both directions — a schema
 // key with no entry is unsettable in practice, an entry with no schema key is a
 // key the config would never read back.
@@ -58,7 +58,7 @@ func TestRepoSettableKeysComeFromTheSchema(t *testing.T) {
 	t.Parallel()
 	keys := RepoSettableKeys()
 	if len(keys) == 0 {
-		t.Fatal("no settable repo keys reflected from RepoRuntimeConfig")
+		t.Fatal("no settable repo keys reflected from RepoSettableConfig")
 	}
 	declared := make(map[string]bool, len(keys))
 	for _, key := range keys {
@@ -74,7 +74,7 @@ func TestRepoSettableKeysComeFromTheSchema(t *testing.T) {
 	}
 	for key := range repoSettingKinds {
 		if !declared[key] {
-			t.Errorf("%q is declared settable but is not a field of RepoRuntimeConfig", key)
+			t.Errorf("%q is declared settable but is not a field of RepoSettableConfig", key)
 		}
 	}
 	if !declared["turn_cap"] {
@@ -191,31 +191,35 @@ func TestStatedRepoSettingBeatsEveryDeclaration(t *testing.T) {
 	}
 }
 
-// TestRecordedRepoSettingStillReadsUnderADeclaration keeps the retired
-// gap-filler honest for a machine that still holds one: it answers when nothing
-// else does, and any declaration of the same key beats it.
-func TestRecordedRepoSettingStillReadsUnderADeclaration(t *testing.T) {
+// TestRecordedRepoSettingFoldsAndThenBeatsTheDeclaration is the rank inversion
+// at this key: a cap an older pop recorded folds into the layer on the first
+// load, and from there it is a statement that beats the hand-authored block it
+// used to lose to. The read says which layer answered.
+func TestRecordedRepoSettingFoldsAndThenBeatsTheDeclaration(t *testing.T) {
 	fx := newPopRepoFixture(t)
 	writeRuntimeFile(t, fx.runtimePath,
 		"[repo_settings.\""+fx.identity+"\"]\nturn_cap = 5\n")
+	writeFixtureConfig(t, fx, "[repo."+quotedPath(fx.main)+"]\nturn_cap = 40\n")
 
-	recorded := &Config{}
-	settings, err := recorded.ResolveRepoSettings(fx.d, fx.feature)
+	cfg, err := LoadWith(fx.d, fx.configPath)
+	if err != nil {
+		t.Fatalf("LoadWith: %v", err)
+	}
+	settings, err := cfg.ResolveRepoSettings(fx.d, fx.feature)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := settingByKey(t, settings, "turn_cap")
-	if got.Value != "5" || got.Source != RepoSettingRuntime || got.Locus != fx.runtimePath {
-		t.Errorf("recorded read = %+v, want 5 from %s at %s", got, RepoSettingRuntime, fx.runtimePath)
+	if got.Value != "5" || got.Source != RepoSettingOverrideLayer || got.Locus != fx.overridePath {
+		t.Errorf("folded read = %+v, want 5 from %s at %s", got, RepoSettingOverrideLayer, fx.overridePath)
 	}
 
-	handAuthored := &Config{Repo: map[string]RepoOverrideConfig{fx.main: {TurnCap: intPtr(40)}}}
-	repoCfg, err := handAuthored.ResolveRepoConfig(fx.d, fx.feature)
+	repoCfg, err := cfg.ResolveRepoConfig(fx.d, fx.feature)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if repoCfg.TurnCap != 40 {
-		t.Errorf("TurnCap = %d, want the hand-authored 40 over a recorded 5", repoCfg.TurnCap)
+	if repoCfg.TurnCap != 5 {
+		t.Errorf("TurnCap = %d, want the folded 5 over the hand-authored 40", repoCfg.TurnCap)
 	}
 }
 

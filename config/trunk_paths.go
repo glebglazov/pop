@@ -12,9 +12,9 @@ func (c *Config) DeclaredTrunkPaths() []string {
 }
 
 // DeclaredTrunkPathsWith reads every source that can state a trunk without the
-// trunk being known first — a [repo."<path>"] block of the global config.toml,
-// the override layer's per-repository entries, and the retired path-keyed records
-// in config.runtime.toml — and hands back the checkouts they name.
+// trunk being known first — a [repo."<path>"] block of the global config.toml and
+// the override layer's per-repository entries — and hands back the checkouts they
+// name.
 //
 // This is the fork-free half of binding.ResolveTrunkPathWith. That resolver
 // answers "which checkout is *this* repository's trunk", which needs a repo key
@@ -47,6 +47,9 @@ func (c *Config) DeclaredTrunkPathsWith(d *Deps) []string {
 	}
 	// A block states a path, and a retired boolean states the block's own key
 	// (ADR-0212 decision 3), so both spellings arrive here as the checkout meant.
+	// A trunk pop recorded for itself is no longer a source of its own: it folded
+	// into the override layer's block for its repository (decision 5), which is
+	// read below.
 	if c != nil {
 		for rawKey, block := range c.Repo {
 			if path, ok := block.Trunk.Resolve(rawKey); ok {
@@ -54,20 +57,15 @@ func (c *Config) DeclaredTrunkPathsWith(d *Deps) []string {
 			}
 		}
 	}
-	// A missing or unreadable override layer, like a missing runtime file, is the
-	// common case and reads as no declarations: a trunk that cannot be read is a
-	// trunk that is not declared, and every caller degrades the same way it does
-	// for a repo with no declaration at all. That is why both errors are dropped.
+	// A missing or unreadable override layer is the common case and reads as no
+	// declarations: a trunk that cannot be read is a trunk that is not declared,
+	// and every caller degrades the same way it does for a repo with no
+	// declaration at all. That is why the error is dropped.
 	if layer, err := loadOverrideLayer(d); err == nil {
 		for key, block := range layer.scoped.Repo {
 			if path, ok := block.Trunk.Resolve(key); ok {
 				add(path)
 			}
-		}
-	}
-	if paths, err := RuntimeRepoTrunkPathsWith(d); err == nil {
-		for _, rawKey := range paths {
-			add(rawKey)
 		}
 	}
 	sort.Strings(out)

@@ -932,11 +932,12 @@ func repoIdentity(d *Deps, path string) string {
 }
 
 // ResolveRepoConfig returns the effective RepoConfig for checkoutPath, resolved
-// scope-first (ADR-0212 decision 1) — most specific source wins, and within the
-// repository scope a declaration beats what pop recorded:
+// scope-first (ADR-0212 decision 1) — the most specific source wins, and every
+// source is a declaration, config's one gap-filler having retired with the
+// runtime record (decision 5):
 //
 //	config.toml [repo."<path>"] → worktree .pop/config.toml → trunk-anchor
-//	.pop/config.toml → pop-written repo settings → global config.toml → default
+//	.pop/config.toml → global config.toml → default
 //
 // The override layer is then laid over that answer (ADR-0212 decision 2), its
 // repository entry over its global one, so an override wins whatever the ladder
@@ -990,8 +991,8 @@ func (c *Config) ResolveWorkbenchesWith(d *Deps, checkoutPath string) ([]Workben
 	// the one below it (ADR-0122 list-by-key), then the override layer over the
 	// result — a blueprint a human overrode wins whatever the ladder decided
 	// (ADR-0212 decision 2). Each collision is reported against seen, read before
-	// this rung's own names are recorded; the lowest rung can collide with
-	// nothing, and the gap-filler rung carries no blueprints.
+	// this rung's own names are recorded, so the lowest rung can collide with
+	// nothing.
 	for _, src := range append(e.scopeLadder(), e.overrideSources()...) {
 		label := src.label
 		pol := repoScopePolicy()
@@ -1237,38 +1238,31 @@ func (c *Config) WorkbenchOrder() []string {
 // ResolvePreferredWorkbench returns the name of the Workbench that should
 // auto-apply when a session is born for checkoutPath, or "" for none, plus any
 // non-fatal warnings the caller should surface. Resolution follows the
-// scope-first law (ADR-0212 decision 1): the most specific source wins, and
-// within one scope a declaration beats a gap-filler pop wrote — under the
-// override layer, which is laid over that answer rather than ranked inside it
-// (decision 2). Highest → lowest, the sources that carry this key:
+// scope-first law (ADR-0212 decision 1): the most specific source wins, under
+// the override layer, which is laid over that answer rather than ranked inside
+// it (decision 2). Highest → lowest, the sources that carry this key:
 //
 //	config.override.toml [repo."<id>"] override · stated for this repository
 //	config.toml [repo."<path>"]        declaration · keyed to this checkout
 //	./.pop/config.toml                 declaration · committed, this worktree
 //	<trunk>/.pop/config.toml (→ id-root)  declaration · committed, inherited
-//	config.runtime.toml[<wt-path>]     gap-filler · what pop recorded here
-//	config.runtime.toml[<trunk-path>]  gap-filler · recorded for the Trunk
 //	→ none
 //
-// The key has no global home, so the ladder starts at the repository. The runtime
-// entries record what pop's own picker happened to pick, so they are gap-fillers
-// under every declaration of this scope — a committed .pop/config.toml therefore
-// wins over a worktree runtime entry. The in-tree .pop/config.toml is read at two
-// anchors — this worktree and the Trunk worktree, the trunk read falling back to
-// the Repository identity root for a bare repo — with presence deciding which
-// supplies the value: a worktree with its own .pop/config.toml overrides the
-// inherited trunk one, and a worktree without inherits trunk's. The inherited
-// anchor reuses ADR-0078's Deps.Trunk resolver and its this-is-trunk read-once
-// guard (skipped when the inherited anchor is this very checkout, so a stale name
-// never double-warns).
+// The key has no global home, so the ladder starts at the repository. The in-tree
+// .pop/config.toml is read at two anchors — this worktree and the Trunk worktree,
+// the trunk read falling back to the Repository identity root for a bare repo —
+// with presence deciding which supplies the value: a worktree with its own
+// .pop/config.toml overrides the inherited trunk one, and a worktree without
+// inherits trunk's. The inherited anchor reuses ADR-0078's Deps.Trunk resolver
+// and its this-is-trunk read-once guard (skipped when the inherited anchor is
+// this very checkout, so a stale name never double-warns).
 //
-// The runtime rungs stay three-valued (ADR-0078): an explicit-none entry
-// (empty string) short-circuits to flat/prompt here — but only within the
-// gap-filler rungs, since it cannot override a declaration above it; a named
-// entry uses that name; an absent entry falls through. The trunk runtime rung is
-// dynamic (the child reflects trunk's current choice, never a value snapshotted
-// at create) and is skipped when the repo has no trunk anchor or the resolver is
-// not wired.
+// The stated rung stays three-valued (ADR-0078, at the key's new home): an entry
+// stated as an empty name is an explicit none and short-circuits to flat/prompt
+// here; a named entry uses that name; no entry at all falls through to the
+// declarations. The per-checkout entries pop once recorded for itself are gone
+// (ADR-0212 decisions 5 and 6) — a preference is stated for the repository, so
+// every worktree of it reads the one answer.
 //
 // A stored name that does not resolve to a real Workbench for this checkout is
 // skipped with a non-fatal warning (ADR-0054 style) at each layer and resolution
@@ -1305,8 +1299,8 @@ func (c *Config) ResolvePreferredWorkbench(d *Deps, checkoutPath string) (string
 	}
 	// consider applies one name-only layer's value (empty means "unset, fall
 	// through"): use the name if it resolves, else warn and continue down the
-	// chain. Returns (result, done). The runtime layers handle their own
-	// explicit-none short-circuit and use consider only for the resolve-or-warn.
+	// chain. Returns (result, done). The stated rung handles its own
+	// explicit-none short-circuit and uses consider only for the resolve-or-warn.
 	consider := func(name string) (string, bool) {
 		if name == "" {
 			return "", false
@@ -1320,37 +1314,16 @@ func (c *Config) ResolvePreferredWorkbench(d *Deps, checkoutPath string) (string
 
 	// Iterate the shared source chain (the enumerator owns the anchor resolution
 	// and the read-once guard). Declaration rungs fall through when empty; the
-	// stated rung and the gap-filler rungs keep their three-valued explicit-none
-	// short-circuit.
+	// stated rung keeps its three-valued explicit-none short-circuit.
 	for _, src := range e.preferredSources() {
-		if !src.runtime {
-			// A stated rung is in the chain only when the override layer holds an
-			// entry, so an empty name there is an explicit none — flat here, and
-			// nothing below is asked.
-			if src.stated && src.name == "" {
-				return "", warnings
-			}
-			if name, done := consider(src.name); done {
-				return name, warnings
-			}
-			continue
-		}
-		name, present, err := RuntimePreferredWorkbenchWith(d, src.runtimePath)
-		if err != nil {
-			debug.Error("config: read %s for %s: %v", src.debugLabel, src.runtimePath, err)
-			continue
-		}
-		if !present {
-			continue
-		}
-		if name == "" {
-			// Explicit none: flat/prompt here, short-circuiting the remaining
-			// (lower) runtime layer (but not the hand-authored layers above, which
-			// have already been passed).
+		// A stated rung is in the chain only when the override layer holds an
+		// entry, so an empty name there is an explicit none — flat here, and
+		// nothing below is asked.
+		if src.stated && src.name == "" {
 			return "", warnings
 		}
-		if resolved, done := consider(name); done {
-			return resolved, warnings
+		if name, done := consider(src.name); done {
+			return name, warnings
 		}
 	}
 
@@ -1686,6 +1659,11 @@ func Load(path string) (*Config, error) {
 
 // LoadWith reads the config file using provided dependencies for ~ expansion
 func LoadWith(d *Deps, path string) (*Config, error) {
+	// A machine upgrading into ADR-0212 decision 5 still holds pop's retired
+	// runtime record. It folds into the override layer here, before any layer is
+	// read, so this very load resolves through what it carried. It happens once
+	// per machine: the fold retires the file it read.
+	foldRetiredRuntimeRecord(d)
 	var cfg Config
 	md, err := toml.DecodeFile(path, &cfg)
 	if err != nil {
@@ -1850,8 +1828,8 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 // already set as claimed, so a later include loses the collision to it. Map and
 // append sections need no seeding — they collide off the destination's live
 // keys/order. Work-group claims are value-driven; [workbench] claims are
-// metadata-driven off the parent file, since a runtime [workbench.preferred]
-// table can leave WorkbenchOpts non-nil with pick_on_create/order unset.
+// metadata-driven off the parent file, a declared `pick_on_create = false` being
+// a meaningful value the unset zero value cannot be told from.
 // overrideMD adds the claims of the override layer, which outranks every
 // hand-authored file including an include.
 func seedIncludeClaims(policy *mergePolicy, cfg *Config, md, overrideMD toml.MetaData) {

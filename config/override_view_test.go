@@ -199,22 +199,3 @@ agents = ["claude", { display_name = "Codex", cmd = "codex --model gpt" }]
 		t.Errorf("EffectiveTOML =\n%s\nwant\n%s", view.EffectiveTOML, want)
 	}
 }
-
-// TestOverrideKeyViewsSeeTheRuntimeLayer covers the fourth layer: pop's own
-// gap-filler is below the hand-authored file but still a place a value can come
-// from, and a preview that omitted it would leave a value with no provenance.
-func TestOverrideKeyViewsSeeTheRuntimeLayer(t *testing.T) {
-	f := newOverrideFixture(t)
-	writeConfigFile(t, f.runtimePath, `
-[work.attended]
-agents = ["runtime-agent"]
-`)
-
-	view := viewFor(t, f, "work.attended.agents")
-	if got := view.Provenance(); got != "config.runtime.toml" {
-		t.Errorf("Provenance() = %q, want config.runtime.toml", got)
-	}
-	if !strings.Contains(view.EffectiveTOML, "runtime-agent") {
-		t.Errorf("EffectiveTOML = %q, want the runtime value", view.EffectiveTOML)
-	}
-}
