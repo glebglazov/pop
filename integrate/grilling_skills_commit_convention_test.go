@@ -42,7 +42,7 @@ func grillConsolidateCommitSection(t *testing.T) string {
 func TestGrillingSkills_CommitConventionContract(t *testing.T) {
 	t.Parallel()
 
-	for _, want := range []string{"pop repo conventions get commits", "Exit 0", "Exit 1", "recipe"} {
+	for _, want := range []string{"pop conventions get commits", "Exit 0", "Exit 1", "recipe"} {
 		if !strings.Contains(grillWithDocsCommitSection(t), want) {
 			t.Errorf("grill-with-docs skill does not resolve the commit convention through pop: missing %q", want)
 		}

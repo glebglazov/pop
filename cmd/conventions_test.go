@@ -81,14 +81,14 @@ func (f *conventionFixture) memory(t *testing.T, dir, kind, body string) string 
 func (f *conventionFixture) get(t *testing.T, dir string, args ...string) (string, error) {
 	t.Helper()
 	var out bytes.Buffer
-	err := runRepoConventionsGetWith(f.deps.conventionsDeps(), &out, dir, args)
+	err := runConventionsGetWith(f.deps.conventionsDeps(), &out, dir, args)
 	return out.String(), err
 }
 
-// TestRepoConventionsGetComposesTheStack is the whole point of the verb: every
+// TestConventionsGetComposesTheStack is the whole point of the verb: every
 // layer that exists comes back, in rank order, labelled, under one statement of
 // the override rule, and closed by the provenance line an agent surfaces.
-func TestRepoConventionsGetComposesTheStack(t *testing.T) {
+func TestConventionsGetComposesTheStack(t *testing.T) {
 	f := newConventionFixture(t)
 
 	defaultsPath := f.userDefaults(t, "commits", "MY-DEFAULT: conventional commits, lowercase subject.")
@@ -158,9 +158,9 @@ POP-MEMORY: scopes are the package name.`)
 	}
 }
 
-// TestRepoConventionsGetWithOnlyUserDefaults is the common shape on a machine
+// TestConventionsGetWithOnlyUserDefaults is the common shape on a machine
 // where nothing repository-specific has been written yet.
-func TestRepoConventionsGetWithOnlyUserDefaults(t *testing.T) {
+func TestConventionsGetWithOnlyUserDefaults(t *testing.T) {
 	f := newConventionFixture(t)
 	path := f.userDefaults(t, "commits", "MY-DEFAULT: conventional commits.")
 
@@ -178,9 +178,9 @@ func TestRepoConventionsGetWithOnlyUserDefaults(t *testing.T) {
 	}
 }
 
-// TestRepoConventionsGetEmptyKindMisses pins the miss: exit 1, and the four
+// TestConventionsGetEmptyKindMisses pins the miss: exit 1, and the four
 // places pop looked, since "nothing here" is only actionable with them named.
-func TestRepoConventionsGetEmptyKindMisses(t *testing.T) {
+func TestConventionsGetEmptyKindMisses(t *testing.T) {
 	f := newConventionFixture(t)
 
 	out, err := f.get(t, f.repo, "commits")
@@ -197,9 +197,9 @@ func TestRepoConventionsGetEmptyKindMisses(t *testing.T) {
 	}
 }
 
-// TestRepoConventionsGetAllKinds walks every kind with no argument. A kind with
+// TestConventionsGetAllKinds walks every kind with no argument. A kind with
 // an answer keeps the exit code at 0 even when its neighbour is empty.
-func TestRepoConventionsGetAllKinds(t *testing.T) {
+func TestConventionsGetAllKinds(t *testing.T) {
 	f := newConventionFixture(t)
 
 	out, err := f.get(t, f.repo)
@@ -225,9 +225,9 @@ func TestRepoConventionsGetAllKinds(t *testing.T) {
 	}
 }
 
-// TestRepoConventionsGetRefusesUnknownKind: the enum is closed, and a kind pop
+// TestConventionsGetRefusesUnknownKind: the enum is closed, and a kind pop
 // has never heard of is refused before anything is looked up or printed.
-func TestRepoConventionsGetRefusesUnknownKind(t *testing.T) {
+func TestConventionsGetRefusesUnknownKind(t *testing.T) {
 	f := newConventionFixture(t)
 	f.userDefaults(t, "commits", "MY-DEFAULT: conventional commits.")
 
@@ -245,10 +245,10 @@ func TestRepoConventionsGetRefusesUnknownKind(t *testing.T) {
 	}
 }
 
-// TestRepoConventionsMemoryIsSharedAcrossWorktrees is why the memory layer
+// TestConventionsMemoryIsSharedAcrossWorktrees is why the memory layer
 // resolves through Repository identity rather than through the directory: a
 // convention pop wrote from the trunk is the same convention in a worktree.
-func TestRepoConventionsMemoryIsSharedAcrossWorktrees(t *testing.T) {
+func TestConventionsMemoryIsSharedAcrossWorktrees(t *testing.T) {
 	f := newConventionFixture(t)
 	worktree := filepath.Join(f.root, "feature-wt")
 	runGitCheckout(t, f.repo, "worktree", "add", "-b", "feature", worktree)
@@ -269,11 +269,11 @@ func TestRepoConventionsMemoryIsSharedAcrossWorktrees(t *testing.T) {
 	}
 }
 
-// TestRepoConventionsRenderingLivesInTheDomainPackage guards ADR-0149's split:
+// TestConventionsRenderingLivesInTheDomainPackage guards ADR-0149's split:
 // cmd wires and exits, the conventions package renders. Any Fprint here would
 // be the first line of a second renderer.
-func TestRepoConventionsRenderingLivesInTheDomainPackage(t *testing.T) {
-	file, err := parser.ParseFile(token.NewFileSet(), "repo.go", nil, 0)
+func TestConventionsRenderingLivesInTheDomainPackage(t *testing.T) {
+	file, err := parser.ParseFile(token.NewFileSet(), "conventions.go", nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +291,7 @@ func TestRepoConventionsRenderingLivesInTheDomainPackage(t *testing.T) {
 			return true
 		}
 		if strings.HasPrefix(sel.Sel.Name, "Fprint") {
-			t.Errorf("cmd/repo.go renders with fmt.%s; rendering belongs in the conventions package", sel.Sel.Name)
+			t.Errorf("cmd/conventions.go renders with fmt.%s; rendering belongs in the conventions package", sel.Sel.Name)
 		}
 		return true
 	})
@@ -300,14 +300,14 @@ func TestRepoConventionsRenderingLivesInTheDomainPackage(t *testing.T) {
 func recipeOut(t *testing.T, kind string) (string, error) {
 	t.Helper()
 	var out bytes.Buffer
-	err := runRepoConventionsRecipeWith(&out, kind)
+	err := runConventionsRecipeWith(&out, kind)
 	return out.String(), err
 }
 
-// TestRepoConventionsRecipePrintsEachKindsMethod: the verb exists on its own
+// TestConventionsRecipePrintsEachKindsMethod: the verb exists on its own
 // because an agent improving a convention that already resolves needs the
 // method too, not only the one that missed.
-func TestRepoConventionsRecipePrintsEachKindsMethod(t *testing.T) {
+func TestConventionsRecipePrintsEachKindsMethod(t *testing.T) {
 	for _, kind := range conventions.KindNames() {
 		out, err := recipeOut(t, kind)
 		if err != nil {
@@ -319,10 +319,10 @@ func TestRepoConventionsRecipePrintsEachKindsMethod(t *testing.T) {
 	}
 }
 
-// TestRepoConventionsRecipeRefusesUnknownKind: the recipe verb reads nothing off
+// TestConventionsRecipeRefusesUnknownKind: the recipe verb reads nothing off
 // disk, so the closed enum is the only thing standing between a typo and empty
 // output.
-func TestRepoConventionsRecipeRefusesUnknownKind(t *testing.T) {
+func TestConventionsRecipeRefusesUnknownKind(t *testing.T) {
 	out, err := recipeOut(t, "bogus")
 	if err == nil {
 		t.Fatalf("unknown kind was accepted:\n%s", out)
@@ -337,10 +337,10 @@ func TestRepoConventionsRecipeRefusesUnknownKind(t *testing.T) {
 	}
 }
 
-// TestRepoConventionsGetMissAnswersWithTheRecipe is the slice: an agent that
+// TestConventionsGetMissAnswersWithTheRecipe is the slice: an agent that
 // asked for a convention pop has never seen is told how to work one out, and
 // still gets the miss status.
-func TestRepoConventionsGetMissAnswersWithTheRecipe(t *testing.T) {
+func TestConventionsGetMissAnswersWithTheRecipe(t *testing.T) {
 	f := newConventionFixture(t)
 
 	out, err := f.get(t, f.repo, "commits")
@@ -363,14 +363,14 @@ func TestRepoConventionsGetMissAnswersWithTheRecipe(t *testing.T) {
 func (f *conventionFixture) set(t *testing.T, dir, kind, body, derivedFrom string) (string, error) {
 	t.Helper()
 	var out bytes.Buffer
-	err := runRepoConventionsSetWith(f.deps.conventionsDeps(), &out, dir, kind, body, derivedFrom)
+	err := runConventionsSetWith(f.deps.conventionsDeps(), &out, dir, kind, body, derivedFrom)
 	return out.String(), err
 }
 
 func (f *conventionFixture) unset(t *testing.T, dir, kind string) (string, error) {
 	t.Helper()
 	var out bytes.Buffer
-	err := runRepoConventionsUnsetWith(f.deps.conventionsDeps(), &out, dir, kind)
+	err := runConventionsUnsetWith(f.deps.conventionsDeps(), &out, dir, kind)
 	return out.String(), err
 }
 
@@ -383,10 +383,10 @@ func (f *conventionFixture) memoryPath(t *testing.T, dir, kind string) string {
 	return path
 }
 
-// TestRepoConventionsSetRemembersWhatGetReadsBack is the slice: what an agent
+// TestConventionsSetRemembersWhatGetReadsBack is the slice: what an agent
 // derived goes in at the memory rank, and comes back out of `get` as a layer
 // whose provenance is the one recorded at write time.
-func TestRepoConventionsSetRemembersWhatGetReadsBack(t *testing.T) {
+func TestConventionsSetRemembersWhatGetReadsBack(t *testing.T) {
 	f := newConventionFixture(t)
 	f.repoDoc(t, "commits", "TEAM-DOC: the type set is feat, fix, chore.")
 
@@ -432,9 +432,9 @@ func TestRepoConventionsSetRemembersWhatGetReadsBack(t *testing.T) {
 	}
 }
 
-// TestRepoConventionsSetReadsStdinOrFile: --file is an alias for stdin, so the
+// TestConventionsSetReadsStdinOrFile: --file is an alias for stdin, so the
 // body must be identical whichever way in the caller used.
-func TestRepoConventionsSetReadsStdinOrFile(t *testing.T) {
+func TestConventionsSetReadsStdinOrFile(t *testing.T) {
 	f := newConventionFixture(t)
 	setCmdLayerDeps(t, f.deps)
 	body := "POP-MEMORY: subjects are imperative.\n"
@@ -464,9 +464,9 @@ func TestRepoConventionsSetReadsStdinOrFile(t *testing.T) {
 	}
 }
 
-// TestRepoConventionsSetReplacesExistingMemory: pop holds one derivation per
+// TestConventionsSetReplacesExistingMemory: pop holds one derivation per
 // kind, so a second write is a correction rather than a second opinion.
-func TestRepoConventionsSetReplacesExistingMemory(t *testing.T) {
+func TestConventionsSetReplacesExistingMemory(t *testing.T) {
 	f := newConventionFixture(t)
 	if out, err := f.set(t, f.repo, "commits", "POP-MEMORY: first reading.", "5 commits"); err != nil {
 		t.Fatalf("first set: %v\n%s", err, out)
@@ -491,10 +491,10 @@ func TestRepoConventionsSetReplacesExistingMemory(t *testing.T) {
 	}
 }
 
-// TestRepoConventionsSetIsSharedAcrossWorktrees: the write is keyed by
+// TestConventionsSetIsSharedAcrossWorktrees: the write is keyed by
 // Repository identity, so a convention derived in a worktree is the
 // repository's, not that directory's.
-func TestRepoConventionsSetIsSharedAcrossWorktrees(t *testing.T) {
+func TestConventionsSetIsSharedAcrossWorktrees(t *testing.T) {
 	f := newConventionFixture(t)
 	worktree := filepath.Join(f.root, "feature-wt")
 	runGitCheckout(t, f.repo, "worktree", "add", "-b", "feature", worktree)
@@ -511,9 +511,9 @@ func TestRepoConventionsSetIsSharedAcrossWorktrees(t *testing.T) {
 	}
 }
 
-// TestRepoConventionsSetRefusals: everything pop declines to remember, and in
+// TestConventionsSetRefusals: everything pop declines to remember, and in
 // each case it must have written nothing.
-func TestRepoConventionsSetRefusals(t *testing.T) {
+func TestConventionsSetRefusals(t *testing.T) {
 	f := newConventionFixture(t)
 	path := f.memoryPath(t, f.repo, "commits")
 
@@ -538,10 +538,10 @@ func TestRepoConventionsSetRefusals(t *testing.T) {
 	}
 }
 
-// TestRepoConventionsUnsetReportsWhatSurvivesIt is why the verb prints a stack:
+// TestConventionsUnsetReportsWhatSurvivesIt is why the verb prints a stack:
 // removing pop's rank leaves the team's document answering, and a caller told
 // only "removed" would think the kind had gone silent.
-func TestRepoConventionsUnsetReportsWhatSurvivesIt(t *testing.T) {
+func TestConventionsUnsetReportsWhatSurvivesIt(t *testing.T) {
 	f := newConventionFixture(t)
 	f.repoDoc(t, "commits", "TEAM-DOC: the type set is feat, fix, chore.")
 	if out, err := f.set(t, f.repo, "commits", "POP-MEMORY: scopes are the package name.", "the last 20 commits"); err != nil {
@@ -570,9 +570,9 @@ func TestRepoConventionsUnsetReportsWhatSurvivesIt(t *testing.T) {
 	}
 }
 
-// TestRepoConventionsUnsetWithoutMemory: the caller asked for a state that
+// TestConventionsUnsetWithoutMemory: the caller asked for a state that
 // already holds, which is not a failure.
-func TestRepoConventionsUnsetWithoutMemory(t *testing.T) {
+func TestConventionsUnsetWithoutMemory(t *testing.T) {
 	f := newConventionFixture(t)
 
 	out, err := f.unset(t, f.repo, "commits")

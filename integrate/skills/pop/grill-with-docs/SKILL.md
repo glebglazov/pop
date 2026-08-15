@@ -151,7 +151,7 @@ To commit:
    Before writing the subject, resolve the commit convention by asking pop:
 
    ```
-   pop repo conventions get commits
+   pop conventions get commits
    ```
 
    Do not derive the grammar yourself. Exit 0 — take the printed convention as

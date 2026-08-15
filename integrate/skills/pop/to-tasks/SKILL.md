@@ -159,7 +159,7 @@ if this step is skipped the repository's grammar is lost for the whole set.)*
 Resolve the convention once, before publishing, by asking pop:
 
 ```
-pop repo conventions get commits
+pop conventions get commits
 ```
 
 Do not derive the grammar yourself. The command composes every layer that answers
