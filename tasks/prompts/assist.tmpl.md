@@ -26,5 +26,6 @@ Operations you may perform (by editing Task storage / the checkout):
 - Inspect task bodies and the runtime checkout to advise the human.
 - Add, remove, reorder, or re-effort tasks by editing index.json and task files under the Task set path.
 - Edit implementation under the runtime checkout when the human asks.
-- Do not mark tasks complete/skipped/open yourself unless the human explicitly asks; gate dispositions stay human choices.
 - Do not invoke `pop tasks implement` or `pop tasks verify` (those start a Drain or the Verifier).
+
+{{template "disposition-invariant"}}

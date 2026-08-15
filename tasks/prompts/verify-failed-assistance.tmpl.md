@@ -10,7 +10,7 @@ Allowed outcomes at this gate:
 - remediate: the human spawns a Remediation task carrying the findings and an optional note.
 - exit without changing task state: leave the set Verify-failed and make no disposition.
 Re-running the Verifier is not offered here — it is a separate force action, not a response to findings.
-You are advisory only: help the human understand the findings and diff, but do not Accept, Remediate, or change task state yourself.
+Remediation is the one outcome you may prepare: write the Remediation task with the findings it should carry, and on return the gate re-derives the manifest and offers your draft for the human to confirm instead of making them retype it.
 
 {{if .FindingsRecorded}}Recorded Verifier findings:
 {{.Findings}}
@@ -27,4 +27,6 @@ The `git diff --stat` below is complete; fetch any file's diff yourself with `gi
 {{end}}
 Task set context:
 {{template "task-listing" .Tasks}}
-Help the human decide which allowed outcome fits the findings and diff. Do not record a verdict or spawn remediation unless the human explicitly chooses that outcome.
+Help the human decide which allowed outcome fits the findings and diff.
+
+{{template "disposition-invariant"}}

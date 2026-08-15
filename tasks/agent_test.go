@@ -1624,6 +1624,9 @@ func TestBuildHITLAssistancePromptWithCompletedAFKWork(t *testing.T) {
 		"defer: the human skips the HITL task",
 		"edit and rerun",
 		"exit without changing task state",
+		// Every gate hears the whole prohibition, reset included (ADR-0208).
+		"You do not effect a disposition — no task status change (complete, skip, reset, reopen)",
+		"You may draft what the human then confirms",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("missing %q in prompt:\n%s", want, prompt)
@@ -1732,6 +1735,8 @@ func TestBuildFailedAssistancePromptIncludesBodyAndFailureReason(t *testing.T) {
 		"complete by hand:",
 		"- 02-b [AFK open] Use storage",
 		"blocked_by: 01-a",
+		"You do not effect a disposition",
+		"You may draft what the human then confirms",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("missing %q in prompt:\n%s", want, prompt)
@@ -1807,7 +1812,10 @@ func TestBuildVerifyFailedAssistancePromptIncludesFindingsAndDiffStat(t *testing
 		"accept:",
 		"remediate:",
 		"Re-running the Verifier is not offered",
-		"advisory only",
+		// The gate may draft the remediation it must not effect (ADR-0208).
+		"Remediation is the one outcome you may prepare",
+		"You do not effect a disposition",
+		"no verdict recorded, no accept, no remediation spawned",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("missing %q in prompt:\n%s", want, prompt)

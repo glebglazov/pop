@@ -388,6 +388,11 @@ func TestBuildAssistPromptOmitsTaskBodies(t *testing.T) {
 		"Task contract to respect",
 		"Operations you may perform",
 		"Do not start a Drain",
+		// The session may still edit the manifest; what it may not do is
+		// effect the disposition that edit implies (ADR-0208).
+		"Add, remove, reorder, or re-effort tasks by editing index.json",
+		"You do not effect a disposition",
+		"an edit to the task manifest",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q:\n%s", want, prompt)

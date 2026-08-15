@@ -13,11 +13,13 @@ Task path: {{.TaskPath}}
 Allowed outcomes:
 - re-run: fix the underlying problem in the runtime checkout so a fresh attempt can pass; the human then reruns the task set to retry the task AFK.
 - complete by hand: the human finishes the task's work directly and marks the task done.
-These are the only outcomes at the Failed gate. Do not change task state yourself; the human chooses the outcome.
+These are the only outcomes at the Failed gate.
 
 Treat the following as the task to work again. Read it in full and satisfy every acceptance criterion:
 {{template "task-body" .Body}}
 
 Task set context:
 {{template "task-listing" .Tasks}}
-Help the human get this task to a passing state. Do not mark the task done or reset it yourself unless the human explicitly chooses that outcome.
+Help the human get this task to a passing state.
+
+{{template "disposition-invariant"}}

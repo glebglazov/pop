@@ -22,4 +22,6 @@ Completed AFK work from task artifacts:
 {{end}}{{if .HasCompletedWork}}{{range .CompletedWork}}- {{.TaskID}} ({{.File}}, {{.Outcome}} at {{.Timestamp}})
 {{range .SummaryLines}}  {{.}}
 {{end}}{{end}}{{end}}
-Use the repository and task context to help the human decide which allowed outcome is correct. Do not mark tasks complete or skipped unless the human explicitly chooses that outcome.
+Use the repository and task context to help the human decide which allowed outcome is correct.
+
+{{template "disposition-invariant"}}
