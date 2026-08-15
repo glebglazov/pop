@@ -46,19 +46,32 @@ func overrideConfigFile(d *Deps) popWrittenFile {
 	}
 }
 
+// read returns the file's text. An absent file reads as empty text rather than
+// as an error, so every reader starts from "nothing stored yet". It is separate
+// from load because a reader that wants the file both ways — as the generic
+// document the write side edits and through pop's own structs — must not read it
+// twice to get them (the override layer does exactly that).
+func (f popWrittenFile) read(d *Deps) (string, error) {
+	data, err := d.FS.ReadFile(f.path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("read %s %q: %w", f.label, f.path, err)
+	}
+	return string(data), nil
+}
+
 // load decodes the file as a generic TOML document, keeping keys pop does not
 // know about. An absent file decodes to an empty document rather than an error,
 // so every writer starts from "nothing stored yet".
 func (f popWrittenFile) load(d *Deps) (map[string]any, toml.MetaData, error) {
-	data, err := d.FS.ReadFile(f.path)
+	data, err := f.read(d)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return map[string]any{}, toml.MetaData{}, nil
-		}
-		return nil, toml.MetaData{}, fmt.Errorf("read %s %q: %w", f.label, f.path, err)
+		return nil, toml.MetaData{}, err
 	}
 	var doc map[string]any
-	md, err := toml.Decode(string(data), &doc)
+	md, err := toml.Decode(data, &doc)
 	if err != nil {
 		return nil, toml.MetaData{}, fmt.Errorf("parse %s %q: %w", f.label, f.path, err)
 	}

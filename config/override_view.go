@@ -177,7 +177,10 @@ func overrideValueLayers(d *Deps, configPath string) ([]overrideValueLayer, erro
 		configPath = DefaultConfigPathWith(d)
 	}
 
-	overrideDoc, _, err := overrideConfigFile(d).load(d)
+	// Only the layer's global half answers here: a key of this list is a dotted
+	// config path, and the per-repository blocks are addressed by repository
+	// rather than by path (ADR-0212 decisions 3 and 7).
+	overrides, err := loadOverrideLayer(d)
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +198,7 @@ func overrideValueLayers(d *Deps, configPath string) ([]overrideValueLayer, erro
 	}
 
 	layers := []overrideValueLayer{
-		{layer: OverrideLayerOverride, doc: overrideDoc},
+		{layer: OverrideLayerOverride, doc: overrides.globalDoc()},
 		{layer: OverrideLayerConfig, doc: userDoc},
 	}
 	for _, include := range documentIncludes(d, configPath, userDoc) {

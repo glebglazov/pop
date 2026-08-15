@@ -103,6 +103,12 @@ func decodeConfigLayer(d *Deps, path string) (*configLayer, error) {
 //	                      inert for everyone who has configured anything
 //	                      (ADR-0202 decision 1).
 //
+// Only the override file's global half takes part in this merge. Its
+// [repo."<identity>"] blocks are the repository-scoped half of the same layer,
+// laid over what the repo-scope ladder resolves for a checkout in hand
+// (override_layer.go, reposcope.go) — which this merge, holding no checkout,
+// could not do.
+//
 // It returns the override layer's MetaData, which the caller needs to keep
 // hand-authored include files from winning over an override.
 func applyConfigLayerMerge(d *Deps, userCfg *Config, userPath string, userMD toml.MetaData) (toml.MetaData, error) {
@@ -132,6 +138,13 @@ func applyConfigLayerMerge(d *Deps, userCfg *Config, userPath string, userMD tom
 			return overrideMD, fmt.Errorf("loading override config %q: %w", overridePath, err)
 		}
 	} else {
+		// The override file's [repo."<identity>"] blocks are the layer's
+		// repository-scoped half and are applied over the resolved value by the
+		// repo-scope resolvers (ADR-0212 decision 2). Merging them here would file
+		// them in the same map as the user's own [repo."<path>"] declarations,
+		// where they would read as one of them — a rung of the very ladder they are
+		// there to outrank.
+		layer.cfg.Repo = nil
 		layers = append(layers, *layer)
 		overrideMD = layer.md
 	}
@@ -158,6 +171,11 @@ func applyConfigLayerMerge(d *Deps, userCfg *Config, userPath string, userMD tom
 // override set inside it.
 func claimOverrideKeys(policy *mergePolicy, overrideMD toml.MetaData) {
 	for _, key := range overrideMD.Keys() {
+		// The per-repository blocks take no part in the global merge, so an
+		// include's own [repo."<path>"] declarations are none of their business.
+		if len(key) > 0 && key[0] == overrideRepoSection {
+			continue
+		}
 		for i := 1; i <= len(key); i++ {
 			policy.claim(strings.Join([]string(key[:i]), "."))
 		}

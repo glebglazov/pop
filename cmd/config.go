@@ -368,11 +368,18 @@ func runConfigRepoSetWith(cd *config.Deps, cfg *config.Config, out io.Writer, ch
 		return err
 	}
 	for _, setting := range settings {
-		if setting.Key != key || setting.Source != config.RepoSettingOverride {
+		if setting.Key != key {
 			continue
 		}
-		fmt.Fprintf(out, "note: %s in your config.toml declares %s = %s and still wins\n",
-			setting.Locus, key, setting.Value)
+		// Two layers can shadow what was just written: a hand-authored block, which
+		// is the more specific declaration, and the override layer, which is laid
+		// over every declaration (ADR-0212 decision 2). Either way the reply names
+		// the locus a human would edit to give the new value effect.
+		switch setting.Source {
+		case config.RepoSettingOverride, config.RepoSettingOverrideLayer:
+			fmt.Fprintf(out, "note: %s declares %s = %s and still wins\n",
+				setting.Locus, key, setting.Value)
+		}
 	}
 	return nil
 }

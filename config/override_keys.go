@@ -19,9 +19,11 @@ const (
 	// OverrideScopeGlobal files the override once for the machine, in the
 	// pop-written config.override.toml. Every exposed key is global today.
 	OverrideScopeGlobal OverrideScope = "global"
-	// OverrideScopeRepo is reserved for a per-repository override and is declared
-	// by no key yet. It exists so the tag carries a scope rather than a boolean:
-	// the first repo-scoped key then needs no second marker (ADR-0202).
+	// OverrideScopeRepo files the override against one repository, in the same
+	// file's [repo."<identity>"] block, where it beats a global entry for the same
+	// key (ADR-0212 decisions 2 and 3). The layer honours the scope — the block
+	// holds the repo-scope key set and resolution lays it over the ladder — though
+	// no key of this registry declares it yet.
 	OverrideScopeRepo OverrideScope = "repo"
 )
 

@@ -922,6 +922,10 @@ func repoIdentity(d *Deps, path string) string {
 //	config.toml [repo."<path>"] → worktree .pop/config.toml → trunk-anchor
 //	.pop/config.toml → pop-written repo settings → global config.toml → default
 //
+// The override layer is then laid over that answer (ADR-0212 decision 2), its
+// repository entry over its global one, so an override wins whatever the ladder
+// above decided.
+//
 // The committed .pop/config.toml is read at two anchors (ADR-0083's surviving
 // two-anchor law): this worktree first, then the trunk anchor (the Trunk
 // worktree, or the repository-identity root for a bare repo), presence deciding.
@@ -953,11 +957,12 @@ func (c *Config) ResolveRepoConfig(d *Deps, checkoutPath string) (RepoConfig, er
 // ResolveWorkbenchesWith returns the union of Workbenches from all homes (global
 // config, committed .pop/config.toml, and [repo."<path>"]), resolved by walking
 // the same scope-first ladder ResolveRepoConfig walks: [repo."<path>"] > worktree
-// .pop/config.toml > trunk-anchor .pop/config.toml > global library. The committed
-// .pop/config.toml is unioned at two anchors (ADR-0083): this worktree outranks
-// the inherited trunk anchor (the Trunk worktree, or the repository-identity root
-// for a bare repo). Blueprints union by name, so a name a more specific source
-// redefines is taken from there and the collision is warned about.
+// .pop/config.toml > trunk-anchor .pop/config.toml > global library, with the
+// override layer laid over the answer. The committed .pop/config.toml is unioned
+// at two anchors (ADR-0083): this worktree outranks the inherited trunk anchor
+// (the Trunk worktree, or the repository-identity root for a bare repo).
+// Blueprints union by name, so a name a more specific source redefines is taken
+// from there and the collision is warned about.
 func (c *Config) ResolveWorkbenchesWith(d *Deps, checkoutPath string) ([]Workbench, []string) {
 	e := c.newRepoScope(d, checkoutPath)
 
@@ -966,10 +971,12 @@ func (c *Config) ResolveWorkbenchesWith(d *Deps, checkoutPath string) ([]Workben
 	seen := make(map[string]string) // name -> source for collision warnings
 
 	// Walk the ladder lowest rung first, so a name defined higher up overwrites
-	// the one below it (ADR-0122 list-by-key). Each collision is reported against
-	// seen, read before this rung's own names are recorded; the lowest rung can
-	// collide with nothing, and the gap-filler rung carries no blueprints.
-	for _, src := range e.scopeLadder() {
+	// the one below it (ADR-0122 list-by-key), then the override layer over the
+	// result — a blueprint a human overrode wins whatever the ladder decided
+	// (ADR-0212 decision 2). Each collision is reported against seen, read before
+	// this rung's own names are recorded; the lowest rung can collide with
+	// nothing, and the gap-filler rung carries no blueprints.
+	for _, src := range append(e.scopeLadder(), e.overrideSources()...) {
 		label := src.label
 		pol := repoScopePolicy()
 		pol.onCollision = func(keyPath string) {
@@ -1215,9 +1222,11 @@ func (c *Config) WorkbenchOrder() []string {
 // auto-apply when a session is born for checkoutPath, or "" for none, plus any
 // non-fatal warnings the caller should surface. Resolution follows the
 // scope-first law (ADR-0212 decision 1): the most specific source wins, and
-// within one scope a declaration beats a gap-filler pop wrote. Highest → lowest,
-// the sources that carry this key:
+// within one scope a declaration beats a gap-filler pop wrote — under the
+// override layer, which is laid over that answer rather than ranked inside it
+// (decision 2). Highest → lowest, the sources that carry this key:
 //
+//	config.override.toml [repo."<id>"] override · stated for this repository
 //	config.toml [repo."<path>"]        declaration · keyed to this checkout
 //	./.pop/config.toml                 declaration · committed, this worktree
 //	<trunk>/.pop/config.toml (→ id-root)  declaration · committed, inherited
@@ -2295,13 +2304,11 @@ func popTOMLScopeFindings(path string, md toml.MetaData) []Finding {
 // repoBlockWarnings returns load-time findings for unknown keys inside
 // [repo."<path>"] blocks. Only the shared repo-scope key set (plus the
 // [repo]-only trunk and turn_cap) is valid there; any other key is silently
-// degraded but surfaced as a finding. The shared part of the valid set is derived
-// from the shared schema (repoScopeLegalKeys), so it stays in sync with
-// .pop/config.toml scope-legality.
+// degraded but surfaced as a finding. The valid set is derived from the shared
+// schema (repoBlockLegalKeys), so it stays in sync with .pop/config.toml
+// scope-legality and with what a block of the override layer may hold.
 func repoBlockWarnings(path string, md toml.MetaData) []Finding {
-	validRepoKeys := repoScopeLegalKeys()
-	validRepoKeys["trunk"] = true    // [repo]-only machine topology, not shared
-	validRepoKeys["turn_cap"] = true // [repo]-only run bound, not shared (ADR-0191)
+	validRepoKeys := repoBlockLegalKeys()
 	var findings []Finding
 	seen := make(map[string]bool)
 	for _, key := range md.Undecoded() {

@@ -107,12 +107,17 @@ func EffectiveJSONWith(d *Deps, path string, trunk CurrentTrunkFunc) (string, er
 // effective mirror. Includes are dropped because the loader has already merged
 // them in — re-listing them would invite a redundant second resolution — and
 // every repo-scope key is canonicalized (~ expanded, symlinks resolved) so the
-// emitted [repo."<path>"] keys are absolute realpaths. When trunk is non-nil the
-// current repo's answers are appended as a [current_repo] table.
+// emitted [repo."<path>"] keys are absolute realpaths, with the override layer's
+// per-repository entries laid over them. When trunk is non-nil the current
+// repo's answers are appended as a [current_repo] table.
 func renderEffectiveTOML(d *Deps, cfg *Config, trunk *ResolvedTrunk) (string, error) {
 	out := *cfg
 	out.Includes = nil
-	out.Repo = canonicalizeRepoKeys(d, cfg.Repo)
+	repo, err := effectiveRepoBlocks(d, cfg)
+	if err != nil {
+		return "", err
+	}
+	out.Repo = repo
 
 	var b strings.Builder
 	if err := toml.NewEncoder(&b).Encode(&out); err != nil {
@@ -176,6 +181,53 @@ func encodeCurrentRepo(d *Deps, cfg *Config, trunk *ResolvedTrunk) (string, erro
 		return "", err
 	}
 	return b.String(), nil
+}
+
+// effectiveRepoBlocks renders the [repo."<path>"] blocks as they are actually in
+// force: the user's own blocks, canonicalized, with the override layer's
+// per-repository entries laid over the block of the same repository (ADR-0212
+// decision 2). Without the overlay the mirror would print a value an override
+// has already replaced — and "what is actually in effect" is the whole reason
+// this command exists. An override for a repository the user declares no block
+// for is emitted under the Repository identity it is filed against, which is the
+// only path the layer knows for it.
+func effectiveRepoBlocks(d *Deps, cfg *Config) (map[string]RepoOverrideConfig, error) {
+	blocks := canonicalizeRepoKeys(d, cfg.Repo)
+	layer, err := loadOverrideLayer(d)
+	if err != nil {
+		return nil, err
+	}
+	for key, override := range layer.scoped.Repo {
+		identity := repoIdentity(d, key)
+		target := identity
+		for declared := range blocks {
+			if repoIdentity(d, declared) == identity {
+				target = declared
+				break
+			}
+		}
+		merged := blocks[target]
+		overlayRepoBlock(&merged, override)
+		if blocks == nil {
+			blocks = map[string]RepoOverrideConfig{}
+		}
+		blocks[target] = merged
+	}
+	return blocks, nil
+}
+
+// overlayRepoBlock lays one [repo] block over another: the shared repo-scope
+// keys through the same walker that resolves them, and the two [repo]-only keys
+// by presence, a nil pointer meaning the block states nothing about that key.
+func overlayRepoBlock(base *RepoOverrideConfig, over RepoOverrideConfig) {
+	scope := over.RepoScopeConfig
+	mergeWalk(&base.RepoScopeConfig, &scope, repoScopeMetadata(scope), repoScopePolicy())
+	if over.Trunk != nil {
+		base.Trunk = over.Trunk
+	}
+	if over.TurnCap != nil {
+		base.TurnCap = over.TurnCap
+	}
 }
 
 // canonicalizeRepoKeys rebuilds a [repo] block map with every key resolved to

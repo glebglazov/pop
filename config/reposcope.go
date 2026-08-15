@@ -24,6 +24,11 @@ import (
 // Nothing here ranks a source by who authored its file, which is what ADR-0083's
 // superseded law did; the walker that consumes the order is unchanged.
 //
+// The override layer is not in that order at all (ADR-0212 decision 2). It is a
+// second, shorter list — overrideSources — laid over whatever the ladder
+// resolved, so a consumer walks the ladder to an answer and then applies the
+// override to it, whatever the ladder's own ordering was.
+//
 // Enumeration is lazy (ADR-0054): it happens at query time per checkout, a
 // source is read only when a resolver asks for it, and a malformed .pop/config.toml
 // degrades to the zero config exactly as before. Walker merges stay same-type:
@@ -39,15 +44,23 @@ type repoScopeEnumerator struct {
 	canon        string
 	identity     string
 
-	// override is the [repo."<path>"] block whose key shares this checkout's
-	// repository identity, resolved once. overrideFound distinguishes "no block"
-	// from "a zero block"; overrideKeyCanon is the canonical key path (for
-	// collision messages); overrideExact reports whether that key canon equals the
-	// checkout canon (the trunk per-checkout gate).
-	overrideFound    bool
-	override         RepoOverrideConfig
-	overrideKeyCanon string
-	overrideExact    bool
+	// declared is the config.toml [repo."<path>"] block whose key shares this
+	// checkout's repository identity — the ladder's most specific declaration,
+	// resolved once. declaredFound distinguishes "no block" from "a zero block";
+	// declaredKeyCanon is the canonical key path (for collision messages);
+	// declaredExact reports whether that key canon equals the checkout canon (the
+	// trunk per-checkout gate). It is named for what it is rather than for the
+	// file it sits in, because "override" now names the layer above the ladder.
+	declaredFound    bool
+	declared         RepoOverrideConfig
+	declaredKeyCanon string
+	declaredExact    bool
+
+	// overrides is the override layer, loaded lazily and once. It is no rung of
+	// the ladder (ADR-0212 decision 2), so every resolver here asks for it after
+	// its walk rather than during it.
+	overridesLoaded bool
+	overrides       overrideLayer
 
 	// popCache memoizes .pop/config.toml reads by canonical anchor path (read-once guard).
 	popCache map[string]popTOMLRead
@@ -70,15 +83,15 @@ func (c *Config) newRepoScope(d *Deps, checkoutPath string) *repoScopeEnumerator
 		identity:     repoIdentity(d, checkoutPath),
 		popCache:     map[string]popTOMLRead{},
 	}
-	e.matchOverride()
+	e.matchDeclaredBlock()
 	return e
 }
 
-// matchOverride finds the [repo."<path>"] block whose key shares this checkout's
-// repository identity. At most one block matches a given identity in practice;
-// when several keys resolve to the same identity the last wins (map order is
-// non-deterministic, as it was before the refactor).
-func (e *repoScopeEnumerator) matchOverride() {
+// matchDeclaredBlock finds the [repo."<path>"] block whose key shares this
+// checkout's repository identity. At most one block matches a given identity in
+// practice; when several keys resolve to the same identity the last wins (map
+// order is non-deterministic, as it was before the refactor).
+func (e *repoScopeEnumerator) matchDeclaredBlock() {
 	if e.cfg == nil {
 		return
 	}
@@ -87,11 +100,29 @@ func (e *repoScopeEnumerator) matchOverride() {
 			continue
 		}
 		b := block
-		e.override = b
-		e.overrideFound = true
-		e.overrideKeyCanon = canonicalPath(e.d, rawKey)
-		e.overrideExact = e.overrideKeyCanon == e.canon
+		e.declared = b
+		e.declaredFound = true
+		e.declaredKeyCanon = canonicalPath(e.d, rawKey)
+		e.declaredExact = e.declaredKeyCanon == e.canon
 	}
+}
+
+// overrideLayer reads the override layer once per enumerator. A file that will
+// not parse degrades to "nothing is overridden" with a debug log rather than
+// failing resolution: an unreadable override must not keep a human out of a
+// session, exactly as a malformed .pop/config.toml does not.
+func (e *repoScopeEnumerator) overrideLayer() overrideLayer {
+	if e.overridesLoaded {
+		return e.overrides
+	}
+	e.overridesLoaded = true
+	layer, err := loadOverrideLayer(e.d)
+	if err != nil {
+		debug.Error("config: read override layer: %v", err)
+		return e.overrides
+	}
+	e.overrides = layer
+	return e.overrides
 }
 
 // popTOML reads the committed .pop/config.toml at anchor, caching by canonical path so
@@ -205,13 +236,35 @@ func (e *repoScopeEnumerator) scopeLadder() []repoScopeSource {
 			err:      err,
 		})
 	}
-	if e.overrideFound {
+	if e.declaredFound {
 		ladder = append(ladder, repoScopeSource{
-			label: fmt.Sprintf("[repo.%q]", e.overrideKeyCanon),
-			scope: e.override.RepoScopeConfig,
+			label: fmt.Sprintf("[repo.%q]", e.declaredKeyCanon),
+			scope: e.declared.RepoScopeConfig,
 		})
 	}
 	return ladder
+}
+
+// overrideSources returns the override layer's rungs for this checkout, lowest
+// first: what the layer states globally, then what it states about this
+// repository. They are deliberately not part of scopeLadder, because an override
+// is not a rank in it (ADR-0212 decision 2) — it is laid over whatever the
+// ladder resolved and always wins, which is what frees every rung beneath from
+// having to encode "and the human must be able to win". Within the layer the
+// ladder's own law applies again: the repository entry is the more specific
+// scope, so it beats the global one for the same key.
+//
+// A consumer therefore walks the ladder and then these, in that order.
+func (e *repoScopeEnumerator) overrideSources() []repoScopeSource {
+	layer := e.overrideLayer()
+	sources := []repoScopeSource{{label: "override layer", scope: layer.globalScope()}}
+	if block, ok := layer.repoBlock(e.d, e.identity); ok {
+		sources = append(sources, repoScopeSource{
+			label: fmt.Sprintf("override layer [repo.%q]", e.identity),
+			scope: block.RepoScopeConfig,
+		})
+	}
+	return sources
 }
 
 // globalScope is what the global config.toml declares for the repo-scope key set
@@ -227,10 +280,11 @@ func (e *repoScopeEnumerator) globalScope() RepoScopeConfig {
 
 // resolveRepoConfig returns the effective RepoConfig for the checkout: the
 // scope-first ladder walked lowest rung first, so the most specific source that
-// declares a key supplies it. The [repo]-only keys stay caller-side — trunk is
-// per-checkout, applied only when the override's key path exactly matches this
-// checkout; turn_cap is per-repository. A missing .pop/config.toml is not an
-// error; a malformed one degrades to the zero config with its error returned.
+// declares a key supplies it, and the override layer then laid over the answer.
+// The [repo]-only keys stay caller-side — trunk is per-checkout, applied only
+// when the block's key path exactly matches this checkout; turn_cap is
+// per-repository. A missing .pop/config.toml is not an error; a malformed one
+// degrades to the zero config with its error returned.
 func (e *repoScopeEnumerator) resolveRepoConfig() (RepoConfig, error) {
 	var result RepoConfig
 	var popErr error
@@ -246,24 +300,46 @@ func (e *repoScopeEnumerator) resolveRepoConfig() (RepoConfig, error) {
 		mergeWalk(&result.RepoScopeConfig, &scope, repoScopeMetadata(scope), repoScopePolicy())
 		result.Findings = append(result.Findings, src.findings...)
 	}
-	if e.overrideFound {
-		if e.override.Trunk != nil && e.overrideExact {
-			result.Trunk = *e.override.Trunk
-		}
-		// turn_cap deliberately skips trunk's exact-checkout gate: the block was
-		// matched by repository identity, so every worktree of the repository reads
-		// the one bound (ADR-0191). A non-positive number bounds nothing, so it
-		// reads as "declares no cap" rather than as a cap of zero turns — and a
-		// hand-written one still overrides a bound pop recorded, which is
-		// declaration-beats-gap-filler within the repository scope.
-		if e.override.TurnCap != nil {
-			result.TurnCap = 0
-			if *e.override.TurnCap > 0 {
-				result.TurnCap = *e.override.TurnCap
-			}
-		}
+	if e.declaredFound {
+		e.applyBlockOnlyKeys(&result, e.declared, e.declaredExact)
+	}
+	// The ladder has resolved a value; the override layer now goes over it
+	// (ADR-0212 decision 2), global entry first so the repository one beats it.
+	for _, src := range e.overrideSources() {
+		scope := src.scope
+		mergeWalk(&result.RepoScopeConfig, &scope, repoScopeMetadata(scope), repoScopePolicy())
+	}
+	if block, ok := e.overrideLayer().repoBlock(e.d, e.identity); ok {
+		// The block is filed under the repository itself, so it names no checkout
+		// and the per-checkout trunk gate can only be met by a repository whose
+		// identity is the checkout in hand. That is the shape ADR-0212 decision 3
+		// retires: trunk becomes a repository-scoped path in its own slice, and the
+		// gate goes with it.
+		e.applyBlockOnlyKeys(&result, block, canonicalPath(e.d, e.identity) == e.canon)
 	}
 	return result, popErr
+}
+
+// applyBlockOnlyKeys applies the two keys that live only in a [repo] block —
+// wherever that block came from, a config.toml declaration or the override
+// layer. They are applied outside the walker because neither is part of the
+// shared repo-scope schema and each keys on something different.
+//
+// trunk describes one checkout, so it applies only when the block's key names
+// this very checkout. turn_cap describes the whole repository, so it deliberately
+// skips that gate: the block was matched by repository identity and every
+// worktree reads the one bound (ADR-0191). A non-positive number bounds nothing,
+// so it reads as "declares no cap" rather than as a cap of zero turns.
+func (e *repoScopeEnumerator) applyBlockOnlyKeys(result *RepoConfig, block RepoOverrideConfig, exact bool) {
+	if block.Trunk != nil && exact {
+		result.Trunk = *block.Trunk
+	}
+	if block.TurnCap != nil {
+		result.TurnCap = 0
+		if *block.TurnCap > 0 {
+			result.TurnCap = *block.TurnCap
+		}
+	}
 }
 
 // applyRecordedSettings folds in the repository gap-filler: the settings pop
@@ -296,21 +372,26 @@ type preferredSource struct {
 }
 
 // preferredSources returns the ordered preferred_workbench chain for the
-// checkout — scopeLadder's law read from the top, for the one key whose runtime
-// rungs are keyed by checkout rather than by repository identity. The
-// .pop/config.toml anchors are read here (cached), so the consider-chain iterates
-// a flat list instead of hand-walking anchors; the runtime rungs stay descriptors
-// read in the chain so their three-valued semantics and per-rung debug logs are
-// preserved. Highest precedence first:
+// checkout — the override layer, then scopeLadder's law read from the top, for
+// the one key whose runtime rungs are keyed by checkout rather than by
+// repository identity. The .pop/config.toml anchors are read here (cached), so
+// the consider-chain iterates a flat list instead of hand-walking anchors; the
+// runtime rungs stay descriptors read in the chain so their three-valued
+// semantics and per-rung debug logs are preserved. Highest precedence first:
 //
+//	override                   config.override.toml [repo."<id>"]  this repository
 //	repository · declaration   config.toml [repo."<path>"]        this checkout
 //	repository · declaration   ./.pop/config.toml                 this worktree
 //	repository · declaration   <trunk-or-id-root>/.pop/config.toml  inherited
 //	repository · gap-filler    config.runtime.toml[<wt-path>]     what pop recorded here
 //	repository · gap-filler    config.runtime.toml[<trunk-path>]  inherited from the Trunk
 //
-// The key has no global home, so the global rung is absent rather than merely
-// losing. The runtime rungs record what pop's own picker happened to pick, which
+// The override entry heads the chain because it is not a rung of it: it is the
+// layer laid over whatever the rest resolves (ADR-0212 decision 2), and reading
+// the chain from the top makes "applied over the answer" and "asked first" the
+// same walk. The key has no global home, so neither the ladder's global rung nor
+// a global override of it exists — a repository is the only scope that can state
+// it. The runtime rungs record what pop's own picker happened to pick, which
 // makes them gap-fillers under every declaration of the same scope — not a
 // checkout scope of their own (ADR-0212 decision 3 admits only two scopes).
 //
@@ -318,10 +399,14 @@ type preferredSource struct {
 // runtime rung when the trunk is absent or is this checkout — the read-once
 // guard, so a stale name is never double-warned by re-reading the same anchor.
 func (e *repoScopeEnumerator) preferredSources() []preferredSource {
-	sources := []preferredSource{
-		{name: e.override.PreferredWorkbench},  // [repo."<path>"]
-		{name: e.popPreferred(e.checkoutPath)}, // this worktree's .pop/config.toml
+	var sources []preferredSource
+	if block, ok := e.overrideLayer().repoBlock(e.d, e.identity); ok {
+		sources = append(sources, preferredSource{name: block.PreferredWorkbench})
 	}
+	sources = append(sources,
+		preferredSource{name: e.declared.PreferredWorkbench},  // [repo."<path>"]
+		preferredSource{name: e.popPreferred(e.checkoutPath)}, // this worktree's .pop/config.toml
+	)
 
 	if anchor := e.inheritedAnchor(); canonicalPath(e.d, anchor) != e.canon {
 		sources = append(sources, preferredSource{name: e.popPreferred(anchor)}) // inherited .pop/config.toml

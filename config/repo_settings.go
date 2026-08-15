@@ -17,7 +17,10 @@ import (
 //
 //   - Pop writes only here, never into the hand-authored config.toml (ADR-0150),
 //     so a [repo."<path>"] block a human writes always beats a value pop wrote
-//     and never the other way around.
+//     and never the other way around. Above both sits the override layer, whose
+//     per-repository block holds the same keys and wins outright (ADR-0212
+//     decision 2) — this layer records what a surface happened to pick, that one
+//     records what a human stated.
 //   - What may be written is derived from a schema by reflection, exactly as
 //     repoScopeLegalKeys derives what may be read, so the setter cannot drift
 //     from what the config accepts.
@@ -46,16 +49,20 @@ type RepoRuntimeConfig struct {
 // test, in both directions, so a field added to RepoRuntimeConfig cannot become
 // settable without its parser or be declared here without existing in the
 // schema.
+//
+// block reads the key out of a [repo] block whatever layer the block came from —
+// a hand-authored config.toml declaration or the override layer's entry for this
+// repository — because the two share one shape (ADR-0212 decision 7).
 type repoSettingKind struct {
-	parse    func(raw string) (any, error)
-	override func(RepoOverrideConfig) (any, bool)
-	runtime  func(RepoRuntimeConfig) (any, bool)
+	parse   func(raw string) (any, error)
+	block   func(RepoOverrideConfig) (any, bool)
+	runtime func(RepoRuntimeConfig) (any, bool)
 }
 
 var repoSettingKinds = map[string]repoSettingKind{
 	"turn_cap": {
 		parse: parseTurnCapSetting,
-		override: func(o RepoOverrideConfig) (any, bool) {
+		block: func(o RepoOverrideConfig) (any, bool) {
 			if o.TurnCap == nil {
 				return nil, false
 			}
@@ -160,8 +167,13 @@ const (
 	RepoSettingUnset RepoSettingSource = "unset"
 	// RepoSettingRuntime is the pop-written layer: what `pop config repo set` wrote.
 	RepoSettingRuntime RepoSettingSource = "pop (config repo set)"
-	// RepoSettingOverride is the hand-authored [repo."<path>"] block, which wins.
+	// RepoSettingOverride is the hand-authored [repo."<path>"] block, the most
+	// specific declaration of the ladder.
 	RepoSettingOverride RepoSettingSource = "hand-authored config.toml"
+	// RepoSettingOverrideLayer is the override layer's entry for this repository:
+	// laid over whatever the ladder resolved, so it beats even the hand-authored
+	// block (ADR-0212 decision 2).
+	RepoSettingOverrideLayer RepoSettingSource = "override layer"
 )
 
 // RepoSetting is one settable key's effective value for a repository, with the
@@ -175,7 +187,8 @@ type RepoSetting struct {
 
 // ResolveRepoSettings reports every settable key's effective value for the
 // repository owning checkoutPath, in the same precedence resolution itself uses:
-// a hand-authored [repo."<path>"] block matched by repository identity beats the
+// the override layer's entry for this repository beats a hand-authored
+// [repo."<path>"] block matched by repository identity, which beats the
 // pop-written runtime layer, which beats unset.
 func (c *Config) ResolveRepoSettings(d *Deps, checkoutPath string) ([]RepoSetting, error) {
 	if d == nil {
@@ -186,6 +199,7 @@ func (c *Config) ResolveRepoSettings(d *Deps, checkoutPath string) ([]RepoSettin
 	if err != nil {
 		return nil, err
 	}
+	overridden, hasOverride := e.overrideLayer().repoBlock(d, e.identity)
 	docs := RepoSettableKeyDocs()
 	settings := make([]RepoSetting, 0, len(docs))
 	for _, doc := range docs {
@@ -196,11 +210,18 @@ func (c *Config) ResolveRepoSettings(d *Deps, checkoutPath string) ([]RepoSettin
 			setting.Source = RepoSettingRuntime
 			setting.Locus = DefaultRuntimeConfigPathWith(d)
 		}
-		if e.overrideFound {
-			if value, ok := kind.override(e.override); ok {
+		if e.declaredFound {
+			if value, ok := kind.block(e.declared); ok {
 				setting.Value = fmt.Sprint(value)
 				setting.Source = RepoSettingOverride
-				setting.Locus = fmt.Sprintf("[repo.%q]", e.overrideKeyCanon)
+				setting.Locus = fmt.Sprintf("[repo.%q]", e.declaredKeyCanon)
+			}
+		}
+		if hasOverride {
+			if value, ok := kind.block(overridden); ok {
+				setting.Value = fmt.Sprint(value)
+				setting.Source = RepoSettingOverrideLayer
+				setting.Locus = DefaultOverrideConfigPathWith(d)
 			}
 		}
 		settings = append(settings, setting)
