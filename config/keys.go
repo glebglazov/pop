@@ -42,10 +42,10 @@ type ConfigKeyDoc struct {
 	Key  string // TOML key name (dotted when nested, e.g. "worktree.commands.key")
 	Type string // human-readable TOML type
 	Desc string // one-line description from the `desc` struct tag ("" if none)
-	// Override is the raw `override` struct tag: the scope a human may override
-	// this key at, "" when the key declares no exposure (ADR-0202 decision 3).
-	// It is carried unvalidated so the override registry — the one place that
-	// knows the legal scope words — is the one place that rejects a typo.
+	// Override is the raw `override` struct tag: the marker a key wears to opt
+	// *out* of overridability, "" for the default — overridable (ADR-0212
+	// decision 4). It is carried unvalidated so the override registry — the one
+	// place that knows the legal marker — is the one place that rejects a typo.
 	Override string
 }
 

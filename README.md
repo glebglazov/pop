@@ -130,8 +130,8 @@ Flag: `-s, --switch` — switch tmux session instead of printing path.
 ### `pop config dashboard`
 
 Browse the config keys you can override, and what each one resolves to. The left
-pane lists every override-exposed key (the ones `pop config keys` marks
-`[override: <scope>]`) with its description beneath and a `●` on keys that
+pane lists every overridable key — every config leaf except the ones `pop config
+keys` marks `[override: never]` — with its description beneath and a `●` on keys that
 carry an override today; the right pane previews the highlighted key in config
 format — the effective value as TOML, the layer that produced it, and the value
 an override is standing on.

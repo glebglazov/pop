@@ -24,7 +24,7 @@ func viewFor(t *testing.T, f *overrideFixture, key string) OverrideKeyView {
 }
 
 // TestOverrideKeyViewsListTheRegistry pins the dashboard's row set to the
-// reflected registry: the editor lists exactly the exposed keys, in schema order.
+// reflected registry: the editor lists every overridable key, in schema order.
 func TestOverrideKeyViewsListTheRegistry(t *testing.T) {
 	f := newOverrideFixture(t)
 	views, err := OverrideKeyViewsWith(f.d, f.userPath)
@@ -36,7 +36,7 @@ func TestOverrideKeyViewsListTheRegistry(t *testing.T) {
 		t.Fatalf("%d views for %d registry keys", len(views), len(registry))
 	}
 	for i, view := range views {
-		if view.Key != registry[i].Key || view.Scope != registry[i].Scope || view.Desc != registry[i].Desc {
+		if view.Key != registry[i].Key || view.Desc != registry[i].Desc {
 			t.Errorf("view %d = %+v, want registry entry %+v", i, view, registry[i])
 		}
 	}

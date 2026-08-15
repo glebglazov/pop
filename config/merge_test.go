@@ -222,25 +222,26 @@ skills = ["nope"]
 	}
 }
 
-// TestConfigMergeTagsAreLegal walks the whole Config type tree with the
+// TestConfigSchemaTagsAreLegal walks the whole Config type tree with the
 // slice-01 drift check, so any merge:/include: tag naming an unknown kind, a
 // malformed list-by-key, or a kind the field's Go type cannot support fails the
 // test run instead of silently misbehaving when the overlay walker runs at load
-// time.
-func TestConfigMergeTagsAreLegal(t *testing.T) {
-	if problems := checkMergeTags(reflect.TypeOf(Config{})); len(problems) != 0 {
-		t.Fatalf("Config has illegal merge tags:\n%s", strings.Join(problems, "\n"))
+// time — and so does a field with no overridability answer, which would
+// otherwise inherit "overridable" in silence (ADR-0212 decision 4).
+func TestConfigSchemaTagsAreLegal(t *testing.T) {
+	if problems := checkSchemaTags(reflect.TypeOf(Config{})); len(problems) != 0 {
+		t.Fatalf("Config has illegal schema tags:\n%s", strings.Join(problems, "\n"))
 	}
 }
 
-// TestRepoScopeConfigMergeTagsAreLegal runs the slice-01 drift check over the
+// TestRepoScopeConfigSchemaTagsAreLegal runs the slice-01 drift check over the
 // shared repo-scope schema (ADR-0083), which the repo-scope enumerator (slice
 // 04) merges same-type via the walker. It catches a merge: tag naming an unknown
 // kind, a malformed list-by-key, or a kind the field's Go type cannot support —
 // e.g. workbenches' list-by-key=name key field must exist on Workbench.
-func TestRepoScopeConfigMergeTagsAreLegal(t *testing.T) {
-	if problems := checkMergeTags(reflect.TypeOf(RepoScopeConfig{})); len(problems) != 0 {
-		t.Fatalf("RepoScopeConfig has illegal merge tags:\n%s", strings.Join(problems, "\n"))
+func TestRepoScopeConfigSchemaTagsAreLegal(t *testing.T) {
+	if problems := checkSchemaTags(reflect.TypeOf(RepoScopeConfig{})); len(problems) != 0 {
+		t.Fatalf("RepoScopeConfig has illegal schema tags:\n%s", strings.Join(problems, "\n"))
 	}
 }
 

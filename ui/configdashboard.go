@@ -15,7 +15,7 @@ import (
 	"github.com/junegunn/fzf/src/util"
 )
 
-// The Config dashboard: a searchable list of override-exposed config keys on the
+// The Config dashboard: a searchable list of overridable config keys on the
 // left, a config-format preview of the highlighted key on the right (ADR-0202
 // decisions 10 and 12). It is a self-contained component rather than a page of
 // any one program, because the three hosts it must open from — the Work
@@ -86,7 +86,7 @@ type ConfigDashboardPreview struct {
 	Reach []ConfigDashboardReachLine
 }
 
-// ConfigDashboardRow is one override-exposed key as the list shows it.
+// ConfigDashboardRow is one overridable key as the list shows it.
 type ConfigDashboardRow struct {
 	// Key is the dotted config path — the row's own text, because it is what
 	// `pop config keys` takes and what the preview's TOML shows.
@@ -155,7 +155,7 @@ type ConfigDashboard struct {
 	failure string
 }
 
-// NewConfigDashboard builds the component over the override-exposed keys, in the
+// NewConfigDashboard builds the component over the overridable keys, in the
 // order the caller listed them.
 func NewConfigDashboard(rows []ConfigDashboardRow, opts ConfigDashboardOpts) *ConfigDashboard {
 	m := &ConfigDashboard{
@@ -576,7 +576,7 @@ func (m *ConfigDashboard) renderRow(row ConfigDashboardRow, state RowState) stri
 func (m *ConfigDashboard) previewLines(height int) []string {
 	row, ok := m.list.Selected()
 	if !ok {
-		hint := "(no override-exposed keys)"
+		hint := "(no overridable keys)"
 		if len(m.rows) > 0 {
 			hint = "(no key matches the filter)"
 		}

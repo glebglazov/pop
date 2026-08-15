@@ -106,7 +106,7 @@ func Rows(views []config.OverrideKeyView) []ui.ConfigDashboardRow {
 	return rows
 }
 
-// Open builds the component a host embeds, over the override-exposed keys as
+// Open builds the component a host embeds, over the overridable keys as
 // they stand now. It never fails: a config that will not resolve becomes the
 // component's own error row, because a host may have nowhere safe to print and
 // an opened modal saying why is better than a chord that appears to do nothing.

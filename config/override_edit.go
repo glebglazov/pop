@@ -59,8 +59,8 @@ func CopyOverrideFromSource(configPath, key string) error {
 // through when empty, copying that emptiness down is a real value and disables
 // the fallthrough — the same thing typing `agents = []` into the editor does.
 func CopyOverrideFromSourceWith(d *Deps, configPath, key string) error {
-	if _, exposed := OverrideKeyScope(key); !exposed {
-		return fmt.Errorf("config key %q is not exposed for overriding", key)
+	if !IsOverridableKey(key) {
+		return fmt.Errorf("config key %q is not one pop can override", key)
 	}
 	layers, err := overrideValueLayers(d, configPath)
 	if err != nil {
@@ -80,7 +80,7 @@ func CopyOverrideFromSourceWith(d *Deps, configPath, key string) error {
 // document rather than off the decoded schema, because an override is stored as
 // the key's whole value and the schema decode exists only to judge it.
 func parseOverrideBuffer(key, buffer string) (any, string) {
-	if _, exposed := OverrideKeyScope(key); !exposed {
+	if !IsOverridableKey(key) {
 		return nil, fmt.Sprintf("%s is not a key pop can override.", key)
 	}
 	if strings.TrimSpace(buffer) == "" {

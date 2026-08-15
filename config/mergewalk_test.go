@@ -357,8 +357,8 @@ type driftBad struct {
 	OK       []string `toml:"ok" merge:"append"`       // legal, no problem
 }
 
-func TestCheckMergeTagsFlagsUnknownAndMismatch(t *testing.T) {
-	problems := checkMergeTags(reflect.TypeOf(driftBad{}))
+func TestCheckSchemaTagsFlagsUnknownAndMismatch(t *testing.T) {
+	problems := checkSchemaTags(reflect.TypeOf(driftBad{}))
 	if len(problems) != 2 {
 		t.Fatalf("problems = %v, want exactly 2", problems)
 	}
@@ -370,17 +370,17 @@ func TestCheckMergeTagsFlagsUnknownAndMismatch(t *testing.T) {
 	}
 }
 
-func TestCheckMergeTagsCleanFixtureHasNoProblems(t *testing.T) {
-	if problems := checkMergeTags(reflect.TypeOf(mwFixture{})); len(problems) != 0 {
+func TestCheckSchemaTagsCleanFixtureHasNoProblems(t *testing.T) {
+	if problems := checkSchemaTags(reflect.TypeOf(mwFixture{})); len(problems) != 0 {
 		t.Fatalf("clean fixture reported problems: %v", problems)
 	}
 }
 
-func TestCheckMergeTagsMalformedListByKey(t *testing.T) {
+func TestCheckSchemaTagsMalformedListByKey(t *testing.T) {
 	type bad struct {
 		Benches []mwBench `toml:"benches" merge:"list-by-key"` // missing =<field>
 	}
-	problems := checkMergeTags(reflect.TypeOf(bad{}))
+	problems := checkSchemaTags(reflect.TypeOf(bad{}))
 	if len(problems) != 1 || !containsSubstr(problems, "malformed list-by-key") {
 		t.Fatalf("problems = %v, want one malformed-list-by-key report", problems)
 	}
@@ -388,9 +388,33 @@ func TestCheckMergeTagsMalformedListByKey(t *testing.T) {
 	type badKeyField struct {
 		Benches []mwBench `toml:"benches" merge:"list-by-key=nope"` // field not on element
 	}
-	problems = checkMergeTags(reflect.TypeOf(badKeyField{}))
+	problems = checkSchemaTags(reflect.TypeOf(badKeyField{}))
 	if len(problems) != 1 || !containsSubstr(problems, "key field") {
 		t.Fatalf("problems = %v, want one missing-key-field report", problems)
+	}
+}
+
+// TestCheckSchemaTagsFlagsUnansweredOverridability pins the drift check's
+// overridability half (ADR-0212 decision 4). Overridability is opt-out, so an
+// unanswerable field inherits "overridable" in silence unless the walk refuses
+// it: a marker no one knows, and a field whose Go type is no TOML type at all
+// and so is neither a leaf nor a table.
+func TestCheckSchemaTagsFlagsUnansweredOverridability(t *testing.T) {
+	type unanswered struct {
+		Typo    string   `toml:"typo" override:"nope"` // not the one legal marker
+		Opaque  chan int `toml:"opaque"`               // no TOML type: leaf or table?
+		Opted   []string `toml:"opted" override:"never"`
+		Default string   `toml:"default"`
+	}
+	problems := checkSchemaTags(reflect.TypeOf(unanswered{}))
+	if len(problems) != 2 {
+		t.Fatalf("problems = %v, want exactly 2", problems)
+	}
+	if !containsSubstr(problems, "unknown override marker") {
+		t.Errorf("problems %v missing the unknown-marker report", problems)
+	}
+	if !containsSubstr(problems, "no TOML type") {
+		t.Errorf("problems %v missing the unanswerable-type report", problems)
 	}
 }
 

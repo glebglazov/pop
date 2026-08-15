@@ -36,6 +36,9 @@ import (
 const (
 	mergeTagName   = "merge"
 	includeTagName = "include"
+	// overrideTagName marks the fields that opt out of overridability; the
+	// registry in override_keys.go owns what its one legal value means.
+	overrideTagName = "override"
 )
 
 const (
@@ -456,18 +459,22 @@ func deepCloneValue(src reflect.Value) reflect.Value {
 	}
 }
 
-// checkMergeTags walks a tagged struct type by reflection and reports every
-// merge:/include: tag that names an unknown kind, has a malformed list-by-key
-// spec, or declares a kind the field's Go type cannot support. Later slices call
-// it in tests against Config and RepoScopeConfig so a bad tag fails the build's
-// test run rather than silently misbehaving at load time.
-func checkMergeTags(t reflect.Type) []string {
+// checkSchemaTags walks a tagged struct type by reflection and reports every
+// field the schema cannot answer for: a merge:/include: tag that names an
+// unknown kind, has a malformed list-by-key spec, or declares a kind the field's
+// Go type cannot support — and a field that has no overridability answer, either
+// because its override marker is not a word this package knows or because its Go
+// type maps to no TOML type, which leaves nothing able to say whether it is a
+// leaf a human may override or a container that is never a unit (ADR-0212
+// decision 4). Tests call it against Config and RepoScopeConfig so a bad tag
+// fails the build's test run rather than silently misbehaving at load time.
+func checkSchemaTags(t reflect.Type) []string {
 	var problems []string
-	checkMergeTagsRec(t, "", map[reflect.Type]bool{}, &problems)
+	checkSchemaTagsRec(t, "", map[reflect.Type]bool{}, &problems)
 	return problems
 }
 
-func checkMergeTagsRec(t reflect.Type, prefix string, seen map[reflect.Type]bool, problems *[]string) {
+func checkSchemaTagsRec(t reflect.Type, prefix string, seen map[reflect.Type]bool, problems *[]string) {
 	for t.Kind() == reflect.Ptr {
 		t = t.Elem()
 	}
@@ -480,7 +487,7 @@ func checkMergeTagsRec(t reflect.Type, prefix string, seen map[reflect.Type]bool
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
 		if f.Anonymous && f.Type.Kind() == reflect.Struct {
-			checkMergeTagsRec(f.Type, prefix, seen, problems)
+			checkSchemaTagsRec(f.Type, prefix, seen, problems)
 			continue
 		}
 		name := tomlName(f)
@@ -496,6 +503,7 @@ func checkMergeTagsRec(t reflect.Type, prefix string, seen map[reflect.Type]bool
 				checkOneTag(f, key, tagName, tagVal, problems)
 			}
 		}
+		checkOverridability(f, key, problems)
 		// Descend into nested tables/arrays/maps of structs so the whole tree is
 		// validated in one pass.
 		if elem, seg := tableElem(f.Type); elem != nil {
@@ -503,8 +511,33 @@ func checkMergeTagsRec(t reflect.Type, prefix string, seen map[reflect.Type]bool
 			if seg != "" {
 				child = key + "." + seg
 			}
-			checkMergeTagsRec(elem, child, seen, problems)
+			checkSchemaTagsRec(elem, child, seen, problems)
 		}
+	}
+}
+
+// overridabilityTOMLTypes is every TOML type the catalog can name. A field
+// outside the set is one tomlTypeName fell back to a Go kind for, and the
+// overridable/never-a-unit cut is drawn on that name: an unnamed type is a field
+// nothing can classify, so it is reported rather than defaulted into the editor.
+var overridabilityTOMLTypes = map[string]bool{
+	"string": true, "boolean": true, "integer": true, "float": true,
+	"array": true, "array of tables": true, "table": true,
+}
+
+// checkOverridability reports a field the override registry could not answer
+// for. Overridability is opt-out, so the answer is normally "yes, it is a leaf a
+// human may override" with nothing written down — which is exactly why an
+// unanswerable field must fail here: it would otherwise inherit the default
+// silently.
+func checkOverridability(f reflect.StructField, key string, problems *[]string) {
+	if marker, ok := f.Tag.Lookup(overrideTagName); ok && marker != overrideNever {
+		*problems = append(*problems, fmt.Sprintf("%s: %s:%q unknown override marker; the only legal value is %q",
+			key, overrideTagName, marker, overrideNever))
+	}
+	if tomlType := tomlTypeName(f.Type); !overridabilityTOMLTypes[tomlType] {
+		*problems = append(*problems, fmt.Sprintf("%s: %s has no TOML type (%s), so nothing answers whether it is overridable",
+			key, f.Type, tomlType))
 	}
 }
 

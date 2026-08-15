@@ -8,56 +8,51 @@ import (
 	"github.com/glebglazov/pop/config"
 )
 
-// TestConfigKeysMarksOverrideExposedKeys pins ADR-0202 decision 3's legibility
-// claim: a human reading the catalog sees the overridable keys and the scope
-// each override lands at, without opening a TUI. Marked rows agree exactly with
-// the reflected registry.
-func TestConfigKeysMarksOverrideExposedKeys(t *testing.T) {
+// TestConfigKeysMarksTheExclusions pins ADR-0212 decision 4's legibility claim.
+// Overridability inverted, so the catalog's mark did too: a human reading it
+// sees the few keys they may *not* override from pop, and every unmarked leaf is
+// one they may. The marked rows are exactly the keys the registry omits.
+func TestConfigKeysMarksTheExclusions(t *testing.T) {
 	t.Parallel()
 	var out bytes.Buffer
 	renderScopeKeys(&out, []config.ConfigScope{config.ScopeGlobal}, true, false)
 	got := out.String()
 
-	registry := config.OverrideKeys()
-	if len(registry) == 0 {
-		t.Fatal("override registry is empty; nothing for the catalog to mark")
+	registry := map[string]bool{}
+	for _, k := range config.OverrideKeys() {
+		registry[k.Key] = true
 	}
-	marked := map[string]bool{}
+	if len(registry) == 0 {
+		t.Fatal("override registry is empty; every leaf should be in it")
+	}
+	var marked []string
 	for _, line := range strings.Split(got, "\n") {
-		key, rest, found := strings.Cut(strings.TrimSpace(line), " [override: ")
+		key, _, found := strings.Cut(strings.TrimSpace(line), " [override: never]")
 		if !found {
 			continue
 		}
-		scope, _, _ := strings.Cut(rest, "]")
-		marked[key+"="+scope] = true
-	}
-	for _, k := range registry {
-		want := k.Key + "=" + string(k.Scope)
-		if !marked[want] {
-			t.Errorf("global catalog does not mark %q:\n%s", want, got)
+		marked = append(marked, key)
+		if registry[key] {
+			t.Errorf("catalog marks %q not overridable, but the registry lists it", key)
 		}
-		delete(marked, want)
 	}
-	for extra := range marked {
-		t.Errorf("catalog marks %q override-exposed, but the registry does not list it", extra)
+	if strings.Join(marked, ",") != "includes,repo" {
+		t.Errorf("marked rows = %v, want the two keys that select where config comes from", marked)
 	}
 }
 
-// TestConfigKeysUntaggedKeyRendersUnchanged keeps the new mark off every key
-// that declares no exposure: such a row is listed exactly as before.
-func TestConfigKeysUntaggedKeyRendersUnchanged(t *testing.T) {
+// TestConfigKeysOverridableKeyRendersUnchanged keeps the mark off every key a
+// human may override — which is now every leaf, so a whole table of rows carries
+// no mark at all.
+func TestConfigKeysOverridableKeyRendersUnchanged(t *testing.T) {
 	t.Parallel()
 	var out bytes.Buffer
 	if err := renderTableKeys(&out, config.ScopeGlobal, "work.verify", false, false); err != nil {
 		t.Fatalf("renderTableKeys: %v", err)
 	}
 	for _, line := range strings.Split(out.String(), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "agents") { // the one exposed key in this table
-			continue
-		}
-		if strings.Contains(trimmed, "[override:") {
-			t.Errorf("untagged row carries an override mark: %q", line)
+		if strings.Contains(line, "[override:") {
+			t.Errorf("an overridable row carries an override mark: %q", line)
 		}
 	}
 }
@@ -67,7 +62,7 @@ func TestConfigKeysUntaggedKeyRendersUnchanged(t *testing.T) {
 func TestConfigKeysHelpExplainsOverrideMark(t *testing.T) {
 	t.Parallel()
 	help := configKeysCmd.Long
-	for _, want := range []string{"[override: <scope>]", "override tag"} {
+	for _, want := range []string{"[override: never]", "override tag", "Every leaf key"} {
 		if !strings.Contains(help, want) {
 			t.Errorf("config keys help does not explain the override mark (%q missing):\n%s", want, help)
 		}

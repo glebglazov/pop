@@ -64,9 +64,11 @@ listing — it sits over it.
 In the repo scope, keys pop can write itself (via pop config repo set) are marked
 [settable], from the same reflection that backs the setter.
 
-A key a human may override from pop itself is marked [override: <scope>], naming
-the scope the override lands at. The mark comes from the key's own override tag,
-so the catalog lists exactly the overridable keys.
+Every leaf key is one a human may override from pop itself, so the catalog marks
+the exceptions instead: a key that selects where config comes from rather than
+holding a value is marked [override: never]. The mark comes from the key's own
+override tag, so the catalog and the override editor cannot disagree. A table is
+no override unit either — only leaves are.
 
 Examples:
   pop config keys                      # top-level keys, all surfaces
@@ -160,9 +162,10 @@ var configDashboardCmd = &cobra.Command{
 	Short: "Browse the config keys you can override",
 	Long: `Browse the config keys you can override, and what each one resolves to.
 
-The left pane lists every override-exposed key — the keys pop config keys marks
-[override: <scope>] — with its description beneath. Type to filter over the key
-path and the description together. A marked row carries an override today.
+The left pane lists every overridable key — every config leaf except the ones
+pop config keys marks [override: never] — with its description beneath. Type to
+filter over the key path and the description together. A marked row carries an
+override today.
 
 The right pane previews the highlighted key in config format: the effective
 value as TOML, the layer that produced it (the override layer, your config.toml,
@@ -505,20 +508,21 @@ func renderTableKeys(out io.Writer, scope config.ConfigScope, path string, recur
 // that backs pop config repo set — so the two surfaces cannot disagree.
 const repoSettableMarker = " [settable]"
 
-// overrideMarker labels a key a human may override from pop, naming the scope
-// the override lands at (ADR-0202 decision 3). Read off the row's own override
-// tag, so the catalog and the override registry cannot disagree.
+// overrideMarker labels the exception rather than the rule: every config leaf is
+// overridable from pop, so what a reader needs pointed out is the key that is
+// not (ADR-0212 decision 4). Read off the row's own override tag, so the catalog
+// and the override registry cannot disagree.
 func overrideMarker(d config.ConfigKeyDoc) string {
-	scope, ok := d.OverrideExposure()
-	if !ok {
+	marker, excluded := d.OverrideExclusion()
+	if !excluded {
 		return ""
 	}
-	return " [override: " + string(scope) + "]"
+	return " [override: " + marker + "]"
 }
 
 // writeKeyTable renders docs as an aligned KEY / TYPE / DESCRIPTION table.
-// In the repo scope, keys in RepoSettableKeys carry repoSettableMarker, and an
-// override-exposed key carries overrideMarker in every scope. When
+// In the repo scope, keys in RepoSettableKeys carry repoSettableMarker, and a
+// key that opts out of overriding carries overrideMarker in every scope. When
 // why is set, keys that declare a reach list each actor line under the row.
 // Schema column widths come only from the schema rows, so a key that declares
 // none is listed identically with and without why.

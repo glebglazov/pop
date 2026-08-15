@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/ui"
 )
 
@@ -94,7 +95,7 @@ func TestConfigDashboardOpenerResolvesTheLayer(t *testing.T) {
 	if !ok {
 		t.Fatalf("component has no rows:\n%s", m.ViewContent())
 	}
-	if !strings.HasPrefix(row.Key, "work.") {
-		t.Errorf("first row = %q, want an override-exposed work key", row.Key)
+	if !config.IsOverridableKey(row.Key) {
+		t.Errorf("first row = %q, which is no overridable key of the schema", row.Key)
 	}
 }

@@ -265,7 +265,7 @@ type TasksConfig struct {
 type ImplementConfig struct {
 	// Agents is the ordered in-process fallback list used by
 	// `pop tasks implement` for unpinned tasks when --agent is absent.
-	Agents AgentEntries `toml:"agents" include:"replace" override:"global" desc:"Ordered fallback agent list for unpinned tasks (strings or {display_name, cmd} tables)."`
+	Agents AgentEntries `toml:"agents" include:"replace" desc:"Ordered fallback agent list for unpinned tasks (strings or {display_name, cmd} tables)."`
 	// MaxTries is the started-attempt cap for implement. Zero/unset ⇒
 	// DefaultTaskMaxTries. An explicit --max-tries flag still wins.
 	MaxTries *int `toml:"max_tries" include:"replace" desc:"Implement started-attempt cap (default 3)."`
@@ -285,7 +285,7 @@ type ImplementConfig struct {
 type AgentGroupConfig struct {
 	// Agents is the ordered fallback list for this kind of work. When empty,
 	// resolution falls through to the kind's documented fallback.
-	Agents AgentEntries `toml:"agents" include:"replace" override:"global" desc:"Ordered fallback agent list for this kind of work (strings or {display_name, cmd} tables)."`
+	Agents AgentEntries `toml:"agents" include:"replace" desc:"Ordered fallback agent list for this kind of work (strings or {display_name, cmd} tables)."`
 }
 
 // VerifyConfig holds Agent-verification settings (ADR-0086). It is the
@@ -301,7 +301,7 @@ type VerifyConfig struct {
 	// mirroring [work.implement].agents: it falls through to the next agent on
 	// a quota pause or a missing binary. An empty list falls back to
 	// [work.implement].agents (and, failing that, the built-in default agent).
-	Agents AgentEntries `toml:"agents" override:"global" desc:"Ordered fallback agent list for the Verifier, falling back to [work.implement].agents when omitted (strings or {display_name, cmd} tables)."`
+	Agents AgentEntries `toml:"agents" desc:"Ordered fallback agent list for the Verifier, falling back to [work.implement].agents when omitted (strings or {display_name, cmd} tables)."`
 	// Effort selects the Verifier's model-strength tier (light, standard, or
 	// heavy). Absent ⇒ heavy — verification runs at the strongest tier by default.
 	Effort string `toml:"effort" desc:"Verifier model-strength tier: light, standard, or heavy (default heavy)."`
@@ -658,7 +658,11 @@ type Finding struct {
 func (f Finding) Error() string { return f.Message }
 
 type Config struct {
-	Includes              []string             `toml:"includes" desc:"Additional config files to merge in (paths, later wins)."`
+	// Includes selects the files that merge into this one, so it decides where
+	// config comes from rather than holding a value — and a layer laid over the
+	// merge cannot decide what went into it. Hence the one exception, with Repo,
+	// to every leaf being overridable (ADR-0212 decision 4).
+	Includes              []string             `toml:"includes" override:"never" desc:"Additional config files to merge in (paths, later wins)."`
 	Projects              []ProjectEntry       `toml:"projects" include:"append" desc:"Directories or globs offered in the project picker."`
 	Commands              []UserDefinedCommand `toml:"commands" desc:"User-defined commands surfaced in the picker."`
 	ExcludeCurrentSession bool                 `toml:"exclude_current_session" desc:"Hide the current tmux session from the picker."`
@@ -698,7 +702,13 @@ type Config struct {
 	// The key is canonicalized (~ expanded, symlinks resolved) at resolution
 	// time; any worktree path or bare dir of the same repo resolves to the
 	// same repository identity.
-	Repo map[string]RepoOverrideConfig `toml:"repo" merge:"map" include:"map-first-wins" desc:"Per-repo override blocks keyed by any checkout path ([repo.\"<path>\"] tables)."`
+	//
+	// It is a scope selector spelled as a table, not a table of values: it says
+	// which repository the keys beneath it are stated for. Its leaves are
+	// ordinary repository-scope keys, overridden through the override layer's own
+	// per-repository blocks, so the node itself has nothing to override
+	// (ADR-0212 decisions 3 and 4).
+	Repo map[string]RepoOverrideConfig `toml:"repo" merge:"map" include:"map-first-wins" override:"never" desc:"Per-repo override blocks keyed by any checkout path ([repo.\"<path>\"] tables)."`
 
 	// Findings holds semantic config problems collected at load time (ADR 0054).
 	// Each is keyed to its config path; callers consult them through value

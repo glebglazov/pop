@@ -11,8 +11,7 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// This file is the read side of the override layer: for each override-exposed
-// key, what value is in force, which layer produced it, and — when an override
+// This file is the read side of the override layer: for each overridable key, what value is in force, which layer produced it, and — when an override
 // exists — what the sources below it still say (ADR-0202 decision 12). The
 // Config dashboard renders these views; nothing here knows about a terminal.
 //
@@ -44,7 +43,7 @@ const (
 	OverrideLayerFallthrough OverrideLayer = "fallthrough"
 )
 
-// overrideFallthrough is the documented fallthrough of one exposed key: the key
+// overrideFallthrough is the documented fallthrough of one overridable key: the key
 // resolution walks on to when this one resolves empty, and how a preview says so
 // in words.
 type overrideFallthrough struct {
@@ -52,7 +51,7 @@ type overrideFallthrough struct {
 	Phrase string
 }
 
-// overrideFallthroughs records which exposed keys fall through when empty. Verify
+// overrideFallthroughs records which keys fall through when empty. Verify
 // says so in its own schema comment (VerifyConfig.Agents) and routine implements
 // it in routine/agents.go; implement and attended have nowhere to walk on to.
 //
@@ -77,15 +76,13 @@ const (
 	overrideNoteEmptyOverride = "override set to an empty list — fallthrough disabled"
 )
 
-// OverrideKeyView is one override-exposed key as a reader meets it: the row text
+// OverrideKeyView is one overridable key as a reader meets it: the row text
 // on the left of the Config dashboard, and everything its preview shows.
 type OverrideKeyView struct {
 	// Key is the dotted config path, the spelling `pop config keys` prints.
 	Key string
 	// Desc is the key's one-line schema description.
 	Desc string
-	// Scope is the scope an override of this key lands at.
-	Scope OverrideScope
 	// Overridden reports that config.override.toml carries this key, which is
 	// what the list marks and what gives the copy and remove actions a target.
 	Overridden bool
@@ -137,7 +134,7 @@ func overrideProvenance(layer OverrideLayer, locus string) string {
 	}
 }
 
-// OverrideKeyViews resolves every override-exposed key against the layers that
+// OverrideKeyViews resolves every overridable key against the layers that
 // can define it, in registry order.
 func OverrideKeyViews(configPath string) ([]OverrideKeyView, error) {
 	return OverrideKeyViewsWith(defaultDeps, configPath)
@@ -159,7 +156,7 @@ func OverrideKeyViewsWith(d *Deps, configPath string) ([]OverrideKeyView, error)
 }
 
 // overrideValueLayer is one config source a key can be defined in, held as a
-// generic TOML document so any exposed key can be read out of it without the
+// generic TOML document so any overridable key can be read out of it without the
 // schema having a say.
 type overrideValueLayer struct {
 	layer OverrideLayer
@@ -167,7 +164,7 @@ type overrideValueLayer struct {
 	doc   map[string]any
 }
 
-// overrideValueLayers returns every layer that can define an exposed key, highest
+// overrideValueLayers returns every layer that can define an overridable key, highest
 // rank first — the ladder applyConfigLayerMerge builds, read from the top so the
 // first layer that defines a key is the one in force. A layer whose file is
 // absent contributes an empty document rather than dropping out, so the ladder's
@@ -256,7 +253,7 @@ func documentIncludes(d *Deps, configPath string, doc map[string]any) []string {
 
 // overrideKeyView resolves one key against the layer ladder.
 func overrideKeyView(key OverrideKey, tomlType string, layers []overrideValueLayer) OverrideKeyView {
-	view := OverrideKeyView{Key: key.Key, Desc: key.Desc, Scope: key.Scope}
+	view := OverrideKeyView{Key: key.Key, Desc: key.Desc}
 	if reach, ok := ConfigKeyReachFor(key.Key); ok {
 		view.Reach = reach.Lines
 	}
