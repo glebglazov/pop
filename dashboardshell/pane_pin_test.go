@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/glebglazov/pop/config"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
@@ -106,16 +107,129 @@ func assertPinnedFirst(t *testing.T, s Shell, pinned, below string) {
 	}
 }
 
-// Decision 5: the dashboard opens on its usual page. `pop routine dashboard`
-// enters on page B, and a launch that is not page A's reads no pane at all —
-// the answer would belong to a row on the other page.
-func TestEntryOnPageBReadsNoPaneFacts(t *testing.T) {
+// The pane is read for whichever page the dashboard opens on: the pin is computed
+// per page, so the entry page decides nothing about whether the facts are worth
+// having. Decision 5 survives as it always was — the launch opens the page it was
+// asked for and never follows an answer across the toggle.
+func TestPaneFactsAreReadForEitherEntryPage(t *testing.T) {
 	d, _ := taggedPaneDeps("set-g")
 
-	if facts := launchPaneFacts(PageWork, d); facts.Set != "set-g" {
-		t.Fatalf("page A facts = %+v, want the pane's set tag — the fixture is not arranging a pane", facts)
+	if facts := launchPaneFacts(d); facts.Set != "set-g" {
+		t.Fatalf("facts = %+v, want the pane's set tag — the fixture is not arranging a pane", facts)
 	}
-	if facts := launchPaneFacts(PageRoutines, d); !facts.Empty() {
-		t.Fatalf("page B facts = %+v, want none", facts)
+}
+
+// routineAttributingKind is page B's half of the same seam: it claims the pane
+// tagged for one of its Routines, which is the one rung the real Routine kind
+// answers.
+type routineAttributingKind struct {
+	*pageKind
+	claims string
+}
+
+func (k *routineAttributingKind) AttributePane(facts work.PaneFacts) (work.Attribution, bool) {
+	if facts.Routine != k.claims {
+		return work.Attribution{}, false
+	}
+	for _, c := range k.containers {
+		if c.ID == k.claims {
+			return work.AttributeOne(work.AttributedContainer{
+				Ref:       ref.WorkRef{Kind: k.id, ContainerID: c.ID},
+				CursorKey: c.CursorKey,
+				Label:     "routine " + c.ID,
+			}), true
+		}
+	}
+	return work.Attribution{}, false
+}
+
+// routinePaneDeps builds deps in a pane tagged for a routine fire, with page B's
+// kind claiming it and page A's claiming nothing of the sort.
+func routinePaneDeps(routineID string) (*drain.Deps, *tmuxtest.Fake) {
+	f := &tmuxtest.Fake{
+		CurrentPaneID:      "%11",
+		CurrentSessionName: "routines",
+		PaneTagValues:      map[string]map[tmuxmod.PaneTag]string{"%11": {tmuxmod.TagRoutine: routineID}},
+	}
+	d, _ := taggedPaneDeps("set-g")
+	d.Tmux = f
+	d.RoutineKinds = func(*drain.Deps, *config.Config) []work.Kind {
+		return []work.Kind{&routineAttributingKind{
+			pageKind: &pageKind{id: ref.KindRoutine, containers: routineRows(),
+				columns: []string{"ROUTINE", "DIRECTORY", "SCHEDULE", "LAST RUN", "STATUS"}, noun: "routine"},
+			claims: routineID,
+		}}
+	}
+	return d, f
+}
+
+// A pane pop opened to fire a Routine pins that Routine's row on page B, whether
+// the human entered on page A and toggled over or came straight in through
+// `pop routine dashboard`. Page A, which lists no Routines, is left exactly as it
+// always looks.
+func TestRoutinePanePinsOnPageBFromEitherEntry(t *testing.T) {
+	// "hourly" sorts after "daily", so seeing it first is the whole of the pin.
+	for _, tc := range []struct {
+		name  string
+		entry Page
+	}{
+		{name: "entered on page A and toggled", entry: PageWork},
+		{name: "opened straight onto page B", entry: PageRoutines},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, f := routinePaneDeps("hourly")
+			s := newShellWith(t, tc.entry, d)
+			if tc.entry == PageWork {
+				assertNothingPinned(t, s)
+				s = pressV(t, s)
+			}
+
+			assertPinnedFirst(t, s, "hourly", "daily")
+			if got := s.PageDashboard(PageRoutines).ListCursor(); got != 0 {
+				t.Fatalf("cursor = %d, want the untouched first row", got)
+			}
+			if f.CurrentPaneFactsCalls != 1 {
+				t.Fatalf("read the pane %d times, want the launch's one round-trip", f.CurrentPaneFactsCalls)
+			}
+		})
+	}
+}
+
+// A routine-attributed pane pins nothing on the page that lists no Routines: the
+// answer belongs to a row on the other page, and page A does not follow it.
+func assertNothingPinned(t *testing.T, s Shell) {
+	t.Helper()
+	view := ui.StripANSI(s.View().Content)
+	if strings.Contains(view, "▸") {
+		t.Fatalf("a row carries the pin mark, want none:\n%s", view)
+	}
+	if at, under := strings.Index(view, "set-a"), strings.Index(view, "set-g"); at < 0 || at > under {
+		t.Fatalf("rows are not in their untouched order:\n%s", view)
+	}
+}
+
+// A pinned row the human filters away is simply gone: the fuzzy filter is the
+// active view on page B, and a launch does not widen it (ADR-0209 decisions 7
+// and 8).
+func TestFilteringAwayAPinnedRoutineRowIsSilent(t *testing.T) {
+	d, _ := routinePaneDeps("hourly")
+	s := newShellWith(t, PageRoutines, d)
+	assertPinnedFirst(t, s, "hourly", "daily")
+
+	for _, key := range []tea.KeyPressMsg{
+		{Code: '/', Text: "/"},
+		{Code: 'd', Text: "d"},
+		{Code: 'a', Text: "a"},
+	} {
+		updated, _ := s.Update(key)
+		s = updated.(Shell)
+	}
+
+	view := ui.StripANSI(s.View().Content)
+	if strings.Contains(view, "hourly") {
+		t.Fatalf("the filtered-away pinned row still renders:\n%s", view)
+	}
+	if strings.Contains(view, "▸") {
+		t.Fatalf("a row carries the pin mark, want none:\n%s", view)
 	}
 }

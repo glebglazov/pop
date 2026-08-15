@@ -41,8 +41,11 @@ type Shell struct {
 	// cfgPath is the hand-authored config this shell loaded, kept so the Config
 	// modal edits and re-reads the same file the pages were built from.
 	cfgPath string
-	width   int
-	height  int
+	// pane is the launching pane's facts, read once at startup and kept for the
+	// page the toggle builds later — the pin is per page, the tmux read is not.
+	pane   work.PaneFacts
+	width  int
+	height int
 
 	// configModal is the Config dashboard when it is open over the page in focus.
 	// While it is set it owns the keyboard: see config_modal.go.
@@ -99,26 +102,25 @@ func newShell(start Page, d *drain.Deps, cfg *config.Config, cfgPath string) (Sh
 	}
 	// The entry page is the one command the operator ran, so its build failure is
 	// that command failing. The other page has no model at all yet.
-	snap, err := dashboard.BuildPageSnapshot(d, cfg, start, launchPaneFacts(start, d))
+	pane := launchPaneFacts(d)
+	snap, err := dashboard.BuildPageSnapshot(d, cfg, start, pane)
 	if err != nil {
 		return Shell{}, err
 	}
 	pages := map[Page]dashboard.QueueDashboard{start: dashboard.NewDashboardOn(d, cfg, snap, start)}
-	return Shell{active: start, pages: pages, d: d, cfg: cfg, cfgPath: cfgPath}, nil
+	return Shell{active: start, pages: pages, d: d, cfg: cfg, cfgPath: cfgPath, pane: pane}, nil
 }
 
-// launchPaneFacts reads the launching pane's facts for page A and nothing else.
-// It is the session's one tmux round-trip for them: the entry build puts them on
-// the snapshot, the page model keeps them, and every rebuild re-derives its pins
-// from the copy it holds.
-// The dashboard opens on its usual page: a pane attributed to a Routine resolves
-// to a row on the other page and is simply not seeded, rather than the launch
-// following the answer across the toggle (ADR-0201 decision 5). Page B, built
-// later by the toggle, is not a launch at all.
-func launchPaneFacts(start Page, d *drain.Deps) work.PaneFacts {
-	if start != PageWork {
-		return work.PaneFacts{}
-	}
+// launchPaneFacts reads the launching pane's facts, whichever page the dashboard
+// opened on. It is the session's one tmux round-trip for them: the shell keeps
+// them, hands them to the entry build and to the page the toggle builds later,
+// and each page model re-derives its own pins from the copy it holds.
+//
+// The dashboard still opens on the page it was asked for (ADR-0201 decision 5) —
+// a pane attributed to a Routine does not drag the launch across the toggle. The
+// pin is simply computed per page, and is waiting on page B when the human gets
+// there.
+func launchPaneFacts(d *drain.Deps) work.PaneFacts {
 	return dashboard.LaunchPaneFacts(d.Tmux)
 }
 
@@ -226,7 +228,7 @@ func (s Shell) buildActivePage() tea.Cmd {
 	if _, built := s.pages[s.active]; built {
 		return nil
 	}
-	s.pages[s.active] = dashboard.OpenPage(s.d, s.cfg, s.active)
+	s.pages[s.active] = dashboard.OpenPage(s.d, s.cfg, s.active, s.pane)
 	if s.width == 0 && s.height == 0 {
 		return nil
 	}

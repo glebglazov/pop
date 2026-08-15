@@ -93,6 +93,9 @@ type KindDeps struct {
 type Kind struct {
 	*Advancer
 	kd *KindDeps
+	// panes is what the last Load remembers for pane attribution: every Routine it
+	// read, keyed by the id a fire pane carries. See attribute.go.
+	panes map[string]work.AttributedContainer
 }
 
 // NewKind returns the Routine kind over kd. A nil kd resolves to real
@@ -134,6 +137,7 @@ func (k *Kind) Load() ([]work.Container, error) {
 		}
 		containers = append(containers, c)
 	}
+	k.recordPanes(containers)
 	return containers, nil
 }
 

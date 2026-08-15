@@ -664,8 +664,13 @@ func NewDashboardOn(d *drain.Deps, cfg *config.Config, snap DashboardSnapshot, p
 // build is the page's own error chrome, not a returned error: the entry shell
 // opens a page the first time the operator asks for it, and a Routines page that
 // will not build must not take the Task sets down with it (ADR-0189).
-func OpenPage(d *drain.Deps, cfg *config.Config, page Page) QueueDashboard {
-	snap, err := BuildPageSnapshot(d, cfg, page, work.PaneFacts{})
+//
+// pane is the launching pane's facts, the same ones the entry page was built
+// with. A page built by the toggle is not a launch, but it is the same pane: the
+// kinds this page lists get their turn at attributing it, which is how a Routine
+// fire pane's row is already pinned when the human toggles over.
+func OpenPage(d *drain.Deps, cfg *config.Config, page Page, pane work.PaneFacts) QueueDashboard {
+	snap, err := BuildPageSnapshot(d, cfg, page, pane)
 	m := NewDashboardOn(d, cfg, snap, page)
 	m.err = err
 	return m
