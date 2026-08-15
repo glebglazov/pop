@@ -1,15 +1,104 @@
 package tasks
 
 import (
+	"embed"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/glebglazov/pop/internal/prompt"
 )
 
 var progressHeaderPattern = regexp.MustCompile(`^(\S+)\s+\[([^\]]+)\]\s+(\S+)\s*$`)
+
+// The Task-set agent prompts live beside the code that owns them, as markdown a
+// human can read and edit without touching Go (ADR-0208). Parsing at init means
+// a malformed template fails the first test run rather than a live gate.
+//
+//go:embed prompts/*.tmpl.md
+var promptTemplateFS embed.FS
+
+var promptTemplates = prompt.MustParseFS(promptTemplateFS, "prompts/*.tmpl.md")
+
+// taskRow is one line of the manifest listing every gate prompt carries. The
+// path is already joined and the blockers already joined into their clause, so
+// the "task-listing" partial only ranges — it holds no per-field conditional and
+// no formatting decision.
+type taskRow struct {
+	ID     string
+	Type   string
+	Status TaskStatus
+	Path   string
+	// TitleClause and BlockedByClause are the rendered optional fragments,
+	// empty when the task has no title or no blockers.
+	TitleClause     string
+	BlockedByClause string
+}
+
+// gateTaskRows builds the listing the HITL, Failed and interrupt gates show.
+// It lists every task in the manifest, open and HITL included: the assisting
+// agent needs the whole set to advise the human. The done-AFK filter belongs to
+// the Verifier's listing alone (ADR-0102), and must never migrate in here.
+func gateTaskRows(m *Manifest) []taskRow {
+	rows := make([]taskRow, 0, len(m.Tasks))
+	for _, task := range m.Tasks {
+		row := taskRow{
+			ID:     task.ID,
+			Type:   task.Type,
+			Status: task.Status,
+			Path:   filepath.Join(m.Dir, task.File),
+		}
+		if task.Title != "" {
+			row.TitleClause = " " + task.Title
+		}
+		if len(task.BlockedBy) > 0 {
+			row.BlockedByClause = "; blocked_by: " + strings.Join(task.BlockedBy, ", ")
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+// taskBodyRow carries the inlined task body each gate fences into its prompt,
+// or the read failure that stands in for it. Readable and Unreadable are named
+// so the partial picks a whole section rather than negating a field inline.
+type taskBodyRow struct {
+	Readable   bool
+	Unreadable bool
+	Path       string
+	Body       string
+	Error      string
+}
+
+func readTaskBody(d *Deps, path string) taskBodyRow {
+	data, err := d.FS.ReadFile(path)
+	if err != nil {
+		return taskBodyRow{Unreadable: true, Path: path, Error: fmt.Sprintf("%v", err)}
+	}
+	return taskBodyRow{Readable: true, Path: path, Body: strings.TrimRight(string(data), "\n")}
+}
+
+// runtimeCheckoutLine renders the optional runtime-path line, empty when the
+// gate has no binding. An empty line closes up in the renderer's normalizer, so
+// the template names the line rather than guarding it.
+func runtimeCheckoutLine(runtimePath string) string {
+	if runtimePath == "" {
+		return ""
+	}
+	return "Runtime checkout: " + runtimePath
+}
+
+// taskHeading joins a task's ID with its optional title the way every gate
+// header states it.
+func taskHeading(task Task) string {
+	if task.Title == "" {
+		return task.ID
+	}
+	return task.ID + " - " + task.Title
+}
 
 // BuildAgentPrompt generates the instruction prompt for an task attempt.
 func BuildAgentPrompt(taskPath, runtimePath string) string {
@@ -69,69 +158,70 @@ func BuildHITLAssistancePrompt(d *Deps, taskSetID string, m *Manifest, blocking 
 		d.FS = DefaultDeps().FS
 	}
 
-	taskPath := filepath.Join(m.Dir, blocking.File)
-	var b strings.Builder
-	fmt.Fprintf(&b, "You are assisting a human at a HITL gate for a Pop task set.\n\n")
-	fmt.Fprintf(&b, "Task set: %s\n", taskSetID)
-	fmt.Fprintf(&b, "Task set path: %s\n", m.Dir)
-	fmt.Fprintf(&b, "Blocking HITL task: %s", blocking.ID)
-	if blocking.Title != "" {
-		fmt.Fprintf(&b, " - %s", blocking.Title)
+	completed := completedAFKProgressRows(d, m)
+	view := hitlPromptView{
+		TaskSetID:           taskSetID,
+		TaskSetPath:         m.Dir,
+		BlockingTask:        taskHeading(blocking),
+		TaskPath:            filepath.Join(m.Dir, blocking.File),
+		RuntimeCheckoutLine: runtimeCheckoutLine(runtimePath),
+		Body:                readTaskBody(d, filepath.Join(m.Dir, blocking.File)),
+		Tasks:               gateTaskRows(m),
+		CompletedWork:       completed,
+		HasCompletedWork:    len(completed) > 0,
+		NoCompletedWork:     len(completed) == 0,
 	}
-	fmt.Fprintf(&b, "\n")
-	fmt.Fprintf(&b, "Human-facing task path: %s\n", taskPath)
-	if runtimePath != "" {
-		fmt.Fprintf(&b, "Runtime checkout: %s\n", runtimePath)
+	return prompt.MustRender(promptTemplates, "hitl-assistance.tmpl.md", view)
+}
+
+// hitlPromptView is what the HITL gate's template renders against.
+type hitlPromptView struct {
+	TaskSetID           string
+	TaskSetPath         string
+	BlockingTask        string
+	TaskPath            string
+	RuntimeCheckoutLine string
+	Body                taskBodyRow
+	Tasks               []taskRow
+	CompletedWork       []completedWorkRow
+	HasCompletedWork    bool
+	NoCompletedWork     bool
+}
+
+// completedWorkRow is one completed-AFK brief, its summary already split into
+// the non-blank lines the prompt indents.
+type completedWorkRow struct {
+	TaskID       string
+	File         string
+	Outcome      string
+	Timestamp    string
+	SummaryLines []string
+}
+
+func completedAFKProgressRows(d *Deps, m *Manifest) []completedWorkRow {
+	items := completedAFKProgress(d, m)
+	rows := make([]completedWorkRow, 0, len(items))
+	for _, item := range items {
+		rows = append(rows, completedWorkRow{
+			TaskID:       item.TaskID,
+			File:         item.File,
+			Outcome:      item.Outcome,
+			Timestamp:    item.Timestamp,
+			SummaryLines: nonBlankLines(item.Summary),
+		})
 	}
-	fmt.Fprintf(&b, "\n")
+	return rows
+}
 
-	fmt.Fprintf(&b, "Allowed manual outcomes:\n")
-	fmt.Fprintf(&b, "- complete: the human marks the HITL task done after verifying the required work.\n")
-	fmt.Fprintf(&b, "- defer: the human skips the HITL task so downstream work can continue while the set remains Deferred.\n")
-	fmt.Fprintf(&b, "- edit and rerun: the human edits tasks or implementation state, then reruns the task set.\n")
-	fmt.Fprintf(&b, "- exit without changing task state: leave the HITL task open and make no manual override.\n\n")
-
-	fmt.Fprintf(&b, "Full HITL task body:\n")
-	if data, err := d.FS.ReadFile(taskPath); err == nil {
-		fmt.Fprintf(&b, "```markdown\n%s\n```\n\n", strings.TrimRight(string(data), "\n"))
-	} else {
-		fmt.Fprintf(&b, "Could not read %s: %v.\n", taskPath, err)
-		fmt.Fprintf(&b, "Proceed by inspecting the task path manually or asking the human for the missing task body.\n\n")
-	}
-
-	fmt.Fprintf(&b, "Task set context:\n")
-	for _, task := range m.Tasks {
-		fmt.Fprintf(&b, "- %s [%s %s]", task.ID, task.Type, task.Status)
-		if task.Title != "" {
-			fmt.Fprintf(&b, " %s", task.Title)
+func nonBlankLines(text string) []string {
+	var lines []string
+	for _, line := range strings.Split(text, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
 		}
-		fmt.Fprintf(&b, " (%s)", filepath.Join(m.Dir, task.File))
-		if len(task.BlockedBy) > 0 {
-			fmt.Fprintf(&b, "; blocked_by: %s", strings.Join(task.BlockedBy, ", "))
-		}
-		fmt.Fprintf(&b, "\n")
+		lines = append(lines, line)
 	}
-	fmt.Fprintf(&b, "\n")
-
-	fmt.Fprintf(&b, "Completed AFK work from task artifacts:\n")
-	completed := completedAFKProgress(d, m)
-	if len(completed) == 0 {
-		fmt.Fprintf(&b, "- No completed AFK work summary is available in progress.txt.\n\n")
-	} else {
-		for _, item := range completed {
-			fmt.Fprintf(&b, "- %s (%s, %s at %s)\n", item.TaskID, item.File, item.Outcome, item.Timestamp)
-			for _, line := range strings.Split(item.Summary, "\n") {
-				if strings.TrimSpace(line) == "" {
-					continue
-				}
-				fmt.Fprintf(&b, "  %s\n", line)
-			}
-		}
-		fmt.Fprintf(&b, "\n")
-	}
-
-	fmt.Fprintf(&b, "Use the repository and task context to help the human decide which allowed outcome is correct. Do not mark tasks complete or skipped unless the human explicitly chooses that outcome.\n")
-	return b.String()
+	return lines
 }
 
 // BuildFailedAssistancePrompt generates the attended-agent prompt shown when a
@@ -151,56 +241,38 @@ func BuildFailedAssistancePrompt(d *Deps, taskSetID string, m *Manifest, failed 
 	}
 
 	taskPath := filepath.Join(m.Dir, failed.File)
-	var b strings.Builder
-	fmt.Fprintf(&b, "You are assisting a human with a failed task in a Pop task set.\n\n")
-	fmt.Fprintf(&b, "Task set: %s\n", taskSetID)
-	fmt.Fprintf(&b, "Task set path: %s\n", m.Dir)
-	fmt.Fprintf(&b, "Failed task: %s", failed.ID)
-	if failed.Title != "" {
-		fmt.Fprintf(&b, " - %s", failed.Title)
+	view := failedPromptView{
+		TaskSetID:           taskSetID,
+		TaskSetPath:         m.Dir,
+		FailedTask:          taskHeading(failed),
+		TaskPath:            taskPath,
+		RuntimeCheckoutLine: runtimeCheckoutLine(runtimePath),
+		Body:                readTaskBody(d, taskPath),
+		Tasks:               gateTaskRows(m),
 	}
-	fmt.Fprintf(&b, "\n")
-	fmt.Fprintf(&b, "Task path: %s\n", taskPath)
-	if runtimePath != "" {
-		fmt.Fprintf(&b, "Runtime checkout: %s\n", runtimePath)
-	}
-	fmt.Fprintf(&b, "\n")
-
 	if reason, err := LatestFailureReason(d, m.Dir, failed.File); err == nil && reason != "" {
-		fmt.Fprintf(&b, "Why the last attempt failed:\n%s\n\n", strings.TrimRight(reason, "\n"))
+		view.FailureReasonRecorded = true
+		view.FailureReason = strings.TrimRight(reason, "\n")
 	} else {
-		fmt.Fprintf(&b, "Why the last attempt failed: no structured failure reason was recorded for the last attempt.\n\n")
+		view.FailureReasonMissing = true
 	}
+	return prompt.MustRender(promptTemplates, "failed-assistance.tmpl.md", view)
+}
 
-	fmt.Fprintf(&b, "Allowed outcomes:\n")
-	fmt.Fprintf(&b, "- re-run: fix the underlying problem in the runtime checkout so a fresh attempt can pass; the human then reruns the task set to retry the task AFK.\n")
-	fmt.Fprintf(&b, "- complete by hand: the human finishes the task's work directly and marks the task done.\n")
-	fmt.Fprintf(&b, "These are the only outcomes at the Failed gate. Do not change task state yourself; the human chooses the outcome.\n\n")
-
-	fmt.Fprintf(&b, "Treat the following as the task to work again. Read it in full and satisfy every acceptance criterion:\n")
-	if data, err := d.FS.ReadFile(taskPath); err == nil {
-		fmt.Fprintf(&b, "```markdown\n%s\n```\n\n", strings.TrimRight(string(data), "\n"))
-	} else {
-		fmt.Fprintf(&b, "Could not read %s: %v.\n", taskPath, err)
-		fmt.Fprintf(&b, "Proceed by inspecting the task path manually or asking the human for the missing task body.\n\n")
-	}
-
-	fmt.Fprintf(&b, "Task set context:\n")
-	for _, task := range m.Tasks {
-		fmt.Fprintf(&b, "- %s [%s %s]", task.ID, task.Type, task.Status)
-		if task.Title != "" {
-			fmt.Fprintf(&b, " %s", task.Title)
-		}
-		fmt.Fprintf(&b, " (%s)", filepath.Join(m.Dir, task.File))
-		if len(task.BlockedBy) > 0 {
-			fmt.Fprintf(&b, "; blocked_by: %s", strings.Join(task.BlockedBy, ", "))
-		}
-		fmt.Fprintf(&b, "\n")
-	}
-	fmt.Fprintf(&b, "\n")
-
-	fmt.Fprintf(&b, "Help the human get this task to a passing state. Do not mark the task done or reset it yourself unless the human explicitly chooses that outcome.\n")
-	return b.String()
+// failedPromptView is what the Failed gate's template renders against. The two
+// failure-reason booleans are named so the template picks a whole section:
+// either the recorded reason or the sentence that stands in for it.
+type failedPromptView struct {
+	TaskSetID             string
+	TaskSetPath           string
+	FailedTask            string
+	TaskPath              string
+	RuntimeCheckoutLine   string
+	FailureReasonRecorded bool
+	FailureReasonMissing  bool
+	FailureReason         string
+	Body                  taskBodyRow
+	Tasks                 []taskRow
 }
 
 // BuildVerifyFailedAssistancePrompt generates the attended-agent prompt shown when
@@ -293,52 +365,27 @@ func BuildInterruptAssistancePrompt(d *Deps, taskSetID string, m *Manifest, inte
 	}
 
 	taskPath := filepath.Join(m.Dir, interrupted.File)
-	var b strings.Builder
-	fmt.Fprintf(&b, "You are assisting a human with an interrupted task in a Pop task set.\n\n")
-	fmt.Fprintf(&b, "Task set: %s\n", taskSetID)
-	fmt.Fprintf(&b, "Task set path: %s\n", m.Dir)
-	fmt.Fprintf(&b, "Interrupted task: %s", interrupted.ID)
-	if interrupted.Title != "" {
-		fmt.Fprintf(&b, " - %s", interrupted.Title)
+	view := interruptPromptView{
+		TaskSetID:           taskSetID,
+		TaskSetPath:         m.Dir,
+		InterruptedTask:     taskHeading(interrupted),
+		TaskPath:            taskPath,
+		RuntimeCheckoutLine: runtimeCheckoutLine(runtimePath),
+		Body:                readTaskBody(d, taskPath),
+		Tasks:               gateTaskRows(m),
 	}
-	fmt.Fprintf(&b, "\n")
-	fmt.Fprintf(&b, "Task path: %s\n", taskPath)
-	if runtimePath != "" {
-		fmt.Fprintf(&b, "Runtime checkout: %s\n", runtimePath)
-	}
-	fmt.Fprintf(&b, "\n")
+	return prompt.MustRender(promptTemplates, "interrupt-assistance.tmpl.md", view)
+}
 
-	fmt.Fprintf(&b, "This task's live attempt was stopped mid-run by an interrupt (SIGINT). The\n")
-	fmt.Fprintf(&b, "human is deciding at the interrupt gate whether to continue draining (re-run\n")
-	fmt.Fprintf(&b, "this task) or exit. You are here to advise and edit by hand only:\n")
-	fmt.Fprintf(&b, "- Do not change task state yourself and do not resume the drain; the human\n")
-	fmt.Fprintf(&b, "  chooses Continue or Exit from the gate menu after you exit.\n")
-	fmt.Fprintf(&b, "- exit without changing task state: leave the interrupted task open and make no manual override.\n\n")
-
-	fmt.Fprintf(&b, "Full interrupted task body:\n")
-	if data, err := d.FS.ReadFile(taskPath); err == nil {
-		fmt.Fprintf(&b, "```markdown\n%s\n```\n\n", strings.TrimRight(string(data), "\n"))
-	} else {
-		fmt.Fprintf(&b, "Could not read %s: %v.\n", taskPath, err)
-		fmt.Fprintf(&b, "Proceed by inspecting the task path manually or asking the human for the missing task body.\n\n")
-	}
-
-	fmt.Fprintf(&b, "Task set context:\n")
-	for _, task := range m.Tasks {
-		fmt.Fprintf(&b, "- %s [%s %s]", task.ID, task.Type, task.Status)
-		if task.Title != "" {
-			fmt.Fprintf(&b, " %s", task.Title)
-		}
-		fmt.Fprintf(&b, " (%s)", filepath.Join(m.Dir, task.File))
-		if len(task.BlockedBy) > 0 {
-			fmt.Fprintf(&b, "; blocked_by: %s", strings.Join(task.BlockedBy, ", "))
-		}
-		fmt.Fprintf(&b, "\n")
-	}
-	fmt.Fprintf(&b, "\n")
-
-	fmt.Fprintf(&b, "Use the repository and task context to help the human decide whether to continue draining this task or exit. Do not mark tasks complete, skipped, or reset unless the human explicitly chooses that outcome.\n")
-	return b.String()
+// interruptPromptView is what the interrupt gate's template renders against.
+type interruptPromptView struct {
+	TaskSetID           string
+	TaskSetPath         string
+	InterruptedTask     string
+	TaskPath            string
+	RuntimeCheckoutLine string
+	Body                taskBodyRow
+	Tasks               []taskRow
 }
 
 // formatSiblingCompletedBriefs renders the inter-task feed appended to the
