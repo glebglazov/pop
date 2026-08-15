@@ -163,7 +163,20 @@ After all conflicts are resolved:
 4. Apply the ADR nullifications: the body cuts for every superseded ADR that passed all four gut conditions.
 5. Inspect `git status --short` and identify only the artifacts produced by this consolidation pass — the base `CONTEXT.md` files, folded fragment deletions, ADR renames, ADR link edits, and stubbed ADR bodies.
 6. Stage exactly those files. Do not stage unrelated existing work.
-7. Commit immediately. First **sample the repo's house style** — `git log -5 --format='%s%n%b'` — and infer the prevailing convention: conventional-commits `type(scope): subject` or not, subject capitalization, and any trailer (e.g. `Co-Authored-By`). Compose the message to match that grammar and reproduce the trailer convention. Infer the *grammar*, don't copy the sampled type/scope verbatim — a skewed window (say five `fix(...)` commits) must not relabel this docs/maintenance pass. When the repo uses conventional commits, default to `docs(context): consolidate glossary fragments` (append `+ reconcile ADR numbers` when this pass renumbered any ADRs, and `+ stub superseded ADRs` when it nullified any); when it has no discernible convention, fall back to `Consolidate context fragments`.
+7. Commit immediately. First resolve the commit convention by asking pop:
+
+   ```
+   pop repo conventions get commits
+   ```
+
+   Do not derive the grammar yourself. Exit 0 — take the printed convention as
+   resolved and compose the message to match its grammar and trailer. Exit 1 —
+   nothing answers `commits` yet; follow the printed recipe, then resolve again.
+   When the resolved (or recipe-derived) convention is conventional commits,
+   default to `docs(context): consolidate glossary fragments` (append `+
+   reconcile ADR numbers` when this pass renumbered any ADRs, and `+ stub
+   superseded ADRs` when it nullified any); when it resolves to no discernible
+   convention, fall back to `Consolidate context fragments`.
 8. Show the user the commit hash, the changed files, any terms that were added, redefined, retired, or manually resolved, any ADRs renumbered (old → new) with the link rewrites that followed, and any ADRs stubbed (pointing where) or held back as contested.
 
 Never delete a fragment with an unresolved op (contested, or only partially applied). A fully **satisfied** fragment is applied — delete it; do not mistake "changed nothing" for "not applied."

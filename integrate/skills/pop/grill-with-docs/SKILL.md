@@ -148,7 +148,16 @@ To commit:
 
    Write a short human `<summary>` of what the artifacts cover (e.g. `effort-model-resolution glossary + ADR-0032`).
 
-   Before writing the subject, **sample the repo's house style** — `git log -5 --format='%s%n%b'` — and infer the prevailing convention: conventional-commits `type(scope): subject` or not, subject capitalization, and any trailer (e.g. `Co-Authored-By`). Match that grammar and reproduce the trailer convention. Infer the *grammar*, don't copy the sampled type/scope verbatim — a skewed window (say five `fix(...)` commits) must not relabel a docs pass. The `type` still follows content (docs-only vs. mixed), as above.
+   Before writing the subject, resolve the commit convention by asking pop:
+
+   ```
+   pop repo conventions get commits
+   ```
+
+   Do not derive the grammar yourself. Exit 0 — take the printed convention as
+   resolved and match its grammar and trailer. Exit 1 — nothing answers `commits`
+   yet; follow the printed recipe, then resolve again. The `type` still follows
+   content (docs-only vs. mixed), as above.
 4. **Report.** After committing, show the user the exact files staged and the commit subject. Separately, report any dirty files this session did *not* touch as "left alone — not staged" so nothing is silently swept or split.
 
 After the commit, the plan is settled and persisted; the user will typically move on to a separate step (such as `to-tasks`) themselves.
