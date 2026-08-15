@@ -291,29 +291,10 @@ func TestKindConformance(t *testing.T) {
 // taxonomy to rank kinds against.
 func TestSnapshotOrdersByKindPrecedenceThenKindLess(t *testing.T) {
 	f := newFixture(t)
-	sets := setkind.New(&setkind.Deps{
-		Tasks:      f.tasks,
-		Project:    f.project,
-		Config:     f.cfg,
-		Groups:     f.groups,
-		LiveDrains: func() ([]tasks.RunningDrain, error) { return nil, nil },
-		Refresh: func(string) (*tasks.RefreshResult, error) {
-			return &tasks.RefreshResult{Rows: []tasks.Row{
-				{ID: "2026-07-01-demo", Status: tasks.StatusReady},
-				{ID: "2026-07-02-later", Status: tasks.StatusBlocked},
-			}}, nil
-		},
-	})
-	maps := wayfinder.NewMapKind(&wayfinder.MapKindDeps{
-		Wayfinder: &wayfinder.Deps{FS: f.fs, Tasks: f.tasks},
-		Project:   f.project,
-		Config:    f.cfg,
-		Groups:    f.groups,
-	})
 
 	// Wired Map-first on purpose: precedence is fixed by the closed enum, not by
 	// the order `cmd` happens to wire.
-	snap, err := work.BuildSnapshot([]work.Kind{maps, sets})
+	snap, err := work.BuildSnapshot(twoKindPage(f))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,6 +316,66 @@ func TestSnapshotOrdersByKindPrecedenceThenKindLess(t *testing.T) {
 	// Header text: every kind's phrases, joined with · in kind order.
 	if want := "2 task sets · 1 ready · 1 map"; snap.SummaryLine() != want {
 		t.Fatalf("summary line = %q, want %q", snap.SummaryLine(), want)
+	}
+}
+
+// twoKindPage is one page holding both mutable kinds — two task sets and one Map —
+// which is the smallest arrangement in which "above the whole task-set block" means
+// anything.
+func twoKindPage(f fixture) []work.Kind {
+	sets := setkind.New(&setkind.Deps{
+		Tasks:      f.tasks,
+		Project:    f.project,
+		Config:     f.cfg,
+		Groups:     f.groups,
+		LiveDrains: func() ([]tasks.RunningDrain, error) { return nil, nil },
+		Refresh: func(string) (*tasks.RefreshResult, error) {
+			return &tasks.RefreshResult{Rows: []tasks.Row{
+				{ID: "2026-07-01-demo", Status: tasks.StatusReady},
+				{ID: "2026-07-02-later", Status: tasks.StatusBlocked},
+			}}, nil
+		},
+	})
+	maps := wayfinder.NewMapKind(&wayfinder.MapKindDeps{
+		Wayfinder: &wayfinder.Deps{FS: f.fs, Tasks: f.tasks},
+		Project:   f.project,
+		Config:    f.cfg,
+		Groups:    f.groups,
+	})
+	return []work.Kind{maps, sets}
+}
+
+// The pin is applied after the sort resolves, which is what lets it do something no
+// comparator could: a Map row the launching pane is attributed to sits above the
+// whole task-set block, while kind precedence and each kind's own order survive
+// underneath it, unchanged (ADR-0209 decision 1).
+func TestAnAttributedMapRowPinsAboveTheWholeTaskSetBlock(t *testing.T) {
+	f := newFixture(t)
+
+	snap, err := work.BuildSnapshotForPane(twoKindPage(f), work.PaneFacts{
+		PaneID:   "%3",
+		WorkKind: string(ref.KindMap),
+		WorkID:   "2026-07-01-chart",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got []string
+	for _, c := range snap.Containers {
+		mark := " "
+		if c.Pinned {
+			mark = "▸"
+		}
+		got = append(got, mark+string(c.Kind)+":"+c.ID)
+	}
+	want := []string{
+		"▸map:2026-07-01-chart",
+		" task-set:2026-07-01-demo",
+		" task-set:2026-07-02-later",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("snapshot order = %v, want %v — the attributed Map first and marked, once, the rest as they were", got, want)
 	}
 }
 

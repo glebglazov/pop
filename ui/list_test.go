@@ -242,8 +242,8 @@ func TestListResizeReclampsScroll(t *testing.T) {
 
 func newMultilineTestList(items []string) *List[string] {
 	return NewList(items, Opts[string]{
-		Key:  func(s string) string { return s },
-		Cell: func(s string, rs RowState) string { return fmt.Sprintf("%s/%d", s, rs.LineIndex) },
+		Key:          func(s string) string { return s },
+		Cell:         func(s string, rs RowState) string { return fmt.Sprintf("%s/%d", s, rs.LineIndex) },
 		LinesPerItem: 2,
 	})
 }
@@ -399,5 +399,78 @@ func TestListSetScrollClampsToBoundsAndCursor(t *testing.T) {
 	l.SetScroll(3)
 	if l.Scroll() != 0 {
 		t.Errorf("SetScroll on a short list = %d, want 0", l.Scroll())
+	}
+}
+
+// newPinnedTestList is the Work dashboard's shape: no quick-access column, so the
+// prefix's second cell is free for the pin mark (ADR-0209 decision 4).
+func newPinnedTestList(items []string, pinned ...string) *List[string] {
+	return NewList(items, Opts[string]{
+		Key:    func(s string) string { return s },
+		Cell:   func(s string, _ RowState) string { return s },
+		Anchor: AnchorTop,
+		Pinned: func(s string) bool {
+			for _, p := range pinned {
+				if p == s {
+					return true
+				}
+			}
+			return false
+		},
+	})
+}
+
+// The mark rides the prefix column the cursor already uses: `▸` alone, `█▸` when
+// the cursor happens to be on the pinned row. Both cells are spent either way, so
+// the cell text starts at the same offset whether anything is pinned or not.
+func TestListPinMarkSharesTheCursorPrefixColumn(t *testing.T) {
+	l := newPinnedTestList(strItems(3), "item-1")
+	l.Resize(3)
+
+	rows := l.VisibleRows()
+	for i, want := range []string{"█ item-0", " ▸item-1", "  item-2"} {
+		if got := StripANSI(rows[i]); got != want {
+			t.Fatalf("row %d = %q, want %q", i, got, want)
+		}
+	}
+
+	l.SetCursor(1)
+	if got := StripANSI(l.VisibleRows()[1]); got != "█▸item-1" {
+		t.Fatalf("cursored pinned row = %q, want %q", got, "█▸item-1")
+	}
+
+	// The same list with nothing pinned: the cell text starts in the same column,
+	// so a launch that pins and one that does not line their columns up.
+	plain := newTestList(strItems(3), AnchorTop, false, 0, nil)
+	plain.Resize(3)
+	for i, row := range append(plain.VisibleRows(), l.VisibleRows()...) {
+		text := StripANSI(row)
+		at := strings.Index(text, "item-")
+		if at < 0 {
+			t.Fatalf("row %d = %q, want it to carry a cell", i, text)
+		}
+		if col := len([]rune(text[:at])); col != 2 {
+			t.Fatalf("row %d starts its cell in column %d, want 2 — the prefix column shifted: %q", i, col, text)
+		}
+	}
+}
+
+// A pin is a starting position, not a frame: scroll past the pinned block and it
+// leaves the viewport with everything else (decision 6).
+func TestListPinnedRowsScrollAwayLikeAnyOther(t *testing.T) {
+	l := newPinnedTestList(strItems(5), "item-0", "item-1")
+	l.Resize(2)
+	if got := StripANSI(l.VisibleRows()[0]); !strings.Contains(got, "item-0") {
+		t.Fatalf("first visible row = %q, want the pinned item-0", got)
+	}
+
+	for range 4 {
+		l.MoveDown()
+	}
+
+	for _, row := range l.VisibleRows() {
+		if plain := StripANSI(row); strings.Contains(plain, "item-0") || strings.Contains(plain, "item-1") {
+			t.Fatalf("pinned row still on screen after scrolling to the end: %q", plain)
+		}
 	}
 }

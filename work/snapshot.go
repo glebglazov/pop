@@ -9,9 +9,10 @@ import (
 
 // Snapshot is the data model for `pop work dashboard`.
 type Snapshot struct {
-	// Containers are every loaded Work container in snapshot order — kind
-	// precedence, then each kind's own comparator. There is no second list beside
-	// it: a dashboard row is one of these.
+	// Containers are every loaded Work container in snapshot order — the rows the
+	// launching pane is attributed to first, then kind precedence and each kind's
+	// own comparator. There is no second list beside it: a dashboard row is one of
+	// these.
 	Containers []Container
 	// Summary is every kind's header phrases in kind order, already pluralised.
 	// SummaryLine joins them.
@@ -23,9 +24,8 @@ type Snapshot struct {
 	ModelSkips []ModelSkip
 	// Attribution is the containers the pane this build was launched from belongs
 	// to, nil when it belongs to none of the kinds on this page. Only a build
-	// handed pane facts can carry one: a rebuild is not a launch, so a poll's
-	// snapshot can never re-seed a cursor the human has since moved (ADR-0201
-	// decision 4).
+	// handed pane facts can carry one; the containers it names that this page
+	// actually shows are the pinned rows at the head of Containers.
 	Attribution *Attribution
 }
 
@@ -87,7 +87,55 @@ func BuildSnapshotForPane(kinds []Kind, facts PaneFacts) (Snapshot, error) {
 		snap.ModelSkips = append(snap.ModelSkips, skips...)
 	}
 	snap.Attribution = AttributePane(ordered, facts)
+	snap.Containers = pinAttributed(snap.Containers, snap.Attribution)
 	return snap, nil
+}
+
+// pinAttributed lifts the attributed rows out of the ordered list and puts them
+// first, in the order attribution ranked them, marking each one. Everything else
+// keeps the order it already had.
+//
+// It runs here, on the concatenated result, rather than as a sort term, because
+// no comparator can express it: rows are ordered within a kind and kinds are
+// ordered by precedence, so an attributed Map row could never reach above the
+// task-set block from inside `Less` (ADR-0209 decision 1). A row is moved rather
+// than copied — one container, one row, or the list's cursor keys and its
+// navigation counts would both lie.
+//
+// A container the attribution names but this build does not hold — one the
+// active view preset dropped — pins nothing and is not mentioned: the preset is
+// absolute, and a launch does not widen it (decisions 7 and 8).
+func pinAttributed(containers []Container, att *Attribution) []Container {
+	if att == nil || len(att.Containers) == 0 {
+		return containers
+	}
+	byKey := make(map[string]int, len(containers))
+	for i, c := range containers {
+		byKey[c.CursorKey] = i
+	}
+	pinned := make([]Container, 0, len(att.Containers))
+	lifted := make(map[int]bool, len(att.Containers))
+	for _, a := range att.Containers {
+		i, ok := byKey[a.CursorKey]
+		if !ok || a.CursorKey == "" || lifted[i] {
+			continue
+		}
+		lifted[i] = true
+		c := containers[i]
+		c.Pinned = true
+		pinned = append(pinned, c)
+	}
+	if len(pinned) == 0 {
+		return containers
+	}
+	out := make([]Container, 0, len(containers))
+	out = append(out, pinned...)
+	for i, c := range containers {
+		if !lifted[i] {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // kindsInPrecedence returns the wired kinds in fixed precedence order, dropping

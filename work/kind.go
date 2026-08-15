@@ -121,6 +121,11 @@ type Container struct {
 	// CursorKey is the stable per-container identity a TUI pins cursor memory to
 	// across rebuilds.
 	CursorKey string
+	// Pinned marks a container the pane this build was launched from is
+	// attributed to. The builder stamps it while lifting the row to the top of
+	// the snapshot, so a surface that renders the mark reads one field instead of
+	// re-deriving the attribution its rows already went through (ADR-0209).
+	Pinned bool
 	// Broken marks a container whose definition could not be read at all, with
 	// BrokenReason carrying what went wrong. A broken container still renders —
 	// hiding a container because it is unreadable hides the thing that needs

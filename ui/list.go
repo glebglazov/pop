@@ -16,6 +16,7 @@ const (
 // RowState is passed to the Cell renderer for each visible row/sub-line.
 type RowState struct {
 	Selected   bool
+	Pinned     bool
 	QuickLabel string
 	Width      int
 	// LineIndex is the zero-based sub-line inside a multi-line item. It is 0
@@ -31,6 +32,11 @@ type Opts[T any] struct {
 	Anchor       Anchor                   // Top | Bottom (fzf-style)
 	ScrollMargin int                      // lines kept above cursor (quick-access reserves ~9)
 	QuickLabel   func(dist int) string    // optional; nil = no quick-access column
+	// Pinned marks a row the caller lifted to the top of the item slice, so the
+	// list can say so in the prefix column's second cell. It is optional; nil
+	// leaves that cell blank. A list with a QuickLabel has no room for it — both
+	// want the same cell — so the two are not wired together.
+	Pinned func(T) bool
 	// LinesPerItem is the number of terminal lines each logical item occupies.
 	// Defaults to 1. Cursor movement still operates on logical items.
 	LinesPerItem int
@@ -301,6 +307,7 @@ func (l *List[T]) VisibleRows() []string {
 		}
 		item := l.items[itemIdx]
 		selected := itemIdx == l.cursor
+		pinned := l.opts.Pinned != nil && l.opts.Pinned(item)
 
 		quickLabel := ""
 		if quickAccess && !selected {
@@ -315,6 +322,7 @@ func (l *List[T]) VisibleRows() []string {
 			if l.opts.Cell != nil {
 				cell = l.opts.Cell(item, RowState{
 					Selected:   selected,
+					Pinned:     pinned,
 					QuickLabel: quickLabel,
 					Width:      0,
 					LineIndex:  sub,
@@ -322,7 +330,7 @@ func (l *List[T]) VisibleRows() []string {
 			}
 
 			isFirstLine := sub == 0
-			lines[lineIdx] = l.renderPrefix(isFirstLine && selected, quickLabel, prefixWidth) + cell
+			lines[lineIdx] = l.renderPrefix(isFirstLine && selected, isFirstLine && pinned, quickLabel, prefixWidth) + cell
 			lineIdx++
 		}
 	}
@@ -337,18 +345,26 @@ func (l *List[T]) VisibleRows() []string {
 	return lines
 }
 
-func (l *List[T]) renderPrefix(selected bool, quickLabel string, prefixWidth int) string {
+// renderPrefix draws the two cells every row carries: the cursor block in the
+// first, the pin mark in the second. Both cells are always spent, whichever way
+// they are filled, so column offsets never shift between one row and the next —
+// or between a render that pins and one that does not.
+func (l *List[T]) renderPrefix(selected, pinned bool, quickLabel string, prefixWidth int) string {
+	mark := " "
+	if pinned {
+		mark = indicatorStyle.Render("▸")
+	}
 	if selected {
 		indicator := indicatorStyle.Render("█")
 		if l.opts.QuickLabel != nil {
 			return strings.Repeat(" ", prefixWidth-1) + indicator
 		}
-		return indicator + " "
+		return indicator + mark
 	}
 	if quickLabel != "" {
 		return dimStyle.Render(quickLabel)
 	}
-	return strings.Repeat(" ", prefixWidth)
+	return strings.Repeat(" ", prefixWidth-1) + mark
 }
 
 func (l *List[T]) clampCursor() {

@@ -705,6 +705,9 @@ func newQueueDashboardOn(d *drain.Deps, cfg *config.Config, snap DashboardSnapsh
 	list = ui.NewList(snap.Containers, ui.Opts[DashboardRow]{
 		Key:    func(r DashboardRow) string { return r.CursorKey },
 		Anchor: ui.AnchorTop,
+		// The snapshot already moved the attributed rows to the top; the mark is
+		// what says why they are there, on every one of them (ADR-0209 decision 4).
+		Pinned: func(r DashboardRow) bool { return r.Pinned },
 		Cell: func(r DashboardRow, rs ui.RowState) string {
 			budget := dashboardListCellBudget(cols.width)
 			cache := livePaneCache{}
@@ -721,47 +724,10 @@ func newQueueDashboardOn(d *drain.Deps, cfg *config.Config, snap DashboardSnapsh
 			return ui.TruncateString(dashboardTableLine(page.styledCells(kinds, r, cache), cols.widths), budget)
 		},
 	})
-	m := QueueDashboard{d: d, cfg: cfg, page: page, kinds: kinds, snap: snap, allRows: snap.Containers, list: list, cols: cols, live: live}
-	m.flash.Set(m.seedCursorFromPane())
-	return m
-}
-
-// seedCursorFromPane places the cursor on the leading row the launching pane was
-// attributed to and returns the line the surface should say about it — empty
-// whenever the cursor lands, and for a pane that belongs to nothing.
-//
-// It runs here, in the constructor, because that is the one moment that is
-// unambiguously before the first paint and after the rows exist. There is no
-// pending target kept afterwards: a cursor that outlives the human's own
-// navigation is one that fights them.
-func (m QueueDashboard) seedCursorFromPane() string {
-	if m.snap.Attribution == nil {
-		return ""
-	}
-	lead, ok := m.snap.Attribution.Leading()
-	if !ok {
-		return ""
-	}
-	if m.list.SetCursorToKey(lead.CursorKey) {
-		return ""
-	}
-	return attributionHiddenLine(lead, m.activeViewPreset().DisplayLabel(), m.filterInput.Value())
-}
-
-// attributionHiddenLine words the miss: the container was attributed, but no row
-// on screen carries its key. Naming both the container and what is hiding it is
-// the point — a cursor resting at row one with no explanation is indistinguishable
-// from a broken feature. The view is never widened to reveal the row; the preset
-// is a deliberate choice and a launch does not overrule it.
-func attributionHiddenLine(c work.AttributedContainer, preset, query string) string {
-	switch {
-	case query != "":
-		return fmt.Sprintf("%s is hidden by the /%s filter", c.Label, query)
-	case preset != "":
-		return fmt.Sprintf("%s is hidden by the %s view", c.Label, preset)
-	default:
-		return c.Label + " is hidden by the active view"
-	}
+	// Attribution has already had its say — it pinned its rows to the top of the
+	// snapshot. Nothing is printed about it, and the cursor rests where it always
+	// does, on the first row (ADR-0209 decision 8).
+	return QueueDashboard{d: d, cfg: cfg, page: page, kinds: kinds, snap: snap, allRows: snap.Containers, list: list, cols: cols, live: live}
 }
 
 // dashboardChromeLines returns the chrome height above the List rows for the
