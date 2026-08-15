@@ -13,7 +13,7 @@ this task) or exit. You are here to advise and edit by hand only:
   menu after you exit.
 - exit without changing task state: leave the interrupted task open and make no manual override.
 
-Full interrupted task body:
+## Full interrupted task body
 ```markdown
 ## What to build
 
@@ -24,7 +24,7 @@ Migrate the builders onto templates.
 - [ ] every builder renders through the seam
 ```
 
-Task set context:
+## Task set context
 - 01-afk [AFK done] Freeze the prompts (/pop/tasks/2026-05-01-demo/01-afk.md)
 - 02-remediation [AFK done] Remediation 1: widen the range (/pop/tasks/2026-05-01-demo/02-remediation.md); blocked_by: 01-afk
 - 03-hitl [HITL open] Review the goldens (/pop/tasks/2026-05-01-demo/03-hitl.md); blocked_by: 01-afk, 02-remediation

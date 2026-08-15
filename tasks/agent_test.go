@@ -1728,7 +1728,7 @@ func TestBuildFailedAssistancePromptIncludesBodyAndFailureReason(t *testing.T) {
 		"Failed task: 01-a - Build storage",
 		"Task path: " + filepath.Join(dir, "01-a.md"),
 		"Runtime checkout: /runtime",
-		"Why the last attempt failed:",
+		"## Why the last attempt failed",
 		"unchecked acceptance criteria",
 		"Wire up the cache layer.",
 		"re-run:",
@@ -1769,7 +1769,7 @@ func TestBuildFailedAssistancePromptWithoutRecordedReason(t *testing.T) {
 	}
 
 	prompt := BuildFailedAssistancePrompt(realFSDeps(), "demo", m, m.Tasks[0], "")
-	if !strings.Contains(prompt, "no structured failure reason was recorded") {
+	if !strings.Contains(prompt, "No structured failure reason was recorded") {
 		t.Fatalf("missing fallback reason line:\n%s", prompt)
 	}
 	if !strings.Contains(prompt, "Do the work.") {
@@ -1802,7 +1802,7 @@ func TestBuildVerifyFailedAssistancePromptIncludesFindingsAndDiffStat(t *testing
 		"Task set path: " + dir,
 		"Work SHA: shaHEAD",
 		"Runtime checkout: /runtime",
-		"Recorded Verifier findings:",
+		"## Recorded Verifier findings",
 		"the retry looks flaky",
 		"Accumulated work diff (at shaHEAD)",
 		"Commit range: shaEARLY^..HEAD",
@@ -1842,7 +1842,7 @@ func TestBuildVerifyFailedAssistancePromptWithoutFindingsOrDiff(t *testing.T) {
 	d.Git = stubGit("", "", "")
 
 	prompt := BuildVerifyFailedAssistancePrompt(d, "demo", m, "", "", "")
-	if !strings.Contains(prompt, "none were recorded for this verdict") {
+	if !strings.Contains(prompt, "None were recorded for this verdict") {
 		t.Fatalf("missing findings fallback:\n%s", prompt)
 	}
 	if !strings.Contains(prompt, "(no committed changes for this set)") {

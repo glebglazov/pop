@@ -5,20 +5,20 @@ Task set path: /pop/tasks/2026-05-01-demo
 Work SHA: shaHEAD
 Runtime checkout: /pop/checkouts/demo
 
-Allowed outcomes at this gate:
+## Allowed outcomes at this gate
 - accept: the human records a human-authored PASS verdict with an optional note.
 - remediate: the human spawns a Remediation task carrying the findings and an optional note.
 - exit without changing task state: leave the set Verify-failed and make no disposition.
 Re-running the Verifier is not offered here — it is a separate force action, not a response to findings.
 Remediation is the one outcome you may prepare: write the Remediation task with the findings it should carry, and on return the gate re-derives the manifest and offers your draft for the human to confirm instead of making them retype it.
 
-Recorded Verifier findings:
+## Recorded Verifier findings
 the range moved under us
 
-Accumulated work diff (at shaHEAD)
+## Accumulated work diff (at shaHEAD)
 (the set's commit range could not be determined — helping the human establish what this set actually landed is the task at this gate)
 
-Task set context:
+## Task set context
 - 01-afk [AFK done] Freeze the prompts (/pop/tasks/2026-05-01-demo/01-afk.md)
 - 02-remediation [AFK done] Remediation 1: widen the range (/pop/tasks/2026-05-01-demo/02-remediation.md); blocked_by: 01-afk
 - 03-hitl [HITL open] Review the goldens (/pop/tasks/2026-05-01-demo/03-hitl.md); blocked_by: 01-afk, 02-remediation

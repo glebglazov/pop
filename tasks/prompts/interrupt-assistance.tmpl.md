@@ -13,10 +13,10 @@ this task) or exit. You are here to advise and edit by hand only:
   menu after you exit.
 - exit without changing task state: leave the interrupted task open and make no manual override.
 
-Full interrupted task body:
+## Full interrupted task body
 {{template "task-body" .Body}}
 
-Task set context:
+## Task set context
 {{template "task-listing" .Tasks}}
 Use the repository and task context to help the human decide whether to continue draining this task or exit.
 

@@ -6,18 +6,18 @@ Blocking HITL task: {{.BlockingTask}}
 Human-facing task path: {{.TaskPath}}
 {{.RuntimeCheckoutLine}}
 
-Allowed manual outcomes:
+## Allowed manual outcomes
 - complete: the human marks the HITL task done after verifying the required work.
 - defer: the human skips the HITL task so downstream work can continue while the set remains Deferred.
 - edit and rerun: the human edits tasks or implementation state, then reruns the task set.
 - exit without changing task state: leave the HITL task open and make no manual override.
 
-Full HITL task body:
+## Full HITL task body
 {{template "task-body" .Body}}
 
-Task set context:
+## Task set context
 {{template "task-listing" .Tasks}}
-Completed AFK work from task artifacts:
+## Completed AFK work from task artifacts
 {{if .NoCompletedWork}}- No completed AFK work summary is available in progress.txt.
 {{end}}{{if .HasCompletedWork}}{{range .CompletedWork}}- {{.TaskID}} ({{.File}}, {{.Outcome}} at {{.Timestamp}})
 {{range .SummaryLines}}  {{.}}

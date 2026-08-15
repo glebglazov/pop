@@ -6,19 +6,21 @@ Failed task: {{.FailedTask}}
 Task path: {{.TaskPath}}
 {{.RuntimeCheckoutLine}}
 
-{{if .FailureReasonRecorded}}Why the last attempt failed:
+{{if .FailureReasonRecorded}}## Why the last attempt failed
 {{.FailureReason}}
-{{end}}{{if .FailureReasonMissing}}Why the last attempt failed: no structured failure reason was recorded for the last attempt.
+{{end}}{{if .FailureReasonMissing}}## Why the last attempt failed
+No structured failure reason was recorded for the last attempt.
 {{end}}
-Allowed outcomes:
+## Allowed outcomes
 - re-run: fix the underlying problem in the runtime checkout so a fresh attempt can pass; the human then reruns the task set to retry the task AFK.
 - complete by hand: the human finishes the task's work directly and marks the task done.
 These are the only outcomes at the Failed gate.
 
-Treat the following as the task to work again. Read it in full and satisfy every acceptance criterion:
+## Task to work again
+Read it in full and satisfy every acceptance criterion:
 {{template "task-body" .Body}}
 
-Task set context:
+## Task set context
 {{template "task-listing" .Tasks}}
 Help the human get this task to a passing state.
 

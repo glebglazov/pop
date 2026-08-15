@@ -12,11 +12,11 @@ this task) or exit. You are here to advise and edit by hand only:
   menu after you exit.
 - exit without changing task state: leave the interrupted task open and make no manual override.
 
-Full interrupted task body:
+## Full interrupted task body
 Could not read /pop/tasks/2026-05-01-demo/01-afk.md: open /pop/tasks/2026-05-01-demo/01-afk.md: permission denied.
 Proceed by inspecting the task path manually or asking the human for the missing task body.
 
-Task set context:
+## Task set context
 - 01-afk [AFK open] (/pop/tasks/2026-05-01-demo/01-afk.md)
 
 Use the repository and task context to help the human decide whether to continue draining this task or exit.

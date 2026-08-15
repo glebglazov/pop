@@ -6,13 +6,13 @@ Blocking HITL task: 03-hitl - Review the goldens
 Human-facing task path: /pop/tasks/2026-05-01-demo/03-hitl.md
 Runtime checkout: /pop/checkouts/demo
 
-Allowed manual outcomes:
+## Allowed manual outcomes
 - complete: the human marks the HITL task done after verifying the required work.
 - defer: the human skips the HITL task so downstream work can continue while the set remains Deferred.
 - edit and rerun: the human edits tasks or implementation state, then reruns the task set.
 - exit without changing task state: leave the HITL task open and make no manual override.
 
-Full HITL task body:
+## Full HITL task body
 ```markdown
 ## Review
 
@@ -23,13 +23,13 @@ Read the goldens and confirm nothing moved.
 - [ ] approved
 ```
 
-Task set context:
+## Task set context
 - 01-afk [AFK done] Freeze the prompts (/pop/tasks/2026-05-01-demo/01-afk.md)
 - 02-remediation [AFK done] Remediation 1: widen the range (/pop/tasks/2026-05-01-demo/02-remediation.md); blocked_by: 01-afk
 - 03-hitl [HITL open] Review the goldens (/pop/tasks/2026-05-01-demo/03-hitl.md); blocked_by: 01-afk, 02-remediation
 - 04-afk [AFK failed] Migrate the templates (/pop/tasks/2026-05-01-demo/04-afk.md); blocked_by: 01-afk
 
-Completed AFK work from task artifacts:
+## Completed AFK work from task artifacts
 - 01-afk (01-afk.md, DONE at 2026-05-01T09:00:00Z)
   captured a golden for each builder
   asserted the whitespace invariant
