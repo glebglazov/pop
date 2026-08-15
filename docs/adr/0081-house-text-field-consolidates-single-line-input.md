@@ -4,6 +4,12 @@ status: accepted
 
 # A hand-rolled house Text field consolidates single-line input
 
+> **Amended by
+> [ADR-0213](0213-a-text-entry-mode-may-reserve-only-keys-that-produce-no-text.md).**
+> "Callers intercept their own reserved keys first" below is a permission with no
+> ceiling; ADR-0213 makes it a constraint — a host may reserve only keys that
+> produce no text.
+
 ## Context
 
 pop had two idioms for the same job — "editable single line." One hand-rolled on
