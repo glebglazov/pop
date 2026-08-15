@@ -5,9 +5,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/glebglazov/pop/internal/frontmatter"
+	"github.com/glebglazov/pop/internal/prompt"
 	"github.com/glebglazov/pop/internal/tty"
 	"github.com/glebglazov/pop/tasks"
 )
@@ -210,79 +212,38 @@ func projectAuthoringSessionFromGate(d *Deps, out io.Writer, pr *ProjectRoutine,
 // prompt is a committed file, there is no schedule and none may be set, and pop
 // never commits — the human reviews the diff and commits if they like it.
 func buildProjectAuthoringPrompt(d *Deps, pr *ProjectRoutine) string {
-	key := checkoutKey(pr.Dir)
-	dataDir := projectRoutineDataDir(d, key, pr.Name)
-	promptPath := filepath.Join(pr.Dir, ".pop", projectRoutinesDirName, pr.Name+projectRoutineExt)
-	memoryDir := filepath.Join(dataDir, memoryDirName)
-	runsDir := filepath.Join(dataDir, runsDirName)
-
+	dataDir := projectRoutineDataDir(d, checkoutKey(pr.Dir), pr.Name)
 	createMode := isCreateModePrompt(pr.Prompt)
 
-	var b strings.Builder
-	if createMode {
-		fmt.Fprintf(&b, "You are helping author the prompt for a pop Project routine (id %q). A\n", ProjectOrigin+pr.Name)
-		b.WriteString("Project routine is a prompt committed to this repo — everyone who checks it out\n")
-		b.WriteString("gets it. Your job in this session is to interview me and write a good prompt.\n\n")
-	} else {
-		fmt.Fprintf(&b, "You are helping refine an existing pop Project routine (id %q). A Project\n", ProjectOrigin+pr.Name)
-		b.WriteString("routine is a prompt committed to this repo — everyone who checks it out gets\n")
-		b.WriteString("it. This session changes its committed prompt file.\n\n")
-	}
+	return prompt.MustRender(promptTemplates, "project-authoring.tmpl.md", projectAuthoringPromptView{
+		QuotedID:         strconv.Quote(ProjectOrigin + pr.Name),
+		CreateMode:       createMode,
+		ReviseMode:       !createMode,
+		CheckoutDir:      pr.Dir,
+		PromptPath:       filepath.Join(pr.Dir, ".pop", projectRoutinesDirName, pr.Name+projectRoutineExt),
+		MemoryDir:        filepath.Join(dataDir, memoryDirName),
+		RunsDir:          filepath.Join(dataDir, runsDirName),
+		PromptBody:       endWithNewline(pr.Prompt),
+		CompleteSentinel: routineCompleteSentinel,
+		FailedSentinel:   routineFailedSentinel,
+	})
+}
 
-	b.WriteString("## Framework contract\n\n")
-	b.WriteString("When the routine fires, pop wraps your prompt — it does NOT run it verbatim. The\n")
-	b.WriteString("wrapping is:\n")
-	fmt.Fprintf(&b, "  - PREAMBLE: \"Before starting, read the routine memory directory at %s and\n", memoryDir)
-	b.WriteString("    incorporate any prior context.\"\n")
-	b.WriteString("  - then the verbatim contents of the prompt file's body\n")
-	fmt.Fprintf(&b, "  - POSTAMBLE: \"When finished, write your report to <runs>/<timestamp>.md and\n")
-	fmt.Fprintf(&b, "    update the routine memory directory at %s with what you learned.\"\n", memoryDir)
-	b.WriteString("  - SENTINEL: the postamble also requires the run to end its output with\n")
-	fmt.Fprintf(&b, "    %s (report written, run done) or %s: <reason>. A run that exits\n", routineCompleteSentinel, routineFailedSentinel)
-	fmt.Fprintf(&b, "    cleanly without %s is recorded FAILED, so do not have the prompt\n", routineCompleteSentinel)
-	b.WriteString("    fight this — leave the sentinel to the framework.\n")
-	b.WriteString("So the prompt should assume the memory has already been read and a report will be\n")
-	b.WriteString("written for it; write it as the routine's task, not as setup/teardown.\n\n")
+// projectAuthoringPromptView is the Project-routine counterpart of
+// authoringPromptView: same shape, minus everything schedule-shaped, because a
+// Project routine has no schedule to label or offer.
+type projectAuthoringPromptView struct {
+	QuotedID string
 
-	b.WriteString("## This routine is a Project routine\n\n")
-	b.WriteString("  - It is manual-fire-only by design: it has NO schedule and none may be set\n")
-	b.WriteString("    (a shared routine on a shared schedule would fire redundantly for everyone).\n")
-	b.WriteString("    Do not add a `schedule:` key — pop ignores it and warns.\n")
-	b.WriteString("  - The frontmatter may carry `agents` and `effort` only.\n")
-	b.WriteString("  - The prompt file is committed to the repo, but pop NEVER commits your edit.\n")
-	b.WriteString("    When we are done, I review the diff and commit it myself if I like it.\n\n")
+	CreateMode bool
+	ReviseMode bool
 
-	b.WriteString("## This routine's concrete paths\n\n")
-	fmt.Fprintf(&b, "  - Checkout (cwd for every run, incl. this session): %s\n", pr.Dir)
-	fmt.Fprintf(&b, "  - Prompt file to edit: %s\n", promptPath)
-	fmt.Fprintf(&b, "  - Memory directory (per-checkout, not committed): %s\n", memoryDir)
-	fmt.Fprintf(&b, "  - Reports directory (per-checkout, not committed): %s\n\n", runsDir)
+	CheckoutDir string
+	PromptPath  string
+	MemoryDir   string
+	RunsDir     string
 
-	if createMode {
-		b.WriteString("## Interview checklist\n\n")
-		b.WriteString("Interview me until you can answer each of these, then write the prompt:\n")
-	} else {
-		b.WriteString("## Current prompt\n\n")
-		b.WriteString(pr.Prompt)
-		if len(pr.Prompt) > 0 && pr.Prompt[len(pr.Prompt)-1] != '\n' {
-			b.WriteByte('\n')
-		}
-		b.WriteString("\n## Refinement checklist\n\n")
-		b.WriteString("Review the current prompt above and work out which of these items it already\n")
-		b.WriteString("settles. Ask me only about what I want changed or what the prompt genuinely\n")
-		b.WriteString("leaves ambiguous:\n")
-	}
-	writeAuthoringChecklistItems(&b)
-
-	b.WriteString("## How to apply your work\n\n")
-	fmt.Fprintf(&b, "  - %s opens with a YAML frontmatter block fenced by `---` lines that\n", promptPath)
-	b.WriteString("    carries this routine's settings (agents, effort only — no schedule); the\n")
-	b.WriteString("    prompt itself is the body below the closing fence.\n")
-	b.WriteString("  - Edit the prompt by rewriting the body below the fence directly; leave the\n")
-	b.WriteString("    frontmatter block in place.\n")
-	b.WriteString("  - Do NOT run git — pop never commits and neither should this session. When you\n")
-	b.WriteString("    exit, control returns to the pop refinement menu, where I can fire a test run\n")
-	b.WriteString("    and, if I like the result, commit the file myself.\n")
-
-	return b.String()
+	PromptBody       string
+	CompleteSentinel string
+	FailedSentinel   string
 }

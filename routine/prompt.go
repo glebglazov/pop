@@ -1,18 +1,37 @@
 package routine
 
 import (
-	"fmt"
+	"embed"
 	"strings"
+
+	"github.com/glebglazov/pop/internal/prompt"
 )
 
+// The Routine agent prompts live beside the code that owns them, as markdown a
+// human can read and edit without touching Go (ADR-0208). Parsing at init means
+// a malformed template fails the first test run rather than a live Fire.
+//
+//go:embed prompts/*.tmpl.md
+var promptTemplateFS embed.FS
+
+var promptTemplates = prompt.MustParseFS(promptTemplateFS, "prompts/*.tmpl.md")
+
+// wrapPromptView is what the run wrapper's template renders against: the
+// framework's own preamble and postamble around the routine's authored body.
+type wrapPromptView struct {
+	MemoryDir        string
+	ReportPath       string
+	DomainPrompt     string
+	CompleteSentinel string
+	FailedSentinel   string
+}
+
 func wrapRoutinePrompt(memoryDir, reportPath, domainPrompt string) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "Before starting, read the routine memory directory at %s and incorporate any prior context.\n\n", memoryDir)
-	b.WriteString(strings.TrimRight(domainPrompt, "\n"))
-	fmt.Fprintf(&b, "\n\nWhen finished, write your report to %s and update the routine memory directory at %s with what you learned.\n", reportPath, memoryDir)
-	fmt.Fprintf(&b, "\nEnd your output with a completion sentinel on its own line, exactly one of:\n")
-	fmt.Fprintf(&b, "  %s   (the run completed and the report was written)\n", routineCompleteSentinel)
-	fmt.Fprintf(&b, "  %s: <reason>   (the run could not be completed)\n", routineFailedSentinel)
-	fmt.Fprintf(&b, "Without %s the run is recorded failed even if you exit cleanly.\n", routineCompleteSentinel)
-	return b.String()
+	return prompt.MustRender(promptTemplates, "wrap.tmpl.md", wrapPromptView{
+		MemoryDir:        memoryDir,
+		ReportPath:       reportPath,
+		DomainPrompt:     strings.TrimRight(domainPrompt, "\n"),
+		CompleteSentinel: routineCompleteSentinel,
+		FailedSentinel:   routineFailedSentinel,
+	})
 }

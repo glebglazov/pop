@@ -6,9 +6,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/internal/prompt"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -100,9 +102,6 @@ func isCreateModePrompt(content string) bool {
 // `pop routine edit --schedule` so the parser's validation is never bypassed.
 func buildAuthoringPrompt(d *Deps, id string, r *Routine) string {
 	dir := routineDir(d, id)
-	promptPath := filepath.Join(dir, promptFileName)
-	memoryDir := filepath.Join(dir, memoryDirName)
-	runsDir := filepath.Join(dir, runsDirName)
 
 	// The frontmatter carries settings (ADR-0139); the authoring agent edits and
 	// reasons about the body, so create-mode detection and the "current prompt"
@@ -110,91 +109,55 @@ func buildAuthoringPrompt(d *Deps, id string, r *Routine) string {
 	_, promptBody, _ := readPromptFrontmatter(d, dir, id)
 	createMode := isCreateModePrompt(promptBody)
 
-	var b strings.Builder
-	if createMode {
-		fmt.Fprintf(&b, "You are helping author the prompt for a pop routine (id %q). Pop routines are\n", id)
-		b.WriteString("directory-bound schedules that fire an unattended agent run over time. Your job\n")
-		b.WriteString("in this session is to interview me and write a good prompt.md for this routine.\n\n")
-	} else {
-		fmt.Fprintf(&b, "You are helping refine an existing pop routine (id %q). Pop routines are\n", id)
-		b.WriteString("directory-bound schedules that fire an unattended agent run over time. This\n")
-		b.WriteString("routine already exists; this session changes its prompt.md.\n\n")
-	}
-
-	b.WriteString("## Framework contract\n\n")
-	b.WriteString("When the routine fires, pop wraps your prompt.md — it does NOT run prompt.md\n")
-	b.WriteString("verbatim. The wrapping is:\n")
-	fmt.Fprintf(&b, "  - PREAMBLE: \"Before starting, read the routine memory directory at %s and\n", memoryDir)
-	b.WriteString("    incorporate any prior context.\"\n")
-	b.WriteString("  - then the verbatim contents of prompt.md\n")
-	fmt.Fprintf(&b, "  - POSTAMBLE: \"When finished, write your report to <runs>/<timestamp>.md and\n")
-	fmt.Fprintf(&b, "    update the routine memory directory at %s with what you learned.\"\n", memoryDir)
-	b.WriteString("  - SENTINEL: the postamble also requires the run to end its output with\n")
-	fmt.Fprintf(&b, "    %s (report written, run done) or %s: <reason>. A run that exits\n", routineCompleteSentinel, routineFailedSentinel)
-	fmt.Fprintf(&b, "    cleanly without %s is recorded FAILED, so do not have prompt.md\n", routineCompleteSentinel)
-	b.WriteString("    fight this — leave the sentinel to the framework and don't tell the run to\n")
-	b.WriteString("    emit a conflicting end marker.\n")
-	b.WriteString("So prompt.md should assume the memory has already been read and a report will be\n")
-	b.WriteString("written for it; write it as the routine's task, not as setup/teardown.\n\n")
-	fmt.Fprintf(&b, "  - Memory directory: %s (persists across runs; you define its format)\n", memoryDir)
-	fmt.Fprintf(&b, "  - Reports directory: %s (one timestamped .md report per run)\n", runsDir)
-	fmt.Fprintf(&b, "  - Schedule grammar: %s\n", ScheduleGrammar)
-	b.WriteString("  - A schedule is optional: an unscheduled routine is a valid, durable end\n")
-	b.WriteString("    state (manual-fire-only — the daemon never fires it). Don't push for a\n")
-	b.WriteString("    cadence if I don't want one yet.\n\n")
-
-	b.WriteString("## This routine's concrete paths\n\n")
-	fmt.Fprintf(&b, "  - Bound directory (cwd for every run, incl. this session): %s\n", r.Manifest.BoundDirectory)
-	fmt.Fprintf(&b, "  - Prompt file to edit: %s\n", promptPath)
-	fmt.Fprintf(&b, "  - Memory directory: %s\n", memoryDir)
-	fmt.Fprintf(&b, "  - Reports directory: %s\n", runsDir)
-	fmt.Fprintf(&b, "  - Current schedule: %s\n", ScheduleLabel(r.Manifest.Schedule))
-	if !r.Manifest.IsScheduled() {
-		b.WriteString("    (unscheduled — this routine only ever fires when I run `pop routine fire`;\n")
-		b.WriteString("    if I want a cadence, ask what I want and settle it in conversation)\n")
-	}
-	b.WriteString("\n")
-
-	if createMode {
-		b.WriteString("## Interview checklist\n\n")
-		b.WriteString("Interview me until you can answer each of these, then write prompt.md:\n")
-	} else {
-		b.WriteString("## Current prompt.md\n\n")
-		b.WriteString(promptBody)
-		if len(promptBody) > 0 && promptBody[len(promptBody)-1] != '\n' {
-			b.WriteByte('\n')
-		}
-		b.WriteString("\n## Refinement checklist\n\n")
-		b.WriteString("Review the current prompt above and work out which of these items it already\n")
-		b.WriteString("settles. Ask me only about what I want changed or what the prompt genuinely\n")
-		b.WriteString("leaves ambiguous:\n")
-	}
-	writeAuthoringChecklistItems(&b)
-
-	b.WriteString("## How to apply your work\n\n")
-	fmt.Fprintf(&b, "  - %s opens with a YAML frontmatter block fenced by `---` lines that\n", promptPath)
-	b.WriteString("    carries this routine's settings (schedule, agents, effort); the prompt\n")
-	b.WriteString("    itself is the body below the closing fence.\n")
-	b.WriteString("  - Edit the prompt by rewriting the body below the fence directly (as before);\n")
-	b.WriteString("    leave the frontmatter block in place.\n")
-	fmt.Fprintf(&b, "  - Change the schedule ONLY via `pop routine edit %s --schedule \"<expr>\"`\n", id)
-	b.WriteString("    (do not hand-edit the `schedule:` frontmatter — that command validates the\n")
-	b.WriteString("    expression through the parser, so validation is never bypassed on write).\n")
-	b.WriteString("  - When you exit, control returns to the pop refinement menu, where I can fire\n")
-	b.WriteString("    a test run and resume the routine.\n")
-
-	return b.String()
+	return prompt.MustRender(promptTemplates, "authoring.tmpl.md", authoringPromptView{
+		ID:               id,
+		QuotedID:         strconv.Quote(id),
+		CreateMode:       createMode,
+		ReviseMode:       !createMode,
+		BoundDirectory:   r.Manifest.BoundDirectory,
+		PromptPath:       filepath.Join(dir, promptFileName),
+		MemoryDir:        filepath.Join(dir, memoryDirName),
+		RunsDir:          filepath.Join(dir, runsDirName),
+		ScheduleGrammar:  ScheduleGrammar,
+		ScheduleLabel:    ScheduleLabel(r.Manifest.Schedule),
+		Unscheduled:      !r.Manifest.IsScheduled(),
+		PromptBody:       endWithNewline(promptBody),
+		CompleteSentinel: routineCompleteSentinel,
+		FailedSentinel:   routineFailedSentinel,
+	})
 }
 
-func writeAuthoringChecklistItems(b *strings.Builder) {
-	b.WriteString("  1. Goal — what should each run accomplish?\n")
-	b.WriteString("  2. Data source — where does the data come from? Test it live now (this\n")
-	b.WriteString("     session runs in the bound directory with repo context and MCP tooling; e.g.\n")
-	b.WriteString("     run the actual JQL query rather than guessing).\n")
-	b.WriteString("  3. Definition of seen/new — how does a run tell already-processed items from\n")
-	b.WriteString("     fresh ones (usually via the memory directory)?\n")
-	b.WriteString("  4. Memory format — what should the routine record in the memory directory,\n")
-	b.WriteString("     and in what shape?\n")
-	b.WriteString("  5. Report format — what should each run's report contain?\n")
-	b.WriteString("  6. Empty-run behavior — what should a run do when there is nothing new?\n\n")
+// authoringPromptView carries every path, label and mode decision the authoring
+// template needs, so the template itself holds prose and section conditionals
+// only (ADR-0208).
+type authoringPromptView struct {
+	ID       string
+	QuotedID string
+
+	// CreateMode and ReviseMode are the two halves of one decision, named
+	// separately so the template selects a whole section by name rather than
+	// negating a flag inline.
+	CreateMode bool
+	ReviseMode bool
+
+	BoundDirectory  string
+	PromptPath      string
+	MemoryDir       string
+	RunsDir         string
+	ScheduleGrammar string
+	ScheduleLabel   string
+	Unscheduled     bool
+
+	PromptBody       string
+	CompleteSentinel string
+	FailedSentinel   string
+}
+
+// endWithNewline keeps an echoed prompt body from running into the heading that
+// follows it when the body on disk has no final newline.
+func endWithNewline(body string) string {
+	if body == "" || strings.HasSuffix(body, "\n") {
+		return body
+	}
+	return body + "\n"
 }
