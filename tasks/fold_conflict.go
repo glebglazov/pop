@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/internal/prompt"
 	"github.com/glebglazov/pop/ui"
 )
 
@@ -191,59 +192,91 @@ func BuildFoldConflictPrompt(d *Deps, ctx FoldConflictContext, conflicted []stri
 	if d == nil {
 		d = defaultDeps
 	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "You are assisting a human resolving a Pop fold rebase conflict.\n\n")
-	fmt.Fprintf(&b, "Task set: %s\n", ctx.SetID)
+	view := foldConflictPromptView{
+		SetID:              ctx.SetID,
+		RuntimePath:        ctx.RuntimePath,
+		SetBranch:          ctx.SetBranch,
+		TrunkBranch:        ctx.TrunkBranch,
+		TrunkPath:          ctx.TrunkPath,
+		ConflictedPaths:    conflicted,
+		HasConflictedPaths: len(conflicted) > 0,
+		NoConflictedPaths:  len(conflicted) == 0,
+	}
 	if ctx.Manifest != nil {
-		fmt.Fprintf(&b, "Task set path: %s\n", ctx.Manifest.Dir)
+		view.TaskSetPathKnown = true
+		view.TaskSetPath = ctx.Manifest.Dir
 	}
-	fmt.Fprintf(&b, "Set checkout (resolve here): %s\n", ctx.RuntimePath)
-	fmt.Fprintf(&b, "Set branch: %s\n", ctx.SetBranch)
-	fmt.Fprintf(&b, "Trunk branch rebasing onto: %s\n", ctx.TrunkBranch)
-	fmt.Fprintf(&b, "Trunk worktree (read-only boundary): %s\n", ctx.TrunkPath)
-	fmt.Fprintf(&b, "\n")
-
-	if len(conflicted) == 0 {
-		fmt.Fprintf(&b, "Conflicted paths: (none currently listed — rebase may still be in progress)\n\n")
-	} else {
-		fmt.Fprintf(&b, "Conflicted paths:\n")
-		for _, p := range conflicted {
-			fmt.Fprintf(&b, "- %s\n", p)
-		}
-		fmt.Fprintf(&b, "\n")
-	}
-
+	// The task context describes what the conflicting work was meant to do, so
+	// it is only offered when the manifest can be trusted to say.
 	if ctx.Manifest != nil && ctx.Manifest.Valid {
-		fmt.Fprintf(&b, "Task context (what this work was meant to do):\n")
-		for _, task := range ctx.Manifest.Tasks {
-			fmt.Fprintf(&b, "- %s [%s %s]", task.ID, task.Type, task.Status)
-			if task.Title != "" {
-				fmt.Fprintf(&b, " %s", task.Title)
-			}
-			fmt.Fprintf(&b, " (%s)\n", filepath.Join(ctx.Manifest.Dir, task.File))
-		}
-		fmt.Fprintf(&b, "\n")
-		appendTaskWhatToBuild(d, &b, ctx.Manifest)
+		view.HasTaskContext = true
+		view.Tasks = foldConflictTaskRows(ctx.Manifest)
+		view.Bodies = taskWhatToBuildRows(d, ctx.Manifest)
 	}
-
-	fmt.Fprintf(&b, "Hard boundary: resolve inside the set checkout only. Never check out, edit, rebase, merge into, or commit on the Trunk worktree at %s.\n", ctx.TrunkPath)
-	fmt.Fprintf(&b, "\n")
-	fmt.Fprintf(&b, "Operations you may perform:\n")
-	fmt.Fprintf(&b, "- Resolve conflict markers in the conflicted paths under the set checkout.\n")
-	fmt.Fprintf(&b, "- Stage resolved paths and run `git rebase --continue` in this checkout to finish rebasing the set branch onto trunk.\n")
-	fmt.Fprintf(&b, "- Never touch the Trunk worktree (%s).\n", ctx.TrunkPath)
-	fmt.Fprintf(&b, "- Never push.\n")
-	return b.String()
+	return prompt.MustRender(promptTemplates, "fold-conflict.tmpl.md", view)
 }
 
-func appendTaskWhatToBuild(d *Deps, b *strings.Builder, m *Manifest) {
+// foldConflictPromptView is what the fold-conflict template renders against.
+type foldConflictPromptView struct {
+	SetID string
+	// The task-set path is known only when a manifest came with the context, so
+	// the template picks the line rather than rendering an empty one.
+	TaskSetPathKnown bool
+	TaskSetPath      string
+	RuntimePath      string
+	SetBranch        string
+	TrunkBranch      string
+	TrunkPath        string
+	// The conflicted-path states are named booleans so the template picks the
+	// listing or the sentence that stands in for it.
+	ConflictedPaths    []string
+	HasConflictedPaths bool
+	NoConflictedPaths  bool
+	HasTaskContext     bool
+	Tasks              []taskRow
+	Bodies             []taskWhatToBuildRow
+}
+
+// foldConflictTaskRows builds the manifest listing for the shared "task-listing"
+// partial. The fold-conflict prompt names no blockers and no effort, so those
+// clauses stay empty — the partial ranges over the same row type either way.
+func foldConflictTaskRows(m *Manifest) []taskRow {
+	rows := make([]taskRow, 0, len(m.Tasks))
+	for _, task := range m.Tasks {
+		row := taskRow{
+			ID:     task.ID,
+			Type:   task.Type,
+			Status: task.Status,
+			Path:   filepath.Join(m.Dir, task.File),
+		}
+		if task.Title != "" {
+			row.TitleClause = " " + task.Title
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+// taskWhatToBuildRow is one task's body as the fold-conflict prompt stanzas it:
+// headed by the task's file name, not by its full path.
+type taskWhatToBuildRow struct {
+	File string
+	Body string
+}
+
+// taskWhatToBuildRows reads each task body the fold-conflict prompt inlines.
+// A task whose file cannot be read, or whose body is blank, is left out
+// entirely: the agent is here to resolve a rebase, and an empty stanza tells it
+// nothing about what the work meant.
+func taskWhatToBuildRows(d *Deps, m *Manifest) []taskWhatToBuildRow {
 	if d == nil || m == nil {
-		return
+		return nil
 	}
 	fs := d.FS
 	if fs == nil {
 		fs = DefaultDeps().FS
 	}
+	var rows []taskWhatToBuildRow
 	for _, task := range m.Tasks {
 		data, err := fs.ReadFile(filepath.Join(m.Dir, task.File))
 		if err != nil {
@@ -253,8 +286,9 @@ func appendTaskWhatToBuild(d *Deps, b *strings.Builder, m *Manifest) {
 		if body == "" {
 			continue
 		}
-		fmt.Fprintf(b, "--- %s ---\n%s\n\n", task.File, body)
+		rows = append(rows, taskWhatToBuildRow{File: task.File, Body: body})
 	}
+	return rows
 }
 
 func listConflictedPaths(d *Deps, checkoutPath string) ([]string, error) {

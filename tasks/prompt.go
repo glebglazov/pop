@@ -119,51 +119,28 @@ func taskHeading(task Task) string {
 }
 
 // BuildAgentPrompt generates the instruction prompt for an task attempt.
+//
+// The completion sentinels the template names (SUMMARY_START, SUMMARY_END,
+// TASK_COMPLETE, TASK_FAILED) stay literal text there. They are also compiled
+// into the assessor's regexes and written again in the retry lessons; folding
+// the three sites onto a shared constant is its own change (ADR-0208).
 func BuildAgentPrompt(taskPath, runtimePath string) string {
 	tasksDir := filepath.Dir(taskPath)
-	var b strings.Builder
-	fmt.Fprintf(&b, "You are implementing the task at: %s\n\n", taskPath)
-	fmt.Fprintf(&b, "Read the task file in full. Follow any optional context references it\n")
-	fmt.Fprintf(&b, "contains (for example a \"## Parent\" section) when present; the task may also\n")
-	fmt.Fprintf(&b, "be self-contained. Implement the work described under \"What to build\" and\n")
-	fmt.Fprintf(&b, "satisfy every box under \"Acceptance criteria\". As you complete each\n")
-	fmt.Fprintf(&b, "criterion, check its box (`- [ ]` → `- [x]`) in %s.\n\n", taskPath)
-	fmt.Fprintf(&b, "Do NOT modify %s. Do NOT modify other task files in %s.\n",
-		filepath.Join(tasksDir, ManifestFileName), tasksDir)
-	fmt.Fprintf(&b, "Do NOT make git commits — the runner handles assessment and committing.\n\n")
-	fmt.Fprintf(&b, "Runtime checkout: %s\n\n", runtimePath)
-	fmt.Fprintf(&b, "Implementation edits belong only beneath the runtime checkout. The task file\n")
-	fmt.Fprintf(&b, "above is the one file you also edit — its acceptance boxes are yours to tick.\n\n")
-	fmt.Fprintf(&b, "This attempt is a single non-interactive session. There is no human and no\n")
-	fmt.Fprintf(&b, "later turn: once you end your response the attempt is over, and ending\n")
-	fmt.Fprintf(&b, "without a completion sentinel (TASK_COMPLETE or TASK_FAILED) is recorded as a\n")
-	fmt.Fprintf(&b, "failure. To wait on a long-running command, keep polling it across successive\n")
-	fmt.Fprintf(&b, "bash calls until it finishes (or fails) — never background the work and end\n")
-	fmt.Fprintf(&b, "your turn to \"wait\", which orphans it and yields no sentinel. A single bash\n")
-	fmt.Fprintf(&b, "call may be killed at its own tool timeout (~10 min), but the whole attempt\n")
-	fmt.Fprintf(&b, "has a far longer timeout (~1 hour), so poll across calls rather than waiting\n")
-	fmt.Fprintf(&b, "within one.\n\n")
-	fmt.Fprintf(&b, "Your context is billed on every turn and only grows within the attempt, so\n")
-	fmt.Fprintf(&b, "the attempt's cost rises with the square of how many tool calls you make.\n")
-	fmt.Fprintf(&b, "Probe wide once rather than laddering narrowing greps; read the ranges of a\n")
-	fmt.Fprintf(&b, "file you need instead of whole large files; never re-run a command or re-read\n")
-	fmt.Fprintf(&b, "a file whose output is already in this session; chain setup and command in one\n")
-	fmt.Fprintf(&b, "shell call instead of repeating cd or env lines. Images are never evicted —\n")
-	fmt.Fprintf(&b, "read one only when visual judgement is the question.\n\n")
-	fmt.Fprintf(&b, "When you have completed the work, close out in this order:\n\n")
-	fmt.Fprintf(&b, "1. Re-read the task file and tick every box under \"Acceptance criteria\" that\n")
-	fmt.Fprintf(&b, "   you have satisfied (`- [ ]` → `- [x]`). An attempt that leaves a box\n")
-	fmt.Fprintf(&b, "   unticked is recorded as failed even when the work itself landed.\n")
-	fmt.Fprintf(&b, "2. Print a summary block followed by the completion sentinel as the final\n")
-	fmt.Fprintf(&b, "   lines of your output, exactly:\n\n")
-	fmt.Fprintf(&b, "SUMMARY_START\n")
-	fmt.Fprintf(&b, "<one or more lines describing what you did>\n")
-	fmt.Fprintf(&b, "SUMMARY_END\n")
-	fmt.Fprintf(&b, "TASK_COMPLETE\n\n")
-	fmt.Fprintf(&b, "If you cannot complete the task (blocked, unclear, missing info, repeated\n")
-	fmt.Fprintf(&b, "failure), instead print as the final line:\n\n")
-	fmt.Fprintf(&b, "TASK_FAILED: <one-line reason>\n")
-	return b.String()
+	return prompt.MustRender(promptTemplates, "agent.tmpl.md", agentPromptView{
+		TaskPath:     taskPath,
+		TasksDir:     tasksDir,
+		ManifestPath: filepath.Join(tasksDir, ManifestFileName),
+		RuntimePath:  runtimePath,
+	})
+}
+
+// agentPromptView is what the AFK worker's template renders against: a long
+// instruction document with four paths in it and no conditional section.
+type agentPromptView struct {
+	TaskPath     string
+	TasksDir     string
+	ManifestPath string
+	RuntimePath  string
 }
 
 // BuildHITLAssistancePrompt generates the attended-agent prompt shown when a

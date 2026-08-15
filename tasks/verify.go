@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/internal/prompt"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/store"
 )
@@ -1246,101 +1247,99 @@ const specFileName = SpecFileName
 // way when present (ADR-0154): unverified claims with the diff authoritative;
 // verdict scope remains done AFK work judged against the criteria and the diff.
 func buildVerifierPrompt(d *Deps, m *Manifest, workSHA string, work workDiffView, priorNote string) string {
-	var b strings.Builder
-	b.WriteString("You are an independent Verifier. A separate agent has already implemented this Task set; ")
-	b.WriteString("your job is to confirm reality, not to trust its self-report.\n\n")
-	b.WriteString(fmt.Sprintf("Task set: %s\n", m.Stem))
+	view := verifierPromptView{
+		TaskSet:     m.Stem,
+		WorkSHALine: optionalLine("Work SHA: ", workSHA),
+		Tasks:       verifierTaskRows(d, m),
+		WorkRange:   work.Range,
+		WorkStat:    work.Stat,
+		WorkEmpty:   work.Empty(),
+		WorkPresent: !work.Empty(),
+	}
 	if workSHA != "" {
-		b.WriteString(fmt.Sprintf("Work SHA: %s\n", workSHA))
+		view.WorkSHAClause = " (at " + workSHA + ")"
 	}
-	b.WriteString("\nThe checkboxes under each task's \"## Acceptance criteria\" heading are authoritative. ")
-	b.WriteString("Judge the done AFK work below against them using the accumulated work diff. ")
-	b.WriteString("Tasks awaiting a human sign-off, and tasks not yet done, are deliberately omitted — do not treat their absence as a failure.\n\n")
-
 	if note := strings.TrimSpace(priorNote); note != "" {
-		b.WriteString("## Prior human note (context only — a real regression here still fails)\n")
-		b.WriteString("A human previously reviewed a Verifier finding on this set and recorded the note below. ")
-		b.WriteString("Treat the non-issue it describes as already adjudicated — do not re-flag it — but this note does not gag your judgment: ")
-		b.WriteString("if a criterion genuinely fails now, still say so.\n")
-		b.WriteString(note)
-		b.WriteString("\n\n")
+		view.PriorNoteRecorded = true
+		view.PriorNote = note
 	}
-
 	if history := formatRemediationHistoryForVerifier(d, m); history != "" {
-		b.WriteString(history)
-		b.WriteString("\n")
+		view.RemediationHistoryRecorded = true
+		view.RemediationHistory = history
 	}
-
 	if spec, ok := readSpec(d, m); ok {
-		b.WriteString("## Spec (context only — the acceptance criteria above remain authoritative)\n")
-		b.WriteString(spec)
-		b.WriteString("\n\n")
+		view.SpecRecorded = true
+		view.Spec = spec
 	}
+	if convention := strings.TrimSpace(m.CommitConvention); convention != "" {
+		view.ConventionRecorded = true
+		view.Convention = convention
+	}
+	return prompt.MustRender(promptTemplates, "verifier.tmpl.md", view)
+}
 
-	b.WriteString("## Tasks\n")
+// verifierPromptView is what the Verifier's template renders against. Every
+// optional section is a named boolean beside the text it guards, so the template
+// picks a whole section and never asks why a field is empty; every read (the
+// spec, the remediation history, each judged task body) and the done-AFK filter
+// happen here.
+type verifierPromptView struct {
+	TaskSet     string
+	WorkSHALine string
+	// WorkSHAClause is the parenthetical the work-diff heading carries when the
+	// verification knows the SHA under judgment.
+	WorkSHAClause              string
+	PriorNoteRecorded          bool
+	PriorNote                  string
+	RemediationHistoryRecorded bool
+	RemediationHistory         string
+	SpecRecorded               bool
+	Spec                       string
+	Tasks                      []verifierTaskRow
+	WorkEmpty                  bool
+	WorkPresent                bool
+	WorkRange                  string
+	WorkStat                   string
+	ConventionRecorded         bool
+	Convention                 string
+}
+
+// verifierTaskRow is one judged task: its heading facts and its body, or the
+// read failure that stands in for the body.
+type verifierTaskRow struct {
+	ID         string
+	Type       string
+	Status     TaskStatus
+	Title      string
+	Readable   bool
+	Unreadable bool
+	Body       string
+	Error      string
+}
+
+// verifierTaskRows lists the set's done AFK work — and nothing else (ADR-0102):
+// open/not-done AFK tasks and HITL tasks of any status are not judged criteria,
+// because an agent cannot judge a human sign-off and a not-yet-run task is not an
+// unmet criterion. This filter is the Verifier's alone; the gates' shared listing
+// deliberately shows the whole manifest, so it must never move into that partial.
+func verifierTaskRows(d *Deps, m *Manifest) []verifierTaskRow {
+	var rows []verifierTaskRow
 	for _, task := range m.Tasks {
-		// Scope to done AFK work only (ADR-0102): open/not-done AFK tasks and
-		// HITL tasks of any status are not judged criteria.
 		if task.Type != "AFK" || task.Status != TaskDone {
 			continue
 		}
-		b.WriteString(fmt.Sprintf("\n### %s [%s] (%s): %s\n", task.ID, task.Type, task.Status, task.Title))
+		row := verifierTaskRow{ID: task.ID, Type: task.Type, Status: task.Status, Title: task.Title}
 		body, err := d.FS.ReadFile(filepath.Join(m.Dir, task.File))
 		if err != nil {
-			b.WriteString(fmt.Sprintf("(could not read task body: %v)\n", err))
-			continue
+			row.Unreadable = true
+			row.Error = fmt.Sprintf("%v", err)
+		} else {
+			row.Readable = true
+			row.Body = strings.TrimSpace(string(body))
 		}
-		b.WriteString(strings.TrimSpace(string(body)))
-		b.WriteString("\n")
+		rows = append(rows, row)
 	}
-
-	b.WriteString("\n## Accumulated work diff")
-	if workSHA != "" {
-		b.WriteString(fmt.Sprintf(" (at %s)", workSHA))
-	}
-	b.WriteString("\n")
-	if work.Empty() {
-		b.WriteString("(no committed changes for this set)\n")
-	} else {
-		b.WriteString(fmt.Sprintf("Commit range: %s\n", work.Range))
-		b.WriteString("The `git diff --stat` below is complete: every file this set changed is listed, with nothing truncated or omitted. ")
-		b.WriteString("A file you have not fetched is therefore not evidence of missing work — if a criterion turns on a file listed below, read its diff before judging it.\n")
-		b.WriteString("The diff bodies are deliberately not inlined; you are in the checkout under verification, so fetch what you decide to look at:\n")
-		b.WriteString(fmt.Sprintf("  git diff %s -- <path>   # one file's diff\n", work.Range))
-		b.WriteString(fmt.Sprintf("  git log --oneline %s    # the commits in the range\n", work.Range))
-		b.WriteString("```\n")
-		b.WriteString(work.Stat)
-		b.WriteString("\n```\n")
-	}
-
-	convention := strings.TrimSpace(m.CommitConvention)
-	if convention != "" {
-		b.WriteString("\n## This repository's commit convention\n")
-		b.WriteString(convention)
-		b.WriteString("\n")
-	}
-
-	b.WriteString("\n## Respond in exactly this format\n")
-	b.WriteString("On the first line, one of:\n")
-	b.WriteString("VERDICT: PASS\n")
-	b.WriteString("VERDICT: FIXABLE\n")
-	b.WriteString("VERDICT: NEEDS-HUMAN\n")
-	b.WriteString("Then, on the following lines:\n")
-	b.WriteString("SUMMARY: <in one line, what needs fixing — optional; omit for PASS>\n")
-	if convention != "" {
-		b.WriteString("COMMIT-SUBJECT: <one line — the commit subject the fix should be committed under>\n")
-	}
-	b.WriteString("FINDINGS: <what fails a criterion and why — leave empty for PASS>\n\n")
-	b.WriteString("PASS = every acceptance criterion is met. ")
-	b.WriteString("FIXABLE = criteria are unmet but an agent could resolve the findings. ")
-	b.WriteString("NEEDS-HUMAN = the findings need a human decision. ")
-	b.WriteString("SUMMARY names, in one line, what needs fixing when remediation is warranted — it is optional and must not affect the verdict.\n")
-	if convention != "" {
-		b.WriteString("COMMIT-SUBJECT is the final, literal subject line the fix work will be committed under, written in the convention above — ")
-		b.WriteString("a real message describing the fix, not a template or a placeholder. Write it only when remediation is warranted; ")
-		b.WriteString("it is optional, must not affect the verdict, and must be a single line with no surrounding quotes or backticks.\n")
-	}
-	return b.String()
+	return rows
 }
 
 // verifierCommitSubjectMaxLen bounds a rendered subject at the length past which
