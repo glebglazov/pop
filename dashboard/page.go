@@ -73,9 +73,12 @@ type dashboardPage struct {
 	rowFilters bool
 	// toggleWord is what the footer hint and the help overlay say `v` switches to.
 	toggleWord string
-	// empty and emptyFiltered are the body text for a page with no rows at all and
-	// for one whose search matched nothing.
-	empty, emptyFiltered string
+	// empty is the body text for a page with no rows at all.
+	empty string
+	// searchNoun is what this page calls its rows in the zero-match empty state —
+	// the one screen where the search has hidden everything, so the term and the
+	// way out both have to be written on it.
+	searchNoun string
 }
 
 // pageSpec returns one page's configuration. It is the whole of the page table:
@@ -114,7 +117,7 @@ func workPage() dashboardPage {
 		rowFilters:     true,
 		toggleWord:     "routines",
 		empty:          "No work-actionable task sets.",
-		emptyFiltered:  "No matching task sets.",
+		searchNoun:     "task sets",
 	}
 }
 
@@ -135,8 +138,8 @@ func routinePage() dashboardPage {
 		statusCells:   routineRowNaturalValues,
 		shrinkOrder:   routineColShrinkOrder,
 		toggleWord:    "work",
-		empty:         routine.EmptyListHint,
-		emptyFiltered: "No matching routines.",
+		empty:      routine.EmptyListHint,
+		searchNoun: "routines",
 	}
 }
 

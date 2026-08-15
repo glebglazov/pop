@@ -2499,7 +2499,8 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 		return []ui.HelpEntry{
 			{Key: "typing", Desc: "narrow rows by name"},
 			{Key: "enter", Desc: "apply search"},
-			{Key: "esc", Desc: "cancel"},
+			{Key: "esc", Desc: "cancel search"},
+			{Key: "ctrl+c", Desc: "quit"},
 		}
 	default:
 		// Main list view
@@ -2709,7 +2710,7 @@ func (m QueueDashboard) pageHeader() string {
 		}
 	}
 	if !m.searchTyping && m.searchTerm != "" {
-		parts = append(parts, fmt.Sprintf("search %q", m.searchTerm))
+		parts = append(parts, "search: "+m.searchTerm)
 	}
 	parts = append(parts, dashboardSummary(m.kinds, m.snap.Containers))
 	return strings.Join(parts, " · ")
@@ -2736,13 +2737,21 @@ func (m QueueDashboard) mainHint() string {
 	return "j/k move · gg/G top/bottom · l/enter status · y copy name · a actions · / search · " + filters + toggle + " · C-h help · h/esc quit"
 }
 
+// emptySearchLine is the body text when the search has hidden every row. It
+// names the term that emptied the view and the keys that bring the rows back:
+// an empty table is the one state where the way out cannot be left to the help
+// overlay, because nothing else on screen says what happened.
+func (m QueueDashboard) emptySearchLine(query string) string {
+	return fmt.Sprintf("No %s match search %q — / then enter to clear.", m.page.searchNoun, query)
+}
+
 // mainBody renders the table body (a blank line, the column header, the
 // separator, then the List's scroll window) or the empty-state message. It is
 // the body the Frame composes its chrome around.
 func (m QueueDashboard) mainBody() string {
 	if len(m.snap.Containers) == 0 {
-		if m.activeQuery() != "" {
-			return m.page.emptyFiltered
+		if query := m.activeQuery(); query != "" {
+			return m.emptySearchLine(query)
 		}
 		return m.page.empty
 	}

@@ -3365,12 +3365,73 @@ func TestDashboardSearch_HeaderNamesTheAppliedTerm(t *testing.T) {
 	m.width = 120
 	m.height = 24
 	m = typeSearch(m, "beta", true)
-	if view := m.View().Content; !strings.Contains(view, `search "beta"`) {
+	if view := m.View().Content; !strings.Contains(view, "search: beta") {
 		t.Fatalf("header does not name the applied search:\n%s", view)
 	}
 	m = typeSearch(m, "", true)
-	if view := m.View().Content; strings.Contains(view, "search \"") {
+	if view := m.View().Content; strings.Contains(view, "search: ") {
 		t.Fatalf("cleared search still named in the header:\n%s", view)
+	}
+}
+
+// The Routine page has no preset menu, so its header names the search alone —
+// the form must not depend on a preset being there to sit beside.
+func TestDashboardSearch_HeaderWithoutAPresetMenu(t *testing.T) {
+	m := openPage(t, routinePageDeps(routinePageContainers()), PageRoutines)
+	m = typeSearch(m, "a", true)
+	header := m.pageHeader()
+	if !strings.HasPrefix(header, "Routines · search: a · ") {
+		t.Fatalf("routine page header = %q, want the search named right after the page", header)
+	}
+}
+
+// The zero-match view is the one screen with no rows to read, so it has to
+// carry both the term that emptied it and the keys that undo it.
+func TestDashboardSearch_EmptyStateNamesTheTermAndTheWayOut(t *testing.T) {
+	m := filterTestModel()
+	m.width = 120
+	m.height = 24
+	m = typeSearch(m, "zzz", true)
+	view := m.View().Content
+	for _, want := range []string{`No task sets match search "zzz"`, "/ then enter to clear"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("zero-match view missing %q:\n%s", want, view)
+		}
+	}
+}
+
+// One word per concept: `/` is the search and `f` is the filter, and neither
+// borrows the other's noun on screen.
+func TestDashboardSearch_VocabularyDoesNotBorrowTheFilterWord(t *testing.T) {
+	m := filterTestModel()
+	m.width = 120
+	m.height = 24
+
+	typing := typeSearch(m, "alpha", false)
+	if hint := typing.mainHint(); !strings.Contains(hint, "enter apply search") ||
+		!strings.Contains(hint, "esc cancel") ||
+		strings.Contains(hint, "j/k") || strings.Contains(hint, " v ") {
+		t.Fatalf("typing hint = %q, want apply/cancel and no navigation", hint)
+	}
+	if strings.Contains(typing.View().Content, "filter") {
+		t.Fatalf("the search calls itself a filter somewhere:\n%s", typing.View().Content)
+	}
+
+	applied := typeSearch(m, "alpha", true)
+	if strings.Contains(applied.pageHeader(), "filter") {
+		t.Fatalf("applied search named a filter in the header: %q", applied.pageHeader())
+	}
+
+	// The `f` menu keeps the word "filter" and never calls itself a search.
+	menu := filterMenuTestModel()
+	updated, _ := menu.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
+	menu = updated.(QueueDashboard)
+	view := menu.View().Content
+	if !strings.Contains(view, "filters") {
+		t.Fatalf("the preset menu dropped the word filter:\n%s", view)
+	}
+	if strings.Contains(view, "search") {
+		t.Fatalf("the preset menu calls itself a search:\n%s", view)
 	}
 }
 
@@ -4231,7 +4292,7 @@ func TestQueueDashboardHelpContent(t *testing.T) {
 		for _, e := range entries {
 			found[e.Key] = true
 		}
-		for _, key := range []string{"typing", "enter", "esc"} {
+		for _, key := range []string{"typing", "enter", "esc", "ctrl+c"} {
 			if !found[key] {
 				t.Errorf("search help missing %q", key)
 			}
