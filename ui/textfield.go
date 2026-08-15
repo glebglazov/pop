@@ -15,8 +15,10 @@ const promptGlyph = "❯ "
 // buffer, a block cursor, and the house prompt glyph "❯ ". It owns an
 // emacs-style editing keymap (arrows, ctrl+b/ctrl+f, home/end incl.
 // ctrl+a/ctrl+e, backspace, ctrl+u clear, and word-level editing: ctrl+w,
-// alt+b/alt+f, alt+d, ctrl+k) as a default; callers intercept their
-// own reserved keys first and forward only the remainder to Update. It emits no
+// alt+b/alt+f, alt+d, ctrl+k) as a default. A host may reserve only keys that
+// produce no text — arrows, tab, pgup/pgdn, ctrl+n/ctrl+p, ctrl+c, and its own
+// commit and cancel keys — and must forward every printable key here (ADR-0213);
+// no host may keep a letter or digit for itself. It emits no
 // tea.Cmd. It is the single house config point for text entry, retiring the old
 // bubbles/v2/textinput wrapper.
 type TextField struct {
