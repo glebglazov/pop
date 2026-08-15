@@ -15,32 +15,6 @@ import (
 // adapter in tasks/setkind orders its containers through WorkRowLess, so the
 // seam's ordering and the legacy comparator are one comparator, not two.
 
-// Membership tiers float rows above the whole status scheme (ADR-0121). A row
-// takes the first tier it qualifies for, so an orphaned + auto-drain set sorts
-// under the auto-drain tier (auto-drain is checked before orphaned).
-const (
-	tierRunning   = iota // live drain holds the checkout (Picked-up)
-	tierAutoDrain        // auto-drain enabled
-	tierOrphaned         // Worktree binding points at a missing checkout
-	tierRest             // everything else
-)
-
-// sortTier returns a row's membership tier (see the tier* constants). The order
-// of these checks encodes the precedence: a row that is both orphaned and
-// auto-drain qualifies for the auto-drain tier first.
-func sortTier(r work.Container) int {
-	switch {
-	case r.LiveDrain:
-		return tierRunning
-	case r.AutoDrain:
-		return tierAutoDrain
-	case r.Orphaned:
-		return tierOrphaned
-	default:
-		return tierRest
-	}
-}
-
 // Queue surface status bands (ADR-0121). A row's band is keyed on its DISPLAYED
 // label, not its raw status: an IN PROGRESS row (a started or live-drained READY
 // set) sorts in the IN PROGRESS band even though its raw status is READY. The
@@ -100,7 +74,7 @@ func statusOrder(s TaskSetStatus) int {
 // ADR-0121 status scheme; a preset's created_desc / created_asc replaces that
 // scheme only (ADR-0197 decision 6).
 func WorkRowLess(a, b work.Container, sortMode string) bool {
-	if ta, tb := sortTier(a), sortTier(b); ta != tb {
+	if ta, tb := work.Tier(a), work.Tier(b); ta != tb {
 		return ta < tb
 	}
 	switch sortMode {

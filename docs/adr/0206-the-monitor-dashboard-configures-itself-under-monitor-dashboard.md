@@ -11,9 +11,10 @@ We renamed the table to `[monitor.dashboard]`, moving all three existing keys,
 and kept `[dashboard]` as a deprecated alias in the manner of `[select]` →
 `[project]` and `[tasks]` → `[work]`. The new `kill_pane_prompt_enabled` key
 (ADR-0205) lands there rather than in `[dashboard]`, and carries a `desc:` tag
-like its neighbours so the Config dashboard can edit it on `alt+c` — a
-confirmation someone wants switched off is exactly what one reaches for
-interactively.
+like its neighbours, so it is listed by `pop config keys` and settable with `pop
+config set`. It is not a row in the Config dashboard: that editor shows only the
+keys tagged `override:"global"`, which by ADR-0202 are the four `work.*.agents`
+lists and nothing else.
 
 ## Considered options
 
