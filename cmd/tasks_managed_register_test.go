@@ -71,6 +71,16 @@ func TestManagedTrunkResolvesAndStatesThePathForm(t *testing.T) {
 		t.Fatalf("--trunk wrote the retired boolean spelling:\n%s", stated)
 	}
 
+	// A bare repository needs the flag once: the next managed register, with no
+	// flag and no terminal, resolves the trunk that was stated.
+	got, err = resolveManagedTrunk(td, nil, other, "")
+	if err != nil {
+		t.Fatalf("second managed register: %v", err)
+	}
+	if realPath(t, got) != realPath(t, trunk) {
+		t.Fatalf("resolved trunk = %q, want the stated %s with no flag", got, trunk)
+	}
+
 	// The Map roots its session at the same answer, with no flag of its own.
 	rooted, err := resolveMapTrunk()
 	if err != nil {

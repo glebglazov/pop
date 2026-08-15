@@ -102,6 +102,24 @@ func (l overrideLayer) repoBlock(d *Deps, identity string) (RepoOverrideConfig, 
 	return block, found
 }
 
+// statedPreferred reports what the layer's block for one repository states as
+// the Preferred workbench, presence included. It reads the block as written
+// rather than as decoded, because for this key an entry stated as "" is an
+// explicit none — a real value the decoded struct cannot tell from an absent key
+// (ADR-0078's three-valued entry, kept where the value now lives).
+func (l overrideLayer) statedPreferred(d *Deps, identity string) (string, bool) {
+	block, _ := repoOverrideBlock(d, l.doc, identity)
+	if block == nil {
+		return "", false
+	}
+	value, ok := block[preferredWorkbenchKey]
+	if !ok {
+		return "", false
+	}
+	name, _ := value.(string)
+	return name, true
+}
+
 // repoBlockLegalKeys is what one per-repository block may hold: the shared
 // repo-scope key set plus the two keys that live only in a [repo] block. It is
 // reflected from the same schema that decodes a hand-authored block, so the

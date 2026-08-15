@@ -10,31 +10,33 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// This file is the Repo override runtime layer (ADR-0191): the repo-scoped
-// settings pop writes for itself, filed in config.runtime.toml under a
-// repository identity rather than an exact checkout, so every worktree of a
-// repository reads one value. Two rules shape everything here:
+// This file is `pop config repo set` and its read-back: the repo-scoped
+// settings a human states through pop, keyed by repository identity rather than
+// by an exact checkout so every worktree of a repository reads one value
+// (ADR-0191's keying, kept). Two rules shape everything here:
 //
-//   - Pop writes only here, never into the hand-authored config.toml (ADR-0150),
-//     so a [repo."<path>"] block a human writes always beats a value pop wrote
-//     and never the other way around. Above both sits the override layer, whose
-//     per-repository block holds the same keys and wins outright (ADR-0212
-//     decision 2) — this layer records what a surface happened to pick, that one
-//     records what a human stated.
-//   - What may be written is derived from a schema by reflection, exactly as
+//   - Setting one is a human stating intent, so it lands in the override layer's
+//     block for the repository (ADR-0212 decision 5) and beats every declaration
+//     the ladder resolves — the same destination, and the same gate, the Config
+//     dashboard's repository rows write through. The identity-keyed runtime
+//     record below is what an existing machine already holds and is read, never
+//     written.
+//   - What may be set is derived from a schema by reflection, exactly as
 //     repoScopeLegalKeys derives what may be read, so the setter cannot drift
 //     from what the config accepts.
 
 // runtimeRepoSettingsSection is the top-level table of config.runtime.toml that
-// holds this layer. It is keyed by repository identity — the divergence from
+// holds the retired record: what `pop config repo set` wrote before it stated
+// intent. It is keyed by repository identity — the divergence from
 // [workbench.preferred], which keys by exact checkout because it describes a
 // checkout rather than a repository.
 const runtimeRepoSettingsSection = "repo_settings"
 
 // RepoRuntimeConfig is the schema of one [repo_settings."<identity>"] block: the
-// repo-scoped keys pop may write on the human's behalf. Every field mirrors a
-// key of RepoOverrideConfig, so this struct is a subset of the hand-authored
-// surface and never a surface of its own; the shared repo scope
+// repo-scoped keys a machine may already hold a record of, and — reflected as
+// RepoSettableKeyDocs — the keys `pop config repo set` states. Every field
+// mirrors a key of RepoOverrideConfig, so this struct is a subset of the
+// hand-authored surface and never a surface of its own; the shared repo scope
 // (RepoScopeConfig, legal in a committed .pop/config.toml too) is deliberately
 // not included, because pop must not write into a repository's tree.
 type RepoRuntimeConfig struct {
@@ -125,15 +127,20 @@ func RepoIdentity(d *Deps, path string) string {
 	return repoIdentity(d, path)
 }
 
-// SetRepoSetting records value for key against the repository owning
-// checkoutPath, in pop's runtime state. The user's config.toml is never touched.
-// It returns the repository identity the value was filed under. An unknown key
-// or an unreadable value is refused before anything is written.
+// SetRepoSetting states value for key against the repository owning
+// checkoutPath. A human setting a repository's bound is stating intent, so it
+// lands in the override layer rather than in a gap-filler pop wrote for itself
+// (ADR-0212 decision 5); the user's config.toml is never touched. It returns the
+// repository identity the value was filed under. An unknown key or an unreadable
+// value is refused before anything is written.
 func SetRepoSetting(checkoutPath, key, value string) (string, error) {
 	return SetRepoSettingWith(defaultDeps, checkoutPath, key, value)
 }
 
-// SetRepoSettingWith is the injectable variant.
+// SetRepoSettingWith is the injectable variant. The raw string a human typed is
+// read by this file's parser and the resulting value handed to the layer's own
+// entry point, so a command-line setter and the Config dashboard write the same
+// key through the same gate.
 func SetRepoSettingWith(d *Deps, checkoutPath, key, value string) (string, error) {
 	if d == nil {
 		d = defaultDeps
@@ -146,16 +153,7 @@ func SetRepoSettingWith(d *Deps, checkoutPath, key, value string) (string, error
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", key, err)
 	}
-	identity := repoIdentity(d, checkoutPath)
-	doc, _, err := loadRuntimeDocument(d)
-	if err != nil {
-		return "", err
-	}
-	setRuntimeRepoSetting(doc, identity, key, parsed)
-	if err := saveRuntimeDocument(d, doc); err != nil {
-		return "", err
-	}
-	return identity, nil
+	return SetRepoOverrideValueWith(d, checkoutPath, key, parsed)
 }
 
 // RepoSettingSource names the layer that supplied a setting's effective value,
@@ -165,8 +163,9 @@ type RepoSettingSource string
 const (
 	// RepoSettingUnset means no layer declares the key.
 	RepoSettingUnset RepoSettingSource = "unset"
-	// RepoSettingRuntime is the pop-written layer: what `pop config repo set` wrote.
-	RepoSettingRuntime RepoSettingSource = "pop (config repo set)"
+	// RepoSettingRuntime is the retired gap-filler: what `pop config repo set`
+	// wrote before it stated intent, still read on a machine that holds one.
+	RepoSettingRuntime RepoSettingSource = "pop (recorded)"
 	// RepoSettingOverride is the hand-authored [repo."<path>"] block, the most
 	// specific declaration of the ladder.
 	RepoSettingOverride RepoSettingSource = "hand-authored config.toml"
@@ -272,20 +271,4 @@ func decodeRepoRuntimeBlock(block map[string]any) (RepoRuntimeConfig, error) {
 		return RepoRuntimeConfig{}, fmt.Errorf("decode repo settings: %w", err)
 	}
 	return cfg, nil
-}
-
-// setRuntimeRepoSetting sets doc[repo_settings][identity][key], creating the
-// intermediate tables on demand.
-func setRuntimeRepoSetting(doc map[string]any, identity, key string, value any) {
-	section, ok := doc[runtimeRepoSettingsSection].(map[string]any)
-	if !ok || section == nil {
-		section = map[string]any{}
-		doc[runtimeRepoSettingsSection] = section
-	}
-	block, ok := section[identity].(map[string]any)
-	if !ok || block == nil {
-		block = map[string]any{}
-		section[identity] = block
-	}
-	block[key] = value
 }

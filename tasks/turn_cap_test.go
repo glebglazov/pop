@@ -275,10 +275,11 @@ func TestResolveRepoTurnCapReadsOneBoundPerRepository(t *testing.T) {
 	}
 }
 
-// TestResolveRepoTurnCapReadsThePopWrittenBound proves the bound `pop config repo
-// set` writes arrives at the resolver the drain itself calls, from a worktree the
-// human never named — and that a hand-authored block still outranks it.
-func TestResolveRepoTurnCapReadsThePopWrittenBound(t *testing.T) {
+// TestResolveRepoTurnCapReadsTheStatedBound proves the bound `pop config repo
+// set` states arrives at the resolver the drain itself calls, from a worktree the
+// human never named — and that it now outranks a hand-authored block, the setter
+// stating intent rather than recording a guess (ADR-0212 decision 5).
+func TestResolveRepoTurnCapReadsTheStatedBound(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	bareRoot := filepath.Join(root, "kestrel")
@@ -296,13 +297,13 @@ func TestResolveRepoTurnCapReadsThePopWrittenBound(t *testing.T) {
 		t.Fatalf("set turn_cap: %v", err)
 	}
 	if got := resolveRepoTurnCap(d, &config.Config{}, feature); got != 18 {
-		t.Fatalf("turn cap at the sibling worktree = %d, want the 18 pop wrote", got)
+		t.Fatalf("turn cap at the sibling worktree = %d, want the 18 that was stated", got)
 	}
 
 	handAuthored := &config.Config{Repo: map[string]config.RepoOverrideConfig{
 		main: {TurnCap: intPtr(6)},
 	}}
-	if got := resolveRepoTurnCap(d, handAuthored, feature); got != 6 {
-		t.Fatalf("turn cap = %d, want the hand-authored 6 to win", got)
+	if got := resolveRepoTurnCap(d, handAuthored, feature); got != 18 {
+		t.Fatalf("turn cap = %d, want the stated 18 over the hand-authored 6", got)
 	}
 }

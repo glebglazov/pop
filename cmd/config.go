@@ -108,21 +108,22 @@ without shell TOML-parsing).`,
 	RunE: runConfigShow,
 }
 
-// configRepoCmd groups the settings pop keeps per repository — the ones it
-// writes itself, as opposed to the ones a human hand-authors.
+// configRepoCmd groups the repo-scoped settings a human states through pop —
+// the scriptable twin of the Config dashboard's repository rows.
 var configRepoCmd = &cobra.Command{
 	Use:   "repo",
 	Short: "Read and set the settings pop keeps per repository",
-	Long: `Read and set the settings pop keeps per repository.
+	Long: `Read and set the repo-scoped settings you state through pop.
 
-These are repo-scoped settings pop writes for you. A value set from any checkout
-of a repository is read by every worktree of it, because it is filed under the
-repository, not under the directory you happened to run in.
+A value set from any checkout of a repository is read by every worktree of it,
+because it is filed under the repository, not under the directory you happened
+to run in.
 
-Pop writes them to its own runtime state (config.runtime.toml), never into your
-hand-authored config.toml. A [repo."<path>"] block you write therefore always
-overrides a value pop wrote, and never the other way around — to take a setting
-back into your own hands, write the key in config.toml.
+Setting one states what you want, so it lands in pop's override layer
+(config.override.toml) and beats every hand-authored source for that key,
+including a [repo."<path>"] block. Your config.toml is never written. To hand
+the setting back to the layers below, remove the key in the Config dashboard
+(pop config dashboard), which edits the same layer.
 
 The settable keys are derived from the config schema itself, so what this command
 can set never drifts from what the config accepts.`,
@@ -147,8 +148,8 @@ var configRepoGetCmd = &cobra.Command{
 	Long: `Show the repo-scoped settings in effect for the current repository.
 
 Each key is reported with the value in effect and the layer that supplied it:
-your hand-authored config.toml, the value pop wrote, or unset. With a key
-argument, only that key is printed.`,
+the override layer you state into, your hand-authored config.toml, a value pop
+recorded before, or unset. With a key argument, only that key is printed.`,
 	Args:              cobra.MaximumNArgs(1),
 	RunE:              runConfigRepoGet,
 	ValidArgsFunction: completeRepoSettingKey,
@@ -359,38 +360,42 @@ func configRepoConfig(d *Deps) *config.Config {
 	return cfg
 }
 
-// runConfigRepoSetWith writes one repo-scoped setting and reports what it did:
-// which repository the value was filed under, and which file now holds it. When
-// a hand-authored block declares the same key, the write still happens (it is
-// the lower layer, and the human may remove the block later) but the reply says
-// plainly that it is not the value in effect.
+// runConfigRepoSetWith states one repo-scoped setting and reports what it did:
+// which repository the value was filed under, and which file now holds it.
+// Setting one is a human stating intent, so it lands in the override layer and
+// nothing can shadow it (ADR-0212 decisions 2 and 5) — what the reply adds
+// instead is the declaration it now stands over, so a human who later removes
+// the override knows what comes back.
 func runConfigRepoSetWith(cd *config.Deps, cfg *config.Config, out io.Writer, checkout, key, value string) error {
+	stood, hadSource := repoSettingInForce(cd, cfg, checkout, key)
 	identity, err := config.SetRepoSettingWith(cd, checkout, key, value)
 	if err != nil {
 		return err
 	}
 	fmt.Fprintf(out, "%s = %s for repository %s\n", key, value, identity)
-	fmt.Fprintf(out, "written to %s\n", config.DefaultRuntimeConfigPathWith(cd))
-
-	settings, err := cfg.ResolveRepoSettings(cd, checkout)
-	if err != nil {
-		return err
-	}
-	for _, setting := range settings {
-		if setting.Key != key {
-			continue
-		}
-		// Two layers can shadow what was just written: a hand-authored block, which
-		// is the more specific declaration, and the override layer, which is laid
-		// over every declaration (ADR-0212 decision 2). Either way the reply names
-		// the locus a human would edit to give the new value effect.
-		switch setting.Source {
-		case config.RepoSettingOverride, config.RepoSettingOverrideLayer:
-			fmt.Fprintf(out, "note: %s declares %s = %s and still wins\n",
-				setting.Locus, key, setting.Value)
-		}
+	fmt.Fprintf(out, "written to %s\n", config.DefaultOverrideConfigPathWith(cd))
+	if hadSource && stood.Source != config.RepoSettingOverrideLayer {
+		fmt.Fprintf(out, "note: overrides %s, which says %s = %s\n",
+			stood.Locus, key, stood.Value)
 	}
 	return nil
+}
+
+// repoSettingInForce reads one key's effective value before a write, so the
+// reply can name what the new value is laid over. A key no layer answers for
+// reports false and the reply says nothing about it.
+func repoSettingInForce(cd *config.Deps, cfg *config.Config, checkout, key string) (config.RepoSetting, bool) {
+	settings, err := cfg.ResolveRepoSettings(cd, checkout)
+	if err != nil {
+		debug.Error("config repo: resolve settings: %v", err)
+		return config.RepoSetting{}, false
+	}
+	for _, setting := range settings {
+		if setting.Key == key && setting.Source != config.RepoSettingUnset {
+			return setting, true
+		}
+	}
+	return config.RepoSetting{}, false
 }
 
 // runConfigRepoGetWith prints the settable keys with the value in effect for

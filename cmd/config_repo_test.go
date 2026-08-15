@@ -13,14 +13,15 @@ import (
 
 // configRepoFixture is a bare repo with two worktrees plus isolated XDG homes,
 // so a set run in one worktree and a get run in the other exercise the same
-// runtime file while the hand-authored config.toml stays observable.
+// override layer while the hand-authored config.toml stays observable.
 type configRepoFixture struct {
-	d           *Deps
-	main        string
-	feature     string
-	identity    string
-	runtimePath string
-	configPath  string
+	d            *Deps
+	main         string
+	feature      string
+	identity     string
+	runtimePath  string
+	overridePath string
+	configPath   string
 }
 
 func newConfigRepoFixture(t *testing.T, configBody string) configRepoFixture {
@@ -51,8 +52,9 @@ func newConfigRepoFixture(t *testing.T, configBody string) configRepoFixture {
 	}
 	return configRepoFixture{
 		d: d, main: main, feature: feature, identity: identity,
-		runtimePath: filepath.Join(dataHome, "pop", "config.runtime.toml"),
-		configPath:  configPath,
+		runtimePath:  filepath.Join(dataHome, "pop", "config.runtime.toml"),
+		overridePath: filepath.Join(dataHome, "pop", "config.override.toml"),
+		configPath:   configPath,
 	}
 }
 
@@ -72,10 +74,10 @@ func (fx configRepoFixture) get(t *testing.T, checkout, key string) string {
 	return out.String()
 }
 
-// TestConfigRepoSetReachesEveryWorktreeAndTheNextAttempt drives the slice end to
-// end: a cap set from one worktree is read from another, the value lands in pop's
-// runtime state with the hand-authored config.toml byte-identical, and the number
-// the next implementation attempt would carry is the one that was set.
+// TestConfigRepoSetReachesEveryWorktreeAndTheNextAttempt drives the command end
+// to end: a cap set from one worktree is read from another, the value lands in
+// the override layer with the hand-authored config.toml byte-identical, and the
+// number the next implementation attempt would carry is the one that was set.
 func TestConfigRepoSetReachesEveryWorktreeAndTheNextAttempt(t *testing.T) {
 	fx := newConfigRepoFixture(t, "[worktree]\nauto_open = true\n")
 	before, err := os.ReadFile(fx.configPath)
@@ -90,8 +92,8 @@ func TestConfigRepoSetReachesEveryWorktreeAndTheNextAttempt(t *testing.T) {
 	if !strings.Contains(out, "turn_cap = 40") || !strings.Contains(out, fx.identity) {
 		t.Errorf("set said %q, want it to name the value and the repository %s", out, fx.identity)
 	}
-	if !strings.Contains(out, fx.runtimePath) {
-		t.Errorf("set said %q, want it to name the runtime file it wrote", out)
+	if !strings.Contains(out, fx.overridePath) {
+		t.Errorf("set said %q, want it to name the override file it wrote", out)
 	}
 
 	// The other worktree of the same repository reads the value, and says where
@@ -100,7 +102,7 @@ func TestConfigRepoSetReachesEveryWorktreeAndTheNextAttempt(t *testing.T) {
 	if !strings.Contains(got, "turn_cap") || !strings.Contains(got, "40") {
 		t.Errorf("get in the sibling worktree = %q, want turn_cap 40", got)
 	}
-	if !strings.Contains(got, string(config.RepoSettingRuntime)) {
+	if !strings.Contains(got, string(config.RepoSettingOverrideLayer)) {
 		t.Errorf("get = %q, want it to name the layer that supplied the value", got)
 	}
 
@@ -111,12 +113,12 @@ func TestConfigRepoSetReachesEveryWorktreeAndTheNextAttempt(t *testing.T) {
 	if string(after) != string(before) {
 		t.Errorf("hand-authored config.toml was modified:\n%s", after)
 	}
-	runtimeBody, err := os.ReadFile(fx.runtimePath)
+	overrideBody, err := os.ReadFile(fx.overridePath)
 	if err != nil {
-		t.Fatalf("runtime file missing: %v", err)
+		t.Fatalf("override file missing: %v", err)
 	}
-	if !strings.Contains(string(runtimeBody), "turn_cap = 40") {
-		t.Errorf("runtime file does not hold the value:\n%s", runtimeBody)
+	if !strings.Contains(string(overrideBody), "turn_cap = 40") {
+		t.Errorf("override layer does not hold the value:\n%s", overrideBody)
 	}
 
 	// The cap the next implementation attempt in this repository carries is the
@@ -139,10 +141,10 @@ func TestConfigRepoSetReachesEveryWorktreeAndTheNextAttempt(t *testing.T) {
 	}
 }
 
-// TestConfigRepoSetSaysWhenAHandAuthoredBlockStillWins pins the layering at the
-// command surface: pop writes its own layer, and says plainly that the block the
-// human wrote is what remains in effect.
-func TestConfigRepoSetSaysWhenAHandAuthoredBlockStillWins(t *testing.T) {
+// TestConfigRepoSetOverridesAHandAuthoredBlock pins the layering at the command
+// surface: the value states intent, so it wins over the block the human wrote,
+// and the reply names what it now stands over.
+func TestConfigRepoSetOverridesAHandAuthoredBlock(t *testing.T) {
 	fx := newConfigRepoFixture(t, "")
 	body := "[repo.\"" + fx.main + "\"]\nturn_cap = 9\n"
 	if err := os.WriteFile(fx.configPath, []byte(body), 0o644); err != nil {
@@ -153,17 +155,17 @@ func TestConfigRepoSetSaysWhenAHandAuthoredBlockStillWins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config repo set: %v", err)
 	}
-	if !strings.Contains(out, "still wins") || !strings.Contains(out, "turn_cap = 9") {
-		t.Errorf("set said %q, want it to report that the hand-authored 9 still wins", out)
+	if !strings.Contains(out, "overrides") || !strings.Contains(out, "turn_cap = 9") {
+		t.Errorf("set said %q, want it to name the hand-authored 9 it stands over", out)
 	}
 
 	got := fx.get(t, fx.feature, "turn_cap")
-	if !strings.Contains(got, "9") || !strings.Contains(got, string(config.RepoSettingOverride)) {
-		t.Errorf("get = %q, want 9 from the hand-authored layer", got)
+	if !strings.Contains(got, string(config.RepoSettingOverrideLayer)) {
+		t.Errorf("get = %q, want the override layer named as the source", got)
 	}
 	// The VALUE cell is the second tab-separated field of the turn_cap row —
 	// do not search the whole buffer for "40", because the temp path or a reach
-	// line can contain those digits without the pop-written value being in effect.
+	// line can contain those digits without the stated value being in effect.
 	for _, line := range strings.Split(got, "\n") {
 		if !strings.HasPrefix(line, "  turn_cap") {
 			continue
@@ -172,14 +174,14 @@ func TestConfigRepoSetSaysWhenAHandAuthoredBlockStillWins(t *testing.T) {
 		if len(fields) < 2 {
 			t.Fatalf("turn_cap row %q has no value cell", line)
 		}
-		if fields[1] != "9" {
-			t.Errorf("turn_cap value = %q, want 9 (hand-authored); pop-written 40 must not win", fields[1])
+		if fields[1] != "40" {
+			t.Errorf("turn_cap value = %q, want the stated 40 over the hand-authored 9", fields[1])
 		}
 	}
 }
 
 // TestConfigRepoRefusesAnUnrecognisedKey proves the refusal names the keys that
-// exist and leaves no runtime state behind, on both verbs.
+// exist and writes nothing, on both verbs.
 func TestConfigRepoRefusesAnUnrecognisedKey(t *testing.T) {
 	fx := newConfigRepoFixture(t, "")
 
@@ -190,8 +192,8 @@ func TestConfigRepoRefusesAnUnrecognisedKey(t *testing.T) {
 	if !strings.Contains(err.Error(), "max_turns") || !strings.Contains(err.Error(), "turn_cap") {
 		t.Errorf("refusal %q should name the key and list the keys that exist", err)
 	}
-	if _, statErr := os.Stat(fx.runtimePath); !os.IsNotExist(statErr) {
-		t.Errorf("a refused set wrote runtime state at %s", fx.runtimePath)
+	if _, statErr := os.Stat(fx.overridePath); !os.IsNotExist(statErr) {
+		t.Errorf("a refused set wrote the override layer at %s", fx.overridePath)
 	}
 
 	var out bytes.Buffer

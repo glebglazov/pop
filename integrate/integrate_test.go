@@ -3023,7 +3023,7 @@ func TestOptOutRemoval_NoPrompt(t *testing.T) {
 }
 
 // TestOptOutRemoval_BareReAdds: after an explicit opt-out removal, bare
-// integrate clears runtime overrides and re-installs the merged baseline.
+// integrate takes the decline back and re-installs the merged baseline.
 func TestOptOutRemoval_BareReAdds(t *testing.T) {
 	t.Parallel()
 	fs := newFakeFS()
@@ -3036,8 +3036,8 @@ func TestOptOutRemoval_BareReAdds(t *testing.T) {
 	// Remove it via explicit opt-out.
 	d := fakeDeps(home, fs, io.Discard)
 	optOuts := map[ComponentID]bool{ComponentPaneSkill: true}
-	if err := ApplyRuntimeConfig(testConfigDeps(t), false, optOuts); err != nil {
-		t.Fatalf("ApplyRuntimeConfig: %v", err)
+	if err := ApplyComponentOptOuts(testConfigDeps(t), false, optOuts); err != nil {
+		t.Fatalf("ApplyComponentOptOuts: %v", err)
 	}
 	baseline, err := BaselineLoader(testConfigDeps(t))
 	if err != nil {
@@ -3050,9 +3050,9 @@ func TestOptOutRemoval_BareReAdds(t *testing.T) {
 		t.Fatalf("pane-skill should be removed after opt-out")
 	}
 
-	// Bare integrate clears runtime and re-asserts the full merged baseline.
-	if err := ApplyRuntimeConfig(testConfigDeps(t), true, nil); err != nil {
-		t.Fatalf("ApplyRuntimeConfig bare: %v", err)
+	// Bare integrate takes the decline back and re-asserts the full merged baseline.
+	if err := ApplyComponentOptOuts(testConfigDeps(t), true, nil); err != nil {
+		t.Fatalf("ApplyComponentOptOuts bare: %v", err)
 	}
 	baseline, err = BaselineLoader(testConfigDeps(t))
 	if err != nil {

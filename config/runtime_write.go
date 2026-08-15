@@ -4,9 +4,18 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+// This file is the pop-written runtime layer as an existing machine holds it.
+// Nothing pop ships writes it any more: every value it carried states intent and
+// has moved to the override layer (ADR-0212 decision 5). What remains here is
+// the read side the resolution ladder still consults as a gap-filler, plus the
+// writers that produced those records, kept until the file itself retires so a
+// machine's own history can still be reproduced and pruned.
+
 // ClearRuntimeIntegrations removes the [integrations] section from
 // config.runtime.toml so merged config re-inherits embedded defaults unless
-// the user config solidifies a smaller list (ADR 0065 bare integrate).
+// the user config solidifies a smaller list (ADR 0065 bare integrate). Bare
+// integrate states its own answer in the override layer now
+// (ClearIntegrationSkillsDecline); this remains for an existing record.
 func ClearRuntimeIntegrations() error {
 	return ClearRuntimeIntegrationsWith(defaultDeps)
 }
@@ -76,6 +85,8 @@ func RuntimePreferredWorkbenchWith(d *Deps, path string) (string, bool, error) {
 
 // SetRuntimePreferredWorkbench records name as the Preferred workbench for the
 // exact worktree path in config.runtime.toml [workbench.preferred] (ADR-0078).
+// Stating a preference lands in the override layer under the repository now
+// (StatePreferredWorkbench); this writes the retired per-checkout record.
 // An empty name is the explicit-none sentinel ("flat/prompt here"), stored
 // distinctly from an absent entry. Writes the file atomically and creates the
 // [workbench.preferred] table as needed.

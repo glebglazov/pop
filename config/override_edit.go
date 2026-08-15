@@ -13,16 +13,10 @@ import (
 // (ADR-0202 decisions 2, 7 and 8). The Config dashboard drives it; nothing here
 // knows about a terminal.
 //
-// The gate is stricter than the config loader on purpose. Pop's own validation
-// is Finding-based and non-fatal (ADR-0054): a malformed agent entry becomes a
-// finding while the list around it loads. That is right for a file a human
-// wrote and wrong for a file pop writes — so a buffer that would produce a
-// finding is refused here and never reaches the disk.
-
-// overrideBufferLabel stands in for a file path in the findings this gate
-// reuses. The load-time validators name the file they are judging, and the file
-// this text would become is config.override.toml.
-const overrideBufferLabel = "config.override.toml"
+// What it judges is the buffer's *shape* — that the text parses, that it sets
+// the key being edited, and that it sets nothing else. What the value itself may
+// be is the shared gate in override_gate.go, which every writer of the layer
+// passes, editor or flag.
 
 // StoreOverrideBuffer parses the text a human handed back from $EDITOR as the
 // whole value of key and writes it to the override layer.
@@ -100,7 +94,7 @@ func parseOverrideBuffer(key, buffer string) (any, string) {
 			"The buffer also sets %s. One buffer overrides one key: %s.",
 			strings.Join(extra, ", "), key)
 	}
-	if problem := overrideSchemaProblem(key, buffer); problem != "" {
+	if problem := OverrideValueProblem(key, value); problem != "" {
 		return nil, problem
 	}
 	return value, ""
@@ -138,53 +132,6 @@ func documentLeafKeys(doc map[string]any, prefix string) []string {
 	}
 	sort.Strings(keys)
 	return keys
-}
-
-// overrideSchemaProblem decodes the buffer against the config schema and reports
-// the first finding that speaks about this key, in the words a load would use.
-// Reusing the load-time validators is the point: the gate refuses exactly what
-// pop would later complain about, so the two can never disagree about what a
-// good value is.
-func overrideSchemaProblem(key, buffer string) string {
-	var cfg Config
-	md, err := toml.Decode(buffer, &cfg)
-	if err != nil {
-		return fmt.Sprintf("%s cannot hold this value: %v", key, err)
-	}
-	for _, finding := range overrideBufferFindings(&cfg, md) {
-		if !findingSpeaksAbout(finding, key) {
-			continue
-		}
-		return "Loading this value would report: " + finding.Message
-	}
-	return ""
-}
-
-// overrideBufferFindings runs the load-time validators that judge a *value*.
-// The ones left out judge a file's shape instead — retired sections, renamed
-// blocks, deprecated spellings — and a buffer that sets one key has no file
-// shape to judge.
-func overrideBufferFindings(cfg *Config, md toml.MetaData) []Finding {
-	findings := agentEntryFindings(overrideBufferLabel, cfg)
-	findings = append(findings, projectEntryFindings(overrideBufferLabel, cfg.Projects)...)
-	findings = append(findings, effortConfigFindings(overrideBufferLabel, md)...)
-	findings = append(findings, agentConfigFindings(overrideBufferLabel, md)...)
-	findings = append(findings, integrationsSkillsFindings(overrideBufferLabel, cfg.Integrations, md)...)
-	findings = append(findings, workViewPresetFindings(overrideBufferLabel, cfg)...)
-	workbench, _ := workbenchFindings(overrideBufferLabel, cfg.Workbenches)
-	findings = append(findings, workbench...)
-	findings = append(findings, worktreeDisplayFindings(overrideBufferLabel, cfg.projectConfig())...)
-	return findings
-}
-
-// findingSpeaksAbout reports whether a finding is about the key being edited —
-// the key itself, an element of it, or something inside it. Findings about
-// anything else belong to config the buffer did not set and are none of this
-// gate's business.
-func findingSpeaksAbout(f Finding, key string) bool {
-	return f.Path == key ||
-		strings.HasPrefix(f.Path, key+".") ||
-		strings.HasPrefix(f.Path, key+"[")
 }
 
 // zeroTOMLValue is the empty value of a TOML type, the value side of the literal

@@ -249,7 +249,7 @@ Use --force to re-point a set that is already bound elsewhere.
 provisioned binding before returning — the same eager provisioning as
 ` + "`register --managed`" + `. It does not need to run from any particular
 checkout, only inside the repo. A bare repo with no configured Trunk worktree
-requires --trunk <path> on first use (persisted to config.runtime.toml). A set
+requires --trunk <path> on first use (stated in pop's override layer). A set
 already bound elsewhere still requires --force, which drops the old binding
 forget-only (the old checkout is retained) before provisioning the new one.`,
 	Args: cobra.ExactArgs(1),
@@ -289,7 +289,7 @@ func init() {
 	rootCmd.AddCommand(taskCmd)
 	taskCmd.AddCommand(taskStatusCmd)
 	taskRegisterCmd.Flags().BoolVar(&taskRegisterManaged, "managed", false, "Provision a pop-managed worktree forked from the Trunk worktree and bind each newly registered set before returning")
-	taskRegisterCmd.Flags().StringVar(&taskRegisterTrunk, "trunk", "", "Mark <path> as this repository's Trunk worktree in config.runtime.toml (required for bare repos on first managed register or bind-worktree)")
+	taskRegisterCmd.Flags().StringVar(&taskRegisterTrunk, "trunk", "", "State <path> as this repository's Trunk worktree in pop's override layer (required for bare repos on first managed register or bind-worktree)")
 	taskRegisterCmd.Flags().BoolVar(&taskRegisterAutoDrain, "auto-drain", false, "Enable the auto-drain consent bit on each newly registered set (default off); `pop tasks auto-drain` and the dashboard `a` toggle remain authoritative afterward")
 	taskCmd.AddCommand(taskRegisterCmd)
 	taskCmd.AddCommand(taskArchiveCmd)
@@ -323,7 +323,7 @@ func init() {
 	taskBindWorktreeCmd.Flags().BoolVar(&taskBindWorktreeForce, "force", false, "Re-point a set already bound elsewhere")
 	taskBindWorktreeCmd.Flags().BoolVarP(&taskRunYes, "yes", "y", false, "Skip managed-worktree delete confirmation when rebinding")
 	taskBindWorktreeCmd.Flags().BoolVar(&taskBindWorktreeManaged, "managed", false, "Provision a pop-managed worktree forked from the Trunk worktree and bind the set before returning")
-	taskBindWorktreeCmd.Flags().StringVar(&taskBindWorktreeTrunk, "trunk", "", "Mark <path> as this repository's Trunk worktree in config.runtime.toml (required for bare repos on first managed bind-worktree)")
+	taskBindWorktreeCmd.Flags().StringVar(&taskBindWorktreeTrunk, "trunk", "", "State <path> as this repository's Trunk worktree in pop's override layer (required for bare repos on first managed bind-worktree)")
 	taskCmd.AddCommand(taskBindWorktreeCmd)
 	taskUnbindWorktreeCmd.Flags().BoolVar(&taskUnbindWorktreeYes, "yes", false, "Skip confirmation prompt")
 	taskCmd.AddCommand(taskUnbindWorktreeCmd)

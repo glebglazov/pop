@@ -87,3 +87,10 @@ func integrateRuntimePath(t *testing.T) string {
 	t.Fatal("test XDG_DATA_HOME must be set")
 	return ""
 }
+
+// integrateOverridePath is config.override.toml under the test data home: where
+// a declined component's stated skills list lands.
+func integrateOverridePath(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(testDataHome(t), "pop", "config.override.toml")
+}

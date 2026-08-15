@@ -26,20 +26,22 @@ var integrateCmd = &cobra.Command{
 The status wiring makes the agent report pane status to pop's monitor; it
 changes no agent behavior. Optional skills (the pane skill and the task
 planning skills) resolve from the merged [integrations] skills list in pop
-config (embedded defaults, then config.runtime.toml, then user config).
+config (embedded defaults, then your config.toml, then anything you have
+stated in pop's override layer).
 
 Run with no flags to install the core status wiring plus every optional
 component in the merged baseline — no prompts, TTY or not. Re-running
-re-asserts the full merged baseline (bare integrate clears runtime
-overrides).
+re-asserts the full merged baseline (bare integrate takes back every
+component you declined).
 
   --no-pane-skills
                 Remove the pane skill if it is currently installed (pop-owned
-                artifacts only) and record the opt-out in config.runtime.toml.
+                artifacts only) and state the decline in pop's override layer,
+                so it holds for later runs.
 
   --no-task-skills
                 Remove the task planning skills if currently installed
-                (pop-owned only) and record the opt-out. Same semantics as
+                (pop-owned only) and state the decline. Same semantics as
                 --no-pane-skills.
 
   --overwrite-conflicts
@@ -192,8 +194,8 @@ func runIntegrate(cmd *cobra.Command, args []string) error {
 
 	cd := cmdLayerDeps().configDeps()
 	bareIntegrate := len(explicitOptOuts) == 0
-	if err := integrate.ApplyRuntimeConfig(cd, bareIntegrate, explicitOptOuts); err != nil {
-		return fmt.Errorf("runtime config: %w", err)
+	if err := integrate.ApplyComponentOptOuts(cd, bareIntegrate, explicitOptOuts); err != nil {
+		return fmt.Errorf("component opt-outs: %w", err)
 	}
 
 	baseline, err := integrate.BaselineLoader(cd)

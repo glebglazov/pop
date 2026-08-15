@@ -1,18 +1,16 @@
 package config
 
 import (
-	"bytes"
-	"fmt"
 	"sort"
-	"strings"
-
-	"github.com/BurntSushi/toml"
 )
 
 // This file is the write side of config.override.toml, the pop-written layer
 // that is laid over whatever the resolution ladder resolved (ADR-0212 decision
-// 2). It is a library only: the editor component that drives it is the sole
-// writer pop ships, and it lands separately, so no command reaches this code yet.
+// 2). Every writer of stated intent comes through here — the Config dashboard's
+// editor and the four scriptable ones (`--trunk`, `--no-<component>`, `pop
+// config repo set`, `pop workbench prefer`) — and each entry point runs the
+// shared gate in override_gate.go first, so the destination and the judgement
+// are one whatever door was used (decision 6).
 //
 // Every entry point works on one whole key: the unit of an override is a key's
 // entire value as TOML, never a patch of it (ADR-0202 decision 2). It comes in
@@ -50,8 +48,14 @@ func SetOverrideValue(key string, value any) error {
 	return SetOverrideValueWith(defaultDeps, key, value)
 }
 
-// SetOverrideValueWith is the injectable variant.
+// SetOverrideValueWith is the injectable variant. Every caller passes the same
+// gate the Config dashboard's editor does (override_gate.go), so a value that
+// would produce a finding is refused here whether a human typed it or a flag
+// did.
 func SetOverrideValueWith(d *Deps, key string, value any) error {
+	if problem := OverrideValueProblem(key, value); problem != "" {
+		return overrideRefusal(problem)
+	}
 	file := overrideConfigFile(d)
 	doc, _, err := file.load(d)
 	if err != nil {
@@ -117,11 +121,15 @@ func SetRepoOverrideValue(checkoutPath, key string, value any) (string, error) {
 }
 
 // SetRepoOverrideValueWith is the injectable variant. A key the repo surface
-// does not hold, or a value it cannot hold, is refused before anything is
-// written: a file pop wrote itself must never be the source of a finding.
+// does not hold, or a value it cannot hold, is refused by the shared gate before
+// anything is written: a file pop wrote itself must never be the source of a
+// finding, and every door into the layer answers that the same way.
 func SetRepoOverrideValueWith(d *Deps, checkoutPath, key string, value any) (string, error) {
 	if !repoBlockLegalKeys()[key] {
 		return "", unknownRepoOverrideKeyError(key)
+	}
+	if problem := RepoOverrideValueProblem(key, value); problem != "" {
+		return "", overrideRefusal(problem)
 	}
 	file := overrideConfigFile(d)
 	doc, _, err := file.load(d)
@@ -134,9 +142,6 @@ func SetRepoOverrideValueWith(d *Deps, checkoutPath, key string, value any) (str
 		block, blockKey = map[string]any{}, identity
 	}
 	block[key] = value
-	if err := validateRepoOverrideBlock(block); err != nil {
-		return "", fmt.Errorf("%s: %w", key, err)
-	}
 	section, ok := doc[overrideRepoSection].(map[string]any)
 	if !ok || section == nil {
 		section = map[string]any{}
@@ -208,33 +213,4 @@ func repoOverrideBlock(d *Deps, doc map[string]any, identity string) (map[string
 		}
 	}
 	return nil, ""
-}
-
-// validateRepoOverrideBlock re-encodes the block and decodes it through the
-// struct that decodes a hand-authored [repo."<path>"] block, so a value the
-// config could not read back is refused at the write rather than ignored at the
-// next load.
-func validateRepoOverrideBlock(block map[string]any) error {
-	var buf bytes.Buffer
-	if err := toml.NewEncoder(&buf).Encode(block); err != nil {
-		return fmt.Errorf("cannot be written as config: %w", err)
-	}
-	var probe RepoOverrideConfig
-	if _, err := toml.Decode(buf.String(), &probe); err != nil {
-		return fmt.Errorf("is not a value this key can hold: %w", err)
-	}
-	return nil
-}
-
-// unknownRepoOverrideKeyError refuses a key that has no repository home, naming
-// the ones that do so the caller does not have to go looking.
-func unknownRepoOverrideKeyError(key string) error {
-	legal := repoBlockLegalKeys()
-	names := make([]string, 0, len(legal))
-	for name := range legal {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return fmt.Errorf("config key %q has no repository scope; repo-scope keys: %s",
-		key, strings.Join(names, ", "))
 }

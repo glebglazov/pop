@@ -43,12 +43,12 @@ const (
 
 // preferredPickerDeps carries the seams for the Workbench-preference picker
 // `pop workbench prefer` opens, so the write/clear/none branches are
-// unit-testable without a real terminal, config, or runtime file.
+// unit-testable without a real terminal, config, or override file.
 type preferredPickerDeps struct {
 	RunPicker          func(items []ui.Item, opts ...ui.PickerOption) (ui.Result, error)
 	ResolveWorkbenches func(path string) []config.Workbench
-	// CurrentEntry reports the runtime entry for path: present is false when
-	// absent (so "<reset>" is offered only when true).
+	// CurrentEntry reports what the repository of path already states: present is
+	// false when it states nothing (so "<reset>" is offered only when true).
 	CurrentEntry   func(path string) (name string, present bool)
 	SetPreferred   func(path, name string) error
 	ClearPreferred func(path string) error
@@ -60,7 +60,8 @@ type preferredPickerDeps struct {
 
 // defaultPreferredPickerDeps wires preferredPickerDeps to production
 // implementations: the shared Workbench resolution (so bare-repo Workbenches
-// still propagate) and the config.runtime.toml [workbench.preferred] store.
+// still propagate) and the override layer's block for the repository, which is
+// where a stated preference lives (ADR-0212 decisions 5 and 6).
 func defaultPreferredPickerDeps() *preferredPickerDeps {
 	return &preferredPickerDeps{
 		RunPicker: ui.Run,
@@ -78,15 +79,15 @@ func defaultPreferredPickerDeps() *preferredPickerDeps {
 			return templates
 		},
 		CurrentEntry: func(path string) (string, bool) {
-			name, present, err := config.RuntimePreferredWorkbench(path)
+			name, stated, err := config.StatedPreferredWorkbench(path)
 			if err != nil {
-				debug.Error("preferred workbench: read runtime entry: %v", err)
+				debug.Error("preferred workbench: read stated entry: %v", err)
 				return "", false
 			}
-			return name, present
+			return name, stated
 		},
-		SetPreferred:   config.SetRuntimePreferredWorkbench,
-		ClearPreferred: config.ClearRuntimePreferredWorkbench,
+		SetPreferred:   config.StatePreferredWorkbench,
+		ClearPreferred: config.ClearPreferredWorkbench,
 		WorkbenchOrder: func() []string {
 			cfgPath := cfgFile
 			if cfgPath == "" {
@@ -104,10 +105,10 @@ func defaultPreferredPickerDeps() *preferredPickerDeps {
 
 // setPreferredWorkbench opens the Workbench-preference picker for checkoutPath
 // (ADR-0078): a quick-search list of the Workbenches resolved for that checkout,
-// plus "<empty>" (writes explicit none) and, when an entry already
-// exists, "<reset>" (deletes the entry). It writes the runtime
-// preference for that checkout only — it never touches any running session. Esc
-// leaves the preference untouched.
+// plus "<empty>" (states explicit none) and, when the repository already states
+// one, "<reset>" (removes what it states). It states the preference for the
+// repository of that checkout — it never touches any running session. Esc leaves
+// the preference untouched.
 //
 // `pop workbench prefer` with no name is its only door: the picker hosts opened
 // it through a chord of their own until ADR-0212 decision 6 retired that in

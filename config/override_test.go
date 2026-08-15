@@ -278,14 +278,24 @@ func TestOverrideWriteIsAtomic(t *testing.T) {
 	}
 }
 
-func TestSetOverrideValueRejectsAKeyTheDocumentCannotHold(t *testing.T) {
+// TestSetOverrideValueRejectsAKeyTheLayerCannotHold pins the gate on the write
+// itself: a path that is no config key at all is refused before the document is
+// touched, in the words the dashboard's editor would have shown.
+func TestSetOverrideValueRejectsAKeyTheLayerCannotHold(t *testing.T) {
 	f := newOverrideFixture(t)
 	if err := SetOverrideValueWith(f.d, "work.verify.enabled", true); err != nil {
 		t.Fatalf("SetOverrideValueWith() error: %v", err)
 	}
 	err := SetOverrideValueWith(f.d, "work.verify.enabled.deeper", "x")
-	if err == nil || !strings.Contains(err.Error(), "not a table") {
-		t.Fatalf("error = %v, want a not-a-table complaint", err)
+	if err == nil || !strings.Contains(err.Error(), "not a key pop can override") {
+		t.Fatalf("error = %v, want the key refused", err)
+	}
+	body, readErr := os.ReadFile(f.overridePath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if strings.Contains(string(body), "deeper") {
+		t.Errorf("a refused key reached the file:\n%s", body)
 	}
 }
 

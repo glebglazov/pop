@@ -10,8 +10,8 @@ import (
 
 // workbenchPreferDeps carries the seams for the `pop workbench prefer` command
 // so the set/clear/none/bad-name branches and the completion source are
-// unit-testable without a real terminal, git repo, or runtime file. Picker holds
-// the slice-02 write path (SetPreferred/ClearPreferred) and picker, which this
+// unit-testable without a real terminal, git repo, or override file. Picker holds
+// the write path (SetPreferred/ClearPreferred) and the picker itself, which this
 // command reuses verbatim — no duplicated write logic (ADR-0078).
 type workbenchPreferDeps struct {
 	Picker          *preferredPickerDeps
@@ -32,28 +32,34 @@ var (
 
 // workbenchPreferCmd is the standalone door into the Preferred workbench picker
 // and write path (ADR-0078), usable from inside any session (bindable to a tmux
-// key). It writes the per-checkout preference only — it never touches a running
+// key). It states the repository's preference only — it never touches a running
 // session.
 var workbenchPreferCmd = &cobra.Command{
 	Use:   "prefer [name]",
-	Short: "Set the preferred workbench for the current checkout",
-	Long: `Set the per-checkout Preferred workbench (ADR-0078).
+	Short: "Set the preferred workbench for the current repository",
+	Long: `Set the Preferred workbench of the current repository (ADR-0078).
 
 With no arguments, opens a picker of the Workbenches resolved for the current
-checkout and writes the chosen preference. With a name, sets it
+checkout and states the chosen preference. With a name, sets it
 non-interactively (the name must resolve for this checkout). Use --clear to
-reset to inheritance/default, or --none to pin "no workbench (here)".
+hand the answer back to the layers below, or --none to pin "no workbench
+(here)".
 
-This sets the preference only; it never touches a running session. The stored
-preference auto-applies the next time a session is born for this checkout.`,
+The preference is stated in pop's override layer under the repository, so every
+worktree of it reads the one answer and nothing you have hand-authored shadows
+it. The Config dashboard's repo.preferred_workbench row is the same setting; this
+command is its non-interactive twin.
+
+This sets the preference only; it never touches a running session. The stated
+preference auto-applies the next time a session is born for this repository.`,
 	Args:              cobra.MaximumNArgs(1),
 	RunE:              runWorkbenchPrefer,
 	ValidArgsFunction: completeWorkbenchPreferArgs,
 }
 
 func init() {
-	workbenchPreferCmd.Flags().BoolVar(&workbenchPreferClear, "clear", false, "remove the current checkout's preference (reset to inheritance/default)")
-	workbenchPreferCmd.Flags().BoolVar(&workbenchPreferNone, "none", false, `pin "no workbench (here)" (explicit none) for the current checkout`)
+	workbenchPreferCmd.Flags().BoolVar(&workbenchPreferClear, "clear", false, "remove the repository's stated preference (reset to what the layers below resolve)")
+	workbenchPreferCmd.Flags().BoolVar(&workbenchPreferNone, "none", false, `pin "no workbench (here)" (explicit none) for this repository`)
 	workbenchCmd.AddCommand(workbenchPreferCmd)
 }
 

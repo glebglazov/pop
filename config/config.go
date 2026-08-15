@@ -1320,9 +1320,16 @@ func (c *Config) ResolvePreferredWorkbench(d *Deps, checkoutPath string) (string
 
 	// Iterate the shared source chain (the enumerator owns the anchor resolution
 	// and the read-once guard). Declaration rungs fall through when empty; the
-	// gap-filler rungs keep their three-valued explicit-none short-circuit.
+	// stated rung and the gap-filler rungs keep their three-valued explicit-none
+	// short-circuit.
 	for _, src := range e.preferredSources() {
 		if !src.runtime {
+			// A stated rung is in the chain only when the override layer holds an
+			// entry, so an empty name there is an explicit none — flat here, and
+			// nothing below is asked.
+			if src.stated && src.name == "" {
+				return "", warnings
+			}
 			if name, done := consider(src.name); done {
 				return name, warnings
 			}

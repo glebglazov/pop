@@ -53,12 +53,14 @@ func ComponentForSkillAlias(alias string) (ComponentID, bool) {
 	}
 }
 
-// ApplyRuntimeConfig mutates config.runtime.toml once per integrate
-// invocation. Bare integrate clears runtime [integrations] overrides; --no-*
-// removes the corresponding skill aliases from the runtime layer (ADR 0065).
-func ApplyRuntimeConfig(cd *config.Deps, bareIntegrate bool, explicitOptOuts map[ComponentID]bool) error {
+// ApplyComponentOptOuts records the invocation's component preferences once per
+// integrate run. Bare integrate takes back every decline; --no-* declines the
+// corresponding skills, which states the reduced list in the override layer so
+// the decline outlives the run and beats a hand-authored list naming the same
+// component (ADR-0065's three-layer merge, retargeted by ADR-0212 decision 5).
+func ApplyComponentOptOuts(cd *config.Deps, bareIntegrate bool, explicitOptOuts map[ComponentID]bool) error {
 	if bareIntegrate {
-		return config.ClearRuntimeIntegrationsWith(cd)
+		return config.ClearIntegrationSkillsDeclineWith(cd)
 	}
 	if len(explicitOptOuts) == 0 {
 		return nil
@@ -71,6 +73,5 @@ func ApplyRuntimeConfig(cd *config.Deps, bareIntegrate bool, explicitOptOuts map
 		}
 		aliases = append(aliases, alias)
 	}
-	return config.RemoveRuntimeIntegrationSkillsWith(cd, aliases...)
+	return config.DeclineIntegrationSkillsWith(cd, aliases...)
 }
-

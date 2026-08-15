@@ -383,10 +383,15 @@ func (e *repoScopeEnumerator) recordedTrunk(doc map[string]any) (string, bool) {
 
 // preferredSource is one rung of the preferred_workbench chain, highest
 // precedence first. A declaration rung carries a resolved name and falls through
-// when it is empty; a runtime rung carries the path to read and honours the
-// three-valued explicit-none sentinel.
+// when it is empty; a stated rung is the override layer's entry, where presence
+// rather than emptiness decides; a runtime rung carries the path to read and
+// honours the same three-valued sentinel from the record it reads.
 type preferredSource struct {
-	runtime     bool
+	runtime bool
+	// stated marks the override layer's entry: it is in the chain only when the
+	// layer holds one, so an empty name here is an explicit none rather than
+	// "says nothing" (ADR-0078's three-valued entry, kept at its new home).
+	stated      bool
 	name        string // hand-authored: the value ("" means unset, fall through)
 	runtimePath string // runtime: path whose entry to read
 	debugLabel  string // runtime: message stem for a read-error debug log
@@ -410,9 +415,11 @@ type preferredSource struct {
 // The override entry heads the chain because it is not a rung of it: it is the
 // layer laid over whatever the rest resolves (ADR-0212 decision 2), and reading
 // the chain from the top makes "applied over the answer" and "asked first" the
-// same walk. The key has no global home, so neither the ladder's global rung nor
-// a global override of it exists — a repository is the only scope that can state
-// it. The runtime rungs record what pop's own picker happened to pick, which
+// same walk. It is the one rung `pop workbench prefer` and the Config dashboard
+// both write, so an explicit none stated there stops the walk rather than
+// falling through as an empty declaration would. The key has no global home, so
+// neither the ladder's global rung nor a global override of it exists — a
+// repository is the only scope that can state it. The runtime rungs record what pop's own picker happened to pick, which
 // makes them gap-fillers under every declaration of the same scope — not a
 // checkout scope of their own (ADR-0212 decision 3 admits only two scopes).
 //
@@ -421,8 +428,8 @@ type preferredSource struct {
 // guard, so a stale name is never double-warned by re-reading the same anchor.
 func (e *repoScopeEnumerator) preferredSources() []preferredSource {
 	var sources []preferredSource
-	if block, ok := e.overrideLayer().repoBlock(e.d, e.identity); ok {
-		sources = append(sources, preferredSource{name: block.PreferredWorkbench})
+	if name, ok := e.overrideLayer().statedPreferred(e.d, e.identity); ok {
+		sources = append(sources, preferredSource{stated: true, name: name})
 	}
 	sources = append(sources,
 		preferredSource{name: e.declared.PreferredWorkbench},  // [repo."<path>"]

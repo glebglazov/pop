@@ -9,17 +9,18 @@ import (
 )
 
 // popRepoFixture lays out a bare repo with two worktrees and returns deps whose
-// runtime file lives in an isolated data dir, plus the paths this slice cares
-// about: the two checkouts, the repository they share, and the two files whose
-// roles must not blur — the runtime file pop writes and the config.toml it must
-// not touch.
+// pop-written files live in an isolated data dir, plus the paths this slice
+// cares about: the two checkouts, the repository they share, and the two files
+// whose roles must not blur — the override layer a setting is stated in, and the
+// config.toml pop must not touch.
 type popRepoFixture struct {
-	d           *Deps
-	main        string
-	feature     string
-	identity    string
-	runtimePath string
-	configPath  string
+	d            *Deps
+	main         string
+	feature      string
+	identity     string
+	runtimePath  string
+	overridePath string
+	configPath   string
 }
 
 func newPopRepoFixture(t *testing.T) popRepoFixture {
@@ -42,7 +43,9 @@ func newPopRepoFixture(t *testing.T) popRepoFixture {
 	}
 	return popRepoFixture{
 		d: d, main: main, feature: feature, identity: bareRoot,
-		runtimePath: runtimePath, configPath: configPath,
+		runtimePath:  runtimePath,
+		overridePath: DefaultOverrideConfigPathWith(d),
+		configPath:   configPath,
 	}
 }
 
@@ -81,8 +84,8 @@ func TestRepoSettableKeysComeFromTheSchema(t *testing.T) {
 
 // TestRepoSettingWrittenOnceServesEveryWorktree is the whole point of the
 // identity keying (ADR-0191 decision 4): the value is set from one worktree and
-// read from another, and it lands in pop's runtime state with the hand-authored
-// config.toml untouched (decision 3).
+// read from another, and it lands in the override layer's block for the
+// repository with the hand-authored config.toml untouched.
 func TestRepoSettingWrittenOnceServesEveryWorktree(t *testing.T) {
 	fx := newPopRepoFixture(t)
 	before, err := os.ReadFile(fx.configPath)
@@ -109,13 +112,17 @@ func TestRepoSettingWrittenOnceServesEveryWorktree(t *testing.T) {
 		}
 	}
 
-	runtimeBody, err := os.ReadFile(fx.runtimePath)
+	overrideBody, err := os.ReadFile(fx.overridePath)
 	if err != nil {
-		t.Fatalf("runtime file missing: %v", err)
+		t.Fatalf("override file missing: %v", err)
 	}
-	if !strings.Contains(string(runtimeBody), "[repo_settings") ||
-		!strings.Contains(string(runtimeBody), "turn_cap = 40") {
-		t.Errorf("runtime file does not hold the value:\n%s", runtimeBody)
+	if !strings.Contains(string(overrideBody), "[repo.") ||
+		!strings.Contains(string(overrideBody), "turn_cap = 40") {
+		t.Errorf("override layer does not hold the value:\n%s", overrideBody)
+	}
+	if _, err := os.Stat(fx.runtimePath); !os.IsNotExist(err) {
+		body, _ := os.ReadFile(fx.runtimePath)
+		t.Errorf("the setting was also written to the retired record:\n%s", body)
 	}
 	after, err := os.ReadFile(fx.configPath)
 	if err != nil {
@@ -126,30 +133,31 @@ func TestRepoSettingWrittenOnceServesEveryWorktree(t *testing.T) {
 	}
 }
 
-// TestHandAuthoredRepoBlockBeatsPopWrittenSetting pins the ordering that makes
-// this layer safe to write into: what a human wrote always wins, including when
-// he writes the number back to nothing, and the read says which layer answered.
-func TestHandAuthoredRepoBlockBeatsPopWrittenSetting(t *testing.T) {
+// TestStatedRepoSettingBeatsEveryDeclaration is the reversal ADR-0212 decision 5
+// brings: `pop config repo set` states intent, so it is laid over the ladder and
+// beats the hand-authored [repo."<path>"] block it used to lose to — including a
+// block that writes the bound back to nothing. The read says which layer answered.
+func TestStatedRepoSettingBeatsEveryDeclaration(t *testing.T) {
 	fx := newPopRepoFixture(t)
 	if _, err := SetRepoSettingWith(fx.d, fx.main, "turn_cap", "5"); err != nil {
 		t.Fatalf("SetRepoSettingWith: %v", err)
 	}
 
-	popWritten := &Config{}
-	repoCfg, err := popWritten.ResolveRepoConfig(fx.d, fx.feature)
+	stated := &Config{}
+	repoCfg, err := stated.ResolveRepoConfig(fx.d, fx.feature)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if repoCfg.TurnCap != 5 {
-		t.Errorf("TurnCap = %d, want the 5 pop wrote", repoCfg.TurnCap)
+		t.Errorf("TurnCap = %d, want the 5 that was stated", repoCfg.TurnCap)
 	}
-	settings, err := popWritten.ResolveRepoSettings(fx.d, fx.feature)
+	settings, err := stated.ResolveRepoSettings(fx.d, fx.feature)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := settingByKey(t, settings, "turn_cap")
-	if got.Value != "5" || got.Source != RepoSettingRuntime || got.Locus != fx.runtimePath {
-		t.Errorf("pop-written read = %+v, want 5 from %s at %s", got, RepoSettingRuntime, fx.runtimePath)
+	if got.Value != "5" || got.Source != RepoSettingOverrideLayer || got.Locus != fx.overridePath {
+		t.Errorf("read = %+v, want 5 from %s at %s", got, RepoSettingOverrideLayer, fx.overridePath)
 	}
 
 	handAuthored := &Config{Repo: map[string]RepoOverrideConfig{fx.main: {TurnCap: intPtr(40)}}}
@@ -157,27 +165,57 @@ func TestHandAuthoredRepoBlockBeatsPopWrittenSetting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if repoCfg.TurnCap != 40 {
-		t.Errorf("TurnCap = %d, want the hand-authored 40", repoCfg.TurnCap)
+	if repoCfg.TurnCap != 5 {
+		t.Errorf("TurnCap = %d, want the stated 5 over the hand-authored 40", repoCfg.TurnCap)
 	}
 	settings, err = handAuthored.ResolveRepoSettings(fx.d, fx.feature)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got = settingByKey(t, settings, "turn_cap")
-	if got.Value != "40" || got.Source != RepoSettingOverride || !strings.Contains(got.Locus, fx.main) {
-		t.Errorf("hand-authored read = %+v, want 40 from %s naming %s", got, RepoSettingOverride, fx.main)
+	if got.Value != "5" || got.Source != RepoSettingOverrideLayer {
+		t.Errorf("read = %+v, want 5 from %s", got, RepoSettingOverrideLayer)
 	}
 
-	// A hand-written non-positive number is a deliberate "no bound", and it must
-	// beat the bound pop recorded like any other hand-authored value.
-	takenBack := &Config{Repo: map[string]RepoOverrideConfig{fx.main: {TurnCap: intPtr(0)}}}
-	repoCfg, err = takenBack.ResolveRepoConfig(fx.d, fx.feature)
+	// Stating 0 is how the bound is given back: a non-positive cap bounds nothing,
+	// and it wins over the hand-authored 40 like any other stated value.
+	if _, err := SetRepoSettingWith(fx.d, fx.main, "turn_cap", "0"); err != nil {
+		t.Fatalf("SetRepoSettingWith(0): %v", err)
+	}
+	repoCfg, err = handAuthored.ResolveRepoConfig(fx.d, fx.feature)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if repoCfg.TurnCap != 0 {
-		t.Errorf("TurnCap = %d, want 0 (a hand-written 0 takes the bound back)", repoCfg.TurnCap)
+		t.Errorf("TurnCap = %d, want 0 (a stated 0 takes the bound back)", repoCfg.TurnCap)
+	}
+}
+
+// TestRecordedRepoSettingStillReadsUnderADeclaration keeps the retired
+// gap-filler honest for a machine that still holds one: it answers when nothing
+// else does, and any declaration of the same key beats it.
+func TestRecordedRepoSettingStillReadsUnderADeclaration(t *testing.T) {
+	fx := newPopRepoFixture(t)
+	writeRuntimeFile(t, fx.runtimePath,
+		"[repo_settings.\""+fx.identity+"\"]\nturn_cap = 5\n")
+
+	recorded := &Config{}
+	settings, err := recorded.ResolveRepoSettings(fx.d, fx.feature)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := settingByKey(t, settings, "turn_cap")
+	if got.Value != "5" || got.Source != RepoSettingRuntime || got.Locus != fx.runtimePath {
+		t.Errorf("recorded read = %+v, want 5 from %s at %s", got, RepoSettingRuntime, fx.runtimePath)
+	}
+
+	handAuthored := &Config{Repo: map[string]RepoOverrideConfig{fx.main: {TurnCap: intPtr(40)}}}
+	repoCfg, err := handAuthored.ResolveRepoConfig(fx.d, fx.feature)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repoCfg.TurnCap != 40 {
+		t.Errorf("TurnCap = %d, want the hand-authored 40 over a recorded 5", repoCfg.TurnCap)
 	}
 }
 
@@ -202,29 +240,34 @@ func TestSetRepoSettingRefusesWhatItCannotSet(t *testing.T) {
 		t.Errorf("refusal %q should name the key", err)
 	}
 
-	if _, err := os.Stat(fx.runtimePath); !os.IsNotExist(err) {
-		body, _ := os.ReadFile(fx.runtimePath)
-		t.Errorf("a refused set still wrote runtime state:\n%s", body)
+	if _, err := os.Stat(fx.overridePath); !os.IsNotExist(err) {
+		body, _ := os.ReadFile(fx.overridePath)
+		t.Errorf("a refused set still wrote the override layer:\n%s", body)
 	}
 }
 
-// TestSetRepoSettingKeepsUnrelatedRuntimeState proves the layer is additive: an
-// existing runtime file keeps its other sections, and a second repository's
-// entry is not disturbed by writing this one.
-func TestSetRepoSettingKeepsUnrelatedRuntimeState(t *testing.T) {
+// TestSetRepoSettingKeepsUnrelatedOverrides proves the write is additive: the
+// layer's global half and another repository's block both survive a write to
+// this one.
+func TestSetRepoSettingKeepsUnrelatedOverrides(t *testing.T) {
 	fx := newPopRepoFixture(t)
-	writeRuntimeFile(t, fx.runtimePath, "[integrations]\nskills = [\"tasks\"]\n\n[repo_settings.\"/srv/other\"]\nturn_cap = 3\n")
+	if err := SetOverrideValueWith(fx.d, "work.implement.agents", []any{"codex"}); err != nil {
+		t.Fatalf("SetOverrideValueWith: %v", err)
+	}
+	if _, err := SetRepoOverrideValueWith(fx.d, "/srv/other", "turn_cap", 3); err != nil {
+		t.Fatalf("SetRepoOverrideValueWith: %v", err)
+	}
 
 	if _, err := SetRepoSettingWith(fx.d, fx.feature, "turn_cap", "12"); err != nil {
 		t.Fatalf("SetRepoSettingWith: %v", err)
 	}
-	body, err := os.ReadFile(fx.runtimePath)
+	body, err := os.ReadFile(fx.overridePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"skills = [\"tasks\"]", "/srv/other", "turn_cap = 3", "turn_cap = 12"} {
+	for _, want := range []string{`agents = ["codex"]`, "/srv/other", "turn_cap = 3", "turn_cap = 12"} {
 		if !strings.Contains(string(body), want) {
-			t.Errorf("runtime file lost %q:\n%s", want, body)
+			t.Errorf("override layer lost %q:\n%s", want, body)
 		}
 	}
 }

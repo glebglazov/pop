@@ -141,6 +141,12 @@ func (e *repoScopeEnumerator) repoScopeLayers() []overrideValueLayer {
 	override := map[string]any{}
 	if block, ok := e.overrideLayer().repoBlock(e.d, e.identity); ok {
 		override = repoBlockDoc(block, e.identity)
+		// A Preferred workbench stated as "" is an explicit none, which the
+		// decoded block cannot tell from an absent key. The row has to show it,
+		// or the value in force and the layer named for it would disagree.
+		if name, stated := e.overrideLayer().statedPreferred(e.d, e.identity); stated {
+			override["preferred_workbench"] = name
+		}
 	}
 	layers := []overrideValueLayer{
 		{layer: OverrideLayerOverride, doc: repoScopeDocument(override)},
@@ -274,8 +280,8 @@ func StoreRepoOverrideBufferWith(d *Deps, checkoutPath, key, buffer string) (str
 	// The same gate the write side applies, run here so a value the block could
 	// not read back sends the human back to the buffer rather than failing the
 	// component: a file pop wrote itself must never be the source of a finding.
-	if err := validateRepoOverrideBlock(map[string]any{leaf: value}); err != nil {
-		return fmt.Sprintf("%s %v", key, err), nil
+	if problem := RepoOverrideValueProblem(key, value); problem != "" {
+		return problem, nil
 	}
 	_, err := SetRepoOverrideValueWith(d, checkoutPath, leaf, value)
 	return "", err
