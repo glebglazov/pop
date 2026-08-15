@@ -152,44 +152,44 @@ func TestMapRegisterValidatesThenRegisters(t *testing.T) {
 // override that still refuses a ticket someone else is holding.
 func TestMapNextAndClaimDriveParallelGrilling(t *testing.T) {
 	t.Parallel()
-	d, storageDir, _ := mapRegistryTestDeps(t, threeTicketMapFiles("demo"))
-	if err := runMapRegisterWith(d, &bytes.Buffer{}, "demo"); err != nil {
+	d, storageDir, _ := mapRegistryTestDeps(t, threeTicketMapFiles("2026-08-03-demo"))
+	if err := runMapRegisterWith(d, &bytes.Buffer{}, "2026-08-03-demo"); err != nil {
 		t.Fatal(err)
 	}
 	nine := time.Date(2026, 8, 3, 9, 0, 0, 0, time.UTC)
 	d.Clock = func() time.Time { return nine }
 
 	var first bytes.Buffer
-	if err := runMapNextWith(d, &first, "demo", false); err != nil {
+	if err := runMapNextWith(d, &first, "2026-08-03-demo", false); err != nil {
 		t.Fatalf("next: %v", err)
 	}
-	wantPath := filepath.Join(storageDir, "maps", "demo", "issues", "01-first.md")
+	wantPath := filepath.Join(storageDir, "maps", "2026-08-03-demo", "issues", "01-first.md")
 	if got := strings.SplitN(first.String(), "\n", 2)[0]; got != "01\t"+wantPath {
 		t.Fatalf("next headline = %q, want the id and path", got)
 	}
 	// The claim belongs to the pane the agent was spawned into, never to the pane
 	// that typed the verb (ADR-0182).
 	firstOwner := claimedOwner(t, first.String())
-	firstPane := onlyGrillingPane(t, d, "demo")
+	firstPane := onlyGrillingPane(t, d, "2026-08-03-demo")
 	if !strings.HasPrefix(firstOwner, "pane:"+firstPane+"/") {
 		t.Fatalf("next claimed for %q, want the spawned pane %s and its pid", firstOwner, firstPane)
 	}
 
 	var second bytes.Buffer
-	if err := runMapNextWith(d, &second, "demo", false); err != nil {
+	if err := runMapNextWith(d, &second, "2026-08-03-demo", false); err != nil {
 		t.Fatalf("second next: %v", err)
 	}
 	if !strings.HasPrefix(second.String(), "03\t") {
 		t.Fatalf("second window got %q, want ticket 03 (02 is blocked)", second.String())
 	}
 
-	if err := runMapNextWith(d, &bytes.Buffer{}, "demo", false); err == nil {
+	if err := runMapNextWith(d, &bytes.Buffer{}, "2026-08-03-demo", false); err == nil {
 		t.Fatal("expected an exhausted frontier to fail")
 	} else if !strings.Contains(err.Error(), "frontier is empty") {
 		t.Fatalf("empty-frontier error = %v", err)
 	}
 
-	if err := runMapClaimWith(d, &bytes.Buffer{}, "demo", "01"); err == nil {
+	if err := runMapClaimWith(d, &bytes.Buffer{}, "2026-08-03-demo", "01"); err == nil {
 		t.Fatal("expected claim to refuse a ticket held by another pane")
 	} else if !strings.Contains(err.Error(), firstOwner) {
 		t.Fatalf("claim refusal = %v, want it to name %s", err, firstOwner)
@@ -199,9 +199,9 @@ func TestMapNextAndClaimDriveParallelGrilling(t *testing.T) {
 	// shell. The very next `next` — same minute, no verb in between — hands 01
 	// back out and respawns into that idle pane, saying what it took over.
 	fake := d.Tmux.(*tmuxtest.Fake)
-	fake.PaneInfos[firstPane] = tmuxmod.PaneInfo{Session: wayfinder.MapSessionName("demo"), Command: "zsh"}
+	fake.PaneInfos[firstPane] = tmuxmod.PaneInfo{Session: wayfinder.MapSessionName("2026-08-03-demo"), Command: "zsh"}
 	var reclaimed bytes.Buffer
-	if err := runMapNextWith(d, &reclaimed, "demo", false); err != nil {
+	if err := runMapNextWith(d, &reclaimed, "2026-08-03-demo", false); err != nil {
 		t.Fatalf("next after the session died: %v", err)
 	}
 	if !strings.HasPrefix(reclaimed.String(), "01\t") {
@@ -218,10 +218,10 @@ func TestMapNextAndClaimDriveParallelGrilling(t *testing.T) {
 	// a new process, so the claim that takes 01 over names an owner the dead one
 	// did not. That takeover is reported: the human's only clue that an earlier
 	// session left drafts behind in the Map's folder.
-	fake.PaneInfos[firstPane] = tmuxmod.PaneInfo{Session: wayfinder.MapSessionName("demo"), Command: "zsh"}
+	fake.PaneInfos[firstPane] = tmuxmod.PaneInfo{Session: wayfinder.MapSessionName("2026-08-03-demo"), Command: "zsh"}
 	fake.PanePIDs[firstPane] = fake.PanePIDs[firstPane] + 1
 	var reported bytes.Buffer
-	if err := runMapNextWith(d, &reported, "demo", false); err != nil {
+	if err := runMapNextWith(d, &reported, "2026-08-03-demo", false); err != nil {
 		t.Fatalf("next after the pane id was reused: %v", err)
 	}
 	if want := "reclaimed ticket 01 from dead owner " + firstOwner; !strings.Contains(reported.String(), want) {
@@ -236,13 +236,13 @@ func TestMapNextAndClaimDriveParallelGrilling(t *testing.T) {
 	// `pop map status <map-id>` is where a human sees who holds what; the files
 	// never say.
 	var shown bytes.Buffer
-	if err := runMapShowWith(d, &shown, "demo"); err != nil {
+	if err := runMapShowWith(d, &shown, "2026-08-03-demo"); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(shown.String(), "claimed by pane:%") {
 		t.Fatalf("show output does not report the live claim:\n%s", shown.String())
 	}
-	manifest, err := os.ReadFile(filepath.Join(storageDir, "maps", "demo", "index.json"))
+	manifest, err := os.ReadFile(filepath.Join(storageDir, "maps", "2026-08-03-demo", "index.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,13 +257,13 @@ func TestMapNextAndClaimDriveParallelGrilling(t *testing.T) {
 // them.
 func TestMapResolveAndOutOfScopeCloseTickets(t *testing.T) {
 	t.Parallel()
-	d, storageDir, _ := mapRegistryTestDeps(t, threeTicketMapFiles("demo"))
-	if err := runMapRegisterWith(d, &bytes.Buffer{}, "demo"); err != nil {
+	d, storageDir, _ := mapRegistryTestDeps(t, threeTicketMapFiles("2026-08-03-demo"))
+	if err := runMapRegisterWith(d, &bytes.Buffer{}, "2026-08-03-demo"); err != nil {
 		t.Fatal(err)
 	}
 	d.Clock = func() time.Time { return time.Date(2026, 8, 3, 9, 0, 0, 0, time.UTC) }
 	d.Owner = func() string { return "pane:%1" }
-	if err := runMapClaimWith(d, &bytes.Buffer{}, "demo", "01"); err != nil {
+	if err := runMapClaimWith(d, &bytes.Buffer{}, "2026-08-03-demo", "01"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -273,11 +273,11 @@ func TestMapResolveAndOutOfScopeCloseTickets(t *testing.T) {
 	}
 
 	var resolved bytes.Buffer
-	err := runMapResolveWith(d, &resolved, wayfinder.ResolveRequest{MapID: "demo", Ticket: "01", AnswerFile: answerPath})
+	err := runMapResolveWith(d, &resolved, wayfinder.ResolveRequest{MapID: "2026-08-03-demo", Ticket: "01", AnswerFile: answerPath})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	ticketPath := filepath.Join(storageDir, "maps", "demo", "issues", "01-first.md")
+	ticketPath := filepath.Join(storageDir, "maps", "2026-08-03-demo", "issues", "01-first.md")
 	if got := strings.SplitN(resolved.String(), "\n", 2)[0]; got != "01\t"+ticketPath {
 		t.Fatalf("resolve headline = %q, want the id and path", got)
 	}
@@ -289,7 +289,7 @@ func TestMapResolveAndOutOfScopeCloseTickets(t *testing.T) {
 
 	var ruledOut bytes.Buffer
 	err = runMapOutOfScopeWith(d, &ruledOut, wayfinder.ResolveRequest{
-		MapID: "demo", Ticket: "03", Reason: "A separate effort owns the client.",
+		MapID: "2026-08-03-demo", Ticket: "03", Reason: "A separate effort owns the client.",
 	})
 	if err != nil {
 		t.Fatalf("out-of-scope: %v", err)
@@ -298,7 +298,7 @@ func TestMapResolveAndOutOfScopeCloseTickets(t *testing.T) {
 		t.Fatalf("out-of-scope output = %q", ruledOut.String())
 	}
 
-	mapMD, err := os.ReadFile(filepath.Join(storageDir, "maps", "demo", "map.md"))
+	mapMD, err := os.ReadFile(filepath.Join(storageDir, "maps", "2026-08-03-demo", "map.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +318,7 @@ func TestMapResolveAndOutOfScopeCloseTickets(t *testing.T) {
 	// Both resolutions move the frontier on: 01 is gone from it and 02, which
 	// waited on 01, is what the next window is handed.
 	var next bytes.Buffer
-	if err := runMapNextWith(d, &next, "demo", false); err != nil {
+	if err := runMapNextWith(d, &next, "2026-08-03-demo", false); err != nil {
 		t.Fatalf("next after resolving: %v", err)
 	}
 	if !strings.HasPrefix(next.String(), "02\t") {
@@ -331,13 +331,13 @@ func TestMapResolveAndOutOfScopeCloseTickets(t *testing.T) {
 // missing one refuses by name, and a dirty repository only ever warns.
 func TestMapResolveDraftFlagsRecordAndWarnOnDirtyTree(t *testing.T) {
 	t.Parallel()
-	files := oneTicketMapFiles("demo")
-	files["maps/demo/adrs/978d65fd-slug.md"] = "# Decision\n\nShip it.\n"
+	files := oneTicketMapFiles("2026-08-03-demo")
+	files["maps/2026-08-03-demo/adrs/978d65fd-slug.md"] = "# Decision\n\nShip it.\n"
 	d, storageDir, _ := mapRegistryTestDeps(t, files)
-	if err := runMapRegisterWith(d, &bytes.Buffer{}, "demo"); err != nil {
+	if err := runMapRegisterWith(d, &bytes.Buffer{}, "2026-08-03-demo"); err != nil {
 		t.Fatal(err)
 	}
-	mapDir := filepath.Join(storageDir, "maps", "demo")
+	mapDir := filepath.Join(storageDir, "maps", "2026-08-03-demo")
 
 	answerPath := filepath.Join(t.TempDir(), "answer.md")
 	if err := os.WriteFile(answerPath, []byte("Ship it.\n"), 0o644); err != nil {
@@ -350,7 +350,7 @@ func TestMapResolveDraftFlagsRecordAndWarnOnDirtyTree(t *testing.T) {
 	// refuse.
 	var resolved bytes.Buffer
 	err := runMapResolveWith(d, &resolved, wayfinder.ResolveRequest{
-		MapID: "demo", Ticket: "01", AnswerFile: answerPath,
+		MapID: "2026-08-03-demo", Ticket: "01", AnswerFile: answerPath,
 		ADRDrafts: []string{"adrs/978d65fd-slug.md"},
 	})
 	if err != nil {
@@ -375,7 +375,7 @@ func TestMapResolveDraftFlagsRecordAndWarnOnDirtyTree(t *testing.T) {
 
 	// A declared draft that does not exist refuses by name, writing nothing.
 	err = runMapResolveWith(d, &bytes.Buffer{}, wayfinder.ResolveRequest{
-		MapID: "demo", Ticket: "01", AnswerFile: answerPath,
+		MapID: "2026-08-03-demo", Ticket: "01", AnswerFile: answerPath,
 		ADRDrafts: []string{"adrs/nope.md"},
 	})
 	if err == nil || !strings.Contains(err.Error(), "--adr adrs/nope.md") {
@@ -396,28 +396,28 @@ func TestMapResolveDraftFlagsRecordAndWarnOnDirtyTree(t *testing.T) {
 // of map.md sees.
 func TestMapSpawnedRecordsTheHandoff(t *testing.T) {
 	t.Parallel()
-	d, storageDir, _ := mapRegistryTestDeps(t, oneTicketMapFiles("demo"))
-	if err := runMapRegisterWith(d, &bytes.Buffer{}, "demo"); err != nil {
+	d, storageDir, _ := mapRegistryTestDeps(t, oneTicketMapFiles("2026-08-03-demo"))
+	if err := runMapRegisterWith(d, &bytes.Buffer{}, "2026-08-03-demo"); err != nil {
 		t.Fatal(err)
 	}
 
 	var recorded bytes.Buffer
-	if err := runMapSpawnedWith(d, &recorded, "demo", "2026-08-05-implementing"); err != nil {
+	if err := runMapSpawnedWith(d, &recorded, "2026-08-03-demo", "2026-08-05-implementing"); err != nil {
 		t.Fatalf("spawned: %v", err)
 	}
-	if !strings.Contains(recorded.String(), "map demo spawned task set 2026-08-05-implementing") {
+	if !strings.Contains(recorded.String(), "map 2026-08-03-demo spawned task set 2026-08-05-implementing") {
 		t.Fatalf("spawned output = %q", recorded.String())
 	}
 
 	var again bytes.Buffer
-	if err := runMapSpawnedWith(d, &again, "demo", "2026-08-05-implementing"); err != nil {
+	if err := runMapSpawnedWith(d, &again, "2026-08-03-demo", "2026-08-05-implementing"); err != nil {
 		t.Fatalf("second spawned: %v", err)
 	}
 	if !strings.Contains(again.String(), "already lists task set 2026-08-05-implementing") {
 		t.Fatalf("second spawned output = %q", again.String())
 	}
 
-	mapDir := filepath.Join(storageDir, "maps", "demo")
+	mapDir := filepath.Join(storageDir, "maps", "2026-08-03-demo")
 	manifest, err := os.ReadFile(filepath.Join(mapDir, "index.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -444,7 +444,7 @@ func TestMapSpawnedRecordsTheHandoff(t *testing.T) {
 	// records what the effort spawned, so a set that resolves to nothing is
 	// reported, never dropped.
 	var shown bytes.Buffer
-	if err := runMapShowWith(d, &shown, "demo"); err != nil {
+	if err := runMapShowWith(d, &shown, "2026-08-03-demo"); err != nil {
 		t.Fatalf("show: %v", err)
 	}
 	if !strings.Contains(shown.String(), "Spawned sets:\n  2026-08-05-implementing — (missing)") {
@@ -454,18 +454,18 @@ func TestMapSpawnedRecordsTheHandoff(t *testing.T) {
 
 func TestMapClaimCompletionOffersUnresolvedTickets(t *testing.T) {
 	t.Parallel()
-	d, _, _ := mapRegistryTestDeps(t, threeTicketMapFiles("demo"))
-	if err := runMapRegisterWith(d, &bytes.Buffer{}, "demo"); err != nil {
+	d, _, _ := mapRegistryTestDeps(t, threeTicketMapFiles("2026-08-03-demo"))
+	if err := runMapRegisterWith(d, &bytes.Buffer{}, "2026-08-03-demo"); err != nil {
 		t.Fatal(err)
 	}
-	if ids, _ := mapClaimCmd.ValidArgsFunction(mapClaimCmd, nil, ""); !slices.Equal(ids, []string{"demo"}) {
-		t.Fatalf("first positional completion = %v, want [demo]", ids)
+	if ids, _ := mapClaimCmd.ValidArgsFunction(mapClaimCmd, nil, ""); !slices.Equal(ids, []string{"2026-08-03-demo"}) {
+		t.Fatalf("first positional completion = %v, want [2026-08-03-demo]", ids)
 	}
-	ids, _ := mapClaimCmd.ValidArgsFunction(mapClaimCmd, []string{"demo"}, "")
+	ids, _ := mapClaimCmd.ValidArgsFunction(mapClaimCmd, []string{"2026-08-03-demo"}, "")
 	if !slices.Equal(ids, []string{"01", "02", "03"}) {
 		t.Fatalf("ticket completion = %v", ids)
 	}
-	if third, _ := mapClaimCmd.ValidArgsFunction(mapClaimCmd, []string{"demo", "01"}, ""); third != nil {
+	if third, _ := mapClaimCmd.ValidArgsFunction(mapClaimCmd, []string{"2026-08-03-demo", "01"}, ""); third != nil {
 		t.Fatalf("completion offered a third positional: %v", third)
 	}
 }
@@ -476,16 +476,16 @@ func TestMapClaimCompletionOffersUnresolvedTickets(t *testing.T) {
 // nothing left instead of failing.
 func TestMapFanOutGrillsTheWholeFrontierThenTopsUp(t *testing.T) {
 	t.Parallel()
-	d, storageDir, _ := mapRegistryTestDeps(t, threeTicketMapFiles("demo"))
-	if err := runMapRegisterWith(d, &bytes.Buffer{}, "demo"); err != nil {
+	d, storageDir, _ := mapRegistryTestDeps(t, threeTicketMapFiles("2026-08-03-demo"))
+	if err := runMapRegisterWith(d, &bytes.Buffer{}, "2026-08-03-demo"); err != nil {
 		t.Fatal(err)
 	}
 	fake := d.Tmux.(*tmuxtest.Fake)
 	fake.Inside = true
-	session := wayfinder.MapSessionName("demo")
+	session := wayfinder.MapSessionName("2026-08-03-demo")
 
 	var out bytes.Buffer
-	if err := runMapFanOutWith(d, &out, "demo", false); err != nil {
+	if err := runMapFanOutWith(d, &out, "2026-08-03-demo", false); err != nil {
 		t.Fatalf("fan-out: %v", err)
 	}
 	// The first field of each block is the ticket id and the second its path —
@@ -496,8 +496,8 @@ func TestMapFanOutGrillsTheWholeFrontierThenTopsUp(t *testing.T) {
 			claimLines = append(claimLines, line)
 		}
 	}
-	wantFirst := "01\t" + filepath.Join(storageDir, "maps", "demo", "issues", "01-first.md")
-	wantSecond := "03\t" + filepath.Join(storageDir, "maps", "demo", "issues", "03-third.md")
+	wantFirst := "01\t" + filepath.Join(storageDir, "maps", "2026-08-03-demo", "issues", "01-first.md")
+	wantSecond := "03\t" + filepath.Join(storageDir, "maps", "2026-08-03-demo", "issues", "03-third.md")
 	if len(claimLines) != 2 || claimLines[0] != wantFirst || claimLines[1] != wantSecond {
 		t.Fatalf("claim lines = %v, want 01 then 03 (02 is blocked)", claimLines)
 	}
@@ -516,7 +516,7 @@ func TestMapFanOutGrillsTheWholeFrontierThenTopsUp(t *testing.T) {
 
 	// An exhausted frontier is a message and exit 0, so fan-out is safe to re-run.
 	var again bytes.Buffer
-	if err := runMapFanOutWith(d, &again, "demo", false); err != nil {
+	if err := runMapFanOutWith(d, &again, "2026-08-03-demo", false); err != nil {
 		t.Fatalf("re-run over an empty frontier = %v, want success", err)
 	}
 	if !strings.Contains(again.String(), "no frontier ticket to grill") {
@@ -535,16 +535,16 @@ func TestMapFanOutGrillsTheWholeFrontierThenTopsUp(t *testing.T) {
 // moving the operator, and a second call returns to that same pane.
 func TestMapAssistOpensTheMapScopedPaneAndStays(t *testing.T) {
 	t.Parallel()
-	d, _, _ := mapRegistryTestDeps(t, threeTicketMapFiles("demo"))
-	if err := runMapRegisterWith(d, &bytes.Buffer{}, "demo"); err != nil {
+	d, _, _ := mapRegistryTestDeps(t, threeTicketMapFiles("2026-08-03-demo"))
+	if err := runMapRegisterWith(d, &bytes.Buffer{}, "2026-08-03-demo"); err != nil {
 		t.Fatal(err)
 	}
 	fake := d.Tmux.(*tmuxtest.Fake)
 	fake.Inside = true
-	session := wayfinder.MapSessionName("demo")
+	session := wayfinder.MapSessionName("2026-08-03-demo")
 
 	var out bytes.Buffer
-	if err := runMapAssistWith(d, &out, "demo", false); err != nil {
+	if err := runMapAssistWith(d, &out, "2026-08-03-demo", false); err != nil {
 		t.Fatalf("assist: %v", err)
 	}
 	if !strings.Contains(out.String(), "opened assist pane assist · "+tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(nil))+" in "+session+":map") {
@@ -555,8 +555,8 @@ func TestMapAssistOpensTheMapScopedPaneAndStays(t *testing.T) {
 	if !strings.Contains(out.String(), "resolves none") {
 		t.Fatalf("assist did not state the write boundary:\n%s", out.String())
 	}
-	pane := onlyGrillingPane(t, d, "demo")
-	if got := strings.Join(fake.SentCommands[pane], " "); !strings.Contains(got, "/pop-wayfinder assist demo") {
+	pane := onlyGrillingPane(t, d, "2026-08-03-demo")
+	if got := strings.Join(fake.SentCommands[pane], " "); !strings.Contains(got, "/pop-wayfinder assist 2026-08-03-demo") {
 		t.Fatalf("assist pane runs %q, want the assist-mode invocation for the map", got)
 	}
 	if len(fake.Switched) != 0 || len(fake.Attached) != 0 {
@@ -568,7 +568,7 @@ func TestMapAssistOpensTheMapScopedPaneAndStays(t *testing.T) {
 
 	// Nothing was claimed, so the frontier verbs still have the whole frontier.
 	var next bytes.Buffer
-	if err := runMapNextWith(d, &next, "demo", false); err != nil {
+	if err := runMapNextWith(d, &next, "2026-08-03-demo", false); err != nil {
 		t.Fatalf("next after assist: %v", err)
 	}
 	if !strings.HasPrefix(next.String(), "01\t") {
@@ -579,13 +579,13 @@ func TestMapAssistOpensTheMapScopedPaneAndStays(t *testing.T) {
 	// Map's prose.
 	fake.PaneInfos = map[string]tmuxmod.PaneInfo{pane: {Session: session, Command: "claude"}}
 	var again bytes.Buffer
-	if err := runMapAssistWith(d, &again, "demo", false); err != nil {
+	if err := runMapAssistWith(d, &again, "2026-08-03-demo", false); err != nil {
 		t.Fatalf("second assist: %v", err)
 	}
 	if !strings.Contains(again.String(), "returned to assist pane assist · "+tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(nil))+" in "+session+":map") {
 		t.Fatalf("second assist = %q, want a return to the first pane", again.String())
 	}
-	if got, _ := fake.PaneTagValue(pane, tmuxmod.TagAssist); got != "demo" {
+	if got, _ := fake.PaneTagValue(pane, tmuxmod.TagAssist); got != "2026-08-03-demo" {
 		t.Fatalf("assist pane tag = %q, want the map id", got)
 	}
 }
@@ -619,19 +619,19 @@ func onlyGrillingPane(t *testing.T, d *wayfinder.Deps, mapID string) string {
 // and the read verbs touch tmux not at all.
 func TestMapSessionPerMapAutoOpensWithoutRelocatingTheCaller(t *testing.T) {
 	t.Parallel()
-	d, _, _ := mapRegistryTestDeps(t, threeTicketMapFiles("demo"))
+	d, _, _ := mapRegistryTestDeps(t, threeTicketMapFiles("2026-08-03-demo"))
 	fake := d.Tmux.(*tmuxtest.Fake)
 	fake.Inside = true
-	session := wayfinder.MapSessionName("demo")
+	session := wayfinder.MapSessionName("2026-08-03-demo")
 
 	var registered bytes.Buffer
-	if err := runMapRegisterWith(d, &registered, "demo"); err != nil {
+	if err := runMapRegisterWith(d, &registered, "2026-08-03-demo"); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(registered.String(), "opened tmux session "+session) {
 		t.Fatalf("register did not report the session it opened:\n%s", registered.String())
 	}
-	if stamp := fake.WorkStamps[session]; stamp.Kind != "map" || stamp.ID != "demo" {
+	if stamp := fake.WorkStamps[session]; stamp.Kind != "map" || stamp.ID != "2026-08-03-demo" {
 		t.Fatalf("work stamp = %+v, want kind map with the map id", stamp)
 	}
 	if len(fake.Switched) != 0 || len(fake.Attached) != 0 {
@@ -639,7 +639,7 @@ func TestMapSessionPerMapAutoOpensWithoutRelocatingTheCaller(t *testing.T) {
 	}
 
 	var next bytes.Buffer
-	if err := runMapNextWith(d, &next, "demo", true); err != nil {
+	if err := runMapNextWith(d, &next, "2026-08-03-demo", true); err != nil {
 		t.Fatalf("next: %v", err)
 	}
 	wantPane := "01-first · " + tasks.FormatAgentEntry(tasks.EffectiveAttendedEntry(nil))
@@ -650,7 +650,7 @@ func TestMapSessionPerMapAutoOpensWithoutRelocatingTheCaller(t *testing.T) {
 	if len(panes) != 1 || fake.PaneTitles[panes[0]] != wantPane {
 		t.Fatalf("grilling panes = %v (titles %v), want one titled after the ticket", fake.Windows[session], fake.PaneTitles)
 	}
-	if got := strings.Join(fake.SentCommands[panes[0]], " "); !strings.Contains(got, "/pop-wayfinder work demo 01") {
+	if got := strings.Join(fake.SentCommands[panes[0]], " "); !strings.Contains(got, "/pop-wayfinder work 2026-08-03-demo 01") {
 		t.Fatalf("grilling pane runs %q, want the work-mode invocation", got)
 	}
 	if len(fake.Switched) != 1 || fake.Switched[0] != session {
@@ -660,7 +660,7 @@ func TestMapSessionPerMapAutoOpensWithoutRelocatingTheCaller(t *testing.T) {
 	// An in-place write from anywhere reports the session and leaves the caller
 	// where they are — an agent resolving from a Task-set pane must not be moved.
 	var claimed bytes.Buffer
-	if err := runMapClaimWith(d, &claimed, "demo", "03"); err != nil {
+	if err := runMapClaimWith(d, &claimed, "2026-08-03-demo", "03"); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 	if !strings.Contains(claimed.String(), "tmux session "+session+" is live") {
@@ -672,13 +672,13 @@ func TestMapSessionPerMapAutoOpensWithoutRelocatingTheCaller(t *testing.T) {
 	}
 	var resolved bytes.Buffer
 	if err := runMapResolveWith(d, &resolved, wayfinder.ResolveRequest{
-		MapID: "demo", Ticket: "01", AnswerFile: answerPath,
+		MapID: "2026-08-03-demo", Ticket: "01", AnswerFile: answerPath,
 	}); err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
 	var ruledOut bytes.Buffer
 	if err := runMapOutOfScopeWith(d, &ruledOut, wayfinder.ResolveRequest{
-		MapID: "demo", Ticket: "03", Reason: "Another effort owns it.",
+		MapID: "2026-08-03-demo", Ticket: "03", Reason: "Another effort owns it.",
 	}); err != nil {
 		t.Fatalf("out-of-scope: %v", err)
 	}
@@ -694,7 +694,7 @@ func TestMapSessionPerMapAutoOpensWithoutRelocatingTheCaller(t *testing.T) {
 	// Reads never create tmux state, so they get a fake with nothing arranged.
 	quiet := &tmuxtest.Fake{}
 	d.Tmux = quiet
-	if err := runMapShowWith(d, &bytes.Buffer{}, "demo"); err != nil {
+	if err := runMapShowWith(d, &bytes.Buffer{}, "2026-08-03-demo"); err != nil {
 		t.Fatal(err)
 	}
 	if err := runMapStatusWith(d, &bytes.Buffer{}, false); err != nil {
@@ -710,20 +710,20 @@ func TestMapSessionPerMapAutoOpensWithoutRelocatingTheCaller(t *testing.T) {
 // that fixes it.
 func TestMapNextRefusesAnUnresolvableTrunk(t *testing.T) {
 	t.Parallel()
-	d, _, _ := mapRegistryTestDeps(t, threeTicketMapFiles("demo"))
-	if err := runMapRegisterWith(d, &bytes.Buffer{}, "demo"); err != nil {
+	d, _, _ := mapRegistryTestDeps(t, threeTicketMapFiles("2026-08-03-demo"))
+	if err := runMapRegisterWith(d, &bytes.Buffer{}, "2026-08-03-demo"); err != nil {
 		t.Fatal(err)
 	}
 	d.Trunk = func() (string, error) { return "", wayfinder.ErrNoTrunk }
 
-	err := runMapNextWith(d, &bytes.Buffer{}, "demo", false)
+	err := runMapNextWith(d, &bytes.Buffer{}, "2026-08-03-demo", false)
 	if err == nil || !strings.Contains(err.Error(), "--trunk <path>") {
 		t.Fatalf("err = %v, want a refusal naming --trunk <path>", err)
 	}
 	// The frontier is untouched, so the ticket is still there once a Trunk is named.
 	d.Trunk = func() (string, error) { return t.TempDir(), nil }
 	var next bytes.Buffer
-	if err := runMapNextWith(d, &next, "demo", false); err != nil {
+	if err := runMapNextWith(d, &next, "2026-08-03-demo", false); err != nil {
 		t.Fatalf("next after naming a trunk: %v", err)
 	}
 	if !strings.HasPrefix(next.String(), "01\t") {
@@ -739,32 +739,32 @@ func TestMapNextRefusesAnUnresolvableTrunk(t *testing.T) {
 // with the Map, the arrived Map stays on the table, and open puts it back.
 func TestMapArriveAndOpenDeclareArrival(t *testing.T) {
 	t.Parallel()
-	d, storageDir, _ := mapRegistryTestDeps(t, oneTicketMapFiles("demo"))
-	fake := &tmuxtest.Fake{Live: map[string]string{wayfinder.MapSessionName("demo"): "/repo"}}
+	d, storageDir, _ := mapRegistryTestDeps(t, oneTicketMapFiles("2026-08-03-demo"))
+	fake := &tmuxtest.Fake{Live: map[string]string{wayfinder.MapSessionName("2026-08-03-demo"): "/repo"}}
 	d.Tmux = fake
-	if err := runMapRegisterWith(d, &bytes.Buffer{}, "demo"); err != nil {
+	if err := runMapRegisterWith(d, &bytes.Buffer{}, "2026-08-03-demo"); err != nil {
 		t.Fatal(err)
 	}
 
 	var arriveBuf bytes.Buffer
-	if err := runMapArriveWith(d, &arriveBuf, "demo"); err != nil {
+	if err := runMapArriveWith(d, &arriveBuf, "2026-08-03-demo"); err != nil {
 		t.Fatal(err)
 	}
 	out := arriveBuf.String()
 	for _, want := range []string{
-		"Map demo is arrived (was active)",
+		"Map 2026-08-03-demo is arrived (was active)",
 		"warning: 1 ticket(s) still unresolved",
 		"01  open",
-		"tore down tmux session " + wayfinder.MapSessionName("demo"),
+		"tore down tmux session " + wayfinder.MapSessionName("2026-08-03-demo"),
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("arrive output missing %q:\n%s", want, out)
 		}
 	}
-	if fake.HasSession(wayfinder.MapSessionName("demo")) {
+	if fake.HasSession(wayfinder.MapSessionName("2026-08-03-demo")) {
 		t.Fatal("the map's tmux session survived arrival")
 	}
-	body, err := os.ReadFile(filepath.Join(storageDir, "maps", "demo", "map.md"))
+	body, err := os.ReadFile(filepath.Join(storageDir, "maps", "2026-08-03-demo", "map.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -776,15 +776,15 @@ func TestMapArriveAndOpenDeclareArrival(t *testing.T) {
 	if err := runMapStatusWith(d, &statusBuf, false); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(statusBuf.String(), "demo") || !strings.Contains(statusBuf.String(), "arrived") {
+	if !strings.Contains(statusBuf.String(), "2026-08-03-demo") || !strings.Contains(statusBuf.String(), "arrived") {
 		t.Fatalf("arrived map missing from the default table:\n%s", statusBuf.String())
 	}
 
 	var openBuf bytes.Buffer
-	if err := runMapOpenWith(d, &openBuf, "demo"); err != nil {
+	if err := runMapOpenWith(d, &openBuf, "2026-08-03-demo"); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(openBuf.String(), "Map demo is active (was arrived)") {
+	if !strings.Contains(openBuf.String(), "Map 2026-08-03-demo is active (was arrived)") {
 		t.Fatalf("open output = %q", openBuf.String())
 	}
 }
@@ -794,25 +794,25 @@ func TestMapArriveAndOpenDeclareArrival(t *testing.T) {
 // and the same `open` that reverses arrival bringing it back.
 func TestMapAbandonAndReopenFromTheCLI(t *testing.T) {
 	t.Parallel()
-	d, storageDir, _ := mapRegistryTestDeps(t, oneTicketMapFiles("demo"))
-	fake := &tmuxtest.Fake{Live: map[string]string{wayfinder.MapSessionName("demo"): "/repo"}}
+	d, storageDir, _ := mapRegistryTestDeps(t, oneTicketMapFiles("2026-08-03-demo"))
+	fake := &tmuxtest.Fake{Live: map[string]string{wayfinder.MapSessionName("2026-08-03-demo"): "/repo"}}
 	d.Tmux = fake
-	if err := runMapRegisterWith(d, &bytes.Buffer{}, "demo"); err != nil {
+	if err := runMapRegisterWith(d, &bytes.Buffer{}, "2026-08-03-demo"); err != nil {
 		t.Fatal(err)
 	}
 
 	var abandonBuf bytes.Buffer
-	if err := runMapAbandonWith(d, &abandonBuf, "demo"); err != nil {
+	if err := runMapAbandonWith(d, &abandonBuf, "2026-08-03-demo"); err != nil {
 		t.Fatal(err)
 	}
-	if out := abandonBuf.String(); !strings.Contains(out, "Map demo is abandoned (was active)") {
+	if out := abandonBuf.String(); !strings.Contains(out, "Map 2026-08-03-demo is abandoned (was active)") {
 		t.Fatalf("abandon output = %q", out)
 	}
 	// Abandonment is not arrival: the session it may have been typed from survives.
-	if !fake.HasSession(wayfinder.MapSessionName("demo")) {
+	if !fake.HasSession(wayfinder.MapSessionName("2026-08-03-demo")) {
 		t.Fatal("abandon tore down the map's tmux session")
 	}
-	body, err := os.ReadFile(filepath.Join(storageDir, "maps", "demo", "map.md"))
+	body, err := os.ReadFile(filepath.Join(storageDir, "maps", "2026-08-03-demo", "map.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -824,49 +824,49 @@ func TestMapAbandonAndReopenFromTheCLI(t *testing.T) {
 	if err := runMapStatusWith(d, &statusBuf, false); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(statusBuf.String(), "demo") {
+	if strings.Contains(statusBuf.String(), "2026-08-03-demo") {
 		t.Fatalf("abandoned map still on the default table:\n%s", statusBuf.String())
 	}
 
 	var openBuf bytes.Buffer
-	if err := runMapOpenWith(d, &openBuf, "demo"); err != nil {
+	if err := runMapOpenWith(d, &openBuf, "2026-08-03-demo"); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(openBuf.String(), "Map demo is active (was abandoned)") {
+	if !strings.Contains(openBuf.String(), "Map 2026-08-03-demo is active (was abandoned)") {
 		t.Fatalf("open output = %q", openBuf.String())
 	}
 	var afterBuf bytes.Buffer
 	if err := runMapStatusWith(d, &afterBuf, false); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(afterBuf.String(), "demo") {
+	if !strings.Contains(afterBuf.String(), "2026-08-03-demo") {
 		t.Fatalf("reopened map missing from the default table:\n%s", afterBuf.String())
 	}
 }
 
 func TestMapArchiveRoundTrip(t *testing.T) {
 	t.Parallel()
-	d, storageDir, _ := mapRegistryTestDeps(t, oneTicketMapFiles("demo"))
-	mapPath := filepath.Join(storageDir, "maps", "demo", "map.md")
+	d, storageDir, _ := mapRegistryTestDeps(t, oneTicketMapFiles("2026-08-03-demo"))
+	mapPath := filepath.Join(storageDir, "maps", "2026-08-03-demo", "map.md")
 	original, err := os.ReadFile(mapPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if err := runMapArchiveWith(d, &bytes.Buffer{}, "demo"); err == nil {
+	if err := runMapArchiveWith(d, &bytes.Buffer{}, "2026-08-03-demo"); err == nil {
 		t.Fatal("expected archive to refuse an unregistered map")
-	} else if !strings.Contains(err.Error(), "pop map register demo") {
+	} else if !strings.Contains(err.Error(), "pop map register 2026-08-03-demo") {
 		t.Fatalf("error = %v", err)
 	}
-	if err := runMapRegisterWith(d, &bytes.Buffer{}, "demo"); err != nil {
+	if err := runMapRegisterWith(d, &bytes.Buffer{}, "2026-08-03-demo"); err != nil {
 		t.Fatal(err)
 	}
 
 	var archiveBuf bytes.Buffer
-	if err := runMapArchiveWith(d, &archiveBuf, "demo"); err != nil {
+	if err := runMapArchiveWith(d, &archiveBuf, "2026-08-03-demo"); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(archiveBuf.String(), "Archived map demo") {
+	if !strings.Contains(archiveBuf.String(), "Archived map 2026-08-03-demo") {
 		t.Fatalf("archive output = %q", archiveBuf.String())
 	}
 	if after, err := os.ReadFile(mapPath); err != nil || string(after) != string(original) {
@@ -877,32 +877,32 @@ func TestMapArchiveRoundTrip(t *testing.T) {
 	if err := runMapStatusWith(d, &statusBuf, false); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(statusBuf.String(), "demo") {
+	if strings.Contains(statusBuf.String(), "2026-08-03-demo") {
 		t.Fatalf("archived map visible in default status:\n%s", statusBuf.String())
 	}
 
 	var unarchiveBuf bytes.Buffer
-	if err := runMapUnarchiveWith(d, &unarchiveBuf, "demo"); err != nil {
+	if err := runMapUnarchiveWith(d, &unarchiveBuf, "2026-08-03-demo"); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(unarchiveBuf.String(), "Unarchived map demo") {
+	if !strings.Contains(unarchiveBuf.String(), "Unarchived map 2026-08-03-demo") {
 		t.Fatalf("unarchive output = %q", unarchiveBuf.String())
 	}
 }
 
 // TestMapShellCompletionOffersMapIDs pins the completion split: every verb
-// offers the visible Maps, unarchive offers only the filed-away one.
+// offers the visible Maps, unarchive offers only the 2026-08-04-filed-away one.
 func TestMapShellCompletionOffersMapIDs(t *testing.T) {
 	t.Parallel()
 	files := oneTicketMapFiles("visible")
-	for rel, content := range oneTicketMapFiles("filed-away") {
+	for rel, content := range oneTicketMapFiles("2026-08-04-filed-away") {
 		files[rel] = content
 	}
 	d, _, _ := mapRegistryTestDeps(t, files)
-	if err := runMapRegisterWith(d, &bytes.Buffer{}, "filed-away"); err != nil {
+	if err := runMapRegisterWith(d, &bytes.Buffer{}, "2026-08-04-filed-away"); err != nil {
 		t.Fatal(err)
 	}
-	if err := runMapArchiveWith(d, &bytes.Buffer{}, "filed-away"); err != nil {
+	if err := runMapArchiveWith(d, &bytes.Buffer{}, "2026-08-04-filed-away"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -916,8 +916,8 @@ func TestMapShellCompletionOffersMapIDs(t *testing.T) {
 		}
 	}
 	got, _ := mapUnarchiveCmd.ValidArgsFunction(mapUnarchiveCmd, nil, "")
-	if !slices.Equal(got, []string{"filed-away"}) {
-		t.Fatalf("unarchive completion = %v, want [filed-away]", got)
+	if !slices.Equal(got, []string{"2026-08-04-filed-away"}) {
+		t.Fatalf("unarchive completion = %v, want [2026-08-04-filed-away]", got)
 	}
 	if second, _ := mapStatusCmd.ValidArgsFunction(mapStatusCmd, []string{"visible"}, ""); second != nil {
 		t.Fatalf("completion offered a second positional: %v", second)
@@ -944,10 +944,10 @@ func TestMapStatusAcceptsOptionalMapArg(t *testing.T) {
 	if err := mapStatusCmd.Args(mapStatusCmd, []string{}); err != nil {
 		t.Fatalf("bare status: %v", err)
 	}
-	if err := mapStatusCmd.Args(mapStatusCmd, []string{"demo"}); err != nil {
+	if err := mapStatusCmd.Args(mapStatusCmd, []string{"2026-08-03-demo"}); err != nil {
 		t.Fatalf("status with one map id: %v", err)
 	}
-	if err := mapStatusCmd.Args(mapStatusCmd, []string{"demo", "extra"}); err == nil {
+	if err := mapStatusCmd.Args(mapStatusCmd, []string{"2026-08-03-demo", "extra"}); err == nil {
 		t.Fatal("expected error for two positional args")
 	}
 }
@@ -1167,18 +1167,18 @@ func TestMapVerbsRecordTheMapsTrunkInHistory(t *testing.T) {
 		run  func(*wayfinder.Deps) error
 	}{
 		{name: "open", run: func(d *wayfinder.Deps) error {
-			return runMapOpenWith(d, &bytes.Buffer{}, "demo")
+			return runMapOpenWith(d, &bytes.Buffer{}, "2026-08-03-demo")
 		}},
 		{name: "assist", run: func(d *wayfinder.Deps) error {
-			return runMapAssistWith(d, &bytes.Buffer{}, "demo", false)
+			return runMapAssistWith(d, &bytes.Buffer{}, "2026-08-03-demo", false)
 		}},
 		{name: "next", run: func(d *wayfinder.Deps) error {
-			return runMapNextWith(d, &bytes.Buffer{}, "demo", false)
+			return runMapNextWith(d, &bytes.Buffer{}, "2026-08-03-demo", false)
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			d, _, _ := mapRegistryTestDeps(t, oneTicketMapFiles("demo"))
-			if err := runMapRegisterWith(d, &bytes.Buffer{}, "demo"); err != nil {
+			d, _, _ := mapRegistryTestDeps(t, oneTicketMapFiles("2026-08-03-demo"))
+			if err := runMapRegisterWith(d, &bytes.Buffer{}, "2026-08-03-demo"); err != nil {
 				t.Fatal(err)
 			}
 			// Registration only reports where the session is; nothing has landed yet.
@@ -1188,7 +1188,7 @@ func TestMapVerbsRecordTheMapsTrunkInHistory(t *testing.T) {
 			if err := tc.run(d); err != nil {
 				t.Fatalf("%s: %v", tc.name, err)
 			}
-			trunk := d.Tmux.(*tmuxtest.Fake).Live[wayfinder.MapSessionName("demo")]
+			trunk := d.Tmux.(*tmuxtest.Fake).Live[wayfinder.MapSessionName("2026-08-03-demo")]
 			if trunk == "" {
 				t.Fatal("the map session was rooted nowhere")
 			}

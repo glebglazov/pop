@@ -24,34 +24,34 @@ func mapStatusOnDisk(t *testing.T, d *Deps, storageDir, mapID string) MapStatus 
 // The whole arrival round trip against real files: arrive writes the status and
 // takes the Map's tmux session with it, open puts the Map back on the frontier.
 func TestArriveWritesStatusAndTearsDownSessionThenOpenReverses(t *testing.T) {
-	d, storageDir := registryFixture(t, oneTicketMap("demo-map"))
+	d, storageDir := registryFixture(t, oneTicketMap("2026-08-03-demo-map"))
 	fake := &tmuxtest.Fake{Live: map[string]string{
-		MapSessionName("demo-map"): "/repo",
+		MapSessionName("2026-08-03-demo-map"): "/repo",
 		"pop-map-other":            "/repo",
 	}}
 	d.Tmux = fake
-	mustRegister(t, d, "demo-map")
+	mustRegister(t, d, "2026-08-03-demo-map")
 
-	arrived, err := ArriveMap(d, "", "demo-map")
+	arrived, err := ArriveMap(d, "", "2026-08-03-demo-map")
 	if err != nil {
 		t.Fatalf("ArriveMap: %v", err)
 	}
 	if arrived.Status != MapArrived || arrived.Previous != MapActive || arrived.Unchanged {
 		t.Fatalf("result = %+v, want active -> arrived", arrived)
 	}
-	if arrived.KilledSession != MapSessionName("demo-map") {
-		t.Fatalf("killed session = %q, want %q", arrived.KilledSession, MapSessionName("demo-map"))
+	if arrived.KilledSession != MapSessionName("2026-08-03-demo-map") {
+		t.Fatalf("killed session = %q, want %q", arrived.KilledSession, MapSessionName("2026-08-03-demo-map"))
 	}
-	if fake.HasSession(MapSessionName("demo-map")) {
+	if fake.HasSession(MapSessionName("2026-08-03-demo-map")) {
 		t.Fatal("the map's session survived arrival")
 	}
 	if !fake.HasSession("pop-map-other") {
 		t.Fatal("arrival killed another map's session")
 	}
-	if got := mapStatusOnDisk(t, d, storageDir, "demo-map"); got != MapArrived {
+	if got := mapStatusOnDisk(t, d, storageDir, "2026-08-03-demo-map"); got != MapArrived {
 		t.Fatalf("on-disk status = %q, want arrived", got)
 	}
-	body, err := os.ReadFile(filepath.Join(storageDir, "maps", "demo-map", "map.md"))
+	body, err := os.ReadFile(filepath.Join(storageDir, "maps", "2026-08-03-demo-map", "map.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestArriveWritesStatusAndTearsDownSessionThenOpenReverses(t *testing.T) {
 		t.Fatalf("map.md still carries the old status:\n%s", body)
 	}
 	// Arrival is a declaration, so re-declaring it is a no-op and not an error.
-	again, err := ArriveMap(d, "", "demo-map")
+	again, err := ArriveMap(d, "", "2026-08-03-demo-map")
 	if err != nil {
 		t.Fatalf("second ArriveMap: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestArriveWritesStatusAndTearsDownSessionThenOpenReverses(t *testing.T) {
 		t.Fatalf("second arrive = %+v, want unchanged with no session to kill", again)
 	}
 
-	reopened, err := OpenMap(d, "", "demo-map")
+	reopened, err := OpenMap(d, "", "2026-08-03-demo-map")
 	if err != nil {
 		t.Fatalf("OpenMap: %v", err)
 	}
@@ -78,13 +78,13 @@ func TestArriveWritesStatusAndTearsDownSessionThenOpenReverses(t *testing.T) {
 	if reopened.Session == nil || !reopened.Session.Created {
 		t.Fatalf("open session = %+v, want a freshly created one", reopened.Session)
 	}
-	if !fake.HasSession(MapSessionName("demo-map")) {
+	if !fake.HasSession(MapSessionName("2026-08-03-demo-map")) {
 		t.Fatal("open did not bring the map's session back")
 	}
 	if len(fake.Attached) == 0 && len(fake.Switched) == 0 {
 		t.Fatal("open did not put the caller in the session")
 	}
-	if got := mapStatusOnDisk(t, d, storageDir, "demo-map"); got != MapActive {
+	if got := mapStatusOnDisk(t, d, storageDir, "2026-08-03-demo-map"); got != MapActive {
 		t.Fatalf("status after open = %q, want active", got)
 	}
 }
@@ -92,25 +92,25 @@ func TestArriveWritesStatusAndTearsDownSessionThenOpenReverses(t *testing.T) {
 // The gate is the destination, not empty fog: unfinished tickets are listed and
 // the arrival goes through, because refusing would only buy fake resolutions.
 func TestArriveWarnsAboutUnfinishedTicketsAndProceeds(t *testing.T) {
-	files := oneTicketMap("fog-map")
-	files["maps/fog-map/issues/02-second.md"] = "## Question\nAnd?\n"
-	files["maps/fog-map/index.json"] = `{"tickets":[` +
+	files := oneTicketMap("2026-08-03-fog-map")
+	files["maps/2026-08-03-fog-map/issues/02-second.md"] = "## Question\nAnd?\n"
+	files["maps/2026-08-03-fog-map/index.json"] = `{"tickets":[` +
 		`{"id":"01","file":"01-first.md","title":"First","type":"grilling","status":"open","blocked_by":[]},` +
 		`{"id":"02","file":"02-second.md","title":"Second","type":"grilling","status":"open","blocked_by":[]}` +
 		`],"spawned_sets":[]}`
 	d, storageDir := registryFixture(t, files)
 	d.Tmux = &tmuxtest.Fake{}
 	asWindow(d, "pane:%9", at(9))
-	mustRegister(t, d, "fog-map")
-	if _, err := ClaimTicket(d, "", "fog-map", "02"); err != nil {
+	mustRegister(t, d, "2026-08-03-fog-map")
+	if _, err := ClaimTicket(d, "", "2026-08-03-fog-map", "02"); err != nil {
 		t.Fatalf("ClaimTicket: %v", err)
 	}
 
-	result, err := ArriveMap(d, "", "fog-map")
+	result, err := ArriveMap(d, "", "2026-08-03-fog-map")
 	if err != nil {
 		t.Fatalf("ArriveMap: %v", err)
 	}
-	if got := mapStatusOnDisk(t, d, storageDir, "fog-map"); got != MapArrived {
+	if got := mapStatusOnDisk(t, d, storageDir, "2026-08-03-fog-map"); got != MapArrived {
 		t.Fatalf("status = %q, want arrived despite open tickets", got)
 	}
 	if len(result.Unfinished) != 2 {

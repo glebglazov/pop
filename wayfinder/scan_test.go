@@ -144,13 +144,13 @@ func TestScanMapsBrokenFolder(t *testing.T) {
 // An arrived Map is deliberately not hidden: it is the lineage view for the sets
 // it spawned, so only archiving and abandonment take a Map off the table.
 func TestBuildStatusHidesAbandonedAndArchivedButKeepsArrived(t *testing.T) {
-	files := oneTicketMap("archived-map")
+	files := oneTicketMap("2026-08-03-archived-map")
 	files["maps/active/map.md"] = "## Destination\nactive"
 	files["maps/arrived-map/map.md"] = "Status: arrived\n\n## Destination\narrived"
 	files["maps/quit-map/map.md"] = "Status: abandoned\n\n## Destination\nquit"
 	d, _ := registryFixture(t, files)
-	mustRegister(t, d, "archived-map")
-	if _, err := ArchiveMap(d, "", "archived-map"); err != nil {
+	mustRegister(t, d, "2026-08-03-archived-map")
+	if _, err := ArchiveMap(d, "", "2026-08-03-archived-map"); err != nil {
 		t.Fatal(err)
 	}
 

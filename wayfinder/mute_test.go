@@ -60,31 +60,31 @@ func muteMapContainer(t *testing.T, k *MapKind, mapID string) work.Container {
 // went, and once the window elapses the row is simply back on the next load —
 // no write, no notification, nothing but a later `now`.
 func TestMutedMapLeavesTheDefaultViewAndComesBackWhenTheWindowEnds(t *testing.T) {
-	k, _, row := muteMapFixture(t, "demo-map")
+	k, _, row := muteMapFixture(t, "2026-08-03-demo-map")
 	until := time.Date(2026, time.August, 14, 9, 0, 0, 0, time.UTC)
 
-	if !sliceContains(muteMapUnder(t, k, "demo-map", "active"), "demo-map") {
+	if !sliceContains(muteMapUnder(t, k, "2026-08-03-demo-map", "active"), "2026-08-03-demo-map") {
 		t.Fatal("fixture map is not in the default view before muting")
 	}
-	if sliceContains(muteMapUnder(t, k, "demo-map", "muted"), "demo-map") {
+	if sliceContains(muteMapUnder(t, k, "2026-08-03-demo-map", "muted"), "2026-08-03-demo-map") {
 		t.Fatal("an unmuted map showed up in the muted preset")
 	}
 
 	if _, err := k.Mute(row, until, false); err != nil {
 		t.Fatalf("Mute: %v", err)
 	}
-	if sliceContains(muteMapUnder(t, k, "demo-map", "active"), "demo-map") {
+	if sliceContains(muteMapUnder(t, k, "2026-08-03-demo-map", "active"), "2026-08-03-demo-map") {
 		t.Fatal("a muted map is still in the default view")
 	}
-	if !sliceContains(muteMapUnder(t, k, "demo-map", "muted"), "demo-map") {
+	if !sliceContains(muteMapUnder(t, k, "2026-08-03-demo-map", "muted"), "2026-08-03-demo-map") {
 		t.Fatal("the muted preset does not hold the muted map; nothing could unmute it")
 	}
 
 	k.d.Now = func() time.Time { return until.Add(time.Second) }
-	if !sliceContains(muteMapUnder(t, k, "demo-map", "active"), "demo-map") {
+	if !sliceContains(muteMapUnder(t, k, "2026-08-03-demo-map", "active"), "2026-08-03-demo-map") {
 		t.Fatal("the map did not return to the default view once its window had passed")
 	}
-	if sliceContains(muteMapUnder(t, k, "demo-map", "muted"), "demo-map") {
+	if sliceContains(muteMapUnder(t, k, "2026-08-03-demo-map", "muted"), "2026-08-03-demo-map") {
 		t.Fatal("an elapsed window still reads as muted")
 	}
 }
@@ -93,7 +93,7 @@ func TestMutedMapLeavesTheDefaultViewAndComesBackWhenTheWindowEnds(t *testing.T)
 // offered, unmute clears it, and — unlike a Task set — there is no Auto-drain
 // consequence to name either way, since a Map has none to clear.
 func TestMapMuteAndUnmuteReadBackOnTheRow(t *testing.T) {
-	k, _, row := muteMapFixture(t, "demo-map")
+	k, _, row := muteMapFixture(t, "2026-08-03-demo-map")
 	until := time.Date(2026, time.August, 14, 9, 0, 0, 0, time.UTC)
 
 	out, err := k.Mute(row, until, false)
@@ -107,7 +107,7 @@ func TestMapMuteAndUnmuteReadBackOnTheRow(t *testing.T) {
 		t.Fatalf("mute message = %q, want the window worded as the row will read", out.Message)
 	}
 
-	muted := muteMapContainer(t, k, "demo-map")
+	muted := muteMapContainer(t, k, "2026-08-03-demo-map")
 	if !muted.MutedUntil.Equal(until) {
 		t.Fatalf("muted until %s, want %s", muted.MutedUntil, until)
 	}
@@ -123,7 +123,7 @@ func TestMapMuteAndUnmuteReadBackOnTheRow(t *testing.T) {
 	if _, err := k.Unmute(row); err != nil {
 		t.Fatalf("Unmute: %v", err)
 	}
-	unmuted := muteMapContainer(t, k, "demo-map")
+	unmuted := muteMapContainer(t, k, "2026-08-03-demo-map")
 	if !unmuted.MutedUntil.IsZero() {
 		t.Fatalf("still muted until %s after unmute", unmuted.MutedUntil)
 	}
@@ -135,7 +135,7 @@ func TestMapMuteAndUnmuteReadBackOnTheRow(t *testing.T) {
 // The random window's instant is never disclosed on a Map's row either — the
 // same secret a Task set's row keeps (decision 6).
 func TestMapSecretMuteNeverShowsItsInstant(t *testing.T) {
-	k, _, row := muteMapFixture(t, "demo-map")
+	k, _, row := muteMapFixture(t, "2026-08-03-demo-map")
 	until := time.Date(2026, time.August, 14, 3, 41, 21, 0, time.UTC)
 
 	out, err := k.Mute(row, until, true)
@@ -146,7 +146,7 @@ func TestMapSecretMuteNeverShowsItsInstant(t *testing.T) {
 		t.Fatalf("mute message = %q, want the secret withheld", out.Message)
 	}
 
-	c := muteMapContainer(t, k, "demo-map")
+	c := muteMapContainer(t, k, "2026-08-03-demo-map")
 	if !c.MuteSecret || !c.MutedUntil.Equal(until) {
 		t.Fatalf("secret mute read back as %s secret=%v", c.MutedUntil, c.MuteSecret)
 	}
@@ -165,18 +165,18 @@ func TestMapSecretMuteNeverShowsItsInstant(t *testing.T) {
 // Task set: the window passes, the row comes back on the next load, and the
 // instant is still sitting in pop.db untouched (decision 1).
 func TestMapMuteExpiresOnReadWithoutWritingAnything(t *testing.T) {
-	k, d, row := muteMapFixture(t, "demo-map")
+	k, d, row := muteMapFixture(t, "2026-08-03-demo-map")
 	until := time.Date(2026, time.August, 14, 9, 0, 0, 0, time.UTC)
 
 	if _, err := k.Mute(row, until, false); err != nil {
 		t.Fatalf("Mute: %v", err)
 	}
-	if muteMapContainer(t, k, "demo-map").MutedUntil.IsZero() {
+	if muteMapContainer(t, k, "2026-08-03-demo-map").MutedUntil.IsZero() {
 		t.Fatal("mute did not take")
 	}
 
 	k.d.Now = func() time.Time { return until.Add(time.Second) }
-	expired := muteMapContainer(t, k, "demo-map")
+	expired := muteMapContainer(t, k, "2026-08-03-demo-map")
 	if !expired.MutedUntil.IsZero() {
 		t.Fatalf("an elapsed window still reads as muted: %s", expired.MutedUntil)
 	}
@@ -188,7 +188,7 @@ func TestMapMuteExpiresOnReadWithoutWritingAnything(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openWorkRegistry: %v", err)
 	}
-	stored, ok, err := s.FindWorkContainer(MapRef("demo-map"))
+	stored, ok, err := s.FindWorkContainer(MapRef("2026-08-03-demo-map"))
 	if err != nil || !ok {
 		t.Fatalf("FindWorkContainer: %v (found=%v)", err, ok)
 	}
@@ -201,8 +201,8 @@ func TestMapMuteExpiresOnReadWithoutWritingAnything(t *testing.T) {
 // rides a registration, and creating one here would be a second, hidden
 // registration path.
 func TestMapMuteOfUnregisteredMapIsRefused(t *testing.T) {
-	k, _, _ := statusKindFixture(t, "demo-map")
-	row := mapContainer(t, k, "demo-map")
+	k, _, _ := statusKindFixture(t, "2026-08-03-demo-map")
+	row := mapContainer(t, k, "2026-08-03-demo-map")
 
 	if _, err := k.Mute(row, time.Now().Add(24*time.Hour), false); err == nil {
 		t.Fatal("muting an unregistered map succeeded")

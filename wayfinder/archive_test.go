@@ -111,21 +111,21 @@ func archivedInRegistry(t *testing.T, d *Deps, mapID string) bool {
 }
 
 func TestArchiveMapWritesRegistryBitAndRoundTrips(t *testing.T) {
-	d, storageDir := registryFixture(t, oneTicketMap("demo-map"))
-	mapPath := filepath.Join(storageDir, "maps", "demo-map", "map.md")
+	d, storageDir := registryFixture(t, oneTicketMap("2026-08-03-demo-map"))
+	mapPath := filepath.Join(storageDir, "maps", "2026-08-03-demo-map", "map.md")
 	original, err := os.ReadFile(mapPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	mustRegister(t, d, "demo-map")
+	mustRegister(t, d, "2026-08-03-demo-map")
 
-	if _, err := ArchiveMap(d, "", "demo-map"); err != nil {
+	if _, err := ArchiveMap(d, "", "2026-08-03-demo-map"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ArchiveMap(d, "", "demo-map"); err != nil {
+	if _, err := ArchiveMap(d, "", "2026-08-03-demo-map"); err != nil {
 		t.Fatalf("second archive should be idempotent: %v", err)
 	}
-	if !archivedInRegistry(t, d, "demo-map") {
+	if !archivedInRegistry(t, d, "2026-08-03-demo-map") {
 		t.Fatal("archive did not set the registry bit")
 	}
 	after, err := os.ReadFile(mapPath)
@@ -154,31 +154,31 @@ func TestArchiveMapWritesRegistryBitAndRoundTrips(t *testing.T) {
 		t.Fatalf("archived label missing: %+v", all.Rows[0])
 	}
 
-	if _, err := UnarchiveMap(d, "", "demo-map"); err != nil {
+	if _, err := UnarchiveMap(d, "", "2026-08-03-demo-map"); err != nil {
 		t.Fatal(err)
 	}
-	if archivedInRegistry(t, d, "demo-map") {
+	if archivedInRegistry(t, d, "2026-08-03-demo-map") {
 		t.Fatal("unarchive did not clear the registry bit")
 	}
 	restored, err := BuildStatus(d, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(restored.Rows) != 1 || restored.Rows[0].ID != "demo-map" {
+	if len(restored.Rows) != 1 || restored.Rows[0].ID != "2026-08-03-demo-map" {
 		t.Fatalf("restored map missing from default status: %+v", restored.Rows)
 	}
 }
 
 func TestArchiveRefusals(t *testing.T) {
-	d, _ := registryFixture(t, oneTicketMap("demo-map"))
+	d, _ := registryFixture(t, oneTicketMap("2026-08-03-demo-map"))
 
-	if _, err := ArchiveMap(d, "", "demo-map"); err == nil {
+	if _, err := ArchiveMap(d, "", "2026-08-03-demo-map"); err == nil {
 		t.Fatal("expected error archiving an unregistered map")
 	} else if !strings.Contains(err.Error(), "not registered") {
 		t.Fatalf("error = %v", err)
 	}
-	mustRegister(t, d, "demo-map")
-	if _, err := UnarchiveMap(d, "", "demo-map"); err == nil {
+	mustRegister(t, d, "2026-08-03-demo-map")
+	if _, err := UnarchiveMap(d, "", "2026-08-03-demo-map"); err == nil {
 		t.Fatal("expected error unarchiving a non-archived map")
 	} else if !strings.Contains(err.Error(), "not archived") {
 		t.Fatalf("error = %v", err)

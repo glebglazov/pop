@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/work/ref"
 )
 
@@ -151,6 +152,72 @@ func TestRegisterMapRefusesMapWithNothingToRegister(t *testing.T) {
 				t.Fatalf("error = %v, want it to mention %q", err, tt.want)
 			}
 		})
+	}
+}
+
+// TestRegisterMapRefusesUndatedID pins the convention pop's authoring guide
+// already states to the human: a Map id is <YYYY-MM-DD-slug>, and registration
+// is where that stops being advisory.
+func TestRegisterMapRefusesUndatedID(t *testing.T) {
+	if _, ok := tasks.IDCreatedAt("demo"); ok {
+		t.Fatal("fixture id must itself be undated by the comparator's parser")
+	}
+	d, _ := registryFixture(t, oneTicketMap("demo"))
+
+	_, err := RegisterMap(d, "", "demo")
+	if err == nil {
+		t.Fatal("expected an undated id to refuse registration")
+	}
+	var malformed *MapMalformedError
+	if !errors.As(err, &malformed) {
+		t.Fatalf("error = %T %v, want *MapMalformedError", err, err)
+	}
+	if !containsAny(malformed.Problems, "<YYYY-MM-DD-slug>") {
+		t.Fatalf("problems %q missing the expected form", malformed.Problems)
+	}
+	s, err := openWorkRegistry(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows, err := s.WorkContainersOfKind(ref.KindMap); err != nil || len(rows) != 0 {
+		t.Fatalf("refused registration still wrote a row: %+v (%v)", rows, err)
+	}
+}
+
+// TestRegisterMapUndatedIDProblemJoinsManifestProblems pins that the date check
+// adds to the fix list rather than short-circuiting it: an undated id with a
+// broken manifest reports both kinds of problem in one refusal.
+func TestRegisterMapUndatedIDProblemJoinsManifestProblems(t *testing.T) {
+	files := oneTicketMap("broken")
+	files["maps/broken/index.json"] = `{"tickets":[` +
+		`{"id":"01","file":"01-first.md","type":"grilling","status":"parked","blocked_by":["07"]}` +
+		`],"spawned_sets":[]}`
+	d, _ := registryFixture(t, files)
+
+	_, err := RegisterMap(d, "", "broken")
+	var malformed *MapMalformedError
+	if !errors.As(err, &malformed) {
+		t.Fatalf("error = %T %v, want *MapMalformedError", err, err)
+	}
+	for _, want := range []string{"<YYYY-MM-DD-slug>", `unknown status "parked"`, `unresolved blocker "07"`} {
+		if !containsAny(malformed.Problems, want) {
+			t.Fatalf("problems %q missing %q", malformed.Problems, want)
+		}
+	}
+}
+
+// TestRegisterMapDateCheckAgreesWithComparator pins that registration and
+// tasks.IDCreatedAt, the ordering comparator's parser, can never disagree about
+// what counts as dated: every id form the comparator accepts registers clean.
+func TestRegisterMapDateCheckAgreesWithComparator(t *testing.T) {
+	for _, id := range []string{"2026-08-03-demo", "2026-08-03-1530-demo"} {
+		if _, ok := tasks.IDCreatedAt(id); !ok {
+			t.Fatalf("test id %q must parse as dated by the comparator", id)
+		}
+		d, _ := registryFixture(t, oneTicketMap(id))
+		if _, err := RegisterMap(d, "", id); err != nil {
+			t.Fatalf("RegisterMap(%s) refused an id the comparator accepts as dated: %v", id, err)
+		}
 	}
 }
 

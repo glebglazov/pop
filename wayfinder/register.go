@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/glebglazov/pop/tasks"
 )
 
 // RegisterResult reports the outcome of ending charting on one Map.
@@ -76,26 +78,30 @@ func RegisterMap(d *Deps, cwd, mapID string) (*RegisterResult, error) {
 // the manifest's advisory warnings alongside, to be printed rather than refused
 // over.
 func mapRegistrationProblems(d *Deps, m Map) (problems, warnings []string) {
+	if _, ok := tasks.IDCreatedAt(m.ID); !ok {
+		problems = append(problems, fmt.Sprintf(
+			"%s: id has no YYYY-MM-DD date prefix; a Map id is <YYYY-MM-DD-slug>", m.ID))
+	}
 	manifest, err := LoadMapManifest(d, m.Dir)
 	switch {
 	case os.IsNotExist(err):
-		return []string{fmt.Sprintf(
+		return append(problems, fmt.Sprintf(
 			"%s: missing; a Map registers from its manifest, so chart its Decision tickets first",
-			MapManifestFileName)}, nil
+			MapManifestFileName)), nil
 	case err != nil:
-		return []string{fmt.Sprintf("%s: %v", MapManifestFileName, err)}, nil
+		return append(problems, fmt.Sprintf("%s: %v", MapManifestFileName, err)), nil
 	case !manifest.Valid:
-		return manifest.Errors, manifest.Warnings
+		return append(problems, manifest.Errors...), manifest.Warnings
 	}
 	// The manifest reads, so anything still rendering the Map BROKEN is a map.md
 	// problem — an unreadable file or an unrecognised Status: line.
 	if m.Broken {
-		return []string{m.BrokenReason}, manifest.Warnings
+		return append(problems, m.BrokenReason), manifest.Warnings
 	}
 	if len(manifest.Tickets) == 0 {
-		return []string{fmt.Sprintf(
+		return append(problems, fmt.Sprintf(
 			"%s: no Decision tickets; charting has produced nothing to register",
-			MapManifestFileName)}, manifest.Warnings
+			MapManifestFileName)), manifest.Warnings
 	}
-	return nil, manifest.Warnings
+	return problems, manifest.Warnings
 }
