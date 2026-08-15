@@ -69,7 +69,14 @@ func RenderStack(w io.Writer, s Stack) error {
 		for _, l := range s.Layers {
 			fmt.Fprintf(tw, "%s\t%s\n", l.Origin, l.Path)
 		}
-		return tw.Flush()
+		if err := tw.Flush(); err != nil {
+			return err
+		}
+		// A miss answers with the method rather than stopping at "nothing here":
+		// the caller wanted the convention, and the recipe is how it gets one
+		// (ADR-0211).
+		fmt.Fprintln(w)
+		return RenderRecipe(w, s.Kind)
 	}
 
 	fmt.Fprintf(w, "%s\n", overrideRule)

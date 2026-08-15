@@ -65,10 +65,30 @@ with the list of the ones that exist, and no stack is printed.`,
 	ValidArgsFunction: completeConventionKind,
 }
 
+var repoConventionsRecipeCmd = &cobra.Command{
+	Use:   "recipe <kind>",
+	Short: "Print how to work out a convention pop does not hold",
+	Long: `Print the built-in recipe for one convention kind.
+
+A recipe is a method, not an answer: it is the steps that derive the convention,
+and where to write the result once you have it. The output says so in its first
+lines, so a recipe cannot be mistaken for a convention.
+
+This is what a missed ` + "`get`" + ` prints, and it is reachable on its own because an
+agent improving a convention that already exists needs the method too.
+
+Nothing here is repository-specific and nothing is read from disk, so it answers
+outside a repository as well as inside one.`,
+	Args:              cobra.ExactArgs(1),
+	RunE:              runRepoConventionsRecipe,
+	ValidArgsFunction: completeConventionKind,
+}
+
 func init() {
 	rootCmd.AddCommand(repoCmd)
 	repoCmd.AddCommand(repoConventionsCmd)
 	repoConventionsCmd.AddCommand(repoConventionsGetCmd)
+	repoConventionsCmd.AddCommand(repoConventionsRecipeCmd)
 }
 
 func completeConventionKind(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
@@ -106,4 +126,19 @@ func runRepoConventionsGetWith(cd *conventions.Deps, w io.Writer, dir string, ar
 		kinds = []conventions.Kind{kind}
 	}
 	return conventions.Get(cd, w, dir, kinds...)
+}
+
+func runRepoConventionsRecipe(cmd *cobra.Command, args []string) error {
+	return runRepoConventionsRecipeWith(cmd.OutOrStdout(), args[0])
+}
+
+// runRepoConventionsRecipeWith is the seam tests drive, so the refusal and the
+// printed recipe are exercised without a process. It takes no Deps: a recipe is
+// built in, and reads nothing.
+func runRepoConventionsRecipeWith(w io.Writer, name string) error {
+	kind, err := conventions.ParseKind(name)
+	if err != nil {
+		return err
+	}
+	return conventions.RenderRecipe(w, kind)
 }

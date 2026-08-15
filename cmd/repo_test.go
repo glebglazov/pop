@@ -295,3 +295,66 @@ func TestRepoConventionsRenderingLivesInTheDomainPackage(t *testing.T) {
 		return true
 	})
 }
+
+func recipeOut(t *testing.T, kind string) (string, error) {
+	t.Helper()
+	var out bytes.Buffer
+	err := runRepoConventionsRecipeWith(&out, kind)
+	return out.String(), err
+}
+
+// TestRepoConventionsRecipePrintsEachKindsMethod: the verb exists on its own
+// because an agent improving a convention that already resolves needs the
+// method too, not only the one that missed.
+func TestRepoConventionsRecipePrintsEachKindsMethod(t *testing.T) {
+	for _, kind := range conventions.KindNames() {
+		out, err := recipeOut(t, kind)
+		if err != nil {
+			t.Fatalf("recipe %s: %v\n%s", kind, err, out)
+		}
+		if !strings.Contains(out, "RECIPE "+kind) || !strings.Contains(out, "METHOD, not a convention") {
+			t.Errorf("recipe %s is not printed as a labelled method:\n%s", kind, out)
+		}
+	}
+}
+
+// TestRepoConventionsRecipeRefusesUnknownKind: the recipe verb reads nothing off
+// disk, so the closed enum is the only thing standing between a typo and empty
+// output.
+func TestRepoConventionsRecipeRefusesUnknownKind(t *testing.T) {
+	out, err := recipeOut(t, "bogus")
+	if err == nil {
+		t.Fatalf("unknown kind was accepted:\n%s", out)
+	}
+	if out != "" {
+		t.Errorf("unknown kind printed a recipe:\n%s", out)
+	}
+	for _, kind := range conventions.KindNames() {
+		if !strings.Contains(err.Error(), kind) {
+			t.Errorf("refusal %q does not list the known kind %q", err, kind)
+		}
+	}
+}
+
+// TestRepoConventionsGetMissAnswersWithTheRecipe is the slice: an agent that
+// asked for a convention pop has never seen is told how to work one out, and
+// still gets the miss status.
+func TestRepoConventionsGetMissAnswersWithTheRecipe(t *testing.T) {
+	f := newConventionFixture(t)
+
+	out, err := f.get(t, f.repo, "commits")
+	if !errors.Is(err, conventions.ErrNoConvention) {
+		t.Fatalf("error = %v, want ErrNoConvention\n%s", err, out)
+	}
+	if !strings.Contains(out, "RECIPE commits") {
+		t.Fatalf("miss did not print the recipe:\n%s", out)
+	}
+	if !strings.Contains(out, conventions.Recipe(conventions.KindCommits)) {
+		t.Errorf("miss printed something other than the built-in recipe:\n%s", out)
+	}
+	// The paths pop consulted still come first: the recipe's last step is where
+	// to write the result, and that is one of them.
+	if strings.Index(out, "EMPTY") > strings.Index(out, "RECIPE commits") {
+		t.Errorf("the recipe precedes the paths pop consulted:\n%s", out)
+	}
+}
