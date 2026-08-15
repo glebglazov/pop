@@ -79,7 +79,11 @@ func scansForCheckouts(checkouts []string, defPath string) []projectScan {
 	return scans
 }
 
-func ptrBool(b bool) *bool { return &b }
+// trunkPtr states a repository's Trunk worktree as the path value it is.
+func trunkPtr(path string) *config.TrunkPath {
+	p := config.TrunkPath(path)
+	return &p
+}
 
 func TestParseGitMainWorktree(t *testing.T) {
 	bare := "worktree /repo/bare.git\nbare\n\nworktree /repo/bare.git/wt0\nHEAD abc\ndetached\n"
@@ -99,7 +103,7 @@ func TestDecideRepoDispatchesBareMultiWorktreeCollapsesToOneDrain(t *testing.T) 
 
 	// trunk override pins the repo's Trunk worktree to the first worktree.
 	cfg := &config.Config{Repo: map[string]config.RepoOverrideConfig{
-		wts[0]: {Trunk: ptrBool(true)},
+		wts[0]: {Trunk: trunkPtr(wts[0])},
 	}}
 	// The set is bound to the trunk checkout so it is Queue-drainable (ADR-0072);
 	// this guards the multi-worktree collapse to a single drain, not the routing

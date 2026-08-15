@@ -663,8 +663,8 @@ func TestMarkTrunkRowsResolvesSymlinksOnlyOnAMiss(t *testing.T) {
 	})
 }
 
-// The wiring, end to end: a [repo."<path>"] trunk = true declaration — the same
-// one that names the fork base for managed worktrees — is what promotes a bare
+// The wiring, end to end: a [repo."<path>"] trunk declaration — the same path
+// that names the fork base for managed worktrees — is what promotes a bare
 // repository's trunk to its top-level row. Nothing in the picker resolves a trunk
 // per checkout, so without this read the declaration went unhonoured here.
 func TestRunProjectPromotesDeclaredTrunkOfABareRepo(t *testing.T) {
@@ -679,14 +679,13 @@ func TestRunProjectPromotesDeclaredTrunkOfABareRepo(t *testing.T) {
 	trunk := filepath.Join(repoRoot, "main")
 	hotfix := filepath.Join(repoRoot, "hotfix")
 
-	declareTrunk := true
 	d := testProjectDeps(t)
 	d.LoadConfig = func() (*config.Config, error) {
 		return &config.Config{
 			Projects: []config.ProjectEntry{{Path: projectDir}},
 			Project:  &config.ProjectConfig{WorktreeDisplay: string(config.WorktreeDisplayNested)},
 			Repo: map[string]config.RepoOverrideConfig{
-				trunk: {Trunk: &declareTrunk},
+				trunk: {Trunk: trunkPtr(trunk)},
 			},
 		}, nil
 	}

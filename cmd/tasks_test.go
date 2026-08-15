@@ -346,9 +346,10 @@ func TestTaskRegisterManagedRefusesWithoutTrunk(t *testing.T) {
 	_ = tasksDir
 }
 
-// TestTaskRegisterManagedTrunkFlagPersists asserts --trunk satisfies a bare
-// repo, persists trunk = true to config.runtime.toml, and a later managed
-// register needs no flag.
+// TestTaskRegisterManagedTrunkFlagPersists asserts --trunk satisfies a bare repo,
+// states the trunk as a path in the layer pop writes (ADR-0212 decision 3) rather
+// than in the user's own config.toml, and that a later managed register needs no
+// flag because that statement is read back.
 func TestTaskRegisterManagedTrunkFlagPersists(t *testing.T) {
 	seed := t.TempDir()
 	initGitRepoWithCommitCmd(t, seed)
@@ -369,7 +370,7 @@ func TestTaskRegisterManagedTrunkFlagPersists(t *testing.T) {
 	resetTaskFlags()
 
 	cfgPath := filepath.Join(xdg, "pop", "config.toml")
-	runtimePath := filepath.Join(xdg, "pop", "config.runtime.toml")
+	overridePath := filepath.Join(xdg, "pop", "config.override.toml")
 	tasksDir := cmdTasksDir(t, td, wt)
 
 	writeTaskThoughts(t, tasksDir, "first")
@@ -403,12 +404,15 @@ func TestTaskRegisterManagedTrunkFlagPersists(t *testing.T) {
 	if string(cfgData) != userCfgBody {
 		t.Fatalf("user config.toml changed:\n%s", cfgData)
 	}
-	runtimeData, err := os.ReadFile(runtimePath)
+	overrideData, err := os.ReadFile(overridePath)
 	if err != nil {
-		t.Fatalf("read runtime config: %v", err)
+		t.Fatalf("read override config: %v", err)
 	}
-	if !strings.Contains(string(runtimeData), "trunk = true") {
-		t.Fatalf("runtime config missing trunk = true:\n%s", runtimeData)
+	if !strings.Contains(string(overrideData), "trunk = ") || !strings.Contains(string(overrideData), realPath(t, wt)) {
+		t.Fatalf("override config does not state the trunk path %q:\n%s", wt, overrideData)
+	}
+	if strings.Contains(string(overrideData), "trunk = true") {
+		t.Fatalf("the retired boolean spelling was written:\n%s", overrideData)
 	}
 
 	writeTaskThoughts(t, tasksDir, "second")

@@ -16,7 +16,7 @@ import (
 // because no representative checkout could be resolved (ADR-0035): a bare repo
 // with no Trunk worktree configured and no per-set Worktree binding. The Queue
 // never guesses a checkout, so it refuses and reports.
-const RepoScanReason = "needs trunk; skipped (set trunk = true in a global [repo.\"<path>\"] block)"
+const RepoScanReason = "needs trunk; skipped (set trunk = \"<path>\" in a global [repo] block)"
 
 // decideRepoDispatches collapses one repository's in-scope checkouts (its
 // worktrees, grouped by Repository identity) into a single scheduling unit and
@@ -101,10 +101,10 @@ func resolveRepresentative(d *Deps, cfg *config.Config, scans []projectScan) (*p
 		}
 	}
 
-	// 1. explicit trunk = true checkout.
+	// 1. the checkout the repository states as its trunk (config-only, no git).
 	for i := range scans {
 		rc, err := resolveRepoConfigFor(d, cfg, scans[i].ProjectPath)
-		if err == nil && rc.Trunk {
+		if err == nil && rc.IsTrunk(configDepsFor(d), scans[i].ProjectPath) {
 			return &scans[i], false, nil
 		}
 	}
@@ -427,13 +427,19 @@ func repoName(scans []projectScan, rep *projectScan) string {
 // global [repo."<path>"] overrides over repo-root .pop/config.toml. trunk is honored
 // only for the keyed checkout path.
 func resolveRepoConfigFor(d *Deps, cfg *config.Config, checkoutPath string) (config.RepoConfig, error) {
-	pd := d.Project
-	if pd == nil || pd.FS == nil {
-		pd = project.DefaultDeps()
-	}
-	cd := &config.Deps{FS: pd.FS}
+	cd := configDepsFor(d)
 	if cfg == nil {
 		return config.LoadRepoConfigWith(cd, checkoutPath)
 	}
 	return cfg.ResolveRepoConfig(cd, checkoutPath)
+}
+
+// configDepsFor is the config-layer view of the drain deps: the same filesystem,
+// so a config read here is stubbed by whatever the test stubbed the scan with.
+func configDepsFor(d *Deps) *config.Deps {
+	pd := d.Project
+	if pd == nil || pd.FS == nil {
+		pd = project.DefaultDeps()
+	}
+	return &config.Deps{FS: pd.FS}
 }

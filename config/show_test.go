@@ -56,12 +56,13 @@ func TestRenderEffectiveTOMLCanonicalizesRepoKeys(t *testing.T) {
 		},
 	}
 	d := &Deps{FS: fs}
-	trunk := true
 	cfg := &Config{
 		Repo: map[string]RepoOverrideConfig{
 			"~/Dev/app": {
 				RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "dev"},
-				Trunk:           &trunk,
+				// The retired boolean spelling: the mirror prints back the checkout
+				// it meant, canonicalized like every other path here.
+				Trunk: legacyTrunkPtr(),
 			},
 		},
 	}
@@ -76,8 +77,8 @@ func TestRenderEffectiveTOMLCanonicalizesRepoKeys(t *testing.T) {
 	if strings.Contains(out, "~/Dev/app") {
 		t.Errorf("raw ~ repo key leaked into effective TOML, got:\n%s", out)
 	}
-	if !strings.Contains(out, "preferred_workbench") || !strings.Contains(out, "trunk = true") {
-		t.Errorf("repo block body missing from effective TOML, got:\n%s", out)
+	if !strings.Contains(out, "preferred_workbench") || !strings.Contains(out, `trunk = "/home/u/private/Dev/app"`) {
+		t.Errorf("repo block body missing or not folded to a path, got:\n%s", out)
 	}
 }
 

@@ -14,11 +14,10 @@ import (
 const managedRegisterNoTrunkMsg = "no Trunk worktree configured; re-run with --trunk <path> to name one"
 
 // resolveManagedTrunk resolves the Trunk worktree for a managed register or
-// bind-worktree. When trunkFlag is non-empty it is normalized, persisted to
-// config.runtime.toml as trunk = true on the checkout path (ADR-0150), and
-// returned. When trunkFlag is empty the trunk is resolved from cfg and
-// checkoutPath; a bare repo with no configured trunk refuses with an error
-// naming --trunk.
+// bind-worktree. When trunkFlag is non-empty it is normalized, stated as this
+// repository's trunk path (ADR-0212 decision 3), and returned. When trunkFlag is
+// empty the trunk is resolved from cfg and checkoutPath; a bare repo with no
+// stated trunk refuses with an error naming --trunk.
 func resolveManagedTrunk(td *tasks.Deps, cfg *config.Config, checkoutPath, trunkFlag string) (trunkPath string, err error) {
 	cd := cmdLayerDeps().configDeps()
 	trunkFlag = strings.TrimSpace(trunkFlag)
@@ -34,8 +33,8 @@ func resolveManagedTrunk(td *tasks.Deps, cfg *config.Config, checkoutPath, trunk
 		if !same {
 			return "", fmt.Errorf("--trunk %q is not a checkout of this repository", trunkPath)
 		}
-		if err := config.SetRuntimeRepoTrunkWith(cd, trunkPath); err != nil {
-			return "", fmt.Errorf("persist trunk to runtime config: %w", err)
+		if err := config.PersistRepoTrunkWith(cd, trunkPath); err != nil {
+			return "", fmt.Errorf("state trunk for this repository: %w", err)
 		}
 		return trunkPath, nil
 	}

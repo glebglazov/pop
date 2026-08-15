@@ -33,8 +33,8 @@ import (
 // source is read only when a resolver asks for it, and a malformed .pop/config.toml
 // degrades to the zero config exactly as before. Walker merges stay same-type:
 // the enumerator hands over the embedded RepoScopeConfig, never the outer
-// RepoOverrideConfig/RepoConfig — the [repo]-only trunk key stays caller-side
-// with its exact-checkout-path condition.
+// RepoOverrideConfig/RepoConfig — the two [repo]-only keys, trunk and turn_cap,
+// stay caller-side because neither is part of the shared schema.
 
 // repoScopeEnumerator resolves the ADR-0083 repo-scope sources for one checkout.
 type repoScopeEnumerator struct {
@@ -47,14 +47,13 @@ type repoScopeEnumerator struct {
 	// declared is the config.toml [repo."<path>"] block whose key shares this
 	// checkout's repository identity — the ladder's most specific declaration,
 	// resolved once. declaredFound distinguishes "no block" from "a zero block";
-	// declaredKeyCanon is the canonical key path (for collision messages);
-	// declaredExact reports whether that key canon equals the checkout canon (the
-	// trunk per-checkout gate). It is named for what it is rather than for the
-	// file it sits in, because "override" now names the layer above the ladder.
+	// declaredKeyCanon is the canonical key path, which names the source in a
+	// collision message and is the checkout a retired `trunk = true` meant. It is
+	// named for what it is rather than for the file it sits in, because "override"
+	// now names the layer above the ladder.
 	declaredFound    bool
 	declared         RepoOverrideConfig
 	declaredKeyCanon string
-	declaredExact    bool
 
 	// overrides is the override layer, loaded lazily and once. It is no rung of
 	// the ladder (ADR-0212 decision 2), so every resolver here asks for it after
@@ -103,7 +102,6 @@ func (e *repoScopeEnumerator) matchDeclaredBlock() {
 		e.declared = b
 		e.declaredFound = true
 		e.declaredKeyCanon = canonicalPath(e.d, rawKey)
-		e.declaredExact = e.declaredKeyCanon == e.canon
 	}
 }
 
@@ -281,9 +279,9 @@ func (e *repoScopeEnumerator) globalScope() RepoScopeConfig {
 // resolveRepoConfig returns the effective RepoConfig for the checkout: the
 // scope-first ladder walked lowest rung first, so the most specific source that
 // declares a key supplies it, and the override layer then laid over the answer.
-// The [repo]-only keys stay caller-side — trunk is per-checkout, applied only
-// when the block's key path exactly matches this checkout; turn_cap is
-// per-repository. A missing .pop/config.toml is not an error; a malformed one
+// The [repo]-only keys stay caller-side: both trunk and turn_cap describe the
+// whole repository, so a block matched by repository identity answers for every
+// worktree of it. A missing .pop/config.toml is not an error; a malformed one
 // degrades to the zero config with its error returned.
 func (e *repoScopeEnumerator) resolveRepoConfig() (RepoConfig, error) {
 	var result RepoConfig
@@ -301,7 +299,7 @@ func (e *repoScopeEnumerator) resolveRepoConfig() (RepoConfig, error) {
 		result.Findings = append(result.Findings, src.findings...)
 	}
 	if e.declaredFound {
-		e.applyBlockOnlyKeys(&result, e.declared, e.declaredExact)
+		e.applyBlockOnlyKeys(&result, e.declared, e.declaredKeyCanon)
 	}
 	// The ladder has resolved a value; the override layer now goes over it
 	// (ADR-0212 decision 2), global entry first so the repository one beats it.
@@ -310,12 +308,9 @@ func (e *repoScopeEnumerator) resolveRepoConfig() (RepoConfig, error) {
 		mergeWalk(&result.RepoScopeConfig, &scope, repoScopeMetadata(scope), repoScopePolicy())
 	}
 	if block, ok := e.overrideLayer().repoBlock(e.d, e.identity); ok {
-		// The block is filed under the repository itself, so it names no checkout
-		// and the per-checkout trunk gate can only be met by a repository whose
-		// identity is the checkout in hand. That is the shape ADR-0212 decision 3
-		// retires: trunk becomes a repository-scoped path in its own slice, and the
-		// gate goes with it.
-		e.applyBlockOnlyKeys(&result, block, canonicalPath(e.d, e.identity) == e.canon)
+		// The layer files its blocks under the repository, so the identity is the
+		// key any declaration in one is read against.
+		e.applyBlockOnlyKeys(&result, block, e.identity)
 	}
 	return result, popErr
 }
@@ -323,16 +318,17 @@ func (e *repoScopeEnumerator) resolveRepoConfig() (RepoConfig, error) {
 // applyBlockOnlyKeys applies the two keys that live only in a [repo] block —
 // wherever that block came from, a config.toml declaration or the override
 // layer. They are applied outside the walker because neither is part of the
-// shared repo-scope schema and each keys on something different.
+// shared repo-scope schema.
 //
-// trunk describes one checkout, so it applies only when the block's key names
-// this very checkout. turn_cap describes the whole repository, so it deliberately
-// skips that gate: the block was matched by repository identity and every
-// worktree reads the one bound (ADR-0191). A non-positive number bounds nothing,
-// so it reads as "declares no cap" rather than as a cap of zero turns.
-func (e *repoScopeEnumerator) applyBlockOnlyKeys(result *RepoConfig, block RepoOverrideConfig, exact bool) {
-	if block.Trunk != nil && exact {
-		result.Trunk = *block.Trunk
+// Both describe the whole repository, and the block was matched by repository
+// identity, so every worktree reads the one answer: the one bound (ADR-0191) and
+// the one fork base (ADR-0212 decision 3). blockKey is the block's own key, which
+// a trunk stated as a path ignores and a retired `trunk = true` is made of. A
+// non-positive turn cap bounds nothing, so it reads as "declares no cap" rather
+// than as a cap of zero turns.
+func (e *repoScopeEnumerator) applyBlockOnlyKeys(result *RepoConfig, block RepoOverrideConfig, blockKey string) {
+	if path, ok := block.Trunk.Resolve(blockKey); ok {
+		result.Trunk = canonicalPath(e.d, path)
 	}
 	if block.TurnCap != nil {
 		result.TurnCap = 0
@@ -349,8 +345,20 @@ func (e *repoScopeEnumerator) applyBlockOnlyKeys(result *RepoConfig, block RepoO
 // the same key, wherever in the repository it was made, overwrites it. A broken
 // runtime file degrades to "pop recorded nothing" rather than failing the whole
 // resolution.
+//
+// The retired path-keyed trunk record is read from the same document, so a
+// machine whose trunk was named before it became a path value resolves one here
+// exactly as it did before, with no operator action.
 func (e *repoScopeEnumerator) applyRecordedSettings(result *RepoConfig) {
-	stored, _, err := runtimeRepoSettingsWith(e.d, e.identity)
+	doc, _, err := loadRuntimeDocument(e.d)
+	if err != nil {
+		debug.Error("config: read pop-written repo settings for %s: %v", e.identity, err)
+		return
+	}
+	if path, ok := e.recordedTrunk(doc); ok {
+		result.Trunk = path
+	}
+	stored, _, err := runtimeRepoSettingsFromDoc(doc, e.identity)
 	if err != nil {
 		debug.Error("config: read pop-written repo settings for %s: %v", e.identity, err)
 		return
@@ -358,6 +366,19 @@ func (e *repoScopeEnumerator) applyRecordedSettings(result *RepoConfig) {
 	if stored.TurnCap != nil && *stored.TurnCap > 0 {
 		result.TurnCap = *stored.TurnCap
 	}
+}
+
+// recordedTrunk finds a retired `[<checkout>] trunk = true` record belonging to
+// this repository. Such a record is keyed by the checkout it marked, so the fold
+// to a path value is the key itself — matched by identity, which is how the
+// repository-scoped value it becomes is keyed.
+func (e *repoScopeEnumerator) recordedTrunk(doc map[string]any) (string, bool) {
+	for _, path := range runtimeRepoTrunkPaths(doc) {
+		if repoIdentity(e.d, path) == e.identity {
+			return canonicalPath(e.d, path), true
+		}
+	}
+	return "", false
 }
 
 // preferredSource is one rung of the preferred_workbench chain, highest

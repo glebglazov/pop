@@ -11,8 +11,8 @@ func intPtr(n int) *int { return &n }
 
 // TestRepoTurnCapResolvesForEveryWorktree pins ADR-0191 decision 4: the bound is
 // keyed by repository identity, not by the exact checkout that keys the block, so
-// every worktree of a bare repo reads the one number — the divergence from trunk,
-// which stays per-checkout right beside it.
+// every worktree of a bare repo reads the one number — the same keying trunk
+// gained beside it (ADR-0212 decision 3).
 func TestRepoTurnCapResolvesForEveryWorktree(t *testing.T) {
 	bareRoot := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(bareRoot, ".bare"), 0o755); err != nil {
@@ -28,7 +28,7 @@ func TestRepoTurnCapResolvesForEveryWorktree(t *testing.T) {
 	d := DefaultDeps()
 
 	cfg := &Config{Repo: map[string]RepoOverrideConfig{
-		main: {TurnCap: intPtr(12), Trunk: boolPtr(true)},
+		main: {TurnCap: intPtr(12), Trunk: trunkPtr(main)},
 	}}
 	for _, checkout := range []string{main, feature, bareRoot} {
 		got, err := cfg.ResolveRepoConfig(d, checkout)
@@ -40,14 +40,17 @@ func TestRepoTurnCapResolvesForEveryWorktree(t *testing.T) {
 		}
 	}
 
-	// trunk keeps its exact-checkout semantics: the sibling worktree reads the
-	// bound but is not itself the Trunk.
+	// trunk is keyed the same way: the sibling worktree reads the repository's
+	// trunk path — which is main, so the sibling is not itself the Trunk.
 	sibling, err := cfg.ResolveRepoConfig(d, feature)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sibling.Trunk {
-		t.Error("trunk leaked to a sibling worktree; it is per-checkout")
+	if !sibling.IsTrunk(d, main) {
+		t.Errorf("trunk at the sibling = %q, want %s (one fork base per repository)", sibling.Trunk, main)
+	}
+	if sibling.IsTrunk(d, feature) {
+		t.Error("the sibling worktree must not read itself as the Trunk")
 	}
 
 	none, err := (&Config{}).ResolveRepoConfig(d, feature)

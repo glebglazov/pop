@@ -227,8 +227,8 @@ func RouteDrainCheckout(req RouteDrainCheckoutRequest) (RouteDrainCheckoutResult
 				PD:           req.PD,
 				Config:       req.Config,
 				CheckoutPath: checkout,
-				SetID:          setID,
-				Now:            req.Now,
+				SetID:        setID,
+				Now:          req.Now,
 			})
 			if err != nil {
 				return RouteDrainCheckoutResult{}, err
@@ -382,12 +382,21 @@ func ResolveTrunkPath(td *tasks.Deps, cfg *config.Config, checkoutPath string) (
 	return ResolveTrunkPathWith(config.DefaultDeps(), td, cfg, checkoutPath)
 }
 
-// ResolveTrunkPathWith resolves the Trunk worktree using cd for runtime-tier
-// reads (layer 5: config.runtime.toml[<checkout-path>], never layer 6).
-// Precedence: hand-authored [repo."<path>"] trunk = true (layers 1–4 via cfg),
-// then runtime layer 5, then the git main worktree for non-bare repositories.
+// ResolveTrunkPathWith resolves the Trunk worktree, using cd for the config reads
+// a trunk may come from. A trunk is a path stated at repository scope (ADR-0212
+// decision 3), so every source here names a checkout — the retired `trunk = true`
+// spelling folding to the checkout it marked, whether it sits in a config.toml
+// block or in a runtime record.
+//
+// Order: the override layer's entry for this repository, which is laid over the
+// resolution ladder and so wins outright; then a [repo."<path>"] declaration in
+// config.toml; then what an older pop recorded in config.runtime.toml; then the
+// git main worktree for a non-bare repository. No source is trunk-anchored — a
+// trunk that had to be known before it could be read would never resolve at all
+// (ADR-0150).
+//
 // Returns (path, false, nil) on success; (_, true, nil) when the repo is bare
-// with no trunk override (caller must refuse and name a trunk).
+// with no trunk stated (caller must refuse and name a trunk).
 func ResolveTrunkPathWith(cd *config.Deps, td *tasks.Deps, cfg *config.Config, checkoutPath string) (path string, bare bool, err error) {
 	if td == nil {
 		return "", false, fmt.Errorf("missing task dependencies")
@@ -399,30 +408,61 @@ func ResolveTrunkPathWith(cd *config.Deps, td *tasks.Deps, cfg *config.Config, c
 	if err != nil {
 		return "", false, err
 	}
+	statedPaths, err := config.OverrideTrunkPathsWith(cd)
+	if err != nil {
+		return "", false, err
+	}
+	if candidate, ok := matchCheckoutOfRepo(td, repoKey, statedPaths); ok {
+		return candidate, false, nil
+	}
 	if cfg != nil {
+		// A block is matched by the repository its key belongs to, and the trunk it
+		// states is the checkout it names — the same block for every worktree.
 		for rawKey, block := range cfg.Repo {
-			if block.Trunk == nil || !*block.Trunk {
+			stated, ok := block.Trunk.Resolve(rawKey)
+			if !ok {
 				continue
 			}
-			candidate, err := tasks.NormalizeProjectPathWith(td, rawKey)
+			blockPath, err := tasks.NormalizeProjectPathWith(td, rawKey)
 			if err != nil {
 				continue
 			}
-			candidateKey, err := repoKeyFromCheckout(td, candidate)
+			blockKey, err := repoKeyFromCheckout(td, blockPath)
 			if err != nil {
 				continue
 			}
-			if candidateKey == repoKey {
-				return candidate, false, nil
+			if blockKey != repoKey {
+				continue
 			}
+			candidate, err := tasks.NormalizeProjectPathWith(td, stated)
+			if err != nil {
+				continue
+			}
+			return candidate, false, nil
 		}
 	}
 	runtimePaths, err := config.RuntimeRepoTrunkPathsWith(cd)
 	if err != nil {
 		return "", false, err
 	}
-	for _, rawKey := range runtimePaths {
-		candidate, err := tasks.NormalizeProjectPathWith(td, rawKey)
+	if candidate, ok := matchCheckoutOfRepo(td, repoKey, runtimePaths); ok {
+		return candidate, false, nil
+	}
+	mainPath, bare, err := GitMainWorktree(td, checkoutPath)
+	if err != nil || bare || mainPath == "" {
+		return mainPath, bare, err
+	}
+	return mainPath, false, nil
+}
+
+// matchCheckoutOfRepo picks the first stated path that is a checkout of the
+// repository repoKey names. A trunk is stated as a path (ADR-0212 decision 3), so
+// which repository a stated trunk belongs to is a question git answers about the
+// path itself — no agreement needed between the key a value was filed under and
+// the checkout the caller is standing in.
+func matchCheckoutOfRepo(td *tasks.Deps, repoKey string, paths []string) (string, bool) {
+	for _, raw := range paths {
+		candidate, err := tasks.NormalizeProjectPathWith(td, raw)
 		if err != nil {
 			continue
 		}
@@ -431,14 +471,10 @@ func ResolveTrunkPathWith(cd *config.Deps, td *tasks.Deps, cfg *config.Config, c
 			continue
 		}
 		if candidateKey == repoKey {
-			return candidate, false, nil
+			return candidate, true
 		}
 	}
-	mainPath, bare, err := GitMainWorktree(td, checkoutPath)
-	if err != nil || bare || mainPath == "" {
-		return mainPath, bare, err
-	}
-	return mainPath, false, nil
+	return "", false
 }
 
 func repoKeyFromCheckout(td *tasks.Deps, checkoutPath string) (string, error) {

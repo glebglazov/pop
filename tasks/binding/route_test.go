@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -676,6 +677,9 @@ func TestRouteDrainCheckoutOverrideWinsOverNamedDirective(t *testing.T) {
 	}
 }
 
+// A [repo] block states the repository's trunk as a path; the block below is
+// keyed by the trunk itself, and TestResolveTrunkPathReadsAPathFromAnyBlock
+// covers a block keyed by another worktree of the same repository.
 func TestResolveTrunkPathUsesConfigOverride(t *testing.T) {
 	t.Parallel()
 	td := routeTestDeps(t)
@@ -683,7 +687,7 @@ func TestResolveTrunkPathUsesConfigOverride(t *testing.T) {
 	base := addLinkedWorktree(t, main, "exec-base")
 	cfg := &config.Config{
 		Repo: map[string]config.RepoOverrideConfig{
-			base: {Trunk: boolPtr(true)},
+			base: {Trunk: trunkPtr(base)},
 		},
 	}
 	path, bare, err := ResolveTrunkPath(td, cfg, main)
@@ -703,31 +707,74 @@ func TestResolveTrunkPathUsesConfigOverride(t *testing.T) {
 	}
 }
 
-func TestResolveTrunkPathUsesRuntimeLayer5(t *testing.T) {
+// The block key names the repository, the value names the checkout: a block keyed
+// by one worktree can state that another is the trunk, which the retired boolean
+// could never say (ADR-0212 decision 3).
+func TestResolveTrunkPathReadsAPathFromAnyBlock(t *testing.T) {
+	t.Parallel()
+	td := routeTestDeps(t)
+	main := initAdoptRepo(t)
+	base := addLinkedWorktree(t, main, "stated-base")
+	other := addLinkedWorktree(t, main, "asking-from")
+	cfg := &config.Config{
+		Repo: map[string]config.RepoOverrideConfig{
+			other: {Trunk: trunkPtr(base)},
+		},
+	}
+	for _, from := range []string{main, other, base} {
+		path, bare, err := ResolveTrunkPathWith(nil, td, cfg, from)
+		if err != nil {
+			t.Fatalf("resolve from %s: %v", from, err)
+		}
+		if bare || canonTrunk(t, path) != canonTrunk(t, base) {
+			t.Fatalf("trunk from %s = %q bare = %v, want %q", from, path, bare, base)
+		}
+	}
+}
+
+// Naming a trunk states intent, so `--trunk` lands in the override layer — and
+// the layer is laid over the ladder, so it wins over a declaration too.
+func TestResolveTrunkPathOverrideLayerWins(t *testing.T) {
+	t.Parallel()
+	td := routeTestDeps(t)
+	main := initAdoptRepo(t)
+	declared := addLinkedWorktree(t, main, "declared-base")
+	stated := addLinkedWorktree(t, main, "stated-base")
+	d, _ := trunkStoreDeps(t)
+	if err := config.PersistRepoTrunkWith(d, stated); err != nil {
+		t.Fatalf("persist trunk: %v", err)
+	}
+	cfg := &config.Config{
+		Repo: map[string]config.RepoOverrideConfig{
+			declared: {Trunk: trunkPtr(declared)},
+		},
+	}
+	path, bare, err := ResolveTrunkPathWith(d, td, cfg, main)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if bare || canonTrunk(t, path) != canonTrunk(t, stated) {
+		t.Fatalf("trunk = %q bare = %v, want the stated %q", path, bare, stated)
+	}
+}
+
+func canonTrunk(t *testing.T, path string) string {
+	t.Helper()
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	return path
+}
+
+// A machine that named its trunk before decision 3 holds a path-keyed record;
+// the resolver still folds it to that checkout, with no operator action.
+func TestResolveTrunkPathUsesRecordedTrunk(t *testing.T) {
 	t.Parallel()
 	td := routeTestDeps(t)
 	main := initAdoptRepo(t)
 	base := addLinkedWorktree(t, main, "runtime-trunk")
-	root := t.TempDir()
-	dataDir := filepath.Join(root, "data")
-	d := &config.Deps{FS: &deps.MockFileSystem{
-		GetenvFunc: func(key string) string {
-			if key == "XDG_DATA_HOME" {
-				return dataDir
-			}
-			return ""
-		},
-		UserHomeDirFunc: func() (string, error) { return filepath.Join(root, "home"), nil },
-		ReadFileFunc:    os.ReadFile,
-		WriteFileFunc:   os.WriteFile,
-		MkdirAllFunc:    os.MkdirAll,
-		RenameFunc:      os.Rename,
-		RemoveAllFunc:   os.RemoveAll,
-		StatFunc:        os.Stat,
-	}}
-	if err := config.SetRuntimeRepoTrunkWith(d, base); err != nil {
-		t.Fatalf("set runtime trunk: %v", err)
-	}
+	d, dataDir := trunkStoreDeps(t)
+	writeRecordedTrunk(t, dataDir, base)
 	path, bare, err := ResolveTrunkPathWith(d, td, nil, main)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -745,35 +792,18 @@ func TestResolveTrunkPathUsesRuntimeLayer5(t *testing.T) {
 	}
 }
 
-func TestResolveTrunkPathHandAuthoredOverridesRuntime(t *testing.T) {
+// A declaration is more specific than what pop recorded, so it takes over.
+func TestResolveTrunkPathDeclarationBeatsRecord(t *testing.T) {
 	t.Parallel()
 	td := routeTestDeps(t)
 	main := initAdoptRepo(t)
 	hand := addLinkedWorktree(t, main, "hand-trunk")
 	runtime := addLinkedWorktree(t, main, "runtime-trunk")
-	root := t.TempDir()
-	dataDir := filepath.Join(root, "data")
-	d := &config.Deps{FS: &deps.MockFileSystem{
-		GetenvFunc: func(key string) string {
-			if key == "XDG_DATA_HOME" {
-				return dataDir
-			}
-			return ""
-		},
-		UserHomeDirFunc: func() (string, error) { return filepath.Join(root, "home"), nil },
-		ReadFileFunc:    os.ReadFile,
-		WriteFileFunc:   os.WriteFile,
-		MkdirAllFunc:    os.MkdirAll,
-		RenameFunc:      os.Rename,
-		RemoveAllFunc:   os.RemoveAll,
-		StatFunc:        os.Stat,
-	}}
-	if err := config.SetRuntimeRepoTrunkWith(d, runtime); err != nil {
-		t.Fatalf("set runtime trunk: %v", err)
-	}
+	d, dataDir := trunkStoreDeps(t)
+	writeRecordedTrunk(t, dataDir, runtime)
 	cfg := &config.Config{
 		Repo: map[string]config.RepoOverrideConfig{
-			hand: {Trunk: boolPtr(true)},
+			hand: {Trunk: trunkPtr(hand)},
 		},
 	}
 	path, bare, err := ResolveTrunkPathWith(d, td, cfg, main)
@@ -904,7 +934,54 @@ func TestProbeWorktreeDirectiveBoundSatisfied(t *testing.T) {
 	}
 }
 
-func boolPtr(v bool) *bool { return &v }
+// trunkStoreDeps points config at a throwaway data dir, so a test can lay down
+// the files a trunk may be stated in — the override layer, or the retired record
+// — without touching the machine's own.
+func trunkStoreDeps(t *testing.T) (*config.Deps, string) {
+	t.Helper()
+	root := t.TempDir()
+	dataDir := filepath.Join(root, "data")
+	return &config.Deps{FS: &deps.MockFileSystem{
+		GetenvFunc: func(key string) string {
+			if key == "XDG_DATA_HOME" {
+				return dataDir
+			}
+			return ""
+		},
+		UserHomeDirFunc: func() (string, error) { return filepath.Join(root, "home"), nil },
+		ReadFileFunc:    os.ReadFile,
+		WriteFileFunc:   os.WriteFile,
+		MkdirAllFunc:    os.MkdirAll,
+		RenameFunc:      os.Rename,
+		RemoveAllFunc:   os.RemoveAll,
+		StatFunc:        os.Stat,
+		EvalSymlinksFunc: func(path string) (string, error) {
+			return filepath.EvalSymlinks(path)
+		},
+	}}, dataDir
+}
+
+// trunkPtr states a repository's Trunk worktree the way a [repo] block holds it
+// since ADR-0212 decision 3: the path of the checkout, not a flag on it.
+func trunkPtr(path string) *config.TrunkPath {
+	p := config.TrunkPath(path)
+	return &p
+}
+
+// writeRecordedTrunk lays down the retired `[<checkout>] trunk = true` record an
+// older pop wrote, so the resolver's fold can be exercised on a machine shaped
+// like one that already has one.
+func writeRecordedTrunk(t *testing.T, dataDir, checkout string) {
+	t.Helper()
+	dir := filepath.Join(dataDir, "pop")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "[" + strconv.Quote(checkout) + "]\ntrunk = true\n"
+	if err := os.WriteFile(filepath.Join(dir, "config.runtime.toml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // TestRouteDrainCheckoutForegroundResumesAdoptedBinding asserts an idle
 // adopted binding at a different checkout is resumed, not re-pointed (ADR-0151).

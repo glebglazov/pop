@@ -193,6 +193,16 @@ func encodeCurrentRepo(d *Deps, cfg *Config, trunk *ResolvedTrunk) (string, erro
 // only path the layer knows for it.
 func effectiveRepoBlocks(d *Deps, cfg *Config) (map[string]RepoOverrideConfig, error) {
 	blocks := canonicalizeRepoKeys(d, cfg.Repo)
+	// A trunk is printed as the path it names, whichever spelling stated it: a
+	// block still holding the retired boolean is folded to the checkout it marked
+	// (ADR-0212 decision 3), so the mirror reads back in the one live form.
+	for key, block := range blocks {
+		if path, ok := block.Trunk.Resolve(key); ok {
+			folded := TrunkPath(canonicalPath(d, path))
+			block.Trunk = &folded
+			blocks[key] = block
+		}
+	}
 	layer, err := loadOverrideLayer(d)
 	if err != nil {
 		return nil, err

@@ -50,9 +50,8 @@ func TestTaskCheckoutReportsLocalityAcrossCheckouts(t *testing.T) {
 	// A config block declaring a checkout as Trunk. Locality must ignore it in
 	// both the bare and the non-bare case, because the drain does.
 	declared := func(path string) *config.Config {
-		yes := true
 		return &config.Config{Repo: map[string]config.RepoOverrideConfig{
-			realPath(t, path): {Trunk: &yes},
+			realPath(t, path): {Trunk: trunkPtr(realPath(t, path))},
 		}}
 	}
 

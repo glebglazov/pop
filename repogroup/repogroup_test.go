@@ -17,7 +17,11 @@ import (
 // the Work kinds stopped owning it: what a group resolves to is the same question
 // for every kind that scans per repository.
 
-func dashboardBoolPtr(b bool) *bool { return &b }
+// trunkPtr states a repository's Trunk worktree as the path value it is.
+func trunkPtr(path string) *config.TrunkPath {
+	p := config.TrunkPath(path)
+	return &p
+}
 
 // TestIntegrationTargetDerivedForkFree covers ADR-0060's integration target rules
 // without forking git (a guard git fails the test on any static command): a
@@ -62,7 +66,7 @@ func TestIntegrationTargetDerivedForkFree(t *testing.T) {
 	t.Run("bare uses config trunk", func(t *testing.T) {
 		d := mkDeps()
 		cfg := &config.Config{Repo: map[string]config.RepoOverrideConfig{
-			"/repo/main": {Trunk: dashboardBoolPtr(true)},
+			"/repo/main": {Trunk: trunkPtr("/repo/main")},
 		}}
 		scans := []Checkout{
 			{Name: "repo/feat", ProjectPath: "/repo/feat", RuntimePath: "/repo/feat"},

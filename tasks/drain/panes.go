@@ -215,8 +215,8 @@ func pathWithinOrEqual(p, base string) bool {
 }
 
 // dashboardRepresentative resolves a repo group's integration target without
-// forking git (ADR-0060): a per-checkout `trunk = true` override wins (bare or
-// not), else a non-bare repo's target is the main worktree — the parent of the
+// forking git (ADR-0060): the checkout the repository states as its trunk wins
+// (bare or not), else a non-bare repo's target is the main worktree — the parent of the
 // common directory — and a bare repo with no declared trunk has none (bare=true,
 // rep=nil). A renamed execution key surfaces as a fatal config finding, matching
 // resolveRepresentative's contract.
@@ -230,10 +230,10 @@ func dashboardRepresentative(d *Deps, cfg *config.Config, commonDir string, scan
 		}
 	}
 
-	// 1. explicit trunk = true checkout (config-only, no git).
+	// 1. the checkout the repository states as its trunk (config-only, no git).
 	for i := range scans {
 		rc, err := resolveRepoConfigFor(d, cfg, scans[i].ProjectPath)
-		if err == nil && rc.Trunk {
+		if err == nil && rc.IsTrunk(configDepsFor(d), scans[i].ProjectPath) {
 			return &scans[i], false, nil
 		}
 	}

@@ -11,17 +11,18 @@ func (c *Config) DeclaredTrunkPaths() []string {
 	return c.DeclaredTrunkPathsWith(defaultDeps)
 }
 
-// DeclaredTrunkPathsWith reads the two path-keyed trunk declarations — a
-// hand-authored [repo."<path>"] trunk = true block and runtime layer 5
-// (config.runtime.toml) — and hands back the paths they name.
+// DeclaredTrunkPathsWith reads every source that can state a trunk without the
+// trunk being known first — a [repo."<path>"] block of the global config.toml,
+// the override layer's per-repository entries, and the retired path-keyed records
+// in config.runtime.toml — and hands back the checkouts they name.
 //
 // This is the fork-free half of binding.ResolveTrunkPathWith. That resolver
 // answers "which checkout is *this* repository's trunk", which needs a repo key
 // per candidate and so a git fork per candidate. A caller that already holds the
 // checkout and only wants to know whether it was *declared* the trunk needs
-// neither: a declaration is keyed by the path itself, so the answer is a set
-// membership test. That is what keeps the project picker's zero-git-call
-// invariant (ADR-0110) intact while it honours the declaration.
+// neither: every declaration names a path, so the answer is a set membership
+// test. That is what keeps the project picker's zero-git-call invariant
+// (ADR-0110) intact while it honours the declaration.
 //
 // Paths are returned as written after home expansion, with no symlink
 // resolution: resolving costs an lstat per path component, and the caller that
@@ -44,17 +45,26 @@ func (c *Config) DeclaredTrunkPathsWith(d *Deps) []string {
 		seen[path] = true
 		out = append(out, path)
 	}
+	// A block states a path, and a retired boolean states the block's own key
+	// (ADR-0212 decision 3), so both spellings arrive here as the checkout meant.
 	if c != nil {
 		for rawKey, block := range c.Repo {
-			if block.Trunk != nil && *block.Trunk {
-				add(rawKey)
+			if path, ok := block.Trunk.Resolve(rawKey); ok {
+				add(path)
 			}
 		}
 	}
-	// A missing runtime file is the common case and reads as no declarations,
-	// which is why the error is dropped rather than surfaced: a trunk that cannot
-	// be read is a trunk that is not declared, and every caller degrades the same
-	// way it does for a repo with no declaration at all.
+	// A missing or unreadable override layer, like a missing runtime file, is the
+	// common case and reads as no declarations: a trunk that cannot be read is a
+	// trunk that is not declared, and every caller degrades the same way it does
+	// for a repo with no declaration at all. That is why both errors are dropped.
+	if layer, err := loadOverrideLayer(d); err == nil {
+		for key, block := range layer.scoped.Repo {
+			if path, ok := block.Trunk.Resolve(key); ok {
+				add(path)
+			}
+		}
+	}
 	if paths, err := RuntimeRepoTrunkPathsWith(d); err == nil {
 		for _, rawKey := range paths {
 			add(rawKey)

@@ -1328,7 +1328,7 @@ func TestLoadRepoConfigDirectives(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("err = %v, want containing %q", err, tt.wantErr)
 				}
-				if got.Trunk {
+				if got.Trunk != "" {
 					t.Fatalf("malformed config must degrade to zero repo config, got %+v", got)
 				}
 				return
@@ -1399,7 +1399,7 @@ func TestPopTOMLScopeLegality(t *testing.T) {
 		if !findingFor(cfg, "trunk is only valid in a global") {
 			t.Fatalf("trunk should produce a [repo]-only finding: %+v", cfg.Findings)
 		}
-		if cfg.Trunk {
+		if cfg.Trunk != "" {
 			t.Error("trunk in .pop/config.toml must not be honored")
 		}
 	})
@@ -3168,7 +3168,7 @@ projects = [{ path = "/main" }]
 
 		writeFile("private.toml", `
 [repo."/home/user/secret"]
-trunk = true
+trunk = "/home/user/secret/main"
 `)
 		configPath := writeFile("config.toml", `
 includes = ["private.toml"]
@@ -3183,8 +3183,8 @@ projects = [{ path = "/main" }]
 		if !ok {
 			t.Fatal("expected [repo.\"/home/user/secret\"] to be merged from include")
 		}
-		if block.Trunk == nil || !*block.Trunk {
-			t.Error("trunk should be true")
+		if path, ok := block.Trunk.Resolve("/home/user/secret"); !ok || path != "/home/user/secret/main" {
+			t.Errorf("trunk = %q (ok=%v), want the included path", path, ok)
 		}
 		if len(cfg.Warnings) != 0 {
 			t.Errorf("expected no warnings, got: %v", cfg.Warnings)
@@ -3203,13 +3203,13 @@ projects = [{ path = "/main" }]
 
 		writeFile("extra.toml", `
 [repo."/shared/repo"]
-trunk = false
+trunk = "/shared/repo/included"
 `)
 		configPath := writeFile("config.toml", `
 includes = ["extra.toml"]
 
 [repo."/shared/repo"]
-trunk = true
+trunk = "/shared/repo/parent"
 `)
 
 		cfg, err := Load(configPath)
@@ -3220,8 +3220,8 @@ trunk = true
 		if !ok {
 			t.Fatal("expected [repo.\"/shared/repo\"] in effective config")
 		}
-		if block.Trunk == nil || !*block.Trunk {
-			t.Error("parent's trunk=true should win")
+		if path, ok := block.Trunk.Resolve("/shared/repo"); !ok || path != "/shared/repo/parent" {
+			t.Errorf("trunk = %q (ok=%v), want the parent's own value to win", path, ok)
 		}
 		if len(cfg.Warnings) != 1 {
 			t.Fatalf("expected 1 collision warning, got %d: %v", len(cfg.Warnings), cfg.Warnings)
@@ -3243,11 +3243,11 @@ trunk = true
 
 		writeFile("first.toml", `
 [repo."/shared/repo"]
-trunk = true
+trunk = "/shared/repo/first"
 `)
 		writeFile("second.toml", `
 [repo."/shared/repo"]
-trunk = false
+trunk = "/shared/repo/second"
 `)
 		configPath := writeFile("config.toml", `
 includes = ["first.toml", "second.toml"]
@@ -3261,8 +3261,8 @@ includes = ["first.toml", "second.toml"]
 		if !ok {
 			t.Fatal("expected [repo.\"/shared/repo\"] in effective config")
 		}
-		if block.Trunk == nil || !*block.Trunk {
-			t.Error("first include's trunk=true should win over second include's false")
+		if path, ok := block.Trunk.Resolve("/shared/repo"); !ok || path != "/shared/repo/first" {
+			t.Errorf("trunk = %q (ok=%v), want the first include's value", path, ok)
 		}
 		if len(cfg.Warnings) != 1 {
 			t.Fatalf("expected 1 collision warning, got %d: %v", len(cfg.Warnings), cfg.Warnings)
@@ -4255,18 +4255,18 @@ func TestResolveRepoConfigPrecedence(t *testing.T) {
 		UserHomeDirFunc:  real.UserHomeDir,
 	}}
 
-	t.Run("global override sets trunk", func(t *testing.T) {
+	t.Run("global declaration states trunk", func(t *testing.T) {
 		cfg := &Config{
 			Repo: map[string]RepoOverrideConfig{
-				root: {Trunk: boolPtr(true)},
+				root: {Trunk: trunkPtr(root)},
 			},
 		}
 		got, err := cfg.ResolveRepoConfig(d, root)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !got.Trunk {
-			t.Errorf("Trunk = false, want true (override wins)")
+		if !got.IsTrunk(d, root) {
+			t.Errorf("Trunk = %q, want %s (declaration wins)", got.Trunk, root)
 		}
 	})
 
@@ -4276,8 +4276,8 @@ func TestResolveRepoConfigPrecedence(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.Trunk {
-			t.Errorf("Trunk = true, want false (no override)")
+		if got.Trunk != "" {
+			t.Errorf("Trunk = %q, want empty (nothing declares one)", got.Trunk)
 		}
 	})
 
@@ -4291,7 +4291,7 @@ func TestResolveRepoConfigPrecedence(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.Trunk {
+		if got.Trunk != "" {
 			t.Errorf("expected zero defaults, got %+v", got)
 		}
 	})
@@ -4360,7 +4360,7 @@ func TestResolvePreferredWorkbench(t *testing.T) {
 		cfg := &Config{
 			Workbenches: []Workbench{{Name: "gs-dev"}},
 			Repo: map[string]RepoOverrideConfig{
-				root: {Trunk: boolPtr(true)},
+				root: {Trunk: trunkPtr(root)},
 			},
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, root)
@@ -4945,7 +4945,7 @@ func TestResolveRepoConfigSharedSchema(t *testing.T) {
 		root := t.TempDir()
 		writePopTOML(t, root, "preferred_workbench = \"committed\"\n")
 		cfg := &Config{Repo: map[string]RepoOverrideConfig{
-			root: {Trunk: boolPtr(true)},
+			root: {Trunk: trunkPtr(root)},
 		}}
 		got, err := cfg.ResolveRepoConfig(newDeps(), root)
 		if err != nil {
@@ -4965,7 +4965,7 @@ func TestResolveRepoConfigSharedSchema(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if cfg.Trunk {
+		if cfg.Trunk != "" {
 			t.Error("trunk in .pop/config.toml must not be honored")
 		}
 		var warned bool
@@ -5019,43 +5019,49 @@ func TestResolveRepoConfigNoPOPTOML(t *testing.T) {
 	}}
 	cfg := &Config{
 		Repo: map[string]RepoOverrideConfig{
-			dir: {Trunk: boolPtr(true)},
+			dir: {Trunk: trunkPtr(dir)},
 		},
 	}
 	got, err := cfg.ResolveRepoConfig(d, dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !got.Trunk {
-		t.Errorf("Trunk = false, want true")
+	if !got.IsTrunk(d, dir) {
+		t.Errorf("Trunk = %q, want %s", got.Trunk, dir)
 	}
 }
 
-func TestResolveRepoConfigTrunkPerCheckout(t *testing.T) {
-	// trunk=true block keyed by /bare/main must NOT propagate to /bare/feature.
+// A block keyed by /bare/main states the repository's one fork base (ADR-0212
+// decision 3), so /bare/feature resolves the same path — and reads it as main's,
+// never as its own.
+func TestResolveRepoConfigTrunkIsRepositoryScoped(t *testing.T) {
 	bareDir := "/bare"
 	d := &Deps{FS: makeFSWithBare(bareDir)}
+	main := bareDir + "/main"
+	feature := bareDir + "/feature"
 
 	cfg := &Config{
 		Repo: map[string]RepoOverrideConfig{
-			bareDir + "/main": {Trunk: boolPtr(true)},
+			main: {Trunk: trunkPtr(main)},
 		},
 	}
 
-	mainGot, err := cfg.ResolveRepoConfig(d, bareDir+"/main")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !mainGot.Trunk {
-		t.Errorf("main: Trunk = false, want true (keyed checkout)")
+	for _, checkout := range []string{main, feature} {
+		got, err := cfg.ResolveRepoConfig(d, checkout)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !got.IsTrunk(d, main) {
+			t.Errorf("%s: Trunk = %q, want %s (one fork base per repository)", checkout, got.Trunk, main)
+		}
 	}
 
-	featureGot, err := cfg.ResolveRepoConfig(d, bareDir+"/feature")
+	featureGot, err := cfg.ResolveRepoConfig(d, feature)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if featureGot.Trunk {
-		t.Errorf("feature: Trunk = true, want false (not the keyed checkout)")
+	if featureGot.IsTrunk(d, feature) {
+		t.Error("feature: a worktree that is not the trunk must not read itself as one")
 	}
 }
 
@@ -5160,8 +5166,8 @@ projects = ["should-warn"]
 	if !ok {
 		t.Fatalf("repo block not parsed")
 	}
-	if block.Trunk == nil || !*block.Trunk {
-		t.Errorf("trunk not parsed correctly from repo block")
+	if path, ok := block.Trunk.Resolve("/path/to/repo"); !ok || path != "/path/to/repo" {
+		t.Errorf("trunk = %q (ok=%v), want the block's own key", path, ok)
 	}
 	// A warning must be emitted for the unknown key
 	found := false

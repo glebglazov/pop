@@ -782,8 +782,9 @@ func (c *Config) ProjectEntries() ([]ProjectEntry, error) {
 // here is accepted at BOTH repo-scope loci: the committed repo-root .pop/config.toml
 // and the user's central global [repo."<path>"] override block. Adding a
 // repo-scope key here makes both surfaces accept it without touching two structs.
-// trunk is the sole exception — it is per-checkout machine topology, never valid
-// in committed .pop/config.toml — so it lives on the individual structs, not here.
+// trunk is the sole exception — it is machine topology, an absolute path on this
+// machine and never valid in committed .pop/config.toml — so it lives on the
+// individual structs, not here.
 type RepoScopeConfig struct {
 	// Workbenches are repo-scope session blueprints (canonical key). The walker
 	// unions them by name across the repo-scope ladder (ADR-0122), so a
@@ -805,12 +806,15 @@ type RepoScopeConfig struct {
 // from a global override, never parsed from .pop/config.toml).
 type RepoConfig struct {
 	RepoScopeConfig
-	// Trunk marks a specific checkout as the Trunk worktree — the repository's
-	// fork base for managed worktrees. Meaningful only in a [repo."<path>"]
-	// global override block keyed to that checkout; a bare repo must declare
-	// trunk = true to enable managed-worktree provisioning. Repo-local .pop/config.toml
-	// cannot name a machine-specific trunk, so this is never decoded (toml:"-").
-	Trunk bool `toml:"-"`
+	// Trunk is the resolved path of this repository's Trunk worktree — its fork
+	// base for managed worktrees — empty when the repository declares none. It is
+	// stated at repository scope, in a [repo."<path>"] block of the global
+	// config.toml or in the override layer's entry for the repository (ADR-0212
+	// decision 3), and answers the same for every worktree of that repository.
+	// A committed .pop/config.toml cannot name a machine-specific path, and a trunk
+	// that had to be known before it could be read would never resolve, so this is
+	// never decoded (toml:"-") and only ever populated by resolution.
+	Trunk string `toml:"-"`
 
 	// TurnCap is the resolved Turn cap for this checkout's repository: how many
 	// Turns one implementation attempt may spend (ADR-0190). Zero means the
@@ -834,9 +838,11 @@ type RepoConfig struct {
 // etc.) are not.
 type RepoOverrideConfig struct {
 	RepoScopeConfig
-	// Trunk is meaningful only for the specific checkout path that keys this
-	// block; it is not propagated to other worktrees of the same repo.
-	Trunk *bool `toml:"trunk" desc:"Mark this exact checkout as the repo's Trunk (fork base for managed worktrees)."`
+	// Trunk names the checkout that is the repository's Trunk worktree. Like
+	// turn_cap it describes the whole repository, so the block is matched by
+	// repository identity and every worktree reads the one answer (ADR-0212
+	// decision 3); the retired boolean spelling folds to the block's own key.
+	Trunk *TrunkPath `toml:"trunk" desc:"Path of the checkout that is this repo's Trunk (fork base for managed worktrees)."`
 	// TurnCap bounds how many Turns one implementation attempt in this repository
 	// may spend (ADR-0190). Unlike trunk it is matched by repository identity, not
 	// by the exact checkout that keys the block, because a bound describes the
@@ -2151,11 +2157,11 @@ func repoRenameFindings(path string, md toml.MetaData) []Finding {
 		if len(key) == 1 {
 			switch key[0] {
 			case "worktree_ready":
-				add(fmt.Sprintf("%s: worktree_ready was removed; use trunk = true in a global [repo.%q] block to name the Trunk worktree", path, "<path>"))
+				add(fmt.Sprintf("%s: worktree_ready was removed; use trunk = \"<path>\" in a global [repo.%q] block to name the Trunk worktree", path, "<path>"))
 			case "execution_base":
-				add(fmt.Sprintf("%s: execution_base was renamed to trunk; use trunk = true in a global [repo.%q] block", path, "<path>"))
+				add(fmt.Sprintf("%s: execution_base was renamed to trunk; use trunk = \"<path>\" in a global [repo.%q] block", path, "<path>"))
 			case "queue_base":
-				add(fmt.Sprintf("%s: queue_base was renamed to trunk; use trunk = true in a global [repo.%q] block", path, "<path>"))
+				add(fmt.Sprintf("%s: queue_base was renamed to trunk; use trunk = \"<path>\" in a global [repo.%q] block", path, "<path>"))
 			}
 		}
 		// [repo."<path>"] block renames (len>=3)

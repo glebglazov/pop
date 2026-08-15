@@ -85,7 +85,7 @@ func (g Group) Storage() string {
 
 // ScanReason is the config-class message a bare repo with no declared trunk
 // carries on its containers (ADR-0059/0060).
-const ScanReason = "needs trunk; skipped (set trunk = true in a global [repo.\"<path>\"] block)"
+const ScanReason = "needs trunk; skipped (set trunk = \"<path>\" in a global [repo] block)"
 
 // Resolve resolves every renderable repo group's static coordinates fork-free
 // (ADR-0060). It iterates the repositories that have a Task storage marker on
@@ -192,8 +192,8 @@ func FromMarker(d *Deps, cfg *config.Config, commonDir string, scans []Checkout)
 }
 
 // representative resolves a repo group's integration target without forking git
-// (ADR-0060): a per-checkout `trunk = true` override wins (bare or not), else a
-// non-bare repo's target is the main worktree — the parent of the common
+// (ADR-0060): the checkout the repository states as its trunk wins (bare or
+// not), else a non-bare repo's target is the main worktree — the parent of the common
 // directory — and a bare repo with no declared trunk has none (bare=true,
 // rep=nil). A renamed execution key surfaces as a fatal config finding.
 func representative(d *Deps, cfg *config.Config, commonDir string, scans []Checkout) (*Checkout, bool, error) {
@@ -206,10 +206,10 @@ func representative(d *Deps, cfg *config.Config, commonDir string, scans []Check
 		}
 	}
 
-	// 1. explicit trunk = true checkout (config-only, no git).
+	// 1. the checkout the repository states as its trunk (config-only, no git).
 	for i := range scans {
 		rc, err := resolveRepoConfigFor(d, cfg, scans[i].ProjectPath)
-		if err == nil && rc.Trunk {
+		if err == nil && rc.IsTrunk(configDepsFor(d), scans[i].ProjectPath) {
 			return &scans[i], false, nil
 		}
 	}
@@ -324,15 +324,21 @@ func canonicalCheckoutPath(d *tasks.Deps, path string) (string, error) {
 // global [repo."<path>"] overrides over repo-root .pop/config.toml. trunk is
 // honored only for the keyed checkout path.
 func resolveRepoConfigFor(d *Deps, cfg *config.Config, checkoutPath string) (config.RepoConfig, error) {
-	pd := d.Project
-	if pd == nil || pd.FS == nil {
-		pd = project.DefaultDeps()
-	}
-	cd := &config.Deps{FS: pd.FS}
+	cd := configDepsFor(d)
 	if cfg == nil {
 		return config.LoadRepoConfigWith(cd, checkoutPath)
 	}
 	return cfg.ResolveRepoConfig(cd, checkoutPath)
+}
+
+// configDepsFor is the config-layer view of these deps: the same filesystem, so a
+// config read here is stubbed by whatever the test stubbed the scan with.
+func configDepsFor(d *Deps) *config.Deps {
+	pd := d.Project
+	if pd == nil || pd.FS == nil {
+		pd = project.DefaultDeps()
+	}
+	return &config.Deps{FS: pd.FS}
 }
 
 // repoName derives a stable label for a repository unit — the repository display

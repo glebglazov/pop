@@ -113,7 +113,7 @@ func TestResolveCurrentRepoTrunkBareConfigOverride(t *testing.T) {
 
 	cfg := &config.Config{
 		Repo: map[string]config.RepoOverrideConfig{
-			wt: {Trunk: boolPtrShow(true)},
+			wt: {Trunk: trunkPtr(wt)},
 		},
 	}
 
@@ -152,7 +152,11 @@ func TestResolveCurrentRepoTrunkOutsideRepo(t *testing.T) {
 	}
 }
 
-func boolPtrShow(b bool) *bool { return &b }
+// trunkPtr states a repository's Trunk worktree as the path value it is.
+func trunkPtr(path string) *config.TrunkPath {
+	p := config.TrunkPath(path)
+	return &p
+}
 
 // TestRunConfigShowJSONEmitsValidJSON verifies --json produces valid JSON
 // carrying the current-repo trunk/bare as cleanly extractable fields, while

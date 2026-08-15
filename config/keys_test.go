@@ -238,7 +238,7 @@ func TestTomlTypeName(t *testing.T) {
 	}
 	cases := map[string]string{
 		"preferred_workbench": "string",          // string field
-		"trunk":               "boolean",         // *bool field
+		"trunk":               "string",          // *TrunkPath field: a checkout path
 		"workbenches":         "array of tables", // []Workbench field
 	}
 	for key, want := range cases {

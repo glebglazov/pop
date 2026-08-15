@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -379,27 +380,18 @@ count = 2
 	}
 }
 
-func TestSetRuntimeRepoTrunkPersistsAndLists(t *testing.T) {
+// Nothing writes a `[<path>] trunk = true` record any more, but a machine that
+// already holds one must still be able to name its Trunk worktree from it.
+func TestRuntimeRepoTrunkPathsReadsRecordedTrunks(t *testing.T) {
 	d, runtimePath := runtimeTestDeps(t)
 	checkout := filepath.Join(t.TempDir(), "repo", "main")
-	if err := os.MkdirAll(checkout, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := SetRuntimeRepoTrunkWith(d, checkout); err != nil {
-		t.Fatalf("set: %v", err)
-	}
+	writeRuntimeFile(t, runtimePath, "["+strconv.Quote(checkout)+"]\ntrunk = true\n\n[\"/srv/other\"]\nworkbench = \"x\"\n")
+
 	paths, err := RuntimeRepoTrunkPathsWith(d)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	if len(paths) != 1 || paths[0] != checkout {
 		t.Fatalf("paths = %v, want [%s]", paths, checkout)
-	}
-	data, err := os.ReadFile(runtimePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), "trunk = true") {
-		t.Fatalf("missing trunk = true:\n%s", data)
 	}
 }

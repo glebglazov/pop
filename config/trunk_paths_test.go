@@ -10,8 +10,10 @@ import (
 )
 
 // The declared-trunk set is what the project picker reads instead of resolving a
-// trunk per checkout: both path-keyed tiers, home-expanded, cleaned, sorted, and
-// no git anywhere near it.
+// trunk per checkout: every source that can state one without knowing it first —
+// blocks, the override layer, the retired records — home-expanded, cleaned,
+// sorted, and no git anywhere near it. A block states a path; the retired boolean
+// states the block's own key, and both arrive here as the checkout meant.
 func TestDeclaredTrunkPaths(t *testing.T) {
 	t.Parallel()
 
@@ -24,6 +26,10 @@ func TestDeclaredTrunkPaths(t *testing.T) {
 	if err := os.WriteFile(runtimeFile, []byte("[\"/srv/kestrel/main\"]\ntrunk = true\n\n[\"/srv/other/wt\"]\nworkbench = \"x\"\n"), 0o644); err != nil {
 		t.Fatalf("write runtime: %v", err)
 	}
+	overrideFile := filepath.Join(dataHome, "pop", "config.override.toml")
+	if err := os.WriteFile(overrideFile, []byte("[repo.\"/srv/wren\"]\ntrunk = \"/srv/wren/main\"\n"), 0o644); err != nil {
+		t.Fatalf("write override: %v", err)
+	}
 
 	real := deps.NewRealFileSystem()
 	d := &Deps{FS: &deps.MockFileSystem{
@@ -33,16 +39,19 @@ func TestDeclaredTrunkPaths(t *testing.T) {
 	}}
 
 	cfg := &Config{Repo: map[string]RepoOverrideConfig{
-		"~/Dev/work/game_server/main": {Trunk: boolPtr(true)},
-		"/srv/hawk/./trunk":           {Trunk: boolPtr(true)},
-		"/srv/not-a-trunk":            {Trunk: boolPtr(false)},
-		"/srv/no-opinion":             {},
+		"~/Dev/work/game_server": {Trunk: trunkPtr("~/Dev/work/game_server/main")},
+		"/srv/hawk/wt":           {Trunk: trunkPtr("/srv/hawk/./trunk")},
+		"/srv/legacy":            {Trunk: legacyTrunkPtr()},
+		"/srv/not-a-trunk":       {Trunk: trunkPtr("")},
+		"/srv/no-opinion":        {},
 	}}
 
 	got := cfg.DeclaredTrunkPathsWith(d)
 	want := []string{
 		"/srv/hawk/trunk",
 		"/srv/kestrel/main",
+		"/srv/legacy",
+		"/srv/wren/main",
 		filepath.Join(home, "Dev", "work", "game_server", "main"),
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -52,7 +61,8 @@ func TestDeclaredTrunkPaths(t *testing.T) {
 	// A nil Config is the zero-declaration case, not a panic: the picker asks
 	// before it knows whether config loaded.
 	var nilCfg *Config
-	if got := nilCfg.DeclaredTrunkPathsWith(d); len(got) != 1 || got[0] != "/srv/kestrel/main" {
-		t.Errorf("nil Config = %q, want the runtime tier alone", got)
+	want = []string{"/srv/kestrel/main", "/srv/wren/main"}
+	if got := nilCfg.DeclaredTrunkPathsWith(d); !reflect.DeepEqual(got, want) {
+		t.Errorf("nil Config = %q, want the pop-written sources alone (%q)", got, want)
 	}
 }

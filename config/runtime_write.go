@@ -244,26 +244,12 @@ func RuntimeIntegrationsSkillsWith(d *Deps) ([]string, bool, error) {
 	return skills, true, nil
 }
 
-// SetRuntimeRepoTrunk records checkoutPath as the Trunk worktree for its
-// repository in config.runtime.toml (ADR-0150). The path is stored as a
-// top-level table keyed by the exact checkout path with trunk = true.
-func SetRuntimeRepoTrunk(checkoutPath string) error {
-	return SetRuntimeRepoTrunkWith(defaultDeps, checkoutPath)
-}
-
-// SetRuntimeRepoTrunkWith is the injectable variant.
-func SetRuntimeRepoTrunkWith(d *Deps, checkoutPath string) error {
-	doc, _, err := loadRuntimeDocument(d)
-	if err != nil {
-		return err
-	}
-	setRuntimeRepoTrunk(doc, checkoutPath)
-	return saveRuntimeDocument(d, doc)
-}
-
-// RuntimeRepoTrunkPaths returns every checkout path marked trunk = true in
-// config.runtime.toml. Used when resolving the Trunk worktree from the runtime
-// tier (layer 5 only — never the trunk-anchored layer 6).
+// RuntimeRepoTrunkPaths returns every checkout a `[<path>] trunk = true` record
+// in config.runtime.toml marks as its repository's Trunk worktree. Nothing writes
+// such a record any more — naming a trunk states intent and lands in the override
+// layer (ADR-0212 decisions 3 and 5) — so this is a read of what an existing
+// machine already holds, folded to the path form by the checkout the record is
+// keyed by.
 func RuntimeRepoTrunkPaths() ([]string, error) {
 	return RuntimeRepoTrunkPathsWith(defaultDeps)
 }
@@ -275,15 +261,6 @@ func RuntimeRepoTrunkPathsWith(d *Deps) ([]string, error) {
 		return nil, err
 	}
 	return runtimeRepoTrunkPaths(doc), nil
-}
-
-func setRuntimeRepoTrunk(doc map[string]any, checkoutPath string) {
-	block, ok := doc[checkoutPath].(map[string]any)
-	if !ok || block == nil {
-		block = map[string]any{}
-		doc[checkoutPath] = block
-	}
-	block["trunk"] = true
 }
 
 var runtimeDocumentReservedKeys = map[string]bool{

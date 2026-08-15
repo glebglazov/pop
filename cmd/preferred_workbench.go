@@ -15,9 +15,9 @@ import (
 // preferredResolverConfigDeps returns config.Deps with the ADR-0078 trunk
 // inheritance layer wired: a worktree with no preference of its own inherits
 // the Trunk worktree's runtime entry, resolved dynamically at open. The trunk
-// is the existing Trunk worktree resolution (non-bare git main worktree, or
-// bare trunk = true via binding.ResolveTrunkPath); a bare repo with no trunk
-// anchor yields ("", false) so the inheritance layer is skipped.
+// is the existing Trunk worktree resolution (non-bare git main worktree, or the
+// path a bare repo states via binding.ResolveTrunkPath); a bare repo with no
+// trunk anchor yields ("", false) so the inheritance layer is skipped.
 func preferredResolverConfigDeps(cfg *config.Config) *config.Deps {
 	d := config.DefaultDeps()
 	d.Trunk = func(checkoutPath string) (string, bool) {

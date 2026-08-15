@@ -27,8 +27,8 @@ import (
 
 // runtimeRepoSettingsSection is the top-level table of config.runtime.toml that
 // holds this layer. It is keyed by repository identity — the divergence from
-// [workbench.preferred] and the repo trunk, which key by exact checkout because
-// they describe a checkout rather than a repository.
+// [workbench.preferred], which keys by exact checkout because it describes a
+// checkout rather than a repository.
 const runtimeRepoSettingsSection = "repo_settings"
 
 // RepoRuntimeConfig is the schema of one [repo_settings."<identity>"] block: the
@@ -236,6 +236,13 @@ func runtimeRepoSettingsWith(d *Deps, identity string) (RepoRuntimeConfig, bool,
 	if err != nil {
 		return RepoRuntimeConfig{}, false, err
 	}
+	return runtimeRepoSettingsFromDoc(doc, identity)
+}
+
+// runtimeRepoSettingsFromDoc is the same read against an already-loaded document,
+// for a caller that needs more than one section of it and must not pay a second
+// file read to get them.
+func runtimeRepoSettingsFromDoc(doc map[string]any, identity string) (RepoRuntimeConfig, bool, error) {
 	section, ok := doc[runtimeRepoSettingsSection].(map[string]any)
 	if !ok || section == nil {
 		return RepoRuntimeConfig{}, false, nil
