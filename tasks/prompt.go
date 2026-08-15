@@ -36,6 +36,11 @@ type taskRow struct {
 	// empty when the task has no title or no blockers.
 	TitleClause     string
 	BlockedByClause string
+	// EffortClause is the badge the Assist listing carries inside the brackets
+	// and the gates' listings do not. Carrying it as row data keeps the shared
+	// partial prose: it ranges and interpolates, it never asks which caller
+	// built the row.
+	EffortClause string
 }
 
 // gateTaskRows builds the listing the HITL, Failed and interrupt gates show.
@@ -43,6 +48,16 @@ type taskRow struct {
 // agent needs the whole set to advise the human. The done-AFK filter belongs to
 // the Verifier's listing alone (ADR-0102), and must never migrate in here.
 func gateTaskRows(m *Manifest) []taskRow {
+	return manifestTaskRows(m, false)
+}
+
+// assistTaskRows builds the same listing for the Assist session, which shows
+// each task's effort so the human can re-effort from the session.
+func assistTaskRows(m *Manifest) []taskRow {
+	return manifestTaskRows(m, true)
+}
+
+func manifestTaskRows(m *Manifest, withEffort bool) []taskRow {
 	rows := make([]taskRow, 0, len(m.Tasks))
 	for _, task := range m.Tasks {
 		row := taskRow{
@@ -50,6 +65,9 @@ func gateTaskRows(m *Manifest) []taskRow {
 			Type:   task.Type,
 			Status: task.Status,
 			Path:   filepath.Join(m.Dir, task.File),
+		}
+		if withEffort {
+			row.EffortClause = " effort=" + task.Effort
 		}
 		if task.Title != "" {
 			row.TitleClause = " " + task.Title
@@ -287,67 +305,68 @@ func BuildVerifyFailedAssistancePrompt(d *Deps, taskSetID string, m *Manifest, w
 		d.FS = DefaultDeps().FS
 	}
 
-	var b strings.Builder
-	fmt.Fprintf(&b, "You are assisting a human at a Verify-failed gate for a Pop task set.\n\n")
-	fmt.Fprintf(&b, "Task set: %s\n", taskSetID)
-	fmt.Fprintf(&b, "Task set path: %s\n", m.Dir)
-	if workSHA != "" {
-		fmt.Fprintf(&b, "Work SHA: %s\n", workSHA)
-	}
-	if runtimePath != "" {
-		fmt.Fprintf(&b, "Runtime checkout: %s\n", runtimePath)
-	}
-	fmt.Fprintf(&b, "\n")
-
-	fmt.Fprintf(&b, "Allowed outcomes at this gate:\n")
-	fmt.Fprintf(&b, "- accept: the human records a human-authored PASS verdict with an optional note.\n")
-	fmt.Fprintf(&b, "- remediate: the human spawns a Remediation task carrying the findings and an optional note.\n")
-	fmt.Fprintf(&b, "- exit without changing task state: leave the set Verify-failed and make no disposition.\n")
-	fmt.Fprintf(&b, "Re-running the Verifier is not offered here — it is a separate force action, not a response to findings.\n")
-	fmt.Fprintf(&b, "You are advisory only: help the human understand the findings and diff, but do not Accept, Remediate, or change task state yourself.\n\n")
-
-	if trimmed := strings.TrimSpace(findings); trimmed != "" {
-		fmt.Fprintf(&b, "Recorded Verifier findings:\n%s\n\n", trimmed)
-	} else {
-		fmt.Fprintf(&b, "Recorded Verifier findings: none were recorded for this verdict.\n\n")
-	}
-
 	// The diff bodies stay out of the prompt for the same reason the Verifier's
 	// do (see workDiffView): the assisting agent is in the checkout and can read
 	// what the human asks about, while an inlined diff of a large set overflows
-	// both argv and the context window.
+	// both argv and the context window. The view carries the range and stat the
+	// heading announces, never a body.
 	work := verifyWorkDiff(d, runtimePath, taskSetID, m)
-	fmt.Fprintf(&b, "Accumulated work diff")
+	view := verifyFailedPromptView{
+		TaskSetID:           taskSetID,
+		TaskSetPath:         m.Dir,
+		WorkSHALine:         optionalLine("Work SHA: ", workSHA),
+		RuntimeCheckoutLine: runtimeCheckoutLine(runtimePath),
+		WorkRange:           work.Range,
+		WorkStat:            work.Stat,
+		WorkUndetermined:    work.Undetermined,
+		Tasks:               gateTaskRows(m),
+	}
 	if workSHA != "" {
-		fmt.Fprintf(&b, " (at %s)", workSHA)
+		view.WorkSHAClause = " (at " + workSHA + ")"
 	}
-	fmt.Fprintf(&b, "\n")
-	if work.Undetermined {
-		fmt.Fprintf(&b, "(the set's commit range could not be determined — helping the human establish what this set actually landed is the task at this gate)\n\n")
-	} else if work.Empty() {
-		fmt.Fprintf(&b, "(no committed changes for this set)\n\n")
+	if trimmed := strings.TrimSpace(findings); trimmed != "" {
+		view.FindingsRecorded = true
+		view.Findings = trimmed
 	} else {
-		fmt.Fprintf(&b, "Commit range: %s\n", work.Range)
-		fmt.Fprintf(&b, "The `git diff --stat` below is complete; fetch any file's diff yourself with `git diff %s -- <path>`.\n", work.Range)
-		fmt.Fprintf(&b, "```\n%s\n```\n\n", work.Stat)
+		view.FindingsMissing = true
 	}
-
-	fmt.Fprintf(&b, "Task set context:\n")
-	for _, task := range m.Tasks {
-		fmt.Fprintf(&b, "- %s [%s %s]", task.ID, task.Type, task.Status)
-		if task.Title != "" {
-			fmt.Fprintf(&b, " %s", task.Title)
-		}
-		fmt.Fprintf(&b, " (%s)", filepath.Join(m.Dir, task.File))
-		if len(task.BlockedBy) > 0 {
-			fmt.Fprintf(&b, "; blocked_by: %s", strings.Join(task.BlockedBy, ", "))
-		}
-		fmt.Fprintf(&b, "\n")
+	if !work.Undetermined {
+		view.WorkEmpty = work.Empty()
+		view.WorkPresent = !work.Empty()
 	}
-	fmt.Fprintf(&b, "\n")
+	return prompt.MustRender(promptTemplates, "verify-failed-assistance.tmpl.md", view)
+}
 
-	fmt.Fprintf(&b, "Help the human decide which allowed outcome fits the findings and diff. Do not record a verdict or spawn remediation unless the human explicitly chooses that outcome.\n")
-	return b.String()
+// verifyFailedPromptView is what the Verify-fail gate's template renders
+// against. The findings and work-diff states are named booleans so the template
+// picks a whole section rather than deriving which of the three diff cases holds.
+type verifyFailedPromptView struct {
+	TaskSetID           string
+	TaskSetPath         string
+	WorkSHALine         string
+	RuntimeCheckoutLine string
+	FindingsRecorded    bool
+	FindingsMissing     bool
+	Findings            string
+	// WorkSHAClause is the parenthetical the work-diff heading carries when the
+	// gate knows the SHA under judgment.
+	WorkSHAClause    string
+	WorkUndetermined bool
+	WorkEmpty        bool
+	WorkPresent      bool
+	WorkRange        string
+	WorkStat         string
+	Tasks            []taskRow
+}
+
+// optionalLine renders prefix+value, or nothing when the value is absent. An
+// empty line closes up in the renderer's normalizer, so the template names the
+// line rather than guarding it.
+func optionalLine(prefix, value string) string {
+	if value == "" {
+		return ""
+	}
+	return prefix + value
 }
 
 // BuildInterruptAssistancePrompt generates the attended-agent prompt shown when a
@@ -511,73 +530,76 @@ func BuildAssistPrompt(d *Deps, taskSetID string, m *Manifest, status TaskSetSta
 		d.FS = DefaultDeps().FS
 	}
 
-	var b strings.Builder
-	fmt.Fprintf(&b, "You are assisting a human in an Assist session for a Pop task set.\n\n")
-	fmt.Fprintf(&b, "Task set: %s\n", taskSetID)
-	fmt.Fprintf(&b, "Task set path: %s\n", m.Dir)
-	fmt.Fprintf(&b, "Derived status: %s\n", status)
-	if runtimePath != "" {
-		fmt.Fprintf(&b, "Worktree binding / Runtime path (Binding-first): %s\n", runtimePath)
+	view := assistPromptView{
+		TaskSetID:   taskSetID,
+		TaskSetPath: m.Dir,
+		Status:      string(status),
+		BindingLine: optionalLine("Worktree binding / Runtime path (Binding-first): ", runtimePath),
+		Tasks:       assistTaskRows(m),
 	}
-	fmt.Fprintf(&b, "\n")
-
-	fmt.Fprintf(&b, "Manifest listing (task bodies are NOT inlined — read them from Task storage):\n")
-	for _, task := range m.Tasks {
-		fmt.Fprintf(&b, "- %s [%s %s effort=%s]", task.ID, task.Type, task.Status, task.Effort)
-		if task.Title != "" {
-			fmt.Fprintf(&b, " %s", task.Title)
-		}
-		fmt.Fprintf(&b, " (%s)", filepath.Join(m.Dir, task.File))
-		if len(task.BlockedBy) > 0 {
-			fmt.Fprintf(&b, "; blocked_by: %s", strings.Join(task.BlockedBy, ", "))
-		}
-		fmt.Fprintf(&b, "\n")
-	}
-	fmt.Fprintf(&b, "\n")
-
 	if trimmed := strings.TrimSpace(findings); trimmed != "" {
-		fmt.Fprintf(&b, "Latest Verify verdict findings:\n%s\n\n", trimmed)
+		view.FindingsRecorded = true
+		view.Findings = trimmed
 	}
+	view.Progress, view.HasProgress, view.ProgressEmpty, view.ProgressUnavailable = recentProgressRows(d, m)
+	return prompt.MustRender(promptTemplates, "assist.tmpl.md", view)
+}
 
-	fmt.Fprintf(&b, "Recent progress:\n")
-	progressPath := filepath.Join(m.Dir, "progress.txt")
-	if data, err := d.FS.ReadFile(progressPath); err == nil {
-		records := parseProgressRecords(string(data))
-		if len(records) == 0 {
-			fmt.Fprintf(&b, "- (progress.txt is empty)\n\n")
-		} else {
-			start := 0
-			if len(records) > 8 {
-				start = len(records) - 8
-			}
-			for _, rec := range records[start:] {
-				fmt.Fprintf(&b, "- %s [%s] %s\n", rec.Timestamp, rec.File, rec.Outcome)
-				for _, line := range strings.Split(rec.Summary, "\n") {
-					if strings.TrimSpace(line) == "" {
-						continue
-					}
-					fmt.Fprintf(&b, "  %s\n", line)
-				}
-			}
-			fmt.Fprintf(&b, "\n")
-		}
-	} else {
-		fmt.Fprintf(&b, "- No progress.txt is available yet.\n\n")
+// assistPromptView is what the Assist session's template renders against. The
+// three progress states are named booleans so the template picks a whole
+// section: the recent records, the empty file, or no file at all.
+type assistPromptView struct {
+	TaskSetID           string
+	TaskSetPath         string
+	Status              string
+	BindingLine         string
+	Tasks               []taskRow
+	FindingsRecorded    bool
+	Findings            string
+	Progress            []progressRow
+	HasProgress         bool
+	ProgressEmpty       bool
+	ProgressUnavailable bool
+}
+
+// progressRow is one recent progress record, its summary already split into the
+// non-blank lines the prompt indents.
+type progressRow struct {
+	Timestamp    string
+	File         string
+	Outcome      string
+	SummaryLines []string
+}
+
+// recentProgressRowLimit is how much of the tail of progress.txt the Assist
+// session shows: enough for the human to see how the set got here, short of
+// replaying a long drain.
+const recentProgressRowLimit = 8
+
+// recentProgressRows reads progress.txt once and returns the tail of its
+// records with the state the template selects on.
+func recentProgressRows(d *Deps, m *Manifest) (rows []progressRow, has, empty, unavailable bool) {
+	data, err := d.FS.ReadFile(filepath.Join(m.Dir, "progress.txt"))
+	if err != nil {
+		return nil, false, false, true
 	}
-
-	fmt.Fprintf(&b, "Task contract to respect:\n")
-	fmt.Fprintf(&b, "- Each task file has \"What to build\" and \"## Acceptance criteria\" checkboxes.\n")
-	fmt.Fprintf(&b, "- Do not modify index.json's task list shape carelessly; run `pop tasks authoring-guide` for what must stay coherent.\n")
-	fmt.Fprintf(&b, "- Do not make git commits — the human owns commits and drain assessment.\n")
-	fmt.Fprintf(&b, "- Do not start a Drain and do not run the Verifier.\n\n")
-
-	fmt.Fprintf(&b, "Operations you may perform (by editing Task storage / the checkout):\n")
-	fmt.Fprintf(&b, "- Inspect task bodies and the runtime checkout to advise the human.\n")
-	fmt.Fprintf(&b, "- Add, remove, reorder, or re-effort tasks by editing index.json and task files under the Task set path.\n")
-	fmt.Fprintf(&b, "- Edit implementation under the runtime checkout when the human asks.\n")
-	fmt.Fprintf(&b, "- Do not mark tasks complete/skipped/open yourself unless the human explicitly asks; gate dispositions stay human choices.\n")
-	fmt.Fprintf(&b, "- Do not invoke `pop tasks implement` or `pop tasks verify` (those start a Drain or the Verifier).\n")
-	return b.String()
+	records := parseProgressRecords(string(data))
+	if len(records) == 0 {
+		return nil, false, true, false
+	}
+	start := 0
+	if len(records) > recentProgressRowLimit {
+		start = len(records) - recentProgressRowLimit
+	}
+	for _, rec := range records[start:] {
+		rows = append(rows, progressRow{
+			Timestamp:    rec.Timestamp,
+			File:         rec.File,
+			Outcome:      rec.Outcome,
+			SummaryLines: nonBlankLines(rec.Summary),
+		})
+	}
+	return rows, true, false, false
 }
 
 func parseProgressRecords(data string) []progressRecord {

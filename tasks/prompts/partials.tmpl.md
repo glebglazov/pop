@@ -1,4 +1,4 @@
-{{define "task-listing"}}{{range .}}- {{.ID}} [{{.Type}} {{.Status}}]{{.TitleClause}} ({{.Path}}){{.BlockedByClause}}
+{{define "task-listing"}}{{range .}}- {{.ID}} [{{.Type}} {{.Status}}{{.EffortClause}}]{{.TitleClause}} ({{.Path}}){{.BlockedByClause}}
 {{end}}{{end}}
 {{define "task-body"}}{{if .Readable}}```markdown
 {{.Body}}
