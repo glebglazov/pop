@@ -20,7 +20,7 @@ import (
 // attribution beside the containers it was resolved against.
 func attributeMap(t *testing.T, k *MapKind, facts work.PaneFacts) (*work.Attribution, map[string]work.Container) {
 	t.Helper()
-	snap, err := work.BuildSnapshotForPane([]work.Kind{k}, facts)
+	snap, err := work.BuildSnapshotForPane([]work.Kind{k}, facts, work.OrderByKindPrecedence)
 	if err != nil {
 		t.Fatalf("BuildSnapshotForPane: %v", err)
 	}

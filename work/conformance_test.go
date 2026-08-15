@@ -36,6 +36,10 @@ type conformanceCase struct {
 	container string
 	// items is how many Work items that container carries.
 	items int
+	// wantCreated is the creation date the kind must stamp on that container, as
+	// `YYYY-MM-DD`, and empty for a kind whose containers have no creation date to
+	// read (ADR-0210).
+	wantCreated string
 	// wantActions and wantItemActions are the verbs offered over the container and
 	// over its first item.
 	wantActions     []work.Verb
@@ -53,10 +57,11 @@ type conformanceCase struct {
 func conformanceCases() []conformanceCase {
 	return []conformanceCase{
 		{
-			name:      "task set",
-			id:        ref.KindTaskSet,
-			container: "2026-07-01-demo",
-			items:     2,
+			name:        "task set",
+			id:          ref.KindTaskSet,
+			container:   "2026-07-01-demo",
+			items:       2,
+			wantCreated: "2026-07-01",
 			kind: func(t *testing.T, f fixture) work.Kind {
 				return setkind.New(&setkind.Deps{
 					Tasks:      f.tasks,
@@ -96,10 +101,11 @@ func conformanceCases() []conformanceCase {
 			callerModal: setkind.VerbDrain,
 		},
 		{
-			name:      "map",
-			id:        ref.KindMap,
-			container: "2026-07-01-chart",
-			items:     1,
+			name:        "map",
+			id:          ref.KindMap,
+			container:   "2026-07-01-chart",
+			items:       1,
+			wantCreated: "2026-07-01",
 			kind: func(t *testing.T, f fixture) work.Kind {
 				return wayfinder.NewMapKind(&wayfinder.MapKindDeps{
 					Wayfinder: &wayfinder.Deps{FS: f.fs, Tasks: f.tasks},
@@ -127,6 +133,8 @@ func conformanceCases() []conformanceCase {
 			name:      "routine",
 			id:        ref.KindRoutine,
 			container: "demo",
+			// A Routine has no creation date, so it stamps none and takes the zero.
+			wantCreated: "",
 			// A Routine's Work items are its runs; the fixture holds one.
 			items: 1,
 			kind: func(t *testing.T, f fixture) work.Kind {
@@ -190,6 +198,12 @@ func TestKindConformance(t *testing.T) {
 			}
 			if c.Project == "" || c.Status == "" || c.CursorKey == "" {
 				t.Fatalf("container %+v must carry a project, a status label and a cursor key", c)
+			}
+			// The kind stamps its own creation date during Load, from the prefix its
+			// identifiers carry — or leaves the zero when it has no such date, which
+			// is what makes the cross-kind date key stand aside for it (ADR-0210).
+			if want := wantCreatedAt(t, tc.wantCreated); !c.CreatedAt.Equal(want) {
+				t.Fatalf("container CreatedAt = %v, want %v", c.CreatedAt, want)
 			}
 			// Every kind composes a STATUS cell, and its first segment is the label a
 			// surface colours by bucket.
@@ -356,7 +370,7 @@ func TestAnAttributedMapRowPinsAboveTheWholeTaskSetBlock(t *testing.T) {
 		PaneID:   "%3",
 		WorkKind: string(ref.KindMap),
 		WorkID:   "2026-07-01-chart",
-	})
+	}, work.OrderByKindPrecedence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,6 +391,20 @@ func TestAnAttributedMapRowPinsAboveTheWholeTaskSetBlock(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("snapshot order = %v, want %v — the attributed Map first and marked, once, the rest as they were", got, want)
 	}
+}
+
+// wantCreatedAt turns a case's `YYYY-MM-DD` expectation into the instant the
+// stamp must carry, and an empty one into the zero date.
+func wantCreatedAt(t *testing.T, date string) time.Time {
+	t.Helper()
+	if date == "" {
+		return time.Time{}
+	}
+	at, err := time.ParseInLocation("2006-01-02", date, time.UTC)
+	if err != nil {
+		t.Fatalf("wantCreated %q: %v", date, err)
+	}
+	return at
 }
 
 func verbsOf(actions []work.Action) []work.Verb {

@@ -177,6 +177,11 @@ func (k *MapKind) Load() ([]work.Container, error) {
 			containers = append(containers, containerFor(g, m, sets.resolve(m.SpawnedSets), now))
 		}
 	}
+	// A Map's creation date is the `YYYY-MM-DD` prefix of its directory name, read
+	// through the Task-set kind's parser because it is the same prefix (ADR-0210).
+	// A Map registered before the prefix was expected keeps the zero date and
+	// sorts below every dated row rather than at an arbitrary spot.
+	tasks.StampWorkCreatedAt(containers)
 	return containers, nil
 }
 

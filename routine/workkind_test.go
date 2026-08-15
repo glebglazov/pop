@@ -113,6 +113,23 @@ func TestRoutineKindStampsTiersAtLoadAndOrdersByThem(t *testing.T) {
 	if want := "3 routines · 1 here · 3 paused"; snap.SummaryLine() != want {
 		t.Fatalf("summary = %q, want %q", snap.SummaryLine(), want)
 	}
+	// A Routine has no creation date, so it stamps none — and the zero it keeps is
+	// what makes the cross-kind date key stand aside, leaving this page in the
+	// relevance order above under the date ordering too (ADR-0210).
+	dated, err := work.BuildSnapshotForPane([]work.Kind{k}, work.PaneFacts{}, work.OrderByCreatedDesc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var datedOrder []string
+	for _, c := range dated.Containers {
+		if !c.CreatedAt.IsZero() {
+			t.Fatalf("routine %q carries a creation date %v, want none", c.ID, c.CreatedAt)
+		}
+		datedOrder = append(datedOrder, c.ID)
+	}
+	if !slices.Equal(datedOrder, wantOrder) {
+		t.Fatalf("created_desc order = %v, want the relevance order %v", datedOrder, wantOrder)
+	}
 }
 
 // TestRoutineKindLessReadsOnlyTheStampedTier pins the comparator as pure over two

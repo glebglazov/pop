@@ -170,6 +170,10 @@ func (k *Kind) Load() ([]work.Container, error) {
 		}
 		containers = append(containers, got...)
 	}
+	// The kind stamps its own creation dates, the way the builder stamps the kind:
+	// a set's date is its id's prefix, and the loader that produced the id is the
+	// authority on it (ADR-0210).
+	tasks.StampWorkCreatedAt(containers)
 	return containers, nil
 }
 

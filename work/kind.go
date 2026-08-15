@@ -108,6 +108,18 @@ type Container struct {
 	// `(kind, id)` registry is keyed on.
 	Kind KindID
 	ID   string
+	// CreatedAt is when the container came into being, stamped by its own kind
+	// during Load from the `YYYY-MM-DD[-HHMM]` prefix its identifier already
+	// carries — no persisted instant and no lifecycle event behind it (ADR-0210).
+	// It is the cross-kind ordering key, which is why it lives beside the identity
+	// rather than among a kind's cells.
+	//
+	// Zero means the kind has no opinion: such a container sorts after every dated
+	// one and falls through to its own kind's comparator. That is how a Routine —
+	// which has no creation date — keeps its relevance order on a single-kind
+	// page, and how a Map registered before the prefix was enforced gets a defined
+	// position instead of an arbitrary one.
+	CreatedAt time.Time
 	// Project is the repository-group label the container belongs to, the label
 	// every read surface groups by.
 	Project string

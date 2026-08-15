@@ -138,6 +138,9 @@ func (k *Kind) Load() ([]work.Container, error) {
 		containers = append(containers, c)
 	}
 	k.recordPanes(containers)
+	// No creation date is stamped, deliberately: a Routine has no creation date to
+	// read, and the zero it keeps is what makes the cross-kind date key stand
+	// aside so Less below orders a Routine page by relevance tier (ADR-0210).
 	return containers, nil
 }
 

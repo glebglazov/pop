@@ -10,9 +10,9 @@ import (
 // Snapshot is the data model for `pop work dashboard`.
 type Snapshot struct {
 	// Containers are every loaded Work container in snapshot order — the rows the
-	// launching pane is attributed to first, then kind precedence and each kind's
-	// own comparator. There is no second list beside it: a dashboard row is one of
-	// these.
+	// launching pane is attributed to first, then whatever the build's Ordering
+	// ranked the rest by. There is no second list beside it: a dashboard row is
+	// one of these.
 	Containers []Container
 	// Summary is every kind's header phrases in kind order, already pluralised.
 	// SummaryLine joins them.
@@ -46,16 +46,37 @@ type ModelSkip struct {
 	StatedUntil time.Time
 }
 
+// Ordering names how a build ranks containers against each other. It is a
+// `work`-owned value the caller passes in rather than something each kind
+// signals, so a page has one authority on its own order: kinds stamping the key
+// independently would make an interleaved page an emergent property of every
+// kind agreeing, and one kind disagreeing would yield a half-ordered page with
+// nowhere to look (ADR-0210).
+type Ordering int
+
+const (
+	// OrderByKindPrecedence is the pre-ADR-0210 order: the closed enum's kind
+	// order partitions the page, and each kind's own comparator orders its block.
+	// Nothing compares across kinds. Scheduling pins it explicitly — a serial
+	// dispatch's "first wins, rest defer" must not inherit a display default.
+	OrderByKindPrecedence Ordering = iota
+	// OrderByCreatedDesc interleaves every kind by creation date, newest first.
+	OrderByCreatedDesc
+	// OrderByCreatedAsc is OrderByCreatedDesc reversed, oldest first.
+	OrderByCreatedAsc
+)
+
+// createdOrder reports whether this ordering ranks by creation date at all.
+func (o Ordering) createdOrder() bool {
+	return o == OrderByCreatedDesc || o == OrderByCreatedAsc
+}
+
 // BuildSnapshot builds one point-in-time Work snapshot from a wired list of
-// kinds. It is the whole of the builder: every read of the filesystem and of
-// pop.db happens inside a kind's Load, so `work` itself scans nothing and knows
-// nothing about what a task set or a Map is.
-//
-// Ordering is fixed kind precedence — the closed enum's order — then the owning
-// kind's own comparator. Nothing compares across kinds, which is the point: with
-// no shared status taxonomy there is no cross-kind ranking to derive.
+// kinds, in kind-precedence order. It is the whole of the builder: every read of
+// the filesystem and of pop.db happens inside a kind's Load, so `work` itself
+// scans nothing and knows nothing about what a task set or a Map is.
 func BuildSnapshot(kinds []Kind) (Snapshot, error) {
-	return BuildSnapshotForPane(kinds, PaneFacts{})
+	return BuildSnapshotForPane(kinds, PaneFacts{}, OrderByKindPrecedence)
 }
 
 // BuildSnapshotForPane is BuildSnapshot plus the facts of the pane the surface
@@ -68,7 +89,7 @@ func BuildSnapshot(kinds []Kind) (Snapshot, error) {
 // Every build asks again, not just the first. A pin is current: the containers
 // change between builds — a drain goes live, a set becomes bound — so the answer
 // derived from the same facts changes with them (ADR-0209 decision 5).
-func BuildSnapshotForPane(kinds []Kind, facts PaneFacts) (Snapshot, error) {
+func BuildSnapshotForPane(kinds []Kind, facts PaneFacts, order Ordering) (Snapshot, error) {
 	ordered := kindsInPrecedence(kinds)
 	loaded := make([][]Container, len(ordered))
 	for i, k := range ordered {
@@ -87,7 +108,9 @@ func BuildSnapshotForPane(kinds []Kind, facts PaneFacts) (Snapshot, error) {
 
 	snap := Snapshot{Pane: facts}
 	for i, k := range ordered {
-		snap.Containers = append(snap.Containers, loaded[i]...)
+		// Header phrases stay per kind under every ordering: a count is not an
+		// order, and "how many of each" becomes more useful once the reader can no
+		// longer read it off where the blocks start and stop.
 		snap.Summary = append(snap.Summary, k.Summary(loaded[i])...)
 		skips, err := kindModelSkips(k)
 		if err != nil {
@@ -95,6 +118,7 @@ func BuildSnapshotForPane(kinds []Kind, facts PaneFacts) (Snapshot, error) {
 		}
 		snap.ModelSkips = append(snap.ModelSkips, skips...)
 	}
+	snap.Containers = merge(ordered, loaded, order)
 	snap.Attribution = AttributePane(ordered, facts)
 	snap.Containers = pinAttributed(snap.Containers, snap.Attribution)
 	return snap, nil
@@ -169,6 +193,69 @@ func sortWithin(k Kind, containers []Container) {
 	sort.SliceStable(containers, func(i, j int) bool {
 		return k.Less(containers[i], containers[j])
 	})
+}
+
+// merge turns the per-kind blocks — each already in its own kind's order — into
+// the one list a page renders, under the requested ordering.
+//
+// Kind precedence is concatenation and nothing more, which is what keeps that
+// ordering byte-identical to the pre-ADR-0210 build. Creation order re-sorts the
+// whole page across kinds; the sort is stable over blocks that already hold
+// their kind's order, so a kind's own sequence survives every key it ties on.
+func merge(kinds []Kind, loaded [][]Container, order Ordering) []Container {
+	var all []Container
+	for _, block := range loaded {
+		all = append(all, block...)
+	}
+	if !order.createdOrder() {
+		return all
+	}
+	byKind := make(map[KindID]Kind, len(kinds))
+	for _, k := range kinds {
+		byKind[k.ID()] = k
+	}
+	sort.SliceStable(all, func(i, j int) bool {
+		return crossKindLess(byKind, order, all[i], all[j])
+	})
+	return all
+}
+
+// crossKindLess is the cross-kind comparator: membership tier, then creation
+// date in the requested direction, then kind precedence, then the owning kind's
+// own comparator (ADR-0210).
+//
+// Tier first is what keeps a live drain floating above the whole page whatever
+// its date, and `work` can read the tiers itself because every kind already
+// stamps the three fields Tier reads. Kind precedence survives only here, as the
+// last-resort tiebreak for two kinds landing on the exact same date — a real
+// case, since a Map and the task set it spawned share a day. Below it the two
+// containers are of one kind, so handing them to that kind's Less honours the
+// interface's "never asked to compare across kinds" contract.
+func crossKindLess(byKind map[KindID]Kind, order Ordering, a, b Container) bool {
+	if ta, tb := Tier(a), Tier(b); ta != tb {
+		return ta < tb
+	}
+	if !a.CreatedAt.Equal(b.CreatedAt) {
+		// A zero date is "no opinion", not "the beginning of time": it sinks below
+		// every dated container in both directions.
+		switch {
+		case a.CreatedAt.IsZero():
+			return false
+		case b.CreatedAt.IsZero():
+			return true
+		case order == OrderByCreatedAsc:
+			return a.CreatedAt.Before(b.CreatedAt)
+		default:
+			return a.CreatedAt.After(b.CreatedAt)
+		}
+	}
+	if ra, rb := kindRank(a.Kind), kindRank(b.Kind); ra != rb {
+		return ra < rb
+	}
+	if k, ok := byKind[a.Kind]; ok {
+		return k.Less(a, b)
+	}
+	return false
 }
 
 // kindModelSkips collects a kind's machine-global model skips when it carries

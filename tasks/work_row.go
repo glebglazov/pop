@@ -134,6 +134,20 @@ func createdSortLess(a, b work.Container, sortMode string) bool {
 	return a.ID > b.ID
 }
 
+// StampWorkCreatedAt fills in each container's creation date from its
+// identifier's `YYYY-MM-DD[-HHMM]` prefix (ADR-0210). It lives here because the
+// prefix parser does, and both kinds whose identifiers carry a date — task sets
+// and Maps — read it through this one implementation rather than each deciding
+// again what an unparseable id means. An id with no parseable prefix is left at
+// the zero date, which the builder reads as "no opinion".
+func StampWorkCreatedAt(containers []work.Container) {
+	for i := range containers {
+		if created, ok := IDCreatedAt(containers[i].ID); ok {
+			containers[i].CreatedAt = created
+		}
+	}
+}
+
 // SortWorkRows applies the shared Queue surface order (WorkRowLess) to a set of
 // Work rows. sortMode is the active preset's sort (empty = status scheme).
 func SortWorkRows(rows []work.Container, sortMode string) {
