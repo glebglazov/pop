@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/conventions"
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/monitor"
@@ -256,6 +257,19 @@ func (d *Deps) historyDeps() *history.Deps {
 	// real one (ADR-0140/0188).
 	hd.Tasks = d.tasksDeps()
 	return hd
+}
+
+// conventionsDeps resolves the Repo convention seam for a verb entrypoint. Like
+// history, it borrows the cmd layer's tasks deps rather than building its own:
+// the Convention memory layer is filed under Repository identity, so it has to
+// resolve through the same data dir the rest of the cmd layer routes to.
+func (d *Deps) conventionsDeps() *conventions.Deps {
+	cd := conventions.DefaultDeps()
+	if d != nil && d.FS != nil {
+		cd.FS = d.FS
+	}
+	cd.Tasks = d.tasksDeps()
+	return cd
 }
 
 func cmdMonitorStatePath() string {
