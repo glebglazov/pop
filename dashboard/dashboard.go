@@ -726,27 +726,26 @@ func newQueueDashboardOn(d *drain.Deps, cfg *config.Config, snap DashboardSnapsh
 	return m
 }
 
-// seedCursorFromPane places the cursor on the row the launching pane was
-// attributed to and returns the line the surface should say about it — empty for
-// the two silent cases, a landed cursor and a pane that belongs to nothing
-// (ADR-0201 decision 6).
+// seedCursorFromPane places the cursor on the leading row the launching pane was
+// attributed to and returns the line the surface should say about it — empty
+// whenever the cursor lands, and for a pane that belongs to nothing.
 //
 // It runs here, in the constructor, because that is the one moment that is
 // unambiguously before the first paint and after the rows exist. There is no
 // pending target kept afterwards: a cursor that outlives the human's own
 // navigation is one that fights them.
 func (m QueueDashboard) seedCursorFromPane() string {
-	att := m.snap.Attribution
-	if att == nil {
+	if m.snap.Attribution == nil {
 		return ""
 	}
-	if m.list.SetCursorToKey(att.CursorKey) {
-		// A landed cursor is silent unless the kind had to choose which container the
-		// pane meant, in which case its Note is the choice: which one, out of how
-		// many, and why (ADR-0201 decision 2).
-		return att.Note
+	lead, ok := m.snap.Attribution.Leading()
+	if !ok {
+		return ""
 	}
-	return attributionHiddenLine(*att, m.activeViewPreset().DisplayLabel(), m.filterInput.Value())
+	if m.list.SetCursorToKey(lead.CursorKey) {
+		return ""
+	}
+	return attributionHiddenLine(lead, m.activeViewPreset().DisplayLabel(), m.filterInput.Value())
 }
 
 // attributionHiddenLine words the miss: the container was attributed, but no row
@@ -754,14 +753,14 @@ func (m QueueDashboard) seedCursorFromPane() string {
 // the point — a cursor resting at row one with no explanation is indistinguishable
 // from a broken feature. The view is never widened to reveal the row; the preset
 // is a deliberate choice and a launch does not overrule it.
-func attributionHiddenLine(att work.Attribution, preset, query string) string {
+func attributionHiddenLine(c work.AttributedContainer, preset, query string) string {
 	switch {
 	case query != "":
-		return fmt.Sprintf("%s is hidden by the /%s filter", att.Label, query)
+		return fmt.Sprintf("%s is hidden by the /%s filter", c.Label, query)
 	case preset != "":
-		return fmt.Sprintf("%s is hidden by the %s view", att.Label, preset)
+		return fmt.Sprintf("%s is hidden by the %s view", c.Label, preset)
 	default:
-		return att.Label + " is hidden by the active view"
+		return c.Label + " is hidden by the active view"
 	}
 }
 

@@ -21,7 +21,7 @@ type Snapshot struct {
 	// per-container, which is why they ride the snapshot and render as a footer
 	// one-liner rather than as a cell. Empty is the steady state.
 	ModelSkips []ModelSkip
-	// Attribution is the container the pane this build was launched from belongs
+	// Attribution is the containers the pane this build was launched from belongs
 	// to, nil when it belongs to none of the kinds on this page. Only a build
 	// handed pane facts can carry one: a rebuild is not a launch, so a poll's
 	// snapshot can never re-seed a cursor the human has since moved (ADR-0201

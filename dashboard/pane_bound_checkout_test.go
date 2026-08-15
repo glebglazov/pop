@@ -3,7 +3,7 @@ package dashboard
 import (
 	"os"
 	"path/filepath"
-	"strings"
+	"slices"
 	"testing"
 	"time"
 
@@ -105,56 +105,87 @@ func TestLiveDrainAtThePaneDirectoryBeatsTheBindingFallback(t *testing.T) {
 	}
 }
 
-// With several sets bound to one checkout, the claim decides — and because a
-// choice was made, it is named: which set, out of how many, and why.
-func TestCheckoutClaimDecidesAmongSeveralBoundSets(t *testing.T) {
+// With several sets bound to one checkout, every one of them is attributed: the
+// shell really is standing in all of their work. The claim only decides who leads,
+// and nothing is said about it — a choice nobody made needs no confessing
+// (ADR-0209 decision 2).
+func TestEveryBoundSetIsAttributedWithTheClaimHolderLeading(t *testing.T) {
 	d, cfg, stems, checkout := boundCheckoutFixture(t, 0, 1, 2)
 	registerClaimHeldBy(t, d, stems[0], checkout)
 
 	m := openSeeded(t, d, cfg)
 
-	if got := cursorRow(t, m); got != stems[0] {
-		t.Fatalf("cursor on %q, want the claim holder (%q)", got, stems[0])
+	got := attributedSets(t, m)
+	if len(got) != 3 || got[0] != stems[0] {
+		t.Fatalf("attributed %v, want all three bound sets with the claim holder %q leading", got, stems[0])
 	}
-	for _, want := range []string{stems[0], "3", store.ClaimFailedGate.Phrase()} {
-		if !strings.Contains(m.flash.Text(), want) {
-			t.Fatalf("status = %q, want it to carry %q", m.flash.Text(), want)
-		}
+	if cursor := cursorRow(t, m); cursor != stems[0] {
+		t.Fatalf("cursor on %q, want the leading candidate (%q)", cursor, stems[0])
+	}
+	if m.flash.Text() != "" {
+		t.Fatalf("status = %q, want silence: nothing was chosen", m.flash.Text())
 	}
 }
 
-// With no claim, the set drained most recently is the best evidence there is; with
-// neither, the topmost bound row under the active sort — a defined answer rather
-// than an arbitrary one. Both name the choice.
-func TestBoundTieBreaksOnDrainRecencyThenSortOrder(t *testing.T) {
-	t.Run("most recently drained", func(t *testing.T) {
+// With no claim, the set drained most recently leads, and the sets that never
+// drained follow in the order the active sort already puts them in. Every rung of
+// the sub-ladder now orders candidates instead of picking one, so all three are
+// still attributed either way.
+func TestBoundCandidatesAreOrderedByDrainRecencyThenSortOrder(t *testing.T) {
+	t.Run("most recently drained leads", func(t *testing.T) {
 		d, cfg, stems, checkout := boundCheckoutFixture(t, 0, 1, 2)
 		recordFinishedDrain(t, d, checkout, stems[0])
 		recordFinishedDrain(t, d, checkout, stems[1])
 
 		m := openSeeded(t, d, cfg)
 
-		if got := cursorRow(t, m); got != stems[1] {
-			t.Fatalf("cursor on %q, want the most recently drained set (%q)", got, stems[1])
+		got := attributedSets(t, m)
+		want := []string{stems[1], stems[0], stems[2]}
+		if !slices.Equal(got, want) {
+			t.Fatalf("attributed %v, want %v — recency first, the never-drained set last", got, want)
 		}
-		if !strings.Contains(m.flash.Text(), stems[1]) || !strings.Contains(m.flash.Text(), "recently") {
-			t.Fatalf("status = %q, want it to name %q and the recency it was chosen by", m.flash.Text(), stems[1])
+		if cursor := cursorRow(t, m); cursor != stems[1] {
+			t.Fatalf("cursor on %q, want the most recently drained set (%q)", cursor, stems[1])
+		}
+		if m.flash.Text() != "" {
+			t.Fatalf("status = %q, want silence", m.flash.Text())
 		}
 	})
 
-	t.Run("topmost under the current sort", func(t *testing.T) {
-		d, cfg, _, _ := boundCheckoutFixture(t, 0, 1, 2)
+	t.Run("the current sort orders the rest", func(t *testing.T) {
+		d, cfg, stems, _ := boundCheckoutFixture(t, 0, 1, 2)
 
 		m := openSeeded(t, d, cfg)
 
-		want := m.snap.Containers[0].ID
-		if got := cursorRow(t, m); got != want {
-			t.Fatalf("cursor on %q, want the topmost row under the current sort (%q)", got, want)
+		var want []string
+		for _, row := range m.snap.Containers {
+			if slices.Contains(stems, row.ID) {
+				want = append(want, row.ID)
+			}
 		}
-		if !strings.Contains(m.flash.Text(), want) || !strings.Contains(m.flash.Text(), "topmost") {
-			t.Fatalf("status = %q, want it to name %q and the sort it was chosen by", m.flash.Text(), want)
+		if got := attributedSets(t, m); !slices.Equal(got, want) {
+			t.Fatalf("attributed %v, want the rows in their current sort order %v", got, want)
+		}
+		if cursor := cursorRow(t, m); cursor != want[0] {
+			t.Fatalf("cursor on %q, want the topmost row under the current sort (%q)", cursor, want[0])
+		}
+		if m.flash.Text() != "" {
+			t.Fatalf("status = %q, want silence", m.flash.Text())
 		}
 	})
+}
+
+// attributedSets is the ranked ids the launch attributed the pane to.
+func attributedSets(t *testing.T, m QueueDashboard) []string {
+	t.Helper()
+	if m.snap.Attribution == nil {
+		t.Fatal("attribution = none, want the sets bound to the checkout the shell is in")
+	}
+	var ids []string
+	for _, c := range m.snap.Attribution.Containers {
+		ids = append(ids, c.Ref.ContainerID)
+	}
+	return ids
 }
 
 // A shell somewhere no work is bound is the common case, and it is silent: a

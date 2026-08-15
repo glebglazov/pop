@@ -32,24 +32,30 @@ func attributeMap(t *testing.T, k *MapKind, facts work.PaneFacts) (*work.Attribu
 }
 
 // assertAttributes pins an attribution against the row it names: the identity
-// every Work surface uses, and the cursor key the row itself carries.
+// every Work surface uses, and the cursor key the row itself carries. A Map's
+// rungs each name exactly one container, so an answer carrying a second one is a
+// failure of the rung, not a ranking.
 func assertAttributes(t *testing.T, att *work.Attribution, rows map[string]work.Container, mapID string) {
 	t.Helper()
 	if att == nil {
 		t.Fatalf("attribution = none, want the Map %q", mapID)
 	}
-	if att.Ref != (ref.WorkRef{Kind: ref.KindMap, ContainerID: mapID}) {
-		t.Fatalf("ref = %v, want map:%s", att.Ref, mapID)
+	if len(att.Containers) != 1 {
+		t.Fatalf("attribution = %+v, want exactly the Map %q", att.Containers, mapID)
+	}
+	c := att.Containers[0]
+	if c.Ref != (ref.WorkRef{Kind: ref.KindMap, ContainerID: mapID}) {
+		t.Fatalf("ref = %v, want map:%s", c.Ref, mapID)
 	}
 	row, ok := rows[mapID]
 	if !ok {
 		t.Fatalf("no row for %q among %d — this assertion needs a rendered row", mapID, len(rows))
 	}
-	if att.CursorKey != row.CursorKey {
-		t.Fatalf("cursor key = %q, want the row's own %q", att.CursorKey, row.CursorKey)
+	if c.CursorKey != row.CursorKey {
+		t.Fatalf("cursor key = %q, want the row's own %q", c.CursorKey, row.CursorKey)
 	}
-	if att.Label == "" {
-		t.Fatal("label = empty: the status line has nothing to name the container by")
+	if c.Label == "" {
+		t.Fatal("label = empty: the surface has nothing to name the container by")
 	}
 }
 
@@ -117,10 +123,14 @@ func TestHiddenMapIsStillAttributed(t *testing.T) {
 	if _, rendered := rows["2026-07-03-abandoned"]; rendered {
 		t.Fatal("the abandoned Map rendered a row; this test needs a hidden one")
 	}
-	if att == nil || att.Ref.ContainerID != "2026-07-03-abandoned" {
-		t.Fatalf("attribution = %+v, want the hidden Map", att)
+	if att == nil {
+		t.Fatal("attribution = none, want the hidden Map")
 	}
-	if att.Label == "" {
+	lead, ok := att.Leading()
+	if !ok || lead.Ref.ContainerID != "2026-07-03-abandoned" {
+		t.Fatalf("attribution = %+v, want the hidden Map", att.Containers)
+	}
+	if lead.Label == "" {
 		t.Fatal("label = empty: a hidden container is reported by name or not at all")
 	}
 }

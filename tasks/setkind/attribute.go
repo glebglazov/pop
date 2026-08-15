@@ -1,7 +1,6 @@
 package setkind
 
 import (
-	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -18,11 +17,11 @@ import (
 // / @pop_assist is a pane pop opened for that set — not a pane that happens to
 // sit near it.
 
-// paneIndex maps a set id to the attribution its row would carry. It is recorded
-// from every row a pass read, including the rows the view preset dropped: a pane
-// tagged for a hidden set has to be reported by name, and a lookup afterwards
-// would mean scanning the machine a second time.
-type paneIndex map[string]work.Attribution
+// paneIndex maps a set id to the attributed container its row would carry. It is
+// recorded from every row a pass read, including the rows the view preset
+// dropped: a pane tagged for a hidden set has to be answered for by name, and a
+// lookup afterwards would mean scanning the machine a second time.
+type paneIndex map[string]work.AttributedContainer
 
 // boundSet is one candidate for the ladder's weakest rung: a set whose Worktree
 // binding points somewhere, so a pane standing in that checkout might be about
@@ -61,7 +60,7 @@ func (k *Kind) recordPanes(g repogroup.Group, refresh *tasks.RefreshResult, snap
 			// key's own collision has always had.
 			continue
 		}
-		k.panes[row.ID] = work.Attribution{
+		k.panes[row.ID] = work.AttributedContainer{
 			Ref:       ref.WorkRef{Kind: ref.KindTaskSet, ContainerID: row.ID},
 			CursorKey: setCursorKey(g, row.ID),
 			Label:     "task set " + row.ID,
@@ -98,8 +97,8 @@ func (k *Kind) AttributePane(facts work.PaneFacts) (work.Attribution, bool) {
 		if id == "" {
 			continue
 		}
-		if att, ok := k.panes[id]; ok {
-			return att, true
+		if c, ok := k.panes[id]; ok {
+			return work.AttributeOne(c), true
 		}
 	}
 	return work.Attribution{}, false
@@ -141,17 +140,18 @@ func (k *Kind) attributeLiveDrainAt(dir string) (work.Attribution, bool) {
 	if setID == "" {
 		return work.Attribution{}, false
 	}
-	att, ok := k.panes[setID]
-	return att, ok
+	c, ok := k.panes[setID]
+	if !ok {
+		return work.Attribution{}, false
+	}
+	return work.AttributeOne(c), true
 }
 
 // attributeBoundCheckoutAt resolves the pane's directory to the bound checkout
 // containing it and then to the sets bound there. One checkout can hold several,
-// and pop has no per-set recency to rank them, so the tie breaks in order: the
-// checkout claim, which names exactly one holder while something is live there;
-// then the set drained most recently; then the topmost row under the active sort.
-// Whichever decided, a choice between candidates is named for the human — a
-// cursor is one keypress from wrong, and silence about a near miss reads as a bug.
+// and every one of them is an answer: the pane really is standing in all of their
+// work, so all of them are attributed and only their order is decided
+// (ADR-0209 decision 2).
 func (k *Kind) attributeBoundCheckoutAt(dir string) (work.Attribution, bool) {
 	checkout := ""
 	for _, cand := range k.bound {
@@ -169,49 +169,56 @@ func (k *Kind) attributeBoundCheckoutAt(dir string) (work.Attribution, bool) {
 			cands = append(cands, cand)
 		}
 	}
-	switch len(cands) {
-	case 0:
-		return work.Attribution{}, false
-	case 1:
-		att, ok := k.panes[cands[0].setID]
-		return att, ok
-	}
-	chosen, reason := k.breakBoundTie(cands)
-	att, ok := k.panes[chosen.setID]
-	if !ok {
+	if len(cands) == 0 {
 		return work.Attribution{}, false
 	}
-	att.Note = fmt.Sprintf("%s — 1 of %d sets bound to this checkout: %s", att.Label, len(cands), reason)
-	return att, true
+	att := work.Attribution{}
+	for _, cand := range k.rankBoundCandidates(cands) {
+		if c, ok := k.panes[cand.setID]; ok {
+			att.Containers = append(att.Containers, c)
+		}
+	}
+	return att, len(att.Containers) > 0
 }
 
-// breakBoundTie picks one of several sets bound to the same checkout and reports
-// why, walking the sub-ladder of decision 2 until one rung answers.
-func (k *Kind) breakBoundTie(cands []boundSet) (boundSet, string) {
-	if holder, reason, ok := k.claimHolder(cands); ok {
-		return holder, "it holds the checkout claim (" + reason + ")"
-	}
-	if latest, ok := k.mostRecentlyDrained(cands); ok {
-		return latest, "it drained most recently"
-	}
-	sorted := make([]boundSet, len(cands))
-	copy(sorted, cands)
-	sort.SliceStable(sorted, func(i, j int) bool {
-		return tasks.WorkRowLess(sorted[i].sortRow, sorted[j].sortRow, k.d.ViewPreset.Sort)
+// rankBoundCandidates orders the sets bound to one checkout, leader first, by the
+// sub-ladder of ADR-0201 decision 2 — demoted by ADR-0209 from picking a winner to
+// picking who leads: the checkout claim holder while something is live there, then
+// the sets that drained, most recent first, then the never-drained ones in the
+// order the active sort already puts them in.
+func (k *Kind) rankBoundCandidates(cands []boundSet) []boundSet {
+	claim := k.claimHolder(cands)
+	drained := k.drainStarts(cands)
+	ranked := make([]boundSet, len(cands))
+	copy(ranked, cands)
+	sort.SliceStable(ranked, func(i, j int) bool {
+		a, b := ranked[i], ranked[j]
+		if held := a.setID == claim; held != (b.setID == claim) {
+			return held
+		}
+		atA, hasA := drained[a.setID]
+		atB, hasB := drained[b.setID]
+		if hasA != hasB {
+			return hasA
+		}
+		if hasA && !atA.Equal(atB) {
+			return atA.After(atB)
+		}
+		return tasks.WorkRowLess(a.sortRow, b.sortRow, k.d.ViewPreset.Sort)
 	})
-	return sorted[0], "it is the topmost bound row under the current sort"
+	return ranked
 }
 
-// claimHolder returns the candidate holding the live Checkout claim on the shared
-// checkout, and the claim's own phrase for why it holds it. The claim is keyed by
-// the runtime path as each binding spells it, so every distinct spelling is asked
-// until one answers; a claim held by something that is not one of these candidates
-// decides nothing. A claim that cannot be read decides nothing either — the next
-// rung is a better answer than an error about a cursor.
-func (k *Kind) claimHolder(cands []boundSet) (boundSet, string, bool) {
-	byID := map[string]boundSet{}
+// claimHolder returns the id of the candidate holding the live Checkout claim on
+// the shared checkout. The claim is keyed by the runtime path as each binding
+// spells it, so every distinct spelling is asked until one answers; a claim held by
+// something that is not one of these candidates ranks nothing. A claim that cannot
+// be read ranks nothing either — the rung below is a better answer than an error
+// about row order.
+func (k *Kind) claimHolder(cands []boundSet) string {
+	bound := map[string]bool{}
 	for _, cand := range cands {
-		byID[cand.setID] = cand
+		bound[cand.setID] = true
 	}
 	asked := map[string]bool{}
 	for _, cand := range cands {
@@ -226,19 +233,19 @@ func (k *Kind) claimHolder(cands []boundSet) (boundSet, string, bool) {
 		if claim.Holder.Kind != ref.KindTaskSet {
 			continue
 		}
-		if holder, ok := byID[claim.Holder.ContainerID]; ok {
-			return holder, claim.Reason.Phrase(), true
+		if bound[claim.Holder.ContainerID] {
+			return claim.Holder.ContainerID
 		}
 	}
-	return boundSet{}, "", false
+	return ""
 }
 
-// mostRecentlyDrained returns the candidate whose last Drain started latest. Sets
-// that never drained are no answer at all: with none of them ever drained the rung
-// is silent and the sort decides.
-func (k *Kind) mostRecentlyDrained(cands []boundSet) (boundSet, bool) {
+// drainStarts reads each candidate's last Drain start, which is the only per-set
+// recency pop records. A set missing from the map never drained, and ranks below
+// every set that did.
+func (k *Kind) drainStarts(cands []boundSet) map[string]time.Time {
 	starts := map[string]map[string]time.Time{}
-	best, bestAt, found := boundSet{}, time.Time{}, false
+	out := map[string]time.Time{}
 	for _, cand := range cands {
 		byRepo, read := starts[cand.repoCommonDir]
 		if !read {
@@ -249,13 +256,11 @@ func (k *Kind) mostRecentlyDrained(cands []boundSet) (boundSet, bool) {
 			}
 			starts[cand.repoCommonDir] = byRepo
 		}
-		at, drained := byRepo[cand.setID]
-		if !drained || (found && !at.After(bestAt)) {
-			continue
+		if at, drained := byRepo[cand.setID]; drained {
+			out[cand.setID] = at
 		}
-		best, bestAt, found = cand, at, true
 	}
-	return best, found
+	return out
 }
 
 // canonPath canonicalizes a directory for containment comparison, falling back to

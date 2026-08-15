@@ -25,11 +25,11 @@ func (k *attributingKind) AttributePane(facts work.PaneFacts) (work.Attribution,
 	}
 	for _, c := range k.containers {
 		if c.ID == k.claims {
-			return work.Attribution{
+			return work.AttributeOne(work.AttributedContainer{
 				Ref:       ref.WorkRef{Kind: k.id, ContainerID: c.ID},
 				CursorKey: c.CursorKey,
 				Label:     "task set " + c.ID,
-			}, true
+			}), true
 		}
 	}
 	return work.Attribution{}, false

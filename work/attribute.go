@@ -36,25 +36,46 @@ type PaneFacts struct {
 // attribution is silent rather than mistaken.
 func (f PaneFacts) Empty() bool { return f == PaneFacts{} }
 
-// Attribution names the Work container a pane belongs to.
+// Attribution names the Work containers a pane belongs to.
+//
+// It is a list, not one container, because a pane standing in a checkout several
+// Task sets are bound to belongs to all of them: the surface pins every one
+// rather than choosing (ADR-0209 decision 2). Nothing is chosen, so nothing is
+// explained — an attribution carries no message.
 type Attribution struct {
+	// Containers is every container the pane is attributed to, most likely first.
+	// A kind that had to rank candidates ranks them here; the leader is the one a
+	// surface reaches for when it can only use one.
+	Containers []AttributedContainer
+}
+
+// AttributedContainer is one container a pane is attributed to.
+type AttributedContainer struct {
 	// Ref is the container's identity, the same one every other Work surface
 	// names it by.
 	Ref ref.WorkRef
-	// CursorKey is the row handle a TUI places its cursor with. Row order is not
+	// CursorKey is the row handle a TUI addresses the row by. Row order is not
 	// stable across rebuilds, so the key is the only valid handle — an index is
 	// not.
 	CursorKey string
 	// Label is the kind's own phrase for the container ("task set 04-foo"), for
 	// the one line a surface prints when the row it names cannot be shown.
 	Label string
-	// Note is what the surface must say even when the cursor lands: the kind had
-	// more than one candidate and chose this one, so the choice is named along
-	// with how many there were and why. Empty for an unambiguous attribution,
-	// which is the silent case — placing a cursor is not an action, but a
-	// plausible near miss that says nothing looks like a bug (ADR-0201 decision
-	// 2).
-	Note string
+}
+
+// AttributeOne is the answer of a rung that names exactly one container, which is
+// every rung above the bound-checkout one.
+func AttributeOne(c AttributedContainer) Attribution {
+	return Attribution{Containers: []AttributedContainer{c}}
+}
+
+// Leading is the container a surface uses when it can only use one: the head of
+// the ranking the answering kind gave.
+func (a Attribution) Leading() (AttributedContainer, bool) {
+	if len(a.Containers) == 0 {
+		return AttributedContainer{}, false
+	}
+	return a.Containers[0], true
 }
 
 // PaneAttributor is the optional seam a kind implements when a pane may belong to
@@ -78,8 +99,9 @@ type PaneAttributor interface {
 // any kind's mere locality, however deep the checkout the pane is standing in
 // (ADR-0201 decision 1).
 //
-// A kind answering here owes the surface a Note whenever it had to choose between
-// candidates.
+// A kind answering here answers with every candidate it has, ranked: locality is
+// the rung where one directory can mean several containers, and none of them is
+// wrong (ADR-0209 decision 2).
 type PaneNeighbourhoodAttributor interface {
 	AttributePaneNeighbourhood(PaneFacts) (Attribution, bool)
 }
@@ -101,14 +123,14 @@ func AttributePane(kinds []Kind, facts PaneFacts) *Attribution {
 	ordered := kindsInPrecedence(kinds)
 	for _, k := range ordered {
 		if attributor, ok := k.(PaneAttributor); ok {
-			if att, hit := attributor.AttributePane(facts); hit {
+			if att, hit := attributor.AttributePane(facts); hit && len(att.Containers) > 0 {
 				return &att
 			}
 		}
 	}
 	for _, k := range ordered {
 		if attributor, ok := k.(PaneNeighbourhoodAttributor); ok {
-			if att, hit := attributor.AttributePaneNeighbourhood(facts); hit {
+			if att, hit := attributor.AttributePaneNeighbourhood(facts); hit && len(att.Containers) > 0 {
 				return &att
 			}
 		}
