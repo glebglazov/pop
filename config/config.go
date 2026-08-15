@@ -783,7 +783,8 @@ type RepoScopeConfig struct {
 	// a session is born for any checkout of this repo (ADR-0078). It is keyed by
 	// repository identity, not the exact checkout path, so it is a coarse default
 	// shared by every worktree of the repo. Readable from committed .pop/config.toml as
-	// well as the global override; the override wins for the same key (ADR-0083).
+	// well as from a [repo."<path>"] block, which — being keyed to one checkout —
+	// is the more specific declaration and wins for the same key (ADR-0212).
 	PreferredWorkbench string `toml:"preferred_workbench" desc:"Repo-default Workbench that auto-applies to new sessions of this repo."`
 }
 
@@ -914,16 +915,20 @@ func repoIdentity(d *Deps, path string) string {
 	return canon
 }
 
-// ResolveRepoConfig returns the effective RepoConfig for checkoutPath by merging:
+// ResolveRepoConfig returns the effective RepoConfig for checkoutPath, resolved
+// scope-first (ADR-0212 decision 1) — most specific source wins, and within the
+// repository scope a declaration beats what pop recorded:
 //
-//	global [repo."<path>"] override → worktree .pop/config.toml → trunk-anchor .pop/config.toml → default
+//	config.toml [repo."<path>"] → worktree .pop/config.toml → trunk-anchor
+//	.pop/config.toml → pop-written repo settings → global config.toml → default
 //
-// The committed .pop/config.toml is read at two anchors (ADR-0083): this worktree
-// first, then the trunk anchor (the Trunk worktree, or the repository-identity
-// root for a bare repo), presence deciding. Fields are merged individually; a
-// nil pointer in the override means "not set" and the next layer wins. trunk
-// exists only in global override blocks and is applied only when the override's
-// key path exactly matches checkoutPath (per-checkout semantics).
+// The committed .pop/config.toml is read at two anchors (ADR-0083's surviving
+// two-anchor law): this worktree first, then the trunk anchor (the Trunk
+// worktree, or the repository-identity root for a bare repo), presence deciding.
+// Fields are merged individually; a nil pointer in the override means "not set"
+// and the next source down wins. trunk exists only in [repo."<path>"] blocks and
+// is applied only when the block's key path exactly matches checkoutPath
+// (per-checkout semantics).
 //
 // A missing .pop/config.toml is not an error. A malformed .pop/config.toml degrades to the
 // zero config (the error is returned so callers may surface a warning).
@@ -940,18 +945,19 @@ func (c *Config) ResolveRepoConfig(d *Deps, checkoutPath string) (RepoConfig, er
 	}
 	// The shared enumerator does the identity walk, the [repo."<path>"] match, and
 	// the two-anchor .pop/config.toml reads (worktree then trunk); the walker merges the
-	// shared RepoScopeConfig down the ladder (ADR-0083, ADR-0122). trunk stays
-	// caller-side inside resolveRepoConfig with its exact-checkout-path condition.
+	// shared RepoScopeConfig down the scope-first ladder (ADR-0212, ADR-0122). trunk
+	// stays caller-side inside resolveRepoConfig with its exact-checkout-path condition.
 	return c.newRepoScope(d, checkoutPath).resolveRepoConfig()
 }
 
 // ResolveWorkbenchesWith returns the union of Workbenches from all homes (global
-// config, committed .pop/config.toml, and [repo."<path>"]), resolved with
-// most-specific-wins precedence: [repo."<path>"] > worktree .pop/config.toml >
-// trunk-anchor .pop/config.toml > global library. The committed .pop/config.toml is unioned at
-// two anchors (ADR-0083): this worktree outranks the inherited trunk anchor (the
-// Trunk worktree, or the repository-identity root for a bare repo). Name
-// collisions emit warnings.
+// config, committed .pop/config.toml, and [repo."<path>"]), resolved by walking
+// the same scope-first ladder ResolveRepoConfig walks: [repo."<path>"] > worktree
+// .pop/config.toml > trunk-anchor .pop/config.toml > global library. The committed
+// .pop/config.toml is unioned at two anchors (ADR-0083): this worktree outranks
+// the inherited trunk anchor (the Trunk worktree, or the repository-identity root
+// for a bare repo). Blueprints union by name, so a name a more specific source
+// redefines is taken from there and the collision is warned about.
 func (c *Config) ResolveWorkbenchesWith(d *Deps, checkoutPath string) ([]Workbench, []string) {
 	e := c.newRepoScope(d, checkoutPath)
 
@@ -959,56 +965,25 @@ func (c *Config) ResolveWorkbenchesWith(d *Deps, checkoutPath string) ([]Workben
 	var warnings []string
 	seen := make(map[string]string) // name -> source for collision warnings
 
-	// unionInto walker-merges one source's workbenches into merged by name
-	// (ADR-0122 list-by-key), the later ladder source winning. onCollide (nil for
-	// the base) builds today's per-source warning naming the prior source, read
-	// from seen before this source's names are recorded.
-	unionInto := func(src RepoScopeConfig, source string, onCollide func(name, prior string) string) {
+	// Walk the ladder lowest rung first, so a name defined higher up overwrites
+	// the one below it (ADR-0122 list-by-key). Each collision is reported against
+	// seen, read before this rung's own names are recorded; the lowest rung can
+	// collide with nothing, and the gap-filler rung carries no blueprints.
+	for _, src := range e.scopeLadder() {
+		label := src.label
 		pol := repoScopePolicy()
-		if onCollide != nil {
-			pol.onCollision = func(keyPath string) {
-				name := workbenchCollisionName(keyPath)
-				warnings = append(warnings, onCollide(name, seen[name]))
-			}
+		pol.onCollision = func(keyPath string) {
+			name := workbenchCollisionName(keyPath)
+			warnings = append(warnings, fmt.Sprintf(
+				"session template %q defined in both %s and %s; using %s",
+				name, seen[name], label, label,
+			))
 		}
-		s := RepoScopeConfig{Workbenches: src.Workbenches}
-		mergeWalk(&merged, &s, repoScopeMetadata(s), pol)
-		for _, tmpl := range src.Workbenches {
-			seen[tmpl.Name] = source
+		scope := RepoScopeConfig{Workbenches: src.scope.Workbenches}
+		mergeWalk(&merged, &scope, repoScopeMetadata(scope), pol)
+		for _, tmpl := range scope.Workbenches {
+			seen[tmpl.Name] = label
 		}
-	}
-
-	// Global templates (lowest precedence, already validated at Load).
-	if c != nil {
-		unionInto(RepoScopeConfig{Workbenches: c.Workbenches}, "global config", nil)
-	}
-
-	// Committed .pop/config.toml, resolved worktree-first then the trunk anchor (ADR-0083
-	// two-anchor law): the trunk anchor unions first (lower precedence) and the
-	// worktree's own .pop/config.toml last, so its templates outrank the inherited ones.
-	// The read-once guard in popScopeAnchors collapses to a single union (no
-	// double-warn) when the checkout is itself the trunk anchor.
-	for _, anchor := range e.popScopeAnchors() {
-		popTOML, _ := e.popTOML(anchor)
-		unionInto(RepoScopeConfig{Workbenches: popTOML.Workbenches}, ".pop/config.toml",
-			func(name, prior string) string {
-				return fmt.Sprintf(
-					"session template %q defined in both %s and .pop/config.toml; using .pop/config.toml",
-					name, prior,
-				)
-			})
-	}
-
-	// The identity-matched [repo."<path>"] override (highest precedence).
-	if e.overrideFound {
-		keyCanon := e.overrideKeyCanon
-		unionInto(e.override.RepoScopeConfig, fmt.Sprintf("[repo.%q]", keyCanon),
-			func(name, prior string) string {
-				return fmt.Sprintf(
-					"session template %q defined in both %s and [repo.%q]; using [repo.%q]",
-					name, prior, keyCanon, keyCanon,
-				)
-			})
 	}
 
 	return merged.Workbenches, warnings
@@ -1239,38 +1214,36 @@ func (c *Config) WorkbenchOrder() []string {
 // ResolvePreferredWorkbench returns the name of the Workbench that should
 // auto-apply when a session is born for checkoutPath, or "" for none, plus any
 // non-fatal warnings the caller should surface. Resolution follows the
-// user-first precedence law (ADR-0083): hand-authored config beats
-// runtime-generated config at any scope, and the user's central config.toml
-// beats the repo's in-tree .pop/config.toml. Highest → lowest, the layers that carry
-// this key:
+// scope-first law (ADR-0212 decision 1): the most specific source wins, and
+// within one scope a declaration beats a gap-filler pop wrote. Highest → lowest,
+// the sources that carry this key:
 //
-//	1  config.toml [repo."<path>"]        user central · repo-specific
-//	   config.toml (global keys)          n/a for this key (no global home)
-//	3  ./.pop/config.toml                        repo in-tree, this worktree
-//	4  <trunk>/.pop/config.toml (→ id-root)      repo in-tree, inherited from the Trunk
-//	5  config.runtime.toml[<wt-path>]     runtime, this worktree (ctrl+w)
-//	6  config.runtime.toml[<trunk-path>]  runtime, inherited from the Trunk
-//	   → none
+//	config.toml [repo."<path>"]        declaration · keyed to this checkout
+//	./.pop/config.toml                 declaration · committed, this worktree
+//	<trunk>/.pop/config.toml (→ id-root)  declaration · committed, inherited
+//	config.runtime.toml[<wt-path>]     gap-filler · what pop recorded here (ctrl+w)
+//	config.runtime.toml[<trunk-path>]  gap-filler · recorded for the Trunk
+//	→ none
 //
-// Everything hand-authored (1–4) beats everything runtime (5–6): a repo default
-// or committed .pop/config.toml therefore wins over a worktree runtime entry (the
-// reverse of the shipped scope-first ordering), and runtime is now a gap-filler
-// applying only where nothing hand-authored sets the key. The in-tree .pop/config.toml
-// is read at two anchors — this worktree (layer 3) and the Trunk worktree, the
-// trunk read falling back to the Repository identity root for a bare repo (layer
-// 4) — with presence deciding which supplies the value: a worktree with its own
-// .pop/config.toml overrides the inherited trunk one, and a worktree without inherits
-// trunk's. Layer 4 reuses ADR-0078's Deps.Trunk resolver and its this-is-trunk
-// read-once guard (skipped when the inherited anchor is this very checkout, so a
-// stale name never double-warns).
+// The key has no global home, so the ladder starts at the repository. The runtime
+// entries record what pop's own picker happened to pick, so they are gap-fillers
+// under every declaration of this scope — a committed .pop/config.toml therefore
+// wins over a worktree runtime entry. The in-tree .pop/config.toml is read at two
+// anchors — this worktree and the Trunk worktree, the trunk read falling back to
+// the Repository identity root for a bare repo — with presence deciding which
+// supplies the value: a worktree with its own .pop/config.toml overrides the
+// inherited trunk one, and a worktree without inherits trunk's. The inherited
+// anchor reuses ADR-0078's Deps.Trunk resolver and its this-is-trunk read-once
+// guard (skipped when the inherited anchor is this very checkout, so a stale name
+// never double-warns).
 //
-// The runtime layers stay three-valued (ADR-0078): an explicit-none entry
+// The runtime rungs stay three-valued (ADR-0078): an explicit-none entry
 // (empty string) short-circuits to flat/prompt here — but only within the
-// runtime tier, since it can no longer override a hand-authored value above it;
-// a named entry uses that name; an absent entry falls through. The trunk runtime
-// layer is dynamic (the child reflects trunk's current choice, never a value
-// snapshotted at create) and is skipped when the repo has no trunk anchor or the
-// resolver is not wired.
+// gap-filler rungs, since it cannot override a declaration above it; a named
+// entry uses that name; an absent entry falls through. The trunk runtime rung is
+// dynamic (the child reflects trunk's current choice, never a value snapshotted
+// at create) and is skipped when the repo has no trunk anchor or the resolver is
+// not wired.
 //
 // A stored name that does not resolve to a real Workbench for this checkout is
 // skipped with a non-fatal warning (ADR-0054 style) at each layer and resolution
@@ -1320,9 +1293,9 @@ func (c *Config) ResolvePreferredWorkbench(d *Deps, checkoutPath string) (string
 		return "", false
 	}
 
-	// Iterate the shared ADR-0083 source chain (the enumerator owns the anchor
-	// resolution and the read-once guard). Hand-authored layers fall through when
-	// empty; runtime layers keep their three-valued explicit-none short-circuit.
+	// Iterate the shared source chain (the enumerator owns the anchor resolution
+	// and the read-once guard). Declaration rungs fall through when empty; the
+	// gap-filler rungs keep their three-valued explicit-none short-circuit.
 	for _, src := range e.preferredSources() {
 		if !src.runtime {
 			if name, done := consider(src.name); done {

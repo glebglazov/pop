@@ -33,7 +33,8 @@ const (
 	// hand-authored file that pulled it in, below an override.
 	OverrideLayerInclude OverrideLayer = "config.toml include"
 	// OverrideLayerRuntime is config.runtime.toml, the pop-written gap-filler
-	// that loses to everything hand-authored.
+	// that records what pop's surfaces picked, so every declaration of the same
+	// scope beats it.
 	OverrideLayerRuntime OverrideLayer = "config.runtime.toml"
 	// OverrideLayerDefault means no layer defines the key and the built-in
 	// default stands.

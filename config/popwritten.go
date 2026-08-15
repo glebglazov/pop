@@ -25,8 +25,8 @@ type popWrittenFile struct {
 	label   string
 }
 
-// runtimeConfigFile is config.runtime.toml, the gap-filler layer that loses to
-// every hand-authored source.
+// runtimeConfigFile is config.runtime.toml, the gap-filler layer that records
+// what pop's surfaces picked and so loses to every declaration of its scope.
 func runtimeConfigFile(d *Deps) popWrittenFile {
 	return popWrittenFile{
 		path:    DefaultRuntimeConfigPathWith(d),
@@ -35,8 +35,9 @@ func runtimeConfigFile(d *Deps) popWrittenFile {
 	}
 }
 
-// overrideConfigFile is config.override.toml, the override layer that beats
-// every hand-authored source (ADR-0202).
+// overrideConfigFile is config.override.toml, the override layer that holds what
+// a human stated through pop's own editor and so beats the file it overrides
+// (ADR-0202).
 func overrideConfigFile(d *Deps) popWrittenFile {
 	return popWrittenFile{
 		path:    DefaultOverrideConfigPathWith(d),

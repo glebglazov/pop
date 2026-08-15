@@ -144,6 +144,94 @@ func TestRenderEffectiveTOMLTrunkBareNoOverride(t *testing.T) {
 	}
 }
 
+// TestRenderEffectiveTOMLReportsScopeFirstRepoValues verifies the current-repo
+// section answers for the checkout the command ran in, scope-first (ADR-0212
+// decision 1): a preferred workbench a team committed to .pop/config.toml is
+// reported as in force even though it appears in none of the global config
+// printed above it, and the checkout-keyed [repo."<path>"] block — the more
+// specific declaration — is what a reader sees when both exist.
+func TestRenderEffectiveTOMLReportsScopeFirstRepoValues(t *testing.T) {
+	real := deps.NewRealFileSystem()
+	newDeps := func(t *testing.T) *Deps {
+		t.Helper()
+		dataDir := filepath.Join(t.TempDir(), "data")
+		return &Deps{FS: &deps.MockFileSystem{
+			GetenvFunc: func(key string) string {
+				if key == "XDG_DATA_HOME" {
+					return dataDir
+				}
+				return ""
+			},
+			StatFunc:         real.Stat,
+			ReadFileFunc:     real.ReadFile,
+			EvalSymlinksFunc: real.EvalSymlinks,
+			UserHomeDirFunc:  real.UserHomeDir,
+		}}
+	}
+	commit := func(t *testing.T, dir, name string) {
+		t.Helper()
+		body := "preferred_workbench = \"" + name + "\"\n" +
+			"[[workbenches]]\nname = \"" + name + "\"\n" +
+			"windows = [{name = \"main\", layout = {name = \"editor\", command = \"vim\"}}]\n"
+		if err := os.MkdirAll(filepath.Join(dir, ".pop"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, ".pop", "config.toml"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("the committed value is what the mirror reports", func(t *testing.T) {
+		d := newDeps(t)
+		checkout := t.TempDir()
+		commit(t, checkout, "committed")
+
+		out, err := renderEffectiveTOML(d, &Config{}, &ResolvedTrunk{Path: checkout, Checkout: checkout})
+		if err != nil {
+			t.Fatalf("renderEffectiveTOML: %v", err)
+		}
+		if !strings.Contains(out, `preferred_workbench = "committed"`) {
+			t.Errorf("current-repo section does not report the committed value, got:\n%s", out)
+		}
+	})
+
+	t.Run("the checkout-keyed block is reported over the committed value", func(t *testing.T) {
+		d := newDeps(t)
+		checkout := t.TempDir()
+		commit(t, checkout, "committed")
+		cap40 := 40
+		cfg := &Config{Repo: map[string]RepoOverrideConfig{checkout: {
+			RepoScopeConfig: RepoScopeConfig{
+				PreferredWorkbench: "specific",
+				Workbenches:        []Workbench{{Name: "specific"}},
+			},
+			TurnCap: &cap40,
+		}}}
+
+		out, err := renderEffectiveTOML(d, cfg, &ResolvedTrunk{Path: checkout, Checkout: checkout})
+		if err != nil {
+			t.Fatalf("renderEffectiveTOML: %v", err)
+		}
+		if !strings.Contains(out, `preferred_workbench = "specific"`) {
+			t.Errorf("current-repo section does not report the more specific declaration, got:\n%s", out)
+		}
+		if !strings.Contains(out, "turn_cap = 40") {
+			t.Errorf("current-repo section does not report the resolved turn cap, got:\n%s", out)
+		}
+	})
+
+	t.Run("no checkout leaves the repo-scope keys out", func(t *testing.T) {
+		d := newDeps(t)
+		out, err := renderEffectiveTOML(d, &Config{}, &ResolvedTrunk{Path: "/srv/app", Bare: true})
+		if err != nil {
+			t.Fatalf("renderEffectiveTOML: %v", err)
+		}
+		if strings.Contains(out, "preferred_workbench") || strings.Contains(out, "turn_cap") {
+			t.Errorf("repo-scope keys reported with no checkout to resolve them from, got:\n%s", out)
+		}
+	})
+}
+
 // writeShowConfig writes a minimal config.toml to a temp dir and returns its
 // path, so EffectiveJSONWith (which loads through toml.DecodeFile) has a real
 // file to read.

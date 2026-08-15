@@ -21,6 +21,12 @@ type ResolvedTrunk struct {
 	Path string
 	// Bare reports whether the underlying repository is bare.
 	Bare bool
+	// Checkout is the checkout the command ran in — the anchor the repo-scope
+	// keys of the current-repo section resolve from. It is the caller's own
+	// working directory, not the Trunk: scope-first resolution answers per
+	// checkout, and a worktree may declare something its Trunk does not. Empty
+	// leaves the repo-scope keys out of the section.
+	Checkout string
 }
 
 // CurrentTrunkFunc resolves the current repo's effective Trunk worktree from the
@@ -102,7 +108,7 @@ func EffectiveJSONWith(d *Deps, path string, trunk CurrentTrunkFunc) (string, er
 // them in — re-listing them would invite a redundant second resolution — and
 // every repo-scope key is canonicalized (~ expanded, symlinks resolved) so the
 // emitted [repo."<path>"] keys are absolute realpaths. When trunk is non-nil the
-// current repo's resolved Trunk worktree is appended as a [current_repo] table.
+// current repo's answers are appended as a [current_repo] table.
 func renderEffectiveTOML(d *Deps, cfg *Config, trunk *ResolvedTrunk) (string, error) {
 	out := *cfg
 	out.Includes = nil
@@ -113,7 +119,7 @@ func renderEffectiveTOML(d *Deps, cfg *Config, trunk *ResolvedTrunk) (string, er
 		return "", err
 	}
 	if trunk != nil {
-		section, err := encodeCurrentRepo(d, trunk)
+		section, err := encodeCurrentRepo(d, cfg, trunk)
 		if err != nil {
 			return "", err
 		}
@@ -124,17 +130,31 @@ func renderEffectiveTOML(d *Deps, cfg *Config, trunk *ResolvedTrunk) (string, er
 }
 
 // currentRepoTOML is the [current_repo] table body: the resolved effective Trunk
-// worktree (absolute realpath, omitted when none is resolvable) and whether the
-// underlying repository is bare.
+// worktree (absolute realpath, omitted when none is resolvable), whether the
+// underlying repository is bare, and the repo-scope keys as they resolve at the
+// checkout the command ran in.
 type currentRepoTOML struct {
-	Trunk string `toml:"trunk,omitempty"`
-	Bare  bool   `toml:"bare"`
+	Trunk              string `toml:"trunk,omitempty"`
+	Bare               bool   `toml:"bare"`
+	PreferredWorkbench string `toml:"preferred_workbench,omitempty"`
+	// TurnCap is a pointer so "this repository declares no bound" is an absent
+	// key rather than a printed zero, which would read as a cap of no turns.
+	TurnCap *int `toml:"turn_cap,omitempty"`
 }
 
-// encodeCurrentRepo renders the resolved trunk as a standalone [current_repo]
-// TOML table. The trunk path is canonicalized the same way repo keys are (~
-// expanded, symlinks resolved) so it is emitted as an absolute realpath.
-func encodeCurrentRepo(d *Deps, trunk *ResolvedTrunk) (string, error) {
+// encodeCurrentRepo renders what pop resolves for the current repository as a
+// standalone [current_repo] TOML table. The trunk path is canonicalized the same
+// way repo keys are (~ expanded, symlinks resolved) so it is emitted as an
+// absolute realpath.
+//
+// The repo-scope keys are resolved from the checkout rather than read off the
+// global config, which is what makes the mirror report the scope-first answer
+// (ADR-0212 decision 1): a value a team committed to .pop/config.toml lives in no
+// file this command prints above, yet it is what is in force here — so a reader
+// standing in that repository sees the committed value, not the global one it now
+// outranks. Resolution warnings are dropped: the mirror states effective values
+// and never provenance, and a stale name is already surfaced as a load finding.
+func encodeCurrentRepo(d *Deps, cfg *Config, trunk *ResolvedTrunk) (string, error) {
 	section := struct {
 		CurrentRepo currentRepoTOML `toml:"current_repo"`
 	}{
@@ -142,6 +162,13 @@ func encodeCurrentRepo(d *Deps, trunk *ResolvedTrunk) (string, error) {
 	}
 	if p := strings.TrimSpace(trunk.Path); p != "" {
 		section.CurrentRepo.Trunk = canonicalPath(d, p)
+	}
+	if checkout := strings.TrimSpace(trunk.Checkout); checkout != "" {
+		section.CurrentRepo.PreferredWorkbench, _ = cfg.ResolvePreferredWorkbench(d, checkout)
+		if repoCfg, err := cfg.ResolveRepoConfig(d, checkout); err == nil && repoCfg.TurnCap > 0 {
+			bound := repoCfg.TurnCap
+			section.CurrentRepo.TurnCap = &bound
+		}
 	}
 
 	var b strings.Builder

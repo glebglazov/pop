@@ -84,16 +84,18 @@ func decodeConfigLayer(d *Deps, path string) (*configLayer, error) {
 // field-by-field (ADR-0065, ADR-0202).
 //
 // Two of those files are written by pop itself, and they sit on opposite sides of
-// the hand-authored file on purpose:
+// the hand-authored file on purpose. What separates them is not that pop wrote
+// both but what each one says (ADR-0212 decision 5): one records what happened,
+// the other states what a human wants.
 //
 //	config.runtime.toml   BELOW config.toml — the gap-filler. It records what
 //	                      pop's own surfaces happened to pick (a ctrl+w Preferred
 //	                      workbench, a Trunk checkout, an integrate skills list),
-//	                      so anything a human wrote must beat it. That low rank is
-//	                      load-bearing, not incidental: preferred_workbench's
+//	                      so a declaration at the same scope must beat it. That low
+//	                      rank is load-bearing, not incidental: preferred_workbench's
 //	                      three-valued explicit-none logic exists precisely
-//	                      because a runtime entry can no longer outrank a
-//	                      hand-authored value (see ResolvePreferredWorkbench).
+//	                      because a runtime entry cannot outrank a declaration
+//	                      above it (see ResolvePreferredWorkbench).
 //	config.override.toml  ABOVE config.toml — the override layer. It records whole
 //	                      keys a human deliberately overrode through pop's own
 //	                      editor, so it has to beat the very file being

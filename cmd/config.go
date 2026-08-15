@@ -94,6 +94,11 @@ merged in (not re-listed as an includes array), and every [repo."<path>"] key
 canonicalized to an absolute realpath (~ expanded, symlinks resolved). Effective
 values only — no per-value provenance.
 
+Run inside a repository, the [current_repo] table also reports what the
+repo-scope keys resolve to at this checkout. Those answers are scope-first, so a
+value committed to the repo's .pop/config.toml appears there even though it lives
+in none of the files printed above — and it is what wins over a global one.
+
 --json emits the same mirror as JSON instead, for machine consumers (e.g. the
 to-tasks-here-and-now guard reading the resolved current_repo.trunk / .bare
 without shell TOML-parsing).`,
@@ -447,7 +452,10 @@ func resolveCurrentRepoTrunk(td *tasks.Deps, cfg *config.Config, checkoutPath st
 	if terr != nil {
 		trunkPath = ""
 	}
-	return &config.ResolvedTrunk{Path: trunkPath, Bare: bare}, nil
+	// The checkout travels with the answer: the repo-scope half of the
+	// current-repo section resolves scope-first from where the command ran, which
+	// is not always the trunk.
+	return &config.ResolvedTrunk{Path: trunkPath, Bare: bare, Checkout: checkoutPath}, nil
 }
 
 // renderScopeKeys prints each scope's keys under a scope heading. When recurse

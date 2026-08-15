@@ -757,6 +757,93 @@ func TestResolveWorkbenchesWithTwoAnchor(t *testing.T) {
 	})
 }
 
+// TestRepoScopeResolutionIsScopeFirst pins ADR-0212 decision 1 on the one
+// repo-scope key that has a home in every scope. The specific statement wins over
+// the general one, whoever authored it: a blueprint a team committed to
+// .pop/config.toml now beats the global library's blueprint of the same name —
+// the reversal of ADR-0083, under which the personal general value shadowed it —
+// and the checkout-keyed [repo."<path>"] block, the most specific declaration
+// there is, beats both. Both entry points are asserted together because they walk
+// one ladder and must never disagree about what is in force here.
+func TestRepoScopeResolutionIsScopeFirst(t *testing.T) {
+	// The tag rides in before_apply so the winning blueprint is identifiable
+	// after the union merges the same name from several sources.
+	globalLibrary := func(tag string) *Config {
+		return &Config{Workbenches: []Workbench{{
+			Name:        "shared",
+			BeforeApply: []string{tag},
+			Windows: []WorkbenchWindow{{
+				Name:   "main",
+				Layout: &WorkbenchPaneSpec{Name: "editor", Command: "vim"},
+			}},
+		}}}
+	}
+	writeCommitted := func(t *testing.T, dir, tag string) {
+		t.Helper()
+		body := "[[workbenches]]\nname = \"shared\"\n" +
+			"before_apply = [\"" + tag + "\"]\n" +
+			"windows = [{name = \"main\", layout = {name = \"editor\", command = \"vim\"}}]\n"
+		if err := os.WriteFile(popConfigPath(t, dir), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	blockDeclaring := func(checkout, tag string) map[string]RepoOverrideConfig {
+		return map[string]RepoOverrideConfig{checkout: {RepoScopeConfig: RepoScopeConfig{
+			Workbenches: []Workbench{{Name: "shared", BeforeApply: []string{tag}}},
+		}}}
+	}
+	tagOf := func(t *testing.T, wbs []Workbench) string {
+		t.Helper()
+		if len(wbs) != 1 || wbs[0].Name != "shared" || len(wbs[0].BeforeApply) != 1 {
+			t.Fatalf("workbenches = %+v, want a single tagged 'shared'", wbs)
+		}
+		return wbs[0].BeforeApply[0]
+	}
+	// inForce answers through both entry points and insists they agree.
+	inForce := func(t *testing.T, d *Deps, cfg *Config, checkout string) string {
+		t.Helper()
+		repoCfg, err := cfg.ResolveRepoConfig(d, checkout)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fromRepoConfig := tagOf(t, repoCfg.Workbenches)
+		unioned, _ := cfg.ResolveWorkbenchesWith(d, checkout)
+		if got := tagOf(t, unioned); got != fromRepoConfig {
+			t.Fatalf("ResolveWorkbenchesWith says %q, ResolveRepoConfig says %q; one ladder, one answer",
+				got, fromRepoConfig)
+		}
+		return fromRepoConfig
+	}
+
+	t.Run("the global declaration stands when the repository says nothing", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		root := t.TempDir()
+		if got := inForce(t, d, globalLibrary("global"), root); got != "global" {
+			t.Fatalf("in force = %q, want global (nothing more specific was stated)", got)
+		}
+	})
+
+	t.Run("a committed repo-scope value beats the global one", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		root := t.TempDir()
+		writeCommitted(t, root, "committed")
+		if got := inForce(t, d, globalLibrary("global"), root); got != "committed" {
+			t.Fatalf("in force = %q, want committed (the team's specific statement wins)", got)
+		}
+	})
+
+	t.Run("the checkout-keyed block beats the committed value and the global one", func(t *testing.T) {
+		d := preferredResolverDeps(t)
+		root := t.TempDir()
+		writeCommitted(t, root, "committed")
+		cfg := globalLibrary("global")
+		cfg.Repo = blockDeclaring(root, "block")
+		if got := inForce(t, d, cfg, root); got != "block" {
+			t.Fatalf("in force = %q, want block (the most specific declaration wins)", got)
+		}
+	})
+}
+
 func TestLoadEffortConfig(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`
@@ -4344,13 +4431,13 @@ func preferredResolverDeps(t *testing.T) *Deps {
 	}}
 }
 
-// TestResolvePreferredWorkbenchPrecedence exercises the runtime tier under the
-// user-first law (ADR-0083): the worktree runtime entry (layer 5) is now a
-// gap-filler that sits BELOW the hand-authored [repo] default (layer 1), the
-// reverse of the shipped scope-first ordering. It applies only where nothing
-// hand-authored sets the key; three-valued semantics still hold within the tier.
+// TestResolvePreferredWorkbenchPrecedence exercises the gap-filler rungs under
+// the scope-first law (ADR-0212 decision 1): what pop recorded for this worktree
+// sits BELOW every declaration of the same scope, so it applies only where no
+// declaration sets the key; three-valued semantics still hold among the
+// gap-fillers.
 func TestResolvePreferredWorkbenchPrecedence(t *testing.T) {
-	t.Run("repo default beats the worktree runtime entry (slice-01 reversal)", func(t *testing.T) {
+	t.Run("repo default beats what pop recorded for the worktree", func(t *testing.T) {
 		d := preferredResolverDeps(t)
 		root := t.TempDir()
 		if err := SetRuntimePreferredWorkbenchWith(d, root, "minimal"); err != nil {
@@ -4362,11 +4449,11 @@ func TestResolvePreferredWorkbenchPrecedence(t *testing.T) {
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, root)
 		if name != "gs-dev" || len(warns) != 0 {
-			t.Fatalf("name=%q warns=%v, want gs-dev/none (hand-authored [repo] beats runtime)", name, warns)
+			t.Fatalf("name=%q warns=%v, want gs-dev/none (a declaration beats the gap-filler)", name, warns)
 		}
 	})
 
-	t.Run("runtime entry applies where nothing hand-authored sets the key", func(t *testing.T) {
+	t.Run("runtime entry applies where no declaration sets the key", func(t *testing.T) {
 		d := preferredResolverDeps(t)
 		root := t.TempDir()
 		if err := SetRuntimePreferredWorkbenchWith(d, root, "minimal"); err != nil {
@@ -4379,7 +4466,7 @@ func TestResolvePreferredWorkbenchPrecedence(t *testing.T) {
 		}
 	})
 
-	t.Run("explicit none short-circuits within the runtime tier", func(t *testing.T) {
+	t.Run("explicit none short-circuits within the gap-filler rungs", func(t *testing.T) {
 		d := preferredResolverDeps(t)
 		root := t.TempDir()
 		if err := SetRuntimePreferredWorkbenchWith(d, root, ""); err != nil {
@@ -4392,7 +4479,7 @@ func TestResolvePreferredWorkbenchPrecedence(t *testing.T) {
 		}
 	})
 
-	t.Run("explicit none does NOT override a hand-authored repo default", func(t *testing.T) {
+	t.Run("explicit none does NOT override a declared repo default", func(t *testing.T) {
 		d := preferredResolverDeps(t)
 		root := t.TempDir()
 		if err := SetRuntimePreferredWorkbenchWith(d, root, ""); err != nil {
@@ -4404,7 +4491,7 @@ func TestResolvePreferredWorkbenchPrecedence(t *testing.T) {
 		}
 		name, warns := cfg.ResolvePreferredWorkbench(d, root)
 		if name != "gs-dev" || len(warns) != 0 {
-			t.Fatalf("name=%q warns=%v, want gs-dev/none (runtime explicit-none cannot beat hand-authored)", name, warns)
+			t.Fatalf("name=%q warns=%v, want gs-dev/none (a gap-filler explicit-none cannot beat a declaration)", name, warns)
 		}
 	})
 
@@ -4457,12 +4544,12 @@ func TestResolvePreferredWorkbenchPrecedence(t *testing.T) {
 	})
 }
 
-// TestResolvePreferredWorkbenchTrunkInheritance exercises the runtime trunk
-// inheritance layer (layer 6 under ADR-0083: config.runtime.toml[<trunk-path>]),
-// the lowest layer that carries this key. A worktree with no runtime entry of
-// its own inherits the Trunk worktree's runtime entry, resolved dynamically at
-// open. These cases isolate the runtime tier (no hand-authored [repo]/.pop/config.toml
-// value above), since anything hand-authored now beats runtime. The Trunk
+// TestResolvePreferredWorkbenchTrunkInheritance exercises the inherited
+// gap-filler rung (config.runtime.toml[<trunk-path>]), the lowest rung that
+// carries this key. A worktree with no runtime entry of its own inherits the
+// Trunk worktree's runtime entry, resolved dynamically at open. These cases
+// isolate the gap-filler rungs (no [repo]/.pop/config.toml declaration above),
+// since every declaration of this scope beats them. The Trunk
 // resolver is injected via Deps.Trunk (config cannot import tasks/binding).
 func TestResolvePreferredWorkbenchTrunkInheritance(t *testing.T) {
 	// withTrunk returns Deps whose Trunk resolver always points at trunkPath.
@@ -4523,7 +4610,7 @@ func TestResolvePreferredWorkbenchTrunkInheritance(t *testing.T) {
 		}
 	})
 
-	t.Run("trunk's explicit none yields none when nothing hand-authored", func(t *testing.T) {
+	t.Run("trunk's explicit none yields none when nothing is declared", func(t *testing.T) {
 		d := preferredResolverDeps(t)
 		trunk := t.TempDir()
 		child := t.TempDir()
@@ -4623,13 +4710,13 @@ func TestResolvePreferredWorkbenchTrunkInheritance(t *testing.T) {
 	})
 }
 
-// TestResolvePreferredWorkbenchUserFirstLadder exercises the ADR-0083 user-first
-// precedence ladder end to end: each layer that carries preferred_workbench in
-// isolation, the slice-01 reversal (hand-authored beats runtime), the
-// global-shadow ([repo] beats committed .pop/config.toml), and the two-anchor .pop/config.toml
-// inheritance (this worktree vs the Trunk worktree, identity-root fallback for a
-// bare repo).
-func TestResolvePreferredWorkbenchUserFirstLadder(t *testing.T) {
+// TestResolvePreferredWorkbenchScopeFirstLadder exercises the ADR-0212 decision 1
+// ladder end to end for a key whose whole ladder sits at repository scope: each
+// rung that carries preferred_workbench in isolation, declaration-beats-gap-filler
+// within the scope, the most-specific declaration ([repo."<path>"] beats committed
+// .pop/config.toml), and the two-anchor .pop/config.toml inheritance (this worktree
+// vs the Trunk worktree, identity-root fallback for a bare repo).
+func TestResolvePreferredWorkbenchScopeFirstLadder(t *testing.T) {
 	writePopTOML := func(t *testing.T, dir, name string) {
 		t.Helper()
 		body := "preferred_workbench = \"" + name + "\"\n"
@@ -4638,7 +4725,7 @@ func TestResolvePreferredWorkbenchUserFirstLadder(t *testing.T) {
 		}
 	}
 
-	t.Run("layer 1: [repo] block supplies the value", func(t *testing.T) {
+	t.Run("declaration: the [repo] block supplies the value", func(t *testing.T) {
 		d := preferredResolverDeps(t)
 		root := t.TempDir()
 		cfg := &Config{
@@ -4650,7 +4737,7 @@ func TestResolvePreferredWorkbenchUserFirstLadder(t *testing.T) {
 		}
 	})
 
-	t.Run("layer 3: this worktree's committed .pop/config.toml supplies the value", func(t *testing.T) {
+	t.Run("declaration: this worktree's committed .pop/config.toml supplies the value", func(t *testing.T) {
 		d := preferredResolverDeps(t)
 		root := t.TempDir()
 		writePopTOML(t, root, "committed-wb")
@@ -4660,7 +4747,7 @@ func TestResolvePreferredWorkbenchUserFirstLadder(t *testing.T) {
 		}
 	})
 
-	t.Run("layer 4: inherited trunk .pop/config.toml supplies the value", func(t *testing.T) {
+	t.Run("declaration: the inherited trunk .pop/config.toml supplies the value", func(t *testing.T) {
 		d := preferredResolverDeps(t)
 		trunk := t.TempDir()
 		child := t.TempDir()
@@ -4672,7 +4759,7 @@ func TestResolvePreferredWorkbenchUserFirstLadder(t *testing.T) {
 		}
 	})
 
-	t.Run("layer 5: worktree runtime entry supplies the value", func(t *testing.T) {
+	t.Run("gap-filler: what pop recorded for this worktree supplies the value", func(t *testing.T) {
 		d := preferredResolverDeps(t)
 		root := t.TempDir()
 		if err := SetRuntimePreferredWorkbenchWith(d, root, "rt-wb"); err != nil {
@@ -4684,7 +4771,7 @@ func TestResolvePreferredWorkbenchUserFirstLadder(t *testing.T) {
 		}
 	})
 
-	t.Run("layer 6: inherited trunk runtime entry supplies the value", func(t *testing.T) {
+	t.Run("gap-filler: what pop recorded for the Trunk supplies the value", func(t *testing.T) {
 		d := preferredResolverDeps(t)
 		trunk := t.TempDir()
 		child := t.TempDir()
@@ -4698,7 +4785,7 @@ func TestResolvePreferredWorkbenchUserFirstLadder(t *testing.T) {
 		}
 	})
 
-	t.Run("reversal: [repo] default beats a worktree runtime entry", func(t *testing.T) {
+	t.Run("within the scope: the [repo] declaration beats what pop recorded", func(t *testing.T) {
 		d := preferredResolverDeps(t)
 		root := t.TempDir()
 		if err := SetRuntimePreferredWorkbenchWith(d, root, "rt-wb"); err != nil {
@@ -4709,11 +4796,11 @@ func TestResolvePreferredWorkbenchUserFirstLadder(t *testing.T) {
 			Repo:        map[string]RepoOverrideConfig{root: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "repo-wb"}}},
 		}
 		if name, warns := cfg.ResolvePreferredWorkbench(d, root); name != "repo-wb" || len(warns) != 0 {
-			t.Fatalf("name=%q warns=%v, want repo-wb/none (hand-authored beats runtime)", name, warns)
+			t.Fatalf("name=%q warns=%v, want repo-wb/none (a declaration beats the gap-filler)", name, warns)
 		}
 	})
 
-	t.Run("reversal: committed .pop/config.toml beats a worktree runtime entry", func(t *testing.T) {
+	t.Run("within the scope: the committed declaration beats what pop recorded", func(t *testing.T) {
 		d := preferredResolverDeps(t)
 		root := t.TempDir()
 		writePopTOML(t, root, "committed-wb")
@@ -4722,11 +4809,11 @@ func TestResolvePreferredWorkbenchUserFirstLadder(t *testing.T) {
 		}
 		cfg := &Config{Workbenches: []Workbench{{Name: "committed-wb"}, {Name: "rt-wb"}}}
 		if name, warns := cfg.ResolvePreferredWorkbench(d, root); name != "committed-wb" || len(warns) != 0 {
-			t.Fatalf("name=%q warns=%v, want committed-wb/none (in-tree beats runtime)", name, warns)
+			t.Fatalf("name=%q warns=%v, want committed-wb/none (a declaration beats the gap-filler)", name, warns)
 		}
 	})
 
-	t.Run("global-shadow: [repo] beats committed .pop/config.toml for the key", func(t *testing.T) {
+	t.Run("most specific: the checkout-keyed [repo] block beats the committed value", func(t *testing.T) {
 		d := preferredResolverDeps(t)
 		root := t.TempDir()
 		writePopTOML(t, root, "committed-wb")
@@ -4735,7 +4822,7 @@ func TestResolvePreferredWorkbenchUserFirstLadder(t *testing.T) {
 			Repo:        map[string]RepoOverrideConfig{root: {RepoScopeConfig: RepoScopeConfig{PreferredWorkbench: "central-wb"}}},
 		}
 		if name, warns := cfg.ResolvePreferredWorkbench(d, root); name != "central-wb" || len(warns) != 0 {
-			t.Fatalf("name=%q warns=%v, want central-wb/none (central config.toml shadows committed .pop/config.toml)", name, warns)
+			t.Fatalf("name=%q warns=%v, want central-wb/none (the checkout-keyed block is the more specific declaration)", name, warns)
 		}
 	})
 
@@ -4781,7 +4868,7 @@ func TestResolvePreferredWorkbenchUserFirstLadder(t *testing.T) {
 		cfg := &Config{Workbenches: []Workbench{{Name: "rt-wb"}}}
 		name, warns := cfg.ResolvePreferredWorkbench(d, root)
 		if name != "rt-wb" {
-			t.Fatalf("name=%q, want rt-wb (stale in-tree skips to runtime gap-filler)", name)
+			t.Fatalf("name=%q, want rt-wb (a stale declaration skips to the gap-filler)", name)
 		}
 		if len(warns) != 1 || !strings.Contains(warns[0], "ghost") {
 			t.Fatalf("warns=%v, want one naming the stale .pop/config.toml name", warns)
@@ -4790,10 +4877,11 @@ func TestResolvePreferredWorkbenchUserFirstLadder(t *testing.T) {
 }
 
 // TestResolveRepoConfigSharedSchema exercises the unified repo-scope schema
-// (ADR-0083): preferred_workbench now rides the shared key set, so it parses
-// from a committed .pop/config.toml as well as from a global [repo."<path>"] block, and
-// the personal override beats .pop/config.toml for the same key. trunk stays
-// [repo]-only and is rejected in .pop/config.toml.
+// (ADR-0083's surviving decision): preferred_workbench rides the shared key set,
+// so it parses from a committed .pop/config.toml as well as from a
+// [repo."<path>"] block — and the block, keyed to one checkout, is the more
+// specific declaration and wins for the same key. trunk stays [repo]-only and is
+// rejected in .pop/config.toml.
 func TestResolveRepoConfigSharedSchema(t *testing.T) {
 	real := deps.NewRealFileSystem()
 	newDeps := func() *Deps {
@@ -4892,9 +4980,9 @@ func TestResolveRepoConfigSharedSchema(t *testing.T) {
 	})
 }
 
-// As of slice 02 (ADR-0083), ResolvePreferredWorkbench's ladder consults the
-// committed .pop/config.toml at layer 3, so a .pop/config.toml-only preferred_workbench (with
-// no [repo] override above it) now supplies the resolved value.
+// ResolvePreferredWorkbench's ladder consults the committed .pop/config.toml as
+// a repository declaration, so a .pop/config.toml-only preferred_workbench (with
+// no [repo] block above it) supplies the resolved value.
 func TestPreferredWorkbenchFromPopTOML(t *testing.T) {
 	root := t.TempDir()
 	popTOML := "preferred_workbench = \"gs-dev\"\n" +
