@@ -170,6 +170,31 @@ func TestRoutineRunItemVerbsComeFromTheKind(t *testing.T) {
 	}
 }
 
+// TestKindHandoffVerbFlashesPendingAtDispatch pins the reassurance a kind's own
+// handoff owes the operator (ADR-0158, ADR-0167): the flash is set the moment the
+// key lands, before the spawn the verb runs has produced anything. The kind's
+// in-place verbs stay silent until they have something to report.
+func TestKindHandoffVerbFlashesPendingAtDispatch(t *testing.T) {
+	container := firedRoutineContainer()
+	d := routinePageDeps([]work.Container{container})
+
+	// The verb's own command is deliberately never run: what is under test is what
+	// the surface says while the spawn is still outstanding.
+	dispatch := func(t *testing.T, key string) QueueDashboard {
+		t.Helper()
+		m := pressKeys(t, openPage(t, d, PageRoutines), "a")
+		updated, _ := m.update(tea.KeyPressMsg{Code: rune(key[0]), Text: key})
+		return updated.(QueueDashboard)
+	}
+
+	if got := dispatch(t, "I").flash.Text(); got != dashboardHandoffPending {
+		t.Fatalf("firing a routine flashed %q, want %q", got, dashboardHandoffPending)
+	}
+	if got := dispatch(t, "l").flash.Text(); got != "" {
+		t.Fatalf("an in-place verb flashed %q, want nothing", got)
+	}
+}
+
 // outcomeKind answers one arranged outcome for its one verb, so the dashboard's
 // interpretation of each outcome kind can be driven on its own.
 type outcomeKind struct {

@@ -323,6 +323,21 @@ func dashboardMenuItemHandoff(item dashboardMenuItem) bool {
 	return item.key != "" && item.key != strings.ToLower(item.key)
 }
 
+// dashboardVerbHandsOff reports whether verb hands off when the row's own kind
+// performs it. The answer comes from the same menu items the operator sees, so
+// the key case stays the single fact about handoff-ness and a kind that spawns a
+// pane under an uppercase key needs no registration on the dispatch side either.
+// A verb the row's kind does not offer — a flat shortcut aimed at another kind —
+// hands off nowhere.
+func dashboardVerbHandsOff(kinds workKinds, row DashboardRow, verb work.Verb) bool {
+	for _, item := range dashboardMenuItems(kinds, row) {
+		if item.verb == verb {
+			return dashboardMenuItemHandoff(item)
+		}
+	}
+	return false
+}
+
 // items are the verbs the open menu is showing, empty for a menu with no list yet.
 func (menu *dashboardMenu) items() []dashboardMenuItem {
 	if menu == nil || menu.list == nil {
@@ -1589,7 +1604,11 @@ func (m QueueDashboard) dispatchVerb(verb work.Verb, row DashboardRow) (tea.Mode
 	}
 	// Every other verb is the kind's own to run: it performs it and the dashboard
 	// carries out the outcome, so a kind whose verbs need no dashboard-owned modal
-	// needs no case here (ADR-0173).
+	// needs no case here (ADR-0173). A kind's handoff earns the same pending flash
+	// as a dashboard-owned one — the spawn is just as slow and just as invisible.
+	if dashboardVerbHandsOff(m.kinds, row, verb) {
+		m.flash.Set(dashboardHandoffPending)
+	}
 	return m, m.performKindVerb(row, verb)
 }
 
