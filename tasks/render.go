@@ -298,10 +298,13 @@ func buildRows(state *GlobalState, defPath string, disc *Discovery, manifests ma
 }
 
 // orderStatusRows returns rows in status-table display order: missing sets
-// first, then Done sets (by registration order), then every active set (by
-// priority, then registration order). It is applied after building rows and
-// re-applied after Verify verdicts change statuses, so a formerly-Done set that
-// now needs verification moves out of the Done group into the active group.
+// first, then Done sets (newest identifier first), then every active set (by
+// priority, then newest identifier first). Priority still outranks recency —
+// a priority is a deliberate act, recency only a default — but where two rows
+// carry the same priority the newer set leads (ADR-0215). It is applied after
+// building rows and re-applied after Verify verdicts change statuses, so a
+// formerly-Done set that now needs verification moves out of the Done group
+// into the active group; the identifier key makes that re-application stable.
 func orderStatusRows(rows []Row) []Row {
 	var missing, done, active []Row
 	for _, row := range rows {
@@ -315,21 +318,41 @@ func orderStatusRows(rows []Row) []Row {
 		}
 	}
 
+	rank := newestFirstRank(rows)
+
 	sort.SliceStable(done, func(i, j int) bool {
-		return done[i].RegIndex < done[j].RegIndex
+		return rank[done[i].ID] < rank[done[j].ID]
 	})
 
 	sort.SliceStable(active, func(i, j int) bool {
 		if active[i].Priority != active[j].Priority {
 			return active[i].Priority > active[j].Priority
 		}
-		return active[i].RegIndex < active[j].RegIndex
+		return rank[active[i].ID] < rank[active[j].ID]
 	})
 
 	ordered := append([]Row{}, missing...)
 	ordered = append(ordered, done...)
 	ordered = append(ordered, active...)
 	return ordered
+}
+
+// newestFirstRank maps each row's identifier to its position in newest-first
+// order, so a sort with another primary key (priority) can still break ties
+// through the one shared definition of newest-first rather than reversing a
+// comparison of its own.
+func newestFirstRank(rows []Row) map[string]int {
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	rank := make(map[string]int, len(ids))
+	for i, id := range SortIdentifiersNewestFirst(ids) {
+		if _, seen := rank[id]; !seen {
+			rank[id] = i
+		}
+	}
+	return rank
 }
 
 func buildTaskSetRow(reg RegisteredTaskSet, m *Manifest, regIndex int) Row {

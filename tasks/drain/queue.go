@@ -1037,8 +1037,11 @@ func (d *Deps) CheckoutClaimAt(runtimePath string) *store.CheckoutClaim {
 // Auto-drain Ready sets eligible for supervisor dispatch, highest priority
 // first. RefreshWith returns only non-Archived sets, so Archived sets are
 // already dropped. The one ordering definition lives here — higher priority
-// integers rank first, ties break by registration order, matching the status
-// table's active-set ordering — and backoff/parking (abnormal-drain history)
+// integers rank first, ties break by registration order — deliberately not the
+// status table's newest-first tiebreak (ADR-0215): RegIndex is unique, so
+// unattended dispatch ranks the same whatever order the rows arrive in, and a
+// display change can never re-rank scheduling — and backoff/parking
+// (abnormal-drain history)
 // and quota-recovery waiters gate which of those ready sets are spawnable now.
 // On no eligible set it reports why via a single SpawnDeferral (ADR-0106) —
 // reason species, the blocked set, and an optional until-instant — so every

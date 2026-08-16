@@ -602,7 +602,7 @@ Choosing the project path for a tasks command. A unique project display-name mat
 _Avoid_: Worktree discovery, task storage
 
 **Task set priority**:
-A numeric value used to choose between ready Task sets. Newly registered Task sets start at priority `0`. Higher priority wins; equal-priority Task sets retain registration order.
+A numeric value used to choose between ready Task sets. Newly registered Task sets start at priority `0`. Higher priority wins; equal-priority Task sets break the tie newest **Task set identifier** first (ADR-0215), because a priority is a deliberate act and recency is only a default. Unattended **Work supervision** dispatch is the exception: it ranks equal priorities by registration order, so a display order can never re-rank unattended scheduling.
 _Avoid_: Task dependency, task-manifest order
 
 **Task set status**:
@@ -694,7 +694,7 @@ The `NEXT` marker `pop tasks status` prints on the single highest-priority **Rea
 _Avoid_: AUTO badge, auto-pick, auto-picked, auto-pick badge
 
 **Next task**:
-Selecting and executing one task from the highest-priority Ready Task set. Non-runnable Task sets are reported and skipped; among Ready Task sets, equal priority retains registration order.
+Selecting and executing one task from the highest-priority Ready Task set. Non-runnable Task sets are reported and skipped; among Ready Task sets, equal priority breaks the tie newest **Task set identifier** first, matching the **Status table** the human reads top-to-bottom.
 _Avoid_: First registered Task set, highest-priority Task set regardless of status
 
 **Task executor**:
@@ -1045,7 +1045,7 @@ The precondition for any **Out-of-band mutation**: no **Checkout claim** on the 
 _Avoid_: idle checkout, unlocked
 
 **Status table**:
-The non-interactive summary printed by `pop tasks status` after discovery refresh. **Archived Task set**s are excluded from the default table; when at least one exists, a quiet footer reports the archived count and the `pop tasks status --archived` command that lists them, so filed-away work stays discoverable. `--archived` instead renders only the Archived Task sets. In the default table, Missing Task sets appear first as stale registrations, followed by Done Task sets. Remaining discovered Task sets then appear in scheduler order: descending priority with stable registration order for ties, so the user can read the active schedule top-to-bottom to understand which Ready work will be selected first. The automatically selected Ready Task set is marked explicitly. Before execution, the actual implement target is also marked; when an explicit Task set override differs from the automatic selection, the table shows both markers on their respective rows. The checkout note describes where a whole-set **Implement** would run by default: the bound checkout when the set has a **Worktree binding**, otherwise the **current checkout** (a **Default binding** is recorded there on first drain; a **Worktree directive** routes only **Work supervision**, not a foreground Implement). Single task-file runs are still current-checkout operations. An interactive tasks dashboard is deferred until the table workflow is exercised.
+The non-interactive summary printed by `pop tasks status` after discovery refresh. **Archived Task set**s are excluded from the default table; when at least one exists, a quiet footer reports the archived count and the `pop tasks status --archived` command that lists them, so filed-away work stays discoverable. `--archived` instead renders only the Archived Task sets. In the default table, Missing Task sets appear first as stale registrations, followed by Done Task sets. Remaining discovered Task sets then appear in scheduler order: descending priority, with ties broken newest **Task set identifier** first (ADR-0215), so the user can read the active schedule top-to-bottom to understand which Ready work will be selected first. The automatically selected Ready Task set is marked explicitly. Before execution, the actual implement target is also marked; when an explicit Task set override differs from the automatic selection, the table shows both markers on their respective rows. The checkout note describes where a whole-set **Implement** would run by default: the bound checkout when the set has a **Worktree binding**, otherwise the **current checkout** (a **Default binding** is recorded there on first drain; a **Worktree directive** routes only **Work supervision**, not a foreground Implement). Single task-file runs are still current-checkout operations. An interactive tasks dashboard is deferred until the table workflow is exercised.
 _Avoid_: Workload status table, dashboard
 
 **Execution confirmation**:

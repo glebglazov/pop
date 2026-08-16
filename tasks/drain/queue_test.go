@@ -84,6 +84,39 @@ func TestSelectReadySet(t *testing.T) {
 	}
 }
 
+// The status table now breaks priority ties newest-identifier-first (ADR-0215),
+// which changes the order rows reach this selector in. Unattended dispatch must
+// not move with it: RegIndex is unique, so the result is a function of the rows
+// alone, not of their incoming order.
+func TestSelectReadySetsIndependentOfIncomingRowOrder(t *testing.T) {
+	rows := []tasks.Row{
+		{ID: "2026-01-01-older", Status: tasks.StatusReady, AutoDrain: true, Priority: 5, RegIndex: 0},
+		{ID: "2026-06-01-newer", Status: tasks.StatusReady, AutoDrain: true, Priority: 5, RegIndex: 1},
+		{ID: "2026-03-01-middle", Status: tasks.StatusReady, AutoDrain: true, Priority: 5, RegIndex: 2},
+	}
+	newestFirst := []tasks.Row{rows[1], rows[2], rows[0]}
+
+	want, _, ok := selectReadySets(&tasks.RefreshResult{Rows: rows}, nil, nil, nil)
+	if !ok {
+		t.Fatal("no ready sets from registration order")
+	}
+	got, _, ok := selectReadySets(&tasks.RefreshResult{Rows: newestFirst}, nil, nil, nil)
+	if !ok {
+		t.Fatal("no ready sets from newest-first order")
+	}
+	if len(got) != len(want) {
+		t.Fatalf("selection = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("selection = %v, want %v", got, want)
+		}
+	}
+	if want[0] != "2026-01-01-older" {
+		t.Fatalf("dispatch head = %q, want 2026-01-01-older (registration order)", want[0])
+	}
+}
+
 func TestScanSkipsNonGitProjectsOutsideQueueScope(t *testing.T) {
 	gitRepo := t.TempDir()
 	queuetest.InitGitRepo(t, gitRepo)
