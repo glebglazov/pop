@@ -62,7 +62,7 @@ func TestAgentGroupCatalogs(t *testing.T) {
 		}
 	}
 
-	attended := catalogs[3]
+	attended := catalogs[len(catalogs)-1]
 	if attended.Group != "attended" {
 		t.Fatalf("group = %q, want attended", attended.Group)
 	}

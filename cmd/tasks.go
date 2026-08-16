@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/conventions"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
@@ -41,6 +42,10 @@ var (
 	taskVerifyEffort          string
 	taskVerifyAccept          string
 	taskVerifyRemediate       string
+	taskReviewTimeout         string
+	taskReviewAgents          []string
+	taskReviewEffort          string
+	taskReviewShow            bool
 	taskImplementVerifyAgents []string
 	taskImplementVerifyEffort string
 	taskStatusArchived        bool
@@ -146,6 +151,29 @@ var taskVerifyCmd = &cobra.Command{
 	Short: "Run an independent Verifier agent over a task set and record a PASS/FIXABLE/NEEDS-HUMAN verdict",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runTaskVerify,
+}
+
+var taskReviewCmd = &cobra.Command{
+	Use:   "review TASK_SET",
+	Short: "Run an independent Reviewer agent over a task set's changeset and write the review document",
+	Long: `Review how a task set's changeset is written, against this repository's standard.
+
+A fresh Reviewer reads the resolved code-review convention, the previous review
+document when one exists, and the changeset itself — it is given the commit
+range and the set's diff --stat and reads the changed files in the checkout on
+its own. It reaches no verdict, gates nothing and changes no status: the whole
+output is one document a human acts on or ignores.
+
+Each review supersedes the last. Earlier documents are kept beside it under the
+set's task storage, which is outside the repository tree, so a review can never
+be staged into a commit. Getting one into a pull request is an explicit act:
+
+  pop tasks review my-set --show | pbcopy
+
+Any set with a done AFK task and a non-empty commit range may be reviewed, at
+any time — including mid-drain, where a standards correction is worth most.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runTaskReview,
 }
 
 var taskAssistCmd = &cobra.Command{
@@ -300,6 +328,7 @@ func init() {
 	taskCmd.AddCommand(taskAutoDrainCmd)
 	taskCmd.AddCommand(taskImplementCmd)
 	taskCmd.AddCommand(taskVerifyCmd)
+	taskCmd.AddCommand(taskReviewCmd)
 	taskCmd.AddCommand(taskAssistCmd)
 	taskCmd.AddCommand(taskResetTaskCmd)
 	taskCmd.AddCommand(taskCompleteTaskCmd)
@@ -360,6 +389,12 @@ func init() {
 	taskVerifyCmd.Flags().StringVar(&taskVerifyEffort, "effort", "", "Verifier model-strength tier: light, standard, or heavy (default heavy)")
 	taskVerifyCmd.Flags().StringVar(&taskVerifyAccept, "accept", "", "Accept a non-PASS verdict: record a human-authored PASS at the current work SHA carrying this note (skips the Verifier); the note feeds forward as context into later verifier prompts")
 	taskVerifyCmd.Flags().StringVar(&taskVerifyRemediate, "remediate", "", "Remediate a non-PASS verdict: spawn a Remediation task from the set's findings carrying this note (skips the Verifier), even from NEEDS-HUMAN or past the remediation depth cap; the Drain then picks it up")
+
+	taskReviewCmd.Flags().StringVar(&taskRuntimePath, "task-runtime-path", "", "Git checkout root for task execution (normalized to checkout root)")
+	taskReviewCmd.Flags().StringVar(&taskReviewTimeout, "timeout", "45m", "Maximum duration for the Reviewer attempt")
+	taskReviewCmd.Flags().StringArrayVar(&taskReviewAgents, "agent", nil, "Reviewer agent preset; repeat to define an ordered quota/missing-binary fallback list")
+	taskReviewCmd.Flags().StringVar(&taskReviewEffort, "effort", "", "Reviewer model-strength tier: light, standard, or heavy (default heavy)")
+	taskReviewCmd.Flags().BoolVar(&taskReviewShow, "show", false, "Print the set's latest review document to stdout and run no agent")
 
 	taskAssistCmd.Flags().StringVar(&taskRuntimePath, "task-runtime-path", "", "Git checkout root for task execution (normalized to checkout root)")
 	taskAssistCmd.Flags().StringArrayVar(&taskAgentPresets, "agent", nil, "Agent preset for attended assistance (claude, opencode, cursor, codex, pi, kimi), optionally followed by extra agent args")
@@ -928,6 +963,49 @@ func runTaskVerify(cmd *cobra.Command, args []string) error {
 	return runTaskVerifyWith(cmdLayerDeps().tasksDeps(), os.Stdout, args[0],
 		cmd.Flags().Changed("accept"), taskVerifyAccept,
 		cmd.Flags().Changed("remediate"), taskVerifyRemediate)
+}
+
+func runTaskReview(cmd *cobra.Command, args []string) error {
+	return runTaskReviewWith(cmdLayerDeps().tasksDeps(), os.Stdout, args[0], taskReviewShow)
+}
+
+func runTaskReviewWith(d *tasks.Deps, w io.Writer, taskSetID string, show bool) error {
+	timeout, err := time.ParseDuration(taskReviewTimeout)
+	if err != nil {
+		return fmt.Errorf("tasks review: invalid --timeout %q: %w", taskReviewTimeout, err)
+	}
+	resolveInput, err := bindingFirstVerifyResolveInput(d, taskSetID)
+	if err != nil {
+		return fmt.Errorf("tasks review: %w", err)
+	}
+	if _, err := tasks.ReviewTaskSetWith(d, taskProjectDeps(), taskConfigLoad, tasks.ReviewOptions{
+		ResolveInput: resolveInput,
+		TaskSetID:    taskSetID,
+		Agents:       append([]string(nil), taskReviewAgents...),
+		Effort:       taskReviewEffort,
+		Timeout:      timeout,
+		Output:       w,
+		Show:         show,
+		Convention:   codeReviewConvention(d),
+	}); err != nil {
+		return fmt.Errorf("tasks review: %w", err)
+	}
+	return nil
+}
+
+// codeReviewConvention wires the Reviewer's convention seam to the real
+// Convention stack. It lives here because the conventions package resolves
+// Repository identity through tasks, so tasks cannot reach it directly and cmd
+// is the layer that holds both.
+func codeReviewConvention(d *tasks.Deps) tasks.ReviewConvention {
+	return func(cwd string) (string, error) {
+		stack, err := conventions.Resolve(&conventions.Deps{Tasks: d}, conventions.KindCodeReview, cwd)
+		if err != nil {
+			return "", err
+		}
+		prose, _ := conventions.StackProse(stack)
+		return prose, nil
+	}
 }
 
 func runTaskAssist(cmd *cobra.Command, args []string) error {

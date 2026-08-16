@@ -116,7 +116,7 @@ func catalogModelSkips(d *Deps, now time.Time) map[string]map[string]ModelSkipHo
 }
 
 // AgentGroupOrder lists the Work groups the catalog renders, in display order.
-var AgentGroupOrder = []string{"implement", "verify", "routine", "attended"}
+var AgentGroupOrder = []string{"implement", "verify", "review", "routine", "attended"}
 
 // AgentGroupCatalog is one Work group's agent list, resolved for display.
 type AgentGroupCatalog struct {
@@ -176,6 +176,7 @@ func AgentGroupCatalogs(cfg *config.Config) []AgentGroupCatalog {
 	lists := map[string]config.AgentEntries{
 		"implement": cfg.ImplementAgentEntries(),
 		"verify":    cfg.VerifyAgentEntries(),
+		"review":    cfg.ReviewAgentEntries(),
 		"routine":   cfg.RoutineAgentEntries(),
 		"attended":  cfg.AttendedAgentEntries(),
 	}

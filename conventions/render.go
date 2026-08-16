@@ -122,6 +122,29 @@ func StackPreview(s Stack) string {
 	return b.String()
 }
 
+// StackProse renders one kind's stack as the prose an agent is handed inside a
+// larger prompt: the composition rule, then every layer that speaks labelled
+// with its origin and reach, then the provenance line. It carries no heading of
+// its own and names no editing surface — the prompt that embeds it owns both.
+//
+// A stack no layer speaks in returns false rather than the four paths `get`
+// prints: an agent cannot act on where pop looked, and a prompt that recited
+// them would read as an instruction to go and write one.
+func StackProse(s Stack) (string, bool) {
+	present := s.Present()
+	if len(present) == 0 {
+		return "", false
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s\n", overrideRule)
+	for i, l := range present {
+		fmt.Fprintf(&b, "\n----- LAYER %d OF %d: %s (%s) -----\n%s\n\n%s\n",
+			i+1, len(present), strings.ToUpper(string(l.Origin)), l.Origin.Scope(), l.Path, l.Body)
+	}
+	fmt.Fprintf(&b, "\n%s\n", s.Provenance())
+	return b.String(), true
+}
+
 // overlayNote says where the human's own layer is and whether it holds
 // anything. An editing surface writes that one layer, so a reader deciding
 // whether to edit needs to know which of the four they would be changing.

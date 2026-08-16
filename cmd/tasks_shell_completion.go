@@ -28,6 +28,7 @@ func registerTaskShellCompletions() {
 	_ = taskCmd.RegisterFlagCompletionFunc("project", completeTaskProjects)
 
 	_ = taskImplementCmd.RegisterFlagCompletionFunc("agent", completeTaskAgents)
+	_ = taskReviewCmd.RegisterFlagCompletionFunc("agent", completeTaskAgents)
 	_ = taskImplementCmd.RegisterFlagCompletionFunc("agent-output", completeTaskAgentOutputs)
 
 	taskStatusCmd.ValidArgsFunction = completeTaskStatusArgs
@@ -38,6 +39,7 @@ func registerTaskShellCompletions() {
 	taskAutoDrainCmd.ValidArgsFunction = completeTaskAutoDrainArgs
 	taskImplementCmd.ValidArgsFunction = completeTaskImplementArgs
 	taskVerifyCmd.ValidArgsFunction = completeTaskStatusArgs
+	taskReviewCmd.ValidArgsFunction = completeTaskStatusArgs
 	taskAssistCmd.ValidArgsFunction = completeTaskStatusArgs
 	taskResetTaskCmd.ValidArgsFunction = completeTaskTaskFileArgs
 	taskCompleteTaskCmd.ValidArgsFunction = completeTaskTaskFileArgs
@@ -124,6 +126,7 @@ func registerTaskPathFlagCompletions() {
 	_ = taskCmd.MarkPersistentFlagDirname("task-definition-path")
 	_ = taskImplementCmd.MarkFlagDirname("task-runtime-path")
 	_ = taskVerifyCmd.MarkFlagDirname("task-runtime-path")
+	_ = taskReviewCmd.MarkFlagDirname("task-runtime-path")
 }
 
 func completeTaskProjects(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {

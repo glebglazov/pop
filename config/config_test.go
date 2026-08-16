@@ -175,6 +175,54 @@ max_remediation_depth = 2
 	}
 }
 
+// TestLoadWorkReviewSettings pins the [work.review] group (ADR-0214): three keys
+// and no more, disabled unless the human says otherwise, and an omitted agents
+// list left empty so resolution falls through to [work.implement].agents.
+func TestLoadWorkReviewSettings(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+[work.review]
+enabled = true
+effort = "standard"
+agents = ["codex", "claude"]
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := cfg.ReviewSettings()
+	if r == nil {
+		t.Fatal("expected [work.review] section to parse")
+	}
+	if !r.Enabled {
+		t.Fatal("expected [work.review] enabled = true to load as enabled")
+	}
+	if r.Effort != "standard" {
+		t.Fatalf("review effort = %q, want standard", r.Effort)
+	}
+	if got := strings.Join(cfg.ReviewAgents(), ","); got != "codex,claude" {
+		t.Fatalf("review agents = %q, want codex,claude", got)
+	}
+
+	// Undeclared everywhere: no section, review off, no agents of its own.
+	emptyPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(emptyPath, []byte("\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	empty, err := Load(emptyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if empty.ReviewSettings() != nil {
+		t.Fatal("an undeclared [work.review] must resolve to nil, not an enabled group")
+	}
+	if len(empty.ReviewAgents()) != 0 {
+		t.Fatalf("review agents = %v, want none so resolution falls through", empty.ReviewAgents())
+	}
+}
+
 func TestWorkbenchPickOnCreate(t *testing.T) {
 	// Defaults to false: nil receiver, nil section, and an empty section.
 	var nilCfg *Config

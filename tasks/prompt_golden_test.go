@@ -282,6 +282,20 @@ func TestVerifierPromptGoldens(t *testing.T) {
 		buildVerifierPrompt(bareDeps(), goldenBareManifest(), "", workDiffView{}, ""))
 }
 
+func TestReviewerPromptGoldens(t *testing.T) {
+	prompttest.Assert(t, goldenPath("reviewer.full.md"),
+		buildReviewerPrompt(goldenFixtureDeps(t), goldenFullManifest(),
+			workDiffView{Range: "base000..HEAD", Stat: " tasks/prompt.go | 12 ++++----\n 1 file changed"},
+			"CONVENTION code-review\n\nSmall functions; table-driven tests.",
+			reviewDocument{Path: filepath.Join(goldenSetDir, "reviews", "review-20260501T090000Z.md"),
+				Body: "## Naming\n\n`buildThing` builds nothing."}, true))
+
+	// Absent side: no convention derived, no review before this one, no spec.
+	prompttest.Assert(t, goldenPath("reviewer.bare.md"),
+		buildReviewerPrompt(bareDeps(), goldenBareManifest(),
+			workDiffView{Range: "root000..HEAD", Stat: " a.go | 1 +"}, "", reviewDocument{}, false))
+}
+
 func TestFoldConflictPromptGoldens(t *testing.T) {
 	ctx := FoldConflictContext{
 		SetID:       goldenSetID,

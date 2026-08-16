@@ -1348,6 +1348,31 @@ func TestImplementAgentFlagExplicitness(t *testing.T) {
 	}
 }
 
+// TestReviewerSteeringFlagsRegistered pins `pop tasks review`'s surface: the
+// same checkout/agent/effort steering the Verifier takes, plus --show, which is
+// how a document reaches a pull request.
+func TestReviewerSteeringFlagsRegistered(t *testing.T) {
+	if taskReviewCmd.Flags().Lookup("task-runtime-path") == nil {
+		t.Fatal("tasks review --task-runtime-path flag not registered")
+	}
+	agent := taskReviewCmd.Flags().Lookup("agent")
+	if agent == nil {
+		t.Fatal("tasks review --agent flag not registered")
+	}
+	if agent.Value.Type() != "stringArray" {
+		t.Fatalf("tasks review --agent type = %q, want stringArray (repeatable)", agent.Value.Type())
+	}
+	if taskReviewCmd.Flags().Lookup("effort") == nil {
+		t.Fatal("tasks review --effort flag not registered")
+	}
+	if taskReviewCmd.Flags().Lookup("show") == nil {
+		t.Fatal("tasks review --show flag not registered")
+	}
+	if taskReviewCmd.Flags().Lookup("accept") != nil || taskReviewCmd.Flags().Lookup("remediate") != nil {
+		t.Fatal("a review reaches no verdict, so it has nothing to accept or remediate")
+	}
+}
+
 func TestVerifierSteeringFlagsRegistered(t *testing.T) {
 	// `pop tasks verify --task-runtime-path <checkout>` pins the Verifier to a
 	// specific checkout root instead of resolving from the repo root.

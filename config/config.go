@@ -320,6 +320,25 @@ type VerifyConfig struct {
 	AttemptRetryDelays []string `toml:"attempt_retry_delays" desc:"Verify inter-attempt retry delay schedule (array of duration strings)."`
 }
 
+// ReviewConfig holds Code-review settings (ADR-0214). It carries exactly three
+// keys and no remediation depth, because a review reaches no verdict and spawns
+// no work: the whole output is a document a human may act on or ignore.
+type ReviewConfig struct {
+	// Enabled is the master opt-in switch for automatic review. Absent/false ⇒
+	// the drain never reviews; `pop tasks review <set>` still runs on demand,
+	// the way a human asking for a second opinion always may.
+	Enabled bool `toml:"enabled" desc:"Enable automatic Code review at AFK quiescence (default false)."`
+	// Agents is the ordered fallback list of agent presets the Reviewer walks,
+	// mirroring [work.verify].agents: it falls through to the next agent on a
+	// quota pause or a missing binary. An empty list falls back to
+	// [work.implement].agents (and, failing that, the built-in default agent).
+	Agents AgentEntries `toml:"agents" desc:"Ordered fallback agent list for the Reviewer, falling back to [work.implement].agents when omitted (strings or {display_name, cmd} tables)."`
+	// Effort selects the Reviewer's model-strength tier (light, standard, or
+	// heavy). Absent ⇒ heavy — judging naming, structure and idiom is the
+	// strongest tier's work.
+	Effort string `toml:"effort" desc:"Reviewer model-strength tier: light, standard, or heavy (default heavy)."`
+}
+
 // TaskGitConfig holds commit-time git configuration applied to Pop's own
 // commits during a task drain (e.g. disabling GPG signing so an unattended
 // queue drain never hangs on a 1Password presence prompt).
@@ -483,6 +502,8 @@ type WorkConfig struct {
 	Implement *ImplementConfig `toml:"implement" merge:"fields" include:"fields" desc:"Implement Work group ([work.implement] table)."`
 	// Verify is the Verifier's group (ADR-0086).
 	Verify *VerifyConfig `toml:"verify" merge:"fields" include:"replace" desc:"Agent-verification settings ([work.verify] table)."`
+	// Review is the Reviewer's group (ADR-0214).
+	Review *ReviewConfig `toml:"review" merge:"fields" include:"replace" desc:"Code-review settings ([work.review] table)."`
 	// Routine is the recurring-Routine group. An empty list falls through to
 	// [work.implement].agents; a Routine manifest's own agents still beats both.
 	Routine *AgentGroupConfig `toml:"routine" merge:"fields" include:"replace" desc:"Routine Work group ([work.routine] table)."`
@@ -1108,6 +1129,28 @@ func (c *Config) VerifySettings() *VerifyConfig {
 		return nil
 	}
 	return c.Work.Verify
+}
+
+// ReviewAgents returns the commands of the [work.review].agents list, in
+// configured order, or nil.
+func (c *Config) ReviewAgents() []string {
+	return c.ReviewAgentEntries().Commands()
+}
+
+// ReviewAgentEntries returns the [work.review].agents entries as declared.
+func (c *Config) ReviewAgentEntries() AgentEntries {
+	if r := c.ReviewSettings(); r != nil {
+		return r.Agents
+	}
+	return nil
+}
+
+// ReviewSettings returns the [work.review] block, or nil when undeclared.
+func (c *Config) ReviewSettings() *ReviewConfig {
+	if c == nil || c.Work == nil {
+		return nil
+	}
+	return c.Work.Review
 }
 
 // RoutineAgents returns the commands of the [work.routine].agents list, or nil.

@@ -211,6 +211,16 @@ projects = [
 # max_tries = 3
 # attempt_retry_delays = ["1m", "5m", "15m"]
 #
+# [work.review]
+# The Reviewer (ADR-0214): a fresh agent reads the changeset against this
+# repository's code-review convention and writes a document. It reaches no
+# verdict and gates nothing. `enabled` arms automatic review at AFK quiescence;
+# `pop tasks review <set>` runs on demand either way. An omitted agents list
+# falls back to [work.implement].agents.
+# enabled = false
+# agents = ["claude"]
+# effort = "heavy"
+#
 # [work.routine]
 # Recurring Routine runs. A Routine manifest's own agents beats this group; an
 # empty list falls through to [work.implement].agents.

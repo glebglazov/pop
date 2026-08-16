@@ -774,187 +774,52 @@ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, t
 	if err != nil {
 		return "", exitErr(ExitSetup, "%v", err)
 	}
-
 	quotaRetryAfter, err := resolveAgentQuotaRetryAfter(cfg)
 	if err != nil {
 		return "", exitErr(ExitSetup, "%v", err)
 	}
 
-	var (
-		lastRaw            string
-		unavailablePresets []AgentProceedVerdict
-	)
-	specs := nonEmptyAgentSpecs(sel.Agents, DefaultAgentPreset)
-	if probeMemo == nil {
-		probeMemo = newAgentAvailabilityProbeMemo()
+	walked, err := runAgentFallbackWalk(d, agentFallbackWalk{
+		role:            verifierRole(d, errOut, taskSetDir, setID, workSHA),
+		sel:             sel,
+		runtimePath:     runtimePath,
+		prompt:          prompt,
+		out:             out,
+		errOut:          errOut,
+		timeout:         timeout,
+		maxTries:        maxTries,
+		retryDelays:     retryDelays,
+		quotaRetryAfter: quotaRetryAfter,
+		cfg:             cfg,
+		probeMemo:       probeMemo,
+	})
+	if err != nil {
+		return "", err
 	}
-	// The recorded Effort model skips are shared by every preset in the list and
-	// read once, on the first preset that actually reaches its tier — a round
-	// where every preset is skipped before invocation never opens the store.
-	var skips effortModelSkips
-	resolveSpec := newEffortSpecResolver("", sel.Effort, true, cfg)
-	for i, agentSpec := range specs {
-		preset, err := AgentPresetName(agentSpec)
-		if err != nil {
-			return "", exitErr(ExitSetup, "resolve verifier agent: %v", err)
-		}
-		if !agentBinaryAvailable(d, preset) {
-			v := NewMissingBinaryVerdict(preset, "binary not found on PATH")
-			unavailablePresets = append(unavailablePresets, v)
-			if i+1 < len(specs) && out != nil {
-				outputFor(out).line(ansiDim, "   %s", v.fallThroughMessage("Verifier agent"))
-			}
-			continue
-		}
-		if v := probeMemo.checkProceedVerdict(d, runtimePath, preset); v != nil {
-			unavailablePresets = append(unavailablePresets, *v)
-			if i+1 < len(specs) && out != nil {
-				outputFor(out).line(ansiDim, "   %s", v.fallThroughMessage("Verifier agent"))
-			}
-			continue
-		}
-		if skips == nil {
-			loaded, err := loadEffortModelSkips(d, time.Now())
-			if err != nil {
-				return "", exitErr(ExitOperational, "%v", err)
-			}
-			skips = loaded
-		}
-		walk := &effortModelWalk{
-			d: d, preset: preset, baseSpec: agentSpec, resolve: resolveSpec, skips: skips,
-			build: func(spec string) (func(prompt string) (*AgentInvocation, error), error) {
-				return func(prompt string) (*AgentInvocation, error) {
-					return ResolveAgentInvocationWithMode(spec, "", prompt, runtimePath, AgentOutputAuto)
-				}, nil
-			},
-		}
-		announced := false
+	return resolveVerifierAgentExhaustion(walked.Answer, walked.Unavailable)
+}
 
-		// try advances by hand because an Effort model skip restarts the try on
-		// the tier's next entry rather than spending one: only an answer about
-		// the work under verification charges the verify cap (ADR-0168).
-		for try := 1; try <= maxTries; {
-			build, exhausted, err := walk.builder()
-			if err != nil {
-				return "", exitErr(ExitSetup, "resolve verifier agent: %v", err)
-			}
-			if exhausted != nil {
-				unavailablePresets = append(unavailablePresets, *exhausted)
-				if i+1 < len(specs) && out != nil {
-					outputFor(out).line(ansiDim, "   %s", exhausted.fallThroughMessage("Verifier agent"))
-				}
-				break
-			}
-			invocation, err := build(prompt)
-			if err != nil {
-				return "", exitErr(ExitSetup, "resolve verifier agent: %v", err)
-			}
-			if !announced && out != nil {
-				outputFor(out).line(ansiBold+ansiCyan, "━━ Verifying with %s", invocation.RequestedAgent)
-			}
-			announced = true
-			if out != nil {
-				outputFor(out).line(ansiDim, "   Attempt %d/%d · %s", try, maxTries, invocation.RequestedAgent)
-			}
-			raw, outcome, err := runAgentAttempt(d, runtimePath, out, timeout, invocation)
-			if err != nil {
-				return "", exitErr(ExitOperational, "run verifier: %v", err)
-			}
-			outcomeStr := verifyAttemptOutcome(outcome)
-			reason := verifyAttemptReason(outcome)
-			exitCode := 0
-			if outcome != nil {
-				exitCode = outcome.exitCode
-			}
-			// Interrupted attempts are persisted but yield no verdict.
-			if outcome != nil && outcome.interrupted {
-				_ = persistVerifyRun(d, errOut, taskSetDir, setID, workSHA, outcome.stream, invocation.AgentPreset(), invocation.RequestedAgent, try, outcomeStr, reason, exitCode, "")
-				return "", exitErr(ExitInterrupted, "interrupted")
-			}
-			normalized := invocation.NormalizeOutput(raw)
-			// Proceed-verdict fall-through: a stopped agent renders no verdict, so
-			// the Verifier walks to the next preset (ADR-0153, ADR-0168).
-			if normalized.ProceedVerdict != nil {
-				v := stampDetectedVerdict(*normalized.ProceedVerdict, preset, invocation.PinnedModel())
-				// A model-scoped verdict condemns the entry, not the preset: the
-				// run is persisted as the refusal it is, the model is recorded as
-				// an Effort model skip, and this try restarts on the tier's next
-				// entry. Only an exhausted tier escalates into the preset-scoped
-				// handling below (ADR-0168).
-				persisted := false
-				if v.Scope == ProceedScopeModel {
-					stop, err := walk.retire(v)
-					if err != nil {
-						return "", exitErr(ExitOperational, "%v", err)
-					}
-					// The run is persisted as what the verdict finally
-					// condemned: a skip when another tier entry takes over, an
-					// unusable agent when the escalation hands the preset on.
-					if stop == nil {
-						_ = persistSkippedVerifyRun(d, errOut, taskSetDir, setID, workSHA, outcome.stream, invocation.AgentPreset(), invocation.RequestedAgent, v.Model, try, v.Reason, exitCode)
-						if out != nil {
-							outputFor(out).line(ansiDim, "   %s", v.effortModelSkipMessage("Verifier agent", walk.nextModel()))
-						}
-						continue
-					}
-					_ = persistVerifyRun(d, errOut, taskSetDir, setID, workSHA, outcome.stream, invocation.AgentPreset(), invocation.RequestedAgent, try, streamOutcomeAgentUnusable, v.Reason, exitCode, "")
-					v, persisted = *stop, true
-				}
-				if _, ok := v.TimeHealing(); ok {
-					resetAt := agentQuotaResetAt(preset, v.Reason, time.Now())
-					v = v.WithResetAt(resetAt)
-					until := agentQuotaCooldownUntil(resetAt, time.Now(), quotaRetryAfter)
-					_ = updateAgentCooldown(d, preset, until)
-					if !persisted {
-						_ = persistVerifyRun(d, errOut, taskSetDir, setID, workSHA, outcome.stream, invocation.AgentPreset(), invocation.RequestedAgent, try, streamOutcomeQuotaPaused, "", exitCode, "")
-					}
-					unavailablePresets = append(unavailablePresets, v)
-					if out != nil {
-						outputFor(out).line(ansiDim, "   %s", v.fallThroughMessage("Verifier agent"))
-					}
-					break
-				}
-				if !persisted {
-					_ = persistVerifyRun(d, errOut, taskSetDir, setID, workSHA, outcome.stream, invocation.AgentPreset(), invocation.RequestedAgent, try, streamOutcomeAgentUnusable, v.Reason, exitCode, "")
-				}
-				unavailablePresets = append(unavailablePresets, v)
-				if i+1 < len(specs) && out != nil {
-					outputFor(out).line(ansiDim, "   %s", v.fallThroughMessage("Verifier agent"))
-				}
-				break
-			}
-			// A Verifier timeout is a retry-eligible failure. Unlike an implement
-			// timeout (which restarts instantly from a compact digest), a verify
-			// hang is more likely a genuine stall than a bloated context, so it
-			// falls through to the shared retry path below and waits the Task
-			// attempt retry delay. It consumes the verify cap and, once exhausted,
-			// follows the existing next-preset agent fall-through.
-			if outcome != nil && outcome.timedOut && out != nil {
-				outputFor(out).line(ansiRed, "   Attempt %d/%d timed out after %s", try, maxTries, timeout)
-			}
-
-			verdict, _, _ := ParseVerdict(normalized.Output)
-			_ = persistVerifyRun(d, errOut, taskSetDir, setID, workSHA, outcome.stream, invocation.AgentPreset(), invocation.RequestedAgent, try, outcomeStr, reason, exitCode, string(verdict))
-			lastRaw = normalized.Output
-
-			if !verifyAttemptRetryEligible(outcome, normalized.Output) {
-				return normalized.Output, nil
-			}
-			if try >= maxTries {
-				break
-			}
-			delay := attemptRetryDelay(retryDelays, try)
-			try++
-			if delay <= 0 {
-				if out != nil {
-					outputFor(out).line(ansiYellow, "↻ Retrying with preserved changes...")
-				}
-			} else if waitRetryDelay(d, out, delay) {
-				return "", exitErr(ExitInterrupted, "interrupted")
-			}
-		}
+// verifierRole is what the shared fallback walk calls the Verifier: its name in
+// the operator's output, the Captured run pair each invocation is filed as
+// (stamped with the work SHA under judgment and, when one was rendered, the
+// verdict), and the rule that a cleanly parsed verdict ends the walk even on a
+// timeout — that is the Verifier succeeding, not a hang worth retrying.
+func verifierRole(d *Deps, errOut io.Writer, taskSetDir, setID, workSHA string) agentRole {
+	return agentRole{
+		Noun:   "Verifier agent",
+		Gerund: "Verifying",
+		Persist: func(rec *streamRecorder, invocation *AgentInvocation, try int, outcome, reason string, exitCode int) {
+			_ = persistVerifyRun(d, errOut, taskSetDir, setID, workSHA, rec, invocation.AgentPreset(), invocation.RequestedAgent, try, outcome, reason, exitCode, "")
+		},
+		PersistAnswer: func(rec *streamRecorder, invocation *AgentInvocation, try int, outcome, reason string, exitCode int, answer string) {
+			verdict, _, _ := ParseVerdict(answer)
+			_ = persistVerifyRun(d, errOut, taskSetDir, setID, workSHA, rec, invocation.AgentPreset(), invocation.RequestedAgent, try, outcome, reason, exitCode, string(verdict))
+		},
+		PersistSkipped: func(rec *streamRecorder, invocation *AgentInvocation, model string, try int, reason string, exitCode int) {
+			_ = persistSkippedVerifyRun(d, errOut, taskSetDir, setID, workSHA, rec, invocation.AgentPreset(), invocation.RequestedAgent, model, try, reason, exitCode)
+		},
+		RetryEligible: verifyAttemptRetryEligible,
 	}
-	return resolveVerifierAgentExhaustion(lastRaw, unavailablePresets)
 }
 
 // resolveVerifierAgentExhaustion returns the last verifier output when present,
