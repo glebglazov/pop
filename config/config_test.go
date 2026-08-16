@@ -5678,3 +5678,95 @@ func TestProjectWorktreeDisplayZeroValues(t *testing.T) {
 		t.Errorf("empty config: %q, want %q", got, WorktreeDisplayFlat)
 	}
 }
+
+// TestIncludeWorkGroupsMergeFieldWise pins the sibling Work groups' include
+// semantics (ADR-0037 first-wins, per field): an include may set a key of
+// [work.verify] or [work.review] that the parent left alone, and keeps it even
+// though the parent configures a different key of the same table. The parent
+// still wins the keys it does declare, and [work.daemon] rides the same
+// whitelist as its siblings.
+func TestIncludeWorkGroupsMergeFieldWise(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeFile := func(name, content string) string {
+		p := filepath.Join(tmpDir, name)
+		if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+
+	writeFile("extra.toml", `
+[work.verify]
+agents = ["codex"]
+effort = "light"
+max_tries = 7
+
+[work.review]
+agents = ["codex"]
+effort = "light"
+
+[work.daemon]
+poll_interval = "30s"
+`)
+	configPath := writeFile("config.toml", `
+includes = ["extra.toml"]
+
+[work.verify]
+enabled = true
+effort = "heavy"
+
+[work.review]
+enabled = true
+effort = "heavy"
+`)
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	verify := cfg.Work.Verify
+	if verify == nil {
+		t.Fatal("expected [work.verify] to survive the include merge")
+	}
+	if !verify.Enabled {
+		t.Error("[work.verify].enabled = false, want the parent's true")
+	}
+	if verify.Effort != "heavy" {
+		t.Errorf("[work.verify].effort = %q, want the parent's %q", verify.Effort, "heavy")
+	}
+	if len(verify.Agents) != 1 || verify.Agents[0].Cmd != "codex" {
+		t.Errorf("[work.verify].agents = %#v, want the include's [codex]", verify.Agents)
+	}
+	if verify.MaxTries == nil || *verify.MaxTries != 7 {
+		t.Errorf("[work.verify].max_tries = %v, want the include's 7", verify.MaxTries)
+	}
+
+	review := cfg.Work.Review
+	if review == nil {
+		t.Fatal("expected [work.review] to survive the include merge")
+	}
+	if !review.Enabled {
+		t.Error("[work.review].enabled = false, want the parent's true")
+	}
+	if review.Effort != "heavy" {
+		t.Errorf("[work.review].effort = %q, want the parent's %q", review.Effort, "heavy")
+	}
+	if len(review.Agents) != 1 || review.Agents[0].Cmd != "codex" {
+		t.Errorf("[work.review].agents = %#v, want the include's [codex]", review.Agents)
+	}
+
+	if cfg.Work.Daemon == nil || cfg.Work.Daemon.PollInterval != "30s" {
+		t.Errorf("[work.daemon] = %#v, want the include's poll_interval 30s", cfg.Work.Daemon)
+	}
+
+	joined := strings.Join(cfg.Warnings, "\n")
+	for _, want := range []string{
+		"[work.verify].effort skipped, already defined (first definition wins)",
+		"[work.review].effort skipped, already defined (first definition wins)",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("warnings missing %q; got:\n%s", want, joined)
+		}
+	}
+}

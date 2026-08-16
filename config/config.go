@@ -296,28 +296,28 @@ type VerifyConfig struct {
 	// Enabled is the master opt-in switch. Absent/false ⇒ the Verifier never
 	// runs and status derives from the manifest alone, exactly as before this
 	// feature (ADR-0086/0087).
-	Enabled bool `toml:"enabled" desc:"Enable Agent verification as a Done gate (default false)."`
+	Enabled bool `toml:"enabled" include:"replace" desc:"Enable Agent verification as a Done gate (default false)."`
 	// Agents is the ordered fallback list of agent presets the Verifier walks,
 	// mirroring [work.implement].agents: it falls through to the next agent on
 	// a quota pause or a missing binary. An empty list falls back to
 	// [work.implement].agents (and, failing that, the built-in default agent).
-	Agents AgentEntries `toml:"agents" desc:"Ordered fallback agent list for the Verifier, falling back to [work.implement].agents when omitted (strings or {display_name, cmd} tables)."`
+	Agents AgentEntries `toml:"agents" include:"replace" desc:"Ordered fallback agent list for the Verifier, falling back to [work.implement].agents when omitted (strings or {display_name, cmd} tables)."`
 	// Effort selects the Verifier's model-strength tier (light, standard, or
 	// heavy). Absent ⇒ heavy — verification runs at the strongest tier by default.
-	Effort string `toml:"effort" desc:"Verifier model-strength tier: light, standard, or heavy (default heavy)."`
+	Effort string `toml:"effort" include:"replace" desc:"Verifier model-strength tier: light, standard, or heavy (default heavy)."`
 	// MaxRemediationDepth bounds the verify→remediate→re-verify loop (ADR-0086):
 	// a FIXABLE verdict spawns a Remediation task only while the set is under this
 	// many cycles, after which it parks at VERIFY-FAILED. A nil pointer ⇒ the
 	// built-in default; a value ≤ 0 disables remediation (a FIXABLE verdict parks
 	// immediately).
-	MaxRemediationDepth *int `toml:"max_remediation_depth" desc:"Max verify→remediate cycles before parking at VERIFY-FAILED (default 3)."`
+	MaxRemediationDepth *int `toml:"max_remediation_depth" include:"replace" desc:"Max verify→remediate cycles before parking at VERIFY-FAILED (default 3)."`
 	// MaxTries is the started-attempt cap for verify. Zero/unset ⇒
 	// DefaultTaskMaxTries.
-	MaxTries *int `toml:"max_tries" desc:"Verify started-attempt cap (default 3)."`
+	MaxTries *int `toml:"max_tries" include:"replace" desc:"Verify started-attempt cap (default 3)."`
 	// AttemptRetryDelays is the ordered inter-attempt wait schedule for verify
 	// retries. Omitted ⇒ DefaultTaskAttemptRetryDelays; an explicit empty array
 	// ⇒ zero delay (instant retries).
-	AttemptRetryDelays []string `toml:"attempt_retry_delays" desc:"Verify inter-attempt retry delay schedule (array of duration strings)."`
+	AttemptRetryDelays []string `toml:"attempt_retry_delays" include:"replace" desc:"Verify inter-attempt retry delay schedule (array of duration strings)."`
 }
 
 // ReviewConfig holds Code-review settings (ADR-0214). It carries exactly three
@@ -327,16 +327,16 @@ type ReviewConfig struct {
 	// Enabled is the master opt-in switch for automatic review. Absent/false ⇒
 	// the drain never reviews; `pop tasks review <set>` still runs on demand,
 	// the way a human asking for a second opinion always may.
-	Enabled bool `toml:"enabled" desc:"Enable automatic Code review at AFK quiescence (default false)."`
+	Enabled bool `toml:"enabled" include:"replace" desc:"Enable automatic Code review at AFK quiescence (default false)."`
 	// Agents is the ordered fallback list of agent presets the Reviewer walks,
 	// mirroring [work.verify].agents: it falls through to the next agent on a
 	// quota pause or a missing binary. An empty list falls back to
 	// [work.implement].agents (and, failing that, the built-in default agent).
-	Agents AgentEntries `toml:"agents" desc:"Ordered fallback agent list for the Reviewer, falling back to [work.implement].agents when omitted (strings or {display_name, cmd} tables)."`
+	Agents AgentEntries `toml:"agents" include:"replace" desc:"Ordered fallback agent list for the Reviewer, falling back to [work.implement].agents when omitted (strings or {display_name, cmd} tables)."`
 	// Effort selects the Reviewer's model-strength tier (light, standard, or
 	// heavy). Absent ⇒ heavy — judging naming, structure and idiom is the
 	// strongest tier's work.
-	Effort string `toml:"effort" desc:"Reviewer model-strength tier: light, standard, or heavy (default heavy)."`
+	Effort string `toml:"effort" include:"replace" desc:"Reviewer model-strength tier: light, standard, or heavy (default heavy)."`
 }
 
 // TaskGitConfig holds commit-time git configuration applied to Pop's own
@@ -497,23 +497,29 @@ func (c *Config) ResolveCommitConfigOverrides() ([]string, error) {
 // Every group merges field-by-field across config layers: the override layer
 // carries one key at a time (ADR-0202 decision 2), so a whole-table replace
 // would silently drop the hand-authored keys sitting beside the overridden one.
+// Includes descend the same way, first-wins per key (ADR-0037): an include may
+// set one key of a group the parent also configured without losing the parent's
+// other keys, and without its own siblings being erased by the parent's table.
 type WorkConfig struct {
 	// Implement is the unattended coding drain's group.
 	Implement *ImplementConfig `toml:"implement" merge:"fields" include:"fields" desc:"Implement Work group ([work.implement] table)."`
 	// Verify is the Verifier's group (ADR-0086).
-	Verify *VerifyConfig `toml:"verify" merge:"fields" include:"replace" desc:"Agent-verification settings ([work.verify] table)."`
+	Verify *VerifyConfig `toml:"verify" merge:"fields" include:"fields" desc:"Agent-verification settings ([work.verify] table)."`
 	// Review is the Reviewer's group (ADR-0214).
-	Review *ReviewConfig `toml:"review" merge:"fields" include:"replace" desc:"Code-review settings ([work.review] table)."`
+	Review *ReviewConfig `toml:"review" merge:"fields" include:"fields" desc:"Code-review settings ([work.review] table)."`
 	// Routine is the recurring-Routine group. An empty list falls through to
 	// [work.implement].agents; a Routine manifest's own agents still beats both.
-	Routine *AgentGroupConfig `toml:"routine" merge:"fields" include:"replace" desc:"Routine Work group ([work.routine] table)."`
+	Routine *AgentGroupConfig `toml:"routine" merge:"fields" include:"fields" desc:"Routine Work group ([work.routine] table)."`
 	// Attended is the group every human-facing session shares — gate assistance,
 	// an Assist session, Map assist, map grilling, a Routine refinement session.
-	Attended *AgentGroupConfig `toml:"attended" merge:"fields" include:"replace" desc:"Attended-session Work group ([work.attended] table)."`
+	Attended *AgentGroupConfig `toml:"attended" merge:"fields" include:"fields" desc:"Attended-session Work group ([work.attended] table)."`
 	// Dashboard holds Work-read-surface settings (view presets). Distinct from
 	// the root [dashboard] table, which configures the monitor/pane dashboard.
 	Dashboard *WorkDashboardConfig `toml:"dashboard" include:"fields" desc:"Work read-surface settings ([work.dashboard] table)."`
-	Daemon    *WorkDaemonConfig    `toml:"daemon" desc:"Work supervisor timing ([work.daemon] table)."`
+	// Daemon is the supervisor's timing. It is includable like every sibling
+	// group: a machine whose quota or load wants a different cadence is exactly
+	// the machine-local case an include file exists to carry.
+	Daemon *WorkDaemonConfig `toml:"daemon" merge:"fields" include:"fields" desc:"Work supervisor timing ([work.daemon] table)."`
 }
 
 // WorkDaemonConfig holds `pop work daemon` supervisor configuration. Durations
@@ -521,13 +527,13 @@ type WorkConfig struct {
 // ResolveWorkDaemon.
 type WorkDaemonConfig struct {
 	// PollInterval is the supervisor's scan cadence. Empty ⇒ DefaultWorkDaemonPollInterval.
-	PollInterval string `toml:"poll_interval" desc:"Supervisor scan cadence as a duration string (e.g. \"60s\")."`
+	PollInterval string `toml:"poll_interval" include:"replace" desc:"Supervisor scan cadence as a duration string (e.g. \"60s\")."`
 	// AgentQuotaRetryAfter is the global cooldown applied after an agent reports
 	// a quota exit, before it re-enters rotation. Empty ⇒ DefaultWorkDaemonQuotaRetryAfter.
-	AgentQuotaRetryAfter string `toml:"agent_quota_retry_after" desc:"Cooldown after an agent quota exit, as a duration string."`
+	AgentQuotaRetryAfter string `toml:"agent_quota_retry_after" include:"replace" desc:"Cooldown after an agent quota exit, as a duration string."`
 	// CrashRetryDelays is the ordered backoff schedule for crash retries; its
 	// length is the park threshold. Empty ⇒ DefaultWorkDaemonCrashRetryDelays.
-	CrashRetryDelays []string `toml:"crash_retry_delays" desc:"Crash-retry backoff schedule (array of duration strings); length = park threshold."`
+	CrashRetryDelays []string `toml:"crash_retry_delays" include:"replace" desc:"Crash-retry backoff schedule (array of duration strings); length = park threshold."`
 }
 
 // Work-daemon default values applied when the [work.daemon] section or
@@ -1875,6 +1881,42 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 // a meaningful value the unset zero value cannot be told from.
 // overrideMD adds the claims of the override layer, which outranks every
 // hand-authored file including an include.
+// workGroupIncludeKeys maps every field-wise [work.<group>] sub-table to the
+// include-whitelisted keys it carries. It is derived from the include: tags
+// themselves, so a key added to a Work group is seeded for free and the claim
+// ledger can never drift from the schema it guards.
+var workGroupIncludeKeys = includeKeysByWorkGroup()
+
+func includeKeysByWorkGroup() map[string][]string {
+	out := map[string][]string{}
+	t := reflect.TypeOf(WorkConfig{})
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if f.Tag.Get(includeTagName) != kindFields {
+			continue
+		}
+		group := f.Type
+		for group.Kind() == reflect.Ptr {
+			group = group.Elem()
+		}
+		if group.Kind() != reflect.Struct {
+			continue
+		}
+		var keys []string
+		for j := 0; j < group.NumField(); j++ {
+			sf := group.Field(j)
+			if _, ok := sf.Tag.Lookup(includeTagName); !ok {
+				continue
+			}
+			if name := tomlName(sf); name != "" && name != "-" {
+				keys = append(keys, name)
+			}
+		}
+		out[tomlName(f)] = keys
+	}
+	return out
+}
+
 func seedIncludeClaims(policy *mergePolicy, cfg *Config, md, overrideMD toml.MetaData) {
 	claimOverrideKeys(policy, overrideMD)
 	if cfg.Task != nil && cfg.Task.Git != nil {
@@ -1895,14 +1937,17 @@ func seedIncludeClaims(policy *mergePolicy, cfg *Config, md, overrideMD toml.Met
 				policy.claim("work.implement.git")
 			}
 		}
-		if cfg.Work.Verify != nil {
-			policy.claim("work.verify")
-		}
-		if cfg.Work.Routine != nil {
-			policy.claim("work.routine")
-		}
-		if cfg.Work.Attended != nil {
-			policy.claim("work.attended")
+		// The sibling groups merge per field, so each key the parent declared is
+		// claimed on its own. These claims are metadata-driven rather than
+		// value-driven: `enabled = false` and an unset enabled are the same Go
+		// value, and only the parent's metadata can tell the deliberate opt-out
+		// from silence.
+		for group, keys := range workGroupIncludeKeys {
+			for _, key := range keys {
+				if md.IsDefined("work", group, key) {
+					policy.claim("work." + group + "." + key)
+				}
+			}
 		}
 		if md.IsDefined("work", "dashboard", "tasks", "presets") {
 			policy.claim("work.dashboard.tasks.presets")
@@ -1946,26 +1991,21 @@ func includeCollisionMessage(path, keyPath string) string {
 		return fmt.Sprintf("%s: [agents.%s] skipped, already defined (first definition wins)", path, rest)
 	}
 	switch keyPath {
-	case "work.implement.agents":
-		return fmt.Sprintf("%s: [work.implement].agents skipped, already defined (first definition wins)", path)
-	case "work.implement.max_tries":
-		return fmt.Sprintf("%s: [work.implement].max_tries skipped, already defined (first definition wins)", path)
-	case "work.implement.attempt_retry_delays":
-		return fmt.Sprintf("%s: [work.implement].attempt_retry_delays skipped, already defined (first definition wins)", path)
 	case "work.implement.git":
 		return fmt.Sprintf("%s: [work.implement.git] skipped, already defined (first definition wins)", path)
-	case "work.verify":
-		return fmt.Sprintf("%s: [work.verify] skipped, already defined (first definition wins)", path)
-	case "work.routine":
-		return fmt.Sprintf("%s: [work.routine] skipped, already defined (first definition wins)", path)
-	case "work.attended":
-		return fmt.Sprintf("%s: [work.attended] skipped, already defined (first definition wins)", path)
 	case "tasks.git":
 		return fmt.Sprintf("%s: [tasks.git] skipped, already defined (first definition wins)", path)
 	case "workbench.pick_on_create":
 		return fmt.Sprintf("%s: [workbench] pick_on_create skipped, already defined (first definition wins)", path)
 	case "workbench.order":
 		return fmt.Sprintf("%s: [workbench] order skipped, already defined (first definition wins)", path)
+	}
+	// Every [work.<group>] merges per key, so a collision names the group's table
+	// and the one key that lost — the whole table is never what was skipped.
+	if rest, ok := strings.CutPrefix(keyPath, "work."); ok {
+		if group, key, found := strings.Cut(rest, "."); found && !strings.Contains(key, ".") {
+			return fmt.Sprintf("%s: [work.%s].%s skipped, already defined (first definition wins)", path, group, key)
+		}
 	}
 	return fmt.Sprintf("%s: %s skipped, already defined (first definition wins)", path, keyPath)
 }
