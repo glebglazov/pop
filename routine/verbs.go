@@ -53,7 +53,7 @@ const noReportMessage = "no report to copy"
 
 // Actions returns the container-level verbs that apply to one Routine right now,
 // spawning (handoff) verbs first and in-place verbs last: `I P E R O` then
-// `a l h c y`. A Routine whose definition would not load offers only copy-name:
+// `a l h p y`. A Routine whose definition would not load offers only copy-name:
 // every other verb reads or writes a definition that is not there, and offering
 // one would promise an act that can only fail. A Project routine carries no
 // pause bit (ADR-0138), so the consent pair is absent from it — the same
@@ -82,7 +82,7 @@ func (k *Kind) Actions(c work.Container) []work.Action {
 		work.Action{Verb: VerbHandoff, Key: "h", Label: "handoff prompt"},
 	)
 	if c.RoutineLastReport != "" {
-		actions = append(actions, work.Action{Verb: VerbCopyReportPath, Key: "c", Label: "copy report path"})
+		actions = append(actions, work.Action{Verb: VerbCopyReportPath, Key: "p", Label: "copy report path"})
 	}
 	return append(actions, work.Action{Verb: work.VerbCopyName, Key: "y", Label: "copy name"})
 }
@@ -101,7 +101,7 @@ func (k *Kind) StatusActions(c work.Container) []work.Action { return nil }
 func (k *Kind) ItemActions(c work.Container, item work.Item) []work.Action {
 	var actions []work.Action
 	if item.File != "" {
-		actions = append(actions, work.Action{Verb: VerbCopyReportPath, Key: "c", Label: "copy report path"})
+		actions = append(actions, work.Action{Verb: VerbCopyReportPath, Key: "p", Label: "copy report path"})
 	}
 	return append(actions, work.Action{Verb: work.VerbCopyName, Key: "y", Label: "copy name"})
 }

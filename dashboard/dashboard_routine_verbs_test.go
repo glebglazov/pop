@@ -76,7 +76,7 @@ func TestRoutineVerbsComeFromTheKindAndDispatchToIt(t *testing.T) {
 		t.Fatalf("menu keys = %v, want the Routine kind's own %v", got, want)
 	}
 
-	m = pressKeys(t, m, "c")
+	m = pressKeys(t, m, "p")
 	if copied != container.RoutineLastReport {
 		t.Fatalf("clipboard = %q, want the newest run's report %q", copied, container.RoutineLastReport)
 	}
@@ -113,7 +113,7 @@ func TestRoutineVerbBehavesTheSameOnEitherPage(t *testing.T) {
 		m.copyFunc = func(payload string) error { copied = payload; return nil }
 		m = pressKeys(t, m, "a")
 		got := result{keys: menuKeys(m.menu)}
-		m = pressKeys(t, m, "c")
+		m = pressKeys(t, m, "p")
 		got.copied, got.status = copied, m.flash.Text()
 		// The runs verb opens the same generic detail from either page.
 		m = pressKeys(t, m, "a", "l")
@@ -161,7 +161,7 @@ func TestRoutineRunItemVerbsComeFromTheKind(t *testing.T) {
 		t.Fatalf("item menu keys = %v, want the kind's %v", got, want)
 	}
 
-	m = pressKeys(t, m, "c")
+	m = pressKeys(t, m, "p")
 	if copied != container.Items[0].File {
 		t.Fatalf("clipboard = %q, want the run's report %q", copied, container.Items[0].File)
 	}
