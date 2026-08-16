@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/glebglazov/pop/config"
@@ -68,6 +69,7 @@ const (
 	hitlGateDefer
 	hitlGateShell
 	hitlGateReverify
+	hitlGateReadReview
 )
 
 func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverifyGateContext) (bool, error) {
@@ -104,11 +106,17 @@ func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverif
 		// this set (ADR-0086/ADR-0012); the option force-re-runs the Verifier so a
 		// human who edited the work inline can re-check it without a fresh drain.
 		showReverify := gateReverifyEnabled(rv, m)
-		action, err := promptHITLGateAction(out, in, d, env.cfg, runtimePath, reader, taskSetID, m, hitl, body, invocation, showReverify)
+		// Re-resolved each time round the menu: a Re-verify may land a Remediation
+		// task and a review written since the gate opened is still the one to point at.
+		review, hasReview := latestReviewPointer(d, m)
+		action, err := promptHITLGateAction(out, in, d, env.cfg, runtimePath, reader, taskSetID, m, hitl, body, invocation, showReverify, review, hasReview)
 		if err != nil {
 			return true, err
 		}
 		switch action {
+		case hitlGateReadReview:
+			pageReviewDocument(d, in, runtimePath, out, review)
+			// A read changes nothing — loop back to the menu with the set as it was.
 		case hitlGateReverify:
 			repo := ""
 			if id, idErr := ResolveRepositoryIdentity(d, runtimePath); idErr == nil {
@@ -246,6 +254,48 @@ func spawnRuntimeShell(d *Deps, stdin io.Reader, runtimePath string, out io.Writ
 	return err
 }
 
+// pageReviewDocument shows the set's Review artifact to the human at the gate.
+// It spawns no agent: the document is already written, and this entry is a read
+// of it, not a second opinion (ADR-0214). The human's pager runs attended in the
+// runtime checkout; when none will run, the document is printed instead, because
+// the whole point of the entry is that the human sees it.
+func pageReviewDocument(d *Deps, stdin io.Reader, runtimePath string, out io.Writer, p ReviewPointer) {
+	if p.Path == "" {
+		return
+	}
+	name, args := pagerCommand(p.Path)
+	var err error
+	if attended, ok := d.Runner.(AttendedCommandRunner); ok {
+		_, err = attended.RunAttended(context.Background(), runtimePath, stdin, out, out, name, args...)
+	} else {
+		_, err = d.Runner.Run(context.Background(), runtimePath, out, out, name, args...)
+	}
+	if err == nil {
+		return
+	}
+	fmt.Fprintf(outputFor(out), "Could not page %s (%v); printing it instead.\n", p.Path, err)
+	fs := d.FS
+	if fs == nil {
+		fs = DefaultDeps().FS
+	}
+	data, readErr := fs.ReadFile(p.Path)
+	if readErr != nil {
+		fmt.Fprintf(outputFor(out), "Could not read the review: %v\n", readErr)
+		return
+	}
+	fmt.Fprintln(outputFor(out), strings.TrimRight(string(data), "\n"))
+}
+
+// pagerCommand is $PAGER as the human set it, words and flags alike, falling
+// back to less in the raw-control mode a Markdown document reads best in.
+func pagerCommand(path string) (string, []string) {
+	fields := strings.Fields(os.Getenv("PAGER"))
+	if len(fields) == 0 {
+		fields = []string{"less", "-R"}
+	}
+	return fields[0], append(fields[1:], path)
+}
+
 // gateWillPrompt reports whether an interactive gate handler will enter its
 // menu loop (a real human-wait) rather than no-op. It mirrors the guard at the
 // top of handleInteractiveHITLGate / handleInteractiveFailedGate, so the caller
@@ -292,15 +342,27 @@ func gateReverifyEnabled(rv *reverifyGateContext, m *Manifest) bool {
 	return rv != nil && verifyEnabled(rv.cfg) && m != nil && !m.VerifyOptedOut()
 }
 
-func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, cfg *config.Config, runtimePath string, reader *promptReader, taskSetID string, m *Manifest, hitl *Task, body string, invocation *AgentAssistanceInvocation, showReverify bool) (hitlGateAction, error) {
+func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, cfg *config.Config, runtimePath string, reader *promptReader, taskSetID string, m *Manifest, hitl *Task, body string, invocation *AgentAssistanceInvocation, showReverify bool, review ReviewPointer, hasReview bool) (hitlGateAction, error) {
 	items := []ui.GateMenuItem{
 		{Key: "1", Label: "Get agent assistance (default)", Details: gateInvocationDetails(invocation), Default: true, Assists: true},
 		{Key: "2", Label: "Complete task"},
 		{Key: "3", Label: "Defer task"},
 		{Key: "4", Label: "Open a shell in the checkout"},
 	}
+	// The two conditional entries take the next free number each, so the menu
+	// stays contiguous whichever of them the set earns; the keys are read back
+	// through this map rather than by position.
+	keys := map[string]hitlGateAction{"1": hitlGateAssist, "2": hitlGateComplete, "3": hitlGateDefer, "4": hitlGateShell}
+	add := func(action hitlGateAction, label string, details ...string) {
+		key := strconv.Itoa(len(items) + 1)
+		keys[key] = action
+		items = append(items, ui.GateMenuItem{Key: key, Label: label, Details: details})
+	}
 	if showReverify {
-		items = append(items, ui.GateMenuItem{Key: "5", Label: "Re-verify (re-run the Verifier against the current work)"})
+		add(hitlGateReverify, "Re-verify (re-run the Verifier against the current work)")
+	}
+	if hasReview {
+		add(hitlGateReadReview, "Read the code review (no agent runs)", review.Path)
 	}
 	items = append(items, ui.GateMenuItem{Key: "0", Label: "Exit"})
 
@@ -311,6 +373,7 @@ func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, cfg *config.Conf
 			gateWaiterPreamble(d, runtimePath),
 			gateTaskBodyPreamble(hitl.File, body),
 			gateRemediationPreamble(d, taskSetID, m),
+			gateReviewPreamble(review, hasReview),
 		),
 		Items: items,
 	}
@@ -318,23 +381,10 @@ func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, cfg *config.Conf
 	if err != nil {
 		return hitlGateExit, err
 	}
-	switch choice {
-	case "1":
-		return hitlGateAssist, nil
-	case "2":
-		return hitlGateComplete, nil
-	case "3":
-		return hitlGateDefer, nil
-	case "4":
-		return hitlGateShell, nil
-	case "5":
-		if showReverify {
-			return hitlGateReverify, nil
-		}
-		return hitlGateExit, nil
-	default:
-		return hitlGateExit, nil
+	if action, ok := keys[choice]; ok {
+		return action, nil
 	}
+	return hitlGateExit, nil
 }
 
 // readPromptLine reads one menu selection. eofDefault is returned when the

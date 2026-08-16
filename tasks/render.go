@@ -684,11 +684,13 @@ func renderTaskList(out *output, taskSetID string, m *Manifest) {
 // this drills into a single set and shows every task's status, type, identifier,
 // title, and blockers in manifest (dependency) order, so a set's aggregate
 // state can be read down to the task that holds it.
-func RenderTaskSetDetail(w io.Writer, taskSetID string, row *Row, m *Manifest) {
-	renderTaskSetDetail(outputFor(w), taskSetID, row, m)
+// It closes with the set's Code review pointer when one exists — d is what
+// resolves it, and a nil d falls back to the default dependencies.
+func RenderTaskSetDetail(d *Deps, w io.Writer, taskSetID string, row *Row, m *Manifest) {
+	renderTaskSetDetail(d, outputFor(w), taskSetID, row, m)
 }
 
-func renderTaskSetDetail(out *output, taskSetID string, row *Row, m *Manifest) {
+func renderTaskSetDetail(d *Deps, out *output, taskSetID string, row *Row, m *Manifest) {
 	status := DeriveStatus(m)
 	progress := ""
 	bound := false
@@ -750,6 +752,28 @@ func renderTaskSetDetail(out *output, taskSetID string, row *Row, m *Manifest) {
 		}
 		line := fmt.Sprintf("%-*s  %-*s  %-*s  %-*s  %s", stW, taskStatusCell(task), tyW, task.Type, idW, task.ID, titleW, title, blockedBy)
 		fmt.Fprintln(out, out.styled(taskStyle(m, task), line))
+	}
+
+	renderReviewPointerSection(d, out, m)
+}
+
+// renderReviewPointerSection closes the detail view with the same pointer the
+// HITL gate carries: where the set's latest Review artifact is and which commit
+// it describes, never the document itself (ADR-0214). A set that has never been
+// reviewed gets no section at all.
+func renderReviewPointerSection(d *Deps, out *output, m *Manifest) {
+	p, ok := latestReviewPointer(d, m)
+	if !ok {
+		return
+	}
+	fmt.Fprintln(out)
+	out.line(ansiCyan, "CODE REVIEW")
+	fmt.Fprintf(out, "  %s\n", p.Path)
+	if phrase := p.CommitPhrase(); phrase != "" {
+		fmt.Fprintf(out, "  written against %s\n", phrase)
+	}
+	if p.Written != "" {
+		fmt.Fprintf(out, "  reviewed %s\n", p.Written)
 	}
 }
 

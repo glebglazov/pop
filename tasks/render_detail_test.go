@@ -17,7 +17,7 @@ func TestRenderTaskSetDetailFoldsFailedRetryCount(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	RenderTaskSetDetail(&buf, "demo", nil, m)
+	RenderTaskSetDetail(nil, &buf, "demo", nil, m)
 	out := buf.String()
 
 	if !strings.Contains(out, "failed(3)") {
@@ -37,7 +37,7 @@ func TestRenderTaskSetDetailMalformed(t *testing.T) {
 	m := &Manifest{Valid: false, Errors: []string{"bad index.json"}}
 
 	var buf bytes.Buffer
-	RenderTaskSetDetail(&buf, "demo", &Row{ID: "demo", Status: StatusMalformed}, m)
+	RenderTaskSetDetail(nil, &buf, "demo", &Row{ID: "demo", Status: StatusMalformed}, m)
 	out := buf.String()
 
 	if !strings.Contains(out, "malformed") || !strings.Contains(out, "bad index.json") {
@@ -50,7 +50,7 @@ func TestRenderTaskSetDetailMalformed(t *testing.T) {
 
 func TestRenderTaskSetDetailMissing(t *testing.T) {
 	var buf bytes.Buffer
-	RenderTaskSetDetail(&buf, "gone", &Row{ID: "gone", Status: StatusMissing}, nil)
+	RenderTaskSetDetail(nil, &buf, "gone", &Row{ID: "gone", Status: StatusMissing}, nil)
 	out := buf.String()
 
 	if !strings.Contains(out, "missing") {

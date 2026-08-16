@@ -519,7 +519,7 @@ func runTaskRegisterWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 			return fmt.Errorf("tasks register: %w", err)
 		}
 		tasks.AttachBound(d, result.Rows)
-		tasks.RenderTaskSetDetail(w, id, tasks.FindRow(result, id), result.Manifests[id])
+		tasks.RenderTaskSetDetail(d, w, id, tasks.FindRow(result, id), result.Manifests[id])
 		return nil
 	}
 
@@ -694,7 +694,7 @@ func runTaskStatusWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 			return fmt.Errorf("tasks status: %w", err)
 		}
 		tasks.AttachBound(d, result.Rows)
-		tasks.RenderTaskSetDetail(w, id, tasks.FindRow(result, id), result.Manifests[id])
+		tasks.RenderTaskSetDetail(d, w, id, tasks.FindRow(result, id), result.Manifests[id])
 		return nil
 	}
 

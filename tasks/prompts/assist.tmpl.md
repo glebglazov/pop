@@ -9,6 +9,10 @@ Derived status: {{.Status}}
 {{template "task-listing" .Tasks}}
 {{if .FindingsRecorded}}## Latest Verify verdict findings
 {{.Findings}}
+{{end}}{{if .HasReview}}## Latest code review (NOT inlined — read the file yourself)
+- Document: {{.ReviewPath}}
+{{if .ReviewCommit}}- Written against: {{.ReviewCommit}}
+{{end}}- It is one Reviewer's opinion against this repository's standards. It reaches no verdict and gates nothing; read it when the human asks what to do about the review, and treat acting on it as the human's call.
 {{end}}
 ## Recent progress
 {{if .ProgressUnavailable}}- No progress.txt is available yet.

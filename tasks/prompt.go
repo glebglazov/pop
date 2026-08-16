@@ -518,6 +518,14 @@ func BuildAssistPrompt(d *Deps, taskSetID string, m *Manifest, status TaskSetSta
 		view.FindingsRecorded = true
 		view.Findings = trimmed
 	}
+	// The load-bearing surface of ADR-0214: named as a path, like every task
+	// body, so "read the review and let's work out what to do about it" needs no
+	// plumbing beyond the agent opening the file.
+	if p, ok := latestReviewPointer(d, m); ok {
+		view.HasReview = true
+		view.ReviewPath = p.Path
+		view.ReviewCommit = p.CommitPhrase()
+	}
 	view.Progress, view.HasProgress, view.ProgressEmpty, view.ProgressUnavailable = recentProgressRows(d, m)
 	return prompt.MustRender(promptTemplates, "assist.tmpl.md", view)
 }
@@ -533,6 +541,9 @@ type assistPromptView struct {
 	Tasks               []taskRow
 	FindingsRecorded    bool
 	Findings            string
+	HasReview           bool
+	ReviewPath          string
+	ReviewCommit        string
 	Progress            []progressRow
 	HasProgress         bool
 	ProgressEmpty       bool
