@@ -13,6 +13,11 @@ import (
 type Kind string
 
 const (
+	// KindCodeReview is the standard a Reviewer holds a changeset against: what
+	// good code looks like in this repository, as prose. Pop asserts none of it
+	// — the standard is the codebase's, and the recipe derives it from there
+	// (ADR-0214).
+	KindCodeReview Kind = "code-review"
 	// KindCommits is the commit-message grammar a repository's team writes
 	// history in — types, scopes, subject style and body style, which are one
 	// document and one git log sample rather than two kinds.
@@ -25,7 +30,7 @@ const (
 // Kinds returns every Convention kind in rank-independent declaration order:
 // the order `get` with no kind walks, and the order an unknown kind is refused
 // with.
-func Kinds() []Kind { return []Kind{KindCommits, KindIssueTracker} }
+func Kinds() []Kind { return []Kind{KindCodeReview, KindCommits, KindIssueTracker} }
 
 // Desc is the one-line description of what a kind answers, for a surface that
 // lists kinds beside things of another sort and has to say what each one is. It
@@ -33,6 +38,8 @@ func Kinds() []Kind { return []Kind{KindCommits, KindIssueTracker} }
 // than in that surface so two surfaces cannot describe a kind differently.
 func (k Kind) Desc() string {
 	switch k {
+	case KindCodeReview:
+		return "What good code looks like in this repository — the standard a review reads a changeset against."
 	case KindCommits:
 		return "How this repository writes commits — types, scopes, subject and body style."
 	case KindIssueTracker:

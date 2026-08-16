@@ -67,6 +67,49 @@ func TestCommitsRecipeCarriesTheDerivation(t *testing.T) {
 	}
 }
 
+// TestCodeReviewIsAKindWithARecipe: review is configurable only through this
+// stack, so the kind's presence in the enum is what makes a repository able to
+// state its own standard at all (ADR-0214).
+func TestCodeReviewIsAKindWithARecipe(t *testing.T) {
+	var found bool
+	for _, kind := range Kinds() {
+		found = found || kind == KindCodeReview
+	}
+	if !found {
+		t.Fatalf("code-review is not a Convention kind; Kinds() = %v", Kinds())
+	}
+	if strings.TrimSpace(Recipe(KindCodeReview)) == "" {
+		t.Error("the code-review kind has no recipe to derive a standard with")
+	}
+}
+
+// TestCodeReviewRecipeDerivesTheStandardFromTheRepository: pop ships no house
+// style, so the recipe's whole job is to send the reader to the codebase's own
+// evidence and then to a layer that keeps the answer.
+func TestCodeReviewRecipeDerivesTheStandardFromTheRepository(t *testing.T) {
+	recipe := Recipe(KindCodeReview)
+	for what, want := range map[string]string{
+		"the repository's own documents": "AGENTS.md",
+		"its architectural decisions":    "docs/adr/",
+		"its linter configuration":       ".golangci.yml",
+		"its formatter and build":        "pre-commit",
+		"the idiom of the code itself":   "idiom",
+		"where a derived result goes":    "pop memory",
+		"the write verb":                 "pop conventions set code-review",
+		"the team's own layer":           "docs/agents/code-review.md",
+		"the no-standard result":         "No discernible code-review convention",
+	} {
+		if !strings.Contains(recipe, want) {
+			t.Errorf("code-review recipe does not carry %s (%q):\n%s", what, want, recipe)
+		}
+	}
+	// Pop asserting a standard is the option ADR-0214 rejected: the recipe has
+	// to say so, or a reader with nothing derivable invents one.
+	if !strings.Contains(recipe, "Pop does not ship one") {
+		t.Errorf("code-review recipe does not decline to assert a house style:\n%s", recipe)
+	}
+}
+
 // TestIssueTrackerRecipeResolvesTheStore: the kind that rarely fires still has
 // to answer on the machine where it does — one that never integrated.
 func TestIssueTrackerRecipeResolvesTheStore(t *testing.T) {
