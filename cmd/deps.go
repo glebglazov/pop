@@ -239,7 +239,10 @@ func (d *Deps) wayfinderDeps() *wayfinder.Deps {
 }
 
 func (d *Deps) monitorDeps() *monitor.Deps {
-	md := monitor.DefaultDeps()
+	// The monitor package resolves no config (ADR 0001): the tmux module it
+	// polls panes through is built here, from the cmd layer's config-resolved
+	// socket and include (ADR-0199).
+	md := monitor.DefaultDeps(defaultTmuxMod)
 	if d != nil && d.FS != nil {
 		md.FS = d.FS
 	}

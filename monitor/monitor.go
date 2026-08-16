@@ -11,7 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/internal/deps"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
@@ -85,15 +84,24 @@ type Deps struct {
 	Tmux tmuxmod.Tmux
 }
 
-// DefaultDeps returns dependencies using real implementations
-func DefaultDeps() *Deps {
+// DefaultDeps returns dependencies using real implementations, with the tmux
+// module handed in already built. The socket and include behind that module
+// are config-driven (tmux.socket / tmux.include, ADR-0199), and config-driven
+// policy is resolved in the command layer: the monitor package must not import
+// config (ADR 0001).
+func DefaultDeps(tmux tmuxmod.Tmux) *Deps {
 	return &Deps{
 		FS:   deps.NewRealFileSystem(),
-		Tmux: tmuxmod.New(config.ConfiguredTmuxSocket(), config.ConfiguredTmuxInclude()),
+		Tmux: tmux,
 	}
 }
 
-var defaultDeps = DefaultDeps()
+// defaultDeps backs the entrypoints that need no tmux — the state/PID paths,
+// the derived address, and a Store built with a nil Deps. Its Tmux is nil on
+// purpose: filling it would mean resolving config at package init, which is
+// exactly the import this package refuses. Anything that talks to tmux takes
+// the module as an argument or through Deps built by the caller.
+var defaultDeps = &Deps{FS: deps.NewRealFileSystem()}
 
 // dataDirWith returns the XDG-resolved pop data directory (the scope of the
 // monitor state). The daemon address is derived from this path so that

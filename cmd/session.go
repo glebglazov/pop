@@ -143,7 +143,7 @@ func switchToTmuxTargetAndZoomWith(mod tmuxmod.Tmux, target string) error {
 
 // loadMonitorState returns the monitor state if the daemon is running, or nil otherwise
 func loadMonitorState() *monitor.State {
-	return loadMonitorStateWith(monitor.DefaultDeps())
+	return loadMonitorStateWith(cmdLayerDeps().monitorDeps())
 }
 
 func loadMonitorStateWith(d *monitor.Deps) *monitor.State {
@@ -175,7 +175,7 @@ func loadMonitorStateAlways() *monitor.State {
 // monitorAttentionSessions returns sessions needing attention,
 // or nil if the daemon is not running
 func monitorAttentionSessions() map[string]bool {
-	return monitorAttentionSessionsWith(monitor.DefaultDeps())
+	return monitorAttentionSessionsWith(cmdLayerDeps().monitorDeps())
 }
 
 func monitorAttentionSessionsWith(d *monitor.Deps) map[string]bool {

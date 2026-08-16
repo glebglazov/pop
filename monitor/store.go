@@ -28,10 +28,11 @@ type Store struct {
 }
 
 // NewStore creates a Store for the given state file path.
-// If d is nil, DefaultDeps() is used.
+// If d is nil, the filesystem-only defaults are used; the methods that touch
+// tmux take the module as an argument, so a Store never needs one of its own.
 func NewStore(path string, d *Deps) *Store {
 	if d == nil {
-		d = DefaultDeps()
+		d = defaultDeps
 	}
 	return &Store{path: path, deps: d}
 }

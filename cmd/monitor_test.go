@@ -17,6 +17,21 @@ import (
 	"github.com/glebglazov/pop/monitor"
 )
 
+// TestMonitorDepsCarryConfiguredTmux pins the wiring that keeps tmux.socket and
+// tmux.include (ADR-0199) in force for the monitor daemon now that the monitor
+// package resolves no config of its own (ADR 0001): the module the poll loop
+// prunes panes through is the cmd layer's own config-resolved handle, not one
+// the monitor built.
+func TestMonitorDepsCarryConfiguredTmux(t *testing.T) {
+	md := cmdLayerDeps().monitorDeps()
+	if md.Tmux == nil {
+		t.Fatal("monitorDeps().Tmux is nil — the daemon poll would panic instead of pruning dead panes")
+	}
+	if md.Tmux != defaultTmuxMod {
+		t.Errorf("monitorDeps().Tmux = %v, want the cmd layer's configured tmux module", md.Tmux)
+	}
+}
+
 func TestBinaryNewerThanPIDWith(t *testing.T) {
 	t.Parallel()
 	now := time.Now()

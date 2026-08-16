@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 )
 
 func TestDefaultAddrWith(t *testing.T) {
@@ -156,7 +158,7 @@ func TestRunDaemonWith_AddrInUse(t *testing.T) {
 	pidPath := filepath.Join(dir, "monitor.pid")
 	statePath := filepath.Join(dir, "monitor.json")
 
-	err = RunDaemonWith(DefaultDeps(), statePath, pidPath, addr,
+	err = RunDaemonWith(DefaultDeps(&tmuxtest.Fake{}), statePath, pidPath, addr,
 		func(Request) Response { return Response{OK: true} })
 
 	if !errors.Is(err, ErrAddrInUse) {

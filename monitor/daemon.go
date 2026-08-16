@@ -25,16 +25,12 @@ const pollInterval = 5 * time.Second
 // rather than dying silently.
 var ErrAddrInUse = errors.New("monitor address already in use")
 
-// RunDaemon runs the monitoring loop in the foreground.
-// Writes PID file on start, removes on exit.
-// The daemon only handles cleanup (dead panes) and active-pane
-// auto-clear. State transitions are driven by hooks calling
-// `pop pane set-status`.
-func RunDaemon(statePath, pidPath, addr string, handler RequestHandler) error {
-	return RunDaemonWith(DefaultDeps(), statePath, pidPath, addr, handler)
-}
-
-// RunDaemonWith runs the monitoring loop using provided dependencies.
+// RunDaemonWith runs the monitoring loop in the foreground, using provided
+// dependencies (the poll loop asks their tmux module which panes are alive, so
+// the caller owns that module — there is no config-free default for it).
+// Writes PID file on start, removes on exit. The daemon only handles cleanup
+// (dead panes) and active-pane auto-clear; state transitions are driven by
+// hooks calling `pop pane set-status`.
 // It starts a TCP listener for incoming status commands and runs the
 // dead-pane poll loop. A mutex serializes all state mutations
 // (socket handler + poll cleanup).
@@ -132,7 +128,7 @@ func liveTmuxPanes(tmux tmuxmod.Tmux) map[string]bool {
 
 // StopDaemon sends SIGTERM to the daemon process
 func StopDaemon(pidPath string) error {
-	return StopDaemonWith(DefaultDeps(), pidPath)
+	return StopDaemonWith(defaultDeps, pidPath)
 }
 
 // StopDaemonWith sends SIGTERM using provided dependencies

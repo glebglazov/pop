@@ -77,7 +77,7 @@ func runPaneMonitorStart(cmd *cobra.Command, args []string) error {
 	installTmuxAutoClearHooks()
 
 	handler := buildMonitorHandler(defaultTmuxMod, statePath)
-	err := monitor.RunDaemon(statePath, pidPath, addr, handler)
+	err := monitor.RunDaemonWith(cmdLayerDeps().monitorDeps(), statePath, pidPath, addr, handler)
 	if errors.Is(err, monitor.ErrAddrInUse) {
 		// Handshake above found no pop daemon, yet the bind failed: a non-pop
 		// process holds the port. Surface it instead of dying silently.
@@ -555,7 +555,7 @@ var paneMonitorStatusCmd = &cobra.Command{
 }
 
 func runPaneMonitorStatus(cmd *cobra.Command, args []string) error {
-	return runPaneMonitorStatusWith(monitor.DefaultDeps(), os.Stdout)
+	return runPaneMonitorStatusWith(cmdLayerDeps().monitorDeps(), os.Stdout)
 }
 
 func runPaneMonitorStatusWith(d *monitor.Deps, w io.Writer) error {
