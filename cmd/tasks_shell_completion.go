@@ -37,7 +37,12 @@ func registerTaskShellCompletions() {
 
 	_ = taskImplementCmd.RegisterFlagCompletionFunc("agent", completeTaskAgents)
 	_ = taskReviewCmd.RegisterFlagCompletionFunc("agent", completeTaskAgents)
+	_ = taskVerifyCmd.RegisterFlagCompletionFunc("agent", completeTaskAgents)
+	_ = taskAssistCmd.RegisterFlagCompletionFunc("agent", completeTaskAgents)
+	_ = taskFoldCmd.RegisterFlagCompletionFunc("agent", completeTaskAgents)
 	_ = taskImplementCmd.RegisterFlagCompletionFunc("agent-output", completeTaskAgentOutputs)
+	_ = taskVerifyCmd.RegisterFlagCompletionFunc("effort", completeTaskEffort)
+	_ = taskReviewCmd.RegisterFlagCompletionFunc("effort", completeTaskEffort)
 
 	taskStatusCmd.ValidArgsFunction = completeTaskStatusArgs
 	taskRegisterCmd.ValidArgsFunction = completeTaskStatusArgs
@@ -203,6 +208,10 @@ func completeTaskAgents(cmd *cobra.Command, args []string, toComplete string) ([
 
 func completeTaskAgentOutputs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	return filterShellCompletions(tasks.ValidAgentOutputModes(), toComplete), cobra.ShellCompDirectiveNoFileComp
+}
+
+func completeTaskEffort(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return filterShellCompletions(tasks.ValidEfforts(), toComplete), cobra.ShellCompDirectiveNoFileComp
 }
 
 // completeTaskStatusArgs completes the optional set argument to `tasks status`.

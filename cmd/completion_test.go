@@ -245,12 +245,64 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 		}
 	})
 
+	sub("verify, assist, and fold complete agent presets", func(t *testing.T) {
+		for _, verb := range []string{"verify", "assist", "fold"} {
+			out := shellCompNoDesc(t, "tasks", verb, "--agent")
+			for _, preset := range []string{"claude", "codex", "cursor", "opencode", "pi"} {
+				assertShellCompContains(t, out, preset)
+			}
+		}
+	})
+
+	sub("verify and review complete effort", func(t *testing.T) {
+		for _, verb := range []string{"verify", "review"} {
+			out := shellCompNoDesc(t, "tasks", verb, "--effort")
+			assertShellCompContains(t, out, "light", "standard", "heavy")
+		}
+	})
+
 	sub("subcommands", func(t *testing.T) {
 		out := shellCompNoDesc(t, "tasks")
 		for _, sub := range []string{"status", "set-priority", "auto-drain", "implement", "open", "stream", "agents"} {
 			assertShellCompContains(t, out, sub)
 		}
 	})
+}
+
+func TestRoutineShellCompletionCandidates(t *testing.T) {
+	t.Parallel()
+	for _, verb := range []string{"new", "edit"} {
+		t.Run(verb, func(t *testing.T) {
+			out := shellCompNoDesc(t, "routine", verb, "--agent")
+			for _, preset := range []string{"claude", "codex", "cursor", "opencode", "pi"} {
+				assertShellCompContains(t, out, preset)
+			}
+
+			out = shellCompNoDesc(t, "routine", verb, "--refine-agent")
+			for _, preset := range []string{"claude", "codex", "cursor", "opencode", "pi"} {
+				assertShellCompContains(t, out, preset)
+			}
+
+			out = shellCompNoDesc(t, "routine", verb, "--effort")
+			assertShellCompContains(t, out, "light", "standard", "heavy")
+		})
+	}
+}
+
+func TestWorkStatusPresetShellCompletionCandidates(t *testing.T) {
+	// ADR-0145: cfgFile/workConfigLoad overrides are process-global — stays serial.
+	oldCfgFile := cfgFile
+	oldLoad := workConfigLoad
+	defer func() {
+		cfgFile = oldCfgFile
+		workConfigLoad = oldLoad
+	}()
+
+	cfgFile = filepath.Join(t.TempDir(), "config.toml")
+	workConfigLoad = func(string) (*config.Config, error) { return &config.Config{}, nil }
+
+	out := shellCompNoDesc(t, "work", "status", "--preset")
+	assertShellCompContains(t, out, "active", "unfolded", "recent-7d", "recent-30d", "all", "muted")
 }
 
 func TestTasksUnbindWorktreeShellCompletionCandidates(t *testing.T) {

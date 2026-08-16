@@ -48,6 +48,9 @@ func newRoutineNewCmd() *cobra.Command {
 	cmd.Flags().StringArrayVar(&o.agents, "agent", nil, "runtime agent preset for scheduled runs; repeat to define an ordered fallback list")
 	cmd.Flags().StringVar(&o.effort, "effort", "", "runtime model-strength tier: light, standard, or heavy (default standard)")
 	cmd.Flags().StringVar(&o.refineAgent, "refine-agent", "", "override the agent preset for the Routine refinement session")
+	_ = cmd.RegisterFlagCompletionFunc("agent", completeTaskAgents)
+	_ = cmd.RegisterFlagCompletionFunc("refine-agent", completeTaskAgents)
+	_ = cmd.RegisterFlagCompletionFunc("effort", completeTaskEffort)
 	return cmd
 }
 
@@ -73,6 +76,9 @@ The bound directory and id are fixed at creation.`,
 	cmd.Flags().StringArrayVar(&o.agents, "agent", nil, "set the runtime agent preset list for scheduled runs; repeat for an ordered fallback list (direct write, pauses the routine)")
 	cmd.Flags().StringVar(&o.effort, "effort", "", "set the runtime model-strength tier: light, standard, or heavy (direct write, pauses the routine)")
 	cmd.Flags().StringVar(&o.refineAgent, "refine-agent", "", "override the agent preset for the Routine refinement session")
+	_ = cmd.RegisterFlagCompletionFunc("agent", completeTaskAgents)
+	_ = cmd.RegisterFlagCompletionFunc("refine-agent", completeTaskAgents)
+	_ = cmd.RegisterFlagCompletionFunc("effort", completeTaskEffort)
 	return cmd
 }
 

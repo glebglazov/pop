@@ -63,6 +63,21 @@ func init() {
 
 	workStatusCmd.Flags().StringVar(&workStatusPreset, "preset", "", "Work view preset name (default: first configured preset)")
 	workStatusCmd.Flags().BoolVar(&workStatusIncludeDone, "include-done", false, "deprecated: alias for --preset all")
+	_ = workStatusCmd.RegisterFlagCompletionFunc("preset", completeWorkStatusPreset)
+}
+
+// completeWorkStatusPreset lists the resolved Work view preset roster: the
+// user's configured presets, or the shipped roster when none are declared.
+func completeWorkStatusPreset(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	cfgPath := cfgFile
+	if cfgPath == "" {
+		cfgPath = config.DefaultConfigPath()
+	}
+	cfg, err := workConfigLoad(cfgPath)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return filterShellCompletions(cfg.WorkViewPresetNames(), toComplete), cobra.ShellCompDirectiveNoFileComp
 }
 
 var (
