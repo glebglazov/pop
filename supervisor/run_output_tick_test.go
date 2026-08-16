@@ -35,14 +35,18 @@ func TestRunOutputBaselineOnceAndQuietTick(t *testing.T) {
 
 	tick(d, &out, runOut)
 	first := out.String()
-	if !strings.Contains(first, "Picked-up sets:") {
-		t.Fatalf("first tick must print baseline:\n%s", first)
+	// The baseline is `pop work status`'s own render (ADR-0121): its Summary
+	// headline over the two captioned tables, and none of the retired per-bucket
+	// inventory the baseline used to print.
+	for _, want := range []string{"Summary:", "Work: none", "Task sets:", "Routines:"} {
+		if !strings.Contains(first, want) {
+			t.Fatalf("first tick baseline missing %q:\n%s", want, first)
+		}
 	}
-	if !strings.Contains(first, "1 other project: no ready work") {
-		t.Fatalf("first tick baseline missing collapsed idle count:\n%s", first)
-	}
-	if strings.Contains(first, "Daemon state:") {
-		t.Fatalf("baseline must not dump daemon JSON:\n%s", first)
+	for _, omit := range []string{"Picked-up sets:", "Active worktrees:", "Queued ready sets:", "no ready work", "Daemon state:"} {
+		if strings.Contains(first, omit) {
+			t.Fatalf("baseline must not print %q:\n%s", omit, first)
+		}
 	}
 
 	tick(d, &out, runOut)

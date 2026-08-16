@@ -62,7 +62,7 @@ func TestFormatRunSummary(t *testing.T) {
 	}
 }
 
-func TestRenderRunBaselineCollapsesIdleProjects(t *testing.T) {
+func TestRunViewCollapsesIdleProjects(t *testing.T) {
 	td := queuetest.DataDeps(t)
 	snap, err := StatusFromDecisions(&Deps{Tasks: td}, []Decision{
 		{Project: "running", Busy: true, LockStatus: &tasks.RuntimeLockStatus{
@@ -83,27 +83,11 @@ func TestRenderRunBaselineCollapsesIdleProjects(t *testing.T) {
 	if view.IdleCount != 3 {
 		t.Fatalf("IdleCount = %d, want 3", view.IdleCount)
 	}
-
-	var out bytes.Buffer
-	RenderRunBaseline(&out, view)
-	text := out.String()
-	for _, want := range []string{
-		"Summary:",
-		"Picked-up sets:",
-		"Active worktrees:",
-		"running: set-a pid=99",
-		"Queued ready sets:",
-		"queued: waiting ready set set-ready",
-		"3 other projects: no ready work",
-	} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("baseline missing %q:\n%s", want, text)
-		}
+	if len(view.Running) != 1 || view.Running[0].SetID != "set-a" {
+		t.Fatalf("Running = %+v, want the one picked-up set", view.Running)
 	}
-	for _, omit := range []string{"idle-a", "idle-b", "idle-c", "Daemon state", `"version"`} {
-		if strings.Contains(text, omit) {
-			t.Fatalf("baseline should not contain %q:\n%s", omit, text)
-		}
+	if len(view.Queued) != 1 || view.Queued[0].ReadySet != "set-ready" {
+		t.Fatalf("Queued = %+v, want the one ready set", view.Queued)
 	}
 }
 
@@ -240,31 +224,6 @@ func TestFormatRunSummaryAwaitingApproval(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("summary missing %q:\n%s", want, text)
 		}
-	}
-}
-
-// TestRenderRunBaselineAwaitingApprovalSection checks the baseline renders a distinct
-// "Awaiting approval:" section for AWAITING-APPROVAL sets.
-func TestRenderRunBaselineAwaitingApprovalSection(t *testing.T) {
-	view := RunView{
-		AwaitingApproval: []AwaitingApprovalItem{{Project: "pop", SetID: "hitl-set"}},
-		ScanErrors:       map[string]string{},
-	}
-
-	var out bytes.Buffer
-	RenderRunBaseline(&out, view)
-	text := out.String()
-
-	for _, want := range []string{
-		"Awaiting approval:",
-		"pop: hitl-set — awaiting your sign-off",
-	} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("baseline missing %q:\n%s", want, text)
-		}
-	}
-	if strings.Contains(text, "Blocked:\n  pop") {
-		t.Fatalf("awaiting-approval set must not appear under Blocked:\n%s", text)
 	}
 }
 
@@ -480,31 +439,7 @@ func TestRepoIdentityLabelBaselineDeltaParity(t *testing.T) {
 
 	view := BuildRunView(snap, time.Now().UTC())
 
-	// -- Baseline assertions --
-	var buf bytes.Buffer
-	RenderRunBaseline(&buf, view)
-	baselineText := buf.String()
-
-	// Picked-up sets uses repo-identity label.
-	if !strings.Contains(baselineText, basename+": "+setIDRunning) {
-		t.Fatalf("baseline Picked-up sets must use repo-identity label %q:\n%s", basename, baselineText)
-	}
-	// Must NOT contain any picker-Project name as a row prefix.
-	if strings.Contains(baselineText, "game_server/main: "+setIDRunning) {
-		t.Fatalf("baseline must not use picker-Project name:\n%s", baselineText)
-	}
-
-	// Active worktrees uses repo-identity label.
-	if !strings.Contains(baselineText, basename+": "+setIDRunning) {
-		t.Fatalf("baseline Active worktrees must use repo-identity label %q:\n%s", basename, baselineText)
-	}
-
-	// Queued ready sets uses repo-identity label.
-	if !strings.Contains(baselineText, basename+": waiting ready set "+setIDQueued) {
-		t.Fatalf("baseline Queued ready sets must use repo-identity label %q:\n%s", basename, baselineText)
-	}
-
-	// -- Delta assertions (same label as baseline) --
+	// -- Delta assertions --
 	lines := DiffRunView(&RunView{}, view)
 	spawnFound := false
 	readyFound := false
@@ -620,15 +555,6 @@ func TestAdoptedWorktreeSuffixOnBaselineAndDelta(t *testing.T) {
 
 	view := BuildRunView(snap, time.Now().UTC())
 
-	var buf bytes.Buffer
-	RenderRunBaseline(&buf, view)
-	baselineText := buf.String()
-
-	wantLabel := basename + " (in wt0): " + setID
-	if !strings.Contains(baselineText, wantLabel) {
-		t.Fatalf("baseline missing adopted-worktree suffix %q:\n%s", wantLabel, baselineText)
-	}
-
 	lines := DiffRunView(&RunView{}, view)
 	wantDelta := "work: " + basename + " (in wt0): spawned drain for " + setID
 	found := false
@@ -699,18 +625,6 @@ func TestManagedWorktreeSuffixSuppressed(t *testing.T) {
 
 	view := BuildRunView(snap, time.Now().UTC())
 
-	var buf bytes.Buffer
-	RenderRunBaseline(&buf, view)
-	baselineText := buf.String()
-
-	if strings.Contains(baselineText, "(in wt0)") {
-		t.Fatalf("managed worktree must not render adopted suffix:\n%s", baselineText)
-	}
-	wantLabel := basename + ": " + setID
-	if !strings.Contains(baselineText, wantLabel) {
-		t.Fatalf("baseline missing managed label %q:\n%s", wantLabel, baselineText)
-	}
-
 	lines := DiffRunView(&RunView{}, view)
 	for _, line := range lines {
 		if strings.Contains(line, "(in wt0)") {
@@ -753,13 +667,6 @@ func TestInPlaceDrainNoWorktreeSuffix(t *testing.T) {
 	snap.Tasks = td
 
 	view := BuildRunView(snap, time.Now().UTC())
-
-	var buf bytes.Buffer
-	RenderRunBaseline(&buf, view)
-	baselineText := buf.String()
-	if strings.Contains(baselineText, "(in ") {
-		t.Fatalf("in-place drain must not render worktree suffix:\n%s", baselineText)
-	}
 
 	lines := DiffRunView(&RunView{}, view)
 	for _, line := range lines {

@@ -35,16 +35,17 @@ type RunView struct {
 	IdleCount        int
 	ScanErrors       map[string]string
 
-	// worktreeBindings carries the work behind the Active-worktrees section rather
-	// than its result: deriving it refreshes the whole definition path of every
-	// bound checkout, and the only surface that renders it is the daemon's
-	// one-time run baseline (ADR-0189). Read it through WorktreeBindings.
+	// worktreeBindings carries the work behind the Worktree-binding inventory
+	// rather than its result: deriving it refreshes the whole definition path of
+	// every bound checkout (ADR-0189). The daemon's run baseline used to be its one
+	// reader; the baseline now prints the `pop work status` tables, so the thunk is
+	// unread and therefore free. Read it through WorktreeBindings.
 	worktreeBindings *lazyWorktreeBindings
 }
 
-// WorktreeBindings returns the provisioned checkouts of the Active-worktrees
-// section, deriving them on first read. A view built by hand rather than by
-// BuildRunView carries no section and lists nothing.
+// WorktreeBindings returns the provisioned checkouts of the Worktree-binding
+// inventory, deriving them on first read. A view built by hand rather than by
+// BuildRunView carries no inventory and lists nothing.
 func (v RunView) WorktreeBindings() []WorktreeBindingView {
 	if v.worktreeBindings == nil {
 		return nil
@@ -52,7 +53,7 @@ func (v RunView) WorktreeBindings() []WorktreeBindingView {
 	return v.worktreeBindings.items()
 }
 
-// lazyWorktreeBindings is the deferred Active-worktrees section: the derivation
+// lazyWorktreeBindings is the deferred Worktree-binding inventory: the derivation
 // runs at most once, and because the view holds it by pointer every copy of the
 // view — the daemon's swallow snapshot included — shares that one answer.
 type lazyWorktreeBindings struct {
@@ -193,7 +194,7 @@ func BuildRunView(snap StatusSnapshot, now time.Time) RunView {
 
 	view.Blocked = append(view.Blocked, blockedItemsFromState(snap.Tasks, snap.CrashRetryDelays, now, blockedProjects)...)
 	view.Blocked = append(view.Blocked, blockedItemsFromRecoveryWaiters(snap.Tasks, snap.RecoveryWaiters, blockedProjects)...)
-	// The Active-worktrees section is deferred rather than built: no caller here
+	// The Worktree-binding inventory is deferred rather than built: no caller here
 	// reads it, and one that does pays for it then (ADR-0189). Running is captured
 	// by value so the section answers for the scan this view was built from, even
 	// though SeedSpawnedRunning may append to a later copy of the view.
@@ -449,117 +450,6 @@ func RenderRunSummary(out io.Writer, view RunView) {
 	fmt.Fprintf(out, "  Work: %s\n", formatWorkSummary(view))
 }
 
-// RenderRunBaseline prints the one-time Daemon run baseline inventory.
-func RenderRunBaseline(out io.Writer, view RunView) {
-	RenderRunSummary(out, view)
-
-	fmt.Fprintln(out, "Picked-up sets:")
-	if len(view.Running) == 0 {
-		fmt.Fprintln(out, "  none")
-	} else {
-		for _, p := range view.Running {
-			fmt.Fprintf(out, "  %s\n", formatRunningLine(p))
-		}
-	}
-
-	// The baseline is the one surface that renders Active worktrees, so it is the
-	// one place the deferred section is paid for (ADR-0189).
-	worktrees := view.WorktreeBindings()
-	fmt.Fprintln(out, "Active worktrees:")
-	if len(worktrees) == 0 {
-		fmt.Fprintln(out, "  none")
-	} else {
-		for _, wt := range worktrees {
-			fmt.Fprintf(out, "  %s\n", formatWorktreeBindingLine(wt))
-		}
-	}
-
-	fmt.Fprintln(out, "Queued ready sets:")
-	if len(view.Queued) == 0 {
-		fmt.Fprintln(out, "  none")
-	} else {
-		for _, q := range view.Queued {
-			projectLabel := projectLabelWithWorktree(repoLabelOrProject(q.RepoLabel, q.Project), q.RuntimePath, q.ReadySet, q.ProjectConfigError)
-			fmt.Fprintf(out, "  %s: waiting ready set %s\n", projectLabel, q.ReadySet)
-		}
-	}
-
-	fmt.Fprintln(out, "Blocked:")
-	if len(view.Blocked) == 0 {
-		fmt.Fprintln(out, "  none")
-	} else {
-		for _, b := range view.Blocked {
-			fmt.Fprintf(out, "  %s\n", formatBlockedLine(b))
-		}
-	}
-
-	fmt.Fprintln(out, "Awaiting approval:")
-	if len(view.AwaitingApproval) == 0 {
-		fmt.Fprintln(out, "  none")
-	} else {
-		for _, u := range view.AwaitingApproval {
-			project := repoLabelOrProject(u.RepoLabel, u.Project)
-			if project == "" {
-				project = "(unknown project)"
-			}
-			setID := u.SetID
-			if setID == "" {
-				setID = "(unknown set)"
-			}
-			project += worktreeSuffix(u.RuntimePath, setID)
-			fmt.Fprintf(out, "  %s: %s — awaiting your sign-off\n", project, setID)
-		}
-	}
-
-	if len(view.Skipped) > 0 {
-		fmt.Fprintln(out, "Skipped repositories:")
-		for _, s := range view.Skipped {
-			project := repoLabelOrProject(s.RepoLabel, s.Project)
-			if project == "" {
-				project = "(unknown project)"
-			}
-			fmt.Fprintf(out, "  %s: %s\n", project, s.Reason)
-		}
-	}
-
-	if len(view.ScanErrors) > 0 {
-		fmt.Fprintln(out, "Scan errors:")
-		projects := make([]string, 0, len(view.ScanErrors))
-		for project := range view.ScanErrors {
-			projects = append(projects, project)
-		}
-		sort.Strings(projects)
-		for _, project := range projects {
-			fmt.Fprintf(out, "  %s: %s\n", project, view.ScanErrors[project])
-		}
-	}
-
-	switch view.IdleCount {
-	case 0:
-	case 1:
-		fmt.Fprintln(out, "1 other project: no ready work")
-	default:
-		fmt.Fprintf(out, "%d other projects: no ready work\n", view.IdleCount)
-	}
-}
-
-func formatRunningLine(p PickedUpSet) string {
-	setID := p.SetID
-	if setID == "" {
-		setID = "(unknown set)"
-	}
-	projectLabel := projectLabelWithWorktree(repoLabelOrProject(p.RepoLabel, p.Project), p.RuntimePath, setID, p.ProjectConfigError)
-	started := ""
-	if !p.StartedAt.IsZero() {
-		started = " since " + p.StartedAt.UTC().Format(time.RFC3339)
-	}
-	pid := ""
-	if p.PID > 0 {
-		pid = fmt.Sprintf(" pid=%d", p.PID)
-	}
-	return fmt.Sprintf("%s: %s%s%s", projectLabel, setID, pid, started)
-}
-
 func buildWorktreeBindingViews(d *tasks.Deps, cfg *config.Config, running []PickedUpSet, preset config.WorkViewPreset, now time.Time) []WorktreeBindingView {
 	bindings, err := binding.AllBindings(d)
 	if err != nil || len(bindings) == 0 {
@@ -688,88 +578,6 @@ func (c *bindingFactsCache) refresh(runtimePath string) *tasks.RefreshResult {
 	}
 	c.refreshes[runtimePath] = refresh
 	return refresh
-}
-
-func formatWorktreeBindingLine(binding WorktreeBindingView) string {
-	setID := binding.SetID
-	if setID == "" {
-		setID = "(unknown set)"
-	}
-	project := repoLabelOrProject(binding.RepoLabel, binding.Project)
-	if project == "" {
-		project = "(unknown project)"
-	}
-	project += worktreeSuffix(binding.RuntimePath, setID)
-	var parts []string
-	parts = append(parts, fmt.Sprintf("%s: %s", project, setID))
-	if binding.Branch != "" {
-		parts = append(parts, "branch="+binding.Branch)
-	}
-	if binding.RuntimePath != "" {
-		parts = append(parts, "at "+binding.RuntimePath)
-	}
-	line := strings.Join(parts, " ")
-	line += " — " + binding.Phase
-	if binding.PID > 0 {
-		line += fmt.Sprintf(" pid=%d", binding.PID)
-	}
-	return line
-}
-
-func formatBlockedLine(b BlockedItem) string {
-	switch b.Kind {
-	case "agent_cooldown":
-		until := ""
-		if !b.Until.IsZero() {
-			until = " until " + b.Until.Local().Format(time.RFC3339)
-		}
-		return fmt.Sprintf("agent %s cooling%s", b.Agent, until)
-	case "parked":
-		setID := b.SetID
-		if setID == "" {
-			setID = "(unknown set)"
-		}
-		project := repoLabelOrProject(b.RepoLabel, b.Project)
-		if project == "" {
-			project = "(unknown project)"
-		}
-		project += worktreeSuffix(b.RuntimePath, setID)
-		return fmt.Sprintf("%s: %s parked (%s)", project, setID, b.Reason)
-	case "recovery_wait":
-		setID := b.SetID
-		if setID == "" {
-			setID = "(unknown set)"
-		}
-		project := repoLabelOrProject(b.RepoLabel, b.Project)
-		if project == "" {
-			project = "(unknown project)"
-		}
-		project += worktreeSuffix(b.RuntimePath, setID)
-		until := ""
-		if !b.Until.IsZero() {
-			until = " until " + b.Until.Local().Format(time.RFC3339)
-		}
-		agent := ""
-		if b.Agent != "" {
-			agent = " agent=" + b.Agent
-		}
-		return fmt.Sprintf("%s: %s waiting for quota recovery%s%s", project, setID, agent, until)
-	default:
-		setID := b.SetID
-		if setID == "" {
-			setID = "(unknown set)"
-		}
-		project := repoLabelOrProject(b.RepoLabel, b.Project)
-		if project == "" {
-			project = "(unknown project)"
-		}
-		project += worktreeSuffix(b.RuntimePath, setID)
-		until := ""
-		if !b.Until.IsZero() {
-			until = " until " + b.Until.UTC().Format(time.RFC3339)
-		}
-		return fmt.Sprintf("%s: %s %s%s", project, setID, b.Reason, until)
-	}
 }
 
 // SeedSpawnedRunning augments view.Running with any spawned set not already

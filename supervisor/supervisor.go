@@ -78,7 +78,9 @@ func tick(d *drain.Deps, out io.Writer, runOut *runOutputState) {
 
 	if snap, err := drain.BuildStatus(d, cfg); err == nil {
 		preSpawn := drain.BuildRunView(snap, time.Now())
-		runOut.emitViewTransition(out, preSpawn, nil)
+		runOut.emitViewTransition(out, preSpawn, nil, func(w io.Writer) {
+			renderBaseline(w, d, cfg, snap)
+		})
 	} else {
 		fmt.Fprintf(out, "work: status: %v\n", err)
 	}

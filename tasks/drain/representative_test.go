@@ -1,7 +1,6 @@
 package drain
 
 import (
-	"bytes"
 	"github.com/glebglazov/pop/internal/queuetest"
 	"os"
 	"path/filepath"
@@ -231,7 +230,7 @@ func TestDecideRepoDispatchesBareWithoutBaseRefusesAndReports(t *testing.T) {
 		t.Fatalf("reason = %q, want %q", dec.Reason, RepoScanReason)
 	}
 
-	// The refusal is reported in status and run output, never silently dropped.
+	// The refusal is reported in status, never silently dropped.
 	td := queuetest.DataDeps(t)
 	snap, err := StatusFromDecisions(&Deps{Tasks: td}, decisions)
 	if err != nil {
@@ -241,10 +240,9 @@ func TestDecideRepoDispatchesBareWithoutBaseRefusesAndReports(t *testing.T) {
 	if len(snap.Skipped) != 1 || snap.Skipped[0].Reason != RepoScanReason {
 		t.Fatalf("status Skipped = %+v, want one %q", snap.Skipped, RepoScanReason)
 	}
-	var out bytes.Buffer
-	RenderRunBaseline(&out, BuildRunView(snap, time.Now()))
-	if !strings.Contains(out.String(), RepoScanReason) {
-		t.Fatalf("run output omits skip reason:\n%s", out.String())
+	view := BuildRunView(snap, time.Now())
+	if len(view.Skipped) != 1 || view.Skipped[0].Reason != RepoScanReason {
+		t.Fatalf("run view Skipped = %+v, want one %q", view.Skipped, RepoScanReason)
 	}
 }
 

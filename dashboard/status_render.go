@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/tasks/drain"
 	"github.com/glebglazov/pop/work"
 )
@@ -52,6 +53,33 @@ func RenderStatus(out io.Writer, snap drain.StatusSnapshot, tables StatusTables)
 	renderStatusTable(out, statusTaskSetsCaption, workPage(), tables.TaskSets, mapRow)
 	renderStatusTable(out, statusRoutinesCaption, routinePage(), tables.Routines, nil)
 	renderStatusScanErrors(out, view.ScanErrors)
+}
+
+// BuildStatusTables builds the two tables the status surface prints, through the
+// work data core (ADR-0143): the caller is a consumer of work.BuildSnapshotForPane,
+// so status renders the same rows the dashboard's two pages derive — page A's, then
+// page B's. It reads the same ordering off the same active preset the dashboard
+// does (ADR-0210), which is what keeps the two surfaces row-for-row identical
+// rather than merely similar.
+//
+// Both `pop work status` and the daemon's run baseline build through here, so the
+// baseline is that same render rather than an inventory of its own.
+func BuildStatusTables(d *drain.Deps, cfg *config.Config) (StatusTables, error) {
+	order := d.WorkOrdering()
+	setKinds := d.WorkKinds(cfg)
+	sets, err := work.BuildSnapshotForPane(setKinds, work.PaneFacts{}, order)
+	if err != nil {
+		return StatusTables{}, err
+	}
+	routineKinds := d.RoutinePageKinds(cfg)
+	routines, err := work.BuildSnapshotForPane(routineKinds, work.PaneFacts{}, order)
+	if err != nil {
+		return StatusTables{}, err
+	}
+	return StatusTables{
+		TaskSets: StatusTable{Kinds: setKinds, Rows: sets.Containers},
+		Routines: StatusTable{Kinds: routineKinds, Rows: routines.Containers},
+	}, nil
 }
 
 // The two table captions. Two tables with two column sets under one headline

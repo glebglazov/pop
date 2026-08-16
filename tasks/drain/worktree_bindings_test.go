@@ -138,19 +138,24 @@ func TestWorktreeBindingsRefreshOncePerCheckout(t *testing.T) {
 		}
 	}
 
-	// The rendered section is unchanged by the memo, and the baseline pays nothing
-	// twice: the section resolved above is the one it prints.
-	readsBeforeRender := counting.total
-	var out strings.Builder
-	RenderRunBaseline(&out, view)
-	if counting.total != readsBeforeRender {
-		t.Fatalf("baseline render made %d further definition reads, want 0 (the section memoizes)", counting.total-readsBeforeRender)
+	// The section is unchanged by the memo, and a second reader pays nothing: the
+	// items resolved above are the ones it gets.
+	readsBeforeSecondRead := counting.total
+	again := view.WorktreeBindings()
+	if counting.total != readsBeforeSecondRead {
+		t.Fatalf("second read made %d further definition reads, want 0 (the section memoizes)", counting.total-readsBeforeSecondRead)
 	}
-	checkout := filepath.Base(repo)
+	bySet := make(map[string]WorktreeBindingView, len(again))
+	for _, item := range again {
+		bySet[item.SetID] = item
+	}
 	for _, stem := range sets {
-		want := checkout + " (in " + checkout + "): " + stem + " branch=" + stem + "-branch at " + repo + " — bound"
-		if !strings.Contains(out.String(), want) {
-			t.Fatalf("baseline missing Active-worktrees line %q:\n%s", want, out.String())
+		item, ok := bySet[stem]
+		if !ok {
+			t.Fatalf("second read dropped %s: %+v", stem, again)
+		}
+		if item.Branch != stem+"-branch" || item.RuntimePath != repo || item.Phase != "bound" {
+			t.Fatalf("binding of %s = %+v, want branch %s-branch bound at %s", stem, item, stem, repo)
 		}
 	}
 }

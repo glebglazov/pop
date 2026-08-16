@@ -125,9 +125,11 @@ func TestSupervisorSkipsSpawnWithActiveRecoveryWaiter(t *testing.T) {
 	if _, ok := queuetest.ExtractSpawnCommand(rt); ok {
 		t.Fatalf("supervisor must not spawn while recovery waiter is active, got commands: %v", rt.Commands)
 	}
+	// The waiter is surfaced in the baseline's Summary roll-up; the per-waiter
+	// detail line is retired with the inventory sections (ADR-0121).
 	out := supervisorOut.String()
-	if !strings.Contains(out, "waiting for quota recovery") {
-		t.Fatalf("supervisor output missing recovery wait status:\n%s", out)
+	if !strings.Contains(out, "Work: 1 blocked") {
+		t.Fatalf("supervisor baseline should roll the waiter up as blocked:\n%s", out)
 	}
 }
 
