@@ -867,9 +867,9 @@ func (d *MonitorDashboard) buildHints() string {
 	if d.killPrompt != nil {
 		return "  Kill " + d.killPrompt.label + "? y/N"
 	}
-	hints := "  Enter open and clear · Shift+Enter open · r toggle unread/clear · f follow · x unmonitor · C-x kill · F follow view · ← back · Esc cancel · C-h help"
+	hints := "  j/k move · Enter open and clear · Shift+Enter open · r toggle unread/clear · f follow · x unmonitor · C-x kill · F follow view · ← back · Esc cancel · C-h help"
 	if d.pickerMode {
-		hints = "  Enter select · F follow view · Esc cancel · C-h help"
+		hints = "  j/k move · Enter select · F follow view · Esc cancel · C-h help"
 		switch d.quickAccessModifier {
 		case "alt":
 			hints += " · A-1..9 quick select"
@@ -946,7 +946,7 @@ func (d *MonitorDashboard) View() tea.View {
 func (d *MonitorDashboard) helpEntries() []HelpEntry {
 	if d.pickerMode {
 		entries := []HelpEntry{
-			{"↑/↓ C-p/C-n", "Navigate"},
+			{"↑/↓ j/k C-p/C-n", "Navigate"},
 			{"Enter", "Select"},
 			{"F", "Toggle follow view"},
 			{"← / h", "Back / quit"},
@@ -962,7 +962,7 @@ func (d *MonitorDashboard) helpEntries() []HelpEntry {
 	}
 
 	return []HelpEntry{
-		{"↑/↓ C-p/C-n", "Navigate"},
+		{"↑/↓ j/k C-p/C-n", "Navigate"},
 		{"Enter", "Open and clear unread"},
 		{"Shift+Enter / p", "Peek (open without clearing)"},
 		{"r", "Toggle unread/clear"},

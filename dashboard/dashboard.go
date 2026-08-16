@@ -2767,7 +2767,7 @@ func (m QueueDashboard) mainHint() string {
 	if m.page.rowFilters {
 		filters = "f filters · "
 	}
-	return "j/k move · gg/G top/bottom · l/enter status · y copy name · a actions · / search · " + filters + toggle + " · C-h help · h/esc quit"
+	return "j/k move · gg/G top/bottom · l/enter detail · y copy name · a actions · / search · " + filters + toggle + " · C-h help · h/esc quit"
 }
 
 // emptySearchLine is the body text when the search has hidden every row. It
