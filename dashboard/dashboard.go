@@ -779,11 +779,14 @@ func (m QueueDashboard) resizeMainList() {
 
 // ViewToggleAllowed reports whether v may switch to the other page. The rule is
 // unchanged from when the toggle swapped two TUIs: a modal, menu or detail owns
-// the keyboard, so v means whatever that overlay says it means. The search's
-// typing phase owns it the same way — there `v` is the letter v, typed into a
-// project name, and never the page toggle (ADR-0213).
+// the keyboard, so v means whatever that overlay says it means. The help overlay
+// owns it too — while it is open every key but its own dismiss is swallowed
+// (ADR-0095), and the operator reading the key list must not have the page
+// switch out from under it. The search's typing phase owns it the same way —
+// there `v` is the letter v, typed into a project name, and never the page
+// toggle (ADR-0213).
 func (m QueueDashboard) ViewToggleAllowed() bool {
-	return !m.searchTyping &&
+	return !m.showHelp && !m.searchTyping &&
 		m.bind == nil && m.drainPick == nil && m.abandon == nil &&
 		m.detail == nil && m.menu == nil && m.itemMenu == nil && m.filter == nil
 }
@@ -806,6 +809,12 @@ func (m QueueDashboard) OpenCheckout() string {
 // ListCursor exposes the main-list cursor index for tests.
 func (m QueueDashboard) ListCursor() int {
 	return m.list.Cursor()
+}
+
+// HelpOpen reports whether the help overlay is showing. The shell asks so it can
+// hold back the keys it would otherwise intercept before the page sees them.
+func (m QueueDashboard) HelpOpen() bool {
+	return m.showHelp
 }
 
 // SearchTyping reports whether the search's typing phase owns the keyboard.

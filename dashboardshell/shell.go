@@ -164,7 +164,13 @@ func (s Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			s, cmd := s.updateConfigModal(msg)
 			return s, cmd
 		}
-		if kpm, ok := keyMsg.(tea.KeyPressMsg); ok && ui.IsConfigDashboardKey(kpm) {
+		// The help overlay swallows every key but its own dismiss (ADR-0095), and
+		// that includes the two the shell would otherwise take first: the operator
+		// reading the key list gets neither a page switch nor the Config dashboard
+		// on top of what they are reading. The keys fall through to the page, which
+		// swallows them and lets ? or esc close the overlay.
+		helpOpen := s.page(s.active).HelpOpen()
+		if kpm, ok := keyMsg.(tea.KeyPressMsg); ok && !helpOpen && ui.IsConfigDashboardKey(kpm) {
 			return s.openConfigModal(), nil
 		}
 		if keyMsg.String() == "v" && s.activePageToggleAllowed() {

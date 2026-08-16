@@ -180,6 +180,53 @@ func TestConfigModalSuspendsEveryHostKey(t *testing.T) {
 	}
 }
 
+// ADR-0095: while the help overlay is open every other key is swallowed, and
+// that covers the two the shell takes before the page sees them. The operator
+// reading the key list gets neither a page switch under the overlay nor the
+// Config dashboard on top of it.
+func TestHelpOverlaySwallowsShellKeys(t *testing.T) {
+	live := func() Shell { return shellWithConfigModal(t, PageWork, &stubOverrideWriter{}, nil) }
+	help := tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl}
+	toggle := tea.KeyPressMsg{Code: 'v', Text: "v"}
+
+	// The controls: both keys are live on this shell with no overlay open.
+	if press(t, live(), toggle).ActivePage() != PageRoutines {
+		t.Fatal("`v` does not page this shell — the fixture proves nothing")
+	}
+	if !press(t, live(), altC()).ConfigModalOpen() {
+		t.Fatal("alt+c opens no modal on this shell — the fixture proves nothing")
+	}
+
+	withHelp := func() Shell {
+		s := press(t, live(), help)
+		if !s.PageDashboard(PageWork).HelpOpen() {
+			t.Fatal("ctrl+h opened no help overlay")
+		}
+		return s
+	}
+
+	s := press(t, withHelp(), toggle)
+	if s.ActivePage() != PageWork {
+		t.Fatalf("v paged the shell to %v while help was open", s.ActivePage())
+	}
+	if _, built := s.pages[PageRoutines]; built {
+		t.Fatal("v built the other page while help was open")
+	}
+
+	s = press(t, withHelp(), altC())
+	if s.ConfigModalOpen() {
+		t.Fatal("alt+c opened the Config modal while help was open")
+	}
+	if !s.PageDashboard(PageWork).HelpOpen() {
+		t.Fatal("alt+c closed the help overlay instead of being swallowed by it")
+	}
+
+	// The overlay's own keys still work, so the swallow is not a lock-in.
+	if press(t, s, esc()).PageDashboard(PageWork).HelpOpen() {
+		t.Fatal("esc left the help overlay open")
+	}
+}
+
 // The chord is the component's own, so a host key it collides with does not
 // exist: `c` alone is not it, and neither is ctrl+c, which quits.
 func TestConfigModalChordIsAltCAlone(t *testing.T) {
