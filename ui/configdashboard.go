@@ -431,6 +431,9 @@ func (m *ConfigDashboard) refresh() {
 	// Every caller has just written the layer, which is exactly what a host has to
 	// re-read for.
 	m.wrote = true
+	// A successful action reaches this point, so any stale failure row from an
+	// earlier act is no longer true and must not survive it.
+	m.failure = ""
 	rows, err := m.writer.Rows()
 	if err != nil {
 		m.failure = fmt.Sprintf("Wrote the override, but could not re-read the config: %v", err)

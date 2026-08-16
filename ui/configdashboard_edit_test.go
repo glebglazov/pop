@@ -415,6 +415,26 @@ func TestConfigDashboardWriteFailureIsARow(t *testing.T) {
 	})
 }
 
+// TestConfigDashboardSuccessClearsFailure is the missing half of decision 11:
+// the failure row is not forever once shown — a later successful action must
+// remove it, or a stale "Could not …" survives past the problem it named.
+func TestConfigDashboardSuccessClearsFailure(t *testing.T) {
+	m, writer := editingConfigDashboard(t, &scriptedEditor{})
+	writer.removeErr = errors.New("read-only file system")
+
+	ctrl(m, 'x')
+	if !strings.Contains(configDashboardView(m), "read-only file system") {
+		t.Fatalf("setup: failure not shown before the later success:\n%s", configDashboardView(m))
+	}
+
+	writer.removeErr = nil
+	ctrl(m, 'y') // copy source, on the same row, now succeeds
+
+	if strings.Contains(configDashboardView(m), "read-only file system") {
+		t.Errorf("stale failure survived a later successful action:\n%s", configDashboardView(m))
+	}
+}
+
 // TestConfigDashboardWithoutAWriterIsReadOnly: a host that wires no writer gets
 // the preview and nothing else, and says so rather than binding keys that would
 // do nothing.
