@@ -205,7 +205,7 @@ var taskSkipTaskCmd = &cobra.Command{
 }
 
 var taskStreamCmd = &cobra.Command{
-	Use:   "stream TASK_SET[/FILE.md]",
+	Use:   "stream [TASK_SET | TASK_SET/FILE.md]",
 	Short: "Show per-task attempt stream replay derived from captured attempt streams",
 	Args:  cobra.ExactArgs(1),
 	Run:   runTaskStream,

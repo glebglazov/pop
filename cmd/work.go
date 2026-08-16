@@ -13,8 +13,8 @@ import (
 
 var workCmd = &cobra.Command{
 	Use:   "work",
-	Short: "Cross-concept work surface for planning, maps, and task sets",
-	Long: `Cross-concept work surface for planning, maps, and task sets.
+	Short: "Cross-concept work surface for planning, maps, task sets, and Routines",
+	Long: `Cross-concept work surface for planning, maps, task sets, and Routines.
 
 The Work dashboard is the unified hands-on surface for ongoing work across
 registered projects, in two pages toggled with v: task sets and maps, and
@@ -40,7 +40,7 @@ var workShowPathCmd = &cobra.Command{
 
 var workDashboardCmd = &cobra.Command{
 	Use:   "dashboard",
-	Short: "Open the work dashboard",
+	Short: "Open the Work dashboard",
 	Args:  cobra.NoArgs,
 	RunE:  runWorkDashboard,
 }
