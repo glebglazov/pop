@@ -357,8 +357,11 @@ func TestDashboardActionMenuOpenAndClose(t *testing.T) {
 	}
 }
 
+// Every former direct verb key is inert at the top level and reachable only
+// through the action menu. `I` is the deliberate exception: it is the flat
+// shortcut for the row's own I action, covered by TestFlatIDispatchesPerKind.
 func TestDashboardFormerDirectKeysInertAtTopLevel(t *testing.T) {
-	for _, key := range []string{"i", "I", "b", "u", "U", "p", "P", "O", "d", "m"} {
+	for _, key := range []string{"i", "b", "u", "U", "p", "P", "O", "d", "m"} {
 		m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{{Project: "pop", Worktree: "/repo/wt (main)", CursorKey: "pop\x00set", RawStatus: tasks.StatusReady, ID: "set", DefPath: "/repo/tasks", StatePath: "/repo/state.json", RuntimePath: "/repo/wt", Bound: true, Parked: true}}})
 		updated, cmd := m.Update(tea.KeyPressMsg{Code: []rune(key)[0], Text: key})
 		got := updated.(QueueDashboard)

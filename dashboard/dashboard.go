@@ -353,6 +353,20 @@ func dashboardVerbHandsOff(kinds workKinds, row DashboardRow, verb work.Verb) bo
 	return false
 }
 
+// dashboardShortcutVerb resolves a flat list-level shortcut against the row's own
+// menu: the verb the row's kind advertises under key, and whether it advertises
+// one at all. A flat key is then the same action the operator would reach through
+// `a` on that row — one key, one meaning, whatever kind the cursor is on — rather
+// than a second registry of key-to-verb that each kind would have to be added to.
+func dashboardShortcutItem(kinds workKinds, row DashboardRow, key string) (dashboardMenuItem, bool) {
+	for _, item := range dashboardMenuItems(kinds, row) {
+		if item.key == key {
+			return item, true
+		}
+	}
+	return dashboardMenuItem{}, false
+}
+
 // items are the verbs the open menu is showing, empty for a menu with no list yet.
 func (menu *dashboardMenu) items() []dashboardMenuItem {
 	if menu == nil || menu.list == nil {
@@ -1047,11 +1061,21 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = nil
 			return m, nil
 		case "I":
-			// The wayfinding shortcut is anchored to the Map kind rather than to the
-			// verb being offered: a Map with an empty frontier must still answer with
-			// the "no frontier tickets" report rather than a dead key.
+			// I is the row's own I: a Task set drains, a Routine fires, a Map works its
+			// frontier ticket — each dispatched through the same verb path the row's `a`
+			// menu would take, so the flat key never means something the menu does not
+			// advertise.
 			row, ok := m.list.Selected()
-			if !ok || !mapRow(row) {
+			if !ok {
+				return m, nil
+			}
+			if item, ok := dashboardShortcutItem(m.kinds, row, "I"); ok {
+				return m.dispatchVerb(item.verb, row)
+			}
+			// The Map keeps its unconditional answer: with an empty frontier it offers
+			// no I item, and the "no frontier tickets" report is a better reply than a
+			// dead key.
+			if !mapRow(row) {
 				return m, nil
 			}
 			m.err = nil
@@ -2576,8 +2600,16 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			ui.HelpEntry{Key: "v", Desc: m.page.toggleWord + " view"},
 			ui.HelpEntry{Key: "h/esc", Desc: "quit"},
 		)
-		if row, ok := m.list.Selected(); ok && mapRow(row) {
-			entries = append(entries, ui.HelpEntry{Key: "I", Desc: "work next frontier ticket"})
+		// I is bound to whatever the cursored row's own kind offers under that key,
+		// so the overlay names that action rather than one kind's (ADR-0204). A Map
+		// with an empty frontier advertises no I item but still answers the key with
+		// its frontier report, so it keeps the entry.
+		if row, ok := m.list.Selected(); ok {
+			if item, found := dashboardShortcutItem(m.kinds, row, "I"); found {
+				entries = append(entries, ui.HelpEntry{Key: "I", Desc: item.label})
+			} else if mapRow(row) {
+				entries = append(entries, ui.HelpEntry{Key: "I", Desc: "work next frontier ticket"})
+			}
 		}
 		return entries
 	}

@@ -207,6 +207,24 @@ func TestLaunchWayfinderSessionReusesRunningWithoutResend(t *testing.T) {
 	}
 }
 
+// verbCmd unwraps the batch Update builds when a verb sets a flash: the verb's
+// own command comes first and the flash-expiry timer after, so a test that wants
+// the verb's message runs only the first half and never waits out the timer.
+func verbCmd(t *testing.T, cmd tea.Cmd) tea.Cmd {
+	t.Helper()
+	if cmd == nil {
+		return nil
+	}
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		return cmd
+	}
+	if len(batch) == 0 {
+		t.Fatal("empty batch carries no verb command")
+	}
+	return batch[0]
+}
+
 func TestDashboardMapRowISpawnsFocusesAndQuits(t *testing.T) {
 	d, cfg, row, f, _ := wayfinderSpawnFixture(t)
 	f.Inside = true
@@ -215,7 +233,7 @@ func TestDashboardMapRowISpawnsFocusesAndQuits(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("I on map row did not return a command")
 	}
-	msg := cmd()
+	msg := verbCmd(t, cmd)()
 	handoff, ok := msg.(dashboardHandoffMsg)
 	if !ok {
 		t.Fatalf("msg = %T, want dashboardHandoffMsg", msg)
@@ -313,7 +331,7 @@ func TestDashboardMapRowIReusesRunningWithoutResend(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("I did not return a command")
 	}
-	msg := cmd()
+	msg := verbCmd(t, cmd)()
 	handoff, ok := msg.(dashboardHandoffMsg)
 	if !ok {
 		t.Fatalf("msg = %T, want dashboardHandoffMsg", msg)
