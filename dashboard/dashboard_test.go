@@ -21,6 +21,7 @@ import (
 	"github.com/glebglazov/pop/repogroup"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/setkind"
+	"github.com/glebglazov/pop/ui"
 	"github.com/glebglazov/pop/wayfinder"
 	"github.com/glebglazov/pop/work"
 	"github.com/glebglazov/pop/work/ref"
@@ -1409,6 +1410,43 @@ func TestDashboardBindModalListStagesNavigateAndSelect(t *testing.T) {
 	}
 	if m.bind.baseRef != "develop" {
 		t.Fatalf("baseRef = %q, want develop", m.bind.baseRef)
+	}
+}
+
+// TestDashboardBindModalNameStageTypesEveryLetter pins the rule the name stage
+// is built to (ADR-0213): once the modal is taking a worktree name, the list
+// navigation keys are plain characters, so a name holding j or k can be typed.
+// The stage also carries the house field's editing (ADR-0081), so ctrl+u clears
+// and the word motions work.
+func TestDashboardBindModalNameStageTypesEveryLetter(t *testing.T) {
+	row := DashboardRow{Project: "pop", ID: "set-bind"}
+	m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{row}})
+	m.bind = &dashboardBindModal{row: row, stage: dashboardBindStageName, baseRef: "main", name: ui.NewTextField()}
+
+	typeName := func(m QueueDashboard, s string) QueueDashboard {
+		for _, ch := range s {
+			updated, _ := m.Update(tea.KeyPressMsg{Code: ch, Text: string(ch)})
+			m = updated.(QueueDashboard)
+		}
+		return m
+	}
+
+	m = typeName(m, "jk-hotfix")
+	if got := m.bind.name.Value(); got != "jk-hotfix" {
+		t.Fatalf("name = %q, want every key typed", got)
+	}
+
+	// ctrl+u clears the buffer; the word motions then edit what is retyped.
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+	m = updated.(QueueDashboard)
+	if got := m.bind.name.Value(); got != "" {
+		t.Fatalf("name = %q after ctrl+u, want cleared", got)
+	}
+	m = typeName(m, "kj fix")
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'w', Mod: tea.ModCtrl})
+	m = updated.(QueueDashboard)
+	if got := m.bind.name.Value(); got != "kj " {
+		t.Fatalf("name = %q after ctrl+w, want the last word deleted", got)
 	}
 }
 

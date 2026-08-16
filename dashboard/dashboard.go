@@ -139,11 +139,11 @@ type dashboardBindModal struct {
 	row   DashboardRow
 	stage dashboardBindStage
 	// list drives the worktree-pick and base-ref-pick stages (both wrapping).
-	// Base refs are held as entries with only Label set. The name stage is a
-	// plain text input and does not use the list.
+	// Base refs are held as entries with only Label set. The name stage is text
+	// entry through the house field and does not use the list.
 	list    *ui.List[drain.BindEntry]
 	baseRef string
-	name    string
+	name    ui.TextField
 	loading bool
 }
 
@@ -1202,32 +1202,31 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// updateBindModal drives the bind modal. Enter commits the stage and esc/ctrl+c
+// closes the modal in every stage. The name stage is text entry, so it reserves
+// nothing else: every other key — j and k included — goes to the house field,
+// which brings its own editing keymap (ADR-0081, ADR-0213). The j/k list
+// navigation therefore belongs to the picking stages alone.
 func (m QueueDashboard) updateBindModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "ctrl+c":
 		m.bind = nil
 		return m, nil
-	case "j", "down":
-		if m.bind.stage != dashboardBindStageName && m.bind.list != nil {
-			m.bind.list.MoveDown()
-		}
-		return m, nil
-	case "k", "up":
-		if m.bind.stage != dashboardBindStageName && m.bind.list != nil {
-			m.bind.list.MoveUp()
-		}
-		return m, nil
-	case "backspace":
-		if m.bind.stage == dashboardBindStageName && len(m.bind.name) > 0 {
-			m.bind.name = m.bind.name[:len(m.bind.name)-1]
-		}
-		return m, nil
 	case "enter":
 		return m.confirmBindModal()
 	}
 	if m.bind.stage == dashboardBindStageName {
-		if s := msg.String(); len([]rune(s)) == 1 {
-			m.bind.name += s
+		m.bind.name.Update(msg)
+		return m, nil
+	}
+	switch msg.String() {
+	case "j", "down":
+		if m.bind.list != nil {
+			m.bind.list.MoveDown()
+		}
+	case "k", "up":
+		if m.bind.list != nil {
+			m.bind.list.MoveUp()
 		}
 	}
 	return m, nil
@@ -1965,9 +1964,10 @@ func (m QueueDashboard) confirmBindModal() (tea.Model, tea.Cmd) {
 		}
 		m.bind.baseRef = entry.Label
 		m.bind.stage = dashboardBindStageName
+		m.bind.name = ui.NewTextField()
 		return m, nil
 	case dashboardBindStageName:
-		name := strings.TrimSpace(m.bind.name)
+		name := strings.TrimSpace(m.bind.name.Value())
 		if name == "" {
 			m.err = fmt.Errorf("worktree name is required")
 			return m, nil
@@ -2382,7 +2382,10 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 		case dashboardBindStageName:
 			return []ui.HelpEntry{
 				{Key: "typing", Desc: "enter worktree name"},
+				{Key: "←/→ C-b/C-f", Desc: "move cursor"},
 				{Key: "backspace", Desc: "delete character"},
+				{Key: "C-w/M-b/M-f", Desc: "word editing"},
+				{Key: "C-u", Desc: "clear name"},
 				{Key: "enter", Desc: "create worktree"},
 				{Key: "esc", Desc: "cancel"},
 			}
@@ -3280,7 +3283,7 @@ func renderDashboardBindModal(w io.Writer, modal *dashboardBindModal, avail, wid
 		fmt.Fprint(w, ui.HintStyle.Render(ui.TruncateString("enter select · esc cancel", width)))
 	case dashboardBindStageName:
 		fmt.Fprintln(w, ui.TruncateString(fmt.Sprintf("Base: %s", modal.baseRef), width))
-		fmt.Fprintln(w, ui.TruncateString(fmt.Sprintf("Name: %s", modal.name), width))
+		fmt.Fprintln(w, ui.TruncateString("Name: "+modal.name.View(), width))
 		fmt.Fprint(w, ui.HintStyle.Render(ui.TruncateString("enter create · esc cancel", width)))
 	}
 }
