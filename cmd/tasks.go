@@ -1228,6 +1228,7 @@ func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reade
 		Timeout:          timeout,
 		VerifyAgents:     append([]string(nil), taskImplementVerifyAgents...),
 		VerifyEffort:     taskImplementVerifyEffort,
+		ReviewConvention: codeReviewConvention(d),
 		Yes:              taskRunYes,
 		ConfirmIn:        stdin,
 		ConfirmOut:       stderr,

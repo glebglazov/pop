@@ -534,6 +534,24 @@ var migrations = []string{
 	// the Verifier rendered nothing usable — the commit then falls back to pop's
 	// default format.
 	`ALTER TABLE verify_verdicts ADD COLUMN commit_subject TEXT NOT NULL DEFAULT '';`,
+	// 33: review_episodes — the Review episode for a Task set (ADR-0214): whether
+	// automatic Code review is armed, keyed (repo, set_id) where repo is the
+	// repository's git common dir, the same identity verify_verdicts uses. One row
+	// per set, rewritten by every review: it records the done-AFK work composition
+	// the review judged, and a drain re-arms only when the set's current
+	// composition differs from it. Unlike a Verify verdict there is nothing to
+	// invalidate and no verdict to cache — a review reaches none — so the row
+	// carries only the fact that this composition has been reviewed, plus where
+	// the resulting document went and which work SHA it was written against.
+	`CREATE TABLE review_episodes (
+		repo        TEXT NOT NULL,
+		set_id      TEXT NOT NULL,
+		work_sha    TEXT NOT NULL DEFAULT '',
+		composition TEXT NOT NULL DEFAULT '',
+		document    TEXT NOT NULL DEFAULT '',
+		reviewed_at TEXT NOT NULL DEFAULT '',
+		PRIMARY KEY (repo, set_id)
+	);`,
 }
 
 func (s *Store) migrate() error {

@@ -57,6 +57,15 @@ type RunTaskSetOptions struct {
 	// verifyCoreOptions.runVerifier. Unexported and test-only: production always
 	// resolves the real Verifier agent. Nil ⇒ the configured Verifier runs.
 	verifyRunner func(prompt string) (string, error)
+	// ReviewConvention resolves the repository's `code-review` Convention for the
+	// drain's review phase (ADR-0214). It is a seam for the same reason the
+	// on-demand review's is: the conventions package resolves Repository identity
+	// through tasks, so the caller that holds both wires it. Nil ⇒ the Reviewer is
+	// handed no convention and is told so.
+	ReviewConvention ReviewConvention
+	// reviewRunner overrides the review phase's agent spawn, mirroring
+	// reviewCoreOptions.runReviewer. Unexported and test-only.
+	reviewRunner func(prompt string) (string, string, error)
 }
 
 // RunTaskSetResult is the outcome of a run-tasks invocation.
@@ -124,11 +133,11 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 
 // loop drains the resolved Task set sequentially through eligible AFK tasks. It
 // runs after setup and reads as pure orchestration: each iteration re-Refreshes,
-// then dispatches to one of three methods — the pre-approval Verifier phase, the
-// terminal-status switch, or the task-execution branch — each of which owns its
-// choreography and hands back a continue/return directive. The methods mutate the
-// run's Drain / prompt-reader / result state through the receiver so the deferred
-// finalize sees the latest values.
+// then dispatches to one of four methods — the pre-approval Verifier phase, the
+// Code review phase, the terminal-status switch, or the task-execution branch —
+// each of which owns its choreography and hands back a continue/return directive.
+// The methods mutate the run's Drain / prompt-reader / result state through the
+// receiver so the deferred finalize sees the latest values.
 func (r *implementRun) loop() (*RunTaskSetResult, error) {
 	d := r.d
 	resolved := r.resolved
@@ -161,6 +170,16 @@ func (r *implementRun) loop() (*RunTaskSetResult, error) {
 				continue
 			case verifyReturn:
 				return result, verifyErr
+			}
+
+			// Code review phase (ADR-0214): with [work.review] enabled and the
+			// set's Review episode armed, write the set's Review artifact here —
+			// after verification has finished moving the tree, and before the
+			// terminal switch hands the set to a human. It gates nothing, so the
+			// only directive it can hand back besides falling through is the
+			// human's interrupt.
+			if directive, reviewErr := r.reviewPhase(currentRefresh, row); directive == reviewReturn {
+				return result, reviewErr
 			}
 
 			// Terminal-status dispatch (DONE / DEFERRED / BLOCKED /

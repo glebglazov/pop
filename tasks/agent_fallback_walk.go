@@ -37,9 +37,8 @@ type agentRole struct {
 }
 
 // persist, persistAnswer and persistSkipped are how the walk files a run: each
-// no-ops when its role left the seam unset. A role whose invocations are not
-// part of a Task set's Captured run record — an on-demand act a human is
-// watching, rather than a phase of a drain — sets none of them.
+// no-ops when its role left the seam unset, so a role that has nowhere to file
+// an invocation costs the walk no branch of its own.
 func (r agentRole) persist(rec *streamRecorder, invocation *AgentInvocation, try int, outcome, reason string, exitCode int) {
 	if r.Persist != nil {
 		r.Persist(rec, invocation, try, outcome, reason, exitCode)

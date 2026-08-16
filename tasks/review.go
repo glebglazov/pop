@@ -79,13 +79,17 @@ type ReviewResult struct {
 type reviewCoreOptions struct {
 	DefPath     string
 	RuntimePath string
-	SetID       string
-	Agents      []string
-	Effort      string
-	Timeout     time.Duration
-	Output      io.Writer
-	Show        bool
-	Convention  ReviewConvention
+	// Repo is the repository identity the set's Review episode is keyed by (the
+	// git common dir). Empty resolves nothing and records no episode, so a review
+	// still runs and still writes its document in a checkout pop cannot identify.
+	Repo       string
+	SetID      string
+	Agents     []string
+	Effort     string
+	Timeout    time.Duration
+	Output     io.Writer
+	Show       bool
+	Convention ReviewConvention
 	// runReviewer returns the Reviewer's document and the agent that wrote it.
 	runReviewer func(prompt string) (string, string, error)
 	probeMemo   *agentAvailabilityProbeMemo
@@ -112,9 +116,14 @@ func ReviewTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 		return nil, err
 	}
 	cfg, _ := loadConfig(config.DefaultConfigPath())
+	repo := ""
+	if id, idErr := ResolveRepositoryIdentity(d, runtimePath); idErr == nil {
+		repo = id.CommonDir
+	}
 	return reviewResolvedSet(d, cfg, reviewCoreOptions{
 		DefPath:     resolved.DefinitionPath,
 		RuntimePath: runtimePath,
+		Repo:        repo,
 		SetID:       strings.TrimSpace(opts.TaskSetID),
 		Agents:      opts.Agents,
 		Effort:      opts.Effort,
@@ -142,17 +151,21 @@ func reviewResolvedSet(d *Deps, cfg *config.Config, opts reviewCoreOptions) (*Re
 	}
 	previous, hasPrevious := latestReviewDocument(d, m.Dir)
 	convention := resolveReviewConvention(opts)
-	body, agent, err := runReviewer(d, cfg, opts, m, work, convention, previous, hasPrevious)
+	// The work SHA is read before the Reviewer runs: it is the commit the document
+	// describes, and the Reviewer that moved it would be doing something a review
+	// must not do.
+	workSHA := verifyWorkSHA(d, opts.RuntimePath)
+	body, agent, err := runReviewer(d, cfg, opts, m, workSHA, work, convention, previous, hasPrevious)
 	if err != nil {
 		return nil, err
 	}
-	workSHA := verifyWorkSHA(d, opts.RuntimePath)
 	at := d.Now().UTC()
 	doc := renderReviewDocument(at, opts.SetID, workSHA, work.Range, agent, body)
 	path, err := writeReviewDocument(d, m.Dir, at, doc)
 	if err != nil {
 		return nil, err
 	}
+	recordReviewEpisode(d, opts.Output, reviewEpisodeRecord(opts.Repo, opts.SetID, workSHA, reviewComposition(m), path, at))
 	printReviewWritten(opts.Output, opts.SetID, path, hasPrevious)
 	return &ReviewResult{SetID: opts.SetID, WorkSHA: workSHA, Path: path, Body: doc}, nil
 }
@@ -222,13 +235,13 @@ func resolveReviewConvention(opts reviewCoreOptions) string {
 
 // runReviewer builds the prompt and invokes the Reviewer, returning the document
 // and the agent that wrote it.
-func runReviewer(d *Deps, cfg *config.Config, opts reviewCoreOptions, m *Manifest, work workDiffView, convention string, previous reviewDocument, hasPrevious bool) (string, string, error) {
+func runReviewer(d *Deps, cfg *config.Config, opts reviewCoreOptions, m *Manifest, workSHA string, work workDiffView, convention string, previous reviewDocument, hasPrevious bool) (string, string, error) {
 	text := buildReviewerPrompt(d, m, work, convention, previous, hasPrevious)
 	run := opts.runReviewer
 	if run == nil {
 		sel := resolveReviewer(opts.Agents, opts.Effort, cfg)
 		run = func(prompt string) (string, string, error) {
-			return runConfiguredReviewer(d, cfg, sel, opts.RuntimePath, prompt, opts.Output, opts.Timeout, opts.probeMemo)
+			return runConfiguredReviewer(d, cfg, sel, m.Dir, opts.SetID, workSHA, opts.RuntimePath, prompt, opts.Output, opts.Timeout, opts.probeMemo)
 		}
 	}
 	body, agent, err := run(text)
@@ -275,10 +288,7 @@ func resolveReviewer(cliAgents []string, cliEffort string, cfg *config.Config) v
 // agent that wrote it. The Reviewer's cap and retry schedule are the built-in
 // task defaults: [work.review] carries no retry keys, because a review that
 // cannot be produced this time costs nothing to ask for again.
-//
-// The walk files no Captured run: a review is an act a human asked for and is
-// watching, not a phase of a drain, and its record is the Review artifact.
-func runConfiguredReviewer(d *Deps, cfg *config.Config, sel verifierSelection, runtimePath, prompt string, out io.Writer, timeout time.Duration, probeMemo *agentAvailabilityProbeMemo) (string, string, error) {
+func runConfiguredReviewer(d *Deps, cfg *config.Config, sel verifierSelection, taskSetDir, setID, workSHA, runtimePath, prompt string, out io.Writer, timeout time.Duration, probeMemo *agentAvailabilityProbeMemo) (string, string, error) {
 	if timeout <= 0 {
 		timeout = DefaultAttemptTimeout
 	}
@@ -287,13 +297,7 @@ func runConfiguredReviewer(d *Deps, cfg *config.Config, sel verifierSelection, r
 		return "", "", exitErr(ExitSetup, "%v", err)
 	}
 	walked, err := runAgentFallbackWalk(d, agentFallbackWalk{
-		role: agentRole{
-			Noun:   "Reviewer agent",
-			Gerund: "Reviewing",
-			// A review has no format to parse, so the only failed attempt is one
-			// that came back with nothing to write down.
-			RetryEligible: func(_ *attemptOutcome, raw string) bool { return strings.TrimSpace(raw) == "" },
-		},
+		role:            reviewerRole(d, out, taskSetDir, setID, workSHA),
 		sel:             sel,
 		runtimePath:     runtimePath,
 		prompt:          prompt,
@@ -316,6 +320,41 @@ func runConfiguredReviewer(d *Deps, cfg *config.Config, sel verifierSelection, r
 		return "", "", exitErr(ExitOperational, "the Reviewer produced no document")
 	}
 	return "", "", exitErr(ExitSetup, "%s", formatHumanHealingExhaustionMessage(walked.Unavailable))
+}
+
+// reviewerRole is what the shared fallback walk calls the Reviewer: its name in
+// the operator's output, the Captured run pair each invocation is filed as under
+// the `review` phase label, and the rule that the only failed attempt is one
+// that came back with nothing to write down — a review has no format to parse,
+// so any prose is the Reviewer answering.
+//
+// Its runs are filed exactly as the Verifier's are, and for the same reason: a
+// Reviewer spends the same agent quota on the same set, so hiding it would make
+// `pop tasks spend` understate what a drain cost. No verdict rides along,
+// because a review reaches none.
+func reviewerRole(d *Deps, errOut io.Writer, taskSetDir, setID, workSHA string) agentRole {
+	return agentRole{
+		Noun:   "Reviewer agent",
+		Gerund: "Reviewing",
+		Persist: func(rec *streamRecorder, invocation *AgentInvocation, try int, outcome, reason string, exitCode int) {
+			_ = persistReviewRun(d, errOut, taskSetDir, setID, workSHA, rec, invocation.AgentPreset(), invocation.RequestedAgent, try, outcome, reason, exitCode)
+		},
+		PersistAnswer: func(rec *streamRecorder, invocation *AgentInvocation, try int, outcome, reason string, exitCode int, _ string) {
+			_ = persistReviewRun(d, errOut, taskSetDir, setID, workSHA, rec, invocation.AgentPreset(), invocation.RequestedAgent, try, outcome, reason, exitCode)
+		},
+		PersistSkipped: func(rec *streamRecorder, invocation *AgentInvocation, model string, try int, reason string, exitCode int) {
+			_ = persistSkippedReviewRun(d, errOut, taskSetDir, setID, workSHA, rec, invocation.AgentPreset(), invocation.RequestedAgent, model, try, reason, exitCode)
+		},
+		RetryEligible: func(_ *attemptOutcome, raw string) bool { return strings.TrimSpace(raw) == "" },
+	}
+}
+
+// reviewEnabled reports whether automatic Code review is enabled in user config
+// (ADR-0214). Like Agent verification's switch it defaults off, and it gates only
+// the drain's own review phase: `pop tasks review <set>` is a human asking, and
+// runs whatever this says.
+func reviewEnabled(cfg *config.Config) bool {
+	return cfg.ReviewSettings() != nil && cfg.ReviewSettings().Enabled
 }
 
 // reviewDocument is one Review artifact on disk: where it is, when it was

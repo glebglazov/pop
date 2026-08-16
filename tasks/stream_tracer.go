@@ -172,8 +172,8 @@ func readSetAttemptStreams(d *Deps, m *Manifest, last bool) ([]TaskStream, error
 	if last {
 		run := runs[len(runs)-1]
 		var ts TaskStream
-		if run.meta.TaskFile == "" && run.meta.Phase == "verify" {
-			ts = TaskStream{TaskID: "verify", File: "", Title: "Verify"}
+		if setLevel, ok := setLevelRunStream(run); ok {
+			ts = setLevel
 		} else {
 			task := taskByFile(m, run.meta.TaskFile)
 			if task == nil {
@@ -201,22 +201,40 @@ func taskByFile(m *Manifest, file string) *Task {
 	return nil
 }
 
+// setLevelRunStream names the synthetic task stream a set-level run belongs to
+// — a run of a drain phase that judges the whole set rather than one task, so it
+// carries no task file. Verification and Code review are the two, and each reads
+// as its own row rather than being folded into a task's attempts.
+func setLevelRunStream(run capturedRun) (TaskStream, bool) {
+	if run.meta.TaskFile != "" {
+		return TaskStream{}, false
+	}
+	switch run.meta.Phase {
+	case "verify":
+		return TaskStream{TaskID: "verify", Title: "Verify"}, true
+	case "review":
+		return TaskStream{TaskID: "review", Title: "Review"}, true
+	}
+	return TaskStream{}, false
+}
+
 // groupRunsIntoTaskStreams groups chronologically sorted runs by task, preserving
-// the order in which each task first appears in the run timeline. Verify runs
-// (set-level, no task file) are grouped into a synthetic "verify" task.
+// the order in which each task first appears in the run timeline. Set-level runs
+// (verify, review — no task file) are grouped into a synthetic task each.
 func groupRunsIntoTaskStreams(m *Manifest, runs []capturedRun) []TaskStream {
 	var groups []TaskStream
 	seen := map[string]int{}
 	for _, run := range runs {
 		key := run.meta.TaskFile
-		if key == "" && run.meta.Phase == "verify" {
-			key = "__verify__"
+		setLevel, isSetLevel := setLevelRunStream(run)
+		if isSetLevel {
+			key = "__" + run.meta.Phase + "__"
 		}
 		idx, ok := seen[key]
 		if !ok {
 			var ts TaskStream
-			if key == "__verify__" {
-				ts = TaskStream{TaskID: "verify", File: "", Title: "Verify"}
+			if isSetLevel {
+				ts = setLevel
 			} else {
 				task := taskByFile(m, key)
 				if task == nil {

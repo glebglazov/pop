@@ -16,16 +16,16 @@ import (
 // and the task-set drain. Integration was removed (ADR-0070): a Done drain in a
 // worktree is the human's own concern, so there is no merge epilogue.
 type WholeSetOptions struct {
-	ResolveInput    tasks.ResolveInput
-	TaskSetOverride string
-	InWorktree      bool
-	ForceRebind     bool
-	AgentPreset     string
-	AgentPresets    []string
-	AgentExplicit   bool
-	AgentCmd        string
-	AgentOutput     tasks.AgentOutputMode
-	AllowDirty      tasks.DirtyRuntimeStrategy
+	ResolveInput     tasks.ResolveInput
+	TaskSetOverride  string
+	InWorktree       bool
+	ForceRebind      bool
+	AgentPreset      string
+	AgentPresets     []string
+	AgentExplicit    bool
+	AgentCmd         string
+	AgentOutput      tasks.AgentOutputMode
+	AllowDirty       tasks.DirtyRuntimeStrategy
 	MaxTries         int
 	MaxTriesExplicit bool
 	Timeout          time.Duration
@@ -34,10 +34,14 @@ type WholeSetOptions struct {
 	// `--verify-effort`), forwarded verbatim to the task-set executor.
 	VerifyAgents []string
 	VerifyEffort string
-	Yes          bool
-	ConfirmIn    io.Reader
-	ConfirmOut   io.Writer
-	Output       io.Writer
+	// ReviewConvention resolves the repository's `code-review` Convention for the
+	// drain's review phase (ADR-0214); forwarded verbatim to the task-set
+	// executor, which hands it to the Reviewer.
+	ReviewConvention tasks.ReviewConvention
+	Yes              bool
+	ConfirmIn        io.Reader
+	ConfirmOut       io.Writer
+	Output           io.Writer
 	// PreSeedTopic pre-seeds the pane's Topic from each task's Title at drain
 	// spawn (ADR-0058); forwarded verbatim to the task-set executor.
 	PreSeedTopic func(taskTitle string)
@@ -74,26 +78,27 @@ func RunWholeSetWith(d *Deps, opts WholeSetOptions) (*tasks.RunTaskSetResult, er
 		return nil, err
 	}
 	result, err := tasks.RunTaskSetWith(d.tasksDeps(), d.projectDeps(), d.loadConfig, tasks.RunTaskSetOptions{
-		ResolveInput:    resolveInput,
-		TaskSetOverride: opts.TaskSetOverride,
-		AgentPreset:     opts.AgentPreset,
-		AgentPresets:    opts.AgentPresets,
-		AgentExplicit:   opts.AgentExplicit,
-		AgentCmd:        opts.AgentCmd,
-		AgentOutput:     opts.AgentOutput,
-		AllowDirty:      opts.AllowDirty,
-		MaxTries:         opts.MaxTries,
-		MaxTriesExplicit: opts.MaxTriesExplicit,
-		Timeout:          opts.Timeout,
-		VerifyAgents:    opts.VerifyAgents,
-		VerifyEffort:    opts.VerifyEffort,
-		Yes:             opts.Yes,
-		ConfirmIn:       opts.ConfirmIn,
-		ConfirmOut:      opts.ConfirmOut,
-		Output:          opts.Output,
+		ResolveInput:           resolveInput,
+		TaskSetOverride:        opts.TaskSetOverride,
+		AgentPreset:            opts.AgentPreset,
+		AgentPresets:           opts.AgentPresets,
+		AgentExplicit:          opts.AgentExplicit,
+		AgentCmd:               opts.AgentCmd,
+		AgentOutput:            opts.AgentOutput,
+		AllowDirty:             opts.AllowDirty,
+		MaxTries:               opts.MaxTries,
+		MaxTriesExplicit:       opts.MaxTriesExplicit,
+		Timeout:                opts.Timeout,
+		VerifyAgents:           opts.VerifyAgents,
+		VerifyEffort:           opts.VerifyEffort,
+		ReviewConvention:       opts.ReviewConvention,
+		Yes:                    opts.Yes,
+		ConfirmIn:              opts.ConfirmIn,
+		ConfirmOut:             opts.ConfirmOut,
+		Output:                 opts.Output,
 		BindCheckout:           bindCheckout(d),
 		RefreshManagedCheckout: refreshManagedCheckout(d),
-		PreSeedTopic:    opts.PreSeedTopic,
+		PreSeedTopic:           opts.PreSeedTopic,
 	})
 	if err != nil {
 		return result, err
