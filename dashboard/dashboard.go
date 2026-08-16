@@ -1002,6 +1002,10 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.list.MoveDown()
 		case "k", "up":
 			m.list.MoveUp()
+		case "ctrl+d":
+			m.list.HalfPageDown()
+		case "ctrl+u":
+			m.list.HalfPageUp()
 		case "G":
 			m.list.SetCursor(len(m.snap.Containers) - 1)
 		case "ctrl+g":
@@ -1704,6 +1708,14 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "k", "up":
 		if m.detail != nil {
 			m.detail.list.MoveUp()
+		}
+	case "ctrl+d":
+		if m.detail != nil {
+			m.detail.list.HalfPageDown()
+		}
+	case "ctrl+u":
+		if m.detail != nil {
+			m.detail.list.HalfPageUp()
 		}
 	case "G":
 		if m.detail != nil {
@@ -2518,6 +2530,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 		// Detail view (one container's items, whatever kind it is)
 		return []ui.HelpEntry{
 			{Key: "j/k", Desc: "navigate items"},
+			{Key: "ctrl+d/ctrl+u", Desc: "half page down/up"},
 			{Key: "gg", Desc: "first item"},
 			{Key: "G", Desc: "last item"},
 			{Key: "l/enter", Desc: "peek item text"},
@@ -2539,6 +2552,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 		// Main list view
 		entries := []ui.HelpEntry{
 			{Key: "j/k", Desc: "navigate"},
+			{Key: "ctrl+d/ctrl+u", Desc: "half page down/up"},
 			{Key: "gg", Desc: "first row"},
 			{Key: "G", Desc: "last row"},
 			{Key: "l/enter", Desc: "open detail"},

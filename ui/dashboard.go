@@ -116,6 +116,10 @@ type MonitorDashboard struct {
 
 	showHelp bool
 
+	// pendingG remembers a half-typed `gg`: the first `g` arms it, the second
+	// jumps to the top, and any other key disarms it.
+	pendingG bool
+
 	previewFunc      func(paneID string) string
 	reloadFunc       func() []AttentionPane
 	markClearFunc    func(paneID string)
@@ -372,15 +376,35 @@ func (d *MonitorDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The kill prompt swallows the whole keyboard, help included: the pane
 		// it names must not move under the answer.
 		if d.killPrompt != nil {
+			d.pendingG = false
 			return d.updateKillPrompt(msg)
 		}
 
 		// Help overlay: toggle, dismiss, or swallow keys while open.
 		if ToggleHelp(&d.showHelp, msg) {
+			d.pendingG = false
 			return d, nil
 		}
 
+		// gg/G are the same list vocabulary the Work dashboard speaks. The chord
+		// is resolved ahead of the flat bindings so a first `g` can arm it, and
+		// every other key below disarms it.
+		if key.Matches(msg, dashboardKeys.Top) {
+			if d.pendingG {
+				d.pendingG = false
+				d.jumpCursorTo(0)
+			} else {
+				d.pendingG = true
+			}
+			return d, nil
+		}
+		d.pendingG = false
+
 		switch {
+		case key.Matches(msg, dashboardKeys.Bottom):
+			d.jumpCursorTo(len(d.panes) - 1)
+			return d, nil
+
 		case key.Matches(msg, dashboardKeys.Back):
 			if d.dirty {
 				d.result = MonitorDashboardResult{Action: MonitorDashboardActionRefresh}
@@ -743,6 +767,19 @@ func (d *MonitorDashboard) updateAllPanesStatus(paneID string, status AttentionS
 	}
 }
 
+// jumpCursorTo lands the cursor on row i, doing the same bookkeeping a j/k
+// step does: the anchored row is released because this is the user navigating
+// away, and the preview follows the new selection.
+func (d *MonitorDashboard) jumpCursorTo(i int) {
+	if len(d.panes) == 0 {
+		return
+	}
+	d.clearProtectedPane()
+	d.list.SetCursor(i)
+	d.syncFromList()
+	d.fetchPreview()
+}
+
 // protectSelectedPane anchors a row mutated in place until the user navigates
 // away. Reloads may continue to reorder the surrounding rows.
 func (d *MonitorDashboard) protectSelectedPane() {
@@ -947,6 +984,7 @@ func (d *MonitorDashboard) helpEntries() []HelpEntry {
 	if d.pickerMode {
 		entries := []HelpEntry{
 			{"↑/↓ j/k C-p/C-n", "Navigate"},
+			{"gg / G", "Top / bottom"},
 			{"Enter", "Select"},
 			{"F", "Toggle follow view"},
 			{"← / h", "Back / quit"},
@@ -963,6 +1001,7 @@ func (d *MonitorDashboard) helpEntries() []HelpEntry {
 
 	return []HelpEntry{
 		{"↑/↓ j/k C-p/C-n", "Navigate"},
+		{"gg / G", "Top / bottom"},
 		{"Enter", "Open and clear unread"},
 		{"Shift+Enter / p", "Peek (open without clearing)"},
 		{"r", "Toggle unread/clear"},
@@ -1160,6 +1199,10 @@ type dashboardKeyMap struct {
 	ToggleClearUnread key.Binding
 	Back              key.Binding
 	MarkUnread        key.Binding
+	// Top is the second half of the `gg` chord, so it is read before the flat
+	// bindings and only jumps once a first `g` is already pending.
+	Top    key.Binding
+	Bottom key.Binding
 	KillPane          key.Binding
 	// KillConfirm and KillCancel are the confirmation's own grammar, matching
 	// the Work dashboard's abandon modal. They are read only while the prompt is
@@ -1195,6 +1238,12 @@ var dashboardKeys = dashboardKeyMap{
 	),
 	ToggleClearUnread: key.NewBinding(
 		key.WithKeys("r"),
+	),
+	Top: key.NewBinding(
+		key.WithKeys("g"),
+	),
+	Bottom: key.NewBinding(
+		key.WithKeys("G"),
 	),
 	Back: key.NewBinding(
 		key.WithKeys("left", "h"),
