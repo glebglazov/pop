@@ -176,9 +176,15 @@ func (k *Kind) Perform(c work.Container, item *work.Item, verb work.Verb) (work.
 		}
 		return work.Outcome{Kind: work.OutcomeMessage, Clipboard: path, Message: "copied " + path}, nil
 	case work.VerbShell:
+		// A task set's shell runs in its Worktree binding, which is the cell this
+		// kind's own builder fills; Checkout is honoured first for a container
+		// assembled elsewhere.
 		dir := strings.TrimSpace(c.Checkout)
 		if dir == "" {
-			return work.Outcome{}, fmt.Errorf("setkind: %s has no checkout to open a shell in", c.ID)
+			dir = strings.TrimSpace(c.RuntimePath)
+		}
+		if dir == "" {
+			return work.Outcome{}, fmt.Errorf("task set %q has no checkout to open a shell in", c.ID)
 		}
 		return work.Outcome{
 			Kind:    work.OutcomeHandoff,

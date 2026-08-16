@@ -224,11 +224,22 @@ func TestShellVerbSpawnsNothingTagged(t *testing.T) {
 	rt.Fake.Inside = true
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
-	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, cmd := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
-	_, cmd := got.update(tea.KeyPressMsg{Code: 'O', Text: "O"})
+	updated, cmd = got.update(tea.KeyPressMsg{Code: 'O', Text: "O"})
 	if cmd == nil {
 		t.Fatal("shell verb must return a command")
+	}
+	// The shell is the kind's verb: it resolves the directory and hands the
+	// dashboard a handoff outcome, which the model then spawns into.
+	verbMsg, ok := cmd().(dashboardKindVerbMsg)
+	if !ok {
+		t.Fatalf("msg = %T, want dashboardKindVerbMsg", cmd())
+	}
+	got = updated.(QueueDashboard)
+	_, cmd = got.update(verbMsg)
+	if cmd == nil {
+		t.Fatal("shell outcome must spawn the pane")
 	}
 	msg := cmd()
 	handoff, ok := msg.(dashboardHandoffMsg)

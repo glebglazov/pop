@@ -178,6 +178,12 @@ func (m *QueueDashboard) reportVerbError(msg dashboardKindVerbMsg, err error) {
 		m.reportVerbStatus(msg, fmt.Sprintf("error: %v", err))
 		return
 	}
+	// A handoff verb flashes "handing off…" the moment it dispatches; a refusal is
+	// where it stopped handing off, so the reassurance goes with it rather than
+	// sitting beside the error line.
+	if m.flash.Text() == dashboardHandoffPending || m.flash.Text() == dashboardSpawnPending {
+		m.flash.Set("")
+	}
 	m.actionErr = err
 }
 

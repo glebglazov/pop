@@ -37,6 +37,21 @@ const dashboardHandoffPending = "handing off…"
 // the agent starts.
 const dashboardSpawnPending = "spawning…"
 
+// dashboardNoCheckoutMessage is Ctrl-g's refusal. Ctrl-g is offered on every row
+// of every kind, so it says nothing about task sets: the row that refuses may be
+// a Map or a Routine (ADR-0173).
+const dashboardNoCheckoutMessage = "no checkout bound to this row"
+
+// rowCheckoutPath is the directory a kind-generic surface opens for a row: the
+// kind's own answer first, and the Task-set binding for a row whose builder fills
+// only that cell.
+func rowCheckoutPath(row DashboardRow) string {
+	if dir := strings.TrimSpace(row.Checkout); dir != "" {
+		return dir
+	}
+	return strings.TrimSpace(row.RuntimePath)
+}
+
 // A dashboard row is a Work container — there is no row model beside it — and
 // the seam's data types live in the top-level work package (ADR-0143). These
 // aliases preserve queue's local vocabulary and its exported surface
@@ -999,11 +1014,12 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !ok {
 				return m, nil
 			}
-			if strings.TrimSpace(row.RuntimePath) == "" {
-				m.flash.Set("no checkout bound to this task set")
+			dir := rowCheckoutPath(row)
+			if dir == "" {
+				m.flash.Set(dashboardNoCheckoutMessage)
 				return m, nil
 			}
-			m.openCheckout = row.RuntimePath
+			m.openCheckout = dir
 			return m, tea.Quit
 		case "a", "A":
 			row, ok := m.list.Selected()
@@ -1583,21 +1599,6 @@ func (m QueueDashboard) dispatchVerb(verb work.Verb, row DashboardRow) (tea.Mode
 	case wayfinder.VerbAssist:
 		m.flash.Set(dashboardHandoffPending)
 		return m, m.launchWayfinderAssist(row)
-	case work.VerbShell:
-		// The directory is the kind's answer, not the dashboard's: a task set opens
-		// in its bound checkout, a Map in its repository, and a kind that resolves
-		// none says so by leaving it blank. A row from a builder that predates the
-		// seam carries only the Task-set binding, which is that kind's answer too.
-		dir := strings.TrimSpace(row.Checkout)
-		if dir == "" {
-			dir = strings.TrimSpace(row.RuntimePath)
-		}
-		if dir == "" {
-			m.flash.Set("no checkout bound to this task set")
-			return m, nil
-		}
-		m.flash.Set(dashboardHandoffPending)
-		return m, m.launchShell(row, dir)
 	case work.VerbCopyName:
 		m.flash.Set(m.copyRowName(row))
 		return m, nil
@@ -1689,11 +1690,12 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.detail == nil {
 			return m, nil
 		}
-		if strings.TrimSpace(m.detail.row.RuntimePath) == "" {
-			m.detail.flash.Set("no checkout bound to this task set")
+		dir := rowCheckoutPath(m.detail.row)
+		if dir == "" {
+			m.detail.flash.Set(dashboardNoCheckoutMessage)
 			return m, nil
 		}
-		m.openCheckout = m.detail.row.RuntimePath
+		m.openCheckout = dir
 		return m, tea.Quit
 	case "j", "down":
 		if m.detail != nil {

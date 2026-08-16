@@ -766,8 +766,11 @@ func TestDashboardCtrlGUnboundRowShowsStatusAndDoesNotQuit(t *testing.T) {
 	if got.openCheckout != "" {
 		t.Fatalf("openCheckout = %q, want empty on unbound row", got.openCheckout)
 	}
-	if got.flash.Text() != "no checkout bound to this task set" {
-		t.Fatalf("flash = %q, want 'no checkout bound to this task set'", got.flash.Text())
+	if got.flash.Text() != dashboardNoCheckoutMessage {
+		t.Fatalf("flash = %q, want %q", got.flash.Text(), dashboardNoCheckoutMessage)
+	}
+	if strings.Contains(got.flash.Text(), "task set") {
+		t.Fatalf("Ctrl-g is offered on every kind's rows; flash %q names one kind", got.flash.Text())
 	}
 }
 
@@ -4089,27 +4092,42 @@ func TestMainListRuntimeShell(t *testing.T) {
 		return updated.(QueueDashboard), cmd
 	}
 
-	t.Run("O with empty runtimePath is no-op with flash hint", func(t *testing.T) {
-		row := DashboardRow{ID: "set-x", DefPath: "/def", RuntimePath: ""}
-		m := newQueueDashboard(nil, nil, DashboardSnapshot{Containers: []DashboardRow{row}})
+	// The shell verb is the kind's own, so an unbound row's refusal is the Task-set
+	// kind's wording, arriving through the verb seam rather than a dashboard flash.
+	refuse := func(t *testing.T, m QueueDashboard) QueueDashboard {
+		t.Helper()
 		got, cmd := runtimeShell(m)
-		if cmd != nil {
-			t.Fatal("O with empty runtimePath: expected no cmd")
+		if cmd == nil {
+			t.Fatal("shell verb must return a command")
 		}
-		if got.flash.Text() == "" {
-			t.Fatal("O with empty runtimePath: expected flash hint")
+		msg, ok := cmd().(dashboardKindVerbMsg)
+		if !ok {
+			t.Fatalf("shell cmd produced %T, want dashboardKindVerbMsg", cmd())
+		}
+		updated, cmd := got.update(msg)
+		if cmd != nil {
+			t.Fatal("a refused shell must hand off nowhere")
+		}
+		return updated.(QueueDashboard)
+	}
+
+	t.Run("O with empty runtimePath refuses in the kind's words", func(t *testing.T) {
+		row := DashboardRow{ID: "set-x", DefPath: "/def", RuntimePath: ""}
+		got := refuse(t, newQueueDashboard(nil, nil, DashboardSnapshot{Containers: []DashboardRow{row}}))
+		want := `task set "set-x" has no checkout to open a shell in`
+		if got.actionErr == nil || got.actionErr.Error() != want {
+			t.Fatalf("action error = %v, want %q", got.actionErr, want)
+		}
+		if got.flash.Text() != "" {
+			t.Fatalf("flash = %q, want the pending reassurance cleared by the refusal", got.flash.Text())
 		}
 	})
 
-	t.Run("O with whitespace-only runtimePath is no-op with flash hint", func(t *testing.T) {
+	t.Run("O with whitespace-only runtimePath refuses too", func(t *testing.T) {
 		row := DashboardRow{ID: "set-y", DefPath: "/def", RuntimePath: "   "}
-		m := newQueueDashboard(nil, nil, DashboardSnapshot{Containers: []DashboardRow{row}})
-		got, cmd := runtimeShell(m)
-		if cmd != nil {
-			t.Fatal("O with whitespace runtimePath: expected no cmd")
-		}
-		if got.flash.Text() == "" {
-			t.Fatal("O with whitespace runtimePath: expected flash hint")
+		got := refuse(t, newQueueDashboard(nil, nil, DashboardSnapshot{Containers: []DashboardRow{row}}))
+		if got.actionErr == nil || !strings.Contains(got.actionErr.Error(), "no checkout to open a shell in") {
+			t.Fatalf("action error = %v, want a shell refusal", got.actionErr)
 		}
 	})
 
@@ -4131,9 +4149,9 @@ func TestMainListRuntimeShell(t *testing.T) {
 	t.Run("flash hint rendered in view", func(t *testing.T) {
 		row := DashboardRow{ID: "set-z", DefPath: "/def", RuntimePath: ""}
 		m := newQueueDashboard(nil, nil, DashboardSnapshot{Containers: []DashboardRow{row}})
-		m.flash.Set("no checkout bound to this task set")
+		m.flash.Set(dashboardNoCheckoutMessage)
 		v := m.View()
-		if !strings.Contains(v.Content, "no checkout bound to this task set") {
+		if !strings.Contains(v.Content, dashboardNoCheckoutMessage) {
 			t.Fatalf("flash not rendered in view:\n%s", v.Content)
 		}
 	})

@@ -170,6 +170,31 @@ func TestRoutineRunItemVerbsComeFromTheKind(t *testing.T) {
 	}
 }
 
+// TestShellRefusalSpeaksTheRowsOwnKind pins where the shell verb's refusal comes
+// from: a Routine with no bound directory is turned away in the Routine kind's
+// words, because the dashboard no longer intercepts the verb and has no wording of
+// its own to offer a row of any kind (ADR-0173).
+func TestShellRefusalSpeaksTheRowsOwnKind(t *testing.T) {
+	container := routineContainer("delta", routine.TierHere)
+	if container.Checkout != "" {
+		t.Fatalf("fixture checkout = %q, want a Routine with no directory to open", container.Checkout)
+	}
+	m := openPage(t, routinePageDeps([]work.Container{container}), PageRoutines)
+
+	m = pressKeys(t, m, "a", "O")
+
+	if m.actionErr == nil {
+		t.Fatal("a shell with nowhere to run must surface a refusal")
+	}
+	want := `routine "delta" has no directory to open a shell in`
+	if m.actionErr.Error() != want {
+		t.Fatalf("refusal = %q, want the Routine kind's own %q", m.actionErr, want)
+	}
+	if m.flash.Text() != "" {
+		t.Fatalf("status = %q, want the handoff reassurance cleared by the refusal", m.flash.Text())
+	}
+}
+
 // TestKindHandoffVerbFlashesPendingAtDispatch pins the reassurance a kind's own
 // handoff owes the operator (ADR-0158, ADR-0167): the flash is set the moment the
 // key lands, before the spawn the verb runs has produced anything. The kind's
