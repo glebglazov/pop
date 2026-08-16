@@ -3,27 +3,34 @@ package wayfinder
 import (
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 	"text/tabwriter"
+
+	"github.com/glebglazov/pop/tasks"
 )
 
 const destinationGistMaxLen = 48
 
-// BuildStatus derives the status snapshot from on-disk maps.
+// BuildStatus derives the status snapshot from on-disk maps, newest Map first
+// (ADR-0215).
 func BuildStatus(d *Deps, cwd string, includeAll bool) (StatusSnapshot, error) {
 	maps, err := ScanMaps(d, cwd)
 	if err != nil {
 		return StatusSnapshot{}, err
 	}
-	rows := make([]StatusRow, 0, len(maps))
+	byID := make(map[string]StatusRow, len(maps))
+	ids := make([]string, 0, len(maps))
 	for _, m := range maps {
 		row := mapToStatusRow(m)
 		if includeAll || visibleByDefault(row) {
-			rows = append(rows, row)
+			byID[row.ID] = row
+			ids = append(ids, row.ID)
 		}
 	}
-	sort.SliceStable(rows, func(i, j int) bool { return rows[i].ID < rows[j].ID })
+	rows := make([]StatusRow, 0, len(ids))
+	for _, id := range tasks.SortIdentifiersNewestFirst(ids) {
+		rows = append(rows, byID[id])
+	}
 	return StatusSnapshot{Rows: rows}, nil
 }
 

@@ -47,7 +47,7 @@ func completeMapTicketArgs(cmd *cobra.Command, args []string, toComplete string)
 	case 1:
 		d := cmdLayerDeps()
 		ids := wayfinder.CompletionTicketIDs(d.wayfinderDeps(), d.WorkDir(), args[0])
-		return filterShellCompletions(ids, toComplete), cobra.ShellCompDirectiveNoFileComp
+		return filterShellCompletions(ids, toComplete), setListCompDirective
 	default:
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
@@ -67,5 +67,5 @@ func completeMapIDs(args []string, toComplete string, archivedOnly bool) ([]stri
 	}
 	d := cmdLayerDeps()
 	ids := wayfinder.CompletionMapIDs(d.wayfinderDeps(), d.WorkDir(), archivedOnly)
-	return filterShellCompletions(ids, toComplete), cobra.ShellCompDirectiveNoFileComp
+	return filterShellCompletions(ids, toComplete), setListCompDirective
 }

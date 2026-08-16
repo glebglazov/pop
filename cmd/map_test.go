@@ -890,6 +890,41 @@ func TestMapArchiveRoundTrip(t *testing.T) {
 	}
 }
 
+// TestMapCompletionOrdersMapsNewestFirstButTicketsAscending pins the shape
+// ADR-0215 asks for: picking a Map starts at the newest, walking its tickets
+// starts at the first, and the shell is told to keep pop's order either way.
+func TestMapCompletionOrdersMapsNewestFirstButTicketsAscending(t *testing.T) {
+	t.Parallel()
+	files := oneTicketMapFiles("2026-08-03-demo")
+	for rel, content := range threeTicketMapFiles("2026-08-05-later") {
+		files[rel] = content
+	}
+	d, _, _ := mapRegistryTestDeps(t, files)
+	if err := runMapRegisterWith(d, &bytes.Buffer{}, "2026-08-03-demo"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runMapRegisterWith(d, &bytes.Buffer{}, "2026-08-05-later"); err != nil {
+		t.Fatal(err)
+	}
+
+	wantDirective := cobra.ShellCompDirectiveKeepOrder | cobra.ShellCompDirectiveNoFileComp
+	ids, directive := mapStatusCmd.ValidArgsFunction(mapStatusCmd, nil, "")
+	if !slices.Equal(ids, []string{"2026-08-05-later", "2026-08-03-demo"}) {
+		t.Fatalf("map id completion = %v, want newest first", ids)
+	}
+	if directive != wantDirective {
+		t.Fatalf("map id completion directive = %v, want %v", directive, wantDirective)
+	}
+
+	tickets, ticketDirective := mapClaimCmd.ValidArgsFunction(mapClaimCmd, []string{"2026-08-05-later"}, "")
+	if !slices.Equal(tickets, []string{"01", "02", "03"}) {
+		t.Fatalf("ticket completion = %v, want ascending", tickets)
+	}
+	if ticketDirective != wantDirective {
+		t.Fatalf("ticket completion directive = %v, want %v", ticketDirective, wantDirective)
+	}
+}
+
 // TestMapShellCompletionOffersMapIDs pins the completion split: every verb
 // offers the visible Maps, unarchive offers only the 2026-08-04-filed-away one.
 func TestMapShellCompletionOffersMapIDs(t *testing.T) {
@@ -911,7 +946,7 @@ func TestMapShellCompletionOffersMapIDs(t *testing.T) {
 		if !slices.Equal(got, []string{"visible"}) {
 			t.Fatalf("%s completion = %v, want [visible]", cmd.Name(), got)
 		}
-		if directive != cobra.ShellCompDirectiveNoFileComp {
+		if directive != (cobra.ShellCompDirectiveKeepOrder | cobra.ShellCompDirectiveNoFileComp) {
 			t.Fatalf("%s completion directive = %v", cmd.Name(), directive)
 		}
 	}

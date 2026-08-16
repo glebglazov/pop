@@ -162,8 +162,8 @@ func TestBuildStatusHidesAbandonedAndArchivedButKeepsArrived(t *testing.T) {
 	for _, row := range snap.Rows {
 		visible = append(visible, row.ID)
 	}
-	if len(visible) != 2 || visible[0] != "active" || visible[1] != "arrived-map" {
-		t.Fatalf("default rows = %v, want [active arrived-map]", visible)
+	if len(visible) != 2 || visible[0] != "arrived-map" || visible[1] != "active" {
+		t.Fatalf("default rows = %v, want [arrived-map active]", visible)
 	}
 
 	all, err := BuildStatus(d, "", true)

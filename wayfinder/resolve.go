@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/glebglazov/pop/tasks"
 )
 
 // FindMap resolves a bare map identifier to one scanned Map.
@@ -25,10 +27,11 @@ func FindMap(d *Deps, cwd, raw string) (Map, error) {
 	return Map{}, fmt.Errorf("unknown wayfinder map %q; valid: %s", resolved, mapIDList(maps))
 }
 
-// CompletionMapIDs lists map identifiers for shell completion, sorted. archivedOnly
-// selects the set `unarchive` offers — the one verb whose whole purpose is an
-// archived Map, which every other surface hides. A scan error yields no candidates
-// rather than an error: completion stays silent where a verb would complain.
+// CompletionMapIDs lists map identifiers for shell completion, newest first
+// (ADR-0215). archivedOnly selects the set `unarchive` offers — the one verb
+// whose whole purpose is an archived Map, which every other surface hides. A
+// scan error yields no candidates rather than an error: completion stays
+// silent where a verb would complain.
 func CompletionMapIDs(d *Deps, cwd string, archivedOnly bool) []string {
 	maps, err := ScanMaps(d, cwd)
 	if err != nil {
@@ -41,8 +44,7 @@ func CompletionMapIDs(d *Deps, cwd string, archivedOnly bool) []string {
 		}
 		ids = append(ids, m.ID)
 	}
-	sort.Strings(ids)
-	return ids
+	return tasks.SortIdentifiersNewestFirst(ids)
 }
 
 // CompletionTicketIDs lists the ticket ids of one Map that are still open or
@@ -90,6 +92,5 @@ func mapIDList(maps []Map) string {
 	for i, m := range maps {
 		ids[i] = m.ID
 	}
-	sort.Strings(ids)
-	return strings.Join(ids, ", ")
+	return strings.Join(tasks.SortIdentifiersNewestFirst(ids), ", ")
 }

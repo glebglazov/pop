@@ -10,11 +10,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// setListCompDirective is what every completion returning a list of task-set
-// identifiers hands back. KeepOrder is the load-bearing half of newest-first
-// ordering (ADR-0215): without it zsh's _describe re-sorts the candidates
-// alphabetically before drawing them and the Go-side sort never reaches a
-// human.
+// setListCompDirective is what every completion returning a list of dated
+// identifiers hands back — Task sets and Maps alike, plus the Map ticket
+// completion that keeps its own ascending order. KeepOrder is the
+// load-bearing half of newest-first ordering (ADR-0215): without it zsh's
+// _describe re-sorts the candidates alphabetically before drawing them and
+// the Go-side sort never reaches a human.
 const setListCompDirective = cobra.ShellCompDirectiveKeepOrder | cobra.ShellCompDirectiveNoFileComp
 
 var (
