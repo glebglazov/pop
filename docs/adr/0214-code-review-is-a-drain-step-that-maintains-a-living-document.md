@@ -55,6 +55,18 @@ learns its own accent.
   switch. Verification may spawn a Remediation task and move the tree; a document
   written before that would describe a changeset that no longer exists at the
   moment the human reads it.
+- **The review runs in the drain's own pane, not one of its own.** A pop pane is
+  a detached process — `EnsureTaggedPane` sends a shell command and returns
+  without waiting — so a Reviewer spawned into one would let the drain reach the
+  terminal switch before the document existed, losing the ordering the bullet
+  above buys. The in-drain review is therefore an in-process call, streaming into
+  the drain pane exactly as the implement and verify phases do; only its captured
+  telemetry is separated, under a `review` phase label. The general rule, of
+  which verify was already an instance: **an in-drain phase streams into the
+  drain's pane, and a dashboard verb spawns a tagged pane of its own.**
+  `TagVerify` panes belong to `LaunchVerify`, the dashboard's on-demand verb, not
+  to the drain's verify phase. A dashboard Review verb would take a `TagReview`
+  pane on the same grounds.
 - **The Reviewer is not given diff bodies.** It gets the commit range and the
   Work diff view for orientation and reads the changed files itself, so the
   prompt stays bounded regardless of set size. Pop's review prompt must say so
