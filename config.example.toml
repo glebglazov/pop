@@ -33,6 +33,33 @@ projects = [
 # Options: "alt" (default), "ctrl", "disabled"
 # quick_access_modifier = "alt"
 
+# [tmux]
+# Global-scope only: excluded from the include whitelist and from repo-scope
+# surfaces, since a repository that could redirect the socket could start a
+# server pop then treats as the user's.
+#
+# Tmux server socket name every pop command addresses (-L <name>). Defaults to
+# "" (unset), which addresses tmux's own default server with no -L flag.
+# socket = ""
+#
+# Path to a user-authored tmux config the Base tmux config sources last, so a
+# user running pop's Base tmux config can still keep personal bindings. Pop
+# never creates or writes this file.
+# include = "~/.config/pop/tmux.conf"
+
+# [integrations]
+# AI-agent integration settings, read at repo-integrate time as well as by
+# `pop doctor`.
+#
+# Embedded skills to install (array of skill aliases). Defaults to installing
+# both shipped skills.
+# skills = ["tasks", "pane"]
+#
+# Prefix applied to every embedded skill's installed name, so an installed
+# skill is named "<prefix><base>". Defaults to "pop-"; set to "" for bare
+# base names.
+# skills_prefix = "pop-"
+
 # [project]
 # Project-picker custom keybindings (override global commands matched by key)
 # commands = [
@@ -86,6 +113,37 @@ projects = [
 #     { command = "git status", weight = 1 },
 # ]
 
+# [repo."~/Dev/personal/pop"]
+# Per-repo override blocks, keyed by any checkout path of the repository (the
+# key is canonicalized and resolves to the same repository identity for every
+# worktree). Accepts the same repo-scope keys as a repo-root .pop/config.toml
+# (workbenches, preferred_workbench) plus the two keys that are [repo]-only
+# because they name machine topology and can never be committed:
+#
+# trunk names the checkout that is this repository's Trunk worktree (the fork
+# base for managed worktrees).
+# trunk = "~/Dev/personal/pop"
+#
+# turn_cap bounds how many Turns one implementation attempt in this repository
+# may spend (claude only; other presets cannot be told).
+# turn_cap = 40
+#
+# preferred_workbench names the repo-default Workbench that auto-applies when
+# a session is born for any checkout of this repo.
+# preferred_workbench = "full-dev"
+#
+# workbenches are repo-scope session blueprints, unioned by name across the
+# repo-scope ladder; a higher-precedence source overrides a same-named
+# blueprint from a lower one.
+# workbenches = [{ name = "minimal", windows = [{ name = "edit", layout = { command = "nvim" } }] }]
+
+# A repository can instead declare workbenches and preferred_workbench in a
+# committed repo-root .pop/config.toml (not this file) — the same repo-scope
+# key set as [repo."<path>"] above, minus trunk and turn_cap, which are
+# machine topology and never valid there. The global config.toml keys above
+# win on collision; .pop/config.toml only fills in what the user's central
+# config leaves unset.
+
 # [pane_monitoring]
 # Automatically downgrade unread to clear when the pane is currently
 # active (visible and focused). Useful if you're already watching the output.
@@ -95,6 +153,17 @@ projects = [
 # --source tmux-global. Set this to disable auto-read on tmux navigation
 # while still allowing explicit reads from the dashboard.
 # ignore_status_from = ["tmux-global"]
+#
+# Bind a TCP listener for daemon IPC instead of direct state writes. Needed
+# for the agent-step Topic derivation pipeline below to run on the daemon
+# rather than falling back to the prompt hook.
+# tcp_server = false
+#
+# Pin the monitor daemon's TCP address (host:port). Empty derives it from the
+# data dir. A pinned addr is shared across any data dirs using this config, so
+# only pin it for single-instance setups (e.g. exposing a fixed port to
+# containers).
+# addr = "127.0.0.1:4830"
 #
 # Topic derivation pipeline: an ordered list of typed steps pop runs to derive a
 # pane's Topic (ADR 0068). Each step is either type = "truncate" (cheap local
@@ -132,6 +201,12 @@ projects = [
 # Word cap applied to a derived Topic after it is normalized into a lowercase
 # kebab slug (e.g. debugging-auth-middleware). Defaults to 5.
 # topic_words = 5
+#
+# Per-recipe timeout, in seconds, for a topic_agents agent step, after which
+# pop kills it and falls through to the next recipe (then to prompt
+# truncation). Large local models (e.g. a multi-GB ollama model that must
+# cold-load) need more than the default of 30.
+# topic_derivation_timeout = 30
 
 # [updates]
 # Gate the picker Update notice and the daily background update check.
@@ -207,9 +282,18 @@ projects = [
 # attempt_retry_delays = ["1m", "5m", "15m"]
 #
 # [work.verify]
-# The Verifier (ADR-0086). An omitted agents list falls back to
-# [work.implement].agents.
+# The Verifier (ADR-0086). `enabled` is the master opt-in switch: absent/false
+# means the Verifier never runs and status derives from the manifest alone.
+# An omitted agents list falls back to [work.implement].agents. `effort`
+# selects the Verifier's model-strength tier (light, standard, or heavy);
+# absent defaults to heavy. `max_remediation_depth` bounds the
+# verify->remediate->re-verify loop: a FIXABLE verdict spawns a Remediation
+# task only while the set is under this many cycles, after which it parks at
+# VERIFY-FAILED; a value <= 0 disables remediation.
+# enabled = false
 # agents = ["claude"]
+# effort = "heavy"
+# max_remediation_depth = 3
 # max_tries = 3
 # attempt_retry_delays = ["1m", "5m", "15m"]
 #
@@ -239,6 +323,21 @@ projects = [
 #   { display_name = "Claude Cheap", cmd = "claude --model haiku" },
 #   "codex",
 # ]
+
+# [[work.dashboard.tasks.presets]]
+# Work view presets for the Work dashboard (ADR-0197). A declared list
+# (including empty) replaces pop's shipped roster wholesale; the first entry
+# is the default view, and entries 1-9 get digit shortcuts. Reference a
+# shipped preset by name with { system = "<name>" }, or declare fields
+# directly. Fields AND-combine; `hide` subtracts its match from the result.
+# name = "active"
+# muted = false
+# [work.dashboard.tasks.presets.hide]
+# status = ["done"]
+# unfolded = false
+#
+# [[work.dashboard.tasks.presets]]
+# system = "recent-7d"
 
 # [work.implement.git]
 # Commit-time git config applied ONLY to pop's own commits during a task drain
