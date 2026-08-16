@@ -93,7 +93,8 @@ the dashboard's "a" toggle remain authoritative afterwards.
 
 Re-registering an already-registered set never rebinds it; move it with
 "pop tasks bind-worktree <task-set-name> --force" from inside the target
-checkout.
+checkout. --auto-drain is not covered by that rule: naming a set and passing the
+flag raises its consent bit whether or not the set was already registered.
 
 A set that comes back MALFORMED is a fix loop, not a failure: the diagnostics
 name every problem at once, so fix what they name and re-run until the set reads
@@ -290,7 +291,7 @@ func init() {
 	taskCmd.AddCommand(taskStatusCmd)
 	taskRegisterCmd.Flags().BoolVar(&taskRegisterManaged, "managed", false, "Provision a pop-managed worktree forked from the Trunk worktree and bind each newly registered set before returning")
 	taskRegisterCmd.Flags().StringVar(&taskRegisterTrunk, "trunk", "", "State <path> as this repository's Trunk worktree in pop's override layer (required for bare repos on first managed register or bind-worktree)")
-	taskRegisterCmd.Flags().BoolVar(&taskRegisterAutoDrain, "auto-drain", false, "Enable the auto-drain consent bit on each newly registered set (default off); `pop tasks auto-drain` and the dashboard `a` toggle remain authoritative afterward")
+	taskRegisterCmd.Flags().BoolVar(&taskRegisterAutoDrain, "auto-drain", false, "Enable the auto-drain consent bit on each newly registered set, and on a set named as an argument even if it was already registered (default off); `pop tasks auto-drain` and the dashboard `a` toggle remain authoritative afterward")
 	taskCmd.AddCommand(taskRegisterCmd)
 	taskCmd.AddCommand(taskArchiveCmd)
 	taskCmd.AddCommand(taskUnarchiveCmd)
@@ -441,13 +442,13 @@ func runTaskRegisterWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 	// longer take effect. The set is never MALFORMED for carrying them.
 	warnDeprecatedManifestKeys(w, result)
 
-	// --auto-drain sets the consent bit on each set this register just activated,
-	// reusing the same primitive `pop tasks auto-drain` writes through. Off by
-	// default: unattended draining stays opt-in per invocation. It runs only for
-	// first-time registrations, mirroring eagerBindNewRegistrations, and the
-	// dashboard `a` toggle / `pop tasks auto-drain` remain authoritative afterward.
+	// --auto-drain sets the consent bit on each set this register names, reusing
+	// the same primitive `pop tasks auto-drain` writes through. Off by default:
+	// unattended draining stays opt-in per invocation, and the dashboard `a`
+	// toggle / `pop tasks auto-drain` remain authoritative afterward.
+	var autoDrained []string
 	if taskRegisterAutoDrain {
-		applyRegisterAutoDrain(d, resolved.DefinitionPath, result.NewRegistrationIDs, w)
+		autoDrained = applyRegisterAutoDrain(d, result, resolved.DefinitionPath, taskSetID, w)
 	}
 
 	// Resolve the runtime checkout once (see runTaskStatusWith): Binding-first
@@ -465,15 +466,15 @@ func runTaskRegisterWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 		// worktree from the Trunk worktree instead (ADR-0147).
 		if !taskRegisterManaged {
 			eagerBindNewRegistrations(d, cfg, runtimePath, result.NewRegistrationIDs, w)
-			// Said once, right after the bind that provokes it: a set that both
-			// consents to unattended draining and just bound to the Trunk
-			// worktree is the one consequential shape the here-by-default rule
-			// produces (ADR-0192).
-			if taskRegisterAutoDrain && len(result.NewRegistrationIDs) > 0 {
-				warnTrunkAutoDrain(d, w, runtimePath)
-			}
 		}
 	}
+
+	// Said once per set, after every binding this register makes exists: a set
+	// that both consents to unattended draining and is bound to the Trunk
+	// worktree is the one consequential shape the here-by-default rule produces
+	// (ADR-0192). The gate is the set's own binding, so --managed needs no
+	// separate case — a provisioned worktree is simply not the Trunk.
+	warnTrunkAutoDrain(d, w, autoDrained)
 
 	// With a set argument, drill into that one set's per-task breakdown after
 	// registering; absent, render the whole-repo overview.
@@ -528,34 +529,67 @@ func eagerBindNewRegistrations(d *tasks.Deps, cfg *config.Config, checkoutPath s
 	}
 }
 
-// applyRegisterAutoDrain enables the auto-drain consent bit for each set this
-// register just activated (--auto-drain). It writes through
+// applyRegisterAutoDrain enables the auto-drain consent bit for each set
+// --auto-drain names, and reports the ones now consenting. It writes through
 // tasks.SetTaskSetAutoDrain — the same primitive SetAutoDrainWith uses to back
 // `pop tasks auto-drain` — rather than a parallel writer. Best-effort: a
 // failure is warned, not fatal, so it cannot itself fail a register.
-func applyRegisterAutoDrain(d *tasks.Deps, defPath string, newSetIDs []string, w io.Writer) {
-	for _, setID := range newSetIDs {
+func applyRegisterAutoDrain(d *tasks.Deps, result *tasks.RefreshResult, defPath, taskSetID string, w io.Writer) []string {
+	var applied []string
+	for _, setID := range autoDrainTargets(result, taskSetID) {
 		if _, err := tasks.SetTaskSetAutoDrain(d, defPath, setID, true); err != nil {
 			fmt.Fprintf(w, "warning: could not enable auto-drain for %s: %v\n", setID, err)
+			continue
+		}
+		applied = append(applied, setID)
+	}
+	return applied
+}
+
+// autoDrainTargets names the sets --auto-drain writes consent for: every set
+// this register just activated, plus the set named as the positional argument
+// even when it was already registered. Consent is not a binding — re-registering
+// deliberately never rebinds, because overwriting a binding moves work to
+// another checkout, while raising the consent bit only grants what the
+// invocation asked for. A bare register still widens no further than its own new
+// registrations, so the flag can never flip the bit across a whole backlog. An
+// argument that will not resolve is dropped here; runTaskRegisterWith reports it
+// when it renders that set's detail.
+func autoDrainTargets(result *tasks.RefreshResult, taskSetID string) []string {
+	targets := append([]string(nil), result.NewRegistrationIDs...)
+	named, err := tasks.ResolveTaskSetTarget(result, taskSetID)
+	if err != nil || named == "" {
+		return targets
+	}
+	for _, id := range targets {
+		if id == named {
+			return targets
 		}
 	}
+	return append(targets, named)
 }
 
 // warnTrunkAutoDrain names the hazard the here-by-default registration rule
-// deliberately makes ordinary (ADR-0192): the set now consents to unattended
+// deliberately makes ordinary (ADR-0192): a set that now consents to unattended
 // draining and is bound to the Trunk worktree, so the Work daemon may commit and
-// open panes on the branch the human is standing on. Callers gate on the consent
-// bit and on no managed worktree having been asked for; this adds the locality
-// half, read through checkoutLocality — the same predicate `pop tasks checkout`
-// renders, so the warning cannot disagree with the binding it describes. A
-// checkout whose locality will not resolve is silent: this is output, never a
-// reason to fail a registration.
-func warnTrunkAutoDrain(d *tasks.Deps, w io.Writer, checkoutPath string) {
-	locality, _, err := checkoutLocality(d, checkoutPath)
-	if err != nil || locality != localityTrunk {
-		return
+// open panes on the branch the human is standing on. The caller passes the sets
+// whose consent bit this register raised; the locality half is read per set from
+// the binding it actually carries, through checkoutLocality — the same predicate
+// `pop tasks checkout` renders, so the warning cannot disagree with the binding
+// it describes. An unbound set, or a checkout whose locality will not resolve,
+// is silent: this is output, never a reason to fail a registration.
+func warnTrunkAutoDrain(d *tasks.Deps, w io.Writer, setIDs []string) {
+	for _, setID := range setIDs {
+		_, bound, ok, err := binding.FindBySetID(d, setID)
+		if err != nil || !ok {
+			continue
+		}
+		locality, _, err := checkoutLocality(d, bound.RuntimePath)
+		if err != nil || locality != localityTrunk {
+			continue
+		}
+		fmt.Fprintf(w, "warning: auto-drain is on and %s is bound to the Trunk worktree at %s: the Work daemon may drain it unattended here, committing and opening panes on the branch you are standing on; re-register with 'managed' (--managed) for an isolated worktree instead\n", setID, bound.RuntimePath)
 	}
-	fmt.Fprintf(w, "warning: auto-drain is on and this set is bound to the Trunk worktree at %s: the Work daemon may drain it unattended here, committing and opening panes on the branch you are standing on; re-register with 'managed' (--managed) for an isolated worktree instead\n", checkoutPath)
 }
 
 // warnDeprecatedManifestKeys prints a deprecation warning for each set whose

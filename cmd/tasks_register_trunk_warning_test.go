@@ -13,12 +13,12 @@ import (
 
 // The register-time trunk warning is one line, and these tests care only about
 // that line: the rest of register's output is a status render.
-const trunkAutoDrainWarnMarker = "auto-drain is on and this set is bound to the Trunk worktree"
+const trunkAutoDrainWarnMarker = "is bound to the Trunk worktree"
 
 func trunkAutoDrainWarnings(out string) []string {
 	var found []string
 	for _, line := range strings.Split(out, "\n") {
-		if strings.HasPrefix(line, "warning:") && strings.Contains(line, trunkAutoDrainWarnMarker) {
+		if strings.HasPrefix(line, "warning: auto-drain is on and") && strings.Contains(line, trunkAutoDrainWarnMarker) {
 			found = append(found, line)
 		}
 	}
