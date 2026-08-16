@@ -128,7 +128,15 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 	if err = run.setup(); err != nil {
 		return run.result, err
 	}
-	return run.loop()
+	result, err = run.loop()
+	// Interrupt auto-drain revocation, exit-path half (ADR-0120): a drain that
+	// ends on an interrupt leaves the set without Auto-drain consent no matter
+	// which phase the interrupt landed in. Only the task-execution attempt routes
+	// through the interrupt gate, which revokes earlier and revives on Continue;
+	// a quota-recovery wait, the Verifier and the Reviewer each end the run from
+	// their own path and are covered here.
+	run.revokeAutoDrainOnInterruptedExit(err)
+	return result, err
 }
 
 // loop drains the resolved Task set sequentially through eligible AFK tasks. It

@@ -11,26 +11,11 @@ import (
 	"github.com/glebglazov/pop/store"
 )
 
-// drainSetAutoDrain reads the store-backed auto-drain consent bit recorded for a
-// run's registered set, so interrupt tests can assert clear/revive against the
-// same value the queue's `Ready && AutoDrain` eligibility predicate reads.
+// drainSetAutoDrain reads the auto-drain consent bit recorded for a run's
+// registered set.
 func drainSetAutoDrain(t *testing.T, run *implementRun, setID string) bool {
 	t.Helper()
-	state, err := LoadGlobalStateWith(run.d, run.statePath)
-	if err != nil {
-		t.Fatalf("LoadGlobalState: %v", err)
-	}
-	canon, err := CanonicalDefinitionPathWith(run.d, run.resolved.DefinitionPath)
-	if err != nil {
-		t.Fatalf("CanonicalDefinitionPathWith: %v", err)
-	}
-	for _, set := range state.Tasks[canon].TaskSets {
-		if set.ID == setID {
-			return set.AutoDrain
-		}
-	}
-	t.Fatalf("set %q not registered", setID)
-	return false
+	return registeredAutoDrain(t, run.d, run.resolved.DefinitionPath, setID)
 }
 
 // readSetProgress returns the set-level progress.txt for the run's manifest dir,
