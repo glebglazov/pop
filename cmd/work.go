@@ -49,11 +49,18 @@ var workDashboardCmd = &cobra.Command{
 // Work dashboard — an alias for seeding the `all` view preset (ADR-0197).
 var workDashboardIncludeDone bool
 
+// workDashboardPreset backs the `--preset` flag on the Work dashboard,
+// matching `pop work status` (ADR-0197/0210: presets are the shared view
+// mechanism of both read surfaces). Empty means the configured default preset.
+var workDashboardPreset string
+
 func init() {
 	rootCmd.AddCommand(workCmd)
 	workCmd.AddCommand(workShowPathCmd)
 	workCmd.AddCommand(workDashboardCmd)
 	workDashboardCmd.Flags().BoolVar(&workDashboardIncludeDone, "include-done", false, "deprecated: alias for seeding the all view preset")
+	workDashboardCmd.Flags().StringVar(&workDashboardPreset, "preset", "", "Work view preset name to open with (default: first configured preset)")
+	_ = workDashboardCmd.RegisterFlagCompletionFunc("preset", completeWorkStatusPreset)
 }
 
 func runWorkShowPath(cmd *cobra.Command, args []string) {
@@ -81,7 +88,7 @@ func runWorkDashboard(cmd *cobra.Command, args []string) error {
 	}
 	d := cmdLayerDeps().queueDeps()
 	d.LoadConfig = workConfigLoad
-	preset, err := resolveWorkStatusPreset(cfg, "", workDashboardIncludeDone, cmd.ErrOrStderr())
+	preset, err := resolveWorkStatusPreset(cfg, workDashboardPreset, workDashboardIncludeDone, cmd.ErrOrStderr())
 	if err != nil {
 		return err
 	}

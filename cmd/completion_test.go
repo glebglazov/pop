@@ -303,6 +303,9 @@ func TestWorkStatusPresetShellCompletionCandidates(t *testing.T) {
 
 	out := shellCompNoDesc(t, "work", "status", "--preset")
 	assertShellCompContains(t, out, "active", "unfolded", "recent-7d", "recent-30d", "all", "muted")
+
+	out = shellCompNoDesc(t, "work", "dashboard", "--preset")
+	assertShellCompContains(t, out, "active", "unfolded", "recent-7d", "recent-30d", "all", "muted")
 }
 
 func TestTasksUnbindWorktreeShellCompletionCandidates(t *testing.T) {

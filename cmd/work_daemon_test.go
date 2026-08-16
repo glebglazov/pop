@@ -68,6 +68,7 @@ func TestWorkReadSurfacesThreadViewPreset(t *testing.T) {
 	oldStatusInc := workStatusIncludeDone
 	oldDashInc := workDashboardIncludeDone
 	oldStatusPreset := workStatusPreset
+	oldDashPreset := workDashboardPreset
 	defer func() {
 		cfgFile = oldCfgFile
 		workConfigLoad = oldLoad
@@ -77,6 +78,7 @@ func TestWorkReadSurfacesThreadViewPreset(t *testing.T) {
 		workStatusIncludeDone = oldStatusInc
 		workDashboardIncludeDone = oldDashInc
 		workStatusPreset = oldStatusPreset
+		workDashboardPreset = oldDashPreset
 	}()
 
 	setCmdLayerDeps(t, newTestCmdDeps(t, "", t.TempDir(), ""))
@@ -126,14 +128,20 @@ func TestWorkReadSurfacesThreadViewPreset(t *testing.T) {
 		t.Fatalf("--include-done ViewPreset: status=%q dashboard=%q, want both all", statusPreset, dashPreset)
 	}
 
-	// --preset unfolded on status.
+	// --preset unfolded on status, and on the dashboard (ADR-0197/0210: presets
+	// are the shared view mechanism of both read surfaces).
 	workStatusIncludeDone = false
+	workDashboardIncludeDone = false
 	workStatusPreset = "unfolded"
+	workDashboardPreset = "unfolded"
 	if err := runWorkStatus(workStatusCmd, nil); err != nil {
 		t.Fatal(err)
 	}
-	if statusPreset != "unfolded" {
-		t.Fatalf("--preset unfolded ViewPreset = %q, want unfolded", statusPreset)
+	if err := runWorkDashboard(workDashboardCmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	if statusPreset != "unfolded" || dashPreset != "unfolded" {
+		t.Fatalf("--preset unfolded ViewPreset: status=%q dashboard=%q, want both unfolded", statusPreset, dashPreset)
 	}
 
 	// `--preset muted` lists what the dashboard's muted preset lists (ADR-0200
@@ -177,6 +185,9 @@ func TestWorkReadSurfacesRegisterIncludeDoneFlag(t *testing.T) {
 		t.Fatal("work dashboard missing --include-done flag")
 	} else if f.DefValue != "false" {
 		t.Fatalf("work dashboard --include-done default = %q, want false", f.DefValue)
+	}
+	if f := workDashboardCmd.Flags().Lookup("preset"); f == nil {
+		t.Fatal("work dashboard missing --preset flag")
 	}
 }
 

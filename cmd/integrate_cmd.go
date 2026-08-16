@@ -13,6 +13,7 @@ var integrateUpdateExisting bool
 var integratePaneSkill bool
 var integrateTaskSkills bool
 var integrateNoPaneSkill bool
+var integrateNoPaneSkillsLegacy bool
 var integrateNoTaskSkills bool
 var integrateVerbose bool
 var integrateOverwriteConflicts bool
@@ -34,15 +35,16 @@ component in the merged baseline — no prompts, TTY or not. Re-running
 re-asserts the full merged baseline (bare integrate takes back every
 component you declined).
 
-  --no-pane-skills
+  --no-pane-skill
                 Remove the pane skill if it is currently installed (pop-owned
                 artifacts only) and state the decline in pop's override layer,
-                so it holds for later runs.
+                so it holds for later runs. Renamed from --no-pane-skills,
+                which now errors naming the new spelling.
 
   --no-task-skills
                 Remove the task planning skills if currently installed
                 (pop-owned only) and state the decline. Same semantics as
-                --no-pane-skills.
+                --no-pane-skill.
 
   --overwrite-conflicts
                 On install, prompt to destroy unowned entries that block
@@ -135,8 +137,10 @@ func init() {
 		"Install the pane skill (lets the agent drive tmux panes) alongside the status wiring")
 	integrateCmd.Flags().BoolVar(&integrateTaskSkills, "task-skills", false,
 		"Install the task planning skills (grill-with-docs, to-spec, to-tasks) alongside the status wiring")
-	integrateCmd.Flags().BoolVar(&integrateNoPaneSkill, "no-pane-skills", false,
+	integrateCmd.Flags().BoolVar(&integrateNoPaneSkill, "no-pane-skill", false,
 		"Remove the pane skill if installed (pop-owned only) and record the opt-out")
+	integrateCmd.Flags().BoolVar(&integrateNoPaneSkillsLegacy, "no-pane-skills", false,
+		"Removed: renamed to --no-pane-skill")
 	integrateCmd.Flags().BoolVar(&integrateNoTaskSkills, "no-task-skills", false,
 		"Remove the task planning skills if installed (pop-owned only) and record the opt-out")
 	integrateCmd.Flags().BoolVar(&integrateVerbose, "verbose", false,
@@ -153,6 +157,10 @@ func positiveIntegrateFlagError(flag string) error {
 	return fmt.Errorf("%s is no longer supported: configure optional components via [integrations] skills in pop config, or run 'pop integrate <agent>' to install the merged baseline", flag)
 }
 
+func renamedIntegrateFlagError(oldFlag, newFlag string) error {
+	return fmt.Errorf("%s is renamed to %s", oldFlag, newFlag)
+}
+
 func runIntegrate(cmd *cobra.Command, args []string) error {
 	if integrateUpdateExisting {
 		if integrateOverwriteConflicts {
@@ -165,6 +173,9 @@ func runIntegrate(cmd *cobra.Command, args []string) error {
 	}
 	if integrateTaskSkills {
 		return positiveIntegrateFlagError("--task-skills")
+	}
+	if integrateNoPaneSkillsLegacy {
+		return renamedIntegrateFlagError("--no-pane-skills", "--no-pane-skill")
 	}
 
 	var explicitOptOuts map[integrate.ComponentID]bool

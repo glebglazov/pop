@@ -299,7 +299,7 @@ func TestKimiRefresh_ReconcilesIntegratedAgent(t *testing.T) {
 	}
 }
 
-// TestKimiIntegrate_ComponentOptOutRemovesSkills: --no-pane-skills and
+// TestKimiIntegrate_ComponentOptOutRemovesSkills: --no-pane-skill and
 // --no-task-skills reconcile kimi the same way they do the JSON-hook agents —
 // the opted-out component's pop-owned artifacts go, the status wiring and the
 // other component stay.
@@ -312,7 +312,7 @@ func TestKimiIntegrate_ComponentOptOutRemovesSkills(t *testing.T) {
 		gone   string
 		kept   string
 	}{
-		{"--no-pane-skills", ComponentPaneSkill, ComponentTaskSkills, "pop-tmux-pane", "pop-to-tasks"},
+		{"--no-pane-skill", ComponentPaneSkill, ComponentTaskSkills, "pop-tmux-pane", "pop-to-tasks"},
 		{"--no-task-skills", ComponentTaskSkills, ComponentPaneSkill, "pop-to-tasks", "pop-tmux-pane"},
 	}
 	for _, tc := range tests {

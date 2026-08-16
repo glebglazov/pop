@@ -11,8 +11,8 @@ import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/integrate"
-	"github.com/glebglazov/pop/monitor"
 	"github.com/glebglazov/pop/internal/tmux"
+	"github.com/glebglazov/pop/monitor"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/release"
 	"github.com/glebglazov/pop/tasks"
@@ -988,7 +988,7 @@ func doctorStatusReason(check doctorCheck) string {
 // component a bare `pop integrate <agent>` installs.
 var doctorComponentFlag = map[integrate.ComponentID]string{
 	integrate.ComponentStatusWiring: "",
-	integrate.ComponentPaneSkill:    "--no-pane-skills",
+	integrate.ComponentPaneSkill:    "--no-pane-skill",
 	integrate.ComponentTaskSkills:   "--task-skills",
 }
 

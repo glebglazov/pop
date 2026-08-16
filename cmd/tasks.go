@@ -355,7 +355,7 @@ func init() {
 	taskBindWorktreeCmd.Flags().BoolVar(&taskBindWorktreeManaged, "managed", false, "Provision a pop-managed worktree forked from the Trunk worktree and bind the set before returning")
 	taskBindWorktreeCmd.Flags().StringVar(&taskBindWorktreeTrunk, "trunk", "", "State <path> as this repository's Trunk worktree in pop's override layer (required for bare repos on first managed bind-worktree)")
 	taskCmd.AddCommand(taskBindWorktreeCmd)
-	taskUnbindWorktreeCmd.Flags().BoolVar(&taskUnbindWorktreeYes, "yes", false, "Skip confirmation prompt")
+	taskUnbindWorktreeCmd.Flags().BoolVarP(&taskUnbindWorktreeYes, "yes", "y", false, "Skip confirmation prompt")
 	taskCmd.AddCommand(taskUnbindWorktreeCmd)
 	taskFoldCmd.Flags().BoolVarP(&taskFoldYes, "yes", "y", false, "Skip managed-worktree delete confirmation after fold")
 	taskFoldCmd.Flags().StringArrayVar(&taskAgentPresets, "agent", nil, "Agent preset for fold-conflict assistance (claude, opencode, cursor, codex, pi, kimi), optionally followed by extra agent args")

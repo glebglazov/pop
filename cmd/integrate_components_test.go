@@ -35,6 +35,28 @@ func TestPositiveIntegrateFlagsHardError(t *testing.T) {
 	}
 }
 
+// TestLegacyNoPaneSkillsFlagHardError: the retired --no-pane-skills spelling
+// errors naming its replacement, --no-pane-skill, instead of aliasing it.
+func TestLegacyNoPaneSkillsFlagHardError(t *testing.T) {
+	t.Parallel()
+	prevLegacy := integrateNoPaneSkillsLegacy
+	prevUpdate := integrateUpdateExisting
+	t.Cleanup(func() {
+		integrateNoPaneSkillsLegacy = prevLegacy
+		integrateUpdateExisting = prevUpdate
+	})
+	integrateUpdateExisting = false
+
+	integrateNoPaneSkillsLegacy = true
+	err := runIntegrate(integrateCmd, []string{"claude"})
+	if err == nil {
+		t.Fatal("expected error for --no-pane-skills")
+	}
+	if !strings.Contains(err.Error(), "--no-pane-skills") || !strings.Contains(err.Error(), "--no-pane-skill") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestIntegrateCmd_UpdateExistingWithAgentArgIsError(t *testing.T) {
 	prev := integrateUpdateExisting
 	integrateUpdateExisting = true

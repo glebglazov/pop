@@ -13,7 +13,7 @@ type Request struct {
 	Components []ComponentID
 
 	// ExplicitOptOuts names components the caller is removing and recording
-	// as opted out (e.g. --no-pane-skills).
+	// as opted out (e.g. --no-pane-skill).
 	ExplicitOptOuts map[ComponentID]bool
 
 	// RemoveComponents is the set to remove for Remove. Empty means every
