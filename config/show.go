@@ -9,14 +9,15 @@ import (
 
 // ResolvedTrunk is the current repo's effective Trunk worktree as surfaced by
 // pop config show: the checkout that serves as Trunk — a bare repo's
-// config-declared trunk = true worktree, or a non-bare repo's git-derived main
-// worktree (which no config file names) — together with whether the underlying
-// repository is bare. Resolving it needs git, so the caller (cmd) wires pop's
-// own trunk resolver; config only renders the answer. A nil *ResolvedTrunk means
-// the command ran outside any git repo, so the section is omitted.
+// config-declared trunk = "<path>" worktree (ADR-0212 decision 3), or a
+// non-bare repo's git-derived main worktree (which no config file names) —
+// together with whether the underlying repository is bare. Resolving it needs
+// git, so the caller (cmd) wires pop's own trunk resolver; config only renders
+// the answer. A nil *ResolvedTrunk means the command ran outside any git repo,
+// so the section is omitted.
 type ResolvedTrunk struct {
 	// Path is the Trunk worktree checkout; rendered as an absolute realpath.
-	// Empty when no trunk is resolvable (e.g. a bare repo with no trunk = true
+	// Empty when no trunk is resolvable (e.g. a bare repo with no trunk
 	// override), in which case only Bare is emitted.
 	Path string
 	// Bare reports whether the underlying repository is bare.
@@ -30,7 +31,7 @@ type ResolvedTrunk struct {
 }
 
 // CurrentTrunkFunc resolves the current repo's effective Trunk worktree from the
-// merged config (which supplies any trunk = true override). It returns a nil
+// merged config (which supplies any trunk = "<path>" override). It returns a nil
 // *ResolvedTrunk when run outside any git repo, so the current-repo section is
 // omitted. cmd wires pop's real resolver; config never imports the trunk
 // resolver, keeping this package free of git and the task-binding store.

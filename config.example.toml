@@ -1,7 +1,9 @@
 # pop configuration
 # Place this file at ~/.config/pop/config.toml
 
-# Include additional config files (only their projects entries are merged)
+# Include additional config files (only projects, [work.*], [effort.<agent>],
+# [repo."<path>"], [agents.<preset>], workbenches, [workbench] and
+# [work.dashboard] are merged; parent and earlier includes win on collision)
 # Paths support ~ expansion and are resolved relative to this config file
 # includes = ["work.toml", "~/Dev/personal.toml"]
 

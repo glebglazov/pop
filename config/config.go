@@ -683,7 +683,7 @@ type Config struct {
 	// config comes from rather than holding a value — and a layer laid over the
 	// merge cannot decide what went into it. Hence the one exception, with Repo,
 	// to every leaf being overridable (ADR-0212 decision 4).
-	Includes              []string             `toml:"includes" override:"never" desc:"Additional config files to merge in (paths, later wins)."`
+	Includes              []string             `toml:"includes" override:"never" desc:"Additional config files to merge in (paths; parent and earlier includes win)."`
 	Projects              []ProjectEntry       `toml:"projects" include:"append" desc:"Directories or globs offered in the project picker."`
 	Commands              []UserDefinedCommand `toml:"commands" desc:"User-defined commands surfaced in the picker."`
 	ExcludeCurrentSession bool                 `toml:"exclude_current_session" desc:"Hide the current tmux session from the picker."`
