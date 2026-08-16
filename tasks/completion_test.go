@@ -42,7 +42,7 @@ func TestCompleteTaskSetIDsFromDiscovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(stems) != 2 || stems[0] != "alpha" || stems[1] != "beta" {
+	if len(stems) != 2 || stems[0] != "beta" || stems[1] != "alpha" {
 		t.Fatalf("stems = %#v", stems)
 	}
 }
@@ -106,7 +106,7 @@ func TestCompleteActionableTaskTargetsOmitsDoneSetsAndTasks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(all, ",") != "archived/,feature/" {
+	if strings.Join(all, ",") != "feature/,archived/" {
 		t.Fatalf("unfiltered identifiers = %#v", all)
 	}
 }
@@ -436,11 +436,11 @@ func TestCompleteTaskSetIDsDoesNotRegisterInStateFile(t *testing.T) {
 	}
 }
 
-func TestCompleteTaskSetIDsSorted(t *testing.T) {
+func TestCompleteTaskSetIDsOrdersNewestFirst(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	tasksDir, d := setupCompletionRepo(t, root)
-	for _, stem := range []string{"charlie", "alpha", "bravo"} {
+	for _, stem := range []string{"2026-06-15-bravo", "2026-07-01-charlie", "2026-06-01-alpha"} {
 		writeCompletionTaskSet(t, tasksDir, stem)
 	}
 
@@ -448,7 +448,7 @@ func TestCompleteTaskSetIDsSorted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(stems, ",") != "alpha,bravo,charlie" {
-		t.Fatalf("stems = %#v", stems)
+	if strings.Join(stems, ",") != "2026-07-01-charlie,2026-06-15-bravo,2026-06-01-alpha" {
+		t.Fatalf("stems = %#v (want newest-first)", stems)
 	}
 }

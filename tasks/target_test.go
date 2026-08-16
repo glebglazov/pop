@@ -194,7 +194,7 @@ func TestTaskTargetIdentifierCompletions(t *testing.T) {
 	refresh := refreshFixture(t, root)
 
 	ids := taskTargetIdentifierCompletions(refresh, "")
-	if len(ids) != 2 || ids[0] != "alpha/" || ids[1] != "beta/" {
+	if len(ids) != 2 || ids[0] != "beta/" || ids[1] != "alpha/" {
 		t.Fatalf("identifiers = %#v", ids)
 	}
 
@@ -229,7 +229,7 @@ func TestActionableTaskTargetCompletionsNeverOfferDoneThings(t *testing.T) {
 	}}
 
 	ids := actionableTaskTargetCompletions(refresh, "")
-	if strings.Join(ids, ",") != "broken/,deferred/,mixed/" {
+	if strings.Join(ids, ",") != "mixed/,deferred/,broken/" {
 		t.Fatalf("actionable identifiers = %#v", ids)
 	}
 
@@ -240,7 +240,7 @@ func TestActionableTaskTargetCompletionsNeverOfferDoneThings(t *testing.T) {
 
 	// The unfiltered variant still offers Done sets and done tasks (stream).
 	all := taskTargetIdentifierCompletions(refresh, "")
-	if strings.Join(all, ",") != "broken/,deferred/,finished/,mixed/" {
+	if strings.Join(all, ",") != "mixed/,finished/,deferred/,broken/" {
 		t.Fatalf("unfiltered identifiers = %#v", all)
 	}
 	allFiles := taskTargetIdentifierCompletions(refresh, "mixed/")
@@ -257,4 +257,32 @@ func refreshFixture(t *testing.T, root string) *RefreshResult {
 		t.Fatal(err)
 	}
 	return result
+}
+
+// TestTaskTargetStagesSortInOppositeDirections pins the two stages of a target
+// completion apart: the set stage is a dated identifier and descends, the file
+// stage below it is a sequence identifier and ascends (ADR-0215). They are
+// sorted four lines apart in one function, so nothing but a test stops a future
+// edit from flipping both together.
+func TestTaskTargetStagesSortInOppositeDirections(t *testing.T) {
+	refresh := &RefreshResult{Manifests: map[string]*Manifest{
+		"2026-06-01-alpha": {Valid: true, Tasks: []Task{
+			{ID: "01-first", File: "01-first.md", Status: "open"},
+			{ID: "02-second", File: "02-second.md", Status: "open"},
+			{ID: "03-third", File: "03-third.md", Status: "open"},
+		}},
+		"2026-06-15-beta":  {Valid: true},
+		"2026-07-01-gamma": {Valid: true},
+	}}
+
+	sets := taskTargetIdentifierCompletions(refresh, "")
+	if strings.Join(sets, ",") != "2026-07-01-gamma/,2026-06-15-beta/,2026-06-01-alpha/" {
+		t.Fatalf("set stage = %#v (want newest-first)", sets)
+	}
+
+	files := taskTargetIdentifierCompletions(refresh, "2026-06-01-alpha/")
+	want := "2026-06-01-alpha/01-first.md,2026-06-01-alpha/02-second.md,2026-06-01-alpha/03-third.md"
+	if strings.Join(files, ",") != want {
+		t.Fatalf("file stage = %#v (want ascending)", files)
+	}
 }

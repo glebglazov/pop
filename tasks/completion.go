@@ -62,10 +62,11 @@ func CompleteTaskSetIDsWith(d *Deps, pd *project.Deps, loadConfig func(string) (
 }
 
 // CompleteExportTaskSetIDs returns on-disk Task-set identifiers for
-// `transfer export` completion. Alone among completion surfaces it orders
-// newest-first (reverse identifier sort) and drops ids already on the command
-// line, matching the recency-driven transfer workflow. Archived sets stay
-// omitted like every surface except unarchive.
+// `transfer export` completion. It inherits the newest-first order every set
+// surface now carries (ADR-0215) and adds the one thing export alone needs:
+// dropping ids already on the command line, so tabbing a later positional never
+// re-offers a chosen set. Archived sets stay omitted like every surface except
+// unarchive.
 func CompleteExportTaskSetIDs(input CompletionInput, chosen []string, toComplete string) ([]string, error) {
 	return CompleteExportTaskSetIDsWith(defaultDeps, project.DefaultDeps(), config.Load, input, chosen, toComplete)
 }
@@ -87,7 +88,8 @@ func CompleteExportTaskSetIDsWith(d *Deps, pd *project.Deps, loadConfig func(str
 		}
 		out = append(out, id)
 	}
-	sort.Sort(sort.Reverse(sort.StringSlice(out)))
+	// No reverse here: the enumerator already returned newest-first, and a
+	// second reversal would turn export back into oldest-first.
 	return out, nil
 }
 
@@ -126,8 +128,7 @@ func completeTaskSetIDsWithArchiveMode(d *Deps, pd *project.Deps, loadConfig fun
 		}
 		ids = append(ids, id)
 	}
-	sort.Strings(ids)
-	return ids, nil
+	return SortIdentifiersNewestFirst(ids), nil
 }
 
 // CompleteTaskTargets returns bare Task set identifiers and, after an

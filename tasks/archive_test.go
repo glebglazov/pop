@@ -411,7 +411,7 @@ func TestUnarchiveTaskSetsRestoresSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(completions, ",") != "one,two" {
+	if strings.Join(completions, ",") != "two,one" {
 		t.Fatalf("completion ids = %v, want restored sets", completions)
 	}
 	state, err := LoadGlobalStateWith(d, StatePathFor(root))

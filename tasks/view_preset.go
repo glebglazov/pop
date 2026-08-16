@@ -1,6 +1,7 @@
 package tasks
 
 import (
+	"sort"
 	"strings"
 	"time"
 
@@ -124,6 +125,21 @@ func IDCreatedAt(id string) (time.Time, bool) {
 	default:
 		return time.Time{}, false
 	}
+}
+
+// SortIdentifiersNewestFirst puts the newest dated identifier first, sorting
+// ids in place and returning them for use in a return statement. This is the
+// one definition of newest-first identifier order (ADR-0215); every surface
+// that offers a Task set or a Map for a human to pick calls it instead of
+// reversing for itself.
+//
+// The comparison is on the identifier string, not on a parsed date: the
+// YYYY-MM-DD[-HHMM] prefix is fixed-width and leading, so string order and date
+// order agree, and unlike IDCreatedAt there is no unparseable case whose only
+// honest handling would be to drop a row out of a picker.
+func SortIdentifiersNewestFirst(ids []string) []string {
+	sort.Sort(sort.Reverse(sort.StringSlice(ids)))
+	return ids
 }
 
 // PresetWantsArchived reports whether the preset's archived mode requires the

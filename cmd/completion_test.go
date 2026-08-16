@@ -108,26 +108,41 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 	sub("set stage drills with no-space directive", func(t *testing.T) {
 		out := shellCompNoDesc(t, "tasks", "implement")
 		assertShellCompContains(t, out, "svc/")
-		assertShellCompDirective(t, out, cobra.ShellCompDirectiveNoSpace|cobra.ShellCompDirectiveNoFileComp)
+		assertShellCompDirective(t, out, cobra.ShellCompDirectiveNoSpace|cobra.ShellCompDirectiveKeepOrder|cobra.ShellCompDirectiveNoFileComp)
 	})
 
 	sub("file stage uses trailing space", func(t *testing.T) {
+		// No KeepOrder: the file stage lists sequence identifiers, which stay
+		// alphabetical, so letting the shell re-sort changes nothing.
 		out := shellCompNoDescCompleting(t, "tasks", "implement", "svc/")
 		assertShellCompDirective(t, out, cobra.ShellCompDirectiveNoFileComp)
+	})
+
+	sub("spend completes task sets", func(t *testing.T) {
+		out := shellCompNoDesc(t, "tasks", "spend")
+		assertShellCompContains(t, out, "svc")
+		assertShellCompOmitsExact(t, out, "svc/")
+		assertShellCompDirective(t, out, cobra.ShellCompDirectiveKeepOrder|cobra.ShellCompDirectiveNoFileComp)
+	})
+
+	sub("every set surface offers the newest set first", func(t *testing.T) {
+		for _, verb := range []string{"status", "register", "archive", "set-priority", "auto-drain", "verify", "review", "assist", "show-path", "spend"} {
+			assertShellCompOrder(t, shellCompNoDesc(t, "tasks", verb), "svc", "mix", "done")
+		}
 	})
 
 	sub("set-priority stays set-only without slash drill", func(t *testing.T) {
 		out := shellCompNoDesc(t, "tasks", "set-priority")
 		assertShellCompContains(t, out, "svc")
 		assertShellCompOmitsExact(t, out, "svc/")
-		assertShellCompDirective(t, out, cobra.ShellCompDirectiveNoFileComp)
+		assertShellCompDirective(t, out, cobra.ShellCompDirectiveKeepOrder|cobra.ShellCompDirectiveNoFileComp)
 	})
 
 	sub("auto-drain stays set-only without slash drill", func(t *testing.T) {
 		out := shellCompNoDesc(t, "tasks", "auto-drain")
 		assertShellCompContains(t, out, "svc")
 		assertShellCompOmitsExact(t, out, "svc/")
-		assertShellCompDirective(t, out, cobra.ShellCompDirectiveNoFileComp)
+		assertShellCompDirective(t, out, cobra.ShellCompDirectiveKeepOrder|cobra.ShellCompDirectiveNoFileComp)
 	})
 
 	sub("auto-drain offers no completion for a second positional arg", func(t *testing.T) {
@@ -141,7 +156,7 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 		assertShellCompContains(t, out, "svc")
 		assertShellCompOmitsExact(t, out, "archived")
 		assertShellCompOmitsExact(t, out, "svc/")
-		assertShellCompDirective(t, out, cobra.ShellCompDirectiveNoFileComp)
+		assertShellCompDirective(t, out, cobra.ShellCompDirectiveKeepOrder|cobra.ShellCompDirectiveNoFileComp)
 	})
 
 	sub("export stays set-only without slash drill", func(t *testing.T) {
@@ -149,7 +164,7 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 		assertShellCompContains(t, out, "svc")
 		assertShellCompOmitsExact(t, out, "archived")
 		assertShellCompOmitsExact(t, out, "svc/")
-		assertShellCompDirective(t, out, cobra.ShellCompDirectiveNoFileComp)
+		assertShellCompDirective(t, out, cobra.ShellCompDirectiveKeepOrder|cobra.ShellCompDirectiveNoFileComp)
 	})
 
 	sub("export orders newest-first and drops ids already on the line", func(t *testing.T) {
@@ -263,7 +278,7 @@ func TestTasksUnbindWorktreeShellCompletionCandidates(t *testing.T) {
 
 	out := shellCompNoDesc(t, "tasks", "unbind-worktree")
 	assertShellCompContains(t, out, "set-bound", "set-other")
-	assertShellCompDirective(t, out, cobra.ShellCompDirectiveNoFileComp)
+	assertShellCompDirective(t, out, cobra.ShellCompDirectiveKeepOrder|cobra.ShellCompDirectiveNoFileComp)
 
 	out = shellCompNoDescCompleting(t, "tasks", "unbind-worktree", "set-b")
 	assertShellCompContains(t, out, "set-bound")

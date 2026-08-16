@@ -214,6 +214,9 @@ func taskTargetCompletions(refresh *RefreshResult, toComplete string, omitDone b
 				out = append(out, candidate)
 			}
 		}
+		// The file stage stays ascending. NN-slug is a sequence identifier: it
+		// encodes the order the work should be done in, not recency, so walking
+		// a set's contents starts at the first task (ADR-0215).
 		sort.Strings(out)
 		return out
 	}
@@ -231,6 +234,5 @@ func taskTargetCompletions(refresh *RefreshResult, toComplete string, omitDone b
 			ids = append(ids, candidate)
 		}
 	}
-	sort.Strings(ids)
-	return ids
+	return SortIdentifiersNewestFirst(ids)
 }

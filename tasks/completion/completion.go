@@ -7,7 +7,6 @@
 package completion
 
 import (
-	"sort"
 	"strings"
 
 	"github.com/glebglazov/pop/tasks"
@@ -15,7 +14,8 @@ import (
 )
 
 // AbandonSetIDs returns task-set identifiers that currently hold a worktree
-// binding, deduplicated and sorted, for completing `pop tasks unbind-worktree`.
+// binding, deduplicated and newest-first, for completing
+// `pop tasks unbind-worktree`.
 func AbandonSetIDs(td *tasks.Deps) ([]string, error) {
 	if td == nil {
 		td = tasks.DefaultDeps()
@@ -28,11 +28,11 @@ func AbandonSetIDs(td *tasks.Deps) ([]string, error) {
 	for key := range bindings {
 		ids = append(ids, binding.SetIDFromKey(key))
 	}
-	return dedupeSortSetIDs(ids), nil
+	return dedupeSetIDsNewestFirst(ids), nil
 }
 
 // BindWorktreeSetIDs returns every bound task-set identifier, deduplicated and
-// sorted, for completing `pop tasks bind-worktree`.
+// newest-first, for completing `pop tasks bind-worktree`.
 func BindWorktreeSetIDs(td *tasks.Deps) ([]string, error) {
 	if td == nil {
 		td = tasks.DefaultDeps()
@@ -49,10 +49,10 @@ func BindWorktreeSetIDs(td *tasks.Deps) ([]string, error) {
 	for id := range seen {
 		ids = append(ids, id)
 	}
-	return dedupeSortSetIDs(ids), nil
+	return dedupeSetIDsNewestFirst(ids), nil
 }
 
-func dedupeSortSetIDs(ids []string) []string {
+func dedupeSetIDsNewestFirst(ids []string) []string {
 	seen := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
 		id = strings.TrimSpace(id)
@@ -64,6 +64,5 @@ func dedupeSortSetIDs(ids []string) []string {
 	for id := range seen {
 		out = append(out, id)
 	}
-	sort.Strings(out)
-	return out
+	return tasks.SortIdentifiersNewestFirst(out)
 }

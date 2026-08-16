@@ -58,7 +58,7 @@ func TestAbandonSetIDsEmpty(t *testing.T) {
 	}
 }
 
-func TestAbandonSetIDsDedupesAndSorts(t *testing.T) {
+func TestAbandonSetIDsDedupesAndOrdersNewestFirst(t *testing.T) {
 	td := testDeps(t)
 	seedBindings(t, td, map[string]binding.Binding{
 		"beta\x00set-b":   {RuntimePath: "/wt/b", Project: "beta"},
@@ -70,13 +70,13 @@ func TestAbandonSetIDsDedupesAndSorts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ids) != 2 || ids[0] != "set-a" || ids[1] != "set-b" {
-		t.Fatalf("ids = %#v, want [set-a set-b]", ids)
+	if len(ids) != 2 || ids[0] != "set-b" || ids[1] != "set-a" {
+		t.Fatalf("ids = %#v, want [set-b set-a]", ids)
 	}
 }
 
 // TestBindWorktreeSetIDs verifies the candidate list is the bound set IDs,
-// deduplicated and sorted across repos.
+// deduplicated across repos and ordered newest-first.
 func TestBindWorktreeSetIDs(t *testing.T) {
 	td := testDeps(t)
 	seedBindings(t, td, map[string]binding.Binding{
@@ -88,7 +88,7 @@ func TestBindWorktreeSetIDs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ids) != 2 || ids[0] != "set-a" || ids[1] != "set-b" {
-		t.Fatalf("ids = %#v, want [set-a set-b]", ids)
+	if len(ids) != 2 || ids[0] != "set-b" || ids[1] != "set-a" {
+		t.Fatalf("ids = %#v, want [set-b set-a]", ids)
 	}
 }

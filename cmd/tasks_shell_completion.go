@@ -10,6 +10,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// setListCompDirective is what every completion returning a list of task-set
+// identifiers hands back. KeepOrder is the load-bearing half of newest-first
+// ordering (ADR-0215): without it zsh's _describe re-sorts the candidates
+// alphabetically before drawing them and the Go-side sort never reaches a
+// human.
+const setListCompDirective = cobra.ShellCompDirectiveKeepOrder | cobra.ShellCompDirectiveNoFileComp
+
 var (
 	taskCompletionDeps        = func() *tasks.Deps { return cmdLayerDeps().tasksDeps() }
 	taskCompletionProjectDeps = func() *project.Deps { return cmdLayerDeps().projectDeps() }
@@ -41,6 +48,7 @@ func registerTaskShellCompletions() {
 	taskVerifyCmd.ValidArgsFunction = completeTaskStatusArgs
 	taskReviewCmd.ValidArgsFunction = completeTaskStatusArgs
 	taskAssistCmd.ValidArgsFunction = completeTaskStatusArgs
+	taskSpendCmd.ValidArgsFunction = completeTaskStatusArgs
 	taskResetTaskCmd.ValidArgsFunction = completeTaskTaskFileArgs
 	taskCompleteTaskCmd.ValidArgsFunction = completeTaskTaskFileArgs
 	taskSkipTaskCmd.ValidArgsFunction = completeTaskTaskFileArgs
@@ -66,7 +74,7 @@ func completeTaskShowPathArgs(cmd *cobra.Command, args []string, toComplete stri
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	return filterShellCompletions(ids, toComplete), cobra.ShellCompDirectiveNoFileComp
+	return filterShellCompletions(ids, toComplete), setListCompDirective
 }
 
 // completeTaskExportArgs diverges from the shared alphabetical enumerator:
@@ -85,7 +93,7 @@ func completeTaskExportArgs(cmd *cobra.Command, args []string, toComplete string
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	return filterShellCompletions(ids, toComplete), cobra.ShellCompDirectiveNoFileComp
+	return filterShellCompletions(ids, toComplete), setListCompDirective
 }
 
 func completeTaskBindWorktreeArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -96,7 +104,7 @@ func completeTaskBindWorktreeArgs(cmd *cobra.Command, args []string, toComplete 
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	return filterShellCompletions(ids, toComplete), cobra.ShellCompDirectiveNoFileComp
+	return filterShellCompletions(ids, toComplete), setListCompDirective
 }
 
 func completeTaskUnbindWorktreeArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -107,7 +115,7 @@ func completeTaskUnbindWorktreeArgs(cmd *cobra.Command, args []string, toComplet
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	return filterShellCompletions(ids, toComplete), cobra.ShellCompDirectiveNoFileComp
+	return filterShellCompletions(ids, toComplete), setListCompDirective
 }
 
 func completeTaskFoldArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -118,7 +126,7 @@ func completeTaskFoldArgs(cmd *cobra.Command, args []string, toComplete string) 
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	return filterShellCompletions(ids, toComplete), cobra.ShellCompDirectiveNoFileComp
+	return filterShellCompletions(ids, toComplete), setListCompDirective
 }
 
 func registerTaskPathFlagCompletions() {
@@ -152,7 +160,7 @@ func completeTaskTaskSets(cmd *cobra.Command, args []string, toComplete string) 
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	return filterShellCompletions(stems, toComplete), cobra.ShellCompDirectiveNoFileComp
+	return filterShellCompletions(stems, toComplete), setListCompDirective
 }
 
 func completeTaskTaskTargets(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -185,7 +193,7 @@ func completeTaskTargetCandidates(cmd *cobra.Command, toComplete string, list fu
 	// Set stage: candidates are <task-set>/. Keep the cursor on the slash
 	// (no trailing space) so the operator can drill straight into a file,
 	// while <task-set>/ itself remains a valid whole-set target.
-	return filtered, cobra.ShellCompDirectiveNoSpace | cobra.ShellCompDirectiveNoFileComp
+	return filtered, cobra.ShellCompDirectiveNoSpace | setListCompDirective
 }
 
 func completeTaskAgents(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -228,7 +236,7 @@ func completeTaskUnarchiveArgs(cmd *cobra.Command, args []string, toComplete str
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	return filterShellCompletions(ids, toComplete), cobra.ShellCompDirectiveNoFileComp
+	return filterShellCompletions(ids, toComplete), setListCompDirective
 }
 
 func completeTaskSetPriorityArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
