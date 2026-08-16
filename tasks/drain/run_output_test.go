@@ -54,7 +54,7 @@ func TestFormatRunSummary(t *testing.T) {
 	text := out.String()
 	for _, want := range []string{
 		"Summary:",
-		"Queue: 1 running, 2 queued, 1 blocked",
+		"Work: 1 running, 2 queued, 1 blocked",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("summary missing %q:\n%s", want, text)

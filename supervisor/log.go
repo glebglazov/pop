@@ -131,7 +131,7 @@ func appendRoutineLogEvents(events *[]LogEvent, run store.RoutineRun) {
 	})
 }
 
-// RenderLog prints recent Queue journal events, most recent last.
+// RenderLog prints recent Work journal events, most recent last.
 func RenderLog(out io.Writer, events []LogEvent, limit int) {
 	if limit <= 0 || limit > len(events) {
 		limit = len(events)
@@ -141,7 +141,7 @@ func RenderLog(out io.Writer, events []LogEvent, limit int) {
 		start = 0
 	}
 	if len(events[start:]) == 0 {
-		fmt.Fprintln(out, "No queue journal entries.")
+		fmt.Fprintln(out, "No daemon journal entries.")
 		return
 	}
 	for _, ev := range events[start:] {

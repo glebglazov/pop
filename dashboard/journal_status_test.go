@@ -53,7 +53,7 @@ func TestRenderStatusFromLocksAndState(t *testing.T) {
 	text := out.String()
 	for _, want := range []string{
 		"Summary:",
-		"Queue: 1 running, 1 queued",
+		"Work: 1 running, 1 queued",
 		"Scan errors:",
 		"idle: /repo/idle/.pop/config.toml: expected value",
 	} {

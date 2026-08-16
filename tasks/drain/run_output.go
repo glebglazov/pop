@@ -423,7 +423,7 @@ func repoLabelFromRepoKey(repoKey string) string {
 	return repoKey[:sepIdx]
 }
 
-func formatQueueWorkSummary(view RunView) string {
+func formatWorkSummary(view RunView) string {
 	var parts []string
 	if n := len(view.Running); n > 0 {
 		parts = append(parts, fmt.Sprintf("%d running", n))
@@ -443,13 +443,13 @@ func formatQueueWorkSummary(view RunView) string {
 	return strings.Join(parts, ", ")
 }
 
-// RenderRunSummary prints the aggregate queue headline.
+// RenderRunSummary prints the aggregate Work status summary headline.
 func RenderRunSummary(out io.Writer, view RunView) {
 	fmt.Fprintln(out, "Summary:")
-	fmt.Fprintf(out, "  Queue: %s\n", formatQueueWorkSummary(view))
+	fmt.Fprintf(out, "  Work: %s\n", formatWorkSummary(view))
 }
 
-// RenderRunBaseline prints the one-time queue run inventory.
+// RenderRunBaseline prints the one-time Daemon run baseline inventory.
 func RenderRunBaseline(out io.Writer, view RunView) {
 	RenderRunSummary(out, view)
 

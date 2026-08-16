@@ -170,7 +170,7 @@ func LaunchDrain(d *Deps, cfg *config.Config, row DashboardRow) (DashboardDrainR
 			return DashboardDrainResult{}, err
 		}
 		if len(allScans) == 0 {
-			return DashboardDrainResult{}, fmt.Errorf("task set %s is no longer in a registered queue project", row.ID)
+			return DashboardDrainResult{}, fmt.Errorf("task set %s is no longer in a registered project", row.ID)
 		}
 		rep, bare, err := resolveRepresentative(d, cfg, allScans)
 		if err != nil {
@@ -795,7 +795,7 @@ func dashboardBindContext(d *Deps, cfg *config.Config, row DashboardRow) ([]proj
 		return nil, "", err
 	}
 	if len(scans) == 0 {
-		return nil, "", fmt.Errorf("task set %s is no longer in a registered queue project", row.ID)
+		return nil, "", fmt.Errorf("task set %s is no longer in a registered project", row.ID)
 	}
 	repoKey := row.RepoKey
 	if repoKey == "" {
