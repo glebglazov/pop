@@ -161,12 +161,16 @@ type MonitorDashboard struct {
 }
 
 // killPanePrompt is the y/N confirmation the kill key opens by default. It
-// remembers the row it names, and while it is open every key outside its own
-// grammar is inert — so `y` can only ever destroy the pane the prompt asked
-// about, never a row the cursor moved to in between.
+// remembers the panes it named, and while it is open every key outside its own
+// grammar is inert — so `y` can only ever destroy what the prompt asked about,
+// never a row the cursor moved to nor a Selection a poll changed in between.
 type killPanePrompt struct {
-	paneID string
-	label  string
+	paneIDs []string
+	label   string
+	// plural marks a prompt opened over a Selection. A Selection of one is still
+	// plural: its answer consumes the marks, which the single-pane path knows
+	// nothing about.
+	plural bool
 }
 
 // MonitorDashboardOption configures the dashboard
@@ -448,7 +452,7 @@ func (d *MonitorDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return d, tea.Quit
 
 		case key.Matches(msg, dashboardKeys.Enter):
-			if d.refuseSingular("open and clear") {
+			if d.refuseSingular(&dashboardKeys.Enter) {
 				return d, nil
 			}
 			if len(d.panes) == 0 {
@@ -466,7 +470,7 @@ func (d *MonitorDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if d.pickerMode {
 				return d, nil
 			}
-			if d.refuseSingular("peek") {
+			if d.refuseSingular(&dashboardKeys.PeekPane) {
 				return d, nil
 			}
 			// "Peek" — open the pane without mutating its monitor state.
@@ -502,7 +506,7 @@ func (d *MonitorDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if d.pickerMode {
 				return d, nil
 			}
-			if d.refuseSingular("toggle unread") {
+			if d.refuseSingular(&dashboardKeys.ToggleClearUnread) {
 				return d, nil
 			}
 			if len(d.panes) > 0 && d.markClearFunc != nil && d.markUnreadFunc != nil {
@@ -534,7 +538,7 @@ func (d *MonitorDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if d.pickerMode {
 				return d, nil
 			}
-			if d.refuseSingular("mark unread") {
+			if d.refuseSingular(&dashboardKeys.MarkUnread) {
 				return d, nil
 			}
 			if len(d.panes) > 0 && d.markUnreadFunc != nil {
@@ -560,7 +564,7 @@ func (d *MonitorDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if d.pickerMode {
 				return d, nil
 			}
-			if d.refuseSingular("follow") {
+			if d.refuseSingular(&dashboardKeys.FollowPane) {
 				return d, nil
 			}
 			if len(d.panes) > 0 && d.toggleFollowFunc != nil {
@@ -597,7 +601,7 @@ func (d *MonitorDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if d.pickerMode {
 				return d, nil
 			}
-			if d.refuseSingular("unmonitor") {
+			if d.refuseSingular(&dashboardKeys.Unmonitor) {
 				return d, nil
 			}
 			if len(d.panes) > 0 && d.unmonitorFunc != nil {
@@ -635,10 +639,13 @@ func (d *MonitorDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if d.pickerMode {
 				return d, nil
 			}
-			// The kill goes plural in a later slice; until it does it says so
-			// rather than killing one of many marked panes.
-			if d.refuseSingular("kill") {
+			// The capability table grants the kill both modes, so this asks the
+			// marks which one applies rather than carrying a flag of its own.
+			if d.refuseSingular(&dashboardKeys.KillPane) {
 				return d, nil
+			}
+			if d.selection.Active() {
+				return d, d.startKillSelected()
 			}
 			return d, d.startKillPane()
 
@@ -693,24 +700,171 @@ func (d *MonitorDashboard) startKillPane() tea.Cmd {
 	if d.killPromptEnabled {
 		// A prompt that a stale message covered would be answered blind.
 		d.flash.Set("")
-		d.killPrompt = &killPanePrompt{paneID: pane.PaneID, label: killPaneLabel(pane)}
+		d.killPrompt = &killPanePrompt{paneIDs: []string{pane.PaneID}, label: killPaneLabel(pane)}
 		return nil
 	}
 	return d.killPane(pane.PaneID)
 }
 
+// startKillSelected answers the kill key in selection mode. It captures the marked
+// panes now rather than reading the Selection again when the answer arrives, so
+// the set the human agreed to is the set the kill runs over even though the poll
+// keeps rebuilding underneath the prompt. The prompt setting governs here exactly
+// as it does for one pane: someone who turned it off made a standing decision
+// about this risk, and asking anyway would overrule it (ADR-0215 decision 7).
+func (d *MonitorDashboard) startKillSelected() tea.Cmd {
+	if d.killPaneFunc == nil {
+		return nil
+	}
+	paneIDs := d.selectedPaneIDs()
+	if len(paneIDs) == 0 {
+		return nil
+	}
+	if d.killPromptEnabled {
+		d.flash.Set("")
+		d.killPrompt = &killPanePrompt{paneIDs: paneIDs, label: paneCount(len(paneIDs)), plural: true}
+		return nil
+	}
+	return d.killPanes(paneIDs)
+}
+
+// selectedPaneIDs lists the marked panes in the order the view holds them, which
+// is the order the region draws and therefore the order failures are reported in.
+func (d *MonitorDashboard) selectedPaneIDs() []string {
+	var ids []string
+	for _, pane := range d.panes {
+		if d.selection.Has(pane.PaneID) {
+			ids = append(ids, pane.PaneID)
+		}
+	}
+	return ids
+}
+
 // updateKillPrompt runs the confirmation's grammar — y kills, enter/n/esc/C-c
-// cancel, everything else is ignored — and returns the dashboard to normal.
+// cancel, everything else is ignored — and returns the dashboard to normal. A
+// cancel leaves the Selection whole: nothing was killed, so nothing is consumed.
 func (d *MonitorDashboard) updateKillPrompt(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, dashboardKeys.KillConfirm):
-		paneID := d.killPrompt.paneID
+		prompt := d.killPrompt
 		d.killPrompt = nil
-		return d, d.killPane(paneID)
+		if prompt.plural {
+			return d, d.killPanes(prompt.paneIDs)
+		}
+		return d, d.killPane(prompt.paneIDs[0])
 	case key.Matches(msg, dashboardKeys.KillCancel):
 		d.killPrompt = nil
 	}
 	return d, nil
+}
+
+// killPanes kills a whole captured set in one pass. A failure does not abort the
+// run — every pane gets its turn — and the Selection afterwards is exactly the
+// panes that failed, so they stay marked at the top of the list and a retry needs
+// no re-marking (ADR-0215 decision 6). ADR-0205's narrower rules are inherited
+// unchanged: the dashboard's own pane is skipped rather than failing the batch,
+// each kill drops the pane's monitor entry in the same breath, and a run that
+// empties the monitored set quits the dashboard.
+func (d *MonitorDashboard) killPanes(paneIDs []string) tea.Cmd {
+	killed := 0
+	skipped := false
+	var failed []string
+	var reasons []string
+
+	for _, paneID := range paneIDs {
+		if d.currentPaneID != "" && paneID == d.currentPaneID {
+			skipped = true
+			continue
+		}
+		pane, ok := d.paneByID(paneID)
+		if !ok {
+			// The pane left the monitored set between the prompt and the answer.
+			// The set was agreed to, so its absence is reported rather than
+			// silently shrinking what the human said yes to.
+			failed = append(failed, paneID)
+			reasons = append(reasons, paneID+": pane is gone")
+			continue
+		}
+		if err := d.killPaneFunc(paneID); err != nil {
+			failed = append(failed, paneID)
+			reasons = append(reasons, fmt.Sprintf("%s: %v", killPaneLabel(pane), err))
+			continue
+		}
+		killed++
+		d.dropPaneEntry(paneID)
+	}
+
+	if killed > 0 {
+		d.dirty = true
+	}
+	// A skipped pane is not a failure, so it is consumed with the successes: the
+	// mode is left unless something is still worth retrying.
+	d.selection.Clear()
+	for _, paneID := range failed {
+		d.selection.Toggle(paneID)
+	}
+	d.flash.Set(killOutcome(killed, reasons, skipped))
+	d.clearProtectedPane()
+	d.rebuildView()
+	if len(d.panes) == 0 {
+		d.result = MonitorDashboardResult{Action: MonitorDashboardActionCancel}
+		return tea.Quit
+	}
+	return nil
+}
+
+// killOutcome words what a bulk kill did on the one line it has: what it
+// destroyed, then the single reason when exactly one pane failed or a bare count
+// when several did, then the skip ADR-0205 mandates — because a pane the human
+// marked and did not lose is otherwise an unexplained survivor.
+func killOutcome(killed int, reasons []string, skipped bool) string {
+	var parts []string
+	if killed > 0 {
+		parts = append(parts, "killed "+paneCount(killed))
+	}
+	switch len(reasons) {
+	case 0:
+	case 1:
+		parts = append(parts, "1 failed: "+reasons[0])
+	default:
+		parts = append(parts, fmt.Sprintf("%d failed", len(reasons)))
+	}
+	if skipped {
+		parts = append(parts, "skipped the pane the dashboard is running in")
+	}
+	return strings.Join(parts, " · ")
+}
+
+// paneCount words a number of panes for a prompt or an outcome.
+func paneCount(n int) string {
+	if n == 1 {
+		return "1 pane"
+	}
+	return fmt.Sprintf("%d panes", n)
+}
+
+// paneByID finds a pane in the monitored set, which is also the test of whether
+// it is still there at all.
+func (d *MonitorDashboard) paneByID(paneID string) (AttentionPane, bool) {
+	for _, pane := range d.allPanes {
+		if pane.PaneID == paneID {
+			return pane, true
+		}
+	}
+	return AttentionPane{}, false
+}
+
+// dropPaneEntry takes a pane out of the monitored set the dashboard holds. The
+// callback already removed the store's entry; this is the view catching up
+// immediately rather than waiting for the daemon's five-second sweep, which does
+// not run at all when the daemon is down (ADR-0205).
+func (d *MonitorDashboard) dropPaneEntry(paneID string) {
+	for i := range d.allPanes {
+		if d.allPanes[i].PaneID == paneID {
+			d.allPanes = append(d.allPanes[:i], d.allPanes[i+1:]...)
+			return
+		}
+	}
 }
 
 // killPane destroys a pane and takes its row out of the view. A failed kill
@@ -737,12 +891,7 @@ func (d *MonitorDashboard) killPane(paneID string) tea.Cmd {
 	d.flash.Set("killed " + label)
 	d.dirty = true
 
-	for i := range d.allPanes {
-		if d.allPanes[i].PaneID == paneID {
-			d.allPanes = append(d.allPanes[:i], d.allPanes[i+1:]...)
-			break
-		}
-	}
+	d.dropPaneEntry(paneID)
 	d.panes = append(d.panes[:idx], d.panes[idx+1:]...)
 	if len(d.panes) == 0 {
 		d.result = MonitorDashboardResult{Action: MonitorDashboardActionCancel}
@@ -757,6 +906,11 @@ func (d *MonitorDashboard) killPane(paneID string) tea.Cmd {
 	d.fetchPreview()
 	return nil
 }
+
+// killPromptStyle paints the y/N question in the house accent, the colour the
+// mode word and the region separator use: the question is chrome that is on for
+// as long as it goes unanswered, not a message that expires like a flash.
+var killPromptStyle = lipgloss.NewStyle().Foreground(colorAccent)
 
 // killPaneLabel names a pane in a prompt or a flash, falling back to the tmux
 // pane id for a row whose name has not been derived yet.
@@ -903,15 +1057,26 @@ func (d *MonitorDashboard) monitored(paneID string) bool {
 	return false
 }
 
-// refuseSingular answers a verb that acts on one pane while rows are marked: it
-// does nothing and says so on the bottom line, because a key that goes silently
-// inert is indistinguishable from a bug (ADR-0215 decision 4). It reports whether
-// it refused, so a verb's handler declares itself singular in one line.
-func (d *MonitorDashboard) refuseSingular(verb string) bool {
+// refuseSingular answers a binding whose verb acts on one pane while rows are
+// marked: it does nothing and says so on the bottom line, because a key that goes
+// silently inert is indistinguishable from a bug (ADR-0215 decision 4). The
+// capability table decides — a binding it grants `plural` passes straight through
+// — so a handler consults it in one line and nothing else has to know the modes.
+func (d *MonitorDashboard) refuseSingular(binding *key.Binding) bool {
 	if !d.selection.Active() {
 		return false
 	}
-	d.flash.Set(fmt.Sprintf("%s acts on one pane — shift+tab clears the %d selected", verb, d.selection.Len()))
+	verb := dashboardVerbs[binding]
+	if verb.plural {
+		return false
+	}
+	name := verb.name
+	if name == "" {
+		// A binding with no entry is singular and unnamed, so the refusal names
+		// the key instead — the human still learns which press did nothing.
+		name = strings.Join(binding.Keys(), "/")
+	}
+	d.flash.Set(fmt.Sprintf("%s acts on one pane — shift+tab clears the %d selected", name, d.selection.Len()))
 	return true
 }
 
@@ -1052,13 +1217,13 @@ func (d *MonitorDashboard) buildHints() string {
 	// The prompt takes the bottom line the same way a flash does — one line
 	// either way, and the question sits where the answer's report will land.
 	if d.killPrompt != nil {
-		return "  Kill " + d.killPrompt.label + "? y/N"
+		return killPromptStyle.Render("  Kill " + d.killPrompt.label + "? y/N")
 	}
 	hints := "  j/k move · Tab select · Enter open and clear · Shift+Enter open · r toggle unread/clear · f follow · x unmonitor · C-x kill · F follow view · ← back · Esc cancel · C-h help"
 	if d.selection.Active() {
 		// Only the keys that still do something in the mode, so the line does not
 		// advertise the verbs it is refusing.
-		hints = "  j/k move · Tab select · S-Tab clear · F follow view · ← back · Esc cancel · C-h help"
+		hints = "  j/k move · Tab select · S-Tab clear · C-x kill · F follow view · ← back · Esc cancel · C-h help"
 	}
 	if d.pickerMode {
 		hints = "  j/k move · Enter select · F follow view · Esc cancel · C-h help"
@@ -1166,7 +1331,7 @@ func (d *MonitorDashboard) helpEntries() []HelpEntry {
 		{"f", "Follow pane"},
 		{"F", "Toggle follow view"},
 		{"x", "Unmonitor pane"},
-		{"C-x", "Kill pane"},
+		{"C-x", "Kill pane or selection"},
 		{"← / h", "Back / quit"},
 		{"Esc / C-c", "Cancel"},
 	}
@@ -1434,4 +1599,31 @@ var dashboardKeys = dashboardKeyMap{
 	KillCancel: key.NewBinding(
 		key.WithKeys("esc", "ctrl+c", "n", "enter"),
 	),
+}
+
+// monitorVerb is one row of the monitor's capability table: the name a refusal
+// calls a binding's verb by, and whether that verb works in selection mode.
+type monitorVerb struct {
+	name   string
+	plural bool
+}
+
+// dashboardVerbs declares, per binding, the modes that binding's verb works in.
+// It is the monitor's mirror of the capability field work.Action carries: the
+// monitor's verbs are callbacks over a pane id with no kind and no Perform to
+// hang one on, so the declaration lives beside the keymap instead (ADR-0215
+// decision 5).
+//
+// Silence means singular — a binding absent from this table, or present without
+// `plural`, acts on one pane — so bulk is granted one verb at a time by someone
+// writing it down here, and the grant list is a reviewable audit rather than an
+// invisible default.
+var dashboardVerbs = map[*key.Binding]monitorVerb{
+	&dashboardKeys.Enter:             {name: "open and clear"},
+	&dashboardKeys.PeekPane:          {name: "peek"},
+	&dashboardKeys.ToggleClearUnread: {name: "toggle unread"},
+	&dashboardKeys.MarkUnread:        {name: "mark unread"},
+	&dashboardKeys.FollowPane:        {name: "follow"},
+	&dashboardKeys.Unmonitor:         {name: "unmonitor"},
+	&dashboardKeys.KillPane:          {name: "kill", plural: true},
 }
