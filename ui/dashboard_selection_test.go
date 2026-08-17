@@ -176,6 +176,10 @@ func TestMonitorSelectionChrome(t *testing.T) {
 		if !strings.HasPrefix(strings.TrimSpace(bottom), SelectionMode) {
 			t.Errorf("bottom line = %q, want the mode word at the left", bottom)
 		}
+		// The word is padded on both sides, so the hints never butt against it.
+		if !strings.Contains(bottom, "  "+SelectionMode+"  j/k move") {
+			t.Errorf("bottom line = %q, want the mode word evenly spaced from the hints", bottom)
+		}
 		d = pressMonitor(d, keyShiftTab())
 		if view := StripANSI(d.View().Content); strings.Contains(view, SelectionMode) {
 			t.Errorf("mode word survived shift+tab:\n%s", view)

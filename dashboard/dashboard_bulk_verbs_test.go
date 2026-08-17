@@ -541,3 +541,119 @@ func TestWorkBulkMuteAppliesOneWindowToEveryRow(t *testing.T) {
 		t.Fatal("a successful mute left the marks behind")
 	}
 }
+
+// A menu is opened *by* the Selection, so it cannot be what hides it: the
+// counted separator stays under the marked rows and the mode word stays at the
+// left of the bottom line, ahead of the menu's own hints. The menu view composes
+// its own body and footer rather than going through List and Frame, which is why
+// both signals are pinned here as well as in the no-menu twin.
+func selectionSignals(t *testing.T, m QueueDashboard, marked int) (view, separator string) {
+	t.Helper()
+	view = ui.StripANSI(m.View().Content)
+	separator = ui.StripANSI(ui.SelectionSeparator(marked))
+	if !strings.Contains(view, separator) {
+		t.Fatalf("the separator %q is not on screen:\n%s", separator, view)
+	}
+	if !strings.Contains(view, ui.SelectionMode) {
+		t.Fatalf("the bottom line does not carry %s:\n%s", ui.SelectionMode, view)
+	}
+	return view, separator
+}
+
+func TestWorkBulkMenuKeepsTheSelectionSignals(t *testing.T) {
+	m, _ := setDashboard(t, "set-a", "set-b", "set-c", "set-d")
+	m = bulkPress(t, m, selKeyTab())
+	m = bulkPress(t, m, selKeyTab())
+	m = bulkPress(t, m, selKeyRune('a'))
+	if m.menu == nil || !m.menu.plural {
+		t.Fatal("`a` did not open the plural action menu")
+	}
+
+	view, separator := selectionSignals(t, m, 2)
+
+	// The divider sits directly below the marked rows: they are above it, every
+	// other row below it, and the menu is below it too — it belongs to the cursor,
+	// which is on the rest of the list.
+	cut := strings.Index(view, separator)
+	before, after := view[:cut], view[cut:]
+	if !strings.Contains(before, "set-a") || !strings.Contains(before, "set-b") {
+		t.Fatalf("the marked rows are not above the separator:\n%s", view)
+	}
+	if !strings.Contains(after, "set-c") || !strings.Contains(after, "set-d") {
+		t.Fatalf("the unmarked rows are not below the separator:\n%s", view)
+	}
+	if !strings.Contains(after, "actions (2 rows)") {
+		t.Fatalf("the menu moved above the separator:\n%s", view)
+	}
+
+	// The mode word leads the bottom line and the menu's hints follow it, spaced.
+	lines := strings.Split(strings.TrimRight(view, "\n"), "\n")
+	bottom := lines[len(lines)-1]
+	if want := ui.SelectionMode + "  j/k move"; !strings.HasPrefix(strings.TrimLeft(bottom, " "), want) {
+		t.Fatalf("bottom line = %q, want it to start %q", bottom, want)
+	}
+}
+
+// Both submenus render through the same overlay path, and a submenu is where the
+// write actually happens — the signals matter most there.
+func TestWorkBulkSubmenusKeepTheSelectionSignals(t *testing.T) {
+	for _, tc := range []struct{ name, key, title string }{
+		{"status", "s", "status"},
+		{"mute", "m", "mute"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, _ := setDashboard(t, "set-a", "set-b", "set-c")
+			m = bulkPress(t, m, selKeyTab())
+			m = bulkPress(t, m, selKeyTab())
+			m = bulkPress(t, m, selKeyRune('a'))
+			m = bulkPress(t, m, selKeyRune(rune(tc.key[0])))
+			if m.menu == nil || !m.menu.nested() {
+				t.Fatalf("`%s` did not open the %s submenu", tc.key, tc.name)
+			}
+			view, _ := selectionSignals(t, m, 2)
+			if !strings.Contains(view, tc.title) {
+				t.Fatalf("the %s submenu is not on screen:\n%s", tc.name, view)
+			}
+		})
+	}
+}
+
+// The two-line table is a second row loop with its own menu placement, so it
+// carries the divider separately.
+func TestWorkBulkMenuKeepsTheSelectionSignalsInTwoLineMode(t *testing.T) {
+	m, _ := setDashboard(t, "set-a", "set-b", "set-c")
+	// Below the width threshold and above the height floor is two-line mode.
+	m.width = dashboardTwoLineWidthThreshold - 20
+	m.cols.width = m.width
+	m.cols.refit()
+	m.resizeMainList()
+	if !m.page.twoLine(m.snap.Containers, m.width, m.height) {
+		t.Fatal("the page is not in two-line mode")
+	}
+
+	m = bulkPress(t, m, selKeyTab())
+	m = bulkPress(t, m, selKeyRune('a'))
+	if m.menu == nil || !m.menu.plural {
+		t.Fatal("`a` did not open the plural action menu")
+	}
+
+	view, separator := selectionSignals(t, m, 1)
+	cut := strings.Index(view, separator)
+	if !strings.Contains(view[:cut], "set-a") || !strings.Contains(view[cut:], "set-b") {
+		t.Fatalf("the divider does not sit between the marked row and the rest:\n%s", view)
+	}
+}
+
+// With nothing marked the menu view is exactly what it always was: no divider
+// and no mode word, because there is no mode.
+func TestWorkMenuWithoutASelectionRendersNoSelectionSignals(t *testing.T) {
+	m, _ := setDashboard(t, "set-a", "set-b")
+	m = bulkPress(t, m, selKeyRune('a'))
+	if m.menu == nil || m.menu.plural {
+		t.Fatal("`a` did not open the singular action menu")
+	}
+	view := ui.StripANSI(m.View().Content)
+	if strings.Contains(view, "selected") || strings.Contains(view, ui.SelectionMode) {
+		t.Fatalf("a menu with nothing marked shows a Selection signal:\n%s", view)
+	}
+}

@@ -3202,7 +3202,7 @@ func (m QueueDashboard) viewWithMenu() string {
 		fmt.Fprintf(&body, "%s\n", ui.HintStyle.Render(line))
 	}
 	fmt.Fprintln(&body)
-	renderDashboardTableWithMenu(&body, m.page, m.kinds, m.snap.Containers, m.list.Cursor(), m.width, m.height, m.menu, m.liveCache())
+	renderDashboardTableWithMenu(&body, m.page, m.kinds, m.snap.Containers, m.list.Cursor(), m.list.RegionCount(), m.width, m.height, m.menu, m.liveCache())
 	hint := "j/k move · enter/letter run · esc close"
 	if m.menu.pinned {
 		hint = "j/k move · J/K row · enter/letter run · esc close"
@@ -3213,7 +3213,10 @@ func (m QueueDashboard) viewWithMenu() string {
 			hint = "j/k move · J/K row · enter/letter run · esc back"
 		}
 	}
-	writeDashboardFooter(&body, m.height, dashboardFooterLine(m.flash, hint))
+	// The menu view builds its own footer instead of going through Frame, so the
+	// mode word is prepended here — a Selection outlives the menu that acts on it
+	// and must stay visible while it is open (ADR-0215 decision 4).
+	writeDashboardFooter(&body, m.height, ui.WithModeWord(m.modeWord(), dashboardFooterLine(m.flash, hint)))
 	return body.String()
 }
 
@@ -3737,17 +3740,31 @@ func renderDashboardAbandonModal(w io.Writer, modal *dashboardAbandonModal, widt
 }
 
 func renderDashboardTable(w io.Writer, page dashboardPage, kinds workKinds, rows []DashboardRow, cursor, width, height int, live livePaneCache) {
-	renderDashboardTableWithMenu(w, page, kinds, rows, cursor, width, height, nil, live)
+	renderDashboardTableWithMenu(w, page, kinds, rows, cursor, 0, width, height, nil, live)
+}
+
+// writeSelectionSeparator emits the Selection's counted divider after row index
+// i when that row is the last marked one. The bespoke overlay renderers walk the
+// row slice flat, and its leading regionCount rows are exactly the marked ones
+// (viewRows lifts them to the front), so the divider is one emission rather than
+// a region the renderer has to own.
+func writeSelectionSeparator(w io.Writer, i, regionCount, width int) {
+	if regionCount <= 0 || i != regionCount-1 {
+		return
+	}
+	fmt.Fprintf(w, "%s\n", ui.TruncateString(ui.SelectionSeparator(regionCount), width))
 }
 
 // renderDashboardTableWithMenu renders the task-set table and, when menu is
 // non-nil, splices the action overlay in next to the cursored row: below it by
 // default, flipping above when the cursor sits too low for the menu to fit
 // beneath it within height (dashboardMenuPlaceBelow). live colours handoff-verb
-// keys in the overlay (ADR-0158).
-func renderDashboardTableWithMenu(w io.Writer, page dashboardPage, kinds workKinds, rows []DashboardRow, cursor, width, height int, menu *dashboardMenu, live livePaneCache) {
+// keys in the overlay (ADR-0158). regionCount is how many leading rows a live
+// Selection has marked, zero when none is; the divider is drawn below them so
+// the marks stay legible with the menu open.
+func renderDashboardTableWithMenu(w io.Writer, page dashboardPage, kinds workKinds, rows []DashboardRow, cursor, regionCount, width, height int, menu *dashboardMenu, live livePaneCache) {
 	if page.twoLine(rows, width, height) {
-		renderDashboardTableTwoLineWithMenu(w, kinds, rows, cursor, width, height, menu, live)
+		renderDashboardTableTwoLineWithMenu(w, kinds, rows, cursor, regionCount, width, height, menu, live)
 		return
 	}
 	headers := page.headers(kinds)
@@ -3778,6 +3795,7 @@ func renderDashboardTableWithMenu(w io.Writer, page dashboardPage, kinds workKin
 		}
 		line := ui.TruncateString(prefix+dashboardTableLine(page.styledCells(kinds, row, live), widths), width)
 		fmt.Fprintf(w, "%s\n", line)
+		writeSelectionSeparator(w, i, regionCount, width)
 		if menu != nil && i == cursor && placeBelow {
 			writeMenu()
 		}
@@ -3789,7 +3807,7 @@ func renderDashboardTableWithMenu(w io.Writer, page dashboardPage, kinds workKin
 // Each row occupies two terminal lines: line 1 holds the activity cluster,
 // PROJECT, TASK SET (the set id) and WORKTREE; line 2 holds STATUS indented under
 // the TASK SET column.
-func renderDashboardTableTwoLineWithMenu(w io.Writer, kinds workKinds, rows []DashboardRow, cursor, width, height int, menu *dashboardMenu, live livePaneCache) {
+func renderDashboardTableTwoLineWithMenu(w io.Writer, kinds workKinds, rows []DashboardRow, cursor, regionCount, width, height int, menu *dashboardMenu, live livePaneCache) {
 	line1Widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths(rows), dashboardTableBodyBudget(width))
 	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTwoLineTableHeader(line1Widths), width))
 	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTwoLineStatusHeader(line1Widths), width))
@@ -3820,6 +3838,7 @@ func renderDashboardTableTwoLineWithMenu(w io.Writer, kinds workKinds, rows []Da
 		line2 := ui.TruncateString("  "+dashboardTwoLineRowLine2(kinds, row, line1Widths), width)
 		fmt.Fprintf(w, "%s\n", line1)
 		fmt.Fprintf(w, "%s\n", line2)
+		writeSelectionSeparator(w, i, regionCount, width)
 		if menu != nil && i == cursor && placeBelow {
 			writeMenu()
 		}

@@ -62,10 +62,25 @@ func (f Frame) bottomLine() string {
 	} else if f.Hints != "" {
 		rest = hintStyle.Render(f.Hints)
 	}
-	if f.Mode == "" {
+	return WithModeWord(f.Mode, rest)
+}
+
+// WithModeWord puts mode at the left of a bottom line already built, so a view
+// that composes its own footer instead of going through Frame still shows which
+// mode it is in. The word carries the table's own two-column row indent on the
+// left, and the same again on the right, so it sits evenly between the margin and
+// whatever follows it — a mode word butted straight against the hints reads as
+// one run-on string. A rest that already indents itself (a flash always does) is
+// left as it is, so the gap is two columns either way.
+func WithModeWord(mode, rest string) string {
+	if mode == "" {
 		return rest
 	}
-	return modeWordStyle.Render("  "+f.Mode) + rest
+	word := modeWordStyle.Render("  " + mode)
+	if rest == "" || strings.HasPrefix(StripANSI(rest), " ") {
+		return word + rest
+	}
+	return word + "  " + rest
 }
 
 // frameClipLine is the last Block row when the pane cannot hold the full list.
