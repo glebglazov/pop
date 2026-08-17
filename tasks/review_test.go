@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -297,9 +298,22 @@ func TestReviewRunsMidDrainAndChangesNoStatus(t *testing.T) {
 	}
 }
 
+// manifestWithReviewer builds a bare manifest carrying a per-set `reviewer`
+// override object under Unknown, so ReviewerOverride() parses it exactly as it
+// would from a loaded index.json.
+func manifestWithReviewer(t *testing.T, agents []string, effort string) *Manifest {
+	t.Helper()
+	raw, err := json.Marshal(AgentDirective{Agents: agents, Effort: effort})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &Manifest{Unknown: map[string]json.RawMessage{"reviewer": raw}}
+}
+
 // TestResolveReviewerPrecedence covers the Reviewer chain (ADR-0214), highest
-// first: CLI flags → [work.review] → [work.implement].agents / heavy, with
-// agents and effort resolving independently of one another.
+// first: CLI flags → the per-set `reviewer` override → [work.review] →
+// [work.implement].agents / heavy, with agents and effort resolving
+// independently of one another.
 func TestResolveReviewerPrecedence(t *testing.T) {
 	t.Parallel()
 	reviewCfg := func(agents []string, effort string) *config.Config {
@@ -312,6 +326,7 @@ func TestResolveReviewerPrecedence(t *testing.T) {
 		name       string
 		cliAgents  []string
 		cliEffort  string
+		manifest   *Manifest
 		cfg        *config.Config
 		wantAgents []string
 		wantEffort string
@@ -344,11 +359,35 @@ func TestResolveReviewerPrecedence(t *testing.T) {
 			wantAgents: []string{"opencode"},
 			wantEffort: "light",
 		},
+		{
+			name:       "per-set reviewer overrides config",
+			manifest:   manifestWithReviewer(t, []string{"pi"}, "light"),
+			cfg:        reviewCfg([]string{"codex"}, "standard"),
+			wantAgents: []string{"pi"},
+			wantEffort: "light",
+		},
+		{
+			name:       "CLI overrides the per-set reviewer",
+			cliAgents:  []string{"opencode"},
+			cliEffort:  "heavy",
+			manifest:   manifestWithReviewer(t, []string{"pi"}, "light"),
+			cfg:        reviewCfg([]string{"codex"}, "standard"),
+			wantAgents: []string{"opencode"},
+			wantEffort: "heavy",
+		},
+		{
+			name:       "per-set agents and effort resolve independently",
+			cliAgents:  []string{"opencode"},
+			manifest:   manifestWithReviewer(t, nil, "light"),
+			cfg:        reviewCfg([]string{"codex"}, "standard"),
+			wantAgents: []string{"opencode"}, // CLI agents win
+			wantEffort: "light",              // per-set effort wins (no CLI effort)
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			sel, err := resolveReviewer(tt.cliAgents, tt.cliEffort, tt.cfg)
+			sel, err := resolveReviewer(tt.cliAgents, tt.cliEffort, tt.manifest, tt.cfg)
 			if err != nil {
 				t.Fatalf("resolveReviewer: %v", err)
 			}

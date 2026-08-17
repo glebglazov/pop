@@ -613,10 +613,30 @@ func WriteManifestAtomic(d *Deps, m *Manifest) error {
 // malformed value is treated as participating (fail toward verifying); the key
 // rides through WriteManifestAtomic in Unknown, so a rewrite preserves it.
 func (m *Manifest) VerifyOptedOut() bool {
+	return m.optedOut("verify")
+}
+
+// ReviewOptedOut reports whether the set explicitly opted out of Code review
+// with `"review": false` in its manifest (ADR-0214). It is the Verifier rule
+// applied to the Reviewer, key for key: user config is the master gate, an
+// absent or truthy `review` key means the set is reviewed while the feature is
+// globally enabled, and a malformed value is treated as participating.
+//
+// A hand-run `pop tasks review <set>` ignores it, the way a hand-run verify
+// ignores `"verify": false`: the key declines the automatic drain step, not a
+// human asking the question.
+func (m *Manifest) ReviewOptedOut() bool {
+	return m.optedOut("review")
+}
+
+// optedOut reads a boolean set key as an opt-out. The key rides through
+// WriteManifestAtomic in Unknown, so a rewrite preserves it; anything that does
+// not parse as `false` leaves the set participating.
+func (m *Manifest) optedOut(key string) bool {
 	if m == nil {
 		return false
 	}
-	raw, ok := m.Unknown["verify"]
+	raw, ok := m.Unknown[key]
 	if !ok {
 		return false
 	}
@@ -627,30 +647,47 @@ func (m *Manifest) VerifyOptedOut() bool {
 	return !enabled
 }
 
-// VerifierDirective is a set's per-set Verifier override, read from the
-// manifest's `"verifier": {"agents": [...], "effort": "..."}` object (ADR-0086).
-// It overrides the [work.verify] config default (agents, effort) for that
-// set, but it is opt-out only for participation: user config is the master gate,
-// so a directive can steer *how* a set is verified but never opt it *in* while
-// the feature is globally off (that stays VerifyOptedOut / the config switch).
-type VerifierDirective struct {
+// AgentDirective is a set's per-set override of the agent list and effort a
+// set-level phase runs at, read from the manifest's
+// `"verifier": {"agents": [...], "effort": "..."}` object (ADR-0086) and its
+// `"reviewer"` twin (ADR-0214). One type serves both because the two phases
+// resolve the same two values by the same precedence.
+//
+// It overrides the phase's config default for that set, but it is opt-out only
+// for participation: user config is the master gate, so a directive can steer
+// *how* a set is verified or reviewed but never opt it *in* while the feature is
+// globally off (that stays VerifyOptedOut / ReviewOptedOut and the config switch).
+type AgentDirective struct {
 	Agents []string `json:"agents,omitempty"`
 	Effort string   `json:"effort,omitempty"`
 }
 
 // VerifierOverride returns the set's per-set Verifier override, or nil when the
 // manifest carries no `verifier` object (or a malformed one — a bad value is
-// ignored so it falls through to the config default). The key rides through
-// WriteManifestAtomic in Unknown, so a rewrite preserves it.
-func (m *Manifest) VerifierOverride() *VerifierDirective {
+// ignored so it falls through to the config default).
+func (m *Manifest) VerifierOverride() *AgentDirective {
+	return m.agentDirective("verifier")
+}
+
+// ReviewerOverride returns the set's per-set Reviewer override, read from the
+// manifest's `reviewer` object, or nil when there is none.
+func (m *Manifest) ReviewerOverride() *AgentDirective {
+	return m.agentDirective("reviewer")
+}
+
+// agentDirective parses one override object out of the manifest's unread keys.
+// The key rides through WriteManifestAtomic in Unknown, so a rewrite preserves
+// it; a malformed object resolves to nil rather than an error, leaving the phase
+// on its config default.
+func (m *Manifest) agentDirective(key string) *AgentDirective {
 	if m == nil {
 		return nil
 	}
-	raw, ok := m.Unknown["verifier"]
+	raw, ok := m.Unknown[key]
 	if !ok {
 		return nil
 	}
-	var over VerifierDirective
+	var over AgentDirective
 	if err := json.Unmarshal(raw, &over); err != nil {
 		return nil
 	}

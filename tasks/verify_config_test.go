@@ -18,7 +18,7 @@ import (
 // would from a loaded index.json.
 func manifestWithVerifier(t *testing.T, agents []string, effort string) *Manifest {
 	t.Helper()
-	over := VerifierDirective{Agents: agents, Effort: effort}
+	over := AgentDirective{Agents: agents, Effort: effort}
 	raw, err := json.Marshal(over)
 	if err != nil {
 		t.Fatal(err)

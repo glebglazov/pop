@@ -156,6 +156,42 @@ func TestDrainReachesTheSameTerminalStatusWithReviewOnAndOff(t *testing.T) {
 	}
 }
 
+// TestDrainSkipsReviewForAnOptedOutSet: `"review": false` declines the drain's
+// Code review for one set while the group stays enabled for every other — the
+// Verifier's per-set opt-out, key for key. The set reaches the same terminal
+// status it would have reached reviewed, because review gates nothing.
+func TestDrainSkipsReviewForAnOptedOutSet(t *testing.T) {
+	t.Parallel()
+	env := setupRunTaskSetFixture(t, "demo", signOffSet())
+	_, _, head := runtimeHead(t, env.deps(), env.root)
+	writeManifestWithSetKeys(t, filepath.Join(env.tasksDir, "demo"), signOffSet(),
+		map[string]any{"base_commit": head, "review": false})
+
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(false, "", &buf)
+	opts.TaskSetOverride = "demo"
+	opts.ConfirmIn = strings.NewReader("2\n") // Complete the sign-off at the gate.
+	opts.ConfirmOut = &buf
+	opts.verifyRunner = func(string) (string, error) { return "VERDICT: PASS\n", nil }
+	opts.reviewRunner = func(string) (string, string, error) {
+		t.Fatal("an opted-out set must spawn no Reviewer")
+		return "", "", nil
+	}
+
+	result, err := RunTaskSetWith(env.deps(), nil, func(string) (*config.Config, error) {
+		return reviewEnabledConfig(), nil
+	}, opts)
+	if err != nil {
+		t.Fatalf("RunTaskSetWith: %v", err)
+	}
+	if !result.TaskSetDone {
+		t.Fatalf("result = %+v, want the completed sign-off to reach DONE", result)
+	}
+	if docs := reviewDocuments(t, env); len(docs) != 0 {
+		t.Fatalf("an opted-out set wrote %v", docs)
+	}
+}
+
 // TestReviewRunIsCapturedUnderItsOwnPhase: the Reviewer's invocation is filed as
 // a Captured run under the `review` phase — the seam the shared fallback walk
 // calls — and the lenses that read those runs give it a row of its own rather

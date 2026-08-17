@@ -201,6 +201,17 @@ Set-level keys:
   reads it (the per-task subjects are already written); it is what an agent
   spawning a task mid-drain renders a new `+"`commit_subject`"+` from. Omit it
   when no convention resolved.
+- `+"`verify`"+` / `+"`review`"+` — optional booleans, and opt-**out** only:
+  write `+"`false`"+` to decline the drain's Agent verification or its Code
+  review for this set alone (generated or vendored code, say). Omit them and the
+  set participates in whichever of the two the user has enabled globally; neither
+  key can switch a globally disabled phase on, and a hand-run
+  `+"`pop tasks verify`"+` / `+"`pop tasks review`"+` runs regardless.
+- `+"`verifier`"+` / `+"`reviewer`"+` — optional
+  `+"`{\"agents\": [...], \"effort\": \"...\"}`"+` objects steering *how* this
+  set is verified or reviewed: they override the configured agent fallback list
+  and effort for that phase, and CLI flags still win over them. They steer only —
+  participation stays the `+"`verify`"+` / `+"`review`"+` keys' business.
 - No `+"`worktree`"+` and no `+"`auto_drain`"+` (ADR-0115): binding and
   auto-drain are `+"`register`"+` flags and dashboard toggles, never manifest
   keys. A legacy set carrying them is not malformed; they are ignored.

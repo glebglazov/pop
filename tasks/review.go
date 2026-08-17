@@ -239,7 +239,7 @@ func runReviewer(d *Deps, cfg *config.Config, opts reviewCoreOptions, m *Manifes
 	text := buildReviewerPrompt(d, m, work, convention, previous, hasPrevious)
 	run := opts.runReviewer
 	if run == nil {
-		sel, err := resolveReviewer(opts.Agents, opts.Effort, cfg)
+		sel, err := resolveReviewer(opts.Agents, opts.Effort, m, cfg)
 		if err != nil {
 			return "", "", err
 		}
@@ -258,8 +258,9 @@ func runReviewer(d *Deps, cfg *config.Config, opts reviewCoreOptions, m *Manifes
 }
 
 // resolveReviewer applies the Reviewer precedence chain (ADR-0214), highest
-// first: CLI flags → [work.review] → [work.implement].agents / DefaultReviewEffort.
-// Agents and effort resolve independently, the way the Verifier's do.
+// first: CLI flags → the per-set manifest `reviewer` override → [work.review] →
+// [work.implement].agents / DefaultReviewEffort. Agents and effort resolve
+// independently, the way the Verifier's do.
 //
 // The chain never consults which agents actually implemented the set's tasks:
 // the Reviewer is resolved from the human's configuration alone, so it is a
@@ -269,10 +270,18 @@ func runReviewer(d *Deps, cfg *config.Config, opts reviewCoreOptions, m *Manifes
 // Like the Verifier's, the fallthrough to [work.implement].agents is disabled by
 // an override of `agents = []`, which resolves to an error rather than a
 // selection (ADR-0202 decision 6).
-func resolveReviewer(cliAgents []string, cliEffort string, cfg *config.Config) (verifierSelection, error) {
+func resolveReviewer(cliAgents []string, cliEffort string, m *Manifest, cfg *config.Config) (verifierSelection, error) {
 	agents := nonEmptyStrings(cliAgents)
 	effort := strings.TrimSpace(cliEffort)
 
+	if over := m.ReviewerOverride(); over != nil {
+		if len(agents) == 0 {
+			agents = nonEmptyStrings(over.Agents)
+		}
+		if effort == "" {
+			effort = strings.TrimSpace(over.Effort)
+		}
+	}
 	if r := cfg.ReviewSettings(); r != nil && effort == "" {
 		effort = strings.TrimSpace(r.Effort)
 	}

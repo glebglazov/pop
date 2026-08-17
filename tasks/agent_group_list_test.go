@@ -66,7 +66,7 @@ func TestResolveVerifierEmptyOverrideDisablesFallthrough(t *testing.T) {
 // TestResolveReviewerEmptyOverrideDisablesFallthrough is the same pair for the
 // Reviewer, which reads its own key through the one shared rule.
 func TestResolveReviewerEmptyOverrideDisablesFallthrough(t *testing.T) {
-	sel, err := resolveReviewer(nil, "", agentGroupCfg())
+	sel, err := resolveReviewer(nil, "", nil, agentGroupCfg())
 	if err != nil {
 		t.Fatalf("resolveReviewer with an absent list: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestResolveReviewerEmptyOverrideDisablesFallthrough(t *testing.T) {
 		t.Fatalf("agents = %v, want the implement list", sel.Agents)
 	}
 
-	_, err = resolveReviewer(nil, "", agentGroupCfg(config.KeyReviewAgents))
+	_, err = resolveReviewer(nil, "", nil, agentGroupCfg(config.KeyReviewAgents))
 	if err == nil {
 		t.Fatal("resolveReviewer resolved an explicit empty override; want a refusal")
 	}
@@ -83,7 +83,7 @@ func TestResolveReviewerEmptyOverrideDisablesFallthrough(t *testing.T) {
 		t.Fatalf("error = %q, want it to name %s", err, config.KeyReviewAgents)
 	}
 
-	sel, err = resolveReviewer([]string{"codex"}, "", agentGroupCfg(config.KeyReviewAgents))
+	sel, err = resolveReviewer([]string{"codex"}, "", nil, agentGroupCfg(config.KeyReviewAgents))
 	if err != nil {
 		t.Fatalf("resolveReviewer with --agent: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestEmptyOverrideOfOneGroupLeavesTheOthers(t *testing.T) {
 	if _, err := resolveVerifier(nil, "", manifestWithVerifier(t, nil, ""), cfg); err == nil {
 		t.Fatal("verify resolved an explicit empty override")
 	}
-	sel, err := resolveReviewer(nil, "", cfg)
+	sel, err := resolveReviewer(nil, "", nil, cfg)
 	if err != nil {
 		t.Fatalf("review refused on verify's override: %v", err)
 	}

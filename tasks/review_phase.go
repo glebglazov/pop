@@ -54,6 +54,12 @@ func (r *implementRun) reviewPhase(currentRefresh *RefreshResult, row *Row) (rev
 		return reviewFallThrough, nil
 	}
 	m := currentRefresh.Manifests[r.taskSetID]
+	// The per-set decline (ADR-0214), the Verifier's opt-out key for key: a set of
+	// generated or vendored code says no to review here rather than by switching
+	// the group off for every set in the repository.
+	if m.ReviewOptedOut() {
+		return reviewFallThrough, nil
+	}
 	composition := reviewComposition(m)
 	repo := ""
 	if id, idErr := ResolveRepositoryIdentity(r.d, r.runtimePath); idErr == nil {
