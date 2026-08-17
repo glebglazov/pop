@@ -6,6 +6,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
@@ -15,12 +16,21 @@ import (
 // ten most recent Task sets, not a claim about substrate depth (ADR-0160).
 const spendRollupSetLimit = 10
 
+// Spend sort vocabulary for the cross-set rollup (ADR-0218).
+const (
+	SpendSortRecency = "recency"
+	SpendSortTokens  = "tokens"
+)
+
 // SpendOptions configures the Spend lens.
 type SpendOptions struct {
 	ResolveInput
 	// Target is a bare Task set identifier for per-set breakdown. Empty selects
 	// the cross-set rollup.
 	Target string
+	// Sort orders the cross-set rollup. Empty means recency. Unrecognised
+	// values are refused before anything is rendered.
+	Sort string
 }
 
 // SpendRollupRow is aggregated Run spend for one Task set.
@@ -35,6 +45,9 @@ type SpendRollupRow struct {
 	TurnBlindRuns  int
 	PeakBlindRuns  int
 	Agents         string // populated when the set mixes agents
+	// LastRunAt is the latest Captured run start time in the set. Zero when no
+	// run carries a readable start time (ADR-0218).
+	LastRunAt time.Time
 }
 
 // SpendRollupResult is the cross-set spend rollup.
@@ -45,19 +58,20 @@ type SpendRollupResult struct {
 
 // spendRollupJSONRow is the machine-readable rollup row emitted by --json.
 type spendRollupJSONRow struct {
-	TaskSetID        string   `json:"task_set_id"`
-	InputTokens      int64    `json:"input_tokens"`
-	OutputTokens     int64    `json:"output_tokens"`
-	CacheReadTokens  int64    `json:"cache_read_tokens"`
-	CacheWriteTokens int64    `json:"cache_write_tokens"`
-	PartialCostUSD   *float64 `json:"partial_cost_usd,omitempty"`
-	Turns            *int     `json:"turns"`
-	TurnBlindRuns    int      `json:"turn_blind_runs"`
-	PeakInputTokens  *int64   `json:"peak_input_tokens"`
-	PeakBlindRuns    int      `json:"peak_blind_runs"`
-	RunCount         int      `json:"run_count"`
-	TokenBlindRuns   int      `json:"token_blind_runs"`
-	Agent            string   `json:"agent,omitempty"`
+	TaskSetID        string     `json:"task_set_id"`
+	InputTokens      int64      `json:"input_tokens"`
+	OutputTokens     int64      `json:"output_tokens"`
+	CacheReadTokens  int64      `json:"cache_read_tokens"`
+	CacheWriteTokens int64      `json:"cache_write_tokens"`
+	PartialCostUSD   *float64   `json:"partial_cost_usd,omitempty"`
+	Turns            *int       `json:"turns"`
+	TurnBlindRuns    int        `json:"turn_blind_runs"`
+	PeakInputTokens  *int64     `json:"peak_input_tokens"`
+	PeakBlindRuns    int        `json:"peak_blind_runs"`
+	RunCount         int        `json:"run_count"`
+	TokenBlindRuns   int        `json:"token_blind_runs"`
+	LastRunAt        *time.Time `json:"last_run_at"`
+	Agent            string     `json:"agent,omitempty"`
 }
 
 // spendRollupJSON is the machine-readable rollup payload.
@@ -159,6 +173,11 @@ func SpendRollup(opts SpendOptions) (*SpendRollupResult, error) {
 
 // SpendRollupWith aggregates Run spend using injected dependencies.
 func SpendRollupWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts SpendOptions) (*SpendRollupResult, error) {
+	sortMode, err := normalizeSpendSort(opts.Sort)
+	if err != nil {
+		return nil, err
+	}
+
 	resolved, err := ResolvePathsWith(d, pd, loadConfig, opts.ResolveInput)
 	if err != nil {
 		return nil, exitErr(ExitSetup, "%v", err)
@@ -174,7 +193,7 @@ func SpendRollupWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 		return nil, exitErr(ExitSetup, "%v", err)
 	}
 
-	setIDs := recentTaskSetIDsForSpend(state, resolved.DefinitionPath, refresh.Manifests, spendRollupSetLimit)
+	setIDs := activeTaskSetIDsForSpend(state, resolved.DefinitionPath, refresh.Manifests)
 	result := &SpendRollupResult{Sets: make([]SpendRollupRow, 0, len(setIDs))}
 	for _, setID := range setIDs {
 		m := refresh.Manifests[setID]
@@ -188,9 +207,15 @@ func SpendRollupWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 		result.Sets = append(result.Sets, row)
 	}
 
-	sort.Slice(result.Sets, func(i, j int) bool {
-		return tokenUsageTotal(result.Sets[i].Tokens) > tokenUsageTotal(result.Sets[j].Tokens)
-	})
+	// The display bound is always the most recent N by Captured-run start time;
+	// --sort then reorders that window (ADR-0218).
+	sortSpendRollupRows(result.Sets, SpendSortRecency)
+	if len(result.Sets) > spendRollupSetLimit {
+		result.Sets = result.Sets[:spendRollupSetLimit]
+	}
+	if sortMode != SpendSortRecency {
+		sortSpendRollupRows(result.Sets, sortMode)
+	}
 	for _, row := range result.Sets {
 		if spendAgentsMix(row.Agents) {
 			result.ShowAgents = true
@@ -198,6 +223,50 @@ func SpendRollupWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 		}
 	}
 	return result, nil
+}
+
+// normalizeSpendSort maps the caller's --sort value onto the closed vocabulary.
+// Empty means recency. An unrecognised value is refused with the accepted list
+// and nothing is rendered.
+func normalizeSpendSort(raw string) (string, error) {
+	switch raw {
+	case "", SpendSortRecency:
+		return SpendSortRecency, nil
+	case SpendSortTokens:
+		return SpendSortTokens, nil
+	default:
+		return "", exitErr(ExitSetup, "unknown spend sort %q (want one of: %s)", raw, strings.Join([]string{SpendSortRecency, SpendSortTokens}, ", "))
+	}
+}
+
+func sortSpendRollupRows(rows []SpendRollupRow, mode string) {
+	sort.SliceStable(rows, func(i, j int) bool {
+		return spendRollupRowLess(rows[i], rows[j], mode)
+	})
+}
+
+// spendRollupRowLess reports whether a should sort before b. Recency is every
+// sort's tie-break: newer Captured-run start first, and a set with no readable
+// start time always sorts after one that has one.
+func spendRollupRowLess(a, b SpendRollupRow, mode string) bool {
+	if mode == SpendSortTokens {
+		ta, tb := tokenUsageTotal(a.Tokens), tokenUsageTotal(b.Tokens)
+		if ta != tb {
+			return ta > tb
+		}
+	}
+	return spendRollupRecencyLess(a, b)
+}
+
+func spendRollupRecencyLess(a, b SpendRollupRow) bool {
+	aZero, bZero := a.LastRunAt.IsZero(), b.LastRunAt.IsZero()
+	if aZero != bZero {
+		return !aZero
+	}
+	if !aZero && !a.LastRunAt.Equal(b.LastRunAt) {
+		return a.LastRunAt.After(b.LastRunAt)
+	}
+	return a.TaskSetID < b.TaskSetID
 }
 
 // SpendSetBreakdown aggregates Run spend for one Task set, broken down per task
@@ -352,10 +421,10 @@ func countCompletedTasks(m *Manifest) int {
 	return n
 }
 
-// recentTaskSetIDsForSpend returns up to limit non-archived Task set identifiers
-// ordered newest-first by reverse identifier sort (the same recency heuristic
-// as transfer export completion).
-func recentTaskSetIDsForSpend(state *GlobalState, defPath string, manifests map[string]*Manifest, limit int) []string {
+// activeTaskSetIDsForSpend returns every non-archived Task set identifier. The
+// rollup picks its display window by Captured-run start time after aggregation
+// (ADR-0218); identifier order is not a stand-in for recency.
+func activeTaskSetIDsForSpend(state *GlobalState, defPath string, manifests map[string]*Manifest) []string {
 	archived := archivedTaskSetIDs(state, defPath)
 	ids := make([]string, 0, len(manifests))
 	for id := range manifests {
@@ -363,10 +432,6 @@ func recentTaskSetIDsForSpend(state *GlobalState, defPath string, manifests map[
 			continue
 		}
 		ids = append(ids, id)
-	}
-	sort.Sort(sort.Reverse(sort.StringSlice(ids)))
-	if len(ids) > limit {
-		ids = ids[:limit]
 	}
 	return ids
 }
@@ -403,6 +468,9 @@ func taskSetSpendRollup(d *Deps, taskSetID, taskSetDir string) (SpendRollupRow, 
 		if run.meta.Agent != "" {
 			setAgents[run.meta.Agent] = true
 		}
+		if !run.meta.StartTime.IsZero() && (row.LastRunAt.IsZero() || run.meta.StartTime.After(row.LastRunAt)) {
+			row.LastRunAt = run.meta.StartTime
+		}
 		row.RunCount++
 		if !spend.Tokens.HasUsage() {
 			row.TokenBlindRuns++
@@ -420,6 +488,14 @@ func taskSetSpendRollup(d *Deps, taskSetID, taskSetDir string) (SpendRollupRow, 
 	}
 	row.Agents = formatSpendAgents(setAgents)
 	return row, nil
+}
+
+func spendLastRunAtJSONPtr(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	utc := t.UTC()
+	return &utc
 }
 
 func addPartialCost(acc *PartialCost, c PartialCost) {
@@ -890,6 +966,7 @@ func RenderSpendRollupJSON(w io.Writer, result *SpendRollupResult) error {
 			PeakBlindRuns:    row.PeakBlindRuns,
 			RunCount:         row.RunCount,
 			TokenBlindRuns:   row.TokenBlindRuns,
+			LastRunAt:        spendLastRunAtJSONPtr(row.LastRunAt),
 		}
 		if result.ShowAgents {
 			jr.Agent = row.Agents

@@ -66,6 +66,7 @@ var (
 	taskStreamLast            bool
 	taskStreamToolDetail      bool
 	taskSpendJSON             bool
+	taskSpendSort             string
 	taskAgentsModels          bool
 )
 
@@ -351,6 +352,7 @@ func init() {
 	taskStreamCmd.Flags().BoolVar(&taskStreamToolDetail, "tool-detail", false, "Deepen the timing breakdown to argument-level tool facts")
 	taskCmd.AddCommand(taskSpendCmd)
 	taskSpendCmd.Flags().BoolVar(&taskSpendJSON, "json", false, "Emit spend data as JSON instead of a table")
+	taskSpendCmd.Flags().StringVar(&taskSpendSort, "sort", tasks.SpendSortRecency, "Order the rollup by recency (latest Captured run) or tokens")
 	taskCmd.AddCommand(taskShowPathCmd)
 	taskCheckoutCmd.Flags().BoolVar(&taskCheckoutLocality, "locality", false, "Print exactly one word, trunk or worktree (the default with no flags)")
 	taskCheckoutCmd.Flags().BoolVar(&taskCheckoutJSON, "json", false, "Print the whole checkout as JSON: path, locality, branch, trunk_path (omitted when unresolvable), bare, managed")
@@ -1699,6 +1701,7 @@ func runTaskSpendWith(d *tasks.Deps, w io.Writer, target string) error {
 	}
 	result, err := tasks.SpendRollupWith(d, taskProjectDeps(), taskConfigLoad, tasks.SpendOptions{
 		ResolveInput: taskResolveInput(),
+		Sort:         taskSpendSort,
 	})
 	if err != nil {
 		return err

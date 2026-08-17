@@ -44,7 +44,7 @@ func TestSpendRollupSelectsTenMostRecentSets(t *testing.T) {
 		setDir := registerSpendSet(t, env, setID, []Task{
 			{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
 		})
-		writeSpendRun(t, setDir, "01-a.md", "01-a", "claude", base, []streamEventRecord{
+		writeSpendRun(t, setDir, "01-a.md", "01-a", "claude", base.Add(time.Duration(i)*time.Minute), []streamEventRecord{
 			{Type: "event", AtMS: 100, Raw: `{"type":"result","usage":{"input_tokens":1,"output_tokens":1}}`},
 		})
 	}
@@ -70,6 +70,9 @@ func TestSpendRollupSelectsTenMostRecentSets(t *testing.T) {
 			t.Fatalf("missing expected set %q", formatSpendSetID(i))
 		}
 	}
+	if result.Sets[0].TaskSetID != formatSpendSetID(11) {
+		t.Fatalf("default order starts with %q, want newest-by-run-start %q", result.Sets[0].TaskSetID, formatSpendSetID(11))
+	}
 }
 
 func TestSpendRollupSortsRowsByTotalTokens(t *testing.T) {
@@ -79,7 +82,7 @@ func TestSpendRollupSortsRowsByTotalTokens(t *testing.T) {
 	lowDir := registerSpendSet(t, env, "2026-06-10-low", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
 	})
-	writeSpendRun(t, lowDir, "01-a.md", "01-a", "claude", base, []streamEventRecord{
+	writeSpendRun(t, lowDir, "01-a.md", "01-a", "claude", base.Add(time.Hour), []streamEventRecord{
 		{Type: "event", AtMS: 100, Raw: `{"type":"result","usage":{"input_tokens":10,"output_tokens":5}}`},
 	})
 
@@ -92,6 +95,7 @@ func TestSpendRollupSortsRowsByTotalTokens(t *testing.T) {
 
 	result, err := SpendRollupWith(env.deps(), nil, nil, SpendOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
+		Sort:         SpendSortTokens,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -109,6 +113,119 @@ func TestSpendRollupSortsRowsByTotalTokens(t *testing.T) {
 	if high.RunCount != 1 || high.TokenBlindRuns != 0 {
 		t.Fatalf("high counts = runs %d blind %d", high.RunCount, high.TokenBlindRuns)
 	}
+}
+
+func TestSpendRollupDefaultOrdersByLastRunAt(t *testing.T) {
+	env := spendFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+
+	olderID := registerSpendSet(t, env, "2026-06-09-older-id", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	writeSpendRun(t, olderID, "01-a.md", "01-a", "claude", base.Add(2*time.Hour), []streamEventRecord{
+		{Type: "event", AtMS: 100, Raw: `{"type":"result","usage":{"input_tokens":1,"output_tokens":1}}`},
+	})
+
+	newerID := registerSpendSet(t, env, "2026-06-12-newer-id", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	writeSpendRun(t, newerID, "01-a.md", "01-a", "claude", base, []streamEventRecord{
+		{Type: "event", AtMS: 100, Raw: `{"type":"result","usage":{"input_tokens":1,"output_tokens":1}}`},
+	})
+
+	result, err := SpendRollupWith(env.deps(), nil, nil, SpendOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Sets) != 2 {
+		t.Fatalf("sets = %#v", result.Sets)
+	}
+	if result.Sets[0].TaskSetID != "2026-06-09-older-id" || result.Sets[1].TaskSetID != "2026-06-12-newer-id" {
+		t.Fatalf("order = %#v, want run-start recency over identifier order", []string{result.Sets[0].TaskSetID, result.Sets[1].TaskSetID})
+	}
+}
+
+func TestSpendRollupTokensTieBreaksByRecency(t *testing.T) {
+	env := spendFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	usage := []streamEventRecord{
+		{Type: "event", AtMS: 100, Raw: `{"type":"result","usage":{"input_tokens":10,"output_tokens":5}}`},
+	}
+
+	older := registerSpendSet(t, env, "2026-06-10-a", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	writeSpendRun(t, older, "01-a.md", "01-a", "claude", base, usage)
+
+	newer := registerSpendSet(t, env, "2026-06-10-b", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	writeSpendRun(t, newer, "01-a.md", "01-a", "claude", base.Add(time.Hour), usage)
+
+	result, err := SpendRollupWith(env.deps(), nil, nil, SpendOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Sort:         SpendSortTokens,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Sets) != 2 {
+		t.Fatalf("sets = %#v", result.Sets)
+	}
+	if result.Sets[0].TaskSetID != "2026-06-10-b" || result.Sets[1].TaskSetID != "2026-06-10-a" {
+		t.Fatalf("order = %#v, want equal tokens broken newest-first", []string{result.Sets[0].TaskSetID, result.Sets[1].TaskSetID})
+	}
+}
+
+func TestSpendRollupMissingLastRunAtSortsLast(t *testing.T) {
+	env := spendFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+
+	registerSpendSet(t, env, "2026-06-12-no-runs", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	withRuns := registerSpendSet(t, env, "2026-06-09-with-runs", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	writeSpendRun(t, withRuns, "01-a.md", "01-a", "claude", base, []streamEventRecord{
+		{Type: "event", AtMS: 100, Raw: `{"type":"result","usage":{"input_tokens":1,"output_tokens":1}}`},
+	})
+
+	result, err := SpendRollupWith(env.deps(), nil, nil, SpendOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Sets) != 2 {
+		t.Fatalf("sets = %#v", result.Sets)
+	}
+	if result.Sets[0].TaskSetID != "2026-06-09-with-runs" || result.Sets[1].TaskSetID != "2026-06-12-no-runs" {
+		t.Fatalf("order = %#v, want readable last_run_at before missing", []string{result.Sets[0].TaskSetID, result.Sets[1].TaskSetID})
+	}
+	if !result.Sets[1].LastRunAt.IsZero() {
+		t.Fatalf("no-runs LastRunAt = %v, want zero", result.Sets[1].LastRunAt)
+	}
+}
+
+func TestSpendRollupRejectsUnknownSort(t *testing.T) {
+	env := spendFixture(t)
+	_, err := SpendRollupWith(env.deps(), nil, nil, SpendOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Sort:         "cost",
+	})
+	if err == nil {
+		t.Fatal("expected unknown sort to be refused")
+	}
+	msg := err.Error()
+	for _, want := range []string{"cost", SpendSortRecency, SpendSortTokens} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q missing %q", msg, want)
+		}
+	}
+	assertExitCode(t, err, ExitSetup)
 }
 
 func TestSpendRollupCountsTokenBlindRuns(t *testing.T) {
@@ -145,6 +262,7 @@ func TestSpendRollupCountsTokenBlindRuns(t *testing.T) {
 func TestRenderSpendRollupJSON(t *testing.T) {
 	turns := 4
 	peak := int64(900)
+	lastRun := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
 	result := &SpendRollupResult{Sets: []SpendRollupRow{{
 		TaskSetID: "demo",
 		Tokens: TokenUsage{
@@ -157,6 +275,7 @@ func TestRenderSpendRollupJSON(t *testing.T) {
 		TokenBlindRuns: 1,
 		TurnBlindRuns:  1,
 		PeakBlindRuns:  1,
+		LastRunAt:      lastRun,
 	}}}
 	var buf bytes.Buffer
 	if err := RenderSpendRollupJSON(&buf, result); err != nil {
@@ -180,6 +299,33 @@ func TestRenderSpendRollupJSON(t *testing.T) {
 	}
 	if got.PeakInputTokens == nil || *got.PeakInputTokens != peak || got.PeakBlindRuns != 1 {
 		t.Fatalf("peak = %v blind = %d, want %d and 1 blind", got.PeakInputTokens, got.PeakBlindRuns, peak)
+	}
+	if got.LastRunAt == nil || !got.LastRunAt.Equal(lastRun) {
+		t.Fatalf("last_run_at = %v, want %v", got.LastRunAt, lastRun)
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	sets, _ := raw["sets"].([]any)
+	row, _ := sets[0].(map[string]any)
+	if _, ok := row["last_run_at"]; !ok {
+		t.Fatalf("last_run_at missing from JSON row: %s", buf.String())
+	}
+
+	empty := &SpendRollupResult{Sets: []SpendRollupRow{{TaskSetID: "empty"}}}
+	buf.Reset()
+	if err := RenderSpendRollupJSON(&buf, empty); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(buf.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	sets, _ = raw["sets"].([]any)
+	row, _ = sets[0].(map[string]any)
+	if v, ok := row["last_run_at"]; !ok || v != nil {
+		t.Fatalf("last_run_at = %#v, want present null", row["last_run_at"])
 	}
 }
 
