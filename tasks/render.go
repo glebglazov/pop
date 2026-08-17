@@ -707,7 +707,7 @@ func renderTaskList(out *output, taskSetID string, m *Manifest) {
 // this drills into a single set and shows every task's status, type, identifier,
 // title, and blockers in manifest (dependency) order, so a set's aggregate
 // state can be read down to the task that holds it.
-// It closes with the set's Code review pointer when one exists — d is what
+// It closes with the set's Artifact summary when one exists — d is what
 // resolves it, and a nil d falls back to the default dependencies.
 func RenderTaskSetDetail(d *Deps, w io.Writer, taskSetID string, row *Row, m *Manifest) {
 	renderTaskSetDetail(d, outputFor(w), taskSetID, row, m)
@@ -777,23 +777,22 @@ func renderTaskSetDetail(d *Deps, out *output, taskSetID string, row *Row, m *Ma
 		fmt.Fprintln(out, out.styled(taskStyle(m, task), line))
 	}
 
-	renderReviewPointerSection(d, out, m)
+	renderArtifactSummarySection(d, out, taskSetID, m)
 }
 
-// renderReviewPointerSection closes the detail view with the same pointer the
-// HITL gate carries: where the set's latest Review artifact is and which commit
-// it describes, never the document itself (ADR-0214). A set that has never been
-// reviewed gets no section at all.
-func renderReviewPointerSection(d *Deps, out *output, m *Manifest) {
-	p, ok := latestReviewPointer(d, m)
+// renderArtifactSummarySection points terminal users to the Artifact list while
+// giving the same summary facts as the dashboard detail surface (ADR-0217).
+func renderArtifactSummarySection(d *Deps, out *output, setID string, m *Manifest) {
+	summary, ok := LatestArtifactSummary(d, m.Dir)
 	if !ok {
 		return
 	}
 	fmt.Fprintln(out)
-	out.line(ansiCyan, "%s", strings.ToUpper(ReviewSectionTitle))
-	for _, line := range strings.Split(p.Body(), "\n") {
+	out.line(ansiCyan, "%s", strings.ToUpper(ArtifactSectionTitle))
+	for _, line := range strings.Split(summary.Body(), "\n") {
 		fmt.Fprintf(out, "  %s\n", line)
 	}
+	fmt.Fprintf(out, "  view with: pop tasks artifacts %s\n", setID)
 }
 
 // taskStatusCell renders one task's status for the detail table, folding the

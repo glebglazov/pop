@@ -12,9 +12,7 @@ import (
 	"github.com/glebglazov/pop/work"
 )
 
-// reviewSectionProse is the one string the section may never carry: the Review
-// document's body. The dashboard names the artifact and offers a verb, exactly
-// as the HITL gate and the CLI detail render do (ADR-0214).
+// reviewSectionProse is the one string the summary may never carry.
 const reviewSectionProse = "SECRET-REVIEW-PROSE"
 
 // seedReviewedSet files one Review artifact under a fresh set directory and
@@ -70,29 +68,28 @@ func containerForReviewedSet(t *testing.T, m *tasks.Manifest) work.Container {
 	return got[0]
 }
 
-// TestDetailSectionCarriesTheReviewPointer pins the last surface ADR-0214 names:
-// the Work dashboard's Task-set detail view carries the same pointer the gate,
-// the CLI render and the Assist prompt do — and an unreviewed set carries none.
-func TestDetailSectionCarriesTheReviewPointer(t *testing.T) {
+// TestDetailSectionSummarisesArtifacts pins the dashboard consequence of
+// ADR-0217: it gives the Artifact count and newest member, but no path.
+func TestDetailSectionSummarisesArtifacts(t *testing.T) {
 	reviewedManifest, path := seedReviewedSet(t, true)
 	reviewed := containerForReviewedSet(t, reviewedManifest)
 
-	if len(reviewed.DetailSections) != 1 || reviewed.DetailSections[0].Title != tasks.ReviewSectionTitle {
-		t.Fatalf("detail sections = %+v, want one titled %q", reviewed.DetailSections, tasks.ReviewSectionTitle)
+	if len(reviewed.DetailSections) != 1 || reviewed.DetailSections[0].Title != tasks.ArtifactSectionTitle {
+		t.Fatalf("detail sections = %+v, want one titled %q", reviewed.DetailSections, tasks.ArtifactSectionTitle)
 	}
 	body := reviewed.DetailSections[0].Body
-	for _, want := range []string{path, "abc123a", "aaa111^..HEAD", "2026-08-16 12:00Z"} {
+	for _, want := range []string{"1 artifact", "newest: review", "2026-08-16 12:00Z"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("section body missing %q:\n%s", want, body)
 		}
 	}
-	if strings.Contains(body, reviewSectionProse) {
-		t.Fatalf("section inlined the review document:\n%s", body)
+	if strings.Contains(body, path) || strings.Contains(body, "abc123a") || strings.Contains(body, reviewSectionProse) {
+		t.Fatalf("section retained the Review pointer or prose:\n%s", body)
 	}
 
 	unreviewedManifest, _ := seedReviewedSet(t, false)
 	unreviewed := containerForReviewedSet(t, unreviewedManifest)
 	if len(unreviewed.DetailSections) != 0 {
-		t.Fatalf("unreviewed set authored %+v, want no section", unreviewed.DetailSections)
+		t.Fatalf("set with no artifacts authored %+v, want no section", unreviewed.DetailSections)
 	}
 }

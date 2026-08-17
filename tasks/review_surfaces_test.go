@@ -45,10 +45,9 @@ func hitlGateOutput(t *testing.T, d *Deps, m *Manifest, input string) (string, h
 	return out.String(), action
 }
 
-// TestReviewPointerReachesEverySurface drives the three places a human meets a
-// Code review — the HITL sign-off gate, the Task set detail view and the Assist
-// prompt — and pins that each names the document and the commit it was written
-// against, and none of them inlines a word of it.
+// TestReviewPointerReachesEverySurface drives every surface the original review
+// pointer reached. The gate and Assist prompt retain the full pointer, while the
+// CLI detail view now gives the Artifact summary and list command (ADR-0217).
 func TestReviewPointerReachesEverySurface(t *testing.T) {
 	t.Parallel()
 	d, m := hitlFixture(t)
@@ -67,7 +66,7 @@ func TestReviewPointerReachesEverySurface(t *testing.T) {
 		wants   []string
 	}{
 		{"HITL gate", gate, []string{path, "abc123a", "aaa111^..HEAD", "Read the code review"}},
-		{"detail view", detail.String(), []string{"CODE REVIEW", path, "abc123a"}},
+		{"detail view", detail.String(), []string{"ARTIFACTS", "1 artifact", "newest: review, written 2026-08-16 12:00Z", "pop tasks artifacts demo"}},
 		{"assist prompt", assist, []string{path, "abc123a", "read the file yourself"}},
 	} {
 		for _, want := range s.wants {
@@ -79,11 +78,14 @@ func TestReviewPointerReachesEverySurface(t *testing.T) {
 			t.Fatalf("%s inlined the review document:\n%s", s.surface, s.text)
 		}
 	}
+	if strings.Contains(detail.String(), path) || strings.Contains(detail.String(), "abc123a") {
+		t.Fatalf("detail view retained the review pointer:\n%s", detail.String())
+	}
 }
 
-// TestUnreviewedSetShowsNothingExtra is the other half of the rule: until a set
-// has a Review artifact, no surface says the word.
-func TestUnreviewedSetShowsNothingExtra(t *testing.T) {
+// TestSetWithNoArtifactsShowsNothingExtra pins the empty-list rule on all three
+// surfaces. The fixture has task documents, but no published artifacts.
+func TestSetWithNoArtifactsShowsNothingExtra(t *testing.T) {
 	t.Parallel()
 	d, m := hitlFixture(t)
 
@@ -102,8 +104,13 @@ func TestUnreviewedSetShowsNothingExtra(t *testing.T) {
 		{"detail view", detail.String()},
 		{"assist prompt", assist},
 	} {
-		if strings.Contains(strings.ToLower(s.text), "code review") {
-			t.Fatalf("%s mentions a review the set never had:\n%s", s.surface, s.text)
+		lower := strings.ToLower(s.text)
+		mentionsEmptyBlock := strings.Contains(lower, "code review")
+		if s.surface == "detail view" {
+			mentionsEmptyBlock = strings.Contains(lower, "artifacts")
+		}
+		if mentionsEmptyBlock {
+			t.Fatalf("%s mentions artifacts the set does not have:\n%s", s.surface, s.text)
 		}
 	}
 }

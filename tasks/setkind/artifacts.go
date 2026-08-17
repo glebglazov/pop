@@ -2,9 +2,7 @@ package setkind
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/glebglazov/pop/tasks"
@@ -12,11 +10,11 @@ import (
 )
 
 const (
-	artifactTypeReview   = "review"
-	artifactTypeSpec     = "spec"
-	artifactTypeProgress = "progress"
-	progressFileName     = "progress.txt"
-	reviewsDirName       = "reviews"
+	artifactTypeReview   = tasks.ArtifactTypeReview
+	artifactTypeSpec     = tasks.ArtifactTypeSpec
+	artifactTypeProgress = tasks.ArtifactTypeProgress
+	progressFileName     = tasks.ProgressFileName
+	reviewsDirName       = tasks.ReviewsDirName
 )
 
 var _ work.ArtifactSource = (*Kind)(nil)
@@ -26,64 +24,19 @@ var _ work.ArtifactSource = (*Kind)(nil)
 // that do not date themselves; reviews use the instant already in each name.
 func (k *Kind) Artifacts(c work.Container) ([]work.Artifact, error) {
 	setDir := filepath.Join(c.DefPath, c.ID)
-	entries, err := k.d.Tasks.FS.ReadDir(setDir)
+	listed, err := tasks.Artifacts(k.d.Tasks, setDir)
 	if err != nil {
 		return nil, fmt.Errorf("read artifacts for task set %q: %w", c.ID, err)
 	}
-
-	artifacts := make([]work.Artifact, 0)
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		var artifactType string
-		switch entry.Name() {
-		case tasks.SpecFileName:
-			artifactType = artifactTypeSpec
-		case progressFileName:
-			artifactType = artifactTypeProgress
-		default:
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return nil, fmt.Errorf("read artifact %s: %w", entry.Name(), err)
-		}
+	artifacts := make([]work.Artifact, 0, len(listed))
+	for _, artifact := range listed {
 		artifacts = append(artifacts, work.Artifact{
-			Type: artifactType,
-			Name: entry.Name(),
-			Path: filepath.Join(setDir, entry.Name()),
-			At:   info.ModTime(),
+			Type: artifact.Type,
+			Name: artifact.Name,
+			Path: artifact.Path,
+			At:   artifact.At,
 		})
 	}
-
-	reviewDir := filepath.Join(setDir, reviewsDirName)
-	reviews, err := k.d.Tasks.FS.ReadDir(reviewDir)
-	if err != nil && !os.IsNotExist(err) {
-		return nil, fmt.Errorf("read review artifacts for task set %q: %w", c.ID, err)
-	}
-	for _, entry := range reviews {
-		at, ok := tasks.ReviewFileInstant(entry.Name())
-		if entry.IsDir() || !ok {
-			continue
-		}
-		artifacts = append(artifacts, work.Artifact{
-			Type: artifactTypeReview,
-			Name: entry.Name(),
-			Path: filepath.Join(reviewDir, entry.Name()),
-			At:   at,
-		})
-	}
-
-	sort.Slice(artifacts, func(i, j int) bool {
-		if !artifacts[i].At.Equal(artifacts[j].At) {
-			return artifacts[i].At.After(artifacts[j].At)
-		}
-		if artifacts[i].Name != artifacts[j].Name {
-			return artifacts[i].Name < artifacts[j].Name
-		}
-		return artifacts[i].Type < artifacts[j].Type
-	})
 	return artifacts, nil
 }
 

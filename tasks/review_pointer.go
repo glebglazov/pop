@@ -5,12 +5,9 @@ import (
 	"strings"
 )
 
-// ReviewPointer is a set's current Review artifact as every human-facing surface
-// carries it: where the document is and which commit it was written against,
-// never what it says. A standards review over a multi-task set is pages long, so
-// inlining it anywhere floods the surface it appears on; the surfaces name the
-// path and offer a verb, and the reader (human or assistance agent) opens it
-// (ADR-0214).
+// ReviewPointer is a set's current Review artifact as the HITL gate and Assist
+// prompt carry it: where the document is and which commit it was written
+// against, never what it says (ADR-0214, narrowed by ADR-0217).
 type ReviewPointer struct {
 	// Path is the absolute path of the latest Review artifact.
 	Path string
@@ -24,21 +21,8 @@ type ReviewPointer struct {
 	Written string
 }
 
-// ReviewSectionTitle heads the pointer wherever a surface renders it as a block
-// of its own. It is one constant so the CLI detail view and the dashboard's
-// Task-set detail section cannot drift into naming the same thing differently.
-const ReviewSectionTitle = "Code review"
-
-// LatestReviewPointer is latestReviewPointer for the Work kind: the Task-set
-// adapter lives outside this package, and the pointer it hands the dashboard
-// must be the one every other surface resolves, not a second derivation.
-func LatestReviewPointer(d *Deps, m *Manifest) (ReviewPointer, bool) {
-	return latestReviewPointer(d, m)
-}
-
 // latestReviewPointer resolves the pointer for a set, and false when the set has
-// never been reviewed — which is what makes "a set with no review shows nothing
-// extra" one condition rather than a rule each surface re-derives.
+// never been reviewed.
 func latestReviewPointer(d *Deps, m *Manifest) (ReviewPointer, bool) {
 	if d == nil {
 		d = defaultDeps
@@ -95,24 +79,8 @@ func (p ReviewPointer) CommitPhrase() string {
 	}
 }
 
-// Body is the pointer as a block, one fact per line: where the document is,
-// which commit it describes, and when it was written. It carries no heading of
-// its own — every surface that renders a block already has one — which is what
-// lets the CLI detail view and the dashboard's Task-set detail section print the
-// same facts without either owning the wording (ADR-0214).
-func (p ReviewPointer) Body() string {
-	lines := []string{p.Path}
-	if phrase := p.CommitPhrase(); phrase != "" {
-		lines = append(lines, "written against "+phrase)
-	}
-	if p.Written != "" {
-		lines = append(lines, "reviewed "+p.Written)
-	}
-	return strings.Join(lines, "\n")
-}
-
-// Summary is the single line the gate preamble and the detail view share: the
-// commit reviewed, when, and where to read it.
+// Summary is the single line the gate preamble uses: the commit reviewed, when,
+// and where to read it.
 func (p ReviewPointer) Summary() string {
 	var b strings.Builder
 	b.WriteString("Code review")

@@ -396,7 +396,7 @@ func containersFromGroup(d *Deps, cfg *config.Config, snap *snapshot, delays []t
 			CursorKey:             setCursorKey(g, taskRow.ID),
 			DestKind:              wt.DestKind,
 			Items:                 itemsFor(refresh, taskRow.ID),
-			DetailSections:        reviewSections(d.Tasks, manifestFor(refresh, taskRow.ID)),
+			DetailSections:        artifactSections(d.Tasks, manifestFor(refresh, taskRow.ID)),
 			Headline:              taskRow.Progress,
 		}
 		container.Broken, container.BrokenReason = brokenFor(refresh, taskRow.ID)
@@ -419,17 +419,17 @@ func liveMute(row tasks.Row, now time.Time) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-// reviewSections carries the set's latest Review artifact pointer into the
-// dashboard's detail view — the same path and commit the HITL gate, the CLI
-// detail render and the Assist prompt name, and never the document itself
-// (ADR-0214). A set that has never been reviewed authors no section at all,
-// which is why this returns nil rather than an empty-bodied block.
-func reviewSections(td *tasks.Deps, m *tasks.Manifest) []work.Section {
-	p, ok := tasks.LatestReviewPointer(td, m)
+// artifactSections tells the dashboard why the Task set has an Artifact view
+// without putting a non-actionable document path in a prose section (ADR-0217).
+func artifactSections(td *tasks.Deps, m *tasks.Manifest) []work.Section {
+	if m == nil {
+		return nil
+	}
+	summary, ok := tasks.LatestArtifactSummary(td, m.Dir)
 	if !ok {
 		return nil
 	}
-	return []work.Section{{Title: tasks.ReviewSectionTitle, Body: p.Body()}}
+	return []work.Section{{Title: tasks.ArtifactSectionTitle, Body: summary.Body()}}
 }
 
 // itemsFor projects a set's manifest tasks onto Work items. The manifest is
