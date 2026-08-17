@@ -81,6 +81,12 @@ type dashboardRowsMsg struct {
 	snap DashboardSnapshot
 	live livePaneCache
 	err  error
+	// unfiltered is the same build over every container this page's kinds hold,
+	// whatever the active Work view preset selects. It is carried only while rows
+	// are marked, because it exists to answer one question the preset build cannot:
+	// whether a marked row the preset hides still exists (ADR-0215 decision 2). It
+	// is nil on every other poll, and nil is read as "not asked", never as "gone".
+	unfiltered []DashboardRow
 }
 
 func (m QueueDashboard) liveCache() livePaneCache {
@@ -636,9 +642,23 @@ type QueueDashboard struct {
 	searchTyping bool
 	searchInput  ui.TextField
 	searchTerm   string
-	pendingG     bool
-	flash        ui.Flash
-	showHelp     bool
+
+	// selection is the human's mark over the rows, keyed by CursorKey and holding
+	// the whole of selection mode: the mode is exactly "some row is marked"
+	// (ADR-0215 decisions 1 and 4). Marked rows are lifted into a region at the top
+	// of the list and are exempt from every narrowing — the active preset's and the
+	// search's alike — so there is no selected-but-invisible row to account for.
+	selection ui.Selection
+	// unfiltered is the last poll's rows as they are before the active Work view
+	// preset selects among them, held only while rows are marked. It is what makes
+	// the exemption possible: a marked row missing from allRows is hidden by the
+	// preset when it is here, and gone from disk when it is not. Empty means no
+	// poll has been asked for it, and then allRows is the widest set the model has.
+	unfiltered []DashboardRow
+
+	pendingG bool
+	flash    ui.Flash
+	showHelp bool
 	// openCheckout is the bound checkout path chosen with Ctrl-g on the main
 	// list. It is set alongside a tea.Quit so RunDashboard can surface it out of
 	// the program and the command layer runs the workbench-aware open after the
@@ -993,7 +1013,7 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.String() == "g" {
 			if m.pendingG {
 				m.pendingG = false
-				m.list.SetCursor(0)
+				m.list.SetCursor(m.regionTop())
 			} else {
 				m.pendingG = true
 			}
@@ -1021,13 +1041,28 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+u":
 			m.list.HalfPageUp()
 		case "G":
-			m.list.SetCursor(len(m.snap.Containers) - 1)
+			m.list.SetCursor(m.regionBottom())
+		case "tab":
+			// Navigation and marking are the two things a mode never gates, so tab
+			// answers on both sides of it (ADR-0215 decision 4).
+			m.toggleSelected()
+			return m, nil
+		case "shift+tab":
+			if !m.selection.Active() {
+				return m, nil
+			}
+			m.selection.Clear()
+			m.applySearch(m.activeQuery())
+			return m, nil
 		case "ctrl+g":
 			// Open the highlighted row's bound checkout in pop (task 02). A row
 			// with a bound checkout surfaces its path on quit so the command
 			// layer runs the workbench-aware open after the TUI exits; a row with
 			// no checkout shows an inline status and keeps the dashboard running
 			// (mirroring the shell action).
+			if m.refuseSingular("open worktree") {
+				return m, nil
+			}
 			row, ok := m.list.Selected()
 			if !ok {
 				return m, nil
@@ -1040,6 +1075,9 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.openCheckout = dir
 			return m, tea.Quit
 		case "a", "A":
+			if m.refuseSingular("the action menu") {
+				return m, nil
+			}
 			row, ok := m.list.Selected()
 			if !ok {
 				return m, nil
@@ -1065,6 +1103,9 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// frontier ticket — each dispatched through the same verb path the row's `a`
 			// menu would take, so the flat key never means something the menu does not
 			// advertise.
+			if m.refuseSingular("I") {
+				return m, nil
+			}
 			row, ok := m.list.Selected()
 			if !ok {
 				return m, nil
@@ -1081,6 +1122,9 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = nil
 			return m, m.launchWayfinderSession(row, "")
 		case "l", "enter":
+			if m.refuseSingular("the detail view") {
+				return m, nil
+			}
 			row, ok := m.list.Selected()
 			if !ok {
 				return m, nil
@@ -1089,6 +1133,9 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.detail = newDetailView(row)
 			return m, nil
 		case "y":
+			if m.refuseSingular("copy name") {
+				return m, nil
+			}
 			row, ok := m.list.Selected()
 			if !ok {
 				return m, nil
@@ -1133,6 +1180,8 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.live = &livePaneCache{}
 			}
 			*m.live = msg.live
+			m.unfiltered = msg.unfiltered
+			m.retainSelection()
 			m.applySearch(m.activeQuery())
 			if m.detail != nil {
 				// The detail view reads the container the table just rebuilt: one
@@ -1939,18 +1988,151 @@ func (m QueueDashboard) activeQuery() string {
 // applySearch narrows the preset's rows by query and feeds them to the List,
 // keeping the cursor on the container it was on. The search subtracts from
 // allRows — the rows the active Work view preset selected — so it can never widen
-// the view. A cursored row the query excludes has nowhere to stay, and only then
-// does the cursor fall back to the top.
+// the view, except for the rows the human marked: those are lifted into the
+// Selection region and are exempt from both narrowings (ADR-0215 decision 2). A
+// cursored row the query excludes has nowhere to stay, and only then does the
+// cursor fall back — to the first row below the region, which the cursor never
+// enters except by being walked in.
 func (m *QueueDashboard) applySearch(query string) {
 	cursorKey := ""
 	if row, ok := m.list.Selected(); ok {
 		cursorKey = row.CursorKey
 	}
-	m.snap.Containers = filterDashboardRows(m.allRows, query)
+	m.snap.Containers = m.viewRows(query)
 	m.syncListRows()
-	if cursorKey != "" && !m.list.SetCursorToKey(cursorKey) {
-		m.list.SetCursor(0)
+	if m.selection.Active() {
+		m.list.SetRegion(ui.SelectionRegion(m.selection.Len()))
+	} else {
+		m.list.SetRegion(ui.Region{})
 	}
+	if cursorKey != "" && !m.list.SetCursorToKey(cursorKey) {
+		m.list.SetCursor(m.list.RegionCount())
+	}
+}
+
+// viewRows is the row slice the list holds: the marked rows first, then the rows
+// the query leaves of the ones the preset selected. A row is moved and never
+// copied — one row, one key — or the list's key-based re-anchoring and its j/k
+// counts would both start lying (ADR-0215 decision 3).
+func (m QueueDashboard) viewRows(query string) []DashboardRow {
+	rest := filterDashboardRows(m.allRows, query)
+	if !m.selection.Active() {
+		return rest
+	}
+	_, rest = ui.SplitSelected(&m.selection, rest, rowCursorKey)
+	return append(m.selectionRows(), rest...)
+}
+
+// selectionRows is the region's content: every marked row, in the list's own sort
+// and kind precedence rather than in marking order. The unfiltered build orders
+// them and supplies the ones the preset hides — that is the only thing it is
+// asked for — while a marked row the preset does select still renders from the
+// preset's own build, so one build remains the authority on every row it holds.
+func (m QueueDashboard) selectionRows() []DashboardRow {
+	pool := m.allRows
+	if len(m.unfiltered) > 0 {
+		pool = m.unfiltered
+	}
+	marked, _ := ui.SplitSelected(&m.selection, pool, rowCursorKey)
+	selected := make(map[string]DashboardRow, len(m.allRows))
+	for _, row := range m.allRows {
+		selected[row.CursorKey] = row
+	}
+	for i, row := range marked {
+		if fresh, ok := selected[row.CursorKey]; ok {
+			marked[i] = fresh
+		}
+	}
+	return marked
+}
+
+// rowCursorKey is a row's UI identity, which is what the Selection is keyed by.
+func rowCursorKey(row DashboardRow) string { return row.CursorKey }
+
+// retainSelection drops the marks whose containers are gone, and says nothing:
+// the human marked a container, and one that no longer exists cannot be a target.
+// A container the preset merely hides is not gone — the unfiltered build is
+// exactly the evidence that tells the two apart, and without one (no poll has
+// been asked for it yet) the rows the preset selected are the best the model has.
+func (m *QueueDashboard) retainSelection() {
+	if !m.selection.Active() {
+		return
+	}
+	present := make(map[string]bool, len(m.allRows)+len(m.unfiltered))
+	for _, row := range m.allRows {
+		present[row.CursorKey] = true
+	}
+	for _, row := range m.unfiltered {
+		present[row.CursorKey] = true
+	}
+	m.selection.Retain(func(key string) bool { return present[key] })
+}
+
+// toggleSelected answers tab: it marks or unmarks the cursored row and lands the
+// cursor on the row that followed it, which is the outcome tab guarantees
+// whichever way the row itself moved (ADR-0215 decision 8). The view is recomposed
+// rather than reordered in place, so an unmarked row goes back to its own sorted
+// position instead of to the head of the rest.
+func (m *QueueDashboard) toggleSelected() {
+	row, ok := m.list.Selected()
+	if !ok {
+		return
+	}
+	next := ""
+	if rows := m.list.Items(); m.list.Cursor()+1 < len(rows) {
+		next = rows[m.list.Cursor()+1].CursorKey
+	}
+	m.selection.Toggle(row.CursorKey)
+	m.applySearch(m.activeQuery())
+	if next == "" || !m.list.SetCursorToKey(next) {
+		// The row was the last one, so there is no row after it: stay at the bottom,
+		// which is where the row the human just marked used to be.
+		m.list.SetCursor(m.list.Len() - 1)
+	}
+}
+
+// regionTop is where `gg` lands: the top of the region the cursor is in, and the
+// top of the whole list on a second press. A cursor already sitting on the first
+// row below the region has nowhere nearer to go, so it goes all the way.
+func (m QueueDashboard) regionTop() int {
+	if region := m.list.RegionCount(); region > 0 && m.list.Cursor() > region {
+		return region
+	}
+	return 0
+}
+
+// regionBottom is where `G` lands: the bottom of the region the cursor is in, and
+// the bottom of the whole list on a second press. For a cursor below the region
+// the two are the same row, so one press reaches it.
+func (m QueueDashboard) regionBottom() int {
+	if region := m.list.RegionCount(); region > 0 && m.list.Cursor() < region-1 {
+		return region - 1
+	}
+	return m.list.Len() - 1
+}
+
+// refuseSingular answers a key whose verb acts on one row while rows are marked:
+// it does nothing and says so on the bottom line, because a key that goes
+// silently inert is indistinguishable from a bug (ADR-0215 decision 4). Every verb
+// on this surface is singular today — the capability a verb declares to go plural
+// arrives with the slice that grants the first one — so every one of them calls
+// this in a line.
+func (m *QueueDashboard) refuseSingular(verb string) bool {
+	if !m.selection.Active() {
+		return false
+	}
+	m.flash.Set(fmt.Sprintf("%s acts on one row — shift+tab clears the %d selected", verb, m.selection.Len()))
+	return true
+}
+
+// modeWord names the mode the surface is in, which today is selection mode and
+// nothing else. It is derived from the marks themselves, so it appears with the
+// first one and goes away with the last.
+func (m QueueDashboard) modeWord() string {
+	if !m.selection.Active() {
+		return ""
+	}
+	return ui.SelectionMode
 }
 
 func (m QueueDashboard) moveItemTextPeek(delta int) {
@@ -2052,12 +2234,49 @@ func (m QueueDashboard) confirmBindModal() (tea.Model, tea.Cmd) {
 // is whatever the pane belongs to now: a drain that has just gone live in the
 // pane's checkout pins on this poll, and one that has ended un-pins on it. No
 // tmux round-trip happens here — only the answer is re-derived.
+// While rows are marked it also builds the same page unfiltered, because a mark
+// outranks the preset and the preset build alone cannot tell a row it hides from
+// a row that is gone (ADR-0215 decision 2). That second build is the price of the
+// exemption, and it is paid only in selection mode and only on the page that has
+// presets at all.
 func (m QueueDashboard) reload() tea.Cmd {
+	unfiltered := m.selection.Active() && m.page.rowFilters
 	return func() tea.Msg {
 		snap, err := work.BuildSnapshotForPane(m.page.kinds(m.d, m.cfg), m.pane, m.d.WorkOrdering())
 		live := loadLivePaneCache(m.d)
-		return dashboardRowsMsg{page: m.page.id, snap: snap, live: live, err: err}
+		msg := dashboardRowsMsg{page: m.page.id, snap: snap, live: live, err: err}
+		if err == nil && unfiltered {
+			msg.unfiltered = m.unfilteredRows()
+		}
+		return msg
 	}
+}
+
+// unfilteredRows builds this page over every container its kinds hold. It orders
+// them the way the active preset does — the widening is about which rows exist,
+// not about where they sit — so the marked rows it contributes read in the same
+// sort as the rows beside them. A build that fails contributes nothing rather
+// than an empty answer: no evidence is not evidence of absence, and the marks
+// survive to the next poll.
+func (m QueueDashboard) unfilteredRows() []DashboardRow {
+	snap, err := work.BuildSnapshotForPane(m.page.kinds(m.unfilteredDeps(), m.cfg), m.pane, m.d.WorkOrdering())
+	if err != nil {
+		return nil
+	}
+	return snap.Containers
+}
+
+// unfilteredDeps is this page's deps with the widest shipped preset installed,
+// keeping the active preset's sort so both builds of one poll agree on order.
+func (m QueueDashboard) unfilteredDeps() *drain.Deps {
+	preset, ok := config.ShippedWorkViewPreset("all")
+	if m.d == nil || !ok {
+		return m.d
+	}
+	preset.Sort = m.d.EffectiveViewPreset().Sort
+	d := *m.d
+	d.ViewPreset = preset
+	return &d
 }
 
 // unparkSet handles the `P` key: it writes a durable park-clear event for the
@@ -2579,6 +2798,8 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "ctrl+d/ctrl+u", Desc: "half page down/up"},
 			{Key: "gg", Desc: "first row"},
 			{Key: "G", Desc: "last row"},
+			{Key: "tab", Desc: "select row"},
+			{Key: "shift+tab", Desc: "clear selection"},
 			{Key: "l/enter", Desc: "open detail"},
 			{Key: "y", Desc: "copy name"},
 			{Key: "a", Desc: "action menu"},
@@ -2737,6 +2958,7 @@ func (m QueueDashboard) frameSpec() ui.Frame {
 		Footnote:  m.modelSkipFootnote(),
 		Block:     block,
 		Hints:     hints,
+		Mode:      m.modeWord(),
 	}
 }
 
@@ -2813,7 +3035,12 @@ func (m QueueDashboard) mainHint() string {
 	if m.page.rowFilters {
 		filters = "f filters · "
 	}
-	return "j/k move · gg/G top/bottom · l/enter detail · y copy name · a actions · / search · " + filters + toggle + " · C-h help · h/esc quit"
+	if m.selection.Active() {
+		// Only the keys that still do something in the mode, so the line does not
+		// advertise the verbs it is refusing.
+		return "j/k move · gg/G top/bottom · tab select · shift+tab clear · / search · " + filters + toggle + " · C-h help · h/esc quit"
+	}
+	return "j/k move · gg/G top/bottom · tab select · l/enter detail · y copy name · a actions · / search · " + filters + toggle + " · C-h help · h/esc quit"
 }
 
 // emptySearchLine is the body text when the search has hidden every row. It

@@ -10,6 +10,7 @@ import (
 	"github.com/glebglazov/pop/dashboard"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/drain"
+	"github.com/glebglazov/pop/ui"
 	"github.com/glebglazov/pop/work"
 	"github.com/glebglazov/pop/work/ref"
 )
@@ -229,6 +230,43 @@ func TestShellVIsTypedIntoASearchNotAPageToggle(t *testing.T) {
 	if s = pressV(t, s); s.ActivePage() != PageRoutines {
 		t.Fatalf("v after applying = %v, want the routine page", s.ActivePage())
 	}
+}
+
+// TestShellPagesHoldIndependentSelections is the shell's half of ADR-0215: the
+// two pages are two models, so each holds its own marks — and the toggle, which
+// keeps a page's cursor and its search, keeps its Selection too.
+func TestShellPagesHoldIndependentSelections(t *testing.T) {
+	pressTab := func(s Shell) Shell {
+		updated, _ := s.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+		return updated.(Shell)
+	}
+	selected := func(t *testing.T, s Shell, want string) {
+		t.Helper()
+		view := s.View().Content
+		if want == "" {
+			if strings.Contains(view, ui.SelectionMode) {
+				t.Fatalf("page %v is in selection mode with nothing marked:\n%s", s.ActivePage(), view)
+			}
+			return
+		}
+		if !strings.Contains(view, ui.SelectionMode) || !strings.Contains(view, want) {
+			t.Fatalf("page %v does not show %q marked:\n%s", s.ActivePage(), want, view)
+		}
+	}
+
+	s := newTestShell(t, PageWork)
+	s = pressTab(pressTab(s))
+	selected(t, s, "2 selected")
+
+	s = pressV(t, s)
+	selected(t, s, "")
+	s = pressTab(s)
+	selected(t, s, "1 selected")
+
+	s = pressV(t, s)
+	selected(t, s, "2 selected")
+	s = pressV(t, s)
+	selected(t, s, "1 selected")
 }
 
 func TestShellHelpNamesThePageTheToggleLeadsTo(t *testing.T) {

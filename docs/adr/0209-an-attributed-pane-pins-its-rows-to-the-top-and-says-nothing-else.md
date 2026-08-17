@@ -73,6 +73,10 @@ pin is a starting position, not a frame.
 live filter query is not pinned, and pinning never widens either. This is ADR-0201's "a launch
 does not get to overrule a deliberate preset", unchanged.
 
+[ADR-0215](0215-a-selection-is-a-human-mark-that-outranks-a-preset-and-turns-verbs-plural.md)
+amends this for the human's own mark: a marked row is exempt from both narrowings. The clause
+constrains pop's inference, and `tab` is not a guess. Pinning is inference, so it still yields.
+
 **8. Total silence.** No flash, ever. `Attribution.Note` and `attributionHiddenLine` are
 deleted. Attributed means pinned; unattributed, or attributed to a hidden row, means the
 dashboard looks exactly as it always does. ADR-0201 decision 6 spent a line on the hidden case

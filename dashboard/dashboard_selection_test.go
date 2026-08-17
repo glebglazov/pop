@@ -1,0 +1,610 @@
+package dashboard
+
+import (
+	"slices"
+	"strings"
+	"testing"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/drain"
+	"github.com/glebglazov/pop/ui"
+	"github.com/glebglazov/pop/work"
+	"github.com/glebglazov/pop/work/ref"
+)
+
+// The Work dashboard's Selection (ADR-0215): tab marks a row, the marks lift into
+// a region at the top of the list, and while any row is marked the surface is in
+// selection mode — every verb refuses out loud and nothing but navigation acts.
+// Every test here drives the keys, because the mode is only worth anything if the
+// keyboard behaves.
+
+func selKeyTab() tea.KeyPressMsg      { return tea.KeyPressMsg{Code: tea.KeyTab} }
+func selKeyShiftTab() tea.KeyPressMsg { return tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift} }
+func selKeyRune(r rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: r, Text: string(r)}
+}
+
+// selPress feeds one key and returns the model it produced, dropping the command:
+// no key in this file schedules work whose result the assertions read.
+func selPress(t *testing.T, m QueueDashboard, msg tea.KeyMsg) QueueDashboard {
+	t.Helper()
+	updated, _ := m.Update(msg)
+	got, ok := updated.(QueueDashboard)
+	if !ok {
+		t.Fatalf("key %v took the model out of the dashboard", msg)
+	}
+	return got
+}
+
+// selRows is a page of plain task-set rows, one per id, in the order given.
+func selRows(ids ...string) []DashboardRow {
+	rows := make([]DashboardRow, 0, len(ids))
+	for _, id := range ids {
+		rows = append(rows, TestDashboardRow("pop", id, DashboardRow{
+			RawStatus: tasks.StatusReady, Status: "READY",
+			DefPath: "/repo/tasks", StatePath: "/repo/state.json",
+		}))
+	}
+	return rows
+}
+
+// selDashboard is a model over those rows, sized for a terminal that shows them
+// all.
+func selDashboard(rows []DashboardRow) QueueDashboard {
+	m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: rows})
+	m.width, m.height = 120, 40
+	m.cols.width = m.width
+	m.cols.refit()
+	m.resizeMainList()
+	return m
+}
+
+// selIDs is the list in render order — where the rows sit, which is the whole of
+// what a mark does to one.
+func selIDs(m QueueDashboard) []string {
+	ids := make([]string, 0, m.list.Len())
+	for _, row := range m.list.Items() {
+		ids = append(ids, row.ID)
+	}
+	return ids
+}
+
+// selCursorID is the row the cursor is on.
+func selCursorID(t *testing.T, m QueueDashboard) string {
+	t.Helper()
+	row, ok := m.list.Selected()
+	if !ok {
+		t.Fatal("the cursor is on no row")
+	}
+	return row.ID
+}
+
+// markRow walks the cursor onto a row by id and marks it, which is the only way a
+// human ever makes a Selection.
+func markRow(t *testing.T, m QueueDashboard, id string) QueueDashboard {
+	t.Helper()
+	target := slices.Index(selIDs(m), id)
+	if target < 0 {
+		t.Fatalf("row %q is not on the list: %v", id, selIDs(m))
+	}
+	for m.list.Cursor() != target {
+		step := 'j'
+		if m.list.Cursor() > target {
+			step = 'k'
+		}
+		m = selPress(t, m, selKeyRune(step))
+	}
+	return selPress(t, m, selKeyTab())
+}
+
+func TestWorkSelectionTabLiftsTheRowIntoTheRegion(t *testing.T) {
+	m := selDashboard(selRows("set-a", "set-b", "set-c"))
+
+	m = markRow(t, m, "set-b")
+
+	if got := selIDs(m); !slices.Equal(got, []string{"set-b", "set-a", "set-c"}) {
+		t.Fatalf("rows = %v, want the marked row lifted to the top", got)
+	}
+	if got := m.list.RegionCount(); got != 1 {
+		t.Fatalf("region holds %d rows, want the one marked row", got)
+	}
+	if got := selCursorID(t, m); got != "set-c" {
+		t.Fatalf("cursor on %q, want the row that followed the marked one", got)
+	}
+	if !m.selection.Has("pop\x00set-b") {
+		t.Fatal("the marked row is not in the Selection")
+	}
+
+	// A second mark joins the first, and the region reads in the list's own order
+	// rather than in the order the marks were made.
+	m = markRow(t, m, "set-a")
+	if got := selIDs(m); !slices.Equal(got, []string{"set-a", "set-b", "set-c"}) {
+		t.Fatalf("rows = %v, want the region sorted as the list is, not by mark order", got)
+	}
+	if got := m.list.RegionCount(); got != 2 {
+		t.Fatalf("region holds %d rows, want 2", got)
+	}
+
+	// Unmarking sends the row back to its own place rather than to the head of the
+	// rest, and every row is on the list exactly once throughout.
+	m = markRow(t, m, "set-b")
+	if got := selIDs(m); !slices.Equal(got, []string{"set-a", "set-b", "set-c"}) {
+		t.Fatalf("rows = %v after unmarking set-b, want it back in its sorted place", got)
+	}
+	if got := m.list.RegionCount(); got != 1 {
+		t.Fatalf("region holds %d rows after an unmark, want 1", got)
+	}
+}
+
+func TestWorkSelectionShiftTabClearsTheWholeSelection(t *testing.T) {
+	m := selDashboard(selRows("set-a", "set-b", "set-c"))
+	m = markRow(t, m, "set-b")
+	m = markRow(t, m, "set-c")
+
+	m = selPress(t, m, selKeyShiftTab())
+
+	if m.selection.Active() {
+		t.Fatalf("%d marks survived shift+tab", m.selection.Len())
+	}
+	if got := m.list.RegionCount(); got != 0 {
+		t.Fatalf("region holds %d rows after the clear, want none", got)
+	}
+	if got := selIDs(m); !slices.Equal(got, []string{"set-a", "set-b", "set-c"}) {
+		t.Fatalf("rows = %v, want the list back in its own order", got)
+	}
+	if got := m.modeWord(); got != "" {
+		t.Fatalf("mode word = %q after the clear, want none", got)
+	}
+}
+
+// The mode is visible or it is not a mode: the word on the bottom line and the
+// counted separator above the rest of the list are the whole of what says a verb
+// will refuse. Both are the shared primitive's own words (ADR-0215 decision 3).
+func TestWorkSelectionRendersTheModeWordAndCountedSeparator(t *testing.T) {
+	m := selDashboard(selRows("set-a", "set-b", "set-c"))
+	if strings.Contains(ui.StripANSI(m.View().Content), ui.SelectionMode) {
+		t.Fatal("the mode word shows with nothing marked")
+	}
+
+	m = markRow(t, m, "set-b")
+	m = markRow(t, m, "set-c")
+
+	view := ui.StripANSI(m.View().Content)
+	if !strings.Contains(view, ui.SelectionMode) {
+		t.Fatalf("the bottom line does not carry %s:\n%s", ui.SelectionMode, view)
+	}
+	if want := ui.StripANSI(ui.SelectionSeparator(2)); !strings.Contains(view, want) {
+		t.Fatalf("the separator %q is not on screen:\n%s", want, view)
+	}
+
+	// The separator sits under the marked rows and above every other row.
+	rows := ui.StripANSI(strings.Join(m.list.VisibleRows(), "\n"))
+	sep := strings.Index(rows, ui.StripANSI(ui.SelectionSeparator(2)))
+	if sep < 0 {
+		t.Fatalf("no separator in the list body:\n%s", rows)
+	}
+	if before, after := rows[:sep], rows[sep:]; !strings.Contains(before, "set-b") ||
+		!strings.Contains(before, "set-c") || !strings.Contains(after, "set-a") {
+		t.Fatalf("the marked rows are not the block above the separator:\n%s", rows)
+	}
+
+	// A refusal cannot hide the mode: the flash takes the rest of the line.
+	m = selPress(t, m, selKeyRune('y'))
+	view = ui.StripANSI(m.View().Content)
+	if !strings.Contains(view, ui.SelectionMode) || !strings.Contains(view, "acts on one row") {
+		t.Fatalf("want both the mode word and the refusal on the bottom line:\n%s", view)
+	}
+}
+
+// The pane pin keeps its column and its place: the region is above the pinned
+// block, a marked row that is also attributed keeps its `▸`, and a pin still
+// yields to the narrowings a mark is exempt from (ADR-0209 decision 7 stands for
+// pop's own inference).
+func TestWorkSelectionRegionSitsAboveThePanePins(t *testing.T) {
+	rows := selRows("set-a", "set-b", "set-c")
+	rows[0].Pinned = true
+	rows[1].Pinned = true
+	// The snapshot builder has already lifted the pinned rows to the top.
+	m := selDashboard(rows)
+
+	m = markRow(t, m, "set-b")
+	m = markRow(t, m, "set-c")
+
+	if got := selIDs(m); !slices.Equal(got, []string{"set-b", "set-c", "set-a"}) {
+		t.Fatalf("rows = %v, want the marked rows above the pinned block", got)
+	}
+	m.list.Resize(m.list.Len() + 2)
+	body := m.list.VisibleRows()
+	if got := ui.StripANSI(body[0]); !strings.HasPrefix(got, " ▸") && !strings.HasPrefix(got, "█▸") {
+		t.Fatalf("the marked and attributed row lost its pin mark: %q", got)
+	}
+	pinned := -1
+	for i, line := range body {
+		if strings.Contains(ui.StripANSI(line), "set-a") {
+			pinned = i
+		}
+	}
+	if pinned < 0 {
+		t.Fatalf("the unmarked pinned row is not on screen:\n%s", strings.Join(body, "\n"))
+	}
+	if got := ui.StripANSI(body[pinned]); !strings.HasPrefix(got, " ▸") && !strings.HasPrefix(got, "█▸") {
+		t.Fatalf("the pin beneath the region is not marked: %q", got)
+	}
+}
+
+// A mark outranks the query and a pin does not: the marked row stays on screen
+// through a search that excludes it, the pinned row does not, and neither is on
+// the list twice.
+func TestWorkSelectionOutranksTheSearchAndThePinDoesNot(t *testing.T) {
+	rows := selRows("set-a", "set-b", "other-c")
+	rows[0].Pinned = true
+	m := selDashboard(rows)
+
+	m = markRow(t, m, "set-b")
+	m = selPress(t, m, selKeyRune('/'))
+	for _, r := range "other" {
+		m = selPress(t, m, selKeyRune(r))
+	}
+	m = selPress(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if got := selIDs(m); !slices.Equal(got, []string{"set-b", "other-c"}) {
+		t.Fatalf("rows = %v, want the marked row kept and the pinned row filtered away", got)
+	}
+	if got := m.list.RegionCount(); got != 1 {
+		t.Fatalf("region holds %d rows under a search, want the marked one", got)
+	}
+
+	// Clearing the mark hands the row back to the query.
+	m = selPress(t, m, selKeyShiftTab())
+	if got := selIDs(m); !slices.Equal(got, []string{"other-c"}) {
+		t.Fatalf("rows = %v once unmarked, want the query alone to decide", got)
+	}
+}
+
+// presetKind is a wired Work kind that answers the active Work view preset the
+// way a real one does: every container it holds under `all`, and only the ones
+// the fixture calls visible under anything else. A preset is the one narrowing a
+// surface cannot undo by itself, so this is what a mark has to survive.
+type presetKind struct {
+	d *drain.Deps
+	f *presetFixture
+}
+
+// presetFixture is the machine behind the kind: which containers exist at all,
+// and which of them the active preset selects.
+type presetFixture struct {
+	rows   []work.Container
+	hidden map[string]bool
+}
+
+func (f *presetFixture) drop(id string) {
+	f.rows = slices.DeleteFunc(f.rows, func(c work.Container) bool { return c.ID == id })
+}
+
+func (k *presetKind) ID() work.KindID { return ref.KindTaskSet }
+
+func (k *presetKind) Load() ([]work.Container, error) {
+	if k.d != nil && k.d.ViewPreset.Name == "all" {
+		return slices.Clone(k.f.rows), nil
+	}
+	var out []work.Container
+	for _, row := range k.f.rows {
+		if !k.f.hidden[row.ID] {
+			out = append(out, row)
+		}
+	}
+	return out, nil
+}
+
+func (k *presetKind) Less(a, b work.Container) bool { return a.ID < b.ID }
+func (k *presetKind) Columns() []string {
+	return []string{"PROJECT", "TASK SET", "STATUS", "WORKTREE", ""}
+}
+func (k *presetKind) Actions(work.Container) []work.Action                { return nil }
+func (k *presetKind) StatusActions(work.Container) []work.Action          { return nil }
+func (k *presetKind) ItemActions(work.Container, work.Item) []work.Action { return nil }
+
+func (k *presetKind) StatusCell(c work.Container) []work.StatusSegment {
+	return []work.StatusSegment{{Text: c.Status, Tone: work.ToneLabel}}
+}
+
+func (k *presetKind) Perform(work.Container, *work.Item, work.Verb) (work.Outcome, error) {
+	return work.Outcome{}, nil
+}
+
+func (k *presetKind) Summary(containers []work.Container) []string {
+	return []string{work.CountPhrase(len(containers), "task set", "task sets")}
+}
+
+// presetDashboard opens page A over the fixture, through the wiring a launch
+// uses, with an active preset that is not `all`.
+func presetDashboard(t *testing.T, f *presetFixture) QueueDashboard {
+	t.Helper()
+	d := &drain.Deps{Kinds: func(d *drain.Deps, _ *config.Config) []work.Kind {
+		return []work.Kind{&presetKind{d: d, f: f}}
+	}}
+	d.ViewPreset, _ = config.ShippedWorkViewPreset("active")
+	cfg := &config.Config{}
+	snap, err := BuildPageSnapshot(d, cfg, PageWork, work.PaneFacts{})
+	if err != nil {
+		t.Fatalf("BuildPageSnapshot: %v", err)
+	}
+	m := NewDashboardOn(d, cfg, snap, PageWork)
+	m.width, m.height = 120, 40
+	m.cols.width = m.width
+	m.cols.refit()
+	m.resizeMainList()
+	return m
+}
+
+// selPoll is one poll: the model's own reload command and the message it
+// produces, which is the only path a running dashboard takes to new rows.
+func selPoll(t *testing.T, m QueueDashboard) QueueDashboard {
+	t.Helper()
+	msg, ok := m.reload()().(dashboardRowsMsg)
+	if !ok {
+		t.Fatal("reload did not produce a rows message")
+	}
+	if msg.err != nil {
+		t.Fatalf("reload: %v", msg.err)
+	}
+	updated, _ := m.Update(msg)
+	return updated.(QueueDashboard)
+}
+
+func TestWorkSelectionOutranksThePreset(t *testing.T) {
+	f := &presetFixture{rows: selRows("set-a", "set-b", "set-c"), hidden: map[string]bool{}}
+	m := presetDashboard(t, f)
+
+	m = markRow(t, m, "set-b")
+	// The preset now hides the marked row, exactly as picking another entry in the
+	// filter menu would.
+	f.hidden["set-b"] = true
+	m = selPoll(t, m)
+
+	if got := selIDs(m); !slices.Equal(got, []string{"set-b", "set-a", "set-c"}) {
+		t.Fatalf("rows = %v, want the marked row kept in the region", got)
+	}
+	if !m.selection.Has("pop\x00set-b") {
+		t.Fatal("the preset took the mark with it")
+	}
+	if got := m.list.RegionCount(); got != 1 {
+		t.Fatalf("region holds %d rows, want the marked one", got)
+	}
+	for _, row := range m.allRows {
+		if row.ID == "set-b" {
+			t.Fatal("the fixture is not exercising the exemption: the preset still selects set-b")
+		}
+	}
+
+	// Clearing the mark hands the row back to the preset.
+	m = selPress(t, m, selKeyShiftTab())
+	if got := selIDs(m); !slices.Equal(got, []string{"set-a", "set-c"}) {
+		t.Fatalf("rows = %v once unmarked, want the preset alone to decide", got)
+	}
+}
+
+func TestWorkSelectionDropsAVanishedContainerSilently(t *testing.T) {
+	f := &presetFixture{rows: selRows("set-a", "set-b", "set-c"), hidden: map[string]bool{}}
+	m := presetDashboard(t, f)
+
+	m = markRow(t, m, "set-b")
+	m = markRow(t, m, "set-c")
+	f.drop("set-b")
+	m = selPoll(t, m)
+
+	if m.selection.Has("pop\x00set-b") {
+		t.Fatal("a container that left the snapshot kept its mark")
+	}
+	if got := selIDs(m); !slices.Equal(got, []string{"set-c", "set-a"}) {
+		t.Fatalf("rows = %v, want the gone row gone and set-c still marked", got)
+	}
+	if m.flash.Text() != "" {
+		t.Fatalf("status = %q, want silence: a row that no longer exists cannot be a target", m.flash.Text())
+	}
+	if got := m.list.RegionCount(); got != 1 {
+		t.Fatalf("region holds %d rows, want the one surviving mark", got)
+	}
+}
+
+func TestWorkSelectionSurvivesThePollRebuild(t *testing.T) {
+	m := selDashboard(selRows("set-a", "set-b", "set-c"))
+	m = markRow(t, m, "set-b")
+
+	// The poll replaces the row slice wholesale, and with reordered, freshly built
+	// rows: the mark rides the cursor key, never a row identity or an index.
+	rebuilt := selRows("set-c", "set-b", "set-a")
+	rebuilt[1].Status = "DRAINING"
+	updated, _ := m.Update(dashboardRowsMsg{snap: DashboardSnapshot{Containers: rebuilt}})
+	m = updated.(QueueDashboard)
+
+	if !m.selection.Has("pop\x00set-b") {
+		t.Fatal("the rebuild dropped the mark")
+	}
+	if got := selIDs(m); !slices.Equal(got, []string{"set-b", "set-c", "set-a"}) {
+		t.Fatalf("rows = %v, want the marked row still in the region", got)
+	}
+	if got := m.list.Items()[0].Status; got != "DRAINING" {
+		t.Fatalf("region row status = %q, want the freshly built row rather than a kept copy", got)
+	}
+}
+
+// The region is a rendering limit, never a narrowing: it takes a third of the
+// viewport and says how many members it left out, and the separator keeps
+// counting all of them.
+func TestWorkSelectionRegionCapsAtAThirdOfTheViewport(t *testing.T) {
+	m := selDashboard(selRows("set-a", "set-b", "set-c", "set-d", "set-e", "set-f"))
+	for _, id := range []string{"set-a", "set-b", "set-c", "set-d"} {
+		m = markRow(t, m, id)
+	}
+	m.list.Resize(6)
+
+	body := ui.StripANSI(strings.Join(m.list.VisibleRows(), "\n"))
+	if want := ui.StripANSI(ui.SelectionOverflow(2)); !strings.Contains(body, want) {
+		t.Fatalf("want the overflow line %q in:\n%s", want, body)
+	}
+	if want := ui.StripANSI(ui.SelectionSeparator(4)); !strings.Contains(body, want) {
+		t.Fatalf("want the separator to count every mark (%q) in:\n%s", want, body)
+	}
+	if m.selection.Len() != 4 {
+		t.Fatalf("the cap changed the Selection: %d marks", m.selection.Len())
+	}
+}
+
+// The cursor never starts in the region and no rebuild puts it there — but j and k
+// walk in, which is how a row gets unmarked.
+func TestWorkSelectionCursorStaysOutOfTheRegionUntilWalkedIn(t *testing.T) {
+	m := selDashboard(selRows("set-a", "set-b", "set-c"))
+	m = markRow(t, m, "set-b")
+	if got := selCursorID(t, m); got != "set-c" {
+		t.Fatalf("cursor on %q after the mark, want the row below the region", got)
+	}
+
+	// The cursored row leaves on the next poll, so the cursor has to fall back
+	// somewhere — and the region is not it.
+	updated, _ := m.Update(dashboardRowsMsg{snap: DashboardSnapshot{Containers: selRows("set-a", "set-b")}})
+	m = updated.(QueueDashboard)
+	if got := selCursorID(t, m); got != "set-a" {
+		t.Fatalf("cursor fell back onto %q, want the first row below the region", got)
+	}
+
+	m = selPress(t, m, selKeyRune('k'))
+	if got := selCursorID(t, m); got != "set-b" {
+		t.Fatalf("k landed on %q, want the marked row: j/k walk into the region", got)
+	}
+	m = selPress(t, m, selKeyTab())
+	if m.selection.Active() {
+		t.Fatal("tab in the region did not unmark the row")
+	}
+}
+
+func TestWorkSelectionJumpKeysAreRegionAware(t *testing.T) {
+	m := selDashboard(selRows("set-a", "set-b", "set-c", "set-d"))
+	m = markRow(t, m, "set-a")
+	m = markRow(t, m, "set-b")
+	// Rows now read: set-a, set-b | set-c, set-d.
+
+	m = selPress(t, m, selKeyRune('G'))
+	if got := selCursorID(t, m); got != "set-d" {
+		t.Fatalf("G from below the region landed on %q, want the last row", got)
+	}
+	m = selPress(t, m, selKeyRune('g'))
+	m = selPress(t, m, selKeyRune('g'))
+	if got := selCursorID(t, m); got != "set-c" {
+		t.Fatalf("gg landed on %q, want the top of the cursor's own region first", got)
+	}
+	m = selPress(t, m, selKeyRune('g'))
+	m = selPress(t, m, selKeyRune('g'))
+	if got := selCursorID(t, m); got != "set-a" {
+		t.Fatalf("a second gg landed on %q, want the top of the whole list", got)
+	}
+	m = selPress(t, m, selKeyRune('G'))
+	if got := selCursorID(t, m); got != "set-b" {
+		t.Fatalf("G from inside the region landed on %q, want the region's own bottom", got)
+	}
+	m = selPress(t, m, selKeyRune('G'))
+	if got := selCursorID(t, m); got != "set-d" {
+		t.Fatalf("a second G landed on %q, want the bottom of the whole list", got)
+	}
+}
+
+// Every verb on this surface is singular, and a singular verb in selection mode
+// says so rather than quietly acting on the cursored row.
+func TestWorkSelectionRefusesEverySingularVerb(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		key  tea.KeyPressMsg
+	}{
+		{"detail", selKeyRune('l')},
+		{"detail via enter", tea.KeyPressMsg{Code: tea.KeyEnter}},
+		{"copy name", selKeyRune('y')},
+		{"action menu", selKeyRune('a')},
+		{"pinned action menu", selKeyRune('A')},
+		{"row's own I", selKeyRune('I')},
+		{"open worktree", tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rows := selRows("set-a", "set-b")
+			rows[1].Checkout = "/repo/worktree"
+			m := selDashboard(rows)
+			var copied int
+			m.copyFunc = func(string) error { copied++; return nil }
+			m = markRow(t, m, "set-a")
+
+			m = selPress(t, m, tc.key)
+
+			if !strings.Contains(m.flash.Text(), "acts on one row") {
+				t.Fatalf("flash = %q, want a refusal naming the mode", m.flash.Text())
+			}
+			if !strings.Contains(m.flash.Text(), "shift+tab") {
+				t.Fatalf("flash = %q, want the way out of the mode", m.flash.Text())
+			}
+			if m.detail != nil || m.menu != nil || copied != 0 || m.openCheckout != "" {
+				t.Fatal("a refused verb acted anyway")
+			}
+			if !m.selection.Active() {
+				t.Fatal("a refusal dropped the Selection")
+			}
+		})
+	}
+}
+
+// Navigation is never gated: the mode changes what a verb does, not what the
+// keyboard reaches.
+func TestWorkSelectionKeepsNavigationLive(t *testing.T) {
+	m := selDashboard(selRows("set-a", "set-b", "set-c"))
+	m = markRow(t, m, "set-a")
+
+	m = selPress(t, m, selKeyRune('j'))
+	if got := selCursorID(t, m); got != "set-c" {
+		t.Fatalf("j landed on %q, want the next row", got)
+	}
+
+	m = selPress(t, m, selKeyRune('/'))
+	if !m.searchTyping {
+		t.Fatal("the search did not open in selection mode")
+	}
+	m = selPress(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if !m.selection.Active() {
+		t.Fatal("leaving the search dropped the Selection")
+	}
+
+	m = selPress(t, m, selKeyRune('f'))
+	if m.filter == nil {
+		t.Fatal("the preset list did not open in selection mode")
+	}
+	m = selPress(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+
+	if !m.ViewToggleAllowed() {
+		t.Fatal("the page toggle is gated by the mode")
+	}
+
+	m = selPress(t, m, tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
+	if !m.showHelp {
+		t.Fatal("help did not open in selection mode")
+	}
+}
+
+// The detail view is one container's items, and item-level bulk is out of scope:
+// tab there is a key that does nothing at all (ADR-0215 consequences).
+func TestWorkSelectionTabIsInertInTheDetailView(t *testing.T) {
+	m := selDashboard(selRows("set-a", "set-b"))
+	m = selPress(t, m, selKeyRune('l'))
+	if m.detail == nil {
+		t.Fatal("the detail view did not open")
+	}
+
+	m = selPress(t, m, selKeyTab())
+
+	if m.selection.Active() {
+		t.Fatal("tab marked a row from inside the detail view")
+	}
+	if m.detail == nil {
+		t.Fatal("tab closed the detail view")
+	}
+	if m.flash.Text() != "" {
+		t.Fatalf("status = %q, want an inert key to say nothing", m.flash.Text())
+	}
+}
