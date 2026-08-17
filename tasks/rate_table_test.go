@@ -48,16 +48,20 @@ func TestNotionalCostFromRatesUsesPromptForMissingCacheWrite(t *testing.T) {
 
 func TestFormatSpendCellRateBlindUsesEmDash(t *testing.T) {
 	u := TokenUsage{Input: 100, Output: 50, HasInput: true, HasOutput: true}
-	got := formatSpendCell(u, PartialCost{})
+	got := formatSpendCell(u, PartialCost{}, "")
 	if got != "150 (—)" {
 		t.Fatalf("got %q", got)
 	}
 	if strings.Contains(got, "$0") {
 		t.Fatalf("rate-blind must not render a zero dollar figure: %q", got)
 	}
-	priced := formatSpendCell(u, PartialCost{Dollars: 1.234, HasCost: true})
+	priced := formatSpendCell(u, PartialCost{Dollars: 1.234, HasCost: true}, RateSourceTable)
 	if priced != "150 (~$1.23)" {
 		t.Fatalf("priced = %q", priced)
+	}
+	declared := formatSpendCell(u, PartialCost{Dollars: 1.234, HasCost: true}, RateSourceOverride)
+	if declared != "150 (*~$1.23)" {
+		t.Fatalf("declared = %q", declared)
 	}
 }
 
@@ -222,7 +226,7 @@ func TestSpendRollupPricesClaudeRunNotional(t *testing.T) {
 	var buf bytes.Buffer
 	RenderSpendRollup(&buf, result)
 	out := buf.String()
-	cell := formatSpendCell(row.Tokens, row.Notional)
+	cell := formatSpendCell(row.Tokens, row.Notional, row.RateSource)
 	if !strings.Contains(out, cell) {
 		t.Fatalf("render missing spend cell %q:\n%s", cell, out)
 	}
@@ -286,7 +290,7 @@ func TestSpendSetBreakdownPricesClaudeAndPrefersPiMeasured(t *testing.T) {
 	var buf bytes.Buffer
 	RenderSpendSetBreakdown(&buf, result)
 	out := buf.String()
-	if !strings.Contains(out, formatSpendCell(result.ImplementTokens, result.ImplementNotional)) {
+	if !strings.Contains(out, formatSpendCell(result.ImplementTokens, result.ImplementNotional, "")) {
 		t.Fatalf("breakdown missing spend cell:\n%s", out)
 	}
 	if !strings.Contains(out, "rate table ") {

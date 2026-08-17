@@ -330,9 +330,10 @@ type PricedSpend struct {
 }
 
 // priceRunSpend resolves the dollar annotation for one Captured run: pi's
-// measured PartialCost outranks a table estimate; otherwise the adapter's
-// declared rate-key rule prices the run (ADR-0218).
-func priceRunSpend(run capturedRun, spend RunSpend, table *RateTable) PricedSpend {
+// measured PartialCost outranks a table estimate; otherwise a declared override
+// beats the published table, then the adapter's rate-key rule prices the run
+// (ADR-0218).
+func priceRunSpend(run capturedRun, spend RunSpend, table *RateTable, overrides map[string]ModelRates) PricedSpend {
 	if spend.Cost.HasCost {
 		return PricedSpend{
 			Cost:     spend.Cost,
@@ -343,6 +344,13 @@ func priceRunSpend(run capturedRun, spend RunSpend, table *RateTable) PricedSpen
 	if resolved.Key == "" {
 		return PricedSpend{}
 	}
+	if rates, ok := lookupDeclaredRate(overrides, resolved.Key); ok {
+		return PricedSpend{
+			Cost:       notionalCostFromRates(spend.Tokens, rates),
+			RateSource: RateSourceOverride,
+			ModelKey:   resolved.Key,
+		}
+	}
 	rates, ok := table.lookup(resolved.Key)
 	if !ok {
 		return PricedSpend{}
@@ -352,4 +360,12 @@ func priceRunSpend(run capturedRun, spend RunSpend, table *RateTable) PricedSpen
 		RateSource: RateSourceTable,
 		ModelKey:   resolved.Key,
 	}
+}
+
+func lookupDeclaredRate(overrides map[string]ModelRates, modelKey string) (ModelRates, bool) {
+	if len(overrides) == 0 || modelKey == "" {
+		return ModelRates{}, false
+	}
+	rates, ok := overrides[modelKey]
+	return rates, ok
 }

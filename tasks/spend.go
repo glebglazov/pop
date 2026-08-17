@@ -243,12 +243,13 @@ func SpendRollupWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 	}
 
 	table := loadRateTableForSpend(d)
+	overrides := loadDeclaredSpendRates(loadConfig)
 
 	var result *SpendRollupResult
 	if opts.All {
-		result, err = spendRollupAll(d, table)
+		result, err = spendRollupAll(d, table, overrides)
 	} else {
-		result, err = spendRollupRepo(d, pd, loadConfig, opts, table)
+		result, err = spendRollupRepo(d, pd, loadConfig, opts, table, overrides)
 	}
 	if err != nil {
 		return nil, err
@@ -284,7 +285,7 @@ func SpendRollupWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 
 // spendRollupRepo is the current-checkout rollup: manifests under one
 // definition path, archived sets filtered out (ADR-0160).
-func spendRollupRepo(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts SpendOptions, table *RateTable) (*SpendRollupResult, error) {
+func spendRollupRepo(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts SpendOptions, table *RateTable, overrides map[string]ModelRates) (*SpendRollupResult, error) {
 	resolved, err := ResolvePathsWith(d, pd, loadConfig, opts.ResolveInput)
 	if err != nil {
 		return nil, exitErr(ExitSetup, "%v", err)
@@ -308,7 +309,7 @@ func spendRollupRepo(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 		if m == nil {
 			continue
 		}
-		row, err := taskSetSpendRollup(d, setID, m.Dir, table)
+		row, err := taskSetSpendRollup(d, setID, m.Dir, table, overrides)
 		if err != nil {
 			return nil, exitErr(ExitOperational, "spend for %s: %v", setID, err)
 		}
@@ -322,7 +323,7 @@ func spendRollupRepo(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 // machine (ADR-0218). Enumeration is store.AllSets — not the config project
 // list — grouped by def_path; a def_path whose storage is gone is skipped and
 // counted rather than crashing the render.
-func spendRollupAll(d *Deps, table *RateTable) (*SpendRollupResult, error) {
+func spendRollupAll(d *Deps, table *RateTable, overrides map[string]ModelRates) (*SpendRollupResult, error) {
 	s, ok, err := d.Store(false)
 	if err != nil {
 		return nil, exitErr(ExitSetup, "%v", err)
@@ -383,7 +384,7 @@ func spendRollupAll(d *Deps, table *RateTable) (*SpendRollupResult, error) {
 			if m == nil {
 				continue
 			}
-			row, err := taskSetSpendRollup(d, reg.SetID, m.Dir, table)
+			row, err := taskSetSpendRollup(d, reg.SetID, m.Dir, table, overrides)
 			if err != nil {
 				return nil, exitErr(ExitOperational, "spend for %s: %v", reg.SetID, err)
 			}
@@ -626,7 +627,8 @@ func SpendSetBreakdownWith(d *Deps, pd *project.Deps, loadConfig func(string) (*
 	}
 
 	table := loadRateTableForSpend(d)
-	result, err := buildSpendSetBreakdown(d, taskSetID, m, table)
+	overrides := loadDeclaredSpendRates(loadConfig)
+	result, err := buildSpendSetBreakdown(d, taskSetID, m, table, overrides)
 	if err != nil {
 		return nil, exitErr(ExitOperational, "spend for %s: %v", taskSetID, err)
 	}
@@ -634,7 +636,7 @@ func SpendSetBreakdownWith(d *Deps, pd *project.Deps, loadConfig func(string) (*
 	return result, nil
 }
 
-func buildSpendSetBreakdown(d *Deps, taskSetID string, m *Manifest, table *RateTable) (*SpendSetBreakdownResult, error) {
+func buildSpendSetBreakdown(d *Deps, taskSetID string, m *Manifest, table *RateTable, overrides map[string]ModelRates) (*SpendSetBreakdownResult, error) {
 	runs, err := listSpendRuns(d, m.Dir)
 	if err != nil {
 		return nil, err
@@ -648,7 +650,7 @@ func buildSpendSetBreakdown(d *Deps, taskSetID string, m *Manifest, table *RateT
 		if err != nil {
 			return nil, err
 		}
-		notional := priceRunSpend(run, spend, table)
+		notional := priceRunSpend(run, spend, table, overrides)
 		if run.meta.Agent != "" {
 			setAgents[run.meta.Agent] = true
 		}
@@ -779,7 +781,7 @@ func archivedTaskSetIDs(state *GlobalState, defPath string) map[string]bool {
 	return out
 }
 
-func taskSetSpendRollup(d *Deps, taskSetID, taskSetDir string, table *RateTable) (SpendRollupRow, error) {
+func taskSetSpendRollup(d *Deps, taskSetID, taskSetDir string, table *RateTable, overrides map[string]ModelRates) (SpendRollupRow, error) {
 	runs, err := listSpendRuns(d, taskSetDir)
 	if err != nil {
 		return SpendRollupRow{}, err
@@ -791,7 +793,7 @@ func taskSetSpendRollup(d *Deps, taskSetID, taskSetDir string, table *RateTable)
 		if err != nil {
 			return SpendRollupRow{}, err
 		}
-		notional := priceRunSpend(run, spend, table)
+		notional := priceRunSpend(run, spend, table, overrides)
 		if run.meta.Agent != "" {
 			setAgents[run.meta.Agent] = true
 		}
@@ -976,7 +978,7 @@ func writeSpendRollupRow(w io.Writer, row SpendRollupRow, showAgents bool) {
 	if showAgents {
 		agent = row.Agents
 	}
-	cell := formatSpendCell(row.Tokens, row.Notional)
+	cell := formatSpendCell(row.Tokens, row.Notional, row.RateSource)
 	if showAgents {
 		fmt.Fprintf(w, "%-20s %-28s %6s %6s %8s %8s %8s %9s %9s %5d %6d %18s\n",
 			row.Project,
@@ -1073,7 +1075,7 @@ func spendPeakInputJSONPtr(peak PeakInput) *int64 {
 // RenderSpendSetBreakdown writes the per-set spend breakdown for humans.
 func RenderSpendSetBreakdown(w io.Writer, result *SpendSetBreakdownResult) {
 	fmt.Fprintf(w, "tokens per completed task: %s", formatSpendPerCompletedTask(result))
-	implementLine := fmt.Sprintf("  (%s implement", formatSpendCell(result.ImplementTokens, result.ImplementNotional))
+	implementLine := fmt.Sprintf("  (%s implement", formatSpendCell(result.ImplementTokens, result.ImplementNotional, ""))
 	fmt.Fprintf(w, "%s, %d done, %d runs, %d blind)\n",
 		implementLine,
 		result.CompletedTasks,
@@ -1081,7 +1083,7 @@ func RenderSpendSetBreakdown(w io.Writer, result *SpendSetBreakdownResult) {
 		result.ImplementTokenBlindRuns,
 	)
 	fmt.Fprintf(w, "verification spend: %s  (%d runs, %d blind)\n",
-		formatSpendCell(result.VerificationTokens, result.VerificationNotional),
+		formatSpendCell(result.VerificationTokens, result.VerificationNotional, ""),
 		result.VerificationRunCount,
 		result.VerificationTokenBlindRuns,
 	)
@@ -1089,7 +1091,7 @@ func RenderSpendSetBreakdown(w io.Writer, result *SpendSetBreakdownResult) {
 	// there is spend behind it and never before.
 	if result.ReviewRunCount > 0 {
 		fmt.Fprintf(w, "review spend: %s  (%d runs, %d blind)\n",
-			formatSpendCell(result.ReviewTokens, result.ReviewNotional),
+			formatSpendCell(result.ReviewTokens, result.ReviewNotional, ""),
 			result.ReviewRunCount,
 			result.ReviewTokenBlindRuns,
 		)
@@ -1121,7 +1123,7 @@ func writeSpendBreakdownRow(w io.Writer, row SpendBreakdownRow, showAgents bool)
 	if showAgents {
 		agent = row.Agent
 	}
-	cell := formatSpendCell(row.Tokens, row.Notional)
+	cell := formatSpendCell(row.Tokens, row.Notional, row.RateSource)
 	if showAgents {
 		fmt.Fprintf(w, "%-28s %6s %6s %8s %8s %8s %9s %9s %5d %6d %18s\n",
 			row.TaskID,
@@ -1164,13 +1166,17 @@ func formatSpendPerCompletedTask(result *SpendSetBreakdownResult) string {
 }
 
 // formatSpendCell is the shared tokens (~$notional) cell for rollup and
-// breakdown surfaces. Rate-blind figures render (—), never (~$0.00).
-func formatSpendCell(u TokenUsage, notional PartialCost) string {
+// breakdown surfaces. Rate-blind figures render (—), never (~$0.00). A
+// declared override renders (*~$…) so a guess never passes for a published rate.
+func formatSpendCell(u TokenUsage, notional PartialCost, rateSource string) string {
 	if !u.HasUsage() {
 		return "—"
 	}
 	tokens := fmt.Sprintf("%d", tokenUsageTotal(u))
 	if notional.HasCost {
+		if rateSource == RateSourceOverride {
+			return fmt.Sprintf("%s (*~$%.2f)", tokens, notional.Dollars)
+		}
 		return fmt.Sprintf("%s (~$%.2f)", tokens, notional.Dollars)
 	}
 	return fmt.Sprintf("%s (—)", tokens)

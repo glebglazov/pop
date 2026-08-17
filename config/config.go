@@ -429,6 +429,23 @@ type EffortConfig struct {
 	Light    []EffortModel `toml:"light" desc:"Light-tier model/reasoning ladder (array)."`
 }
 
+// SpendConfig holds Spend-lens settings (ADR-0218).
+type SpendConfig struct {
+	// ModelRates are per-model notional rates a human declares for models the
+	// published Rate table cannot cover ([spend.model_rates."<model>"] tables).
+	ModelRates map[string]SpendModelRate `toml:"model_rates" merge:"map" include:"map-first-wins" desc:"Per-model declared notional rates for the Spend lens ([spend.model_rates.\"<model>\"] tables)."`
+}
+
+// SpendModelRate is the four per-token rates a declared override may state.
+// They mirror a Rate-table entry so the two are interchangeable at lookup
+// (ADR-0218).
+type SpendModelRate struct {
+	Prompt     string `toml:"prompt" desc:"Per-token prompt/input rate (USD) for this model."`
+	Completion string `toml:"completion" desc:"Per-token completion/output rate (USD) for this model."`
+	CacheRead  string `toml:"cache_read,omitempty" desc:"Per-token cache-read rate (USD); optional."`
+	CacheWrite string `toml:"cache_write,omitempty" desc:"Per-token cache-write rate (USD); optional."`
+}
+
 // AgentConfig holds the settings keyed by agent preset rather than by kind of
 // work. Only the output mode is left: it decides how pop parses this agent's
 // stream in any kind of run (ADR-0194). The attended argument and model keys the
@@ -724,6 +741,7 @@ type Config struct {
 	Work          *WorkConfig         `toml:"work" merge:"fields" include:"fields" desc:"Work settings ([work] table; one sub-table per kind of work)."`
 	Updates       *UpdatesConfig      `toml:"updates" desc:"Auto-update behavior ([updates] table)."`
 	Integrations  *IntegrationsConfig `toml:"integrations" merge:"fields" desc:"AI-agent integration settings ([integrations] table)."`
+	Spend         *SpendConfig        `toml:"spend" merge:"fields" include:"fields" desc:"Spend lens settings ([spend] table)."`
 	// Tmux holds global tmux-server addressing and the Tmux config include
 	// ([tmux] table). Global-scope only (ADR-0199): no include: tag, not on
 	// the include whitelist, not repo-scope.

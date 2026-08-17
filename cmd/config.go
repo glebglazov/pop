@@ -142,6 +142,32 @@ Examples:
 	ValidArgsFunction: completeRepoSettingKey,
 }
 
+var configSpendCmd = &cobra.Command{
+	Use:   "spend",
+	Short: "Configure the Spend lens",
+}
+
+var configSpendModelRateCmd = &cobra.Command{
+	Use:   "model-rate",
+	Short: "Declare a notional rate for a model the published table cannot cover",
+}
+
+var configSpendModelRateSetCmd = &cobra.Command{
+	Use:   "set <model> <prompt> <completion> [cache_read] [cache_write]",
+	Short: "Declare a per-token rate override for one model",
+	Long: `Declare a per-token notional rate for one model's rate-table key.
+
+The value lands in config.override.toml under [spend.model_rates."<model>"]
+and beats the published Rate table for that model in pop tasks spend.
+
+Examples:
+  pop config spend model-rate set composer-2.5 0.000001 0.000002
+  pop config spend model-rate set composer-2.5 0.000001 0.000002 0.0000001 0.000001`,
+	Args:              cobra.RangeArgs(3, 5),
+	RunE:              runConfigSpendModelRateSet,
+	ValidArgsFunction: completeSpendModelRateKey,
+}
+
 var configRepoGetCmd = &cobra.Command{
 	Use:   "get [key]",
 	Short: "Show the repo-scoped settings in effect here, and where each came from",
@@ -213,6 +239,9 @@ func init() {
 	configCmd.AddCommand(configShowCmd)
 	configCmd.AddCommand(configDashboardCmd)
 	configCmd.AddCommand(configRepoCmd)
+	configCmd.AddCommand(configSpendCmd)
+	configSpendCmd.AddCommand(configSpendModelRateCmd)
+	configSpendModelRateCmd.AddCommand(configSpendModelRateSetCmd)
 	configRepoCmd.AddCommand(configRepoSetCmd)
 	configRepoCmd.AddCommand(configRepoGetCmd)
 	configShowCmd.Flags().BoolVar(&configShowJSON, "json", false, "emit the effective config as JSON instead of TOML")
@@ -449,6 +478,28 @@ func runConfigRepoGetWith(cd *config.Deps, cfg *config.Config, out io.Writer, ch
 		}
 	}
 	return tw.Flush()
+}
+
+func runConfigSpendModelRateSet(cmd *cobra.Command, args []string) error {
+	model := args[0]
+	rates, err := config.ParseSpendModelRateCLI(args[1:])
+	if err != nil {
+		return fmt.Errorf("spend.model_rates.%s: %w", model, err)
+	}
+	cd := cmdLayerDeps().configDeps()
+	if err := config.SetSpendModelRateWith(cd, model, rates); err != nil {
+		return err
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "spend.model_rates.%s declared\n", model)
+	fmt.Fprintf(cmd.OutOrStdout(), "written to %s\n", config.DefaultOverrideConfigPathWith(cd))
+	return nil
+}
+
+func completeSpendModelRateKey(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return tasks.KnownSpendRateModelKeys(), cobra.ShellCompDirectiveNoFileComp
 }
 
 // currentRepoTrunk resolves the current repo's effective Trunk worktree for

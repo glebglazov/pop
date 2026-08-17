@@ -137,8 +137,10 @@ func stripEffortSuffix(model string) string {
 // resolveRunRateKey derives the Rate-table key for one Captured run.
 // Prefer the Actual model; when that is unreadable, fall back to the model
 // named in the Requested agent (or the run's recorded pinned model). An
-// adapter with no normalisation rule, or a model that matches no table entry,
-// yields an empty key — rate-blind, never guessed (ADR-0218).
+// adapter with no normalisation rule, or a model string that normalises to
+// nothing, yields an empty key — rate-blind at pricing time, never guessed
+// (ADR-0218). Whether a key is priceable is decided in priceRunSpend from
+// declared overrides and the published table, not here.
 func resolveRunRateKey(run capturedRun, table *RateTable) RunRateKey {
 	adapter, ok := agentAdapters[run.meta.Agent]
 	if !ok {
@@ -151,12 +153,10 @@ func resolveRunRateKey(run capturedRun, table *RateTable) RunRateKey {
 
 	if actual := extractActualModel(run.meta.Agent, run.events); actual != "" {
 		key := normalize(actual)
-		if _, found := table.lookup(key); found {
-			return RunRateKey{Key: key, Source: RateKeyFromActual}
+		if key == "" {
+			return RunRateKey{}
 		}
-		// Actual model was readable but not priceable — do not fall back to the
-		// requested model and invent a different figure (ADR-0218).
-		return RunRateKey{}
+		return RunRateKey{Key: key, Source: RateKeyFromActual}
 	}
 
 	requested := requestedModelForRate(run)
@@ -164,10 +164,10 @@ func resolveRunRateKey(run capturedRun, table *RateTable) RunRateKey {
 		return RunRateKey{}
 	}
 	key := normalize(requested)
-	if _, found := table.lookup(key); found {
-		return RunRateKey{Key: key, Source: RateKeyFromRequested}
+	if key == "" {
+		return RunRateKey{}
 	}
-	return RunRateKey{}
+	return RunRateKey{Key: key, Source: RateKeyFromRequested}
 }
 
 func requestedModelForRate(run capturedRun) string {

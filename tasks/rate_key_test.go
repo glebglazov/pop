@@ -148,8 +148,14 @@ func TestResolveRunRateKeyComposerStaysBlind(t *testing.T) {
 			},
 		}
 		got := resolveRunRateKey(run, table)
-		if got.Key != "" {
-			t.Fatalf("%s should be rate-blind, got %+v", model, got)
+		if got.Key != model {
+			t.Fatalf("%s key = %q, want normalized %q", model, got.Key, model)
+		}
+		priced := priceRunSpend(run, RunSpend{
+			Tokens: TokenUsage{Input: 100, HasInput: true},
+		}, table, nil)
+		if priced.Cost.HasCost || priced.RateSource != "" {
+			t.Fatalf("%s should stay rate-blind without a declaration, got %+v", model, priced)
 		}
 	}
 }
