@@ -46,7 +46,7 @@ type MultiSelect struct {
 	showHelp bool
 }
 
-var multiSelectToggle = key.NewBinding(key.WithKeys("space"))
+var multiSelectToggle = key.NewBinding(key.WithKeys("tab"))
 
 func multiSelectCell(m *MultiSelect) func(msRow, RowState) string {
 	return func(row msRow, _ RowState) string {
@@ -141,6 +141,10 @@ func (m *MultiSelect) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cursor >= 0 && m.cursor < len(m.items) && !m.items[m.cursor].Locked {
 				m.checked[m.cursor] = !m.checked[m.cursor]
 			}
+			if m.cursor < len(m.items)-1 {
+				m.list.MoveDown()
+				m.cursor = m.list.Cursor()
+			}
 			return m, nil
 
 		case key.Matches(msg, keys.Up):
@@ -159,7 +163,7 @@ func (m *MultiSelect) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *MultiSelect) helpEntries() []HelpEntry {
 	return []HelpEntry{
-		{"Space", "Toggle selection"},
+		{"Tab", "Toggle selection"},
 		{"Enter", "Confirm selections"},
 		{"↑/↓", "Navigate"},
 		{"Esc", "Cancel"},
@@ -182,7 +186,7 @@ func (m *MultiSelect) frameSpec() Frame {
 		Width:  m.width,
 		TermH:  m.height,
 		Header: m.title,
-		Hints:  "  Space toggle · Enter confirm · Esc cancel · C-h help",
+		Hints:  "  Tab toggle · Enter confirm · Esc cancel · C-h help",
 	}
 }
 

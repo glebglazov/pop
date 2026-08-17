@@ -12,6 +12,7 @@ import (
 func keyDown() tea.KeyPressMsg  { return tea.KeyPressMsg{Code: tea.KeyDown} }
 func keyUp() tea.KeyPressMsg    { return tea.KeyPressMsg{Code: tea.KeyUp} }
 func keySpace() tea.KeyPressMsg { return tea.KeyPressMsg{Code: ' '} }
+func keyTab() tea.KeyPressMsg   { return tea.KeyPressMsg{Code: tea.KeyTab} }
 func keyEnter() tea.KeyPressMsg { return tea.KeyPressMsg{Code: tea.KeyEnter} }
 func keyEsc() tea.KeyPressMsg   { return tea.KeyPressMsg{Code: tea.KeyEscape} }
 
@@ -44,10 +45,9 @@ func TestMultiSelectToggleAndConfirm(t *testing.T) {
 		{Label: "open-2"},
 	})
 
-	// cursor on index 1; check it, move down, check index 2.
-	m.Update(keySpace())
-	m.Update(keyDown())
-	m.Update(keySpace())
+	// cursor starts on index 1; tab checks it and advances to index 2, tab checks that too.
+	m.Update(keyTab())
+	m.Update(keyTab())
 	_, cmd := m.Update(keyEnter())
 	if cmd == nil {
 		t.Fatal("enter should quit")
@@ -62,6 +62,55 @@ func TestMultiSelectToggleAndConfirm(t *testing.T) {
 	}
 }
 
+func TestMultiSelectTabTogglesAndAdvances(t *testing.T) {
+	m := NewMultiSelect("pick", []MultiSelectItem{
+		{Label: "open-1"},
+		{Label: "open-2"},
+	})
+
+	m.Update(keyTab())
+	if !m.checked[0] {
+		t.Fatal("tab should toggle the cursored row")
+	}
+	if m.cursor != 1 {
+		t.Fatalf("cursor = %d, want 1 after tab advances", m.cursor)
+	}
+}
+
+func TestMultiSelectSpaceNoLongerToggles(t *testing.T) {
+	m := NewMultiSelect("pick", []MultiSelectItem{
+		{Label: "open-1"},
+		{Label: "open-2"},
+	})
+
+	m.Update(keySpace())
+	if m.checked[0] {
+		t.Fatal("space should not toggle a row")
+	}
+	if m.cursor != 0 {
+		t.Fatalf("cursor = %d, want 0 (space must not move it either)", m.cursor)
+	}
+}
+
+func TestMultiSelectTabOnLastRowDoesNotWrap(t *testing.T) {
+	m := NewMultiSelect("pick", []MultiSelectItem{
+		{Label: "open-1"},
+		{Label: "open-2"},
+	})
+	m.Update(keyDown())
+	if m.cursor != 1 {
+		t.Fatalf("cursor = %d, want 1", m.cursor)
+	}
+
+	m.Update(keyTab())
+	if !m.checked[1] {
+		t.Fatal("tab should toggle the last row")
+	}
+	if m.cursor != 1 {
+		t.Fatalf("cursor = %d, want 1 (tab must not wrap past the last row)", m.cursor)
+	}
+}
+
 func TestMultiSelectLockedRowCannotToggle(t *testing.T) {
 	m := NewMultiSelect("pick", []MultiSelectItem{
 		{Label: "done-1", Locked: true, LockedMark: "✓"},
@@ -72,7 +121,7 @@ func TestMultiSelectLockedRowCannotToggle(t *testing.T) {
 	if m.cursor != 0 {
 		t.Fatalf("cursor = %d, want 0", m.cursor)
 	}
-	m.Update(keySpace())
+	m.Update(keyTab())
 	if m.checked[0] {
 		t.Fatal("locked row was toggled")
 	}
@@ -87,7 +136,7 @@ func TestMultiSelectCancelEmptyResult(t *testing.T) {
 		{Label: "open-1"},
 		{Label: "open-2"},
 	})
-	m.Update(keySpace()) // check something first
+	m.Update(keyTab()) // check something first
 	_, cmd := m.Update(keyEsc())
 	if cmd == nil {
 		t.Fatal("esc should quit")
@@ -200,10 +249,10 @@ func TestMultiSelectHelp_SwallowsKeysWhileOpen(t *testing.T) {
 		t.Fatal("showHelp should be true after C-h")
 	}
 
-	// Space should be swallowed
-	m.Update(keySpace())
+	// Tab should be swallowed
+	m.Update(keyTab())
 	if m.checked[0] {
-		t.Error("space in help mode should not toggle")
+		t.Error("tab in help mode should not toggle")
 	}
 	if !m.showHelp {
 		t.Error("showHelp should remain true")
@@ -287,20 +336,17 @@ func TestMultiSelectHelp_NormalOpsStillWork(t *testing.T) {
 	})
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
 
-	// Toggle first item
-	m.Update(keySpace())
+	// Toggle first item; tab both checks it and advances the cursor.
+	m.Update(keyTab())
 	if !m.checked[0] {
 		t.Error("first item should be toggled")
 	}
-
-	// Move down
-	m.Update(keyDown())
 	if m.cursor != 1 {
 		t.Errorf("cursor should be at 1, got %d", m.cursor)
 	}
 
 	// Toggle second item
-	m.Update(keySpace())
+	m.Update(keyTab())
 	if !m.checked[1] {
 		t.Error("second item should be toggled")
 	}
