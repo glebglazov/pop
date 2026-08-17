@@ -18,7 +18,9 @@ import (
 	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/tasks/drain"
 	"github.com/glebglazov/pop/tasks/implement"
+	"github.com/glebglazov/pop/tasks/setkind"
 	"github.com/glebglazov/pop/ui"
+	"github.com/glebglazov/pop/work"
 	"github.com/spf13/cobra"
 )
 
@@ -46,6 +48,7 @@ var (
 	taskReviewAgents          []string
 	taskReviewEffort          string
 	taskReviewShow            bool
+	taskArtifactsShow         string
 	taskImplementVerifyAgents []string
 	taskImplementVerifyEffort string
 	taskStatusArchived        bool
@@ -174,6 +177,13 @@ Any set with a done AFK task and a non-empty commit range may be reviewed, at
 any time — including mid-drain, where a standards correction is worth most.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runTaskReview,
+}
+
+var taskArtifactsCmd = &cobra.Command{
+	Use:   "artifacts TASK_SET",
+	Short: "List a task set's readable documents, or print one verbatim",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runTaskArtifacts,
 }
 
 var taskAssistCmd = &cobra.Command{
@@ -329,6 +339,7 @@ func init() {
 	taskCmd.AddCommand(taskImplementCmd)
 	taskCmd.AddCommand(taskVerifyCmd)
 	taskCmd.AddCommand(taskReviewCmd)
+	taskCmd.AddCommand(taskArtifactsCmd)
 	taskCmd.AddCommand(taskAssistCmd)
 	taskCmd.AddCommand(taskResetTaskCmd)
 	taskCmd.AddCommand(taskCompleteTaskCmd)
@@ -395,6 +406,7 @@ func init() {
 	taskReviewCmd.Flags().StringArrayVar(&taskReviewAgents, "agent", nil, "Reviewer agent preset; repeat to define an ordered quota/missing-binary fallback list")
 	taskReviewCmd.Flags().StringVar(&taskReviewEffort, "effort", "", "Reviewer model-strength tier: light, standard, or heavy (default heavy)")
 	taskReviewCmd.Flags().BoolVar(&taskReviewShow, "show", false, "Print the set's latest review document to stdout and run no agent")
+	taskArtifactsCmd.Flags().StringVar(&taskArtifactsShow, "show", "", "Print the named artifact verbatim")
 
 	taskAssistCmd.Flags().StringVar(&taskRuntimePath, "task-runtime-path", "", "Git checkout root for task execution (normalized to checkout root)")
 	taskAssistCmd.Flags().StringArrayVar(&taskAgentPresets, "agent", nil, "Agent preset for attended assistance (claude, opencode, cursor, codex, pi, kimi), optionally followed by extra agent args")
@@ -989,6 +1001,62 @@ func runTaskReviewWith(d *tasks.Deps, w io.Writer, taskSetID string, show bool) 
 		Convention:   codeReviewConvention(d),
 	}); err != nil {
 		return fmt.Errorf("tasks review: %w", err)
+	}
+	return nil
+}
+
+func runTaskArtifacts(cmd *cobra.Command, args []string) error {
+	return runTaskArtifactsWith(cmdLayerDeps().tasksDeps(), os.Stdout, args[0], taskArtifactsShow)
+}
+
+func runTaskArtifactsWith(d *tasks.Deps, w io.Writer, taskSetID, show string) error {
+	resolved, err := tasks.ResolvePathsWith(d, taskProjectDeps(), taskConfigLoad, taskResolveInput())
+	if err != nil {
+		return fmt.Errorf("tasks artifacts: %w", err)
+	}
+	discovery, err := tasks.DiscoverWith(d, resolved.DefinitionPath)
+	if err != nil {
+		return fmt.Errorf("tasks artifacts: %w", err)
+	}
+	if discovery.TaskDirErr != nil {
+		return fmt.Errorf("tasks artifacts: %w", discovery.TaskDirErr)
+	}
+	if _, ok := discovery.Manifests[taskSetID]; !ok {
+		return fmt.Errorf("tasks artifacts: unknown task set %q", taskSetID)
+	}
+
+	var source work.ArtifactSource = setkind.New(&setkind.Deps{Tasks: d})
+	artifacts, err := source.Artifacts(work.Container{ID: taskSetID, DefPath: resolved.DefinitionPath})
+	if err != nil {
+		return fmt.Errorf("tasks artifacts: %w", err)
+	}
+	if show != "" {
+		for _, artifact := range artifacts {
+			if artifact.Name != show {
+				continue
+			}
+			body, err := d.FS.ReadFile(artifact.Path)
+			if err != nil {
+				return fmt.Errorf("tasks artifacts: read %s: %w", show, err)
+			}
+			_, err = w.Write(body)
+			return err
+		}
+		available := make([]string, 0, len(artifacts))
+		for _, artifact := range artifacts {
+			available = append(available, artifact.Name)
+		}
+		if len(available) == 0 {
+			return fmt.Errorf("tasks artifacts: artifact %q not found; no artifacts are available", show)
+		}
+		return fmt.Errorf("tasks artifacts: artifact %q not found; available: %s", show, strings.Join(available, ", "))
+	}
+	if len(artifacts) == 0 {
+		fmt.Fprintf(w, "Task set %s has no artifacts.\n", taskSetID)
+		return nil
+	}
+	for _, artifact := range artifacts {
+		fmt.Fprintf(w, "%s\t%s\t%s\n", artifact.Type, artifact.At.UTC().Format(time.RFC3339), artifact.Name)
 	}
 	return nil
 }

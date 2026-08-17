@@ -1,8 +1,8 @@
 // Package work is the Work seam: one `Kind` interface that every Work kind
 // complies with, the plain data structs its methods pass around (Container,
-// Item, Action, Outcome, Section), and the snapshot builder that walks a wired
-// list of kinds. It imports no kind package — adapters live kind-side and `cmd`
-// wires them — and it imports neither bubbletea nor lipgloss, so the styled
+// Item, Artifact, Action, Outcome, Section), and the snapshot builder that walks
+// a wired list of kinds. It imports no kind package — adapters live kind-side
+// and `cmd` wires them — and it imports neither bubbletea nor lipgloss, so the styled
 // render layer stays TUI-side (ADR-0143); guard tests enforce both boundaries.
 //
 // There is no row model beside the container: a dashboard row is a `Container`,

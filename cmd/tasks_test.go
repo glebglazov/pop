@@ -1219,6 +1219,7 @@ func resetTaskFlags() {
 	taskStreamFull = false
 	taskStreamRaw = false
 	taskStreamLast = false
+	taskArtifactsShow = ""
 }
 
 func setupRunTaskCmdFixture(t *testing.T) (root string, td *tasks.Deps) {

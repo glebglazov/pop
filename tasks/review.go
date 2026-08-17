@@ -411,7 +411,7 @@ func latestReviewDocument(d *Deps, setDir string) (reviewDocument, bool) {
 	var found reviewDocument
 	ok := false
 	for _, entry := range entries {
-		at, isReview := reviewFileInstant(entry.Name())
+		at, isReview := ReviewFileInstant(entry.Name())
 		if entry.IsDir() || !isReview {
 			continue
 		}
@@ -431,9 +431,11 @@ func latestReviewDocument(d *Deps, setDir string) (reviewDocument, bool) {
 	return found, true
 }
 
-// reviewFileInstant reads a Review artifact's name back as the instant it was
-// written, and false for anything else in the directory.
-func reviewFileInstant(name string) (time.Time, bool) {
+// ReviewFileInstant reads a Review artifact's name back as the instant it was
+// written, and false for anything else in the directory. It is exported so the
+// Task-set Work kind can use the review document's own timestamp as its Artifact
+// ordering key instead of duplicating the filename contract.
+func ReviewFileInstant(name string) (time.Time, bool) {
 	stamp, ok := strings.CutPrefix(name, reviewFilePrefix)
 	if !ok {
 		return time.Time{}, false
