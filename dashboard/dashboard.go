@@ -1935,15 +1935,11 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 				return m.dispatchArtifactKey(msg.String(), m.detail.row, artifact, true)
 			}
-			if msg.String() != "y" {
-				return m, nil
-			}
 			item, ok := m.detail.itemByID(m.detail.peek.itemID)
 			if !ok {
 				return m, nil
 			}
-			m.detail.peek.flash.Set(m.copyItemName(m.detail.row, item))
-			return m, nil
+			return m.dispatchItemKey(msg.String(), m.detail.row, item, true)
 		}
 		return m, nil
 	}
@@ -2065,15 +2061,11 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m.dispatchArtifactKey(msg.String(), m.detail.row, artifact, false)
 		}
-		if msg.String() != "y" {
-			return m, nil
-		}
 		item, ok := m.detail.list.Selected()
 		if !ok {
 			return m, nil
 		}
-		m.detail.flash.Set(m.copyItemName(m.detail.row, item))
-		return m, nil
+		return m.dispatchItemKey(msg.String(), m.detail.row, item, false)
 	}
 	return m, nil
 }
@@ -2140,6 +2132,17 @@ func (m QueueDashboard) dispatchArtifactKey(key string, row work.Container, arti
 	for _, action := range m.kinds.artifactActionsFor(row, artifact) {
 		if action.Key == key {
 			return m.dispatchArtifactVerb(action.Verb, row, artifact, inPeek)
+		}
+	}
+	return m, nil
+}
+
+// dispatchItemKey resolves a direct key through the kind's advertised actions,
+// so the direct route and the row menu always execute the same verb.
+func (m QueueDashboard) dispatchItemKey(key string, row work.Container, item work.Item, inPeek bool) (tea.Model, tea.Cmd) {
+	for _, action := range m.kinds.itemActionsFor(row, item) {
+		if action.Key == key {
+			return m.dispatchItemVerb(action.Verb, row, item, inPeek)
 		}
 	}
 	return m, nil

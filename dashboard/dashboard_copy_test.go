@@ -242,6 +242,42 @@ func TestQueueDashboardCopyDetailTaskViaMenu(t *testing.T) {
 	}
 }
 
+func TestQueueDashboardCopyDetailTaskPath(t *testing.T) {
+	task := tasks.Task{ID: "01-a", File: "/repo/tasks/my-set/01-a.md", Status: "open"}
+	m := detailCopyModel("my-set", task)
+
+	if !menuHasItemKey(m.kinds.itemActionsFor(m.detail.row, m.detail.row.Items[0]), "p") {
+		t.Fatal("task item menu missing copy path bound to p")
+	}
+	var captured string
+	m.copyFunc = func(s string) error { captured = s; return nil }
+
+	updated, cmd := m.update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+	if cmd != nil {
+		t.Fatal("p should not schedule a command")
+	}
+	got := updated.(QueueDashboard)
+	if captured != task.File {
+		t.Fatalf("copyFunc captured %q, want %q", captured, task.File)
+	}
+	if got.detail.flash.Text() != "copied "+task.File {
+		t.Fatalf("flash = %q, want copied confirmation", got.detail.flash.Text())
+	}
+
+	m = detailCopyModel("my-set", task)
+	m.copyFunc = func(s string) error { captured = s; return nil }
+	updated, _ = m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	got = updated.(QueueDashboard)
+	updated, cmd = got.update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+	if cmd != nil {
+		t.Fatal("p in task menu should not schedule a command")
+	}
+	got = updated.(QueueDashboard)
+	if captured != task.File || got.detail.flash.Text() != "copied "+task.File {
+		t.Fatalf("task menu copy path = %q, flash = %q", captured, got.detail.flash.Text())
+	}
+}
+
 // TestQueueDashboardCopyPeekTask covers the `y` verb inside the Document peek.
 func TestQueueDashboardCopyPeekTask(t *testing.T) {
 	task := tasks.Task{ID: "02-b", File: "02-b.md", Status: "open"}
@@ -289,6 +325,26 @@ func TestQueueDashboardCopyPeekTaskViaMenu(t *testing.T) {
 	}
 	if got.detail.peek.flash.Text() != "copied set-peek-menu/02-b.md" {
 		t.Fatalf("peek flash = %q, want copied confirmation", got.detail.peek.flash.Text())
+	}
+}
+
+func TestQueueDashboardCopyPeekTaskPath(t *testing.T) {
+	task := tasks.Task{ID: "02-b", File: "/repo/tasks/set-peek/02-b.md", Status: "open"}
+	m := detailCopyModel("set-peek", task)
+	m.detail.peek = &documentPeek{itemID: "02-b", text: "body\n"}
+
+	var captured string
+	m.copyFunc = func(s string) error { captured = s; return nil }
+	updated, cmd := m.update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+	if cmd != nil {
+		t.Fatal("p should not schedule a command")
+	}
+	got := updated.(QueueDashboard)
+	if captured != task.File {
+		t.Fatalf("copyFunc captured %q, want %q", captured, task.File)
+	}
+	if got.detail.peek.flash.Text() != "copied "+task.File || got.detail.flash.Text() != "" {
+		t.Fatalf("flash landed on wrong surface: peek=%q detail=%q", got.detail.peek.flash.Text(), got.detail.flash.Text())
 	}
 }
 

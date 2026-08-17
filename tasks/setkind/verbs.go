@@ -130,7 +130,8 @@ func (k *Kind) StatusActions(c work.Container) []work.Action {
 
 // ItemActions returns the verbs applicable to one task, filtered to its status:
 // complete for anything not already done, open for any reopenable task (mirroring
-// CanReopen), skip for an open task, and copy-name always. Every one of them is
+// CanReopen), skip for an open task, and copy-name always. A task that names its
+// markdown also offers its absolute path. Every one of them is
 // singular: a Selection marks containers, and item-level bulk is out of scope by
 // decision — a whole-set verb already means every unlocked task, and
 // `pop tasks complete` already does per-task multi-select (ADR-0215).
@@ -146,7 +147,11 @@ func (k *Kind) ItemActions(c work.Container, item work.Item) []work.Action {
 	if status == tasks.TaskOpen {
 		actions = append(actions, work.Action{Verb: VerbSkip, Key: "s", Label: "skip"})
 	}
-	return append(actions, work.Action{Verb: work.VerbCopyName, Key: "y", Label: "copy name"})
+	actions = append(actions, work.Action{Verb: work.VerbCopyName, Key: "y", Label: "copy name"})
+	if item.File != "" {
+		actions = append(actions, work.Action{Verb: VerbCopyPath, Key: "p", Label: "copy path"})
+	}
+	return actions
 }
 
 // verifyEligible reports whether the verify verb applies to a set: one a verdict
@@ -185,6 +190,13 @@ func (k *Kind) Perform(c work.Container, item *work.Item, verb work.Verb) (work.
 		}
 		return work.Outcome{Kind: work.OutcomeMessage, Clipboard: payload, Message: "copied " + payload}, nil
 	case VerbCopyPath:
+		if item != nil {
+			path := strings.TrimSpace(item.File)
+			if path == "" {
+				return work.Outcome{}, fmt.Errorf("setkind: task %s has no file", item.ID)
+			}
+			return work.Outcome{Kind: work.OutcomeMessage, Clipboard: path, Message: "copied " + path}, nil
+		}
 		path := strings.TrimSpace(c.RuntimePath)
 		if path == "" {
 			return work.Outcome{}, fmt.Errorf("setkind: %s is not bound to a worktree", c.ID)

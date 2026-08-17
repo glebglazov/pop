@@ -111,3 +111,27 @@ func TestCopyPathHiddenOnUnboundSet(t *testing.T) {
 		t.Fatalf("copy-path clipboard = %q, want the bound worktree's runtime path", out.Clipboard)
 	}
 }
+
+func TestTaskCopyPathUsesTaskFile(t *testing.T) {
+	k := New(nil)
+	c := work.Container{ID: "2026-07-01-demo", RuntimePath: "/repo/worktrees/demo"}
+	item := work.Item{ID: "01-task", Status: string(tasks.TaskOpen), File: "/repo/tasks/2026-07-01-demo/01-task.md"}
+
+	actions := k.ItemActions(c, item)
+	if !slices.Contains(verbsOffered(actions), VerbCopyPath) {
+		t.Fatalf("task item actions = %v, want copy-path", verbsOffered(actions))
+	}
+	out, err := k.Perform(c, &item, VerbCopyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Clipboard != item.File {
+		t.Fatalf("copy-path clipboard = %q, want task path %q", out.Clipboard, item.File)
+	}
+
+	noFile := item
+	noFile.File = ""
+	if slices.Contains(verbsOffered(k.ItemActions(c, noFile)), VerbCopyPath) {
+		t.Fatal("task without a file offered copy-path")
+	}
+}
