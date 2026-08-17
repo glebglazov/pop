@@ -30,4 +30,5 @@ The `git diff --stat` below is complete; fetch any file's diff yourself with `gi
 {{template "task-listing" .Tasks}}
 Help the human decide which allowed outcome fits the findings and diff.
 
-{{template "disposition-invariant"}}
+{{template "the-human-decides"}}
+{{template "you-may-draft-what-the-human-confirms"}}

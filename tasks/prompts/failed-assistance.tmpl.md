@@ -24,4 +24,5 @@ Read it in full and satisfy every acceptance criterion:
 {{template "task-listing" .Tasks}}
 Help the human get this task to a passing state.
 
-{{template "disposition-invariant"}}
+{{template "the-human-decides"}}
+{{template "you-may-draft-what-the-human-confirms"}}

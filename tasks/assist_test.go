@@ -388,9 +388,9 @@ func TestBuildAssistPromptOmitsTaskBodies(t *testing.T) {
 		"Task contract to respect",
 		"Operations you may perform",
 		"Do not start a Drain",
-		// The session may still edit the manifest; what it may not do is
-		// effect the disposition that edit implies (ADR-0208).
-		"Add, remove, reorder, or re-effort tasks by editing index.json",
+		// Task-appending is granted once, via the shared authoring grant
+		// (ADR-0217), not restated in this Operations list.
+		"You may create a new Task set, or append a task to this one",
 		"You do not effect a disposition",
 		"an edit to the task manifest",
 	} {

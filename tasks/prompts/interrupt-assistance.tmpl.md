@@ -20,4 +20,5 @@ this task) or exit. You are here to advise and edit by hand only:
 {{template "task-listing" .Tasks}}
 Use the repository and task context to help the human decide whether to continue draining this task or exit.
 
-{{template "disposition-invariant"}}
+{{template "the-human-decides"}}
+{{template "you-may-draft-what-the-human-confirms"}}

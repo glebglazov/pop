@@ -24,4 +24,5 @@ Human-facing task path: {{.TaskPath}}
 {{end}}{{end}}{{end}}
 Use the repository and task context to help the human decide which allowed outcome is correct.
 
-{{template "disposition-invariant"}}
+{{template "the-human-decides"}}
+{{template "you-may-draft-what-the-human-confirms"}}
