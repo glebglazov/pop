@@ -472,7 +472,10 @@ func runAndStoreVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *
 
 	run := opts.runVerifier
 	if run == nil {
-		sel := resolveVerifier(opts.Agents, opts.Effort, m, cfg)
+		sel, err := resolveVerifier(opts.Agents, opts.Effort, m, cfg)
+		if err != nil {
+			return nil, err
+		}
 		run = func(prompt string) (string, error) {
 			return runConfiguredVerifier(d, cfg, sel, m.Dir, opts.SetID, workSHA, opts.RuntimePath, prompt, opts.Output, opts.Output, opts.Timeout, opts.probeMemo)
 		}
@@ -700,9 +703,11 @@ func verifyAttemptReason(outcome *attemptOutcome) string {
 // override → [work.verify] config → [work.implement].agents / DefaultVerifyEffort.
 // Agents and effort resolve independently, so a CLI effort can steer a
 // config-listed agent list, and vice versa. When no layer names an agent list it
-// falls back to [work.implement].agents (ResolveDefaultAgentPresets), so the
-// Verifier always has at least one agent to walk.
-func resolveVerifier(cliAgents []string, cliEffort string, m *Manifest, cfg *config.Config) verifierSelection {
+// falls back to [work.implement].agents (ResolveAgentGroupPresets), so the
+// Verifier always has at least one agent to walk — unless the override layer
+// states `agents = []`, the one emptiness that disables the fallthrough and so
+// the one way this resolves to an error instead of a selection.
+func resolveVerifier(cliAgents []string, cliEffort string, m *Manifest, cfg *config.Config) (verifierSelection, error) {
 	agents := nonEmptyStrings(cliAgents)
 	effort := strings.TrimSpace(cliEffort)
 
@@ -714,21 +719,20 @@ func resolveVerifier(cliAgents []string, cliEffort string, m *Manifest, cfg *con
 			effort = strings.TrimSpace(over.Effort)
 		}
 	}
-	if v := cfg.VerifySettings(); v != nil {
-		if len(agents) == 0 {
-			agents = v.Agents.Commands()
-		}
-		if effort == "" {
-			effort = strings.TrimSpace(v.Effort)
-		}
+	if v := cfg.VerifySettings(); v != nil && effort == "" {
+		effort = strings.TrimSpace(v.Effort)
 	}
 	if len(agents) == 0 {
-		agents = ResolveDefaultAgentPresets(nil, "", false, cfg)
+		resolved, err := ResolveAgentGroupPresets(cfg.VerifyAgentList(), cfg)
+		if err != nil {
+			return verifierSelection{}, err
+		}
+		agents = resolved
 	}
 	if effort == "" {
 		effort = DefaultVerifyEffort
 	}
-	return verifierSelection{Agents: agents, Effort: effort}
+	return verifierSelection{Agents: agents, Effort: effort}, nil
 }
 
 // nonEmptyStrings returns the non-blank entries of specs, preserving order.

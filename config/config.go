@@ -299,8 +299,9 @@ type VerifyConfig struct {
 	Enabled bool `toml:"enabled" include:"replace" desc:"Enable Agent verification as a Done gate (default false)."`
 	// Agents is the ordered fallback list of agent presets the Verifier walks,
 	// mirroring [work.implement].agents: it falls through to the next agent on
-	// a quota pause or a missing binary. An empty list falls back to
-	// [work.implement].agents (and, failing that, the built-in default agent).
+	// a quota pause or a missing binary. An absent list falls back to
+	// [work.implement].agents (and, failing that, the built-in default agent);
+	// an override of `agents = []` disables that fallback (agent_list.go).
 	Agents AgentEntries `toml:"agents" include:"replace" desc:"Ordered fallback agent list for the Verifier, falling back to [work.implement].agents when omitted (strings or {display_name, cmd} tables)."`
 	// Effort selects the Verifier's model-strength tier (light, standard, or
 	// heavy). Absent ⇒ heavy — verification runs at the strongest tier by default.
@@ -330,8 +331,9 @@ type ReviewConfig struct {
 	Enabled bool `toml:"enabled" include:"replace" desc:"Enable automatic Code review at AFK quiescence (default false)."`
 	// Agents is the ordered fallback list of agent presets the Reviewer walks,
 	// mirroring [work.verify].agents: it falls through to the next agent on a
-	// quota pause or a missing binary. An empty list falls back to
-	// [work.implement].agents (and, failing that, the built-in default agent).
+	// quota pause or a missing binary. An absent list falls back to
+	// [work.implement].agents (and, failing that, the built-in default agent);
+	// an override of `agents = []` disables that fallback (agent_list.go).
 	Agents AgentEntries `toml:"agents" include:"replace" desc:"Ordered fallback agent list for the Reviewer, falling back to [work.implement].agents when omitted (strings or {display_name, cmd} tables)."`
 	// Effort selects the Reviewer's model-strength tier (light, standard, or
 	// heavy). Absent ⇒ heavy — judging naming, structure and idiom is the
@@ -507,8 +509,9 @@ type WorkConfig struct {
 	Verify *VerifyConfig `toml:"verify" merge:"fields" include:"fields" desc:"Agent-verification settings ([work.verify] table)."`
 	// Review is the Reviewer's group (ADR-0214).
 	Review *ReviewConfig `toml:"review" merge:"fields" include:"fields" desc:"Code-review settings ([work.review] table)."`
-	// Routine is the recurring-Routine group. An empty list falls through to
-	// [work.implement].agents; a Routine manifest's own agents still beats both.
+	// Routine is the recurring-Routine group. An absent list falls through to
+	// [work.implement].agents — an override of `agents = []` does not
+	// (agent_list.go); a Routine manifest's own agents still beats both.
 	Routine *AgentGroupConfig `toml:"routine" merge:"fields" include:"fields" desc:"Routine Work group ([work.routine] table)."`
 	// Attended is the group every human-facing session shares — gate assistance,
 	// an Assist session, Map assist, map grilling, a Routine refinement session.
@@ -745,6 +748,13 @@ type Config struct {
 	Findings []Finding `toml:"-"`
 
 	Warnings []string `toml:"-"` // non-serialized warnings from config loading
+
+	// EmptyAgentOverrides names the Work-group agent lists config.override.toml
+	// states as an explicit empty list (agent_list.go). It rides on the merged
+	// config because the merge keeps a key's value and drops the layer that
+	// wrote it, and for these keys the layer is the whole difference between "no
+	// list of its own" and "no agents at all" (ADR-0202 decision 6).
+	EmptyAgentOverrides []string `toml:"-"`
 }
 
 // recordFinding appends a finding and mirrors its message into Warnings, so a

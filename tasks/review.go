@@ -239,7 +239,10 @@ func runReviewer(d *Deps, cfg *config.Config, opts reviewCoreOptions, m *Manifes
 	text := buildReviewerPrompt(d, m, work, convention, previous, hasPrevious)
 	run := opts.runReviewer
 	if run == nil {
-		sel := resolveReviewer(opts.Agents, opts.Effort, cfg)
+		sel, err := resolveReviewer(opts.Agents, opts.Effort, cfg)
+		if err != nil {
+			return "", "", err
+		}
 		run = func(prompt string) (string, string, error) {
 			return runConfiguredReviewer(d, cfg, sel, m.Dir, opts.SetID, workSHA, opts.RuntimePath, prompt, opts.Output, opts.Timeout, opts.probeMemo)
 		}
@@ -262,25 +265,28 @@ func runReviewer(d *Deps, cfg *config.Config, opts reviewCoreOptions, m *Manifes
 // the Reviewer is resolved from the human's configuration alone, so it is a
 // fresh agent by construction rather than the implementing session asked a
 // second question.
-func resolveReviewer(cliAgents []string, cliEffort string, cfg *config.Config) verifierSelection {
+//
+// Like the Verifier's, the fallthrough to [work.implement].agents is disabled by
+// an override of `agents = []`, which resolves to an error rather than a
+// selection (ADR-0202 decision 6).
+func resolveReviewer(cliAgents []string, cliEffort string, cfg *config.Config) (verifierSelection, error) {
 	agents := nonEmptyStrings(cliAgents)
 	effort := strings.TrimSpace(cliEffort)
 
-	if r := cfg.ReviewSettings(); r != nil {
-		if len(agents) == 0 {
-			agents = r.Agents.Commands()
-		}
-		if effort == "" {
-			effort = strings.TrimSpace(r.Effort)
-		}
+	if r := cfg.ReviewSettings(); r != nil && effort == "" {
+		effort = strings.TrimSpace(r.Effort)
 	}
 	if len(agents) == 0 {
-		agents = ResolveDefaultAgentPresets(nil, "", false, cfg)
+		resolved, err := ResolveAgentGroupPresets(cfg.ReviewAgentList(), cfg)
+		if err != nil {
+			return verifierSelection{}, err
+		}
+		agents = resolved
 	}
 	if effort == "" {
 		effort = DefaultReviewEffort
 	}
-	return verifierSelection{Agents: agents, Effort: effort}
+	return verifierSelection{Agents: agents, Effort: effort}, nil
 }
 
 // runConfiguredReviewer walks the resolved Reviewer agent list at the resolved

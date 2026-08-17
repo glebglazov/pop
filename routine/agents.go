@@ -13,27 +13,31 @@ import (
 // ResolveRoutineAgentPresets returns the ordered agent preset list for a Routine run.
 // The Routine's own manifest list wins when set; else [work.routine].agents;
 // else resolution falls through to [work.implement].agents and the built-in
-// default agent. Effort is not applied here — see resolveRoutineRunSpecs.
-func ResolveRoutineAgentPresets(manifestAgents []string, cfg *config.Config) []string {
+// default agent — unless the override layer states `work.routine.agents = []`,
+// the emptiness that disables the fallthrough and is answered with an error
+// (ADR-0202 decision 6, shared with verify and review through
+// tasks.ResolveAgentGroupPresets). Effort is not applied here — see
+// resolveRoutineRunSpecs.
+func ResolveRoutineAgentPresets(manifestAgents []string, cfg *config.Config) ([]string, error) {
 	if agents := nonEmptyAgentSpecs(manifestAgents); len(agents) > 0 {
-		return agents
+		return agents, nil
 	}
-	if agents := nonEmptyAgentSpecs(cfg.RoutineAgents()); len(agents) > 0 {
-		return agents
-	}
-	return tasks.ResolveDefaultAgentPresets(nil, "", false, cfg)
+	return tasks.ResolveAgentGroupPresets(cfg.RoutineAgentList(), cfg)
 }
 
 // resolveRoutineRunSpecs resolves the ordered agent specs for one Routine run,
 // preferring the manifest's own list and pinning each preset's model via the
 // effort ladder at the Routine's effort (default standard).
-func resolveRoutineRunSpecs(cfg *config.Config, m Manifest) []string {
-	specs := ResolveRoutineAgentPresets(m.Agents, cfg)
+func resolveRoutineRunSpecs(cfg *config.Config, m Manifest) ([]string, error) {
+	specs, err := ResolveRoutineAgentPresets(m.Agents, cfg)
+	if err != nil {
+		return nil, err
+	}
 	resolved := make([]string, len(specs))
 	for i, spec := range specs {
 		resolved[i] = tasks.ResolveAgentSpecForEffort(spec, m.Effort, cfg)
 	}
-	return resolved
+	return resolved, nil
 }
 
 func nonEmptyAgentSpecs(specs []string) []string {

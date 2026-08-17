@@ -51,21 +51,21 @@ type overrideFallthrough struct {
 	Phrase string
 }
 
-// overrideFallthroughs records which keys fall through when empty. Verify
-// says so in its own schema comment (VerifyConfig.Agents) and routine implements
-// it in routine/agents.go; implement and attended have nowhere to walk on to.
+// overrideFallthroughs records which keys fall through when empty: the three
+// Work groups that walk on to implement's list, the same three config/agent_list.go
+// answers provenance for. Implement and attended have nowhere to walk on to.
 //
 // The second half of ADR-0202 decision 6 — that an override of `agents = []`
-// *disables* the fallthrough — is what the preview words below promise. The
-// editor stores that emptiness as a real value and the ladder read here tells it
-// from an absent key, so the preview is right about what is stored. Agent
-// resolution is not: resolveVerifier (tasks/verify.go) and
-// ResolveRoutineAgentPresets (routine/agents.go) still walk on from any empty
-// list, whoever wrote it. Closing that means giving both run paths a way to ask
-// who wrote the emptiness, which is a change to them and not to this file.
+// *disables* the fallthrough — is what the preview words below promise, and what
+// execution does. The editor stores that emptiness as a real value, the ladder
+// read here tells it from an absent key, and the merged config carries which
+// keys the override layer states empty (Config.EmptyAgentOverrides) so that
+// resolveVerifier, resolveReviewer and ResolveRoutineAgentPresets refuse to walk
+// on from an emptiness a human wrote.
 var overrideFallthroughs = map[string]overrideFallthrough{
-	"work.verify.agents":  {Key: "work.implement.agents", Phrase: "the implement list"},
-	"work.routine.agents": {Key: "work.implement.agents", Phrase: "the implement list"},
+	KeyVerifyAgents:  {Key: "work.implement.agents", Phrase: "the implement list"},
+	KeyReviewAgents:  {Key: "work.implement.agents", Phrase: "the implement list"},
+	KeyRoutineAgents: {Key: "work.implement.agents", Phrase: "the implement list"},
 }
 
 // Wording for the two states that both look empty (ADR-0202 decision 6). They

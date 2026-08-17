@@ -91,6 +91,7 @@ func decodeConfigLayer(d *Deps, path string) (*configLayer, error) {
 // hand-authored include files from winning over an override.
 func applyConfigLayerMerge(d *Deps, userCfg *Config, userPath string, userMD toml.MetaData) (toml.MetaData, error) {
 	var overrideMD toml.MetaData
+	var emptyAgentOverrides []string
 
 	defaults, err := loadEmbeddedDefaults()
 	if err != nil {
@@ -115,6 +116,10 @@ func applyConfigLayerMerge(d *Deps, userCfg *Config, userPath string, userMD tom
 		// where they would read as one of them — a rung of the very ladder they are
 		// there to outrank.
 		layer.cfg.Repo = nil
+		// Read before the merge: which of the falling-through agent lists this
+		// layer states as empty is a fact about the layer, and the merge below
+		// keeps only the value.
+		emptyAgentOverrides = emptyAgentListOverrides(layer)
 		layers = append(layers, *layer)
 		overrideMD = layer.md
 	}
@@ -128,6 +133,7 @@ func applyConfigLayerMerge(d *Deps, userCfg *Config, userPath string, userMD tom
 		}
 		mergeWalk(&merged, layer.cfg, layer.md, policy)
 	}
+	merged.EmptyAgentOverrides = emptyAgentOverrides
 
 	*userCfg = merged
 	return overrideMD, nil

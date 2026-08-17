@@ -175,7 +175,14 @@ func executeFire(d *Deps, p firePlan) (*FireResult, error) {
 		return tasks.RunRoutineAgentInvocation(taskDeps, p.boundDir, out, timeout, agentSpec, wrappedPrompt)
 	}
 
-	specs := resolveRoutineRunSpecs(cfg, Manifest{Agents: p.agents, Effort: p.effort})
+	specs, err := resolveRoutineRunSpecs(cfg, Manifest{Agents: p.agents, Effort: p.effort})
+	if err != nil {
+		// An explicit empty agent override is a configuration the run cannot
+		// proceed under, so the run is filed as failed with the sentence naming
+		// the key rather than started on a preset nobody asked for.
+		fail(err.Error())
+		return nil, fmt.Errorf("routine run failed: %w", err)
+	}
 	result, preset, execErr := runRoutineWithAgentFallback(d, cfg, specs, out, attempt)
 	if execErr != nil {
 		reason := execErr.Error()

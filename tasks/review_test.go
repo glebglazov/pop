@@ -348,7 +348,10 @@ func TestResolveReviewerPrecedence(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			sel := resolveReviewer(tt.cliAgents, tt.cliEffort, tt.cfg)
+			sel, err := resolveReviewer(tt.cliAgents, tt.cliEffort, tt.cfg)
+			if err != nil {
+				t.Fatalf("resolveReviewer: %v", err)
+			}
 			if strings.Join(sel.Agents, ",") != strings.Join(tt.wantAgents, ",") {
 				t.Fatalf("agents = %v, want %v", sel.Agents, tt.wantAgents)
 			}

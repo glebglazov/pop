@@ -52,7 +52,10 @@ func TestResolveRoutineRunSpecsOrderAndEffort(t *testing.T) {
 	}
 
 	// Manifest list wins over both config lists; effort pins the model.
-	specs := resolveRoutineRunSpecs(cfg, Manifest{Agents: []string{"claude", "codex"}, Effort: "heavy"})
+	specs, err := resolveRoutineRunSpecs(cfg, Manifest{Agents: []string{"claude", "codex"}, Effort: "heavy"})
+	if err != nil {
+		t.Fatalf("resolveRoutineRunSpecs: %v", err)
+	}
 	if len(specs) != 2 {
 		t.Fatalf("specs = %#v, want 2 entries", specs)
 	}
@@ -64,7 +67,10 @@ func TestResolveRoutineRunSpecsOrderAndEffort(t *testing.T) {
 	}
 
 	// No manifest list ⇒ [routines].agents head; empty effort ⇒ standard.
-	specs = resolveRoutineRunSpecs(cfg, Manifest{})
+	specs, err = resolveRoutineRunSpecs(cfg, Manifest{})
+	if err != nil {
+		t.Fatalf("resolveRoutineRunSpecs: %v", err)
+	}
 	if len(specs) != 1 || !strings.HasPrefix(specs[0], "cursor") {
 		t.Fatalf("specs = %#v, want cursor head", specs)
 	}

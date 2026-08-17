@@ -92,7 +92,10 @@ func TestResolveVerifierPrecedence(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sel := resolveVerifier(tt.cliAgents, tt.cliEffort, tt.manifest, tt.cfg)
+			sel, err := resolveVerifier(tt.cliAgents, tt.cliEffort, tt.manifest, tt.cfg)
+			if err != nil {
+				t.Fatalf("resolveVerifier: %v", err)
+			}
 			if strings.Join(sel.Agents, ",") != strings.Join(tt.wantAgents, ",") {
 				t.Fatalf("agents = %#v, want %#v", sel.Agents, tt.wantAgents)
 			}
