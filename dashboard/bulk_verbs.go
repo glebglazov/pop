@@ -6,7 +6,9 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/glebglazov/pop/tasks/setkind"
 	"github.com/glebglazov/pop/ui"
+	"github.com/glebglazov/pop/wayfinder"
 	"github.com/glebglazov/pop/work"
 )
 
@@ -107,6 +109,47 @@ func bulkLabel(verb work.Verb, n int) string {
 // names the verb, the mode and the way out of it (ADR-0215 decision 4).
 func singularRefusal(verb string, marked int) string {
 	return fmt.Sprintf("%s acts on one row — shift+tab clears the %d selected", verb, marked)
+}
+
+// singularModalVerbs is the dashboard's own half of decision 5's capability
+// audit. A kind declares its verbs plural in work.Action.Modes, but these verbs
+// never reach a kind — the surface intercepts them in dispatchVerb for a modal of
+// its own — so what they are capable of is written down here instead, in one
+// reviewable list rather than a guard scattered through a dozen handlers. The
+// value is the word the refusal uses, which is the kind's own label for the verb.
+//
+// Every entry resolves a checkout, a worktree or a session *per row*: one modal
+// cannot answer for a set, and the handoffs among them address a pane, which has
+// no plural meaning at all. Mute, unmute and abandon are absent because their
+// input is shared — one duration, or a confirmation, or nothing — which is the
+// line ADR-0215 decision 5 draws through the intercepted verbs.
+var singularModalVerbs = map[work.Verb]string{
+	setkind.VerbDrain:        "drain",
+	setkind.VerbVerify:       "verify",
+	setkind.VerbBind:         "bind worktree",
+	setkind.VerbUnbind:       "unbind worktree",
+	setkind.VerbAutoDrain:    "auto-drain",
+	setkind.VerbAssist:       "assist",
+	setkind.VerbFold:         "fold",
+	setkind.VerbUnpark:       "unpark",
+	wayfinder.VerbWork:       "work frontier ticket and go",
+	wayfinder.VerbWorkHere:   "work frontier ticket",
+	wayfinder.VerbFanOut:     "fan out frontier and go",
+	wayfinder.VerbFanOutHere: "fan out frontier",
+	wayfinder.VerbAssist:     "assist the map and go",
+}
+
+// refuseInterceptedVerb answers one of those verbs arriving while rows are
+// marked. It is called from dispatchVerb — the one gate every route to an
+// intercepted verb passes, whether the human came through a menu hotkey, a flat
+// key or a pinned menu — so no caller can reach a per-row modal with a Selection
+// open, and none of them has to remember to check.
+func (m *QueueDashboard) refuseInterceptedVerb(verb work.Verb) bool {
+	name, ok := singularModalVerbs[verb]
+	if !ok {
+		return false
+	}
+	return m.refuseSingular(name)
 }
 
 // selectionMenuItems is the action menu over a Selection: the intersected verbs,

@@ -13,8 +13,8 @@ import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/debug"
 	"github.com/glebglazov/pop/history"
-	"github.com/glebglazov/pop/project"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
+	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/setkind"
 	"github.com/glebglazov/pop/ui"
@@ -1129,7 +1129,7 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// frontier ticket — each dispatched through the same verb path the row's `a`
 			// menu would take, so the flat key never means something the menu does not
 			// advertise.
-			if m.refuseSingular("I") {
+			if m.refuseSingular(m.selectionShortcutName("I")) {
 				return m, nil
 			}
 			row, ok := m.list.Selected()
@@ -1656,6 +1656,12 @@ func (m QueueDashboard) invokeFilterItem(idx int) (tea.Model, tea.Cmd) {
 // self-contained.
 func (m QueueDashboard) dispatchVerb(verb work.Verb, row DashboardRow) (tea.Model, tea.Cmd) {
 	m.err = nil
+	// The intercepted verbs that stay singular refuse here rather than at each key
+	// that reaches them: this is where every one of them arrives, so the audit and
+	// the guard sit together (ADR-0215 decision 5).
+	if m.refuseInterceptedVerb(verb) {
+		return m, nil
+	}
 	switch verb {
 	case setkind.VerbDrain:
 		m.flash.Set(dashboardHandoffPending)
@@ -2176,6 +2182,25 @@ func (m *QueueDashboard) refuseSingular(verb string) bool {
 	}
 	m.flash.Set(singularRefusal(verb, m.selection.Len()))
 	return true
+}
+
+// selectionShortcutName is what a flat key's refusal calls itself: the label the
+// marked rows all give that key, and the bare key when they give it different
+// ones or none — naming one kind's verb over a Selection spanning two would be a
+// worse answer than naming the key the human pressed.
+func (m QueueDashboard) selectionShortcutName(key string) string {
+	name := ""
+	for _, row := range m.selectionRows() {
+		item, ok := dashboardShortcutItem(m.kinds, row, key)
+		if !ok || (name != "" && item.label != name) {
+			return key
+		}
+		name = item.label
+	}
+	if name == "" {
+		return key
+	}
+	return name
 }
 
 // modeWord names the mode the surface is in, which today is selection mode and
