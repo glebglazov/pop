@@ -137,6 +137,18 @@ func CommitSubject(taskSetID, taskID string) string {
 	return fmt.Sprintf("tasks(%s): %s", taskSetSlug(taskSetID), taskID)
 }
 
+// TaskTrailerKey is the git trailer key naming the task an implementation commit
+// came from (ADR-0216).
+const TaskTrailerKey = "Pop-Task"
+
+// TaskTrailer returns the trailer line an implementation commit ends with. The
+// Task set identifier keeps its timestamp prefix — unlike a subject, which
+// carries its own date, the trailer is an identifier readers match against the
+// store's own directory names, so stripping would force a reverse mapping.
+func TaskTrailer(taskSetID, taskID string) string {
+	return fmt.Sprintf("%s: %s/%s", TaskTrailerKey, taskSetID, taskID)
+}
+
 // DirtyCheckpointSubject returns the checkpoint commit subject for dirty runtime state.
 func DirtyCheckpointSubject(taskSetID, taskID string) string {
 	return fmt.Sprintf("tasks(%s): %s capturing dirty state", taskSetSlug(taskSetID), taskID)

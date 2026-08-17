@@ -79,7 +79,7 @@ func TestCreateImplementationCommitAppliesConfigOverrides(t *testing.T) {
 	var commits []recordedCommit
 	d := &Deps{Git: mockGitRecordingCommits(&commits)}
 
-	if _, err := createImplementationCommit(d, "/runtime", CommitSubject("set", "01-task"), "summary", overrides); err != nil {
+	if _, err := createImplementationCommit(d, "/runtime", &Selection{TaskSetID: "set", TaskID: "01-task"}, "summary", overrides); err != nil {
 		t.Fatalf("createImplementationCommit: %v", err)
 	}
 	if len(commits) != 1 {
@@ -106,7 +106,7 @@ func TestCommitsCarryNoOverridesWhenUnconfigured(t *testing.T) {
 	var commits []recordedCommit
 	d := &Deps{Git: mockGitRecordingCommits(&commits)}
 
-	if _, err := createImplementationCommit(d, "/runtime", CommitSubject("set", "01-task"), "summary", nil); err != nil {
+	if _, err := createImplementationCommit(d, "/runtime", &Selection{TaskSetID: "set", TaskID: "01-task"}, "summary", nil); err != nil {
 		t.Fatalf("createImplementationCommit: %v", err)
 	}
 	if err := checkpointDirtyRuntime(d, "/runtime", "set", "01-task", nil); err != nil {

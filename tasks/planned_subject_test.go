@@ -36,10 +36,10 @@ func TestPlannedSubjectCommittedVerbatimAndFallsBackToDefault(t *testing.T) {
 	fallback := drainTaskWithCommit(t, env, "02-b", "b.txt")
 
 	for _, want := range []struct {
-		sha, subject, summary string
+		sha, subject, summary, trailer string
 	}{
-		{planned.CommitSHA, plannedSubject, "summary for 01-a"},
-		{fallback.CommitSHA, CommitSubject("demo", "02-b"), "summary for 02-b"},
+		{planned.CommitSHA, plannedSubject, "summary for 01-a", "demo/01-a"},
+		{fallback.CommitSHA, CommitSubject("demo", "02-b"), "summary for 02-b", "demo/02-b"},
 	} {
 		subject, err := realGitInDir(env.root, "log", "-1", "--format=%s", want.sha)
 		if err != nil {
@@ -52,8 +52,13 @@ func TestPlannedSubjectCommittedVerbatimAndFallsBackToDefault(t *testing.T) {
 		if err != nil {
 			t.Fatalf("log body %s: %v", want.sha, err)
 		}
-		if strings.TrimSpace(body) != want.summary {
-			t.Fatalf("commit body = %q, want the agent summary %q", body, want.summary)
+		// The trailer is the message's own last paragraph, so the summary stays the
+		// body's first one and the subject is untouched (ADR-0216).
+		if first, _, _ := strings.Cut(strings.TrimSpace(body), "\n\n"); first != want.summary {
+			t.Fatalf("commit body's first paragraph = %q, want the agent summary %q", first, want.summary)
+		}
+		if got := readTaskTrailer(t, env.root, want.sha); got != want.trailer {
+			t.Fatalf("Pop-Task trailer = %q, want %q", got, want.trailer)
 		}
 	}
 

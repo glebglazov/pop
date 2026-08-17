@@ -151,7 +151,7 @@ func TestRootImplementationCommitRecordsNullBase(t *testing.T) {
 	}
 
 	d := &Deps{FS: deps.NewRealFileSystem(), Git: deps.NewRealGit()}
-	commit, err := createImplementationCommit(d, repo, CommitSubject("demo", "01-a"), "summary", rootCommitOverrides)
+	commit, err := createImplementationCommit(d, repo, &Selection{TaskSetID: "demo", TaskID: "01-a"}, "summary", rootCommitOverrides)
 	if err != nil {
 		t.Fatalf("createImplementationCommit: %v", err)
 	}

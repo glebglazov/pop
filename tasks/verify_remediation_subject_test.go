@@ -134,8 +134,12 @@ func TestRemediationSubjectReachesTheCommitVerbatim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("log body: %v", err)
 	}
-	if strings.TrimSpace(body) != "summary for "+id {
+	if first, _, _ := strings.Cut(strings.TrimSpace(body), "\n\n"); first != "summary for "+id {
 		t.Fatalf("commit body = %q, want the agent summary", body)
+	}
+	// A Remediation task is a task, so its commit is marked like any other's.
+	if got, want := readTaskTrailer(t, env.root, result.CommitSHA), "demo/"+id; got != want {
+		t.Fatalf("Pop-Task trailer = %q, want %q", got, want)
 	}
 	if recorded := taskByID(t, loadDemoManifest(t, env), id); recorded.Commit == nil || recorded.Commit.Subject != renderedSubject {
 		t.Fatalf("recorded commit = %+v, want the rendered subject", recorded.Commit)

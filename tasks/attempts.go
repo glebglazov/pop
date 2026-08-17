@@ -467,7 +467,7 @@ func completeSuccessfulTask(d *Deps, sel *Selection, runtimePath, summary string
 
 	var commit *ImplementationCommit
 	if hasChanges {
-		made, err := createImplementationCommit(d, runtimePath, implementationSubject(sel), summary, commitOverrides)
+		made, err := createImplementationCommit(d, runtimePath, sel, summary, commitOverrides)
 		if err != nil {
 			return nil, exitErr(ExitOperational, "implementation commit: %v", err)
 		}
@@ -524,7 +524,11 @@ func implementationSubject(sel *Selection) string {
 	return CommitSubject(sel.TaskSetID, sel.TaskID)
 }
 
-func createImplementationCommit(d *Deps, runtimePath, subject, summary string, commitOverrides []string) (*ImplementationCommit, error) {
+// createImplementationCommit writes the task's work as one commit. It takes the
+// whole Selection rather than a finished message so the Task trailer cannot be
+// forgotten by a caller: subject and trailer are both derived here, and every
+// task commit therefore carries the trailer (ADR-0216).
+func createImplementationCommit(d *Deps, runtimePath string, sel *Selection, summary string, commitOverrides []string) (*ImplementationCommit, error) {
 	if _, err := d.Git.CommandInDir(runtimePath, "add", "-A"); err != nil {
 		return nil, err
 	}
@@ -535,7 +539,11 @@ func createImplementationCommit(d *Deps, runtimePath, subject, summary string, c
 	if strings.TrimSpace(staged) == "" {
 		return nil, nil
 	}
-	if _, err := d.Git.CommandInDir(runtimePath, commitGitArgs(commitOverrides, "commit", "-m", subject, "-m", summary)...); err != nil {
+	// A third `-m` puts the trailer in a paragraph of its own, which is what makes
+	// git read it as a trailer rather than as the summary's last line of prose.
+	subject := implementationSubject(sel)
+	trailer := TaskTrailer(sel.TaskSetID, sel.TaskID)
+	if _, err := d.Git.CommandInDir(runtimePath, commitGitArgs(commitOverrides, "commit", "-m", subject, "-m", summary, "-m", trailer)...); err != nil {
 		return nil, err
 	}
 	// One call answers both questions: `--parents` prints the new commit's SHA
