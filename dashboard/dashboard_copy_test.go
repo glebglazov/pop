@@ -253,9 +253,10 @@ func TestQueueDashboardCopyDetailTaskPath(t *testing.T) {
 	m.copyFunc = func(s string) error { captured = s; return nil }
 
 	updated, cmd := m.update(tea.KeyPressMsg{Code: 'p', Text: "p"})
-	if cmd != nil {
-		t.Fatal("p should not schedule a command")
+	if cmd == nil {
+		t.Fatal("p did not dispatch through the kind command seam")
 	}
+	updated, _ = updated.(QueueDashboard).update(cmd())
 	got := updated.(QueueDashboard)
 	if captured != task.File {
 		t.Fatalf("copyFunc captured %q, want %q", captured, task.File)
@@ -269,9 +270,10 @@ func TestQueueDashboardCopyDetailTaskPath(t *testing.T) {
 	updated, _ = m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got = updated.(QueueDashboard)
 	updated, cmd = got.update(tea.KeyPressMsg{Code: 'p', Text: "p"})
-	if cmd != nil {
-		t.Fatal("p in task menu should not schedule a command")
+	if cmd == nil {
+		t.Fatal("p in task menu did not dispatch through the kind command seam")
 	}
+	updated, _ = updated.(QueueDashboard).update(cmd())
 	got = updated.(QueueDashboard)
 	if captured != task.File || got.detail.flash.Text() != "copied "+task.File {
 		t.Fatalf("task menu copy path = %q, flash = %q", captured, got.detail.flash.Text())
@@ -336,9 +338,10 @@ func TestQueueDashboardCopyPeekTaskPath(t *testing.T) {
 	var captured string
 	m.copyFunc = func(s string) error { captured = s; return nil }
 	updated, cmd := m.update(tea.KeyPressMsg{Code: 'p', Text: "p"})
-	if cmd != nil {
-		t.Fatal("p should not schedule a command")
+	if cmd == nil {
+		t.Fatal("p did not dispatch through the kind command seam")
 	}
+	updated, _ = updated.(QueueDashboard).update(cmd())
 	got := updated.(QueueDashboard)
 	if captured != task.File {
 		t.Fatalf("copyFunc captured %q, want %q", captured, task.File)

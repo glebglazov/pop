@@ -92,7 +92,9 @@ func conformanceCases() []conformanceCase {
 				setkind.VerbBind, setkind.VerbAutoDrain, work.VerbStatus,
 				setkind.VerbArchive, work.VerbCopyName,
 			},
-			wantItemActions: []work.Verb{setkind.VerbComplete, setkind.VerbSkip, work.VerbCopyName},
+			wantItemActions: []work.Verb{
+				setkind.VerbComplete, setkind.VerbSkip, work.VerbCopyName, setkind.VerbCopyPath,
+			},
 			wantStatusActions: []work.Verb{
 				setkind.VerbComplete, setkind.VerbOpen, setkind.VerbSkip,
 				setkind.VerbArchive, setkind.VerbUnarchive,

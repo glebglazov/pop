@@ -1205,8 +1205,8 @@ The full-screen interactive drill-down entered with `l` or Enter from the **Work
 _Avoid_: status view, status modal, inspect modal, task editor
 
 **Document peek**:
-A read-only nested view over any absolute file path a detail row carries — a task's markdown, a **Routine**'s last report. It is opened with `l` or Enter, supports Vim-style scrolling (`j`/`k`, `ctrl-d`/`ctrl-u`, `gg`/`G`), and is dismissed with `h`/left/`esc` without changing anything. Renamed and widened from **Task text peek**, whose name claimed a task-only scope the implementation never had: the view reads whatever path the row hands it.
-_Avoid_: task text peek, task editor, task modal, preview pane
+A read-only nested view over any absolute file path a detail row carries — a task's markdown, a **Routine**'s last report. It is opened with `l` or Enter, supports Vim-style scrolling (`j`/`k`, `ctrl-d`/`ctrl-u`, `gg`/`G`), and is dismissed with `h`/left/`esc` without changing anything. The view reads whatever path the row hands it.
+_Avoid_: task editor, task modal, preview pane
 
 **Execution-state store**:
 The machine-global SQLite database in pop's data dir holding every layer-2 execution fact — Drains, Worktree bindings, Verify verdicts, agent cooldowns, spawn intents, gate holds (ADR-0055/0118). Layer-1 Task set status stays manifest-derived on disk and is never stored here. A process holds exactly one lazily-opened cached handle, and every subsystem borrows that handle — nothing opens the database through a second path, and borrowers never close the shared handle (ADR-0140). Pure readers never create the database as a side effect. Process liveness (the PID + start-time predicate) is a policy the store receives at open, not a closure callers pass per operation.
