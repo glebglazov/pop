@@ -143,9 +143,9 @@ func TestWorkBulkMuteAsksOnceForTheWholeSet(t *testing.T) {
 	m = bulkPress(t, m, selKeyRune('a'))
 	m = bulkPress(t, m, selKeyRune('m'))
 
-	lines := strings.Join(dashboardMuteMenuLines(m.menu.mute, m.menu.pluralCount(), 120), "\n")
-	if !strings.Contains(ui.StripANSI(lines), "mute (3 rows)") {
-		t.Fatalf("mute submenu = %q, want a title naming the whole set", ui.StripANSI(lines))
+	lines := strings.Join(dashboardMuteMenuLines(m.menu.mute, 120), "\n")
+	if !strings.Contains(ui.StripANSI(lines), "mute") || strings.Contains(ui.StripANSI(lines), "mute (") {
+		t.Fatalf("mute submenu = %q, want a title without a row count", ui.StripANSI(lines))
 	}
 
 	m = bulkPress(t, m, selKeyRune('3'))

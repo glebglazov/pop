@@ -215,9 +215,9 @@ func TestWorkBulkMenuListsOnlyWhatEveryRowOffers(t *testing.T) {
 	if m.menu == nil || !m.menu.plural {
 		t.Fatal("`a` did not open the plural action menu")
 	}
-	want := []string{"status ▸ (2 rows)", "copy name (2 rows)"}
+	want := []string{"status ▸", "copy name"}
 	if got := menuLabels(m); !slices.Equal(got, want) {
-		t.Fatalf("menu = %v, want %v — the intersection, each item naming its count", got, want)
+		t.Fatalf("menu = %v, want %v — the intersection, each item its verb label", got, want)
 	}
 	// mute is plural but only one kind offers it; archive is offered by one kind
 	// only; shell is offered by one and is singular anyway.
@@ -228,10 +228,10 @@ func TestWorkBulkMenuListsOnlyWhatEveryRowOffers(t *testing.T) {
 			}
 		}
 	}
-	// The title carries the count too, for the reader who never looks at an item.
+	// The title is the same dimmed caption the singular menu uses.
 	lines := ui.StripANSI(strings.Join(dashboardMenuLines(m.menu, 200, livePaneCache{}), "\n"))
-	if !strings.Contains(lines, "actions (2 rows)") {
-		t.Fatalf("menu title does not name its targets:\n%s", lines)
+	if !strings.Contains(lines, "actions") || strings.Contains(lines, "actions (") {
+		t.Fatalf("menu title repeats the count:\n%s", lines)
 	}
 }
 
@@ -272,13 +272,13 @@ func TestWorkBulkStatusSubmenuIntersects(t *testing.T) {
 	if m.menu == nil || m.menu.status == nil {
 		t.Fatal("`s` did not open the status submenu over the Selection")
 	}
-	want := []string{"complete (2 rows)", "open (2 rows)"}
+	want := []string{"complete", "open"}
 	if got := menuLabels(m); !slices.Equal(got, want) {
 		t.Fatalf("submenu = %v, want %v", got, want)
 	}
 	lines := ui.StripANSI(strings.Join(dashboardMenuLines(m.menu, 200, livePaneCache{}), "\n"))
-	if !strings.Contains(lines, "status (2 rows)") {
-		t.Fatalf("submenu title does not name its targets:\n%s", lines)
+	if !strings.Contains(lines, "status") || strings.Contains(lines, "status (") {
+		t.Fatalf("submenu title repeats the count:\n%s", lines)
 	}
 
 	// A Map and a task set both offer the opener and neither shares a status word
@@ -593,10 +593,10 @@ func TestWorkBulkMenuKeepsTheSelectionSignals(t *testing.T) {
 	if !strings.Contains(after, "set-c") || !strings.Contains(after, "set-d") {
 		t.Fatalf("the unmarked rows are not below the separator:\n%s", view)
 	}
-	if !strings.Contains(before, "actions (2 rows)") {
+	if !strings.Contains(before, "actions") || strings.Contains(before, "actions (") {
 		t.Fatalf("the menu is not above the separator:\n%s", view)
 	}
-	if strings.Contains(after, "actions (2 rows)") {
+	if strings.Contains(after, "actions") {
 		t.Fatalf("the menu leaked below the separator:\n%s", view)
 	}
 
@@ -630,12 +630,12 @@ func TestWorkBulkMenuSitsAtTheFootOfTheRegion(t *testing.T) {
 	view, separator := selectionSignals(t, m, 2)
 	cut := strings.Index(view, separator)
 	before := view[:cut]
-	if !strings.Contains(before, "actions (2 rows)") {
+	if !strings.Contains(before, "actions") || strings.Contains(before, "actions (") {
 		t.Fatalf("cursor on set-d moved the menu out of the region:\n%s", view)
 	}
 	// Menu follows the last marked row (set-b), not the cursored one.
 	lastMarked := strings.LastIndex(before, "set-b")
-	menuAt := strings.Index(before, "actions (2 rows)")
+	menuAt := strings.Index(before, "actions")
 	if lastMarked < 0 || menuAt < 0 || menuAt < lastMarked {
 		t.Fatalf("menu is not after the last marked row:\n%s", before)
 	}
@@ -737,7 +737,7 @@ func TestWorkBulkMenuKeepsTheSelectionSignalsInTwoLineMode(t *testing.T) {
 	if !strings.Contains(after, "set-c") {
 		t.Fatalf("the unmarked row is not below the separator:\n%s", view)
 	}
-	if !strings.Contains(before, "actions (2 rows)") {
+	if !strings.Contains(before, "actions") || strings.Contains(before, "actions (") {
 		t.Fatalf("the menu is not above the separator in two-line mode:\n%s", view)
 	}
 	if rowCursorOn(view) {

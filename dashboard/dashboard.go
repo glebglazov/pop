@@ -4206,18 +4206,12 @@ func dashboardMenuLines(menu *dashboardMenu, width int, live livePaneCache) []st
 		return nil
 	}
 	if menu.status != nil {
-		return dashboardStatusMenuLines(menu.status, menu.pluralCount(), width)
+		return dashboardStatusMenuLines(menu.status, width)
 	}
 	if menu.mute != nil {
-		return dashboardMuteMenuLines(menu.mute, menu.pluralCount(), width)
+		return dashboardMuteMenuLines(menu.mute, width)
 	}
-	title := "actions"
-	if menu.plural {
-		// The title states the count once and every item repeats it, because the
-		// item is what a hotkey fires: a human who typed `x` never read the title.
-		title = fmt.Sprintf("actions (%s)", bulkCount(len(menu.targets)))
-	}
-	lines := []string{ui.TruncateString("    "+ui.HintStyle.Render(title), width)}
+	lines := []string{ui.TruncateString("    "+ui.HintStyle.Render("actions"), width)}
 	cursor := menu.list.Cursor()
 	for i, item := range menu.list.Items() {
 		marker := "  "
@@ -4231,19 +4225,12 @@ func dashboardMenuLines(menu *dashboardMenu, width int, live livePaneCache) []st
 	return lines
 }
 
-// dashboardStatusMenuLines renders the nested status submenu. targets is how
-// many rows a pick will write, zero for the singular menu — the same count the
-// action menu above it carries, restated because a submenu is where the write
-// actually happens.
-func dashboardStatusMenuLines(status *dashboardStatusMenu, targets, width int) []string {
+// dashboardStatusMenuLines renders the nested status submenu.
+func dashboardStatusMenuLines(status *dashboardStatusMenu, width int) []string {
 	if status == nil {
 		return nil
 	}
-	title := "status"
-	if targets > 0 {
-		title = fmt.Sprintf("status (%s)", bulkCount(targets))
-	}
-	lines := []string{ui.TruncateString("    "+ui.HintStyle.Render(title), width)}
+	lines := []string{ui.TruncateString("    "+ui.HintStyle.Render("status"), width)}
 	cursor := status.list.Cursor()
 	for i, item := range status.list.Items() {
 		marker := "  "
@@ -4259,15 +4246,11 @@ func dashboardStatusMenuLines(status *dashboardStatusMenu, targets, width int) [
 // dashboardMuteMenuLines renders the nested mute submenu: six numbered windows,
 // then one dimmed footer stating the hour they all land at. The footer is why no
 // entry carries the hour itself.
-func dashboardMuteMenuLines(mute *dashboardMuteMenu, targets, width int) []string {
+func dashboardMuteMenuLines(mute *dashboardMuteMenu, width int) []string {
 	if mute == nil {
 		return nil
 	}
-	title := "mute"
-	if targets > 0 {
-		title = fmt.Sprintf("mute (%s)", bulkCount(targets))
-	}
-	lines := []string{ui.TruncateString("    "+ui.HintStyle.Render(title), width)}
+	lines := []string{ui.TruncateString("    "+ui.HintStyle.Render("mute"), width)}
 	cursor := mute.list.Cursor()
 	for i, window := range mute.list.Items() {
 		marker := "  "

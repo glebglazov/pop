@@ -94,12 +94,11 @@ func offersPlural(rows []DashboardRow, list func(DashboardRow) []work.Action, ve
 }
 
 // bulkCount is how the plural surface names its target set, in the one phrasing
-// the menu titles, the item labels, the prompt and the flash all use.
+// the prompt and the flash use.
 func bulkCount(n int) string { return work.CountPhrase(n, "row", "rows") }
 
 // bulkLabel names what a verb is about to do to how many rows — the prompt's
-// question and the menu item's label are the same sentence, so the human reads
-// the count twice before answering.
+// question.
 func bulkLabel(verb work.Verb, n int) string {
 	return fmt.Sprintf("%s %s", verb, bulkCount(n))
 }
@@ -153,9 +152,9 @@ func (m *QueueDashboard) refuseInterceptedVerb(verb work.Verb) bool {
 }
 
 // selectionMenuItems is the action menu over a Selection: the intersected verbs,
-// each labelled with the number of rows it will act on. Reserved keys are
-// dropped exactly as they are for one row (ADR-0196), so no kind can claim a
-// movement key by going plural.
+// each labelled with the verb's own label. Reserved keys are dropped exactly as
+// they are for one row (ADR-0196), so no kind can claim a movement key by going
+// plural.
 func (m QueueDashboard) selectionMenuItems(rows []DashboardRow) []dashboardMenuItem {
 	actions := pluralActions(rows, m.kinds.actionsFor)
 	items := make([]dashboardMenuItem, 0, len(actions))
@@ -165,7 +164,7 @@ func (m QueueDashboard) selectionMenuItems(rows []DashboardRow) []dashboardMenuI
 		}
 		items = append(items, dashboardMenuItem{
 			key:   action.Key,
-			label: fmt.Sprintf("%s (%s)", action.Label, bulkCount(len(rows))),
+			label: action.Label,
 			verb:  action.Verb,
 		})
 	}
@@ -213,9 +212,6 @@ func (m QueueDashboard) invokeSelectionMenuItem(idx int) (tea.Model, tea.Cmd) {
 			m.menu = nil
 			m.flash.Set(fmt.Sprintf("no status verb applies to all %s", bulkCount(len(rows))))
 			return m, nil
-		}
-		for i, action := range actions {
-			actions[i].Label = fmt.Sprintf("%s (%s)", action.Label, bulkCount(len(rows)))
 		}
 		m.menu.status = &dashboardStatusMenu{
 			row:  m.menu.row,
