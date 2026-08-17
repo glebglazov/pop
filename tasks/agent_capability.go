@@ -134,6 +134,15 @@ func (c AgentActualModelCapability) validate(preset string) error {
 	}
 }
 
+// AgentRateKeyCapability is a preset's declared rule for mapping a model
+// identifier onto a Rate-table key (ADR-0218). Normalize may be nil: an
+// adapter with no rule produces rate-blind runs rather than a build or run
+// failure. This is not a stream-shape capability — it transforms a model
+// string and needs no captured-stream fixture (ADR-0165).
+type AgentRateKeyCapability struct {
+	Normalize func(model string) string
+}
+
 // AgentStreamRenderCapability is a preset's declared stance on rendering a
 // Captured run's events into a readable stream replay (ADR-0165).
 type AgentStreamRenderCapability struct {

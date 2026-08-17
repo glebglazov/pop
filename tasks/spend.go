@@ -68,8 +68,8 @@ type SpendRollupRow struct {
 	// run carries a readable start time (ADR-0218).
 	LastRunAt time.Time
 	// Notional is the dollar annotation for this row: pi's measured PartialCost
-	// where present, else a Rate-table estimate for Claude runs. HasCost false
-	// is rate-blind — absent, never zero (ADR-0218).
+	// where present, else a Rate-table estimate via the adapter's rate-key rule.
+	// HasCost false is rate-blind — absent, never zero (ADR-0218).
 	Notional PartialCost
 }
 

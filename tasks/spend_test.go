@@ -609,9 +609,11 @@ func formatSpendSetID(n int) string {
 }
 
 type spendRunOpts struct {
-	phase   string
-	attempt int
-	outcome string
+	phase          string
+	attempt        int
+	outcome        string
+	requestedAgent string
+	model          string
 }
 
 func writeSpendRunEx(t *testing.T, taskSetDir, taskFile, taskID, agent string, start time.Time, events []streamEventRecord, opts spendRunOpts) {
@@ -631,16 +633,18 @@ func writeSpendRunEx(t *testing.T, taskSetDir, taskFile, taskID, agent string, s
 	}
 	runID := uuid.New().String()
 	meta := capturedRunMeta{
-		RunID:     runID,
-		Phase:     opts.phase,
-		TaskSetID: filepath.Base(taskSetDir),
-		TaskID:    taskID,
-		TaskFile:  taskFile,
-		StartTime: start.UTC(),
-		EndTime:   start.Add(time.Minute).UTC(),
-		Outcome:   opts.outcome,
-		Agent:     agent,
-		Attempt:   opts.attempt,
+		RunID:          runID,
+		Phase:          opts.phase,
+		TaskSetID:      filepath.Base(taskSetDir),
+		TaskID:         taskID,
+		TaskFile:       taskFile,
+		StartTime:      start.UTC(),
+		EndTime:        start.Add(time.Minute).UTC(),
+		Outcome:        opts.outcome,
+		Agent:          agent,
+		RequestedAgent: opts.requestedAgent,
+		Model:          opts.model,
+		Attempt:        opts.attempt,
 	}
 	metaData, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {

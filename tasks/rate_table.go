@@ -321,34 +321,18 @@ func notionalCostFromRates(u TokenUsage, rates ModelRates) PartialCost {
 	return PartialCost{Dollars: dollars, HasCost: true}
 }
 
-// claudeRateKey maps Claude's reported Actual model onto an OpenRouter id.
-// Claude streams emit bare Anthropic names (e.g. claude-opus-5); the table is
-// keyed with the anthropic/ vendor prefix. Other adapters wait for their
-// normalisation rules (ADR-0218 slice 04).
-func claudeRateKey(actualModel string) string {
-	if actualModel == "" {
-		return ""
-	}
-	for i := 0; i < len(actualModel); i++ {
-		if actualModel[i] == '/' {
-			return actualModel
-		}
-	}
-	return "anthropic/" + actualModel
-}
-
 // priceRunSpend resolves the dollar annotation for one Captured run: pi's
-// measured PartialCost outranks a table estimate; this slice estimates Claude
-// runs only; everything else is rate-blind (ADR-0218).
+// measured PartialCost outranks a table estimate; otherwise the adapter's
+// declared rate-key rule prices the run (ADR-0218).
 func priceRunSpend(run capturedRun, spend RunSpend, table *RateTable) PartialCost {
 	if spend.Cost.HasCost {
 		return spend.Cost
 	}
-	if run.meta.Agent != "claude" {
+	resolved := resolveRunRateKey(run, table)
+	if resolved.Key == "" {
 		return PartialCost{}
 	}
-	key := claudeRateKey(extractActualModel(run.meta.Agent, run.events))
-	rates, ok := table.lookup(key)
+	rates, ok := table.lookup(resolved.Key)
 	if !ok {
 		return PartialCost{}
 	}

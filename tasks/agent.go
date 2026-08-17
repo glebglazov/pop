@@ -196,6 +196,7 @@ type AgentAdapter interface {
 	CostCapability() AgentCostCapability
 	ToolTimingCapability() AgentToolTimingCapability
 	ActualModelCapability() AgentActualModelCapability
+	RateKeyCapability() AgentRateKeyCapability
 	StreamRenderCapability() AgentStreamRenderCapability
 	TurnCapability() AgentTurnCapability
 	PeakInputCapability() AgentPeakInputCapability
@@ -240,6 +241,7 @@ var agentAdapters = map[string]AgentAdapter{
 		cost:        AgentCostCapability{Kind: CapabilitySupported, Extract: claudePartialCost},
 		toolTimings: AgentToolTimingCapability{Kind: CapabilitySupported, Extract: claudeToolTimings},
 		actualModel: AgentActualModelCapability{Kind: CapabilitySupported, Extract: claudeActualModel},
+		rateKey:     AgentRateKeyCapability{Normalize: claudeRateKey},
 		streamRender: AgentStreamRenderCapability{Kind: CapabilitySupported, Render: renderClaudeEvent},
 		turns:        AgentTurnCapability{Kind: CapabilitySupported, Extract: claudeTurnCount},
 		peakInput:    AgentPeakInputCapability{Kind: CapabilitySupported, Extract: claudePeakInput},
@@ -314,6 +316,7 @@ var agentAdapters = map[string]AgentAdapter{
 		cost:                   AgentCostCapability{Kind: CapabilityBlind, Reason: "cursor reports token usage but no dollar cost"},
 		toolTimings:            AgentToolTimingCapability{Kind: CapabilitySupported, Extract: cursorToolTimings},
 		actualModel:            AgentActualModelCapability{Kind: CapabilitySupported, Extract: cursorActualModel},
+		rateKey:                AgentRateKeyCapability{Normalize: cursorRateKey},
 		streamRender:           AgentStreamRenderCapability{Kind: CapabilitySupported, Render: renderCursorEvent},
 		turns:                  AgentTurnCapability{Kind: CapabilitySupported, Extract: cursorTurnCount},
 		peakInput:              AgentPeakInputCapability{Kind: CapabilityBlind, Reason: "cursor reports token usage only as a whole-run total on result"},
@@ -353,6 +356,7 @@ var agentAdapters = map[string]AgentAdapter{
 		cost:                   AgentCostCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no dollar cost"},
 		toolTimings:            AgentToolTimingCapability{Kind: CapabilitySupported, Extract: codexToolTimings},
 		actualModel:            AgentActualModelCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no actual-model init event"},
+		rateKey:                AgentRateKeyCapability{Normalize: codexRateKey},
 		streamRender:           AgentStreamRenderCapability{Kind: CapabilitySupported, Render: renderCodexEvent},
 		turns:                  AgentTurnCapability{Kind: CapabilitySupported, Extract: codexTurnCount},
 		peakInput:              AgentPeakInputCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no per-call usage block"},
@@ -391,6 +395,7 @@ var agentAdapters = map[string]AgentAdapter{
 		cost:           AgentCostCapability{Kind: CapabilitySupported, Extract: piPartialCost},
 		toolTimings:    AgentToolTimingCapability{Kind: CapabilitySupported, Extract: piToolTimings},
 		actualModel:    AgentActualModelCapability{Kind: CapabilitySupported, Extract: piActualModel},
+		rateKey:        AgentRateKeyCapability{Normalize: piRateKey},
 		streamRender:   AgentStreamRenderCapability{Kind: CapabilitySupported, Render: renderPiEvent},
 		turns:          AgentTurnCapability{Kind: CapabilitySupported, Extract: piTurnCount},
 		peakInput:      AgentPeakInputCapability{Kind: CapabilitySupported, Extract: piPeakInput},
@@ -480,6 +485,7 @@ type presetAgentSpec struct {
 	cost            AgentCostCapability
 	toolTimings     AgentToolTimingCapability
 	actualModel     AgentActualModelCapability
+	rateKey         AgentRateKeyCapability
 	streamRender    AgentStreamRenderCapability
 	turns           AgentTurnCapability
 	peakInput       AgentPeakInputCapability
@@ -677,6 +683,10 @@ func (a *presetAgentAdapter) ActualModelCapability() AgentActualModelCapability 
 	return a.actualModel
 }
 
+func (a *presetAgentAdapter) RateKeyCapability() AgentRateKeyCapability {
+	return a.rateKey
+}
+
 func (a *presetAgentAdapter) StreamRenderCapability() AgentStreamRenderCapability {
 	return a.streamRender
 }
@@ -796,6 +806,10 @@ func (a customAgentAdapter) ToolTimingCapability() AgentToolTimingCapability {
 
 func (a customAgentAdapter) ActualModelCapability() AgentActualModelCapability {
 	return AgentActualModelCapability{Kind: CapabilityBlind, Reason: "custom agent commands produce no structured stream"}
+}
+
+func (a customAgentAdapter) RateKeyCapability() AgentRateKeyCapability {
+	return AgentRateKeyCapability{}
 }
 
 func (a customAgentAdapter) StreamRenderCapability() AgentStreamRenderCapability {
