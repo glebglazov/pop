@@ -114,12 +114,11 @@ type dashboardUnparkMsg struct {
 	err   error
 }
 
-// dashboardItemTextMsg carries one Work item's text back to the detail peek.
-type dashboardItemTextMsg struct {
-	itemID string
-	path   string
-	text   string
-	err    error
+// dashboardDocumentTextMsg carries one document's text back to the Document peek.
+type dashboardDocumentTextMsg struct {
+	path string
+	text string
+	err  error
 }
 type dashboardBindListMsg struct {
 	row     DashboardRow
@@ -498,7 +497,7 @@ func (m QueueDashboard) activeViewPreset() config.WorkViewPreset {
 }
 
 // itemMenu is the action overlay opened with `a` over a single Work item — in
-// the detail view (over the cursored item) or the item text peek (over the
+// the detail view (over the cursored item) or the Document peek (over the
 // previewed one). Its verbs are the owning kind's ItemActions, asked for when the
 // menu opens rather than carried on the item, so eligibility is as fresh as the
 // keypress (ADR-0173). inPeek marks which view it was opened from so the renderer
@@ -531,7 +530,7 @@ type detailView struct {
 	row  work.Container
 	list *ui.List[work.Item]
 	cols *detailColumns
-	peek *itemTextPeek
+	peek *documentPeek
 	// flash is the detail view's transient feedback: a hint on an invalid
 	// transition, a confirmation on success. It takes the hint line for three
 	// seconds and expires itself (ADR-0204).
@@ -594,8 +593,14 @@ func (d *detailView) itemByID(id string) (work.Item, bool) {
 	return work.Item{}, false
 }
 
-type itemTextPeek struct {
+// documentPeek is the Document peek (ADR-0217): a read-only nested view over any
+// absolute file path a detail row carries — a task's markdown, a Routine's last
+// report. Title and path are set at open time, so opening needs no item; itemID
+// is populated only when an item backs the row, letting the peek's own verb
+// dispatch (`a`, `y`) look that item back up.
+type documentPeek struct {
 	itemID  string
+	title   string
 	path    string
 	text    string
 	loading bool
@@ -1337,12 +1342,11 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.applyKindVerb(msg)
 	case dashboardBulkVerbMsg:
 		return m.applyBulkVerb(msg)
-	case dashboardItemTextMsg:
+	case dashboardDocumentTextMsg:
 		if m.detail == nil || m.detail.peek == nil {
 			return m, nil
 		}
 		m.detail.peek.loading = false
-		m.detail.peek.itemID = msg.itemID
 		m.detail.peek.path = msg.path
 		m.detail.peek.text = msg.text
 		m.detail.peek.err = msg.err
@@ -1772,15 +1776,15 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "ctrl+c":
 			return m, tea.Quit
 		case "j", "down":
-			m.moveItemTextPeek(1)
+			m.moveDocumentPeek(1)
 		case "k", "up":
-			m.moveItemTextPeek(-1)
+			m.moveDocumentPeek(-1)
 		case "ctrl+d":
-			m.moveItemTextPeek(halfPageDelta(m.itemTextPeekPageSize()))
+			m.moveDocumentPeek(halfPageDelta(m.documentPeekPageSize()))
 		case "ctrl+u":
-			m.moveItemTextPeek(-halfPageDelta(m.itemTextPeekPageSize()))
+			m.moveDocumentPeek(-halfPageDelta(m.documentPeekPageSize()))
 		case "G":
-			m.detail.peek.scroll = m.maxItemTextPeekScroll()
+			m.detail.peek.scroll = m.maxDocumentPeekScroll()
 		case "a":
 			item, ok := m.detail.itemByID(m.detail.peek.itemID)
 			if !ok {
@@ -1862,7 +1866,7 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !ok {
 			return m, nil
 		}
-		m.detail.peek = &itemTextPeek{itemID: item.ID, loading: true}
+		m.detail.peek = &documentPeek{itemID: item.ID, title: m.detail.row.ID + " / " + item.ID, loading: true}
 		return m, m.loadItemText(item)
 	case "a":
 		if m.detail == nil {
@@ -2213,7 +2217,7 @@ func (m QueueDashboard) modeWord() string {
 	return ui.SelectionMode
 }
 
-func (m QueueDashboard) moveItemTextPeek(delta int) {
+func (m QueueDashboard) moveDocumentPeek(delta int) {
 	if m.detail == nil || m.detail.peek == nil || delta == 0 {
 		return
 	}
@@ -2221,28 +2225,28 @@ func (m QueueDashboard) moveItemTextPeek(delta int) {
 	if m.detail.peek.scroll < 0 {
 		m.detail.peek.scroll = 0
 	}
-	if maxScroll := m.maxItemTextPeekScroll(); m.detail.peek.scroll > maxScroll {
+	if maxScroll := m.maxDocumentPeekScroll(); m.detail.peek.scroll > maxScroll {
 		m.detail.peek.scroll = maxScroll
 	}
 }
 
-func (m QueueDashboard) maxItemTextPeekScroll() int {
+func (m QueueDashboard) maxDocumentPeekScroll() int {
 	if m.detail == nil || m.detail.peek == nil {
 		return 0
 	}
-	lines := itemTextPeekLines(m.detail.peek.text)
-	maxScroll := len(lines) - m.itemTextPeekPageSize()
+	lines := documentPeekLines(m.detail.peek.text)
+	maxScroll := len(lines) - m.documentPeekPageSize()
 	if maxScroll < 0 {
 		return 0
 	}
 	return maxScroll
 }
 
-func (m QueueDashboard) itemTextPeekPageSize() int {
+func (m QueueDashboard) documentPeekPageSize() int {
 	if m.detail == nil || m.detail.peek == nil {
 		return 1
 	}
-	return itemTextPeekPageSize(m.height, m.detail.peek.path)
+	return documentPeekPageSize(m.height, m.detail.peek.path)
 }
 
 // filterDashboardRows returns rows whose Project or id contain query as a
@@ -2638,13 +2642,13 @@ func dashboardRowStorageDir(row DashboardRow) string {
 	return ""
 }
 
-// loadItemText reads one Work item's text for the peek. The path is the item's
-// own — every kind resolves it when it builds the item, so the peek needs no
-// directory of the kind's to join against.
+// loadItemText reads one Work item's text for the Document peek. The path is the
+// item's own — every kind resolves it when it builds the item, so the peek needs
+// no directory of the kind's to join against.
 func (m QueueDashboard) loadItemText(item work.Item) tea.Cmd {
 	return func() tea.Msg {
 		if strings.TrimSpace(item.File) == "" {
-			return dashboardItemTextMsg{itemID: item.ID, err: fmt.Errorf("%s has no file to preview", item.ID)}
+			return dashboardDocumentTextMsg{err: fmt.Errorf("%s has no file to preview", item.ID)}
 		}
 		d := m.d
 		if d == nil {
@@ -2655,9 +2659,9 @@ func (m QueueDashboard) loadItemText(item work.Item) tea.Cmd {
 		}
 		data, err := d.Tasks.FS.ReadFile(item.File)
 		if err != nil {
-			return dashboardItemTextMsg{itemID: item.ID, path: item.File, err: err}
+			return dashboardDocumentTextMsg{path: item.File, err: err}
 		}
-		return dashboardItemTextMsg{itemID: item.ID, path: item.File, text: string(data)}
+		return dashboardDocumentTextMsg{path: item.File, text: string(data)}
 	}
 }
 
@@ -3308,14 +3312,14 @@ func dashboardSummary(kinds workKinds, rows []DashboardRow) string {
 	return strings.Join(kinds.summary(rows), " · ")
 }
 
-// viewDetail renders the full-screen container detail view. The item text peek
+// viewDetail renders the full-screen container detail view. The Document peek
 // (ADR-0079) and the item action-menu overlay keep their bespoke rendering; the
 // plain state composes through a Frame with the item list on ui.List.
 func (m QueueDashboard) viewDetail() string {
 	d := m.detail
 	if d.peek != nil {
 		var b strings.Builder
-		renderItemTextPeek(&b, d, m.height, m.width, m.itemMenu)
+		renderDocumentPeek(&b, d, m.height, m.width, m.itemMenu)
 		return b.String()
 	}
 	if m.itemMenu != nil {
@@ -3557,13 +3561,9 @@ func itemMenuLines(menu *itemMenu, width int) []string {
 	return lines
 }
 
-func renderItemTextPeek(b *strings.Builder, d *detailView, height, width int, menu *itemMenu) {
+func renderDocumentPeek(b *strings.Builder, d *detailView, height, width int, menu *itemMenu) {
 	p := d.peek
-	header := d.row.ID
-	if p.itemID != "" {
-		header += " / " + p.itemID
-	}
-	fmt.Fprintln(b, header)
+	fmt.Fprintln(b, p.title)
 	if menu != nil && menu.inPeek {
 		for _, ml := range itemMenuLines(menu, width) {
 			fmt.Fprintln(b, ml)
@@ -3585,8 +3585,8 @@ func renderItemTextPeek(b *strings.Builder, d *detailView, height, width int, me
 	if p.path != "" {
 		fmt.Fprintf(b, "  %s\n\n", p.path)
 	}
-	lines := itemTextPeekLines(p.text)
-	pageSize := itemTextPeekPageSize(height, p.path)
+	lines := documentPeekLines(p.text)
+	pageSize := documentPeekPageSize(height, p.path)
 	maxScroll := len(lines) - pageSize
 	if maxScroll < 0 {
 		maxScroll = 0
@@ -3620,7 +3620,7 @@ func renderItemTextPeek(b *strings.Builder, d *detailView, height, width int, me
 	writeDashboardFooter(b, height, dashboardFooterLine(p.flash, hint))
 }
 
-func itemTextPeekLines(text string) []string {
+func documentPeekLines(text string) []string {
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}
@@ -3631,7 +3631,7 @@ func itemTextPeekLines(text string) []string {
 	return lines
 }
 
-func itemTextPeekPageSize(height int, path string) int {
+func documentPeekPageSize(height int, path string) int {
 	if height <= 0 {
 		height = 20
 	}

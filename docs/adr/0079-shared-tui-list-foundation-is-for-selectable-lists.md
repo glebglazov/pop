@@ -30,7 +30,7 @@ overlays adopt `List` for their **item cursor only**.
 
 Two things are deliberately **kept bespoke and out of `List`**:
 
-- **The task text peek is a text pager, not a list.** It scrolls lines of a file
+- **The Document peek is a text pager, not a list.** It scrolls lines of a file
   with no selected item. `List[T]` always renders a cursor indicator on the
   selected row; a pager has none. It stays a hand-rolled scroller.
 - **Overlay placement stays bespoke.** Deciding whether an action menu renders

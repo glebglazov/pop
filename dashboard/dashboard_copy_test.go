@@ -242,11 +242,11 @@ func TestQueueDashboardCopyDetailTaskViaMenu(t *testing.T) {
 	}
 }
 
-// TestQueueDashboardCopyPeekTask covers the `y` verb inside the task text peek.
+// TestQueueDashboardCopyPeekTask covers the `y` verb inside the Document peek.
 func TestQueueDashboardCopyPeekTask(t *testing.T) {
 	task := tasks.Task{ID: "02-b", File: "02-b.md", Status: "open"}
 	m := detailCopyModel("set-peek", task)
-	m.detail.peek = &itemTextPeek{itemID: "02-b", text: "body\n"}
+	m.detail.peek = &documentPeek{itemID: "02-b", text: "body\n"}
 
 	var captured string
 	m.copyFunc = func(s string) error { captured = s; return nil }
@@ -272,7 +272,7 @@ func TestQueueDashboardCopyPeekTask(t *testing.T) {
 func TestQueueDashboardCopyPeekTaskViaMenu(t *testing.T) {
 	task := tasks.Task{ID: "02-b", File: "02-b.md", Status: "failed"}
 	m := detailCopyModel("set-peek-menu", task)
-	m.detail.peek = &itemTextPeek{itemID: "02-b", text: "body\n"}
+	m.detail.peek = &documentPeek{itemID: "02-b", text: "body\n"}
 
 	var captured string
 	m.copyFunc = func(s string) error { captured = s; return nil }
@@ -319,7 +319,7 @@ func TestQueueDashboardCopyMapDetailTicket(t *testing.T) {
 func TestQueueDashboardCopyMapPeekTicket(t *testing.T) {
 	m, _ := newMapDetailDashboard(t)
 	got := openMapDetail(t, m)
-	got.detail.peek = &itemTextPeek{itemID: "01", text: "ticket body\n"}
+	got.detail.peek = &documentPeek{itemID: "01", text: "ticket body\n"}
 
 	var captured string
 	got.copyFunc = func(s string) error { captured = s; return nil }

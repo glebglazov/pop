@@ -1201,12 +1201,12 @@ The interactive chooser the **Work dashboard** opens on `i` for an **unbound** *
 _Avoid_: checkout picker, drain wizard, runtime picker
 
 **Task set detail view**:
-The full-screen interactive drill-down entered with `l` or Enter from the **Work dashboard**, replacing the table until dismissed with `h`/left/`esc`. It lists the focused **Task set**'s tasks, supports Vim-style list movement including top and bottom (`gg`/`G`), opens a read-only **Task text peek** for the cursored task with `l` or Enter, and applies **Complete task** (`C`), **Open task** (`O`), or **Skip** (`K`) to the single cursored task without a separate confirmation.
+The full-screen interactive drill-down entered with `l` or Enter from the **Work dashboard**, replacing the table until dismissed with `h`/left/`esc`. It lists the focused **Task set**'s tasks, supports Vim-style list movement including top and bottom (`gg`/`G`), opens a read-only **Document peek** for the cursored task with `l` or Enter, and applies **Complete task** (`C`), **Open task** (`O`), or **Skip** (`K`) to the single cursored task without a separate confirmation.
 _Avoid_: status view, status modal, inspect modal, task editor
 
-**Task text peek**:
-A read-only nested view inside the **Task set detail view** that shows the full markdown text of the cursored task file from **Task storage**. It is opened with `l` or Enter from the task list, supports Vim-style scrolling (`j`/`k`, `ctrl-d`/`ctrl-u`, `gg`/`G`), and is dismissed with `h`/left/`esc`, returning to the same **Task set detail view** without changing task status.
-_Avoid_: task editor, task modal, preview pane
+**Document peek**:
+A read-only nested view over any absolute file path a detail row carries — a task's markdown, a **Routine**'s last report. It is opened with `l` or Enter, supports Vim-style scrolling (`j`/`k`, `ctrl-d`/`ctrl-u`, `gg`/`G`), and is dismissed with `h`/left/`esc` without changing anything. Renamed and widened from **Task text peek**, whose name claimed a task-only scope the implementation never had: the view reads whatever path the row hands it.
+_Avoid_: task text peek, task editor, task modal, preview pane
 
 **Execution-state store**:
 The machine-global SQLite database in pop's data dir holding every layer-2 execution fact — Drains, Worktree bindings, Verify verdicts, agent cooldowns, spawn intents, gate holds (ADR-0055/0118). Layer-1 Task set status stays manifest-derived on disk and is never stored here. A process holds exactly one lazily-opened cached handle, and every subsystem borrows that handle — nothing opens the database through a second path, and borrowers never close the shared handle (ADR-0140). Pure readers never create the database as a side effect. Process liveness (the PID + start-time predicate) is a policy the store receives at open, not a closure callers pass per operation.
@@ -1385,7 +1385,7 @@ The nested list of Task-set status verbs inside the Work dashboard's action menu
 _Avoid_: status menu, state menu, verbs menu
 
 **Copy-name verb**:
-The `y` verb on every **Work dashboard** level, copying the cursored row's identifier via **Clipboard copy** and always reporting a transient status confirmation. Payload follows the level: a bare **Task set identifier** on a task-set table row, the map id on a Wayfinder Map row, a **Task target reference** (`<task-set>/<file>.md`) in the **Task set detail view** and **Task text peek**, and a bare ticket id on a Map ticket. Bound both as a direct keypress and as an action-menu entry, so it is discoverable without being slow to reach.
+The `y` verb on every **Work dashboard** level, copying the cursored row's identifier via **Clipboard copy** and always reporting a transient status confirmation. Payload follows the level: a bare **Task set identifier** on a task-set table row, the map id on a Wayfinder Map row, a **Task target reference** (`<task-set>/<file>.md`) in the **Task set detail view** and **Document peek**, and a bare ticket id on a Map ticket. Bound both as a direct keypress and as an action-menu entry, so it is discoverable without being slow to reach.
 _Avoid_: yank verb, copy id, clipboard verb
 
 ### Routines

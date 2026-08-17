@@ -1602,7 +1602,7 @@ func TestDashboardDetailViewPeekTaskText(t *testing.T) {
 	}
 }
 
-func TestDashboardTaskTextPeekScrolls(t *testing.T) {
+func TestDashboardDocumentPeekScrolls(t *testing.T) {
 	m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{
 		{Project: "pop", CursorKey: "pop\x00set-scroll", RawStatus: tasks.StatusReady, ID: "set-scroll"},
 	}})
@@ -1610,7 +1610,7 @@ func TestDashboardTaskTextPeekScrolls(t *testing.T) {
 	m.width = 80
 	m.detail = &detailView{
 		row: m.snap.Containers[0],
-		peek: &itemTextPeek{
+		peek: &documentPeek{
 			itemID: "01-a",
 			path:   filepath.Join("/tasks", "set-scroll", "01-a.md"),
 			text:   "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\n",
@@ -3957,14 +3957,14 @@ func TestDetailViewActionsHintRendered(t *testing.T) {
 	}
 }
 
-// TestPeekTaskMenuOpensAndDispatches verifies `a` in the task text peek opens
+// TestPeekTaskMenuOpensAndDispatches verifies `a` in the Document peek opens
 // the task menu for the previewed task and dispatches a filtered verb.
 func TestPeekTaskMenuOpensAndDispatches(t *testing.T) {
 	row := DashboardRow{ID: "set-peek", DefPath: "/def"}
 	failedTask := tasks.Task{ID: "02-b", File: "02-b.md", Status: "failed"}
 	m, completeCalls, resetCalls, _ := detailOverrideModel(row, failedTask, nil, nil, nil)
 	// Open a peek over the previewed task.
-	m.detail.peek = &itemTextPeek{itemID: "02-b", text: "body\n"}
+	m.detail.peek = &documentPeek{itemID: "02-b", text: "body\n"}
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
@@ -4006,7 +4006,7 @@ func TestPeekTaskMenuRendersOverlay(t *testing.T) {
 	m, _, _, _ := detailOverrideModel(row, openTask, nil, nil, nil)
 	m.width = 120
 	m.height = 14
-	m.detail.peek = &itemTextPeek{itemID: "01-a", text: "body line\n"}
+	m.detail.peek = &documentPeek{itemID: "01-a", text: "body line\n"}
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
@@ -4024,7 +4024,7 @@ func TestPeekFormerKeysInertWithoutMenu(t *testing.T) {
 	row := DashboardRow{ID: "set-peek-inert", DefPath: "/def"}
 	openTask := tasks.Task{ID: "01-a", File: "01-a.md", Status: "open"}
 	m, completeCalls, _, skipCalls := detailOverrideModel(row, openTask, nil, nil, nil)
-	m.detail.peek = &itemTextPeek{itemID: "01-a", text: "body\n"}
+	m.detail.peek = &documentPeek{itemID: "01-a", text: "body\n"}
 
 	for _, key := range []rune{'c', 'o', 'k'} {
 		updated, cmd := m.Update(tea.KeyPressMsg{Code: key, Text: string(key)})
@@ -4255,7 +4255,7 @@ func TestQueueDashboardHelpOverlay(t *testing.T) {
 
 	t.Run("help works in peek mode", func(t *testing.T) {
 		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
-		m.detail = &detailView{peek: &itemTextPeek{}}
+		m.detail = &detailView{peek: &documentPeek{}}
 		updated, _ := m.Update(ctrlH)
 		got := updated.(QueueDashboard)
 		if !got.showHelp {
@@ -4401,7 +4401,7 @@ func TestQueueDashboardHelpContent(t *testing.T) {
 
 	t.Run("peek mode shows peek bindings", func(t *testing.T) {
 		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
-		m.detail = &detailView{peek: &itemTextPeek{}}
+		m.detail = &detailView{peek: &documentPeek{}}
 		entries := m.helpEntries()
 		found := map[string]bool{}
 		for _, e := range entries {
