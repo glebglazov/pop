@@ -790,13 +790,9 @@ func renderReviewPointerSection(d *Deps, out *output, m *Manifest) {
 		return
 	}
 	fmt.Fprintln(out)
-	out.line(ansiCyan, "CODE REVIEW")
-	fmt.Fprintf(out, "  %s\n", p.Path)
-	if phrase := p.CommitPhrase(); phrase != "" {
-		fmt.Fprintf(out, "  written against %s\n", phrase)
-	}
-	if p.Written != "" {
-		fmt.Fprintf(out, "  reviewed %s\n", p.Written)
+	out.line(ansiCyan, "%s", strings.ToUpper(ReviewSectionTitle))
+	for _, line := range strings.Split(p.Body(), "\n") {
+		fmt.Fprintf(out, "  %s\n", line)
 	}
 }
 

@@ -24,6 +24,18 @@ type ReviewPointer struct {
 	Written string
 }
 
+// ReviewSectionTitle heads the pointer wherever a surface renders it as a block
+// of its own. It is one constant so the CLI detail view and the dashboard's
+// Task-set detail section cannot drift into naming the same thing differently.
+const ReviewSectionTitle = "Code review"
+
+// LatestReviewPointer is latestReviewPointer for the Work kind: the Task-set
+// adapter lives outside this package, and the pointer it hands the dashboard
+// must be the one every other surface resolves, not a second derivation.
+func LatestReviewPointer(d *Deps, m *Manifest) (ReviewPointer, bool) {
+	return latestReviewPointer(d, m)
+}
+
 // latestReviewPointer resolves the pointer for a set, and false when the set has
 // never been reviewed — which is what makes "a set with no review shows nothing
 // extra" one condition rather than a rule each surface re-derives.
@@ -81,6 +93,22 @@ func (p ReviewPointer) CommitPhrase() string {
 	default:
 		return p.CommitRange
 	}
+}
+
+// Body is the pointer as a block, one fact per line: where the document is,
+// which commit it describes, and when it was written. It carries no heading of
+// its own — every surface that renders a block already has one — which is what
+// lets the CLI detail view and the dashboard's Task-set detail section print the
+// same facts without either owning the wording (ADR-0214).
+func (p ReviewPointer) Body() string {
+	lines := []string{p.Path}
+	if phrase := p.CommitPhrase(); phrase != "" {
+		lines = append(lines, "written against "+phrase)
+	}
+	if p.Written != "" {
+		lines = append(lines, "reviewed "+p.Written)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // Summary is the single line the gate preamble and the detail view share: the
