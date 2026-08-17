@@ -120,6 +120,12 @@ type MonitorDashboard struct {
 	// jumps to the top, and any other key disarms it.
 	pendingG bool
 
+	// selection is the human's mark on rows, keyed by pane id (ADR-0215). The
+	// dashboard's whole notion of selection mode is derived from it — the mode
+	// word, the reserved region and every verb's refusal read this one set, so
+	// there is no second flag that could disagree with the marks.
+	selection Selection
+
 	previewFunc      func(paneID string) string
 	reloadFunc       func() []AttentionPane
 	markClearFunc    func(paneID string)
@@ -392,7 +398,7 @@ func (d *MonitorDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key.Matches(msg, dashboardKeys.Top) {
 			if d.pendingG {
 				d.pendingG = false
-				d.jumpCursorTo(0)
+				d.jumpCursorTo(d.regionTop())
 			} else {
 				d.pendingG = true
 			}
@@ -402,7 +408,24 @@ func (d *MonitorDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch {
 		case key.Matches(msg, dashboardKeys.Bottom):
-			d.jumpCursorTo(len(d.panes) - 1)
+			d.jumpCursorTo(d.regionBottom())
+			return d, nil
+
+		case key.Matches(msg, dashboardKeys.ToggleSelect):
+			// Picker mode promises the caller it mutates nothing, and a Selection
+			// is the human marking the rows a verb is about to change.
+			if d.pickerMode || len(d.panes) == 0 {
+				return d, nil
+			}
+			d.toggleSelected()
+			return d, nil
+
+		case key.Matches(msg, dashboardKeys.ClearSelection):
+			if d.pickerMode || !d.selection.Active() {
+				return d, nil
+			}
+			d.selection.Clear()
+			d.rebuildView()
 			return d, nil
 
 		case key.Matches(msg, dashboardKeys.Back):
@@ -425,6 +448,9 @@ func (d *MonitorDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return d, tea.Quit
 
 		case key.Matches(msg, dashboardKeys.Enter):
+			if d.refuseSingular("open and clear") {
+				return d, nil
+			}
 			if len(d.panes) == 0 {
 				d.result = MonitorDashboardResult{Action: MonitorDashboardActionCancel}
 				return d, tea.Quit
@@ -438,6 +464,9 @@ func (d *MonitorDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, dashboardKeys.PeekPane):
 			if d.pickerMode {
+				return d, nil
+			}
+			if d.refuseSingular("peek") {
 				return d, nil
 			}
 			// "Peek" — open the pane without mutating its monitor state.
@@ -473,6 +502,9 @@ func (d *MonitorDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if d.pickerMode {
 				return d, nil
 			}
+			if d.refuseSingular("toggle unread") {
+				return d, nil
+			}
 			if len(d.panes) > 0 && d.markClearFunc != nil && d.markUnreadFunc != nil {
 				pane := &d.panes[d.cursor]
 				if pane.Status == AttentionVirtual {
@@ -502,6 +534,9 @@ func (d *MonitorDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if d.pickerMode {
 				return d, nil
 			}
+			if d.refuseSingular("mark unread") {
+				return d, nil
+			}
 			if len(d.panes) > 0 && d.markUnreadFunc != nil {
 				pane := &d.panes[d.cursor]
 				if pane.Status == AttentionVirtual {
@@ -523,6 +558,9 @@ func (d *MonitorDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, dashboardKeys.FollowPane):
 			if d.pickerMode {
+				return d, nil
+			}
+			if d.refuseSingular("follow") {
 				return d, nil
 			}
 			if len(d.panes) > 0 && d.toggleFollowFunc != nil {
@@ -559,6 +597,9 @@ func (d *MonitorDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if d.pickerMode {
 				return d, nil
 			}
+			if d.refuseSingular("unmonitor") {
+				return d, nil
+			}
 			if len(d.panes) > 0 && d.unmonitorFunc != nil {
 				pane := d.panes[d.cursor]
 				if pane.Status == AttentionVirtual {
@@ -592,6 +633,11 @@ func (d *MonitorDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Picker mode promises callers it mutates nothing, and destroying a
 			// pane is the largest mutation the view has.
 			if d.pickerMode {
+				return d, nil
+			}
+			// The kill goes plural in a later slice; until it does it says so
+			// rather than killing one of many marked panes.
+			if d.refuseSingular("kill") {
 				return d, nil
 			}
 			return d, d.startKillPane()
@@ -740,6 +786,7 @@ func (d *MonitorDashboard) sortPanes() {
 	sort.SliceStable(d.panes, func(i, j int) bool {
 		return attentionStatusOrder(d.panes[i].Status) < attentionStatusOrder(d.panes[j].Status)
 	})
+	d.liftSelected()
 	d.pinProtectedPane()
 	d.syncPanesToList()
 }
@@ -778,6 +825,94 @@ func (d *MonitorDashboard) jumpCursorTo(i int) {
 	d.list.SetCursor(i)
 	d.syncFromList()
 	d.fetchPreview()
+}
+
+// regionTop is where `gg` lands: the top of the region the cursor is in, and the
+// top of the whole list on a second press. A cursor already sitting on the first
+// row below the region has nowhere nearer to go, so it goes all the way.
+func (d *MonitorDashboard) regionTop() int {
+	region := d.list.RegionCount()
+	if region > 0 && d.cursor > region {
+		return region
+	}
+	return 0
+}
+
+// regionBottom is where `G` lands: the bottom of the region the cursor is in, and
+// the bottom of the whole list on a second press. For a cursor below the region
+// the two are the same row, so one press reaches it.
+func (d *MonitorDashboard) regionBottom() int {
+	region := d.list.RegionCount()
+	if region > 0 && d.cursor < region-1 {
+		return region - 1
+	}
+	return len(d.panes) - 1
+}
+
+// toggleSelected answers tab: it marks or unmarks the cursored pane and lands the
+// cursor on the row that followed it, which is the outcome tab guarantees
+// whichever way the row itself moved (ADR-0215 decision 8). The view is rebuilt
+// from the monitored set rather than reordered in place, so an unmarked row goes
+// back to its own sorted position instead of to the head of the rest.
+func (d *MonitorDashboard) toggleSelected() {
+	if d.cursor < 0 || d.cursor >= len(d.panes) {
+		return
+	}
+	next := ""
+	if d.cursor+1 < len(d.panes) {
+		next = d.panes[d.cursor+1].PaneID
+	}
+	d.selection.Toggle(d.panes[d.cursor].PaneID)
+	// A mark is the human ordering rows deliberately, so it releases a row an
+	// earlier in-place mutation anchored: both orderings cannot hold at once.
+	d.clearProtectedPane()
+	d.rebuildView()
+	if next == "" || !d.list.SetCursorToKey(next) {
+		// The marked row was last, so there is no next row: stay at the bottom,
+		// which is where the row the human just marked used to be.
+		d.list.SetCursor(len(d.panes) - 1)
+	}
+	d.syncFromList()
+	d.fetchPreview()
+}
+
+// liftSelected moves every marked pane to the top of the view and tells the list
+// how many rows its reserved region holds. It is the one place the Selection
+// area's ordering is applied, so the region is a property of the view rather than
+// of the key that made it.
+func (d *MonitorDashboard) liftSelected() {
+	// A pane that left the monitored set takes its mark with it, and says
+	// nothing: a row that no longer exists cannot be a target.
+	d.selection.Retain(d.monitored)
+	if !d.selection.Active() {
+		d.list.SetRegion(Region{})
+		return
+	}
+	marked, rest := SplitSelected(&d.selection, d.panes, func(p AttentionPane) string { return p.PaneID })
+	d.panes = append(marked, rest...)
+	d.list.SetRegion(SelectionRegion(d.selection.Len()))
+}
+
+// monitored reports whether a pane id is still in the monitored set.
+func (d *MonitorDashboard) monitored(paneID string) bool {
+	for _, pane := range d.allPanes {
+		if pane.PaneID == paneID {
+			return true
+		}
+	}
+	return false
+}
+
+// refuseSingular answers a verb that acts on one pane while rows are marked: it
+// does nothing and says so on the bottom line, because a key that goes silently
+// inert is indistinguishable from a bug (ADR-0215 decision 4). It reports whether
+// it refused, so a verb's handler declares itself singular in one line.
+func (d *MonitorDashboard) refuseSingular(verb string) bool {
+	if !d.selection.Active() {
+		return false
+	}
+	d.flash.Set(fmt.Sprintf("%s acts on one pane — shift+tab clears the %d selected", verb, d.selection.Len()))
+	return true
 }
 
 // protectSelectedPane anchors a row mutated in place until the user navigates
@@ -837,7 +972,10 @@ func (d *MonitorDashboard) rebuildView() {
 	if d.following {
 		filtered := make([]AttentionPane, 0)
 		for _, pane := range d.allPanes {
-			if pane.Following {
+			// A mark outranks the view filter: the human named this row, later
+			// than and at least as deliberately as the filter, so no pane is ever
+			// selected and invisible (ADR-0215 decision 2).
+			if pane.Following || d.selection.Has(pane.PaneID) {
 				filtered = append(filtered, pane)
 			}
 		}
@@ -846,6 +984,7 @@ func (d *MonitorDashboard) rebuildView() {
 		d.panes = make([]AttentionPane, len(d.allPanes))
 		copy(d.panes, d.allPanes)
 	}
+	d.liftSelected()
 
 	if d.pinProtectedPane() {
 		d.list.SetItems(d.panes)
@@ -894,7 +1033,18 @@ func (d *MonitorDashboard) frameSpec() Frame {
 		Warnings: d.warnings,
 		Hints:    d.buildHints(),
 		Flash:    d.flash,
+		Mode:     d.modeWord(),
 	}
+}
+
+// modeWord names the mode the surface is in, which today is selection mode and
+// nothing else. It is derived from the marks themselves, so it appears with the
+// first one and goes away with the last.
+func (d *MonitorDashboard) modeWord() string {
+	if !d.selection.Active() {
+		return ""
+	}
+	return SelectionMode
 }
 
 // buildHints returns the hints string based on the current mode.
@@ -904,7 +1054,12 @@ func (d *MonitorDashboard) buildHints() string {
 	if d.killPrompt != nil {
 		return "  Kill " + d.killPrompt.label + "? y/N"
 	}
-	hints := "  j/k move · Enter open and clear · Shift+Enter open · r toggle unread/clear · f follow · x unmonitor · C-x kill · F follow view · ← back · Esc cancel · C-h help"
+	hints := "  j/k move · Tab select · Enter open and clear · Shift+Enter open · r toggle unread/clear · f follow · x unmonitor · C-x kill · F follow view · ← back · Esc cancel · C-h help"
+	if d.selection.Active() {
+		// Only the keys that still do something in the mode, so the line does not
+		// advertise the verbs it is refusing.
+		hints = "  j/k move · Tab select · S-Tab clear · F follow view · ← back · Esc cancel · C-h help"
+	}
 	if d.pickerMode {
 		hints = "  j/k move · Enter select · F follow view · Esc cancel · C-h help"
 		switch d.quickAccessModifier {
@@ -1002,6 +1157,8 @@ func (d *MonitorDashboard) helpEntries() []HelpEntry {
 	return []HelpEntry{
 		{"↑/↓ j/k C-p/C-n", "Navigate"},
 		{"gg / G", "Top / bottom"},
+		{"Tab", "Select pane"},
+		{"Shift+Tab", "Clear selection"},
 		{"Enter", "Open and clear unread"},
 		{"Shift+Enter / p", "Peek (open without clearing)"},
 		{"r", "Toggle unread/clear"},
@@ -1147,6 +1304,12 @@ func (d *MonitorDashboard) viewDashboard() string {
 		} else {
 			b.WriteString("\x1b[0m")
 			b.WriteString(left)
+			// A pane row fills the column by itself; the Selection area's own
+			// lines are text of their own length, so the column separator is held
+			// straight here rather than in every line that could sit in the list.
+			if pad := leftWidth - lipgloss.Width(left); pad > 0 {
+				b.WriteString(strings.Repeat(" ", pad))
+			}
 		}
 		b.WriteString(sepStyle.Render("│"))
 		b.WriteString(rightContent)
@@ -1201,9 +1364,14 @@ type dashboardKeyMap struct {
 	MarkUnread        key.Binding
 	// Top is the second half of the `gg` chord, so it is read before the flat
 	// bindings and only jumps once a first `g` is already pending.
-	Top    key.Binding
-	Bottom key.Binding
-	KillPane          key.Binding
+	Top      key.Binding
+	Bottom   key.Binding
+	KillPane key.Binding
+	// ToggleSelect and ClearSelection are the Selection's whole grammar: tab
+	// marks the cursored pane, shift+tab drops every mark and thereby leaves
+	// selection mode (ADR-0215 decision 8).
+	ToggleSelect   key.Binding
+	ClearSelection key.Binding
 	// KillConfirm and KillCancel are the confirmation's own grammar, matching
 	// the Work dashboard's abandon modal. They are read only while the prompt is
 	// open, which is why they may reuse keys the dashboard binds elsewhere.
@@ -1253,6 +1421,12 @@ var dashboardKeys = dashboardKeyMap{
 	),
 	KillPane: key.NewBinding(
 		key.WithKeys("ctrl+x"),
+	),
+	ToggleSelect: key.NewBinding(
+		key.WithKeys("tab"),
+	),
+	ClearSelection: key.NewBinding(
+		key.WithKeys("shift+tab"),
 	),
 	KillConfirm: key.NewBinding(
 		key.WithKeys("y"),

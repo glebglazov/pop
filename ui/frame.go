@@ -40,19 +40,32 @@ type Frame struct {
 	// either way, so a message costs no layout shift.
 	Flash Flash
 	Hints string // "" = absent
+	// Mode is the word a true mode holds at the left of the bottom line, e.g.
+	// SelectionMode. It sits ahead of the flash as well as the hints, because a
+	// mode outlives any one message and a verb's refusal is exactly the moment
+	// the human most needs to see which mode they are in (ADR-0215 decision 4).
+	Mode string // "" = no mode
 }
+
+// modeWordStyle paints a mode word in the house accent, the same weight as a
+// header: the bottom line's other tenants are dim or accent-plain, so the mode
+// reads as chrome that is on rather than as a message.
+var modeWordStyle = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 
 // bottomLine is the rendered bottom line: the live flash when there is one,
 // otherwise the hints, and "" when the view has neither. One accessor so the
 // budget and the paint cannot disagree about whether that line is present.
 func (f Frame) bottomLine() string {
+	rest := ""
 	if line := f.Flash.Line(); line != "" {
-		return line
+		rest = line
+	} else if f.Hints != "" {
+		rest = hintStyle.Render(f.Hints)
 	}
-	if f.Hints == "" {
-		return ""
+	if f.Mode == "" {
+		return rest
 	}
-	return hintStyle.Render(f.Hints)
+	return modeWordStyle.Render("  "+f.Mode) + rest
 }
 
 // frameClipLine is the last Block row when the pane cannot hold the full list.
