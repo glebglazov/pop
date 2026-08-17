@@ -1,0 +1,25 @@
+---
+fragment: 2ACC8F22
+generation: 0022
+branch: master
+---
+
+~ Spend lens
+  The `pop tasks spend [TASK_SET]` command — the read-only lens over **Run spend**, and the second lens over the same substrate as **Attempt stream replay**. Bare, it rolls up recent **Task set**s of the current repository, one row each; `--all` widens the same rollup across every repository registered on this machine, adding a Project column. Rows carry the four token components, **Turn**, **Peak input**, the set's dominant model with a mix marker, and a spend cell reading `tokens (~$notional)` — tokens are the unit of record and the parenthesised **Notional cost** is an annotation, so a **Rate-blind run**'s row still ranks on tokens. `--sort` takes `recency|tokens|cost`, default `recency`, an unrecognised value refused with the list; recency is every sort's tie-break and means the set's latest **Captured run** start time, never the identifier's lexical order. Rate-blind rows sort last under `--sort cost` as a named block. With a `TASK_SET` it breaks that set down per task in the same cell format, listing verification runs as their own rows, and takes no `--sort`. `--json` emits the same data machine-readably, with `project` and `last_run_at` always present and cost as separate `notional_cost_usd`/`rate_source`/`model_key` fields rather than a formatted string. The headline metric is **tokens per completed task**: every implement attempt charges to its task, including failed and retried ones, so retry waste stays visible instead of averaged away; verify runs have no task and charge to the set. It captures nothing and never mutates its inputs.
+  was: The `pop tasks spend [TASK_SET]` command — the read-only cross-set lens over **Run spend**, and the second lens over the same substrate as **Attempt stream replay**. Bare, it rolls up the ten most recent **Task set**s, one row each, sorted by total tokens; with a `TASK_SET` it breaks that set down per task, listing verification runs as their own rows. `--json` emits the same data machine-readably. The headline metric is **tokens per completed task**: every implement attempt charges to its task, including failed and retried ones, so retry waste stays visible instead of averaged away; verify runs have no task and charge to the set. It captures nothing and never mutates.
+  avoid: tokens command, usage report, cost report, rollup, price sort
+
++ Notional cost
+  What a **Captured run**'s tokens would have cost at published API list price, derived at read time by applying the **Rate table** to the run's **Actual model** — falling back to the model named in its **Requested agent** when the adapter is actual-model-blind, and never guessed beyond that. It is not money spent: pop drives subscription CLIs, so the marginal cost of those tokens is usually zero, and the name carries that caveat rather than a footnote. Always rendered with `~` and parenthesised behind the token figure it annotates, never summed into a figure that reads as a bill. Distinct from the measured `cost` half of **Run spend** — pi's reported `cost.total` — which is real money and outranks an estimate wherever both exist.
+  avoid: price, cost estimate, dollar spend, actual cost
+  under: Spend
+
++ Rate table
+  The per-model price list the **Spend lens** applies to produce a **Notional cost**: four rates per model — prompt, completion, cache-read and cache-write — trimmed from OpenRouter's public models endpoint, which needs no authentication. A snapshot ships vendored with the binary and covers every model, not only the ones the current **Effort ladder**s name, so adopting a model does not silently make it rate-blind. `spend` refreshes it into `<data>/pop/` when the cached copy is over a day old, with a 3s timeout and a silent fall back to the vendored snapshot; the footer prints the snapshot's date so a stale or fallback table states its own age. A model publishing no cache-write rate is priced at its prompt rate, which is how those providers bill rather than an assumption. Per-request long-context rate overrides are ignored — applying a per-request tier to an aggregate is a fiction — so a long-context figure is a bounded understatement. A human may declare an override rate for a model the table cannot cover, rendered distinctly from a published rate.
+  avoid: pricing table, cost map, price list
+  under: Spend
+
++ Rate-blind run
+  A **Captured run** whose model resolves to no **Rate table** entry and no declared override, so its **Notional cost** is absent rather than zero — the cost sibling of **Token-blind run** and **Turn-blind run**. Its tokens are still known and still rank, and its spend cell reads `— ` where the parenthesised figure would sit, with the count carried in the footer behind every total it stands inside. Under `--sort cost` rate-blind rows form a named trailing block, so an unpriceable model can never rank as the cheapest thing in a list. Cursor's `composer` family is the standing case: a seat-included model whose list price does not exist in any published sense.
+  avoid: unpriced run, cost-blind run
+  under: Spend

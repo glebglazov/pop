@@ -23,7 +23,7 @@ Pop supplies facts and threshold-marked suspects. **Naming the waste bucket and 
 
 | Surface | What it gives you |
 | --- | --- |
-| `pop tasks spend` | Ranks recent task sets (bare) or breaks one set down per task. Read the **`turns`** and **`peak-in`** columns first — they surface long-grinding runs and peak context pressure, not just token totals. Turn-blind and peak-blind runs show **`—`**, never zero; do not treat blind as cheap. The **`agent`** column appears only when a set mixes agents. Use `--json` when you need machine-readable `turns`, `peak_input_tokens`, and blind-run counts. |
+| `pop tasks spend --sort tokens` | Ranks recent task sets (bare) or breaks one set down per task. **Always pass `--sort` explicitly** — the bare default is `recency`, which answers "what have I been doing", not "what was expensive" (ADR-0218). Read the **`turns`** and **`peak-in`** columns first — they surface long-grinding runs and peak context pressure, not just token totals. Turn-blind and peak-blind runs show **`—`**, never zero; do not treat blind as cheap. The spend cell reads `tokens (~$notional)`: the parenthesised figure is a **modelled** list price, not money spent, and a **`(—)`** means the model has no rate, not that the run was free. The **`agent`** and **model** columns appear when a set mixes them — check both before comparing numbers across rows. Use `--json` when you need machine-readable `turns`, `peak_input_tokens`, `notional_cost_usd`, and blind-run counts. |
 | `pop tasks stream <TASK_SET>/<task> --tool-detail` | Replays one task's attempts and deepens the timing breakdown to **argument-level tool facts**: repeated identical invocations, unbounded file reads, largest payloads, error loops, image reads. Without `--tool-detail`, replay stays terse (that output also prints during live drains). Pop may mark a run **`suspect:`** when peak-in exceeds 200k or turns exceed twice the set's median — relative thresholds only. **Pop does not classify waste buckets** ("search thrash", "missing repo docs", …); you do, from the facts. Render-blind agents refuse tool detail with their stated reason instead of partial facts. |
 
 Run both commands from the repository whose drain you are auditing. They read pop's captured run store; they capture nothing and mutate nothing.
@@ -39,10 +39,12 @@ Work the four steps in order. Stop when you have a routed fix the human agrees w
 ### 1. Rank — find runs worth tracing
 
 ```sh
-pop tasks spend
+pop tasks spend --sort tokens
 ```
 
-Scan **`turns`** and **`peak-in`** alongside cost and token columns. High turns with moderate cost often mean thrash; high peak-in with few turns often means one enormous context load.
+State the sort — do not inherit the default, which is recency. Use `--sort cost` instead when you are arguing about money rather than throughput, remembering that rate-blind rows sort last as a named block and are not cheap, merely unpriceable. Add `--all` when the question spans projects rather than this repository.
+
+Scan **`turns`** and **`peak-in`** alongside the token and notional-cost columns. High turns with moderate spend often mean thrash; high peak-in with few turns often means one enormous context load.
 
 When you already know the task set:
 
@@ -54,7 +56,7 @@ Breaks the set down per task (verification runs are separate rows). Pick the row
 
 If the set mixes agents, use the **`agent`** column before comparing numbers across rows.
 
-Respect blind markers: a row showing **`—`** for turns or peak-in cannot be ranked on that axis. Note blind runs (`blind` column / JSON `*_blind_runs`) but do not infer zero.
+Respect blind markers: a row showing **`—`** for turns, peak-in or notional cost cannot be ranked on that axis. Note blind runs (`blind` column / JSON `*_blind_runs`) but do not infer zero.
 
 ### 2. Trace — open the dearest attempt at argument granularity
 
@@ -119,4 +121,4 @@ Wait for confirmation before editing repo instructions or task files, or before 
 
 ## Done
 
-The audit is complete when the human accepts a routed fix (or explicitly defers). Re-run `pop tasks spend` on the same set after the next drain if you need to verify the numbers moved.
+The audit is complete when the human accepts a routed fix (or explicitly defers). Re-run `pop tasks spend` on the same set after the next drain if you need to verify the numbers moved, passing the same `--sort` you used the first time — two rankings taken under different sorts are not a comparison.
