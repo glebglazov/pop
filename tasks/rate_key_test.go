@@ -1,6 +1,8 @@
 package tasks
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -231,6 +233,12 @@ func TestSpendRollupPricesCodexFromRequestedAgent(t *testing.T) {
 	if !row.Notional.HasCost {
 		t.Fatalf("expected notional from requested model, got %+v", row.Notional)
 	}
+	if row.ModelKeySource != RateKeyFromRequested {
+		t.Fatalf("model_key_source = %q, want requested", row.ModelKeySource)
+	}
+	if row.ModelKey != "openai/gpt-5.6-sol" {
+		t.Fatalf("model_key = %q, want openai/gpt-5.6-sol", row.ModelKey)
+	}
 	want := 1000 * 0.0000025 // openai/gpt-5.6-sol prompt
 	if diff := row.Notional.Dollars - want; diff > 1e-12 || diff < -1e-12 {
 		t.Fatalf("notional = %v, want %v", row.Notional.Dollars, want)
@@ -248,6 +256,24 @@ func TestSpendRollupPricesCodexFromRequestedAgent(t *testing.T) {
 	}, table)
 	if resolved.Source != RateKeyFromRequested || resolved.Key != "openai/gpt-5.6-sol" {
 		t.Fatalf("resolved = %+v, want requested openai/gpt-5.6-sol", resolved)
+	}
+
+	var buf bytes.Buffer
+	RenderSpendRollup(&buf, result)
+	if !strings.Contains(buf.String(), "(~?$") {
+		t.Fatalf("expected requested-model spend marker:\n%s", buf.String())
+	}
+	var jsonBuf bytes.Buffer
+	if err := RenderSpendRollupJSON(&jsonBuf, result); err != nil {
+		t.Fatal(err)
+	}
+	var decoded spendRollupJSON
+	if err := json.Unmarshal(jsonBuf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	got := decoded.Sets[0]
+	if got.ModelKeySource == nil || *got.ModelKeySource != string(RateKeyFromRequested) {
+		t.Fatalf("model_key_source = %v, want requested", got.ModelKeySource)
 	}
 }
 

@@ -78,10 +78,10 @@ func (d *Deps) rateTableFetcher() RateTableFetcher {
 // ModelRates is the four per-token rates a model may publish. CacheWrite may be
 // absent — those providers bill cache-write tokens at the prompt rate (ADR-0218).
 type ModelRates struct {
-	Prompt     float64
-	Completion float64
-	CacheRead  float64
-	CacheWrite float64
+	Prompt        float64
+	Completion    float64
+	CacheRead     float64
+	CacheWrite    float64
 	HasCacheWrite bool
 }
 
@@ -93,7 +93,7 @@ type RateTable struct {
 
 // rateTableFile is the on-disk / embedded JSON shape.
 type rateTableFile struct {
-	FetchedAt string                     `json:"fetched_at"`
+	FetchedAt string                        `json:"fetched_at"`
 	Models    map[string]rateTableRatesJSON `json:"models"`
 }
 
@@ -107,8 +107,8 @@ type rateTableRatesJSON struct {
 // openRouterModelsPayload is the live endpoint shape, trimmed on ingest.
 type openRouterModelsPayload struct {
 	Data []struct {
-		ID       string            `json:"id"`
-		Pricing  map[string]string `json:"pricing"`
+		ID      string            `json:"id"`
+		Pricing map[string]string `json:"pricing"`
 	} `json:"data"`
 }
 
@@ -324,9 +324,10 @@ func notionalCostFromRates(u TokenUsage, rates ModelRates) PartialCost {
 // PricedSpend is one Captured run's dollar annotation plus the provenance a
 // machine consumer needs without parsing a formatted cell (ADR-0218).
 type PricedSpend struct {
-	Cost       PartialCost
-	RateSource string // RateSourceTable, RateSourceOverride, or empty
-	ModelKey   string
+	Cost           PartialCost
+	RateSource     string // RateSourceTable, RateSourceOverride, or empty
+	ModelKey       string
+	ModelKeySource RateKeySource // RateKeyFromActual or RateKeyFromRequested
 }
 
 // priceRunSpend resolves the dollar annotation for one Captured run: pi's
@@ -334,21 +335,23 @@ type PricedSpend struct {
 // beats the published table, then the adapter's rate-key rule prices the run
 // (ADR-0218).
 func priceRunSpend(run capturedRun, spend RunSpend, table *RateTable, overrides map[string]ModelRates) PricedSpend {
+	resolved := resolveRunRateKey(run, table)
 	if spend.Cost.HasCost {
 		return PricedSpend{
-			Cost:     spend.Cost,
-			ModelKey: resolveRunRateKey(run, table).Key,
+			Cost:           spend.Cost,
+			ModelKey:       resolved.Key,
+			ModelKeySource: resolved.Source,
 		}
 	}
-	resolved := resolveRunRateKey(run, table)
 	if resolved.Key == "" {
 		return PricedSpend{}
 	}
 	if rates, ok := lookupDeclaredRate(overrides, resolved.Key); ok {
 		return PricedSpend{
-			Cost:       notionalCostFromRates(spend.Tokens, rates),
-			RateSource: RateSourceOverride,
-			ModelKey:   resolved.Key,
+			Cost:           notionalCostFromRates(spend.Tokens, rates),
+			RateSource:     RateSourceOverride,
+			ModelKey:       resolved.Key,
+			ModelKeySource: resolved.Source,
 		}
 	}
 	rates, ok := table.lookup(resolved.Key)
@@ -356,9 +359,10 @@ func priceRunSpend(run capturedRun, spend RunSpend, table *RateTable, overrides 
 		return PricedSpend{}
 	}
 	return PricedSpend{
-		Cost:       notionalCostFromRates(spend.Tokens, rates),
-		RateSource: RateSourceTable,
-		ModelKey:   resolved.Key,
+		Cost:           notionalCostFromRates(spend.Tokens, rates),
+		RateSource:     RateSourceTable,
+		ModelKey:       resolved.Key,
+		ModelKeySource: resolved.Source,
 	}
 }
 

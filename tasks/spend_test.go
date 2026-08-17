@@ -1353,12 +1353,13 @@ func TestSpendRollupCostSortPutsRateBlindInTrailingBlock(t *testing.T) {
 
 func TestRenderSpendRollupJSONNotionalCostFields(t *testing.T) {
 	priced := &SpendRollupResult{Sets: []SpendRollupRow{{
-		TaskSetID:  "priced",
-		Tokens:     TokenUsage{Input: 10, HasInput: true},
-		Notional:   PartialCost{Dollars: 1.25, HasCost: true},
-		RateSource: RateSourceTable,
-		ModelKey:   "anthropic/claude-opus-5",
-		RunCount:   1,
+		TaskSetID:      "priced",
+		Tokens:         TokenUsage{Input: 10, HasInput: true},
+		Notional:       PartialCost{Dollars: 1.25, HasCost: true},
+		RateSource:     RateSourceTable,
+		ModelKey:       "anthropic/claude-opus-5",
+		ModelKeySource: RateKeyFromActual,
+		RunCount:       1,
 	}}}
 	var buf bytes.Buffer
 	if err := RenderSpendRollupJSON(&buf, priced); err != nil {
@@ -1381,6 +1382,9 @@ func TestRenderSpendRollupJSONNotionalCostFields(t *testing.T) {
 	}
 	if got.ModelKey != "anthropic/claude-opus-5" {
 		t.Fatalf("model_key = %q", got.ModelKey)
+	}
+	if got.ModelKeySource == nil || *got.ModelKeySource != string(RateKeyFromActual) {
+		t.Fatalf("model_key_source = %v, want actual", got.ModelKeySource)
 	}
 
 	blind := &SpendRollupResult{Sets: []SpendRollupRow{{
@@ -1406,6 +1410,9 @@ func TestRenderSpendRollupJSONNotionalCostFields(t *testing.T) {
 	}
 	if row["model_key"] != "" {
 		t.Fatalf("model_key = %v, want empty", row["model_key"])
+	}
+	if row["model_key_source"] != nil {
+		t.Fatalf("model_key_source = %v, want null", row["model_key_source"])
 	}
 }
 
@@ -1440,6 +1447,9 @@ func TestSpendRollupJSONCarriesNotionalFromLivePricing(t *testing.T) {
 	}
 	if got.ModelKey != "anthropic/claude-opus-5" {
 		t.Fatalf("model_key = %q", got.ModelKey)
+	}
+	if got.ModelKeySource == nil || *got.ModelKeySource != string(RateKeyFromActual) {
+		t.Fatalf("model_key_source = %v, want actual", got.ModelKeySource)
 	}
 }
 

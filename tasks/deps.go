@@ -31,14 +31,14 @@ type storeCache struct {
 
 // Deps holds external dependencies for the task package.
 type Deps struct {
-	FS           deps.FileSystem
-	Git          deps.Git
-	Runner       CommandRunner
+	FS     deps.FileSystem
+	Git    deps.Git
+	Runner CommandRunner
 	// RateTableFetcher loads the OpenRouter models payload for the Spend lens
 	// Rate table refresh. Nil uses RealRateTableFetcher (ADR-0218).
 	RateTableFetcher RateTableFetcher
-	LookPath     func(file string) (string, error)
-	ProcessAlive func(pid int) bool
+	LookPath         func(file string) (string, error)
+	ProcessAlive     func(pid int) bool
 	// ProcessStartToken returns an opaque token capturing the start instant of
 	// the process with the given PID, and whether it could be determined. Paired
 	// with ProcessAlive it defeats PID reuse in drain liveness. A nil seam falls
