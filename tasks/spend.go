@@ -29,6 +29,13 @@ const spendRollupAllSetLimit = 20
 const (
 	SpendSortRecency = "recency"
 	SpendSortTokens  = "tokens"
+	SpendSortCost    = "cost"
+)
+
+// Rate-source labels for machine-readable Notional cost provenance (ADR-0218).
+const (
+	RateSourceTable    = "table"
+	RateSourceOverride = "override"
 )
 
 // SpendOptions configures the Spend lens.
@@ -71,12 +78,22 @@ type SpendRollupRow struct {
 	// where present, else a Rate-table estimate via the adapter's rate-key rule.
 	// HasCost false is rate-blind — absent, never zero (ADR-0218).
 	Notional PartialCost
+	// RateSource is "table" or "override" when a published or declared rate
+	// priced any run; empty when the figure is measured-only or the row is
+	// rate-blind (ADR-0218).
+	RateSource string
+	// ModelKey is the Rate-table key the row was priced under. Empty when
+	// rate-blind or when priced runs disagree on the key.
+	ModelKey string
 }
 
 // SpendRollupResult is the cross-set spend rollup.
 type SpendRollupResult struct {
 	Sets       []SpendRollupRow
 	ShowAgents bool // true when any displayed set mixes agents
+	// Sort is the ordering applied to Sets after the recency window (ADR-0218).
+	// Render uses it to label the rate-blind trailing block under --sort cost.
+	Sort string
 	// SkippedStorages is how many AllSets def_paths were skipped because their
 	// Task storage directory is gone. Reported in the human footer so a total
 	// never silently shrinks (ADR-0218).
@@ -88,12 +105,15 @@ type SpendRollupResult struct {
 // spendRollupJSONRow is the machine-readable rollup row emitted by --json.
 type spendRollupJSONRow struct {
 	TaskSetID        string     `json:"task_set_id"`
-	Project           string     `json:"project"`
+	Project          string     `json:"project"`
 	InputTokens      int64      `json:"input_tokens"`
 	OutputTokens     int64      `json:"output_tokens"`
 	CacheReadTokens  int64      `json:"cache_read_tokens"`
 	CacheWriteTokens int64      `json:"cache_write_tokens"`
 	PartialCostUSD   *float64   `json:"partial_cost_usd,omitempty"`
+	NotionalCostUSD  *float64   `json:"notional_cost_usd,omitempty"`
+	RateSource       *string    `json:"rate_source"`
+	ModelKey         string     `json:"model_key"`
 	Turns            *int       `json:"turns"`
 	TurnBlindRuns    int        `json:"turn_blind_runs"`
 	PeakInputTokens  *int64     `json:"peak_input_tokens"`
@@ -123,6 +143,8 @@ type SpendBreakdownRow struct {
 	PeakBlindRuns  int
 	Agent          string // populated when the set mixes agents
 	Notional       PartialCost
+	RateSource     string
+	ModelKey       string
 }
 
 // SpendSetBreakdownResult is the per-task spend breakdown for one Task set.
@@ -163,6 +185,9 @@ type spendBreakdownJSONRow struct {
 	CacheReadTokens  int64    `json:"cache_read_tokens"`
 	CacheWriteTokens int64    `json:"cache_write_tokens"`
 	PartialCostUSD   *float64 `json:"partial_cost_usd,omitempty"`
+	NotionalCostUSD  *float64 `json:"notional_cost_usd,omitempty"`
+	RateSource       *string  `json:"rate_source"`
+	ModelKey         string   `json:"model_key"`
 	Turns            *int     `json:"turns"`
 	TurnBlindRuns    int      `json:"turn_blind_runs"`
 	PeakInputTokens  *int64   `json:"peak_input_tokens"`
@@ -229,6 +254,7 @@ func SpendRollupWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 		return nil, err
 	}
 	result.RateTableDate = table.FetchedAt
+	result.Sort = sortMode
 
 	limit := spendRollupSetLimit
 	if opts.All {
@@ -509,13 +535,16 @@ func spendParentSegments(rootPath string) []string {
 // Empty means recency. An unrecognised value is refused with the accepted list
 // and nothing is rendered.
 func normalizeSpendSort(raw string) (string, error) {
+	accepted := []string{SpendSortRecency, SpendSortTokens, SpendSortCost}
 	switch raw {
 	case "", SpendSortRecency:
 		return SpendSortRecency, nil
 	case SpendSortTokens:
 		return SpendSortTokens, nil
+	case SpendSortCost:
+		return SpendSortCost, nil
 	default:
-		return "", exitErr(ExitSetup, "unknown spend sort %q (want one of: %s)", raw, strings.Join([]string{SpendSortRecency, SpendSortTokens}, ", "))
+		return "", exitErr(ExitSetup, "unknown spend sort %q (want one of: %s)", raw, strings.Join(accepted, ", "))
 	}
 }
 
@@ -527,12 +556,22 @@ func sortSpendRollupRows(rows []SpendRollupRow, mode string) {
 
 // spendRollupRowLess reports whether a should sort before b. Recency is every
 // sort's tie-break: newer Captured-run start first, and a set with no readable
-// start time always sorts after one that has one.
+// start time always sorts after one that has one. Under cost, rate-blind rows
+// form a trailing block so an unpriceable set never ranks cheapest (ADR-0218).
 func spendRollupRowLess(a, b SpendRollupRow, mode string) bool {
-	if mode == SpendSortTokens {
+	switch mode {
+	case SpendSortTokens:
 		ta, tb := tokenUsageTotal(a.Tokens), tokenUsageTotal(b.Tokens)
 		if ta != tb {
 			return ta > tb
+		}
+	case SpendSortCost:
+		aBlind, bBlind := !a.Notional.HasCost, !b.Notional.HasCost
+		if aBlind != bBlind {
+			return !aBlind
+		}
+		if !aBlind && a.Notional.Dollars != b.Notional.Dollars {
+			return a.Notional.Dollars > b.Notional.Dollars
 		}
 	}
 	return spendRollupRecencyLess(a, b)
@@ -634,7 +673,7 @@ func buildSpendSetBreakdown(d *Deps, taskSetID string, m *Manifest, table *RateT
 		}
 		addTokenUsage(&row.Tokens, spend.Tokens)
 		addPartialCost(&row.Cost, spend.Cost)
-		addPartialCost(&row.Notional, notional)
+		mergePricedSpend(&row.Notional, &row.RateSource, &row.ModelKey, notional)
 		addTurnCount(&row.Turns, spend.Turns)
 		addPeakInput(&row.PeakInput, spend.PeakInput)
 		recordSpendRowAgent(row, run.meta.Agent)
@@ -647,7 +686,7 @@ func buildSpendSetBreakdown(d *Deps, taskSetID string, m *Manifest, table *RateT
 			}
 			addTokenUsage(&result.VerificationTokens, spend.Tokens)
 			addPartialCost(&result.VerificationCost, spend.Cost)
-			addPartialCost(&result.VerificationNotional, notional)
+			addPartialCost(&result.VerificationNotional, notional.Cost)
 		case spendReviewRowKey:
 			result.ReviewRunCount++
 			if !spend.Tokens.HasUsage() {
@@ -655,7 +694,7 @@ func buildSpendSetBreakdown(d *Deps, taskSetID string, m *Manifest, table *RateT
 			}
 			addTokenUsage(&result.ReviewTokens, spend.Tokens)
 			addPartialCost(&result.ReviewCost, spend.Cost)
-			addPartialCost(&result.ReviewNotional, notional)
+			addPartialCost(&result.ReviewNotional, notional.Cost)
 		default:
 			result.ImplementRunCount++
 			if !spend.Tokens.HasUsage() {
@@ -663,7 +702,7 @@ func buildSpendSetBreakdown(d *Deps, taskSetID string, m *Manifest, table *RateT
 			}
 			addTokenUsage(&result.ImplementTokens, spend.Tokens)
 			addPartialCost(&result.ImplementCost, spend.Cost)
-			addPartialCost(&result.ImplementNotional, notional)
+			addPartialCost(&result.ImplementNotional, notional.Cost)
 		}
 	}
 
@@ -771,7 +810,7 @@ func taskSetSpendRollup(d *Deps, taskSetID, taskSetDir string, table *RateTable)
 		}
 		addTokenUsage(&row.Tokens, spend.Tokens)
 		addPartialCost(&row.Cost, spend.Cost)
-		addPartialCost(&row.Notional, notional)
+		mergePricedSpend(&row.Notional, &row.RateSource, &row.ModelKey, notional)
 		addTurnCount(&row.Turns, spend.Turns)
 		addPeakInput(&row.PeakInput, spend.PeakInput)
 	}
@@ -791,6 +830,29 @@ func addPartialCost(acc *PartialCost, c PartialCost) {
 	if c.HasCost {
 		acc.Dollars += c.Dollars
 		acc.HasCost = true
+	}
+}
+
+// mergePricedSpend folds one run's priced annotation into a row's Notional,
+// RateSource and ModelKey. Override wins over table; a mixed ModelKey clears
+// to empty so a consumer never reads a single key as the whole row.
+func mergePricedSpend(notional *PartialCost, rateSource, modelKey *string, p PricedSpend) {
+	addPartialCost(notional, p.Cost)
+	switch {
+	case p.RateSource == RateSourceOverride:
+		*rateSource = RateSourceOverride
+	case p.RateSource == RateSourceTable && *rateSource == "":
+		*rateSource = RateSourceTable
+	}
+	if p.ModelKey == "" {
+		return
+	}
+	if *modelKey == "" {
+		*modelKey = p.ModelKey
+		return
+	}
+	if *modelKey != p.ModelKey {
+		*modelKey = ""
 	}
 }
 
@@ -885,7 +947,15 @@ func tokenUsageTotal(u TokenUsage) int64 {
 func RenderSpendRollup(w io.Writer, result *SpendRollupResult) {
 	showAgents := result != nil && result.ShowAgents
 	writeSpendRollupHeader(w, showAgents)
+	labelBlind := result != nil && result.Sort == SpendSortCost
+	blindBlock := false
 	for _, row := range result.Sets {
+		if labelBlind && !row.Notional.HasCost {
+			if !blindBlock {
+				fmt.Fprintln(w, "(rate-blind)")
+				blindBlock = true
+			}
+		}
 		writeSpendRollupRow(w, row, showAgents)
 	}
 	writeSpendRollupFooter(w, result)
@@ -1128,6 +1198,14 @@ func partialCostUSDPtr(c PartialCost) *float64 {
 	return &v
 }
 
+func rateSourceJSONPtr(source string) *string {
+	if source == "" {
+		return nil
+	}
+	v := source
+	return &v
+}
+
 // RenderSpendSetBreakdownJSON writes the per-set spend breakdown as JSON.
 func RenderSpendSetBreakdownJSON(w io.Writer, result *SpendSetBreakdownResult) error {
 	payload := spendSetBreakdownJSON{
@@ -1166,6 +1244,9 @@ func RenderSpendSetBreakdownJSON(w io.Writer, result *SpendSetBreakdownResult) e
 			CacheReadTokens:  row.Tokens.CacheRead,
 			CacheWriteTokens: row.Tokens.CacheWrite,
 			PartialCostUSD:   partialCostUSDPtr(row.Cost),
+			NotionalCostUSD:  partialCostUSDPtr(row.Notional),
+			RateSource:       rateSourceJSONPtr(row.RateSource),
+			ModelKey:         row.ModelKey,
 			Turns:            spendTurnsJSONPtr(row.Turns),
 			TurnBlindRuns:    row.TurnBlindRuns,
 			PeakInputTokens:  spendPeakInputJSONPtr(row.PeakInput),
@@ -1195,6 +1276,9 @@ func RenderSpendRollupJSON(w io.Writer, result *SpendRollupResult) error {
 			CacheReadTokens:  row.Tokens.CacheRead,
 			CacheWriteTokens: row.Tokens.CacheWrite,
 			PartialCostUSD:   partialCostUSDPtr(row.Cost),
+			NotionalCostUSD:  partialCostUSDPtr(row.Notional),
+			RateSource:       rateSourceJSONPtr(row.RateSource),
+			ModelKey:         row.ModelKey,
 			Turns:            spendTurnsJSONPtr(row.Turns),
 			TurnBlindRuns:    row.TurnBlindRuns,
 			PeakInputTokens:  spendPeakInputJSONPtr(row.PeakInput),

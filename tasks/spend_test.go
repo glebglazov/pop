@@ -217,13 +217,13 @@ func TestSpendRollupRejectsUnknownSort(t *testing.T) {
 	env := spendFixture(t)
 	_, err := SpendRollupWith(env.deps(), nil, nil, SpendOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
-		Sort:         "cost",
+		Sort:         "bogus",
 	})
 	if err == nil {
 		t.Fatal("expected unknown sort to be refused")
 	}
 	msg := err.Error()
-	for _, want := range []string{"cost", SpendSortRecency, SpendSortTokens} {
+	for _, want := range []string{"bogus", SpendSortRecency, SpendSortTokens, SpendSortCost} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("error %q missing %q", msg, want)
 		}
@@ -1261,5 +1261,184 @@ func TestRenderSpendRollupJSONReportsTurnsAndPeakWhenPresent(t *testing.T) {
 	}
 	if got.PeakInputTokens == nil || *got.PeakInputTokens != peak {
 		t.Fatalf("peak = %v, want %d", got.PeakInputTokens, peak)
+	}
+}
+
+func TestSpendRollupSortsByNotionalCostDearestFirst(t *testing.T) {
+	env := spendFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+
+	cheapDir := registerSpendSet(t, env, "2026-06-10-cheap", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	writeSpendRun(t, cheapDir, "01-a.md", "01-a", "claude", base.Add(time.Hour), claudePricedEvents(100, 0, 0, 0, "claude-opus-5"))
+
+	dearDir := registerSpendSet(t, env, "2026-06-10-dear", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	writeSpendRun(t, dearDir, "01-a.md", "01-a", "claude", base, claudePricedEvents(10000, 0, 0, 0, "claude-opus-5"))
+
+	result, err := SpendRollupWith(env.deps(), nil, nil, SpendOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Sort:         SpendSortCost,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Sets) != 2 {
+		t.Fatalf("sets = %#v", result.Sets)
+	}
+	if result.Sets[0].TaskSetID != "2026-06-10-dear" || result.Sets[1].TaskSetID != "2026-06-10-cheap" {
+		t.Fatalf("order = %#v, want dearest first", []string{result.Sets[0].TaskSetID, result.Sets[1].TaskSetID})
+	}
+	if result.Sort != SpendSortCost {
+		t.Fatalf("Sort = %q, want %q", result.Sort, SpendSortCost)
+	}
+}
+
+func TestSpendRollupCostSortPutsRateBlindInTrailingBlock(t *testing.T) {
+	env := spendFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+
+	blindDir := registerSpendSet(t, env, "2026-06-10-blind", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	writeSpendRun(t, blindDir, "01-a.md", "01-a", "claude", base.Add(2*time.Hour), claudePricedEvents(1, 0, 0, 0, "claude-does-not-exist"))
+
+	midDir := registerSpendSet(t, env, "2026-06-10-mid", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	writeSpendRun(t, midDir, "01-a.md", "01-a", "claude", base.Add(time.Hour), claudePricedEvents(100, 0, 0, 0, "claude-opus-5"))
+
+	dearDir := registerSpendSet(t, env, "2026-06-10-dear", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	writeSpendRun(t, dearDir, "01-a.md", "01-a", "claude", base, claudePricedEvents(10000, 0, 0, 0, "claude-opus-5"))
+
+	result, err := SpendRollupWith(env.deps(), nil, nil, SpendOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+		Sort:         SpendSortCost,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Sets) != 3 {
+		t.Fatalf("sets = %#v", result.Sets)
+	}
+	got := []string{result.Sets[0].TaskSetID, result.Sets[1].TaskSetID, result.Sets[2].TaskSetID}
+	want := []string{"2026-06-10-dear", "2026-06-10-mid", "2026-06-10-blind"}
+	if got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Fatalf("order = %#v, want %#v", got, want)
+	}
+	if result.Sets[2].Notional.HasCost {
+		t.Fatalf("trailing row should be rate-blind, got %+v", result.Sets[2].Notional)
+	}
+
+	var buf bytes.Buffer
+	RenderSpendRollup(&buf, result)
+	out := buf.String()
+	if !strings.Contains(out, "(rate-blind)") {
+		t.Fatalf("expected labelled rate-blind block:\n%s", out)
+	}
+	blindIdx := strings.Index(out, "(rate-blind)")
+	rowIdx := strings.Index(out, "2026-06-10-blind")
+	if blindIdx < 0 || rowIdx < 0 || blindIdx > rowIdx {
+		t.Fatalf("label must precede the blind row:\n%s", out)
+	}
+	midIdx := strings.Index(out, "2026-06-10-mid")
+	if midIdx > blindIdx {
+		t.Fatalf("priceable rows must precede the rate-blind label:\n%s", out)
+	}
+}
+
+func TestRenderSpendRollupJSONNotionalCostFields(t *testing.T) {
+	priced := &SpendRollupResult{Sets: []SpendRollupRow{{
+		TaskSetID:  "priced",
+		Tokens:     TokenUsage{Input: 10, HasInput: true},
+		Notional:   PartialCost{Dollars: 1.25, HasCost: true},
+		RateSource: RateSourceTable,
+		ModelKey:   "anthropic/claude-opus-5",
+		RunCount:   1,
+	}}}
+	var buf bytes.Buffer
+	if err := RenderSpendRollupJSON(&buf, priced); err != nil {
+		t.Fatal(err)
+	}
+	raw := buf.String()
+	if strings.Contains(raw, "~$") || strings.Contains(raw, "tokens (") {
+		t.Fatalf("JSON must not carry a formatted spend cell: %s", raw)
+	}
+	var decoded spendRollupJSON
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	got := decoded.Sets[0]
+	if got.NotionalCostUSD == nil || *got.NotionalCostUSD != 1.25 {
+		t.Fatalf("notional_cost_usd = %v", got.NotionalCostUSD)
+	}
+	if got.RateSource == nil || *got.RateSource != RateSourceTable {
+		t.Fatalf("rate_source = %v", got.RateSource)
+	}
+	if got.ModelKey != "anthropic/claude-opus-5" {
+		t.Fatalf("model_key = %q", got.ModelKey)
+	}
+
+	blind := &SpendRollupResult{Sets: []SpendRollupRow{{
+		TaskSetID: "blind",
+		Tokens:    TokenUsage{Input: 10, HasInput: true},
+		RunCount:  1,
+	}}}
+	buf.Reset()
+	if err := RenderSpendRollupJSON(&buf, blind); err != nil {
+		t.Fatal(err)
+	}
+	var asMap map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &asMap); err != nil {
+		t.Fatal(err)
+	}
+	sets, _ := asMap["sets"].([]any)
+	row, _ := sets[0].(map[string]any)
+	if _, ok := row["notional_cost_usd"]; ok {
+		t.Fatalf("notional_cost_usd must be absent for rate-blind, got %s", buf.String())
+	}
+	if row["rate_source"] != nil {
+		t.Fatalf("rate_source = %v, want null", row["rate_source"])
+	}
+	if row["model_key"] != "" {
+		t.Fatalf("model_key = %v, want empty", row["model_key"])
+	}
+}
+
+func TestSpendRollupJSONCarriesNotionalFromLivePricing(t *testing.T) {
+	env := spendFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	setDir := registerSpendSet(t, env, "2026-06-10-priced", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	writeSpendRun(t, setDir, "01-a.md", "01-a", "claude", base, claudePricedEvents(1000, 0, 0, 0, "claude-opus-5"))
+
+	result, err := SpendRollupWith(env.deps(), nil, nil, SpendOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := RenderSpendRollupJSON(&buf, result); err != nil {
+		t.Fatal(err)
+	}
+	var decoded spendRollupJSON
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	got := decoded.Sets[0]
+	if got.NotionalCostUSD == nil || *got.NotionalCostUSD <= 0 {
+		t.Fatalf("notional_cost_usd = %v", got.NotionalCostUSD)
+	}
+	if got.RateSource == nil || *got.RateSource != RateSourceTable {
+		t.Fatalf("rate_source = %v", got.RateSource)
+	}
+	if got.ModelKey != "anthropic/claude-opus-5" {
+		t.Fatalf("model_key = %q", got.ModelKey)
 	}
 }

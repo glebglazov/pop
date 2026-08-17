@@ -360,7 +360,7 @@ func init() {
 	taskStreamCmd.Flags().BoolVar(&taskStreamToolDetail, "tool-detail", false, "Deepen the timing breakdown to argument-level tool facts")
 	taskCmd.AddCommand(taskSpendCmd)
 	taskSpendCmd.Flags().BoolVar(&taskSpendJSON, "json", false, "Emit spend data as JSON instead of a table")
-	taskSpendCmd.Flags().StringVar(&taskSpendSort, "sort", tasks.SpendSortRecency, "Order the rollup by recency (latest Captured run) or tokens")
+	taskSpendCmd.Flags().StringVar(&taskSpendSort, "sort", tasks.SpendSortRecency, "Order the rollup by recency (latest Captured run), tokens, or cost")
 	taskSpendCmd.Flags().BoolVar(&taskSpendAll, "all", false, "Roll up Task sets from every registered repository on this machine")
 	taskSpendCmd.Flags().IntVar(&taskSpendLimit, "limit", 0, "Cap rollup rows after the recency window (default 10; 20 with --all)")
 	taskCmd.AddCommand(taskShowPathCmd)

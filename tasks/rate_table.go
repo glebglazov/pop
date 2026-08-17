@@ -321,20 +321,35 @@ func notionalCostFromRates(u TokenUsage, rates ModelRates) PartialCost {
 	return PartialCost{Dollars: dollars, HasCost: true}
 }
 
+// PricedSpend is one Captured run's dollar annotation plus the provenance a
+// machine consumer needs without parsing a formatted cell (ADR-0218).
+type PricedSpend struct {
+	Cost       PartialCost
+	RateSource string // RateSourceTable, RateSourceOverride, or empty
+	ModelKey   string
+}
+
 // priceRunSpend resolves the dollar annotation for one Captured run: pi's
 // measured PartialCost outranks a table estimate; otherwise the adapter's
 // declared rate-key rule prices the run (ADR-0218).
-func priceRunSpend(run capturedRun, spend RunSpend, table *RateTable) PartialCost {
+func priceRunSpend(run capturedRun, spend RunSpend, table *RateTable) PricedSpend {
 	if spend.Cost.HasCost {
-		return spend.Cost
+		return PricedSpend{
+			Cost:     spend.Cost,
+			ModelKey: resolveRunRateKey(run, table).Key,
+		}
 	}
 	resolved := resolveRunRateKey(run, table)
 	if resolved.Key == "" {
-		return PartialCost{}
+		return PricedSpend{}
 	}
 	rates, ok := table.lookup(resolved.Key)
 	if !ok {
-		return PartialCost{}
+		return PricedSpend{}
 	}
-	return notionalCostFromRates(spend.Tokens, rates)
+	return PricedSpend{
+		Cost:       notionalCostFromRates(spend.Tokens, rates),
+		RateSource: RateSourceTable,
+		ModelKey:   resolved.Key,
+	}
 }
