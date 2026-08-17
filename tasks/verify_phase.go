@@ -37,7 +37,9 @@ const (
 // A human-completed set is the exception to everything below the verdict itself:
 // the Verifier still runs and its verdict is still recorded and printed, but a
 // non-PASS neither parks the set nor spawns remediation, because the status is
-// the human's assertion and the verdict rides beside it as a mark.
+// the human's assertion and the verdict rides beside it as a mark. A quota pause
+// on such a set is dropped for the same reason: nothing the Verifier could say
+// would change the terminal, so the drain does not wait for the quota to return.
 // At or over the cap (or on a NEEDS-HUMAN verdict) the set parks as VERIFY-FAILED:
 // on a TTY a human gate dispositions it (Accept / Remediate / shell / exit) and a
 // handled disposition clears the terminal and resumes (verifyContinue); otherwise
@@ -48,7 +50,9 @@ const (
 //
 // It mutates the run's result / Drain / prompt-reader state through the receiver so
 // the drain loop and the deferred finalize see the latest values. Quota-pause
-// during verify parks and waits, and a failed waiter registration exits with the
+// during verify parks and waits — except on a human-completed set, where the
+// verdict is informational and the pause is reported and dropped — and a failed
+// waiter registration exits with the
 // QuotaPaused result populated; a human gate disposition clears the verify-failed
 // terminal from the result and resumes; the `--yes` path prints the summary and
 // exits with the ExitNoRunnable error.
@@ -85,6 +89,16 @@ func (r *implementRun) verifyPhase(currentRefresh *RefreshResult, row *Row) (ver
 	}, m, row.Status)
 	if verr != nil {
 		if qp, ok := AsVerifyQuotaPause(verr); ok {
+			if m != nil && m.HumanCompleted {
+				// Waiting buys nothing here: the verdict this Verifier would have
+				// produced cannot gate the set (a non-PASS on a human-completed set is
+				// information, not a veto), so parking the drain until quota returns
+				// would hold a Runtime lock for a mark. Drop it like the Reviewer does —
+				// the set keeps its terminal status, the mark stays unverified, and the
+				// Verifier is still scheduled, so a later drain records it.
+				outputFor(out).line(ansiYellow, "━━ Verifier quota paused for %s (%s) — the set is human-completed, so the drain does not wait", taskSetID, qp.Preset)
+				return verifyFallThrough, nil
+			}
 			priority := 0
 			if row := findRow(currentRefresh, taskSetID); row != nil {
 				priority = row.Priority

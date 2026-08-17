@@ -176,3 +176,56 @@ func TestVerifyPhaseQuotaPauseParksAndResumes(t *testing.T) {
 		t.Fatalf("runtime lock not held after resume: %#v", status)
 	}
 }
+
+// TestVerifyPhaseQuotaPauseOnHumanCompletedFallsThrough: the verdict a
+// human-completed set would get is informational (ADR-0179), so a quota-paused
+// Verifier has nothing to wait for. The phase reports the pause and falls through
+// to the terminal switch, leaving no verdict on record — the mark stays unverified
+// and the Verifier is still scheduled, so a later drain records it.
+func TestVerifyPhaseQuotaPauseOnHumanCompletedFallsThrough(t *testing.T) {
+	verdictText := ""
+	run, refresh, row, _ := newVerifyPhaseRunWithKeys(t, func(string) (string, error) {
+		if verdictText != "" {
+			return verdictText, nil
+		}
+		// The reset instant is already elapsed, so a phase that parked would recover
+		// and answer verifyContinue rather than hanging the test.
+		return "", newVerifyQuotaPause(VerifyQuotaPause{
+			Preset:  "claude",
+			ResetAt: time.Now().Add(-time.Hour),
+			Reason:  "verifier quota exhausted",
+		})
+	}, map[string]any{"human_completed": true})
+
+	directive, err := run.verifyPhase(refresh, row)
+	if err != nil {
+		t.Fatalf("verifyPhase: %v", err)
+	}
+	if directive != verifyFallThrough {
+		t.Fatalf("directive = %d, want verifyFallThrough (%d) — a human-completed set must not park on quota", directive, verifyFallThrough)
+	}
+	if run.result.QuotaPaused || run.result.TaskSetVerifyFailed {
+		t.Fatalf("result must carry no pause or verify-failed terminal: %+v", run.result)
+	}
+	if row.Status != StatusDone {
+		t.Fatalf("display row status = %q, want DONE", row.Status)
+	}
+	repo, _, head := runtimeHead(t, run.d, run.runtimePath)
+	if stored := readStoredVerdict(t, run.d, repo, "demo", head); stored != nil {
+		t.Fatalf("stored verdict = %+v, want none — an unrun Verifier must leave the mark unverified", stored)
+	}
+
+	// The work SHA has not moved, so the Verifier is still scheduled: the next
+	// drain over the same set invokes it again and records the verdict.
+	verdictText = "VERDICT: PASS\nFINDINGS: none\n"
+	directive, err = run.verifyPhase(refresh, row)
+	if err != nil {
+		t.Fatalf("second verifyPhase: %v", err)
+	}
+	if directive != verifyFallThrough {
+		t.Fatalf("second directive = %d, want verifyFallThrough (%d)", directive, verifyFallThrough)
+	}
+	if stored := readStoredVerdict(t, run.d, repo, "demo", head); stored == nil || stored.Verdict != string(VerdictPass) {
+		t.Fatalf("stored verdict = %+v, want PASS recorded by the later drain", stored)
+	}
+}
