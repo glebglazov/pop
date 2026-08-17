@@ -84,6 +84,13 @@ type agentWalkResult struct {
 	Answer string
 	// Agent is the resolved agent that produced Answer, empty when none did.
 	Agent string
+	// AnswerRetryEligible reports that the attempt behind Answer was one the role
+	// would have retried had a try been left — a timeout, a run error or a
+	// non-zero exit. The walk hands the text back either way, because a role that
+	// only parses it (the Verifier) reaches the same refusal on its own; a role
+	// that would otherwise persist the text verbatim (the Reviewer) reads this to
+	// tell a finished document from the prose an attempt died halfway through.
+	AnswerRetryEligible bool
 	// Unavailable holds each preset the walk could not get an answer out of.
 	Unavailable []AgentProceedVerdict
 }
@@ -260,7 +267,8 @@ func runAgentFallbackWalk(d *Deps, w agentFallbackWalk) (agentWalkResult, error)
 			result.Answer = normalized.Output
 			result.Agent = invocation.RequestedAgent
 
-			if !w.role.RetryEligible(outcome, normalized.Output) {
+			result.AnswerRetryEligible = w.role.RetryEligible(outcome, normalized.Output)
+			if !result.AnswerRetryEligible {
 				return result, nil
 			}
 			if try >= w.maxTries {

@@ -313,7 +313,10 @@ func runConfiguredReviewer(d *Deps, cfg *config.Config, sel verifierSelection, t
 	if err != nil {
 		return "", "", err
 	}
-	if strings.TrimSpace(walked.Answer) != "" {
+	// Prose from an attempt that timed out or died is half a review, and writing
+	// it would supersede a complete earlier document with it. Once the cap is
+	// spent the set keeps the review it already had.
+	if strings.TrimSpace(walked.Answer) != "" && !walked.AnswerRetryEligible {
 		return walked.Answer, walked.Agent, nil
 	}
 	if len(walked.Unavailable) == 0 {
@@ -324,9 +327,9 @@ func runConfiguredReviewer(d *Deps, cfg *config.Config, sel verifierSelection, t
 
 // reviewerRole is what the shared fallback walk calls the Reviewer: its name in
 // the operator's output, the Captured run pair each invocation is filed as under
-// the `review` phase label, and the rule that the only failed attempt is one
-// that came back with nothing to write down — a review has no format to parse,
-// so any prose is the Reviewer answering.
+// the `review` phase label, and the rule for which attempts are worth retrying —
+// a review has no format to parse, so any prose from a run that reached its own
+// ending is the Reviewer answering.
 //
 // Its runs are filed exactly as the Verifier's are, and for the same reason: a
 // Reviewer spends the same agent quota on the same set, so hiding it would make
@@ -345,8 +348,23 @@ func reviewerRole(d *Deps, errOut io.Writer, taskSetDir, setID, workSHA string) 
 		PersistSkipped: func(rec *streamRecorder, invocation *AgentInvocation, model string, try int, reason string, exitCode int) {
 			_ = persistSkippedReviewRun(d, errOut, taskSetDir, setID, workSHA, rec, invocation.AgentPreset(), invocation.RequestedAgent, model, try, reason, exitCode)
 		},
-		RetryEligible: func(_ *attemptOutcome, raw string) bool { return strings.TrimSpace(raw) == "" },
+		RetryEligible: reviewAttemptRetryEligible,
 	}
+}
+
+// reviewAttemptRetryEligible reports whether a Reviewer invocation should be
+// retried on the current preset. It reads the Verifier's rule with the verdict
+// parse taken out: a review has no format, so the ending is all there is to
+// judge. A run that timed out, could not be launched, or exited non-zero was cut
+// off mid-thought, and the prose it left is a fragment rather than a shorter
+// review — retrying costs one more attempt, while accepting it would write that
+// fragment over the set's last complete document. A clean run that said nothing
+// at all is retried for the same reason it is under the Verifier.
+func reviewAttemptRetryEligible(outcome *attemptOutcome, raw string) bool {
+	if outcome != nil && (outcome.timedOut || outcome.runErr != nil || outcome.exitCode != 0) {
+		return true
+	}
+	return strings.TrimSpace(raw) == ""
 }
 
 // reviewEnabled reports whether automatic Code review is enabled in user config
