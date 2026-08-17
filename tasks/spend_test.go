@@ -1442,3 +1442,194 @@ func TestSpendRollupJSONCarriesNotionalFromLivePricing(t *testing.T) {
 		t.Fatalf("model_key = %q", got.ModelKey)
 	}
 }
+
+func TestSpendRollupShowsModelColumnOnlyWhenSetMixesModels(t *testing.T) {
+	single := &SpendRollupResult{Sets: []SpendRollupRow{{
+		TaskSetID: "demo",
+		Tokens:    TokenUsage{Input: 1, HasInput: true},
+		Models:    "anthropic/claude-opus-5",
+		RunCount:  1,
+	}}}
+	var buf bytes.Buffer
+	RenderSpendRollup(&buf, single)
+	if strings.Contains(buf.String(), "model") {
+		t.Fatalf("single-model set should hide model column:\n%s", buf.String())
+	}
+
+	mixed := &SpendRollupResult{
+		ShowModels: true,
+		Sets: []SpendRollupRow{{
+			TaskSetID: "mixed",
+			Tokens:    TokenUsage{Input: 1, HasInput: true},
+			Models:    "anthropic/claude-opus-5+",
+			RunCount:  2,
+		}},
+	}
+	buf.Reset()
+	RenderSpendRollup(&buf, mixed)
+	out := buf.String()
+	if !strings.Contains(out, "model") || !strings.Contains(out, "anthropic/claude-opus-5+") {
+		t.Fatalf("mixed set should show model column:\n%s", out)
+	}
+}
+
+func TestSpendRollupSingleModelNamesModelWhenColumnVisible(t *testing.T) {
+	result := &SpendRollupResult{
+		ShowModels: true,
+		Sets: []SpendRollupRow{
+			{
+				TaskSetID: "mixed",
+				Project:   "pop",
+				Tokens:    TokenUsage{Input: 1, HasInput: true},
+				Models:    "anthropic/claude-opus-5+",
+				RunCount:  2,
+			},
+			{
+				TaskSetID: "single",
+				Project:   "pop",
+				Tokens:    TokenUsage{Input: 1, HasInput: true},
+				Models:    "openai/gpt-5.6-sol",
+				RunCount:  1,
+			},
+		},
+	}
+	var buf bytes.Buffer
+	RenderSpendRollup(&buf, result)
+	out := buf.String()
+	if !strings.Contains(out, "openai/gpt-5.6-sol") {
+		t.Fatalf("single-model row should name its model:\n%s", out)
+	}
+}
+
+func TestSpendRollupMixedModelsShowsDominantWithMixMarker(t *testing.T) {
+	env := spendFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	setDir := registerSpendSet(t, env, "2026-06-10-mixed-models", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	writeSpendRun(t, setDir, "01-a.md", "01-a", "claude", base, claudePricedEvents(10000, 0, 0, 0, "claude-opus-5"))
+	writeSpendRun(t, setDir, "01-a.md", "01-a", "claude", base.Add(time.Minute), claudePricedEvents(100, 0, 0, 0, "claude-sonnet-5"))
+
+	result, err := SpendRollupWith(env.deps(), nil, nil, SpendOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.ShowModels {
+		t.Fatal("expected ShowModels for mixed-model set")
+	}
+	row := result.Sets[0]
+	if row.Models != "anthropic/claude-opus-5+" {
+		t.Fatalf("models = %q, want dominant with mix marker", row.Models)
+	}
+}
+
+func TestSpendRollupAllModelBlindShowsBlindMarker(t *testing.T) {
+	env := spendFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	setDir := registerSpendSet(t, env, "2026-06-10-blind-models", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	writeSpendRunEx(t, setDir, "01-a.md", "01-a", "codex", base, codexPricedEvents(100, 50), spendRunOpts{})
+	writeSpendRunEx(t, setDir, "01-a.md", "01-a", "codex", base.Add(time.Minute), codexPricedEvents(10, 5), spendRunOpts{})
+
+	blindOnly, err := SpendRollupWith(env.deps(), nil, nil, SpendOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blindOnly.Sets[0].Models != spendModelBlindKey {
+		t.Fatalf("models = %q, want blind marker", blindOnly.Sets[0].Models)
+	}
+
+	mixedDir := registerSpendSet(t, env, "2026-06-10-mixed-with-blind", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	writeSpendRun(t, mixedDir, "01-a.md", "01-a", "claude", base, claudePricedEvents(1000, 0, 0, 0, "claude-opus-5"))
+	writeSpendRun(t, mixedDir, "01-a.md", "01-a", "claude", base.Add(time.Minute), claudePricedEvents(100, 0, 0, 0, "claude-sonnet-5"))
+
+	withBlind := &SpendRollupResult{
+		ShowModels: true,
+		Sets: []SpendRollupRow{
+			{TaskSetID: "mixed", Project: "pop", Tokens: TokenUsage{Input: 1, HasInput: true}, Models: "anthropic/claude-opus-5+", RunCount: 2},
+			blindOnly.Sets[0],
+		},
+	}
+	withBlind.Sets[1].Project = "pop"
+	var buf bytes.Buffer
+	RenderSpendRollup(&buf, withBlind)
+	if !strings.Contains(buf.String(), spendModelBlindKey) {
+		t.Fatalf("all-blind row should render blind marker when column visible:\n%s", buf.String())
+	}
+}
+
+func TestRenderSpendRollupJSONCarriesModelSplit(t *testing.T) {
+	env := spendFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	setDir := registerSpendSet(t, env, "2026-06-10-json-models", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	writeSpendRun(t, setDir, "01-a.md", "01-a", "claude", base, claudePricedEvents(1000, 50, 0, 0, "claude-opus-5"))
+	writeSpendRun(t, setDir, "01-a.md", "01-a", "claude", base.Add(time.Minute), claudePricedEvents(100, 10, 0, 0, "claude-sonnet-5"))
+
+	result, err := SpendRollupWith(env.deps(), nil, nil, SpendOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := RenderSpendRollupJSON(&buf, result); err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	sets := raw["sets"].([]any)
+	row := sets[0].(map[string]any)
+	models, ok := row["models"].(map[string]any)
+	if !ok || len(models) != 2 {
+		t.Fatalf("models = %#v, want two entries", row["models"])
+	}
+	opus := models["anthropic/claude-opus-5"].(map[string]any)
+	if opus["input_tokens"].(float64) != 1000 || opus["output_tokens"].(float64) != 50 {
+		t.Fatalf("opus split = %#v", opus)
+	}
+	sonnet := models["anthropic/claude-sonnet-5"].(map[string]any)
+	if sonnet["input_tokens"].(float64) != 100 || sonnet["output_tokens"].(float64) != 10 {
+		t.Fatalf("sonnet split = %#v", sonnet)
+	}
+}
+
+func TestRenderSpendRollupJSONModelSplitForBlindRuns(t *testing.T) {
+	env := spendFixture(t)
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	setDir := registerSpendSet(t, env, "2026-06-10-json-blind", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	writeSpendRunEx(t, setDir, "01-a.md", "01-a", "codex", base, codexPricedEvents(100, 50), spendRunOpts{})
+
+	result, err := SpendRollupWith(env.deps(), nil, nil, SpendOptions{
+		ResolveInput: ResolveInput{CWD: env.root},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := RenderSpendRollupJSON(&buf, result); err != nil {
+		t.Fatal(err)
+	}
+	var decoded spendRollupJSON
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.Sets[0].Models) != 1 {
+		t.Fatalf("models = %#v", decoded.Sets[0].Models)
+	}
+	if _, ok := decoded.Sets[0].Models[spendModelBlindKey]; !ok {
+		t.Fatalf("blind runs should land under blind key, got %#v", decoded.Sets[0].Models)
+	}
+}
