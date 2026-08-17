@@ -9,9 +9,22 @@ import (
 var (
 	summaryStartRE = regexp.MustCompile(`(?m)^SUMMARY_START\s*$`)
 	summaryEndRE   = regexp.MustCompile(`(?m)^SUMMARY_END\s*$`)
-	// taskCompleteRE matches the completion sentinel only when it stands alone
-	// on a line, same contract as SUMMARY_START / SUMMARY_END.
-	taskCompleteRE = regexp.MustCompile(`(?m)^TASK_COMPLETE\s*$`)
+)
+
+// The completion sentinels open the run's final line. Requiring the line to
+// open on the sentinel rejects one an agent buried mid-sentence while
+// narrating the contract ("…then print TASK_COMPLETE if the suite is green"),
+// which is the shape that would otherwise pass off unfinished work as done.
+// Requiring it to be the *final* line rejects a narrated mention anywhere
+// earlier in the transcript.
+//
+// What it deliberately tolerates is prose glued after the sentinel on that
+// line — several models close out "TASK_COMPLETEThe work landed: …" from a
+// single message, so no per-preset transcript framing can split it. Failure
+// has always been read this way; success now matches.
+const (
+	completeSentinel = "TASK_COMPLETE"
+	failedSentinel   = "TASK_FAILED:"
 )
 
 // The completion-contract failure reasons the harness itself records, as
@@ -46,15 +59,15 @@ func AssessCompletion(output string, taskMarkdown []byte) Assessment {
 	lines := splitNonEmptyLines(trimmed)
 	lastLine := lines[len(lines)-1]
 
-	if strings.HasPrefix(lastLine, "TASK_FAILED:") {
-		a.FailedReason = strings.TrimSpace(strings.TrimPrefix(lastLine, "TASK_FAILED:"))
+	if strings.HasPrefix(lastLine, failedSentinel) {
+		a.FailedReason = strings.TrimSpace(strings.TrimPrefix(lastLine, failedSentinel))
 		if a.FailedReason == "" {
 			a.FailedReason = "agent reported failure"
 		}
 		return a
 	}
 
-	if !taskCompleteRE.MatchString(trimmed) {
+	if !strings.HasPrefix(lastLine, completeSentinel) {
 		a.FailedReason = reasonMissingSentinel
 		return a
 	}

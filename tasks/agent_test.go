@@ -1446,6 +1446,24 @@ func TestNormalizeCursorStreamJSONGluedSummarySentinelStillAssesses(t *testing.T
 	}
 }
 
+// Captured from a real cursor-grok-4.5-medium run (task set
+// 2026-08-17-spend-lens, run 42a34ad4): the sign-off is glued to the sentinel
+// *inside* one assistant message, so cursorTranscript's per-message framing
+// cannot separate them. The completion contract has to read this as complete.
+func TestNormalizeCursorStreamJSONIntraMessageGluedSentinelStillAssesses(t *testing.T) {
+	raw := "{\"type\":\"system\",\"subtype\":\"init\",\"model\":\"Grok 4.5\"}\n" +
+		"{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Work and acceptance boxes are already done.\\n\\nSUMMARY_START\\nSpend rollup defaults to newest-first by latest run start_time.\\nSUMMARY_END\\nTASK_COMPLETESpend-lens recency work is done: build/vet/tests passed.\"}]}}\n"
+
+	result := NormalizeAgentOutput(AgentOutputCursorStreamJSON, raw)
+	assessment := AssessCompletion(result.Output, []byte("## Acceptance criteria\n\n- [x] done\n"))
+	if !assessment.Complete {
+		t.Fatalf("assessment failed: %q (output %q)", assessment.FailedReason, result.Output)
+	}
+	if assessment.Summary != "Spend rollup defaults to newest-first by latest run start_time." {
+		t.Fatalf("summary = %q", assessment.Summary)
+	}
+}
+
 func TestNormalizeCursorStreamJSONDetectsAuthFailure(t *testing.T) {
 	authLine := "Error: Authentication required. Please run 'agent login' first, or set CURSOR_API_KEY environment variable."
 	raw := authLine + "\n"

@@ -14,19 +14,34 @@ func TestAssessCompletionSuccess(t *testing.T) {
 	}
 }
 
-func TestAssessCompletionRequiresOwnLineSentinel(t *testing.T) {
+// The sentinel opens the final line. Prose glued after it is tolerated — that
+// is how several models close out from a single message — while a sentinel
+// narrated mid-sentence, or mentioned before the run's real close, is not.
+func TestAssessCompletionRequiresFinalLineToOpenOnSentinel(t *testing.T) {
 	md := []byte("## Acceptance criteria\n\n- [x] ok\n")
-	ok := AssessCompletion("SUMMARY_START\nok\nSUMMARY_END\nTASK_COMPLETE\n", md)
-	if !ok.Complete {
-		t.Fatalf("own-line sentinel rejected: %#v", ok)
-	}
-	buried := AssessCompletion("SUMMARY_START\nok\nSUMMARY_END\nAll done TASK_COMPLETE for real.\n", md)
-	if buried.Complete || buried.FailedReason != "missing TASK_COMPLETE sentinel" {
-		t.Fatalf("buried sentinel accepted: %#v", buried)
-	}
-	glued := AssessCompletion("SUMMARY_START\nok\nSUMMARY_END\nTASK_COMPLETEThe work is done.\n", md)
-	if glued.Complete || glued.FailedReason != "missing TASK_COMPLETE sentinel" {
-		t.Fatalf("trailing-glued sentinel accepted: %#v", glued)
+
+	for _, tc := range []struct {
+		name   string
+		output string
+		want   bool
+	}{
+		{"own line", "SUMMARY_START\nok\nSUMMARY_END\nTASK_COMPLETE\n", true},
+		// The shape cursor/grok emits: sign-off glued to the sentinel inside
+		// one assistant message, so no transcript framing can split it.
+		{"glued sign-off", "SUMMARY_START\nok\nSUMMARY_END\nTASK_COMPLETEThe work landed: tests pass.\n", true},
+		{"buried mid-sentence", "SUMMARY_START\nok\nSUMMARY_END\nAll done TASK_COMPLETE for real.\n", false},
+		{"narrated, then kept working", "I'll print TASK_COMPLETE once green.\nSUMMARY_START\nok\nSUMMARY_END\nstill running the suite\n", false},
+		{"sentinel not the last word", "SUMMARY_START\nok\nSUMMARY_END\nTASK_COMPLETE\n\nOne more thought:\nlet me reconsider.\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := AssessCompletion(tc.output, md)
+			if a.Complete != tc.want {
+				t.Fatalf("Complete = %v, want %v (reason %q)", a.Complete, tc.want, a.FailedReason)
+			}
+			if !tc.want && a.FailedReason != reasonMissingSentinel {
+				t.Fatalf("reason = %q, want %q", a.FailedReason, reasonMissingSentinel)
+			}
+		})
 	}
 }
 
