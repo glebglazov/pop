@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebglazov/pop/config"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
@@ -194,6 +195,40 @@ func TestMapKindVerbsFollowTheFrontier(t *testing.T) {
 	}
 	if _, err := k.Perform(active, nil, work.Verb("drain")); err == nil {
 		t.Fatal("a Task-set verb on a Map should be refused")
+	}
+}
+
+// TestMapKindVerbCapabilities is the Map's half of the grant list ADR-0215
+// decision 5 asks to be reviewable: every verb the kind owns, with the one bit
+// that says whether a Selection may run it. The four frontier verbs and assist
+// each resolve a session per Map and hand the operator to a pane, so none of
+// them is plural; the shared openers and the whole status vocabulary are.
+func TestMapKindVerbCapabilities(t *testing.T) {
+	k, _ := mapKindFixture(t)
+	containers, err := k.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var active work.Container
+	for _, c := range containers {
+		if c.ID == "2026-07-01-active" {
+			active = c
+		}
+	}
+	active.MutedUntil = time.Now().Add(time.Hour)
+	plural := map[work.Verb]bool{
+		work.VerbMute: true, work.VerbUnmute: true, work.VerbStatus: true, work.VerbCopyName: true,
+		VerbReopen: true, VerbAbandon: true, VerbArchive: true, VerbUnarchive: true,
+	}
+	for _, action := range append(k.Actions(active), k.StatusActions(active)...) {
+		if got := action.Modes.AllowsPlural(); got != plural[action.Verb] {
+			t.Fatalf("%s plural = %v, want %v", action.Verb, got, plural[action.Verb])
+		}
+	}
+	for _, action := range k.ItemActions(active, active.Items[0]) {
+		if action.Modes.AllowsPlural() {
+			t.Fatalf("ticket verb %s is plural, want every item verb singular", action.Verb)
+		}
 	}
 }
 

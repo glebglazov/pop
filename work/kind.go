@@ -380,7 +380,33 @@ type Action struct {
 	Verb  Verb
 	Key   string
 	Label string
+	// Modes is the set of surface modes this verb works in. The zero value is
+	// Singular, so a kind that declares nothing offers a verb that acts on the one
+	// container it was invoked over (ADR-0215 decision 5).
+	Modes ActionModes
 }
+
+// ActionModes is the set of surface modes one action works in. It is declared by
+// the kind that owns the verb because eligibility for a Selection is a property
+// of the act — whether one confirmation, one duration or one status word answers
+// identically for every targeted container — and only the kind knows that. It
+// cannot be derived from the verb's Outcome: the outcome exists after Perform
+// runs and the menu is drawn before.
+type ActionModes uint8
+
+const (
+	// Singular is the zero value and the default: the action targets the one
+	// container the surface invoked it over. Silence meaning singular is the point
+	// of the default — bulk is granted one verb at a time by someone writing it
+	// down, so the grant list is a reviewable audit rather than a blanket rule.
+	Singular ActionModes = 0
+	// Plural additionally declares the action fit to run over a Selection, where
+	// the surface loops it over every marked container.
+	Plural ActionModes = 1
+)
+
+// AllowsPlural reports whether the action may be run over a Selection.
+func (m ActionModes) AllowsPlural() bool { return m&Plural != 0 }
 
 // OutcomeKind classifies what a caller must do with a performed verb.
 type OutcomeKind int

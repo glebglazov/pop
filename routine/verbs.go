@@ -59,9 +59,16 @@ const noReportMessage = "no report to copy"
 // pause bit (ADR-0138), so the consent pair is absent from it — the same
 // filtering the Routine action menu has always done, now answered by the kind
 // that knows why.
+//
+// Capability audit (ADR-0215 decision 5). Plural — copy-name alone. Singular —
+// everything else: fire, preview, edit and refine each hand the operator to a
+// pane; the pause pair is one bit per Routine, so a mixed set has no single
+// direction to drive; runs opens one history; and handoff and copy-report-path
+// each name one Routine's text, which the surface has nowhere to put beside
+// another's.
 func (k *Kind) Actions(c work.Container) []work.Action {
 	if c.Broken {
-		return []work.Action{{Verb: work.VerbCopyName, Key: "y", Label: "copy name"}}
+		return []work.Action{{Verb: work.VerbCopyName, Key: "y", Label: "copy name", Modes: work.Plural}}
 	}
 	actions := []work.Action{
 		{Verb: VerbFire, Key: "I", Label: "fire now"},
@@ -84,7 +91,7 @@ func (k *Kind) Actions(c work.Container) []work.Action {
 	if c.RoutineLastReport != "" {
 		actions = append(actions, work.Action{Verb: VerbCopyReportPath, Key: "p", Label: "copy report path"})
 	}
-	return append(actions, work.Action{Verb: work.VerbCopyName, Key: "y", Label: "copy name"})
+	return append(actions, work.Action{Verb: work.VerbCopyName, Key: "y", Label: "copy name", Modes: work.Plural})
 }
 
 // StatusActions returns nothing: a Routine has no status to write. Its one
@@ -97,7 +104,9 @@ func (k *Kind) StatusActions(c work.Container) []work.Action { return nil }
 
 // ItemActions returns the verbs for one run. A run is a record, not a thing to
 // act on: what a reader wants from it is where its report is — the same
-// copy-report-path verb the row offers over the newest run — and its name.
+// copy-report-path verb the row offers over the newest run — and its name. Both
+// are singular, like every item verb: a Selection marks containers, and
+// item-level bulk is out of scope by decision (ADR-0215).
 func (k *Kind) ItemActions(c work.Container, item work.Item) []work.Action {
 	var actions []work.Action
 	if item.File != "" {

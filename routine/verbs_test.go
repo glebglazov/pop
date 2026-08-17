@@ -55,6 +55,47 @@ func hasVerb(actions []work.Action, verb work.Verb) bool {
 	return false
 }
 
+// TestRoutineVerbCapabilities is the Routine's half of the grant list ADR-0215
+// decision 5 asks to be reviewable. Copy-name is the only plural verb a Routine
+// has: firing, previewing, editing and refining each hand the operator to a
+// pane, the pause pair is one bit with no single direction over a mixed set, and
+// the two text-copying verbs each name one Routine's own file.
+func TestRoutineVerbCapabilities(t *testing.T) {
+	d, home := routineTmuxDeps(t)
+	if _, err := AddWith(d, "alpha", "every 6h", home); err != nil {
+		t.Fatal(err)
+	}
+	k := verbKind(t, d, home)
+	containers, err := k.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := containerByID(t, containers, "alpha")
+	c.RoutineLastReport = "/data/reports/alpha.md"
+
+	for _, action := range append(k.Actions(c), k.StatusActions(c)...) {
+		want := action.Verb == work.VerbCopyName
+		if got := action.Modes.AllowsPlural(); got != want {
+			t.Fatalf("%s plural = %v, want %v", action.Verb, got, want)
+		}
+	}
+	// Item-level bulk is out of scope, so a run's own verbs are singular — the
+	// copy-name on a run included.
+	for _, action := range k.ItemActions(c, work.Item{ID: "run-1", File: "/data/reports/alpha.md"}) {
+		if action.Modes.AllowsPlural() {
+			t.Fatalf("run verb %s is plural, want every item verb singular", action.Verb)
+		}
+	}
+	// A Routine that will not load offers its name alone, and that verb keeps its
+	// capability: a broken row is still a row a Selection can copy.
+	broken := c
+	broken.Broken = true
+	actions := k.Actions(broken)
+	if len(actions) != 1 || !actions[0].Modes.AllowsPlural() {
+		t.Fatalf("broken Routine actions = %+v, want copy-name alone, plural", actions)
+	}
+}
+
 // TestRoutineActionsAnswerTheRowInFrontOfThem drives the whole lazy-verb rule:
 // what a Routine offers is read off the container each time a menu opens, so the
 // consent pair flips direction with the pause bit, a Project routine never offers

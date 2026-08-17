@@ -93,6 +93,15 @@ func SelectionOverflow(hidden int) string {
 	return dimStyle.Render(fmt.Sprintf("  … +%d more selected", hidden))
 }
 
+// ConfirmPrompt is the inline y/N question a bulk verb asks before it runs,
+// rendered for the bottom line the hints and the flash share. Both plural
+// surfaces ask it the same way, in the house accent, because the grammar is the
+// whole of what a human has to recognise: a line ending in `? y/N` means one key
+// is about to write over everything marked (ADR-0215 decision 7).
+func ConfirmPrompt(label string) string {
+	return killPromptStyle.Render("  " + label + "? y/N")
+}
+
 // SelectionRegion is the list Region a Selection of count rows asks for: the
 // marked rows reserved at the top of the list, under the house separator and
 // overflow lines.

@@ -1440,10 +1440,10 @@ func (d *MonitorDashboard) buildHints() string {
 	// The prompt takes the bottom line the same way a flash does — one line
 	// either way, and the question sits where the answer's report will land.
 	if d.killPrompt != nil {
-		return killPromptStyle.Render("  Kill " + d.killPrompt.label + "? y/N")
+		return ConfirmPrompt("Kill " + d.killPrompt.label)
 	}
 	if d.writePrompt != nil {
-		return killPromptStyle.Render("  " + d.writePrompt.label + "? y/N")
+		return ConfirmPrompt(d.writePrompt.label)
 	}
 	hints := "  j/k move · Tab select · Enter open and clear · Shift+Enter open · r toggle unread/clear · f follow · x unmonitor · C-x kill · F follow view · ← back · Esc cancel · C-h help"
 	if d.selection.Active() {

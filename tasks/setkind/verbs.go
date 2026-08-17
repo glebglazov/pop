@@ -53,6 +53,14 @@ const (
 //
 // It is called when a menu opens over one container, not per container at load
 // time, so the eligibility it reports is as fresh as the keypress.
+//
+// Capability audit (ADR-0215 decision 5). Plural — mute, unmute, the status
+// opener, archive and copy-name: one window, one confirmation or one word
+// answers identically for every marked set, and the opener's own submenu
+// intersects again underneath it. Singular — drain, verify, fold, assist, shell,
+// bind, unbind, auto-drain, unpark and copy-path: each resolves a checkout, a
+// worktree, a session or a modal per set, so one answer cannot stand for the
+// batch, and the handoff verbs have no plural meaning at all.
 func (k *Kind) Actions(c work.Container) []work.Action {
 	actions := []work.Action{{Verb: VerbDrain, Key: "I", Label: "drain"}}
 	// Verify is the lighter, explicit Verifier force (ADR-0123): offered only on
@@ -68,7 +76,7 @@ func (k *Kind) Actions(c work.Container) []work.Action {
 	actions = append(actions,
 		work.Action{Verb: VerbAssist, Key: "S", Label: "assist"},
 		work.Action{Verb: work.VerbShell, Key: "O", Label: "shell"},
-		work.Action{Verb: work.VerbMute, Key: "m", Label: "mute ▸"},
+		work.Action{Verb: work.VerbMute, Key: "m", Label: "mute ▸", Modes: work.Plural},
 	)
 	// Unmute precedes unbind deliberately: both want `u`, and on a row that
 	// carries a mute *and* a worktree the mute is what `u` clears (ADR-0200
@@ -77,7 +85,7 @@ func (k *Kind) Actions(c work.Container) []work.Action {
 	// a row the human just pulled out of the archive-of-attention, and unbinding
 	// a muted set is not something anyone does by hotkey.
 	if !c.MutedUntil.IsZero() {
-		actions = append(actions, work.Action{Verb: work.VerbUnmute, Key: "u", Label: "unmute"})
+		actions = append(actions, work.Action{Verb: work.VerbUnmute, Key: "u", Label: "unmute", Modes: work.Plural})
 	}
 	actions = append(actions, work.Action{Verb: VerbBind, Key: "b", Label: "bind worktree"})
 	if c.Bound {
@@ -86,13 +94,13 @@ func (k *Kind) Actions(c work.Container) []work.Action {
 	if !c.Orphaned {
 		actions = append(actions, work.Action{Verb: VerbAutoDrain, Key: "a", Label: "auto-drain"})
 	}
-	actions = append(actions, work.Action{Verb: work.VerbStatus, Key: "s", Label: "status ▸"})
+	actions = append(actions, work.Action{Verb: work.VerbStatus, Key: "s", Label: "status ▸", Modes: work.Plural})
 	if c.Parked {
 		actions = append(actions, work.Action{Verb: VerbUnpark, Key: "r", Label: "unpark"})
 	}
 	actions = append(actions,
-		work.Action{Verb: VerbArchive, Key: "x", Label: "archive"},
-		work.Action{Verb: work.VerbCopyName, Key: "y", Label: "copy name"},
+		work.Action{Verb: VerbArchive, Key: "x", Label: "archive", Modes: work.Plural},
+		work.Action{Verb: work.VerbCopyName, Key: "y", Label: "copy name", Modes: work.Plural},
 	)
 	if c.Bound {
 		actions = append(actions, work.Action{Verb: VerbCopyPath, Key: "p", Label: "copy path"})
@@ -106,19 +114,26 @@ func (k *Kind) Actions(c work.Container) []work.Action {
 // the dashboard because they are this kind's status vocabulary and no other's
 // (ADR-0186); the keys and labels are unchanged from the hardcoded list they
 // replace, because an operator's fingers are part of the interface.
+//
+// All five are plural (ADR-0215 decision 5): a status word takes no per-set
+// input, each set's write is one atomic manifest write of its own, and moving a
+// batch of sets to a status is the operation the Selection was built for.
 func (k *Kind) StatusActions(c work.Container) []work.Action {
 	return []work.Action{
-		{Verb: VerbComplete, Key: "c", Label: "complete"},
-		{Verb: VerbOpen, Key: "o", Label: "open"},
-		{Verb: VerbSkip, Key: "s", Label: "skip"},
-		{Verb: VerbArchive, Key: "x", Label: "archive"},
-		{Verb: VerbUnarchive, Key: "u", Label: "unarchive"},
+		{Verb: VerbComplete, Key: "c", Label: "complete", Modes: work.Plural},
+		{Verb: VerbOpen, Key: "o", Label: "open", Modes: work.Plural},
+		{Verb: VerbSkip, Key: "s", Label: "skip", Modes: work.Plural},
+		{Verb: VerbArchive, Key: "x", Label: "archive", Modes: work.Plural},
+		{Verb: VerbUnarchive, Key: "u", Label: "unarchive", Modes: work.Plural},
 	}
 }
 
 // ItemActions returns the verbs applicable to one task, filtered to its status:
 // complete for anything not already done, open for any reopenable task (mirroring
-// CanReopen), skip for an open task, and copy-name always.
+// CanReopen), skip for an open task, and copy-name always. Every one of them is
+// singular: a Selection marks containers, and item-level bulk is out of scope by
+// decision — a whole-set verb already means every unlocked task, and
+// `pop tasks complete` already does per-task multi-select (ADR-0215).
 func (k *Kind) ItemActions(c work.Container, item work.Item) []work.Action {
 	var actions []work.Action
 	status := tasks.TaskStatus(item.Status)

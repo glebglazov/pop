@@ -228,6 +228,12 @@ func (k *MapKind) Columns() []string {
 // mutable on the same terms as a Task set (ADR-0200 decision 7), offered on the
 // same `m` opener and, on an already-muted row, `u` for unmute — eligibility by
 // omission, the way every conditional verb here works.
+//
+// Capability audit (ADR-0215 decision 5). Plural — mute, unmute, the status
+// opener and copy-name, for the same reason a task set's are: the input is
+// shared, or there is none. Singular — the four frontier verbs and assist, each
+// of which resolves a session per Map and hands the operator to a pane, which
+// has no plural meaning; and shell, which is one directory.
 func (k *MapKind) Actions(c work.Container) []work.Action {
 	var actions []work.Action
 	if c.MapFrontier > 0 {
@@ -239,10 +245,10 @@ func (k *MapKind) Actions(c work.Container) []work.Action {
 	actions = append(actions,
 		work.Action{Verb: VerbAssist, Key: "S", Label: "assist the map and go"},
 		work.Action{Verb: work.VerbShell, Key: "O", Label: "shell"},
-		work.Action{Verb: work.VerbMute, Key: "m", Label: "mute ▸"},
+		work.Action{Verb: work.VerbMute, Key: "m", Label: "mute ▸", Modes: work.Plural},
 	)
 	if !c.MutedUntil.IsZero() {
-		actions = append(actions, work.Action{Verb: work.VerbUnmute, Key: "u", Label: "unmute"})
+		actions = append(actions, work.Action{Verb: work.VerbUnmute, Key: "u", Label: "unmute", Modes: work.Plural})
 	}
 	if c.MapFrontier > 0 {
 		actions = append(actions,
@@ -251,8 +257,8 @@ func (k *MapKind) Actions(c work.Container) []work.Action {
 		)
 	}
 	return append(actions,
-		work.Action{Verb: work.VerbStatus, Key: "s", Label: "status ▸"},
-		work.Action{Verb: work.VerbCopyName, Key: "y", Label: "copy name"},
+		work.Action{Verb: work.VerbStatus, Key: "s", Label: "status ▸", Modes: work.Plural},
+		work.Action{Verb: work.VerbCopyName, Key: "y", Label: "copy name", Modes: work.Plural},
 	)
 }
 
@@ -267,12 +273,18 @@ func (k *MapKind) Actions(c work.Container) []work.Action {
 // reports the same `pop map register` corrective the command line gives, and
 // unarchiving a Map that was never archived says so. Gating them here would mean
 // reproducing those rules on a read surface.
+//
+// All four are plural (ADR-0215 decision 5): abandoning a batch of Maps is one
+// confirmation answered identically for every one of them, and the other three
+// take no input at all. The intersection is what keeps a Selection holding a Map
+// and a task set from seeing either kind's words — the two vocabularies share no
+// verb id.
 func (k *MapKind) StatusActions(c work.Container) []work.Action {
 	return []work.Action{
-		{Verb: VerbReopen, Key: "o", Label: "open (reopen)"},
-		{Verb: VerbAbandon, Key: "a", Label: "abandon"},
-		{Verb: VerbArchive, Key: "x", Label: "archive"},
-		{Verb: VerbUnarchive, Key: "u", Label: "unarchive"},
+		{Verb: VerbReopen, Key: "o", Label: "open (reopen)", Modes: work.Plural},
+		{Verb: VerbAbandon, Key: "a", Label: "abandon", Modes: work.Plural},
+		{Verb: VerbArchive, Key: "x", Label: "archive", Modes: work.Plural},
+		{Verb: VerbUnarchive, Key: "u", Label: "unarchive", Modes: work.Plural},
 	}
 }
 
@@ -286,6 +298,9 @@ func (k *MapKind) StatusActions(c work.Container) []work.Action {
 // it right now, and going to that conversation is the one thing the operator can
 // want from the row. Without this the row offers copy-name alone, and a Map's
 // live sessions are reachable from the dashboard only by first killing them.
+//
+// Every one of them is singular: a Selection marks containers, and item-level
+// bulk is out of scope by decision (ADR-0215).
 func (k *MapKind) ItemActions(c work.Container, item work.Item) []work.Action {
 	var actions []work.Action
 	switch {

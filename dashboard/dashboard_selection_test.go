@@ -191,7 +191,7 @@ func TestWorkSelectionRendersTheModeWordAndCountedSeparator(t *testing.T) {
 	}
 
 	// A refusal cannot hide the mode: the flash takes the rest of the line.
-	m = selPress(t, m, selKeyRune('y'))
+	m = selPress(t, m, selKeyRune('l'))
 	view = ui.StripANSI(m.View().Content)
 	if !strings.Contains(view, ui.SelectionMode) || !strings.Contains(view, "acts on one row") {
 		t.Fatalf("want both the mode word and the refusal on the bottom line:\n%s", view)
@@ -510,8 +510,9 @@ func TestWorkSelectionJumpKeysAreRegionAware(t *testing.T) {
 	}
 }
 
-// Every verb on this surface is singular, and a singular verb in selection mode
-// says so rather than quietly acting on the cursored row.
+// A verb no kind declared plural says so in selection mode rather than quietly
+// acting on the cursored row. The keys that went plural — `a` and `y` — have
+// their own tests in dashboard_bulk_verbs_test.go.
 func TestWorkSelectionRefusesEverySingularVerb(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -519,9 +520,6 @@ func TestWorkSelectionRefusesEverySingularVerb(t *testing.T) {
 	}{
 		{"detail", selKeyRune('l')},
 		{"detail via enter", tea.KeyPressMsg{Code: tea.KeyEnter}},
-		{"copy name", selKeyRune('y')},
-		{"action menu", selKeyRune('a')},
-		{"pinned action menu", selKeyRune('A')},
 		{"row's own I", selKeyRune('I')},
 		{"open worktree", tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl}},
 	} {

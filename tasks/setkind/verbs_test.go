@@ -46,6 +46,37 @@ func TestActionsOrderSpawningFirst(t *testing.T) {
 	}
 }
 
+// TestVerbCapabilities is the Task-set kind's half of the grant list ADR-0215
+// decision 5 asks to be reviewable: every verb this kind owns, with the one bit
+// that says whether a Selection may run it. The container below trips every
+// conditional verb, so a verb added without a decision about its capability
+// fails here rather than reaching a plural menu unnoticed.
+func TestVerbCapabilities(t *testing.T) {
+	k := New(nil)
+	c := work.Container{
+		ID: "2026-07-01-demo", Bound: true, Provisioned: true, Parked: true,
+		VerifyMark: tasks.VerifyMarkUnverified, RawStatus: tasks.StatusDone,
+		MutedUntil: time.Date(2026, 8, 14, 9, 0, 0, 0, time.UTC),
+	}
+	plural := map[work.Verb]bool{
+		work.VerbMute: true, work.VerbUnmute: true, work.VerbStatus: true,
+		VerbArchive: true, work.VerbCopyName: true,
+		VerbComplete: true, VerbOpen: true, VerbSkip: true, VerbUnarchive: true,
+	}
+	for _, action := range append(k.Actions(c), k.StatusActions(c)...) {
+		if got := action.Modes.AllowsPlural(); got != plural[action.Verb] {
+			t.Fatalf("%s plural = %v, want %v", action.Verb, got, plural[action.Verb])
+		}
+	}
+	// Item-level bulk is out of scope, so no task verb is plural.
+	item := work.Item{ID: "01", Status: string(tasks.TaskOpen)}
+	for _, action := range k.ItemActions(c, item) {
+		if action.Modes.AllowsPlural() {
+			t.Fatalf("item verb %s is plural, want every item verb singular", action.Verb)
+		}
+	}
+}
+
 // TestCopyPathHiddenOnUnboundSet pins that `p` is hidden — not offered at all —
 // on an unbound set, exactly like `u` (unbind), rather than shown and erroring
 // when pressed. A bound set offers it immediately after `y` and Perform copies

@@ -273,12 +273,28 @@ type dashboardMenu struct {
 	status *dashboardStatusMenu
 	mute   *dashboardMuteMenu
 	pinned bool
+	// plural marks a menu opened over a Selection: its items are the verbs every
+	// targeted row offers and declares plural, and targets is the row set they
+	// will run over — captured when the menu opened, so the poll rebuilding the
+	// table underneath cannot change what a keypress is aimed at. row is still the
+	// first target, which is what the overlay is drawn beside.
+	plural  bool
+	targets []DashboardRow
 }
 
 // nested reports whether a submenu is open over the action menu. The two nest
 // the same way and only one can be open at a time, so every place that asks
 // "is the action menu itself taking keys" asks here.
 func (m *dashboardMenu) nested() bool { return m.status != nil || m.mute != nil }
+
+// pluralCount is how many rows this menu's verbs will act on, zero for a menu
+// over the cursored row. It is what the overlay's titles state.
+func (m *dashboardMenu) pluralCount() int {
+	if m == nil || !m.plural {
+		return 0
+	}
+	return len(m.targets)
+}
 
 // Row-verb key case (ADR-0158): uppercase = handoff (spawns/focuses a pane, quits
 // the dashboard); lowercase = in-place (acts and leaves the dashboard standing).
@@ -655,6 +671,10 @@ type QueueDashboard struct {
 	// preset when it is here, and gone from disk when it is not. Empty means no
 	// poll has been asked for it, and then allRows is the widest set the model has.
 	unfiltered []DashboardRow
+	// bulkPrompt is the inline y/N a plural verb opens before it writes. While it
+	// is open every key outside its own grammar is inert, so `y` can only ever
+	// write what the question named (ADR-0215 decision 7).
+	bulkPrompt *dashboardBulkPrompt
 
 	pendingG bool
 	flash    ui.Flash
@@ -851,7 +871,7 @@ func (m QueueDashboard) resizeMainList() {
 // toggle (ADR-0213).
 func (m QueueDashboard) ViewToggleAllowed() bool {
 	return !m.showHelp && !m.searchTyping &&
-		m.bind == nil && m.drainPick == nil && m.abandon == nil &&
+		m.bind == nil && m.drainPick == nil && m.abandon == nil && m.bulkPrompt == nil &&
 		m.detail == nil && m.menu == nil && m.itemMenu == nil && m.filter == nil
 }
 
@@ -995,6 +1015,10 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pendingG = false
 			return m.updateAbandonModal(msg)
 		}
+		if m.bulkPrompt != nil {
+			m.pendingG = false
+			return m.updateBulkPrompt(msg)
+		}
 		if m.detail != nil {
 			return m.updateDetailView(msg)
 		}
@@ -1075,8 +1099,10 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.openCheckout = dir
 			return m, tea.Quit
 		case "a", "A":
-			if m.refuseSingular("the action menu") {
-				return m, nil
+			if m.selection.Active() {
+				// Over a Selection there is one menu, not a pinned one and a one-shot
+				// one: pinning follows the row cursor, and the cursor is not the target.
+				return m.openSelectionMenu()
 			}
 			row, ok := m.list.Selected()
 			if !ok {
@@ -1133,8 +1159,11 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.detail = newDetailView(row)
 			return m, nil
 		case "y":
-			if m.refuseSingular("copy name") {
-				return m, nil
+			if m.selection.Active() {
+				// Copy-name is granted plural by every kind that has a name, so `y`
+				// keeps its meaning in the mode: it copies what is marked, in the
+				// region's order, and asks nothing first because it writes nothing.
+				return m.dispatchBulkVerb(work.VerbCopyName, m.selectionRows())
 			}
 			row, ok := m.list.Selected()
 			if !ok {
@@ -1306,6 +1335,8 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.reload()
 	case dashboardKindVerbMsg:
 		return m.applyKindVerb(msg)
+	case dashboardBulkVerbMsg:
+		return m.applyBulkVerb(msg)
 	case dashboardItemTextMsg:
 		if m.detail == nil || m.detail.peek == nil {
 			return m, nil
@@ -1406,6 +1437,9 @@ func (m QueueDashboard) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.invokeMenuItem(i)
 		}
 	}
+	if m.menu.plural {
+		m.refuseMenuVerb(msg.String())
+	}
 	return m, nil
 }
 
@@ -1479,6 +1513,16 @@ func (m QueueDashboard) invokeMuteMenuItem(idx int) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	row := m.menu.row
+	if m.menu.plural {
+		// The window the human just picked is the shared input that makes mute
+		// plural: one date, every marked row, one confirmation.
+		targets := m.menu.targets
+		window := windows[idx]
+		m.menu = nil
+		return m.openBulkPrompt(bulkLabel(work.VerbMute, len(targets)), targets, func(m QueueDashboard, rows []DashboardRow) tea.Cmd {
+			return m.bulkMute(rows, window)
+		})
+	}
 	if m.menu.pinned {
 		m.menu.mute = nil
 	} else {
@@ -1493,6 +1537,9 @@ func (m QueueDashboard) invokeMuteMenuItem(idx int) (tea.Model, tea.Cmd) {
 func (m QueueDashboard) invokeMenuItem(idx int) (tea.Model, tea.Cmd) {
 	if m.menu == nil {
 		return m, nil
+	}
+	if m.menu.plural {
+		return m.invokeSelectionMenuItem(idx)
 	}
 	items := m.menu.list.Items()
 	if idx < 0 || idx >= len(items) {
@@ -1531,6 +1578,13 @@ func (m QueueDashboard) invokeStatusMenuItem(idx int) (tea.Model, tea.Cmd) {
 	}
 	item := items[idx]
 	row := m.menu.row
+	if m.menu.plural {
+		// A plural write is about to change every marked row and consume the marks,
+		// so the whole overlay goes: what it was showing is no longer the question.
+		targets := m.menu.targets
+		m.menu = nil
+		return m.dispatchBulkVerb(item.Verb, targets)
+	}
 	if m.menu.pinned {
 		m.menu.status = nil
 	} else {
@@ -2113,15 +2167,14 @@ func (m QueueDashboard) regionBottom() int {
 
 // refuseSingular answers a key whose verb acts on one row while rows are marked:
 // it does nothing and says so on the bottom line, because a key that goes
-// silently inert is indistinguishable from a bug (ADR-0215 decision 4). Every verb
-// on this surface is singular today — the capability a verb declares to go plural
-// arrives with the slice that grants the first one — so every one of them calls
-// this in a line.
+// silently inert is indistinguishable from a bug (ADR-0215 decision 4). The keys
+// that reach a verb no kind declared plural — the detail view, the row's own I,
+// the worktree open — each call this in a line.
 func (m *QueueDashboard) refuseSingular(verb string) bool {
 	if !m.selection.Active() {
 		return false
 	}
-	m.flash.Set(fmt.Sprintf("%s acts on one row — shift+tab clears the %d selected", verb, m.selection.Len()))
+	m.flash.Set(singularRefusal(verb, m.selection.Len()))
 	return true
 }
 
@@ -2688,6 +2741,12 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "y", Desc: "confirm unbind"},
 			{Key: "enter/n/esc", Desc: "cancel"},
 		}
+	case m.bulkPrompt != nil:
+		// A bulk verb's confirmation, which owns the keyboard until it is answered.
+		return []ui.HelpEntry{
+			{Key: "y", Desc: "confirm " + m.bulkPrompt.label},
+			{Key: "enter/n/esc", Desc: "cancel"},
+		}
 	case m.itemMenu != nil:
 		// Item-level action menu (in detail or peek). Its verbs are the owning
 		// kind's, so the help lists the menu that is actually open rather than one
@@ -2801,12 +2860,26 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "tab", Desc: "select row"},
 			{Key: "shift+tab", Desc: "clear selection"},
 			{Key: "l/enter", Desc: "open detail"},
-			{Key: "y", Desc: "copy name"},
-			{Key: "a", Desc: "action menu"},
-			{Key: "A", Desc: "pinned action menu"},
-			{Key: "ctrl+g", Desc: "open worktree"},
-			{Key: "/", Desc: "search"},
 		}
+		// In selection mode the same two keys mean the marks, so the overlay says
+		// so rather than describing the singular surface the human is not on. A
+		// pinned menu follows the row cursor and has nothing to pin to there.
+		if m.selection.Active() {
+			entries = append(entries,
+				ui.HelpEntry{Key: "y", Desc: "copy selected names"},
+				ui.HelpEntry{Key: "a", Desc: "actions over the selection"},
+			)
+		} else {
+			entries = append(entries,
+				ui.HelpEntry{Key: "y", Desc: "copy name"},
+				ui.HelpEntry{Key: "a", Desc: "action menu"},
+				ui.HelpEntry{Key: "A", Desc: "pinned action menu"},
+			)
+		}
+		entries = append(entries,
+			ui.HelpEntry{Key: "ctrl+g", Desc: "open worktree"},
+			ui.HelpEntry{Key: "/", Desc: "search"},
+		)
 		if m.searchTerm != "" {
 			entries = append(entries, ui.HelpEntry{Key: "/ enter", Desc: "clear search"})
 		}
@@ -3020,6 +3093,11 @@ func (m QueueDashboard) pageHeader() string {
 // mainHint returns the footer hint for the main (non-modal, non-menu) view.
 func (m QueueDashboard) mainHint() string {
 	toggle := "v " + m.page.toggleWord
+	// The prompt takes the bottom line the same way a flash does — one line either
+	// way, and the question sits where the answer's report will land.
+	if m.bulkPrompt != nil {
+		return ui.ConfirmPrompt(m.bulkPrompt.label)
+	}
 	if m.searchTyping {
 		// The three reserved keys, and nothing about j/k or v: while typing those
 		// are letters (ADR-0213).
@@ -3038,7 +3116,7 @@ func (m QueueDashboard) mainHint() string {
 	if m.selection.Active() {
 		// Only the keys that still do something in the mode, so the line does not
 		// advertise the verbs it is refusing.
-		return "j/k move · gg/G top/bottom · tab select · shift+tab clear · / search · " + filters + toggle + " · C-h help · h/esc quit"
+		return "j/k move · gg/G top/bottom · tab select · shift+tab clear · y copy names · a actions · / search · " + filters + toggle + " · C-h help · h/esc quit"
 	}
 	return "j/k move · gg/G top/bottom · tab select · l/enter detail · y copy name · a actions · / search · " + filters + toggle + " · C-h help · h/esc quit"
 }
@@ -3761,12 +3839,18 @@ func dashboardMenuLines(menu *dashboardMenu, width int, live livePaneCache) []st
 		return nil
 	}
 	if menu.status != nil {
-		return dashboardStatusMenuLines(menu.status, width)
+		return dashboardStatusMenuLines(menu.status, menu.pluralCount(), width)
 	}
 	if menu.mute != nil {
-		return dashboardMuteMenuLines(menu.mute, width)
+		return dashboardMuteMenuLines(menu.mute, menu.pluralCount(), width)
 	}
-	lines := []string{ui.TruncateString("    "+ui.HintStyle.Render("actions"), width)}
+	title := "actions"
+	if menu.plural {
+		// The title states the count once and every item repeats it, because the
+		// item is what a hotkey fires: a human who typed `x` never read the title.
+		title = fmt.Sprintf("actions (%s)", bulkCount(len(menu.targets)))
+	}
+	lines := []string{ui.TruncateString("    "+ui.HintStyle.Render(title), width)}
 	cursor := menu.list.Cursor()
 	for i, item := range menu.list.Items() {
 		marker := "  "
@@ -3780,12 +3864,19 @@ func dashboardMenuLines(menu *dashboardMenu, width int, live livePaneCache) []st
 	return lines
 }
 
-// dashboardStatusMenuLines renders the nested status submenu.
-func dashboardStatusMenuLines(status *dashboardStatusMenu, width int) []string {
+// dashboardStatusMenuLines renders the nested status submenu. targets is how
+// many rows a pick will write, zero for the singular menu — the same count the
+// action menu above it carries, restated because a submenu is where the write
+// actually happens.
+func dashboardStatusMenuLines(status *dashboardStatusMenu, targets, width int) []string {
 	if status == nil {
 		return nil
 	}
-	lines := []string{ui.TruncateString("    "+ui.HintStyle.Render("status"), width)}
+	title := "status"
+	if targets > 0 {
+		title = fmt.Sprintf("status (%s)", bulkCount(targets))
+	}
+	lines := []string{ui.TruncateString("    "+ui.HintStyle.Render(title), width)}
 	cursor := status.list.Cursor()
 	for i, item := range status.list.Items() {
 		marker := "  "
@@ -3801,11 +3892,15 @@ func dashboardStatusMenuLines(status *dashboardStatusMenu, width int) []string {
 // dashboardMuteMenuLines renders the nested mute submenu: six numbered windows,
 // then one dimmed footer stating the hour they all land at. The footer is why no
 // entry carries the hour itself.
-func dashboardMuteMenuLines(mute *dashboardMuteMenu, width int) []string {
+func dashboardMuteMenuLines(mute *dashboardMuteMenu, targets, width int) []string {
 	if mute == nil {
 		return nil
 	}
-	lines := []string{ui.TruncateString("    "+ui.HintStyle.Render("mute"), width)}
+	title := "mute"
+	if targets > 0 {
+		title = fmt.Sprintf("mute (%s)", bulkCount(targets))
+	}
+	lines := []string{ui.TruncateString("    "+ui.HintStyle.Render(title), width)}
 	cursor := mute.list.Cursor()
 	for i, window := range mute.list.Items() {
 		marker := "  "
