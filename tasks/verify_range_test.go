@@ -49,7 +49,9 @@ func newRangeRepo(t *testing.T) *rangeRepo {
 }
 
 // commit writes one file and commits it under subject, returning the new SHA.
-func (r *rangeRepo) commit(t *testing.T, file, subject string) string {
+// Each extra paragraph becomes its own `-m`, exactly as the commit path builds a
+// message body and its trailer.
+func (r *rangeRepo) commit(t *testing.T, file, subject string, paragraphs ...string) string {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(r.dir, file), []byte(subject+"\n"), 0o644); err != nil {
 		t.Fatalf("write %s: %v", file, err)
@@ -57,7 +59,11 @@ func (r *rangeRepo) commit(t *testing.T, file, subject string) string {
 	if _, err := realGitInDir(r.dir, "add", "-A"); err != nil {
 		t.Fatalf("git add: %v", err)
 	}
-	if _, err := realGitInDir(r.dir, "commit", "-m", subject); err != nil {
+	args := []string{"commit", "-m", subject}
+	for _, p := range paragraphs {
+		args = append(args, "-m", p)
+	}
+	if _, err := realGitInDir(r.dir, args...); err != nil {
 		t.Fatalf("git commit %q: %v", subject, err)
 	}
 	sha, err := realGitInDir(r.dir, "rev-parse", "HEAD")
@@ -65,6 +71,13 @@ func (r *rangeRepo) commit(t *testing.T, file, subject string) string {
 		t.Fatalf("rev-parse HEAD: %v", err)
 	}
 	return sha
+}
+
+// commitTask commits the way the executor does: the task's subject, the agent's
+// summary, and the set's Pop-Task trailer as the message's last paragraph.
+func (r *rangeRepo) commitTask(t *testing.T, file, subject, taskID string) string {
+	t.Helper()
+	return r.commit(t, file, subject, "summary for "+taskID, TaskTrailer("demo", taskID))
 }
 
 func (r *rangeRepo) git(t *testing.T, args ...string) string {
@@ -147,18 +160,18 @@ func TestVerifyRangeFromRecordedBase(t *testing.T) {
 	}
 }
 
-// TestVerifyRangeAfterRebaseUsesRecordedSubjects: a rebase onto a newer trunk
+// TestVerifyRangeAfterRebaseUsesTheTaskTrailer: a rebase onto a newer trunk
 // rewrites every task SHA while leaving the old base an ancestor, so `base..HEAD`
 // would swallow the commits others landed meanwhile. The rewritten SHAs are what
-// catch it: the range restarts at the earliest commit carrying a recorded
-// subject, and the foreign commit below it stays out.
-func TestVerifyRangeAfterRebaseUsesRecordedSubjects(t *testing.T) {
+// catch it: the range restarts at the earliest commit carrying the set's Pop-Task
+// trailer, and the foreign commit below it stays out (ADR-0216).
+func TestVerifyRangeAfterRebaseUsesTheTaskTrailer(t *testing.T) {
 	t.Parallel()
 	repo := newRangeRepo(t)
 	base := repo.commit(t, "trunk.txt", "chore: seed the trunk")
 	branch := repo.git(t, "rev-parse", "--abbrev-ref", "HEAD")
-	first := repo.commit(t, "a.txt", "feat(store): add the a path")
-	second := repo.commit(t, "b.txt", "feat(store): add the b path")
+	first := repo.commitTask(t, "a.txt", "feat(store): add the a path", "01-a")
+	second := repo.commitTask(t, "b.txt", "feat(store): add the b path", "02-b")
 
 	repo.git(t, "checkout", "-b", "trunk", base)
 	foreign := repo.commit(t, "other.txt", "fix(api): someone else's commit")
@@ -172,7 +185,7 @@ func TestVerifyRangeAfterRebaseUsesRecordedSubjects(t *testing.T) {
 	work := verifyWorkDiff(repo.deps, repo.dir, "demo", m)
 
 	if work.Undetermined {
-		t.Fatal("range read as undetermined although the subjects survived the rebase")
+		t.Fatal("range read as undetermined although the trailer survived the rebase")
 	}
 	if work.Range != foreign+"..HEAD" {
 		t.Fatalf("range = %q, want the rebased set's own commits %q", work.Range, foreign+"..HEAD")
@@ -187,18 +200,84 @@ func TestVerifyRangeAfterRebaseUsesRecordedSubjects(t *testing.T) {
 	}
 }
 
-// TestVerifyRangeUndeterminedWhenSubjectsReworded: with the recorded SHAs gone
-// from history and the subjects rewritten, there is nothing left to resolve
-// against — the resolver refuses to guess and marks the view undetermined.
-func TestVerifyRangeUndeterminedWhenSubjectsReworded(t *testing.T) {
+// TestVerifyRangeRecoveryFromTheRootCommit: the set's first commit is the
+// repository's own first commit, so the recovered anchor has no parent and the
+// empty tree stands in for it — the range still covers everything the set landed.
+func TestVerifyRangeRecoveryFromTheRootCommit(t *testing.T) {
+	t.Parallel()
+	repo := newRangeRepo(t)
+	first := repo.commitTask(t, "a.txt", "feat(store): add the a path", "01-a")
+	repo.commitTask(t, "b.txt", "feat(store): add the b path", "02-b")
+
+	// A rebase from the root rewrites every SHA, the root commit's included, while
+	// keeping every message — so layer one cannot answer and layer two must.
+	repo.git(t, "rebase", "--root", "--force-rebase")
+
+	m := recordedSet("", TaskCommit{SHA: first, Subject: "feat(store): add the a path"})
+	work := verifyWorkDiff(repo.deps, repo.dir, "demo", m)
+
+	if work.Undetermined {
+		t.Fatalf("work = %+v, want a range recovered from the root commit", work)
+	}
+	if work.Range != emptyTreeSHA+"..HEAD" {
+		t.Fatalf("range = %q, want the empty tree standing in for the missing parent %q", work.Range, emptyTreeSHA+"..HEAD")
+	}
+	for _, file := range []string{"a.txt", "b.txt"} {
+		if !strings.Contains(work.Stat, file) {
+			t.Fatalf("stat omits %s:\n%s", file, work.Stat)
+		}
+	}
+}
+
+// TestVerifyRangeIgnoresACommitQuotingAPlannedSubject: a revert, a fixup, or a
+// merge summary repeats a commit's subject in its own message. Such a commit is
+// older than the set's first commit, so anchoring on it would silently widen the
+// changeset — only the trailer pop wrote anchors the range (ADR-0216).
+func TestVerifyRangeIgnoresACommitQuotingAPlannedSubject(t *testing.T) {
+	t.Parallel()
+	repo := newRangeRepo(t)
+	base := repo.commit(t, "trunk.txt", "chore: seed the trunk")
+	branch := repo.git(t, "rev-parse", "--abbrev-ref", "HEAD")
+	first := repo.commitTask(t, "a.txt", "feat(store): add the a path", "01-a")
+
+	repo.git(t, "checkout", "-b", "trunk", base)
+	// The quoting commit, and a foreign one under it, both belong to trunk.
+	repo.commit(t, "other.txt", "fix(api): someone else's commit")
+	quoting := repo.commit(t, "revert.txt", `Revert "feat(store): add the a path"`,
+		`This reverts an earlier attempt at "feat(store): add the a path".`)
+	repo.git(t, "checkout", branch)
+	repo.git(t, "rebase", "--onto", "trunk", base)
+
+	m := recordedSet(base, TaskCommit{SHA: first, Subject: "feat(store): add the a path"})
+	work := verifyWorkDiff(repo.deps, repo.dir, "demo", m)
+
+	if work.Range != quoting+"..HEAD" {
+		t.Fatalf("range = %q, want it to start after the quoting commit %q", work.Range, quoting+"..HEAD")
+	}
+	if got := repo.subjectsIn(t, work.Range); strings.Join(got, "|") != "feat(store): add the a path" {
+		t.Fatalf("range covers %v, want only the set's own commit", got)
+	}
+	for _, file := range []string{"revert.txt", "other.txt"} {
+		if strings.Contains(work.Stat, file) {
+			t.Fatalf("stat includes %s, a commit the set did not make:\n%s", file, work.Stat)
+		}
+	}
+}
+
+// TestVerifyRangeUndeterminedWithoutATrailer: a set that drained before the
+// trailer existed has nothing left to resolve against once its recorded SHAs go
+// unreachable — the recorded subjects are deliberately not searched, because a
+// commit merely quoting one is a wrong answer where this is a loud failure.
+func TestVerifyRangeUndeterminedWithoutATrailer(t *testing.T) {
 	t.Parallel()
 	repo := newRangeRepo(t)
 	base := repo.commit(t, "trunk.txt", "chore: seed the trunk")
 	first := repo.commit(t, "a.txt", "feat(store): add the a path")
 	second := repo.commit(t, "b.txt", "feat(store): add the b path")
 
+	// The rebase kept the subjects, dropped the SHAs, and there is no trailer.
 	repo.git(t, "reset", "--hard", base)
-	repo.commit(t, "a.txt", "squashed: everything, reworded")
+	repo.commit(t, "a.txt", "feat(store): add the a path")
 
 	m := recordedSet(base,
 		TaskCommit{SHA: first, Subject: "feat(store): add the a path"},

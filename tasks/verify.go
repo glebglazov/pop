@@ -930,7 +930,7 @@ func (v workDiffView) Empty() bool { return strings.TrimSpace(v.Range) == "" }
 // commit range could not be resolved. It is the Verifier's own voice for a run
 // that never happened, so it must say that plainly: nothing was reviewed.
 const rangeUndeterminedFindings = "The set's commit range could not be determined. " +
-	"Neither the recorded Set base commit and task commits nor any recorded commit subject is present in this checkout's history " +
+	"Neither the recorded Set base commit and task commits nor any commit carrying this set's Pop-Task trailer is present in this checkout's history " +
 	"(the branch was likely rebased with the commits reworded, or the work lives on another branch). " +
 	"The Verifier was not run and nothing was reviewed — a human must confirm what this set landed."
 
@@ -967,17 +967,20 @@ func verifyWorkDiff(d *Deps, runtimePath, setID string, m *Manifest) workDiffVie
 // happily name a range swallowing every commit others landed on trunk meanwhile.
 // A rewritten task SHA is the signal that the base no longer means what it did.
 //
-// Layer two recovers from that rewrite through the recorded commit *subjects*,
-// which a rebase keeps by default: the earliest commit whose message matches one
-// of them starts the range at `match^..HEAD`, which begins after the foreign
-// commits the rebase moved the set on top of.
+// Layer two recovers from that rewrite through the set's own `Pop-Task` trailer,
+// which a rebase keeps along with the rest of the message (ADR-0216): the
+// earliest commit carrying it starts the range at `match^..HEAD`, which begins
+// after the foreign commits the rebase moved the set on top of. The range stays
+// contiguous rather than becoming the set of trailered commits — a docs commit or
+// a hand fix made in the same checkout mid-drain is part of what the set landed
+// and belongs in the Verifier's context.
 //
 // Nothing found is not a range. The caller parks the set for a human.
 func resolveVerifyRange(d *Deps, runtimePath string, m *Manifest) (string, bool) {
 	if commitReachable(d, runtimePath, m.BaseCommit) && recordedCommitsReachable(d, runtimePath, m) {
 		return rangeToHEADFrom(m.BaseCommit), true
 	}
-	if sha, ok := earliestRecordedSubjectCommit(d, runtimePath, m); ok {
+	if sha, ok := earliestTrailedCommit(d, runtimePath, m.Stem); ok {
 		return rangeToHEADFrom(parentOf(d, runtimePath, sha)), true
 	}
 	return "", false
@@ -1029,25 +1032,23 @@ func recordedCommitsReachable(d *Deps, runtimePath string, m *Manifest) bool {
 	return true
 }
 
-// earliestRecordedSubjectCommit finds the oldest commit reachable from HEAD
-// whose message contains one of the set's recorded commit subjects. The search
-// is fixed-string — a planned subject is arbitrary prose and must never be read
-// as a regular expression — and git ORs the repeated --grep patterns, so one
-// walk answers for every subject at once.
-func earliestRecordedSubjectCommit(d *Deps, runtimePath string, m *Manifest) (string, bool) {
-	args := []string{"log", "--format=%H", "--fixed-strings"}
-	seen := map[string]bool{}
-	for _, task := range m.Tasks {
-		if task.Commit == nil || strings.TrimSpace(task.Commit.Subject) == "" || seen[task.Commit.Subject] {
-			continue
-		}
-		seen[task.Commit.Subject] = true
-		args = append(args, "--grep", task.Commit.Subject)
-	}
-	if len(seen) == 0 {
+// earliestTrailedCommit finds the oldest commit reachable from HEAD that pop
+// stamped for this set. One pattern answers for the whole set — the trailer's set
+// half plus the separator its task half follows — so a single walk needs no
+// knowledge of which tasks committed, and a task whose commit record was lost is
+// found anyway.
+//
+// The pattern is text pop wrote and nothing quotes, which is what makes the
+// anchor trustworthy where a subject search was not: a revert, a fixup, or a
+// merge summary repeating a commit's subject is older than the set's own first
+// commit and would silently widen the range. The search is fixed-string all the
+// same, because a set identifier carries a user-chosen slug.
+func earliestTrailedCommit(d *Deps, runtimePath, stem string) (string, bool) {
+	if strings.TrimSpace(stem) == "" {
 		return "", false
 	}
-	out, err := d.Git.CommandInDir(runtimePath, append(args, "HEAD")...)
+	pattern := TaskTrailerKey + ": " + stem + "/"
+	out, err := d.Git.CommandInDir(runtimePath, "log", "--format=%H", "--fixed-strings", "--grep", pattern, "HEAD")
 	if err != nil {
 		return "", false
 	}
