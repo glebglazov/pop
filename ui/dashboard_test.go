@@ -15,6 +15,8 @@ func newMonitorDashboard(panes []AttentionPane, cb AttentionCallbacks, opts ...M
 	d := NewMonitorDashboard(copied, cb, nil, opts...)
 	d.width = 80
 	d.height = 20
+	d.list.SetWidth(d.leftWidth())
+	d.list.Resize(d.listBodyHeight())
 	d.Init()
 	return d
 }

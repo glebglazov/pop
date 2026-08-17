@@ -76,11 +76,38 @@ func TestSelectionRegionChrome(t *testing.T) {
 	if region.Count != 5 {
 		t.Errorf("region count = %d, want 5", region.Count)
 	}
-	if got := StripANSI(region.Separator(5)); strings.TrimSpace(got) != "5 selected" {
-		t.Errorf("separator = %q, want the count", got)
+	if got := StripANSI(region.Separator(5, 40)); !strings.Contains(got, "5 selected") {
+		t.Errorf("separator = %q, want the count set into the rule", got)
 	}
 	if got := StripANSI(region.Overflow(2)); strings.TrimSpace(got) != "… +2 more selected" {
 		t.Errorf("overflow = %q, want the hidden count", got)
+	}
+}
+
+// TestSelectionSeparatorIsARule pins the divider's shape: a dim horizontal rule
+// that spans the width it is given, with the count set into it, and truncates
+// to that width on a narrow terminal rather than wrapping.
+func TestSelectionSeparatorIsARule(t *testing.T) {
+	wide := StripANSI(SelectionSeparator(2, 40))
+	if got := len([]rune(wide)); got != 40 {
+		t.Fatalf("wide rule width = %d, want 40: %q", got, wide)
+	}
+	if !strings.HasPrefix(wide, "───") || !strings.HasSuffix(wide, "─") {
+		t.Errorf("wide rule = %q, want leading and trailing box-drawing dashes", wide)
+	}
+	if !strings.Contains(wide, "2 selected") {
+		t.Errorf("wide rule = %q, want the count set into it", wide)
+	}
+	if strings.Contains(wide, "\n") {
+		t.Errorf("wide rule wrapped: %q", wide)
+	}
+
+	narrow := StripANSI(SelectionSeparator(2, 10))
+	if got := len([]rune(narrow)); got != 10 {
+		t.Fatalf("narrow rule width = %d, want 10: %q", got, narrow)
+	}
+	if strings.Contains(narrow, "\n") {
+		t.Errorf("narrow rule wrapped: %q", narrow)
 	}
 }
 

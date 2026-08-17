@@ -144,12 +144,12 @@ func TestMonitorSelectionChrome(t *testing.T) {
 		rows := plainRows(d)
 		sep := -1
 		for i, row := range rows {
-			if strings.TrimSpace(row) == "2 selected" {
+			if strings.Contains(row, "2 selected") && strings.Contains(row, "─") {
 				sep = i
 			}
 		}
 		if sep < 0 {
-			t.Fatalf("no `2 selected` line in the list:\n%s", strings.Join(rows, "\n"))
+			t.Fatalf("no `2 selected` rule in the list:\n%s", strings.Join(rows, "\n"))
 		}
 		if !strings.Contains(rows[sep-1], "pane%2") {
 			t.Errorf("line above the separator = %q, want the last marked pane", rows[sep-1])
@@ -157,8 +157,36 @@ func TestMonitorSelectionChrome(t *testing.T) {
 		if !strings.Contains(rows[sep+1], "pane%3") {
 			t.Errorf("line below the separator = %q, want the first unmarked pane", rows[sep+1])
 		}
-		if got := d.list.VisibleRows()[sep]; got != dimStyle.Render("  2 selected") {
-			t.Errorf("separator line = %q, want it rendered dim", got)
+		want := SelectionSeparator(2, d.leftWidth())
+		if got := d.list.VisibleRows()[sep]; got != want {
+			t.Errorf("separator line = %q, want the dim rule %q", got, want)
+		}
+	})
+
+	t.Run("a narrow list truncates the rule without wrapping", func(t *testing.T) {
+		d := newMonitorDashboard(selectionPanes(4), AttentionCallbacks{})
+		d.list.SetWidth(10)
+		d = markPanes(d, "%1", "%2")
+
+		rows := plainRows(d)
+		sep := -1
+		for i, row := range rows {
+			if strings.Contains(row, "─") {
+				sep = i
+				break
+			}
+		}
+		if sep < 0 {
+			t.Fatalf("no rule in the list:\n%s", strings.Join(rows, "\n"))
+		}
+		if got := len([]rune(rows[sep])); got != 10 {
+			t.Errorf("rule width = %d, want 10: %q", got, rows[sep])
+		}
+		if strings.Contains(rows[sep], "\n") {
+			t.Errorf("rule wrapped: %q", rows[sep])
+		}
+		if got := d.list.VisibleRows()[sep]; got != SelectionSeparator(2, 10) {
+			t.Errorf("separator = %q, want SelectionSeparator(2, 10)", got)
 		}
 	})
 

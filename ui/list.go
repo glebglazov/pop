@@ -53,7 +53,9 @@ type Region struct {
 	// Count is how many leading items belong to the region; zero means none.
 	Count int
 	// Separator renders the line between the region and the rest of the list.
-	Separator func(count int) string
+	// Width is the visible columns the list is drawing into; the separator fills
+	// that width rather than guessing one.
+	Separator func(count, width int) string
 	// Overflow renders the line that stands in for the members the cap left out.
 	// It is called only when the cap bites.
 	Overflow func(hidden int) string
@@ -67,6 +69,7 @@ type List[T any] struct {
 	cursor int
 	scroll int
 	height int
+	width  int
 	opts   Opts[T]
 	region Region
 }
@@ -179,6 +182,12 @@ func (l *List[T]) HalfPageDown() {
 func (l *List[T]) Resize(bodyHeight int) {
 	l.height = bodyHeight
 	l.adjustScroll()
+}
+
+// SetWidth sets the visible columns the list draws into. Region separators fill
+// this width; row cells receive it on RowState.Width.
+func (l *List[T]) SetWidth(w int) {
+	l.width = w
 }
 
 // Selected returns the item at the cursor, or false when empty or out of bounds.
@@ -381,7 +390,7 @@ func (l *List[T]) regionLines(lay regionLayout, prefixWidth int) []string {
 		out = append(out, l.region.Overflow(lay.hidden()))
 	}
 	if l.region.Separator != nil {
-		out = append(out, l.region.Separator(lay.count))
+		out = append(out, l.region.Separator(lay.count, l.width))
 	} else {
 		out = append(out, "")
 	}
@@ -413,7 +422,7 @@ func (l *List[T]) itemLines(idx, prefixWidth int) []string {
 				Selected:   selected,
 				Pinned:     pinned,
 				QuickLabel: quickLabel,
-				Width:      0,
+				Width:      l.width,
 				LineIndex:  sub,
 			})
 		}

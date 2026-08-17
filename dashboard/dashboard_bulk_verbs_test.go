@@ -550,7 +550,7 @@ func TestWorkBulkMuteAppliesOneWindowToEveryRow(t *testing.T) {
 func selectionSignals(t *testing.T, m QueueDashboard, marked int) (view, separator string) {
 	t.Helper()
 	view = ui.StripANSI(m.View().Content)
-	separator = ui.StripANSI(ui.SelectionSeparator(marked))
+	separator = ui.StripANSI(ui.SelectionSeparator(marked, m.width))
 	if !strings.Contains(view, separator) {
 		t.Fatalf("the separator %q is not on screen:\n%s", separator, view)
 	}

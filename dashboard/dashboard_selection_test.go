@@ -175,7 +175,7 @@ func TestWorkSelectionRendersTheModeWordAndCountedSeparator(t *testing.T) {
 	if !strings.Contains(view, ui.SelectionMode) {
 		t.Fatalf("the bottom line does not carry %s:\n%s", ui.SelectionMode, view)
 	}
-	if want := ui.StripANSI(ui.SelectionSeparator(2)); !strings.Contains(view, want) {
+	if want := ui.StripANSI(ui.SelectionSeparator(2, m.width)); !strings.Contains(view, want) {
 		t.Fatalf("the separator %q is not on screen:\n%s", want, view)
 	}
 	// The word is padded on both sides, so the hints never butt against it.
@@ -185,7 +185,7 @@ func TestWorkSelectionRendersTheModeWordAndCountedSeparator(t *testing.T) {
 
 	// The separator sits under the marked rows and above every other row.
 	rows := ui.StripANSI(strings.Join(m.list.VisibleRows(), "\n"))
-	sep := strings.Index(rows, ui.StripANSI(ui.SelectionSeparator(2)))
+	sep := strings.Index(rows, ui.StripANSI(ui.SelectionSeparator(2, m.width)))
 	if sep < 0 {
 		t.Fatalf("no separator in the list body:\n%s", rows)
 	}
@@ -449,12 +449,78 @@ func TestWorkSelectionRegionCapsAtAThirdOfTheViewport(t *testing.T) {
 	if want := ui.StripANSI(ui.SelectionOverflow(2)); !strings.Contains(body, want) {
 		t.Fatalf("want the overflow line %q in:\n%s", want, body)
 	}
-	if want := ui.StripANSI(ui.SelectionSeparator(4)); !strings.Contains(body, want) {
+	if want := ui.StripANSI(ui.SelectionSeparator(4, m.width)); !strings.Contains(body, want) {
 		t.Fatalf("want the separator to count every mark (%q) in:\n%s", want, body)
 	}
 	if m.selection.Len() != 4 {
 		t.Fatalf("the cap changed the Selection: %d marks", m.selection.Len())
 	}
+}
+
+// The Selection divider is a rule that spans the list's width on the Work
+// dashboard's list view and on the menu-overlay renderer — the same primitive,
+// including when the terminal is too narrow for the full label.
+func TestWorkSelectionSeparatorIsARule(t *testing.T) {
+	t.Run("the list view draws a full-width rule", func(t *testing.T) {
+		m := selDashboard(selRows("set-a", "set-b", "set-c"))
+		m = markRow(t, m, "set-b")
+		m = markRow(t, m, "set-c")
+
+		want := ui.StripANSI(ui.SelectionSeparator(2, m.width))
+		body := ui.StripANSI(strings.Join(m.list.VisibleRows(), "\n"))
+		if !strings.Contains(body, want) {
+			t.Fatalf("want rule %q in:\n%s", want, body)
+		}
+		if !strings.HasPrefix(want, "───") || !strings.Contains(want, "2 selected") {
+			t.Fatalf("rule shape = %q", want)
+		}
+	})
+
+	t.Run("a narrow list truncates the rule without wrapping", func(t *testing.T) {
+		m := selDashboard(selRows("set-a", "set-b", "set-c"))
+		m.width = 12
+		m.cols.width = m.width
+		m.cols.refit()
+		m.resizeMainList()
+		m = markRow(t, m, "set-b")
+		m = markRow(t, m, "set-c")
+
+		want := ui.StripANSI(ui.SelectionSeparator(2, 12))
+		if got := len([]rune(want)); got != 12 {
+			t.Fatalf("narrow rule width = %d, want 12: %q", got, want)
+		}
+		body := ui.StripANSI(strings.Join(m.list.VisibleRows(), "\n"))
+		if !strings.Contains(body, want) {
+			t.Fatalf("want truncated rule %q in:\n%s", want, body)
+		}
+		if strings.Contains(want, "\n") {
+			t.Fatalf("rule wrapped: %q", want)
+		}
+	})
+
+	t.Run("the menu overlay draws the same rule", func(t *testing.T) {
+		m := selDashboard(selRows("set-a", "set-b", "set-c"))
+		m = markRow(t, m, "set-b")
+		m = markRow(t, m, "set-c")
+		m = selPress(t, m, selKeyRune('a'))
+		if m.menu == nil {
+			t.Fatal("`a` did not open the action menu")
+		}
+
+		want := ui.StripANSI(ui.SelectionSeparator(2, m.width))
+		view := ui.StripANSI(m.View().Content)
+		if !strings.Contains(view, want) {
+			t.Fatalf("want rule %q in the menu overlay:\n%s", want, view)
+		}
+
+		m.width = 12
+		m.cols.width = m.width
+		narrow := ui.StripANSI(ui.SelectionSeparator(2, 12))
+		view = ui.StripANSI(m.View().Content)
+		if !strings.Contains(view, narrow) {
+			t.Fatalf("want truncated rule %q in the narrow menu overlay:\n%s", narrow, view)
+		}
+	})
 }
 
 // The cursor never starts in the region and no rebuild puts it there — but j and k

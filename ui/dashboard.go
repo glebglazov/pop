@@ -697,6 +697,7 @@ func (d *MonitorDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if d.height < 3 {
 			d.height = 3
 		}
+		d.list.SetWidth(d.leftWidth())
 		d.list.Resize(d.listBodyHeight())
 		d.syncFromList()
 	}
@@ -1684,6 +1685,7 @@ func (d *MonitorDashboard) viewDashboard() string {
 		previewStart = len(previewLines) - listHeight
 	}
 
+	d.list.SetWidth(leftWidth)
 	for i, left := range d.list.VisibleRows() {
 		previewIdx := previewStart + i
 		rightContent := ""

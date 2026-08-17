@@ -983,6 +983,7 @@ func (m QueueDashboard) resizeMainList() {
 	} else {
 		m.list.SetLinesPerItem(1)
 	}
+	m.list.SetWidth(m.width)
 	m.list.Resize(listH)
 }
 
@@ -4057,7 +4058,7 @@ func writeSelectionSeparator(w io.Writer, i, regionCount, width int) {
 	if regionCount <= 0 || i != regionCount-1 {
 		return
 	}
-	fmt.Fprintf(w, "%s\n", ui.TruncateString(ui.SelectionSeparator(regionCount), width))
+	fmt.Fprintf(w, "%s\n", ui.SelectionSeparator(regionCount, width))
 }
 
 // renderDashboardTableWithMenu renders the task-set table and, when menu is

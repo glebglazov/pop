@@ -1,6 +1,9 @@
 package ui
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // SelectionMode is the word a surface holds at the left of its bottom line while
 // rows are marked. It is the whole visible difference between a plural surface
@@ -79,12 +82,27 @@ func SplitSelected[T any](s *Selection, rows []T, key func(T) string) (marked, r
 	return marked, rest
 }
 
-// SelectionSeparator is the dim line that divides the Selection area from the
-// rest of the list. It carries the count, which is what makes the cap below a
-// rendering limit rather than a narrowing: the number of targets is stated even
-// when not every one is drawn.
-func SelectionSeparator(count int) string {
-	return dimStyle.Render(fmt.Sprintf("  %d selected", count))
+// SelectionSeparator is the dim rule that closes the Selection area. The count
+// is set into a horizontal rule that spans width, so the block reads as a block
+// rather than as one more row. A non-positive width still draws a short rule so
+// callers that have not sized the surface yet do not lose the count.
+func SelectionSeparator(count, width int) string {
+	const dash = "─"
+	label := fmt.Sprintf(" %d selected ", count)
+	left := 3
+	if width <= 0 {
+		return dimStyle.Render(strings.Repeat(dash, left) + label + strings.Repeat(dash, left))
+	}
+	labelW := len(label) // label is ASCII
+	if width <= labelW {
+		return dimStyle.Render(TruncateToWidth(strings.Repeat(dash, left)+label, width))
+	}
+	rest := width - labelW
+	if left > rest {
+		left = rest
+	}
+	right := rest - left
+	return dimStyle.Render(strings.Repeat(dash, left) + label + strings.Repeat(dash, right))
 }
 
 // SelectionOverflow is the line that stands in for the members the viewport cap
