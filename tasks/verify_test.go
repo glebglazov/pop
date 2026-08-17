@@ -776,6 +776,125 @@ func TestVerifyResolvedSetRemediateFromNeedsHumanSpawnsTask(t *testing.T) {
 	}
 }
 
+// TestHumanRemediateRequiresVerifyFailedMark: `pop tasks verify --remediate` is
+// refused unless the set's Verification mark is verify-failed (ADR-0217). Each
+// non-failed mark is refused by name with a pointer at the authoring guide, and
+// a refused call writes nothing; a verify-failed set still remediates.
+func TestHumanRemediateRequiresVerifyFailedMark(t *testing.T) {
+	t.Parallel()
+
+	assertNoRemediationWrite := func(t *testing.T, d *Deps, defPath string, before *Manifest, verdictSHA string, wantBlockedBy map[string][]string) {
+		t.Helper()
+		entries, err := os.ReadDir(filepath.Join(defPath, "demo"))
+		if err != nil {
+			t.Fatalf("readdir set folder: %v", err)
+		}
+		for _, e := range entries {
+			if strings.Contains(e.Name(), "remediation") && strings.HasSuffix(e.Name(), ".md") {
+				t.Fatalf("no remediation markdown must be written on refusal, found %s", e.Name())
+			}
+		}
+		reloaded := LoadManifest(d, "demo", filepath.Join(defPath, "demo", "index.json"))
+		if !reloaded.Valid {
+			t.Fatalf("reloaded manifest invalid: %v", reloaded.Errors)
+		}
+		if len(reloaded.Tasks) != len(before.Tasks) {
+			t.Fatalf("manifest task count = %d, want %d (no append on refusal)", len(reloaded.Tasks), len(before.Tasks))
+		}
+		for id, want := range wantBlockedBy {
+			assertHITLBlockedBy(t, reloaded, id, want)
+		}
+		if verdictSHA != "" {
+			if got := readStoredVerdict(t, d, "/repo/.git", "demo", verdictSHA); got == nil {
+				t.Fatalf("verdict at %s must survive a refused remediation", verdictSHA)
+			}
+		}
+	}
+
+	t.Run("refuses verified", func(t *testing.T) {
+		d, defPath := setupVerifyFixtureTasks(t, stubGit("shaV\n", "", ""), hitlGateRemediationSet())
+		seedVerdict(t, d, store.VerifyVerdict{Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaV", Verdict: "PASS"})
+		before := LoadManifest(d, "demo", filepath.Join(defPath, "demo", "index.json"))
+		wantBlocked := map[string][]string{
+			"03-mid-gate": {"01-a"},
+			"04-approval": {"02-b"},
+		}
+
+		_, err := verifyResolvedSet(d, nil, verifyCoreOptions{
+			Repo: "/repo/.git", DefPath: defPath, RuntimePath: "/rt", SetID: "demo",
+			Output: &bytes.Buffer{}, Remediate: true, RemediateNote: "follow-up",
+			runVerifier: func(string) (string, error) { t.Fatal("must not verify"); return "", nil },
+		})
+		if err == nil {
+			t.Fatal("remediate must refuse a verified set")
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "verified") || !strings.Contains(msg, "not verify-failed") {
+			t.Fatalf("refusal must name the verified mark: %v", err)
+		}
+		if !strings.Contains(msg, "pop tasks authoring-guide") {
+			t.Fatalf("refusal must point at authoring-guide: %v", err)
+		}
+		assertNoRemediationWrite(t, d, defPath, before, "shaV", wantBlocked)
+	})
+
+	t.Run("refuses unverified", func(t *testing.T) {
+		d, defPath := setupVerifyFixture(t, stubGit("shaU\n", "", ""))
+		before := LoadManifest(d, "demo", filepath.Join(defPath, "demo", "index.json"))
+
+		_, err := verifyResolvedSet(d, nil, verifyCoreOptions{
+			Repo: "/repo/.git", DefPath: defPath, RuntimePath: "/rt", SetID: "demo",
+			Output: &bytes.Buffer{}, Remediate: true, RemediateNote: "follow-up",
+			runVerifier: func(string) (string, error) { t.Fatal("must not verify"); return "", nil },
+		})
+		if err == nil {
+			t.Fatal("remediate must refuse an unverified set")
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "unverified") || !strings.Contains(msg, "pop tasks authoring-guide") {
+			t.Fatalf("refusal must name unverified and point at authoring-guide: %v", err)
+		}
+		assertNoRemediationWrite(t, d, defPath, before, "", nil)
+	})
+
+	t.Run("refuses absent mark", func(t *testing.T) {
+		d, defPath := setupVerifyFixtureTasks(t, stubGit("shaN\n", "", ""), []Task{
+			{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+		})
+		before := LoadManifest(d, "demo", filepath.Join(defPath, "demo", "index.json"))
+
+		_, err := verifyResolvedSet(d, nil, verifyCoreOptions{
+			Repo: "/repo/.git", DefPath: defPath, RuntimePath: "/rt", SetID: "demo",
+			Output: &bytes.Buffer{}, Remediate: true, RemediateNote: "follow-up",
+			runVerifier: func(string) (string, error) { t.Fatal("must not verify"); return "", nil },
+		})
+		if err == nil {
+			t.Fatal("remediate must refuse a non-terminal set (absent mark)")
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "none") || !strings.Contains(msg, "pop tasks authoring-guide") {
+			t.Fatalf("refusal must name the absent mark and point at authoring-guide: %v", err)
+		}
+		assertNoRemediationWrite(t, d, defPath, before, "", nil)
+	})
+
+	t.Run("succeeds on verify-failed", func(t *testing.T) {
+		d, defPath := setupVerifyFixture(t, stubGit("shaF\n", "", ""))
+		seedVerdict(t, d, store.VerifyVerdict{Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaF", Verdict: "NEEDS-HUMAN", Findings: "gap"})
+
+		if _, err := verifyResolvedSet(d, nil, verifyCoreOptions{
+			Repo: "/repo/.git", DefPath: defPath, RuntimePath: "/rt", SetID: "demo",
+			Output: &bytes.Buffer{}, Remediate: true, RemediateNote: "fix the gap",
+			runVerifier: func(string) (string, error) { t.Fatal("must not verify"); return "", nil },
+		}); err != nil {
+			t.Fatalf("remediate on verify-failed: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(defPath, "demo", "02-remediation.md")); err != nil {
+			t.Fatalf("remediation markdown must be written: %v", err)
+		}
+	})
+}
+
 // TestVerifyResolvedSetRemediateOverCapSpawnsTask: a human-triggered remediation
 // spawns a task even when the set has already exhausted the auto remediation
 // depth cap (ADR-0103) — the human authorises the fix the auto path refuses. The
@@ -786,6 +905,8 @@ func TestVerifyResolvedSetRemediateOverCapSpawnsTask(t *testing.T) {
 	// The set already carries DefaultMaxRemediationDepth auto remediation tasks:
 	// the auto FIXABLE-under-cap path would spawn nothing.
 	d, defPath := setupVerifyFixtureTasks(t, stubGit("shaCap\n", "", ""), remediationSet(DefaultMaxRemediationDepth))
+	// Human --remediate requires a verify-failed mark (ADR-0217).
+	seedVerdict(t, d, store.VerifyVerdict{Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaCap", Verdict: "FIXABLE", Findings: "still one gap"})
 
 	var out bytes.Buffer
 	if _, err := verifyResolvedSet(d, nil, verifyCoreOptions{

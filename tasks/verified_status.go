@@ -2,6 +2,31 @@ package tasks
 
 import "github.com/glebglazov/pop/store"
 
+// resolveSetVerifyMark returns the set's Verification mark via the read-side
+// resolution — the same answer every surface uses. Human Remediate (ADR-0217)
+// asks this, not the raw verdict rows, before writing anything.
+func resolveSetVerifyMark(d *Deps, m *Manifest, repo, setID, workSHA string) VerifyMark {
+	var current, latestPass *store.VerifyVerdict
+	if s, ok, err := openDrainStoreIfExists(d); err == nil && ok && repo != "" && setID != "" {
+		if v, err := s.GetVerifyVerdict(repo, setID, workSHA); err == nil {
+			current = v
+		}
+		if v, err := s.GetLatestPassVerifyVerdict(repo, setID); err == nil {
+			latestPass = v
+		}
+	}
+	return ResolveVerifiedStatus(m, workSHA, current, latestPass).Mark
+}
+
+// verifyMarkLabel is the Verification mark as named in a refusal: the stored
+// vocabulary for a present mark, and "none" when the mark is absent.
+func verifyMarkLabel(mark VerifyMark) string {
+	if mark == VerifyMarkNone {
+		return "none"
+	}
+	return string(mark)
+}
+
 // ResolveVerifiedStatus is the single read-side Verified status resolution
 // (CONTEXT.md): it layers a set's Verify verdicts onto its manifest-derived
 // status and reports the ADR-0096 immunization SHA to surface. Every surface

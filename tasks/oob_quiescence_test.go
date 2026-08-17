@@ -93,6 +93,7 @@ func TestAcceptRefusedByLiveDrain(t *testing.T) {
 // runs, and appends no Remediation task (ADR-0104).
 func TestRemediateRefusedByLiveDrain(t *testing.T) {
 	d, defPath := setupVerifyFixture(t, stubGit("shaR\n", "", ""))
+	seedVerdict(t, d, store.VerifyVerdict{Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaR", Verdict: "NEEDS-HUMAN", Findings: "x"})
 	seedLiveDrain(t, d, "/rt", "otherset", 4242, "tok")
 	aliveSeam(d, 4242, "tok")
 
@@ -166,6 +167,7 @@ func TestAcceptRefusedByLiveWaiter(t *testing.T) {
 // occupies the checkout, and appends no Remediation task.
 func TestRemediateRefusedByLiveWaiter(t *testing.T) {
 	d, defPath := setupVerifyFixture(t, stubGit("shaR\n", "", ""))
+	seedVerdict(t, d, store.VerifyVerdict{Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaR", Verdict: "NEEDS-HUMAN", Findings: "x"})
 	seedRecoveryWaiter(t, d, "/rt", "otherset", 555, "wtok")
 	aliveSeam(d, 555, "wtok")
 
@@ -287,6 +289,7 @@ func TestAcceptProceedsPastOwnGateHold(t *testing.T) {
 // its task while this process's own gate hold is registered.
 func TestRemediateProceedsPastOwnGateHold(t *testing.T) {
 	d, defPath := setupVerifyFixture(t, stubGit("shaR\n", "", ""))
+	seedVerdict(t, d, store.VerifyVerdict{Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaR", Verdict: "NEEDS-HUMAN", Findings: "x"})
 	pid := os.Getpid()
 	token := "gate-owner"
 	seedGateHold(t, d, "/rt", "demo", pid, token)

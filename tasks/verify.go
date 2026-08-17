@@ -252,13 +252,20 @@ func acceptResolvedSet(d *Deps, opts verifyCoreOptions, m *Manifest, workSHA str
 // remediateResolvedSet enacts a human-triggered Remediate (ADR-0103): a human
 // turns the set's findings into a fix by spawning a Remediation task carrying
 // their own note, without running the Verifier. Unlike the automatic
-// FIXABLE-under-cap spawn, this works from any current verdict (a NEEDS-HUMAN, or
-// a FIXABLE whose depth cap is exhausted) — the human authorises the fix the auto
-// path will not. It reuses spawnRemediationTask wholesale, so the new open AFK
-// work invalidates the set's cached verdicts and the Drain then picks the task up
-// like any eligible AFK task. The Remediation body carries the set's current
-// findings (the verdict recorded at the work SHA, when any) plus the human note.
+// FIXABLE-under-cap spawn, this is refused unless the set's Verification mark is
+// verify-failed (ADR-0217) — the human authorises the fix the auto path will not
+// (a NEEDS-HUMAN, or a FIXABLE whose depth cap is exhausted), but only on a set
+// that has actually failed verification. It reuses spawnRemediationTask
+// wholesale, so the new open AFK work invalidates the set's cached verdicts and
+// the Drain then picks the task up like any eligible AFK task. The Remediation
+// body carries the set's current findings (the verdict recorded at the work SHA,
+// when any) plus the human note.
 func remediateResolvedSet(d *Deps, opts verifyCoreOptions, m *Manifest, workSHA string) (*VerifyResult, error) {
+	if mark := resolveSetVerifyMark(d, m, opts.Repo, opts.SetID, workSHA); mark != VerifyMarkFailed {
+		return nil, exitErr(ExitSetup,
+			"cannot remediate set %q: verification mark is %s (not verify-failed); to add work to a set that has not failed verification, run pop tasks authoring-guide",
+			opts.SetID, verifyMarkLabel(mark))
+	}
 	note := strings.TrimSpace(opts.RemediateNote)
 	recorded := latestVerdict(d, opts.Repo, opts.SetID, workSHA)
 	findings := ""
