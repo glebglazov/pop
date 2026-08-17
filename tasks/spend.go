@@ -4,17 +4,26 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/internal/fanout"
+	"github.com/glebglazov/pop/internal/repokey"
 	"github.com/glebglazov/pop/project"
 )
 
 // spendRollupSetLimit is the display bound for bare `pop tasks spend`: the
-// ten most recent Task sets, not a claim about substrate depth (ADR-0160).
+// ten most recent Task sets of the current repository (ADR-0160).
 const spendRollupSetLimit = 10
+
+// spendRollupAllSetLimit is the display bound for `pop tasks spend --all`:
+// the twenty most recent Task sets across every registration on this machine
+// (ADR-0218). Overridable with --limit; never a per-project quota.
+const spendRollupAllSetLimit = 20
 
 // Spend sort vocabulary for the cross-set rollup (ADR-0218).
 const (
@@ -31,11 +40,21 @@ type SpendOptions struct {
 	// Sort orders the cross-set rollup. Empty means recency. Unrecognised
 	// values are refused before anything is rendered.
 	Sort string
+	// All widens the rollup across every Task-set registration on this machine
+	// (ADR-0218). Without it the lens stays repo-scoped.
+	All bool
+	// Limit caps how many rows the rollup keeps after the recency window is
+	// taken. Zero means the scope default (10 repo-scoped, 20 with --all).
+	Limit int
 }
 
 // SpendRollupRow is aggregated Run spend for one Task set.
 type SpendRollupRow struct {
 	TaskSetID      string
+	// Project is the repository-root basename for this set, disambiguated by a
+	// parent segment when two projects share a basename (ADR-0218). Present in
+	// both scopes so a payload shape never depends on --all.
+	Project        string
 	Tokens         TokenUsage
 	Cost           PartialCost
 	Turns          TurnCount
@@ -54,11 +73,16 @@ type SpendRollupRow struct {
 type SpendRollupResult struct {
 	Sets       []SpendRollupRow
 	ShowAgents bool // true when any displayed set mixes agents
+	// SkippedStorages is how many AllSets def_paths were skipped because their
+	// Task storage directory is gone. Reported in the human footer so a total
+	// never silently shrinks (ADR-0218).
+	SkippedStorages int
 }
 
 // spendRollupJSONRow is the machine-readable rollup row emitted by --json.
 type spendRollupJSONRow struct {
 	TaskSetID        string     `json:"task_set_id"`
+	Project           string     `json:"project"`
 	InputTokens      int64      `json:"input_tokens"`
 	OutputTokens     int64      `json:"output_tokens"`
 	CacheReadTokens  int64      `json:"cache_read_tokens"`
@@ -177,7 +201,49 @@ func SpendRollupWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 	if err != nil {
 		return nil, err
 	}
+	if opts.Limit < 0 {
+		return nil, exitErr(ExitSetup, "spend limit must be >= 0")
+	}
 
+	var result *SpendRollupResult
+	if opts.All {
+		result, err = spendRollupAll(d)
+	} else {
+		result, err = spendRollupRepo(d, pd, loadConfig, opts)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	limit := spendRollupSetLimit
+	if opts.All {
+		limit = spendRollupAllSetLimit
+	}
+	if opts.Limit > 0 {
+		limit = opts.Limit
+	}
+
+	// The display bound is always the most recent N by Captured-run start time;
+	// --sort then reorders that window (ADR-0218).
+	sortSpendRollupRows(result.Sets, SpendSortRecency)
+	if len(result.Sets) > limit {
+		result.Sets = result.Sets[:limit]
+	}
+	if sortMode != SpendSortRecency {
+		sortSpendRollupRows(result.Sets, sortMode)
+	}
+	for _, row := range result.Sets {
+		if spendAgentsMix(row.Agents) {
+			result.ShowAgents = true
+			break
+		}
+	}
+	return result, nil
+}
+
+// spendRollupRepo is the current-checkout rollup: manifests under one
+// definition path, archived sets filtered out (ADR-0160).
+func spendRollupRepo(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts SpendOptions) (*SpendRollupResult, error) {
 	resolved, err := ResolvePathsWith(d, pd, loadConfig, opts.ResolveInput)
 	if err != nil {
 		return nil, exitErr(ExitSetup, "%v", err)
@@ -193,6 +259,7 @@ func SpendRollupWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 		return nil, exitErr(ExitSetup, "%v", err)
 	}
 
+	projectLabel := spendProjectLabels(d, []string{resolved.DefinitionPath})[resolved.DefinitionPath]
 	setIDs := activeTaskSetIDsForSpend(state, resolved.DefinitionPath, refresh.Manifests)
 	result := &SpendRollupResult{Sets: make([]SpendRollupRow, 0, len(setIDs))}
 	for _, setID := range setIDs {
@@ -204,25 +271,223 @@ func SpendRollupWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 		if err != nil {
 			return nil, exitErr(ExitOperational, "spend for %s: %v", setID, err)
 		}
+		row.Project = projectLabel
 		result.Sets = append(result.Sets, row)
 	}
+	return result, nil
+}
 
-	// The display bound is always the most recent N by Captured-run start time;
-	// --sort then reorders that window (ADR-0218).
-	sortSpendRollupRows(result.Sets, SpendSortRecency)
-	if len(result.Sets) > spendRollupSetLimit {
-		result.Sets = result.Sets[:spendRollupSetLimit]
+// spendRollupAll widens the rollup across every Task-set registration on this
+// machine (ADR-0218). Enumeration is store.AllSets — not the config project
+// list — grouped by def_path; a def_path whose storage is gone is skipped and
+// counted rather than crashing the render.
+func spendRollupAll(d *Deps) (*SpendRollupResult, error) {
+	s, ok, err := d.Store(false)
+	if err != nil {
+		return nil, exitErr(ExitSetup, "%v", err)
 	}
-	if sortMode != SpendSortRecency {
-		sortSpendRollupRows(result.Sets, sortMode)
+	if !ok {
+		return &SpendRollupResult{}, nil
 	}
-	for _, row := range result.Sets {
-		if spendAgentsMix(row.Agents) {
-			result.ShowAgents = true
-			break
+	all, err := s.AllSets()
+	if err != nil {
+		return nil, exitErr(ExitSetup, "%v", err)
+	}
+
+	defPaths := make([]string, 0, len(all))
+	for def := range all {
+		defPaths = append(defPaths, def)
+	}
+	sort.Strings(defPaths)
+
+	liveDefs := make([]string, 0, len(defPaths))
+	skipped := 0
+	for _, def := range defPaths {
+		_, err := d.FS.Stat(def)
+		if os.IsNotExist(err) {
+			skipped++
+			continue
+		}
+		if err != nil {
+			return nil, exitErr(ExitOperational, "stat task storage %s: %v", def, err)
+		}
+		liveDefs = append(liveDefs, def)
+	}
+
+	result := &SpendRollupResult{SkippedStorages: skipped}
+	if len(liveDefs) == 0 {
+		return result, nil
+	}
+
+	prepared, err := PrepareRefreshes(d, liveDefs)
+	if err != nil {
+		return nil, exitErr(ExitSetup, "%v", err)
+	}
+	refreshes, err := fanout.Map(prepared, func(p *PreparedRefresh) (*RefreshResult, error) {
+		return p.Refresh(d)
+	})
+	if err != nil {
+		return nil, exitErr(ExitOperational, "%v", err)
+	}
+
+	labels := spendProjectLabels(d, liveDefs)
+	for i, def := range liveDefs {
+		label := labels[def]
+		refresh := refreshes[i]
+		for _, reg := range all[def] {
+			if reg.Archived {
+				continue
+			}
+			m := refresh.Manifests[reg.SetID]
+			if m == nil {
+				continue
+			}
+			row, err := taskSetSpendRollup(d, reg.SetID, m.Dir)
+			if err != nil {
+				return nil, exitErr(ExitOperational, "spend for %s: %v", reg.SetID, err)
+			}
+			row.Project = label
+			result.Sets = append(result.Sets, row)
 		}
 	}
 	return result, nil
+}
+
+// spendProjectRef is one definition path's raw project coordinates used to
+// build the display label: repository-root basename, disambiguated by a parent
+// segment when two collide — never the managed-worktree repoKey (ADR-0218).
+type spendProjectRef struct {
+	defPath  string
+	basename string
+	rootPath string
+}
+
+func spendProjectLabels(d *Deps, defPaths []string) map[string]string {
+	refs := make([]spendProjectRef, 0, len(defPaths))
+	for _, def := range defPaths {
+		refs = append(refs, readSpendProjectRef(d, def))
+	}
+	return disambiguateSpendProjectLabels(refs)
+}
+
+func readSpendProjectRef(d *Deps, defPath string) spendProjectRef {
+	ref := spendProjectRef{defPath: defPath}
+	storageDir := filepath.Dir(defPath)
+	data, err := d.FS.ReadFile(filepath.Join(storageDir, repoMarkerFile))
+	if err == nil {
+		var marker RepoMarker
+		if json.Unmarshal(data, &marker) == nil && marker.RepositoryPath != "" {
+			ref.basename = RepoBasename(marker.RepositoryPath)
+			ref.rootPath = spendRepoRoot(marker.RepositoryPath)
+			return ref
+		}
+	}
+	ref.basename = repokey.Basename(filepath.Base(storageDir))
+	ref.rootPath = storageDir
+	return ref
+}
+
+func spendRepoRoot(commonDir string) string {
+	base := filepath.Base(commonDir)
+	switch base {
+	case ".git", ".bare":
+		return filepath.Dir(commonDir)
+	}
+	return strings.TrimSuffix(commonDir, ".git")
+}
+
+func disambiguateSpendProjectLabels(refs []spendProjectRef) map[string]string {
+	out := make(map[string]string, len(refs))
+	byBase := map[string][]int{}
+	for i, r := range refs {
+		byBase[r.basename] = append(byBase[r.basename], i)
+	}
+	for base, idxs := range byBase {
+		if len(idxs) == 1 {
+			out[refs[idxs[0]].defPath] = base
+			continue
+		}
+		type info struct {
+			idx  int
+			segs []string
+		}
+		infos := make([]info, len(idxs))
+		maxLevels := 0
+		for j, idx := range idxs {
+			segs := spendParentSegments(refs[idx].rootPath)
+			infos[j] = info{idx: idx, segs: segs}
+			if len(segs) > maxLevels {
+				maxLevels = len(segs)
+			}
+		}
+		resolved := map[int]bool{}
+		for level := 0; level < maxLevels && len(resolved) < len(infos); level++ {
+			counts := map[string]int{}
+			for i, inf := range infos {
+				if resolved[i] || level >= len(inf.segs) {
+					continue
+				}
+				counts[inf.segs[level]]++
+			}
+			for i, inf := range infos {
+				if resolved[i] || level >= len(inf.segs) {
+					continue
+				}
+				if counts[inf.segs[level]] == 1 {
+					out[refs[inf.idx].defPath] = base + " (" + inf.segs[level] + ")"
+					resolved[i] = true
+				}
+			}
+		}
+		for i, inf := range infos {
+			if resolved[i] {
+				continue
+			}
+			if len(inf.segs) == 0 {
+				out[refs[inf.idx].defPath] = base
+				continue
+			}
+			disambig := inf.segs[0]
+			for level := 1; level < len(inf.segs); level++ {
+				candidate := strings.Join(inf.segs[:level+1], "/")
+				unique := true
+				for j, other := range infos {
+					if i == j || resolved[j] {
+						continue
+					}
+					otherJoin := strings.Join(other.segs[:min(level+1, len(other.segs))], "/")
+					if candidate == otherJoin {
+						unique = false
+						break
+					}
+				}
+				disambig = candidate
+				if unique {
+					break
+				}
+			}
+			out[refs[inf.idx].defPath] = base + " (" + disambig + ")"
+		}
+	}
+	return out
+}
+
+func spendParentSegments(rootPath string) []string {
+	parent := filepath.Dir(rootPath)
+	var segs []string
+	for parent != "" && parent != "." && parent != string(filepath.Separator) {
+		base := filepath.Base(parent)
+		if base == "" || base == "." || base == string(filepath.Separator) {
+			break
+		}
+		segs = append(segs, base)
+		next := filepath.Dir(parent)
+		if next == parent {
+			break
+		}
+		parent = next
+	}
+	return segs
 }
 
 // normalizeSpendSort maps the caller's --sort value onto the closed vocabulary.
@@ -600,22 +865,23 @@ func RenderSpendRollup(w io.Writer, result *SpendRollupResult) {
 	for _, row := range result.Sets {
 		writeSpendRollupRow(w, row, showCost, showAgents)
 	}
+	writeSpendRollupFooter(w, result)
 }
 
 func writeSpendRollupHeader(w io.Writer, showCost, showAgents bool) {
 	switch {
 	case showCost && showAgents:
-		fmt.Fprintf(w, "%-28s %6s %6s %8s %8s %8s %9s %9s %5s %6s %12s\n",
-			"task set", "agent", "turns", "peak-in", "in", "out", "cache-r", "cache-w", "runs", "blind", "cost (partial)")
+		fmt.Fprintf(w, "%-20s %-28s %6s %6s %8s %8s %8s %9s %9s %5s %6s %12s\n",
+			"project", "task set", "agent", "turns", "peak-in", "in", "out", "cache-r", "cache-w", "runs", "blind", "cost (partial)")
 	case showCost:
-		fmt.Fprintf(w, "%-28s %6s %8s %8s %8s %9s %9s %5s %6s %12s\n",
-			"task set", "turns", "peak-in", "in", "out", "cache-r", "cache-w", "runs", "blind", "cost (partial)")
+		fmt.Fprintf(w, "%-20s %-28s %6s %8s %8s %8s %9s %9s %5s %6s %12s\n",
+			"project", "task set", "turns", "peak-in", "in", "out", "cache-r", "cache-w", "runs", "blind", "cost (partial)")
 	case showAgents:
-		fmt.Fprintf(w, "%-28s %6s %6s %8s %8s %8s %9s %9s %5s %6s\n",
-			"task set", "agent", "turns", "peak-in", "in", "out", "cache-r", "cache-w", "runs", "blind")
+		fmt.Fprintf(w, "%-20s %-28s %6s %6s %8s %8s %8s %9s %9s %5s %6s\n",
+			"project", "task set", "agent", "turns", "peak-in", "in", "out", "cache-r", "cache-w", "runs", "blind")
 	default:
-		fmt.Fprintf(w, "%-28s %6s %8s %8s %8s %9s %9s %5s %6s\n",
-			"task set", "turns", "peak-in", "in", "out", "cache-r", "cache-w", "runs", "blind")
+		fmt.Fprintf(w, "%-20s %-28s %6s %8s %8s %8s %9s %9s %5s %6s\n",
+			"project", "task set", "turns", "peak-in", "in", "out", "cache-r", "cache-w", "runs", "blind")
 	}
 }
 
@@ -626,7 +892,8 @@ func writeSpendRollupRow(w io.Writer, row SpendRollupRow, showCost, showAgents b
 	}
 	switch {
 	case showCost && showAgents:
-		fmt.Fprintf(w, "%-28s %6s %6s %8s %8s %8s %9s %9s %5d %6d %12s\n",
+		fmt.Fprintf(w, "%-20s %-28s %6s %6s %8s %8s %8s %9s %9s %5d %6d %12s\n",
+			row.Project,
 			row.TaskSetID,
 			agent,
 			formatSpendTurns(row.Turns),
@@ -640,7 +907,8 @@ func writeSpendRollupRow(w io.Writer, row SpendRollupRow, showCost, showAgents b
 			formatPartialCost(row.Cost),
 		)
 	case showCost:
-		fmt.Fprintf(w, "%-28s %6s %8s %8s %8s %9s %9s %5d %6d %12s\n",
+		fmt.Fprintf(w, "%-20s %-28s %6s %8s %8s %8s %9s %9s %5d %6d %12s\n",
+			row.Project,
 			row.TaskSetID,
 			formatSpendTurns(row.Turns),
 			formatSpendPeakInput(row.PeakInput),
@@ -653,7 +921,8 @@ func writeSpendRollupRow(w io.Writer, row SpendRollupRow, showCost, showAgents b
 			formatPartialCost(row.Cost),
 		)
 	case showAgents:
-		fmt.Fprintf(w, "%-28s %6s %6s %8s %8s %8s %9s %9s %5d %6d\n",
+		fmt.Fprintf(w, "%-20s %-28s %6s %6s %8s %8s %8s %9s %9s %5d %6d\n",
+			row.Project,
 			row.TaskSetID,
 			agent,
 			formatSpendTurns(row.Turns),
@@ -666,7 +935,8 @@ func writeSpendRollupRow(w io.Writer, row SpendRollupRow, showCost, showAgents b
 			row.TokenBlindRuns,
 		)
 	default:
-		fmt.Fprintf(w, "%-28s %6s %8s %8s %8s %9s %9s %5d %6d\n",
+		fmt.Fprintf(w, "%-20s %-28s %6s %8s %8s %8s %9s %9s %5d %6d\n",
+			row.Project,
 			row.TaskSetID,
 			formatSpendTurns(row.Turns),
 			formatSpendPeakInput(row.PeakInput),
@@ -678,6 +948,24 @@ func writeSpendRollupRow(w io.Writer, row SpendRollupRow, showCost, showAgents b
 			row.TokenBlindRuns,
 		)
 	}
+}
+
+func writeSpendRollupFooter(w io.Writer, result *SpendRollupResult) {
+	if result == nil {
+		return
+	}
+	blind := 0
+	for _, row := range result.Sets {
+		blind += row.TokenBlindRuns
+	}
+	if blind == 0 && result.SkippedStorages == 0 {
+		return
+	}
+	fmt.Fprintf(w, "%d token-blind runs", blind)
+	if result.SkippedStorages > 0 {
+		fmt.Fprintf(w, ", %d missing storages skipped", result.SkippedStorages)
+	}
+	fmt.Fprintln(w)
 }
 
 func spendRollupHasPartialCost(result *SpendRollupResult) bool {
@@ -955,6 +1243,7 @@ func RenderSpendRollupJSON(w io.Writer, result *SpendRollupResult) error {
 	for i, row := range result.Sets {
 		jr := spendRollupJSONRow{
 			TaskSetID:        row.TaskSetID,
+			Project:          row.Project,
 			InputTokens:      row.Tokens.Input,
 			OutputTokens:     row.Tokens.Output,
 			CacheReadTokens:  row.Tokens.CacheRead,

@@ -23,6 +23,9 @@ func spendFixture(t *testing.T) *execFixture {
 	if err != nil {
 		t.Fatalf("resolve storage: %v", err)
 	}
+	if err := EnsureStorage(d, id); err != nil {
+		t.Fatalf("ensure storage: %v", err)
+	}
 	return &execFixture{root: root, tasksDir: id.TasksDir, d: d}
 }
 
@@ -265,6 +268,7 @@ func TestRenderSpendRollupJSON(t *testing.T) {
 	lastRun := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
 	result := &SpendRollupResult{Sets: []SpendRollupRow{{
 		TaskSetID: "demo",
+		Project:   "pop",
 		Tokens: TokenUsage{
 			Input: 10, Output: 5, CacheRead: 2, CacheWrite: 1,
 			HasInput: true, HasOutput: true, HasCacheRead: true, HasCacheWrite: true,
@@ -289,7 +293,7 @@ func TestRenderSpendRollupJSON(t *testing.T) {
 		t.Fatalf("sets = %#v", decoded.Sets)
 	}
 	got := decoded.Sets[0]
-	if got.TaskSetID != "demo" || got.InputTokens != 10 || got.OutputTokens != 5 ||
+	if got.TaskSetID != "demo" || got.Project != "pop" || got.InputTokens != 10 || got.OutputTokens != 5 ||
 		got.CacheReadTokens != 2 || got.CacheWriteTokens != 1 ||
 		got.RunCount != 3 || got.TokenBlindRuns != 1 {
 		t.Fatalf("row = %+v", got)
@@ -313,6 +317,9 @@ func TestRenderSpendRollupJSON(t *testing.T) {
 	if _, ok := row["last_run_at"]; !ok {
 		t.Fatalf("last_run_at missing from JSON row: %s", buf.String())
 	}
+	if _, ok := row["project"]; !ok {
+		t.Fatalf("project missing from JSON row: %s", buf.String())
+	}
 
 	empty := &SpendRollupResult{Sets: []SpendRollupRow{{TaskSetID: "empty"}}}
 	buf.Reset()
@@ -327,11 +334,15 @@ func TestRenderSpendRollupJSON(t *testing.T) {
 	if v, ok := row["last_run_at"]; !ok || v != nil {
 		t.Fatalf("last_run_at = %#v, want present null", row["last_run_at"])
 	}
+	if _, ok := row["project"]; !ok {
+		t.Fatalf("project missing from empty JSON row: %s", buf.String())
+	}
 }
 
 func TestRenderSpendRollupHumanTable(t *testing.T) {
 	result := &SpendRollupResult{Sets: []SpendRollupRow{{
 		TaskSetID: "demo",
+		Project:   "pop",
 		Tokens: TokenUsage{
 			Input: 100, Output: 50, CacheRead: 10,
 			HasInput: true, HasOutput: true, HasCacheRead: true,
@@ -342,7 +353,7 @@ func TestRenderSpendRollupHumanTable(t *testing.T) {
 	var buf bytes.Buffer
 	RenderSpendRollup(&buf, result)
 	out := buf.String()
-	for _, want := range []string{"task set", "turns", "peak-in", "cache-r", "cache-w", "runs", "blind", "demo", "100", "50", "10", "2", "1"} {
+	for _, want := range []string{"project", "task set", "turns", "peak-in", "cache-r", "cache-w", "runs", "blind", "pop", "demo", "100", "50", "10", "2", "1", "token-blind runs"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output missing %q:\n%s", want, out)
 		}
@@ -423,6 +434,174 @@ func TestSpendRollupExcludesArchivedSets(t *testing.T) {
 	if len(result.Sets) != 1 || result.Sets[0].TaskSetID != "2026-06-11-active" {
 		t.Fatalf("sets = %#v, want only active set", result.Sets)
 	}
+}
+
+func TestSpendRollupAllCrossesProjects(t *testing.T) {
+	d := newTestDeps(t)
+	base := t.TempDir()
+	envA := spendFixtureAt(t, d, filepath.Join(base, "personal", "pop"))
+	envB := spendFixtureAt(t, d, filepath.Join(base, "work", "pop"))
+	start := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+
+	dirA := registerSpendSet(t, envA, "2026-06-10-alpha", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	writeSpendRun(t, dirA, "01-a.md", "01-a", "claude", start, []streamEventRecord{
+		{Type: "event", AtMS: 100, Raw: `{"type":"result","usage":{"input_tokens":1,"output_tokens":1}}`},
+	})
+	dirB := registerSpendSet(t, envB, "2026-06-11-beta", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	writeSpendRun(t, dirB, "01-a.md", "01-a", "claude", start.Add(time.Minute), []streamEventRecord{
+		{Type: "event", AtMS: 100, Raw: `{"type":"result","usage":{"input_tokens":2,"output_tokens":2}}`},
+	})
+
+	scoped, err := SpendRollupWith(d, nil, nil, SpendOptions{
+		ResolveInput: ResolveInput{CWD: envA.root},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scoped.Sets) != 1 || scoped.Sets[0].TaskSetID != "2026-06-10-alpha" {
+		t.Fatalf("repo-scoped sets = %#v", scoped.Sets)
+	}
+	if scoped.Sets[0].Project == "" {
+		t.Fatal("repo-scoped row missing project")
+	}
+
+	all, err := SpendRollupWith(d, nil, nil, SpendOptions{All: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all.Sets) != 2 {
+		t.Fatalf("all sets = %#v, want 2", all.Sets)
+	}
+	byID := map[string]SpendRollupRow{}
+	for _, row := range all.Sets {
+		byID[row.TaskSetID] = row
+	}
+	if byID["2026-06-10-alpha"].Project == byID["2026-06-11-beta"].Project {
+		t.Fatalf("colliding basenames not disambiguated: %#v", all.Sets)
+	}
+	if !strings.Contains(byID["2026-06-10-alpha"].Project, "personal") {
+		t.Fatalf("alpha project = %q, want personal disambiguator", byID["2026-06-10-alpha"].Project)
+	}
+	if !strings.Contains(byID["2026-06-11-beta"].Project, "work") {
+		t.Fatalf("beta project = %q, want work disambiguator", byID["2026-06-11-beta"].Project)
+	}
+	if all.Sets[0].TaskSetID != "2026-06-11-beta" {
+		t.Fatalf("flat recency order starts with %q, want beta", all.Sets[0].TaskSetID)
+	}
+}
+
+func TestSpendRollupAllRespectsLimit(t *testing.T) {
+	d := newTestDeps(t)
+	env := spendFixtureAt(t, d, t.TempDir())
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	for i := 1; i <= 5; i++ {
+		setDir := registerSpendSet(t, env, formatSpendSetID(i), []Task{
+			{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+		})
+		writeSpendRun(t, setDir, "01-a.md", "01-a", "claude", base.Add(time.Duration(i)*time.Minute), []streamEventRecord{
+			{Type: "event", AtMS: 100, Raw: `{"type":"result","usage":{"input_tokens":1,"output_tokens":1}}`},
+		})
+	}
+	result, err := SpendRollupWith(d, nil, nil, SpendOptions{All: true, Limit: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Sets) != 3 {
+		t.Fatalf("sets = %d, want 3", len(result.Sets))
+	}
+	if result.Sets[0].TaskSetID != formatSpendSetID(5) {
+		t.Fatalf("newest first = %q", result.Sets[0].TaskSetID)
+	}
+}
+
+func TestSpendRollupAllSkipsMissingStorage(t *testing.T) {
+	d := newTestDeps(t)
+	base := t.TempDir()
+	envKeep := spendFixtureAt(t, d, filepath.Join(base, "keep"))
+	envGone := spendFixtureAt(t, d, filepath.Join(base, "gone"))
+	start := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+
+	keepDir := registerSpendSet(t, envKeep, "2026-06-10-keep", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	writeSpendRun(t, keepDir, "01-a.md", "01-a", "claude", start, []streamEventRecord{
+		{Type: "event", AtMS: 100, Raw: `{"type":"result","usage":{"input_tokens":1,"output_tokens":1}}`},
+	})
+	goneDir := registerSpendSet(t, envGone, "2026-06-11-gone", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	writeSpendRun(t, goneDir, "01-a.md", "01-a", "claude", start.Add(time.Minute), []streamEventRecord{
+		{Type: "event", AtMS: 100, Raw: `{"type":"result","usage":{"input_tokens":9,"output_tokens":9}}`},
+	})
+	if err := os.RemoveAll(filepath.Dir(envGone.tasksDir)); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := SpendRollupWith(d, nil, nil, SpendOptions{All: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.SkippedStorages != 1 {
+		t.Fatalf("SkippedStorages = %d, want 1", result.SkippedStorages)
+	}
+	if len(result.Sets) != 1 || result.Sets[0].TaskSetID != "2026-06-10-keep" {
+		t.Fatalf("sets = %#v, want only keep", result.Sets)
+	}
+
+	var buf bytes.Buffer
+	RenderSpendRollup(&buf, result)
+	if !strings.Contains(buf.String(), "1 missing storages skipped") {
+		t.Fatalf("footer missing skipped count:\n%s", buf.String())
+	}
+}
+
+func TestSpendRollupAllExcludesArchived(t *testing.T) {
+	d := newTestDeps(t)
+	env := spendFixtureAt(t, d, t.TempDir())
+	base := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	activeDir := registerSpendSet(t, env, "2026-06-11-active", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	writeSpendRun(t, activeDir, "01-a.md", "01-a", "claude", base, []streamEventRecord{
+		{Type: "event", AtMS: 100, Raw: `{"type":"result","usage":{"input_tokens":1,"output_tokens":1}}`},
+	})
+	archivedDir := registerSpendSet(t, env, "2026-06-12-archived", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
+	})
+	writeSpendRun(t, archivedDir, "01-a.md", "01-a", "claude", base, []streamEventRecord{
+		{Type: "event", AtMS: 100, Raw: `{"type":"result","usage":{"input_tokens":999,"output_tokens":999}}`},
+	})
+	if _, err := ArchiveTaskSetWith(d, nil, nil, ResolveInput{CWD: env.root}, "2026-06-12-archived"); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := SpendRollupWith(d, nil, nil, SpendOptions{All: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Sets) != 1 || result.Sets[0].TaskSetID != "2026-06-11-active" {
+		t.Fatalf("sets = %#v", result.Sets)
+	}
+}
+
+func spendFixtureAt(t *testing.T, d *Deps, root string) *execFixture {
+	t.Helper()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	initExecutorGitRepo(t, root)
+	id, err := ResolveRepositoryIdentity(d, root)
+	if err != nil {
+		t.Fatalf("resolve storage: %v", err)
+	}
+	if err := EnsureStorage(d, id); err != nil {
+		t.Fatalf("ensure storage: %v", err)
+	}
+	return &execFixture{root: root, tasksDir: id.TasksDir, d: d}
 }
 
 func formatSpendSetID(n int) string {

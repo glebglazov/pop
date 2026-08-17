@@ -67,6 +67,8 @@ var (
 	taskStreamToolDetail      bool
 	taskSpendJSON             bool
 	taskSpendSort             string
+	taskSpendAll              bool
+	taskSpendLimit            int
 	taskAgentsModels          bool
 )
 
@@ -225,8 +227,14 @@ var taskStreamCmd = &cobra.Command{
 var taskSpendCmd = &cobra.Command{
 	Use:   "spend [TASK_SET]",
 	Short: "Roll up run spend across recent task sets or break one set down per task",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runTaskSpend,
+	Long: `Roll up run spend across recent task sets, or break one set down per task.
+
+Bare, the lens is repo-scoped: the current checkout's most recent Task sets.
+--all widens the same rollup across every repository registered on this machine,
+with a Project column on every row. The widened list is one flat list (never a
+per-project quota), capped at 20 by default and adjustable with --limit.`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runTaskSpend,
 }
 
 var taskShowPathCmd = &cobra.Command{
@@ -353,6 +361,8 @@ func init() {
 	taskCmd.AddCommand(taskSpendCmd)
 	taskSpendCmd.Flags().BoolVar(&taskSpendJSON, "json", false, "Emit spend data as JSON instead of a table")
 	taskSpendCmd.Flags().StringVar(&taskSpendSort, "sort", tasks.SpendSortRecency, "Order the rollup by recency (latest Captured run) or tokens")
+	taskSpendCmd.Flags().BoolVar(&taskSpendAll, "all", false, "Roll up Task sets from every registered repository on this machine")
+	taskSpendCmd.Flags().IntVar(&taskSpendLimit, "limit", 0, "Cap rollup rows after the recency window (default 10; 20 with --all)")
 	taskCmd.AddCommand(taskShowPathCmd)
 	taskCheckoutCmd.Flags().BoolVar(&taskCheckoutLocality, "locality", false, "Print exactly one word, trunk or worktree (the default with no flags)")
 	taskCheckoutCmd.Flags().BoolVar(&taskCheckoutJSON, "json", false, "Print the whole checkout as JSON: path, locality, branch, trunk_path (omitted when unresolvable), bare, managed")
@@ -1702,6 +1712,8 @@ func runTaskSpendWith(d *tasks.Deps, w io.Writer, target string) error {
 	result, err := tasks.SpendRollupWith(d, taskProjectDeps(), taskConfigLoad, tasks.SpendOptions{
 		ResolveInput: taskResolveInput(),
 		Sort:         taskSpendSort,
+		All:          taskSpendAll,
+		Limit:        taskSpendLimit,
 	})
 	if err != nil {
 		return err
