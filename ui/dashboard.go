@@ -145,6 +145,11 @@ type MonitorDashboard struct {
 	// caller passes WithMonitorDashboardKillPrompt(false).
 	killPromptEnabled bool
 	killPrompt        *killPanePrompt
+	// writePrompt is the y/N confirmation for a non-destructive bulk write —
+	// unmonitor or follow — which is never gated by killPromptEnabled: neither
+	// verb touches a process, so ADR-0205's standing exception for kills does
+	// not apply (ADR-0215 decision 7).
+	writePrompt *writePrompt
 
 	warnings []string
 
@@ -171,6 +176,17 @@ type killPanePrompt struct {
 	// plural: its answer consumes the marks, which the single-pane path knows
 	// nothing about.
 	plural bool
+}
+
+// writePrompt is the y/N confirmation a bulk unmonitor or follow opens. It has
+// no singular counterpart and no config gate — those verbs never prompt for
+// one pane at all — so unlike killPanePrompt it always fires over a Selection.
+// apply is the verb to run on `y`, already closed over any direction the
+// verb's label depends on.
+type writePrompt struct {
+	paneIDs []string
+	label   string
+	apply   func(d *MonitorDashboard, paneIDs []string) tea.Cmd
 }
 
 // MonitorDashboardOption configures the dashboard
@@ -389,6 +405,10 @@ func (d *MonitorDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			d.pendingG = false
 			return d.updateKillPrompt(msg)
 		}
+		if d.writePrompt != nil {
+			d.pendingG = false
+			return d.updateWritePrompt(msg)
+		}
 
 		// Help overlay: toggle, dismiss, or swallow keys while open.
 		if ToggleHelp(&d.showHelp, msg) {
@@ -567,6 +587,9 @@ func (d *MonitorDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if d.refuseSingular(&dashboardKeys.FollowPane) {
 				return d, nil
 			}
+			if d.selection.Active() {
+				return d, d.startFollowSelected()
+			}
 			if len(d.panes) > 0 && d.toggleFollowFunc != nil {
 				pane := &d.panes[d.cursor]
 				if pane.Status == AttentionVirtual {
@@ -603,6 +626,9 @@ func (d *MonitorDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if d.refuseSingular(&dashboardKeys.Unmonitor) {
 				return d, nil
+			}
+			if d.selection.Active() {
+				return d, d.startUnmonitorSelected()
 			}
 			if len(d.panes) > 0 && d.unmonitorFunc != nil {
 				pane := d.panes[d.cursor]
@@ -728,6 +754,63 @@ func (d *MonitorDashboard) startKillSelected() tea.Cmd {
 	return d.killPanes(paneIDs)
 }
 
+// startUnmonitorSelected answers the unmonitor key in selection mode. It opens
+// the standard bulk y/N — never the kill prompt's config gate, since forgetting
+// a pane touches no process (ADR-0215 decision 7) — over the marked set
+// captured now, the same staleness rule startKillSelected uses.
+func (d *MonitorDashboard) startUnmonitorSelected() tea.Cmd {
+	if d.unmonitorFunc == nil {
+		return nil
+	}
+	paneIDs := d.selectedPaneIDs()
+	if len(paneIDs) == 0 {
+		return nil
+	}
+	d.flash.Set("")
+	d.writePrompt = &writePrompt{
+		paneIDs: paneIDs,
+		label:   fmt.Sprintf("unmonitor %d", len(paneIDs)),
+		apply:   (*MonitorDashboard).unmonitorPanes,
+	}
+	return nil
+}
+
+// startFollowSelected answers the follow key in selection mode. A toggle over a
+// mixed set is ambiguous, so the direction is decided once, here, rather than
+// per pane: if any marked pane is not followed, the run follows all of them;
+// otherwise it unfollows all of them (ADR-0215 decision 5). The label names
+// that decision rather than a static word, since "follow" would otherwise read
+// as a promise the run might actually break.
+func (d *MonitorDashboard) startFollowSelected() tea.Cmd {
+	if d.toggleFollowFunc == nil {
+		return nil
+	}
+	paneIDs := d.selectedPaneIDs()
+	if len(paneIDs) == 0 {
+		return nil
+	}
+	follow := false
+	for _, pane := range d.panes {
+		if d.selection.Has(pane.PaneID) && !pane.Following {
+			follow = true
+			break
+		}
+	}
+	verb := "unfollow"
+	if follow {
+		verb = "follow"
+	}
+	d.flash.Set("")
+	d.writePrompt = &writePrompt{
+		paneIDs: paneIDs,
+		label:   fmt.Sprintf("%s %d", verb, len(paneIDs)),
+		apply: func(dd *MonitorDashboard, ids []string) tea.Cmd {
+			return dd.followPanes(ids, follow)
+		},
+	}
+	return nil
+}
+
 // selectedPaneIDs lists the marked panes in the order the view holds them, which
 // is the order the region draws and therefore the order failures are reported in.
 func (d *MonitorDashboard) selectedPaneIDs() []string {
@@ -754,6 +837,22 @@ func (d *MonitorDashboard) updateKillPrompt(msg tea.KeyPressMsg) (tea.Model, tea
 		return d, d.killPane(prompt.paneIDs[0])
 	case key.Matches(msg, dashboardKeys.KillCancel):
 		d.killPrompt = nil
+	}
+	return d, nil
+}
+
+// updateWritePrompt runs the same y/N grammar the kill prompt uses — `y` runs
+// the verb it named, everything else in KillCancel's set backs out — over a
+// bulk unmonitor or follow instead. A cancel leaves the Selection whole:
+// nothing changed, so nothing is consumed.
+func (d *MonitorDashboard) updateWritePrompt(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, dashboardKeys.KillConfirm):
+		prompt := d.writePrompt
+		d.writePrompt = nil
+		return d, prompt.apply(d, prompt.paneIDs)
+	case key.Matches(msg, dashboardKeys.KillCancel):
+		d.writePrompt = nil
 	}
 	return d, nil
 }
@@ -835,6 +934,129 @@ func killOutcome(killed int, reasons []string, skipped bool) string {
 	return strings.Join(parts, " · ")
 }
 
+// unmonitorPanes forgets a whole captured set in one pass, inheriting the same
+// failure rule killPanes uses: a pane that left the monitored set between the
+// prompt and the answer is reported rather than silently dropped from what the
+// human agreed to. Unmonitoring never touches a process, so nothing else can
+// fail. The Selection collapses to exactly the failures, and a run that empties
+// the monitored set quits the dashboard, exactly as a bulk kill does.
+func (d *MonitorDashboard) unmonitorPanes(paneIDs []string) tea.Cmd {
+	unmonitored := 0
+	var failed []string
+	var reasons []string
+
+	for _, paneID := range paneIDs {
+		if _, ok := d.paneByID(paneID); !ok {
+			failed = append(failed, paneID)
+			reasons = append(reasons, paneID+": pane is gone")
+			continue
+		}
+		d.unmonitorFunc(paneID)
+		d.dropPaneEntry(paneID)
+		unmonitored++
+	}
+
+	if unmonitored > 0 {
+		d.dirty = true
+	}
+	d.selection.Clear()
+	for _, paneID := range failed {
+		d.selection.Toggle(paneID)
+	}
+	d.flash.Set(unmonitorOutcome(unmonitored, reasons))
+	d.clearProtectedPane()
+	d.rebuildView()
+	if len(d.panes) == 0 {
+		d.result = MonitorDashboardResult{Action: MonitorDashboardActionCancel}
+		return tea.Quit
+	}
+	return nil
+}
+
+// unmonitorOutcome words a bulk unmonitor's result on the flash line, matching
+// killOutcome's grammar: what succeeded, then the single reason when exactly
+// one pane failed or a bare count when several did.
+func unmonitorOutcome(unmonitored int, reasons []string) string {
+	var parts []string
+	if unmonitored > 0 {
+		parts = append(parts, "unmonitored "+paneCount(unmonitored))
+	}
+	switch len(reasons) {
+	case 0:
+	case 1:
+		parts = append(parts, "1 failed: "+reasons[0])
+	default:
+		parts = append(parts, fmt.Sprintf("%d failed", len(reasons)))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// followPanes drives every captured pane to one following value in one pass.
+// The direction was decided once when the prompt opened, not re-decided per
+// pane — that decision is the whole point of driving a mixed set to one value
+// (ADR-0215 decision 5) — so a pane already at the target value is left alone
+// rather than toggled past it. Following never touches a process, so the only
+// failure is the same staleness gap unmonitorPanes and killPanes both guard: a
+// pane gone from the monitored set between the prompt and the answer.
+func (d *MonitorDashboard) followPanes(paneIDs []string, follow bool) tea.Cmd {
+	changed := 0
+	var failed []string
+	var reasons []string
+
+	for _, paneID := range paneIDs {
+		pane, ok := d.paneByID(paneID)
+		if !ok {
+			failed = append(failed, paneID)
+			reasons = append(reasons, paneID+": pane is gone")
+			continue
+		}
+		if pane.Following == follow {
+			continue
+		}
+		d.toggleFollowFunc(paneID)
+		for i := range d.allPanes {
+			if d.allPanes[i].PaneID == paneID {
+				d.allPanes[i].Following = follow
+				break
+			}
+		}
+		changed++
+	}
+
+	if changed > 0 {
+		d.dirty = true
+	}
+	d.selection.Clear()
+	for _, paneID := range failed {
+		d.selection.Toggle(paneID)
+	}
+	d.flash.Set(followOutcome(follow, changed, reasons))
+	d.clearProtectedPane()
+	d.rebuildView()
+	return nil
+}
+
+// followOutcome words a bulk follow or unfollow's result on the flash line,
+// matching killOutcome's grammar.
+func followOutcome(follow bool, changed int, reasons []string) string {
+	verb := "followed"
+	if !follow {
+		verb = "unfollowed"
+	}
+	var parts []string
+	if changed > 0 {
+		parts = append(parts, verb+" "+paneCount(changed))
+	}
+	switch len(reasons) {
+	case 0:
+	case 1:
+		parts = append(parts, "1 failed: "+reasons[0])
+	default:
+		parts = append(parts, fmt.Sprintf("%d failed", len(reasons)))
+	}
+	return strings.Join(parts, " · ")
+}
+
 // paneCount words a number of panes for a prompt or an outcome.
 func paneCount(n int) string {
 	if n == 1 {
@@ -909,7 +1131,8 @@ func (d *MonitorDashboard) killPane(paneID string) tea.Cmd {
 
 // killPromptStyle paints the y/N question in the house accent, the colour the
 // mode word and the region separator use: the question is chrome that is on for
-// as long as it goes unanswered, not a message that expires like a flash.
+// as long as it goes unanswered, not a message that expires like a flash. Every
+// bulk confirmation shares it, kill included, since they are one grammar.
 var killPromptStyle = lipgloss.NewStyle().Foreground(colorAccent)
 
 // killPaneLabel names a pane in a prompt or a flash, falling back to the tmux
@@ -1219,11 +1442,14 @@ func (d *MonitorDashboard) buildHints() string {
 	if d.killPrompt != nil {
 		return killPromptStyle.Render("  Kill " + d.killPrompt.label + "? y/N")
 	}
+	if d.writePrompt != nil {
+		return killPromptStyle.Render("  " + d.writePrompt.label + "? y/N")
+	}
 	hints := "  j/k move · Tab select · Enter open and clear · Shift+Enter open · r toggle unread/clear · f follow · x unmonitor · C-x kill · F follow view · ← back · Esc cancel · C-h help"
 	if d.selection.Active() {
 		// Only the keys that still do something in the mode, so the line does not
 		// advertise the verbs it is refusing.
-		hints = "  j/k move · Tab select · S-Tab clear · C-x kill · F follow view · ← back · Esc cancel · C-h help"
+		hints = "  j/k move · Tab select · S-Tab clear · f follow · x unmonitor · C-x kill · F follow view · ← back · Esc cancel · C-h help"
 	}
 	if d.pickerMode {
 		hints = "  j/k move · Enter select · F follow view · Esc cancel · C-h help"
@@ -1328,9 +1554,9 @@ func (d *MonitorDashboard) helpEntries() []HelpEntry {
 		{"Shift+Enter / p", "Peek (open without clearing)"},
 		{"r", "Toggle unread/clear"},
 		{"C-a", "Mark unread"},
-		{"f", "Follow pane"},
+		{"f", "Follow pane or selection"},
 		{"F", "Toggle follow view"},
-		{"x", "Unmonitor pane"},
+		{"x", "Unmonitor pane or selection"},
 		{"C-x", "Kill pane or selection"},
 		{"← / h", "Back / quit"},
 		{"Esc / C-c", "Cancel"},
@@ -1623,7 +1849,7 @@ var dashboardVerbs = map[*key.Binding]monitorVerb{
 	&dashboardKeys.PeekPane:          {name: "peek"},
 	&dashboardKeys.ToggleClearUnread: {name: "toggle unread"},
 	&dashboardKeys.MarkUnread:        {name: "mark unread"},
-	&dashboardKeys.FollowPane:        {name: "follow"},
-	&dashboardKeys.Unmonitor:         {name: "unmonitor"},
+	&dashboardKeys.FollowPane:        {name: "follow", plural: true},
+	&dashboardKeys.Unmonitor:         {name: "unmonitor", plural: true},
 	&dashboardKeys.KillPane:          {name: "kill", plural: true},
 }

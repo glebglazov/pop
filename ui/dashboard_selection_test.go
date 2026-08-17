@@ -363,8 +363,6 @@ func TestMonitorSelectionRefusesSingularVerbs(t *testing.T) {
 		{"peek", tea.KeyPressMsg{Code: 'p', Text: "p"}, "peek"},
 		{"toggle unread", tea.KeyPressMsg{Code: 'r', Text: "r"}, "toggle unread"},
 		{"mark unread", tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl}, "mark unread"},
-		{"follow", tea.KeyPressMsg{Code: 'f', Text: "f"}, "follow"},
-		{"unmonitor", tea.KeyPressMsg{Code: 'x', Text: "x"}, "unmonitor"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var acted []string

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -26,17 +27,19 @@ func (k *killVerdicts) callbacks() AttentionCallbacks {
 
 func keyY() tea.KeyPressMsg { return tea.KeyPressMsg{Code: 'y', Text: "y"} }
 
-// TestMonitorVerbCapabilities pins the capability table itself: the kill is the
-// one binding granted the plural mode, and a binding that declares nothing acts
-// on one pane and says so (ADR-0215 decision 5).
+// TestMonitorVerbCapabilities pins the capability table itself: kill, follow
+// and unmonitor are the bindings granted the plural mode, and a binding that
+// declares nothing acts on one pane and says so (ADR-0215 decision 5).
 func TestMonitorVerbCapabilities(t *testing.T) {
-	for binding, verb := range dashboardVerbs {
-		if verb.plural && binding != &dashboardKeys.KillPane {
-			t.Errorf("%q is granted the plural mode; only the kill is", verb.name)
-		}
+	pluralBindings := map[*key.Binding]bool{
+		&dashboardKeys.KillPane:   true,
+		&dashboardKeys.FollowPane: true,
+		&dashboardKeys.Unmonitor:  true,
 	}
-	if !dashboardVerbs[&dashboardKeys.KillPane].plural {
-		t.Error("the kill does not declare the plural mode")
+	for binding, verb := range dashboardVerbs {
+		if verb.plural != pluralBindings[binding] {
+			t.Errorf("%q plural = %v, want %v", verb.name, verb.plural, pluralBindings[binding])
+		}
 	}
 
 	d := newMonitorDashboard(selectionPanes(3), AttentionCallbacks{})
