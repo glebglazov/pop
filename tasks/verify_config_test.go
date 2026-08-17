@@ -128,7 +128,8 @@ func TestVerifierBinaryAvailable(t *testing.T) {
 // binary is absent, the runner hard-errors with each preset's diagnostic instead
 // of yielding empty output that ParseVerdict would turn into NEEDS-HUMAN.
 func TestRunConfiguredVerifierAllMissingHardErrors(t *testing.T) {
-	d := &Deps{LookPath: func(string) (string, error) { return "", exec.ErrNotFound }}
+	d := newTestDeps(t)
+	d.LookPath = func(string) (string, error) { return "", exec.ErrNotFound }
 	_, err := runConfiguredVerifier(d, nil, verifierSelection{
 		Agents: []string{"cursor", "claude"}, Effort: "heavy",
 	}, t.TempDir(), "demo", "sha1", t.TempDir(), "prompt", &bytes.Buffer{}, &bytes.Buffer{}, time.Minute, nil)

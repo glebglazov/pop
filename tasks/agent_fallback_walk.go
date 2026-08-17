@@ -1,6 +1,7 @@
 package tasks
 
 import (
+	"fmt"
 	"io"
 	"strings"
 	"time"
@@ -98,9 +99,9 @@ type agentWalkResult struct {
 // runAgentFallbackWalk walks a role's resolved agent list at the resolved
 // effort, retrying each available preset up to the role's cap with Task attempt
 // retry delays between invocation failures, then falling through to the next
-// agent on quota pause or exhausted retries. Missing-binary and logged-out
-// presets are skipped via the shared Agent unavailability kinds (PATH check,
-// availability probe, passive auth detection).
+// agent on quota pause or exhausted retries. Cooling, missing-binary and
+// logged-out presets are skipped via the shared Agent unavailability kinds
+// (cooldown store, PATH check, availability probe, passive auth detection).
 //
 // Inside a preset it also walks that preset's Effort tier the way implement
 // does: a model-scoped verdict records an Effort model skip and restarts the try
@@ -122,11 +123,28 @@ func runAgentFallbackWalk(d *Deps, w agentFallbackWalk) (agentWalkResult, error)
 	// read once, on the first preset that actually reaches its tier — a round
 	// where every preset is skipped before invocation never opens the store.
 	var skips effortModelSkips
+	// The machine-global cooldown store is what a quota pause anywhere on this
+	// machine left behind, so the walk reads it before invoking anything: a preset
+	// the last hour already proved exhausted is skipped here rather than spending
+	// an invocation to be told the same thing again (ADR-0034, ADR-0100).
+	cooldowns, err := readAgentCooldowns(d)
+	if err != nil {
+		return agentWalkResult{}, exitErr(ExitOperational, "%v", err)
+	}
+	activeCooldowns := activeAgentCooldowns(cooldowns, time.Now())
 	resolveSpec := newEffortSpecResolver("", w.sel.Effort, true, w.cfg)
 	for i, agentSpec := range specs {
 		preset, err := AgentPresetName(agentSpec)
 		if err != nil {
 			return agentWalkResult{}, exitErr(ExitSetup, "resolve %s: %v", strings.ToLower(w.role.Noun), err)
+		}
+		if until, cooling := activeCooldowns[preset]; cooling {
+			v := NewQuotaPauseVerdict(preset, fmt.Sprintf("agent quota cooldown until %s", until.UTC().Format(time.RFC3339)), until)
+			result.Unavailable = append(result.Unavailable, v)
+			if i+1 < len(specs) && w.out != nil {
+				outputFor(w.out).line(ansiDim, "   %s", v.fallThroughMessage(w.role.Noun))
+			}
+			continue
 		}
 		if !agentBinaryAvailable(d, preset) {
 			v := NewMissingBinaryVerdict(preset, "binary not found on PATH")

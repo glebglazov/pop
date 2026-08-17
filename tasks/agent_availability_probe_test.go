@@ -148,7 +148,8 @@ func TestAgentAvailabilityProbeMemoRunsOncePerPreset(t *testing.T) {
 
 func TestAgentAvailabilityProbeMemoOneWaySkip(t *testing.T) {
 	runner := &probeCountingRunner{output: `{"isAuthenticated":false}`}
-	d := &Deps{Runner: runner}
+	d := newTestDeps(t)
+	d.Runner = runner
 	memo := newAgentAvailabilityProbeMemo()
 
 	first := memo.checkProceedVerdict(d, ".", "cursor")
@@ -167,7 +168,8 @@ func TestAgentAvailabilityProbeMemoOneWaySkip(t *testing.T) {
 
 func TestRunConfiguredVerifierSharedProbeMemoRunsOnce(t *testing.T) {
 	runner := &probeCountingRunner{output: `{"isAuthenticated":false}`}
-	d := &Deps{Runner: runner}
+	d := newTestDeps(t)
+	d.Runner = runner
 	memo := newAgentAvailabilityProbeMemo()
 	sel := verifierSelection{Agents: []string{"cursor"}, Effort: "heavy"}
 
@@ -190,7 +192,8 @@ func TestRunConfiguredVerifierSharedProbeMemoRunsOnce(t *testing.T) {
 
 func TestImplementAndVerifyShareProbeMemo(t *testing.T) {
 	runner := &probeCountingRunner{output: `{"isAuthenticated":false}`}
-	d := &Deps{Runner: runner}
+	d := newTestDeps(t)
+	d.Runner = runner
 	memo := newAgentAvailabilityProbeMemo()
 
 	if u := memo.checkProceedVerdict(d, ".", "cursor"); u == nil || u.Kind != ProceedAuthFailure {
