@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebglazov/pop/tasks"
 )
@@ -29,6 +30,10 @@ func TestTaskArtifactsListsAndShowsDocuments(t *testing.T) {
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
+	}
+	specAt := time.Date(2026, 8, 17, 11, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(filepath.Join(setDir, tasks.SpecFileName), specAt, specAt); err != nil {
+		t.Fatal(err)
 	}
 
 	var list bytes.Buffer

@@ -96,3 +96,20 @@ func TestArtifactsEmptyAndArtifactVerbs(t *testing.T) {
 		t.Fatalf("copy path = %+v, %v", path, err)
 	}
 }
+
+func TestArtifactCopyNameIsSetRelative(t *testing.T) {
+	defPath := t.TempDir()
+	setDir := filepath.Join(defPath, "demo")
+	artifact := work.Artifact{
+		Name: "review-20260817T120000Z.md",
+		Path: filepath.Join(setDir, reviewsDirName, "review-20260817T120000Z.md"),
+	}
+	kind := New(&Deps{Tasks: tasks.DefaultDeps()})
+	outcome, err := kind.PerformArtifact(work.Container{ID: "demo", DefPath: defPath}, artifact, work.VerbCopyName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := outcome.Clipboard, "reviews/review-20260817T120000Z.md"; got != want {
+		t.Fatalf("copy-name payload = %q, want set-relative %q", got, want)
+	}
+}

@@ -3,7 +3,6 @@ package dashboard
 import (
 	"errors"
 	"fmt"
-	"github.com/glebglazov/pop/tasks/drain"
 	"io"
 	"path/filepath"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/drain"
 	"github.com/glebglazov/pop/tasks/setkind"
 	"github.com/glebglazov/pop/ui"
 	"github.com/glebglazov/pop/wayfinder"
@@ -496,16 +496,16 @@ func (m QueueDashboard) activeViewPreset() config.WorkViewPreset {
 	return config.WorkViewPreset{}
 }
 
-// itemMenu is the action overlay opened with `a` over a single Work item — in
-// the detail view (over the cursored item) or the Document peek (over the
-// previewed one). Its verbs are the owning kind's ItemActions, asked for when the
-// menu opens rather than carried on the item, so eligibility is as fresh as the
-// keypress (ADR-0173). inPeek marks which view it was opened from so the renderer
-// can place it correctly.
+// itemMenu is the action overlay for one row in either detail list. It may be
+// opened from the detail view or the Document peek. Exactly one of item and
+// artifact identifies the row, and its verbs are asked of the owning kind when
+// the menu opens, so eligibility is as fresh as the keypress (ADR-0173/0217).
+// inPeek marks which view opened it so feedback and rendering stay on that view.
 type itemMenu struct {
-	item   work.Item
-	list   *ui.List[work.Action]
-	inPeek bool
+	item     work.Item
+	artifact *work.Artifact
+	list     *ui.List[work.Action]
+	inPeek   bool
 }
 
 // newItemMenu wraps the kind's verbs for one item in a ui.List with j/k
@@ -518,19 +518,30 @@ func newItemMenu(item work.Item, actions []work.Action, inPeek bool) *itemMenu {
 	}
 }
 
+// newArtifactMenu wraps the owning kind's verbs for one artifact row.
+func newArtifactMenu(artifact work.Artifact, actions []work.Action, inPeek bool) *itemMenu {
+	return &itemMenu{
+		artifact: &artifact,
+		list:     ui.NewList(actions, ui.Opts[work.Action]{Wrap: true}),
+		inPeek:   inPeek,
+	}
+}
+
 // detailView is the full-screen container detail that replaces the table. It is
-// generic over kinds: the kind's prose sections render above one item list, and
-// every item verb comes from that kind (ADR-0173) — a new kind gets a detail view
-// by filling Items and DetailSections, never by writing a frame of its own.
+// generic over kinds: the kind's prose sections render above its item list and,
+// when published, its Artifact view. Every row verb comes from that kind
+// (ADR-0173/0217), so a new kind gets a detail view without writing a frame.
 //
 // Its data is the container itself, refreshed by the same periodic rebuild that
 // feeds the table: there is no second loader to drift from the rows behind it.
 // ReplaceItems re-anchors the cursor by item id on refresh (ADR-0079).
 type detailView struct {
-	row  work.Container
-	list *ui.List[work.Item]
-	cols *detailColumns
-	peek *documentPeek
+	row          work.Container
+	list         *ui.List[work.Item]
+	artifactList *ui.List[work.Artifact]
+	artifacts    bool
+	cols         *detailColumns
+	peek         *documentPeek
 	// flash is the detail view's transient feedback: a hint on an invalid
 	// transition, a confirmation on success. It takes the hint line for three
 	// seconds and expires itself (ADR-0204).
@@ -548,9 +559,11 @@ type detailColumns struct {
 // Detail item-table column widths. Status, type, and title are fixed; the ID
 // column grows to the widest item ID (floored at the "ID" header).
 const (
-	detailStatusW = 10
-	detailTypeW   = 4
-	detailTitleW  = 40
+	detailStatusW          = 10
+	detailTypeW            = 4
+	detailTitleW           = 40
+	detailArtifactTypeW    = 8
+	detailArtifactWrittenW = len("2006-01-02T15:04:05Z")
 )
 
 // detailTableChromeLines is the number of body lines above the detail List rows:
@@ -570,8 +583,38 @@ func newDetailView(row work.Container) *detailView {
 			return detailItemLine(i, cols.idW)
 		},
 	})
+	d.artifactList = ui.NewList([]work.Artifact{}, ui.Opts[work.Artifact]{
+		Key:    func(a work.Artifact) string { return a.Path },
+		Anchor: ui.AnchorTop,
+		Cell: func(a work.Artifact, _ ui.RowState) string {
+			return detailArtifactLine(a)
+		},
+	})
 	d.sync(row)
 	return d
+}
+
+// openDetailView builds the generic detail and asks the focused container's kind
+// for its optional second list. A missing seam and an empty answer are the same
+// visible state: there is no Artifact view to advertise (ADR-0217).
+func (m QueueDashboard) openDetailView(row work.Container) *detailView {
+	d := newDetailView(row)
+	if artifacts, err := m.kinds.artifactsFor(row); err == nil {
+		d.syncArtifacts(artifacts)
+	}
+	return d
+}
+
+// syncDetailView keeps both lists current on the dashboard's normal poll. The
+// kind remains the single source for artifact membership and ordering.
+func (m QueueDashboard) syncDetailView(row work.Container) {
+	if m.detail == nil {
+		return
+	}
+	m.detail.sync(row)
+	if artifacts, err := m.kinds.artifactsFor(row); err == nil {
+		m.detail.syncArtifacts(artifacts)
+	}
 }
 
 // sync adopts a rebuilt container: the same container the table now shows, with
@@ -581,6 +624,73 @@ func (d *detailView) sync(row work.Container) {
 	d.row = row
 	d.cols.idW = detailIDWidth(row.Items)
 	d.list.ReplaceItems(row.Items)
+}
+
+// syncArtifacts adopts the kind's current artifact list. When the last artifact
+// disappears during a refresh, the detail returns to its item list instead of
+// leaving the human in a blank view that no longer has a valid switch (ADR-0217).
+func (d *detailView) syncArtifacts(artifacts []work.Artifact) {
+	d.artifactList.ReplaceItems(artifacts)
+	if len(artifacts) == 0 {
+		d.artifacts = false
+	}
+}
+
+func (d *detailView) hasArtifacts() bool {
+	return d != nil && d.artifactList != nil && d.artifactList.Len() > 0
+}
+
+func (d *detailView) toggleArtifacts() {
+	if d.hasArtifacts() {
+		d.artifacts = !d.artifacts
+	}
+}
+
+func (d *detailView) moveDown() {
+	if d.artifacts {
+		d.artifactList.MoveDown()
+		return
+	}
+	d.list.MoveDown()
+}
+
+func (d *detailView) moveUp() {
+	if d.artifacts {
+		d.artifactList.MoveUp()
+		return
+	}
+	d.list.MoveUp()
+}
+
+func (d *detailView) halfPageDown() {
+	if d.artifacts {
+		d.artifactList.HalfPageDown()
+		return
+	}
+	d.list.HalfPageDown()
+}
+
+func (d *detailView) halfPageUp() {
+	if d.artifacts {
+		d.artifactList.HalfPageUp()
+		return
+	}
+	d.list.HalfPageUp()
+}
+
+func (d *detailView) setCursor(i int) {
+	if d.artifacts {
+		d.artifactList.SetCursor(i)
+		return
+	}
+	d.list.SetCursor(i)
+}
+
+func (d *detailView) lastIndex() int {
+	if d.artifacts {
+		return d.artifactList.Len() - 1
+	}
+	return d.list.Len() - 1
 }
 
 // itemByID returns the container item with the given id, or false if absent.
@@ -593,19 +703,29 @@ func (d *detailView) itemByID(id string) (work.Item, bool) {
 	return work.Item{}, false
 }
 
+func (d *detailView) artifactByPath(path string) (work.Artifact, bool) {
+	for _, artifact := range d.artifactList.Items() {
+		if artifact.Path == path {
+			return artifact, true
+		}
+	}
+	return work.Artifact{}, false
+}
+
 // documentPeek is the Document peek (ADR-0217): a read-only nested view over any
 // absolute file path a detail row carries — a task's markdown, a Routine's last
-// report. Title and path are set at open time, so opening needs no item; itemID
-// is populated only when an item backs the row, letting the peek's own verb
-// dispatch (`a`, `y`) look that item back up.
+// report or an Artifact. Title and path are set at open time, so opening needs
+// no item; itemID or artifactPath is populated only when that kind of row backs
+// the peek, letting its own verbs look the row back up.
 type documentPeek struct {
-	itemID  string
-	title   string
-	path    string
-	text    string
-	loading bool
-	err     error
-	scroll  int
+	itemID       string
+	artifactPath string
+	title        string
+	path         string
+	text         string
+	loading      bool
+	err          error
+	scroll       int
 	// flash is the peek's own transient feedback, on the same three-second
 	// lifetime as every other flash (ADR-0204).
 	flash ui.Flash
@@ -1161,7 +1281,7 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.err = nil
-			m.detail = newDetailView(row)
+			m.detail = m.openDetailView(row)
 			return m, nil
 		case "y":
 			if m.selection.Active() {
@@ -1223,7 +1343,7 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// detail and the row it was opened from at the same tick.
 				for _, row := range m.snap.Containers {
 					if row.CursorKey == m.detail.row.CursorKey {
-						m.detail.sync(row)
+						m.syncDetailView(row)
 						break
 					}
 				}
@@ -1786,6 +1906,18 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "G":
 			m.detail.peek.scroll = m.maxDocumentPeekScroll()
 		case "a":
+			if m.detail.peek.artifactPath != "" {
+				artifact, ok := m.detail.artifactByPath(m.detail.peek.artifactPath)
+				if !ok {
+					return m, nil
+				}
+				actions := m.kinds.artifactActionsFor(m.detail.row, artifact)
+				if len(actions) == 0 {
+					return m, nil
+				}
+				m.itemMenu = newArtifactMenu(artifact, actions, true)
+				return m, nil
+			}
 			item, ok := m.detail.itemByID(m.detail.peek.itemID)
 			if !ok {
 				return m, nil
@@ -1795,7 +1927,17 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.itemMenu = newItemMenu(item, actions, true)
-		case "y":
+		case "y", "p":
+			if m.detail.peek.artifactPath != "" {
+				artifact, ok := m.detail.artifactByPath(m.detail.peek.artifactPath)
+				if !ok {
+					return m, nil
+				}
+				return m.dispatchArtifactKey(msg.String(), m.detail.row, artifact, true)
+			}
+			if msg.String() != "y" {
+				return m, nil
+			}
 			item, ok := m.detail.itemByID(m.detail.peek.itemID)
 			if !ok {
 				return m, nil
@@ -1809,7 +1951,7 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.pendingG {
 			m.pendingG = false
 			if m.detail != nil {
-				m.detail.list.SetCursor(0)
+				m.detail.setCursor(0)
 			}
 		} else {
 			m.pendingG = true
@@ -1823,6 +1965,11 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "ctrl+c":
 		return m, tea.Quit
+	case "v":
+		if m.detail != nil {
+			m.detail.toggleArtifacts()
+		}
+		return m, nil
 	case "ctrl+g":
 		// Open the detail container's checkout in pop, mirroring the main-list
 		// Ctrl-g: surface the checkout on quit so the command layer runs the
@@ -1840,27 +1987,40 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "j", "down":
 		if m.detail != nil {
-			m.detail.list.MoveDown()
+			m.detail.moveDown()
 		}
 	case "k", "up":
 		if m.detail != nil {
-			m.detail.list.MoveUp()
+			m.detail.moveUp()
 		}
 	case "ctrl+d":
 		if m.detail != nil {
-			m.detail.list.HalfPageDown()
+			m.detail.halfPageDown()
 		}
 	case "ctrl+u":
 		if m.detail != nil {
-			m.detail.list.HalfPageUp()
+			m.detail.halfPageUp()
 		}
 	case "G":
 		if m.detail != nil {
-			m.detail.list.SetCursor(len(m.detail.row.Items) - 1)
+			m.detail.setCursor(m.detail.lastIndex())
 		}
 	case "l", "enter":
 		if m.detail == nil {
 			return m, nil
+		}
+		if m.detail.artifacts {
+			artifact, ok := m.detail.artifactList.Selected()
+			if !ok {
+				return m, nil
+			}
+			m.detail.peek = &documentPeek{
+				artifactPath: artifact.Path,
+				title:        m.detail.row.ID + " / " + artifact.Name,
+				path:         artifact.Path,
+				loading:      true,
+			}
+			return m, m.loadDocumentText(artifact.Path, artifact.Name)
 		}
 		item, ok := m.detail.list.Selected()
 		if !ok {
@@ -1870,6 +2030,18 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.loadItemText(item)
 	case "a":
 		if m.detail == nil {
+			return m, nil
+		}
+		if m.detail.artifacts {
+			artifact, ok := m.detail.artifactList.Selected()
+			if !ok {
+				return m, nil
+			}
+			actions := m.kinds.artifactActionsFor(m.detail.row, artifact)
+			if len(actions) == 0 {
+				return m, nil
+			}
+			m.itemMenu = newArtifactMenu(artifact, actions, false)
 			return m, nil
 		}
 		item, ok := m.detail.list.Selected()
@@ -1882,8 +2054,18 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.itemMenu = newItemMenu(item, actions, false)
 		return m, nil
-	case "y":
+	case "y", "p":
 		if m.detail == nil {
+			return m, nil
+		}
+		if m.detail.artifacts {
+			artifact, ok := m.detail.artifactList.Selected()
+			if !ok {
+				return m, nil
+			}
+			return m.dispatchArtifactKey(msg.String(), m.detail.row, artifact, false)
+		}
+		if msg.String() != "y" {
 			return m, nil
 		}
 		item, ok := m.detail.list.Selected()
@@ -1943,9 +2125,28 @@ func (m QueueDashboard) invokeItemMenuItem(idx int) (tea.Model, tea.Cmd) {
 	}
 	verb := actions[idx].Verb
 	item := m.itemMenu.item
+	artifact := m.itemMenu.artifact
 	inPeek := m.itemMenu.inPeek
 	m.itemMenu = nil
+	if artifact != nil {
+		return m.dispatchArtifactVerb(verb, m.detail.row, *artifact, inPeek)
+	}
 	return m.dispatchItemVerb(verb, m.detail.row, item, inPeek)
+}
+
+// dispatchArtifactKey resolves a direct key through the kind's advertised
+// actions, so the direct route and the row menu always execute the same verb.
+func (m QueueDashboard) dispatchArtifactKey(key string, row work.Container, artifact work.Artifact, inPeek bool) (tea.Model, tea.Cmd) {
+	for _, action := range m.kinds.artifactActionsFor(row, artifact) {
+		if action.Key == key {
+			return m.dispatchArtifactVerb(action.Verb, row, artifact, inPeek)
+		}
+	}
+	return m, nil
+}
+
+func (m QueueDashboard) dispatchArtifactVerb(verb work.Verb, row work.Container, artifact work.Artifact, inPeek bool) (tea.Model, tea.Cmd) {
+	return m, m.performKindArtifactVerb(row, artifact, inPeek, verb)
 }
 
 // dispatchItemVerb runs one item verb, keyed by verb id and never by kind — the
@@ -2646,9 +2847,15 @@ func dashboardRowStorageDir(row DashboardRow) string {
 // item's own — every kind resolves it when it builds the item, so the peek needs
 // no directory of the kind's to join against.
 func (m QueueDashboard) loadItemText(item work.Item) tea.Cmd {
+	return m.loadDocumentText(item.File, item.ID)
+}
+
+// loadDocumentText reads one absolute path for the Document peek. label is used
+// only when the row carries no path, so the refusal names what could not open.
+func (m QueueDashboard) loadDocumentText(path, label string) tea.Cmd {
 	return func() tea.Msg {
-		if strings.TrimSpace(item.File) == "" {
-			return dashboardDocumentTextMsg{err: fmt.Errorf("%s has no file to preview", item.ID)}
+		if strings.TrimSpace(path) == "" {
+			return dashboardDocumentTextMsg{err: fmt.Errorf("%s has no file to preview", label)}
 		}
 		d := m.d
 		if d == nil {
@@ -2657,11 +2864,11 @@ func (m QueueDashboard) loadItemText(item work.Item) tea.Cmd {
 		if d.Tasks == nil {
 			d.Tasks = tasks.DefaultDeps()
 		}
-		data, err := d.Tasks.FS.ReadFile(item.File)
+		data, err := d.Tasks.FS.ReadFile(path)
 		if err != nil {
-			return dashboardDocumentTextMsg{path: item.File, err: err}
+			return dashboardDocumentTextMsg{path: path, err: err}
 		}
-		return dashboardDocumentTextMsg{path: item.File, text: string(data)}
+		return dashboardDocumentTextMsg{path: path, text: string(data)}
 	}
 }
 
@@ -2845,7 +3052,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "esc", Desc: "close menu"},
 		}
 	case m.detail != nil && m.detail.peek != nil:
-		// Detail peek view (task set or Map ticket)
+		// Detail peek view (item or artifact)
 		entries := []ui.HelpEntry{
 			{Key: "j/k", Desc: "scroll line"},
 			{Key: "ctrl+d", Desc: "page down"},
@@ -2853,23 +3060,47 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "gg", Desc: "top"},
 			{Key: "G", Desc: "bottom"},
 			{Key: "y", Desc: "copy name"},
-			{Key: "h/esc", Desc: "close peek"},
 		}
-		entries = append(entries, ui.HelpEntry{Key: "a", Desc: "item actions"})
+		if m.detail.peek.artifactPath != "" {
+			entries = append(entries, ui.HelpEntry{Key: "p", Desc: "copy path"})
+		}
+		entries = append(entries, ui.HelpEntry{Key: "h/esc", Desc: "close peek"})
+		actionDesc := "item actions"
+		if m.detail.peek.artifactPath != "" {
+			actionDesc = "artifact actions"
+		}
+		entries = append(entries, ui.HelpEntry{Key: "a", Desc: actionDesc})
 		return entries
 	case m.detail != nil:
-		// Detail view (one container's items, whatever kind it is)
-		return []ui.HelpEntry{
-			{Key: "j/k", Desc: "navigate items"},
+		// Detail view (one container's item list or Artifact view)
+		noun := "items"
+		entries := []ui.HelpEntry{
+			{Key: "j/k", Desc: "navigate " + noun},
 			{Key: "ctrl+d/ctrl+u", Desc: "half page down/up"},
-			{Key: "gg", Desc: "first item"},
-			{Key: "G", Desc: "last item"},
-			{Key: "l/enter", Desc: "peek item text"},
+			{Key: "gg", Desc: "first " + strings.TrimSuffix(noun, "s")},
+			{Key: "G", Desc: "last " + strings.TrimSuffix(noun, "s")},
+			{Key: "l/enter", Desc: "peek document"},
 			{Key: "a", Desc: "item actions"},
 			{Key: "y", Desc: "copy name"},
-			{Key: "ctrl+g", Desc: "open worktree"},
-			{Key: "h/esc", Desc: "back to list"},
 		}
+		if m.detail.artifacts {
+			entries[0].Desc = "navigate artifacts"
+			entries[2].Desc = "first artifact"
+			entries[3].Desc = "last artifact"
+			entries[5].Desc = "artifact actions"
+			entries = append(entries, ui.HelpEntry{Key: "p", Desc: "copy path"})
+		}
+		if m.detail.hasArtifacts() {
+			desc := "show artifacts"
+			if m.detail.artifacts {
+				desc = "show items"
+			}
+			entries = append(entries, ui.HelpEntry{Key: "v", Desc: desc})
+		}
+		return append(entries,
+			ui.HelpEntry{Key: "ctrl+g", Desc: "open worktree"},
+			ui.HelpEntry{Key: "h/esc", Desc: "back to list"},
+		)
 	case m.searchTyping:
 		// Search, typing phase. Every other key is text, so there is nothing else
 		// to list (ADR-0213).
@@ -3313,8 +3544,8 @@ func dashboardSummary(kinds workKinds, rows []DashboardRow) string {
 }
 
 // viewDetail renders the full-screen container detail view. The Document peek
-// (ADR-0079) and the item action-menu overlay keep their bespoke rendering; the
-// plain state composes through a Frame with the item list on ui.List.
+// and row action-menu overlay keep their bespoke rendering; each plain list
+// composes through a Frame with ui.List (ADR-0079/0217).
 func (m QueueDashboard) viewDetail() string {
 	d := m.detail
 	if d.peek != nil {
@@ -3354,7 +3585,7 @@ func (m QueueDashboard) detailFrame() (ui.Frame, string) {
 		TermH:  m.height,
 		Header: header,
 		Flash:  d.flash,
-		Hints:  "j/k · gg/G top/bottom · l/enter peek · a actions · y copy name · h/esc back",
+		Hints:  detailHints(d),
 	}
 	budget := frame.BodyHeight(m.height)
 	// The item list is the point of the view, so prose yields to it: sections are
@@ -3364,15 +3595,38 @@ func (m QueueDashboard) detailFrame() (ui.Frame, string) {
 	if listH < 1 {
 		listH = 1
 	}
-	d.list.Resize(listH)
+	var tableHeader, tableSeparator string
+	var rows []string
+	if d.artifacts {
+		d.artifactList.Resize(listH)
+		tableHeader = detailArtifactTableHeader()
+		tableSeparator = detailArtifactTableSeparator()
+		rows = d.artifactList.VisibleRows()
+	} else {
+		d.list.Resize(listH)
+		tableHeader = detailTableHeader(d.cols.idW)
+		tableSeparator = detailTableSeparator(d.cols.idW)
+		rows = d.list.VisibleRows()
+	}
 	parts := append([]string{}, sections...)
 	parts = append(parts,
 		"",
-		"  "+detailTableHeader(d.cols.idW),
-		"  "+detailTableSeparator(d.cols.idW),
+		"  "+tableHeader,
+		"  "+tableSeparator,
 	)
-	parts = append(parts, d.list.VisibleRows()...)
+	parts = append(parts, rows...)
 	return frame, strings.Join(parts, "\n")
+}
+
+func detailHints(d *detailView) string {
+	if d.artifacts {
+		return "j/k · gg/G top/bottom · l/enter peek · a actions · y copy name · p copy path · v tasks · h/esc back"
+	}
+	hint := "j/k · gg/G top/bottom · l/enter peek · a actions · y copy name"
+	if d.hasArtifacts() {
+		hint += " · v artifacts"
+	}
+	return hint + " · h/esc back"
 }
 
 // detailSectionLines renders the kind-authored prose blocks that sit above the
@@ -3480,6 +3734,32 @@ func detailTableSeparator(idW int) string {
 		strings.Repeat("-", 12))
 }
 
+// detailArtifactLine formats the Artifact view's three cells. The owning kind
+// already orders the rows; the dashboard only renders its type, UTC written
+// instant and bare filename (ADR-0217).
+func detailArtifactLine(artifact work.Artifact) string {
+	written := "-"
+	if !artifact.At.IsZero() {
+		written = artifact.At.UTC().Format(time.RFC3339)
+	}
+	return fmt.Sprintf("%-*s  %-*s  %s",
+		detailArtifactTypeW, artifact.Type,
+		detailArtifactWrittenW, written,
+		filepath.Base(artifact.Name))
+}
+
+func detailArtifactTableHeader() string {
+	return fmt.Sprintf("%-*s  %-*s  %s",
+		detailArtifactTypeW, "TYPE", detailArtifactWrittenW, "WRITTEN", "FILENAME")
+}
+
+func detailArtifactTableSeparator() string {
+	return fmt.Sprintf("%-*s  %-*s  %s",
+		detailArtifactTypeW, strings.Repeat("-", detailArtifactTypeW),
+		detailArtifactWrittenW, strings.Repeat("-", detailArtifactWrittenW),
+		strings.Repeat("-", len("FILENAME")))
+}
+
 // renderDetailContent renders the detail item list with the action-menu overlay
 // spliced next to the cursored item (ADR-0079 bespoke placement; its cursor is
 // ported onto List in a later slice). It renders every item — no scroll window —
@@ -3502,11 +3782,23 @@ func (m QueueDashboard) renderDetailContent(b *strings.Builder, d *detailView, h
 	}
 	fmt.Fprintln(b)
 
-	idW := d.cols.idW
-	fmt.Fprintf(b, "  %s\n", detailTableHeader(idW))
-	fmt.Fprintf(b, "  %s\n", detailTableSeparator(idW))
+	var tableHeader, tableSeparator string
+	if d.artifacts {
+		tableHeader = detailArtifactTableHeader()
+		tableSeparator = detailArtifactTableSeparator()
+	} else {
+		tableHeader = detailTableHeader(d.cols.idW)
+		tableSeparator = detailTableSeparator(d.cols.idW)
+	}
+	fmt.Fprintf(b, "  %s\n", tableHeader)
+	fmt.Fprintf(b, "  %s\n", tableSeparator)
 
 	cursorIdx := d.list.Cursor()
+	rowCount := d.list.Len()
+	if d.artifacts {
+		cursorIdx = d.artifactList.Cursor()
+		rowCount = d.artifactList.Len()
+	}
 	var menuLines []string
 	placeBelow := true
 	if menu != nil && !menu.inPeek {
@@ -3518,7 +3810,7 @@ func (m QueueDashboard) renderDetailContent(b *strings.Builder, d *detailView, h
 			fmt.Fprintf(b, "%s\n", ml)
 		}
 	}
-	for i, item := range d.row.Items {
+	for i := 0; i < rowCount; i++ {
 		if menuLines != nil && i == cursorIdx && !placeBelow {
 			writeMenu()
 		}
@@ -3526,14 +3818,20 @@ func (m QueueDashboard) renderDetailContent(b *strings.Builder, d *detailView, h
 		if i == cursorIdx {
 			prefix = ui.IndicatorStyle.Render("█") + " "
 		}
-		fmt.Fprintf(b, "%s%s\n", prefix, detailItemLine(item, idW))
+		line := ""
+		if d.artifacts {
+			line = detailArtifactLine(d.artifactList.Items()[i])
+		} else {
+			line = detailItemLine(d.list.Items()[i], d.cols.idW)
+		}
+		fmt.Fprintf(b, "%s%s\n", prefix, line)
 		if menuLines != nil && i == cursorIdx && placeBelow {
 			writeMenu()
 		}
 	}
 
 	fmt.Fprintln(b)
-	hint := "  j/k · gg/G top/bottom · l/enter peek · a actions · y copy name · h/esc back"
+	hint := "  " + detailHints(d)
 	if menu != nil {
 		hint = "  j/k move · enter/letter run · esc close"
 	}
@@ -3570,12 +3868,12 @@ func renderDocumentPeek(b *strings.Builder, d *detailView, height, width int, me
 		}
 	}
 	if p.loading {
-		fmt.Fprintln(b, "  loading task text...")
+		fmt.Fprintln(b, "  loading document...")
 		writeDashboardFooter(b, height, ui.HintStyle.Render("  h/esc back"))
 		return
 	}
 	if p.err != nil {
-		fmt.Fprintf(b, "  error loading task text: %v\n", p.err)
+		fmt.Fprintf(b, "  error loading document: %v\n", p.err)
 		if p.path != "" {
 			fmt.Fprintf(b, "  %s\n", p.path)
 		}
@@ -3598,7 +3896,7 @@ func renderDocumentPeek(b *strings.Builder, d *detailView, height, width int, me
 		p.scroll = 0
 	}
 	if len(lines) == 0 {
-		fmt.Fprintln(b, "  (empty task file)")
+		fmt.Fprintln(b, "  (empty document)")
 	} else {
 		end := p.scroll + pageSize
 		if end > len(lines) {
@@ -3613,7 +3911,11 @@ func renderDocumentPeek(b *strings.Builder, d *detailView, height, width int, me
 	if maxScroll > 0 {
 		position = fmt.Sprintf(" · %d/%d", p.scroll+1, len(lines))
 	}
-	hint := "  j/k · C-d/C-u · gg/G · y copy name · a actions · h/esc back" + position
+	hint := "  j/k · C-d/C-u · gg/G · y copy name"
+	if p.artifactPath != "" {
+		hint += " · p copy path"
+	}
+	hint += " · a actions · h/esc back" + position
 	if menu != nil && menu.inPeek {
 		hint = "  j/k move · enter/letter run · esc close"
 	}

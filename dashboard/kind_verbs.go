@@ -2,10 +2,10 @@ package dashboard
 
 import (
 	"fmt"
-	"github.com/glebglazov/pop/tasks/drain"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/glebglazov/pop/tasks/drain"
 	"github.com/glebglazov/pop/work"
 )
 
@@ -20,16 +20,17 @@ import (
 // two keypresses.
 
 // dashboardKindVerbMsg carries one performed verb's outcome back to the model.
-// The row, item and inPeek travel with it so the result lands on the surface the
-// verb was invoked from — a row verb on the dashboard's status line, an item verb
-// on the detail's or the peek's.
+// The row, detail member and inPeek travel with it so the result lands on the
+// surface the verb was invoked from — a row verb on the dashboard's status line,
+// an item or artifact verb on the detail's or the peek's.
 type dashboardKindVerbMsg struct {
-	row     DashboardRow
-	item    *work.Item
-	inPeek  bool
-	verb    work.Verb
-	outcome work.Outcome
-	err     error
+	row      DashboardRow
+	item     *work.Item
+	artifact *work.Artifact
+	inPeek   bool
+	verb     work.Verb
+	outcome  work.Outcome
+	err      error
 }
 
 // performKindVerb asks the row's own kind to run verb.
@@ -40,6 +41,21 @@ func (m QueueDashboard) performKindVerb(row DashboardRow, verb work.Verb) tea.Cm
 // performKindItemVerb asks the row's kind to run verb over one of its items.
 func (m QueueDashboard) performKindItemVerb(row DashboardRow, item work.Item, inPeek bool, verb work.Verb) tea.Cmd {
 	return m.performKind(row, &item, inPeek, verb)
+}
+
+// performKindArtifactVerb asks the row's optional ArtifactSource to run verb.
+func (m QueueDashboard) performKindArtifactVerb(row DashboardRow, artifact work.Artifact, inPeek bool, verb work.Verb) tea.Cmd {
+	kinds := m.kinds
+	return func() tea.Msg {
+		msg := dashboardKindVerbMsg{row: row, artifact: &artifact, inPeek: inPeek, verb: verb}
+		source := kinds.artifactSourceFor(row)
+		if source == nil {
+			msg.err = fmt.Errorf("%s publishes no artifacts", row.ID)
+			return msg
+		}
+		msg.outcome, msg.err = source.PerformArtifact(row, artifact, verb)
+		return msg
+	}
 }
 
 func (m QueueDashboard) performKind(row DashboardRow, item *work.Item, inPeek bool, verb work.Verb) tea.Cmd {
@@ -110,7 +126,7 @@ func (m QueueDashboard) applyKindVerb(msg dashboardKindVerbMsg) (tea.Model, tea.
 		if !ok {
 			row = msg.row
 		}
-		m.detail = newDetailView(row)
+		m.detail = m.openDetailView(row)
 		return m, nil
 	case work.OutcomeHandoff:
 		return m, m.handoffOutcome(msg.row, msg.outcome.Handoff)
@@ -161,20 +177,20 @@ func (m *QueueDashboard) reportVerbStatus(msg dashboardKindVerbMsg, status strin
 		return
 	}
 	switch {
-	case msg.item != nil && msg.inPeek && m.detail != nil && m.detail.peek != nil:
+	case (msg.item != nil || msg.artifact != nil) && msg.inPeek && m.detail != nil && m.detail.peek != nil:
 		m.detail.peek.flash.Set(status)
-	case msg.item != nil && m.detail != nil:
+	case (msg.item != nil || msg.artifact != nil) && m.detail != nil:
 		m.detail.flash.Set(status)
 	default:
 		m.flash.Set(status)
 	}
 }
 
-// reportVerbError surfaces a refused verb. A row verb's failure is sticky on the
-// dashboard's action-error line; an item verb's stays inside the detail it was run
-// from, the way the detail's own flash messages already report.
+// reportVerbError surfaces a refused verb. A container verb's failure is sticky
+// on the dashboard's action-error line; an item or artifact verb stays inside the
+// detail surface where it ran.
 func (m *QueueDashboard) reportVerbError(msg dashboardKindVerbMsg, err error) {
-	if msg.item != nil && m.detail != nil {
+	if (msg.item != nil || msg.artifact != nil) && m.detail != nil {
 		m.reportVerbStatus(msg, fmt.Sprintf("error: %v", err))
 		return
 	}

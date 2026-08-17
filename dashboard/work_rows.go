@@ -97,6 +97,36 @@ func (w workKinds) itemActionsFor(row DashboardRow, item work.Item) []work.Actio
 	return k.ItemActions(row, item)
 }
 
+// artifactSourceFor returns the optional artifact half of a row's kind. A kind
+// that publishes no documents implements nothing, so a generic surface needs no
+// kind-specific exclusion for Maps or any future Work kind (ADR-0217).
+func (w workKinds) artifactSourceFor(row DashboardRow) work.ArtifactSource {
+	k := w.kindFor(row)
+	if k == nil {
+		return nil
+	}
+	source, _ := k.(work.ArtifactSource)
+	return source
+}
+
+// artifactsFor asks the owning kind for the documents this container publishes.
+func (w workKinds) artifactsFor(row DashboardRow) ([]work.Artifact, error) {
+	source := w.artifactSourceFor(row)
+	if source == nil {
+		return nil, nil
+	}
+	return source.Artifacts(row)
+}
+
+// artifactActionsFor asks the owning kind which verbs apply to one artifact now.
+func (w workKinds) artifactActionsFor(row DashboardRow, artifact work.Artifact) []work.Action {
+	source := w.artifactSourceFor(row)
+	if source == nil {
+		return nil
+	}
+	return source.ArtifactActions(row, artifact)
+}
+
 // itemCopyPayload is the reference the kind writes to the clipboard for one of
 // its items. The kind answers rather than the surface guessing: a task set names
 // a task by its paste-ready `<set>/<file>.md` target, a Map names a ticket by its

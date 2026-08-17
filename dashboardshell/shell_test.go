@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/glebglazov/pop/config"
@@ -27,6 +28,23 @@ type pageKind struct {
 	noun       string
 	loads      *int
 	loadErr    error
+}
+
+type artifactPageKind struct{ *pageKind }
+
+func (*artifactPageKind) Artifacts(work.Container) ([]work.Artifact, error) {
+	return []work.Artifact{{
+		Type: "spec", Name: "spec.md", Path: "/tasks/set-a/spec.md",
+		At: time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC),
+	}}, nil
+}
+
+func (*artifactPageKind) ArtifactActions(work.Container, work.Artifact) []work.Action {
+	return nil
+}
+
+func (k *artifactPageKind) PerformArtifact(work.Container, work.Artifact, work.Verb) (work.Outcome, error) {
+	return work.Outcome{}, work.UnknownVerb(k.ID(), "artifact")
 }
 
 func (k *pageKind) ID() work.KindID { return k.id }
@@ -345,7 +363,13 @@ func TestShellUnbuildablePageDoesNotAbortTheOpen(t *testing.T) {
 }
 
 func TestShellVIgnoredWhileAPageOwnsTheKeyboard(t *testing.T) {
-	s := newTestShell(t, PageWork)
+	d := countedDeps(nil, nil, nil)
+	d.Kinds = func(*drain.Deps, *config.Config) []work.Kind {
+		return []work.Kind{&artifactPageKind{pageKind: &pageKind{
+			id: ref.KindTaskSet, containers: setRows(), columns: []string{"PROJECT", "TASK SET", "STATUS", "WORKTREE", ""}, noun: "task set",
+		}}}
+	}
+	s := newShellWith(t, PageWork, d)
 	if _, cmd := s.Update(tea.KeyPressMsg{Code: 'l', Text: "l"}); cmd != nil {
 		t.Fatal("entering the detail reads the container in hand, not a fresh load")
 	}
@@ -354,7 +378,11 @@ func TestShellVIgnoredWhileAPageOwnsTheKeyboard(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("v should not toggle out of a detail view")
 	}
-	if updated.(Shell).ActivePage() != PageWork {
+	s = updated.(Shell)
+	if s.ActivePage() != PageWork {
 		t.Fatal("should stay on the work page while its detail is open")
+	}
+	if view := s.View().Content; !strings.Contains(view, "FILENAME") || !strings.Contains(view, "spec.md") {
+		t.Fatalf("the shell withheld the page toggle but did not pass v to the detail's Artifact view:\n%s", view)
 	}
 }

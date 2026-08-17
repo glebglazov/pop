@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/work"
@@ -97,11 +98,17 @@ func (k *Kind) ArtifactActions(work.Container, work.Artifact) []work.Action {
 
 // PerformArtifact performs one artifact transfer without applying Task item
 // status semantics to a document.
-func (k *Kind) PerformArtifact(_ work.Container, artifact work.Artifact, verb work.Verb) (work.Outcome, error) {
+func (k *Kind) PerformArtifact(c work.Container, artifact work.Artifact, verb work.Verb) (work.Outcome, error) {
 	var payload string
 	switch verb {
 	case work.VerbCopyName:
 		payload = artifact.Name
+		setDir := filepath.Join(c.DefPath, c.ID)
+		if c.DefPath != "" && c.ID != "" {
+			if rel, err := filepath.Rel(setDir, artifact.Path); err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				payload = filepath.ToSlash(rel)
+			}
+		}
 	case VerbCopyPath:
 		payload = artifact.Path
 	default:
