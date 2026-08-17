@@ -275,8 +275,10 @@ type dashboardMenu struct {
 	// plural marks a menu opened over a Selection: its items are the verbs every
 	// targeted row offers and declares plural, and targets is the row set they
 	// will run over — captured when the menu opened, so the poll rebuilding the
-	// table underneath cannot change what a keypress is aimed at. row is still the
-	// first target, which is what the overlay is drawn beside.
+	// table underneath cannot change what a keypress is aimed at. The plural
+	// overlay sits at the foot of the Selection region (after the last marked
+	// row, above the rule); row is still the first target for any path that
+	// needs a single row identity.
 	plural  bool
 	targets []DashboardRow
 }
@@ -4062,12 +4064,13 @@ func writeSelectionSeparator(w io.Writer, i, regionCount, width int) {
 }
 
 // renderDashboardTableWithMenu renders the task-set table and, when menu is
-// non-nil, splices the action overlay in next to the cursored row: below it by
-// default, flipping above when the cursor sits too low for the menu to fit
-// beneath it within height (dashboardMenuPlaceBelow). live colours handoff-verb
-// keys in the overlay (ADR-0158). regionCount is how many leading rows a live
-// Selection has marked, zero when none is; the divider is drawn below them so
-// the marks stay legible with the menu open.
+// non-nil, splices the action overlay in. A singular menu nests under the
+// cursored row (below by default, flipping above via dashboardMenuPlaceBelow
+// when the cursor sits too low). A plural menu sits at the foot of the
+// Selection region — after the last marked row, above the rule — and never
+// flips; the row cursor is unpainted while it is open. live colours
+// handoff-verb keys in the overlay (ADR-0158). regionCount is how many leading
+// rows a live Selection has marked, zero when none is.
 func renderDashboardTableWithMenu(w io.Writer, page dashboardPage, kinds workKinds, rows []DashboardRow, cursor, regionCount, width, height int, menu *dashboardMenu, live livePaneCache) {
 	if page.twoLine(rows, width, height) {
 		renderDashboardTableTwoLineWithMenu(w, kinds, rows, cursor, regionCount, width, height, menu, live)
@@ -4078,11 +4081,14 @@ func renderDashboardTableWithMenu(w io.Writer, page dashboardPage, kinds workKin
 	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTableLine(headers, widths), width))
 	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTableSeparator(headers, widths), width))
 
+	pluralMenu := menu != nil && menu.plural
 	var menuLines []string
 	placeBelow := true
 	if menu != nil {
 		menuLines = dashboardMenuLines(menu, width, live)
-		placeBelow = dashboardMenuPlaceBelow(cursor, len(menuLines), height)
+		if !pluralMenu {
+			placeBelow = dashboardMenuPlaceBelow(cursor, len(menuLines), height)
+		}
 	}
 	writeMenu := func() {
 		for _, ml := range menuLines {
@@ -4090,40 +4096,48 @@ func renderDashboardTableWithMenu(w io.Writer, page dashboardPage, kinds workKin
 		}
 	}
 	for i, row := range rows {
-		if menu != nil && i == cursor && !placeBelow {
+		if menu != nil && !pluralMenu && i == cursor && !placeBelow {
 			writeMenu()
 		}
 		var prefix string
-		if i == cursor {
+		if i == cursor && !pluralMenu {
 			prefix = ui.IndicatorStyle.Render("█") + " "
 		} else {
 			prefix = "  "
 		}
 		line := ui.TruncateString(prefix+dashboardTableLine(page.styledCells(kinds, row, live), widths), width)
 		fmt.Fprintf(w, "%s\n", line)
+		if pluralMenu && i == regionCount-1 {
+			writeMenu()
+		}
 		writeSelectionSeparator(w, i, regionCount, width)
-		if menu != nil && i == cursor && placeBelow {
+		if menu != nil && !pluralMenu && i == cursor && placeBelow {
 			writeMenu()
 		}
 	}
 }
 
 // renderDashboardTableTwoLineWithMenu renders the two-line task-set table and,
-// when menu is non-nil, splices the action overlay next to the cursored row.
-// Each row occupies two terminal lines: line 1 holds the activity cluster,
-// PROJECT, TASK SET (the set id) and WORKTREE; line 2 holds STATUS indented under
-// the TASK SET column.
+// when menu is non-nil, splices the action overlay the same way the single-line
+// renderer does: singular menus nest under the cursored row (with flip-above),
+// plural menus sit at the foot of the Selection region with the row cursor
+// suppressed. Each row occupies two terminal lines: line 1 holds the activity
+// cluster, PROJECT, TASK SET (the set id) and WORKTREE; line 2 holds STATUS
+// indented under the TASK SET column.
 func renderDashboardTableTwoLineWithMenu(w io.Writer, kinds workKinds, rows []DashboardRow, cursor, regionCount, width, height int, menu *dashboardMenu, live livePaneCache) {
 	line1Widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths(rows), dashboardTableBodyBudget(width))
 	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTwoLineTableHeader(line1Widths), width))
 	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTwoLineStatusHeader(line1Widths), width))
 	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTwoLineTableSeparator(line1Widths), width))
 
+	pluralMenu := menu != nil && menu.plural
 	var menuLines []string
 	placeBelow := true
 	if menu != nil {
 		menuLines = dashboardMenuLines(menu, width, live)
-		placeBelow = dashboardMenuPlaceBelowTwoLine(cursor, len(menuLines), height)
+		if !pluralMenu {
+			placeBelow = dashboardMenuPlaceBelowTwoLine(cursor, len(menuLines), height)
+		}
 	}
 	writeMenu := func() {
 		for _, ml := range menuLines {
@@ -4131,11 +4145,11 @@ func renderDashboardTableTwoLineWithMenu(w io.Writer, kinds workKinds, rows []Da
 		}
 	}
 	for i, row := range rows {
-		if menu != nil && i == cursor && !placeBelow {
+		if menu != nil && !pluralMenu && i == cursor && !placeBelow {
 			writeMenu()
 		}
 		var prefix string
-		if i == cursor {
+		if i == cursor && !pluralMenu {
 			prefix = ui.IndicatorStyle.Render("█") + " "
 		} else {
 			prefix = "  "
@@ -4144,8 +4158,11 @@ func renderDashboardTableTwoLineWithMenu(w io.Writer, kinds workKinds, rows []Da
 		line2 := ui.TruncateString("  "+dashboardTwoLineRowLine2(kinds, row, line1Widths), width)
 		fmt.Fprintf(w, "%s\n", line1)
 		fmt.Fprintf(w, "%s\n", line2)
+		if pluralMenu && i == regionCount-1 {
+			writeMenu()
+		}
 		writeSelectionSeparator(w, i, regionCount, width)
-		if menu != nil && i == cursor && placeBelow {
+		if menu != nil && !pluralMenu && i == cursor && placeBelow {
 			writeMenu()
 		}
 	}
