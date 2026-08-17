@@ -127,7 +127,7 @@ includes = ["extra.toml"]
 // claim: "no override" and "overridden to an empty list" both render as an empty
 // value, so the preview has to say which in words.
 func TestOverrideKeyViewNamesTheTwoEmptyStates(t *testing.T) {
-	for _, key := range []string{"work.verify.agents", "work.routine.agents"} {
+	for _, key := range []string{"work.verify.agents", "work.review.agents", "work.routine.agents"} {
 		t.Run(key+" without an override", func(t *testing.T) {
 			f := newOverrideFixture(t)
 			writeConfigFile(t, f.userPath, `
