@@ -67,6 +67,10 @@ type SpendRollupRow struct {
 	// LastRunAt is the latest Captured run start time in the set. Zero when no
 	// run carries a readable start time (ADR-0218).
 	LastRunAt time.Time
+	// Notional is the dollar annotation for this row: pi's measured PartialCost
+	// where present, else a Rate-table estimate for Claude runs. HasCost false
+	// is rate-blind — absent, never zero (ADR-0218).
+	Notional PartialCost
 }
 
 // SpendRollupResult is the cross-set spend rollup.
@@ -77,6 +81,8 @@ type SpendRollupResult struct {
 	// Task storage directory is gone. Reported in the human footer so a total
 	// never silently shrinks (ADR-0218).
 	SkippedStorages int
+	// RateTableDate is the fetched_at of the Rate table that priced this render.
+	RateTableDate time.Time
 }
 
 // spendRollupJSONRow is the machine-readable rollup row emitted by --json.
@@ -116,6 +122,7 @@ type SpendBreakdownRow struct {
 	TurnBlindRuns  int
 	PeakBlindRuns  int
 	Agent          string // populated when the set mixes agents
+	Notional       PartialCost
 }
 
 // SpendSetBreakdownResult is the per-task spend breakdown for one Task set.
@@ -140,6 +147,11 @@ type SpendSetBreakdownResult struct {
 	ReviewCost           PartialCost
 	ReviewRunCount       int
 	ReviewTokenBlindRuns int
+	ImplementNotional    PartialCost
+	VerificationNotional PartialCost
+	ReviewNotional       PartialCost
+	// RateTableDate is the fetched_at of the Rate table that priced this render.
+	RateTableDate time.Time
 }
 
 // spendBreakdownJSONRow is the machine-readable breakdown row emitted by --json.
@@ -205,15 +217,18 @@ func SpendRollupWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 		return nil, exitErr(ExitSetup, "spend limit must be >= 0")
 	}
 
+	table := loadRateTableForSpend(d)
+
 	var result *SpendRollupResult
 	if opts.All {
-		result, err = spendRollupAll(d)
+		result, err = spendRollupAll(d, table)
 	} else {
-		result, err = spendRollupRepo(d, pd, loadConfig, opts)
+		result, err = spendRollupRepo(d, pd, loadConfig, opts, table)
 	}
 	if err != nil {
 		return nil, err
 	}
+	result.RateTableDate = table.FetchedAt
 
 	limit := spendRollupSetLimit
 	if opts.All {
@@ -243,7 +258,7 @@ func SpendRollupWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 
 // spendRollupRepo is the current-checkout rollup: manifests under one
 // definition path, archived sets filtered out (ADR-0160).
-func spendRollupRepo(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts SpendOptions) (*SpendRollupResult, error) {
+func spendRollupRepo(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts SpendOptions, table *RateTable) (*SpendRollupResult, error) {
 	resolved, err := ResolvePathsWith(d, pd, loadConfig, opts.ResolveInput)
 	if err != nil {
 		return nil, exitErr(ExitSetup, "%v", err)
@@ -267,7 +282,7 @@ func spendRollupRepo(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 		if m == nil {
 			continue
 		}
-		row, err := taskSetSpendRollup(d, setID, m.Dir)
+		row, err := taskSetSpendRollup(d, setID, m.Dir, table)
 		if err != nil {
 			return nil, exitErr(ExitOperational, "spend for %s: %v", setID, err)
 		}
@@ -281,7 +296,7 @@ func spendRollupRepo(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 // machine (ADR-0218). Enumeration is store.AllSets — not the config project
 // list — grouped by def_path; a def_path whose storage is gone is skipped and
 // counted rather than crashing the render.
-func spendRollupAll(d *Deps) (*SpendRollupResult, error) {
+func spendRollupAll(d *Deps, table *RateTable) (*SpendRollupResult, error) {
 	s, ok, err := d.Store(false)
 	if err != nil {
 		return nil, exitErr(ExitSetup, "%v", err)
@@ -342,7 +357,7 @@ func spendRollupAll(d *Deps) (*SpendRollupResult, error) {
 			if m == nil {
 				continue
 			}
-			row, err := taskSetSpendRollup(d, reg.SetID, m.Dir)
+			row, err := taskSetSpendRollup(d, reg.SetID, m.Dir, table)
 			if err != nil {
 				return nil, exitErr(ExitOperational, "spend for %s: %v", reg.SetID, err)
 			}
@@ -571,14 +586,16 @@ func SpendSetBreakdownWith(d *Deps, pd *project.Deps, loadConfig func(string) (*
 		return nil, exitErr(ExitNoRunnable, "task set %q is malformed", taskSetID)
 	}
 
-	result, err := buildSpendSetBreakdown(d, taskSetID, m)
+	table := loadRateTableForSpend(d)
+	result, err := buildSpendSetBreakdown(d, taskSetID, m, table)
 	if err != nil {
 		return nil, exitErr(ExitOperational, "spend for %s: %v", taskSetID, err)
 	}
+	result.RateTableDate = table.FetchedAt
 	return result, nil
 }
 
-func buildSpendSetBreakdown(d *Deps, taskSetID string, m *Manifest) (*SpendSetBreakdownResult, error) {
+func buildSpendSetBreakdown(d *Deps, taskSetID string, m *Manifest, table *RateTable) (*SpendSetBreakdownResult, error) {
 	runs, err := listSpendRuns(d, m.Dir)
 	if err != nil {
 		return nil, err
@@ -592,6 +609,7 @@ func buildSpendSetBreakdown(d *Deps, taskSetID string, m *Manifest) (*SpendSetBr
 		if err != nil {
 			return nil, err
 		}
+		notional := priceRunSpend(run, spend, table)
 		if run.meta.Agent != "" {
 			setAgents[run.meta.Agent] = true
 		}
@@ -616,6 +634,7 @@ func buildSpendSetBreakdown(d *Deps, taskSetID string, m *Manifest) (*SpendSetBr
 		}
 		addTokenUsage(&row.Tokens, spend.Tokens)
 		addPartialCost(&row.Cost, spend.Cost)
+		addPartialCost(&row.Notional, notional)
 		addTurnCount(&row.Turns, spend.Turns)
 		addPeakInput(&row.PeakInput, spend.PeakInput)
 		recordSpendRowAgent(row, run.meta.Agent)
@@ -628,6 +647,7 @@ func buildSpendSetBreakdown(d *Deps, taskSetID string, m *Manifest) (*SpendSetBr
 			}
 			addTokenUsage(&result.VerificationTokens, spend.Tokens)
 			addPartialCost(&result.VerificationCost, spend.Cost)
+			addPartialCost(&result.VerificationNotional, notional)
 		case spendReviewRowKey:
 			result.ReviewRunCount++
 			if !spend.Tokens.HasUsage() {
@@ -635,6 +655,7 @@ func buildSpendSetBreakdown(d *Deps, taskSetID string, m *Manifest) (*SpendSetBr
 			}
 			addTokenUsage(&result.ReviewTokens, spend.Tokens)
 			addPartialCost(&result.ReviewCost, spend.Cost)
+			addPartialCost(&result.ReviewNotional, notional)
 		default:
 			result.ImplementRunCount++
 			if !spend.Tokens.HasUsage() {
@@ -642,6 +663,7 @@ func buildSpendSetBreakdown(d *Deps, taskSetID string, m *Manifest) (*SpendSetBr
 			}
 			addTokenUsage(&result.ImplementTokens, spend.Tokens)
 			addPartialCost(&result.ImplementCost, spend.Cost)
+			addPartialCost(&result.ImplementNotional, notional)
 		}
 	}
 
@@ -718,7 +740,7 @@ func archivedTaskSetIDs(state *GlobalState, defPath string) map[string]bool {
 	return out
 }
 
-func taskSetSpendRollup(d *Deps, taskSetID, taskSetDir string) (SpendRollupRow, error) {
+func taskSetSpendRollup(d *Deps, taskSetID, taskSetDir string, table *RateTable) (SpendRollupRow, error) {
 	runs, err := listSpendRuns(d, taskSetDir)
 	if err != nil {
 		return SpendRollupRow{}, err
@@ -730,6 +752,7 @@ func taskSetSpendRollup(d *Deps, taskSetID, taskSetDir string) (SpendRollupRow, 
 		if err != nil {
 			return SpendRollupRow{}, err
 		}
+		notional := priceRunSpend(run, spend, table)
 		if run.meta.Agent != "" {
 			setAgents[run.meta.Agent] = true
 		}
@@ -748,6 +771,7 @@ func taskSetSpendRollup(d *Deps, taskSetID, taskSetDir string) (SpendRollupRow, 
 		}
 		addTokenUsage(&row.Tokens, spend.Tokens)
 		addPartialCost(&row.Cost, spend.Cost)
+		addPartialCost(&row.Notional, notional)
 		addTurnCount(&row.Turns, spend.Turns)
 		addPeakInput(&row.PeakInput, spend.PeakInput)
 	}
@@ -859,40 +883,32 @@ func tokenUsageTotal(u TokenUsage) int64 {
 
 // RenderSpendRollup writes the cross-set spend rollup for humans.
 func RenderSpendRollup(w io.Writer, result *SpendRollupResult) {
-	showCost := spendRollupHasPartialCost(result)
 	showAgents := result != nil && result.ShowAgents
-	writeSpendRollupHeader(w, showCost, showAgents)
+	writeSpendRollupHeader(w, showAgents)
 	for _, row := range result.Sets {
-		writeSpendRollupRow(w, row, showCost, showAgents)
+		writeSpendRollupRow(w, row, showAgents)
 	}
 	writeSpendRollupFooter(w, result)
 }
 
-func writeSpendRollupHeader(w io.Writer, showCost, showAgents bool) {
-	switch {
-	case showCost && showAgents:
-		fmt.Fprintf(w, "%-20s %-28s %6s %6s %8s %8s %8s %9s %9s %5s %6s %12s\n",
-			"project", "task set", "agent", "turns", "peak-in", "in", "out", "cache-r", "cache-w", "runs", "blind", "cost (partial)")
-	case showCost:
-		fmt.Fprintf(w, "%-20s %-28s %6s %8s %8s %8s %9s %9s %5s %6s %12s\n",
-			"project", "task set", "turns", "peak-in", "in", "out", "cache-r", "cache-w", "runs", "blind", "cost (partial)")
-	case showAgents:
-		fmt.Fprintf(w, "%-20s %-28s %6s %6s %8s %8s %8s %9s %9s %5s %6s\n",
-			"project", "task set", "agent", "turns", "peak-in", "in", "out", "cache-r", "cache-w", "runs", "blind")
-	default:
-		fmt.Fprintf(w, "%-20s %-28s %6s %8s %8s %8s %9s %9s %5s %6s\n",
-			"project", "task set", "turns", "peak-in", "in", "out", "cache-r", "cache-w", "runs", "blind")
+func writeSpendRollupHeader(w io.Writer, showAgents bool) {
+	if showAgents {
+		fmt.Fprintf(w, "%-20s %-28s %6s %6s %8s %8s %8s %9s %9s %5s %6s %18s\n",
+			"project", "task set", "agent", "turns", "peak-in", "in", "out", "cache-r", "cache-w", "runs", "blind", "tokens")
+		return
 	}
+	fmt.Fprintf(w, "%-20s %-28s %6s %8s %8s %8s %9s %9s %5s %6s %18s\n",
+		"project", "task set", "turns", "peak-in", "in", "out", "cache-r", "cache-w", "runs", "blind", "tokens")
 }
 
-func writeSpendRollupRow(w io.Writer, row SpendRollupRow, showCost, showAgents bool) {
+func writeSpendRollupRow(w io.Writer, row SpendRollupRow, showAgents bool) {
 	agent := ""
 	if showAgents {
 		agent = row.Agents
 	}
-	switch {
-	case showCost && showAgents:
-		fmt.Fprintf(w, "%-20s %-28s %6s %6s %8s %8s %8s %9s %9s %5d %6d %12s\n",
+	cell := formatSpendCell(row.Tokens, row.Notional)
+	if showAgents {
+		fmt.Fprintf(w, "%-20s %-28s %6s %6s %8s %8s %8s %9s %9s %5d %6d %18s\n",
 			row.Project,
 			row.TaskSetID,
 			agent,
@@ -904,50 +920,23 @@ func writeSpendRollupRow(w io.Writer, row SpendRollupRow, showCost, showAgents b
 			formatSpendCount(row.Tokens.HasCacheWrite, row.Tokens.CacheWrite),
 			row.RunCount,
 			row.TokenBlindRuns,
-			formatPartialCost(row.Cost),
+			cell,
 		)
-	case showCost:
-		fmt.Fprintf(w, "%-20s %-28s %6s %8s %8s %8s %9s %9s %5d %6d %12s\n",
-			row.Project,
-			row.TaskSetID,
-			formatSpendTurns(row.Turns),
-			formatSpendPeakInput(row.PeakInput),
-			formatSpendCount(row.Tokens.HasInput, row.Tokens.Input),
-			formatSpendCount(row.Tokens.HasOutput, row.Tokens.Output),
-			formatSpendCount(row.Tokens.HasCacheRead, row.Tokens.CacheRead),
-			formatSpendCount(row.Tokens.HasCacheWrite, row.Tokens.CacheWrite),
-			row.RunCount,
-			row.TokenBlindRuns,
-			formatPartialCost(row.Cost),
-		)
-	case showAgents:
-		fmt.Fprintf(w, "%-20s %-28s %6s %6s %8s %8s %8s %9s %9s %5d %6d\n",
-			row.Project,
-			row.TaskSetID,
-			agent,
-			formatSpendTurns(row.Turns),
-			formatSpendPeakInput(row.PeakInput),
-			formatSpendCount(row.Tokens.HasInput, row.Tokens.Input),
-			formatSpendCount(row.Tokens.HasOutput, row.Tokens.Output),
-			formatSpendCount(row.Tokens.HasCacheRead, row.Tokens.CacheRead),
-			formatSpendCount(row.Tokens.HasCacheWrite, row.Tokens.CacheWrite),
-			row.RunCount,
-			row.TokenBlindRuns,
-		)
-	default:
-		fmt.Fprintf(w, "%-20s %-28s %6s %8s %8s %8s %9s %9s %5d %6d\n",
-			row.Project,
-			row.TaskSetID,
-			formatSpendTurns(row.Turns),
-			formatSpendPeakInput(row.PeakInput),
-			formatSpendCount(row.Tokens.HasInput, row.Tokens.Input),
-			formatSpendCount(row.Tokens.HasOutput, row.Tokens.Output),
-			formatSpendCount(row.Tokens.HasCacheRead, row.Tokens.CacheRead),
-			formatSpendCount(row.Tokens.HasCacheWrite, row.Tokens.CacheWrite),
-			row.RunCount,
-			row.TokenBlindRuns,
-		)
+		return
 	}
+	fmt.Fprintf(w, "%-20s %-28s %6s %8s %8s %8s %9s %9s %5d %6d %18s\n",
+		row.Project,
+		row.TaskSetID,
+		formatSpendTurns(row.Turns),
+		formatSpendPeakInput(row.PeakInput),
+		formatSpendCount(row.Tokens.HasInput, row.Tokens.Input),
+		formatSpendCount(row.Tokens.HasOutput, row.Tokens.Output),
+		formatSpendCount(row.Tokens.HasCacheRead, row.Tokens.CacheRead),
+		formatSpendCount(row.Tokens.HasCacheWrite, row.Tokens.CacheWrite),
+		row.RunCount,
+		row.TokenBlindRuns,
+		cell,
+	)
 }
 
 func writeSpendRollupFooter(w io.Writer, result *SpendRollupResult) {
@@ -958,26 +947,20 @@ func writeSpendRollupFooter(w io.Writer, result *SpendRollupResult) {
 	for _, row := range result.Sets {
 		blind += row.TokenBlindRuns
 	}
-	if blind == 0 && result.SkippedStorages == 0 {
+	parts := make([]string, 0, 3)
+	if blind > 0 {
+		parts = append(parts, fmt.Sprintf("%d token-blind runs", blind))
+	}
+	if result.SkippedStorages > 0 {
+		parts = append(parts, fmt.Sprintf("%d missing storages skipped", result.SkippedStorages))
+	}
+	if !result.RateTableDate.IsZero() {
+		parts = append(parts, fmt.Sprintf("rate table %s", result.RateTableDate.UTC().Format("2006-01-02")))
+	}
+	if len(parts) == 0 {
 		return
 	}
-	fmt.Fprintf(w, "%d token-blind runs", blind)
-	if result.SkippedStorages > 0 {
-		fmt.Fprintf(w, ", %d missing storages skipped", result.SkippedStorages)
-	}
-	fmt.Fprintln(w)
-}
-
-func spendRollupHasPartialCost(result *SpendRollupResult) bool {
-	if result == nil {
-		return false
-	}
-	for _, row := range result.Sets {
-		if row.Cost.HasCost {
-			return true
-		}
-	}
-	return false
+	fmt.Fprintln(w, strings.Join(parts, ", "))
 }
 
 func formatSpendCount(reported bool, n int64) string {
@@ -1020,71 +1003,57 @@ func spendPeakInputJSONPtr(peak PeakInput) *int64 {
 // RenderSpendSetBreakdown writes the per-set spend breakdown for humans.
 func RenderSpendSetBreakdown(w io.Writer, result *SpendSetBreakdownResult) {
 	fmt.Fprintf(w, "tokens per completed task: %s", formatSpendPerCompletedTask(result))
-	implementLine := fmt.Sprintf("  (%s implement", formatSpendTotal(result.ImplementTokens))
-	if result.ImplementCost.HasCost {
-		implementLine += fmt.Sprintf(", %s partial cost", formatPartialCost(result.ImplementCost))
-	}
+	implementLine := fmt.Sprintf("  (%s implement", formatSpendCell(result.ImplementTokens, result.ImplementNotional))
 	fmt.Fprintf(w, "%s, %d done, %d runs, %d blind)\n",
 		implementLine,
 		result.CompletedTasks,
 		result.ImplementRunCount,
 		result.ImplementTokenBlindRuns,
 	)
-	verifyLine := fmt.Sprintf("verification spend: %s", formatSpendTotal(result.VerificationTokens))
-	if result.VerificationCost.HasCost {
-		verifyLine += fmt.Sprintf("  (%s partial cost", formatPartialCost(result.VerificationCost))
-		verifyLine += fmt.Sprintf(", %d runs, %d blind)", result.VerificationRunCount, result.VerificationTokenBlindRuns)
-	} else {
-		verifyLine += fmt.Sprintf("  (%d runs, %d blind)", result.VerificationRunCount, result.VerificationTokenBlindRuns)
-	}
-	fmt.Fprintf(w, "%s\n", verifyLine)
+	fmt.Fprintf(w, "verification spend: %s  (%d runs, %d blind)\n",
+		formatSpendCell(result.VerificationTokens, result.VerificationNotional),
+		result.VerificationRunCount,
+		result.VerificationTokenBlindRuns,
+	)
 	// A set nobody reviewed says nothing about review: the line appears the moment
 	// there is spend behind it and never before.
 	if result.ReviewRunCount > 0 {
-		reviewLine := fmt.Sprintf("review spend: %s", formatSpendTotal(result.ReviewTokens))
-		if result.ReviewCost.HasCost {
-			reviewLine += fmt.Sprintf("  (%s partial cost", formatPartialCost(result.ReviewCost))
-			reviewLine += fmt.Sprintf(", %d runs, %d blind)", result.ReviewRunCount, result.ReviewTokenBlindRuns)
-		} else {
-			reviewLine += fmt.Sprintf("  (%d runs, %d blind)", result.ReviewRunCount, result.ReviewTokenBlindRuns)
-		}
-		fmt.Fprintf(w, "%s\n", reviewLine)
+		fmt.Fprintf(w, "review spend: %s  (%d runs, %d blind)\n",
+			formatSpendCell(result.ReviewTokens, result.ReviewNotional),
+			result.ReviewRunCount,
+			result.ReviewTokenBlindRuns,
+		)
 	}
 	fmt.Fprintln(w)
 
-	showCost := spendBreakdownHasPartialCost(result)
 	showAgents := result != nil && result.ShowAgents
-	writeSpendBreakdownHeader(w, showCost, showAgents)
+	writeSpendBreakdownHeader(w, showAgents)
 	for _, row := range result.Rows {
-		writeSpendBreakdownRow(w, row, showCost, showAgents)
+		writeSpendBreakdownRow(w, row, showAgents)
+	}
+	if result != nil && !result.RateTableDate.IsZero() {
+		fmt.Fprintf(w, "rate table %s\n", result.RateTableDate.UTC().Format("2006-01-02"))
 	}
 }
 
-func writeSpendBreakdownHeader(w io.Writer, showCost, showAgents bool) {
-	switch {
-	case showCost && showAgents:
-		fmt.Fprintf(w, "%-28s %6s %6s %8s %8s %8s %9s %9s %5s %6s %12s\n",
-			"task", "agent", "turns", "peak-in", "in", "out", "cache-r", "cache-w", "runs", "blind", "cost (partial)")
-	case showCost:
-		fmt.Fprintf(w, "%-28s %6s %8s %8s %8s %9s %9s %5s %6s %12s\n",
-			"task", "turns", "peak-in", "in", "out", "cache-r", "cache-w", "runs", "blind", "cost (partial)")
-	case showAgents:
-		fmt.Fprintf(w, "%-28s %6s %6s %8s %8s %8s %9s %9s %5s %6s\n",
-			"task", "agent", "turns", "peak-in", "in", "out", "cache-r", "cache-w", "runs", "blind")
-	default:
-		fmt.Fprintf(w, "%-28s %6s %8s %8s %8s %9s %9s %5s %6s\n",
-			"task", "turns", "peak-in", "in", "out", "cache-r", "cache-w", "runs", "blind")
+func writeSpendBreakdownHeader(w io.Writer, showAgents bool) {
+	if showAgents {
+		fmt.Fprintf(w, "%-28s %6s %6s %8s %8s %8s %9s %9s %5s %6s %18s\n",
+			"task", "agent", "turns", "peak-in", "in", "out", "cache-r", "cache-w", "runs", "blind", "tokens")
+		return
 	}
+	fmt.Fprintf(w, "%-28s %6s %8s %8s %8s %9s %9s %5s %6s %18s\n",
+		"task", "turns", "peak-in", "in", "out", "cache-r", "cache-w", "runs", "blind", "tokens")
 }
 
-func writeSpendBreakdownRow(w io.Writer, row SpendBreakdownRow, showCost, showAgents bool) {
+func writeSpendBreakdownRow(w io.Writer, row SpendBreakdownRow, showAgents bool) {
 	agent := ""
 	if showAgents {
 		agent = row.Agent
 	}
-	switch {
-	case showCost && showAgents:
-		fmt.Fprintf(w, "%-28s %6s %6s %8s %8s %8s %9s %9s %5d %6d %12s\n",
+	cell := formatSpendCell(row.Tokens, row.Notional)
+	if showAgents {
+		fmt.Fprintf(w, "%-28s %6s %6s %8s %8s %8s %9s %9s %5d %6d %18s\n",
 			row.TaskID,
 			agent,
 			formatSpendTurns(row.Turns),
@@ -1095,69 +1064,46 @@ func writeSpendBreakdownRow(w io.Writer, row SpendBreakdownRow, showCost, showAg
 			formatSpendCount(row.Tokens.HasCacheWrite, row.Tokens.CacheWrite),
 			row.RunCount,
 			row.TokenBlindRuns,
-			formatPartialCost(row.Cost),
+			cell,
 		)
-	case showCost:
-		fmt.Fprintf(w, "%-28s %6s %8s %8s %8s %9s %9s %5d %6d %12s\n",
-			row.TaskID,
-			formatSpendTurns(row.Turns),
-			formatSpendPeakInput(row.PeakInput),
-			formatSpendCount(row.Tokens.HasInput, row.Tokens.Input),
-			formatSpendCount(row.Tokens.HasOutput, row.Tokens.Output),
-			formatSpendCount(row.Tokens.HasCacheRead, row.Tokens.CacheRead),
-			formatSpendCount(row.Tokens.HasCacheWrite, row.Tokens.CacheWrite),
-			row.RunCount,
-			row.TokenBlindRuns,
-			formatPartialCost(row.Cost),
-		)
-	case showAgents:
-		fmt.Fprintf(w, "%-28s %6s %6s %8s %8s %8s %9s %9s %5d %6d\n",
-			row.TaskID,
-			agent,
-			formatSpendTurns(row.Turns),
-			formatSpendPeakInput(row.PeakInput),
-			formatSpendCount(row.Tokens.HasInput, row.Tokens.Input),
-			formatSpendCount(row.Tokens.HasOutput, row.Tokens.Output),
-			formatSpendCount(row.Tokens.HasCacheRead, row.Tokens.CacheRead),
-			formatSpendCount(row.Tokens.HasCacheWrite, row.Tokens.CacheWrite),
-			row.RunCount,
-			row.TokenBlindRuns,
-		)
-	default:
-		fmt.Fprintf(w, "%-28s %6s %8s %8s %8s %9s %9s %5d %6d\n",
-			row.TaskID,
-			formatSpendTurns(row.Turns),
-			formatSpendPeakInput(row.PeakInput),
-			formatSpendCount(row.Tokens.HasInput, row.Tokens.Input),
-			formatSpendCount(row.Tokens.HasOutput, row.Tokens.Output),
-			formatSpendCount(row.Tokens.HasCacheRead, row.Tokens.CacheRead),
-			formatSpendCount(row.Tokens.HasCacheWrite, row.Tokens.CacheWrite),
-			row.RunCount,
-			row.TokenBlindRuns,
-		)
+		return
 	}
-}
-
-func spendBreakdownHasPartialCost(result *SpendSetBreakdownResult) bool {
-	if result == nil {
-		return false
-	}
-	if result.ImplementCost.HasCost || result.VerificationCost.HasCost || result.ReviewCost.HasCost {
-		return true
-	}
-	for _, row := range result.Rows {
-		if row.Cost.HasCost {
-			return true
-		}
-	}
-	return false
+	fmt.Fprintf(w, "%-28s %6s %8s %8s %8s %9s %9s %5d %6d %18s\n",
+		row.TaskID,
+		formatSpendTurns(row.Turns),
+		formatSpendPeakInput(row.PeakInput),
+		formatSpendCount(row.Tokens.HasInput, row.Tokens.Input),
+		formatSpendCount(row.Tokens.HasOutput, row.Tokens.Output),
+		formatSpendCount(row.Tokens.HasCacheRead, row.Tokens.CacheRead),
+		formatSpendCount(row.Tokens.HasCacheWrite, row.Tokens.CacheWrite),
+		row.RunCount,
+		row.TokenBlindRuns,
+		cell,
+	)
 }
 
 func formatSpendPerCompletedTask(result *SpendSetBreakdownResult) string {
 	if result.TokensPerCompletedTask == nil {
 		return "—"
 	}
-	return fmt.Sprintf("%d", *result.TokensPerCompletedTask)
+	tokens := fmt.Sprintf("%d", *result.TokensPerCompletedTask)
+	if result.ImplementNotional.HasCost && result.CompletedTasks > 0 {
+		return fmt.Sprintf("%s (~$%.2f)", tokens, result.ImplementNotional.Dollars/float64(result.CompletedTasks))
+	}
+	return fmt.Sprintf("%s (—)", tokens)
+}
+
+// formatSpendCell is the shared tokens (~$notional) cell for rollup and
+// breakdown surfaces. Rate-blind figures render (—), never (~$0.00).
+func formatSpendCell(u TokenUsage, notional PartialCost) string {
+	if !u.HasUsage() {
+		return "—"
+	}
+	tokens := fmt.Sprintf("%d", tokenUsageTotal(u))
+	if notional.HasCost {
+		return fmt.Sprintf("%s (~$%.2f)", tokens, notional.Dollars)
+	}
+	return fmt.Sprintf("%s (—)", tokens)
 }
 
 func formatSpendTotal(u TokenUsage) string {

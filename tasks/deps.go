@@ -34,6 +34,9 @@ type Deps struct {
 	FS           deps.FileSystem
 	Git          deps.Git
 	Runner       CommandRunner
+	// RateTableFetcher loads the OpenRouter models payload for the Spend lens
+	// Rate table refresh. Nil uses RealRateTableFetcher (ADR-0218).
+	RateTableFetcher RateTableFetcher
 	LookPath     func(file string) (string, error)
 	ProcessAlive func(pid int) bool
 	// ProcessStartToken returns an opaque token capturing the start instant of

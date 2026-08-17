@@ -876,7 +876,7 @@ func TestRenderSpendSetBreakdownHuman(t *testing.T) {
 	var buf bytes.Buffer
 	RenderSpendSetBreakdown(&buf, result)
 	out := buf.String()
-	for _, want := range []string{"tokens per completed task: 150", "verification spend: 500", "turns", "peak-in", "01-a", "verify", "blind"} {
+	for _, want := range []string{"tokens per completed task: 150 (—)", "verification spend: 500 (—)", "turns", "peak-in", "01-a", "verify", "blind"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output missing %q:\n%s", want, out)
 		}
@@ -929,12 +929,15 @@ func TestSpendRollupAggregatesPiPartialCost(t *testing.T) {
 	if diff := row.Cost.Dollars - 0.15; diff > 0.0001 || diff < -0.0001 {
 		t.Fatalf("partial cost = %+v, want 0.15 from pi runs only", row.Cost)
 	}
+	if !row.Notional.HasCost || row.Notional.Dollars < 0.149 || row.Notional.Dollars > 0.151 {
+		t.Fatalf("notional should prefer pi measured 0.15, got %+v", row.Notional)
+	}
 	if row.RunCount != 3 {
 		t.Fatalf("runs = %d", row.RunCount)
 	}
 }
 
-func TestSpendRollupOmitsCostColumnWhenNoAdapterReportsIt(t *testing.T) {
+func TestSpendRollupOmitsDollarWhenRateBlind(t *testing.T) {
 	result := &SpendRollupResult{Sets: []SpendRollupRow{{
 		TaskSetID: "demo",
 		Tokens: TokenUsage{
@@ -945,24 +948,27 @@ func TestSpendRollupOmitsCostColumnWhenNoAdapterReportsIt(t *testing.T) {
 	var buf bytes.Buffer
 	RenderSpendRollup(&buf, result)
 	out := buf.String()
-	if strings.Contains(out, "cost") || strings.Contains(out, "$") {
-		t.Fatalf("expected no cost column when absent, got:\n%s", out)
+	if !strings.Contains(out, "150 (—)") {
+		t.Fatalf("expected rate-blind spend cell, got:\n%s", out)
+	}
+	if strings.Contains(out, "$") {
+		t.Fatalf("expected no dollar figure when rate-blind, got:\n%s", out)
 	}
 }
 
-func TestRenderSpendRollupShowsPartialCostLabel(t *testing.T) {
+func TestRenderSpendRollupShowsNotionalSpendCell(t *testing.T) {
 	result := &SpendRollupResult{Sets: []SpendRollupRow{{
 		TaskSetID: "demo",
 		Tokens: TokenUsage{
 			Input: 100, Output: 50, HasInput: true, HasOutput: true,
 		},
-		Cost:     PartialCost{Dollars: 0.1234, HasCost: true},
+		Notional: PartialCost{Dollars: 0.1234, HasCost: true},
 		RunCount: 1,
 	}}}
 	var buf bytes.Buffer
 	RenderSpendRollup(&buf, result)
 	out := buf.String()
-	for _, want := range []string{"cost (partial)", "$0.1234"} {
+	for _, want := range []string{"tokens", "150 (~$0.12)"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output missing %q:\n%s", want, out)
 		}
@@ -1026,34 +1032,34 @@ func TestSpendSetBreakdownAggregatesPiPartialCost(t *testing.T) {
 	}
 }
 
-func TestRenderSpendSetBreakdownShowsPartialCostLabel(t *testing.T) {
+func TestRenderSpendSetBreakdownShowsNotionalSpendCell(t *testing.T) {
 	perTask := int64(150)
 	result := &SpendSetBreakdownResult{
 		TaskSetID:              "demo",
 		CompletedTasks:         1,
 		TokensPerCompletedTask: &perTask,
 		ImplementTokens:        TokenUsage{Input: 100, Output: 50, HasInput: true, HasOutput: true},
-		ImplementCost:          PartialCost{Dollars: 0.50, HasCost: true},
+		ImplementNotional:      PartialCost{Dollars: 0.50, HasCost: true},
 		ImplementRunCount:      1,
 		VerificationTokens:     TokenUsage{Input: 500, HasInput: true},
-		VerificationCost:       PartialCost{Dollars: 0.25, HasCost: true},
+		VerificationNotional:   PartialCost{Dollars: 0.25, HasCost: true},
 		VerificationRunCount:   1,
 		Rows: []SpendBreakdownRow{{
 			TaskID:   "01-a",
 			Tokens:   TokenUsage{Input: 100, Output: 50, HasInput: true, HasOutput: true},
-			Cost:     PartialCost{Dollars: 0.50, HasCost: true},
+			Notional: PartialCost{Dollars: 0.50, HasCost: true},
 			RunCount: 1,
 		}, {
 			TaskID:   "verify",
 			Tokens:   TokenUsage{Input: 500, HasInput: true},
-			Cost:     PartialCost{Dollars: 0.25, HasCost: true},
+			Notional: PartialCost{Dollars: 0.25, HasCost: true},
 			RunCount: 1,
 		}},
 	}
 	var buf bytes.Buffer
 	RenderSpendSetBreakdown(&buf, result)
 	out := buf.String()
-	for _, want := range []string{"partial cost", "cost (partial)", "$0.5000", "$0.2500"} {
+	for _, want := range []string{"150 (~$0.50)", "500 (~$0.25)", "tokens"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output missing %q:\n%s", want, out)
 		}

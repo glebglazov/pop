@@ -1,6 +1,7 @@
 package tasks
 
 import (
+	"context"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -45,10 +46,12 @@ func newTestDeps(t *testing.T) *Deps {
 	t.Helper()
 	dir := t.TempDir()
 	d := &Deps{
-		FS: testFSWithDataHome(dir),
+		FS:                           testFSWithDataHome(dir),
 		Git:                          deps.NewRealGit(),
+		Clock:                        deps.FixedClock{Instant: time.Date(2026, 8, 17, 18, 0, 0, 0, time.UTC)},
 		Runner:                       fakeAwareRunner{},
 		LookPath:                     exec.LookPath,
+		RateTableFetcher:             panicRateTableFetcher{},
 		RecoveryFastCheckInterval:    2 * time.Millisecond,
 		RecoveryPollInterval:         2 * time.Millisecond,
 		RecoveryPollImminentInterval: 2 * time.Millisecond,
@@ -57,4 +60,12 @@ func newTestDeps(t *testing.T) *Deps {
 	}
 	t.Cleanup(func() { _ = d.CloseStore() })
 	return d
+}
+
+// panicRateTableFetcher fails loudly if a test triggers a Rate table refresh
+// without injecting its own fetcher — the Spend lens must never reach the network.
+type panicRateTableFetcher struct{}
+
+func (panicRateTableFetcher) Fetch(context.Context) ([]byte, error) {
+	panic("rate table fetch reached the network in a test")
 }

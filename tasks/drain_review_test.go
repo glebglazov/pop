@@ -226,7 +226,7 @@ func TestReviewRunIsCapturedUnderItsOwnPhase(t *testing.T) {
 
 	// The spend lens gives it its own row and its own bucket: a review is not
 	// implement spend, and pretending otherwise would overstate what a task cost.
-	breakdown, err := buildSpendSetBreakdown(d, "demo", m)
+	breakdown, err := buildSpendSetBreakdown(d, "demo", m, loadRateTableForSpend(d))
 	if err != nil {
 		t.Fatalf("buildSpendSetBreakdown: %v", err)
 	}
