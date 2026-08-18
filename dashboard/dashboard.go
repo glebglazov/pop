@@ -273,10 +273,10 @@ type dashboardMenu struct {
 	// plural marks a menu opened over a Selection: its items are the verbs every
 	// targeted row offers and declares plural, and targets is the row set they
 	// will run over — captured when the menu opened, so the poll rebuilding the
-	// table underneath cannot change what a keypress is aimed at. The plural
-	// overlay sits at the foot of the Selection region (after the last marked
-	// row, above the rule); row is still the first target for any path that
-	// needs a single row identity.
+	// table underneath cannot change what a keypress is aimed at. It renders at
+	// the same fixed position a singular menu does, counting its targets on its
+	// own rule; row is still the first target for any path that needs a single
+	// row identity.
 	plural  bool
 	targets []DashboardRow
 }
@@ -287,12 +287,25 @@ type dashboardMenu struct {
 func (m *dashboardMenu) nested() bool { return m.status != nil || m.mute != nil }
 
 // pluralCount is how many rows this menu's verbs will act on, zero for a menu
-// over the cursored row. It is what the overlay's titles state.
+// over the cursored row.
 func (m *dashboardMenu) pluralCount() int {
 	if m == nil || !m.plural {
 		return 0
 	}
 	return len(m.targets)
+}
+
+// target is what the menu's top rule names: the container a singular menu acts
+// on, and the count a plural one does. The two are one phrase because a human
+// reading the rule is asking one question — what is this about to hit.
+func (m *dashboardMenu) target() string {
+	if m == nil {
+		return ""
+	}
+	if n := m.pluralCount(); n > 0 {
+		return fmt.Sprintf("%d selected", n)
+	}
+	return m.row.ID
 }
 
 // Row-verb key case (ADR-0158): uppercase = handoff (spawns/focuses a pane, quits
@@ -403,7 +416,7 @@ func (menu *dashboardMenu) items() []dashboardMenuItem {
 func newDashboardMenu(kinds workKinds, row DashboardRow) *dashboardMenu {
 	return &dashboardMenu{
 		row:  row,
-		list:   ui.NewList(dashboardMenuItems(kinds, row), ui.Opts[dashboardMenuItem]{Wrap: true}),
+		list: ui.NewList(dashboardMenuItems(kinds, row), ui.Opts[dashboardMenuItem]{Wrap: true}),
 	}
 }
 
@@ -3222,9 +3235,9 @@ func (m QueueDashboard) View() tea.View {
 // line count can never drift from what is drawn (ADR-0079).
 // dashboardActionErrorLine formats a sticky row-verb error for display. It keeps
 // the full message (no column-math truncation): the ⚠ warning region and the
-// menu/modal bodies render it un-clipped, so a long refusal wraps in the
-// terminal rather than being cut into meaninglessness — the informative head is
-// always visible.
+// modal bodies render it un-clipped, so a long refusal wraps in the terminal
+// rather than being cut into meaninglessness — the informative head is always
+// visible.
 func dashboardActionErrorLine(err error) string {
 	return fmt.Sprintf("action failed: %v", err)
 }
@@ -3254,11 +3267,20 @@ func (m QueueDashboard) frameSpec() ui.Frame {
 		subheader = ui.TruncateString(line, m.width-2)
 	}
 	hints := m.mainHint()
+	// Both overlays this surface opens are Frame regions, so their reserved
+	// height and their render cannot drift (ADR-0197 decision 9): BodyHeight
+	// shrinks the table by exactly len(block), which is what makes the list
+	// re-clamp its scroll rather than render past the pane. They occupy the same
+	// screen rows and only one can be open at a time.
 	var block []string
-	if m.filter != nil {
-		// The filter block is a Frame region so its reserved height and render
-		// cannot drift (ADR-0197 decision 9); BodyHeight shrinks the table by
-		// exactly len(block).
+	switch {
+	case m.menu != nil:
+		block = dashboardMenuLines(m.menu, m.width, m.liveCache())
+		hints = "j/k move · enter/letter run · esc close"
+		if m.menu.nested() {
+			hints = "j/k move · enter/letter run · esc back"
+		}
+	case m.filter != nil:
 		block = m.dashboardFilterMenuLines()
 		hints = "j/k move · 1-9/enter select · esc close"
 	}
@@ -3402,33 +3424,15 @@ func (m QueueDashboard) mainBody() string {
 	return strings.Join(parts, "\n")
 }
 
-// viewWithMenu renders the action-menu overlay: the summary, the full table with
-// the menu spliced next to the cursored row (bespoke overlay placement, ADR-0079),
-// and the menu footer. The menu overlay's own body is ported onto List in a later
-// slice; here it keeps the current rendering with the cursor read from the List.
+// viewWithMenu renders the action-menu overlay through the shared Frame. The
+// menu is a reserved Block immediately above the hint line, so it sits at one
+// fixed screen position whatever row the cursor is on (ADR-0224 decision 4) and
+// the table body shrinks by exactly its height — rows leave the viewport from
+// the top and scroll back when the menu closes. The body is the menu-less
+// view's own, which is what keeps the list live and its cursor painted
+// underneath an open menu, the plural case included.
 func (m QueueDashboard) viewWithMenu() string {
-	var body strings.Builder
-	if m.err != nil {
-		fmt.Fprintf(&body, "refresh error: %v\n", m.err)
-	}
-	if m.actionErr != nil {
-		fmt.Fprintf(&body, "%s\n", dashboardActionErrorLine(m.actionErr))
-	}
-	fmt.Fprintf(&body, "%s\n", m.pageHeader())
-	if line := m.attendedAgentStatusLine(); line != "" {
-		fmt.Fprintf(&body, "%s\n", ui.HintStyle.Render(line))
-	}
-	fmt.Fprintln(&body)
-	renderDashboardTableWithMenu(&body, m.page, m.kinds, m.snap.Containers, m.list.Cursor(), m.list.RegionCount(), m.width, m.height, m.menu, m.liveCache())
-	hint := "j/k move · enter/letter run · esc close"
-	if m.menu.nested() {
-		hint = "j/k move · enter/letter run · esc back"
-	}
-	// The menu view builds its own footer instead of going through Frame, so the
-	// mode word is prepended here — a Selection outlives the menu that acts on it
-	// and must stay visible while it is open (ADR-0215 decision 4).
-	writeDashboardFooter(&body, m.height, ui.WithModeWord(m.modeWord(), dashboardFooterLine(m.flash, hint)))
-	return body.String()
+	return m.frameSpec().Render(m.mainBody())
 }
 
 // viewWithFilterMenu renders the Work view preset modal through the shared
@@ -3776,10 +3780,8 @@ func (m QueueDashboard) renderDetailContent(b *strings.Builder, d *detailView, h
 		rowCount = d.artifactList.Len()
 	}
 	var menuLines []string
-	placeBelow := true
 	if menu != nil && !menu.inPeek {
 		menuLines = itemMenuLines(menu, width)
-		placeBelow = dashboardMenuPlaceBelow(cursorIdx, len(menuLines), height)
 	}
 	writeMenu := func() {
 		for _, ml := range menuLines {
@@ -3787,9 +3789,6 @@ func (m QueueDashboard) renderDetailContent(b *strings.Builder, d *detailView, h
 		}
 	}
 	for i := 0; i < rowCount; i++ {
-		if menuLines != nil && i == cursorIdx && !placeBelow {
-			writeMenu()
-		}
 		prefix := "  "
 		if i == cursorIdx {
 			prefix = ui.IndicatorStyle.Render("█") + " "
@@ -3801,7 +3800,7 @@ func (m QueueDashboard) renderDetailContent(b *strings.Builder, d *detailView, h
 			line = detailItemLine(d.list.Items()[i], d.cols.idW)
 		}
 		fmt.Fprintf(b, "%s%s\n", prefix, line)
-		if menuLines != nil && i == cursorIdx && placeBelow {
+		if menuLines != nil && i == cursorIdx {
 			writeMenu()
 		}
 	}
@@ -4017,171 +4016,65 @@ func renderDashboardAbandonModal(w io.Writer, modal *dashboardAbandonModal, widt
 	fmt.Fprint(w, ui.HintStyle.Render(ui.TruncateString("y confirm · enter/n/esc cancel", width)))
 }
 
+// renderDashboardTable renders the task-set table for the views that compose
+// their own body instead of going through Frame plus List: the column header,
+// its separator, then one line per row with the cursor block on the cursored
+// one. No overlay is ever spliced into it — every menu on this surface is bottom
+// chrome now (ADR-0224 decision 4). live colours the activity cluster (ADR-0158).
 func renderDashboardTable(w io.Writer, page dashboardPage, kinds workKinds, rows []DashboardRow, cursor, width, height int, live livePaneCache) {
-	renderDashboardTableWithMenu(w, page, kinds, rows, cursor, 0, width, height, nil, live)
-}
-
-// writeSelectionSeparator emits the Selection's counted divider after row index
-// i when that row is the last marked one. The bespoke overlay renderers walk the
-// row slice flat, and its leading regionCount rows are exactly the marked ones
-// (viewRows lifts them to the front), so the divider is one emission rather than
-// a region the renderer has to own.
-func writeSelectionSeparator(w io.Writer, i, regionCount, width int) {
-	if regionCount <= 0 || i != regionCount-1 {
-		return
-	}
-	fmt.Fprintf(w, "%s\n", ui.SelectionSeparator(regionCount, width))
-}
-
-// renderDashboardTableWithMenu renders the task-set table and, when menu is
-// non-nil, splices the action overlay in. A singular menu nests under the
-// cursored row (below by default, flipping above via dashboardMenuPlaceBelow
-// when the cursor sits too low). A plural menu sits at the foot of the
-// Selection region — after the last marked row, above the rule — and never
-// flips; the row cursor is unpainted while it is open. live colours
-// handoff-verb keys in the overlay (ADR-0158). regionCount is how many leading
-// rows a live Selection has marked, zero when none is.
-func renderDashboardTableWithMenu(w io.Writer, page dashboardPage, kinds workKinds, rows []DashboardRow, cursor, regionCount, width, height int, menu *dashboardMenu, live livePaneCache) {
 	if page.twoLine(rows, width, height) {
-		renderDashboardTableTwoLineWithMenu(w, kinds, rows, cursor, regionCount, width, height, menu, live)
+		renderDashboardTableTwoLine(w, kinds, rows, cursor, width, live)
 		return
 	}
 	headers := page.headers(kinds)
 	widths := page.tableWidthsForRows(kinds, rows, width)
 	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTableLine(headers, widths), width))
 	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTableSeparator(headers, widths), width))
-
-	pluralMenu := menu != nil && menu.plural
-	var menuLines []string
-	placeBelow := true
-	if menu != nil {
-		menuLines = dashboardMenuLines(menu, width, live)
-		if !pluralMenu {
-			placeBelow = dashboardMenuPlaceBelow(cursor, len(menuLines), height)
-		}
-	}
-	writeMenu := func() {
-		for _, ml := range menuLines {
-			fmt.Fprintf(w, "%s\n", ml)
-		}
-	}
 	for i, row := range rows {
-		if menu != nil && !pluralMenu && i == cursor && !placeBelow {
-			writeMenu()
-		}
-		var prefix string
-		if i == cursor && !pluralMenu {
+		prefix := "  "
+		if i == cursor {
 			prefix = ui.IndicatorStyle.Render("█") + " "
-		} else {
-			prefix = "  "
 		}
 		line := ui.TruncateString(prefix+dashboardTableLine(page.styledCells(kinds, row, live), widths), width)
 		fmt.Fprintf(w, "%s\n", line)
-		if pluralMenu && i == regionCount-1 {
-			writeMenu()
-		}
-		writeSelectionSeparator(w, i, regionCount, width)
-		if menu != nil && !pluralMenu && i == cursor && placeBelow {
-			writeMenu()
-		}
 	}
 }
 
-// renderDashboardTableTwoLineWithMenu renders the two-line task-set table and,
-// when menu is non-nil, splices the action overlay the same way the single-line
-// renderer does: singular menus nest under the cursored row (with flip-above),
-// plural menus sit at the foot of the Selection region with the row cursor
-// suppressed. Each row occupies two terminal lines: line 1 holds the activity
-// cluster, PROJECT, TASK SET (the set id) and WORKTREE; line 2 holds STATUS
-// indented under the TASK SET column.
-func renderDashboardTableTwoLineWithMenu(w io.Writer, kinds workKinds, rows []DashboardRow, cursor, regionCount, width, height int, menu *dashboardMenu, live livePaneCache) {
+// renderDashboardTableTwoLine renders the two-line task-set table: each row
+// occupies two terminal lines, line 1 holding the activity cluster, PROJECT,
+// TASK SET (the set id) and WORKTREE, line 2 holding STATUS indented under the
+// TASK SET column.
+func renderDashboardTableTwoLine(w io.Writer, kinds workKinds, rows []DashboardRow, cursor, width int, live livePaneCache) {
 	line1Widths := dashboardTwoLineFitWidths(dashboardTwoLineNaturalWidths(rows), dashboardTableBodyBudget(width))
 	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTwoLineTableHeader(line1Widths), width))
 	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTwoLineStatusHeader(line1Widths), width))
 	fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTwoLineTableSeparator(line1Widths), width))
-
-	pluralMenu := menu != nil && menu.plural
-	var menuLines []string
-	placeBelow := true
-	if menu != nil {
-		menuLines = dashboardMenuLines(menu, width, live)
-		if !pluralMenu {
-			placeBelow = dashboardMenuPlaceBelowTwoLine(cursor, len(menuLines), height)
-		}
-	}
-	writeMenu := func() {
-		for _, ml := range menuLines {
-			fmt.Fprintf(w, "%s\n", ml)
-		}
-	}
 	for i, row := range rows {
-		if menu != nil && !pluralMenu && i == cursor && !placeBelow {
-			writeMenu()
-		}
-		var prefix string
-		if i == cursor && !pluralMenu {
+		prefix := "  "
+		if i == cursor {
 			prefix = ui.IndicatorStyle.Render("█") + " "
-		} else {
-			prefix = "  "
 		}
-		line1 := ui.TruncateString(prefix+dashboardTwoLineRowLine1(row, line1Widths, live), width)
-		line2 := ui.TruncateString("  "+dashboardTwoLineRowLine2(kinds, row, line1Widths), width)
-		fmt.Fprintf(w, "%s\n", line1)
-		fmt.Fprintf(w, "%s\n", line2)
-		if pluralMenu && i == regionCount-1 {
-			writeMenu()
-		}
-		writeSelectionSeparator(w, i, regionCount, width)
-		if menu != nil && !pluralMenu && i == cursor && placeBelow {
-			writeMenu()
-		}
+		fmt.Fprintf(w, "%s\n", ui.TruncateString(prefix+dashboardTwoLineRowLine1(row, line1Widths, live), width))
+		fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTwoLineRowLine2(kinds, row, line1Widths), width))
 	}
 }
 
-// dashboardMenuPlaceBelowTwoLine is the two-line-mode variant of
-// dashboardMenuPlaceBelow. Each row consumes two terminal lines, so the space
-// below the cursored row is reduced accordingly.
-func dashboardMenuPlaceBelowTwoLine(cursor, menuHeight, height int) bool {
-	if height <= 0 {
-		return true
-	}
-	linesBelowCursor := height - (dashboardTableTopOffset + 1) - 2*(cursor+1)
-	return linesBelowCursor >= menuHeight
-}
-
-// dashboardTableTopOffset is the number of lines above the first table row in
-// the dashboard view: the summary line, a blank, the header, and the separator.
-const dashboardTableTopOffset = 4
-
-// dashboardMenuPlaceBelow reports whether the action menu of menuHeight lines
-// should render below the cursor row (true) or flip above it (false). It flips
-// above only when the cursor sits low enough that the menu would not fit beneath
-// it within the viewport. A non-positive height (no WindowSizeMsg yet) keeps the
-// menu below.
-func dashboardMenuPlaceBelow(cursor, menuHeight, height int) bool {
-	if height <= 0 {
-		return true
-	}
-	linesBelowCursor := height - 1 - dashboardTableTopOffset - cursor
-	return linesBelowCursor >= menuHeight
-}
-
-// dashboardMenuLines renders the action overlay as a block of lines indented to
-// nest under the cursored row, with the highlighted item carrying the shared
-// cursor block. The first line is a dimmed "actions" caption. When the status
-// submenu is open it renders that instead. Handoff-verb keys are coloured by
-// the live-pane affordance (ADR-0158).
+// dashboardMenuLines renders an action overlay as the Frame Block it is drawn
+// as: a rule naming what the verbs will hit, then one line per item with the
+// highlighted one carrying the shared cursor block. When a submenu is open it
+// renders that instead, at the same position and under the same rule grammar.
+// Handoff-verb keys are coloured by the live-pane affordance (ADR-0158).
 func dashboardMenuLines(menu *dashboardMenu, width int, live livePaneCache) []string {
 	if menu == nil {
 		return nil
 	}
 	if menu.status != nil {
-		return dashboardStatusMenuLines(menu.status, width)
+		return dashboardStatusMenuLines(menu.status, menu.target(), width)
 	}
 	if menu.mute != nil {
-		return dashboardMuteMenuLines(menu.mute, width)
+		return dashboardMuteMenuLines(menu.mute, menu.target(), width)
 	}
-	lines := []string{ui.TruncateString("    "+ui.HintStyle.Render("actions"), width)}
+	lines := []string{dashboardMenuRule("actions", menu.target(), width)}
 	cursor := menu.list.Cursor()
 	for i, item := range menu.list.Items() {
 		marker := "  "
@@ -4195,12 +4088,26 @@ func dashboardMenuLines(menu *dashboardMenu, width int, live livePaneCache) []st
 	return lines
 }
 
-// dashboardStatusMenuLines renders the nested status submenu.
-func dashboardStatusMenuLines(status *dashboardStatusMenu, width int) []string {
+// dashboardMenuRule is the top line of every menu block: the menu's own noun and
+// the target it acts on, in the rule grammar the Selection's divider draws in. A
+// menu at the foot of the screen has no adjacency to spend, so this line is the
+// whole of what says which row — or how many — a keypress is about to write over
+// (ADR-0224 decision 5).
+func dashboardMenuRule(noun, target string, width int) string {
+	label := noun
+	if target != "" {
+		label += " · " + target
+	}
+	return ui.CaptionRule(label, width)
+}
+
+// dashboardStatusMenuLines renders the nested status submenu, captioned with the
+// target its parent menu named.
+func dashboardStatusMenuLines(status *dashboardStatusMenu, target string, width int) []string {
 	if status == nil {
 		return nil
 	}
-	lines := []string{ui.TruncateString("    "+ui.HintStyle.Render("status"), width)}
+	lines := []string{dashboardMenuRule("status", target, width)}
 	cursor := status.list.Cursor()
 	for i, item := range status.list.Items() {
 		marker := "  "
@@ -4216,11 +4123,11 @@ func dashboardStatusMenuLines(status *dashboardStatusMenu, width int) []string {
 // dashboardMuteMenuLines renders the nested mute submenu: six numbered windows,
 // then one dimmed footer stating the hour they all land at. The footer is why no
 // entry carries the hour itself.
-func dashboardMuteMenuLines(mute *dashboardMuteMenu, width int) []string {
+func dashboardMuteMenuLines(mute *dashboardMuteMenu, target string, width int) []string {
 	if mute == nil {
 		return nil
 	}
-	lines := []string{ui.TruncateString("    "+ui.HintStyle.Render("mute"), width)}
+	lines := []string{dashboardMenuRule("mute", target, width)}
 	cursor := mute.list.Cursor()
 	for i, window := range mute.list.Items() {
 		marker := "  "

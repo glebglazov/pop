@@ -3,6 +3,8 @@ package ui
 import (
 	"fmt"
 	"strings"
+
+	"charm.land/lipgloss/v2"
 )
 
 // SelectionMode is the word a surface holds at the left of its bottom line while
@@ -82,18 +84,22 @@ func SplitSelected[T any](s *Selection, rows []T, key func(T) string) (marked, r
 	return marked, rest
 }
 
-// SelectionSeparator is the dim rule that closes the Selection area. The count
-// is set into a horizontal rule that spans width, so the block reads as a block
-// rather than as one more row. A non-positive width still draws a short rule so
-// callers that have not sized the surface yet do not lose the count.
-func SelectionSeparator(count, width int) string {
+// CaptionRule is the dim rule a named block of list chrome opens or closes with:
+// label set into a horizontal rule that spans width, so the block reads as a
+// block rather than as one more row. It is one grammar for every such rule on a
+// list surface — the Selection area's counted divider and an action menu's top
+// caption are the same object seen twice, which is what lets a human read a
+// bottom-anchored menu as being *about* something without adjacency to say so
+// (ADR-0224 decision 5). A non-positive width still draws a short rule so
+// callers that have not sized the surface yet do not lose the label.
+func CaptionRule(label string, width int) string {
 	const dash = "─"
-	label := fmt.Sprintf(" %d selected ", count)
+	label = " " + label + " "
 	left := 3
 	if width <= 0 {
 		return dimStyle.Render(strings.Repeat(dash, left) + label + strings.Repeat(dash, left))
 	}
-	labelW := len(label) // label is ASCII
+	labelW := lipgloss.Width(label)
 	if width <= labelW {
 		return dimStyle.Render(TruncateToWidth(strings.Repeat(dash, left)+label, width))
 	}
@@ -103,6 +109,12 @@ func SelectionSeparator(count, width int) string {
 	}
 	right := rest - left
 	return dimStyle.Render(strings.Repeat(dash, left) + label + strings.Repeat(dash, right))
+}
+
+// SelectionSeparator is the dim rule that closes the Selection area, counting
+// the rows it holds.
+func SelectionSeparator(count, width int) string {
+	return CaptionRule(fmt.Sprintf("%d selected", count), width)
 }
 
 // SelectionOverflow is the line that stands in for the members the viewport cap

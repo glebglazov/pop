@@ -597,60 +597,6 @@ func TestDashboardArchiveRetainsBinding(t *testing.T) {
 	}
 }
 
-func TestDashboardActionMenuAnchorsBelowAndFlipsAbove(t *testing.T) {
-	// dashboardMenuPlaceBelow: a cursor near the top fits the menu below it; a
-	// cursor low in the list does not, so it flips above.
-	if !dashboardMenuPlaceBelow(0, 6, 24) {
-		t.Fatal("menu should render below a top-of-list cursor")
-	}
-	if dashboardMenuPlaceBelow(18, 6, 24) {
-		t.Fatal("menu should flip above a bottom-of-list cursor")
-	}
-	if !dashboardMenuPlaceBelow(5, 6, 0) {
-		t.Fatal("menu should default below when height is unknown")
-	}
-
-	// dashboardMenuPlaceBelowTwoLine: each logical row consumes two physical
-	// lines, so the available space below the cursor is halved.
-	if !dashboardMenuPlaceBelowTwoLine(0, 6, 24) {
-		t.Fatal("two-line menu should render below a top-of-list cursor")
-	}
-	if dashboardMenuPlaceBelowTwoLine(8, 6, 24) {
-		t.Fatal("two-line menu should flip above a low cursor (each row is two lines)")
-	}
-	if !dashboardMenuPlaceBelowTwoLine(5, 6, 0) {
-		t.Fatal("two-line menu should default below when height is unknown")
-	}
-
-	rows := make([]DashboardRow, 20)
-	for i := range rows {
-		id := fmt.Sprintf("set-%02d", i)
-		rows[i] = DashboardRow{Project: "pop", CursorKey: "pop\x00" + id, RawStatus: tasks.StatusReady, ID: id}
-	}
-
-	// Cursor at the top: the menu caption sits below the cursor row.
-	mTop := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: rows})
-	mTop.width = 120
-	mTop.height = 24
-	mTop.list.SetCursor(0)
-	updated, _ := mTop.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	topView := updated.(QueueDashboard).View().Content
-	if got := menuCaptionLine(topView); got <= cursorRowLine(topView, "set-00") {
-		t.Fatalf("top cursor: caption line %d should be below cursor row:\n%s", got, topView)
-	}
-
-	// Cursor at the bottom: the menu caption flips above the cursor row.
-	mBot := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: rows})
-	mBot.width = 120
-	mBot.height = 24
-	mBot.list.SetCursor(len(rows) - 1)
-	updated, _ = mBot.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	botView := updated.(QueueDashboard).View().Content
-	if got := menuCaptionLine(botView); got >= cursorRowLine(botView, "set-19") {
-		t.Fatalf("bottom cursor: caption line %d should be above cursor row:\n%s", got, botView)
-	}
-}
-
 func contains(haystack []string, needle string) bool {
 	for _, s := range haystack {
 		if s == needle {
@@ -658,14 +604,6 @@ func contains(haystack []string, needle string) bool {
 		}
 	}
 	return false
-}
-
-func menuCaptionLine(view string) int {
-	return dashboardTestLineIndex(strings.Split(view, "\n"), "actions")
-}
-
-func cursorRowLine(view, setID string) int {
-	return dashboardTestLineIndex(strings.Split(view, "\n"), setID)
 }
 
 func TestDashboardStatusKeysOpenDetailViewAndClosePreservesCursor(t *testing.T) {
@@ -4697,8 +4635,8 @@ func TestDashboardTwoLineClampsToBodyHeight(t *testing.T) {
 // TestDashboardShortPaneCollapsesToSingleLine asserts that a pane below the
 // two-line height floor renders single-line rows even when the terminal is
 // narrow and a set id is long — a short tmux popup trades id completeness for
-// visible-row density (ADR-0107). The collapse must hold in both the main body
-// and the action-menu overlay.
+// visible-row density (ADR-0107). The collapse is one decision for the whole
+// surface: the menu overlay renders the same body, so it inherits it.
 func TestDashboardShortPaneCollapsesToSingleLine(t *testing.T) {
 	longID := strings.Repeat("a", 37)
 	rows := []DashboardRow{
@@ -4734,18 +4672,26 @@ func TestDashboardShortPaneCollapsesToSingleLine(t *testing.T) {
 	}
 	assertSingleLineRow(m.View().Content, "main body")
 
-	// The action-menu overlay must share the same single-line decision.
+	// The action-menu overlay shares that decision because it renders the same
+	// body. On a pane this short the menu block is taller than the rows it leaves
+	// room for, so the assertion is the row density and the pane bound rather than
+	// a visible row: Frame clips the block and never renders past TermH.
 	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	m = updated.(QueueDashboard)
 	if m.menu == nil {
 		t.Fatal("a did not open the action menu")
 	}
-	assertSingleLineRow(m.View().Content, "menu overlay")
+	if m.list.LinesPerItem() != 1 {
+		t.Fatalf("LinesPerItem = %d with the menu open, want 1 on a short pane", m.list.LinesPerItem())
+	}
+	if got := len(strings.Split(m.View().Content, "\n")); got > m.height {
+		t.Fatalf("menu overlay = %d lines, want at most the pane's %d", got, m.height)
+	}
 }
 
-// TestDashboardMenuTwoLineOverlay verifies that opening the action menu (`a`)
-// on a narrow pane renders the table rows in two-line mode and anchors the menu
-// relative to the cursor's two-line block.
+// TestDashboardMenuTwoLineOverlay verifies that opening the action menu (`a`) on
+// a narrow pane leaves the table rows in two-line mode and renders the menu
+// block within the pane's width.
 func TestDashboardMenuTwoLineOverlay(t *testing.T) {
 	longID := strings.Repeat("a", 37)
 	rows := []DashboardRow{

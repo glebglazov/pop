@@ -133,9 +133,9 @@ func TestWorkBulkAbandonReusesTheFailureCollapse(t *testing.T) {
 	}
 }
 
-// The plural modals count their target set: the submenu says how many rows the
-// window it is about to pick will land on, and one confirmation follows — not
-// one per row.
+// The plural modals count their target set: the submenu's rule says how many
+// rows the window it is about to pick will land on, and one confirmation
+// follows — not one per row.
 func TestWorkBulkMuteAsksOnceForTheWholeSet(t *testing.T) {
 	m, k := setDashboard(t, "set-a", "set-b", "set-c")
 	m = markAll(t, m, 3)
@@ -143,9 +143,9 @@ func TestWorkBulkMuteAsksOnceForTheWholeSet(t *testing.T) {
 	m = bulkPress(t, m, selKeyRune('a'))
 	m = bulkPress(t, m, selKeyRune('m'))
 
-	lines := strings.Join(dashboardMuteMenuLines(m.menu.mute, 120), "\n")
-	if !strings.Contains(ui.StripANSI(lines), "mute") || strings.Contains(ui.StripANSI(lines), "mute (") {
-		t.Fatalf("mute submenu = %q, want a title without a row count", ui.StripANSI(lines))
+	lines := ui.StripANSI(strings.Join(dashboardMuteMenuLines(m.menu.mute, m.menu.target(), 120), "\n"))
+	if !strings.Contains(lines, "mute · 3 selected") {
+		t.Fatalf("mute submenu = %q, want one submenu naming all three rows on its rule", lines)
 	}
 
 	m = bulkPress(t, m, selKeyRune('3'))

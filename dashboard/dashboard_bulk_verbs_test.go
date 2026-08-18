@@ -228,10 +228,11 @@ func TestWorkBulkMenuListsOnlyWhatEveryRowOffers(t *testing.T) {
 			}
 		}
 	}
-	// The title is the same dimmed caption the singular menu uses.
+	// The menu sits at the foot with no adjacency to what it targets, so its own
+	// rule counts the marked rows (ADR-0224 decision 5).
 	lines := ui.StripANSI(strings.Join(dashboardMenuLines(m.menu, 200, livePaneCache{}), "\n"))
-	if !strings.Contains(lines, "actions") || strings.Contains(lines, "actions (") {
-		t.Fatalf("menu title repeats the count:\n%s", lines)
+	if !strings.Contains(lines, "actions · 2 selected") {
+		t.Fatalf("menu rule does not name its target:\n%s", lines)
 	}
 }
 
@@ -277,8 +278,8 @@ func TestWorkBulkStatusSubmenuIntersects(t *testing.T) {
 		t.Fatalf("submenu = %v, want %v", got, want)
 	}
 	lines := ui.StripANSI(strings.Join(dashboardMenuLines(m.menu, 200, livePaneCache{}), "\n"))
-	if !strings.Contains(lines, "status") || strings.Contains(lines, "status (") {
-		t.Fatalf("submenu title repeats the count:\n%s", lines)
+	if !strings.Contains(lines, "status · 2 selected") {
+		t.Fatalf("submenu rule does not name its target:\n%s", lines)
 	}
 
 	// A Map and a task set both offer the opener and neither shares a status word
@@ -544,9 +545,9 @@ func TestWorkBulkMuteAppliesOneWindowToEveryRow(t *testing.T) {
 
 // A menu is opened *by* the Selection, so it cannot be what hides it: the
 // counted separator stays under the marked rows and the mode word stays at the
-// left of the bottom line, ahead of the menu's own hints. The menu view composes
-// its own body and footer rather than going through List and Frame, which is why
-// both signals are pinned here as well as in the no-menu twin.
+// left of the bottom line, ahead of the menu's own hints. The menu is a Frame
+// block below the whole list now (ADR-0224 decision 4), so neither signal is a
+// thing the menu can displace — which is what these tests check.
 func selectionSignals(t *testing.T, m QueueDashboard, marked int) (view, separator string) {
 	t.Helper()
 	view = ui.StripANSI(m.View().Content)
@@ -561,7 +562,7 @@ func selectionSignals(t *testing.T, m QueueDashboard, marked int) (view, separat
 }
 
 // rowCursorOn reports whether any table row carries the █ block (as opposed to
-// the menu's own highlighted item, which is indented under the row).
+// the menu's own highlighted item, which is indented inside the menu block).
 func rowCursorOn(view string) bool {
 	for _, line := range strings.Split(ui.StripANSI(view), "\n") {
 		trimmed := strings.TrimLeft(line, " ")
@@ -583,8 +584,8 @@ func TestWorkBulkMenuKeepsTheSelectionSignals(t *testing.T) {
 
 	view, separator := selectionSignals(t, m, 2)
 
-	// The plural menu sits inside the region: marked rows, then the menu, then
-	// the rule, then the rest of the list.
+	// The region is untouched by the menu: marked rows, the rule, the rest of the
+	// list — and the menu below all of it as bottom chrome rather than spliced in.
 	cut := strings.Index(view, separator)
 	before, after := view[:cut], view[cut:]
 	if !strings.Contains(before, "set-a") || !strings.Contains(before, "set-b") {
@@ -593,11 +594,11 @@ func TestWorkBulkMenuKeepsTheSelectionSignals(t *testing.T) {
 	if !strings.Contains(after, "set-c") || !strings.Contains(after, "set-d") {
 		t.Fatalf("the unmarked rows are not below the separator:\n%s", view)
 	}
-	if !strings.Contains(before, "actions") || strings.Contains(before, "actions (") {
-		t.Fatalf("the menu is not above the separator:\n%s", view)
+	if strings.Contains(before, "actions") {
+		t.Fatalf("the menu was spliced into the table:\n%s", view)
 	}
-	if strings.Contains(after, "actions") {
-		t.Fatalf("the menu leaked below the separator:\n%s", view)
+	if !strings.Contains(after, "actions · 2 selected") {
+		t.Fatalf("the menu is not below the list, naming its targets:\n%s", view)
 	}
 
 	// The mode word leads the bottom line and the menu's hints follow it, spaced.
@@ -608,42 +609,11 @@ func TestWorkBulkMenuKeepsTheSelectionSignals(t *testing.T) {
 	}
 }
 
-// The plural menu anchors on the last marked row, never the cursored one: moving
-// the cursor before opening it, or sitting it low enough that a singular menu
-// would flip, must not move the block or put it above the region.
-func TestWorkBulkMenuSitsAtTheFootOfTheRegion(t *testing.T) {
-	m, _ := setDashboard(t, "set-a", "set-b", "set-c", "set-d")
-	m = bulkPress(t, m, selKeyTab())
-	m = bulkPress(t, m, selKeyTab())
-	// Walk the cursor onto the last unmarked row — far enough that a singular
-	// menu would flip above its row on a short viewport — then open the menu.
-	m.height = 12
-	m.resizeMainList()
-	for selCursorID(t, m) != "set-d" {
-		m = bulkPress(t, m, selKeyRune('j'))
-	}
-	m = bulkPress(t, m, selKeyRune('a'))
-	if m.menu == nil || !m.menu.plural {
-		t.Fatal("`a` did not open the plural action menu")
-	}
-
-	view, separator := selectionSignals(t, m, 2)
-	cut := strings.Index(view, separator)
-	before := view[:cut]
-	if !strings.Contains(before, "actions") || strings.Contains(before, "actions (") {
-		t.Fatalf("cursor on set-d moved the menu out of the region:\n%s", view)
-	}
-	// Menu follows the last marked row (set-b), not the cursored one.
-	lastMarked := strings.LastIndex(before, "set-b")
-	menuAt := strings.Index(before, "actions")
-	if lastMarked < 0 || menuAt < 0 || menuAt < lastMarked {
-		t.Fatalf("menu is not after the last marked row:\n%s", before)
-	}
-}
-
-// While a plural menu is open the menu's own █ is the only cursor; the row
-// cursor returns in its original position the moment the menu closes.
-func TestWorkBulkMenuSuppressesTheRowCursor(t *testing.T) {
+// The row cursor stays painted under a plural menu, beside the menu's own █: the
+// menu is not next to the rows any more, so blanking the row cursor would cost
+// the human the one thing that says where they will be when the menu closes
+// (ADR-0224 decision 5). It is still in its original position afterwards.
+func TestWorkBulkMenuKeepsTheRowCursorPainted(t *testing.T) {
 	m, _ := setDashboard(t, "set-a", "set-b", "set-c")
 	m = bulkPress(t, m, selKeyTab())
 	m = bulkPress(t, m, selKeyTab())
@@ -655,11 +625,11 @@ func TestWorkBulkMenuSuppressesTheRowCursor(t *testing.T) {
 		t.Fatal("`a` did not open the plural action menu")
 	}
 	openView := m.View().Content
-	if rowCursorOn(openView) {
-		t.Fatalf("a table row still carries the cursor while the plural menu is open:\n%s", ui.StripANSI(openView))
+	if !rowCursorOn(openView) {
+		t.Fatalf("the row cursor was blanked while the plural menu is open:\n%s", ui.StripANSI(openView))
 	}
-	if !strings.Contains(ui.StripANSI(openView), "█") {
-		t.Fatalf("the menu's own cursor is missing:\n%s", ui.StripANSI(openView))
+	if strings.Count(ui.StripANSI(openView), "█") != 2 {
+		t.Fatalf("want two cursors — the row's and the menu's:\n%s", ui.StripANSI(openView))
 	}
 	if m.list.Cursor() != cursorBefore {
 		t.Fatalf("opening the menu moved the cursor from %d to %d", cursorBefore, m.list.Cursor())
@@ -678,8 +648,8 @@ func TestWorkBulkMenuSuppressesTheRowCursor(t *testing.T) {
 	}
 }
 
-// Both submenus render through the same overlay path, so they inherit the
-// region's foot placement and the suppressed row cursor.
+// Both submenus render through the same block path, so they inherit its position
+// below the whole list and leave the row cursor painted.
 func TestWorkBulkSubmenusKeepTheSelectionSignals(t *testing.T) {
 	for _, tc := range []struct{ name, key, title string }{
 		{"status", "s", "status"},
@@ -696,19 +666,23 @@ func TestWorkBulkSubmenusKeepTheSelectionSignals(t *testing.T) {
 			}
 			view, separator := selectionSignals(t, m, 2)
 			cut := strings.Index(view, separator)
-			before := view[:cut]
-			if !strings.Contains(before, tc.title) {
-				t.Fatalf("the %s submenu is not above the separator:\n%s", tc.name, view)
+			before, after := view[:cut], view[cut:]
+			if strings.Contains(before, tc.title) {
+				t.Fatalf("the %s submenu was spliced into the table:\n%s", tc.name, view)
 			}
-			if rowCursorOn(view) {
-				t.Fatalf("a table row carries the cursor under the %s submenu:\n%s", tc.name, view)
+			if !strings.Contains(after, tc.title+" · 2 selected") {
+				t.Fatalf("the %s submenu is not below the list, naming its targets:\n%s", tc.name, view)
+			}
+			if !rowCursorOn(view) {
+				t.Fatalf("the row cursor was blanked under the %s submenu:\n%s", tc.name, view)
 			}
 		})
 	}
 }
 
-// The two-line table is a second row loop with its own menu placement, so it
-// carries the region's foot placement and the suppressed row cursor separately.
+// Two-line mode changes how tall a row is and nothing about where the menu goes,
+// so the signals read the same there — one menu placement rule, not one per
+// table mode.
 func TestWorkBulkMenuKeepsTheSelectionSignalsInTwoLineMode(t *testing.T) {
 	m, _ := setDashboard(t, "set-a", "set-b", "set-c")
 	// Below the width threshold and above the height floor is two-line mode.
@@ -737,11 +711,14 @@ func TestWorkBulkMenuKeepsTheSelectionSignalsInTwoLineMode(t *testing.T) {
 	if !strings.Contains(after, "set-c") {
 		t.Fatalf("the unmarked row is not below the separator:\n%s", view)
 	}
-	if !strings.Contains(before, "actions") || strings.Contains(before, "actions (") {
-		t.Fatalf("the menu is not above the separator in two-line mode:\n%s", view)
+	if strings.Contains(before, "actions") {
+		t.Fatalf("the menu was spliced into the two-line table:\n%s", view)
 	}
-	if rowCursorOn(view) {
-		t.Fatalf("a table row carries the cursor in two-line mode:\n%s", view)
+	if !strings.Contains(after, "actions · 2 selected") {
+		t.Fatalf("the menu is not below the two-line list:\n%s", view)
+	}
+	if !rowCursorOn(view) {
+		t.Fatalf("the row cursor was blanked in two-line mode:\n%s", view)
 	}
 
 	m = bulkPress(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
@@ -752,7 +729,7 @@ func TestWorkBulkMenuKeepsTheSelectionSignalsInTwoLineMode(t *testing.T) {
 		t.Fatalf("cursor moved from %d to %d on close", cursorBefore, m.list.Cursor())
 	}
 	if !rowCursorOn(m.View().Content) {
-		t.Fatalf("the row cursor did not return in two-line mode:\n%s", ui.StripANSI(m.View().Content))
+		t.Fatalf("the row cursor is missing in two-line mode:\n%s", ui.StripANSI(m.View().Content))
 	}
 }
 

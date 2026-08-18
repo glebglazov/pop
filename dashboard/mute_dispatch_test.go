@@ -154,7 +154,7 @@ func TestMuteSubmenuStatesTheHourOnlyInItsFooter(t *testing.T) {
 		}
 	}
 
-	lines := dashboardMuteMenuLines(got.menu.mute, 200)
+	lines := dashboardMuteMenuLines(got.menu.mute, got.menu.target(), 200)
 	footer := lines[len(lines)-1]
 	if !strings.Contains(footer, "09:00 UTC") {
 		t.Fatalf("footer = %q, want the invariant hour stated once", footer)
