@@ -75,7 +75,7 @@ func muteDashboard(t *testing.T, row DashboardRow) (QueueDashboard, *muteRecorde
 	}
 	m := newQueueDashboard(&drain.Deps{Tasks: td}, nil, DashboardSnapshot{Containers: []DashboardRow{row}})
 	m.kinds = newWorkKinds([]work.Kind{rec})
-	m.menu = newDashboardMenu(m.kinds, row, false)
+	m.menu = newDashboardMenu(m.kinds, row)
 	return m, rec
 }
 

@@ -21,7 +21,7 @@ func TestLivePaneMenuKeyColours(t *testing.T) {
 	live.set(tmuxmod.TagSet, setID, livePaneRunning)
 	live.set(tmuxmod.TagAssist, setID, livePaneIdle)
 
-	menu := newDashboardMenu(testKinds(), row, false)
+	menu := newDashboardMenu(testKinds(), row)
 	lines := dashboardMenuLines(menu, 80, live)
 	joined := strings.Join(lines, "\n")
 
@@ -190,7 +190,7 @@ func TestLivePaneShellAlwaysDarkInMenu(t *testing.T) {
 	row := DashboardRow{ID: "s", RuntimePath: "/wt", Bound: true}
 	live := livePaneCache{}
 	live.set(tmuxmod.TagSet, "s", livePaneRunning)
-	menu := newDashboardMenu(testKinds(), row, false)
+	menu := newDashboardMenu(testKinds(), row)
 	for _, item := range menu.list.Items() {
 		if item.verb == work.VerbShell {
 			if st := menuItemLiveState(item, row, live); st != livePaneNone {
@@ -233,7 +233,7 @@ func TestLivePaneRowClusterMatchesMenu(t *testing.T) {
 	live.set(tmuxmod.TagAssist, setID, livePaneRunning)
 
 	cluster := dashboardActivityCluster(row, live, true)
-	menu := newDashboardMenu(testKinds(), row, false)
+	menu := newDashboardMenu(testKinds(), row)
 	lines := dashboardMenuLines(menu, 80, live)
 	joined := strings.Join(lines, "\n")
 

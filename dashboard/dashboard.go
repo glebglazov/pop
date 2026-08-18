@@ -260,18 +260,16 @@ func newDashboardStatusMenu(kinds workKinds, row DashboardRow) *dashboardStatusM
 	}
 }
 
-// dashboardMenu is the layered action overlay opened with `a` (one-shot) or `A`
-// (pinned) over the focused row. It carries the snapshot of the row it was
-// opened on and the verbs applicable to that row on a ui.List whose cursor
-// drives j/k + Enter selection. When pinned, J/K move the dashboard row cursor
-// beneath the menu and the verb list re-filters to each row's context. When
-// status is non-nil the status submenu is open over the action menu.
+// dashboardMenu is the layered action overlay opened with `a` over the focused
+// row. It carries the snapshot of the row it was opened on and the verbs
+// applicable to that row on a ui.List whose cursor drives j/k + Enter
+// selection. The menu closes as soon as a verb fires. When status is non-nil
+// the status submenu is open over the action menu.
 type dashboardMenu struct {
 	row    DashboardRow
 	list   *ui.List[dashboardMenuItem]
 	status *dashboardStatusMenu
 	mute   *dashboardMuteMenu
-	pinned bool
 	// plural marks a menu opened over a Selection: its items are the verbs every
 	// targeted row offers and declares plural, and targets is the row set they
 	// will run over — captured when the menu opened, so the poll rebuilding the
@@ -402,41 +400,21 @@ func (menu *dashboardMenu) items() []dashboardMenuItem {
 // enrichment. Tests and call sites that lack a live model use this; the
 // production path goes through QueueDashboard.newDashboardMenu so attended
 // verb rows name the entry that will run.
-func newDashboardMenu(kinds workKinds, row DashboardRow, pinned bool) *dashboardMenu {
+func newDashboardMenu(kinds workKinds, row DashboardRow) *dashboardMenu {
 	return &dashboardMenu{
-		row:    row,
-		pinned: pinned,
+		row:  row,
 		list:   ui.NewList(dashboardMenuItems(kinds, row), ui.Opts[dashboardMenuItem]{Wrap: true}),
 	}
 }
 
 // newDashboardMenu opens the action overlay on row, wrapping the kind's verbs in
-// a ui.List with j/k wrap-around navigation. When pinned is true the menu
-// survives in-place verbs and J/K move the row cursor beneath it. Attended
-// verbs carry the entry that will run (ADR-0196).
-func (m QueueDashboard) newDashboardMenu(row DashboardRow, pinned bool) *dashboardMenu {
+// a ui.List with j/k wrap-around navigation. Attended verbs carry the entry that
+// will run (ADR-0196).
+func (m QueueDashboard) newDashboardMenu(row DashboardRow) *dashboardMenu {
 	return &dashboardMenu{
-		row:    row,
-		pinned: pinned,
-		list:   ui.NewList(m.menuItemsFor(row), ui.Opts[dashboardMenuItem]{Wrap: true}),
+		row:  row,
+		list: ui.NewList(m.menuItemsFor(row), ui.Opts[dashboardMenuItem]{Wrap: true}),
 	}
-}
-
-// syncPinnedMenuRow re-filters the pinned menu to the dashboard's cursored row.
-func (m QueueDashboard) syncPinnedMenuRow() (tea.Model, tea.Cmd) {
-	if m.menu == nil || !m.menu.pinned {
-		return m, nil
-	}
-	row, ok := m.list.Selected()
-	items := m.menuItemsFor(row)
-	if !ok || len(items) == 0 {
-		m.menu = nil
-		return m, nil
-	}
-	m.menu.row = row
-	m.menu.status = nil
-	m.menu.list = ui.NewList(items, ui.Opts[dashboardMenuItem]{Wrap: true})
-	return m, nil
 }
 
 // dashboardFilterItem is one Work view preset in the filter menu: its digit
@@ -1261,10 +1239,8 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.openCheckout = dir
 			return m, tea.Quit
-		case "a", "A":
+		case "a":
 			if m.selection.Active() {
-				// Over a Selection there is one menu, not a pinned one and a one-shot
-				// one: pinning follows the row cursor, and the cursor is not the target.
 				return m.openSelectionMenu()
 			}
 			row, ok := m.list.Selected()
@@ -1274,7 +1250,7 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.menuItemsFor(row)) == 0 {
 				return m, nil
 			}
-			m.menu = m.newDashboardMenu(row, msg.String() == "A")
+			m.menu = m.newDashboardMenu(row)
 			m.err = nil
 			return m, nil
 		case "f":
@@ -1387,17 +1363,10 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			if m.menu != nil {
-				if m.menu.pinned {
-					if row, ok := m.list.Selected(); ok {
+				for _, row := range m.snap.Containers {
+					if row.CursorKey == m.menu.row.CursorKey {
 						m.menu.row = row
-						m.menu.list = ui.NewList(m.menuItemsFor(row), ui.Opts[dashboardMenuItem]{Wrap: true})
-					}
-				} else {
-					for _, row := range m.snap.Containers {
-						if row.CursorKey == m.menu.row.CursorKey {
-							m.menu.row = row
-							break
-						}
+						break
 					}
 				}
 			}
@@ -1576,16 +1545,6 @@ func (m QueueDashboard) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc", "ctrl+c":
 		m.menu = nil
 		return m, nil
-	case "J":
-		if m.menu.pinned {
-			m.list.MoveDown()
-			return m.syncPinnedMenuRow()
-		}
-	case "K":
-		if m.menu.pinned {
-			m.list.MoveUp()
-			return m.syncPinnedMenuRow()
-		}
 	case "j", "down":
 		m.menu.list.MoveDown()
 		return m, nil
@@ -1664,9 +1623,8 @@ func (m QueueDashboard) updateMuteMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// invokeMuteMenuItem closes the submenu and mutes the row until the chosen
-// window. Muting is in-place, so a pinned menu survives it, exactly as a status
-// write does.
+// invokeMuteMenuItem closes the overlay and mutes the row until the chosen
+// window.
 func (m QueueDashboard) invokeMuteMenuItem(idx int) (tea.Model, tea.Cmd) {
 	if m.menu == nil || m.menu.mute == nil {
 		return m, nil
@@ -1686,11 +1644,7 @@ func (m QueueDashboard) invokeMuteMenuItem(idx int) (tea.Model, tea.Cmd) {
 			return m.bulkMute(rows, window)
 		})
 	}
-	if m.menu.pinned {
-		m.menu.mute = nil
-	} else {
-		m.menu = nil
-	}
+	m.menu = nil
 	m.err = nil
 	return m, m.muteRow(row, windows[idx])
 }
@@ -1721,16 +1675,13 @@ func (m QueueDashboard) invokeMenuItem(idx int) (tea.Model, tea.Cmd) {
 		m.menu.mute = newDashboardMuteMenu(m.taskDeps(), row)
 		return m, nil
 	}
-	pinned := m.menu.pinned && !dashboardMenuItemHandoff(item)
-	if !pinned {
-		m.menu = nil
-	}
+	m.menu = nil
 	return m.dispatchVerb(item.verb, row)
 }
 
 // invokeStatusMenuItem closes the submenu and dispatches the status verb at idx
 // down the one path every row verb takes — no status-specific dispatch of its own
-// (ADR-0186). A status write is in-place, so a pinned menu survives it.
+// (ADR-0186).
 func (m QueueDashboard) invokeStatusMenuItem(idx int) (tea.Model, tea.Cmd) {
 	if m.menu == nil || m.menu.status == nil {
 		return m, nil
@@ -1748,11 +1699,7 @@ func (m QueueDashboard) invokeStatusMenuItem(idx int) (tea.Model, tea.Cmd) {
 		m.menu = nil
 		return m.dispatchBulkVerb(item.Verb, targets)
 	}
-	if m.menu.pinned {
-		m.menu.status = nil
-	} else {
-		m.menu = nil
-	}
+	m.menu = nil
 	return m.dispatchVerb(item.Verb, row)
 }
 
@@ -3081,9 +3028,6 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			ui.HelpEntry{Key: "enter", Desc: "run action"},
 			ui.HelpEntry{Key: "esc", Desc: "close menu"},
 		)
-		if m.menu.pinned {
-			entries = append(entries, ui.HelpEntry{Key: "J/K", Desc: "move row cursor"})
-		}
 		return entries
 	case m.filter != nil:
 		// Work view preset list (ADR-0197)
@@ -3164,8 +3108,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "l/enter", Desc: "open detail"},
 		}
 		// In selection mode the same two keys mean the marks, so the overlay says
-		// so rather than describing the singular surface the human is not on. A
-		// pinned menu follows the row cursor and has nothing to pin to there.
+		// so rather than describing the singular surface the human is not on.
 		if m.selection.Active() {
 			entries = append(entries,
 				ui.HelpEntry{Key: "y", Desc: "copy selected names"},
@@ -3175,7 +3118,6 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			entries = append(entries,
 				ui.HelpEntry{Key: "y", Desc: "copy name"},
 				ui.HelpEntry{Key: "a", Desc: "action menu"},
-				ui.HelpEntry{Key: "A", Desc: "pinned action menu"},
 			)
 		}
 		entries = append(entries,
@@ -3228,8 +3170,6 @@ func (m QueueDashboard) View() tea.View {
 			title = "Help · " + page + " · mute submenu"
 		} else if m.menu != nil && m.menu.status != nil {
 			title = "Help · " + page + " · status submenu"
-		} else if m.menu != nil && m.menu.pinned {
-			title = "Help · " + page + " · pinned action menu"
 		} else if m.menu != nil {
 			title = "Help · " + page + " · action menu"
 		} else if m.filter != nil {
@@ -3481,14 +3421,8 @@ func (m QueueDashboard) viewWithMenu() string {
 	fmt.Fprintln(&body)
 	renderDashboardTableWithMenu(&body, m.page, m.kinds, m.snap.Containers, m.list.Cursor(), m.list.RegionCount(), m.width, m.height, m.menu, m.liveCache())
 	hint := "j/k move · enter/letter run · esc close"
-	if m.menu.pinned {
-		hint = "j/k move · J/K row · enter/letter run · esc close"
-	}
 	if m.menu.nested() {
 		hint = "j/k move · enter/letter run · esc back"
-		if m.menu.pinned {
-			hint = "j/k move · J/K row · enter/letter run · esc back"
-		}
 	}
 	// The menu view builds its own footer instead of going through Frame, so the
 	// mode word is prepended here — a Selection outlives the menu that acts on it

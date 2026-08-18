@@ -84,7 +84,7 @@ func TestQueueDashboardCopyViaMenu(t *testing.T) {
 		}
 		m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{row}})
 		m.width, m.height = 120, 24
-		if !menuHasKey(newDashboardMenu(testKinds(), row, false), "y") {
+		if !menuHasKey(newDashboardMenu(testKinds(), row), "y") {
 			t.Fatal("task-set menu missing copy name bound to y")
 		}
 

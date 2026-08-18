@@ -110,7 +110,7 @@ func TestRoutineOffersNoStatusSubmenu(t *testing.T) {
 func TestDashboardStatusSubmenuEscNavigation(t *testing.T) {
 	row := DashboardRow{ID: "demo"}
 	m := newQueueDashboard(nil, nil, DashboardSnapshot{Containers: []DashboardRow{row}})
-	m.menu = newDashboardMenu(testKinds(), row, false)
+	m.menu = newDashboardMenu(testKinds(), row)
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
 	got := updated.(QueueDashboard)
@@ -153,7 +153,7 @@ func TestDashboardStatusVerbErrorIsSurfaced(t *testing.T) {
 
 func TestDashboardStatusSubmenuHelp(t *testing.T) {
 	m := newQueueDashboard(nil, nil, DashboardSnapshot{})
-	m.menu = newDashboardMenu(testKinds(), DashboardRow{ID: "set"}, false)
+	m.menu = newDashboardMenu(testKinds(), DashboardRow{ID: "set"})
 	m.menu.status = newDashboardStatusMenu(testKinds(), DashboardRow{ID: "set"})
 	entries := m.helpEntries()
 	found := map[string]bool{}
@@ -188,7 +188,7 @@ func TestDashboardStatusSubmenuDispatchInProcess(t *testing.T) {
 	d, cfg, row, _ := dashboardLaunchFixture(t, repo, setID)
 	row.ProjectPath = repo
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
-	m.menu = newDashboardMenu(testKinds(), row, false)
+	m.menu = newDashboardMenu(testKinds(), row)
 	m.menu.status = newDashboardStatusMenu(testKinds(), row)
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Text: "c"})
@@ -256,7 +256,7 @@ func TestDashboardStatusArchivePairInProcess(t *testing.T) {
 	row := DashboardRow{ID: "demo", DefPath: "/repo/tasks", CursorKey: "pop\x00demo"}
 	for _, key := range []rune{'x', 'u'} {
 		m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{row}})
-		m.menu = newDashboardMenu(m.kinds, row, false)
+		m.menu = newDashboardMenu(m.kinds, row)
 		m.menu.status = newDashboardStatusMenu(m.kinds, row)
 		_, cmd := m.Update(tea.KeyPressMsg{Code: key, Text: string(key)})
 		if cmd == nil {

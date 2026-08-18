@@ -141,7 +141,7 @@ var singularModalVerbs = map[work.Verb]string{
 // refuseInterceptedVerb answers one of those verbs arriving while rows are
 // marked. It is called from dispatchVerb — the one gate every route to an
 // intercepted verb passes, whether the human came through a menu hotkey, a flat
-// key or a pinned menu — so no caller can reach a per-row modal with a Selection
+// key — so no caller can reach a per-row modal with a Selection
 // open, and none of them has to remember to check.
 func (m *QueueDashboard) refuseInterceptedVerb(verb work.Verb) bool {
 	name, ok := singularModalVerbs[verb]

@@ -3772,7 +3772,7 @@ func TestTaskMenuKMovesCursor(t *testing.T) {
 func TestStatusSubmenuKMovesCursor(t *testing.T) {
 	row := DashboardRow{ID: "demo"}
 	m := newQueueDashboard(nil, nil, DashboardSnapshot{Containers: []DashboardRow{row}})
-	m.menu = newDashboardMenu(testKinds(), row, false)
+	m.menu = newDashboardMenu(testKinds(), row)
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
 	got := updated.(QueueDashboard)
@@ -4337,7 +4337,10 @@ func TestQueueDashboardHelpContent(t *testing.T) {
 		for _, e := range entries {
 			found[e.Key] = true
 		}
-		required := []string{"j/k", "gg", "G", "l/enter", "y", "a", "A", "/", "h/esc"}
+		required := []string{"j/k", "gg", "G", "l/enter", "y", "a", "/", "h/esc"}
+		if found["A"] {
+			t.Error("main list help still advertises the retired A binding")
+		}
 		for _, key := range required {
 			if !found[key] {
 				t.Errorf("main list help missing key: %s", key)
@@ -4421,7 +4424,7 @@ func TestQueueDashboardHelpContent(t *testing.T) {
 		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
 		// The help lists the menu that is open, so it is opened over a row the way a
 		// keypress opens it — the verbs are the row's kind's, not a second list here.
-		m.menu = newDashboardMenu(testKinds(), DashboardRow{ID: "set"}, false)
+		m.menu = newDashboardMenu(testKinds(), DashboardRow{ID: "set"})
 		entries := m.helpEntries()
 		found := map[string]bool{}
 		for _, e := range entries {
