@@ -3544,16 +3544,14 @@ func dashboardSummary(kinds workKinds, rows []DashboardRow) string {
 	return strings.Join(kinds.summary(rows), " · ")
 }
 
-// viewDetail renders the full-screen container detail view through a Frame with
-// ui.List (ADR-0079/0217), item menu included: the menu is a reserved Block, so
-// it lands at the same screen position as the table view's menus. Only the
-// Document peek still composes its own lines.
+// viewDetail renders every full-screen detail state through a Frame. Item menus
+// are reserved Blocks in both the item list and the Document peek, so they use
+// the same bottom chrome as the table view's menus (ADR-0224 decision 4).
 func (m QueueDashboard) viewDetail() string {
 	d := m.detail
 	if d.peek != nil {
-		var b strings.Builder
-		renderDocumentPeek(&b, d, m.height, m.width, m.itemMenu)
-		return b.String()
+		frame, body := m.documentPeekFrame()
+		return frame.Render(body)
 	}
 	frame, body := m.detailFrame()
 	return frame.Render(body)
@@ -3795,32 +3793,60 @@ func (menu *itemMenu) target() string {
 	return menu.item.ID
 }
 
-func renderDocumentPeek(b *strings.Builder, d *detailView, height, width int, menu *itemMenu) {
+// documentPeekFrame gives the Document peek the same budget-and-render path as
+// the item list. Its menu is a Block, so opening it removes exactly the fitted
+// Block height from the document body and anchors the menu above the hint line.
+func (m QueueDashboard) documentPeekFrame() (ui.Frame, string) {
+	d := m.detail
 	p := d.peek
-	fmt.Fprintln(b, p.title)
-	if menu != nil && menu.inPeek {
-		for _, ml := range itemMenuLines(menu, width) {
-			fmt.Fprintln(b, ml)
-		}
+	hints := "  j/k · C-d/C-u · gg/G · y copy name"
+	if p.artifactPath != "" {
+		hints += " · p copy path"
 	}
+	hints += " · a actions · h/esc back"
+	var block []string
+	if m.itemMenu != nil && m.itemMenu.inPeek {
+		block = itemMenuLines(m.itemMenu, m.width)
+		hints = "  j/k move · enter/letter run · esc close"
+	}
+	title := p.title
+	if title == "" {
+		// A Document peek always owns a title row. Some direct tests omit its
+		// text, but the row must still stay in the shared Frame budget.
+		title = " "
+	}
+	frame := ui.Frame{
+		Width:  m.width,
+		TermH:  m.height,
+		Header: title,
+		Flash:  p.flash,
+		Block:  block,
+		Hints:  hints,
+	}
+
+	var b strings.Builder
 	if p.loading {
-		fmt.Fprintln(b, "  loading document...")
-		writeDashboardFooter(b, height, ui.HintStyle.Render("  h/esc back"))
-		return
+		frame.Hints = "  h/esc back"
+		fmt.Fprintln(&b, "  loading document...")
+		return frame, strings.TrimSuffix(b.String(), "\n")
 	}
 	if p.err != nil {
-		fmt.Fprintf(b, "  error loading document: %v\n", p.err)
+		frame.Hints = "  h/esc back"
+		fmt.Fprintf(&b, "  error loading document: %v\n", p.err)
 		if p.path != "" {
-			fmt.Fprintf(b, "  %s\n", p.path)
+			fmt.Fprintf(&b, "  %s\n", p.path)
 		}
-		writeDashboardFooter(b, height, ui.HintStyle.Render("  h/esc back"))
-		return
+		return frame, strings.TrimSuffix(b.String(), "\n")
 	}
 	if p.path != "" {
-		fmt.Fprintf(b, "  %s\n\n", p.path)
+		fmt.Fprintf(&b, "  %s\n\n", p.path)
 	}
-	lines := p.lines(width)
-	pageSize := documentPeekPageSize(height, p.path)
+	lines := p.lines(m.width)
+	budgetHeight := m.height
+	if budgetHeight <= 0 {
+		budgetHeight = 20
+	}
+	pageSize := documentPeekBodyPageSize(frame.BodyHeight(budgetHeight), p.path)
 	maxScroll := len(lines) - pageSize
 	if maxScroll < 0 {
 		maxScroll = 0
@@ -3832,30 +3858,25 @@ func renderDocumentPeek(b *strings.Builder, d *detailView, height, width int, me
 		p.scroll = 0
 	}
 	if len(lines) == 0 {
-		fmt.Fprintln(b, "  (empty document)")
+		fmt.Fprintln(&b, "  (empty document)")
 	} else {
 		end := p.scroll + pageSize
 		if end > len(lines) {
 			end = len(lines)
 		}
 		for _, line := range lines[p.scroll:end] {
-			fmt.Fprintln(b, ui.TruncateString(line, width))
+			fmt.Fprintln(&b, ui.TruncateString(line, m.width))
 		}
 	}
-	fmt.Fprintln(b)
+	fmt.Fprintln(&b)
 	position := ""
 	if maxScroll > 0 {
 		position = fmt.Sprintf(" · %d/%d", p.scroll+1, len(lines))
 	}
-	hint := "  j/k · C-d/C-u · gg/G · y copy name"
-	if p.artifactPath != "" {
-		hint += " · p copy path"
+	if len(block) == 0 {
+		frame.Hints += position
 	}
-	hint += " · a actions · h/esc back" + position
-	if menu != nil && menu.inPeek {
-		hint = "  j/k move · enter/letter run · esc close"
-	}
-	writeDashboardFooter(b, height, dashboardFooterLine(p.flash, hint))
+	return frame, strings.TrimSuffix(b.String(), "\n")
 }
 
 func documentPeekLines(text string) []string {
@@ -3873,11 +3894,15 @@ func documentPeekPageSize(height int, path string) int {
 	if height <= 0 {
 		height = 20
 	}
+	return documentPeekBodyPageSize(height-2, path) // title and hint
+}
+
+func documentPeekBodyPageSize(bodyHeight int, path string) int {
 	pathLines := 0
 	if path != "" {
 		pathLines = 2
 	}
-	pageSize := height - 1 /* title */ - 1 /* header */ - pathLines - 1 /* hint */
+	pageSize := bodyHeight - pathLines - 1 // blank line above the bottom chrome
 	if pageSize < 1 {
 		return 1
 	}

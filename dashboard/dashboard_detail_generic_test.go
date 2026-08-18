@@ -230,6 +230,52 @@ func TestDetailItemMenuIsBottomChrome(t *testing.T) {
 	}
 }
 
+// TestDocumentPeekItemMenuIsBottomChrome covers the nested detail state that
+// has no ui.List: its menu still uses the shared Frame Block, and its document
+// window yields and restores exactly the Block's height.
+func TestDocumentPeekItemMenuIsBottomChrome(t *testing.T) {
+	m := genericDetailDashboard(&itemVerbKind{})
+	m.height = 14
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	m = updated.(QueueDashboard)
+	var text strings.Builder
+	for i := 0; i < 20; i++ {
+		fmt.Fprintf(&text, "line-%02d\n", i)
+	}
+	m.detail.peek = &documentPeek{
+		itemID: "01",
+		title:  "Document · 01",
+		path:   "/tmp/01.txt",
+		text:   text.String(),
+	}
+
+	before := m.View().Content
+	beforeVisible := strings.Count(before, "line-")
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	m = updated.(QueueDashboard)
+	if m.itemMenu == nil || !m.itemMenu.inPeek {
+		t.Fatal("a did not open the Document peek item menu")
+	}
+
+	during := m.View().Content
+	block := itemMenuLines(m.itemMenu, m.width)
+	lines := strings.Split(during, "\n")
+	ruleAt := dashboardTestLineIndex(lines, "actions · 01")
+	if want := len(lines) - 1 - len(block); ruleAt != want {
+		t.Fatalf("Document peek menu rule at line %d, want %d above the hint line:\n%s", ruleAt, want, ui.StripANSI(during))
+	}
+	if got := beforeVisible - strings.Count(during, "line-"); got != len(block) {
+		t.Fatalf("Document peek body lost %d rows, want the menu block's %d lines", got, len(block))
+	}
+
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = updated.(QueueDashboard)
+	after := m.View().Content
+	if got := strings.Count(after, "line-"); got != beforeVisible {
+		t.Fatalf("Document peek body restored to %d rows, want %d", got, beforeVisible)
+	}
+}
+
 // TestItemCopyNamePayloadComesFromTheKind pins that the clipboard reference is
 // the kind's answer rather than a shape the dashboard assumes.
 func TestItemCopyNamePayloadComesFromTheKind(t *testing.T) {
