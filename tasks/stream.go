@@ -240,10 +240,10 @@ func encodeAttemptStream(r *streamRecorder, agent, requestedAgent string, attemp
 
 // encodeCapturedRunEvents renders the event payload for a Captured run: one
 // timestamped raw event per JSONL line, no header or footer.
-func encodeCapturedRunEvents(rec *streamRecorder) ([]byte, error) {
+func encodeCapturedRunEvents(events []streamEventRecord) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
-	for _, ev := range rec.events {
+	for _, ev := range events {
 		if err := enc.Encode(ev); err != nil {
 			return nil, err
 		}
@@ -301,7 +301,10 @@ func writeCapturedRun(d *Deps, taskSetDir, phase, taskSetID, taskID, taskFile st
 	}
 
 	eventsPath := filepath.Join(dir, runID+".events.jsonl.gz")
-	eventsData, err := encodeCapturedRunEvents(rec)
+	// The Rollout splice runs here, before the payload is encoded, so a codex
+	// run reaches storage self-contained and every extraction rule stays a pure
+	// function of the stored stream (ADR-0219).
+	eventsData, err := encodeCapturedRunEvents(spliceCodexRollout(d, agent, rec.events, rec.start))
 	if err != nil {
 		return "", "", err
 	}
