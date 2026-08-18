@@ -6,10 +6,11 @@ import (
 	"testing"
 )
 
-// TestRenderStackEmptyNamesEveryPlaceItLooked pins the miss rendering, which is
-// the only output a caller gets before pop exits 1: the four paths, in
-// resolution order, so the reader knows where an answer would go.
-func TestRenderStackEmptyNamesEveryPlaceItLooked(t *testing.T) {
+// TestUnwrittenKindResolvesToItsRecipe pins the last rank: a kind no document
+// and no memory answers still resolves, to the method for deriving one, and the
+// rendering says so twice — in the block label a reader scans, and in the
+// banner the body opens with (ADR-0223 decision 5).
+func TestUnwrittenKindResolvesToItsRecipe(t *testing.T) {
 	stack := Stack{Kind: KindCommits, Layers: []Layer{
 		{Origin: OriginUserDefaults, Path: "/h/.agents/docs/commits.md"},
 		{Origin: OriginRepository, Path: "/r/docs/agents/commits.md"},
@@ -17,23 +18,56 @@ func TestRenderStackEmptyNamesEveryPlaceItLooked(t *testing.T) {
 		{Origin: OriginOverlay, Path: "/h/.agents/docs/commits.overlay.md"},
 	}}
 
+	if got := stack.Answer(); got.Origin != OriginRecipe || got.Body == "" {
+		t.Fatalf("Answer() = %s / %q, want the recipe rank", got.Origin, got.Body)
+	}
+	// Nothing is written anywhere, so nothing is losing to anything.
+	if stack.Contested() {
+		t.Error("a kind resolving to its recipe is reported as contested")
+	}
+
 	var out bytes.Buffer
 	if err := RenderStack(&out, stack); err != nil {
 		t.Fatal(err)
 	}
 	got := out.String()
-	if !strings.Contains(got, "EMPTY") {
-		t.Errorf("empty stack is not marked empty:\n%s", got)
-	}
-	for _, l := range stack.Layers {
-		if !strings.Contains(got, l.Path) {
-			t.Errorf("consulted path %q missing:\n%s", l.Path, got)
+	for _, want := range []string{
+		"METHOD: CONVENTION RECIPE",
+		"METHOD, not a convention",
+		Recipe(KindCommits),
+		"the method for deriving one",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("recipe rank rendering missing %q:\n%s", want, got)
 		}
 	}
-	// A table, not prose: the house plain-text style puts an uppercase header
-	// over it.
-	if !strings.Contains(got, "ORIGIN") || !strings.Contains(got, "PATH") {
-		t.Errorf("consulted-paths table has no uppercase header:\n%s", got)
+	// The recipe answers; it is never labelled as somebody's answer.
+	if strings.Contains(got, "ANSWER:") {
+		t.Errorf("the method is rendered as an answer:\n%s", got)
+	}
+	// `recipe <kind>` and a fallthrough hand over the same body.
+	var direct bytes.Buffer
+	if err := RenderRecipe(&direct, KindCommits); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, strings.TrimPrefix(direct.String(), "RECIPE commits\n\n")) {
+		t.Errorf("the resolved recipe is not the body `recipe` prints:\n%s\n----\n%s", got, direct.String())
+	}
+}
+
+// A written rank of any kind outranks the recipe, which is the whole reason the
+// recipe sits beneath all three.
+func TestAnyWrittenRankOutranksTheRecipe(t *testing.T) {
+	for _, origin := range writtenRanks {
+		s := Stack{Kind: KindCommits, Layers: []Layer{
+			{Origin: origin, Path: "/p", Present: true, Body: "WRITTEN"},
+		}}
+		if got := s.Answer(); got.Origin != origin {
+			t.Errorf("%s answers with %s", origin, got.Origin)
+		}
+		if prose := StackProse(s); strings.Contains(prose, "METHOD") {
+			t.Errorf("%s answered and the recipe still printed:\n%s", origin, prose)
+		}
 	}
 }
 
@@ -47,39 +81,44 @@ func TestResolutionPicksOneAnswer(t *testing.T) {
 	overlay := Layer{Origin: OriginOverlay, Path: "/h/.agents/docs/commits.overlay.md", Present: true, Body: "EXTRA"}
 
 	tests := []struct {
-		name       string
+		name string
+		// answer is the body expected in force; empty means the kind falls
+		// through to its recipe.
 		layers     []Layer
 		answer     string
-		hasAnswer  bool
 		hasOverlay bool
 		contested  bool
 	}{
-		{name: "nothing anywhere"},
-		{name: "memory alone", layers: []Layer{memory}, answer: "POP", hasAnswer: true},
+		{name: "nothing anywhere falls through to the recipe"},
+		{name: "memory alone", layers: []Layer{memory}, answer: "POP"},
 		{name: "the team's document stands memory down",
-			layers: []Layer{repo, memory}, answer: "TEAM", hasAnswer: true, contested: true},
+			layers: []Layer{repo, memory}, answer: "TEAM", contested: true},
 		{name: "the human's document stands the team's down",
-			layers: []Layer{defaults, repo}, answer: "MINE", hasAnswer: true, contested: true},
+			layers: []Layer{defaults, repo}, answer: "MINE", contested: true},
 		{name: "the human's document stands both down",
-			layers: []Layer{defaults, repo, memory}, answer: "MINE", hasAnswer: true, contested: true},
+			layers: []Layer{defaults, repo, memory}, answer: "MINE", contested: true},
 		{name: "the overlay rides on the answer",
-			layers: []Layer{repo, overlay}, answer: "TEAM", hasAnswer: true, hasOverlay: true},
-		{name: "the overlay alone is no contender",
+			layers: []Layer{repo, overlay}, answer: "TEAM", hasOverlay: true},
+		{name: "the overlay alone rides on the recipe",
 			layers: []Layer{overlay}, hasOverlay: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := Stack{Kind: KindCommits, Layers: tt.layers}
-			answer, ok := s.Answer()
-			if ok != tt.hasAnswer || (ok && answer.Body != tt.answer) {
-				t.Errorf("Answer() = %q, %v; want %q, %v", answer.Body, ok, tt.answer, tt.hasAnswer)
+			answer := s.Answer()
+			wantBody, wantOrigin := tt.answer, Origin("")
+			if wantBody == "" {
+				wantBody, wantOrigin = recipeLayer(KindCommits).Body, OriginRecipe
+			}
+			if answer.Body != wantBody {
+				t.Errorf("Answer() = %q, want %q", answer.Body, wantBody)
+			}
+			if wantOrigin != "" && answer.Origin != wantOrigin {
+				t.Errorf("Answer() origin = %s, want %s", answer.Origin, wantOrigin)
 			}
 			if _, ok := s.Overlay(); ok != tt.hasOverlay {
 				t.Errorf("Overlay() present = %v, want %v", ok, tt.hasOverlay)
-			}
-			if got := s.Empty(); got != (!tt.hasAnswer && !tt.hasOverlay) {
-				t.Errorf("Empty() = %v", got)
 			}
 			if got := s.Contested(); got != tt.contested {
 				t.Errorf("Contested() = %v, want %v", got, tt.contested)
@@ -87,13 +126,10 @@ func TestResolutionPicksOneAnswer(t *testing.T) {
 
 			// The rendered surfaces carry the answer and the overlay, and never a
 			// rank the answer stood down.
-			prose, spoke := StackProse(s)
-			if spoke == s.Empty() {
-				t.Fatalf("StackProse spoke = %v for an Empty() = %v stack", spoke, s.Empty())
-			}
+			prose := StackProse(s)
 			for _, l := range tt.layers {
 				shown := strings.Contains(prose, l.Body)
-				inForce := (tt.hasAnswer && l.Body == tt.answer) || l.Origin == OriginOverlay
+				inForce := (tt.answer != "" && l.Body == tt.answer) || l.Origin == OriginOverlay
 				if shown != inForce {
 					t.Errorf("layer %s shown = %v, want %v:\n%s", l.Origin, shown, inForce, prose)
 				}
@@ -147,11 +183,15 @@ func TestProvenanceDisclosesTheAnswerAndTheOverlay(t *testing.T) {
 			absent: []string{"Pop memory"},
 		},
 		{
-			name: "an overlay with nothing to ride on says so",
+			name: "an unwritten kind discloses that it holds a method",
+			want: []string{"resolved to convention recipe", "recipes/commits.md", "not rules to follow"},
+		},
+		{
+			name: "an overlay rides on the recipe when nothing is written",
 			layers: []Layer{
 				{Origin: OriginOverlay, Path: "/h/.agents/docs/commits.overlay.md", Present: true, Body: "b"},
 			},
-			want: []string{"your overlay alone", "no layer holds an answer"},
+			want: []string{"convention recipe", "appended", "/h/.agents/docs/commits.overlay.md"},
 		},
 	}
 
@@ -243,9 +283,10 @@ func TestStackPreviewShowsTheAnswerAndTheOverlay(t *testing.T) {
 	}
 }
 
-// An empty stack previews as the places pop looked, the same fact `get` gives a
-// miss — without the recipe, which is a page of method and not a pane of state.
-func TestStackPreviewOfAnEmptyStackNamesWherePopLooked(t *testing.T) {
+// The pane shows the recipe when that is what answers: the ADR's rule is that
+// `get` and the pane cannot describe one convention differently, and the rank
+// in force is as much the pane's business as any other.
+func TestStackPreviewOfAnUnwrittenKindShowsTheRecipe(t *testing.T) {
 	stack := Stack{Kind: KindIssueTracker, Layers: []Layer{
 		{Origin: OriginUserDefaults, Path: "/h/.agents/docs/issue-tracker.md"},
 		{Origin: OriginRepository, Path: "/r/docs/agents/issue-tracker.md"},
@@ -255,12 +296,13 @@ func TestStackPreviewOfAnEmptyStackNamesWherePopLooked(t *testing.T) {
 
 	got := StackPreview(stack)
 
-	if !strings.Contains(got, "nothing answers it") {
-		t.Fatalf("an empty stack does not say so:\n%s", got)
-	}
-	for _, l := range stack.Layers {
-		if !strings.Contains(got, l.Path) {
-			t.Errorf("consulted path %q missing:\n%s", l.Path, got)
+	for _, want := range []string{"METHOD: CONVENTION RECIPE", Recipe(KindIssueTracker)} {
+		if !strings.Contains(got, want) {
+			t.Errorf("preview of an unwritten kind is missing %q:\n%s", want, got)
 		}
+	}
+	// The overlay is still the layer an edit here writes.
+	if !strings.Contains(got, "/h/.agents/docs/issue-tracker.overlay.md") {
+		t.Errorf("preview does not name the layer an edit writes:\n%s", got)
 	}
 }

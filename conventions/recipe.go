@@ -49,13 +49,27 @@ this.`
 // which is the reason the enum is closed (ADR-0211).
 func Recipe(kind Kind) string { return recipes[kind] }
 
+// recipeLayer is the recipe as the last rank of the stack: always present,
+// with no path on disk, and a body that opens with the banner. Putting the
+// banner in the body is what lets every surface that renders a resolved stack
+// carry it without knowing recipes exist — a consumer handed this rank reads
+// "METHOD, not a convention" in the same place another rank puts its rules
+// (ADR-0223 decision 5).
+func recipeLayer(kind Kind) Layer {
+	return Layer{
+		Origin:  OriginRecipe,
+		Path:    fmt.Sprintf("embedded: recipes/%s.md", kind),
+		Present: true,
+		Body:    fmt.Sprintf(recipeBanner, kind) + "\n\n" + Recipe(kind),
+	}
+}
+
 // RenderRecipe prints one kind's recipe under the banner that marks it as a
-// method. It is what `recipe <kind>` prints and what a missed `get` prints
-// beneath the paths it consulted — one rendering, so the two surfaces cannot
-// describe the same recipe differently.
+// method. It is what `recipe <kind>` prints, and it prints the same body the
+// last rank of a resolved stack carries, so asking for the method directly and
+// falling through to it cannot describe one recipe differently.
 func RenderRecipe(w io.Writer, kind Kind) error {
 	fmt.Fprintf(w, "RECIPE %s\n\n", kind)
-	fmt.Fprintf(w, recipeBanner+"\n\n", kind)
-	_, err := fmt.Fprintf(w, "%s\n", Recipe(kind))
+	_, err := fmt.Fprintf(w, "%s\n", recipeLayer(kind).Body)
 	return err
 }

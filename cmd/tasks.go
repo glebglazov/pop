@@ -1084,8 +1084,7 @@ func codeReviewConvention(d *tasks.Deps) tasks.ReviewConvention {
 		if err != nil {
 			return "", err
 		}
-		prose, _ := conventions.StackProse(stack)
-		return prose, nil
+		return conventions.StackProse(stack), nil
 	}
 }
 

@@ -1,10 +1,8 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/glebglazov/pop/conventions"
 	"github.com/spf13/cobra"
@@ -41,10 +39,13 @@ The answer is the first of these that holds something:
   user defaults  ~/.agents/docs/<kind>.md               yours, every repository
   repository     docs/agents/<kind>.md                  the team's, in version control
   pop memory     <task storage>/conventions/<kind>.md   pop-written, this repo
+  recipe         built into pop                         the method for deriving one
 
 Your own document outranks the team's: pop resolves conventions on your machine,
 on your behalf. Pop memory is pop's stand-in for a written answer, so it stands
-down as soon as either document exists.
+down as soon as either document exists. The recipe is last and is always there,
+so a kind nobody has answered hands you the method for working one out, under a
+banner saying so — steps to carry out, not rules to follow.
 
   user overlay   ~/.agents/docs/<kind>.overlay.md  appended to whichever answered
 
@@ -54,10 +55,9 @@ worktree of a repository reads one file.
 Output ends with a one-line provenance summary naming what answered, ready to be
 surfaced verbatim as the "which source am I using" disclosure.
 
-With no kind, every known kind prints in turn. Exit is 1 when the kinds asked
-about are all empty — a miss, not a failure — and the paths pop consulted are
-printed so you know where an answer would go. An unknown kind is refused with
-the list of the ones that exist, and nothing is printed.`,
+With no kind, every known kind prints in turn. Exit is 0 in every case, because
+every kind resolves to something. An unknown kind is refused with the list of
+the ones that exist, and nothing is printed.`,
 	Args:              cobra.MaximumNArgs(1),
 	RunE:              runConventionsGet,
 	ValidArgsFunction: completeConventionKind,
@@ -72,8 +72,9 @@ A recipe is a method, not an answer: it is the steps that derive the convention,
 and where to write the result once you have it. The output says so in its first
 lines, so a recipe cannot be mistaken for a convention.
 
-This is what a missed ` + "`get`" + ` prints, and it is reachable on its own because an
-agent improving a convention that already exists needs the method too.
+` + "`get`" + ` prints this same body when nothing else answers the kind, and this verb
+is reachable on its own because an agent improving a convention that already
+answers needs the method too.
 
 Nothing here is repository-specific and nothing is read from disk, so it answers
 outside a repository as well as inside one.`,
@@ -163,14 +164,10 @@ func runConventionsGet(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("conventions get: %w", err)
 	}
-	err = runConventionsGetWith(cmdLayerDeps().conventionsDeps(), cmd.OutOrStdout(), dir, args)
-	// An empty stack has already printed everything it has to say. Exiting here
-	// rather than returning the error keeps it out of the error reporter: the
-	// caller wanted a status, not a failure report.
-	if errors.Is(err, conventions.ErrNoConvention) {
-		os.Exit(1)
-	}
-	return err
+	// Every kind resolves to something, so there is no miss status to translate:
+	// the command succeeds whenever it printed, and the reader tells a method
+	// from an answer by what it printed (ADR-0223 decision 5).
+	return runConventionsGetWith(cmdLayerDeps().conventionsDeps(), cmd.OutOrStdout(), dir, args)
 }
 
 // runConventionsGetWith is the seam tests drive: it takes the writer and the

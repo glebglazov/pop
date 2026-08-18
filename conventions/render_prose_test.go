@@ -7,14 +7,16 @@ import (
 
 // TestStackProse: the prose an agent is handed inside a larger prompt carries
 // the one answer in force and the human's overlay, under no composition rule
-// and no layer numbering, and a kind nothing answers yields nothing at all
-// rather than a list of paths an agent cannot act on.
+// and no layer numbering. A kind nobody has written an answer to is handed the
+// recipe, marked as a method, rather than silence.
 func TestStackProse(t *testing.T) {
-	silent := Stack{Kind: KindCodeReview, Layers: []Layer{
+	unwritten := StackProse(Stack{Kind: KindCodeReview, Layers: []Layer{
 		{Origin: OriginRepository, Path: "/repo/docs/agents/code-review.md"},
-	}}
-	if got, ok := StackProse(silent); ok || got != "" {
-		t.Fatalf("StackProse(silent) = %q, %v; want empty and false", got, ok)
+	}})
+	for _, want := range []string{"METHOD: CONVENTION RECIPE", "METHOD, not a convention", Recipe(KindCodeReview)} {
+		if !strings.Contains(unwritten, want) {
+			t.Fatalf("prose for an unwritten kind is missing %q:\n%s", want, unwritten)
+		}
 	}
 
 	spoken := Stack{Kind: KindCodeReview, Layers: []Layer{
@@ -22,10 +24,7 @@ func TestStackProse(t *testing.T) {
 		{Origin: OriginRepository, Path: "/repo/docs/agents/code-review.md", Present: true, Body: "table-driven tests only"},
 		{Origin: OriginOverlay, Path: "/home/docs/code-review.overlay.md", Present: true, Body: "never approve a TODO"},
 	}}
-	got, ok := StackProse(spoken)
-	if !ok {
-		t.Fatal("StackProse must speak for a kind that answers")
-	}
+	got := StackProse(spoken)
 	for _, want := range []string{
 		"ANSWER: USER DEFAULTS",
 		"prefer small functions",
@@ -39,7 +38,8 @@ func TestStackProse(t *testing.T) {
 	}
 	// The rank the answer stood down is not handed to the agent at all, and
 	// there is no rule left telling it to reconcile anything.
-	for _, absent := range []string{"table-driven tests only", "LAYER 1 OF", "compose", "contradict"} {
+	// A written answer displaces the recipe as it displaces any lower rank.
+	for _, absent := range []string{"table-driven tests only", "LAYER 1 OF", "compose", "contradict", "METHOD"} {
 		if strings.Contains(got, absent) {
 			t.Fatalf("prose still carries %q:\n%s", absent, got)
 		}

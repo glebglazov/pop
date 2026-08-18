@@ -220,33 +220,65 @@ func TestConventionsGetWithOnlyUserDefaults(t *testing.T) {
 	}
 }
 
-// TestConventionsGetEmptyKindMisses pins the miss: exit 1, and the four
-// places pop looked, since "nothing here" is only actionable with them named.
-func TestConventionsGetEmptyKindMisses(t *testing.T) {
+// TestConventionsGetUnwrittenKindResolvesToTheRecipe: a repository that has
+// written nothing still gets an answer — the method for working one out, under
+// the banner that stops it being read as rules — and the command succeeds
+// (ADR-0223 decision 5).
+func TestConventionsGetUnwrittenKindResolvesToTheRecipe(t *testing.T) {
 	f := newConventionFixture(t)
 
 	out, err := f.get(t, f.repo, "commits")
-	if !errors.Is(err, conventions.ErrNoConvention) {
-		t.Fatalf("error = %v, want ErrNoConvention\n%s", err, out)
+	if err != nil {
+		t.Fatalf("an unwritten kind is not a failure: %v\n%s", err, out)
 	}
-	for _, want := range []string{"user defaults", "pop memory", "repository", "user overlay"} {
+	for _, want := range []string{
+		"CONVENTION commits",
+		"METHOD: CONVENTION RECIPE",
+		"METHOD, not a convention",
+		conventions.Recipe(conventions.KindCommits),
+		"Provenance:",
+	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("miss output does not name the %s layer:\n%s", want, out)
+			t.Fatalf("output missing %q:\n%s", want, out)
 		}
-	}
-	if !strings.Contains(out, filepath.Join("docs", "agents", "commits.md")) {
-		t.Errorf("miss output does not name the repository path:\n%s", out)
 	}
 }
 
-// TestConventionsGetAllKinds walks every kind with no argument. A kind with
-// an answer keeps the exit code at 0 even when its neighbour is empty.
+// A document written at any rank stands the recipe down: the recipe is last,
+// not a floor laid under whatever answered.
+func TestConventionsGetDocumentOutranksTheRecipe(t *testing.T) {
+	f := newConventionFixture(t)
+	path := f.repoDoc(t, "commits", "TEAM-DOC: the type set is feat, fix, chore.")
+
+	out, err := f.get(t, f.repo, "commits")
+	if err != nil {
+		t.Fatalf("get commits: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "TEAM-DOC") || !strings.Contains(out, path) {
+		t.Fatalf("the document is not in force:\n%s", out)
+	}
+	if strings.Contains(out, "METHOD") || strings.Contains(out, conventions.Recipe(conventions.KindCommits)) {
+		t.Errorf("the recipe still prints beside a written answer:\n%s", out)
+	}
+	// Asking for the method directly is still a real request when a document
+	// answers: an agent improving that document needs the derivation.
+	recipe, err := recipeOut(t, "commits")
+	if err != nil {
+		t.Fatalf("recipe commits: %v\n%s", err, recipe)
+	}
+	if !strings.Contains(recipe, "RECIPE commits") || !strings.Contains(recipe, conventions.Recipe(conventions.KindCommits)) {
+		t.Errorf("the recipe verb does not answer while a document is in force:\n%s", recipe)
+	}
+}
+
+// TestConventionsGetAllKinds walks every kind with no argument. Nothing written
+// anywhere is still exit 0, because every kind resolves to its recipe.
 func TestConventionsGetAllKinds(t *testing.T) {
 	f := newConventionFixture(t)
 
 	out, err := f.get(t, f.repo)
-	if !errors.Is(err, conventions.ErrNoConvention) {
-		t.Fatalf("all kinds empty: error = %v, want ErrNoConvention\n%s", err, out)
+	if err != nil {
+		t.Fatalf("nothing written anywhere: %v\n%s", err, out)
 	}
 
 	f.repoDoc(t, "commits", "TEAM-DOC: the type set is feat, fix, chore.")
@@ -262,8 +294,9 @@ func TestConventionsGetAllKinds(t *testing.T) {
 	if !strings.Contains(out, "TEAM-DOC") {
 		t.Errorf("the answered kind did not render its layer:\n%s", out)
 	}
-	if !strings.Contains(out, "EMPTY") {
-		t.Errorf("the empty kind is not marked as empty:\n%s", out)
+	// The kinds nobody wrote an answer for print their method instead.
+	if !strings.Contains(out, conventions.Recipe(conventions.KindIssueTracker)) {
+		t.Errorf("an unwritten kind did not fall through to its recipe:\n%s", out)
 	}
 }
 
@@ -376,29 +409,6 @@ func TestConventionsRecipeRefusesUnknownKind(t *testing.T) {
 		if !strings.Contains(err.Error(), kind) {
 			t.Errorf("refusal %q does not list the known kind %q", err, kind)
 		}
-	}
-}
-
-// TestConventionsGetMissAnswersWithTheRecipe is the slice: an agent that
-// asked for a convention pop has never seen is told how to work one out, and
-// still gets the miss status.
-func TestConventionsGetMissAnswersWithTheRecipe(t *testing.T) {
-	f := newConventionFixture(t)
-
-	out, err := f.get(t, f.repo, "commits")
-	if !errors.Is(err, conventions.ErrNoConvention) {
-		t.Fatalf("error = %v, want ErrNoConvention\n%s", err, out)
-	}
-	if !strings.Contains(out, "RECIPE commits") {
-		t.Fatalf("miss did not print the recipe:\n%s", out)
-	}
-	if !strings.Contains(out, conventions.Recipe(conventions.KindCommits)) {
-		t.Errorf("miss printed something other than the built-in recipe:\n%s", out)
-	}
-	// The paths pop consulted still come first: the recipe's last step is where
-	// to write the result, and that is one of them.
-	if strings.Index(out, "EMPTY") > strings.Index(out, "RECIPE commits") {
-		t.Errorf("the recipe precedes the paths pop consulted:\n%s", out)
 	}
 }
 
@@ -652,7 +662,7 @@ func TestConventionsUnsetWithoutMemory(t *testing.T) {
 	if !strings.Contains(out, "nothing to remove") {
 		t.Errorf("unset does not say there was no memory:\n%s", out)
 	}
-	if !strings.Contains(out, "Nothing answers commits now.") || !strings.Contains(out, "EMPTY") {
+	if !strings.Contains(out, "Nothing answers commits now") || !strings.Contains(out, "METHOD: CONVENTION RECIPE") {
 		t.Errorf("unset does not report what is in force after it:\n%s", out)
 	}
 
