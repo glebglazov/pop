@@ -2364,22 +2364,24 @@ func (m *QueueDashboard) toggleSelected() {
 	}
 }
 
-// regionTop is where `gg` lands: the top of the region the cursor is in, and the
-// top of the whole list on a second press. A cursor already sitting on the first
-// row below the region has nowhere nearer to go, so it goes all the way.
+// regionTop is where `gg` lands: the first marked row from the foot region, then
+// the top of the whole list. The Selection region is at the foot of the list.
 func (m QueueDashboard) regionTop() int {
-	if region := m.list.RegionCount(); region > 0 && m.list.Cursor() > region {
-		return region
+	region := m.list.RegionCount()
+	ordinary := m.list.Len() - region
+	if region > 0 && m.list.Cursor() > ordinary {
+		return ordinary
 	}
 	return 0
 }
 
-// regionBottom is where `G` lands: the bottom of the region the cursor is in, and
-// the bottom of the whole list on a second press. For a cursor below the region
-// the two are the same row, so one press reaches it.
+// regionBottom is where `G` lands: the last ordinary row before the foot region,
+// then the bottom of the whole list.
 func (m QueueDashboard) regionBottom() int {
-	if region := m.list.RegionCount(); region > 0 && m.list.Cursor() < region-1 {
-		return region - 1
+	region := m.list.RegionCount()
+	ordinary := m.list.Len() - region
+	if region > 0 && m.list.Cursor() < ordinary-1 {
+		return ordinary - 1
 	}
 	return m.list.Len() - 1
 }

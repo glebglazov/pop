@@ -159,6 +159,44 @@ func TestWorkSelectionShiftTabClearsTheWholeSelection(t *testing.T) {
 	}
 }
 
+func TestWorkSelectionJumpsStopAtTheFootRegion(t *testing.T) {
+	unmarked := selDashboard(selRows("set-a", "set-b", "set-c", "set-d", "set-e"))
+	unmarked = selPress(t, unmarked, selKeyRune('G'))
+	if got := unmarked.list.Cursor(); got != 4 {
+		t.Fatalf("G without a Selection put the cursor at %d, want 4", got)
+	}
+	unmarked = selPress(t, unmarked, selKeyRune('g'))
+	unmarked = selPress(t, unmarked, selKeyRune('g'))
+	if got := unmarked.list.Cursor(); got != 0 {
+		t.Fatalf("gg without a Selection put the cursor at %d, want 0", got)
+	}
+
+	m := selDashboard(selRows("set-a", "set-b", "set-c", "set-d", "set-e"))
+	m = markRow(t, m, "set-d")
+	m = markRow(t, m, "set-e")
+	m.list.SetCursor(0)
+
+	m = selPress(t, m, selKeyRune('G'))
+	if got := m.list.Cursor(); got != 2 {
+		t.Fatalf("G from the ordinary rows put the cursor at %d, want 2", got)
+	}
+	m = selPress(t, m, selKeyRune('G'))
+	if got := m.list.Cursor(); got != 4 {
+		t.Fatalf("second G put the cursor at %d, want the last marked row 4", got)
+	}
+
+	m = selPress(t, m, selKeyRune('g'))
+	m = selPress(t, m, selKeyRune('g'))
+	if got := m.list.Cursor(); got != 3 {
+		t.Fatalf("gg from the foot region put the cursor at %d, want the first marked row 3", got)
+	}
+	m = selPress(t, m, selKeyRune('g'))
+	m = selPress(t, m, selKeyRune('g'))
+	if got := m.list.Cursor(); got != 0 {
+		t.Fatalf("second gg put the cursor at %d, want the first row", got)
+	}
+}
+
 // The mode is visible or it is not a mode: the word on the bottom line and the
 // counted separator above the marked rows are the whole of what says a verb
 // will refuse. Both are the shared primitive's own words (ADR-0215 decision 3).

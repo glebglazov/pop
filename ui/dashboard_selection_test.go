@@ -133,6 +133,53 @@ func TestMonitorSelectionShiftTabClears(t *testing.T) {
 	}
 }
 
+func TestMonitorSelectionJumpsStopAtTheFootRegion(t *testing.T) {
+	unmarked := newMonitorDashboard(selectionPanes(5), AttentionCallbacks{})
+	m, _ := unmarked.Update(tea.KeyPressMsg{Code: 'G', Text: "G"})
+	unmarked = m.(*MonitorDashboard)
+	if unmarked.cursor != 4 {
+		t.Fatalf("G without a Selection put the cursor at %d, want 4", unmarked.cursor)
+	}
+	unmarked = pressG(unmarked)
+	unmarked = pressG(unmarked)
+	if unmarked.cursor != 0 {
+		t.Fatalf("gg without a Selection put the cursor at %d, want 0", unmarked.cursor)
+	}
+
+	d := newMonitorDashboard(selectionPanes(5), AttentionCallbacks{})
+	d = markPanes(d, "%4", "%5")
+	d.list.SetCursor(0)
+	d.syncFromList()
+
+	m, _ = d.Update(tea.KeyPressMsg{Code: 'G', Text: "G"})
+	d = m.(*MonitorDashboard)
+	if d.cursor != 2 {
+		t.Fatalf("G from the ordinary rows put the cursor at %d, want 2", d.cursor)
+	}
+	m, _ = d.Update(tea.KeyPressMsg{Code: 'G', Text: "G"})
+	d = m.(*MonitorDashboard)
+	if d.cursor != 4 {
+		t.Fatalf("second G put the cursor at %d, want the last marked row 4", d.cursor)
+	}
+
+	d = pressG(d)
+	d = pressG(d)
+	if d.cursor != 3 {
+		t.Fatalf("gg from the foot region put the cursor at %d, want the first marked row 3", d.cursor)
+	}
+	d = pressG(d)
+	d = pressG(d)
+	if d.cursor != 0 {
+		t.Fatalf("second gg put the cursor at %d, want the first row", d.cursor)
+	}
+
+	m, _ = d.Update(tea.KeyPressMsg{Code: 'G', Text: "G"})
+	d = m.(*MonitorDashboard)
+	if d.cursor != 2 {
+		t.Fatalf("G from ordinary rows after a jump put the cursor at %d, want 2", d.cursor)
+	}
+}
+
 // TestMonitorSelectionChrome pins what the surface says while rows are marked:
 // the dim count line above the region, the mode word at the left of the bottom
 // line, and the overflow note when the viewport cap bites.

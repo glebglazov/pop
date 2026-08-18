@@ -1205,24 +1205,24 @@ func (d *MonitorDashboard) jumpCursorTo(i int) {
 	d.fetchPreview()
 }
 
-// regionTop is where `gg` lands: the top of the region the cursor is in, and the
-// top of the whole list on a second press. A cursor already sitting on the first
-// row below the region has nowhere nearer to go, so it goes all the way.
+// regionTop is where `gg` lands: the first marked row from the foot region, then
+// the top of the whole list. The Selection region is at the foot of the list.
 func (d *MonitorDashboard) regionTop() int {
 	region := d.list.RegionCount()
-	if region > 0 && d.cursor > region {
-		return region
+	ordinary := len(d.panes) - region
+	if region > 0 && d.cursor > ordinary {
+		return ordinary
 	}
 	return 0
 }
 
-// regionBottom is where `G` lands: the bottom of the region the cursor is in, and
-// the bottom of the whole list on a second press. For a cursor below the region
-// the two are the same row, so one press reaches it.
+// regionBottom is where `G` lands: the last ordinary row before the foot region,
+// then the bottom of the whole list.
 func (d *MonitorDashboard) regionBottom() int {
 	region := d.list.RegionCount()
-	if region > 0 && d.cursor < region-1 {
-		return region - 1
+	ordinary := len(d.panes) - region
+	if region > 0 && d.cursor < ordinary-1 {
+		return ordinary - 1
 	}
 	return len(d.panes) - 1
 }
