@@ -369,8 +369,8 @@ var agentAdapters = map[string]AgentAdapter{
 		rateKey:      AgentRateKeyCapability{Normalize: codexRateKey},
 		streamRender: AgentStreamRenderCapability{Kind: CapabilitySupported, Render: renderCodexEvent},
 		turns:        AgentTurnCapability{Kind: CapabilitySupported, Extract: codexTurnCount},
-		peakInput:    AgentPeakInputCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no per-call usage block"},
-		spendMarkers: []string{"turn.completed"},
+		peakInput:    AgentPeakInputCapability{Kind: CapabilitySupported, Extract: codexPeakInput},
+		spendMarkers: []string{"turn.completed", "token_count"},
 		reasoning: AgentReasoningCapability{
 			Kind:       CapabilitySupported,
 			SpecTokens: codexReasoningSpecTokens,

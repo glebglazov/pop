@@ -102,7 +102,7 @@ func TestSampledRunTurnCounts(t *testing.T) {
 		{"claude", "claude.events.jsonl.gz", 8},
 		{"cursor", "cursor.events.jsonl.gz", 8},
 		{"pi", "pi.events.jsonl.gz", 11},
-		{"codex", "codex.events.jsonl.gz", 1},
+		{"codex", "codex.events.jsonl.gz", 13},
 	}
 	for _, tc := range cases {
 		t.Run(tc.agent, func(t *testing.T) {
@@ -127,18 +127,54 @@ func TestSampledRunPeakInput(t *testing.T) {
 	if !piPeak.HasPeak || piPeak.Tokens != 11879 {
 		t.Fatalf("pi peak = %+v, want 11879 reported", piPeak)
 	}
+
+	codexEvents := loadTurnFixture(t, "codex.events.jsonl.gz")
+	codexPeak := extractPeakInput("codex", codexEvents)
+	if !codexPeak.HasPeak || codexPeak.Tokens != 77726 {
+		t.Fatalf("codex peak = %+v, want 77726 reported", codexPeak)
+	}
 }
 
-func TestCodexTurnCountUsesTurnCompleted(t *testing.T) {
-	events := []streamEventRecord{
+func TestCodexTurnCountCountsSplicedTokenCounts(t *testing.T) {
+	spliced := []streamEventRecord{
 		{Type: "event", AtMS: 1, Raw: `{"type":"turn.started"}`},
-		{Type: "event", AtMS: 2, Raw: `{"type":"turn.completed"}`},
-		{Type: "event", AtMS: 3, Raw: `{"type":"turn.started"}`},
-		{Type: "event", AtMS: 4, Raw: `{"type":"turn.completed"}`},
+		{Type: "event", AtMS: 2, Raw: `{"type":"token_count","info":{"last_token_usage":{"input_tokens":10}}}`},
+		{Type: "event", AtMS: 3, Raw: `{"type":"token_count","info":{"last_token_usage":{"input_tokens":20}}}`},
+		{Type: "event", AtMS: 4, Raw: `{"type":"token_count","info":{"last_token_usage":{"input_tokens":30}}}`},
+		{Type: "event", AtMS: 5, Raw: `{"type":"turn.completed","usage":{"input_tokens":30}}`},
 	}
-	tc := codexTurnCount(events)
-	if tc.Count != 2 || !tc.HasTurn {
-		t.Fatalf("turns = %+v, want 2 reported", tc)
+	if tc := codexTurnCount(spliced); tc.Count != 3 || !tc.HasTurn {
+		t.Fatalf("turns = %+v, want 3 reported", tc)
+	}
+
+	// An unspliced run carries codex's one turn.completed per headless run; the
+	// retired rule read that as a single turn, which was wrong for every run.
+	unspliced := []streamEventRecord{
+		{Type: "event", AtMS: 1, Raw: `{"type":"turn.started"}`},
+		{Type: "event", AtMS: 2, Raw: `{"type":"turn.completed","usage":{"input_tokens":30}}`},
+	}
+	if tc := codexTurnCount(unspliced); tc.HasTurn {
+		t.Fatalf("unspliced turns = %+v, want turn-blind", tc)
+	}
+}
+
+func TestCodexPeakInputTakesMaxPerCallContext(t *testing.T) {
+	// cached_input_tokens is a breakdown of input_tokens on codex's wire, so the
+	// per-call figure adds only cache_write_input_tokens (ADR-0219).
+	events := []streamEventRecord{
+		{Type: "event", AtMS: 1, Raw: `{"type":"token_count","info":{"last_token_usage":{"input_tokens":200,"cached_input_tokens":150,"cache_write_input_tokens":0}}}`},
+		{Type: "event", AtMS: 2, Raw: `{"type":"token_count","info":{"last_token_usage":{"input_tokens":300,"cached_input_tokens":290,"cache_write_input_tokens":7}}}`},
+		{Type: "event", AtMS: 3, Raw: `{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":0,"cache_write_input_tokens":0}}}`},
+		{Type: "event", AtMS: 4, Raw: `{"type":"turn.completed","usage":{"input_tokens":600,"cached_input_tokens":440,"output_tokens":9}}`},
+	}
+	peak := codexPeakInput(events)
+	if !peak.HasPeak || peak.Tokens != 307 {
+		t.Fatalf("peak = %+v, want 307 reported", peak)
+	}
+
+	unspliced := []streamEventRecord{events[3]}
+	if blind := codexPeakInput(unspliced); blind.HasPeak {
+		t.Fatalf("unspliced peak = %+v, want peak-blind", blind)
 	}
 }
 
@@ -178,7 +214,7 @@ func TestExtractPeakInputBlindForCursorAndUnsupportedAdapters(t *testing.T) {
 		t.Fatalf("cursor should be peak-blind, got %+v", cursorPeak)
 	}
 
-	for _, agent := range []string{"codex", "kimi", "opencode"} {
+	for _, agent := range []string{"kimi", "opencode"} {
 		peak := extractPeakInput(agent, events)
 		if peak.HasPeak {
 			t.Fatalf("%s should be peak-blind, got %+v", agent, peak)

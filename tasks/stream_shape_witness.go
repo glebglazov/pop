@@ -22,6 +22,8 @@ func streamShapeBytesWitness(cap streamShapeCapability, events []streamEventReco
 		return witnessStreamRenderBytes(events)
 	case streamShapeTurn:
 		return witnessTurnBytes(events)
+	case streamShapePeakInput:
+		return witnessPeakInputBytes(events)
 	case streamShapeTurnCapExhaustion:
 		return witnessTurnCapExhaustionBytes(events)
 	default:
@@ -383,6 +385,48 @@ func witnessTurnBytes(events []streamEventRecord) bool {
 			return true
 		}
 		if probe.Type == "turn.started" || probe.Type == "turn.completed" {
+			return true
+		}
+	}
+	return false
+}
+
+
+// witnessPeakInputBytes reports whether a capture carries per-call context
+// figures — usage blocks on more than one event, in any adapter's spelling,
+// including codex's spliced info.last_token_usage. A peak is a maximum over
+// calls, so one whole-run rollup can never witness one: that is exactly the
+// shape the peak-blind declarations describe, and this gate catches a capture
+// that turns out to report usage call by call after all.
+func witnessPeakInputBytes(events []streamEventRecord) bool {
+	carriers := 0
+	for _, ev := range events {
+		var probe struct {
+			Usage   json.RawMessage `json:"usage"`
+			Message *struct {
+				Usage json.RawMessage `json:"usage"`
+			} `json:"message"`
+			Info *struct {
+				LastTokenUsage json.RawMessage `json:"last_token_usage"`
+			} `json:"info"`
+		}
+		if err := json.Unmarshal([]byte(ev.Raw), &probe); err != nil {
+			continue
+		}
+		blocks := []json.RawMessage{probe.Usage}
+		if probe.Message != nil {
+			blocks = append(blocks, probe.Message.Usage)
+		}
+		if probe.Info != nil {
+			blocks = append(blocks, probe.Info.LastTokenUsage)
+		}
+		for _, block := range blocks {
+			if len(block) > 0 && jsonHasUsageKeys(block) {
+				carriers++
+				break
+			}
+		}
+		if carriers > 1 {
 			return true
 		}
 	}

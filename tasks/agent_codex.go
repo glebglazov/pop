@@ -306,11 +306,14 @@ func codexTokenUsage(events []streamEventRecord) TokenUsage {
 	return u
 }
 
-// codexTurnCount is codex's Turn extraction rule (ADR-0165).
+// codexTurnCount is codex's Turn extraction rule (ADR-0165, ADR-0219).
 //
-// Authoritative events: turn.completed — one per codex exec turn. turn.started
-// may appear without a matching completed on aborted runs; only completed events
-// count as verifiable turn boundaries.
+// Authoritative events: the token_count events the capture-time Rollout splice
+// merged in — one per model call, which is what a Turn means for claude and pi
+// too. codex's own exec stream carries one turn.completed per headless run, so
+// counting those answered 1 for every run no matter how long it ground; a run
+// stored without its rollout reads turn-blind instead, which is the honest
+// answer.
 func codexTurnCount(events []streamEventRecord) TurnCount {
 	count := 0
 	for _, ev := range events {
@@ -320,7 +323,7 @@ func codexTurnCount(events []streamEventRecord) TurnCount {
 		if err := json.Unmarshal([]byte(ev.Raw), &event); err != nil {
 			continue
 		}
-		if event.Type == "turn.completed" {
+		if event.Type == codexTokenCountEvent {
 			count++
 		}
 	}
@@ -328,6 +331,48 @@ func codexTurnCount(events []streamEventRecord) TurnCount {
 		return TurnCount{}
 	}
 	return TurnCount{Count: count, HasTurn: true}
+}
+
+// codexPeakInput is codex's Peak input extraction rule (ADR-0165, ADR-0219).
+//
+// Authoritative events: the spliced token_count events, each carrying that
+// model call's own context under info.last_token_usage. The peak is the largest
+// per-call context any call carried.
+//
+// One wire fact separates codex from claude and pi (ADR-0219): codex's
+// input_tokens already includes the cached prefix, so cached_input_tokens is a
+// breakdown of input_tokens, not a second addend — adding it would double-count
+// the whole cached context. Only cache_write_input_tokens, the freshly written
+// prefix, sits outside input_tokens.
+func codexPeakInput(events []streamEventRecord) PeakInput {
+	var peak int64
+	found := false
+	for _, ev := range events {
+		var event struct {
+			Type string `json:"type"`
+			Info *struct {
+				LastTokenUsage *struct {
+					InputTokens           int64 `json:"input_tokens"`
+					CacheWriteInputTokens int64 `json:"cache_write_input_tokens"`
+				} `json:"last_token_usage"`
+			} `json:"info"`
+		}
+		if err := json.Unmarshal([]byte(ev.Raw), &event); err != nil {
+			continue
+		}
+		if event.Type != codexTokenCountEvent || event.Info == nil || event.Info.LastTokenUsage == nil {
+			continue
+		}
+		usage := event.Info.LastTokenUsage
+		if total := usage.InputTokens + usage.CacheWriteInputTokens; total > peak {
+			peak = total
+		}
+		found = true
+	}
+	if !found {
+		return PeakInput{}
+	}
+	return PeakInput{Tokens: peak, HasPeak: true}
 }
 
 // codexToolTimings derives per-tool durations from one stored Captured attempt

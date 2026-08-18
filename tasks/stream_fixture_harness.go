@@ -20,6 +20,7 @@ const (
 	streamShapeActualModel
 	streamShapeStreamRender
 	streamShapeTurn
+	streamShapePeakInput
 	streamShapeTurnCapExhaustion
 )
 
@@ -30,6 +31,7 @@ var streamShapeCapabilityOrder = []streamShapeCapability{
 	streamShapeActualModel,
 	streamShapeStreamRender,
 	streamShapeTurn,
+	streamShapePeakInput,
 	streamShapeTurnCapExhaustion,
 }
 
@@ -47,6 +49,8 @@ func (c streamShapeCapability) String() string {
 		return "stream-render"
 	case streamShapeTurn:
 		return "turn"
+	case streamShapePeakInput:
+		return "peak-input"
 	case streamShapeTurnCapExhaustion:
 		return "turn-cap-exhaustion"
 	default:
@@ -86,6 +90,7 @@ type streamShapeGolden struct {
 	actualModel       *string
 	streamRender      *streamRenderGolden
 	turn              *TurnCount
+	peakInput         *PeakInput
 	turnCapExhaustion *turnCapExhaustionGolden
 }
 
@@ -106,6 +111,8 @@ func (g *streamShapeGolden) hasGolden(cap streamShapeCapability) bool {
 		return g.streamRender != nil
 	case streamShapeTurn:
 		return g.turn != nil
+	case streamShapePeakInput:
+		return g.peakInput != nil
 	case streamShapeTurnCapExhaustion:
 		return g.turnCapExhaustion != nil
 	default:
@@ -185,6 +192,8 @@ func streamShapeCapabilityKind(adapter AgentAdapter, cap streamShapeCapability) 
 		return adapter.StreamRenderCapability().Kind
 	case streamShapeTurn:
 		return adapter.TurnCapability().Kind
+	case streamShapePeakInput:
+		return adapter.PeakInputCapability().Kind
 	case streamShapeTurnCapExhaustion:
 		return adapter.TurnCapExhaustionCapability().Kind
 	default:
@@ -207,6 +216,8 @@ func extractStreamShapeOutput(preset string, cap streamShapeCapability, events [
 		return summarizeStreamRender(renderStreamEvents(preset, events)), nil
 	case streamShapeTurn:
 		return extractTurnCount(preset, events), nil
+	case streamShapePeakInput:
+		return extractPeakInput(preset, events), nil
 	case streamShapeTurnCapExhaustion:
 		return turnCapExhaustionGolden{
 			AtNonZeroExit: attemptExhaustedTurnCap(preset, events, 1),
@@ -240,6 +251,8 @@ func streamShapeGoldenMismatch(cap streamShapeCapability, want, got any) string 
 		return fmt.Sprintf("stream-render: got %+v, want %+v", got.(streamRenderGolden), want.(streamRenderGolden))
 	case streamShapeTurn:
 		return fmt.Sprintf("turn: got %+v, want %+v", got.(TurnCount), want.(TurnCount))
+	case streamShapePeakInput:
+		return fmt.Sprintf("peak-input: got %+v, want %+v", got.(PeakInput), want.(PeakInput))
 	case streamShapeTurnCapExhaustion:
 		return fmt.Sprintf("turn-cap-exhaustion: got %+v, want %+v", got.(turnCapExhaustionGolden), want.(turnCapExhaustionGolden))
 	default:
@@ -301,6 +314,8 @@ func streamShapeGoldenValue(g *streamShapeGolden, cap streamShapeCapability) any
 		return *g.streamRender
 	case streamShapeTurn:
 		return *g.turn
+	case streamShapePeakInput:
+		return *g.peakInput
 	case streamShapeTurnCapExhaustion:
 		return *g.turnCapExhaustion
 	default:
@@ -322,6 +337,8 @@ func streamShapeOutputsMatch(cap streamShapeCapability, want, got any) bool {
 		return streamRenderGoldensMatch(got.(streamRenderGolden), want.(streamRenderGolden))
 	case streamShapeTurn:
 		return got.(TurnCount) == want.(TurnCount)
+	case streamShapePeakInput:
+		return got.(PeakInput) == want.(PeakInput)
 	case streamShapeTurnCapExhaustion:
 		return got.(turnCapExhaustionGolden) == want.(turnCapExhaustionGolden)
 	default:
@@ -359,6 +376,8 @@ func streamShapeOutputPresent(cap streamShapeCapability, got any) bool {
 		return true
 	case streamShapeTurn:
 		return got.(TurnCount).HasTurn
+	case streamShapePeakInput:
+		return got.(PeakInput).HasPeak
 	case streamShapeTurnCapExhaustion:
 		return got.(turnCapExhaustionGolden).AtNonZeroExit
 	default:
@@ -458,7 +477,8 @@ var streamShapeFixtureGoldens = map[string]*streamShapeGolden{
 			EventCount: 22,
 			TypeCounts: map[string]int{"assistant": 1, "raw": 10, "system": 1, "tool_use": 10},
 		},
-		turn: &TurnCount{Count: 8, HasTurn: true},
+		turn:      &TurnCount{Count: 8, HasTurn: true},
+		peakInput: &PeakInput{Tokens: 40038, HasPeak: true},
 		// Measured against claude.max-turns.events.jsonl.gz: the same captured run
 		// as above, cut off after three assistant turns and closed with the
 		// terminal record a live `claude --max-turns 3` produced on 2026-08-06 —
@@ -497,7 +517,13 @@ var streamShapeFixtureGoldens = map[string]*streamShapeGolden{
 			EventCount: 1,
 			TypeCounts: map[string]int{"tool_use": 1},
 		},
-		turn: &TurnCount{Count: 1, HasTurn: true},
+		// Measured against codex.events.jsonl.gz, whose captured stream carries the
+		// token_count events the Rollout splice merged in (ADR-0219): 13 model
+		// calls, and a largest per-call context of 77,726 tokens — input_tokens plus
+		// cache_write_input_tokens, with cached_input_tokens left out because
+		// codex's input_tokens already includes it.
+		turn:      &TurnCount{Count: 13, HasTurn: true},
+		peakInput: &PeakInput{Tokens: 77726, HasPeak: true},
 	},
 	"pi": {
 		usage: &TokenUsage{
@@ -514,7 +540,8 @@ var streamShapeFixtureGoldens = map[string]*streamShapeGolden{
 			EventCount: 144,
 			TypeCounts: map[string]int{"assistant": 114, "tool_use": 30},
 		},
-		turn: &TurnCount{Count: 11, HasTurn: true},
+		turn:      &TurnCount{Count: 11, HasTurn: true},
+		peakInput: &PeakInput{Tokens: 11879, HasPeak: true},
 	},
 }
 
