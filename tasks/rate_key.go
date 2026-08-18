@@ -151,6 +151,13 @@ func resolveRunRateKey(run capturedRun, table *RateTable) RunRateKey {
 		return RunRateKey{}
 	}
 
+	if actual := run.actualModel; actual != "" {
+		key := normalize(actual)
+		if key == "" {
+			return RunRateKey{}
+		}
+		return RunRateKey{Key: key, Source: RateKeyFromActual}
+	}
 	if actual := extractActualModel(run.meta.Agent, run.events); actual != "" {
 		key := normalize(actual)
 		if key == "" {

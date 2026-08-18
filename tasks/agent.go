@@ -200,6 +200,11 @@ type AgentAdapter interface {
 	StreamRenderCapability() AgentStreamRenderCapability
 	TurnCapability() AgentTurnCapability
 	PeakInputCapability() AgentPeakInputCapability
+	// SpendStreamMarkers are substrings that identify event lines which may
+	// carry spend-relevant payload (tokens, cost, turns, peak, actual model).
+	// A spend extract skips any line that matches none before JSON-parsing it.
+	// Empty means the adapter is spend-stream-blind: do not open the events file.
+	SpendStreamMarkers() []string
 	ReasoningCapability() AgentReasoningCapability
 	TurnCapEnforcementCapability() AgentTurnCapEnforcementCapability
 	TurnCapExhaustionCapability() AgentTurnCapExhaustionCapability
@@ -236,15 +241,18 @@ var agentAdapters = map[string]AgentAdapter{
 				"light":    {{Model: "sonnet", Reasoning: "low"}},
 			},
 		},
-		executable: AgentExecutableCapability{Kind: CapabilitySupported, Name: "claude"},
-		usage:       AgentUsageCapability{Kind: CapabilitySupported, Extract: claudeTokenUsage},
-		cost:        AgentCostCapability{Kind: CapabilitySupported, Extract: claudePartialCost},
-		toolTimings: AgentToolTimingCapability{Kind: CapabilitySupported, Extract: claudeToolTimings},
-		actualModel: AgentActualModelCapability{Kind: CapabilitySupported, Extract: claudeActualModel},
-		rateKey:     AgentRateKeyCapability{Normalize: claudeRateKey},
+		executable:   AgentExecutableCapability{Kind: CapabilitySupported, Name: "claude"},
+		usage:        AgentUsageCapability{Kind: CapabilitySupported, Extract: claudeTokenUsage},
+		cost:         AgentCostCapability{Kind: CapabilitySupported, Extract: claudePartialCost},
+		toolTimings:  AgentToolTimingCapability{Kind: CapabilitySupported, Extract: claudeToolTimings},
+		actualModel:  AgentActualModelCapability{Kind: CapabilitySupported, Extract: claudeActualModel},
+		rateKey:      AgentRateKeyCapability{Normalize: claudeRateKey},
 		streamRender: AgentStreamRenderCapability{Kind: CapabilitySupported, Render: renderClaudeEvent},
 		turns:        AgentTurnCapability{Kind: CapabilitySupported, Extract: claudeTurnCount},
 		peakInput:    AgentPeakInputCapability{Kind: CapabilitySupported, Extract: claudePeakInput},
+		// usage (tokens/cost/peak), assistant (turns/peak), system (actual model),
+		// total_cost_usd (cost-only result events).
+		spendMarkers: []string{"usage", "assistant", "system", "total_cost_usd"},
 		reasoning: AgentReasoningCapability{
 			Kind:       CapabilitySupported,
 			SpecTokens: claudeReasoningSpecTokens,
@@ -256,7 +264,7 @@ var agentAdapters = map[string]AgentAdapter{
 			Contains:   claudeArgsContainTurnCap,
 		},
 		turnCapExhaustion: AgentTurnCapExhaustionCapability{Kind: CapabilitySupported, Exhausted: claudeTurnCapExhausted},
-		models:      []string{"opus", "sonnet", "haiku", "fable"},
+		models:            []string{"opus", "sonnet", "haiku", "fable"},
 	}),
 	"opencode": newPresetAgentAdapter(presetAgentSpec{
 		preset:         "opencode",
@@ -274,18 +282,18 @@ var agentAdapters = map[string]AgentAdapter{
 			Kind:   CapabilityBlind,
 			Reason: "opencode has no built-in effort ladder",
 		},
-		executable:     AgentExecutableCapability{Kind: CapabilitySupported, Name: "opencode"},
-		usage:          AgentUsageCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no usage block"},
-		cost:           AgentCostCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no dollar cost"},
-		toolTimings:    AgentToolTimingCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no tool-use/tool-result pairing"},
-		actualModel:    AgentActualModelCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no actual-model field"},
-		streamRender:   AgentStreamRenderCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no renderable assistant/tool_result message shape"},
-		turns:          AgentTurnCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no message boundary"},
-		peakInput:      AgentPeakInputCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no per-call usage block"},
-		reasoning:      AgentReasoningCapability{Kind: CapabilityBlind, Reason: "opencode's CLI carries no reasoning or thinking level parameter"},
-		turnCapEnforcement: AgentTurnCapEnforcementCapability{Kind: CapabilityBlind, Reason: "opencode's turn cap is its per-agent `steps` key, reachable only from its own config file, which pop never writes"},
-		turnCapExhaustion: AgentTurnCapExhaustionCapability{Kind: CapabilityBlind, Reason: "opencode ends a step-capped run gracefully — a forced text-only summary and a success exit, indistinguishable from a run that finished"},
-		models:         []string{"opencode/kimi-k2.6", "opencode/gpt-5.5", "opencode/claude-opus-4-8", "opencode/claude-sonnet-4-6"},
+		executable:             AgentExecutableCapability{Kind: CapabilitySupported, Name: "opencode"},
+		usage:                  AgentUsageCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no usage block"},
+		cost:                   AgentCostCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no dollar cost"},
+		toolTimings:            AgentToolTimingCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no tool-use/tool-result pairing"},
+		actualModel:            AgentActualModelCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no actual-model field"},
+		streamRender:           AgentStreamRenderCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no renderable assistant/tool_result message shape"},
+		turns:                  AgentTurnCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no message boundary"},
+		peakInput:              AgentPeakInputCapability{Kind: CapabilityBlind, Reason: "opencode's JSON parts carry no per-call usage block"},
+		reasoning:              AgentReasoningCapability{Kind: CapabilityBlind, Reason: "opencode's CLI carries no reasoning or thinking level parameter"},
+		turnCapEnforcement:     AgentTurnCapEnforcementCapability{Kind: CapabilityBlind, Reason: "opencode's turn cap is its per-agent `steps` key, reachable only from its own config file, which pop never writes"},
+		turnCapExhaustion:      AgentTurnCapExhaustionCapability{Kind: CapabilityBlind, Reason: "opencode ends a step-capped run gracefully — a forced text-only summary and a success exit, indistinguishable from a run that finished"},
+		models:                 []string{"opencode/kimi-k2.6", "opencode/gpt-5.5", "opencode/claude-opus-4-8", "opencode/claude-sonnet-4-6"},
 		modelsInstallDependent: true,
 	}),
 	"cursor": newPresetAgentAdapter(presetAgentSpec{
@@ -298,7 +306,7 @@ var agentAdapters = map[string]AgentAdapter{
 		availability: AgentAvailabilityProbeCapability{
 			Kind:                 CapabilitySupported,
 			Command:              &AgentCommand{Name: "cursor-agent", Args: []string{"status", "--format", "json"}},
-			IdentifyingArgs:        []string{"status"},
+			IdentifyingArgs:      []string{"status"},
 			Interpret:            interpretCursorAvailabilityProbe,
 			ReportsAuthenticated: reportsCursorAuthenticated,
 		},
@@ -311,22 +319,24 @@ var agentAdapters = map[string]AgentAdapter{
 				"light":    {{Model: "composer-2.5-fast"}},
 			},
 		},
-		executable:             AgentExecutableCapability{Kind: CapabilitySupported, Name: "cursor-agent"},
-		usage:                  AgentUsageCapability{Kind: CapabilitySupported, Extract: cursorTokenUsage},
-		cost:                   AgentCostCapability{Kind: CapabilityBlind, Reason: "cursor reports token usage but no dollar cost"},
-		toolTimings:            AgentToolTimingCapability{Kind: CapabilitySupported, Extract: cursorToolTimings},
-		actualModel:            AgentActualModelCapability{Kind: CapabilitySupported, Extract: cursorActualModel},
-		rateKey:                AgentRateKeyCapability{Normalize: cursorRateKey},
-		streamRender:           AgentStreamRenderCapability{Kind: CapabilitySupported, Render: renderCursorEvent},
-		turns:                  AgentTurnCapability{Kind: CapabilitySupported, Extract: cursorTurnCount},
-		peakInput:              AgentPeakInputCapability{Kind: CapabilityBlind, Reason: "cursor reports token usage only as a whole-run total on result"},
+		executable:   AgentExecutableCapability{Kind: CapabilitySupported, Name: "cursor-agent"},
+		usage:        AgentUsageCapability{Kind: CapabilitySupported, Extract: cursorTokenUsage},
+		cost:         AgentCostCapability{Kind: CapabilityBlind, Reason: "cursor reports token usage but no dollar cost"},
+		toolTimings:  AgentToolTimingCapability{Kind: CapabilitySupported, Extract: cursorToolTimings},
+		actualModel:  AgentActualModelCapability{Kind: CapabilitySupported, Extract: cursorActualModel},
+		rateKey:      AgentRateKeyCapability{Normalize: cursorRateKey},
+		streamRender: AgentStreamRenderCapability{Kind: CapabilitySupported, Render: renderCursorEvent},
+		turns:        AgentTurnCapability{Kind: CapabilitySupported, Extract: cursorTurnCount},
+		peakInput:    AgentPeakInputCapability{Kind: CapabilityBlind, Reason: "cursor reports token usage only as a whole-run total on result"},
+		// result (tokens), system (actual model), assistant/tool_call (turns).
+		spendMarkers: []string{"result", "system", "assistant", "tool_call"},
 		reasoning: AgentReasoningCapability{
 			Kind:     CapabilityBlind,
 			Reason:   "cursor selects a full model name per effort tier instead of a separate reasoning parameter",
 			Contains: cursorArgsContainReasoning,
 		},
-		turnCapEnforcement: AgentTurnCapEnforcementCapability{Kind: CapabilityBlind, Reason: "cursor-agent has no turn cap of any kind"},
-		turnCapExhaustion: AgentTurnCapExhaustionCapability{Kind: CapabilityBlind, Reason: "cursor-agent has no turn cap, so there is no exhausted ending to recognise"},
+		turnCapEnforcement:     AgentTurnCapEnforcementCapability{Kind: CapabilityBlind, Reason: "cursor-agent has no turn cap of any kind"},
+		turnCapExhaustion:      AgentTurnCapExhaustionCapability{Kind: CapabilityBlind, Reason: "cursor-agent has no turn cap, so there is no exhausted ending to recognise"},
 		models:                 []string{"auto", "composer-2.5", "gpt-5.3-codex"},
 		modelsInstallDependent: true,
 	}),
@@ -351,22 +361,23 @@ var agentAdapters = map[string]AgentAdapter{
 				"light":    {{Model: "gpt-5.4-mini", Reasoning: "low"}},
 			},
 		},
-		executable:             AgentExecutableCapability{Kind: CapabilitySupported, Name: "codex"},
-		usage:                  AgentUsageCapability{Kind: CapabilitySupported, Extract: codexTokenUsage},
-		cost:                   AgentCostCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no dollar cost"},
-		toolTimings:            AgentToolTimingCapability{Kind: CapabilitySupported, Extract: codexToolTimings},
-		actualModel:            AgentActualModelCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no actual-model init event"},
-		rateKey:                AgentRateKeyCapability{Normalize: codexRateKey},
-		streamRender:           AgentStreamRenderCapability{Kind: CapabilitySupported, Render: renderCodexEvent},
-		turns:                  AgentTurnCapability{Kind: CapabilitySupported, Extract: codexTurnCount},
-		peakInput:              AgentPeakInputCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no per-call usage block"},
+		executable:   AgentExecutableCapability{Kind: CapabilitySupported, Name: "codex"},
+		usage:        AgentUsageCapability{Kind: CapabilitySupported, Extract: codexTokenUsage},
+		cost:         AgentCostCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no dollar cost"},
+		toolTimings:  AgentToolTimingCapability{Kind: CapabilitySupported, Extract: codexToolTimings},
+		actualModel:  AgentActualModelCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no actual-model init event"},
+		rateKey:      AgentRateKeyCapability{Normalize: codexRateKey},
+		streamRender: AgentStreamRenderCapability{Kind: CapabilitySupported, Render: renderCodexEvent},
+		turns:        AgentTurnCapability{Kind: CapabilitySupported, Extract: codexTurnCount},
+		peakInput:    AgentPeakInputCapability{Kind: CapabilityBlind, Reason: "codex item streams carry no per-call usage block"},
+		spendMarkers: []string{"turn.completed"},
 		reasoning: AgentReasoningCapability{
 			Kind:       CapabilitySupported,
 			SpecTokens: codexReasoningSpecTokens,
 			Contains:   codexArgsContainReasoning,
 		},
-		turnCapEnforcement: AgentTurnCapEnforcementCapability{Kind: CapabilityBlind, Reason: "codex has no turn cap; a turn there is one HTTP request carrying many iterations"},
-		turnCapExhaustion: AgentTurnCapExhaustionCapability{Kind: CapabilityBlind, Reason: "codex has no turn cap, so there is no exhausted ending to recognise"},
+		turnCapEnforcement:     AgentTurnCapEnforcementCapability{Kind: CapabilityBlind, Reason: "codex has no turn cap; a turn there is one HTTP request carrying many iterations"},
+		turnCapExhaustion:      AgentTurnCapExhaustionCapability{Kind: CapabilityBlind, Reason: "codex has no turn cap, so there is no exhausted ending to recognise"},
 		models:                 []string{"gpt-5.5", "gpt-5.4-mini"},
 		modelsInstallDependent: true,
 	}),
@@ -390,36 +401,38 @@ var agentAdapters = map[string]AgentAdapter{
 				"light":    {{Model: "opencode-go/deepseek-v4-flash", Reasoning: "low"}},
 			},
 		},
-		executable:     AgentExecutableCapability{Kind: CapabilitySupported, Name: "pi"},
-		usage:          AgentUsageCapability{Kind: CapabilitySupported, Extract: piTokenUsage},
-		cost:           AgentCostCapability{Kind: CapabilitySupported, Extract: piPartialCost},
-		toolTimings:    AgentToolTimingCapability{Kind: CapabilitySupported, Extract: piToolTimings},
-		actualModel:    AgentActualModelCapability{Kind: CapabilitySupported, Extract: piActualModel},
-		rateKey:        AgentRateKeyCapability{Normalize: piRateKey},
-		streamRender:   AgentStreamRenderCapability{Kind: CapabilitySupported, Render: renderPiEvent},
-		turns:          AgentTurnCapability{Kind: CapabilitySupported, Extract: piTurnCount},
-		peakInput:      AgentPeakInputCapability{Kind: CapabilitySupported, Extract: piPeakInput},
+		executable:   AgentExecutableCapability{Kind: CapabilitySupported, Name: "pi"},
+		usage:        AgentUsageCapability{Kind: CapabilitySupported, Extract: piTokenUsage},
+		cost:         AgentCostCapability{Kind: CapabilitySupported, Extract: piPartialCost},
+		toolTimings:  AgentToolTimingCapability{Kind: CapabilitySupported, Extract: piToolTimings},
+		actualModel:  AgentActualModelCapability{Kind: CapabilitySupported, Extract: piActualModel},
+		rateKey:      AgentRateKeyCapability{Normalize: piRateKey},
+		streamRender: AgentStreamRenderCapability{Kind: CapabilitySupported, Render: renderPiEvent},
+		turns:        AgentTurnCapability{Kind: CapabilitySupported, Extract: piTurnCount},
+		peakInput:    AgentPeakInputCapability{Kind: CapabilitySupported, Extract: piPeakInput},
+		// message_end (tokens/cost/actual model), turn_end (turns/peak).
+		spendMarkers: []string{"message_end", "turn_end"},
 		reasoning: AgentReasoningCapability{
 			Kind:       CapabilitySupported,
 			SpecTokens: piReasoningSpecTokens,
 			Contains:   piArgsContainReasoning,
 		},
-		turnCapEnforcement: AgentTurnCapEnforcementCapability{Kind: CapabilityBlind, Reason: "pi has no turn cap, and no token or dollar budget either"},
-		turnCapExhaustion: AgentTurnCapExhaustionCapability{Kind: CapabilityBlind, Reason: "pi has no turn cap, so there is no exhausted ending to recognise"},
-		models:         []string{"opencode-go/kimi-k2.6", "opencode-go/qwen3.7-max", "opencode-go/minimax-m3", "opencode-go/deepseek-v4-flash"},
+		turnCapEnforcement:     AgentTurnCapEnforcementCapability{Kind: CapabilityBlind, Reason: "pi has no turn cap, and no token or dollar budget either"},
+		turnCapExhaustion:      AgentTurnCapExhaustionCapability{Kind: CapabilityBlind, Reason: "pi has no turn cap, so there is no exhausted ending to recognise"},
+		models:                 []string{"opencode-go/kimi-k2.6", "opencode-go/qwen3.7-max", "opencode-go/minimax-m3", "opencode-go/deepseek-v4-flash"},
 		modelsInstallDependent: true,
 	}),
 	// kimi takes the prompt as its -p value and needs no permission flag: -p is
 	// auto-permission by design and rejects --yolo/--auto (ADR-0164).
 	"kimi": newPresetAgentAdapter(presetAgentSpec{
-		preset:          "kimi",
-		headlessPrefix:  []string{"kimi", "-p"},
-		promptDelivery:  promptAsPrefixFlagValue,
-		autoFormat:      AgentOutputKimiStreamJSON,
-		autoArgs:        []string{"--output-format", "stream-json"},
-		env:             []string{"KIMI_CODE_NO_AUTO_UPDATE=1"},
-		assistance:      AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "kimi"}},
-		attendedArgs:    AgentAttendedArgsCapability{Kind: CapabilityBlind, Reason: "kimi's -p is its own auto-permission and it rejects --yolo/--auto, so its attended session launches bare (ADR-0164)"},
+		preset:         "kimi",
+		headlessPrefix: []string{"kimi", "-p"},
+		promptDelivery: promptAsPrefixFlagValue,
+		autoFormat:     AgentOutputKimiStreamJSON,
+		autoArgs:       []string{"--output-format", "stream-json"},
+		env:            []string{"KIMI_CODE_NO_AUTO_UPDATE=1"},
+		assistance:     AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "kimi"}},
+		attendedArgs:   AgentAttendedArgsCapability{Kind: CapabilityBlind, Reason: "kimi's -p is its own auto-permission and it rejects --yolo/--auto, so its attended session launches bare (ADR-0164)"},
 		availability: AgentAvailabilityProbeCapability{
 			Kind:   CapabilityBlind,
 			Reason: "kimi ships no read-only auth status command",
@@ -433,23 +446,23 @@ var agentAdapters = map[string]AgentAdapter{
 				"light":    {{Model: "moonshot-ai/kimi-k2.7-code-highspeed"}},
 			},
 		},
-		executable:      AgentExecutableCapability{Kind: CapabilitySupported, Name: "kimi"},
-		usage:           AgentUsageCapability{Kind: CapabilityBlind, Reason: "kimi stream usage has not been verified against a captured run"},
-		cost:            AgentCostCapability{Kind: CapabilityBlind, Reason: "kimi stream cost has not been verified against a captured run"},
-		toolTimings:     AgentToolTimingCapability{Kind: CapabilityBlind, Reason: "kimi stream tool timings have not been verified against a captured run"},
-		actualModel:     AgentActualModelCapability{Kind: CapabilityBlind, Reason: "kimi stream actual model has not been verified against a captured run"},
-		streamRender:    AgentStreamRenderCapability{Kind: CapabilityBlind, Reason: "kimi stream rendering has not been verified against a captured run"},
-		turns:           AgentTurnCapability{Kind: CapabilityBlind, Reason: "kimi stream turn count has not been verified against a captured run"},
-		peakInput:       AgentPeakInputCapability{Kind: CapabilityBlind, Reason: "kimi stream peak input has not been verified against a captured run"},
+		executable:   AgentExecutableCapability{Kind: CapabilitySupported, Name: "kimi"},
+		usage:        AgentUsageCapability{Kind: CapabilityBlind, Reason: "kimi stream usage has not been verified against a captured run"},
+		cost:         AgentCostCapability{Kind: CapabilityBlind, Reason: "kimi stream cost has not been verified against a captured run"},
+		toolTimings:  AgentToolTimingCapability{Kind: CapabilityBlind, Reason: "kimi stream tool timings have not been verified against a captured run"},
+		actualModel:  AgentActualModelCapability{Kind: CapabilityBlind, Reason: "kimi stream actual model has not been verified against a captured run"},
+		streamRender: AgentStreamRenderCapability{Kind: CapabilityBlind, Reason: "kimi stream rendering has not been verified against a captured run"},
+		turns:        AgentTurnCapability{Kind: CapabilityBlind, Reason: "kimi stream turn count has not been verified against a captured run"},
+		peakInput:    AgentPeakInputCapability{Kind: CapabilityBlind, Reason: "kimi stream peak input has not been verified against a captured run"},
 		reasoning: AgentReasoningCapability{
 			Kind:       CapabilitySupported,
 			EnvKey:     "KIMI_MODEL_THINKING_EFFORT",
 			SpecTokens: kimiReasoningSpecTokens,
 			Contains:   kimiArgsContainReasoning,
 		},
-		turnCapEnforcement: AgentTurnCapEnforcementCapability{Kind: CapabilityBlind, Reason: "kimi's turn cap is loop_control.max_steps_per_turn, reachable only from its own config file, which pop never writes"},
-		turnCapExhaustion: AgentTurnCapExhaustionCapability{Kind: CapabilityBlind, Reason: "kimi reports a step-capped ending as loop.max_steps_exceeded on stderr and puts nothing in its stream-json"},
-		models:          []string{"moonshot-ai/kimi-k3", "moonshot-ai/kimi-k2.7-code", "moonshot-ai/kimi-k2.7-code-highspeed"},
+		turnCapEnforcement:     AgentTurnCapEnforcementCapability{Kind: CapabilityBlind, Reason: "kimi's turn cap is loop_control.max_steps_per_turn, reachable only from its own config file, which pop never writes"},
+		turnCapExhaustion:      AgentTurnCapExhaustionCapability{Kind: CapabilityBlind, Reason: "kimi reports a step-capped ending as loop.max_steps_exceeded on stderr and puts nothing in its stream-json"},
+		models:                 []string{"moonshot-ai/kimi-k3", "moonshot-ai/kimi-k2.7-code", "moonshot-ai/kimi-k2.7-code-highspeed"},
 		modelsInstallDependent: true,
 	}),
 }
@@ -477,19 +490,22 @@ type presetAgentSpec struct {
 	// env rides into every invocation of this preset as KEY=VALUE entries
 	// layered over pop's own environment, for knobs the CLI exposes nowhere
 	// else (ADR-0164).
-	env []string
-	assistance      AgentAssistanceCapability
-	attendedArgs    AgentAttendedArgsCapability
-	availability    AgentAvailabilityProbeCapability
-	usage           AgentUsageCapability
-	cost            AgentCostCapability
-	toolTimings     AgentToolTimingCapability
-	actualModel     AgentActualModelCapability
-	rateKey         AgentRateKeyCapability
-	streamRender    AgentStreamRenderCapability
-	turns           AgentTurnCapability
-	peakInput       AgentPeakInputCapability
-	reasoning       AgentReasoningCapability
+	env          []string
+	assistance   AgentAssistanceCapability
+	attendedArgs AgentAttendedArgsCapability
+	availability AgentAvailabilityProbeCapability
+	usage        AgentUsageCapability
+	cost         AgentCostCapability
+	toolTimings  AgentToolTimingCapability
+	actualModel  AgentActualModelCapability
+	rateKey      AgentRateKeyCapability
+	streamRender AgentStreamRenderCapability
+	turns        AgentTurnCapability
+	peakInput    AgentPeakInputCapability
+	// spendMarkers identify event lines that may contribute to Run spend or
+	// Actual model during a streaming spend extract. Empty = open no stream.
+	spendMarkers []string
+	reasoning    AgentReasoningCapability
 	// turnCapEnforcement says whether this preset can be told, in argv, to stop
 	// after a number of Turns — the repository's bound on one implementation
 	// attempt (ADR-0190).
@@ -498,10 +514,10 @@ type presetAgentSpec struct {
 	// stream and exit status, that a run stopped because it reached that bound
 	// (ADR-0190).
 	turnCapExhaustion AgentTurnCapExhaustionCapability
-	quotaReset      AgentQuotaResetCapability
-	effortLadder    AgentEffortLadderCapability
-	executable      AgentExecutableCapability
-	models          []string
+	quotaReset        AgentQuotaResetCapability
+	effortLadder      AgentEffortLadderCapability
+	executable        AgentExecutableCapability
+	models            []string
 	// modelsInstallDependent marks a curated list whose aliases are resolved by
 	// the local install's own provider config rather than being stable,
 	// account-independent names, so the catalog can say so.
@@ -699,6 +715,10 @@ func (a *presetAgentAdapter) PeakInputCapability() AgentPeakInputCapability {
 	return a.peakInput
 }
 
+func (a *presetAgentAdapter) SpendStreamMarkers() []string {
+	return append([]string{}, a.spendMarkers...)
+}
+
 func (a *presetAgentAdapter) ReasoningCapability() AgentReasoningCapability {
 	return a.reasoning
 }
@@ -823,6 +843,8 @@ func (a customAgentAdapter) TurnCapability() AgentTurnCapability {
 func (a customAgentAdapter) PeakInputCapability() AgentPeakInputCapability {
 	return AgentPeakInputCapability{Kind: CapabilityBlind, Reason: "custom agent commands produce no structured stream"}
 }
+
+func (a customAgentAdapter) SpendStreamMarkers() []string { return nil }
 
 func (a customAgentAdapter) ReasoningCapability() AgentReasoningCapability {
 	return AgentReasoningCapability{Kind: CapabilityBlind, Reason: "custom agent commands carry no reasoning parameter"}

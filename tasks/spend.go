@@ -255,6 +255,15 @@ func SpendRollup(opts SpendOptions) (*SpendRollupResult, error) {
 	return SpendRollupWith(defaultDeps, project.DefaultDeps(), config.Load, opts)
 }
 
+// spendRollupCandidate is one Task set's metadata-only rollup row: enough to
+// rank the recency window without opening any event stream.
+type spendRollupCandidate struct {
+	TaskSetID string
+	Project   string
+	Dir       string
+	LastRunAt time.Time
+}
+
 // SpendRollupWith aggregates Run spend using injected dependencies.
 func SpendRollupWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts SpendOptions) (*SpendRollupResult, error) {
 	sortMode, err := normalizeSpendSort(opts.Sort)
@@ -268,17 +277,18 @@ func SpendRollupWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 	table := loadRateTableForSpend(d)
 	overrides := loadDeclaredSpendRates(loadConfig)
 
-	var result *SpendRollupResult
+	var (
+		candidates []spendRollupCandidate
+		skipped    int
+	)
 	if opts.All {
-		result, err = spendRollupAll(d, table, overrides)
+		candidates, skipped, err = spendRollupAllCandidates(d)
 	} else {
-		result, err = spendRollupRepo(d, pd, loadConfig, opts, table, overrides)
+		candidates, err = spendRollupRepoCandidates(d, pd, loadConfig, opts)
 	}
 	if err != nil {
 		return nil, err
 	}
-	result.RateTableDate = table.FetchedAt
-	result.Sort = sortMode
 
 	limit := spendRollupSetLimit
 	if opts.All {
@@ -288,11 +298,29 @@ func SpendRollupWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 		limit = opts.Limit
 	}
 
-	// The display bound is always the most recent N by Captured-run start time;
-	// --sort then reorders that window (ADR-0218).
-	sortSpendRollupRows(result.Sets, SpendSortRecency)
-	if len(result.Sets) > limit {
-		result.Sets = result.Sets[:limit]
+	// Rank on metadata alone, then price only the surviving window (ADR-0218).
+	sortSpendRollupCandidates(candidates)
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+
+	priced, err := fanout.Map(candidates, func(c spendRollupCandidate) (SpendRollupRow, error) {
+		row, err := taskSetSpendRollup(d, c.TaskSetID, c.Dir, table, overrides)
+		if err != nil {
+			return SpendRollupRow{}, fmt.Errorf("spend for %s: %w", c.TaskSetID, err)
+		}
+		row.Project = c.Project
+		return row, nil
+	})
+	if err != nil {
+		return nil, exitErr(ExitOperational, "%v", err)
+	}
+
+	result := &SpendRollupResult{
+		Sets:            priced,
+		SkippedStorages: skipped,
+		RateTableDate:   table.FetchedAt,
+		Sort:            sortMode,
 	}
 	if sortMode != SpendSortRecency {
 		sortSpendRollupRows(result.Sets, sortMode)
@@ -308,9 +336,10 @@ func SpendRollupWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 	return result, nil
 }
 
-// spendRollupRepo is the current-checkout rollup: manifests under one
-// definition path, archived sets filtered out (ADR-0160).
-func spendRollupRepo(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts SpendOptions, table *RateTable, overrides map[string]ModelRates) (*SpendRollupResult, error) {
+// spendRollupRepoCandidates is the current-checkout rollup's metadata pass:
+// manifests under one definition path, archived sets filtered out (ADR-0160).
+// No event stream is opened.
+func spendRollupRepoCandidates(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts SpendOptions) ([]spendRollupCandidate, error) {
 	resolved, err := ResolvePathsWith(d, pd, loadConfig, opts.ResolveInput)
 	if err != nil {
 		return nil, exitErr(ExitSetup, "%v", err)
@@ -328,37 +357,38 @@ func spendRollupRepo(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 
 	projectLabel := spendProjectLabels(d, []string{resolved.DefinitionPath})[resolved.DefinitionPath]
 	setIDs := activeTaskSetIDsForSpend(state, resolved.DefinitionPath, refresh.Manifests)
-	result := &SpendRollupResult{Sets: make([]SpendRollupRow, 0, len(setIDs))}
+	out := make([]spendRollupCandidate, 0, len(setIDs))
 	for _, setID := range setIDs {
 		m := refresh.Manifests[setID]
 		if m == nil {
 			continue
 		}
-		row, err := taskSetSpendRollup(d, setID, m.Dir, table, overrides)
+		c, err := taskSetSpendMeta(d, setID, m.Dir)
 		if err != nil {
 			return nil, exitErr(ExitOperational, "spend for %s: %v", setID, err)
 		}
-		row.Project = projectLabel
-		result.Sets = append(result.Sets, row)
+		c.Project = projectLabel
+		out = append(out, c)
 	}
-	return result, nil
+	return out, nil
 }
 
-// spendRollupAll widens the rollup across every Task-set registration on this
-// machine (ADR-0218). Enumeration is store.AllSets — not the config project
-// list — grouped by def_path; a def_path whose storage is gone is skipped and
-// counted rather than crashing the render.
-func spendRollupAll(d *Deps, table *RateTable, overrides map[string]ModelRates) (*SpendRollupResult, error) {
+// spendRollupAllCandidates widens the rollup across every Task-set registration
+// on this machine (ADR-0218). Enumeration is store.AllSets — not the config
+// project list — grouped by def_path; a def_path whose storage is gone is
+// skipped and counted rather than crashing the render. Ranking uses run
+// metadata only; event streams stay closed until the display window is priced.
+func spendRollupAllCandidates(d *Deps) ([]spendRollupCandidate, int, error) {
 	s, ok, err := d.Store(false)
 	if err != nil {
-		return nil, exitErr(ExitSetup, "%v", err)
+		return nil, 0, exitErr(ExitSetup, "%v", err)
 	}
 	if !ok {
-		return &SpendRollupResult{}, nil
+		return nil, 0, nil
 	}
 	all, err := s.AllSets()
 	if err != nil {
-		return nil, exitErr(ExitSetup, "%v", err)
+		return nil, 0, exitErr(ExitSetup, "%v", err)
 	}
 
 	defPaths := make([]string, 0, len(all))
@@ -376,28 +406,28 @@ func spendRollupAll(d *Deps, table *RateTable, overrides map[string]ModelRates) 
 			continue
 		}
 		if err != nil {
-			return nil, exitErr(ExitOperational, "stat task storage %s: %v", def, err)
+			return nil, 0, exitErr(ExitOperational, "stat task storage %s: %v", def, err)
 		}
 		liveDefs = append(liveDefs, def)
 	}
 
-	result := &SpendRollupResult{SkippedStorages: skipped}
 	if len(liveDefs) == 0 {
-		return result, nil
+		return nil, skipped, nil
 	}
 
 	prepared, err := PrepareRefreshes(d, liveDefs)
 	if err != nil {
-		return nil, exitErr(ExitSetup, "%v", err)
+		return nil, 0, exitErr(ExitSetup, "%v", err)
 	}
 	refreshes, err := fanout.Map(prepared, func(p *PreparedRefresh) (*RefreshResult, error) {
 		return p.Refresh(d)
 	})
 	if err != nil {
-		return nil, exitErr(ExitOperational, "%v", err)
+		return nil, 0, exitErr(ExitOperational, "%v", err)
 	}
 
 	labels := spendProjectLabels(d, liveDefs)
+	var out []spendRollupCandidate
 	for i, def := range liveDefs {
 		label := labels[def]
 		refresh := refreshes[i]
@@ -409,15 +439,44 @@ func spendRollupAll(d *Deps, table *RateTable, overrides map[string]ModelRates) 
 			if m == nil {
 				continue
 			}
-			row, err := taskSetSpendRollup(d, reg.SetID, m.Dir, table, overrides)
+			c, err := taskSetSpendMeta(d, reg.SetID, m.Dir)
 			if err != nil {
-				return nil, exitErr(ExitOperational, "spend for %s: %v", reg.SetID, err)
+				return nil, 0, exitErr(ExitOperational, "spend for %s: %v", reg.SetID, err)
 			}
-			row.Project = label
-			result.Sets = append(result.Sets, row)
+			c.Project = label
+			out = append(out, c)
 		}
 	}
-	return result, nil
+	return out, skipped, nil
+}
+
+func sortSpendRollupCandidates(candidates []spendRollupCandidate) {
+	sort.SliceStable(candidates, func(i, j int) bool {
+		a, b := candidates[i], candidates[j]
+		aZero, bZero := a.LastRunAt.IsZero(), b.LastRunAt.IsZero()
+		if aZero != bZero {
+			return !aZero
+		}
+		if !aZero && !a.LastRunAt.Equal(b.LastRunAt) {
+			return a.LastRunAt.After(b.LastRunAt)
+		}
+		return a.TaskSetID < b.TaskSetID
+	})
+}
+
+// taskSetSpendMeta builds a rollup candidate from Captured-run metadata alone.
+func taskSetSpendMeta(d *Deps, taskSetID, taskSetDir string) (spendRollupCandidate, error) {
+	metas, err := listSpendRunMetas(d, taskSetDir)
+	if err != nil {
+		return spendRollupCandidate{}, err
+	}
+	c := spendRollupCandidate{TaskSetID: taskSetID, Dir: taskSetDir}
+	for _, meta := range metas {
+		if !meta.StartTime.IsZero() && (c.LastRunAt.IsZero() || meta.StartTime.After(c.LastRunAt)) {
+			c.LastRunAt = meta.StartTime
+		}
+	}
+	return c, nil
 }
 
 // spendProjectRef is one definition path's raw project coordinates used to
@@ -666,16 +725,18 @@ func buildSpendSetBreakdown(d *Deps, taskSetID string, m *Manifest, table *RateT
 	if err != nil {
 		return nil, err
 	}
+	runsDir := capturedRunsDir(m.Dir)
 
 	result := &SpendSetBreakdownResult{TaskSetID: taskSetID}
 	seen := map[string]int{}
 	setAgents := map[string]bool{}
 	setModels := spendModelSplit{}
 	for _, run := range runs {
-		spend, err := runSpend(run)
+		spend, actual, err := loadRunSpend(d, runsDir, run)
 		if err != nil {
 			return nil, err
 		}
+		run.actualModel = actual
 		notional := priceRunSpend(run, spend, table, overrides)
 		if run.meta.Agent != "" {
 			setAgents[run.meta.Agent] = true
@@ -816,13 +877,15 @@ func taskSetSpendRollup(d *Deps, taskSetID, taskSetDir string, table *RateTable,
 	if err != nil {
 		return SpendRollupRow{}, err
 	}
+	runsDir := capturedRunsDir(taskSetDir)
 	row := SpendRollupRow{TaskSetID: taskSetID, ModelSplit: spendModelSplit{}}
 	setAgents := map[string]bool{}
 	for _, run := range runs {
-		spend, err := runSpend(run)
+		spend, actual, err := loadRunSpend(d, runsDir, run)
 		if err != nil {
 			return SpendRollupRow{}, err
 		}
+		run.actualModel = actual
 		notional := priceRunSpend(run, spend, table, overrides)
 		if run.meta.Agent != "" {
 			setAgents[run.meta.Agent] = true

@@ -377,10 +377,7 @@ func TestSpendRollupIsReadOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runsBefore, err := os.ReadDir(capturedRunsDir(setDir))
-	if err != nil {
-		t.Fatal(err)
-	}
+	metaBefore, eventsBefore := countSpendRunPairs(t, setDir)
 
 	if _, err := SpendRollupWith(env.deps(), nil, nil, SpendOptions{
 		ResolveInput: ResolveInput{CWD: env.root},
@@ -395,13 +392,27 @@ func TestSpendRollupIsReadOnly(t *testing.T) {
 	if string(before) != string(after) {
 		t.Fatal("spend mutated task manifest")
 	}
-	runsAfter, err := os.ReadDir(capturedRunsDir(setDir))
+	metaAfter, eventsAfter := countSpendRunPairs(t, setDir)
+	if metaBefore != metaAfter || eventsBefore != eventsAfter {
+		t.Fatalf("run pairs changed: meta %d→%d events %d→%d", metaBefore, metaAfter, eventsBefore, eventsAfter)
+	}
+}
+
+func countSpendRunPairs(t *testing.T, setDir string) (metas, events int) {
+	t.Helper()
+	entries, err := os.ReadDir(capturedRunsDir(setDir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(runsBefore) != len(runsAfter) {
-		t.Fatalf("runs dir changed: %d -> %d", len(runsBefore), len(runsAfter))
+	for _, e := range entries {
+		switch {
+		case strings.HasSuffix(e.Name(), ".meta.json"):
+			metas++
+		case strings.HasSuffix(e.Name(), ".events.jsonl.gz"):
+			events++
+		}
 	}
+	return metas, events
 }
 
 func TestSpendRollupExcludesArchivedSets(t *testing.T) {

@@ -263,7 +263,7 @@ func TestListSpendRunsIgnoresLegacyAttemptLayout(t *testing.T) {
 	if isLegacyRun(runs[0]) {
 		t.Fatal("spend run must not be legacy")
 	}
-	spend, err := runSpend(runs[0])
+	spend, _, err := loadRunSpend(env.deps(), capturedRunsDir(taskSetDir), runs[0])
 	if err != nil {
 		t.Fatal(err)
 	}

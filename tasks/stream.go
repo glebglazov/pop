@@ -115,10 +115,14 @@ type capturedRunMeta struct {
 // meta record with the raw event sequence. legacyPath is set only for runs
 // loaded from legacy task-stem gzips and keeps the original storage path so
 // raw replay can locate the file without parsing the synthetic run_id.
+// actualModel is an optional pre-extracted Actual model (from a streaming spend
+// pass or a persisted spend cache); when set, rate-key resolution prefers it
+// over scanning events.
 type capturedRun struct {
-	meta       capturedRunMeta
-	events     []streamEventRecord
-	legacyPath string
+	meta        capturedRunMeta
+	events      []streamEventRecord
+	legacyPath  string
+	actualModel string
 }
 
 // phaseOrder returns a sort rank for run phases. Lower values sort earlier.
