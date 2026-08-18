@@ -728,9 +728,44 @@ type documentPeek struct {
 	loading      bool
 	err          error
 	scroll       int
+	// rendered caches the glamour rendering of text at renderedWidth, so the body
+	// is rendered once per width rather than once per frame. A width change — the
+	// only thing a window resize does to the peek — misses the cache and re-wraps.
+	rendered      string
+	renderedWidth int
+	hasRendered   bool
 	// flash is the peek's own transient feedback, on the same three-second
 	// lifetime as every other flash (ADR-0204).
 	flash ui.Flash
+}
+
+// body returns the text the peek scrolls over at the given width: markdown
+// rendered through glamour, every other extension exactly as it is on disk
+// (ADR-0222).
+func (p *documentPeek) body(width int) string {
+	if !ui.RendersMarkdown(p.path) {
+		return p.text
+	}
+	if !p.hasRendered || p.renderedWidth != width {
+		p.rendered = ui.RenderMarkdown(p.text, width)
+		p.renderedWidth = width
+		p.hasRendered = true
+	}
+	return p.rendered
+}
+
+// lines is the peek's scrollable unit — one screen line of the body, after
+// rendering — so scrolling, paging and gg/G all count rendered lines.
+func (p *documentPeek) lines(width int) []string {
+	return documentPeekLines(p.body(width))
+}
+
+// invalidateRender drops the cached rendering, so freshly loaded text is never
+// read through the previous document's wrap.
+func (p *documentPeek) invalidateRender() {
+	p.rendered = ""
+	p.renderedWidth = 0
+	p.hasRendered = false
 }
 
 // dashboardColumns holds the task-set table's natural column widths (derived from
@@ -1473,6 +1508,7 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.detail.peek.path = msg.path
 		m.detail.peek.text = msg.text
 		m.detail.peek.err = msg.err
+		m.detail.peek.invalidateRender()
 	}
 	return m, nil
 }
@@ -2441,7 +2477,7 @@ func (m QueueDashboard) maxDocumentPeekScroll() int {
 	if m.detail == nil || m.detail.peek == nil {
 		return 0
 	}
-	lines := documentPeekLines(m.detail.peek.text)
+	lines := m.detail.peek.lines(m.width)
 	maxScroll := len(lines) - m.documentPeekPageSize()
 	if maxScroll < 0 {
 		return 0
@@ -3889,7 +3925,7 @@ func renderDocumentPeek(b *strings.Builder, d *detailView, height, width int, me
 	if p.path != "" {
 		fmt.Fprintf(b, "  %s\n\n", p.path)
 	}
-	lines := documentPeekLines(p.text)
+	lines := p.lines(width)
 	pageSize := documentPeekPageSize(height, p.path)
 	maxScroll := len(lines) - pageSize
 	if maxScroll < 0 {

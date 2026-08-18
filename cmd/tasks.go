@@ -22,6 +22,7 @@ import (
 	"github.com/glebglazov/pop/ui"
 	"github.com/glebglazov/pop/work"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var (
@@ -1051,7 +1052,7 @@ func runTaskArtifactsWith(d *tasks.Deps, w io.Writer, taskSetID, show string) er
 			if err != nil {
 				return fmt.Errorf("tasks artifacts: read %s: %w", show, err)
 			}
-			_, err = w.Write(body)
+			_, err = w.Write(taskShowDocument(artifact.Path, body))
 			return err
 		}
 		available := make([]string, 0, len(artifacts))
@@ -1463,6 +1464,27 @@ var taskStdinInteractive = func(stdin io.Reader) bool {
 		return false
 	}
 	return (info.Mode() & os.ModeCharDevice) != 0
+}
+
+// taskShowDocument decides how one artifact's bytes reach stdout: a markdown
+// document read on a terminal is rendered through glamour, and everything else is
+// the file's exact bytes — another extension, or a redirect into a file or a pull
+// request, which is not a human reading on a terminal (ADR-0222).
+func taskShowDocument(path string, body []byte) []byte {
+	if !taskStdoutInteractive() || !ui.RendersMarkdown(path) {
+		return body
+	}
+	return []byte(ui.RenderMarkdown(string(body), taskStdoutWidth()) + "\n")
+}
+
+// taskStdoutWidth is the rendering width for documents printed to a terminal. It
+// is a package variable so tests can pin the wrap width.
+var taskStdoutWidth = func() int {
+	width, _, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil || width <= 0 {
+		return 0 // ui.RenderMarkdown falls back to its own default width
+	}
+	return width
 }
 
 // taskStdoutInteractive reports whether stdout is an interactive terminal. It is a

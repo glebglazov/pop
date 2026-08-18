@@ -1205,7 +1205,7 @@ The full-screen interactive drill-down entered with `l` or Enter from the **Work
 _Avoid_: status view, status modal, inspect modal, task editor
 
 **Document peek**:
-A read-only nested view over any absolute file path a detail row carries — a task's markdown, a **Routine**'s last report. It is opened with `l` or Enter, supports Vim-style scrolling (`j`/`k`, `ctrl-d`/`ctrl-u`, `gg`/`G`), and is dismissed with `h`/left/`esc` without changing anything. The view reads whatever path the row hands it.
+A read-only nested view over any absolute file path a detail row carries — a task's markdown, a **Routine**'s last report. It is opened with `l` or Enter, supports Vim-style scrolling (`j`/`k`, `ctrl-d`/`ctrl-u`, `gg`/`G`), and is dismissed with `h`/left/`esc` without changing anything. The view reads whatever path the row hands it, and renders a `.md` path as Markdown while showing every other extension exactly as it is on disk; the rendering wraps to the view's own width and is re-wrapped on a window resize, and scrolling counts rendered lines (ADR-0222).
 _Avoid_: task editor, task modal, preview pane
 
 **Execution-state store**:

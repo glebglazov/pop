@@ -1613,7 +1613,9 @@ func TestDashboardDocumentPeekScrolls(t *testing.T) {
 		peek: &documentPeek{
 			itemID: "01-a",
 			path:   filepath.Join("/tasks", "set-scroll", "01-a.md"),
-			text:   "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\n",
+			// A markdown document renders (ADR-0222), so the fixture's lines are list
+			// items: one rendered line each, which is what the peek scrolls over.
+			text:   "- line 1\n- line 2\n- line 3\n- line 4\n- line 5\n- line 6\n",
 		},
 	}
 

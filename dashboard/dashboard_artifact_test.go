@@ -170,7 +170,7 @@ func TestArtifactPeekAndCopyVerbsStayOnTheirInvokingSurface(t *testing.T) {
 	}
 	var body strings.Builder
 	for i := 0; i < 40; i++ {
-		fmt.Fprintf(&body, "line %02d\n", i)
+		fmt.Fprintf(&body, "- line %02d\n", i)
 	}
 	if err := os.WriteFile(path, []byte(body.String()), 0o644); err != nil {
 		t.Fatal(err)
