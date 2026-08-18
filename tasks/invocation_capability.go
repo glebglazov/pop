@@ -80,6 +80,43 @@ func flagName(arg string) (string, bool) {
 	return name, true
 }
 
+// readOnlyArgs returns what this preset adds to a command line that must not
+// change the checkout. A Blind preset contributes nothing and runs exactly as it
+// would without the request (ADR-0221).
+func (c AgentReadOnlyPostureCapability) readOnlyArgs() []string {
+	if c.Kind != CapabilitySupported {
+		return nil
+	}
+	return append([]string{}, c.Args...)
+}
+
+// withdrawFrom returns the headless-prefix arguments that survive this posture:
+// every flag it displaces is dropped along with the value that followed it, so a
+// prefix asserting "no sandbox" cannot quietly outrank the sandbox pop asked for.
+func (c AgentReadOnlyPostureCapability) withdrawFrom(prefix []string) []string {
+	if c.Kind != CapabilitySupported || len(c.Withdraws) == 0 {
+		return prefix
+	}
+	withdrawn := make(map[string]bool, len(c.Withdraws))
+	for _, flag := range c.Withdraws {
+		withdrawn[flag] = true
+	}
+	out := make([]string, 0, len(prefix))
+	drop := false
+	for _, arg := range prefix {
+		if flag, isFlag := flagName(arg); isFlag {
+			drop = withdrawn[flag] && !strings.Contains(arg, "=")
+			if withdrawn[flag] {
+				continue
+			}
+		} else if drop {
+			continue
+		}
+		out = append(out, arg)
+	}
+	return out
+}
+
 func (c AgentExecutableCapability) executableName() string {
 	if c.Kind != CapabilitySupported {
 		return ""

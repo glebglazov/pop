@@ -374,6 +374,9 @@ func TestPresetUsageAndCostCapabilitiesDeclared(t *testing.T) {
 		if err := adapter.AttendedArgsCapability().validate(preset); err != nil {
 			t.Fatalf("%s attended-args: %v", preset, err)
 		}
+		if err := adapter.ReadOnlyPostureCapability().validate(preset); err != nil {
+			t.Fatalf("%s read-only posture: %v", preset, err)
+		}
 	}
 }
 
@@ -426,6 +429,9 @@ func validTestPresetAgentSpec() presetAgentSpec {
 		attendedArgs: AgentAttendedArgsCapability{
 			Kind: CapabilityBlind, Reason: reason,
 		},
+		readOnly: AgentReadOnlyPostureCapability{
+			Kind: CapabilityBlind, Reason: reason,
+		},
 	}
 }
 
@@ -455,6 +461,7 @@ func TestPresetAgentSpecValidateRejectsMissingCapability(t *testing.T) {
 		{"executable", func(s *presetAgentSpec) { s.executable = AgentExecutableCapability{} }, "executable"},
 		{"availability-probe", func(s *presetAgentSpec) { s.availability = AgentAvailabilityProbeCapability{} }, "availability-probe"},
 		{"attended-args", func(s *presetAgentSpec) { s.attendedArgs = AgentAttendedArgsCapability{} }, "attended-args"},
+		{"read-only posture", func(s *presetAgentSpec) { s.readOnly = AgentReadOnlyPostureCapability{} }, "read-only posture"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

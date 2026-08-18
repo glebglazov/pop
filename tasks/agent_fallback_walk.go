@@ -35,6 +35,12 @@ type agentRole struct {
 	// RetryEligible reports whether an invocation that ended without the role's
 	// answer should be retried on the current preset.
 	RetryEligible func(outcome *attemptOutcome, raw string) bool
+	// ReadOnly spawns this role's agents under the read-only agent posture. Only
+	// the Reviewer sets it: it reads a checkout the Verifier has already passed
+	// on, where an edit of its own would arrive unattributed in work nobody
+	// re-verifies. The Verifier runs the build and the test suite and so keeps
+	// the posture it has always had (ADR-0221).
+	ReadOnly bool
 }
 
 // persist, persistAnswer and persistSkipped are how the walk files a run: each
@@ -172,6 +178,9 @@ func runAgentFallbackWalk(d *Deps, w agentFallbackWalk) (agentWalkResult, error)
 			d: d, preset: preset, baseSpec: agentSpec, resolve: resolveSpec, skips: skips,
 			build: func(spec string) (func(prompt string) (*AgentInvocation, error), error) {
 				return func(prompt string) (*AgentInvocation, error) {
+					if w.role.ReadOnly {
+						return ResolveReadOnlyAgentInvocation(spec, "", prompt, w.runtimePath, AgentOutputAuto)
+					}
 					return ResolveAgentInvocationWithMode(spec, "", prompt, w.runtimePath, AgentOutputAuto)
 				}, nil
 			},
@@ -199,6 +208,15 @@ func runAgentFallbackWalk(d *Deps, w agentFallbackWalk) (agentWalkResult, error)
 			}
 			if !announced && w.out != nil {
 				outputFor(w.out).line(ansiBold+ansiCyan, "━━ %s with %s", w.role.Gerund, invocation.RequestedAgent)
+				// The guarantee differs by preset, so the operator is told which
+				// one this preset gave rather than that one was asked for.
+				if note, enforced := invocation.ReadOnlyPosture(); note != "" {
+					colour := ansiDim
+					if !enforced {
+						colour = ansiYellow
+					}
+					outputFor(w.out).line(colour, "   %s", note)
+				}
 			}
 			announced = true
 			if w.out != nil {

@@ -425,6 +425,44 @@ func (c AgentAttendedArgsCapability) validate(preset string) error {
 	}
 }
 
+// AgentReadOnlyPostureCapability is a preset's declared stance on being told to
+// run without the ability to change the checkout it was pointed at (ADR-0221).
+// Invocation shape, so no captured stream backs it (ADR-0166). Supported carries
+// the arguments that constrain the CLI — a tool denial on one agent, a read-only
+// sandbox on another — plus the headless-prefix flags they must displace, since
+// a prefix that bypasses the sandbox outranks a later request for one. Blind
+// carries a sentence naming why the CLI has no such argument, and a Blind preset
+// reviews exactly as it does today rather than refusing to run: the guarantee
+// pop reports is the one it actually obtained.
+type AgentReadOnlyPostureCapability struct {
+	Kind CapabilityKind
+	Args []string // required iff Supported
+	// Withdraws are headless-prefix flag names this posture takes back out of
+	// the command line, because leaving them in would silently outrank Args.
+	Withdraws []string
+	Reason    string // required iff Blind
+}
+
+// validate reports whether this read-only posture stance is a complete declaration.
+func (c AgentReadOnlyPostureCapability) validate(preset string) error {
+	switch c.Kind {
+	case CapabilitySupported:
+		if len(c.Args) == 0 {
+			return fmt.Errorf("agent preset %q: read-only posture capability is Supported but Args is empty", preset)
+		}
+		return nil
+	case CapabilityBlind:
+		if strings.TrimSpace(c.Reason) == "" {
+			return fmt.Errorf("agent preset %q: read-only posture capability is Blind but Reason is empty", preset)
+		}
+		return nil
+	case capabilityUnset:
+		return fmt.Errorf("agent preset %q: read-only posture capability is unset", preset)
+	default:
+		return fmt.Errorf("agent preset %q: read-only posture capability has unknown kind %d", preset, c.Kind)
+	}
+}
+
 // AgentExecutableCapability is a preset's declared CLI executable basename
 // (ADR-0166).
 type AgentExecutableCapability struct {

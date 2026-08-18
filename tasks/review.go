@@ -341,7 +341,8 @@ func runConfiguredReviewer(d *Deps, cfg *config.Config, sel verifierSelection, t
 }
 
 // reviewerRole is what the shared fallback walk calls the Reviewer: its name in
-// the operator's output, the Captured run pair each invocation is filed as under
+// the operator's output, the read-only agent posture it alone is spawned under
+// (ADR-0221), the Captured run pair each invocation is filed as under
 // the `review` phase label, and the rule for which attempts are worth retrying —
 // a review has no format to parse, so any prose from a run that reached its own
 // ending is the Reviewer answering.
@@ -364,6 +365,7 @@ func reviewerRole(d *Deps, errOut io.Writer, taskSetDir, setID, workSHA string) 
 			_ = persistSkippedReviewRun(d, errOut, taskSetDir, setID, workSHA, rec, invocation.AgentPreset(), invocation.RequestedAgent, model, try, reason, exitCode)
 		},
 		RetryEligible: reviewAttemptRetryEligible,
+		ReadOnly:      true,
 	}
 }
 

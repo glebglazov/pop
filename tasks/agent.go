@@ -75,6 +75,25 @@ type AgentInvocation struct {
 	// when the human wrote his own `--max-turns` — pop emitted nothing there, so
 	// the number in force is his and not pop's to report.
 	turnCap int
+	// readOnly records that this command was asked to run under the read-only
+	// agent posture, so it can report the posture it actually obtained — which,
+	// on a preset declared blind, is none at all (ADR-0221).
+	readOnly bool
+}
+
+// ReadOnlyPosture is what pop can honestly say about the read-only agent posture
+// of this command: the sentence to show an operator, and whether the posture is
+// enforced by the agent rather than only asked for in the prompt. Both are empty
+// and false when nothing asked this invocation to run read-only (ADR-0221).
+func (i *AgentInvocation) ReadOnlyPosture() (note string, enforced bool) {
+	if i == nil || !i.readOnly || i.adapter == nil {
+		return "", false
+	}
+	capability := i.adapter.ReadOnlyPostureCapability()
+	if capability.Kind == CapabilitySupported {
+		return "Read-only posture: " + strings.Join(capability.Args, " "), true
+	}
+	return "Read-only posture not enforced: " + capability.Reason, false
 }
 
 // AgentPreset returns the owning adapter's preset name.
@@ -128,6 +147,12 @@ type AgentHeadlessRequest struct {
 	// Verifier reads and judges where an Implementer builds, and one number cannot
 	// mean both (ADR-0190). An adapter that cannot be told about a cap ignores it.
 	TurnCap int
+	// ReadOnly asks the preset to run without the ability to change the checkout
+	// it is pointed at. Only the Reviewer sets it — the Verifier must run the
+	// build and the test suite, which a read-only sandbox would fail for reasons
+	// that have nothing to do with the code under judgment (ADR-0221). A preset
+	// declared blind on the posture is invoked exactly as it would be without it.
+	ReadOnly bool
 }
 
 // AgentAssistanceRequest describes one attended HITL assistance invocation.
@@ -191,6 +216,7 @@ type AgentAdapter interface {
 	RenderOutput(w io.Writer, raw string, format AgentOutputFormat)
 	AssistanceCapability() AgentAssistanceCapability
 	AttendedArgsCapability() AgentAttendedArgsCapability
+	ReadOnlyPostureCapability() AgentReadOnlyPostureCapability
 	AvailabilityProbeCapability() AgentAvailabilityProbeCapability
 	UsageCapability() AgentUsageCapability
 	CostCapability() AgentCostCapability
@@ -226,6 +252,9 @@ var agentAdapters = map[string]AgentAdapter{
 		autoArgs:       []string{"--output-format", "stream-json", "--verbose"},
 		assistance:     AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "claude"}},
 		attendedArgs:   AgentAttendedArgsCapability{Kind: CapabilitySupported, Args: []string{"--permission-mode", "auto"}},
+		// The `=` spelling is load-bearing: --disallowedTools is variadic, so the
+		// space form swallows every argument after it, the generated prompt included.
+		readOnly: AgentReadOnlyPostureCapability{Kind: CapabilitySupported, Args: []string{"--disallowedTools=Edit,Write,NotebookEdit"}},
 		availability: AgentAvailabilityProbeCapability{
 			Kind:                 CapabilitySupported,
 			Command:              &AgentCommand{Name: "claude", Args: []string{"auth", "status"}},
@@ -273,6 +302,7 @@ var agentAdapters = map[string]AgentAdapter{
 		autoArgs:       []string{"--format", "json"},
 		assistance:     AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "opencode"}},
 		attendedArgs:   AgentAttendedArgsCapability{Kind: CapabilityBlind, Reason: "opencode's CLI carries no auto-approval flag, so its attended session launches bare"},
+		readOnly:       AgentReadOnlyPostureCapability{Kind: CapabilityBlind, Reason: "opencode run takes no tool-denial or sandbox argument; its only read-only route is `--agent plan`, which swaps the whole agent persona rather than constraining the one pop asked for"},
 		availability: AgentAvailabilityProbeCapability{
 			Kind:   CapabilityBlind,
 			Reason: "opencode ships no read-only auth status command",
@@ -303,6 +333,10 @@ var agentAdapters = map[string]AgentAdapter{
 		autoArgs:       []string{"--output-format", "stream-json"},
 		assistance:     AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "cursor-agent"}},
 		attendedArgs:   AgentAttendedArgsCapability{Kind: CapabilitySupported, Args: []string{"--force", "--trust"}},
+		// Ask mode is cursor's own read-only execution mode: it answers in prose and
+		// refuses both edits and system-changing shell commands, which is the whole
+		// of what a Reviewer needs and none of what it must not do.
+		readOnly: AgentReadOnlyPostureCapability{Kind: CapabilitySupported, Args: []string{"--mode", "ask"}},
 		availability: AgentAvailabilityProbeCapability{
 			Kind:                 CapabilitySupported,
 			Command:              &AgentCommand{Name: "cursor-agent", Args: []string{"status", "--format", "json"}},
@@ -347,6 +381,15 @@ var agentAdapters = map[string]AgentAdapter{
 		autoArgs:       []string{"--json"},
 		assistance:     AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "codex"}},
 		attendedArgs:   AgentAttendedArgsCapability{Kind: CapabilitySupported, Args: []string{"--dangerously-bypass-approvals-and-sandbox"}},
+		// The bypass flag in the headless prefix wins over a later --sandbox: codex
+		// reports `sandbox: danger-full-access` when both are passed. The posture
+		// takes it back out, and exec's approval policy is `never` either way, so a
+		// write the sandbox refuses fails that command instead of stopping the run.
+		readOnly: AgentReadOnlyPostureCapability{
+			Kind:      CapabilitySupported,
+			Args:      []string{"--sandbox", "read-only"},
+			Withdraws: []string{"--dangerously-bypass-approvals-and-sandbox"},
+		},
 		availability: AgentAvailabilityProbeCapability{
 			Kind:                 CapabilitySupported,
 			Command:              &AgentCommand{Name: "codex", Args: []string{"login", "status"}},
@@ -388,6 +431,9 @@ var agentAdapters = map[string]AgentAdapter{
 		autoArgs:       []string{"--mode", "json"},
 		assistance:     AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "pi"}},
 		attendedArgs:   AgentAttendedArgsCapability{Kind: CapabilityBlind, Reason: "pi's CLI carries no auto-approval flag — not even its headless drains pass one"},
+		// pi's denylist takes its own built-in tool names, of which edit and write
+		// are the two that change a checkout; bash stays, as it does under claude.
+		readOnly: AgentReadOnlyPostureCapability{Kind: CapabilitySupported, Args: []string{"--exclude-tools", "edit,write"}},
 		availability: AgentAvailabilityProbeCapability{
 			Kind:   CapabilityBlind,
 			Reason: "pi ships no read-only auth status command",
@@ -433,6 +479,7 @@ var agentAdapters = map[string]AgentAdapter{
 		env:            []string{"KIMI_CODE_NO_AUTO_UPDATE=1"},
 		assistance:     AgentAssistanceCapability{Mode: AgentAssistanceNative, Command: &AgentCommand{Name: "kimi"}},
 		attendedArgs:   AgentAttendedArgsCapability{Kind: CapabilityBlind, Reason: "kimi's -p is its own auto-permission and it rejects --yolo/--auto, so its attended session launches bare (ADR-0164)"},
+		readOnly:       AgentReadOnlyPostureCapability{Kind: CapabilityBlind, Reason: "kimi's -p run is auto-permission by design and no tool-denial or sandbox argument of its CLI has been verified"},
 		availability: AgentAvailabilityProbeCapability{
 			Kind:   CapabilityBlind,
 			Reason: "kimi ships no read-only auth status command",
@@ -493,6 +540,9 @@ type presetAgentSpec struct {
 	env          []string
 	assistance   AgentAssistanceCapability
 	attendedArgs AgentAttendedArgsCapability
+	// readOnly says how this preset is told, in argv, to run without the ability
+	// to change the checkout it reviews (ADR-0221).
+	readOnly     AgentReadOnlyPostureCapability
 	availability AgentAvailabilityProbeCapability
 	usage        AgentUsageCapability
 	cost         AgentCostCapability
@@ -548,6 +598,7 @@ func (s presetAgentSpec) validate() error {
 		{s.executable.validate(preset)},
 		{s.availability.validate(preset)},
 		{s.attendedArgs.validate(preset)},
+		{s.readOnly.validate(preset)},
 	} {
 		if check.err != nil {
 			return check.err
@@ -565,6 +616,8 @@ func newPresetAgentAdapter(spec presetAgentSpec) AgentAdapter {
 	spec.env = append([]string{}, spec.env...)
 	spec.availability = cloneAvailabilityProbeCapability(spec.availability)
 	spec.attendedArgs.Args = append([]string{}, spec.attendedArgs.Args...)
+	spec.readOnly.Args = append([]string{}, spec.readOnly.Args...)
+	spec.readOnly.Withdraws = append([]string{}, spec.readOnly.Withdraws...)
 	spec.models = append([]string{}, spec.models...)
 	return &presetAgentAdapter{presetAgentSpec: spec}
 }
@@ -580,15 +633,25 @@ func (a *presetAgentAdapter) HeadlessInvocation(req AgentHeadlessRequest) (*Agen
 		mode = AgentOutputAuto
 	}
 	extraArgs, extraEnv := a.splitEnvAssignments(req.ExtraArgs)
+	prefixTail := a.headlessPrefix[1:]
+	if req.ReadOnly {
+		prefixTail = a.readOnly.withdrawFrom(prefixTail)
+	}
 	args := []string{a.headlessPrefix[0]}
 	args = append(args, extraArgs...)
-	args = append(args, a.headlessPrefix[1:]...)
+	args = append(args, prefixTail...)
 	promptArg := 0
 	// A flag-value prompt must stay adjacent to the flag it belongs to, so it
 	// lands before pop's owned output flags instead of at the very end.
 	if a.promptDelivery == promptAsPrefixFlagValue {
 		promptArg = len(args)
 		args = append(args, req.Prompt)
+	}
+	// The posture lands with the permission flags it belongs beside rather than at
+	// the tail: a variadic flag (claude's tool denial) that ends the command line
+	// would swallow the generated prompt.
+	if req.ReadOnly {
+		args = append(args, a.readOnly.readOnlyArgs()...)
 	}
 	format := AgentOutputPlain
 	if mode == AgentOutputAuto {
@@ -623,6 +686,7 @@ func (a *presetAgentAdapter) HeadlessInvocation(req AgentHeadlessRequest) (*Agen
 		OutputFormat: format,
 		adapter:      a,
 		turnCap:      turnCap,
+		readOnly:     req.ReadOnly,
 		// Args drops argv[0], so the recorded index shifts with it.
 		promptArg: max(promptArg-1, 0),
 	}, nil
@@ -676,6 +740,13 @@ func (a *presetAgentAdapter) AssistanceCapability() AgentAssistanceCapability {
 func (a *presetAgentAdapter) AttendedArgsCapability() AgentAttendedArgsCapability {
 	capability := a.attendedArgs
 	capability.Args = append([]string{}, a.attendedArgs.Args...)
+	return capability
+}
+
+func (a *presetAgentAdapter) ReadOnlyPostureCapability() AgentReadOnlyPostureCapability {
+	capability := a.readOnly
+	capability.Args = append([]string{}, a.readOnly.Args...)
+	capability.Withdraws = append([]string{}, a.readOnly.Withdraws...)
 	return capability
 }
 
@@ -806,6 +877,10 @@ func (a customAgentAdapter) AssistanceCapability() AgentAssistanceCapability {
 
 func (a customAgentAdapter) AttendedArgsCapability() AgentAttendedArgsCapability {
 	return AgentAttendedArgsCapability{Kind: CapabilityBlind, Reason: "a custom agent command is a headless command with no attended form"}
+}
+
+func (a customAgentAdapter) ReadOnlyPostureCapability() AgentReadOnlyPostureCapability {
+	return AgentReadOnlyPostureCapability{Kind: CapabilityBlind, Reason: "a custom agent command is whatever the human wrote, and pop knows no argument of it that would make it read-only"}
 }
 
 func (a customAgentAdapter) AvailabilityProbeCapability() AgentAvailabilityProbeCapability {
@@ -951,7 +1026,7 @@ func ResolveAgentInvocation(preset, agentCmd, prompt, runtimePath string) (*Agen
 // command it resolves carries no Turn cap: every uncapped verb (verification,
 // Routine work) resolves through here, and the cap is implement-only (ADR-0190).
 func ResolveAgentInvocationWithMode(preset, agentCmd, prompt, runtimePath string, mode AgentOutputMode) (*AgentInvocation, error) {
-	return resolveAgentInvocation(preset, agentCmd, prompt, runtimePath, mode, 0)
+	return resolveAgentInvocation(preset, agentCmd, prompt, runtimePath, mode, 0, false)
 }
 
 // ResolveImplementAgentInvocation resolves the command for one implementation
@@ -959,10 +1034,18 @@ func ResolveAgentInvocationWithMode(preset, agentCmd, prompt, runtimePath string
 // repository declares none, and a preset that cannot be told to cap turns is
 // invoked exactly as it would be without one (ADR-0190).
 func ResolveImplementAgentInvocation(preset, agentCmd, prompt, runtimePath string, mode AgentOutputMode, turnCap int) (*AgentInvocation, error) {
-	return resolveAgentInvocation(preset, agentCmd, prompt, runtimePath, mode, turnCap)
+	return resolveAgentInvocation(preset, agentCmd, prompt, runtimePath, mode, turnCap, false)
 }
 
-func resolveAgentInvocation(preset, agentCmd, prompt, runtimePath string, mode AgentOutputMode, turnCap int) (*AgentInvocation, error) {
+// ResolveReadOnlyAgentInvocation resolves the command for a role that must not be
+// able to change the checkout it was pointed at — the Reviewer, and only it
+// (ADR-0221). A preset declared blind on the posture resolves the same command it
+// would otherwise, and the invocation says so when asked.
+func ResolveReadOnlyAgentInvocation(preset, agentCmd, prompt, runtimePath string, mode AgentOutputMode) (*AgentInvocation, error) {
+	return resolveAgentInvocation(preset, agentCmd, prompt, runtimePath, mode, 0, true)
+}
+
+func resolveAgentInvocation(preset, agentCmd, prompt, runtimePath string, mode AgentOutputMode, turnCap int, readOnly bool) (*AgentInvocation, error) {
 	if err := validateAgentOutputMode(mode); err != nil {
 		return nil, err
 	}
@@ -978,6 +1061,7 @@ func resolveAgentInvocation(preset, agentCmd, prompt, runtimePath string, mode A
 			RequestedAgent: requestedAgentSpec(preset, adapter.Preset()),
 			adapter:        adapter,
 			promptArg:      3,
+			readOnly:       readOnly,
 		}, nil
 	}
 	_, extraArgs, err := parseAgentPresetSpec(preset)
@@ -994,6 +1078,7 @@ func resolveAgentInvocation(preset, agentCmd, prompt, runtimePath string, mode A
 		OutputMode:  mode,
 		ExtraArgs:   extraArgs,
 		TurnCap:     turnCap,
+		ReadOnly:    readOnly,
 	})
 	if err != nil {
 		return nil, err
