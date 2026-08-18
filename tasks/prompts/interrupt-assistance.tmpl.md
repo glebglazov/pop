@@ -18,6 +18,8 @@ this task) or exit. You are here to advise and edit by hand only:
 
 ## Task set context
 {{template "task-listing" .Tasks}}
+{{template "latest-code-review" .Review}}
+
 Use the repository and task context to help the human decide whether to continue draining this task or exit.
 
 {{template "the-human-decides"}}

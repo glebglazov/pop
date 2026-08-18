@@ -22,6 +22,8 @@ Read it in full and satisfy every acceptance criterion:
 
 ## Task set context
 {{template "task-listing" .Tasks}}
+{{template "latest-code-review" .Review}}
+
 Help the human get this task to a passing state.
 
 {{template "the-human-decides"}}

@@ -12,3 +12,10 @@ Proceed by inspecting the task path manually or asking the human for the missing
 4. Writing files only *drafts*. Run `pop tasks register` and work the MALFORMED fix list until the set reads READY.
 5. Creating work is not a disposition — it completes, skips, accepts and remediates nothing at this gate.
 An appended task that the set's open HITL gates should wait on is wired into those gates' `blocked_by`, the way a remediation spawn wires itself.{{end}}
+{{define "latest-code-review"}}{{if .HasReview}}
+## Latest code review (NOT inlined — read the file yourself)
+- Document: {{.Path}}
+{{if .Commit}}- Written against: {{.Commit}}
+{{end}}{{if .OutOfDate}}- Out of date: the checkout has moved past that commit. Parts of it may describe files as they no longer are; check what changed since before you act on a finding.
+{{end}}- It is one Reviewer's opinion against this repository's standards. It reaches no verdict and gates nothing; read it when the human asks what to do about the review, and treat acting on it as the human's call.
+{{end}}{{end}}

@@ -93,3 +93,46 @@ func (p ReviewPointer) Summary() string {
 	fmt.Fprintf(&b, ": %s", p.Path)
 	return b.String()
 }
+
+// StaleAgainst reports whether the checkout has moved past the commit this
+// review was written against. Unknown on either side is not staleness: a
+// document recording no work SHA, or a checkout whose HEAD pop cannot read, says
+// nothing about whether the review still describes today's files.
+func (p ReviewPointer) StaleAgainst(workSHA string) bool {
+	written, current := p.WorkSHA, ShortSHA(workSHA)
+	if written == "" || current == "" {
+		return false
+	}
+	// Either side may be the shorter abbreviation — a hand-edited header, or a
+	// document written when the shortening differed — so a common prefix counts
+	// as the same commit.
+	return !strings.HasPrefix(current, written) && !strings.HasPrefix(written, current)
+}
+
+// reviewBlockView is the pointer as the five attended prompts render it: the
+// document to read, the commit it was written against, and whether the checkout
+// has since moved past that commit. All five share one prompt fragment, so this
+// is the one shape it renders against (ADR-0214).
+type reviewBlockView struct {
+	HasReview bool
+	Path      string
+	Commit    string
+	OutOfDate bool
+}
+
+// reviewBlock resolves that view for a set, and the empty view — which renders
+// nothing at all — for a set that has never been reviewed.
+func reviewBlock(d *Deps, m *Manifest, runtimePath string) reviewBlockView {
+	if d == nil {
+		d = defaultDeps
+	}
+	p, ok := latestReviewPointer(d, m)
+	if !ok {
+		return reviewBlockView{}
+	}
+	view := reviewBlockView{HasReview: true, Path: p.Path, Commit: p.CommitPhrase()}
+	if d != nil && d.Git != nil {
+		view.OutOfDate = p.StaleAgainst(verifyWorkSHA(d, runtimePath))
+	}
+	return view
+}

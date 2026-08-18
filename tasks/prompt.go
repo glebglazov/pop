@@ -165,6 +165,7 @@ func BuildHITLAssistancePrompt(d *Deps, taskSetID string, m *Manifest, blocking 
 		CompletedWork:       completed,
 		HasCompletedWork:    len(completed) > 0,
 		NoCompletedWork:     len(completed) == 0,
+		Review:              reviewBlock(d, m, runtimePath),
 	}
 	return prompt.MustRender(promptTemplates, "hitl-assistance.tmpl.md", view)
 }
@@ -181,6 +182,7 @@ type hitlPromptView struct {
 	CompletedWork       []completedWorkRow
 	HasCompletedWork    bool
 	NoCompletedWork     bool
+	Review              reviewBlockView
 }
 
 // completedWorkRow is one completed-AFK brief, its summary already split into
@@ -244,6 +246,7 @@ func BuildFailedAssistancePrompt(d *Deps, taskSetID string, m *Manifest, failed 
 		RuntimeCheckoutLine: runtimeCheckoutLine(runtimePath),
 		Body:                readTaskBody(d, taskPath),
 		Tasks:               gateTaskRows(m),
+		Review:              reviewBlock(d, m, runtimePath),
 	}
 	if reason, err := LatestFailureReason(d, m.Dir, failed.File); err == nil && reason != "" {
 		view.FailureReasonRecorded = true
@@ -268,6 +271,7 @@ type failedPromptView struct {
 	FailureReason         string
 	Body                  taskBodyRow
 	Tasks                 []taskRow
+	Review                reviewBlockView
 }
 
 // BuildVerifyFailedAssistancePrompt generates the attended-agent prompt shown when
@@ -297,6 +301,7 @@ func BuildVerifyFailedAssistancePrompt(d *Deps, taskSetID string, m *Manifest, w
 		WorkStat:            work.Stat,
 		WorkUndetermined:    work.Undetermined,
 		Tasks:               gateTaskRows(m),
+		Review:              reviewBlock(d, m, runtimePath),
 	}
 	if workSHA != "" {
 		view.WorkSHAClause = " (at " + workSHA + ")"
@@ -334,6 +339,7 @@ type verifyFailedPromptView struct {
 	WorkRange        string
 	WorkStat         string
 	Tasks            []taskRow
+	Review           reviewBlockView
 }
 
 // optionalLine renders prefix+value, or nothing when the value is absent. An
@@ -369,6 +375,7 @@ func BuildInterruptAssistancePrompt(d *Deps, taskSetID string, m *Manifest, inte
 		RuntimeCheckoutLine: runtimeCheckoutLine(runtimePath),
 		Body:                readTaskBody(d, taskPath),
 		Tasks:               gateTaskRows(m),
+		Review:              reviewBlock(d, m, runtimePath),
 	}
 	return prompt.MustRender(promptTemplates, "interrupt-assistance.tmpl.md", view)
 }
@@ -382,6 +389,7 @@ type interruptPromptView struct {
 	RuntimeCheckoutLine string
 	Body                taskBodyRow
 	Tasks               []taskRow
+	Review              reviewBlockView
 }
 
 // formatSiblingCompletedBriefs renders the inter-task feed appended to the
@@ -521,11 +529,7 @@ func BuildAssistPrompt(d *Deps, taskSetID string, m *Manifest, status TaskSetSta
 	// The load-bearing surface of ADR-0214: named as a path, like every task
 	// body, so "read the review and let's work out what to do about it" needs no
 	// plumbing beyond the agent opening the file.
-	if p, ok := latestReviewPointer(d, m); ok {
-		view.HasReview = true
-		view.ReviewPath = p.Path
-		view.ReviewCommit = p.CommitPhrase()
-	}
+	view.Review = reviewBlock(d, m, runtimePath)
 	view.Progress, view.HasProgress, view.ProgressEmpty, view.ProgressUnavailable = recentProgressRows(d, m)
 	return prompt.MustRender(promptTemplates, "assist.tmpl.md", view)
 }
@@ -541,9 +545,7 @@ type assistPromptView struct {
 	Tasks               []taskRow
 	FindingsRecorded    bool
 	Findings            string
-	HasReview           bool
-	ReviewPath          string
-	ReviewCommit        string
+	Review              reviewBlockView
 	Progress            []progressRow
 	HasProgress         bool
 	ProgressEmpty       bool

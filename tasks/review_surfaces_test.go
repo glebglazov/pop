@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"bytes"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -162,5 +163,108 @@ func TestReviewPointerReadsTheArtifactsOwnHeader(t *testing.T) {
 	}
 	if got := p.CommitPhrase(); got != ShortSHA("abc123abc123")+" (aaa111^..HEAD)" {
 		t.Fatalf("commit phrase: %q", got)
+	}
+}
+
+// attendedPrompts renders every attended prompt pop opens for a set: the Assist
+// session and the four gates. Keyed by name so a failure says which surface lost
+// the block.
+func attendedPrompts(d *Deps, m *Manifest) map[string]string {
+	return map[string]string{
+		"assist prompt":         BuildAssistPrompt(d, "demo", m, StatusAwaitingApproval, "/rt", ""),
+		"HITL gate prompt":      BuildHITLAssistancePrompt(d, "demo", m, m.Tasks[1], "/rt"),
+		"failed gate prompt":    BuildFailedAssistancePrompt(d, "demo", m, m.Tasks[0], "/rt"),
+		"verify-failed prompt":  BuildVerifyFailedAssistancePrompt(d, "demo", m, "sha1", "01-a: naming", "/rt"),
+		"interrupt gate prompt": BuildInterruptAssistancePrompt(d, "demo", m, m.Tasks[0], "/rt"),
+	}
+}
+
+// TestReviewBlockReachesEveryAttendedPrompt drives the Review pointer decision
+// end to end: every attended session is told where the review is and whether it
+// still describes the checkout, while the unattended implementer and the Verifier
+// are told nothing about it.
+func TestReviewBlockReachesEveryAttendedPrompt(t *testing.T) {
+	t.Parallel()
+	d, m := hitlFixture(t)
+	path := seedReviewArtifact(t, d, m)
+
+	// The fixture checkout's HEAD is sha1; the review was written against
+	// abc123abc123, so every prompt must say the review is out of date.
+	for surface, text := range attendedPrompts(d, m) {
+		for _, want := range []string{path, "abc123abc123", "Out of date", "read the file yourself"} {
+			if !strings.Contains(text, want) {
+				t.Fatalf("%s missing %q:\n%s", surface, want, text)
+			}
+		}
+		if strings.Contains(text, reviewProse) {
+			t.Fatalf("%s inlined the review document:\n%s", surface, text)
+		}
+	}
+
+	// The two unattended prompts carry no pointer at all.
+	unattended := map[string]string{
+		"implementer prompt": BuildAgentPrompt(filepath.Join(m.Dir, m.Tasks[0].File), "/rt"),
+		"verifier prompt":    buildVerifierPrompt(d, m, "sha1", workDiffView{Range: "aaa111^..HEAD", Stat: " a.go | 1 +"}, ""),
+	}
+	for surface, text := range unattended {
+		for _, unwanted := range []string{path, "Latest code review"} {
+			if strings.Contains(text, unwanted) {
+				t.Fatalf("%s carries the review block (%q):\n%s", surface, unwanted, text)
+			}
+		}
+	}
+}
+
+// TestReviewBlockIsSilentWhenCurrentOrAbsent pins the block's two quiet states:
+// a review written against the commit the checkout is on says nothing about
+// staleness, and a set with no review renders no block in any attended prompt.
+func TestReviewBlockIsSilentWhenCurrentOrAbsent(t *testing.T) {
+	t.Parallel()
+	d, m := hitlFixture(t)
+	seedReviewArtifact(t, d, m)
+	d.Git = stubGit("abc123abc123\n", "", "")
+
+	for surface, text := range attendedPrompts(d, m) {
+		if !strings.Contains(text, "Latest code review") {
+			t.Fatalf("%s lost the review block:\n%s", surface, text)
+		}
+		if strings.Contains(text, "Out of date") {
+			t.Fatalf("%s called a current review out of date:\n%s", surface, text)
+		}
+	}
+
+	unreviewed, um := hitlFixture(t)
+	for surface, text := range attendedPrompts(unreviewed, um) {
+		if strings.Contains(strings.ToLower(text), "code review") {
+			t.Fatalf("%s mentions a review the set does not have:\n%s", surface, text)
+		}
+	}
+}
+
+// TestReviewStalenessNeedsBothCommits pins that an unknown commit on either side
+// is not staleness — a document with no work SHA, or a checkout pop cannot read,
+// says nothing about whether the review still holds.
+func TestReviewStalenessNeedsBothCommits(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		pointer ReviewPointer
+		current string
+		stale   bool
+	}{
+		{name: "moved on", pointer: ReviewPointer{WorkSHA: "abc123abc123"}, current: "def456def456", stale: true},
+		{name: "same commit", pointer: ReviewPointer{WorkSHA: "abc123abc123"}, current: "abc123abc123", stale: false},
+		{name: "same commit unabbreviated", pointer: ReviewPointer{WorkSHA: "abc123abc123"}, current: "abc123abc123def789", stale: false},
+		{name: "shorter header", pointer: ReviewPointer{WorkSHA: "abc123a"}, current: "abc123abc123", stale: false},
+		{name: "document records none", pointer: ReviewPointer{}, current: "abc123abc123", stale: false},
+		{name: "checkout unreadable", pointer: ReviewPointer{WorkSHA: "abc123abc123"}, current: "", stale: false},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := tc.pointer.StaleAgainst(tc.current); got != tc.stale {
+				t.Fatalf("StaleAgainst(%q) = %v, want %v", tc.current, got, tc.stale)
+			}
+		})
 	}
 }
