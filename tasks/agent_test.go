@@ -1464,6 +1464,49 @@ func TestNormalizeCursorStreamJSONIntraMessageGluedSentinelStillAssesses(t *test
 	}
 }
 
+// Captured 2026-08-18 from attempts 1 and 2 of
+// 2026-08-17-spend-lens/10-rollup-reads-only-what-it-displays on
+// cursor-grok-4.5-high: cursor-agent reconnects, resumes from its checkpoint,
+// and gives up on the upstream's resource-exhausted status. Both attempts were
+// scored as ordinary failures and burned the task's retry cap on a model that
+// could not run at all.
+func TestNormalizeCursorStreamJSONDetectsExhaustedResource(t *testing.T) {
+	exhausted := "RetriableError: [resource_exhausted] Error"
+	raw := "{\"type\":\"system\",\"subtype\":\"init\",\"model\":\"Cursor Grok 4.5 High\"}\n" +
+		"{\"type\":\"retry\",\"subtype\":\"resuming\",\"attempt\":3}\n" +
+		exhausted + "\n"
+
+	result := NormalizeAgentOutput(AgentOutputCursorStreamJSON, raw)
+	if result.ProceedVerdict == nil {
+		t.Fatal("missing exhausted-resource verdict")
+	}
+	if result.ProceedVerdict.Scope != ProceedScopeModel {
+		t.Fatalf("scope = %q, want %q", result.ProceedVerdict.Scope, ProceedScopeModel)
+	}
+	if result.ProceedVerdict.Reason != exhausted {
+		t.Fatalf("reason = %q, want %q", result.ProceedVerdict.Reason, exhausted)
+	}
+	if _, ok := result.ProceedVerdict.TimeHealing(); !ok {
+		t.Fatal("an exhausted allowance must heal with time")
+	}
+}
+
+// cursor-agent prints transport errors it goes on to recover from, so the
+// diagnostic condemns the run only when the run ended on it.
+func TestNormalizeCursorStreamJSONExhaustedResourceMidRunStillAssesses(t *testing.T) {
+	raw := "{\"type\":\"system\",\"subtype\":\"init\",\"model\":\"Cursor Grok 4.5 High\"}\n" +
+		"RetriableError: [resource_exhausted] Error\n" +
+		"{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"SUMMARY_START\\nrecovered and finished\\nSUMMARY_END\\nTASK_COMPLETE\"}]}}\n"
+
+	result := NormalizeAgentOutput(AgentOutputCursorStreamJSON, raw)
+	if result.ProceedVerdict != nil {
+		t.Fatalf("recovered run condemned: %#v", result.ProceedVerdict)
+	}
+	if assessment := AssessCompletion(result.Output, []byte("## Acceptance criteria\n\n- [x] done\n")); !assessment.Complete {
+		t.Fatalf("assessment failed: %q", assessment.FailedReason)
+	}
+}
+
 func TestNormalizeCursorStreamJSONDetectsAuthFailure(t *testing.T) {
 	authLine := "Error: Authentication required. Please run 'agent login' first, or set CURSOR_API_KEY environment variable."
 	raw := authLine + "\n"

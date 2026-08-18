@@ -20,6 +20,16 @@ const (
 	cursorSpentAllowancePhrase = "usage limit"
 )
 
+// cursorExhaustedResourcePrefix and cursorExhaustedResourcePhrase open the
+// other diagnostic a spent allowance reaches pop as. Where the
+// ActionRequiredError refuses before the model engages, this one surfaces from
+// cursor-agent's own transport retry loop: it reconnects, resumes from its
+// checkpoint, and gives up on the upstream's resource-exhausted status.
+const (
+	cursorExhaustedResourcePrefix = "RetriableError:"
+	cursorExhaustedResourcePhrase = "[resource_exhausted]"
+)
+
 // cursorResetDatePattern matches the bare calendar date cursor's spent-allowance
 // diagnostic names as the reset ("… ends on 9/4/2026."). It carries no time of
 // day and no timezone, so it can only be read as a local date.
@@ -30,6 +40,9 @@ func normalizeCursorStreamJSON(raw string) AgentResult {
 		return AgentResult{ProceedVerdict: v}
 	}
 	if v := cursorSpentAllowanceReason(raw, time.Now()); v != nil {
+		return AgentResult{ProceedVerdict: v}
+	}
+	if v := cursorExhaustedResourceReason(raw); v != nil {
 		return AgentResult{ProceedVerdict: v}
 	}
 	return normalizedTranscript(cursorTranscript(raw), nil)
@@ -113,6 +126,43 @@ func cursorSpentAllowanceReason(raw string, now time.Time) *AgentProceedVerdict 
 		return &v
 	}
 	return nil
+}
+
+// cursorExhaustedResourceReason scans the raw capture for the resource-exhausted
+// give-up cursor-agent prints when the login's allowance for the requested model
+// runs out mid-session. Confirmed shape, captured 2026-08-18: a run of
+// reconnect/resume events and then one bare non-JSON line, exit 1.
+//
+// It is the same domain fact as the ActionRequiredError refusal — this model is
+// not runnable on this login right now — so it carries the same model-scoped,
+// time-healing verdict and the Effort ladder walks down to the tier's next
+// entry. Without it the give-up reads as an ordinary failed attempt and burns a
+// retry against a model that cannot run at all.
+//
+// The diagnostic counts only as the capture's last line. cursor-agent recovers
+// from transport errors it prints along the way, and a run that went on to close
+// out its sentinel is a completed run, not an exhausted allowance.
+func cursorExhaustedResourceReason(raw string) *AgentProceedVerdict {
+	last := lastNonEmptyLine(raw)
+	if !strings.HasPrefix(last, cursorExhaustedResourcePrefix) || !strings.Contains(last, cursorExhaustedResourcePhrase) {
+		return nil
+	}
+	// The diagnostic names no model and no reset, so the skip holds for the
+	// caller's own cap: the executor stamps the ladder entry that was pinned.
+	v := NewModelRefusedVerdict("", "", last, ProceedRecoveryTime)
+	return &v
+}
+
+func lastNonEmptyLine(raw string) string {
+	scanner := bufio.NewScanner(strings.NewReader(raw))
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	last := ""
+	for scanner.Scan() {
+		if line := strings.TrimSpace(scanner.Text()); line != "" {
+			last = line
+		}
+	}
+	return last
 }
 
 // cursorQuotaResetAt reads the reset instant out of a cursor diagnostic. The
