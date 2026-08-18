@@ -14,8 +14,8 @@ import (
 	"github.com/glebglazov/pop/work/ref"
 )
 
-// The Work dashboard's Selection (ADR-0215): tab marks a row, the marks lift into
-// a region at the top of the list, and while any row is marked the surface is in
+// The Work dashboard's Selection (ADR-0224): tab marks a row, the marks move into
+// a region at the foot of the list, and while any row is marked the surface is in
 // selection mode — every verb refuses out loud and nothing but navigation acts.
 // Every test here drives the keys, because the mode is only worth anything if the
 // keyboard behaves.
@@ -99,13 +99,13 @@ func markRow(t *testing.T, m QueueDashboard, id string) QueueDashboard {
 	return selPress(t, m, selKeyTab())
 }
 
-func TestWorkSelectionTabLiftsTheRowIntoTheRegion(t *testing.T) {
+func TestWorkSelectionTabMovesTheRowIntoTheFootRegion(t *testing.T) {
 	m := selDashboard(selRows("set-a", "set-b", "set-c"))
 
 	m = markRow(t, m, "set-b")
 
-	if got := selIDs(m); !slices.Equal(got, []string{"set-b", "set-a", "set-c"}) {
-		t.Fatalf("rows = %v, want the marked row lifted to the top", got)
+	if got := selIDs(m); !slices.Equal(got, []string{"set-a", "set-c", "set-b"}) {
+		t.Fatalf("rows = %v, want the marked row moved to the foot", got)
 	}
 	if got := m.list.RegionCount(); got != 1 {
 		t.Fatalf("region holds %d rows, want the one marked row", got)
@@ -120,7 +120,7 @@ func TestWorkSelectionTabLiftsTheRowIntoTheRegion(t *testing.T) {
 	// A second mark joins the first, and the region reads in the list's own order
 	// rather than in the order the marks were made.
 	m = markRow(t, m, "set-a")
-	if got := selIDs(m); !slices.Equal(got, []string{"set-a", "set-b", "set-c"}) {
+	if got := selIDs(m); !slices.Equal(got, []string{"set-c", "set-a", "set-b"}) {
 		t.Fatalf("rows = %v, want the region sorted as the list is, not by mark order", got)
 	}
 	if got := m.list.RegionCount(); got != 2 {
@@ -130,7 +130,7 @@ func TestWorkSelectionTabLiftsTheRowIntoTheRegion(t *testing.T) {
 	// Unmarking sends the row back to its own place rather than to the head of the
 	// rest, and every row is on the list exactly once throughout.
 	m = markRow(t, m, "set-b")
-	if got := selIDs(m); !slices.Equal(got, []string{"set-a", "set-b", "set-c"}) {
+	if got := selIDs(m); !slices.Equal(got, []string{"set-b", "set-c", "set-a"}) {
 		t.Fatalf("rows = %v after unmarking set-b, want it back in its sorted place", got)
 	}
 	if got := m.list.RegionCount(); got != 1 {
@@ -160,7 +160,7 @@ func TestWorkSelectionShiftTabClearsTheWholeSelection(t *testing.T) {
 }
 
 // The mode is visible or it is not a mode: the word on the bottom line and the
-// counted separator above the rest of the list are the whole of what says a verb
+// counted separator above the marked rows are the whole of what says a verb
 // will refuse. Both are the shared primitive's own words (ADR-0215 decision 3).
 func TestWorkSelectionRendersTheModeWordAndCountedSeparator(t *testing.T) {
 	m := selDashboard(selRows("set-a", "set-b", "set-c"))
@@ -183,15 +183,35 @@ func TestWorkSelectionRendersTheModeWordAndCountedSeparator(t *testing.T) {
 		t.Fatalf("want %q on the bottom line, evenly spaced:\n%s", want, view)
 	}
 
-	// The separator sits under the marked rows and above every other row.
+	// The separator sits under every ordinary row and above the marked rows.
 	rows := ui.StripANSI(strings.Join(m.list.VisibleRows(), "\n"))
 	sep := strings.Index(rows, ui.StripANSI(ui.SelectionSeparator(2, m.width)))
 	if sep < 0 {
 		t.Fatalf("no separator in the list body:\n%s", rows)
 	}
-	if before, after := rows[:sep], rows[sep:]; !strings.Contains(before, "set-b") ||
-		!strings.Contains(before, "set-c") || !strings.Contains(after, "set-a") {
-		t.Fatalf("the marked rows are not the block above the separator:\n%s", rows)
+	if before, after := rows[:sep], rows[sep:]; !strings.Contains(before, "set-a") ||
+		!strings.Contains(after, "set-b") || !strings.Contains(after, "set-c") {
+		t.Fatalf("the marked rows are not the block below the separator:\n%s", rows)
+	}
+	visible := m.list.VisibleRows()
+	separatorRow := -1
+	ordinaryRow := -1
+	for i, line := range visible {
+		plain := ui.StripANSI(line)
+		if strings.Contains(plain, "2 selected") {
+			separatorRow = i
+		}
+		if strings.Contains(plain, "set-a") {
+			ordinaryRow = i
+		}
+	}
+	if want := len(visible) - 3; separatorRow != want {
+		t.Fatalf("separator row = %d, want the fixed foot row %d", separatorRow, want)
+	}
+	for i := ordinaryRow + 1; i < separatorRow; i++ {
+		if visible[i] != "" {
+			t.Fatalf("row %d between the ordinary list and foot = %q, want blank", i, visible[i])
+		}
 	}
 
 	// A refusal cannot hide the mode: the flash takes the rest of the line.
@@ -202,11 +222,11 @@ func TestWorkSelectionRendersTheModeWordAndCountedSeparator(t *testing.T) {
 	}
 }
 
-// The pane pin keeps its column and its place: the region is above the pinned
-// block, a marked row that is also attributed keeps its `▸`, and a pin still
+// The pane pin keeps its column and its place: the pinned block is above the
+// region, a marked row that is also attributed keeps its `▸`, and a pin still
 // yields to the narrowings a mark is exempt from (ADR-0209 decision 7 stands for
 // pop's own inference).
-func TestWorkSelectionRegionSitsAboveThePanePins(t *testing.T) {
+func TestWorkSelectionLeavesThePanePinAtTheHead(t *testing.T) {
 	rows := selRows("set-a", "set-b", "set-c")
 	rows[0].Pinned = true
 	rows[1].Pinned = true
@@ -216,13 +236,13 @@ func TestWorkSelectionRegionSitsAboveThePanePins(t *testing.T) {
 	m = markRow(t, m, "set-b")
 	m = markRow(t, m, "set-c")
 
-	if got := selIDs(m); !slices.Equal(got, []string{"set-b", "set-c", "set-a"}) {
-		t.Fatalf("rows = %v, want the marked rows above the pinned block", got)
+	if got := selIDs(m); !slices.Equal(got, []string{"set-a", "set-b", "set-c"}) {
+		t.Fatalf("rows = %v, want the pinned ordinary row above the marked rows", got)
 	}
 	m.list.Resize(m.list.Len() + 2)
 	body := m.list.VisibleRows()
 	if got := ui.StripANSI(body[0]); !strings.HasPrefix(got, " ▸") && !strings.HasPrefix(got, "█▸") {
-		t.Fatalf("the marked and attributed row lost its pin mark: %q", got)
+		t.Fatalf("the pane pin is not at the head of the list: %q", got)
 	}
 	pinned := -1
 	for i, line := range body {
@@ -234,7 +254,7 @@ func TestWorkSelectionRegionSitsAboveThePanePins(t *testing.T) {
 		t.Fatalf("the unmarked pinned row is not on screen:\n%s", strings.Join(body, "\n"))
 	}
 	if got := ui.StripANSI(body[pinned]); !strings.HasPrefix(got, " ▸") && !strings.HasPrefix(got, "█▸") {
-		t.Fatalf("the pin beneath the region is not marked: %q", got)
+		t.Fatalf("the pin at the head is not marked: %q", got)
 	}
 }
 
@@ -253,7 +273,7 @@ func TestWorkSelectionOutranksTheSearchAndThePinDoesNot(t *testing.T) {
 	}
 	m = selPress(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
-	if got := selIDs(m); !slices.Equal(got, []string{"set-b", "other-c"}) {
+	if got := selIDs(m); !slices.Equal(got, []string{"other-c", "set-b"}) {
 		t.Fatalf("rows = %v, want the marked row kept and the pinned row filtered away", got)
 	}
 	if got := m.list.RegionCount(); got != 1 {
@@ -368,7 +388,7 @@ func TestWorkSelectionOutranksThePreset(t *testing.T) {
 	f.hidden["set-b"] = true
 	m = selPoll(t, m)
 
-	if got := selIDs(m); !slices.Equal(got, []string{"set-b", "set-a", "set-c"}) {
+	if got := selIDs(m); !slices.Equal(got, []string{"set-a", "set-c", "set-b"}) {
 		t.Fatalf("rows = %v, want the marked row kept in the region", got)
 	}
 	if !m.selection.Has("pop\x00set-b") {
@@ -402,7 +422,7 @@ func TestWorkSelectionDropsAVanishedContainerSilently(t *testing.T) {
 	if m.selection.Has("pop\x00set-b") {
 		t.Fatal("a container that left the snapshot kept its mark")
 	}
-	if got := selIDs(m); !slices.Equal(got, []string{"set-c", "set-a"}) {
+	if got := selIDs(m); !slices.Equal(got, []string{"set-a", "set-c"}) {
 		t.Fatalf("rows = %v, want the gone row gone and set-c still marked", got)
 	}
 	if m.flash.Text() != "" {
@@ -427,10 +447,10 @@ func TestWorkSelectionSurvivesThePollRebuild(t *testing.T) {
 	if !m.selection.Has("pop\x00set-b") {
 		t.Fatal("the rebuild dropped the mark")
 	}
-	if got := selIDs(m); !slices.Equal(got, []string{"set-b", "set-c", "set-a"}) {
+	if got := selIDs(m); !slices.Equal(got, []string{"set-c", "set-a", "set-b"}) {
 		t.Fatalf("rows = %v, want the marked row still in the region", got)
 	}
-	if got := m.list.Items()[0].Status; got != "DRAINING" {
+	if got := m.list.Items()[m.list.Len()-1].Status; got != "DRAINING" {
 		t.Fatalf("region row status = %q, want the freshly built row rather than a kept copy", got)
 	}
 }
@@ -526,10 +546,19 @@ func TestWorkSelectionSeparatorIsARule(t *testing.T) {
 // The cursor never starts in the region and no rebuild puts it there — but j and k
 // walk in, which is how a row gets unmarked.
 func TestWorkSelectionCursorStaysOutOfTheRegionUntilWalkedIn(t *testing.T) {
+	last := selDashboard(selRows("set-a", "set-b", "set-c"))
+	last = markRow(t, last, "set-c")
+	if got := selCursorID(t, last); got != "set-b" {
+		t.Fatalf("cursor on %q after marking the last row, want the last ordinary row", got)
+	}
+	if last.list.Cursor() >= last.list.Len()-last.list.RegionCount() {
+		t.Fatalf("cursor = %d, inside a region of %d rows", last.list.Cursor(), last.list.RegionCount())
+	}
+
 	m := selDashboard(selRows("set-a", "set-b", "set-c"))
 	m = markRow(t, m, "set-b")
 	if got := selCursorID(t, m); got != "set-c" {
-		t.Fatalf("cursor on %q after the mark, want the row below the region", got)
+		t.Fatalf("cursor on %q after the mark, want the next ordinary row", got)
 	}
 
 	// The cursored row leaves on the next poll, so the cursor has to fall back
@@ -537,46 +566,16 @@ func TestWorkSelectionCursorStaysOutOfTheRegionUntilWalkedIn(t *testing.T) {
 	updated, _ := m.Update(dashboardRowsMsg{snap: DashboardSnapshot{Containers: selRows("set-a", "set-b")}})
 	m = updated.(QueueDashboard)
 	if got := selCursorID(t, m); got != "set-a" {
-		t.Fatalf("cursor fell back onto %q, want the first row below the region", got)
+		t.Fatalf("cursor fell back onto %q, want the first ordinary row", got)
 	}
 
-	m = selPress(t, m, selKeyRune('k'))
+	m = selPress(t, m, selKeyRune('j'))
 	if got := selCursorID(t, m); got != "set-b" {
-		t.Fatalf("k landed on %q, want the marked row: j/k walk into the region", got)
+		t.Fatalf("j landed on %q, want the marked row: j/k walk into the region", got)
 	}
 	m = selPress(t, m, selKeyTab())
 	if m.selection.Active() {
 		t.Fatal("tab in the region did not unmark the row")
-	}
-}
-
-func TestWorkSelectionJumpKeysAreRegionAware(t *testing.T) {
-	m := selDashboard(selRows("set-a", "set-b", "set-c", "set-d"))
-	m = markRow(t, m, "set-a")
-	m = markRow(t, m, "set-b")
-	// Rows now read: set-a, set-b | set-c, set-d.
-
-	m = selPress(t, m, selKeyRune('G'))
-	if got := selCursorID(t, m); got != "set-d" {
-		t.Fatalf("G from below the region landed on %q, want the last row", got)
-	}
-	m = selPress(t, m, selKeyRune('g'))
-	m = selPress(t, m, selKeyRune('g'))
-	if got := selCursorID(t, m); got != "set-c" {
-		t.Fatalf("gg landed on %q, want the top of the cursor's own region first", got)
-	}
-	m = selPress(t, m, selKeyRune('g'))
-	m = selPress(t, m, selKeyRune('g'))
-	if got := selCursorID(t, m); got != "set-a" {
-		t.Fatalf("a second gg landed on %q, want the top of the whole list", got)
-	}
-	m = selPress(t, m, selKeyRune('G'))
-	if got := selCursorID(t, m); got != "set-b" {
-		t.Fatalf("G from inside the region landed on %q, want the region's own bottom", got)
-	}
-	m = selPress(t, m, selKeyRune('G'))
-	if got := selCursorID(t, m); got != "set-d" {
-		t.Fatalf("a second G landed on %q, want the bottom of the whole list", got)
 	}
 }
 

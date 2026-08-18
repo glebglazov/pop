@@ -814,7 +814,7 @@ type QueueDashboard struct {
 
 	// selection is the human's mark over the rows, keyed by CursorKey and holding
 	// the whole of selection mode: the mode is exactly "some row is marked"
-	// (ADR-0215 decisions 1 and 4). Marked rows are lifted into a region at the top
+	// (ADR-0215 decisions 1 and 4). Marked rows are parked in a region at the foot
 	// of the list and are exempt from every narrowing — the active preset's and the
 	// search's alike — so there is no selected-but-invisible row to account for.
 	selection ui.Selection
@@ -2255,10 +2255,10 @@ func (m QueueDashboard) activeQuery() string {
 // applySearch narrows the preset's rows by query and feeds them to the List,
 // keeping the cursor on the container it was on. The search subtracts from
 // allRows — the rows the active Work view preset selected — so it can never widen
-// the view, except for the rows the human marked: those are lifted into the
+// the view, except for the rows the human marked: those are parked in the
 // Selection region and are exempt from both narrowings (ADR-0215 decision 2). A
 // cursored row the query excludes has nowhere to stay, and only then does the
-// cursor fall back — to the first row below the region, which the cursor never
+// cursor fall back — to the first ordinary row above the region, which it never
 // enters except by being walked in.
 func (m *QueueDashboard) applySearch(query string) {
 	cursorKey := ""
@@ -2273,28 +2273,29 @@ func (m *QueueDashboard) applySearch(query string) {
 		m.list.SetRegion(ui.Region{})
 	}
 	if cursorKey != "" && !m.list.SetCursorToKey(cursorKey) {
-		m.list.SetCursor(m.list.RegionCount())
+		m.list.SetCursor(0)
 	}
 }
 
-// viewRows is the row slice the list holds: the marked rows first, then the rows
-// the query leaves of the ones the preset selected. A row is moved and never
-// copied — one row, one key — or the list's key-based re-anchoring and its j/k
-// counts would both start lying (ADR-0215 decision 3).
+// viewRows is the row slice the list holds: the rows the query leaves first, then
+// the marked rows at the foot. A row is moved and never copied — one row, one key
+// — or the list's key-based re-anchoring and its j/k counts would both start
+// lying (ADR-0224 decision 1).
 func (m QueueDashboard) viewRows(query string) []DashboardRow {
 	rest := filterDashboardRows(m.allRows, query)
 	if !m.selection.Active() {
 		return rest
 	}
 	_, rest = ui.SplitSelected(&m.selection, rest, rowCursorKey)
-	return append(m.selectionRows(), rest...)
+	return append(rest, m.selectionRows()...)
 }
 
-// selectionRows is the region's content: every marked row, in the list's own sort
-// and kind precedence rather than in marking order. The unfiltered build orders
-// them and supplies the ones the preset hides — that is the only thing it is
-// asked for — while a marked row the preset does select still renders from the
-// preset's own build, so one build remains the authority on every row it holds.
+// selectionRows is the foot region's content: every marked row, in the list's
+// own sort and kind precedence rather than in marking order. The unfiltered build
+// orders them and supplies the ones the preset hides — that is the only thing it
+// is asked for — while a marked row the preset does select still renders from
+// the preset's own build, so one build remains the authority on every row it
+// holds.
 func (m QueueDashboard) selectionRows() []DashboardRow {
 	pool := m.allRows
 	if len(m.unfiltered) > 0 {
@@ -2349,12 +2350,17 @@ func (m *QueueDashboard) toggleSelected() {
 	if rows := m.list.Items(); m.list.Cursor()+1 < len(rows) {
 		next = rows[m.list.Cursor()+1].CursorKey
 	}
-	m.selection.Toggle(row.CursorKey)
+	marked := m.selection.Toggle(row.CursorKey)
 	m.applySearch(m.activeQuery())
-	if next == "" || !m.list.SetCursorToKey(next) {
-		// The row was the last one, so there is no row after it: stay at the bottom,
-		// which is where the row the human just marked used to be.
-		m.list.SetCursor(m.list.Len() - 1)
+	if next == "" || marked && m.selection.Has(next) || !m.list.SetCursorToKey(next) {
+		// Marking the last ordinary row must not drop the cursor into the foot
+		// region. Stay on the last ordinary row when there is one.
+		ordinary := m.list.Len() - m.list.RegionCount()
+		if ordinary > 0 {
+			m.list.SetCursor(ordinary - 1)
+		} else {
+			m.list.SetCursor(m.list.Len() - 1)
+		}
 	}
 }
 

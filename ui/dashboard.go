@@ -1164,7 +1164,7 @@ func (d *MonitorDashboard) sortPanes() {
 	sort.SliceStable(d.panes, func(i, j int) bool {
 		return attentionStatusOrder(d.panes[i].Status) < attentionStatusOrder(d.panes[j].Status)
 	})
-	d.liftSelected()
+	d.parkSelected()
 	d.pinProtectedPane()
 	d.syncPanesToList()
 }
@@ -1240,25 +1240,30 @@ func (d *MonitorDashboard) toggleSelected() {
 	if d.cursor+1 < len(d.panes) {
 		next = d.panes[d.cursor+1].PaneID
 	}
-	d.selection.Toggle(d.panes[d.cursor].PaneID)
+	marked := d.selection.Toggle(d.panes[d.cursor].PaneID)
 	// A mark is the human ordering rows deliberately, so it releases a row an
 	// earlier in-place mutation anchored: both orderings cannot hold at once.
 	d.clearProtectedPane()
 	d.rebuildView()
-	if next == "" || !d.list.SetCursorToKey(next) {
-		// The marked row was last, so there is no next row: stay at the bottom,
-		// which is where the row the human just marked used to be.
-		d.list.SetCursor(len(d.panes) - 1)
+	if next == "" || marked && d.selection.Has(next) || !d.list.SetCursorToKey(next) {
+		// Marking the last ordinary row must not drop the cursor into the foot
+		// region. Stay on the last ordinary row when there is one.
+		ordinary := len(d.panes) - d.list.RegionCount()
+		if ordinary > 0 {
+			d.list.SetCursor(ordinary - 1)
+		} else {
+			d.list.SetCursor(len(d.panes) - 1)
+		}
 	}
 	d.syncFromList()
 	d.fetchPreview()
 }
 
-// liftSelected moves every marked pane to the top of the view and tells the list
-// how many rows its reserved region holds. It is the one place the Selection
-// area's ordering is applied, so the region is a property of the view rather than
-// of the key that made it.
-func (d *MonitorDashboard) liftSelected() {
+// parkSelected moves every marked pane to the foot of the view and tells the
+// list how many rows its reserved region holds. It is the one place the
+// Selection area's ordering is applied, so the region is a property of the view
+// rather than of the key that made it.
+func (d *MonitorDashboard) parkSelected() {
 	// A pane that left the monitored set takes its mark with it, and says
 	// nothing: a row that no longer exists cannot be a target.
 	d.selection.Retain(d.monitored)
@@ -1267,7 +1272,7 @@ func (d *MonitorDashboard) liftSelected() {
 		return
 	}
 	marked, rest := SplitSelected(&d.selection, d.panes, func(p AttentionPane) string { return p.PaneID })
-	d.panes = append(marked, rest...)
+	d.panes = append(rest, marked...)
 	d.list.SetRegion(SelectionRegion(d.selection.Len()))
 }
 
@@ -1373,7 +1378,7 @@ func (d *MonitorDashboard) rebuildView() {
 		d.panes = make([]AttentionPane, len(d.allPanes))
 		copy(d.panes, d.allPanes)
 	}
-	d.liftSelected()
+	d.parkSelected()
 
 	if d.pinProtectedPane() {
 		d.list.SetItems(d.panes)
@@ -1387,7 +1392,7 @@ func (d *MonitorDashboard) rebuildView() {
 	if selectedPaneID != "" {
 		if !d.list.SetCursorToKey(selectedPaneID) {
 			if len(d.panes) > 0 {
-				d.list.SetCursor(len(d.panes) - 1)
+				d.list.SetCursor(0)
 			}
 		}
 	} else if d.cursor >= len(d.panes) {

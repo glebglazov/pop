@@ -42,15 +42,15 @@ type Opts[T any] struct {
 	LinesPerItem int
 }
 
-// Region is a reserved block of leading items the list keeps at the top of the
-// list, divided from the rest by a line of its own. It is how a Selection area
-// reaches the screen (ADR-0215 decision 3): the caller moves the marked rows to
-// the front of the item slice and says how many there are, and the list spends
-// the lines — capping the block at a third of the viewport and saying how many
-// members the cap left out. The cursor still walks one flat item slice, so a row
-// in the region is reached and left like any other row.
+// Region is a reserved block of trailing items the list keeps at the foot of the
+// viewport, divided from the ordinary rows by a line of its own. It is how a
+// Selection area reaches the screen (ADR-0224 decision 1): the caller moves the
+// marked rows to the end of the item slice and says how many there are, and the
+// list spends the lines — capping the block at a third of the viewport and
+// saying how many members the cap left out. The cursor still walks one flat item
+// slice, so a row in the region is reached and left like any other row.
 type Region struct {
-	// Count is how many leading items belong to the region; zero means none.
+	// Count is how many trailing items belong to the region; zero means none.
 	Count int
 	// Separator renders the line between the region and the rest of the list.
 	// Width is the visible columns the list is drawing into; the separator fills
@@ -261,27 +261,30 @@ func (l *List[T]) JumpTo(i int) {
 // cursor movement.
 func (l *List[T]) SetScroll(scroll int) {
 	visible := l.visibleItems()
+	ordinaryCount := len(l.items) - l.RegionCount()
 	if visible <= 0 {
 		l.scroll = 0
 		return
 	}
-	if scroll > l.cursor {
-		scroll = l.cursor
+	if l.cursor < ordinaryCount {
+		if scroll > l.cursor {
+			scroll = l.cursor
+		}
+		if scroll <= l.cursor-visible {
+			scroll = l.cursor - visible + 1
+		}
 	}
-	if scroll <= l.cursor-visible {
-		scroll = l.cursor - visible + 1
-	}
-	l.scroll = min(max(scroll, 0), max(len(l.items)-visible, 0))
+	l.scroll = min(max(scroll, 0), max(ordinaryCount-visible, 0))
 }
 
-// SetRegion declares the reserved block at the front of the item slice and
+// SetRegion declares the reserved block at the end of the item slice and
 // reclamps scroll, because the block's lines come out of the scrolling area.
 func (l *List[T]) SetRegion(r Region) {
 	l.region = r
 	l.adjustScroll()
 }
 
-// RegionCount is how many leading items the region holds — what a region-aware
+// RegionCount is how many trailing items the region holds — what a region-aware
 // jump key measures the edge of the cursor's own region against.
 func (l *List[T]) RegionCount() int {
 	return min(max(l.region.Count, 0), len(l.items))
@@ -316,8 +319,9 @@ func (l *List[T]) regionLayout() regionLayout {
 	}
 	// The block scrolls for one reason only: to keep a cursor that walked into it
 	// on screen.
-	if l.cursor < count && l.cursor >= lay.shown {
-		lay.scroll = l.cursor - lay.shown + 1
+	start := len(l.items) - count
+	if l.cursor >= start+lay.shown {
+		lay.scroll = l.cursor - start - lay.shown + 1
 	}
 	return lay
 }
@@ -334,8 +338,8 @@ func (l *List[T]) visibleItems() int {
 // indicator, quick-access prefix column, padding, and anchor blank lines. When
 // LinesPerItem > 1, each logical item is rendered over that many physical lines;
 // the cursor prefix and quick-access label appear only on the first line. A
-// Region, when one is set, is drawn above its separator and keeps its lines
-// whatever the rest of the list scrolls to.
+// Region, when one is set, is drawn below its separator and keeps its lines at
+// the viewport foot whatever the rest of the list scrolls to.
 func (l *List[T]) VisibleRows() []string {
 	height := l.height
 	if height <= 0 {
@@ -349,11 +353,11 @@ func (l *List[T]) VisibleRows() []string {
 	region := l.regionLines(lay, prefixWidth)
 
 	restHeight := max(height-len(region), 0)
-	restCount := len(l.items) - lay.count
-	logicalVisible := min(restHeight/lpi, restCount)
+	ordinaryCount := len(l.items) - lay.count
+	logicalVisible := min(restHeight/lpi, ordinaryCount)
 
-	start := max(l.scroll, lay.count)
-	if maxStart := lay.count + restCount - logicalVisible; start > maxStart {
+	start := max(l.scroll, 0)
+	if maxStart := ordinaryCount - logicalVisible; start > maxStart {
 		start = maxStart
 	}
 
@@ -366,33 +370,35 @@ func (l *List[T]) VisibleRows() []string {
 	for i := 0; i < emptyBefore; i++ {
 		lines = append(lines, "")
 	}
-	lines = append(lines, region...)
 	for i := 0; i < logicalVisible; i++ {
 		lines = append(lines, l.itemLines(start+i, prefixWidth)...)
 	}
-	for len(lines) < height {
+	for len(lines) < height-len(region) {
 		lines = append(lines, "")
 	}
+	lines = append(lines, region...)
 	return lines[:height]
 }
 
-// regionLines draws the reserved block: its visible members, the note standing in
-// for the ones the cap left out, and the separator that divides it from the rest.
+// regionLines draws the reserved block: the separator that divides it from the
+// ordinary rows, its visible members, and the note standing in for the ones the
+// cap left out.
 func (l *List[T]) regionLines(lay regionLayout, prefixWidth int) []string {
 	if lay.count == 0 {
 		return nil
 	}
 	out := make([]string, 0, lay.lines)
-	for i := lay.scroll; i < lay.scroll+lay.shown && i < lay.count; i++ {
-		out = append(out, l.itemLines(i, prefixWidth)...)
-	}
-	if lay.hidden() > 0 && l.region.Overflow != nil {
-		out = append(out, l.region.Overflow(lay.hidden()))
-	}
 	if l.region.Separator != nil {
 		out = append(out, l.region.Separator(lay.count, l.width))
 	} else {
 		out = append(out, "")
+	}
+	start := len(l.items) - lay.count
+	for i := start + lay.scroll; i < start+lay.scroll+lay.shown && i < len(l.items); i++ {
+		out = append(out, l.itemLines(i, prefixWidth)...)
+	}
+	if lay.hidden() > 0 && l.region.Overflow != nil {
+		out = append(out, l.region.Overflow(lay.hidden()))
 	}
 	return out
 }
@@ -490,18 +496,17 @@ func (l *List[T]) adjustScroll() {
 }
 
 // rescroll recomputes the scroll offset for the current cursor. A region takes
-// its lines off the scrolling area and its members out of it, so the offset is
-// worked out over the rest of the list and carried back into item indices — and
-// a cursor inside the region leaves the rest where it stands, because the region
-// scrolls itself.
+// its lines and trailing members out of the ordinary list. A cursor inside the
+// region leaves the ordinary rows where they stand because the region scrolls
+// itself.
 func (l *List[T]) rescroll(margin int) {
 	lay := l.regionLayout()
 	height := (l.height - lay.lines) / l.LinesPerItem()
-	l.scroll = lay.count + adjustScroll(
-		max(l.cursor-lay.count, 0),
-		l.scroll-lay.count,
-		height,
-		len(l.items)-lay.count,
-		margin,
-	)
+	ordinaryCount := len(l.items) - lay.count
+	if l.cursor < ordinaryCount {
+		l.scroll = adjustScroll(l.cursor, l.scroll, height, ordinaryCount, margin)
+		return
+	}
+	visible := min(max(height, 0), ordinaryCount)
+	l.scroll = min(max(l.scroll, 0), max(ordinaryCount-visible, 0))
 }

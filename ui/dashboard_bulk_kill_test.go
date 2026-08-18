@@ -226,7 +226,7 @@ func TestMonitorBulkKillFailures(t *testing.T) {
 		if d.selection.Len() != 1 || !d.selection.Has("%1") {
 			t.Fatalf("selection = %d panes, want exactly the pane that failed", d.selection.Len())
 		}
-		if ids := paneIDs(d.panes); ids[0] != "%1" || d.list.RegionCount() != 1 {
+		if ids := paneIDs(d.panes); ids[len(ids)-1] != "%1" || d.list.RegionCount() != 1 {
 			t.Errorf("view = %v with region %d, want the failed pane alone in the region", ids, d.list.RegionCount())
 		}
 		if _, ok := d.paneByID("%1"); !ok {

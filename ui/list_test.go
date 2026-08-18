@@ -59,6 +59,49 @@ func TestListAnchorBottom(t *testing.T) {
 	}
 }
 
+func TestListRegionIsAReservedFoot(t *testing.T) {
+	separator := func(int, int) string { return "selected" }
+	l := newTestList(strItems(3), AnchorTop, false, 0, nil)
+	l.Resize(7)
+	l.SetRegion(Region{Count: 1, Separator: separator})
+
+	rows := l.VisibleRows()
+	if !strings.Contains(StripANSI(rows[0]), "item-0") || !strings.Contains(StripANSI(rows[1]), "item-1") {
+		t.Fatalf("ordinary rows did not stay at the head: %q", rows)
+	}
+	for i := 2; i < 5; i++ {
+		if rows[i] != "" {
+			t.Fatalf("padding row %d = %q, want blank space before the foot", i, rows[i])
+		}
+	}
+	if rows[5] != "selected" || !strings.Contains(StripANSI(rows[6]), "item-2") {
+		t.Fatalf("foot = %q, want divider then the trailing region item", rows[5:])
+	}
+
+	// The divider stays on the same screen row when the ordinary list grows.
+	l.SetItems(strItems(5))
+	rows = l.VisibleRows()
+	if rows[5] != "selected" || !strings.Contains(StripANSI(rows[6]), "item-4") {
+		t.Fatalf("grown foot = %q, want the divider fixed on row 5", rows[5:])
+	}
+}
+
+func TestListCursorWalksIntoTheFootRegion(t *testing.T) {
+	l := newTestList(strItems(4), AnchorTop, false, 0, nil)
+	l.Resize(6)
+	l.SetRegion(Region{Count: 2, Separator: func(int, int) string { return "selected" }})
+	l.SetCursor(1)
+
+	l.MoveDown()
+	if l.Cursor() != 2 {
+		t.Fatalf("cursor = %d, want the first trailing region item", l.Cursor())
+	}
+	l.MoveUp()
+	if l.Cursor() != 1 {
+		t.Fatalf("cursor = %d, want the last ordinary item", l.Cursor())
+	}
+}
+
 func TestListMoveUpDownWrap(t *testing.T) {
 	l := newTestList(strItems(3), AnchorTop, true, 0, nil)
 	l.SetCursor(0)

@@ -156,7 +156,7 @@ func TestMonitorBulkUnmonitorAnswersTheCapturedSet(t *testing.T) {
 		t.Errorf("flash = %q, want the successes counted too", got)
 	}
 	// %2 is not merely a failure — it is gone from the monitored set entirely,
-	// so liftSelected's Retain drops its mark: there is nothing left to retry.
+	// so parkSelected's Retain drops its mark: there is nothing left to retry.
 	if d.selection.Active() {
 		t.Errorf("selection still holds %d panes, want none — the failed pane no longer exists", d.selection.Len())
 	}
@@ -297,7 +297,7 @@ func TestMonitorBulkFollowAnswersTheCapturedSet(t *testing.T) {
 		t.Errorf("flash = %q, want the successes counted too", got)
 	}
 	// %2 is gone from the monitored set entirely, not merely a failure, so
-	// liftSelected's Retain drops its mark: there is nothing left to retry.
+	// parkSelected's Retain drops its mark: there is nothing left to retry.
 	if d.selection.Active() {
 		t.Errorf("selection still holds %d panes, want none — the failed pane no longer exists", d.selection.Len())
 	}

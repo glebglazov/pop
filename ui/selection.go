@@ -111,7 +111,7 @@ func CaptionRule(label string, width int) string {
 	return dimStyle.Render(strings.Repeat(dash, left) + label + strings.Repeat(dash, right))
 }
 
-// SelectionSeparator is the dim rule that closes the Selection area, counting
+// SelectionSeparator is the dim rule that opens the Selection area, counting
 // the rows it holds.
 func SelectionSeparator(count, width int) string {
 	return CaptionRule(fmt.Sprintf("%d selected", count), width)
@@ -133,8 +133,7 @@ func ConfirmPrompt(label string) string {
 }
 
 // SelectionRegion is the list Region a Selection of count rows asks for: the
-// marked rows reserved at the top of the list, under the house separator and
-// overflow lines.
+// marked rows reserved at the foot of the viewport, below the house separator.
 func SelectionRegion(count int) Region {
 	return Region{
 		Count:     count,

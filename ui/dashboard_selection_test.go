@@ -54,10 +54,10 @@ func plainRows(d *MonitorDashboard) []string {
 }
 
 // TestMonitorSelectionTabMarks pins tab's whole outcome: the pane is marked, its
-// row lifts into the reserved region at the top, exactly once, and the cursor
+// row moves into the reserved region at the foot, exactly once, and the cursor
 // lands on the row that followed it (ADR-0215 decisions 3 and 8).
 func TestMonitorSelectionTabMarks(t *testing.T) {
-	t.Run("the cursored pane lifts to the top and the cursor moves on", func(t *testing.T) {
+	t.Run("the cursored pane moves to the foot and the cursor moves on", func(t *testing.T) {
 		d := newMonitorDashboard(selectionPanes(4), AttentionCallbacks{})
 		d.cursor = 1 // %2
 		d = pressMonitor(d, keyTab())
@@ -65,8 +65,8 @@ func TestMonitorSelectionTabMarks(t *testing.T) {
 		if !d.selection.Has("%2") {
 			t.Fatalf("tab did not mark %%2; selection holds %d", d.selection.Len())
 		}
-		if got := paneIDs(d.panes); strings.Join(got, ",") != "%2,%1,%3,%4" {
-			t.Errorf("view order = %v, want the marked pane first", got)
+		if got := paneIDs(d.panes); strings.Join(got, ",") != "%1,%3,%4,%2" {
+			t.Errorf("view order = %v, want the marked pane last", got)
 		}
 		if d.list.RegionCount() != 1 {
 			t.Errorf("region count = %d, want 1", d.list.RegionCount())
@@ -109,7 +109,7 @@ func TestMonitorSelectionTabMarks(t *testing.T) {
 	t.Run("the region follows the list's own order, not the marking order", func(t *testing.T) {
 		d := newMonitorDashboard(selectionPanes(4), AttentionCallbacks{})
 		d = markPanes(d, "%3", "%1")
-		if got := paneIDs(d.panes); strings.Join(got, ",") != "%1,%3,%2,%4" {
+		if got := paneIDs(d.panes); strings.Join(got, ",") != "%2,%4,%1,%3" {
 			t.Errorf("view order = %v, want %%1 before %%3 — marking order is not state", got)
 		}
 	})
@@ -134,7 +134,7 @@ func TestMonitorSelectionShiftTabClears(t *testing.T) {
 }
 
 // TestMonitorSelectionChrome pins what the surface says while rows are marked:
-// the dim count line under the region, the mode word at the left of the bottom
+// the dim count line above the region, the mode word at the left of the bottom
 // line, and the overflow note when the viewport cap bites.
 func TestMonitorSelectionChrome(t *testing.T) {
 	t.Run("a dim count line divides the region from the rest", func(t *testing.T) {
@@ -151,11 +151,14 @@ func TestMonitorSelectionChrome(t *testing.T) {
 		if sep < 0 {
 			t.Fatalf("no `2 selected` rule in the list:\n%s", strings.Join(rows, "\n"))
 		}
-		if !strings.Contains(rows[sep-1], "pane%2") {
-			t.Errorf("line above the separator = %q, want the last marked pane", rows[sep-1])
+		if want := len(rows) - 3; sep != want {
+			t.Fatalf("separator row = %d, want the fixed foot row %d", sep, want)
 		}
-		if !strings.Contains(rows[sep+1], "pane%3") {
-			t.Errorf("line below the separator = %q, want the first unmarked pane", rows[sep+1])
+		if !strings.Contains(rows[sep-1], "pane%5") {
+			t.Errorf("line above the separator = %q, want the last ordinary pane", rows[sep-1])
+		}
+		if !strings.Contains(rows[sep+1], "pane%1") {
+			t.Errorf("line below the separator = %q, want the first marked pane", rows[sep+1])
 		}
 		want := SelectionSeparator(2, d.leftWidth())
 		if got := d.list.VisibleRows()[sep]; got != want {
@@ -270,8 +273,8 @@ func TestMonitorSelectionSurvivesRebuild(t *testing.T) {
 		if !d.selection.Has("%2") {
 			t.Fatal("the mark did not survive the rebuild")
 		}
-		if got := paneIDs(d.panes); got[0] != "%2" || d.list.RegionCount() != 1 {
-			t.Errorf("view order = %v with region %d, want %%2 alone at the top", got, d.list.RegionCount())
+		if got := paneIDs(d.panes); got[len(got)-1] != "%2" || d.list.RegionCount() != 1 {
+			t.Errorf("view order = %v with region %d, want %%2 alone at the foot", got, d.list.RegionCount())
 		}
 	})
 
@@ -300,6 +303,19 @@ func TestMonitorSelectionSurvivesRebuild(t *testing.T) {
 // never in the region by default or after a rebuild, but j/k walk in, which is
 // how a mark is removed.
 func TestMonitorSelectionCursorAndRegion(t *testing.T) {
+	t.Run("marking the last ordinary row keeps the cursor above the region", func(t *testing.T) {
+		d := newMonitorDashboard(selectionPanes(4), AttentionCallbacks{})
+		d.cursor = 3
+		d = pressMonitor(d, keyTab())
+
+		if d.cursor >= len(d.panes)-d.list.RegionCount() {
+			t.Fatalf("cursor = %d, inside a region of %d rows", d.cursor, d.list.RegionCount())
+		}
+		if pane, _ := d.list.Selected(); pane.PaneID != "%3" {
+			t.Fatalf("cursor sits on %s, want the last ordinary pane %%3", pane.PaneID)
+		}
+	})
+
 	t.Run("a rebuild never moves the cursor into the region", func(t *testing.T) {
 		d := newMonitorDashboard(selectionPanes(4), AttentionCallbacks{})
 		d = markPanes(d, "%1", "%2")
@@ -308,7 +324,7 @@ func TestMonitorSelectionCursorAndRegion(t *testing.T) {
 		m, _ := d.Update(reloadTickMsg{})
 		d = m.(*MonitorDashboard)
 
-		if d.cursor < d.list.RegionCount() {
+		if d.cursor >= len(d.panes)-d.list.RegionCount() {
 			t.Fatalf("cursor = %d, inside a region of %d rows", d.cursor, d.list.RegionCount())
 		}
 		if pane, _ := d.list.Selected(); pane.PaneID != before.PaneID {
@@ -316,68 +332,19 @@ func TestMonitorSelectionCursorAndRegion(t *testing.T) {
 		}
 	})
 
-	t.Run("k walks into the region and tab there unmarks", func(t *testing.T) {
+	t.Run("j walks into the region and tab there unmarks", func(t *testing.T) {
 		d := newMonitorDashboard(selectionPanes(4), AttentionCallbacks{})
 		d = markPanes(d, "%1", "%2")
-		d.list.SetCursor(2) // the first row below the region
+		d.list.SetCursor(1) // the last ordinary row above the region
 		d.syncFromList()
 
-		d = pressMonitor(d, tea.KeyPressMsg{Code: 'k', Text: "k"})
-		if d.cursor != 1 {
-			t.Fatalf("cursor = %d, want 1 — k must enter the region", d.cursor)
+		d = pressMonitor(d, tea.KeyPressMsg{Code: 'j', Text: "j"})
+		if d.cursor != 2 {
+			t.Fatalf("cursor = %d, want 2 — j must enter the region", d.cursor)
 		}
 		d = pressMonitor(d, keyTab())
-		if d.selection.Has("%2") {
+		if d.selection.Has("%1") {
 			t.Error("tab inside the region did not unmark the row")
-		}
-	})
-}
-
-// TestMonitorSelectionRegionAwareJumps pins decision 4's jump rule: gg and G stop
-// at the edge of the region the cursor is in before the edge of the whole list.
-func TestMonitorSelectionRegionAwareJumps(t *testing.T) {
-	newMarked := func(t *testing.T) *MonitorDashboard {
-		t.Helper()
-		d := newMonitorDashboard(selectionPanes(6), AttentionCallbacks{})
-		d = markPanes(d, "%1", "%2")
-		if d.list.RegionCount() != 2 {
-			t.Fatalf("region count = %d, want 2", d.list.RegionCount())
-		}
-		return d
-	}
-
-	t.Run("G reaches the region's bottom, then the list's", func(t *testing.T) {
-		d := newMarked(t)
-		d.cursor = 0
-		d = pressMonitor(d, tea.KeyPressMsg{Code: 'G', Text: "G"})
-		if d.cursor != 1 {
-			t.Fatalf("cursor = %d, want 1 — the bottom of the region", d.cursor)
-		}
-		d = pressMonitor(d, tea.KeyPressMsg{Code: 'G', Text: "G"})
-		if d.cursor != 5 {
-			t.Fatalf("cursor = %d, want 5 — the bottom of the whole list", d.cursor)
-		}
-	})
-
-	t.Run("gg reaches the rest's top, then the list's", func(t *testing.T) {
-		d := newMarked(t)
-		d.cursor = 5
-		d = pressG(pressG(d))
-		if d.cursor != 2 {
-			t.Fatalf("cursor = %d, want 2 — the top of the rows below the region", d.cursor)
-		}
-		d = pressG(pressG(d))
-		if d.cursor != 0 {
-			t.Fatalf("cursor = %d, want 0 — the top of the whole list", d.cursor)
-		}
-	})
-
-	t.Run("G from below the region reaches the list's bottom at once", func(t *testing.T) {
-		d := newMarked(t)
-		d.cursor = 3
-		d = pressMonitor(d, tea.KeyPressMsg{Code: 'G', Text: "G"})
-		if d.cursor != 5 {
-			t.Fatalf("cursor = %d, want 5", d.cursor)
 		}
 	})
 }

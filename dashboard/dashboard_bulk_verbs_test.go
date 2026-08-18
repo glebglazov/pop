@@ -405,7 +405,7 @@ func TestWorkBulkFailureLeavesExactlyTheFailedRowsMarked(t *testing.T) {
 		t.Fatalf("Selection = %d marks, want the failed row alone", m.selection.Len())
 	}
 	if got := m.list.RegionCount(); got != 1 {
-		t.Fatalf("region holds %d rows, want the failed row still lifted", got)
+		t.Fatalf("region holds %d rows, want the failed row still parked", got)
 	}
 }
 
@@ -544,7 +544,7 @@ func TestWorkBulkMuteAppliesOneWindowToEveryRow(t *testing.T) {
 }
 
 // A menu is opened *by* the Selection, so it cannot be what hides it: the
-// counted separator stays under the marked rows and the mode word stays at the
+// counted separator stays above the marked rows and the mode word stays at the
 // left of the bottom line, ahead of the menu's own hints. The menu is a Frame
 // block below the whole list now (ADR-0224 decision 4), so neither signal is a
 // thing the menu can displace — which is what these tests check.
@@ -584,15 +584,15 @@ func TestWorkBulkMenuKeepsTheSelectionSignals(t *testing.T) {
 
 	view, separator := selectionSignals(t, m, 2)
 
-	// The region is untouched by the menu: marked rows, the rule, the rest of the
+	// The region is untouched by the menu: ordinary rows, the rule, marked rows,
 	// list — and the menu below all of it as bottom chrome rather than spliced in.
 	cut := strings.Index(view, separator)
 	before, after := view[:cut], view[cut:]
-	if !strings.Contains(before, "set-a") || !strings.Contains(before, "set-b") {
-		t.Fatalf("the marked rows are not above the separator:\n%s", view)
+	if !strings.Contains(after, "set-a") || !strings.Contains(after, "set-b") {
+		t.Fatalf("the marked rows are not below the separator:\n%s", view)
 	}
-	if !strings.Contains(after, "set-c") || !strings.Contains(after, "set-d") {
-		t.Fatalf("the unmarked rows are not below the separator:\n%s", view)
+	if !strings.Contains(before, "set-c") || !strings.Contains(before, "set-d") {
+		t.Fatalf("the ordinary rows are not above the separator:\n%s", view)
 	}
 	if strings.Contains(before, "actions") {
 		t.Fatalf("the menu was spliced into the table:\n%s", view)
@@ -705,11 +705,11 @@ func TestWorkBulkMenuKeepsTheSelectionSignalsInTwoLineMode(t *testing.T) {
 	view, separator := selectionSignals(t, m, 2)
 	cut := strings.Index(view, separator)
 	before, after := view[:cut], view[cut:]
-	if !strings.Contains(before, "set-a") || !strings.Contains(before, "set-b") {
-		t.Fatalf("the marked rows are not above the separator:\n%s", view)
+	if !strings.Contains(after, "set-a") || !strings.Contains(after, "set-b") {
+		t.Fatalf("the marked rows are not below the separator:\n%s", view)
 	}
-	if !strings.Contains(after, "set-c") {
-		t.Fatalf("the unmarked row is not below the separator:\n%s", view)
+	if !strings.Contains(before, "set-c") {
+		t.Fatalf("the ordinary row is not above the separator:\n%s", view)
 	}
 	if strings.Contains(before, "actions") {
 		t.Fatalf("the menu was spliced into the two-line table:\n%s", view)
