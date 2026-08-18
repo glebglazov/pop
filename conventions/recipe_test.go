@@ -94,19 +94,27 @@ func TestCodeReviewRecipeDerivesTheStandardFromTheRepository(t *testing.T) {
 		"its linter configuration":       ".golangci.yml",
 		"its formatter and build":        "pre-commit",
 		"the idiom of the code itself":   "idiom",
-		"where a derived result goes":    "pop memory",
-		"the write verb":                 "pop conventions set code-review",
 		"the team's own layer":           "docs/agents/code-review.md",
-		"the no-standard result":         "No discernible code-review convention",
+		"the smell baseline's source":    "Fowler",
+		"a named smell":                  "Feature Envy",
+		"the repository-overrides rule":  "The repository overrides.",
+		"the judgement-call rule":        "Always a judgement call.",
 	} {
 		if !strings.Contains(recipe, want) {
 			t.Errorf("code-review recipe does not carry %s (%q):\n%s", what, want, recipe)
 		}
 	}
-	// Pop asserting a standard is the option ADR-0214 rejected: the recipe has
-	// to say so, or a reader with nothing derivable invents one.
-	if !strings.Contains(recipe, "Pop does not ship one") {
+	// Pop asserting a house style is the option ADR-0214 rejected; the floor
+	// baseline is not that, so the recipe has to keep declining one.
+	if !strings.Contains(recipe, "Pop does not ship a house style") {
 		t.Errorf("code-review recipe does not decline to assert a house style:\n%s", recipe)
+	}
+	// ADR-0223 decision 5: pop memory is the wrong artifact for a review
+	// standard, and the recipe must not send anyone back to it.
+	for _, unwanted := range []string{"pop memory", "pop conventions set code-review", "No discernible code-review convention"} {
+		if strings.Contains(recipe, unwanted) {
+			t.Errorf("code-review recipe still carries %q, which ADR-0223 retired:\n%s", unwanted, recipe)
+		}
 	}
 }
 

@@ -3,12 +3,14 @@
 Nobody has written down what good code looks like here, so a review has no
 standard to read a changeset against.
 
-**Pop does not ship one.** There is no house style in this tool to fall back
-on, and inventing one would have a review judge this repository against a
-stranger's taste. The standard belongs to the codebase: derive it from the
-repository itself — its own documents, its linters and formatter, and the idiom
-of the code that is already there — the same way the `commits` recipe reads the
-team's log rather than pop's own commits.
+**Pop does not ship a house style.** Inventing one would have a review judge
+this repository against a stranger's taste. The standard belongs to the
+codebase: derive it from the repository itself — its own documents, its
+linters and formatter, and the idiom of the code that is already there — the
+same way the `commits` recipe reads the team's log rather than pop's own
+commits. What pop does ship is a floor beneath those three sources: a named
+baseline of code smells, for a repository that has written nothing about
+itself to still hold a changeset against something honest.
 
 Work all three sources. Unlike the other kinds, this one does **not** stop at
 the first hit: a documented rule, an enforced rule and an unwritten habit are
@@ -51,36 +53,55 @@ current idiom.
 Write the habits down as habits, with an example location, so a later review can
 tell an unwritten rule from an enforced one.
 
-## 4. Write the result down, in the layer that fits where it came from
+## 4. The smell baseline, as a floor
+
+Beneath the three sources above sits a named baseline: a fixed set of Fowler
+smells (*Refactoring*, ch. 3) that applies even when a repository has written
+nothing about itself. Two rules bind it:
+
+- **The repository overrides.** Anything derived from the three sources above
+  wins — where a documented standard, an enforced rule or the code's own idiom
+  endorses something the baseline would flag, suppress the smell.
+- **Always a judgement call.** Each smell below is a labelled heuristic, never
+  a hard violation, and — like anything derived above — skip whatever tooling
+  already enforces.
+
+Each smell reads *what it is* → *how to fix*:
+
+- **Mysterious Name** — a function, variable, or type whose name doesn't reveal
+  what it does or holds. → rename it; if no honest name comes, the design's murky.
+- **Duplicated Code** — the same logic shape appears in more than one place. →
+  extract the shared shape, call it from both.
+- **Feature Envy** — a method that reaches into another object's data more than
+  its own. → move the method onto the data it envies.
+- **Data Clumps** — the same few fields or params keep travelling together (a
+  type wanting to be born). → bundle them into one type, pass that.
+- **Primitive Obsession** — a primitive or string standing in for a domain
+  concept that deserves its own type. → give the concept its own small type.
+- **Repeated Switches** — the same `switch`/`if`-cascade on the same type
+  recurs. → replace with polymorphism, or one map both sites share.
+- **Shotgun Surgery** — one logical change forces scattered edits across many
+  files. → gather what changes together into one module.
+- **Divergent Change** — one file or module is edited for several unrelated
+  reasons. → split so each module changes for one reason.
+- **Speculative Generality** — abstraction, parameters, or hooks added for a
+  need nothing asks for. → delete it; inline back until a real need shows.
+- **Message Chains** — long `a.b().c().d()` navigation the caller shouldn't
+  depend on. → hide the walk behind one method on the first object.
+- **Middle Man** — a class or function that mostly just delegates onward. →
+  cut it, call the real target direct.
+- **Refused Bequest** — a subclass or implementer that ignores or overrides
+  most of what it inherits. → drop the inheritance, use composition.
+
+## 5. Write the result down, in the repository's document
 
 A derivation nobody records is one every future review pays for again.
-
-- **Derived by you**, from the sources above, goes to the **pop memory** layer:
-  pop's inference about one repository on one machine, recorded with what it was
-  derived from so a reader can weigh it.
-  `pop conventions get code-review` names that layer's path, and
-  `pop conventions set code-review --derived-from "..."` writes it.
-- **Stated by the human in session** — "we never mock in tests here" — is the
-  team's rule, not pop's guess. Offer to put it in the repository's
-  `docs/agents/code-review.md`, which outranks pop memory and which version
-  control carries to their colleagues, and let the human decide.
+Whether you derived it from the sources above or the human stated it in
+session — "we never mock in tests here" — a review standard is prose about a
+team's taste, and the repository's `docs/agents/code-review.md` is the only
+right place for it: it is what version control carries to their colleagues.
+Offer the addition, and let the human decide.
 
 Keep it short enough to be read in full before every review, and keep it to what
 is true here. A standard that lists what any good code anywhere would do gives a
 review nothing to hold this changeset against.
-
-## 5. When nothing can be derived, write **that** down
-
-A repository with no documents, no linter configuration and no shared idiom has
-no standard, and that is a real result rather than a failed derivation. Do not
-substitute a generic one. Record the nothing, in the pop memory layer, as plainly
-as you would record a standard:
-
-    No discernible code-review convention. No agent or contributor documents,
-    no linter or formatter configuration, and no shared idiom across the files
-    sampled. Derived from: <what you read>. Review only what the changeset's own
-    stated intent asks for until the team states a standard.
-
-Written down, the next review reads a settled answer and keeps its opinions to
-itself. Left unwritten, every review re-derives the same nothing and fills the
-gap with its own taste.
