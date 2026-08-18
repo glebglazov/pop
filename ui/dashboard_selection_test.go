@@ -53,6 +53,24 @@ func plainRows(d *MonitorDashboard) []string {
 	return out
 }
 
+func TestMonitorTopScrollEdgeRidesTheHeader(t *testing.T) {
+	d := newMonitorDashboard(selectionPanes(8), AttentionCallbacks{})
+	d.width = 100
+	d.height = 1
+	d.list.Resize(d.listBodyHeight())
+	d.list.SetCursor(5)
+	d.syncFromList()
+
+	view := StripANSI(d.View().Content)
+	want := ScrollEdge("↑", d.list.ScrollEdges().Above)
+	if !strings.Contains(strings.Split(view, "\n")[0], StripANSI(want)) {
+		t.Fatalf("monitor header has no top Scroll edge:\n%s", view)
+	}
+	if strings.Contains(strings.Join(plainRows(d), "\n"), "↑") {
+		t.Fatal("Monitor List spent a separate row for the top Scroll edge")
+	}
+}
+
 // TestMonitorSelectionTabMarks pins tab's whole outcome: the pane is marked, its
 // row moves into the reserved region at the foot, exactly once, and the cursor
 // lands on the row that followed it (ADR-0215 decisions 3 and 8).
@@ -277,8 +295,11 @@ func TestMonitorSelectionChrome(t *testing.T) {
 		if !strings.Contains(body, "5 selected") {
 			t.Errorf("no count line over five marks:\n%s", body)
 		}
-		if !strings.Contains(body, "… +2 more selected") {
-			t.Errorf("no overflow note for the two members the cap hid:\n%s", body)
+		if !strings.Contains(body, "↓ 2") {
+			t.Errorf("no closing Scroll edge for the two members the cap hid:\n%s", body)
+		}
+		if strings.Contains(body, "more selected") {
+			t.Errorf("old Selection overflow line still renders:\n%s", body)
 		}
 		drawn := 0
 		for _, id := range []string{"%1", "%2", "%3", "%4", "%5"} {

@@ -1,11 +1,29 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 )
+
+func TestPickerGetsListScrollEdgeWithoutAnOption(t *testing.T) {
+	items := make([]Item, 8)
+	for i := range items {
+		items[i] = Item{Name: "item", Path: string(rune('a' + i))}
+	}
+	p := NewPicker(items)
+	p.width = 80
+	p.list.Resize(4)
+	p.list.SetCursor(5)
+
+	view := StripANSI(p.viewProject())
+	want := StripANSI(ScrollEdge("↑", p.list.ScrollEdges().Above))
+	if want == "" || !strings.Contains(view, want) {
+		t.Fatalf("picker has no shared top Scroll edge:\n%s", view)
+	}
+}
 
 func TestFormatKeyHint(t *testing.T) {
 	tests := []struct {

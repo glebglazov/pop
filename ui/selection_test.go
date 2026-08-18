@@ -76,11 +76,12 @@ func TestSelectionRegionChrome(t *testing.T) {
 	if region.Count != 5 {
 		t.Errorf("region count = %d, want 5", region.Count)
 	}
-	if got := StripANSI(region.Separator(5, 40)); !strings.Contains(got, "5 selected") {
+	if got := StripANSI(region.Separator(5, 40, ScrollEdges{})); !strings.Contains(got, "5 selected") {
 		t.Errorf("separator = %q, want the count set into the rule", got)
 	}
-	if got := StripANSI(region.Overflow(2)); strings.TrimSpace(got) != "… +2 more selected" {
-		t.Errorf("overflow = %q, want the hidden count", got)
+	got := StripANSI(region.Separator(5, 40, ScrollEdges{Below: 4, RegionAbove: 2}))
+	if !strings.HasPrefix(got, "↓ 4 ") || !strings.HasSuffix(got, " ↑ 2") {
+		t.Errorf("two-sided separator = %q, want both boundary counts", got)
 	}
 }
 

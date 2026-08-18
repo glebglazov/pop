@@ -98,11 +98,12 @@ func NewMultiSelect(title string, items []MultiSelectItem) *MultiSelect {
 		items:   items,
 		checked: checked,
 		list: NewList(rows, Opts[msRow]{
-			Key:          func(r msRow) string { return r.item.Label },
-			Cell:         nil, // set below after m exists
-			Wrap:         true,
-			Anchor:       AnchorTop,
-			ScrollMargin: 0,
+			Key:             func(r msRow) string { return r.item.Label },
+			Cell:            nil, // set below after m exists
+			Wrap:            true,
+			Anchor:          AnchorTop,
+			ScrollMargin:    0,
+			TopEdgeOnChrome: true,
 		}),
 		cursor: cursor,
 	}
@@ -185,7 +186,7 @@ func (m *MultiSelect) frameSpec() Frame {
 	return Frame{
 		Width:  m.width,
 		TermH:  m.height,
-		Header: m.title,
+		Header: ScrollEdgeLine(m.title, m.width, "↑", m.list.ScrollEdges().Above),
 		Hints:  "  Tab toggle · Enter confirm · Esc cancel · C-h help",
 	}
 }

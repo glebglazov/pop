@@ -318,11 +318,12 @@ func NewPicker(items []Item, opts ...PickerOption) *Picker {
 	}
 
 	p.list = NewList(items, Opts[Item]{
-		Key:          func(it Item) string { return it.Path },
-		Wrap:         true,
-		Anchor:       AnchorBottom,
-		ScrollMargin: scrollMargin,
-		QuickLabel:   p.quickAccess.LabelFunc(),
+		Key:             func(it Item) string { return it.Path },
+		Wrap:            true,
+		Anchor:          AnchorBottom,
+		ScrollMargin:    scrollMargin,
+		QuickLabel:      p.quickAccess.LabelFunc(),
+		TopEdgeOnChrome: true,
 	})
 	p.list.opts.Cell = p.pickerCell
 
@@ -784,7 +785,7 @@ func (p *Picker) frameSpec() Frame {
 		Width:    p.width,
 		Notice:   p.updateNotice,
 		Header:   header,
-		InputBox: p.input.View(),
+		InputBox: ScrollEdgeLine(p.input.View(), p.width, "↑", p.list.ScrollEdges().Above),
 		Warnings: p.warnings,
 		Hints:    p.buildHints(),
 	}

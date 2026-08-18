@@ -81,6 +81,39 @@ func selCursorID(t *testing.T, m QueueDashboard) string {
 	return row.ID
 }
 
+func TestWorkListTopScrollEdgeRidesTheTableRule(t *testing.T) {
+	m := selDashboard(selRows("a", "b", "c", "d", "e", "f", "g", "h"))
+	m.list.Resize(3)
+	m.list.SetCursor(5)
+
+	body := ui.StripANSI(m.mainBody())
+	lines := strings.Split(body, "\n")
+	if !strings.Contains(lines[m.dashboardChromeLines()-1], "↑ 3") {
+		t.Fatalf("table rule has no top Scroll edge:\n%s", body)
+	}
+	if strings.Contains(ui.StripANSI(strings.Join(m.list.VisibleRows(), "\n")), "↑") {
+		t.Fatal("Work List spent a separate row for the top Scroll edge")
+	}
+}
+
+func TestWorkSelectionDividerCarriesBothScrollEdges(t *testing.T) {
+	m := selDashboard(selRows("a", "b", "c", "d", "e", "f", "g", "h", "i", "j"))
+	for _, id := range []string{"g", "h", "i", "j"} {
+		m = markRow(t, m, id)
+	}
+	m.list.Resize(6)
+	m.list.SetCursor(2)
+	m.list.SetCursor(9)
+
+	body := ui.StripANSI(strings.Join(m.list.VisibleRows(), "\n"))
+	if !strings.Contains(body, "↓ ") || !strings.Contains(body, "↑ 2") {
+		t.Fatalf("Selection divider does not carry both Scroll edges:\n%s", body)
+	}
+	if strings.Contains(body, "more selected") {
+		t.Fatalf("old overflow grammar still renders:\n%s", body)
+	}
+}
+
 // markRow walks the cursor onto a row by id and marks it, which is the only way a
 // human ever makes a Selection.
 func markRow(t *testing.T, m QueueDashboard, id string) QueueDashboard {
@@ -504,8 +537,11 @@ func TestWorkSelectionRegionCapsAtAThirdOfTheViewport(t *testing.T) {
 	m.list.Resize(6)
 
 	body := ui.StripANSI(strings.Join(m.list.VisibleRows(), "\n"))
-	if want := ui.StripANSI(ui.SelectionOverflow(2)); !strings.Contains(body, want) {
-		t.Fatalf("want the overflow line %q in:\n%s", want, body)
+	if !strings.Contains(body, "↓ 2") {
+		t.Fatalf("want the closing Scroll edge in:\n%s", body)
+	}
+	if strings.Contains(body, "more selected") {
+		t.Fatalf("old Selection overflow line still renders:\n%s", body)
 	}
 	if want := ui.StripANSI(ui.SelectionSeparator(4, m.width)); !strings.Contains(body, want) {
 		t.Fatalf("want the separator to count every mark (%q) in:\n%s", want, body)

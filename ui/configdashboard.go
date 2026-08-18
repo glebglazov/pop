@@ -205,8 +205,9 @@ func NewConfigDashboard(rows []ConfigDashboardRow, opts ConfigDashboardOpts) *Co
 	}
 	m.input.Focus()
 	m.list = NewList(rows, Opts[ConfigDashboardRow]{
-		Key:  func(r ConfigDashboardRow) string { return r.Key },
-		Cell: m.renderRow,
+		Key:             func(r ConfigDashboardRow) string { return r.Key },
+		Cell:            m.renderRow,
+		TopEdgeOnChrome: true,
 	})
 	return m
 }
@@ -584,7 +585,7 @@ func (m *ConfigDashboard) frameSpec() Frame {
 	return Frame{
 		Width:    m.viewWidth(),
 		TermH:    m.viewHeight(),
-		Header:   "  Config · what is in force here",
+		Header:   ScrollEdgeLine("  Config · what is in force here", m.viewWidth(), "↑", m.list.ScrollEdges().Above),
 		InputBox: m.input.View(),
 		Warnings: warnings,
 		Hints:    hints,

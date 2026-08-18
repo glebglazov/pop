@@ -289,11 +289,12 @@ func (d *MonitorDashboard) initList() {
 		scrollMargin = 9
 	}
 	d.list = NewList(d.panes, Opts[AttentionPane]{
-		Key:          func(p AttentionPane) string { return p.PaneID },
-		Wrap:         true,
-		Anchor:       AnchorBottom,
-		ScrollMargin: scrollMargin,
-		QuickLabel:   d.quickAccess.LabelFunc(),
+		Key:             func(p AttentionPane) string { return p.PaneID },
+		Wrap:            true,
+		Anchor:          AnchorBottom,
+		ScrollMargin:    scrollMargin,
+		QuickLabel:      d.quickAccess.LabelFunc(),
+		TopEdgeOnChrome: true,
 	})
 	d.list.opts.Cell = d.dashboardCell
 }
@@ -1637,13 +1638,26 @@ func (d *MonitorDashboard) viewDashboard() string {
 	} else {
 		headerText += " · normal"
 	}
-	headerText = truncateString(headerText, leftWidth-1)
-	headerPadding := leftWidth - len([]rune(headerText)) - 1
+	edge := ScrollEdge("↑", d.list.ScrollEdges().Above)
+	edgeWidth := lipgloss.Width(edge)
+	headerBudget := leftWidth - 1
+	if edgeWidth > 0 {
+		headerBudget -= edgeWidth + 1
+	}
+	headerText = truncateString(headerText, headerBudget)
+	headerPadding := leftWidth - len([]rune(headerText)) - 1 - edgeWidth
+	if edgeWidth > 0 {
+		headerPadding--
+	}
 	if headerPadding < 0 {
 		headerPadding = 0
 	}
 	b.WriteString(headerStyle.Render(" " + headerText))
 	b.WriteString(strings.Repeat(" ", headerPadding))
+	if edgeWidth > 0 {
+		b.WriteString(" ")
+		b.WriteString(edge)
+	}
 	b.WriteString(sepStyle.Render("│"))
 
 	// Right header: pane name anchored to top-right, pin after name

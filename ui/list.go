@@ -1,6 +1,9 @@
 package ui
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // Anchor controls where list rows sit within the viewport when fewer items
 // than the body height are visible.
@@ -40,6 +43,10 @@ type Opts[T any] struct {
 	// LinesPerItem is the number of terminal lines each logical item occupies.
 	// Defaults to 1. Cursor movement still operates on logical items.
 	LinesPerItem int
+	// TopEdgeOnChrome tells List that its consumer will put the hidden-above
+	// count on existing chrome. The default is false, so a plain List spends a
+	// row of its own and every picker gets a Scroll edge without opting in.
+	TopEdgeOnChrome bool
 }
 
 // Region is a reserved block of trailing items the list keeps at the foot of the
@@ -55,10 +62,25 @@ type Region struct {
 	// Separator renders the line between the region and the rest of the list.
 	// Width is the visible columns the list is drawing into; the separator fills
 	// that width rather than guessing one.
-	Separator func(count, width int) string
-	// Overflow renders the line that stands in for the members the cap left out.
-	// It is called only when the cap bites.
-	Overflow func(hidden int) string
+	Separator func(count, width int, edges ScrollEdges) string
+}
+
+// ScrollEdges counts the rows hidden beyond each boundary of a List render.
+// Above and Below describe the ordinary list. RegionAbove and RegionBelow
+// describe the reserved foot region.
+type ScrollEdges struct {
+	Above       int
+	Below       int
+	RegionAbove int
+	RegionBelow int
+}
+
+// ScrollEdge renders one hidden-row count in the shared List grammar.
+func ScrollEdge(arrow string, hidden int) string {
+	if hidden <= 0 {
+		return ""
+	}
+	return dimStyle.Render(fmt.Sprintf("%s %d", arrow, hidden))
 }
 
 // List is a passive, generic scrolling-list viewport. It owns cursor, scroll,
@@ -260,8 +282,8 @@ func (l *List[T]) JumpTo(i int) {
 // where rows should land say so directly, instead of inferring an offset from
 // cursor movement.
 func (l *List[T]) SetScroll(scroll int) {
-	visible := l.visibleItems()
 	ordinaryCount := len(l.items) - l.RegionCount()
+	visible := l.visibleItemsForScroll(scroll)
 	if visible <= 0 {
 		l.scroll = 0
 		return
@@ -300,8 +322,9 @@ type regionLayout struct {
 	lines  int // terminal lines the whole block takes
 }
 
-// hidden is how many members the cap left out.
-func (r regionLayout) hidden() int { return r.count - r.shown }
+func (r regionLayout) hiddenBelow() int {
+	return max(r.count-r.scroll-r.shown, 0)
+}
 
 func (l *List[T]) regionLayout() regionLayout {
 	count := l.RegionCount()
@@ -313,15 +336,15 @@ func (l *List[T]) regionLayout() regionLayout {
 	// nothing, so the area always shows at least the row its count speaks for.
 	rows := max(l.height/3/lpi, 1)
 	lay := regionLayout{count: count, shown: min(count, rows)}
-	lay.lines = min(lay.shown*lpi+1, l.height) // the separator always draws
-	if lay.hidden() > 0 {
-		lay.lines = min(lay.lines+1, l.height)
-	}
 	// The block scrolls for one reason only: to keep a cursor that walked into it
 	// on screen.
 	start := len(l.items) - count
 	if l.cursor >= start+lay.shown {
 		lay.scroll = l.cursor - start - lay.shown + 1
+	}
+	lay.lines = min(lay.shown*lpi+1, l.height) // the separator always draws
+	if lay.hiddenBelow() > 0 {
+		lay.lines = min(lay.lines+1, l.height)
 	}
 	return lay
 }
@@ -330,8 +353,30 @@ func (l *List[T]) regionLayout() regionLayout {
 // show at once — the unit both the scroll offset and the clamp are counted in.
 // A region takes both its lines and its members out of that part.
 func (l *List[T]) visibleItems() int {
+	return l.visibleItemsForScroll(l.scroll)
+}
+
+func (l *List[T]) visibleItemsForScroll(scroll int) int {
 	lay := l.regionLayout()
-	return min((l.height-lay.lines)/l.LinesPerItem(), len(l.items)-lay.count)
+	height := l.height - lay.lines
+	if !l.opts.TopEdgeOnChrome && scroll > 0 {
+		height--
+	}
+	return min(max(height, 0)/l.LinesPerItem(), len(l.items)-lay.count)
+}
+
+// ScrollEdges returns the counts for the current render. Consumers with
+// existing chrome use Above there; the List renders the other edges itself.
+func (l *List[T]) ScrollEdges() ScrollEdges {
+	lay := l.regionLayout()
+	visible := l.visibleItems()
+	ordinaryCount := len(l.items) - lay.count
+	return ScrollEdges{
+		Above:       max(l.scroll, 0),
+		Below:       max(ordinaryCount-l.scroll-visible, 0),
+		RegionAbove: max(lay.scroll, 0),
+		RegionBelow: lay.hiddenBelow(),
+	}
 }
 
 // VisibleRows returns exactly bodyHeight rendered lines. List owns the █
@@ -351,8 +396,16 @@ func (l *List[T]) VisibleRows() []string {
 
 	lay := l.regionLayout()
 	region := l.regionLines(lay, prefixWidth)
+	edges := l.ScrollEdges()
 
 	restHeight := max(height-len(region), 0)
+	topEdge := ""
+	if !l.opts.TopEdgeOnChrome {
+		topEdge = ScrollEdge("↑", edges.Above)
+		if topEdge != "" {
+			restHeight--
+		}
+	}
 	ordinaryCount := len(l.items) - lay.count
 	logicalVisible := min(restHeight/lpi, ordinaryCount)
 
@@ -367,6 +420,9 @@ func (l *List[T]) VisibleRows() []string {
 	}
 
 	lines := make([]string, 0, height)
+	if topEdge != "" {
+		lines = append(lines, "  "+topEdge)
+	}
 	for i := 0; i < emptyBefore; i++ {
 		lines = append(lines, "")
 	}
@@ -388,8 +444,9 @@ func (l *List[T]) regionLines(lay regionLayout, prefixWidth int) []string {
 		return nil
 	}
 	out := make([]string, 0, lay.lines)
+	edges := l.ScrollEdges()
 	if l.region.Separator != nil {
-		out = append(out, l.region.Separator(lay.count, l.width))
+		out = append(out, l.region.Separator(lay.count, l.width, edges))
 	} else {
 		out = append(out, "")
 	}
@@ -397,8 +454,8 @@ func (l *List[T]) regionLines(lay regionLayout, prefixWidth int) []string {
 	for i := start + lay.scroll; i < start+lay.scroll+lay.shown && i < len(l.items); i++ {
 		out = append(out, l.itemLines(i, prefixWidth)...)
 	}
-	if lay.hidden() > 0 && l.region.Overflow != nil {
-		out = append(out, l.region.Overflow(lay.hidden()))
+	if edges.RegionBelow > 0 {
+		out = append(out, "  "+ScrollEdge("↓", edges.RegionBelow))
 	}
 	return out
 }
@@ -505,6 +562,10 @@ func (l *List[T]) rescroll(margin int) {
 	ordinaryCount := len(l.items) - lay.count
 	if l.cursor < ordinaryCount {
 		l.scroll = adjustScroll(l.cursor, l.scroll, height, ordinaryCount, margin)
+		if !l.opts.TopEdgeOnChrome && l.scroll > 0 {
+			height = max((l.height-lay.lines-1)/l.LinesPerItem(), 0)
+			l.scroll = adjustScroll(l.cursor, l.scroll, height, ordinaryCount, margin)
+		}
 		return
 	}
 	visible := min(max(height, 0), ordinaryCount)

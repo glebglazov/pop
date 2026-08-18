@@ -111,16 +111,66 @@ func CaptionRule(label string, width int) string {
 	return dimStyle.Render(strings.Repeat(dash, left) + label + strings.Repeat(dash, right))
 }
 
-// SelectionSeparator is the dim rule that opens the Selection area, counting
-// the rows it holds.
-func SelectionSeparator(count, width int) string {
-	return CaptionRule(fmt.Sprintf("%d selected", count), width)
+// ScrollEdgeLine puts a hidden-row count at the right end of existing chrome.
+// A zero count leaves the chrome unchanged.
+func ScrollEdgeLine(line string, width int, arrow string, hidden int) string {
+	edge := ScrollEdge(arrow, hidden)
+	if edge == "" {
+		return TruncateString(line, width)
+	}
+	edgeWidth := lipgloss.Width(edge)
+	if width <= edgeWidth {
+		return TruncateToWidth(edge, width)
+	}
+	line = TruncateToWidth(line, width-edgeWidth-1)
+	padding := width - lipgloss.Width(line) - edgeWidth
+	return line + strings.Repeat(" ", max(padding, 1)) + edge
 }
 
-// SelectionOverflow is the line that stands in for the members the viewport cap
-// left out of the area.
-func SelectionOverflow(hidden int) string {
-	return dimStyle.Render(fmt.Sprintf("  … +%d more selected", hidden))
+// SelectionSeparator is the dim rule that opens the Selection area. It is also
+// the boundary between two lists, so it carries the ordinary rows hidden below
+// at its left and the region rows hidden above at its right.
+func SelectionSeparator(count, width int, edge ...ScrollEdges) string {
+	if len(edge) == 0 || (edge[0].Below == 0 && edge[0].RegionAbove == 0) {
+		return CaptionRule(fmt.Sprintf("%d selected", count), width)
+	}
+	left := ScrollEdge("↓", edge[0].Below)
+	right := ScrollEdge("↑", edge[0].RegionAbove)
+	return captionRuleWithEnds(fmt.Sprintf("%d selected", count), width, left, right)
+}
+
+func captionRuleWithEnds(label string, width int, left, right string) string {
+	plainLeft, plainRight := StripANSI(left), StripANSI(right)
+	label = " " + label + " "
+	if width <= 0 {
+		return dimStyle.Render(strings.TrimSpace(plainLeft + " ───" + label + "─── " + plainRight))
+	}
+	fixed := lipgloss.Width(label)
+	if plainLeft != "" {
+		fixed += lipgloss.Width(plainLeft) + 1
+	}
+	if plainRight != "" {
+		fixed += lipgloss.Width(plainRight) + 1
+	}
+	if width <= fixed {
+		return dimStyle.Render(TruncateToWidth(strings.TrimSpace(plainLeft+" "+label+" "+plainRight), width))
+	}
+	dashes := width - fixed
+	leftDashes := dashes / 2
+	rightDashes := dashes - leftDashes
+	var b strings.Builder
+	if plainLeft != "" {
+		b.WriteString(plainLeft)
+		b.WriteByte(' ')
+	}
+	b.WriteString(strings.Repeat("─", leftDashes))
+	b.WriteString(label)
+	b.WriteString(strings.Repeat("─", rightDashes))
+	if plainRight != "" {
+		b.WriteByte(' ')
+		b.WriteString(plainRight)
+	}
+	return dimStyle.Render(b.String())
 }
 
 // ConfirmPrompt is the inline y/N question a bulk verb asks before it runs,
@@ -136,8 +186,9 @@ func ConfirmPrompt(label string) string {
 // marked rows reserved at the foot of the viewport, below the house separator.
 func SelectionRegion(count int) Region {
 	return Region{
-		Count:     count,
-		Separator: SelectionSeparator,
-		Overflow:  SelectionOverflow,
+		Count: count,
+		Separator: func(count, width int, edges ScrollEdges) string {
+			return SelectionSeparator(count, width, edges)
+		},
 	}
 }

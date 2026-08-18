@@ -17,12 +17,13 @@ func strItems(n int) []string {
 
 func newTestList(items []string, anchor Anchor, wrap bool, margin int, quickLabel func(int) string) *List[string] {
 	return NewList(items, Opts[string]{
-		Key:          func(s string) string { return s },
-		Cell:         func(s string, _ RowState) string { return s },
-		Wrap:         wrap,
-		Anchor:       anchor,
-		ScrollMargin: margin,
-		QuickLabel:   quickLabel,
+		Key:             func(s string) string { return s },
+		Cell:            func(s string, _ RowState) string { return s },
+		Wrap:            wrap,
+		Anchor:          anchor,
+		ScrollMargin:    margin,
+		QuickLabel:      quickLabel,
+		TopEdgeOnChrome: true,
 	})
 }
 
@@ -32,6 +33,44 @@ func TestListVisibleRowsExactHeight(t *testing.T) {
 	rows := l.VisibleRows()
 	if len(rows) != 5 {
 		t.Fatalf("VisibleRows() len = %d, want 5", len(rows))
+	}
+}
+
+func TestListScrollEdgesRenderByDefault(t *testing.T) {
+	l := NewList(strItems(8), Opts[string]{
+		Key:  func(s string) string { return s },
+		Cell: func(s string, _ RowState) string { return s },
+	})
+	l.Resize(4)
+	l.SetCursor(5)
+
+	edges := l.ScrollEdges()
+	if edges.Above != 3 || edges.Below != 2 {
+		t.Fatalf("ScrollEdges() = %+v, want 3 above and 2 below", edges)
+	}
+	rows := l.VisibleRows()
+	if got := StripANSI(rows[0]); strings.TrimSpace(got) != "↑ 3" {
+		t.Fatalf("default top edge = %q, want ↑ 3", got)
+	}
+	if len(rows) != 4 {
+		t.Fatalf("VisibleRows() len = %d, want the edge contained in four lines", len(rows))
+	}
+}
+
+func TestListTopEdgeCanRideConsumerChrome(t *testing.T) {
+	l := NewList(strItems(8), Opts[string]{
+		Key:             func(s string) string { return s },
+		Cell:            func(s string, _ RowState) string { return s },
+		TopEdgeOnChrome: true,
+	})
+	l.Resize(4)
+	l.SetCursor(5)
+
+	if got := l.ScrollEdges().Above; got != 2 {
+		t.Fatalf("hidden above = %d, want 2", got)
+	}
+	if strings.Contains(StripANSI(strings.Join(l.VisibleRows(), "\n")), "↑") {
+		t.Fatal("List rendered its own top edge after the consumer claimed its chrome")
 	}
 }
 
@@ -60,7 +99,7 @@ func TestListAnchorBottom(t *testing.T) {
 }
 
 func TestListRegionIsAReservedFoot(t *testing.T) {
-	separator := func(int, int) string { return "selected" }
+	separator := func(int, int, ScrollEdges) string { return "selected" }
 	l := newTestList(strItems(3), AnchorTop, false, 0, nil)
 	l.Resize(7)
 	l.SetRegion(Region{Count: 1, Separator: separator})
@@ -89,7 +128,7 @@ func TestListRegionIsAReservedFoot(t *testing.T) {
 func TestListCursorWalksIntoTheFootRegion(t *testing.T) {
 	l := newTestList(strItems(4), AnchorTop, false, 0, nil)
 	l.Resize(6)
-	l.SetRegion(Region{Count: 2, Separator: func(int, int) string { return "selected" }})
+	l.SetRegion(Region{Count: 2, Separator: func(int, int, ScrollEdges) string { return "selected" }})
 	l.SetCursor(1)
 
 	l.MoveDown()
@@ -99,6 +138,35 @@ func TestListCursorWalksIntoTheFootRegion(t *testing.T) {
 	l.MoveUp()
 	if l.Cursor() != 1 {
 		t.Fatalf("cursor = %d, want the last ordinary item", l.Cursor())
+	}
+}
+
+func TestListRegionEdgesFollowItsWindow(t *testing.T) {
+	l := NewList(strItems(10), Opts[string]{
+		Key:             func(s string) string { return s },
+		Cell:            func(s string, _ RowState) string { return s },
+		TopEdgeOnChrome: true,
+	})
+	l.Resize(6)
+	l.SetRegion(SelectionRegion(4))
+
+	rows := l.VisibleRows()
+	if got := strings.TrimSpace(StripANSI(rows[len(rows)-1])); got != "↓ 2" {
+		t.Fatalf("initial region closing edge = %q, want ↓ 2", got)
+	}
+
+	l.SetCursor(2)
+	l.SetCursor(9)
+	edges := l.ScrollEdges()
+	if edges.Below == 0 || edges.RegionAbove != 2 || edges.RegionBelow != 0 {
+		t.Fatalf("scrolled region edges = %+v, want ordinary below and two region rows above", edges)
+	}
+	plain := StripANSI(strings.Join(l.VisibleRows(), "\n"))
+	if !strings.Contains(plain, "↓ ") || !strings.Contains(plain, "↑ 2") {
+		t.Fatalf("divider does not carry both counts:\n%s", plain)
+	}
+	if got := strings.TrimSpace(strings.Split(plain, "\n")[5]); strings.HasPrefix(got, "↓") {
+		t.Fatalf("closing edge rendered with no region members below: %q", got)
 	}
 }
 
@@ -285,9 +353,10 @@ func TestListResizeReclampsScroll(t *testing.T) {
 
 func newMultilineTestList(items []string) *List[string] {
 	return NewList(items, Opts[string]{
-		Key:          func(s string) string { return s },
-		Cell:         func(s string, rs RowState) string { return fmt.Sprintf("%s/%d", s, rs.LineIndex) },
-		LinesPerItem: 2,
+		Key:             func(s string) string { return s },
+		Cell:            func(s string, rs RowState) string { return fmt.Sprintf("%s/%d", s, rs.LineIndex) },
+		LinesPerItem:    2,
+		TopEdgeOnChrome: true,
 	})
 }
 
@@ -449,9 +518,10 @@ func TestListSetScrollClampsToBoundsAndCursor(t *testing.T) {
 // prefix's second cell is free for the pin mark (ADR-0209 decision 4).
 func newPinnedTestList(items []string, pinned ...string) *List[string] {
 	return NewList(items, Opts[string]{
-		Key:    func(s string) string { return s },
-		Cell:   func(s string, _ RowState) string { return s },
-		Anchor: AnchorTop,
+		Key:             func(s string) string { return s },
+		Cell:            func(s string, _ RowState) string { return s },
+		Anchor:          AnchorTop,
+		TopEdgeOnChrome: true,
 		Pinned: func(s string) bool {
 			for _, p := range pinned {
 				if p == s {

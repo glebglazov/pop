@@ -954,8 +954,9 @@ func newQueueDashboardOn(d *drain.Deps, cfg *config.Config, snap DashboardSnapsh
 	live := &livePaneCache{}
 	var list *ui.List[DashboardRow]
 	list = ui.NewList(snap.Containers, ui.Opts[DashboardRow]{
-		Key:    func(r DashboardRow) string { return r.CursorKey },
-		Anchor: ui.AnchorTop,
+		Key:             func(r DashboardRow) string { return r.CursorKey },
+		Anchor:          ui.AnchorTop,
+		TopEdgeOnChrome: true,
 		// The snapshot already moved the attributed rows to the top; the mark is
 		// what says why they are there, on every one of them (ADR-0209 decision 4).
 		Pinned: func(r DashboardRow) bool { return r.Pinned },
@@ -3418,14 +3419,14 @@ func (m QueueDashboard) mainBody() string {
 			"",
 			ui.TruncateString("  "+dashboardTwoLineTableHeader(line1Widths), m.width),
 			ui.TruncateString("  "+dashboardTwoLineStatusHeader(line1Widths), m.width),
-			ui.TruncateString("  "+dashboardTwoLineTableSeparator(line1Widths), m.width),
+			ui.ScrollEdgeLine("  "+dashboardTwoLineTableSeparator(line1Widths), m.width, "↑", m.list.ScrollEdges().Above),
 		}
 	} else {
 		headers := m.page.headers(m.kinds)
 		parts = []string{
 			"",
 			ui.TruncateString("  "+dashboardTableLine(headers, m.cols.widths), m.width),
-			ui.TruncateString("  "+dashboardTableSeparator(headers, m.cols.widths), m.width),
+			ui.ScrollEdgeLine("  "+dashboardTableSeparator(headers, m.cols.widths), m.width, "↑", m.list.ScrollEdges().Above),
 		}
 	}
 	parts = append(parts, m.list.VisibleRows()...)
