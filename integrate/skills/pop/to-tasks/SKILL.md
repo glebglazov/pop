@@ -167,12 +167,16 @@ answer — your own `~/.agents/docs/commits.md`, else the repository's committed
 `docs/agents/commits.md`, else what pop remembered — and prints it with the
 layer it came from, plus your overlay where you have written one.
 
-- **Exit 0** — take the printed convention as resolved. The command has already
-  chosen which layer answers, so read its output as the answer rather than
-  weighing layers yourself.
-- **Exit 1** — nothing answers `commits` yet. The command prints the paths it
-  consulted and a **recipe**: the method for deriving the convention, including
-  which layer to record the result in. Follow it, then resolve again.
+The command always exits 0; read the banner on its first line to tell which
+case you got:
+
+- **`ANSWER`** — take the printed convention as resolved. The command has
+  already chosen which layer answers, so read its output as the answer rather
+  than weighing layers yourself.
+- **`METHOD`** — nothing answers `commits` yet. The command prints the paths
+  it consulted and a **recipe**: the method for deriving the convention,
+  including which layer to record the result in. Follow it, then resolve
+  again.
 
 If what resolves is that the repository has **no discernible** commit convention,
 write neither field: the set carries no convention and each task commits under

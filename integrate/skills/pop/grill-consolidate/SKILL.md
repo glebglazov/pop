@@ -169,9 +169,11 @@ After all conflicts are resolved:
    pop conventions get commits
    ```
 
-   Do not derive the grammar yourself. Exit 0 — take the printed convention as
-   resolved and compose the message to match its grammar and trailer. Exit 1 —
-   nothing answers `commits` yet; follow the printed recipe, then resolve again.
+   Do not derive the grammar yourself. The command always exits 0 — read the
+   banner on its first line instead: `ANSWER` means take the printed
+   convention as resolved and compose the message to match its grammar and
+   trailer; `METHOD` means nothing answers `commits` yet, so follow the
+   printed recipe, then resolve again.
    When the resolved (or recipe-derived) convention is conventional commits,
    default to `docs(context): consolidate glossary fragments` (append `+
    reconcile ADR numbers` when this pass renumbered any ADRs, and `+ stub

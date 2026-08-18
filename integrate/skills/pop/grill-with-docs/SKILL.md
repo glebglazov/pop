@@ -154,10 +154,11 @@ To commit:
    pop conventions get commits
    ```
 
-   Do not derive the grammar yourself. Exit 0 — take the printed convention as
-   resolved and match its grammar and trailer. Exit 1 — nothing answers `commits`
-   yet; follow the printed recipe, then resolve again. The `type` still follows
-   content (docs-only vs. mixed), as above.
+   Do not derive the grammar yourself. The command always exits 0 — read the
+   banner on its first line instead: `ANSWER` means take the printed
+   convention as resolved and match its grammar and trailer; `METHOD` means
+   nothing answers `commits` yet, so follow the printed recipe, then resolve
+   again. The `type` still follows content (docs-only vs. mixed), as above.
 4. **Report.** After committing, show the user the exact files staged and the commit subject. Separately, report any dirty files this session did *not* touch as "left alone — not staged" so nothing is silently swept or split.
 
 After the commit, the plan is settled and persisted; the user will typically move on to a separate step (such as `to-tasks`) themselves.

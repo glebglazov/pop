@@ -37,8 +37,9 @@ func TestToTasksSkill_CommitConventionContract(t *testing.T) {
 	// Resolution is a command call, and both of its outcomes are handled.
 	for _, want := range []string{
 		"pop conventions get commits",
-		"Exit 0",
-		"Exit 1",
+		"always exits 0",
+		"ANSWER",
+		"METHOD",
 		"recipe",
 	} {
 		if !strings.Contains(section, want) {
