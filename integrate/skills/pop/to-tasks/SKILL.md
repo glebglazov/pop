@@ -162,13 +162,14 @@ Resolve the convention once, before publishing, by asking pop:
 pop conventions get commits
 ```
 
-Do not derive the grammar yourself. The command composes every layer that answers
-the question for this repository — the repository's own `docs/agents/commits.md`
-among them — and prints the resolved convention with the layer it came from.
+Do not derive the grammar yourself. The command resolves this repository's
+answer — your own `~/.agents/docs/commits.md`, else the repository's committed
+`docs/agents/commits.md`, else what pop remembered — and prints it with the
+layer it came from, plus your overlay where you have written one.
 
-- **Exit 0** — take the printed convention as resolved. The highest-ranked layer
-  wins; the command has already applied that precedence, so read its output as
-  the answer rather than re-weighing the layers.
+- **Exit 0** — take the printed convention as resolved. The command has already
+  chosen which layer answers, so read its output as the answer rather than
+  weighing layers yourself.
 - **Exit 1** — nothing answers `commits` yet. The command prints the paths it
   consulted and a **recipe**: the method for deriving the convention, including
   which layer to record the result in. Follow it, then resolve again.

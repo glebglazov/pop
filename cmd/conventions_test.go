@@ -85,14 +85,14 @@ func (f *conventionFixture) get(t *testing.T, dir string, args ...string) (strin
 	return out.String(), err
 }
 
-// TestConventionsGetComposesTheStack is the whole point of the verb: every
-// layer that exists comes back, in rank order, labelled, under one statement of
-// the override rule, and closed by the provenance line an agent surfaces.
-func TestConventionsGetComposesTheStack(t *testing.T) {
+// TestConventionsGetResolvesToOneAnswerPlusTheOverlay is the whole point of the
+// verb: one rank answers, the ranks it stood down are nowhere in the output, and
+// the human's overlay rides along with whichever won.
+func TestConventionsGetResolvesToOneAnswerPlusTheOverlay(t *testing.T) {
 	f := newConventionFixture(t)
 
 	defaultsPath := f.userDefaults(t, "commits", "MY-DEFAULT: conventional commits, lowercase subject.")
-	memoryPath := f.memory(t, f.repo, "commits", `---
+	f.memory(t, f.repo, "commits", `---
 derived_from: a sample of 40 commits
 derived_at: 2026-08-01
 ---
@@ -105,44 +105,43 @@ POP-MEMORY: scopes are the package name.`)
 		t.Fatalf("get commits: %v\n%s", err, out)
 	}
 
-	// Rank order is the contract; the bodies must appear lowest rank first.
-	order := []string{"MY-DEFAULT", "POP-MEMORY", "TEAM-DOC", "MY-OVERLAY"}
-	at := -1
-	for _, marker := range order {
-		i := strings.Index(out, marker)
-		if i < 0 {
-			t.Fatalf("layer %s missing from output:\n%s", marker, out)
+	// The human's own document outranks the team's, and both stand pop's memory
+	// down: only one of the three is anywhere in the output.
+	if !strings.Contains(out, "MY-DEFAULT") {
+		t.Fatalf("the human's document did not answer:\n%s", out)
+	}
+	for _, stoodDown := range []string{"TEAM-DOC", "POP-MEMORY", repoPath} {
+		if strings.Contains(out, stoodDown) {
+			t.Errorf("a rank the answer stood down is still rendered (%q):\n%s", stoodDown, out)
 		}
-		if i < at {
-			t.Fatalf("layers out of rank order at %s:\n%s", marker, out)
-		}
-		at = i
+	}
+	// The overlay appends rather than competing, so it is there beside the winner.
+	if !strings.Contains(out, "MY-OVERLAY") {
+		t.Errorf("the overlay was not appended to the answer:\n%s", out)
+	}
+	if strings.Index(out, "MY-DEFAULT") > strings.Index(out, "MY-OVERLAY") {
+		t.Errorf("the overlay is printed before the answer it rides on:\n%s", out)
 	}
 
-	// Each layer is labelled with both its origin and the path it came from,
-	// which is what lets a reader go and edit the right one.
-	for origin, path := range map[string]string{
-		"USER DEFAULTS": defaultsPath,
-		"POP MEMORY":    memoryPath,
-		"REPOSITORY":    repoPath,
-		"USER OVERLAY":  overlayPath,
+	// Each block is labelled with both its role and the path it came from, which
+	// is what lets a reader go and edit the right one.
+	for label, path := range map[string]string{
+		"ANSWER: USER DEFAULTS":  defaultsPath,
+		"APPENDED: USER OVERLAY": overlayPath,
 	} {
-		if !strings.Contains(out, origin) {
-			t.Errorf("output does not label the %s layer:\n%s", origin, out)
+		if !strings.Contains(out, label) {
+			t.Errorf("output does not carry the %s block:\n%s", label, out)
 		}
 		if !strings.Contains(out, path) {
-			t.Errorf("output does not name the %s path %q:\n%s", origin, path, out)
+			t.Errorf("output does not name the path %q:\n%s", path, out)
 		}
 	}
 
-	// Pop's bookkeeping is not part of the convention: the frontmatter is peeled
-	// off the memory layer's body and re-emitted as provenance instead.
-	if strings.Contains(out, "derived_from:") {
-		t.Errorf("memory frontmatter leaked into the rendered body:\n%s", out)
-	}
-
-	if n := strings.Count(out, "where two of them directly contradict"); n != 1 {
-		t.Errorf("override rule stated %d times, want exactly once:\n%s", n, out)
+	// Nothing survives of the composed reading: no rule to reconcile, no numbering.
+	for _, gone := range []string{"contradict", "compose", "LAYER 1 OF"} {
+		if strings.Contains(out, gone) {
+			t.Errorf("the composition rendering survives (%q):\n%s", gone, out)
+		}
 	}
 
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
@@ -150,11 +149,54 @@ POP-MEMORY: scopes are the package name.`)
 	if !strings.HasPrefix(last, "Provenance:") {
 		t.Fatalf("output does not end with the provenance summary, got %q", last)
 	}
-	if !strings.Contains(last, "user overlay") || !strings.Contains(last, overlayPath) {
-		t.Errorf("provenance does not name the top layer: %q", last)
+	if !strings.Contains(last, "user defaults") || !strings.Contains(last, defaultsPath) {
+		t.Errorf("provenance does not name what answered: %q", last)
 	}
-	if !strings.Contains(last, "a sample of 40 commits") {
-		t.Errorf("provenance does not disclose what pop memory was derived from: %q", last)
+	if !strings.Contains(last, overlayPath) {
+		t.Errorf("provenance does not say the overlay is appended: %q", last)
+	}
+}
+
+// The memory layer answers only when neither document does, and its frontmatter
+// is pop's bookkeeping rather than part of the convention: it comes back out as
+// the provenance line's derivation clause.
+func TestConventionsGetFallsBackToMemory(t *testing.T) {
+	f := newConventionFixture(t)
+	memoryPath := f.memory(t, f.repo, "commits", `---
+derived_from: a sample of 40 commits
+derived_at: 2026-08-01
+---
+POP-MEMORY: scopes are the package name.`)
+
+	out, err := f.get(t, f.repo, "commits")
+	if err != nil {
+		t.Fatalf("get commits: %v\n%s", err, out)
+	}
+	for _, want := range []string{"POP-MEMORY: scopes are the package name.", "ANSWER: POP MEMORY", memoryPath} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "derived_from:") {
+		t.Errorf("memory frontmatter leaked into the rendered body:\n%s", out)
+	}
+	if !strings.Contains(out, "a sample of 40 commits") {
+		t.Errorf("provenance does not disclose what pop memory was derived from:\n%s", out)
+	}
+
+	// A committed document is enough to stand it down entirely.
+	f.repoDoc(t, "commits", "TEAM-DOC: the type set is feat, fix, chore, docs.")
+	out, err = f.get(t, f.repo, "commits")
+	if err != nil {
+		t.Fatalf("get commits: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "TEAM-DOC") {
+		t.Fatalf("the repository's document did not answer:\n%s", out)
+	}
+	for _, gone := range []string{"POP-MEMORY", "a sample of 40 commits"} {
+		if strings.Contains(out, gone) {
+			t.Errorf("pop memory did not stand down for a written answer (%q):\n%s", gone, out)
+		}
 	}
 }
 
@@ -174,7 +216,7 @@ func TestConventionsGetWithOnlyUserDefaults(t *testing.T) {
 		}
 	}
 	if !strings.Contains(out, "Provenance:") || !strings.Contains(out, "user defaults") {
-		t.Fatalf("provenance does not name the only layer as the top one:\n%s", out)
+		t.Fatalf("provenance does not name the only layer as the answer:\n%s", out)
 	}
 }
 
@@ -416,12 +458,27 @@ func TestConventionsSetRemembersWhatGetReadsBack(t *testing.T) {
 		t.Errorf("memory file does not hold the body:\n%s", stored)
 	}
 
+	// The team's committed document stands the fresh memory down: what pop just
+	// remembered is not what a reader is handed.
 	got, err := f.get(t, f.repo, "commits")
 	if err != nil {
 		t.Fatalf("get commits: %v\n%s", err, got)
 	}
-	if strings.Index(got, "POP-MEMORY") > strings.Index(got, "TEAM-DOC") {
-		t.Errorf("the memory layer did not come back below the repository's document:\n%s", got)
+	if !strings.Contains(got, "TEAM-DOC") || strings.Contains(got, "POP-MEMORY") {
+		t.Errorf("the memory layer did not stand down for the repository's document:\n%s", got)
+	}
+
+	// With no document to stand it down, it answers, frontmatter peeled off and
+	// re-emitted as the provenance the write recorded.
+	if err := os.Remove(filepath.Join(f.repo, "docs", "agents", "commits.md")); err != nil {
+		t.Fatal(err)
+	}
+	got, err = f.get(t, f.repo, "commits")
+	if err != nil {
+		t.Fatalf("get commits: %v\n%s", err, got)
+	}
+	if !strings.Contains(got, "POP-MEMORY: scopes are the package name.") {
+		t.Errorf("the memory layer did not answer once nothing outranked it:\n%s", got)
 	}
 	if strings.Contains(got, "derived_from:") {
 		t.Errorf("frontmatter leaked into the rendered body:\n%s", got)
@@ -538,16 +595,25 @@ func TestConventionsSetRefusals(t *testing.T) {
 	}
 }
 
-// TestConventionsUnsetReportsWhatSurvivesIt is why the verb prints a stack:
-// removing pop's rank leaves the team's document answering, and a caller told
-// only "removed" would think the kind had gone silent.
-func TestConventionsUnsetReportsWhatSurvivesIt(t *testing.T) {
+// TestConventionsUnsetPromotesTheNextRank is why the verb prints more than
+// "removed": memory was the answer, and removing it hands the kind to the
+// repository's document — which the report names on the spot.
+func TestConventionsUnsetPromotesTheNextRank(t *testing.T) {
 	f := newConventionFixture(t)
-	f.repoDoc(t, "commits", "TEAM-DOC: the type set is feat, fix, chore.")
 	if out, err := f.set(t, f.repo, "commits", "POP-MEMORY: scopes are the package name.", "the last 20 commits"); err != nil {
 		t.Fatalf("set commits: %v\n%s", err, out)
 	}
 	path := f.memoryPath(t, f.repo, "commits")
+
+	// Before the removal, memory is what answers.
+	before, err := f.get(t, f.repo, "commits")
+	if err != nil {
+		t.Fatalf("get commits: %v\n%s", err, before)
+	}
+	if !strings.Contains(before, "POP-MEMORY") {
+		t.Fatalf("memory is not the answer to begin with:\n%s", before)
+	}
+	f.repoDoc(t, "commits", "TEAM-DOC: the type set is feat, fix, chore.")
 
 	out, err := f.unset(t, f.repo, "commits")
 	if err != nil {
@@ -559,8 +625,12 @@ func TestConventionsUnsetReportsWhatSurvivesIt(t *testing.T) {
 	if !strings.Contains(out, "REMOVED") || !strings.Contains(out, path) {
 		t.Errorf("unset does not name what it removed:\n%s", out)
 	}
+	if !strings.Contains(out, "Now in force: repository (") ||
+		!strings.Contains(out, filepath.Join("docs", "agents", "commits.md")) {
+		t.Errorf("unset does not name the rank it promoted:\n%s", out)
+	}
 	if !strings.Contains(out, "TEAM-DOC: the type set is feat, fix, chore.") {
-		t.Errorf("unset does not print the stack still in effect:\n%s", out)
+		t.Errorf("unset does not print what answers the kind now:\n%s", out)
 	}
 	if strings.Contains(out, "POP-MEMORY") {
 		t.Errorf("the removed layer is still reported as in effect:\n%s", out)
@@ -582,8 +652,8 @@ func TestConventionsUnsetWithoutMemory(t *testing.T) {
 	if !strings.Contains(out, "nothing to remove") {
 		t.Errorf("unset does not say there was no memory:\n%s", out)
 	}
-	if !strings.Contains(out, "EMPTY") {
-		t.Errorf("unset does not report the stack that remains:\n%s", out)
+	if !strings.Contains(out, "Nothing answers commits now.") || !strings.Contains(out, "EMPTY") {
+		t.Errorf("unset does not report what is in force after it:\n%s", out)
 	}
 
 	out, err = f.unset(t, f.repo, "bogus")

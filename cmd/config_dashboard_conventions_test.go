@@ -15,7 +15,7 @@ import (
 
 // The Config dashboard is the one editor for everything in force in a directory
 // (ADR-0212 decision 8): a repository's conventions are rows beside its config
-// keys, they preview as the stack `pop conventions get` prints, and editing one
+// keys, they preview exactly what `pop conventions get` prints, and editing one
 // writes the human's overlay. These tests drive the component over a real
 // repository and real files, through the writer `pop config dashboard` builds.
 
@@ -138,10 +138,11 @@ func TestConfigDashboardListsConventionsBesideConfigKeys(t *testing.T) {
 	if commits.Desc == "" {
 		t.Error("the convention row carries no description to search or read")
 	}
-	// Layers that compose are not layers contending: nothing is quietly losing,
-	// which is the state that marker and that sort exist to report.
-	if commits.Contested {
-		t.Error("a stack with two layers speaking is marked contested")
+	// A kind resolves to one answer, so the team's document holding something the
+	// human's document stood down is exactly a layer quietly losing — the state
+	// that marker and that sort exist to report (ADR-0223).
+	if !commits.Contested {
+		t.Error("a document standing another down is not marked contested")
 	}
 
 	// One filter over one list: the query that finds a config key's path finds a
@@ -151,10 +152,10 @@ func TestConfigDashboardListsConventionsBesideConfigKeys(t *testing.T) {
 	selectKey(t, m, "conventions.commits")
 }
 
-// Selecting a convention shows every layer that speaks, labelled with its origin,
-// in rank order — the same stack `pop conventions get` prints, rendered by the
-// same package.
-func TestConfigDashboardPreviewsTheWholeConventionStack(t *testing.T) {
+// Selecting a convention shows what is in force — the one answer and the
+// overlay — and never a rank the answer stood down. It is rendered by the same
+// package `pop conventions get` renders through, so the two cannot disagree.
+func TestConfigDashboardPreviewsWhatIsInForce(t *testing.T) {
 	f := newConventionDashboardFixture(t)
 	f.twoLayers(t)
 
@@ -163,23 +164,32 @@ func TestConfigDashboardPreviewsTheWholeConventionStack(t *testing.T) {
 	row, _ := m.Selected()
 
 	preview := row.Preview.Layers
-	defaults := strings.Index(preview, "USER DEFAULTS")
-	repository := strings.Index(preview, "REPOSITORY")
-	if defaults < 0 || repository < 0 || defaults > repository {
-		t.Fatalf("the layers are not labelled in rank order:\n%s", preview)
-	}
-	for _, want := range []string{"Imperative subjects.", "Conventional commits, scope required.", "Provenance:"} {
+	for _, want := range []string{"ANSWER: USER DEFAULTS", "Imperative subjects.", "Provenance:"} {
 		if !strings.Contains(preview, want) {
 			t.Errorf("preview missing %q:\n%s", want, preview)
 		}
 	}
+	if strings.Contains(preview, "Conventional commits, scope required.") {
+		t.Errorf("the preview shows a document the answer stood down:\n%s", preview)
+	}
+
+	// One resolution, one rendering: what the pane shows is inside what the
+	// command prints for the same repository.
+	var out bytes.Buffer
+	if err := conventions.Get(f.deps.conventionsDeps(), &out, f.repo, conventions.KindCommits); err != nil {
+		t.Fatalf("conventions get: %v", err)
+	}
+	answer := "----- ANSWER: USER DEFAULTS (yours, every repository) -----"
+	if !strings.Contains(out.String(), answer) || !strings.Contains(preview, answer) {
+		t.Errorf("the pane and the command label the answer differently:\npane:\n%s\nget:\n%s", preview, out.String())
+	}
 	if !strings.Contains(ui.StripANSI(m.ViewContent()), "USER DEFAULTS") {
-		t.Errorf("the stack is nowhere on screen:\n%s", ui.StripANSI(m.ViewContent()))
+		t.Errorf("the answer is nowhere on screen:\n%s", ui.StripANSI(m.ViewContent()))
 	}
 }
 
 // Editing a convention opens in place and writes prose: the human's overlay,
-// which every later read composes on top of the layers below.
+// which every later read appends to whichever rank answered.
 func TestConfigDashboardEditsAConventionAsProse(t *testing.T) {
 	f := newConventionDashboardFixture(t)
 	f.twoLayers(t)
@@ -213,8 +223,8 @@ func TestConfigDashboardEditsAConventionAsProse(t *testing.T) {
 	if !strings.Contains(out.String(), "Never name pop in a subject line.") {
 		t.Fatalf("the overlay is not in the stack get prints:\n%s", out.String())
 	}
-	if !strings.Contains(out.String(), "on top is user overlay") {
-		t.Errorf("the overlay did not land on top of the stack:\n%s", out.String())
+	if !strings.Contains(out.String(), "Your overlay is appended") {
+		t.Errorf("the overlay is not reported as appended to the answer:\n%s", out.String())
 	}
 
 	row, _ := m.Selected()
@@ -222,7 +232,7 @@ func TestConfigDashboardEditsAConventionAsProse(t *testing.T) {
 		t.Fatalf("row = %+v, want the new layer visible the moment the editor closed", row)
 	}
 
-	// ctrl+x hands the kind back to the layers below, exactly as it hands a key
+	// ctrl+x hands the kind back to the answer alone, exactly as it hands a key
 	// back to the source it stood on.
 	pressConfigDashboard(m, tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	if _, err := os.Stat(f.overlayPath()); !os.IsNotExist(err) {
@@ -233,9 +243,10 @@ func TestConfigDashboardEditsAConventionAsProse(t *testing.T) {
 	}
 }
 
-// Copying the source down assumes one value below to copy. A stack has layers
-// that compose instead, and flattening them would be pop merging prose — the one
-// thing this family declines to do — so the action refuses and writes nothing.
+// Copying the source down assumes an override standing over a value, so that
+// copying it changes nothing. The overlay is appended to the answer instead, so
+// copying the answer into it would state the same prose twice — the action
+// refuses and writes nothing.
 func TestConfigDashboardRefusesToCopyAConventionDown(t *testing.T) {
 	f := newConventionDashboardFixture(t)
 	f.twoLayers(t)
@@ -245,7 +256,7 @@ func TestConfigDashboardRefusesToCopyAConventionDown(t *testing.T) {
 	pressConfigDashboard(m, tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
 
 	view := ui.StripANSI(m.ViewContent())
-	if !strings.Contains(view, "compose") {
+	if !strings.Contains(view, "appended to the answer") {
 		t.Fatalf("the refusal does not say why, in the view:\n%s", view)
 	}
 	if _, err := os.Stat(f.overlayPath()); !os.IsNotExist(err) {

@@ -7,13 +7,13 @@ import (
 )
 
 // TestRenderStackEmptyNamesEveryPlaceItLooked pins the miss rendering, which is
-// the only output a caller gets before pop exits 1: the four paths, in rank
-// order, so the reader knows where an answer would go.
+// the only output a caller gets before pop exits 1: the four paths, in
+// resolution order, so the reader knows where an answer would go.
 func TestRenderStackEmptyNamesEveryPlaceItLooked(t *testing.T) {
 	stack := Stack{Kind: KindCommits, Layers: []Layer{
 		{Origin: OriginUserDefaults, Path: "/h/.agents/docs/commits.md"},
-		{Origin: OriginMemory, Path: "/d/pop/repos/pop-abc/conventions/commits.md"},
 		{Origin: OriginRepository, Path: "/r/docs/agents/commits.md"},
+		{Origin: OriginMemory, Path: "/d/pop/repos/pop-abc/conventions/commits.md"},
 		{Origin: OriginOverlay, Path: "/h/.agents/docs/commits.overlay.md"},
 	}}
 
@@ -37,10 +37,75 @@ func TestRenderStackEmptyNamesEveryPlaceItLooked(t *testing.T) {
 	}
 }
 
-// TestProvenanceDisclosesTopLayerAndMemoryOrigin pins the one line every skill
+// TestResolutionPicksOneAnswer walks the rank order that decides everything
+// else: the human's document over the team's, the team's over pop's memory, and
+// the overlay riding on whichever won rather than competing with it.
+func TestResolutionPicksOneAnswer(t *testing.T) {
+	defaults := Layer{Origin: OriginUserDefaults, Path: "/h/.agents/docs/commits.md", Present: true, Body: "MINE"}
+	repo := Layer{Origin: OriginRepository, Path: "/r/docs/agents/commits.md", Present: true, Body: "TEAM"}
+	memory := Layer{Origin: OriginMemory, Path: "/d/conventions/commits.md", Present: true, Body: "POP"}
+	overlay := Layer{Origin: OriginOverlay, Path: "/h/.agents/docs/commits.overlay.md", Present: true, Body: "EXTRA"}
+
+	tests := []struct {
+		name       string
+		layers     []Layer
+		answer     string
+		hasAnswer  bool
+		hasOverlay bool
+		contested  bool
+	}{
+		{name: "nothing anywhere"},
+		{name: "memory alone", layers: []Layer{memory}, answer: "POP", hasAnswer: true},
+		{name: "the team's document stands memory down",
+			layers: []Layer{repo, memory}, answer: "TEAM", hasAnswer: true, contested: true},
+		{name: "the human's document stands the team's down",
+			layers: []Layer{defaults, repo}, answer: "MINE", hasAnswer: true, contested: true},
+		{name: "the human's document stands both down",
+			layers: []Layer{defaults, repo, memory}, answer: "MINE", hasAnswer: true, contested: true},
+		{name: "the overlay rides on the answer",
+			layers: []Layer{repo, overlay}, answer: "TEAM", hasAnswer: true, hasOverlay: true},
+		{name: "the overlay alone is no contender",
+			layers: []Layer{overlay}, hasOverlay: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := Stack{Kind: KindCommits, Layers: tt.layers}
+			answer, ok := s.Answer()
+			if ok != tt.hasAnswer || (ok && answer.Body != tt.answer) {
+				t.Errorf("Answer() = %q, %v; want %q, %v", answer.Body, ok, tt.answer, tt.hasAnswer)
+			}
+			if _, ok := s.Overlay(); ok != tt.hasOverlay {
+				t.Errorf("Overlay() present = %v, want %v", ok, tt.hasOverlay)
+			}
+			if got := s.Empty(); got != (!tt.hasAnswer && !tt.hasOverlay) {
+				t.Errorf("Empty() = %v", got)
+			}
+			if got := s.Contested(); got != tt.contested {
+				t.Errorf("Contested() = %v, want %v", got, tt.contested)
+			}
+
+			// The rendered surfaces carry the answer and the overlay, and never a
+			// rank the answer stood down.
+			prose, spoke := StackProse(s)
+			if spoke == s.Empty() {
+				t.Fatalf("StackProse spoke = %v for an Empty() = %v stack", spoke, s.Empty())
+			}
+			for _, l := range tt.layers {
+				shown := strings.Contains(prose, l.Body)
+				inForce := (tt.hasAnswer && l.Body == tt.answer) || l.Origin == OriginOverlay
+				if shown != inForce {
+					t.Errorf("layer %s shown = %v, want %v:\n%s", l.Origin, shown, inForce, prose)
+				}
+			}
+		})
+	}
+}
+
+// TestProvenanceDisclosesTheAnswerAndTheOverlay pins the one line every skill
 // surfaces verbatim, which is the whole reason pop emits it rather than letting
 // each skill phrase it.
-func TestProvenanceDisclosesTopLayerAndMemoryOrigin(t *testing.T) {
+func TestProvenanceDisclosesTheAnswerAndTheOverlay(t *testing.T) {
 	tests := []struct {
 		name   string
 		layers []Layer
@@ -48,7 +113,7 @@ func TestProvenanceDisclosesTopLayerAndMemoryOrigin(t *testing.T) {
 		absent []string
 	}{
 		{
-			name: "memory on top with full frontmatter",
+			name: "memory answers with full frontmatter",
 			layers: []Layer{
 				{Origin: OriginMemory, Path: "/d/conventions/commits.md", Present: true, Body: "b",
 					DerivedFrom: "a sample of 40 commits", DerivedAt: "2026-08-01"},
@@ -56,27 +121,37 @@ func TestProvenanceDisclosesTopLayerAndMemoryOrigin(t *testing.T) {
 			want: []string{"pop memory", "/d/conventions/commits.md", "a sample of 40 commits", "2026-08-01"},
 		},
 		{
-			name: "memory under the repository's document",
+			name: "the repository's document stands memory down",
 			layers: []Layer{
 				{Origin: OriginMemory, Path: "/d/conventions/commits.md", Present: true, Body: "b", DerivedFrom: "a sample of 40 commits"},
 				{Origin: OriginRepository, Path: "/r/docs/agents/commits.md", Present: true, Body: "b"},
 			},
-			want: []string{"repository", "/r/docs/agents/commits.md", "a sample of 40 commits"},
+			want: []string{"repository", "/r/docs/agents/commits.md"},
+			// A memory nobody is being handed has no derivation worth quoting.
+			absent: []string{"a sample of 40 commits", "/d/conventions/commits.md"},
 		},
 		{
-			name: "memory without frontmatter still discloses itself",
+			name: "answering memory without frontmatter still discloses itself",
 			layers: []Layer{
 				{Origin: OriginMemory, Path: "/d/conventions/commits.md", Present: true, Body: "b"},
 			},
 			want: []string{"pop memory", "records no derivation"},
 		},
 		{
-			name: "no memory in the stack",
+			name: "the overlay is named as appended, not as the answer",
 			layers: []Layer{
 				{Origin: OriginRepository, Path: "/r/docs/agents/commits.md", Present: true, Body: "b"},
+				{Origin: OriginOverlay, Path: "/h/.agents/docs/commits.overlay.md", Present: true, Body: "b"},
 			},
-			want:   []string{"repository"},
+			want:   []string{"resolved to repository", "appended", "/h/.agents/docs/commits.overlay.md"},
 			absent: []string{"Pop memory"},
+		},
+		{
+			name: "an overlay with nothing to ride on says so",
+			layers: []Layer{
+				{Origin: OriginOverlay, Path: "/h/.agents/docs/commits.overlay.md", Present: true, Body: "b"},
+			},
+			want: []string{"your overlay alone", "no layer holds an answer"},
 		},
 	}
 
@@ -118,32 +193,25 @@ func TestSplitFrontmatterOnlyTakesAWellFormedFence(t *testing.T) {
 	}
 }
 
-// TestStackPreviewLabelsEveryLayerThatSpeaks pins what a surface showing a
-// convention beside values of another sort gets: the layers that speak, each
-// labelled with its origin and reach, in rank order, plus where the layer an
-// editor writes lives. Silent layers are not listed — they are what the empty
-// case names.
-func TestStackPreviewLabelsEveryLayerThatSpeaks(t *testing.T) {
+// TestStackPreviewShowsTheAnswerAndTheOverlay pins what a surface showing a
+// convention beside values of another sort gets: the same answer, overlay and
+// provenance `get` prints, plus where the layer an editor writes lives. A rank
+// the answer stood down is not shown — what is in force is the question the
+// pane exists to answer.
+func TestStackPreviewShowsTheAnswerAndTheOverlay(t *testing.T) {
 	stack := Stack{Kind: KindCommits, Layers: []Layer{
 		{Origin: OriginUserDefaults, Path: "/h/.agents/docs/commits.md", Present: true, Body: "Imperative subjects."},
-		{Origin: OriginMemory, Path: "/d/conventions/commits.md"},
 		{Origin: OriginRepository, Path: "/r/docs/agents/commits.md", Present: true, Body: "Conventional commits."},
+		{Origin: OriginMemory, Path: "/d/conventions/commits.md"},
 		{Origin: OriginOverlay, Path: "/h/.agents/docs/commits.overlay.md"},
 	}}
 
 	got := StackPreview(stack)
 
-	defaults := strings.Index(got, "USER DEFAULTS")
-	repository := strings.Index(got, "REPOSITORY")
-	if defaults < 0 || repository < 0 || defaults > repository {
-		t.Fatalf("the two layers that speak are not labelled in rank order:\n%s", got)
-	}
 	for _, want := range []string{
-		"2 of 4 layers speak",
+		"ANSWER: USER DEFAULTS",
 		"yours, every repository",
-		"the team's, in version control",
 		"Imperative subjects.",
-		"Conventional commits.",
 		"Provenance:",
 		// The layer an editor here would write, named whether or not it holds
 		// anything: a reader deciding to edit needs to know which of the four
@@ -155,8 +223,23 @@ func TestStackPreviewLabelsEveryLayerThatSpeaks(t *testing.T) {
 			t.Errorf("preview missing %q:\n%s", want, got)
 		}
 	}
-	if strings.Contains(got, "/d/conventions/commits.md") {
-		t.Errorf("a silent layer is listed as one that speaks:\n%s", got)
+	for _, absent := range []string{"Conventional commits.", "/d/conventions/commits.md"} {
+		if strings.Contains(got, absent) {
+			t.Errorf("a layer the answer stood down is shown as in force (%q):\n%s", absent, got)
+		}
+	}
+
+	// The pane and `pop conventions get` render one thing, so they cannot
+	// describe the same convention differently.
+	var printed bytes.Buffer
+	if err := RenderStack(&printed, stack); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(printed.String(), stack.inForceProse()) {
+		t.Errorf("get does not print what the preview shows:\n%s", printed.String())
+	}
+	if !strings.Contains(got, stack.inForceProse()) {
+		t.Errorf("the preview does not show what get prints:\n%s", got)
 	}
 }
 
@@ -165,14 +248,14 @@ func TestStackPreviewLabelsEveryLayerThatSpeaks(t *testing.T) {
 func TestStackPreviewOfAnEmptyStackNamesWherePopLooked(t *testing.T) {
 	stack := Stack{Kind: KindIssueTracker, Layers: []Layer{
 		{Origin: OriginUserDefaults, Path: "/h/.agents/docs/issue-tracker.md"},
-		{Origin: OriginMemory, Path: "/d/conventions/issue-tracker.md"},
 		{Origin: OriginRepository, Path: "/r/docs/agents/issue-tracker.md"},
+		{Origin: OriginMemory, Path: "/d/conventions/issue-tracker.md"},
 		{Origin: OriginOverlay, Path: "/h/.agents/docs/issue-tracker.overlay.md"},
 	}}
 
 	got := StackPreview(stack)
 
-	if !strings.Contains(got, "no layer speaks") {
+	if !strings.Contains(got, "nothing answers it") {
 		t.Fatalf("an empty stack does not say so:\n%s", got)
 	}
 	for _, l := range stack.Layers {

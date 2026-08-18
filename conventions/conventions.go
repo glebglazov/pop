@@ -2,11 +2,12 @@
 // this repository do X" for one Convention kind, resolved for the repository
 // the current checkout belongs to.
 //
-// A kind never resolves to a single document. It resolves to a Convention
-// stack of four layers that compose, and pop's whole job here is mechanical:
-// derive the four paths, read what exists, order and label it, and state the
-// override rule. It never merges prose — the agent reading the output
-// reconciles the layers (ADR-0211).
+// A kind resolves to exactly one answer plus the human's overlay: the human's
+// own document, else the repository's committed one, else pop's memory, with
+// ~/.agents/docs/<kind>.overlay.md appended whenever it exists. Nothing else
+// composes (ADR-0223). Pop's job here is mechanical — derive the four paths,
+// read what exists, decide which one answers, and label it. It never merges
+// prose.
 package conventions
 
 import (

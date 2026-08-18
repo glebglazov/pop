@@ -22,38 +22,42 @@ var conventionsCmd = &cobra.Command{
 	Long: `Read the conventions this repository is written under.
 
 A convention is prose — "how does this repository write its commits" — held for
-one convention kind. It is never a single document: a kind resolves through a
-stack of four layers, and what you get back is every layer that has something
-to say.`,
+one convention kind. A kind resolves to exactly one answer, plus your own
+overlay where you have written one.`,
 }
 
 var conventionsGetCmd = &cobra.Command{
 	Use:   "get [kind]",
-	Short: "Print every layer of a convention's stack, lowest rank first",
-	Long: `Print the convention stack for this repository, for one kind or for all of them.
+	Short: "Print the convention in force here, and your overlay",
+	Long: `Print the convention in force for this repository, for one kind or for all of them.
 
-The consumer is an agent that has to follow the convention. It gets every layer
-that exists — labelled with its origin and path, lowest rank first, under one
-statement of the override rule — and reconciles them itself. Pop orders and
-labels; it never merges prose.
+The consumer is an agent that has to follow the convention. It gets one answer,
+labelled with its origin and path, and your overlay appended where you have
+written one. Nothing else composes, and there is no contradiction left for the
+reader to reconcile.
 
-The four layers, lowest rank first:
+The answer is the first of these that holds something:
 
-  user defaults  ~/.agents/docs/<kind>.md          yours, every repository
+  user defaults  ~/.agents/docs/<kind>.md               yours, every repository
+  repository     docs/agents/<kind>.md                  the team's, in version control
   pop memory     <task storage>/conventions/<kind>.md   pop-written, this repo
-  repository     docs/agents/<kind>.md             the team's, in version control
-  user overlay   ~/.agents/docs/<kind>.overlay.md  yours, over every repository
+
+Your own document outranks the team's: pop resolves conventions on your machine,
+on your behalf. Pop memory is pop's stand-in for a written answer, so it stands
+down as soon as either document exists.
+
+  user overlay   ~/.agents/docs/<kind>.overlay.md  appended to whichever answered
 
 The memory layer is filed under the repository, not the directory, so every
 worktree of a repository reads one file.
 
-Output ends with a one-line provenance summary naming the layer on top, ready
-to be surfaced verbatim as the "which source am I using" disclosure.
+Output ends with a one-line provenance summary naming what answered, ready to be
+surfaced verbatim as the "which source am I using" disclosure.
 
-With no kind, every known kind's stack prints in turn. Exit is 1 when the kinds
-asked about are all empty — a miss, not a failure — and the paths pop consulted
-are printed so you know where an answer would go. An unknown kind is refused
-with the list of the ones that exist, and no stack is printed.`,
+With no kind, every known kind prints in turn. Exit is 1 when the kinds asked
+about are all empty — a miss, not a failure — and the paths pop consulted are
+printed so you know where an answer would go. An unknown kind is refused with
+the list of the ones that exist, and nothing is printed.`,
 	Args:              cobra.MaximumNArgs(1),
 	RunE:              runConventionsGet,
 	ValidArgsFunction: completeConventionKind,
@@ -99,9 +103,11 @@ The file is filed under the repository, not the checkout, so a convention
 written in the trunk is the same convention in every worktree of it. Writing
 again replaces what is there.
 
-This is one rank of four. It is where a convention pop derived from evidence
-belongs; a convention a human states in session belongs in the repository's
-` + "`docs/agents/<kind>.md`" + `, which outranks this layer and which the team owns.`,
+This is the last rank consulted: pop's stand-in for a written answer, which
+stands down the moment either document exists. It is where a convention pop
+derived from evidence belongs; a convention a human states in session belongs in
+the repository's ` + "`docs/agents/<kind>.md`" + `, which the team owns, or in
+` + "`~/.agents/docs/<kind>.md`" + `, which is yours and outranks both.`,
 	Args:              cobra.ExactArgs(1),
 	RunE:              runConventionsSet,
 	ValidArgsFunction: completeConventionKind,
@@ -113,9 +119,10 @@ var conventionsUnsetCmd = &cobra.Command{
 	Long: `Remove the pop memory layer of a convention stack for this repository.
 
 Only pop's own layer goes: the user's documents and the repository's committed
-document are untouched, so the kind usually keeps answering. The output says
-what still answers it, printed exactly as ` + "`get`" + ` would print it, so the verb
-cannot be read as silencing the kind.
+document are untouched, so the kind usually keeps answering — and where memory
+was the answer, removing it promotes the next rank. The output names what is in
+force afterwards and prints it exactly as ` + "`get`" + ` would, so the verb cannot be
+read as silencing the kind.
 
 A kind pop holds no memory for is reported as such and is not a failure.`,
 	Args:              cobra.ExactArgs(1),

@@ -8,9 +8,10 @@ import (
 	"github.com/glebglazov/pop/tasks"
 )
 
-// ErrNoConvention reports that every layer pop consulted was empty. It is a
-// miss, not a failure: the caller has already been told where pop looked, and
-// the CLI turns this into exit 1 rather than an error report.
+// ErrNoConvention reports that no rank pop consulted holds an answer and no
+// overlay exists either. It is a miss, not a failure: the caller has already
+// been told where pop looked, and the CLI turns this into exit 1 rather than an
+// error report.
 var ErrNoConvention = errors.New("no convention found in any layer of the stack")
 
 // Origin labels one rank of the Convention stack by who authored it. The four
@@ -19,33 +20,39 @@ var ErrNoConvention = errors.New("no convention found in any layer of the stack"
 type Origin string
 
 const (
-	// OriginUserDefaults is ~/.agents/docs/<kind>.md — the human's preferences,
-	// applying to every repository, which a team's document may overrule.
+	// OriginUserDefaults is ~/.agents/docs/<kind>.md — the human's own answer,
+	// applying to every repository. It is the first rank consulted: pop resolves
+	// conventions on one human's machine, on that human's behalf, so where the
+	// two disagree the person at the terminal is the one being served
+	// (ADR-0223 decision 2).
 	OriginUserDefaults Origin = "user defaults"
-	// OriginMemory is the Convention memory: the layer pop writes itself, filed
-	// under Repository identity so it is per repository and per machine.
-	OriginMemory Origin = "pop memory"
 	// OriginRepository is docs/agents/<kind>.md — the team's rules, in version
-	// control.
+	// control, and the answer wherever the human has written none of their own.
 	OriginRepository Origin = "repository"
+	// OriginMemory is the Convention memory: the layer pop writes itself, filed
+	// under Repository identity so it is per repository and per machine. It is
+	// the last rank, and it stands down as soon as either document exists — it
+	// is pop's stand-in for a written answer, and a written answer makes it
+	// redundant (ADR-0223 decision 4).
+	OriginMemory Origin = "pop memory"
 	// OriginOverlay is ~/.agents/docs/<kind>.overlay.md — the human's
-	// constraints that must survive any repository, which is why the same author
-	// holds both ends of the stack.
+	// constraints, which ride along with whichever rank answered rather than
+	// competing with it. It is the one layer that appends (ADR-0223 decision 3).
 	OriginOverlay Origin = "user overlay"
 )
 
 // Scope is the one-phrase reminder of how far a layer reaches, printed beside
-// its origin so the rank order reads as something other than four file paths.
+// its origin so a labelled block reads as something other than a file path.
 func (o Origin) Scope() string {
 	switch o {
 	case OriginUserDefaults:
 		return "yours, every repository"
-	case OriginMemory:
-		return "pop-written, this repository on this machine"
 	case OriginRepository:
 		return "the team's, in version control"
+	case OriginMemory:
+		return "pop-written, this repository on this machine"
 	case OriginOverlay:
-		return "yours, overrides every repository"
+		return "yours, appended to any answer"
 	}
 	return ""
 }
@@ -68,44 +75,64 @@ type Layer struct {
 }
 
 // Stack is one Convention kind resolved for one repository: every rank pop
-// consulted, lowest first, present or not.
+// consulted, present or not. It resolves to exactly one answer plus the
+// overlay — the ranks below the answer are not consulted at all (ADR-0223).
 type Stack struct {
 	Kind   Kind
 	Layers []Layer
 }
 
-// Present returns the layers that hold something, in rank order.
-func (s Stack) Present() []Layer {
-	out := make([]Layer, 0, len(s.Layers))
+// answerRanks is the order a kind resolves in: the human's own document, then
+// the team's, then pop's memory. The first that holds something is the answer,
+// and the rest are not read into it — nothing composes.
+var answerRanks = []Origin{OriginUserDefaults, OriginRepository, OriginMemory}
+
+// speaks returns one rank when it holds something.
+func (s Stack) speaks(origin Origin) (Layer, bool) {
 	for _, l := range s.Layers {
-		if l.Present {
-			out = append(out, l)
-		}
-	}
-	return out
-}
-
-// Empty reports a kind nothing anywhere has an answer for.
-func (s Stack) Empty() bool { return len(s.Present()) == 0 }
-
-// Top returns the highest-ranked layer that holds something — the one that wins
-// a direct contradiction.
-func (s Stack) Top() (Layer, bool) {
-	present := s.Present()
-	if len(present) == 0 {
-		return Layer{}, false
-	}
-	return present[len(present)-1], true
-}
-
-// memory returns the Convention memory layer when it holds something.
-func (s Stack) memory() (Layer, bool) {
-	for _, l := range s.Layers {
-		if l.Origin == OriginMemory && l.Present {
+		if l.Origin == origin && l.Present {
 			return l, true
 		}
 	}
 	return Layer{}, false
+}
+
+// Answer returns the one layer in force for this kind, and false for a kind
+// nothing has written an answer to.
+func (s Stack) Answer() (Layer, bool) {
+	for _, origin := range answerRanks {
+		if l, ok := s.speaks(origin); ok {
+			return l, true
+		}
+	}
+	return Layer{}, false
+}
+
+// Overlay returns the human's overlay when it holds something. It is appended
+// to whichever rank answered, so it is never in competition with one.
+func (s Stack) Overlay() (Layer, bool) { return s.speaks(OriginOverlay) }
+
+// Empty reports a kind neither an answer nor an overlay exists for.
+func (s Stack) Empty() bool {
+	if _, ok := s.Answer(); ok {
+		return false
+	}
+	_, ok := s.Overlay()
+	return !ok
+}
+
+// Contested reports that a rank below the answer also holds something, so a
+// document or a memory is quietly losing. Under winner-take-all that is a real
+// state a reader wants surfaced; the overlay is never a contender, since it
+// appends rather than displaces (ADR-0223).
+func (s Stack) Contested() bool {
+	speaking := 0
+	for _, origin := range answerRanks {
+		if _, ok := s.speaks(origin); ok {
+			speaking++
+		}
+	}
+	return speaking > 1
 }
 
 // MemoryPath returns where Convention memory for kind lives: one Markdown file
@@ -165,20 +192,22 @@ func resolveStackRoots(d *Deps, cwd string) (stackRoots, error) {
 	}, nil
 }
 
-// layers derives the four layer paths for kind, lowest rank first, reading
-// nothing.
+// layers derives the four layer paths for kind, in resolution order, reading
+// nothing. The three answer ranks come first, best first, and the overlay last
+// because it is appended rather than ranked.
 func (r stackRoots) layers(kind Kind) []Layer {
 	return []Layer{
 		{Origin: OriginUserDefaults, Path: filepath.Join(r.agentsDocs, string(kind)+".md")},
-		{Origin: OriginMemory, Path: memoryPathIn(r.storageDir, kind)},
 		{Origin: OriginRepository, Path: filepath.Join(r.topLevel, "docs", "agents", string(kind)+".md")},
+		{Origin: OriginMemory, Path: memoryPathIn(r.storageDir, kind)},
 		{Origin: OriginOverlay, Path: overlayPathIn(r.agentsDocs, kind)},
 	}
 }
 
-// Resolve reads the whole Convention stack for kind in the repository owning
-// cwd. Every rank is returned whether or not it holds something: a caller that
-// found nothing still needs to be told where pop looked.
+// Resolve reads every rank of the Convention stack for kind in the repository
+// owning cwd. All four come back whether or not they hold something: a caller
+// that found nothing still needs to be told where pop looked, and one that did
+// still needs to know which layer an edit would land in.
 func Resolve(d *Deps, kind Kind, cwd string) (Stack, error) {
 	stacks, err := ResolveAll(d, cwd, kind)
 	if err != nil {
@@ -191,6 +220,9 @@ func Resolve(d *Deps, kind Kind, cwd string) (Stack, error) {
 // order asked for. Every caller that shows more than one kind — `get` with no
 // kind, the Config dashboard's rows — goes through here, because the repository
 // each stack is about is the same one.
+//
+// Every rank is read even though at most two are shown: which one won is only
+// knowable by looking, and Contested is a fact about the ones that lost.
 func ResolveAll(d *Deps, cwd string, kinds ...Kind) ([]Stack, error) {
 	roots, err := resolveStackRoots(d, cwd)
 	if err != nil {

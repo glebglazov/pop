@@ -10,15 +10,15 @@ import (
 
 // The Config dashboard's convention rows (ADR-0212 decision 8). A Convention
 // kind sits in the same list as a config leaf because the right pane answers the
-// same question for both — what is in force here, and what produced it — and
-// differing only in that a key resolves to one value and a kind to a labelled
-// stack is a difference of shape, not of question.
+// same question for both — what is in force here, and what produced it — and a
+// kind answering in prose rather than in TOML is a difference of medium, not of
+// question.
 //
 // Everything about a convention is resolved and rendered in `conventions`; this
 // file decides only which rows exist and what the three keystrokes mean for one.
 // The layer an edit here writes is the Convention overlay, because that is what
-// an override *is* for a convention: prose laid over the composed stack rather
-// than a layer displacing another (ADR-0212 decision 2).
+// an override *is* for a convention: prose appended to whichever rank answered
+// rather than a layer displacing another (ADR-0212 decision 2).
 
 // conventionsDeps derives the Repo convention seam from the config seam. The two
 // read the same machine through the same filesystem, so a host that has sandboxed
@@ -54,10 +54,12 @@ func (w Writer) conventionRows() []ui.ConfigDashboardRow {
 			Key:  conventions.RowKey(stack.Kind),
 			Desc: stack.Kind.Desc(),
 			// The marker means the human's own statement is in force, which for a
-			// convention is the overlay. Contested it never is: the layers of a stack
-			// compose, so a second one speaking is not a first one quietly losing —
-			// the state that marker exists to report.
+			// convention is the overlay.
 			Overridden: present,
+			// A kind resolves to one answer, so a second rank holding something is a
+			// first one quietly losing — the state that marker and that sort exist to
+			// report (ADR-0223).
+			Contested: stack.Contested(),
 			Preview: ui.ConfigDashboardPreview{
 				Layers:   conventions.StackPreview(stack),
 				EditSeed: conventionEditSeed(stack.Kind, overlay),
@@ -83,9 +85,9 @@ func overlayLayer(stack conventions.Stack) (conventions.Layer, bool) {
 // under it has cancelled rather than stated the note.
 func conventionEditSeed(kind conventions.Kind, overlay conventions.Layer) string {
 	note := ui.ConfigEditorNote(fmt.Sprintf(
-		"your %s overlay — the top layer of the stack, in every repository.\n"+
+		"your %s overlay — appended to whatever answers, in every repository.\n"+
 			"%s\n"+
-			"It composes over the layers below rather than replacing them. Leave this\n"+
+			"It rides along with the answer rather than replacing it. Leave this\n"+
 			"buffer empty to change nothing; ctrl+x removes the overlay.",
 		kind, overlay.Path))
 	if overlay.Present {
@@ -101,11 +103,11 @@ func (w Writer) storeConvention(kind conventions.Kind, buffer string) (string, e
 	return "", conventions.SetOverlay(w.conventions, kind, buffer)
 }
 
-// copySourceConvention refuses. Copying the source down assumes one value below
-// the override to copy, and a convention has a composed stack instead: flattening
-// it into the overlay would be pop merging prose, which is the one thing this
-// whole family declines to do (ADR-0211).
+// copySourceConvention refuses. Copying the source down assumes an override
+// standing *over* a value, so that copying it changes nothing; the overlay is
+// appended to the answer instead, so copying the answer into it would hand the
+// reader the same prose twice (ADR-0223 decision 3).
 func copySourceConvention(kind conventions.Kind) error {
-	return fmt.Errorf("the %s layers compose, so there is no single value to copy down; "+
-		"press enter to write your overlay", kind)
+	return fmt.Errorf("your %s overlay is appended to the answer, not laid over it, "+
+		"so copying the answer down would state it twice; press enter to write your overlay", kind)
 }

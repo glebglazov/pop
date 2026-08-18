@@ -136,8 +136,8 @@ own `repo.<key>` leaves, then its `conventions.<kind>` rows, each with its
 description beneath and a `●` where your own layer is in force today. The right
 pane previews the highlighted row: a config key in config format — the effective
 value as TOML, the layer that produced it, and the value an override is standing
-on — and a convention as its whole stack, every layer that speaks labelled with
-its origin, lowest rank first.
+on — and a convention as what is in force: the one rank that answered, labelled
+with its origin, and your overlay appended beneath it.
 
 | Key | Action |
 |-----|--------|
@@ -150,9 +150,9 @@ its origin, lowest rank first.
 | `C-h` | Help |
 
 For a convention, the layer that is yours is the overlay —
-`~/.agents/docs/<kind>.overlay.md` — which composes on top of the layers below
-rather than replacing one of them, so `enter` opens your editor on it as
-Markdown and `C-y` says there is no single value to copy down.
+`~/.agents/docs/<kind>.overlay.md` — which is appended to whichever rank
+answered rather than replacing it, so `enter` opens your editor on it as
+Markdown and `C-y` says copying the answer down would state it twice.
 
 For a config key, `enter` opens your editor on the whole `key = value` line in force today.
 Handing back an empty buffer cancels — `C-x` is how an override is removed —
