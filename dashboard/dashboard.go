@@ -3523,9 +3523,10 @@ func dashboardSummary(kinds workKinds, rows []DashboardRow) string {
 	return strings.Join(kinds.summary(rows), " · ")
 }
 
-// viewDetail renders the full-screen container detail view. The Document peek
-// and row action-menu overlay keep their bespoke rendering; each plain list
-// composes through a Frame with ui.List (ADR-0079/0217).
+// viewDetail renders the full-screen container detail view through a Frame with
+// ui.List (ADR-0079/0217), item menu included: the menu is a reserved Block, so
+// it lands at the same screen position as the table view's menus. Only the
+// Document peek still composes its own lines.
 func (m QueueDashboard) viewDetail() string {
 	d := m.detail
 	if d.peek != nil {
@@ -3533,21 +3534,16 @@ func (m QueueDashboard) viewDetail() string {
 		renderDocumentPeek(&b, d, m.height, m.width, m.itemMenu)
 		return b.String()
 	}
-	if m.itemMenu != nil {
-		var b strings.Builder
-		m.renderDetailContent(&b, d, m.height, m.width, m.itemMenu)
-		return b.String()
-	}
 	frame, body := m.detailFrame()
 	return frame.Render(body)
 }
 
-// detailFrame builds the Frame and body for the non-menu detail states: a
-// container that could not be read, and the sections-plus-item-list content. The
-// same Frame drives the body-height budget and the render (ADR-0079); the
-// content body's List is sized to the budget the Frame leaves minus the prose
-// sections and the table's own chrome, so the list clamps to the terminal
-// instead of rendering every item.
+// detailFrame builds the Frame and body for the detail states: a container that
+// could not be read, or the sections-plus-item-list content with an optional
+// item-menu Block. The same Frame drives the body-height budget and the render
+// (ADR-0079); the content body's List is sized to the budget the Frame leaves
+// minus the prose sections and the table's own chrome, so the list clamps to the
+// terminal instead of rendering every item.
 func (m QueueDashboard) detailFrame() (ui.Frame, string) {
 	d := m.detail
 	const backHint = "h/esc back"
@@ -3560,12 +3556,23 @@ func (m QueueDashboard) detailFrame() (ui.Frame, string) {
 		return ui.Frame{Width: m.width, TermH: m.height, Header: header, Hints: backHint}, body
 	}
 
+	// The item menu is a Block, the same reserved region the table view's menus
+	// render as (ADR-0224 decision 4): BodyHeight shrinks the item list by exactly
+	// its height, so opening a menu scrolls rows out from the top and closing it
+	// scrolls them back, and the list can never paint past the pane.
+	hints := detailHints(d)
+	var block []string
+	if m.itemMenu != nil && !m.itemMenu.inPeek {
+		block = itemMenuLines(m.itemMenu, m.width)
+		hints = "j/k move · enter/letter run · esc close"
+	}
 	frame := ui.Frame{
 		Width:  m.width,
 		TermH:  m.height,
 		Header: header,
 		Flash:  d.flash,
-		Hints:  detailHints(d),
+		Block:  block,
+		Hints:  hints,
 	}
 	budget := frame.BodyHeight(m.height)
 	// The item list is the point of the view, so prose yields to it: sections are
@@ -3740,98 +3747,31 @@ func detailArtifactTableSeparator() string {
 		strings.Repeat("-", len("FILENAME")))
 }
 
-// renderDetailContent renders the detail item list with the action-menu overlay
-// spliced next to the cursored item (ADR-0079 bespoke placement; its cursor is
-// ported onto List in a later slice). It renders every item — no scroll window —
-// and reads the cursor from the List. The non-menu state renders via detailFrame.
-func (m QueueDashboard) renderDetailContent(b *strings.Builder, d *detailView, height, width int, menu *itemMenu) {
-	fmt.Fprintln(b, m.detailHeader(d.row))
-
-	if d.row.Broken {
-		body := "  BROKEN"
-		if d.row.BrokenReason != "" {
-			body += ": " + d.row.BrokenReason
-		}
-		fmt.Fprintln(b, body)
-		writeDashboardFooter(b, height, ui.HintStyle.Render("  h/esc back"))
-		return
-	}
-
-	for _, line := range detailSectionLines(d.row.DetailSections, width) {
-		fmt.Fprintln(b, line)
-	}
-	fmt.Fprintln(b)
-
-	var tableHeader, tableSeparator string
-	if d.artifacts {
-		tableHeader = detailArtifactTableHeader()
-		tableSeparator = detailArtifactTableSeparator()
-	} else {
-		tableHeader = detailTableHeader(d.cols.idW)
-		tableSeparator = detailTableSeparator(d.cols.idW)
-	}
-	fmt.Fprintf(b, "  %s\n", tableHeader)
-	fmt.Fprintf(b, "  %s\n", tableSeparator)
-
-	cursorIdx := d.list.Cursor()
-	rowCount := d.list.Len()
-	if d.artifacts {
-		cursorIdx = d.artifactList.Cursor()
-		rowCount = d.artifactList.Len()
-	}
-	var menuLines []string
-	if menu != nil && !menu.inPeek {
-		menuLines = itemMenuLines(menu, width)
-	}
-	writeMenu := func() {
-		for _, ml := range menuLines {
-			fmt.Fprintf(b, "%s\n", ml)
-		}
-	}
-	for i := 0; i < rowCount; i++ {
-		prefix := "  "
-		if i == cursorIdx {
-			prefix = ui.IndicatorStyle.Render("█") + " "
-		}
-		line := ""
-		if d.artifacts {
-			line = detailArtifactLine(d.artifactList.Items()[i])
-		} else {
-			line = detailItemLine(d.list.Items()[i], d.cols.idW)
-		}
-		fmt.Fprintf(b, "%s%s\n", prefix, line)
-		if menuLines != nil && i == cursorIdx {
-			writeMenu()
-		}
-	}
-
-	fmt.Fprintln(b)
-	hint := "  " + detailHints(d)
-	if menu != nil {
-		hint = "  j/k move · enter/letter run · esc close"
-	}
-	writeDashboardFooter(b, height, dashboardFooterLine(d.flash, hint))
-}
-
-// itemMenuLines renders the item-level action overlay as a block of lines,
-// indented to nest under the cursored item, with the highlighted verb carrying
-// the shared cursor block. The first line is a dimmed "actions" caption. It
-// mirrors dashboardMenuLines (the container-view overlay) for a consistent look.
+// itemMenuLines renders a detail-view item menu as the Frame Block it is drawn
+// as, through the same builder and at the same screen position as the table
+// view's menus: where the actions are is a fact about the dashboard, not about
+// which view is open (ADR-0224 decision 4).
 func itemMenuLines(menu *itemMenu, width int) []string {
 	if menu == nil {
 		return nil
 	}
-	lines := []string{ui.TruncateString("    "+ui.HintStyle.Render("actions"), width)}
-	cursor := menu.list.Cursor()
-	for i, action := range menu.list.Items() {
-		marker := "  "
-		if i == cursor {
-			marker = ui.IndicatorStyle.Render("█") + " "
-		}
-		line := fmt.Sprintf("    %s%s  %s", marker, action.Key, action.Label)
-		lines = append(lines, ui.TruncateString(line, width))
+	entries := make([]menuEntry, 0, menu.list.Len())
+	for _, action := range menu.list.Items() {
+		entries = append(entries, menuEntry{key: action.Key, label: action.Label})
 	}
-	return lines
+	return menuBlockLines("actions", menu.target(), width, menu.list.Cursor(), entries)
+}
+
+// target is the row the menu's verbs will hit, named the way that row names
+// itself: an item by its ID, an artifact by its filename.
+func (menu *itemMenu) target() string {
+	if menu == nil {
+		return ""
+	}
+	if menu.artifact != nil {
+		return menu.artifact.Name
+	}
+	return menu.item.ID
 }
 
 func renderDocumentPeek(b *strings.Builder, d *detailView, height, width int, menu *itemMenu) {
@@ -4059,11 +3999,37 @@ func renderDashboardTableTwoLine(w io.Writer, kinds workKinds, rows []DashboardR
 	}
 }
 
-// dashboardMenuLines renders an action overlay as the Frame Block it is drawn
-// as: a rule naming what the verbs will hit, then one line per item with the
-// highlighted one carrying the shared cursor block. When a submenu is open it
-// renders that instead, at the same position and under the same rule grammar.
-// Handoff-verb keys are coloured by the live-pane affordance (ADR-0158).
+// menuEntry is one line of a menu block: the key a human presses and what it
+// does. Callers style the key before handing it over — the table view's handoff
+// colouring (ADR-0158) is a property of the verb, not of the block.
+type menuEntry struct {
+	key   string
+	label string
+}
+
+// menuBlockLines is the single path every action menu renders through — the table
+// view's singular and plural menus, their status and mute submenus, and the
+// detail view's item menus. A rule naming the noun and its target, then one line
+// per entry with the cursored one carrying the shared cursor block. Every caller
+// hands the result to a Frame as its Block, which is what puts all of them at one
+// fixed screen position above the hint line (ADR-0224 decision 4).
+func menuBlockLines(noun, target string, width, cursor int, entries []menuEntry) []string {
+	lines := []string{dashboardMenuRule(noun, target, width)}
+	for i, entry := range entries {
+		marker := "  "
+		if i == cursor {
+			marker = ui.IndicatorStyle.Render("█") + " "
+		}
+		line := fmt.Sprintf("    %s%s  %s", marker, entry.key, entry.label)
+		lines = append(lines, ui.TruncateString(line, width))
+	}
+	return lines
+}
+
+// dashboardMenuLines renders a row action menu as the Frame Block it is drawn as.
+// When a submenu is open it renders that instead, at the same position and under
+// the same rule grammar. Handoff-verb keys are coloured by the live-pane
+// affordance (ADR-0158).
 func dashboardMenuLines(menu *dashboardMenu, width int, live livePaneCache) []string {
 	if menu == nil {
 		return nil
@@ -4074,18 +4040,14 @@ func dashboardMenuLines(menu *dashboardMenu, width int, live livePaneCache) []st
 	if menu.mute != nil {
 		return dashboardMuteMenuLines(menu.mute, menu.target(), width)
 	}
-	lines := []string{dashboardMenuRule("actions", menu.target(), width)}
-	cursor := menu.list.Cursor()
-	for i, item := range menu.list.Items() {
-		marker := "  "
-		if i == cursor {
-			marker = ui.IndicatorStyle.Render("█") + " "
-		}
-		key := styleHandoffKey(item.key, menuItemLiveState(item, menu.row, live))
-		line := fmt.Sprintf("    %s%s  %s", marker, key, item.label)
-		lines = append(lines, ui.TruncateString(line, width))
+	entries := make([]menuEntry, 0, menu.list.Len())
+	for _, item := range menu.list.Items() {
+		entries = append(entries, menuEntry{
+			key:   styleHandoffKey(item.key, menuItemLiveState(item, menu.row, live)),
+			label: item.label,
+		})
 	}
-	return lines
+	return menuBlockLines("actions", menu.target(), width, menu.list.Cursor(), entries)
 }
 
 // dashboardMenuRule is the top line of every menu block: the menu's own noun and
@@ -4107,17 +4069,11 @@ func dashboardStatusMenuLines(status *dashboardStatusMenu, target string, width 
 	if status == nil {
 		return nil
 	}
-	lines := []string{dashboardMenuRule("status", target, width)}
-	cursor := status.list.Cursor()
-	for i, item := range status.list.Items() {
-		marker := "  "
-		if i == cursor {
-			marker = ui.IndicatorStyle.Render("█") + " "
-		}
-		line := fmt.Sprintf("    %s%s  %s", marker, item.Key, item.Label)
-		lines = append(lines, ui.TruncateString(line, width))
+	entries := make([]menuEntry, 0, status.list.Len())
+	for _, item := range status.list.Items() {
+		entries = append(entries, menuEntry{key: item.Key, label: item.Label})
 	}
-	return lines
+	return menuBlockLines("status", target, width, status.list.Cursor(), entries)
 }
 
 // dashboardMuteMenuLines renders the nested mute submenu: six numbered windows,
@@ -4127,16 +4083,11 @@ func dashboardMuteMenuLines(mute *dashboardMuteMenu, target string, width int) [
 	if mute == nil {
 		return nil
 	}
-	lines := []string{dashboardMenuRule("mute", target, width)}
-	cursor := mute.list.Cursor()
+	entries := make([]menuEntry, 0, mute.list.Len())
 	for i, window := range mute.list.Items() {
-		marker := "  "
-		if i == cursor {
-			marker = ui.IndicatorStyle.Render("█") + " "
-		}
-		line := fmt.Sprintf("    %s%s  %s", marker, muteWindowKey(i), window.Label)
-		lines = append(lines, ui.TruncateString(line, width))
+		entries = append(entries, menuEntry{key: muteWindowKey(i), label: window.Label})
 	}
+	lines := menuBlockLines("mute", target, width, mute.list.Cursor(), entries)
 	return append(lines, ui.TruncateString("      "+ui.HintStyle.Render(muteMenuFooter()), width))
 }
 

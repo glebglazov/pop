@@ -1,14 +1,16 @@
 package dashboard
 
 import (
-	"github.com/glebglazov/pop/tasks/drain"
+	"fmt"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/glebglazov/pop/tasks/drain"
 	"github.com/glebglazov/pop/tasks/setkind"
+	"github.com/glebglazov/pop/ui"
 	"github.com/glebglazov/pop/wayfinder"
 	"github.com/glebglazov/pop/work"
 	"github.com/glebglazov/pop/work/ref"
@@ -159,6 +161,72 @@ func TestItemMenuIsBuiltOnOpenFromTheKind(t *testing.T) {
 	got = updated.(QueueDashboard)
 	if keys := itemMenuKeys(got.itemMenu); len(keys) != 2 || keys[1] != "L" {
 		t.Fatalf("item menu keys = %v, want the verb the kind added since the build", keys)
+	}
+}
+
+// TestDetailItemMenuIsBottomChrome pins the detail half of ADR-0224 decision 4:
+// a kind-authored item menu uses the same reserved Block as the table menu. It
+// names its item, ends above the hint line, takes exactly its own height from the
+// list, and gives that height back when it closes.
+func TestDetailItemMenuIsBottomChrome(t *testing.T) {
+	row := genericDetailRow()
+	row.DetailSections = nil
+	row.Items = make([]work.Item, 20)
+	for i := range row.Items {
+		row.Items[i] = work.Item{
+			ID:     fmt.Sprintf("item-%02d", i),
+			Title:  fmt.Sprintf("Item %02d", i),
+			Type:   "AFK",
+			Status: "open",
+		}
+	}
+	d := &drain.Deps{Kinds: func(*drain.Deps, *config.Config) []work.Kind {
+		return []work.Kind{&itemVerbKind{}}
+	}}
+	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{row}})
+	m.width, m.height = 120, 18
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	m = updated.(QueueDashboard)
+	m.detail.list.SetCursor(len(row.Items) - 1)
+
+	before := m.View().Content
+	beforeRows := append([]string(nil), m.detail.list.VisibleRows()...)
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	m = updated.(QueueDashboard)
+	if m.itemMenu == nil {
+		t.Fatal("a did not open the detail item menu")
+	}
+
+	during := m.View().Content
+	duringRows := append([]string(nil), m.detail.list.VisibleRows()...)
+	block := itemMenuLines(m.itemMenu, m.width)
+	lines := strings.Split(during, "\n")
+	ruleAt := dashboardTestLineIndex(lines, "actions · item-19")
+	if ruleAt < 0 {
+		t.Fatalf("item menu rule does not name its target:\n%s", ui.StripANSI(during))
+	}
+	if want := len(lines) - 1 - len(block); ruleAt != want {
+		t.Fatalf("item menu rule at line %d, want %d so its block ends above the hint line:\n%s", ruleAt, want, ui.StripANSI(during))
+	}
+	if got, want := len(beforeRows)-len(duringRows), len(block); got != want {
+		t.Fatalf("detail body lost %d rows, want the menu block's %d lines", got, want)
+	}
+	if !strings.Contains(ui.StripANSI(duringRows[len(duringRows)-1]), "item-19") {
+		t.Fatalf("cursored item left the body after the menu opened: %v", duringRows)
+	}
+
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = updated.(QueueDashboard)
+	if m.itemMenu != nil {
+		t.Fatal("esc did not close the detail item menu")
+	}
+	after := m.View().Content
+	afterRows := m.detail.list.VisibleRows()
+	if len(afterRows) != len(beforeRows) {
+		t.Fatalf("detail body restored to %d rows, want %d", len(afterRows), len(beforeRows))
+	}
+	if got, want := len(strings.Split(after, "\n")), len(strings.Split(before, "\n")); got != want {
+		t.Fatalf("restored detail has %d screen rows, want %d", got, want)
 	}
 }
 
