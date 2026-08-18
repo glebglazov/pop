@@ -23,7 +23,7 @@ import (
 const (
 	lessonContinue        = "continue — your approach stood, finish and close out the sentinel"
 	lessonUncheckedBoxes  = "continue — your approach stood and the work landed; the attempt failed only because the task file still had unticked acceptance boxes. Tick every `- [ ]` under \"Acceptance criteria\" to `- [x]` in the task file, then print the summary block and TASK_COMPLETE."
-	lessonMissingSentinel = "continue — your approach stood; the attempt ended without TASK_COMPLETE standing alone on its own final line. Do the remaining work, then close out with the sentinel exactly as the prompt spells it."
+	lessonMissingSentinel = "continue — your approach stood; the attempt ended without any line opening on TASK_COMPLETE. Do the remaining work, then close out with the sentinel exactly as the prompt spells it: it starts its own line, and anything you add after it belongs on that line or below."
 	lessonMissingSummary  = "continue — your approach stood; the attempt printed no usable SUMMARY_START…SUMMARY_END block. Close out with a non-empty summary block above TASK_COMPLETE."
 	lessonReassess        = "reassess"
 	lessonResume          = "resume — this attempt was cut off mid-flight (not a failure). The runtime checkout already holds the partial changes; read the uncommitted working-tree diff first and continue from it."

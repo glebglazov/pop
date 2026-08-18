@@ -14,10 +14,11 @@ func TestAssessCompletionSuccess(t *testing.T) {
 	}
 }
 
-// The sentinel opens the final line. Prose glued after it is tolerated — that
-// is how several models close out from a single message — while a sentinel
-// narrated mid-sentence, or mentioned before the run's real close, is not.
-func TestAssessCompletionRequiresFinalLineToOpenOnSentinel(t *testing.T) {
+// The sentinel opens the line the run closes out on. The sign-off after it is
+// tolerated — that is how several models close out from a single message, and
+// it wraps across lines as often as it does not — while a sentinel narrated
+// mid-sentence is not.
+func TestAssessCompletionRequiresCloseOutLineToOpenOnSentinel(t *testing.T) {
 	md := []byte("## Acceptance criteria\n\n- [x] ok\n")
 
 	for _, tc := range []struct {
@@ -29,9 +30,11 @@ func TestAssessCompletionRequiresFinalLineToOpenOnSentinel(t *testing.T) {
 		// The shape cursor/grok emits: sign-off glued to the sentinel inside
 		// one assistant message, so no transcript framing can split it.
 		{"glued sign-off", "SUMMARY_START\nok\nSUMMARY_END\nTASK_COMPLETEThe work landed: tests pass.\n", true},
+		// The shape that failed a landed spend-lens task: the same glued
+		// sign-off, wrapping into a second paragraph.
+		{"sign-off past a paragraph break", "SUMMARY_START\nok\nSUMMARY_END\nTASK_COMPLETEThe work landed.\n\n`go test` passed.\n", true},
 		{"buried mid-sentence", "SUMMARY_START\nok\nSUMMARY_END\nAll done TASK_COMPLETE for real.\n", false},
 		{"narrated, then kept working", "I'll print TASK_COMPLETE once green.\nSUMMARY_START\nok\nSUMMARY_END\nstill running the suite\n", false},
-		{"sentinel not the last word", "SUMMARY_START\nok\nSUMMARY_END\nTASK_COMPLETE\n\nOne more thought:\nlet me reconsider.\n", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := AssessCompletion(tc.output, md)
@@ -42,6 +45,16 @@ func TestAssessCompletionRequiresFinalLineToOpenOnSentinel(t *testing.T) {
 				t.Fatalf("reason = %q, want %q", a.FailedReason, reasonMissingSentinel)
 			}
 		})
+	}
+}
+
+// Reading from the end means the last sentinel is the ending that counts: an
+// agent that closed out complete and then thought better of it is failed.
+func TestAssessCompletionLastSentinelWins(t *testing.T) {
+	output := "SUMMARY_START\nok\nSUMMARY_END\nTASK_COMPLETE\nTASK_FAILED: the suite went red on a second look\n"
+	a := AssessCompletion(output, []byte("## Acceptance criteria\n\n- [x] ok\n"))
+	if a.Complete || a.FailedReason != "the suite went red on a second look" {
+		t.Fatalf("assessment = %#v", a)
 	}
 }
 

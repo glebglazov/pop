@@ -11,17 +11,20 @@ var (
 	summaryEndRE   = regexp.MustCompile(`(?m)^SUMMARY_END\s*$`)
 )
 
-// The completion sentinels open the run's final line. Requiring the line to
-// open on the sentinel rejects one an agent buried mid-sentence while
-// narrating the contract ("…then print TASK_COMPLETE if the suite is green"),
-// which is the shape that would otherwise pass off unfinished work as done.
-// Requiring it to be the *final* line rejects a narrated mention anywhere
-// earlier in the transcript.
+// The completion sentinels open the line a run closes out on. Requiring the
+// line to *open* on the sentinel rejects one an agent buried mid-sentence
+// while narrating the contract ("…then print TASK_COMPLETE if the suite is
+// green"), which is the shape that would otherwise pass off unfinished work as
+// done. That anchor is the guard; it is what makes a narrated mention
+// unreadable as a close-out.
 //
-// What it deliberately tolerates is prose glued after the sentinel on that
-// line — several models close out "TASK_COMPLETEThe work landed: …" from a
-// single message, so no per-preset transcript framing can split it. Failure
-// has always been read this way; success now matches.
+// What the reading deliberately tolerates is the model's own sign-off after
+// the sentinel — several models close out "TASK_COMPLETEThe work landed: …"
+// from a single message, and that sign-off runs to several lines as often as
+// one. So the close-out is the *last* sentinel-opening line rather than the
+// last line of the transcript: a sign-off that wraps into a second paragraph
+// no longer buries a sentinel the agent did emit. Failure has always been read
+// this way; success now matches.
 const (
 	completeSentinel = "TASK_COMPLETE"
 	failedSentinel   = "TASK_FAILED:"
@@ -56,19 +59,17 @@ func AssessCompletion(output string, taskMarkdown []byte) Assessment {
 		return a
 	}
 
-	lines := splitNonEmptyLines(trimmed)
-	lastLine := lines[len(lines)-1]
-
-	if strings.HasPrefix(lastLine, failedSentinel) {
-		a.FailedReason = strings.TrimSpace(strings.TrimPrefix(lastLine, failedSentinel))
-		if a.FailedReason == "" {
-			a.FailedReason = "agent reported failure"
-		}
+	closeOut, ok := closeOutLine(splitNonEmptyLines(trimmed))
+	if !ok {
+		a.FailedReason = reasonMissingSentinel
 		return a
 	}
 
-	if !strings.HasPrefix(lastLine, completeSentinel) {
-		a.FailedReason = reasonMissingSentinel
+	if strings.HasPrefix(closeOut, failedSentinel) {
+		a.FailedReason = strings.TrimSpace(strings.TrimPrefix(closeOut, failedSentinel))
+		if a.FailedReason == "" {
+			a.FailedReason = "agent reported failure"
+		}
 		return a
 	}
 
@@ -85,6 +86,20 @@ func AssessCompletion(output string, taskMarkdown []byte) Assessment {
 		a.FailedReason = reasonUncheckedBoxes
 	}
 	return a
+}
+
+// closeOutLine picks the line the run closes out on: the last one opening on
+// either sentinel. Reading from the end is what lets an agent's own sign-off
+// follow the sentinel across a paragraph break — the two sentinels are read
+// together so a TASK_FAILED written under an earlier TASK_COMPLETE is still
+// the ending that counts.
+func closeOutLine(lines []string) (string, bool) {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.HasPrefix(lines[i], completeSentinel) || strings.HasPrefix(lines[i], failedSentinel) {
+			return lines[i], true
+		}
+	}
+	return "", false
 }
 
 func splitNonEmptyLines(s string) []string {
