@@ -11,7 +11,7 @@ import (
 	"github.com/glebglazov/pop/work"
 )
 
-func TestArtifactsPublishesClosedListNewestFirst(t *testing.T) {
+func TestArtifactsPublishesClosedListInTypeTierOrder(t *testing.T) {
 	defPath := t.TempDir()
 	setDir := filepath.Join(defPath, "demo")
 	reviewDir := filepath.Join(setDir, reviewsDirName)
@@ -36,8 +36,11 @@ func TestArtifactsPublishesClosedListNewestFirst(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// The spec and progress mtimes are the ones a total recency order would
+	// have hoisted above every review: the progress record was just rewritten
+	// and the spec re-planned after the older review.
 	specAt := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
-	progressAt := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
+	progressAt := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)
 	if err := os.Chtimes(filepath.Join(setDir, tasks.SpecFileName), specAt, specAt); err != nil {
 		t.Fatal(err)
 	}
@@ -59,8 +62,8 @@ func TestArtifactsPublishesClosedListNewestFirst(t *testing.T) {
 	}
 	want := []string{
 		"review:review-20260817T120000Z.md",
-		"spec:spec.md",
 		"review:review-20260815T120000Z.md",
+		"spec:spec.md",
 		"progress:progress.txt",
 	}
 	if !reflect.DeepEqual(rows, want) {

@@ -75,7 +75,11 @@ already carry their instant — and the filename is what `y` and `p` hand you.
   stray file nobody recognises is a validation concern and belongs with the
   existing orphan-markdown rule, not in a display surface.
 - **One total order, newest first, over a family that does not timestamp itself
-  uniformly.** A review takes its instant from the instant in its own filename —
+  uniformly.** *(Superseded by [ADR-0220](0220-artifacts-are-ordered-by-type-tier-not-by-recency.md):
+  the order is now a type tier — every review first, newest-first among
+  themselves, then `spec.md`, then `progress.txt` — and recency orders only the
+  review family. The instants below still say where each row's timestamp comes
+  from.)* A review takes its instant from the instant in its own filename —
   which is why that instant is in the filename — and everything else from its
   modification time, read off the directory listing the load already performs, so
   no extra `Stat` enters a fanned-out read path. Modification time is truthful for

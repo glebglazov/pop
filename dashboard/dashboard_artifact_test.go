@@ -109,7 +109,7 @@ func TestArtifactViewSwitchesListsAndKeepsDetailSections(t *testing.T) {
 		}
 	}
 	if reviewAt, specAt := strings.Index(artifacts, "review-20260817T120000Z.md"), strings.Index(artifacts, "spec.md"); reviewAt < 0 || reviewAt > specAt {
-		t.Fatalf("artifacts are not in the kind's newest-first order:\n%s", artifacts)
+		t.Fatalf("artifacts are not in the order the kind published:\n%s", artifacts)
 	}
 	if strings.Contains(artifacts, "First") {
 		t.Fatalf("Artifact view still renders the task list:\n%s", artifacts)
