@@ -197,9 +197,8 @@ func TestActionMenuShrinksTheListBodyByItsHeight(t *testing.T) {
 	}
 }
 
-// The list under an open menu is the live list, not a picture of it: the menu
-// keeps the keyboard, so the movement here is the list's own, and the point is
-// that the render follows it.
+// The list under an open menu is the live list, not a picture of it: uppercase
+// movement reaches the row list while lowercase movement stays with the menu.
 func TestListStaysLiveUnderAnOpenMenu(t *testing.T) {
 	m := manyRows(t, 24)
 	m.list.SetCursor(0)
@@ -208,7 +207,7 @@ func TestListStaysLiveUnderAnOpenMenu(t *testing.T) {
 		t.Fatalf("cursored row = %q, want set-00 painted under the open menu", got)
 	}
 
-	m.list.MoveDown()
+	m = bulkPress(t, m, tea.KeyPressMsg{Code: 'J', Text: "J"})
 	if m.menu == nil {
 		t.Fatal("moving the list closed the menu")
 	}

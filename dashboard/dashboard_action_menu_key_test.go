@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"slices"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -52,9 +53,9 @@ func TestDashboardActionMenuClosesOnInPlaceVerb(t *testing.T) {
 	}
 }
 
-// J/K keep moving the row cursor with no menu open, and do nothing to a menu
-// that is open.
-func TestDashboardMenuIgnoresRowCursorKeys(t *testing.T) {
+// J/K move the live row list while the menu keeps the target and items it had
+// when it opened. This is navigation, not the retired pinned-menu re-filtering.
+func TestDashboardMenuRowCursorKeysKeepItsOriginalTarget(t *testing.T) {
 	m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{
 		{Project: "pop", CursorKey: "pop\x00plain", ID: "plain", RuntimePath: "/wt"},
 		{Project: "pop", CursorKey: "pop\x00bound", ID: "bound", Bound: true, RuntimePath: "/wt"},
@@ -64,13 +65,23 @@ func TestDashboardMenuIgnoresRowCursorKeys(t *testing.T) {
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got := updated.(QueueDashboard)
+	menuCursor := got.menu.list.Cursor()
+	menuKeysBefore := menuKeys(got.menu)
 	updated, _ = got.Update(tea.KeyPressMsg{Code: 'J', Text: "J"})
 	got = updated.(QueueDashboard)
-	if got.ListCursor() != 0 {
-		t.Fatalf("J moved the row cursor to %d with a menu open", got.ListCursor())
+	if got.ListCursor() != 1 {
+		t.Fatalf("J moved the row cursor to %d, want 1 with a menu open", got.ListCursor())
 	}
 	if got.menu == nil || got.menu.row.ID != "plain" {
-		t.Fatal("J re-filtered the open menu")
+		t.Fatal("J changed the open menu's original target")
+	}
+	if got.menu.list.Cursor() != menuCursor || !slices.Equal(menuKeys(got.menu), menuKeysBefore) {
+		t.Fatal("J re-filtered or navigated the open menu")
+	}
+
+	updated, _ = got.Update(tea.KeyPressMsg{Code: 'K', Text: "K"})
+	if got := updated.(QueueDashboard); got.ListCursor() != 0 {
+		t.Fatalf("K moved the row cursor to %d, want 0 with a menu open", got.ListCursor())
 	}
 }
 

@@ -4378,6 +4378,9 @@ func TestQueueDashboardHelpContent(t *testing.T) {
 		if !found["esc"] {
 			t.Error("action menu help missing 'esc'")
 		}
+		if !found["J/K"] {
+			t.Error("action menu help missing row navigation")
+		}
 	})
 
 	t.Run("item menu shows the open menu's verbs", func(t *testing.T) {

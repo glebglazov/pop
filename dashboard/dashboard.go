@@ -1542,11 +1542,20 @@ func (m QueueDashboard) updateAbandonModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 }
 
 // updateMenu drives the action overlay: esc/ctrl+c close it, j/k move the
-// highlight, Enter runs the highlighted verb, and any matching verb letter runs
-// that verb directly. Non-matching keys are inert while the menu is open. When
-// the status submenu is open, esc returns to the action menu instead.
+// highlight, J/K move the live list underneath, Enter runs the highlighted verb,
+// and any matching verb letter runs that verb directly. Row movement keeps the
+// menu's original target and items; the retired pinned menu's re-filtering does
+// not return. When a submenu is open, esc returns to the action menu instead.
 func (m QueueDashboard) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.menu == nil {
+		return m, nil
+	}
+	switch msg.String() {
+	case "J":
+		m.list.MoveDown()
+		return m, nil
+	case "K":
+		m.list.MoveUp()
 		return m, nil
 	}
 	if m.menu.status != nil {
@@ -3019,6 +3028,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 		return append(entries,
 			ui.HelpEntry{Key: "", Desc: muteMenuFooter()},
 			ui.HelpEntry{Key: "j/k", Desc: "navigate"},
+			ui.HelpEntry{Key: "J/K", Desc: "navigate rows"},
 			ui.HelpEntry{Key: "enter", Desc: "mute"},
 			ui.HelpEntry{Key: "esc", Desc: "back"},
 		)
@@ -3033,6 +3043,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 		}
 		return append(entries,
 			ui.HelpEntry{Key: "j/k", Desc: "navigate"},
+			ui.HelpEntry{Key: "J/K", Desc: "navigate rows"},
 			ui.HelpEntry{Key: "enter", Desc: "run action"},
 			ui.HelpEntry{Key: "esc", Desc: "back to action menu"},
 		)
@@ -3047,6 +3058,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 		}
 		entries = append(entries,
 			ui.HelpEntry{Key: "j/k", Desc: "navigate"},
+			ui.HelpEntry{Key: "J/K", Desc: "navigate rows"},
 			ui.HelpEntry{Key: "enter", Desc: "run action"},
 			ui.HelpEntry{Key: "esc", Desc: "close menu"},
 		)
@@ -3285,9 +3297,9 @@ func (m QueueDashboard) frameSpec() ui.Frame {
 	switch {
 	case m.menu != nil:
 		block = dashboardMenuLines(m.menu, m.width, m.liveCache())
-		hints = "j/k move · enter/letter run · esc close"
+		hints = "j/k move · J/K rows · enter/letter run · esc close"
 		if m.menu.nested() {
-			hints = "j/k move · enter/letter run · esc back"
+			hints = "j/k move · J/K rows · enter/letter run · esc back"
 		}
 	case m.filter != nil:
 		block = m.dashboardFilterMenuLines()
