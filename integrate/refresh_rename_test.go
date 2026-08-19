@@ -137,10 +137,8 @@ func TestRefresh_PrunesRenamedSkill(t *testing.T) {
 			if fs.symlinks[currentLink] != wantTarget {
 				t.Fatalf("%s not linked: %q -> %q (want -> %q)", currentName, currentLink, fs.symlinks[currentLink], wantTarget)
 			}
-			for _, rel := range []string{"SKILL.md", "CONTEXT-FORMAT.md"} {
-				if _, ok := fs.files[filepath.Join(wantTarget, rel)]; !ok {
-					t.Fatalf("renamed skill missing %s under %s", rel, wantTarget)
-				}
+			if _, ok := fs.files[filepath.Join(wantTarget, "SKILL.md")]; !ok {
+				t.Fatalf("renamed skill missing SKILL.md under %s", wantTarget)
 			}
 
 			// ...and the old name survives nowhere — no orphan link, no orphan

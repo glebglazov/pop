@@ -9,8 +9,8 @@ import (
 // renders, with the companion files each one is expected to carry alongside its
 // SKILL.md body.
 var taskSkillDirs = map[string][]string{
-	"pop-grilling":                 {"CONTEXT-FORMAT.md"},
-	"pop-grill-with-docs":          {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
+	"pop-grilling":                 {},
+	"pop-grill-with-docs":          {},
 	"pop-grill-with-map":           {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
 	"pop-grill-consolidate":        {},
 	"pop-domain-modeling":          {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
@@ -37,9 +37,9 @@ func companionSource(base, name string) string {
 
 // TestRenderTaskSkillsDirAgents pins the task-skills rendered tree for
 // each agent that hosts skills as directories (claude, codex, pi, cursor,
-// opencode): seven skill directories, each with a name-injected SKILL.md, and
-// grill-with-docs and prototype carrying companion documents with cross-skill
-// references rewritten alongside the body.
+// opencode): one directory per skill, each with a name-injected SKILL.md, and
+// domain-modeling, grill-with-map and prototype carrying companion documents
+// with cross-skill references rewritten alongside the body.
 func TestRenderTaskSkillsDirAgents(t *testing.T) {
 	t.Parallel()
 	baseNames := fileBasedSkillBaseNames()

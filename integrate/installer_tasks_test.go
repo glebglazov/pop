@@ -54,9 +54,9 @@ func taskAgents() []taskAgent {
 var taskSkillNames = []string{"pop-grilling", "pop-grill-with-docs", "pop-grill-with-map", "pop-grill-consolidate", "pop-domain-modeling", "pop-to-spec", "pop-to-tasks", "pop-wayfinder", "pop-prototype", "pop-research", "pop-setup-matt-pocock-skills", "pop-spend-audit"}
 
 // TestInstallTaskSkillsAllAgents covers the clean install for claude, codex,
-// pi, and cursor: all seven planning skills land as render trees under the data
-// dir and the agent location receives a symlink per skill. grill-with-docs keeps
-// its companion documents so its internal references resolve.
+// pi, and cursor: every planning skill lands as a render tree under the data
+// dir and the agent location receives a symlink per skill. Each skill that has
+// companion documents keeps them so its internal references resolve.
 func TestInstallTaskSkillsAllAgents(t *testing.T) {
 	t.Parallel()
 	for _, a := range taskAgents() {
@@ -85,11 +85,10 @@ func TestInstallTaskSkillsAllAgents(t *testing.T) {
 				}
 			}
 
-			// grill-with-docs and prototype companions ride alongside their bodies
-			// in the render tree so their relative references resolve.
+			// domain-modeling, grill-with-map and prototype companions ride
+			// alongside their bodies in the render tree so their relative
+			// references resolve.
 			for skill, companions := range map[string][]string{
-				"pop-grilling":                 {"CONTEXT-FORMAT.md"},
-				"pop-grill-with-docs":          {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
 				"pop-grill-with-map":           {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
 				"pop-domain-modeling":          {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
 				"pop-prototype":                {"LOGIC.md", "UI.md"},
@@ -259,11 +258,11 @@ func TestInstallTaskSkillsPrunesStaleToPRD(t *testing.T) {
 
 // TestTaskSkillsDoctorSeesMissingSkillOrSharedDoc drives the state Doctor
 // reports for the task-skills component after the install is damaged five
-// ways: the interview primitive's body deleted, its copy of the shared
-// CONTEXT-FORMAT.md deleted, another consumer's copy hand-edited, and the same
-// two damages done to domain-modeling, which owns the canonical documents. Each
-// is a finding — an installed skill missing the format document reads the
-// glossary union by guesswork, and one that carries a drifted copy reads it by
+// ways: the interview primitive's body deleted, the one receiver's copy of the
+// shared CONTEXT-FORMAT.md deleted, that same receiver's copy hand-edited, and
+// the equivalent two damages done to domain-modeling, which owns the canonical
+// documents. Each is a finding — an installed skill missing the format document
+// writes drafts by guesswork, and one carrying a drifted copy writes them by
 // stale rules. The owner is no more exempt than a receiver.
 func TestTaskSkillsDoctorSeesMissingSkillOrSharedDoc(t *testing.T) {
 	t.Parallel()
@@ -279,13 +278,13 @@ func TestTaskSkillsDoctorSeesMissingSkillOrSharedDoc(t *testing.T) {
 		{
 			name: "shared doc absent",
 			damage: func(fs *fakeFS) {
-				delete(fs.files, filepath.Join(renderDir, "pop-grilling", "CONTEXT-FORMAT.md"))
+				delete(fs.files, filepath.Join(renderDir, "pop-grill-with-map", "CONTEXT-FORMAT.md"))
 			},
 		},
 		{
 			name: "shared doc drifted",
 			damage: func(fs *fakeFS) {
-				fs.files[filepath.Join(renderDir, "pop-grill-with-docs", "CONTEXT-FORMAT.md")] = []byte("hand-edited format rules")
+				fs.files[filepath.Join(renderDir, "pop-grill-with-map", "ADR-FORMAT.md")] = []byte("hand-edited format rules")
 			},
 		},
 		{

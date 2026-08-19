@@ -27,8 +27,15 @@ found.
 Run the `grilling` skill for the conversation itself: map the design tree,
 ask the whole settled frontier one round at a time, find every fact yourself,
 and stop when the frontier is empty. That skill is the interview and nothing
-else — it writes nothing and asks which skill records the decisions. This one is
-that answer, and its destination is the Map.
+else — it writes nothing and leaves the destination to whichever skill composed
+it. This one is that answer, and its destination is the Map.
+
+The interview is the only skill this session loads. In particular it never loads
+`domain-modeling`: that discipline writes glossary fragments and numbered ADRs
+into the repository under study, which is the one thing a wayfinding session may
+not do. The rules this session needs from it — how the glossary union is read,
+what an ADR has to clear, what a draft looks like — are written out below, in
+the Map-only form they take here.
 
 Scope the tree to the ticket you are resolving. A question that belongs to a
 different ticket is fog to name in the answer, not a branch to walk here.
@@ -93,7 +100,8 @@ terms.
 
 ## ADR drafts
 
-Apply the same three-criteria test `grill-with-docs` applies — the verdict is
+Apply the same three-criteria test the `domain-modeling` discipline applies,
+restated here in full because this session does not load it — the verdict is
 made here, in session, with the human present. Offer an ADR only when all three
 hold:
 

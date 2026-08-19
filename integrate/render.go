@@ -49,7 +49,7 @@ func renderComponent(id ComponentID, agent, prefix string) (map[string][]byte, e
 //   - A directory `skills/pop/<base>` holding `SKILL.md` plus any companion
 //     documents — a multi-file skill named `<prefix><base>`. The companion
 //     files ride alongside the skill body so the body's relative references
-//     resolve (grill-with-docs and its two format documents), as do the
+//     resolve (domain-modeling and its two format documents), as do the
 //     pop-owned documents the skill shares with others (sharedSkillDocs).
 func renderSkillComponent(comp Component, agent, prefix string) (map[string][]byte, error) {
 	baseNames := fileBasedSkillBaseNames()
@@ -279,20 +279,36 @@ func rewriteBacktickSkillReference(content, rewritten, base string) string {
 // rewriteInvocationBacktickReferences rewrites backticked skill names that
 // appear only in cross-skill invocation contexts. Bare backticks on common-word
 // names (ticket types, branch paths) are left alone.
+//
+// Each pattern is tried sentence-initial as well: "Run the `grilling` skill" is
+// the same instruction to load the same skill as the mid-sentence form, and a
+// composing body that opens a paragraph with it would otherwise ship an
+// unresolved name to a machine using a non-empty prefix.
 func rewriteInvocationBacktickReferences(content, rewritten, base string) string {
 	q := "`" + base + "`"
 	rq := "`" + rewritten + "`"
 	for _, pat := range []string{
 		"run the " + q + " skill",
+		"load the " + q + " skill",
 		"tickets use " + q,
 		"with " + q,
 		"suggest " + q,
 		"when " + q + " writes",
 		"use the " + q + " skill",
 	} {
-		content = strings.ReplaceAll(content, pat, strings.Replace(pat, q, rq, 1))
+		for _, form := range []string{pat, sentenceInitial(pat)} {
+			content = strings.ReplaceAll(content, form, strings.Replace(form, q, rq, 1))
+		}
 	}
 	return content
+}
+
+// sentenceInitial upper-cases an invocation pattern's first letter.
+func sentenceInitial(pat string) string {
+	if pat == "" || pat[0] < 'a' || pat[0] > 'z' {
+		return pat
+	}
+	return string(pat[0]-('a'-'A')) + pat[1:]
 }
 
 func rewriteSlashSkillReference(content, rewritten, base string) string {

@@ -1,136 +1,70 @@
 ---
 name: grill-with-docs
-description: Grilling session that challenges your plan against the existing domain model, sharpens terminology, and updates documentation (CONTEXT.md, ADRs) inline as decisions crystallise — conflict-free under parallel agents and teams via generation-numbered glossary fragments and sequential-id ADRs. Use when user wants to stress-test a plan against their project's language and documented decisions.
+description: Grilling session that challenges your plan against the existing domain model, sharpens terminology, and records what settles as glossary fragments and ADRs — conflict-free under parallel agents and teams via generation-numbered fragments and sequential-id ADRs — then commits the session's own artifacts as it closes. Use when user wants to stress-test a plan against their project's language and documented decisions.
 disable-model-invocation: true
 ---
 
 <!--
-base: mattpocock/skills domain-modeling@8b78b53
+No upstream base, so no drift pin and no verbatim region: this file is
+pop-original composition (ADR-0225 decision 4). Upstream reaches the same
+session by loading two skills together, and this file is that composition plus
+the three things that are pop's alone — the round-close beat for glossary
+writes, one fact-finding activity, and the closing commit.
 
-This file is a marked overlay. Everything from here down to the "POP OVERLAY"
-marker is a verbatim copy of domain-modeling/SKILL.md at the pinned ref above —
-the glossary/ADR discipline on its own. Pop inlines it rather than delegating to
-`/domain-modeling`, per ADR-0009 (skills are embedded in the binary and ship to
-machines without Matt's skills installed).
+Neither composed skill is inlined here. `grilling` is the interview primitive
+and `domain-modeling` is the glossary/ADR discipline; both ship in this same
+component and both are agent-loaded, so this session can load them. Restating
+either would give pop a second copy of a rule to keep honest, which is the one
+thing the composition exists to prevent. The two format documents this file used
+to carry are `domain-modeling`'s companions — it reaches them through that
+skill, not through a copy of its own.
 
-The interview half is no longer inlined here. It is pop's own `grilling`
-skill — the same upstream primitive, installed alongside this one by the same
-component — and the overlay below composes over it rather than restating it, so
-one copy of the interview rules serves both this skill and the wayfinding
-variant. domain-modeling's `disable-model-invocation` counterpart is kept:
-**human-opened**, because this session is where a decision is committed to
-`CONTEXT.md`/`docs/adr/` — grilling is a manual-only session the user opens
-with `/grill-with-docs`, never something the model starts on its own. Pop's
-parallel-safety additions — the
-single-writer override, grill-consolidate, and the commit-on-close discipline —
-live below the marker. To review upstream drift, diff the region between this
-header and the marker against domain-modeling@<newref>.
+**human-opened** (`disable-model-invocation`, as upstream's domain-modeling
+counterpart is): this is the session that commits decisions to the repository,
+so a human opens it with `/grill-with-docs` and the model never starts it on
+its own.
 -->
 
-# Domain Modeling
+# Grill with docs
 
-Actively build and sharpen the project's domain model as you design. This is the *active* discipline — challenging terms, inventing edge-case scenarios, and writing the glossary and decisions down the moment they crystallise. (Merely *reading* `CONTEXT.md` for vocabulary is not this skill — that's a one-line habit any skill can do. This skill is for when you're changing the model, not just consuming it.)
+A grilling session whose decisions land in the repository. It is two skills plus
+a beat, a rule and a commit of its own.
 
-## File structure
+## Load both skills before the first round
 
-Most repos have a single context:
+Run the `grilling` skill for the conversation itself: map the design tree, ask
+the whole settled frontier one round at a time, find every fact yourself, and
+stop when the frontier is empty. That skill is the interview and nothing else —
+it writes nothing, and leaves the destination to whichever skill composed it.
 
-```
-/
-├── CONTEXT.md
-├── docs/
-│   └── adr/
-│       ├── 0001-event-sourced-orders.md
-│       └── 0002-postgres-for-write-model.md
-└── src/
-```
+Run the `domain-modeling` skill for the model the conversation is sharpening:
+challenge the user's terms against the glossary union, sharpen fuzzy language,
+stress-test relationships with concrete scenarios, write a glossary op to this
+session's fragment when a term settles, and offer an ADR only when its three
+criteria all hold.
 
-If a `CONTEXT-MAP.md` exists at the root, the repo has multiple contexts. The map points to where each one lives:
+Read both before the first round. Everything below is what this session adds on
+top of them; nothing below repeats a rule either skill already carries.
 
-```
-/
-├── CONTEXT-MAP.md
-├── docs/
-│   └── adr/                          ← system-wide decisions
-├── src/
-│   ├── ordering/
-│   │   ├── CONTEXT.md
-│   │   └── docs/adr/                 ← context-specific decisions
-│   └── billing/
-│       ├── CONTEXT.md
-│       └── docs/adr/
-```
+## Glossary writes ride the round
 
-Create files lazily — only when you have something to write. If no `CONTEXT.md` exists, create one when the first term is resolved. If no `docs/adr/` exists, create it when the first ADR is needed.
-
-## During the session
-
-### Challenge against the glossary
-
-When the user uses a term that conflicts with the existing language in `CONTEXT.md`, call it out immediately. "Your glossary defines 'cancellation' as X, but you seem to mean Y — which is it?"
-
-### Sharpen fuzzy language
-
-When the user uses vague or overloaded terms, propose a precise canonical term. "You're saying 'account' — do you mean the Customer or the User? Those are different things."
-
-### Discuss concrete scenarios
-
-When domain relationships are being discussed, stress-test them with specific scenarios. Invent scenarios that probe edge cases and force the user to be precise about the boundaries between concepts.
-
-### Cross-reference with code
-
-When the user states how something works, check whether the code agrees. If you find a contradiction, surface it: "Your code cancels entire Orders, but you just said partial cancellation is possible — which is right?"
-
-### Update CONTEXT.md inline
-
-When a term is resolved, update `CONTEXT.md` right there. Don't batch these up — capture them as they happen. Use the format in [CONTEXT-FORMAT.md](./CONTEXT-FORMAT.md).
-
-`CONTEXT.md` should be totally devoid of implementation details. Do not treat `CONTEXT.md` as a spec, a scratch pad, or a repository for implementation decisions. It is a glossary and nothing else.
-
-### Offer ADRs sparingly
-
-Only offer to create an ADR when all three are true:
-
-1. **Hard to reverse** — the cost of changing your mind later is meaningful
-2. **Surprising without context** — a future reader will wonder "why did they do it this way?"
-3. **The result of a real trade-off** — there were genuine alternatives and you picked one for specific reasons
-
-If any of the three is missing, skip the ADR. Use the format in [ADR-FORMAT.md](./ADR-FORMAT.md).
-<!-- ═══════════════════════════════ POP OVERLAY ═══════════════════════════════
-Everything below is pop-specific and has no upstream twin. It names the
-interview primitive this skill composes over (grilling), and carries the
-behavioural overrides of the base — replacing domain-modeling's "Update
-CONTEXT.md inline" single-writer instruction with per-session fragments written
-once a round, and collapsing the base's scattered fact-finding into one rule —
-plus the grill-consolidate fold-in path and the commit-on-close discipline that
-make grilling safe under parallel agents and teams. Where a line below contradicts
-the verbatim upstream region, the line below wins; the upstream text is kept
-byte-intact only so drift stays diffable.
--->
-
-## Composed over grilling
-
-Run the `grilling` skill for the conversation itself: map the design tree,
-ask the whole settled frontier one round at a time, find every fact yourself,
-and stop when the frontier is empty. That skill is the interview and nothing
-else — it deliberately writes nothing, and asks which skill records the
-decisions. This one is that answer: the glossary fragments, ADRs and closing
-commit below are where a `grill-with-docs` session's decisions land.
-
-Everything on this page is the write discipline layered on top of the interview.
-Read both before the first round.
-
-## Single-writer override
-
-**Override (negates the "Update CONTEXT.md inline" section above): never write the base `CONTEXT.md` — write a delta op to your own per-session fragment per [CONTEXT-FORMAT.md](./CONTEXT-FORMAT.md), and treat the glossary you challenge terms against as the union of base + fragments.** Read [CONTEXT-FORMAT.md](./CONTEXT-FORMAT.md) before your first write. This keeps concurrent sessions and teams conflict-free; the "update `CONTEXT.md` right there" wording upstream is the one place pop deviates, and this line is authoritative.
-
-**Write once a round, not per term.** The primitive resolves decisions in rounds, and glossary writes ride the same beat. Don't append an op the moment a term settles mid-round — at each round's close, if that round settled any terms, write their `+`/`~`/`-` ops to your fragment in a single update, and skip rounds that settled nothing. This supersedes the base's "capture them as they happen … don't batch these up" timing, which assumed per-term writes to a file pop no longer touches.
-
-If the user asks you to **consolidate** (fold accumulated fragments into the base), use the `grill-consolidate` skill. Consolidation is a separate single-writer maintenance pass, not part of the grilling session — don't fold fragments in mid-grill.
+**Write once a round, not per term.** The interview settles decisions in rounds,
+so in this session the glossary writes ride the same beat: at each round's close,
+if that round settled any terms, write their ops to your fragment in a single
+update, and skip rounds that settled nothing. This is the session beat
+`domain-modeling` leaves to a composing workflow; it replaces that skill's
+write-when-it-settles timing and nothing else — where the fragment lives, how its
+generation is picked, and the op syntax are unchanged.
 
 ## Fact-finding is one activity
 
-The primitive's "find facts yourself, never ask the user," domain-modeling's "Challenge against the glossary," and its "Cross-reference with code" are **the same activity**, not three separate ones. Read the code and the base+fragment glossary-union directly — inline for a cheap check, a non-blocking sub-agent for heavy exploration — and surface any contradiction between what you find and what the user claimed. There is no path where you ask the user to supply a fact you could have looked up.
+The interview's "find facts yourself, never ask the user," and the discipline's
+"challenge against the glossary" and "cross-reference with code" are **the same
+activity**, not three separate ones. Read the code and the base+fragment
+glossary union directly — inline for a cheap check, a non-blocking sub-agent for
+heavy exploration — and surface any contradiction between what you find and what
+the user claimed. There is no path where you ask the user to supply a fact you
+could have looked up.
 
 ## Closing the session
 
@@ -141,7 +75,7 @@ Why this matters: these artifacts often get carried into downstream work via a f
 To commit:
 
 1. **Skip if nothing to do.** If the working directory is not a git repository, or this session created/modified no committable repository files, say so and skip.
-2. **Identify session paths.** From this conversation's history, list *exactly* the repository files this session created or modified — the base glossary (`CONTEXT.md`, `CONTEXT-MAP.md`), session fragments (`.grill-context/**`, plus any legacy `CONTEXT.*.md` colocated beside a base), ADRs (`docs/adr/**`), and any code or prototype the session touched. Commit CONTEXT fragments **as-is** — do not consolidate them (consolidation is a separate pass). Do **not** include files this session never touched, even if dirty; prior-session artifacts are intentionally out of scope.
+2. **Identify session paths.** From this conversation's history, list *exactly* the repository files this session created or modified — the base glossary (`CONTEXT.md`, `CONTEXT-MAP.md`), session fragments (`.grill-context/**`, plus any legacy `CONTEXT.*.md` colocated beside a base), ADRs (`docs/adr/**`), and any code or prototype the session touched. Commit CONTEXT fragments **as-is** — folding them into the base is the separate `grill-consolidate` pass, never part of this commit. Do **not** include files this session never touched, even if dirty; prior-session artifacts are intentionally out of scope.
 3. **Stage exactly those paths** (never `git add -A`) and create a **single commit**. Derive a short `<topic-slug>` from the subject of the grilling session (the term or area discussed). The type follows content:
    - docs-only → `docs(<topic-slug>): <summary> (ADR-NNNN + glossary)` (drop whichever parenthetical part doesn't apply)
    - mixed code + docs → a fitting conventional type (`feat`, `chore`, …), still scoped `(<topic-slug>)`

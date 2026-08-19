@@ -239,39 +239,3 @@ func TestInstallDomainModelingPrunesStaleEntry(t *testing.T) {
 		})
 	}
 }
-
-// TestGrillingWorkflowsUnchangedByAdditiveSlice is the boundary guard for this
-// additive slice: exposing the discipline as its own skill must not yet move any
-// rule out of the workflows that ship beside it. grill-with-docs stays the
-// human-opened session that carries its own override and closing commit, and
-// each grilling workflow keeps the companions it installs today. The move
-// itself is a later slice; until then a change here is a regression.
-func TestGrillingWorkflowsUnchangedByAdditiveSlice(t *testing.T) {
-	t.Parallel()
-	docs, err := skillFiles.ReadFile("skills/pop/grill-with-docs/SKILL.md")
-	if err != nil {
-		t.Fatalf("read embedded grill-with-docs skill: %v", err)
-	}
-	front := frontmatterOf(t, string(docs))
-	if !strings.Contains(front, "disable-model-invocation: true") {
-		t.Error("grill-with-docs is human-opened and must keep its manual gate")
-	}
-	for _, want := range []string{"Single-writer override", "Closing the session"} {
-		if !strings.Contains(string(docs), want) {
-			t.Errorf("grill-with-docs lost its %q section in an additive slice", want)
-		}
-	}
-
-	tree, err := renderComponent(ComponentTaskSkills, "claude", "pop-")
-	if err != nil {
-		t.Fatalf("renderComponent: %v", err)
-	}
-	for _, skill := range []string{"pop-grilling", "pop-grill-with-docs", "pop-grill-with-map"} {
-		if _, ok := tree[skill+"/SKILL.md"]; !ok {
-			t.Errorf("%s is no longer installed", skill)
-		}
-		if _, ok := tree[skill+"/CONTEXT-FORMAT.md"]; !ok {
-			t.Errorf("%s lost its CONTEXT-FORMAT.md copy", skill)
-		}
-	}
-}

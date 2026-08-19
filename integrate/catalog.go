@@ -94,8 +94,9 @@ var catalog = []Component{
 		// Each source is a skill directory (SKILL.md plus any companion
 		// documents). Companion files must ride alongside a body so its
 		// relative references resolve; sharedSkillDocs below hands the two
-		// format documents domain-modeling owns to the other skills that read
-		// or write the same glossary and ADRs.
+		// format documents domain-modeling owns to the one other skill that
+		// writes compatible glossary and ADR documents without loading the
+		// discipline.
 		sources: []string{
 			"skills/pop/grilling",
 			"skills/pop/grill-with-docs",
@@ -122,20 +123,17 @@ var catalog = []Component{
 const sharedSkillDocOwner = "skills/pop/domain-modeling"
 
 // sharedSkillDocs maps a skill's base name to the documents it receives a copy
-// of from sharedSkillDocOwner. One source of truth, several destinations: the
-// glossary union rule and the `+`/`~`/`-` op syntax are the same text for the
-// skill that only reads the union (grilling), the one that writes fragments
-// into it (grill-with-docs) and the one that drafts the same ops into a Map
-// (grill-with-map), so they cannot be allowed to drift apart. The ADR template
-// is shared the same way by the skills that produce ADRs — one as a numbered
-// repo file, one as an unnumbered Map draft. Each copy lands beside the skill
-// body, so a body's `./CONTEXT-FORMAT.md` link resolves wherever the skill is
-// installed. The owner is absent from this map: its copies are already its own
-// directory's files.
+// of from sharedSkillDocOwner. One source of truth, one destination today
+// (ADR-0225 decision 3): grill-with-map drafts the same `+`/`~`/`-` glossary ops
+// and the same ADR body as domain-modeling does, but into a Map rather than the
+// repository, so it must read the identical rules while deliberately not loading
+// the discipline that writes them. Every other skill that needs those rules
+// loads domain-modeling and reaches the documents through it. The copy lands
+// beside the receiving body, so a `./CONTEXT-FORMAT.md` link resolves wherever
+// the skill is installed. The owner is absent from this map: its copies are
+// already its own directory's files.
 var sharedSkillDocs = map[string][]string{
-	"grilling":        {"CONTEXT-FORMAT.md"},
-	"grill-with-docs": {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
-	"grill-with-map":  {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
+	"grill-with-map": {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
 }
 
 // sharedDocSource returns the embedded path of a shared document.

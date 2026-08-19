@@ -244,6 +244,16 @@ func TestRewriteSkillReferencesWordBoundary(t *testing.T) {
 			want:  "run the `pop-grill-with-docs` skill",
 		},
 		{
+			name:  "sentence-initial invocation of a common-word name",
+			input: "Run the `grilling` skill for the interview.",
+			want:  "Run the `pop-grilling` skill for the interview.",
+		},
+		{
+			name:  "common-word name outside an invocation is left alone",
+			input: "a grilling ticket resolves in conversation",
+			want:  "a grilling ticket resolves in conversation",
+		},
+		{
 			name:  "hyphenated partial word not matched",
 			input: "not-pop-to-spec-here",
 			want:  "not-pop-to-spec-here",

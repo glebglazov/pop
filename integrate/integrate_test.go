@@ -2141,7 +2141,7 @@ func TestRefreshComponent_OpencodeTaskSkillsAddsMissing(t *testing.T) {
 		t.Fatalf("task skill not symlinked for opencode: %v", fs.symlinks)
 	}
 	for _, c := range []string{"ADR-FORMAT.md", "CONTEXT-FORMAT.md"} {
-		p := filepath.Join("/h", ".local", "share", "pop", "integrations", "opencode", "task-skills", "pop-grill-with-docs", c)
+		p := filepath.Join("/h", ".local", "share", "pop", "integrations", "opencode", "task-skills", "pop-domain-modeling", c)
 		if _, ok := fs.files[p]; !ok {
 			t.Fatalf("companion not written: %s", p)
 		}
