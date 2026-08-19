@@ -13,6 +13,10 @@ import (
 // instead of archaeological. It covers the domain-modeling body and the two
 // format documents it owns (pinned to domain-modeling@8b78b53) and the
 // setup-matt-pocock-skills seed templates (pinned to mattpocock/skills@8b78b53).
+// 8b78b53 is the reviewed current revision for this whole restructure
+// (ADR-0225 decision 7), so the fixtures below are also the re-pin evidence: the
+// Domain-doc seed's read rule lives entirely under its marker, and this test is
+// what proves adding it left the upstream base untouched.
 //
 // grill-with-docs is absent: since ADR-0225 it inlines no upstream text at all —
 // it loads grilling and domain-modeling instead — so it has no region to pin.
