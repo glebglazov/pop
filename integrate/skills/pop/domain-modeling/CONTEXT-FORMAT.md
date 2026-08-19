@@ -8,12 +8,13 @@ union-read, collision handling) live below that marker. To review upstream
 drift, diff the region between this header and the marker against
 domain-modeling@<newref>.
 
-Pop keeps exactly one copy of this file, here in `_shared/`. Every skill that
-reads or writes the glossary — grilling reads the union, grill-with-docs
-writes fragments into it — receives a copy in its installed directory at
+Pop keeps exactly one copy of this file, here beside domain-modeling — the
+skill that owns the glossary discipline, as upstream. Every other installed
+skill that reads or writes the glossary receives a copy in its own directory at
 install time, so the union rule and the op syntax cannot drift between them and
-each skill's `./CONTEXT-FORMAT.md` reference still resolves. Only the
-destination differs per skill; see `sharedSkillDocs` in integrate/catalog.go.
+each skill's `./CONTEXT-FORMAT.md` reference still resolves wherever it is
+installed. Only the destination differs per skill; see `sharedSkillDocs` in
+integrate/catalog.go.
 -->
 
 # CONTEXT.md Format

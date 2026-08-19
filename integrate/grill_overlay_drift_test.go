@@ -10,8 +10,9 @@ import (
 // vendored upstream fixture its above-marker region must stay byte-identical
 // to. Per ADR-0112/ADR-0136, drift review reduces to diffing this region
 // against the pinned upstream source; this test makes that diff mechanical
-// instead of archaeological. It covers the grill-with-docs body and the shared
-// format documents (pinned to domain-modeling@8b78b53), the grilling
+// instead of archaeological. It covers the domain-modeling body and the two
+// format documents it owns, plus the grill-with-docs body that still inlines
+// the same upstream half (all pinned to domain-modeling@8b78b53), the grilling
 // interview primitive (pinned to productivity/grilling@8b78b53 — upstream
 // absorbed the in-progress experiment it was first pinned to into its shipped
 // grilling skill, so this pin tracks a live upstream), and the setup-matt-pocock-skills
@@ -19,12 +20,15 @@ import (
 //
 // grill-with-docs' verbatim region is the domain-modeling half alone: the
 // interview half it used to inline is now grilling, composed over rather
-// than concatenated, so each upstream skill is pinned in exactly one place.
+// than concatenated. Two entries share the domain-modeling fixture while the
+// discipline is exposed as its own skill and grill-with-docs has not yet been
+// turned into a composer; one pin, one fixture, two files to keep honest.
 var overlayPinnedFiles = map[string]string{
 	"skills/pop/grilling/SKILL.md":                                "testdata/grilling-pin/SKILL.md",
+	"skills/pop/domain-modeling/SKILL.md":                         "testdata/domain-modeling-pin/SKILL.md",
+	"skills/pop/domain-modeling/CONTEXT-FORMAT.md":                "testdata/domain-modeling-pin/CONTEXT-FORMAT.md",
+	"skills/pop/domain-modeling/ADR-FORMAT.md":                    "testdata/domain-modeling-pin/ADR-FORMAT.md",
 	"skills/pop/grill-with-docs/SKILL.md":                         "testdata/domain-modeling-pin/SKILL.md",
-	"skills/pop/_shared/CONTEXT-FORMAT.md":                        "testdata/domain-modeling-pin/CONTEXT-FORMAT.md",
-	"skills/pop/_shared/ADR-FORMAT.md":                            "testdata/domain-modeling-pin/ADR-FORMAT.md",
 	"skills/pop/setup-matt-pocock-skills/domain.md":               "testdata/setup-skill-pin/domain.md",
 	"skills/pop/setup-matt-pocock-skills/issue-tracker-github.md": "testdata/setup-skill-pin/issue-tracker-github.md",
 	"skills/pop/setup-matt-pocock-skills/issue-tracker-gitlab.md": "testdata/setup-skill-pin/issue-tracker-gitlab.md",

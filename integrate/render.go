@@ -117,9 +117,9 @@ func renderMultiFileSkill(tree map[string][]byte, agent, prefix, dir string, bas
 }
 
 // renderSharedSkillDocs copies each document this skill shares with others
-// (sharedSkillDocs) from `skills/pop/_shared/` into the skill's own rendered
-// directory, so the installed skill is self-contained and its relative links
-// resolve without knowing where pop keeps the original.
+// (sharedSkillDocs) from the owning skill's directory into this skill's own
+// rendered directory, so the installed skill is self-contained and its relative
+// links resolve without knowing which skill owns the original.
 func renderSharedSkillDocs(tree map[string][]byte, prefix, base, skillName string, baseNames []string) error {
 	for _, name := range sharedSkillDocs[base] {
 		src := sharedDocSource(name)

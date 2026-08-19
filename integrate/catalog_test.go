@@ -149,6 +149,7 @@ func TestCatalog_TaskSkillsSources(t *testing.T) {
 		"skills/pop/grill-with-docs",
 		"skills/pop/grill-with-map",
 		"skills/pop/grill-consolidate",
+		"skills/pop/domain-modeling",
 		"skills/pop/to-spec",
 		"skills/pop/to-tasks",
 		"skills/pop/wayfinder",

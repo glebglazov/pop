@@ -13,6 +13,7 @@ var taskSkillDirs = map[string][]string{
 	"pop-grill-with-docs":          {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
 	"pop-grill-with-map":           {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
 	"pop-grill-consolidate":        {},
+	"pop-domain-modeling":          {"ADR-FORMAT.md", "CONTEXT-FORMAT.md"},
 	"pop-to-spec":                  {},
 	"pop-to-tasks":                 {},
 	"pop-wayfinder":                {},
@@ -23,8 +24,8 @@ var taskSkillDirs = map[string][]string{
 }
 
 // companionSource resolves where a rendered companion's bytes come from: the
-// skill's own embedded directory, or skills/pop/_shared/ for a document the
-// skill shares with others.
+// skill's own embedded directory, or the owning skill's directory for a
+// document this skill only receives a copy of.
 func companionSource(base, name string) string {
 	for _, shared := range sharedSkillDocs[base] {
 		if shared == name {
@@ -151,12 +152,12 @@ func TestRenderTaskSkillsBodyRewritesCrossSkillReferences(t *testing.T) {
 	}
 
 	wayfinder := string(tree["pop-wayfinder/SKILL.md"])
-	for _, want := range []string{"pop-grill-with-docs", "pop-to-spec", "pop-to-tasks"} {
+	for _, want := range []string{"pop-grill-with-docs", "pop-to-spec", "pop-to-tasks", "/pop-domain-modeling"} {
 		if !strings.Contains(wayfinder, want) {
 			t.Errorf("wayfinder body missing rewritten reference %q", want)
 		}
 	}
-	for _, bare := range []string{"`grill-with-docs`", "`to-spec`", "`to-tasks`"} {
+	for _, bare := range []string{"`grill-with-docs`", "`to-spec`", "`to-tasks`", "/domain-modeling"} {
 		if strings.Contains(wayfinder, bare) {
 			t.Errorf("wayfinder body still has bare reference %q", bare)
 		}

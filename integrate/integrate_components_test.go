@@ -150,8 +150,8 @@ func TestRunIntegrateComponentsCodexInstallsMergedBaseline(t *testing.T) {
 	if _, ok := fs.symlinks[grillDest]; !ok {
 		t.Fatalf("codex task skill not symlinked: %v", fs.symlinks)
 	}
-	if len(fs.symlinks) != 13 { // pane + spawn-agent + 11 task skills
-		t.Fatalf("expected 13 skill symlinks, got %d: %v", len(fs.symlinks), fs.symlinks)
+	if len(fs.symlinks) != 14 { // pane + spawn-agent + 12 task skills
+		t.Fatalf("expected 14 skill symlinks, got %d: %v", len(fs.symlinks), fs.symlinks)
 	}
 }
 
@@ -178,8 +178,8 @@ func TestRunIntegrateComponentsOpencodeInstallsMergedBaseline(t *testing.T) {
 	if _, ok := fs.symlinks[grillDest]; !ok {
 		t.Fatalf("opencode task skill not symlinked: %v", fs.symlinks)
 	}
-	if len(fs.symlinks) != 13 { // pane + spawn-agent + 11 task skills
-		t.Fatalf("expected 13 skill symlinks, got %d: %v", len(fs.symlinks), fs.symlinks)
+	if len(fs.symlinks) != 14 { // pane + spawn-agent + 12 task skills
+		t.Fatalf("expected 14 skill symlinks, got %d: %v", len(fs.symlinks), fs.symlinks)
 	}
 }
 
