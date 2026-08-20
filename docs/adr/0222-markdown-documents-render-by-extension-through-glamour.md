@@ -1,5 +1,7 @@
 # Markdown documents render, by extension, through glamour
 
+> **Amended by [ADR-0230](0230-pop-resolves-the-terminal-appearance-itself.md):** the automatic-style clause below is wrong wherever pop actually runs — inside tmux, glamour's automatic style always resolves to dark, whatever the terminal's background is. Pop resolves the **Terminal appearance** itself and hands glamour an explicit palette. Every other decision in this ADR stands.
+
 The Document peek shows a file's bytes. Everything it is pointed at is Markdown written for a human to read — a task body, a Review artifact, a spec, a Routine's last report — and reading it as raw text means reading `##`, backticks and list markers as noise, in the one surface whose whole purpose is reading.
 
 The decision: **pop renders Markdown with `github.com/charmbracelet/glamour`, and decides whether to render by file extension — a `.md` path is rendered, every other path is shown raw.** It reaches the Document peek and `pop tasks artifacts --show` when stdout is a terminal; a redirected `--show` stays byte-exact, because a document piped into a file or a pull request is not being read on a terminal. The renderer uses glamour's automatic style, takes its wrap width from the surface's own content width, and is rebuilt when the window resizes — a stale wrap width is the one glamour misconfiguration a reader sees immediately.
