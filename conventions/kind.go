@@ -26,12 +26,50 @@ const (
 	// KindIssueTracker is which Work store a repository files issues in and how
 	// a planning skill publishes into it.
 	KindIssueTracker Kind = "issue-tracker"
+	// KindVerification is how work is checked in a repository: the build and
+	// test invocation, which gate is whole-tree and which is scoped, and what
+	// counts as evidence that one was run. It is a fact about a repository's
+	// toolchain that no other pop surface holds, and it is the standard Agent
+	// verification itself follows — the shared word is deliberate (ADR-0227
+	// decision 4).
+	KindVerification Kind = "verification"
 )
+
+// Shape is how a kind's answer reaches an agent. It is a property of the kind
+// rather than a habit of each call site, so a consumer cannot decide it locally
+// and the author of the next kind owes it a decision (ADR-0227 decision 1).
+type Shape string
+
+const (
+	// ShapeRoleDriving means the convention is an agent's entire mandate, so it
+	// is the prompt body and pop supplies only a frame around it: a Role
+	// preamble before it and a Response contract after it. There is then one
+	// voice on what to check, rather than the team's document arguing with
+	// pop's prompt (ADR-0227 decisions 2 and 3).
+	ShapeRoleDriving Shape = "role-driving"
+	// ShapeStepInforming means the convention is a fact a prompt about
+	// something else needs, so it stays a labelled block inside a prompt pop
+	// wrote end to end.
+	ShapeStepInforming Shape = "step-informing"
+)
+
+// Shape answers how this kind reaches an agent.
+func (k Kind) Shape() Shape {
+	switch k {
+	case KindCodeReview, KindVerification:
+		return ShapeRoleDriving
+	case KindCommits, KindIssueTracker:
+		return ShapeStepInforming
+	}
+	return ""
+}
 
 // Kinds returns every Convention kind in rank-independent declaration order:
 // the order `get` with no kind walks, and the order an unknown kind is refused
 // with.
-func Kinds() []Kind { return []Kind{KindCodeReview, KindCommits, KindIssueTracker} }
+func Kinds() []Kind {
+	return []Kind{KindCodeReview, KindCommits, KindIssueTracker, KindVerification}
+}
 
 // Desc is the one-line description of what a kind answers, for a surface that
 // lists kinds beside things of another sort and has to say what each one is. It
@@ -45,6 +83,8 @@ func (k Kind) Desc() string {
 		return "How this repository writes commits — types, scopes, subject and body style."
 	case KindIssueTracker:
 		return "Which Work store this repository files issues in, and how a skill publishes into it."
+	case KindVerification:
+		return "How work is checked in this repository — the build and test gates, and what counts as having run them."
 	}
 	return ""
 }

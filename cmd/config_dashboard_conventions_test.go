@@ -131,7 +131,7 @@ func TestConfigDashboardListsConventionsBesideConfigKeys(t *testing.T) {
 			commits = row
 		}
 	}
-	for _, want := range []string{"work.implement.agents", "conventions.commits", "conventions.issue-tracker", "conventions.code-review"} {
+	for _, want := range []string{"work.implement.agents", "conventions.commits", "conventions.issue-tracker", "conventions.code-review", "conventions.verification"} {
 		if !keys[want] {
 			t.Fatalf("no row for %s; the list holds %d rows", want, len(rows))
 		}

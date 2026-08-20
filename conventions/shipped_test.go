@@ -140,3 +140,45 @@ func TestIssueTrackerShippedAnswerIsPopsTrackerDoc(t *testing.T) {
 		t.Errorf("issue-tracker shipped answer still tells the reader to refresh integration:\n%s", answer)
 	}
 }
+
+// TestVerificationShippedAnswerIsHowWorkIsChecked: the kind's whole point is to
+// hold a fact about a repository's toolchain that every pop-spawned agent used
+// to rediscover — so its shipped answer has to say how to find the invocation,
+// which gate is which, and what counts as having run one (ADR-0227 decision 4).
+func TestVerificationShippedAnswerIsHowWorkIsChecked(t *testing.T) {
+	answer := Shipped(KindVerification)
+	for what, want := range map[string]string{
+		"where the invocation is written down": "AGENTS.md",
+		"the repository's task runner":         "Makefile",
+		"the scoped gate":                      "Scoped",
+		"the whole-tree gate":                  "Whole-tree",
+		"what evidence is":                     "Evidence is the output of a command you ran",
+		"reading the diff":                     "diff",
+		"an unrunnable gate":                   "unrunnable gate is a finding",
+	} {
+		if !strings.Contains(answer, want) {
+			t.Errorf("verification shipped answer does not carry %s (%q):\n%s", what, want, answer)
+		}
+	}
+}
+
+// TestVerificationShippedAnswerCarriesNoneOfPopsMachinery: the answer is a
+// standard a team could replace wholesale, so pop's reply format and the scope
+// rule naming which tasks are under judgement stay in the frame pop owns
+// (ADR-0227 decisions 2 and 4).
+func TestVerificationShippedAnswerCarriesNoneOfPopsMachinery(t *testing.T) {
+	answer := Shipped(KindVerification)
+	for what, gone := range map[string]string{
+		"the verdict vocabulary":     "VERDICT",
+		"a verdict value":            "NEEDS-HUMAN",
+		"the summary line":           "SUMMARY:",
+		"the commit-subject line":    "COMMIT-SUBJECT",
+		"the findings line":          "FINDINGS",
+		"the done-AFK scope rule":    "done AFK",
+		"the authoritative criteria": "acceptance criteria",
+	} {
+		if strings.Contains(answer, gone) {
+			t.Errorf("verification shipped answer carries %s (%q), which is pop's frame:\n%s", what, gone, answer)
+		}
+	}
+}
