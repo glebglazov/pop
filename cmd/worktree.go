@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -57,14 +58,110 @@ standalone binding is roomier:
 	RunE: runWorktree,
 }
 
+var worktreeFoldCmd = &cobra.Command{
+	Use:   "fold [<name>]",
+	Short: "Rebase a worktree onto trunk and fast-forward trunk",
+	Args:  cobra.MaximumNArgs(1),
+	RunE:  runWorktreeFold,
+}
+
 var switchSession bool
 var worktreeYankTarget string
+var worktreeFoldYes bool
+var worktreeFoldAgentPresets []string
+var worktreeFoldAgentCmd string
 
 func init() {
 	worktreeCmd.PersistentFlags().BoolVarP(&switchSession, "switch", "s", false, "Switch tmux session instead of printing path")
 	worktreeCmd.PersistentFlags().StringVar(&worktreeYankTarget, "yank-target", "", "Send yanked path to specified tmux pane instead of system clipboard")
 	worktreeCmd.AddCommand(worktreeDashboardCmd)
+	worktreeFoldCmd.Flags().BoolVarP(&worktreeFoldYes, "yes", "y", false, "Fold without interactive confirmation")
+	worktreeFoldCmd.Flags().StringArrayVar(&worktreeFoldAgentPresets, "agent", nil, "Agent preset for fold-conflict assistance, optionally followed by extra agent args")
+	worktreeFoldCmd.Flags().StringVar(&worktreeFoldAgentCmd, "agent-cmd", "", "Trusted shell prefix for fold-conflict assistance; generated prompt passed as final positional argument")
+	worktreeCmd.AddCommand(worktreeFoldCmd)
 	rootCmd.AddCommand(worktreeCmd)
+}
+
+func runWorktreeFold(cmd *cobra.Command, args []string) error {
+	d := cmdLayerDeps()
+	cwd, err := d.DirOrGetwd()
+	if err != nil {
+		return fmt.Errorf("worktree fold: resolve current checkout: %w", err)
+	}
+	name := ""
+	if len(args) == 1 {
+		name = args[0]
+	}
+	cfgPath := cfgFile
+	if cfgPath == "" {
+		cfgPath = taskConfigPath()
+	}
+	cfg, err := taskConfigLoad(cfgPath)
+	if err != nil {
+		return fmt.Errorf("worktree fold: %w", err)
+	}
+	agentPreset := ""
+	if len(worktreeFoldAgentPresets) > 0 {
+		agentPreset = worktreeFoldAgentPresets[len(worktreeFoldAgentPresets)-1]
+	}
+	return runWorktreeFoldWith(d, cfg, cwd, name, binding.FoldOptions{
+		Yes:                 worktreeFoldYes,
+		In:                  cmd.InOrStdin(),
+		ConfirmCheckoutFold: true,
+		AgentPreset:         agentPreset,
+		AgentCmd:            worktreeFoldAgentCmd,
+	}, cmd.OutOrStdout())
+}
+
+func runWorktreeFoldWith(d *Deps, cfg *config.Config, cwd, name string, opts binding.FoldOptions, out io.Writer) error {
+	path, err := resolveWorktreeFoldPath(d.projectDeps(), cwd, name)
+	if err != nil {
+		return fmt.Errorf("worktree fold: %w", err)
+	}
+	setIDs, err := binding.LiveBoundSetIDs(d.tasksDeps(), path)
+	if err != nil {
+		return fmt.Errorf("worktree fold: inspect worktree binding: %w", err)
+	}
+	if len(setIDs) > 0 {
+		if len(setIDs) == 1 {
+			return fmt.Errorf("worktree fold refused: %s is bound to Task set %s; use `pop tasks fold %s`", path, setIDs[0], setIDs[0])
+		}
+		return fmt.Errorf("worktree fold refused: %s is bound to Task sets %s; use `pop tasks fold <set>`", path, strings.Join(setIDs, ", "))
+	}
+	if _, err := binding.FoldCheckout(d.tasksDeps(), cfg, path, opts, out); err != nil {
+		return fmt.Errorf("worktree fold: %w", err)
+	}
+	return nil
+}
+
+func resolveWorktreeFoldPath(d *project.Deps, cwd, name string) (string, error) {
+	ctx, err := project.DetectRepoContextFromPathWith(d, cwd)
+	if err != nil {
+		return "", fmt.Errorf("not in a git repository")
+	}
+	if strings.TrimSpace(name) == "" {
+		if ctx.IsBare {
+			return "", fmt.Errorf("current directory is not a worktree")
+		}
+		return ctx.GitRoot, nil
+	}
+	worktrees, err := project.ListWorktreesWith(d, ctx)
+	if err != nil {
+		return "", fmt.Errorf("list worktrees: %w", err)
+	}
+	var matches []string
+	for _, wt := range worktrees {
+		if wt.Name == name {
+			matches = append(matches, wt.Path)
+		}
+	}
+	if len(matches) == 0 {
+		return "", fmt.Errorf("worktree %q not found", name)
+	}
+	if len(matches) > 1 {
+		return "", fmt.Errorf("worktree name %q is ambiguous", name)
+	}
+	return matches[0], nil
 }
 
 func runWorktree(cmd *cobra.Command, args []string) error {

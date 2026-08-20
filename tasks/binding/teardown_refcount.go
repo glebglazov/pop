@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/glebglazov/pop/config"
@@ -112,25 +113,52 @@ func checkoutUnderManagedRoot(td *tasks.Deps, runtimePath string) (bool, error) 
 }
 
 func liveReferentCount(td *tasks.Deps, checkoutPath string, excludeKeys map[string]bool) (int, error) {
+	referents, err := liveReferents(td, checkoutPath, excludeKeys)
+	if err != nil {
+		return 0, err
+	}
+	return len(referents), nil
+}
+
+// LiveBoundSetIDs names the non-archived Task sets that still hold a binding to
+// checkoutPath. Checkout-addressed verbs use it to defer to the set's gates.
+func LiveBoundSetIDs(td *tasks.Deps, checkoutPath string) ([]string, error) {
+	referents, err := liveReferents(td, checkoutPath, nil)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(referents))
+	for _, id := range referents {
+		if id != "" {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids, nil
+}
+
+// liveReferents lists the set id for each live binding on checkoutPath. An empty
+// id is still a referent because pop cannot prove that it released the checkout.
+func liveReferents(td *tasks.Deps, checkoutPath string, excludeKeys map[string]bool) ([]string, error) {
 	if td == nil {
 		td = tasks.DefaultDeps()
 	}
 	targetCanon, err := canonicalCheckoutPath(td, checkoutPath)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	bindings, err := AllBindings(td)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	if len(bindings) == 0 {
-		return 0, nil
+		return nil, nil
 	}
 	state, err := tasks.LoadGlobalStateWith(td, tasks.DefaultStatePathWith(td))
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	count := 0
+	var referents []string
 	for key, b := range bindings {
 		if excludeKeys != nil && excludeKeys[key] {
 			continue
@@ -145,25 +173,27 @@ func liveReferentCount(td *tasks.Deps, checkoutPath string, excludeKeys map[stri
 		}
 		setID := SetIDFromKey(key)
 		if setID == "" {
-			count++
+			referents = append(referents, "")
 			continue
 		}
+		// A set whose storage cannot be resolved cannot be shown to be archived,
+		// and an unproven release is no release: it stays a live referent.
 		id, err := tasks.ResolveRepositoryIdentity(td, path)
 		if err != nil {
-			count++
+			referents = append(referents, setID)
 			continue
 		}
 		defPath, err := tasks.CanonicalDefinitionPathWith(td, id.TasksDir)
 		if err != nil {
-			count++
+			referents = append(referents, setID)
 			continue
 		}
 		if taskSetArchived(state, defPath, setID) {
 			continue
 		}
-		count++
+		referents = append(referents, setID)
 	}
-	return count, nil
+	return referents, nil
 }
 
 func taskSetArchived(state *tasks.GlobalState, defPath, setID string) bool {

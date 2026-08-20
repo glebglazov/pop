@@ -92,7 +92,11 @@ func HandleFoldConflict(d *Deps, cfg *config.Config, ctx FoldConflictContext, op
 	reader := newPromptReader(in)
 	for {
 		badge := foldConflictVerifiedBadge(d, cfg, ctx.SetID, ctx.RuntimePath)
-		action, err := promptFoldConflictAction(out, in, reader, d, cfg, ctx.SetID, badge, invocation)
+		subject := ctx.SetID
+		if strings.TrimSpace(subject) == "" {
+			subject = ctx.RuntimePath
+		}
+		action, err := promptFoldConflictAction(out, in, reader, d, cfg, subject, strings.TrimSpace(ctx.SetID) != "", badge, invocation)
 		if err != nil {
 			return err
 		}
@@ -167,23 +171,34 @@ const (
 	foldConflictExit
 )
 
-func promptFoldConflictAction(out io.Writer, in io.Reader, reader *promptReader, d *Deps, cfg *config.Config, setID string, badge VerifiedAtBadge, invocation *AgentAssistanceInvocation) (foldConflictAction, error) {
+func promptFoldConflictAction(out io.Writer, in io.Reader, reader *promptReader, d *Deps, cfg *config.Config, subject string, hasSet bool, badge VerifiedAtBadge, invocation *AgentAssistanceInvocation) (foldConflictAction, error) {
 	var preamble []string
-	if text := VerifiedAtBadgeText(badge); text != "" {
-		preamble = append(preamble, "  "+text)
+	if hasSet {
+		if text := VerifiedAtBadgeText(badge); text != "" {
+			preamble = append(preamble, "  "+text)
+		}
 	}
+	items := []ui.GateMenuItem{
+		{Key: "1", Label: "Agent assistance (default)", Details: gateInvocationDetails(invocation), Default: true, Assists: true},
+		{Key: "2", Label: "Resume fold"},
+		{Key: "3", Label: "Retry fold from scratch"},
+	}
+	if hasSet {
+		items = append(items, ui.GateMenuItem{Key: "4", Label: "Verify set"})
+	}
+	abandonKey := "4"
+	if hasSet {
+		abandonKey = "5"
+	}
+	items = append(items,
+		ui.GateMenuItem{Key: abandonKey, Label: "Abandon fold", Details: []string{"abort the rebase, restore the branch, delete the fold scratch branch"}},
+		ui.GateMenuItem{Key: "0", Label: "Exit", Details: []string{"leave the rebase parked for a later fold to resume"}},
+	)
 	spec := ui.GateMenuSpec{
-		Headline: fmt.Sprintf("Fold conflict: %s needs its branch rebased onto trunk.", setID),
+		Headline: fmt.Sprintf("Fold conflict: %s needs its branch rebased onto trunk.", subject),
 		Tone:     ui.GateMenuToneDefault,
 		Preamble: preamble,
-		Items: []ui.GateMenuItem{
-			{Key: "1", Label: "Agent assistance (default)", Details: gateInvocationDetails(invocation), Default: true, Assists: true},
-			{Key: "2", Label: "Resume fold"},
-			{Key: "3", Label: "Retry fold from scratch"},
-			{Key: "4", Label: "Verify set"},
-			{Key: "5", Label: "Abandon fold", Details: []string{"abort the rebase, restore the branch, delete the fold scratch branch"}},
-			{Key: "0", Label: "Exit", Details: []string{"leave the rebase parked for a later fold to resume"}},
-		},
+		Items:    items,
 	}
 	choice, _, err := promptGateMenu(out, in, reader, spec, nil, cfg)
 	if err != nil {
@@ -197,7 +212,10 @@ func promptFoldConflictAction(out io.Writer, in io.Reader, reader *promptReader,
 	case "3":
 		return foldConflictRetry, nil
 	case "4":
-		return foldConflictVerify, nil
+		if hasSet {
+			return foldConflictVerify, nil
+		}
+		return foldConflictAbandon, nil
 	case "5":
 		return foldConflictAbandon, nil
 	default:
@@ -212,6 +230,7 @@ func BuildFoldConflictPrompt(d *Deps, ctx FoldConflictContext, conflicted []stri
 		d = defaultDeps
 	}
 	view := foldConflictPromptView{
+		HasSet:             strings.TrimSpace(ctx.SetID) != "",
 		SetID:              ctx.SetID,
 		RuntimePath:        ctx.RuntimePath,
 		SetBranch:          ctx.SetBranch,
@@ -237,7 +256,8 @@ func BuildFoldConflictPrompt(d *Deps, ctx FoldConflictContext, conflicted []stri
 
 // foldConflictPromptView is what the fold-conflict template renders against.
 type foldConflictPromptView struct {
-	SetID string
+	HasSet bool
+	SetID  string
 	// The task-set path is known only when a manifest came with the context, so
 	// the template picks the line rather than rendering an empty one.
 	TaskSetPathKnown bool
@@ -341,6 +361,9 @@ func foldResumeRebase(d *Deps, setPath string, out io.Writer) error {
 }
 
 func offerFoldPostResolveVerify(d *Deps, cfg *config.Config, ctx FoldConflictContext, opts FoldConflictAssistanceOptions, out io.Writer, reader *promptReader) error {
+	if strings.TrimSpace(ctx.SetID) == "" {
+		return nil
+	}
 	display := outputFor(out)
 	fmt.Fprintln(display)
 	fmt.Fprintln(display, "Rebase resolved. Verify the set before fast-forwarding trunk?")

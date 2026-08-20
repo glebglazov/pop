@@ -18,10 +18,18 @@ import (
 type FoldOptions struct {
 	Yes bool
 	In  io.Reader
+	// ConfirmCheckoutFold asks the checkout primitive to confirm the landing.
+	// The Task-set specialization has its own confirmations and leaves it false.
+	ConfirmCheckoutFold bool
 	// AgentPreset / AgentCmd select the attended fold-conflict assistance
 	// adapter when a rebase conflict offers an interactive session.
 	AgentPreset string
 	AgentCmd    string
+}
+
+func confirmCheckoutFold(in io.Reader, out io.Writer, yes bool, path string) (bool, error) {
+	prompt := fmt.Sprintf("Fold worktree %s into trunk? [y/N]: ", path)
+	return confirmYesNo(in, out, yes, prompt, "non-interactive worktree fold requires --yes")
 }
 
 // FoldResult describes a successful fold.

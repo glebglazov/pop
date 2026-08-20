@@ -43,10 +43,20 @@ func FoldCheckout(td *tasks.Deps, cfg *config.Config, path string, opts FoldOpti
 		opts.In = os.Stdin
 	}
 
+	confirmed := !opts.ConfirmCheckoutFold
 	for {
 		plan, err := preflightFoldCheckout(td, cfg, foldCheckoutRequest{path: path})
 		if err != nil {
 			return FoldCheckoutResult{}, err
+		}
+		if !confirmed {
+			confirmed, err = confirmCheckoutFold(opts.In, out, opts.Yes, plan.path)
+			if err != nil {
+				return FoldCheckoutResult{}, err
+			}
+			if !confirmed {
+				return FoldCheckoutResult{}, fmt.Errorf("fold cancelled")
+			}
 		}
 		if err := foldRebaseAndFastForward(td, cfg, opts, out, plan.rebaseContext(nil)); err != nil {
 			if errors.Is(err, tasks.ErrFoldRetry) {

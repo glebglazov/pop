@@ -79,7 +79,7 @@ func TestPromptFoldConflictActionMenuOptions(t *testing.T) {
 	var out bytes.Buffer
 	in := strings.NewReader("0\n")
 	reader := newPromptReader(in)
-	action, err := promptFoldConflictAction(&out, in, reader, nil, nil, "demo", VerifiedAtBadge{
+	action, err := promptFoldConflictAction(&out, in, reader, nil, nil, "demo", true, VerifiedAtBadge{
 		State: VerifiedAtAtHead,
 		SHA:   "abc123def456",
 	}, nil)
@@ -113,12 +113,56 @@ func TestPromptFoldConflictActionDefaultsToAgent(t *testing.T) {
 	var out bytes.Buffer
 	in := strings.NewReader("\n")
 	reader := newPromptReader(in)
-	action, err := promptFoldConflictAction(&out, in, reader, nil, nil, "demo", VerifiedAtBadge{}, nil)
+	action, err := promptFoldConflictAction(&out, in, reader, nil, nil, "demo", true, VerifiedAtBadge{}, nil)
 	if err != nil {
 		t.Fatalf("prompt: %v", err)
 	}
 	if action != foldConflictAgent {
 		t.Fatalf("action = %v, want agent", action)
+	}
+}
+
+func TestPromptFoldConflictWithoutSetOmitsSetOnlyChoices(t *testing.T) {
+	var out bytes.Buffer
+	in := strings.NewReader("4\n")
+	reader := newPromptReader(in)
+	action, err := promptFoldConflictAction(&out, in, reader, nil, nil, "/repo/human-work", false, VerifiedAtBadge{
+		State: VerifiedAtAtHead,
+		SHA:   "abc123def456",
+	}, nil)
+	if err != nil {
+		t.Fatalf("prompt: %v", err)
+	}
+	if action != foldConflictAbandon {
+		t.Fatalf("action = %v, want abandon", action)
+	}
+	got := out.String()
+	for _, absent := range []string{"Verify set", "verified @"} {
+		if strings.Contains(got, absent) {
+			t.Errorf("checkout prompt contains %q:\n%s", absent, got)
+		}
+	}
+	if !strings.Contains(got, "4. Abandon fold") {
+		t.Fatalf("checkout prompt missing abandon choice:\n%s", got)
+	}
+}
+
+func TestFoldConflictAgentPromptWithoutSetUsesCheckoutLanguage(t *testing.T) {
+	prompt := BuildFoldConflictPrompt(nil, FoldConflictContext{
+		RuntimePath: "/repo/human-work",
+		SetBranch:   "human-work",
+		TrunkBranch: "main",
+		TrunkPath:   "/repo/main",
+	}, nil)
+	for _, absent := range []string{"Task set:", "Set checkout", "Set branch"} {
+		if strings.Contains(prompt, absent) {
+			t.Errorf("checkout prompt contains %q:\n%s", absent, prompt)
+		}
+	}
+	for _, want := range []string{"Checkout (resolve here): /repo/human-work", "Checkout branch: human-work"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("checkout prompt missing %q:\n%s", want, prompt)
+		}
 	}
 }
 
@@ -136,7 +180,7 @@ func TestPromptFoldConflictActionSelectsResumeRetryVerifyAbandon(t *testing.T) {
 		var out bytes.Buffer
 		in := strings.NewReader(tc.in)
 		reader := newPromptReader(in)
-		got, err := promptFoldConflictAction(&out, in, reader, nil, nil, "demo", VerifiedAtBadge{}, nil)
+		got, err := promptFoldConflictAction(&out, in, reader, nil, nil, "demo", true, VerifiedAtBadge{}, nil)
 		if err != nil {
 			t.Fatalf("input %q: %v", tc.in, err)
 		}

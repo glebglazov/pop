@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +18,150 @@ import (
 	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/ui"
 )
+
+func runWorktreeFoldGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func addWorktreeFoldCommit(t *testing.T, repo, name string) string {
+	t.Helper()
+	path := filepath.Join(filepath.Dir(repo), name)
+	runWorktreeFoldGit(t, repo, "worktree", "add", "-b", name, path)
+	if err := os.WriteFile(filepath.Join(path, "work.txt"), []byte(name+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runWorktreeFoldGit(t, path, "add", "work.txt")
+	runWorktreeFoldGit(t, path, "commit", "-m", "worktree work")
+	return path
+}
+
+func TestWorktreeFoldDefaultsToCurrentCheckoutAndKeepsIt(t *testing.T) {
+	parent := t.TempDir()
+	repo := filepath.Join(parent, "repo")
+	if err := os.Mkdir(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepoWithCommitCmd(t, repo)
+	wt := addWorktreeFoldCommit(t, repo, "human-work")
+	d := newTestCmdDeps(t, wt, filepath.Join(parent, "xdg"), filepath.Join(parent, "config"))
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+
+	err := runWorktreeFoldWith(d, cfg, wt, "", binding.FoldOptions{
+		Yes: true, In: tasks.NonInteractiveReader{}, ConfirmCheckoutFold: true,
+	}, io.Discard)
+	if err != nil {
+		t.Fatalf("fold current worktree: %v", err)
+	}
+	if _, err := os.Stat(wt); err != nil {
+		t.Fatalf("fold deleted checkout: %v", err)
+	}
+	if got := runWorktreeFoldGit(t, wt, "branch", "--show-current"); got != "human-work" {
+		t.Fatalf("checkout branch = %q, want human-work", got)
+	}
+	branchTip := runWorktreeFoldGit(t, repo, "rev-parse", "human-work")
+	if trunkTip := runWorktreeFoldGit(t, repo, "rev-parse", "HEAD"); trunkTip != branchTip {
+		t.Fatalf("trunk tip = %s, branch tip = %s", trunkTip, branchTip)
+	}
+}
+
+func TestWorktreeFoldNamedUnboundManagedWorktreeSurvives(t *testing.T) {
+	parent := t.TempDir()
+	repo := filepath.Join(parent, "repo")
+	if err := os.Mkdir(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepoWithCommitCmd(t, repo)
+	d := newTestCmdDeps(t, repo, filepath.Join(parent, "xdg"), filepath.Join(parent, "config"))
+	b, err := binding.ProvisionScratchWorktree(d.tasksDeps(), repo, "HEAD", time.Now())
+	if err != nil {
+		t.Fatalf("provision managed worktree: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(b.RuntimePath, "managed.txt"), []byte("work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runWorktreeFoldGit(t, b.RuntimePath, "add", "managed.txt")
+	runWorktreeFoldGit(t, b.RuntimePath, "commit", "-m", "managed work")
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+
+	err = runWorktreeFoldWith(d, cfg, repo, filepath.Base(b.RuntimePath), binding.FoldOptions{
+		Yes: true, In: tasks.NonInteractiveReader{}, ConfirmCheckoutFold: true,
+	}, io.Discard)
+	if err != nil {
+		t.Fatalf("fold named managed worktree: %v", err)
+	}
+	if _, err := os.Stat(b.RuntimePath); err != nil {
+		t.Fatalf("fold deleted managed checkout: %v", err)
+	}
+	if got := runWorktreeFoldGit(t, b.RuntimePath, "branch", "--show-current"); got != b.Branch {
+		t.Fatalf("checkout branch = %q, want %q", got, b.Branch)
+	}
+}
+
+func TestWorktreeFoldRefusesLiveBindingAndNamesTaskSet(t *testing.T) {
+	parent := t.TempDir()
+	repo := filepath.Join(parent, "repo")
+	if err := os.Mkdir(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepoWithCommitCmd(t, repo)
+	wt := addWorktreeFoldCommit(t, repo, "bound-work")
+	d := newTestCmdDeps(t, wt, filepath.Join(parent, "xdg"), filepath.Join(parent, "config"))
+	id, err := tasks.ResolveRepositoryIdentity(d.tasksDeps(), wt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := binding.Put(d.tasksDeps(), binding.Key(id, "set-bound"), binding.Adopt(d.tasksDeps(), wt, "bound-work", repo)); err != nil {
+		t.Fatal(err)
+	}
+
+	err = runWorktreeFoldWith(d, &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}, wt, "", binding.FoldOptions{
+		Yes: true, In: tasks.NonInteractiveReader{}, ConfirmCheckoutFold: true,
+	}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "set-bound") || !strings.Contains(err.Error(), "pop tasks fold set-bound") {
+		t.Fatalf("err = %v, want set-addressed refusal", err)
+	}
+}
+
+func TestWorktreeFoldNonInteractiveRequiresYes(t *testing.T) {
+	parent := t.TempDir()
+	repo := filepath.Join(parent, "repo")
+	if err := os.Mkdir(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepoWithCommitCmd(t, repo)
+	wt := addWorktreeFoldCommit(t, repo, "needs-yes")
+	d := newTestCmdDeps(t, wt, filepath.Join(parent, "xdg"), filepath.Join(parent, "config"))
+	trunkBefore := runWorktreeFoldGit(t, repo, "rev-parse", "HEAD")
+
+	err := runWorktreeFoldWith(d, &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}, wt, "", binding.FoldOptions{
+		In: tasks.NonInteractiveReader{}, ConfirmCheckoutFold: true,
+	}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "requires --yes") {
+		t.Fatalf("err = %v, want --yes refusal", err)
+	}
+	if got := runWorktreeFoldGit(t, repo, "rev-parse", "HEAD"); got != trunkBefore {
+		t.Fatalf("trunk moved without --yes: %s -> %s", trunkBefore, got)
+	}
+}
+
+func TestWorktreeFoldCommandAcceptsOptionalNameAndYes(t *testing.T) {
+	if worktreeFoldCmd.Use != "fold [<name>]" {
+		t.Fatalf("Use = %q, want optional picker-visible name", worktreeFoldCmd.Use)
+	}
+	if flag := worktreeFoldCmd.Flags().Lookup("yes"); flag == nil || flag.Shorthand != "y" {
+		t.Fatalf("--yes flag = %#v, want -y/--yes", flag)
+	}
+	if err := worktreeFoldCmd.Args(worktreeFoldCmd, []string{"one", "two"}); err == nil {
+		t.Fatal("fold accepted more than one worktree name")
+	}
+}
 
 // countingGitDeps swaps project's package-global dependencies for ones whose
 // git calls are counted, and returns the live counter plus a restore func.
