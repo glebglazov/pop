@@ -132,7 +132,10 @@ type foldPreflightContext struct {
 
 // PreflightFold applies the same precondition checks as Fold without rebasing
 // or releasing the binding. Dashboard and CLI surfaces use it to refuse early
-// with the same messages Fold would return.
+// with the same messages Fold would return. It is asked on the way into a fold,
+// never to paint a row, which is why it may still reconcile one thing it finds:
+// a Fold scratch branch left by a fold that died after its work landed is
+// deleted here (ADR-0229).
 func PreflightFold(td *tasks.Deps, cfg *config.Config, setID string) error {
 	_, err := preflightFold(td, cfg, setID)
 	return err

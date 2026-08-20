@@ -19,6 +19,14 @@ import (
 // never fetches.
 var ErrFoldRetry = errors.New("fold: retry from preflight")
 
+// ErrFoldAbandon signals that the operator chose "Abandon fold" at the Fold
+// conflict prompt: the in-flight rebase was aborted and the fold must be rolled
+// back to the state it found — nothing landed, and nothing is left parked. It is
+// deliberately not "Exit": exit stops for now and leaves the rebase in progress
+// for a later fold to resume, and walking away from a fold is a different
+// intention from putting it down (ADR-0229).
+var ErrFoldAbandon = errors.New("fold abandoned: rebase aborted, trunk unchanged and nothing rewritten")
+
 // FoldConflictContext carries the identity and git context for a fold rebase
 // conflict inside the set's own checkout.
 type FoldConflictContext struct {
@@ -47,7 +55,8 @@ type FoldConflictAssistanceOptions struct {
 // operator retries from scratch, exits, or verify fails. Returns nil when the
 // rebase completed (conflicts resolved and continued); the caller may continue
 // the fold fast-forward. Returns ErrFoldRetry when the operator aborted and
-// asked to restart Fold from preflight.
+// asked to restart Fold from preflight, and ErrFoldAbandon when they abandoned
+// the fold outright.
 func HandleFoldConflict(d *Deps, cfg *config.Config, ctx FoldConflictContext, opts FoldConflictAssistanceOptions) error {
 	if d == nil {
 		d = defaultDeps
@@ -130,6 +139,12 @@ func HandleFoldConflict(d *Deps, cfg *config.Config, ctx FoldConflictContext, op
 			}
 			fmt.Fprintln(outputFor(out), "Aborted in-flight rebase; retrying fold from preflight.")
 			return ErrFoldRetry
+		case foldConflictAbandon:
+			if _, err := d.Git.CommandInDir(ctx.RuntimePath, "rebase", "--abort"); err != nil {
+				return fmt.Errorf("fold refused: abort rebase to abandon the fold: %w", err)
+			}
+			fmt.Fprintln(outputFor(out), "Aborted the in-flight rebase and abandoned the fold; nothing landed.")
+			return ErrFoldAbandon
 		case foldConflictVerify:
 			if err := runFoldSetVerify(d, cfg, ctx, opts, out); err != nil {
 				return err
@@ -147,6 +162,7 @@ const (
 	foldConflictAgent foldConflictAction = iota
 	foldConflictResume
 	foldConflictRetry
+	foldConflictAbandon
 	foldConflictVerify
 	foldConflictExit
 )
@@ -165,7 +181,8 @@ func promptFoldConflictAction(out io.Writer, in io.Reader, reader *promptReader,
 			{Key: "2", Label: "Resume fold"},
 			{Key: "3", Label: "Retry fold from scratch"},
 			{Key: "4", Label: "Verify set"},
-			{Key: "0", Label: "Exit"},
+			{Key: "5", Label: "Abandon fold", Details: []string{"abort the rebase, restore the branch, delete the fold scratch branch"}},
+			{Key: "0", Label: "Exit", Details: []string{"leave the rebase parked for a later fold to resume"}},
 		},
 	}
 	choice, _, err := promptGateMenu(out, in, reader, spec, nil, cfg)
@@ -181,6 +198,8 @@ func promptFoldConflictAction(out io.Writer, in io.Reader, reader *promptReader,
 		return foldConflictRetry, nil
 	case "4":
 		return foldConflictVerify, nil
+	case "5":
+		return foldConflictAbandon, nil
 	default:
 		return foldConflictExit, nil
 	}

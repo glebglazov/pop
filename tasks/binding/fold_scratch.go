@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/tasks"
@@ -29,8 +30,12 @@ type foldRebaseContext struct {
 // purpose: a re-run must compute the same ref, which is what lets a stopped fold be
 // read back out of git rather than out of a journal (ADR-0229).
 func foldScratchBranch(branch string) string {
-	return "pop/fold/" + strings.ReplaceAll(strings.TrimSpace(branch), "/", "-")
+	return foldScratchPrefix + strings.ReplaceAll(strings.TrimSpace(branch), "/", "-")
 }
+
+// foldScratchPrefix is what marks a ref as fold's own to rewrite and to delete —
+// recovery reads it off a parked rebase to know the rebase in flight is a fold's.
+const foldScratchPrefix = "pop/fold/"
 
 // foldRebaseAndFastForward does the fold's git work on a Fold scratch branch, so
 // the branch it was asked to fold is rewritten by nothing (ADR-0229): the scratch
@@ -133,9 +138,10 @@ func rebaseScratchOntoTrunk(td *tasks.Deps, cfg *config.Config, opts FoldOptions
 		In:          opts.In,
 		Out:         out,
 	})
-	if errors.Is(err, tasks.ErrFoldRetry) {
-		// Retry restarts the whole verb from preflight, which must find the checkout as
-		// it was: aborting the rebase left it standing on the scratch branch.
+	if errors.Is(err, tasks.ErrFoldRetry) || errors.Is(err, tasks.ErrFoldAbandon) {
+		// Both aborted the rebase and left the checkout standing on the scratch branch,
+		// and neither may leave that ref behind: retry starts the verb again from
+		// preflight, abandon stops for good. Only "exit" parks.
 		abandonFoldScratch(td, ctx, scratch)
 	}
 	return err
@@ -158,19 +164,56 @@ func refuseTrunkUnfitToLand(td *tasks.Deps, trunkPath string) error {
 
 // landFoldedBranch runs after trunk already carries the work, so it is past the
 // Fold boundary: the real branch force-moves to the folded tip — its first and only
-// move — the checkout returns to it, and the scratch branch goes. A failure here
-// leaves the work landed, so it reports where it stopped instead of refusing.
+// move — the checkout returns to it, and the scratch branch goes. These are local
+// ref updates on landed work, so each is retried a bounded number of times and a
+// failure that outlasts that is reported for exactly what it is. Trunk is never
+// unwound; running fold again converges on the same end state (ADR-0229).
 func landFoldedBranch(td *tasks.Deps, ctx foldRebaseContext, scratch string) error {
-	if _, err := td.Git.CommandInDir(ctx.setPath, "branch", "-f", ctx.setBranch, scratch); err != nil {
-		return fmt.Errorf("fold landed in trunk, but could not move %s onto the folded tip: %w", ctx.setBranch, err)
+	if err := retryAfterLanding(func() error {
+		_, err := td.Git.CommandInDir(ctx.setPath, "branch", "-f", ctx.setBranch, scratch)
+		return err
+	}); err != nil {
+		return fmt.Errorf("fold landed in trunk: trunk holds the work, %s does not — could not move it onto the folded tip %s after %d attempts; trunk stays as it is, so folding again finishes the job: %w",
+			ctx.setBranch, scratch, foldPostLandingAttempts, err)
 	}
-	if _, err := td.Git.CommandInDir(ctx.setPath, "checkout", ctx.setBranch); err != nil {
-		return fmt.Errorf("fold landed in trunk, but could not check %s back out in %s: %w", ctx.setBranch, ctx.setPath, err)
+	if err := retryAfterLanding(func() error {
+		_, err := td.Git.CommandInDir(ctx.setPath, "checkout", ctx.setBranch)
+		return err
+	}); err != nil {
+		return fmt.Errorf("fold landed in trunk and %s holds the work, but %s is still standing on the fold scratch branch %s after %d attempts: %w",
+			ctx.setBranch, ctx.setPath, scratch, foldPostLandingAttempts, err)
 	}
-	if _, err := td.Git.CommandInDir(ctx.setPath, "branch", "-d", scratch); err != nil {
-		return fmt.Errorf("fold landed in trunk, but could not delete the fold scratch branch %s: %w", scratch, err)
+	if err := retryAfterLanding(func() error {
+		_, err := td.Git.CommandInDir(ctx.setPath, "branch", "-d", scratch)
+		return err
+	}); err != nil {
+		return fmt.Errorf("fold landed in trunk and %s holds the work; only the fold scratch branch %s is left over — it could not be deleted after %d attempts: %w",
+			ctx.setBranch, scratch, foldPostLandingAttempts, err)
 	}
 	return nil
+}
+
+// foldPostLandingAttempts bounds the inline retry of the ref updates that follow the
+// fast-forward, and foldPostLandingRetryDelay spaces them. They are local ref
+// writes on work that has already landed, so the only failure worth waiting out is a
+// transient one — another process holding the index or a ref lock — and a couple of
+// tries a moment apart either clears it or proves it is not transient.
+const (
+	foldPostLandingAttempts   = 3
+	foldPostLandingRetryDelay = 100 * time.Millisecond
+)
+
+func retryAfterLanding(step func() error) error {
+	var err error
+	for attempt := 0; attempt < foldPostLandingAttempts; attempt++ {
+		if attempt > 0 {
+			time.Sleep(foldPostLandingRetryDelay)
+		}
+		if err = step(); err == nil {
+			return nil
+		}
+	}
+	return err
 }
 
 // refuseAndAbandon rolls the fold's refs back to what it found and returns the

@@ -571,7 +571,7 @@ A **Task set** whose work is finished but whose checkout is still held as a pop-
 _Avoid_: unfinalized, pending fold, outstanding set, unlanded work
 
 **Fold conflict prompt**:
-The attended, TTY-only choice pop presents when a **Fold** rebase stops on a conflict in the set's checkout: agent assistance (default, Enter), **resume** (continue the in-flight rebase), **retry** (abort it and restart fold from preflight), verify the set, or exit. It re-appears after every unsuccessful resolution rather than refusing once, and carries the set's **Verified-at SHA** badge so the human can see whether the work is still cleared. Unreachable without a TTY — an unattended resolver moving trunk is exactly what fold refuses to be.
+The attended, TTY-only choice pop presents when a **Fold** rebase stops on a conflict in the set's checkout: agent assistance (default, Enter), **resume** (continue the in-flight rebase), **retry** (abort it and restart fold from preflight), verify the set, **abandon** (abort the rebase, put the checkout back on its own branch and delete the fold's scratch branch, so the fold did not happen), or **exit**, which parks the rebase exactly as it stands for a later fold to resume. Abandon and exit are separate keys on purpose: walking away from a fold and putting it down for now are different intentions (ADR-0229). It re-appears after every unsuccessful resolution rather than refusing once, and carries the set's **Verified-at SHA** badge so the human can see whether the work is still cleared. Unreachable without a TTY — an unattended resolver moving trunk is exactly what fold refuses to be.
 _Avoid_: conflict menu, merge prompt, resolver
 
 **Unbind worktree**:

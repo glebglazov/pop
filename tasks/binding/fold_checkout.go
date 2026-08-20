@@ -154,10 +154,10 @@ func preflightFoldCheckout(td *tasks.Deps, cfg *config.Config, req foldCheckoutR
 
 	// A fold rebase left in progress makes the folding checkout dirty; re-entering
 	// Fold must route to the Fold conflict prompt instead of the dirty refusal.
-	parkedRebase := rebaseInProgress(td, path)
+	parked, parkedFoldFound := readParkedFold(td, path)
 	if dirty, err := worktreeIsDirty(td, path); err != nil {
 		return foldCheckoutPlan{}, fmt.Errorf("fold refused: check %s: %w", label, err)
-	} else if dirty && !parkedRebase {
+	} else if dirty && !parkedFoldFound {
 		return foldCheckoutPlan{}, fmt.Errorf("fold refused: %s is dirty (%s)", label, path)
 	}
 	if err := refuseDirtyTrunk(td, trunkPath); err != nil {
@@ -171,9 +171,9 @@ func preflightFoldCheckout(td *tasks.Deps, cfg *config.Config, req foldCheckoutR
 		return foldCheckoutPlan{}, err
 	}
 
-	branch := strings.TrimSpace(req.branch)
-	if branch == "" {
-		branch = CurrentBranch(td, path)
+	branch, err := resolveFoldBranch(td, path, req.branch, parked)
+	if err != nil {
+		return foldCheckoutPlan{}, err
 	}
 	if branch == "" {
 		return foldCheckoutPlan{}, fmt.Errorf("fold refused: %s %s is detached", label, path)
@@ -183,6 +183,31 @@ func preflightFoldCheckout(td *tasks.Deps, cfg *config.Config, req foldCheckoutR
 		return foldCheckoutPlan{}, fmt.Errorf("fold refused: Trunk worktree %s is detached", trunkPath)
 	}
 
+	plan := foldCheckoutPlan{
+		subject:     subject,
+		setID:       setID,
+		path:        path,
+		trunkPath:   trunkPath,
+		branch:      branch,
+		trunkBranch: trunkBranch,
+	}
+
+	// Finding a Fold scratch branch here is normal, not an error: it is how a fold
+	// that stopped tells the next one where it got to (ADR-0229).
+	scratch := foldScratchBranch(branch)
+	switch classifyFoldScratch(td, parkedFoldFound, plan, scratch) {
+	case foldScratchParked:
+		// The checks below describe a fold that has not started yet; this one has, and
+		// resumes through the conflict prompt.
+		return plan, nil
+	case foldScratchResidue:
+		if err := discardFoldScratchResidue(td, plan, scratch); err != nil {
+			return foldCheckoutPlan{}, err
+		}
+	case foldScratchAmbiguous:
+		return foldCheckoutPlan{}, refuseAmbiguousFoldScratch(scratch, branch)
+	}
+
 	// A branch trunk already reaches has nothing to land: the rebase would drop every
 	// commit as already-upstream and the fast-forward would be a no-op, so without
 	// this the fold would report success having changed nothing.
@@ -190,22 +215,13 @@ func preflightFoldCheckout(td *tasks.Deps, cfg *config.Config, req foldCheckoutR
 		return foldCheckoutPlan{}, fmt.Errorf("fold refused: %s is already contained in trunk (%s); nothing to fold", branch, trunkBranch)
 	}
 
-	return foldCheckoutPlan{
-		subject:     subject,
-		setID:       setID,
-		path:        path,
-		trunkPath:   trunkPath,
-		branch:      branch,
-		trunkBranch: trunkBranch,
-	}, nil
+	return plan, nil
 }
 
 // branchContainedInTrunk reports whether the trunk branch already reaches every
-// commit on branch. git answers with an exit status and the git seam surfaces only
-// an error, so anything but success reads as not contained — a genuine git problem
-// then surfaces at the rebase, which speaks about it better than a preflight probe
-// could.
+// commit on branch — a fold that would land nothing. A genuine git problem reads as
+// "not contained" and surfaces at the rebase, which speaks about it better than a
+// preflight probe could.
 func branchContainedInTrunk(td *tasks.Deps, trunkPath, branch, trunkBranch string) bool {
-	_, err := td.Git.CommandInDir(trunkPath, "merge-base", "--is-ancestor", branch, trunkBranch)
-	return err == nil
+	return refContains(td, trunkPath, trunkBranch, branch)
 }

@@ -97,7 +97,11 @@ func TestPromptFoldConflictActionMenuOptions(t *testing.T) {
 		"2. Resume fold",
 		"3. Retry fold from scratch",
 		"4. Verify set",
+		"5. Abandon fold",
 		"0. Exit",
+		// Abandon and exit are different intentions, so the menu says which is which.
+		"abort the rebase",
+		"leave the rebase parked",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("menu missing %q\n%s", want, got)
@@ -118,7 +122,7 @@ func TestPromptFoldConflictActionDefaultsToAgent(t *testing.T) {
 	}
 }
 
-func TestPromptFoldConflictActionSelectsResumeRetryVerify(t *testing.T) {
+func TestPromptFoldConflictActionSelectsResumeRetryVerifyAbandon(t *testing.T) {
 	cases := []struct {
 		in   string
 		want foldConflictAction
@@ -126,6 +130,7 @@ func TestPromptFoldConflictActionSelectsResumeRetryVerify(t *testing.T) {
 		{"2\n", foldConflictResume},
 		{"3\n", foldConflictRetry},
 		{"4\n", foldConflictVerify},
+		{"5\n", foldConflictAbandon},
 	}
 	for _, tc := range cases {
 		var out bytes.Buffer
