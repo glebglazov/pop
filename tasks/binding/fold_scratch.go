@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -67,7 +68,8 @@ func foldRebaseAndFastForward(td *tasks.Deps, cfg *config.Config, opts FoldOptio
 
 		trunkAfterRebase, err := revParseHEAD(td, ctx.trunkPath)
 		if err != nil {
-			return fmt.Errorf("fold refused: read trunk HEAD: %w", err)
+			return refuseAndAbandon(td, ctx, scratch,
+				fmt.Errorf("fold refused: read trunk HEAD: %w", err))
 		}
 		if trunkAfterRebase != trunkBefore {
 			if attempt+1 < maxAttempts {
@@ -82,23 +84,90 @@ func foldRebaseAndFastForward(td *tasks.Deps, cfg *config.Config, opts FoldOptio
 			return refuseAndAbandon(td, ctx, scratch, err)
 		}
 
+		foldedTip, err := revParseRef(td, ctx.setPath, scratch)
+		if err != nil {
+			return refuseAndAbandon(td, ctx, scratch,
+				fmt.Errorf("fold refused: read folded tip %s: %w", scratch, err))
+		}
 		if err := fastForwardTrunk(td, ctx.trunkPath, scratch); err != nil {
-			trunkNow, readErr := revParseHEAD(td, ctx.trunkPath)
-			if readErr != nil {
-				return fmt.Errorf("fold refused: read trunk HEAD: %w", readErr)
+			state, recoveryErr := classifyFailedFastForward(td, ctx, scratch, foldedTip, trunkBefore)
+			if recoveryErr != nil {
+				return fmt.Errorf("fold stopped after git could not report whether the failed fast-forward landed; the fold scratch branch %s is preserved so trunk is not unwound — retry when git can read the repository: %w", scratch, recoveryErr)
 			}
-			if trunkNow != trunkBefore {
+			switch state {
+			case failedFastForwardLanded:
+				return landFoldedBranch(td, ctx, scratch)
+			case failedFastForwardTrunkMoved:
 				if attempt+1 < maxAttempts {
 					continue
 				}
 				return refuseAndAbandon(td, ctx, scratch, errTrunkMovedDuringFold)
+			case failedFastForwardNotLanded:
+				return refuseAndAbandon(td, ctx, scratch,
+					fmt.Errorf("fold refused: could not fast-forward trunk onto %s: %w", ctx.setBranch, err))
 			}
-			return refuseAndAbandon(td, ctx, scratch,
-				fmt.Errorf("fold refused: could not fast-forward trunk onto %s: %w", ctx.setBranch, err))
 		}
 		return landFoldedBranch(td, ctx, scratch)
 	}
 	return errTrunkMovedDuringFold
+}
+
+type failedFastForwardState int
+
+const (
+	failedFastForwardNotLanded failedFastForwardState = iota
+	failedFastForwardLanded
+	failedFastForwardTrunkMoved
+)
+
+// classifyFailedFastForward locates a failed merge command on Fold's irreversible
+// boundary. Git can update trunk and then report a hook failure, so the command's
+// error is not evidence that the fold stayed before the boundary. The refs decide:
+// an unchanged trunk did not land, while a changed trunk that reaches the folded
+// tip did. A different changed trunk is the existing concurrent-move case.
+func classifyFailedFastForward(td *tasks.Deps, ctx foldRebaseContext, scratch, foldedTip, trunkBefore string) (failedFastForwardState, error) {
+	var lastErr error
+	for attempt := 0; attempt < foldPostLandingAttempts; attempt++ {
+		if attempt > 0 {
+			time.Sleep(foldPostLandingRetryDelay)
+		}
+		trunkNow, err := revParseHEAD(td, ctx.trunkPath)
+		if err != nil {
+			lastErr = fmt.Errorf("read trunk HEAD: %w", err)
+			continue
+		}
+		if trunkNow == trunkBefore {
+			return failedFastForwardNotLanded, nil
+		}
+		if trunkNow == foldedTip {
+			return failedFastForwardLanded, nil
+		}
+		contains, err := refContainsKnown(td, ctx.trunkPath, ctx.trunkBranch, scratch)
+		if err != nil {
+			lastErr = fmt.Errorf("check whether trunk contains %s: %w", scratch, err)
+			continue
+		}
+		if contains {
+			return failedFastForwardLanded, nil
+		}
+		return failedFastForwardTrunkMoved, nil
+	}
+	return failedFastForwardNotLanded, lastErr
+}
+
+// refContainsKnown is refContains with an error-bearing third state. Git uses exit
+// status 1 for the ordinary "not an ancestor" answer; every other failure means
+// Fold cannot safely choose a side of the landing boundary.
+func refContainsKnown(td *tasks.Deps, path, container, ref string) (bool, error) {
+	_, err := td.Git.CommandInDir(path, "merge-base", "--is-ancestor", ref, container)
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, err
 }
 
 var errTrunkMovedDuringFold = fmt.Errorf("fold refused: Trunk worktree moved during fold; redo once already attempted — resolve manually and retry")

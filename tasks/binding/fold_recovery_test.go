@@ -313,6 +313,106 @@ func TestFoldPostLandingFailureRetriesThenReportsWithTrunkIntact(t *testing.T) {
 	}
 }
 
+// A failure while reading trunk after the scratch rebase is still before Fold's
+// irreversible boundary. The checkout and scratch ref must therefore roll back.
+func TestFoldTrunkReadFailureAfterRebaseRollsBackBeforeLanding(t *testing.T) {
+	t.Parallel()
+	repo := initAdoptRepo(t)
+	td := lifecycleTestDeps(t)
+	wt := addLinkedWorktree(t, repo, "human-work")
+	writeFileCommit(t, wt, "feature.txt", "branch work\n", "branch work")
+	writeFileCommit(t, repo, "trunk.txt", "trunk work\n", "trunk work")
+	branchTip := refAt(t, wt, "human-work")
+	trunkTip := refAt(t, repo, "HEAD")
+	scratch := foldScratchBranch("human-work")
+
+	inner := td.Git
+	var rebaseFinished atomic.Bool
+	var readFailed atomic.Bool
+	td.Git = &interceptGit{
+		inner: inner,
+		onCommandInDir: func(dir string, args ...string) (string, error) {
+			if len(args) >= 1 && args[0] == "rebase" {
+				out, err := inner.CommandInDir(dir, args...)
+				if err == nil {
+					rebaseFinished.Store(true)
+				}
+				return out, err
+			}
+			if len(args) == 2 && args[0] == "rev-parse" && args[1] == "HEAD" && rebaseFinished.Load() && readFailed.CompareAndSwap(false, true) {
+				return "", fmt.Errorf("simulated trunk read failure")
+			}
+			return inner.CommandInDir(dir, args...)
+		},
+	}
+
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+	if _, err := FoldCheckout(td, cfg, wt, FoldOptions{In: tasks.NonInteractiveReader{}}, io.Discard); err == nil || !strings.Contains(err.Error(), "read trunk HEAD") {
+		t.Fatalf("err = %v, want the trunk read refusal", err)
+	}
+	if got := currentBranchAt(t, wt); got != "human-work" {
+		t.Fatalf("checkout branch = %q, want human-work", got)
+	}
+	if branchExists(t, repo, scratch) {
+		t.Fatalf("pre-landing failure left scratch branch %s", scratch)
+	}
+	if got := refAt(t, wt, "human-work"); got != branchTip {
+		t.Fatalf("human-work moved: %s -> %s", branchTip, got)
+	}
+	if got := refAt(t, repo, "HEAD"); got != trunkTip {
+		t.Fatalf("trunk moved: %s -> %s", trunkTip, got)
+	}
+}
+
+// Git can move trunk and then report failure, for example from a post-merge hook.
+// Fold must read the refs, enter post-landing recovery, and complete the local tail.
+func TestFoldFailedFastForwardThatLandedConverges(t *testing.T) {
+	t.Parallel()
+	repo := initAdoptRepo(t)
+	td := lifecycleTestDeps(t)
+	wt := addLinkedWorktree(t, repo, "human-work")
+	writeFileCommit(t, wt, "feature.txt", "branch work\n", "branch work")
+	writeFileCommit(t, repo, "trunk.txt", "trunk work\n", "trunk work")
+	scratch := foldScratchBranch("human-work")
+
+	inner := td.Git
+	var fastForwardFailed atomic.Bool
+	var readFailed atomic.Bool
+	td.Git = &interceptGit{
+		inner: inner,
+		onCommandInDir: func(dir string, args ...string) (string, error) {
+			if len(args) >= 3 && args[0] == "merge" && args[1] == "--ff-only" && args[2] == scratch {
+				if _, err := inner.CommandInDir(dir, args...); err != nil {
+					return "", err
+				}
+				fastForwardFailed.Store(true)
+				return "", fmt.Errorf("simulated failure after trunk moved")
+			}
+			if len(args) == 2 && args[0] == "rev-parse" && args[1] == "HEAD" && fastForwardFailed.Load() && readFailed.CompareAndSwap(false, true) {
+				return "", fmt.Errorf("simulated first recovery read failure")
+			}
+			return inner.CommandInDir(dir, args...)
+		},
+	}
+
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+	if _, err := FoldCheckout(td, cfg, wt, FoldOptions{In: tasks.NonInteractiveReader{}}, io.Discard); err != nil {
+		t.Fatalf("fold after failed fast-forward that landed: %v", err)
+	}
+	if !readFailed.Load() {
+		t.Fatal("test did not exercise the failed recovery read")
+	}
+	if got := refAt(t, wt, "human-work"); got != refAt(t, repo, "HEAD") {
+		t.Fatalf("human-work = %s, want landed trunk tip %s", got, refAt(t, repo, "HEAD"))
+	}
+	if got := currentBranchAt(t, wt); got != "human-work" {
+		t.Fatalf("checkout branch = %q, want human-work", got)
+	}
+	if branchExists(t, repo, scratch) {
+		t.Fatalf("converged fold left scratch branch %s", scratch)
+	}
+}
+
 // Once the real branch has moved, a checkout or scratch-delete failure is past
 // Fold's irreversible boundary. A later Task-set Fold must recognize that landing,
 // finish the local cleanup, and continue through binding release and teardown.
