@@ -7,8 +7,9 @@ import (
 	"strings"
 )
 
-// The Convention overlay is the top rank of the stack: the human's own prose,
-// which survives whatever a repository says (ADR-0211). This file is its write
+// The Convention overlay is the layer that appends: the human's own prose, which
+// rides along with whichever rank answered rather than displacing one, so it
+// survives whatever a repository says (ADR-0211, ADR-0223 decision 3). This file is its write
 // side, and it exists because ADR-0212 decision 2 names it what an override *is*
 // for a convention — prose laid over the composed stack rather than a layer
 // displacing another — so the surface that overrides a config key overrides a
@@ -16,7 +17,9 @@ import (
 //
 // It is global, not per repository: a constraint the human states holds in every
 // repository, which is why it is derived from the home directory alone and can
-// be written from outside a checkout.
+// be written from outside a checkout. A constraint meant for one project is
+// stated as a whole Project convention instead, a second appending rank being
+// the composition ADR-0223 removed.
 
 // overlayPathIn is the overlay's file under a documents directory. The stack
 // derives it from roots it already holds and the write side derives it from the
@@ -50,14 +53,12 @@ func Overlay(d *Deps, kind Kind) (Layer, error) {
 }
 
 // SetOverlay writes body as the Convention overlay for kind, replacing whatever
-// was there. It carries no frontmatter: provenance is what pop records about a
-// convention *pop* derived, and this layer is the human's own statement, whose
-// origin is not in question.
+// was there.
 func SetOverlay(d *Deps, kind Kind, body string) error {
 	body = strings.TrimSpace(body)
 	// A file holding only whitespace reads as an absent layer, so writing one
 	// would leave the human believing they had stated something pop will never
-	// print — the same refusal Convention memory makes.
+	// print — the same refusal every writable rank makes.
 	if body == "" {
 		return ErrEmptyConvention
 	}

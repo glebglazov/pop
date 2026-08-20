@@ -111,26 +111,25 @@ func (s Stack) overlayNote() string {
 	return ""
 }
 
-// RenderSet confirms a write of the Convention memory layer: which file holds
-// it now, the provenance stored beside it, and the reminder that memory is the
-// last rank consulted — a writer who thinks it is the answer would never look
-// at the document either the human or the team may have written above it.
-func RenderSet(w io.Writer, kind Kind, path, derivedFrom, derivedAt string, replaced bool) error {
+// RenderSet confirms a write of the human's document for this project: which
+// file holds it now, and the reminder that this rank outranks everything else a
+// reader could be following here — a writer who took it for a note to self would
+// not expect it to stand down their own global document and the team's committed
+// one.
+func RenderSet(w io.Writer, kind Kind, path string, replaced bool) error {
 	verb := "WROTE"
 	if replaced {
 		verb = "REPLACED"
 	}
-	fmt.Fprintf(w, "%s pop memory for %s\n\n", verb, kind)
+	fmt.Fprintf(w, "%s your %s convention for this project\n\n", verb, kind)
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(tw, "path\t%s\n", path)
-	fmt.Fprintf(tw, "derived from\t%s\n", derivedFrom)
-	fmt.Fprintf(tw, "derived at\t%s\n", derivedAt)
 	if err := tw.Flush(); err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "\nThis is the pop memory rank — pop's stand-in for a written answer, and the\n"+
-		"last one consulted. A ~/.agents/docs/%[1]s.md or a committed docs/agents/%[1]s.md\n"+
-		"answers instead of it. Run `pop conventions get %[1]s` for what is in force.\n", kind)
+	fmt.Fprintf(w, "\nThis is the first rank consulted, so it answers %[1]s here whatever\n"+
+		"~/.agents/docs/%[1]s.md or a committed docs/agents/%[1]s.md says. Your overlay\n"+
+		"is still appended to it. Run `pop conventions get %[1]s` for what is in force.\n", kind)
 	return nil
 }
 
@@ -140,9 +139,9 @@ func RenderSet(w io.Writer, kind Kind, path, derivedFrom, derivedAt string, repl
 // `get` uses, so the two surfaces cannot disagree about what is in effect.
 func RenderUnset(w io.Writer, kind Kind, path string, removed bool, remaining Stack) error {
 	if removed {
-		fmt.Fprintf(w, "REMOVED pop memory for %s\n%s\n\n", kind, path)
+		fmt.Fprintf(w, "REMOVED your %s convention for this project\n%s\n\n", kind, path)
 	} else {
-		fmt.Fprintf(w, "NO pop memory for %s — nothing to remove.\n%s\n\n", kind, path)
+		fmt.Fprintf(w, "NO %s convention of yours for this project — nothing to remove.\n%s\n\n", kind, path)
 	}
 	fmt.Fprintf(w, "%s\n\n", nowInForce(remaining))
 	return RenderStack(w, remaining)
@@ -164,36 +163,14 @@ func nowInForce(s Stack) string {
 }
 
 // Provenance is the ready-made one-line disclosure a reading agent surfaces:
-// which rank answered, whether the overlay rides on it, and — when pop's own
-// layer is the answer — what pop derived it from. Pop emits it rather than
-// leaving each skill to phrase it, so the "which source am I using" line cannot
-// drift between skills the way the derivation itself once did (ADR-0211).
+// which rank answered, and whether the overlay rides on it. Pop emits it rather
+// than leaving each skill to phrase it, so the "which source am I using" line
+// cannot drift between the skills that ask (ADR-0211).
 func (s Stack) Provenance() string {
 	answer := s.Answer()
 	line := fmt.Sprintf("Provenance: %s resolved to %s (%s).", s.Kind, answer.Origin, answer.Path)
 	if overlay, ok := s.Overlay(); ok {
 		line += fmt.Sprintf(" Your overlay is appended (%s).", overlay.Path)
 	}
-	switch answer.Origin {
-	// Only an answering memory is disclosed: a memory the documents stood down
-	// is not in force, and quoting its derivation would describe prose nobody is
-	// being handed.
-	case OriginMemory:
-		line += " " + memoryDerivation(answer)
-	}
 	return line
-}
-
-// memoryDerivation phrases Convention memory's frontmatter as the clause the
-// provenance line carries. Memory written without frontmatter still gets a
-// clause: a pop-written layer whose origin is unrecorded is itself worth
-// disclosing.
-func memoryDerivation(mem Layer) string {
-	switch {
-	case mem.DerivedFrom != "" && mem.DerivedAt != "":
-		return fmt.Sprintf("Pop memory was derived from %s on %s.", mem.DerivedFrom, mem.DerivedAt)
-	case mem.DerivedFrom != "":
-		return fmt.Sprintf("Pop memory was derived from %s.", mem.DerivedFrom)
-	}
-	return "Pop memory records no derivation."
 }

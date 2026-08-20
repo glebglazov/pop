@@ -163,10 +163,10 @@ pop conventions get commits
 ```
 
 Do not derive the grammar yourself. The command resolves this repository's
-answer — your own `~/.agents/docs/commits.md`, else the repository's committed
-`docs/agents/commits.md`, else what pop remembered, else pop's own shipped
-answer — and prints it with the rank it came from, plus your overlay where you
-have written one. It always exits 0 and always prints rules to follow, so take
+answer — your own `~/.agents/docs/projects/<project>/commits.md`, else your own
+`~/.agents/docs/commits.md`, else the repository's committed
+`docs/agents/commits.md`, else pop's own shipped answer — and prints it with the
+rank it came from, plus your overlay where you have written one. It always exits 0 and always prints rules to follow, so take
 its output as resolved rather than weighing ranks yourself.
 
 If what resolves is that the repository has **no discernible** commit convention,

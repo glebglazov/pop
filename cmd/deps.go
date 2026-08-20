@@ -264,8 +264,9 @@ func (d *Deps) historyDeps() *history.Deps {
 
 // conventionsDeps resolves the Repo convention seam for a verb entrypoint. Like
 // history, it borrows the cmd layer's tasks deps rather than building its own:
-// the Convention memory layer is filed under Repository identity, so it has to
-// resolve through the same data dir the rest of the cmd layer routes to.
+// the project rank falls back to Repository identity where a repository has no
+// remote, so it has to resolve through the same data dir the rest of the cmd
+// layer routes to.
 func (d *Deps) conventionsDeps() *conventions.Deps {
 	cd := conventions.DefaultDeps()
 	if d != nil && d.FS != nil {

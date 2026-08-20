@@ -20,13 +20,13 @@ func TestStackProse(t *testing.T) {
 	}
 
 	spoken := Stack{Kind: KindCodeReview, Layers: []Layer{
-		{Origin: OriginUserDefaults, Path: "/home/docs/code-review.md", Present: true, Body: "prefer small functions"},
+		{Origin: OriginProject, Path: "/home/docs/projects/github.com-tripledot-pop/code-review.md", Present: true, Body: "prefer small functions"},
 		{Origin: OriginRepository, Path: "/repo/docs/agents/code-review.md", Present: true, Body: "table-driven tests only"},
 		{Origin: OriginOverlay, Path: "/home/docs/code-review.overlay.md", Present: true, Body: "never approve a TODO"},
 	}}
 	got := StackProse(spoken)
 	for _, want := range []string{
-		"ANSWER: USER DEFAULTS",
+		"ANSWER: USER PROJECT",
 		"prefer small functions",
 		"APPENDED: USER OVERLAY",
 		"never approve a TODO",

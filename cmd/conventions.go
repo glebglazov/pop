@@ -36,22 +36,22 @@ reader to reconcile.
 
 The answer is the first of these that holds something:
 
-  user defaults  ~/.agents/docs/<kind>.md               yours, every repository
-  repository     docs/agents/<kind>.md                  the team's, in version control
-  pop memory     <task storage>/conventions/<kind>.md   pop-written, this repo
-  shipped        built into pop                         pop's own, displaced by any above
+  user project   ~/.agents/docs/projects/<slug>/<kind>.md   yours, this project
+  user global    ~/.agents/docs/<kind>.md                   yours, every repository
+  repository     docs/agents/<kind>.md                      the team's, in version control
+  shipped        built into pop                             pop's own, displaced by any above
 
-Your own document outranks the team's: pop resolves conventions on your machine,
-on your behalf. Pop memory is pop's stand-in for a written answer, so it stands
-down as soon as either document exists. The shipped rank is last and is always
-there, so a kind nobody has answered still hands you rules to follow — generic
-ones, because pop cannot know your project's taste, and displaced whole the
-moment anybody writes their own.
+Your own documents outrank the team's — pop resolves conventions on your
+machine, on your behalf — and the more specific of the two outranks the general.
+The shipped rank is last and is always there, so a kind nobody has answered
+still hands you rules to follow: generic ones, because pop cannot know your
+project's taste, and displaced whole the moment anybody writes their own.
 
   user overlay   ~/.agents/docs/<kind>.overlay.md  appended to whichever answered
 
-The memory layer is filed under the repository, not the directory, so every
-worktree of a repository reads one file.
+Your project document is keyed by the repository's git remote, so every clone of
+one project reads one file; a repository with no remote is keyed by pop's own
+identity for it instead.
 
 Output ends with a one-line provenance summary naming what answered, ready to be
 surfaced verbatim as the "which source am I using" disclosure.
@@ -88,30 +88,23 @@ outside a repository as well as inside one.`,
 
 var conventionsSetCmd = &cobra.Command{
 	Use:   "set <kind>",
-	Short: "Remember a convention for this repository",
-	Long: `Write the pop memory layer of a convention stack for this repository.
+	Short: "State your own convention for this project",
+	Long: `Write your own document for one convention kind in this project.
 
-The body is read from stdin, because the writer is an agent that has just worked
-out the convention, not a human at a terminal. ` + "`--file`" + ` reads the same body from
-a path instead. There is no editor mode.
+The body is read from stdin. ` + "`--file`" + ` reads the same body from a path instead.
+There is no editor mode.
 
-  pop conventions default commits           # what pop answers with today
-  ... | pop conventions set commits --derived-from "the last 20 commits"
+  pop conventions default commits      # what pop answers with today
+  ... | pop conventions set commits
 
-` + "`--derived-from`" + ` is required: it names the evidence the convention was derived
-from, is stored in the file's frontmatter with the time of the write, and is
-what the provenance line of a later ` + "`get`" + ` quotes. A remembered convention whose
-origin nobody can state is worse than no memory at all.
+This is the first rank consulted, so it answers the kind here whatever your
+global ` + "`~/.agents/docs/<kind>.md`" + ` or the team's committed
+` + "`docs/agents/<kind>.md`" + ` says. It is what to reach for when you mean to override
+everything for one project — trying a convention out, or contradicting a team's
+grammar locally.
 
-The file is filed under the repository, not the checkout, so a convention
-written in the trunk is the same convention in every worktree of it. Writing
-again replaces what is there.
-
-This is the last rank consulted: pop's stand-in for a written answer, which
-stands down the moment either document exists. It is where a convention pop
-derived from evidence belongs; a convention a human states in session belongs in
-the repository's ` + "`docs/agents/<kind>.md`" + `, which the team owns, or in
-` + "`~/.agents/docs/<kind>.md`" + `, which is yours and outranks both.`,
+It lives outside the repository, keyed by the git remote, so it needs no commit
+and every clone of the project reads it. Writing again replaces what is there.`,
 	Args:              cobra.ExactArgs(1),
 	RunE:              runConventionsSet,
 	ValidArgsFunction: completeConventionKind,
@@ -119,25 +112,23 @@ the repository's ` + "`docs/agents/<kind>.md`" + `, which the team owns, or in
 
 var conventionsUnsetCmd = &cobra.Command{
 	Use:   "unset <kind>",
-	Short: "Forget the convention pop remembered for this repository",
-	Long: `Remove the pop memory layer of a convention stack for this repository.
+	Short: "Remove your own convention for this project",
+	Long: `Remove your own document for one convention kind in this project.
 
-Only pop's own layer goes: the user's documents and the repository's committed
-document are untouched, so the kind usually keeps answering — and where memory
-was the answer, removing it promotes the next rank. The output names what is in
-force afterwards and prints it exactly as ` + "`get`" + ` would, so the verb cannot be
+Only that one file goes: your global document and the repository's committed one
+are untouched, so the kind usually keeps answering — and since this was the top
+rank, removing it promotes whichever rank sat under it. The output names what is
+in force afterwards and prints it exactly as ` + "`get`" + ` would, so the verb cannot be
 read as silencing the kind.
 
-A kind pop holds no memory for is reported as such and is not a failure.`,
+A kind you have written nothing for in this project is reported as such and is
+not a failure.`,
 	Args:              cobra.ExactArgs(1),
 	RunE:              runConventionsUnset,
 	ValidArgsFunction: completeConventionKind,
 }
 
-var (
-	conventionsSetFile        string
-	conventionsSetDerivedFrom string
-)
+var conventionsSetFile string
 
 func init() {
 	rootCmd.AddCommand(conventionsCmd)
@@ -148,11 +139,6 @@ func init() {
 
 	conventionsSetCmd.Flags().StringVar(&conventionsSetFile, "file", "",
 		"read the convention body from this file instead of stdin")
-	conventionsSetCmd.Flags().StringVar(&conventionsSetDerivedFrom, "derived-from", "",
-		"what the convention was derived from, recorded as its provenance")
-	if err := conventionsSetCmd.MarkFlagRequired("derived-from"); err != nil {
-		panic(err)
-	}
 }
 
 func completeConventionKind(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
@@ -196,8 +182,7 @@ func runConventionsSet(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("conventions set: %w", err)
 	}
-	return runConventionsSetWith(cmdLayerDeps().conventionsDeps(), cmd.OutOrStdout(), dir,
-		args[0], body, conventionsSetDerivedFrom)
+	return runConventionsSetWith(cmdLayerDeps().conventionsDeps(), cmd.OutOrStdout(), dir, args[0], body)
 }
 
 // readConventionBody resolves the two ways in, which are one path: --file is an
@@ -220,12 +205,12 @@ func readConventionBody(stdin io.Reader, file string) (string, error) {
 
 // runConventionsSetWith is the seam tests drive: the refusal, the write and
 // its report without a process or a terminal.
-func runConventionsSetWith(cd *conventions.Deps, w io.Writer, dir, name, body, derivedFrom string) error {
+func runConventionsSetWith(cd *conventions.Deps, w io.Writer, dir, name, body string) error {
 	kind, err := conventions.ParseKind(name)
 	if err != nil {
 		return err
 	}
-	return conventions.Set(cd, w, kind, dir, body, derivedFrom)
+	return conventions.Set(cd, w, kind, dir, body)
 }
 
 func runConventionsUnset(cmd *cobra.Command, args []string) error {

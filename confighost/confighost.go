@@ -79,9 +79,9 @@ func NewWriter(deps *config.Deps, configPath, checkout string) Writer {
 
 // WithConventions points the convention rows at a caller's own seam. A host that
 // already resolves conventions for its other verbs passes that one, so the
-// dashboard reads the Convention memory layer out of the same data dir the rest
-// of the program routes to; a host that has no seam of its own keeps the one
-// derived from the config deps.
+// dashboard resolves a convention against the same repository the rest of the
+// program routes to; a host that has no seam of its own keeps the one derived
+// from the config deps.
 func (w Writer) WithConventions(cd *conventions.Deps) Writer {
 	if cd != nil {
 		w.conventions = cd

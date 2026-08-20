@@ -208,9 +208,8 @@ type repoScopeSource struct {
 // is and so still beats every source below it.
 //
 // Every rung is a declaration: the one gap-filler config had was the runtime
-// record, and it is gone (ADR-0212 decision 5). Convention memory, the gap-filler
-// pop still holds, is no rung of this ladder — a convention resolves through its
-// own composed stack (ADR-0211).
+// record, and it is gone (ADR-0212 decision 5). A convention is no rung of this
+// ladder either — it resolves through its own stack of ranks (ADR-0211).
 //
 // Only keys that have a global home carry a value on the global rung;
 // preferred_workbench has none, so for that key the ladder simply starts at the

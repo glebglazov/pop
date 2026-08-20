@@ -10,13 +10,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/glebglazov/pop/conventions"
+	"github.com/glebglazov/pop/tasks"
 )
 
 // conventionFixture is one repository with an isolated home and data dir, so a
-// test can author any subset of the four layers and read the stack back.
+// test can author any subset of the written ranks and read the stack back.
 type conventionFixture struct {
 	root     string
 	repo     string
@@ -52,7 +52,7 @@ func (f *conventionFixture) write(t *testing.T, path, body string) string {
 	return path
 }
 
-func (f *conventionFixture) userDefaults(t *testing.T, kind, body string) string {
+func (f *conventionFixture) globalDoc(t *testing.T, kind, body string) string {
 	t.Helper()
 	return f.write(t, filepath.Join(f.dataHome, "home", ".agents", "docs", kind+".md"), body)
 }
@@ -67,15 +67,32 @@ func (f *conventionFixture) repoDoc(t *testing.T, kind, body string) string {
 	return f.write(t, filepath.Join(f.repo, "docs", "agents", kind+".md"), body)
 }
 
-// memory writes the layer nothing in this slice writes for real, straight to
-// the path Repository identity resolves to.
-func (f *conventionFixture) memory(t *testing.T, dir, kind, body string) string {
+func (f *conventionFixture) projectPath(t *testing.T, dir, kind string) string {
 	t.Helper()
-	path, err := conventions.MemoryPath(f.deps.conventionsDeps(), conventions.Kind(kind), dir)
+	path, err := conventions.ProjectPath(f.deps.conventionsDeps(), conventions.Kind(kind), dir)
 	if err != nil {
-		t.Fatalf("resolve memory path: %v", err)
+		t.Fatalf("resolve project path: %v", err)
 	}
-	return f.write(t, path, body)
+	return path
+}
+
+// projectDoc writes the human's document for this project straight to the path
+// the rank resolves to, for the tests that read rather than write.
+func (f *conventionFixture) projectDoc(t *testing.T, dir, kind, body string) string {
+	t.Helper()
+	return f.write(t, f.projectPath(t, dir, kind), body)
+}
+
+// retiredMemoryPath is where pop used to write a convention for itself: one file
+// per kind under the repository's Task storage directory. Nothing derives it any
+// more, so a test that asserts it is never read has to spell it out.
+func (f *conventionFixture) retiredMemoryPath(t *testing.T, kind string) string {
+	t.Helper()
+	id, err := tasks.ResolveRepositoryIdentity(f.deps.tasksDeps(), f.repo)
+	if err != nil {
+		t.Fatalf("resolve repository identity: %v", err)
+	}
+	return filepath.Join(id.StorageDir, "conventions", kind+".md")
 }
 
 func (f *conventionFixture) get(t *testing.T, dir string, args ...string) (string, error) {
@@ -91,12 +108,8 @@ func (f *conventionFixture) get(t *testing.T, dir string, args ...string) (strin
 func TestConventionsGetResolvesToOneAnswerPlusTheOverlay(t *testing.T) {
 	f := newConventionFixture(t)
 
-	defaultsPath := f.userDefaults(t, "commits", "MY-DEFAULT: conventional commits, lowercase subject.")
-	f.memory(t, f.repo, "commits", `---
-derived_from: a sample of 40 commits
-derived_at: 2026-08-01
----
-POP-MEMORY: scopes are the package name.`)
+	projectPath := f.projectDoc(t, f.repo, "commits", "MY-PROJECT-DOC: scopes are the package name.")
+	globalPath := f.globalDoc(t, "commits", "MY-GLOBAL-DOC: conventional commits, lowercase subject.")
 	repoPath := f.repoDoc(t, "commits", "TEAM-DOC: the type set is feat, fix, chore, docs.")
 	overlayPath := f.overlay(t, "commits", "MY-OVERLAY: never mention the agent in the body.")
 
@@ -105,12 +118,13 @@ POP-MEMORY: scopes are the package name.`)
 		t.Fatalf("get commits: %v\n%s", err, out)
 	}
 
-	// The human's own document outranks the team's, and both stand pop's memory
-	// down: only one of the three is anywhere in the output.
-	if !strings.Contains(out, "MY-DEFAULT") {
-		t.Fatalf("the human's document did not answer:\n%s", out)
+	// The human's document for this project outranks their document for every
+	// repository, and both outrank the team's: only one of the three is anywhere
+	// in the output.
+	if !strings.Contains(out, "MY-PROJECT-DOC") {
+		t.Fatalf("the human's project document did not answer:\n%s", out)
 	}
-	for _, stoodDown := range []string{"TEAM-DOC", "POP-MEMORY", repoPath} {
+	for _, stoodDown := range []string{"MY-GLOBAL-DOC", "TEAM-DOC", globalPath, repoPath} {
 		if strings.Contains(out, stoodDown) {
 			t.Errorf("a rank the answer stood down is still rendered (%q):\n%s", stoodDown, out)
 		}
@@ -119,14 +133,14 @@ POP-MEMORY: scopes are the package name.`)
 	if !strings.Contains(out, "MY-OVERLAY") {
 		t.Errorf("the overlay was not appended to the answer:\n%s", out)
 	}
-	if strings.Index(out, "MY-DEFAULT") > strings.Index(out, "MY-OVERLAY") {
+	if strings.Index(out, "MY-PROJECT-DOC") > strings.Index(out, "MY-OVERLAY") {
 		t.Errorf("the overlay is printed before the answer it rides on:\n%s", out)
 	}
 
 	// Each block is labelled with both its role and the path it came from, which
 	// is what lets a reader go and edit the right one.
 	for label, path := range map[string]string{
-		"ANSWER: USER DEFAULTS":  defaultsPath,
+		"ANSWER: USER PROJECT":   projectPath,
 		"APPENDED: USER OVERLAY": overlayPath,
 	} {
 		if !strings.Contains(out, label) {
@@ -149,7 +163,7 @@ POP-MEMORY: scopes are the package name.`)
 	if !strings.HasPrefix(last, "Provenance:") {
 		t.Fatalf("output does not end with the provenance summary, got %q", last)
 	}
-	if !strings.Contains(last, "user defaults") || !strings.Contains(last, defaultsPath) {
+	if !strings.Contains(last, "user project") || !strings.Contains(last, projectPath) {
 		t.Errorf("provenance does not name what answered: %q", last)
 	}
 	if !strings.Contains(last, overlayPath) {
@@ -157,12 +171,57 @@ POP-MEMORY: scopes are the package name.`)
 	}
 }
 
-// The memory layer answers only when neither document does, and its frontmatter
-// is pop's bookkeeping rather than part of the convention: it comes back out as
-// the provenance line's derivation clause.
-func TestConventionsGetFallsBackToMemory(t *testing.T) {
+// TestConventionsGetRanksTheHumansTwoDocuments walks the middle of the stack:
+// the global document answers where nothing more specific does, and the team's
+// document answers where the human has written nothing at all.
+func TestConventionsGetRanksTheHumansTwoDocuments(t *testing.T) {
 	f := newConventionFixture(t)
-	memoryPath := f.memory(t, f.repo, "commits", `---
+	repoPath := f.repoDoc(t, "commits", "TEAM-DOC: the type set is feat, fix, chore, docs.")
+
+	out, err := f.get(t, f.repo, "commits")
+	if err != nil {
+		t.Fatalf("get commits: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "TEAM-DOC") || !strings.Contains(out, repoPath) {
+		t.Fatalf("the team's document did not answer:\n%s", out)
+	}
+
+	globalPath := f.globalDoc(t, "commits", "MY-GLOBAL-DOC: conventional commits.")
+	out, err = f.get(t, f.repo, "commits")
+	if err != nil {
+		t.Fatalf("get commits: %v\n%s", err, out)
+	}
+	for _, want := range []string{"MY-GLOBAL-DOC", "ANSWER: USER GLOBAL", globalPath, "yours, every repository"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "TEAM-DOC") {
+		t.Errorf("the team's document did not stand down for the human's:\n%s", out)
+	}
+
+	projectPath := f.projectDoc(t, f.repo, "commits", "MY-PROJECT-DOC: scopes are the package name.")
+	out, err = f.get(t, f.repo, "commits")
+	if err != nil {
+		t.Fatalf("get commits: %v\n%s", err, out)
+	}
+	for _, want := range []string{"MY-PROJECT-DOC", "ANSWER: USER PROJECT", projectPath, "yours, this project"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "MY-GLOBAL-DOC") {
+		t.Errorf("the human's global document did not stand down for their project one:\n%s", out)
+	}
+}
+
+// TestConventionsGetNeverReadsTheRetiredMemoryRank: the rank pop wrote for
+// itself is gone, and a file left where it used to live changes nothing about
+// what resolves. Nothing deletes it, because a rank that stops being consulted
+// needs no migration (ADR-0226 decision 5).
+func TestConventionsGetNeverReadsTheRetiredMemoryRank(t *testing.T) {
+	f := newConventionFixture(t)
+	stale := f.write(t, f.retiredMemoryPath(t, "commits"), `---
 derived_from: a sample of 40 commits
 derived_at: 2026-08-01
 ---
@@ -172,51 +231,27 @@ POP-MEMORY: scopes are the package name.`)
 	if err != nil {
 		t.Fatalf("get commits: %v\n%s", err, out)
 	}
-	for _, want := range []string{"POP-MEMORY: scopes are the package name.", "ANSWER: POP MEMORY", memoryPath} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("output missing %q:\n%s", want, out)
+	if !strings.Contains(out, "ANSWER: SHIPPED") {
+		t.Fatalf("a stale memory file changed what resolves:\n%s", out)
+	}
+	for _, gone := range []string{"POP-MEMORY", "pop memory", "a sample of 40 commits", stale} {
+		if strings.Contains(out, gone) {
+			t.Errorf("the retired rank still reaches the reader (%q):\n%s", gone, out)
 		}
 	}
-	if strings.Contains(out, "derived_from:") {
-		t.Errorf("memory frontmatter leaked into the rendered body:\n%s", out)
-	}
-	if !strings.Contains(out, "a sample of 40 commits") {
-		t.Errorf("provenance does not disclose what pop memory was derived from:\n%s", out)
+	// The file is left alone: it is not pop's to delete.
+	if _, err := os.Stat(stale); err != nil {
+		t.Errorf("the file at the retired location was removed: %v", err)
 	}
 
-	// A committed document is enough to stand it down entirely.
-	f.repoDoc(t, "commits", "TEAM-DOC: the type set is feat, fix, chore, docs.")
+	// A written rank still answers with the stale file sitting there.
+	f.repoDoc(t, "commits", "TEAM-DOC: the type set is feat, fix, chore.")
 	out, err = f.get(t, f.repo, "commits")
 	if err != nil {
 		t.Fatalf("get commits: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "TEAM-DOC") {
-		t.Fatalf("the repository's document did not answer:\n%s", out)
-	}
-	for _, gone := range []string{"POP-MEMORY", "a sample of 40 commits"} {
-		if strings.Contains(out, gone) {
-			t.Errorf("pop memory did not stand down for a written answer (%q):\n%s", gone, out)
-		}
-	}
-}
-
-// TestConventionsGetWithOnlyUserDefaults is the common shape on a machine
-// where nothing repository-specific has been written yet.
-func TestConventionsGetWithOnlyUserDefaults(t *testing.T) {
-	f := newConventionFixture(t)
-	path := f.userDefaults(t, "commits", "MY-DEFAULT: conventional commits.")
-
-	out, err := f.get(t, f.repo, "commits")
-	if err != nil {
-		t.Fatalf("get commits: %v\n%s", err, out)
-	}
-	for _, want := range []string{"MY-DEFAULT: conventional commits.", "USER DEFAULTS", path} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("output missing %q:\n%s", want, out)
-		}
-	}
-	if !strings.Contains(out, "Provenance:") || !strings.Contains(out, "user defaults") {
-		t.Fatalf("provenance does not name the only layer as the answer:\n%s", out)
+	if !strings.Contains(out, "TEAM-DOC") || strings.Contains(out, "POP-MEMORY") {
+		t.Errorf("resolution with a stale memory file present is not the team's document:\n%s", out)
 	}
 }
 
@@ -309,7 +344,7 @@ func TestConventionsGetAllKinds(t *testing.T) {
 // has never heard of is refused before anything is looked up or printed.
 func TestConventionsGetRefusesUnknownKind(t *testing.T) {
 	f := newConventionFixture(t)
-	f.userDefaults(t, "commits", "MY-DEFAULT: conventional commits.")
+	f.globalDoc(t, "commits", "MY-GLOBAL-DOC: conventional commits.")
 
 	out, err := f.get(t, f.repo, "bogus")
 	if err == nil {
@@ -325,27 +360,65 @@ func TestConventionsGetRefusesUnknownKind(t *testing.T) {
 	}
 }
 
-// TestConventionsMemoryIsSharedAcrossWorktrees is why the memory layer
-// resolves through Repository identity rather than through the directory: a
-// convention pop wrote from the trunk is the same convention in a worktree.
-func TestConventionsMemoryIsSharedAcrossWorktrees(t *testing.T) {
+// TestConventionsProjectRankIsKeyedByTheRemote is why the top rank is not keyed
+// by Repository identity: the document is about the project, which outlives any
+// one clone, so two checkouts of one remote read one file — and a repository
+// nobody has published falls back to the identity-keyed location, there being
+// nothing else to name it by.
+func TestConventionsProjectRankIsKeyedByTheRemote(t *testing.T) {
+	f := newConventionFixture(t)
+	docs := filepath.Join(f.dataHome, "home", ".agents", "docs", "projects")
+
+	// With no remote: keyed by the same name pop's own storage for the
+	// repository carries.
+	id, err := tasks.ResolveRepositoryIdentity(f.deps.tasksDeps(), f.repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := f.projectPath(t, f.repo, "commits"),
+		filepath.Join(docs, filepath.Base(id.StorageDir), "commits.md"); got != want {
+		t.Errorf("with no remote, project path = %q, want the identity-keyed %q", got, want)
+	}
+
+	runGitCheckout(t, f.repo, "remote", "add", "origin", "git@github.com:tripledot/github_dashboard.git")
+	want := filepath.Join(docs, "github.com-tripledot-github_dashboard", "commits.md")
+	if got := f.projectPath(t, f.repo, "commits"); got != want {
+		t.Fatalf("project path = %q, want the remote-keyed %q", got, want)
+	}
+
+	// A second clone of the same remote, at another path on disk and so with
+	// another Repository identity, reads the same document.
+	clone := filepath.Join(f.root, "clone")
+	runGitCheckout(t, f.root, "clone", f.repo, clone)
+	runGitCheckout(t, clone, "remote", "set-url", "origin", "git@github.com:tripledot/github_dashboard.git")
+	f.projectDoc(t, f.repo, "commits", "MY-PROJECT-DOC: scopes are the package name.")
+	out, err := f.get(t, clone, "commits")
+	if err != nil {
+		t.Fatalf("get from the clone: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "MY-PROJECT-DOC") || !strings.Contains(out, want) {
+		t.Fatalf("a second clone of the project did not read the project document:\n%s", out)
+	}
+}
+
+// A worktree is the same project as its trunk however the rank is keyed, so a
+// document written for the project answers in both.
+func TestConventionsProjectRankIsSharedAcrossWorktrees(t *testing.T) {
 	f := newConventionFixture(t)
 	worktree := filepath.Join(f.root, "feature-wt")
 	runGitCheckout(t, f.repo, "worktree", "add", "-b", "feature", worktree)
 
-	memoryPath := f.memory(t, f.repo, "commits", "POP-MEMORY: scopes are the package name.")
-	if fromWorktree, err := conventions.MemoryPath(f.deps.conventionsDeps(), conventions.KindCommits, worktree); err != nil {
-		t.Fatalf("resolve memory path from worktree: %v", err)
-	} else if fromWorktree != memoryPath {
-		t.Fatalf("worktree memory path = %q, want the trunk's %q", fromWorktree, memoryPath)
+	path := f.projectDoc(t, f.repo, "commits", "MY-PROJECT-DOC: scopes are the package name.")
+	if fromWorktree := f.projectPath(t, worktree, "commits"); fromWorktree != path {
+		t.Fatalf("worktree project path = %q, want the trunk's %q", fromWorktree, path)
 	}
 
 	out, err := f.get(t, worktree, "commits")
 	if err != nil {
 		t.Fatalf("get from worktree: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "POP-MEMORY: scopes are the package name.") {
-		t.Fatalf("worktree did not read the repository's memory layer:\n%s", out)
+	if !strings.Contains(out, "MY-PROJECT-DOC: scopes are the package name.") {
+		t.Fatalf("worktree did not read the project's document:\n%s", out)
 	}
 }
 
@@ -419,10 +492,10 @@ func TestConventionsDefaultRefusesUnknownKind(t *testing.T) {
 	}
 }
 
-func (f *conventionFixture) set(t *testing.T, dir, kind, body, derivedFrom string) (string, error) {
+func (f *conventionFixture) set(t *testing.T, dir, kind, body string) (string, error) {
 	t.Helper()
 	var out bytes.Buffer
-	err := runConventionsSetWith(f.deps.conventionsDeps(), &out, dir, kind, body, derivedFrom)
+	err := runConventionsSetWith(f.deps.conventionsDeps(), &out, dir, kind, body)
 	return out.String(), err
 }
 
@@ -433,76 +506,50 @@ func (f *conventionFixture) unset(t *testing.T, dir, kind string) (string, error
 	return out.String(), err
 }
 
-func (f *conventionFixture) memoryPath(t *testing.T, dir, kind string) string {
-	t.Helper()
-	path, err := conventions.MemoryPath(f.deps.conventionsDeps(), conventions.Kind(kind), dir)
-	if err != nil {
-		t.Fatalf("resolve memory path: %v", err)
-	}
-	return path
-}
-
-// TestConventionsSetRemembersWhatGetReadsBack is the slice: what an agent
-// derived goes in at the memory rank, and comes back out of `get` as a layer
-// whose provenance is the one recorded at write time.
-func TestConventionsSetRemembersWhatGetReadsBack(t *testing.T) {
+// TestConventionsSetWritesWhatGetReadsBack is the round trip: what the human
+// stated for this project lands at the top rank, comes back out of `get` as the
+// answer, and stands the team's document down.
+func TestConventionsSetWritesWhatGetReadsBack(t *testing.T) {
 	f := newConventionFixture(t)
 	f.repoDoc(t, "commits", "TEAM-DOC: the type set is feat, fix, chore.")
 
-	out, err := f.set(t, f.repo, "commits", "POP-MEMORY: scopes are the package name.\n", "the last 20 commits")
+	out, err := f.set(t, f.repo, "commits", "MY-PROJECT-DOC: scopes are the package name.\n")
 	if err != nil {
 		t.Fatalf("set commits: %v\n%s", err, out)
 	}
-	path := f.memoryPath(t, f.repo, "commits")
+	path := f.projectPath(t, f.repo, "commits")
 	if !strings.Contains(out, path) {
 		t.Errorf("set does not report where the convention landed:\n%s", out)
 	}
 
-	// The frontmatter is the reason the provenance line cannot desync from the
-	// body: both are written by the same call, into the same file.
+	// The file holds the human's prose and none of pop's bookkeeping: every
+	// writable rank is their own statement (ADR-0226 decision 5).
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("read memory file: %v", err)
+		t.Fatalf("read project document: %v", err)
 	}
 	stored := string(raw)
-	if !strings.Contains(stored, "derived_from: the last 20 commits") {
-		t.Errorf("memory file records no derivation source:\n%s", stored)
+	if !strings.Contains(stored, "MY-PROJECT-DOC: scopes are the package name.") {
+		t.Errorf("the file does not hold the body:\n%s", stored)
 	}
-	if !strings.Contains(stored, "derived_at: "+time.Now().Format("2006-01-02")) {
-		t.Errorf("memory file records no write time:\n%s", stored)
-	}
-	if !strings.Contains(stored, "POP-MEMORY: scopes are the package name.") {
-		t.Errorf("memory file does not hold the body:\n%s", stored)
+	for _, gone := range []string{"---", "derived_from", "derived_at"} {
+		if strings.Contains(stored, gone) {
+			t.Errorf("the file carries pop's frontmatter (%q):\n%s", gone, stored)
+		}
 	}
 
-	// The team's committed document stands the fresh memory down: what pop just
-	// remembered is not what a reader is handed.
 	got, err := f.get(t, f.repo, "commits")
 	if err != nil {
 		t.Fatalf("get commits: %v\n%s", err, got)
 	}
-	if !strings.Contains(got, "TEAM-DOC") || strings.Contains(got, "POP-MEMORY") {
-		t.Errorf("the memory layer did not stand down for the repository's document:\n%s", got)
+	if !strings.Contains(got, "MY-PROJECT-DOC: scopes are the package name.") {
+		t.Fatalf("what was written is not what answers:\n%s", got)
 	}
-
-	// With no document to stand it down, it answers, frontmatter peeled off and
-	// re-emitted as the provenance the write recorded.
-	if err := os.Remove(filepath.Join(f.repo, "docs", "agents", "commits.md")); err != nil {
-		t.Fatal(err)
+	if strings.Contains(got, "TEAM-DOC") {
+		t.Errorf("the team's document was not stood down by the human's:\n%s", got)
 	}
-	got, err = f.get(t, f.repo, "commits")
-	if err != nil {
-		t.Fatalf("get commits: %v\n%s", err, got)
-	}
-	if !strings.Contains(got, "POP-MEMORY: scopes are the package name.") {
-		t.Errorf("the memory layer did not answer once nothing outranked it:\n%s", got)
-	}
-	if strings.Contains(got, "derived_from:") {
-		t.Errorf("frontmatter leaked into the rendered body:\n%s", got)
-	}
-	last := strings.Split(strings.TrimRight(got, "\n"), "\n")
-	if line := last[len(last)-1]; !strings.Contains(line, "the last 20 commits") {
-		t.Errorf("provenance does not quote the recorded derivation: %q", line)
+	if !strings.Contains(got, "ANSWER: USER PROJECT") {
+		t.Errorf("the written rank is not labelled as the human's project document:\n%s", got)
 	}
 }
 
@@ -511,13 +558,13 @@ func TestConventionsSetRemembersWhatGetReadsBack(t *testing.T) {
 func TestConventionsSetReadsStdinOrFile(t *testing.T) {
 	f := newConventionFixture(t)
 	setCmdLayerDeps(t, f.deps)
-	body := "POP-MEMORY: subjects are imperative.\n"
+	body := "MY-PROJECT-DOC: subjects are imperative.\n"
 
 	fromStdin, err := readConventionBody(strings.NewReader(body), "")
 	if err != nil {
 		t.Fatalf("read from stdin: %v", err)
 	}
-	file := f.write(t, filepath.Join(f.root, "derived.md"), body)
+	file := f.write(t, filepath.Join(f.root, "stated.md"), body)
 	fromFile, err := readConventionBody(strings.NewReader("WRONG: stdin must be ignored"), file)
 	if err != nil {
 		t.Fatalf("read from file: %v", err)
@@ -526,31 +573,33 @@ func TestConventionsSetReadsStdinOrFile(t *testing.T) {
 		t.Fatalf("stdin gave %q and --file gave %q, want both %q", fromStdin, fromFile, body)
 	}
 
-	if out, err := f.set(t, f.repo, "commits", fromFile, "a file the agent wrote"); err != nil {
+	if out, err := f.set(t, f.repo, "commits", fromFile); err != nil {
 		t.Fatalf("set from file body: %v\n%s", err, out)
 	}
 	got, err := f.get(t, f.repo, "commits")
 	if err != nil {
 		t.Fatalf("get commits: %v\n%s", err, got)
 	}
-	if !strings.Contains(got, "POP-MEMORY: subjects are imperative.") {
-		t.Fatalf("the file's body did not reach the memory layer:\n%s", got)
+	if !strings.Contains(got, "MY-PROJECT-DOC: subjects are imperative.") {
+		t.Fatalf("the file's body did not reach the project rank:\n%s", got)
 	}
 }
 
-// TestConventionsSetReplacesExistingMemory: pop holds one derivation per
-// kind, so a second write is a correction rather than a second opinion.
-func TestConventionsSetReplacesExistingMemory(t *testing.T) {
+// TestConventionsSetReplacesWhatIsThere: the rank holds one document per kind,
+// so a second write is a correction rather than a second opinion — and the
+// report says so, a write that silently overwrote last month's statement being
+// the surprise worth naming.
+func TestConventionsSetReplacesWhatIsThere(t *testing.T) {
 	f := newConventionFixture(t)
-	if out, err := f.set(t, f.repo, "commits", "POP-MEMORY: first reading.", "5 commits"); err != nil {
+	if out, err := f.set(t, f.repo, "commits", "MY-PROJECT-DOC: first reading."); err != nil {
 		t.Fatalf("first set: %v\n%s", err, out)
 	}
-	out, err := f.set(t, f.repo, "commits", "POP-MEMORY: second reading.", "40 commits")
+	out, err := f.set(t, f.repo, "commits", "MY-PROJECT-DOC: second reading.")
 	if err != nil {
 		t.Fatalf("second set: %v\n%s", err, out)
 	}
 	if !strings.Contains(out, "REPLACED") {
-		t.Errorf("a write over an existing memory does not say it replaced one:\n%s", out)
+		t.Errorf("a write over an existing document does not say it replaced one:\n%s", out)
 	}
 
 	got, err := f.get(t, f.repo, "commits")
@@ -560,38 +609,18 @@ func TestConventionsSetReplacesExistingMemory(t *testing.T) {
 	if strings.Contains(got, "first reading") {
 		t.Errorf("the replaced body survived:\n%s", got)
 	}
-	if !strings.Contains(got, "second reading") || !strings.Contains(got, "40 commits") {
-		t.Errorf("the replacing body or its provenance is missing:\n%s", got)
+	if !strings.Contains(got, "second reading") {
+		t.Errorf("the replacing body is missing:\n%s", got)
 	}
 }
 
-// TestConventionsSetIsSharedAcrossWorktrees: the write is keyed by
-// Repository identity, so a convention derived in a worktree is the
-// repository's, not that directory's.
-func TestConventionsSetIsSharedAcrossWorktrees(t *testing.T) {
-	f := newConventionFixture(t)
-	worktree := filepath.Join(f.root, "feature-wt")
-	runGitCheckout(t, f.repo, "worktree", "add", "-b", "feature", worktree)
-
-	if out, err := f.set(t, worktree, "commits", "POP-MEMORY: scopes are the package name.", "the last 20 commits"); err != nil {
-		t.Fatalf("set from worktree: %v\n%s", err, out)
-	}
-	got, err := f.get(t, f.repo, "commits")
-	if err != nil {
-		t.Fatalf("get from trunk: %v\n%s", err, got)
-	}
-	if !strings.Contains(got, "POP-MEMORY: scopes are the package name.") {
-		t.Fatalf("the trunk did not read what the worktree wrote:\n%s", got)
-	}
-}
-
-// TestConventionsSetRefusals: everything pop declines to remember, and in
-// each case it must have written nothing.
+// TestConventionsSetRefusals: everything pop declines to write, and in each
+// case it must have written nothing.
 func TestConventionsSetRefusals(t *testing.T) {
 	f := newConventionFixture(t)
-	path := f.memoryPath(t, f.repo, "commits")
+	path := f.projectPath(t, f.repo, "commits")
 
-	out, err := f.set(t, f.repo, "bogus", "POP-MEMORY: anything.", "a sample")
+	out, err := f.set(t, f.repo, "bogus", "MY-PROJECT-DOC: anything.")
 	if err == nil {
 		t.Fatalf("unknown kind was accepted:\n%s", out)
 	}
@@ -601,34 +630,31 @@ func TestConventionsSetRefusals(t *testing.T) {
 		}
 	}
 
-	if _, err := f.set(t, f.repo, "commits", "   \n", "a sample"); !errors.Is(err, conventions.ErrEmptyConvention) {
+	if _, err := f.set(t, f.repo, "commits", "   \n"); !errors.Is(err, conventions.ErrEmptyConvention) {
 		t.Errorf("empty body: error = %v, want ErrEmptyConvention", err)
 	}
-	if _, err := f.set(t, f.repo, "commits", "POP-MEMORY: anything.", "  "); !errors.Is(err, conventions.ErrNoDerivation) {
-		t.Errorf("missing derivation: error = %v, want ErrNoDerivation", err)
-	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Errorf("a refused set left a memory file at %s", path)
+		t.Errorf("a refused set left a file at %s", path)
 	}
 }
 
 // TestConventionsUnsetPromotesTheNextRank is why the verb prints more than
-// "removed": memory was the answer, and removing it hands the kind to the
-// repository's document — which the report names on the spot.
+// "removed": the human's project document was the answer, and removing it hands
+// the kind to the repository's document — which the report names on the spot.
 func TestConventionsUnsetPromotesTheNextRank(t *testing.T) {
 	f := newConventionFixture(t)
-	if out, err := f.set(t, f.repo, "commits", "POP-MEMORY: scopes are the package name.", "the last 20 commits"); err != nil {
+	if out, err := f.set(t, f.repo, "commits", "MY-PROJECT-DOC: scopes are the package name."); err != nil {
 		t.Fatalf("set commits: %v\n%s", err, out)
 	}
-	path := f.memoryPath(t, f.repo, "commits")
+	path := f.projectPath(t, f.repo, "commits")
 
-	// Before the removal, memory is what answers.
+	// Before the removal, the human's project document is what answers.
 	before, err := f.get(t, f.repo, "commits")
 	if err != nil {
 		t.Fatalf("get commits: %v\n%s", err, before)
 	}
-	if !strings.Contains(before, "POP-MEMORY") {
-		t.Fatalf("memory is not the answer to begin with:\n%s", before)
+	if !strings.Contains(before, "MY-PROJECT-DOC") {
+		t.Fatalf("the project document is not the answer to begin with:\n%s", before)
 	}
 	f.repoDoc(t, "commits", "TEAM-DOC: the type set is feat, fix, chore.")
 
@@ -637,7 +663,7 @@ func TestConventionsUnsetPromotesTheNextRank(t *testing.T) {
 		t.Fatalf("unset commits: %v\n%s", err, out)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("the memory file survived unset at %s", path)
+		t.Fatalf("the project document survived unset at %s", path)
 	}
 	if !strings.Contains(out, "REMOVED") || !strings.Contains(out, path) {
 		t.Errorf("unset does not name what it removed:\n%s", out)
@@ -649,7 +675,7 @@ func TestConventionsUnsetPromotesTheNextRank(t *testing.T) {
 	if !strings.Contains(out, "TEAM-DOC: the type set is feat, fix, chore.") {
 		t.Errorf("unset does not print what answers the kind now:\n%s", out)
 	}
-	if strings.Contains(out, "POP-MEMORY") {
+	if strings.Contains(out, "MY-PROJECT-DOC") {
 		t.Errorf("the removed layer is still reported as in effect:\n%s", out)
 	}
 	if !strings.Contains(out, "Provenance:") || !strings.Contains(out, "repository") {
@@ -657,9 +683,9 @@ func TestConventionsUnsetPromotesTheNextRank(t *testing.T) {
 	}
 }
 
-// TestConventionsUnsetWithoutMemory: the caller asked for a state that
+// TestConventionsUnsetWithNothingWritten: the caller asked for a state that
 // already holds, which is not a failure.
-func TestConventionsUnsetWithoutMemory(t *testing.T) {
+func TestConventionsUnsetWithNothingWritten(t *testing.T) {
 	f := newConventionFixture(t)
 
 	out, err := f.unset(t, f.repo, "commits")
@@ -667,7 +693,7 @@ func TestConventionsUnsetWithoutMemory(t *testing.T) {
 		t.Fatalf("unset with nothing to remove: %v\n%s", err, out)
 	}
 	if !strings.Contains(out, "nothing to remove") {
-		t.Errorf("unset does not say there was no memory:\n%s", out)
+		t.Errorf("unset does not say there was nothing written:\n%s", out)
 	}
 	if !strings.Contains(out, "Nobody answers commits now") || !strings.Contains(out, "ANSWER: SHIPPED") {
 		t.Errorf("unset does not report what is in force after it:\n%s", out)

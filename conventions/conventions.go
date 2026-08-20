@@ -2,25 +2,24 @@
 // this repository do X" for one Convention kind, resolved for the repository
 // the current checkout belongs to.
 //
-// A kind resolves to exactly one answer plus the human's overlay: the human's
-// own document, else the repository's committed one, else pop's memory, with
+// A kind resolves to exactly one answer plus the human's overlay: their document
+// for this project, else their document for every repository, else the
+// repository's committed one, else pop's own shipped answer, with
 // ~/.agents/docs/<kind>.overlay.md appended whenever it exists. Nothing else
-// composes (ADR-0223). Pop's job here is mechanical — derive the four paths,
-// read what exists, decide which one answers, and label it. It never merges
-// prose.
+// composes (ADR-0223, ADR-0226). Pop's job here is mechanical — derive the
+// paths, read what exists, decide which one answers, and label it. It never
+// merges prose.
 package conventions
 
 import (
-	"time"
-
 	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/tasks"
 )
 
 // Deps is this package's process seam: the filesystem the layers are read
-// through, and the tasks seam that answers Repository identity — the key the
-// Convention memory layer is filed under, and what makes every worktree of a
-// repository read one file.
+// through, and the tasks seam that answers both the git questions the paths
+// derive from — the project's remote, and the Repository identity a project with
+// no remote falls back to.
 type Deps struct {
 	FS    deps.FileSystem
 	Tasks *tasks.Deps
@@ -40,11 +39,6 @@ func (d *Deps) fs() deps.FileSystem {
 	}
 	return d.FS
 }
-
-// now is when a write says it happened. It rides the tasks bag rather than a
-// clock of this package's own: that bag already answers Repository identity for
-// the same write, so a test that fixes one fixes both.
-func (d *Deps) now() time.Time { return d.tasksDeps().Now() }
 
 func (d *Deps) tasksDeps() *tasks.Deps {
 	if d != nil && d.Tasks != nil {

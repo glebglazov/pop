@@ -80,7 +80,7 @@ func overlayLayer(stack conventions.Stack) (conventions.Layer, bool) {
 }
 
 // conventionEditSeed is what $EDITOR opens on for a convention row: the overlay
-// as it stands, under a note saying which of the four layers this is. The note
+// as it stands, under a note saying which layer this is. The note
 // is pop's own and comes back out of the buffer, so a human who writes nothing
 // under it has cancelled rather than stated the note.
 func conventionEditSeed(kind conventions.Kind, overlay conventions.Layer) string {

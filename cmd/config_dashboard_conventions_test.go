@@ -65,7 +65,7 @@ func (f *conventionDashboardFixture) write(t *testing.T, path, body string) {
 }
 
 // twoLayers authors the two hand-written layers a repository usually has: the
-// human's defaults for every repository, and the team's committed document.
+// human's document for every repository, and the team's committed one.
 func (f *conventionDashboardFixture) twoLayers(t *testing.T) {
 	t.Helper()
 	f.write(t, filepath.Join(f.home, ".agents", "docs", "commits.md"), "Imperative subjects.\n")
@@ -164,7 +164,7 @@ func TestConfigDashboardPreviewsWhatIsInForce(t *testing.T) {
 	row, _ := m.Selected()
 
 	preview := row.Preview.Layers
-	for _, want := range []string{"ANSWER: USER DEFAULTS", "Imperative subjects.", "Provenance:"} {
+	for _, want := range []string{"ANSWER: USER GLOBAL", "Imperative subjects.", "Provenance:"} {
 		if !strings.Contains(preview, want) {
 			t.Errorf("preview missing %q:\n%s", want, preview)
 		}
@@ -179,11 +179,11 @@ func TestConfigDashboardPreviewsWhatIsInForce(t *testing.T) {
 	if err := conventions.Get(f.deps.conventionsDeps(), &out, f.repo, conventions.KindCommits); err != nil {
 		t.Fatalf("conventions get: %v", err)
 	}
-	answer := "----- ANSWER: USER DEFAULTS (yours, every repository) -----"
+	answer := "----- ANSWER: USER GLOBAL (yours, every repository) -----"
 	if !strings.Contains(out.String(), answer) || !strings.Contains(preview, answer) {
 		t.Errorf("the pane and the command label the answer differently:\npane:\n%s\nget:\n%s", preview, out.String())
 	}
-	if !strings.Contains(ui.StripANSI(m.ViewContent()), "USER DEFAULTS") {
+	if !strings.Contains(ui.StripANSI(m.ViewContent()), "USER GLOBAL") {
 		t.Errorf("the answer is nowhere on screen:\n%s", ui.StripANSI(m.ViewContent()))
 	}
 }

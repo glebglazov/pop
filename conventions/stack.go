@@ -13,21 +13,21 @@ import (
 type Origin string
 
 const (
-	// OriginUserDefaults is ~/.agents/docs/<kind>.md — the human's own answer,
-	// applying to every repository. It is the first rank consulted: pop resolves
+	// OriginProject is ~/.agents/docs/projects/<slug>/<kind>.md — the human's own
+	// answer for one project, and the first rank consulted. It outranks their
+	// global document because the more specific of two documents by the same
+	// author wins, which makes it the rank to reach for when overriding
+	// everything for one project (ADR-0226 decision 4).
+	OriginProject Origin = "user project"
+	// OriginGlobal is ~/.agents/docs/<kind>.md — the human's own answer, applying
+	// to every repository. It outranks the team's document because pop resolves
 	// conventions on one human's machine, on that human's behalf, so where the
 	// two disagree the person at the terminal is the one being served
 	// (ADR-0223 decision 2).
-	OriginUserDefaults Origin = "user defaults"
+	OriginGlobal Origin = "user global"
 	// OriginRepository is docs/agents/<kind>.md — the team's rules, in version
 	// control, and the answer wherever the human has written none of their own.
 	OriginRepository Origin = "repository"
-	// OriginMemory is the Convention memory: the layer pop writes itself, filed
-	// under Repository identity so it is per repository and per machine. It is
-	// the last rank, and it stands down as soon as either document exists — it
-	// is pop's stand-in for a written answer, and a written answer makes it
-	// redundant (ADR-0223 decision 4).
-	OriginMemory Origin = "pop memory"
 	// OriginShipped is pop's own answer for the kind: the last rank, embedded
 	// rather than read from disk, and always holding something — which is what
 	// makes a kind always resolve to rules somebody can follow. Any written rank
@@ -43,35 +43,31 @@ const (
 // its origin so a labelled block reads as something other than a file path.
 func (o Origin) Scope() string {
 	switch o {
-	case OriginUserDefaults:
+	case OriginProject:
+		return "yours, this project"
+	case OriginGlobal:
 		return "yours, every repository"
 	case OriginRepository:
 		return "the team's, in version control"
-	case OriginMemory:
-		return "pop-written, this repository on this machine"
 	case OriginShipped:
 		return "pop's own, displaced by any above"
 	case OriginOverlay:
-		return "yours, appended to any answer"
+		return "yours, appended to whichever answered"
 	}
 	return ""
 }
 
-// Layer is one rank of the Convention stack: where pop looked, what it found
-// there, and — for Convention memory — the frontmatter recording how it got
-// there.
+// Layer is one rank of the Convention stack: where pop looked and what it found
+// there. Every rank is one document and nothing else — no rank carries pop's
+// bookkeeping, all the writable ones being the human's own statement
+// (ADR-0226 decision 5).
 type Layer struct {
 	Origin  Origin
 	Path    string
 	Present bool
-	// Body is the layer's prose with any frontmatter removed, so the reader is
-	// handed the convention and not pop's bookkeeping.
+	// Body is the document's prose, trimmed. It is the whole of what a reader is
+	// handed when this rank answers.
 	Body string
-	// DerivedFrom and DerivedAt are Convention memory's provenance. They are the
-	// only reason the frontmatter exists: the disclosure line quotes them so
-	// "which source am I using" cannot drift between the skills that ask.
-	DerivedFrom string
-	DerivedAt   string
 }
 
 // Stack is one Convention kind resolved for one repository: every rank pop
@@ -85,11 +81,11 @@ type Stack struct {
 }
 
 // writtenRanks is the order the ranks somebody wrote resolve in: the human's
-// own document, then the team's, then pop's memory. The first that holds
-// something is the answer, and the rest are not read into it — nothing
-// composes. Beneath all three sits the shipped rank, which nobody wrote and
-// which is reached by falling off the end of this list.
-var writtenRanks = []Origin{OriginUserDefaults, OriginRepository, OriginMemory}
+// document for this project, then their document for every repository, then the
+// team's. The first that holds something is the answer, and the rest are not
+// read into it — nothing composes. Beneath all three sits the shipped rank,
+// which nobody wrote and which is reached by falling off the end of this list.
+var writtenRanks = []Origin{OriginProject, OriginGlobal, OriginRepository}
 
 // speaks returns one rank when it holds something.
 func (s Stack) speaks(origin Origin) (Layer, bool) {
@@ -119,7 +115,7 @@ func (s Stack) Answer() Layer {
 func (s Stack) Overlay() (Layer, bool) { return s.speaks(OriginOverlay) }
 
 // Contested reports that a rank below the answer also holds something, so a
-// document or a memory is quietly losing. Under winner-take-all that is a real
+// document somebody wrote is quietly losing. Under winner-take-all that is a real
 // state a reader wants surfaced; the overlay is never a contender, since it
 // appends rather than displaces (ADR-0223).
 func (s Stack) Contested() bool {
@@ -132,46 +128,30 @@ func (s Stack) Contested() bool {
 	return speaking > 1
 }
 
-// MemoryPath returns where Convention memory for kind lives: one Markdown file
-// per kind under the repository's Task storage directory, beside tasks/ and
-// maps/. It is derived from Repository identity rather than from the checkout,
-// which is what makes two worktrees of one repository read one file.
-func MemoryPath(d *Deps, kind Kind, cwd string) (string, error) {
-	id, err := tasks.ResolveRepositoryIdentity(d.tasksDeps(), cwd)
-	if err != nil {
-		return "", err
-	}
-	return memoryPathIn(id.StorageDir, kind), nil
-}
-
-// memoryPathIn is where Convention memory sits under a repository's storage
-// directory. The write side reaches it through MemoryPath and the stack builds
-// it from roots it already holds; both spell it here so they cannot drift.
-func memoryPathIn(storageDir string, kind Kind) string {
-	return filepath.Join(storageDir, "conventions", string(kind)+".md")
-}
-
 // stackRoots is everything a stack's paths derive from that is about the
 // repository rather than about the kind: the human's documents directory, the
-// repository's Task storage directory and the checkout's top level. Resolving
-// it costs two git questions, so it is resolved once and every kind's paths are
-// built from it — a caller asking for all the kinds at once pays for one
-// repository, not one per kind.
+// directory holding their documents for this project, and the checkout's top
+// level. Resolving it costs git questions, so it is resolved once and every
+// kind's paths are built from it — a caller asking for all the kinds at once
+// pays for one repository, not one per kind.
 type stackRoots struct {
-	agentsDocs string
-	storageDir string
-	topLevel   string
+	agentsDocs  string
+	projectDocs string
+	topLevel    string
 }
 
 // resolveStackRoots answers those three for the repository owning cwd. Both
-// git-derived roots resolve from cwd, so a caller outside a repository is
-// refused here rather than silently getting a two-layer stack.
+// repository-derived roots resolve from cwd, so a caller outside a repository is
+// refused here — by the project rank, which has neither a remote nor a
+// Repository identity to key itself by — rather than silently getting a stack
+// with no repository in it.
 func resolveStackRoots(d *Deps, cwd string) (stackRoots, error) {
 	home, err := d.fs().UserHomeDir()
 	if err != nil {
 		return stackRoots{}, err
 	}
-	id, err := tasks.ResolveRepositoryIdentity(d.tasksDeps(), cwd)
+	agentsDocs := filepath.Join(home, ".agents", "docs")
+	projectDocs, err := projectDocsDir(d, agentsDocs, cwd)
 	if err != nil {
 		return stackRoots{}, err
 	}
@@ -183,9 +163,9 @@ func resolveStackRoots(d *Deps, cwd string) (stackRoots, error) {
 		return stackRoots{}, err
 	}
 	return stackRoots{
-		agentsDocs: filepath.Join(home, ".agents", "docs"),
-		storageDir: id.StorageDir,
-		topLevel:   topLevel,
+		agentsDocs:  agentsDocs,
+		projectDocs: projectDocs,
+		topLevel:    topLevel,
 	}, nil
 }
 
@@ -194,9 +174,9 @@ func resolveStackRoots(d *Deps, cwd string) (stackRoots, error) {
 // them does, and the overlay last because it is appended rather than ranked.
 func (r stackRoots) layers(kind Kind) []Layer {
 	return []Layer{
-		{Origin: OriginUserDefaults, Path: filepath.Join(r.agentsDocs, string(kind)+".md")},
+		{Origin: OriginProject, Path: projectPathIn(r.projectDocs, kind)},
+		{Origin: OriginGlobal, Path: filepath.Join(r.agentsDocs, string(kind)+".md")},
 		{Origin: OriginRepository, Path: filepath.Join(r.topLevel, "docs", "agents", string(kind)+".md")},
-		{Origin: OriginMemory, Path: memoryPathIn(r.storageDir, kind)},
 		shippedLayer(kind),
 		{Origin: OriginOverlay, Path: overlayPathIn(r.agentsDocs, kind)},
 	}
@@ -250,49 +230,12 @@ func readLayer(d *Deps, l *Layer) {
 	if err != nil {
 		return
 	}
-	body := string(raw)
-	if l.Origin == OriginMemory {
-		var front map[string]string
-		front, body = splitFrontmatter(body)
-		l.DerivedFrom = front["derived_from"]
-		l.DerivedAt = front["derived_at"]
-	}
-	body = strings.TrimSpace(body)
-	// A file holding only whitespace (or only frontmatter) says nothing, and
-	// printing it as a layer would put an empty labelled section in front of the
-	// reader.
+	body := strings.TrimSpace(string(raw))
+	// A file holding only whitespace says nothing, and printing it as a layer
+	// would put an empty labelled section in front of the reader.
 	if body == "" {
 		return
 	}
 	l.Present = true
 	l.Body = body
-}
-
-// splitFrontmatter peels a leading `---` fenced block of `key: value` lines off
-// a document, returning its fields and the prose beneath. Convention memory is
-// the only layer that carries one, and it carries one only to record what the
-// convention was derived from.
-func splitFrontmatter(body string) (map[string]string, string) {
-	fields := map[string]string{}
-	rest := strings.TrimLeft(body, "\r\n")
-	if !strings.HasPrefix(rest, "---") {
-		return fields, body
-	}
-	lines := strings.Split(rest, "\n")
-	if strings.TrimSpace(lines[0]) != "---" {
-		return fields, body
-	}
-	for i := 1; i < len(lines); i++ {
-		if strings.TrimSpace(lines[i]) == "---" {
-			return fields, strings.Join(lines[i+1:], "\n")
-		}
-		key, value, ok := strings.Cut(lines[i], ":")
-		if !ok {
-			continue
-		}
-		fields[strings.TrimSpace(key)] = strings.Trim(strings.TrimSpace(value), `"`)
-	}
-	// An unterminated fence is not frontmatter; hand the document back whole
-	// rather than swallowing it.
-	return map[string]string{}, body
 }

@@ -310,9 +310,9 @@ func runConfigDashboard(cmd *cobra.Command, _ []string) error {
 		path = config.DefaultConfigPathWith(d.configDeps())
 	}
 	checkout, _ := d.DirOrGetwd()
-	// The convention rows resolve through the cmd layer's own seam, so the
-	// Convention memory layer is read out of the data dir every other verb routes
-	// to rather than one derived here.
+	// The convention rows resolve through the cmd layer's own seam, so a
+	// convention is resolved against the repository every other verb routes to
+	// rather than one derived here.
 	writer := confighost.NewWriter(d.configDeps(), path, checkout).WithConventions(d.conventionsDeps())
 	rows, err := writer.Rows()
 	if err != nil {

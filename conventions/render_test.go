@@ -6,15 +6,24 @@ import (
 	"testing"
 )
 
-// TestUnwrittenKindResolvesToTheShippedRank pins the last rank: a kind no
-// document and no memory answers still resolves, to pop's own answer, rendered
-// as an answer like any other rank's (ADR-0226 decision 1).
+// The four written paths a test authors, in rank order. They are spelled out
+// rather than derived so a test reads as the stack it is asserting about.
+const (
+	projectDoc = "/h/.agents/docs/projects/github.com-tripledot-pop/commits.md"
+	globalDoc  = "/h/.agents/docs/commits.md"
+	repoDoc    = "/r/docs/agents/commits.md"
+	overlayDoc = "/h/.agents/docs/commits.overlay.md"
+)
+
+// TestUnwrittenKindResolvesToTheShippedRank pins the last rank: a kind nobody
+// has written a document for still resolves, to pop's own answer, rendered as an
+// answer like any other rank's (ADR-0226 decision 1).
 func TestUnwrittenKindResolvesToTheShippedRank(t *testing.T) {
 	stack := Stack{Kind: KindCommits, Layers: []Layer{
-		{Origin: OriginUserDefaults, Path: "/h/.agents/docs/commits.md"},
-		{Origin: OriginRepository, Path: "/r/docs/agents/commits.md"},
-		{Origin: OriginMemory, Path: "/d/pop/repos/pop-abc/conventions/commits.md"},
-		{Origin: OriginOverlay, Path: "/h/.agents/docs/commits.overlay.md"},
+		{Origin: OriginProject, Path: projectDoc},
+		{Origin: OriginGlobal, Path: globalDoc},
+		{Origin: OriginRepository, Path: repoDoc},
+		{Origin: OriginOverlay, Path: overlayDoc},
 	}}
 
 	if got := stack.Answer(); got.Origin != OriginShipped || got.Body == "" {
@@ -71,13 +80,14 @@ func TestAnyWrittenRankOutranksTheShippedRank(t *testing.T) {
 }
 
 // TestResolutionPicksOneAnswer walks the rank order that decides everything
-// else: the human's document over the team's, the team's over pop's memory, and
-// the overlay riding on whichever won rather than competing with it.
+// else: the human's document for this project over their document for every
+// repository, either over the team's, and the overlay riding on whichever won
+// rather than competing with it.
 func TestResolutionPicksOneAnswer(t *testing.T) {
-	defaults := Layer{Origin: OriginUserDefaults, Path: "/h/.agents/docs/commits.md", Present: true, Body: "MINE"}
-	repo := Layer{Origin: OriginRepository, Path: "/r/docs/agents/commits.md", Present: true, Body: "TEAM"}
-	memory := Layer{Origin: OriginMemory, Path: "/d/conventions/commits.md", Present: true, Body: "POP"}
-	overlay := Layer{Origin: OriginOverlay, Path: "/h/.agents/docs/commits.overlay.md", Present: true, Body: "EXTRA"}
+	project := Layer{Origin: OriginProject, Path: projectDoc, Present: true, Body: "MINE-HERE"}
+	global := Layer{Origin: OriginGlobal, Path: globalDoc, Present: true, Body: "MINE-EVERYWHERE"}
+	repo := Layer{Origin: OriginRepository, Path: repoDoc, Present: true, Body: "TEAM"}
+	overlay := Layer{Origin: OriginOverlay, Path: overlayDoc, Present: true, Body: "EXTRA"}
 
 	tests := []struct {
 		name string
@@ -89,13 +99,13 @@ func TestResolutionPicksOneAnswer(t *testing.T) {
 		contested  bool
 	}{
 		{name: "nothing anywhere falls through to the shipped rank"},
-		{name: "memory alone", layers: []Layer{memory}, answer: "POP"},
-		{name: "the team's document stands memory down",
-			layers: []Layer{repo, memory}, answer: "TEAM", contested: true},
-		{name: "the human's document stands the team's down",
-			layers: []Layer{defaults, repo}, answer: "MINE", contested: true},
-		{name: "the human's document stands both down",
-			layers: []Layer{defaults, repo, memory}, answer: "MINE", contested: true},
+		{name: "the team's document alone", layers: []Layer{repo}, answer: "TEAM"},
+		{name: "the human's global document stands the team's down",
+			layers: []Layer{global, repo}, answer: "MINE-EVERYWHERE", contested: true},
+		{name: "the human's project document stands their global one down",
+			layers: []Layer{project, global}, answer: "MINE-HERE", contested: true},
+		{name: "the human's project document stands both others down",
+			layers: []Layer{project, global, repo}, answer: "MINE-HERE", contested: true},
 		{name: "the overlay rides on the answer",
 			layers: []Layer{repo, overlay}, answer: "TEAM", hasOverlay: true},
 		{name: "the overlay alone rides on the shipped rank",
@@ -139,7 +149,9 @@ func TestResolutionPicksOneAnswer(t *testing.T) {
 
 // TestProvenanceDisclosesTheAnswerAndTheOverlay pins the one line every skill
 // surfaces verbatim, which is the whole reason pop emits it rather than letting
-// each skill phrase it.
+// each skill phrase it. It names the answering rank and its path, the overlay
+// clause where one applies, and nothing else — there is no rank left whose
+// origin pop would have to account for (ADR-0226 decision 5).
 func TestProvenanceDisclosesTheAnswerAndTheOverlay(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -148,52 +160,45 @@ func TestProvenanceDisclosesTheAnswerAndTheOverlay(t *testing.T) {
 		absent []string
 	}{
 		{
-			name: "memory answers with full frontmatter",
+			name: "the human's project document answers",
 			layers: []Layer{
-				{Origin: OriginMemory, Path: "/d/conventions/commits.md", Present: true, Body: "b",
-					DerivedFrom: "a sample of 40 commits", DerivedAt: "2026-08-01"},
+				{Origin: OriginProject, Path: projectDoc, Present: true, Body: "b"},
 			},
-			want: []string{"pop memory", "/d/conventions/commits.md", "a sample of 40 commits", "2026-08-01"},
+			want: []string{"resolved to user project", projectDoc},
 		},
 		{
-			name: "the repository's document stands memory down",
+			name: "the project document stands the others down",
 			layers: []Layer{
-				{Origin: OriginMemory, Path: "/d/conventions/commits.md", Present: true, Body: "b", DerivedFrom: "a sample of 40 commits"},
-				{Origin: OriginRepository, Path: "/r/docs/agents/commits.md", Present: true, Body: "b"},
+				{Origin: OriginProject, Path: projectDoc, Present: true, Body: "b"},
+				{Origin: OriginGlobal, Path: globalDoc, Present: true, Body: "b"},
+				{Origin: OriginRepository, Path: repoDoc, Present: true, Body: "b"},
 			},
-			want: []string{"repository", "/r/docs/agents/commits.md"},
-			// A memory nobody is being handed has no derivation worth quoting.
-			absent: []string{"a sample of 40 commits", "/d/conventions/commits.md"},
-		},
-		{
-			name: "answering memory without frontmatter still discloses itself",
-			layers: []Layer{
-				{Origin: OriginMemory, Path: "/d/conventions/commits.md", Present: true, Body: "b"},
-			},
-			want: []string{"pop memory", "records no derivation"},
+			want: []string{"resolved to user project", projectDoc},
+			// A rank nobody is being handed is not disclosed as a source.
+			absent: []string{globalDoc, repoDoc},
 		},
 		{
 			name: "the overlay is named as appended, not as the answer",
 			layers: []Layer{
-				{Origin: OriginRepository, Path: "/r/docs/agents/commits.md", Present: true, Body: "b"},
-				{Origin: OriginOverlay, Path: "/h/.agents/docs/commits.overlay.md", Present: true, Body: "b"},
+				{Origin: OriginRepository, Path: repoDoc, Present: true, Body: "b"},
+				{Origin: OriginOverlay, Path: overlayDoc, Present: true, Body: "b"},
 			},
-			want:   []string{"resolved to repository", "appended", "/h/.agents/docs/commits.overlay.md"},
-			absent: []string{"Pop memory"},
+			want: []string{"resolved to repository", "appended", overlayDoc},
 		},
 		{
 			name: "an unwritten kind names pop's own answer and claims nothing more",
 			want: []string{"resolved to shipped", "shipped/commits.md"},
 			// The clause that told a reader what is in force is a method, not
-			// rules, went with the recipe rank (ADR-0226 decision 1).
-			absent: []string{"method", "not rules to follow"},
+			// rules, went with the recipe rank; the clause that quoted pop's own
+			// derivation went with the memory rank (ADR-0226).
+			absent: []string{"method", "not rules to follow", "derived"},
 		},
 		{
 			name: "an overlay rides on the shipped rank when nothing is written",
 			layers: []Layer{
-				{Origin: OriginOverlay, Path: "/h/.agents/docs/commits.overlay.md", Present: true, Body: "b"},
+				{Origin: OriginOverlay, Path: overlayDoc, Present: true, Body: "b"},
 			},
-			want: []string{"shipped", "appended", "/h/.agents/docs/commits.overlay.md"},
+			want: []string{"shipped", "appended", overlayDoc},
 		},
 	}
 
@@ -217,24 +222,6 @@ func TestProvenanceDisclosesTheAnswerAndTheOverlay(t *testing.T) {
 	}
 }
 
-// TestSplitFrontmatterOnlyTakesAWellFormedFence: a document that merely opens
-// with a horizontal rule is prose, and swallowing it would silently delete a
-// convention.
-func TestSplitFrontmatterOnlyTakesAWellFormedFence(t *testing.T) {
-	fields, body := splitFrontmatter("---\nderived_from: git log\n---\nthe convention\n")
-	if fields["derived_from"] != "git log" {
-		t.Errorf("derived_from = %q", fields["derived_from"])
-	}
-	if strings.TrimSpace(body) != "the convention" {
-		t.Errorf("body = %q", body)
-	}
-
-	unterminated := "---\nnot really frontmatter\nthe convention\n"
-	if fields, body := splitFrontmatter(unterminated); len(fields) != 0 || body != unterminated {
-		t.Errorf("unterminated fence was treated as frontmatter: %v / %q", fields, body)
-	}
-}
-
 // TestStackPreviewShowsTheAnswerAndTheOverlay pins what a surface showing a
 // convention beside values of another sort gets: the same answer, overlay and
 // provenance `get` prints, plus where the layer an editor writes lives. A rank
@@ -242,30 +229,30 @@ func TestSplitFrontmatterOnlyTakesAWellFormedFence(t *testing.T) {
 // pane exists to answer.
 func TestStackPreviewShowsTheAnswerAndTheOverlay(t *testing.T) {
 	stack := Stack{Kind: KindCommits, Layers: []Layer{
-		{Origin: OriginUserDefaults, Path: "/h/.agents/docs/commits.md", Present: true, Body: "Imperative subjects."},
-		{Origin: OriginRepository, Path: "/r/docs/agents/commits.md", Present: true, Body: "Conventional commits."},
-		{Origin: OriginMemory, Path: "/d/conventions/commits.md"},
-		{Origin: OriginOverlay, Path: "/h/.agents/docs/commits.overlay.md"},
+		{Origin: OriginProject, Path: projectDoc},
+		{Origin: OriginGlobal, Path: globalDoc, Present: true, Body: "Imperative subjects."},
+		{Origin: OriginRepository, Path: repoDoc, Present: true, Body: "Conventional commits."},
+		{Origin: OriginOverlay, Path: overlayDoc},
 	}}
 
 	got := StackPreview(stack)
 
 	for _, want := range []string{
-		"ANSWER: USER DEFAULTS",
+		"ANSWER: USER GLOBAL",
 		"yours, every repository",
 		"Imperative subjects.",
 		"Provenance:",
 		// The layer an editor here would write, named whether or not it holds
-		// anything: a reader deciding to edit needs to know which of the four
-		// they would be changing.
+		// anything: a reader deciding to edit needs to know which rank they
+		// would be changing.
 		"not written yet",
-		"/h/.agents/docs/commits.overlay.md",
+		overlayDoc,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("preview missing %q:\n%s", want, got)
 		}
 	}
-	for _, absent := range []string{"Conventional commits.", "/d/conventions/commits.md"} {
+	for _, absent := range []string{"Conventional commits.", repoDoc} {
 		if strings.Contains(got, absent) {
 			t.Errorf("a layer the answer stood down is shown as in force (%q):\n%s", absent, got)
 		}
@@ -290,9 +277,9 @@ func TestStackPreviewShowsTheAnswerAndTheOverlay(t *testing.T) {
 // rank in force is as much the pane's business as any other.
 func TestStackPreviewOfAnUnwrittenKindShowsTheShippedRank(t *testing.T) {
 	stack := Stack{Kind: KindIssueTracker, Layers: []Layer{
-		{Origin: OriginUserDefaults, Path: "/h/.agents/docs/issue-tracker.md"},
+		{Origin: OriginProject, Path: "/h/.agents/docs/projects/github.com-tripledot-pop/issue-tracker.md"},
+		{Origin: OriginGlobal, Path: "/h/.agents/docs/issue-tracker.md"},
 		{Origin: OriginRepository, Path: "/r/docs/agents/issue-tracker.md"},
-		{Origin: OriginMemory, Path: "/d/conventions/issue-tracker.md"},
 		{Origin: OriginOverlay, Path: "/h/.agents/docs/issue-tracker.overlay.md"},
 	}}
 
@@ -306,5 +293,23 @@ func TestStackPreviewOfAnUnwrittenKindShowsTheShippedRank(t *testing.T) {
 	// The overlay is still the layer an edit here writes.
 	if !strings.Contains(got, "/h/.agents/docs/issue-tracker.overlay.md") {
 		t.Errorf("preview does not name the layer an edit writes:\n%s", got)
+	}
+}
+
+// Every rank's scope is the phrase printed beside its origin, so a labelled
+// block reads as something other than a file path. A rank with none would
+// render an empty parenthesis, and "defaults" is retired as a rank word
+// because it named two ranks at opposite ends of the stack (ADR-0226).
+func TestEveryRankStatesItsAuthorAndScope(t *testing.T) {
+	for _, origin := range append(append([]Origin{}, writtenRanks...), OriginShipped, OriginOverlay) {
+		scope := origin.Scope()
+		if scope == "" {
+			t.Errorf("rank %q states no scope", origin)
+		}
+		for _, word := range []string{"defaults", "memory"} {
+			if strings.Contains(string(origin), word) || strings.Contains(scope, word) {
+				t.Errorf("rank %q (%q) still uses the retired word %q", origin, scope, word)
+			}
+		}
 	}
 }
