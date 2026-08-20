@@ -409,9 +409,10 @@ func RunProject(d *ProjectDeps) error {
 	}
 
 	// Read once, here where the picker is constructed: a change to
-	// [project] worktree_display takes effect on the next invocation, so nothing
-	// has to re-read config or re-render mid-session.
+	// [project] worktree_display or session_ordering takes effect on the next
+	// invocation, so nothing has to re-read config or re-render mid-session.
 	worktreeDisplay := cfg.ProjectWorktreeDisplay()
+	sessionOrdering := cfg.ProjectSessionOrdering()
 	// Expansion lives in the process and is persisted nowhere, so it survives the
 	// picker's in-loop reopens — some actions close the picker, act, and reopen it
 	// with fresh rows — and a fresh dashboard opens collapsed.
@@ -430,7 +431,7 @@ func RunProject(d *ProjectDeps) error {
 		if d.WorkSessions != nil {
 			workSessions = d.WorkSessions()
 		}
-		sessionRows := buildSessionAwareItemsWith(baseItems, hist, d.SessionActivity(), excludedSessionNames, attention, workSessions)
+		sessionRows := buildSessionAwareItemsWith(baseItems, hist, d.SessionActivity(), excludedSessionNames, attention, workSessions, sessionOrdering)
 		// A Map session is not a checkout, so it reaches here as a standalone row
 		// with no project; this is where it gets one, from the directory tmux started
 		// it in. It runs after the recency sort and touches no Path, so a Map keeps
@@ -662,15 +663,15 @@ func sortBaseItemsByHistory(items []ui.Item, hist *history.History) []ui.Item {
 	return sorted
 }
 
-func buildSessionAwareItems(baseItems []ui.Item, hist *history.History, excludedSessionNames map[string]bool, monitorEnabled bool) []ui.Item {
+func buildSessionAwareItems(baseItems []ui.Item, hist *history.History, excludedSessionNames map[string]bool, monitorEnabled bool, ordering config.SessionOrdering) []ui.Item {
 	var attentionSessions map[string]bool
 	if monitorEnabled {
 		attentionSessions = monitorAttentionSessions()
 	}
-	return buildSessionAwareItemsWith(baseItems, hist, history.TmuxSessionActivity(), excludedSessionNames, attentionSessions, tmuxWorkSessions())
+	return buildSessionAwareItemsWith(baseItems, hist, history.TmuxSessionActivity(), excludedSessionNames, attentionSessions, tmuxWorkSessions(), ordering)
 }
 
-func buildSessionAwareItemsWith(baseItems []ui.Item, hist *history.History, sessionActivity map[string]int64, excludedSessionNames map[string]bool, attentionSessions map[string]bool, workSessions map[string]tmuxmod.WorkSession) []ui.Item {
+func buildSessionAwareItemsWith(baseItems []ui.Item, hist *history.History, sessionActivity map[string]int64, excludedSessionNames map[string]bool, attentionSessions map[string]bool, workSessions map[string]tmuxmod.WorkSession, ordering config.SessionOrdering) []ui.Item {
 	// Build set of session names that correspond to project items
 	projectSessionNames := make(map[string]bool)
 	for _, item := range baseItems {
@@ -721,10 +722,19 @@ func buildSessionAwareItemsWith(baseItems []ui.Item, hist *history.History, sess
 	}
 
 	// Sort by unified timeline
-	return sortByUnifiedRecency(items, hist, sessionActivity)
+	return sortByUnifiedRecency(items, hist, sessionActivity, ordering)
 }
 
-func sortByUnifiedRecency(items []ui.Item, hist *history.History, sessionActivity map[string]int64) []ui.Item {
+// sortByUnifiedRecency orders rows oldest-first along one unified timeline —
+// History landings for project rows, tmux activity as the standalone fallback.
+// Under SessionOrderingLiveFirst ([project] session_ordering) the rows that
+// carry a live-session glyph tier after everything else: the picker renders
+// this slice top to bottom with the cursor and the quick-access digits on its
+// tail, so the live tier is what keeps every attachable session grouped next
+// to the prompt instead of interleaved with recently visited but session-less
+// checkouts. The tier reads rowHasLiveSession — the glyph the caller just
+// assigned — so it cannot disagree with what nesting later treats as live.
+func sortByUnifiedRecency(items []ui.Item, hist *history.History, sessionActivity map[string]int64, ordering config.SessionOrdering) []ui.Item {
 	historyTimes := make(map[string]time.Time)
 	for _, e := range hist.Entries {
 		historyTimes[e.Path] = e.LastAccess
@@ -746,6 +756,13 @@ func sortByUnifiedRecency(items []ui.Item, hist *history.History, sessionActivit
 	copy(sorted, items)
 
 	sort.SliceStable(sorted, func(i, j int) bool {
+		if ordering == config.SessionOrderingLiveFirst {
+			li, lj := rowHasLiveSession(sorted[i]), rowHasLiveSession(sorted[j])
+			if li != lj {
+				return lj
+			}
+		}
+
 		ti, oki := getAccessTime(sorted[i])
 		tj, okj := getAccessTime(sorted[j])
 

@@ -211,7 +211,7 @@ func TestMapRowRecencyComesFromSessionActivityAfterNesting(t *testing.T) {
 			"kestrel":                 300,
 			"pop-map-2026-08-03-demo": mapActivity,
 		}
-		sessionRows := buildSessionAwareItemsWith(baseItems, hist, activity, nil, nil, workSessions)
+		sessionRows := buildSessionAwareItemsWith(baseItems, hist, activity, nil, nil, workSessions, config.SessionOrderingUnified)
 		rows, mapMeta := attributeMapSessions(sessionRows, workSessions, meta)
 		expanded := map[string]bool{"/src/hawk": true, "/src/kestrel": true}
 		return rowNames(buildProjectRows(rows, mapMeta, config.WorktreeDisplayNested, expanded))
@@ -231,6 +231,53 @@ func TestMapRowRecencyComesFromSessionActivityAfterNesting(t *testing.T) {
 	// possible row, which is what the fallback answering with it looks like.
 	if got := render(0); !reflect.DeepEqual(got, []string{"hawk ▾", "  2026-08-03-demo", "  fix-auth", "kestrel"}) {
 		t.Errorf("map at the epoch: rows = %q", got)
+	}
+}
+
+// Under [project] session_ordering = "live-first" the tier survives nesting: a
+// node's rank is its most recent folded-in row, so a project with no live
+// session of its own rides its live children — worktree and Map alike — into
+// the live tier at the prompt end, while the checkout that was visited last
+// but has nothing to attach to stays in the dead tier above it. This is the
+// composition the flag promises ("every attachable session grouped next to
+// the prompt") in the one mode where rows move after the sort.
+func TestLiveFirstOrderingSurvivesNesting(t *testing.T) {
+	t.Parallel()
+
+	baseItems := []ui.Item{
+		{Name: "hawk", Path: "/src/hawk", SessionName: "hawk"},
+		{Name: "hawk/fix-auth", Path: "/wt/hawk/fix-auth", SessionName: "hawk/fix-auth"},
+		{Name: "kestrel", Path: "/src/kestrel", SessionName: "kestrel"},
+	}
+	meta := map[string]projectRowMeta{
+		"/src/hawk":         {Repo: "hawk", RepoLabel: "hawk"},
+		"/wt/hawk/fix-auth": {IsWorktree: true, Repo: "hawk"},
+		"/src/kestrel":      {Repo: "kestrel", RepoLabel: "kestrel"},
+	}
+	workSessions := mapWorkSessions("2026-08-03-demo", "/src/hawk")
+
+	// kestrel is the most recently visited row on the whole timeline, but its
+	// session is gone; hawk's own session is gone too, only its worktree and
+	// its Map are live.
+	hist := &history.History{Entries: []history.Entry{
+		{Path: "/src/hawk", LastAccess: time.Unix(100, 0)},
+		{Path: "/wt/hawk/fix-auth", LastAccess: time.Unix(200, 0)},
+		{Path: "/src/kestrel", LastAccess: time.Unix(300, 0)},
+	}}
+	activity := map[string]int64{
+		"hawk/fix-auth":           200,
+		"pop-map-2026-08-03-demo": 150,
+	}
+
+	sessionRows := buildSessionAwareItemsWith(baseItems, hist, activity, nil, nil, workSessions, config.SessionOrderingLiveFirst)
+	rows, mapMeta := attributeMapSessions(sessionRows, workSessions, meta)
+	expanded := map[string]bool{"/src/hawk": true, "/src/kestrel": true}
+	got := rowNames(buildProjectRows(rows, mapMeta, config.WorktreeDisplayNested, expanded))
+
+	// Unified ordering would put kestrel at the tail, next to the prompt; the
+	// live tier pushes it above the hoisted hawk group instead.
+	if !reflect.DeepEqual(got, []string{"kestrel", "hawk ▾", "  2026-08-03-demo", "  fix-auth"}) {
+		t.Errorf("live-first nested rows = %q", got)
 	}
 }
 
