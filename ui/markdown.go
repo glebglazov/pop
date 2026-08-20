@@ -24,14 +24,19 @@ func RendersMarkdown(path string) bool {
 	return strings.EqualFold(filepath.Ext(path), ".md")
 }
 
-// RenderMarkdown renders Markdown for a terminal of the given width, wrapping to
-// fit inside glamour's own margins. A width of zero or less falls back to 80.
+// RenderMarkdown renders Markdown for a terminal of the given width and
+// appearance, wrapping to fit inside glamour's own margins. A width of zero or
+// less falls back to 80.
+//
+// The appearance is asked for rather than inferred: glamour's automatic style is
+// a tmux-blind background guess that always answers dark, so pop resolves the
+// fact itself and glamour is told (ADR-0230).
 //
 // Rendering is best-effort: a document glamour cannot parse comes back as the text
 // that went in, because a reader losing the document is worse than reading its
 // markup.
-func RenderMarkdown(text string, width int) string {
-	renderer, err := newMarkdownRenderer(width)
+func RenderMarkdown(text string, width int, appearance Appearance) string {
+	renderer, err := newMarkdownRenderer(width, appearance)
 	if err != nil {
 		return text
 	}
@@ -42,7 +47,7 @@ func RenderMarkdown(text string, width int) string {
 	return trimBlankEdgeLines(out)
 }
 
-func newMarkdownRenderer(width int) (*glamour.TermRenderer, error) {
+func newMarkdownRenderer(width int, appearance Appearance) (*glamour.TermRenderer, error) {
 	if width <= 0 {
 		width = documentWidthFallback
 	}
@@ -50,7 +55,10 @@ func newMarkdownRenderer(width int) (*glamour.TermRenderer, error) {
 	if wrap < 20 {
 		wrap = 20
 	}
-	return glamour.NewTermRenderer(glamour.WithAutoStyle(), glamour.WithWordWrap(wrap))
+	return glamour.NewTermRenderer(
+		glamour.WithStandardStyle(appearance.glamourStyle()),
+		glamour.WithWordWrap(wrap),
+	)
 }
 
 // trimBlankEdgeLines drops the blank lines glamour pads a document with. The

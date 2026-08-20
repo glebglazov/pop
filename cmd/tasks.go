@@ -1519,7 +1519,7 @@ func taskShowDocument(path string, body []byte) []byte {
 	if !taskStdoutInteractive() || !ui.RendersMarkdown(path) {
 		return body
 	}
-	return []byte(ui.RenderMarkdown(string(body), taskStdoutWidth()) + "\n")
+	return []byte(ui.RenderMarkdown(string(body), taskStdoutWidth(), taskStdoutAppearance()) + "\n")
 }
 
 // taskStdoutWidth is the rendering width for documents printed to a terminal. It
@@ -1530,6 +1530,13 @@ var taskStdoutWidth = func() int {
 		return 0 // ui.RenderMarkdown falls back to its own default width
 	}
 	return width
+}
+
+// taskStdoutAppearance is the terminal appearance documents printed to stdout are
+// drawn for. It is a package variable so tests can pin the palette instead of
+// querying whatever terminal the test runner happens to have.
+var taskStdoutAppearance = func() ui.Appearance {
+	return ui.ResolveAppearance(os.Stdin, os.Stdout)
 }
 
 // taskStdoutInteractive reports whether stdout is an interactive terminal. It is a

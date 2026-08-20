@@ -738,7 +738,9 @@ func (p *documentPeek) body(width int) string {
 		return p.text
 	}
 	if !p.hasRendered || p.renderedWidth != width {
-		p.rendered = ui.RenderMarkdown(p.text, width)
+		// The peek does not resolve the terminal appearance yet, so it renders
+		// plain: legible on any background, and never a wrong palette.
+		p.rendered = ui.RenderMarkdown(p.text, width, ui.AppearancePlain)
 		p.renderedWidth = width
 		p.hasRendered = true
 	}

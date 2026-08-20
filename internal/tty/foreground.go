@@ -88,3 +88,22 @@ func ClaimForeground(fd int) Foreground {
 func GuardRead(fn func() error) error {
 	return withBlockedSignals(fn, unix.SIGTTIN, unix.SIGTTOU)
 }
+
+// HoldsForeground reports whether this process's group already owns fd's
+// terminal foreground.
+//
+// This is the question to ask before a read that must not take the foreground:
+// a background query pop makes on its own behalf, where the right answer to
+// "someone else holds it" is to skip the read rather than to interrupt whoever
+// does hold it. A foreground that cannot be read counts as not held.
+func HoldsForeground(fd int) bool {
+	pgrp, err := unix.Getpgid(0)
+	if err != nil {
+		return false
+	}
+	holder, err := ForegroundPgrp(fd)
+	if err != nil {
+		return false
+	}
+	return holder == pgrp
+}
