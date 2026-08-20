@@ -379,198 +379,129 @@ func userIssueTrackerLinkPath(home string) string {
 	return filepath.Join(home, ".agents", "docs", "issue-tracker.md")
 }
 
-// agentSymlinks returns the links a refresh created for agents, excluding the
-// agent-agnostic user-level Issue tracker doc link (ADR-0169).
-func agentSymlinks(fs *fakeFS, home string) map[string]string {
-	out := map[string]string{}
-	for link, target := range fs.symlinks {
-		if link == userIssueTrackerLinkPath(home) {
-			continue
-		}
-		out[link] = target
-	}
-	return out
-}
-
-// seedUserIssueTrackerLink pre-creates the user-level link so refresh tests
-// focused on other concerns observe no link outcome.
-func seedUserIssueTrackerLink(fs *fakeFS, home string) {
+// seedPopIssueTrackerLink pre-creates the user-level link exactly as pop's own
+// earlier refresh would have (ADR-0169): a symlink at the vendor-neutral
+// user-level path pointing at pop's Shipped asset.
+func seedPopIssueTrackerLink(fs *fakeFS, home string) {
 	fs.dirs[filepath.Join(home, ".agents", "docs")] = true
 	fs.symlinks[userIssueTrackerLinkPath(home)] = issueTrackerDataPath(home)
 }
 
-// TestLinkUserIssueTrackerDoc_CreatesWhenAbsent proves the vendor-neutral
-// user-level link is created, with one outcome, when nothing occupies it.
-func TestLinkUserIssueTrackerDoc_CreatesWhenAbsent(t *testing.T) {
-	t.Parallel()
-	fs := newFakeFS()
-
-	outcome := linkUserIssueTrackerDoc(fakeDeps("/h", fs, io.Discard))
-	link := userIssueTrackerLinkPath("/h")
-	if outcome == nil {
-		t.Fatal("expected an outcome when the link is created")
-	}
-	if outcome.Skill != link {
-		t.Errorf("outcome path = %q, want %q", outcome.Skill, link)
-	}
-	if outcome.Label != "linked" {
-		t.Errorf("outcome label = %q, want linked", outcome.Label)
-	}
-	if got := fs.symlinks[link]; got != issueTrackerDataPath("/h") {
-		t.Errorf("link target = %q, want %q", got, issueTrackerDataPath("/h"))
-	}
-	if !fs.dirs[filepath.Join("/h", ".agents", "docs")] {
-		t.Error("expected ~/.agents/docs to be created")
-	}
-}
-
-// TestLinkUserIssueTrackerDoc_OccupiedPathsLeftAlone walks every occupancy case:
-// pop never overwrites and never repairs what is already at the link path.
-func TestLinkUserIssueTrackerDoc_OccupiedPathsLeftAlone(t *testing.T) {
+// TestRemoveUserIssueTrackerDocLink covers the three occupancy states at
+// ~/.agents/docs/issue-tracker.md: pop's own prior link is removed, a human's
+// own file or foreign link is left alone, and nothing there yields no outcome.
+func TestRemoveUserIssueTrackerDocLink(t *testing.T) {
 	t.Parallel()
 	link := userIssueTrackerLinkPath("/h")
 
-	tests := []struct {
-		name  string
-		setup func(*fakeFS)
-		check func(*testing.T, *fakeFS)
-	}{
-		{
-			name:  "regular file override",
-			setup: func(fs *fakeFS) { fs.files[link] = []byte("# my own doc\n") },
-			check: func(t *testing.T, fs *fakeFS) {
-				if string(fs.files[link]) != "# my own doc\n" {
-					t.Errorf("user file was modified: %q", fs.files[link])
-				}
-				if _, ok := fs.symlinks[link]; ok {
-					t.Error("pop must not replace a user file with a link")
-				}
-			},
-		},
-		{
-			name:  "directory",
-			setup: func(fs *fakeFS) { fs.dirs[link] = true },
-			check: func(t *testing.T, fs *fakeFS) {
-				if _, ok := fs.symlinks[link]; ok {
-					t.Error("pop must not link over a directory")
-				}
-			},
-		},
-		{
-			name:  "symlink elsewhere",
-			setup: func(fs *fakeFS) { fs.symlinks[link] = "/elsewhere/issue-tracker.md" },
-			check: func(t *testing.T, fs *fakeFS) {
-				if got := fs.symlinks[link]; got != "/elsewhere/issue-tracker.md" {
-					t.Errorf("foreign link was repointed to %q", got)
-				}
-			},
-		},
-		{
-			name:  "symlink already at pop asset",
-			setup: func(fs *fakeFS) { fs.symlinks[link] = issueTrackerDataPath("/h") },
-			check: func(t *testing.T, fs *fakeFS) {
-				if got := fs.symlinks[link]; got != issueTrackerDataPath("/h") {
-					t.Errorf("link target = %q, want unchanged", got)
-				}
-			},
-		},
-		{
-			// Dangling only until the same refresh seeds the target, so it is
-			// treated as correct rather than recreated.
-			name: "dangling symlink at pop asset",
-			setup: func(fs *fakeFS) {
-				fs.symlinks[link] = issueTrackerDataPath("/h")
-				delete(fs.files, issueTrackerDataPath("/h"))
-			},
-			check: func(t *testing.T, fs *fakeFS) {
-				if got := fs.symlinks[link]; got != issueTrackerDataPath("/h") {
-					t.Errorf("dangling link was rewritten to %q", got)
-				}
-			},
-		},
-		{
-			name:  "docs dir is a regular file",
-			setup: func(fs *fakeFS) { fs.files[filepath.Join("/h", ".agents", "docs")] = []byte("not a dir") },
-			check: func(t *testing.T, fs *fakeFS) {
-				if _, ok := fs.symlinks[link]; ok {
-					t.Error("pop must not link when ~/.agents/docs is a file")
-				}
-				if fs.dirs[filepath.Join("/h", ".agents", "docs")] {
-					t.Error("pop must not create a directory over a user file")
-				}
-			},
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			fs := newFakeFS()
-			tc.setup(fs)
-			if outcome := linkUserIssueTrackerDoc(fakeDeps("/h", fs, io.Discard)); outcome != nil {
-				t.Errorf("expected no outcome for an occupied path, got %+v", outcome)
-			}
-			tc.check(t, fs)
-		})
-	}
-}
-
-// TestLinkUserIssueTrackerDoc_FailuresAreNonFatal proves a read-only home still
-// integrates: mkdir and symlink errors yield no outcome and no panic.
-func TestLinkUserIssueTrackerDoc_FailuresAreNonFatal(t *testing.T) {
-	t.Parallel()
-
-	t.Run("mkdir fails", func(t *testing.T) {
+	t.Run("pop's own link", func(t *testing.T) {
 		t.Parallel()
 		fs := newFakeFS()
-		fs.mkdirErr[filepath.Join("/h", ".agents", "docs")] = os.ErrPermission
+		seedPopIssueTrackerLink(fs, "/h")
 
-		if outcome := linkUserIssueTrackerDoc(fakeDeps("/h", fs, io.Discard)); outcome != nil {
-			t.Errorf("expected no outcome when mkdir fails, got %+v", outcome)
+		outcome := removeUserIssueTrackerDocLink(fakeDeps("/h", fs, io.Discard))
+		if outcome == nil {
+			t.Fatal("expected an outcome when pop's own link is removed")
+		}
+		if outcome.Skill != link {
+			t.Errorf("outcome path = %q, want %q", outcome.Skill, link)
+		}
+		if outcome.Label != "removed" {
+			t.Errorf("outcome label = %q, want removed", outcome.Label)
+		}
+		if _, ok := fs.symlinks[link]; ok {
+			t.Error("pop's own link is still present")
+		}
+	})
+
+	t.Run("human's own file", func(t *testing.T) {
+		t.Parallel()
+		fs := newFakeFS()
+		fs.files[link] = []byte("# my own tracker doc\n")
+
+		if outcome := removeUserIssueTrackerDocLink(fakeDeps("/h", fs, io.Discard)); outcome != nil {
+			t.Errorf("expected no outcome for a human's own file, got %+v", outcome)
+		}
+		if string(fs.files[link]) != "# my own tracker doc\n" {
+			t.Errorf("human's file was modified: %q", fs.files[link])
+		}
+	})
+
+	t.Run("nothing there", func(t *testing.T) {
+		t.Parallel()
+		fs := newFakeFS()
+
+		if outcome := removeUserIssueTrackerDocLink(fakeDeps("/h", fs, io.Discard)); outcome != nil {
+			t.Errorf("expected no outcome when nothing occupies the path, got %+v", outcome)
+		}
+	})
+
+	t.Run("symlink elsewhere", func(t *testing.T) {
+		t.Parallel()
+		fs := newFakeFS()
+		fs.symlinks[link] = "/elsewhere/issue-tracker.md"
+
+		if outcome := removeUserIssueTrackerDocLink(fakeDeps("/h", fs, io.Discard)); outcome != nil {
+			t.Errorf("expected no outcome for a foreign link, got %+v", outcome)
+		}
+		if got := fs.symlinks[link]; got != "/elsewhere/issue-tracker.md" {
+			t.Errorf("foreign link was touched: %q", got)
+		}
+	})
+
+	t.Run("removal fails", func(t *testing.T) {
+		t.Parallel()
+		fs := newFakeFS()
+		seedPopIssueTrackerLink(fs, "/h")
+		fs.removeErr[link] = os.ErrPermission
+
+		if outcome := removeUserIssueTrackerDocLink(fakeDeps("/h", fs, io.Discard)); outcome != nil {
+			t.Errorf("expected no outcome when removal fails, got %+v", outcome)
+		}
+		if _, ok := fs.symlinks[link]; !ok {
+			t.Error("link must remain when removal is blocked")
+		}
+	})
+}
+
+// TestRefresh_RemovesUserIssueTrackerDocLink proves Integration refresh retires
+// pop's own prior link with a reported outcome, and never creates a new one.
+func TestRefresh_RemovesUserIssueTrackerDocLink(t *testing.T) {
+	t.Parallel()
+
+	t.Run("present", func(t *testing.T) {
+		t.Parallel()
+		setupIntegrateConfigLayer(t)
+		fs := newFakeFS()
+		seedPopIssueTrackerLink(fs, "/h")
+
+		_, real := fakeFactories("/h", fs)
+		var stdout strings.Builder
+		if err := RunUpdateExistingWith("rev-unlink1", testConfigDeps(t), real, &stdout, io.Discard, false); err != nil {
+			t.Fatalf("RunUpdateExistingWith: %v", err)
+		}
+		link := userIssueTrackerLinkPath("/h")
+		if _, ok := fs.symlinks[link]; ok {
+			t.Errorf("refresh did not remove pop's own link at %s", link)
+		}
+		if out := stdout.String(); !strings.Contains(out, link) || !strings.Contains(out, "removed") {
+			t.Errorf("expected a removed outcome naming %s, got %q", link, out)
+		}
+	})
+
+	t.Run("absent", func(t *testing.T) {
+		t.Parallel()
+		setupIntegrateConfigLayer(t)
+		fs := newFakeFS()
+
+		_, real := fakeFactories("/h", fs)
+		if err := RunUpdateExistingWith("rev-unlink2", testConfigDeps(t), real, io.Discard, io.Discard, false); err != nil {
+			t.Fatalf("RunUpdateExistingWith: %v", err)
 		}
 		if _, ok := fs.symlinks[userIssueTrackerLinkPath("/h")]; ok {
-			t.Error("no link may be created when the directory could not be made")
+			t.Error("refresh must never create the user-level link")
 		}
 	})
-
-	t.Run("symlink fails", func(t *testing.T) {
-		t.Parallel()
-		fs := newFakeFS()
-		d := fakeDeps("/h", fs, io.Discard)
-		d.symlink = func(string, string) error { return os.ErrPermission }
-
-		if outcome := linkUserIssueTrackerDoc(d); outcome != nil {
-			t.Errorf("expected no outcome when symlink fails, got %+v", outcome)
-		}
-	})
-}
-
-// TestRefresh_LinksUserIssueTrackerDoc proves Integration refresh publishes the
-// user-level link and names it in one outcome line, and stays silent on a rerun.
-func TestRefresh_LinksUserIssueTrackerDoc(t *testing.T) {
-	t.Parallel()
-	setupIntegrateConfigLayer(t)
-	fs := newFakeFS()
-
-	_, real := fakeFactories("/h", fs)
-	var stdout strings.Builder
-	if err := RunUpdateExistingWith("rev-link1", testConfigDeps(t), real, &stdout, io.Discard, false); err != nil {
-		t.Fatalf("RunUpdateExistingWith: %v", err)
-	}
-	link := userIssueTrackerLinkPath("/h")
-	if got := fs.symlinks[link]; got != issueTrackerDataPath("/h") {
-		t.Fatalf("refresh did not link %s at the shipped asset, got %q", link, got)
-	}
-	if out := stdout.String(); !strings.Contains(out, link) || !strings.Contains(out, "linked") {
-		t.Errorf("expected a linked outcome naming %s, got %q", link, out)
-	}
-
-	result := updateStaleIntegrations(testConfigDeps(t), real)
-	for _, o := range result.Outcomes {
-		if o.Skill == link {
-			t.Errorf("second refresh must not re-report the link, got %+v", o)
-		}
-	}
 }
 
 // TestRemoveStaleDataDirWorkStoreDoc covers present / absent / unwritable

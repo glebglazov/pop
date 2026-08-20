@@ -208,54 +208,50 @@ func userIssueTrackerDocLinkPath(d *Deps) (string, error) {
 	return filepath.Join(home, ".agents", "docs", "issue-tracker.md"), nil
 }
 
-// linkUserIssueTrackerDoc publishes the user-level second layer by symlinking
-// ~/.agents/docs/issue-tracker.md at pop's Shipped asset. Creation is strictly
-// create-if-absent: anything already at the link path — regular file, directory,
-// or symlink pointing anywhere, dangling or not — is the user's and is left
-// alone. A regular file occupying ~/.agents/docs aborts the step entirely.
-//
-// This is the narrow ADR-0169 exception to ADR-0150: pop writes a link, never
-// content, outside its data dir, and only into empty space. Every failure is
-// logged and skipped so a read-only home still integrates.
-func linkUserIssueTrackerDoc(d *Deps) *Outcome {
+// removeUserIssueTrackerDocLink retires the ADR-0169 user-level link at
+// ~/.agents/docs/issue-tracker.md (ADR-0226 consequence 2): pop's own shipped
+// answer now has a rank of its own, so it has no business squatting in the
+// rank reserved for the human's own document. Removal is conditional on the
+// link still being pop's: only a symlink whose target is exactly pop's Shipped
+// asset path is removed. A missing path, a regular file, a directory, or a
+// symlink pointing anywhere else is the human's and is left alone. Every
+// failure is logged and skipped so a read-only home still integrates.
+func removeUserIssueTrackerDocLink(d *Deps) *Outcome {
 	target, err := issueTrackerDocPath(d)
 	if err != nil {
-		debug.Error("linkUserIssueTrackerDoc: asset path: %v", err)
+		debug.Error("removeUserIssueTrackerDocLink: asset path: %v", err)
 		return nil
 	}
 	link, err := userIssueTrackerDocLinkPath(d)
 	if err != nil {
-		debug.Error("linkUserIssueTrackerDoc: link path: %v", err)
+		debug.Error("removeUserIssueTrackerDocLink: link path: %v", err)
 		return nil
 	}
 
-	if _, err := d.lstatMode(link); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		debug.Error("linkUserIssueTrackerDoc: lstat %s: %v", link, err)
-		return nil
-	}
-
-	dir := filepath.Dir(link)
-	if mode, err := d.lstatMode(dir); err == nil {
-		if mode.IsRegular() {
-			debug.Error("linkUserIssueTrackerDoc: %s is a regular file; skipping", dir)
-			return nil
+	mode, err := d.lstatMode(link)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			debug.Error("removeUserIssueTrackerDocLink: lstat %s: %v", link, err)
 		}
-	} else if !os.IsNotExist(err) {
-		debug.Error("linkUserIssueTrackerDoc: lstat %s: %v", dir, err)
+		return nil
+	}
+	if mode&os.ModeSymlink == 0 {
+		return nil
+	}
+	dest, err := d.readlink(link)
+	if err != nil {
+		debug.Error("removeUserIssueTrackerDocLink: readlink %s: %v", link, err)
+		return nil
+	}
+	if dest != target {
 		return nil
 	}
 
-	if err := d.mkdirAll(dir, 0o755); err != nil {
-		debug.Error("linkUserIssueTrackerDoc: mkdir %s: %v", dir, err)
+	if err := d.removeAll(link); err != nil {
+		debug.Error("removeUserIssueTrackerDocLink: remove %s: %v", link, err)
 		return nil
 	}
-	if err := d.symlink(target, link); err != nil {
-		debug.Error("linkUserIssueTrackerDoc: symlink %s -> %s: %v", link, target, err)
-		return nil
-	}
-	return &Outcome{Skill: link, Label: "linked"}
+	return &Outcome{Skill: link, Label: "removed"}
 }
 
 // staleDataDirWorkStoreDocPath returns the pre-ADR-0169 Shipped-asset path at
