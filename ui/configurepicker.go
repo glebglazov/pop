@@ -345,17 +345,17 @@ func (cp *ConfigurePicker) View() tea.View {
 
 	var b strings.Builder
 
-	previewStyle := lipgloss.NewStyle().Foreground(colorPreview)
+	previewStyle := lipgloss.NewStyle().Foreground(colorPreview())
 
 	// Phase-specific top hint
 	switch cp.phase {
 	case phasePath:
 		b.WriteString("  ")
-		b.WriteString(headerStyle.Render("Enter a project directory pattern"))
+		b.WriteString(headerStyle().Render("Enter a project directory pattern"))
 		b.WriteString("\n")
 	case phaseDepth:
 		b.WriteString("  ")
-		b.WriteString(headerStyle.Render("Set display depth"))
+		b.WriteString(headerStyle().Render("Set display depth"))
 		b.WriteString("\n")
 	}
 
@@ -414,7 +414,7 @@ func (cp *ConfigurePicker) View() tea.View {
 		if showMore {
 			remaining := len(cp.preview) - previewCount
 			b.WriteString("    ")
-			b.WriteString(dimStyle.Render(fmt.Sprintf("... and %d more", remaining)))
+			b.WriteString(dimStyle().Render(fmt.Sprintf("... and %d more", remaining)))
 			b.WriteString("\n")
 		}
 	} else {
@@ -437,7 +437,7 @@ func (cp *ConfigurePicker) View() tea.View {
 	case phaseDepth:
 		hints = "  ↑/↓ adjust depth · Enter confirm · Esc back · C-h help"
 	}
-	b.WriteString(hintStyle.Render(hints))
+	b.WriteString(hintStyle().Render(hints))
 
 	v := tea.NewView(b.String())
 	v.AltScreen = true

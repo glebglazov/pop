@@ -50,7 +50,9 @@ type Frame struct {
 // modeWordStyle paints a mode word in the house accent, the same weight as a
 // header: the bottom line's other tenants are dim or accent-plain, so the mode
 // reads as chrome that is on rather than as a message.
-var modeWordStyle = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+func modeWordStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(colorAccent()).Bold(true)
+}
 
 // bottomLine is the rendered bottom line: the live flash when there is one,
 // otherwise the hints, and "" when the view has neither. One accessor so the
@@ -60,7 +62,7 @@ func (f Frame) bottomLine() string {
 	if line := f.Flash.Line(); line != "" {
 		rest = line
 	} else if f.Hints != "" {
-		rest = hintStyle.Render(f.Hints)
+		rest = hintStyle().Render(f.Hints)
 	}
 	return WithModeWord(f.Mode, rest)
 }
@@ -76,7 +78,7 @@ func WithModeWord(mode, rest string) string {
 	if mode == "" {
 		return rest
 	}
-	word := modeWordStyle.Render("  " + mode)
+	word := modeWordStyle().Render("  " + mode)
 	if rest == "" || strings.HasPrefix(StripANSI(rest), " ") {
 		return word + rest
 	}
@@ -141,7 +143,7 @@ func (f Frame) fittedBlock(termH int) []string {
 	if len(f.Block) <= budget {
 		return f.Block
 	}
-	indicator := hintStyle.Render(frameClipLine)
+	indicator := hintStyle().Render(frameClipLine)
 	if budget == 1 {
 		return []string{indicator}
 	}
@@ -198,10 +200,10 @@ func (f Frame) Render(body string) string {
 		parts = append(parts, renderUpdateNotice(f.Width, f.Notice))
 	}
 	if f.Header != "" {
-		parts = append(parts, headerStyle.Render(f.Header))
+		parts = append(parts, headerStyle().Render(f.Header))
 	}
 	if f.Subheader != "" {
-		parts = append(parts, hintStyle.Render(f.Subheader))
+		parts = append(parts, hintStyle().Render(f.Subheader))
 	}
 
 	if includeBody {
@@ -215,7 +217,7 @@ func (f Frame) Render(body string) string {
 	}
 
 	if len(f.Warnings) > 0 {
-		warnStyle := lipgloss.NewStyle().Foreground(colorWorking)
+		warnStyle := lipgloss.NewStyle().Foreground(colorWorking())
 		lines := make([]string, len(f.Warnings))
 		for i, w := range f.Warnings {
 			lines[i] = warnStyle.Render("  ⚠ " + w)
@@ -224,7 +226,7 @@ func (f Frame) Render(body string) string {
 	}
 
 	if f.Footnote != "" {
-		parts = append(parts, hintStyle.Render("  "+f.Footnote))
+		parts = append(parts, hintStyle().Render("  "+f.Footnote))
 	}
 
 	if len(block) > 0 {
@@ -255,7 +257,7 @@ func clampFrameToTermH(content string, termH int, hasBottomLine bool) string {
 	if len(lines) <= termH {
 		return content
 	}
-	indicator := hintStyle.Render(frameClipLine)
+	indicator := hintStyle().Render(frameClipLine)
 	if hasBottomLine {
 		bottom := lines[len(lines)-1]
 		if termH == 1 {

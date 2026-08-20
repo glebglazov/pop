@@ -3487,13 +3487,13 @@ func (m QueueDashboard) dashboardFilterMenuLines() []string {
 	if m.filter == nil {
 		return nil
 	}
-	lines := []string{ui.TruncateString("    "+ui.HintStyle.Render("filters"), m.width)}
+	lines := []string{ui.TruncateString("    "+ui.HintStyle().Render("filters"), m.width)}
 	cursor := m.filter.list.Cursor()
 	active := m.activeViewPreset().Name
 	for i, item := range m.filter.list.Items() {
 		marker := "  "
 		if i == cursor {
-			marker = ui.IndicatorStyle.Render("█") + " "
+			marker = ui.IndicatorStyle().Render("█") + " "
 		}
 		box := "[ ]"
 		if item.preset.Name == active {
@@ -3952,16 +3952,16 @@ func renderDashboardBindModal(w io.Writer, modal *dashboardBindModal, avail, wid
 	case dashboardBindStageWorktree:
 		// Chrome above/below the list: the "Bind worktree" title and the hint.
 		writeModalListRows(w, modal.list, modalListHeight(avail, 2), width)
-		fmt.Fprint(w, ui.HintStyle.Render(ui.TruncateString("enter select · esc cancel", width)))
+		fmt.Fprint(w, ui.HintStyle().Render(ui.TruncateString("enter select · esc cancel", width)))
 	case dashboardBindStageBaseRef:
 		fmt.Fprintln(w, ui.TruncateString("Base ref", width))
 		// Chrome: the title, the "Base ref" caption, and the hint.
 		writeModalListRows(w, modal.list, modalListHeight(avail, 3), width)
-		fmt.Fprint(w, ui.HintStyle.Render(ui.TruncateString("enter select · esc cancel", width)))
+		fmt.Fprint(w, ui.HintStyle().Render(ui.TruncateString("enter select · esc cancel", width)))
 	case dashboardBindStageName:
 		fmt.Fprintln(w, ui.TruncateString(fmt.Sprintf("Base: %s", modal.baseRef), width))
 		fmt.Fprintln(w, ui.TruncateString("Name: "+modal.name.View(), width))
-		fmt.Fprint(w, ui.HintStyle.Render(ui.TruncateString("enter create · esc cancel", width)))
+		fmt.Fprint(w, ui.HintStyle().Render(ui.TruncateString("enter create · esc cancel", width)))
 	}
 }
 
@@ -3976,7 +3976,7 @@ func renderDashboardDrainModal(w io.Writer, modal *dashboardDrainModal, avail, w
 	}
 	// Chrome above/below the list: the title line and the hint.
 	writeModalListRows(w, modal.list, modalListHeight(avail, 2), width)
-	fmt.Fprint(w, ui.HintStyle.Render(ui.TruncateString("enter drain · esc cancel", width)))
+	fmt.Fprint(w, ui.HintStyle().Render(ui.TruncateString("enter drain · esc cancel", width)))
 }
 
 // modalListHeight derives a modal list's scroll-window height from the body
@@ -4004,7 +4004,7 @@ func renderDashboardAbandonModal(w io.Writer, modal *dashboardAbandonModal, widt
 		return
 	}
 	fmt.Fprintln(w, ui.TruncateString("This releases the binding without integrating. Task statuses are unchanged.", width))
-	fmt.Fprint(w, ui.HintStyle.Render(ui.TruncateString("y confirm · enter/n/esc cancel", width)))
+	fmt.Fprint(w, ui.HintStyle().Render(ui.TruncateString("y confirm · enter/n/esc cancel", width)))
 }
 
 // renderDashboardTable renders the task-set table for the views that compose
@@ -4024,7 +4024,7 @@ func renderDashboardTable(w io.Writer, page dashboardPage, kinds workKinds, rows
 	for i, row := range rows {
 		prefix := "  "
 		if i == cursor {
-			prefix = ui.IndicatorStyle.Render("█") + " "
+			prefix = ui.IndicatorStyle().Render("█") + " "
 		}
 		line := ui.TruncateString(prefix+dashboardTableLine(page.styledCells(kinds, row, live), widths), width)
 		fmt.Fprintf(w, "%s\n", line)
@@ -4043,7 +4043,7 @@ func renderDashboardTableTwoLine(w io.Writer, kinds workKinds, rows []DashboardR
 	for i, row := range rows {
 		prefix := "  "
 		if i == cursor {
-			prefix = ui.IndicatorStyle.Render("█") + " "
+			prefix = ui.IndicatorStyle().Render("█") + " "
 		}
 		fmt.Fprintf(w, "%s\n", ui.TruncateString(prefix+dashboardTwoLineRowLine1(row, line1Widths, live), width))
 		fmt.Fprintf(w, "%s\n", ui.TruncateString("  "+dashboardTwoLineRowLine2(kinds, row, line1Widths), width))
@@ -4069,7 +4069,7 @@ func menuBlockLines(noun, target string, width, cursor int, entries []menuEntry)
 	for i, entry := range entries {
 		marker := "  "
 		if i == cursor {
-			marker = ui.IndicatorStyle.Render("█") + " "
+			marker = ui.IndicatorStyle().Render("█") + " "
 		}
 		line := fmt.Sprintf("    %s%s  %s", marker, entry.key, entry.label)
 		lines = append(lines, ui.TruncateString(line, width))
@@ -4139,7 +4139,7 @@ func dashboardMuteMenuLines(mute *dashboardMuteMenu, target string, width int) [
 		entries = append(entries, menuEntry{key: muteWindowKey(i), label: window.Label})
 	}
 	lines := menuBlockLines("mute", target, width, mute.list.Cursor(), entries)
-	return append(lines, ui.TruncateString("      "+ui.HintStyle.Render(muteMenuFooter()), width))
+	return append(lines, ui.TruncateString("      "+ui.HintStyle().Render(muteMenuFooter()), width))
 }
 
 // dashboardFooterLine is the bottom line of the views that compose their own
@@ -4150,7 +4150,7 @@ func dashboardFooterLine(flash ui.Flash, hint string) string {
 	if line := flash.Line(); line != "" {
 		return line
 	}
-	return ui.HintStyle.Render(hint)
+	return ui.HintStyle().Render(hint)
 }
 
 func writeDashboardFooter(b *strings.Builder, height int, hint string) {

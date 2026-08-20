@@ -59,7 +59,7 @@ func multiSelectCell(m *MultiSelect) func(msRow, RowState) string {
 			if mark == "" {
 				mark = " "
 			}
-			box = dimStyle.Render(mark)
+			box = dimStyle().Render(mark)
 		} else if m.checked[i] {
 			box = "[x]"
 		} else {
@@ -68,7 +68,7 @@ func multiSelectCell(m *MultiSelect) func(msRow, RowState) string {
 
 		line := box + " " + it.Label
 		if it.Locked {
-			line = box + " " + dimStyle.Render(it.Label)
+			line = box + " " + dimStyle().Render(it.Label)
 		}
 		return line
 	}

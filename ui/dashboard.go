@@ -1135,7 +1135,7 @@ func (d *MonitorDashboard) killPane(paneID string) tea.Cmd {
 // mode word and the region separator use: the question is chrome that is on for
 // as long as it goes unanswered, not a message that expires like a flash. Every
 // bulk confirmation shares it, kill included, since they are one grammar.
-var killPromptStyle = lipgloss.NewStyle().Foreground(colorAccent)
+func killPromptStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(colorAccent()) }
 
 // killPaneLabel names a pane in a prompt or a flash, falling back to the tmux
 // pane id for a row whose name has not been derived yet.
@@ -1479,9 +1479,9 @@ func (d *MonitorDashboard) dashboardCell(pane AttentionPane, rs RowState) string
 	prefixWidth := 2
 	cellWidth := leftWidth - prefixWidth
 
-	attentionIconStyle := lipgloss.NewStyle().Foreground(colorAttention)
-	workingIconStyle := lipgloss.NewStyle().Foreground(colorWorkingSpinner)
-	clearIconStyle := lipgloss.NewStyle().Foreground(colorClear)
+	attentionIconStyle := lipgloss.NewStyle().Foreground(colorAttention())
+	workingIconStyle := lipgloss.NewStyle().Foreground(colorWorkingSpinner())
+	clearIconStyle := lipgloss.NewStyle().Foreground(colorClear())
 
 	var icon string
 	switch pane.Status {
@@ -1508,7 +1508,7 @@ func (d *MonitorDashboard) dashboardCell(pane AttentionPane, rs RowState) string
 	name := truncateString(pane.Name, nameWidth)
 	displayName := name
 	if pane.TopicDerived {
-		displayName = dimStyle.Render(name)
+		displayName = dimStyle().Render(name)
 	}
 
 	contentWidth := iconWidth + len([]rune(name))
@@ -1577,7 +1577,7 @@ func (d *MonitorDashboard) viewHelp() string {
 func (d *MonitorDashboard) viewDashboard() string {
 	var b strings.Builder
 
-	sepStyle := lipgloss.NewStyle().Foreground(colorSeparator)
+	sepStyle := lipgloss.NewStyle().Foreground(colorSeparator())
 
 	leftWidth := d.leftWidth()
 	rightWidth := d.width - leftWidth - 1
@@ -1587,7 +1587,7 @@ func (d *MonitorDashboard) viewDashboard() string {
 
 	// Empty panes
 	if len(d.panes) == 0 {
-		msgStyle := lipgloss.NewStyle().Foreground(colorDim)
+		msgStyle := lipgloss.NewStyle().Foreground(colorDim())
 		var eb strings.Builder
 		if d.updateNotice != "" {
 			eb.WriteString(renderUpdateNotice(d.width, d.updateNotice))
@@ -1599,7 +1599,7 @@ func (d *MonitorDashboard) viewDashboard() string {
 		} else {
 			headerText += " · normal"
 		}
-		eb.WriteString(headerStyle.Render(" " + headerText))
+		eb.WriteString(headerStyle().Render(" " + headerText))
 		eb.WriteString("\n")
 		for i := 0; i < d.height-1; i++ {
 			eb.WriteString("\n")
@@ -1611,7 +1611,7 @@ func (d *MonitorDashboard) viewDashboard() string {
 		}
 		if d.emptyNote != "" {
 			eb.WriteString("\n")
-			eb.WriteString(hintStyle.Render("  " + d.emptyNote))
+			eb.WriteString(hintStyle().Render("  " + d.emptyNote))
 		}
 		eb.WriteString("\n")
 		// This footer is built by hand rather than by Frame, so it repeats
@@ -1624,7 +1624,7 @@ func (d *MonitorDashboard) viewDashboard() string {
 		if d.reloadFunc != nil {
 			hint += " · r to reload"
 		}
-		eb.WriteString(hintStyle.Render(hint))
+		eb.WriteString(hintStyle().Render(hint))
 		return eb.String()
 	}
 
@@ -1652,7 +1652,7 @@ func (d *MonitorDashboard) viewDashboard() string {
 	if headerPadding < 0 {
 		headerPadding = 0
 	}
-	b.WriteString(headerStyle.Render(" " + headerText))
+	b.WriteString(headerStyle().Render(" " + headerText))
 	b.WriteString(strings.Repeat(" ", headerPadding))
 	if edgeWidth > 0 {
 		b.WriteString(" ")
@@ -1681,14 +1681,14 @@ func (d *MonitorDashboard) viewDashboard() string {
 	}
 	// A machine-derived Topic name is dimmed; otherwise it uses the header
 	// style. The pin always keeps the header style.
-	nameStyle := headerStyle
+	nameStyle := headerStyle()
 	if pane.TopicDerived {
-		nameStyle = dimStyle
+		nameStyle = dimStyle()
 	}
 	b.WriteString(strings.Repeat(" ", rightPadding))
 	b.WriteString(nameStyle.Render(paneName))
 	if pinSuffix != "" {
-		b.WriteString(headerStyle.Render(pinSuffix))
+		b.WriteString(headerStyle().Render(pinSuffix))
 	}
 	b.WriteString("\n")
 

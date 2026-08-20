@@ -148,13 +148,13 @@ func (m TextField) View() string {
 	if m.focused {
 		buffer = renderInputWithCursor(m.value, m.cursor)
 	}
-	return indicatorStyle.Render(promptGlyph) + buffer
+	return indicatorStyle().Render(promptGlyph) + buffer
 }
 
 // renderInputWithCursor draws the buffer with a reverse-video block over the
 // rune at the cursor (or a trailing block when the cursor sits past the end).
 func renderInputWithCursor(value []rune, cursor int) string {
-	cursorStyle := dimStyle.Reverse(true)
+	cursorStyle := dimStyle().Reverse(true)
 	if cursor >= len(value) {
 		return string(value) + cursorStyle.Render(" ")
 	}

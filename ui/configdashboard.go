@@ -73,7 +73,7 @@ const configContestedMarker = "◆"
 
 // configContestedStyle colours that marker apart from the override dot: the two
 // say different things and sit in adjacent columns.
-var configContestedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+func configContestedStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(colorWarning()) }
 
 // ConfigDashboardReachLine is one actor's line of a key's declared reach
 // (ADR-0198), already resolved by the caller.
@@ -593,7 +593,7 @@ func (m *ConfigDashboard) viewBody(height int) string {
 	left := m.list.VisibleRows()
 	right := m.previewLines(height)
 
-	sep := lipgloss.NewStyle().Foreground(colorSeparator).Render("│")
+	sep := lipgloss.NewStyle().Foreground(colorSeparator()).Render("│")
 	lines := make([]string, height)
 	for i := 0; i < height; i++ {
 		leftLine := ""
@@ -631,21 +631,21 @@ func (m *ConfigDashboard) renderRow(row ConfigDashboardRow, state RowState) stri
 		if strings.TrimSpace(row.Desc) == "" {
 			return ""
 		}
-		return dimStyle.Render(TruncateString("    "+row.Desc, width))
+		return dimStyle().Render(TruncateString("    "+row.Desc, width))
 	}
 	marker := " "
 	if row.Overridden {
-		marker = IndicatorStyle.Render(configOverrideMarker)
+		marker = IndicatorStyle().Render(configOverrideMarker)
 	}
 	if row.Contested {
-		marker = configContestedStyle.Render(configContestedMarker) + marker
+		marker = configContestedStyle().Render(configContestedMarker) + marker
 	} else {
 		marker = " " + marker
 	}
 	marker += " "
 	text := TruncateString(row.Key, width-3)
 	if state.Selected {
-		text = selectedGateItemStyle.Render(text)
+		text = selectedGateItemStyle().Render(text)
 	}
 	return marker + text
 }
@@ -661,7 +661,7 @@ func (m *ConfigDashboard) previewLines(height int) []string {
 		if len(m.rows) > 0 {
 			hint = "(no key matches the filter)"
 		}
-		return []string{hintStyle.Render(hint)}
+		return []string{hintStyle().Render(hint)}
 	}
 
 	width := m.previewWidth()
@@ -671,7 +671,7 @@ func (m *ConfigDashboard) previewLines(height int) []string {
 			lines = append(lines, style.Render(TruncateString(line, width)))
 		}
 	}
-	plain := lipgloss.NewStyle().Foreground(colorPreview)
+	plain := lipgloss.NewStyle().Foreground(colorPreview())
 
 	// A prose row's preview is the caller's whole text: the layers that speak are
 	// its provenance, so there is no separate line to name one.
@@ -683,23 +683,23 @@ func (m *ConfigDashboard) previewLines(height int) []string {
 	add(plain, row.Preview.ValueTOML)
 	if row.Preview.Provenance != "" {
 		lines = append(lines, "")
-		add(hintStyle, "from: "+row.Preview.Provenance)
+		add(hintStyle(), "from: "+row.Preview.Provenance)
 	}
 	if row.Preview.Note != "" {
-		add(hintStyle, row.Preview.Note)
+		add(hintStyle(), row.Preview.Note)
 	}
 	if row.Preview.SourceProvenance != "" {
 		lines = append(lines, "")
-		add(hintStyle, "without the override: "+row.Preview.SourceProvenance)
+		add(hintStyle(), "without the override: "+row.Preview.SourceProvenance)
 		if row.Preview.SourceTOML != "" {
-			add(dimStyle, row.Preview.SourceTOML)
+			add(dimStyle(), row.Preview.SourceTOML)
 		}
 	}
 	if len(row.Preview.Reach) > 0 {
 		lines = append(lines, "")
-		add(hintStyle, "reach:")
+		add(hintStyle(), "reach:")
 		for _, line := range row.Preview.Reach {
-			add(dimStyle, "  "+line.Actor+"  "+line.Detail)
+			add(dimStyle(), "  "+line.Actor+"  "+line.Detail)
 		}
 	}
 
@@ -710,7 +710,7 @@ func (m *ConfigDashboard) previewLines(height int) []string {
 // reader knows the value continues past the last line they can see.
 func clipPreview(lines []string, height int) []string {
 	if len(lines) > height {
-		lines = append(lines[:height-1:height-1], hintStyle.Render("  … clipped to fit the pane"))
+		lines = append(lines[:height-1:height-1], hintStyle().Render("  … clipped to fit the pane"))
 	}
 	return lines
 }

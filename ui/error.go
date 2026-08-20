@@ -27,22 +27,17 @@ type errorModel struct {
 	copyFunc func(string) error
 }
 
-var (
-	errorTitleStyle = lipgloss.NewStyle().
-			Foreground(colorAttention).
-			Bold(true)
+var errorMessageStyle = lipgloss.NewStyle()
 
-	errorMessageStyle = lipgloss.NewStyle()
+func errorTitleStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(colorAttention()).Bold(true)
+}
 
-	errorTraceStyle = lipgloss.NewStyle().
-			Foreground(colorDim)
+func errorTraceStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(colorDim()) }
 
-	errorCopiedStyle = lipgloss.NewStyle().
-				Foreground(colorAccent)
+func errorCopiedStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(colorAccent()) }
 
-	errorCopyFailedStyle = lipgloss.NewStyle().
-				Foreground(colorWorking)
-)
+func errorCopyFailedStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(colorWorking()) }
 
 func (m *errorModel) Init() tea.Cmd {
 	return nil
@@ -81,7 +76,7 @@ func (m *errorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *errorModel) View() tea.View {
 	var b strings.Builder
 
-	title := errorTitleStyle.Render("  ✗ Error")
+	title := errorTitleStyle().Render("  ✗ Error")
 	b.WriteString(title)
 	b.WriteString("\n\n")
 
@@ -94,11 +89,11 @@ func (m *errorModel) View() tea.View {
 
 	if m.trace != "" {
 		b.WriteString("\n")
-		b.WriteString(errorTitleStyle.Render("  Stack trace"))
+		b.WriteString(errorTitleStyle().Render("  Stack trace"))
 		b.WriteString("\n\n")
 		for _, line := range strings.Split(strings.TrimRight(m.trace, "\n"), "\n") {
 			b.WriteString("  ")
-			b.WriteString(errorTraceStyle.Render(line))
+			b.WriteString(errorTraceStyle().Render(line))
 			b.WriteString("\n")
 		}
 	}
@@ -108,15 +103,15 @@ func (m *errorModel) View() tea.View {
 	// Status line: copied / copy failed
 	switch {
 	case m.copied:
-		b.WriteString(errorCopiedStyle.Render("  ✓ Copied to clipboard"))
+		b.WriteString(errorCopiedStyle().Render("  ✓ Copied to clipboard"))
 		b.WriteString("\n")
 	case m.copyErrMsg != "":
-		b.WriteString(errorCopyFailedStyle.Render("  ⚠ Copy failed: " + m.copyErrMsg))
+		b.WriteString(errorCopyFailedStyle().Render("  ⚠ Copy failed: " + m.copyErrMsg))
 		b.WriteString("\n")
 	}
 
 	b.WriteString("\n")
-	b.WriteString(hintStyle.Render("  c copy · any other key dismiss"))
+	b.WriteString(hintStyle().Render("  c copy · any other key dismiss"))
 
 	v := tea.NewView(b.String())
 	v.AltScreen = true

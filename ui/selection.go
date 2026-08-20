@@ -97,18 +97,18 @@ func CaptionRule(label string, width int) string {
 	label = " " + label + " "
 	left := 3
 	if width <= 0 {
-		return dimStyle.Render(strings.Repeat(dash, left) + label + strings.Repeat(dash, left))
+		return dimStyle().Render(strings.Repeat(dash, left) + label + strings.Repeat(dash, left))
 	}
 	labelW := lipgloss.Width(label)
 	if width <= labelW {
-		return dimStyle.Render(TruncateToWidth(strings.Repeat(dash, left)+label, width))
+		return dimStyle().Render(TruncateToWidth(strings.Repeat(dash, left)+label, width))
 	}
 	rest := width - labelW
 	if left > rest {
 		left = rest
 	}
 	right := rest - left
-	return dimStyle.Render(strings.Repeat(dash, left) + label + strings.Repeat(dash, right))
+	return dimStyle().Render(strings.Repeat(dash, left) + label + strings.Repeat(dash, right))
 }
 
 // ScrollEdgeLine puts a hidden-row count at the right end of existing chrome.
@@ -143,7 +143,7 @@ func captionRuleWithEnds(label string, width int, left, right string) string {
 	plainLeft, plainRight := StripANSI(left), StripANSI(right)
 	label = " " + label + " "
 	if width <= 0 {
-		return dimStyle.Render(strings.TrimSpace(plainLeft + " ───" + label + "─── " + plainRight))
+		return dimStyle().Render(strings.TrimSpace(plainLeft + " ───" + label + "─── " + plainRight))
 	}
 	fixed := lipgloss.Width(label)
 	if plainLeft != "" {
@@ -153,7 +153,7 @@ func captionRuleWithEnds(label string, width int, left, right string) string {
 		fixed += lipgloss.Width(plainRight) + 1
 	}
 	if width <= fixed {
-		return dimStyle.Render(TruncateToWidth(strings.TrimSpace(plainLeft+" "+label+" "+plainRight), width))
+		return dimStyle().Render(TruncateToWidth(strings.TrimSpace(plainLeft+" "+label+" "+plainRight), width))
 	}
 	dashes := width - fixed
 	leftDashes := dashes / 2
@@ -170,7 +170,7 @@ func captionRuleWithEnds(label string, width int, left, right string) string {
 		b.WriteByte(' ')
 		b.WriteString(plainRight)
 	}
-	return dimStyle.Render(b.String())
+	return dimStyle().Render(b.String())
 }
 
 // ConfirmPrompt is the inline y/N question a bulk verb asks before it runs,
@@ -179,7 +179,7 @@ func captionRuleWithEnds(label string, width int, left, right string) string {
 // whole of what a human has to recognise: a line ending in `? y/N` means one key
 // is about to write over everything marked (ADR-0215 decision 7).
 func ConfirmPrompt(label string) string {
-	return killPromptStyle.Render("  " + label + "? y/N")
+	return killPromptStyle().Render("  " + label + "? y/N")
 }
 
 // SelectionRegion is the list Region a Selection of count rows asks for: the

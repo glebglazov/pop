@@ -73,7 +73,9 @@ func detailStatusStyled(kinds workKinds, row DashboardRow) string {
 }
 
 // dashboardManagedWtStyle colors the [managed wt] destination badge.
-var dashboardManagedWtStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
+func dashboardManagedWtStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(ui.ColorAccent())
+}
 
 // dashboardVerifiedAtBadgeStyled renders the Verified-at SHA badge with the
 // three-state colour rule (ADR-0156): green at HEAD, yellow when drifted, red
@@ -146,11 +148,11 @@ var dashboardStatusBucketStyle = map[string]lipgloss.Style{
 func renderDashboardDest(kind work.DestKind, label string) string {
 	switch kind {
 	case work.DestManagedDirective:
-		return dashboardManagedWtStyle.Render(work.DestLabelManagedWt)
+		return dashboardManagedWtStyle().Render(work.DestLabelManagedWt)
 	case work.DestNeedsBind:
-		return ui.HintStyle.Render(work.DestLabelNeedsBind)
+		return ui.HintStyle().Render(work.DestLabelNeedsBind)
 	case work.DestDoneManagedBound:
-		return dashboardManagedWtStyle.Render("[managed wt " + label + "]")
+		return dashboardManagedWtStyle().Render("[managed wt " + label + "]")
 	default:
 		return label
 	}

@@ -26,14 +26,14 @@ func TestLivePaneMenuKeyColours(t *testing.T) {
 	joined := strings.Join(lines, "\n")
 
 	greenI := livePaneRunningStyle.Render("I")
-	greyS := livePaneIdleStyle.Render("S")
+	greyS := livePaneIdleStyle().Render("S")
 	if !strings.Contains(joined, greenI) {
 		t.Fatalf("drain key must be green when running:\n%s", joined)
 	}
 	if !strings.Contains(joined, greyS) {
 		t.Fatalf("assist key must be grey when idle:\n%s", joined)
 	}
-	if strings.Contains(joined, livePaneRunningStyle.Render("O")) || strings.Contains(joined, livePaneIdleStyle.Render("O")) {
+	if strings.Contains(joined, livePaneRunningStyle.Render("O")) || strings.Contains(joined, livePaneIdleStyle().Render("O")) {
 		t.Fatalf("shell key must stay dark:\n%s", joined)
 	}
 	if !strings.Contains(joined, "O  shell") {
@@ -267,7 +267,7 @@ func TestLivePaneRowClusterInView(t *testing.T) {
 	if !strings.Contains(view, livePaneRunningStyle.Render("I")) {
 		t.Fatalf("view must show green drain in row cluster:\n%s", view)
 	}
-	if !strings.Contains(view, livePaneIdleStyle.Render("S")) {
+	if !strings.Contains(view, livePaneIdleStyle().Render("S")) {
 		t.Fatalf("view must show grey assist in row cluster:\n%s", view)
 	}
 }
@@ -296,7 +296,7 @@ func TestLivePaneRowClusterClearsOnReload(t *testing.T) {
 	})
 	got = updated.(QueueDashboard)
 	view := got.View().Content
-	if strings.Contains(view, livePaneRunningStyle.Render("I")) || strings.Contains(view, livePaneIdleStyle.Render("I")) {
+	if strings.Contains(view, livePaneRunningStyle.Render("I")) || strings.Contains(view, livePaneIdleStyle().Render("I")) {
 		t.Fatalf("cluster must be dark after pane died:\n%s", view)
 	}
 	if !strings.Contains(view, dashboardActivityClusterPlain) {

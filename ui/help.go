@@ -73,7 +73,7 @@ func RenderHelpOverlay(title string, entries []HelpEntry, width, height int) str
 	}
 
 	writeInputBox(&b, width, " "+title)
-	b.WriteString(hintStyle.Render("  C-h toggle · Esc close"))
+	b.WriteString(hintStyle().Render("  C-h toggle · Esc close"))
 
 	return b.String()
 }

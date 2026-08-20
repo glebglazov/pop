@@ -104,9 +104,9 @@ func (m *namePromptModel) viewHelp() string {
 func (m *namePromptModel) viewNormal() tea.View {
 	var b strings.Builder
 
-	b.WriteString(headerStyle.Render("  " + m.header))
+	b.WriteString(headerStyle().Render("  " + m.header))
 	if m.base != "" {
-		b.WriteString(hintStyle.Render("  (base: " + m.base + ")"))
+		b.WriteString(hintStyle().Render("  (base: " + m.base + ")"))
 	}
 	b.WriteString("\n\n")
 
@@ -115,7 +115,7 @@ func (m *namePromptModel) viewNormal() tea.View {
 	b.WriteString(m.field.View())
 	b.WriteString("\n\n")
 
-	b.WriteString(hintStyle.Render("  enter confirm · esc cancel · C-h help"))
+	b.WriteString(hintStyle().Render("  enter confirm · esc cancel · C-h help"))
 
 	v := tea.NewView(b.String())
 	v.AltScreen = true

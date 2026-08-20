@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"image/color"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -11,41 +12,77 @@ import (
 	"github.com/junegunn/fzf/src/util"
 )
 
-// Shared color constants used across picker views
-var (
-	colorAccent    = lipgloss.Color("39")
-	colorDim       = lipgloss.Color("241")
-	colorPreview   = lipgloss.Color("252")
-	colorSeparator = lipgloss.Color("238")
-	colorAttention = lipgloss.Color("196")
-	// colorWorking is the house "live/hot" colour: a running agent pane (Monitor
-	// spinner) or a live drain (Work dashboard dot). Intentionally the same red
-	// (196) as colorAttention — working and unread share the "hot" red and are
-	// told apart by motion (working animates/spins, unread sits still) rather
-	// than hue.
-	colorWorking = lipgloss.Color("196")
-	// colorWorkingSpinner is the Monitor working-spinner hue: bright yellow (11).
-	// The animated spinner reads as "an agent is live here" through motion + hue
-	// together, so it doesn't need to share colorWorking's red with unread.
-	colorWorkingSpinner = lipgloss.Color("11")
-	colorClear          = lipgloss.Color("241")
+// Shared house palette used across picker and dashboard views. Every pinned
+// colour is a light/dark pair (ADR-0230): today's value is the dark member,
+// so a terminal that answers dark — or does not answer at all — sees no
+// change. Pairs are read through the appearance in force each time a style
+// is built, never captured at package init; a value captured once from a
+// fact that changes is the bug this pairing exists to remove. This is the
+// palette's one definition — every other file reads it rather than pinning
+// its own copy.
 
-	indicatorStyle = lipgloss.NewStyle().Foreground(colorAccent)
-	hintStyle      = lipgloss.NewStyle().Foreground(colorDim)
-	dimStyle       = lipgloss.NewStyle().Foreground(colorDim)
-	headerStyle    = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+// paletteColor picks a pair's light member on a light terminal and its dark
+// member otherwise, including plain: a terminal that never answers keeps
+// today's colour rather than switching to one chosen for a background it
+// never confirmed.
+func paletteColor(light, dark string) color.Color {
+	return lipgloss.LightDark(CurrentAppearance() != AppearanceLight)(lipgloss.Color(light), lipgloss.Color(dark))
+}
 
-	// IndicatorStyle is the shared cursor-row block indicator; exported for cross-package use.
-	IndicatorStyle = indicatorStyle
-	// HintStyle is the shared dimmed footer hint style; exported for cross-package use.
-	HintStyle = hintStyle
-	// ColorWorking is the shared house "live/hot" colour; exported so other
-	// packages (e.g. the Work dashboard live-drain dot) paint working the same red.
-	ColorWorking = colorWorking
-	// ColorWorkingSpinner is the Monitor working-spinner colour (bright yellow);
-	// exported so other dashboards paint the animated working dots identically.
-	ColorWorkingSpinner = colorWorkingSpinner
-)
+func colorAccent() color.Color { return paletteColor("25", "39") }
+
+// colorDim and colorClear are a same-member pair, stated on purpose: 241
+// reads as "less contrast than body text" on either background.
+func colorDim() color.Color   { return lipgloss.Color("241") }
+func colorClear() color.Color { return lipgloss.Color("241") }
+
+func colorPreview() color.Color   { return paletteColor("238", "252") }
+func colorSeparator() color.Color { return paletteColor("250", "238") }
+
+// colorAttention and colorWorking are the house "hot" red, intentionally the
+// same pair: a running agent pane (Monitor spinner) or a live drain (Work
+// dashboard dot) shares it with unread, and the two are told apart by motion
+// (working animates/spins, unread sits still) rather than hue.
+func colorAttention() color.Color { return paletteColor("160", "196") }
+func colorWorking() color.Color   { return paletteColor("160", "196") }
+
+// colorWorkingSpinner is the Monitor working-spinner hue: bright yellow, ANSI
+// index 11. The terminal's own theme already defines that index in both
+// variants, so it already follows a theme switch and needs no pairing here.
+// The animated spinner reads as "an agent is live here" through motion + hue
+// together, so it doesn't need to share colorWorking's red with unread.
+func colorWorkingSpinner() color.Color { return lipgloss.Color("11") }
+
+// colorWarning is the house amber for a non-fatal problem: a gate's warn
+// tone, a config key more than one layer contests.
+func colorWarning() color.Color { return paletteColor("166", "214") }
+
+func indicatorStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(colorAccent()) }
+func hintStyle() lipgloss.Style      { return lipgloss.NewStyle().Foreground(colorDim()) }
+func dimStyle() lipgloss.Style       { return lipgloss.NewStyle().Foreground(colorDim()) }
+func headerStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(colorAccent()).Bold(true)
+}
+
+// IndicatorStyle is the shared cursor-row block indicator; exported for cross-package use.
+func IndicatorStyle() lipgloss.Style { return indicatorStyle() }
+
+// HintStyle is the shared dimmed footer hint style; exported for cross-package use.
+func HintStyle() lipgloss.Style { return hintStyle() }
+
+// ColorAccent is the shared house accent colour; exported for cross-package use.
+func ColorAccent() color.Color { return colorAccent() }
+
+// ColorClear is the shared house "reset to neutral" colour; exported for cross-package use.
+func ColorClear() color.Color { return colorClear() }
+
+// ColorWorking is the shared house "live/hot" colour; exported so other
+// packages (e.g. the Work dashboard live-drain dot) paint working the same red.
+func ColorWorking() color.Color { return colorWorking() }
+
+// ColorWorkingSpinner is the Monitor working-spinner colour (bright yellow);
+// exported so other dashboards paint the animated working dots identically.
+func ColorWorkingSpinner() color.Color { return colorWorkingSpinner() }
 
 // WriteInputBox writes a bordered input box to b; exported for cross-package use.
 // content is rendered inside; use TextField.View() or a static string like " Help".
@@ -89,14 +126,14 @@ func renderUpdateNotice(width int, text string) string {
 		return ""
 	}
 	if width <= 0 {
-		return dimStyle.Render(text)
+		return dimStyle().Render(text)
 	}
 	text = truncateToWidth(text, width)
 	padding := width - len([]rune(text))
 	if padding < 0 {
 		padding = 0
 	}
-	return strings.Repeat(" ", padding) + dimStyle.Render(text)
+	return strings.Repeat(" ", padding) + dimStyle().Render(text)
 }
 
 // TruncateToWidth trims s to at most width runes (plain text, no ANSI).

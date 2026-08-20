@@ -7,6 +7,7 @@ import (
 	"charm.land/lipgloss/v2"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
 	"github.com/glebglazov/pop/tasks/setkind"
+	"github.com/glebglazov/pop/ui"
 	"github.com/glebglazov/pop/wayfinder"
 )
 
@@ -120,10 +121,9 @@ func loadLivePaneCache(d *drain.Deps) livePaneCache {
 }
 
 // livePane styles for handoff-verb keys in the action menu.
-var (
-	livePaneIdleStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-	livePaneRunningStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-)
+func livePaneIdleStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(ui.ColorClear()) }
+
+var livePaneRunningStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
 
 // styleHandoffKey colours a handoff verb's shortcut by its live-pane state.
 // Shell is always dark (livePaneNone): it is not an activity pop supervises.
@@ -131,7 +131,7 @@ var (
 func styleHandoffKey(key string, state livePaneState) string {
 	switch state {
 	case livePaneIdle:
-		return livePaneIdleStyle.Render(key)
+		return livePaneIdleStyle().Render(key)
 	case livePaneRunning:
 		return livePaneRunningStyle.Render(key)
 	default:

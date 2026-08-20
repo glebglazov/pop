@@ -26,7 +26,7 @@ type FlashExpiredMsg struct{ token uint64 }
 // without any of them mistaking another's timer for its own.
 var flashTokens atomic.Uint64
 
-var flashStyle = lipgloss.NewStyle().Foreground(colorAccent)
+func flashStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(colorAccent()) }
 
 // Flash is transient action feedback with a lifetime. It owns the message, the
 // three-second expiry and the command that fires it, so a view says what just
@@ -94,5 +94,5 @@ func (f Flash) Line() string {
 	if f.text == "" {
 		return ""
 	}
-	return flashStyle.Render("  " + f.text)
+	return flashStyle().Render("  " + f.text)
 }

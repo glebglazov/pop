@@ -297,8 +297,8 @@ func (m *GateMenu) ViewChoices() string {
 		}
 		label := fmt.Sprintf("%s. %s", it.Key, itemLabel)
 		if i == m.cursor {
-			prefix = IndicatorStyle.Render("▸ ")
-			label = selectedGateItemStyle.Render(label)
+			prefix = IndicatorStyle().Render("▸ ")
+			label = selectedGateItemStyle().Render(label)
 		} else {
 			prefix = "  "
 		}
@@ -307,16 +307,16 @@ func (m *GateMenu) ViewChoices() string {
 		b.WriteString("\n")
 		for _, d := range it.Details {
 			b.WriteString("     ")
-			b.WriteString(hintStyle.Render(d))
+			b.WriteString(hintStyle().Render(d))
 			b.WriteString("\n")
 		}
 	}
 
 	if m.spec.Footnote != "" {
-		b.WriteString(hintStyle.Render("  " + m.spec.Footnote))
+		b.WriteString(hintStyle().Render("  " + m.spec.Footnote))
 		b.WriteString("\n")
 	}
-	b.WriteString(hintStyle.Render("  enter select · digit jump · ↑/↓ move · C-h help"))
+	b.WriteString(hintStyle().Render("  enter select · digit jump · ↑/↓ move · C-h help"))
 	b.WriteString("\n")
 	return b.String()
 }
@@ -334,26 +334,28 @@ func clampToPane(content string, height int) string {
 		return content
 	}
 	kept := append([]string{}, lines[:height-1]...)
-	kept = append(kept, hintStyle.Render("  … clipped to fit the pane"))
+	kept = append(kept, hintStyle().Render("  … clipped to fit the pane"))
 	return strings.Join(kept, "\n") + "\n"
 }
 
 func (m *GateMenu) headlineStyle() lipgloss.Style {
 	switch m.spec.Tone {
 	case GateMenuToneWarn:
-		return gateWarnStyle
+		return gateWarnStyle()
 	case GateMenuToneError:
-		return gateErrorStyle
+		return gateErrorStyle()
 	default:
-		return headerStyle
+		return headerStyle()
 	}
 }
 
-var (
-	gateWarnStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
-	gateErrorStyle        = lipgloss.NewStyle().Foreground(colorAttention).Bold(true)
-	selectedGateItemStyle = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
-)
+func gateWarnStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(colorWarning()).Bold(true) }
+func gateErrorStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(colorAttention()).Bold(true)
+}
+func selectedGateItemStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(colorAccent()).Bold(true)
+}
 
 type gateMenuKeyMap struct {
 	Up     key.Binding

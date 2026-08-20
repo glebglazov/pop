@@ -80,7 +80,7 @@ func ScrollEdge(arrow string, hidden int) string {
 	if hidden <= 0 {
 		return ""
 	}
-	return dimStyle.Render(fmt.Sprintf("%s %d", arrow, hidden))
+	return dimStyle().Render(fmt.Sprintf("%s %d", arrow, hidden))
 }
 
 // List is a passive, generic scrolling-list viewport. It owns cursor, scroll,
@@ -502,17 +502,17 @@ func (l *List[T]) itemLines(idx, prefixWidth int) []string {
 func (l *List[T]) renderPrefix(selected, pinned bool, quickLabel string, prefixWidth int) string {
 	mark := " "
 	if pinned {
-		mark = indicatorStyle.Render("▸")
+		mark = indicatorStyle().Render("▸")
 	}
 	if selected {
-		indicator := indicatorStyle.Render("█")
+		indicator := indicatorStyle().Render("█")
 		if l.opts.QuickLabel != nil {
 			return strings.Repeat(" ", prefixWidth-1) + indicator
 		}
 		return indicator + mark
 	}
 	if quickLabel != "" {
-		return dimStyle.Render(quickLabel)
+		return dimStyle().Render(quickLabel)
 	}
 	return strings.Repeat(" ", prefixWidth-1) + mark
 }
