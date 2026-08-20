@@ -161,12 +161,14 @@ the upstream text is kept byte-intact only so drift stays diffable.
 ## Issue tracker doc resolution
 
 Ignore upstream's "run `/setup-matt-pocock-skills`" line and its default
-local-markdown tracker. Resolve the issue-tracker doc two-layer instead:
+local-markdown tracker. Resolve the issue-tracker doc through pop instead:
 
-1. If the repo has `docs/agents/issue-tracker.md`, that doc wins.
-2. Otherwise read `~/.agents/docs/issue-tracker.md`.
-3. If neither exists, stop and tell the user no issue-tracker doc is
-   configured — there is no further fallback.
+Run `pop conventions get issue-tracker` and read the document it prints. That
+command resolves the ranks itself — this repository's
+`docs/agents/issue-tracker.md` where it has one, the human's own project or
+global document where they wrote one, pop's own shipped answer beneath them —
+and it always answers, so there is no no-doc-configured arm and no path to read
+by hand.
 
 Resolve this repository's Task-storage root once per session with
 `pop work show-path`; the doc lays maps out under a `maps/` sibling of that

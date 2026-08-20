@@ -188,3 +188,143 @@ func TestTaskRegisterLeavesALiveSetsConventionAlone(t *testing.T) {
 		t.Fatalf("re-register rewrote a live set's convention: %s", got)
 	}
 }
+
+// resolvedCommitConvention is what the stack answers for the checkout at root —
+// the value a register is expected to project into a manifest.
+func resolvedCommitConvention(t *testing.T, td *tasks.Deps, root string) string {
+	t.Helper()
+	stack, err := conventions.Resolve(&conventions.Deps{FS: td.FS, Tasks: td}, conventions.KindCommits, root)
+	if err != nil {
+		t.Fatalf("resolve commits convention: %v", err)
+	}
+	want := strings.TrimSpace(conventions.StackProse(stack))
+	if want == "" {
+		t.Fatal("the commits kind must always answer")
+	}
+	return want
+}
+
+// TestTaskRegisterWritesTheConventionIntoAMalformedSet covers the path the
+// issue-tracker doc prescribes: a set that registers MALFORMED, is fixed, and is
+// re-registered. The set registers into state either way, and the fixing
+// re-register is not a new registration, so a set skipped here for malformity
+// would keep the planning agent's copy forever. The key therefore lands on the
+// document itself — the invalid value the author typed is carried across
+// untouched rather than replaced by pop's projection of the parsed manifest.
+func TestTaskRegisterWritesTheConventionIntoAMalformedSet(t *testing.T) {
+	root, _, td := setupCmdRepoTest(t)
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	tasksDir := cmdTasksDir(t, td, root)
+	setDir := registerConventionSet(t, tasksDir, "2026-08-20-broken", "STALE: subjects look roughly like `thing: summary`")
+
+	// A task type no validator accepts: JSON-valid, manifest-invalid.
+	raw := readSetKeys(t, setDir)
+	raw["tasks"] = json.RawMessage(`[{"id":"01-a","file":"01-a.md","title":"A","type":"SIDEWAYS","status":"open","commit_subject":"feat(demo): teach the widget to blink"}]`)
+	data, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(setDir, "index.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origLoad := taskConfigLoad
+	taskConfigLoad = func(string) (*config.Config, error) {
+		return &config.Config{Projects: []config.ProjectEntry{{Path: root}}}, nil
+	}
+	t.Cleanup(func() { taskConfigLoad = origLoad })
+
+	var out bytes.Buffer
+	if err := runTaskRegisterWith(td, &out, ""); err != nil {
+		t.Fatalf("register failed: %v\n%s", err, out.String())
+	}
+
+	want := resolvedCommitConvention(t, td, root)
+	after := readSetKeys(t, setDir)
+	var got string
+	if err := json.Unmarshal(after["commit_convention"], &got); err != nil {
+		t.Fatalf("commit_convention on disk = %s", after["commit_convention"])
+	}
+	if got != want {
+		t.Fatalf("a malformed set kept the planning agent's convention.\ngot:\n%s\nwant:\n%s", got, want)
+	}
+	// Nothing else was rewritten from the parse: the value that made the set
+	// malformed is still the author's own, so the diagnostics still name it.
+	if !strings.Contains(string(after["tasks"]), `"type": "SIDEWAYS"`) {
+		t.Errorf("the write projected parsed fields back over the author's manifest: %s", after["tasks"])
+	}
+
+	// The human fixes the type and re-registers: the set is already registered,
+	// so this register is not an activation — and the convention already written
+	// stands.
+	fixed := readSetKeys(t, setDir)
+	fixed["tasks"] = json.RawMessage(`[{"id":"01-a","file":"01-a.md","title":"A","type":"AFK","status":"open","commit_subject":"feat(demo): teach the widget to blink"}]`)
+	data, err = json.Marshal(fixed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(setDir, "index.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := runTaskRegisterWith(td, &out, ""); err != nil {
+		t.Fatalf("re-register failed: %v\n%s", err, out.String())
+	}
+	m := tasks.LoadManifest(td, "2026-08-20-broken", filepath.Join(setDir, "index.json"))
+	if !m.Valid {
+		t.Fatalf("the fixed manifest is still not valid: %v", m.Errors)
+	}
+	if m.CommitConvention != want {
+		t.Fatalf("after the fixing re-register the convention is %q", m.CommitConvention)
+	}
+}
+
+// TestTaskRegisterFillsALiveSetsMissingConvention covers the other half of the
+// boundary: a register leaves a registered set's convention alone, but a set
+// carrying none at all is not left unable to answer what a commit looks like
+// here — a mid-drain Remediation renders its subject from that key.
+func TestTaskRegisterFillsALiveSetsMissingConvention(t *testing.T) {
+	root, _, td := setupCmdRepoTest(t)
+	resetTaskFlags()
+	t.Cleanup(resetTaskFlags)
+
+	tasksDir := cmdTasksDir(t, td, root)
+	setDir := registerConventionSet(t, tasksDir, "2026-08-20-empty", "")
+
+	origLoad := taskConfigLoad
+	taskConfigLoad = func(string) (*config.Config, error) {
+		return &config.Config{Projects: []config.ProjectEntry{{Path: root}}}, nil
+	}
+	t.Cleanup(func() { taskConfigLoad = origLoad })
+
+	var out bytes.Buffer
+	if err := runTaskRegisterWith(td, &out, ""); err != nil {
+		t.Fatalf("first register failed: %v\n%s", err, out.String())
+	}
+
+	// A set that registered before pop wrote the key at all: strip it back out.
+	stripped := readSetKeys(t, setDir)
+	delete(stripped, "commit_convention")
+	data, err := json.Marshal(stripped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(setDir, "index.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out.Reset()
+	if err := runTaskRegisterWith(td, &out, ""); err != nil {
+		t.Fatalf("second register failed: %v\n%s", err, out.String())
+	}
+	want := resolvedCommitConvention(t, td, root)
+	var got string
+	if err := json.Unmarshal(readSetKeys(t, setDir)["commit_convention"], &got); err != nil {
+		t.Fatalf("commit_convention on disk = %s", readSetKeys(t, setDir)["commit_convention"])
+	}
+	if got != want {
+		t.Fatalf("a registered set was left with no convention.\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}

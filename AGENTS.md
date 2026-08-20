@@ -15,8 +15,8 @@ files to read in ranges, and where agent-CLI wire facts live:
 ### Issue tracker
 
 Issues, specs, and task sets live in pop's per-machine Work store. No repo
-tracker doc by design — each machine resolves its own store via
-`~/.agents/docs/issue-tracker.md`.
+tracker doc by design — resolve the doc with
+`pop conventions get issue-tracker`.
 
 ### Domain docs
 

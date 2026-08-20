@@ -105,15 +105,17 @@ byte-intact only so drift stays diffable.
 
 Ignore upstream's "run `/setup-matt-pocock-skills`" line **and** its step-3
 publish mechanics (publish to the tracker, apply the `ready-for-agent` label).
-Resolve the issue-tracker doc two-layer instead:
+Resolve the issue-tracker doc through pop instead:
 
-1. If the repo has `docs/agents/issue-tracker.md`, that doc wins.
-2. Otherwise read `~/.agents/docs/issue-tracker.md`.
-3. If neither exists, stop and tell the user no issue-tracker doc is
-   configured — there is no further fallback.
+Run `pop conventions get issue-tracker` and read the document it prints. That
+command resolves the ranks itself — this repository's
+`docs/agents/issue-tracker.md` where it has one, the human's own project or
+global document where they wrote one, pop's own shipped answer beneath them —
+and it always answers, so there is no no-doc-configured arm and no path to read
+by hand.
 
 Publish the spec per the resolved doc's **"Publishing a spec"** section. That
-section owns store resolution and the two-layer doc override; run
+section owns store resolution and how the doc itself is resolved; run
 `pop tasks authoring-guide` for the file's shape — the co-located `spec.md`
 path, the `<task-set-name>` naming convention, and the template including the
 Map back-link line. None of it is restated here; consult the doc and the guide.

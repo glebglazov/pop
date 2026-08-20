@@ -227,8 +227,10 @@ type Manifest struct {
 	//
 	// pop writes it itself when the set registers, from the resolved stack
 	// (ADR-0228, RecordCommitConvention): it is a projection of the Convention
-	// stack, not an author's copy of it, and an authored value is overwritten.
-	// Empty only for a set registered before pop wrote the key.
+	// stack, not an author's copy of it, and an authored value is overwritten. A
+	// later register fills it where it is blank on a set that is still live, so a
+	// set whose manifest was MALFORMED at its own registration is not left
+	// without one; a value already there on a registered set stands.
 	CommitConvention string
 	// HumanCompleted records that a human's own `complete` is what carried this set
 	// terminal, read from and written back as the set-level `human_completed` key.

@@ -5,14 +5,16 @@ pop's own Task storage, reached through the `pop` CLI. A planning skill that onl
 knows "consult the Work store doc for this operation" can publish correctly using
 the per-operation sections below; nothing here refers back into a skill body.
 
-Resolution is two-layer. A repo-level `docs/agents/issue-tracker.md` wins when
-present. Absent that, skills read the user-level `~/.agents/docs/issue-tracker.md`
-— which is where *this* file is reached from. To change publish behaviour for one
-repository, write the repo doc at `docs/agents/issue-tracker.md`.
+A skill reaches this document by running `pop conventions get issue-tracker`,
+which resolves the convention's ranks and prints the one that answers: this
+repository's `docs/agents/issue-tracker.md` where it has one, the human's own
+project or global document where they wrote one, and this file — pop's own
+shipped answer — beneath them. To change publish behaviour for one repository,
+commit the repo doc at `docs/agents/issue-tracker.md`; it displaces this one.
 
-**The override is skill convention, not something pop's Go reads.** No code
-consults the repo doc; only a skill resolving "which issue-tracker doc applies"
-does. It governs **store choice and behavioural convention** — which register
+**The override changes which document a skill follows, not how pop behaves.** No
+Go code reads the repo doc; the resolution serves the skill asking "which
+issue-tracker doc applies". It governs **store choice and behavioural convention** — which register
 flags a repository defaults to, how the report-and-suggest step is worded, and
 so on — never authoring shape. It never really governed shape either: a
 validator compiled into the binary enforces the file templates and enums

@@ -39,8 +39,13 @@ func TestIssueTrackerDoc_EmbeddedContent(t *testing.T) {
 	if strings.Contains(body, "XDG_DATA_HOME") {
 		t.Error("embedded doc must not quote a pop data-dir path (ADR-0169)")
 	}
-	if !strings.Contains(body, "~/.agents/docs/issue-tracker.md") {
-		t.Error("embedded doc must name the vendor-neutral user-level path")
+	// ADR-0226 retired the user-level symlink: the doc is reached by resolving
+	// the convention, not by reading a path.
+	if strings.Contains(body, "~/.agents/docs/issue-tracker.md") {
+		t.Error("embedded doc must not name the retired user-level path")
+	}
+	if !strings.Contains(body, "pop conventions get issue-tracker") {
+		t.Error("embedded doc must name the command a skill reaches it through")
 	}
 }
 

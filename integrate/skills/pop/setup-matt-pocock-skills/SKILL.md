@@ -155,19 +155,19 @@ GitHub / GitLab / Local markdown / Other:
   committed into each one.
 
 When the user picks pop, **write NO repo `docs/agents/issue-tracker.md` by
-default.** An absent repo doc is the signal: the planning skills fall back to
-the machine-level `~/.agents/docs/issue-tracker.md`, so each machine resolves
-its own store. Do not synthesize a repo tracker doc from a template — there is
-no pop tracker template, and a committed doc would override that machine-level
-default for everyone.
+default.** An absent repo doc is the signal: the planning skills resolve the doc
+with `pop conventions get issue-tracker`, which falls through to pop's own
+shipped answer, so each machine resolves its own store. Do not synthesize a repo
+tracker doc from a template — there is no pop tracker template, and a committed
+doc would override that fall-through for everyone.
 
 Offer, as a **one-line option only**, committing a repo doc to pin the choice
 for the whole team:
 
 > Want to pin pop as the tracker for everyone who clones this repo? I can
 > commit a one-line `docs/agents/issue-tracker.md` that names pop; otherwise I
-> leave it absent and each machine uses its own
-> `~/.agents/docs/issue-tracker.md`.
+> leave it absent and each machine uses whatever
+> `pop conventions get issue-tracker` answers there.
 
 Only write the repo doc if the user says yes. Silence means leave it absent.
 
