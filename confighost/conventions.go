@@ -100,7 +100,8 @@ func conventionEditSeed(kind conventions.Kind, overlay conventions.Layer) string
 // no problem to hand back: prose has no schema to fail, and the one refusal —
 // an empty body — the component already reads as a cancel before it gets here.
 func (w Writer) storeConvention(kind conventions.Kind, buffer string) (string, error) {
-	return "", conventions.SetOverlay(w.conventions, kind, buffer)
+	_, _, err := conventions.Write(w.conventions, conventions.OriginOverlay, kind, w.checkout, buffer)
+	return "", err
 }
 
 // copySourceConvention refuses. Copying the source down assumes an override

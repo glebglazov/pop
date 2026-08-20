@@ -111,37 +111,60 @@ func (s Stack) overlayNote() string {
 	return ""
 }
 
-// RenderSet confirms a write of the human's document for this project: which
-// file holds it now, and the reminder that this rank outranks everything else a
-// reader could be following here — a writer who took it for a note to self would
-// not expect it to stand down their own global document and the team's committed
-// one.
-func RenderSet(w io.Writer, kind Kind, path string, replaced bool) error {
+// RenderSet confirms a write by naming the rank it landed at. The rank is the
+// fact worth reporting: a writer who took their document for a note to self
+// would not expect it to stand down the team's committed one, and a writer who
+// meant to state something everywhere would want to know they stated it here.
+func RenderSet(w io.Writer, origin Origin, kind Kind, path string, replaced bool) error {
 	verb := "WROTE"
 	if replaced {
 		verb = "REPLACED"
 	}
-	fmt.Fprintf(w, "%s your %s convention for this project\n\n", verb, kind)
+	fmt.Fprintf(w, "%s your %s convention at the %s rank (%s)\n\n",
+		verb, kind, origin, origin.Scope())
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(tw, "path\t%s\n", path)
 	if err := tw.Flush(); err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "\nThis is the first rank consulted, so it answers %[1]s here whatever\n"+
-		"~/.agents/docs/%[1]s.md or a committed docs/agents/%[1]s.md says. Your overlay\n"+
-		"is still appended to it. Run `pop conventions get %[1]s` for what is in force.\n", kind)
+	fmt.Fprintf(w, "\n%s\nRun `pop conventions get %s` for what is in force.\n",
+		rankReach(origin, kind), kind)
 	return nil
+}
+
+// rankReach says what writing one rank did to the others, in the reader's own
+// terms. Which ranks a write outranks is derivable from the stack, but the
+// sentence a human needs is about the documents they know they have, so each
+// rank names them.
+func rankReach(origin Origin, kind Kind) string {
+	switch origin {
+	case OriginProject:
+		return fmt.Sprintf("This is the first rank consulted, so it answers %[1]s here whatever\n"+
+			"~/.agents/docs/%[1]s.md or a committed docs/agents/%[1]s.md says. Your overlay\n"+
+			"is still appended to it.", kind)
+	case OriginGlobal:
+		return fmt.Sprintf("This answers %[1]s in every repository where you have written no\n"+
+			"project document, and it stands down a committed docs/agents/%[1]s.md when it\n"+
+			"does. Your overlay is still appended to it.", kind)
+	case OriginOverlay:
+		return fmt.Sprintf("This is appended to whichever rank answers %s, in every repository,\n"+
+			"rather than displacing one — so it rides along with the team's document\n"+
+			"instead of hiding it.", kind)
+	}
+	return ""
 }
 
 // RenderUnset reports a removal together with what answers the kind now.
 // Removing the winning rank promotes the next one, which is the fact the verb
 // exists to report; the stack beneath is printed through the same renderer
 // `get` uses, so the two surfaces cannot disagree about what is in effect.
-func RenderUnset(w io.Writer, kind Kind, path string, removed bool, remaining Stack) error {
+func RenderUnset(w io.Writer, origin Origin, kind Kind, path string, removed bool, remaining Stack) error {
 	if removed {
-		fmt.Fprintf(w, "REMOVED your %s convention for this project\n%s\n\n", kind, path)
+		fmt.Fprintf(w, "REMOVED your %s convention at the %s rank (%s)\n%s\n\n",
+			kind, origin, origin.Scope(), path)
 	} else {
-		fmt.Fprintf(w, "NO %s convention of yours for this project — nothing to remove.\n%s\n\n", kind, path)
+		fmt.Fprintf(w, "NO %s convention of yours at the %s rank (%s) — nothing to remove.\n%s\n\n",
+			kind, origin, origin.Scope(), path)
 	}
 	fmt.Fprintf(w, "%s\n\n", nowInForce(remaining))
 	return RenderStack(w, remaining)

@@ -169,13 +169,32 @@ func resolveStackRoots(d *Deps, cwd string) (stackRoots, error) {
 	}, nil
 }
 
+// globalPathIn is the human's document for a kind under their documents
+// directory: the rank that holds wherever they are. The stack builds it from
+// roots it already has and the writer builds it from the home directory, so it
+// is spelled once and the layer pop writes stays the layer pop reads.
+func globalPathIn(agentsDocs string, kind Kind) string {
+	return filepath.Join(agentsDocs, string(kind)+".md")
+}
+
+// GlobalPath returns where the human's document for kind, applying to every
+// repository, lives. It needs no repository, which is the whole point of the
+// rank.
+func GlobalPath(d *Deps, kind Kind) (string, error) {
+	home, err := d.fs().UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return globalPathIn(filepath.Join(home, ".agents", "docs"), kind), nil
+}
+
 // layers derives kind's ranks in resolution order, reading no file. The three
 // written ranks come first, best first, then pop's own answer for when none of
 // them does, and the overlay last because it is appended rather than ranked.
 func (r stackRoots) layers(kind Kind) []Layer {
 	return []Layer{
 		{Origin: OriginProject, Path: projectPathIn(r.projectDocs, kind)},
-		{Origin: OriginGlobal, Path: filepath.Join(r.agentsDocs, string(kind)+".md")},
+		{Origin: OriginGlobal, Path: globalPathIn(r.agentsDocs, kind)},
 		{Origin: OriginRepository, Path: filepath.Join(r.topLevel, "docs", "agents", string(kind)+".md")},
 		shippedLayer(kind),
 		{Origin: OriginOverlay, Path: overlayPathIn(r.agentsDocs, kind)},

@@ -120,7 +120,10 @@ func (w Writer) CopySource(key string) error {
 
 func (w Writer) Remove(key string) error {
 	if kind, ok := conventions.RowKind(key); ok {
-		return conventions.ClearOverlay(w.conventions, kind)
+		// The dashboard edits one rank and only one — the overlay — so it names
+		// that rank to the same writer `pop conventions unset` goes through.
+		_, _, err := conventions.Erase(w.conventions, conventions.OriginOverlay, kind, w.checkout)
+		return err
 	}
 	if leaf, ok := w.repoScope(key); ok {
 		return config.DeleteRepoOverrideValueWith(w.deps, w.checkout, leaf)

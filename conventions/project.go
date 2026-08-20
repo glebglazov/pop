@@ -1,9 +1,6 @@
 package conventions
 
 import (
-	"errors"
-	"io"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -12,8 +9,9 @@ import (
 
 // The Project convention is rank 0 of the stack: the human's own answer for one
 // project, held outside the repository so it needs no commit and no agreement
-// from a team (ADR-0226 decision 4). This file is both its path derivation and
-// its write side.
+// from a team (ADR-0226 decision 4). This file is where its path comes
+// from; the write itself goes through the one rank-parameterised writer in
+// write.go.
 //
 // Alone among pop's per-repository state it is keyed by the git remote rather
 // than by Repository identity. The subject differs: a store, a binding and a
@@ -21,11 +19,6 @@ import (
 // repository genuinely is a new subject, while a convention document is about
 // the project as a thing that outlives any one clone. A remote is also derivable
 // with no stored state, which a human-chosen name would not be.
-
-// ErrEmptyConvention refuses a write with nothing in it. A file holding only
-// whitespace reads as an absent layer to Resolve, so accepting one would leave
-// the human believing they had stated something pop will never print.
-var ErrEmptyConvention = errors.New("refusing to write an empty convention body")
 
 // projectPathIn is one kind's document inside a project's documents directory.
 // The write side reaches it through ProjectPath and the stack builds it from
@@ -123,62 +116,4 @@ func remoteSlug(remote string) string {
 
 func isSlugAlphanumeric(r rune) bool {
 	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9'
-}
-
-// Set writes the human's document for kind in the project owning cwd and
-// reports where it landed. It carries no frontmatter: every writable rank is the
-// human's own statement, whose origin is not in question (ADR-0226 decision 5).
-func Set(d *Deps, w io.Writer, kind Kind, cwd, body string) error {
-	body = strings.TrimSpace(body)
-	if body == "" {
-		return ErrEmptyConvention
-	}
-
-	path, err := ProjectPath(d, kind, cwd)
-	if err != nil {
-		return err
-	}
-	if err := d.fs().MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-
-	// Whether this replaces something matters to the writer: somebody who meant
-	// to state a convention and instead overwrote what they wrote last month
-	// should be told so by the same line that confirms the write.
-	_, statErr := d.fs().Stat(path)
-	replaced := statErr == nil
-
-	if err := d.fs().WriteFile(path, []byte(body+"\n"), 0o644); err != nil {
-		return err
-	}
-	return RenderSet(w, kind, path, replaced)
-}
-
-// Unset removes the human's document for kind in this project and prints the
-// stack that remains. The report is not a courtesy: removing the top rank hands
-// the kind to whatever sat under it, and printing that on the spot is what stops
-// `unset` being read as silencing the kind.
-func Unset(d *Deps, w io.Writer, kind Kind, cwd string) error {
-	path, err := ProjectPath(d, kind, cwd)
-	if err != nil {
-		return err
-	}
-
-	// Nothing to remove is a fact about the stack, not a failure: the caller
-	// asked for a state, and that state already holds.
-	removed := true
-	if _, err := d.fs().Stat(path); err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		removed = false
-	} else if err := d.fs().RemoveAll(path); err != nil {
-		return err
-	}
-
-	remaining, err := Resolve(d, kind, cwd)
-	if err != nil {
-		return err
-	}
-	return RenderUnset(w, kind, path, removed, remaining)
 }

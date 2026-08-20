@@ -87,48 +87,105 @@ outside a repository as well as inside one.`,
 }
 
 var conventionsSetCmd = &cobra.Command{
-	Use:   "set <kind>",
-	Short: "State your own convention for this project",
-	Long: `Write your own document for one convention kind in this project.
+	Use:   "set <kind> (--project|--global|--overlay)",
+	Short: "State your own convention at one rank",
+	Long: `Write your own document for one convention kind, at the rank you name.
 
 The body is read from stdin. ` + "`--file`" + ` reads the same body from a path instead.
 There is no editor mode.
 
   pop conventions default commits      # what pop answers with today
-  ... | pop conventions set commits
+  ... | pop conventions set commits --project
 
-This is the first rank consulted, so it answers the kind here whatever your
-global ` + "`~/.agents/docs/<kind>.md`" + ` or the team's committed
-` + "`docs/agents/<kind>.md`" + ` says. It is what to reach for when you mean to override
+Exactly one rank must be named. Pop never guesses: a convention is authoritative
+prose, and writing it a rank away from where you meant is the mistake worth a
+refusal.
+
+  --project    ~/.agents/docs/projects/<slug>/<kind>.md   yours, this project
+  --global     ~/.agents/docs/<kind>.md                   yours, every repository
+  --overlay    ~/.agents/docs/<kind>.overlay.md           appended to whichever answered
+
+` + "`--project`" + ` is the first rank consulted, so it answers the kind here whatever your
+global document or the team's committed one says: reach for it to override
 everything for one project — trying a convention out, or contradicting a team's
-grammar locally.
+grammar locally. It lives outside the repository, keyed by the git remote, so it
+needs no commit and every clone of the project reads it.
 
-It lives outside the repository, keyed by the git remote, so it needs no commit
-and every clone of the project reads it. Writing again replaces what is there.`,
+` + "`--global`" + ` is the same statement made everywhere you work. ` + "`--overlay`" + ` does not
+displace anything: it rides along with whichever rank answered.
+
+The team's committed ` + "`docs/agents/<kind>.md`" + ` is not writable here. Naming
+` + "`--repository`" + ` is refused with its path and the reason: a document a team follows
+should land through a diff somebody reviews. Writing again at the same rank
+replaces what is there.`,
 	Args:              cobra.ExactArgs(1),
 	RunE:              runConventionsSet,
 	ValidArgsFunction: completeConventionKind,
 }
 
 var conventionsUnsetCmd = &cobra.Command{
-	Use:   "unset <kind>",
-	Short: "Remove your own convention for this project",
-	Long: `Remove your own document for one convention kind in this project.
+	Use:   "unset <kind> (--project|--global|--overlay)",
+	Short: "Remove your own convention at one rank",
+	Long: `Remove your own document for one convention kind, at the rank you name.
 
-Only that one file goes: your global document and the repository's committed one
-are untouched, so the kind usually keeps answering — and since this was the top
-rank, removing it promotes whichever rank sat under it. The output names what is
-in force afterwards and prints it exactly as ` + "`get`" + ` would, so the verb cannot be
-read as silencing the kind.
+It mirrors ` + "`set`" + ` exactly: the same three ranks, named the same way, and the same
+refusal for naming none or for naming the team's committed document.
 
-A kind you have written nothing for in this project is reported as such and is
-not a failure.`,
+Only that one file goes: the other ranks are untouched, so the kind usually keeps
+answering — and where the removed rank was the one in force, whichever rank sat
+under it is promoted. The output names what is in force afterwards and prints it
+exactly as ` + "`get`" + ` would, so the verb cannot be read as silencing the kind.
+
+A rank you have written nothing at is reported as such and is not a failure.`,
 	Args:              cobra.ExactArgs(1),
 	RunE:              runConventionsUnset,
 	ValidArgsFunction: completeConventionKind,
 }
 
 var conventionsSetFile string
+
+// rankFlags is one command's rank switches: the flag a human sets to say which
+// layer a write lands in. They are held as a set rather than one bool each so
+// the "exactly one" rule is stated once, and so the flag names come from the
+// ranks themselves rather than from a second list that could drift.
+type rankFlags map[string]*bool
+
+// named returns the rank the caller asked for, or the empty string when they
+// asked for none. Cobra refuses two at once before this is reached, so the first
+// set flag is the only one.
+func (r rankFlags) named() string {
+	for name, set := range r {
+		if set != nil && *set {
+			return name
+		}
+	}
+	return ""
+}
+
+var (
+	conventionsSetRanks   = rankFlags{}
+	conventionsUnsetRanks = rankFlags{}
+)
+
+// addRankFlags gives a write verb its rank switches. The repository rank is
+// registered alongside the writable three even though pop refuses it: a reader
+// who reaches for the team's document asked a fair question, and the answer is
+// the reason it is not written here rather than "unknown flag".
+func addRankFlags(cmd *cobra.Command, flags rankFlags) {
+	ranks := append([]conventions.Origin{}, conventions.WritableRanks...)
+	ranks = append(ranks, conventions.OriginRepository)
+	names := make([]string, 0, len(ranks))
+	for _, origin := range ranks {
+		name := origin.RankName()
+		usage := fmt.Sprintf("the %s rank — %s", origin, origin.Scope())
+		if origin == conventions.OriginRepository {
+			usage = "the team's committed document — refused, with the reason"
+		}
+		flags[name] = cmd.Flags().Bool(name, false, usage)
+		names = append(names, name)
+	}
+	cmd.MarkFlagsMutuallyExclusive(names...)
+}
 
 func init() {
 	rootCmd.AddCommand(conventionsCmd)
@@ -139,6 +196,8 @@ func init() {
 
 	conventionsSetCmd.Flags().StringVar(&conventionsSetFile, "file", "",
 		"read the convention body from this file instead of stdin")
+	addRankFlags(conventionsSetCmd, conventionsSetRanks)
+	addRankFlags(conventionsUnsetCmd, conventionsUnsetRanks)
 }
 
 func completeConventionKind(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
@@ -182,7 +241,8 @@ func runConventionsSet(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("conventions set: %w", err)
 	}
-	return runConventionsSetWith(cmdLayerDeps().conventionsDeps(), cmd.OutOrStdout(), dir, args[0], body)
+	return runConventionsSetWith(cmdLayerDeps().conventionsDeps(), cmd.OutOrStdout(), dir,
+		args[0], conventionsSetRanks.named(), body)
 }
 
 // readConventionBody resolves the two ways in, which are one path: --file is an
@@ -203,14 +263,19 @@ func readConventionBody(stdin io.Reader, file string) (string, error) {
 	return string(raw), nil
 }
 
-// runConventionsSetWith is the seam tests drive: the refusal, the write and
-// its report without a process or a terminal.
-func runConventionsSetWith(cd *conventions.Deps, w io.Writer, dir, name, body string) error {
+// runConventionsSetWith is the seam tests drive: the refusals, the write and
+// its report without a process or a terminal. The rank arrives as the word the
+// caller named, so the seam exercises the same refusal a bare `set` gets.
+func runConventionsSetWith(cd *conventions.Deps, w io.Writer, dir, name, rank, body string) error {
 	kind, err := conventions.ParseKind(name)
 	if err != nil {
 		return err
 	}
-	return conventions.Set(cd, w, kind, dir, body)
+	origin, err := conventions.ParseRank(rank, kind)
+	if err != nil {
+		return err
+	}
+	return conventions.Set(cd, w, origin, kind, dir, body)
 }
 
 func runConventionsUnset(cmd *cobra.Command, args []string) error {
@@ -218,17 +283,22 @@ func runConventionsUnset(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("conventions unset: %w", err)
 	}
-	return runConventionsUnsetWith(cmdLayerDeps().conventionsDeps(), cmd.OutOrStdout(), dir, args[0])
+	return runConventionsUnsetWith(cmdLayerDeps().conventionsDeps(), cmd.OutOrStdout(), dir,
+		args[0], conventionsUnsetRanks.named())
 }
 
 // runConventionsUnsetWith is the seam tests drive, so the removal and the
 // stack that survives it are exercised together.
-func runConventionsUnsetWith(cd *conventions.Deps, w io.Writer, dir, name string) error {
+func runConventionsUnsetWith(cd *conventions.Deps, w io.Writer, dir, name, rank string) error {
 	kind, err := conventions.ParseKind(name)
 	if err != nil {
 		return err
 	}
-	return conventions.Unset(cd, w, kind, dir)
+	origin, err := conventions.ParseRank(rank, kind)
+	if err != nil {
+		return err
+	}
+	return conventions.Unset(cd, w, origin, kind, dir)
 }
 
 func runConventionsDefault(cmd *cobra.Command, args []string) error {

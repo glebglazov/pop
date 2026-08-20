@@ -6,6 +6,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/glebglazov/pop/conventions"
 	"github.com/glebglazov/pop/tasks"
+	"github.com/spf13/cobra"
 )
 
 // conventionFixture is one repository with an isolated home and data dir, so a
@@ -492,17 +494,19 @@ func TestConventionsDefaultRefusesUnknownKind(t *testing.T) {
 	}
 }
 
-func (f *conventionFixture) set(t *testing.T, dir, kind, body string) (string, error) {
+// set and unset name a rank the way the command line does: every write states
+// which layer it lands in, so no fixture helper can hide one behind a default.
+func (f *conventionFixture) set(t *testing.T, dir, kind, rank, body string) (string, error) {
 	t.Helper()
 	var out bytes.Buffer
-	err := runConventionsSetWith(f.deps.conventionsDeps(), &out, dir, kind, body)
+	err := runConventionsSetWith(f.deps.conventionsDeps(), &out, dir, kind, rank, body)
 	return out.String(), err
 }
 
-func (f *conventionFixture) unset(t *testing.T, dir, kind string) (string, error) {
+func (f *conventionFixture) unset(t *testing.T, dir, kind, rank string) (string, error) {
 	t.Helper()
 	var out bytes.Buffer
-	err := runConventionsUnsetWith(f.deps.conventionsDeps(), &out, dir, kind)
+	err := runConventionsUnsetWith(f.deps.conventionsDeps(), &out, dir, kind, rank)
 	return out.String(), err
 }
 
@@ -513,7 +517,7 @@ func TestConventionsSetWritesWhatGetReadsBack(t *testing.T) {
 	f := newConventionFixture(t)
 	f.repoDoc(t, "commits", "TEAM-DOC: the type set is feat, fix, chore.")
 
-	out, err := f.set(t, f.repo, "commits", "MY-PROJECT-DOC: scopes are the package name.\n")
+	out, err := f.set(t, f.repo, "commits", "project", "MY-PROJECT-DOC: scopes are the package name.\n")
 	if err != nil {
 		t.Fatalf("set commits: %v\n%s", err, out)
 	}
@@ -573,7 +577,7 @@ func TestConventionsSetReadsStdinOrFile(t *testing.T) {
 		t.Fatalf("stdin gave %q and --file gave %q, want both %q", fromStdin, fromFile, body)
 	}
 
-	if out, err := f.set(t, f.repo, "commits", fromFile); err != nil {
+	if out, err := f.set(t, f.repo, "commits", "project", fromFile); err != nil {
 		t.Fatalf("set from file body: %v\n%s", err, out)
 	}
 	got, err := f.get(t, f.repo, "commits")
@@ -591,10 +595,10 @@ func TestConventionsSetReadsStdinOrFile(t *testing.T) {
 // the surprise worth naming.
 func TestConventionsSetReplacesWhatIsThere(t *testing.T) {
 	f := newConventionFixture(t)
-	if out, err := f.set(t, f.repo, "commits", "MY-PROJECT-DOC: first reading."); err != nil {
+	if out, err := f.set(t, f.repo, "commits", "project", "MY-PROJECT-DOC: first reading."); err != nil {
 		t.Fatalf("first set: %v\n%s", err, out)
 	}
-	out, err := f.set(t, f.repo, "commits", "MY-PROJECT-DOC: second reading.")
+	out, err := f.set(t, f.repo, "commits", "project", "MY-PROJECT-DOC: second reading.")
 	if err != nil {
 		t.Fatalf("second set: %v\n%s", err, out)
 	}
@@ -620,7 +624,7 @@ func TestConventionsSetRefusals(t *testing.T) {
 	f := newConventionFixture(t)
 	path := f.projectPath(t, f.repo, "commits")
 
-	out, err := f.set(t, f.repo, "bogus", "MY-PROJECT-DOC: anything.")
+	out, err := f.set(t, f.repo, "bogus", "project", "MY-PROJECT-DOC: anything.")
 	if err == nil {
 		t.Fatalf("unknown kind was accepted:\n%s", out)
 	}
@@ -630,7 +634,7 @@ func TestConventionsSetRefusals(t *testing.T) {
 		}
 	}
 
-	if _, err := f.set(t, f.repo, "commits", "   \n"); !errors.Is(err, conventions.ErrEmptyConvention) {
+	if _, err := f.set(t, f.repo, "commits", "project", "   \n"); !errors.Is(err, conventions.ErrEmptyConvention) {
 		t.Errorf("empty body: error = %v, want ErrEmptyConvention", err)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -643,7 +647,7 @@ func TestConventionsSetRefusals(t *testing.T) {
 // the kind to the repository's document — which the report names on the spot.
 func TestConventionsUnsetPromotesTheNextRank(t *testing.T) {
 	f := newConventionFixture(t)
-	if out, err := f.set(t, f.repo, "commits", "MY-PROJECT-DOC: scopes are the package name."); err != nil {
+	if out, err := f.set(t, f.repo, "commits", "project", "MY-PROJECT-DOC: scopes are the package name."); err != nil {
 		t.Fatalf("set commits: %v\n%s", err, out)
 	}
 	path := f.projectPath(t, f.repo, "commits")
@@ -658,7 +662,7 @@ func TestConventionsUnsetPromotesTheNextRank(t *testing.T) {
 	}
 	f.repoDoc(t, "commits", "TEAM-DOC: the type set is feat, fix, chore.")
 
-	out, err := f.unset(t, f.repo, "commits")
+	out, err := f.unset(t, f.repo, "commits", "project")
 	if err != nil {
 		t.Fatalf("unset commits: %v\n%s", err, out)
 	}
@@ -688,7 +692,7 @@ func TestConventionsUnsetPromotesTheNextRank(t *testing.T) {
 func TestConventionsUnsetWithNothingWritten(t *testing.T) {
 	f := newConventionFixture(t)
 
-	out, err := f.unset(t, f.repo, "commits")
+	out, err := f.unset(t, f.repo, "commits", "project")
 	if err != nil {
 		t.Fatalf("unset with nothing to remove: %v\n%s", err, out)
 	}
@@ -699,7 +703,7 @@ func TestConventionsUnsetWithNothingWritten(t *testing.T) {
 		t.Errorf("unset does not report what is in force after it:\n%s", out)
 	}
 
-	out, err = f.unset(t, f.repo, "bogus")
+	out, err = f.unset(t, f.repo, "bogus", "project")
 	if err == nil {
 		t.Fatalf("unknown kind was accepted:\n%s", out)
 	}
@@ -711,4 +715,217 @@ func TestConventionsUnsetWithNothingWritten(t *testing.T) {
 			t.Errorf("refusal %q does not list the known kind %q", err, kind)
 		}
 	}
+}
+
+// rankPath is where each rank's document lives for this fixture, so a test can
+// assert that a write landed at the rank it named and nowhere else.
+func (f *conventionFixture) rankPath(t *testing.T, dir, kind, rank string) string {
+	t.Helper()
+	docs := filepath.Join(f.dataHome, "home", ".agents", "docs")
+	switch rank {
+	case "project":
+		return f.projectPath(t, dir, kind)
+	case "global":
+		return filepath.Join(docs, kind+".md")
+	case "overlay":
+		return filepath.Join(docs, kind+".overlay.md")
+	}
+	t.Fatalf("no path for rank %q", rank)
+	return ""
+}
+
+// TestConventionsSetWritesTheRankItWasGiven is what the rank argument buys: the
+// same verb reaches three different files, each one named on the command line,
+// and `get` reads back the one that was written.
+func TestConventionsSetWritesTheRankItWasGiven(t *testing.T) {
+	for _, tc := range []struct {
+		rank  string
+		body  string
+		label string
+	}{
+		{"project", "MY-PROJECT-DOC: scopes are the package name.", "ANSWER: USER PROJECT"},
+		{"global", "MY-GLOBAL-DOC: subjects are imperative.", "ANSWER: USER GLOBAL"},
+		{"overlay", "MY-OVERLAY: never mention the agent.", "APPENDED: USER OVERLAY"},
+	} {
+		t.Run(tc.rank, func(t *testing.T) {
+			f := newConventionFixture(t)
+			path := f.rankPath(t, f.repo, "commits", tc.rank)
+
+			out, err := f.set(t, f.repo, "commits", tc.rank, tc.body+"\n")
+			if err != nil {
+				t.Fatalf("set --%s: %v\n%s", tc.rank, err, out)
+			}
+			// The report names the rank, not just the file: a writer who thought
+			// they were stating a note to self should be told which layer they
+			// took over.
+			if !strings.Contains(out, path) || !strings.Contains(out, tc.rank) {
+				t.Errorf("set --%s does not report the rank and path it wrote:\n%s", tc.rank, out)
+			}
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read the %s rank: %v", tc.rank, err)
+			}
+			if strings.TrimSpace(string(raw)) != tc.body {
+				t.Errorf("the %s rank holds %q, want %q", tc.rank, raw, tc.body)
+			}
+
+			got, err := f.get(t, f.repo, "commits")
+			if err != nil {
+				t.Fatalf("get commits: %v\n%s", err, got)
+			}
+			if !strings.Contains(got, tc.body) || !strings.Contains(got, tc.label) {
+				t.Errorf("what was written at the %s rank is not what %s reports:\n%s", tc.rank, tc.label, got)
+			}
+		})
+	}
+}
+
+// TestConventionsUnsetMirrorsSetAtEveryRank: the same three ranks, named the
+// same way, and each removal reports what answers the kind afterwards.
+func TestConventionsUnsetMirrorsSetAtEveryRank(t *testing.T) {
+	for _, rank := range []string{"project", "global", "overlay"} {
+		t.Run(rank, func(t *testing.T) {
+			f := newConventionFixture(t)
+			f.repoDoc(t, "commits", "TEAM-DOC: the type set is feat, fix, chore.")
+			path := f.rankPath(t, f.repo, "commits", rank)
+			if out, err := f.set(t, f.repo, "commits", rank, "MINE: written to be removed."); err != nil {
+				t.Fatalf("set --%s: %v\n%s", rank, err, out)
+			}
+
+			out, err := f.unset(t, f.repo, "commits", rank)
+			if err != nil {
+				t.Fatalf("unset --%s: %v\n%s", rank, err, out)
+			}
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Fatalf("the %s rank survived unset at %s", rank, path)
+			}
+			if !strings.Contains(out, "REMOVED") || !strings.Contains(out, path) || !strings.Contains(out, rank) {
+				t.Errorf("unset --%s does not name the rank and file it removed:\n%s", rank, out)
+			}
+			// Whatever the rank was, the report closes on what answers now — the
+			// team's document, since that is all that is left.
+			if !strings.Contains(out, "TEAM-DOC: the type set is feat, fix, chore.") ||
+				!strings.Contains(out, "Now in force: repository (") {
+				t.Errorf("unset --%s does not report what answers the kind now:\n%s", rank, out)
+			}
+			if strings.Contains(out, "MINE: written to be removed.") {
+				t.Errorf("the removed layer is still reported as in effect:\n%s", out)
+			}
+		})
+	}
+}
+
+// TestConventionsWriteRefusesWithoutARank: guessing would land authoritative
+// prose at a rank the human did not choose, so a write that names none is
+// refused with the ranks that exist — and nothing lands anywhere.
+func TestConventionsWriteRefusesWithoutARank(t *testing.T) {
+	f := newConventionFixture(t)
+
+	for _, tc := range []struct {
+		name string
+		run  func() (string, error)
+	}{
+		{"set", func() (string, error) { return f.set(t, f.repo, "commits", "", "MINE: anything.") }},
+		{"unset", func() (string, error) { return f.unset(t, f.repo, "commits", "") }},
+	} {
+		out, err := tc.run()
+		if err == nil {
+			t.Fatalf("%s with no rank was accepted:\n%s", tc.name, out)
+		}
+		for _, rank := range []string{"--project", "--global", "--overlay"} {
+			if !strings.Contains(err.Error(), rank) {
+				t.Errorf("%s refusal %q does not list the rank %s", tc.name, err, rank)
+			}
+		}
+		if out != "" {
+			t.Errorf("%s with no rank printed a report:\n%s", tc.name, out)
+		}
+	}
+	for _, rank := range []string{"project", "global", "overlay"} {
+		if path := f.rankPath(t, f.repo, "commits", rank); pathExists(path) {
+			t.Errorf("a refused write left a file at the %s rank: %s", rank, path)
+		}
+	}
+}
+
+// TestConventionsWriteRefusesTheRepositoryRank: the team's document is a real
+// rank and a reader who reaches for it gets the reason it is not written here,
+// with its path — never an unknown-flag error.
+func TestConventionsWriteRefusesTheRepositoryRank(t *testing.T) {
+	f := newConventionFixture(t)
+
+	for _, tc := range []struct {
+		name string
+		run  func() (string, error)
+	}{
+		{"set", func() (string, error) { return f.set(t, f.repo, "commits", "repository", "MINE: anything.") }},
+		{"unset", func() (string, error) { return f.unset(t, f.repo, "commits", "repository") }},
+	} {
+		out, err := tc.run()
+		if err == nil {
+			t.Fatalf("%s --repository was accepted:\n%s", tc.name, out)
+		}
+		for _, want := range []string{filepath.Join("docs", "agents", "commits.md"), "version control", "diff"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%s --repository refusal %q does not say %q", tc.name, err, want)
+			}
+		}
+	}
+	if path := filepath.Join(f.repo, "docs", "agents", "commits.md"); pathExists(path) {
+		t.Errorf("a refused write created the team's document at %s", path)
+	}
+}
+
+// A body that reads as an absent layer is refused wherever it was aimed: one
+// reader reads every rank, so one refusal covers them all.
+func TestConventionsSetRefusesAnEmptyBodyAtEveryRank(t *testing.T) {
+	f := newConventionFixture(t)
+
+	for _, rank := range []string{"project", "global", "overlay"} {
+		if _, err := f.set(t, f.repo, "commits", rank, "  \n\t\n"); !errors.Is(err, conventions.ErrEmptyConvention) {
+			t.Errorf("set --%s with an empty body = %v, want ErrEmptyConvention", rank, err)
+		}
+		if path := f.rankPath(t, f.repo, "commits", rank); pathExists(path) {
+			t.Errorf("a refused body left a file at the %s rank: %s", rank, path)
+		}
+	}
+}
+
+// TestConventionsWriteVerbsShareOneRankSurface: both verbs carry the same four
+// switches, at most one at a time, and the repository one is registered so that
+// naming it reaches pop's reason rather than cobra's unknown-flag error.
+func TestConventionsWriteVerbsShareOneRankSurface(t *testing.T) {
+	for _, cmd := range []*cobra.Command{conventionsSetCmd, conventionsUnsetCmd} {
+		for _, rank := range []string{"project", "global", "overlay", "repository"} {
+			if cmd.Flags().Lookup(rank) == nil {
+				t.Errorf("%s has no --%s flag", cmd.Name(), rank)
+			}
+		}
+	}
+
+	// Two ranks at once is as much a guess as none, so the surface refuses it
+	// before any body is read.
+	probe := &cobra.Command{Use: "probe", RunE: func(*cobra.Command, []string) error { return nil }}
+	probe.SetOut(io.Discard)
+	probe.SetErr(io.Discard)
+	flags := rankFlags{}
+	addRankFlags(probe, flags)
+	probe.SetArgs([]string{"--project", "--global"})
+	if err := probe.Execute(); err == nil {
+		t.Error("two ranks at once was accepted; a write must name exactly one")
+	}
+
+	// And the rank a caller named is the one the verb is handed — with none
+	// named, the empty string, which the conventions package refuses.
+	if got := flags.named(); got != "project" && got != "global" {
+		t.Errorf("named() = %q after --project --global, want one of the two", got)
+	}
+	if got := (rankFlags{}).named(); got != "" {
+		t.Errorf("named() with nothing set = %q, want the empty string", got)
+	}
+}
+
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
