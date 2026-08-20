@@ -35,9 +35,13 @@ const (
 	KindVerification Kind = "verification"
 )
 
-// Shape is how a kind's answer reaches an agent. It is a property of the kind
-// rather than a habit of each call site, so a consumer cannot decide it locally
-// and the author of the next kind owes it a decision (ADR-0227 decision 1).
+// Shape is how a kind's answer is built into a prompt. It is a property of the
+// kind rather than a habit of each call site, so a consumer cannot decide it
+// locally and the author of the next kind owes it a decision (ADR-0227 decision
+// 1). It says nothing about delivery: a kind reaches an agent by three paths and
+// pop hands the prose over on only two of them — the body of a role-driving
+// prompt and the `commits` block on a task set's manifest — the third being the
+// agent running `pop conventions get` itself (ADR-0230).
 type Shape string
 
 const (
@@ -48,8 +52,10 @@ const (
 	// pop's prompt (ADR-0227 decisions 2 and 3).
 	ShapeRoleDriving Shape = "role-driving"
 	// ShapeStepInforming means the convention is a fact a prompt about
-	// something else needs, so it stays a labelled block inside a prompt pop
-	// wrote end to end.
+	// something else needs: where a prompt carries it, it is a labelled block
+	// inside a prompt pop wrote end to end, having no output contract of its
+	// own to protect. It does not follow that a prompt carries it at all —
+	// `issue-tracker` is read by an agent running the command.
 	ShapeStepInforming Shape = "step-informing"
 )
 

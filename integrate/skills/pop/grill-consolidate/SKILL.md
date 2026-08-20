@@ -173,6 +173,9 @@ After all conflicts are resolved:
    prints rules to follow — pop's own shipped answer where nobody has written
    one — so take the printed convention as resolved and compose the message to
    match its grammar and trailer.
+   Read every line the command prints — do not pipe it through `head`, `tail`,
+   `sed -n` or `grep`, since a prefix read drops rules you are still bound by;
+   the output's first line says how many lines to read.
    When the resolved convention is conventional commits,
    default to `docs(context): consolidate glossary fragments` (append `+
    reconcile ADR numbers` when this pass renumbered any ADRs, and `+ stub

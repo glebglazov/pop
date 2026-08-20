@@ -200,10 +200,11 @@ Below them sit the keys of the repository you are standing in, spelled
 repo.<key> — the leaves pop config keys --scope repo lists. Editing one states
 it for that repository, so every worktree of it reads the one answer.
 
-Last come that repository's conventions, spelled conventions.<kind> — the prose
-pop conventions get prints in full: the one rank that answers, labelled with its
-origin and reach, your overlay where you have written one, and the provenance
-line. A kind nobody has written an answer for shows pop's own. Those rows are
+Last come that repository's conventions, spelled conventions.<kind> — the same
+prose pop conventions get prints, minus the read-whole notice that command puts
+above it: the one rank that answers, labelled with its origin and reach, your
+overlay where you have written one, and the provenance line. This pane is
+scrolled rather than piped, so there is nothing here for a notice to guard. A kind nobody has written an answer for shows pop's own. Those rows are
 read-only: they name the two documents that are yours to write and leave the
 writing to pop conventions set, a convention being a document rather than a
 value.

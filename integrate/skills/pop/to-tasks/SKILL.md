@@ -145,6 +145,10 @@ global document where they wrote one, pop's own shipped answer beneath them —
 and it always answers, so there is no no-doc-configured arm and no path to read
 by hand.
 
+Read every line the command prints — do not pipe it through `head`, `tail`,
+`sed -n` or `grep`, since a prefix read drops rules you are still bound by;
+the output's first line says how many lines to read.
+
 Publish the tickets per the resolved doc's **"Publishing tickets"** section. That
 section owns every publish mechanic — the task-markdown template, the `index.json`
 manifest, the effort heuristic, HITL/AFK typing, `pop tasks register`, the
@@ -169,8 +173,11 @@ Do not derive the grammar yourself. The command resolves this repository's
 answer — your own `~/.agents/docs/projects/<project>/commits.md`, else your own
 `~/.agents/docs/commits.md`, else the repository's committed
 `docs/agents/commits.md`, else pop's own shipped answer — and prints it with the
-rank it came from, plus your overlay where you have written one. It always exits 0 and always prints rules to follow, so take
-its output as resolved rather than weighing ranks yourself.
+rank it came from, plus your overlay where you have written one.
+It always exits 0 and always prints rules to follow, so take its output as
+resolved rather than weighing ranks yourself. Read every line the command prints — do not pipe it
+through `head`, `tail`, `sed -n` or `grep`, since a prefix read drops rules you
+are still bound by; the output's first line says how many lines to read.
 
 If what resolves is that the repository has **no discernible** commit convention,
 write no subject: each task commits under pop's built-in default format. Do not

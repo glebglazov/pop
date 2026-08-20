@@ -47,12 +47,14 @@ func shippedLayer(kind Kind) Layer {
 	}
 }
 
-// RenderShipped prints one kind's shipped answer on its own. It is what
+// RenderShipped prints one kind's shipped answer on its own, under the same
+// read-whole notice `get` prints — both are command paths, and an agent reaching
+// for pop's own answer truncates output the same way. It is what
 // `default <kind>` prints, and it prints the same body the last rank of a
 // resolved stack carries, so a human basing their own document on pop's cannot
 // be shown a different one from the agent that fell through to it.
 func RenderShipped(w io.Writer, kind Kind) error {
-	fmt.Fprintf(w, "SHIPPED CONVENTION %s\n\n", kind)
-	_, err := fmt.Fprintf(w, "%s\n", Shipped(kind))
+	_, err := io.WriteString(w, WithReadWholeNotice(
+		fmt.Sprintf("SHIPPED CONVENTION %s\n\n%s\n", kind, Shipped(kind))))
 	return err
 }

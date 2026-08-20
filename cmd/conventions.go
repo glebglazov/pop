@@ -53,10 +53,14 @@ Your project document is keyed by the repository's git remote, so every clone of
 one project reads one file; a repository with no remote is keyed by pop's own
 identity for it instead.
 
-Output ends with a one-line provenance summary naming what answered, ready to be
-surfaced verbatim as the "which source am I using" disclosure.
+Output opens with a read-whole notice: one line saying how many lines follow and
+that every one of them binds you. Read them all — do not pipe this through
+head, tail, sed -n or grep, since a prefix read drops rules you are still
+bound by. It ends with a one-line provenance summary naming what answered, ready
+to be surfaced verbatim as the "which source am I using" disclosure.
 
-With no kind, every known kind prints in turn. Exit is 0 in every case, because
+With no kind, every known kind prints in turn, each under its own notice
+counting that kind alone. Exit is 0 in every case, because
 every kind resolves to something followable. An unknown kind is refused with the list of
 the ones that exist, and nothing is printed.`,
 	Args:              cobra.MaximumNArgs(1),
@@ -80,7 +84,10 @@ rank you mean it to apply to. Customising is a human asking, never a machine
 telling a machine to derive.
 
 Nothing here is repository-specific and nothing is read from disk, so it answers
-outside a repository as well as inside one.`,
+outside a repository as well as inside one.
+
+Output opens with the same read-whole notice ` + "`get`" + ` prints — this is a command
+path too, and an agent shortens its output the same way.`,
 	Args:              cobra.ExactArgs(1),
 	RunE:              runConventionsDefault,
 	ValidArgsFunction: completeConventionKind,

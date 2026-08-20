@@ -170,6 +170,10 @@ global document where they wrote one, pop's own shipped answer beneath them —
 and it always answers, so there is no no-doc-configured arm and no path to read
 by hand.
 
+Read every line the command prints — do not pipe it through `head`, `tail`,
+`sed -n` or `grep`, since a prefix read drops rules you are still bound by;
+the output's first line says how many lines to read.
+
 Resolve this repository's Task-storage root once per session with
 `pop work show-path`; the doc lays maps out under a `maps/` sibling of that
 root's `tasks/`.

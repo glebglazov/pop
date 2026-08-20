@@ -91,7 +91,10 @@ To commit:
    Do not derive the grammar yourself. The command always exits 0 and always
    prints rules to follow — pop's own shipped answer where nobody has written
    one — so take the printed convention as resolved and match its grammar and
-   trailer. The `type` still follows content (docs-only vs. mixed), as above.
+   trailer.
+   Read every line the command prints — do not pipe it through `head`, `tail`,
+   `sed -n` or `grep`, since a prefix read drops rules you are still bound by;
+   the output's first line says how many lines to read. The `type` still follows content (docs-only vs. mixed), as above.
 4. **Report.** After committing, show the user the exact files staged and the commit subject. Separately, report any dirty files this session did *not* touch as "left alone — not staged" so nothing is silently swept or split.
 
 After the commit, the plan is settled and persisted; the user will typically move on to a separate step (such as `to-tasks`) themselves.

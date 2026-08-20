@@ -161,6 +161,10 @@ shipped answer, so each machine resolves its own store. Do not synthesize a repo
 tracker doc from a template — there is no pop tracker template, and a committed
 doc would override that fall-through for everyone.
 
+Read every line the command prints — do not pipe it through `head`, `tail`,
+`sed -n` or `grep`, since a prefix read drops rules you are still bound by;
+the output's first line says how many lines to read.
+
 Offer, as a **one-line option only**, committing a repo doc to pin the choice
 for the whole team:
 

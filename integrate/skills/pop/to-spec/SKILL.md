@@ -114,6 +114,10 @@ global document where they wrote one, pop's own shipped answer beneath them —
 and it always answers, so there is no no-doc-configured arm and no path to read
 by hand.
 
+Read every line the command prints — do not pipe it through `head`, `tail`,
+`sed -n` or `grep`, since a prefix read drops rules you are still bound by;
+the output's first line says how many lines to read.
+
 Publish the spec per the resolved doc's **"Publishing a spec"** section. That
 section owns store resolution and how the doc itself is resolved; run
 `pop tasks authoring-guide` for the file's shape — the co-located `spec.md`

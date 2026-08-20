@@ -59,14 +59,48 @@ func (s Stack) inForce() string {
 // human-facing and agent-facing renderings describing one differently.
 func (s Stack) inForceProse() string { return s.inForce() + "\n" + s.Provenance() + "\n" }
 
-// RenderStack prints one kind's convention as plain text: the answer in force,
-// the overlay where there is one, and the provenance line. A kind nobody has
-// written an answer to resolves to pop's own and prints that instead, so this
-// never renders a miss.
+// RenderStack prints one kind's convention as plain text: the read-whole
+// notice, then the answer in force, the overlay where there is one, and the
+// provenance line. A kind nobody has written an answer to resolves to pop's own
+// and prints that instead, so this never renders a miss.
 func RenderStack(w io.Writer, s Stack) error {
-	fmt.Fprintf(w, "CONVENTION %s\n\n", s.Kind)
-	_, err := io.WriteString(w, s.inForceProse())
+	_, err := io.WriteString(w, WithReadWholeNotice(
+		fmt.Sprintf("CONVENTION %s\n\n%s", s.Kind, s.inForceProse())))
 	return err
+}
+
+// ReadWholeNoticeLabel opens the Read-whole notice. It is exported because the
+// two paths pop hands a convention over itself — the prose injected into a
+// prompt and the Config dashboard's preview — are defined by the notice being
+// absent from them, and a test can only assert that against the label pop
+// prints (ADR-0230).
+const ReadWholeNoticeLabel = "READ-WHOLE NOTICE"
+
+// WithReadWholeNotice puts the Read-whole notice above a block a shell command
+// is about to print: one line saying how many lines follow and that all of them
+// are binding.
+//
+// A header rather than a footer, because a header is the only part of the output
+// a prefix read cannot drop, and unconditional rather than printed only above
+// some length, because a guard the shortest kind lacks reads as advisory
+// (ADR-0230). The count is of the block exactly as printed — banner, overlay and
+// provenance included — so the reader can check it against what they received.
+func WithReadWholeNotice(block string) string {
+	return fmt.Sprintf("%s: %d lines follow. Read every one of them — a prefix read drops rules you are still bound by.\n%s",
+		ReadWholeNoticeLabel, countLines(block), block)
+}
+
+// countLines counts the lines of a rendered block the way a reader counts them:
+// a trailing newline closes the last line rather than starting an empty one.
+func countLines(block string) int {
+	if block == "" {
+		return 0
+	}
+	n := strings.Count(block, "\n")
+	if !strings.HasSuffix(block, "\n") {
+		n++
+	}
+	return n
 }
 
 // StackPreview renders one kind for a surface that shows it in a pane beside

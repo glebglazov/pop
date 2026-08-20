@@ -58,7 +58,9 @@ func TestUnwrittenKindResolvesToTheShippedRank(t *testing.T) {
 	if err := RenderShipped(&direct, KindCommits); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(got, strings.TrimPrefix(direct.String(), "SHIPPED CONVENTION commits\n\n")) {
+	shippedBody := direct.String()
+	shippedBody = shippedBody[strings.Index(shippedBody, "SHIPPED CONVENTION commits\n\n")+len("SHIPPED CONVENTION commits\n\n"):]
+	if !strings.Contains(got, shippedBody) {
 		t.Errorf("the resolved answer is not the body `default` prints:\n%s\n----\n%s", got, direct.String())
 	}
 }
