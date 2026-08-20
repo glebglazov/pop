@@ -499,6 +499,15 @@ func runTaskRegisterWith(d *tasks.Deps, w io.Writer, taskSetID string) error {
 		}
 	}
 
+	// The set's commit convention is pop's own projection of the resolved stack,
+	// written here rather than trusted from a planning agent's manifest
+	// (ADR-0228). A resolution or write failure is a warning, not a failed
+	// register: the set is Work either way, and the key is only read by an agent
+	// that spawns a task mid-drain.
+	if err := tasks.RecordCommitConvention(d, result, cmdLayerDeps().WorkDir(), commitConvention(d)); err != nil {
+		fmt.Fprintf(w, "warning: %v\n", err)
+	}
+
 	// Retired manifest keys (worktree/auto_drain) still register successfully but
 	// are ignored (ADR-0115): warn so a legacy manifest's author learns the keys no
 	// longer take effect. The set is never MALFORMED for carrying them.
@@ -1084,6 +1093,24 @@ func runTaskArtifactsWith(d *tasks.Deps, w io.Writer, taskSetID, show string) er
 func codeReviewConvention(d *tasks.Deps) tasks.ReviewConvention {
 	return func(cwd string) (string, error) {
 		stack, err := conventions.Resolve(&conventions.Deps{Tasks: d}, conventions.KindCodeReview, cwd)
+		if err != nil {
+			return "", err
+		}
+		return conventions.StackProse(stack), nil
+	}
+}
+
+// commitConvention wires the register-time Commit-convention seam to the real
+// Convention stack (ADR-0228): what pop records on a registering set is the same
+// resolved prose `pop conventions get commits` prints, so the manifest key and
+// the command can never disagree. It lives beside the other two seams, and for
+// the same reason — cmd is the layer that holds both packages.
+func commitConvention(d *tasks.Deps) tasks.CommitConventionSource {
+	return func(cwd string) (string, error) {
+		// The filesystem rides along from the tasks deps: the human's own ranks live
+		// under their home, so a caller with a routed filesystem must resolve the
+		// same ranks the rest of its layer sees.
+		stack, err := conventions.Resolve(&conventions.Deps{FS: d.FS, Tasks: d}, conventions.KindCommits, cwd)
 		if err != nil {
 			return "", err
 		}

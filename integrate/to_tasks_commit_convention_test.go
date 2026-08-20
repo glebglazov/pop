@@ -44,14 +44,33 @@ func TestToTasksSkill_CommitConventionContract(t *testing.T) {
 			t.Errorf("to-tasks skill does not resolve the commit convention through pop: missing %q", want)
 		}
 	}
-	// Both keys are named, and their shape is deferred rather than restated.
+	// The subject is the agent's to write, and its shape is deferred rather than
+	// restated.
 	for _, want := range []string{
 		"`commit_subject`",
-		"`commit_convention`",
 		"pop tasks\nauthoring-guide",
 	} {
 		if !strings.Contains(section, want) {
 			t.Errorf("to-tasks skill's publish direction missing %q", want)
+		}
+	}
+	// ADR-0228: the set-level key is pop's own projection of the stack, so the
+	// skill names it only to say not to write it. An instruction to supply it is
+	// exactly the hand-copy that ADR retires.
+	for _, want := range []string{
+		"Do **not** write the set-level **`commit_convention`**",
+		"pop writes that key",
+	} {
+		if !strings.Contains(section, want) {
+			t.Errorf("to-tasks skill still asks an agent for the commit convention: missing %q", want)
+		}
+	}
+	for _, gone := range []string{
+		"write both fields",
+		"the convention text itself",
+	} {
+		if strings.Contains(section, gone) {
+			t.Errorf("to-tasks skill still instructs writing `commit_convention`: %q", gone)
 		}
 	}
 	// A non-pop Work store has no pop manifest to write these keys into.

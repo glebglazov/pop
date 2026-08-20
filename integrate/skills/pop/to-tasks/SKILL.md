@@ -151,10 +151,11 @@ here; consult the doc.
 
 ## Commit convention
 
-*(Irreducible pop bit: the convention is resolved while the work is broken down,
-not when a task commits. pop commits each task's work under the subject written
-here **verbatim** — it renders nothing and reformats nothing at commit time — so
-if this step is skipped the repository's grammar is lost for the whole set.)*
+*(Irreducible pop bit: each task's subject is rendered while the work is broken
+down, not when a task commits. pop commits each task's work under the subject
+written here **verbatim** — it renders nothing and reformats nothing at commit
+time — so if this step is skipped the repository's grammar is lost for the whole
+set.)*
 
 Resolve the convention once, before publishing, by asking pop:
 
@@ -170,21 +171,23 @@ rank it came from, plus your overlay where you have written one. It always exits
 its output as resolved rather than weighing ranks yourself.
 
 If what resolves is that the repository has **no discernible** commit convention,
-write neither field: the set carries no convention and each task commits under
-pop's built-in default format. Do not guess one.
+write no subject: each task commits under pop's built-in default format. Do not
+guess one.
 
-When a convention resolves, write both fields into the set's `index.json`:
+When a convention resolves, write each task's **`commit_subject`** into the set's
+`index.json` — the final, literal subject line for that task's work, rendered
+*now* from that task's intent under the convention.
 
-- each task's **`commit_subject`** — the final, literal subject line for that
-  task's work, rendered *now* from that task's intent under the convention;
-- the set-level **`commit_convention`** — the convention text itself, which is
-  what renders a subject for a task spawned mid-drain (a Remediation).
+Do **not** write the set-level **`commit_convention`**. pop writes that key
+itself when the set registers, from the same resolved answer you just read, and
+overwrites anything you put there: it is pop's projection of the convention, not
+a copy for you to retype.
 
-This section owns the **discovery contract** only. Where those keys sit, how they
-are spelled and what pop does when one is absent belong to `pop tasks
+This section owns the **discovery contract** only. Where the subject sits, how it
+is spelled and what pop does when it is absent belong to `pop tasks
 authoring-guide`; read it before writing the manifest.
 
-**Non-pop stores.** Both fields are pop-manifest keys. When the resolved Work
+**Non-pop stores.** The subject is a pop-manifest key. When the resolved Work
 store is not pop, skip this step entirely.
 
 ## No quiz

@@ -219,12 +219,16 @@ type Manifest struct {
 	// made its first implementation commit.
 	BaseCommitRecorded bool
 	// CommitConvention is the set's resolved Commit convention: the prose
-	// description of this repository's commit grammar, resolved once at plan time
-	// and read from and written back as the set-level `commit_convention` key
-	// (ADR-0207). Nothing in the commit path reads it — the per-task Planned
-	// commit subjects are already rendered — it is carried for the agents that
-	// render a subject later, chiefly the Verifier spawning a Remediation task
-	// mid-drain. Empty when the convention did not resolve.
+	// description of this repository's commit grammar, read from and written back
+	// as the set-level `commit_convention` key (ADR-0207). Nothing in the commit
+	// path reads it — the per-task Planned commit subjects are already rendered —
+	// it is carried for the agents that render a subject later, chiefly the
+	// Verifier spawning a Remediation task mid-drain.
+	//
+	// pop writes it itself when the set registers, from the resolved stack
+	// (ADR-0228, RecordCommitConvention): it is a projection of the Convention
+	// stack, not an author's copy of it, and an authored value is overwritten.
+	// Empty only for a set registered before pop wrote the key.
 	CommitConvention string
 	// HumanCompleted records that a human's own `complete` is what carried this set
 	// terminal, read from and written back as the set-level `human_completed` key.

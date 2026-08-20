@@ -196,11 +196,12 @@ Set-level keys:
 - `+"`source_map`"+` — the id of the Map this set was spawned from. Written on
   **every** Map-sourced set, spec or no spec, so the back-link is never
   half-built.
-- `+"`commit_convention`"+` — optional prose describing this repository's commit
-  grammar, resolved once when the set was planned. Nothing in the commit path
-  reads it (the per-task subjects are already written); it is what an agent
-  spawning a task mid-drain renders a new `+"`commit_subject`"+` from. Omit it
-  when no convention resolved.
+- `+"`commit_convention`"+` — **pop's, not yours.** Register writes this key
+  itself, from the same resolved commit convention
+  `+"`pop conventions get commits`"+` prints: it is the prose an agent spawning
+  a task mid-drain renders a new `+"`commit_subject`"+` from, and pop projects
+  it rather than trust a retyped copy. Do not supply it — a value written here
+  is overwritten when the set registers.
 - `+"`verify`"+` / `+"`review`"+` — optional booleans, and opt-**out** only:
   write `+"`false`"+` to decline the drain's Agent verification or its Code
   review for this set alone (generated or vendored code, say). Omit them and the
