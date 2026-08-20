@@ -1088,6 +1088,20 @@ func codeReviewConvention(d *tasks.Deps) tasks.ReviewConvention {
 	}
 }
 
+// verificationConvention wires the Verifier's mandate to the real Convention
+// stack (ADR-0227): the resolved `verification` convention is the body of the
+// Verifier's prompt. It lives beside codeReviewConvention, and for the same
+// reason — cmd is the layer that holds both packages.
+func verificationConvention(d *tasks.Deps) tasks.VerificationConvention {
+	return func(cwd string) (string, error) {
+		stack, err := conventions.Resolve(&conventions.Deps{Tasks: d}, conventions.KindVerification, cwd)
+		if err != nil {
+			return "", err
+		}
+		return conventions.StackProse(stack), nil
+	}
+}
+
 func runTaskAssist(cmd *cobra.Command, args []string) error {
 	return runTaskAssistWith(cmdLayerDeps().tasksDeps(), os.Stdout, os.Stdin, args[0])
 }
@@ -1162,6 +1176,7 @@ func runTaskVerifyWith(d *tasks.Deps, w io.Writer, taskSetID string, accept bool
 		Accept:       accept,
 		Remediate:    remediate,
 		Note:         note,
+		Convention:   verificationConvention(d),
 	}); err != nil {
 		return fmt.Errorf("tasks verify: %w", err)
 	}
@@ -1293,27 +1308,28 @@ func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reade
 	impl.LoadConfig = taskConfigLoad
 	impl.StdinInteractive = taskStdinInteractive
 	_, err = implement.RunWholeSetWith(impl, implement.WholeSetOptions{
-		ResolveInput:     taskResolveInput(),
-		TaskSetOverride:  taskSetPath,
-		InWorktree:       taskInWorktree,
-		ForceRebind:      taskForceRebind,
-		AgentPreset:      selectedTaskAgentPreset(),
-		AgentPresets:     selectedTaskAgentPresets(),
-		AgentExplicit:    agentExplicit,
-		AgentCmd:         taskAgentCmd,
-		AgentOutput:      taskAgentOutput,
-		AllowDirty:       taskAllowDirty,
-		MaxTries:         taskMaxTries,
-		MaxTriesExplicit: maxTriesExplicit,
-		Timeout:          timeout,
-		VerifyAgents:     append([]string(nil), taskImplementVerifyAgents...),
-		VerifyEffort:     taskImplementVerifyEffort,
-		ReviewConvention: codeReviewConvention(d),
-		Yes:              taskRunYes,
-		ConfirmIn:        stdin,
-		ConfirmOut:       stderr,
-		Output:           stdout,
-		PreSeedTopic:     taskPreSeedTopic(),
+		ResolveInput:           taskResolveInput(),
+		TaskSetOverride:        taskSetPath,
+		InWorktree:             taskInWorktree,
+		ForceRebind:            taskForceRebind,
+		AgentPreset:            selectedTaskAgentPreset(),
+		AgentPresets:           selectedTaskAgentPresets(),
+		AgentExplicit:          agentExplicit,
+		AgentCmd:               taskAgentCmd,
+		AgentOutput:            taskAgentOutput,
+		AllowDirty:             taskAllowDirty,
+		MaxTries:               taskMaxTries,
+		MaxTriesExplicit:       maxTriesExplicit,
+		Timeout:                timeout,
+		VerifyAgents:           append([]string(nil), taskImplementVerifyAgents...),
+		VerifyEffort:           taskImplementVerifyEffort,
+		ReviewConvention:       codeReviewConvention(d),
+		VerificationConvention: verificationConvention(d),
+		Yes:                    taskRunYes,
+		ConfirmIn:              stdin,
+		ConfirmOut:             stderr,
+		Output:                 stdout,
+		PreSeedTopic:           taskPreSeedTopic(),
 	})
 	return err
 }

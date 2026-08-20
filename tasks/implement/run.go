@@ -38,10 +38,14 @@ type WholeSetOptions struct {
 	// drain's review phase (ADR-0214); forwarded verbatim to the task-set
 	// executor, which hands it to the Reviewer.
 	ReviewConvention tasks.ReviewConvention
-	Yes              bool
-	ConfirmIn        io.Reader
-	ConfirmOut       io.Writer
-	Output           io.Writer
+	// VerificationConvention resolves the repository's `verification` Convention
+	// for the drain's verify phase (ADR-0227); forwarded verbatim to the task-set
+	// executor, which hands it to the Verifier as its mandate.
+	VerificationConvention tasks.VerificationConvention
+	Yes                    bool
+	ConfirmIn              io.Reader
+	ConfirmOut             io.Writer
+	Output                 io.Writer
 	// PreSeedTopic pre-seeds the pane's Topic from each task's Title at drain
 	// spawn (ADR-0058); forwarded verbatim to the task-set executor.
 	PreSeedTopic func(taskTitle string)
@@ -92,6 +96,7 @@ func RunWholeSetWith(d *Deps, opts WholeSetOptions) (*tasks.RunTaskSetResult, er
 		VerifyAgents:           opts.VerifyAgents,
 		VerifyEffort:           opts.VerifyEffort,
 		ReviewConvention:       opts.ReviewConvention,
+		VerificationConvention: opts.VerificationConvention,
 		Yes:                    opts.Yes,
 		ConfirmIn:              opts.ConfirmIn,
 		ConfirmOut:             opts.ConfirmOut,

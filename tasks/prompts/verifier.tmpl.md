@@ -30,7 +30,12 @@ The diff bodies are deliberately not inlined; you are in the checkout under veri
 {{.WorkStat}}
 ```
 {{end}}
-{{if .ConventionRecorded}}## This repository's commit convention
+{{if .VerificationRecorded}}## How work is checked in this repository
+This section is this repository's verification convention: what it takes to believe the work above is sound. It is the repository's and the human's, not pop's — check the work the way it says.
+
+{{.Verification}}
+
+{{end}}{{if .ConventionRecorded}}## This repository's commit convention
 {{.Convention}}
 
 {{end}}## Respond in exactly this format

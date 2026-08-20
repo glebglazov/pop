@@ -51,6 +51,13 @@ The diff bodies are deliberately not inlined; you are in the checkout under veri
  1 file changed
 ```
 
+## How work is checked in this repository
+This section is this repository's verification convention: what it takes to believe the work above is sound. It is the repository's and the human's, not pop's — check the work the way it says.
+
+Run `make test` before believing the work.
+
+from pop's shipped answer (nobody wrote one above it)
+
 ## This repository's commit convention
 tasks(<set-slug>): <task-id> — imperative, lower case, no trailing period.
 

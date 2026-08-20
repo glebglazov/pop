@@ -71,6 +71,15 @@ const emptyTreeSHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 // (ADR-0086): verification defaults to the strongest tier.
 const DefaultVerifyEffort = "heavy"
 
+// VerificationConvention resolves this repository's `verification` Convention
+// stack as the prose that becomes the Verifier's mandate — the body of its
+// prompt rather than a section inside pop's own (ADR-0227 decisions 1 and 2).
+// It is a seam for the same reason ReviewConvention is: the conventions package
+// answers Repository identity through this package, so tasks cannot import it
+// back. A nil seam, an error, or an empty answer all mean the same thing — the
+// prompt carries no mandate and pop's frame stands alone.
+type VerificationConvention func(cwd string) (string, error)
+
 // VerifyOptions configures a `pop tasks verify <set>` run.
 type VerifyOptions struct {
 	ResolveInput ResolveInput
@@ -100,6 +109,9 @@ type VerifyOptions struct {
 	// forward as context into later Verifier prompts), or written into the
 	// human-triggered Remediation task's body.
 	Note string
+	// Convention resolves the `verification` convention that is the Verifier's
+	// mandate for the checkout.
+	Convention VerificationConvention
 }
 
 // VerifyResult is the outcome of one verification, returned after the verdict is
@@ -136,6 +148,9 @@ type verifyCoreOptions struct {
 	Remediate     bool
 	RemediateNote string
 	runVerifier   func(prompt string) (string, error)
+	// Convention resolves the `verification` convention handed to the Verifier as
+	// its mandate.
+	Convention VerificationConvention
 	// probeMemo shares availability-probe results across Implement implement and
 	// verify phases within one run; nil constructs a fresh memo for standalone verify.
 	probeMemo *agentAvailabilityProbeMemo
@@ -184,6 +199,7 @@ func VerifyTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 		AcceptNote:    opts.Note,
 		Remediate:     opts.Remediate,
 		RemediateNote: opts.Note,
+		Convention:    opts.Convention,
 	})
 }
 
@@ -475,7 +491,7 @@ func runAndStoreVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *
 			ComputedAt: time.Now().UTC(),
 		})
 	}
-	prompt := buildVerifierPrompt(d, m, workSHA, work, priorNote)
+	prompt := buildVerifierPrompt(d, m, workSHA, work, priorNote, resolveVerificationConvention(opts))
 
 	run := opts.runVerifier
 	if run == nil {
@@ -1106,11 +1122,32 @@ func commitSubjectPrefix(taskSetID string) string {
 // spec-less, not as an error.
 const specFileName = SpecFileName
 
-// buildVerifierPrompt assembles the Verifier's input: the authoritative
-// acceptance criteria and task bodies for the set's `done` AFK tasks only, plus
-// the commit range and complete stat of the accumulated work (the diff bodies
-// are the Verifier's to fetch, see workDiffView), and the exact response format
-// the parser expects. Open/not-`done` AFK tasks and HITL tasks of any status are
+// resolveVerificationConvention asks the seam for the repository's
+// `verification` convention, the prose the Verifier's prompt is built around.
+// It is best-effort by design: a caller that wired no seam, or a resolution that
+// fails, leaves the Verifier with pop's frame — who it is and the reply it owes
+// — rather than failing a run over a document that is not pop's to supply.
+func resolveVerificationConvention(opts verifyCoreOptions) string {
+	if opts.Convention == nil {
+		return ""
+	}
+	prose, err := opts.Convention(opts.RuntimePath)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(prose)
+}
+
+// buildVerifierPrompt assembles the Verifier's input as an envelope (ADR-0227
+// decisions 2 and 3): the resolved `verification` convention is the body — what
+// to check is the repository's sentence, not pop's — wrapped by the two things
+// pop owns and cannot let a document displace. Before it, who the agent is and
+// what it is judging; after it, the reply format the parser reads, because a
+// malformed reply resolves to NEEDS-HUMAN and a prompt that lost the format
+// would park every set. Everything between the two is data pop assembles: the
+// authoritative acceptance criteria and task bodies for the set's `done` AFK
+// tasks only, plus the commit range and complete stat of the accumulated work
+// (the diff bodies are the Verifier's to fetch, see workDiffView). Open/not-`done` AFK tasks and HITL tasks of any status are
 // excluded (ADR-0102): an agent cannot judge a human sign-off, and a not-yet-run
 // task is not an unmet criterion — emitting either made a still-open terminal
 // HITL gate read as a failing criterion, deadlocking the drain before the gate
@@ -1123,7 +1160,7 @@ const specFileName = SpecFileName
 // at that spot must still fail. Done Remediation history is folded in the same
 // way when present (ADR-0154): unverified claims with the diff authoritative;
 // verdict scope remains done AFK work judged against the criteria and the diff.
-func buildVerifierPrompt(d *Deps, m *Manifest, workSHA string, work workDiffView, priorNote string) string {
+func buildVerifierPrompt(d *Deps, m *Manifest, workSHA string, work workDiffView, priorNote, verification string) string {
 	view := verifierPromptView{
 		TaskSet:     m.Stem,
 		WorkSHALine: optionalLine("Work SHA: ", workSHA),
@@ -1147,6 +1184,10 @@ func buildVerifierPrompt(d *Deps, m *Manifest, workSHA string, work workDiffView
 	if spec, ok := readSpec(d, m); ok {
 		view.SpecRecorded = true
 		view.Spec = spec
+	}
+	if mandate := strings.TrimSpace(verification); mandate != "" {
+		view.VerificationRecorded = true
+		view.Verification = mandate
 	}
 	if convention := strings.TrimSpace(m.CommitConvention); convention != "" {
 		view.ConventionRecorded = true
@@ -1179,6 +1220,10 @@ type verifierPromptView struct {
 	WorkStat                   string
 	ConventionRecorded         bool
 	Convention                 string
+	// VerificationRecorded and Verification carry the resolved `verification`
+	// convention, the body pop's frame wraps.
+	VerificationRecorded bool
+	Verification         string
 }
 
 // verifierTaskRow is one judged task: its heading facts and its body, or the

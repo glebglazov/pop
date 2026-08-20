@@ -18,17 +18,17 @@ type RunTaskSetOptions struct {
 	AgentPresets    []string
 	// AgentExplicit reports the --agent flag was explicitly passed
 	// (Flags().Changed).
-	AgentExplicit bool
-	AgentCmd      string
-	AgentOutput   AgentOutputMode
-	AllowDirty    DirtyRuntimeStrategy
+	AgentExplicit    bool
+	AgentCmd         string
+	AgentOutput      AgentOutputMode
+	AllowDirty       DirtyRuntimeStrategy
 	MaxTries         int
 	MaxTriesExplicit bool
 	Timeout          time.Duration
-	Yes           bool
-	ConfirmIn     io.Reader
-	ConfirmOut    io.Writer
-	Output        io.Writer
+	Yes              bool
+	ConfirmIn        io.Reader
+	ConfirmOut       io.Writer
+	Output           io.Writer
 	// BindCheckout, when set, is invoked once the drain has committed to its
 	// Task set and runtime checkout (after the running Drain is started, before
 	// any task runs). It lets the caller record the
@@ -63,6 +63,12 @@ type RunTaskSetOptions struct {
 	// through tasks, so the caller that holds both wires it. Nil ⇒ the Reviewer is
 	// handed no convention and is told so.
 	ReviewConvention ReviewConvention
+	// VerificationConvention resolves the repository's `verification` Convention
+	// for the drain's verify phase (ADR-0227): it is the Verifier's mandate, not a
+	// section of pop's prompt. Same seam reason as ReviewConvention — the caller
+	// that holds both packages wires it. Nil ⇒ the Verifier runs on pop's frame
+	// alone.
+	VerificationConvention VerificationConvention
 	// reviewRunner overrides the review phase's agent spawn, mirroring
 	// reviewCoreOptions.runReviewer. Unexported and test-only.
 	reviewRunner func(prompt string) (string, string, error)
@@ -84,8 +90,8 @@ type RunTaskSetResult struct {
 	VerifyFindings      string
 	// VerifyRerunCmd is a copy-pasteable `pop tasks verify …` when verification failed.
 	VerifyRerunCmd string
-	SkippedTasks  []string
-	BlockedReason string
+	SkippedTasks   []string
+	BlockedReason  string
 	// ProceedVerdict is set when an agent could not carry on (ADR-0168).
 	ProceedVerdict *AgentProceedVerdict
 	// QuotaPaused and friends mirror a quota-pause verdict for callers that

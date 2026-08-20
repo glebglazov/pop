@@ -204,7 +204,7 @@ func TestReviewBlockReachesEveryAttendedPrompt(t *testing.T) {
 	// The two unattended prompts carry no pointer at all.
 	unattended := map[string]string{
 		"implementer prompt": BuildAgentPrompt(filepath.Join(m.Dir, m.Tasks[0].File), "/rt"),
-		"verifier prompt":    buildVerifierPrompt(d, m, "sha1", workDiffView{Range: "aaa111^..HEAD", Stat: " a.go | 1 +"}, ""),
+		"verifier prompt":    buildVerifierPrompt(d, m, "sha1", workDiffView{Range: "aaa111^..HEAD", Stat: " a.go | 1 +"}, "", ""),
 	}
 	for surface, text := range unattended {
 		for _, unwanted := range []string{path, "Latest code review"} {

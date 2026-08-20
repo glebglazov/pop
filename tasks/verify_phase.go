@@ -84,6 +84,7 @@ func (r *implementRun) verifyPhase(currentRefresh *RefreshResult, row *Row) (ver
 		Effort:      opts.VerifyEffort,
 		Timeout:     timeout,
 		Output:      out,
+		Convention:  opts.VerificationConvention,
 		runVerifier: opts.verifyRunner,
 		probeMemo:   r.agentProbeMemo,
 	}, m, row.Status)
