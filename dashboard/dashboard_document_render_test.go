@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/glebglazov/pop/ui"
 	"github.com/glebglazov/pop/work"
 	"github.com/glebglazov/pop/work/ref"
 )
@@ -53,7 +54,7 @@ func TestDocumentPeekRendersMarkdownByExtensionAndScrollsRenderedLines(t *testin
 	}
 
 	m = openPeek(t, m)
-	body := m.detail.peek.body(m.width)
+	body := m.detail.peek.body(m.width, ui.CurrentAppearance())
 	if strings.Contains(body, "- first finding") || !strings.Contains(body, "first finding") {
 		t.Fatalf("markdown document was not rendered:\n%q", body)
 	}
@@ -66,7 +67,7 @@ func TestDocumentPeekRendersMarkdownByExtensionAndScrollsRenderedLines(t *testin
 
 	// Scrolling, paging and G all move over the rendered lines, which the wrapped
 	// paragraph makes more numerous than the file's.
-	rendered := m.detail.peek.lines(m.width)
+	rendered := m.detail.peek.lines(m.width, ui.CurrentAppearance())
 	if len(rendered) <= len(documentPeekLines(spec)) {
 		t.Fatalf("rendered body has %d lines, want more than the file's %d", len(rendered), len(documentPeekLines(spec)))
 	}
@@ -80,7 +81,7 @@ func TestDocumentPeekRendersMarkdownByExtensionAndScrollsRenderedLines(t *testin
 	wide := len(rendered)
 	updated, _ = m.Update(tea.WindowSizeMsg{Width: 50, Height: 18})
 	m = updated.(QueueDashboard)
-	if narrow := len(m.detail.peek.lines(m.width)); narrow <= wide {
+	if narrow := len(m.detail.peek.lines(m.width, ui.CurrentAppearance())); narrow <= wide {
 		t.Fatalf("resize did not re-wrap: %d lines at width 50, %d at width 120", narrow, wide)
 	}
 
@@ -89,7 +90,7 @@ func TestDocumentPeekRendersMarkdownByExtensionAndScrollsRenderedLines(t *testin
 	m = updated.(QueueDashboard)
 	updated, _ = m.update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	m = openPeek(t, updated.(QueueDashboard))
-	if got := m.detail.peek.body(m.width); got != progress {
+	if got := m.detail.peek.body(m.width, ui.CurrentAppearance()); got != progress {
 		t.Fatalf("progress record was not shown raw:\n%q", got)
 	}
 }

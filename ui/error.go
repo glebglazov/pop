@@ -145,8 +145,7 @@ func ShowError(err error, trace string) {
 		message: err.Error(),
 		trace:   trace,
 	}
-	program := tea.NewProgram(m)
-	if _, runErr := program.Run(); runErr != nil {
+	if _, runErr := RunProgram(m, nil, nil); runErr != nil {
 		// Fall back to plain stderr if the TUI can't run (no tty, etc).
 		fmt.Fprintf(os.Stderr, "error: %s\n", err.Error())
 		if trace != "" {

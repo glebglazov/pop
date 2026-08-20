@@ -1216,8 +1216,12 @@ _Avoid_: checkout picker, drain wizard, runtime picker
 The full-screen interactive drill-down entered with `l` or Enter from the **Work dashboard**, replacing the table until dismissed with `h`/left/`esc`. It lists the focused **Task set**'s tasks, supports Vim-style list movement including top and bottom (`gg`/`G`), opens a read-only **Document peek** for the cursored task with `l` or Enter, and applies **Complete task** (`C`), **Open task** (`O`), or **Skip** (`K`) to the single cursored task without a separate confirmation.
 _Avoid_: status view, status modal, inspect modal, task editor
 
+**Terminal appearance**:
+The background a terminal actually has — dark, light, or plain — resolved by pop from the terminal's own background colour rather than guessed by a renderer, and the fact every palette pop prints is selected from (ADR-0230). Plain is a full member, not a fallback for the other two: it is the answer whenever the terminal will not say, and the only one that keeps a redirected document byte-exact. One chokepoint owns it — **`ui.RunProgram`**, which resolves it before a TUI takes stdin, enables the terminal's colour-scheme notification for as long as the program runs, and re-resolves on every notification, because a notification reports the operating system's setting and never the terminal's background. Surfaces read the appearance in force; they never capture it.
+_Avoid_: dark mode, colour scheme, theme, background detection
+
 **Document peek**:
-A read-only nested view over any absolute file path a detail row carries — a task's markdown, a **Routine**'s last report. It is opened with `l` or Enter, supports Vim-style scrolling (`j`/`k`, `ctrl-d`/`ctrl-u`, `gg`/`G`), and is dismissed with `h`/left/`esc` without changing anything. The view reads whatever path the row hands it, and renders a `.md` path as Markdown while showing every other extension exactly as it is on disk; the rendering wraps to the view's own width and is re-wrapped on a window resize, and scrolling counts rendered lines (ADR-0222).
+A read-only nested view over any absolute file path a detail row carries — a task's markdown, a **Routine**'s last report. It is opened with `l` or Enter, supports Vim-style scrolling (`j`/`k`, `ctrl-d`/`ctrl-u`, `gg`/`G`), and is dismissed with `h`/left/`esc` without changing anything. The view reads whatever path the row hands it, and renders a `.md` path as Markdown while showing every other extension exactly as it is on disk; the rendering wraps to the view's own width and draws in the **Terminal appearance** in force, is re-rendered when either of those changes, and scrolling counts rendered lines (ADR-0222/0230).
 _Avoid_: task editor, task modal, preview pane
 
 **Execution-state store**:

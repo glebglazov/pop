@@ -425,13 +425,10 @@ func runGateMenuInteractive(m *GateMenu, in io.Reader, out io.Writer, interrupt 
 		}()
 	}
 
-	opts := []tea.ProgramOption{
+	final, err := RunProgram(m, in, out,
 		tea.WithContext(ctx),
-		tea.WithInput(in),
-		tea.WithOutput(out),
 		tea.WithoutSignalHandler(),
-	}
-	final, err := tea.NewProgram(m, opts...).Run()
+	)
 	if err != nil {
 		select {
 		case <-forceQuit:

@@ -228,8 +228,7 @@ func (m *MultiSelect) Result() MultiSelectResult {
 // result. Cancelling (Esc/Ctrl-C) yields a non-confirmed, empty result.
 func RunMultiSelect(title string, items []MultiSelectItem) (MultiSelectResult, error) {
 	m := NewMultiSelect(title, items)
-	program := tea.NewProgram(m)
-	out, err := program.Run()
+	out, err := RunProgram(m, nil, nil)
 	if err != nil {
 		return MultiSelectResult{Confirmed: false}, err
 	}

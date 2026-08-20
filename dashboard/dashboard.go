@@ -719,29 +719,31 @@ type documentPeek struct {
 	loading      bool
 	err          error
 	scroll       int
-	// rendered caches the glamour rendering of text at renderedWidth, so the body
-	// is rendered once per width rather than once per frame. A width change — the
-	// only thing a window resize does to the peek — misses the cache and re-wraps.
-	rendered      string
-	renderedWidth int
-	hasRendered   bool
+	// rendered caches the glamour rendering of text at renderedWidth in
+	// renderedAppearance, so the body is rendered once per pair rather than once
+	// per frame. Both keys change under the reader: a window resize re-wraps, and
+	// a terminal theme switch re-paints on the very next frame, which is why the
+	// peek handles no appearance message of its own (ADR-0230).
+	rendered           string
+	renderedWidth      int
+	renderedAppearance ui.Appearance
+	hasRendered        bool
 	// flash is the peek's own transient feedback, on the same three-second
 	// lifetime as every other flash (ADR-0204).
 	flash ui.Flash
 }
 
-// body returns the text the peek scrolls over at the given width: markdown
-// rendered through glamour, every other extension exactly as it is on disk
-// (ADR-0222).
-func (p *documentPeek) body(width int) string {
+// body returns the text the peek scrolls over at the given width and
+// appearance: markdown rendered through glamour, every other extension exactly
+// as it is on disk (ADR-0222).
+func (p *documentPeek) body(width int, appearance ui.Appearance) string {
 	if !ui.RendersMarkdown(p.path) {
 		return p.text
 	}
-	if !p.hasRendered || p.renderedWidth != width {
-		// The peek does not resolve the terminal appearance yet, so it renders
-		// plain: legible on any background, and never a wrong palette.
-		p.rendered = ui.RenderMarkdown(p.text, width, ui.AppearancePlain)
+	if !p.hasRendered || p.renderedWidth != width || p.renderedAppearance != appearance {
+		p.rendered = ui.RenderMarkdown(p.text, width, appearance)
 		p.renderedWidth = width
+		p.renderedAppearance = appearance
 		p.hasRendered = true
 	}
 	return p.rendered
@@ -749,8 +751,8 @@ func (p *documentPeek) body(width int) string {
 
 // lines is the peek's scrollable unit — one screen line of the body, after
 // rendering — so scrolling, paging and gg/G all count rendered lines.
-func (p *documentPeek) lines(width int) []string {
-	return documentPeekLines(p.body(width))
+func (p *documentPeek) lines(width int, appearance ui.Appearance) []string {
+	return documentPeekLines(p.body(width, appearance))
 }
 
 // invalidateRender drops the cached rendering, so freshly loaded text is never
@@ -758,6 +760,7 @@ func (p *documentPeek) lines(width int) []string {
 func (p *documentPeek) invalidateRender() {
 	p.rendered = ""
 	p.renderedWidth = 0
+	p.renderedAppearance = ui.AppearancePlain
 	p.hasRendered = false
 }
 
@@ -2457,7 +2460,7 @@ func (m QueueDashboard) maxDocumentPeekScroll() int {
 	if m.detail == nil || m.detail.peek == nil {
 		return 0
 	}
-	lines := m.detail.peek.lines(m.width)
+	lines := m.detail.peek.lines(m.width, ui.CurrentAppearance())
 	maxScroll := len(lines) - m.documentPeekPageSize()
 	if maxScroll < 0 {
 		return 0
@@ -3843,7 +3846,7 @@ func (m QueueDashboard) documentPeekFrame() (ui.Frame, string) {
 	if p.path != "" {
 		fmt.Fprintf(&b, "  %s\n\n", p.path)
 	}
-	lines := p.lines(m.width)
+	lines := p.lines(m.width, ui.CurrentAppearance())
 	budgetHeight := m.height
 	if budgetHeight <= 0 {
 		budgetHeight = 20
@@ -4176,8 +4179,7 @@ func RunDashboard(d *drain.Deps, cfg *config.Config) (string, error) {
 		return "", err
 	}
 	m := newQueueDashboard(d, cfg, snap)
-	program := tea.NewProgram(m)
-	final, err := program.Run()
+	final, err := ui.RunProgram(m, nil, nil)
 	if err != nil {
 		return "", err
 	}

@@ -1753,8 +1753,7 @@ func RunMonitorDashboard(title string, panes []AttentionPane, cb AttentionCallba
 	}
 	d.syncFromList()
 	d.fetchPreview()
-	program := tea.NewProgram(d)
-	m, err := program.Run()
+	m, err := RunProgram(d, nil, nil)
 	if err != nil {
 		return MonitorDashboardResult{Action: MonitorDashboardActionCancel}, err
 	}

@@ -146,7 +146,7 @@ var namePromptKeys = namePromptKeyMap{
 // confirmed=false when the human cancels with Esc.
 func PromptName(header, defaultValue, base string) (name string, confirmed bool, err error) {
 	m := newNamePrompt(header, defaultValue, base)
-	final, err := tea.NewProgram(m).Run()
+	final, err := RunProgram(m, nil, nil)
 	if err != nil {
 		return "", false, err
 	}

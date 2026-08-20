@@ -458,8 +458,7 @@ func (cp *ConfigurePicker) Result() ConfigurePickerResult {
 // RunConfigurePicker launches the configure picker and returns the result
 func RunConfigurePicker(expandFn func(string) []string) (ConfigurePickerResult, error) {
 	cp := NewConfigurePicker(expandFn)
-	program := tea.NewProgram(cp)
-	m, err := program.Run()
+	m, err := RunProgram(cp, nil, nil)
 	if err != nil {
 		return ConfigurePickerResult{Cancelled: true}, err
 	}

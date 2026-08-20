@@ -764,11 +764,7 @@ func RunConfigDashboard(rows []ConfigDashboardRow, opts ConfigDashboardOpts, in 
 	if fd, ok := tty.TerminalFd(in); ok {
 		claimTerminal(fd, nil)
 	}
-	final, err := tea.NewProgram(m,
-		tea.WithInput(in),
-		tea.WithOutput(out),
-		tea.WithoutSignalHandler(),
-	).Run()
+	final, err := RunProgram(m, in, out, tea.WithoutSignalHandler())
 	if err != nil {
 		return err
 	}

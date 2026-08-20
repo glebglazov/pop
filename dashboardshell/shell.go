@@ -125,8 +125,7 @@ func launchPaneFacts(d *drain.Deps) work.PaneFacts {
 }
 
 func runShell(s Shell) (Shell, error) {
-	program := tea.NewProgram(s)
-	final, err := program.Run()
+	final, err := ui.RunProgram(s, nil, nil)
 	if err != nil {
 		return Shell{}, err
 	}

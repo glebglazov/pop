@@ -1056,8 +1056,7 @@ func (p *Picker) Result() Result {
 // Run starts the picker and returns the result
 func Run(items []Item, opts ...PickerOption) (Result, error) {
 	p := NewPicker(items, opts...)
-	program := tea.NewProgram(p)
-	m, err := program.Run()
+	m, err := RunProgram(p, nil, nil)
 	if err != nil {
 		return Result{Action: ActionCancel}, err
 	}
