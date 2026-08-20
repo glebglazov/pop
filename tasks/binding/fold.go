@@ -33,13 +33,15 @@ type FoldResult struct {
 	TornDown    bool
 }
 
-// Fold rebases a finished Task set's branch onto the Trunk worktree and
-// releases its checkout (ADR-0148, ADR-0156). It runs a plain rebase of the
-// set branch onto trunk inside the set's own checkout, then advances trunk by
-// fast-forward only. On success it releases the Worktree binding and applies
-// reference-counted teardown. It never pushes, never fetches, and never
-// archives the set. A Fold conflict prompt "retry" aborts the in-flight rebase
-// and restarts this verb from preflight.
+// Fold folds the checkout a finished Task set is bound to, and releases that
+// binding (ADR-0148, ADR-0156, ADR-0229). It is the set-addressed
+// specialization of FoldCheckout: it resolves the set to a checkout, adds the
+// promises a *set* owes — status eligibility, the Awaiting-approval sign-off,
+// binding release, reference-counted teardown — and leaves the git work to the
+// primitive. It never pushes, never fetches, and never archives the set. A Fold
+// conflict prompt "retry" aborts the in-flight rebase and restarts this verb
+// from preflight, which is why the sign-off is asked per attempt rather than
+// once around the loop.
 func Fold(td *tasks.Deps, pd *project.Deps, cfg *config.Config, setID string, opts FoldOptions, hooks LifecycleHooks, out io.Writer) (FoldResult, error) {
 	setID = strings.TrimSpace(setID)
 	if setID == "" {
@@ -64,10 +66,8 @@ func Fold(td *tasks.Deps, pd *project.Deps, cfg *config.Config, setID string, op
 			return FoldResult{}, err
 		}
 		b := ctx.binding
-		runtimePath := ctx.runtimePath
-		trunkPath := ctx.trunkPath
-		branch := ctx.branch
-		trunkBranch := ctx.trunkBranch
+		runtimePath := ctx.plan.path
+		branch := ctx.plan.branch
 
 		if ctx.setStatus == tasks.StatusAwaitingApproval {
 			confirmed, err := confirmFoldSignOff(opts.In, out, opts.Yes, ctx.openHITL)
@@ -80,14 +80,7 @@ func Fold(td *tasks.Deps, pd *project.Deps, cfg *config.Config, setID string, op
 		}
 
 		manifest := loadFoldManifest(td, setID, runtimePath)
-		if err := foldRebaseAndFastForward(td, cfg, opts, out, foldRebaseContext{
-			setID:       setID,
-			manifest:    manifest,
-			setPath:     runtimePath,
-			trunkPath:   trunkPath,
-			setBranch:   branch,
-			trunkBranch: trunkBranch,
-		}); err != nil {
+		if err := foldRebaseAndFastForward(td, cfg, opts, out, ctx.plan.rebaseContext(manifest)); err != nil {
 			if errors.Is(err, tasks.ErrFoldRetry) {
 				continue
 			}
@@ -120,21 +113,21 @@ func Fold(td *tasks.Deps, pd *project.Deps, cfg *config.Config, setID string, op
 			SetID:       setID,
 			RuntimePath: runtimePath,
 			Branch:      branch,
-			TrunkPath:   trunkPath,
+			TrunkPath:   ctx.plan.trunkPath,
 			TornDown:    tornDown,
 		}, nil
 	}
 }
 
+// foldPreflightContext is a set-addressed fold's plan: the checkout-level plan
+// the primitive validated, plus the binding it came from and the set status the
+// sign-off reads.
 type foldPreflightContext struct {
-	key         string
-	binding     Binding
-	runtimePath string
-	trunkPath   string
-	branch      string
-	trunkBranch string
-	setStatus   tasks.TaskSetStatus
-	openHITL    []tasks.Task
+	key       string
+	binding   Binding
+	plan      foldCheckoutPlan
+	setStatus tasks.TaskSetStatus
+	openHITL  []tasks.Task
 }
 
 // PreflightFold applies the same precondition checks as Fold without rebasing
@@ -166,67 +159,30 @@ func preflightFold(td *tasks.Deps, cfg *config.Config, setID string) (foldPrefli
 		return foldPreflightContext{}, fmt.Errorf("fold refused: %s has no worktree binding", setID)
 	}
 
-	trunkPath, bare, err := ResolveTrunkPath(td, cfg, runtimePath)
+	// The status gate rides in as the primitive's gate so it keeps refusing where
+	// it always has: after the checkout resolves to something other than trunk,
+	// before either end is checked for cleanliness.
+	var status foldSetStatus
+	plan, err := preflightFoldCheckout(td, cfg, foldCheckoutRequest{
+		path:   runtimePath,
+		setID:  setID,
+		branch: strings.TrimSpace(b.Branch),
+		gate: func() error {
+			var err error
+			status, err = resolveFoldSetStatus(td, cfg, setID, runtimePath)
+			return err
+		},
+	})
 	if err != nil {
-		return foldPreflightContext{}, fmt.Errorf("fold refused: resolve trunk: %w", err)
-	}
-	if bare || strings.TrimSpace(trunkPath) == "" {
-		return foldPreflightContext{}, fmt.Errorf("fold refused: repository has no resolvable Trunk worktree")
-	}
-
-	if same, err := sameCheckout(td, runtimePath, trunkPath); err != nil {
 		return foldPreflightContext{}, err
-	} else if same {
-		return foldPreflightContext{}, fmt.Errorf("fold refused: %s is bound to the Trunk worktree itself; nothing to fold", setID)
-	}
-
-	foldStatus, err := resolveFoldSetStatus(td, cfg, setID, runtimePath)
-	if err != nil {
-		return foldPreflightContext{}, err
-	}
-
-	// A fold rebase left in progress makes the set worktree dirty; re-entering
-	// Fold must route to the Fold conflict prompt instead of the dirty refusal.
-	parkedRebase := rebaseInProgress(td, runtimePath)
-	if dirty, err := worktreeIsDirty(td, runtimePath); err != nil {
-		return foldPreflightContext{}, fmt.Errorf("fold refused: check set worktree: %w", err)
-	} else if dirty && !parkedRebase {
-		return foldPreflightContext{}, fmt.Errorf("fold refused: set worktree is dirty (%s)", runtimePath)
-	}
-	if dirty, err := worktreeIsDirty(td, trunkPath); err != nil {
-		return foldPreflightContext{}, fmt.Errorf("fold refused: check trunk: %w", err)
-	} else if dirty {
-		return foldPreflightContext{}, fmt.Errorf("fold refused: Trunk worktree is dirty (%s)", trunkPath)
-	}
-
-	if err := refuseLiveClaim(td, "set worktree", runtimePath); err != nil {
-		return foldPreflightContext{}, err
-	}
-	if err := refuseLiveClaim(td, "Trunk worktree", trunkPath); err != nil {
-		return foldPreflightContext{}, err
-	}
-
-	branch := strings.TrimSpace(b.Branch)
-	if branch == "" {
-		branch = CurrentBranch(td, runtimePath)
-	}
-	if branch == "" {
-		return foldPreflightContext{}, fmt.Errorf("fold refused: set worktree %s is detached", runtimePath)
-	}
-	trunkBranch := CurrentBranch(td, trunkPath)
-	if trunkBranch == "" {
-		return foldPreflightContext{}, fmt.Errorf("fold refused: Trunk worktree %s is detached", trunkPath)
 	}
 
 	return foldPreflightContext{
-		key:         key,
-		binding:     b,
-		runtimePath: runtimePath,
-		trunkPath:   trunkPath,
-		branch:      branch,
-		trunkBranch: trunkBranch,
-		setStatus:   foldStatus.status,
-		openHITL:    foldStatus.openHITL,
+		key:       key,
+		binding:   b,
+		plan:      plan,
+		setStatus: status.status,
+		openHITL:  status.openHITL,
 	}, nil
 }
 
