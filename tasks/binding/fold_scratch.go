@@ -169,19 +169,23 @@ func refuseTrunkUnfitToLand(td *tasks.Deps, trunkPath string) error {
 // failure that outlasts that is reported for exactly what it is. Trunk is never
 // unwound; running fold again converges on the same end state (ADR-0229).
 func landFoldedBranch(td *tasks.Deps, ctx foldRebaseContext, scratch string) error {
-	if err := retryAfterLanding(func() error {
-		_, err := td.Git.CommandInDir(ctx.setPath, "branch", "-f", ctx.setBranch, scratch)
-		return err
-	}); err != nil {
-		return fmt.Errorf("fold landed in trunk: trunk holds the work, %s does not — could not move it onto the folded tip %s after %d attempts; trunk stays as it is, so folding again finishes the job: %w",
-			ctx.setBranch, scratch, foldPostLandingAttempts, err)
+	if !refContains(td, ctx.setPath, ctx.setBranch, scratch) {
+		if err := retryAfterLanding(func() error {
+			_, err := td.Git.CommandInDir(ctx.setPath, "branch", "-f", ctx.setBranch, scratch)
+			return err
+		}); err != nil {
+			return fmt.Errorf("fold landed in trunk: trunk holds the work, %s does not — could not move it onto the folded tip %s after %d attempts; trunk stays as it is, so folding again finishes the job: %w",
+				ctx.setBranch, scratch, foldPostLandingAttempts, err)
+		}
 	}
-	if err := retryAfterLanding(func() error {
-		_, err := td.Git.CommandInDir(ctx.setPath, "checkout", ctx.setBranch)
-		return err
-	}); err != nil {
-		return fmt.Errorf("fold landed in trunk and %s holds the work, but %s is still standing on the fold scratch branch %s after %d attempts: %w",
-			ctx.setBranch, ctx.setPath, scratch, foldPostLandingAttempts, err)
+	if CurrentBranch(td, ctx.setPath) != ctx.setBranch {
+		if err := retryAfterLanding(func() error {
+			_, err := td.Git.CommandInDir(ctx.setPath, "checkout", ctx.setBranch)
+			return err
+		}); err != nil {
+			return fmt.Errorf("fold landed in trunk and %s holds the work, but %s is still standing on the fold scratch branch %s after %d attempts: %w",
+				ctx.setBranch, ctx.setPath, scratch, foldPostLandingAttempts, err)
+		}
 	}
 	if err := retryAfterLanding(func() error {
 		_, err := td.Git.CommandInDir(ctx.setPath, "branch", "-d", scratch)

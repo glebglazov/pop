@@ -58,7 +58,12 @@ func FoldCheckout(td *tasks.Deps, cfg *config.Config, path string, opts FoldOpti
 				return FoldCheckoutResult{}, fmt.Errorf("fold cancelled")
 			}
 		}
-		if err := foldRebaseAndFastForward(td, cfg, opts, out, plan.rebaseContext(nil)); err != nil {
+		if plan.landedInTrunk {
+			err = landFoldedBranch(td, plan.rebaseContext(nil), foldScratchBranch(plan.branch))
+		} else {
+			err = foldRebaseAndFastForward(td, cfg, opts, out, plan.rebaseContext(nil))
+		}
+		if err != nil {
 			if errors.Is(err, tasks.ErrFoldRetry) {
 				continue
 			}
@@ -99,6 +104,10 @@ type foldCheckoutPlan struct {
 	trunkPath   string
 	branch      string
 	trunkBranch string
+	// landedInTrunk means trunk already contains a Fold scratch branch left after
+	// the irreversible fast-forward. The caller resumes the bounded local branch,
+	// checkout, and scratch-ref updates without rebasing or moving trunk again.
+	landedInTrunk bool
 }
 
 // rebaseContext hands the git work what it needs. manifest is the addressing
@@ -211,8 +220,11 @@ func preflightFoldCheckout(td *tasks.Deps, cfg *config.Config, req foldCheckoutR
 		// resumes through the conflict prompt.
 		return plan, nil
 	case foldScratchResidue:
-		if err := discardFoldScratchResidue(td, plan, scratch); err != nil {
-			return foldCheckoutPlan{}, err
+		plan.landedInTrunk = refContains(td, plan.trunkPath, plan.trunkBranch, scratch)
+		if !plan.landedInTrunk {
+			if err := discardFoldScratchResidue(td, plan, scratch); err != nil {
+				return foldCheckoutPlan{}, err
+			}
 		}
 	case foldScratchAmbiguous:
 		return foldCheckoutPlan{}, refuseAmbiguousFoldScratch(scratch, branch)
@@ -221,7 +233,7 @@ func preflightFoldCheckout(td *tasks.Deps, cfg *config.Config, req foldCheckoutR
 	// A branch trunk already reaches has nothing to land: the rebase would drop every
 	// commit as already-upstream and the fast-forward would be a no-op, so without
 	// this the fold would report success having changed nothing.
-	if branchContainedInTrunk(td, trunkPath, branch, trunkBranch) {
+	if !plan.landedInTrunk && branchContainedInTrunk(td, trunkPath, branch, trunkBranch) {
 		return foldCheckoutPlan{}, fmt.Errorf("fold refused: %s is already contained in trunk (%s); nothing to fold", branch, trunkBranch)
 	}
 

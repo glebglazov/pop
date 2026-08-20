@@ -812,9 +812,12 @@ func TestBaseRefPickerItemsPutsMainFirstBranchesAtBottom(t *testing.T) {
 func TestWorktreeHelpHasNoPhantomCreateBinding(t *testing.T) {
 	t.Parallel()
 	// ctrl-n is cursor-down in the picker; a create binding never shipped.
-	// Guard against the stale help line returning.
-	if strings.Contains(worktreeDashboardCmd.Long, "ctrl-n") {
-		t.Error("worktree dashboard help advertises ctrl-n, which is not a create binding")
+	// Guard against a help line assigning create to ctrl-n while allowing its
+	// real navigation binding.
+	for _, line := range strings.Split(worktreeDashboardCmd.Long, "\n") {
+		if strings.Contains(line, "ctrl-n") && strings.Contains(strings.ToLower(line), "create") {
+			t.Errorf("worktree dashboard help advertises a false ctrl-n create binding: %q", line)
+		}
 	}
 }
 

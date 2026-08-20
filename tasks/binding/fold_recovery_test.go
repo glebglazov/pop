@@ -313,6 +313,100 @@ func TestFoldPostLandingFailureRetriesThenReportsWithTrunkIntact(t *testing.T) {
 	}
 }
 
+// Once the real branch has moved, a checkout or scratch-delete failure is past
+// Fold's irreversible boundary. A later Task-set Fold must recognize that landing,
+// finish the local cleanup, and continue through binding release and teardown.
+func TestTaskSetFoldRerunAfterRealBranchMovedCompletesItsTail(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		fails func(args []string, branch, scratch string) bool
+	}{
+		{
+			name: "checkout failure",
+			fails: func(args []string, branch, _ string) bool {
+				return len(args) >= 2 && args[0] == "checkout" && args[1] == branch
+			},
+		},
+		{
+			name: "scratch delete failure",
+			fails: func(args []string, _, scratch string) bool {
+				return len(args) >= 3 && args[0] == "branch" && args[1] == "-d" && args[2] == scratch
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			repo := initAdoptRepo(t)
+			td := lifecycleTestDeps(t)
+			setID := "set-tail"
+			seedDoneTaskSet(t, td, repo, setID)
+			b, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
+				TD: td, CheckoutPath: repo, SetID: setID,
+			})
+			if err != nil {
+				t.Fatalf("provision: %v", err)
+			}
+			writeFileCommit(t, b.RuntimePath, "feature.txt", "branch work\n", "branch work")
+			writeFileCommit(t, repo, "trunk.txt", "trunk work\n", "trunk work")
+			scratch := foldScratchBranch(b.Branch)
+			cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+
+			inner := td.Git
+			var attempts atomic.Int32
+			td.Git = &interceptGit{
+				inner: inner,
+				onCommandInDir: func(dir string, args ...string) (string, error) {
+					if tc.fails(args, b.Branch, scratch) {
+						attempts.Add(1)
+						return "", fmt.Errorf("simulated post-landing failure")
+					}
+					return inner.CommandInDir(dir, args...)
+				},
+			}
+			if _, err := Fold(td, nil, cfg, setID, FoldOptions{Yes: true, In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, io.Discard); err == nil {
+				t.Fatal("want the first Fold to stop after landing")
+			}
+			if got := attempts.Load(); got != int32(foldPostLandingAttempts) {
+				t.Fatalf("post-landing attempts = %d, want %d", got, foldPostLandingAttempts)
+			}
+			landed := refAt(t, repo, "HEAD")
+			if got := refAt(t, repo, b.Branch); got != landed {
+				t.Fatalf("real branch = %s, want landed tip %s", got, landed)
+			}
+
+			// The dashboard/CLI eligibility probe must not erase the only signal that
+			// tells the subsequent Fold this is a completed landing.
+			td.Git = inner
+			if err := PreflightFold(td, cfg, setID); err != nil {
+				t.Fatalf("preflight completed landing: %v", err)
+			}
+			if !branchExists(t, repo, scratch) {
+				t.Fatalf("read-only preflight deleted completed-landing signal %s", scratch)
+			}
+
+			got, err := Fold(td, nil, cfg, setID, FoldOptions{Yes: true, In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, io.Discard)
+			if err != nil {
+				t.Fatalf("rerun after real branch moved: %v", err)
+			}
+			if !got.TornDown {
+				t.Fatal("rerun did not complete reference-counted teardown")
+			}
+			if _, _, ok, err := FindBySetID(td, setID); err != nil || ok {
+				t.Fatalf("binding after rerun: present=%v err=%v", ok, err)
+			}
+			if branchExists(t, repo, scratch) {
+				t.Fatalf("rerun left scratch ref %s", scratch)
+			}
+			if got := refAt(t, repo, "HEAD"); got != landed {
+				t.Fatalf("rerun moved trunk: %s -> %s", landed, got)
+			}
+			if _, err := os.Stat(b.RuntimePath); !os.IsNotExist(err) {
+				t.Fatalf("managed worktree survived teardown: %v", err)
+			}
+		})
+	}
+}
+
 // filesOutsideGit lists every file under roots, skipping what git keeps for itself,
 // so a test can prove a fold wrote no record of its own.
 func filesOutsideGit(t *testing.T, roots ...string) []string {

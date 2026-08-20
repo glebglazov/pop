@@ -88,7 +88,12 @@ func Fold(td *tasks.Deps, pd *project.Deps, cfg *config.Config, setID string, op
 		}
 
 		manifest := loadFoldManifest(td, setID, runtimePath)
-		if err := foldRebaseAndFastForward(td, cfg, opts, out, ctx.plan.rebaseContext(manifest)); err != nil {
+		if ctx.plan.landedInTrunk {
+			err = landFoldedBranch(td, ctx.plan.rebaseContext(manifest), foldScratchBranch(branch))
+		} else {
+			err = foldRebaseAndFastForward(td, cfg, opts, out, ctx.plan.rebaseContext(manifest))
+		}
+		if err != nil {
 			if errors.Is(err, tasks.ErrFoldRetry) {
 				continue
 			}
@@ -143,7 +148,8 @@ type foldPreflightContext struct {
 // with the same messages Fold would return. It is asked on the way into a fold,
 // never to paint a row, which is why it may still reconcile one thing it finds:
 // a Fold scratch branch left by a fold that died after its work landed is
-// deleted here (ADR-0229).
+// left intact here when trunk already holds it. The actual Fold consumes that
+// Git-owned signal after it enters the post-landing path (ADR-0229).
 func PreflightFold(td *tasks.Deps, cfg *config.Config, setID string) error {
 	_, err := preflightFold(td, cfg, setID)
 	return err
