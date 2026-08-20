@@ -400,20 +400,3 @@ func TestResolveReviewerPrecedence(t *testing.T) {
 		})
 	}
 }
-
-// TestReviewWithoutAConventionSaysSo: pop ships no house standard, so a
-// repository that has derived none is told to read its own idiom instead.
-func TestReviewWithoutAConventionSaysSo(t *testing.T) {
-	t.Parallel()
-	d, defPath, _ := setupReviewFixture(t, time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC))
-	var gotPrompt string
-	if _, err := reviewResolvedSet(d, nil, reviewOpts(defPath, &bytes.Buffer{}, func(prompt string) (string, string, error) {
-		gotPrompt = prompt
-		return "## Fine", "claude", nil
-	})); err != nil {
-		t.Fatalf("reviewResolvedSet: %v", err)
-	}
-	if !strings.Contains(gotPrompt, "No code-review convention is recorded") {
-		t.Fatalf("prompt does not admit the missing convention:\n%s", gotPrompt)
-	}
-}

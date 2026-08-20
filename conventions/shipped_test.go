@@ -182,3 +182,40 @@ func TestVerificationShippedAnswerCarriesNoneOfPopsMachinery(t *testing.T) {
 		}
 	}
 }
+
+// TestCodeReviewShippedAnswerReviewsOnTwoAxes: pop's own answer weighs how the
+// code is written and whether it does what was asked (ADR-0227 consequence). The
+// second axis knowingly overlaps the Verifier's, which is tolerable only because
+// a review reaches no verdict — so the answer says the overlap is a second
+// opinion rather than claiming the last word.
+func TestCodeReviewShippedAnswerReviewsOnTwoAxes(t *testing.T) {
+	answer := Shipped(KindCodeReview)
+	for what, want := range map[string]string{
+		"the standards axis":          "Axis 1 — Standards: how the code is written",
+		"the spec axis":               "Axis 2 — Spec: whether the code does what was asked",
+		"work the request never got":  "Missing",
+		"work nobody asked for":       "Extra",
+		"work that answers otherwise": "Different",
+		"the diff over the report":    "Read the diff for this axis",
+		"the overlap it admits":       "second opinion",
+	} {
+		if !strings.Contains(answer, want) {
+			t.Errorf("code-review shipped answer does not carry %s (%q):\n%s", what, want, answer)
+		}
+	}
+}
+
+// TestCodeReviewShippedAnswerInstructsNoWrites: the Reviewer runs under a
+// read-only posture (ADR-0221), so an answer that told it to record or fix
+// anything would be an instruction it cannot obey.
+func TestCodeReviewShippedAnswerInstructsNoWrites(t *testing.T) {
+	answer := Shipped(KindCodeReview)
+	if !strings.Contains(answer, "Change no files") {
+		t.Errorf("code-review shipped answer does not hold the reader to reading only:\n%s", answer)
+	}
+	for _, gone := range []string{"write the result", "Write the result", "commit the", "apply the fix"} {
+		if strings.Contains(answer, gone) {
+			t.Errorf("code-review shipped answer instructs a write (%q):\n%s", gone, answer)
+		}
+	}
+}

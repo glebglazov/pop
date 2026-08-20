@@ -219,9 +219,10 @@ func hasDoneAFKTask(m *Manifest) bool {
 }
 
 // resolveReviewConvention asks the seam for the repository's `code-review`
-// convention. It is best-effort by design: pop asserts no house standard, so a
-// repository that has not derived one is reviewed against its own idiom and the
-// prompt says exactly that rather than failing the run.
+// convention — the body of the Reviewer's prompt (ADR-0227). It is best-effort
+// by design: the stack always answers, so an empty result means no seam was
+// wired or resolution failed, and the Reviewer then runs on pop's frame alone
+// rather than the run failing.
 func resolveReviewConvention(opts reviewCoreOptions) string {
 	if opts.Convention == nil {
 		return ""
@@ -525,13 +526,14 @@ func printReviewWritten(w io.Writer, setID, path string, superseded bool) {
 	out.line(ansiDim, "   Read it: pop tasks review %s --show", setID)
 }
 
-// buildReviewerPrompt assembles the Reviewer's input: pop's review instruction,
-// the resolved `code-review` convention, the previous document when one exists,
-// and the changeset's shape — its commit range and complete `git diff --stat`,
-// never the diff bodies. The Reviewer stands in the checkout under review and
-// reads the changed files itself, which is the deliberate divergence from how
-// the Verifier is prompted: naming, structure and idiom cannot be judged from a
-// file-name-and-linecount table (ADR-0214).
+// buildReviewerPrompt assembles the Reviewer's input as an envelope (ADR-0227):
+// pop's role framing, then the resolved `code-review` convention as the body,
+// then the output expectation pop needs back. Around the body sit the previous
+// document when one exists and the changeset's shape — its commit range and
+// complete `git diff --stat`, never the diff bodies. The Reviewer stands in the
+// checkout under review and reads the changed files itself, which is the
+// deliberate divergence from how the Verifier is prompted: naming, structure and
+// idiom cannot be judged from a file-name-and-linecount table (ADR-0214).
 func buildReviewerPrompt(d *Deps, m *Manifest, work workDiffView, convention string, previous reviewDocument, hasPrevious bool) string {
 	view := reviewerPromptView{
 		TaskSet:   m.Stem,
@@ -571,9 +573,10 @@ type reviewerPromptView struct {
 	WorkStat           string
 }
 
-// reviewerTaskRow is one line of what the set set out to do — an orientation
-// listing, not a contract. A review judges how the code is written, not whether
-// a criterion is met, so the task bodies are deliberately not inlined.
+// reviewerTaskRow is one line of what the set set out to do. The titles are what
+// the Reviewer weighs the changeset against when its standard asks whether the
+// code does what was asked; the task bodies stay out because the checkboxes are
+// the Verifier's evidence, and the Reviewer reads the changed files instead.
 type reviewerTaskRow struct {
 	ID    string
 	Title string

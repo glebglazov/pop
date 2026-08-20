@@ -165,11 +165,13 @@ var taskReviewCmd = &cobra.Command{
 	Short: "Run an independent Reviewer agent over a task set's changeset and write the review document",
 	Long: `Review how a task set's changeset is written, against this repository's standard.
 
-A fresh Reviewer reads the resolved code-review convention, the previous review
-document when one exists, and the changeset itself — it is given the commit
-range and the set's diff --stat and reads the changed files in the checkout on
-its own. It reaches no verdict, gates nothing and changes no status: the whole
-output is one document a human acts on or ignores.
+The resolved code-review convention is the review's whole standard: pop supplies
+the role framing and the output expectation, and the convention says what to
+weigh. A fresh Reviewer reads it, the previous review document when one exists,
+and the changeset itself — it is given the commit range and the set's diff --stat
+and reads the changed files in the checkout on its own. It reaches no verdict,
+gates nothing and changes no status: the whole output is one document a human
+acts on or ignores.
 
 Each review supersedes the last. Earlier documents are kept beside it under the
 set's task storage, which is outside the repository tree, so a review can never
@@ -1075,9 +1077,10 @@ func runTaskArtifactsWith(d *tasks.Deps, w io.Writer, taskSetID, show string) er
 }
 
 // codeReviewConvention wires the Reviewer's convention seam to the real
-// Convention stack. It lives here because the conventions package resolves
-// Repository identity through tasks, so tasks cannot reach it directly and cmd
-// is the layer that holds both.
+// Convention stack (ADR-0227): the resolved `code-review` convention is the body
+// of the Reviewer's prompt. It lives here because the conventions package
+// resolves Repository identity through tasks, so tasks cannot reach it directly
+// and cmd is the layer that holds both.
 func codeReviewConvention(d *tasks.Deps) tasks.ReviewConvention {
 	return func(cwd string) (string, error) {
 		stack, err := conventions.Resolve(&conventions.Deps{Tasks: d}, conventions.KindCodeReview, cwd)

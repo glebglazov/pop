@@ -1,10 +1,11 @@
 # The standard to hold a changeset against
 
 Nobody has written down what good code looks like here, so this is pop's own
-answer: a named baseline of code smells, generic by construction. Any document
-written at a rank above this one — the team's `docs/agents/code-review.md`, or
-either of your own — displaces it whole, so a repository that has stated its
-taste is never reviewed against a stranger's.
+answer: a review on two axes — how the code is written, and whether it does what
+was asked — with a named baseline of smells for the first, generic by
+construction. Any document written at a rank above this one — the team's
+`docs/agents/code-review.md`, or either of your own — displaces it whole, so a
+repository that has stated its taste is never reviewed against a stranger's.
 
 Two rules bind everything below.
 
@@ -27,7 +28,7 @@ Two rules bind everything below.
   says faster, so record those as *enforced elsewhere* and spend the review on
   what no linter can see.
 
-## The smell baseline
+## Axis 1 — Standards: how the code is written
 
 A fixed set of Fowler smells (*Refactoring*, ch. 3). Each reads *what it is* →
 *how to fix*:
@@ -57,8 +58,35 @@ A fixed set of Fowler smells (*Refactoring*, ch. 3). Each reads *what it is* →
 - **Refused Bequest** — a subclass or implementer that ignores or overrides
   most of what it inherits. → drop the inheritance, use composition.
 
+## Axis 2 — Spec: whether the code does what was asked
+
+Well-written code that answers a different question than the one asked is still
+the wrong change, and only a reader of the diff can see it. Take what the work
+set out to do from whatever states it — the request, the spec, the task titles —
+and read the changed files against it:
+
+- **Missing** — something the work was asked for that no file does. Name what is
+  absent and where it would have gone.
+- **Extra** — behaviour, configuration or abstraction the request never asked
+  for. Say what it is; a change nobody wanted still has to be maintained.
+- **Different** — what the code does where the request said something else, most
+  often in an edge the request settled and the code decided for itself.
+
+Read the diff for this axis rather than the report beside it: a summary, a
+commit message and a checked box each state an intent, and the code is what
+happened. Where the request is genuinely silent, say the request is silent
+instead of inventing the requirement it did not state.
+
+Another reader may reach this axis from the acceptance criteria rather than from
+the files, and the two of you can disagree. That is the point of reading it here:
+a second opinion from different evidence, in a document a human weighs.
+
 ## What a finding is worth saying
 
-A finding names the smell, the location, and what the fix would be. A review
-that lists what any good code anywhere would do gives the reader nothing to hold
+A finding names its axis, the location, and what the fix would be. A review that
+lists what any good code anywhere would do gives the reader nothing to hold
 *this* changeset against.
+
+Your reply is the whole review. Change no files, record nothing on disk, and fix
+nothing you found — what you write is read by a human who decides what to do
+about it.
