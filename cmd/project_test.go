@@ -154,7 +154,7 @@ func TestBuildSessionAwareItems(t *testing.T) {
 		}
 		hist := &history.History{}
 
-		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil, nil)
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil, nil, config.SessionOrderingUnified)
 
 		// Should have 4 items: 2 projects + 2 standalone
 		if len(result) != 4 {
@@ -190,7 +190,7 @@ func TestBuildSessionAwareItems(t *testing.T) {
 			},
 		}
 
-		result := buildSessionAwareItemsWith(baseItems, &history.History{}, sessionActivity, nil, nil, workSessions)
+		result := buildSessionAwareItemsWith(baseItems, &history.History{}, sessionActivity, nil, nil, workSessions, config.SessionOrderingUnified)
 
 		markerByPath := make(map[string]string)
 		for _, item := range result {
@@ -218,7 +218,7 @@ func TestBuildSessionAwareItems(t *testing.T) {
 		}
 		hist := &history.History{}
 
-		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil, nil)
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil, nil, config.SessionOrderingUnified)
 
 		iconByPath := make(map[string]string)
 		for _, item := range result {
@@ -244,7 +244,7 @@ func TestBuildSessionAwareItems(t *testing.T) {
 		sessionActivity := map[string]int64{}
 		hist := &history.History{}
 
-		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil, nil)
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil, nil, config.SessionOrderingUnified)
 
 		if len(result) != 2 {
 			t.Fatalf("got %d items, want 2", len(result))
@@ -271,7 +271,7 @@ func TestBuildSessionAwareItems(t *testing.T) {
 		}
 		hist := &history.History{}
 
-		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, excludedSessionNames, nil, nil)
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, excludedSessionNames, nil, nil, config.SessionOrderingUnified)
 
 		// Should have only 1 item: "api" with dir session icon
 		// "app" should NOT appear as standalone
@@ -297,7 +297,7 @@ func TestBuildSessionAwareItems(t *testing.T) {
 		}
 		hist := &history.History{}
 
-		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil, nil)
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil, nil, config.SessionOrderingUnified)
 
 		if len(result) != 1 {
 			t.Fatalf("got %d items, want 1 (session should match project)", len(result))
@@ -317,7 +317,7 @@ func TestBuildSessionAwareItems(t *testing.T) {
 		}
 		hist := &history.History{}
 
-		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil, nil)
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil, nil, config.SessionOrderingUnified)
 
 		if len(result) != 1 {
 			t.Fatalf("got %d items, want 1", len(result))
@@ -338,7 +338,7 @@ func TestBuildSessionAwareItems(t *testing.T) {
 		}
 		hist := &history.History{}
 
-		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil, nil)
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil, nil, config.SessionOrderingUnified)
 
 		if len(result) != 1 {
 			t.Fatalf("got %d items, want 1", len(result))
@@ -368,7 +368,7 @@ func TestBuildSessionAwareItems_AttentionIndicator(t *testing.T) {
 		}
 		hist := &history.History{}
 
-		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, attentionSessions, nil)
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, attentionSessions, nil, config.SessionOrderingUnified)
 
 		iconByPath := make(map[string]string)
 		for _, item := range result {
@@ -394,7 +394,7 @@ func TestBuildSessionAwareItems_AttentionIndicator(t *testing.T) {
 		}
 		hist := &history.History{}
 
-		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, attentionSessions, nil)
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, attentionSessions, nil, config.SessionOrderingUnified)
 
 		iconByPath := make(map[string]string)
 		for _, item := range result {
@@ -418,7 +418,7 @@ func TestBuildSessionAwareItems_AttentionIndicator(t *testing.T) {
 		}
 		hist := &history.History{}
 
-		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil, nil)
+		result := buildSessionAwareItemsWith(baseItems, hist, sessionActivity, nil, nil, nil, config.SessionOrderingUnified)
 
 		if result[0].Icon != iconDirSession {
 			t.Errorf("nil attention: Icon = %q, want %q", result[0].Icon, iconDirSession)
@@ -443,7 +443,7 @@ func TestSortByUnifiedRecency(t *testing.T) {
 			"recent-session": 2000,
 		}
 
-		result := sortByUnifiedRecency(items, hist, sessionActivity)
+		result := sortByUnifiedRecency(items, hist, sessionActivity, config.SessionOrderingUnified)
 
 		// Expected: no-history first (alphabetical, no timestamp), old-project (ts=1000), recent-session (ts=2000)
 		expected := []string{"/no-history", "/old-project", "tmux:recent-session"}
@@ -470,9 +470,95 @@ func TestSortByUnifiedRecency(t *testing.T) {
 			"session-mid": 2000,
 		}
 
-		result := sortByUnifiedRecency(items, hist, sessionActivity)
+		result := sortByUnifiedRecency(items, hist, sessionActivity, config.SessionOrderingUnified)
 
 		expected := []string{"/proj-old", "tmux:session-mid", "/proj-new"}
+		for i, want := range expected {
+			if result[i].Path != want {
+				t.Errorf("result[%d].Path = %q, want %q", i, result[i].Path, want)
+			}
+		}
+	})
+
+	// The live-first fixtures carry icons because that is what the sort reads:
+	// buildSessionAwareItemsWith assigns every row its glyph before sorting, so
+	// a direct call has to arrive in the same state.
+	t.Run("live-first tiers glyphed rows after dead rows", func(t *testing.T) {
+		items := []ui.Item{
+			{Name: "proj-old", Path: "/proj-old"},
+			{Name: "session-mid", Path: "tmux:session-mid", Icon: iconStandaloneSession},
+			{Name: "proj-new", Path: "/proj-new"},
+		}
+		hist := &history.History{
+			Entries: []history.Entry{
+				{Path: "/proj-old", LastAccess: time.Unix(1000, 0)},
+				{Path: "/proj-new", LastAccess: time.Unix(3000, 0)},
+			},
+		}
+		sessionActivity := map[string]int64{
+			"session-mid": 2000,
+		}
+
+		result := sortByUnifiedRecency(items, hist, sessionActivity, config.SessionOrderingLiveFirst)
+
+		// proj-new was visited after session-mid's last activity, but it has no
+		// live session, so it must not split the live tier.
+		expected := []string{"/proj-old", "/proj-new", "tmux:session-mid"}
+		for i, want := range expected {
+			if result[i].Path != want {
+				t.Errorf("result[%d].Path = %q, want %q", i, result[i].Path, want)
+			}
+		}
+	})
+
+	t.Run("live-first joins live project rows by their own recency", func(t *testing.T) {
+		items := []ui.Item{
+			{Name: "live-proj", Path: "/live-proj", SessionName: "live-proj", Icon: iconDirSession},
+			{Name: "dead-proj", Path: "/dead-proj", SessionName: "dead-proj"},
+			{Name: "live-session", Path: "tmux:live-session", Icon: iconStandaloneSession},
+		}
+		hist := &history.History{
+			Entries: []history.Entry{
+				{Path: "/live-proj", LastAccess: time.Unix(1000, 0)},
+				{Path: "/dead-proj", LastAccess: time.Unix(3000, 0)},
+			},
+		}
+		sessionActivity := map[string]int64{
+			"live-proj":    1000,
+			"live-session": 2000,
+		}
+
+		result := sortByUnifiedRecency(items, hist, sessionActivity, config.SessionOrderingLiveFirst)
+
+		// dead-proj was visited most recently, but its session is gone: the two
+		// live rows stay grouped at the recent end with no gap between them.
+		expected := []string{"/dead-proj", "/live-proj", "tmux:live-session"}
+		for i, want := range expected {
+			if result[i].Path != want {
+				t.Errorf("result[%d].Path = %q, want %q", i, result[i].Path, want)
+			}
+		}
+	})
+
+	t.Run("live-first reads the glyph, not the activity map", func(t *testing.T) {
+		// The tier and nesting must agree on what "live" means, and nesting reads
+		// rowHasLiveSession. An attention glyph is assigned without consulting the
+		// activity map, so a row carrying one tiers live even when its name has no
+		// activity entry.
+		items := []ui.Item{
+			{Name: "attn", Path: "/attn", SessionName: "attn", Icon: iconAttention},
+			{Name: "fresh", Path: "/fresh"},
+		}
+		hist := &history.History{
+			Entries: []history.Entry{
+				{Path: "/attn", LastAccess: time.Unix(1000, 0)},
+				{Path: "/fresh", LastAccess: time.Unix(2000, 0)},
+			},
+		}
+
+		result := sortByUnifiedRecency(items, hist, map[string]int64{}, config.SessionOrderingLiveFirst)
+
+		expected := []string{"/fresh", "/attn"}
 		for i, want := range expected {
 			if result[i].Path != want {
 				t.Errorf("result[%d].Path = %q, want %q", i, result[i].Path, want)
@@ -493,7 +579,7 @@ func TestSortByUnifiedRecency(t *testing.T) {
 			"newer":  3000,
 		}
 
-		result := sortByUnifiedRecency(items, hist, sessionActivity)
+		result := sortByUnifiedRecency(items, hist, sessionActivity, config.SessionOrderingUnified)
 
 		expected := []string{"tmux:older", "tmux:middle", "tmux:newer"}
 		for i, want := range expected {
