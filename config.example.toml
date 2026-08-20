@@ -71,6 +71,13 @@ projects = [
 # "flat" (default): every worktree is its own row, named "<project>/<worktree>"
 # "nested": a project's live worktree sessions hang under it as a second level
 # worktree_display = "flat"
+# How the dashboard orders its rows:
+# "unified" (default): one recency timeline, rows with a live session
+# interleaved with recently visited but session-less checkouts
+# "live-first": rows with a live tmux session group at the bottom of the list,
+# next to the prompt where the cursor and the quick-access digits sit; recency
+# order is unchanged within each tier
+# session_ordering = "unified"
 
 # [worktree]
 # Worktree-specific custom keybindings (override global commands matched by key)

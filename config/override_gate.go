@@ -67,6 +67,7 @@ func overrideBufferFindings(cfg *Config, md toml.MetaData) []Finding {
 	workbench, _ := workbenchFindings(overrideBufferLabel, cfg.Workbenches)
 	findings = append(findings, workbench...)
 	findings = append(findings, worktreeDisplayFindings(overrideBufferLabel, cfg.projectConfig())...)
+	findings = append(findings, sessionOrderingFindings(overrideBufferLabel, cfg.projectConfig())...)
 	findings = append(findings, spendModelRateFindings(cfg, md)...)
 	return findings
 }

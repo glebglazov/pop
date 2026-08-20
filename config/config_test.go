@@ -5679,6 +5679,96 @@ func TestProjectWorktreeDisplayZeroValues(t *testing.T) {
 	}
 }
 
+// [project] session_ordering is a two-word vocabulary with a permanent default:
+// live-first is a preference, so anything unreadable keeps today's unified
+// timeline and says so in the warning banner instead of guessing. The
+// deprecated [select] table is honored like every other project key.
+func TestProjectSessionOrdering(t *testing.T) {
+	tests := []struct {
+		name        string
+		toml        string
+		want        SessionOrdering
+		wantFinding bool
+	}{
+		{name: "absent", toml: "projects = []", want: SessionOrderingUnified},
+		{name: "unified", toml: "projects = []\n[project]\nsession_ordering = \"unified\"", want: SessionOrderingUnified},
+		{name: "live-first", toml: "projects = []\n[project]\nsession_ordering = \"live-first\"", want: SessionOrderingLiveFirst},
+		{
+			name: "deprecated [select] table honored",
+			toml: "projects = []\n[select]\nsession_ordering = \"live-first\"",
+			want: SessionOrderingLiveFirst,
+		},
+		{
+			name:        "unknown value rejected",
+			toml:        "projects = []\n[project]\nsession_ordering = \"live_first\"",
+			want:        SessionOrderingUnified,
+			wantFinding: true,
+		},
+		{
+			name:        "capitalised value rejected",
+			toml:        "projects = []\n[project]\nsession_ordering = \"Live-First\"",
+			want:        SessionOrderingUnified,
+			wantFinding: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			configPath := filepath.Join(t.TempDir(), "config.toml")
+			if err := os.WriteFile(configPath, []byte(tt.toml), 0644); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			cfg, err := Load(configPath)
+			if err != nil {
+				t.Fatalf("Load(): %v", err)
+			}
+			if got := cfg.ProjectSessionOrdering(); got != tt.want {
+				t.Errorf("ProjectSessionOrdering() = %q, want %q", got, tt.want)
+			}
+
+			var finding *Finding
+			for i := range cfg.Findings {
+				if cfg.Findings[i].Path == "project.session_ordering" {
+					finding = &cfg.Findings[i]
+				}
+			}
+			if tt.wantFinding {
+				if finding == nil {
+					t.Fatalf("no finding for project.session_ordering; findings = %+v", cfg.Findings)
+				}
+				if !strings.Contains(finding.Message, configPath) {
+					t.Errorf("finding %q does not name the config file %q", finding.Message, configPath)
+				}
+				// The banner is the only place the rejection surfaces, so the
+				// message has to reach it.
+				found := false
+				for _, w := range cfg.Warnings {
+					if w == finding.Message {
+						found = true
+					}
+				}
+				if !found {
+					t.Errorf("finding %q missing from Warnings %q", finding.Message, cfg.Warnings)
+				}
+			} else if finding != nil {
+				t.Errorf("unexpected finding %+v", *finding)
+			}
+		})
+	}
+}
+
+// A nil receiver and a config with no [project] table both resolve to the
+// default, so the getter is safe on every path that reaches it.
+func TestProjectSessionOrderingZeroValues(t *testing.T) {
+	var nilCfg *Config
+	if got := nilCfg.ProjectSessionOrdering(); got != SessionOrderingUnified {
+		t.Errorf("nil config: %q, want %q", got, SessionOrderingUnified)
+	}
+	if got := (&Config{}).ProjectSessionOrdering(); got != SessionOrderingUnified {
+		t.Errorf("empty config: %q, want %q", got, SessionOrderingUnified)
+	}
+}
+
 // TestIncludeWorkGroupsMergeFieldWise pins the sibling Work groups' include
 // semantics (ADR-0037 first-wins, per field): an include may set a key of
 // [work.verify] or [work.review] that the parent left alone, and keeps it even

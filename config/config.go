@@ -164,6 +164,11 @@ type ProjectConfig struct {
 	// project's live worktree sessions under it as a second level. Read through
 	// Config.ProjectWorktreeDisplay, never off this field.
 	WorktreeDisplay string `toml:"worktree_display" desc:"How the project dashboard arranges worktree rows (flat|nested)."`
+	// SessionOrdering selects how the dashboard orders its rows. Absent or
+	// "unified" is today's one recency timeline; "live-first" tiers the rows
+	// with a live tmux session next to the prompt. Read through
+	// Config.ProjectSessionOrdering, never off this field.
+	SessionOrdering string `toml:"session_ordering" desc:"How the project dashboard orders its rows (unified|live-first)."`
 }
 
 // WorktreeDisplay is how the project dashboard arranges a repository's worktree
@@ -178,6 +183,20 @@ const (
 	WorktreeDisplayFlat WorktreeDisplay = "flat"
 	// WorktreeDisplayNested hangs a project's live worktree sessions under it.
 	WorktreeDisplayNested WorktreeDisplay = "nested"
+)
+
+// SessionOrdering is how the project dashboard orders its rows: unified (one
+// recency timeline, rows with a live session interleaved with session-less
+// checkouts) or live-first (the rows with a live session tier next to the
+// prompt, recency untouched within each tier). Live-first is a preference and
+// unified is the permanent default — this is not a migration.
+type SessionOrdering string
+
+const (
+	// SessionOrderingUnified is the default: one unified recency timeline.
+	SessionOrderingUnified SessionOrdering = "unified"
+	// SessionOrderingLiveFirst tiers rows with a live session next to the prompt.
+	SessionOrderingLiveFirst SessionOrdering = "live-first"
 )
 
 // Integration skill alias values for optional integration components.
@@ -1450,6 +1469,26 @@ func (c *Config) ProjectWorktreeDisplay() WorktreeDisplay {
 	return WorktreeDisplayFlat
 }
 
+// ProjectSessionOrdering returns how the project dashboard orders its rows.
+// An absent key, an empty value or a value the vocabulary does not contain
+// resolves to SessionOrderingUnified: an unreadable preference must not change
+// which row sits next to the prompt, and the rejected value is already
+// surfaced as a load-time finding (sessionOrderingFindings). The deprecated
+// [select] table is honored like every other project key.
+func (c *Config) ProjectSessionOrdering() SessionOrdering {
+	if c == nil {
+		return SessionOrderingUnified
+	}
+	pc := c.projectConfig()
+	if pc == nil {
+		return SessionOrderingUnified
+	}
+	if SessionOrdering(pc.SessionOrdering) == SessionOrderingLiveFirst {
+		return SessionOrderingLiveFirst
+	}
+	return SessionOrderingUnified
+}
+
 // worktreeDisplayFindings rejects a [project] worktree_display value outside the
 // two-word vocabulary. Per ADR 0054 it is collected, not thrown: the dashboard
 // still opens — flat — and names the offending value in its warning banner
@@ -1469,6 +1508,30 @@ func worktreeDisplayFindings(path string, pc *ProjectConfig) []Finding {
 		Message: fmt.Sprintf(
 			"%s: [project] worktree_display = %q is not one of %q, %q; using %q",
 			path, pc.WorktreeDisplay, WorktreeDisplayFlat, WorktreeDisplayNested, WorktreeDisplayFlat,
+		),
+	}}
+}
+
+// sessionOrderingFindings rejects a [project] session_ordering value outside
+// the two-word vocabulary. Per ADR 0054 it is collected, not thrown: the
+// dashboard still opens — on the unified timeline — and names the offending
+// value in its warning banner rather than silently ordering rows the way the
+// operator did not ask for. Only the main config is checked, because [project]
+// is not on the include whitelist: an included table is dropped and warned
+// about as a whole.
+func sessionOrderingFindings(path string, pc *ProjectConfig) []Finding {
+	if pc == nil || pc.SessionOrdering == "" {
+		return nil
+	}
+	switch SessionOrdering(pc.SessionOrdering) {
+	case SessionOrderingUnified, SessionOrderingLiveFirst:
+		return nil
+	}
+	return []Finding{{
+		Path: "project.session_ordering",
+		Message: fmt.Sprintf(
+			"%s: [project] session_ordering = %q is not one of %q, %q; using %q",
+			path, pc.SessionOrdering, SessionOrderingUnified, SessionOrderingLiveFirst, SessionOrderingUnified,
 		),
 	}}
 }
@@ -1822,6 +1885,9 @@ func LoadWith(d *Deps, path string) (*Config, error) {
 	// Runs after the [select] alias is folded in, so the finding is raised once
 	// for whichever table actually carried the value.
 	for _, f := range worktreeDisplayFindings(path, cfg.projectConfig()) {
+		cfg.recordFinding(f)
+	}
+	for _, f := range sessionOrderingFindings(path, cfg.projectConfig()) {
 		cfg.recordFinding(f)
 	}
 
