@@ -245,6 +245,21 @@ func confirmFoldSignOff(in io.Reader, out io.Writer, yes bool, hitl []tasks.Task
 	return confirmYesNo(in, out, yes, prompt, "non-interactive fold of an AWAITING-APPROVAL set requires --yes")
 }
 
+// refuseDirtyTrunk is the refusal trunk earns for uncommitted work. It is a
+// function rather than an inline check because the fold asks it twice — once in
+// preflight and once on the edge of the fast-forward — and both must say it the
+// same way.
+func refuseDirtyTrunk(td *tasks.Deps, trunkPath string) error {
+	dirty, err := worktreeIsDirty(td, trunkPath)
+	if err != nil {
+		return fmt.Errorf("fold refused: check trunk: %w", err)
+	}
+	if dirty {
+		return fmt.Errorf("fold refused: Trunk worktree is dirty (%s)", trunkPath)
+	}
+	return nil
+}
+
 func refuseLiveClaim(td *tasks.Deps, label, path string) error {
 	claim, err := tasks.ReadCheckoutClaim(td, path)
 	if err != nil {
@@ -259,15 +274,6 @@ func refuseLiveClaim(td *tasks.Deps, label, path string) error {
 		return fmt.Errorf("fold refused: %s has a live claim (%s, held by %s)", label, reason, holder)
 	}
 	return fmt.Errorf("fold refused: %s has a live claim (%s)", label, reason)
-}
-
-type foldRebaseContext struct {
-	setID       string
-	manifest    *tasks.Manifest
-	setPath     string
-	trunkPath   string
-	setBranch   string
-	trunkBranch string
 }
 
 func loadFoldManifest(td *tasks.Deps, setID, runtimePath string) *tasks.Manifest {
@@ -288,84 +294,6 @@ func loadFoldManifest(td *tasks.Deps, setID, runtimePath string) *tasks.Manifest
 		return nil
 	}
 	return tasks.LoadManifest(td, setID, manifestPath)
-}
-
-// foldRebaseAndFastForward rebases the set branch onto trunk inside the set
-// checkout, then fast-forwards trunk onto that branch. If trunk moves between
-// the rebase and the fast-forward, it redoes the rebase once and then refuses.
-func foldRebaseAndFastForward(td *tasks.Deps, cfg *config.Config, opts FoldOptions, out io.Writer, ctx foldRebaseContext) error {
-	const maxAttempts = 2
-	for attempt := 0; attempt < maxAttempts; attempt++ {
-		trunkBefore, err := revParseHEAD(td, ctx.trunkPath)
-		if err != nil {
-			return fmt.Errorf("fold refused: read trunk HEAD: %w", err)
-		}
-
-		if err := rebaseSetOntoTrunk(td, cfg, opts, out, ctx); err != nil {
-			return err
-		}
-
-		trunkAfterRebase, err := revParseHEAD(td, ctx.trunkPath)
-		if err != nil {
-			return fmt.Errorf("fold refused: read trunk HEAD: %w", err)
-		}
-		if trunkAfterRebase != trunkBefore {
-			if attempt+1 < maxAttempts {
-				continue
-			}
-			return errTrunkMovedDuringFold
-		}
-
-		if err := fastForwardTrunk(td, ctx.trunkPath, ctx.setBranch); err != nil {
-			trunkNow, readErr := revParseHEAD(td, ctx.trunkPath)
-			if readErr != nil {
-				return fmt.Errorf("fold refused: read trunk HEAD: %w", readErr)
-			}
-			if trunkNow != trunkBefore {
-				if attempt+1 < maxAttempts {
-					continue
-				}
-				return errTrunkMovedDuringFold
-			}
-			return fmt.Errorf("fold refused: could not fast-forward trunk onto %s: %w", ctx.setBranch, err)
-		}
-		return nil
-	}
-	return errTrunkMovedDuringFold
-}
-
-var errTrunkMovedDuringFold = fmt.Errorf("fold refused: Trunk worktree moved during fold; redo once already attempted — resolve manually and retry")
-
-func rebaseSetOntoTrunk(td *tasks.Deps, cfg *config.Config, opts FoldOptions, out io.Writer, ctx foldRebaseContext) error {
-	// Re-entering Fold with a parked rebase skips starting a new one and goes
-	// straight to the Fold conflict prompt (ADR-0156).
-	if !rebaseInProgress(td, ctx.setPath) {
-		_, err := td.Git.CommandInDir(ctx.setPath, "rebase", ctx.trunkBranch)
-		if err == nil {
-			return nil
-		}
-		if !rebaseInProgress(td, ctx.setPath) {
-			return fmt.Errorf("fold refused: rebase set branch onto trunk failed (trunk unchanged): %w", err)
-		}
-	}
-	return tasks.HandleFoldConflict(td, cfg, tasks.FoldConflictContext{
-		SetID:       ctx.setID,
-		Manifest:    ctx.manifest,
-		RuntimePath: ctx.setPath,
-		SetBranch:   ctx.setBranch,
-		TrunkBranch: ctx.trunkBranch,
-		TrunkPath:   ctx.trunkPath,
-	}, tasks.FoldConflictAssistanceOptions{
-		AgentPreset: opts.AgentPreset,
-		AgentCmd:    opts.AgentCmd,
-		In:          opts.In,
-		Out:         out,
-	})
-}
-
-func fastForwardTrunk(td *tasks.Deps, trunkPath, setBranch string) error {
-	_, err := td.Git.CommandInDir(trunkPath, "merge", "--ff-only", setBranch)
-	return err
 }
 
 func rebaseInProgress(td *tasks.Deps, path string) bool {
@@ -396,7 +324,11 @@ func rebaseStateDirPresent(td *tasks.Deps, path string) bool {
 }
 
 func revParseHEAD(td *tasks.Deps, path string) (string, error) {
-	out, err := td.Git.CommandInDir(path, "rev-parse", "HEAD")
+	return revParseRef(td, path, "HEAD")
+}
+
+func revParseRef(td *tasks.Deps, path, ref string) (string, error) {
+	out, err := td.Git.CommandInDir(path, "rev-parse", ref)
 	if err != nil {
 		return "", err
 	}

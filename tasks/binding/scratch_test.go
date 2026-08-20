@@ -118,6 +118,8 @@ func TestScratchWorktreeBindsAndFoldsThroughExistingPath(t *testing.T) {
 		t.Errorf("stored binding must be provisioned (managed-root checkout), got %+v", stored)
 	}
 
+	writeFileCommit(t, b.RuntimePath, "docs.txt", "docs\n", "docs work")
+
 	got, err := Fold(td, nil, cfg, "docs-set", FoldOptions{Yes: true, In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, io.Discard)
 	if err != nil {
 		t.Fatalf("fold: %v", err)

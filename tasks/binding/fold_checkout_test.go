@@ -3,6 +3,7 @@ package binding
 import (
 	"io"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -60,13 +61,18 @@ func foldReadOnlyCall(args []string) bool {
 	return false
 }
 
+// foldCommitID masks the commit ids an action names, so two folds in two
+// repositories compare on what they did rather than on which objects they did it to.
+var foldCommitID = regexp.MustCompile(`\b[0-9a-f]{40}\b`)
+
 func (g *foldActionGit) record(dir string, args []string) {
 	if len(args) == 0 || !foldMutatingVerbs[args[0]] || foldReadOnlyCall(args) {
 		return
 	}
+	action := foldCommitID.ReplaceAllString(g.label(dir)+": git "+strings.Join(args, " "), "<sha>")
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.actions = append(g.actions, g.label(dir)+": git "+strings.Join(args, " "))
+	g.actions = append(g.actions, action)
 }
 
 func (g *foldActionGit) Command(args ...string) (string, error) {
@@ -151,8 +157,8 @@ func TestSetFoldAndCheckoutFoldTakeTheSameGitActions(t *testing.T) {
 	if !strings.Contains(plainActions, "folding: git rebase ") {
 		t.Fatalf("fold must rebase in the folding checkout, got:\n%s", plainActions)
 	}
-	if !strings.Contains(plainActions, "trunk: git merge --ff-only "+b.Branch) {
-		t.Fatalf("fold must fast-forward trunk onto the branch, got:\n%s", plainActions)
+	if !strings.Contains(plainActions, "trunk: git merge --ff-only "+foldScratchBranch(b.Branch)) {
+		t.Fatalf("fold must fast-forward trunk onto the fold scratch branch, got:\n%s", plainActions)
 	}
 }
 

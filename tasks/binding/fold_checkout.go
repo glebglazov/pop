@@ -160,10 +160,8 @@ func preflightFoldCheckout(td *tasks.Deps, cfg *config.Config, req foldCheckoutR
 	} else if dirty && !parkedRebase {
 		return foldCheckoutPlan{}, fmt.Errorf("fold refused: %s is dirty (%s)", label, path)
 	}
-	if dirty, err := worktreeIsDirty(td, trunkPath); err != nil {
-		return foldCheckoutPlan{}, fmt.Errorf("fold refused: check trunk: %w", err)
-	} else if dirty {
-		return foldCheckoutPlan{}, fmt.Errorf("fold refused: Trunk worktree is dirty (%s)", trunkPath)
+	if err := refuseDirtyTrunk(td, trunkPath); err != nil {
+		return foldCheckoutPlan{}, err
 	}
 
 	if err := refuseLiveClaim(td, label, path); err != nil {
@@ -185,6 +183,13 @@ func preflightFoldCheckout(td *tasks.Deps, cfg *config.Config, req foldCheckoutR
 		return foldCheckoutPlan{}, fmt.Errorf("fold refused: Trunk worktree %s is detached", trunkPath)
 	}
 
+	// A branch trunk already reaches has nothing to land: the rebase would drop every
+	// commit as already-upstream and the fast-forward would be a no-op, so without
+	// this the fold would report success having changed nothing.
+	if branchContainedInTrunk(td, trunkPath, branch, trunkBranch) {
+		return foldCheckoutPlan{}, fmt.Errorf("fold refused: %s is already contained in trunk (%s); nothing to fold", branch, trunkBranch)
+	}
+
 	return foldCheckoutPlan{
 		subject:     subject,
 		setID:       setID,
@@ -193,4 +198,14 @@ func preflightFoldCheckout(td *tasks.Deps, cfg *config.Config, req foldCheckoutR
 		branch:      branch,
 		trunkBranch: trunkBranch,
 	}, nil
+}
+
+// branchContainedInTrunk reports whether the trunk branch already reaches every
+// commit on branch. git answers with an exit status and the git seam surfaces only
+// an error, so anything but success reads as not contained — a genuine git problem
+// then surfaces at the rebase, which speaks about it better than a preflight probe
+// could.
+func branchContainedInTrunk(td *tasks.Deps, trunkPath, branch, trunkBranch string) bool {
+	_, err := td.Git.CommandInDir(trunkPath, "merge-base", "--is-ancestor", branch, trunkBranch)
+	return err == nil
 }

@@ -1,0 +1,203 @@
+package binding
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"strings"
+
+	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/tasks"
+)
+
+// foldRebaseContext is what the fold's git work needs: both ends of the fold and
+// the branch on each. manifest is the addressing set's manifest, which the Fold
+// conflict prompt reads, and nil when no set addressed the fold.
+type foldRebaseContext struct {
+	setID       string
+	manifest    *tasks.Manifest
+	setPath     string
+	trunkPath   string
+	setBranch   string
+	trunkBranch string
+}
+
+// foldScratchBranch names the Fold scratch branch for a branch: `pop/fold/<branch>`
+// with `/` flattened to `-`. The flattening is git's own constraint — it cannot
+// hold `pop/fold/a` and `pop/fold/a/b` at once, one being a file where the other
+// needs a directory. The name carries no timestamp and no uniquifying suffix on
+// purpose: a re-run must compute the same ref, which is what lets a stopped fold be
+// read back out of git rather than out of a journal (ADR-0229).
+func foldScratchBranch(branch string) string {
+	return "pop/fold/" + strings.ReplaceAll(strings.TrimSpace(branch), "/", "-")
+}
+
+// foldRebaseAndFastForward does the fold's git work on a Fold scratch branch, so
+// the branch it was asked to fold is rewritten by nothing (ADR-0229): the scratch
+// branch is created at that branch's pre-fold tip, rebased onto trunk, and landed
+// in trunk by fast-forward; only then does the real branch move — once, by a forced
+// ref update, to a tip trunk already carries. If trunk moves between the rebase and
+// the fast-forward, the scratch branch is reset to the recorded tip and the rebase
+// redone once; a second move refuses.
+func foldRebaseAndFastForward(td *tasks.Deps, cfg *config.Config, opts FoldOptions, out io.Writer, ctx foldRebaseContext) error {
+	scratch := foldScratchBranch(ctx.setBranch)
+	// The pre-fold tip is read from the branch, never journalled: the branch does not
+	// move until the work has landed, so a re-entered fold reads the same commit the
+	// first attempt did.
+	tip, err := revParseRef(td, ctx.setPath, ctx.setBranch)
+	if err != nil {
+		return fmt.Errorf("fold refused: read tip of %s: %w", ctx.setBranch, err)
+	}
+
+	const maxAttempts = 2
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		trunkBefore, err := revParseHEAD(td, ctx.trunkPath)
+		if err != nil {
+			return fmt.Errorf("fold refused: read trunk HEAD: %w", err)
+		}
+
+		if err := rebaseScratchOntoTrunk(td, cfg, opts, out, ctx, scratch, tip); err != nil {
+			return err
+		}
+
+		trunkAfterRebase, err := revParseHEAD(td, ctx.trunkPath)
+		if err != nil {
+			return fmt.Errorf("fold refused: read trunk HEAD: %w", err)
+		}
+		if trunkAfterRebase != trunkBefore {
+			if attempt+1 < maxAttempts {
+				continue
+			}
+			return refuseAndAbandon(td, ctx, scratch, errTrunkMovedDuringFold)
+		}
+
+		// Conflict resolution can run for an hour after preflight looked, so trunk
+		// answers for itself once more immediately before the one irreversible act.
+		if err := refuseTrunkUnfitToLand(td, ctx.trunkPath); err != nil {
+			return refuseAndAbandon(td, ctx, scratch, err)
+		}
+
+		if err := fastForwardTrunk(td, ctx.trunkPath, scratch); err != nil {
+			trunkNow, readErr := revParseHEAD(td, ctx.trunkPath)
+			if readErr != nil {
+				return fmt.Errorf("fold refused: read trunk HEAD: %w", readErr)
+			}
+			if trunkNow != trunkBefore {
+				if attempt+1 < maxAttempts {
+					continue
+				}
+				return refuseAndAbandon(td, ctx, scratch, errTrunkMovedDuringFold)
+			}
+			return refuseAndAbandon(td, ctx, scratch,
+				fmt.Errorf("fold refused: could not fast-forward trunk onto %s: %w", ctx.setBranch, err))
+		}
+		return landFoldedBranch(td, ctx, scratch)
+	}
+	return errTrunkMovedDuringFold
+}
+
+var errTrunkMovedDuringFold = fmt.Errorf("fold refused: Trunk worktree moved during fold; redo once already attempted — resolve manually and retry")
+
+// rebaseScratchOntoTrunk stands the folding checkout on the Fold scratch branch at
+// the real branch's pre-fold tip and rebases that instead. A rebase already in
+// progress is a parked fold — the scratch branch is checked out mid-rewrite, so
+// re-creating it would throw away a resolution in flight — and goes straight to the
+// Fold conflict prompt (ADR-0156).
+func rebaseScratchOntoTrunk(td *tasks.Deps, cfg *config.Config, opts FoldOptions, out io.Writer, ctx foldRebaseContext, scratch, tip string) error {
+	if !rebaseInProgress(td, ctx.setPath) {
+		// `-B` is create-or-reset, which makes a first attempt and a redo after trunk
+		// moved the same act; standing on the scratch branch is also what later lets the
+		// real branch be forced, since git refuses to force a branch that is checked out.
+		if _, err := td.Git.CommandInDir(ctx.setPath, "checkout", "-B", scratch, tip); err != nil {
+			return fmt.Errorf("fold refused: create fold scratch branch %s: %w", scratch, err)
+		}
+		_, err := td.Git.CommandInDir(ctx.setPath, "rebase", ctx.trunkBranch)
+		if err == nil {
+			return nil
+		}
+		if !rebaseInProgress(td, ctx.setPath) {
+			return refuseAndAbandon(td, ctx, scratch,
+				fmt.Errorf("fold refused: rebase set branch onto trunk failed (trunk unchanged): %w", err))
+		}
+	}
+	err := tasks.HandleFoldConflict(td, cfg, tasks.FoldConflictContext{
+		SetID:       ctx.setID,
+		Manifest:    ctx.manifest,
+		RuntimePath: ctx.setPath,
+		SetBranch:   ctx.setBranch,
+		TrunkBranch: ctx.trunkBranch,
+		TrunkPath:   ctx.trunkPath,
+	}, tasks.FoldConflictAssistanceOptions{
+		AgentPreset: opts.AgentPreset,
+		AgentCmd:    opts.AgentCmd,
+		In:          opts.In,
+		Out:         out,
+	})
+	if errors.Is(err, tasks.ErrFoldRetry) {
+		// Retry restarts the whole verb from preflight, which must find the checkout as
+		// it was: aborting the rebase left it standing on the scratch branch.
+		abandonFoldScratch(td, ctx, scratch)
+	}
+	return err
+}
+
+func fastForwardTrunk(td *tasks.Deps, trunkPath, branch string) error {
+	_, err := td.Git.CommandInDir(trunkPath, "merge", "--ff-only", branch)
+	return err
+}
+
+// refuseTrunkUnfitToLand is trunk's half of preflight, asked again on the edge of
+// the fast-forward. It refuses in preflight's own words, because a trunk that went
+// dirty or got claimed mid-fold is the same situation preflight already names.
+func refuseTrunkUnfitToLand(td *tasks.Deps, trunkPath string) error {
+	if err := refuseDirtyTrunk(td, trunkPath); err != nil {
+		return err
+	}
+	return refuseLiveClaim(td, "Trunk worktree", trunkPath)
+}
+
+// landFoldedBranch runs after trunk already carries the work, so it is past the
+// Fold boundary: the real branch force-moves to the folded tip — its first and only
+// move — the checkout returns to it, and the scratch branch goes. A failure here
+// leaves the work landed, so it reports where it stopped instead of refusing.
+func landFoldedBranch(td *tasks.Deps, ctx foldRebaseContext, scratch string) error {
+	if _, err := td.Git.CommandInDir(ctx.setPath, "branch", "-f", ctx.setBranch, scratch); err != nil {
+		return fmt.Errorf("fold landed in trunk, but could not move %s onto the folded tip: %w", ctx.setBranch, err)
+	}
+	if _, err := td.Git.CommandInDir(ctx.setPath, "checkout", ctx.setBranch); err != nil {
+		return fmt.Errorf("fold landed in trunk, but could not check %s back out in %s: %w", ctx.setBranch, ctx.setPath, err)
+	}
+	if _, err := td.Git.CommandInDir(ctx.setPath, "branch", "-d", scratch); err != nil {
+		return fmt.Errorf("fold landed in trunk, but could not delete the fold scratch branch %s: %w", scratch, err)
+	}
+	return nil
+}
+
+// refuseAndAbandon rolls the fold's refs back to what it found and returns the
+// refusal that stopped it. Every exit before the fast-forward can do this: nothing
+// but the scratch ref was ever rewritten, so there is no restore step — the fold
+// simply did not happen (ADR-0229).
+func refuseAndAbandon(td *tasks.Deps, ctx foldRebaseContext, scratch string, refusal error) error {
+	abandonFoldScratch(td, ctx, scratch)
+	return refusal
+}
+
+// abandonFoldScratch puts the folding checkout back on its own branch and deletes
+// the scratch branch. A rebase still in progress is left exactly as it stands: that
+// is a parked fold, and the resolution in it is worth more than a tidy ref list.
+// Best-effort throughout — it runs on a path that is already refusing, and the
+// refusal is the more useful thing to report.
+func abandonFoldScratch(td *tasks.Deps, ctx foldRebaseContext, scratch string) {
+	if rebaseInProgress(td, ctx.setPath) {
+		return
+	}
+	if CurrentBranch(td, ctx.setPath) != scratch {
+		return
+	}
+	if _, err := td.Git.CommandInDir(ctx.setPath, "checkout", ctx.setBranch); err != nil {
+		return
+	}
+	// `-D`, not `-d`: a scratch branch abandoned before the fast-forward carries
+	// rebased copies that nothing has merged.
+	_, _ = td.Git.CommandInDir(ctx.setPath, "branch", "-D", scratch)
+}

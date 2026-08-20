@@ -767,6 +767,7 @@ func TestFoldTrunkMovingMidFoldRedoesOnceThenRefuses(t *testing.T) {
 		t.Fatalf("provision: %v", err)
 	}
 	writeFileCommit(t, b.RuntimePath, "feature.txt", "set\n", "set work")
+	branchBefore := revParse(t, td, b.RuntimePath, b.Branch)
 
 	var ffAttempts atomic.Int32
 	inner := td.Git
@@ -790,6 +791,9 @@ func TestFoldTrunkMovingMidFoldRedoesOnceThenRefuses(t *testing.T) {
 	}
 	if got := ffAttempts.Load(); got != 2 {
 		t.Fatalf("ff attempts = %d, want 2 (one redo)", got)
+	}
+	if now := revParse(t, td, b.RuntimePath, b.Branch); now != branchBefore {
+		t.Fatalf("refused fold moved %s: before=%s after=%s", b.Branch, branchBefore, now)
 	}
 	if rebaseInProgress(td, repo) {
 		t.Fatal("trunk must not be mid-rebase")
@@ -847,11 +851,13 @@ func TestFoldRefusesPreconditions(t *testing.T) {
 		td := lifecycleTestDeps(t)
 		defPath := seedDoneTaskSet(t, td, repo, "set-hc")
 		markHumanCompleted(t, filepath.Join(defPath, "set-hc", "index.json"))
-		if _, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
+		b, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
 			TD: td, CheckoutPath: repo, SetID: "set-hc",
-		}); err != nil {
+		})
+		if err != nil {
 			t.Fatalf("provision: %v", err)
 		}
+		writeFileCommit(t, b.RuntimePath, "feature.txt", "work\n", "set work")
 		cfg := &config.Config{
 			Projects: []config.ProjectEntry{{Path: repo}},
 			Work:     &config.WorkConfig{Verify: &config.VerifyConfig{Enabled: true}},
@@ -1177,15 +1183,17 @@ func TestFoldAwaitingApprovalListsHITLInConfirmation(t *testing.T) {
 		{"id": "09-review", "title": "Review"},
 		{"id": "10-signoff", "title": "Sign off"},
 	})
-	if _, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
+	b, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
 		TD: td, CheckoutPath: repo, SetID: "set-confirm-signoff",
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("provision: %v", err)
 	}
+	writeFileCommit(t, b.RuntimePath, "feature.txt", "set work\n", "set work")
 
 	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
 	var out bytes.Buffer
-	_, err := Fold(td, nil, cfg, "set-confirm-signoff", FoldOptions{In: strings.NewReader("n\n")}, LifecycleHooks{}, &out)
+	_, err = Fold(td, nil, cfg, "set-confirm-signoff", FoldOptions{In: strings.NewReader("n\n")}, LifecycleHooks{}, &out)
 	if err == nil || !strings.Contains(err.Error(), "cancelled") {
 		t.Fatalf("err = %v, want cancelled fold", err)
 	}
@@ -1295,14 +1303,16 @@ func TestFoldAwaitingApprovalNonInteractiveRefusesWithoutYes(t *testing.T) {
 	seedAwaitingApprovalTaskSet(t, td, repo, "set-ni", []map[string]any{
 		{"id": "09-review", "title": "Review"},
 	})
-	if _, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
+	b, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
 		TD: td, CheckoutPath: repo, SetID: "set-ni",
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("provision: %v", err)
 	}
+	writeFileCommit(t, b.RuntimePath, "feature.txt", "set work\n", "set work")
 
 	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
-	_, err := Fold(td, nil, cfg, "set-ni", FoldOptions{In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, io.Discard)
+	_, err = Fold(td, nil, cfg, "set-ni", FoldOptions{In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "AWAITING-APPROVAL set requires --yes") {
 		t.Fatalf("err = %v, want non-interactive sign-off refusal", err)
 	}
