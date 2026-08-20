@@ -196,6 +196,58 @@ func TestCreateManagedWorktreeKey(t *testing.T) {
 	}
 }
 
+func TestFoldWorktreeKeyIsCapabilityGatedAndLiveOnEveryRow(t *testing.T) {
+	items := []Item{
+		{Name: "trunk", Path: "/repo", Marker: "ordinary"},
+		{Name: "bound", Path: "/repo/bound", Marker: "managed"},
+	}
+
+	disabled := NewPicker(items)
+	disabled.Init()
+	disabled.Update(tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
+	if disabled.result.Action == ActionFoldWorktree {
+		t.Fatal("ctrl+l fired when WithFoldWorktree was disabled")
+	}
+
+	for i := range items {
+		picker := NewPicker(items, WithFoldWorktree(), WithInitialCursorIndex(i))
+		picker.Init()
+		_, cmd := picker.Update(tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
+		if cmd == nil {
+			t.Fatalf("row %d: ctrl+l did not quit with an action", i)
+		}
+		if got := picker.Result(); got.Action != ActionFoldWorktree || got.Selected == nil || got.Selected.Path != items[i].Path {
+			t.Fatalf("row %d: result = %+v, want Fold for %s", i, got, items[i].Path)
+		}
+	}
+}
+
+func TestFoldWorktreeHelpYieldsToUserCommand(t *testing.T) {
+	items := []Item{{Name: "wt", Path: "/wt"}}
+	on := NewPicker(items, WithFoldWorktree())
+	on.width, on.height, on.showHelp = 60, 20, true
+	if view := on.viewHelp(); !containsSubstring(view, "C-l") || !containsSubstring(view, "Fold worktree") {
+		t.Fatalf("Fold help missing from enabled picker:\n%s", view)
+	}
+
+	overridden := NewPicker(items, WithFoldWorktree(), WithUserDefinedCommands([]UserDefinedCommand{
+		{Key: "ctrl+l", Label: "mine", Command: "true"},
+	}))
+	overridden.Init()
+	overridden.Update(tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
+	if got := overridden.Result(); got.Action != ActionUserDefinedCommand {
+		t.Fatalf("ctrl+l action = %v, want the user-defined command", got.Action)
+	}
+	overridden.width, overridden.height, overridden.showHelp = 60, 20, true
+	view := overridden.viewHelp()
+	if containsSubstring(view, "Fold worktree") {
+		t.Fatalf("overridden built-in remained in help:\n%s", view)
+	}
+	if !containsSubstring(view, "mine") {
+		t.Fatalf("user command missing from help:\n%s", view)
+	}
+}
+
 func TestHelpViewShowsCreateManagedWorktree(t *testing.T) {
 	items := []Item{{Name: "test", Path: "/test"}}
 

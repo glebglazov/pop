@@ -68,6 +68,7 @@ const (
 	ActionYankPath
 	ActionCreateWorktree
 	ActionCreateManagedWorktree
+	ActionFoldWorktree
 )
 
 // Picker is a fuzzy-searchable list picker
@@ -98,6 +99,7 @@ type Picker struct {
 	showReset          bool
 	showOpenWindow     bool
 	showCreateWorktree bool
+	showFoldWorktree   bool
 	cursorAtEnd        bool
 
 	quickAccessModifier string
@@ -183,6 +185,13 @@ func WithOpenWindow() PickerOption {
 func WithCreateWorktree() PickerOption {
 	return func(p *Picker) {
 		p.showCreateWorktree = true
+	}
+}
+
+// WithFoldWorktree enables the worktree Fold action (ctrl+l).
+func WithFoldWorktree() PickerOption {
+	return func(p *Picker) {
+		p.showFoldWorktree = true
 	}
 }
 
@@ -513,6 +522,17 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					p.result.Selected = item
 				}
 				return p, tea.Quit
+			}
+
+		case key.Matches(msg, keys.FoldWorktree):
+			if p.showFoldWorktree {
+				if item, ok := p.selectedItem(); ok {
+					p.result = Result{
+						Selected: item,
+						Action:   ActionFoldWorktree,
+					}
+					return p, tea.Quit
+				}
 			}
 
 		case key.Matches(msg, keys.YankPath):
@@ -972,6 +992,9 @@ func (p *Picker) helpEntries() []HelpEntry {
 	if p.showCreateWorktree && !p.isKeyOverridden("ctrl+t") {
 		entries = append(entries, HelpEntry{"C-t", "Create managed worktree"})
 	}
+	if p.showFoldWorktree && !p.isKeyOverridden("ctrl+l") {
+		entries = append(entries, HelpEntry{"C-l", "Fold worktree"})
+	}
 	if p.showDelete && !p.isKeyOverridden("ctrl+d") {
 		entries = append(entries, HelpEntry{"C-d", "Delete"})
 	}
@@ -1058,6 +1081,7 @@ type keyMap struct {
 	YankPath              key.Binding
 	CreateWorktree        key.Binding
 	CreateManagedWorktree key.Binding
+	FoldWorktree          key.Binding
 	TreeExpand            key.Binding
 	TreeCollapse          key.Binding
 }
@@ -1107,6 +1131,9 @@ var keys = keyMap{
 	),
 	CreateManagedWorktree: key.NewBinding(
 		key.WithKeys("ctrl+t"),
+	),
+	FoldWorktree: key.NewBinding(
+		key.WithKeys("ctrl+l"),
 	),
 	// Bare arrows only: ctrl+f and ctrl+b stay paging, and the emacs cursor keys
 	// the textfield owns keep their meaning when a query is typed.

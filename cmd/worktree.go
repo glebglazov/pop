@@ -38,11 +38,22 @@ var worktreeDashboardCmd = &cobra.Command{
 Must be run from within a git repository.
 
 Keybindings:
-  enter    - switch to worktree (prints path or switches tmux session)
-  ctrl-d   - delete worktree
-  ctrl-x   - force delete worktree
-  alt-c    - open the Config dashboard over the picker
-  esc      - cancel
+  up/down, ctrl-p/ctrl-n - navigate
+  ctrl-b/ctrl-f         - page up/down
+  ctrl-u, alt-backspace - clear the filter
+  ctrl-h                - show help
+  enter                 - switch to worktree (prints path or switches tmux session)
+  ctrl-a                - create worktree
+  ctrl-t                - create managed worktree
+  ctrl-l                - fold worktree in a tagged tmux pane
+  ctrl-k                - kill the worktree's tmux session
+  ctrl-r                - reset worktree history
+  ctrl-y                - yank path to a tmux pane
+  ctrl-d                - delete worktree
+  ctrl-x                - force delete worktree
+  alt-c                 - open the Config dashboard over the picker
+  alt-1..9              - quick select (modifier is configurable)
+  esc, ctrl-c           - cancel
 
 While the Config dashboard is open it owns the keyboard: no picker key does
 anything, ctrl-x included, so removing an override there cannot delete a
@@ -256,6 +267,16 @@ func runWorktree(cmd *cobra.Command, args []string) error {
 			restoreCursorIdx = result.CursorIndex
 			// Continue loop — items rebuild with fresh attention state
 
+		case ui.ActionFoldWorktree:
+			if result.Selected != nil {
+				restoreCursorIdx = result.CursorIndex
+				if err := launchWorktreeFold(defaultTmuxMod, result.Selected); err != nil {
+					debug.Error("worktree: fold: %v", err)
+					fmt.Fprintf(os.Stderr, "Fold refused: %v\n", err)
+				}
+			}
+			// Fold runs in its pane; return to a freshly-built picker.
+
 		case ui.ActionCreateWorktree:
 			if err := createWorktree(ctx); err != nil {
 				debug.Error("worktree: create: %v", err)
@@ -366,6 +387,7 @@ func worktreePickerOptions(customCommands []ui.UserDefinedCommand, quickAccessMo
 		ui.WithKillSession(),
 		ui.WithReset(),
 		ui.WithCreateWorktree(),
+		ui.WithFoldWorktree(),
 		ui.WithQuickAccess(quickAccessModifier),
 		ui.WithIconLegend(iconLegends...),
 		// While the Config dashboard is open every key above is suspended, which
@@ -391,6 +413,32 @@ func worktreePickerOptions(customCommands []ui.UserDefinedCommand, quickAccessMo
 	}
 
 	return opts
+}
+
+// launchWorktreeFold starts the checkout-addressed Fold outside the picker
+// process. The picker owns stdout as its selected-path result, so this helper
+// deliberately has no output writer and sends all Fold interaction to a pane.
+func launchWorktreeFold(mod tmuxmod.Tmux, item *ui.Item) error {
+	if item == nil {
+		return nil
+	}
+	if !mod.InTmux() {
+		return fmt.Errorf("run `pop worktree fold` directly outside tmux")
+	}
+	session := checkoutSessionName(item.Path)
+	paneID, err := tmuxmod.EnsureTaggedPane(
+		mod,
+		tmuxmod.TagFold,
+		session,
+		tmuxmod.DrainWindow,
+		item.Path,
+		item.Path,
+		"pop worktree fold",
+	)
+	if err != nil {
+		return fmt.Errorf("launch `pop worktree fold`: %w", err)
+	}
+	return mod.SetPaneTitle(paneID, "fold · "+item.Name)
 }
 
 // buildWorktreeItems converts worktrees to picker items, applying the session

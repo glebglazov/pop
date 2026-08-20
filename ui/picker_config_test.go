@@ -25,7 +25,7 @@ func pickerItems() []Item {
 // worktreePickerOpts and projectPickerOpts are the two hosts as cmd builds them,
 // minus what needs a repo: the key sets are what matters here.
 func worktreePickerOpts() []PickerOption {
-	return []PickerOption{WithDelete(), WithContext(), WithKillSession(), WithReset(), WithCreateWorktree()}
+	return []PickerOption{WithDelete(), WithContext(), WithKillSession(), WithReset(), WithCreateWorktree(), WithFoldWorktree()}
 }
 
 func projectPickerOpts() []PickerOption {
@@ -177,6 +177,7 @@ func TestPickerConfigDashboardSuspendsEveryOtherKey(t *testing.T) {
 		{"select", enterKey, ActionConfirm},
 		{"yank", ctrlKey('y'), ActionYankPath},
 		{"kill session", ctrlKey('k'), ActionKillSession},
+		{"fold worktree", ctrlKey('l'), ActionFoldWorktree},
 		{"cancel", escKey, ActionCancel},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -13,6 +13,8 @@ import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/history"
 	"github.com/glebglazov/pop/internal/deps"
+	tmuxmod "github.com/glebglazov/pop/internal/tmux"
+	"github.com/glebglazov/pop/internal/tmux/tmuxtest"
 	"github.com/glebglazov/pop/project"
 	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
@@ -160,6 +162,51 @@ func TestWorktreeFoldCommandAcceptsOptionalNameAndYes(t *testing.T) {
 	}
 	if err := worktreeFoldCmd.Args(worktreeFoldCmd, []string{"one", "two"}); err == nil {
 		t.Fatal("fold accepted more than one worktree name")
+	}
+}
+
+func TestLaunchWorktreeFoldSpawnsTaggedPaneWithoutPickerOutput(t *testing.T) {
+	parent := t.TempDir()
+	repo := filepath.Join(parent, "repo")
+	if err := os.Mkdir(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepoWithCommitCmd(t, repo)
+	wt := addWorktreeFoldCommit(t, repo, "picker-fold")
+	fake := &tmuxtest.Fake{Inside: true}
+	item := &ui.Item{Name: "picker-fold", Path: wt}
+
+	if err := launchWorktreeFold(fake, item); err != nil {
+		t.Fatalf("launchWorktreeFold: %v", err)
+	}
+	session := checkoutSessionName(wt)
+	panes := fake.Windows[session][tmuxmod.DrainWindow]
+	if len(panes) != 1 {
+		t.Fatalf("fold panes = %v, want one", panes)
+	}
+	pane := panes[0]
+	if got := fake.PaneTagValues[pane][tmuxmod.TagFold]; got != wt {
+		t.Fatalf("@pop_fold = %q, want selected path %q", got, wt)
+	}
+	if got := fake.SentCommands[pane]; len(got) != 1 || got[0] != "pop worktree fold Enter" {
+		t.Fatalf("sent commands = %v, want pop worktree fold", got)
+	}
+	if got := fake.PaneCwd[pane]; got != wt {
+		t.Fatalf("pane cwd = %q, want %q", got, wt)
+	}
+	if got := fake.PaneTitles[pane]; got != "fold · picker-fold" {
+		t.Fatalf("pane title = %q", got)
+	}
+}
+
+func TestLaunchWorktreeFoldOutsideTmuxNamesHeadlessVerb(t *testing.T) {
+	fake := &tmuxtest.Fake{}
+	err := launchWorktreeFold(fake, &ui.Item{Name: "wt", Path: "/repo/wt"})
+	if err == nil || !strings.Contains(err.Error(), "pop worktree fold") {
+		t.Fatalf("error = %v, want refusal naming pop worktree fold", err)
+	}
+	if len(fake.Live) != 0 || len(fake.Windows) != 0 {
+		t.Fatalf("outside-tmux refusal spawned state: live=%v windows=%v", fake.Live, fake.Windows)
 	}
 }
 
@@ -768,6 +815,29 @@ func TestWorktreeHelpHasNoPhantomCreateBinding(t *testing.T) {
 	// Guard against the stale help line returning.
 	if strings.Contains(worktreeDashboardCmd.Long, "ctrl-n") {
 		t.Error("worktree dashboard help advertises ctrl-n, which is not a create binding")
+	}
+}
+
+func TestWorktreeHelpAndReadmeListCurrentBindings(t *testing.T) {
+	t.Parallel()
+	readme, err := os.ReadFile(filepath.Join("..", "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, binding := range []string{
+		"ctrl-p", "ctrl-n", "ctrl-b", "ctrl-f", "ctrl-u", "alt-backspace",
+		"ctrl-h", "enter", "ctrl-a", "ctrl-t", "ctrl-l", "ctrl-k", "ctrl-r",
+		"ctrl-y", "ctrl-d", "ctrl-x", "alt-c", "alt-1..9", "esc", "ctrl-c",
+	} {
+		if !strings.Contains(worktreeDashboardCmd.Long, binding) {
+			t.Errorf("worktree dashboard long help omits %s", binding)
+		}
+		if !strings.Contains(string(readme), "`"+binding+"`") && binding != "alt-1..9" {
+			t.Errorf("README worktree keybindings omit %s", binding)
+		}
+	}
+	if !strings.Contains(string(readme), "`alt-1..9`") {
+		t.Error("README worktree keybindings omit alt-1..9")
 	}
 }
 

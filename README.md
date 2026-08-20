@@ -119,11 +119,22 @@ Fuzzy-pick a worktree in the current repo. Prints the selected path (useful for 
 
 | Key | Action |
 |-----|--------|
+| `up` / `down`, `ctrl-p` / `ctrl-n` | Navigate |
+| `ctrl-b` / `ctrl-f` | Page up / down |
+| `ctrl-u`, `alt-backspace` | Clear filter |
+| `ctrl-h` | Show help |
 | `enter` | Open worktree |
+| `ctrl-a` | Create worktree |
+| `ctrl-t` | Create managed worktree |
+| `ctrl-l` | Fold worktree in a tagged tmux pane |
+| `ctrl-k` | Kill tmux session |
+| `ctrl-r` | Reset history |
+| `ctrl-y` | Yank path to a tmux pane |
 | `ctrl-d` | Delete worktree |
 | `ctrl-x` | Force delete worktree |
-| `ctrl-n` | Create new worktree |
 | `alt-c` | Config overrides |
+| `alt-1..9` | Quick select (modifier is configurable) |
+| `esc`, `ctrl-c` | Cancel |
 
 Flag: `-s, --switch` — switch tmux session instead of printing path.
 
