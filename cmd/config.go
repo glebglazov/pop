@@ -201,27 +201,27 @@ repo.<key> — the leaves pop config keys --scope repo lists. Editing one states
 it for that repository, so every worktree of it reads the one answer.
 
 Last come that repository's conventions, spelled conventions.<kind> — the prose
-pop conventions get prints in full. A convention resolves to a stack of layers
-rather than to one value, so its preview is every layer that speaks, labelled
-with its origin, lowest rank first.
+pop conventions get prints in full: the one rank that answers, labelled with its
+origin and reach, your overlay where you have written one, and the provenance
+line. A kind nobody has written an answer for shows pop's own. Those rows are
+read-only: they name the two documents that are yours to write and leave the
+writing to pop conventions set, a convention being a document rather than a
+value.
 
 The right pane previews the highlighted key in config format: the effective
 value as TOML, the layer that produced it (the override layer, your config.toml,
 a built-in default, or a fallthrough to another key), and, where an override is
 in force, the value it is standing on.
 
-Three keys write the layer that is yours for the highlighted row — the override
-layer for a config key, your ~/.agents/docs/<kind>.overlay.md for a convention:
+Three keys write the override layer for the highlighted config key. On a
+convention row they do nothing, and the footer does not offer them:
 
-  enter  edit in $EDITOR. A config key is seeded with the whole key = value line
-         in force today; a convention with your overlay, which composes on top of
-         the layers below rather than replacing them. Handing back an empty
-         buffer cancels; an explicitly empty collection is a real value, which is
-         how a group's fallthrough is disabled on purpose. A value that would
-         produce a config finding re-opens the editor with the problem instead of
-         being written.
-  C-y    copy the source value down as the override, without an editor. A
-         convention has no single value below to copy, and says so.
+  enter  edit in $EDITOR, seeded with the whole key = value line in force today.
+         Handing back an empty buffer cancels; an explicitly empty collection is
+         a real value, which is how a group's fallthrough is disabled on purpose.
+         A value that would produce a config finding re-opens the editor with the
+         problem instead of being written.
+  C-y    copy the source value down as the override, without an editor.
   C-x    remove the override, restoring the source. There is no confirmation:
          C-y puts the source value back.
 

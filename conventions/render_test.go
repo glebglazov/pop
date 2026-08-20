@@ -224,8 +224,8 @@ func TestProvenanceDisclosesTheAnswerAndTheOverlay(t *testing.T) {
 
 // TestStackPreviewShowsTheAnswerAndTheOverlay pins what a surface showing a
 // convention beside values of another sort gets: the same answer, overlay and
-// provenance `get` prints, plus where the layer an editor writes lives. A rank
-// the answer stood down is not shown — what is in force is the question the
+// provenance `get` prints, closed by both documents the human could write. A
+// rank the answer stood down is not shown — what is in force is the question the
 // pane exists to answer.
 func TestStackPreviewShowsTheAnswerAndTheOverlay(t *testing.T) {
 	stack := Stack{Kind: KindCommits, Layers: []Layer{
@@ -242,11 +242,13 @@ func TestStackPreviewShowsTheAnswerAndTheOverlay(t *testing.T) {
 		"yours, every repository",
 		"Imperative subjects.",
 		"Provenance:",
-		// The layer an editor here would write, named whether or not it holds
-		// anything: a reader deciding to edit needs to know which rank they
-		// would be changing.
+		// Both documents that are the human's to write, each named whether or
+		// not it holds anything: the pane writes neither, so the paths and the
+		// verb are what a reader leaves with.
 		"not written yet",
+		projectDoc,
 		overlayDoc,
+		"pop conventions set commits --project",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("preview missing %q:\n%s", want, got)
@@ -290,9 +292,15 @@ func TestStackPreviewOfAnUnwrittenKindShowsTheShippedRank(t *testing.T) {
 			t.Errorf("preview of an unwritten kind is missing %q:\n%s", want, got)
 		}
 	}
-	// The overlay is still the layer an edit here writes.
-	if !strings.Contains(got, "/h/.agents/docs/issue-tracker.overlay.md") {
-		t.Errorf("preview does not name the layer an edit writes:\n%s", got)
+	// Both writable documents are still named, an unwritten kind being exactly
+	// the case where a reader is about to write one.
+	for _, want := range []string{
+		"/h/.agents/docs/projects/github.com-tripledot-pop/issue-tracker.md",
+		"/h/.agents/docs/issue-tracker.overlay.md",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("preview does not name %q, a document the reader may write:\n%s", want, got)
+		}
 	}
 }
 

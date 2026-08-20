@@ -1,8 +1,6 @@
 package ui
 
 import (
-	"errors"
-	"os"
 	"strings"
 	"testing"
 
@@ -11,64 +9,54 @@ import (
 
 // A row may hold prose composed from several layers rather than one config value
 // (ADR-0212 decision 8). These tests pin what that costs this component: it shows
-// the caller's text, it edits the layer the caller nominates rather than the
-// preview, and it still says nothing on stdout.
+// the caller's text, it offers none of the three write actions on it (ADR-0226),
+// and it still says nothing on stdout.
 
-// proseWriter is a caller whose one row is prose: the preview is a whole stack
-// and the edit writes the top layer of it.
+// proseWriter is a caller whose one row is prose. Every action records that it
+// was reached, because reaching one at all is the failure.
 type proseWriter struct {
-	overlay   string
 	stored    []string
-	copyErr   error
-	storeErr  error
 	copyCalls int
+	removes   int
 }
 
-const proseLayers = `commits — 2 of 4 layers speak, lowest rank first.
+const proseLayers = `commits — what is in force here.
 
-1. USER DEFAULTS — yours, every repository
-/home/g/.agents/docs/commits.md
-
-Imperative subjects.
-
-2. REPOSITORY — the team's, in version control
+----- ANSWER: REPOSITORY (the team's, in version control) -----
 /r/docs/agents/commits.md
 
-Conventional commits.`
+Conventional commits.
+
+Provenance: commits resolved to repository (/r/docs/agents/commits.md).
+
+read-only here. Your own documents for this kind:
+  project (yours, this project, not written yet)
+    /home/g/.agents/docs/projects/github.com-g-r/commits.md
+  overlay (yours, appended to whichever answered, not written yet)
+    /home/g/.agents/docs/commits.overlay.md
+Write one with ` + "`pop conventions set commits --project`" + ` or ` + "`--overlay`" + `.`
 
 func (w *proseWriter) Store(key, buffer string) (string, error) {
 	w.stored = append(w.stored, buffer)
-	if w.storeErr != nil {
-		return "", w.storeErr
-	}
-	w.overlay = strings.TrimSpace(buffer)
 	return "", nil
 }
 
 func (w *proseWriter) CopySource(string) error {
 	w.copyCalls++
-	if w.copyErr != nil {
-		return w.copyErr
-	}
 	return nil
 }
 
 func (w *proseWriter) Remove(string) error {
-	w.overlay = ""
+	w.removes++
 	return nil
 }
 
 func (w *proseWriter) Rows() ([]ConfigDashboardRow, error) {
-	row := ConfigDashboardRow{
-		Key:        "conventions.commits",
-		Desc:       "How this repository writes commits.",
-		Overridden: w.overlay != "",
-		Preview: ConfigDashboardPreview{
-			Layers:   proseLayers,
-			EditSeed: ConfigEditorNote("your commits overlay.") + w.overlay,
-		},
-	}
-	return []ConfigDashboardRow{row}, nil
+	return []ConfigDashboardRow{{
+		Key:     "conventions.commits",
+		Desc:    "How this repository writes commits.",
+		Preview: ConfigDashboardPreview{Layers: proseLayers},
+	}}, nil
 }
 
 func proseConfigDashboard(t *testing.T, editor func(string, tea.ExecCallback) tea.Cmd) (*ConfigDashboard, *proseWriter) {
@@ -81,19 +69,19 @@ func proseConfigDashboard(t *testing.T, editor func(string, tea.ExecCallback) te
 	return newSizedConfigDashboardWith(rows, ConfigDashboardOpts{Writer: writer, Editor: editor}, 100, 30), writer
 }
 
-// The preview is the caller's own text — every layer that speaks, in the order
-// the caller put them — and none of the config-format furniture, there being no
-// single layer for a `from:` line to name.
+// The preview is the caller's own text — the answer in force, the provenance
+// line and the paths a write would land in — and none of the config-format
+// furniture, there being no single layer for a `from:` line to name.
 func TestConfigDashboardProseRowPreviewsItsLayers(t *testing.T) {
 	m, _ := proseConfigDashboard(t, nil)
 
 	got := configDashboardView(m)
 	for _, want := range []string{
 		"conventions.commits",
-		"USER DEFAULTS",
-		"REPOSITORY",
-		"Imperative subjects.",
+		"ANSWER: REPOSITORY",
 		"Conventional commits.",
+		"Provenance:",
+		"commits.overlay.md",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("view missing %q:\n%s", want, got)
@@ -104,55 +92,74 @@ func TestConfigDashboardProseRowPreviewsItsLayers(t *testing.T) {
 	}
 }
 
-// Enter edits the one layer the caller nominates, in a Markdown buffer, and pop's
-// own notes come back out of it: the buffer is the value here, so a note left in
-// would be written into the human's document.
-func TestConfigDashboardProseRowEditsItsOwnLayer(t *testing.T) {
-	var paths []string
-	var seeds []string
+// A prose row is read-only: the three keys do nothing there, no editor opens,
+// and the footer offers none of them — a key a footer names must work, and one
+// it does not name must not fire (ADR-0226).
+func TestConfigDashboardProseRowTakesNoWriteAction(t *testing.T) {
+	opened := 0
 	editor := func(path string, done tea.ExecCallback) tea.Cmd {
-		paths = append(paths, path)
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Errorf("read seed: %v", err)
-		}
-		seeds = append(seeds, string(data))
-		if err := os.WriteFile(path, []byte("# pop: this note is pop's\nAlways sign off.\n"), 0o644); err != nil {
-			t.Errorf("write reply: %v", err)
-		}
+		opened++
 		return func() tea.Msg { return done(nil) }
 	}
 	m, writer := proseConfigDashboard(t, editor)
 
 	enter(m)
+	ctrl(m, 'y')
+	ctrl(m, 'x')
 
-	if len(paths) != 1 || !strings.HasSuffix(paths[0], ".md") {
-		t.Fatalf("editor buffers = %v, want one Markdown file", paths)
+	if opened != 0 {
+		t.Errorf("$EDITOR opened %d times on a read-only row", opened)
 	}
-	// The seed is the layer being edited, not the composed preview: seeding with
-	// the stack would have the human hand back layers they never wrote.
-	if strings.Contains(seeds[0], "REPOSITORY") {
-		t.Errorf("the editor was seeded with the whole stack:\n%s", seeds[0])
+	if len(writer.stored) != 0 || writer.copyCalls != 0 || writer.removes != 0 {
+		t.Errorf("write side reached: stored=%v copies=%d removes=%d",
+			writer.stored, writer.copyCalls, writer.removes)
 	}
-	if !strings.Contains(seeds[0], "your commits overlay.") {
-		t.Errorf("the editor was not seeded with the caller's own text:\n%s", seeds[0])
-	}
-	if writer.overlay != "Always sign off." {
-		t.Errorf("stored %q, want the prose alone with pop's note taken back out", writer.overlay)
-	}
-	if row, _ := m.Selected(); !row.Overridden {
-		t.Errorf("row = %+v, want the human's own layer marked in force", row)
+	got := configDashboardView(m)
+	for _, gone := range []string{"enter edit", "C-y copy source", "C-x remove"} {
+		if strings.Contains(got, gone) {
+			t.Errorf("the footer offers %q on a read-only row:\n%s", gone, got)
+		}
 	}
 }
 
-// The row the caller marks as having no single value below it refuses the copy,
-// and the refusal is a row in this view — not a line on stdout, which in two of
-// the three hosts is a `cd` argument.
-func TestConfigDashboardProseRowRefusalStaysInTheView(t *testing.T) {
+// The keys are gated on the highlighted row, not on the component: a dashboard
+// holding both sorts of row still writes a config key.
+func TestConfigDashboardConfigRowStillWritesBesideProseRows(t *testing.T) {
+	writer := newFakeOverrideWriter()
+	configRows, err := writer.Rows()
+	if err != nil {
+		t.Fatalf("Rows() error: %v", err)
+	}
+	proseRow := ConfigDashboardRow{
+		Key:     "conventions.commits",
+		Preview: ConfigDashboardPreview{Layers: proseLayers},
+	}
+	editor := &scriptedEditor{replies: []string{`work.implement.agents = ["codex"]`}}
+	m := newSizedConfigDashboardWith(append([]ConfigDashboardRow{proseRow}, configRows...),
+		ConfigDashboardOpts{Writer: writer, Editor: editor.open}, 100, 30)
+
+	// Move off the prose row onto the first config key.
+	press(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	enter(m)
+
+	if len(editor.seeds) != 1 {
+		t.Fatalf("editor opened %d times on a config row, want once", len(editor.seeds))
+	}
+	if got := writer.override["work.implement.agents"]; got != `work.implement.agents = ["codex"]` {
+		t.Errorf("stored %q, want what came back from the editor", got)
+	}
+	if !strings.Contains(configDashboardView(m), "enter edit") {
+		t.Errorf("the footer does not offer the keys on a config row:\n%s", configDashboardView(m))
+	}
+}
+
+// The refusal path is a row in this view, never a line on stdout, which in two
+// of the three hosts is a `cd` argument.
+func TestConfigDashboardProseRowStaysOffStdout(t *testing.T) {
 	var view string
 	out := captureStdout(t, func() {
-		m, writer := proseConfigDashboard(t, nil)
-		writer.copyErr = errors.New("the commits layers compose, so there is no single value to copy down")
+		m, _ := proseConfigDashboard(t, nil)
+		enter(m)
 		ctrl(m, 'y')
 		view = m.ViewContent()
 	})
@@ -160,7 +167,7 @@ func TestConfigDashboardProseRowRefusalStaysInTheView(t *testing.T) {
 	if out != "" {
 		t.Fatalf("the component wrote to stdout: %q", out)
 	}
-	if !strings.Contains(view, "no single value to copy down") {
-		t.Fatalf("the refusal is nowhere in the view:\n%s", view)
+	if strings.Contains(view, "Could not") {
+		t.Fatalf("a read-only row produced a failure row:\n%s", view)
 	}
 }

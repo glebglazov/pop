@@ -1,8 +1,6 @@
 package confighost
 
 import (
-	"fmt"
-
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/conventions"
 	"github.com/glebglazov/pop/ui"
@@ -15,10 +13,11 @@ import (
 // question.
 //
 // Everything about a convention is resolved and rendered in `conventions`; this
-// file decides only which rows exist and what the three keystrokes mean for one.
-// The layer an edit here writes is the Convention overlay, because that is what
-// an override *is* for a convention: prose appended to whichever rank answered
-// rather than a layer displacing another (ADR-0212 decision 2).
+// file decides only which rows exist. It writes nothing: a convention row is a
+// read-only preview naming the documents a write would land in, because a
+// convention is a document rather than a value, and the human's two writable
+// ranks differ in reach — so one edit key could not serve both without hiding
+// the more authoritative one behind a keystroke nobody discovers (ADR-0226).
 
 // conventionsDeps derives the Repo convention seam from the config seam. The two
 // read the same machine through the same filesystem, so a host that has sandboxed
@@ -49,66 +48,21 @@ func (w Writer) conventionRows() []ui.ConfigDashboardRow {
 	}
 	rows := make([]ui.ConfigDashboardRow, 0, len(stacks))
 	for _, stack := range stacks {
-		overlay, present := overlayLayer(stack)
+		_, overlaid := stack.Overlay()
 		rows = append(rows, ui.ConfigDashboardRow{
 			Key:  conventions.RowKey(stack.Kind),
 			Desc: stack.Kind.Desc(),
 			// The marker means the human's own statement is in force, which for a
 			// convention is the overlay.
-			Overridden: present,
+			Overridden: overlaid,
 			// A kind resolves to one answer, so a second rank holding something is a
 			// first one quietly losing — the state that marker and that sort exist to
 			// report (ADR-0223).
 			Contested: stack.Contested(),
 			Preview: ui.ConfigDashboardPreview{
-				Layers:   conventions.StackPreview(stack),
-				EditSeed: conventionEditSeed(stack.Kind, overlay),
+				Layers: conventions.StackPreview(stack),
 			},
 		})
 	}
 	return rows
-}
-
-// overlayLayer picks the layer an edit writes out of a resolved stack.
-func overlayLayer(stack conventions.Stack) (conventions.Layer, bool) {
-	for _, layer := range stack.Layers {
-		if layer.Origin == conventions.OriginOverlay {
-			return layer, layer.Present
-		}
-	}
-	return conventions.Layer{}, false
-}
-
-// conventionEditSeed is what $EDITOR opens on for a convention row: the overlay
-// as it stands, under a note saying which layer this is. The note
-// is pop's own and comes back out of the buffer, so a human who writes nothing
-// under it has cancelled rather than stated the note.
-func conventionEditSeed(kind conventions.Kind, overlay conventions.Layer) string {
-	note := ui.ConfigEditorNote(fmt.Sprintf(
-		"your %s overlay — appended to whatever answers, in every repository.\n"+
-			"%s\n"+
-			"It rides along with the answer rather than replacing it. Leave this\n"+
-			"buffer empty to change nothing; ctrl+x removes the overlay.",
-		kind, overlay.Path))
-	if overlay.Present {
-		return note + overlay.Body + "\n"
-	}
-	return note
-}
-
-// storeConvention makes the edited prose the human's overlay for kind. There is
-// no problem to hand back: prose has no schema to fail, and the one refusal —
-// an empty body — the component already reads as a cancel before it gets here.
-func (w Writer) storeConvention(kind conventions.Kind, buffer string) (string, error) {
-	_, _, err := conventions.Write(w.conventions, conventions.OriginOverlay, kind, w.checkout, buffer)
-	return "", err
-}
-
-// copySourceConvention refuses. Copying the source down assumes an override
-// standing *over* a value, so that copying it changes nothing; the overlay is
-// appended to the answer instead, so copying the answer into it would hand the
-// reader the same prose twice (ADR-0223 decision 3).
-func copySourceConvention(kind conventions.Kind) error {
-	return fmt.Errorf("your %s overlay is appended to the answer, not laid over it, "+
-		"so copying the answer down would state it twice; press enter to write your overlay", kind)
 }

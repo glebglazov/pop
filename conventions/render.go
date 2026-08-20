@@ -71,7 +71,7 @@ func RenderStack(w io.Writer, s Stack) error {
 
 // StackPreview renders one kind for a surface that shows it in a pane beside
 // values of another sort: the same answer, overlay and provenance `get` prints,
-// plus where the layer an editor writes lives.
+// closed by where a write would land.
 //
 // It returns a string rather than writing to an io.Writer because its consumer
 // is a pane and not a stream, and it lives here rather than in that consumer
@@ -81,7 +81,7 @@ func RenderStack(w io.Writer, s Stack) error {
 func StackPreview(s Stack) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s — what is in force here.\n\n%s", s.Kind, s.inForceProse())
-	fmt.Fprintf(&b, "\n%s\n", s.overlayNote())
+	fmt.Fprintf(&b, "\n%s", s.writeNote())
 	return b.String()
 }
 
@@ -94,21 +94,30 @@ func StackPreview(s Stack) string {
 // has written an answer to resolves to pop's own.
 func StackProse(s Stack) string { return s.inForceProse() }
 
-// overlayNote says where the human's overlay is and whether it holds anything.
-// An editing surface writes that one layer, so a reader deciding whether to
-// edit needs to know which rank they would be changing — and the overlay is the
-// one that never displaces an answer.
-func (s Stack) overlayNote() string {
-	for _, l := range s.Layers {
-		if l.Origin != OriginOverlay {
-			continue
+// writeNote says where a human changes this kind, naming both documents that
+// are theirs to write and the verb that writes them. A pane that shows a
+// convention does not edit one — a convention is a document rather than a
+// value, and the two writable human ranks differ in reach, so which of them a
+// keystroke meant could not be read off the row (ADR-0226) — which is exactly
+// why the reader needs the paths spelled out here.
+func (s Stack) writeNote() string {
+	var b strings.Builder
+	b.WriteString("read-only here. Your own documents for this kind:\n")
+	for _, origin := range []Origin{OriginProject, OriginOverlay} {
+		for _, l := range s.Layers {
+			if l.Origin != origin {
+				continue
+			}
+			state := "not written yet"
+			if l.Present {
+				state = "written"
+			}
+			fmt.Fprintf(&b, "  %s (%s, %s)\n    %s\n",
+				origin.RankName(), origin.Scope(), state, l.Path)
 		}
-		if l.Present {
-			return "your overlay, edited here:\n" + l.Path
-		}
-		return "your overlay — not written yet — would be:\n" + l.Path
 	}
-	return ""
+	fmt.Fprintf(&b, "Write one with `pop conventions set %s --project` or `--overlay`.\n", s.Kind)
+	return b.String()
 }
 
 // RenderSet confirms a write by naming the rank it landed at. The rank is the

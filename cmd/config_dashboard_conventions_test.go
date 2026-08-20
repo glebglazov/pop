@@ -15,8 +15,9 @@ import (
 
 // The Config dashboard is the one editor for everything in force in a directory
 // (ADR-0212 decision 8): a repository's conventions are rows beside its config
-// keys, they preview exactly what `pop conventions get` prints, and editing one
-// writes the human's overlay. These tests drive the component over a real
+// keys and preview exactly what `pop conventions get` prints. They are read-only
+// — a convention is a document the convention verb writes, not a value this
+// surface flips (ADR-0226). These tests drive the component over a real
 // repository and real files, through the writer `pop config dashboard` builds.
 
 type conventionDashboardFixture struct {
@@ -188,79 +189,100 @@ func TestConfigDashboardPreviewsWhatIsInForce(t *testing.T) {
 	}
 }
 
-// Editing a convention opens in place and writes prose: the human's overlay,
-// which every later read appends to whichever rank answered.
-func TestConfigDashboardEditsAConventionAsProse(t *testing.T) {
-	f := newConventionDashboardFixture(t)
-	f.twoLayers(t)
-
-	m := f.dashboard(t, "Never name pop in a subject line.\n")
-	selectKey(t, m, "conventions.commits")
-	pressConfigDashboard(m, tea.KeyPressMsg{Code: tea.KeyEnter})
-
-	if !m.Wrote() {
-		t.Fatal("the dashboard reports no write")
-	}
-	// The buffer opens on the layer being written, under pop's own note — which
-	// comes back out, so nothing pop wrote lands in the human's document.
-	if len(f.seeds) != 1 || !strings.Contains(f.seeds[0], "overlay") {
-		t.Fatalf("editor seeds = %q, want one buffer naming the layer it edits", f.seeds)
-	}
-	body, err := os.ReadFile(f.overlayPath())
-	if err != nil {
-		t.Fatalf("read overlay: %v", err)
-	}
-	if got := strings.TrimSpace(string(body)); got != "Never name pop in a subject line." {
-		t.Fatalf("overlay = %q, want the prose alone", got)
-	}
-
-	// The read command and the dashboard are one resolution: what was just
-	// written is the top layer of the stack `pop conventions get` prints.
-	var out bytes.Buffer
-	if err := conventions.Get(f.deps.conventionsDeps(), &out, f.repo, conventions.KindCommits); err != nil {
-		t.Fatalf("conventions get: %v", err)
-	}
-	if !strings.Contains(out.String(), "Never name pop in a subject line.") {
-		t.Fatalf("the overlay is not in the stack get prints:\n%s", out.String())
-	}
-	if !strings.Contains(out.String(), "Your overlay is appended") {
-		t.Errorf("the overlay is not reported as appended to the answer:\n%s", out.String())
-	}
-
-	row, _ := m.Selected()
-	if !row.Overridden || !strings.Contains(row.Preview.Layers, "Never name pop in a subject line.") {
-		t.Fatalf("row = %+v, want the new layer visible the moment the editor closed", row)
-	}
-
-	// ctrl+x hands the kind back to the answer alone, exactly as it hands a key
-	// back to the source it stood on.
-	pressConfigDashboard(m, tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
-	if _, err := os.Stat(f.overlayPath()); !os.IsNotExist(err) {
-		t.Fatalf("the overlay survived its removal: %v", err)
-	}
-	if row, _ := m.Selected(); row.Overridden {
-		t.Errorf("row = %+v, want no layer of the human's own left in force", row)
-	}
-}
-
-// Copying the source down assumes an override standing over a value, so that
-// copying it changes nothing. The overlay is appended to the answer instead, so
-// copying the answer into it would state the same prose twice — the action
-// refuses and writes nothing.
-func TestConfigDashboardRefusesToCopyAConventionDown(t *testing.T) {
+// The preview closes by naming both documents that are the human's to write, so
+// a reader who wants to change the answer leaves with the paths and the verb.
+func TestConfigDashboardPreviewNamesBothWritablePaths(t *testing.T) {
 	f := newConventionDashboardFixture(t)
 	f.twoLayers(t)
 
 	m := f.dashboard(t)
 	selectKey(t, m, "conventions.commits")
-	pressConfigDashboard(m, tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
+	row, _ := m.Selected()
 
-	view := ui.StripANSI(m.ViewContent())
-	if !strings.Contains(view, "appended to the answer") {
-		t.Fatalf("the refusal does not say why, in the view:\n%s", view)
+	preview := row.Preview.Layers
+	for _, want := range []string{
+		f.overlayPath(),
+		filepath.Join("projects"),
+		"commits.md",
+		"pop conventions set commits",
+	} {
+		if !strings.Contains(preview, want) {
+			t.Errorf("preview missing %q:\n%s", want, preview)
+		}
 	}
-	if _, err := os.Stat(f.overlayPath()); !os.IsNotExist(err) {
-		t.Error("a refused copy still wrote the overlay")
+}
+
+// A kind nobody has written an answer for previews pop's own, that rank being
+// what is in force there.
+func TestConfigDashboardPreviewsTheShippedAnswer(t *testing.T) {
+	f := newConventionDashboardFixture(t)
+
+	m := f.dashboard(t)
+	selectKey(t, m, "conventions.commits")
+	row, _ := m.Selected()
+
+	if !strings.Contains(row.Preview.Layers, "ANSWER: SHIPPED") {
+		t.Fatalf("a kind nobody answered does not preview pop's own answer:\n%s", row.Preview.Layers)
+	}
+}
+
+// The three write keys do nothing on a convention row: no editor opens, no
+// document is written or removed, and the dashboard reports no write for the
+// host to re-read after.
+func TestConfigDashboardLeavesConventionWritesToTheVerb(t *testing.T) {
+	f := newConventionDashboardFixture(t)
+	f.twoLayers(t)
+	f.write(t, f.overlayPath(), "Never name pop in a subject line.\n")
+
+	m := f.dashboard(t, "Something the human never gets to type.\n")
+	selectKey(t, m, "conventions.commits")
+	pressConfigDashboard(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	pressConfigDashboard(m, tea.KeyPressMsg{Code: 'y', Mod: tea.ModCtrl})
+	pressConfigDashboard(m, tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
+
+	if len(f.seeds) != 0 {
+		t.Errorf("an editor opened on a convention row: %q", f.seeds)
+	}
+	if m.Wrote() {
+		t.Error("the dashboard reports a write it never made")
+	}
+	body, err := os.ReadFile(f.overlayPath())
+	if err != nil {
+		t.Fatalf("the overlay did not survive the three keys: %v", err)
+	}
+	if got := strings.TrimSpace(string(body)); got != "Never name pop in a subject line." {
+		t.Fatalf("overlay = %q, want the human's own prose untouched", got)
+	}
+	view := ui.StripANSI(m.ViewContent())
+	for _, gone := range []string{"enter edit", "C-y copy source", "C-x remove"} {
+		if strings.Contains(view, gone) {
+			t.Errorf("the footer offers %q on a convention row:\n%s", gone, view)
+		}
+	}
+}
+
+// The same keys still write a config key in the same list: read-only is a
+// property of the row, not of the dashboard.
+func TestConfigDashboardStillEditsAConfigKeyBesideConventions(t *testing.T) {
+	f := newConventionDashboardFixture(t)
+	f.twoLayers(t)
+
+	m := f.dashboard(t, "work.implement.agents = [\"codex\"]\n")
+	selectKey(t, m, "work.implement.agents")
+	pressConfigDashboard(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if len(f.seeds) != 1 {
+		t.Fatalf("editor opened %d times on a config key, want once", len(f.seeds))
+	}
+	if !m.Wrote() {
+		t.Fatal("the dashboard reports no write for a config key")
+	}
+	row, _ := m.Selected()
+	if !row.Overridden || !strings.Contains(row.Preview.ValueTOML, "codex") {
+		t.Fatalf("row = %+v, want the override in force the moment the editor closed", row)
+	}
+	if !strings.Contains(ui.StripANSI(m.ViewContent()), "enter edit") {
+		t.Errorf("the footer does not offer the keys on a config row:\n%s", ui.StripANSI(m.ViewContent()))
 	}
 }
 

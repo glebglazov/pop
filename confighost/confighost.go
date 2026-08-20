@@ -50,8 +50,9 @@ import (
 // against the repository the dashboard was opened in and written into the
 // layer's block for it — which is how a Preferred workbench, a key with no
 // global spelling, is chosen here at all (decision 6). A `conventions.<kind>` row
-// is neither: it holds prose, and writing it states the human's Convention
-// overlay (decision 8, and conventions.go beside this file).
+// is neither, and none of the three actions reaches one: it holds a document the
+// convention verb writes, and the component never offers an action on it
+// (ADR-0226, and conventions.go beside this file).
 type Writer struct {
 	deps       *config.Deps
 	configPath string
@@ -99,9 +100,6 @@ func (w Writer) repoScope(key string) (string, bool) {
 }
 
 func (w Writer) Store(key, buffer string) (string, error) {
-	if kind, ok := conventions.RowKind(key); ok {
-		return w.storeConvention(kind, buffer)
-	}
 	if _, ok := w.repoScope(key); ok {
 		return config.StoreRepoOverrideBufferWith(w.deps, w.checkout, key, buffer)
 	}
@@ -109,9 +107,6 @@ func (w Writer) Store(key, buffer string) (string, error) {
 }
 
 func (w Writer) CopySource(key string) error {
-	if kind, ok := conventions.RowKind(key); ok {
-		return copySourceConvention(kind)
-	}
 	if _, ok := w.repoScope(key); ok {
 		return config.CopyRepoOverrideFromSourceWith(w.deps, w.configPath, w.checkout, key)
 	}
@@ -119,12 +114,6 @@ func (w Writer) CopySource(key string) error {
 }
 
 func (w Writer) Remove(key string) error {
-	if kind, ok := conventions.RowKind(key); ok {
-		// The dashboard edits one rank and only one — the overlay — so it names
-		// that rank to the same writer `pop conventions unset` goes through.
-		_, _, err := conventions.Erase(w.conventions, conventions.OriginOverlay, kind, w.checkout)
-		return err
-	}
 	if leaf, ok := w.repoScope(key); ok {
 		return config.DeleteRepoOverrideValueWith(w.deps, w.checkout, leaf)
 	}
