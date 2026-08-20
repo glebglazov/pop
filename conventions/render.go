@@ -8,9 +8,9 @@ import (
 )
 
 // Get resolves and prints the convention in force for each kind in turn. Every
-// kind resolves to something — its recipe where nobody has written an answer —
-// so there is no miss left to report and the only error it can return is a
-// failure to resolve the repository at all (ADR-0223 decision 5).
+// kind resolves to rules to follow — pop's own where nobody has written an
+// answer — so there is no miss left to report and the only error it can return
+// is a failure to resolve the repository at all (ADR-0226 decision 1).
 func Get(d *Deps, w io.Writer, cwd string, kinds ...Kind) error {
 	stacks, err := ResolveAll(d, cwd, kinds...)
 	if err != nil {
@@ -42,8 +42,8 @@ func RenderStacks(w io.Writer, stacks []Stack) error {
 func (s Stack) inForce() string {
 	var b strings.Builder
 	answer := s.Answer()
-	fmt.Fprintf(&b, "----- %s: %s (%s) -----\n%s\n\n%s\n",
-		blockLabel(answer.Origin), strings.ToUpper(string(answer.Origin)), answer.Origin.Scope(),
+	fmt.Fprintf(&b, "----- ANSWER: %s (%s) -----\n%s\n\n%s\n",
+		strings.ToUpper(string(answer.Origin)), answer.Origin.Scope(),
 		answer.Path, answer.Body)
 	if overlay, ok := s.Overlay(); ok {
 		fmt.Fprintln(&b)
@@ -51,16 +51,6 @@ func (s Stack) inForce() string {
 			strings.ToUpper(string(overlay.Origin)), overlay.Origin.Scope(), overlay.Path, overlay.Body)
 	}
 	return b.String()
-}
-
-// blockLabel opens the answer's block. The last rank is a method rather than an
-// answer, and a reader scanning headings has to see that before the banner
-// beneath repeats it at length.
-func blockLabel(o Origin) string {
-	if o == OriginRecipe {
-		return "METHOD"
-	}
-	return "ANSWER"
 }
 
 // inForceProse is the whole of what a kind that answers renders to: the blocks
@@ -71,7 +61,7 @@ func (s Stack) inForceProse() string { return s.inForce() + "\n" + s.Provenance(
 
 // RenderStack prints one kind's convention as plain text: the answer in force,
 // the overlay where there is one, and the provenance line. A kind nobody has
-// written an answer to resolves to its recipe and prints that instead, so this
+// written an answer to resolves to pop's own and prints that instead, so this
 // never renders a miss.
 func RenderStack(w io.Writer, s Stack) error {
 	fmt.Fprintf(w, "CONVENTION %s\n\n", s.Kind)
@@ -100,9 +90,8 @@ func StackPreview(s Stack) string {
 // heading of its own and names no editing surface — the prompt that embeds it
 // owns both.
 //
-// It always speaks. A kind nobody has written an answer to resolves to its
-// recipe, and an agent handed a method it can work is better served than by the
-// silence this used to return.
+// It always speaks, and what it speaks is always rules to follow: a kind nobody
+// has written an answer to resolves to pop's own.
 func StackProse(s Stack) string { return s.inForceProse() }
 
 // overlayNote says where the human's overlay is and whether it holds anything.
@@ -165,9 +154,8 @@ func RenderUnset(w io.Writer, kind Kind, path string, removed bool, remaining St
 func nowInForce(s Stack) string {
 	answer := s.Answer()
 	line := fmt.Sprintf("Now in force: %s (%s).", answer.Origin, answer.Path)
-	if answer.Origin == OriginRecipe {
-		line = fmt.Sprintf("Nothing answers %s now, so it falls through to the %s: the method for working one out.",
-			s.Kind, OriginRecipe)
+	if answer.Origin == OriginShipped {
+		line = fmt.Sprintf("Nobody answers %s now, so it falls through to pop's own answer for the kind.", s.Kind)
 	}
 	if overlay, ok := s.Overlay(); ok {
 		line += fmt.Sprintf(" Your overlay is appended (%s).", overlay.Path)
@@ -179,7 +167,7 @@ func nowInForce(s Stack) string {
 // which rank answered, whether the overlay rides on it, and — when pop's own
 // layer is the answer — what pop derived it from. Pop emits it rather than
 // leaving each skill to phrase it, so the "which source am I using" line cannot
-// drift between skills the way the recipe itself did (ADR-0211).
+// drift between skills the way the derivation itself once did (ADR-0211).
 func (s Stack) Provenance() string {
 	answer := s.Answer()
 	line := fmt.Sprintf("Provenance: %s resolved to %s (%s).", s.Kind, answer.Origin, answer.Path)
@@ -192,10 +180,6 @@ func (s Stack) Provenance() string {
 	// being handed.
 	case OriginMemory:
 		line += " " + memoryDerivation(answer)
-	// The disclosure a consumer of the last rank needs is that it is not an
-	// answer at all, in the one line skills surface verbatim.
-	case OriginRecipe:
-		line += " Nobody has written an answer for it, so what is in force is the method for deriving one, not rules to follow."
 	}
 	return line
 }

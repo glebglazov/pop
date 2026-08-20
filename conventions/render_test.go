@@ -6,11 +6,10 @@ import (
 	"testing"
 )
 
-// TestUnwrittenKindResolvesToItsRecipe pins the last rank: a kind no document
-// and no memory answers still resolves, to the method for deriving one, and the
-// rendering says so twice — in the block label a reader scans, and in the
-// banner the body opens with (ADR-0223 decision 5).
-func TestUnwrittenKindResolvesToItsRecipe(t *testing.T) {
+// TestUnwrittenKindResolvesToTheShippedRank pins the last rank: a kind no
+// document and no memory answers still resolves, to pop's own answer, rendered
+// as an answer like any other rank's (ADR-0226 decision 1).
+func TestUnwrittenKindResolvesToTheShippedRank(t *testing.T) {
 	stack := Stack{Kind: KindCommits, Layers: []Layer{
 		{Origin: OriginUserDefaults, Path: "/h/.agents/docs/commits.md"},
 		{Origin: OriginRepository, Path: "/r/docs/agents/commits.md"},
@@ -18,12 +17,12 @@ func TestUnwrittenKindResolvesToItsRecipe(t *testing.T) {
 		{Origin: OriginOverlay, Path: "/h/.agents/docs/commits.overlay.md"},
 	}}
 
-	if got := stack.Answer(); got.Origin != OriginRecipe || got.Body == "" {
-		t.Fatalf("Answer() = %s / %q, want the recipe rank", got.Origin, got.Body)
+	if got := stack.Answer(); got.Origin != OriginShipped || got.Body == "" {
+		t.Fatalf("Answer() = %s / %q, want the shipped rank", got.Origin, got.Body)
 	}
 	// Nothing is written anywhere, so nothing is losing to anything.
 	if stack.Contested() {
-		t.Error("a kind resolving to its recipe is reported as contested")
+		t.Error("a kind resolving to pop's own answer is reported as contested")
 	}
 
 	var out bytes.Buffer
@@ -32,32 +31,32 @@ func TestUnwrittenKindResolvesToItsRecipe(t *testing.T) {
 	}
 	got := out.String()
 	for _, want := range []string{
-		"METHOD: CONVENTION RECIPE",
-		"METHOD, not a convention",
-		Recipe(KindCommits),
-		"the method for deriving one",
+		"ANSWER: SHIPPED",
+		"pop's own, displaced by any above",
+		Shipped(KindCommits),
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("recipe rank rendering missing %q:\n%s", want, got)
+			t.Errorf("shipped rank rendering missing %q:\n%s", want, got)
 		}
 	}
-	// The recipe answers; it is never labelled as somebody's answer.
-	if strings.Contains(got, "ANSWER:") {
-		t.Errorf("the method is rendered as an answer:\n%s", got)
+	// The banner ADR-0226 deleted taught readers to stop at the first line; no
+	// surface may reintroduce it.
+	if strings.Contains(got, "METHOD") {
+		t.Errorf("the shipped rank is rendered under a method banner:\n%s", got)
 	}
-	// `recipe <kind>` and a fallthrough hand over the same body.
+	// `default <kind>` and a fallthrough hand over the same body.
 	var direct bytes.Buffer
-	if err := RenderRecipe(&direct, KindCommits); err != nil {
+	if err := RenderShipped(&direct, KindCommits); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(got, strings.TrimPrefix(direct.String(), "RECIPE commits\n\n")) {
-		t.Errorf("the resolved recipe is not the body `recipe` prints:\n%s\n----\n%s", got, direct.String())
+	if !strings.Contains(got, strings.TrimPrefix(direct.String(), "SHIPPED CONVENTION commits\n\n")) {
+		t.Errorf("the resolved answer is not the body `default` prints:\n%s\n----\n%s", got, direct.String())
 	}
 }
 
-// A written rank of any kind outranks the recipe, which is the whole reason the
-// recipe sits beneath all three.
-func TestAnyWrittenRankOutranksTheRecipe(t *testing.T) {
+// A written rank of any kind outranks pop's own answer, which is the whole
+// reason the shipped rank sits beneath all three.
+func TestAnyWrittenRankOutranksTheShippedRank(t *testing.T) {
 	for _, origin := range writtenRanks {
 		s := Stack{Kind: KindCommits, Layers: []Layer{
 			{Origin: origin, Path: "/p", Present: true, Body: "WRITTEN"},
@@ -65,8 +64,8 @@ func TestAnyWrittenRankOutranksTheRecipe(t *testing.T) {
 		if got := s.Answer(); got.Origin != origin {
 			t.Errorf("%s answers with %s", origin, got.Origin)
 		}
-		if prose := StackProse(s); strings.Contains(prose, "METHOD") {
-			t.Errorf("%s answered and the recipe still printed:\n%s", origin, prose)
+		if prose := StackProse(s); strings.Contains(prose, "SHIPPED") {
+			t.Errorf("%s answered and pop's own answer still printed:\n%s", origin, prose)
 		}
 	}
 }
@@ -83,13 +82,13 @@ func TestResolutionPicksOneAnswer(t *testing.T) {
 	tests := []struct {
 		name string
 		// answer is the body expected in force; empty means the kind falls
-		// through to its recipe.
+		// through to the shipped rank.
 		layers     []Layer
 		answer     string
 		hasOverlay bool
 		contested  bool
 	}{
-		{name: "nothing anywhere falls through to the recipe"},
+		{name: "nothing anywhere falls through to the shipped rank"},
 		{name: "memory alone", layers: []Layer{memory}, answer: "POP"},
 		{name: "the team's document stands memory down",
 			layers: []Layer{repo, memory}, answer: "TEAM", contested: true},
@@ -99,7 +98,7 @@ func TestResolutionPicksOneAnswer(t *testing.T) {
 			layers: []Layer{defaults, repo, memory}, answer: "MINE", contested: true},
 		{name: "the overlay rides on the answer",
 			layers: []Layer{repo, overlay}, answer: "TEAM", hasOverlay: true},
-		{name: "the overlay alone rides on the recipe",
+		{name: "the overlay alone rides on the shipped rank",
 			layers: []Layer{overlay}, hasOverlay: true},
 	}
 
@@ -109,7 +108,7 @@ func TestResolutionPicksOneAnswer(t *testing.T) {
 			answer := s.Answer()
 			wantBody, wantOrigin := tt.answer, Origin("")
 			if wantBody == "" {
-				wantBody, wantOrigin = recipeLayer(KindCommits).Body, OriginRecipe
+				wantBody, wantOrigin = shippedLayer(KindCommits).Body, OriginShipped
 			}
 			if answer.Body != wantBody {
 				t.Errorf("Answer() = %q, want %q", answer.Body, wantBody)
@@ -183,15 +182,18 @@ func TestProvenanceDisclosesTheAnswerAndTheOverlay(t *testing.T) {
 			absent: []string{"Pop memory"},
 		},
 		{
-			name: "an unwritten kind discloses that it holds a method",
-			want: []string{"resolved to convention recipe", "recipes/commits.md", "not rules to follow"},
+			name: "an unwritten kind names pop's own answer and claims nothing more",
+			want: []string{"resolved to shipped", "shipped/commits.md"},
+			// The clause that told a reader what is in force is a method, not
+			// rules, went with the recipe rank (ADR-0226 decision 1).
+			absent: []string{"method", "not rules to follow"},
 		},
 		{
-			name: "an overlay rides on the recipe when nothing is written",
+			name: "an overlay rides on the shipped rank when nothing is written",
 			layers: []Layer{
 				{Origin: OriginOverlay, Path: "/h/.agents/docs/commits.overlay.md", Present: true, Body: "b"},
 			},
-			want: []string{"convention recipe", "appended", "/h/.agents/docs/commits.overlay.md"},
+			want: []string{"shipped", "appended", "/h/.agents/docs/commits.overlay.md"},
 		},
 	}
 
@@ -283,10 +285,10 @@ func TestStackPreviewShowsTheAnswerAndTheOverlay(t *testing.T) {
 	}
 }
 
-// The pane shows the recipe when that is what answers: the ADR's rule is that
-// `get` and the pane cannot describe one convention differently, and the rank
-// in force is as much the pane's business as any other.
-func TestStackPreviewOfAnUnwrittenKindShowsTheRecipe(t *testing.T) {
+// The pane shows pop's own answer when that is what answers: the ADR's rule is
+// that `get` and the pane cannot describe one convention differently, and the
+// rank in force is as much the pane's business as any other.
+func TestStackPreviewOfAnUnwrittenKindShowsTheShippedRank(t *testing.T) {
 	stack := Stack{Kind: KindIssueTracker, Layers: []Layer{
 		{Origin: OriginUserDefaults, Path: "/h/.agents/docs/issue-tracker.md"},
 		{Origin: OriginRepository, Path: "/r/docs/agents/issue-tracker.md"},
@@ -296,7 +298,7 @@ func TestStackPreviewOfAnUnwrittenKindShowsTheRecipe(t *testing.T) {
 
 	got := StackPreview(stack)
 
-	for _, want := range []string{"METHOD: CONVENTION RECIPE", Recipe(KindIssueTracker)} {
+	for _, want := range []string{"ANSWER: SHIPPED", Shipped(KindIssueTracker)} {
 		if !strings.Contains(got, want) {
 			t.Errorf("preview of an unwritten kind is missing %q:\n%s", want, got)
 		}

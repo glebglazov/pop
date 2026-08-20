@@ -220,11 +220,10 @@ func TestConventionsGetWithOnlyUserDefaults(t *testing.T) {
 	}
 }
 
-// TestConventionsGetUnwrittenKindResolvesToTheRecipe: a repository that has
-// written nothing still gets an answer — the method for working one out, under
-// the banner that stops it being read as rules — and the command succeeds
-// (ADR-0223 decision 5).
-func TestConventionsGetUnwrittenKindResolvesToTheRecipe(t *testing.T) {
+// TestConventionsGetUnwrittenKindResolvesToTheShippedRank: a repository that
+// has written nothing still gets rules to follow — pop's own answer, labelled
+// an answer — and the command succeeds (ADR-0226 decision 1).
+func TestConventionsGetUnwrittenKindResolvesToTheShippedRank(t *testing.T) {
 	f := newConventionFixture(t)
 
 	out, err := f.get(t, f.repo, "commits")
@@ -233,20 +232,22 @@ func TestConventionsGetUnwrittenKindResolvesToTheRecipe(t *testing.T) {
 	}
 	for _, want := range []string{
 		"CONVENTION commits",
-		"METHOD: CONVENTION RECIPE",
-		"METHOD, not a convention",
-		conventions.Recipe(conventions.KindCommits),
+		"ANSWER: SHIPPED",
+		conventions.Shipped(conventions.KindCommits),
 		"Provenance:",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output missing %q:\n%s", want, out)
 		}
 	}
+	if strings.Contains(out, "METHOD") {
+		t.Fatalf("a METHOD banner survives in `get` output:\n%s", out)
+	}
 }
 
-// A document written at any rank stands the recipe down: the recipe is last,
-// not a floor laid under whatever answered.
-func TestConventionsGetDocumentOutranksTheRecipe(t *testing.T) {
+// A document written at any rank stands pop's own answer down: the shipped rank
+// is last, not a floor laid under whatever answered.
+func TestConventionsGetDocumentOutranksTheShippedRank(t *testing.T) {
 	f := newConventionFixture(t)
 	path := f.repoDoc(t, "commits", "TEAM-DOC: the type set is feat, fix, chore.")
 
@@ -257,22 +258,22 @@ func TestConventionsGetDocumentOutranksTheRecipe(t *testing.T) {
 	if !strings.Contains(out, "TEAM-DOC") || !strings.Contains(out, path) {
 		t.Fatalf("the document is not in force:\n%s", out)
 	}
-	if strings.Contains(out, "METHOD") || strings.Contains(out, conventions.Recipe(conventions.KindCommits)) {
-		t.Errorf("the recipe still prints beside a written answer:\n%s", out)
+	if strings.Contains(out, "METHOD") || strings.Contains(out, conventions.Shipped(conventions.KindCommits)) {
+		t.Errorf("pop's own answer still prints beside a written one:\n%s", out)
 	}
-	// Asking for the method directly is still a real request when a document
-	// answers: an agent improving that document needs the derivation.
-	recipe, err := recipeOut(t, "commits")
+	// Asking for pop's own answer directly is still a real request when a
+	// document answers: a human revising that document starts from pop's.
+	shipped, err := defaultOut(t, "commits")
 	if err != nil {
-		t.Fatalf("recipe commits: %v\n%s", err, recipe)
+		t.Fatalf("default commits: %v\n%s", err, shipped)
 	}
-	if !strings.Contains(recipe, "RECIPE commits") || !strings.Contains(recipe, conventions.Recipe(conventions.KindCommits)) {
-		t.Errorf("the recipe verb does not answer while a document is in force:\n%s", recipe)
+	if !strings.Contains(shipped, "SHIPPED CONVENTION commits") || !strings.Contains(shipped, conventions.Shipped(conventions.KindCommits)) {
+		t.Errorf("the default verb does not answer while a document is in force:\n%s", shipped)
 	}
 }
 
 // TestConventionsGetAllKinds walks every kind with no argument. Nothing written
-// anywhere is still exit 0, because every kind resolves to its recipe.
+// anywhere is still exit 0, because every kind resolves to pop's own answer.
 func TestConventionsGetAllKinds(t *testing.T) {
 	f := newConventionFixture(t)
 
@@ -294,9 +295,13 @@ func TestConventionsGetAllKinds(t *testing.T) {
 	if !strings.Contains(out, "TEAM-DOC") {
 		t.Errorf("the answered kind did not render its layer:\n%s", out)
 	}
-	// The kinds nobody wrote an answer for print their method instead.
-	if !strings.Contains(out, conventions.Recipe(conventions.KindIssueTracker)) {
-		t.Errorf("an unwritten kind did not fall through to its recipe:\n%s", out)
+	// The kinds nobody wrote an answer for print pop's own instead, and no
+	// banner survives anywhere in a whole-stack rendering.
+	if !strings.Contains(out, conventions.Shipped(conventions.KindIssueTracker)) {
+		t.Errorf("an unwritten kind did not fall through to the shipped rank:\n%s", out)
+	}
+	if strings.Contains(out, "METHOD") {
+		t.Errorf("a METHOD banner survives in a whole-stack rendering:\n%s", out)
 	}
 }
 
@@ -372,38 +377,40 @@ func TestConventionsRenderingLivesInTheDomainPackage(t *testing.T) {
 	})
 }
 
-func recipeOut(t *testing.T, kind string) (string, error) {
+func defaultOut(t *testing.T, kind string) (string, error) {
 	t.Helper()
 	var out bytes.Buffer
-	err := runConventionsRecipeWith(&out, kind)
+	err := runConventionsDefaultWith(&out, kind)
 	return out.String(), err
 }
 
-// TestConventionsRecipePrintsEachKindsMethod: the verb exists on its own
-// because an agent improving a convention that already resolves needs the
-// method too, not only the one that missed.
-func TestConventionsRecipePrintsEachKindsMethod(t *testing.T) {
+// TestConventionsDefaultPrintsEachKindsShippedAnswer: the verb exists on its
+// own because a human writing their own document starts from pop's, whether or
+// not the kind already resolves to something else.
+func TestConventionsDefaultPrintsEachKindsShippedAnswer(t *testing.T) {
 	for _, kind := range conventions.KindNames() {
-		out, err := recipeOut(t, kind)
+		out, err := defaultOut(t, kind)
 		if err != nil {
-			t.Fatalf("recipe %s: %v\n%s", kind, err, out)
+			t.Fatalf("default %s: %v\n%s", kind, err, out)
 		}
-		if !strings.Contains(out, "RECIPE "+kind) || !strings.Contains(out, "METHOD, not a convention") {
-			t.Errorf("recipe %s is not printed as a labelled method:\n%s", kind, out)
+		if !strings.Contains(out, "SHIPPED CONVENTION "+kind) {
+			t.Errorf("default %s is not printed as pop's own answer:\n%s", kind, out)
+		}
+		if strings.Contains(out, "METHOD") {
+			t.Errorf("default %s prints a method banner:\n%s", kind, out)
 		}
 	}
 }
 
-// TestConventionsRecipeRefusesUnknownKind: the recipe verb reads nothing off
-// disk, so the closed enum is the only thing standing between a typo and empty
-// output.
-func TestConventionsRecipeRefusesUnknownKind(t *testing.T) {
-	out, err := recipeOut(t, "bogus")
+// TestConventionsDefaultRefusesUnknownKind: the verb reads nothing off disk, so
+// the closed enum is the only thing standing between a typo and empty output.
+func TestConventionsDefaultRefusesUnknownKind(t *testing.T) {
+	out, err := defaultOut(t, "bogus")
 	if err == nil {
 		t.Fatalf("unknown kind was accepted:\n%s", out)
 	}
 	if out != "" {
-		t.Errorf("unknown kind printed a recipe:\n%s", out)
+		t.Errorf("unknown kind printed an answer:\n%s", out)
 	}
 	for _, kind := range conventions.KindNames() {
 		if !strings.Contains(err.Error(), kind) {
@@ -662,7 +669,7 @@ func TestConventionsUnsetWithoutMemory(t *testing.T) {
 	if !strings.Contains(out, "nothing to remove") {
 		t.Errorf("unset does not say there was no memory:\n%s", out)
 	}
-	if !strings.Contains(out, "Nothing answers commits now") || !strings.Contains(out, "METHOD: CONVENTION RECIPE") {
+	if !strings.Contains(out, "Nobody answers commits now") || !strings.Contains(out, "ANSWER: SHIPPED") {
 		t.Errorf("unset does not report what is in force after it:\n%s", out)
 	}
 

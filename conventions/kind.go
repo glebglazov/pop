@@ -6,17 +6,18 @@ import (
 )
 
 // Kind is one member of the closed set of things pop can hold a Repo
-// convention for. It is closed rather than free-form because each kind's
-// Convention recipe is kind-specific work pop must know how to do, so a kind
-// pop has never heard of has no method to offer and nowhere sensible to look
-// (ADR-0211).
+// convention for. It is closed rather than free-form because each kind carries
+// a Shipped convention — pop's own answer, written for that kind — so a kind
+// pop has never heard of has nothing to answer with and nowhere sensible to
+// look (ADR-0211, ADR-0226).
 type Kind string
 
 const (
 	// KindCodeReview is the standard a Reviewer holds a changeset against: what
-	// good code looks like in this repository, as prose. Pop asserts none of it
-	// — the standard is the codebase's, and the recipe derives it from there
-	// (ADR-0214).
+	// good code looks like in this repository, as prose. Where the repository
+	// has stated none, pop's shipped answer is a smell baseline that the
+	// repository's own documents, linters and idiom override (ADR-0214,
+	// ADR-0226 decision 2).
 	KindCodeReview Kind = "code-review"
 	// KindCommits is the commit-message grammar a repository's team writes
 	// history in — types, scopes, subject style and body style, which are one

@@ -39,13 +39,14 @@ The answer is the first of these that holds something:
   user defaults  ~/.agents/docs/<kind>.md               yours, every repository
   repository     docs/agents/<kind>.md                  the team's, in version control
   pop memory     <task storage>/conventions/<kind>.md   pop-written, this repo
-  recipe         built into pop                         the method for deriving one
+  shipped        built into pop                         pop's own, displaced by any above
 
 Your own document outranks the team's: pop resolves conventions on your machine,
 on your behalf. Pop memory is pop's stand-in for a written answer, so it stands
-down as soon as either document exists. The recipe is last and is always there,
-so a kind nobody has answered hands you the method for working one out, under a
-banner saying so — steps to carry out, not rules to follow.
+down as soon as either document exists. The shipped rank is last and is always
+there, so a kind nobody has answered still hands you rules to follow — generic
+ones, because pop cannot know your project's taste, and displaced whole the
+moment anybody writes their own.
 
   user overlay   ~/.agents/docs/<kind>.overlay.md  appended to whichever answered
 
@@ -56,30 +57,32 @@ Output ends with a one-line provenance summary naming what answered, ready to be
 surfaced verbatim as the "which source am I using" disclosure.
 
 With no kind, every known kind prints in turn. Exit is 0 in every case, because
-every kind resolves to something. An unknown kind is refused with the list of
+every kind resolves to something followable. An unknown kind is refused with the list of
 the ones that exist, and nothing is printed.`,
 	Args:              cobra.MaximumNArgs(1),
 	RunE:              runConventionsGet,
 	ValidArgsFunction: completeConventionKind,
 }
 
-var conventionsRecipeCmd = &cobra.Command{
-	Use:   "recipe <kind>",
-	Short: "Print how to work out a convention pop does not hold",
-	Long: `Print the built-in recipe for one convention kind.
+var conventionsDefaultCmd = &cobra.Command{
+	Use:   "default <kind>",
+	Short: "Print pop's own answer for one convention kind",
+	Long: `Print the shipped convention for one kind: pop's own answer, built into the
+binary and the last rank of the stack.
 
-A recipe is a method, not an answer: it is the steps that derive the convention,
-and where to write the result once you have it. The output says so in its first
-lines, so a recipe cannot be mistaken for a convention.
+It is rules to follow, not a method for deriving them — generic by construction,
+because pop cannot know your project's taste. ` + "`get`" + ` prints this same body when
+nothing else answers the kind.
 
-` + "`get`" + ` prints this same body when nothing else answers the kind, and this verb
-is reachable on its own because an agent improving a convention that already
-answers needs the method too.
+This verb is reachable on its own so a human writing their own document can
+start from pop's: read it, keep what fits, and write the result at whichever
+rank you mean it to apply to. Customising is a human asking, never a machine
+telling a machine to derive.
 
 Nothing here is repository-specific and nothing is read from disk, so it answers
 outside a repository as well as inside one.`,
 	Args:              cobra.ExactArgs(1),
-	RunE:              runConventionsRecipe,
+	RunE:              runConventionsDefault,
 	ValidArgsFunction: completeConventionKind,
 }
 
@@ -92,7 +95,7 @@ The body is read from stdin, because the writer is an agent that has just worked
 out the convention, not a human at a terminal. ` + "`--file`" + ` reads the same body from
 a path instead. There is no editor mode.
 
-  pop conventions recipe commits            # the method
+  pop conventions default commits           # what pop answers with today
   ... | pop conventions set commits --derived-from "the last 20 commits"
 
 ` + "`--derived-from`" + ` is required: it names the evidence the convention was derived
@@ -139,7 +142,7 @@ var (
 func init() {
 	rootCmd.AddCommand(conventionsCmd)
 	conventionsCmd.AddCommand(conventionsGetCmd)
-	conventionsCmd.AddCommand(conventionsRecipeCmd)
+	conventionsCmd.AddCommand(conventionsDefaultCmd)
 	conventionsCmd.AddCommand(conventionsSetCmd)
 	conventionsCmd.AddCommand(conventionsUnsetCmd)
 
@@ -164,9 +167,8 @@ func runConventionsGet(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("conventions get: %w", err)
 	}
-	// Every kind resolves to something, so there is no miss status to translate:
-	// the command succeeds whenever it printed, and the reader tells a method
-	// from an answer by what it printed (ADR-0223 decision 5).
+	// Every kind resolves to rules to follow, so there is no miss status to
+	// translate: the command succeeds whenever it printed (ADR-0226 decision 1).
 	return runConventionsGetWith(cmdLayerDeps().conventionsDeps(), cmd.OutOrStdout(), dir, args)
 }
 
@@ -244,17 +246,17 @@ func runConventionsUnsetWith(cd *conventions.Deps, w io.Writer, dir, name string
 	return conventions.Unset(cd, w, kind, dir)
 }
 
-func runConventionsRecipe(cmd *cobra.Command, args []string) error {
-	return runConventionsRecipeWith(cmd.OutOrStdout(), args[0])
+func runConventionsDefault(cmd *cobra.Command, args []string) error {
+	return runConventionsDefaultWith(cmd.OutOrStdout(), args[0])
 }
 
-// runConventionsRecipeWith is the seam tests drive, so the refusal and the
-// printed recipe are exercised without a process. It takes no Deps: a recipe is
-// built in, and reads nothing.
-func runConventionsRecipeWith(w io.Writer, name string) error {
+// runConventionsDefaultWith is the seam tests drive, so the refusal and the
+// printed answer are exercised without a process. It takes no Deps: the shipped
+// rank is built in, and reads nothing.
+func runConventionsDefaultWith(w io.Writer, name string) error {
 	kind, err := conventions.ParseKind(name)
 	if err != nil {
 		return err
 	}
-	return conventions.RenderRecipe(w, kind)
+	return conventions.RenderShipped(w, kind)
 }

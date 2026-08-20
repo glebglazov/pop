@@ -164,19 +164,10 @@ pop conventions get commits
 
 Do not derive the grammar yourself. The command resolves this repository's
 answer — your own `~/.agents/docs/commits.md`, else the repository's committed
-`docs/agents/commits.md`, else what pop remembered — and prints it with the
-layer it came from, plus your overlay where you have written one.
-
-The command always exits 0; read the banner on its first line to tell which
-case you got:
-
-- **`ANSWER`** — take the printed convention as resolved. The command has
-  already chosen which layer answers, so read its output as the answer rather
-  than weighing layers yourself.
-- **`METHOD`** — nothing answers `commits` yet. The command prints the paths
-  it consulted and a **recipe**: the method for deriving the convention,
-  including which layer to record the result in. Follow it, then resolve
-  again.
+`docs/agents/commits.md`, else what pop remembered, else pop's own shipped
+answer — and prints it with the rank it came from, plus your overlay where you
+have written one. It always exits 0 and always prints rules to follow, so take
+its output as resolved rather than weighing ranks yourself.
 
 If what resolves is that the repository has **no discernible** commit convention,
 write neither field: the set carries no convention and each task commits under

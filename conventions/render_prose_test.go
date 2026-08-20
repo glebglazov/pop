@@ -7,13 +7,13 @@ import (
 
 // TestStackProse: the prose an agent is handed inside a larger prompt carries
 // the one answer in force and the human's overlay, under no composition rule
-// and no layer numbering. A kind nobody has written an answer to is handed the
-// recipe, marked as a method, rather than silence.
+// and no layer numbering. A kind nobody has written an answer to is handed
+// pop's own answer, labelled an answer like any other, rather than silence.
 func TestStackProse(t *testing.T) {
 	unwritten := StackProse(Stack{Kind: KindCodeReview, Layers: []Layer{
 		{Origin: OriginRepository, Path: "/repo/docs/agents/code-review.md"},
 	}})
-	for _, want := range []string{"METHOD: CONVENTION RECIPE", "METHOD, not a convention", Recipe(KindCodeReview)} {
+	for _, want := range []string{"ANSWER: SHIPPED", Shipped(KindCodeReview)} {
 		if !strings.Contains(unwritten, want) {
 			t.Fatalf("prose for an unwritten kind is missing %q:\n%s", want, unwritten)
 		}
@@ -38,8 +38,8 @@ func TestStackProse(t *testing.T) {
 	}
 	// The rank the answer stood down is not handed to the agent at all, and
 	// there is no rule left telling it to reconcile anything.
-	// A written answer displaces the recipe as it displaces any lower rank.
-	for _, absent := range []string{"table-driven tests only", "LAYER 1 OF", "compose", "contradict", "METHOD"} {
+	// A written answer displaces the shipped rank as it displaces any lower rank.
+	for _, absent := range []string{"table-driven tests only", "LAYER 1 OF", "compose", "contradict", "METHOD", "SHIPPED"} {
 		if strings.Contains(got, absent) {
 			t.Fatalf("prose still carries %q:\n%s", absent, got)
 		}

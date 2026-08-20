@@ -42,7 +42,7 @@ func grillConsolidateCommitSection(t *testing.T) string {
 func TestGrillingSkills_CommitConventionContract(t *testing.T) {
 	t.Parallel()
 
-	for _, want := range []string{"pop conventions get commits", "always exits 0", "ANSWER", "METHOD", "recipe"} {
+	for _, want := range []string{"pop conventions get commits", "always exits 0", "prints rules to follow"} {
 		if !strings.Contains(grillWithDocsCommitSection(t), want) {
 			t.Errorf("grill-with-docs skill does not resolve the commit convention through pop: missing %q", want)
 		}
@@ -65,8 +65,11 @@ func TestGrillingSkills_CommitConventionContract(t *testing.T) {
 
 // TestGrillingSkills_NoOwnLogSamplingRecipe is the un-drift guard: no embedded
 // skill body may carry its own git-log sampling derivation for the commit
-// convention. That derivation lives in the `commits` recipe now — a fourth
-// copy anywhere in the shipped skills is exactly the drift ADR-0211 retires.
+// convention, and none may send an agent back to a METHOD banner pop no longer
+// prints. That derivation lives in pop's shipped `commits` answer now — a
+// fourth copy anywhere in the shipped skills is exactly the drift ADR-0211
+// retires, and a skill working a method pop deleted is worse than one that
+// never mentioned it (ADR-0226 decision 1).
 func TestGrillingSkills_NoOwnLogSamplingRecipe(t *testing.T) {
 	t.Parallel()
 
@@ -85,6 +88,8 @@ func TestGrillingSkills_NoOwnLogSamplingRecipe(t *testing.T) {
 		for _, gone := range []string{
 			"git log -5 --format",
 			"house style",
+			"METHOD",
+			"printed recipe",
 		} {
 			if strings.Contains(text, gone) {
 				t.Errorf("%s still carries its own log-sampling recipe: %q", path, gone)

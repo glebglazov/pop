@@ -28,11 +28,11 @@ const (
 	// is pop's stand-in for a written answer, and a written answer makes it
 	// redundant (ADR-0223 decision 4).
 	OriginMemory Origin = "pop memory"
-	// OriginRecipe is the kind's built-in Convention recipe: not an answer at
-	// all, but the method for deriving one. It is the last rank, it is embedded
-	// rather than read from disk, and it always holds something — which is what
-	// makes a kind always resolve to something (ADR-0223 decision 5).
-	OriginRecipe Origin = "convention recipe"
+	// OriginShipped is pop's own answer for the kind: the last rank, embedded
+	// rather than read from disk, and always holding something — which is what
+	// makes a kind always resolve to rules somebody can follow. Any written rank
+	// above it displaces it whole (ADR-0226 decision 1).
+	OriginShipped Origin = "shipped"
 	// OriginOverlay is ~/.agents/docs/<kind>.overlay.md — the human's
 	// constraints, which ride along with whichever rank answered rather than
 	// competing with it. It is the one layer that appends (ADR-0223 decision 3).
@@ -49,8 +49,8 @@ func (o Origin) Scope() string {
 		return "the team's, in version control"
 	case OriginMemory:
 		return "pop-written, this repository on this machine"
-	case OriginRecipe:
-		return "built into pop, the method for deriving an answer"
+	case OriginShipped:
+		return "pop's own, displaced by any above"
 	case OriginOverlay:
 		return "yours, appended to any answer"
 	}
@@ -77,8 +77,8 @@ type Layer struct {
 // Stack is one Convention kind resolved for one repository: every rank pop
 // consulted, present or not. It resolves to exactly one answer plus the
 // overlay — the ranks below the answer are not consulted at all — and because
-// the last rank is the built-in recipe, it always resolves to something
-// (ADR-0223).
+// the last rank is pop's own shipped answer, it always resolves to rules
+// somebody can follow (ADR-0226).
 type Stack struct {
 	Kind   Kind
 	Layers []Layer
@@ -87,8 +87,8 @@ type Stack struct {
 // writtenRanks is the order the ranks somebody wrote resolve in: the human's
 // own document, then the team's, then pop's memory. The first that holds
 // something is the answer, and the rest are not read into it — nothing
-// composes. Beneath all three sits the recipe, which is not written anywhere
-// and is reached by falling off the end of this list.
+// composes. Beneath all three sits the shipped rank, which nobody wrote and
+// which is reached by falling off the end of this list.
 var writtenRanks = []Origin{OriginUserDefaults, OriginRepository, OriginMemory}
 
 // speaks returns one rank when it holds something.
@@ -102,16 +102,16 @@ func (s Stack) speaks(origin Origin) (Layer, bool) {
 }
 
 // Answer returns the one layer in force for this kind. A kind nobody has
-// written an answer to answers with its recipe, so there is no miss for a
-// caller to handle: what changes is whether the reader is handed rules to
-// follow or a method to work (ADR-0223 decision 5).
+// written an answer to answers with pop's own, so there is no miss for a caller
+// to handle and no case in which the reader is handed anything other than rules
+// to follow (ADR-0226 decision 1).
 func (s Stack) Answer() Layer {
 	for _, origin := range writtenRanks {
 		if l, ok := s.speaks(origin); ok {
 			return l
 		}
 	}
-	return recipeLayer(s.Kind)
+	return shippedLayer(s.Kind)
 }
 
 // Overlay returns the human's overlay when it holds something. It is appended
@@ -190,14 +190,14 @@ func resolveStackRoots(d *Deps, cwd string) (stackRoots, error) {
 }
 
 // layers derives kind's ranks in resolution order, reading no file. The three
-// written ranks come first, best first, then the recipe that answers when none
-// of them does, and the overlay last because it is appended rather than ranked.
+// written ranks come first, best first, then pop's own answer for when none of
+// them does, and the overlay last because it is appended rather than ranked.
 func (r stackRoots) layers(kind Kind) []Layer {
 	return []Layer{
 		{Origin: OriginUserDefaults, Path: filepath.Join(r.agentsDocs, string(kind)+".md")},
 		{Origin: OriginRepository, Path: filepath.Join(r.topLevel, "docs", "agents", string(kind)+".md")},
 		{Origin: OriginMemory, Path: memoryPathIn(r.storageDir, kind)},
-		recipeLayer(kind),
+		shippedLayer(kind),
 		{Origin: OriginOverlay, Path: overlayPathIn(r.agentsDocs, kind)},
 	}
 }
@@ -240,10 +240,10 @@ func ResolveAll(d *Deps, cwd string, kinds ...Kind) ([]Stack, error) {
 // readLayer fills in what is on disk at a layer's path. An unreadable path is
 // an absent layer, not an error: the written ranks are expected to be missing
 // most of the time, and a stack that refused on the first missing file could
-// never resolve. The recipe rank is embedded and already holds its body, so
+// never resolve. The shipped rank is embedded and already holds its body, so
 // there is nothing to read for it.
 func readLayer(d *Deps, l *Layer) {
-	if l.Origin == OriginRecipe {
+	if l.Origin == OriginShipped {
 		return
 	}
 	raw, err := d.fs().ReadFile(l.Path)

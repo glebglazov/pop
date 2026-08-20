@@ -34,13 +34,11 @@ func TestToTasksSkill_CommitConventionContract(t *testing.T) {
 	t.Parallel()
 	section := toTasksCommitConventionSection(t)
 
-	// Resolution is a command call, and both of its outcomes are handled.
+	// Resolution is one command call with one outcome to handle.
 	for _, want := range []string{
 		"pop conventions get commits",
 		"always exits 0",
-		"ANSWER",
-		"METHOD",
-		"recipe",
+		"prints rules to follow",
 	} {
 		if !strings.Contains(section, want) {
 			t.Errorf("to-tasks skill does not resolve the commit convention through pop: missing %q", want)
@@ -72,11 +70,11 @@ func TestToTasksSkill_CommitConventionContract(t *testing.T) {
 	}
 }
 
-// TestToTasksSkill_CommitConventionRecipeMoved guards the direction of the move:
-// the derivation ladder lives in the `commits` recipe now, so the skill must not
-// carry a second copy that can drift from it, and the retired document name must
-// not survive as an alias.
-func TestToTasksSkill_CommitConventionRecipeMoved(t *testing.T) {
+// TestToTasksSkill_CommitConventionDerivationMoved guards the direction of the
+// move: the log-sampling ladder lives in pop's shipped `commits` answer now, so
+// the skill must not carry a second copy that can drift from it, and the retired
+// document name must not survive as an alias.
+func TestToTasksSkill_CommitConventionDerivationMoved(t *testing.T) {
 	t.Parallel()
 	body := toTasksSkillBody(t)
 
