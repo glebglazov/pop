@@ -97,6 +97,10 @@ func (r *implementRun) runSelectedTask(currentRefresh *RefreshResult, sel *Selec
 	resolveSpec := newEffortSpecResolver(opts.AgentCmd, sel.Task.Effort, sel.Task.EffortExplicit, cfg)
 	taskResult, execErr := executeTaskAttemptsWithAgentFallback(d, sel, runtimePath, out, confirmOut, basePrompt, baseAgentPresets, resolveSpec, buildForAgent, maxTries, timeout, commitOverrides, agentQuotaRetryAfter, retryDelays, r.agentProbeMemo)
 	if execErr != nil {
+		// The chokepoint sees every ending, so the Task result line is printed here
+		// rather than in the branches below: the gates that follow can keep the
+		// drain going, but this task's turn is over either way.
+		renderTaskResultLine(out, sel.TaskSetID, sel.TaskID, taskEndingForExecError(execErr), "")
 		afterRefresh, refreshErr := RefreshWith(d, resolved.DefinitionPath, statePath)
 		if refreshErr == nil {
 			result.Refresh = afterRefresh
@@ -158,12 +162,18 @@ func (r *implementRun) runSelectedTask(currentRefresh *RefreshResult, sel *Selec
 			// Drain ending saying so rather than looking like a clean finish
 			// (ADR-0231).
 			result.NoAgentStarted = taskResult.NoAgentStarted
+			// Not one preset could run, so the walk left the task exactly as it was:
+			// the same ending as an exhausted agent list, told the same way.
+			renderTaskResultLine(out, sel.TaskSetID, sel.TaskID, taskEndingOutOfAgents, "")
 			return runTaskReturn, result, taskExitErr(sel, ExitSetup, "%s", humanHealingStopMessage(sel, taskResult.NoAgentStarted, presets))
 		}
 		// Quota recovery wait (ADR-0100): instead of exiting with ExitQuotaPaused,
 		// park the drain, register a recovery waiter, and poll until the preset's
 		// cooldown elapses and a recovery turn is acquired. Both foreground and
 		// unattended drains enter the wait loop.
+		// Said before the recovery wait, which can outlast the operator's patience:
+		// the line is what tells them which agent the drain is waiting on.
+		renderTaskResultLine(out, sel.TaskSetID, sel.TaskID, taskEndingQuotaPaused, u.Preset)
 		priority := 0
 		if row := findRow(currentRefresh, taskSetID); row != nil {
 			priority = row.Priority
@@ -185,6 +195,7 @@ func (r *implementRun) runSelectedTask(currentRefresh *RefreshResult, sel *Selec
 		return runTaskContinue, nil, nil
 	}
 
+	renderTaskDone(out, taskResult)
 	result.Completed = append(result.Completed, taskResult)
 	return runTaskContinue, nil, nil
 }

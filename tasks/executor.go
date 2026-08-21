@@ -288,6 +288,8 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 		}
 	}
 
+	printConciseSummary(out, result)
+
 	afterRefresh, err := RefreshWith(d, resolved.DefinitionPath, statePath)
 	if err != nil {
 		return nil, taskExitErr(sel, ExitOperational, "refresh after completion: %v", err)

@@ -888,7 +888,7 @@ func TestRunTasksCmdStartsWithoutAFKConsent(t *testing.T) {
 	if strings.Contains(stdout.String(), "Run AFK tasks in this Task set?") {
 		t.Fatalf("set drain must not ask for AFK consent:\n%s", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "✓ Completed demo/01-a") {
+	if !strings.Contains(stdout.String(), "✓ demo/01-a done") {
 		t.Fatalf("expected set to drain:\n%s", stdout.String())
 	}
 	_ = root
