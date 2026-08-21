@@ -20,6 +20,41 @@ const (
 	StateCrashed      = "crashed"
 )
 
+// Drain endings. An ending is the Agent fallback walk outcome behind a terminal,
+// recorded when the exit reason alone cannot say it (ADR-0231): a drain that ran
+// out of agents and one that could not start a single agent both stop as cleanly
+// as a healthy one, so `state` cannot tell a journal reader them apart. Empty on
+// every other drain — including the ordinary fall-through, where one agent
+// stepped aside and the next finished the work.
+const (
+	// EndingAgentsExhausted is a walk in which an agent spent its whole Task
+	// retry cap without finishing and no agent was left to hand the work to.
+	EndingAgentsExhausted = "agents_exhausted"
+	// EndingNoAgentStarted is a walk in which not one preset ran a Task attempt —
+	// every agent was cooling, capped, unauthenticated or absent. Nothing was
+	// attempted, so nothing failed; what it wants is a human, not a retry.
+	EndingNoAgentStarted = "no_agent_started"
+)
+
+// DrainEnding is how one Drain stopped: the exit-reason terminal, the Agent
+// fallback walk ending behind it where there is one, and the agent the stop
+// belongs to. The three travel together because a journal reader ranking a stop
+// needs all of them — the terminal to say what the process did, the ending to
+// say whether an agent list was spent doing it, and the preset to say which
+// agent to look at first.
+type DrainEnding struct {
+	State  string
+	Ending string
+	// ExhaustedPreset is the agent the stop belongs to: the one whose quota ran
+	// out on a quota-paused terminal, or the one that spent the last retry cap on
+	// an exhausted walk.
+	ExhaustedPreset string
+	// ExhaustedPinned and ExhaustedResetAt are meaningful only for
+	// StateQuotaPaused.
+	ExhaustedPinned  bool
+	ExhaustedResetAt time.Time
+}
+
 // Drain is one supervised execution of draining a Task set, keyed by
 // (repository identity, set id) and carrying the owning process so liveness can
 // be checked.
@@ -40,6 +75,8 @@ type Drain struct {
 	ExhaustedPreset  string
 	ExhaustedPinned  bool
 	ExhaustedResetAt time.Time
+	// Ending is the Drain ending: one of the Ending* values, or empty.
+	Ending string
 }
 
 const timeLayout = time.RFC3339Nano
@@ -151,19 +188,19 @@ func (s *Store) StartDrain(d Drain) (Drain, error) {
 	return d, nil
 }
 
-// FinishDrain transitions a running Drain to a terminal exit reason. The
-// exhausted-preset fields are meaningful only for StateQuotaPaused; pass zero
-// values otherwise.
-func (s *Store) FinishDrain(id int64, state string, exhaustedPreset string, exhaustedPinned bool, exhaustedResetAt, finishedAt time.Time) error {
+// FinishDrain transitions a running Drain to the terminal it ended on.
+func (s *Store) FinishDrain(id int64, e DrainEnding, finishedAt time.Time) error {
 	_, err := s.db.Exec(
 		`UPDATE drains
-		   SET state = ?, finished_at = ?, exhausted_preset = ?, exhausted_pinned = ?, exhausted_reset_at = ?
+		   SET state = ?, finished_at = ?, exhausted_preset = ?, exhausted_pinned = ?,
+		       exhausted_reset_at = ?, ending = ?
 		 WHERE id = ?`,
-		state,
+		e.State,
 		finishedAt.UTC().Format(timeLayout),
-		nullString(exhaustedPreset),
-		boolToInt(exhaustedPinned),
-		nullTime(exhaustedResetAt),
+		nullString(e.ExhaustedPreset),
+		boolToInt(e.ExhaustedPinned),
+		nullTime(e.ExhaustedResetAt),
+		e.Ending,
 		id)
 	return err
 }
@@ -274,7 +311,7 @@ func (s *Store) ReconcileCrashed(finishedAt time.Time) (int, error) {
 func (s *Store) LatestTerminalByRuntimePath(runtimePath string) (*Drain, error) {
 	row := s.db.QueryRow(
 		`SELECT id, repo, set_id, runtime_path, pid, proc_start, started_at, state,
-		        finished_at, exhausted_preset, exhausted_pinned, exhausted_reset_at
+		        finished_at, exhausted_preset, exhausted_pinned, exhausted_reset_at, ending
 		 FROM drains
 		 WHERE runtime_path = ? AND state <> ?
 		 ORDER BY finished_at DESC, id DESC
@@ -321,7 +358,7 @@ func (s *Store) LatestDrainStartsByRepo(repo string) (map[string]time.Time, erro
 func (s *Store) AllDrains() ([]Drain, error) {
 	return s.queryDrains(
 		`SELECT id, repo, set_id, runtime_path, pid, proc_start, started_at, state,
-		        finished_at, exhausted_preset, exhausted_pinned, exhausted_reset_at
+		        finished_at, exhausted_preset, exhausted_pinned, exhausted_reset_at, ending
 		 FROM drains ORDER BY id ASC`)
 }
 
@@ -332,7 +369,7 @@ func (s *Store) AllDrains() ([]Drain, error) {
 func (s *Store) RunningDrains() ([]Drain, error) {
 	return s.queryDrains(
 		`SELECT id, repo, set_id, runtime_path, pid, proc_start, started_at, state,
-		        finished_at, exhausted_preset, exhausted_pinned, exhausted_reset_at
+		        finished_at, exhausted_preset, exhausted_pinned, exhausted_reset_at, ending
 		 FROM drains WHERE state = ? ORDER BY id ASC`, StateRunning)
 }
 
@@ -346,12 +383,13 @@ func (s *Store) queryDrains(query string, args ...any) ([]Drain, error) {
 	for rows.Next() {
 		var d Drain
 		var started, state string
-		var procStart, finished, preset, resetAt sql.NullString
+		var procStart, finished, preset, resetAt, ending sql.NullString
 		var pinned int
 		if err := rows.Scan(&d.ID, &d.Repo, &d.SetID, &d.RuntimePath, &d.PID, &procStart, &started, &state,
-			&finished, &preset, &pinned, &resetAt); err != nil {
+			&finished, &preset, &pinned, &resetAt, &ending); err != nil {
 			return nil, err
 		}
+		d.Ending = ending.String
 		d.ProcStart = procStart.String
 		d.StartedAt = parseTime(started)
 		d.State = state
@@ -493,10 +531,10 @@ func drainStateAbnormal(state string) bool {
 func scanDrain(row *sql.Row) (*Drain, error) {
 	var d Drain
 	var started, state string
-	var procStart, finished, preset, resetAt sql.NullString
+	var procStart, finished, preset, resetAt, ending sql.NullString
 	var pinned int
 	err := row.Scan(&d.ID, &d.Repo, &d.SetID, &d.RuntimePath, &d.PID, &procStart, &started, &state,
-		&finished, &preset, &pinned, &resetAt)
+		&finished, &preset, &pinned, &resetAt, &ending)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -510,6 +548,7 @@ func scanDrain(row *sql.Row) (*Drain, error) {
 	d.ExhaustedPreset = preset.String
 	d.ExhaustedPinned = pinned != 0
 	d.ExhaustedResetAt = parseTime(resetAt.String)
+	d.Ending = ending.String
 	return &d, nil
 }
 

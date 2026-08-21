@@ -169,23 +169,18 @@ func newImplementRun(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 // RunTaskSetWith defers it with &err. Registered before BindCheckout so a bind or
 // later-setup failure still finalizes the row.
 func (r *implementRun) finalize(errp *error) {
-	var (
-		declined     bool
-		unavail      *AgentProceedVerdict
-		verifyFailed bool
-		pinned       bool
-	)
+	var outcome drainOutcome
 	if r.result != nil {
-		declined = r.result.Declined
-		unavail = r.result.ProceedVerdict
-		verifyFailed = r.result.TaskSetVerifyFailed
-		pinned = r.result.PausePinnedAgent
+		outcome.declined = r.result.Declined
+		outcome.unavail = r.result.ProceedVerdict
+		outcome.verifyFailed = r.result.TaskSetVerifyFailed
+		outcome.pinned = r.result.PausePinnedAgent
+		outcome.noAgentStarted = r.result.NoAgentStarted
 	}
-	var err error
 	if errp != nil {
-		err = *errp
+		outcome.err = *errp
 	}
-	finalizeDrain(r.drain, declined, unavail, verifyFailed, pinned, err)
+	finalizeDrain(r.drain, outcome)
 }
 
 // setup runs the remaining preparation after the opening BeginDrain: checkout
@@ -279,7 +274,7 @@ func (r *implementRun) parkDrain() {
 	if r.drain == nil {
 		return
 	}
-	_ = r.drain.Finish(store.StateFinished, "", false, time.Time{})
+	_ = r.drain.Finish(store.DrainEnding{State: store.StateFinished})
 	r.drain = nil
 }
 

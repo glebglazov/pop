@@ -425,7 +425,7 @@ func reverifyAtGate(d *Deps, rv *reverifyGateContext, out io.Writer, repo, runti
 	if err != nil {
 		return err
 	}
-	defer func() { _ = handle.Finish(store.StateFinished, "", false, time.Time{}) }()
+	defer func() { _ = handle.Finish(store.DrainEnding{State: store.StateFinished}) }()
 	opts := verifyCoreOptions{
 		Repo:        repo,
 		RuntimePath: runtimePath,

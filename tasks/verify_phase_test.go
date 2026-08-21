@@ -38,7 +38,7 @@ func newVerifyPhaseRunWithKeys(t *testing.T, verify func(string) (string, error)
 	if err != nil {
 		t.Fatalf("BeginDrain: %v", err)
 	}
-	t.Cleanup(func() { finalizeDrain(handle, false, nil, false, false, nil) })
+	t.Cleanup(func() { finalizeDrain(handle, drainOutcome{}) })
 
 	run := &implementRun{
 		d:           d,

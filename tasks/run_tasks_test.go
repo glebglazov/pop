@@ -281,7 +281,7 @@ func TestRunTaskSetReleasesRuntimeLockAtInitialHITLGatePrompt(t *testing.T) {
 		if err != nil {
 			t.Fatalf("second drain must claim the parked checkout: %v", err)
 		}
-		if err := handle.Finish(store.StateFinished, "", false, time.Time{}); err != nil {
+		if err := handle.Finish(store.DrainEnding{State: store.StateFinished}); err != nil {
 			t.Fatalf("finish second drain: %v", err)
 		}
 	}
@@ -323,7 +323,7 @@ func TestRunTaskSetReleasesRuntimeLockAtFailedGatePrompt(t *testing.T) {
 		if err != nil {
 			t.Fatalf("second drain must claim the parked checkout: %v", err)
 		}
-		if err := handle.Finish(store.StateFinished, "", false, time.Time{}); err != nil {
+		if err := handle.Finish(store.DrainEnding{State: store.StateFinished}); err != nil {
 			t.Fatalf("finish second drain: %v", err)
 		}
 	}
@@ -607,7 +607,7 @@ func TestRunTaskSetResumeAfterGateRefusesOnConcurrentDrain(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		if rival != nil {
-			_ = rival.Finish(store.StateFinished, "", false, time.Time{})
+			_ = rival.Finish(store.DrainEnding{State: store.StateFinished})
 		}
 	})
 

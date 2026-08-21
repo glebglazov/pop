@@ -64,7 +64,7 @@ func TestInterruptedTerminalDoesNotBackoffOrPark(t *testing.T) {
 		if err != nil {
 			t.Fatalf("BeginDrain: %v", err)
 		}
-		if err := h.Finish(store.StateInterrupted, "", false, time.Time{}); err != nil {
+		if err := h.Finish(store.DrainEnding{State: store.StateInterrupted}); err != nil {
 			t.Fatalf("Finish: %v", err)
 		}
 	}
@@ -106,7 +106,7 @@ func TestCleanTerminalResetsBackoffCountFromDrainHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginDrain: %v", err)
 	}
-	if err := h.Finish(store.StateFinished, "", false, time.Time{}); err != nil {
+	if err := h.Finish(store.DrainEnding{State: store.StateFinished}); err != nil {
 		t.Fatalf("Finish: %v", err)
 	}
 	info, _ = tasks.ReadSetBackoff(td, commonDir, "set-1")

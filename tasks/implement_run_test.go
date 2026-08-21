@@ -4,7 +4,6 @@ import (
 	"io"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/glebglazov/pop/store"
 )
@@ -108,7 +107,7 @@ func TestImplementRunEnsureDrainReacquiresAndRefusesCollision(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rival must claim the parked checkout: %v", err)
 	}
-	t.Cleanup(func() { _ = rival.Finish(store.StateFinished, "", false, time.Time{}) })
+	t.Cleanup(func() { _ = rival.Finish(store.DrainEnding{State: store.StateFinished}) })
 
 	err = run.ensureDrain()
 	assertExitCode(t, err, ExitOperational)

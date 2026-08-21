@@ -2,7 +2,6 @@ package queuetest
 
 import (
 	"testing"
-	"time"
 
 	"github.com/glebglazov/pop/store"
 
@@ -50,7 +49,7 @@ func SeedAbnormalDrain(t *testing.T, td *tasks.Deps, runtimePath, setID string) 
 	if err != nil {
 		t.Fatalf("BeginDrain: %v", err)
 	}
-	if err := h.Finish(store.StateCrashed, "", false, time.Time{}); err != nil {
+	if err := h.Finish(store.DrainEnding{State: store.StateCrashed}); err != nil {
 		t.Fatalf("Finish: %v", err)
 	}
 }

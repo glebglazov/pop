@@ -153,6 +153,11 @@ func (r *implementRun) runSelectedTask(currentRefresh *RefreshResult, sel *Selec
 				presets = []AgentProceedVerdict{*u}
 			}
 			result.ProceedVerdict = &presets[0]
+			// Carry the no-op fact up to the set-level result: the drain's own
+			// finalize reads it there, and a walk that started no agent records a
+			// Drain ending saying so rather than looking like a clean finish
+			// (ADR-0231).
+			result.NoAgentStarted = taskResult.NoAgentStarted
 			return runTaskReturn, result, taskExitErr(sel, ExitSetup, "%s", humanHealingStopMessage(sel, taskResult.NoAgentStarted, presets))
 		}
 		// Quota recovery wait (ADR-0100): instead of exiting with ExitQuotaPaused,

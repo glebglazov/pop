@@ -274,16 +274,16 @@ func BeginDrain(d *Deps, runtimePath, setID string, noticeOut io.Writer) (*Drain
 	return &DrainHandle{store: s, id: drain.ID}, nil
 }
 
-// Finish transitions the Drain to a terminal exit-reason store state (one of the
-// store.State* terminals). The exhausted-preset arguments are meaningful only for
-// a quota-paused terminal. The set's work disposition is never recorded — it
-// stays derived from the manifest (ADR-0056). It borrows the process-cached store
+// Finish transitions the Drain to the terminal it ended on (a store.State*
+// exit reason, plus the Agent fallback walk ending behind it where the exit
+// reason cannot say it). The set's work disposition is never recorded — it stays
+// derived from the manifest (ADR-0056). It borrows the process-cached store
 // handle and does not close it.
-func (h *DrainHandle) Finish(terminal string, exhaustedPreset string, exhaustedPinned bool, exhaustedResetAt time.Time) error {
+func (h *DrainHandle) Finish(ending store.DrainEnding) error {
 	if h == nil {
 		return nil
 	}
-	return h.store.FinishDrain(h.id, terminal, exhaustedPreset, exhaustedPinned, exhaustedResetAt, time.Now().UTC())
+	return h.store.FinishDrain(h.id, ending, time.Now().UTC())
 }
 
 // Cancel removes the Drain row. It is used when the drain never executed
@@ -296,18 +296,35 @@ func (h *DrainHandle) Cancel() error {
 	return h.store.CancelDrain(h.id)
 }
 
+// drainOutcome is everything the process knows about how its drain ended by the
+// time it finalizes the row: the dispositions the result carries and the final
+// error. It is one value rather than a parameter list because the terminal is a
+// judgment over all of it at once — an Agent fallback walk that spent its list,
+// for instance, is read off the error while the agent it spent is read off the
+// same error's ending.
+type drainOutcome struct {
+	declined     bool
+	unavail      *AgentProceedVerdict
+	verifyFailed bool
+	pinned       bool
+	// noAgentStarted marks a walk in which not one preset ran a Task attempt, so
+	// the stop is a no-op rather than a failure (ADR-0231).
+	noAgentStarted bool
+	err            error
+}
+
 // finalizeDrain records the appropriate exit-reason terminal for a finished
 // drain, or cancels the row when the drain was declined and never executed.
-func finalizeDrain(h *DrainHandle, declined bool, unavail *AgentProceedVerdict, verifyFailed bool, pinned bool, err error) {
+func finalizeDrain(h *DrainHandle, o drainOutcome) {
 	if h == nil {
 		return
 	}
-	terminal, p, pin, r, executed := drainTerminal(declined, unavail, verifyFailed, pinned, err)
+	ending, executed := drainTerminal(o)
 	if !executed {
 		_ = h.Cancel()
 		return
 	}
-	_ = h.Finish(terminal, p, pin, r)
+	_ = h.Finish(ending)
 }
 
 // drainTerminal maps the observable end of a drain to its exit-reason store
@@ -317,21 +334,45 @@ func finalizeDrain(h *DrainHandle, declined bool, unavail *AgentProceedVerdict, 
 // remediation cap, ADR-0086/0087) are the non-finished terminals; everything
 // else — success, failure, blocked, setup error after the drain began — is a
 // finished process whose disposition is read from the manifest, not the Drain.
-func drainTerminal(declined bool, unavail *AgentProceedVerdict, verifyFailed bool, pinned bool, err error) (terminal string, _ string, _ bool, _ time.Time, executed bool) {
-	if declined {
-		return "", "", false, time.Time{}, false
+//
+// Two clean stops carry a Drain ending beside the terminal, because they are the
+// ones a human coming back to the machine has to be able to pick out of a
+// journal of clean finishes: a drain that ran out of agents, and one that could
+// not start a single one (ADR-0231).
+func drainTerminal(o drainOutcome) (store.DrainEnding, bool) {
+	if o.declined {
+		return store.DrainEnding{}, false
 	}
-	if unavail != nil {
-		if th, ok := unavail.TimeHealing(); ok {
-			return store.StateQuotaPaused, unavail.Preset, pinned, th.ResetAt, true
+	if o.unavail != nil {
+		if th, ok := o.unavail.TimeHealing(); ok {
+			return store.DrainEnding{
+				State:            store.StateQuotaPaused,
+				ExhaustedPreset:  o.unavail.Preset,
+				ExhaustedPinned:  o.pinned,
+				ExhaustedResetAt: th.ResetAt,
+			}, true
 		}
 		// A human-healing verdict is a clean finished stop (ADR-0153).
+		if o.noAgentStarted {
+			return store.DrainEnding{
+				State:           store.StateFinished,
+				Ending:          store.EndingNoAgentStarted,
+				ExhaustedPreset: o.unavail.Preset,
+			}, true
+		}
 	}
-	if isInterrupted(err) {
-		return store.StateInterrupted, "", false, time.Time{}, true
+	if isInterrupted(o.err) {
+		return store.DrainEnding{State: store.StateInterrupted}, true
 	}
-	if verifyFailed {
-		return store.StateVerifyFailed, "", false, time.Time{}, true
+	if o.verifyFailed {
+		return store.DrainEnding{State: store.StateVerifyFailed}, true
 	}
-	return store.StateFinished, "", false, time.Time{}, true
+	if spent, ok := exhaustedWalkPreset(o.err); ok {
+		return store.DrainEnding{
+			State:           store.StateFinished,
+			Ending:          store.EndingAgentsExhausted,
+			ExhaustedPreset: spent,
+		}, true
+	}
+	return store.DrainEnding{State: store.StateFinished}, true
 }

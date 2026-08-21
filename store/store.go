@@ -552,6 +552,14 @@ var migrations = []string{
 		reviewed_at TEXT NOT NULL DEFAULT '',
 		PRIMARY KEY (repo, set_id)
 	);`,
+	// 34: drains.ending — the Agent fallback walk outcome behind a terminal, for
+	// the walks whose exit reason cannot say it (ADR-0231). A drain that ran out
+	// of agents finishes cleanly, and so does one that could not start a single
+	// agent; both look exactly like a healthy drain in the `state` column, which
+	// is what stopped the journal from ranking them. Empty on every ordinary
+	// drain, including one where an agent stepped aside and the next finished the
+	// work.
+	`ALTER TABLE drains ADD COLUMN ending TEXT NOT NULL DEFAULT '';`,
 }
 
 func (s *Store) migrate() error {

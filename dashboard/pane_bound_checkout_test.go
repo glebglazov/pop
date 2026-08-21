@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
-	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/queuetest"
@@ -227,7 +226,7 @@ func recordFinishedDrain(t *testing.T, d *drain.Deps, checkout, setID string) {
 	if err != nil {
 		t.Fatalf("BeginDrain(%s): %v", setID, err)
 	}
-	if err := handle.Finish(store.StateFinished, "", false, time.Time{}); err != nil {
+	if err := handle.Finish(store.DrainEnding{State: store.StateFinished}); err != nil {
 		t.Fatalf("finish drain(%s): %v", setID, err)
 	}
 }

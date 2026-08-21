@@ -9,9 +9,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/store"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -233,7 +233,7 @@ func TestFoldRechecksTrunkImmediatelyBeforeTheFastForward(t *testing.T) {
 				if err != nil {
 					t.Fatalf("BeginDrain on trunk: %v", err)
 				}
-				t.Cleanup(func() { _ = h.Finish("finished", "", false, time.Time{}) })
+				t.Cleanup(func() { _ = h.Finish(store.DrainEnding{State: store.StateFinished}) })
 			},
 			want: "live claim",
 		},

@@ -697,7 +697,7 @@ func TestRunTaskReleasesRuntimeLockAtConfirmationPrompt(t *testing.T) {
 		if err != nil {
 			t.Fatalf("second drain must claim the unlocked checkout: %v", err)
 		}
-		if err := handle.Finish(store.StateFinished, "", false, time.Time{}); err != nil {
+		if err := handle.Finish(store.DrainEnding{State: store.StateFinished}); err != nil {
 			t.Fatalf("finish second drain: %v", err)
 		}
 	}

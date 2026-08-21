@@ -21,6 +21,9 @@ type DrainRecord struct {
 	ExhaustedPreset  string
 	ExhaustedPinned  bool
 	ExhaustedResetAt time.Time
+	// Ending is the Agent fallback walk ending behind the terminal, where the
+	// exit reason cannot say it (store.Ending*), and empty otherwise.
+	Ending string
 }
 
 // Running reports whether the drain has not yet reached a terminal.
@@ -70,6 +73,7 @@ func AllDrains(d *Deps) ([]DrainRecord, error) {
 			ExhaustedPreset:  dr.ExhaustedPreset,
 			ExhaustedPinned:  dr.ExhaustedPinned,
 			ExhaustedResetAt: dr.ExhaustedResetAt,
+			Ending:           dr.Ending,
 		})
 	}
 	return out, nil

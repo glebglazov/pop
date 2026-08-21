@@ -149,7 +149,7 @@ func TestVerifyFailGateRegistersNonClaimingHold(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginDrain: %v", err)
 	}
-	t.Cleanup(func() { finalizeDrain(handle, false, nil, false, false, nil) })
+	t.Cleanup(func() { finalizeDrain(handle, drainOutcome{}) })
 
 	holdSeen := false
 	check := func(t *testing.T) {

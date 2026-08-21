@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/dashboard"
@@ -48,6 +49,15 @@ var workLogCmd = &cobra.Command{
 	RunE:  runWorkLog,
 }
 
+// workLogSevere backs `--severe` on `pop work log`: the short list a human wants
+// on coming back to the machine — only the events that cost a drain its agents
+// (ADR-0231).
+var workLogSevere bool
+
+// workLogSince backs `--severe`'s window. It defaults to a day because that is
+// the span of an unattended night.
+var workLogSince time.Duration
+
 // workStatusIncludeDone backs the deprecated `--include-done` flag on
 // `pop work status` — an alias for `--preset all` (ADR-0197).
 var workStatusIncludeDone bool
@@ -60,6 +70,9 @@ func init() {
 	workCmd.AddCommand(workDaemonCmd)
 	workCmd.AddCommand(workStatusCmd)
 	workCmd.AddCommand(workLogCmd)
+
+	workLogCmd.Flags().BoolVar(&workLogSevere, "severe", false, "Show only severe events — a drain that spent its whole agent list, or one that could not start an agent at all")
+	workLogCmd.Flags().DurationVar(&workLogSince, "since", 24*time.Hour, "Window the --severe listing covers")
 
 	workStatusCmd.Flags().StringVar(&workStatusPreset, "preset", "", "Work view preset name (default: first configured preset)")
 	workStatusCmd.Flags().BoolVar(&workStatusIncludeDone, "include-done", false, "deprecated: alias for --preset all")
@@ -217,6 +230,10 @@ func runWorkLog(cmd *cobra.Command, args []string) error {
 	events, err := supervisor.BuildLog(cmdLayerDeps().tasksDeps())
 	if err != nil {
 		return err
+	}
+	if workLogSevere {
+		supervisor.RenderSevereLog(cmdOut(cmd), events, workLogSince, time.Now())
+		return nil
 	}
 	supervisor.RenderLog(cmdOut(cmd), events, workLogLimit)
 	return nil

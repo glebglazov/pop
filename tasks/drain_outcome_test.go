@@ -197,18 +197,20 @@ func TestRunTaskSetDoneRecordsFinished(t *testing.T) {
 func TestDrainTerminal(t *testing.T) {
 	resetAt := time.Date(2026, 6, 15, 2, 28, 0, 0, time.UTC)
 	cases := []struct {
-		name         string
-		declined     bool
-		unavail      *AgentProceedVerdict
-		verifyFailed bool
-		pinned       bool
-		err          error
-		wantTerminal string
-		wantPreset   string
-		wantPinned   bool
-		wantReset    time.Time
-		wantExecuted bool
-		wantAbnorm   bool
+		name           string
+		declined       bool
+		unavail        *AgentProceedVerdict
+		verifyFailed   bool
+		pinned         bool
+		noAgentStarted bool
+		err            error
+		wantTerminal   string
+		wantEnding     string
+		wantPreset     string
+		wantPinned     bool
+		wantReset      time.Time
+		wantExecuted   bool
+		wantAbnorm     bool
 	}{
 		{
 			name: "quota pause carries preset and reset",
@@ -264,6 +266,28 @@ func TestDrainTerminal(t *testing.T) {
 			wantAbnorm:   false,
 		},
 		{
+			// The two clean stops the journal has to be able to pick out of a
+			// journal of clean finishes (ADR-0231).
+			name: "a walk that started no agent records the no-op ending",
+			unavail: func() *AgentProceedVerdict {
+				u := NewAuthFailureVerdict("cursor", "Authentication required")
+				return &u
+			}(),
+			noAgentStarted: true,
+			wantTerminal:   store.StateFinished,
+			wantEnding:     store.EndingNoAgentStarted,
+			wantPreset:     "cursor",
+			wantExecuted:   true,
+		},
+		{
+			name:         "an exhausted walk records the ending and the agent that spent the last cap",
+			err:          &exhaustedWalkError{fault: faultContract, preset: "claude", err: exitErr(ExitOperational, "out of agents")},
+			wantTerminal: store.StateFinished,
+			wantEnding:   store.EndingAgentsExhausted,
+			wantPreset:   "claude",
+			wantExecuted: true,
+		},
+		{
 			name:         "declined never executed",
 			declined:     true,
 			wantExecuted: false,
@@ -271,27 +295,37 @@ func TestDrainTerminal(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			terminal, preset, pinned, gotReset, executed := drainTerminal(tc.declined, tc.unavail, tc.verifyFailed, tc.pinned, tc.err)
+			ending, executed := drainTerminal(drainOutcome{
+				declined:       tc.declined,
+				unavail:        tc.unavail,
+				verifyFailed:   tc.verifyFailed,
+				pinned:         tc.pinned,
+				noAgentStarted: tc.noAgentStarted,
+				err:            tc.err,
+			})
 			if executed != tc.wantExecuted {
 				t.Fatalf("executed = %v, want %v", executed, tc.wantExecuted)
 			}
 			if !executed {
 				return
 			}
-			if terminal != tc.wantTerminal {
-				t.Fatalf("terminal = %q, want %q", terminal, tc.wantTerminal)
+			if ending.State != tc.wantTerminal {
+				t.Fatalf("terminal = %q, want %q", ending.State, tc.wantTerminal)
 			}
-			if preset != tc.wantPreset {
-				t.Fatalf("preset = %q, want %q", preset, tc.wantPreset)
+			if ending.Ending != tc.wantEnding {
+				t.Fatalf("ending = %q, want %q", ending.Ending, tc.wantEnding)
 			}
-			if pinned != tc.wantPinned {
-				t.Fatalf("pinned = %v, want %v", pinned, tc.wantPinned)
+			if ending.ExhaustedPreset != tc.wantPreset {
+				t.Fatalf("preset = %q, want %q", ending.ExhaustedPreset, tc.wantPreset)
 			}
-			if tc.unavail != nil && !gotReset.Equal(tc.wantReset) {
-				t.Fatalf("reset = %v, want %v", gotReset, tc.wantReset)
+			if ending.ExhaustedPinned != tc.wantPinned {
+				t.Fatalf("pinned = %v, want %v", ending.ExhaustedPinned, tc.wantPinned)
+			}
+			if tc.unavail != nil && !ending.ExhaustedResetAt.Equal(tc.wantReset) {
+				t.Fatalf("reset = %v, want %v", ending.ExhaustedResetAt, tc.wantReset)
 			}
 			// Only crashed is abnormal (ADR-0120); interrupted is now a clean stop.
-			gotAbnorm := terminal == store.StateCrashed
+			gotAbnorm := ending.State == store.StateCrashed
 			if gotAbnorm != tc.wantAbnorm {
 				t.Fatalf("abnormal = %v, want %v", gotAbnorm, tc.wantAbnorm)
 			}
@@ -309,7 +343,7 @@ func TestReadTerminalDrainProjectsLatestTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	if err := h.Finish(store.StateQuotaPaused, "codex", true, resetAt); err != nil {
+	if err := h.Finish(store.DrainEnding{State: store.StateQuotaPaused, ExhaustedPreset: "codex", ExhaustedPinned: true, ExhaustedResetAt: resetAt}); err != nil {
 		t.Fatalf("finish: %v", err)
 	}
 

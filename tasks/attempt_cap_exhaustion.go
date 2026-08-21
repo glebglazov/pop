@@ -101,7 +101,11 @@ func retryCapFallThroughMessage(role, preset string, attempts int, reason string
 // Failed gate to dispose of (ADR-0231).
 type exhaustedWalkError struct {
 	fault attemptFault
-	err   *ExitError
+	// preset is the agent that spent the last retry cap — the one a human
+	// reading the journal looks at first, and the reason the Drain row records an
+	// agent beside the exhausted-walk ending.
+	preset string
+	err    *ExitError
 }
 
 func (e *exhaustedWalkError) Error() string { return e.err.Error() }
@@ -116,6 +120,18 @@ func exhaustedWalkFault(err error) (attemptFault, bool) {
 		return stop.fault, true
 	}
 	return 0, false
+}
+
+// exhaustedWalkPreset reports the agent that spent the last retry cap of an
+// exhausted walk, and false for every other error. It is what lets the Drain
+// row — and so the journal — name an agent for a stop whose exit reason is an
+// ordinary clean finish.
+func exhaustedWalkPreset(err error) (string, bool) {
+	var stop *exhaustedWalkError
+	if errors.As(err, &stop) {
+		return stop.preset, true
+	}
+	return "", false
 }
 
 // disposeExhaustedWalk writes the ending of a task whose Agent fallback list ran
@@ -136,7 +152,8 @@ func disposeExhaustedWalk(d *Deps, sel *Selection, out io.Writer, spent attemptC
 	if spent.fault.leavesTaskOpen() {
 		display.line(ansiDim, "   Every agent died on the provider's side, which is never the task's fault: %s/%s stays open and a later drain retries it.", sel.TaskSetID, sel.TaskID)
 		return &exhaustedWalkError{
-			fault: spent.fault,
+			fault:  spent.fault,
+			preset: spent.preset,
 			err:   taskExitErr(sel, ExitOperational, "every agent failed on the provider's side, task left open (last: %s)", clampAgentDiagnostic(spent.reason)),
 		}
 	}
@@ -147,8 +164,9 @@ func disposeExhaustedWalk(d *Deps, sel *Selection, out io.Writer, spent attemptC
 		return taskExitErr(sel, ExitOperational, "%v", err)
 	}
 	return &exhaustedWalkError{
-		fault: spent.fault,
-		err:   taskExitErr(sel, ExitOperational, "%s", spent.summary),
+		fault:  spent.fault,
+		preset: spent.preset,
+		err:    taskExitErr(sel, ExitOperational, "%s", spent.summary),
 	}
 }
 

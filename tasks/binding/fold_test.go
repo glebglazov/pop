@@ -13,7 +13,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/store"
@@ -941,7 +940,7 @@ func TestFoldRefusesPreconditions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("BeginDrain: %v", err)
 		}
-		defer func() { _ = h.Finish("finished", "", false, time.Time{}) }()
+		defer func() { _ = h.Finish(store.DrainEnding{State: store.StateFinished}) }()
 
 		cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
 		_, err = Fold(td, nil, cfg, "set-claim", FoldOptions{Yes: true, In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, io.Discard)

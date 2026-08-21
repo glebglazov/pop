@@ -61,7 +61,7 @@ func newHITLGateRun(t *testing.T, confirmIn io.Reader, yes bool) (*implementRun,
 	}
 	t.Cleanup(func() {
 		if run.drain != nil {
-			finalizeDrain(run.drain, false, nil, false, false, nil)
+			finalizeDrain(run.drain, drainOutcome{})
 		}
 	})
 	return run, d, runtimePath, m, hitl

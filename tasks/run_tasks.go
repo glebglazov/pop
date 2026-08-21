@@ -94,6 +94,11 @@ type RunTaskSetResult struct {
 	BlockedReason  string
 	// ProceedVerdict is set when an agent could not carry on (ADR-0168).
 	ProceedVerdict *AgentProceedVerdict
+	// NoAgentStarted marks a drain whose Agent fallback walk ran no Task attempt
+	// at all — every preset cooling, capped, unauthenticated or missing. The drain
+	// stopped without attempting anything, so it is a no-op rather than a failure,
+	// and its Drain row records that ending (ADR-0231).
+	NoAgentStarted bool
 	// QuotaPaused and friends mirror a quota-pause verdict for callers that
 	// assert the observable pause fields rather than the verdict type.
 	QuotaPaused bool

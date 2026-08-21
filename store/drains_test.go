@@ -145,7 +145,7 @@ func TestFinishDrainTransitionsTerminal(t *testing.T) {
 		t.Fatalf("StartDrain: %v", err)
 	}
 	reset := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
-	if err := s.FinishDrain(d.ID, StateQuotaPaused, "claude", true, reset, time.Now().UTC()); err != nil {
+	if err := s.FinishDrain(d.ID, DrainEnding{State: StateQuotaPaused, ExhaustedPreset: "claude", ExhaustedPinned: true, ExhaustedResetAt: reset}, time.Now().UTC()); err != nil {
 		t.Fatalf("FinishDrain: %v", err)
 	}
 	if live, _ := s.LiveDrainByRuntimePath("/rt"); live != nil {
@@ -173,7 +173,7 @@ func TestFinishDrainTransitionsTerminal(t *testing.T) {
 func TestFinishedTerminalOmitsQuotaFields(t *testing.T) {
 	s := openTestStore(t)
 	d, _ := s.StartDrain(Drain{Repo: "repo", SetID: "set", RuntimePath: "/rt", PID: 1, StartedAt: time.Now()})
-	if err := s.FinishDrain(d.ID, StateFinished, "", false, time.Time{}, time.Now().UTC()); err != nil {
+	if err := s.FinishDrain(d.ID, DrainEnding{State: StateFinished}, time.Now().UTC()); err != nil {
 		t.Fatalf("FinishDrain: %v", err)
 	}
 	term, _ := s.LatestTerminalByRuntimePath("/rt")
@@ -193,7 +193,7 @@ func finishAt(t *testing.T, s *Store, repo, setID, state string, at time.Time) {
 	if err != nil {
 		t.Fatalf("StartDrain: %v", err)
 	}
-	if err := s.FinishDrain(d.ID, state, "", false, time.Time{}, at); err != nil {
+	if err := s.FinishDrain(d.ID, DrainEnding{State: state}, at); err != nil {
 		t.Fatalf("FinishDrain: %v", err)
 	}
 }

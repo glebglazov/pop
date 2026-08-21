@@ -85,6 +85,16 @@ reads out of a provider's message — so a cap enters the ordinary **Agent quota
 recovery wait** and the preset rejoins the walk when the hour is up. Hitting it
 again starts another hour.
 
+**The journal ranks what cost a drain its agents.** A **Work journal** entry
+carries a severity, and the two endings above — a spent agent list and a walk
+that started nothing — are severe, recorded as a **Drain ending** on the drain
+row because both stop on an ordinary clean-finish exit reason and would
+otherwise be filed beside a healthy drain. A healthy fall-through is not severe:
+one agent stepping aside for one that finishes the work is pop working, and it
+must not compete for attention with a drain that lost every agent it had.
+`pop work log --severe` is the whole answer to "what went wrong while I was
+away?", over the last day by default, each entry naming its task set and agent.
+
 **The provider's diagnostic survives.** `assessAttempt` reads the adapter's
 parsed output on a non-zero exit instead of discarding it. This is the smallest
 change here and the highest-leverage: it is what makes the **Progress record**,

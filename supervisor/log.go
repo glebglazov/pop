@@ -10,6 +10,24 @@ import (
 	"github.com/glebglazov/pop/tasks"
 )
 
+// LogSeverity ranks a journal event by whether a human coming back to the
+// machine has to see it. The journal is otherwise flat, which makes the one
+// question worth asking after a night away — "what went wrong while I was
+// gone?" — a read of the whole history (ADR-0231).
+type LogSeverity int
+
+const (
+	// SeverityRoutine is pop working: a drain that finished, a park it comes back
+	// from on its own, an agent that stepped aside for the next one. It is the
+	// severity of every event that costs nothing.
+	SeverityRoutine LogSeverity = iota
+	// SeveritySevere is a drain that spent an agent list rather than using it: an
+	// agent that burned its whole retry budget without finishing, or a walk that
+	// could not start a single agent. Both leave the machine idle until a human
+	// looks, which is the only reason to rank an event at all.
+	SeveritySevere
+)
+
 // LogEvent is one entry in the Queue journal view. ADR-0055 retires the
 // standalone append-only journal file: the journal is now a view derived from
 // Drain transitions (each Drain contributes a spawn and, once terminal, an
@@ -19,9 +37,18 @@ type LogEvent struct {
 	SetID       string
 	RuntimePath string
 	// Kind is the rendered event: "spawned", a terminal exit reason
-	// (finished/quota_paused/interrupted/crashed), "integrated", or "unparked".
-	Kind   string
-	Detail string
+	// (finished/quota_paused/interrupted/crashed), a Drain ending that the exit
+	// reason cannot say on its own (agents_exhausted/no_agent_started),
+	// "integrated", or "unparked".
+	Kind string
+	// Agent names the agent preset the event belongs to, where one does: the
+	// preset a quota pause is waiting on, the one that spent the last retry cap,
+	// or the one whose refusal ended a walk that started nothing. It is rendered
+	// beside the set id so a severe entry says which agent and which task set
+	// without the reader opening anything else.
+	Agent    string
+	Detail   string
+	Severity LogSeverity
 }
 
 // BuildLog derives the Queue journal view from the store: every Drain's spawn
@@ -71,8 +98,17 @@ func BuildLog(td *tasks.Deps) ([]LogEvent, error) {
 			RuntimePath: dr.RuntimePath,
 			Kind:        dr.State,
 		}
-		if dr.State == "quota_paused" && dr.ExhaustedPreset != "" {
-			ev.Detail = "agent=" + dr.ExhaustedPreset
+		if dr.State == store.StateQuotaPaused {
+			ev.Agent = dr.ExhaustedPreset
+		}
+		if dr.Ending != "" {
+			// The Drain ending is the event: a walk that ran out of agents and one
+			// that started none both stop on an ordinary clean-finish exit reason,
+			// so reading the state column would file them beside a healthy drain
+			// (ADR-0231).
+			ev.Kind = dr.Ending
+			ev.Agent = dr.ExhaustedPreset
+			ev.Severity = SeveritySevere
 		}
 		events = append(events, ev)
 	}
@@ -131,6 +167,35 @@ func appendRoutineLogEvents(events *[]LogEvent, run store.RoutineRun) {
 	})
 }
 
+// SevereEvents returns the severe events at or after cutoff, oldest-first — the
+// short list behind "what went wrong while I was away?". An ordinary
+// fall-through, where one agent stepped aside and the next completed the work,
+// leaves no severe event to report (ADR-0231).
+func SevereEvents(events []LogEvent, cutoff time.Time) []LogEvent {
+	var out []LogEvent
+	for _, ev := range events {
+		if ev.Severity != SeveritySevere || ev.Timestamp.Before(cutoff) {
+			continue
+		}
+		out = append(out, ev)
+	}
+	return out
+}
+
+// RenderSevereLog prints the severe events of the window ending at now, saying
+// so plainly when there are none — an empty list is the answer a human wants
+// most, and it must not read like a journal with nothing in it.
+func RenderSevereLog(out io.Writer, events []LogEvent, window time.Duration, now time.Time) {
+	severe := SevereEvents(events, now.Add(-window))
+	if len(severe) == 0 {
+		fmt.Fprintf(out, "No severe events in the last %s.\n", window)
+		return
+	}
+	for _, ev := range severe {
+		fmt.Fprintln(out, formatLogEvent(ev))
+	}
+}
+
 // RenderLog prints recent Work journal events, most recent last.
 func RenderLog(out io.Writer, events []LogEvent, limit int) {
 	if limit <= 0 || limit > len(events) {
@@ -145,11 +210,25 @@ func RenderLog(out io.Writer, events []LogEvent, limit int) {
 		return
 	}
 	for _, ev := range events[start:] {
-		ts := ev.Timestamp.UTC().Format(time.RFC3339)
-		line := fmt.Sprintf("%s %s %s", ts, ev.SetID, ev.Kind)
-		if ev.Detail != "" {
-			line += " " + ev.Detail
-		}
-		fmt.Fprintln(out, line)
+		fmt.Fprintln(out, formatLogEvent(ev))
 	}
+}
+
+// formatLogEvent renders one journal line. It is one format for both surfaces —
+// the whole journal and the severe listing — so an entry read in either place
+// names the same things: the instant, the severity where it is not routine, the
+// task set, the event, and the agent it belongs to.
+func formatLogEvent(ev LogEvent) string {
+	line := ev.Timestamp.UTC().Format(time.RFC3339)
+	if ev.Severity == SeveritySevere {
+		line += " SEVERE"
+	}
+	line += fmt.Sprintf(" %s %s", ev.SetID, ev.Kind)
+	if ev.Agent != "" {
+		line += " agent=" + ev.Agent
+	}
+	if ev.Detail != "" {
+		line += " " + ev.Detail
+	}
+	return line
 }

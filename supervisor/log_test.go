@@ -25,7 +25,7 @@ func TestBuildLogFromStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginDrain: %v", err)
 	}
-	if err := h.Finish(store.StateQuotaPaused, "codex", false, time.Time{}); err != nil {
+	if err := h.Finish(store.DrainEnding{State: store.StateQuotaPaused, ExhaustedPreset: "codex"}); err != nil {
 		t.Fatalf("Finish: %v", err)
 	}
 	// A park-clear (unpark) event.

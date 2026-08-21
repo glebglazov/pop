@@ -288,4 +288,22 @@ func TestWorkStatusAndLogPrintTheirSurfaces(t *testing.T) {
 	if strings.TrimSpace(logOut.String()) == "" {
 		t.Fatal("work log printed nothing on an empty journal")
 	}
+
+	// The one command a human runs on coming back to the machine: the severe
+	// events of the last day, which on an empty journal is a plain answer rather
+	// than silence (ADR-0231).
+	logOut.Reset()
+	if err := workLogCmd.Flags().Set("severe", "true"); err != nil {
+		t.Fatalf("set --severe: %v", err)
+	}
+	t.Cleanup(func() {
+		workLogSevere = false
+		workLogSince = 24 * time.Hour
+	})
+	if err := runWorkLog(workLogCmd, nil); err != nil {
+		t.Fatalf("work log --severe: %v", err)
+	}
+	if !strings.Contains(logOut.String(), "No severe events in the last 24h") {
+		t.Fatalf("work log --severe = %q, want the last day's severe events by default", logOut.String())
+	}
 }

@@ -209,15 +209,13 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 		return nil, err
 	}
 	defer func() {
-		var (
-			declined bool
-			unavail  *AgentProceedVerdict
-		)
+		outcome := drainOutcome{err: err}
 		if result != nil {
-			declined = result.Declined
-			unavail = result.ProceedVerdict
+			outcome.declined = result.Declined
+			outcome.unavail = result.ProceedVerdict
+			outcome.noAgentStarted = result.NoAgentStarted
 		}
-		finalizeDrain(drain, declined, unavail, false, false, err)
+		finalizeDrain(drain, outcome)
 	}()
 
 	// Adopt this checkout into the binding model (ADR-0036): worktree-locus runs

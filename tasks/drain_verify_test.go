@@ -498,7 +498,7 @@ func TestDrainVerifyPhaseWritesWhileDrainHeld(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginDrain: %v", err)
 	}
-	defer func() { _ = handle.Finish(store.StateFinished, "", false, time.Time{}) }()
+	defer func() { _ = handle.Finish(store.DrainEnding{State: store.StateFinished}) }()
 
 	status, verdict, err := drainVerifyPhase(d, nil, verifyCoreOptions{
 		Repo: repo, RuntimePath: runtimePath, SetID: "demo", Output: &bytes.Buffer{},
