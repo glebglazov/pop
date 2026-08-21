@@ -20,6 +20,9 @@ type agentRole struct {
 	Noun string
 	// Gerund opens the once-per-preset heading: "━━ <Gerund> with <agent>".
 	Gerund string
+	// Phase is the Work group the role's attempts are spent in, as a Captured run
+	// and a Spent retry cap both name it ("verify", "review").
+	Phase string
 	// Persist records as a Captured run one invocation that ended without the
 	// role answering — interrupted, quota-paused, or refused — best-effort.
 	Persist func(rec *streamRecorder, invocation *AgentInvocation, try int, outcome, reason string, exitCode int)
@@ -68,8 +71,12 @@ func (r agentRole) persistSkipped(rec *streamRecorder, invocation *AgentInvocati
 // that do not change between presets, gathered so the walk reads as a loop over
 // the one thing that does.
 type agentFallbackWalk struct {
-	role            agentRole
-	sel             verifierSelection
+	role agentRole
+	sel  verifierSelection
+	// setID is the Task set under judgment, which the walk itself needs for one
+	// reason only: an agent that spends its whole cap here is a Spent retry cap,
+	// and a journal entry has to say which set it was paid for.
+	setID           string
 	runtimePath     string
 	prompt          string
 	out, errOut     io.Writer
@@ -311,9 +318,20 @@ func runAgentFallbackWalk(d *Deps, w agentFallbackWalk) (agentWalkResult, error)
 				// turn passes to the next agent — the same event a refusal is, and
 				// reported the same way, so the operator reads why the list moved
 				// on rather than a gap (ADR-0231).
+				spentReason := exhaustedTryReason(outcome, w.timeout)
+				// The burn is recorded here rather than where the walk ends,
+				// because a preset that spends its cap and is then rescued by the
+				// next one leaves no trace in the walk's own result — and it is
+				// exactly the waste the journal exists to surface (ADR-0231).
+				recordSpentRetryCap(d, w.runtimePath, SpentRetryCapRecord{
+					SetID:    w.setID,
+					Phase:    w.role.Phase,
+					Preset:   preset,
+					Attempts: try,
+					Reason:   spentReason,
+				})
 				if i+1 < len(specs) && w.out != nil {
-					reason := exhaustedTryReason(outcome, w.timeout)
-					outputFor(w.out).line(ansiDim, "   %s", retryCapFallThroughMessage(w.role.Noun, preset, try, reason))
+					outputFor(w.out).line(ansiDim, "   %s", retryCapFallThroughMessage(w.role.Noun, preset, try, spentReason))
 				}
 				break
 			}

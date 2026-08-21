@@ -85,21 +85,39 @@ reads out of a provider's message — so a cap enters the ordinary **Agent quota
 recovery wait** and the preset rejoins the walk when the hour is up. Hitting it
 again starts another hour.
 
-**The journal ranks what cost a drain its agents.** A **Work journal** entry
-carries a severity, and the two endings above — a spent agent list and a walk
-that started nothing — are severe, recorded as a **Drain ending** on the drain
-row because both stop on an ordinary clean-finish exit reason and would
-otherwise be filed beside a healthy drain. A healthy fall-through is not severe:
-one agent stepping aside for one that finishes the work is pop working, and it
-must not compete for attention with a drain that lost every agent it had.
-`pop work log --severe` is the whole answer to "what went wrong while I was
-away?", over the last day by default, each entry naming its task set and agent.
+**The journal ranks a spent budget, not just a lost drain.** A **Work journal**
+entry carries a severity. The severe event is a **Spent retry cap** — an agent
+that burned its whole cap on one piece of work without finishing it — recorded
+when the cap runs out and severe whatever the drain went on to do. That is the
+incident above: with the walk fixed, the same night ends with a healthy agent
+finishing the work, so ranking on the drain's ending alone would file three
+45-minute timeouts per task as a clean finish and show the human nothing. A cap
+spent under a walk that then parks on another agent's quota is the same story.
+The two **Drain ending** values are severe beside it — a spent agent list and a
+walk that started nothing — because both stop on an ordinary clean-finish exit
+reason and would otherwise be filed beside a healthy drain. A refusal is not
+severe: an agent that cools or declines and steps aside for one that finishes
+the work spends nothing, which is pop working. `pop work log --severe` is the
+whole answer to "what went wrong while I was away?", over the last day by
+default, each entry naming its task set, its agent, and the work the attempts
+were spent on.
+
+A spent cap is its own store row rather than a second column beside the ending,
+because `drains.ending` holds one value per drain while the burn is per (agent,
+work): one drain can spend claude's cap on one task and codex's on the next and
+still finish the set, and every one of those burns was paid for.
 
 **The provider's diagnostic survives.** `assessAttempt` reads the adapter's
 parsed output on a non-zero exit instead of discarding it. This is the smallest
-change here and the highest-leverage: it is what makes the **Progress record**,
-the **Work journal**, and the prior-attempt digest handed to the *next* agent
-say `Your computer went to sleep mid-response` rather than `status 1`.
+change here and the highest-leverage: it is what makes the prior-attempt digest
+handed to the *next* agent say `Your computer went to sleep mid-response` rather
+than `status 1`, and what the fall-through and out-of-agents lines the operator
+watches quote. It does not reach the **Progress record** on the ending that
+quotes it most — a walk exhausted by provider collapses appends no progress
+record at all, because it leaves the task **Open** and the record's grain is
+terminal — and the **Work journal** names the agent and the event rather than
+the sentence, keeping a listing a listing; the diagnostic itself stays in the
+**Captured attempt stream**.
 
 ## Considered options
 

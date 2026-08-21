@@ -50,8 +50,8 @@ var workLogCmd = &cobra.Command{
 }
 
 // workLogSevere backs `--severe` on `pop work log`: the short list a human wants
-// on coming back to the machine — only the events that cost a drain its agents
-// (ADR-0231).
+// on coming back to the machine — only the events that spent an agent's whole
+// retry budget or a drain's whole agent list (ADR-0231).
 var workLogSevere bool
 
 // workLogSince backs `--severe`'s window. It defaults to a day because that is
@@ -71,7 +71,7 @@ func init() {
 	workCmd.AddCommand(workStatusCmd)
 	workCmd.AddCommand(workLogCmd)
 
-	workLogCmd.Flags().BoolVar(&workLogSevere, "severe", false, "Show only severe events — a drain that spent its whole agent list, or one that could not start an agent at all")
+	workLogCmd.Flags().BoolVar(&workLogSevere, "severe", false, "Show only severe events — an agent that burned its whole retry cap without finishing, a drain that spent its whole agent list, or one that could not start an agent at all")
 	workLogCmd.Flags().DurationVar(&workLogSince, "since", 24*time.Hour, "Window the --severe listing covers")
 
 	workStatusCmd.Flags().StringVar(&workStatusPreset, "preset", "", "Work view preset name (default: first configured preset)")

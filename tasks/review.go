@@ -315,6 +315,7 @@ func runConfiguredReviewer(d *Deps, cfg *config.Config, sel verifierSelection, t
 	walked, err := runAgentFallbackWalk(d, agentFallbackWalk{
 		role:            reviewerRole(d, out, taskSetDir, setID, workSHA),
 		sel:             sel,
+		setID:           setID,
 		runtimePath:     runtimePath,
 		prompt:          prompt,
 		out:             out,
@@ -356,6 +357,7 @@ func reviewerRole(d *Deps, errOut io.Writer, taskSetDir, setID, workSHA string) 
 	return agentRole{
 		Noun:   "Reviewer agent",
 		Gerund: "Reviewing",
+		Phase:  spendPhaseReview,
 		Persist: func(rec *streamRecorder, invocation *AgentInvocation, try int, outcome, reason string, exitCode int) {
 			_ = persistReviewRun(d, errOut, taskSetDir, setID, workSHA, rec, invocation.AgentPreset(), invocation.RequestedAgent, try, outcome, reason, exitCode)
 		},

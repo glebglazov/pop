@@ -395,6 +395,18 @@ func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath s
 		result, spent, execErr := executeTaskAttempts(d, sel, runtimePath, out, errOut, basePrompt, walk, maxTries, timeout, commitOverrides, retryDelays, ledger)
 		if spent != nil {
 			spentCap = spent
+			// Every burn is recorded as it happens, not once the walk is over: a
+			// preset that spent its whole cap and was then rescued by the next
+			// agent still cost the attempts, and the drain's own ending — a plain
+			// finish — cannot say so (ADR-0231).
+			recordSpentRetryCap(d, runtimePath, SpentRetryCapRecord{
+				SetID:    sel.TaskSetID,
+				Phase:    spendPhaseImplement,
+				TaskID:   sel.TaskID,
+				Preset:   spent.preset,
+				Attempts: spent.attempts,
+				Reason:   spent.reason,
+			})
 			if i+1 < len(specs) && out != nil {
 				outputFor(out).line(ansiDim, "   %s", spent.fallThroughMessage("Agent"))
 			}

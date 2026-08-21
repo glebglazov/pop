@@ -560,6 +560,27 @@ var migrations = []string{
 	// drain, including one where an agent stepped aside and the next finished the
 	// work.
 	`ALTER TABLE drains ADD COLUMN ending TEXT NOT NULL DEFAULT '';`,
+	// 35: spent_retry_caps — one row per agent that burned its whole retry cap on
+	// one piece of work without finishing it (ADR-0231). It is a table rather
+	// than a second column beside `drains.ending` because the ending holds one
+	// value per drain while the burn is per (agent, work): a single drain can
+	// spend claude's cap on one task, codex's on the next, and still finish the
+	// set, and the human who pays for those attempts has to see each of them.
+	// The row is written when the cap runs out, not when the drain ends, so
+	// whatever the drain went on to do — finish, park on a quota, run out of
+	// agents — leaves the burn recorded.
+	`CREATE TABLE spent_retry_caps (
+		id           INTEGER PRIMARY KEY AUTOINCREMENT,
+		repo         TEXT    NOT NULL,
+		set_id       TEXT    NOT NULL,
+		runtime_path TEXT    NOT NULL DEFAULT '',
+		phase        TEXT    NOT NULL DEFAULT '',
+		task_id      TEXT    NOT NULL DEFAULT '',
+		preset       TEXT    NOT NULL,
+		attempts     INTEGER NOT NULL DEFAULT 0,
+		reason       TEXT    NOT NULL DEFAULT '',
+		spent_at     TEXT    NOT NULL
+	);`,
 }
 
 func (s *Store) migrate() error {

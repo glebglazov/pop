@@ -198,6 +198,14 @@ printf 'SUMMARY_START\nclaude done\nSUMMARY_END\nTASK_COMPLETE\n'
 	if wait := time.Until(until.ExhaustedUntil); wait < 55*time.Minute || wait > 70*time.Minute {
 		t.Fatalf("codex cools for %s, want about pop's hour", wait)
 	}
+	// This is the fall-through that costs nothing: the cap was abandoned at the
+	// first refusal rather than spent, so the night's severe listing stays empty
+	// (ADR-0231).
+	if caps, err := AllSpentRetryCaps(d); err != nil {
+		t.Fatalf("AllSpentRetryCaps: %v", err)
+	} else if len(caps) != 0 {
+		t.Fatalf("spent caps = %#v, want none for a refusal that spent no budget", caps)
+	}
 
 	assertTaskDone(t, env.execFixture(), "01-a")
 }

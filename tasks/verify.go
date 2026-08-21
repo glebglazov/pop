@@ -809,6 +809,7 @@ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, t
 	walked, err := runAgentFallbackWalk(d, agentFallbackWalk{
 		role:            verifierRole(d, errOut, taskSetDir, setID, workSHA),
 		sel:             sel,
+		setID:           setID,
 		runtimePath:     runtimePath,
 		prompt:          prompt,
 		out:             out,
@@ -835,6 +836,7 @@ func verifierRole(d *Deps, errOut io.Writer, taskSetDir, setID, workSHA string) 
 	return agentRole{
 		Noun:   "Verifier agent",
 		Gerund: "Verifying",
+		Phase:  spendPhaseVerify,
 		Persist: func(rec *streamRecorder, invocation *AgentInvocation, try int, outcome, reason string, exitCode int) {
 			_ = persistVerifyRun(d, errOut, taskSetDir, setID, workSHA, rec, invocation.AgentPreset(), invocation.RequestedAgent, try, outcome, reason, exitCode, "")
 		},

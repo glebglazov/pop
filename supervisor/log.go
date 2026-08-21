@@ -21,10 +21,12 @@ const (
 	// from on its own, an agent that stepped aside for the next one. It is the
 	// severity of every event that costs nothing.
 	SeverityRoutine LogSeverity = iota
-	// SeveritySevere is a drain that spent an agent list rather than using it: an
-	// agent that burned its whole retry budget without finishing, or a walk that
-	// could not start a single agent. Both leave the machine idle until a human
-	// looks, which is the only reason to rank an event at all.
+	// SeveritySevere is an agent list spent rather than used: an agent that
+	// burned its whole retry cap on one piece of work without finishing, a walk
+	// that ran out of agents doing it, or one that could not start a single
+	// agent. A spent cap is severe on its own terms, whatever the drain went on
+	// to do — a later agent finishing the work does not refund the attempts, and
+	// it is the case this ranking exists for (ADR-0231).
 	SeveritySevere
 )
 
@@ -38,12 +40,12 @@ type LogEvent struct {
 	RuntimePath string
 	// Kind is the rendered event: "spawned", a terminal exit reason
 	// (finished/quota_paused/interrupted/crashed), a Drain ending that the exit
-	// reason cannot say on its own (agents_exhausted/no_agent_started),
-	// "integrated", or "unparked".
+	// reason cannot say on its own (agents_exhausted/no_agent_started), a spent
+	// retry cap ("retry_cap_spent"), "integrated", or "unparked".
 	Kind string
 	// Agent names the agent preset the event belongs to, where one does: the
-	// preset a quota pause is waiting on, the one that spent the last retry cap,
-	// or the one whose refusal ended a walk that started nothing. It is rendered
+	// preset a quota pause is waiting on, the one that burned a retry cap, or the
+	// one whose refusal ended a walk that started nothing. It is rendered
 	// beside the set id so a severe entry says which agent and which task set
 	// without the reader opening anything else.
 	Agent    string
@@ -52,8 +54,8 @@ type LogEvent struct {
 }
 
 // BuildLog derives the Queue journal view from the store: every Drain's spawn
-// and terminal, every integration event, and every park-clear (unpark) event,
-// ordered oldest-first by timestamp.
+// and terminal, every spent retry cap, every integration event, and every
+// park-clear (unpark) event, ordered oldest-first by timestamp.
 func BuildLog(td *tasks.Deps) ([]LogEvent, error) {
 	drains, err := tasks.AllDrains(td)
 	if err != nil {
@@ -64,6 +66,10 @@ func BuildLog(td *tasks.Deps) ([]LogEvent, error) {
 		return nil, err
 	}
 	parkClears, err := tasks.AllParkClears(td)
+	if err != nil {
+		return nil, err
+	}
+	spentCaps, err := tasks.AllSpentRetryCaps(td)
 	if err != nil {
 		return nil, err
 	}
@@ -112,6 +118,21 @@ func BuildLog(td *tasks.Deps) ([]LogEvent, error) {
 		}
 		events = append(events, ev)
 	}
+	for _, c := range spentCaps {
+		// A burn is its own event, on the row that recorded it rather than on the
+		// drain: `drains.ending` holds one value per drain, while a drain can
+		// spend one agent's cap on one task and another's on the next and still
+		// finish (ADR-0231).
+		events = append(events, LogEvent{
+			Timestamp:   c.SpentAt,
+			SetID:       c.SetID,
+			RuntimePath: c.RuntimePath,
+			Kind:        "retry_cap_spent",
+			Agent:       c.Preset,
+			Detail:      spentRetryCapDetail(c),
+			Severity:    SeveritySevere,
+		})
+	}
 	for _, in := range integrations {
 		detail := ""
 		if in.BaseRef != "" {
@@ -139,6 +160,25 @@ func BuildLog(td *tasks.Deps) ([]LogEvent, error) {
 		return events[i].Timestamp.Before(events[j].Timestamp)
 	})
 	return events, nil
+}
+
+// spentRetryCapDetail says what the attempts were spent on, so a severe entry
+// points at one piece of work rather than at a whole set: the phase and, on
+// implement, the task itself. The provider's last words are deliberately absent —
+// the journal is a listing, and the diagnostic lives in the Captured attempt
+// stream the task's own streams directory holds.
+func spentRetryCapDetail(c tasks.SpentRetryCapRecord) string {
+	detail := "phase=" + c.Phase
+	if c.Phase == "" {
+		detail = "phase=unknown"
+	}
+	if c.TaskID != "" {
+		detail += " task=" + c.TaskID
+	}
+	if c.Attempts > 0 {
+		detail += fmt.Sprintf(" attempts=%d", c.Attempts)
+	}
+	return detail
 }
 
 func appendRoutineLogEvents(events *[]LogEvent, run store.RoutineRun) {
