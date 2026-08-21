@@ -180,6 +180,10 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 	displayRefresh := *refresh
 	displayRefresh.Rows = displayRows
 
+	// A single-task file run has no drain, so it says where it runs in the
+	// Drain header's place: always the current checkout.
+	renderCurrentCheckoutLine(out, runtimePath)
+
 	fmt.Fprintln(out)
 	Render(out, &displayRefresh)
 

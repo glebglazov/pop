@@ -40,6 +40,11 @@ type RunTaskSetOptions struct {
 	// RefreshManagedCheckout, when set, runs before BindCheckout to fast-forward
 	// a commitless provisioned managed worktree onto current trunk (ADR-0147).
 	RefreshManagedCheckout func(setID, projectPath, runtimePath string) error
+	// DrainHeader carries the Drain header facts the executor cannot resolve on
+	// its own — the Worktree binding kind and whether this run recorded a Default
+	// binding. Drain routing fills it in; the zero value renders an unbound
+	// header, which is what a runtime-override run is.
+	DrainHeader DrainHeader
 	// PreSeedTopic, when set, pre-seeds the pane's Topic from each task's Title
 	// at drain spawn (ADR-0058). It is invoked once per task before that task's
 	// first agent prompt, but guards on the existing @pop_topic, so the first

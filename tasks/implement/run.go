@@ -51,15 +51,13 @@ type WholeSetOptions struct {
 	PreSeedTopic func(taskTitle string)
 }
 
-// RuntimeConfirmOptions carries confirmation inputs and the report writer for
-// foreground drain routing.
+// RuntimeConfirmOptions carries the confirmation inputs foreground drain routing
+// needs. Routing prints no location report of its own — where the drain runs is
+// stated unconditionally by the executor's Drain header.
 type RuntimeConfirmOptions struct {
 	Yes        bool
 	ConfirmIn  io.Reader
 	ConfirmOut io.Writer
-	// Output receives the drain-at-binding location report. When nil, the report
-	// is discarded (tests that only assert ResolveInput may omit it).
-	Output io.Writer
 }
 
 // RunWholeSet orchestrates whole-set Implement: route → drain.
@@ -72,17 +70,17 @@ func RunWholeSetWith(d *Deps, opts WholeSetOptions) (*tasks.RunTaskSetResult, er
 	if d == nil {
 		d = DefaultDeps()
 	}
-	resolveInput, err := resolveTaskSetRuntime(d, opts.ResolveInput, opts.TaskSetOverride, opts.InWorktree, opts.ForceRebind, RuntimeConfirmOptions{
+	resolveInput, header, err := resolveTaskSetRuntime(d, opts.ResolveInput, opts.TaskSetOverride, opts.InWorktree, opts.ForceRebind, RuntimeConfirmOptions{
 		Yes:        opts.Yes,
 		ConfirmIn:  opts.ConfirmIn,
 		ConfirmOut: opts.ConfirmOut,
-		Output:     opts.Output,
 	})
 	if err != nil {
 		return nil, err
 	}
 	result, err := tasks.RunTaskSetWith(d.tasksDeps(), d.projectDeps(), d.loadConfig, tasks.RunTaskSetOptions{
 		ResolveInput:           resolveInput,
+		DrainHeader:            header,
 		TaskSetOverride:        opts.TaskSetOverride,
 		AgentPreset:            opts.AgentPreset,
 		AgentPresets:           opts.AgentPresets,
@@ -114,36 +112,42 @@ func RunWholeSetWith(d *Deps, opts WholeSetOptions) (*tasks.RunTaskSetResult, er
 // ResolveTaskSetRuntime applies drain checkout routing for tests and returns
 // the ResolveInput the executor should use.
 func ResolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, inWorktree bool) (tasks.ResolveInput, error) {
-	return resolveTaskSetRuntime(d, in, taskSetPath, inWorktree, false, RuntimeConfirmOptions{})
+	resolved, _, err := resolveTaskSetRuntime(d, in, taskSetPath, inWorktree, false, RuntimeConfirmOptions{})
+	return resolved, err
 }
 
-// ResolveTaskSetRuntimeWith applies drain checkout routing with confirmation and
-// report options — the domain-contract seam behaviour tests exercise.
-func ResolveTaskSetRuntimeWith(d *Deps, in tasks.ResolveInput, taskSetPath string, inWorktree bool, confirm RuntimeConfirmOptions) (tasks.ResolveInput, error) {
+// ResolveTaskSetRuntimeWith applies drain checkout routing with confirmation
+// options and returns the Drain header facts routing resolved — the
+// domain-contract seam behaviour tests exercise.
+func ResolveTaskSetRuntimeWith(d *Deps, in tasks.ResolveInput, taskSetPath string, inWorktree bool, confirm RuntimeConfirmOptions) (tasks.ResolveInput, tasks.DrainHeader, error) {
 	return resolveTaskSetRuntime(d, in, taskSetPath, inWorktree, false, confirm)
 }
 
-func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, inWorktree bool, forceRebind bool, confirm RuntimeConfirmOptions) (tasks.ResolveInput, error) {
+// resolveTaskSetRuntime routes the drain and reports, alongside the executor's
+// ResolveInput, the two Drain header facts only routing knows: the Worktree
+// binding kind the drain runs under, and whether this run is the one that
+// recorded the set's Default binding.
+func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, inWorktree bool, forceRebind bool, confirm RuntimeConfirmOptions) (tasks.ResolveInput, tasks.DrainHeader, error) {
 	resolved, err := tasks.ResolvePathsWith(d.tasksDeps(), d.projectDeps(), d.loadConfig, in)
 	if err != nil {
-		return in, err
+		return in, tasks.DrainHeader{}, err
 	}
 	refresh, err := tasks.RefreshWith(d.tasksDeps(), resolved.DefinitionPath, tasks.StatePathFor(resolved.DefinitionPath))
 	if err != nil {
-		return in, err
+		return in, tasks.DrainHeader{}, err
 	}
 	taskSetOverride, err := tasks.ResolveTaskSetTarget(refresh, taskSetPath)
 	if err != nil {
-		return in, err
+		return in, tasks.DrainHeader{}, err
 	}
 	if taskSetOverride != "" {
 		if err := tasks.RejectArchivedTaskSet(d.tasksDeps(), tasks.StatePathFor(resolved.DefinitionPath), resolved.DefinitionPath, taskSetOverride); err != nil {
-			return in, err
+			return in, tasks.DrainHeader{}, err
 		}
 	}
 	taskSetID, _, err := tasks.SelectTaskSet(refresh, taskSetOverride)
 	if err != nil {
-		return in, err
+		return in, tasks.DrainHeader{}, err
 	}
 
 	started, progress := taskSetRowInfo(refresh, taskSetID)
@@ -153,7 +157,7 @@ func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, i
 
 	key, existing, bound, err := binding.GetForSet(td, resolved.ProjectPath, taskSetID)
 	if err != nil {
-		return in, err
+		return in, tasks.DrainHeader{}, err
 	}
 
 	confirmOut := confirm.ConfirmOut
@@ -169,18 +173,18 @@ func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, i
 	if inWorktree {
 		if bound {
 			if !forceRebind {
-				return in, fmt.Errorf("tasks implement: task set %s is already bound; pass --force-rebind to retarget --in-worktree", taskSetID)
+				return in, tasks.DrainHeader{}, fmt.Errorf("tasks implement: task set %s is already bound; pass --force-rebind to retarget --in-worktree", taskSetID)
 			}
 			confirmed, err := binding.AuthorizeLeavingBinding(td, d.projectDeps(), cfg, taskSetID, existing, key, started, progress, confirm.Yes, confirm.ConfirmIn, confirmOut, hooks)
 			if err != nil {
-				return in, err
+				return in, tasks.DrainHeader{}, err
 			}
 			if !confirmed {
 				inWorktree = false
 				forceRebind = false
 			} else {
 				if err := binding.Delete(td, key); err != nil {
-					return in, err
+					return in, tasks.DrainHeader{}, err
 				}
 				return provisionInWorktree(d, in, resolved.ProjectPath, taskSetID)
 			}
@@ -192,12 +196,12 @@ func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, i
 	if bound && forceRebind {
 		differs, err := binding.CheckoutPathsDiffer(td, existing.RuntimePath, resolved.ProjectPath)
 		if err != nil {
-			return in, err
+			return in, tasks.DrainHeader{}, err
 		}
 		if differs {
 			confirmed, err := binding.AuthorizeLeavingBinding(td, d.projectDeps(), cfg, taskSetID, existing, key, started, progress, confirm.Yes, confirm.ConfirmIn, confirmOut, hooks)
 			if err != nil {
-				return in, err
+				return in, tasks.DrainHeader{}, err
 			}
 			if !confirmed {
 				forceRebind = false
@@ -220,52 +224,54 @@ func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, i
 	})
 	if err != nil {
 		if errors.Is(err, binding.ErrBoundWorktreeInvalid) {
-			return in, fmt.Errorf("bound worktree for %s is invalid (%v); repair git state or run `pop tasks unbind-worktree`", taskSetID, err)
+			return in, tasks.DrainHeader{}, fmt.Errorf("bound worktree for %s is invalid (%v); repair git state or run `pop tasks unbind-worktree`", taskSetID, err)
 		}
-		return in, err
+		return in, tasks.DrainHeader{}, err
 	}
 
 	currentID, err := tasks.ResolveRepositoryIdentity(td, resolved.ProjectPath)
 	if err != nil {
-		return in, err
+		return in, tasks.DrainHeader{}, err
 	}
 	runtimeID, err := tasks.ResolveRepositoryIdentity(td, route.RuntimePath)
 	if err != nil {
-		return in, err
+		return in, tasks.DrainHeader{}, err
 	}
 	if currentID.CommonDir != runtimeID.CommonDir {
-		return in, fmt.Errorf("task set %q belongs to a different repository than the current checkout (%s vs %s); run implement from a checkout of the set's repository",
+		return in, tasks.DrainHeader{}, fmt.Errorf("task set %q belongs to a different repository than the current checkout (%s vs %s); run implement from a checkout of the set's repository",
 			taskSetID, currentID.CommonDir, runtimeID.CommonDir)
 	}
 
 	// Foreground implement never reaches the Queue-only worktree directive
 	// (ADR-0072), so ProvisionedManaged/AdoptedNamed are never set here. An
 	// existing binding wins regardless of cwd (ADR-0151): point the executor at
-	// it and, when invoked from elsewhere, report where the drain actually runs.
-	// --force-rebind re-points to the current checkout (Rebound). An unbound set's
-	// BoundDefault persists a binding to the current checkout — RuntimePath is that
-	// same checkout the executor already resolves, so it needs no re-pointing here.
+	// it. --force-rebind re-points to the current checkout (Rebound). An unbound
+	// set's BoundDefault persists a binding to the current checkout — RuntimePath
+	// is that same checkout the executor already resolves, so it needs no
+	// re-pointing here. Where the drain lands is not reported from here at all:
+	// the executor's Drain header states it on every run.
 	if route.Rebound || route.UsedExistingBinding || route.ProvisionedManaged || route.AdoptedNamed || strings.TrimSpace(in.RuntimeOverride) != "" {
 		in.RuntimeOverride = route.RuntimePath
 	}
-	if route.UsedExistingBinding && !route.Rebound {
-		currentRuntime, err := tasks.ResolveRuntimePathWith(td, resolved.ProjectPath, "")
-		if err != nil {
-			return in, err
-		}
-		boundRuntime, err := tasks.ResolveRuntimePathWith(td, route.RuntimePath, "")
-		if err != nil {
-			return in, err
-		}
-		if boundRuntime != currentRuntime {
-			out := confirm.Output
-			if out == nil {
-				out = io.Discard
-			}
-			fmt.Fprintf(out, "draining at bound checkout %s\n", route.RuntimePath)
-		}
+	return in, routedDrainHeader(route), nil
+}
+
+// routedDrainHeader reads the Drain header facts off a routing outcome. Every
+// arm that resolved through the binding store carries the Binding, so the kind
+// comes straight off its Provisioned bit; a runtime override binds nothing and
+// so leaves the header unbound.
+func routedDrainHeader(route binding.RouteDrainCheckoutResult) tasks.DrainHeader {
+	bound := route.UsedExistingBinding || route.BoundDefault || route.ProvisionedManaged || route.AdoptedNamed || route.Rebound
+	header := tasks.DrainHeader{RecordedDefaultBinding: route.BoundDefault}
+	switch {
+	case !bound:
+		header.Binding = tasks.DrainHeaderUnbound
+	case route.Binding.Provisioned:
+		header.Binding = tasks.DrainHeaderManaged
+	default:
+		header.Binding = tasks.DrainHeaderAdopted
 	}
-	return in, nil
+	return header
 }
 
 // provisionInWorktree implements `--in-worktree`: it forks a managed worktree
@@ -273,31 +279,31 @@ func resolveTaskSetRuntime(d *Deps, in tasks.ResolveInput, taskSetPath string, i
 // the set, and points the drain at the new checkout. Callers retargeting an
 // already-bound set must authorize leaving the binding and delete the old row
 // before calling this helper.
-func provisionInWorktree(d *Deps, in tasks.ResolveInput, projectPath, setID string) (tasks.ResolveInput, error) {
+func provisionInWorktree(d *Deps, in tasks.ResolveInput, projectPath, setID string) (tasks.ResolveInput, tasks.DrainHeader, error) {
 	td := d.tasksDeps()
 	cfg, _ := d.loadConfig(config.DefaultConfigPath())
 
 	key, _, bound, err := binding.GetForSet(td, projectPath, setID)
 	if err != nil {
-		return in, err
+		return in, tasks.DrainHeader{}, err
 	}
 	if bound {
-		return in, fmt.Errorf("tasks implement: task set %s is already bound", setID)
+		return in, tasks.DrainHeader{}, fmt.Errorf("tasks implement: task set %s is already bound", setID)
 	}
 
 	b, err := binding.ProvisionWorktree(td, binding.ManagedWorktreesRoot(td), projectPath, setID, "HEAD", d.now())
 	if err != nil {
-		return in, err
+		return in, tasks.DrainHeader{}, err
 	}
 	if id, err := tasks.ResolveRepositoryIdentity(td, projectPath); err == nil {
 		b.Project = binding.DetectProject(d.projectDeps(), td, cfg, id)
 	}
 	if err := binding.Put(td, key, b); err != nil {
-		return in, err
+		return in, tasks.DrainHeader{}, err
 	}
 
 	in.RuntimeOverride = b.RuntimePath
-	return in, nil
+	return in, tasks.DrainHeader{Binding: tasks.DrainHeaderManaged}, nil
 }
 
 // bindCheckout returns the binding hook whole-set implement passes to the
