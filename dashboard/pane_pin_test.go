@@ -134,7 +134,11 @@ func taskSetPaneFixture(t *testing.T) (*drain.Deps, *config.Config, *queuetest.R
 	})
 	d, cfg, _, rt := dashboardLaunchFixture(t, repo, setID)
 	stems := registerDoneSets(t, repo, 3)
+	// `all` shows the done rows this fixture registers but declares no pin, so the
+	// grant is added here: these tests are about what a pinning preset does, and
+	// the gate itself is exercised by TestOnlyAPresetDeclaringPinLiftsTheRows.
 	d.ViewPreset, _ = config.ShippedWorkViewPreset("all")
+	d.ViewPreset.Pin = true
 	return d, cfg, rt, stems
 }
 
@@ -258,6 +262,7 @@ func TestHiddenAttributedSetIsNotPinnedAndTheViewIsNotWidened(t *testing.T) {
 	d.ViewPreset = config.WorkViewPreset{
 		Name:  "_hide-done",
 		Label: "in flight",
+		Pin:   true,
 		Hide:  &config.WorkViewPresetFilter{Status: []string{"done"}},
 	}
 
@@ -397,4 +402,134 @@ func TestPinningLeavesEveryPresetSortIntactBeneathTheBlock(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The gate (glossary: Pane pin): the pin is a grant of the active preset, so the
+// same launch that lifts and marks the attributed row under a pinning preset
+// leaves it in its sorted place, unmarked, under one that declares nothing.
+// Attribution is computed either way — it is the lift alone that the field owns.
+func TestOnlyAPresetDeclaringPinLiftsTheAttributedRows(t *testing.T) {
+	d, cfg, rt, stems := taskSetPaneFixture(t)
+	attributed := stems[len(stems)-1]
+	baseline := unpinnedOrder(t, d, cfg)
+	if baseline[0] == attributed {
+		t.Fatalf("the tagged set already sorts first in %v — the fixture cannot tell a lift from no lift", baseline)
+	}
+	inPane(rt.Fake, "work", "%9")
+	tagPane(rt.Fake, "%9", tmuxmod.TagSet, attributed)
+
+	d.ViewPreset.Pin = false
+	m := openFromPane(t, d, cfg)
+
+	if got := pinnedBlock(t, m); len(got) != 0 {
+		t.Fatalf("pinned %v under a preset that declares no pin, want nothing lifted", got)
+	}
+	if got := rowIDs(m); !slices.Equal(got, baseline) {
+		t.Fatalf("rows = %v, want the sorted order %v — the attributed row keeps its own place", got, baseline)
+	}
+	if m.snap.Attribution == nil {
+		t.Fatal("attribution = none: it is preset-independent and still computed where the lift is not")
+	}
+	leading, ok := m.snap.Attribution.Leading()
+	if !ok || leading.CursorKey != rowKeyFor(t, m, attributed) {
+		t.Fatalf("attribution names %+v, want the tagged set %q", leading, attributed)
+	}
+	if m.ListCursor() != 0 {
+		t.Fatalf("cursor = %d, want the first row: the cursor is not the field's business", m.ListCursor())
+	}
+	if m.flash.Text() != "" {
+		t.Fatalf("status = %q, want the same silence a pinning launch keeps", m.flash.Text())
+	}
+	m.list.Resize(len(m.snap.Containers))
+	for i, row := range m.list.VisibleRows() {
+		if strings.Contains(ui.StripANSI(row), "▸") {
+			t.Fatalf("row %d = %q carries the pin mark under a preset that grants no pin", i, ui.StripANSI(row))
+		}
+	}
+
+	d.ViewPreset.Pin = true
+	pinning := openFromPane(t, d, cfg)
+
+	if got := pinnedBlock(t, pinning); !slices.Equal(got, []string{attributed}) {
+		t.Fatalf("pinned %v once the preset declares pin, want %q", got, attributed)
+	}
+	if got, want := rowIDs(pinning), wantPinnedFirst(baseline, attributed); !slices.Equal(got, want) {
+		t.Fatalf("rows = %v, want %v", got, want)
+	}
+}
+
+// Switching presets in the filter menu carries the pin with the choice: the same
+// rows, the same sort, and the lift appearing or vanishing on that one rebuild.
+func TestSelectingAPresetInTheFilterMenuAppliesAndRemovesThePin(t *testing.T) {
+	d, cfg, rt, stems := taskSetPaneFixture(t)
+	attributed := stems[len(stems)-1]
+	baseline := unpinnedOrder(t, d, cfg)
+	inPane(rt.Fake, "work", "%9")
+	tagPane(rt.Fake, "%9", tmuxmod.TagSet, attributed)
+
+	// A two-entry roster admitting exactly the same rows, so the pin is the only
+	// thing the human's choice changes.
+	plain := config.WorkViewPreset{
+		Name:                 "plain",
+		WorkViewPresetFilter: config.WorkViewPresetFilter{Archived: config.ArchivedInclude},
+	}
+	pinning := plain
+	pinning.Name = "pinning"
+	pinning.Pin = true
+	if cfg.Work == nil {
+		cfg.Work = &config.WorkConfig{}
+	}
+	cfg.Work.Dashboard = &config.WorkDashboardConfig{
+		Tasks: &config.WorkDashboardTasksConfig{Presets: []config.WorkViewPreset{plain, pinning}},
+	}
+	d.ViewPreset = cfg.DefaultWorkViewPreset()
+
+	m := openFromPane(t, d, cfg)
+	if got := pinnedBlock(t, m); len(got) != 0 {
+		t.Fatalf("pinned %v under the default (non-pinning) preset, want nothing", got)
+	}
+
+	m = selectFilterPreset(t, m, '2')
+	if got := m.d.ViewPreset.Name; got != "pinning" {
+		t.Fatalf("preset after digit 2 = %q, want pinning", got)
+	}
+	if got := pinnedBlock(t, m); !slices.Equal(got, []string{attributed}) {
+		t.Fatalf("pinned %v after switching to the pinning preset, want %q", got, attributed)
+	}
+
+	m = selectFilterPreset(t, m, '1')
+	if got := m.d.ViewPreset.Name; got != "plain" {
+		t.Fatalf("preset after digit 1 = %q, want plain", got)
+	}
+	if got := pinnedBlock(t, m); len(got) != 0 {
+		t.Fatalf("pinned %v after switching back, want the pin removed on that rebuild", got)
+	}
+	if got := rowIDs(m); !slices.Equal(got, baseline) {
+		t.Fatalf("rows = %v, want the sorted order %v", got, baseline)
+	}
+}
+
+// selectFilterPreset is the human's gesture: open the filter menu (it stays open
+// across a selection), press the preset's digit, and take the rebuild the
+// selection asked for.
+func selectFilterPreset(t *testing.T, m QueueDashboard, digit rune) QueueDashboard {
+	t.Helper()
+	if m.filter == nil {
+		updated, _ := m.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
+		m = updated.(QueueDashboard)
+	}
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: digit, Text: string(digit)})
+	m = updated.(QueueDashboard)
+	if cmd == nil {
+		t.Fatalf("selecting preset %q triggered no rebuild", string(digit))
+	}
+	msg, ok := cmd().(dashboardRowsMsg)
+	if !ok {
+		t.Fatal("the preset selection's command did not produce rows")
+	}
+	if msg.err != nil {
+		t.Fatalf("rebuild after the preset switch: %v", msg.err)
+	}
+	updated, _ = m.Update(msg)
+	return updated.(QueueDashboard)
 }

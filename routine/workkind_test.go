@@ -116,7 +116,7 @@ func TestRoutineKindStampsTiersAtLoadAndOrdersByThem(t *testing.T) {
 	// A Routine has no creation date, so it stamps none — and the zero it keeps is
 	// what makes the cross-kind date key stand aside, leaving this page in the
 	// relevance order above under the date ordering too (ADR-0210).
-	dated, err := work.BuildSnapshotForPane([]work.Kind{k}, work.PaneFacts{}, work.OrderByCreatedDesc)
+	dated, err := work.BuildSnapshotForPane([]work.Kind{k}, work.PaneFacts{}, work.BuildOptions{Ordering: work.OrderByCreatedDesc})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -9,10 +9,10 @@ import (
 
 // Snapshot is the data model for `pop work dashboard`.
 type Snapshot struct {
-	// Containers are every loaded Work container in snapshot order — the rows the
-	// launching pane is attributed to first, then whatever the build's Ordering
-	// ranked the rest by. There is no second list beside it: a dashboard row is
-	// one of these.
+	// Containers are every loaded Work container in snapshot order — whatever the
+	// build's Ordering ranked them by, with the rows the launching pane is
+	// attributed to lifted first when the build's preset granted the pin. There is
+	// no second list beside it: a dashboard row is one of these.
 	Containers []Container
 	// Summary is every kind's header phrases in kind order, already pluralised.
 	// SummaryLine joins them.
@@ -78,10 +78,23 @@ func (o Ordering) createdOrder() bool {
 //
 // It is the convenience for callers with no active preset in hand — wiring
 // checks and tests. A read surface calls BuildSnapshotForPane and passes the
-// ordering its preset asked for (ADR-0210), because a page that took the
+// options its preset asked for (ADR-0210), because a page that took the
 // kind-precedence default from here would silently ignore the human's sort.
 func BuildSnapshot(kinds []Kind) (Snapshot, error) {
-	return BuildSnapshotForPane(kinds, PaneFacts{}, OrderByKindPrecedence)
+	return BuildSnapshotForPane(kinds, PaneFacts{}, BuildOptions{Ordering: OrderByKindPrecedence})
+}
+
+// BuildOptions is what the active Work view preset grants a build: how the page
+// ranks its rows, and whether the Pane pin applies to it. Both are handed to the
+// builder as `work`-owned values rather than read from a preset here, so this
+// seam keeps knowing nothing about config (ADR-0210).
+type BuildOptions struct {
+	// Ordering ranks the containers against each other.
+	Ordering Ordering
+	// PinPane lifts the attributed rows above the ordered list and marks them.
+	// Only a preset declaring `pin` grants it; attribution itself is computed
+	// either way, so a build that does not pin still names the pane's containers.
+	PinPane bool
 }
 
 // BuildSnapshotForPane is BuildSnapshot plus the facts of the pane the surface
@@ -91,10 +104,15 @@ func BuildSnapshot(kinds []Kind) (Snapshot, error) {
 // switch over kinds in exactly the layer the seam exists to keep free of them
 // (ADR-0201 decision 3).
 //
+// Whether the answer also lifts those rows is the active preset's to grant: the
+// build pins only when opts.PinPane says the preset declares it, and computes the
+// attribution regardless, because the cursor landing and the naming that read it
+// are preset-independent.
+//
 // Every build asks again, not just the first. A pin is current: the containers
 // change between builds — a drain goes live, a set becomes bound — so the answer
 // derived from the same facts changes with them (ADR-0209 decision 5).
-func BuildSnapshotForPane(kinds []Kind, facts PaneFacts, order Ordering) (Snapshot, error) {
+func BuildSnapshotForPane(kinds []Kind, facts PaneFacts, opts BuildOptions) (Snapshot, error) {
 	ordered := kindsInPrecedence(kinds)
 	loaded := make([][]Container, len(ordered))
 	for i, k := range ordered {
@@ -123,9 +141,14 @@ func BuildSnapshotForPane(kinds []Kind, facts PaneFacts, order Ordering) (Snapsh
 		}
 		snap.ModelSkips = append(snap.ModelSkips, skips...)
 	}
-	snap.Containers = merge(ordered, loaded, order)
+	snap.Containers = merge(ordered, loaded, opts.Ordering)
+	// Attribution is asked for under every preset, pinning or not: the surfaces
+	// that name the pane's container and land their first cursor on it read it
+	// here, and only the lift below is the preset's to grant.
 	snap.Attribution = AttributePane(ordered, facts)
-	snap.Containers = pinAttributed(snap.Containers, snap.Attribution)
+	if opts.PinPane {
+		snap.Containers = pinAttributed(snap.Containers, snap.Attribution)
+	}
 	return snap, nil
 }
 
@@ -139,6 +162,9 @@ func BuildSnapshotForPane(kinds []Kind, facts PaneFacts, order Ordering) (Snapsh
 // task-set block from inside `Less` (ADR-0209 decision 1). A row is moved rather
 // than copied — one container, one row, or the list's cursor keys and its
 // navigation counts would both lie.
+//
+// It runs only for a build whose preset declares `pin`. Under any other preset
+// the attributed rows keep their sorted position, unmarked.
 //
 // A container the attribution names but this build does not hold — one the
 // active view preset dropped — pins nothing and is not mentioned: the preset is

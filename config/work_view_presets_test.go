@@ -318,3 +318,61 @@ name = "from-parent"
 		t.Fatalf("parent list must replace (not append) include, got %#v", got)
 	}
 }
+
+// The pin is declared, never inherited (glossary: Work view preset): a user
+// roster keeps the Pane pin only by writing `pin = true`, and of the shipped
+// roster only `active` does.
+func TestOnlyTheShippedActivePresetDeclaresPin(t *testing.T) {
+	for _, p := range ShippedWorkViewPresets() {
+		if want := p.Name == "active"; p.Pin != want {
+			t.Errorf("shipped %q pin = %v, want %v", p.Name, p.Pin, want)
+		}
+	}
+}
+
+func TestPresetPinDecodesAndDefaultsToFalse(t *testing.T) {
+	body := `
+[[work.dashboard.tasks.presets]]
+name = "mine"
+pin = true
+
+[[work.dashboard.tasks.presets]]
+name = "silent"
+
+[[work.dashboard.tasks.presets]]
+name = "wrong"
+pin = "yes"
+
+[[work.dashboard.tasks.presets]]
+name = "nested"
+hide = { pin = true }
+`
+	cfg, err := Load(writeConfig(t, body))
+	if err != nil {
+		t.Fatalf("Load must not fail on a bad pin: %v", err)
+	}
+	byName := map[string]WorkViewPreset{}
+	for _, p := range cfg.ResolveWorkViewPresets() {
+		byName[p.Name] = p
+	}
+	if p := byName["mine"]; !p.Pin {
+		t.Errorf("declared pin = %v, want true", p.Pin)
+	}
+	// An unset pin is no pin: the field is a grant, so silence withholds it.
+	if p := byName["silent"]; p.Pin {
+		t.Errorf("undeclared pin = %v, want false", p.Pin)
+	}
+	if p := byName["wrong"]; p.Pin {
+		t.Errorf("pin = \"yes\" resolved to %v, want the field ignored", p.Pin)
+	}
+	for _, want := range []string{`pin must be a bool`, `hide has unknown key "pin"`} {
+		if !containsSubstring(cfg.Warnings, want) {
+			t.Errorf("Warnings missing %q; got: %v", want, cfg.Warnings)
+		}
+	}
+	// A hide clause decides which rows exist, never where they sit, so the grant
+	// has no meaning inside one.
+	if p := byName["nested"]; p.Pin {
+		t.Errorf("hide.pin granted the pin (%v), want it confined to the entry", p.Pin)
+	}
+}

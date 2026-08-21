@@ -65,14 +65,17 @@ func RenderStatus(out io.Writer, snap drain.StatusSnapshot, tables StatusTables)
 // Both `pop work status` and the daemon's run baseline build through here, so the
 // baseline is that same render rather than an inventory of its own.
 func BuildStatusTables(d *drain.Deps, cfg *config.Config) (StatusTables, error) {
-	order := d.WorkOrdering()
+	// Empty pane facts, so nothing is attributed and nothing pins whatever the
+	// preset declares: `pop work status` is a printed list, not a page someone is
+	// standing in.
+	opts := work.BuildOptions{Ordering: d.WorkOrdering()}
 	setKinds := d.WorkKinds(cfg)
-	sets, err := work.BuildSnapshotForPane(setKinds, work.PaneFacts{}, order)
+	sets, err := work.BuildSnapshotForPane(setKinds, work.PaneFacts{}, opts)
 	if err != nil {
 		return StatusTables{}, err
 	}
 	routineKinds := d.RoutinePageKinds(cfg)
-	routines, err := work.BuildSnapshotForPane(routineKinds, work.PaneFacts{}, order)
+	routines, err := work.BuildSnapshotForPane(routineKinds, work.PaneFacts{}, opts)
 	if err != nil {
 		return StatusTables{}, err
 	}

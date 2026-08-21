@@ -79,6 +79,7 @@ func TestASetBoundMidSessionJoinsThePinnedBlock(t *testing.T) {
 	d, cfg, _, rt := dashboardLaunchFixture(t, repo, setID)
 	stems := registerDoneSets(t, repo, 3)
 	d.ViewPreset, _ = config.ShippedWorkViewPreset("all")
+	d.ViewPreset.Pin = true
 	checkout := bindStemsToOneCheckout(t, d, repo, stems, 1)
 	inPane(rt.Fake, "editor", "%7")
 	rt.Fake.PaneCwd = map[string]string{"%7": checkout}
@@ -177,6 +178,7 @@ func TestSwitchingToAPresetThatHidesAPinnedRowUnpinsItSilently(t *testing.T) {
 	d.ViewPreset = config.WorkViewPreset{
 		Name:  "_hide-done",
 		Label: "in flight",
+		Pin:   true,
 		Hide:  &config.WorkViewPresetFilter{Status: []string{"done"}},
 	}
 	m = rebuild(t, m)

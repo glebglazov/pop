@@ -145,6 +145,16 @@ func (d *Deps) WorkOrdering() work.Ordering {
 	}
 }
 
+// WorkBuildOptions is everything the active preset grants a snapshot build: its
+// ordering, plus whether it grants the Pane pin (its `pin` field). It sits here
+// for the reason WorkOrdering does — this is the layer that resolves which preset
+// is active, so the `work` seam takes values it is handed rather than a preset it
+// would have to read. Absent `pin` is no pin: the lift is asked for, never
+// inherited from a roster position.
+func (d *Deps) WorkBuildOptions() work.BuildOptions {
+	return work.BuildOptions{Ordering: d.WorkOrdering(), PinPane: d.EffectiveViewPreset().Pin}
+}
+
 type runtimeLock interface {
 	Release() error
 }

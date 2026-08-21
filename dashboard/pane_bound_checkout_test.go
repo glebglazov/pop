@@ -32,6 +32,7 @@ func boundCheckoutFixture(t *testing.T, bind ...int) (*drain.Deps, *config.Confi
 	d, cfg, _, rt := dashboardLaunchFixture(t, repo, setID)
 	stems := registerDoneSets(t, repo, 3)
 	d.ViewPreset, _ = config.ShippedWorkViewPreset("all")
+	d.ViewPreset.Pin = true
 	checkout := bindStemsToOneCheckout(t, d, repo, stems, bind...)
 	inPane(rt.Fake, "editor", "%7")
 	if rt.Fake.PaneCwd == nil {

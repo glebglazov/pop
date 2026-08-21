@@ -939,7 +939,7 @@ func BuildPageSnapshot(d *drain.Deps, cfg *config.Config, page Page, pane work.P
 	if d == nil {
 		d = drain.DefaultDeps()
 	}
-	return work.BuildSnapshotForPane(pageSpec(page).kinds(d, cfg), pane, d.WorkOrdering())
+	return work.BuildSnapshotForPane(pageSpec(page).kinds(d, cfg), pane, d.WorkBuildOptions())
 }
 
 func newQueueDashboard(d *drain.Deps, cfg *config.Config, snap DashboardSnapshot) QueueDashboard {
@@ -962,8 +962,10 @@ func newQueueDashboardOn(d *drain.Deps, cfg *config.Config, snap DashboardSnapsh
 		Key:             func(r DashboardRow) string { return r.CursorKey },
 		Anchor:          ui.AnchorTop,
 		TopEdgeOnChrome: true,
-		// The snapshot already moved the attributed rows to the top; the mark is
-		// what says why they are there, on every one of them (ADR-0209 decision 4).
+		// The snapshot already moved the attributed rows to the top — when the active
+		// preset granted the pin; under any other preset nothing is marked. The mark
+		// is what says why the lifted rows are there, on every one of them
+		// (ADR-0209 decision 4).
 		Pinned: func(r DashboardRow) bool { return r.Pinned },
 		Cell: func(r DashboardRow, rs ui.RowState) string {
 			budget := dashboardListCellBudget(cols.width)
@@ -2550,7 +2552,7 @@ func (m QueueDashboard) confirmBindModal() (tea.Model, tea.Cmd) {
 func (m QueueDashboard) reload() tea.Cmd {
 	unfiltered := m.selection.Active() && m.page.rowFilters
 	return func() tea.Msg {
-		snap, err := work.BuildSnapshotForPane(m.page.kinds(m.d, m.cfg), m.pane, m.d.WorkOrdering())
+		snap, err := work.BuildSnapshotForPane(m.page.kinds(m.d, m.cfg), m.pane, m.d.WorkBuildOptions())
 		live := loadLivePaneCache(m.d)
 		msg := dashboardRowsMsg{page: m.page.id, snap: snap, live: live, err: err}
 		if err == nil && unfiltered {
@@ -2567,7 +2569,7 @@ func (m QueueDashboard) reload() tea.Cmd {
 // than an empty answer: no evidence is not evidence of absence, and the marks
 // survive to the next poll.
 func (m QueueDashboard) unfilteredRows() []DashboardRow {
-	snap, err := work.BuildSnapshotForPane(m.page.kinds(m.unfilteredDeps(), m.cfg), m.pane, m.d.WorkOrdering())
+	snap, err := work.BuildSnapshotForPane(m.page.kinds(m.unfilteredDeps(), m.cfg), m.pane, m.d.WorkBuildOptions())
 	if err != nil {
 		return nil
 	}
@@ -2575,13 +2577,18 @@ func (m QueueDashboard) unfilteredRows() []DashboardRow {
 }
 
 // unfilteredDeps is this page's deps with the widest shipped preset installed,
-// keeping the active preset's sort so both builds of one poll agree on order.
+// keeping the active preset's sort so both builds of one poll agree on order. The
+// pin grant rides along with the sort for the same reason: the widening is about
+// which rows exist, not about where they sit, so a marked row it contributes must
+// not appear lifted in a view whose preset does not pin.
 func (m QueueDashboard) unfilteredDeps() *drain.Deps {
 	preset, ok := config.ShippedWorkViewPreset("all")
 	if m.d == nil || !ok {
 		return m.d
 	}
-	preset.Sort = m.d.EffectiveViewPreset().Sort
+	active := m.d.EffectiveViewPreset()
+	preset.Sort = active.Sort
+	preset.Pin = active.Pin
 	d := *m.d
 	d.ViewPreset = preset
 	return &d
@@ -4174,7 +4181,7 @@ func writeDashboardFooter(b *strings.Builder, height int, hint string) {
 // quit for any other reason), leaving the workbench-aware open to the command
 // layer (task 02).
 func RunDashboard(d *drain.Deps, cfg *config.Config) (string, error) {
-	snap, err := work.BuildSnapshotForPane(d.WorkKinds(cfg), work.PaneFacts{}, d.WorkOrdering())
+	snap, err := work.BuildSnapshotForPane(d.WorkKinds(cfg), work.PaneFacts{}, d.WorkBuildOptions())
 	if err != nil {
 		return "", err
 	}

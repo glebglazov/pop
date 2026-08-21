@@ -40,7 +40,7 @@ func routineRowIDs(snap work.Snapshot) []string {
 
 func buildForPane(t *testing.T, k *Kind, facts work.PaneFacts) work.Snapshot {
 	t.Helper()
-	snap, err := work.BuildSnapshotForPane([]work.Kind{k}, facts, work.OrderByKindPrecedence)
+	snap, err := work.BuildSnapshotForPane([]work.Kind{k}, facts, work.BuildOptions{Ordering: work.OrderByKindPrecedence, PinPane: true})
 	if err != nil {
 		t.Fatalf("BuildSnapshotForPane: %v", err)
 	}

@@ -373,7 +373,7 @@ func TestAnAttributedMapRowPinsAboveTheWholeTaskSetBlock(t *testing.T) {
 		PaneID:   "%3",
 		WorkKind: string(ref.KindMap),
 		WorkID:   "2026-07-01-chart",
-	}, work.OrderByKindPrecedence)
+	}, work.BuildOptions{Ordering: work.OrderByKindPrecedence, PinPane: true})
 	if err != nil {
 		t.Fatal(err)
 	}

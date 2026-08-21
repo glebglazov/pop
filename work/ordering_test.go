@@ -20,7 +20,7 @@ import (
 func TestCreationOrderInterleavesTaskSetsAndMaps(t *testing.T) {
 	f := newFixture(t)
 
-	desc, err := work.BuildSnapshotForPane(straddlingPage(f), work.PaneFacts{}, work.OrderByCreatedDesc)
+	desc, err := work.BuildSnapshotForPane(straddlingPage(f), work.PaneFacts{}, work.BuildOptions{Ordering: work.OrderByCreatedDesc})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestCreationOrderInterleavesTaskSetsAndMaps(t *testing.T) {
 		t.Fatalf("created_desc order = %v, want %v", got, want)
 	}
 
-	asc, err := work.BuildSnapshotForPane(straddlingPage(f), work.PaneFacts{}, work.OrderByCreatedAsc)
+	asc, err := work.BuildSnapshotForPane(straddlingPage(f), work.PaneFacts{}, work.BuildOptions{Ordering: work.OrderByCreatedAsc})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestCreationOrderKeysBelowAndAboveTheDate(t *testing.T) {
 		{ID: "z-undated-map"},
 	}}
 
-	snap, err := work.BuildSnapshotForPane([]work.Kind{maps, sets}, work.PaneFacts{}, work.OrderByCreatedDesc)
+	snap, err := work.BuildSnapshotForPane([]work.Kind{maps, sets}, work.PaneFacts{}, work.BuildOptions{Ordering: work.OrderByCreatedDesc})
 	if err != nil {
 		t.Fatal(err)
 	}
