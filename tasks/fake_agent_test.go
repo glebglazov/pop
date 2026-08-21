@@ -228,16 +228,22 @@ func (b *fakeAgentBehavior) play(dir string, stdout io.Writer, prompt string) in
 		if s.checkTask {
 			tickTaskFile(taskPath)
 		}
-		summary := s.summary
-		if summary == "" {
-			summary = "attempt complete"
-		}
-		if s.skipSentinel {
+		switch {
+		case s.rawOutput != "":
+			// Arbitrary provider prose, written exactly as declared — no
+			// SUMMARY/TASK_COMPLETE wrapper, so it reaches assessAttempt the way
+			// a real agent's unparsed stdout would.
+			fmt.Fprint(stdout, s.rawOutput)
+		case s.skipSentinel:
 			fmt.Fprintln(stdout, "incomplete")
-		} else {
+		default:
+			summary := s.summary
+			if summary == "" {
+				summary = "attempt complete"
+			}
 			fmt.Fprintf(stdout, "SUMMARY_START\n%s\nSUMMARY_END\nTASK_COMPLETE\n", summary)
 		}
-		return 0
+		return s.exitCode
 	}
 
 	if b.steps != nil {

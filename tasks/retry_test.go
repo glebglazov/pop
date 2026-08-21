@@ -45,6 +45,34 @@ func TestRunTaskRetriesPreserveEdits(t *testing.T) {
 	assertTaskDone(t, env, "01-a")
 }
 
+// TestAttemptScriptCombinesRawOutputAndExitCode proves the crossing ADR-0231
+// names unwritable before this slice: one attempt in a multi-attempt sequence
+// printing a provider's own error prose and exiting non-zero. The raw text
+// must reach assessAttempt the way a real agent's stdout would, and the
+// declared exit code must be the one the attempt loop sees.
+func TestAttemptScriptCombinesRawOutputAndExitCode(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	const providerErr = "Error: rate_limit_exceeded: please retry after 30s"
+	agent := writeAttemptAgent(t, env.root, []attemptScript{
+		{rawOutput: providerErr, exitCode: 1},
+	})
+
+	opts := env.runOpts(true, agent)
+	opts.MaxTries = 1
+	var buf bytes.Buffer
+	opts.Output = &buf
+
+	_, err := RunTaskWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+	if !strings.Contains(buf.String(), providerErr) {
+		t.Fatalf("captured attempt stream missing declared provider text:\n%s", buf.String())
+	}
+	if !strings.Contains(err.Error(), "agent exited with status 1") {
+		t.Fatalf("err = %v, want it to name the declared exit code", err)
+	}
+	assertTaskFailed(t, env, "01-a", 1)
+}
+
 func TestRunTaskExhaustedRetriesMarkFailed(t *testing.T) {
 	env := setupExecutorFixture(t, false)
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{
@@ -493,6 +521,14 @@ type attemptScript struct {
 	skipSentinel bool
 	summary      string
 	sleep        time.Duration
+	// rawOutput, when non-empty, is written verbatim as the attempt's stdout
+	// instead of the SUMMARY block or "incomplete" sentinel — the shape a real
+	// provider's own error text takes. exitCode is the status the attempt loop
+	// sees for this attempt; both are additive over writeRealShimAttemptAgent's
+	// real-shim fields and default to today's behaviour (empty, exit 0). Only
+	// the in-process writeAttemptAgent (fakeAgentBehavior.play) honors them.
+	rawOutput string
+	exitCode  int
 }
 
 // writeRealShimAttemptAgent installs a real #!/bin/sh agent scripted over a
