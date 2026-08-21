@@ -65,14 +65,91 @@ func taskExitErr(sel *Selection, code int, format string, args ...any) *ExitErro
 	return exitErr(code, "task %s/%s: %s", sel.TaskSetID, sel.TaskID, fmt.Sprintf(format, args...))
 }
 
-// executeTaskAttempts runs the retry loop for one task. The prompt is rebuilt
-// per attempt (via the walk's invocation builder over basePrompt) so a retry can
-// carry this task's own prior-attempt digest forward alongside set-wide
+// taskAttemptLedger is what one task's attempts add up to across the whole Agent
+// fallback list: how many tries have been started, and where each was captured.
+// It belongs to the walk rather than to a preset because both numbers are facts
+// about the task — the digest handed to a later agent reads "Attempt 4" without
+// caring which CLI ran attempts 1 to 3, and the breakdown printed when the task
+// reaches a terminal state covers every agent that had a turn (ADR-0231). The
+// per-preset Task retry cap is counted separately, inside the retry loop.
+type taskAttemptLedger struct {
+	attempts int
+	streams  []string
+}
+
+// spendTry claims the next task-wide attempt ordinal. It is called once per try,
+// not once per invocation: an Effort model skip restarts the try on the tier's
+// next entry, and both runs are the same attempt of the task (ADR-0168).
+func (l *taskAttemptLedger) spendTry() int {
+	l.attempts++
+	return l.attempts
+}
+
+func (l *taskAttemptLedger) record(path string) {
+	if path != "" {
+		l.streams = append(l.streams, path)
+	}
+}
+
+// attemptCapExhaustion is a preset that spent its whole Task retry cap without
+// finishing. It carries the ending the retry loop would once have written on the
+// spot, because whether this is the task's ending at all turns on something only
+// the Agent fallback walk knows: whether the list has another agent left
+// (ADR-0231).
+type attemptCapExhaustion struct {
+	preset string
+	// attempts is how many tries this preset itself spent, which is the cap
+	// unless the cap was reached by a shorter route.
+	attempts int
+	// reason is what the last attempt ended on, in the provider's own words
+	// wherever it left any: the sentence the fall-through line shows the
+	// operator and the prior-attempt digest carries to the next agent.
+	reason string
+	// summary is the FAILED progress line this ending writes if no agent is
+	// left, already phrased against the task's own attempt count rather than
+	// this preset's share of it.
+	summary string
+}
+
+func (e attemptCapExhaustion) fallThroughMessage(role string) string {
+	return retryCapFallThroughMessage(role, e.preset, e.attempts, e.reason)
+}
+
+// retryCapFallThroughMessage is the dim line printed when a preset spent its
+// whole Task retry cap without finishing and the turn passes to the next agent.
+// It reads like a proceed verdict's fall-through on purpose: to the operator the
+// two are one event — this agent is not going to do the work and the next one is
+// up — and the only thing worth saying differently is that a spent cap, rather
+// than a refusal, is what ended the turn. role is the caller's word for what it
+// is walking past, so every Work group reports the fall-through in its own voice
+// (ADR-0231).
+func retryCapFallThroughMessage(role, preset string, attempts int, reason string) string {
+	spent := fmt.Sprintf("spent its %d attempts", attempts)
+	if attempts == 1 {
+		spent = "spent its only attempt"
+	}
+	msg := fmt.Sprintf("%s %s %s without finishing", role, preset, spent)
+	if reason = strings.TrimSpace(reason); reason != "" {
+		msg += fmt.Sprintf(" (last: %s)", clampAgentDiagnostic(reason))
+	}
+	return msg + "; trying next"
+}
+
+// executeTaskAttempts runs the retry loop for one task on one preset. The prompt
+// is rebuilt per attempt (via the walk's invocation builder over basePrompt) so a
+// retry can carry this task's own prior-attempt digest forward alongside set-wide
 // remediation history and sibling briefs; attempt 1 runs those feeds only when
 // they have content (ADR 0040/ADR 0154). Inside each attempt the walk steps
 // through the preset's Effort tier: a model-scoped verdict restarts the attempt
 // on the next entry without spending a try (ADR-0168).
-func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOut io.Writer, basePrompt string, walk *effortModelWalk, maxTries int, timeout time.Duration, commitOverrides []string, retryDelays []time.Duration) (*RunTaskResult, error) {
+//
+// It reports a spent Task retry cap as an attemptCapExhaustion rather than
+// writing the task's ending itself: only the Agent fallback walk knows whether
+// another agent is left to try, and a preset that has run out of tries has said
+// nothing about whether the task can be done (ADR-0231). ledger carries the
+// attempt ordinals and captured streams across those presets, so a task's
+// attempts are numbered once for the whole walk.
+func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOut io.Writer, basePrompt string, walk *effortModelWalk, maxTries int, timeout time.Duration, commitOverrides []string, retryDelays []time.Duration, ledger *taskAttemptLedger) (*RunTaskResult, *attemptCapExhaustion, error) {
 	if errOut == nil {
 		errOut = os.Stderr
 	}
@@ -82,11 +159,11 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 	} else {
 		display.line(ansiBold+ansiCyan, "━━ Running task %s/%s: %s", sel.TaskSetID, sel.TaskID, sel.Task.Title)
 	}
-	// Captured attempt streams written by this invocation, for the inline
-	// breakdown when the task reaches a terminal state. Full history stays
-	// with `pop tasks stream`.
-	var streamPaths []string
 	for attempt := 1; attempt <= maxTries; attempt++ {
+		// The task's own ordinal for this try, claimed below by the first
+		// invocation that actually runs. It is the preset's own attempt number
+		// only while this is the first preset to get a turn.
+		taskAttempt := 0
 		prompt := basePrompt
 		// Carry harness-built feeds forward whenever they have content so a
 		// retry converges instead of repeating (ADR 0040/ADR 0089/ADR 0154):
@@ -119,13 +196,13 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 			invocation  *AgentInvocation
 			outcome     *attemptOutcome
 			agentResult AgentResult
-			persist     func(rec *streamRecorder, attempt int, outcome, reason string, exitCode int)
+			persist     func(rec *streamRecorder, outcome, reason string, exitCode int)
 			escalated   *AgentProceedVerdict
 		)
 		for {
 			build, exhausted, err := walk.builder()
 			if err != nil {
-				return nil, taskExitErr(sel, ExitSetup, "%v", err)
+				return nil, nil, taskExitErr(sel, ExitSetup, "%v", err)
 			}
 			if exhausted != nil {
 				escalated = exhausted
@@ -133,13 +210,18 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 			}
 			invocation, err = build(prompt)
 			if err != nil {
-				return nil, taskExitErr(sel, ExitSetup, "%v", err)
+				return nil, nil, taskExitErr(sel, ExitSetup, "%v", err)
 			}
 			entry := invocation
-			persist = func(rec *streamRecorder, attempt int, outcome, reason string, exitCode int) {
-				if p := persistAttemptStream(d, errOut, sel, rec, entry.AgentPreset(), entry.RequestedAgent, attempt, outcome, reason, exitCode); p != "" {
-					streamPaths = append(streamPaths, p)
-				}
+			if taskAttempt == 0 {
+				// A try whose Effort tier had nothing left to invoke never became
+				// an attempt of the task, so it claims no ordinal; every
+				// invocation this try makes past the first is the same attempt
+				// walking the tier (ADR-0168).
+				taskAttempt = ledger.spendTry()
+			}
+			persist = func(rec *streamRecorder, outcome, reason string, exitCode int) {
+				ledger.record(persistAttemptStream(d, errOut, sel, rec, entry.AgentPreset(), entry.RequestedAgent, taskAttempt, outcome, reason, exitCode))
 			}
 			display.line(ansiDim, "   Attempt %d/%d · %s", attempt, maxTries, invocation.RequestedAgent)
 			display.line(ansiDim, "── Agent output ────────────────────────────────────────")
@@ -147,7 +229,7 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 			agentOut, attemptOut, err := runAgentAttempt(d, runtimePath, out, timeout, invocation)
 			if err != nil {
 				display.line(ansiRed, "✗ Agent failed to start for %s/%s", sel.TaskSetID, sel.TaskID)
-				return nil, taskExitErr(sel, ExitOperational, "agent execution: %v", err)
+				return nil, nil, taskExitErr(sel, ExitOperational, "agent execution: %v", err)
 			}
 			outcome = attemptOut
 			if outcome.timedOut {
@@ -165,51 +247,53 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 			refused := stampDetectedVerdict(*agentResult.ProceedVerdict, invocation.AgentPreset(), invocation.PinnedModel())
 			stop, err := walk.retire(refused)
 			if err != nil {
-				return nil, taskExitErr(sel, ExitOperational, "%v", err)
+				return nil, nil, taskExitErr(sel, ExitOperational, "%v", err)
 			}
 			// The run is persisted as what the verdict finally condemned: a skip
 			// when another tier entry takes over, an unusable agent when the
 			// escalation hands the whole preset on.
 			if stop != nil {
-				persist(outcome.stream, attempt, streamOutcomeAgentUnusable, refused.Reason, outcome.exitCode)
+				persist(outcome.stream, streamOutcomeAgentUnusable, refused.Reason, outcome.exitCode)
 				escalated = stop
 				break
 			}
-			if p := persistSkippedAttemptStream(d, errOut, sel, outcome.stream, entry.AgentPreset(), entry.RequestedAgent, refused.Model, attempt, refused.Reason, outcome.exitCode); p != "" {
-				streamPaths = append(streamPaths, p)
-			}
+			ledger.record(persistSkippedAttemptStream(d, errOut, sel, outcome.stream, entry.AgentPreset(), entry.RequestedAgent, refused.Model, taskAttempt, refused.Reason, outcome.exitCode))
 			// The verdict is spent here — this attempt starts over on the tier's
 			// next entry, and nothing downstream should see it.
 			agentResult = AgentResult{}
 			display.line(ansiDim, "   %s", refused.effortModelSkipMessage("Agent", walk.nextModel()))
 		}
 		if escalated != nil {
-			return proceedVerdictResult(sel, *escalated), nil
+			return proceedVerdictResult(sel, *escalated), nil, nil
 		}
 		if outcome.interrupted {
-			persist(outcome.stream, attempt, streamOutcomeInterrupted, "", outcome.exitCode)
-			return nil, taskExitErr(sel, ExitInterrupted, "interrupted")
+			persist(outcome.stream, streamOutcomeInterrupted, "", outcome.exitCode)
+			return nil, nil, taskExitErr(sel, ExitInterrupted, "interrupted")
 		}
 		if outcome.timedOut {
 			timeoutReason := fmt.Sprintf("timed out after %s", timeout)
-			persist(outcome.stream, attempt, streamOutcomeTimedOut, timeoutReason, outcome.exitCode)
+			persist(outcome.stream, streamOutcomeTimedOut, timeoutReason, outcome.exitCode)
 			display.line(ansiRed, "✗ Attempt %d/%d timed out after %s", attempt, maxTries, timeout)
 			// A timeout almost always means execution ran too long (an oversized
 			// context window), not a doomed approach. The retry restarts from the
 			// compact prior-attempt "continue" digest (ADR 0040), carried forward at
 			// the top of the loop, rather than the bloated transcript — so a wait
 			// adds nothing and the retry fires instantly. It consumes one slot of the
-			// shared max_tries budget; only the final attempt finalizes Failed.
+			// shared max_tries budget; only the final attempt ends the preset's turn.
 			if attempt < maxTries {
 				display.line(ansiYellow, "↻ Retrying instantly with preserved changes...")
 				continue
 			}
-			printAttemptBreakdown(d, out, streamPaths)
-			summary := fmt.Sprintf("timed out after %s on attempt %d", timeout, attempt)
-			if err := finalizeTaskFailed(d, sel, attempt, summary); err != nil {
-				return nil, taskExitErr(sel, ExitOperational, "%v", err)
-			}
-			return nil, taskExitErr(sel, ExitOperational, "%s", summary)
+			// The cap is spent on timeouts alone. That is real evidence the work
+			// does not fit in one attempt, but it is evidence about this preset:
+			// another agent may have room this one did not, so the walk is left to
+			// decide whether the task has run out of agents (ADR-0231).
+			return nil, &attemptCapExhaustion{
+				preset:   walk.preset,
+				attempts: attempt,
+				reason:   timeoutReason,
+				summary:  fmt.Sprintf("timed out after %s on attempt %d", timeout, taskAttempt),
+			}, nil
 		}
 		if outcome.turnCapExhausted {
 			// The agent stopped itself at the repository's bound, so the attempt
@@ -220,38 +304,38 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 			// separately (ADR-0190 decision 6). Like a timeout, there is nothing to
 			// wait for: the retry fires instantly on the compact digest.
 			reason := turnCapExhaustedReason(invocation.turnCap)
-			persist(outcome.stream, attempt, streamOutcomeTurnCapExhausted, reason, outcome.exitCode)
+			persist(outcome.stream, streamOutcomeTurnCapExhausted, reason, outcome.exitCode)
 			display.line(ansiRed, "✗ Attempt %d/%d %s", attempt, maxTries, reason)
 			if attempt < maxTries {
 				display.line(ansiYellow, "↻ Retrying instantly with preserved changes...")
 				continue
 			}
-			printAttemptBreakdown(d, out, streamPaths)
-			summary := fmt.Sprintf("%s on attempt %d", reason, attempt)
-			if err := finalizeTaskFailed(d, sel, attempt, summary); err != nil {
-				return nil, taskExitErr(sel, ExitOperational, "%v", err)
-			}
-			return nil, taskExitErr(sel, ExitOperational, "%s", summary)
+			return nil, &attemptCapExhaustion{
+				preset:   walk.preset,
+				attempts: attempt,
+				reason:   reason,
+				summary:  fmt.Sprintf("%s on attempt %d", reason, taskAttempt),
+			}, nil
 		}
 		if outcome.runErr != nil {
-			return nil, taskExitErr(sel, ExitOperational, "agent execution: %v", outcome.runErr)
+			return nil, nil, taskExitErr(sel, ExitOperational, "agent execution: %v", outcome.runErr)
 		}
 		if agentResult.ProceedVerdict != nil {
 			v := stampDetectedVerdict(*agentResult.ProceedVerdict, invocation.AgentPreset(), invocation.PinnedModel())
 			if _, ok := v.TimeHealing(); ok {
 				v = resolveProceedResetAt(v, time.Now())
-				persist(outcome.stream, attempt, streamOutcomeQuotaPaused, "", outcome.exitCode)
+				persist(outcome.stream, streamOutcomeQuotaPaused, "", outcome.exitCode)
 				display.line(ansiYellow, "Paused: agent quota exhausted for %s/%s", sel.TaskSetID, sel.TaskID)
 				display.line(ansiYellow, "  %s", v.Reason)
 			} else {
-				persist(outcome.stream, attempt, streamOutcomeAgentUnusable, v.Reason, outcome.exitCode)
+				persist(outcome.stream, streamOutcomeAgentUnusable, v.Reason, outcome.exitCode)
 			}
-			return proceedVerdictResult(sel, v), nil
+			return proceedVerdictResult(sel, v), nil, nil
 		}
 
 		taskData, err := d.FS.ReadFile(sel.TaskPath)
 		if err != nil {
-			return nil, taskExitErr(sel, ExitOperational, "read task markdown: %v", err)
+			return nil, nil, taskExitErr(sel, ExitOperational, "read task markdown: %v", err)
 		}
 
 		assessment, reason := assessAttempt(agentResult.Output, outcome.exitCode, taskData)
@@ -259,15 +343,17 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 		if assessment.Complete {
 			streamOutcome = streamOutcomeCompleted
 		}
-		persist(outcome.stream, attempt, streamOutcome, reason, outcome.exitCode)
+		persist(outcome.stream, streamOutcome, reason, outcome.exitCode)
 		if assessment.Complete {
 			result, err := completeSuccessfulTask(d, sel, runtimePath, assessment.Summary, commitOverrides)
 			if err != nil {
-				return nil, taskExitErr(sel, ExitOperational, "%v", err)
+				return nil, nil, taskExitErr(sel, ExitOperational, "%v", err)
 			}
 			printConciseSummary(out, result)
-			printAttemptBreakdown(d, out, streamPaths)
-			return result, nil
+			// Every attempt the task had, including those an earlier agent in the
+			// fallback list spent before handing the turn on.
+			printAttemptBreakdown(d, out, ledger.streams)
+			return result, nil, nil
 		}
 
 		display.line(ansiRed, "✗ Attempt %d/%d failed: %s", attempt, maxTries, reason)
@@ -276,19 +362,21 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 			if delay <= 0 {
 				display.line(ansiYellow, "↻ Retrying with preserved changes...")
 			} else if waitRetryDelay(d, out, delay) {
-				return nil, taskExitErr(sel, ExitInterrupted, "interrupted")
+				return nil, nil, taskExitErr(sel, ExitInterrupted, "interrupted")
 			}
 			continue
 		}
 
-		printAttemptBreakdown(d, out, streamPaths)
-		summary := fmt.Sprintf("failed after %d attempts: %s", maxTries, reason)
-		if err := finalizeTaskFailed(d, sel, maxTries, summary); err != nil {
-			return nil, taskExitErr(sel, ExitOperational, "%v", err)
-		}
-		return nil, taskExitErr(sel, ExitOperational, "%s", summary)
+		// This preset is out of tries. Whether the task is out of agents is the
+		// walk's to answer (ADR-0231).
+		return nil, &attemptCapExhaustion{
+			preset:   walk.preset,
+			attempts: attempt,
+			reason:   reason,
+			summary:  fmt.Sprintf("failed after %d attempts: %s", taskAttempt, reason),
+		}, nil
 	}
-	return nil, taskExitErr(sel, ExitOperational, "unexpected attempt loop exit")
+	return nil, nil, taskExitErr(sel, ExitOperational, "unexpected attempt loop exit")
 }
 
 // executeTaskAttemptsWithAgentFallback walks the two nested lists a task's
@@ -296,6 +384,12 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 // tier resolveSpec resolves. agentSpecs are the base specs, before Effort
 // resolution — the tier is resolved per attempt so a recorded Effort model skip
 // is filtered out of every resolution after the one that recorded it (ADR-0168).
+//
+// Every way a preset can fail to do the work advances the walk: a preset-scoped
+// proceed verdict, and equally a preset that spent its whole Task retry cap
+// without finishing. The walk ends only when the list ends, so it is the only
+// place that knows a task has run out of agents — and therefore the place that
+// writes the task's Failed ending (ADR-0231).
 func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath string, out, errOut io.Writer, basePrompt string, agentSpecs []string, resolveSpec effortSpecResolver, buildForAgent func(agentSpec string) (func(prompt string) (*AgentInvocation, error), error), maxTries int, timeout time.Duration, commitOverrides []string, agentQuotaRetryAfter time.Duration, retryDelays []time.Duration, probeMemo *agentAvailabilityProbeMemo) (*RunTaskResult, error) {
 	cooldowns, err := readAgentCooldowns(d)
 	if err != nil {
@@ -308,6 +402,11 @@ func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath s
 	}
 	specs := nonEmptyAgentSpecs(agentSpecs, DefaultAgentPreset)
 	var unavailableResults []*RunTaskResult
+	// The last preset to spend its Task retry cap, held in case the list runs
+	// out: its ending becomes the task's, and until then it is only a reason to
+	// try the next agent (ADR-0231).
+	var spentCap *attemptCapExhaustion
+	ledger := &taskAttemptLedger{}
 	for i, agentSpec := range specs {
 		preset, err := AgentPresetName(agentSpec)
 		if err != nil {
@@ -334,7 +433,14 @@ func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath s
 			continue
 		}
 		walk := &effortModelWalk{d: d, preset: preset, baseSpec: agentSpec, resolve: resolveSpec, skips: skips, build: buildForAgent}
-		result, execErr := executeTaskAttempts(d, sel, runtimePath, out, errOut, basePrompt, walk, maxTries, timeout, commitOverrides, retryDelays)
+		result, spent, execErr := executeTaskAttempts(d, sel, runtimePath, out, errOut, basePrompt, walk, maxTries, timeout, commitOverrides, retryDelays, ledger)
+		if spent != nil {
+			spentCap = spent
+			if i+1 < len(specs) && out != nil {
+				outputFor(out).line(ansiDim, "   %s", spent.fallThroughMessage("Agent"))
+			}
+			continue
+		}
 		if execErr != nil || result == nil || result.ProceedVerdict == nil {
 			return result, execErr
 		}
@@ -353,10 +459,32 @@ func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath s
 		}
 		unavailableResults = append(unavailableResults, result)
 	}
-	if len(unavailableResults) == 0 {
+	verdict := resolveAgentFallbackVerdict(sel, unavailableResults)
+	// A time-healing verdict outranks a spent cap: the preset it condemns comes
+	// back on its own, so parking the drain until it does and retrying the task
+	// then is a better ending than declaring the task failed while an agent that
+	// was never really tried is about to be usable again.
+	if verdict != nil && verdict.ProceedVerdict != nil {
+		if _, ok := verdict.ProceedVerdict.TimeHealing(); ok {
+			return verdict, nil
+		}
+	}
+	if spentCap != nil {
+		// Every agent has had its turn and none finished. This is the ending the
+		// preset that spent its cap would have written on its own before the walk
+		// learned to advance: the task is Failed and the drain stops, which is
+		// per-drain rather than per-task because the next task would be handed
+		// the same dead list (ADR-0231).
+		printAttemptBreakdown(d, out, ledger.streams)
+		if err := finalizeTaskFailed(d, sel, ledger.attempts, spentCap.summary); err != nil {
+			return nil, taskExitErr(sel, ExitOperational, "%v", err)
+		}
+		return nil, taskExitErr(sel, ExitOperational, "%s", spentCap.summary)
+	}
+	if verdict == nil {
 		return nil, taskExitErr(sel, ExitOperational, "no agent attempts were run")
 	}
-	return resolveAgentFallbackVerdict(sel, unavailableResults), nil
+	return verdict, nil
 }
 
 func proceedVerdictResult(sel *Selection, v AgentProceedVerdict) *RunTaskResult {

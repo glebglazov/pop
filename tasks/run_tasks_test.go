@@ -2568,7 +2568,12 @@ printf '%s\n' '{"type":"result","subtype":"error_during_execution","result":"You
 	}
 }
 
-func TestRunTaskSetAgentFallbackDoesNotAdvanceOnPlainFailure(t *testing.T) {
+// TestRunTaskSetAgentFallbackAdvancesOnPlainFailure: a preset that spends its
+// whole cap reporting its own failure has still said only that it could not do
+// the work, so the next agent gets its turn and can finish (ADR-0231). This test
+// pinned the opposite until the walk learned to advance — the defect that left a
+// healthy agent untried behind a failing one.
+func TestRunTaskSetAgentFallbackAdvancesOnPlainFailure(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
@@ -2587,6 +2592,7 @@ printf 'TASK_FAILED: plain failure\n'
 exit 2
 `, claudeCount))
 	installAgentShim(t, env.root, "codex", fmt.Sprintf(`#!/bin/sh
+if [ "$1" = login ]; then exit 0; fi
 printf 'called\n' >> %[1]q
 TASK=$(cat "$(printf '%%s' "$*" | sed -n 's|.*Read the file \([^ ]*\) in full:.*|\1|p' | head -1)" | sed -n 's|^.*You are implementing the task at: ||p' | head -1 | awk '{print $1}')
 if [ -n "$TASK" ] && [ -f "$TASK" ]; then sed -i '' 's/- \[ \]/- [x]/g' "$TASK" 2>/dev/null || sed -i 's/- \[ \]/- [x]/g' "$TASK"; fi
@@ -2598,14 +2604,20 @@ printf 'SUMMARY_START\ncodex done\nSUMMARY_END\nTASK_COMPLETE\n'
 	opts.AgentExplicit = true
 	opts.MaxTries = 2
 
-	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
-	assertExitCode(t, err, ExitOperational)
+	result, err := RunTaskSetWith(env.deps(), nil, nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.TaskSetDone || len(result.Completed) != 1 {
+		t.Fatalf("result = %#v, want the second agent to have finished the work", result)
+	}
 	if got := strings.TrimSpace(readFileString(t, claudeCount)); got != "2" {
-		t.Fatalf("claude attempts = %q, want 2", got)
+		t.Fatalf("claude attempts = %q, want its own full cap of 2", got)
 	}
-	if _, err := os.Stat(codexCount); !os.IsNotExist(err) {
-		t.Fatalf("codex should not be called on plain failure: %v", err)
+	if got := strings.Count(readFileString(t, codexCount), "called"); got != 1 {
+		t.Fatalf("codex invocations = %d, want one — the turn handed on after claude's cap", got)
 	}
+	assertTaskDone(t, env.execFixture(), "01-a")
 }
 
 func TestRunTaskSetAgentFallbackReportsEarliestReset(t *testing.T) {

@@ -307,6 +307,14 @@ func runAgentFallbackWalk(d *Deps, w agentFallbackWalk) (agentWalkResult, error)
 				return result, nil
 			}
 			if try >= w.maxTries {
+				// The cap is spent and this preset still has not answered, so the
+				// turn passes to the next agent — the same event a refusal is, and
+				// reported the same way, so the operator reads why the list moved
+				// on rather than a gap (ADR-0231).
+				if i+1 < len(specs) && w.out != nil {
+					reason := exhaustedTryReason(outcome, w.timeout)
+					outputFor(w.out).line(ansiDim, "   %s", retryCapFallThroughMessage(w.role.Noun, preset, try, reason))
+				}
 				break
 			}
 			delay := attemptRetryDelay(w.retryDelays, try)
@@ -321,4 +329,15 @@ func runAgentFallbackWalk(d *Deps, w agentFallbackWalk) (agentWalkResult, error)
 		}
 	}
 	return result, nil
+}
+
+// exhaustedTryReason names what a role's last try ended on, for the line printed
+// when a preset's Task retry cap runs out. A timeout and a crash each have their
+// own sentence; a try that ran clean and still left the role nothing to read has
+// none, and the message drops the clause rather than inventing one.
+func exhaustedTryReason(outcome *attemptOutcome, timeout time.Duration) string {
+	if outcome != nil && outcome.timedOut {
+		return fmt.Sprintf("timed out after %s", timeout)
+	}
+	return verifyAttemptReason(outcome)
 }
