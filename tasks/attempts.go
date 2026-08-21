@@ -307,7 +307,6 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 			if err != nil {
 				return nil, nil, taskExitErr(sel, ExitOperational, "%v", err)
 			}
-			printConciseSummary(out, result)
 			// Every attempt the task had, including those an earlier agent in the
 			// fallback list spent before handing the turn on.
 			printAttemptBreakdown(d, out, ledger.streams)
@@ -746,9 +745,19 @@ func finalizeTaskDone(d *Deps, sel *Selection, runtimePath, summary string, comm
 	}})
 }
 
+// printConciseSummary narrates a completed single-task file run, which claims no
+// drain and so gets no Task result line: the drain's chokepoint prints its own
+// line for the same ending.
 func printConciseSummary(w io.Writer, result *RunTaskResult) {
 	out := outputFor(w)
 	out.line(ansiGreen, "✓ Completed %s/%s", result.Selection.TaskSetID, result.Selection.TaskID)
+	printCommitDetail(out, result)
+}
+
+// printCommitDetail names what a completed task left in the Runtime, beneath
+// whichever line announced the completion.
+func printCommitDetail(w io.Writer, result *RunTaskResult) {
+	out := outputFor(w)
 	if result.NoOp {
 		fmt.Fprintln(out, "  No implementation commit (verified no-op)")
 	} else if result.CommitSHA != "" {

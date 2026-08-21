@@ -829,8 +829,8 @@ func TestRunTaskPrintsInlineBreakdownOnDone(t *testing.T) {
 	out := buf.String()
 
 	summary, heading := strings.Index(out, "✓ Completed demo/01-a"), strings.Index(out, "Attempt timing")
-	if summary == -1 || heading == -1 || heading < summary {
-		t.Fatalf("breakdown not after completion summary:\n%s", out)
+	if summary == -1 || heading == -1 || summary < heading {
+		t.Fatalf("completion summary not after breakdown:\n%s", out)
 	}
 	breakdown := out[heading:]
 	if !strings.Contains(breakdown, "claude") || !strings.Contains(breakdown, "completed") {

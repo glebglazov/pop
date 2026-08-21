@@ -77,7 +77,7 @@ func TestSupervisorSpawnPlainImplementDrain(t *testing.T) {
 	if strings.Contains(confirmOut.String(), "Run AFK tasks in this Task set?") {
 		t.Fatalf("queue spawn must not ask for AFK consent:\n%s", confirmOut.String())
 	}
-	if !strings.Contains(out, "✓ Completed queue-drain/01-a") {
+	if !strings.Contains(out, "✓ queue-drain/01-a done") {
 		t.Fatalf("AFK task should run without a start prompt:\n%s", out)
 	}
 	for _, want := range []string{

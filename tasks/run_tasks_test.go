@@ -1829,7 +1829,7 @@ func TestRunTaskSetYesPrintsConciseSummary(t *testing.T) {
 		"   Attempt 1/3",
 		"── Agent output",
 		"── Agent finished for demo/01-a",
-		"✓ Completed demo/01-a",
+		"✓ demo/01-a done",
 		"✓ Completed task set demo",
 	} {
 		if !strings.Contains(out, want) {
@@ -1839,7 +1839,7 @@ func TestRunTaskSetYesPrintsConciseSummary(t *testing.T) {
 	if strings.Contains(out, "\033[") {
 		t.Fatalf("redirected output contains ANSI:\n%q", out)
 	}
-	if !strings.Contains(out, "Completed demo/01-a") || !strings.Contains(out, "Completed task set demo") {
+	if !strings.Contains(out, "demo/01-a done") || !strings.Contains(out, "Completed task set demo") {
 		t.Fatalf("missing concise summary:\n%s", out)
 	}
 	if strings.Count(out, "STATUS") != 1 {
