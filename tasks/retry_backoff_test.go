@@ -165,21 +165,28 @@ func TestRunTaskInstantRetriesWithEmptyDelayList(t *testing.T) {
 		}}, nil
 	}
 
+	// "Instant" is pinned by the retry wait never being asked for, not by a stopwatch:
+	// the whole-tree gate runs this beside every other test, where elapsed time
+	// measures the machine's load rather than the code under test.
+	var waits atomic.Int32
+	d.RetryDelayWait = func(io.Writer, time.Duration) bool {
+		waits.Add(1)
+		return false
+	}
+
 	opts := env.runOpts(true, agent)
 	opts.MaxTries = 2
 	opts.Output = io.Discard
 
-	start := time.Now()
 	_, err := RunTaskWith(d, nil, loadConfig, opts)
-	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("run failed: %v", err)
 	}
 	if got := atomic.LoadInt32(&calls); got != 2 {
 		t.Fatalf("started attempts = %d, want 2", got)
 	}
-	if elapsed > 2*time.Second {
-		t.Fatalf("instant retries took %s, want immediate", elapsed)
+	if got := waits.Load(); got != 0 {
+		t.Fatalf("retry waited %d times, want the empty delay list to retry at once", got)
 	}
 }
 

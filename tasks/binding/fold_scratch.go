@@ -22,6 +22,9 @@ type foldRebaseContext struct {
 	trunkPath   string
 	setBranch   string
 	trunkBranch string
+	// afterLanding is the addressing caller's tail, run past the landing boundary
+	// while the scratch ref still stands, and nil when the caller has none.
+	afterLanding func() error
 }
 
 // foldScratchBranch names the Fold scratch branch for a branch: `pop/fold/<branch>`
@@ -233,7 +236,8 @@ func refuseTrunkUnfitToLand(td *tasks.Deps, trunkPath string) error {
 
 // landFoldedBranch runs after trunk already carries the work, so it is past the
 // Fold boundary: the real branch force-moves to the folded tip — its first and only
-// move — the checkout returns to it, and the scratch branch goes. These are local
+// move — the checkout returns to it, the scratch branch goes, and the addressing
+// caller's own tail runs last. These are local
 // ref updates on landed work, so each is retried a bounded number of times and a
 // failure that outlasts that is reported for exactly what it is. Trunk is never
 // unwound; running fold again converges on the same end state (ADR-0229).
@@ -263,7 +267,30 @@ func landFoldedBranch(td *tasks.Deps, ctx foldRebaseContext, scratch string) err
 		return fmt.Errorf("fold landed in trunk and %s holds the work; only the fold scratch branch %s is left over — it could not be deleted after %d attempts: %w",
 			ctx.setBranch, scratch, foldPostLandingAttempts, err)
 	}
+
+	// The addressing caller's tail — for a Task set, the sign-off and the release of
+	// its binding — is the last thing that can fail on work that has already landed.
+	// It is recoverable only while something still says the landing happened, so a
+	// failure puts the scratch ref back: the next fold reads it as residue, resumes
+	// here and finishes the tail, where without it the fold would meet the
+	// already-contained refusal and never finish at all (ADR-0229).
+	if ctx.afterLanding != nil {
+		if err := retryAfterLanding(ctx.afterLanding); err != nil {
+			restoreFoldLandingMarker(td, ctx, scratch)
+			return fmt.Errorf("fold landed in trunk and %s holds the work, but finishing the fold failed after %d attempts; trunk stays as it is and the fold scratch branch %s marks the landing, so folding again finishes the job: %w",
+				ctx.setBranch, foldPostLandingAttempts, scratch, err)
+		}
+	}
 	return nil
+}
+
+// restoreFoldLandingMarker re-creates the scratch ref at the landed tip after the
+// addressing caller's tail failed. The ref is fold's own record, kept in git and
+// nowhere else, and it says exactly one thing: trunk carries this branch's work
+// because a fold put it there. Best-effort — the tail's failure is the more useful
+// thing to report, and a git that cannot write a ref will say so again on the retry.
+func restoreFoldLandingMarker(td *tasks.Deps, ctx foldRebaseContext, scratch string) {
+	_, _ = td.Git.CommandInDir(ctx.setPath, "branch", "-f", scratch, ctx.setBranch)
 }
 
 // foldPostLandingAttempts bounds the inline retry of the ref updates that follow the

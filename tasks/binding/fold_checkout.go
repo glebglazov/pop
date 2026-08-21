@@ -33,6 +33,15 @@ func FoldCheckout(td *tasks.Deps, cfg *config.Config, path string, opts FoldOpti
 	if path == "" {
 		return FoldCheckoutResult{}, fmt.Errorf("checkout path is required")
 	}
+	return foldCheckout(td, cfg, foldCheckoutRequest{path: path}, opts, out)
+}
+
+// foldCheckout is the one fold: preflight, the confirmation, the rebase, the Fold
+// conflict prompt's retry loop, the fast-forward and the post-landing sequence. Both
+// entry points run through it — a bare checkout addresses it with nothing but a path,
+// and a Task set hands it the set's addressing and the two hooks where a set's own
+// promises land (ADR-0229).
+func foldCheckout(td *tasks.Deps, cfg *config.Config, req foldCheckoutRequest, opts FoldOptions, out io.Writer) (FoldCheckoutResult, error) {
 	if td == nil {
 		td = tasks.DefaultDeps()
 	}
@@ -45,7 +54,7 @@ func FoldCheckout(td *tasks.Deps, cfg *config.Config, path string, opts FoldOpti
 
 	confirmed := !opts.ConfirmCheckoutFold
 	for {
-		plan, err := preflightFoldCheckout(td, cfg, foldCheckoutRequest{path: path})
+		plan, err := preflightFoldCheckout(td, cfg, req)
 		if err != nil {
 			return FoldCheckoutResult{}, err
 		}
@@ -58,10 +67,17 @@ func FoldCheckout(td *tasks.Deps, cfg *config.Config, path string, opts FoldOpti
 				return FoldCheckoutResult{}, fmt.Errorf("fold cancelled")
 			}
 		}
+		var manifest *tasks.Manifest
+		if req.afterPreflight != nil {
+			if manifest, err = req.afterPreflight(); err != nil {
+				return FoldCheckoutResult{}, err
+			}
+		}
+		ctx := plan.rebaseContext(manifest, req.afterLanding)
 		if plan.landedInTrunk {
-			err = landFoldedBranch(td, plan.rebaseContext(nil), foldScratchBranch(plan.branch))
+			err = landFoldedBranch(td, ctx, foldScratchBranch(plan.branch))
 		} else {
-			err = foldRebaseAndFastForward(td, cfg, opts, out, plan.rebaseContext(nil))
+			err = foldRebaseAndFastForward(td, cfg, opts, out, ctx)
 		}
 		if err != nil {
 			if errors.Is(err, tasks.ErrFoldRetry) {
@@ -91,6 +107,15 @@ type foldCheckoutRequest struct {
 	// before any cleanliness check — where the set-addressed fold's status gate
 	// has always sat, so a set's refusals keep their precedence.
 	gate func() error
+	// afterPreflight runs on each attempt once the plan has passed every refusal and
+	// before any git act: the set-addressed fold asks its sign-off here and answers
+	// with the manifest the Fold conflict prompt reads.
+	afterPreflight func() (*tasks.Manifest, error)
+	// afterLanding runs after trunk carries the work and the real branch has been
+	// moved onto it, while the scratch ref still stands. A caller's own tail belongs
+	// here rather than after the fold returns: a failure leaves that ref behind, and
+	// the ref is what brings a re-run back to this point (ADR-0229).
+	afterLanding func() error
 }
 
 // foldCheckoutPlan is a checkout whose fold has passed every path-level
@@ -112,15 +137,17 @@ type foldCheckoutPlan struct {
 
 // rebaseContext hands the git work what it needs. manifest is the addressing
 // set's manifest, which the Fold conflict prompt reads, and nil when no set
-// addressed this fold.
-func (p foldCheckoutPlan) rebaseContext(manifest *tasks.Manifest) foldRebaseContext {
+// addressed this fold; afterLanding is the addressing caller's own tail, run inside
+// the post-landing sequence.
+func (p foldCheckoutPlan) rebaseContext(manifest *tasks.Manifest, afterLanding func() error) foldRebaseContext {
 	return foldRebaseContext{
-		setID:       p.setID,
-		manifest:    manifest,
-		setPath:     p.path,
-		trunkPath:   p.trunkPath,
-		setBranch:   p.branch,
-		trunkBranch: p.trunkBranch,
+		setID:        p.setID,
+		manifest:     manifest,
+		setPath:      p.path,
+		trunkPath:    p.trunkPath,
+		setBranch:    p.branch,
+		trunkBranch:  p.trunkBranch,
+		afterLanding: afterLanding,
 	}
 }
 

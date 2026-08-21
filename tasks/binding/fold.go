@@ -1,7 +1,6 @@
 package binding
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -45,11 +44,11 @@ type FoldResult struct {
 // binding (ADR-0148, ADR-0156, ADR-0229). It is the set-addressed
 // specialization of FoldCheckout: it resolves the set to a checkout, adds the
 // promises a *set* owes — status eligibility, the Awaiting-approval sign-off,
-// binding release, reference-counted teardown — and leaves the git work to the
-// primitive. It never pushes, never fetches, and never archives the set. A Fold
-// conflict prompt "retry" aborts the in-flight rebase and restarts this verb
-// from preflight, which is why the sign-off is asked per attempt rather than
-// once around the loop.
+// binding release, reference-counted teardown — and leaves every git act,
+// including the retry loop and the conflict prompt, to the primitive. It never
+// pushes, never fetches, and never archives the set. A Fold conflict prompt
+// "retry" restarts the primitive from preflight, which is why the sign-off is
+// asked per attempt rather than once around the fold.
 func Fold(td *tasks.Deps, pd *project.Deps, cfg *config.Config, setID string, opts FoldOptions, hooks LifecycleHooks, out io.Writer) (FoldResult, error) {
 	setID = strings.TrimSpace(setID)
 	if setID == "" {
@@ -68,79 +67,73 @@ func Fold(td *tasks.Deps, pd *project.Deps, cfg *config.Config, setID string, op
 		opts.In = os.Stdin
 	}
 
-	for {
-		ctx, err := preflightFold(td, cfg, setID)
-		if err != nil {
-			return FoldResult{}, err
-		}
-		b := ctx.binding
-		runtimePath := ctx.plan.path
-		branch := ctx.plan.branch
+	key, b, err := resolveFoldBinding(td, setID)
+	if err != nil {
+		return FoldResult{}, err
+	}
 
-		if ctx.setStatus == tasks.StatusAwaitingApproval {
-			confirmed, err := confirmFoldSignOff(opts.In, out, opts.Yes, ctx.openHITL)
+	// The primitive owns the attempt loop, so both hooks below may run more than
+	// once: status is re-read by the gate on every attempt, and the sign-off is
+	// re-asked with it.
+	var status foldSetStatus
+	req := foldSetRequest(td, cfg, setID, b, &status)
+	req.afterPreflight = func() (*tasks.Manifest, error) {
+		if status.status == tasks.StatusAwaitingApproval {
+			confirmed, err := confirmFoldSignOff(opts.In, out, opts.Yes, status.openHITL)
 			if err != nil {
-				return FoldResult{}, err
+				return nil, err
 			}
 			if !confirmed {
-				return FoldResult{}, fmt.Errorf("fold cancelled")
+				return nil, fmt.Errorf("fold cancelled")
 			}
 		}
-
-		manifest := loadFoldManifest(td, setID, runtimePath)
-		if ctx.plan.landedInTrunk {
-			err = landFoldedBranch(td, ctx.plan.rebaseContext(manifest), foldScratchBranch(branch))
-		} else {
-			err = foldRebaseAndFastForward(td, cfg, opts, out, ctx.plan.rebaseContext(manifest))
-		}
-		if err != nil {
-			if errors.Is(err, tasks.ErrFoldRetry) {
-				continue
-			}
-			return FoldResult{}, err
-		}
-
-		if ctx.setStatus == tasks.StatusAwaitingApproval {
-			manifest = loadFoldManifest(td, setID, runtimePath)
-			if manifest == nil || !manifest.Valid {
-				return FoldResult{}, fmt.Errorf("fold: reload manifest for sign-off: task set %s is malformed or missing", setID)
-			}
-			if err := tasks.CompleteFoldSignOff(td, manifest, runtimePath); err != nil {
-				return FoldResult{}, fmt.Errorf("fold: complete sign-off: %w", err)
-			}
-		}
-
-		fmt.Fprintf(out, "Folded %s: trunk fast-forwarded onto %s\n", setID, branch)
-
-		if err := Delete(td, ctx.key); err != nil {
-			return FoldResult{}, fmt.Errorf("fold: release binding: %w", err)
-		}
-		fmt.Fprintf(out, "Released worktree binding for %s\n", setID)
-
-		tornDown, err := maybeTeardownAfterFold(td, pd, cfg, b, opts.Yes, opts.In, out, hooks)
-		if err != nil {
-			return FoldResult{}, err
-		}
-
-		return FoldResult{
-			SetID:       setID,
-			RuntimePath: runtimePath,
-			Branch:      branch,
-			TrunkPath:   ctx.plan.trunkPath,
-			TornDown:    tornDown,
-		}, nil
+		return loadFoldManifest(td, setID, b.RuntimePath), nil
 	}
+	req.afterLanding = func() error {
+		return completeFoldSetTail(td, setID, b.RuntimePath, key, status.status)
+	}
+
+	res, err := foldCheckout(td, cfg, req, opts, out)
+	if err != nil {
+		return FoldResult{}, err
+	}
+	fmt.Fprintf(out, "Released worktree binding for %s\n", setID)
+
+	tornDown, err := maybeTeardownAfterFold(td, pd, cfg, b, opts.Yes, opts.In, out, hooks)
+	if err != nil {
+		return FoldResult{}, err
+	}
+
+	return FoldResult{
+		SetID:       setID,
+		RuntimePath: res.RuntimePath,
+		Branch:      res.Branch,
+		TrunkPath:   res.TrunkPath,
+		TornDown:    tornDown,
+	}, nil
 }
 
-// foldPreflightContext is a set-addressed fold's plan: the checkout-level plan
-// the primitive validated, plus the binding it came from and the set status the
-// sign-off reads.
-type foldPreflightContext struct {
-	key       string
-	binding   Binding
-	plan      foldCheckoutPlan
-	setStatus tasks.TaskSetStatus
-	openHITL  []tasks.Task
+// completeFoldSetTail is everything a set-addressed fold owes once its work is in
+// trunk: the Awaiting-approval sign-off and the release of the binding. It runs
+// while the Fold scratch branch still stands, so a failure here leaves the ref that
+// tells the next fold the work landed and the set was never finished — which is what
+// makes a re-run converge instead of meeting the already-contained refusal
+// (ADR-0229). Re-entry is safe: a completed sign-off has no open HITL task left to
+// complete, and the set's status is re-read before it is asked for again.
+func completeFoldSetTail(td *tasks.Deps, setID, runtimePath, key string, status tasks.TaskSetStatus) error {
+	if status == tasks.StatusAwaitingApproval {
+		manifest := loadFoldManifest(td, setID, runtimePath)
+		if manifest == nil || !manifest.Valid {
+			return fmt.Errorf("fold: reload manifest for sign-off: task set %s is malformed or missing", setID)
+		}
+		if err := tasks.CompleteFoldSignOff(td, manifest, runtimePath); err != nil {
+			return fmt.Errorf("fold: complete sign-off: %w", err)
+		}
+	}
+	if err := Delete(td, key); err != nil {
+		return fmt.Errorf("fold: release binding: %w", err)
+	}
+	return nil
 }
 
 // PreflightFold applies the same precondition checks as Fold without rebasing
@@ -151,56 +144,57 @@ type foldPreflightContext struct {
 // left intact here when trunk already holds it. The actual Fold consumes that
 // Git-owned signal after it enters the post-landing path (ADR-0229).
 func PreflightFold(td *tasks.Deps, cfg *config.Config, setID string) error {
-	_, err := preflightFold(td, cfg, setID)
-	return err
-}
-
-func preflightFold(td *tasks.Deps, cfg *config.Config, setID string) (foldPreflightContext, error) {
-	setID = strings.TrimSpace(setID)
-	if setID == "" {
-		return foldPreflightContext{}, fmt.Errorf("set id is required")
-	}
 	if td == nil {
 		td = tasks.DefaultDeps()
 	}
+	setID = strings.TrimSpace(setID)
+	_, b, err := resolveFoldBinding(td, setID)
+	if err != nil {
+		return err
+	}
+	var status foldSetStatus
+	_, err = preflightFoldCheckout(td, cfg, foldSetRequest(td, cfg, setID, b, &status))
+	return err
+}
 
+// resolveFoldBinding names the checkout a set's fold acts on. It is the one
+// refusal that precedes every path-level check, because without a binding there is
+// no checkout to ask anything about.
+func resolveFoldBinding(td *tasks.Deps, setID string) (string, Binding, error) {
+	setID = strings.TrimSpace(setID)
+	if setID == "" {
+		return "", Binding{}, fmt.Errorf("set id is required")
+	}
 	key, b, ok, err := FindBySetID(td, setID)
 	if err != nil {
-		return foldPreflightContext{}, err
+		return "", Binding{}, err
 	}
-	if !ok {
-		return foldPreflightContext{}, fmt.Errorf("fold refused: %s has no worktree binding", setID)
+	if !ok || strings.TrimSpace(b.RuntimePath) == "" {
+		return "", Binding{}, fmt.Errorf("fold refused: %s has no worktree binding", setID)
 	}
-	runtimePath := strings.TrimSpace(b.RuntimePath)
-	if runtimePath == "" {
-		return foldPreflightContext{}, fmt.Errorf("fold refused: %s has no worktree binding", setID)
-	}
+	return key, b, nil
+}
 
-	// The status gate rides in as the primitive's gate so it keeps refusing where
-	// it always has: after the checkout resolves to something other than trunk,
-	// before either end is checked for cleanliness.
-	var status foldSetStatus
-	plan, err := preflightFoldCheckout(td, cfg, foldCheckoutRequest{
+// foldSetRequest addresses the primitive at the checkout a set is bound to. The
+// status gate rides in as the primitive's gate so it keeps refusing where it always
+// has: after the checkout resolves to something other than trunk, before either end
+// is checked for cleanliness. status is written through so the caller can read the
+// status each attempt saw.
+func foldSetRequest(td *tasks.Deps, cfg *config.Config, setID string, b Binding, status *foldSetStatus) foldCheckoutRequest {
+	runtimePath := strings.TrimSpace(b.RuntimePath)
+	return foldCheckoutRequest{
 		path:   runtimePath,
 		setID:  setID,
 		branch: strings.TrimSpace(b.Branch),
 		gate: func() error {
-			var err error
-			status, err = resolveFoldSetStatus(td, cfg, setID, runtimePath)
-			return err
+			resolved, err := resolveFoldSetStatus(td, cfg, setID, runtimePath)
+			if err != nil {
+				return err
+			}
+			*status = resolved
+			return nil
 		},
-	})
-	if err != nil {
-		return foldPreflightContext{}, err
 	}
-
-	return foldPreflightContext{
-		key:       key,
-		binding:   b,
-		plan:      plan,
-		setStatus: status.status,
-		openHITL:  status.openHITL,
-	}, nil
 }
 
 func sameCheckout(td *tasks.Deps, a, b string) (bool, error) {

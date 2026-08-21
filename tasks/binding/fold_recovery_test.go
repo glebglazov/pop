@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -626,4 +627,158 @@ func sameStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// The tail a Task set owes — sign-off and binding release — runs on work that has
+// already landed, and by then the scratch ref is gone. A failure there must not leave
+// the set stranded: the landing marker goes back, and the next fold reads it, resumes
+// past the already-contained refusal, completes the sign-off and releases the
+// binding.
+func TestTaskSetFoldTailFailureRestoresLandingMarkerAndRerunFinishes(t *testing.T) {
+	t.Parallel()
+	repo := initAdoptRepo(t)
+	td := lifecycleTestDeps(t)
+	setID := "set-tail-signoff"
+	seedAwaitingApprovalTaskSet(t, td, repo, setID, []map[string]any{
+		{"id": "09-signoff", "title": "Sign off"},
+	})
+	b, err := ProvisionManagedBinding(ProvisionManagedBindingRequest{
+		TD: td, CheckoutPath: repo, SetID: setID,
+	})
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	writeFileCommit(t, b.RuntimePath, "feature.txt", "set work\n", "set work")
+	writeFileCommit(t, repo, "trunk.txt", "trunk work\n", "trunk work")
+	scratch := foldScratchBranch(b.Branch)
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+
+	mock, ok := td.FS.(*deps.MockFileSystem)
+	if !ok {
+		t.Fatalf("test deps FS = %T, want a mock to fail the sign-off write", td.FS)
+	}
+	realRename := mock.RenameFunc
+
+	// The sign-off write is armed only once git has finished and deleted the scratch
+	// ref: that is the state a retry could not otherwise recover from.
+	var armed atomic.Bool
+	var signOffFailures atomic.Int32
+	mock.RenameFunc = func(oldpath, newpath string) error {
+		if armed.Load() && strings.HasSuffix(newpath, filepath.Join(setID, "index.json")) {
+			signOffFailures.Add(1)
+			return fmt.Errorf("simulated manifest write failure")
+		}
+		return realRename(oldpath, newpath)
+	}
+	inner := td.Git
+	td.Git = &interceptGit{
+		inner: inner,
+		onCommandInDir: func(dir string, args ...string) (string, error) {
+			out, err := inner.CommandInDir(dir, args...)
+			if err == nil && len(args) >= 3 && args[0] == "branch" && args[1] == "-d" && args[2] == scratch {
+				armed.Store(true)
+			}
+			return out, err
+		},
+	}
+
+	_, err = Fold(td, nil, cfg, setID, FoldOptions{Yes: true, In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "marks the landing") {
+		t.Fatalf("err = %v, want the tail failure to report the preserved landing marker", err)
+	}
+	if got := signOffFailures.Load(); got != int32(foldPostLandingAttempts) {
+		t.Fatalf("sign-off attempts = %d, want the bounded %d", got, foldPostLandingAttempts)
+	}
+	landed := refAt(t, repo, "HEAD")
+	if got := refAt(t, repo, b.Branch); got != landed {
+		t.Fatalf("real branch = %s, want the landed tip %s", got, landed)
+	}
+	if !branchExists(t, repo, scratch) {
+		t.Fatalf("tail failure left no landing marker %s, so a rerun cannot converge", scratch)
+	}
+	if _, _, ok, _ := FindBySetID(td, setID); !ok {
+		t.Fatal("binding released despite the failed tail")
+	}
+	if got := manifestStatusAt(t, td, repo, setID); got != tasks.StatusAwaitingApproval {
+		t.Fatalf("set status = %q, want it still AWAITING-APPROVAL", got)
+	}
+
+	armed.Store(false)
+	td.Git = inner
+	got, err := Fold(td, nil, cfg, setID, FoldOptions{Yes: true, In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, io.Discard)
+	if err != nil {
+		t.Fatalf("rerun after tail failure: %v", err)
+	}
+	if !got.TornDown {
+		t.Fatal("rerun did not complete reference-counted teardown")
+	}
+	if s := manifestStatusAt(t, td, repo, setID); s != tasks.StatusDone {
+		t.Fatalf("set status after rerun = %q, want DONE", s)
+	}
+	if _, _, ok, err := FindBySetID(td, setID); err != nil || ok {
+		t.Fatalf("binding after rerun: present=%v err=%v", ok, err)
+	}
+	if branchExists(t, repo, scratch) {
+		t.Fatalf("rerun left the landing marker %s", scratch)
+	}
+	if now := refAt(t, repo, "HEAD"); now != landed {
+		t.Fatalf("rerun moved trunk: %s -> %s", landed, now)
+	}
+	log := runGitOutput(t, repo, "log", "--oneline")
+	if n := strings.Count(log, "set work"); n != 1 {
+		t.Fatalf("trunk carries the folded commit %d times, want one:\n%s", n, log)
+	}
+}
+
+// The recovery does not care which of the addressing caller's tail steps failed —
+// binding release fails the same way a sign-off does. Asked at the primitive, any
+// tail failure restores the marker, and the next fold resumes at that same point and
+// runs the tail again.
+func TestFoldTailFailureRecoversWhicheverTailStepFailed(t *testing.T) {
+	t.Parallel()
+	repo := initAdoptRepo(t)
+	td := lifecycleTestDeps(t)
+	wt := addLinkedWorktree(t, repo, "human-work")
+	writeFileCommit(t, wt, "feature.txt", "branch work\n", "branch work")
+	writeFileCommit(t, repo, "trunk.txt", "trunk work\n", "trunk work")
+	scratch := foldScratchBranch("human-work")
+	cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
+
+	var calls atomic.Int32
+	failing := foldCheckoutRequest{path: wt, afterLanding: func() error {
+		calls.Add(1)
+		return fmt.Errorf("simulated tail failure")
+	}}
+	opts := FoldOptions{In: tasks.NonInteractiveReader{}}
+	if _, err := foldCheckout(td, cfg, failing, opts, io.Discard); err == nil || !strings.Contains(err.Error(), "marks the landing") {
+		t.Fatalf("err = %v, want the tail failure to report the preserved landing marker", err)
+	}
+	if got := calls.Load(); got != int32(foldPostLandingAttempts) {
+		t.Fatalf("tail attempts = %d, want the bounded %d", got, foldPostLandingAttempts)
+	}
+	landed := refAt(t, repo, "HEAD")
+	if !branchExists(t, repo, scratch) {
+		t.Fatalf("tail failure left no landing marker %s", scratch)
+	}
+	if got := refAt(t, wt, scratch); got != landed {
+		t.Fatalf("landing marker at %s, want the landed tip %s", got, landed)
+	}
+
+	var reruns atomic.Int32
+	finishing := foldCheckoutRequest{path: wt, afterLanding: func() error {
+		reruns.Add(1)
+		return nil
+	}}
+	if _, err := foldCheckout(td, cfg, finishing, opts, io.Discard); err != nil {
+		t.Fatalf("rerun after tail failure: %v", err)
+	}
+	if got := reruns.Load(); got != 1 {
+		t.Fatalf("rerun ran the tail %d times, want once", got)
+	}
+	if branchExists(t, repo, scratch) {
+		t.Fatalf("rerun left the landing marker %s", scratch)
+	}
+	if now := refAt(t, repo, "HEAD"); now != landed {
+		t.Fatalf("rerun moved trunk: %s -> %s", landed, now)
+	}
 }
