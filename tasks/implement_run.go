@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/glebglazov/pop/config"
@@ -162,6 +163,21 @@ func newImplementRun(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 	}, nil
 }
 
+// invocationDir is the directory the run was invoked from, as the Drain header
+// names it: the caller's explicit CWD when it supplied one, otherwise the
+// process working directory. Empty when neither resolves, which drops the
+// header's conditional "invoked from" line rather than guessing.
+func (r *implementRun) invocationDir() string {
+	if cwd := strings.TrimSpace(r.opts.CWD); cwd != "" {
+		return cwd
+	}
+	cwd, err := r.d.FS.Getwd()
+	if err != nil {
+		return ""
+	}
+	return cwd
+}
+
 // finalize records the appropriate exit-reason terminal for the run's latest
 // Drain (nil while parked ⇒ a no-op, since the park already recorded the
 // segment's terminal), or cancels it when the run was declined and never executed
@@ -193,6 +209,9 @@ func (r *implementRun) finalize(errp *error) {
 func (r *implementRun) setup() error {
 	d := r.d
 	opts := r.opts
+
+	// The Drain header opens every whole-set run, before anything else it prints.
+	renderDrainHeader(r.out, r.taskSetID, r.runtimePath, r.invocationDir(), opts.DrainHeader)
 
 	// A provisioned managed worktree forked at register time may lag trunk by
 	// the time its first task runs; fast-forward commitless branches onto current

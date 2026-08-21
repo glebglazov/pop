@@ -236,9 +236,14 @@ func TestResolveTaskSetRuntimeManagedDirectiveForegroundIgnored(t *testing.T) {
 	root, d := setupImplementFixture(t)
 	seedManagedIntentImplement(t, d, root, "demo")
 
-	resolved, err := ResolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root}, "demo", false)
+	resolved, header, err := ResolveTaskSetRuntimeWith(d, tasks.ResolveInput{CWD: root}, "demo", false, RuntimeConfirmOptions{})
 	if err != nil {
 		t.Fatalf("resolve runtime: %v", err)
+	}
+	// The run that records the Default binding is the one that announces it, so
+	// the header carries the fact into the drain.
+	if header.Binding != tasks.DrainHeaderAdopted || !header.RecordedDefaultBinding {
+		t.Fatalf("header = %+v, want a just-recorded adopted default binding", header)
 	}
 	// The default binding's checkout is the current checkout the executor already
 	// resolves, so routing leaves RuntimeOverride untouched (no re-pointing).
@@ -297,18 +302,15 @@ func TestResolveTaskSetRuntimeBoundDrainsAtBindingFromOtherCheckout(t *testing.T
 		t.Fatal(err)
 	}
 
-	var report bytes.Buffer
-	resolved, err := ResolveTaskSetRuntimeWith(d, tasks.ResolveInput{CWD: root}, "demo", false, RuntimeConfirmOptions{
-		Output: &report,
-	})
+	resolved, header, err := ResolveTaskSetRuntimeWith(d, tasks.ResolveInput{CWD: root}, "demo", false, RuntimeConfirmOptions{})
 	if err != nil {
 		t.Fatalf("resolve runtime: %v", err)
 	}
 	if resolved.RuntimeOverride != wt {
 		t.Fatalf("RuntimeOverride = %q, want bound checkout %q", resolved.RuntimeOverride, wt)
 	}
-	if !strings.Contains(report.String(), "draining at bound checkout "+wt) {
-		t.Fatalf("report = %q, want drain-at-binding location for %q", report.String(), wt)
+	if header.Binding != tasks.DrainHeaderAdopted || header.RecordedDefaultBinding {
+		t.Fatalf("header = %+v, want an adopted binding the run did not just record", header)
 	}
 
 	b, ok, err := binding.Lookup(d.tasksDeps(), binding.Key(id, "demo"))
@@ -446,7 +448,7 @@ func TestResolveTaskSetRuntimeInWorktreeRejectsBoundSet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = resolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root}, "demo", true, false, RuntimeConfirmOptions{})
+	_, _, err = resolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root}, "demo", true, false, RuntimeConfirmOptions{})
 	if err == nil || !strings.Contains(err.Error(), "already bound") || !strings.Contains(err.Error(), "--force-rebind") {
 		t.Fatalf("err = %v, want already-bound rejection with --force-rebind guidance", err)
 	}
@@ -469,8 +471,7 @@ func TestResolveTaskSetRuntimeForceRebindCleanSetRepoints(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var out bytes.Buffer
-	resolved, err := resolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root}, "demo", false, true, RuntimeConfirmOptions{Output: &out})
+	resolved, _, err := resolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root}, "demo", false, true, RuntimeConfirmOptions{})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -484,9 +485,6 @@ func TestResolveTaskSetRuntimeForceRebindCleanSetRepoints(t *testing.T) {
 	b, ok, err := binding.Lookup(d.tasksDeps(), binding.Key(id, "demo"))
 	if err != nil || !ok || b.RuntimePath != currentRuntime {
 		t.Fatalf("binding = %+v ok=%v, want rebind to %q", b, ok, currentRuntime)
-	}
-	if out.String() != "" {
-		t.Fatalf("unexpected output for clean rebind: %q", out.String())
 	}
 }
 
@@ -508,10 +506,9 @@ func TestResolveTaskSetRuntimeForceRebindStartedDecline(t *testing.T) {
 	}
 
 	var report bytes.Buffer
-	resolved, err := resolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root}, "demo", false, true, RuntimeConfirmOptions{
+	resolved, _, err := resolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root}, "demo", false, true, RuntimeConfirmOptions{
 		ConfirmIn:  strings.NewReader("n\n"),
 		ConfirmOut: &report,
-		Output:     &report,
 	})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -545,7 +542,7 @@ func TestResolveTaskSetRuntimeForceRebindStartedNonInteractiveErrors(t *testing.
 		t.Fatal(err)
 	}
 
-	_, err = resolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root}, "demo", false, true, RuntimeConfirmOptions{
+	_, _, err = resolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root}, "demo", false, true, RuntimeConfirmOptions{
 		ConfirmIn: tasks.NonInteractiveReader{},
 	})
 	if err == nil || !strings.Contains(err.Error(), "non-interactive implement requires --yes to rebind away from binding when the set has progress") {
@@ -570,9 +567,9 @@ func TestResolveTaskSetRuntimeForceRebindStartedYesProceeds(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resolved, err := resolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root}, "demo", false, true, RuntimeConfirmOptions{
-		Yes:        true,
-		ConfirmIn:  tasks.NonInteractiveReader{},
+	resolved, _, err := resolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root}, "demo", false, true, RuntimeConfirmOptions{
+		Yes:       true,
+		ConfirmIn: tasks.NonInteractiveReader{},
 	})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -596,7 +593,7 @@ func TestResolveTaskSetRuntimeForceRebindManagedTeardownAfterProgress(t *testing
 	managed := seedImplementManagedBinding(t, td, root, "demo")
 
 	var confirmOut bytes.Buffer
-	resolved, err := resolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root}, "demo", false, true, RuntimeConfirmOptions{
+	resolved, _, err := resolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root}, "demo", false, true, RuntimeConfirmOptions{
 		ConfirmIn:  strings.NewReader("y\ny\n"),
 		ConfirmOut: &confirmOut,
 	})
@@ -638,9 +635,9 @@ func TestResolveTaskSetRuntimeInWorktreeForceRebindRetargets(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resolved, err := resolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root}, "demo", true, true, RuntimeConfirmOptions{
-		Yes:        true,
-		ConfirmIn:  tasks.NonInteractiveReader{},
+	resolved, _, err := resolveTaskSetRuntime(d, tasks.ResolveInput{CWD: root}, "demo", true, true, RuntimeConfirmOptions{
+		Yes:       true,
+		ConfirmIn: tasks.NonInteractiveReader{},
 	})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
