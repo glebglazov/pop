@@ -66,6 +66,11 @@ type RunTaskResult struct {
 	// UnavailablePresets lists every preset that was human-healing unavailable
 	// when the agent fallback list is fully exhausted (ADR-0153).
 	UnavailablePresets []AgentProceedVerdict
+	// NoAgentStarted marks a walk in which no preset ran a single Task attempt —
+	// every one cooling, capped, unauthenticated or missing from PATH. Nothing
+	// was attempted, so nothing failed and no task changed state: the run ends on
+	// a no-op, which is a different event from an exhausted list (ADR-0231).
+	NoAgentStarted bool
 	CommitSHA          string
 	AgentSummary       string
 }
@@ -277,7 +282,7 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 					Render(out, afterRefresh)
 				}
 			}
-			return result, taskExitErr(sel, ExitSetup, "%s", formatHumanHealingExhaustionMessage(presets))
+			return result, taskExitErr(sel, ExitSetup, "%s", humanHealingStopMessage(sel, result.NoAgentStarted, presets))
 		}
 	}
 

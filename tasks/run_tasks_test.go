@@ -1276,7 +1276,7 @@ func TestRunTaskSetFailedStopMentionsCompleteAndReset(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
-	agent := writeSequentialFakeAgent(t, env.root, []fakeAgentStep{{exitCode: 1}})
+	agent := writeSequentialFakeAgent(t, env.root, []fakeAgentStep{{skipSentinel: true}})
 
 	var buf bytes.Buffer
 	opts := env.runTaskSetOpts(true, agent, &buf)
@@ -1303,7 +1303,10 @@ func TestRunTaskSetHITLOnlyTaskSetRejectedAtSelection(t *testing.T) {
 	assertExitCode(t, err, ExitNoRunnable)
 }
 
-func TestRunTaskSetFailedTaskStopsDrain(t *testing.T) {
+// A real shim exiting non-zero stops the drain where it stands, and the task it
+// died on keeps its Open status: a non-zero exit is the provider falling over,
+// never the work, so the next drain gets the task back (ADR-0231).
+func TestRunTaskSetCrashedTaskStopsDrain(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open"},
@@ -1319,7 +1322,7 @@ func TestRunTaskSetFailedTaskStopsDrain(t *testing.T) {
 	_, err := RunTaskSetWith(env.deps(), nil, nil, opts)
 	assertExitCode(t, err, ExitOperational)
 	assertTaskDone(t, env.execFixture(), "01-a")
-	assertTaskFailed(t, env.execFixture(), "02-b", 1)
+	assertTaskOpen(t, env.execFixture(), "02-b")
 }
 
 func TestRunTaskSetClaudeQuotaPauseRegistersRecoveryWaiter(t *testing.T) {
@@ -1666,7 +1669,7 @@ func TestRunTaskSetFailedGateLiveFailureRerunRetries(t *testing.T) {
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 	})
 	agent := writeSequentialFakeAgent(t, env.root, []fakeAgentStep{
-		{exitCode: 1},
+		{skipSentinel: true},
 		{summary: "recovered"},
 	})
 
@@ -2402,7 +2405,9 @@ func TestRunTaskSetPinnedModelBypassesTheEffortModelSkip(t *testing.T) {
 }
 
 // Only the subscription gate falls through: kimi's other 401s are ordinary
-// failures that burn the retry cap and finalize the task Failed.
+// failures that burn the retry cap. Nothing recognises them, so they end the
+// walk as what they are on the wire — a non-zero exit, charged to the provider,
+// leaving the task Open for the next drain (ADR-0231).
 func TestRunTaskSetKimiAuthErrorFailsThroughRetryCap(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
@@ -2425,7 +2430,7 @@ func TestRunTaskSetKimiAuthErrorFailsThroughRetryCap(t *testing.T) {
 	if strings.Contains(buf.String(), "cannot run") {
 		t.Fatalf("generic auth 401 must not read as a model refusal:\n%s", buf.String())
 	}
-	assertTaskFailed(t, env.execFixture(), "01-a", 2)
+	assertTaskOpen(t, env.execFixture(), "01-a")
 }
 
 func TestRunTaskSetAllAgentsHumanHealingUnavailableExitsSetup(t *testing.T) {
@@ -3416,6 +3421,10 @@ func (e *runTaskSetFixture) runTaskSetOpts(yes bool, agentCmd string, out io.Wri
 type fakeAgentStep struct {
 	summary  string
 	exitCode int
+	// skipSentinel ends the step with no Completion sentinel: the exit-zero
+	// contract failure, which is the only side of the exit status a task fault
+	// lives on and so the only way a test drives a task to Failed (ADR-0231).
+	skipSentinel bool
 }
 
 type checkingPromptReader struct {

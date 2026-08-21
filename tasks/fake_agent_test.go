@@ -44,8 +44,8 @@ import (
 //   - timeout kill: TestRunTaskSetTimeoutPropagation — the shim sleeps past the
 //     timeout and is SIGKILLed via the process group; the fake never hangs, so
 //     this must spawn.
-//   - non-zero exit: TestRunTaskSetFailedTaskStopsDrain — a real shim exits
-//     non-zero and the drain records the failure.
+//   - non-zero exit: TestRunTaskSetCrashedTaskStopsDrain — a real shim exits
+//     non-zero and the drain stops with the task left open.
 //   - quota-signal parsing: TestRunTaskSetClaudeQuotaPauseRegistersRecoveryWaiter
 //     — a real `claude` preset binary emits a quota-limit result line parsed by
 //     the normalizer.
@@ -86,7 +86,7 @@ var realShimSmokeSet = []string{
 	"TestRunTaskSetDrainsMultipleAFKTasksInOrder",
 	"TestRunTaskStructuredAttemptWritesStream",
 	"TestRunTaskSetTimeoutPropagation",
-	"TestRunTaskSetFailedTaskStopsDrain",
+	"TestRunTaskSetCrashedTaskStopsDrain",
 	"TestRunTaskSetClaudeQuotaPauseRegistersRecoveryWaiter",
 	"TestRunAttendedNonTerminalStdinPlainExec",
 	"TestRunAttendedTTYNotStdinFd",
@@ -255,6 +255,10 @@ func (b *fakeAgentBehavior) play(dir string, stdout io.Writer, prompt string) in
 		var step fakeAgentStep
 		if i < len(b.steps) {
 			step = b.steps[i]
+		}
+		if step.skipSentinel {
+			fmt.Fprintln(stdout, "incomplete")
+			return step.exitCode
 		}
 		summary := step.summary
 		if summary == "" {

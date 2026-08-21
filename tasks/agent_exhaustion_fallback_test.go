@@ -59,11 +59,12 @@ func TestUnrecognisedFailureHandsTheTaskToTheNextAgent(t *testing.T) {
 	assertTaskDone(t, env.execFixture(), "01-a")
 }
 
-// TestEveryAgentSpentFailsTheTaskAndStopsTheDrain is the other side of the same
-// walk: with no agent left the ending is the one a spent cap always wrote — the
-// task Failed, counted over every attempt every agent made — and the drain stops
-// rather than handing the next task the same dead list.
-func TestEveryAgentSpentFailsTheTaskAndStopsTheDrain(t *testing.T) {
+// TestEveryAgentSpentStopsTheDrain is the other side of the same walk: with no
+// agent left the drain stops where it stands rather than handing the next task
+// the same dead list. Both agents here died on the provider's side, so the task
+// keeps its Open status — the ending each fault gets is
+// TestExhaustedWalkEndings' subject (ADR-0231).
+func TestEveryAgentSpentStopsTheDrain(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
 		{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "open"},
@@ -85,10 +86,12 @@ func TestEveryAgentSpentFailsTheTaskAndStopsTheDrain(t *testing.T) {
 	if got := agentCalls(t, claudeCalls); got != 2 {
 		t.Fatalf("claude attempts = %d, want its own 2 after codex handed on", got)
 	}
-	// Four attempts is what the task actually had; the count is the task's, not
-	// the last agent's share of it.
-	assertTaskFailed(t, env.execFixture(), "01-a", 4)
-	assertProgressContains(t, env.execFixture(), "FAILED", "API Error: 529 Overloaded")
+	// Four attempts is what the task actually had; the breakdown printed at the
+	// stop is the task's, not the last agent's share of it.
+	if want := "Out of agents for demo/01-a after 4 attempts"; !strings.Contains(buf.String(), want) {
+		t.Fatalf("output missing %q:\n%s", want, buf.String())
+	}
+	assertTaskStatus(t, env, "01-a", TaskOpen)
 	assertTaskStatus(t, env, "02-b", TaskOpen)
 }
 

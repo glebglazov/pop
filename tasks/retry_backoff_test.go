@@ -212,5 +212,8 @@ func TestRunTaskConfigMaxTriesWithoutExplicitFlag(t *testing.T) {
 
 	_, err := RunTaskWith(d, nil, loadConfig, opts)
 	assertExitCode(t, err, ExitOperational)
-	assertTaskFailed(t, env, "01-a", 5)
+	if got := atomic.LoadInt32(&calls); got != 5 {
+		t.Fatalf("started attempts = %d, want the configured cap of 5", got)
+	}
+	assertTaskOpen(t, env, "01-a")
 }

@@ -17,9 +17,10 @@ const (
 	runTaskContinue runTaskDirective = iota
 	// runTaskReturn hands the returned (result, err) pair straight back to the
 	// caller — a Drain collision, a dirty-strategy failure, the exhausted-attempts
-	// exec error (after the Failed gate falls through to advice), a quota-recovery
-	// wait error, or a clean quota-pause exit with the pause fields populated —
-	// exactly as the inline branch returned.
+	// exec error (after the Failed gate falls through to advice, or straight away
+	// when the walk left the task Open), a quota-recovery wait error, or a clean
+	// quota-pause exit with the pause fields populated — exactly as the inline
+	// branch returned.
 	runTaskReturn
 )
 
@@ -32,7 +33,9 @@ const (
 // executeTaskAttemptsWithAgentFallback. On an exec error it refreshes, renders,
 // and runs the Failed gate choreography — a handled disposition keeps draining
 // (runTaskContinue), otherwise it prints the static stop advice and returns the
-// original exec error. A quota pause parks and waits for recovery (ADR-0100); a
+// original exec error. An exec error from a walk exhausted by provider collapses
+// skips that choreography: the task is still Open, so there is no failure to
+// dispose of and the drain simply stops (ADR-0231). A quota pause parks and waits for recovery (ADR-0100); a
 // failed waiter registration exits cleanly with the pause fields populated on the
 // result, while a recovered wait keeps draining. A completed attempt is appended
 // to the result and the loop continues.
@@ -118,6 +121,14 @@ func (r *implementRun) runSelectedTask(currentRefresh *RefreshResult, sel *Selec
 				}
 				return runTaskReturn, result, execErr
 			}
+			if fault, exhausted := exhaustedWalkFault(execErr); exhausted && fault.leavesTaskOpen() {
+				// The agent list ran out on provider collapses alone, so the walk
+				// left the task Open: there is no failure for the Failed gate to
+				// dispose of, and the drain stops for Work supervision to pick the
+				// task up once the machine is awake and the network is back
+				// (ADR-0231).
+				return runTaskReturn, result, execErr
+			}
 			// Park the Runtime execution lock before the post-failure Failed gate
 			// menu so it runs lock-free (ADR-0067).
 			handled, gateErr := r.failedGate(m)
@@ -142,7 +153,7 @@ func (r *implementRun) runSelectedTask(currentRefresh *RefreshResult, sel *Selec
 				presets = []AgentProceedVerdict{*u}
 			}
 			result.ProceedVerdict = &presets[0]
-			return runTaskReturn, result, taskExitErr(sel, ExitSetup, "%s", formatHumanHealingExhaustionMessage(presets))
+			return runTaskReturn, result, taskExitErr(sel, ExitSetup, "%s", humanHealingStopMessage(sel, taskResult.NoAgentStarted, presets))
 		}
 		// Quota recovery wait (ADR-0100): instead of exiting with ExitQuotaPaused,
 		// park the drain, register a recovery waiter, and poll until the preset's

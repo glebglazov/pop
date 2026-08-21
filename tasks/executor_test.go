@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -250,6 +251,8 @@ func TestRunTaskPiQuotaPause(t *testing.T) {
 	}
 }
 
+// A crashed agent still exits pop operationally, but the task it crashed on is
+// left Open: the exit status is the provider's news, not the work's (ADR-0231).
 func TestRunTaskAgentFailureExitCode(t *testing.T) {
 	env := setupExecutorFixture(t, false)
 	agent := writeFakeAgent(t, env.root, fakeAgentConfig{exitCode: 1})
@@ -259,7 +262,7 @@ func TestRunTaskAgentFailureExitCode(t *testing.T) {
 	opts.MaxTries = 1
 	_, err := RunTaskWith(d, nil, nil, opts)
 	assertExitCode(t, err, ExitOperational)
-	assertTaskFailed(t, env, "01-a", 1)
+	assertTaskOpen(t, env, "01-a")
 }
 
 func TestRunTaskMissingSentinelFails(t *testing.T) {
@@ -1037,8 +1040,8 @@ func assertExitCode(t *testing.T, err error, code int) {
 	if err == nil {
 		t.Fatalf("expected exit %d", code)
 	}
-	ee, ok := err.(*ExitError)
-	if !ok || ee.Code != code {
+	var ee *ExitError
+	if !errors.As(err, &ee) || ee.Code != code {
 		t.Fatalf("err = %v, want code %d", err, code)
 	}
 }

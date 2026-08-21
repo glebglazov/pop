@@ -73,14 +73,16 @@ func TestAttemptScriptCombinesRawOutputAndExitCode(t *testing.T) {
 	if !strings.Contains(err.Error(), providerErr) {
 		t.Fatalf("err = %v, want it to carry the declared provider text", err)
 	}
-	assertTaskFailed(t, env, "01-a", 1)
+	// A crash is the provider's, so the task keeps its Open status (ADR-0231).
+	assertTaskOpen(t, env, "01-a")
 }
 
 // TestFailedAttemptsReportProviderDiagnostic drives two of the real wordings
-// observed on this machine through a two-attempt run and follows the recorded
-// reason to every surface it feeds: the failure the human sees, the Failed line
-// in the progress record, and the digest handed to the attempt after it
-// (ADR-0231).
+// observed on this machine through a two-attempt run and follows the reason to
+// the surfaces it feeds: the failure the human sees and the digest handed to the
+// attempt after it. Nothing is written against the task — every one of these
+// exits non-zero, and a provider that fell over leaves the work exactly where it
+// was (ADR-0231).
 func TestFailedAttemptsReportProviderDiagnostic(t *testing.T) {
 	env := setupExecutorFixture(t, false)
 	const (
@@ -103,8 +105,10 @@ func TestFailedAttemptsReportProviderDiagnostic(t *testing.T) {
 	if strings.Contains(err.Error(), "agent exited with status") {
 		t.Fatalf("err = %v, want no exit-code phrasing when the provider spoke", err)
 	}
-	assertTaskFailed(t, env, "01-a", 2)
-	assertProgressContains(t, env, "FAILED", overloaded)
+	assertTaskOpen(t, env, "01-a")
+	if _, statErr := os.Stat(filepath.Join(env.demoDir(), "progress.txt")); !os.IsNotExist(statErr) {
+		t.Fatalf("a provider collapse wrote a terminal progress record: %v", statErr)
+	}
 }
 
 // installClaudeCrashingAgent puts a fake `claude` on PATH that opens its
@@ -176,7 +180,7 @@ func TestFailedAttemptWithoutDiagnosticNamesExitCode(t *testing.T) {
 	if !strings.Contains(err.Error(), "agent exited with status 1") {
 		t.Fatalf("err = %v, want the exit-code fallback", err)
 	}
-	assertProgressContains(t, env, "FAILED", "agent exited with status 1")
+	assertTaskOpen(t, env, "01-a")
 }
 
 func TestRunTaskExhaustedRetriesMarkFailed(t *testing.T) {
@@ -247,7 +251,7 @@ func TestRunTaskConfigurableMaxTries(t *testing.T) {
 	if got := atomic.LoadInt32(&calls); got != 5 {
 		t.Fatalf("started attempts = %d, want 5", got)
 	}
-	assertTaskFailed(t, env, "01-a", 5)
+	assertTaskOpen(t, env, "01-a")
 }
 
 func installClaudeQuotaAgent(t *testing.T, root string) string {

@@ -91,50 +91,6 @@ func (l *taskAttemptLedger) record(path string) {
 	}
 }
 
-// attemptCapExhaustion is a preset that spent its whole Task retry cap without
-// finishing. It carries the ending the retry loop would once have written on the
-// spot, because whether this is the task's ending at all turns on something only
-// the Agent fallback walk knows: whether the list has another agent left
-// (ADR-0231).
-type attemptCapExhaustion struct {
-	preset string
-	// attempts is how many tries this preset itself spent, which is the cap
-	// unless the cap was reached by a shorter route.
-	attempts int
-	// reason is what the last attempt ended on, in the provider's own words
-	// wherever it left any: the sentence the fall-through line shows the
-	// operator and the prior-attempt digest carries to the next agent.
-	reason string
-	// summary is the FAILED progress line this ending writes if no agent is
-	// left, already phrased against the task's own attempt count rather than
-	// this preset's share of it.
-	summary string
-}
-
-func (e attemptCapExhaustion) fallThroughMessage(role string) string {
-	return retryCapFallThroughMessage(role, e.preset, e.attempts, e.reason)
-}
-
-// retryCapFallThroughMessage is the dim line printed when a preset spent its
-// whole Task retry cap without finishing and the turn passes to the next agent.
-// It reads like a proceed verdict's fall-through on purpose: to the operator the
-// two are one event — this agent is not going to do the work and the next one is
-// up — and the only thing worth saying differently is that a spent cap, rather
-// than a refusal, is what ended the turn. role is the caller's word for what it
-// is walking past, so every Work group reports the fall-through in its own voice
-// (ADR-0231).
-func retryCapFallThroughMessage(role, preset string, attempts int, reason string) string {
-	spent := fmt.Sprintf("spent its %d attempts", attempts)
-	if attempts == 1 {
-		spent = "spent its only attempt"
-	}
-	msg := fmt.Sprintf("%s %s %s without finishing", role, preset, spent)
-	if reason = strings.TrimSpace(reason); reason != "" {
-		msg += fmt.Sprintf(" (last: %s)", clampAgentDiagnostic(reason))
-	}
-	return msg + "; trying next"
-}
-
 // executeTaskAttempts runs the retry loop for one task on one preset. The prompt
 // is rebuilt per attempt (via the walk's invocation builder over basePrompt) so a
 // retry can carry this task's own prior-attempt digest forward alongside set-wide
@@ -291,6 +247,7 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 			return nil, &attemptCapExhaustion{
 				preset:   walk.preset,
 				attempts: attempt,
+				fault:    faultOverrun,
 				reason:   timeoutReason,
 				summary:  fmt.Sprintf("timed out after %s on attempt %d", timeout, taskAttempt),
 			}, nil
@@ -313,6 +270,7 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 			return nil, &attemptCapExhaustion{
 				preset:   walk.preset,
 				attempts: attempt,
+				fault:    faultOverrun,
 				reason:   reason,
 				summary:  fmt.Sprintf("%s on attempt %d", reason, taskAttempt),
 			}, nil
@@ -372,6 +330,7 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 		return nil, &attemptCapExhaustion{
 			preset:   walk.preset,
 			attempts: attempt,
+			fault:    attemptFaultForExit(outcome.exitCode),
 			reason:   reason,
 			summary:  fmt.Sprintf("failed after %d attempts: %s", taskAttempt, reason),
 		}, nil
@@ -460,6 +419,13 @@ func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath s
 		unavailableResults = append(unavailableResults, result)
 	}
 	verdict := resolveAgentFallbackVerdict(sel, unavailableResults)
+	if verdict != nil && ledger.attempts == 0 {
+		// Not one preset got as far as invoking an agent: every one was cooling,
+		// capped, unauthenticated or absent from PATH. Nothing was attempted, so
+		// nothing failed, and the caller reports the stop as the no-op it is
+		// rather than as an exhausted list (ADR-0231).
+		verdict.NoAgentStarted = true
+	}
 	// A time-healing verdict outranks a spent cap: the preset it condemns comes
 	// back on its own, so parking the drain until it does and retrying the task
 	// then is a better ending than declaring the task failed while an agent that
@@ -470,19 +436,16 @@ func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath s
 		}
 	}
 	if spentCap != nil {
-		// Every agent has had its turn and none finished. This is the ending the
-		// preset that spent its cap would have written on its own before the walk
-		// learned to advance: the task is Failed and the drain stops, which is
-		// per-drain rather than per-task because the next task would be handed
-		// the same dead list (ADR-0231).
+		// Every agent has had its turn and none finished, so this walk is where
+		// the task's ending is written. Which ending that is follows how the last
+		// agent stopped, and the drain stops either way — per-drain rather than
+		// per-task, because the next task would be handed the same dead list
+		// (ADR-0231).
 		printAttemptBreakdown(d, out, ledger.streams)
-		if err := finalizeTaskFailed(d, sel, ledger.attempts, spentCap.summary); err != nil {
-			return nil, taskExitErr(sel, ExitOperational, "%v", err)
-		}
-		return nil, taskExitErr(sel, ExitOperational, "%s", spentCap.summary)
+		return nil, disposeExhaustedWalk(d, sel, out, *spentCap, ledger.attempts)
 	}
 	if verdict == nil {
-		return nil, taskExitErr(sel, ExitOperational, "no agent attempts were run")
+		return nil, taskExitErr(sel, ExitSetup, "%s", humanHealingStopMessage(sel, true, nil))
 	}
 	return verdict, nil
 }
