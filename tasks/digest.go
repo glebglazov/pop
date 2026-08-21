@@ -60,7 +60,7 @@ func attemptLesson(outcome, reason string, exitCode int) string {
 	case outcome == streamOutcomeTimedOut:
 		return lessonContinue
 	case exitCode != 0:
-		return lessonReassess
+		return crashLesson(r, exitCode)
 	case isContractReason(r):
 		return contractLesson(r)
 	case r == "" || r == reasonEmptyOutput:
@@ -68,6 +68,21 @@ func attemptLesson(outcome, reason string, exitCode int) string {
 	default:
 		return "pivot/reassess: " + r
 	}
+}
+
+// crashLesson phrases what a non-zero exit teaches the retry. The crash is the
+// provider falling over rather than the approach failing (ADR-0231), and it
+// lands after the agent has usually done real work, so the diagnostic is worth
+// carrying whole: it tells the next attempt it was cut off by machinery and that
+// the partial work is waiting in the checkout. A crash that left no sentence has
+// nothing to carry and keeps the bare reassess.
+func crashLesson(reason string, exitCode int) string {
+	if reason == "" || reason == fmt.Sprintf("agent exited with status %d", exitCode) {
+		return lessonReassess
+	}
+	return "resume — the previous attempt did not finish because its agent stopped: " +
+		strings.TrimRight(reason, ".") +
+		". That is the machinery failing, not your approach. Its changes are already in the runtime checkout; read the uncommitted working-tree diff first and continue from it."
 }
 
 // isContractReason reports whether a failure reason is one the harness produced

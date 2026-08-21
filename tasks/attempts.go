@@ -439,9 +439,51 @@ func earliestTimeHealingVerdict(results []*RunTaskResult) *RunTaskResult {
 	return nil
 }
 
+// agentDiagnosticMaxRunes bounds a provider's sentence to what a one-line
+// progress record and a prompt digest can carry. Every wording observed is far
+// shorter; the cap exists so an agent that dies mid-paragraph cannot turn one
+// failure into a wall of text on three surfaces at once.
+const agentDiagnosticMaxRunes = 200
+
+// agentExitDiagnostic says why an attempt that exited non-zero stopped, in the
+// provider's own words whenever it left any. Non-zero exit has only ever been
+// the provider falling over — a sleeping laptop, a dropped connection, a capped
+// account — and the sentence naming which one arrives last, after whatever work
+// the agent had already done, so the capture's final line is the diagnostic
+// (ADR-0231). A capture that said nothing keeps the exit code, because a failure
+// with no reason at all is worse than a thin one.
+func agentExitDiagnostic(agentOut string, exitCode int) string {
+	exitReason := fmt.Sprintf("agent exited with status %d", exitCode)
+	trimmed := strings.TrimRight(agentOut, " \t\r\n")
+	// A capture that closes out on the contract has no provider tail: the agent
+	// got its own last word in, and whatever killed it afterwards said nothing.
+	// Its own TASK_FAILED text is the exception — that sentence is why it stopped.
+	if closeOut, ok := closeOutLine(splitNonEmptyLines(trimmed)); ok {
+		if !strings.HasPrefix(closeOut, failedSentinel) {
+			return exitReason
+		}
+		if reported := strings.TrimSpace(strings.TrimPrefix(closeOut, failedSentinel)); reported != "" {
+			return clampAgentDiagnostic(reported)
+		}
+		return exitReason
+	}
+	diagnostic := lastNonEmptyLine(trimmed)
+	if diagnostic == "" {
+		return exitReason
+	}
+	return clampAgentDiagnostic(diagnostic)
+}
+
+func clampAgentDiagnostic(diagnostic string) string {
+	if runes := []rune(diagnostic); len(runes) > agentDiagnosticMaxRunes {
+		return strings.TrimSpace(string(runes[:agentDiagnosticMaxRunes])) + "…"
+	}
+	return diagnostic
+}
+
 func assessAttempt(agentOut string, exitCode int, taskData []byte) (Assessment, string) {
 	if exitCode != 0 {
-		return Assessment{}, fmt.Sprintf("agent exited with status %d", exitCode)
+		return Assessment{}, agentExitDiagnostic(agentOut, exitCode)
 	}
 	assessment := AssessCompletion(agentOut, taskData)
 	if assessment.Complete {

@@ -67,10 +67,116 @@ func TestAttemptScriptCombinesRawOutputAndExitCode(t *testing.T) {
 	if !strings.Contains(buf.String(), providerErr) {
 		t.Fatalf("captured attempt stream missing declared provider text:\n%s", buf.String())
 	}
-	if !strings.Contains(err.Error(), "agent exited with status 1") {
-		t.Fatalf("err = %v, want it to name the declared exit code", err)
+	// The attempt loop reports the provider's own sentence for a non-zero exit
+	// (ADR-0231), so the declared exit code shows up as the text that came with
+	// it rather than as "status 1".
+	if !strings.Contains(err.Error(), providerErr) {
+		t.Fatalf("err = %v, want it to carry the declared provider text", err)
 	}
 	assertTaskFailed(t, env, "01-a", 1)
+}
+
+// TestFailedAttemptsReportProviderDiagnostic drives two of the real wordings
+// observed on this machine through a two-attempt run and follows the recorded
+// reason to every surface it feeds: the failure the human sees, the Failed line
+// in the progress record, and the digest handed to the attempt after it
+// (ADR-0231).
+func TestFailedAttemptsReportProviderDiagnostic(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	const (
+		asleep     = "API Error: Your computer went to sleep mid-response"
+		overloaded = "API Error: 529 Overloaded"
+	)
+	agent := writeAttemptAgent(t, env.root, []attemptScript{
+		{changeFile: "impl.txt", changeData: "half done\n", rawOutput: "reading the task\n" + asleep + "\n", exitCode: 1},
+		{rawOutput: "picking it back up\n" + overloaded + "\n", exitCode: 1},
+	})
+	opts := env.runOpts(true, agent)
+	opts.MaxTries = 2
+	opts.Output = io.Discard
+
+	_, err := RunTaskWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+	if !strings.Contains(err.Error(), overloaded) {
+		t.Fatalf("err = %v, want the last attempt's provider diagnostic", err)
+	}
+	if strings.Contains(err.Error(), "agent exited with status") {
+		t.Fatalf("err = %v, want no exit-code phrasing when the provider spoke", err)
+	}
+	assertTaskFailed(t, env, "01-a", 2)
+	assertProgressContains(t, env, "FAILED", overloaded)
+}
+
+// installClaudeCrashingAgent puts a fake `claude` on PATH that opens its
+// stream-json normally and then dies the way the corpus records: a plain-text
+// provider diagnostic as its last line, exit 1, on every attempt. Structured
+// output is what makes the run recorded, which is what the prior-attempt digest
+// is built from.
+func installClaudeCrashingAgent(t *testing.T, root, diagnostic string) {
+	t.Helper()
+	// ADR-0145: PATH stub — callers stay serial deliberately.
+	dir := filepath.Join(root, ".agent-bin")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = auth ] && [ \"$2\" = status ]; then\n" +
+		"  printf '{\"loggedIn\":true}\\n'\n" +
+		"  exit 0\n" +
+		"fi\n" +
+		`printf '%s\n' '{"type":"system","subtype":"init"}'` + "\n" +
+		"printf '%s\\n' " + shellQuote(diagnostic) + "\n" +
+		"exit 1\n"
+	writeFile(t, filepath.Join(dir, "claude"), script)
+	if err := os.Chmod(filepath.Join(dir, "claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// TestFailedAttemptDiagnosticReachesNextAttemptDigest follows the recorded
+// reason into the one surface that is not a report to a human: the digest the
+// next attempt is handed. Without it a retry — on this agent or the next one in
+// the fallback list — is told only that something exited (ADR-0231).
+func TestFailedAttemptDiagnosticReachesNextAttemptDigest(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	const capped = "You hit your spend cap set by the owner of your workspace."
+	installClaudeCrashingAgent(t, env.root, capped)
+
+	opts := env.runOpts(true, "")
+	opts.AgentPreset = "claude"
+	opts.MaxTries = 2
+	opts.Output = io.Discard
+
+	_, err := RunTaskWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+	if !strings.Contains(err.Error(), capped) {
+		t.Fatalf("err = %v, want the provider's own sentence", err)
+	}
+	digest := buildPriorAttemptDigest(env.deps(), env.demoDir(), "01-a.md")
+	if !strings.Contains(digest, capped) {
+		t.Fatalf("prior-attempt digest missing the provider diagnostic:\n%s", digest)
+	}
+}
+
+// A crash that printed nothing usable still has to say something: the exit code
+// is all pop knows, and a reasonless failure is worse than a thin one.
+func TestFailedAttemptWithoutDiagnosticNamesExitCode(t *testing.T) {
+	env := setupExecutorFixture(t, false)
+	agent := writeAttemptAgent(t, env.root, []attemptScript{
+		{rawOutput: "   \n", exitCode: 1},
+	})
+
+	opts := env.runOpts(true, agent)
+	opts.MaxTries = 1
+	opts.Output = io.Discard
+
+	_, err := RunTaskWith(env.deps(), nil, nil, opts)
+	assertExitCode(t, err, ExitOperational)
+	if !strings.Contains(err.Error(), "agent exited with status 1") {
+		t.Fatalf("err = %v, want the exit-code fallback", err)
+	}
+	assertProgressContains(t, env, "FAILED", "agent exited with status 1")
 }
 
 func TestRunTaskExhaustedRetriesMarkFailed(t *testing.T) {
