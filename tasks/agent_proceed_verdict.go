@@ -14,6 +14,13 @@ type AgentProceedKind string
 const (
 	// ProceedQuotaPause is the time-healing kind (ADR-0153).
 	ProceedQuotaPause AgentProceedKind = "quota_pause"
+	// ProceedSpendCap is the time-healing kind for a provider refusing the
+	// account because somebody capped its spending: the CLI is healthy, the
+	// session is valid, and no allowance is exhausted — a human set a ceiling
+	// and the account has reached it. It is its own flavour rather than a quota
+	// pause because a quota pause names the moment it lifts and a spend cap
+	// names nothing at all, so pop dates it itself (ADR-0231).
+	ProceedSpendCap AgentProceedKind = "spend_cap"
 	// ProceedAuthFailure is a human-healing kind: a logged-out CLI (ADR-0153).
 	ProceedAuthFailure AgentProceedKind = "auth_failure"
 	// ProceedMissingBinary is a human-healing kind: the preset's binary is
@@ -101,6 +108,17 @@ type TimeHealingRecovery struct {
 	ResetAt time.Time
 }
 
+// spendCapCooldown is how long pop puts a spend-capped preset aside. It is
+// pop's own number, not a figure any provider reported: a spend cap names no
+// moment it will lift, so there is nothing to parse and something has to be
+// invented for the preset to rejoin the walk on its own.
+//
+// An hour is the deliberate guess. A cap raised over lunch costs almost nothing
+// — the preset is back within the hour — and a cap nobody ever raises costs one
+// refused invocation an hour instead of needing a human to notice a stopped
+// drain. Hitting the cap again simply starts another hour (ADR-0231).
+const spendCapCooldown = time.Hour
+
 // NewQuotaPauseVerdict builds the sole time-healing kind.
 func NewQuotaPauseVerdict(preset, reason string, resetAt time.Time) AgentProceedVerdict {
 	return AgentProceedVerdict{
@@ -117,6 +135,28 @@ func NewQuotaPauseVerdict(preset, reason string, resetAt time.Time) AgentProceed
 // only. Preset and ResetAt are filled by the executor after detection.
 func DetectedQuotaPause(reason string) *AgentProceedVerdict {
 	v := NewQuotaPauseVerdict("", reason, time.Time{})
+	return &v
+}
+
+// NewSpendCapVerdict builds a spend-cap verdict: preset-scoped, because one
+// capped account can run no model through this CLI, and time-healing, because
+// the invented hour is what brings it back.
+func NewSpendCapVerdict(preset, reason string, resetAt time.Time) AgentProceedVerdict {
+	return AgentProceedVerdict{
+		Kind:     ProceedSpendCap,
+		Scope:    ProceedScopePreset,
+		Recovery: ProceedRecoveryTime,
+		ResetAt:  resetAt,
+		Reason:   reason,
+		Preset:   preset,
+	}
+}
+
+// DetectedSpendCap is the adapter-side form of a spend cap: kind and the
+// provider's own sentence. Preset and ResetAt are filled by the executor after
+// detection, the reset from spendCapCooldown rather than from this reason.
+func DetectedSpendCap(reason string) *AgentProceedVerdict {
+	v := NewSpendCapVerdict("", reason, time.Time{})
 	return &v
 }
 
@@ -224,6 +264,8 @@ func (v AgentProceedVerdict) fallThroughMessage(role string) string {
 	switch v.Kind {
 	case ProceedQuotaPause:
 		return fmt.Sprintf("%s %s quota-paused; trying next", role, v.Preset)
+	case ProceedSpendCap:
+		return fmt.Sprintf("%s %s stopped by a spend cap; cooling %s — pop's own wait, since a cap names no reset of its own; trying next", role, v.Preset, formatDuration(spendCapCooldown))
 	case ProceedAuthFailure:
 		return fmt.Sprintf("%s %s unauthenticated; trying next", role, v.Preset)
 	case ProceedMissingBinary:
@@ -257,6 +299,29 @@ func (v AgentProceedVerdict) modelOrPlaceholder() string {
 		return "its resolved model"
 	}
 	return v.Model
+}
+
+// resolveProceedResetAt fills in the instant a time-healing verdict waits for.
+// Every flavour but one is dated by the provider: the preset's adapter parses
+// the reset out of the diagnostic. A spend cap is dated by pop, because the
+// refusal names no reset, so the adapter must not be asked — and must not
+// overwrite the hour with the zero instant it would answer (ADR-0231).
+func resolveProceedResetAt(v AgentProceedVerdict, now time.Time) AgentProceedVerdict {
+	if _, ok := v.TimeHealing(); !ok {
+		return v
+	}
+	if v.Kind == ProceedSpendCap {
+		return v.WithResetAt(now.Add(spendCapCooldown))
+	}
+	return v.WithResetAt(agentQuotaResetAt(v.Preset, v.Reason, now))
+}
+
+// pausesUntilReset reports the flavours that park a drain until a moment
+// passes, which is what the QuotaPaused result fields mirror for callers that
+// never see the verdict itself: a quota pause and a spend cap alike leave the
+// task Open, record the preset as cooling, and enter Agent quota recovery wait.
+func (v AgentProceedVerdict) pausesUntilReset() bool {
+	return v.Kind == ProceedQuotaPause || v.Kind == ProceedSpendCap
 }
 
 // TimeHealing reports the time-healing witness when this verdict heals with

@@ -49,7 +49,7 @@ func normalizeCodexJSONL(raw string) AgentResult {
 				detail = event.Message
 			}
 			if pause == nil {
-				pause = codexQuotaPauseReason(detail)
+				pause = codexProceedStop(detail)
 			}
 			appendAgentDiagnostic(&diagnostics, detail)
 		}
@@ -59,6 +59,18 @@ func normalizeCodexJSONL(raw string) AgentResult {
 		return AgentResult{ProceedVerdict: pause}
 	}
 	return normalizedTranscript(transcript, diagnostics)
+}
+
+// codexProceedStop reads one codex error or turn.failed diagnostic for the
+// stops that are the account's rather than the task's. The two are told apart
+// by what they promise: a usage limit refills at a stated time, a spend cap
+// waits on a person, so they cool on different clocks and are separate verdict
+// flavours (ADR-0231).
+func codexProceedStop(message string) *AgentProceedVerdict {
+	if v := spendCapReason(message); v != nil {
+		return v
+	}
+	return codexQuotaPauseReason(message)
 }
 
 // codexQuotaPauseReason detects codex's usage-limit message in an error or

@@ -37,9 +37,9 @@ func RunRoutineAgentInvocation(d *Deps, runtimePath string, liveOut io.Writer, t
 	if normalized.ProceedVerdict != nil {
 		v := normalized.ProceedVerdict.WithPreset(invocation.AgentPreset())
 		if _, ok := v.TimeHealing(); ok {
-			v = v.WithResetAt(agentQuotaResetAt(v.Preset, v.Reason, time.Now()))
+			v = resolveProceedResetAt(v, time.Now())
 		}
-		result.QuotaPaused = v.Kind == ProceedQuotaPause
+		result.QuotaPaused = v.pausesUntilReset()
 		result.QuotaPreset = v.Preset
 		result.QuotaReason = v.Reason
 		if th, ok := v.TimeHealing(); ok {

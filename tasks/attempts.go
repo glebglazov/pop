@@ -239,7 +239,7 @@ func executeTaskAttempts(d *Deps, sel *Selection, runtimePath string, out, errOu
 		if agentResult.ProceedVerdict != nil {
 			v := stampDetectedVerdict(*agentResult.ProceedVerdict, invocation.AgentPreset(), invocation.PinnedModel())
 			if _, ok := v.TimeHealing(); ok {
-				v = v.WithResetAt(agentQuotaResetAt(v.Preset, v.Reason, time.Now()))
+				v = resolveProceedResetAt(v, time.Now())
 				persist(outcome.stream, attempt, streamOutcomeQuotaPaused, "", outcome.exitCode)
 				display.line(ansiYellow, "Paused: agent quota exhausted for %s/%s", sel.TaskSetID, sel.TaskID)
 				display.line(ansiYellow, "  %s", v.Reason)
@@ -364,7 +364,7 @@ func proceedVerdictResult(sel *Selection, v AgentProceedVerdict) *RunTaskResult 
 		Selection:      sel,
 		ProceedVerdict: &v,
 	}
-	if v.Kind == ProceedQuotaPause {
+	if v.pausesUntilReset() {
 		result.QuotaPaused = true
 		result.PauseReason = v.Reason
 		result.PausePreset = v.Preset

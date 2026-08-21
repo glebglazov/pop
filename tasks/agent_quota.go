@@ -28,6 +28,30 @@ var (
 	opencodeGoQuotaResetDaysPattern     = regexp.MustCompile(`(?i)\bResets in\s+([0-9]+)\s*days?\b`)
 )
 
+// spendCapSignal anchors a billing refusal: an account somebody put a ceiling
+// on, told to stop until an owner raises it. Observed from codex (2026-08-21),
+// exactly:
+//
+//	You hit your spend cap set by the owner of your workspace. Ask an owner to
+//	increase your spend cap to continue.
+//
+// with rate_limit_reached_type "workspace_member_usage_limit_reached" on the
+// preceding token_count event. The workspace, the owner and the surrounding
+// upsell all vary, so the anchor is the two words the refusal is about; the
+// whole sentence is kept as the reason, because "ask an owner to increase your
+// spend cap" is the only instruction pop can give a human about it.
+const spendCapSignal = "spend cap"
+
+// spendCapReason returns a spend-cap verdict when a provider diagnostic is a
+// billing refusal. Shared rather than per-adapter: the phrasing is a provider's
+// billing vocabulary, not a CLI's, so any adapter reading a diagnostic can ask.
+func spendCapReason(message string) *AgentProceedVerdict {
+	if strings.Contains(strings.ToLower(message), spendCapSignal) {
+		return DetectedSpendCap(strings.TrimSpace(message))
+	}
+	return nil
+}
+
 // opencodeGoQuotaPauseReason scans the raw agent capture line-by-line and
 // returns a quota-pause proceed verdict when any line contains an opencode-go
 // quota signal. The full matching line becomes the reason so downstream reset
