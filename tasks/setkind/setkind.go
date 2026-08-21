@@ -188,8 +188,8 @@ type groupLoad struct {
 // Less orders two task-set containers by the shared Queue surface comparator
 // (ADR-0121 / ADR-0197) over their row projections — the same total order `pop
 // work dashboard` and `pop work status` read. The active ViewPreset's sort
-// displaces the status scheme under the membership tiers; absent sort keeps
-// today's ADR-0121 order.
+// displaces the status scheme outright, and nothing is lifted above the key it
+// asks for; absent sort means created_desc.
 func (k *Kind) Less(a, b work.Container) bool {
 	return tasks.WorkRowLess(a, b, k.d.ViewPreset.Sort)
 }

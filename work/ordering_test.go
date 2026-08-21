@@ -74,16 +74,17 @@ func straddlingPage(f fixture) []work.Kind {
 	return []work.Kind{maps, sets}
 }
 
-// TestCreationOrderKeysBelowAndAboveTheDate pins the three keys the date sits
-// between: the membership tiers above it, and kind precedence then the owning
-// kind's own comparator below it. Stub kinds carry the containers because every
-// one of those keys is the builder's — what the rules need from a kind is a date,
-// a tier and a comparator, not a filesystem.
-func TestCreationOrderKeysBelowAndAboveTheDate(t *testing.T) {
+// TestCreationOrderKeysUnderTheDate pins the keys below the date — kind
+// precedence, then the owning kind's own comparator — and that nothing sits
+// above it: a live drain is ordered by its date like every other row (ADR-0210
+// as amended). Stub kinds carry the containers because every one of those keys
+// is the builder's — what the rules need from a kind is a date and a comparator,
+// not a filesystem.
+func TestCreationOrderKeysUnderTheDate(t *testing.T) {
 	day := func(d int) time.Time { return time.Date(2026, time.July, d, 0, 0, 0, 0, time.UTC) }
 	sets := stubKind{id: ref.KindTaskSet, containers: []work.Container{
-		// The oldest row on the page, held by a live drain: the tiers sit above the
-		// date key, so it floats over every dated container of either kind.
+		// The oldest row on the page, held by a live drain: liveness is a STATUS-cell
+		// fact and no longer a position, so it sits at its date like anything else.
 		{ID: "2026-07-01-draining", CreatedAt: day(1), LiveDrain: true},
 		{ID: "2026-07-09-newest", CreatedAt: day(9)},
 		{ID: "2026-07-05-tie", CreatedAt: day(5)},
@@ -101,12 +102,12 @@ func TestCreationOrderKeysBelowAndAboveTheDate(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"task-set:2026-07-01-draining",
 		"task-set:2026-07-09-newest",
 		// An exact date tie between two kinds is a real case, and kind precedence is
 		// what is left to break it.
 		"task-set:2026-07-05-tie",
 		"map:2026-07-05-tie-map",
+		"task-set:2026-07-01-draining",
 		// A zero date is no opinion: every undated row sinks below every dated one,
 		// and among themselves they fall through to kind precedence and then to the
 		// owning kind's comparator.

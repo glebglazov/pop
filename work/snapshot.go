@@ -251,21 +251,19 @@ func merge(kinds []Kind, loaded [][]Container, order Ordering) []Container {
 	return all
 }
 
-// crossKindLess is the cross-kind comparator: membership tier, then creation
-// date in the requested direction, then kind precedence, then the owning kind's
-// own comparator (ADR-0210).
+// crossKindLess is the cross-kind comparator: creation date in the requested
+// direction, then kind precedence, then the owning kind's own comparator
+// (ADR-0210 as amended).
 //
-// Tier first is what keeps a live drain floating above the whole page whatever
-// its date, and `work` can read the tiers itself because every kind already
-// stamps the three fields Tier reads. Kind precedence survives only here, as the
-// last-resort tiebreak for two kinds landing on the exact same date — a real
-// case, since a Map and the task set it spawned share a day. Below it the two
-// containers are of one kind, so handing them to that kind's Less honours the
-// interface's "never asked to compare across kinds" contract.
+// The requested key is the whole of the order and nothing outranks it: a date
+// view that lifted a row for being auto-drained or orphaned would put a July
+// container above an August one, which is the one thing "newest first" may not
+// do. Kind precedence survives only here, as the last-resort tiebreak for two
+// kinds landing on the exact same date — a real case, since a Map and the task
+// set it spawned share a day. Below it the two containers are of one kind, so
+// handing them to that kind's Less honours the interface's "never asked to
+// compare across kinds" contract.
 func crossKindLess(byKind map[KindID]Kind, order Ordering, a, b Container) bool {
-	if ta, tb := Tier(a), Tier(b); ta != tb {
-		return ta < tb
-	}
 	if !a.CreatedAt.Equal(b.CreatedAt) {
 		// A zero date is "no opinion", not "the beginning of time": it sinks below
 		// every dated container in both directions.

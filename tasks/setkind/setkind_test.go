@@ -716,8 +716,10 @@ func TestLessThreadsPresetSort(t *testing.T) {
 		// Under the status scheme READY floats above BLOCKED regardless of date.
 		t.Fatal("empty-sort Less: READY should precede BLOCKED")
 	}
-	if statusKind.Less(older, live) {
-		t.Fatal("empty-sort Less: live-drain must float above rest")
+	if !statusKind.Less(live, older) {
+		// Under the status scheme a live-drained DONE set reads IN PROGRESS, which is
+		// the leading band — the band, not a tier, is what puts it first.
+		t.Fatal("empty-sort Less: IN PROGRESS should precede BLOCKED")
 	}
 
 	recent, _ := config.ShippedWorkViewPreset("recent-30d")
@@ -725,14 +727,14 @@ func TestLessThreadsPresetSort(t *testing.T) {
 	if !recencyKind.Less(newer, older) || recencyKind.Less(older, newer) {
 		t.Fatal("created_desc Less: newer id must precede older")
 	}
-	if recencyKind.Less(newer, live) {
-		t.Fatal("created_desc Less: live-drain must still float above dated rest")
+	if recencyKind.Less(live, newer) {
+		t.Fatal("created_desc Less: a live drain is ordered by its date, not lifted")
 	}
 	// Kind.Less and SortWorkRows must agree — one comparator.
 	rows := []work.Container{older, newer, live}
 	tasks.SortWorkRows(rows, recent.Sort)
-	if rows[0].ID != live.ID || rows[1].ID != newer.ID || rows[2].ID != older.ID {
-		t.Fatalf("SortWorkRows(%q) = %v/%v/%v, want live/newer/older", recent.Sort, rows[0].ID, rows[1].ID, rows[2].ID)
+	if rows[0].ID != newer.ID || rows[1].ID != live.ID || rows[2].ID != older.ID {
+		t.Fatalf("SortWorkRows(%q) = %v/%v/%v, want newer/live/older", recent.Sort, rows[0].ID, rows[1].ID, rows[2].ID)
 	}
 	if !recencyKind.Less(rows[0], rows[1]) || !recencyKind.Less(rows[1], rows[2]) {
 		t.Fatal("Kind.Less disagrees with SortWorkRows under recent-30d")

@@ -71,32 +71,30 @@ func TestSortOrder(t *testing.T) {
 	}
 }
 
-// TestTieredSortOrder drives the full Queue surface order (ADR-0121) across a
-// mixed fixture that exercises every membership tier and the status scheme,
-// which `sort = "status"` is now the way to ask for (ADR-0210). Tier
-// precedence is running → auto-drain → orphaned → the rest; the orphaned +
-// auto-drain set lands in the auto-drain tier; within the rest tier the status
-// scheme floats the IN PROGRESS band, then the READY band (both cross-project),
-// then every remaining status per-project by the explicit status order; SetID
-// descending is the tiebreak throughout.
-func TestTieredSortOrder(t *testing.T) {
+// TestStatusSchemeSortOrder drives the full ADR-0121 status scheme, which
+// `sort = "status"` is now the way to ask for (ADR-0210), across a fixture whose
+// rows also carry the live-drain, auto-drain and orphaned facts that used to
+// float above it (ADR-0232). The scheme floats the IN PROGRESS band, then the
+// READY band (both cross-project), then every remaining status per-project by the
+// explicit status order; SetID descending is the tiebreak throughout.
+func TestStatusSchemeSortOrder(t *testing.T) {
 	rows := []work.Container{
-		// Rest tier, rest band — alphabetically-early project with a needs-you status.
+		// Rest band — alphabetically-early project with a needs-you status.
 		{Project: "alpha", ID: "2026-02-01-blk", RawStatus: StatusBlocked},
-		// Rest tier, READY band — floats above alpha's BLOCKED even though bravo sorts later.
+		// READY band — floats above alpha's BLOCKED even though bravo sorts later.
 		{Project: "bravo", ID: "2026-02-02-rdy", RawStatus: StatusReady},
 		{Project: "alpha", ID: "2026-02-03-rdy", RawStatus: StatusReady},
-		// Rest tier, IN PROGRESS band (started READY) — floats above the READY band.
+		// IN PROGRESS band (started READY) — floats above the READY band.
 		{Project: "bravo", Started: true, ID: "2026-02-04-inp", RawStatus: StatusReady},
-		// Rest tier, rest band — DONE and AWAITING-APPROVAL, project-first then status order.
+		// Rest band — DONE and AWAITING-APPROVAL, project-first then status order.
 		{Project: "bravo", ID: "2026-02-05-done", RawStatus: StatusDone},
 		{Project: "charlie", ID: "2026-02-06-aa", RawStatus: StatusAwaitingApproval},
-		// Orphaned tier.
+		// An orphaned binding, an auto-drain grant and a live drain: facts the STATUS
+		// cell reports and the comparator ignores, so each of these rows reads at its
+		// own status like any other (ADR-0232).
 		{Project: "zoo", ID: "2026-04-01-orph", RawStatus: StatusReady, Orphaned: true},
-		// Auto-drain tier — the orphaned+auto-drain set belongs here, not orphaned.
 		{Project: "kilo", ID: "2026-05-01-ad", RawStatus: StatusReady, AutoDrain: true},
 		{Project: "kilo", ID: "2026-05-02-ado", RawStatus: StatusReady, AutoDrain: true, Orphaned: true},
-		// Running tier — highest precedence even over an auto-drain BLOCKED set.
 		{Project: "delta", ID: "2026-06-01-run", RawStatus: StatusBlocked, AutoDrain: true, LiveDrain: true},
 	}
 	SortWorkRows(rows, config.PresetSortStatus)
@@ -105,20 +103,20 @@ func TestTieredSortOrder(t *testing.T) {
 		got[i] = r.Project + "/" + r.ID
 	}
 	want := []string{
-		// Tier 1: running (floats above the whole status scheme, BLOCKED and all).
-		"delta/2026-06-01-run",
-		// Tier 2: auto-drain, SetID descending.
+		"bravo/2026-02-04-inp", // IN PROGRESS band (started READY) leads
+		// READY band, cross-project by project then id descending — the auto-drain and
+		// orphaned rows are READY too, and read here rather than above the band.
+		"alpha/2026-02-03-rdy",
+		"bravo/2026-02-02-rdy",
 		"kilo/2026-05-02-ado",
 		"kilo/2026-05-01-ad",
-		// Tier 3: orphaned.
 		"zoo/2026-04-01-orph",
-		// Tier 4: the rest, status scheme.
-		"bravo/2026-02-04-inp",  // IN PROGRESS band (started READY) floats first
-		"alpha/2026-02-03-rdy",  // READY band, cross-project: alpha before bravo
-		"bravo/2026-02-02-rdy",  // READY band
-		"alpha/2026-02-01-blk",  // rest band, project-first: alpha BLOCKED
-		"bravo/2026-02-05-done", // rest band: bravo DONE
-		"charlie/2026-02-06-aa", // rest band: charlie AWAITING-APPROVAL
+		// Rest band, project-first then the explicit status order. The live-drained set
+		// is BLOCKED, so it reads as BLOCKED under its own project.
+		"alpha/2026-02-01-blk",
+		"bravo/2026-02-05-done",
+		"charlie/2026-02-06-aa",
+		"delta/2026-06-01-run",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("order = %v, want %v", got, want)
@@ -272,10 +270,10 @@ func TestWorkRowStatusCellComposition(t *testing.T) {
 }
 
 // TestPresetCreatedSortOrdersByIdentifierDate pins ADR-0197 decision 6: a
-// preset's created_desc / created_asc replaces the status scheme under the
-// membership tiers. recent-30d's shipped sort is created_desc (newest-first);
-// created_asc is the reverse. Live-drain, auto-drain and orphaned rows still
-// float above every dated rest-tier row.
+// preset's created_desc / created_asc replaces the status scheme outright.
+// recent-30d's shipped sort is created_desc (newest-first); created_asc is the
+// reverse. Live-drain, auto-drain and orphaned rows take their date position
+// like every other row — the date is the whole order (ADR-0232).
 func TestPresetCreatedSortOrdersByIdentifierDate(t *testing.T) {
 	recent, ok := config.ShippedWorkViewPreset("recent-30d")
 	if !ok {
@@ -298,11 +296,11 @@ func TestPresetCreatedSortOrdersByIdentifierDate(t *testing.T) {
 	SortWorkRows(desc, config.PresetSortCreatedDesc)
 	gotDesc := idsOf(desc)
 	wantDesc := []string{
-		"2026-01-10-run", // live-drain tier
-		"2026-01-15-ad",  // auto-drain tier
-		"2026-02-01-orph", // orphaned tier
-		"2026-06-01-new", // rest: newest first
+		"2026-06-01-new", // newest first, whatever each row carries
 		"2026-03-15-mid",
+		"2026-02-01-orph", // orphaned
+		"2026-01-15-ad",   // auto-drain
+		"2026-01-10-run",  // live drain
 		"2026-01-01-old",
 	}
 	if !reflect.DeepEqual(gotDesc, wantDesc) {
@@ -313,10 +311,10 @@ func TestPresetCreatedSortOrdersByIdentifierDate(t *testing.T) {
 	SortWorkRows(asc, config.PresetSortCreatedAsc)
 	gotAsc := idsOf(asc)
 	wantAsc := []string{
+		"2026-01-01-old", // oldest first
 		"2026-01-10-run",
 		"2026-01-15-ad",
 		"2026-02-01-orph",
-		"2026-01-01-old", // rest: oldest first
 		"2026-03-15-mid",
 		"2026-06-01-new",
 	}
@@ -326,7 +324,7 @@ func TestPresetCreatedSortOrdersByIdentifierDate(t *testing.T) {
 }
 
 // TestPresetCreatedSortUndatedPosition pins a defined place for identifiers
-// with no parseable date: after every dated rest-tier row under both
+// with no parseable date: after every dated row under both
 // created_desc and created_asc, then ID descending among themselves.
 func TestPresetCreatedSortUndatedPosition(t *testing.T) {
 	rows := []work.Container{
@@ -362,7 +360,7 @@ func TestPresetCreatedSortUndatedPosition(t *testing.T) {
 // TestAbsentSortMeansCreatedDescAndStatusIsTheOptIn pins the ADR-0210 flip on
 // the shared comparator: a preset that declares no sort orders by creation date
 // newest first, and the ADR-0121 status scheme is reached only by declaring
-// `status`, where it reproduces the pre-change sequence exactly.
+// `status`, where the bands and the per-project status order are the whole of it.
 func TestAbsentSortMeansCreatedDescAndStatusIsTheOptIn(t *testing.T) {
 	base := []work.Container{
 		{Project: "alpha", ID: "2026-02-01-blk", RawStatus: StatusBlocked},
@@ -384,11 +382,12 @@ func TestAbsentSortMeansCreatedDescAndStatusIsTheOptIn(t *testing.T) {
 		t.Fatalf("absent sort %v differs from declared created_desc %v", idsOf(viaAbsent), idsOf(viaDeclared))
 	}
 	wantCreated := []string{
-		// The membership tiers still float above the date key.
+		// Pure date order: the live-drained set leads because it is the newest, not
+		// because it is running.
 		"2026-06-01-run",
 		"2026-05-01-ad",
 		"2026-04-01-orph",
-		// Then the rest tier, newest first, with no regard for status.
+		// Then the rest, newest first, with no regard for status.
 		"2026-02-06-aa",
 		"2026-02-05-done",
 		"2026-02-04-inp",
@@ -403,18 +402,18 @@ func TestAbsentSortMeansCreatedDescAndStatusIsTheOptIn(t *testing.T) {
 	viaStatus := append([]work.Container(nil), base...)
 	SortWorkRows(viaStatus, config.PresetSortStatus)
 	wantStatus := []string{
-		"2026-06-01-run",
+		"2026-02-04-inp", // IN PROGRESS band
+		"2026-02-03-rdy", // READY band, cross-project
+		"2026-02-02-rdy",
 		"2026-05-01-ad",
 		"2026-04-01-orph",
-		"2026-02-04-inp",
-		"2026-02-03-rdy",
-		"2026-02-02-rdy",
-		"2026-02-01-blk",
+		"2026-02-01-blk", // rest band, project-first
 		"2026-02-05-done",
 		"2026-02-06-aa",
+		"2026-06-01-run",
 	}
 	if !reflect.DeepEqual(idsOf(viaStatus), wantStatus) {
-		t.Fatalf("status sort = %v, want the pre-change scheme %v", idsOf(viaStatus), wantStatus)
+		t.Fatalf("status sort = %v, want the ADR-0121 scheme %v", idsOf(viaStatus), wantStatus)
 	}
 }
 

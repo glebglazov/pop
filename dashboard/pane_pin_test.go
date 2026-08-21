@@ -142,6 +142,13 @@ func taskSetPaneFixture(t *testing.T) (*drain.Deps, *config.Config, *queuetest.R
 	return d, cfg, rt, stems
 }
 
+// movableStem is a set the sorted order never puts first, whichever direction the
+// preset sorts in — the fixtures that prove a lift moves a row need a row there is
+// somewhere to move it from.
+func movableStem(stems []string) string {
+	return stems[len(stems)/2]
+}
+
 // The first rung: a pane pop opened for a Task set. All four tags name the set the
 // pane is working on, so all four pin the same row — drain, verify, fold and assist
 // are activities on one container, not four kinds of pane.
@@ -157,7 +164,7 @@ func TestPaneTaggedForATaskSetPinsItsRowFirst(t *testing.T) {
 	} {
 		t.Run(tag.name, func(t *testing.T) {
 			d, cfg, rt, stems := taskSetPaneFixture(t)
-			want := stems[len(stems)-1]
+			want := movableStem(stems)
 			baseline := unpinnedOrder(t, d, cfg)
 			if baseline[0] == want {
 				t.Fatalf("the tagged set already sorts first in %v — the fixture is not exercising a move", baseline)
@@ -410,7 +417,7 @@ func TestPinningLeavesEveryPresetSortIntactBeneathTheBlock(t *testing.T) {
 // Attribution is computed either way — it is the lift alone that the field owns.
 func TestOnlyAPresetDeclaringPinLiftsTheAttributedRows(t *testing.T) {
 	d, cfg, rt, stems := taskSetPaneFixture(t)
-	attributed := stems[len(stems)-1]
+	attributed := movableStem(stems)
 	baseline := unpinnedOrder(t, d, cfg)
 	if baseline[0] == attributed {
 		t.Fatalf("the tagged set already sorts first in %v — the fixture cannot tell a lift from no lift", baseline)

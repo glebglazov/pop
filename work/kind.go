@@ -492,32 +492,3 @@ func kindRank(id KindID) int {
 	}
 	return len(ref.Kinds())
 }
-
-// Membership tiers float a container above the whole status scheme (ADR-0121),
-// cross-kind: a live drain or an auto-drain or an orphaned binding on a Map or a
-// Routine floats it exactly as it would a Task set. A container takes the first
-// tier it qualifies for, so one that is both orphaned and auto-drain qualifies
-// for the auto-drain tier (Tier checks it first).
-const (
-	TierRunning   = iota // live drain holds the checkout (Picked-up)
-	TierAutoDrain        // auto-drain enabled
-	TierOrphaned         // Worktree binding points at a missing checkout
-	TierRest             // everything else
-)
-
-// Tier returns a container's membership tier (see the Tier* constants), read
-// only from fields every kind already stamps onto Container. The order of these
-// checks encodes the precedence: a container that is both orphaned and
-// auto-drain qualifies for the auto-drain tier.
-func Tier(c Container) int {
-	switch {
-	case c.LiveDrain:
-		return TierRunning
-	case c.AutoDrain:
-		return TierAutoDrain
-	case c.Orphaned:
-		return TierOrphaned
-	default:
-		return TierRest
-	}
-}

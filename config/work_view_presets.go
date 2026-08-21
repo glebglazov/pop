@@ -58,7 +58,7 @@ type WorkViewPresetFilter struct {
 	Unfolded      *bool    `toml:"unfolded,omitempty" desc:"Match unfolded (true) or folded (false) rows."`
 	Archived      string   `toml:"archived,omitempty" desc:"Archived-row mode: exclude|include|only (default exclude)."`
 	CreatedWithin string   `toml:"created_within,omitempty" desc:"Only rows whose id date prefix falls within this duration."`
-	Sort          string   `toml:"sort,omitempty" desc:"Row sort under the membership tiers: created_desc|created_asc|status (default created_desc)."`
+	Sort          string   `toml:"sort,omitempty" desc:"Row sort: created_desc|created_asc|status (default created_desc)."`
 	// Muted matches on a live Mute (ADR-0200 decision 8). Unset admits both, so
 	// a preset that says nothing about mute keeps showing muted rows; the mute
 	// expires against the evaluation instant, not against a stored flag.

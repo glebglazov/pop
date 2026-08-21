@@ -9,7 +9,7 @@ import (
 
 // The Task-set kind's half of the Work row derivation. These read this kind's
 // status vocabulary — the Work view preset filter (ADR-0197), the ADR-0121
-// membership tiers, status bands and intra-project status order, and the
+// status bands and intra-project status order, and the
 // STATUS-cell composition — so they live with the kind that owns those statuses
 // rather than in the `work` seam, which names no kind's statuses. The Work-kind
 // adapter in tasks/setkind orders its containers through WorkRowLess, so the
@@ -69,22 +69,20 @@ func statusOrder(s TaskSetStatus) int {
 
 // WorkRowLess is the shared Queue surface comparator (ADR-0121 / ADR-0197), the
 // single source of the total order both `pop work dashboard` and `pop work
-// status` read. Rows float by membership tier (live-drain → auto-drain →
-// orphaned) under every preset. Below the tiers, creation date is what orders
-// them: an empty sortMode means created_desc, the same as declaring it
-// (ADR-0210). Only the explicit `status` sort reaches the ADR-0121 scheme, which
-// is now an opt-in rather than the implied default.
+// status` read. The preset's sort is the whole of it and nothing is lifted above
+// it: creation date orders the rows, an empty sortMode meaning created_desc, the
+// same as declaring it (ADR-0210). Only the explicit `status` sort reaches the
+// ADR-0121 scheme, which is now an opt-in rather than the implied default. A
+// live drain, an auto-drain bit or an orphaned binding says so in the STATUS
+// cell and changes no row's position (ADR-0210 as amended).
 func WorkRowLess(a, b work.Container, sortMode string) bool {
-	if ta, tb := work.Tier(a), work.Tier(b); ta != tb {
-		return ta < tb
-	}
 	if sortMode == config.PresetSortStatus {
 		return statusSchemeLess(a, b)
 	}
 	return createdSortLess(a, b, sortMode)
 }
 
-// statusSchemeLess is the ADR-0121 status scheme under the membership tiers:
+// statusSchemeLess is the ADR-0121 status scheme:
 // IN PROGRESS and READY bands read cross-project (Project asc, then ID desc);
 // every remaining status reads per-project (Project asc, then the explicit
 // status order, then ID desc). Bands key on the displayed label, so a started
@@ -109,8 +107,7 @@ func statusSchemeLess(a, b work.Container) bool {
 	return a.ID > b.ID
 }
 
-// createdSortLess orders by identifier date prefix under the membership tiers.
-// Ids with no parseable date always sort after every dated id (both directions),
+// createdSortLess orders by identifier date prefix. Ids with no parseable date always sort after every dated id (both directions),
 // then by ID descending among themselves — a defined position rather than an
 // arbitrary one (ADR-0197). Equal dates break on ID descending. Every sortMode
 // but created_asc reads as newest-first, which is what makes an absent sort mean
