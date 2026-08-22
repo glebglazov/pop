@@ -168,36 +168,37 @@ func (l *List[T]) MoveDown() {
 	l.adjustScroll()
 }
 
-// HalfPageUp moves the cursor up by one page (body height).
+// HalfPageUp moves the cursor up by one page: the rows the viewport shows, less
+// one that stays on screen as the reader's landmark.
 func (l *List[T]) HalfPageUp() {
 	if len(l.items) == 0 {
 		return
 	}
-	page := l.height
-	if page < 1 {
-		page = 1
-	}
-	l.cursor -= page
+	l.cursor -= l.page()
 	if l.cursor < 0 {
 		l.cursor = 0
 	}
 	l.adjustScroll()
 }
 
-// HalfPageDown moves the cursor down by one page (body height).
+// HalfPageDown moves the cursor down by one page: the rows the viewport shows,
+// less one that stays on screen as the reader's landmark.
 func (l *List[T]) HalfPageDown() {
 	if len(l.items) == 0 {
 		return
 	}
-	page := l.height
-	if page < 1 {
-		page = 1
-	}
-	l.cursor += page
+	l.cursor += l.page()
 	if l.cursor >= len(l.items) {
 		l.cursor = len(l.items) - 1
 	}
 	l.adjustScroll()
+}
+
+// page is the paging distance. The viewport height is in terminal lines, and a
+// row can cost more than one of them, so the distance is counted in the records
+// actually on screen — one short, so the row the reader was on stays visible.
+func (l *List[T]) page() int {
+	return max(l.visibleItems()-1, 1)
 }
 
 // Resize sets the viewport body height and reclamps scroll.

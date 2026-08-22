@@ -2474,7 +2474,17 @@ func (m QueueDashboard) documentPeekPageSize() int {
 	if m.detail == nil || m.detail.peek == nil {
 		return 1
 	}
-	return documentPeekPageSize(m.height, m.detail.peek.path)
+	return documentPeekBodyPageSize(m.documentPeekChrome().BodyHeight(m.documentPeekBudget()), m.detail.peek.path)
+}
+
+// documentPeekBudget is the terminal lines the peek lays itself out in. A
+// dashboard that has not been sized yet still has to answer a motion, so the
+// unsized case takes the same default the render takes.
+func (m QueueDashboard) documentPeekBudget() int {
+	if m.height <= 0 {
+		return 20
+	}
+	return m.height
 }
 
 // filterDashboardRows returns rows whose Project or id contain query as a
@@ -3805,12 +3815,12 @@ func (menu *itemMenu) target() string {
 	return menu.item.ID
 }
 
-// documentPeekFrame gives the Document peek the same budget-and-render path as
-// the item list. Its menu is a Block, so opening it removes exactly the fitted
-// Block height from the document body and anchors the menu above the hint line.
-func (m QueueDashboard) documentPeekFrame() (ui.Frame, string) {
-	d := m.detail
-	p := d.peek
+// documentPeekChrome is the Frame the peek draws into, with no document in it
+// yet. The render fills it; the paging asks it how many lines the document is
+// left, so chrome the peek grows — an open item menu takes a Block — shortens
+// the page by exactly the lines it takes off screen.
+func (m QueueDashboard) documentPeekChrome() ui.Frame {
+	p := m.detail.peek
 	hints := "  j/k · C-d/C-u · gg/G · y copy name"
 	if p.artifactPath != "" {
 		hints += " · p copy path"
@@ -3827,7 +3837,7 @@ func (m QueueDashboard) documentPeekFrame() (ui.Frame, string) {
 		// text, but the row must still stay in the shared Frame budget.
 		title = " "
 	}
-	frame := ui.Frame{
+	return ui.Frame{
 		Width:  m.width,
 		TermH:  m.height,
 		Header: title,
@@ -3835,6 +3845,14 @@ func (m QueueDashboard) documentPeekFrame() (ui.Frame, string) {
 		Block:  block,
 		Hints:  hints,
 	}
+}
+
+// documentPeekFrame gives the Document peek the same budget-and-render path as
+// the item list. Its menu is a Block, so opening it removes exactly the fitted
+// Block height from the document body and anchors the menu above the hint line.
+func (m QueueDashboard) documentPeekFrame() (ui.Frame, string) {
+	p := m.detail.peek
+	frame := m.documentPeekChrome()
 
 	var b strings.Builder
 	if p.loading {
@@ -3854,11 +3872,7 @@ func (m QueueDashboard) documentPeekFrame() (ui.Frame, string) {
 		fmt.Fprintf(&b, "  %s\n\n", p.path)
 	}
 	lines := p.lines(m.width, ui.CurrentAppearance())
-	budgetHeight := m.height
-	if budgetHeight <= 0 {
-		budgetHeight = 20
-	}
-	pageSize := documentPeekBodyPageSize(frame.BodyHeight(budgetHeight), p.path)
+	pageSize := documentPeekBodyPageSize(frame.BodyHeight(m.documentPeekBudget()), p.path)
 	maxScroll := len(lines) - pageSize
 	if maxScroll < 0 {
 		maxScroll = 0
@@ -3885,7 +3899,7 @@ func (m QueueDashboard) documentPeekFrame() (ui.Frame, string) {
 	if maxScroll > 0 {
 		position = fmt.Sprintf(" · %d/%d", p.scroll+1, len(lines))
 	}
-	if len(block) == 0 {
+	if len(frame.Block) == 0 {
 		frame.Hints += position
 	}
 	return frame, strings.TrimSuffix(b.String(), "\n")
@@ -3900,13 +3914,6 @@ func documentPeekLines(text string) []string {
 		lines = lines[:len(lines)-1]
 	}
 	return lines
-}
-
-func documentPeekPageSize(height int, path string) int {
-	if height <= 0 {
-		height = 20
-	}
-	return documentPeekBodyPageSize(height-2, path) // title and hint
 }
 
 func documentPeekBodyPageSize(bodyHeight int, path string) int {

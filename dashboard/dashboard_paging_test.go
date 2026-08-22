@@ -26,20 +26,20 @@ func TestMainListHalfPageKeys(t *testing.T) {
 
 	updated, _ := m.Update(ctrlKey('d'))
 	got := updated.(QueueDashboard)
-	if got.list.Cursor() != 4 {
-		t.Fatalf("after C-d cursor = %d, want 4", got.list.Cursor())
+	if got.list.Cursor() != 3 {
+		t.Fatalf("after C-d cursor = %d, want 3", got.list.Cursor())
 	}
 
 	updated, _ = got.Update(ctrlKey('d'))
 	got = updated.(QueueDashboard)
-	if got.list.Cursor() != 8 {
-		t.Fatalf("after second C-d cursor = %d, want 8", got.list.Cursor())
+	if got.list.Cursor() != 6 {
+		t.Fatalf("after second C-d cursor = %d, want 6", got.list.Cursor())
 	}
 
 	updated, _ = got.Update(ctrlKey('u'))
 	got = updated.(QueueDashboard)
-	if got.list.Cursor() != 4 {
-		t.Fatalf("after C-u cursor = %d, want 4", got.list.Cursor())
+	if got.list.Cursor() != 3 {
+		t.Fatalf("after C-u cursor = %d, want 3", got.list.Cursor())
 	}
 
 	updated, _ = got.Update(ctrlKey('u'))
@@ -70,8 +70,8 @@ func TestDetailListHalfPageKeys(t *testing.T) {
 
 	updated, _ = got.Update(ctrlKey('d'))
 	got = updated.(QueueDashboard)
-	if got.detail.list.Cursor() != 3 {
-		t.Fatalf("after C-d detail cursor = %d, want 3", got.detail.list.Cursor())
+	if got.detail.list.Cursor() != 2 {
+		t.Fatalf("after C-d detail cursor = %d, want 2", got.detail.list.Cursor())
 	}
 
 	updated, _ = got.Update(ctrlKey('u'))

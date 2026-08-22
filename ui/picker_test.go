@@ -1081,8 +1081,8 @@ func TestHalfPageUpDown(t *testing.T) {
 
 	// ctrl+b = HalfPageUp
 	picker.Update(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
-	if picker.cursor != 5 {
-		t.Errorf("PageUp: cursor = %d, want 5", picker.cursor)
+	if picker.cursor != 6 {
+		t.Errorf("PageUp: cursor = %d, want 6", picker.cursor)
 	}
 
 	// Page up clamps to 0
@@ -1094,8 +1094,8 @@ func TestHalfPageUpDown(t *testing.T) {
 	// ctrl+f = HalfPageDown
 	picker.cursor = 15
 	picker.Update(tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
-	if picker.cursor != 25 {
-		t.Errorf("PageDown: cursor = %d, want 25", picker.cursor)
+	if picker.cursor != 24 {
+		t.Errorf("PageDown: cursor = %d, want 24", picker.cursor)
 	}
 
 	// Page down clamps to last

@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -92,5 +93,60 @@ func TestDocumentPeekRendersMarkdownByExtensionAndScrollsRenderedLines(t *testin
 	m = openPeek(t, updated.(QueueDashboard))
 	if got := m.detail.peek.body(m.width, ui.CurrentAppearance()); got != progress {
 		t.Fatalf("progress record was not shown raw:\n%q", got)
+	}
+}
+
+// The Document peek's page is the lines it really draws. Chrome the peek grows
+// takes those lines away, so an item menu open over the document must shorten
+// the page with it — otherwise the peek pages past its own bottom and G leaves
+// the last lines unreachable.
+func TestDocumentPeekPageShrinksWithTheMenuOverIt(t *testing.T) {
+	root := t.TempDir()
+	row := genericDetailRow()
+	row.DefPath = root
+	setDir := filepath.Join(root, row.ID)
+	if err := os.MkdirAll(setDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var doc strings.Builder
+	for i := 1; i <= 60; i++ {
+		fmt.Fprintf(&doc, "line %02d\n", i)
+	}
+	docPath := filepath.Join(setDir, "notes.txt")
+	if err := os.WriteFile(docPath, []byte(doc.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	kind := &artifactDetailKind{id: ref.KindTaskSet, artifacts: []work.Artifact{
+		{Type: "progress", Name: "notes.txt", Path: docPath, At: time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)},
+	}}
+	m := openArtifactDetail(t, artifactDetailDashboard(kind, row))
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'v', Text: "v"})
+	m = updated.(QueueDashboard)
+	updated, cmd := m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(QueueDashboard)
+	if cmd == nil {
+		t.Fatal("Enter did not open the Document peek")
+	}
+	updated, _ = m.update(cmd())
+	m = updated.(QueueDashboard)
+
+	bare := m.documentPeekPageSize()
+
+	updated, _ = m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	m = updated.(QueueDashboard)
+	if m.itemMenu == nil || !m.itemMenu.inPeek {
+		t.Fatal("a did not open the item menu over the peek")
+	}
+	withMenu := m.documentPeekPageSize()
+	if withMenu >= bare {
+		t.Fatalf("page over the menu = %d, want fewer than the bare %d", withMenu, bare)
+	}
+
+	// The document's bottom stays reachable: the last scroll the peek allows
+	// itself must put the last line on screen. An over-long page understates the
+	// scroll and strands the tail off screen.
+	m.detail.peek.scroll = m.maxDocumentPeekScroll()
+	if !strings.Contains(ui.StripANSI(m.View().Content), "line 60") {
+		t.Fatalf("the peek's last scroll does not reach the last line:\n%s", m.View().Content)
 	}
 }

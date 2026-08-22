@@ -205,8 +205,8 @@ func TestListHalfPage(t *testing.T) {
 	l.SetCursor(10)
 
 	l.HalfPageUp()
-	if l.Cursor() != 5 {
-		t.Fatalf("HalfPageUp: cursor = %d, want 5", l.Cursor())
+	if l.Cursor() != 6 {
+		t.Fatalf("HalfPageUp: cursor = %d, want 6", l.Cursor())
 	}
 
 	l.HalfPageDown()
@@ -224,6 +224,55 @@ func TestListHalfPage(t *testing.T) {
 	l.HalfPageDown()
 	if l.Cursor() != 19 {
 		t.Fatalf("HalfPageDown clamp: cursor = %d, want 19", l.Cursor())
+	}
+}
+
+// TestHalfPageMovesOneScreenLessARow pins the paging distance to the records the
+// viewport really shows, whatever else spends its lines: two-line rows, a foot
+// region, and the hidden-above edge all shrink the screen, and the page shrinks
+// with them. One row short of a screen, so the reader keeps a landmark.
+func TestHalfPageMovesOneScreenLessARow(t *testing.T) {
+	cases := []struct {
+		name string
+		list *List[string]
+	}{
+		{"one line per row", newTestList(strItems(40), AnchorTop, false, 0, nil)},
+		{"two lines per row", newMultilineTestList(strItems(40))},
+		{"foot region", func() *List[string] {
+			l := newTestList(strItems(40), AnchorTop, false, 0, nil)
+			l.SetRegion(Region{Count: 6, Separator: func(_, _ int, _ ScrollEdges) string { return "--" }})
+			return l
+		}()},
+		{"list draws its own top edge", NewList(strItems(40), Opts[string]{
+			Key:  func(s string) string { return s },
+			Cell: func(s string, _ RowState) string { return s },
+		})},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, height := range []int{4, 7, 12} {
+				l := tc.list
+				l.Resize(height)
+				l.SetCursor(20)
+
+				// One row is the floor: a viewport too crowded to show two
+				// records still moves.
+				want := max(l.visibleItems()-1, 1)
+				before := l.Cursor()
+				l.HalfPageDown()
+				if got := l.Cursor() - before; got != want {
+					t.Fatalf("height %d: C-d moved %d rows, want %d", height, got, want)
+				}
+
+				want = max(l.visibleItems()-1, 1)
+				before = l.Cursor()
+				l.HalfPageUp()
+				if got := before - l.Cursor(); got != want {
+					t.Fatalf("height %d: C-u moved %d rows, want %d", height, got, want)
+				}
+			}
+		})
 	}
 }
 
