@@ -9,12 +9,30 @@ import (
 )
 
 var (
-	claudeWeekdayResetAtPattern = regexp.MustCompile(`(?i)\bresets\s+(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+([0-9]{1,2}):([0-9]{2})\s*([AP]M)\b`)
-	claudeBareResetAtPattern    = regexp.MustCompile(`(?i)\bresets\s+([0-9]{1,2}):([0-9]{2})\s*([AP]M)\b`)
+	// The minutes are optional because claude states the hour alone when the
+	// window lands on one — "resets 9pm", observed 2026-08-24. Requiring them was
+	// what left that refusal undated (ADR-0233).
+	claudeWeekdayResetAtPattern = regexp.MustCompile(`(?i)\bresets\s+(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+([0-9]{1,2})(?::([0-9]{2}))?\s*([AP]M)\b`)
+	claudeBareResetAtPattern    = regexp.MustCompile(`(?i)\bresets\s+([0-9]{1,2})(?::([0-9]{2}))?\s*([AP]M)\b`)
+	// The zone claude names after the clock — "resets 9pm (Europe/Madrid)". An
+	// hour with no zone is ambiguous, so the message states one; reading it is
+	// what keeps a machine in another zone from waiting out the wrong hour.
+	claudeResetZonePattern = regexp.MustCompile(`\(([A-Za-z_]+/[A-Za-z0-9_+\-/]+)\)`)
 )
 
 func normalizeClaudeStreamJSON(raw string) AgentResult {
-	return normalizeResultStreamJSON(raw, claudeQuotaPauseReason)
+	return normalizeResultStreamJSON(raw, func(result string) *AgentProceedVerdict {
+		v := claudeQuotaPauseReason(result)
+		if v == nil {
+			return nil
+		}
+		// The instant is resolved here, where the whole capture is in hand,
+		// rather than at the executor's reason-only seam: claude states the
+		// reset as an epoch on its own rate-limit event, and only this call
+		// site can see it (ADR-0233).
+		stamped := v.WithResetAt(claudeStreamQuotaResetAt(raw, v.Reason, time.Now()))
+		return &stamped
+	})
 }
 
 // claudeLineRenderer renders claude stream-json events live: assistant prose
@@ -321,7 +339,76 @@ func claudeQuotaPauseReason(result string) *AgentProceedVerdict {
 	return nil
 }
 
+// claudeStreamQuotaResetAt dates a detected quota pause from the whole capture:
+// the epoch claude's own rate-limit event states when it has one, and the prose
+// clause in the refusal only when it has not (ADR-0233).
+//
+// The wire figure wins because it is the same fact without the two ways the
+// sentence loses it — a wording pop's patterns do not cover, and a clock read in
+// the wrong zone. Reading it is not Agent quota reporting: it is taken from the
+// capture pop already consumes, only after the refusal, and never to ask how
+// much allowance is left.
+func claudeStreamQuotaResetAt(raw, reason string, now time.Time) time.Time {
+	if at := claudeRateLimitResetAt(raw, now); !at.IsZero() {
+		return at
+	}
+	return claudeQuotaResetAt(reason, now)
+}
+
+// claudeRateLimitResetAt reads the reset instant off the rate-limit events
+// claude emits beside its refusal. Observed 2026-08-24, verbatim:
+//
+//	{"type":"rate_limit_event","rate_limit_info":{"status":"rejected",
+//	 "resetsAt":1787598000,"rateLimitType":"five_hour",...}}
+//
+// Only a rejecting event dates a pause. The same event type also carries
+// `allowed` and `allowed_warning` readings throughout a healthy run, and those
+// describe a window pop is still spending in, not one it is waiting on. The last
+// rejection wins, matching how the terminal result event is read.
+//
+// The stated epoch is padded by the Quota assurance offset, which is what it is
+// for: this is a second-granular edge, and a retry that lands on it exactly is
+// refused again — writing a fresh cooldown from the moment of that refusal
+// rather than from the truth (ADR-0233).
+//
+// now bounds what may be believed. The prose clauses can only name an instant
+// within the week, but an epoch can say anything, and the drain waits on this
+// value directly — so a figure outside the horizon the cooldown store would
+// accept is read as garbage rather than as a park lasting past it (ADR-0034).
+func claudeRateLimitResetAt(raw string, now time.Time) time.Time {
+	var latest int64
+	scanAgentJSONLines(raw, nil, func(line []byte) bool {
+		var event struct {
+			Type      string `json:"type"`
+			RateLimit struct {
+				Status   string `json:"status"`
+				ResetsAt int64  `json:"resetsAt"`
+			} `json:"rate_limit_info"`
+		}
+		if err := json.Unmarshal(line, &event); err != nil {
+			return false
+		}
+		if event.Type == "rate_limit_event" && event.RateLimit.Status == "rejected" && event.RateLimit.ResetsAt > 0 {
+			latest = event.RateLimit.ResetsAt
+		}
+		return true
+	})
+	if latest == 0 {
+		return time.Time{}
+	}
+	at := time.Unix(latest, 0).UTC().Add(quotaAssuranceOffset)
+	if at.Sub(now.UTC()) > maxAgentQuotaResetHorizon {
+		return time.Time{}
+	}
+	return at
+}
+
+// claudeQuotaResetAt reads the reset clause out of the refusal itself. It is the
+// fallback for a capture that states no reset epoch of its own, so it stays as
+// forgiving as the wording is: the hour may come without minutes, and the zone
+// the message names decides which hour that is (ADR-0233).
 func claudeQuotaResetAt(reason string, now time.Time) time.Time {
+	loc := claudeResetZone(reason, now.Location())
 	if m := claudeWeekdayResetAtPattern.FindStringSubmatch(reason); m != nil {
 		hour, minute, ok := parseQuotaClock(m[2], m[3], m[4])
 		if !ok {
@@ -331,26 +418,47 @@ func claudeQuotaResetAt(reason string, now time.Time) time.Time {
 		if !ok {
 			return time.Time{}
 		}
-		return nextQuotaWeekdayTime(now, weekday, hour, minute)
+		return nextQuotaWeekdayTimeIn(now, loc, weekday, hour, minute)
 	}
 	if m := claudeBareResetAtPattern.FindStringSubmatch(reason); m != nil {
 		hour, minute, ok := parseQuotaClock(m[1], m[2], m[3])
 		if !ok {
 			return time.Time{}
 		}
-		return nextQuotaLocalTime(now, hour, minute)
+		return nextQuotaTimeIn(now, loc, hour, minute)
 	}
 	return time.Time{}
 }
 
+// claudeResetZone resolves the zone a refusal names to a location, falling back
+// to the caller's when the message names none or names one this machine has no
+// zone database entry for. A zone pop cannot load is not worse than the zone it
+// assumed before there was one to read.
+func claudeResetZone(reason string, fallback *time.Location) *time.Location {
+	m := claudeResetZonePattern.FindStringSubmatch(reason)
+	if m == nil {
+		return fallback
+	}
+	loc, err := time.LoadLocation(m[1])
+	if err != nil {
+		return fallback
+	}
+	return loc
+}
+
+// parseQuotaClock reads a 12-hour clock out of a refusal. An empty minuteText is
+// the hour stated on its own ("9pm"), not a parse failure.
 func parseQuotaClock(hourText, minuteText, meridiem string) (int, int, bool) {
 	hour, err := strconv.Atoi(hourText)
 	if err != nil || hour < 1 || hour > 12 {
 		return 0, 0, false
 	}
-	minute, err := strconv.Atoi(minuteText)
-	if err != nil || minute < 0 || minute > 59 {
-		return 0, 0, false
+	minute := 0
+	if minuteText != "" {
+		minute, err = strconv.Atoi(minuteText)
+		if err != nil || minute < 0 || minute > 59 {
+			return 0, 0, false
+		}
 	}
 	switch strings.ToUpper(meridiem) {
 	case "AM":
@@ -389,7 +497,13 @@ func parseQuotaWeekday(text string) (time.Weekday, bool) {
 }
 
 func nextQuotaLocalTime(now time.Time, hour, minute int) time.Time {
-	loc := now.Location()
+	return nextQuotaTimeIn(now, now.Location(), hour, minute)
+}
+
+// nextQuotaTimeIn is nextQuotaLocalTime in a stated zone: the next occurrence of
+// a wall clock, read where the provider meant it rather than where pop happens
+// to be running (ADR-0233).
+func nextQuotaTimeIn(now time.Time, loc *time.Location, hour, minute int) time.Time {
 	localNow := now.In(loc)
 	reset := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), hour, minute, 0, 0, loc)
 	if !reset.After(localNow) {
@@ -401,8 +515,9 @@ func nextQuotaLocalTime(now time.Time, hour, minute int) time.Time {
 	return reset
 }
 
-func nextQuotaWeekdayTime(now time.Time, weekday time.Weekday, hour, minute int) time.Time {
-	loc := now.Location()
+// nextQuotaWeekdayTimeIn is nextQuotaTimeIn for a clock that also names a day:
+// the next occurrence of that weekday at that time, in the stated zone.
+func nextQuotaWeekdayTimeIn(now time.Time, loc *time.Location, weekday time.Weekday, hour, minute int) time.Time {
 	localNow := now.In(loc)
 	reset := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), hour, minute, 0, 0, loc)
 	days := (int(weekday) - int(localNow.Weekday()) + 7) % 7
