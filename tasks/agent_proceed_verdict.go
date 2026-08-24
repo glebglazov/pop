@@ -306,12 +306,20 @@ func (v AgentProceedVerdict) modelOrPlaceholder() string {
 // the reset out of the diagnostic. A spend cap is dated by pop, because the
 // refusal names no reset, so the adapter must not be asked — and must not
 // overwrite the hour with the zero instant it would answer (ADR-0231).
+//
+// A verdict that already carries an instant keeps it. This seam is handed a
+// reason and nothing else, so an adapter that dated the refusal from its whole
+// capture — claude's rate-limit epoch (ADR-0233) — knows something re-deriving
+// from the sentence cannot recover.
 func resolveProceedResetAt(v AgentProceedVerdict, now time.Time) AgentProceedVerdict {
 	if _, ok := v.TimeHealing(); !ok {
 		return v
 	}
 	if v.Kind == ProceedSpendCap {
 		return v.WithResetAt(now.Add(spendCapCooldown))
+	}
+	if !v.ResetAt.IsZero() {
+		return v
 	}
 	return v.WithResetAt(agentQuotaResetAt(v.Preset, v.Reason, now))
 }
