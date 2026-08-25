@@ -2774,13 +2774,15 @@ func TestRunTaskSetAgentFallbackWritesResetAwareCooldown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := codexQuotaResetAt(reason, before).Add(agentQuotaResetSkew)
+	want := codexQuotaResetAt(reason, before)
 	got := store["codex"].ExhaustedUntil
 	if got.Before(want.Add(-5*time.Second)) || got.After(want.Add(5*time.Second)) {
-		t.Fatalf("cooldown until = %s, want around reset+skew %s", got, want)
+		t.Fatalf("cooldown until = %s, want the derived reset %s", got, want)
 	}
-	if waiter.ResetAt.IsZero() || !got.After(waiter.ResetAt) {
-		t.Fatalf("waiter reset = %s, store cooldown = %s", waiter.ResetAt, got)
+	// The park sleeps on the instant the row holds, not two minutes before it
+	// (ADR-0235).
+	if waiter.ResetAt.IsZero() || !got.Equal(waiter.ResetAt.UTC()) {
+		t.Fatalf("waiter reset = %s, store cooldown = %s, want the same instant", waiter.ResetAt, got)
 	}
 	assertTaskOpen(t, env.execFixture(), "01-a")
 

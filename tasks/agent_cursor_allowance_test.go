@@ -53,7 +53,7 @@ func TestCursorSpentAllowanceCaptureYieldsModelScopedTimeHealingVerdict(t *testi
 	if !strings.Contains(v.Reason, "hit your usage limit") {
 		t.Fatalf("Reason = %q, want the provider diagnostic", v.Reason)
 	}
-	want := time.Date(2026, 9, 4, 0, 0, 0, 0, time.Local)
+	want := time.Date(2026, 9, 4, 0, 0, 0, 0, time.Local).Add(quotaAssuranceOffset)
 	if !v.ResetAt.Equal(want) {
 		t.Fatalf("ResetAt = %s, want %s (the 9/4/2026 the message states)", v.ResetAt, want)
 	}
@@ -106,7 +106,7 @@ func TestCursorQuotaResetAt(t *testing.T) {
 		reason string
 		want   time.Time
 	}{
-		{"stated date", "…reset when your monthly cycle ends on 9/4/2026.", time.Date(2026, 9, 4, 0, 0, 0, 0, time.Local)},
+		{"stated date", "…reset when your monthly cycle ends on 9/4/2026.", time.Date(2026, 9, 4, 0, 0, 0, 0, time.Local).Add(quotaAssuranceOffset)},
 		{"no date", "You've hit your usage limit for Opus.", time.Time{}},
 		{"date already behind now", "…ends on 1/2/2026.", time.Time{}},
 		{"nonsense month", "…ends on 19/4/2026.", time.Time{}},
@@ -149,7 +149,7 @@ func TestModelSkipCooldownUntilCapsTheHorizon(t *testing.T) {
 		want    time.Time
 	}{
 		{"captured 9/4/2026 clamps to 24h", time.Date(2026, 9, 4, 0, 0, 0, 0, time.UTC), now.Add(maxModelSkipHorizon)},
-		{"nearer date honoured as-is", now.Add(45 * time.Minute), now.Add(45*time.Minute + agentQuotaResetSkew)},
+		{"nearer date honoured as-is", now.Add(45 * time.Minute), now.Add(45 * time.Minute)},
 		{"no date keeps the one hour default", time.Time{}, now.Add(defaultAgentQuotaRetryAfter)},
 		{"date already behind now keeps the default", now.Add(-time.Minute), now.Add(defaultAgentQuotaRetryAfter)},
 	}

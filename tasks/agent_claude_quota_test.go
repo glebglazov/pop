@@ -65,10 +65,10 @@ func TestClaudeSessionLimitCaptureIsDatedFromItsRateLimitEvent(t *testing.T) {
 	if !v.ResetAt.Equal(want) {
 		t.Fatalf("ResetAt = %s, want %s (the epoch the rate-limit event stated, padded)", v.ResetAt, want)
 	}
-	// The sentence alone cannot produce that instant; if it ever could, this
-	// test would pass for the wrong reason.
-	if got := claudeQuotaResetAt(v.Reason, claudeCaptureRefusedAt); got.Equal(want) {
-		t.Fatal("the prose clause now yields the wire instant; re-point this test at what still cannot be read")
+	// The wire is where that instant came from: the rate-limit event alone
+	// yields it, before the prose clause is consulted at all.
+	if got := claudeRateLimitResetAt(raw, claudeCaptureRefusedAt); !got.Equal(want) {
+		t.Fatalf("wire reset = %s, want %s — the capture is dated from its rate-limit event", got, want)
 	}
 }
 
@@ -97,9 +97,14 @@ func TestClaudeQuotaCooldownOutlastsTheStatedResetRatherThanTheRefusal(t *testin
 	if blind := claudeCaptureRefusedAt.Add(defaultAgentQuotaRetryAfter); until.Equal(blind) {
 		t.Fatalf("cooldown fell back to the blind hour at %s", blind)
 	}
-	want := claudeCaptureStatedReset.Add(quotaAssuranceOffset).Add(agentQuotaResetSkew)
+	want := claudeCaptureStatedReset.Add(quotaAssuranceOffset)
 	if !until.Equal(want) {
 		t.Fatalf("cooldown until %s, want %s", until, want)
+	}
+	// One offset, not two: the row holds the instant the wait sleeps on
+	// (ADR-0235).
+	if !until.Equal(v.ResetAt) {
+		t.Fatalf("cooldown until %s, want the verdict's reset %s", until, v.ResetAt)
 	}
 }
 
@@ -130,7 +135,7 @@ func TestClaudeQuotaResetFallsBackToTheProseClause(t *testing.T) {
 	t.Parallel()
 	raw := `{"type":"result","subtype":"error_during_execution","result":"You've hit your weekly limit · resets Mon 12:00am"}`
 	now := time.Date(2026, 6, 11, 15, 0, 0, 0, time.Local) // Thu
-	want := time.Date(2026, 6, 15, 0, 0, 0, 0, time.Local) // next Mon
+	want := time.Date(2026, 6, 15, 0, 0, 0, 0, time.Local).Add(quotaAssuranceOffset) // next Mon, padded once
 
 	if got := claudeRateLimitResetAt(raw, now); !got.IsZero() {
 		t.Fatalf("wire reset = %s, want zero when the capture states none", got)
@@ -156,7 +161,7 @@ func TestClaudeQuotaResetAtReadsAnHourOnlyClauseInItsStatedZone(t *testing.T) {
 		t.Skipf("no zone database for America/New_York: %v", err)
 	}
 	now := time.Date(2026, 8, 24, 13, 58, 22, 0, newYork)
-	want := time.Date(2026, 8, 24, 21, 0, 0, 0, madrid)
+	want := time.Date(2026, 8, 24, 21, 0, 0, 0, madrid).Add(quotaAssuranceOffset)
 	if got := claudeQuotaResetAt(reason, now); !got.Equal(want) {
 		t.Fatalf("reset = %s, want %s", got, want)
 	}
@@ -167,7 +172,7 @@ func TestClaudeQuotaResetAtReadsAnHourOnlyClauseInItsStatedZone(t *testing.T) {
 	}
 	// It is the epoch the capture states, which is the point: the two channels
 	// agree once the sentence is read the way it was written.
-	if !want.Equal(claudeCaptureStatedReset) {
+	if !want.Equal(claudeCaptureStatedReset.Add(quotaAssuranceOffset)) {
 		t.Fatalf("prose reset %s disagrees with the stated epoch %s", want, claudeCaptureStatedReset)
 	}
 }
@@ -179,12 +184,12 @@ func TestClaudeQuotaResetAtHourOnlyWeekdayAndUnknownZone(t *testing.T) {
 	loc := time.FixedZone("local", 2*60*60)
 	now := time.Date(2026, 6, 11, 15, 0, 0, 0, loc) // Thu
 
-	want := time.Date(2026, 6, 15, 0, 0, 0, 0, loc) // next Mon
+	want := time.Date(2026, 6, 15, 0, 0, 0, 0, loc).Add(quotaAssuranceOffset) // next Mon, padded once
 	if got := claudeQuotaResetAt("You've hit your weekly limit \u00b7 resets Mon 12am", now); !got.Equal(want) {
 		t.Fatalf("weekday hour-only reset = %s, want %s", got, want)
 	}
 
-	wantLocal := time.Date(2026, 6, 11, 21, 0, 0, 0, loc)
+	wantLocal := time.Date(2026, 6, 11, 21, 0, 0, 0, loc).Add(quotaAssuranceOffset)
 	if got := claudeQuotaResetAt("You've hit your session limit \u00b7 resets 9pm (Mars/Olympus_Mons)", now); !got.Equal(wantLocal) {
 		t.Fatalf("unloadable zone reset = %s, want the local reading %s", got, wantLocal)
 	}

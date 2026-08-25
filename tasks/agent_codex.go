@@ -97,7 +97,7 @@ func codexQuotaResetAt(reason string, now time.Time) time.Time {
 	if !ok {
 		return time.Time{}
 	}
-	return nextQuotaLocalTime(now, hour, minute)
+	return withQuotaAssuranceOffset(nextQuotaLocalTime(now, hour, minute))
 }
 
 func agentQuotaResetAt(preset, reason string, now time.Time) time.Time {

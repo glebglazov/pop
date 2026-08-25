@@ -14,7 +14,6 @@ import (
 
 const (
 	agentCooldownFileName       = "agent-cooldowns.json"
-	agentQuotaResetSkew         = 2 * time.Minute
 	maxAgentQuotaResetHorizon   = 8 * 24 * time.Hour
 	defaultAgentQuotaRetryAfter = time.Hour
 	// maxModelSkipHorizon caps how long one Effort model skip holds, whatever
@@ -155,7 +154,10 @@ func agentQuotaCooldownUntil(resetAt, now time.Time, fallback time.Duration) tim
 	if !resetAt.After(now) || resetAt.Sub(now) > maxAgentQuotaResetHorizon {
 		return now.Add(fallback)
 	}
-	return resetAt.Add(agentQuotaResetSkew)
+	// Recorded exactly as derived. The Quota assurance offset is already in it,
+	// and padding again here would put the row two minutes past the instant the
+	// recovery wait sleeps on — one wasted park per quota pause (ADR-0235).
+	return resetAt
 }
 
 // updateAgentModelCooldown records (or refreshes) an Effort model skip
@@ -204,11 +206,10 @@ func modelSkipCooldownUntil(resetAt, now time.Time) time.Time {
 	if !resetAt.After(now) {
 		return now.Add(defaultAgentQuotaRetryAfter)
 	}
-	until := resetAt.Add(agentQuotaResetSkew)
-	if until.After(capped) {
+	if resetAt.After(capped) {
 		return capped
 	}
-	return until
+	return resetAt
 }
 
 // ActiveAgentModelCooldownsWith returns every Effort model skip (ADR-0168)

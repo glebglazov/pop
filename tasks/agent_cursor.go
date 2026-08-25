@@ -184,7 +184,7 @@ func cursorQuotaResetAt(reason string, now time.Time) time.Time {
 	if !reset.After(now) {
 		return time.Time{}
 	}
-	return reset
+	return withQuotaAssuranceOffset(reset)
 }
 
 // cursorAuthFailureReason scans the raw capture for the logged-out cursor-agent

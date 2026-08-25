@@ -1284,7 +1284,7 @@ func TestClaudeQuotaResetAtParsesCapturedWeeklyLimitString(t *testing.T) {
 	loc := time.FixedZone("local", -5*60*60)
 	reason := "You've hit your weekly limit · resets Mon 12:00am"
 	now := time.Date(2026, 6, 11, 15, 0, 0, 0, loc) // Thu
-	want := time.Date(2026, 6, 15, 0, 0, 0, 0, loc) // next Mon
+	want := time.Date(2026, 6, 15, 0, 0, 0, 0, loc).Add(quotaAssuranceOffset) // next Mon, padded once
 	got := claudeQuotaResetAt(reason, now)
 	if !got.Equal(want) {
 		t.Fatalf("reset = %s, want %s", got, want)
@@ -1300,7 +1300,7 @@ func TestClaudeQuotaResetAtParsesCapturedWeeklyLimitString(t *testing.T) {
 func TestClaudeQuotaResetAtParsesBareTimeAndFailures(t *testing.T) {
 	loc := time.FixedZone("local", 2*60*60)
 	now := time.Date(2026, 6, 15, 23, 0, 0, 0, loc)
-	want := time.Date(2026, 6, 16, 0, 0, 0, 0, loc)
+	want := time.Date(2026, 6, 16, 0, 0, 0, 0, loc).Add(quotaAssuranceOffset)
 	if got := claudeQuotaResetAt("You've hit your session limit · resets 12:00am", now); !got.Equal(want) {
 		t.Fatalf("bare reset = %s, want %s", got, want)
 	}
@@ -1346,7 +1346,7 @@ func TestCodexQuotaResetAtParsesCapturedLimitString(t *testing.T) {
 	loc := time.FixedZone("local", -5*60*60)
 	reason := "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 2:28 AM."
 	now := time.Date(2026, 6, 15, 1, 30, 0, 0, loc)
-	want := time.Date(2026, 6, 15, 2, 28, 0, 0, loc)
+	want := time.Date(2026, 6, 15, 2, 28, 0, 0, loc).Add(quotaAssuranceOffset)
 	if got := codexQuotaResetAt(reason, now); !got.Equal(want) {
 		t.Fatalf("reset = %s, want %s", got, want)
 	}
@@ -1355,7 +1355,7 @@ func TestCodexQuotaResetAtParsesCapturedLimitString(t *testing.T) {
 func TestCodexQuotaResetAtNextOccurrenceAndFailures(t *testing.T) {
 	loc := time.FixedZone("local", 2*60*60)
 	now := time.Date(2026, 6, 15, 3, 0, 0, 0, loc)
-	want := time.Date(2026, 6, 16, 2, 28, 0, 0, loc)
+	want := time.Date(2026, 6, 16, 2, 28, 0, 0, loc).Add(quotaAssuranceOffset)
 	if got := codexQuotaResetAt("try again at 2:28 AM.", now); !got.Equal(want) {
 		t.Fatalf("next reset = %s, want %s", got, want)
 	}

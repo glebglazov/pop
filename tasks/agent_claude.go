@@ -408,6 +408,12 @@ func claudeRateLimitResetAt(raw string, now time.Time) time.Time {
 // forgiving as the wording is: the hour may come without minutes, and the zone
 // the message names decides which hour that is (ADR-0233).
 func claudeQuotaResetAt(reason string, now time.Time) time.Time {
+	return withQuotaAssuranceOffset(claudeQuotaResetClauseAt(reason, now))
+}
+
+// claudeQuotaResetClauseAt is the clause reading itself, unpadded — the instant
+// the sentence names, which claudeQuotaResetAt then pads exactly once.
+func claudeQuotaResetClauseAt(reason string, now time.Time) time.Time {
 	loc := claudeResetZone(reason, now.Location())
 	if m := claudeWeekdayResetAtPattern.FindStringSubmatch(reason); m != nil {
 		hour, minute, ok := parseQuotaClock(m[2], m[3], m[4])

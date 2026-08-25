@@ -11,7 +11,22 @@ import (
 // quotaAssuranceOffset pads every derived reset instant so pop never retries a
 // paused agent a moment before its window actually reopens. Shared by every
 // adapter's quota reset derivation.
+//
+// It is applied once, at derivation, and nowhere downstream: the recovery wait
+// sleeps on the padded instant and the cooldown row records that same instant,
+// so a drain that wakes at it finds the preset runnable rather than still
+// cooling (ADR-0235). A second offset added at the store would wake every park
+// one offset early and cost it a whole park-resume-park cycle.
 const quotaAssuranceOffset = 2 * time.Minute
+
+// withQuotaAssuranceOffset pads a derived reset instant. A zero instant means no
+// reset was derived at all, and there is nothing to pad.
+func withQuotaAssuranceOffset(at time.Time) time.Time {
+	if at.IsZero() {
+		return at
+	}
+	return at.Add(quotaAssuranceOffset)
+}
 
 const (
 	opencodeGoFiveHourQuotaSignal   = "5-hour usage limit reached"
