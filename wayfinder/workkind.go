@@ -215,25 +215,24 @@ func (k *MapKind) Columns() []string {
 
 // Actions returns the container-level verbs for a Map: work one frontier ticket
 // or fan out the whole frontier when it has one, assist the Map itself, a shell in
-// the repository, mute, and copy-name. Spawning verbs come before
+// the repository, and copy-name. Spawning verbs come before
 // in-place ones, and all four frontier keys are gated on a frontier — a Map with
 // none offers no dead key.
 //
-// The status opener is not here: the Status menu opens from the row list on its
-// own key (ADR-0236 decision 1), which is what keeps the operator's way off a Map
-// row — archive or abandon — reachable from a Map with nothing left to grill
-// (ADR-0186).
+// Neither the status opener nor the mute pair is here: both menus open from the
+// row list on their own keys (ADR-0236 decisions 1 and 5), which is what keeps
+// the operator's way off a Map row — archive or abandon — reachable from a Map
+// with nothing left to grill (ADR-0186).
 //
 // Assist is **not** gated: a Map whose frontier is empty or fully claimed is when a
 // session scoped to the Map itself is most needed (ADR-0184). The Task-set verbs
-// (drain/bind/…) have never applied to a Map and still do not — the shared two are
-// the only verbs a Map has in common with a task set. Mute is a third: a Map is
-// mutable on the same terms as a Task set (ADR-0200 decision 7), offered on the
-// same `m` opener and, on an already-muted row, `u` for unmute — eligibility by
-// omission, the way every conditional verb here works.
+// (drain/bind/…) have never applied to a Map and still do not — shell and
+// copy-name are the only verbs a Map has in common with a task set. Mute is a
+// third thing the two share, on the Mute menu's own key: a Map is mutable on the
+// same terms as a Task set (ADR-0200 decision 7).
 //
-// Capability audit (ADR-0215 decision 5). Plural — mute, unmute and copy-name,
-// for the same reason a task set's are: the input is shared, or there is none. Singular — the four frontier verbs and assist, each
+// Capability audit (ADR-0215 decision 5). Plural — copy-name alone, for the same
+// reason a task set's is: there is no per-Map input. Singular — the four frontier verbs and assist, each
 // of which resolves a session per Map and hands the operator to a pane, which
 // has no plural meaning; and shell, which is one directory.
 func (k *MapKind) Actions(c work.Container) []work.Action {
@@ -247,11 +246,7 @@ func (k *MapKind) Actions(c work.Container) []work.Action {
 	actions = append(actions,
 		work.Action{Verb: VerbAssist, Key: "S", Label: "assist the map and go"},
 		work.Action{Verb: work.VerbShell, Key: "O", Label: "shell"},
-		work.Action{Verb: work.VerbMute, Key: "m", Label: "mute ▸", Modes: work.Plural},
 	)
-	if !c.MutedUntil.IsZero() {
-		actions = append(actions, work.Action{Verb: work.VerbUnmute, Key: "u", Label: "unmute", Modes: work.Plural})
-	}
 	if c.MapFrontier > 0 {
 		actions = append(actions,
 			work.Action{Verb: VerbWorkHere, Key: "i", Label: "work frontier ticket"},

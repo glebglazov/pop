@@ -248,23 +248,20 @@ func TestMenuRuleNamesItsTarget(t *testing.T) {
 		t.Fatalf("singular rule does not name the cursored container:\n%s", view)
 	}
 
-	// The Status menu opens from the row list and the mute submenu from inside the
-	// action menu; both render through the one block path, which is what this pins.
+	// The Status and the Mute menus both open from the row list, and both render
+	// through the one block path, which is what this pins.
 	for _, tc := range []struct {
 		name, key, want string
-		fromActionMenu  bool
 	}{
 		{name: "status", key: "s", want: "status · set-a"},
-		{name: "mute", key: "m", want: "mute · set-a", fromActionMenu: true},
+		{name: "mute", key: "m", want: "mute · set-a"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			opened, _ := setDashboard(t, "set-a", "set-b")
 			opened = bulkPress(t, opened, selKeyRune('a'))
 			actionsAt := menuRuleLine(t, opened.View().Content)
 			actionsBlock := blockLines(t, opened)
-			if !tc.fromActionMenu {
-				opened = bulkPress(t, opened, selKeyEsc())
-			}
+			opened = bulkPress(t, opened, selKeyEsc())
 
 			opened = bulkPress(t, opened, selKeyRune(rune(tc.key[0])))
 			if opened.menu == nil || (opened.menu.status == nil && opened.menu.mute == nil) {

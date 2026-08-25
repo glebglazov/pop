@@ -56,12 +56,16 @@ const (
 // StatusActions' own `x` writes, and two entries for one write is the drift the
 // split removes (decision 4).
 //
+// Neither is the mute pair. The Mute menu opens from the row list too, and
+// unmute moved inside it (decision 5) — which is what makes the `u` here mean
+// unbind worktree on every set, muted or not, instead of the two verbs contesting
+// one key and the row's state deciding.
+//
 // It is called when a menu opens over one container, not per container at load
 // time, so the eligibility it reports is as fresh as the keypress.
 //
-// Capability audit (ADR-0215 decision 5). Plural — mute, unmute and copy-name:
-// one window, one confirmation or one word answers identically for every marked
-// set. Singular — drain, verify, fold, assist, shell, bind, unbind, auto-drain,
+// Capability audit (ADR-0215 decision 5). Plural — copy-name alone: one word
+// answers identically for every marked set. Singular — drain, verify, fold, assist, shell, bind, unbind, auto-drain,
 // unpark and copy-path: each resolves a checkout, a worktree, a session or a
 // modal per set, so one answer cannot stand for the batch, and the handoff verbs
 // have no plural meaning at all.
@@ -80,18 +84,8 @@ func (k *Kind) Actions(c work.Container) []work.Action {
 	actions = append(actions,
 		work.Action{Verb: VerbAssist, Key: "S", Label: "assist"},
 		work.Action{Verb: work.VerbShell, Key: "O", Label: "shell"},
-		work.Action{Verb: work.VerbMute, Key: "m", Label: "mute ▸", Modes: work.Plural},
+		work.Action{Verb: VerbBind, Key: "b", Label: "bind worktree"},
 	)
-	// Unmute precedes unbind deliberately: both want `u`, and on a row that
-	// carries a mute *and* a worktree the mute is what `u` clears (ADR-0200
-	// decision 4 keys unmute rather than leaving it to a digit). Unbind keeps its
-	// place in the list and stays one Enter away — mute is the fresher gesture on
-	// a row the human just pulled out of the archive-of-attention, and unbinding
-	// a muted set is not something anyone does by hotkey.
-	if !c.MutedUntil.IsZero() {
-		actions = append(actions, work.Action{Verb: work.VerbUnmute, Key: "u", Label: "unmute", Modes: work.Plural})
-	}
-	actions = append(actions, work.Action{Verb: VerbBind, Key: "b", Label: "bind worktree"})
 	if c.Bound {
 		actions = append(actions, work.Action{Verb: VerbUnbind, Key: "u", Label: "unbind worktree"})
 	}

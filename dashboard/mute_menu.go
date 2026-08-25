@@ -150,13 +150,25 @@ func muteMorning(date time.Time) time.Time {
 	return time.Date(y, m, d, muteWindowHour, 0, 0, 0, time.UTC)
 }
 
-// dashboardMuteMenu is the nested mute overlay opened with `m` from the action
-// menu. Unlike the status submenu its items are the surface's own — a date is
-// not kind knowledge — and what the kind receives is the instant behind the
-// digit the human pressed, through work.Muter.
+// dashboardMuteMenu is the Mute menu opened with `m` from the row list
+// (ADR-0236 decision 1). Unlike the Status menu its items are the surface's
+// own — a date is not kind knowledge — and what the kind receives is the instant
+// behind the digit the human pressed, through work.Muter.
 type dashboardMuteMenu struct {
 	row  DashboardRow
-	list *ui.List[MuteWindow]
+	list *ui.List[muteMenuEntry]
+}
+
+// muteMenuEntry is one line of the Mute menu: a window that starts a mute, or
+// the clear entry that ends one. Both halves of the gesture live on one menu
+// because mute and unmute are one concept (ADR-0236 decision 5), and the clear
+// entry keeps `u` rather than taking a digit — it is not a window, so a digit
+// must not change which date it means depending on whether the row is muted.
+type muteMenuEntry struct {
+	key    string
+	label  string
+	window MuteWindow
+	clear  bool
 }
 
 // taskDeps is the dependency bag the window derivation reads its clock and its
@@ -169,14 +181,40 @@ func (m QueueDashboard) taskDeps() *tasks.Deps {
 	return m.d.Tasks
 }
 
-// newDashboardMuteMenu opens the mute submenu over row with the windows derived
-// from right now. The list is derived per opening rather than cached: the dates
-// change with the day, and a menu built at launch would offer yesterday.
-func newDashboardMuteMenu(td *tasks.Deps, row DashboardRow) *dashboardMuteMenu {
+// newDashboardMuteMenu opens the Mute menu over row with the windows derived
+// from right now, and with `u` to clear when clearable says the target carries a
+// mute. The windows are derived per opening rather than cached: the dates change
+// with the day, and a menu built at launch would offer yesterday.
+func newDashboardMuteMenu(td *tasks.Deps, row DashboardRow, clearable bool) *dashboardMuteMenu {
+	windows := MuteWindows(td)
+	entries := make([]muteMenuEntry, 0, len(windows)+1)
+	for i, window := range windows {
+		entries = append(entries, muteMenuEntry{key: muteWindowKey(i), label: window.Label, window: window})
+	}
+	if clearable {
+		entries = append(entries, muteMenuEntry{key: "u", label: "clear mute", clear: true})
+	}
 	return &dashboardMuteMenu{
 		row:  row,
-		list: ui.NewList(MuteWindows(td), ui.Opts[MuteWindow]{Wrap: true}),
+		list: ui.NewList(entries, ui.Opts[muteMenuEntry]{Wrap: true}),
 	}
+}
+
+// muteMenuClearable reports whether the Mute menu opened over rows offers the
+// clear entry: every target must carry a mute. Over one row that is the
+// eligibility the action menu expressed by omitting unmute; over a Selection it
+// is the same intersection every plural verb answers to (ADR-0215) — one `u`
+// that cleared some of the marked rows would be a partial answer.
+func muteMenuClearable(rows []DashboardRow) bool {
+	if len(rows) == 0 {
+		return false
+	}
+	for _, row := range rows {
+		if row.MutedUntil.IsZero() {
+			return false
+		}
+	}
+	return true
 }
 
 // muteWindowKey is the digit one entry answers to. The digits are monotonic in

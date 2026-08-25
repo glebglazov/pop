@@ -16,7 +16,7 @@ import (
 // The dashboard's half of Mute (ADR-0200 decisions 4 and 5): the surface derives
 // the six windows and hands one instant to the row's own kind. These drive the
 // model through real keypresses over a recording kind, so what is asserted is
-// what a human pressing `a m 3` actually causes.
+// what a human pressing `m 3` actually causes.
 
 // muteRecorder is a Work kind that records the mute it was asked for and nothing
 // else. It stands in for a real kind because the question here is what the
@@ -36,10 +36,10 @@ func (r *muteRecorder) StatusCell(c work.Container) []work.StatusSegment {
 }
 
 func (r *muteRecorder) Actions(c work.Container) []work.Action {
-	actions := []work.Action{{Verb: work.VerbMute, Key: "m", Label: "mute ▸"}}
-	if !c.MutedUntil.IsZero() {
-		actions = append(actions, work.Action{Verb: work.VerbUnmute, Key: "u", Label: "unmute"})
-	}
+	// Neither half of mute is here: the Mute menu opens from the row list and holds
+	// both (ADR-0236 decision 5). The kind's contribution is the work.Muter seam
+	// below and nothing else.
+	actions := []work.Action{{Verb: work.VerbShell, Key: "O", Label: "shell"}}
 	return actions
 }
 
@@ -65,7 +65,8 @@ func (r *muteRecorder) Unmute(work.Container) (work.Outcome, error) {
 
 // muteDashboard builds a dashboard whose only kind is the recorder, with the
 // clock and the roll pinned so the six windows are the ones ADR-0200's table
-// names for a Monday.
+// names for a Monday. No menu is opened: `m` reaches the Mute menu from the row
+// list (ADR-0236 decision 1).
 func muteDashboard(t *testing.T, row DashboardRow) (QueueDashboard, *muteRecorder) {
 	t.Helper()
 	rec := &muteRecorder{}
@@ -75,12 +76,12 @@ func muteDashboard(t *testing.T, row DashboardRow) (QueueDashboard, *muteRecorde
 	}
 	m := newQueueDashboard(&drain.Deps{Tasks: td}, nil, DashboardSnapshot{Containers: []DashboardRow{row}})
 	m.kinds = newWorkKinds([]work.Kind{rec})
-	m.menu = newDashboardMenu(m.kinds, row)
 	return m, rec
 }
 
-// `a` then `m` nests the window list, and a digit picks one: the kind receives
-// the instant behind that digit, never the digit and never a duration.
+// `m` on a row opens the window list straight from the row list, and a digit
+// picks one: the kind receives the instant behind that digit, never the digit and
+// never a duration.
 func TestMuteSubmenuOpensAndPicksAWindow(t *testing.T) {
 	row := DashboardRow{ID: "demo", CursorKey: "pop\x00demo"}
 	m, rec := muteDashboard(t, row)
@@ -88,10 +89,10 @@ func TestMuteSubmenuOpensAndPicksAWindow(t *testing.T) {
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
 	got := updated.(QueueDashboard)
 	if got.menu == nil || got.menu.mute == nil {
-		t.Fatal("m should nest the mute submenu under the action menu")
+		t.Fatal("m should open the Mute menu from the row list")
 	}
 	if n := len(got.menu.mute.list.Items()); n != 6 {
-		t.Fatalf("mute submenu offered %d windows, want 6", n)
+		t.Fatalf("the Mute menu over an unmuted row offered %d entries, want the 6 windows alone", n)
 	}
 
 	// Digit 3 on a Monday is `Wed 12 Aug` — the second dated entry, since the
@@ -148,9 +149,9 @@ func TestMuteSubmenuStatesTheHourOnlyInItsFooter(t *testing.T) {
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
 	got := updated.(QueueDashboard)
 
-	for _, window := range got.menu.mute.list.Items() {
-		if strings.Contains(window.Label, "UTC") || strings.Contains(window.Label, "09:00") {
-			t.Errorf("entry %q repeats the invariant hour", window.Label)
+	for _, entry := range got.menu.mute.list.Items() {
+		if strings.Contains(entry.label, "UTC") || strings.Contains(entry.label, "09:00") {
+			t.Errorf("entry %q repeats the invariant hour", entry.label)
 		}
 	}
 
@@ -170,62 +171,89 @@ func TestMuteSubmenuStatesTheHourOnlyInItsFooter(t *testing.T) {
 	}
 }
 
-// Unmute is offered only where there is a mute to clear, and it reaches the
-// kind through the Muter seam rather than through Perform.
+// Clearing a mute lives in the Mute menu, on `u`, beside the windows that set
+// one (ADR-0236 decision 5) — and only where there is a mute to clear. It reaches
+// the kind through the Muter seam rather than through Perform.
 func TestUnmuteIsOfferedOnlyOnAMutedRow(t *testing.T) {
 	plain := DashboardRow{ID: "demo", CursorKey: "pop\x00demo"}
 	muted := plain
 	muted.MutedUntil = time.Date(2026, time.August, 14, 9, 0, 0, 0, time.UTC)
 
 	m, _ := muteDashboard(t, plain)
-	for _, item := range dashboardMenuItems(m.kinds, plain) {
-		if item.verb == work.VerbUnmute {
-			t.Fatalf("an unmuted row offers unmute: %+v", item)
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
+	for _, entry := range updated.(QueueDashboard).menu.mute.list.Items() {
+		if entry.clear {
+			t.Fatalf("an unmuted row's Mute menu offers a clear entry: %+v", entry)
 		}
 	}
 
 	m, rec := muteDashboard(t, muted)
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
+	got := updated.(QueueDashboard)
 	offered := false
-	for _, item := range dashboardMenuItems(m.kinds, muted) {
-		if item.verb == work.VerbUnmute && item.key == "u" {
+	for _, entry := range got.menu.mute.list.Items() {
+		if entry.clear && entry.key == "u" {
 			offered = true
 		}
 	}
 	if !offered {
-		t.Fatal("a muted row must offer unmute on u")
+		t.Fatal("a muted row's Mute menu must offer clear on u")
+	}
+	// Every window keeps the digit it had: the clear entry is not one of them, so a
+	// digit means the same date whether or not the row is muted.
+	for i, entry := range got.menu.mute.list.Items() {
+		if !entry.clear && entry.key != muteWindowKey(i) {
+			t.Fatalf("window %d answers to %q, want %q", i, entry.key, muteWindowKey(i))
+		}
 	}
 
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'u', Text: "u"})
+	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'u', Text: "u"})
 	if cmd == nil {
-		t.Fatal("u dispatched nothing on a muted row")
+		t.Fatal("u cleared nothing on a muted row")
 	}
 	cmd()
 	if rec.unmuted != 1 {
 		t.Fatalf("kind unmuted %d times, want 1", rec.unmuted)
 	}
 	if got := updated.(QueueDashboard); got.menu != nil {
-		t.Fatal("unmute should close the one-shot menu")
+		t.Fatal("clearing a mute should close the menu")
 	}
 }
 
-// esc backs out of the window list to the action menu, the way the status
-// submenu does — the two nest identically.
-func TestMuteSubmenuEscReturnsToTheActionMenu(t *testing.T) {
-	m, rec := muteDashboard(t, DashboardRow{ID: "demo"})
+// A kind with no mute answers `m` in a flash: at top level the key reaches the
+// whole surface, and one that does nothing reads as broken (ADR-0236 decision 7).
+func TestMuteMenuFlashesOnAKindThatCannotBeMuted(t *testing.T) {
+	row := DashboardRow{Kind: ref.KindRoutine, ID: "daily", CursorKey: "pop\x00daily"}
+	m := newQueueDashboard(&drain.Deps{}, nil, DashboardSnapshot{Containers: []DashboardRow{row}})
+	m.kinds = testRoutineKinds()
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
-	updated, _ = updated.(QueueDashboard).Update(tea.KeyPressMsg{Code: tea.KeyEscape, Text: "esc"})
 	got := updated.(QueueDashboard)
-	if got.menu == nil || got.menu.mute != nil {
-		t.Fatal("esc should close the window list and leave the action menu open")
+	if got.menu != nil {
+		t.Fatal("m opened a Mute menu over a kind that cannot be muted")
+	}
+	if want := "a Routine cannot be muted"; got.flash.Text() != want {
+		t.Fatalf("flash = %q, want %q", got.flash.Text(), want)
+	}
+}
+
+// The esc out of the Mute menu goes back to the rows, there being no menu under
+// it any more.
+func TestMuteMenuEscClosesToTheRowList(t *testing.T) {
+	m, rec := muteDashboard(t, DashboardRow{ID: "demo", CursorKey: "pop\x00demo"})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
+	updated, _ = updated.(QueueDashboard).Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if got := updated.(QueueDashboard); got.menu != nil {
+		t.Fatalf("esc left a menu open: %+v", got.menu)
 	}
 	if len(rec.muted) != 0 {
 		t.Fatalf("esc muted something: %v", rec.muted)
 	}
 }
 
-// Routines are not mutable, and they say so by omission — the same way every
-// other ineligible verb is declared. The durable half of the invariant is the
+// Routines are not mutable: no verb of theirs names a mute and no seam of theirs
+// takes one, which is what turns `m` on a Routine row into the flash above. The
+// durable half of the invariant is the
 // store's (ADR-0200 decision 7): a Routine already carries an indefinite pause
 // bit, and a second human-set suppression beside it would be two vocabularies
 // for one intent.

@@ -285,14 +285,41 @@ func (m QueueDashboard) openStatusMenu() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// openMuteMenu answers `m` from the row list. Over one row it offers that row's
+// windows and, on an already-muted row, `u` to clear; over a Selection one window
+// answers for every marked row, exactly as the opener did from inside the action
+// menu (ADR-0236 decisions 1 and 10).
+//
+// A kind with no mute answers in a flash, for the same reason a kind with no
+// status does: at top level the absence can no longer explain itself by a line
+// simply not being in a list (decision 7).
+func (m QueueDashboard) openMuteMenu() (tea.Model, tea.Cmd) {
+	if m.selection.Active() {
+		return m.openSelectionMuteMenu()
+	}
+	row, ok := m.list.Selected()
+	if !ok {
+		return m, nil
+	}
+	if m.kinds.muterFor(row) == nil {
+		m.flash.Set(fmt.Sprintf("a %s cannot be muted", detailKindNoun(row.Kind)))
+		return m, nil
+	}
+	m.err = nil
+	m.menu = &dashboardMenu{
+		row:  row,
+		mute: newDashboardMuteMenu(m.taskDeps(), row, muteMenuClearable([]DashboardRow{row})),
+	}
+	return m, nil
+}
+
 // dashboardMenu is the layered action overlay opened with `a` over the focused
 // row. It carries the snapshot of the row it was opened on and the verbs
 // applicable to that row on a ui.List whose cursor drives j/k + Enter
-// selection. The menu closes as soon as a verb fires. When status is non-nil
-// the status submenu is open over the action menu.
-// A menu opened straight as the Status menu carries no list of its own: status
-// is the only thing it is showing, so there is nothing underneath it to go back
-// to and esc leaves the overlay.
+// selection. The menu closes as soon as a verb fires.
+// A menu opened straight as the Status or the Mute menu carries no list of its
+// own: that menu is the only thing it is showing, so there is nothing underneath
+// it to go back to and esc leaves the overlay.
 type dashboardMenu struct {
 	row    DashboardRow
 	list   *ui.List[dashboardMenuItem]
@@ -308,12 +335,6 @@ type dashboardMenu struct {
 	plural  bool
 	targets []DashboardRow
 }
-
-// nested reports whether a submenu is open over the action menu — which today is
-// the mute submenu alone, the Status menu having moved to the row list
-// (ADR-0236 decision 1). Every place that asks "is the action menu itself taking
-// keys" asks here, and a Status menu answers no: it has no menu under it.
-func (m *dashboardMenu) nested() bool { return m.mute != nil }
 
 // pluralCount is how many rows this menu's verbs will act on, zero for a menu
 // over the cursored row.
@@ -1307,6 +1328,11 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// The Status menu opens from the row list, not from inside another menu
 			// (ADR-0236 decision 1): `s` `x` archives where `a` `s` `x` used to.
 			return m.openStatusMenu()
+		case "m":
+			// The Mute menu opens the same way, and it is where unmute lives now —
+			// which is what frees `u` in the action menu to mean unbind worktree and
+			// nothing else (ADR-0236 decision 5).
+			return m.openMuteMenu()
 		case "f":
 			// Open the Work view preset list (ADR-0197). Unlike `/` (a search that
 			// subtracts by name from the rows already included) this modal picks
@@ -1657,17 +1683,18 @@ func (m QueueDashboard) updateStatusMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// updateMuteMenu drives the nested mute submenu: esc returns to the action menu,
-// j/k move the highlight, Enter mutes with the highlighted window, and digits
-// 1–6 mute with that window directly. Navigation resolves before the digits for
-// the same reason the status submenu resolves it before verb letters.
+// updateMuteMenu drives the Mute menu: esc closes it back to the row list it
+// opened from, j/k move the highlight, Enter runs the highlighted entry, digits
+// 1–6 mute with that window directly, and `u` clears the mute where the menu
+// offers it. Navigation resolves before the entry keys for the same reason the
+// Status menu resolves it before verb letters.
 func (m QueueDashboard) updateMuteMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.menu == nil || m.menu.mute == nil {
 		return m, nil
 	}
 	switch msg.String() {
 	case "esc", "ctrl+c":
-		m.menu.mute = nil
+		m.menu = nil
 		return m, nil
 	case "j", "down":
 		m.menu.mute.list.MoveDown()
@@ -1678,42 +1705,53 @@ func (m QueueDashboard) updateMuteMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		return m.invokeMuteMenuItem(m.menu.mute.list.Cursor())
 	}
-	for i := range m.menu.mute.list.Items() {
-		if msg.String() == muteWindowKey(i) {
+	for i, entry := range m.menu.mute.list.Items() {
+		if msg.String() == entry.key {
 			return m.invokeMuteMenuItem(i)
 		}
 	}
 	return m, nil
 }
 
-// invokeMuteMenuItem closes the overlay and mutes the row until the chosen
-// window.
+// invokeMuteMenuItem closes the overlay and either mutes the target until the
+// chosen window or clears the mute it carries. Both halves leave the verb seam
+// for work.Muter (ADR-0200 decision 5): a verb id carries no payload, so the
+// window has nowhere to ride on Perform and unmute follows its pair.
 func (m QueueDashboard) invokeMuteMenuItem(idx int) (tea.Model, tea.Cmd) {
 	if m.menu == nil || m.menu.mute == nil {
 		return m, nil
 	}
-	windows := m.menu.mute.list.Items()
-	if idx < 0 || idx >= len(windows) {
+	entries := m.menu.mute.list.Items()
+	if idx < 0 || idx >= len(entries) {
 		return m, nil
 	}
+	entry := entries[idx]
 	row := m.menu.row
-	if m.menu.plural {
+	plural, targets := m.menu.plural, m.menu.targets
+	m.menu = nil
+	m.err = nil
+	if entry.clear {
+		if plural {
+			return m.openBulkPrompt(bulkLabel(work.VerbUnmute, len(targets)), targets, func(m QueueDashboard, rows []DashboardRow) tea.Cmd {
+				return m.bulkUnmute(rows)
+			})
+		}
+		return m, m.unmuteRow(row)
+	}
+	if plural {
 		// The window the human just picked is the shared input that makes mute
 		// plural: one date, every marked row, one confirmation.
-		targets := m.menu.targets
-		window := windows[idx]
-		m.menu = nil
+		window := entry.window
 		return m.openBulkPrompt(bulkLabel(work.VerbMute, len(targets)), targets, func(m QueueDashboard, rows []DashboardRow) tea.Cmd {
 			return m.bulkMute(rows, window)
 		})
 	}
-	m.menu = nil
-	m.err = nil
-	return m, m.muteRow(row, windows[idx])
+	return m, m.muteRow(row, entry.window)
 }
 
 // invokeMenuItem closes the menu and dispatches the verb at idx against the row
-// the menu was opened on, except for the mute submenu opener which nests.
+// the menu was opened on. Nothing in the menu opens another menu any more: both
+// openers it used to carry are top-level keys (ADR-0236 decision 1).
 func (m QueueDashboard) invokeMenuItem(idx int) (tea.Model, tea.Cmd) {
 	if m.menu == nil {
 		return m, nil
@@ -1727,13 +1765,6 @@ func (m QueueDashboard) invokeMenuItem(idx int) (tea.Model, tea.Cmd) {
 	}
 	item := items[idx]
 	row := m.menu.row
-	// The mute opener nests instead of dispatching: it names no kind, and has
-	// nothing to perform until the human picks a window from the list underneath
-	// it.
-	if item.verb == work.VerbMute {
-		m.menu.mute = newDashboardMuteMenu(m.taskDeps(), row)
-		return m, nil
-	}
 	m.menu = nil
 	return m.dispatchVerb(item.verb, row)
 }
@@ -1875,15 +1906,6 @@ func (m QueueDashboard) dispatchVerb(verb work.Verb, row DashboardRow) (tea.Mode
 		}
 		m.flash.Set(dashboardHandoffPending)
 		return m, m.launchFold(row)
-	case work.VerbUnmute:
-		// Unmute goes to the Muter seam rather than to Perform: a verb id carries no
-		// payload and mute's pair had to leave the verb seam for the mute half, so
-		// both halves land on one interface (ADR-0200 decision 5).
-		if row.MutedUntil.IsZero() {
-			m.flash.Set("not muted")
-			return m, nil
-		}
-		return m, m.unmuteRow(row)
 	case setkind.VerbUnpark:
 		if !row.Parked {
 			m.flash.Set("task set is not parked")
@@ -3068,20 +3090,20 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			ui.HelpEntry{Key: "esc", Desc: "close menu"},
 		)
 	case m.menu != nil && m.menu.mute != nil:
-		// The mute submenu's entries are dates derived from today, so the help lists
-		// the windows actually on offer rather than a fixed roster that would be
-		// wrong by tomorrow.
+		// The Mute menu's entries are dates derived from today, so the help lists the
+		// windows actually on offer rather than a fixed roster that would be wrong by
+		// tomorrow — and the clear entry only where the row carries a mute.
 		items := m.menu.mute.list.Items()
 		entries := make([]ui.HelpEntry, 0, len(items)+4)
-		for i, window := range items {
-			entries = append(entries, ui.HelpEntry{Key: muteWindowKey(i), Desc: window.Label})
+		for _, entry := range items {
+			entries = append(entries, ui.HelpEntry{Key: entry.key, Desc: entry.label})
 		}
 		return append(entries,
 			ui.HelpEntry{Key: "", Desc: muteMenuFooter()},
 			ui.HelpEntry{Key: "j/k", Desc: "navigate"},
 			ui.HelpEntry{Key: "J/K", Desc: "navigate rows"},
-			ui.HelpEntry{Key: "enter", Desc: "mute"},
-			ui.HelpEntry{Key: "esc", Desc: "back"},
+			ui.HelpEntry{Key: "enter", Desc: "run entry"},
+			ui.HelpEntry{Key: "esc", Desc: "close menu"},
 		)
 	case m.menu != nil && m.menu.status != nil:
 		// The Status menu's verbs are the focused row's own kind's, so the help
@@ -3199,12 +3221,14 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 				ui.HelpEntry{Key: "y", Desc: "copy selected names"},
 				ui.HelpEntry{Key: "a", Desc: "actions over the selection"},
 				ui.HelpEntry{Key: "s", Desc: "status menu over the selection"},
+				ui.HelpEntry{Key: "m", Desc: "mute menu over the selection"},
 			)
 		} else {
 			entries = append(entries,
 				ui.HelpEntry{Key: "y", Desc: "copy name"},
 				ui.HelpEntry{Key: "a", Desc: "action menu"},
 				ui.HelpEntry{Key: "s", Desc: "status menu"},
+				ui.HelpEntry{Key: "m", Desc: "mute menu"},
 			)
 		}
 		entries = append(entries,
@@ -3254,7 +3278,7 @@ func (m QueueDashboard) View() tea.View {
 		} else if m.detail != nil {
 			title = "Help · " + page + " · detail"
 		} else if m.menu != nil && m.menu.mute != nil {
-			title = "Help · " + page + " · mute submenu"
+			title = "Help · " + page + " · mute menu"
 		} else if m.menu != nil && m.menu.status != nil {
 			title = "Help · " + page + " · status menu"
 		} else if m.menu != nil {
@@ -3350,10 +3374,9 @@ func (m QueueDashboard) frameSpec() ui.Frame {
 	switch {
 	case m.menu != nil:
 		block = dashboardMenuLines(m.menu, m.width, m.liveCache())
+		// No menu nests under another any more (ADR-0236 decision 1), so esc always
+		// means the same thing: back to the rows.
 		hints = "j/k move · J/K rows · enter/letter run · esc close"
-		if m.menu.nested() {
-			hints = "j/k move · J/K rows · enter/letter run · esc back"
-		}
 	case m.filter != nil:
 		block = m.dashboardFilterMenuLines()
 		hints = "j/k move · 1-9/enter select · esc close"
@@ -3454,9 +3477,9 @@ func (m QueueDashboard) mainHint() string {
 	if m.selection.Active() {
 		// Only the keys that still do something in the mode, so the line does not
 		// advertise the verbs it is refusing.
-		return "j/k move · gg/G top/bottom · tab select · shift+tab clear · y copy names · a actions · s status ▸ · / search · " + filters + toggle + " · C-h help · h/esc quit"
+		return "j/k move · gg/G top/bottom · tab select · shift+tab clear · y copy names · a actions · s status ▸ · m mute ▸ · / search · " + filters + toggle + " · C-h help · h/esc quit"
 	}
-	return "j/k move · gg/G top/bottom · tab select · l/enter detail · y copy name · a actions · s status ▸ · / search · " + filters + toggle + " · C-h help · h/esc quit"
+	return "j/k move · gg/G top/bottom · tab select · l/enter detail · y copy name · a actions · s status ▸ · m mute ▸ · / search · " + filters + toggle + " · C-h help · h/esc quit"
 }
 
 // emptySearchLine is the body text when the search has hidden every row. It
@@ -4104,7 +4127,7 @@ type menuEntry struct {
 }
 
 // menuBlockLines is the single path every action menu renders through — the table
-// view's singular and plural menus, their status and mute submenus, and the
+// view's singular and plural menus, the Status and Mute menus, and the
 // detail view's item menus. A rule naming the noun and its target, then one line
 // per entry with the cursored one carrying the shared cursor block. Every caller
 // hands the result to a Frame as its Block, which is what puts all of them at one
@@ -4172,16 +4195,16 @@ func dashboardStatusMenuLines(status *dashboardStatusMenu, target string, width 
 	return menuBlockLines("status", target, width, status.list.Cursor(), entries)
 }
 
-// dashboardMuteMenuLines renders the nested mute submenu: six numbered windows,
-// then one dimmed footer stating the hour they all land at. The footer is why no
-// entry carries the hour itself.
+// dashboardMuteMenuLines renders the Mute menu: six numbered windows, the clear
+// entry where the target carries a mute, then one dimmed footer stating the hour
+// every date lands at. The footer is why no entry carries the hour itself.
 func dashboardMuteMenuLines(mute *dashboardMuteMenu, target string, width int) []string {
 	if mute == nil {
 		return nil
 	}
 	entries := make([]menuEntry, 0, mute.list.Len())
-	for i, window := range mute.list.Items() {
-		entries = append(entries, menuEntry{key: muteWindowKey(i), label: window.Label})
+	for _, entry := range mute.list.Items() {
+		entries = append(entries, menuEntry{key: entry.key, label: entry.label})
 	}
 	lines := menuBlockLines("mute", target, width, mute.list.Cursor(), entries)
 	return append(lines, ui.TruncateString("      "+ui.HintStyle().Render(muteMenuFooter()), width))

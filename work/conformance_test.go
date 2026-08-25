@@ -84,11 +84,8 @@ func conformanceCases() []conformanceCase {
 					},
 				})
 			},
-			// The fixture's set is not muted, so it offers the mute opener and not its
-			// unmute half — eligibility by omission, the way every conditional verb
-			// works (ADR-0200 decision 7).
 			wantActions: []work.Verb{
-				setkind.VerbDrain, setkind.VerbAssist, work.VerbShell, work.VerbMute,
+				setkind.VerbDrain, setkind.VerbAssist, work.VerbShell,
 				setkind.VerbBind, setkind.VerbAutoDrain, work.VerbCopyName,
 			},
 			wantItemActions: []work.Verb{
@@ -115,12 +112,8 @@ func conformanceCases() []conformanceCase {
 					Groups:    f.groups,
 				})
 			},
-			// The fixture's Map is not muted, so it offers the mute opener and not its
-			// unmute half, the same eligibility-by-omission a Task set's row follows
-			// (ADR-0200 decision 7: Task sets and Maps are mutable, a Routine is not —
-			// see the "routine" case below, whose wantActions names no mute verb at all).
 			wantActions: []work.Verb{
-				wayfinder.VerbWork, wayfinder.VerbFanOut, wayfinder.VerbAssist, work.VerbShell, work.VerbMute,
+				wayfinder.VerbWork, wayfinder.VerbFanOut, wayfinder.VerbAssist, work.VerbShell,
 				wayfinder.VerbWorkHere, wayfinder.VerbFanOutHere, work.VerbCopyName,
 			},
 			wantItemActions: []work.Verb{wayfinder.VerbWork, wayfinder.VerbWorkHere, work.VerbCopyName},
@@ -254,6 +247,15 @@ func TestKindConformance(t *testing.T) {
 			}
 			if slices.Contains(verbsOf(k.Actions(c)), work.VerbStatus) {
 				t.Fatalf("Actions = %v, want no status opener — the Status menu opens from the row list", verbsOf(k.Actions(c)))
+			}
+			// The mute pair follows the status opener out of Actions (ADR-0236
+			// decision 5): whether a kind can be muted is ref.Kind.Mutable's answer and
+			// the Mute menu's own key asks it, so a kind that lists either half is
+			// offering a menu twice and putting unmute back in `u`'s way.
+			for _, verb := range []work.Verb{work.VerbMute, work.VerbUnmute} {
+				if slices.Contains(verbsOf(k.Actions(c)), verb) {
+					t.Fatalf("Actions = %v, want no %s — the Mute menu opens from the row list", verbsOf(k.Actions(c)), verb)
+				}
 			}
 			for _, action := range status {
 				if action.Key == "" || action.Label == "" {

@@ -18,12 +18,9 @@ func verbsOffered(actions []work.Action) []work.Verb {
 }
 
 // TestActionsOrderSpawningFirst pins the ordering rule: every spawning (handoff)
-// verb before every in-place one, `I V F S O` then `m u b u a s r x y p` — the
-// fix for the old interleaved `I V b u a s S F r O x y`. The container below
-// trips every conditional verb so the full list is exercised in one pass, mute
-// included, which is also where the deliberate `u` collision shows: unmute
-// precedes unbind, so a row carrying both answers `u` with the mute (ADR-0200
-// decision 4).
+// verb before every in-place one, `I V F S O` then `b u a r y p` — the fix for
+// the old interleaved `I V b u a s S F r O x y`. The container below trips every
+// conditional verb so the full list is exercised in one pass.
 func TestActionsOrderSpawningFirst(t *testing.T) {
 	k := New(nil)
 	c := work.Container{
@@ -38,11 +35,33 @@ func TestActionsOrderSpawningFirst(t *testing.T) {
 	}
 	want := []work.Verb{
 		VerbDrain, VerbVerify, VerbFold, VerbAssist, work.VerbShell,
-		work.VerbMute, work.VerbUnmute, VerbBind, VerbUnbind, VerbAutoDrain,
+		VerbBind, VerbUnbind, VerbAutoDrain,
 		VerbUnpark, work.VerbCopyName, VerbCopyPath,
 	}
 	if got := verbsOffered(k.Actions(c)); !slices.Equal(got, want) {
 		t.Fatalf("Actions = %v, want %v", got, want)
+	}
+}
+
+// The `u` contest is over: unmute moved into the Mute menu (ADR-0236 decision 5),
+// so on a set that carries both a mute and a worktree `u` is unbind and nothing
+// else. A key whose meaning turned on the row's state is the thing this pins
+// against coming back.
+func TestUnbindOwnsUOnAMutedBoundSet(t *testing.T) {
+	k := New(nil)
+	c := work.Container{
+		ID: "2026-07-01-demo", Bound: true, Provisioned: true,
+		RawStatus:  tasks.StatusReady,
+		MutedUntil: time.Date(2026, 8, 14, 9, 0, 0, 0, time.UTC),
+	}
+	var onU []work.Action
+	for _, a := range k.Actions(c) {
+		if a.Key == "u" {
+			onU = append(onU, a)
+		}
+	}
+	if len(onU) != 1 || onU[0].Verb != VerbUnbind {
+		t.Fatalf("`u` on a muted, bound set = %+v, want unbind worktree alone", onU)
 	}
 }
 
@@ -59,7 +78,6 @@ func TestVerbCapabilities(t *testing.T) {
 		MutedUntil: time.Date(2026, 8, 14, 9, 0, 0, 0, time.UTC),
 	}
 	plural := map[work.Verb]bool{
-		work.VerbMute: true, work.VerbUnmute: true,
 		VerbArchive: true, work.VerbCopyName: true,
 		VerbComplete: true, VerbOpen: true, VerbSkip: true, VerbUnarchive: true,
 	}

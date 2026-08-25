@@ -89,9 +89,11 @@ func TestMutedMapLeavesTheDefaultViewAndComesBackWhenTheWindowEnds(t *testing.T)
 	}
 }
 
-// The mute pair on a Map: the row reads back exactly the words the submenu
+// The mute pair on a Map: the row reads back exactly the words the Mute menu
 // offered, unmute clears it, and — unlike a Task set — there is no Auto-drain
-// consequence to name either way, since a Map has none to clear.
+// consequence to name either way, since a Map has none to clear. Neither half is
+// in Actions to check: both are the Mute menu's, which asks ref.Kind.Mutable
+// rather than a verb list (ADR-0236 decision 5).
 func TestMapMuteAndUnmuteReadBackOnTheRow(t *testing.T) {
 	k, _, row := muteMapFixture(t, "2026-08-03-demo-map")
 	until := time.Date(2026, time.August, 14, 9, 0, 0, 0, time.UTC)
@@ -114,21 +116,12 @@ func TestMapMuteAndUnmuteReadBackOnTheRow(t *testing.T) {
 	if cell := work.StatusCellText(k.StatusCell(muted)); !strings.Contains(cell, "unmuted on Fri 14 Aug, 09:00 UTC") {
 		t.Fatalf("status cell = %q, want the mute read back in full", cell)
 	}
-	if !muted.MutedUntil.IsZero() {
-		if got, want := verbsOf(k.Actions(muted)), work.VerbUnmute; !containsVerb(got, want) {
-			t.Fatalf("actions on a muted map = %v, want unmute offered", got)
-		}
-	}
-
 	if _, err := k.Unmute(row); err != nil {
 		t.Fatalf("Unmute: %v", err)
 	}
 	unmuted := muteMapContainer(t, k, "2026-08-03-demo-map")
 	if !unmuted.MutedUntil.IsZero() {
 		t.Fatalf("still muted until %s after unmute", unmuted.MutedUntil)
-	}
-	if containsVerb(verbsOf(k.Actions(unmuted)), work.VerbUnmute) {
-		t.Fatal("an unmuted map still offers unmute")
 	}
 }
 

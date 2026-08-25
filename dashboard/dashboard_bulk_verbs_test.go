@@ -20,6 +20,11 @@ import (
 // afterwards. Every test drives the keys, because a mode is only worth anything
 // if the keyboard behaves.
 
+// mutedUntilExample is the mute a muted page wears. Only its presence matters to
+// the Mute menu, which offers `u` where a row carries one and no window where it
+// does not.
+var mutedUntilExample = time.Date(2026, time.August, 14, 9, 0, 0, 0, time.UTC)
+
 // bulkLog records what the kinds under test were actually asked to do, which is
 // the only way to tell "performed every row" from "reported five".
 type bulkLog struct {
@@ -40,6 +45,10 @@ type bulkKind struct {
 	ids     []string
 	actions []work.Action
 	status  []work.Action
+	// muted is the mute every row of this kind wears, zero for an unmuted page.
+	// The Mute menu offers its clear entry off the row, not off a verb list, so a
+	// test about unmute says so here.
+	muted time.Time
 	// fail names the containers whose Perform refuses, and with what.
 	fail map[string]string
 	log  *bulkLog
@@ -52,7 +61,7 @@ func (k *bulkKind) Load() ([]work.Container, error) {
 	for _, id := range k.ids {
 		rows = append(rows, work.Container{
 			Kind: k.id, ID: id, Project: "pop", Status: "READY",
-			CursorKey: "pop\x00" + id,
+			CursorKey: "pop\x00" + id, MutedUntil: k.muted,
 		})
 	}
 	return rows, nil
@@ -99,15 +108,14 @@ func (k *bulkKind) Unmute(c work.Container) (work.Outcome, error) {
 }
 
 // setVerbs is a Task-set-shaped verb list: one handoff verb that stays singular,
-// the shared plural mute opener, and an archive only this kind offers. The status
-// opener is in no kind's Actions — the Status menu opens from the row list
-// (ADR-0236 decision 1) — so the status half of the pair is what a Selection
-// intersects when `s` is pressed.
+// and an archive only this kind offers. Neither the status nor the mute opener is
+// in any kind's Actions — both menus open from the row list (ADR-0236 decisions 1
+// and 5) — so the status half of the pair is what a Selection intersects when `s`
+// is pressed.
 func setVerbs() ([]work.Action, []work.Action) {
 	return []work.Action{
 			{Verb: work.Verb("drain"), Key: "I", Label: "drain"},
 			{Verb: work.VerbShell, Key: "O", Label: "shell"},
-			{Verb: work.VerbMute, Key: "m", Label: "mute ▸", Modes: work.Plural},
 			{Verb: work.Verb("archive"), Key: "x", Label: "archive", Modes: work.Plural},
 			{Verb: work.VerbCopyName, Key: "y", Label: "copy name", Modes: work.Plural},
 		}, []work.Action{
@@ -220,9 +228,9 @@ func TestWorkBulkMenuListsOnlyWhatEveryRowOffers(t *testing.T) {
 	if got := menuLabels(m); !slices.Equal(got, want) {
 		t.Fatalf("menu = %v, want %v — the intersection, each item its verb label", got, want)
 	}
-	// mute is plural but only one kind offers it; archive is offered by one kind
-	// only; shell is offered by one and is singular anyway.
-	for _, absent := range []work.Verb{work.VerbMute, work.Verb("archive"), work.VerbShell, work.Verb("drain")} {
+	// archive is offered by one kind only; shell is offered by one and is singular
+	// anyway.
+	for _, absent := range []work.Verb{work.Verb("archive"), work.VerbShell, work.Verb("drain")} {
 		for _, item := range m.menu.list.Items() {
 			if item.verb == absent {
 				t.Fatalf("%s reached a menu over rows that do not all offer it plurally", absent)
@@ -506,18 +514,17 @@ func TestWorkBulkMenuRefusesASingularVerbsHotkey(t *testing.T) {
 }
 
 // Mute is the one plural verb whose modal takes input: the window is picked
-// once, in the surface's own submenu, and answers identically for every marked
+// once, in the surface's own menu, and answers identically for every marked
 // row (ADR-0215 decision 5).
 func TestWorkBulkMuteAppliesOneWindowToEveryRow(t *testing.T) {
 	m, k := setDashboard(t, "set-a", "set-b")
 	m = bulkPress(t, m, selKeyTab())
 	m = bulkPress(t, m, selKeyTab())
-	m = bulkPress(t, m, selKeyRune('a'))
 	m = bulkPress(t, m, selKeyRune('m'))
 	if m.menu == nil || m.menu.mute == nil {
-		t.Fatal("`m` did not open the mute submenu over the Selection")
+		t.Fatal("`m` did not open the Mute menu over the Selection")
 	}
-	window := m.menu.mute.list.Items()[1]
+	window := m.menu.mute.list.Items()[1].window
 
 	m = bulkPress(t, m, selKeyRune('2'))
 	if m.bulkPrompt == nil {
@@ -647,23 +654,19 @@ func TestWorkBulkMenuKeepsTheRowCursorPainted(t *testing.T) {
 }
 
 // Both menus render through the same block path, so they inherit its position
-// below the whole list and leave the row cursor painted — the Status menu opening
-// from the row list and the mute submenu from inside the action menu.
+// below the whole list and leave the row cursor painted — and both now open from
+// the row list (ADR-0236 decision 1).
 func TestWorkBulkSubmenusKeepTheSelectionSignals(t *testing.T) {
 	for _, tc := range []struct {
 		name, key, title string
-		fromActionMenu   bool
 	}{
 		{name: "status", key: "s", title: "status"},
-		{name: "mute", key: "m", title: "mute", fromActionMenu: true},
+		{name: "mute", key: "m", title: "mute"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m, _ := setDashboard(t, "set-a", "set-b", "set-c")
 			m = bulkPress(t, m, selKeyTab())
 			m = bulkPress(t, m, selKeyTab())
-			if tc.fromActionMenu {
-				m = bulkPress(t, m, selKeyRune('a'))
-			}
 			m = bulkPress(t, m, selKeyRune(rune(tc.key[0])))
 			if m.menu == nil || (m.menu.status == nil && m.menu.mute == nil) {
 				t.Fatalf("`%s` did not open the %s menu", tc.key, tc.name)

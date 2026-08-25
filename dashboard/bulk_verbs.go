@@ -217,9 +217,35 @@ func (m QueueDashboard) openSelectionStatusMenu() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// invokeSelectionMenuItem runs the plural menu's item at idx. The mute opener
-// nests the same way it does over one row, offering the surface's own dates, and
-// everything else goes to the bulk dispatch.
+// openSelectionMuteMenu answers `m` under a Selection: the surface's own windows
+// over every marked row, and the clear entry when every one of them is muted
+// (ADR-0236 decision 10). A Selection holding a row that cannot be muted opens
+// nothing — the plural menu expressed that by intersection, and at top level it
+// has to be said.
+func (m QueueDashboard) openSelectionMuteMenu() (tea.Model, tea.Cmd) {
+	rows := m.selectionRows()
+	if len(rows) == 0 {
+		return m, nil
+	}
+	for _, row := range rows {
+		if m.kinds.muterFor(row) == nil {
+			m.flash.Set(fmt.Sprintf("not every one of the %s can be muted", bulkCount(len(rows))))
+			return m, nil
+		}
+	}
+	m.err = nil
+	m.menu = &dashboardMenu{
+		row:     rows[0],
+		plural:  true,
+		targets: rows,
+		mute:    newDashboardMuteMenu(m.taskDeps(), rows[0], muteMenuClearable(rows)),
+	}
+	return m, nil
+}
+
+// invokeSelectionMenuItem runs the plural menu's item at idx down the bulk
+// dispatch. Nothing in the menu opens another menu any more: both openers it
+// used to carry are top-level keys (ADR-0236 decision 1).
 func (m QueueDashboard) invokeSelectionMenuItem(idx int) (tea.Model, tea.Cmd) {
 	items := m.menu.list.Items()
 	if idx < 0 || idx >= len(items) {
@@ -227,10 +253,6 @@ func (m QueueDashboard) invokeSelectionMenuItem(idx int) (tea.Model, tea.Cmd) {
 	}
 	item := items[idx]
 	rows := m.menu.targets
-	if item.verb == work.VerbMute {
-		m.menu.mute = newDashboardMuteMenu(m.taskDeps(), m.menu.row)
-		return m, nil
-	}
 	m.menu = nil
 	return m.dispatchBulkVerb(item.verb, rows)
 }
@@ -265,12 +287,6 @@ func (m QueueDashboard) dispatchBulkVerb(verb work.Verb, rows []DashboardRow) (t
 		// Copying is not a write: it changes no container and a mistaken one costs
 		// a second keypress, so it keeps the immediacy the single-row `y` has.
 		return m, m.performBulkKindVerb(verb, rows)
-	case work.VerbUnmute:
-		// Unmute leaves the verb seam for work.Muter exactly as it does over one
-		// row (ADR-0200 decision 5); the loop and the reporting are unchanged.
-		return m.openBulkPrompt(bulkLabel(verb, len(rows)), rows, func(m QueueDashboard, rows []DashboardRow) tea.Cmd {
-			return m.bulkUnmute(rows)
-		})
 	}
 	return m.openBulkPrompt(bulkLabel(verb, len(rows)), rows, func(m QueueDashboard, rows []DashboardRow) tea.Cmd {
 		return m.performBulkKindVerb(verb, rows)

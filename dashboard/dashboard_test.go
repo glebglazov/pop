@@ -359,9 +359,11 @@ func TestDashboardActionMenuOpenAndClose(t *testing.T) {
 
 // Every former direct verb key is inert at the top level and reachable only
 // through the action menu. `I` is the deliberate exception: it is the flat
-// shortcut for the row's own I action, covered by TestFlatIDispatchesPerKind.
+// shortcut for the row's own I action, covered by TestFlatIDispatchesPerKind, and
+// `m` is no longer in this list at all — it opens the Mute menu (ADR-0236
+// decision 1).
 func TestDashboardFormerDirectKeysInertAtTopLevel(t *testing.T) {
-	for _, key := range []string{"i", "b", "u", "U", "p", "P", "O", "d", "m"} {
+	for _, key := range []string{"i", "b", "u", "U", "p", "P", "O", "d"} {
 		m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{{Project: "pop", Worktree: "/repo/wt (main)", CursorKey: "pop\x00set", RawStatus: tasks.StatusReady, ID: "set", DefPath: "/repo/tasks", StatePath: "/repo/state.json", RuntimePath: "/repo/wt", Bound: true, Parked: true}}})
 		updated, cmd := m.Update(tea.KeyPressMsg{Code: []rune(key)[0], Text: key})
 		got := updated.(QueueDashboard)
@@ -389,7 +391,7 @@ func TestDashboardActionMenuContextFiltering(t *testing.T) {
 
 	// A plain ready set: only the unconditional verbs plus auto-drain (non-orphaned).
 	plain := keysFor(DashboardRow{ID: "plain", RuntimePath: "/wt"})
-	if want := []string{"I", "S", "O", "m", "b", "a", "y"}; !reflect.DeepEqual(plain, want) {
+	if want := []string{"I", "S", "O", "b", "a", "y"}; !reflect.DeepEqual(plain, want) {
 		t.Fatalf("plain row verbs = %v, want %v", plain, want)
 	}
 
@@ -5073,14 +5075,14 @@ func TestDashboardMapRowQueueVerbsInert(t *testing.T) {
 	// the Map-scoped assist session, and the shared ones — spawning keys before
 	// in-place ones. Every Task-set verb stays absent, queue verbs having never
 	// applied to a Map, and so does the status opener: the Status menu opens from
-	// the row list (ADR-0236 decision 1). Mute is shared (ADR-0200 decision 7): the
-	// fixture's Map is unmuted, so only the opener shows.
+	// the row list (ADR-0236 decision 1) — and so does the Mute menu (decision 5),
+	// which is why no mute verb is here either.
 	items := dashboardMenuItems(testKinds(), mapRow)
 	var keys []string
 	for _, item := range items {
 		keys = append(keys, item.key)
 	}
-	if want := []string{"I", "A", "S", "O", "m", "i", "a", "y"}; !reflect.DeepEqual(keys, want) {
+	if want := []string{"I", "A", "S", "O", "i", "a", "y"}; !reflect.DeepEqual(keys, want) {
 		t.Fatalf("map menu keys = %v, want %v", keys, want)
 	}
 	for _, item := range items {

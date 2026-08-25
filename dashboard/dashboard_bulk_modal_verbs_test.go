@@ -18,13 +18,6 @@ import (
 // Selection. Everything else the surface intercepts resolves a checkout, a
 // worktree or a session per row, and refuses out loud instead.
 
-// mutedSetVerbs is the Task-set verb list as it reads on an already-muted row:
-// the same actions, plus the unmute `u` the kind only offers while a mute is on.
-func mutedSetVerbs() ([]work.Action, []work.Action) {
-	actions, status := setVerbs()
-	return append(actions, work.Action{Verb: work.VerbUnmute, Key: "u", Label: "unmute", Modes: work.Plural}), status
-}
-
 // mapDashboard is a page of Map-shaped rows, whose status vocabulary is the one
 // that carries abandon.
 func mapDashboard(t *testing.T, ids ...string) (QueueDashboard, *bulkKind) {
@@ -45,13 +38,17 @@ func markAll(t *testing.T, m QueueDashboard, n int) QueueDashboard {
 
 // Unmute takes no input at all, so one `u` answers for the whole Selection: the
 // confirmation is the only question, and every marked row is cleared through the
-// same work.Muter seam the single row uses.
+// same work.Muter seam the single row uses. It is reached from the Mute menu,
+// beside the windows that set a mute (ADR-0236 decision 5).
 func TestWorkBulkUnmuteClearsEverySelectedRow(t *testing.T) {
-	actions, status := mutedSetVerbs()
-	k := &bulkKind{id: ref.KindTaskSet, ids: []string{"set-a", "set-b", "set-c"}, actions: actions, status: status, log: &bulkLog{}}
+	actions, status := setVerbs()
+	k := &bulkKind{
+		id: ref.KindTaskSet, ids: []string{"set-a", "set-b", "set-c"},
+		actions: actions, status: status, muted: mutedUntilExample, log: &bulkLog{},
+	}
 	m := markAll(t, bulkDashboard(t, k), 3)
 
-	m = bulkPress(t, m, selKeyRune('a'))
+	m = bulkPress(t, m, selKeyRune('m'))
 	m = bulkPress(t, m, selKeyRune('u'))
 
 	if m.bulkPrompt == nil {
@@ -131,25 +128,24 @@ func TestWorkBulkAbandonReusesTheFailureCollapse(t *testing.T) {
 	}
 }
 
-// The plural modals count their target set: the submenu's rule says how many
+// The plural modals count their target set: the Mute menu's rule says how many
 // rows the window it is about to pick will land on, and one confirmation
 // follows — not one per row.
 func TestWorkBulkMuteAsksOnceForTheWholeSet(t *testing.T) {
 	m, k := setDashboard(t, "set-a", "set-b", "set-c")
 	m = markAll(t, m, 3)
 
-	m = bulkPress(t, m, selKeyRune('a'))
 	m = bulkPress(t, m, selKeyRune('m'))
 
 	lines := ui.StripANSI(strings.Join(dashboardMuteMenuLines(m.menu.mute, m.menu.target(), 120), "\n"))
 	if !strings.Contains(lines, "mute · 3 selected") {
-		t.Fatalf("mute submenu = %q, want one submenu naming all three rows on its rule", lines)
+		t.Fatalf("Mute menu = %q, want one menu naming all three rows on its rule", lines)
 	}
 
 	m = bulkPress(t, m, selKeyRune('3'))
 
 	if m.menu != nil {
-		t.Fatal("the mute submenu reopened for a second row")
+		t.Fatal("the Mute menu reopened for a second row")
 	}
 	if got := ui.StripANSI(m.mainHint()); got != ui.StripANSI(ui.ConfirmPrompt("mute 3 rows")) {
 		t.Fatalf("hint line = %q, want one question for all three rows", got)
@@ -258,10 +254,5 @@ func TestWorkSingleRowInterceptedVerbsAreUnchanged(t *testing.T) {
 	updated, _ = m.dispatchVerb(setkind.VerbUnpark, rows[0])
 	if got := updated.(QueueDashboard).flash.Text(); got != "task set is not parked" {
 		t.Fatalf("flash = %q, want unpark's own eligibility answer", got)
-	}
-
-	updated, _ = m.dispatchVerb(work.VerbUnmute, rows[0])
-	if got := updated.(QueueDashboard).flash.Text(); got != "not muted" {
-		t.Fatalf("flash = %q, want unmute's own eligibility answer", got)
 	}
 }

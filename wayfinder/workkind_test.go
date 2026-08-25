@@ -161,7 +161,7 @@ func TestMapKindVerbsFollowTheFrontier(t *testing.T) {
 		}
 		return out
 	}
-	wantActions := []work.Verb{VerbWork, VerbFanOut, VerbAssist, work.VerbShell, work.VerbMute, VerbWorkHere, VerbFanOutHere, work.VerbCopyName}
+	wantActions := []work.Verb{VerbWork, VerbFanOut, VerbAssist, work.VerbShell, VerbWorkHere, VerbFanOutHere, work.VerbCopyName}
 	if got := verbs(k.Actions(active)); !slices.Equal(got, wantActions) {
 		t.Fatalf("map actions = %v, want %v", got, wantActions)
 	}
@@ -174,11 +174,12 @@ func TestMapKindVerbsFollowTheFrontier(t *testing.T) {
 	// All four frontier keys are gated on a frontier: a Map with none offers no
 	// dead key, going or staying. Assist survives the gate — a Map whose frontier
 	// is empty or fully claimed is when a Map-scoped session is most needed
-	// (ADR-0184). The way off the row is the Status menu, which is not in this
-	// list at all: it opens from the row list (ADR-0236 decision 1).
+	// (ADR-0184). The way off the row is the Status menu, and muting it is the Mute
+	// menu; neither is in this list at all, both opening from the row list
+	// (ADR-0236 decisions 1 and 5).
 	frontierless := active
 	frontierless.MapFrontier = 0
-	if got, want := verbs(k.Actions(frontierless)), []work.Verb{VerbAssist, work.VerbShell, work.VerbMute, work.VerbCopyName}; !slices.Equal(got, want) {
+	if got, want := verbs(k.Actions(frontierless)), []work.Verb{VerbAssist, work.VerbShell, work.VerbCopyName}; !slices.Equal(got, want) {
 		t.Fatalf("frontierless map actions = %v, want %v", got, want)
 	}
 
@@ -202,7 +203,7 @@ func TestMapKindVerbsFollowTheFrontier(t *testing.T) {
 // decision 5 asks to be reviewable: every verb the kind owns, with the one bit
 // that says whether a Selection may run it. The four frontier verbs and assist
 // each resolve a session per Map and hand the operator to a pane, so none of
-// them is plural; the shared openers and the whole status vocabulary are.
+// them is plural; copy-name and the whole status vocabulary are.
 func TestMapKindVerbCapabilities(t *testing.T) {
 	k, _ := mapKindFixture(t)
 	containers, err := k.Load()
@@ -217,7 +218,7 @@ func TestMapKindVerbCapabilities(t *testing.T) {
 	}
 	active.MutedUntil = time.Now().Add(time.Hour)
 	plural := map[work.Verb]bool{
-		work.VerbMute: true, work.VerbUnmute: true, work.VerbCopyName: true,
+		work.VerbCopyName: true,
 		VerbReopen: true, VerbAbandon: true, VerbArchive: true, VerbUnarchive: true,
 	}
 	for _, action := range append(k.Actions(active), k.StatusActions(active)...) {
