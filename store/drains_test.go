@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -100,29 +101,65 @@ func TestStartDrainInsertsRunning(t *testing.T) {
 	}
 }
 
-func TestStartDrainRefusesConcurrentSameSet(t *testing.T) {
+// TestStartDrainRefusesSetClaimedElsewhere pins the Set claim: the same set
+// draining in another checkout refuses on the *set*, and says which checkout to
+// look in — not on the tree the caller is standing in.
+func TestStartDrainRefusesSetClaimedElsewhere(t *testing.T) {
 	s := openTestStore(t)
 	if _, err := s.StartDrain(Drain{Repo: "repo", SetID: "set", RuntimePath: "/rt-a", PID: 1, StartedAt: time.Now()}); err != nil {
 		t.Fatalf("first StartDrain: %v", err)
 	}
 	// Same (repo, set) in a different checkout, first PID alive → refused.
-	conflict, err := s.StartDrain(Drain{Repo: "repo", SetID: "set", RuntimePath: "/rt-b", PID: 2, StartedAt: time.Now()})
-	if !errors.Is(err, ErrDrainInProgress) {
-		t.Fatalf("err = %v, want ErrDrainInProgress", err)
+	_, err := s.StartDrain(Drain{Repo: "repo", SetID: "set", RuntimePath: "/rt-b", PID: 2, StartedAt: time.Now()})
+	if !errors.Is(err, ErrSetClaimed) {
+		t.Fatalf("err = %v, want ErrSetClaimed", err)
 	}
-	if conflict.PID != 1 {
-		t.Fatalf("conflict drain = %+v, want the live drain (PID 1)", conflict)
+	if errors.Is(err, ErrCheckoutClaimed) {
+		t.Fatalf("a set-keyed refusal must not read as a Checkout claim: %v", err)
+	}
+	var claimed *SetClaimedError
+	if !errors.As(err, &claimed) {
+		t.Fatalf("err = %v, want *SetClaimedError", err)
+	}
+	if claimed.Claim.RuntimePath != "/rt-a" || claimed.Claim.PID != 1 {
+		t.Fatalf("claim = %+v, want the live drain in /rt-a (PID 1)", claimed.Claim)
+	}
+	if claimed.Claim.Set.ContainerID != "set" {
+		t.Fatalf("claim set = %q, want the drained set", claimed.Claim.Set.ContainerID)
+	}
+	if !strings.Contains(err.Error(), "set set is already being drained in /rt-a") {
+		t.Fatalf("refusal = %q, must name the set and where it drains", err.Error())
 	}
 }
 
-func TestStartDrainRefusesConcurrentSameCheckout(t *testing.T) {
+// TestStartDrainRefusesCheckoutClaimedByOtherSet pins the Checkout claim: a
+// different set holding this tree refuses on the *checkout*, naming the path and
+// the set holding it.
+func TestStartDrainRefusesCheckoutClaimedByOtherSet(t *testing.T) {
 	s := openTestStore(t)
 	if _, err := s.StartDrain(Drain{Repo: "repo", SetID: "set-a", RuntimePath: "/rt", PID: 1, StartedAt: time.Now()}); err != nil {
 		t.Fatalf("first StartDrain: %v", err)
 	}
 	// Different set but same checkout, first PID alive → refused.
-	if _, err := s.StartDrain(Drain{Repo: "repo", SetID: "set-b", RuntimePath: "/rt", PID: 2, StartedAt: time.Now()}); !errors.Is(err, ErrDrainInProgress) {
-		t.Fatalf("err = %v, want ErrDrainInProgress", err)
+	_, err := s.StartDrain(Drain{Repo: "repo", SetID: "set-b", RuntimePath: "/rt", PID: 2, StartedAt: time.Now()})
+	if !errors.Is(err, ErrCheckoutClaimed) {
+		t.Fatalf("err = %v, want ErrCheckoutClaimed", err)
+	}
+	if errors.Is(err, ErrSetClaimed) {
+		t.Fatalf("a checkout-keyed refusal must not read as a Set claim: %v", err)
+	}
+	var claimed *CheckoutClaimedError
+	if !errors.As(err, &claimed) {
+		t.Fatalf("err = %v, want *CheckoutClaimedError", err)
+	}
+	if claimed.Claim.RuntimePath != "/rt" || claimed.Claim.Holder.ContainerID != "set-a" {
+		t.Fatalf("claim = %+v, want /rt held by set-a", claimed.Claim)
+	}
+	if claimed.Claim.Reason != ClaimRunningDrain {
+		t.Fatalf("reason = %q, want the running-drain claim", claimed.Claim.Reason)
+	}
+	if !strings.Contains(err.Error(), "checkout /rt is claimed by set set-a") {
+		t.Fatalf("refusal = %q, must name the path and the holding set", err.Error())
 	}
 }
 
@@ -338,7 +375,7 @@ func TestStartDrainConcurrentSeparateConnectionsAdmitsOne(t *testing.T) {
 			switch {
 			case err == nil:
 				admitted++
-			case errors.Is(err, ErrDrainInProgress):
+			case errors.Is(err, ErrSetClaimed), errors.Is(err, ErrCheckoutClaimed):
 				refused++
 			default:
 				t.Errorf("unexpected err: %v", err)

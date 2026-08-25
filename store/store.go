@@ -21,10 +21,6 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// ErrDrainInProgress reports that a live running Drain already holds the
-// (repository, set) or runtime checkout a StartDrain tried to claim.
-var ErrDrainInProgress = errors.New("drain already in progress")
-
 // Liveness reports whether the process identified by pid, paired with the opaque
 // start-time token procStart, is still running. It is the store's crash-healing
 // policy: the reconcile sweeps and the mutual-exclusion / quiescence gates

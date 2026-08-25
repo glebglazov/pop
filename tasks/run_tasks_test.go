@@ -579,7 +579,7 @@ func TestRunTaskSetParkAtGateRecordsFinishedDrain(t *testing.T) {
 
 // On gate clear the loop re-acquires a fresh Drain before resuming AFK work; a
 // collision with a concurrent drain that grabbed the checkout meanwhile refuses
-// cleanly with the "already in progress" error, and the gate decision already
+// cleanly with the Checkout claim refusal, and the gate decision already
 // persisted to the manifest is left intact (ADR-0067).
 func TestRunTaskSetResumeAfterGateRefusesOnConcurrentDrain(t *testing.T) {
 	env := setupRunTaskSetFixture(t, "demo", []Task{
@@ -618,8 +618,8 @@ func TestRunTaskSetResumeAfterGateRefusesOnConcurrentDrain(t *testing.T) {
 
 	_, err = RunTaskSetWith(d, nil, nil, opts)
 	assertExitCode(t, err, ExitOperational)
-	if !strings.Contains(err.Error(), "already in progress") {
-		t.Fatalf("resume must refuse on concurrent drain: %v", err)
+	if !strings.Contains(err.Error(), "is claimed by set") {
+		t.Fatalf("resume must refuse with the Checkout claim: %v", err)
 	}
 	// The gate decision persisted despite the refused resume.
 	assertTaskDone(t, env.execFixture(), "01-hitl")
@@ -3362,8 +3362,9 @@ func TestRunTaskSetRefusesWhenSetLiveElsewhere(t *testing.T) {
 
 	_, err = RunTaskSetWith(d, nil, nil, opts)
 	assertExitCode(t, err, ExitOperational)
-	if !strings.Contains(err.Error(), "already in progress") {
-		t.Fatalf("err = %v, want cross-checkout refusal", err)
+	// Cross-checkout: the refusal is the Set claim, not the tree the caller stands in.
+	if !strings.Contains(err.Error(), "set demo is already being drained in ") {
+		t.Fatalf("err = %v, want the Set claim refusal", err)
 	}
 	if bindCalls != 0 {
 		t.Fatalf("BindCheckout must not run when the drain is refused; got %d calls", bindCalls)

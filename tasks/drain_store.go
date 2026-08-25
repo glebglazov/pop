@@ -253,16 +253,17 @@ func BeginDrain(d *Deps, runtimePath, setID string, noticeOut io.Writer) (*Drain
 		StartedAt:   time.Now().UTC(),
 	})
 	if err != nil {
-		if errors.Is(err, store.ErrDrainInProgress) {
-			return nil, exitErr(ExitOperational,
-				"runtime execution already in progress (PID %d since %s at %s)",
-				drain.PID, drain.StartedAt.Format(time.RFC3339), drain.RuntimePath)
+		// Each refusal names its own resource: the Set claim sends the human to the
+		// checkout already draining the set, the Checkout claim to the tree that
+		// must hold still. The store owns both sentences so this path and
+		// AcquireRuntimeLock cannot drift apart.
+		var setClaimed *store.SetClaimedError
+		if errors.As(err, &setClaimed) {
+			return nil, exitErr(ExitOperational, "%s", setClaimed.Claim.Sentence())
 		}
 		var claimed *store.CheckoutClaimedError
 		if errors.As(err, &claimed) {
-			return nil, exitErr(ExitOperational,
-				"checkout claimed by set %s (%s)",
-				claimed.Claim.Holder.ContainerID, claimed.Claim.Reason.Phrase())
+			return nil, exitErr(ExitOperational, "%s", claimed.Claim.Sentence())
 		}
 		return nil, exitErr(ExitOperational, "record drain start: %v", err)
 	}

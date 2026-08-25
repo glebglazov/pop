@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -236,8 +237,8 @@ func TestCheckoutClaimHoldersAreTaskSetRefs(t *testing.T) {
 			// message through the holder's String() would silently reword every
 			// refusal and deferral line to "claimed by set task-set:set-a".
 			refusal := (&CheckoutClaimedError{Claim: *claim}).Error()
-			if want := "checkout claimed by set set-a (" + tc.phrase + ")"; refusal != want {
-				t.Fatalf("refusal = %q, want %q", refusal, want)
+			if want := "checkout /rt is claimed by set set-a (" + tc.phrase + ", PID 100 since "; !strings.HasPrefix(refusal, want) {
+				t.Fatalf("refusal = %q, want prefix %q", refusal, want)
 			}
 		})
 	}
@@ -265,8 +266,8 @@ func TestStartDrainRefusesOtherSetWaiter(t *testing.T) {
 	if !errors.Is(err, ErrCheckoutClaimed) {
 		t.Fatalf("err = %v, want ErrCheckoutClaimed", err)
 	}
-	if errors.Is(err, ErrDrainInProgress) {
-		t.Fatalf("claim refusal must be distinguishable from ErrDrainInProgress: %v", err)
+	if errors.Is(err, ErrSetClaimed) {
+		t.Fatalf("claim refusal must be distinguishable from ErrSetClaimed: %v", err)
 	}
 	var claimed *CheckoutClaimedError
 	if !errors.As(err, &claimed) {

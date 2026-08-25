@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/glebglazov/pop/store"
+	"github.com/glebglazov/pop/work/ref"
 )
 
 // RuntimeLockMetadata describes the live Drain holding a runtime checkout. It is
@@ -76,16 +77,21 @@ func ReadRuntimeLockStatus(d *Deps, runtimeRoot string) *RuntimeLockStatus {
 // AcquireRuntimeLock takes a path-scoped claim on a runtime checkout, used by
 // integration to serialise against a live drain. It refuses when a drain is
 // running against the checkout; otherwise it returns a no-op lock (it records no
-// Drain — integration's own durable event lands in a later slice).
+// Drain — integration's own durable event lands in a later slice). Being
+// path-scoped, its refusal is always the Checkout claim — this tree must hold
+// still — and it renders the store's own sentence for that claim, the same one
+// BeginDrain produces.
 func AcquireRuntimeLock(d *Deps, runtimeRoot string, noticeOut io.Writer) (*RuntimeLock, error) {
 	status := ReadRuntimeLockStatus(d, runtimeRoot)
 	if status.Locked && status.Metadata != nil {
-		return nil, exitErr(ExitOperational,
-			"runtime execution already in progress (PID %d since %s at %s)",
-			status.Metadata.PID,
-			status.Metadata.StartedAt.Format(time.RFC3339),
-			status.Metadata.RuntimePath,
-		)
+		claim := store.CheckoutClaim{
+			Holder:      ref.WorkRef{Kind: ref.KindTaskSet, ContainerID: status.Metadata.SetID},
+			Reason:      store.ClaimRunningDrain,
+			RuntimePath: status.Metadata.RuntimePath,
+			PID:         status.Metadata.PID,
+			Since:       status.Metadata.StartedAt,
+		}
+		return nil, exitErr(ExitOperational, "%s", claim.Sentence())
 	}
 	return &RuntimeLock{}, nil
 }

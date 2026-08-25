@@ -66,7 +66,7 @@ func TestImplementRunParkDrainIdempotent(t *testing.T) {
 
 // TestImplementRunEnsureDrainReacquiresAndRefusesCollision drives ensureDrain
 // directly: a no-op while a Drain is held, a clean re-acquire after a park, and a
-// clean "already in progress" refusal when a rival drain has claimed the freed
+// clean Checkout claim refusal when a rival drain has claimed the freed
 // checkout — leaving the run parked (nil Drain) with nothing lost (ADR-0067).
 func TestImplementRunEnsureDrainReacquiresAndRefusesCollision(t *testing.T) {
 	d, repo := drainTestRepo(t)
@@ -111,8 +111,8 @@ func TestImplementRunEnsureDrainReacquiresAndRefusesCollision(t *testing.T) {
 
 	err = run.ensureDrain()
 	assertExitCode(t, err, ExitOperational)
-	if !strings.Contains(err.Error(), "already in progress") {
-		t.Fatalf("collision must refuse with the mutual-exclusion error: %v", err)
+	if !strings.Contains(err.Error(), "is claimed by set rival (running drain") {
+		t.Fatalf("collision must refuse with the Checkout claim naming the rival: %v", err)
 	}
 	if run.drain != nil {
 		t.Fatal("a refused re-acquire must leave the run parked (nil Drain)")

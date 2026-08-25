@@ -110,8 +110,9 @@ func TestBeginDrainRefusesConcurrentSameSet(t *testing.T) {
 
 	_, err = BeginDrain(d, repo, "demo", &bytes.Buffer{})
 	assertExitCode(t, err, ExitOperational)
-	if !strings.Contains(err.Error(), "already in progress") {
-		t.Fatalf("err = %v, want mutual-exclusion refusal", err)
+	// The Set claim, not the Checkout claim: the set itself is already draining.
+	if !strings.Contains(err.Error(), "set demo is already being drained in") {
+		t.Fatalf("err = %v, want the Set claim refusal", err)
 	}
 }
 
@@ -176,8 +177,10 @@ func TestAcquireRuntimeLockPathScopedRefusesWhileDrainLive(t *testing.T) {
 
 	_, err = AcquireRuntimeLock(d, repo, &bytes.Buffer{})
 	assertExitCode(t, err, ExitOperational)
-	if !strings.Contains(err.Error(), "already in progress") {
-		t.Fatalf("err = %v, want refusal while drain live", err)
+	// Path-scoped, so the refusal is the Checkout claim, naming the tree and the
+	// set holding it.
+	if !strings.Contains(err.Error(), "is claimed by set demo (running drain") {
+		t.Fatalf("err = %v, want the Checkout claim refusal", err)
 	}
 }
 

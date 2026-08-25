@@ -9,11 +9,12 @@ import (
 	"github.com/glebglazov/pop/work/ref"
 )
 
-// ErrCheckoutClaimed reports that StartDrain refused because another set's live
-// Checkout claim already holds the runtime checkout (ADR-0135). It is distinct
-// from ErrDrainInProgress — which names a live *running Drain* on the same (repo,
-// set) or checkout — because a claim can be held by a non-executing process (a
-// quota-recovery waiter that will resume). A *CheckoutClaimedError carries the
+// ErrCheckoutClaimed reports that StartDrain refused because a live Checkout
+// claim already holds the runtime checkout — the tree must hold still (ADR-0135).
+// It is distinct from ErrSetClaimed, which names the *set* being drained
+// somewhere else, so a refusal tells a human whether to look in this tree or in
+// another worktree. The claim need not be an executing process: a quota-recovery
+// waiter that will resume holds one too. A *CheckoutClaimedError carries the
 // claiming holder and claim reason and satisfies errors.Is(err, ErrCheckoutClaimed).
 var ErrCheckoutClaimed = errors.New("checkout claimed by another set")
 
@@ -64,8 +65,24 @@ func (r ClaimReason) Phrase() string {
 type CheckoutClaim struct {
 	Holder ref.WorkRef
 	Reason ClaimReason
-	PID    int
-	Since  time.Time
+	// RuntimePath is the checkout the claim holds, carried so a refusal names the
+	// resource it is about without the caller re-deriving it.
+	RuntimePath string
+	PID         int
+	Since       time.Time
+}
+
+// Sentence renders the Checkout claim as the refusal (and, later, wait) line:
+// which tree is held, by which set, and why. It is the single wording for the
+// checkout-keyed refusal, so BeginDrain and AcquireRuntimeLock say the same
+// thing about the same claim.
+func (c CheckoutClaim) Sentence() string {
+	s := fmt.Sprintf("checkout %s is claimed by set %s (%s, PID %d",
+		c.RuntimePath, c.Holder.ContainerID, c.Reason.Phrase(), c.PID)
+	if !c.Since.IsZero() {
+		s += " since " + c.Since.UTC().Format(time.RFC3339)
+	}
+	return s + ")"
 }
 
 // taskSetHolder names the Task set owning a claim. Each row the union reads
@@ -82,9 +99,7 @@ type CheckoutClaimedError struct {
 	Claim CheckoutClaim
 }
 
-func (e *CheckoutClaimedError) Error() string {
-	return fmt.Sprintf("checkout claimed by set %s (%s)", e.Claim.Holder.ContainerID, e.Claim.Reason.Phrase())
-}
+func (e *CheckoutClaimedError) Error() string { return e.Claim.Sentence() }
 
 func (e *CheckoutClaimedError) Is(target error) bool { return target == ErrCheckoutClaimed }
 
@@ -160,7 +175,7 @@ func (s *Store) liveGateHoldClaim(q claimQuerier, runtimePath, excludeSet string
 			continue
 		}
 		if s.alive(c.pid, c.procStart) {
-			return &CheckoutClaim{Holder: taskSetHolder(c.setID), Reason: ClaimFailedGate, PID: c.pid, Since: c.since}, nil
+			return &CheckoutClaim{Holder: taskSetHolder(c.setID), Reason: ClaimFailedGate, RuntimePath: runtimePath, PID: c.pid, Since: c.since}, nil
 		}
 	}
 	return nil, nil
@@ -205,7 +220,7 @@ func (s *Store) liveDrainClaim(q claimQuerier, runtimePath string) (*CheckoutCla
 
 	for _, c := range cands {
 		if s.alive(c.pid, c.procStart) {
-			return &CheckoutClaim{Holder: taskSetHolder(c.setID), Reason: ClaimRunningDrain, PID: c.pid, Since: c.since}, nil
+			return &CheckoutClaim{Holder: taskSetHolder(c.setID), Reason: ClaimRunningDrain, RuntimePath: runtimePath, PID: c.pid, Since: c.since}, nil
 		}
 	}
 	return nil, nil
@@ -253,7 +268,7 @@ func (s *Store) liveWaiterClaim(q claimQuerier, runtimePath, excludeSet string) 
 			continue
 		}
 		if s.alive(c.pid, c.procStart) {
-			return &CheckoutClaim{Holder: taskSetHolder(c.setID), Reason: ClaimQuotaWaiter, PID: c.pid, Since: c.since}, nil
+			return &CheckoutClaim{Holder: taskSetHolder(c.setID), Reason: ClaimQuotaWaiter, RuntimePath: runtimePath, PID: c.pid, Since: c.since}, nil
 		}
 	}
 	return nil, nil
