@@ -21,9 +21,9 @@ func TestUpdateAgentModelCooldownUsesResetAtWhenParsed(t *testing.T) {
 	if len(active) != 1 {
 		t.Fatalf("active = %#v, want 1 entry", active)
 	}
-	want := agentQuotaCooldownUntil(resetAt, time.Now(), defaultAgentQuotaRetryAfter)
+	want := modelSkipCooldownUntil(resetAt, time.Now())
 	if diff := active[0].Until.Sub(want); diff < -time.Minute || diff > time.Minute {
-		t.Fatalf("Until = %s, want close to %s (via agentQuotaCooldownUntil)", active[0].Until, want)
+		t.Fatalf("Until = %s, want close to %s (via modelSkipCooldownUntil)", active[0].Until, want)
 	}
 }
 
@@ -44,8 +44,8 @@ func TestUpdateAgentModelCooldownDefaultsToOneHourWithoutResetAt(t *testing.T) {
 		t.Fatalf("active = %#v, want 1 entry", active)
 	}
 	got := active[0].Until
-	if got.Before(before.Add(defaultAgentQuotaRetryAfter)) || got.After(time.Now().Add(defaultAgentQuotaRetryAfter+time.Minute)) {
-		t.Fatalf("Until = %s, want ~%s from now (one hour default)", got, defaultAgentQuotaRetryAfter)
+	if got.Before(before.Add(defaultModelSkipRetryAfter)) || got.After(time.Now().Add(defaultModelSkipRetryAfter+time.Minute)) {
+		t.Fatalf("Until = %s, want ~%s from now (one hour default)", got, defaultModelSkipRetryAfter)
 	}
 }
 

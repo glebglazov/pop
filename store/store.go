@@ -581,6 +581,28 @@ var migrations = []string{
 		reason       TEXT    NOT NULL DEFAULT '',
 		spent_at     TEXT    NOT NULL
 	);`,
+	// 36: agent_cooldowns learns whether it read its instant or invented it
+	// (ADR-0235). `exhausted_until` alone could not say, so four different
+	// things wrote it identically — a provider's epoch, a provider's countdown,
+	// a per-signal backoff pop invented, and a blind hour measured from pop's
+	// disappointment. That last one compounded: an early retry earned a refusal
+	// that wrote another full hour from the *later* moment, so an undershoot of
+	// two minutes bought an overshoot of nearly one.
+	//
+	// stated_until is NULL exactly when pop guessed, mirroring the column
+	// migration 30 gave agent_model_cooldowns. A guessed row's exhausted_until
+	// is the ceiling of its Quota window class — the latest that window can
+	// still run — dated at the *first* refusal and never re-derived from a later
+	// one; class records which window, empty when the refusal named none.
+	//
+	// next_probe_at and probe_lease_until belong to the probe loop that ends a
+	// guess by asking the agent rather than by waiting out the ceiling. Nothing
+	// writes them yet; they are here so the columns arrive in one migration
+	// rather than two.
+	`ALTER TABLE agent_cooldowns ADD COLUMN stated_until TEXT;
+	 ALTER TABLE agent_cooldowns ADD COLUMN class TEXT NOT NULL DEFAULT '';
+	 ALTER TABLE agent_cooldowns ADD COLUMN next_probe_at TEXT;
+	 ALTER TABLE agent_cooldowns ADD COLUMN probe_lease_until TEXT;`,
 }
 
 func (s *Store) migrate() error {

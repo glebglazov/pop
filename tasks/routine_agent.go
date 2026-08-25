@@ -16,6 +16,12 @@ type RoutineAgentAttempt struct {
 	QuotaPreset  string
 	QuotaResetAt time.Time
 	QuotaReason  string
+	// QuotaCooldown is what the refusal behind this attempt asks the cooldown
+	// store to record. It is kept beside QuotaResetAt rather than derived from
+	// it because the two answer different questions: QuotaResetAt is when this
+	// run may resume, while the request also says whether any provider stated
+	// that instant (ADR-0235).
+	QuotaCooldown AgentQuotaCooldownRequest
 }
 
 // RunRoutineAgentInvocation runs one headless agent invocation in runtimePath.
@@ -44,17 +50,19 @@ func RunRoutineAgentInvocation(d *Deps, runtimePath string, liveOut io.Writer, t
 		result.QuotaReason = v.Reason
 		if th, ok := v.TimeHealing(); ok {
 			result.QuotaResetAt = th.ResetAt
+			result.QuotaCooldown = quotaCooldownRequest(v)
 		}
 	}
 	return result, nil
 }
 
-// RecordAgentQuotaCooldownFromReset stores a machine-global cooldown for one agent preset.
-func RecordAgentQuotaCooldownFromReset(d *Deps, cfg *config.Config, preset string, resetAt time.Time) error {
-	retryAfter, err := resolveAgentQuotaRetryAfter(cfg)
+// RecordAgentQuotaCooldown stores a machine-global cooldown for one agent preset
+// and returns the expiry now in force, which is the standing row when this
+// refusal was a guess against a cooldown that has not elapsed (ADR-0235).
+func RecordAgentQuotaCooldown(d *Deps, cfg *config.Config, req AgentQuotaCooldownRequest) (time.Time, error) {
+	unclassed, err := resolveAgentQuotaRetryAfter(cfg)
 	if err != nil {
-		return err
+		return time.Time{}, err
 	}
-	until := agentQuotaCooldownUntil(resetAt, time.Now(), retryAfter)
-	return updateAgentCooldown(d, preset, until)
+	return recordAgentQuotaCooldown(d, req, time.Now(), unclassed)
 }

@@ -2797,72 +2797,103 @@ func TestRunTaskSetAgentFallbackWritesResetAwareCooldown(t *testing.T) {
 	}
 }
 
-func TestRunTaskSetAgentFallbackWritesFixedIntervalCooldownWhenResetMissing(t *testing.T) {
-	env := setupRunTaskSetFixture(t, "demo", []Task{
-		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
-	})
-	installAgentShim(t, env.root, "claude", `#!/bin/sh
+// A refusal that names no reset instant is dated from the ceiling of the window
+// class it named, and only a refusal naming no window at all falls back to the
+// configured interval. The fixed interval used to answer both, which is what
+// made an early wake write another full interval from its own later moment
+// (ADR-0235).
+func TestRunTaskSetAgentFallbackDatesACooldownItHadToGuess(t *testing.T) {
+	cases := []struct {
+		name  string
+		shim  string
+		after func(start time.Time) time.Duration
+	}{
+		{
+			name: "a weekly refusal is dated from the week, not the configured interval",
+			shim: `#!/bin/sh
 printf '%s\n' '{"type":"result","subtype":"error_during_execution","result":"You'\''ve hit your weekly limit"}'
-`)
-	loadConfig := func(string) (*config.Config, error) {
-		return &config.Config{Work: &config.WorkConfig{Daemon: &config.WorkDaemonConfig{AgentQuotaRetryAfter: "17m"}}}, nil
+`,
+			after: func(time.Time) time.Duration { return 7 * 24 * time.Hour },
+		},
+		{
+			name: "a refusal naming no window falls back to the configured interval",
+			shim: `#!/bin/sh
+printf '%s\n' '{"type":"rate_limit_event","rate_limit_info":{"status":"rejected"}}'
+printf '%s\n' '{"type":"result","subtype":"error_during_execution","api_error_status":429,"result":"request refused"}'
+`,
+			after: func(time.Time) time.Duration { return 17 * time.Minute },
+		},
 	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := setupRunTaskSetFixture(t, "demo", []Task{
+				{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+			})
+			installAgentShim(t, env.root, "claude", tc.shim)
+			loadConfig := func(string) (*config.Config, error) {
+				return &config.Config{Work: &config.WorkConfig{Daemon: &config.WorkDaemonConfig{AgentQuotaRetryAfter: "17m"}}}, nil
+			}
 
-	opts := env.runTaskSetOpts(true, "", io.Discard)
-	opts.AgentPresets = []string{"claude"}
-	opts.AgentExplicit = true
-	opts.MaxTries = 1
+			opts := env.runTaskSetOpts(true, "", io.Discard)
+			opts.AgentPresets = []string{"claude"}
+			opts.AgentExplicit = true
+			opts.MaxTries = 1
 
-	d := env.deps()
-	before := time.Now().UTC()
+			d := env.deps()
+			before := time.Now().UTC()
 
-	// Run the task set in a goroutine - it will enter the recovery wait loop
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		_, _ = RunTaskSetWith(d, nil, loadConfig, opts)
-	}()
+			// Run the task set in a goroutine - it will enter the recovery wait loop
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				_, _ = RunTaskSetWith(d, nil, loadConfig, opts)
+			}()
 
-	// Wait for the recovery waiter to be registered
-	var waiter *RecoveryWaiter
-	for i := 0; i < 20; i++ {
-		time.Sleep(100 * time.Millisecond)
-		var err error
-		waiter, err = GetRecoveryWaiter(d, "demo")
-		if err != nil {
-			t.Fatalf("get recovery waiter: %v", err)
-		}
-		if waiter != nil {
-			break
-		}
-	}
+			// Wait for the recovery waiter to be registered
+			var waiter *RecoveryWaiter
+			for i := 0; i < 20; i++ {
+				time.Sleep(100 * time.Millisecond)
+				var err error
+				waiter, err = GetRecoveryWaiter(d, "demo")
+				if err != nil {
+					t.Fatalf("get recovery waiter: %v", err)
+				}
+				if waiter != nil {
+					break
+				}
+			}
 
-	if waiter == nil {
-		t.Fatal("recovery waiter not registered after 2 seconds")
-	}
-	if waiter.Preset != "claude" {
-		t.Fatalf("waiter preset = %q, want claude", waiter.Preset)
-	}
+			if waiter == nil {
+				t.Fatal("recovery waiter not registered after 2 seconds")
+			}
+			if waiter.Preset != "claude" {
+				t.Fatalf("waiter preset = %q, want claude", waiter.Preset)
+			}
 
-	after := time.Now().UTC()
-	store, err := readAgentCooldowns(d)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := store["claude"].ExhaustedUntil
-	if got.Before(before.Add(17*time.Minute)) || got.After(after.Add(17*time.Minute+2*time.Second)) {
-		t.Fatalf("cooldown until = %s, want about now+17m", got)
-	}
-	assertTaskOpen(t, env.execFixture(), "01-a")
+			after := time.Now().UTC()
+			store, err := readAgentCooldowns(d)
+			if err != nil {
+				t.Fatal(err)
+			}
+			row := store["claude"]
+			if row.ExhaustedUntil.Before(before.Add(tc.after(before))) || row.ExhaustedUntil.After(after.Add(tc.after(after)+2*time.Second)) {
+				t.Fatalf("cooldown until = %s, want about now+%s", row.ExhaustedUntil, tc.after(before))
+			}
+			if !row.StatedUntil.IsZero() {
+				t.Fatalf("stated instant %s recorded for a refusal that named no reset", row.StatedUntil)
+			}
+			assertTaskOpen(t, env.execFixture(), "01-a")
 
-	// Clean up
-	if err := DeregisterRecoveryWaiter(d, "demo"); err != nil {
-		t.Fatalf("deregister recovery waiter: %v", err)
-	}
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("goroutine did not exit after waiter deregistration")
+			// Clean up
+			if err := DeregisterRecoveryWaiter(d, "demo"); err != nil {
+				t.Fatalf("deregister recovery waiter: %v", err)
+			}
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("goroutine did not exit after waiter deregistration")
+			}
+		})
 	}
 }
 

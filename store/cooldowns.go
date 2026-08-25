@@ -8,12 +8,25 @@ import (
 // AgentCooldown is one machine-global agent-preset quota cooldown: the preset
 // whose subscription quota was exhausted and the instant it may be tried again.
 type AgentCooldown struct {
-	Preset         string
+	Preset string
+	// ExhaustedUntil is the expiry pop enforces. For a stated row it is the
+	// provider's own instant; for a guessed one it is the ceiling of the
+	// refusal's window class — a backstop, not a retry time (ADR-0235).
 	ExhaustedUntil time.Time
+	// StatedUntil is the reset instant the provider's refusal named. Zero is
+	// what marks the row a guess: nothing on the wire backs ExhaustedUntil.
+	StatedUntil time.Time
+	// Class is the Quota window class the refusal named, empty when it named
+	// none. It is what a guessed expiry was dated from.
+	Class string
 }
 
-// PutAgentCooldown upserts the cooldown for one agent preset. An empty preset or
-// zero instant is a no-op. The latest write for a preset wins (ADR-0055).
+// PutAgentCooldown upserts a guessed cooldown for one agent preset, overwriting
+// whatever is there. An empty preset or zero instant is a no-op. It carries no
+// stated instant and no window class, which is the truth about its only caller:
+// the one-time fold of the retired agent-cooldowns.json file, whose records were
+// a bare expiry (ADR-0055). Every refusal goes through RecordAgentQuotaCooldown
+// instead, which is the one path that may not overwrite blindly.
 func (s *Store) PutAgentCooldown(preset string, until time.Time) error {
 	if preset == "" || until.IsZero() {
 		return nil
@@ -25,22 +38,91 @@ func (s *Store) PutAgentCooldown(preset string, until time.Time) error {
 	return err
 }
 
+// RecordAgentQuotaCooldown records one refusal against a preset and returns the
+// row as it stands afterwards — which is not always the row passed in.
+//
+// A cooldown whose instant the provider stated (StatedUntil non-zero) always
+// wins: reading beats guessing, and the fresher reading beats the older one. A
+// guess, by contrast, never displaces a cooldown that is still in force at now.
+// That single rule carries both halves of ADR-0235: a guess cannot overwrite a
+// stated instant that has yet to pass, and a second refusal against a live guess
+// cannot re-date its ceiling from the later moment. Only once the recorded
+// expiry has elapsed does a guess write again, and it then writes a whole fresh
+// row — which is also how a statement that proved wrong becomes a guess.
+//
+// The read and the write share one BEGIN IMMEDIATE transaction, because the row
+// is machine-global and parallel checkouts refuse independently.
+func (s *Store) RecordAgentQuotaCooldown(c AgentCooldown, now time.Time) (AgentCooldown, error) {
+	if c.Preset == "" || c.ExhaustedUntil.IsZero() {
+		return c, nil
+	}
+	now = now.UTC()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return AgentCooldown{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	row := tx.QueryRow(
+		`SELECT exhausted_until, stated_until, class FROM agent_cooldowns WHERE preset = ?`,
+		c.Preset)
+	var until, stated, class sql.NullString
+	switch err := row.Scan(&until, &stated, &class); err {
+	case nil:
+		existing := AgentCooldown{
+			Preset:         c.Preset,
+			ExhaustedUntil: parseTime(until.String),
+			StatedUntil:    parseTime(stated.String),
+			Class:          class.String,
+		}
+		if c.StatedUntil.IsZero() && existing.ExhaustedUntil.After(now) {
+			return existing, nil
+		}
+	case sql.ErrNoRows:
+		// Nothing recorded — this refusal is the first one.
+	default:
+		return AgentCooldown{}, err
+	}
+
+	if _, err := tx.Exec(
+		`INSERT INTO agent_cooldowns (preset, exhausted_until, stated_until, class, next_probe_at, probe_lease_until)
+		 VALUES (?, ?, ?, ?, NULL, NULL)
+		 ON CONFLICT(preset) DO UPDATE SET
+		   exhausted_until   = excluded.exhausted_until,
+		   stated_until      = excluded.stated_until,
+		   class             = excluded.class,
+		   next_probe_at     = NULL,
+		   probe_lease_until = NULL`,
+		c.Preset,
+		c.ExhaustedUntil.UTC().Format(timeLayout),
+		nullTime(c.StatedUntil),
+		c.Class); err != nil {
+		return AgentCooldown{}, err
+	}
+	return c, tx.Commit()
+}
+
 // AllAgentCooldowns returns every recorded cooldown keyed by preset, regardless
 // of whether it has elapsed.
-func (s *Store) AllAgentCooldowns() (map[string]time.Time, error) {
-	rows, err := s.db.Query(`SELECT preset, exhausted_until FROM agent_cooldowns`)
+func (s *Store) AllAgentCooldowns() (map[string]AgentCooldown, error) {
+	rows, err := s.db.Query(`SELECT preset, exhausted_until, stated_until, class FROM agent_cooldowns`)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-	out := map[string]time.Time{}
+	out := map[string]AgentCooldown{}
 	for rows.Next() {
 		var preset string
-		var until sql.NullString
-		if err := rows.Scan(&preset, &until); err != nil {
+		var until, stated, class sql.NullString
+		if err := rows.Scan(&preset, &until, &stated, &class); err != nil {
 			return nil, err
 		}
-		out[preset] = parseTime(until.String)
+		out[preset] = AgentCooldown{
+			Preset:         preset,
+			ExhaustedUntil: parseTime(until.String),
+			StatedUntil:    parseTime(stated.String),
+			Class:          class.String,
+		}
 	}
 	return out, rows.Err()
 }

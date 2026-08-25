@@ -137,8 +137,8 @@ func TestAgentModelCooldownDoesNotAffectPresetCooldownReads(t *testing.T) {
 	if len(presets) != 1 {
 		t.Fatalf("presets = %#v, want exactly the one preset row, no model rows leaking in", presets)
 	}
-	until, ok := presets["cursor"]
-	if !ok || !until.Equal(now.Add(time.Hour)) {
-		t.Fatalf("presets[cursor] = %v, ok=%v, want %s", until, ok, now.Add(time.Hour))
+	row, ok := presets["cursor"]
+	if !ok || !row.ExhaustedUntil.Equal(now.Add(time.Hour)) {
+		t.Fatalf("presets[cursor] = %v, ok=%v, want %s", row, ok, now.Add(time.Hour))
 	}
 }

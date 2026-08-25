@@ -91,10 +91,13 @@ func runRoutineWithAgentFallback(
 		if !result.QuotaPaused {
 			return result, preset, nil
 		}
-		if err := tasks.RecordAgentQuotaCooldownFromReset(taskDeps, cfg, result.QuotaPreset, result.QuotaResetAt); err != nil {
+		until, err := tasks.RecordAgentQuotaCooldown(taskDeps, cfg, result.QuotaCooldown)
+		if err != nil {
 			return nil, "", fmt.Errorf("record agent cooldown: %w", err)
 		}
-		cooldowns[result.QuotaPreset] = result.QuotaResetAt
+		// The recorded expiry, not this refusal's own: a guess against a live
+		// cooldown leaves the standing row alone (ADR-0235).
+		cooldowns[result.QuotaPreset] = until
 		quotaAttempts = append(quotaAttempts, result)
 		if out != nil && i+1 < len(specs) {
 			fmt.Fprintf(out, "Agent %s quota-paused; trying next\n", result.QuotaPreset)

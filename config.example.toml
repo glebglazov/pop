@@ -226,7 +226,10 @@ projects = [
 # Supervisor timing for `pop work daemon`. Agent selection is configured under
 # [work.implement].agents (see below), not in this section.
 # poll_interval = "60s"
-# agent_quota_retry_after = "1h"
+# Ceiling for a quota refusal that named no window class; a refusal that names
+# one is dated from that window's span instead. Defaults to 5h, the shortest
+# window a subscription has.
+# agent_quota_retry_after = "5h"
 # crash_retry_delays = ["1m", "5m", "15m"]
 
 # Per-agent effort ladders map task effort to ordered { model, reasoning }

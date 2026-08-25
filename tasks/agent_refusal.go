@@ -1,6 +1,9 @@
 package tasks
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 // AgentQuotaWindowClass names which allowance a refusal exhausted — the window
 // that has to reopen before the preset can run again. It is read from the typed
@@ -27,6 +30,24 @@ const (
 	// still has room.
 	QuotaWindowOpus AgentQuotaWindowClass = "opus"
 )
+
+// Span is how long the window this class names runs, and so the longest a
+// refusal against it can still be in force. A cooldown pop had to guess is
+// dated from it: five hours for a session limit, a week for either weekly
+// allowance (ADR-0235).
+//
+// Unknown reports false rather than a number. No channel of the capture named a
+// window, so there is no span to date from and the caller falls back to its
+// configured ceiling instead of inventing one here.
+func (c AgentQuotaWindowClass) Span() (time.Duration, bool) {
+	switch c {
+	case QuotaWindowFiveHour:
+		return 5 * time.Hour, true
+	case QuotaWindowWeekly, QuotaWindowOpus:
+		return 7 * 24 * time.Hour, true
+	}
+	return 0, false
+}
 
 // detectRefusal reports the quota refusal this signature finds in one Captured
 // run: the structured channel first, the marker sentences beneath it (ADR-0234).

@@ -3,6 +3,7 @@ package tasks
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -40,8 +41,8 @@ func TestAgentCooldownConcurrentUpdates(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			preset := fmt.Sprintf("agent-%02d", i)
-			until := time.Date(2026, 6, 20, 12, i, 0, 0, time.UTC)
-			if err := updateAgentCooldown(d, preset, until); err != nil {
+			req := AgentQuotaCooldownRequest{Preset: preset, Stated: concurrentCooldownUntil(i)}
+			if _, err := recordAgentQuotaCooldown(d, req, time.Now(), 0); err != nil {
 				errCh <- err
 			}
 		}()
@@ -61,32 +62,93 @@ func TestAgentCooldownConcurrentUpdates(t *testing.T) {
 	}
 	for i := 0; i < writers; i++ {
 		preset := fmt.Sprintf("agent-%02d", i)
-		want := time.Date(2026, 6, 20, 12, i, 0, 0, time.UTC)
+		want := concurrentCooldownUntil(i)
 		if got := store[preset].ExhaustedUntil; !got.Equal(want) {
 			t.Fatalf("%s until = %s, want %s", preset, got, want)
 		}
 	}
 }
 
-func TestAgentQuotaCooldownUntilPolicyInTasks(t *testing.T) {
+// concurrentCooldownUntil spaces the writers' stated resets a minute apart, all
+// ahead of now: a reset already behind now is no statement and would be recorded
+// as a guess instead.
+func concurrentCooldownUntil(i int) time.Time {
+	return time.Now().UTC().Add(time.Hour).Truncate(time.Second).Add(time.Duration(i) * time.Minute)
+}
+
+// updateAgentCooldown writes one preset's row unconditionally, the way the fold
+// of the retired agent-cooldowns.json file does. It seeds a cooldown for tests
+// that are about how a cooling preset is *read*; a test about how a refusal is
+// recorded must go through recordAgentQuotaCooldown, whose whole subject is
+// which writes are refused.
+func updateAgentCooldown(d *Deps, preset string, until time.Time) error {
+	s, err := openDrainStore(d)
+	if err != nil {
+		return err
+	}
+	return s.PutAgentCooldown(strings.TrimSpace(preset), until.UTC())
+}
+
+func TestAgentQuotaCooldownRowPolicy(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC)
-	fallback := 30 * time.Minute
+	unclassed := 30 * time.Minute
 
 	tests := []struct {
-		name    string
-		resetAt time.Time
-		want    time.Time
+		name       string
+		req        AgentQuotaCooldownRequest
+		want       time.Time
+		wantStated bool
 	}{
-		{name: "zero fallback", resetAt: time.Time{}, want: now.Add(fallback)},
-		{name: "past fallback", resetAt: now.Add(-time.Second), want: now.Add(fallback)},
-		{name: "too far fallback", resetAt: now.Add(8*24*time.Hour + time.Second), want: now.Add(fallback)},
-		{name: "sane reset recorded as derived", resetAt: now.Add(time.Hour), want: now.Add(time.Hour)},
+		{
+			name:       "stated reset recorded as derived, in both columns",
+			req:        AgentQuotaCooldownRequest{Stated: now.Add(time.Hour), Class: QuotaWindowFiveHour},
+			want:       now.Add(time.Hour),
+			wantStated: true,
+		},
+		{
+			name: "no reset is dated from the class ceiling",
+			req:  AgentQuotaCooldownRequest{Class: QuotaWindowFiveHour},
+			want: now.Add(5 * time.Hour),
+		},
+		{
+			name: "a weekly refusal is dated from the week",
+			req:  AgentQuotaCooldownRequest{Class: QuotaWindowWeekly},
+			want: now.Add(7 * 24 * time.Hour),
+		},
+		{
+			name: "a reset already behind now is no statement",
+			req:  AgentQuotaCooldownRequest{Stated: now.Add(-time.Second), Class: QuotaWindowOpus},
+			want: now.Add(7 * 24 * time.Hour),
+		},
+		{
+			name: "a reset past the horizon is no statement",
+			req:  AgentQuotaCooldownRequest{Stated: now.Add(maxAgentQuotaResetHorizon + time.Second), Class: QuotaWindowFiveHour},
+			want: now.Add(5 * time.Hour),
+		},
+		{
+			name: "an unclassed refusal uses the configured ceiling",
+			req:  AgentQuotaCooldownRequest{},
+			want: now.Add(unclassed),
+		},
+		{
+			name: "a caller's own ceiling answers where no class does",
+			req:  AgentQuotaCooldownRequest{Ceiling: spendCapCooldown},
+			want: now.Add(spendCapCooldown),
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := agentQuotaCooldownUntil(tc.resetAt, now, fallback); !got.Equal(tc.want) {
-				t.Fatalf("cooldown = %s, want %s", got, tc.want)
+			tc.req.Preset = "claude"
+			row := agentQuotaCooldownRow(tc.req, now, unclassed)
+			if !row.ExhaustedUntil.Equal(tc.want) {
+				t.Fatalf("cooldown = %s, want %s", row.ExhaustedUntil, tc.want)
+			}
+			if got := !row.StatedUntil.IsZero(); got != tc.wantStated {
+				t.Fatalf("stated = %v (%s), want %v: the absent statement is what marks a guess", got, row.StatedUntil, tc.wantStated)
+			}
+			if tc.wantStated && !row.StatedUntil.Equal(row.ExhaustedUntil) {
+				t.Fatalf("stated %s and enforced %s disagree for a read reset", row.StatedUntil, row.ExhaustedUntil)
 			}
 		})
 	}
@@ -109,12 +171,12 @@ func TestStatedQuotaResetParksOnceNotTwice(t *testing.T) {
 	}
 	v := resolveProceedResetAt(stampDetectedVerdict(*result.ProceedVerdict, "claude", "opus"), claudeCaptureRefusedAt)
 
-	until := agentQuotaCooldownUntil(v.ResetAt, claudeCaptureRefusedAt, defaultAgentQuotaRetryAfter)
+	until, err := recordAgentQuotaCooldown(d, quotaCooldownRequest(v), claudeCaptureRefusedAt, defaultUnclassedQuotaCeiling)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !until.Equal(v.ResetAt.UTC()) {
 		t.Fatalf("cooldown row at %s, want the instant the wait sleeps on, %s", until, v.ResetAt.UTC())
-	}
-	if err := updateAgentCooldown(d, v.Preset, until); err != nil {
-		t.Fatal(err)
 	}
 
 	// WaitForRecovery resumes at the first instant that is not before ResetAt.

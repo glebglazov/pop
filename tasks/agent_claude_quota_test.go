@@ -90,12 +90,16 @@ func TestClaudeQuotaCooldownOutlastsTheStatedResetRatherThanTheRefusal(t *testin
 		t.Fatalf("ResetAt = %s, want the adapter's instant kept through resolution", v.ResetAt)
 	}
 
-	until := agentQuotaCooldownUntil(v.ResetAt, claudeCaptureRefusedAt, defaultAgentQuotaRetryAfter)
+	row := agentQuotaCooldownRow(quotaCooldownRequest(v), claudeCaptureRefusedAt, defaultUnclassedQuotaCeiling)
+	until := row.ExhaustedUntil
+	if row.StatedUntil.IsZero() {
+		t.Fatalf("row recorded no stated instant, want the provider's %s: a read reset must never look like a guess", v.ResetAt)
+	}
 	if !until.After(claudeCaptureStatedReset) {
 		t.Fatalf("cooldown until %s, want it to outlast the stated reset %s", until, claudeCaptureStatedReset)
 	}
-	if blind := claudeCaptureRefusedAt.Add(defaultAgentQuotaRetryAfter); until.Equal(blind) {
-		t.Fatalf("cooldown fell back to the blind hour at %s", blind)
+	if blind := claudeCaptureRefusedAt.Add(defaultUnclassedQuotaCeiling); until.Equal(blind) {
+		t.Fatalf("cooldown fell back to the unclassed ceiling at %s", blind)
 	}
 	want := claudeCaptureStatedReset.Add(quotaAssuranceOffset)
 	if !until.Equal(want) {
@@ -207,15 +211,16 @@ func TestClaudeRateLimitResetBeyondTheHorizonIsGarbage(t *testing.T) {
 	if got := claudeRateLimitResetAt(raw, now); !got.IsZero() {
 		t.Fatalf("reset = %s, want zero for an epoch %s out", got, maxAgentQuotaResetHorizon)
 	}
-	// The horizon is the store's, so whatever survives here is an instant
-	// agentQuotaCooldownUntil will honour rather than discard.
+	// The horizon is the store's, so whatever survives here is an instant the
+	// cooldown row will honour as a statement rather than discard.
 	inside := now.Add(maxAgentQuotaResetHorizon - time.Hour).Truncate(time.Second)
 	raw = fmt.Sprintf(`{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":%d,"rateLimitType":"weekly"}}`, inside.Unix())
 	got := claudeRateLimitResetAt(raw, now)
 	if !got.Equal(inside.Add(quotaAssuranceOffset)) {
 		t.Fatalf("reset = %s, want %s", got, inside.Add(quotaAssuranceOffset))
 	}
-	if until := agentQuotaCooldownUntil(got, now, defaultAgentQuotaRetryAfter); !until.After(inside) {
-		t.Fatalf("cooldown until %s, want it to outlast the stated reset %s", until, inside)
+	req := AgentQuotaCooldownRequest{Preset: "claude", Stated: got, Class: QuotaWindowWeekly}
+	if row := agentQuotaCooldownRow(req, now, defaultUnclassedQuotaCeiling); !row.ExhaustedUntil.After(inside) || row.StatedUntil.IsZero() {
+		t.Fatalf("cooldown row %+v, want a stated instant outlasting %s", row, inside)
 	}
 }

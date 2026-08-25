@@ -108,7 +108,8 @@ func TestRunRoutineWithAgentFallbackSkipsCooldownedPreset(t *testing.T) {
 	}
 	taskDeps := tasks.DefaultDeps()
 	d.Tasks = taskDeps
-	if err := tasks.RecordAgentQuotaCooldownFromReset(taskDeps, mustConfig(t, d.LoadConfig), "claude", time.Now().Add(time.Hour)); err != nil {
+	req := tasks.AgentQuotaCooldownRequest{Preset: "claude", Stated: time.Now().Add(time.Hour)}
+	if _, err := tasks.RecordAgentQuotaCooldown(taskDeps, mustConfig(t, d.LoadConfig), req); err != nil {
 		t.Fatal(err)
 	}
 

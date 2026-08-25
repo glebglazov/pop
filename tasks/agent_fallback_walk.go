@@ -275,8 +275,7 @@ func runAgentFallbackWalk(d *Deps, w agentFallbackWalk) (agentWalkResult, error)
 				}
 				if _, ok := v.TimeHealing(); ok {
 					v = resolveProceedResetAt(v, time.Now())
-					until := agentQuotaCooldownUntil(v.ResetAt, time.Now(), w.quotaRetryAfter)
-					_ = updateAgentCooldown(d, preset, until)
+					_, _ = recordAgentQuotaCooldown(d, quotaCooldownRequest(v), time.Now(), w.quotaRetryAfter)
 					if !persisted {
 						w.role.persist(outcome.stream, invocation, try, streamOutcomeQuotaPaused, "", exitCode)
 					}

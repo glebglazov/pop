@@ -417,9 +417,13 @@ func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath s
 		v := *result.ProceedVerdict
 		// Only a preset-scoped verdict reaches the preset cooldown store; a
 		// model-scoped one leaves the CLI running fine (ADR-0168).
-		if th, ok := v.TimeHealing(); ok && v.Scope == ProceedScopePreset {
-			until := agentQuotaCooldownUntil(th.ResetAt, time.Now(), agentQuotaRetryAfter)
-			if err := updateAgentCooldown(d, v.Preset, until); err != nil {
+		if _, ok := v.TimeHealing(); ok && v.Scope == ProceedScopePreset {
+			// The recorded expiry, not the one this refusal proposed: a guess
+			// against a cooldown that is still in force leaves the earlier row
+			// standing, and the walk must skip the preset until *that* instant
+			// (ADR-0235).
+			until, err := recordAgentQuotaCooldown(d, quotaCooldownRequest(v), time.Now(), agentQuotaRetryAfter)
+			if err != nil {
 				return nil, taskExitErr(sel, ExitOperational, "%v", err)
 			}
 			activeCooldowns[v.Preset] = until

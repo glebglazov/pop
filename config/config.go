@@ -567,9 +567,12 @@ type WorkConfig struct {
 type WorkDaemonConfig struct {
 	// PollInterval is the supervisor's scan cadence. Empty ⇒ DefaultWorkDaemonPollInterval.
 	PollInterval string `toml:"poll_interval" include:"replace" desc:"Supervisor scan cadence as a duration string (e.g. \"60s\")."`
-	// AgentQuotaRetryAfter is the global cooldown applied after an agent reports
-	// a quota exit, before it re-enters rotation. Empty ⇒ DefaultWorkDaemonQuotaRetryAfter.
-	AgentQuotaRetryAfter string `toml:"agent_quota_retry_after" include:"replace" desc:"Cooldown after an agent quota exit, as a duration string."`
+	// AgentQuotaRetryAfter is how long a preset cools down after a quota refusal
+	// that named no window class — the *unclassed* ceiling only. A refusal that
+	// names its window is dated from that window's own span instead, and one
+	// that carries the provider's reset instant is dated from the instant
+	// (ADR-0235). Empty ⇒ DefaultWorkDaemonQuotaRetryAfter.
+	AgentQuotaRetryAfter string `toml:"agent_quota_retry_after" include:"replace" desc:"Ceiling for a quota refusal that named no window, as a duration string."`
 	// CrashRetryDelays is the ordered backoff schedule for crash retries; its
 	// length is the park threshold. Empty ⇒ DefaultWorkDaemonCrashRetryDelays.
 	CrashRetryDelays []string `toml:"crash_retry_delays" include:"replace" desc:"Crash-retry backoff schedule (array of duration strings); length = park threshold."`
@@ -578,8 +581,14 @@ type WorkDaemonConfig struct {
 // Work-daemon default values applied when the [work.daemon] section or
 // individual fields are omitted.
 const (
-	DefaultWorkDaemonPollInterval    = 60 * time.Second
-	DefaultWorkDaemonQuotaRetryAfter = time.Hour
+	DefaultWorkDaemonPollInterval = 60 * time.Second
+	// DefaultWorkDaemonQuotaRetryAfter is the shortest Quota window class span —
+	// the five-hour session limit. A refusal naming no window is assumed to have
+	// exhausted the shortest one, so pop waits the least any real window could
+	// need. The former one hour was shorter than every window a subscription
+	// actually has, so it guaranteed a second refusal, and each of those used to
+	// re-date the deadline from its own later moment (ADR-0235).
+	DefaultWorkDaemonQuotaRetryAfter = 5 * time.Hour
 )
 
 // DefaultWorkDaemonCrashRetryDelays is the default crash-retry backoff schedule.

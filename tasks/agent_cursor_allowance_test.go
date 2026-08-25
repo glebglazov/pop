@@ -150,8 +150,8 @@ func TestModelSkipCooldownUntilCapsTheHorizon(t *testing.T) {
 	}{
 		{"captured 9/4/2026 clamps to 24h", time.Date(2026, 9, 4, 0, 0, 0, 0, time.UTC), now.Add(maxModelSkipHorizon)},
 		{"nearer date honoured as-is", now.Add(45 * time.Minute), now.Add(45 * time.Minute)},
-		{"no date keeps the one hour default", time.Time{}, now.Add(defaultAgentQuotaRetryAfter)},
-		{"date already behind now keeps the default", now.Add(-time.Minute), now.Add(defaultAgentQuotaRetryAfter)},
+		{"no date keeps the one hour default", time.Time{}, now.Add(defaultModelSkipRetryAfter)},
+		{"date already behind now keeps the default", now.Add(-time.Minute), now.Add(defaultModelSkipRetryAfter)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
