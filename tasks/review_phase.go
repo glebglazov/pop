@@ -79,6 +79,9 @@ func (r *implementRun) reviewPhase(currentRefresh *RefreshResult, row *Row) (rev
 		Convention:  r.opts.ReviewConvention,
 		runReviewer: r.opts.reviewRunner,
 		probeMemo:   r.agentProbeMemo,
+		// The drain is already holding this checkout for this set, so the review
+		// step runs inside that claim rather than asking for it again (ADR-0238).
+		checkoutHeld: true,
 	})
 	if err == nil {
 		return reviewFallThrough, nil

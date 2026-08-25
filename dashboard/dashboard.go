@@ -446,14 +446,12 @@ func (m QueueDashboard) menuItemsFor(row DashboardRow) []dashboardMenuItem {
 }
 
 // dashboardVerifyEligible reports whether the verify verb applies to row: a set
-// a verdict can still move that no live drain holds (ADR-0123). It keys on the
-// verification mark rather than the status, so a human-completed set — DONE with
-// an unverified mark — still offers the verb. It is the single guard shared by
-// the menu (inclusion) and dispatch (self-containment).
+// a verdict can still move. It keys on the verification mark rather than the
+// status, so a human-completed set — DONE with an unverified mark — still offers
+// the verb, and a live drain no longer withholds it: the verify pane queues for
+// the checkout and runs when the drain releases it (ADR-0238). It is the single
+// guard shared by the menu (inclusion) and dispatch (self-containment).
 func dashboardVerifyEligible(row DashboardRow) bool {
-	if row.LiveDrain {
-		return false
-	}
 	return row.VerifyMark == tasks.VerifyMarkUnverified || row.VerifyMark == tasks.VerifyMarkFailed
 }
 

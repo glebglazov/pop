@@ -61,6 +61,12 @@ type ReviewOptions struct {
 	Show bool
 	// Convention resolves the `code-review` convention for the checkout.
 	Convention ReviewConvention
+	// Wait is the `--wait` / `--no-wait` tri-state for admission to the checkout
+	// (ADR-0239). The unset default waits at a terminal and refuses elsewhere.
+	Wait AdmissionWaitChoice
+	// ConfirmIn is the invocation's input, read only to tell a human at a
+	// terminal from a script when resolving Wait.
+	ConfirmIn io.Reader
 }
 
 // ReviewResult is the outcome of one review.
@@ -93,6 +99,14 @@ type reviewCoreOptions struct {
 	// runReviewer returns the Reviewer's document and the agent that wrote it.
 	runReviewer func(prompt string) (string, string, error)
 	probeMemo   *agentAvailabilityProbeMemo
+	// admission is the policy the standalone Reviewer acquires the checkout
+	// under (ADR-0238/0239).
+	admission AdmissionPolicy
+	// checkoutHeld says the caller is already inside a claim on this checkout —
+	// the drain's own review step, which runs under the drain's running Drain
+	// row. The review then takes nothing: a second acquisition for the same set
+	// would be refused by the Set claim the caller itself holds.
+	checkoutHeld bool
 }
 
 // ReviewTaskSet reviews a set using default dependencies.
@@ -103,9 +117,9 @@ func ReviewTaskSet(opts ReviewOptions) (*ReviewResult, error) {
 // ReviewTaskSetWith is `pop tasks review <set>` (ADR-0214): it resolves the set,
 // hands a fresh Reviewer pop's review instruction, the resolved `code-review`
 // convention and the set's previous Review artifact, and writes what comes back
-// as the set's current one. It reaches no verdict, writes no status, and holds
-// no lock — review is deliberately runnable mid-drain, where a standards
-// correction is worth most.
+// as the set's current one. It reaches no verdict and writes no status, but it
+// does take the checkout for its duration: a Reviewer reading files another
+// drain is rewriting reviews a state that never existed (ADR-0238).
 func ReviewTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts ReviewOptions) (*ReviewResult, error) {
 	resolved, err := ResolvePathsWith(d, pd, loadConfig, opts.ResolveInput)
 	if err != nil {
@@ -131,6 +145,7 @@ func ReviewTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 		Output:      opts.Output,
 		Show:        opts.Show,
 		Convention:  opts.Convention,
+		admission:   opts.Wait.Policy(opts.ConfirmIn),
 	})
 }
 
@@ -143,7 +158,22 @@ func reviewResolvedSet(d *Deps, cfg *config.Config, opts reviewCoreOptions) (*Re
 		return nil, err
 	}
 	if opts.Show {
+		// Reading the set's current document touches Task storage only, so it
+		// contends for nothing and always runs (ADR-0238).
 		return showLatestReview(d, opts, m)
+	}
+	// Everything below reads the checkout — the commit range, the diff, and the
+	// files the Reviewer opens for itself — so the Reviewer is a Tree-stable
+	// operation and takes the checkout for its duration, waiting at a terminal
+	// when something else holds it (ADR-0238). The hold is released as soon as
+	// the document is written: no terminal is recorded, and the review stays the
+	// lighter surface it was.
+	if !opts.checkoutHeld {
+		hold, err := AcquireTreeStable(d, opts.RuntimePath, opts.SetID, opts.Output, opts.admission)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = hold.Release() }()
 	}
 	work, err := reviewableWork(d, opts, m)
 	if err != nil {

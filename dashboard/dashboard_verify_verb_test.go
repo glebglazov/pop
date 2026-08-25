@@ -12,10 +12,11 @@ import (
 	"github.com/glebglazov/pop/tasks/setkind"
 )
 
-// TestDashboardVerifyVerbConditionalInclusion asserts the `v` verify verb (ADR-0123)
-// is offered only on rows a verdict can still move — the unverified and
+// TestDashboardVerifyVerbConditionalInclusion asserts the `v` verify verb is
+// offered on exactly the rows a verdict can still move — the unverified and
 // verify-failed marks, whatever status carries them — and is absent for every
-// unmarked row and whenever a live drain holds the set.
+// unmarked row, including while a live drain holds the set: the pane it opens
+// waits for the checkout instead of being withheld (ADR-0238).
 func TestDashboardVerifyVerbConditionalInclusion(t *testing.T) {
 	has := func(row DashboardRow) bool {
 		for _, item := range dashboardMenuItems(testKinds(), row) {
@@ -56,12 +57,13 @@ func TestDashboardVerifyVerbConditionalInclusion(t *testing.T) {
 		t.Fatal("verify verb present on a verified DONE row")
 	}
 
-	// A live drain hides the verb even on an otherwise-eligible row: a plain verify
-	// is not quiescence-gated, so the running drain verifies itself.
+	// A live drain no longer withholds the verb: the Verifier takes the checkout
+	// like anything else, so pressing it queues the pane behind the drain rather
+	// than doing nothing (ADR-0238).
 	for _, row := range eligible {
 		row.LiveDrain = true
-		if has(row) {
-			t.Fatalf("verify verb present on a live-drained %s row", row.RawStatus)
+		if !has(row) {
+			t.Fatalf("verify verb missing on a live-drained %s row", row.RawStatus)
 		}
 	}
 }
@@ -87,7 +89,8 @@ func extractVerifySpawnCommand(rt *queuetest.RecordingTmux) (string, bool) {
 
 // TestDashboardVerifyLaunchPinsRuntimePath asserts drain.LaunchVerify spawns a pane whose
 // command pins the row's runtime path via --task-runtime-path, and records no drain
-// lock, spawn intent, or DrainPane (verify is not a drain — ADR-0123).
+// lock, spawn intent, or DrainPane: the claim belongs to the verify the pane runs,
+// which takes and releases it itself (ADR-0238), not to the launcher.
 func TestDashboardVerifyLaunchPinsRuntimePath(t *testing.T) {
 	repo, setID, _ := queuetest.SetupSpawnRepo(t, "verify-pinned", []queuetest.SpawnTask{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
@@ -222,8 +225,10 @@ func canonPath(t *testing.T, path string) string {
 	return got
 }
 
-// assertVerifyRecordsNothing checks the verify spawn left no drain lock, spawn
-// intent, or DrainPane behind — the row's ● indicator must stay dark.
+// assertVerifyRecordsNothing checks the verify *spawn* left no drain lock, spawn
+// intent, or DrainPane behind — the row's ● indicator must stay dark. What the
+// spawned command then takes for itself is the Verifier's own claim, released
+// when its verdict is in hand.
 func assertVerifyRecordsNothing(t *testing.T, d *drain.Deps, repo string) {
 	t.Helper()
 	panes, err := tasks.AllDrainPanes(d.Tasks)

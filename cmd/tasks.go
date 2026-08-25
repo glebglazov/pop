@@ -37,6 +37,10 @@ var (
 	taskRunYes                bool
 	taskImplementWait         bool
 	taskImplementNoWait       bool
+	taskVerifyWait            bool
+	taskVerifyNoWait          bool
+	taskReviewWait            bool
+	taskReviewNoWait          bool
 	taskInWorktree            bool
 	taskForceRebind           bool
 	taskAllowDirty            tasks.DirtyRuntimeStrategy = tasks.DirtyRuntimeContinue
@@ -419,12 +423,18 @@ func init() {
 	taskVerifyCmd.Flags().StringArrayVar(&taskVerifyAgents, "agent", nil, "Verifier agent preset; repeat to define an ordered quota/missing-binary fallback list")
 	taskVerifyCmd.Flags().StringVar(&taskVerifyEffort, "effort", "", "Verifier model-strength tier: light, standard, or heavy (default heavy)")
 	taskVerifyCmd.Flags().StringVar(&taskVerifyAccept, "accept", "", "Accept a non-PASS verdict: record a human-authored PASS at the current work SHA carrying this note (skips the Verifier); the note feeds forward as context into later verifier prompts")
+	taskVerifyCmd.Flags().BoolVar(&taskVerifyWait, "wait", false, "Queue for the checkout and wait when it is held, even unattended (default: wait only at a terminal)")
+	taskVerifyCmd.Flags().BoolVar(&taskVerifyNoWait, "no-wait", false, "Refuse immediately when the checkout or the set is held, even at a terminal")
+	taskVerifyCmd.MarkFlagsMutuallyExclusive("wait", "no-wait")
 	taskVerifyCmd.Flags().StringVar(&taskVerifyRemediate, "remediate", "", "Remediate a verify-failed set: spawn a Remediation task from the set's findings carrying this note (skips the Verifier), including from NEEDS-HUMAN or past the remediation depth cap; refused unless the set's verification mark is verify-failed")
 
 	taskReviewCmd.Flags().StringVar(&taskRuntimePath, "task-runtime-path", "", "Git checkout root for task execution (normalized to checkout root)")
 	taskReviewCmd.Flags().StringVar(&taskReviewTimeout, "timeout", "45m", "Maximum duration for the Reviewer attempt")
 	taskReviewCmd.Flags().StringArrayVar(&taskReviewAgents, "agent", nil, "Reviewer agent preset; repeat to define an ordered quota/missing-binary fallback list")
 	taskReviewCmd.Flags().StringVar(&taskReviewEffort, "effort", "", "Reviewer model-strength tier: light, standard, or heavy (default heavy)")
+	taskReviewCmd.Flags().BoolVar(&taskReviewWait, "wait", false, "Queue for the checkout and wait when it is held, even unattended (default: wait only at a terminal)")
+	taskReviewCmd.Flags().BoolVar(&taskReviewNoWait, "no-wait", false, "Refuse immediately when the checkout or the set is held, even at a terminal")
+	taskReviewCmd.MarkFlagsMutuallyExclusive("wait", "no-wait")
 	taskReviewCmd.Flags().BoolVar(&taskReviewShow, "show", false, "Print the set's latest review document to stdout and run no agent")
 	taskArtifactsCmd.Flags().StringVar(&taskArtifactsShow, "show", "", "Print the named artifact verbatim")
 
@@ -1028,6 +1038,8 @@ func runTaskReviewWith(d *tasks.Deps, w io.Writer, taskSetID string, show bool) 
 		Output:       w,
 		Show:         show,
 		Convention:   codeReviewConvention(d),
+		Wait:         admissionWaitChoice(taskReviewWait, taskReviewNoWait),
+		ConfirmIn:    os.Stdin,
 	}); err != nil {
 		return fmt.Errorf("tasks review: %w", err)
 	}
@@ -1212,6 +1224,8 @@ func runTaskVerifyWith(d *tasks.Deps, w io.Writer, taskSetID string, accept bool
 		Remediate:    remediate,
 		Note:         note,
 		Convention:   verificationConvention(d),
+		Wait:         admissionWaitChoice(taskVerifyWait, taskVerifyNoWait),
+		ConfirmIn:    os.Stdin,
 	}); err != nil {
 		return fmt.Errorf("tasks verify: %w", err)
 	}
@@ -1265,19 +1279,26 @@ func runTaskImplement(cmd *cobra.Command, args []string) {
 	handleTaskExit(err)
 }
 
-// taskImplementWaitChoice resolves `--wait` / `--no-wait` into the admission
-// choice the drain carries. Neither flag means the default: wait when a human is
-// at the terminal, refuse when a machine is driving (ADR-0239). The two flags are
-// mutually exclusive, so their order here decides nothing.
-func taskImplementWaitChoice() tasks.AdmissionWaitChoice {
+// admissionWaitChoice resolves `--wait` / `--no-wait` into the admission choice
+// a command carries. Neither flag means the default: wait when a human is at the
+// terminal, refuse when a machine is driving (ADR-0239). The two flags are
+// mutually exclusive on every command that registers them, so their order here
+// decides nothing. Every Tree-stable operation with a CLI form — implement,
+// verify, review — reads its pair through this one resolution, so the three
+// cannot drift.
+func admissionWaitChoice(wait, noWait bool) tasks.AdmissionWaitChoice {
 	switch {
-	case taskImplementNoWait:
+	case noWait:
 		return tasks.AdmissionWaitNever
-	case taskImplementWait:
+	case wait:
 		return tasks.AdmissionWaitAlways
 	default:
 		return tasks.AdmissionWaitAuto
 	}
+}
+
+func taskImplementWaitChoice() tasks.AdmissionWaitChoice {
+	return admissionWaitChoice(taskImplementWait, taskImplementNoWait)
 }
 
 // isTaskFileTarget reports whether a Task target reference names a single task —

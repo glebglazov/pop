@@ -97,10 +97,13 @@ func setupVerifyFixture(t *testing.T, git *deps.MockGit) (*Deps, string) {
 }
 
 // stubGit answers only the git commands the verify core issues, without touching
-// a real repository.
+// a real repository. The common dir is among them: taking the checkout resolves
+// the repository the claim is keyed by (ADR-0238).
 func stubGit(head, log, diff string) *deps.MockGit {
 	return &deps.MockGit{CommandInDirFunc: func(dir string, args ...string) (string, error) {
 		switch {
+		case len(args) >= 2 && args[0] == "rev-parse" && args[1] == "--git-common-dir":
+			return "/repo/.git", nil
 		case len(args) >= 2 && args[0] == "rev-parse" && args[1] == "HEAD":
 			return head, nil
 		case len(args) >= 1 && args[0] == "log":
@@ -255,6 +258,8 @@ func TestVerifyResolvedSetCarriesWorkStatAndRangeNotTheDiff(t *testing.T) {
 	var diffArgs [][]string
 	git := &deps.MockGit{CommandInDirFunc: func(dir string, args ...string) (string, error) {
 		switch {
+		case len(args) >= 2 && args[0] == "rev-parse" && args[1] == "--git-common-dir":
+			return "/repo/.git", nil
 		case len(args) >= 2 && args[0] == "rev-parse" && args[1] == "HEAD":
 			return "sha1\n", nil
 		case len(args) >= 1 && args[0] == "log":

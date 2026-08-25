@@ -112,6 +112,12 @@ type VerifyOptions struct {
 	// Convention resolves the `verification` convention that is the Verifier's
 	// mandate for the checkout.
 	Convention VerificationConvention
+	// Wait is the `--wait` / `--no-wait` tri-state for admission to the checkout
+	// (ADR-0239). The unset default waits at a terminal and refuses elsewhere.
+	Wait AdmissionWaitChoice
+	// ConfirmIn is the invocation's input, read only to tell a human at a
+	// terminal from a script when resolving Wait.
+	ConfirmIn io.Reader
 }
 
 // VerifyResult is the outcome of one verification, returned after the verdict is
@@ -154,6 +160,10 @@ type verifyCoreOptions struct {
 	// probeMemo shares availability-probe results across Implement implement and
 	// verify phases within one run; nil constructs a fresh memo for standalone verify.
 	probeMemo *agentAvailabilityProbeMemo
+	// admission is the policy the standalone Verifier acquires the checkout under
+	// (ADR-0238/0239). The drain's own verify phase never sets it: it is already
+	// running under the drain's claim.
+	admission AdmissionPolicy
 }
 
 // VerifyTaskSet runs the Verifier over a set using default dependencies.
@@ -200,12 +210,16 @@ func VerifyTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 		Remediate:     opts.Remediate,
 		RemediateNote: opts.Note,
 		Convention:    opts.Convention,
+		admission:     opts.Wait.Policy(opts.ConfirmIn),
 	})
 }
 
 // verifyResolvedSet is the resolved-path core of `pop tasks verify`: it loads
-// the set, runs the Verifier (force — it never reads the SHA cache), persists
-// the verdict, and prints it. All external effects go through injectable seams
+// the set, takes the checkout, runs the Verifier (force — it never reads the SHA
+// cache), persists the verdict, and prints it. The Accept and Remediate
+// dispositions take no claim: neither runs an agent over the tree, and each
+// already guards its own write through Checkout quiescence (ADR-0104). All
+// external effects go through injectable seams
 // (d.Git for SHA and diff, runVerifier for the agent, the store for
 // persistence).
 func verifyResolvedSet(d *Deps, cfg *config.Config, opts verifyCoreOptions) (*VerifyResult, error) {
@@ -220,6 +234,20 @@ func verifyResolvedSet(d *Deps, cfg *config.Config, opts verifyCoreOptions) (*Ve
 	if opts.Remediate {
 		return remediateResolvedSet(d, opts, m, workSHA)
 	}
+	// The Verifier is a Tree-stable operation (ADR-0238): it runs the
+	// repository's tests, which another set's drain rewriting the tree underneath
+	// would break, so it takes the checkout like a drain and — at a terminal —
+	// waits for it rather than judging a moving tree. The hold is released the
+	// moment the verdict is in hand; nothing of it survives, so a verify still
+	// leaves no drain in the set's history.
+	hold, err := AcquireTreeStable(d, opts.RuntimePath, opts.SetID, opts.Output, opts.admission)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = hold.Release() }()
+	// Re-read after admission: a wait ends when whoever held the checkout finished
+	// with it, and what they left behind is the tree this verdict is about.
+	workSHA = verifyWorkSHA(d, opts.RuntimePath)
 	v, err := runAndStoreVerdict(d, cfg, opts, m, workSHA, priorAcceptedNote(d, opts.Repo, opts.SetID))
 	if err != nil {
 		return nil, err

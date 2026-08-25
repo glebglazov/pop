@@ -82,10 +82,10 @@ const (
 // plural verb a set has is copy-name, which lives on the copy menu.
 func (k *Kind) Actions(c work.Container) []work.Action {
 	actions := []work.Action{{Verb: VerbDrain, Key: "I", Label: "drain"}}
-	// Verify is the lighter, explicit Verifier force (ADR-0123): offered only on
-	// sets a verdict can move (NEEDS-VERIFY / VERIFY-FAILED) and hidden while a
-	// live drain holds the set — a plain verify is not quiescence-gated, so the
-	// running drain verifies itself instead.
+	// Verify is the lighter, explicit Verifier force: offered on any set a verdict
+	// can still move. It is no longer hidden while a live drain holds the set —
+	// the Verifier is a Tree-stable operation now, so the pane it opens queues for
+	// the checkout and runs when the drain is done with it (ADR-0238).
 	if verifyEligible(c) {
 		actions = append(actions, work.Action{Verb: VerbVerify, Key: "V", Label: "verify"})
 	}
@@ -179,14 +179,12 @@ func (k *Kind) ItemActions(c work.Container, item work.Item) []work.Action {
 }
 
 // verifyEligible reports whether the verify verb applies to a set: one a verdict
-// can still move that no live drain holds (ADR-0123). The mark, not the status, is
-// the fact — a human-completed set reads DONE and still needs verifying, so
-// keying on NEEDS-VERIFY / VERIFY-FAILED would hide the verb from exactly the set
-// whose verification was deferred.
+// can still move. The mark, not the status, is the fact — a human-completed set
+// reads DONE and still needs verifying, so keying on NEEDS-VERIFY /
+// VERIFY-FAILED would hide the verb from exactly the set whose verification was
+// deferred. A live drain no longer withholds it: waiting for that drain is a
+// better answer than pretending the verb does not exist (ADR-0238).
 func verifyEligible(row work.Container) bool {
-	if row.LiveDrain {
-		return false
-	}
 	return row.VerifyMark == tasks.VerifyMarkUnverified || row.VerifyMark == tasks.VerifyMarkFailed
 }
 

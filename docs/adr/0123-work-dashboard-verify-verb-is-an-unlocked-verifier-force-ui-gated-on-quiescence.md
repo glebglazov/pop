@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0238
 ---
 
 # Work dashboard verify verb is an un-locked Verifier force, UI-gated on quiescence
@@ -37,8 +37,15 @@ Four decisions carry the weight:
   live-drain indicator lights and `p` (preview) does not reach it. The pane is
   ephemeral; its verdict surfaces on the next poll's `ApplyVerifyVerdicts`
   re-derivation with no extra refresh code.
+  *Superseded by [ADR-0238](0238-tree-stability-not-writing-is-what-admission-protects.md):
+  the Verifier needs the tree to hold still, so a standalone verify now takes the
+  Checkout claim and waits for it. Everything else about the lighter surface
+  stands — no drain lifecycle, no terminal recording, no spawn intent, no
+  DrainPane.*
 
-- **UI-gated on quiescence, not command-gated.** A plain verifier force
+- **UI-gated on quiescence, not command-gated.** *(Also superseded by ADR-0238:
+  the command is admission-gated now, so the verb is no longer hidden while a
+  live drain holds the set — pressing it queues the pane behind the drain.)* A plain verifier force
   (`runAndStoreVerdict`) does an unguarded verdict upsert — unlike the
   accept/remediate dispositions, it has no checkout-quiescence transaction. So the
   verb is *hidden* when a live drain holds the set, letting the running drain
@@ -63,3 +70,7 @@ Builds on [ADR-0104](0104-out-of-band-mutators-require-checkout-quiescence.md)
 (quiescence for out-of-band verdict mutators) and
 [ADR-0111](0111-work-dashboard-retires-drain-column-for-in-progress-and-a-live-drain-indicator.md)
 (the live-drain indicator this verb is careful not to light).
+
+Superseded by [ADR-0238](0238-tree-stability-not-writing-is-what-admission-protects.md),
+which replaces this ADR's locking decision: tree stability, not writing, is what
+admission protects, so the standalone Verifier acquires the checkout like a drain.

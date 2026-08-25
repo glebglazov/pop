@@ -258,6 +258,20 @@ func BeginDrain(d *Deps, runtimePath, setID string, noticeOut io.Writer) (*Drain
 // waited must re-derive its target's status before acting on it: the work it was
 // admitted for may have been finished by whoever it was waiting on.
 func BeginDrainWithAdmission(d *Deps, runtimePath, setID string, noticeOut io.Writer, policy AdmissionPolicy) (*DrainHandle, bool, error) {
+	return admitDrainRow(d, runtimePath, setID, noticeOut, policy, true)
+}
+
+// admitDrainRow is the acquisition itself: it takes the Checkout claim and the
+// Set claim together — as one running Drain row — under the given Admission
+// policy, and hands back the handle that releases them.
+//
+// clearSpawnIntent separates a drain from a Tree-stable operation that is not
+// one (ADR-0238). A drain consumes the supervisor's pending-spawn marker,
+// because the row it just inserted is what that marker was standing in for; a
+// standalone Verifier or Reviewer holding the same checkout is not the drain the
+// supervisor dispatched, so it leaves the marker alone rather than hiding a
+// spawn that has yet to happen.
+func admitDrainRow(d *Deps, runtimePath, setID string, noticeOut io.Writer, policy AdmissionPolicy, clearSpawnIntent bool) (*DrainHandle, bool, error) {
 	id, err := ResolveRepositoryIdentity(d, runtimePath)
 	if err != nil {
 		return nil, false, err
@@ -304,11 +318,13 @@ func BeginDrainWithAdmission(d *Deps, runtimePath, setID string, noticeOut io.Wr
 		}
 		return nil, waited, exitErr(ExitOperational, "record drain start: %v", err)
 	}
-	// The running Drain row now covers this set, so its pending-spawn marker (if
-	// the supervisor recorded one at dispatch) has served its purpose: drop it so
-	// it stops shadowing the now-visible drain. Best-effort — a lingering intent
-	// expires on its own and never blocks this drain.
-	_ = s.DeleteSpawnIntent(id.CommonDir, setID)
+	if clearSpawnIntent {
+		// The running Drain row now covers this set, so its pending-spawn marker (if
+		// the supervisor recorded one at dispatch) has served its purpose: drop it so
+		// it stops shadowing the now-visible drain. Best-effort — a lingering intent
+		// expires on its own and never blocks this drain.
+		_ = s.DeleteSpawnIntent(id.CommonDir, setID)
+	}
 	return &DrainHandle{store: s, id: drain.ID}, waited, nil
 }
 

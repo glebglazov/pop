@@ -251,8 +251,13 @@ func TestReviewRefusesAnUndeterminedRange(t *testing.T) {
 	writeManifestWithSetKeys(t, setDir, []Task{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
 	}, map[string]any{"base_commit": "deadbeef"})
-	// Nothing recorded is reachable and no subject matches.
-	d.Git = &deps.MockGit{CommandInDirFunc: func(string, ...string) (string, error) {
+	// Nothing recorded is reachable and no subject matches — but the checkout
+	// still resolves to a repository, since the review takes it before it looks
+	// for a range.
+	d.Git = &deps.MockGit{CommandInDirFunc: func(_ string, args ...string) (string, error) {
+		if len(args) >= 2 && args[0] == "rev-parse" && args[1] == "--git-common-dir" {
+			return "/repo/.git", nil
+		}
 		return "", errStubGitUnreachable
 	}}
 
@@ -267,10 +272,10 @@ func TestReviewRefusesAnUndeterminedRange(t *testing.T) {
 
 var errStubGitUnreachable = errors.New("not in this history")
 
-// TestReviewRunsMidDrainAndChangesNoStatus: an open task beside the done one —
-// a set the drain has not finished — still reviews, and the manifest is left
-// exactly as it was found.
-func TestReviewRunsMidDrainAndChangesNoStatus(t *testing.T) {
+// TestReviewRunsOnAnUnfinishedSetAndChangesNoStatus: an open task beside the
+// done one — a set whose drain has not reached the end — still reviews, and the
+// manifest is left exactly as it was found.
+func TestReviewRunsOnAnUnfinishedSetAndChangesNoStatus(t *testing.T) {
 	t.Parallel()
 	at := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
 	d, defPath, setDir := setupReviewFixture(t, at)
