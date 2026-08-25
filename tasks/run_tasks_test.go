@@ -3432,6 +3432,7 @@ func (e *runTaskSetFixture) deps() *Deps {
 		RecoveryFastCheckInterval:    2 * time.Millisecond,
 		RecoveryPollInterval:         2 * time.Millisecond,
 		RecoveryPollImminentInterval: 2 * time.Millisecond,
+		AdmissionPollInterval:        2 * time.Millisecond,
 		RetryDelayWait:               testRetryDelayWaitHook,
 	}
 }

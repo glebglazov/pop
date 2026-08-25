@@ -40,6 +40,16 @@ type implementRun struct {
 	confirmOut io.Writer
 	out        io.Writer
 
+	// admission is what this run does when the checkout or the set is held: it is
+	// resolved once, from --wait/--no-wait and whether a human is at the terminal,
+	// so the opening BeginDrain and every gate-resume re-acquire answer contention
+	// the same way (ADR-0239).
+	admission AdmissionPolicy
+	// admissionWaited records that the opening grant came out of the Admission
+	// queue rather than immediately. The run re-derives its target before acting
+	// on it when it did — the work may have been finished by whoever it waited on.
+	admissionWaited bool
+
 	// refresh is the opening Refresh snapshot, used only by setup for the initial
 	// render and the start-at-gate checks; the loop re-Refreshes each iteration.
 	refresh *RefreshResult
@@ -139,27 +149,30 @@ func newImplementRun(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 	// held only during active execution (ADR-0067): this opening BeginDrain is the
 	// backstop before BindCheckout, but reaching any gate menu parks (finishes) it
 	// so the menu runs lock-free, and resuming AFK work re-acquires a fresh Drain.
-	drain, err := BeginDrain(d, runtimePath, taskSetID, confirmOut)
+	admission := opts.Wait.Policy(opts.ConfirmIn)
+	drain, waited, err := BeginDrainWithAdmission(d, runtimePath, taskSetID, confirmOut, admission)
 	if err != nil {
 		return nil, err
 	}
 
 	return &implementRun{
-		d:              d,
-		loadConfig:     loadConfig,
-		opts:           opts,
-		plan:           plan,
-		resolved:       resolved,
-		runtimePath:    runtimePath,
-		statePath:      statePath,
-		taskSetID:      taskSetID,
-		hitlFallback:   hitlFallback,
-		confirmOut:     confirmOut,
-		out:            out,
-		refresh:        refresh,
-		drain:          drain,
-		turnCap:        resolveRepoTurnCap(d, plan.cfg, runtimePath),
-		agentProbeMemo: newAgentAvailabilityProbeMemo(),
+		d:               d,
+		loadConfig:      loadConfig,
+		opts:            opts,
+		plan:            plan,
+		resolved:        resolved,
+		runtimePath:     runtimePath,
+		statePath:       statePath,
+		taskSetID:       taskSetID,
+		hitlFallback:    hitlFallback,
+		confirmOut:      confirmOut,
+		out:             out,
+		refresh:         refresh,
+		drain:           drain,
+		admission:       admission,
+		admissionWaited: waited,
+		turnCap:         resolveRepoTurnCap(d, plan.cfg, runtimePath),
+		agentProbeMemo:  newAgentAvailabilityProbeMemo(),
 	}, nil
 }
 
@@ -284,6 +297,56 @@ func (r *implementRun) setup() error {
 	return nil
 }
 
+// settleAfterAdmissionWait re-derives the run's target after it came out of the
+// Admission queue, and reports whether there is anything left to do. Waiting is
+// not free of consequence: the set may have been drained by another queued
+// command, signed off from an assist menu, or archived while this command sat in
+// the line. That is a clean success reporting nothing left to drain — the human
+// asked for the work to be done, and it is — not the stale-target error a
+// refusing command would have produced.
+func (r *implementRun) settleAfterAdmissionWait() (bool, error) {
+	if !r.admissionWaited {
+		return false, nil
+	}
+	refresh, err := RefreshWith(r.d, r.resolved.DefinitionPath, r.statePath)
+	if err != nil {
+		return false, exitErr(ExitSetup, "refresh after admission wait: %v", err)
+	}
+	r.refresh = refresh
+	reason, settled := nothingLeftToDrain(r.d, refresh, r.statePath, r.resolved.DefinitionPath, r.taskSetID)
+	if !settled {
+		return false, nil
+	}
+	r.result = &RunTaskSetResult{
+		TaskSetID:   r.taskSetID,
+		RuntimePath: r.runtimePath,
+		ProjectPath: r.resolved.ProjectPath,
+		Refresh:     refresh,
+		TaskSetDone: true,
+	}
+	outputFor(r.out).line(ansiGreen, "✔ Nothing left to drain: %s", reason)
+	return true, nil
+}
+
+// nothingLeftToDrain reports whether a set still wants a drain, and says in a
+// human sentence why it does not. Only the three dispositions that mean the work
+// is *over* count: archived, gone from the manifest, or DONE. A set parked at a
+// gate — blocked, awaiting approval, failed — still wants this run, because the
+// gate is what the run is here to open.
+func nothingLeftToDrain(d *Deps, refresh *RefreshResult, statePath, defPath, setID string) (string, bool) {
+	if err := RejectArchivedTaskSet(d, statePath, defPath, setID); err != nil {
+		return fmt.Sprintf("set %s was archived while the command waited", setID), true
+	}
+	row := findRow(refresh, setID)
+	if row == nil {
+		return fmt.Sprintf("set %s is no longer registered here", setID), true
+	}
+	if row.Status == StatusDone {
+		return fmt.Sprintf("set %s is done", setID), true
+	}
+	return "", false
+}
+
 // parkDrain releases the Runtime execution lock at a human-wait gate: it finishes
 // the held Drain with the same clean terminal the --yes path records at that point
 // (ADR-0056/0067) — the set's blocked/awaiting_approval/failed disposition stays
@@ -341,14 +404,15 @@ func (r *implementRun) newGateEnv() gateEnv {
 // ensureDrain re-acquires the Runtime execution lock before a contiguous run of
 // AFK attempts resumes after a gate park (ADR-0067). It is a no-op while a Drain
 // is already held (the opening BeginDrain, or an unparked segment). A collision
-// with a concurrent drain on the same checkout refuses cleanly with the existing
-// "already in progress" error; the gate decision was already persisted to the
-// manifest, so nothing is lost.
+// with a concurrent drain on the same checkout is answered by the run's own
+// Admission policy — an attended run waits behind it, an unattended one refuses
+// cleanly. Either way the gate decision was already persisted to the manifest,
+// so nothing is lost.
 func (r *implementRun) ensureDrain() error {
 	if r.drain != nil {
 		return nil
 	}
-	handle, err := BeginDrain(r.d, r.runtimePath, r.taskSetID, r.confirmOut)
+	handle, _, err := BeginDrainWithAdmission(r.d, r.runtimePath, r.taskSetID, r.confirmOut, r.admission)
 	if err != nil {
 		return err
 	}

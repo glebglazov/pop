@@ -35,6 +35,8 @@ var (
 	taskAgentCmd              string
 	taskAgentOutput           tasks.AgentOutputMode
 	taskRunYes                bool
+	taskImplementWait         bool
+	taskImplementNoWait       bool
 	taskInWorktree            bool
 	taskForceRebind           bool
 	taskAllowDirty            tasks.DirtyRuntimeStrategy = tasks.DirtyRuntimeContinue
@@ -404,6 +406,9 @@ func init() {
 	taskImplementCmd.Flags().IntVar(&taskMaxTries, "max-tries", tasks.DefaultMaxTries, "Maximum started attempts per task")
 	taskImplementCmd.Flags().StringVar(&taskTimeout, "timeout", "45m", "Maximum duration per attempt")
 	taskImplementCmd.Flags().BoolVarP(&taskRunYes, "yes", "y", false, "Skip confirmation prompt")
+	taskImplementCmd.Flags().BoolVar(&taskImplementWait, "wait", false, "Queue for the checkout and wait when it is held, even unattended (default: wait only at a terminal)")
+	taskImplementCmd.Flags().BoolVar(&taskImplementNoWait, "no-wait", false, "Refuse immediately when the checkout or the set is held, even at a terminal")
+	taskImplementCmd.MarkFlagsMutuallyExclusive("wait", "no-wait")
 	taskImplementCmd.Flags().BoolVar(&taskInWorktree, "in-worktree", false, "Provision a managed worktree forked from the current checkout and drain there")
 	taskImplementCmd.Flags().BoolVar(&taskForceRebind, "force-rebind", false, "Re-point a bound set to the current checkout (or retarget --in-worktree)")
 	taskImplementCmd.Flags().StringArrayVar(&taskImplementVerifyAgents, "verify-agent", nil, "Verifier agent preset for the in-drain verify phase; repeat to define an ordered fallback list (steers verification independently of --agent)")
@@ -1260,6 +1265,21 @@ func runTaskImplement(cmd *cobra.Command, args []string) {
 	handleTaskExit(err)
 }
 
+// taskImplementWaitChoice resolves `--wait` / `--no-wait` into the admission
+// choice the drain carries. Neither flag means the default: wait when a human is
+// at the terminal, refuse when a machine is driving (ADR-0239). The two flags are
+// mutually exclusive, so their order here decides nothing.
+func taskImplementWaitChoice() tasks.AdmissionWaitChoice {
+	switch {
+	case taskImplementNoWait:
+		return tasks.AdmissionWaitNever
+	case taskImplementWait:
+		return tasks.AdmissionWaitAlways
+	default:
+		return tasks.AdmissionWaitAuto
+	}
+}
+
 // isTaskFileTarget reports whether a Task target reference names a single task —
 // a Task-set-relative file reference such as "<task-set>/<file>.md" — rather than
 // a bare Task set identifier. The ".md" suffix is the discriminator: it is exactly
@@ -1315,6 +1335,7 @@ func runTaskRunTaskWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader
 		MaxTriesExplicit: maxTriesExplicit,
 		Timeout:          timeout,
 		Yes:              taskRunYes,
+		Wait:             taskImplementWaitChoice(),
 		ConfirmIn:        stdin,
 		ConfirmOut:       stderr,
 		Output:           stdout,
@@ -1356,6 +1377,7 @@ func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reade
 		ReviewConvention:       codeReviewConvention(d),
 		VerificationConvention: verificationConvention(d),
 		Yes:                    taskRunYes,
+		Wait:                   taskImplementWaitChoice(),
 		ConfirmIn:              stdin,
 		ConfirmOut:             stderr,
 		Output:                 stdout,

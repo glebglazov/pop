@@ -24,17 +24,21 @@ type RunTaskOptions struct {
 	AgentPresets     []string
 	// AgentExplicit reports the --agent flag was explicitly passed
 	// (Flags().Changed).
-	AgentExplicit bool
-	AgentCmd      string
-	AgentOutput   AgentOutputMode
-	AllowDirty    DirtyRuntimeStrategy
+	AgentExplicit    bool
+	AgentCmd         string
+	AgentOutput      AgentOutputMode
+	AllowDirty       DirtyRuntimeStrategy
 	MaxTries         int
 	MaxTriesExplicit bool
 	Timeout          time.Duration
-	Yes           bool
-	ConfirmIn     io.Reader
-	ConfirmOut    io.Writer
-	Output        io.Writer
+	Yes              bool
+	// Wait mirrors RunTaskSetOptions.Wait for the single-task path: `--wait` /
+	// `--no-wait`, defaulting to waiting only when a human is at the terminal
+	// (ADR-0239).
+	Wait       AdmissionWaitChoice
+	ConfirmIn  io.Reader
+	ConfirmOut io.Writer
+	Output     io.Writer
 	// BindCheckout mirrors RunTaskSetOptions.BindCheckout for the single-task
 	// path: it adopts the current checkout into the binding model (ADR-0036)
 	// once the run has committed to its set and runtime checkout.
@@ -71,8 +75,8 @@ type RunTaskResult struct {
 	// was attempted, so nothing failed and no task changed state: the run ends on
 	// a no-op, which is a different event from an exhausted list (ADR-0231).
 	NoAgentStarted bool
-	CommitSHA          string
-	AgentSummary       string
+	CommitSHA      string
+	AgentSummary   string
 }
 
 // RunTask executes one task task through an agent.
@@ -208,9 +212,25 @@ func RunTaskWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Con
 	// too so it interlocks with whole-set drains of the same set. The running
 	// Drain row exists only while an attempt is actively executing, matching the
 	// whole-set lifecycle.
-	drain, err := BeginDrain(d, runtimePath, sel.TaskSetID, confirmOut)
+	drain, waited, err := BeginDrainWithAdmission(d, runtimePath, sel.TaskSetID, confirmOut, opts.Wait.Policy(opts.ConfirmIn))
 	if err != nil {
 		return nil, err
+	}
+	// A run that came out of the Admission queue asks again whether its task still
+	// wants running: whoever held the checkout may have done it (ADR-0239). A task
+	// that is no longer eligible is a clean success reporting nothing left, and
+	// the run never executed, so its Drain row is cancelled rather than terminated.
+	if waited {
+		current, refreshErr := RefreshWith(d, resolved.DefinitionPath, statePath)
+		if refreshErr != nil {
+			finalizeDrain(drain, drainOutcome{declined: true})
+			return nil, exitErr(ExitSetup, "refresh after admission wait: %v", refreshErr)
+		}
+		if _, selErr := SelectTask(current, taskSetID, taskID); selErr != nil {
+			outputFor(out).line(ansiGreen, "✔ Nothing left to run: %s is no longer an open task", opts.TaskPathOverride)
+			finalizeDrain(drain, drainOutcome{declined: true})
+			return &RunTaskResult{Selection: sel, Refresh: current, Declined: true}, nil
+		}
 	}
 	defer func() {
 		outcome := drainOutcome{err: err}

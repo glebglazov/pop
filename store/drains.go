@@ -87,9 +87,10 @@ func (s *Store) drainAlive(d Drain) bool {
 	return s.alive(d.PID, d.ProcStart)
 }
 
-// StartDrain inserts a running Drain and enforces mutual exclusion in one
-// transaction over two named resources, each with its own typed refusal so a
-// caller can say which one to go and look at:
+// StartDrain inserts a running Drain and enforces mutual exclusion, refusing
+// rather than waiting. It is the Admission grant (TryAdmitDrain) taken without a
+// place in the Admission queue, with the block rendered as one of two typed
+// refusals so a caller can say which resource to go and look at:
 //
 //   - the Set claim (*SetClaimedError, errors.Is ErrSetClaimed) — a live running
 //     Drain for the same (repo, set) in any checkout of the repository;
@@ -98,89 +99,24 @@ func (s *Store) drainAlive(d Drain) bool {
 //     the path, a live Recovery waiter parked on it, or a live claim-bearing gate
 //     hold (another set at a Failed gate over a dirty tree) (ADR-0135).
 //
-// The Set claim is checked first, so a set that is already draining hears about
-// its own drain rather than about the tree. A set's own still-registered waiter
-// or gate hold never blocks its own resume/re-acquire start (a quota-parked set
-// re-starts past it before deregistering; a gate-launched action re-acquires). A
-// running row whose PID is no longer alive is stale (a crash the reconcile heals)
-// and does not block; likewise a dead-owner waiter. Each error carries its own
-// resource — the set claim names the checkout draining it, the checkout claim
-// names the path and the holding set — so no call site has to re-derive the
-// facts. Liveness (whether a recorded owner's process is still running, checked
-// against its PID and ProcStart so a reused PID does not read as live) is the
-// store's construction-time policy (ADR-0118).
+// This is the machine's half of admission: a script or a daemon wants an exit
+// code, not a process that blocks (ADR-0239). A human command goes through the
+// queue instead and never lands here with a block.
+//
+// A running row whose PID is no longer alive is stale (a crash the reconcile
+// heals) and does not block; likewise a dead-owner waiter. Liveness (whether a
+// recorded owner's process is still running, checked against its PID and
+// ProcStart so a reused PID does not read as live) is the store's
+// construction-time policy (ADR-0118).
 func (s *Store) StartDrain(d Drain) (Drain, error) {
-	tx, err := s.db.Begin()
+	drain, block, err := s.TryAdmitDrain(d, 0)
 	if err != nil {
 		return Drain{}, err
 	}
-	defer func() { _ = tx.Rollback() }()
-
-	// The Set claim: one drain of a set across all checkouts. Asked first because
-	// a set draining in another worktree is a different answer from a busy tree,
-	// and it is the one the human needs when both are true.
-	setClaim, err := s.liveSetClaim(tx, d.Repo, d.SetID)
-	if err != nil {
-		return Drain{}, err
+	if refusal := block.Err(); refusal != nil {
+		return Drain{}, refusal
 	}
-	if setClaim != nil {
-		return Drain{}, &SetClaimedError{Claim: *setClaim}
-	}
-
-	// The Checkout claim, first arm: a live running Drain executing against this
-	// tree. Same union the read-side ReadCheckoutClaim derives, run here on the
-	// open transaction under the write lock the BEGIN IMMEDIATE already took.
-	drainClaim, err := s.liveDrainClaim(tx, d.RuntimePath)
-	if err != nil {
-		return Drain{}, err
-	}
-	if drainClaim != nil {
-		return Drain{}, &CheckoutClaimedError{Claim: *drainClaim}
-	}
-
-	// Beyond a live running Drain, another set's live Recovery waiter parked on
-	// this checkout also claims it (ADR-0135): admitting a second set would
-	// clobber the tree the waiter will resume into. The set's own waiter is
-	// excluded so its resume start (which precedes deregistration today) is not
-	// self-blocked.
-	claim, err := s.liveWaiterClaim(tx, d.RuntimePath, d.SetID)
-	if err != nil {
-		return Drain{}, err
-	}
-	if claim != nil {
-		return Drain{}, &CheckoutClaimedError{Claim: *claim}
-	}
-
-	// A live claim-bearing gate hold — another set parked at a Failed gate over a
-	// dirty tree — is the third claim arm (ADR-0135). A non-claiming hold (HITL,
-	// verify-fail, clean Failed gate) is skipped by the claim=1 filter and never
-	// blocks admission. The set's own hold is excluded so a gate-launched
-	// re-acquire (e.g. reverify) is not self-blocked.
-	gateClaim, err := s.liveGateHoldClaim(tx, d.RuntimePath, d.SetID)
-	if err != nil {
-		return Drain{}, err
-	}
-	if gateClaim != nil {
-		return Drain{}, &CheckoutClaimedError{Claim: *gateClaim}
-	}
-
-	res, err := tx.Exec(
-		`INSERT INTO drains (repo, set_id, runtime_path, pid, proc_start, started_at, state)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		d.Repo, d.SetID, d.RuntimePath, d.PID, nullString(d.ProcStart), d.StartedAt.UTC().Format(timeLayout), StateRunning)
-	if err != nil {
-		return Drain{}, err
-	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return Drain{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return Drain{}, err
-	}
-	d.ID = id
-	d.State = StateRunning
-	return d, nil
+	return drain, nil
 }
 
 // FinishDrain transitions a running Drain to the terminal it ended on.

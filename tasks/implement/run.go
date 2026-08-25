@@ -43,9 +43,13 @@ type WholeSetOptions struct {
 	// executor, which hands it to the Verifier as its mandate.
 	VerificationConvention tasks.VerificationConvention
 	Yes                    bool
-	ConfirmIn              io.Reader
-	ConfirmOut             io.Writer
-	Output                 io.Writer
+	// Wait is the `--wait` / `--no-wait` choice, forwarded verbatim to the
+	// task-set executor: what the drain does when the checkout or the set it
+	// wants is held (ADR-0239).
+	Wait       tasks.AdmissionWaitChoice
+	ConfirmIn  io.Reader
+	ConfirmOut io.Writer
+	Output     io.Writer
 	// PreSeedTopic pre-seeds the pane's Topic from each task's Title at drain
 	// spawn (ADR-0058); forwarded verbatim to the task-set executor.
 	PreSeedTopic func(taskTitle string)
@@ -96,6 +100,7 @@ func RunWholeSetWith(d *Deps, opts WholeSetOptions) (*tasks.RunTaskSetResult, er
 		ReviewConvention:       opts.ReviewConvention,
 		VerificationConvention: opts.VerificationConvention,
 		Yes:                    opts.Yes,
+		Wait:                   opts.Wait,
 		ConfirmIn:              opts.ConfirmIn,
 		ConfirmOut:             opts.ConfirmOut,
 		Output:                 opts.Output,

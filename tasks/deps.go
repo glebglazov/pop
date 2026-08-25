@@ -44,7 +44,13 @@ type Deps struct {
 	// with ProcessAlive it defeats PID reuse in drain liveness. A nil seam falls
 	// back to the platform default (defaultProcStartToken).
 	ProcessStartToken func(pid int) (string, bool)
-	NoticeOut         io.Writer
+	// ProcessTTY names the controlling terminal of a PID, or "" when it has none.
+	// It is a seam for the same reason the two above are: an Admission wait line
+	// names the tty of whoever holds the checkout, and a test asserting that line
+	// cannot conjure a real terminal. A nil seam falls back to the platform
+	// default (defaultProcessTTY).
+	ProcessTTY func(pid int) string
+	NoticeOut  io.Writer
 
 	// Recovery-wait cadence (WaitForRecovery, ADR-0100/ADR-0144). These are the
 	// one production time seam this package exposes: zero values fall back to
@@ -54,6 +60,12 @@ type Deps struct {
 	RecoveryFastCheckInterval    time.Duration
 	RecoveryPollInterval         time.Duration
 	RecoveryPollImminentInterval time.Duration
+
+	// AdmissionPollInterval is how often a command in the Admission queue re-asks
+	// for its grant (awaitAdmission, ADR-0239). Zero falls back to the production
+	// default; tests inject a small value so the wait loop advances without
+	// wall-clock waits.
+	AdmissionPollInterval time.Duration
 
 	// RetryDelayWait, when set, replaces the real attempt-retry countdown sleep
 	// (waitAttemptRetryDelay). Nil keeps production behaviour. Tests inject a
@@ -94,6 +106,7 @@ func DefaultDeps() *Deps {
 		RecoveryFastCheckInterval:    defaultRecoveryFastCheckInterval,
 		RecoveryPollInterval:         defaultRecoveryPollInterval,
 		RecoveryPollImminentInterval: defaultRecoveryPollImminentInterval,
+		AdmissionPollInterval:        defaultAdmissionPollInterval,
 		store:                        &storeCache{},
 	}
 }

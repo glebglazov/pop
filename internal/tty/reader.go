@@ -4,7 +4,22 @@ import (
 	"bufio"
 	"io"
 	"os"
+
+	"golang.org/x/term"
 )
+
+// IsTerminal reports whether r is an actual terminal a human could be sitting
+// at. It is stricter than TerminalFd's character-device test on purpose:
+// /dev/null is a character device too, so that test answers "yes" for the very
+// stream a non-interactive invocation is given, which is the wrong answer for
+// anything deciding whether a human is present.
+func IsTerminal(r io.Reader) bool {
+	fd, ok := TerminalFd(r)
+	if !ok {
+		return false
+	}
+	return term.IsTerminal(fd)
+}
 
 // TerminalFd reports the file descriptor behind r when r is a real terminal.
 // Callers use it both to place an attended child in that terminal's foreground

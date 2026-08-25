@@ -55,6 +55,7 @@ func newTestDeps(t *testing.T) *Deps {
 		RecoveryFastCheckInterval:    2 * time.Millisecond,
 		RecoveryPollInterval:         2 * time.Millisecond,
 		RecoveryPollImminentInterval: 2 * time.Millisecond,
+		AdmissionPollInterval:        2 * time.Millisecond,
 		RetryDelayWait:               testRetryDelayWaitHook,
 		store:                        &storeCache{},
 	}

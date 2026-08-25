@@ -600,6 +600,29 @@ var migrations = []string{
 	 ALTER TABLE agent_cooldowns ADD COLUMN class TEXT NOT NULL DEFAULT '';
 	 ALTER TABLE agent_cooldowns ADD COLUMN next_probe_at TEXT;
 	 ALTER TABLE agent_cooldowns ADD COLUMN probe_lease_until TEXT;`,
+	// 37: admission_waiters — the per-checkout Admission queue (ADR-0239). A
+	// human command that finds the checkout held no longer refuses; it registers
+	// here and waits for an Admission grant. The row is durable so the queue
+	// survives a process the human backgrounds and so every reader (dispatch, the
+	// dashboard) can see who is waiting without asking the waiting process.
+	//
+	// `id` is the place in the line: ordering is strict registration FIFO and
+	// deliberately blind to task-set priority, which decides which Ready set the
+	// daemon picks next, not who goes first out of a queue that has already
+	// formed. pid + proc_start are the owner pairing every other claim source
+	// carries, so a dead owner's waiter is swept by the reconcile pass instead of
+	// stalling everyone behind it. A set may appear twice: two commands that both
+	// asked are two places.
+	`CREATE TABLE admission_waiters (
+		id            INTEGER PRIMARY KEY AUTOINCREMENT,
+		runtime_path  TEXT    NOT NULL,
+		repo          TEXT    NOT NULL DEFAULT '',
+		set_id        TEXT    NOT NULL,
+		pid           INTEGER NOT NULL DEFAULT 0,
+		proc_start    TEXT,
+		registered_at TEXT    NOT NULL
+	);
+	 CREATE INDEX admission_waiters_path ON admission_waiters (runtime_path, id);`,
 }
 
 func (s *Store) migrate() error {

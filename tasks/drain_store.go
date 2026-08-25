@@ -185,10 +185,12 @@ func realProductionDataDir() string {
 // acquisition on that checkout forever). It likewise sweeps recovery waiters
 // whose registering process died, so a dead owner's waiter (a kill -9 or terminal
 // close mid-quota-wait) is not left deferring its set in the Queue forever
-// (ADR-0135). It opens the store only when it already exists (a pure reader never
-// materialises an empty database), forks nothing (it reads only the drains,
-// checkout_gate_holds, spawn_intents and recovery_waiters tables), and does
-// bounded transactions. It returns the number of Drains transitioned to crashed.
+// (ADR-0135), and admission waiters whose owner died, so a dead head never
+// stalls the Admission queue behind it (ADR-0239). It opens the store only when
+// it already exists (a pure reader never materialises an empty database), forks
+// nothing (it reads only the drains, checkout_gate_holds, spawn_intents,
+// recovery_waiters and admission_waiters tables), and does bounded transactions.
+// It returns the number of Drains transitioned to crashed.
 func ReconcileDrains(d *Deps) (int, error) {
 	s, ok, err := openDrainStoreIfExists(d)
 	if err != nil || !ok {
@@ -216,6 +218,14 @@ func ReconcileDrains(d *Deps) (int, error) {
 	if _, sweepErr := s.ReconcileRecoveryWaiters(); sweepErr != nil && err == nil {
 		err = sweepErr
 	}
+	// Sweep admission waiters whose registering process died. A strict-FIFO queue
+	// cannot step over a dead head forever: the grant's ordering check skips a
+	// dead owner so nobody stalls in the meantime, and this pass removes the row
+	// (ADR-0239). Same rule: a sweep error only surfaces when the drain arm was
+	// clean.
+	if _, sweepErr := s.ReconcileAdmissionWaiters(); sweepErr != nil && err == nil {
+		err = sweepErr
+	}
 	return n, err
 }
 
@@ -229,50 +239,77 @@ type DrainHandle struct {
 }
 
 // BeginDrain inserts a running Drain for the repository containing runtimePath
-// and the given set, enforcing mutual exclusion transactionally: it refuses
-// when a live running Drain already exists for the same set (in any checkout of
-// the repository) or for the same runtime checkout. It replaces the runtime
-// execution lock file and the cross-checkout backstop (ADR-0055).
+// and the given set, refusing when a live Set claim or Checkout claim stands in
+// the way. It is admission taken without a place in the queue — the shape every
+// internal caller with no human to show a wait line to wants.
 func BeginDrain(d *Deps, runtimePath, setID string, noticeOut io.Writer) (*DrainHandle, error) {
+	handle, _, err := BeginDrainWithAdmission(d, runtimePath, setID, noticeOut, AdmissionRefuse)
+	return handle, err
+}
+
+// BeginDrainWithAdmission is BeginDrain under an explicit Admission policy, and
+// is the single chokepoint both the CLI and the gate-resume path share
+// (ADR-0239). Under AdmissionRefuse it exits non-zero naming the claim, as it
+// always has. Under AdmissionWait it joins the checkout's Admission queue and
+// blocks until a grant arrives, printing who holds the checkout and where to
+// reach them.
+//
+// The bool reports whether the command actually sat in the queue. A caller that
+// waited must re-derive its target's status before acting on it: the work it was
+// admitted for may have been finished by whoever it was waiting on.
+func BeginDrainWithAdmission(d *Deps, runtimePath, setID string, noticeOut io.Writer, policy AdmissionPolicy) (*DrainHandle, bool, error) {
 	id, err := ResolveRepositoryIdentity(d, runtimePath)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	s, err := openDrainStore(d)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	pid := os.Getpid()
 	procStart, _ := procStartToken(d, pid)
-	drain, err := s.StartDrain(store.Drain{
+	row := store.Drain{
 		Repo:        id.CommonDir,
 		SetID:       setID,
 		RuntimePath: runtimePath,
 		PID:         pid,
 		ProcStart:   procStart,
 		StartedAt:   time.Now().UTC(),
-	})
+	}
+
+	var drain store.Drain
+	var waited bool
+	if policy == AdmissionWait {
+		drain, waited, err = awaitAdmission(d, s, row, noticeOut)
+	} else {
+		drain, err = s.StartDrain(row)
+	}
 	if err != nil {
 		// Each refusal names its own resource: the Set claim sends the human to the
 		// checkout already draining the set, the Checkout claim to the tree that
 		// must hold still. The store owns both sentences so this path and
-		// AcquireRuntimeLock cannot drift apart.
+		// AcquireRuntimeLock cannot drift apart. A wait that ended on an interrupt
+		// already carries its own exit code and passes straight through.
 		var setClaimed *store.SetClaimedError
 		if errors.As(err, &setClaimed) {
-			return nil, exitErr(ExitOperational, "%s", setClaimed.Claim.Sentence())
+			return nil, waited, exitErr(ExitOperational, "%s", setClaimed.Claim.Sentence())
 		}
 		var claimed *store.CheckoutClaimedError
 		if errors.As(err, &claimed) {
-			return nil, exitErr(ExitOperational, "%s", claimed.Claim.Sentence())
+			return nil, waited, exitErr(ExitOperational, "%s", claimed.Claim.Sentence())
 		}
-		return nil, exitErr(ExitOperational, "record drain start: %v", err)
+		var exit *ExitError
+		if errors.As(err, &exit) {
+			return nil, waited, err
+		}
+		return nil, waited, exitErr(ExitOperational, "record drain start: %v", err)
 	}
 	// The running Drain row now covers this set, so its pending-spawn marker (if
 	// the supervisor recorded one at dispatch) has served its purpose: drop it so
 	// it stops shadowing the now-visible drain. Best-effort — a lingering intent
 	// expires on its own and never blocks this drain.
 	_ = s.DeleteSpawnIntent(id.CommonDir, setID)
-	return &DrainHandle{store: s, id: drain.ID}, nil
+	return &DrainHandle{store: s, id: drain.ID}, waited, nil
 }
 
 // Finish transitions the Drain to the terminal it ended on (a store.State*

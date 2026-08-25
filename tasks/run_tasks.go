@@ -26,9 +26,13 @@ type RunTaskSetOptions struct {
 	MaxTriesExplicit bool
 	Timeout          time.Duration
 	Yes              bool
-	ConfirmIn        io.Reader
-	ConfirmOut       io.Writer
-	Output           io.Writer
+	// Wait is the `--wait` / `--no-wait` choice: what the run does when the
+	// checkout or the set it wants is held. Unset means wait when a human is at
+	// the terminal and refuse otherwise (ADR-0239).
+	Wait       AdmissionWaitChoice
+	ConfirmIn  io.Reader
+	ConfirmOut io.Writer
+	Output     io.Writer
 	// BindCheckout, when set, is invoked once the drain has committed to its
 	// Task set and runtime checkout (after the running Drain is started, before
 	// any task runs). It lets the caller record the
@@ -141,6 +145,18 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 	// (ADR-0056); exiting parked (drain == nil) is a no-op — the park already
 	// recorded the segment's terminal.
 	defer run.finalize(&err)
+	// A run that came out of the Admission queue asks again what its target still
+	// needs before it drains it: whoever it waited on may have finished the work
+	// (ADR-0239). Nothing left is a clean success, and the Drain the grant
+	// produced is finalized by the deferred above.
+	settled, settleErr := run.settleAfterAdmissionWait()
+	if settleErr != nil {
+		err = settleErr
+		return run.result, err
+	}
+	if settled {
+		return run.result, nil
+	}
 	if err = run.setup(); err != nil {
 		return run.result, err
 	}
