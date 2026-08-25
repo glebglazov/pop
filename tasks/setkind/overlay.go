@@ -133,6 +133,15 @@ func (d *Deps) liveDrains() ([]tasks.RunningDrain, error) {
 	return tasks.LiveRunningDrains(d.Tasks)
 }
 
+// admissionWaiters resolves the AdmissionWaiters seam, defaulting to
+// tasks.LiveAdmissionWaiters.
+func (d *Deps) admissionWaiters() ([]tasks.QueuedCommand, error) {
+	if d.AdmissionWaiters != nil {
+		return d.AdmissionWaiters()
+	}
+	return tasks.LiveAdmissionWaiters(d.Tasks)
+}
+
 // probeDirective resolves the ProbeDirective seam, defaulting to a read-only
 // binding.ProbeWorktreeDirective probe. It returns a config-class error message
 // only for the two unsatisfiable-directive sentinels (ADR-0059); any other probe
@@ -190,6 +199,10 @@ type snapshot struct {
 	bindings   map[string]binding.Binding
 	liveDrains map[string]tasks.RunningDrain
 	drainPanes map[string]tasks.DrainPane
+	// queued is the set of task sets a live Admission waiter is queued for
+	// (ADR-0239) — the Admission indicator's fact, read once per pass like every
+	// other volatile overlay.
+	queued map[string]bool
 }
 
 // newSnapshot reads the volatile per-pass store state once: AllBindings, the
@@ -200,6 +213,7 @@ func newSnapshot(d *Deps) (*snapshot, error) {
 		bindings:   map[string]binding.Binding{},
 		liveDrains: map[string]tasks.RunningDrain{},
 		drainPanes: map[string]tasks.DrainPane{},
+		queued:     map[string]bool{},
 	}
 	if d == nil || d.Tasks == nil {
 		return snap, nil
@@ -225,7 +239,26 @@ func newSnapshot(d *Deps) (*snapshot, error) {
 	for k, p := range panes {
 		snap.drainPanes[k] = p
 	}
+	waiters, err := d.admissionWaiters()
+	if err != nil {
+		return nil, err
+	}
+	for _, w := range waiters {
+		snap.queued[w.SetID] = true
+	}
 	return snap, nil
+}
+
+// queuedCommand reports whether a live command is queued for the set's checkout,
+// waiting for an Admission grant. It keys on the set id rather than the path
+// because a waiter registers to drain one named set: the marker belongs on that
+// set's row wherever it is bound, the way the wait line names the set it is
+// waiting for.
+func queuedCommand(snap *snapshot, setID string) bool {
+	if snap == nil || snap.queued == nil {
+		return false
+	}
+	return snap.queued[setID]
 }
 
 // liveDrainList is the pass's live Drains as a list, which is how attribution

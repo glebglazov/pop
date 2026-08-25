@@ -62,7 +62,7 @@ func (o *checkoutOccupancy) refusal(c work.Candidate) string {
 	if claim := o.claim(c.Checkout); claim != nil && claim.Holder.Container() != holder {
 		// The wording is the deferral's, not a second phrasing of the same fact: the
 		// adapter's display and this backstop report one claim the same way.
-		return drain.SpawnDeferral{Reason: drain.DeferCheckoutClaim, SetID: c.Ref.ContainerID, Claim: claim}.Message()
+		return drain.DeferralForClaim(c.Ref.ContainerID, claim).Message()
 	}
 	return ""
 }

@@ -39,6 +39,14 @@ const (
 	// mid-review of. A non-claiming gate hold (HITL, verify-fail, clean Failed
 	// gate) is not a claim.
 	ClaimFailedGate ClaimReason = "failed_gate"
+	// ClaimQueuedCommand: a live Admission waiter is queued for the path — a human
+	// command that found the checkout held and is waiting for a window rather than
+	// refusing (ADR-0239). It holds nothing yet, and it claims anyway: an automatic
+	// dispatch that raced into the tree the moment the current holder finished
+	// would jump a human who has been waiting, which is the ordering guarantee the
+	// queue exists to make. Read-side only — the Admission grant derives its own
+	// block, so waiters never claim against each other.
+	ClaimQueuedCommand ClaimReason = "queued_command"
 )
 
 // Phrase renders the claim reason as a short human phrase for status and refusal
@@ -51,6 +59,8 @@ func (r ClaimReason) Phrase() string {
 		return "quota wait"
 	case ClaimFailedGate:
 		return "failed gate, uncommitted changes"
+	case ClaimQueuedCommand:
+		return "queued command"
 	default:
 		return string(r)
 	}
@@ -115,7 +125,8 @@ type claimQuerier interface {
 
 // ReadCheckoutClaim derives the live Checkout claim on runtimePath, or nil when
 // nothing live claims it (ADR-0135). A running Drain claim takes precedence over a
-// quota-waiter claim. The store's liveness policy is applied to every candidate,
+// quota-waiter claim, and a live holder of any species takes precedence over a
+// queued command waiting for one to finish (ADR-0239). The store's liveness policy is applied to every candidate,
 // so a dead-owner drain row or waiter (a crash or a kill -9) never claims — it is
 // swept by the opportunistic reconcile, but the read filters it regardless.
 func (s *Store) ReadCheckoutClaim(runtimePath string) (*CheckoutClaim, error) {
@@ -128,7 +139,60 @@ func (s *Store) ReadCheckoutClaim(runtimePath string) (*CheckoutClaim, error) {
 	if claim, err := s.liveWaiterClaim(s.db, runtimePath, ""); err != nil || claim != nil {
 		return claim, err
 	}
-	return s.liveGateHoldClaim(s.db, runtimePath, "")
+	if claim, err := s.liveGateHoldClaim(s.db, runtimePath, ""); err != nil || claim != nil {
+		return claim, err
+	}
+	return s.liveAdmissionClaim(s.db, runtimePath)
+}
+
+// liveAdmissionClaim returns the head of runtimePath's Admission queue — the
+// first waiter whose registering process is still alive — as a Checkout claim,
+// or nil when nobody is queued. It is the last arm of the union because a real
+// holder is the better answer while one exists: a human reading "claimed by set
+// A (running drain)" is told where to go, and only once nothing holds the tree
+// does the queue itself become the reason the checkout is unavailable.
+//
+// This arm belongs to the read side alone. The Admission grant computes its own
+// block (admissionBlock), which consults the queue by position rather than as a
+// claim — were the grant to read this, every waiter would claim against every
+// other and no one would ever be admitted.
+func (s *Store) liveAdmissionClaim(q claimQuerier, runtimePath string) (*CheckoutClaim, error) {
+	rows, err := q.Query(
+		`SELECT set_id, pid, proc_start, registered_at FROM admission_waiters
+		 WHERE runtime_path = ? ORDER BY id ASC`, runtimePath)
+	if err != nil {
+		return nil, err
+	}
+	type candidate struct {
+		setID     string
+		pid       int
+		procStart string
+		since     time.Time
+	}
+	var cands []candidate
+	for rows.Next() {
+		var c candidate
+		var procStart, registered sql.NullString
+		if err := rows.Scan(&c.setID, &c.pid, &procStart, &registered); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		c.procStart = procStart.String
+		c.since = parseTime(registered.String)
+		cands = append(cands, c)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	_ = rows.Close()
+
+	for _, c := range cands {
+		if s.alive(c.pid, c.procStart) {
+			return &CheckoutClaim{Holder: taskSetHolder(c.setID), Reason: ClaimQueuedCommand, RuntimePath: runtimePath, PID: c.pid, Since: c.since}, nil
+		}
+	}
+	return nil, nil
 }
 
 // liveGateHoldClaim returns the live claim-bearing Checkout gate hold on

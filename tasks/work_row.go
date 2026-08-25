@@ -179,6 +179,11 @@ func WorkRowStatusCell(row work.Container) string {
 	return work.StatusCellText(WorkRowStatusSegments(row))
 }
 
+// QueuedMark is the Admission indicator's text: the marker a row carries while a
+// command sits in its checkout's Admission queue (ADR-0239). One word, beside the
+// status rather than in place of it.
+const QueuedMark = "queued"
+
 // WorkRowStatusSegments is that same composition as tone-tagged tokens — the
 // form a styled surface needs, since it must paint the label by status bucket
 // and the verified-at badge by verdict age while leaving every other suffix
@@ -189,6 +194,13 @@ func WorkRowStatusSegments(row work.Container) []work.StatusSegment {
 	badge := VerifiedAtBadgeFor(row)
 	if text := VerifiedAtBadgeText(badge); text != "" {
 		segments = append(segments, work.StatusSegment{Text: text, Tone: verifiedAtTone(badge.State)})
+	}
+	// The Admission indicator (ADR-0239): a command is queued for this set's
+	// checkout. It sits right after the label group, where the live-drain
+	// refinement of the label is, because both say what is happening to the tree
+	// rather than what the set is.
+	if row.QueuedCommand {
+		segments = append(segments, work.StatusSegment{Text: QueuedMark, Tone: work.TonePlain})
 	}
 	// Unfolded rides beside the status the way the Verification mark does
 	// (ADR-0197): derived from a provisioned binding plus FoldEligibleStatus,

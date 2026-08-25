@@ -1076,8 +1076,8 @@ func selectReadySets(refresh *tasks.RefreshResult, backoff setBackoffFunc, recov
 		return ready[i].RegIndex < ready[j].RegIndex
 	})
 	var earliest time.Time
-	var parkedID, backoffID, recoveryID, claimID string
-	var claimHolder *store.CheckoutClaim
+	var parkedID, backoffID, recoveryID, claimID, queuedID string
+	var claimHolder, queuedHolder *store.CheckoutClaim
 	var ids []string
 	for _, row := range ready {
 		if backoff != nil {
@@ -1126,6 +1126,16 @@ func selectReadySets(refresh *tasks.RefreshResult, backoff setBackoffFunc, recov
 						continue
 					}
 				}
+				// A queued command is a claim of its own species (ADR-0239): nothing
+				// holds the tree, but a human is in line for it, and dispatch stands
+				// off rather than taking the window they queued for.
+				if claim.Reason == store.ClaimQueuedCommand {
+					if queuedID == "" {
+						queuedID = row.ID
+						queuedHolder = claim
+					}
+					continue
+				}
 				if claimID == "" {
 					claimID = row.ID
 					claimHolder = claim
@@ -1144,7 +1154,9 @@ func selectReadySets(refresh *tasks.RefreshResult, backoff setBackoffFunc, recov
 	case !earliest.IsZero() && recoveryID != "":
 		return nil, SpawnDeferral{Reason: DeferQuotaRecovery, SetID: recoveryID, Until: earliest}, false
 	case claimID != "":
-		return nil, SpawnDeferral{Reason: DeferCheckoutClaim, SetID: claimID, Claim: claimHolder}, false
+		return nil, DeferralForClaim(claimID, claimHolder), false
+	case queuedID != "":
+		return nil, DeferralForClaim(queuedID, queuedHolder), false
 	case parkedID != "":
 		return nil, SpawnDeferral{Reason: DeferParked, SetID: parkedID}, false
 	default:

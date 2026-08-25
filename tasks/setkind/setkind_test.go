@@ -740,3 +740,41 @@ func TestLessThreadsPresetSort(t *testing.T) {
 		t.Fatal("Kind.Less disagrees with SortWorkRows under recent-30d")
 	}
 }
+
+// TestAdmissionIndicator: the queued marker is a fact about the set a command is
+// waiting to drain, read once per pass with the rest of the volatile overlay, and
+// carried only by that set's row.
+func TestAdmissionIndicator(t *testing.T) {
+	d := testDeps(t, []tasks.Row{
+		{ID: "queued", Status: tasks.StatusNeedsVerify},
+		{ID: "other", Status: tasks.StatusNeedsVerify},
+	})
+	d.AdmissionWaiters = func() ([]tasks.QueuedCommand, error) {
+		return []tasks.QueuedCommand{{SetID: "queued", RuntimePath: "/repo/bound", PID: 123}}, nil
+	}
+	d.Tasks = withDataDir(t, d.Tasks)
+	seedBindingStore(t, d.Tasks, map[string]binding.Binding{
+		binding.ScopedKey("repo-key", "queued"): {RuntimePath: "/repo/bound", Branch: "queued-branch"},
+	})
+	scan := scanFixture{Name: "pop", ProjectPath: "/repo/main", RuntimePath: "/repo/main", DefinitionPath: "/def", RepoKey: "repo-key"}
+
+	got, err := rowsForStatic(d, &config.Config{}, staticForScan(scan, "main", false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]work.Container{}
+	for _, row := range got {
+		byID[row.ID] = row
+	}
+	if !byID["queued"].QueuedCommand {
+		t.Fatal("queued QueuedCommand = false, want true (a command is in its checkout's queue)")
+	}
+	if byID["other"].QueuedCommand {
+		t.Fatal("other QueuedCommand = true, want false")
+	}
+	// The status the set is in survives the marker (ADR-0239): waiting is an
+	// execution fact beside it, never a status of its own.
+	if byID["queued"].RawStatus != tasks.StatusNeedsVerify {
+		t.Fatalf("queued RawStatus = %s, want NEEDS-VERIFY", byID["queued"].RawStatus)
+	}
+}

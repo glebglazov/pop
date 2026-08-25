@@ -61,6 +61,10 @@ type Deps struct {
 	// The load reads it once per pass into its snapshot. Defaults to
 	// tasks.LiveRunningDrains.
 	LiveDrains func() ([]tasks.RunningDrain, error)
+	// AdmissionWaiters returns every live place in an Admission queue (ADR-0239),
+	// read once per pass for the queued marker. Defaults to
+	// tasks.LiveAdmissionWaiters.
+	AdmissionWaiters func() ([]tasks.QueuedCommand, error)
 	// Now returns the current time. Defaults to time.Now.
 	Now func() time.Time
 	// ProbeDirective reports a config/registration-class error message when a
@@ -395,6 +399,7 @@ func containersFromGroup(d *Deps, cfg *config.Config, snap *snapshot, delays []t
 			Provisioned:           provisioned,
 			PaneID:                paneID(snap, g.RepoKey, taskRow.ID),
 			LiveDrain:             liveDrainSet,
+			QueuedCommand:         queuedCommand(snap, taskRow.ID),
 			Started:               taskRow.Started,
 			VerifiedAtSHA:         taskRow.VerifiedAtSHA,
 			VerifiedAtDrifted:     taskRow.VerifiedAtDrifted,

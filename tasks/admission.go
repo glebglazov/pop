@@ -284,3 +284,46 @@ func admissionHolderPane(s *store.Store, setID, runtimePath string) string {
 	}
 	return fallback
 }
+
+// QueuedCommand is one live place in an Admission queue at the tasks boundary:
+// the set a waiting command wants to drain, the checkout it is queued for, and
+// when it joined the line (ADR-0239). It is the read a display surface needs —
+// who is waiting — rather than the store row, whose id is a queue position no
+// reader outside the grant should reason about.
+type QueuedCommand struct {
+	SetID        string
+	Repo         string
+	RuntimePath  string
+	PID          int
+	RegisteredAt time.Time
+}
+
+// LiveAdmissionWaiters returns every registered Admission waiter whose command
+// is still running, in registration order. Dead owners are filtered with the
+// same PID+start-token liveness the running-drain read applies, so a closed
+// terminal never leaves a phantom marker on a row between reconcile passes. It
+// opens the store only when it already exists.
+func LiveAdmissionWaiters(d *Deps) ([]QueuedCommand, error) {
+	s, ok, err := openDrainStoreIfExists(d)
+	if err != nil || !ok {
+		return nil, err
+	}
+	rows, err := s.AllAdmissionWaiters()
+	if err != nil {
+		return nil, err
+	}
+	var out []QueuedCommand
+	for _, w := range rows {
+		if !drainProcessAlive(d, w.PID, w.ProcStart) {
+			continue
+		}
+		out = append(out, QueuedCommand{
+			SetID:        w.SetID,
+			Repo:         w.Repo,
+			RuntimePath:  w.RuntimePath,
+			PID:          w.PID,
+			RegisteredAt: w.RegisteredAt,
+		})
+	}
+	return out, nil
+}

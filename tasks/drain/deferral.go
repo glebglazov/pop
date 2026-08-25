@@ -37,6 +37,13 @@ const (
 	// quota-waiter claim is instead reported as DeferQuotaRecovery so its reset
 	// instant feeds the earliest-eligible display.
 	DeferCheckoutClaim
+	// DeferAdmissionQueue is the queue-scoped sibling of DeferCheckoutClaim
+	// (ADR-0239): nothing holds the Ready set's bound checkout, but a human
+	// command is queued for it and waiting for the next window. The daemon stands
+	// off rather than taking the window the waiter has been queuing for — without
+	// this the daemon can jump a human repeatedly, and the queue's ordering
+	// guarantee is only nominal. Claim names the waiting set.
+	DeferAdmissionQueue
 )
 
 // SpawnDeferral is the single readiness-side representation of "Ready but not
@@ -59,10 +66,28 @@ func (d SpawnDeferral) Deferred() bool { return d.Reason != DeferNone }
 // DeferCheckoutClaim it names the holding set and its claim reason; every other
 // species defers to the reason-species wording.
 func (d SpawnDeferral) Message() string {
-	if d.Reason == DeferCheckoutClaim && d.Claim != nil {
+	if d.Claim == nil {
+		return d.Reason.Message()
+	}
+	switch d.Reason {
+	case DeferCheckoutClaim:
 		return fmt.Sprintf("checkout claimed by set %s (%s)", d.Claim.Holder.ContainerID, d.Claim.Reason.Phrase())
+	case DeferAdmissionQueue:
+		return fmt.Sprintf("checkout awaited by set %s (%s)", d.Claim.Holder.ContainerID, d.Claim.Reason.Phrase())
 	}
 	return d.Reason.Message()
+}
+
+// DeferralForClaim is the one mapping from a Checkout claim to the deferral
+// species that reports it, so the Task-set adapter's display and the
+// supervisor's cross-kind backstop name the same claim the same way. A queued
+// command is the queue species; every other claim reason is the claim species.
+func DeferralForClaim(setID string, claim *store.CheckoutClaim) SpawnDeferral {
+	reason := DeferCheckoutClaim
+	if claim != nil && claim.Reason == store.ClaimQueuedCommand {
+		reason = DeferAdmissionQueue
+	}
+	return SpawnDeferral{Reason: reason, SetID: setID, Claim: claim}
 }
 
 // Message is the human-readable decision reason for the deferral species. It is
@@ -78,6 +103,8 @@ func (r DeferralReason) Message() string {
 		return "set waiting for quota recovery"
 	case DeferCheckoutClaim:
 		return "checkout claimed by another set"
+	case DeferAdmissionQueue:
+		return "checkout awaited by a queued command"
 	default:
 		return ""
 	}
@@ -95,6 +122,8 @@ func (r DeferralReason) Kind() string {
 		return "recovery_wait"
 	case DeferCheckoutClaim:
 		return "checkout_claim"
+	case DeferAdmissionQueue:
+		return "admission_queue"
 	default:
 		return ""
 	}

@@ -327,3 +327,88 @@ func TestStartDrainAdmittedAfterWaiterDeregisters(t *testing.T) {
 		t.Fatalf("set-b not admitted after set-a deregistered: %+v", d)
 	}
 }
+
+func putAdmissionWaiter(t *testing.T, s *Store, setID, path string, pid int, procStart string) {
+	t.Helper()
+	if _, err := s.RegisterAdmissionWaiter(AdmissionWaiter{
+		RuntimePath:  path,
+		Repo:         "r",
+		SetID:        setID,
+		PID:          pid,
+		ProcStart:    procStart,
+		RegisteredAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("RegisterAdmissionWaiter: %v", err)
+	}
+}
+
+// A command queued for a checkout claims it (ADR-0239): dispatch reads the claim
+// union and must see the waiter there, or it spawns onto the tree the waiter has
+// been queuing for the moment the current holder leaves.
+func TestReadCheckoutClaimQueuedCommand(t *testing.T) {
+	s := openTestStore(t, aliveByToken(Drain{PID: 100, ProcStart: "t1"}))
+	putAdmissionWaiter(t, s, "set-a", "/rt", 100, "t1")
+	claim, err := s.ReadCheckoutClaim("/rt")
+	if err != nil {
+		t.Fatalf("ReadCheckoutClaim: %v", err)
+	}
+	if claim == nil || claim.Reason != ClaimQueuedCommand || claim.Holder.ContainerID != "set-a" {
+		t.Fatalf("claim = %+v, want queued-command claim by set-a", claim)
+	}
+	if claim.Reason.Phrase() != "queued command" {
+		t.Fatalf("reason = %q, want %q", claim.Reason.Phrase(), "queued command")
+	}
+	if claim.RuntimePath != "/rt" {
+		t.Fatalf("runtime path = %q, want /rt", claim.RuntimePath)
+	}
+}
+
+// A real holder is the better answer while there is one: the queue only becomes
+// the reason a checkout is unavailable once nothing is executing in it.
+func TestReadCheckoutClaimRunningDrainOutranksQueuedCommand(t *testing.T) {
+	s := openTestStore(t, aliveByToken(Drain{PID: 100, ProcStart: "t1"}, Drain{PID: 101, ProcStart: "t2"}))
+	if _, err := s.StartDrain(Drain{Repo: "r", SetID: "set-a", RuntimePath: "/rt", PID: 100, ProcStart: "t1", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("StartDrain: %v", err)
+	}
+	putAdmissionWaiter(t, s, "set-b", "/rt", 101, "t2")
+	claim, err := s.ReadCheckoutClaim("/rt")
+	if err != nil {
+		t.Fatalf("ReadCheckoutClaim: %v", err)
+	}
+	if claim == nil || claim.Reason != ClaimRunningDrain || claim.Holder.ContainerID != "set-a" {
+		t.Fatalf("claim = %+v, want the running drain by set-a", claim)
+	}
+}
+
+// A waiter whose command died claims nothing — the sweep removes the row, and
+// the read filters it regardless, so a closed terminal never freezes a checkout.
+func TestReadCheckoutClaimDeadQueuedCommandUnclaimed(t *testing.T) {
+	s := openTestStore(t, aliveByToken())
+	putAdmissionWaiter(t, s, "set-a", "/rt", 100, "t1")
+	claim, err := s.ReadCheckoutClaim("/rt")
+	if err != nil {
+		t.Fatalf("ReadCheckoutClaim: %v", err)
+	}
+	if claim != nil {
+		t.Fatalf("claim = %+v, want none for a dead waiter", claim)
+	}
+}
+
+// Waiters do not claim against each other: the union's queued-command arm is
+// read-side only, so a queue of two still grants its head.
+func TestQueuedCommandClaimDoesNotBlockTheGrant(t *testing.T) {
+	s := openTestStore(t, aliveByToken(Drain{PID: 100, ProcStart: "t1"}, Drain{PID: 101, ProcStart: "t2"}))
+	putAdmissionWaiter(t, s, "set-a", "/rt", 100, "t1")
+	putAdmissionWaiter(t, s, "set-b", "/rt", 101, "t2")
+	head, err := s.AdmissionWaitersOn("/rt")
+	if err != nil {
+		t.Fatalf("AdmissionWaitersOn: %v", err)
+	}
+	drain, block, err := s.TryAdmitDrain(Drain{Repo: "r", SetID: "set-a", RuntimePath: "/rt", PID: 100, ProcStart: "t1", StartedAt: time.Now()}, head[0].ID)
+	if err != nil {
+		t.Fatalf("TryAdmitDrain: %v", err)
+	}
+	if block != nil || drain.ID == 0 {
+		t.Fatalf("grant = (%+v, %+v), want the head of the queue admitted", drain, block)
+	}
+}

@@ -258,6 +258,13 @@ type Container struct {
 	// auto-drain suffix silencing (ADR-0108), and the READY→IN PROGRESS
 	// refinement.
 	LiveDrain bool
+	// QueuedCommand is true when a human command is queued for this set's
+	// checkout, waiting for an Admission grant (ADR-0239). It rides beside the
+	// derived status as its own marker rather than becoming a status value:
+	// waiting is an execution fact, the same separation that retired the
+	// IN-PROGRESS drain column (ADR-0111), so a set that is both awaiting
+	// verification and queued shows both.
+	QueuedCommand bool
 	// Started mirrors tasks.Row.Started: a started READY set renders as
 	// "IN PROGRESS". It is a presentational input to the STATUS composition,
 	// never a schedulability fact — logic keys on RawStatus.
