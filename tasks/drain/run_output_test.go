@@ -675,3 +675,66 @@ func TestInPlaceDrainNoWorktreeSuffix(t *testing.T) {
 		}
 	}
 }
+
+// The daemon's run view and its journal lines are where a human first meets a
+// cooldown. A guessed ceiling has to read as a backstop pop invented, not as the
+// provider's own reset: reading the two as one number is what sent the incident's
+// human to a raw SQL delete (ADR-0235).
+func TestRunViewDistinguishesGuessedCooldownFromStated(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	snap := StatusSnapshot{Tasks: queuetest.DataDeps(t), ActiveAgentCooldowns: map[string]tasks.AgentQuotaCooldownView{
+		"claude": {Preset: "claude", Until: now.Add(5 * time.Hour), Guessed: true, Class: tasks.QuotaWindowFiveHour},
+		"codex":  {Preset: "codex", Until: now.Add(90 * time.Minute)},
+	}}
+	view := BuildRunView(snap, now)
+
+	byAgent := map[string]BlockedItem{}
+	for _, item := range view.Blocked {
+		byAgent[item.Agent] = item
+	}
+	guessed, ok := byAgent["claude"]
+	if !ok || !guessed.Guessed {
+		t.Fatalf("blocked = %+v, want a guessed claude cooldown", view.Blocked)
+	}
+	if !strings.Contains(guessed.Reason, "guessed session limit backstop") {
+		t.Fatalf("guessed reason = %q, want it to name the window it was dated from", guessed.Reason)
+	}
+	stated, ok := byAgent["codex"]
+	if !ok || stated.Guessed {
+		t.Fatalf("blocked = %+v, want a stated codex cooldown", view.Blocked)
+	}
+	if strings.Contains(stated.Reason, "guessed") {
+		t.Fatalf("stated reason = %q reads as a guess", stated.Reason)
+	}
+
+	lines := DiffRunView(&RunView{}, view)
+	var guessedLine, statedLine string
+	for _, line := range lines {
+		switch {
+		case strings.Contains(line, "agent claude"):
+			guessedLine = line
+		case strings.Contains(line, "agent codex"):
+			statedLine = line
+		}
+	}
+	if !strings.Contains(guessedLine, "guessed backstop=") {
+		t.Fatalf("journal line for a guess = %q, want it labelled a backstop", guessedLine)
+	}
+	if !strings.Contains(statedLine, "cooldown until=") || strings.Contains(statedLine, "backstop") {
+		t.Fatalf("journal line for a stated reset = %q", statedLine)
+	}
+
+	// The same distinction on the status surface: the cooldowns are the one
+	// blocked kind no table row names, so the summary lists them itself.
+	var summary bytes.Buffer
+	RenderRunSummary(&summary, view)
+	for _, want := range []string{
+		"Agent quota cooldowns:",
+		"claude: guessed session limit backstop",
+		"codex: stated reset",
+	} {
+		if !strings.Contains(summary.String(), want) {
+			t.Fatalf("summary missing %q:\n%s", want, summary.String())
+		}
+	}
+}

@@ -38,10 +38,11 @@ func TestGuessedCooldownDatesFromItsClassCeiling(t *testing.T) {
 	d := newTestDeps(t)
 	now := time.Now().UTC()
 
-	until, err := recordAgentQuotaCooldown(d, undatedRefusal("claude", QuotaWindowFiveHour), now, config.DefaultWorkDaemonQuotaRetryAfter)
+	untilRow, err := recordAgentQuotaCooldown(d, undatedRefusal("claude", QuotaWindowFiveHour), now, config.DefaultWorkDaemonQuotaRetryAfter)
 	if err != nil {
 		t.Fatal(err)
 	}
+	until := untilRow.Until
 	if want := now.Add(5 * time.Hour); !until.Equal(want) {
 		t.Fatalf("cooldown until %s, want the five-hour ceiling %s", until, want)
 	}
@@ -65,10 +66,11 @@ func TestGuessNeverOverwritesALiveStatedInstant(t *testing.T) {
 	if _, err := recordAgentQuotaCooldown(d, AgentQuotaCooldownRequest{Preset: "claude", Stated: stated, Class: QuotaWindowFiveHour}, now, config.DefaultWorkDaemonQuotaRetryAfter); err != nil {
 		t.Fatal(err)
 	}
-	until, err := recordAgentQuotaCooldown(d, undatedRefusal("claude", QuotaWindowWeekly), now.Add(time.Minute), config.DefaultWorkDaemonQuotaRetryAfter)
+	untilRow, err := recordAgentQuotaCooldown(d, undatedRefusal("claude", QuotaWindowWeekly), now.Add(time.Minute), config.DefaultWorkDaemonQuotaRetryAfter)
 	if err != nil {
 		t.Fatal(err)
 	}
+	until := untilRow.Until
 	if !until.Equal(stated) {
 		t.Fatalf("cooldown until %s, want the provider's own %s left standing", until, stated)
 	}
@@ -90,10 +92,11 @@ func TestRefusalAtAStatedInstantBecomesAGuess(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The wake happens at the stated instant, and the agent refuses again.
-	until, err := recordAgentQuotaCooldown(d, undatedRefusal("claude", QuotaWindowFiveHour), stated, config.DefaultWorkDaemonQuotaRetryAfter)
+	untilRow, err := recordAgentQuotaCooldown(d, undatedRefusal("claude", QuotaWindowFiveHour), stated, config.DefaultWorkDaemonQuotaRetryAfter)
 	if err != nil {
 		t.Fatal(err)
 	}
+	until := untilRow.Until
 	if want := stated.Add(5 * time.Hour); !until.Equal(want) {
 		t.Fatalf("cooldown until %s, want the class ceiling %s from the disproved statement", until, want)
 	}
@@ -113,10 +116,11 @@ func TestUnclassedRefusalUsesTheConfiguredCeiling(t *testing.T) {
 	d := newTestDeps(t)
 	now := time.Now().UTC()
 
-	until, err := recordAgentQuotaCooldown(d, undatedRefusal("kimi", QuotaWindowUnknown), now, config.DefaultWorkDaemonQuotaRetryAfter)
+	untilRow, err := recordAgentQuotaCooldown(d, undatedRefusal("kimi", QuotaWindowUnknown), now, config.DefaultWorkDaemonQuotaRetryAfter)
 	if err != nil {
 		t.Fatal(err)
 	}
+	until := untilRow.Until
 	if want := now.Add(config.DefaultWorkDaemonQuotaRetryAfter); !until.Equal(want) {
 		t.Fatalf("cooldown until %s, want the configured unclassed ceiling %s", until, want)
 	}
@@ -133,10 +137,11 @@ func TestGuessedCooldownNeverOutgrowsItsFirstCeiling(t *testing.T) {
 	d := newTestDeps(t)
 	refusedAt := time.Date(2026, 8, 24, 19, 58, 0, 0, time.UTC)
 
-	first, err := recordAgentQuotaCooldown(d, undatedRefusal("claude", QuotaWindowFiveHour), refusedAt, config.DefaultWorkDaemonQuotaRetryAfter)
+	firstRow, err := recordAgentQuotaCooldown(d, undatedRefusal("claude", QuotaWindowFiveHour), refusedAt, config.DefaultWorkDaemonQuotaRetryAfter)
 	if err != nil {
 		t.Fatal(err)
 	}
+	first := firstRow.Until
 	ceiling := refusedAt.Add(5 * time.Hour)
 	if !first.Equal(ceiling) {
 		t.Fatalf("first cooldown until %s, want %s", first, ceiling)
@@ -147,10 +152,11 @@ func TestGuessedCooldownNeverOutgrowsItsFirstCeiling(t *testing.T) {
 		refusedAt.Add(2 * time.Hour),   // and its third
 		ceiling.Add(-time.Millisecond), // a refusal on the very edge of the ceiling
 	} {
-		until, err := recordAgentQuotaCooldown(d, undatedRefusal("claude", QuotaWindowFiveHour), later, config.DefaultWorkDaemonQuotaRetryAfter)
+		untilRow, err := recordAgentQuotaCooldown(d, undatedRefusal("claude", QuotaWindowFiveHour), later, config.DefaultWorkDaemonQuotaRetryAfter)
 		if err != nil {
 			t.Fatal(err)
 		}
+		until := untilRow.Until
 		if !until.Equal(ceiling) {
 			t.Fatalf("refusal at %s moved the cooldown to %s, want the first ceiling %s", later, until, ceiling)
 		}
@@ -162,10 +168,11 @@ func TestGuessedCooldownNeverOutgrowsItsFirstCeiling(t *testing.T) {
 	// Past the ceiling the row is spent, and the next refusal is a first refusal
 	// again — dated from itself, not stacked on what came before.
 	after := ceiling.Add(time.Minute)
-	until, err := recordAgentQuotaCooldown(d, undatedRefusal("claude", QuotaWindowFiveHour), after, config.DefaultWorkDaemonQuotaRetryAfter)
+	untilRow, err := recordAgentQuotaCooldown(d, undatedRefusal("claude", QuotaWindowFiveHour), after, config.DefaultWorkDaemonQuotaRetryAfter)
 	if err != nil {
 		t.Fatal(err)
 	}
+	until := untilRow.Until
 	if want := after.Add(5 * time.Hour); !until.Equal(want) {
 		t.Fatalf("cooldown after the ceiling elapsed = %s, want %s", until, want)
 	}

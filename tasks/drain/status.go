@@ -59,7 +59,10 @@ type StatusSnapshot struct {
 	PickedUp             []PickedUpSet
 	Idle                 []IdleProject
 	Skipped              []SkippedRepo
-	ActiveAgentCooldowns map[string]time.Time
+	// ActiveAgentCooldowns is every live machine-global agent-preset cooldown by
+	// preset, carrying where each expiry came from: a read surface that prints a
+	// guessed ceiling as a stated reset misreports it (ADR-0235).
+	ActiveAgentCooldowns map[string]tasks.AgentQuotaCooldownView
 	RecoveryWaiters      map[string]tasks.RecoveryWaiter
 	Tasks                *tasks.Deps
 	// CrashRetryDelays is the resolved abnormal-backoff escalation schedule (its

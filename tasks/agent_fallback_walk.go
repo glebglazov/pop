@@ -151,8 +151,8 @@ func runAgentFallbackWalk(d *Deps, w agentFallbackWalk) (agentWalkResult, error)
 		if err != nil {
 			return agentWalkResult{}, exitErr(ExitSetup, "resolve %s: %v", strings.ToLower(w.role.Noun), err)
 		}
-		if until, cooling := activeCooldowns[preset]; cooling {
-			v := NewQuotaPauseVerdict(preset, fmt.Sprintf("agent quota cooldown until %s", until.UTC().Format(time.RFC3339)), until)
+		if cooldown, cooling := activeCooldowns[preset]; cooling {
+			v := NewQuotaPauseVerdict(preset, cooldown.pauseReason(), cooldown.Until)
 			result.Unavailable = append(result.Unavailable, v)
 			if i+1 < len(specs) && w.out != nil {
 				outputFor(w.out).line(ansiDim, "   %s", v.fallThroughMessage(w.role.Noun))

@@ -89,10 +89,11 @@ func newProbeFixture(t *testing.T) *probeFixture {
 // behind it, exactly as a quota-paused drain does.
 func (f *probeFixture) park(t *testing.T, setID string, class AgentQuotaWindowClass, at time.Time) *RecoveryWaiter {
 	t.Helper()
-	until, err := recordAgentQuotaCooldown(f.d, AgentQuotaCooldownRequest{Preset: "claude", Class: class}, at, 0)
+	recorded, err := recordAgentQuotaCooldown(f.d, AgentQuotaCooldownRequest{Preset: "claude", Class: class}, at, 0)
 	if err != nil {
 		t.Fatalf("record cooldown: %v", err)
 	}
+	until := recorded.Until
 	runtimePath := filepath.Join(f.root, setID)
 	if err := os.MkdirAll(runtimePath, 0o755); err != nil {
 		t.Fatal(err)

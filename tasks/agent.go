@@ -1383,7 +1383,7 @@ func ResolveAgentAssistanceInvocation(d *Deps, cfg *config.Config, override, age
 	// store that will not open — must not refuse the session (ADR-0195 decision 6):
 	// treat cooling as empty and keep walking on PATH alone. Never fall back to
 	// defaultDeps here: under `go test` that points at the real machine store.
-	var cooldowns map[string]time.Time
+	var cooldowns map[string]AgentQuotaCooldownView
 	if d != nil && d.FS != nil {
 		if loaded, err := ActiveAgentCooldownsWith(d, time.Now().UTC()); err == nil {
 			cooldowns = loaded
@@ -1397,8 +1397,8 @@ func ResolveAgentAssistanceInvocation(d *Deps, cfg *config.Config, override, age
 			return nil, err
 		}
 		if cooldowns != nil {
-			if until, cooling := cooldowns[preset]; cooling {
-				skips = append(skips, formatAttendedSkipCooling(preset, until))
+			if cooldown, cooling := cooldowns[preset]; cooling {
+				skips = append(skips, formatAttendedSkipCooling(cooldown))
 				continue
 			}
 		}
@@ -1433,8 +1433,16 @@ func ResolveAgentAssistanceInvocation(d *Deps, cfg *config.Config, override, age
 	return nil, fmt.Errorf("no usable attended agent: %s", strings.Join(skips, "; "))
 }
 
-func formatAttendedSkipCooling(preset string, until time.Time) string {
-	return fmt.Sprintf("skipped %s (cooling until %s)", preset, until.Local().Format(time.RFC3339))
+// formatAttendedSkipCooling names one skipped attended entry and why. A guessed
+// cooldown says so: the instant is a backstop pop invented from the window
+// class, and a human reading it as the provider's own reset has no reason to
+// reach for `pop work cooldowns clear` (ADR-0235).
+func formatAttendedSkipCooling(c AgentQuotaCooldownView) string {
+	when := c.Until.Local().Format(time.RFC3339)
+	if c.Guessed {
+		return fmt.Sprintf("skipped %s (guessed cooldown, %s backstop %s)", c.Preset, c.Class.Label(), when)
+	}
+	return fmt.Sprintf("skipped %s (cooling until %s)", c.Preset, when)
 }
 
 func formatAttendedSkipMissingBinary(preset string) string {

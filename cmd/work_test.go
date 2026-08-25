@@ -173,9 +173,10 @@ func TestQueueCommandFamilyIsGone(t *testing.T) {
 	}
 }
 
-// TestWorkSubcommandsAreTheWholeSurface pins the verb set: the two read surfaces
-// plus the three former Queue verbs, and no service-management verb — the daemon
-// is foreground and Ctrl-C is stop, so there is nothing to start, stop or install.
+// TestWorkSubcommandsAreTheWholeSurface pins the verb set: the two read surfaces,
+// the three former Queue verbs, the agent-cooldown verb, and no
+// service-management verb — the daemon is foreground and Ctrl-C is stop, so there
+// is nothing to start, stop or install.
 func TestWorkSubcommandsAreTheWholeSurface(t *testing.T) {
 	t.Parallel()
 	var got []string
@@ -183,7 +184,7 @@ func TestWorkSubcommandsAreTheWholeSurface(t *testing.T) {
 		got = append(got, c.Name())
 	}
 	sort.Strings(got)
-	want := []string{"dashboard", "daemon", "log", "show-path", "status"}
+	want := []string{"cooldowns", "dashboard", "daemon", "log", "show-path", "status"}
 	sort.Strings(want)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("pop work subcommands = %v, want %v", got, want)

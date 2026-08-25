@@ -57,12 +57,12 @@ func RunRoutineAgentInvocation(d *Deps, runtimePath string, liveOut io.Writer, t
 }
 
 // RecordAgentQuotaCooldown stores a machine-global cooldown for one agent preset
-// and returns the expiry now in force, which is the standing row when this
+// and returns the cooldown now in force, which is the standing row when this
 // refusal was a guess against a cooldown that has not elapsed (ADR-0235).
-func RecordAgentQuotaCooldown(d *Deps, cfg *config.Config, req AgentQuotaCooldownRequest) (time.Time, error) {
+func RecordAgentQuotaCooldown(d *Deps, cfg *config.Config, req AgentQuotaCooldownRequest) (AgentQuotaCooldownView, error) {
 	unclassed, err := resolveAgentQuotaRetryAfter(cfg)
 	if err != nil {
-		return time.Time{}, err
+		return AgentQuotaCooldownView{}, err
 	}
 	return recordAgentQuotaCooldown(d, req, time.Now(), unclassed)
 }

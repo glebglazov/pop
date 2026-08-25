@@ -171,10 +171,11 @@ func TestStatedQuotaResetParksOnceNotTwice(t *testing.T) {
 	}
 	v := resolveProceedResetAt(stampDetectedVerdict(*result.ProceedVerdict, "claude", "opus"), claudeCaptureRefusedAt)
 
-	until, err := recordAgentQuotaCooldown(d, quotaCooldownRequest(v), claudeCaptureRefusedAt, defaultUnclassedQuotaCeiling)
+	untilRow, err := recordAgentQuotaCooldown(d, quotaCooldownRequest(v), claudeCaptureRefusedAt, defaultUnclassedQuotaCeiling)
 	if err != nil {
 		t.Fatal(err)
 	}
+	until := untilRow.Until
 	if !until.Equal(v.ResetAt.UTC()) {
 		t.Fatalf("cooldown row at %s, want the instant the wait sleeps on, %s", until, v.ResetAt.UTC())
 	}
@@ -186,6 +187,6 @@ func TestStatedQuotaResetParksOnceNotTwice(t *testing.T) {
 		t.Fatal(err)
 	}
 	if stillCooling, cooling := active[v.Preset]; cooling {
-		t.Fatalf("preset still cooling until %s when the park woke at %s: the pause parks twice", stillCooling, wake)
+		t.Fatalf("preset still cooling until %s when the park woke at %s: the pause parks twice", stillCooling.Until, wake)
 	}
 }

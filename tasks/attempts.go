@@ -370,8 +370,8 @@ func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath s
 		if err != nil {
 			return nil, taskExitErr(sel, ExitSetup, "%v", err)
 		}
-		if until, cooling := activeCooldowns[preset]; cooling {
-			v := NewQuotaPauseVerdict(preset, fmt.Sprintf("agent quota cooldown until %s", until.UTC().Format(time.RFC3339)), until)
+		if cooldown, cooling := activeCooldowns[preset]; cooling {
+			v := NewQuotaPauseVerdict(preset, cooldown.pauseReason(), cooldown.Until)
 			unavailableResults = append(unavailableResults, proceedVerdictResult(sel, v))
 			continue
 		}
@@ -422,11 +422,11 @@ func executeTaskAttemptsWithAgentFallback(d *Deps, sel *Selection, runtimePath s
 			// against a cooldown that is still in force leaves the earlier row
 			// standing, and the walk must skip the preset until *that* instant
 			// (ADR-0235).
-			until, err := recordAgentQuotaCooldown(d, quotaCooldownRequest(v), time.Now(), agentQuotaRetryAfter)
+			recorded, err := recordAgentQuotaCooldown(d, quotaCooldownRequest(v), time.Now(), agentQuotaRetryAfter)
 			if err != nil {
 				return nil, taskExitErr(sel, ExitOperational, "%v", err)
 			}
-			activeCooldowns[v.Preset] = until
+			activeCooldowns[v.Preset] = recorded
 		}
 		if v.Scope == ProceedScopePreset && i+1 < len(specs) && out != nil {
 			outputFor(out).line(ansiDim, "   %s", v.fallThroughMessage("Agent"))

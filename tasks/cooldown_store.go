@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -70,15 +71,100 @@ func readAgentCooldowns(d *Deps) (agentCooldownStore, error) {
 	return s.AllAgentCooldowns()
 }
 
+// AgentQuotaCooldownView is one live agent-preset cooldown as a read surface
+// sees it: the expiry pop enforces, and where that instant came from. The origin
+// is the part every surface has to carry — a reset the provider stated and a
+// ceiling pop invented are the same number on screen without it, which is what
+// sent the incident's human to a raw SQL delete (ADR-0235).
+type AgentQuotaCooldownView struct {
+	Preset string
+	// Until is the enforced expiry: the provider's own instant for a stated row,
+	// the window class ceiling for a guessed one.
+	Until time.Time
+	// Guessed marks a Guessed quota cooldown — no provider stated Until, so it is
+	// a backstop the preset is asked about rather than a retry time.
+	Guessed bool
+	// Class is the Quota window class the refusal named, Unknown when it named
+	// none.
+	Class AgentQuotaWindowClass
+	// NextProbeAt is when the exhausted preset is next asked whether it will run.
+	// Only a guess carries one.
+	NextProbeAt time.Time
+}
+
+// Origin names where Until came from in one word, for a surface with a column to
+// fill.
+func (v AgentQuotaCooldownView) Origin() string {
+	if v.Guessed {
+		return "guessed"
+	}
+	return "stated"
+}
+
+// pauseReason is what a fall-through line and a quota-pause verdict say about
+// this cooldown. A stated instant is quoted as a reset; a guess names itself and
+// the window class it was dated from, so nothing downstream reads pop's own
+// ceiling as the provider's word.
+func (v AgentQuotaCooldownView) pauseReason() string {
+	when := v.Until.UTC().Format(time.RFC3339)
+	if v.Guessed {
+		return "agent quota cooldown: guessed " + v.Class.Label() + " backstop " + when
+	}
+	return "agent quota cooldown until " + when
+}
+
 // ActiveAgentCooldownsWith returns active machine-global agent cooldowns keyed
 // by preset. It is read-only so status/reporting callers do not need to know the
 // cooldown store format.
-func ActiveAgentCooldownsWith(d *Deps, now time.Time) (map[string]time.Time, error) {
+func ActiveAgentCooldownsWith(d *Deps, now time.Time) (map[string]AgentQuotaCooldownView, error) {
 	store, err := readAgentCooldowns(d)
 	if err != nil {
 		return nil, err
 	}
 	return activeAgentCooldowns(store, now), nil
+}
+
+// LiveAgentQuotaCooldownsWith is the same read as a list in preset order, for a
+// surface that prints one row per cooldown.
+func LiveAgentQuotaCooldownsWith(d *Deps, now time.Time) ([]AgentQuotaCooldownView, error) {
+	active, err := ActiveAgentCooldownsWith(d, now)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AgentQuotaCooldownView, 0, len(active))
+	for _, v := range active {
+		out = append(out, v)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Preset < out[j].Preset })
+	return out, nil
+}
+
+// ClearAgentQuotaCooldownWith drops one preset's cooldown and releases every
+// park waiting on it, reporting whether there was one to drop. It is the verb a
+// human reaches for when pop guessed wrong — without it the only way to retire a
+// bad ceiling is a SQL delete against a live database (ADR-0235).
+//
+// A store that does not exist yet holds no cooldown, so it is not created here.
+func ClearAgentQuotaCooldownWith(d *Deps, preset string, now time.Time) (bool, error) {
+	preset = strings.TrimSpace(preset)
+	if preset == "" {
+		return false, nil
+	}
+	s, ok, err := openDrainStoreIfExists(d)
+	if err != nil || !ok {
+		return false, err
+	}
+	row, err := s.GetAgentCooldown(preset)
+	if err != nil {
+		return false, err
+	}
+	if row == nil {
+		return false, nil
+	}
+	if err := s.ClearAgentQuotaCooldown(preset, now); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // AgentQuotaCooldownRequest is one refusal reduced to what the cooldown store
@@ -109,27 +195,35 @@ func quotaCooldownRequest(v AgentProceedVerdict) AgentQuotaCooldownRequest {
 }
 
 // recordAgentQuotaCooldown records one refusal against a preset in the store,
-// creating the store on first write, and returns the expiry now in force —
+// creating the store on first write, and returns the cooldown now in force —
 // which is the row already there when this refusal was a guess against a live
-// cooldown. unclassed is the configured ceiling for a refusal naming no window
-// class (ADR-0055/0235).
-func recordAgentQuotaCooldown(d *Deps, req AgentQuotaCooldownRequest, now time.Time, unclassed time.Duration) (time.Time, error) {
+// cooldown. It answers with the whole view rather than the instant because the
+// caller goes on to tell a human about it, and whether pop read the instant or
+// invented it is half of what there is to say. unclassed is the configured
+// ceiling for a refusal naming no window class (ADR-0055/0235).
+func recordAgentQuotaCooldown(d *Deps, req AgentQuotaCooldownRequest, now time.Time, unclassed time.Duration) (AgentQuotaCooldownView, error) {
 	req.Preset = strings.TrimSpace(req.Preset)
 	if req.Preset == "" {
-		return time.Time{}, nil
+		return AgentQuotaCooldownView{}, nil
 	}
 	if err := migrateLegacyAgentCooldownFile(d); err != nil {
-		return time.Time{}, err
+		return AgentQuotaCooldownView{}, err
 	}
 	s, err := openDrainStore(d)
 	if err != nil {
-		return time.Time{}, err
+		return AgentQuotaCooldownView{}, err
 	}
 	recorded, err := s.RecordAgentQuotaCooldown(agentQuotaCooldownRow(req, now, unclassed), now)
 	if err != nil {
-		return time.Time{}, err
+		return AgentQuotaCooldownView{}, err
 	}
-	return recorded.ExhaustedUntil, nil
+	return AgentQuotaCooldownView{
+		Preset:      req.Preset,
+		Until:       recorded.ExhaustedUntil,
+		Guessed:     recorded.StatedUntil.IsZero(),
+		Class:       AgentQuotaWindowClass(recorded.Class),
+		NextProbeAt: recorded.NextProbeAt,
+	}, nil
 }
 
 // agentQuotaCooldownRow turns one refusal into the row it asks to record.
@@ -282,8 +376,8 @@ func ActiveAgentModelCooldownsWith(d *Deps, now time.Time) ([]store.AgentModelCo
 	return s.ActiveAgentModelCooldowns(now)
 }
 
-func activeAgentCooldowns(store agentCooldownStore, now time.Time) map[string]time.Time {
-	active := map[string]time.Time{}
+func activeAgentCooldowns(store agentCooldownStore, now time.Time) map[string]AgentQuotaCooldownView {
+	active := map[string]AgentQuotaCooldownView{}
 	now = now.UTC()
 	for preset, entry := range store {
 		preset = strings.TrimSpace(preset)
@@ -292,7 +386,13 @@ func activeAgentCooldowns(store agentCooldownStore, now time.Time) map[string]ti
 		}
 		until := entry.ExhaustedUntil.UTC()
 		if until.After(now) {
-			active[preset] = until
+			active[preset] = AgentQuotaCooldownView{
+				Preset:      preset,
+				Until:       until,
+				Guessed:     entry.StatedUntil.IsZero(),
+				Class:       AgentQuotaWindowClass(entry.Class),
+				NextProbeAt: entry.NextProbeAt,
+			}
 		}
 	}
 	return active

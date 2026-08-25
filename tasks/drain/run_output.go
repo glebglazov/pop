@@ -91,6 +91,12 @@ type BlockedItem struct {
 	Until     time.Time
 	Reason    string
 	Agent     string
+	// Guessed marks an agent_cooldown item whose Until is a ceiling pop invented
+	// rather than a reset the provider stated (ADR-0235).
+	Guessed bool
+	// Class is the Quota window class a guessed Until was dated from, empty when
+	// the refusal named none or when the instant was stated outright.
+	Class string
 	// RuntimePath is the bound checkout for this set, used to render an
 	// adopted-worktree suffix when the checkout basename differs from SetID.
 	RuntimePath string
@@ -366,17 +372,26 @@ func blockedItemsFromDrainHistory(td *tasks.Deps, bindings map[string]WorktreeBi
 	return out
 }
 
-func blockedItemsFromAgentCooldowns(cooldowns map[string]time.Time, now time.Time) []BlockedItem {
+func blockedItemsFromAgentCooldowns(cooldowns map[string]tasks.AgentQuotaCooldownView, now time.Time) []BlockedItem {
 	var out []BlockedItem
-	for agent, until := range cooldowns {
-		if until.IsZero() || !until.After(now) {
+	for agent, c := range cooldowns {
+		if c.Until.IsZero() || !c.Until.After(now) {
 			continue
 		}
+		reason, class := "agent quota cooldown", ""
+		if c.Guessed {
+			// The class only explains a guess: it is what the ceiling was dated
+			// from, and a stated instant was dated from nothing.
+			class = c.Class.Label()
+			reason = "agent quota cooldown (guessed " + class + " backstop)"
+		}
 		out = append(out, BlockedItem{
-			Kind:   "agent_cooldown",
-			Agent:  agent,
-			Until:  until,
-			Reason: "agent quota cooldown",
+			Kind:    "agent_cooldown",
+			Agent:   agent,
+			Until:   c.Until,
+			Guessed: c.Guessed,
+			Class:   class,
+			Reason:  reason,
 		})
 	}
 	return out
@@ -444,10 +459,49 @@ func formatWorkSummary(view RunView) string {
 	return strings.Join(parts, ", ")
 }
 
-// RenderRunSummary prints the aggregate Work status summary headline.
+// RenderRunSummary prints the aggregate Work status summary headline, and under
+// it the agent quota cooldowns in force.
+//
+// The cooldowns earn their lines because they are the one blocked kind that
+// belongs to no project and so appears in no table row: counted in the headline
+// and named nowhere. Each line says whether pop read the instant or invented it,
+// since a guessed backstop and a provider's reset are otherwise the same number
+// on screen (ADR-0235).
 func RenderRunSummary(out io.Writer, view RunView) {
 	fmt.Fprintln(out, "Summary:")
 	fmt.Fprintf(out, "  Work: %s\n", formatWorkSummary(view))
+	renderAgentCooldownSummary(out, view)
+}
+
+func renderAgentCooldownSummary(out io.Writer, view RunView) {
+	cooldowns := make([]BlockedItem, 0, len(view.Blocked))
+	for _, item := range view.Blocked {
+		if item.Kind == "agent_cooldown" {
+			cooldowns = append(cooldowns, item)
+		}
+	}
+	if len(cooldowns) == 0 {
+		return
+	}
+	sort.SliceStable(cooldowns, func(i, j int) bool { return cooldowns[i].Agent < cooldowns[j].Agent })
+	fmt.Fprintln(out, "  Agent quota cooldowns:")
+	for _, item := range cooldowns {
+		fmt.Fprintf(out, "    %s: %s\n", item.Agent, formatAgentCooldownOrigin(item))
+	}
+}
+
+// formatAgentCooldownOrigin says where one cooldown's instant came from, in the
+// same vocabulary the recovery countdown and `pop work cooldowns` use: a
+// provider's reset, or a backstop pop dated from the window class.
+func formatAgentCooldownOrigin(item BlockedItem) string {
+	when := item.Until.Local().Format(time.RFC3339)
+	if !item.Guessed {
+		return "stated reset " + when
+	}
+	if item.Class == "" {
+		return "guessed backstop " + when
+	}
+	return "guessed " + item.Class + " backstop " + when
 }
 
 func buildWorktreeBindingViews(d *tasks.Deps, cfg *config.Config, running []PickedUpSet, preset config.WorkViewPreset, now time.Time) []WorktreeBindingView {
@@ -691,6 +745,12 @@ func formatBlockedDelta(b BlockedItem, cleared bool) string {
 		until := ""
 		if !b.Until.IsZero() {
 			until = b.Until.Local().Format(time.RFC3339)
+		}
+		// A guessed expiry is labelled a backstop, not an until: the daemon's
+		// journal is where a human first reads the number, so it is where the
+		// number has to admit pop invented it (ADR-0235).
+		if b.Guessed {
+			return fmt.Sprintf("work: agent %s cooldown guessed backstop=%s", b.Agent, until)
 		}
 		return fmt.Sprintf("work: agent %s cooldown until=%s", b.Agent, until)
 	case "parked":

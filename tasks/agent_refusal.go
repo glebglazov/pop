@@ -49,6 +49,21 @@ func (c AgentQuotaWindowClass) Span() (time.Duration, bool) {
 	return 0, false
 }
 
+// Label is the class in the words a human reads on a status surface, rather
+// than the provider's wire spelling. An Unknown class says so out loud: a
+// refusal nobody classified is exactly the one whose cooldown is a blind guess.
+func (c AgentQuotaWindowClass) Label() string {
+	switch c {
+	case QuotaWindowFiveHour:
+		return "session limit"
+	case QuotaWindowWeekly:
+		return "weekly allowance"
+	case QuotaWindowOpus:
+		return "opus weekly allowance"
+	}
+	return "unclassed"
+}
+
 // detectRefusal reports the quota refusal this signature finds in one Captured
 // run: the structured channel first, the marker sentences beneath it (ADR-0234).
 //

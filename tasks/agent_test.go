@@ -1106,7 +1106,7 @@ func TestAttendedLaunchTimeSkip(t *testing.T) {
 		if inv.AgentPreset != "cursor" {
 			t.Fatalf("preset = %q, want cursor after skipping cooling claude", inv.AgentPreset)
 		}
-		wantSkip := formatAttendedSkipCooling("claude", until)
+		wantSkip := formatAttendedSkipCooling(AgentQuotaCooldownView{Preset: "claude", Until: until, Guessed: true})
 		if !strings.Contains(inv.Detail, wantSkip) {
 			t.Fatalf("Detail = %q, want %q", inv.Detail, wantSkip)
 		}
@@ -1158,7 +1158,7 @@ func TestAttendedLaunchTimeSkip(t *testing.T) {
 			t.Fatal("expected refusal when every attended entry is unusable")
 		}
 		msg := err.Error()
-		if !strings.Contains(msg, formatAttendedSkipCooling("claude", until)) {
+		if !strings.Contains(msg, formatAttendedSkipCooling(AgentQuotaCooldownView{Preset: "claude", Until: until, Guessed: true})) {
 			t.Fatalf("error = %q, want cooling skip for claude", msg)
 		}
 		if !strings.Contains(msg, formatAttendedSkipMissingBinary("cursor")) {
