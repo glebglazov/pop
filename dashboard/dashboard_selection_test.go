@@ -401,6 +401,7 @@ func (k *presetKind) Columns() []string {
 func (k *presetKind) Actions(work.Container) []work.Action                { return nil }
 func (k *presetKind) StatusActions(work.Container) []work.Action          { return nil }
 func (k *presetKind) CopyActions(work.Container) []work.Action            { return nil }
+func (k *presetKind) TypeWords() []string                                 { return nil }
 func (k *presetKind) ItemActions(work.Container, work.Item) []work.Action { return nil }
 
 func (k *presetKind) StatusCell(c work.Container) []work.StatusSegment {

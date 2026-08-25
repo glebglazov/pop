@@ -38,6 +38,7 @@ func (k *itemVerbKind) StatusCell(work.Container) []work.StatusSegment {
 func (k *itemVerbKind) Actions(work.Container) []work.Action       { return nil }
 func (k *itemVerbKind) StatusActions(work.Container) []work.Action { return nil }
 func (k *itemVerbKind) CopyActions(work.Container) []work.Action   { return nil }
+func (k *itemVerbKind) TypeWords() []string                        { return nil }
 
 func (k *itemVerbKind) ItemActions(work.Container, work.Item) []work.Action {
 	k.asked++

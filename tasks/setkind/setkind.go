@@ -211,6 +211,13 @@ func (k *Kind) Columns() []string {
 	return TaskSetColumns()
 }
 
+// TypeWords are the words that mean "task set" in the search box. A task set has
+// no type word anywhere on screen — it is the default kind of the page, the crowd
+// rather than the thing being picked out of it — so these are the words a reader
+// brings with them rather than reads: the hyphenated name, the noun on its own,
+// and the plural the store calls a set's contents.
+func (k *Kind) TypeWords() []string { return []string{"task-set", "set", "tasks"} }
+
 // TaskSetColumns is the Task-set column header row, exported because a kind that
 // fills these cells rather than its own must head its page with the identical
 // list — a copy in the other kind would be a second source of one header.

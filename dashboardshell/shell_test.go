@@ -63,6 +63,7 @@ func (k *pageKind) Columns() []string                                   { return
 func (k *pageKind) Actions(work.Container) []work.Action                { return nil }
 func (k *pageKind) StatusActions(work.Container) []work.Action          { return nil }
 func (k *pageKind) CopyActions(work.Container) []work.Action            { return nil }
+func (k *pageKind) TypeWords() []string                                 { return nil }
 func (k *pageKind) ItemActions(work.Container, work.Item) []work.Action { return nil }
 
 func (k *pageKind) StatusCell(c work.Container) []work.StatusSegment {

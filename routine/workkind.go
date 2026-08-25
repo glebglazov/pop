@@ -186,6 +186,10 @@ func (k *Kind) Columns() []string {
 	return routineColumns()
 }
 
+// TypeWords is the one word that means "Routine" in the search box — the word the
+// ROUTINE column heads its own page with.
+func (k *Kind) TypeWords() []string { return []string{"routine"} }
+
 // routineColumns is the one declaration of the Routine column headers, read both
 // by the kind and by the Routine table that renders them.
 func routineColumns() []string {

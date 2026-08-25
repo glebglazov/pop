@@ -132,6 +132,7 @@ func (k orderingStubKind) StatusCell(work.Container) []work.StatusSegment { retu
 func (k orderingStubKind) Actions(work.Container) []work.Action           { return nil }
 func (k orderingStubKind) StatusActions(work.Container) []work.Action     { return nil }
 func (k orderingStubKind) CopyActions(work.Container) []work.Action       { return nil }
+func (k orderingStubKind) TypeWords() []string                            { return nil }
 func (k orderingStubKind) ItemActions(work.Container, work.Item) []work.Action {
 	return nil
 }

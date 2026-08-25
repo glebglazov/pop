@@ -2456,7 +2456,7 @@ func (m *QueueDashboard) applySearch(query string) {
 // — or the list's key-based re-anchoring and its j/k counts would both start
 // lying (ADR-0224 decision 1).
 func (m QueueDashboard) viewRows(query string) []DashboardRow {
-	rest := filterDashboardRows(m.allRows, query)
+	rest := m.kinds.filterDashboardRows(m.allRows, query)
 	if !m.selection.Active() {
 		return rest
 	}
@@ -2644,22 +2644,69 @@ func (m QueueDashboard) documentPeekBudget() int {
 	return m.height
 }
 
-// filterDashboardRows returns rows whose Project or id contain query as a
-// case-insensitive substring — a plain substring match, never a fuzzy one.
-// Returns the rows unchanged when query is empty.
-func filterDashboardRows(rows []DashboardRow, query string) []DashboardRow {
-	if query == "" {
+// filterDashboardRows returns the rows that match query: the ones a reader
+// would say the query describes, found by what the row shows them — its project,
+// its id, the WORKTREE column's label and the checkout directory behind it, and
+// the words its kind answers to (so a Map is found by "wayfinding", the word its
+// status cell prints). A row's status text is deliberately not among them:
+// status is filter-preset vocabulary, and asking the same question in two
+// grammars lets the two answers disagree.
+//
+// Whitespace splits the query into terms, and every term must match some field —
+// different terms are free to match different ones, so "way pop" is the Maps in
+// project pop and "way set" is correctly nothing. Each term is a
+// case-insensitive substring, never a subsequence: without ranking, a fuzzy match
+// across five fields returns nearly everything, and the order of the page is not
+// the search's to touch. A query of nothing but whitespace narrows nothing.
+func (w workKinds) filterDashboardRows(rows []DashboardRow, query string) []DashboardRow {
+	terms := strings.Fields(strings.ToLower(query))
+	if len(terms) == 0 {
 		return rows
 	}
-	q := strings.ToLower(query)
 	var filtered []DashboardRow
 	for _, row := range rows {
-		if strings.Contains(strings.ToLower(row.Project), q) ||
-			strings.Contains(strings.ToLower(row.ID), q) {
+		if matchesEveryTerm(w.searchFields(row), terms) {
 			filtered = append(filtered, row)
 		}
 	}
 	return filtered
+}
+
+// searchFields is everything one row can be found by, already lower-cased. The
+// kind's type words ride alongside the row's own cells so a term never has to
+// know which of the two it landed in.
+func (w workKinds) searchFields(row DashboardRow) []string {
+	fields := []string{
+		strings.ToLower(row.Project),
+		strings.ToLower(row.ID),
+		strings.ToLower(row.Worktree),
+		strings.ToLower(row.Checkout),
+	}
+	if k := w.kindFor(row); k != nil {
+		for _, word := range k.TypeWords() {
+			fields = append(fields, strings.ToLower(word))
+		}
+	}
+	return fields
+}
+
+// matchesEveryTerm reports whether each term is a substring of some field. The
+// quantifiers are what make a multi-term query an "and" across fields rather than
+// within one: every term, any field.
+func matchesEveryTerm(fields, terms []string) bool {
+	for _, term := range terms {
+		found := false
+		for _, field := range fields {
+			if strings.Contains(field, term) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }
 
 func (m QueueDashboard) confirmBindModal() (tea.Model, tea.Cmd) {

@@ -92,6 +92,15 @@ type Kind interface {
 	// separate the header from the kind that fills it, and make a page for a
 	// future kind cost custom dashboard code.
 	Columns() []string
+	// TypeWords are the words a reader would type to mean "this kind", for the
+	// search that narrows a page by what a row shows. They are the kind's own
+	// because the words are the kind's own vocabulary — a Map answers to
+	// "wayfinding" because that is what its status cell prints, not because
+	// anything in `work` knows the enum id. Every kind answers at least one word;
+	// they are matched case-insensitively as substrings like every other search
+	// field, so a kind lists the whole words it owns and lets the match do the
+	// prefixes.
+	TypeWords() []string
 }
 
 // SkipSource is the optional extension a kind implements when it carries

@@ -3051,9 +3051,12 @@ func TestDashboardSearch_EmptyQueryClearsTheSearch(t *testing.T) {
 }
 
 func TestDashboardSearch_EscRestoresThePreviousTerm(t *testing.T) {
-	m := typeSearch(filterTestModel(), "set", true)
+	// "set-" rather than "set": the bare word is now the Task-set kind's own, and
+	// every row on this page is a task set. The hyphen keeps the term an id
+	// fragment, which is what this test is about.
+	m := typeSearch(filterTestModel(), "set-", true)
 	if len(m.snap.Containers) != 2 {
-		t.Fatalf("applied 'set': rows = %d, want 2", len(m.snap.Containers))
+		t.Fatalf("applied 'set-': rows = %d, want 2", len(m.snap.Containers))
 	}
 
 	// Abandon an edit that would have narrowed further: the term in force comes
@@ -3064,14 +3067,14 @@ func TestDashboardSearch_EscRestoresThePreviousTerm(t *testing.T) {
 	if got.searchTyping {
 		t.Fatal("esc must leave the typing phase")
 	}
-	if got.searchTerm != "set" {
-		t.Fatalf("search term = %q, want the 'set' that was in force", got.searchTerm)
+	if got.searchTerm != "set-" {
+		t.Fatalf("search term = %q, want the 'set-' that was in force", got.searchTerm)
 	}
 	if got.searchInput.Value() != "" {
 		t.Fatalf("buffer = %q, want empty after esc", got.searchInput.Value())
 	}
 	if len(got.snap.Containers) != 2 {
-		t.Fatalf("after esc: rows = %d, want the 2 'set' matched", len(got.snap.Containers))
+		t.Fatalf("after esc: rows = %d, want the 2 'set-' matched", len(got.snap.Containers))
 	}
 
 	// With no term in force, abandoning applies none.
@@ -3209,15 +3212,15 @@ func TestDashboardSearch_ApplyRestoresTheWholeKeymap(t *testing.T) {
 	copied := ""
 	m := filterTestModel()
 	m.copyFunc = func(s string) error { copied = s; return nil }
-	m = typeSearch(m, "set", true)
+	m = typeSearch(m, "set-", true)
 	if m.searchTyping {
 		t.Fatal("enter must leave the typing phase")
 	}
-	if m.searchTerm != "set" {
-		t.Fatalf("search term = %q, want 'set'", m.searchTerm)
+	if m.searchTerm != "set-" {
+		t.Fatalf("search term = %q, want 'set-'", m.searchTerm)
 	}
 	if len(m.snap.Containers) != 2 {
-		t.Fatalf("after 'set': rows = %d, want 2", len(m.snap.Containers))
+		t.Fatalf("after 'set-': rows = %d, want 2", len(m.snap.Containers))
 	}
 
 	m.list.SetCursor(0)
@@ -3247,7 +3250,7 @@ func TestDashboardSearch_ApplyRestoresTheWholeKeymap(t *testing.T) {
 	if m.detail == nil {
 		t.Fatal("enter did not open the detail view")
 	}
-	if m.searchTerm != "set" || len(m.snap.Containers) != 2 {
+	if m.searchTerm != "set-" || len(m.snap.Containers) != 2 {
 		t.Fatalf("the search dropped while acting on a row: term %q over %d rows", m.searchTerm, len(m.snap.Containers))
 	}
 }
@@ -3424,54 +3427,140 @@ func TestDashboardSearch_VocabularyDoesNotBorrowTheFilterWord(t *testing.T) {
 	}
 }
 
+// searchRows is a page A the search has something to pick out of: two task sets
+// (one bound to a worktree), one Map, all in projects a term could also land in.
+func searchRows() []DashboardRow {
+	return []DashboardRow{
+		{Kind: ref.KindTaskSet, Project: "alpha", ID: "set-one", Status: "READY"},
+		{
+			Kind: ref.KindTaskSet, Project: "pop", ID: "set-two", Status: "DONE",
+			Worktree: "feature/login", Checkout: "/wt/pop/feature-login",
+		},
+		{Kind: ref.KindMap, Project: "pop", ID: "chart", Status: "WAYFINDING"},
+	}
+}
+
+func matchedIDs(rows []DashboardRow) []string {
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	return ids
+}
+
 func TestFilterDashboardRows(t *testing.T) {
-	rows := []DashboardRow{
-		{Project: "alpha", ID: "set-one"},
-		{Project: "beta", ID: "set-two"},
-		{Project: "gamma", ID: "feature"},
+	kinds := testKinds()
+	rows := searchRows()
+
+	for _, tc := range []struct {
+		name  string
+		query string
+		want  []string
+	}{
+		{"an empty query narrows nothing", "", []string{"set-one", "set-two", "chart"}},
+		{"a project", "alpha", []string{"set-one"}},
+		{"an id", "chart", []string{"chart"}},
+		{"a partial id", "set-", []string{"set-one", "set-two"}},
+		{"case-insensitively", "ALPHA", []string{"set-one"}},
+		{"nothing matching matches nothing", "zzz", []string{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := matchedIDs(kinds.filterDashboardRows(rows, tc.query)); !slices.Equal(got, tc.want) {
+				t.Fatalf("%q matched %v, want %v", tc.query, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSearchFindsRowsByTheirKindsWords is the point of the type-word seam: a
+// reader types the word they read in the table — "wayfinding" is what a Map's
+// status cell prints — rather than the name of an enum, and the word a kind
+// answers to is the kind's own.
+func TestSearchFindsRowsByTheirKindsWords(t *testing.T) {
+	kinds := testKinds()
+	rows := searchRows()
+
+	for _, tc := range []struct {
+		query string
+		want  []string
+	}{
+		{"way", []string{"chart"}},
+		{"wayfinding", []string{"chart"}},
+		{"wayfinder", []string{"chart"}},
+		{"map", []string{"chart"}},
+		{"MAP", []string{"chart"}},
+		{"set", []string{"set-one", "set-two"}},
+		{"task-set", []string{"set-one", "set-two"}},
+		{"tasks", []string{"set-one", "set-two"}},
+	} {
+		if got := matchedIDs(kinds.filterDashboardRows(rows, tc.query)); !slices.Equal(got, tc.want) {
+			t.Fatalf("%q matched %v, want %v", tc.query, got, tc.want)
+		}
 	}
 
-	t.Run("empty query returns all rows", func(t *testing.T) {
-		got := filterDashboardRows(rows, "")
-		if len(got) != 3 {
-			t.Fatalf("empty filter: got %d rows, want 3", len(got))
-		}
-	})
+	// Page B answers to its own kind's word, through its own wiring list.
+	routines := []DashboardRow{
+		{Kind: ref.KindRoutine, ID: "digest", Project: "pop"},
+		{Kind: ref.KindRoutine, ID: "sweep", Project: "pop"},
+	}
+	if got := matchedIDs(testRoutineKinds().filterDashboardRows(routines, "routine")); !slices.Equal(got, []string{"digest", "sweep"}) {
+		t.Fatalf("'routine' over page B matched %v, want both Routines", got)
+	}
+	if got := matchedIDs(kinds.filterDashboardRows(rows, "routine")); len(got) != 0 {
+		t.Fatalf("'routine' over page A matched %v, want nothing", got)
+	}
+}
 
-	t.Run("matches project name", func(t *testing.T) {
-		got := filterDashboardRows(rows, "beta")
-		if len(got) != 1 || got[0].Project != "beta" {
-			t.Fatalf("got %+v, want beta row", got)
-		}
-	})
+// TestSearchFindsRowsByWorktreeLabelAndCheckout pins the destination column as a
+// searchable field both ways: the label the WORKTREE cell shows, and the checkout
+// directory behind it that the cell never spells out.
+func TestSearchFindsRowsByWorktreeLabelAndCheckout(t *testing.T) {
+	kinds := testKinds()
+	rows := searchRows()
 
-	t.Run("matches set ID", func(t *testing.T) {
-		got := filterDashboardRows(rows, "feature")
-		if len(got) != 1 || got[0].ID != "feature" {
-			t.Fatalf("got %+v, want feature row", got)
+	for _, query := range []string{"feature/log", "LOGIN", "/wt/pop/feature-login", "feature-log"} {
+		if got := matchedIDs(kinds.filterDashboardRows(rows, query)); !slices.Equal(got, []string{"set-two"}) {
+			t.Fatalf("%q matched %v, want the bound set", query, got)
 		}
-	})
+	}
+}
 
-	t.Run("case insensitive", func(t *testing.T) {
-		got := filterDashboardRows(rows, "ALPHA")
-		if len(got) != 1 || got[0].Project != "alpha" {
-			t.Fatalf("got %+v, want alpha row", got)
-		}
-	})
+// TestSearchTermsAreAndedAcrossFields is what whitespace means in the box: every
+// term must match, and each is free to match a different field — so "way pop" is
+// the Maps in project pop, and "way set" is correctly nothing.
+func TestSearchTermsAreAndedAcrossFields(t *testing.T) {
+	kinds := testKinds()
+	rows := searchRows()
 
-	t.Run("partial match works", func(t *testing.T) {
-		got := filterDashboardRows(rows, "set")
-		if len(got) != 2 {
-			t.Fatalf("got %d rows for 'set', want 2", len(got))
+	for _, tc := range []struct {
+		query string
+		want  []string
+	}{
+		{"way pop", []string{"chart"}},
+		{"way set", nil},
+		{"set pop", []string{"set-two"}},
+		{"  set   pop  ", []string{"set-two"}},
+		{"   ", []string{"set-one", "set-two", "chart"}},
+		{"pop login", []string{"set-two"}},
+	} {
+		if got := matchedIDs(kinds.filterDashboardRows(rows, tc.query)); !slices.Equal(got, tc.want) {
+			t.Fatalf("%q matched %v, want %v", tc.query, got, tc.want)
 		}
-	})
+	}
+}
 
-	t.Run("no match returns nil", func(t *testing.T) {
-		got := filterDashboardRows(rows, "zzz")
-		if len(got) != 0 {
-			t.Fatalf("got %d rows for 'zzz', want 0", len(got))
+// TestSearchIgnoresStatusText keeps the two grammars apart: status is the filter
+// presets' vocabulary, and a search that answered it too would let the same
+// question have two answers.
+func TestSearchIgnoresStatusText(t *testing.T) {
+	kinds := testKinds()
+	rows := searchRows()
+
+	for _, query := range []string{"ready", "done"} {
+		if got := matchedIDs(kinds.filterDashboardRows(rows, query)); len(got) != 0 {
+			t.Fatalf("%q matched %v, want nothing — status is the presets' word", query, got)
 		}
-	})
+	}
 }
 
 // detailOverrideModel builds a QueueDashboard with a loaded detailView and

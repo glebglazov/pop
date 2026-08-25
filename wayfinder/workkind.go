@@ -219,6 +219,11 @@ func (k *MapKind) Columns() []string {
 	return []string{"PROJECT", "TASK SET", "STATUS", "WORKTREE", ""}
 }
 
+// TypeWords are the words that mean "Map" in the search box. "wayfinding" is the
+// one that matters: it is what a Map's STATUS cell prints, and a reader types
+// what they read rather than what the enum is called.
+func (k *MapKind) TypeWords() []string { return []string{"map", "wayfinder", "wayfinding"} }
+
 // Actions returns the container-level verbs for a Map: work one frontier ticket
 // or fan out the whole frontier when it has one, assist the Map itself, a shell in
 // the repository, and copy-name. Spawning verbs come before

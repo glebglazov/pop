@@ -52,6 +52,8 @@ type conformanceCase struct {
 	wantCopyActions []work.Verb
 	// wantSummary is the kind's header phrases for its own containers.
 	wantSummary []string
+	// wantTypeWords is the words the kind answers to in the dashboard search.
+	wantTypeWords []string
 	// callerModal is a verb the kind hands back for the caller to dispatch, or
 	// empty when it has none.
 	callerModal work.Verb
@@ -102,6 +104,7 @@ func conformanceCases() []conformanceCase {
 			// set's own definition folder — which every set has — is not.
 			wantCopyActions: []work.Verb{work.VerbCopyName, setkind.VerbCopyDefinitionPath},
 			wantSummary:     []string{"1 task set", "1 ready"},
+			wantTypeWords:   []string{"task-set", "set", "tasks"},
 			callerModal:     setkind.VerbDrain,
 		},
 		{
@@ -129,6 +132,7 @@ func conformanceCases() []conformanceCase {
 			},
 			wantCopyActions: []work.Verb{work.VerbCopyName, wayfinder.VerbCopyMapPath},
 			wantSummary:     []string{"1 map"},
+			wantTypeWords:   []string{"map", "wayfinder", "wayfinding"},
 		},
 		{
 			name:      "routine",
@@ -164,6 +168,7 @@ func conformanceCases() []conformanceCase {
 			// alone — a Routine has no folder of its own to offer beside it.
 			wantCopyActions: []work.Verb{work.VerbCopyName},
 			wantSummary:     []string{"1 routine", "1 here"},
+			wantTypeWords:   []string{"routine"},
 		},
 	}
 }
@@ -331,6 +336,23 @@ func TestKindConformance(t *testing.T) {
 
 			if got := k.Summary(containers); !slices.Equal(got, tc.wantSummary) {
 				t.Fatalf("Summary = %v, want %v", got, tc.wantSummary)
+			}
+
+			// The words the search finds this kind's rows by. Every kind answers at
+			// least one, and each is lower-case with no surrounding space: the match is
+			// a case-insensitive substring over a term the reader typed, so a word that
+			// carried either would never be reached.
+			words := k.TypeWords()
+			if !slices.Equal(words, tc.wantTypeWords) {
+				t.Fatalf("TypeWords = %v, want %v", words, tc.wantTypeWords)
+			}
+			if len(words) == 0 {
+				t.Fatal("every kind answers to at least one word")
+			}
+			for _, word := range words {
+				if word != strings.ToLower(word) || word != strings.TrimSpace(word) {
+					t.Fatalf("type word %q must be lower-case and unpadded", word)
+				}
 			}
 		})
 	}

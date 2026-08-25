@@ -40,6 +40,7 @@ func (k *countingKind) Actions(c work.Container) []work.Action {
 
 func (k *countingKind) StatusActions(work.Container) []work.Action          { return nil }
 func (k *countingKind) CopyActions(work.Container) []work.Action            { return nil }
+func (k *countingKind) TypeWords() []string                                 { return nil }
 func (k *countingKind) ItemActions(work.Container, work.Item) []work.Action { return nil }
 func (k *countingKind) Perform(work.Container, *work.Item, work.Verb) (work.Outcome, error) {
 	return work.Outcome{}, nil

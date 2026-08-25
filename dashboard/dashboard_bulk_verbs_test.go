@@ -76,6 +76,7 @@ func (k *bulkKind) Columns() []string {
 func (k *bulkKind) Actions(work.Container) []work.Action       { return slices.Clone(k.actions) }
 func (k *bulkKind) StatusActions(work.Container) []work.Action { return slices.Clone(k.status) }
 func (k *bulkKind) CopyActions(work.Container) []work.Action   { return slices.Clone(k.copies) }
+func (k *bulkKind) TypeWords() []string                        { return nil }
 func (k *bulkKind) ItemActions(work.Container, work.Item) []work.Action {
 	return nil
 }
