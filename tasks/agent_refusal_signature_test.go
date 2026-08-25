@@ -3,6 +3,7 @@ package tasks
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // claudeCaptureReworded is the same capture with the provider's sentence
@@ -143,5 +144,114 @@ func TestClaudeRefusalNeedsBothTypedFields(t *testing.T) {
 	}
 	if result := NormalizeAgentOutput(AgentOutputClaudeStreamJSON, overloaded); result.ProceedVerdict != nil {
 		t.Fatalf("verdict %+v from a capture that refused nothing", *result.ProceedVerdict)
+	}
+}
+
+// codexSpendCapStreamWithTypedField is a spend-capped codex capture carrying
+// the token_count event codex actually sends ahead of the refusal: rate_limits
+// names the workspace cap on rate_limit_reached_type before either diagnostic
+// channel says so in prose (ADR-0234).
+func codexSpendCapStreamWithTypedField(message string) string {
+	return `{"type":"thread.started","thread_id":"t"}` + "\n" +
+		`{"type":"turn.started"}` + "\n" +
+		`{"type":"token_count","info":{},"rate_limits":{"rate_limit_reached_type":"` + codexSpendCapRateLimitType + `"}}` + "\n" +
+		`{"type":"error","message":"` + message + `"}` + "\n" +
+		`{"type":"turn.failed","error":{"message":"` + message + `"}}`
+}
+
+// The typed field is the reading: rate_limit_reached_type on the token_count
+// event ahead of the refusal, unread before ADR-0234 (ADR-0231 recorded its
+// existence and did not read it).
+func TestCodexReadsItsSpendCapFromTheTypedRateLimitTypeField(t *testing.T) {
+	t.Parallel()
+	raw := codexSpendCapStreamWithTypedField(codexSpendCapMessage)
+
+	class, refused := codexStructuredSpendCap(raw)
+	if !refused {
+		t.Fatal("the captured spend cap was not read from its typed field")
+	}
+	if class != QuotaWindowUnknown {
+		t.Fatalf("class = %q, want %q — a spend cap names no allowance window", class, QuotaWindowUnknown)
+	}
+
+	v := normalizeCodexJSONL(raw).ProceedVerdict
+	if v == nil || v.Kind != ProceedSpendCap {
+		t.Fatalf("verdict = %#v, want a spend cap", v)
+	}
+}
+
+// A reworded refusal costs pop nothing now: the "spend cap" substring is gone,
+// the typed field beside it still says what happened, and the provider's own
+// sentence still reaches the reason a human reads.
+func TestCodexSpendCapSurvivesARewordedSentenceWithIntactTypedField(t *testing.T) {
+	t.Parallel()
+	reworded := "Your workspace has reached its spending ceiling for this billing period."
+	if strings.Contains(strings.ToLower(reworded), spendCapSignal) {
+		t.Fatalf("reworded message still carries the substring %q", spendCapSignal)
+	}
+	raw := codexSpendCapStreamWithTypedField(reworded)
+
+	v := normalizeCodexJSONL(raw).ProceedVerdict
+	if v == nil {
+		t.Fatal("a reworded spend cap with an intact typed field went undetected")
+	}
+	if v.Kind != ProceedSpendCap {
+		t.Fatalf("Kind = %q, want %q", v.Kind, ProceedSpendCap)
+	}
+	if v.Reason != reworded {
+		t.Fatalf("Reason = %q, want the provider's reworded sentence %q", v.Reason, reworded)
+	}
+}
+
+// And a capture with no token_count event at all is still read: the substring
+// stays, beneath, exactly as it always has.
+func TestCodexSpendCapFallsBackToTheSubstringWithoutTheTypedField(t *testing.T) {
+	t.Parallel()
+	raw := codexSpendCapStream()
+	if _, refused := codexStructuredSpendCap(raw); refused {
+		t.Fatal("a capture with no token_count event still read as structured")
+	}
+
+	v := normalizeCodexJSONL(raw).ProceedVerdict
+	if v == nil || v.Kind != ProceedSpendCap {
+		t.Fatalf("verdict = %#v, want a spend cap detected from the substring", v)
+	}
+	if v.Reason != codexSpendCapMessage {
+		t.Fatalf("Reason = %q, want %q", v.Reason, codexSpendCapMessage)
+	}
+}
+
+// TestBlindRefusalSignatureStillDetectsViaProse pins that declaring a Blind
+// refusal signature changed nothing about the four providers that have no
+// structured channel to read: each still finds its own refusal from its own
+// prose detector, exactly as it did before this capability existed (ADR-0234).
+func TestBlindRefusalSignatureStillDetectsViaProse(t *testing.T) {
+	t.Parallel()
+	for _, preset := range []string{"cursor", "kimi", "opencode", "pi"} {
+		adapter, err := ResolveAgentAdapter(preset)
+		if err != nil {
+			t.Fatalf("resolve %s: %v", preset, err)
+		}
+		sig := adapter.RefusalSignatureCapability()
+		if sig.Kind != CapabilityBlind {
+			t.Fatalf("%s refusal-signature Kind = %v, want Blind", preset, sig.Kind)
+		}
+		if strings.TrimSpace(sig.Reason) == "" {
+			t.Fatalf("%s Blind refusal-signature carries no reason naming why it has no structured channel", preset)
+		}
+	}
+
+	// cursor: a bare stderr line, model-scoped rather than preset-scoped.
+	now := time.Date(2026, 8, 9, 12, 0, 0, 0, time.Local)
+	if v := cursorSpentAllowanceReason(cursorAllowanceRefusalCapture(t), now); v == nil || v.Kind != ProceedModelRefused {
+		t.Fatalf("cursor prose refusal = %#v, want an unchanged model-scoped refusal", v)
+	}
+	// kimi: a stderr-only quota diagnostic, never on its stream-json.
+	if v := kimiProceedVerdict("Error: usage limit for this period reached, try again later."); v == nil || v.Kind != ProceedQuotaPause {
+		t.Fatalf("kimi prose refusal = %#v, want an unchanged quota pause", v)
+	}
+	// opencode and pi share the opencode-go matcher over the raw capture.
+	if v := opencodeGoQuotaPauseReason("5-hour usage limit reached"); v == nil || v.Kind != ProceedQuotaPause {
+		t.Fatalf("opencode/pi prose refusal = %#v, want an unchanged quota pause", v)
 	}
 }

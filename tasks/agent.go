@@ -405,11 +405,8 @@ var agentAdapters = map[string]AgentAdapter{
 			Command:              &AgentCommand{Name: "codex", Args: []string{"login", "status"}},
 			ReportsAuthenticated: reportsCodexAuthenticated,
 		},
-		refusalSignature: AgentRefusalSignatureCapability{
-			Kind:   CapabilityBlind,
-			Reason: "codex's refusal is classified from the prose inside its typed error and turn.failed events",
-		},
-		quotaReset: AgentQuotaResetCapability{Kind: CapabilitySupported, ResetAt: codexQuotaResetAt},
+		refusalSignature: codexRefusalSignature,
+		quotaReset:       AgentQuotaResetCapability{Kind: CapabilitySupported, ResetAt: codexQuotaResetAt},
 		effortLadder: AgentEffortLadderCapability{
 			Kind: CapabilitySupported,
 			Ladder: map[string][]config.EffortModel{

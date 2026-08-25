@@ -49,7 +49,7 @@ func normalizeCodexJSONL(raw string) AgentResult {
 				detail = event.Message
 			}
 			if pause == nil {
-				pause = codexProceedStop(detail)
+				pause = codexProceedStop(raw, detail)
 			}
 			appendAgentDiagnostic(&diagnostics, detail)
 		}
@@ -61,16 +61,68 @@ func normalizeCodexJSONL(raw string) AgentResult {
 	return normalizedTranscript(transcript, diagnostics)
 }
 
-// codexProceedStop reads one codex error or turn.failed diagnostic for the
-// stops that are the account's rather than the task's. The two are told apart
-// by what they promise: a usage limit refills at a stated time, a spend cap
-// waits on a person, so they cool on different clocks and are separate verdict
-// flavours (ADR-0231).
-func codexProceedStop(message string) *AgentProceedVerdict {
-	if v := spendCapReason(message); v != nil {
+// codexSpendCapRateLimitType is the rate_limit_reached_type value codex's
+// token_count event states, on its rate_limits block, when the account has hit
+// its workspace spend cap — observed 2026-08-21 on the token_count event
+// preceding the refusal.
+const codexSpendCapRateLimitType = "workspace_member_usage_limit_reached"
+
+// codexRefusalSignature is how codex recognises its spend-cap refusal: the
+// typed rate-limit-type field first, its "spend cap" substring beneath it for
+// a capture that changed its event schema rather than its wording (ADR-0234).
+var codexRefusalSignature = AgentRefusalSignatureCapability{
+	Kind:       CapabilitySupported,
+	Structured: codexStructuredSpendCap,
+}
+
+// codexStructuredSpendCap reads codex's typed rate-limit-type field: the
+// token_count event ahead of the refusal carries rate_limit_reached_type on
+// its rate_limits block, unread by the substring match the refusal itself used
+// to be classified by alone (ADR-0234). A spend cap names no allowance window,
+// so the class is always Unknown; the bool is the whole reading.
+func codexStructuredSpendCap(raw string) (AgentQuotaWindowClass, bool) {
+	found := false
+	scanAgentJSONLines(raw, nil, func(line []byte) bool {
+		var event struct {
+			Type       string `json:"type"`
+			RateLimits struct {
+				RateLimitReachedType string `json:"rate_limit_reached_type"`
+			} `json:"rate_limits"`
+		}
+		if err := json.Unmarshal(line, &event); err != nil {
+			return false
+		}
+		if event.Type == "token_count" && event.RateLimits.RateLimitReachedType == codexSpendCapRateLimitType {
+			found = true
+		}
+		return true
+	})
+	return QuotaWindowUnknown, found
+}
+
+// codexProceedStop reads one codex error or turn.failed diagnostic, and the
+// whole capture beside it, for the stops that are the account's rather than
+// the task's. The two are told apart by what they promise: a usage limit
+// refills at a stated time, a spend cap waits on a person, so they cool on
+// different clocks and are separate verdict flavours (ADR-0231).
+func codexProceedStop(raw, message string) *AgentProceedVerdict {
+	if v := codexSpendCapReason(raw, message); v != nil {
 		return v
 	}
 	return codexQuotaPauseReason(message)
+}
+
+// codexSpendCapReason detects codex's spend-cap refusal from the most
+// structured channel this capture carries: the typed rate-limit-type field a
+// preceding token_count event states, with the "spend cap" substring retained
+// as the reading for a capture whose event schema changed instead of its
+// wording (ADR-0234). Either way the provider's own sentence stays the reason
+// a human reads.
+func codexSpendCapReason(raw, message string) *AgentProceedVerdict {
+	if _, ok := codexRefusalSignature.structuredRefusal(raw); ok {
+		return DetectedSpendCap(strings.TrimSpace(message))
+	}
+	return spendCapReason(message)
 }
 
 // codexQuotaPauseReason detects codex's usage-limit message in an error or
