@@ -391,7 +391,7 @@ func TestDashboardActionMenuContextFiltering(t *testing.T) {
 
 	// A plain ready set: only the unconditional verbs plus auto-drain (non-orphaned).
 	plain := keysFor(DashboardRow{ID: "plain", RuntimePath: "/wt"})
-	if want := []string{"I", "S", "O", "b", "a", "y"}; !reflect.DeepEqual(plain, want) {
+	if want := []string{"I", "S", "O", "b", "a"}; !reflect.DeepEqual(plain, want) {
 		t.Fatalf("plain row verbs = %v, want %v", plain, want)
 	}
 
@@ -3232,8 +3232,10 @@ func TestDashboardSearch_ApplyRestoresTheWholeKeymap(t *testing.T) {
 		t.Fatalf("k over the narrowed rows: cursor = %d, want 0", m.list.Cursor())
 	}
 
-	// An action key runs its verb on the narrowed row.
+	// An action key runs its verb on the narrowed row: `y` opens the copy menu and
+	// `n` inside it copies the name.
 	updated, _ = m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	updated, _ = updated.(QueueDashboard).Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	m = updated.(QueueDashboard)
 	if copied != "set-one" {
 		t.Fatalf("y copied %q, want set-one", copied)
@@ -5075,14 +5077,15 @@ func TestDashboardMapRowQueueVerbsInert(t *testing.T) {
 	// the Map-scoped assist session, and the shared ones — spawning keys before
 	// in-place ones. Every Task-set verb stays absent, queue verbs having never
 	// applied to a Map, and so does the status opener: the Status menu opens from
-	// the row list (ADR-0236 decision 1) — and so does the Mute menu (decision 5),
-	// which is why no mute verb is here either.
+	// the row list (ADR-0236 decision 1) — and so does the Mute menu (decision 5)
+	// and the copy menu (decision 6), which is why neither a mute nor a copy verb
+	// is here.
 	items := dashboardMenuItems(testKinds(), mapRow)
 	var keys []string
 	for _, item := range items {
 		keys = append(keys, item.key)
 	}
-	if want := []string{"I", "A", "S", "O", "i", "a", "y"}; !reflect.DeepEqual(keys, want) {
+	if want := []string{"I", "A", "S", "O", "i", "a"}; !reflect.DeepEqual(keys, want) {
 		t.Fatalf("map menu keys = %v, want %v", keys, want)
 	}
 	for _, item := range items {

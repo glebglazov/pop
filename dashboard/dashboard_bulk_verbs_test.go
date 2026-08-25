@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -45,6 +46,7 @@ type bulkKind struct {
 	ids     []string
 	actions []work.Action
 	status  []work.Action
+	copies  []work.Action
 	// muted is the mute every row of this kind wears, zero for an unmuted page.
 	// The Mute menu offers its clear entry off the row, not off a verb list, so a
 	// test about unmute says so here.
@@ -73,6 +75,7 @@ func (k *bulkKind) Columns() []string {
 }
 func (k *bulkKind) Actions(work.Container) []work.Action       { return slices.Clone(k.actions) }
 func (k *bulkKind) StatusActions(work.Container) []work.Action { return slices.Clone(k.status) }
+func (k *bulkKind) CopyActions(work.Container) []work.Action   { return slices.Clone(k.copies) }
 func (k *bulkKind) ItemActions(work.Container, work.Item) []work.Action {
 	return nil
 }
@@ -108,30 +111,38 @@ func (k *bulkKind) Unmute(c work.Container) (work.Outcome, error) {
 }
 
 // setVerbs is a Task-set-shaped verb list: one handoff verb that stays singular,
-// and an archive only this kind offers. Neither the status nor the mute opener is
-// in any kind's Actions — both menus open from the row list (ADR-0236 decisions 1
-// and 5) — so the status half of the pair is what a Selection intersects when `s`
-// is pressed.
-func setVerbs() ([]work.Action, []work.Action) {
+// an archive only this kind offers, and one plural verb both kinds have, which is
+// what a mixed Selection intersects to. No opener is in any kind's Actions — the
+// status, mute and copy menus all open from the row list (ADR-0236 decisions 1, 5
+// and 6) — so each menu's own list is what a Selection intersects when its key is
+// pressed. The third list is the copy menu's, where copy-name lives now.
+func setVerbs() (actions, status, copies []work.Action) {
 	return []work.Action{
 			{Verb: work.Verb("drain"), Key: "I", Label: "drain"},
 			{Verb: work.VerbShell, Key: "O", Label: "shell"},
 			{Verb: work.Verb("archive"), Key: "x", Label: "archive", Modes: work.Plural},
-			{Verb: work.VerbCopyName, Key: "y", Label: "copy name", Modes: work.Plural},
+			{Verb: work.Verb("park"), Key: "P", Label: "park", Modes: work.Plural},
 		}, []work.Action{
 			{Verb: work.Verb("complete"), Key: "c", Label: "complete", Modes: work.Plural},
 			{Verb: work.Verb("open"), Key: "o", Label: "open", Modes: work.Plural},
+		}, []work.Action{
+			{Verb: work.VerbCopyName, Key: "n", Label: "copy name", Modes: work.Plural},
+			{Verb: work.Verb("copy-set-path"), Key: "y", Label: "copy set folder"},
 		}
 }
 
-// mapVerbs is a Map-shaped verb list: it shares copy-name with a task set and
-// nothing else, and its status vocabulary is disjoint.
-func mapVerbs() ([]work.Action, []work.Action) {
+// mapVerbs is a Map-shaped verb list: it shares park with a task set and nothing
+// else, its status vocabulary is disjoint, and its copy menu shares only the name
+// — a folder is one row's own.
+func mapVerbs() (actions, status, copies []work.Action) {
 	return []work.Action{
 			{Verb: work.Verb("work"), Key: "I", Label: "work frontier ticket and go"},
-			{Verb: work.VerbCopyName, Key: "y", Label: "copy name", Modes: work.Plural},
+			{Verb: work.Verb("park"), Key: "P", Label: "park", Modes: work.Plural},
 		}, []work.Action{
 			{Verb: work.Verb("abandon"), Key: "a", Label: "abandon", Modes: work.Plural},
+		}, []work.Action{
+			{Verb: work.VerbCopyName, Key: "n", Label: "copy name", Modes: work.Plural},
+			{Verb: work.Verb("copy-map-path"), Key: "y", Label: "copy map folder"},
 		}
 }
 
@@ -157,8 +168,8 @@ func bulkDashboard(t *testing.T, kinds ...work.Kind) QueueDashboard {
 // setDashboard is the common case: one kind holding the named rows.
 func setDashboard(t *testing.T, ids ...string) (QueueDashboard, *bulkKind) {
 	t.Helper()
-	actions, status := setVerbs()
-	k := &bulkKind{id: ref.KindTaskSet, ids: ids, actions: actions, status: status, log: &bulkLog{}}
+	actions, status, copies := setVerbs()
+	k := &bulkKind{id: ref.KindTaskSet, ids: ids, actions: actions, status: status, copies: copies, log: &bulkLog{}}
 	return bulkDashboard(t, k), k
 }
 
@@ -207,11 +218,11 @@ func menuLabels(m QueueDashboard) []string {
 // offer and both declare plural — never a union, because pressing `archive` on
 // two rows and silently affecting one is the failure the rule exists to prevent.
 func TestWorkBulkMenuListsOnlyWhatEveryRowOffers(t *testing.T) {
-	setActions, setStatus := setVerbs()
-	mapActions, mapStatus := mapVerbs()
+	setActions, setStatus, setCopies := setVerbs()
+	mapActions, mapStatus, mapCopies := mapVerbs()
 	log := &bulkLog{}
-	sets := &bulkKind{id: ref.KindTaskSet, ids: []string{"set-a"}, actions: setActions, status: setStatus, log: log}
-	maps := &bulkKind{id: ref.KindMap, ids: []string{"map-a"}, actions: mapActions, status: mapStatus, log: log}
+	sets := &bulkKind{id: ref.KindTaskSet, ids: []string{"set-a"}, actions: setActions, status: setStatus, copies: setCopies, log: log}
+	maps := &bulkKind{id: ref.KindMap, ids: []string{"map-a"}, actions: mapActions, status: mapStatus, copies: mapCopies, log: log}
 	m := bulkDashboard(t, sets, maps)
 
 	m = bulkPress(t, m, selKeyTab())
@@ -224,7 +235,7 @@ func TestWorkBulkMenuListsOnlyWhatEveryRowOffers(t *testing.T) {
 	if m.menu == nil || !m.menu.plural {
 		t.Fatal("`a` did not open the plural action menu")
 	}
-	want := []string{"copy name"}
+	want := []string{"park"}
 	if got := menuLabels(m); !slices.Equal(got, want) {
 		t.Fatalf("menu = %v, want %v — the intersection, each item its verb label", got, want)
 	}
@@ -292,12 +303,12 @@ func TestWorkBulkStatusMenuIntersects(t *testing.T) {
 
 	// A Map and a task set both have status vocabularies and neither shares a word
 	// with the other, which is exactly the case the intersection exists for.
-	setActions, setStatus := setVerbs()
-	mapActions, mapStatus := mapVerbs()
+	setActions, setStatus, setCopies := setVerbs()
+	mapActions, mapStatus, mapCopies := mapVerbs()
 	log := &bulkLog{}
 	mixed := bulkDashboard(t,
-		&bulkKind{id: ref.KindTaskSet, ids: []string{"set-a"}, actions: setActions, status: setStatus, log: log},
-		&bulkKind{id: ref.KindMap, ids: []string{"map-a"}, actions: mapActions, status: mapStatus, log: log},
+		&bulkKind{id: ref.KindTaskSet, ids: []string{"set-a"}, actions: setActions, status: setStatus, copies: setCopies, log: log},
+		&bulkKind{id: ref.KindMap, ids: []string{"map-a"}, actions: mapActions, status: mapStatus, copies: mapCopies, log: log},
 	)
 	mixed = bulkPress(t, mixed, selKeyTab())
 	mixed = bulkPress(t, mixed, selKeyTab())
@@ -439,9 +450,11 @@ func TestWorkBulkSeveralFailuresFlashABareCount(t *testing.T) {
 	}
 }
 
-// `y` over a Selection copies every marked name, newline-joined in the region's
-// order. It asks nothing first: copying writes no container, and a mistaken copy
-// costs one keypress.
+// `y` over a Selection opens the plural copy menu, and `n` in it copies every
+// marked name, newline-joined in the region's order. It asks nothing first:
+// copying writes no container, and a mistaken copy costs one keypress. The menu
+// lists what every marked row can copy, which for a set of task sets is the name
+// alone — a folder is one row's own (ADR-0236 decisions 6 and 10).
 func TestWorkBulkCopyNameJoinsEverySelectedName(t *testing.T) {
 	m, _ := setDashboard(t, "set-a", "set-b", "set-c")
 	var copied []string
@@ -451,9 +464,19 @@ func TestWorkBulkCopyNameJoinsEverySelectedName(t *testing.T) {
 	m = bulkPress(t, m, selKeyTab()) // marks set-c, so the marks are made out of order
 
 	m = bulkPress(t, m, selKeyRune('y'))
+	if m.menu == nil || m.menu.copy == nil || !m.menu.plural {
+		t.Fatalf("y under a Selection did not open the plural copy menu: %+v", m.menu)
+	}
+	if keys := copyMenuKeys(m); !reflect.DeepEqual(keys, []string{"n"}) {
+		t.Fatalf("plural copy menu keys = %v, want the name alone", keys)
+	}
+	m = bulkPress(t, m, selKeyRune('n'))
 
 	if m.bulkPrompt != nil {
 		t.Fatal("a copy asked for confirmation")
+	}
+	if m.menu != nil {
+		t.Fatal("the plural copy menu stayed open behind the copy")
 	}
 	if len(copied) != 1 || copied[0] != "set-a\nset-c" {
 		t.Fatalf("clipboard = %q, want both names newline-joined in the region's order", copied)

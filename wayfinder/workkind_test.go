@@ -161,7 +161,7 @@ func TestMapKindVerbsFollowTheFrontier(t *testing.T) {
 		}
 		return out
 	}
-	wantActions := []work.Verb{VerbWork, VerbFanOut, VerbAssist, work.VerbShell, VerbWorkHere, VerbFanOutHere, work.VerbCopyName}
+	wantActions := []work.Verb{VerbWork, VerbFanOut, VerbAssist, work.VerbShell, VerbWorkHere, VerbFanOutHere}
 	if got := verbs(k.Actions(active)); !slices.Equal(got, wantActions) {
 		t.Fatalf("map actions = %v, want %v", got, wantActions)
 	}
@@ -179,7 +179,7 @@ func TestMapKindVerbsFollowTheFrontier(t *testing.T) {
 	// (ADR-0236 decisions 1 and 5).
 	frontierless := active
 	frontierless.MapFrontier = 0
-	if got, want := verbs(k.Actions(frontierless)), []work.Verb{VerbAssist, work.VerbShell, work.VerbCopyName}; !slices.Equal(got, want) {
+	if got, want := verbs(k.Actions(frontierless)), []work.Verb{VerbAssist, work.VerbShell}; !slices.Equal(got, want) {
 		t.Fatalf("frontierless map actions = %v, want %v", got, want)
 	}
 
@@ -196,6 +196,42 @@ func TestMapKindVerbsFollowTheFrontier(t *testing.T) {
 	}
 	if _, err := k.Perform(active, nil, work.Verb("drain")); err == nil {
 		t.Fatal("a Task-set verb on a Map should be refused")
+	}
+}
+
+// TestMapCopyMenuOffersNameAndFolder pins the Map's copy menu (ADR-0236 decision
+// 6): the name on `n` and the Map's own folder on `y`, so `y` `y` copies the
+// directory its map.md and tickets live in. Neither is in Actions any more.
+func TestMapCopyMenuOffersNameAndFolder(t *testing.T) {
+	k, _ := mapKindFixture(t)
+	containers, err := k.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var active work.Container
+	for _, c := range containers {
+		if c.ID == "2026-07-01-active" {
+			active = c
+		}
+	}
+	var keyed []string
+	for _, a := range k.CopyActions(active) {
+		keyed = append(keyed, a.Key+"="+string(a.Verb))
+	}
+	if want := []string{"n=copy-name", "y=copy-map-path"}; !slices.Equal(keyed, want) {
+		t.Fatalf("map copy menu = %v, want %v", keyed, want)
+	}
+	for _, a := range k.Actions(active) {
+		if a.Verb == work.VerbCopyName || a.Verb == VerbCopyMapPath || a.Verb == work.VerbCopy {
+			t.Fatalf("Actions offered %s — the copy menu owns it", a.Verb)
+		}
+	}
+	out, err := k.Perform(active, nil, VerbCopyMapPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join("/data/repos/repo-aaaa", "maps", "2026-07-01-active"); out.Clipboard != want {
+		t.Fatalf("copy-map-path clipboard = %q, want %q", out.Clipboard, want)
 	}
 }
 
@@ -219,7 +255,7 @@ func TestMapKindVerbCapabilities(t *testing.T) {
 	active.MutedUntil = time.Now().Add(time.Hour)
 	plural := map[work.Verb]bool{
 		work.VerbCopyName: true,
-		VerbReopen: true, VerbAbandon: true, VerbArchive: true, VerbUnarchive: true,
+		VerbReopen:        true, VerbAbandon: true, VerbArchive: true, VerbUnarchive: true,
 	}
 	for _, action := range append(k.Actions(active), k.StatusActions(active)...) {
 		if got := action.Modes.AllowsPlural(); got != plural[action.Verb] {

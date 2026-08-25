@@ -2,9 +2,12 @@ package dashboard
 
 import (
 	"errors"
-	"github.com/glebglazov/pop/tasks/drain"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/glebglazov/pop/tasks/drain"
+	"github.com/glebglazov/pop/ui"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/glebglazov/pop/config"
@@ -13,10 +16,11 @@ import (
 	"github.com/glebglazov/pop/work/ref"
 )
 
-// TestQueueDashboardCopyTaskSetRow covers the `y` verb on a task-set row: the
-// bare set identifier is copied through the injected clipboard helper and
-// confirmed on the status line.
-func TestQueueDashboardCopyTaskSetRow(t *testing.T) {
+// TestCopyMenuOpensOverATaskSetRow covers `y` on a task-set row: it opens the
+// copy menu rather than copying the name outright, `n` inside it copies the bare
+// set identifier through the injected clipboard helper, and the confirmation lands
+// on the hint line (ADR-0236 decision 6).
+func TestCopyMenuOpensOverATaskSetRow(t *testing.T) {
 	row := DashboardRow{
 		Project: "pop", CursorKey: "pop\x00my-set",
 		RawStatus: tasks.StatusReady, ID: "my-set", DefPath: "/repo/tasks", StatePath: "/repo/state.json",
@@ -33,10 +37,29 @@ func TestQueueDashboardCopyTaskSetRow(t *testing.T) {
 	}
 
 	updated, cmd := m.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
-	if cmd != nil {
-		t.Fatal("y should not schedule a command")
-	}
 	got := updated.(QueueDashboard)
+	if cmd != nil {
+		t.Fatal("opening the copy menu should not schedule a command")
+	}
+	if got.menu == nil || got.menu.copy == nil {
+		t.Fatalf("y did not open the copy menu: %+v", got.menu)
+	}
+	if callCount != 0 {
+		t.Fatalf("y wrote the clipboard %d times before anything was chosen", callCount)
+	}
+	// An unbound set offers its name and its own folder, and no worktree path.
+	if keys := copyMenuKeys(got); !reflect.DeepEqual(keys, []string{"n", "y"}) {
+		t.Fatalf("unbound copy menu keys = %v, want name and set folder", keys)
+	}
+
+	updated, cmd = got.update(tea.KeyPressMsg{Code: 'n', Text: "n"})
+	got = updated.(QueueDashboard)
+	if cmd != nil {
+		t.Fatal("copying a name should not schedule a command")
+	}
+	if got.menu != nil {
+		t.Fatal("choosing an entry must close the copy menu")
+	}
 	if callCount != 1 || captured != "my-set" {
 		t.Fatalf("copyFunc called %d times with %q, want my-set", callCount, captured)
 	}
@@ -45,9 +68,49 @@ func TestQueueDashboardCopyTaskSetRow(t *testing.T) {
 	}
 }
 
-// TestQueueDashboardCopyMapRow covers the `y` verb on a Wayfinder Map row: the
-// map id is copied and confirmed.
-func TestQueueDashboardCopyMapRow(t *testing.T) {
+// TestCopyMenuYYCopiesTheSetsOwnFolder is the new capability: `y` `y` puts the
+// set-definition folder on the clipboard, which nothing could copy before, and a
+// bound set offers its worktree beside it on `w`.
+func TestCopyMenuYYCopiesTheSetsOwnFolder(t *testing.T) {
+	row := DashboardRow{
+		Project: "pop", CursorKey: "pop\x00my-set",
+		RawStatus: tasks.StatusReady, ID: "my-set", DefPath: "/repo/tasks", StatePath: "/repo/state.json",
+		Bound: true, RuntimePath: "/repo/worktrees/my-set",
+	}
+	m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{row}})
+	m.width, m.height = 120, 24
+	var captured string
+	m.copyFunc = func(s string) error { captured = s; return nil }
+
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	got := updated.(QueueDashboard)
+	if keys := copyMenuKeys(got); !reflect.DeepEqual(keys, []string{"n", "y", "w"}) {
+		t.Fatalf("bound copy menu keys = %v, want name, set folder and worktree", keys)
+	}
+	// The menu block names the menu and the row it is about to copy from.
+	if view := ui.StripANSI(got.View().Content); !strings.Contains(view, "copy · my-set") {
+		t.Fatalf("copy menu block missing its rule:\n%s", view)
+	}
+
+	got = pressKeys(t, got, "y")
+	if captured != "/repo/tasks/my-set" {
+		t.Fatalf("y y copied %q, want the set's own definition folder", captured)
+	}
+	if got.menu != nil {
+		t.Fatal("choosing an entry must close the copy menu")
+	}
+
+	// And `w` is the worktree it is bound to, the payload the old `a` `p` had.
+	got = pressKeys(t, got, "y", "w")
+	if captured != "/repo/worktrees/my-set" {
+		t.Fatalf("y w copied %q, want the bound worktree path", captured)
+	}
+}
+
+// TestCopyMenuOnAMapRow covers the Map's copy menu: its name and its map folder.
+// The folder resolves against the store the row's definition path names, so a row
+// carrying none reports the refusal rather than copying a bare id.
+func TestCopyMenuOnAMapRow(t *testing.T) {
 	row := DashboardRow{
 		Project: "pop", Kind: ref.KindMap, CursorKey: "pop\x00map\x00demo-map",
 		ID: "demo-map", MapOpen: 1, MapFrontier: 1,
@@ -56,16 +119,15 @@ func TestQueueDashboardCopyMapRow(t *testing.T) {
 	m.width, m.height = 120, 24
 
 	var captured string
-	m.copyFunc = func(s string) error {
-		captured = s
-		return nil
-	}
+	m.copyFunc = func(s string) error { captured = s; return nil }
 
-	updated, cmd := m.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
-	if cmd != nil {
-		t.Fatal("y should not schedule a command")
-	}
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	got := updated.(QueueDashboard)
+	if keys := copyMenuKeys(got); !reflect.DeepEqual(keys, []string{"n", "y"}) {
+		t.Fatalf("map copy menu keys = %v, want name and map folder", keys)
+	}
+	updated, _ = got.update(tea.KeyPressMsg{Code: 'n', Text: "n"})
+	got = updated.(QueueDashboard)
 	if captured != "demo-map" {
 		t.Fatalf("copyFunc captured %q, want demo-map", captured)
 	}
@@ -74,70 +136,57 @@ func TestQueueDashboardCopyMapRow(t *testing.T) {
 	}
 }
 
-// TestQueueDashboardCopyViaMenu confirms copy name is reachable from the action
-// menu on both row kinds and is bound to y.
-func TestQueueDashboardCopyViaMenu(t *testing.T) {
-	t.Run("task set row", func(t *testing.T) {
-		row := DashboardRow{
-			Project: "pop", CursorKey: "pop\x00set-menu",
-			RawStatus: tasks.StatusReady, ID: "set-menu",
-		}
-		m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{row}})
-		m.width, m.height = 120, 24
-		if !menuHasKey(newDashboardMenu(testKinds(), row), "y") {
-			t.Fatal("task-set menu missing copy name bound to y")
-		}
+// TestCopyMenuEscReturnsToTheRowList pins the way out: the menu opened from the
+// row list, so esc closes to it and nothing was copied.
+func TestCopyMenuEscReturnsToTheRowList(t *testing.T) {
+	row := DashboardRow{
+		Project: "pop", CursorKey: "pop\x00esc-set",
+		RawStatus: tasks.StatusReady, ID: "esc-set", DefPath: "/repo/tasks",
+	}
+	m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{row}})
+	m.width, m.height = 120, 24
+	calls := 0
+	m.copyFunc = func(string) error { calls++; return nil }
 
-		var captured string
-		m.copyFunc = func(s string) error { captured = s; return nil }
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	updated, _ = updated.(QueueDashboard).update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	got := updated.(QueueDashboard)
+	if got.menu != nil {
+		t.Fatal("esc did not close the copy menu")
+	}
+	if calls != 0 {
+		t.Fatalf("esc copied %d times, want none", calls)
+	}
+}
 
-		updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-		got := updated.(QueueDashboard)
-		updated, cmd := got.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
-		if cmd != nil {
-			t.Fatal("y in menu should not schedule a command")
+// TestActionMenuHasNoCopyEntry pins decision 6's other half: the Run menu lost
+// both copies on every wired kind, so no verb it offers is one the copy menu owns.
+func TestActionMenuHasNoCopyEntry(t *testing.T) {
+	rows := []DashboardRow{
+		{Project: "pop", ID: "2026-07-01-set", RawStatus: tasks.StatusReady, Bound: true, RuntimePath: "/repo/wt", DefPath: "/repo/tasks"},
+		{Project: "pop", Kind: ref.KindMap, ID: "2026-07-02-chart", MapOpen: 1, MapFrontier: 1},
+		{Project: "pop", Kind: ref.KindRoutine, ID: "alpha", RoutineLastReport: "/data/report.md"},
+	}
+	for _, row := range rows {
+		kinds := testKinds()
+		if row.Kind == ref.KindRoutine {
+			kinds = testRoutineKinds()
 		}
-		got = updated.(QueueDashboard)
-		if got.menu != nil {
-			t.Fatal("y in menu should close the menu")
+		copies := kinds.copyActionsFor(row)
+		if len(copies) == 0 {
+			t.Fatalf("%s offers nothing to copy", row.Kind)
 		}
-		if captured != "set-menu" {
-			t.Fatalf("copyFunc captured %q, want set-menu", captured)
+		for _, item := range dashboardMenuItems(kinds, row) {
+			if item.verb == work.VerbCopy || item.verb == work.VerbCopyName {
+				t.Fatalf("%s action menu still offers %s", row.Kind, item.verb)
+			}
+			for _, copyAction := range copies {
+				if item.verb == copyAction.Verb {
+					t.Fatalf("%s action menu still offers the copy verb %s", row.Kind, item.verb)
+				}
+			}
 		}
-		if got.flash.Text() != "copied set-menu" {
-			t.Fatalf("flash = %q, want copied confirmation", got.flash.Text())
-		}
-	})
-
-	t.Run("map row", func(t *testing.T) {
-		row := DashboardRow{
-			Project: "pop", Kind: ref.KindMap, CursorKey: "pop\x00map\x00map-menu",
-			ID: "map-menu", MapOpen: 1, MapFrontier: 1,
-		}
-		m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{row}})
-		m.width, m.height = 120, 24
-		items := dashboardMenuItems(testKinds(), row)
-		if last := items[len(items)-1]; last.label != "copy name" || last.key != "y" {
-			t.Fatalf("map menu items = %v, want copy name last on y", items)
-		}
-
-		var captured string
-		m.copyFunc = func(s string) error { captured = s; return nil }
-
-		updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-		got := updated.(QueueDashboard)
-		if got.menu == nil {
-			t.Fatal("a on map row did not open action menu")
-		}
-		updated, _ = got.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
-		got = updated.(QueueDashboard)
-		if captured != "map-menu" {
-			t.Fatalf("copyFunc captured %q, want map-menu", captured)
-		}
-		if got.flash.Text() != "copied map-menu" {
-			t.Fatalf("flash = %q, want copied confirmation", got.flash.Text())
-		}
-	})
+	}
 }
 
 // TestQueueDashboardCopyErrorSurfaces confirms a failing clipboard write is
@@ -150,9 +199,10 @@ func TestQueueDashboardCopyErrorSurfaces(t *testing.T) {
 	m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{row}})
 	m.copyFunc = func(string) error { return errors.New("boom") }
 
-	updated, cmd := m.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	updated, cmd := updated.(QueueDashboard).update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	if cmd != nil {
-		t.Fatal("y should not schedule a command on copy failure")
+		t.Fatal("y n should not schedule a command on copy failure")
 	}
 	got := updated.(QueueDashboard)
 	if got.flash.Text() != "copy failed: boom" {
@@ -160,8 +210,8 @@ func TestQueueDashboardCopyErrorSurfaces(t *testing.T) {
 	}
 }
 
-// TestQueueDashboardCopyHintAdvertisesY confirms the main hint bar advertises
-// the copy-name key.
+// TestQueueDashboardCopyHintAdvertisesY confirms the main hint bar advertises the
+// copy menu as the menu it now is.
 func TestQueueDashboardCopyHintAdvertisesY(t *testing.T) {
 	row := DashboardRow{
 		Project: "pop", CursorKey: "pop\x00hint-set",
@@ -170,9 +220,22 @@ func TestQueueDashboardCopyHintAdvertisesY(t *testing.T) {
 	m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{row}})
 	m.width, m.height = 120, 24
 	hint := m.mainHint()
-	if !strings.Contains(hint, "y copy name") {
-		t.Fatalf("mainHint = %q, want y copy name advertised", hint)
+	if !strings.Contains(hint, "y copy ▸") {
+		t.Fatalf("mainHint = %q, want the copy menu advertised", hint)
 	}
+}
+
+// copyMenuKeys is the open copy menu's entry keys, which is what a menu keyed for
+// the fingers has to be pinned on.
+func copyMenuKeys(m QueueDashboard) []string {
+	if m.menu == nil || m.menu.copy == nil {
+		return nil
+	}
+	var keys []string
+	for _, action := range m.menu.copy.list.Items() {
+		keys = append(keys, action.Key)
+	}
+	return keys
 }
 
 // detailCopyModel builds a QueueDashboard with a loaded task-set detail view.

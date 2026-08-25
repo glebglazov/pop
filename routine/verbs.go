@@ -53,22 +53,25 @@ const noReportMessage = "no report to copy"
 
 // Actions returns the container-level verbs that apply to one Routine right now,
 // spawning (handoff) verbs first and in-place verbs last: `I P E R O` then
-// `a l h p y`. A Routine whose definition would not load offers only copy-name:
-// every other verb reads or writes a definition that is not there, and offering
-// one would promise an act that can only fail. A Project routine carries no
-// pause bit (ADR-0138), so the consent pair is absent from it — the same
-// filtering the Routine action menu has always done, now answered by the kind
-// that knows why.
+// `a l h`. A Routine whose definition would not load offers none of them: every
+// one reads or writes a definition that is not there, and offering one would
+// promise an act that can only fail — such a row is still copyable, on the copy
+// menu's own key (ADR-0236 decision 6). A Project routine carries no pause bit
+// (ADR-0138), so the consent pair is absent from it — the same filtering the
+// Routine action menu has always done, now answered by the kind that knows why.
 //
-// Capability audit (ADR-0215 decision 5). Plural — copy-name alone. Singular —
-// everything else: fire, preview, edit and refine each hand the operator to a
-// pane; the pause pair is one bit per Routine, so a mixed set has no single
-// direction to drive; runs opens one history; and handoff and copy-report-path
-// each name one Routine's text, which the surface has nowhere to put beside
-// another's.
+// Neither copy verb is here. What a Routine can be copied as is its CopyActions,
+// reached from the row list rather than from inside this list (decision 6).
+//
+// Capability audit (ADR-0215 decision 5). Nothing here is plural: fire, preview,
+// edit and refine each hand the operator to a pane; the pause pair is one bit per
+// Routine, so a mixed set has no single direction to drive; runs opens one
+// history; and handoff names one Routine's text, which the surface has nowhere to
+// put beside another's. The one plural verb a Routine has is copy-name, which
+// lives on the copy menu.
 func (k *Kind) Actions(c work.Container) []work.Action {
 	if c.Broken {
-		return []work.Action{{Verb: work.VerbCopyName, Key: "y", Label: "copy name", Modes: work.Plural}}
+		return nil
 	}
 	actions := []work.Action{
 		{Verb: VerbFire, Key: "I", Label: "fire now"},
@@ -88,10 +91,23 @@ func (k *Kind) Actions(c work.Container) []work.Action {
 		work.Action{Verb: VerbRuns, Key: "l", Label: "runs"},
 		work.Action{Verb: VerbHandoff, Key: "h", Label: "handoff prompt"},
 	)
+	return actions
+}
+
+// CopyActions returns what a Routine can be put on the clipboard as: its name and,
+// when its newest run wrote one, that run's report path. A Routine has no folder
+// of its own to offer in `y`'s place — it is a prompt in a directory it shares —
+// so the report keeps the `p` the action menu gave it, and a never-fired Routine
+// simply omits the line (ADR-0236 decision 6).
+//
+// Only copy-name is plural: two Routines' reports have nowhere to go together
+// (ADR-0215 decision 5).
+func (k *Kind) CopyActions(c work.Container) []work.Action {
+	actions := []work.Action{{Verb: work.VerbCopyName, Key: "n", Label: "copy name", Modes: work.Plural}}
 	if c.RoutineLastReport != "" {
 		actions = append(actions, work.Action{Verb: VerbCopyReportPath, Key: "p", Label: "copy report path"})
 	}
-	return append(actions, work.Action{Verb: work.VerbCopyName, Key: "y", Label: "copy name", Modes: work.Plural})
+	return actions
 }
 
 // StatusActions returns nothing: a Routine has no status to write. Its one

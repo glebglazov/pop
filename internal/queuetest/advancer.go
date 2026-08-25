@@ -51,6 +51,7 @@ func (k *RecordingAdvancer) StatusCell(work.Container) []work.StatusSegment {
 }
 func (k *RecordingAdvancer) Actions(work.Container) []work.Action                { return nil }
 func (k *RecordingAdvancer) StatusActions(work.Container) []work.Action          { return nil }
+func (k *RecordingAdvancer) CopyActions(work.Container) []work.Action            { return nil }
 func (k *RecordingAdvancer) ItemActions(work.Container, work.Item) []work.Action { return nil }
 func (k *RecordingAdvancer) Perform(work.Container, *work.Item, work.Verb) (work.Outcome, error) {
 	return work.Outcome{}, nil

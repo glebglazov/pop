@@ -44,6 +44,7 @@ func (r *muteRecorder) Actions(c work.Container) []work.Action {
 }
 
 func (r *muteRecorder) StatusActions(work.Container) []work.Action          { return nil }
+func (r *muteRecorder) CopyActions(work.Container) []work.Action            { return nil }
 func (r *muteRecorder) ItemActions(work.Container, work.Item) []work.Action { return nil }
 func (r *muteRecorder) Summary([]work.Container) []string                   { return nil }
 func (r *muteRecorder) Columns() []string                                   { return nil }

@@ -86,13 +86,18 @@ func TestRoutineVerbCapabilities(t *testing.T) {
 			t.Fatalf("run verb %s is plural, want every item verb singular", action.Verb)
 		}
 	}
-	// A Routine that will not load offers its name alone, and that verb keeps its
-	// capability: a broken row is still a row a Selection can copy.
+	// A Routine that will not load offers no verb at all: every one of them reads
+	// the definition that is missing. It is still copyable — that lives on the copy
+	// menu now — and copy-name keeps its plural grant there, so a broken row is
+	// still a row a Selection can copy (ADR-0236 decision 6).
 	broken := c
 	broken.Broken = true
-	actions := k.Actions(broken)
-	if len(actions) != 1 || !actions[0].Modes.AllowsPlural() {
-		t.Fatalf("broken Routine actions = %+v, want copy-name alone, plural", actions)
+	if actions := k.Actions(broken); len(actions) != 0 {
+		t.Fatalf("broken Routine actions = %+v, want none", actions)
+	}
+	copies := k.CopyActions(broken)
+	if len(copies) == 0 || copies[0].Verb != work.VerbCopyName || !copies[0].Modes.AllowsPlural() {
+		t.Fatalf("broken Routine copy menu = %+v, want copy-name first and plural", copies)
 	}
 }
 
@@ -118,21 +123,21 @@ func TestRoutineActionsAnswerTheRowInFrontOfThem(t *testing.T) {
 	c := containerByID(t, containers, "alpha")
 	want := []work.Verb{
 		VerbFire, VerbPreview, VerbEdit, VerbRefine, work.VerbShell,
-		VerbPause, VerbRuns, VerbHandoff, work.VerbCopyName,
+		VerbPause, VerbRuns, VerbHandoff,
 	}
 	if got := verbsOffered(k.Actions(c)); !equalVerbs(got, want) {
 		t.Fatalf("actions = %v, want %v", got, want)
 	}
-	// Exactly two of the offered verbs are shared ids; every other one is the
+	// Exactly one of the offered verbs is a shared id; every other one is the
 	// Routine's own, so nothing it does was promoted into the seam's vocabulary.
 	shared := 0
 	for _, verb := range verbsOffered(k.Actions(c)) {
-		if verb == work.VerbShell || verb == work.VerbCopyName {
+		if verb == work.VerbShell {
 			shared++
 		}
 	}
-	if shared != 2 {
-		t.Fatalf("shared verbs among %v = %d, want shell and copy-name alone", verbsOffered(k.Actions(c)), shared)
+	if shared != 1 {
+		t.Fatalf("shared verbs among %v = %d, want shell alone", verbsOffered(k.Actions(c)), shared)
 	}
 
 	// The pause the operator applies in one pane is what the next menu open reads.
@@ -180,8 +185,13 @@ func TestRoutineActionsAnswerTheRowInFrontOfThem(t *testing.T) {
 	if !broken.Broken {
 		t.Fatalf("fixture did not break: %+v", broken)
 	}
-	if got := verbsOffered(k.Actions(broken)); !equalVerbs(got, []work.Verb{work.VerbCopyName}) {
-		t.Fatalf("broken actions = %v, want copy-name alone", got)
+	if got := verbsOffered(k.Actions(broken)); len(got) != 0 {
+		t.Fatalf("broken actions = %v, want none — every verb needs the definition that will not load", got)
+	}
+	// A broken Routine is still copyable: its name and whatever report its last run
+	// left are container facts, not definition reads (ADR-0236 decision 6).
+	if got := verbsOffered(k.CopyActions(broken)); !equalVerbs(got, []work.Verb{work.VerbCopyName}) {
+		t.Fatalf("broken copy menu = %v, want copy-name alone", got)
 	}
 }
 
@@ -366,8 +376,17 @@ func TestRoutineCopyVerbs(t *testing.T) {
 	if c.RoutineLastReport != report {
 		t.Fatalf("container last report = %q, want %q", c.RoutineLastReport, report)
 	}
-	if !hasVerb(k.Actions(c), VerbCopyReportPath) {
-		t.Fatalf("a fired Routine must offer copy-report-path: %v", verbsOffered(k.Actions(c)))
+	// The report path is a copy-menu entry now, keyed `p` as it was in the action
+	// menu, beside the name on `n` (ADR-0236 decision 6).
+	var keyed []string
+	for _, a := range k.CopyActions(c) {
+		keyed = append(keyed, a.Key+"="+string(a.Verb))
+	}
+	if want := []string{"n=copy-name", "p=copy-report-path"}; !equalStrings(keyed, want) {
+		t.Fatalf("copy menu = %v, want %v", keyed, want)
+	}
+	if hasVerb(k.Actions(c), VerbCopyReportPath) || hasVerb(k.Actions(c), work.VerbCopyName) {
+		t.Fatalf("Actions still carries a copy verb: %v", verbsOffered(k.Actions(c)))
 	}
 	rowCopy, err := k.Perform(c, nil, VerbCopyReportPath)
 	if err != nil {
@@ -497,9 +516,26 @@ func TestProjectRoutineOffersNoConsentPair(t *testing.T) {
 	if hasVerb(actions, VerbPause) || hasVerb(actions, VerbResume) {
 		t.Fatalf("a Project routine offered the consent pair: %v", verbsOffered(actions))
 	}
-	for _, verb := range []work.Verb{VerbFire, VerbEdit, VerbRefine, VerbRuns, VerbHandoff, work.VerbShell, work.VerbCopyName} {
+	for _, verb := range []work.Verb{VerbFire, VerbEdit, VerbRefine, VerbRuns, VerbHandoff, work.VerbShell} {
 		if !hasVerb(actions, verb) {
 			t.Fatalf("a Project routine must still offer %q: %v", verb, verbsOffered(actions))
 		}
 	}
+	if !hasVerb(k.CopyActions(c), work.VerbCopyName) {
+		t.Fatalf("a Project routine must still be copyable: %v", verbsOffered(k.CopyActions(c)))
+	}
+}
+
+// equalStrings compares two key=verb renderings, which is how a menu keyed for
+// the fingers is pinned.
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

@@ -25,7 +25,10 @@ func TestWorkDashboardMessagesLiveOnTheHintLine(t *testing.T) {
 	m.width, m.height = 120, 24
 	m.copyFunc = func(string) error { return nil }
 
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	// `y` opens the copy menu and `n` is the name inside it (ADR-0236 decision 6);
+	// the confirmation the flash carries is the same one it always was.
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	updated, cmd := updated.(QueueDashboard).Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	got := updated.(QueueDashboard)
 	if got.flash.Text() != "copied my-set" {
 		t.Fatalf("flash = %q, want the copy confirmation", got.flash.Text())
@@ -38,7 +41,7 @@ func TestWorkDashboardMessagesLiveOnTheHintLine(t *testing.T) {
 	if !strings.Contains(shown, "copied my-set") {
 		t.Fatalf("flash not rendered:\n%s", shown)
 	}
-	if strings.Contains(shown, "y copy name") {
+	if strings.Contains(shown, "y copy ▸") {
 		t.Fatalf("hints still shown while the flash holds the line:\n%s", shown)
 	}
 
@@ -52,7 +55,7 @@ func TestWorkDashboardMessagesLiveOnTheHintLine(t *testing.T) {
 	if got.flash.Text() != "" {
 		t.Fatalf("flash = %q after expiry, want it gone", got.flash.Text())
 	}
-	if back := got.View().Content; !strings.Contains(back, "y copy name") {
+	if back := got.View().Content; !strings.Contains(back, "y copy ▸") {
 		t.Fatalf("hints did not come back after the flash expired:\n%s", back)
 	}
 }

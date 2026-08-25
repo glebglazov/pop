@@ -144,6 +144,7 @@ func (k stubKind) Less(a, b work.Container) bool                  { return a.ID 
 func (k stubKind) StatusCell(work.Container) []work.StatusSegment { return nil }
 func (k stubKind) Actions(work.Container) []work.Action           { return nil }
 func (k stubKind) StatusActions(work.Container) []work.Action     { return nil }
+func (k stubKind) CopyActions(work.Container) []work.Action       { return nil }
 func (k stubKind) ItemActions(work.Container, work.Item) []work.Action {
 	return nil
 }

@@ -285,6 +285,54 @@ func (m QueueDashboard) openStatusMenu() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// dashboardCopyMenu is the copy menu opened with `y` from the row list. Its items
+// are the row's own kind's CopyActions — a Task set's name, set folder and
+// worktree path, a Map's name and folder, a Routine's name and last report — so
+// this file knows no payload of any kind (ADR-0236 decision 6). Every entry is
+// performed through the kind's own Perform, like any other verb the dashboard
+// dispatches.
+type dashboardCopyMenu struct {
+	row  DashboardRow
+	list *ui.List[work.Action]
+}
+
+// newDashboardCopyMenu opens the copy menu over row with what its kind can copy
+// right now — the worktree path of an unbound set is absent rather than present
+// and failing.
+func newDashboardCopyMenu(kinds workKinds, row DashboardRow) *dashboardCopyMenu {
+	return &dashboardCopyMenu{
+		row:  row,
+		list: ui.NewList(kinds.copyActionsFor(row), ui.Opts[work.Action]{Wrap: true}),
+	}
+}
+
+// openCopyMenu answers `y` from the row list. It offers what the row's kind says
+// it can be copied as instead of copying the name outright: the name is still one
+// keypress away (`y` `n`), and the paths beside it were reachable from nowhere
+// (decision 6). Over a Selection it offers what every marked row offers and
+// declares plural, which in practice is the name.
+//
+// A kind that can copy nothing answers in a flash rather than opening an empty
+// menu, the rule every top-level opener follows (decision 7). No wired kind is in
+// that state — every one of them has a name — so this is the guard for a future
+// kind, not a case on the board today.
+func (m QueueDashboard) openCopyMenu() (tea.Model, tea.Cmd) {
+	if m.selection.Active() {
+		return m.openSelectionCopyMenu()
+	}
+	row, ok := m.list.Selected()
+	if !ok {
+		return m, nil
+	}
+	if len(m.kinds.copyActionsFor(row)) == 0 {
+		m.flash.Set(fmt.Sprintf("a %s has nothing to copy", detailKindNoun(row.Kind)))
+		return m, nil
+	}
+	m.err = nil
+	m.menu = &dashboardMenu{row: row, copy: newDashboardCopyMenu(m.kinds, row)}
+	return m, nil
+}
+
 // openMuteMenu answers `m` from the row list. Over one row it offers that row's
 // windows and, on an already-muted row, `u` to clear; over a Selection one window
 // answers for every marked row, exactly as the opener did from inside the action
@@ -324,6 +372,7 @@ type dashboardMenu struct {
 	row    DashboardRow
 	list   *ui.List[dashboardMenuItem]
 	status *dashboardStatusMenu
+	copy   *dashboardCopyMenu
 	mute   *dashboardMuteMenu
 	// plural marks a menu opened over a Selection: its items are the verbs every
 	// targeted row offers and declares plural, and targets is the row set they
@@ -1378,18 +1427,11 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.detail = m.openDetailView(row)
 			return m, nil
 		case "y":
-			if m.selection.Active() {
-				// Copy-name is granted plural by every kind that has a name, so `y`
-				// keeps its meaning in the mode: it copies what is marked, in the
-				// region's order, and asks nothing first because it writes nothing.
-				return m.dispatchBulkVerb(work.VerbCopyName, m.selectionRows())
-			}
-			row, ok := m.list.Selected()
-			if !ok {
-				return m, nil
-			}
-			m.flash.Set(m.copyRowName(row))
-			return m, nil
+			// The copy menu opens from the row list, the way every other menu does
+			// (ADR-0236 decisions 1 and 6): `y` `n` copies the name this key used to
+			// copy outright, and `y` `y` copies the row's own folder, which nothing
+			// could copy before.
+			return m.openCopyMenu()
 		}
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -1627,6 +1669,9 @@ func (m QueueDashboard) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.menu.status != nil {
 		return m.updateStatusMenu(msg)
 	}
+	if m.menu.copy != nil {
+		return m.updateCopyMenu(msg)
+	}
 	if m.menu.mute != nil {
 		return m.updateMuteMenu(msg)
 	}
@@ -1681,6 +1726,58 @@ func (m QueueDashboard) updateStatusMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// updateCopyMenu drives the copy menu: esc closes it back to the row list it
+// opened from, j/k move the highlight, Enter runs the highlighted entry, and any
+// matching entry letter runs that entry directly. Navigation resolves before the
+// entry keys for the same reason the Status menu resolves it first — `n` and `w`
+// would otherwise be one rebinding away from shadowing movement.
+func (m QueueDashboard) updateCopyMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.menu == nil || m.menu.copy == nil {
+		return m, nil
+	}
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		m.menu = nil
+		return m, nil
+	case "j", "down":
+		m.menu.copy.list.MoveDown()
+		return m, nil
+	case "k", "up":
+		m.menu.copy.list.MoveUp()
+		return m, nil
+	case "enter":
+		return m.invokeCopyMenuItem(m.menu.copy.list.Cursor())
+	}
+	for i, item := range m.menu.copy.list.Items() {
+		if msg.String() == item.Key {
+			return m.invokeCopyMenuItem(i)
+		}
+	}
+	return m, nil
+}
+
+// invokeCopyMenuItem closes the menu and dispatches the copy verb at idx down the
+// one path every row verb takes — the kind names the payload and the surface
+// writes the clipboard, with no copy-specific dispatch of its own.
+func (m QueueDashboard) invokeCopyMenuItem(idx int) (tea.Model, tea.Cmd) {
+	if m.menu == nil || m.menu.copy == nil {
+		return m, nil
+	}
+	items := m.menu.copy.list.Items()
+	if idx < 0 || idx >= len(items) {
+		return m, nil
+	}
+	item := items[idx]
+	row := m.menu.row
+	if m.menu.plural {
+		targets := m.menu.targets
+		m.menu = nil
+		return m.dispatchBulkVerb(item.Verb, targets)
+	}
+	m.menu = nil
+	return m.dispatchVerb(item.Verb, row)
 }
 
 // updateMuteMenu drives the Mute menu: esc closes it back to the row list it
@@ -3089,6 +3186,21 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			ui.HelpEntry{Key: "enter", Desc: "run action"},
 			ui.HelpEntry{Key: "esc", Desc: "close menu"},
 		)
+	case m.menu != nil && m.menu.copy != nil:
+		// The copy menu's entries are what the focused row's own kind can copy, so
+		// the help lists the menu that is actually open: a Routine row has no
+		// worktree path and must not be told it has one.
+		items := m.menu.copy.list.Items()
+		entries := make([]ui.HelpEntry, 0, len(items)+4)
+		for _, action := range items {
+			entries = append(entries, ui.HelpEntry{Key: action.Key, Desc: action.Label})
+		}
+		return append(entries,
+			ui.HelpEntry{Key: "j/k", Desc: "navigate"},
+			ui.HelpEntry{Key: "J/K", Desc: "navigate rows"},
+			ui.HelpEntry{Key: "enter", Desc: "run entry"},
+			ui.HelpEntry{Key: "esc", Desc: "close menu"},
+		)
 	case m.menu != nil && m.menu.mute != nil:
 		// The Mute menu's entries are dates derived from today, so the help lists the
 		// windows actually on offer rather than a fixed roster that would be wrong by
@@ -3218,14 +3330,14 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 		// so rather than describing the singular surface the human is not on.
 		if m.selection.Active() {
 			entries = append(entries,
-				ui.HelpEntry{Key: "y", Desc: "copy selected names"},
+				ui.HelpEntry{Key: "y", Desc: "copy menu over the selection"},
 				ui.HelpEntry{Key: "a", Desc: "actions over the selection"},
 				ui.HelpEntry{Key: "s", Desc: "status menu over the selection"},
 				ui.HelpEntry{Key: "m", Desc: "mute menu over the selection"},
 			)
 		} else {
 			entries = append(entries,
-				ui.HelpEntry{Key: "y", Desc: "copy name"},
+				ui.HelpEntry{Key: "y", Desc: "copy menu"},
 				ui.HelpEntry{Key: "a", Desc: "action menu"},
 				ui.HelpEntry{Key: "s", Desc: "status menu"},
 				ui.HelpEntry{Key: "m", Desc: "mute menu"},
@@ -3281,6 +3393,8 @@ func (m QueueDashboard) View() tea.View {
 			title = "Help · " + page + " · mute menu"
 		} else if m.menu != nil && m.menu.status != nil {
 			title = "Help · " + page + " · status menu"
+		} else if m.menu != nil && m.menu.copy != nil {
+			title = "Help · " + page + " · copy menu"
 		} else if m.menu != nil {
 			title = "Help · " + page + " · action menu"
 		} else if m.filter != nil {
@@ -3477,9 +3591,9 @@ func (m QueueDashboard) mainHint() string {
 	if m.selection.Active() {
 		// Only the keys that still do something in the mode, so the line does not
 		// advertise the verbs it is refusing.
-		return "j/k move · gg/G top/bottom · tab select · shift+tab clear · y copy names · a actions · s status ▸ · m mute ▸ · / search · " + filters + toggle + " · C-h help · h/esc quit"
+		return "j/k move · gg/G top/bottom · tab select · shift+tab clear · a actions · s status ▸ · y copy ▸ · m mute ▸ · / search · " + filters + toggle + " · C-h help · h/esc quit"
 	}
-	return "j/k move · gg/G top/bottom · tab select · l/enter detail · y copy name · a actions · s status ▸ · m mute ▸ · / search · " + filters + toggle + " · C-h help · h/esc quit"
+	return "j/k move · gg/G top/bottom · tab select · l/enter detail · a actions · s status ▸ · y copy ▸ · m mute ▸ · / search · " + filters + toggle + " · C-h help · h/esc quit"
 }
 
 // emptySearchLine is the body text when the search has hidden every row. It
@@ -4156,6 +4270,9 @@ func dashboardMenuLines(menu *dashboardMenu, width int, live livePaneCache) []st
 	if menu.status != nil {
 		return dashboardStatusMenuLines(menu.status, menu.target(), width)
 	}
+	if menu.copy != nil {
+		return dashboardCopyMenuLines(menu.copy, menu.target(), width)
+	}
 	if menu.mute != nil {
 		return dashboardMuteMenuLines(menu.mute, menu.target(), width)
 	}
@@ -4193,6 +4310,19 @@ func dashboardStatusMenuLines(status *dashboardStatusMenu, target string, width 
 		entries = append(entries, menuEntry{key: item.Key, label: item.Label})
 	}
 	return menuBlockLines("status", target, width, status.list.Cursor(), entries)
+}
+
+// dashboardCopyMenuLines renders the copy menu, captioned with the target the row
+// list named.
+func dashboardCopyMenuLines(copyMenu *dashboardCopyMenu, target string, width int) []string {
+	if copyMenu == nil {
+		return nil
+	}
+	entries := make([]menuEntry, 0, copyMenu.list.Len())
+	for _, item := range copyMenu.list.Items() {
+		entries = append(entries, menuEntry{key: item.Key, label: item.Label})
+	}
+	return menuBlockLines("copy", target, width, copyMenu.list.Cursor(), entries)
 }
 
 // dashboardMuteMenuLines renders the Mute menu: six numbered windows, the clear

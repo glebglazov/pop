@@ -400,6 +400,7 @@ func (k *presetKind) Columns() []string {
 }
 func (k *presetKind) Actions(work.Container) []work.Action                { return nil }
 func (k *presetKind) StatusActions(work.Container) []work.Action          { return nil }
+func (k *presetKind) CopyActions(work.Container) []work.Action            { return nil }
 func (k *presetKind) ItemActions(work.Container, work.Item) []work.Action { return nil }
 
 func (k *presetKind) StatusCell(c work.Container) []work.StatusSegment {
@@ -597,9 +598,12 @@ func TestWorkSelectionSeparatorIsARule(t *testing.T) {
 		m := selDashboard(selRows("set-a", "set-b", "set-c"))
 		m = markRow(t, m, "set-b")
 		m = markRow(t, m, "set-c")
-		m = selPress(t, m, selKeyRune('a'))
+		// The copy menu is the one a Selection of task sets can open: copy-name is
+		// the only plural verb a set has, and it lives there now (ADR-0236
+		// decision 6).
+		m = selPress(t, m, selKeyRune('y'))
 		if m.menu == nil {
-			t.Fatal("`a` did not open the action menu")
+			t.Fatal("`y` did not open the copy menu")
 		}
 
 		want := ui.StripANSI(ui.SelectionSeparator(2, m.width))

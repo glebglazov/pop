@@ -66,6 +66,16 @@ type Kind interface {
 	// and offers no opener; every verb here is performed through Perform like any
 	// other, so there is no second dispatch anywhere.
 	StatusActions(Container) []Action
+	// CopyActions returns the verbs that put something of this container on the
+	// clipboard, for the surface that offers them behind VerbCopy. It is a third
+	// list for the reason StatusActions is a second: what a container can be
+	// copied *as* is the kind's own knowledge — a task set has a set-definition
+	// folder and, when bound, a worktree; a Map has its map folder; a Routine has
+	// its last report — and a reader opening the menu chooses between those, which
+	// is a different act from running a verb on the row. Every entry is performed
+	// through Perform like any other verb, so there is no second dispatch
+	// anywhere. Every kind has at least a name to copy, so no kind returns none.
+	CopyActions(Container) []Action
 	// ItemActions returns the verbs that apply to one item of a container.
 	ItemActions(Container, Item) []Action
 	// Perform runs a verb. The item is nil for a container-level verb.
@@ -352,6 +362,12 @@ type Verb string
 const (
 	// VerbCopyName copies the container's or item's name to the clipboard.
 	VerbCopyName Verb = "copy-name"
+	// VerbCopy opens the container's copy menu. It is shared for the reason
+	// VerbStatus is: opening the menu is the *surface's* act — the entries inside
+	// it are the kind's CopyActions — so a surface can recognise the opener
+	// without naming a kind, and every kind offers it on one key (ADR-0236
+	// decision 6). A kind never performs it.
+	VerbCopy Verb = "copy"
 	// VerbShell opens a shell in the container's checkout.
 	VerbShell Verb = "shell"
 	// VerbStatus opens the container's status submenu. It is shared because

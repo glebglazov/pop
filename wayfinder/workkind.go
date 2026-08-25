@@ -46,6 +46,12 @@ const (
 	// a claimed ticket is one with a live pane and nothing to spawn — which is also
 	// why it has no staying twin: there is no act to perform in place.
 	VerbVisit work.Verb = "visit-ticket"
+	// VerbCopyMapPath copies the Map's own folder — the directory under the store's
+	// `maps/` root that holds its map.md and its ticket markdown. The id carries
+	// the `-map` suffix every kind-local verb here does: the surface dispatches on
+	// the id alone, so a bare "copy-path" would be one case away from performing
+	// the Task set's.
+	VerbCopyMapPath work.Verb = "copy-map-path"
 )
 
 // The Map's status verbs: the four writes that decide whether a Map row is on the
@@ -226,15 +232,16 @@ func (k *MapKind) Columns() []string {
 //
 // Assist is **not** gated: a Map whose frontier is empty or fully claimed is when a
 // session scoped to the Map itself is most needed (ADR-0184). The Task-set verbs
-// (drain/bind/…) have never applied to a Map and still do not — shell and
-// copy-name are the only verbs a Map has in common with a task set. Mute is a
-// third thing the two share, on the Mute menu's own key: a Map is mutable on the
-// same terms as a Task set (ADR-0200 decision 7).
+// (drain/bind/…) have never applied to a Map and still do not — shell is the only
+// verb a Map has in common with a task set here. Copy and mute are two more the
+// two share, each on its own menu's key: what a Map can be copied as is its
+// CopyActions (ADR-0236 decision 6), and a Map is mutable on the same terms as a
+// Task set (ADR-0200 decision 7).
 //
-// Capability audit (ADR-0215 decision 5). Plural — copy-name alone, for the same
-// reason a task set's is: there is no per-Map input. Singular — the four frontier verbs and assist, each
-// of which resolves a session per Map and hands the operator to a pane, which
-// has no plural meaning; and shell, which is one directory.
+// Capability audit (ADR-0215 decision 5). Nothing here is plural: the four
+// frontier verbs and assist each resolve a session per Map and hand the operator
+// to a pane, which has no plural meaning, and shell is one directory. The one
+// plural verb a Map has is copy-name, which lives on the copy menu.
 func (k *MapKind) Actions(c work.Container) []work.Action {
 	var actions []work.Action
 	if c.MapFrontier > 0 {
@@ -253,7 +260,21 @@ func (k *MapKind) Actions(c work.Container) []work.Action {
 			work.Action{Verb: VerbFanOutHere, Key: "a", Label: "fan out frontier"},
 		)
 	}
-	return append(actions, work.Action{Verb: work.VerbCopyName, Key: "y", Label: "copy name", Modes: work.Plural})
+	return actions
+}
+
+// CopyActions returns what a Map can be put on the clipboard as: its name and its
+// map folder — the directory under the store's `maps/` its map.md and tickets live
+// in. The keys mirror the Task set's for the same fingers (ADR-0236 decision 6):
+// `n` is the name, `y` is the Map's own folder, so `y` `y` copies it.
+//
+// Only copy-name is plural: two Maps' folders have nowhere to go together, while
+// a name per marked Map joins into one clipboard write (ADR-0215 decision 5).
+func (k *MapKind) CopyActions(c work.Container) []work.Action {
+	return []work.Action{
+		{Verb: work.VerbCopyName, Key: "n", Label: "copy name", Modes: work.Plural},
+		{Verb: VerbCopyMapPath, Key: "y", Label: "copy map folder"},
+	}
 }
 
 // StatusActions returns the Map's status submenu: reopen, abandon, archive,
@@ -347,7 +368,13 @@ func (k *MapKind) Perform(c work.Container, item *work.Item, verb work.Verb) (wo
 		return k.assistMap(c)
 	case VerbArchive, VerbUnarchive, VerbAbandon, VerbReopen:
 		return k.writeStatus(c, verb)
-	case work.VerbStatus, work.VerbMute, work.VerbUnmute:
+	case VerbCopyMapPath:
+		path, err := k.mapFolder(c)
+		if err != nil {
+			return work.Outcome{}, err
+		}
+		return work.Outcome{Kind: work.OutcomeMessage, Clipboard: path, Message: "copied " + path}, nil
+	case work.VerbStatus, work.VerbCopy, work.VerbMute, work.VerbUnmute:
 		// The status submenu and the mute pair are all caller-dispatched: a verb id
 		// carries no payload, so the status submenu's choice and the mute window come
 		// back through the caller instead — the status verbs one at a time as the
@@ -767,6 +794,23 @@ func (d *MapKindDeps) now() time.Time {
 		return d.Now()
 	}
 	return time.Now()
+}
+
+// mapFolder resolves the directory one Map's own files sit in: the store's
+// `maps/` root, folded from a pre-rename layout the way every read of it is, plus
+// the Map's id. It goes through mapsDir rather than joining the name here so a
+// store that still calls the directory `wayfinder/` yields the path a reader can
+// actually cd into.
+func (k *MapKind) mapFolder(c work.Container) (string, error) {
+	storage := storageDirFor(c)
+	if storage == "" {
+		return "", fmt.Errorf("wayfinder: no storage dir for map %q", c.ID)
+	}
+	root, err := mapsDir(k.d.Wayfinder, storage)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, c.ID), nil
 }
 
 // storageDirFor derives a Map container's Task-storage directory from the

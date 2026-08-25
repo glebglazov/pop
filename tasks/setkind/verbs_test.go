@@ -18,7 +18,7 @@ func verbsOffered(actions []work.Action) []work.Verb {
 }
 
 // TestActionsOrderSpawningFirst pins the ordering rule: every spawning (handoff)
-// verb before every in-place one, `I V F S O` then `b u a r y p` — the fix for
+// verb before every in-place one, `I V F S O` then `b u a r` — the fix for
 // the old interleaved `I V b u a s S F r O x y`. The container below trips every
 // conditional verb so the full list is exercised in one pass.
 func TestActionsOrderSpawningFirst(t *testing.T) {
@@ -35,8 +35,7 @@ func TestActionsOrderSpawningFirst(t *testing.T) {
 	}
 	want := []work.Verb{
 		VerbDrain, VerbVerify, VerbFold, VerbAssist, work.VerbShell,
-		VerbBind, VerbUnbind, VerbAutoDrain,
-		VerbUnpark, work.VerbCopyName, VerbCopyPath,
+		VerbBind, VerbUnbind, VerbAutoDrain, VerbUnpark,
 	}
 	if got := verbsOffered(k.Actions(c)); !slices.Equal(got, want) {
 		t.Fatalf("Actions = %v, want %v", got, want)
@@ -95,30 +94,30 @@ func TestVerbCapabilities(t *testing.T) {
 	}
 }
 
-// TestCopyPathHiddenOnUnboundSet pins that `p` is hidden — not offered at all —
-// on an unbound set, exactly like `u` (unbind), rather than shown and erroring
-// when pressed. A bound set offers it immediately after `y` and Perform copies
-// the bound worktree's runtime path.
-func TestCopyPathHiddenOnUnboundSet(t *testing.T) {
+// TestCopyMenuOffersNameFolderAndWorktree pins the set's copy menu: the name on
+// `n`, the set's own definition folder on `y` — so `y` `y` copies it — and the
+// bound worktree on `w`, hidden rather than shown-and-erroring on an unbound set
+// exactly like `u` (unbind). Neither copy verb is in Actions any more: the menu
+// owns them (ADR-0236 decision 6).
+func TestCopyMenuOffersNameFolderAndWorktree(t *testing.T) {
 	k := New(nil)
 
-	unbound := work.Container{ID: "2026-07-01-demo", Bound: false}
-	actions := k.Actions(unbound)
-	if slices.Contains(verbsOffered(actions), VerbCopyPath) {
-		t.Fatalf("unbound set offered copy-path: %v", verbsOffered(actions))
+	unbound := work.Container{ID: "2026-07-01-demo", DefPath: "/repo/tasks"}
+	if got, want := keyedVerbs(k.CopyActions(unbound)), []string{"n=copy-name", "y=copy-definition-path"}; !slices.Equal(got, want) {
+		t.Fatalf("unbound copy menu = %v, want %v", got, want)
 	}
-	if slices.Contains(verbsOffered(actions), VerbUnbind) {
-		t.Fatalf("unbound set offered unbind: %v", verbsOffered(actions))
+	if slices.Contains(verbsOffered(k.Actions(unbound)), VerbUnbind) {
+		t.Fatalf("unbound set offered unbind: %v", verbsOffered(k.Actions(unbound)))
 	}
 
-	bound := work.Container{ID: "2026-07-01-demo", Bound: true, RuntimePath: "/repo/worktrees/demo"}
-	actions = k.Actions(bound)
-	i := slices.Index(verbsOffered(actions), work.VerbCopyName)
-	if i < 0 || i+1 >= len(actions) || actions[i+1].Verb != VerbCopyPath {
-		t.Fatalf("copy-path does not sit immediately after copy-name: %v", verbsOffered(actions))
+	bound := work.Container{ID: "2026-07-01-demo", DefPath: "/repo/tasks", Bound: true, RuntimePath: "/repo/worktrees/demo"}
+	if got, want := keyedVerbs(k.CopyActions(bound)), []string{"n=copy-name", "y=copy-definition-path", "w=copy-path"}; !slices.Equal(got, want) {
+		t.Fatalf("bound copy menu = %v, want %v", got, want)
 	}
-	if key := actions[i+1].Key; key != "p" {
-		t.Fatalf("copy-path key = %q, want %q", key, "p")
+	for _, verb := range []work.Verb{work.VerbCopyName, VerbCopyPath, VerbCopyDefinitionPath, work.VerbCopy} {
+		if slices.Contains(verbsOffered(k.Actions(bound)), verb) {
+			t.Fatalf("Actions offered %s: %v", verb, verbsOffered(k.Actions(bound)))
+		}
 	}
 
 	out, err := k.Perform(bound, nil, VerbCopyPath)
@@ -128,6 +127,27 @@ func TestCopyPathHiddenOnUnboundSet(t *testing.T) {
 	if out.Clipboard != "/repo/worktrees/demo" {
 		t.Fatalf("copy-path clipboard = %q, want the bound worktree's runtime path", out.Clipboard)
 	}
+	// The new capability: the set itself, which nothing could copy before.
+	out, err = k.Perform(bound, nil, VerbCopyDefinitionPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Clipboard != "/repo/tasks/2026-07-01-demo" {
+		t.Fatalf("copy-definition-path clipboard = %q, want the set's own folder", out.Clipboard)
+	}
+	if _, err := k.Perform(work.Container{ID: "2026-07-01-demo"}, nil, VerbCopyDefinitionPath); err == nil {
+		t.Fatal("a container carrying no definition path must refuse rather than copy a bare id")
+	}
+}
+
+// keyedVerbs renders an action list as `key=verb` pairs, which is what a menu
+// whose keys are chosen for the fingers has to be pinned on.
+func keyedVerbs(actions []work.Action) []string {
+	out := make([]string, 0, len(actions))
+	for _, a := range actions {
+		out = append(out, a.Key+"="+string(a.Verb))
+	}
+	return out
 }
 
 func TestTaskCopyPathUsesTaskFile(t *testing.T) {

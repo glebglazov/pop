@@ -33,6 +33,7 @@ func (k *artifactDetailKind) StatusCell(work.Container) []work.StatusSegment {
 }
 func (k *artifactDetailKind) Actions(work.Container) []work.Action       { return nil }
 func (k *artifactDetailKind) StatusActions(work.Container) []work.Action { return nil }
+func (k *artifactDetailKind) CopyActions(work.Container) []work.Action   { return nil }
 func (k *artifactDetailKind) ItemActions(work.Container, work.Item) []work.Action {
 	return nil
 }

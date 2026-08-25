@@ -86,6 +86,17 @@ func (w workKinds) statusActionsFor(row DashboardRow) []work.Action {
 	return k.StatusActions(row)
 }
 
+// copyActionsFor is what the kind says row can be put on the clipboard as. Asked
+// when the copy menu opens, like statusActionsFor: the payloads are the kind's own
+// and the surface only lays them out (ADR-0236 decision 6).
+func (w workKinds) copyActionsFor(row DashboardRow) []work.Action {
+	k := w.kindFor(row)
+	if k == nil {
+		return nil
+	}
+	return k.CopyActions(row)
+}
+
 // itemActionsFor is the verb list the kind offers over one of row's items right
 // now. Like actionsFor it is asked when the menu opens, never carried on the
 // item: a task completed in another pane must not still offer "complete".

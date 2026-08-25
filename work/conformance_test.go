@@ -47,6 +47,9 @@ type conformanceCase struct {
 	// wantStatusActions is the kind's status submenu over the container, empty for
 	// a kind whose containers carry no writable status.
 	wantStatusActions []work.Verb
+	// wantCopyActions is the kind's copy menu over the container. Every kind has a
+	// name to copy, so no kind's is empty (ADR-0236 decision 6).
+	wantCopyActions []work.Verb
 	// wantSummary is the kind's header phrases for its own containers.
 	wantSummary []string
 	// callerModal is a verb the kind hands back for the caller to dispatch, or
@@ -86,7 +89,7 @@ func conformanceCases() []conformanceCase {
 			},
 			wantActions: []work.Verb{
 				setkind.VerbDrain, setkind.VerbAssist, work.VerbShell,
-				setkind.VerbBind, setkind.VerbAutoDrain, work.VerbCopyName,
+				setkind.VerbBind, setkind.VerbAutoDrain,
 			},
 			wantItemActions: []work.Verb{
 				setkind.VerbComplete, setkind.VerbSkip, work.VerbCopyName, setkind.VerbCopyPath,
@@ -95,8 +98,11 @@ func conformanceCases() []conformanceCase {
 				setkind.VerbComplete, setkind.VerbOpen, setkind.VerbSkip,
 				setkind.VerbArchive, setkind.VerbUnarchive,
 			},
-			wantSummary: []string{"1 task set", "1 ready"},
-			callerModal: setkind.VerbDrain,
+			// The fixture's set is unbound, so the worktree path is absent while the
+			// set's own definition folder — which every set has — is not.
+			wantCopyActions: []work.Verb{work.VerbCopyName, setkind.VerbCopyDefinitionPath},
+			wantSummary:     []string{"1 task set", "1 ready"},
+			callerModal:     setkind.VerbDrain,
 		},
 		{
 			name:        "map",
@@ -114,14 +120,15 @@ func conformanceCases() []conformanceCase {
 			},
 			wantActions: []work.Verb{
 				wayfinder.VerbWork, wayfinder.VerbFanOut, wayfinder.VerbAssist, work.VerbShell,
-				wayfinder.VerbWorkHere, wayfinder.VerbFanOutHere, work.VerbCopyName,
+				wayfinder.VerbWorkHere, wayfinder.VerbFanOutHere,
 			},
 			wantItemActions: []work.Verb{wayfinder.VerbWork, wayfinder.VerbWorkHere, work.VerbCopyName},
 			wantStatusActions: []work.Verb{
 				wayfinder.VerbReopen, wayfinder.VerbAbandon,
 				wayfinder.VerbArchive, wayfinder.VerbUnarchive,
 			},
-			wantSummary: []string{"1 map"},
+			wantCopyActions: []work.Verb{work.VerbCopyName, wayfinder.VerbCopyMapPath},
+			wantSummary:     []string{"1 map"},
 		},
 		{
 			name:      "routine",
@@ -143,17 +150,19 @@ func conformanceCases() []conformanceCase {
 					},
 				})
 			},
-			// Every Routine verb is the kind's own; only shell and copy-name are
-			// shared. The fixture's Routine is unpaused (so the consent pair reads
-			// `pause`) and its newest run is a skipped one that wrote no report, so
-			// the row-level copy-report-path is absent while the run item — which
+			// Every Routine verb is the kind's own; only shell is shared. The fixture's
+			// Routine is unpaused (so the consent pair reads `pause`) and its newest
+			// run is a skipped one that wrote no report, so the row-level
+			// copy-report-path is absent from the copy menu while the run item — which
 			// points at the report path it would have written — offers it.
 			wantActions: []work.Verb{
 				routine.VerbFire, routine.VerbPreview, routine.VerbEdit, routine.VerbRefine,
 				work.VerbShell, routine.VerbPause, routine.VerbRuns, routine.VerbHandoff,
-				work.VerbCopyName,
 			},
 			wantItemActions: []work.Verb{routine.VerbCopyReportPath, work.VerbCopyName},
+			// The fixture's newest run wrote no report, so the copy menu is the name
+			// alone — a Routine has no folder of its own to offer beside it.
+			wantCopyActions: []work.Verb{work.VerbCopyName},
 			wantSummary:     []string{"1 routine", "1 here"},
 		},
 	}
@@ -260,6 +269,33 @@ func TestKindConformance(t *testing.T) {
 			for _, action := range status {
 				if action.Key == "" || action.Label == "" {
 					t.Fatalf("status verb %+v needs a key and a label", action)
+				}
+			}
+
+			// The copy menu is the kind's own third list, reached from the row list on
+			// its own key (ADR-0236 decision 6). What each entry copies is the owning
+			// kind's test to make; here it is the roster and the keys that are pinned.
+			copies := k.CopyActions(c)
+			if got := verbsOf(copies); !slices.Equal(got, tc.wantCopyActions) {
+				t.Fatalf("CopyActions = %v, want %v", got, tc.wantCopyActions)
+			}
+			if len(copies) == 0 {
+				t.Fatal("every kind has at least a name to copy")
+			}
+			for _, action := range copies {
+				if action.Key == "" || action.Label == "" {
+					t.Fatalf("copy entry %+v needs a key and a label", action)
+				}
+			}
+			// Actions carries no copy of any kind: the opener would offer the menu
+			// twice, and a copy verb beside it would be the duplicate archive was
+			// (decision 6).
+			if slices.Contains(verbsOf(k.Actions(c)), work.VerbCopy) {
+				t.Fatalf("Actions = %v, want no copy opener — the copy menu opens from the row list", verbsOf(k.Actions(c)))
+			}
+			for _, action := range copies {
+				if slices.Contains(verbsOf(k.Actions(c)), action.Verb) {
+					t.Fatalf("Actions = %v, want no %s — it is a copy-menu entry", verbsOf(k.Actions(c)), action.Verb)
 				}
 			}
 

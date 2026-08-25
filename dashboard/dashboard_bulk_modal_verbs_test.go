@@ -22,8 +22,8 @@ import (
 // that carries abandon.
 func mapDashboard(t *testing.T, ids ...string) (QueueDashboard, *bulkKind) {
 	t.Helper()
-	actions, status := mapVerbs()
-	k := &bulkKind{id: ref.KindMap, ids: ids, actions: actions, status: status, log: &bulkLog{}}
+	actions, status, copies := mapVerbs()
+	k := &bulkKind{id: ref.KindMap, ids: ids, actions: actions, status: status, copies: copies, log: &bulkLog{}}
 	return bulkDashboard(t, k), k
 }
 
@@ -41,10 +41,10 @@ func markAll(t *testing.T, m QueueDashboard, n int) QueueDashboard {
 // same work.Muter seam the single row uses. It is reached from the Mute menu,
 // beside the windows that set a mute (ADR-0236 decision 5).
 func TestWorkBulkUnmuteClearsEverySelectedRow(t *testing.T) {
-	actions, status := setVerbs()
+	actions, status, copies := setVerbs()
 	k := &bulkKind{
 		id: ref.KindTaskSet, ids: []string{"set-a", "set-b", "set-c"},
-		actions: actions, status: status, muted: mutedUntilExample, log: &bulkLog{},
+		actions: actions, status: status, copies: copies, muted: mutedUntilExample, log: &bulkLog{},
 	}
 	m := markAll(t, bulkDashboard(t, k), 3)
 

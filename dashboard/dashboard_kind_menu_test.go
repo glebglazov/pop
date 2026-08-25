@@ -39,6 +39,7 @@ func (k *countingKind) Actions(c work.Container) []work.Action {
 }
 
 func (k *countingKind) StatusActions(work.Container) []work.Action          { return nil }
+func (k *countingKind) CopyActions(work.Container) []work.Action            { return nil }
 func (k *countingKind) ItemActions(work.Container, work.Item) []work.Action { return nil }
 func (k *countingKind) Perform(work.Container, *work.Item, work.Verb) (work.Outcome, error) {
 	return work.Outcome{}, nil
@@ -85,8 +86,9 @@ func TestActionMenuIsBuiltOnOpenFromTheKind(t *testing.T) {
 }
 
 // TestSharedVerbsKeepOneKeyOnEveryKind pins the two verbs the seam declares
-// shared: copy-name and shell come back on the same key from every kind, while
-// everything else in a menu is that kind's own.
+// shared: shell comes back on the same key from every kind's Run menu and
+// copy-name on the same key from every kind's copy menu, while everything else in
+// either menu is that kind's own.
 func TestSharedVerbsKeepOneKeyOnEveryKind(t *testing.T) {
 	set := DashboardRow{Project: "pop", ID: "2026-07-01-a", RawStatus: tasks.StatusReady, RuntimePath: "/repo/wt"}
 	wfMap := DashboardRow{Project: "pop", Kind: ref.KindMap, ID: "2026-07-02-chart", MapOpen: 1, MapFrontier: 1}
@@ -99,9 +101,20 @@ func TestSharedVerbsKeepOneKeyOnEveryKind(t *testing.T) {
 		}
 		return ""
 	}
+	copyKeyOf := func(row DashboardRow, verb work.Verb) string {
+		for _, action := range testKinds().copyActionsFor(row) {
+			if action.Verb == verb {
+				return action.Key
+			}
+		}
+		return ""
+	}
 	for _, row := range []DashboardRow{set, wfMap} {
-		if got := keyOf(row, work.VerbCopyName); got != "y" {
-			t.Fatalf("copy-name key on %s = %q, want y", row.Kind, got)
+		if got := keyOf(row, work.VerbCopyName); got != "" {
+			t.Fatalf("copy-name is in the Run menu on %s under %q — the copy menu owns it", row.Kind, got)
+		}
+		if got := copyKeyOf(row, work.VerbCopyName); got != "n" {
+			t.Fatalf("copy-name key on %s = %q, want n", row.Kind, got)
 		}
 		if got := keyOf(row, work.VerbShell); got != "O" {
 			t.Fatalf("shell key on %s = %q, want O", row.Kind, got)

@@ -30,6 +30,13 @@ const (
 	// (lowercase) like copy-name, and hidden rather than shown-and-erroring on an
 	// unbound set — the same gate unbind uses.
 	VerbCopyPath work.Verb = "copy-path"
+	// VerbCopyDefinitionPath copies the set's own definition folder — the
+	// `<definition path>/<set id>` directory its task markdown lives in, which is
+	// the set itself rather than a checkout it happens to be bound to. It is the
+	// path a reader reaches for most, so the copy menu gives it `y` (ADR-0236
+	// decision 6), and unlike the worktree path it is never gated: every set has a
+	// folder.
+	VerbCopyDefinitionPath work.Verb = "copy-definition-path"
 
 	// The three task-status writes, offered twice over: as item verbs filtered to
 	// one task's status the way the task action menu has always filtered them, and
@@ -42,13 +49,13 @@ const (
 
 // Actions returns the container-level verbs that apply to one task set right now,
 // spawning (handoff) verbs first and in-place verbs last: `I V F S O` then
-// `b u a r y p`, mirroring the order handoffAfterLaunch already names (drain,
+// `b u a r`, mirroring the order handoffAfterLaunch already names (drain,
 // verify, fold, assist, shell) so the two lists never drift apart. Conditional
 // verbs are filtered to the set's context: verify only for NEEDS-VERIFY /
 // VERIFY-FAILED sets with no live drain, fold only for a bound terminal set,
-// unbind only for bound sets, auto-drain only for non-orphaned sets, unpark only
-// for parked sets, and copy-path only for bound sets. Drain, assist, the runtime
-// shell, bind and copy-name apply to every set regardless of status.
+// unbind only for bound sets, auto-drain only for non-orphaned sets and unpark
+// only for parked sets. Drain, assist, the runtime shell and bind apply to every
+// set regardless of status.
 //
 // Neither the status opener nor archive is here. The Status menu opens from the
 // row list on its own key (ADR-0236 decision 1), and archive is one of its verbs
@@ -61,14 +68,18 @@ const (
 // unbind worktree on every set, muted or not, instead of the two verbs contesting
 // one key and the row's state deciding.
 //
+// Nor is either copy verb. What a set can be copied as is its CopyActions, on the
+// copy menu's own key (decision 6): a list that offered `y` copy-name beside a
+// menu holding three copies would be the same duplicate archive was.
+//
 // It is called when a menu opens over one container, not per container at load
 // time, so the eligibility it reports is as fresh as the keypress.
 //
-// Capability audit (ADR-0215 decision 5). Plural — copy-name alone: one word
-// answers identically for every marked set. Singular — drain, verify, fold, assist, shell, bind, unbind, auto-drain,
-// unpark and copy-path: each resolves a checkout, a worktree, a session or a
-// modal per set, so one answer cannot stand for the batch, and the handoff verbs
-// have no plural meaning at all.
+// Capability audit (ADR-0215 decision 5). Nothing here is plural: drain, verify,
+// fold, assist, shell, bind, unbind, auto-drain and unpark each resolve a
+// checkout, a worktree, a session or a modal per set, so one answer cannot stand
+// for the batch, and the handoff verbs have no plural meaning at all. The one
+// plural verb a set has is copy-name, which lives on the copy menu.
 func (k *Kind) Actions(c work.Container) []work.Action {
 	actions := []work.Action{{Verb: VerbDrain, Key: "I", Label: "drain"}}
 	// Verify is the lighter, explicit Verifier force (ADR-0123): offered only on
@@ -95,10 +106,6 @@ func (k *Kind) Actions(c work.Container) []work.Action {
 	if c.Parked {
 		actions = append(actions, work.Action{Verb: VerbUnpark, Key: "r", Label: "unpark"})
 	}
-	actions = append(actions, work.Action{Verb: work.VerbCopyName, Key: "y", Label: "copy name", Modes: work.Plural})
-	if c.Bound {
-		actions = append(actions, work.Action{Verb: VerbCopyPath, Key: "p", Label: "copy path"})
-	}
 	return actions
 }
 
@@ -120,6 +127,29 @@ func (k *Kind) StatusActions(c work.Container) []work.Action {
 		{Verb: VerbArchive, Key: "x", Label: "archive", Modes: work.Plural},
 		{Verb: VerbUnarchive, Key: "u", Label: "unarchive", Modes: work.Plural},
 	}
+}
+
+// CopyActions returns what a task set can be put on the clipboard as: its name,
+// its own set-definition folder, and — when it is bound — the worktree path it is
+// bound to. The keys are chosen for the fingers rather than for the mnemonic
+// (ADR-0236 decision 6): `y` is the set's own folder, so `y` `y` copies it, `n`
+// is the name and `w` is the worktree.
+//
+// The worktree path keeps the gate it had in Actions — hidden on an unbound set
+// rather than shown and erroring — while the set folder needs none, which is why
+// the new capability is the unconditional one.
+//
+// Only copy-name is plural (ADR-0215 decision 5): a name per marked set joins
+// into one clipboard write, while two sets' folders have nowhere to go together.
+func (k *Kind) CopyActions(c work.Container) []work.Action {
+	actions := []work.Action{
+		{Verb: work.VerbCopyName, Key: "n", Label: "copy name", Modes: work.Plural},
+		{Verb: VerbCopyDefinitionPath, Key: "y", Label: "copy set folder"},
+	}
+	if c.Bound {
+		actions = append(actions, work.Action{Verb: VerbCopyPath, Key: "w", Label: "copy worktree path"})
+	}
+	return actions
 }
 
 // ItemActions returns the verbs applicable to one task, filtered to its status:
@@ -183,6 +213,15 @@ func (k *Kind) Perform(c work.Container, item *work.Item, verb work.Verb) (work.
 			payload = TaskRef(c.ID, *item)
 		}
 		return work.Outcome{Kind: work.OutcomeMessage, Clipboard: payload, Message: "copied " + payload}, nil
+	case VerbCopyDefinitionPath:
+		// The set's own folder under the definition path — the same join
+		// Artifacts uses to find the markdown it lists, so the path a reader pastes
+		// is the directory the set was read from.
+		if c.DefPath == "" || c.ID == "" {
+			return work.Outcome{}, fmt.Errorf("setkind: %s has no definition folder", c.ID)
+		}
+		path := filepath.Join(c.DefPath, c.ID)
+		return work.Outcome{Kind: work.OutcomeMessage, Clipboard: path, Message: "copied " + path}, nil
 	case VerbCopyPath:
 		if item != nil {
 			path := strings.TrimSpace(item.File)
@@ -237,7 +276,7 @@ func (k *Kind) Perform(c work.Container, item *work.Item, verb work.Verb) (work.
 		}
 		return work.Outcome{Kind: work.OutcomeRefresh, Message: fmt.Sprintf("%s %s", word, c.ID)}, nil
 	case VerbDrain, VerbVerify, VerbBind, VerbUnbind, VerbAutoDrain, work.VerbStatus,
-		work.VerbMute, work.VerbUnmute, VerbAssist, VerbFold, VerbUnpark:
+		work.VerbCopy, work.VerbMute, work.VerbUnmute, VerbAssist, VerbFold, VerbUnpark:
 		// The mute pair is caller-dispatched for the same reason the status opener
 		// is, and one more: the window is a date the surface derived, and a verb id
 		// carries no payload. Both arrive back through work.Muter instead.

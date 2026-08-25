@@ -217,6 +217,31 @@ func (m QueueDashboard) openSelectionStatusMenu() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// openSelectionCopyMenu answers `y` under a Selection: the copy entries every
+// marked row offers and declares plural, on a menu that says how many rows it is
+// about to copy (ADR-0236 decision 10). In practice that is the name — a path is
+// one row's own and no two of them share a clipboard — so the mode keeps the
+// meaning `y` had before the menu existed, one keypress deeper.
+func (m QueueDashboard) openSelectionCopyMenu() (tea.Model, tea.Cmd) {
+	rows := m.selectionRows()
+	actions := pluralActions(rows, m.kinds.copyActionsFor)
+	if len(actions) == 0 {
+		m.flash.Set(fmt.Sprintf("nothing can be copied from all %s", bulkCount(len(rows))))
+		return m, nil
+	}
+	m.err = nil
+	m.menu = &dashboardMenu{
+		row:     rows[0],
+		plural:  true,
+		targets: rows,
+		copy: &dashboardCopyMenu{
+			row:  rows[0],
+			list: ui.NewList(actions, ui.Opts[work.Action]{Wrap: true}),
+		},
+	}
+	return m, nil
+}
+
 // openSelectionMuteMenu answers `m` under a Selection: the surface's own windows
 // over every marked row, and the clear entry when every one of them is muted
 // (ADR-0236 decision 10). A Selection holding a row that cannot be muted opens
