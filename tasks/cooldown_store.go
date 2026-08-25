@@ -151,6 +151,10 @@ func agentQuotaCooldownRow(req AgentQuotaCooldownRequest, now time.Time, unclass
 		}
 	}
 	row.ExhaustedUntil = now.Add(guessedQuotaCeiling(req.Class, req.Ceiling, unclassed))
+	// A guess is asked about rather than waited out, and the first ask is one
+	// interval away: the refusal just landed, so the window is certainly still
+	// shut now (ADR-0235).
+	row.NextProbeAt = now.Add(quotaProbeInterval(req.Class, 0))
 	return row
 }
 

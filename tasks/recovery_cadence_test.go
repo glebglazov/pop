@@ -30,7 +30,7 @@ func TestRecoveryPrinterCountdownPrintsEachCall(t *testing.T) {
 	base := time.Now().UTC()
 	resetAt := base.Add(time.Hour)
 	for i := 0; i < 5; i++ {
-		p.countdown(base.Add(time.Duration(i)*30*time.Second), "claude", resetAt)
+		p.countdown(base.Add(time.Duration(i)*30*time.Second), "claude", resetAt, false)
 	}
 
 	if got := countLines(&buf); got != 5 {

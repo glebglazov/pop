@@ -596,9 +596,10 @@ var migrations = []string{
 	// one; class records which window, empty when the refusal named none.
 	//
 	// next_probe_at and probe_lease_until belong to the probe loop that ends a
-	// guess by asking the agent rather than by waiting out the ceiling. Nothing
-	// writes them yet; they are here so the columns arrive in one migration
-	// rather than two.
+	// guess by asking the agent rather than by waiting out the ceiling:
+	// next_probe_at is when the exhausted preset is asked again, and
+	// probe_lease_until is the short claim that keeps parallel checkouts from
+	// each asking. Both are NULL on a stated row, which is never probed.
 	`ALTER TABLE agent_cooldowns ADD COLUMN stated_until TEXT;
 	 ALTER TABLE agent_cooldowns ADD COLUMN class TEXT NOT NULL DEFAULT '';
 	 ALTER TABLE agent_cooldowns ADD COLUMN next_probe_at TEXT;

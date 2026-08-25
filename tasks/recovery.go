@@ -391,12 +391,25 @@ func WaitForRecovery(d *Deps, w *RecoveryWaiter, out *output) error {
 	defer fastTicker.Stop()
 
 	printer := &recoveryPrinter{out: out, heartbeat: recoveryHeartbeat}
+	// A cooldown pop guessed is asked about on this same cadence rather than
+	// waited out; one carrying an instant a provider stated is not (ADR-0235).
+	prober := newQuotaProbeSession(d, s, w, out)
 
 	// poll runs one acquisition-or-countdown pass. Called once per regular poll
 	// tick (never on the fast check), so the status line appears at most once
 	// per poll interval. Returns true when recovery is ready.
 	poll := func() (bool, error) {
 		now := time.Now().UTC()
+		open, err := prober.step(now)
+		if err != nil {
+			return false, exitErr(ExitOperational, "probe quota cooldown: %v", err)
+		}
+		if open {
+			// The preset answered that it will run. The ceiling this park was
+			// sleeping on described a window that is already over, so the wait
+			// stops reading it and goes for its recovery turn.
+			w.ResetAt = now
+		}
 		resetAt := w.ResetAt.UTC()
 		if !now.Before(resetAt) {
 			// Cooldown elapsed. Try to acquire a recovery turn.
@@ -414,7 +427,7 @@ func WaitForRecovery(d *Deps, w *RecoveryWaiter, out *output) error {
 			printer.blocked(now, block)
 		} else {
 			// Pre-cooldown: still waiting for the preset's quota to reset.
-			printer.countdown(now, w.Preset, resetAt)
+			printer.countdown(now, w.Preset, resetAt, prober.probing())
 		}
 		return false, nil
 	}
@@ -530,13 +543,24 @@ type recoveryPrinter struct {
 
 // countdown prints the pre-reset waiting line. It is called once per poll tick,
 // so the countdown appears at most once per poll interval.
-func (p *recoveryPrinter) countdown(now time.Time, preset string, resetAt time.Time) {
+//
+// guessed says the instant is pop's own ceiling rather than a reset any provider
+// stated, and the line says so: reading a guessed backstop as a confident reset
+// time is what sent the incident's human to a raw SQL delete (ADR-0235).
+func (p *recoveryPrinter) countdown(now time.Time, preset string, resetAt time.Time, guessed bool) {
 	if p == nil || p.out == nil {
 		return
 	}
 	waitDur := resetAt.Sub(now)
 	if waitDur < 0 {
 		waitDur = 0
+	}
+	if guessed {
+		p.out.line(ansiDim, "⏳ Waiting for quota recovery: %s stated no reset — probing, backstop %s (in %s)",
+			preset,
+			resetAt.Local().Format("15:04:05 MST"),
+			formatDuration(waitDur))
+		return
 	}
 	p.out.line(ansiDim, "⏳ Waiting for quota recovery: %s resets at %s (in %s)",
 		preset,
