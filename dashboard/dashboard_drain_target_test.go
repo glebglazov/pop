@@ -251,8 +251,8 @@ func TestDashboardIKeyUnboundOpensPicker(t *testing.T) {
 	t.Chdir(repo)
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
-	// Drain now lives behind the action menu: open with `a`, then `i`.
-	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	// Drain now lives behind the Run menu: open with `r`, then `i`.
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
 	updated, cmd := got.update(tea.KeyPressMsg{Code: 'I', Text: "I"})
 	got = updated.(QueueDashboard)
@@ -297,8 +297,8 @@ func TestDashboardIKeyBoundDrainsWithoutPicker(t *testing.T) {
 	})
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
-	// Drain now lives behind the action menu: open with `a`, then `i`.
-	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	// Drain now lives behind the Run menu: open with `r`, then `i`.
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
 	_, cmd := got.update(tea.KeyPressMsg{Code: 'I', Text: "I"})
 	if cmd == nil {

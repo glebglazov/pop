@@ -178,11 +178,11 @@ func TestActionMenuHasNoCopyEntry(t *testing.T) {
 		}
 		for _, item := range dashboardMenuItems(kinds, row) {
 			if item.verb == work.VerbCopy || item.verb == work.VerbCopyName {
-				t.Fatalf("%s action menu still offers %s", row.Kind, item.verb)
+				t.Fatalf("%s run menu still offers %s", row.Kind, item.verb)
 			}
 			for _, copyAction := range copies {
 				if item.verb == copyAction.Verb {
-					t.Fatalf("%s action menu still offers the copy verb %s", row.Kind, item.verb)
+					t.Fatalf("%s run menu still offers the copy verb %s", row.Kind, item.verb)
 				}
 			}
 		}
@@ -275,7 +275,7 @@ func TestQueueDashboardCopyDetailTask(t *testing.T) {
 }
 
 // TestQueueDashboardCopyDetailTaskViaMenu confirms copy name is reachable from
-// the task action menu in the detail view.
+// the task run menu in the detail view.
 func TestQueueDashboardCopyDetailTaskViaMenu(t *testing.T) {
 	task := tasks.Task{ID: "01-a", File: "01-a.md", Status: "open"}
 	m := detailCopyModel("set-menu", task)
@@ -287,7 +287,7 @@ func TestQueueDashboardCopyDetailTaskViaMenu(t *testing.T) {
 	var captured string
 	m.copyFunc = func(s string) error { captured = s; return nil }
 
-	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
 	updated, cmd := got.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	if cmd != nil {
@@ -330,7 +330,7 @@ func TestQueueDashboardCopyDetailTaskPath(t *testing.T) {
 
 	m = detailCopyModel("my-set", task)
 	m.copyFunc = func(s string) error { captured = s; return nil }
-	updated, _ = m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ = m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got = updated.(QueueDashboard)
 	updated, cmd = got.update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 	if cmd == nil {
@@ -378,7 +378,7 @@ func TestQueueDashboardCopyPeekTaskViaMenu(t *testing.T) {
 	var captured string
 	m.copyFunc = func(s string) error { captured = s; return nil }
 
-	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
 	updated, cmd := got.update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	if cmd != nil {

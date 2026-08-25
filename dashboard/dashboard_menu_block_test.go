@@ -32,7 +32,7 @@ func blockLines(t *testing.T, m QueueDashboard) int {
 func menuRuleLine(t *testing.T, view string) int {
 	t.Helper()
 	lines := strings.Split(ui.StripANSI(view), "\n")
-	idx := dashboardTestLineIndex(lines, "actions · ")
+	idx := dashboardTestLineIndex(lines, "run · ")
 	if idx < 0 {
 		t.Fatalf("no menu rule on screen:\n%s", ui.StripANSI(view))
 	}
@@ -89,9 +89,9 @@ func TestActionMenuIsBottomChromeAtOneFixedPosition(t *testing.T) {
 	ruleAt := func(cursor int) (int, int, int) {
 		m := manyRows(t, 24)
 		m.list.SetCursor(cursor)
-		m = bulkPress(t, m, selKeyRune('a'))
+		m = bulkPress(t, m, selKeyRune('r'))
 		if m.menu == nil {
-			t.Fatal("`a` did not open the action menu")
+			t.Fatal("`r` did not open the run menu")
 		}
 		view := m.View().Content
 		lines := strings.Split(view, "\n")
@@ -146,22 +146,22 @@ func TestPluralActionMenuRendersAtTheSamePosition(t *testing.T) {
 
 	singular := manyRows(t, 24)
 	singular.list.SetCursor(0)
-	singular = bulkPress(t, singular, selKeyRune('a'))
+	singular = bulkPress(t, singular, selKeyRune('r'))
 	singularEnd, singularBottom := lastBlockRow(singular)
 
 	plural := manyRows(t, 24)
 	plural = bulkPress(t, plural, selKeyTab())
 	plural = bulkPress(t, plural, selKeyTab())
-	plural = bulkPress(t, plural, selKeyRune('a'))
+	plural = bulkPress(t, plural, selKeyRune('r'))
 	if plural.menu == nil || !plural.menu.plural {
-		t.Fatal("`a` did not open the plural action menu")
+		t.Fatal("`r` did not open the plural run menu")
 	}
 	pluralView := plural.View().Content
 	pluralEnd, pluralBottom := lastBlockRow(plural)
 	if singularEnd != singularBottom || pluralEnd != pluralBottom {
 		t.Fatalf("blocks end at %d and %d, want the row above the hint line (%d, %d)", singularEnd, pluralEnd, singularBottom, pluralBottom)
 	}
-	if !strings.Contains(ui.StripANSI(pluralView), "actions · 2 selected") {
+	if !strings.Contains(ui.StripANSI(pluralView), "run · 2 selected") {
 		t.Fatalf("plural rule does not count its targets:\n%s", ui.StripANSI(pluralView))
 	}
 }
@@ -174,7 +174,7 @@ func TestActionMenuShrinksTheListBodyByItsHeight(t *testing.T) {
 	m.list.SetCursor(19)
 	before := visibleRowIDs(m.View().Content)
 
-	m = bulkPress(t, m, selKeyRune('a'))
+	m = bulkPress(t, m, selKeyRune('r'))
 	block := blockLines(t, m)
 	during := visibleRowIDs(m.View().Content)
 
@@ -202,7 +202,7 @@ func TestActionMenuShrinksTheListBodyByItsHeight(t *testing.T) {
 func TestListStaysLiveUnderAnOpenMenu(t *testing.T) {
 	m := manyRows(t, 24)
 	m.list.SetCursor(0)
-	m = bulkPress(t, m, selKeyRune('a'))
+	m = bulkPress(t, m, selKeyRune('r'))
 	if got := cursoredRowID(m.View().Content); got != "set-00" {
 		t.Fatalf("cursored row = %q, want set-00 painted under the open menu", got)
 	}
@@ -220,9 +220,9 @@ func TestListStaysLiveUnderAnOpenMenu(t *testing.T) {
 // with its indicator rather than by drawing past the pane.
 func TestActionMenuTallerThanThePaneIsClipped(t *testing.T) {
 	m := manyRows(t, 10)
-	m = bulkPress(t, m, selKeyRune('a'))
+	m = bulkPress(t, m, selKeyRune('r'))
 	if m.menu == nil {
-		t.Fatal("`a` did not open the action menu")
+		t.Fatal("`r` did not open the run menu")
 	}
 	view := m.View().Content
 	lines := strings.Split(view, "\n")
@@ -242,9 +242,9 @@ func TestActionMenuTallerThanThePaneIsClipped(t *testing.T) {
 // beside or under it name the same target under their own noun.
 func TestMenuRuleNamesItsTarget(t *testing.T) {
 	m, _ := setDashboard(t, "set-a", "set-b")
-	m = bulkPress(t, m, selKeyRune('a'))
+	m = bulkPress(t, m, selKeyRune('r'))
 	view := ui.StripANSI(m.View().Content)
-	if !strings.Contains(view, "actions · set-a") {
+	if !strings.Contains(view, "run · set-a") {
 		t.Fatalf("singular rule does not name the cursored container:\n%s", view)
 	}
 
@@ -258,7 +258,7 @@ func TestMenuRuleNamesItsTarget(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			opened, _ := setDashboard(t, "set-a", "set-b")
-			opened = bulkPress(t, opened, selKeyRune('a'))
+			opened = bulkPress(t, opened, selKeyRune('r'))
 			actionsAt := menuRuleLine(t, opened.View().Content)
 			actionsBlock := blockLines(t, opened)
 			opened = bulkPress(t, opened, selKeyEsc())

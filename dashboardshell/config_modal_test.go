@@ -71,7 +71,7 @@ func actionDeps() *drain.Deps {
 	return d
 }
 
-// actionKind offers one action, which is all the `a` menu needs to open.
+// actionKind offers one action, which is all the `r` menu needs to open.
 type actionKind struct{ *pageKind }
 
 func (k *actionKind) Actions(work.Container) []work.Action {
@@ -132,8 +132,8 @@ func TestConfigModalSuspendsEveryHostKey(t *testing.T) {
 	// Each control gets its own shell: the pages map is shared by every copy of a
 	// Shell value, so one control's keypress would otherwise land under the next.
 	live := func() Shell { return shellWithConfigModal(t, PageWork, &stubOverrideWriter{}, nil) }
-	if page := press(t, live(), tea.KeyPressMsg{Code: 'a', Text: "a"}).PageDashboard(PageWork); page.ViewToggleAllowed() {
-		t.Fatal("`a` opens no action menu on this page — the fixture proves nothing")
+	if page := press(t, live(), tea.KeyPressMsg{Code: 'r', Text: "r"}).PageDashboard(PageWork); page.ViewToggleAllowed() {
+		t.Fatal("`r` opens no run menu on this page — the fixture proves nothing")
 	}
 	if !press(t, live(), tea.KeyPressMsg{Code: '/', Text: "/"}).PageDashboard(PageWork).SearchTyping() {
 		t.Fatal("`/` starts no search on this page — the fixture proves nothing")
@@ -148,7 +148,7 @@ func TestConfigModalSuspendsEveryHostKey(t *testing.T) {
 
 	for _, key := range []tea.KeyPressMsg{
 		{Code: 'v', Text: "v"}, // the shell's page toggle
-		{Code: 'a', Text: "a"}, // the action menu, a kind's verbs
+		{Code: 'r', Text: "r"}, // the run menu, a kind's verbs
 		{Code: 'j', Text: "j"}, // movement on the table
 		{Code: '/', Text: "/"}, // the row search
 		{Code: 'g', Text: "g"}, // half of the jump-to-top pair

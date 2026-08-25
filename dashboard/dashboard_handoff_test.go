@@ -13,7 +13,7 @@ import (
 	"github.com/glebglazov/pop/tasks"
 )
 
-// TestDashboardHandoffAssistSpawnsFocusesAndQuits drives assist from the action
+// TestDashboardHandoffAssistSpawnsFocusesAndQuits drives assist from the Run
 // menu key through spawn, SelectPane+SwitchClient, and tea.Quit (ADR-0158).
 func TestDashboardHandoffAssistSpawnsFocusesAndQuits(t *testing.T) {
 	repo, setID, _ := queuetest.SetupSpawnRepo(t, "handoff-assist", []queuetest.SpawnTask{
@@ -25,7 +25,7 @@ func TestDashboardHandoffAssistSpawnsFocusesAndQuits(t *testing.T) {
 	rt.Fake.Inside = true
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
-	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
 	_, cmd := got.update(tea.KeyPressMsg{Code: 'S', Text: "S"})
 	if cmd == nil {
@@ -73,7 +73,7 @@ func TestDashboardHandoffAssistReusesWithoutResend(t *testing.T) {
 	rt.Fake.Inside = true
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
-	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
 	_, cmd := got.update(tea.KeyPressMsg{Code: 'S', Text: "S"})
 	if cmd == nil {
@@ -108,7 +108,7 @@ func TestDashboardHandoffAssistOutsideTmuxStays(t *testing.T) {
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 	m.width, m.height = 120, 40
-	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
 	_, cmd := got.update(tea.KeyPressMsg{Code: 'S', Text: "S"})
 	if cmd == nil {
@@ -163,7 +163,7 @@ func TestDashboardHandoffVerifySpawnsFocusesAndQuits(t *testing.T) {
 	rt.Fake.Inside = true
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
-	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
 	_, cmd := got.update(tea.KeyPressMsg{Code: 'V', Text: "V"})
 	if cmd == nil {
@@ -207,7 +207,7 @@ func TestDashboardHandoffVerifyReusesWithoutResend(t *testing.T) {
 	rt.Fake.Inside = true
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
-	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
 	_, cmd := got.update(tea.KeyPressMsg{Code: 'V', Text: "V"})
 	msg := cmd()
@@ -248,7 +248,7 @@ func TestDashboardHandoffDrainSpawnsFocusesAndQuits(t *testing.T) {
 	rt.Fake.Inside = true
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
-	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
 	_, cmd := got.update(tea.KeyPressMsg{Code: 'I', Text: "I"})
 	if cmd == nil {
@@ -300,7 +300,7 @@ func TestDashboardHandoffDrainReusesWithoutResend(t *testing.T) {
 	rt.Fake.Inside = true
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
-	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
 	_, cmd := got.update(tea.KeyPressMsg{Code: 'I', Text: "I"})
 	msg := cmd()
@@ -340,7 +340,7 @@ func TestDashboardHandoffDrainOutsideTmuxStays(t *testing.T) {
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 	m.width, m.height = 120, 40
-	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
 	_, cmd := got.update(tea.KeyPressMsg{Code: 'I', Text: "I"})
 	msg := cmd()

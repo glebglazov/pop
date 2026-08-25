@@ -229,7 +229,7 @@ type dashboardAbandonModal struct {
 	loading bool
 }
 
-// dashboardMenuItem is one verb in the action menu overlay: the flat shortcut
+// dashboardMenuItem is one verb in the run menu overlay: the flat shortcut
 // letter it keeps, the label shown beside it, and the verb id it dispatches. All
 // three are the owning kind's (ADR-0173) — the dashboard authors no verb of its
 // own, it only recognises the ids whose modal it still owns.
@@ -361,13 +361,14 @@ func (m QueueDashboard) openMuteMenu() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// dashboardMenu is the layered action overlay opened with `a` over the focused
-// row. It carries the snapshot of the row it was opened on and the verbs
-// applicable to that row on a ui.List whose cursor drives j/k + Enter
-// selection. The menu closes as soon as a verb fires.
-// A menu opened straight as the Status or the Mute menu carries no list of its
-// own: that menu is the only thing it is showing, so there is nothing underneath
-// it to go back to and esc leaves the overlay.
+// dashboardMenu is the layered menu overlay the row list opens: `r` for the Run
+// menu (its own verb list), or straight into the Status, Copy or Mute menu when
+// one of those keys opens it instead. It carries the snapshot of the row it was
+// opened on and the verbs applicable to that row on a ui.List whose cursor
+// drives j/k + Enter selection. The menu closes as soon as a verb fires.
+// A menu opened straight as the Status, Copy or Mute menu carries no run list of
+// its own: that menu is the only thing it is showing, so there is nothing
+// underneath it to go back to and esc leaves the overlay.
 type dashboardMenu struct {
 	row    DashboardRow
 	list   *ui.List[dashboardMenuItem]
@@ -409,7 +410,7 @@ func (m *dashboardMenu) target() string {
 
 // Row-verb key case (ADR-0158): uppercase = handoff (spawns/focuses a pane, quits
 // the dashboard); lowercase = in-place (acts and leaves the dashboard standing).
-// Mode and navigation keys — action menu `a`, filter `/` and `f`, search, `G`/`gg`
+// Mode and navigation keys — Run menu `r`, filter `/` and `f`, search, `G`/`gg`
 // top/bottom — are outside this rule and keep their own casing.
 //
 // dashboardMenuItems returns the verbs applicable to row: whatever the row's own
@@ -508,7 +509,7 @@ func (menu *dashboardMenu) items() []dashboardMenuItem {
 	return menu.list.Items()
 }
 
-// newDashboardMenu opens the action overlay on row without attended-entry
+// newDashboardMenu opens the Run menu overlay on row without attended-entry
 // enrichment. Tests and call sites that lack a live model use this; the
 // production path goes through QueueDashboard.newDashboardMenu so attended
 // verb rows name the entry that will run.
@@ -519,9 +520,9 @@ func newDashboardMenu(kinds workKinds, row DashboardRow) *dashboardMenu {
 	}
 }
 
-// newDashboardMenu opens the action overlay on row, wrapping the kind's verbs in
-// a ui.List with j/k wrap-around navigation. Attended verbs carry the entry that
-// will run (ADR-0196).
+// newDashboardMenu opens the Run menu overlay on row, wrapping the kind's verbs
+// in a ui.List with j/k wrap-around navigation. Attended verbs carry the entry
+// that will run (ADR-0196).
 func (m QueueDashboard) newDashboardMenu(row DashboardRow) *dashboardMenu {
 	return &dashboardMenu{
 		row:  row,
@@ -539,7 +540,7 @@ type dashboardFilterItem struct {
 }
 
 // dashboardFilterMenu is the modal opened with `f` over the Work dashboard. It
-// is a sibling of the `a` action menu but holds a single-select numbered list of
+// is a sibling of the `r` Run menu but holds a single-select numbered list of
 // Work view presets rather than row verbs, so it is not anchored to the
 // cursored row. Exactly one preset is active; the mark is derived from the
 // model's ViewPreset every frame (ADR-0197).
@@ -588,8 +589,9 @@ func (m QueueDashboard) activeViewPreset() config.WorkViewPreset {
 	return config.WorkViewPreset{}
 }
 
-// itemMenu is the action overlay for one row in either detail list. It may be
-// opened from the detail view or the Document peek. Exactly one of item and
+// itemMenu is the run overlay for one row in either detail list, opened with
+// `r`. It may be opened from the detail view or the Document peek. Exactly one
+// of item and
 // artifact identifies the row, and its verbs are asked of the owning kind when
 // the menu opens, so eligibility is as fresh as the keypress (ADR-0173/0217).
 // inPeek marks which view opened it so feedback and rendering stay on that view.
@@ -1359,7 +1361,12 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.openCheckout = dir
 			return m, tea.Quit
-		case "a":
+		case "r":
+			// The Run menu opens from the row list like every other menu now does
+			// (ADR-0236 decisions 1 and 2): it holds what is left of the old action
+			// menu once status, copy and mute moved out to their own openers. `a` is
+			// retired — it named the set of everything, and the set of everything is
+			// what those three menus just split up.
 			if m.selection.Active() {
 				return m.openSelectionMenu()
 			}
@@ -1379,7 +1386,7 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.openStatusMenu()
 		case "m":
 			// The Mute menu opens the same way, and it is where unmute lives now —
-			// which is what frees `u` in the action menu to mean unbind worktree and
+			// which is what frees `u` in the Run menu to mean unbind worktree and
 			// nothing else (ADR-0236 decision 5).
 			return m.openMuteMenu()
 		case "f":
@@ -1649,11 +1656,13 @@ func (m QueueDashboard) updateAbandonModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 	return m, nil
 }
 
-// updateMenu drives the action overlay: esc/ctrl+c close it, j/k move the
-// highlight, J/K move the live list underneath, Enter runs the highlighted verb,
-// and any matching verb letter runs that verb directly. Row movement keeps the
-// menu's original target and items; the retired pinned menu's re-filtering does
-// not return. When a submenu is open, esc returns to the action menu instead.
+// updateMenu drives the row list's menu overlay: esc/ctrl+c close it, j/k move
+// the highlight, J/K move the live list underneath, Enter runs the highlighted
+// verb, and any matching verb letter runs that verb directly. Row movement keeps
+// the menu's original target and items; the retired pinned menu's re-filtering
+// does not return. A Status, Copy or Mute menu opened straight closes the whole
+// overlay on esc rather than returning to a Run menu beneath it — no menu nests
+// under another (ADR-0236 decision 1).
 func (m QueueDashboard) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.menu == nil {
 		return m, nil
@@ -2069,7 +2078,7 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.moveDocumentPeek(-halfPageDelta(m.documentPeekPageSize()))
 		case "G":
 			m.detail.peek.scroll = m.maxDocumentPeekScroll()
-		case "a":
+		case "r":
 			if m.detail.peek.artifactPath != "" {
 				artifact, ok := m.detail.artifactByPath(m.detail.peek.artifactPath)
 				if !ok {
@@ -2188,7 +2197,7 @@ func (m QueueDashboard) updateDetailView(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.detail.peek = &documentPeek{itemID: item.ID, title: m.detail.row.ID + " / " + item.ID, loading: true}
 		return m, m.loadItemText(item)
-	case "a":
+	case "r":
 		if m.detail == nil {
 			return m, nil
 		}
@@ -3174,7 +3183,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "enter/n/esc", Desc: "cancel"},
 		}
 	case m.itemMenu != nil:
-		// Item-level action menu (in detail or peek). Its verbs are the owning
+		// Item-level Run menu (in detail or peek). Its verbs are the owning
 		// kind's, so the help lists the menu that is actually open rather than one
 		// kind's vocabulary written out here.
 		entries := make([]ui.HelpEntry, 0, len(m.itemMenu.list.Items())+3)
@@ -3233,7 +3242,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			ui.HelpEntry{Key: "esc", Desc: "close menu"},
 		)
 	case m.menu != nil:
-		// Dashboard action menu. Its verbs are the focused row's own kind's, so the
+		// Dashboard Run menu. Its verbs are the focused row's own kind's, so the
 		// help lists the menu that is actually open rather than one kind's vocabulary
 		// written out here — a Routine row's keys would otherwise be a lie.
 		items := m.menu.items()
@@ -3270,11 +3279,11 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			entries = append(entries, ui.HelpEntry{Key: "p", Desc: "copy path"})
 		}
 		entries = append(entries, ui.HelpEntry{Key: "h/esc", Desc: "close peek"})
-		actionDesc := "item actions"
+		runDesc := "item run menu"
 		if m.detail.peek.artifactPath != "" {
-			actionDesc = "artifact actions"
+			runDesc = "artifact run menu"
 		}
-		entries = append(entries, ui.HelpEntry{Key: "a", Desc: actionDesc})
+		entries = append(entries, ui.HelpEntry{Key: "r", Desc: runDesc})
 		return entries
 	case m.detail != nil:
 		// Detail view (one container's item list or Artifact view)
@@ -3285,14 +3294,14 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			{Key: "gg", Desc: "first " + strings.TrimSuffix(noun, "s")},
 			{Key: "G", Desc: "last " + strings.TrimSuffix(noun, "s")},
 			{Key: "l/enter", Desc: "peek document"},
-			{Key: "a", Desc: "item actions"},
+			{Key: "r", Desc: "item run menu"},
 			{Key: "y", Desc: "copy name"},
 		}
 		if m.detail.artifacts {
 			entries[0].Desc = "navigate artifacts"
 			entries[2].Desc = "first artifact"
 			entries[3].Desc = "last artifact"
-			entries[5].Desc = "artifact actions"
+			entries[5].Desc = "artifact run menu"
 			entries = append(entries, ui.HelpEntry{Key: "p", Desc: "copy path"})
 		}
 		if m.detail.hasArtifacts() {
@@ -3330,16 +3339,16 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 		// so rather than describing the singular surface the human is not on.
 		if m.selection.Active() {
 			entries = append(entries,
-				ui.HelpEntry{Key: "y", Desc: "copy menu over the selection"},
-				ui.HelpEntry{Key: "a", Desc: "actions over the selection"},
+				ui.HelpEntry{Key: "r", Desc: "run menu over the selection"},
 				ui.HelpEntry{Key: "s", Desc: "status menu over the selection"},
+				ui.HelpEntry{Key: "y", Desc: "copy menu over the selection"},
 				ui.HelpEntry{Key: "m", Desc: "mute menu over the selection"},
 			)
 		} else {
 			entries = append(entries,
-				ui.HelpEntry{Key: "y", Desc: "copy menu"},
-				ui.HelpEntry{Key: "a", Desc: "action menu"},
+				ui.HelpEntry{Key: "r", Desc: "run menu"},
 				ui.HelpEntry{Key: "s", Desc: "status menu"},
+				ui.HelpEntry{Key: "y", Desc: "copy menu"},
 				ui.HelpEntry{Key: "m", Desc: "mute menu"},
 			)
 		}
@@ -3396,11 +3405,11 @@ func (m QueueDashboard) View() tea.View {
 		} else if m.menu != nil && m.menu.copy != nil {
 			title = "Help · " + page + " · copy menu"
 		} else if m.menu != nil {
-			title = "Help · " + page + " · action menu"
+			title = "Help · " + page + " · run menu"
 		} else if m.filter != nil {
 			title = "Help · " + page + " · filter menu"
 		} else if m.itemMenu != nil {
-			title = "Help · " + page + " · item menu"
+			title = "Help · " + page + " · run menu"
 		} else if m.bind != nil {
 			title = "Help · " + page + " · bind"
 		} else if m.drainPick != nil {
@@ -3584,16 +3593,20 @@ func (m QueueDashboard) mainHint() string {
 		}
 		return toggle + " · C-h help · h/esc quit"
 	}
+	// Movement, marking and the detail key earn no line: only what a row can act
+	// on does, leading with the four top-level menus in the order an operator
+	// reaches for them (ADR-0236 decision 8).
+	openers := "r run ▸ · s status ▸ · y copy ▸ · m mute ▸ · "
+	if m.selection.Active() {
+		// The filter entry gives way to the clear-selection key — the one thing a
+		// Selection adds that the ordinary line has no room to name.
+		return openers + "/ search · shift+tab clear · " + toggle + " · C-h help · h/esc quit"
+	}
 	filters := ""
 	if m.page.rowFilters {
 		filters = "f filters · "
 	}
-	if m.selection.Active() {
-		// Only the keys that still do something in the mode, so the line does not
-		// advertise the verbs it is refusing.
-		return "j/k move · gg/G top/bottom · tab select · shift+tab clear · a actions · s status ▸ · y copy ▸ · m mute ▸ · / search · " + filters + toggle + " · C-h help · h/esc quit"
-	}
-	return "j/k move · gg/G top/bottom · tab select · l/enter detail · a actions · s status ▸ · y copy ▸ · m mute ▸ · / search · " + filters + toggle + " · C-h help · h/esc quit"
+	return openers + "/ search · " + filters + toggle + " · C-h help · h/esc quit"
 }
 
 // emptySearchLine is the body text when the search has hidden every row. It
@@ -3635,7 +3648,7 @@ func (m QueueDashboard) mainBody() string {
 	return strings.Join(parts, "\n")
 }
 
-// viewWithMenu renders the action-menu overlay through the shared Frame. The
+// viewWithMenu renders the row-list's menu overlay through the shared Frame. The
 // menu is a reserved Block immediately above the hint line, so it sits at one
 // fixed screen position whatever row the cursor is on (ADR-0224 decision 4) and
 // the table body shrinks by exactly its height — rows leave the viewport from
@@ -3816,9 +3829,9 @@ func (m QueueDashboard) detailFrame() (ui.Frame, string) {
 
 func detailHints(d *detailView) string {
 	if d.artifacts {
-		return "j/k · gg/G top/bottom · l/enter peek · a actions · y copy name · p copy path · v tasks · h/esc back"
+		return "j/k · gg/G top/bottom · l/enter peek · r run · y copy name · p copy path · v tasks · h/esc back"
 	}
-	hint := "j/k · gg/G top/bottom · l/enter peek · a actions · y copy name"
+	hint := "j/k · gg/G top/bottom · l/enter peek · r run · y copy name"
 	if d.hasArtifacts() {
 		hint += " · v artifacts"
 	}
@@ -3968,7 +3981,7 @@ func itemMenuLines(menu *itemMenu, width int) []string {
 	for _, action := range menu.list.Items() {
 		entries = append(entries, menuEntry{key: action.Key, label: action.Label})
 	}
-	return menuBlockLines("actions", menu.target(), width, menu.list.Cursor(), entries)
+	return menuBlockLines("run", menu.target(), width, menu.list.Cursor(), entries)
 }
 
 // target is the row the menu's verbs will hit, named the way that row names
@@ -3993,7 +4006,7 @@ func (m QueueDashboard) documentPeekChrome() ui.Frame {
 	if p.artifactPath != "" {
 		hints += " · p copy path"
 	}
-	hints += " · a actions · h/esc back"
+	hints += " · r run · h/esc back"
 	var block []string
 	if m.itemMenu != nil && m.itemMenu.inPeek {
 		block = itemMenuLines(m.itemMenu, m.width)
@@ -4240,9 +4253,9 @@ type menuEntry struct {
 	label string
 }
 
-// menuBlockLines is the single path every action menu renders through — the table
-// view's singular and plural menus, the Status and Mute menus, and the
-// detail view's item menus. A rule naming the noun and its target, then one line
+// menuBlockLines is the single path every menu renders through — the table
+// view's Run, Status, Copy and Mute menus, singular and plural alike, and the
+// detail view's Run menu. A rule naming the noun and its target, then one line
 // per entry with the cursored one carrying the shared cursor block. Every caller
 // hands the result to a Frame as its Block, which is what puts all of them at one
 // fixed screen position above the hint line (ADR-0224 decision 4).
@@ -4259,10 +4272,11 @@ func menuBlockLines(noun, target string, width, cursor int, entries []menuEntry)
 	return lines
 }
 
-// dashboardMenuLines renders a row action menu as the Frame Block it is drawn as.
-// When a submenu is open it renders that instead, at the same position and under
-// the same rule grammar. Handoff-verb keys are coloured by the live-pane
-// affordance (ADR-0158).
+// dashboardMenuLines renders the row list's menu overlay as the Frame Block it is
+// drawn as: the Run menu by default, or the Status, Copy or Mute menu when the
+// row list opened one of those instead, at the same position and under the same
+// rule grammar. Handoff-verb keys are coloured by the live-pane affordance
+// (ADR-0158).
 func dashboardMenuLines(menu *dashboardMenu, width int, live livePaneCache) []string {
 	if menu == nil {
 		return nil
@@ -4283,7 +4297,7 @@ func dashboardMenuLines(menu *dashboardMenu, width int, live livePaneCache) []st
 			label: item.label,
 		})
 	}
-	return menuBlockLines("actions", menu.target(), width, menu.list.Cursor(), entries)
+	return menuBlockLines("run", menu.target(), width, menu.list.Cursor(), entries)
 }
 
 // dashboardMenuRule is the top line of every menu block: the menu's own noun and

@@ -85,7 +85,7 @@ func TestDashboardFoldRefusalSticky(t *testing.T) {
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 	m.width, m.height = 120, 40
 
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
 	updated, _ = got.Update(tea.KeyPressMsg{Code: 'F', Text: "F"})
 	got = updated.(QueueDashboard)
@@ -97,7 +97,7 @@ func TestDashboardFoldRefusalSticky(t *testing.T) {
 	}
 }
 
-// TestDashboardHandoffFoldSpawnsFocusesAndQuits drives fold from the action menu
+// TestDashboardHandoffFoldSpawnsFocusesAndQuits drives fold from the Run menu
 // through TagFold spawn, focus, and quit (ADR-0158).
 func TestDashboardHandoffFoldSpawnsFocusesAndQuits(t *testing.T) {
 	repo, setID, _ := queuetest.SetupSpawnRepo(t, "handoff-fold", []queuetest.SpawnTask{
@@ -122,7 +122,7 @@ func TestDashboardHandoffFoldSpawnsFocusesAndQuits(t *testing.T) {
 	rt.Fake.Inside = true
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
-	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
 	_, cmd := got.update(tea.KeyPressMsg{Code: 'F', Text: "F"})
 	if cmd == nil {
@@ -204,7 +204,7 @@ func TestDashboardHandoffFoldReusesConflictPane(t *testing.T) {
 	rt.Fake.Inside = true
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
-	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
 	_, cmd := got.update(tea.KeyPressMsg{Code: 'F', Text: "F"})
 	if cmd == nil {

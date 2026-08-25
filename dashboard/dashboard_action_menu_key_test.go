@@ -10,23 +10,28 @@ import (
 	"github.com/glebglazov/pop/tasks/drain"
 )
 
-// `A` is unbound (ADR-0224 decision 6): sweeping one verb over many rows is the
-// Selection's job, so the uppercase key opens nothing and `a` is the only opener.
-func TestDashboardUppercaseAOpensNothing(t *testing.T) {
+// `a` is retired and silent: it named the set of everything, and the set of
+// everything is what the Status, Copy and Mute menus split up, leaving `r` as
+// the only opener for what remains, the Run menu (ADR-0236 decisions 2 and 3).
+func TestDashboardAOpensNothing(t *testing.T) {
 	m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{
 		{Project: "pop", CursorKey: "pop\x00set-a", RawStatus: tasks.StatusReady, ID: "set-a", RuntimePath: "/repo/wt-a"},
 	}})
 	m.width = 120
 	m.height = 20
 
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'A', Text: "A"})
-	if got := updated.(QueueDashboard); got.menu != nil {
-		t.Fatal("A opened an action menu")
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	got := updated.(QueueDashboard)
+	if got.menu != nil {
+		t.Fatal("a opened a menu")
+	}
+	if got.flash.Text() != "" {
+		t.Fatalf("a produced a message: %q", got.flash.Text())
 	}
 
-	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ = got.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	if got := updated.(QueueDashboard); got.menu == nil {
-		t.Fatal("a did not open the action menu")
+		t.Fatal("r did not open the run menu")
 	}
 }
 
@@ -64,7 +69,7 @@ func TestDashboardMenuRowCursorKeysKeepItsOriginalTarget(t *testing.T) {
 	m.width = 120
 	m.height = 24
 
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
 	menuCursor := got.menu.list.Cursor()
 	menuKeysBefore := menuKeys(got.menu)

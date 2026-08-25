@@ -58,8 +58,9 @@ type dashboardBulkVerbMsg struct {
 // pluralActions intersects one action list across the marked rows: the verbs
 // every one of them offers *and* every one of them declares plural, in the first
 // row's order. list is the per-row action list to intersect — a kind's Actions
-// for the action menu, its StatusActions for the submenu — so both menus narrow
-// by the same rule and neither grows a vocabulary of its own.
+// for the Run menu, its StatusActions for the Status menu, its CopyActions for
+// the Copy menu — so every top-level menu narrows by the same rule and none of
+// them grows a vocabulary of its own.
 func pluralActions(rows []DashboardRow, list func(DashboardRow) []work.Action) []work.Action {
 	if len(rows) == 0 {
 		return nil
@@ -151,7 +152,7 @@ func (m *QueueDashboard) refuseInterceptedVerb(verb work.Verb) bool {
 	return m.refuseSingular(name)
 }
 
-// selectionMenuItems is the action menu over a Selection: the intersected verbs,
+// selectionMenuItems is the Run menu over a Selection: the intersected verbs,
 // each labelled with the verb's own label. Reserved keys are dropped exactly as
 // they are for one row (ADR-0196), so no kind can claim a movement key by going
 // plural.
@@ -171,7 +172,7 @@ func (m QueueDashboard) selectionMenuItems(rows []DashboardRow) []dashboardMenuI
 	return items
 }
 
-// openSelectionMenu answers `a` in selection mode. An empty intersection is not
+// openSelectionMenu answers `r` in selection mode. An empty intersection is not
 // an empty menu: the rows share no verb, and saying so is the only answer that
 // tells the human what to change.
 func (m QueueDashboard) openSelectionMenu() (tea.Model, tea.Cmd) {

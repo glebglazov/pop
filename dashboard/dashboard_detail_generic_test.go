@@ -144,7 +144,7 @@ func TestItemMenuIsBuiltOnOpenFromTheKind(t *testing.T) {
 		t.Fatalf("kind asked for item verbs %d times while only listing items, want 0", kind.asked)
 	}
 
-	updated, _ = got.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ = got.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got = updated.(QueueDashboard)
 	if got.itemMenu == nil || len(got.itemMenu.list.Items()) != 1 {
 		t.Fatalf("item menu = %+v, want the kind's single verb", got.itemMenu)
@@ -158,7 +158,7 @@ func TestItemMenuIsBuiltOnOpenFromTheKind(t *testing.T) {
 
 	kind.extra = &work.Action{Verb: work.Verb("late"), Key: "L", Label: "late verb"}
 	updated, _ = got.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	updated, _ = updated.(QueueDashboard).Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ = updated.(QueueDashboard).Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got = updated.(QueueDashboard)
 	if keys := itemMenuKeys(got.itemMenu); len(keys) != 2 || keys[1] != "L" {
 		t.Fatalf("item menu keys = %v, want the verb the kind added since the build", keys)
@@ -192,17 +192,17 @@ func TestDetailItemMenuIsBottomChrome(t *testing.T) {
 
 	before := m.View().Content
 	beforeRows := append([]string(nil), m.detail.list.VisibleRows()...)
-	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	m = updated.(QueueDashboard)
 	if m.itemMenu == nil {
-		t.Fatal("a did not open the detail item menu")
+		t.Fatal("r did not open the detail run menu")
 	}
 
 	during := m.View().Content
 	duringRows := append([]string(nil), m.detail.list.VisibleRows()...)
 	block := itemMenuLines(m.itemMenu, m.width)
 	lines := strings.Split(during, "\n")
-	ruleAt := dashboardTestLineIndex(lines, "actions · item-19")
+	ruleAt := dashboardTestLineIndex(lines, "run · item-19")
 	if ruleAt < 0 {
 		t.Fatalf("item menu rule does not name its target:\n%s", ui.StripANSI(during))
 	}
@@ -252,16 +252,16 @@ func TestDocumentPeekItemMenuIsBottomChrome(t *testing.T) {
 
 	before := m.View().Content
 	beforeVisible := strings.Count(before, "line-")
-	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	m = updated.(QueueDashboard)
 	if m.itemMenu == nil || !m.itemMenu.inPeek {
-		t.Fatal("a did not open the Document peek item menu")
+		t.Fatal("r did not open the Document peek run menu")
 	}
 
 	during := m.View().Content
 	block := itemMenuLines(m.itemMenu, m.width)
 	lines := strings.Split(during, "\n")
-	ruleAt := dashboardTestLineIndex(lines, "actions · 01")
+	ruleAt := dashboardTestLineIndex(lines, "run · 01")
 	if want := len(lines) - 1 - len(block); ruleAt != want {
 		t.Fatalf("Document peek menu rule at line %d, want %d above the hint line:\n%s", ruleAt, want, ui.StripANSI(during))
 	}

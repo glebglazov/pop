@@ -208,10 +208,10 @@ func TestArtifactPeekAndCopyVerbsStayOnTheirInvokingSurface(t *testing.T) {
 
 	// Both entries in the row menu dispatch through the same artifact seam.
 	for _, key := range []string{"y", "p"} {
-		updated, _ = m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+		updated, _ = m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 		m = updated.(QueueDashboard)
 		if m.itemMenu == nil || m.itemMenu.artifact == nil {
-			t.Fatal("artifact row did not open its own action menu")
+			t.Fatal("artifact row did not open its own run menu")
 		}
 		m = run(t, m, tea.KeyPressMsg{Code: rune(key[0]), Text: key})
 	}
@@ -242,10 +242,10 @@ func TestArtifactPeekAndCopyVerbsStayOnTheirInvokingSurface(t *testing.T) {
 		}
 	}
 	for _, key := range []string{"y", "p"} {
-		updated, _ = m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+		updated, _ = m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 		m = updated.(QueueDashboard)
 		if m.itemMenu == nil || m.itemMenu.artifact == nil || !m.itemMenu.inPeek {
-			t.Fatal("artifact peek did not open its artifact action menu")
+			t.Fatal("artifact peek did not open its artifact run menu")
 		}
 		m = run(t, m, tea.KeyPressMsg{Code: rune(key[0]), Text: key})
 		if m.detail.peek.flash.Text() == "" {

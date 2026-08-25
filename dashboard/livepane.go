@@ -120,7 +120,7 @@ func loadLivePaneCache(d *drain.Deps) livePaneCache {
 	return cache
 }
 
-// livePane styles for handoff-verb keys in the action menu.
+// livePane styles for handoff-verb keys in the Run menu.
 func livePaneIdleStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(ui.ColorClear()) }
 
 var livePaneRunningStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
@@ -165,7 +165,7 @@ var rowActivityCluster = []rowActivityClusterItem{
 // Map rows carry a single wayfinder handoff key (I) coloured from the map
 // window's liveness. Task-set rows carry IVFS from tagged panes. When styled is
 // false the cluster is plain text for width measurement; when true each key is
-// coloured by the cached live-pane state using the same rules as the action menu.
+// coloured by the cached live-pane state using the same rules as the Run menu.
 func dashboardActivityCluster(row DashboardRow, live livePaneCache, styled bool) string {
 	if mapRow(row) {
 		state := live.wayfinderState(row.ID)

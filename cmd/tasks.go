@@ -101,7 +101,7 @@ instead forks an isolated worktree from the Trunk worktree and binds the set to
 that, refusing when no trunk resolves (--trunk <path> names one, needed once per
 bare repo). --auto-drain is independent of both: it sets the set's consent bit
 so the Work daemon may drain the set unattended, and "pop tasks auto-drain" and
-the dashboard's "a" toggle remain authoritative afterwards.
+the dashboard's Run menu "a" toggle remain authoritative afterwards.
 
 Re-registering an already-registered set never rebinds it; move it with
 "pop tasks bind-worktree <task-set-name> --force" from inside the target

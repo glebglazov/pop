@@ -48,12 +48,12 @@ func (k *countingKind) Summary(containers []work.Container) []string { return ni
 func (k *countingKind) Columns() []string                            { return nil }
 func (k *countingKind) ModelSkips() ([]work.ModelSkip, error)        { return k.skipped, nil }
 
-// TestActionMenuIsBuiltOnOpenFromTheKind pins the laziness the seam bought: the
+// TestRunMenuIsBuiltOnOpenFromTheKind pins the laziness the seam bought: the
 // dashboard asks no kind for verbs while it is only showing rows, asks the one
 // kind that owns the cursored row when the menu opens, and gets whatever that
 // kind says at that moment — eligibility that moved since the snapshot is
 // reflected without a rebuild.
-func TestActionMenuIsBuiltOnOpenFromTheKind(t *testing.T) {
+func TestRunMenuIsBuiltOnOpenFromTheKind(t *testing.T) {
 	kind := &countingKind{}
 	d := &drain.Deps{Kinds: func(*drain.Deps, *config.Config) []work.Kind { return []work.Kind{kind} }}
 	row := DashboardRow{Project: "pop", CursorKey: "pop\x00set", Kind: ref.KindTaskSet, ID: "set"}
@@ -64,7 +64,7 @@ func TestActionMenuIsBuiltOnOpenFromTheKind(t *testing.T) {
 		t.Fatalf("kind asked for verbs %d times while only rendering rows, want 0", kind.asked)
 	}
 
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
 	if got.menu == nil || len(got.menu.list.Items()) != 1 {
 		t.Fatalf("menu = %+v, want the kind's single verb", got.menu)
@@ -77,7 +77,7 @@ func TestActionMenuIsBuiltOnOpenFromTheKind(t *testing.T) {
 	// the menu shows it, with no reload in between.
 	kind.extra = &work.Action{Verb: work.Verb("late"), Key: "L", Label: "late verb"}
 	updated, _ = got.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	updated, _ = updated.(QueueDashboard).Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ = updated.(QueueDashboard).Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got = updated.(QueueDashboard)
 	items := got.menu.list.Items()
 	if len(items) != 2 || items[1].key != "L" || items[1].verb != work.Verb("late") {
@@ -153,7 +153,7 @@ func TestModalTaskSetVerbsDispatchByVerbID(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(string(c.verb), func(t *testing.T) {
-			opened, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+			opened, _ := m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 			withMenu := opened.(QueueDashboard)
 			key := ""
 			for _, item := range withMenu.menu.list.Items() {

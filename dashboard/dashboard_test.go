@@ -216,16 +216,16 @@ func TestDashboardAutoDrainBadgeAndToggle(t *testing.T) {
 		},
 	}
 	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{{Project: "pop", Worktree: "/repo/main (main)", CursorKey: "pop\x00plain", RawStatus: tasks.StatusReady, ID: "plain", DefPath: "/repo/tasks", StatePath: "/repo/state.json"}}})
-	// Auto-drain now lives behind the action menu: open with `a`, toggle with `a`.
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	// Auto-drain now lives behind the Run menu: open with `r`, toggle with `a`.
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
 	if got.menu == nil {
-		t.Fatal("a did not open the action menu")
+		t.Fatal("r did not open the run menu")
 	}
 	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	got = updated.(QueueDashboard)
 	if got.menu != nil {
-		t.Fatal("a did not close the action menu after dispatch")
+		t.Fatal("a did not close the run menu after dispatch")
 	}
 	if !got.snap.Containers[0].AutoDrain {
 		t.Fatalf("toggle did not update badge immediately: %+v", got.snap.Containers[0])
@@ -266,8 +266,8 @@ func TestDashboardAutoDrainToggleReflectsInRowAndCount(t *testing.T) {
 		t.Fatalf("baseline view should not mention auto-drain:\n%s", before)
 	}
 
-	// Toggle auto-drain on via the action menu (`a` opens, `a` dispatches).
-	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	// Toggle auto-drain on via the Run menu (`r` opens, `a` dispatches).
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	m = updated.(QueueDashboard)
 	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	m = updated.(QueueDashboard)
@@ -300,16 +300,16 @@ func TestDashboardAutoDrainWaitingMarkerAndCount(t *testing.T) {
 
 func TestDashboardBKeyOpensBindModal(t *testing.T) {
 	m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{{Project: "pop", Worktree: "/repo/main (main)", CursorKey: "pop\x00set-bind", RawStatus: tasks.StatusReady, ID: "set-bind", DefPath: "/repo/tasks", StatePath: "/repo/state.json"}}})
-	// Bind now lives behind the action menu: open with `a`, then `b`.
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	// Bind now lives behind the Run menu: open with `r`, then `b`.
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
 	if got.menu == nil {
-		t.Fatal("a did not open the action menu")
+		t.Fatal("r did not open the run menu")
 	}
 	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
 	got = updated.(QueueDashboard)
 	if got.menu != nil {
-		t.Fatal("b did not close the action menu after dispatch")
+		t.Fatal("b did not close the run menu after dispatch")
 	}
 	if got.bind == nil || !got.bind.loading || got.bind.row.ID != "set-bind" {
 		t.Fatalf("bind modal = %+v, want loading modal for set-bind", got.bind)
@@ -326,11 +326,11 @@ func TestDashboardActionMenuOpenAndClose(t *testing.T) {
 	m.width = 120
 	m.height = 20
 
-	// `a` opens the overlay, anchored to the cursored row, with the menu hint.
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	// `r` opens the overlay, anchored to the cursored row, with the menu hint.
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
 	if got.menu == nil {
-		t.Fatal("a did not open the action menu")
+		t.Fatal("r did not open the run menu")
 	}
 	if cmd != nil {
 		t.Fatal("opening the menu should not dispatch a command")
@@ -339,7 +339,7 @@ func TestDashboardActionMenuOpenAndClose(t *testing.T) {
 		t.Fatalf("menu opened on %q, want set", got.menu.row.ID)
 	}
 	view := got.View().Content
-	if !strings.Contains(view, "actions") {
+	if !strings.Contains(view, "run") {
 		t.Fatalf("menu caption not rendered:\n%s", view)
 	}
 	if !strings.Contains(view, "enter/letter run · esc close") {
@@ -350,7 +350,7 @@ func TestDashboardActionMenuOpenAndClose(t *testing.T) {
 	updated, cmd = got.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	got = updated.(QueueDashboard)
 	if got.menu != nil {
-		t.Fatal("esc did not close the action menu")
+		t.Fatal("esc did not close the run menu")
 	}
 	if cmd != nil {
 		t.Fatal("closing the menu should not quit or dispatch")
@@ -358,7 +358,7 @@ func TestDashboardActionMenuOpenAndClose(t *testing.T) {
 }
 
 // Every former direct verb key is inert at the top level and reachable only
-// through the action menu. `I` is the deliberate exception: it is the flat
+// through the Run menu. `I` is the deliberate exception: it is the flat
 // shortcut for the row's own I action, covered by TestFlatIDispatchesPerKind, and
 // `m` is no longer in this list at all — it opens the Mute menu (ADR-0236
 // decision 1).
@@ -422,8 +422,8 @@ func TestDashboardActionMenuVerbDispatch(t *testing.T) {
 		return newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{{Project: "pop", Worktree: "/repo/wt (main)", CursorKey: "pop\x00set", RawStatus: tasks.StatusReady, ID: "set", DefPath: "/repo/tasks", StatePath: "/repo/state.json", RuntimePath: "/repo/wt", Bound: true}}})
 	}
 
-	// Letter path: `a` then `u` opens the unbind confirm and closes the menu.
-	updated, _ := newModel().Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	// Letter path: `r` then `u` opens the unbind confirm and closes the menu.
+	updated, _ := newModel().Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
 	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'u', Text: "u"})
 	got = updated.(QueueDashboard)
@@ -438,7 +438,7 @@ func TestDashboardActionMenuVerbDispatch(t *testing.T) {
 	}
 
 	// Highlight + Enter path: move onto the bind verb, press Enter.
-	updated, _ = newModel().Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ = newModel().Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got = updated.(QueueDashboard)
 	bindIdx := -1
 	for i, item := range got.menu.list.Items() {
@@ -747,7 +747,7 @@ func TestDashboardViewUsesTaskTableHeaderAndBottomShortcutLegend(t *testing.T) {
 	if got, want := len(lines), m.height; got != want {
 		t.Fatalf("line count = %d, want %d:\n%s", got, want, view)
 	}
-	if !strings.Contains(lines[len(lines)-1], "j/k move") {
+	if !strings.Contains(lines[len(lines)-1], "r run") {
 		t.Fatalf("shortcut legend should be on bottom line:\n%s", view)
 	}
 	if got, want := dashboardTestLineIndex(lines, "PROJECT"), 3; got != want {
@@ -826,7 +826,7 @@ func dashboardTestTableLines(view string) []string {
 		if !inTable {
 			continue
 		}
-		if strings.Contains(line, "j/k move") || strings.Contains(line, "h/esc quit") {
+		if strings.Contains(line, "r run") || strings.Contains(line, "h/esc quit") {
 			break
 		}
 		lines = append(lines, line)
@@ -1105,7 +1105,7 @@ func TestDashboardDetailViewOmitsTitleAndUsesBottomShortcutLegend(t *testing.T) 
 	if got, want := len(lines), m.height; got != want {
 		t.Fatalf("line count = %d, want %d:\n%s", got, want, view)
 	}
-	if !strings.Contains(lines[len(lines)-1], "a actions") {
+	if !strings.Contains(lines[len(lines)-1], "r run") {
 		t.Fatalf("detail shortcut legend should be on bottom line:\n%s", view)
 	}
 	if got, want := dashboardTestLineIndex(lines, "STATUS"), 2; got != want {
@@ -1796,7 +1796,7 @@ func TestDashboardDetailViewVimNavigation(t *testing.T) {
 	}
 }
 
-// menuHasKey reports whether the action menu offers a verb bound to key.
+// menuHasKey reports whether the Run menu offers a verb bound to key.
 func menuHasKey(menu *dashboardMenu, key string) bool {
 	if menu == nil {
 		return false
@@ -2283,9 +2283,9 @@ func TestDashboardBindRefusesLiveLock(t *testing.T) {
 func TestDashboardUKeyRequiresInlineConfirmBeforeUnbind(t *testing.T) {
 	m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{{Project: "pop", Worktree: "/repo/bound (branch)", CursorKey: "pop\x00set-unbind", RawStatus: tasks.StatusFailed, ID: "set-unbind", DefPath: "/repo/tasks", StatePath: "/repo/state.json", Bound: true}}})
 
-	// Unbind now lives behind the action menu: open with `a`, then `u`.
+	// Unbind now lives behind the Run menu: open with `r`, then `u`.
 	openMenu := func(model QueueDashboard) QueueDashboard {
-		updated, _ := model.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+		updated, _ := model.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 		got := updated.(QueueDashboard)
 		if !menuHasKey(got.menu, "u") {
 			t.Fatalf("unbind not offered on bound row: %+v", got.menu)
@@ -2300,7 +2300,7 @@ func TestDashboardUKeyRequiresInlineConfirmBeforeUnbind(t *testing.T) {
 		t.Fatalf("u key returned command before confirmation")
 	}
 	if got.menu != nil {
-		t.Fatal("u did not close the action menu")
+		t.Fatal("u did not close the run menu")
 	}
 	if got.abandon == nil || got.abandon.row.ID != "set-unbind" {
 		t.Fatalf("abandon modal = %+v, want set-unbind", got.abandon)
@@ -3515,10 +3515,10 @@ func itemMenuKeys(menu *itemMenu) []string {
 	return keys
 }
 
-// openTaskMenu presses `a` in the detail view and returns the resulting model.
+// openTaskMenu presses `r` in the detail view and returns the resulting model.
 func openTaskMenu(t *testing.T, m QueueDashboard) QueueDashboard {
 	t.Helper()
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	return updated.(QueueDashboard)
 }
 
@@ -3530,7 +3530,7 @@ func TestDetailTaskMenuCompleteVerb(t *testing.T) {
 	m, completeCalls, _, _ := detailOverrideModel(row, openTask, nil, nil, nil)
 	m = openTaskMenu(t, m)
 	if m.itemMenu == nil {
-		t.Fatal("a on open task: expected task menu to open")
+		t.Fatal("r on open task: expected task menu to open")
 	}
 	if got := itemMenuKeys(m.itemMenu); !slices.Contains(got, "c") {
 		t.Fatalf("open task menu = %v, want to contain C", got)
@@ -3559,7 +3559,7 @@ func TestDetailTaskMenuCompleteVerb(t *testing.T) {
 	m2, completeCalls2, resetCalls2, _ := detailOverrideModel(row, doneTask, nil, nil, nil)
 	m2 = openTaskMenu(t, m2)
 	if m2.itemMenu == nil {
-		t.Fatal("a on done task: expected task menu to open with Open verb")
+		t.Fatal("r on done task: expected task menu to open with Open verb")
 	}
 	keys := itemMenuKeys(m2.itemMenu)
 	if slices.Contains(keys, "c") {
@@ -3768,7 +3768,7 @@ func TestDashboardMenusReserveMovementKeys(t *testing.T) {
 		for _, item := range dashboardMenuItems(testKinds(), row) {
 			keys = append(keys, item.key)
 		}
-		check("action menu ("+row.ID+")", keys)
+		check("run menu ("+row.ID+")", keys)
 	}
 
 	for _, row := range rows {
@@ -3885,8 +3885,8 @@ func TestDetailViewActionsHintRendered(t *testing.T) {
 	m.detail = newTaskDetailView(m.snap.Containers[0], manifest, nil)
 
 	out := m.viewDetail()
-	if !strings.Contains(out, "a actions") {
-		t.Fatalf("hint line missing actions key:\n%s", out)
+	if !strings.Contains(out, "r run") {
+		t.Fatalf("hint line missing run key:\n%s", out)
 	}
 
 	// A live flash takes that same line for its three seconds (ADR-0204), so the
@@ -3896,13 +3896,13 @@ func TestDetailViewActionsHintRendered(t *testing.T) {
 	if !strings.Contains(out, "completed 01-a") {
 		t.Fatalf("flash not rendered:\n%s", out)
 	}
-	if strings.Contains(out, "a actions") {
+	if strings.Contains(out, "r run") {
 		t.Fatalf("hints still shown under a live flash:\n%s", out)
 	}
 }
 
-// TestPeekTaskMenuOpensAndDispatches verifies `a` in the Document peek opens
-// the task menu for the previewed task and dispatches a filtered verb.
+// TestPeekTaskMenuOpensAndDispatches verifies `r` in the Document peek opens
+// the run menu for the previewed task and dispatches a filtered verb.
 func TestPeekTaskMenuOpensAndDispatches(t *testing.T) {
 	row := DashboardRow{ID: "set-peek", DefPath: "/def"}
 	failedTask := tasks.Task{ID: "02-b", File: "02-b.md", Status: "failed"}
@@ -3910,10 +3910,10 @@ func TestPeekTaskMenuOpensAndDispatches(t *testing.T) {
 	// Open a peek over the previewed task.
 	m.detail.peek = &documentPeek{itemID: "02-b", text: "body\n"}
 
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
 	if got.itemMenu == nil {
-		t.Fatal("a in peek: expected task menu to open")
+		t.Fatal("r in peek: expected run menu to open")
 	}
 	if !got.itemMenu.inPeek {
 		t.Fatal("peek-opened menu should be marked inPeek")
@@ -3952,10 +3952,10 @@ func TestPeekTaskMenuRendersOverlay(t *testing.T) {
 	m.height = 14
 	m.detail.peek = &documentPeek{itemID: "01-a", text: "body line\n"}
 
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
 	out := got.View().Content
-	for _, want := range []string{"actions", "c  complete", "s  skip"} {
+	for _, want := range []string{"run", "c  complete", "s  skip"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("rendered peek menu missing %q:\n%s", want, out)
 		}
@@ -4017,7 +4017,7 @@ func TestDetailTaskMenuRendersOverlay(t *testing.T) {
 	m.height = 12
 	m = openTaskMenu(t, m)
 	out := m.View().Content
-	for _, want := range []string{"actions", "c  complete", "o  open"} {
+	for _, want := range []string{"run", "c  complete", "o  open"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("rendered detail menu missing %q:\n%s", want, out)
 		}
@@ -4028,12 +4028,12 @@ func TestDetailTaskMenuRendersOverlay(t *testing.T) {
 }
 
 func TestMainListRuntimeShell(t *testing.T) {
-	// runtimeShell opens the action menu and dispatches the shell verb (`O`).
+	// runtimeShell opens the Run menu and dispatches the shell verb (`O`).
 	runtimeShell := func(m QueueDashboard) (QueueDashboard, tea.Cmd) {
-		updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+		updated, _ := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 		got := updated.(QueueDashboard)
 		if got.menu == nil {
-			t.Fatal("a did not open the action menu")
+			t.Fatal("r did not open the run menu")
 		}
 		updated, cmd := got.update(tea.KeyPressMsg{Code: 'O', Text: "O"})
 		return updated.(QueueDashboard), cmd
@@ -4078,18 +4078,18 @@ func TestMainListRuntimeShell(t *testing.T) {
 		}
 	})
 
-	t.Run("a with no rows does not open the menu", func(t *testing.T) {
+	t.Run("r with no rows does not open the menu", func(t *testing.T) {
 		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
-		updated, cmd := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+		updated, cmd := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 		got := updated.(QueueDashboard)
 		if cmd != nil {
-			t.Fatal("a with no rows: expected no cmd")
+			t.Fatal("r with no rows: expected no cmd")
 		}
 		if got.menu != nil {
-			t.Fatal("a with no rows: menu must not open")
+			t.Fatal("r with no rows: menu must not open")
 		}
 		if got.flash.Text() != "" {
-			t.Fatalf("a with no rows: expected no flash, got %q", got.flash.Text())
+			t.Fatalf("r with no rows: expected no flash, got %q", got.flash.Text())
 		}
 	})
 
@@ -4106,7 +4106,7 @@ func TestMainListRuntimeShell(t *testing.T) {
 	t.Run("menu offers the shell verb", func(t *testing.T) {
 		row := DashboardRow{ID: "set-hint", DefPath: "/def"}
 		m := newQueueDashboard(nil, nil, DashboardSnapshot{Containers: []DashboardRow{row}})
-		updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+		updated, _ := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 		got := updated.(QueueDashboard)
 		view := got.View().Content
 		if !menuHasKey(got.menu, "O") {
@@ -4207,13 +4207,13 @@ func TestQueueDashboardHelpOverlay(t *testing.T) {
 		}
 	})
 
-	t.Run("help works in action menu", func(t *testing.T) {
+	t.Run("help works in run menu", func(t *testing.T) {
 		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
 		m.menu = &dashboardMenu{}
 		updated, _ := m.Update(ctrlH)
 		got := updated.(QueueDashboard)
 		if !got.showHelp {
-			t.Error("C-h should open help in action menu")
+			t.Error("C-h should open help in run menu")
 		}
 	})
 
@@ -4279,7 +4279,7 @@ func TestQueueDashboardHelpContent(t *testing.T) {
 		for _, e := range entries {
 			found[e.Key] = true
 		}
-		required := []string{"j/k", "gg", "G", "l/enter", "y", "a", "/", "h/esc"}
+		required := []string{"j/k", "gg", "G", "l/enter", "y", "r", "/", "h/esc"}
 		if found["A"] {
 			t.Error("main list help still advertises the retired A binding")
 		}
@@ -4341,8 +4341,8 @@ func TestQueueDashboardHelpContent(t *testing.T) {
 		if !found["l/enter"] {
 			t.Error("detail view help missing 'l/enter'")
 		}
-		if !found["a"] {
-			t.Error("detail view help missing 'a'")
+		if !found["r"] {
+			t.Error("detail view help missing 'r'")
 		}
 	})
 
@@ -4362,7 +4362,7 @@ func TestQueueDashboardHelpContent(t *testing.T) {
 		}
 	})
 
-	t.Run("action menu shows menu verbs", func(t *testing.T) {
+	t.Run("run menu shows menu verbs", func(t *testing.T) {
 		m := newQueueDashboard(nil, nil, DashboardSnapshot{})
 		// The help lists the menu that is open, so it is opened over a row the way a
 		// keypress opens it — the verbs are the row's kind's, not a second list here.
@@ -4374,16 +4374,16 @@ func TestQueueDashboardHelpContent(t *testing.T) {
 		}
 		// Should show menu-specific verbs
 		if !found["I"] {
-			t.Error("action menu help missing 'I' (drain)")
+			t.Error("run menu help missing 'I' (drain)")
 		}
 		if !found["b"] {
-			t.Error("action menu help missing 'b' (bind)")
+			t.Error("run menu help missing 'b' (bind)")
 		}
 		if !found["esc"] {
-			t.Error("action menu help missing 'esc'")
+			t.Error("run menu help missing 'esc'")
 		}
 		if !found["J/K"] {
-			t.Error("action menu help missing row navigation")
+			t.Error("run menu help missing row navigation")
 		}
 	})
 
@@ -4480,6 +4480,65 @@ func TestQueueDashboardHelpFooterHint(t *testing.T) {
 	hint := m.mainHint()
 	if !strings.Contains(hint, "C-h help") {
 		t.Error("main footer hint should include 'C-h help'")
+	}
+}
+
+// TestMainFooterLeadsWithTheFourOpenersAndDropsMovement pins ADR-0236 decision 8:
+// the footer names only what a row can act on, leading with the four top-level
+// menus in the order an operator reaches for them, and drops the move,
+// top/bottom, select and detail keys that used to open the line.
+func TestMainFooterLeadsWithTheFourOpenersAndDropsMovement(t *testing.T) {
+	m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{
+		{Project: "pop", CursorKey: "pop\x00set", RawStatus: tasks.StatusReady, ID: "set"},
+	}})
+	hint := m.mainHint()
+	if !strings.HasPrefix(hint, "r run ▸ · s status ▸ · y copy ▸ · m mute ▸ · ") {
+		t.Fatalf("footer = %q, want the four openers first in run/status/copy/mute order", hint)
+	}
+	for _, gone := range []string{"j/k move", "gg/G top/bottom", "tab select", "l/enter detail"} {
+		if strings.Contains(hint, gone) {
+			t.Fatalf("footer = %q, still advertises %q", hint, gone)
+		}
+	}
+}
+
+// TestMainFooterSuppressesOpenersWithNoRows pins ADR-0236 decision 8: with
+// nothing on screen there is nothing to act on, so the four openers drop out.
+func TestMainFooterSuppressesOpenersWithNoRows(t *testing.T) {
+	m := newQueueDashboard(nil, nil, DashboardSnapshot{})
+	hint := m.mainHint()
+	for _, opener := range []string{"r run", "s status", "y copy", "m mute"} {
+		if strings.Contains(hint, opener) {
+			t.Fatalf("footer = %q, want no openers with no rows", hint)
+		}
+	}
+}
+
+// TestMainFooterUnderSelectionOffersClearInPlaceOfFilters pins ADR-0236 decision
+// 8's Selection half: the four openers stay, and the filter entry gives way to
+// the clear-selection key.
+func TestMainFooterUnderSelectionOffersClearInPlaceOfFilters(t *testing.T) {
+	m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{
+		{Project: "pop", CursorKey: "pop\x00set-a", RawStatus: tasks.StatusReady, ID: "set-a"},
+		{Project: "pop", CursorKey: "pop\x00set-b", RawStatus: tasks.StatusReady, ID: "set-b"},
+	}})
+	m.page.rowFilters = true
+	updated, _ := m.Update(selKeyTab())
+	m = updated.(QueueDashboard)
+	if !m.selection.Active() {
+		t.Fatal("tab did not mark the row")
+	}
+	hint := m.mainHint()
+	if strings.Contains(hint, "f filters") {
+		t.Fatalf("footer = %q, filters must give way under a Selection", hint)
+	}
+	if !strings.Contains(hint, "shift+tab clear") {
+		t.Fatalf("footer = %q, want the clear-selection key", hint)
+	}
+	for _, opener := range []string{"r run ▸", "s status ▸", "y copy ▸", "m mute ▸"} {
+		if !strings.Contains(hint, opener) {
+			t.Fatalf("footer = %q, want the openers still offered under a Selection", hint)
+		}
 	}
 }
 
@@ -4679,14 +4738,14 @@ func TestDashboardShortPaneCollapsesToSingleLine(t *testing.T) {
 	}
 	assertSingleLineRow(m.View().Content, "main body")
 
-	// The action-menu overlay shares that decision because it renders the same
+	// The Run menu overlay shares that decision because it renders the same
 	// body. On a pane this short the menu block is taller than the rows it leaves
 	// room for, so the assertion is the row density and the pane bound rather than
 	// a visible row: Frame clips the block and never renders past TermH.
-	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	m = updated.(QueueDashboard)
 	if m.menu == nil {
-		t.Fatal("a did not open the action menu")
+		t.Fatal("r did not open the run menu")
 	}
 	if m.list.LinesPerItem() != 1 {
 		t.Fatalf("LinesPerItem = %d with the menu open, want 1 on a short pane", m.list.LinesPerItem())
@@ -4696,7 +4755,7 @@ func TestDashboardShortPaneCollapsesToSingleLine(t *testing.T) {
 	}
 }
 
-// TestDashboardMenuTwoLineOverlay verifies that opening the action menu (`a`) on
+// TestDashboardMenuTwoLineOverlay verifies that opening the Run menu (`r`) on
 // a narrow pane leaves the table rows in two-line mode and renders the menu
 // block within the pane's width.
 func TestDashboardMenuTwoLineOverlay(t *testing.T) {
@@ -4709,10 +4768,10 @@ func TestDashboardMenuTwoLineOverlay(t *testing.T) {
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = updated.(QueueDashboard)
 
-	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	m = updated.(QueueDashboard)
 	if m.menu == nil {
-		t.Fatal("a did not open the action menu")
+		t.Fatal("r did not open the run menu")
 	}
 
 	view := m.View().Content
@@ -4731,8 +4790,8 @@ func TestDashboardMenuTwoLineOverlay(t *testing.T) {
 		t.Fatalf("row line 2 must contain the status:\n%s", view)
 	}
 
-	// The menu must be rendered with the "actions" caption.
-	if !strings.Contains(view, "actions") {
+	// The menu must be rendered with the "run" caption.
+	if !strings.Contains(view, "run") {
 		t.Fatalf("menu caption not rendered:\n%s", view)
 	}
 
@@ -5095,10 +5154,10 @@ func TestDashboardMapRowQueueVerbsInert(t *testing.T) {
 			t.Fatalf("map menu offers the Task-set verb %q", item.verb)
 		}
 	}
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
 	if got.menu == nil {
-		t.Fatal("a on map row did not open action menu")
+		t.Fatal("r on map row did not open the run menu")
 	}
 
 	// Former direct bind/unbind keys stay inert at top level on map rows too.
@@ -5112,12 +5171,12 @@ func TestDashboardMapRowQueueVerbsInert(t *testing.T) {
 		}
 	}
 
-	// Set rows still open the action menu on a.
+	// Set rows still open the Run menu on r.
 	got.list.SetCursor(1)
-	updated, _ = got.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ = got.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got = updated.(QueueDashboard)
 	if got.menu == nil {
-		t.Fatal("a on set row did not open action menu")
+		t.Fatal("r on set row did not open the run menu")
 	}
 }
 

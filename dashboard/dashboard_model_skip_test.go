@@ -41,7 +41,7 @@ func TestDashboardFooterListsModelSkipsGroupedByPreset(t *testing.T) {
 		t.Fatalf("view missing footer %q:\n%s", want, got)
 	}
 	// The line sits below the table, above the key hints.
-	if strings.Index(got, want) > strings.Index(got, "j/k move") {
+	if strings.Index(got, want) > strings.Index(got, "r run") {
 		t.Fatalf("skip footer should precede the key hints:\n%s", got)
 	}
 }

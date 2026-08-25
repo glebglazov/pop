@@ -51,11 +51,11 @@ func TestLivePanePreviewVerbGone(t *testing.T) {
 	m := newQueueDashboard(&drain.Deps{}, nil, DashboardSnapshot{Containers: []DashboardRow{
 		{CursorKey: "p\x00x", ID: "x"},
 	}})
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
 	_, cmd := got.Update(tea.KeyPressMsg{Code: 'p', Text: "p"})
 	if cmd != nil {
-		t.Fatal("p must be unbound in the action menu")
+		t.Fatal("p must be unbound in the Run menu")
 	}
 }
 
@@ -150,7 +150,7 @@ func TestLivePaneMenuReloadUsesCache(t *testing.T) {
 	setID := "set-cache"
 	row := DashboardRow{CursorKey: "p\x00" + setID, Project: "p", ID: setID}
 	m := newQueueDashboard(&drain.Deps{}, nil, DashboardSnapshot{Containers: []DashboardRow{row}})
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
 
 	live := livePaneCache{}

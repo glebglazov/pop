@@ -366,10 +366,10 @@ func TestDashboardMapDetailWorksFrontierTicketFromItemMenu(t *testing.T) {
 	got.detail.row.ProjectPath = repo
 	got.detail.row.ProjectPath = repo
 
-	updated, _ := got.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := got.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got = updated.(QueueDashboard)
 	if got.itemMenu == nil {
-		t.Fatal("a on a frontier ticket did not open the item menu")
+		t.Fatal("r on a frontier ticket did not open the item menu")
 	}
 	if keys := itemMenuKeys(got.itemMenu); !slices.Contains(keys, "I") {
 		t.Fatalf("frontier ticket menu = %v, want the work verb on I", keys)
@@ -433,7 +433,7 @@ func TestDashboardMapRowSAssistsWithNoFrontier(t *testing.T) {
 	f.Inside = true
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
 
-	opened, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	opened, _ := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	updated, cmd := opened.(QueueDashboard).update(tea.KeyPressMsg{Code: 'S', Text: "S"})
 	if cmd == nil {
 		t.Fatal("S on a map row with no frontier did not return a command")

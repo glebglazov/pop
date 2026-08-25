@@ -9,7 +9,7 @@ import (
 
 // The queue-side end of the Work seam: how a read surface reaches the kind that
 // owns a row. Every cell a row shows and every verb it offers is composed by
-// that kind (ADR-0173), so the dashboard, the action menu and the static status
+// that kind (ADR-0173), so the dashboard, the Run menu and the static status
 // table all resolve the kind first and ask it — none of them branches on what a
 // row is.
 

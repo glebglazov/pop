@@ -60,13 +60,13 @@ func canonical(t *testing.T, path string) string {
 	return resolved
 }
 
-// handoffVerb presses a row's action-menu key and follows the messages it
+// handoffVerb presses a row's Run-menu key and follows the messages it
 // produces to the handoff — the move itself, and the recording behind it. A verb
 // the kind owns answers with its own outcome first and the dashboard turns that
 // into the handoff, so the chain is walked rather than read one message deep.
 func handoffVerb(t *testing.T, m QueueDashboard, key string) dashboardHandoffMsg {
 	t.Helper()
-	updated, _ := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	m = updated.(QueueDashboard)
 	updated, cmd := m.update(tea.KeyPressMsg{Code: rune(key[0]), Text: key})
 	m = updated.(QueueDashboard)

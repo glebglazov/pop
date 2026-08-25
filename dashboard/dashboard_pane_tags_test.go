@@ -224,7 +224,7 @@ func TestShellVerbSpawnsNothingTagged(t *testing.T) {
 	rt.Fake.Inside = true
 
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
-	updated, cmd := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, cmd := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
 	updated, cmd = got.update(tea.KeyPressMsg{Code: 'O', Text: "O"})
 	if cmd == nil {

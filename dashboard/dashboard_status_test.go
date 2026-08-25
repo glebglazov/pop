@@ -19,10 +19,10 @@ import (
 	"github.com/glebglazov/pop/work/ref"
 )
 
-// The action menu offers neither the status opener nor an archive of its own:
+// The Run menu offers neither the status opener nor an archive of its own:
 // both live in the Status menu, which `s` opens from the row list (ADR-0236
 // decisions 1 and 4). `S` assist is untouched, on a task set and on a Map alike.
-func TestActionMenuKeepsAssistAndLosesStatusAndArchive(t *testing.T) {
+func TestRunMenuKeepsAssistAndLosesStatusAndArchive(t *testing.T) {
 	for _, row := range []DashboardRow{
 		{ID: "demo", RawStatus: tasks.StatusReady, Bound: true},
 		{Kind: ref.KindMap, ID: "map-1"},
@@ -34,7 +34,7 @@ func TestActionMenuKeepsAssistAndLosesStatusAndArchive(t *testing.T) {
 			labels[item.key] = item.label
 		}
 		if _, ok := keys["s"]; ok {
-			t.Fatalf("%s row still offers a status entry in the action menu: %q", row.ID, labels["s"])
+			t.Fatalf("%s row still offers a status entry in the run menu: %q", row.ID, labels["s"])
 		}
 		if _, ok := keys["x"]; ok {
 			t.Fatalf("%s row still offers archive beside the status opener: %q", row.ID, labels["x"])

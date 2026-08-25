@@ -132,10 +132,10 @@ func TestDocumentPeekPageShrinksWithTheMenuOverIt(t *testing.T) {
 
 	bare := m.documentPeekPageSize()
 
-	updated, _ = m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ = m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	m = updated.(QueueDashboard)
 	if m.itemMenu == nil || !m.itemMenu.inPeek {
-		t.Fatal("a did not open the item menu over the peek")
+		t.Fatal("r did not open the run menu over the peek")
 	}
 	withMenu := m.documentPeekPageSize()
 	if withMenu >= bare {

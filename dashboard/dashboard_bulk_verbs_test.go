@@ -231,9 +231,9 @@ func TestWorkBulkMenuListsOnlyWhatEveryRowOffers(t *testing.T) {
 		t.Fatalf("marked %d rows, want both", m.selection.Len())
 	}
 
-	m = bulkPress(t, m, selKeyRune('a'))
+	m = bulkPress(t, m, selKeyRune('r'))
 	if m.menu == nil || !m.menu.plural {
-		t.Fatal("`a` did not open the plural action menu")
+		t.Fatal("`r` did not open the plural run menu")
 	}
 	want := []string{"park"}
 	if got := menuLabels(m); !slices.Equal(got, want) {
@@ -251,7 +251,7 @@ func TestWorkBulkMenuListsOnlyWhatEveryRowOffers(t *testing.T) {
 	// The menu sits at the foot with no adjacency to what it targets, so its own
 	// rule counts the marked rows (ADR-0224 decision 5).
 	lines := ui.StripANSI(strings.Join(dashboardMenuLines(m.menu, 200, livePaneCache{}), "\n"))
-	if !strings.Contains(lines, "actions · 2 selected") {
+	if !strings.Contains(lines, "run · 2 selected") {
 		t.Fatalf("menu rule does not name its target:\n%s", lines)
 	}
 }
@@ -268,7 +268,7 @@ func TestWorkBulkMenuRefusesWhenTheRowsShareNothing(t *testing.T) {
 
 	m = bulkPress(t, m, selKeyTab())
 	m = bulkPress(t, m, selKeyTab())
-	m = bulkPress(t, m, selKeyRune('a'))
+	m = bulkPress(t, m, selKeyRune('r'))
 
 	if m.menu != nil {
 		t.Fatal("an empty intersection opened a menu")
@@ -373,7 +373,7 @@ func TestWorkBulkPromptDeclinedKeepsTheSelection(t *testing.T) {
 	m, k := setDashboard(t, "set-a", "set-b")
 	m = bulkPress(t, m, selKeyTab())
 	m = bulkPress(t, m, selKeyTab())
-	m = bulkPress(t, m, selKeyRune('a'))
+	m = bulkPress(t, m, selKeyRune('r'))
 	m = bulkPress(t, m, selKeyRune('x'))
 	if m.bulkPrompt == nil {
 		t.Fatal("archive over a Selection asked nothing")
@@ -391,7 +391,7 @@ func TestWorkBulkPromptDeclinedKeepsTheSelection(t *testing.T) {
 		t.Fatalf("%d rows still marked, want the whole Selection", m.selection.Len())
 	}
 	// Esc backs out the same way.
-	m = bulkPress(t, m, selKeyRune('a'))
+	m = bulkPress(t, m, selKeyRune('r'))
 	m = bulkPress(t, m, selKeyRune('x'))
 	m = bulkPress(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.bulkPrompt != nil || len(k.log.performed) != 0 || m.selection.Len() != 2 {
@@ -407,7 +407,7 @@ func TestWorkBulkFailureLeavesExactlyTheFailedRowsMarked(t *testing.T) {
 	for range 3 {
 		m = bulkPress(t, m, selKeyTab())
 	}
-	m = bulkPress(t, m, selKeyRune('a'))
+	m = bulkPress(t, m, selKeyRune('r'))
 	m = bulkPress(t, m, selKeyRune('x'))
 	m = bulkPress(t, m, selKeyRune('y'))
 
@@ -434,7 +434,7 @@ func TestWorkBulkSeveralFailuresFlashABareCount(t *testing.T) {
 	for range 3 {
 		m = bulkPress(t, m, selKeyTab())
 	}
-	m = bulkPress(t, m, selKeyRune('a'))
+	m = bulkPress(t, m, selKeyRune('r'))
 	m = bulkPress(t, m, selKeyRune('x'))
 	m = bulkPress(t, m, selKeyRune('y'))
 
@@ -494,9 +494,9 @@ func TestWorkBulkCopyNameJoinsEverySelectedName(t *testing.T) {
 func TestWorkSingleRowVerbIsUnchanged(t *testing.T) {
 	m, k := setDashboard(t, "set-a", "set-b")
 
-	m = bulkPress(t, m, selKeyRune('a'))
+	m = bulkPress(t, m, selKeyRune('r'))
 	if m.menu == nil || m.menu.plural {
-		t.Fatal("`a` over no Selection opened a plural menu")
+		t.Fatal("`r` over no Selection opened a plural menu")
 	}
 	if got := menuLabels(m); slices.ContainsFunc(got, func(l string) bool { return strings.Contains(l, "rows") }) {
 		t.Fatalf("menu = %v, want the singular labels unchanged", got)
@@ -518,7 +518,7 @@ func TestWorkBulkMenuRefusesASingularVerbsHotkey(t *testing.T) {
 	m, k := setDashboard(t, "set-a", "set-b")
 	m = bulkPress(t, m, selKeyTab())
 	m = bulkPress(t, m, selKeyTab())
-	m = bulkPress(t, m, selKeyRune('a'))
+	m = bulkPress(t, m, selKeyRune('r'))
 
 	m = bulkPress(t, m, selKeyRune('I'))
 
@@ -605,9 +605,9 @@ func TestWorkBulkMenuKeepsTheSelectionSignals(t *testing.T) {
 	m, _ := setDashboard(t, "set-a", "set-b", "set-c", "set-d")
 	m = bulkPress(t, m, selKeyTab())
 	m = bulkPress(t, m, selKeyTab())
-	m = bulkPress(t, m, selKeyRune('a'))
+	m = bulkPress(t, m, selKeyRune('r'))
 	if m.menu == nil || !m.menu.plural {
-		t.Fatal("`a` did not open the plural action menu")
+		t.Fatal("`r` did not open the plural run menu")
 	}
 
 	view, separator := selectionSignals(t, m, 2)
@@ -622,10 +622,10 @@ func TestWorkBulkMenuKeepsTheSelectionSignals(t *testing.T) {
 	if !strings.Contains(before, "set-c") || !strings.Contains(before, "set-d") {
 		t.Fatalf("the ordinary rows are not above the separator:\n%s", view)
 	}
-	if strings.Contains(before, "actions") {
+	if strings.Contains(before, "run") {
 		t.Fatalf("the menu was spliced into the table:\n%s", view)
 	}
-	if !strings.Contains(after, "actions · 2 selected") {
+	if !strings.Contains(after, "run · 2 selected") {
 		t.Fatalf("the menu is not below the list, naming its targets:\n%s", view)
 	}
 
@@ -648,9 +648,9 @@ func TestWorkBulkMenuKeepsTheRowCursorPainted(t *testing.T) {
 	cursorBefore := m.list.Cursor()
 	cursoredID := selCursorID(t, m)
 
-	m = bulkPress(t, m, selKeyRune('a'))
+	m = bulkPress(t, m, selKeyRune('r'))
 	if m.menu == nil || !m.menu.plural {
-		t.Fatal("`a` did not open the plural action menu")
+		t.Fatal("`r` did not open the plural run menu")
 	}
 	openView := m.View().Content
 	if !rowCursorOn(openView) {
@@ -727,9 +727,9 @@ func TestWorkBulkMenuKeepsTheSelectionSignalsInTwoLineMode(t *testing.T) {
 	m = bulkPress(t, m, selKeyTab())
 	m = bulkPress(t, m, selKeyTab())
 	cursorBefore := m.list.Cursor()
-	m = bulkPress(t, m, selKeyRune('a'))
+	m = bulkPress(t, m, selKeyRune('r'))
 	if m.menu == nil || !m.menu.plural {
-		t.Fatal("`a` did not open the plural action menu")
+		t.Fatal("`r` did not open the plural run menu")
 	}
 
 	view, separator := selectionSignals(t, m, 2)
@@ -741,10 +741,10 @@ func TestWorkBulkMenuKeepsTheSelectionSignalsInTwoLineMode(t *testing.T) {
 	if !strings.Contains(before, "set-c") {
 		t.Fatalf("the ordinary row is not above the separator:\n%s", view)
 	}
-	if strings.Contains(before, "actions") {
+	if strings.Contains(before, "run") {
 		t.Fatalf("the menu was spliced into the two-line table:\n%s", view)
 	}
-	if !strings.Contains(after, "actions · 2 selected") {
+	if !strings.Contains(after, "run · 2 selected") {
 		t.Fatalf("the menu is not below the two-line list:\n%s", view)
 	}
 	if !rowCursorOn(view) {
@@ -768,9 +768,9 @@ func TestWorkBulkMenuKeepsTheSelectionSignalsInTwoLineMode(t *testing.T) {
 // cursored row, and the row cursor still paints.
 func TestWorkMenuWithoutASelectionRendersNoSelectionSignals(t *testing.T) {
 	m, _ := setDashboard(t, "set-a", "set-b")
-	m = bulkPress(t, m, selKeyRune('a'))
+	m = bulkPress(t, m, selKeyRune('r'))
 	if m.menu == nil || m.menu.plural {
-		t.Fatal("`a` did not open the singular action menu")
+		t.Fatal("`r` did not open the singular run menu")
 	}
 	view := ui.StripANSI(m.View().Content)
 	if strings.Contains(view, "selected") || strings.Contains(view, ui.SelectionMode) {
@@ -779,7 +779,7 @@ func TestWorkMenuWithoutASelectionRendersNoSelectionSignals(t *testing.T) {
 	if !rowCursorOn(view) {
 		t.Fatalf("the singular menu suppressed the row cursor:\n%s", view)
 	}
-	caption := strings.Index(view, "actions")
+	caption := strings.Index(view, "run")
 	row := strings.Index(view, "set-a")
 	if caption < 0 || row < 0 || caption < row {
 		t.Fatalf("the singular menu is not nested under the cursored row:\n%s", view)

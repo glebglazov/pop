@@ -251,7 +251,7 @@ func TestWorkSelectionRendersTheModeWordAndCountedSeparator(t *testing.T) {
 		t.Fatalf("the separator %q is not on screen:\n%s", want, view)
 	}
 	// The word is padded on both sides, so the hints never butt against it.
-	if want := "  " + ui.SelectionMode + "  j/k move"; !strings.Contains(view, want) {
+	if want := "  " + ui.SelectionMode + "  r run"; !strings.Contains(view, want) {
 		t.Fatalf("want %q on the bottom line, evenly spaced:\n%s", want, view)
 	}
 

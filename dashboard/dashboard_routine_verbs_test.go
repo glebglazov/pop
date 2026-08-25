@@ -63,9 +63,9 @@ func TestRoutineVerbsComeFromTheKindAndDispatchToIt(t *testing.T) {
 	var copied string
 	m.copyFunc = func(payload string) error { copied = payload; return nil }
 
-	m = pressKeys(t, m, "a")
+	m = pressKeys(t, m, "r")
 	if m.menu == nil {
-		t.Fatal("`a` did not open the action menu")
+		t.Fatal("`r` did not open the run menu")
 	}
 	kind := routine.NewKind(nil)
 	var want []string
@@ -113,12 +113,12 @@ func TestRoutineVerbBehavesTheSameOnEitherPage(t *testing.T) {
 		m := openPage(t, d, page)
 		var copied string
 		m.copyFunc = func(payload string) error { copied = payload; return nil }
-		m = pressKeys(t, m, "a")
+		m = pressKeys(t, m, "r")
 		got := result{keys: menuKeys(m.menu)}
 		m = pressKeys(t, m, "esc", "y", "p")
 		got.copied, got.status = copied, m.flash.Text()
 		// The runs verb opens the same generic detail from either page.
-		m = pressKeys(t, m, "a", "l")
+		m = pressKeys(t, m, "r", "l")
 		got.detail = m.detail != nil
 		if m.detail != nil {
 			got.details = len(m.detail.row.Items)
@@ -147,9 +147,9 @@ func TestRoutineRunItemVerbsComeFromTheKind(t *testing.T) {
 	if m.detail == nil {
 		t.Fatal("`l` did not open the detail view")
 	}
-	m = pressKeys(t, m, "a") // item actions over the cursored run
+	m = pressKeys(t, m, "r") // item run menu over the cursored run
 	if m.itemMenu == nil {
-		t.Fatal("`a` did not open the item action menu")
+		t.Fatal("`r` did not open the item run menu")
 	}
 	var want []string
 	for _, action := range routine.NewKind(nil).ItemActions(container, container.Items[0]) {
@@ -183,7 +183,7 @@ func TestShellRefusalSpeaksTheRowsOwnKind(t *testing.T) {
 	}
 	m := openPage(t, routinePageDeps([]work.Container{container}), PageRoutines)
 
-	m = pressKeys(t, m, "a", "O")
+	m = pressKeys(t, m, "r", "O")
 
 	if m.actionErr == nil {
 		t.Fatal("a shell with nowhere to run must surface a refusal")
@@ -209,7 +209,7 @@ func TestKindHandoffVerbFlashesPendingAtDispatch(t *testing.T) {
 	// the surface says while the spawn is still outstanding.
 	dispatch := func(t *testing.T, key string) QueueDashboard {
 		t.Helper()
-		m := pressKeys(t, openPage(t, d, PageRoutines), "a")
+		m := pressKeys(t, openPage(t, d, PageRoutines), "r")
 		updated, _ := m.update(tea.KeyPressMsg{Code: rune(key[0]), Text: key})
 		return updated.(QueueDashboard)
 	}
@@ -260,7 +260,7 @@ func TestKindVerbOutcomesAreCarriedOutGenerically(t *testing.T) {
 	t.Run("message with a clipboard payload", func(t *testing.T) {
 		k := fixed(work.Outcome{Kind: work.OutcomeMessage, Clipboard: "payload", Message: "copied a thing"}, nil)
 		m, copied := open(t, k)
-		m = pressKeys(t, m, "a", "z")
+		m = pressKeys(t, m, "r", "z")
 		if *copied != "payload" || m.flash.Text() != "copied a thing" {
 			t.Fatalf("clipboard = %q, status = %q", *copied, m.flash.Text())
 		}
@@ -269,7 +269,7 @@ func TestKindVerbOutcomesAreCarriedOutGenerically(t *testing.T) {
 	t.Run("refresh reloads the page", func(t *testing.T) {
 		k := fixed(work.Outcome{Kind: work.OutcomeRefresh, Message: "paused delta"}, nil)
 		m, _ := open(t, k)
-		updated, cmd := m.update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+		updated, cmd := m.update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 		m = updated.(QueueDashboard)
 		updated, cmd = m.update(tea.KeyPressMsg{Code: 'z', Text: "z"})
 		m = updated.(QueueDashboard)
@@ -290,7 +290,7 @@ func TestKindVerbOutcomesAreCarriedOutGenerically(t *testing.T) {
 	t.Run("detail opens the container's items", func(t *testing.T) {
 		k := fixed(work.Outcome{Kind: work.OutcomeDetail}, nil)
 		m, _ := open(t, k)
-		m = pressKeys(t, m, "a", "z")
+		m = pressKeys(t, m, "r", "z")
 		if m.detail == nil || m.detail.row.ID != container.ID || len(m.detail.row.Items) != 1 {
 			t.Fatalf("detail = %+v, want the row's own items", m.detail)
 		}
@@ -302,7 +302,7 @@ func TestKindVerbOutcomesAreCarriedOutGenerically(t *testing.T) {
 			Handoff: work.Handoff{Kind: work.HandoffTmux, Target: "%77"},
 		}, nil)
 		m, _ := open(t, k)
-		m = pressKeys(t, m, "a", "z")
+		m = pressKeys(t, m, "r", "z")
 		fake := m.d.Tmux.(*tmuxtest.Fake)
 		if len(fake.Selected) == 0 || fake.Selected[0] != "%77" {
 			t.Fatalf("selected panes = %v, want the handoff's own", fake.Selected)
@@ -315,7 +315,7 @@ func TestKindVerbOutcomesAreCarriedOutGenerically(t *testing.T) {
 	t.Run("a refusal is sticky on the action line", func(t *testing.T) {
 		k := fixed(work.Outcome{}, fmt.Errorf("routine %q has no directory", "delta"))
 		m, _ := open(t, k)
-		m = pressKeys(t, m, "a", "z")
+		m = pressKeys(t, m, "r", "z")
 		if m.actionErr == nil {
 			t.Fatal("a refused verb must surface")
 		}

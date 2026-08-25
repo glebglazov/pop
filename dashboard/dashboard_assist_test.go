@@ -54,7 +54,7 @@ func TestDashboardAssistMenuPlacement(t *testing.T) {
 	m := newQueueDashboard(nil, nil, DashboardSnapshot{Containers: []DashboardRow{
 		{ID: "demo"},
 	}})
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	got := updated.(QueueDashboard)
 	view := got.View().Content
 	if !strings.Contains(view, "S  assist") {
