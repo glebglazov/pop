@@ -39,7 +39,7 @@ func TestActionsOrderSpawningFirst(t *testing.T) {
 	want := []work.Verb{
 		VerbDrain, VerbVerify, VerbFold, VerbAssist, work.VerbShell,
 		work.VerbMute, work.VerbUnmute, VerbBind, VerbUnbind, VerbAutoDrain,
-		work.VerbStatus, VerbUnpark, VerbArchive, work.VerbCopyName, VerbCopyPath,
+		VerbUnpark, work.VerbCopyName, VerbCopyPath,
 	}
 	if got := verbsOffered(k.Actions(c)); !slices.Equal(got, want) {
 		t.Fatalf("Actions = %v, want %v", got, want)
@@ -59,7 +59,7 @@ func TestVerbCapabilities(t *testing.T) {
 		MutedUntil: time.Date(2026, 8, 14, 9, 0, 0, 0, time.UTC),
 	}
 	plural := map[work.Verb]bool{
-		work.VerbMute: true, work.VerbUnmute: true, work.VerbStatus: true,
+		work.VerbMute: true, work.VerbUnmute: true,
 		VerbArchive: true, work.VerbCopyName: true,
 		VerbComplete: true, VerbOpen: true, VerbSkip: true, VerbUnarchive: true,
 	}

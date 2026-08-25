@@ -137,7 +137,6 @@ func TestModalTaskSetVerbsDispatchByVerbID(t *testing.T) {
 	}{
 		{setkind.VerbBind, func(m QueueDashboard) bool { return m.bind != nil }},
 		{setkind.VerbUnbind, func(m QueueDashboard) bool { return m.abandon != nil }},
-		{work.VerbStatus, func(m QueueDashboard) bool { return m.menu != nil && m.menu.status != nil }},
 	}
 	for _, c := range cases {
 		t.Run(string(c.verb), func(t *testing.T) {

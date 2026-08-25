@@ -239,8 +239,7 @@ type dashboardMenuItem struct {
 	verb  work.Verb
 }
 
-// dashboardStatusMenu is the nested status overlay opened with `s` from the
-// action menu. Its items are the row's own kind's StatusActions — a task set's
+// dashboardStatusMenu is the Status menu opened with `s` from the row list. Its items are the row's own kind's StatusActions — a task set's
 // five task/archive writes, a Map's four lifecycle writes (ADR-0186) — so this
 // file holds no status vocabulary of any kind. Every one of them writes
 // in-process (ADR-0158) and is performed through the kind's own Perform, like any
@@ -250,9 +249,9 @@ type dashboardStatusMenu struct {
 	list *ui.List[work.Action]
 }
 
-// newDashboardStatusMenu opens the status submenu over row with the verbs its
-// kind offers right now. A kind that offers none never gets here: it does not
-// offer the opener either.
+// newDashboardStatusMenu opens the Status menu over row with the verbs its kind
+// offers right now. A kind that offers none never gets here: `s` answers it with
+// a flash instead.
 func newDashboardStatusMenu(kinds workKinds, row DashboardRow) *dashboardStatusMenu {
 	return &dashboardStatusMenu{
 		row:  row,
@@ -260,11 +259,40 @@ func newDashboardStatusMenu(kinds workKinds, row DashboardRow) *dashboardStatusM
 	}
 }
 
+// openStatusMenu answers `s` from the row list. Over one row it offers that row's
+// kind's status vocabulary; over a Selection it offers what every marked row
+// offers and declares plural, exactly as the opener did from inside the action
+// menu (ADR-0236 decision 10).
+//
+// A kind with no status to write answers in a flash. Inside a menu the absence
+// explained itself — the line simply was not in the list — but a key that reaches
+// the whole surface has to say why it did nothing, or it reads as broken
+// (decision 7).
+func (m QueueDashboard) openStatusMenu() (tea.Model, tea.Cmd) {
+	if m.selection.Active() {
+		return m.openSelectionStatusMenu()
+	}
+	row, ok := m.list.Selected()
+	if !ok {
+		return m, nil
+	}
+	if len(m.kinds.statusActionsFor(row)) == 0 {
+		m.flash.Set(fmt.Sprintf("a %s has no status to write", detailKindNoun(row.Kind)))
+		return m, nil
+	}
+	m.err = nil
+	m.menu = &dashboardMenu{row: row, status: newDashboardStatusMenu(m.kinds, row)}
+	return m, nil
+}
+
 // dashboardMenu is the layered action overlay opened with `a` over the focused
 // row. It carries the snapshot of the row it was opened on and the verbs
 // applicable to that row on a ui.List whose cursor drives j/k + Enter
 // selection. The menu closes as soon as a verb fires. When status is non-nil
 // the status submenu is open over the action menu.
+// A menu opened straight as the Status menu carries no list of its own: status
+// is the only thing it is showing, so there is nothing underneath it to go back
+// to and esc leaves the overlay.
 type dashboardMenu struct {
 	row    DashboardRow
 	list   *ui.List[dashboardMenuItem]
@@ -281,10 +309,11 @@ type dashboardMenu struct {
 	targets []DashboardRow
 }
 
-// nested reports whether a submenu is open over the action menu. The two nest
-// the same way and only one can be open at a time, so every place that asks
-// "is the action menu itself taking keys" asks here.
-func (m *dashboardMenu) nested() bool { return m.status != nil || m.mute != nil }
+// nested reports whether a submenu is open over the action menu — which today is
+// the mute submenu alone, the Status menu having moved to the row list
+// (ADR-0236 decision 1). Every place that asks "is the action menu itself taking
+// keys" asks here, and a Status menu answers no: it has no menu under it.
+func (m *dashboardMenu) nested() bool { return m.mute != nil }
 
 // pluralCount is how many rows this menu's verbs will act on, zero for a menu
 // over the cursored row.
@@ -1274,6 +1303,10 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.menu = m.newDashboardMenu(row)
 			m.err = nil
 			return m, nil
+		case "s":
+			// The Status menu opens from the row list, not from inside another menu
+			// (ADR-0236 decision 1): `s` `x` archives where `a` `s` `x` used to.
+			return m.openStatusMenu()
 		case "f":
 			// Open the Work view preset list (ADR-0197). Unlike `/` (a search that
 			// subtracts by name from the rows already included) this modal picks
@@ -1595,8 +1628,8 @@ func (m QueueDashboard) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// updateStatusMenu drives the nested status submenu: esc returns to the action
-// menu, j/k move the highlight, Enter runs the highlighted verb, and any
+// updateStatusMenu drives the Status menu: esc closes it back to the row list it
+// opened from, j/k move the highlight, Enter runs the highlighted verb, and any
 // matching verb letter runs that verb directly. Navigation is resolved before
 // verb letters so a hotkey can never shadow movement.
 func (m QueueDashboard) updateStatusMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1605,7 +1638,7 @@ func (m QueueDashboard) updateStatusMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch msg.String() {
 	case "esc", "ctrl+c":
-		m.menu.status = nil
+		m.menu = nil
 		return m, nil
 	case "j", "down":
 		m.menu.status.list.MoveDown()
@@ -1680,7 +1713,7 @@ func (m QueueDashboard) invokeMuteMenuItem(idx int) (tea.Model, tea.Cmd) {
 }
 
 // invokeMenuItem closes the menu and dispatches the verb at idx against the row
-// the menu was opened on, except for the status submenu opener which nests.
+// the menu was opened on, except for the mute submenu opener which nests.
 func (m QueueDashboard) invokeMenuItem(idx int) (tea.Model, tea.Cmd) {
 	if m.menu == nil {
 		return m, nil
@@ -1694,13 +1727,9 @@ func (m QueueDashboard) invokeMenuItem(idx int) (tea.Model, tea.Cmd) {
 	}
 	item := items[idx]
 	row := m.menu.row
-	if item.verb == work.VerbStatus {
-		m.menu.status = newDashboardStatusMenu(m.kinds, row)
-		return m, nil
-	}
-	// The two shared openers nest instead of dispatching: neither names a kind,
-	// and neither has anything to perform until the human picks from the list
-	// underneath it.
+	// The mute opener nests instead of dispatching: it names no kind, and has
+	// nothing to perform until the human picks a window from the list underneath
+	// it.
 	if item.verb == work.VerbMute {
 		m.menu.mute = newDashboardMuteMenu(m.taskDeps(), row)
 		return m, nil
@@ -3055,8 +3084,8 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			ui.HelpEntry{Key: "esc", Desc: "back"},
 		)
 	case m.menu != nil && m.menu.status != nil:
-		// The status submenu's verbs are the focused row's own kind's, so the help
-		// lists the submenu that is actually open rather than one kind's vocabulary
+		// The Status menu's verbs are the focused row's own kind's, so the help
+		// lists the menu that is actually open rather than one kind's vocabulary
 		// written out here — a Map row's keys would otherwise be a lie.
 		items := m.menu.status.list.Items()
 		entries := make([]ui.HelpEntry, 0, len(items)+3)
@@ -3067,7 +3096,7 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			ui.HelpEntry{Key: "j/k", Desc: "navigate"},
 			ui.HelpEntry{Key: "J/K", Desc: "navigate rows"},
 			ui.HelpEntry{Key: "enter", Desc: "run action"},
-			ui.HelpEntry{Key: "esc", Desc: "back to action menu"},
+			ui.HelpEntry{Key: "esc", Desc: "close menu"},
 		)
 	case m.menu != nil:
 		// Dashboard action menu. Its verbs are the focused row's own kind's, so the
@@ -3169,11 +3198,13 @@ func (m QueueDashboard) helpEntries() []ui.HelpEntry {
 			entries = append(entries,
 				ui.HelpEntry{Key: "y", Desc: "copy selected names"},
 				ui.HelpEntry{Key: "a", Desc: "actions over the selection"},
+				ui.HelpEntry{Key: "s", Desc: "status menu over the selection"},
 			)
 		} else {
 			entries = append(entries,
 				ui.HelpEntry{Key: "y", Desc: "copy name"},
 				ui.HelpEntry{Key: "a", Desc: "action menu"},
+				ui.HelpEntry{Key: "s", Desc: "status menu"},
 			)
 		}
 		entries = append(entries,
@@ -3225,7 +3256,7 @@ func (m QueueDashboard) View() tea.View {
 		} else if m.menu != nil && m.menu.mute != nil {
 			title = "Help · " + page + " · mute submenu"
 		} else if m.menu != nil && m.menu.status != nil {
-			title = "Help · " + page + " · status submenu"
+			title = "Help · " + page + " · status menu"
 		} else if m.menu != nil {
 			title = "Help · " + page + " · action menu"
 		} else if m.filter != nil {
@@ -3423,9 +3454,9 @@ func (m QueueDashboard) mainHint() string {
 	if m.selection.Active() {
 		// Only the keys that still do something in the mode, so the line does not
 		// advertise the verbs it is refusing.
-		return "j/k move · gg/G top/bottom · tab select · shift+tab clear · y copy names · a actions · / search · " + filters + toggle + " · C-h help · h/esc quit"
+		return "j/k move · gg/G top/bottom · tab select · shift+tab clear · y copy names · a actions · s status ▸ · / search · " + filters + toggle + " · C-h help · h/esc quit"
 	}
-	return "j/k move · gg/G top/bottom · tab select · l/enter detail · y copy name · a actions · / search · " + filters + toggle + " · C-h help · h/esc quit"
+	return "j/k move · gg/G top/bottom · tab select · l/enter detail · y copy name · a actions · s status ▸ · / search · " + filters + toggle + " · C-h help · h/esc quit"
 }
 
 // emptySearchLine is the body text when the search has hidden every row. It

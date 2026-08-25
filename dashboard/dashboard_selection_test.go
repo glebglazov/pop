@@ -22,6 +22,7 @@ import (
 
 func selKeyTab() tea.KeyPressMsg      { return tea.KeyPressMsg{Code: tea.KeyTab} }
 func selKeyShiftTab() tea.KeyPressMsg { return tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift} }
+func selKeyEsc() tea.KeyPressMsg      { return tea.KeyPressMsg{Code: tea.KeyEscape, Text: "esc"} }
 func selKeyRune(r rune) tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: r, Text: string(r)}
 }

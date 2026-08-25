@@ -389,7 +389,7 @@ func TestDashboardActionMenuContextFiltering(t *testing.T) {
 
 	// A plain ready set: only the unconditional verbs plus auto-drain (non-orphaned).
 	plain := keysFor(DashboardRow{ID: "plain", RuntimePath: "/wt"})
-	if want := []string{"I", "S", "O", "m", "b", "a", "s", "x", "y"}; !reflect.DeepEqual(plain, want) {
+	if want := []string{"I", "S", "O", "m", "b", "a", "y"}; !reflect.DeepEqual(plain, want) {
 		t.Fatalf("plain row verbs = %v, want %v", plain, want)
 	}
 
@@ -478,24 +478,25 @@ func TestDashboardActionMenuArchiveDispatch(t *testing.T) {
 	// A DONE, bound row: archive is offered regardless of status.
 	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{{Project: "pop", Worktree: "/repo/wt (main)", CursorKey: "pop\x00set", RawStatus: tasks.StatusDone, ID: "set", DefPath: "/repo/tasks", StatePath: "/repo/state.json", RuntimePath: "/repo/wt", Bound: true}}})
 
-	// Archive lives behind the action menu: open with `a`, archive with `x`.
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	// Archive lives in the Status menu and nowhere else: open with `s`, archive
+	// with `x` (ADR-0236 decision 4).
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
 	got := updated.(QueueDashboard)
-	if got.menu == nil {
-		t.Fatal("a did not open the action menu")
+	if got.menu == nil || got.menu.status == nil {
+		t.Fatal("s did not open the status menu")
 	}
 	var keys []string
-	for _, item := range got.menu.list.Items() {
-		keys = append(keys, item.key)
+	for _, action := range got.menu.status.list.Items() {
+		keys = append(keys, action.Key)
 	}
 	if !contains(keys, "x") {
-		t.Fatalf("archive verb absent from a DONE bound row's menu: %v", keys)
+		t.Fatalf("archive verb absent from a DONE bound row's status menu: %v", keys)
 	}
 
 	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 	got = updated.(QueueDashboard)
 	if got.menu != nil {
-		t.Fatal("x did not close the action menu after dispatch")
+		t.Fatal("x did not close the status menu after dispatch")
 	}
 	// No confirmation prompt: archiving opens no modal (it is fully reversible).
 	if got.bind != nil || got.abandon != nil || got.drainPick != nil {
@@ -558,7 +559,7 @@ func TestDashboardArchiveRetainsBinding(t *testing.T) {
 	d := &drain.Deps{Tasks: td}
 	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{{Project: "proj", CursorKey: "proj\x00set-1", RawStatus: tasks.StatusDone, ID: "set-1", DefPath: tasksDir, StatePath: statePath, RuntimePath: "/repo/wt", Bound: true}}})
 
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
 	got := updated.(QueueDashboard)
 	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 	got = updated.(QueueDashboard)
@@ -3706,16 +3707,15 @@ func TestTaskMenuKMovesCursor(t *testing.T) {
 	}
 }
 
-// TestStatusSubmenuKMovesCursor pins j/k as movement-only in the status submenu.
-func TestStatusSubmenuKMovesCursor(t *testing.T) {
+// TestStatusMenuKMovesCursor pins j/k as movement-only in the Status menu.
+func TestStatusMenuKMovesCursor(t *testing.T) {
 	row := DashboardRow{ID: "demo"}
 	m := newQueueDashboard(nil, nil, DashboardSnapshot{Containers: []DashboardRow{row}})
-	m.menu = newDashboardMenu(testKinds(), row)
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
 	got := updated.(QueueDashboard)
 	if got.menu == nil || got.menu.status == nil {
-		t.Fatal("s should open status submenu")
+		t.Fatal("s should open the status menu")
 	}
 	before := got.menu.status.list.Cursor()
 
@@ -5070,17 +5070,17 @@ func TestDashboardMapRowQueueVerbsInert(t *testing.T) {
 	m.list.SetCursor(0)
 
 	// A Map's menu is its own kind's: the four frontier verbs (going and staying),
-	// the Map-scoped assist session, its own status submenu, and the shared ones —
-	// spawning keys before in-place ones. Every Task-set verb stays absent — queue
-	// verbs have never applied to a Map, and the status opener it shares with a task
-	// set is the surface's verb, not that kind's. Mute is shared too (ADR-0200
-	// decision 7): the fixture's Map is unmuted, so only the opener shows.
+	// the Map-scoped assist session, and the shared ones — spawning keys before
+	// in-place ones. Every Task-set verb stays absent, queue verbs having never
+	// applied to a Map, and so does the status opener: the Status menu opens from
+	// the row list (ADR-0236 decision 1). Mute is shared (ADR-0200 decision 7): the
+	// fixture's Map is unmuted, so only the opener shows.
 	items := dashboardMenuItems(testKinds(), mapRow)
 	var keys []string
 	for _, item := range items {
 		keys = append(keys, item.key)
 	}
-	if want := []string{"I", "A", "S", "O", "m", "i", "a", "s", "y"}; !reflect.DeepEqual(keys, want) {
+	if want := []string{"I", "A", "S", "O", "m", "i", "a", "y"}; !reflect.DeepEqual(keys, want) {
 		t.Fatalf("map menu keys = %v, want %v", keys, want)
 	}
 	for _, item := range items {

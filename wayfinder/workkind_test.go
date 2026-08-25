@@ -161,7 +161,7 @@ func TestMapKindVerbsFollowTheFrontier(t *testing.T) {
 		}
 		return out
 	}
-	wantActions := []work.Verb{VerbWork, VerbFanOut, VerbAssist, work.VerbShell, work.VerbMute, VerbWorkHere, VerbFanOutHere, work.VerbStatus, work.VerbCopyName}
+	wantActions := []work.Verb{VerbWork, VerbFanOut, VerbAssist, work.VerbShell, work.VerbMute, VerbWorkHere, VerbFanOutHere, work.VerbCopyName}
 	if got := verbs(k.Actions(active)); !slices.Equal(got, wantActions) {
 		t.Fatalf("map actions = %v, want %v", got, wantActions)
 	}
@@ -174,11 +174,11 @@ func TestMapKindVerbsFollowTheFrontier(t *testing.T) {
 	// All four frontier keys are gated on a frontier: a Map with none offers no
 	// dead key, going or staying. Assist survives the gate — a Map whose frontier
 	// is empty or fully claimed is when a Map-scoped session is most needed
-	// (ADR-0184) — and so does the status submenu, which is the only way off the
-	// row (ADR-0186).
+	// (ADR-0184). The way off the row is the Status menu, which is not in this
+	// list at all: it opens from the row list (ADR-0236 decision 1).
 	frontierless := active
 	frontierless.MapFrontier = 0
-	if got, want := verbs(k.Actions(frontierless)), []work.Verb{VerbAssist, work.VerbShell, work.VerbMute, work.VerbStatus, work.VerbCopyName}; !slices.Equal(got, want) {
+	if got, want := verbs(k.Actions(frontierless)), []work.Verb{VerbAssist, work.VerbShell, work.VerbMute, work.VerbCopyName}; !slices.Equal(got, want) {
 		t.Fatalf("frontierless map actions = %v, want %v", got, want)
 	}
 
@@ -217,7 +217,7 @@ func TestMapKindVerbCapabilities(t *testing.T) {
 	}
 	active.MutedUntil = time.Now().Add(time.Hour)
 	plural := map[work.Verb]bool{
-		work.VerbMute: true, work.VerbUnmute: true, work.VerbStatus: true, work.VerbCopyName: true,
+		work.VerbMute: true, work.VerbUnmute: true, work.VerbCopyName: true,
 		VerbReopen: true, VerbAbandon: true, VerbArchive: true, VerbUnarchive: true,
 	}
 	for _, action := range append(k.Actions(active), k.StatusActions(active)...) {

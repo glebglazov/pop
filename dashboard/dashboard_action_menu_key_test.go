@@ -30,9 +30,10 @@ func TestDashboardUppercaseAOpensNothing(t *testing.T) {
 	}
 }
 
-// The menu does not survive the verb it fires: an in-place write closes it just
-// as a handoff does.
-func TestDashboardActionMenuClosesOnInPlaceVerb(t *testing.T) {
+// A menu does not survive the verb it fires: an in-place write closes it just
+// as a handoff does. Archive is the case, and it is reached with `s` `x` now
+// that it lives in the Status menu alone (ADR-0236 decision 4).
+func TestDashboardMenuClosesOnInPlaceVerb(t *testing.T) {
 	d := &drain.Deps{
 		SetArchived: func(defPath, setID string, on bool) error { return nil },
 	}
@@ -42,11 +43,11 @@ func TestDashboardActionMenuClosesOnInPlaceVerb(t *testing.T) {
 	m.width = 120
 	m.height = 24
 
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
 	got := updated.(QueueDashboard)
 	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
 	if got := updated.(QueueDashboard); got.menu != nil {
-		t.Fatal("archive left the action menu open")
+		t.Fatal("archive left the status menu open")
 	}
 	if cmd == nil {
 		t.Fatal("archive should dispatch")

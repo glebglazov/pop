@@ -19,46 +19,93 @@ import (
 	"github.com/glebglazov/pop/work/ref"
 )
 
-func TestDashboardActionMenuStatusAndAssistKeys(t *testing.T) {
-	row := DashboardRow{ID: "demo", RawStatus: tasks.StatusReady, Bound: true}
-	keys := make(map[string]string)
-	for _, item := range dashboardMenuItems(testKinds(), row) {
-		keys[item.key] = item.label
+// The action menu offers neither the status opener nor an archive of its own:
+// both live in the Status menu, which `s` opens from the row list (ADR-0236
+// decisions 1 and 4). `S` assist is untouched, on a task set and on a Map alike.
+func TestActionMenuKeepsAssistAndLosesStatusAndArchive(t *testing.T) {
+	for _, row := range []DashboardRow{
+		{ID: "demo", RawStatus: tasks.StatusReady, Bound: true},
+		{Kind: ref.KindMap, ID: "map-1"},
+	} {
+		keys := make(map[string]work.Verb)
+		labels := make(map[string]string)
+		for _, item := range dashboardMenuItems(testKinds(), row) {
+			keys[item.key] = item.verb
+			labels[item.key] = item.label
+		}
+		if _, ok := keys["s"]; ok {
+			t.Fatalf("%s row still offers a status entry in the action menu: %q", row.ID, labels["s"])
+		}
+		if _, ok := keys["x"]; ok {
+			t.Fatalf("%s row still offers archive beside the status opener: %q", row.ID, labels["x"])
+		}
+		if keys["S"] == "" {
+			t.Fatalf("%s row lost its assist key S", row.ID)
+		}
 	}
-	if keys["s"] != "status ▸" {
-		t.Fatalf("status submenu key = %q, want status ▸", keys["s"])
+	if got := dashboardMenuItems(testKinds(), DashboardRow{Kind: ref.KindMap, ID: "map-1"}); !mapAssistOffered(got) {
+		t.Fatalf("map row should offer its own assist verb on S: %v", got)
 	}
-	if keys["S"] != "assist" {
-		t.Fatalf("assist key = %q, want assist on S", keys["S"])
-	}
-	if _, ok := keys["x"]; !ok {
-		t.Fatal("top-level archive shortcut x missing")
-	}
+}
 
-	// A Map carries the same two keys: `S` for its own assist session (ADR-0184),
-	// and `s` for its own status submenu (ADR-0186) — the opener is shared, the
-	// items behind it are not.
-	mapKeys := dashboardMenuItems(testKinds(), DashboardRow{Kind: ref.KindMap, ID: "map-1"})
-	var mapAssist, mapStatus bool
-	for _, item := range mapKeys {
-		if item.key == "s" {
-			if item.verb != work.VerbStatus {
-				t.Fatalf("map s = %q, want the shared status opener", item.verb)
-			}
-			mapStatus = true
-		}
-		if item.key == "S" {
-			if item.verb != wayfinder.VerbAssist {
-				t.Fatalf("map S = %q, want the Map's own assist verb", item.verb)
-			}
-			mapAssist = true
+// mapAssistOffered reports whether `S` is the Map's own assist session rather
+// than a Task set's — the opener is shared, the sessions behind the keys are not.
+func mapAssistOffered(items []dashboardMenuItem) bool {
+	for _, item := range items {
+		if item.key == "S" && item.verb == wayfinder.VerbAssist {
+			return true
 		}
 	}
-	if !mapAssist {
-		t.Fatalf("map row should offer assist on S: %v", mapKeys)
+	return false
+}
+
+// `s` opens the Status menu straight from the row list, over a Task set and over
+// a Map, with each kind's own verbs on the keys they have always had.
+func TestStatusMenuOpensFromTheRowList(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		row  DashboardRow
+		want []string
+	}{
+		{"task set", DashboardRow{Project: "pop", CursorKey: "pop\x00demo", ID: "demo", RawStatus: tasks.StatusReady}, []string{"c complete", "o open", "s skip", "x archive", "u unarchive"}},
+		{"map", DashboardRow{Project: "pop", CursorKey: "pop\x00map-1", Kind: ref.KindMap, ID: "map-1"}, []string{"o open (reopen)", "a abandon", "x archive", "u unarchive"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{tc.row}})
+			m.width, m.height = 120, 24
+
+			updated, _ := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+			got := updated.(QueueDashboard)
+			if got.menu == nil || got.menu.status == nil {
+				t.Fatal("s on the row list did not open the status menu")
+			}
+			var items []string
+			for _, action := range got.menu.status.list.Items() {
+				items = append(items, action.Key+" "+action.Label)
+			}
+			if strings.Join(items, ",") != strings.Join(tc.want, ",") {
+				t.Fatalf("status menu = %v, want %v", items, tc.want)
+			}
+		})
 	}
-	if !mapStatus {
-		t.Fatalf("map row should offer a status submenu on s: %v", mapKeys)
+}
+
+// A Routine has no status to write, and at top level the absence can no longer
+// explain itself by a missing line in a list, so `s` says so (ADR-0236
+// decision 7).
+func TestStatusKeyOnARoutineFlashes(t *testing.T) {
+	row := DashboardRow{Project: "pop", CursorKey: "pop\x00nightly", Kind: ref.KindRoutine, ID: "nightly"}
+	m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{row}})
+	m.kinds = testRoutineKinds()
+	m.width, m.height = 120, 24
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+	got := updated.(QueueDashboard)
+	if got.menu != nil {
+		t.Fatal("s opened a menu over a kind with no status vocabulary")
+	}
+	if want := "a Routine has no status to write"; got.flash.Text() != want {
+		t.Fatalf("flash = %q, want %q", got.flash.Text(), want)
 	}
 }
 
@@ -93,9 +140,9 @@ func TestMapStatusSubmenuItems(t *testing.T) {
 	}
 }
 
-// A kind with no status to write offers no submenu and no opener, so `s` is not a
-// key that opens an empty overlay.
-func TestRoutineOffersNoStatusSubmenu(t *testing.T) {
+// A kind with no status to write offers no status verbs at all, so `s` never
+// opens an empty overlay over one.
+func TestRoutineOffersNoStatusVerbs(t *testing.T) {
 	row := DashboardRow{Kind: ref.KindRoutine, ID: "nightly"}
 	if items := testRoutineKinds().statusActionsFor(row); len(items) != 0 {
 		t.Fatalf("routine status actions = %+v, want none", items)
@@ -107,30 +154,22 @@ func TestRoutineOffersNoStatusSubmenu(t *testing.T) {
 	}
 }
 
-func TestDashboardStatusSubmenuEscNavigation(t *testing.T) {
+// The Status menu has nothing underneath it, so one esc returns to the row list
+// rather than uncovering a menu the operator never opened.
+func TestDashboardStatusMenuEscReturnsToTheRowList(t *testing.T) {
 	row := DashboardRow{ID: "demo"}
 	m := newQueueDashboard(nil, nil, DashboardSnapshot{Containers: []DashboardRow{row}})
-	m.menu = newDashboardMenu(testKinds(), row)
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
 	got := updated.(QueueDashboard)
 	if got.menu == nil || got.menu.status == nil {
-		t.Fatal("s should open status submenu")
-	}
-
-	updated, _ = got.Update(tea.KeyPressMsg{Code: tea.KeyEscape, Text: "esc"})
-	got = updated.(QueueDashboard)
-	if got.menu == nil {
-		t.Fatal("esc from submenu should return to action menu")
-	}
-	if got.menu.status != nil {
-		t.Fatal("esc from submenu should close status submenu only")
+		t.Fatal("s should open the status menu")
 	}
 
 	updated, _ = got.Update(tea.KeyPressMsg{Code: tea.KeyEscape, Text: "esc"})
 	got = updated.(QueueDashboard)
 	if got.menu != nil {
-		t.Fatal("esc from action menu should close menu")
+		t.Fatal("esc from the status menu should leave no overlay open")
 	}
 }
 
@@ -151,32 +190,32 @@ func TestDashboardStatusVerbErrorIsSurfaced(t *testing.T) {
 	}
 }
 
-func TestDashboardStatusSubmenuHelp(t *testing.T) {
-	m := newQueueDashboard(nil, nil, DashboardSnapshot{})
-	m.menu = newDashboardMenu(testKinds(), DashboardRow{ID: "set"})
-	m.menu.status = newDashboardStatusMenu(testKinds(), DashboardRow{ID: "set"})
-	entries := m.helpEntries()
+func TestDashboardStatusMenuHelp(t *testing.T) {
+	row := DashboardRow{ID: "set"}
+	m := newQueueDashboard(nil, nil, DashboardSnapshot{Containers: []DashboardRow{row}})
+	m.menu = &dashboardMenu{row: row, status: newDashboardStatusMenu(testKinds(), row)}
 	found := map[string]bool{}
-	for _, e := range entries {
+	for _, e := range m.helpEntries() {
 		found[e.Key] = true
 	}
 	for _, key := range []string{"c", "o", "s", "x", "u", "esc"} {
 		if !found[key] {
-			t.Errorf("status submenu help missing %q", key)
+			t.Errorf("status menu help missing %q", key)
 		}
 	}
 
-	m.menu.status = nil
-	entries = m.helpEntries()
+	// With no menu open the overlay names the opener, which is the only place the
+	// operator can now learn the key.
+	m.menu = nil
 	found = map[string]bool{}
-	for _, e := range entries {
+	for _, e := range m.helpEntries() {
 		found[e.Key] = true
 	}
 	if !found["s"] {
-		t.Error("action menu help missing status submenu key s")
+		t.Error("main help missing the status menu opener s")
 	}
-	if !found["S"] {
-		t.Error("action menu help missing assist key S")
+	if !strings.Contains(m.mainHint(), "s status") {
+		t.Errorf("footer does not advertise the status opener: %q", m.mainHint())
 	}
 }
 
@@ -188,8 +227,7 @@ func TestDashboardStatusSubmenuDispatchInProcess(t *testing.T) {
 	d, cfg, row, _ := dashboardLaunchFixture(t, repo, setID)
 	row.ProjectPath = repo
 	m := newQueueDashboard(d, cfg, DashboardSnapshot{Containers: []DashboardRow{row}})
-	m.menu = newDashboardMenu(testKinds(), row)
-	m.menu.status = newDashboardStatusMenu(testKinds(), row)
+	m.menu = &dashboardMenu{row: row, status: newDashboardStatusMenu(testKinds(), row)}
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Text: "c"})
 	got := updated.(QueueDashboard)
@@ -256,8 +294,7 @@ func TestDashboardStatusArchivePairInProcess(t *testing.T) {
 	row := DashboardRow{ID: "demo", DefPath: "/repo/tasks", CursorKey: "pop\x00demo"}
 	for _, key := range []rune{'x', 'u'} {
 		m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{row}})
-		m.menu = newDashboardMenu(m.kinds, row)
-		m.menu.status = newDashboardStatusMenu(m.kinds, row)
+		m.menu = &dashboardMenu{row: row, status: newDashboardStatusMenu(m.kinds, row)}
 		_, cmd := m.Update(tea.KeyPressMsg{Code: key, Text: string(key)})
 		if cmd == nil {
 			t.Fatalf("%c dispatched no command", key)

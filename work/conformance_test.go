@@ -89,8 +89,7 @@ func conformanceCases() []conformanceCase {
 			// works (ADR-0200 decision 7).
 			wantActions: []work.Verb{
 				setkind.VerbDrain, setkind.VerbAssist, work.VerbShell, work.VerbMute,
-				setkind.VerbBind, setkind.VerbAutoDrain, work.VerbStatus,
-				setkind.VerbArchive, work.VerbCopyName,
+				setkind.VerbBind, setkind.VerbAutoDrain, work.VerbCopyName,
 			},
 			wantItemActions: []work.Verb{
 				setkind.VerbComplete, setkind.VerbSkip, work.VerbCopyName, setkind.VerbCopyPath,
@@ -122,7 +121,7 @@ func conformanceCases() []conformanceCase {
 			// see the "routine" case below, whose wantActions names no mute verb at all).
 			wantActions: []work.Verb{
 				wayfinder.VerbWork, wayfinder.VerbFanOut, wayfinder.VerbAssist, work.VerbShell, work.VerbMute,
-				wayfinder.VerbWorkHere, wayfinder.VerbFanOutHere, work.VerbStatus, work.VerbCopyName,
+				wayfinder.VerbWorkHere, wayfinder.VerbFanOutHere, work.VerbCopyName,
 			},
 			wantItemActions: []work.Verb{wayfinder.VerbWork, wayfinder.VerbWorkHere, work.VerbCopyName},
 			wantStatusActions: []work.Verb{
@@ -244,17 +243,17 @@ func TestKindConformance(t *testing.T) {
 			if got := verbsOf(k.ItemActions(c, item)); !slices.Equal(got, tc.wantItemActions) {
 				t.Fatalf("ItemActions = %v, want %v", got, tc.wantItemActions)
 			}
-			// A kind's status verbs are its own vocabulary (ADR-0186), and a kind that
-			// offers any of them must offer the shared opener, or the submenu is
-			// unreachable. What each one writes is the owning kind's own test to make —
-			// performing them here would archive the fixture.
+			// A kind's status verbs are its own vocabulary (ADR-0186), reached from the
+			// row list rather than from inside Actions (ADR-0236 decision 1): a kind
+			// that lists the opener among its own verbs is offering a menu twice. What
+			// each status verb writes is the owning kind's own test to make — performing
+			// them here would archive the fixture.
 			status := k.StatusActions(c)
 			if got := verbsOf(status); !slices.Equal(got, tc.wantStatusActions) {
 				t.Fatalf("StatusActions = %v, want %v", got, tc.wantStatusActions)
 			}
-			offersOpener := slices.Contains(verbsOf(k.Actions(c)), work.VerbStatus)
-			if len(status) > 0 != offersOpener {
-				t.Fatalf("status verbs = %v but status opener offered = %v", verbsOf(status), offersOpener)
+			if slices.Contains(verbsOf(k.Actions(c)), work.VerbStatus) {
+				t.Fatalf("Actions = %v, want no status opener — the Status menu opens from the row list", verbsOf(k.Actions(c)))
 			}
 			for _, action := range status {
 				if action.Key == "" || action.Label == "" {

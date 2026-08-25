@@ -24,10 +24,10 @@ func mapStatusRow() DashboardRow {
 	})
 }
 
-// The Map's status submenu opens on the same key the Task set's does and offers
-// the Map's own four verbs, each dispatched to the Map kind rather than to any
-// dashboard-side status code.
-func TestMapRowStatusSubmenuDispatchesTheMapsOwnVerbs(t *testing.T) {
+// The Map's Status menu opens on the same key the Task set's does — `s` from the
+// row list — and offers the Map's own four verbs, each dispatched to the Map kind
+// rather than to any dashboard-side status code.
+func TestMapRowStatusMenuDispatchesTheMapsOwnVerbs(t *testing.T) {
 	row := mapStatusRow()
 	for _, tc := range []struct {
 		key  rune
@@ -41,14 +41,12 @@ func TestMapRowStatusSubmenuDispatchesTheMapsOwnVerbs(t *testing.T) {
 		m := newQueueDashboard(&drain.Deps{Tasks: queuetest.DataDeps(t)}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{row}})
 		m.width, m.height = 120, 20
 
-		updated, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+		updated, _ := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
 		got := updated.(QueueDashboard)
-		updated, _ = got.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
-		got = updated.(QueueDashboard)
 		if got.menu == nil || got.menu.status == nil {
-			t.Fatalf("s on a map row did not open the status submenu")
+			t.Fatalf("s on a map row did not open the status menu")
 		}
-		// The submenu names the Map's vocabulary on screen, not a task set's.
+		// The menu names the Map's vocabulary on screen, not a task set's.
 		if view := got.View().Content; !strings.Contains(view, "abandon") || strings.Contains(view, "skip") {
 			t.Fatalf("map status submenu view = \n%s", view)
 		}

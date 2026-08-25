@@ -84,7 +84,6 @@ func TestWorkBulkAbandonConfirmsOnceAndAbandonsEveryRow(t *testing.T) {
 	m, k := mapDashboard(t, "map-a", "map-b", "map-c")
 	m = markAll(t, m, 3)
 
-	m = bulkPress(t, m, selKeyRune('a'))
 	m = bulkPress(t, m, selKeyRune('s'))
 	m = bulkPress(t, m, selKeyRune('a'))
 
@@ -117,7 +116,6 @@ func TestWorkBulkAbandonReusesTheFailureCollapse(t *testing.T) {
 	k.fail = map[string]string{"map-b": "map.md is read-only"}
 	m = markAll(t, m, 2)
 
-	m = bulkPress(t, m, selKeyRune('a'))
 	m = bulkPress(t, m, selKeyRune('s'))
 	m = bulkPress(t, m, selKeyRune('a'))
 	m = bulkPress(t, m, selKeyRune('y'))

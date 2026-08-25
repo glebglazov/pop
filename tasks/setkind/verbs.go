@@ -42,25 +42,29 @@ const (
 
 // Actions returns the container-level verbs that apply to one task set right now,
 // spawning (handoff) verbs first and in-place verbs last: `I V F S O` then
-// `b u a s r x y p`, mirroring the order handoffAfterLaunch already names (drain,
+// `b u a r y p`, mirroring the order handoffAfterLaunch already names (drain,
 // verify, fold, assist, shell) so the two lists never drift apart. Conditional
 // verbs are filtered to the set's context: verify only for NEEDS-VERIFY /
 // VERIFY-FAILED sets with no live drain, fold only for a bound terminal set,
 // unbind only for bound sets, auto-drain only for non-orphaned sets, unpark only
 // for parked sets, and copy-path only for bound sets. Drain, assist, the runtime
-// shell, bind, status, archive and copy-name apply to every set regardless of
-// status.
+// shell, bind and copy-name apply to every set regardless of status.
+//
+// Neither the status opener nor archive is here. The Status menu opens from the
+// row list on its own key (ADR-0236 decision 1), and archive is one of its verbs
+// and nothing else: this list carried an `x` that wrote exactly what
+// StatusActions' own `x` writes, and two entries for one write is the drift the
+// split removes (decision 4).
 //
 // It is called when a menu opens over one container, not per container at load
 // time, so the eligibility it reports is as fresh as the keypress.
 //
-// Capability audit (ADR-0215 decision 5). Plural — mute, unmute, the status
-// opener, archive and copy-name: one window, one confirmation or one word
-// answers identically for every marked set, and the opener's own submenu
-// intersects again underneath it. Singular — drain, verify, fold, assist, shell,
-// bind, unbind, auto-drain, unpark and copy-path: each resolves a checkout, a
-// worktree, a session or a modal per set, so one answer cannot stand for the
-// batch, and the handoff verbs have no plural meaning at all.
+// Capability audit (ADR-0215 decision 5). Plural — mute, unmute and copy-name:
+// one window, one confirmation or one word answers identically for every marked
+// set. Singular — drain, verify, fold, assist, shell, bind, unbind, auto-drain,
+// unpark and copy-path: each resolves a checkout, a worktree, a session or a
+// modal per set, so one answer cannot stand for the batch, and the handoff verbs
+// have no plural meaning at all.
 func (k *Kind) Actions(c work.Container) []work.Action {
 	actions := []work.Action{{Verb: VerbDrain, Key: "I", Label: "drain"}}
 	// Verify is the lighter, explicit Verifier force (ADR-0123): offered only on
@@ -94,14 +98,10 @@ func (k *Kind) Actions(c work.Container) []work.Action {
 	if !c.Orphaned {
 		actions = append(actions, work.Action{Verb: VerbAutoDrain, Key: "a", Label: "auto-drain"})
 	}
-	actions = append(actions, work.Action{Verb: work.VerbStatus, Key: "s", Label: "status ▸", Modes: work.Plural})
 	if c.Parked {
 		actions = append(actions, work.Action{Verb: VerbUnpark, Key: "r", Label: "unpark"})
 	}
-	actions = append(actions,
-		work.Action{Verb: VerbArchive, Key: "x", Label: "archive", Modes: work.Plural},
-		work.Action{Verb: work.VerbCopyName, Key: "y", Label: "copy name", Modes: work.Plural},
-	)
+	actions = append(actions, work.Action{Verb: work.VerbCopyName, Key: "y", Label: "copy name", Modes: work.Plural})
 	if c.Bound {
 		actions = append(actions, work.Action{Verb: VerbCopyPath, Key: "p", Label: "copy path"})
 	}

@@ -99,13 +99,15 @@ func (k *bulkKind) Unmute(c work.Container) (work.Outcome, error) {
 }
 
 // setVerbs is a Task-set-shaped verb list: one handoff verb that stays singular,
-// the shared plural openers, and an archive only this kind offers.
+// the shared plural mute opener, and an archive only this kind offers. The status
+// opener is in no kind's Actions — the Status menu opens from the row list
+// (ADR-0236 decision 1) — so the status half of the pair is what a Selection
+// intersects when `s` is pressed.
 func setVerbs() ([]work.Action, []work.Action) {
 	return []work.Action{
 			{Verb: work.Verb("drain"), Key: "I", Label: "drain"},
 			{Verb: work.VerbShell, Key: "O", Label: "shell"},
 			{Verb: work.VerbMute, Key: "m", Label: "mute ▸", Modes: work.Plural},
-			{Verb: work.VerbStatus, Key: "s", Label: "status ▸", Modes: work.Plural},
 			{Verb: work.Verb("archive"), Key: "x", Label: "archive", Modes: work.Plural},
 			{Verb: work.VerbCopyName, Key: "y", Label: "copy name", Modes: work.Plural},
 		}, []work.Action{
@@ -114,12 +116,11 @@ func setVerbs() ([]work.Action, []work.Action) {
 		}
 }
 
-// mapVerbs is a Map-shaped verb list: it shares the two openers and copy-name
-// with a task set and nothing else, and its status vocabulary is disjoint.
+// mapVerbs is a Map-shaped verb list: it shares copy-name with a task set and
+// nothing else, and its status vocabulary is disjoint.
 func mapVerbs() ([]work.Action, []work.Action) {
 	return []work.Action{
 			{Verb: work.Verb("work"), Key: "I", Label: "work frontier ticket and go"},
-			{Verb: work.VerbStatus, Key: "s", Label: "status ▸", Modes: work.Plural},
 			{Verb: work.VerbCopyName, Key: "y", Label: "copy name", Modes: work.Plural},
 		}, []work.Action{
 			{Verb: work.Verb("abandon"), Key: "a", Label: "abandon", Modes: work.Plural},
@@ -215,7 +216,7 @@ func TestWorkBulkMenuListsOnlyWhatEveryRowOffers(t *testing.T) {
 	if m.menu == nil || !m.menu.plural {
 		t.Fatal("`a` did not open the plural action menu")
 	}
-	want := []string{"status ▸", "copy name"}
+	want := []string{"copy name"}
 	if got := menuLabels(m); !slices.Equal(got, want) {
 		t.Fatalf("menu = %v, want %v — the intersection, each item its verb label", got, want)
 	}
@@ -261,28 +262,27 @@ func TestWorkBulkMenuRefusesWhenTheRowsShareNothing(t *testing.T) {
 	}
 }
 
-// The status submenu intersects by the same rule, and says so when two kinds'
+// The Status menu intersects by the same rule, and says so when two kinds'
 // status vocabularies share no word.
-func TestWorkBulkStatusSubmenuIntersects(t *testing.T) {
+func TestWorkBulkStatusMenuIntersects(t *testing.T) {
 	m, _ := setDashboard(t, "set-a", "set-b")
 	m = bulkPress(t, m, selKeyTab())
 	m = bulkPress(t, m, selKeyTab())
-	m = bulkPress(t, m, selKeyRune('a'))
 	m = bulkPress(t, m, selKeyRune('s'))
 
 	if m.menu == nil || m.menu.status == nil {
-		t.Fatal("`s` did not open the status submenu over the Selection")
+		t.Fatal("`s` did not open the status menu over the Selection")
 	}
 	want := []string{"complete", "open"}
 	if got := menuLabels(m); !slices.Equal(got, want) {
-		t.Fatalf("submenu = %v, want %v", got, want)
+		t.Fatalf("menu = %v, want %v", got, want)
 	}
 	lines := ui.StripANSI(strings.Join(dashboardMenuLines(m.menu, 200, livePaneCache{}), "\n"))
 	if !strings.Contains(lines, "status · 2 selected") {
-		t.Fatalf("submenu rule does not name its target:\n%s", lines)
+		t.Fatalf("menu rule does not name its target:\n%s", lines)
 	}
 
-	// A Map and a task set both offer the opener and neither shares a status word
+	// A Map and a task set both have status vocabularies and neither shares a word
 	// with the other, which is exactly the case the intersection exists for.
 	setActions, setStatus := setVerbs()
 	mapActions, mapStatus := mapVerbs()
@@ -293,17 +293,16 @@ func TestWorkBulkStatusSubmenuIntersects(t *testing.T) {
 	)
 	mixed = bulkPress(t, mixed, selKeyTab())
 	mixed = bulkPress(t, mixed, selKeyTab())
-	mixed = bulkPress(t, mixed, selKeyRune('a'))
 	mixed = bulkPress(t, mixed, selKeyRune('s'))
 
 	if mixed.menu != nil {
-		t.Fatal("an empty status intersection opened a submenu")
+		t.Fatal("an empty status intersection opened a menu")
 	}
 	if got := mixed.flash.Text(); got != "no status verb applies to all 2 rows" {
 		t.Fatalf("flash = %q, want a reason naming the count", got)
 	}
 	if len(log.performed) != 0 {
-		t.Fatalf("a refused submenu wrote something: %v", log.performed)
+		t.Fatalf("a refused menu wrote something: %v", log.performed)
 	}
 }
 
@@ -315,7 +314,6 @@ func TestWorkBulkStatusVerbWritesEverySelectedRow(t *testing.T) {
 	for range 3 {
 		m = bulkPress(t, m, selKeyTab())
 	}
-	m = bulkPress(t, m, selKeyRune('a'))
 	m = bulkPress(t, m, selKeyRune('s'))
 	m = bulkPress(t, m, selKeyRune('c'))
 
@@ -648,33 +646,39 @@ func TestWorkBulkMenuKeepsTheRowCursorPainted(t *testing.T) {
 	}
 }
 
-// Both submenus render through the same block path, so they inherit its position
-// below the whole list and leave the row cursor painted.
+// Both menus render through the same block path, so they inherit its position
+// below the whole list and leave the row cursor painted — the Status menu opening
+// from the row list and the mute submenu from inside the action menu.
 func TestWorkBulkSubmenusKeepTheSelectionSignals(t *testing.T) {
-	for _, tc := range []struct{ name, key, title string }{
-		{"status", "s", "status"},
-		{"mute", "m", "mute"},
+	for _, tc := range []struct {
+		name, key, title string
+		fromActionMenu   bool
+	}{
+		{name: "status", key: "s", title: "status"},
+		{name: "mute", key: "m", title: "mute", fromActionMenu: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m, _ := setDashboard(t, "set-a", "set-b", "set-c")
 			m = bulkPress(t, m, selKeyTab())
 			m = bulkPress(t, m, selKeyTab())
-			m = bulkPress(t, m, selKeyRune('a'))
+			if tc.fromActionMenu {
+				m = bulkPress(t, m, selKeyRune('a'))
+			}
 			m = bulkPress(t, m, selKeyRune(rune(tc.key[0])))
-			if m.menu == nil || !m.menu.nested() {
-				t.Fatalf("`%s` did not open the %s submenu", tc.key, tc.name)
+			if m.menu == nil || (m.menu.status == nil && m.menu.mute == nil) {
+				t.Fatalf("`%s` did not open the %s menu", tc.key, tc.name)
 			}
 			view, separator := selectionSignals(t, m, 2)
 			cut := strings.Index(view, separator)
 			before, after := view[:cut], view[cut:]
 			if strings.Contains(before, tc.title) {
-				t.Fatalf("the %s submenu was spliced into the table:\n%s", tc.name, view)
+				t.Fatalf("the %s menu was spliced into the table:\n%s", tc.name, view)
 			}
 			if !strings.Contains(after, tc.title+" · 2 selected") {
-				t.Fatalf("the %s submenu is not below the list, naming its targets:\n%s", tc.name, view)
+				t.Fatalf("the %s menu is not below the list, naming its targets:\n%s", tc.name, view)
 			}
 			if !rowCursorOn(view) {
-				t.Fatalf("the row cursor was blanked under the %s submenu:\n%s", tc.name, view)
+				t.Fatalf("the row cursor was blanked under the %s menu:\n%s", tc.name, view)
 			}
 		})
 	}

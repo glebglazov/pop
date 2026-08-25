@@ -191,9 +191,34 @@ func (m QueueDashboard) openSelectionMenu() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// invokeSelectionMenuItem runs the plural menu's item at idx. The two shared
-// openers nest the same way they do over one row — the status submenu intersects
-// again underneath, the mute submenu offers the surface's own dates — and
+// openSelectionStatusMenu answers `s` under a Selection: the status verbs every
+// marked row offers and declares plural, on a menu that says how many rows it is
+// about to write (ADR-0236 decision 10).
+func (m QueueDashboard) openSelectionStatusMenu() (tea.Model, tea.Cmd) {
+	rows := m.selectionRows()
+	actions := pluralActions(rows, m.kinds.statusActionsFor)
+	if len(actions) == 0 {
+		// Two kinds' status vocabularies share no verb, which is exactly the case the
+		// intersection exists for: a Map and a task set have nothing to write in
+		// common, and an empty menu would say that by looking broken.
+		m.flash.Set(fmt.Sprintf("no status verb applies to all %s", bulkCount(len(rows))))
+		return m, nil
+	}
+	m.err = nil
+	m.menu = &dashboardMenu{
+		row:     rows[0],
+		plural:  true,
+		targets: rows,
+		status: &dashboardStatusMenu{
+			row:  rows[0],
+			list: ui.NewList(actions, ui.Opts[work.Action]{Wrap: true}),
+		},
+	}
+	return m, nil
+}
+
+// invokeSelectionMenuItem runs the plural menu's item at idx. The mute opener
+// nests the same way it does over one row, offering the surface's own dates, and
 // everything else goes to the bulk dispatch.
 func (m QueueDashboard) invokeSelectionMenuItem(idx int) (tea.Model, tea.Cmd) {
 	items := m.menu.list.Items()
@@ -202,23 +227,7 @@ func (m QueueDashboard) invokeSelectionMenuItem(idx int) (tea.Model, tea.Cmd) {
 	}
 	item := items[idx]
 	rows := m.menu.targets
-	switch item.verb {
-	case work.VerbStatus:
-		actions := pluralActions(rows, m.kinds.statusActionsFor)
-		if len(actions) == 0 {
-			// Two kinds' status vocabularies share no verb, which is exactly the case
-			// the intersection exists for: a Map and a task set have nothing to write
-			// in common, and an empty submenu would say that by looking broken.
-			m.menu = nil
-			m.flash.Set(fmt.Sprintf("no status verb applies to all %s", bulkCount(len(rows))))
-			return m, nil
-		}
-		m.menu.status = &dashboardStatusMenu{
-			row:  m.menu.row,
-			list: ui.NewList(actions, ui.Opts[work.Action]{Wrap: true}),
-		}
-		return m, nil
-	case work.VerbMute:
+	if item.verb == work.VerbMute {
 		m.menu.mute = newDashboardMuteMenu(m.taskDeps(), m.menu.row)
 		return m, nil
 	}

@@ -215,23 +215,25 @@ func (k *MapKind) Columns() []string {
 
 // Actions returns the container-level verbs for a Map: work one frontier ticket
 // or fan out the whole frontier when it has one, assist the Map itself, a shell in
-// the repository, mute, its status submenu, and copy-name. Spawning verbs come before
+// the repository, mute, and copy-name. Spawning verbs come before
 // in-place ones, and all four frontier keys are gated on a frontier — a Map with
 // none offers no dead key.
 //
+// The status opener is not here: the Status menu opens from the row list on its
+// own key (ADR-0236 decision 1), which is what keeps the operator's way off a Map
+// row — archive or abandon — reachable from a Map with nothing left to grill
+// (ADR-0186).
+//
 // Assist is **not** gated: a Map whose frontier is empty or fully claimed is when a
-// session scoped to the Map itself is most needed (ADR-0184). Neither is the status
-// opener: it is the operator's only way off a Map row, and a Map with nothing left
-// to grill is precisely the one being archived or abandoned (ADR-0186). The Task-set verbs
+// session scoped to the Map itself is most needed (ADR-0184). The Task-set verbs
 // (drain/bind/…) have never applied to a Map and still do not — the shared two are
 // the only verbs a Map has in common with a task set. Mute is a third: a Map is
 // mutable on the same terms as a Task set (ADR-0200 decision 7), offered on the
 // same `m` opener and, on an already-muted row, `u` for unmute — eligibility by
 // omission, the way every conditional verb here works.
 //
-// Capability audit (ADR-0215 decision 5). Plural — mute, unmute, the status
-// opener and copy-name, for the same reason a task set's are: the input is
-// shared, or there is none. Singular — the four frontier verbs and assist, each
+// Capability audit (ADR-0215 decision 5). Plural — mute, unmute and copy-name,
+// for the same reason a task set's are: the input is shared, or there is none. Singular — the four frontier verbs and assist, each
 // of which resolves a session per Map and hands the operator to a pane, which
 // has no plural meaning; and shell, which is one directory.
 func (k *MapKind) Actions(c work.Container) []work.Action {
@@ -256,10 +258,7 @@ func (k *MapKind) Actions(c work.Container) []work.Action {
 			work.Action{Verb: VerbFanOutHere, Key: "a", Label: "fan out frontier"},
 		)
 	}
-	return append(actions,
-		work.Action{Verb: work.VerbStatus, Key: "s", Label: "status ▸", Modes: work.Plural},
-		work.Action{Verb: work.VerbCopyName, Key: "y", Label: "copy name", Modes: work.Plural},
-	)
+	return append(actions, work.Action{Verb: work.VerbCopyName, Key: "y", Label: "copy name", Modes: work.Plural})
 }
 
 // StatusActions returns the Map's status submenu: reopen, abandon, archive,

@@ -238,8 +238,8 @@ func TestActionMenuTallerThanThePaneIsClipped(t *testing.T) {
 	}
 }
 
-// The singular menu names the container it will act on, and both submenus name
-// the same target under their own noun.
+// The singular menu names the container it will act on, and the menus that open
+// beside or under it name the same target under their own noun.
 func TestMenuRuleNamesItsTarget(t *testing.T) {
 	m, _ := setDashboard(t, "set-a", "set-b")
 	m = bulkPress(t, m, selKeyRune('a'))
@@ -248,19 +248,27 @@ func TestMenuRuleNamesItsTarget(t *testing.T) {
 		t.Fatalf("singular rule does not name the cursored container:\n%s", view)
 	}
 
-	for _, tc := range []struct{ name, key, want string }{
-		{"status", "s", "status · set-a"},
-		{"mute", "m", "mute · set-a"},
+	// The Status menu opens from the row list and the mute submenu from inside the
+	// action menu; both render through the one block path, which is what this pins.
+	for _, tc := range []struct {
+		name, key, want string
+		fromActionMenu  bool
+	}{
+		{name: "status", key: "s", want: "status · set-a"},
+		{name: "mute", key: "m", want: "mute · set-a", fromActionMenu: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			opened, _ := setDashboard(t, "set-a", "set-b")
 			opened = bulkPress(t, opened, selKeyRune('a'))
 			actionsAt := menuRuleLine(t, opened.View().Content)
 			actionsBlock := blockLines(t, opened)
+			if !tc.fromActionMenu {
+				opened = bulkPress(t, opened, selKeyEsc())
+			}
 
 			opened = bulkPress(t, opened, selKeyRune(rune(tc.key[0])))
-			if opened.menu == nil || !opened.menu.nested() {
-				t.Fatalf("`%s` did not open the %s submenu", tc.key, tc.name)
+			if opened.menu == nil || (opened.menu.status == nil && opened.menu.mute == nil) {
+				t.Fatalf("`%s` did not open the %s menu", tc.key, tc.name)
 			}
 			subView := opened.View().Content
 			subLines := strings.Split(subView, "\n")
