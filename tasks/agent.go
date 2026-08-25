@@ -234,6 +234,7 @@ type AgentAdapter interface {
 	ReasoningCapability() AgentReasoningCapability
 	TurnCapEnforcementCapability() AgentTurnCapEnforcementCapability
 	TurnCapExhaustionCapability() AgentTurnCapExhaustionCapability
+	RefusalSignatureCapability() AgentRefusalSignatureCapability
 	QuotaResetCapability() AgentQuotaResetCapability
 	EffortLadderCapability() AgentEffortLadderCapability
 	ExecutableCapability() AgentExecutableCapability
@@ -261,7 +262,8 @@ var agentAdapters = map[string]AgentAdapter{
 			Interpret:            interpretClaudeAvailabilityProbe,
 			ReportsAuthenticated: reportsClaudeAuthenticated,
 		},
-		quotaReset: AgentQuotaResetCapability{Kind: CapabilitySupported, ResetAt: claudeQuotaResetAt},
+		refusalSignature: claudeRefusalSignature,
+		quotaReset:       AgentQuotaResetCapability{Kind: CapabilitySupported, ResetAt: claudeQuotaResetAt},
 		effortLadder: AgentEffortLadderCapability{
 			Kind: CapabilitySupported,
 			Ladder: map[string][]config.EffortModel{
@@ -307,6 +309,10 @@ var agentAdapters = map[string]AgentAdapter{
 			Kind:   CapabilityBlind,
 			Reason: "opencode ships no read-only auth status command",
 		},
+		refusalSignature: AgentRefusalSignatureCapability{
+			Kind:   CapabilityBlind,
+			Reason: "opencode's refusals arrive as prose on the shared opencode-go matcher over the raw capture, with no typed rate-limit field beside them",
+		},
 		quotaReset: AgentQuotaResetCapability{Kind: CapabilitySupported, ResetAt: piQuotaResetAt},
 		effortLadder: AgentEffortLadderCapability{
 			Kind:   CapabilityBlind,
@@ -343,6 +349,10 @@ var agentAdapters = map[string]AgentAdapter{
 			IdentifyingArgs:      []string{"status"},
 			Interpret:            interpretCursorAvailabilityProbe,
 			ReportsAuthenticated: reportsCursorAuthenticated,
+		},
+		refusalSignature: AgentRefusalSignatureCapability{
+			Kind:   CapabilityBlind,
+			Reason: "cursor writes its refusals as bare non-JSON stderr lines, so there is no typed field to read",
 		},
 		quotaReset: AgentQuotaResetCapability{Kind: CapabilitySupported, ResetAt: cursorQuotaResetAt},
 		effortLadder: AgentEffortLadderCapability{
@@ -395,6 +405,10 @@ var agentAdapters = map[string]AgentAdapter{
 			Command:              &AgentCommand{Name: "codex", Args: []string{"login", "status"}},
 			ReportsAuthenticated: reportsCodexAuthenticated,
 		},
+		refusalSignature: AgentRefusalSignatureCapability{
+			Kind:   CapabilityBlind,
+			Reason: "codex's refusal is classified from the prose inside its typed error and turn.failed events",
+		},
 		quotaReset: AgentQuotaResetCapability{Kind: CapabilitySupported, ResetAt: codexQuotaResetAt},
 		effortLadder: AgentEffortLadderCapability{
 			Kind: CapabilitySupported,
@@ -437,6 +451,10 @@ var agentAdapters = map[string]AgentAdapter{
 		availability: AgentAvailabilityProbeCapability{
 			Kind:   CapabilityBlind,
 			Reason: "pi ships no read-only auth status command",
+		},
+		refusalSignature: AgentRefusalSignatureCapability{
+			Kind:   CapabilityBlind,
+			Reason: "pi's refusals arrive as prose on the shared opencode-go matcher over the raw capture, with no typed rate-limit field beside them",
 		},
 		quotaReset: AgentQuotaResetCapability{Kind: CapabilitySupported, ResetAt: piQuotaResetAt},
 		effortLadder: AgentEffortLadderCapability{
@@ -483,6 +501,10 @@ var agentAdapters = map[string]AgentAdapter{
 		availability: AgentAvailabilityProbeCapability{
 			Kind:   CapabilityBlind,
 			Reason: "kimi ships no read-only auth status command",
+		},
+		refusalSignature: AgentRefusalSignatureCapability{
+			Kind:   CapabilityBlind,
+			Reason: "kimi writes its quota diagnostics to stderr and never to its stream-json",
 		},
 		quotaReset: AgentQuotaResetCapability{Kind: CapabilitySupported, ResetAt: kimiQuotaResetAt},
 		effortLadder: AgentEffortLadderCapability{
@@ -564,10 +586,14 @@ type presetAgentSpec struct {
 	// stream and exit status, that a run stopped because it reached that bound
 	// (ADR-0190).
 	turnCapExhaustion AgentTurnCapExhaustionCapability
-	quotaReset        AgentQuotaResetCapability
-	effortLadder      AgentEffortLadderCapability
-	executable        AgentExecutableCapability
-	models            []string
+	// refusalSignature says which channel of this preset's capture pop reads to
+	// recognise a refusal at all — the typed fields where it has them, the
+	// provider's prose where it has none (ADR-0234).
+	refusalSignature AgentRefusalSignatureCapability
+	quotaReset       AgentQuotaResetCapability
+	effortLadder     AgentEffortLadderCapability
+	executable       AgentExecutableCapability
+	models           []string
 	// modelsInstallDependent marks a curated list whose aliases are resolved by
 	// the local install's own provider config rather than being stable,
 	// account-independent names, so the catalog can say so.
@@ -593,6 +619,7 @@ func (s presetAgentSpec) validate() error {
 		{s.reasoning.validate(preset)},
 		{s.turnCapEnforcement.validate(preset)},
 		{s.turnCapExhaustion.validate(preset)},
+		{s.refusalSignature.validate(preset)},
 		{s.quotaReset.validate(preset)},
 		{s.effortLadder.validate(preset)},
 		{s.executable.validate(preset)},
@@ -802,6 +829,12 @@ func (a *presetAgentAdapter) TurnCapExhaustionCapability() AgentTurnCapExhaustio
 	return a.turnCapExhaustion
 }
 
+func (a *presetAgentAdapter) RefusalSignatureCapability() AgentRefusalSignatureCapability {
+	capability := a.refusalSignature
+	capability.Markers = append([]AgentRefusalMarker{}, a.refusalSignature.Markers...)
+	return capability
+}
+
 func (a *presetAgentAdapter) QuotaResetCapability() AgentQuotaResetCapability {
 	return a.quotaReset
 }
@@ -931,6 +964,10 @@ func (a customAgentAdapter) TurnCapEnforcementCapability() AgentTurnCapEnforceme
 
 func (a customAgentAdapter) TurnCapExhaustionCapability() AgentTurnCapExhaustionCapability {
 	return AgentTurnCapExhaustionCapability{Kind: CapabilityBlind, Reason: "custom agent commands produce no structured stream"}
+}
+
+func (a customAgentAdapter) RefusalSignatureCapability() AgentRefusalSignatureCapability {
+	return AgentRefusalSignatureCapability{Kind: CapabilityBlind, Reason: "custom agent commands produce no structured stream"}
 }
 
 func (a customAgentAdapter) QuotaResetCapability() AgentQuotaResetCapability {

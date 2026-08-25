@@ -22,7 +22,7 @@ var (
 
 func normalizeClaudeStreamJSON(raw string) AgentResult {
 	return normalizeResultStreamJSON(raw, func(result string) *AgentProceedVerdict {
-		v := claudeQuotaPauseReason(result)
+		v := claudeQuotaPauseReason(raw, result)
 		if v == nil {
 			return nil
 		}
@@ -326,17 +326,93 @@ func claudeToolTimings(events []streamEventRecord) ([]ToolTiming, []toolWindow) 
 	})
 }
 
-func claudeQuotaPauseReason(result string) *AgentProceedVerdict {
-	for _, marker := range []string{
-		"You've hit your session limit",
-		"You've hit your weekly limit",
-		"You've hit your Opus limit",
-	} {
-		if strings.Contains(result, marker) {
-			return DetectedQuotaPause(result)
+// claudeRefusalSignature is how claude recognises a quota refusal: the typed
+// fields of its own capture first, its three marker sentences beneath them
+// (ADR-0234).
+//
+// The markers are demoted rather than deleted because they are the only reading
+// left for a capture whose event schema changed instead of its wording — and
+// because each sentence names the window its refusal exhausted, which is the
+// class reading for a capture stating no rate-limit type.
+var claudeRefusalSignature = AgentRefusalSignatureCapability{
+	Kind:       CapabilitySupported,
+	Structured: claudeStructuredRefusal,
+	Markers: []AgentRefusalMarker{
+		{Sentence: "You've hit your session limit", Class: QuotaWindowFiveHour},
+		{Sentence: "You've hit your weekly limit", Class: QuotaWindowWeekly},
+		{Sentence: "You've hit your Opus limit", Class: QuotaWindowOpus},
+	},
+}
+
+func claudeQuotaPauseReason(raw, result string) *AgentProceedVerdict {
+	return claudeRefusalSignature.detectRefusal(raw, result)
+}
+
+// claudeRefusalHTTPStatus is what claude reports as api_error_status on its
+// terminal result when the provider turned the request away.
+const claudeRefusalHTTPStatus = 429
+
+// claudeStructuredRefusal reads a refusal out of the typed fields of one whole
+// capture: the terminal result event's 429 together with a rate-limit event
+// reporting a rejection (ADR-0234). It answers the Quota window class that event
+// names, and whether the pair was there at all.
+//
+// The pair is the reading. A 429 on its own is a transient overload of an API
+// that is still willing to serve this account, and a rejection on its own can be
+// reported on an event pop is not otherwise acting on — the same event type
+// carries `allowed` and `allowed_warning` readings all through a healthy run.
+// The last rejection wins, as it does when the reset epoch is read.
+func claudeStructuredRefusal(raw string) (AgentQuotaWindowClass, bool) {
+	var refusedStatus, rejected bool
+	class := QuotaWindowUnknown
+	scanAgentJSONLines(raw, nil, func(line []byte) bool {
+		var event struct {
+			Type           string `json:"type"`
+			APIErrorStatus int    `json:"api_error_status"`
+			RateLimit      struct {
+				Status        string `json:"status"`
+				RateLimitType string `json:"rateLimitType"`
+			} `json:"rate_limit_info"`
 		}
+		if err := json.Unmarshal(line, &event); err != nil {
+			return false
+		}
+		switch event.Type {
+		case "result":
+			if event.APIErrorStatus == claudeRefusalHTTPStatus {
+				refusedStatus = true
+			}
+		case "rate_limit_event":
+			if event.RateLimit.Status == "rejected" {
+				rejected = true
+				class = claudeQuotaWindowClass(event.RateLimit.RateLimitType)
+			}
+		}
+		return true
+	})
+	return class, refusedStatus && rejected
+}
+
+// claudeQuotaWindowClass maps claude's rateLimitType onto the window class pop
+// holds. `five_hour` is the spelling the captured refusal states; the weekly
+// windows are matched by substring because their wire spelling has not been
+// captured, and a window pop cannot place is Unknown rather than a guess. Opus
+// is tested first: a spelling that names both the Opus allowance and the week it
+// runs over is the Opus one.
+func claudeQuotaWindowClass(rateLimitType string) AgentQuotaWindowClass {
+	token := strings.ToLower(strings.TrimSpace(rateLimitType))
+	switch {
+	case token == "":
+		return QuotaWindowUnknown
+	case token == "five_hour":
+		return QuotaWindowFiveHour
+	case strings.Contains(token, "opus"):
+		return QuotaWindowOpus
+	case strings.Contains(token, "week"), strings.Contains(token, "seven_day"):
+		return QuotaWindowWeekly
+	default:
+		return QuotaWindowUnknown
 	}
-	return nil
 }
 
 // claudeStreamQuotaResetAt dates a detected quota pause from the whole capture:

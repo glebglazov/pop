@@ -98,6 +98,11 @@ type AgentProceedVerdict struct {
 	// Model names the model the verdict is about, for a verdict that condemns one
 	// model rather than the whole preset. Empty otherwise.
 	Model string
+	// WindowClass names which allowance a quota refusal exhausted, as the
+	// refusal's own channel stated it — the typed field where the capture
+	// carried one, the marker sentence where it did not (ADR-0234). Empty for
+	// every other flavour, and for a refusal that named no window.
+	WindowClass AgentQuotaWindowClass
 }
 
 // TimeHealingRecovery witnesses that a verdict heals with time, carrying the
@@ -345,6 +350,13 @@ func (v AgentProceedVerdict) TimeHealing() (TimeHealingRecovery, bool) {
 // WithPreset returns a copy with Preset set.
 func (v AgentProceedVerdict) WithPreset(preset string) AgentProceedVerdict {
 	v.Preset = preset
+	return v
+}
+
+// WithWindowClass returns a copy naming the Quota window class the refusal
+// exhausted.
+func (v AgentProceedVerdict) WithWindowClass(class AgentQuotaWindowClass) AgentProceedVerdict {
+	v.WindowClass = class
 	return v
 }
 

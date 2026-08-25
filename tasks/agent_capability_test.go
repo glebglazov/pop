@@ -359,6 +359,9 @@ func TestPresetUsageAndCostCapabilitiesDeclared(t *testing.T) {
 		if err := adapter.TurnCapEnforcementCapability().validate(preset); err != nil {
 			t.Fatalf("%s turn-cap enforcement: %v", preset, err)
 		}
+		if err := adapter.RefusalSignatureCapability().validate(preset); err != nil {
+			t.Fatalf("%s refusal-signature: %v", preset, err)
+		}
 		if err := adapter.QuotaResetCapability().validate(preset); err != nil {
 			t.Fatalf("%s quota-reset: %v", preset, err)
 		}
@@ -414,6 +417,9 @@ func validTestPresetAgentSpec() presetAgentSpec {
 		turnCapExhaustion: AgentTurnCapExhaustionCapability{
 			Kind: CapabilityBlind, Reason: reason,
 		},
+		refusalSignature: AgentRefusalSignatureCapability{
+			Kind: CapabilityBlind, Reason: reason,
+		},
 		quotaReset: AgentQuotaResetCapability{
 			Kind: CapabilityBlind, Reason: reason,
 		},
@@ -456,6 +462,7 @@ func TestPresetAgentSpecValidateRejectsMissingCapability(t *testing.T) {
 		{"reasoning", func(s *presetAgentSpec) { s.reasoning = AgentReasoningCapability{} }, "reasoning"},
 		{"turn-cap enforcement", func(s *presetAgentSpec) { s.turnCapEnforcement = AgentTurnCapEnforcementCapability{} }, "turn-cap enforcement"},
 		{"turn-cap exhaustion", func(s *presetAgentSpec) { s.turnCapExhaustion = AgentTurnCapExhaustionCapability{} }, "turn-cap exhaustion"},
+		{"refusal-signature", func(s *presetAgentSpec) { s.refusalSignature = AgentRefusalSignatureCapability{} }, "refusal-signature"},
 		{"quota-reset", func(s *presetAgentSpec) { s.quotaReset = AgentQuotaResetCapability{} }, "quota-reset"},
 		{"effort-ladder", func(s *presetAgentSpec) { s.effortLadder = AgentEffortLadderCapability{} }, "effort-ladder"},
 		{"executable", func(s *presetAgentSpec) { s.executable = AgentExecutableCapability{} }, "executable"},

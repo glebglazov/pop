@@ -337,6 +337,56 @@ func (c AgentTurnCapExhaustionCapability) validate(preset string) error {
 	}
 }
 
+// AgentRefusalSignatureCapability is a preset's declared stance on recognising
+// that a provider refused the request at all — the reading upstream of
+// AgentQuotaResetCapability, which only dates a refusal somebody has already
+// found (ADR-0234).
+//
+// Supported means the capture carries typed fields that state the refusal:
+// Structured reads them, and Markers stay beneath as the reading for a provider
+// that changes its event schema rather than its wording. Blind means this
+// adapter has no structured channel to read — cursor's bare stderr lines,
+// kimi's stderr diagnostics — and its own prose detector answers instead. That
+// absence is stated so a later reader cannot mistake it for an unfinished job.
+type AgentRefusalSignatureCapability struct {
+	Kind CapabilityKind
+	// Structured reports whether the typed fields of one whole capture state a
+	// refusal, and which Quota window class they name. Required iff Supported.
+	Structured func(raw string) (AgentQuotaWindowClass, bool)
+	// Markers are the provider's own sentences, each paired with the window class
+	// it announces. They detect a refusal whose typed fields are absent, and name
+	// the class for one whose window field is.
+	Markers []AgentRefusalMarker
+	Reason  string // required iff Blind
+}
+
+// AgentRefusalMarker is one sentence a provider writes when it refuses, and the
+// Quota window class that sentence names.
+type AgentRefusalMarker struct {
+	Sentence string
+	Class    AgentQuotaWindowClass
+}
+
+// validate reports whether this refusal-signature stance is a complete declaration.
+func (c AgentRefusalSignatureCapability) validate(preset string) error {
+	switch c.Kind {
+	case CapabilitySupported:
+		if c.Structured == nil {
+			return fmt.Errorf("agent preset %q: refusal-signature capability is Supported but Structured is nil", preset)
+		}
+		return nil
+	case CapabilityBlind:
+		if strings.TrimSpace(c.Reason) == "" {
+			return fmt.Errorf("agent preset %q: refusal-signature capability is Blind but Reason is empty", preset)
+		}
+		return nil
+	case capabilityUnset:
+		return fmt.Errorf("agent preset %q: refusal-signature capability is unset", preset)
+	default:
+		return fmt.Errorf("agent preset %q: refusal-signature capability has unknown kind %d", preset, c.Kind)
+	}
+}
+
 // AgentQuotaResetCapability is a preset's declared stance on deriving PauseResetAt
 // from quota diagnostics (ADR-0166).
 type AgentQuotaResetCapability struct {
