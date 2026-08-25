@@ -200,9 +200,7 @@ func TestRoutinePanePinsOnPageBFromEitherEntry(t *testing.T) {
 func assertNothingPinned(t *testing.T, s Shell) {
 	t.Helper()
 	view := ui.StripANSI(s.View().Content)
-	if strings.Contains(view, "▸") {
-		t.Fatalf("a row carries the pin mark, want none:\n%s", view)
-	}
+	assertNoRowIsMarked(t, view)
 	if at, under := strings.Index(view, "set-a"), strings.Index(view, "set-g"); at < 0 || at > under {
 		t.Fatalf("rows are not in their untouched order:\n%s", view)
 	}
@@ -228,7 +226,41 @@ func TestFilteringAwayAPinnedRoutineRowIsSilent(t *testing.T) {
 	if strings.Contains(view, "hourly") {
 		t.Fatalf("the filtered-away pinned row still renders:\n%s", view)
 	}
-	if strings.Contains(view, "▸") {
-		t.Fatalf("a row carries the pin mark, want none:\n%s", view)
+	assertNoRowIsMarked(t, view)
+}
+
+// assertNoRowIsMarked reads the pin out of the table body alone. The frame's hint
+// line wears the same mark on every menu opener, so a whole-view scan answers a
+// question about the footer rather than about the rows.
+func assertNoRowIsMarked(t *testing.T, view string) {
+	t.Helper()
+	for _, row := range tableRows(view) {
+		if strings.Contains(row, "▸") {
+			t.Fatalf("row %q carries the pin mark, want none:\n%s", row, view)
+		}
 	}
+}
+
+// tableRows returns the rendered rows: the lines under the header's dashed rule,
+// up to the blank line that ends the table.
+func tableRows(view string) []string {
+	lines := strings.Split(view, "\n")
+	start := -1
+	for i, line := range lines {
+		if strings.Contains(line, "---") {
+			start = i + 1
+			break
+		}
+	}
+	if start < 0 {
+		return nil
+	}
+	var rows []string
+	for _, line := range lines[start:] {
+		if strings.TrimSpace(line) == "" {
+			break
+		}
+		rows = append(rows, line)
+	}
+	return rows
 }
