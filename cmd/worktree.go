@@ -129,16 +129,9 @@ func runWorktreeFoldWith(d *Deps, cfg *config.Config, cwd, name string, opts bin
 	if err != nil {
 		return fmt.Errorf("worktree fold: %w", err)
 	}
-	setIDs, err := binding.LiveBoundSetIDs(d.tasksDeps(), path)
-	if err != nil {
-		return fmt.Errorf("worktree fold: inspect worktree binding: %w", err)
-	}
-	if len(setIDs) > 0 {
-		if len(setIDs) == 1 {
-			return fmt.Errorf("worktree fold refused: %s is bound to Task set %s; use `pop tasks fold %s`", path, setIDs[0], setIDs[0])
-		}
-		return fmt.Errorf("worktree fold refused: %s is bound to Task sets %s; use `pop tasks fold <set>`", path, strings.Join(setIDs, ", "))
-	}
+	// A binding on this checkout is not this verb's business to refuse: the fold
+	// itself names every bound set in its confirmation and settles the ones it
+	// finishes (ADR-0233).
 	if _, err := binding.FoldCheckout(d.tasksDeps(), cfg, path, opts, out); err != nil {
 		return fmt.Errorf("worktree fold: %w", err)
 	}

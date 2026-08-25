@@ -214,29 +214,44 @@ type foldSetStatus struct {
 	openHITL []tasks.Task
 }
 
-func resolveFoldSetStatus(td *tasks.Deps, cfg *config.Config, setID, runtimePath string) (foldSetStatus, error) {
+// foldSetRowStatus reads one set's status the way every fold path needs it —
+// refreshed from disk with verify verdicts applied — and hands back the manifest a
+// sign-off would write through. Its errors are the ones no fold can read past: the
+// set's storage, never the set's state, which is the caller's to judge.
+func foldSetRowStatus(td *tasks.Deps, cfg *config.Config, setID, runtimePath string) (tasks.TaskSetStatus, *tasks.Manifest, error) {
 	id, err := tasks.ResolveRepositoryIdentity(td, runtimePath)
 	if err != nil {
-		return foldSetStatus{}, fmt.Errorf("fold refused: resolve repository: %w", err)
+		return "", nil, fmt.Errorf("fold refused: resolve repository: %w", err)
 	}
 	defPath, err := tasks.CanonicalDefinitionPathWith(td, id.TasksDir)
 	if err != nil {
-		return foldSetStatus{}, fmt.Errorf("fold refused: resolve task storage: %w", err)
+		return "", nil, fmt.Errorf("fold refused: resolve task storage: %w", err)
 	}
 	refresh, err := tasks.RefreshWith(td, defPath, tasks.StatePathFor(defPath))
 	if err != nil {
-		return foldSetStatus{}, fmt.Errorf("fold refused: refresh status: %w", err)
+		return "", nil, fmt.Errorf("fold refused: refresh status: %w", err)
 	}
 	tasks.ApplyVerifyVerdicts(td, refresh, cfg, runtimePath)
 	row := tasks.FindRow(refresh, setID)
 	if row == nil {
-		return foldSetStatus{}, fmt.Errorf("fold refused: task set %s is not registered", setID)
+		return "", nil, fmt.Errorf("fold refused: task set %s is not registered", setID)
 	}
-	switch row.Status {
+	return row.Status, refresh.Manifests[setID], nil
+}
+
+// resolveFoldSetStatus is the set-addressed fold's status gate: everything outside
+// DONE and Awaiting-approval refuses here, because a set-addressed fold is the act
+// of finishing that set and an unfinished set has nothing to finish. The
+// checkout-addressed fold reads the same status and asks instead (ADR-0233).
+func resolveFoldSetStatus(td *tasks.Deps, cfg *config.Config, setID, runtimePath string) (foldSetStatus, error) {
+	status, m, err := foldSetRowStatus(td, cfg, setID, runtimePath)
+	if err != nil {
+		return foldSetStatus{}, err
+	}
+	switch status {
 	case tasks.StatusDone:
 		return foldSetStatus{status: tasks.StatusDone}, nil
 	case tasks.StatusAwaitingApproval:
-		m := refresh.Manifests[setID]
 		if m == nil || !m.Valid {
 			return foldSetStatus{}, fmt.Errorf("fold refused: task set %s is malformed", setID)
 		}
@@ -244,7 +259,7 @@ func resolveFoldSetStatus(td *tasks.Deps, cfg *config.Config, setID, runtimePath
 	case tasks.StatusNeedsVerify:
 		return foldSetStatus{}, fmt.Errorf("fold refused: %s is NEEDS-VERIFY; verify or accept first", setID)
 	default:
-		return foldSetStatus{}, fmt.Errorf("fold refused: %s is %s (must be DONE)", setID, row.Status)
+		return foldSetStatus{}, fmt.Errorf("fold refused: %s is %s (must be DONE)", setID, status)
 	}
 }
 

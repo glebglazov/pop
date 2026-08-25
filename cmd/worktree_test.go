@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -106,7 +107,11 @@ func TestWorktreeFoldNamedUnboundManagedWorktreeSurvives(t *testing.T) {
 	}
 }
 
-func TestWorktreeFoldRefusesLiveBindingAndNamesTaskSet(t *testing.T) {
+// A live binding is pop's own bookkeeping, so the verb asks about it and folds on
+// the answer instead of sending the human to `pop tasks fold` (ADR-0233). The
+// picker's Fold action reaches this same verb through a tagged pane, which is where
+// the question is answered.
+func TestWorktreeFoldBoundCheckoutAsksThenFoldsAndKeepsBoth(t *testing.T) {
 	parent := t.TempDir()
 	repo := filepath.Join(parent, "repo")
 	if err := os.Mkdir(repo, 0o755); err != nil {
@@ -122,12 +127,39 @@ func TestWorktreeFoldRefusesLiveBindingAndNamesTaskSet(t *testing.T) {
 	if err := binding.Put(d.tasksDeps(), binding.Key(id, "set-bound"), binding.Adopt(d.tasksDeps(), wt, "bound-work", repo)); err != nil {
 		t.Fatal(err)
 	}
+	answers, answered, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer answers.Close()
+	if _, err := answered.WriteString("y\n"); err != nil {
+		t.Fatal(err)
+	}
+	answered.Close()
 
+	var out bytes.Buffer
 	err = runWorktreeFoldWith(d, &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}, wt, "", binding.FoldOptions{
-		Yes: true, In: tasks.NonInteractiveReader{}, ConfirmCheckoutFold: true,
-	}, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "set-bound") || !strings.Contains(err.Error(), "pop tasks fold set-bound") {
-		t.Fatalf("err = %v, want set-addressed refusal", err)
+		In: answers, ConfirmCheckoutFold: true,
+	}, &out)
+	if err != nil {
+		t.Fatalf("fold of a bound checkout: %v\n%s", err, out.String())
+	}
+	for _, want := range []string{"is bound to", "set-bound"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("confirmation missing %q:\n%s", want, out.String())
+		}
+	}
+	branchTip := runWorktreeFoldGit(t, repo, "rev-parse", "bound-work")
+	if trunkTip := runWorktreeFoldGit(t, repo, "rev-parse", "HEAD"); trunkTip != branchTip {
+		t.Fatalf("trunk tip = %s, branch tip = %s", trunkTip, branchTip)
+	}
+	if _, err := os.Stat(wt); err != nil {
+		t.Fatalf("fold deleted the bound checkout: %v", err)
+	}
+	// The set is not finished — pop cannot even read a status for it — so the fold
+	// leaves it where it lives.
+	if _, _, ok, err := binding.FindBySetID(d.tasksDeps(), "set-bound"); err != nil || !ok {
+		t.Fatalf("unfinished set lost its binding: ok=%v err=%v", ok, err)
 	}
 }
 

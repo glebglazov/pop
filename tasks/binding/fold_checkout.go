@@ -33,7 +33,32 @@ func FoldCheckout(td *tasks.Deps, cfg *config.Config, path string, opts FoldOpti
 	if path == "" {
 		return FoldCheckoutResult{}, fmt.Errorf("checkout path is required")
 	}
-	return foldCheckout(td, cfg, foldCheckoutRequest{path: path}, opts, out)
+	if td == nil {
+		td = tasks.DefaultDeps()
+	}
+	if out == nil {
+		out = io.Discard
+	}
+
+	// A binding on this checkout changes nothing about the git act, so it is read
+	// for what it makes the fold *say* and what it leaves the fold to settle
+	// afterwards, never to refuse (ADR-0233). Read inside the gate, it is re-read on
+	// every attempt of the primitive's retry loop, like the set-addressed status is.
+	var bound boundFoldSets
+	req := foldCheckoutRequest{path: path}
+	req.gate = func() error {
+		resolved, err := resolveBoundFoldSets(td, cfg, path)
+		if err != nil {
+			return err
+		}
+		bound = resolved
+		return nil
+	}
+	req.confirm = func(opts FoldOptions, out io.Writer, path string) (bool, error) {
+		return bound.confirm(opts, out, path)
+	}
+	req.afterLanding = func() error { return bound.completeTails(td, out) }
+	return foldCheckout(td, cfg, req, opts, out)
 }
 
 // foldCheckout is the one fold: preflight, the confirmation, the rebase, the Fold
@@ -59,7 +84,11 @@ func foldCheckout(td *tasks.Deps, cfg *config.Config, req foldCheckoutRequest, o
 			return FoldCheckoutResult{}, err
 		}
 		if !confirmed {
-			confirmed, err = confirmCheckoutFold(opts.In, out, opts.Yes, plan.path)
+			ask := req.confirm
+			if ask == nil {
+				ask = plainCheckoutConfirm
+			}
+			confirmed, err = ask(opts, out, plan.path)
 			if err != nil {
 				return FoldCheckoutResult{}, err
 			}
@@ -94,6 +123,12 @@ func foldCheckout(td *tasks.Deps, cfg *config.Config, req foldCheckoutRequest, o
 	}
 }
 
+// plainCheckoutConfirm is the question a fold asks when the checkout has nothing
+// about it worth saying: the path, and whether to land it.
+func plainCheckoutConfirm(opts FoldOptions, out io.Writer, path string) (bool, error) {
+	return confirmCheckoutFold(opts.In, out, opts.Yes, path)
+}
+
 // foldCheckoutRequest addresses a fold at one checkout.
 type foldCheckoutRequest struct {
 	path string
@@ -107,6 +142,11 @@ type foldCheckoutRequest struct {
 	// before any cleanliness check — where the set-addressed fold's status gate
 	// has always sat, so a set's refusals keep their precedence.
 	gate func() error
+	// confirm asks the human to approve this landing, replacing the plain checkout
+	// question when the addressing caller has more to say about what the fold will
+	// do — as a checkout with live bindings does. Asked only when
+	// FoldOptions.ConfirmCheckoutFold is set, and once per fold, not per attempt.
+	confirm func(opts FoldOptions, out io.Writer, path string) (bool, error)
 	// afterPreflight runs on each attempt once the plan has passed every refusal and
 	// before any git act: the set-addressed fold asks its sign-off here and answers
 	// with the manifest the Fold conflict prompt reads.
