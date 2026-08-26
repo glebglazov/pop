@@ -108,6 +108,25 @@ func TestMutateIfCheckoutQuiescentProceedsPastOwnGateHold(t *testing.T) {
 	}
 }
 
+// A running Drain row the mutator itself inserted is the claim it took in order
+// to make this very write — an Assist session accepting or remediating under a
+// Tree-stable hold — so it must not read as an occupant.
+func TestMutateIfCheckoutQuiescentProceedsPastOwnDrain(t *testing.T) {
+	s := openTestStore(t, aliveByToken(Drain{PID: 100, ProcStart: "t1"}))
+	if _, err := s.StartDrain(Drain{Repo: "r", SetID: "self", RuntimePath: "/rt", PID: 100, ProcStart: "t1", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("StartDrain: %v", err)
+	}
+	occ, err := s.MutateIfCheckoutQuiescent("/rt", ProcessOwner{PID: 100, ProcStart: "t1"}, func(ctx context.Context, ex Execer) error {
+		return PutVerifyVerdictExec(ctx, ex, acceptVerdict("self"))
+	})
+	if err != nil || occ != nil {
+		t.Fatalf("own drain row must not block: occ=%+v err=%v", occ, err)
+	}
+	if v, _ := s.GetVerifyVerdict("r", "self", "sha1"); v == nil {
+		t.Fatal("verdict should be committed past the mutator's own claim")
+	}
+}
+
 func TestMutateIfCheckoutQuiescentReusedPIDDoesNotExemptOwnHold(t *testing.T) {
 	// PID 200 is alive under both tokens (modelling a liveness predicate that
 	// cannot distinguish reuse). The hold row records h1; the mutator presents h2.

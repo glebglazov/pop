@@ -4,9 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
 	"strings"
-	"syscall"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/project"
@@ -47,10 +45,15 @@ func AssistTaskSet(opts AssistOptions) error {
 // It presents the gate menu that status calls for (or a generic assistance menu),
 // re-derives after status-changing dispositions, and exits on `0`.
 //
-// Guard rails: Binding-first runtime resolution, TTY required (headless equivalents
-// named), refuse live drain / Missing / Archived / repository mismatch, and a
-// non-claiming Checkout gate hold for the session's duration (released on every
-// exit path including interrupt).
+// The session itself contends for nothing: it reads Task storage and holds no
+// claim, so it opens on a set another drain is running, on a set parked at a
+// gate, on an archived set and on a set whose manifest will not parse — a broken
+// manifest is precisely what a human opens Assist to look at. Exclusivity lives
+// on the verbs inside the menu instead: Accept, Remediate and Fold each take the
+// Checkout claim for the length of their own act (see gateEnv.holdTreeStill).
+//
+// What is left to refuse is only what cannot work at all: no interactive
+// terminal, a set that is not on disk, and no checkout to open a session in.
 func AssistTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts AssistOptions) error {
 	if d == nil {
 		d = defaultDeps
@@ -73,17 +76,7 @@ func AssistTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 		return exitErr(ExitSetup, "assisting a task set needs an interactive terminal; headless equivalents: `pop tasks verify %s --accept/--remediate`, `pop tasks complete`/`skip`/`open`, or `pop tasks implement`", setID)
 	}
 
-	runtimePath, manifestPath, err := ValidateAssistLaunch(d, pd, loadConfig, opts)
-	if err != nil {
-		return err
-	}
-
-	resolved, err := ResolvePathsWith(d, pd, loadConfig, opts.ResolveInput)
-	if err != nil {
-		return err
-	}
-	statePath := StatePathFor(resolved.DefinitionPath)
-	runtimeID, err := ResolveRepositoryIdentity(d, runtimePath)
+	target, err := resolveAssistTarget(d, pd, loadConfig, opts)
 	if err != nil {
 		return err
 	}
@@ -93,71 +86,31 @@ func AssistTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 	// this session; empty resolves to the attended group (ADR-0195).
 	agentOverride := strings.TrimSpace(opts.AgentPreset)
 
-	if err := RegisterCheckoutGateHold(d, setID, runtimePath, false); err != nil {
-		return err
-	}
-	released := false
-	release := func() {
-		if released {
-			return
-		}
-		released = true
-		_ = ReleaseCheckoutGateHold(d, setID, runtimePath)
-	}
-	defer release()
-
-	// Interrupt must release the hold on every exit path.
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	defer signal.Stop(sigCh)
-	interruptErr := make(chan error, 1)
-	stopWatch := make(chan struct{})
-	defer close(stopWatch)
-	go func() {
-		select {
-		case <-sigCh:
-			release()
-			select {
-			case interruptErr <- exitErr(ExitInterrupted, "assist session interrupted"):
-			default:
-			}
-		case <-stopWatch:
-		}
-	}()
-
-	reader := newPromptReader(in)
 	env := gateEnv{
 		d:              d,
 		out:            out,
 		in:             in,
-		reader:         reader,
+		reader:         newPromptReader(in),
 		agentOverride:  agentOverride,
 		agentCmd:       opts.AgentCmd,
-		cwd:            resolved.ProjectPath,
-		runtimePath:    runtimePath,
-		definitionPath: resolved.DefinitionPath,
-		statePath:      statePath,
+		cwd:            target.projectPath,
+		runtimePath:    target.runtimePath,
+		definitionPath: target.definitionPath,
+		statePath:      target.statePath,
 		taskSetID:      setID,
 		cfg:            cfg,
 		fold:           opts.Fold,
+		treeStable:     assistTreeStable(d, target.runtimePath, setID),
 	}
 
 	for {
-		select {
-		case err := <-interruptErr:
-			return err
-		default:
-		}
-
-		m := LoadManifest(d, setID, manifestPath)
-		if !m.Valid {
-			return exitErr(ExitSetup, "task set %q is malformed: %s", setID, MalformedSummary(m))
-		}
-		status, findings, workSHA := assistDerivedStatus(d, cfg, m, setID, runtimePath, runtimeID.CommonDir)
+		m := LoadManifest(d, setID, target.manifestPath)
+		status, findings, workSHA := assistDerivedStatus(d, cfg, m, setID, target.runtimePath, target.repo)
 
 		fmt.Fprintln(out)
 		fmt.Fprintf(out, "Assist session: %s [%s]\n", setID, status)
-		fmt.Fprintf(out, "Runtime: %s\n", runtimePath)
+		fmt.Fprintf(out, "Runtime: %s\n", target.runtimePath)
+		printAssistDiagnostics(d, out, target, setID, m)
 
 		var handled bool
 		var gateErr error
@@ -172,7 +125,7 @@ func AssistTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 				handled, gateErr = handleInteractiveHITLGate(env, m, hitl, nil)
 			}
 		case StatusVerifyFailed:
-			handled, gateErr = handleInteractiveVerifyFailedGate(env, runtimeID.CommonDir, m, workSHA, findings)
+			handled, gateErr = handleInteractiveVerifyFailedGate(env, target.repo, m, workSHA, findings)
 		case StatusFailed:
 			failed := FailedTask(m)
 			if failed == nil {
@@ -190,91 +143,145 @@ func AssistTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 			return nil
 		}
 		// Status-changing disposition: re-derive and re-enter the appropriate menu.
-		// Re-check live drain in case a concurrent drain started mid-session.
-		if err := refuseAssistWhileDrainLive(d, setID); err != nil {
-			return err
-		}
 	}
 }
 
-// ValidateAssistLaunch checks preconditions for opening an Assist session without
-// requiring an interactive terminal. It returns the binding-first runtime checkout
-// and manifest path the session would use. It applies the same refusals as
-// AssistTaskSetWith except the interactive-terminal requirement.
-func ValidateAssistLaunch(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts AssistOptions) (runtimePath, manifestPath string, err error) {
-	if d == nil {
-		d = defaultDeps
-	}
+// assistTarget is the address of the set the session works on: the checkout it
+// acts in, and the Task storage it reads. Every field is derived from the
+// checkout the set is bound to, never from where the human was standing, so a
+// session opened from a sibling checkout of another repository addresses the
+// same set the Work dashboard would.
+type assistTarget struct {
+	runtimePath    string
+	projectPath    string
+	definitionPath string
+	statePath      string
+	manifestPath   string
+	// repo is the runtime checkout's git common directory — the repository key
+	// every Verify verdict is stored under.
+	repo string
+}
+
+// resolveAssistTarget resolves the set's checkout and its Task storage, and
+// refuses only when one of them cannot exist: no checkout to open a session in,
+// or a set that is unknown or registered but gone from disk.
+func resolveAssistTarget(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts AssistOptions) (assistTarget, error) {
 	setID := strings.TrimSpace(opts.TaskSetID)
 	if setID == "" {
-		return "", "", exitErr(ExitSetup, "a task set identifier is required")
-	}
-
-	resolved, err := ResolvePathsWith(d, pd, loadConfig, opts.ResolveInput)
-	if err != nil {
-		return "", "", err
-	}
-	statePath := StatePathFor(resolved.DefinitionPath)
-
-	if err := RejectArchivedTaskSet(d, statePath, resolved.DefinitionPath, setID); err != nil {
-		return "", "", err
+		return assistTarget{}, exitErr(ExitSetup, "a task set identifier is required")
 	}
 
 	// Callers pin Binding-first resolution via ResolveInput.RuntimeOverride
-	// (ADR-0146) — the same seam `pop tasks verify` uses — so this package
-	// never imports tasks/binding.
-	runtimePath, err = ResolveRuntimePathWith(d, resolved.ProjectPath, opts.ResolveInput.RuntimeOverride)
+	// (ADR-0146) — the same seam `pop tasks verify` uses — so this package never
+	// imports tasks/binding. Where no checkout was named, the current one stands
+	// in for it.
+	runtimePath := strings.TrimSpace(opts.ResolveInput.RuntimeOverride)
+	if runtimePath == "" {
+		resolved, err := ResolvePathsWith(d, pd, loadConfig, opts.ResolveInput)
+		if err != nil {
+			return assistTarget{}, err
+		}
+		runtimePath = resolved.ProjectPath
+	}
+	runtimePath, err := NormalizeRuntimePathWith(d, runtimePath)
 	if err != nil {
-		return "", "", err
+		return assistTarget{}, err
 	}
 
-	currentID, err := ResolveRepositoryIdentity(d, resolved.ProjectPath)
+	// Task storage is read from the set's own checkout: the definition directory
+	// follows the repository the checkout belongs to, so a session opened from
+	// elsewhere reads the set's manifest rather than looking for it in the
+	// repository the human happened to be in.
+	definitionPath, err := resolveDefinitionPath(d, runtimePath, opts.ResolveInput.DefinitionOverride)
 	if err != nil {
-		return "", "", err
+		return assistTarget{}, err
 	}
-	runtimeID, err := ResolveRepositoryIdentity(d, runtimePath)
+	statePath := StatePathFor(definitionPath)
+	id, err := ResolveRepositoryIdentity(d, runtimePath)
 	if err != nil {
-		return "", "", err
-	}
-	if currentID.CommonDir != runtimeID.CommonDir {
-		return "", "", exitErr(ExitSetup, "task set %q belongs to a different repository than the current checkout (%s vs %s); run assist from a checkout of the set's repository",
-			setID, currentID.CommonDir, runtimeID.CommonDir)
+		return assistTarget{}, err
 	}
 
-	disc, err := DiscoverWith(d, resolved.DefinitionPath)
+	disc, err := DiscoverWith(d, definitionPath)
 	if err != nil {
-		return "", "", exitErr(ExitOperational, "discover task sets: %v", err)
+		return assistTarget{}, exitErr(ExitOperational, "discover task sets: %v", err)
 	}
 	manifestPath, ok := disc.Manifests[setID]
 	if !ok {
 		// Registered-but-gone sets surface as MISSING on refresh.
-		if refresh, rerr := RefreshWith(d, resolved.DefinitionPath, statePath); rerr == nil {
+		if refresh, rerr := RefreshWith(d, definitionPath, statePath); rerr == nil {
 			if row := FindRow(refresh, setID); row != nil && row.Status == StatusMissing {
-				return "", "", exitErr(ExitSetup, "task set %q is missing (registered but not on disk)", setID)
+				return assistTarget{}, exitErr(ExitSetup, "task set %q is missing (registered but not on disk)", setID)
 			}
 		}
-		return "", "", exitErr(ExitSetup, "unknown task set %q", setID)
+		return assistTarget{}, exitErr(ExitSetup, "unknown task set %q", setID)
 	}
 
-	if err := refuseAssistWhileDrainLive(d, setID); err != nil {
-		return "", "", err
-	}
-	return runtimePath, manifestPath, nil
+	return assistTarget{
+		runtimePath:    runtimePath,
+		projectPath:    runtimePath,
+		definitionPath: definitionPath,
+		statePath:      statePath,
+		manifestPath:   manifestPath,
+		repo:           id.CommonDir,
+	}, nil
 }
 
-// refuseAssistWhileDrainLive refuses when the named set has a live running Drain.
-func refuseAssistWhileDrainLive(d *Deps, setID string) error {
-	drains, err := LiveRunningDrains(d)
+// ValidateAssistLaunch resolves the checkout and manifest an Assist session would
+// use, applying every refusal the session itself applies except the
+// interactive-terminal requirement. The Work dashboard calls it before spawning a
+// pane, so a session that cannot open says why in the dashboard instead of dying
+// inside a pane the operator then has to go and read.
+func ValidateAssistLaunch(d *Deps, pd *project.Deps, loadConfig func(string) (*config.Config, error), opts AssistOptions) (runtimePath, manifestPath string, err error) {
+	if d == nil {
+		d = defaultDeps
+	}
+	target, err := resolveAssistTarget(d, pd, loadConfig, opts)
 	if err != nil {
-		return exitErr(ExitOperational, "check live drains: %v", err)
+		return "", "", err
 	}
-	for _, dr := range drains {
-		if dr.SetID == setID {
-			return exitErr(ExitSetup, "task set %q has a live drain (pid %d on %s); wait for it to finish or interrupt it before assisting",
-				setID, dr.PID, dr.RuntimePath)
+	return target.runtimePath, target.manifestPath, nil
+}
+
+// printAssistDiagnostics states what is wrong with the set the session just
+// opened on, in place of the refusals that used to stand where the session now
+// stands. A malformed manifest is named error by error: Assist is where a human
+// goes to look at one, so the session shows the parse failures and opens the
+// menu anyway.
+func printAssistDiagnostics(d *Deps, out io.Writer, target assistTarget, setID string, m *Manifest) {
+	if assistSetArchived(d, target, setID) {
+		fmt.Fprintf(out, "Archived: this set is out of the Work queue.\n")
+	}
+	if m == nil || m.Valid {
+		return
+	}
+	fmt.Fprintf(out, "Manifest is malformed: %s\n", MalformedSummary(m))
+	for _, e := range m.Errors {
+		fmt.Fprintf(out, "  - %s\n", e)
+	}
+}
+
+func assistSetArchived(d *Deps, target assistTarget, setID string) bool {
+	state, err := LoadGlobalStateWith(d, target.statePath)
+	if err != nil {
+		return false
+	}
+	return taskSetArchived(state, target.definitionPath, setID)
+}
+
+// assistTreeStable is how an Assist session lends the checkout to one menu verb.
+// Accept, Remediate and Fold move the tree, so each takes the Checkout claim
+// when it is chosen and gives it back when it is done — waiting in the Admission
+// queue when someone else holds it, which is the wait a human at a terminal
+// wants over a refusal they must re-issue by hand (ADR-0239).
+func assistTreeStable(d *Deps, runtimePath, setID string) treeStableSeam {
+	return func(out io.Writer) (func(), error) {
+		hold, err := AcquireTreeStable(d, runtimePath, setID, out, AdmissionWait)
+		if err != nil {
+			return nil, err
 		}
+		return func() { _ = hold.Release() }, nil
 	}
-	return nil
 }
 
 // assistDerivedStatus computes the set's status from the manifest plus any cached
@@ -336,10 +343,10 @@ func handleGenericAssistMenu(env gateEnv, m *Manifest, status TaskSetStatus, fin
 	}
 
 	prompt := BuildAssistPrompt(d, taskSetID, m, status, runtimePath, findings)
-	invocation, err := ResolveAgentAssistanceInvocation(d, env.cfg, env.agentOverride, env.agentCmd, prompt, runtimePath)
-	if err != nil {
-		return false, exitErr(ExitSetup, "%v", err)
-	}
+	// The agent is resolved when assistance is chosen, never on the way in: a
+	// session must open — and show the set — even when every attended agent is
+	// cooling or missing, and the walk's refusal belongs in the menu.
+	var invocation *AgentAssistanceInvocation
 	offerFold := env.fold != nil && assistFoldEligible(d, taskSetID, status)
 
 	for {
@@ -351,7 +358,8 @@ func handleGenericAssistMenu(env gateEnv, m *Manifest, status TaskSetStatus, fin
 		case genericAssistAgent:
 			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg, env.agentOverride, env.agentCmd, prompt, runtimePath)
 			if err != nil {
-				return false, exitErr(ExitSetup, "%v", err)
+				fmt.Fprintf(outputFor(out), "Could not start Assist assistance: %v\n", err)
+				continue
 			}
 			fmt.Fprintf(outputFor(out), "Starting Assist session assistance: %s\n", invocation.Display)
 			exitCode, err := runAttendedAssistanceCommand(d, in, runtimePath, out, invocation)
@@ -370,16 +378,19 @@ func handleGenericAssistMenu(env gateEnv, m *Manifest, status TaskSetStatus, fin
 				}
 			}
 			prompt = BuildAssistPrompt(d, taskSetID, m, status, runtimePath, findings)
-			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg, env.agentOverride, env.agentCmd, prompt, runtimePath)
-			if err != nil {
-				return false, exitErr(ExitSetup, "%v", err)
-			}
 		case genericAssistShell:
 			if err := spawnRuntimeShell(d, in, runtimePath, out); err != nil {
 				fmt.Fprintf(outputFor(out), "Could not start shell: %v\n", err)
 			}
 		case genericAssistFold:
-			if err := env.fold(taskSetID, in, out); err != nil {
+			release, holdErr := env.holdTreeStill(out)
+			if holdErr != nil {
+				reportTreeStableRefusal(out, "Fold", holdErr)
+				continue
+			}
+			err := env.fold(taskSetID, in, out)
+			release()
+			if err != nil {
 				fmt.Fprintf(outputFor(out), "Fold failed: %v\n", err)
 				continue
 			}

@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/glebglazov/pop/config"
-	"github.com/glebglazov/pop/store"
 	"github.com/glebglazov/pop/tasks"
 )
 
@@ -229,11 +228,7 @@ func TestFoldRechecksTrunkImmediatelyBeforeTheFastForward(t *testing.T) {
 		{
 			name: "live claim",
 			disturb: func(t *testing.T, td *tasks.Deps, trunkPath string) {
-				h, err := tasks.BeginDrain(td, trunkPath, "trunk-holder", io.Discard)
-				if err != nil {
-					t.Fatalf("BeginDrain on trunk: %v", err)
-				}
-				t.Cleanup(func() { _ = h.Finish(store.DrainEnding{State: store.StateFinished}) })
+				seedForeignCheckoutClaim(t, td, trunkPath, "trunk-holder")
 			},
 			want: "live claim",
 		},

@@ -172,13 +172,14 @@ func TestDashboardLaunchAssistReusesPane(t *testing.T) {
 	}
 }
 
-// TestLaunchAssistRefusesLiveDrain asserts drain.LaunchAssist applies the same live-drain
-// refusal as the CLI entry.
-func TestLaunchAssistRefusesLiveDrain(t *testing.T) {
-	repo, setID, _ := queuetest.SetupSpawnRepo(t, "assist-refuse", []queuetest.SpawnTask{
+// TestLaunchAssistOpensOverALiveDrain asserts the dashboard's assist launch no
+// longer refuses while the set is draining: the session contends for nothing, so
+// the pane opens beside the drain.
+func TestLaunchAssistOpensOverALiveDrain(t *testing.T) {
+	repo, setID, _ := queuetest.SetupSpawnRepo(t, "assist-live", []queuetest.SpawnTask{
 		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "done"},
 	})
-	d, cfg, row, _ := dashboardLaunchFixture(t, repo, setID)
+	d, cfg, row, rt := dashboardLaunchFixture(t, repo, setID)
 	row.RuntimePath = repo
 	row.ProjectPath = repo
 	d.Tasks.ProcessAlive = func(pid int) bool { return pid == 4242 }
@@ -198,19 +199,19 @@ func TestLaunchAssistRefusesLiveDrain(t *testing.T) {
 		t.Fatalf("StartDrain: %v", err)
 	}
 
-	_, err = drain.LaunchAssist(d, cfg, row)
-	if err == nil {
-		t.Fatal("drain.LaunchAssist must refuse while drain is live")
+	result, err := drain.LaunchAssist(d, cfg, row)
+	if err != nil {
+		t.Fatalf("drain.LaunchAssist over a live drain: %v", err)
 	}
-	if !strings.Contains(err.Error(), "live drain") {
-		t.Fatalf("refusal must name live drain: %v", err)
+	if result.PaneID == "" {
+		t.Fatalf("expected an assist pane, got %+v (commands=%v)", result, rt.Commands)
 	}
 }
 
 // TestDashboardAssistRefusalSticky asserts a refused assist surfaces as a sticky
 // dashboard action error.
 func TestDashboardAssistRefusalSticky(t *testing.T) {
-	const refusal = `task set "demo" has a live drain (pid 9 on /repo)`
+	const refusal = `task set "demo" is missing (registered but not on disk)`
 	row := TestDashboardRow("proj", "demo", DashboardRow{ID: "demo", RuntimePath: "/repo/wt"})
 	m := newQueueDashboard(&drain.Deps{}, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{row}})
 	m.width, m.height = 120, 40

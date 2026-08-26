@@ -43,6 +43,38 @@ type gateEnv struct {
 	statePath      string
 	taskSetID      string
 	fold           AssistFold
+	// treeStable lends the checkout to one mutating menu verb — Accept,
+	// Remediate, Fold — for the length of that verb alone. It is set by the
+	// Assist session, which holds nothing itself; a drain's own gates leave it
+	// nil, because the drain parked at the gate already holds the checkout its
+	// verb would ask for, and a command cannot wait on itself.
+	treeStable treeStableSeam
+}
+
+// treeStableSeam takes the Checkout claim and hands back the release. A verb
+// calls it when the human chooses it, not when the menu opens: the tree only has
+// to hold still while the verb runs.
+type treeStableSeam func(out io.Writer) (release func(), err error)
+
+// holdTreeStill takes the checkout for one menu verb. With no seam — the drain's
+// own gates — the release is a no-op, so one verb body serves both callers.
+func (e gateEnv) holdTreeStill(out io.Writer) (func(), error) {
+	if e.treeStable == nil {
+		return func() {}, nil
+	}
+	return e.treeStable(out)
+}
+
+// reportTreeStableRefusal prints why a verb could not take the checkout, and
+// leaves the caller on the menu. An interrupt during the wait is the human
+// changing their mind about waiting, not about the session: it says so and goes
+// back to the menu rather than ending the session under them.
+func reportTreeStableRefusal(out io.Writer, verb string, err error) {
+	if isInterrupted(err) {
+		fmt.Fprintf(outputFor(out), "%s cancelled — back to the menu.\n", verb)
+		return
+	}
+	fmt.Fprintf(outputFor(out), "Could not take the checkout for %s: %v\n", verb, err)
 }
 
 // ensurePromptReader returns a single prompt reader reused across every gate
@@ -96,10 +128,10 @@ func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverif
 
 	prompt := BuildHITLAssistancePrompt(d, taskSetID, m, *hitl, runtimePath)
 	body := gateTaskBody(d, m, hitl)
-	invocation, err := ResolveAgentAssistanceInvocation(d, env.cfg, agentOverride, agentCmd, prompt, runtimePath)
-	if err != nil {
-		return false, exitErr(ExitSetup, "%v", err)
-	}
+	// The agent is resolved when assistance is chosen, never on the way in: the
+	// walk that picks one refuses when every attended entry is cooling or
+	// missing, and that refusal belongs in the menu, not in the door.
+	var invocation *AgentAssistanceInvocation
 
 	for {
 		// The gate offers Re-verify only when Agent verification is enabled for
@@ -144,10 +176,6 @@ func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverif
 			hitl = BlockingHITLTask(m)
 			body = gateTaskBody(d, m, hitl)
 			prompt = BuildHITLAssistancePrompt(d, taskSetID, m, *hitl, runtimePath)
-			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg, agentOverride, agentCmd, prompt, runtimePath)
-			if err != nil {
-				return true, exitErr(ExitSetup, "%v", err)
-			}
 		case hitlGateComplete:
 			result, err := CompleteTaskWith(d, nil, nil, CompleteTaskOptions{ResolveInput: ResolveInput{CWD: cwd}, TaskPath: taskPathHint(taskSetID, hitl.File)})
 			if err != nil {
@@ -158,7 +186,8 @@ func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverif
 		case hitlGateAssist:
 			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg, agentOverride, agentCmd, prompt, runtimePath)
 			if err != nil {
-				return true, exitErr(ExitSetup, "%v", err)
+				fmt.Fprintf(outputFor(out), "Could not start HITL assistance: %v\n", err)
+				continue
 			}
 			fmt.Fprintf(outputFor(out), "Starting HITL assistance: %s\n", invocation.Display)
 			exitCode, err := runAttendedAssistanceCommand(d, in, runtimePath, out, invocation)
@@ -179,10 +208,6 @@ func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverif
 			}
 			m = afterManifest
 			prompt = BuildHITLAssistancePrompt(d, taskSetID, m, *BlockingHITLTask(m), runtimePath)
-			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg, agentOverride, agentCmd, prompt, runtimePath)
-			if err != nil {
-				return true, exitErr(ExitSetup, "%v", err)
-			}
 			hitl = BlockingHITLTask(m)
 			body = gateTaskBody(d, m, hitl)
 		case hitlGateDefer:
@@ -242,6 +267,10 @@ func deliverClipboardBriefing(d *Deps, out io.Writer, prompt string) {
 // checkout as an attended subshell. It is a pure side-trip: no task state is
 // changed and no refresh occurs; callers re-show their gate menu after it exits.
 func spawnRuntimeShell(d *Deps, stdin io.Reader, runtimePath string, out io.Writer) error {
+	// The banner is the honest half of leaving the shell unlocked: pop cannot
+	// enforce what a human types at a prompt, and claiming the checkout for a tab
+	// that may stay open all afternoon would stall every command queued behind it.
+	fmt.Fprintf(outputFor(out), "Shell in %s — the checkout is not claimed while it is open, so another command can be admitted to it.\n", runtimePath)
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/sh"
@@ -444,10 +473,8 @@ func handleInteractiveFailedGate(env gateEnv, m *Manifest, failed *Task) (bool, 
 
 	prompt := BuildFailedAssistancePrompt(d, taskSetID, m, *failed, runtimePath)
 	body := gateTaskBody(d, m, failed)
-	invocation, err := ResolveAgentAssistanceInvocation(d, env.cfg, agentOverride, agentCmd, prompt, runtimePath)
-	if err != nil {
-		return false, exitErr(ExitSetup, "%v", err)
-	}
+	// Resolved when assistance is chosen — see handleInteractiveHITLGate.
+	var invocation *AgentAssistanceInvocation
 
 	for {
 		action, err := promptFailedGateAction(out, in, d, env.cfg, runtimePath, reader, taskSetID, failed, body, invocation)
@@ -465,7 +492,8 @@ func handleInteractiveFailedGate(env gateEnv, m *Manifest, failed *Task) (bool, 
 		case failedGateAssist:
 			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg, agentOverride, agentCmd, prompt, runtimePath)
 			if err != nil {
-				return true, exitErr(ExitSetup, "%v", err)
+				fmt.Fprintf(outputFor(out), "Could not start Failed assistance: %v\n", err)
+				continue
 			}
 			fmt.Fprintf(outputFor(out), "Starting Failed assistance: %s\n", invocation.Display)
 			exitCode, err := runAttendedAssistanceCommand(d, in, runtimePath, out, invocation)
@@ -492,10 +520,6 @@ func handleInteractiveFailedGate(env gateEnv, m *Manifest, failed *Task) (bool, 
 			failed = FailedTask(m)
 			prompt = BuildFailedAssistancePrompt(d, taskSetID, m, *failed, runtimePath)
 			body = gateTaskBody(d, m, failed)
-			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg, agentOverride, agentCmd, prompt, runtimePath)
-			if err != nil {
-				return true, exitErr(ExitSetup, "%v", err)
-			}
 		case failedGateComplete:
 			result, err := CompleteTaskWith(d, nil, nil, CompleteTaskOptions{ResolveInput: ResolveInput{CWD: cwd}, TaskPath: taskPathHint(taskSetID, failed.File)})
 			if err != nil {
@@ -589,10 +613,8 @@ func handleInteractiveVerifyFailedGate(env gateEnv, repo string, m *Manifest, wo
 	}
 
 	prompt := BuildVerifyFailedAssistancePrompt(d, taskSetID, m, workSHA, findings, runtimePath)
-	invocation, err := ResolveAgentAssistanceInvocation(d, env.cfg, agentOverride, agentCmd, prompt, runtimePath)
-	if err != nil {
-		return false, exitErr(ExitSetup, "%v", err)
-	}
+	// Resolved when assistance is chosen — see handleInteractiveHITLGate.
+	var invocation *AgentAssistanceInvocation
 
 	for {
 		action, err := promptVerifyFailedGateAction(out, in, d, env.cfg, runtimePath, reader, taskSetID, m, findings, invocation)
@@ -605,6 +627,11 @@ func handleInteractiveVerifyFailedGate(env gateEnv, repo string, m *Manifest, wo
 			if err != nil {
 				return true, err
 			}
+			release, holdErr := env.holdTreeStill(out)
+			if holdErr != nil {
+				reportTreeStableRefusal(out, "Accept", holdErr)
+				continue
+			}
 			if _, err := acceptResolvedSet(d, verifyCoreOptions{
 				Repo:        repo,
 				RuntimePath: runtimePath,
@@ -613,13 +640,20 @@ func handleInteractiveVerifyFailedGate(env gateEnv, repo string, m *Manifest, wo
 				Accept:      true,
 				AcceptNote:  note,
 			}, m, workSHA); err != nil {
+				release()
 				return true, err
 			}
+			release()
 			return true, nil
 		case verifyFailedGateRemediate:
 			note, err := readGateNote(out, reader, "Remediation note (what to fix, optional): ")
 			if err != nil {
 				return true, err
+			}
+			release, holdErr := env.holdTreeStill(out)
+			if holdErr != nil {
+				reportTreeStableRefusal(out, "Remediate", holdErr)
+				continue
 			}
 			if _, err := remediateResolvedSet(d, verifyCoreOptions{
 				Repo:          repo,
@@ -629,13 +663,16 @@ func handleInteractiveVerifyFailedGate(env gateEnv, repo string, m *Manifest, wo
 				Remediate:     true,
 				RemediateNote: note,
 			}, m, workSHA); err != nil {
+				release()
 				return true, err
 			}
+			release()
 			return true, nil
 		case verifyFailedGateAssist:
 			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg, agentOverride, agentCmd, prompt, runtimePath)
 			if err != nil {
-				return true, exitErr(ExitSetup, "%v", err)
+				fmt.Fprintf(outputFor(out), "Could not start Verify-failed assistance: %v\n", err)
+				continue
 			}
 			fmt.Fprintf(outputFor(out), "Starting Verify-failed assistance: %s\n", invocation.Display)
 			exitCode, err := runAttendedAssistanceCommand(d, in, runtimePath, out, invocation)
@@ -648,10 +685,6 @@ func handleInteractiveVerifyFailedGate(env gateEnv, repo string, m *Manifest, wo
 			}
 			// Advisory only: no verdict or manifest change — loop back to the gate menu.
 			prompt = BuildVerifyFailedAssistancePrompt(d, taskSetID, m, workSHA, findings, runtimePath)
-			invocation, err = ResolveAgentAssistanceInvocation(d, env.cfg, agentOverride, agentCmd, prompt, runtimePath)
-			if err != nil {
-				return true, exitErr(ExitSetup, "%v", err)
-			}
 		case verifyFailedGateShell:
 			if err := spawnRuntimeShell(d, in, runtimePath, out); err != nil {
 				fmt.Fprintf(outputFor(out), "Could not start shell: %v\n", err)

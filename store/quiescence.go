@@ -20,10 +20,11 @@ const (
 )
 
 // ProcessOwner identifies the mutating process for checkout-quiescence: a live
-// Checkout gate hold owned by this PID and start token does not block the
-// mutation — the human at the gate is who the hold exists to protect. Ownership
-// requires both fields to match; a recycled PID with a different token does not
-// grant the exemption.
+// Checkout gate hold — or a live running Drain row — owned by this PID and start
+// token does not block the mutation. The human at the gate is who the hold
+// exists to protect, and a drain row this process inserted is the claim it took
+// in order to make this very write. Ownership requires both fields to match; a
+// recycled PID with a different token does not grant the exemption.
 type ProcessOwner struct {
 	PID       int
 	ProcStart string
@@ -61,10 +62,10 @@ type Execer interface {
 }
 
 // MutateIfCheckoutQuiescent enforces ADR-0104: it runs mutate only when the
-// runtime checkout is quiescent — no live running drain and no live foreign
-// Checkout gate hold on runtimePath — refusing with ErrCheckoutBusy (and the
-// naming occupant) otherwise. A gate hold owned by mutator (PID plus start
-// token) does not occupy the checkout. The quiescence check and the mutation share ONE
+// runtime checkout is quiescent — no live foreign running drain and no live
+// foreign Checkout gate hold on runtimePath — refusing with ErrCheckoutBusy (and
+// the naming occupant) otherwise. A drain row or gate hold owned by mutator (PID
+// plus start token) does not occupy the checkout. The quiescence check and the mutation share ONE
 // transaction opened with BEGIN IMMEDIATE, so the write lock is held across both:
 // a concurrent StartDrain cannot commit a running row between the check and the
 // mutation, and a drain that became live is seen by the check. This is the
@@ -142,9 +143,18 @@ func (s *Store) MutateIfCheckoutQuiescent(
 	_ = rows.Close()
 
 	for _, c := range drains {
-		if s.alive(c.pid, c.procStart) {
-			return &CheckoutOccupant{Kind: OccupantDrain, SetID: c.setID, PID: c.pid, Since: c.startedAt}, ErrCheckoutBusy
+		if !s.alive(c.pid, c.procStart) {
+			continue
 		}
+		// A running Drain row this process owns is the mutator's own claim on the
+		// checkout, not somebody moving the tree underneath it: an Assist session
+		// takes the checkout when Accept or Remediate is chosen and writes while
+		// holding it. Ownership needs the PID and the start token, exactly as it
+		// does for the gate hold below, so a reused PID exempts nobody.
+		if mutator.owns(c.pid, c.procStart) {
+			continue
+		}
+		return &CheckoutOccupant{Kind: OccupantDrain, SetID: c.setID, PID: c.pid, Since: c.startedAt}, ErrCheckoutBusy
 	}
 
 	// Live Recovery waiter on this checkout? A quota-parked set is an automatic

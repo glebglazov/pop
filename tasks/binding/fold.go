@@ -294,6 +294,13 @@ func refuseLiveClaim(td *tasks.Deps, label, path string) error {
 	if claim == nil {
 		return nil
 	}
+	// A claim this process holds is the fold's own: an Assist session takes the
+	// checkout before it calls fold, so the tree holds still for the rebase. What
+	// the refusal is about is somebody else moving the tree underneath it, and a
+	// process cannot be somebody else.
+	if claim.PID == os.Getpid() {
+		return nil
+	}
 	reason := claim.Reason.Phrase()
 	holder := strings.TrimSpace(claim.Holder.ContainerID)
 	if holder != "" {

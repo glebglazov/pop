@@ -2,12 +2,18 @@ package tasks
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/deps"
@@ -146,28 +152,402 @@ func TestAssistSessionVerifyFailedAcceptReentersSignOff(t *testing.T) {
 	}
 }
 
-// TestAssistSessionRefusesLiveDrain: assist refuses while the set's own drain is
-// live, naming the occupant.
-func TestAssistSessionRefusesLiveDrain(t *testing.T) {
+// TestAssistOpensWhileTheSetIsHeld: a session opens on a set another drain is
+// running and on a set parked at one of its gates. Assist reads Task storage and
+// claims nothing, so there is nothing for either occupant to refuse it over.
+func TestAssistOpensWhileTheSetIsHeld(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		hold func(t *testing.T, d *Deps, runtime string)
+	}{
+		{
+			name: "live drain on the same set",
+			hold: func(t *testing.T, d *Deps, runtime string) {
+				seedLiveDrain(t, d, runtime, "demo", 4242, "live-tok")
+			},
+		},
+		{
+			name: "drain parked at a gate",
+			hold: func(t *testing.T, d *Deps, runtime string) {
+				seedGateHold(t, d, runtime, "demo", 4242, "live-tok")
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, defPath, root := setupAssistFixture(t, doneAFKSet())
+			runtime, err := ResolveRuntimePathWith(d, root, root)
+			if err != nil {
+				t.Fatalf("ResolveRuntimePathWith: %v", err)
+			}
+			tc.hold(t, d, runtime)
+
+			var out bytes.Buffer
+			err = AssistTaskSetWith(d, &project.Deps{Git: d.Git, FS: d.FS}, loadConfigVerifyEnabled, AssistOptions{
+				ResolveInput: ResolveInput{CWD: root, DefinitionOverride: defPath, RuntimeOverride: runtime},
+				TaskSetID:    "demo",
+				Output:       &out,
+				Input:        strings.NewReader("0\n"),
+			})
+			if err != nil {
+				t.Fatalf("AssistTaskSetWith: %v", err)
+			}
+			if !strings.Contains(out.String(), "Assist session: demo") {
+				t.Fatalf("assist must open over a held set:\n%s", out.String())
+			}
+		})
+	}
+}
+
+// TestAssistOpensOnArchivedSet: an archived set opens and says it is archived.
+func TestAssistOpensOnArchivedSet(t *testing.T) {
 	d, defPath, root := setupAssistFixture(t, doneAFKSet())
 	runtime, err := ResolveRuntimePathWith(d, root, root)
 	if err != nil {
 		t.Fatalf("ResolveRuntimePathWith: %v", err)
 	}
-	seedLiveDrain(t, d, runtime, "demo", 4242, "live-tok")
+	pd := &project.Deps{Git: d.Git, FS: d.FS}
+	// Archiving writes against registered state, so the set is registered first.
+	if _, err := RegisterWith(d, defPath, StatePathFor(defPath)); err != nil {
+		t.Fatalf("RegisterWith: %v", err)
+	}
+	if _, err := ArchiveTaskSetWith(d, pd, loadConfigVerifyEnabled, ResolveInput{CWD: root, DefinitionOverride: defPath}, "demo"); err != nil {
+		t.Fatalf("ArchiveTaskSetWith: %v", err)
+	}
 
+	var out bytes.Buffer
+	err = AssistTaskSetWith(d, pd, loadConfigVerifyEnabled, AssistOptions{
+		ResolveInput: ResolveInput{CWD: root, DefinitionOverride: defPath, RuntimeOverride: runtime},
+		TaskSetID:    "demo",
+		Output:       &out,
+		Input:        strings.NewReader("0\n"),
+	})
+	if err != nil {
+		t.Fatalf("AssistTaskSetWith on an archived set: %v", err)
+	}
+	if !strings.Contains(out.String(), "Archived:") {
+		t.Fatalf("an archived set must say so:\n%s", out.String())
+	}
+}
+
+// TestAssistOpensOnMalformedManifest: a manifest that will not parse is what a
+// human opens Assist to look at, so the session shows the parse errors and opens
+// the menu on them.
+func TestAssistOpensOnMalformedManifest(t *testing.T) {
+	d, defPath, root := setupAssistFixture(t, doneAFKSet())
+	runtime, err := ResolveRuntimePathWith(d, root, root)
+	if err != nil {
+		t.Fatalf("ResolveRuntimePathWith: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(defPath, "demo", "index.json"), []byte("{ not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
 	err = AssistTaskSetWith(d, &project.Deps{Git: d.Git, FS: d.FS}, loadConfigVerifyEnabled, AssistOptions{
 		ResolveInput: ResolveInput{CWD: root, DefinitionOverride: defPath, RuntimeOverride: runtime},
 		TaskSetID:    "demo",
-		Output:       &bytes.Buffer{},
+		Output:       &out,
 		Input:        strings.NewReader("0\n"),
 	})
-	if err == nil {
-		t.Fatal("assist must refuse while the set's drain is live")
+	if err != nil {
+		t.Fatalf("AssistTaskSetWith on a malformed set: %v", err)
 	}
-	if !strings.Contains(err.Error(), "live drain") {
-		t.Fatalf("error must name the live drain: %v", err)
+	outStr := out.String()
+	if !strings.Contains(outStr, "Manifest is malformed:") {
+		t.Fatalf("assist must show the manifest diagnostics:\n%s", outStr)
 	}
+	if !strings.Contains(outStr, "0. Exit") {
+		t.Fatalf("assist must still open the menu over a malformed manifest:\n%s", outStr)
+	}
+}
+
+// TestAssistAddressesTheSetsOwnCheckout: run from a checkout of another
+// repository, the session addresses the set's own bound checkout instead of
+// refusing over where the human was standing.
+func TestAssistAddressesTheSetsOwnCheckout(t *testing.T) {
+	d, defPath, root := setupAssistFixture(t, doneAFKSet())
+	elsewhere := t.TempDir()
+	// Two repositories: the set's checkout answers /repo/.git, the checkout the
+	// human is standing in answers /elsewhere/.git.
+	d.Git = &deps.MockGit{CommandInDirFunc: func(dir string, args ...string) (string, error) {
+		inElsewhere := strings.HasPrefix(dir, elsewhere)
+		switch {
+		case len(args) >= 2 && args[0] == "rev-parse" && args[1] == "HEAD":
+			return "shaASSIST\n", nil
+		case len(args) >= 2 && args[0] == "rev-parse" && args[1] == "--git-common-dir":
+			if inElsewhere {
+				return "/elsewhere/.git\n", nil
+			}
+			return "/repo/.git\n", nil
+		case len(args) >= 2 && args[0] == "rev-parse" && args[1] == "--show-toplevel":
+			if inElsewhere {
+				return elsewhere + "\n", nil
+			}
+			return root + "\n", nil
+		}
+		return "", nil
+	}}
+
+	var out bytes.Buffer
+	err := AssistTaskSetWith(d, &project.Deps{Git: d.Git, FS: d.FS}, loadConfigVerifyEnabled, AssistOptions{
+		ResolveInput: ResolveInput{CWD: elsewhere, DefinitionOverride: defPath, RuntimeOverride: root},
+		TaskSetID:    "demo",
+		Output:       &out,
+		Input:        strings.NewReader("0\n"),
+	})
+	if err != nil {
+		t.Fatalf("AssistTaskSetWith from another repository: %v", err)
+	}
+	if !strings.Contains(out.String(), "Runtime: "+root) {
+		t.Fatalf("session must address the set's own checkout:\n%s", out.String())
+	}
+}
+
+// TestAssistOpensWithNoUsableAgent: with every attended agent unusable the
+// session still opens and shows the set; the walk runs when assistance is
+// chosen, and its refusal prints in the menu.
+func TestAssistOpensWithNoUsableAgent(t *testing.T) {
+	d, defPath, root := setupAssistFixture(t, doneAFKSet())
+	d.LookPath = func(string) (string, error) { return "", errors.New("not on PATH") }
+	runtime, err := ResolveRuntimePathWith(d, root, root)
+	if err != nil {
+		t.Fatalf("ResolveRuntimePathWith: %v", err)
+	}
+
+	var out bytes.Buffer
+	// Choose agent assistance, read the refusal, then exit from the re-shown menu.
+	err = AssistTaskSetWith(d, &project.Deps{Git: d.Git, FS: d.FS}, loadConfigVerifyEnabled, AssistOptions{
+		ResolveInput: ResolveInput{CWD: root, DefinitionOverride: defPath, RuntimeOverride: runtime},
+		TaskSetID:    "demo",
+		Output:       &out,
+		Input:        strings.NewReader("1\n0\n"),
+	})
+	if err != nil {
+		t.Fatalf("AssistTaskSetWith with no usable agent: %v", err)
+	}
+	outStr := out.String()
+	if !strings.Contains(outStr, "Assist session: demo") {
+		t.Fatalf("session must open with no usable agent:\n%s", outStr)
+	}
+	if !strings.Contains(outStr, "Could not start Assist assistance: no usable attended agent") {
+		t.Fatalf("the agent refusal must print in the menu:\n%s", outStr)
+	}
+}
+
+// TestAssistAcceptWaitsForTheCheckoutThenRuns: Accept takes the checkout when it
+// is chosen. Held by another set, it waits in the Admission queue — naming what
+// it waits on — and runs once the holder lets go.
+func TestAssistAcceptWaitsForTheCheckoutThenRuns(t *testing.T) {
+	d, defPath, root, runtime := setupAssistVerifyFailedFixture(t)
+	rival, err := BeginDrain(d, runtime, "rival", io.Discard)
+	if err != nil {
+		t.Fatalf("rival drain: %v", err)
+	}
+
+	out := &liveBuffer{}
+	done := make(chan error, 1)
+	go func() {
+		done <- AssistTaskSetWith(d, &project.Deps{Git: d.Git, FS: d.FS}, loadConfigVerifyEnabled, AssistOptions{
+			ResolveInput: ResolveInput{CWD: root, DefinitionOverride: defPath, RuntimeOverride: runtime},
+			TaskSetID:    "demo",
+			Output:       out,
+			Input:        strings.NewReader("1\nsigning off\n0\n"),
+		})
+	}()
+	waitForOutput(t, out, "Waiting for checkout")
+	if err := rival.Finish(store.DrainEnding{State: store.StateFinished}); err != nil {
+		t.Fatalf("release the rival claim: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("AssistTaskSetWith: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Accept never took the checkout after the holder let go")
+	}
+
+	if !strings.Contains(out.String(), "held by set rival") {
+		t.Fatalf("the wait must name who holds the checkout:\n%s", out.String())
+	}
+	stored := readStoredVerdict(t, d, "/repo/.git", "demo", "shaASSIST")
+	if stored == nil || stored.Verdict != "PASS" || !stored.HumanAuthored {
+		t.Fatalf("stored verdict = %+v, want human-authored PASS", stored)
+	}
+	claim, err := ReadCheckoutClaim(d, runtime)
+	if err != nil {
+		t.Fatalf("ReadCheckoutClaim: %v", err)
+	}
+	if claim != nil {
+		t.Fatalf("Accept must give the checkout back: %+v", claim)
+	}
+}
+
+// TestAssistAcceptInterruptedWaitReturnsToTheMenu: an interrupt while a verb
+// waits for the checkout ends the wait, not the session — the menu comes back
+// and the set is untouched.
+func TestAssistAcceptInterruptedWaitReturnsToTheMenu(t *testing.T) {
+	// Keep the process alive through the SIGINT this test raises, whatever order
+	// the wait loop's own Notify lands in.
+	guard := make(chan os.Signal, 1)
+	signal.Notify(guard, syscall.SIGINT)
+	defer signal.Stop(guard)
+
+	d, defPath, root, runtime := setupAssistVerifyFailedFixture(t)
+	rival, err := BeginDrain(d, runtime, "rival", io.Discard)
+	if err != nil {
+		t.Fatalf("rival drain: %v", err)
+	}
+	t.Cleanup(func() { _ = rival.Finish(store.DrainEnding{State: store.StateFinished}) })
+
+	out := &liveBuffer{}
+	done := make(chan error, 1)
+	go func() {
+		done <- AssistTaskSetWith(d, &project.Deps{Git: d.Git, FS: d.FS}, loadConfigVerifyEnabled, AssistOptions{
+			ResolveInput: ResolveInput{CWD: root, DefinitionOverride: defPath, RuntimeOverride: runtime},
+			TaskSetID:    "demo",
+			Output:       out,
+			Input:        strings.NewReader("1\nsigning off\n0\n"),
+		})
+	}()
+	waitForOutput(t, out, "Waiting for checkout")
+	if err := syscall.Kill(os.Getpid(), syscall.SIGINT); err != nil {
+		t.Fatalf("raise SIGINT: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("an interrupted wait must not end the session: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("SIGINT did not end the wait")
+	}
+
+	outStr := out.String()
+	if !strings.Contains(outStr, "Accept cancelled") {
+		t.Fatalf("the menu must say the verb was cancelled:\n%s", outStr)
+	}
+	if strings.Count(outStr, "Verify-failed:") < 2 {
+		t.Fatalf("the session must come back to its menu:\n%s", outStr)
+	}
+	if stored := readStoredVerdict(t, d, "/repo/.git", "demo", "shaASSIST"); stored == nil || stored.Verdict != "NEEDS-HUMAN" {
+		t.Fatalf("an abandoned Accept must leave the verdict alone, got %+v", stored)
+	}
+}
+
+// TestAssistRemediateWaitsForTheCheckoutThenRuns: Remediate takes the checkout
+// the same way Accept does — it appends to the manifest, so the tree must hold
+// still for it — and spawns its task once the holder lets go.
+func TestAssistRemediateWaitsForTheCheckoutThenRuns(t *testing.T) {
+	d, defPath, root, runtime := setupAssistVerifyFailedFixture(t)
+	rival, err := BeginDrain(d, runtime, "rival", io.Discard)
+	if err != nil {
+		t.Fatalf("rival drain: %v", err)
+	}
+
+	out := &liveBuffer{}
+	done := make(chan error, 1)
+	go func() {
+		done <- AssistTaskSetWith(d, &project.Deps{Git: d.Git, FS: d.FS}, loadConfigVerifyEnabled, AssistOptions{
+			ResolveInput: ResolveInput{CWD: root, DefinitionOverride: defPath, RuntimeOverride: runtime},
+			TaskSetID:    "demo",
+			Output:       out,
+			Input:        strings.NewReader("2\nfix the retry\n0\n"),
+		})
+	}()
+	waitForOutput(t, out, "Waiting for checkout")
+	if err := rival.Finish(store.DrainEnding{State: store.StateFinished}); err != nil {
+		t.Fatalf("release the rival claim: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("AssistTaskSetWith: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Remediate never took the checkout after the holder let go")
+	}
+
+	m := LoadManifest(d, "demo", filepath.Join(defPath, "demo", "index.json"))
+	if len(m.Tasks) != 2 {
+		t.Fatalf("remediation task was not appended: %+v", m.Tasks)
+	}
+	claim, err := ReadCheckoutClaim(d, runtime)
+	if err != nil {
+		t.Fatalf("ReadCheckoutClaim: %v", err)
+	}
+	if claim != nil {
+		t.Fatalf("Remediate must give the checkout back: %+v", claim)
+	}
+}
+
+// TestAssistFoldTakesTheCheckoutForItsOwnAct: Fold runs under the Checkout claim
+// and gives it back when it is done.
+func TestAssistFoldTakesTheCheckoutForItsOwnAct(t *testing.T) {
+	d, defPath, root := setupAssistFixture(t, doneAFKSet())
+	s, _, err := d.Store(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutBinding(store.Binding{
+		ScopedKey:   "repo\x00demo",
+		RuntimePath: root,
+		Branch:      "demo",
+		Project:     "demo",
+		Provisioned: true,
+	}); err != nil {
+		t.Fatalf("PutBinding: %v", err)
+	}
+	runtime, err := ResolveRuntimePathWith(d, root, root)
+	if err != nil {
+		t.Fatalf("ResolveRuntimePathWith: %v", err)
+	}
+
+	heldBy := ""
+	var out bytes.Buffer
+	err = AssistTaskSetWith(d, &project.Deps{Git: d.Git, FS: d.FS}, func(string) (*config.Config, error) {
+		return &config.Config{}, nil
+	}, AssistOptions{
+		ResolveInput: ResolveInput{CWD: root, DefinitionOverride: defPath, RuntimeOverride: runtime},
+		TaskSetID:    "demo",
+		Output:       &out,
+		Input:        strings.NewReader("3\n"),
+		Fold: func(string, io.Reader, io.Writer) error {
+			if claim, cerr := ReadCheckoutClaim(d, runtime); cerr == nil && claim != nil {
+				heldBy = claim.Holder.ContainerID
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("AssistTaskSetWith: %v", err)
+	}
+	if heldBy != "demo" {
+		t.Fatalf("fold ran under claim %q, want the set's own", heldBy)
+	}
+	claim, err := ReadCheckoutClaim(d, runtime)
+	if err != nil {
+		t.Fatalf("ReadCheckoutClaim: %v", err)
+	}
+	if claim != nil {
+		t.Fatalf("fold must give the checkout back: %+v", claim)
+	}
+}
+
+// setupAssistVerifyFailedFixture is a demo set sitting at VERIFY-FAILED, with the
+// runtime checkout resolved — the state the Accept and Remediate verbs act from.
+func setupAssistVerifyFailedFixture(t *testing.T) (*Deps, string, string, string) {
+	t.Helper()
+	d, defPath, root := setupAssistFixture(t, doneAFKSet())
+	seedVerdict(t, d, store.VerifyVerdict{
+		Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaASSIST",
+		Verdict: "NEEDS-HUMAN", Findings: "the retry looks flaky",
+	})
+	runtime, err := ResolveRuntimePathWith(d, root, root)
+	if err != nil {
+		t.Fatalf("ResolveRuntimePathWith: %v", err)
+	}
+	return d, defPath, root, runtime
 }
 
 // TestAssistGenericMenuOffersFoldForDoneBoundSet: the generic assist menu offers
@@ -315,37 +695,27 @@ func TestAssistSessionRefusesNonInteractive(t *testing.T) {
 	}
 }
 
-// TestAssistSessionRegistersNonClaimingGateHold: while the menu is up the session
-// holds a non-claiming Checkout gate hold, released on exit.
-func TestAssistSessionRegistersNonClaimingGateHold(t *testing.T) {
+// TestAssistSessionHoldsNothing: the session itself takes no Checkout gate hold
+// and no Checkout claim. Exclusivity belongs to the verbs inside the menu, so an
+// open menu never stands between another command and the checkout.
+func TestAssistSessionHoldsNothing(t *testing.T) {
 	d, defPath, root := setupAssistFixture(t, doneAFKSet())
 	runtime, err := ResolveRuntimePathWith(d, root, root)
 	if err != nil {
 		t.Fatalf("ResolveRuntimePathWith: %v", err)
 	}
-	seedVerdict(t, d, store.VerifyVerdict{
-		Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaASSIST",
-		Verdict: "NEEDS-HUMAN", Findings: "findings",
-	})
 
-	holdSeen := false
+	checked := false
 	in := &checkingPromptReader{
 		t: t,
-		check: func(*testing.T) {
-			hold, err := GetCheckoutGateHold(d, runtime)
-			if err != nil {
-				t.Fatalf("GetCheckoutGateHold: %v", err)
+		check: func(t *testing.T) {
+			checked = true
+			if hold, err := GetCheckoutGateHold(d, runtime); err != nil || hold != nil {
+				t.Errorf("assist session registered a gate hold: %+v (err %v)", hold, err)
 			}
-			if hold == nil {
-				t.Fatal("checkout gate hold missing during assist session")
+			if claim, err := ReadCheckoutClaim(d, runtime); err != nil || claim != nil {
+				t.Errorf("assist session claimed the checkout: %+v (err %v)", claim, err)
 			}
-			if hold.SetID != "demo" {
-				t.Fatalf("hold set = %q, want demo", hold.SetID)
-			}
-			if hold.Claim {
-				t.Fatal("assist session must register a non-claiming hold")
-			}
-			holdSeen = true
 		},
 		response: "0\n",
 	}
@@ -360,16 +730,33 @@ func TestAssistSessionRegistersNonClaimingGateHold(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AssistTaskSetWith: %v", err)
 	}
-	if !holdSeen {
-		t.Fatal("gate hold was not observed during the menu")
+	if !checked {
+		t.Fatal("the menu never prompted, so nothing was observed")
 	}
-	hold, err := GetCheckoutGateHold(d, runtime)
-	if err != nil {
-		t.Fatalf("GetCheckoutGateHold after exit: %v", err)
+}
+
+// TestRuntimeShellSaysTheCheckoutIsUnclaimed: the shell is the deliberate
+// exception to Tree-stable admission, and its banner says so.
+func TestRuntimeShellSaysTheCheckoutIsUnclaimed(t *testing.T) {
+	d := newTestDeps(t)
+	d.Runner = fakeShellRunner{}
+	var out bytes.Buffer
+	if err := spawnRuntimeShell(d, strings.NewReader(""), "/rt", &out); err != nil {
+		t.Fatalf("spawnRuntimeShell: %v", err)
 	}
-	if hold != nil {
-		t.Fatalf("checkout gate hold leaked after assist exit: %#v", hold)
+	if !strings.Contains(out.String(), "the checkout is not claimed while it is open") {
+		t.Fatalf("shell banner must say the checkout stays unclaimed:\n%s", out.String())
 	}
+}
+
+type fakeShellRunner struct{}
+
+func (fakeShellRunner) Run(context.Context, string, io.Writer, io.Writer, string, ...string) (int, error) {
+	return 0, nil
+}
+
+func (fakeShellRunner) Start(context.Context, string, io.Writer, io.Writer, string, ...string) (*ManagedProcess, error) {
+	return nil, errors.New("not used")
 }
 
 func TestBuildAssistPromptOmitsTaskBodies(t *testing.T) {
@@ -401,4 +788,36 @@ func TestBuildAssistPromptOmitsTaskBodies(t *testing.T) {
 	if strings.Contains(prompt, "Secret body") || strings.Contains(prompt, "Do not inline me") {
 		t.Fatalf("Assist prompt must not inline task bodies:\n%s", prompt)
 	}
+}
+
+// liveBuffer is an output a test can read while the session under test is still
+// writing to it — the only way to act on a wait exactly when the wait is really
+// on screen, rather than on a queue row that may already have been granted.
+type liveBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *liveBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *liveBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func waitForOutput(t *testing.T, b *liveBuffer, want string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(b.String(), want) {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("output never showed %q:\n%s", want, b.String())
 }

@@ -818,15 +818,16 @@ func TestRunTaskSetInteractiveHITLGateShowsNumberedMenu(t *testing.T) {
 	assertExitCode(t, err, ExitNoRunnable)
 
 	out := buf.String()
+	// The entry the menu would launch is named beside the option; the invocation
+	// itself is resolved when assistance is chosen, not while the menu prints, so
+	// the gate opens whether or not any attended agent can run right now.
 	for _, want := range []string{
-		"1. Get agent assistance (default)",
+		"1. Get agent assistance (default) · claude",
 		"2. Complete task",
 		"3. Defer task",
 		"4. Open a shell in the checkout",
 		"0. Exit",
 		"enter select · digit jump",
-		"claude --permission-mode auto <HITL assistance prompt>",
-		"using claude native attended assistance",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("menu missing %q:\n%s", want, out)

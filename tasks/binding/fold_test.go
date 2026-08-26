@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/store"
@@ -936,11 +937,7 @@ func TestFoldRefusesPreconditions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("provision: %v", err)
 		}
-		h, err := tasks.BeginDrain(td, b.RuntimePath, "set-claim", io.Discard)
-		if err != nil {
-			t.Fatalf("BeginDrain: %v", err)
-		}
-		defer func() { _ = h.Finish(store.DrainEnding{State: store.StateFinished}) }()
+		seedForeignCheckoutClaim(t, td, b.RuntimePath, "set-claim")
 
 		cfg := &config.Config{Projects: []config.ProjectEntry{{Path: repo}}}
 		_, err = Fold(td, nil, cfg, "set-claim", FoldOptions{Yes: true, In: tasks.NonInteractiveReader{}}, LifecycleHooks{}, io.Discard)
@@ -1461,4 +1458,34 @@ func tasksDirForBindingRepo(t *testing.T, td *tasks.Deps, repo string) string {
 		t.Fatal(err)
 	}
 	return defPath
+}
+
+// seedForeignCheckoutClaim registers a running Drain owned by another process, so
+// the checkout carries the Checkout claim a fold must refuse. It is deliberately
+// not this process's own claim: a claim this process holds is the fold's own —
+// an Assist session takes the checkout before it folds — and refuseLiveClaim
+// steps over it.
+func seedForeignCheckoutClaim(t *testing.T, td *tasks.Deps, runtimePath, setID string) {
+	t.Helper()
+	td.ProcessAlive = func(int) bool { return true }
+	td.ProcessStartToken = func(int) (string, bool) { return "foreign-tok", true }
+	id, err := tasks.ResolveRepositoryIdentity(td, runtimePath)
+	if err != nil {
+		t.Fatalf("identity: %v", err)
+	}
+	s, err := store.Open(tasks.DrainStorePathWith(td), func(int, string) bool { return true })
+	if err != nil {
+		t.Fatalf("open drain store: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+	if _, err := s.StartDrain(store.Drain{
+		Repo:        id.CommonDir,
+		SetID:       setID,
+		RuntimePath: runtimePath,
+		PID:         os.Getpid() + 1,
+		ProcStart:   "foreign-tok",
+		StartedAt:   time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed foreign claim: %v", err)
+	}
 }
