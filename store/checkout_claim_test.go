@@ -412,3 +412,38 @@ func TestQueuedCommandClaimDoesNotBlockTheGrant(t *testing.T) {
 		t.Fatalf("grant = (%+v, %+v), want the head of the queue admitted", drain, block)
 	}
 }
+
+// The re-entrancy exemption is exact: the same process, the same start token and
+// the same set. Anything else still faces the full admission check.
+func TestClaimHeldByRecognisesOnlyThisProcessesOwnClaim(t *testing.T) {
+	s := openTestStore(t, aliveByToken(
+		Drain{PID: 100, ProcStart: "t1"},
+		Drain{PID: 200, ProcStart: "t2"},
+	))
+	if _, err := s.StartDrain(Drain{Repo: "repo", SetID: "set-a", RuntimePath: "/rt", PID: 100, ProcStart: "t1", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("StartDrain: %v", err)
+	}
+
+	cases := []struct {
+		name  string
+		path  string
+		setID string
+		owner ProcessOwner
+		want  bool
+	}{
+		{"own claim", "/rt", "set-a", ProcessOwner{PID: 100, ProcStart: "t1"}, true},
+		{"another process", "/rt", "set-a", ProcessOwner{PID: 200, ProcStart: "t2"}, false},
+		{"recycled pid", "/rt", "set-a", ProcessOwner{PID: 100, ProcStart: "other"}, false},
+		{"another set", "/rt", "set-b", ProcessOwner{PID: 100, ProcStart: "t1"}, false},
+		{"another checkout", "/other", "set-a", ProcessOwner{PID: 100, ProcStart: "t1"}, false},
+	}
+	for _, tc := range cases {
+		held, err := s.ClaimHeldBy(tc.path, tc.setID, tc.owner)
+		if err != nil {
+			t.Fatalf("%s: ClaimHeldBy: %v", tc.name, err)
+		}
+		if held != tc.want {
+			t.Fatalf("%s: held = %v, want %v", tc.name, held, tc.want)
+		}
+	}
+}

@@ -253,3 +253,55 @@ func TestStandaloneVerifyHoldsTheCheckoutWhileItRuns(t *testing.T) {
 	_ = after.Finish(store.DrainEnding{State: store.StateFinished})
 	assertLeftNoDrainBehind(t, d, commonDir, "demo")
 }
+
+// The reachable regression behind the re-entrancy exemption: an Assist session's
+// Fold takes the checkout for the set, the rebase conflicts, and the conflict
+// prompt's "Verify set" asks for a tree that is already standing still — held by
+// this very process. It must run, not be refused by its own claim.
+func TestFoldConflictVerifyRunsInsideTheSessionsOwnHold(t *testing.T) {
+	d, repo, _, _ := treeStableFixture(t)
+	id, err := ResolveRepositoryIdentity(d, repo)
+	if err != nil {
+		t.Fatalf("ResolveRepositoryIdentity: %v", err)
+	}
+	// The fold conflict prompt resolves the set through canonical Task storage
+	// rather than a caller-supplied definition path, so the set must live there.
+	head, err := realGitInDir(repo, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatalf("rev-parse HEAD: %v", err)
+	}
+	setTasks := []Task{{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: TaskDone}}
+	setupManifest(t, id.TasksDir, "demo", setTasks)
+	writeManifestWithSetKeys(t, filepath.Join(id.TasksDir, "demo"), setTasks,
+		map[string]any{"base_commit": strings.TrimSpace(head)})
+
+	// This is what the Assist menu does when Fold is chosen.
+	hold, err := AcquireTreeStable(d, repo, "demo", io.Discard, AdmissionWait)
+	if err != nil {
+		t.Fatalf("assist Fold could not take the checkout: %v", err)
+	}
+	defer func() { _ = hold.Release() }()
+
+	var out bytes.Buffer
+	verified := false
+	err = runFoldSetVerify(d, nil, FoldConflictContext{
+		SetID:       "demo",
+		RuntimePath: repo,
+	}, FoldConflictAssistanceOptions{
+		RunVerifier: func(string) (string, error) {
+			verified = true
+			return "VERDICT: PASS\nFINDINGS: none\n", nil
+		},
+	}, &out)
+	if err != nil {
+		t.Fatalf("verify inside the fold's own hold: %v", err)
+	}
+	if !verified {
+		t.Fatal("the Verifier never ran")
+	}
+	// The inner verify released nothing: the session still holds the checkout for
+	// the rest of the fold.
+	if _, err := BeginDrain(d, repo, "other", io.Discard); err == nil {
+		t.Fatal("the fold's hold was released by its own nested verify")
+	}
+}

@@ -337,3 +337,55 @@ func (s *Store) liveWaiterClaim(q claimQuerier, runtimePath, excludeSet string) 
 	}
 	return nil, nil
 }
+
+// ClaimHeldBy reports whether the live Checkout claim on runtimePath for setID
+// is a running Drain row this very process inserted — the re-entrancy test a
+// nested Tree-stable operation asks before acquiring (ADR-0238).
+//
+// A command that already holds the checkout for a set cannot take it a second
+// time: the Set claim it holds refuses it, and waiting for that claim would be
+// waiting on itself. Ownership is the same PID + start-token pairing
+// checkout-quiescence exempts through ProcessOwner, and it is narrowed to the
+// claim's own set so a process holding the tree for one set still faces the
+// full admission check when it asks for another.
+//
+// Only the running-drain arm is consulted: it is the only claim species a
+// process takes and then keeps holding while it calls further into pop.
+func (s *Store) ClaimHeldBy(runtimePath, setID string, owner ProcessOwner) (bool, error) {
+	if runtimePath == "" || setID == "" || owner.PID == 0 {
+		return false, nil
+	}
+	rows, err := s.db.Query(
+		`SELECT pid, proc_start FROM drains WHERE state = ? AND runtime_path = ? AND set_id = ?`,
+		StateRunning, runtimePath, setID)
+	if err != nil {
+		return false, err
+	}
+	type candidate struct {
+		pid       int
+		procStart string
+	}
+	var cands []candidate
+	for rows.Next() {
+		var c candidate
+		var procStart sql.NullString
+		if err := rows.Scan(&c.pid, &procStart); err != nil {
+			_ = rows.Close()
+			return false, err
+		}
+		c.procStart = procStart.String
+		cands = append(cands, c)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return false, err
+	}
+	_ = rows.Close()
+
+	for _, c := range cands {
+		if owner.owns(c.pid, c.procStart) && s.alive(c.pid, c.procStart) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
