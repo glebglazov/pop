@@ -59,17 +59,17 @@ func taggedPaneDeps(setID string) (*drain.Deps, *tmuxtest.Fake) {
 }
 
 // The launch reads the pane once and the entry page opens with the row it named
-// pinned to the top and marked — with the cursor left where it always rests. Paging
+// lifted to the top and marked — with the cursor left where it always rests. Paging
 // away and back is not a launch, so the facts are never asked for again.
-func TestEntryOnPageAPinsTheLaunchingPanesRow(t *testing.T) {
+func TestEntryOnPageALiftsTheLaunchingPanesRow(t *testing.T) {
 	d, f := taggedPaneDeps("set-g")
 	s := newShellWith(t, PageWork, d)
 
 	// set-g sorts last of the three rows the fake page loads, so seeing it above
-	// set-a is the whole of the pin.
-	assertPinnedFirst(t, s, "set-g", "set-a")
+	// set-a is the whole of the lift.
+	assertLiftedFirst(t, s, "set-g", "set-a")
 	if got := s.PageDashboard(PageWork).ListCursor(); got != 0 {
-		t.Fatalf("cursor = %d, want the untouched first row: the pin moves rows, not the cursor", got)
+		t.Fatalf("cursor = %d, want the untouched first row: the lift moves rows, not the cursor", got)
 	}
 	if f.CurrentPaneFactsCalls != 1 {
 		t.Fatalf("read the pane %d times at launch, want one round-trip", f.CurrentPaneFactsCalls)
@@ -80,20 +80,20 @@ func TestEntryOnPageAPinsTheLaunchingPanesRow(t *testing.T) {
 	if f.CurrentPaneFactsCalls != 1 {
 		t.Fatalf("read the pane %d times after paging, want the launch's one", f.CurrentPaneFactsCalls)
 	}
-	assertPinnedFirst(t, s, "set-g", "set-a")
+	assertLiftedFirst(t, s, "set-g", "set-a")
 }
 
-// assertPinnedFirst reads the rendered page the way the human does: the pinned row
-// above the row that outranks it under the ordinary sort, carrying the pin mark.
-func assertPinnedFirst(t *testing.T, s Shell, pinned, below string) {
+// assertLiftedFirst reads the rendered page the way the human does: the lifted row
+// above the row that outranks it under the ordinary sort, carrying the lift mark.
+func assertLiftedFirst(t *testing.T, s Shell, lifted, below string) {
 	t.Helper()
 	view := ui.StripANSI(s.View().Content)
-	at, under := strings.Index(view, pinned), strings.Index(view, below)
+	at, under := strings.Index(view, lifted), strings.Index(view, below)
 	if at < 0 || under < 0 {
-		t.Fatalf("view names %q at %d and %q at %d:\n%s", pinned, at, below, under, view)
+		t.Fatalf("view names %q at %d and %q at %d:\n%s", lifted, at, below, under, view)
 	}
 	if at > under {
-		t.Fatalf("%q renders below %q, want it pinned above:\n%s", pinned, below, view)
+		t.Fatalf("%q renders below %q, want it lifted above:\n%s", lifted, below, view)
 	}
 	line := view[at:]
 	if end := strings.IndexByte(line, '\n'); end >= 0 {
@@ -103,11 +103,11 @@ func assertPinnedFirst(t *testing.T, s Shell, pinned, below string) {
 		line = view[start+1:][:len(line)+at-start-1]
 	}
 	if !strings.Contains(line, "\u25b8") {
-		t.Fatalf("pinned row = %q, want the pin mark in its prefix column", line)
+		t.Fatalf("lifted row = %q, want the lift mark in its prefix column", line)
 	}
 }
 
-// The pane is read for whichever page the dashboard opens on: the pin is computed
+// The pane is read for whichever page the dashboard opens on: the lift is computed
 // per page, so the entry page decides nothing about whether the facts are worth
 // having. Decision 5 survives as it always was — the launch opens the page it was
 // asked for and never follows an answer across the toggle.
@@ -163,12 +163,12 @@ func routinePaneDeps(routineID string) (*drain.Deps, *tmuxtest.Fake) {
 	return d, f
 }
 
-// A pane pop opened to fire a Routine pins that Routine's row on page B, whether
+// A pane pop opened to fire a Routine lifts that Routine's row on page B, whether
 // the human entered on page A and toggled over or came straight in through
 // `pop routine dashboard`. Page A, which lists no Routines, is left exactly as it
 // always looks.
-func TestRoutinePanePinsOnPageBFromEitherEntry(t *testing.T) {
-	// "hourly" sorts after "daily", so seeing it first is the whole of the pin.
+func TestRoutinePaneLiftsOnPageBFromEitherEntry(t *testing.T) {
+	// "hourly" sorts after "daily", so seeing it first is the whole of the lift.
 	for _, tc := range []struct {
 		name  string
 		entry Page
@@ -180,11 +180,11 @@ func TestRoutinePanePinsOnPageBFromEitherEntry(t *testing.T) {
 			d, f := routinePaneDeps("hourly")
 			s := newShellWith(t, tc.entry, d)
 			if tc.entry == PageWork {
-				assertNothingPinned(t, s)
+				assertNothingLifted(t, s)
 				s = pressV(t, s)
 			}
 
-			assertPinnedFirst(t, s, "hourly", "daily")
+			assertLiftedFirst(t, s, "hourly", "daily")
 			if got := s.PageDashboard(PageRoutines).ListCursor(); got != 0 {
 				t.Fatalf("cursor = %d, want the untouched first row", got)
 			}
@@ -195,9 +195,9 @@ func TestRoutinePanePinsOnPageBFromEitherEntry(t *testing.T) {
 	}
 }
 
-// A routine-attributed pane pins nothing on the page that lists no Routines: the
+// A routine-attributed pane lifts nothing on the page that lists no Routines: the
 // answer belongs to a row on the other page, and page A does not follow it.
-func assertNothingPinned(t *testing.T, s Shell) {
+func assertNothingLifted(t *testing.T, s Shell) {
 	t.Helper()
 	view := ui.StripANSI(s.View().Content)
 	assertNoRowIsMarked(t, view)
@@ -206,12 +206,12 @@ func assertNothingPinned(t *testing.T, s Shell) {
 	}
 }
 
-// A pinned row the human searches away is simply gone: the search is the active
+// A lifted row the human searches away is simply gone: the search is the active
 // view on page B, and a launch does not widen it (ADR-0209 decisions 7 and 8).
-func TestFilteringAwayAPinnedRoutineRowIsSilent(t *testing.T) {
+func TestFilteringAwayALiftedRoutineRowIsSilent(t *testing.T) {
 	d, _ := routinePaneDeps("hourly")
 	s := newShellWith(t, PageRoutines, d)
-	assertPinnedFirst(t, s, "hourly", "daily")
+	assertLiftedFirst(t, s, "hourly", "daily")
 
 	for _, key := range []tea.KeyPressMsg{
 		{Code: '/', Text: "/"},
@@ -224,19 +224,19 @@ func TestFilteringAwayAPinnedRoutineRowIsSilent(t *testing.T) {
 
 	view := ui.StripANSI(s.View().Content)
 	if strings.Contains(view, "hourly") {
-		t.Fatalf("the filtered-away pinned row still renders:\n%s", view)
+		t.Fatalf("the filtered-away lifted row still renders:\n%s", view)
 	}
 	assertNoRowIsMarked(t, view)
 }
 
-// assertNoRowIsMarked reads the pin out of the table body alone. The frame's hint
+// assertNoRowIsMarked reads the lift out of the table body alone. The frame's hint
 // line wears the same mark on every menu opener, so a whole-view scan answers a
 // question about the footer rather than about the rows.
 func assertNoRowIsMarked(t *testing.T, view string) {
 	t.Helper()
 	for _, row := range tableRows(view) {
 		if strings.Contains(row, "▸") {
-			t.Fatalf("row %q carries the pin mark, want none:\n%s", row, view)
+			t.Fatalf("row %q carries the lift mark, want none:\n%s", row, view)
 		}
 	}
 }

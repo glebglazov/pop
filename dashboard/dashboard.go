@@ -882,7 +882,7 @@ type QueueDashboard struct {
 	kinds workKinds
 	// pane is what the dashboard's own pane showed at launch, read once and kept.
 	// The pane does not move while the dashboard runs, so every rebuild re-asks
-	// the kinds with these same facts and pins whatever the answer is now
+	// the kinds with these same facts and lifts whatever the answer is now
 	// (ADR-0209 decision 5).
 	pane    work.PaneFacts
 	snap    DashboardSnapshot
@@ -1016,7 +1016,7 @@ func NewDashboardOn(d *drain.Deps, cfg *config.Config, snap DashboardSnapshot, p
 // pane is the launching pane's facts, the same ones the entry page was built
 // with. A page built by the toggle is not a launch, but it is the same pane: the
 // kinds this page lists get their turn at attributing it, which is how a Routine
-// fire pane's row is already pinned when the human toggles over.
+// fire pane's row is already lifted when the human toggles over.
 func OpenPage(d *drain.Deps, cfg *config.Config, page Page, pane work.PaneFacts) QueueDashboard {
 	snap, err := BuildPageSnapshot(d, cfg, page, pane)
 	m := NewDashboardOn(d, cfg, snap, page)
@@ -1062,10 +1062,10 @@ func newQueueDashboardOn(d *drain.Deps, cfg *config.Config, snap DashboardSnapsh
 		Anchor:          ui.AnchorTop,
 		TopEdgeOnChrome: true,
 		// The snapshot already moved the attributed rows to the top — when the active
-		// preset granted the pin; under any other preset nothing is marked. The mark
+		// preset granted the lift; under any other preset nothing is marked. The mark
 		// is what says why the lifted rows are there, on every one of them
 		// (ADR-0209 decision 4).
-		Pinned: func(r DashboardRow) bool { return r.Pinned },
+		Lifted: func(r DashboardRow) bool { return r.Lifted },
 		Cell: func(r DashboardRow, rs ui.RowState) string {
 			budget := dashboardListCellBudget(cols.width)
 			cache := livePaneCache{}
@@ -1082,7 +1082,7 @@ func newQueueDashboardOn(d *drain.Deps, cfg *config.Config, snap DashboardSnapsh
 			return ui.TruncateString(dashboardTableLine(page.styledCells(kinds, r, cache), cols.widths), budget)
 		},
 	})
-	// Attribution has already had its say — it pinned its rows to the top of the
+	// Attribution has already had its say — it lifted its rows to the top of the
 	// snapshot. Nothing is printed about it, and the cursor rests where it always
 	// does, on the first row (ADR-0209 decision 8).
 	return QueueDashboard{d: d, cfg: cfg, page: page, kinds: kinds, pane: snap.Pane, snap: snap, allRows: snap.Containers, list: list, cols: cols, live: live}
@@ -2752,9 +2752,9 @@ func (m QueueDashboard) confirmBindModal() (tea.Model, tea.Cmd) {
 // pays for the other page's scan and the header it recomputes counts only what is
 // on screen.
 //
-// It carries the pane facts the model has held since launch, so the pinned block
+// It carries the pane facts the model has held since launch, so the lifted block
 // is whatever the pane belongs to now: a drain that has just gone live in the
-// pane's checkout pins on this poll, and one that has ended un-pins on it. No
+// pane's checkout lifts on this poll, and one that has ended un-lifts on it. No
 // tmux round-trip happens here — only the answer is re-derived.
 // While rows are marked it also builds the same page unfiltered, because a mark
 // outranks the preset and the preset build alone cannot tell a row it hides from
@@ -2790,9 +2790,9 @@ func (m QueueDashboard) unfilteredRows() []DashboardRow {
 
 // unfilteredDeps is this page's deps with the widest shipped preset installed,
 // keeping the active preset's sort so both builds of one poll agree on order. The
-// pin grant rides along with the sort for the same reason: the widening is about
+// lift grant rides along with the sort for the same reason: the widening is about
 // which rows exist, not about where they sit, so a marked row it contributes must
-// not appear lifted in a view whose preset does not pin.
+// not appear lifted in a view whose preset does not lift.
 func (m QueueDashboard) unfilteredDeps() *drain.Deps {
 	preset, ok := config.ShippedWorkViewPreset("all")
 	if m.d == nil || !ok {
@@ -2800,7 +2800,7 @@ func (m QueueDashboard) unfilteredDeps() *drain.Deps {
 	}
 	active := m.d.EffectiveViewPreset()
 	preset.Sort = active.Sort
-	preset.Pin = active.Pin
+	preset.Lift = active.Lift
 	d := *m.d
 	d.ViewPreset = preset
 	return &d

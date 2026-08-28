@@ -65,19 +65,19 @@ func tagPane(f *tmuxtest.Fake, paneID string, tag tmuxmod.PaneTag, value string)
 	f.PaneTagValues[paneID][tag] = value
 }
 
-// pinnedBlock is the ids of the marked rows at the head of the list, and it
+// liftedBlock is the ids of the marked rows at the head of the list, and it
 // insists the block really is a block: a marked row further down would mean the
-// pin reordered nothing, and a row marked twice would mean it was copied rather
+// lift reordered nothing, and a row marked twice would mean it was copied rather
 // than moved.
-func pinnedBlock(t *testing.T, m QueueDashboard) []string {
+func liftedBlock(t *testing.T, m QueueDashboard) []string {
 	t.Helper()
 	var ids []string
 	for i, row := range m.snap.Containers {
-		if !row.Pinned {
+		if !row.Lifted {
 			continue
 		}
 		if i != len(ids) {
-			t.Fatalf("row %d (%s) is marked but sits below %d unmarked rows — the pinned rows are not a block at the top", i, row.ID, i-len(ids))
+			t.Fatalf("row %d (%s) is marked but sits below %d unmarked rows — the lifted rows are not a block at the top", i, row.ID, i-len(ids))
 		}
 		ids = append(ids, row.ID)
 	}
@@ -93,9 +93,9 @@ func rowIDs(m QueueDashboard) []string {
 	return ids
 }
 
-// unpinnedOrder is the order this page has with no pane behind it: the baseline
-// every pinning launch must leave untouched beneath its block.
-func unpinnedOrder(t *testing.T, d *drain.Deps, cfg *config.Config) []string {
+// unliftedOrder is the order this page has with no pane behind it: the baseline
+// every lifting launch must leave untouched beneath its block.
+func unliftedOrder(t *testing.T, d *drain.Deps, cfg *config.Config) []string {
 	t.Helper()
 	snap, err := BuildPageSnapshot(d, cfg, PageWork, work.PaneFacts{})
 	if err != nil {
@@ -103,21 +103,21 @@ func unpinnedOrder(t *testing.T, d *drain.Deps, cfg *config.Config) []string {
 	}
 	var ids []string
 	for _, row := range snap.Containers {
-		if row.Pinned {
-			t.Fatalf("a build with no pane behind it pinned %s", row.ID)
+		if row.Lifted {
+			t.Fatalf("a build with no pane behind it lifted %s", row.ID)
 		}
 		ids = append(ids, row.ID)
 	}
 	return ids
 }
 
-// wantPinnedFirst is the whole list a launch should render: the pinned ids in
-// attribution order, then the baseline with those ids removed — pinned rows are
+// wantLiftedFirst is the whole list a launch should render: the lifted ids in
+// attribution order, then the baseline with those ids removed — lifted rows are
 // moved, not copied, and nothing else shifts.
-func wantPinnedFirst(baseline []string, pinned ...string) []string {
-	want := append([]string{}, pinned...)
+func wantLiftedFirst(baseline []string, lifted ...string) []string {
+	want := append([]string{}, lifted...)
 	for _, id := range baseline {
-		if !slices.Contains(pinned, id) {
+		if !slices.Contains(lifted, id) {
 			want = append(want, id)
 		}
 	}
@@ -126,7 +126,7 @@ func wantPinnedFirst(baseline []string, pinned ...string) []string {
 
 // taskSetPaneFixture is a machine with three registered sets, all visible, and a
 // fake tmux the caller places itself in. Three rows is the point: with one row a
-// pinned row is indistinguishable from no pinning at all.
+// lifted row is indistinguishable from no lift at all.
 func taskSetPaneFixture(t *testing.T) (*drain.Deps, *config.Config, *queuetest.RecordingTmux, []string) {
 	t.Helper()
 	repo, setID, _ := queuetest.SetupSpawnRepo(t, "2026-01-01-done-1", []queuetest.SpawnTask{
@@ -134,11 +134,11 @@ func taskSetPaneFixture(t *testing.T) (*drain.Deps, *config.Config, *queuetest.R
 	})
 	d, cfg, _, rt := dashboardLaunchFixture(t, repo, setID)
 	stems := registerDoneSets(t, repo, 3)
-	// `all` shows the done rows this fixture registers but declares no pin, so the
-	// grant is added here: these tests are about what a pinning preset does, and
-	// the gate itself is exercised by TestOnlyAPresetDeclaringPinLiftsTheRows.
+	// `all` shows the done rows this fixture registers but declares no lift, so the
+	// grant is added here: these tests are about what a lifting preset does, and
+	// the gate itself is exercised by TestOnlyAPresetDeclaringLiftLiftsTheRows.
 	d.ViewPreset, _ = config.ShippedWorkViewPreset("all")
-	d.ViewPreset.Pin = true
+	d.ViewPreset.Lift = true
 	return d, cfg, rt, stems
 }
 
@@ -150,9 +150,9 @@ func movableStem(stems []string) string {
 }
 
 // The first rung: a pane pop opened for a Task set. All four tags name the set the
-// pane is working on, so all four pin the same row — drain, verify, fold and assist
-// are activities on one container, not four kinds of pane.
-func TestPaneTaggedForATaskSetPinsItsRowFirst(t *testing.T) {
+// pane is working on, so all four lift the same row — drain, verify, fold and
+// assist are activities on one container, not four kinds of pane.
+func TestPaneTaggedForATaskSetLiftsItsRowFirst(t *testing.T) {
 	for _, tag := range []struct {
 		name string
 		tag  tmuxmod.PaneTag
@@ -165,7 +165,7 @@ func TestPaneTaggedForATaskSetPinsItsRowFirst(t *testing.T) {
 		t.Run(tag.name, func(t *testing.T) {
 			d, cfg, rt, stems := taskSetPaneFixture(t)
 			want := movableStem(stems)
-			baseline := unpinnedOrder(t, d, cfg)
+			baseline := unliftedOrder(t, d, cfg)
 			if baseline[0] == want {
 				t.Fatalf("the tagged set already sorts first in %v — the fixture is not exercising a move", baseline)
 			}
@@ -174,47 +174,47 @@ func TestPaneTaggedForATaskSetPinsItsRowFirst(t *testing.T) {
 
 			m := openFromPane(t, d, cfg)
 
-			if got := pinnedBlock(t, m); !slices.Equal(got, []string{want}) {
-				t.Fatalf("pinned %v, want only the tagged set %q", got, want)
+			if got := liftedBlock(t, m); !slices.Equal(got, []string{want}) {
+				t.Fatalf("lifted %v, want only the tagged set %q", got, want)
 			}
-			if got := rowIDs(m); !slices.Equal(got, wantPinnedFirst(baseline, want)) {
-				t.Fatalf("rows = %v, want %v — the tagged set first, the rest in their own order", got, wantPinnedFirst(baseline, want))
+			if got := rowIDs(m); !slices.Equal(got, wantLiftedFirst(baseline, want)) {
+				t.Fatalf("rows = %v, want %v — the tagged set first, the rest in their own order", got, wantLiftedFirst(baseline, want))
 			}
 			if m.flash.Text() != "" {
-				t.Fatalf("status = %q, want silence: the pin says it (ADR-0209 decision 8)", m.flash.Text())
+				t.Fatalf("status = %q, want silence: the lift says it (ADR-0209 decision 8)", m.flash.Text())
 			}
 		})
 	}
 }
 
-// A pinned row is marked wherever the cursor is: `▸` on its own, `█▸` when the
+// A lifted row is marked wherever the cursor is: `▸` on its own, `█▸` when the
 // cursor happens to be on it. The prefix column stays two cells wide either way,
-// so a launch that pins and one that does not line their columns up identically.
-func TestAPinnedRowIsMarkedInTheTwoCellPrefixColumn(t *testing.T) {
+// so a launch that lifts and one that does not line their columns up identically.
+func TestALiftedRowIsMarkedInTheTwoCellPrefixColumn(t *testing.T) {
 	d, cfg, rt, stems := taskSetPaneFixture(t)
-	pinned := stems[len(stems)-1]
+	lifted := stems[len(stems)-1]
 	inPane(rt.Fake, "work", "%9")
-	tagPane(rt.Fake, "%9", tmuxmod.TagSet, pinned)
+	tagPane(rt.Fake, "%9", tmuxmod.TagSet, lifted)
 
 	m := openFromPane(t, d, cfg)
 	m.list.Resize(len(m.snap.Containers))
 	rows := m.list.VisibleRows()
 
 	if got := ui.StripANSI(rows[0]); !strings.HasPrefix(got, "█▸") {
-		t.Fatalf("cursored pinned row = %q, want the cursor block and the pin mark", got)
+		t.Fatalf("cursored lifted row = %q, want the cursor block and the lift mark", got)
 	}
 	m.list.SetCursor(1)
 	rows = m.list.VisibleRows()
 	if got := ui.StripANSI(rows[0]); !strings.HasPrefix(got, " ▸") {
-		t.Fatalf("uncursored pinned row = %q, want the pin mark alone", got)
+		t.Fatalf("uncursored lifted row = %q, want the lift mark alone", got)
 	}
 	if got := ui.StripANSI(rows[1]); !strings.HasPrefix(got, "█ ") {
-		t.Fatalf("cursored unpinned row = %q, want the cursor block and a blank pin cell", got)
+		t.Fatalf("cursored unlifted row = %q, want the cursor block and a blank lift cell", got)
 	}
 }
 
 // The ordinary case: an unrelated shell, and a pane tagged for a kind this page
-// does not list. Both leave the dashboard exactly as it always looks — no pin, no
+// does not list. Both leave the dashboard exactly as it always looks — no lift, no
 // line, no moved cursor. A "nothing found" line on every launch trains the human to
 // ignore the status line, and a Routine resolves to a row on the other page, which
 // page A does not follow.
@@ -230,7 +230,7 @@ func TestUnattributedPaneChangesNothingAndSaysNothing(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d, cfg, rt, _ := taskSetPaneFixture(t)
-			baseline := unpinnedOrder(t, d, cfg)
+			baseline := unliftedOrder(t, d, cfg)
 			inPane(rt.Fake, "editor", "%4")
 			if tc.value != "" {
 				tagPane(rt.Fake, "%4", tc.tag, tc.value)
@@ -241,8 +241,8 @@ func TestUnattributedPaneChangesNothingAndSaysNothing(t *testing.T) {
 			if m.snap.Attribution != nil {
 				t.Fatalf("attribution = %+v, want none", *m.snap.Attribution)
 			}
-			if got := pinnedBlock(t, m); len(got) != 0 {
-				t.Fatalf("pinned %v, want nothing", got)
+			if got := liftedBlock(t, m); len(got) != 0 {
+				t.Fatalf("lifted %v, want nothing", got)
 			}
 			if got := rowIDs(m); !slices.Equal(got, baseline) {
 				t.Fatalf("rows = %v, want the untouched order %v", got, baseline)
@@ -258,10 +258,10 @@ func TestUnattributedPaneChangesNothingAndSaysNothing(t *testing.T) {
 }
 
 // Decision 7: the preset is absolute. The set is attributed, but the active preset
-// hides its row, so there is nothing to pin — and nothing to say either, because a
+// hides its row, so there is nothing to lift — and nothing to say either, because a
 // dashboard that looks exactly as it always does is not an anomaly needing an
 // explanation (decision 8).
-func TestHiddenAttributedSetIsNotPinnedAndTheViewIsNotWidened(t *testing.T) {
+func TestHiddenAttributedSetIsNotLiftedAndTheViewIsNotWidened(t *testing.T) {
 	d, cfg, rt, stems := taskSetPaneFixture(t)
 	hidden := stems[len(stems)-1]
 	inPane(rt.Fake, "work", "%9")
@@ -269,7 +269,7 @@ func TestHiddenAttributedSetIsNotPinnedAndTheViewIsNotWidened(t *testing.T) {
 	d.ViewPreset = config.WorkViewPreset{
 		Name:  "_hide-done",
 		Label: "in flight",
-		Pin:   true,
+		Lift:  true,
 		Hide:  &config.WorkViewPresetFilter{Status: []string{"done"}},
 	}
 
@@ -279,7 +279,7 @@ func TestHiddenAttributedSetIsNotPinnedAndTheViewIsNotWidened(t *testing.T) {
 		t.Fatalf("rows = %v, want none — the launch must not widen the preset to reveal the row", rowIDs(m))
 	}
 	if m.snap.Attribution == nil {
-		t.Fatal("attribution = none: a hidden row is still attributed, it simply has no row to pin")
+		t.Fatal("attribution = none: a hidden row is still attributed, it simply has no row to lift")
 	}
 	if m.flash.Text() != "" {
 		t.Fatalf("status = %q, want silence about a row nobody can see", m.flash.Text())
@@ -289,17 +289,17 @@ func TestHiddenAttributedSetIsNotPinnedAndTheViewIsNotWidened(t *testing.T) {
 	}
 }
 
-// The live filter is the preset's twin: a query that excludes the pinned row drops
+// The live filter is the preset's twin: a query that excludes the lifted row drops
 // it like any other row, silently, and the rows it does match keep their order.
-func TestAFilterQueryThatExcludesThePinnedRowDropsItSilently(t *testing.T) {
+func TestAFilterQueryThatExcludesTheLiftedRowDropsItSilently(t *testing.T) {
 	d, cfg, rt, stems := taskSetPaneFixture(t)
-	pinned := stems[len(stems)-1]
+	lifted := stems[len(stems)-1]
 	inPane(rt.Fake, "work", "%9")
-	tagPane(rt.Fake, "%9", tmuxmod.TagSet, pinned)
+	tagPane(rt.Fake, "%9", tmuxmod.TagSet, lifted)
 
 	m := openFromPane(t, d, cfg)
-	if got := pinnedBlock(t, m); !slices.Equal(got, []string{pinned}) {
-		t.Fatalf("pinned %v before filtering, want %v", got, []string{pinned})
+	if got := liftedBlock(t, m); !slices.Equal(got, []string{lifted}) {
+		t.Fatalf("lifted %v before filtering, want %v", got, []string{lifted})
 	}
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
@@ -313,29 +313,29 @@ func TestAFilterQueryThatExcludesThePinnedRowDropsItSilently(t *testing.T) {
 		t.Fatalf("rows under the /%s filter = %v, want only %q", stems[0], got, stems[0])
 	}
 	if m.flash.Text() != "" {
-		t.Fatalf("status = %q, want silence when the filter hid the pinned row", m.flash.Text())
+		t.Fatalf("status = %q, want silence when the filter hid the lifted row", m.flash.Text())
 	}
 }
 
-// Decision 1: the pin is position, never navigation. The cursor opens on the first
-// row the way it always does, and wherever the human moves it, a rebuild leaves
-// them there — rows may rearrange under someone who is reading, but their selection
-// does not.
+// Decision 1: the lift is position, never navigation. The cursor opens on the
+// first row the way it always does, and wherever the human moves it, a rebuild
+// leaves them there — rows may rearrange under someone who is reading, but their
+// selection does not.
 func TestAttributionNeverMovesTheCursor(t *testing.T) {
 	d, cfg, rt, stems := taskSetPaneFixture(t)
-	pinned := stems[len(stems)-1]
+	lifted := stems[len(stems)-1]
 	inPane(rt.Fake, "work", "%9")
-	tagPane(rt.Fake, "%9", tmuxmod.TagSet, pinned)
+	tagPane(rt.Fake, "%9", tmuxmod.TagSet, lifted)
 
 	m := openFromPane(t, d, cfg)
 	if m.ListCursor() != 0 {
 		t.Fatalf("cursor = %d at launch, want the first row: attribution moves rows, not the cursor", m.ListCursor())
 	}
 
-	// Wherever the human went, it is not the pinned row.
+	// Wherever the human went, it is not the lifted row.
 	moved := ""
 	for _, row := range m.snap.Containers {
-		if row.ID != pinned {
+		if row.ID != lifted {
 			moved = row.ID
 			break
 		}
@@ -374,8 +374,8 @@ func rowKeyFor(t *testing.T, m QueueDashboard, id string) string {
 	return ""
 }
 
-// Outside tmux there is no pane, and a dashboard that cannot tell where it is pins
-// nothing rather than guessing.
+// Outside tmux there is no pane, and a dashboard that cannot tell where it is
+// lifts nothing rather than guessing.
 func TestLaunchPaneFactsWithoutAPaneIsEmpty(t *testing.T) {
 	if got := LaunchPaneFacts(nil); !got.Empty() {
 		t.Fatalf("LaunchPaneFacts(nil) = %+v, want zero facts", got)
@@ -388,48 +388,48 @@ func TestLaunchPaneFactsWithoutAPaneIsEmpty(t *testing.T) {
 	}
 }
 
-// The pin is not a sort key: it lifts rows off the top of whatever order the active
-// preset produced and changes nothing underneath. Every sort a preset can declare is
-// checked against its own unpinned build, so a pin can never be mistaken for a
-// re-sort.
-func TestPinningLeavesEveryPresetSortIntactBeneathTheBlock(t *testing.T) {
+// The lift is not a sort key: it lifts rows off the top of whatever order the
+// active preset produced and changes nothing underneath. Every sort a preset can
+// declare is checked against its own unlifted build, so a lift can never be
+// mistaken for a re-sort.
+func TestLiftingLeavesEveryPresetSortIntactBeneathTheBlock(t *testing.T) {
 	for _, sort := range []string{"", config.PresetSortCreatedDesc, config.PresetSortCreatedAsc} {
 		t.Run("sort="+sort, func(t *testing.T) {
 			d, cfg, rt, stems := taskSetPaneFixture(t)
 			d.ViewPreset.Sort = sort
-			pinned := stems[len(stems)-1]
-			baseline := unpinnedOrder(t, d, cfg)
+			lifted := stems[len(stems)-1]
+			baseline := unliftedOrder(t, d, cfg)
 			inPane(rt.Fake, "work", "%9")
-			tagPane(rt.Fake, "%9", tmuxmod.TagSet, pinned)
+			tagPane(rt.Fake, "%9", tmuxmod.TagSet, lifted)
 
 			m := openFromPane(t, d, cfg)
 
-			if got, want := rowIDs(m), wantPinnedFirst(baseline, pinned); !slices.Equal(got, want) {
+			if got, want := rowIDs(m), wantLiftedFirst(baseline, lifted); !slices.Equal(got, want) {
 				t.Fatalf("rows = %v, want %v — the rows beneath the block keep the sort's own order", got, want)
 			}
 		})
 	}
 }
 
-// The gate (glossary: Pane pin): the pin is a grant of the active preset, so the
-// same launch that lifts and marks the attributed row under a pinning preset
+// The gate (glossary: Work lift): the lift is a grant of the active preset, so the
+// same launch that lifts and marks the attributed row under a lifting preset
 // leaves it in its sorted place, unmarked, under one that declares nothing.
 // Attribution is computed either way — it is the lift alone that the field owns.
-func TestOnlyAPresetDeclaringPinLiftsTheAttributedRows(t *testing.T) {
+func TestOnlyAPresetDeclaringLiftLiftsTheAttributedRows(t *testing.T) {
 	d, cfg, rt, stems := taskSetPaneFixture(t)
 	attributed := movableStem(stems)
-	baseline := unpinnedOrder(t, d, cfg)
+	baseline := unliftedOrder(t, d, cfg)
 	if baseline[0] == attributed {
 		t.Fatalf("the tagged set already sorts first in %v — the fixture cannot tell a lift from no lift", baseline)
 	}
 	inPane(rt.Fake, "work", "%9")
 	tagPane(rt.Fake, "%9", tmuxmod.TagSet, attributed)
 
-	d.ViewPreset.Pin = false
+	d.ViewPreset.Lift = false
 	m := openFromPane(t, d, cfg)
 
-	if got := pinnedBlock(t, m); len(got) != 0 {
-		t.Fatalf("pinned %v under a preset that declares no pin, want nothing lifted", got)
+	if got := liftedBlock(t, m); len(got) != 0 {
+		t.Fatalf("lifted %v under a preset that declares no lift, want nothing lifted", got)
 	}
 	if got := rowIDs(m); !slices.Equal(got, baseline) {
 		t.Fatalf("rows = %v, want the sorted order %v — the attributed row keeps its own place", got, baseline)
@@ -445,71 +445,71 @@ func TestOnlyAPresetDeclaringPinLiftsTheAttributedRows(t *testing.T) {
 		t.Fatalf("cursor = %d, want the first row: the cursor is not the field's business", m.ListCursor())
 	}
 	if m.flash.Text() != "" {
-		t.Fatalf("status = %q, want the same silence a pinning launch keeps", m.flash.Text())
+		t.Fatalf("status = %q, want the same silence a lifting launch keeps", m.flash.Text())
 	}
 	m.list.Resize(len(m.snap.Containers))
 	for i, row := range m.list.VisibleRows() {
 		if strings.Contains(ui.StripANSI(row), "▸") {
-			t.Fatalf("row %d = %q carries the pin mark under a preset that grants no pin", i, ui.StripANSI(row))
+			t.Fatalf("row %d = %q carries the lift mark under a preset that grants no lift", i, ui.StripANSI(row))
 		}
 	}
 
-	d.ViewPreset.Pin = true
-	pinning := openFromPane(t, d, cfg)
+	d.ViewPreset.Lift = true
+	lifting := openFromPane(t, d, cfg)
 
-	if got := pinnedBlock(t, pinning); !slices.Equal(got, []string{attributed}) {
-		t.Fatalf("pinned %v once the preset declares pin, want %q", got, attributed)
+	if got := liftedBlock(t, lifting); !slices.Equal(got, []string{attributed}) {
+		t.Fatalf("lifted %v once the preset declares lift, want %q", got, attributed)
 	}
-	if got, want := rowIDs(pinning), wantPinnedFirst(baseline, attributed); !slices.Equal(got, want) {
+	if got, want := rowIDs(lifting), wantLiftedFirst(baseline, attributed); !slices.Equal(got, want) {
 		t.Fatalf("rows = %v, want %v", got, want)
 	}
 }
 
-// Switching presets in the filter menu carries the pin with the choice: the same
+// Switching presets in the filter menu carries the lift with the choice: the same
 // rows, the same sort, and the lift appearing or vanishing on that one rebuild.
-func TestSelectingAPresetInTheFilterMenuAppliesAndRemovesThePin(t *testing.T) {
+func TestSelectingAPresetInTheFilterMenuAppliesAndRemovesTheLift(t *testing.T) {
 	d, cfg, rt, stems := taskSetPaneFixture(t)
 	attributed := stems[len(stems)-1]
-	baseline := unpinnedOrder(t, d, cfg)
+	baseline := unliftedOrder(t, d, cfg)
 	inPane(rt.Fake, "work", "%9")
 	tagPane(rt.Fake, "%9", tmuxmod.TagSet, attributed)
 
-	// A two-entry roster admitting exactly the same rows, so the pin is the only
+	// A two-entry roster admitting exactly the same rows, so the lift is the only
 	// thing the human's choice changes.
 	plain := config.WorkViewPreset{
 		Name:                 "plain",
 		WorkViewPresetFilter: config.WorkViewPresetFilter{Archived: config.ArchivedInclude},
 	}
-	pinning := plain
-	pinning.Name = "pinning"
-	pinning.Pin = true
+	lifting := plain
+	lifting.Name = "lifting"
+	lifting.Lift = true
 	if cfg.Work == nil {
 		cfg.Work = &config.WorkConfig{}
 	}
 	cfg.Work.Dashboard = &config.WorkDashboardConfig{
-		Tasks: &config.WorkDashboardTasksConfig{Presets: []config.WorkViewPreset{plain, pinning}},
+		Tasks: &config.WorkDashboardTasksConfig{Presets: []config.WorkViewPreset{plain, lifting}},
 	}
 	d.ViewPreset = cfg.DefaultWorkViewPreset()
 
 	m := openFromPane(t, d, cfg)
-	if got := pinnedBlock(t, m); len(got) != 0 {
-		t.Fatalf("pinned %v under the default (non-pinning) preset, want nothing", got)
+	if got := liftedBlock(t, m); len(got) != 0 {
+		t.Fatalf("lifted %v under the default (non-lifting) preset, want nothing", got)
 	}
 
 	m = selectFilterPreset(t, m, '2')
-	if got := m.d.ViewPreset.Name; got != "pinning" {
-		t.Fatalf("preset after digit 2 = %q, want pinning", got)
+	if got := m.d.ViewPreset.Name; got != "lifting" {
+		t.Fatalf("preset after digit 2 = %q, want lifting", got)
 	}
-	if got := pinnedBlock(t, m); !slices.Equal(got, []string{attributed}) {
-		t.Fatalf("pinned %v after switching to the pinning preset, want %q", got, attributed)
+	if got := liftedBlock(t, m); !slices.Equal(got, []string{attributed}) {
+		t.Fatalf("lifted %v after switching to the lifting preset, want %q", got, attributed)
 	}
 
 	m = selectFilterPreset(t, m, '1')
 	if got := m.d.ViewPreset.Name; got != "plain" {
 		t.Fatalf("preset after digit 1 = %q, want plain", got)
 	}
-	if got := pinnedBlock(t, m); len(got) != 0 {
-		t.Fatalf("pinned %v after switching back, want the pin removed on that rebuild", got)
+	if got := liftedBlock(t, m); len(got) != 0 {
+		t.Fatalf("lifted %v after switching back, want the lift removed on that rebuild", got)
 	}
 	if got := rowIDs(m); !slices.Equal(got, baseline) {
 		t.Fatalf("rows = %v, want the sorted order %v", got, baseline)

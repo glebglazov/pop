@@ -19,7 +19,7 @@ import (
 // to. Every test here drives the whole path — a fake tmux pane with a real
 // directory, real bindings and a real store, through BuildSeededPageSnapshot into a
 // model — because the rung is only worth anything if the directory, the ranking and
-// the pinned block agree about which sets they are naming.
+// the lifted block agree about which sets they are naming.
 
 // boundCheckoutFixture is the shared shape: three registered sets, one real
 // checkout, and the caller sitting in an untagged shell inside it. Which sets are
@@ -32,7 +32,7 @@ func boundCheckoutFixture(t *testing.T, bind ...int) (*drain.Deps, *config.Confi
 	d, cfg, _, rt := dashboardLaunchFixture(t, repo, setID)
 	stems := registerDoneSets(t, repo, 3)
 	d.ViewPreset, _ = config.ShippedWorkViewPreset("all")
-	d.ViewPreset.Pin = true
+	d.ViewPreset.Lift = true
 	checkout := bindStemsToOneCheckout(t, d, repo, stems, bind...)
 	inPane(rt.Fake, "editor", "%7")
 	if rt.Fake.PaneCwd == nil {
@@ -64,10 +64,10 @@ func bindStemsToOneCheckout(t *testing.T, d *drain.Deps, repo string, stems []st
 }
 
 // A bare shell in a checkout bound to exactly one set: the rung fires, and that set
-// alone is pinned. The shell stands in a subdirectory, which is where an editor
+// alone is lifted. The shell stands in a subdirectory, which is where an editor
 // shell usually is — the directory resolves to the checkout containing it, not only
 // to the checkout root itself.
-func TestBareShellInACheckoutBoundToOneSetPinsIt(t *testing.T) {
+func TestBareShellInACheckoutBoundToOneSetLiftsIt(t *testing.T) {
 	d, cfg, stems, checkout := boundCheckoutFixture(t, 1)
 	sub := filepath.Join(checkout, "internal", "deep")
 	if err := os.MkdirAll(sub, 0o755); err != nil {
@@ -77,8 +77,8 @@ func TestBareShellInACheckoutBoundToOneSetPinsIt(t *testing.T) {
 
 	m := openFromPane(t, d, cfg)
 
-	if got := pinnedBlock(t, m); !slices.Equal(got, []string{stems[1]}) {
-		t.Fatalf("pinned %v, want the one set bound to the checkout the shell is in (%q)", got, stems[1])
+	if got := liftedBlock(t, m); !slices.Equal(got, []string{stems[1]}) {
+		t.Fatalf("lifted %v, want the one set bound to the checkout the shell is in (%q)", got, stems[1])
 	}
 	if m.flash.Text() != "" {
 		t.Fatalf("status = %q, want silence when only one set was a candidate", m.flash.Text())
@@ -97,20 +97,21 @@ func TestLiveDrainAtThePaneDirectoryBeatsTheBindingFallback(t *testing.T) {
 
 	m := openFromPane(t, d, cfg)
 
-	if got := pinnedBlock(t, m); !slices.Equal(got, []string{stems[1]}) {
-		t.Fatalf("pinned %v, want only the set the live drain is running (%q)", got, stems[1])
+	if got := liftedBlock(t, m); !slices.Equal(got, []string{stems[1]}) {
+		t.Fatalf("lifted %v, want only the set the live drain is running (%q)", got, stems[1])
 	}
 	if m.flash.Text() != "" {
 		t.Fatalf("status = %q, want silence: a live drain names its set outright", m.flash.Text())
 	}
 }
 
-// With several sets bound to one checkout, every one of them pins: the shell really
-// is standing in all of their work. The claim only decides who leads, and nothing is
-// said about it — a choice nobody made needs no confessing (ADR-0209 decision 2).
-func TestEveryBoundSetPinsWithTheClaimHolderLeading(t *testing.T) {
+// With several sets bound to one checkout, every one of them lifts: the shell
+// really is standing in all of their work. The claim only decides who leads, and
+// nothing is said about it — a choice nobody made needs no confessing (ADR-0209
+// decision 2).
+func TestEveryBoundSetLiftsWithTheClaimHolderLeading(t *testing.T) {
 	d, cfg, stems, checkout := boundCheckoutFixture(t, 0, 1, 2)
-	baseline := unpinnedOrder(t, d, cfg)
+	baseline := unliftedOrder(t, d, cfg)
 	registerClaimHeldBy(t, d, stems[0], checkout)
 
 	m := openFromPane(t, d, cfg)
@@ -119,22 +120,22 @@ func TestEveryBoundSetPinsWithTheClaimHolderLeading(t *testing.T) {
 	if len(got) != 3 || got[0] != stems[0] {
 		t.Fatalf("attributed %v, want all three bound sets with the claim holder %q leading", got, stems[0])
 	}
-	if pinned := pinnedBlock(t, m); !slices.Equal(pinned, got) {
-		t.Fatalf("pinned %v, want every attributed set in attribution order %v", pinned, got)
+	if lifted := liftedBlock(t, m); !slices.Equal(lifted, got) {
+		t.Fatalf("lifted %v, want every attributed set in attribution order %v", lifted, got)
 	}
-	if rows := rowIDs(m); !slices.Equal(rows, wantPinnedFirst(baseline, got...)) {
-		t.Fatalf("rows = %v, want %v — each pinned set once, the rest as they were", rows, wantPinnedFirst(baseline, got...))
+	if rows := rowIDs(m); !slices.Equal(rows, wantLiftedFirst(baseline, got...)) {
+		t.Fatalf("rows = %v, want %v — each lifted set once, the rest as they were", rows, wantLiftedFirst(baseline, got...))
 	}
 	if m.flash.Text() != "" {
 		t.Fatalf("status = %q, want silence: nothing was chosen", m.flash.Text())
 	}
 }
 
-// With no claim, the set drained most recently leads the pinned block, and the sets
-// that never drained follow in the order the active sort already puts them in. Every
-// rung of the sub-ladder now orders candidates instead of picking one, so all three
-// pin either way.
-func TestPinnedCandidatesAreOrderedByDrainRecencyThenSortOrder(t *testing.T) {
+// With no claim, the set drained most recently leads the lifted block, and the
+// sets that never drained follow in the order the active sort already puts them
+// in. Every rung of the sub-ladder now orders candidates instead of picking one,
+// so all three lift either way.
+func TestLiftedCandidatesAreOrderedByDrainRecencyThenSortOrder(t *testing.T) {
 	t.Run("most recently drained leads", func(t *testing.T) {
 		d, cfg, stems, checkout := boundCheckoutFixture(t, 0, 1, 2)
 		recordFinishedDrain(t, d, checkout, stems[0])
@@ -143,8 +144,8 @@ func TestPinnedCandidatesAreOrderedByDrainRecencyThenSortOrder(t *testing.T) {
 		m := openFromPane(t, d, cfg)
 
 		want := []string{stems[1], stems[0], stems[2]}
-		if got := pinnedBlock(t, m); !slices.Equal(got, want) {
-			t.Fatalf("pinned %v, want %v — recency first, the never-drained set last", got, want)
+		if got := liftedBlock(t, m); !slices.Equal(got, want) {
+			t.Fatalf("lifted %v, want %v — recency first, the never-drained set last", got, want)
 		}
 		if m.flash.Text() != "" {
 			t.Fatalf("status = %q, want silence", m.flash.Text())
@@ -154,10 +155,10 @@ func TestPinnedCandidatesAreOrderedByDrainRecencyThenSortOrder(t *testing.T) {
 	t.Run("the current sort orders the rest", func(t *testing.T) {
 		d, cfg, stems, _ := boundCheckoutFixture(t, 0, 1, 2)
 		// The order the page has with no pane behind it, which is the order the
-		// candidates keep inside the block: the pin lifts rows, it does not re-sort
-		// them.
+		// candidates keep inside the block: the lift moves rows, it does not
+		// re-sort them.
 		var want []string
-		for _, id := range unpinnedOrder(t, d, cfg) {
+		for _, id := range unliftedOrder(t, d, cfg) {
 			if slices.Contains(stems, id) {
 				want = append(want, id)
 			}
@@ -165,8 +166,8 @@ func TestPinnedCandidatesAreOrderedByDrainRecencyThenSortOrder(t *testing.T) {
 
 		m := openFromPane(t, d, cfg)
 
-		if got := pinnedBlock(t, m); !slices.Equal(got, want) {
-			t.Fatalf("pinned %v, want the rows in their current sort order %v", got, want)
+		if got := liftedBlock(t, m); !slices.Equal(got, want) {
+			t.Fatalf("lifted %v, want the rows in their current sort order %v", got, want)
 		}
 		if m.flash.Text() != "" {
 			t.Fatalf("status = %q, want silence", m.flash.Text())
@@ -197,8 +198,8 @@ func TestShellInADirectoryWithNoBoundWorkIsSilent(t *testing.T) {
 	if m.snap.Attribution != nil {
 		t.Fatalf("attribution = %+v from %s, want none", *m.snap.Attribution, checkout)
 	}
-	if got := pinnedBlock(t, m); len(got) != 0 {
-		t.Fatalf("pinned %v, want nothing", got)
+	if got := liftedBlock(t, m); len(got) != 0 {
+		t.Fatalf("lifted %v, want nothing", got)
 	}
 	if m.flash.Text() != "" {
 		t.Fatalf("status = %q, want silence", m.flash.Text())

@@ -294,48 +294,48 @@ func TestWorkSelectionRendersTheModeWordAndCountedSeparator(t *testing.T) {
 	}
 }
 
-// The pane pin keeps its column and its place: the pinned block is above the
-// region, a marked row that is also attributed keeps its `▸`, and a pin still
+// The Work lift keeps its column and its place: the lifted block is above the
+// region, a marked row that is also attributed keeps its `▸`, and a lift still
 // yields to the narrowings a mark is exempt from (ADR-0209 decision 7 stands for
 // pop's own inference).
-func TestWorkSelectionLeavesThePanePinAtTheHead(t *testing.T) {
+func TestWorkSelectionLeavesTheWorkLiftAtTheHead(t *testing.T) {
 	rows := selRows("set-a", "set-b", "set-c")
-	rows[0].Pinned = true
-	rows[1].Pinned = true
-	// The snapshot builder has already lifted the pinned rows to the top.
+	rows[0].Lifted = true
+	rows[1].Lifted = true
+	// The snapshot builder has already lifted the marked rows to the top.
 	m := selDashboard(rows)
 
 	m = markRow(t, m, "set-b")
 	m = markRow(t, m, "set-c")
 
 	if got := selIDs(m); !slices.Equal(got, []string{"set-a", "set-b", "set-c"}) {
-		t.Fatalf("rows = %v, want the pinned ordinary row above the marked rows", got)
+		t.Fatalf("rows = %v, want the lifted ordinary row above the marked rows", got)
 	}
 	m.list.Resize(m.list.Len() + 2)
 	body := m.list.VisibleRows()
 	if got := ui.StripANSI(body[0]); !strings.HasPrefix(got, " ▸") && !strings.HasPrefix(got, "█▸") {
-		t.Fatalf("the pane pin is not at the head of the list: %q", got)
+		t.Fatalf("the Work lift is not at the head of the list: %q", got)
 	}
-	pinned := -1
+	lifted := -1
 	for i, line := range body {
 		if strings.Contains(ui.StripANSI(line), "set-a") {
-			pinned = i
+			lifted = i
 		}
 	}
-	if pinned < 0 {
-		t.Fatalf("the unmarked pinned row is not on screen:\n%s", strings.Join(body, "\n"))
+	if lifted < 0 {
+		t.Fatalf("the unmarked lifted row is not on screen:\n%s", strings.Join(body, "\n"))
 	}
-	if got := ui.StripANSI(body[pinned]); !strings.HasPrefix(got, " ▸") && !strings.HasPrefix(got, "█▸") {
-		t.Fatalf("the pin at the head is not marked: %q", got)
+	if got := ui.StripANSI(body[lifted]); !strings.HasPrefix(got, " ▸") && !strings.HasPrefix(got, "█▸") {
+		t.Fatalf("the lift at the head is not marked: %q", got)
 	}
 }
 
-// A mark outranks the query and a pin does not: the marked row stays on screen
-// through a search that excludes it, the pinned row does not, and neither is on
+// A mark outranks the query and a lift does not: the marked row stays on screen
+// through a search that excludes it, the lifted row does not, and neither is on
 // the list twice.
-func TestWorkSelectionOutranksTheSearchAndThePinDoesNot(t *testing.T) {
+func TestWorkSelectionOutranksTheSearchAndTheLiftDoesNot(t *testing.T) {
 	rows := selRows("set-a", "set-b", "other-c")
-	rows[0].Pinned = true
+	rows[0].Lifted = true
 	m := selDashboard(rows)
 
 	m = markRow(t, m, "set-b")
@@ -346,7 +346,7 @@ func TestWorkSelectionOutranksTheSearchAndThePinDoesNot(t *testing.T) {
 	m = selPress(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if got := selIDs(m); !slices.Equal(got, []string{"other-c", "set-b"}) {
-		t.Fatalf("rows = %v, want the marked row kept and the pinned row filtered away", got)
+		t.Fatalf("rows = %v, want the marked row kept and the lifted row filtered away", got)
 	}
 	if got := m.list.RegionCount(); got != 1 {
 		t.Fatalf("region holds %d rows under a search, want the marked one", got)

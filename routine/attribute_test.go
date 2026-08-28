@@ -40,7 +40,7 @@ func routineRowIDs(snap work.Snapshot) []string {
 
 func buildForPane(t *testing.T, k *Kind, facts work.PaneFacts) work.Snapshot {
 	t.Helper()
-	snap, err := work.BuildSnapshotForPane([]work.Kind{k}, facts, work.BuildOptions{Ordering: work.OrderByKindPrecedence, PinPane: true})
+	snap, err := work.BuildSnapshotForPane([]work.Kind{k}, facts, work.BuildOptions{Ordering: work.OrderByKindPrecedence, LiftPane: true})
 	if err != nil {
 		t.Fatalf("BuildSnapshotForPane: %v", err)
 	}
@@ -50,8 +50,8 @@ func buildForPane(t *testing.T, k *Kind, facts work.PaneFacts) work.Snapshot {
 // The tag rung: the pane pop opened to fire a Routine belongs to that Routine,
 // and its row is lifted to the top of the page. `zzz-sweep` sorts last of the
 // three under the kind's own comparator, so seeing it first is the whole of the
-// pin.
-func TestFirePanePinsItsRoutine(t *testing.T) {
+// lift.
+func TestFirePaneLiftsItsRoutine(t *testing.T) {
 	k, _ := paneRoutines(t)
 
 	snap := buildForPane(t, k, work.PaneFacts{PaneID: "%7", Session: RoutinesSessionName, Routine: "zzz-sweep"})
@@ -68,23 +68,23 @@ func TestFirePanePinsItsRoutine(t *testing.T) {
 		t.Fatalf("attributed %+v, want just %+v", got, want)
 	}
 	if got, wantOrder := routineRowIDs(snap), []string{"zzz-sweep", "aaa-audit", "mmm-mirror"}; !slices.Equal(got, wantOrder) {
-		t.Fatalf("rows = %v, want the fire pane's routine pinned above the rest: %v", got, wantOrder)
+		t.Fatalf("rows = %v, want the fire pane's routine lifted above the rest: %v", got, wantOrder)
 	}
-	if !snap.Containers[0].Pinned {
-		t.Fatal("the pinned row does not say it is pinned")
+	if !snap.Containers[0].Lifted {
+		t.Fatal("the lifted row does not say it is lifted")
 	}
 	for _, c := range snap.Containers[1:] {
-		if c.Pinned {
-			t.Fatalf("%s is pinned too, want only the tagged routine", c.ID)
+		if c.Lifted {
+			t.Fatalf("%s is lifted too, want only the tagged routine", c.ID)
 		}
 	}
 }
 
 // There is no neighbourhood rung. A Routine is project-scoped, so a shell merely
 // standing in a project's checkout — the directory every one of these Routines is
-// bound to — attributes to no Routine at all, rather than pinning the project's
+// bound to — attributes to no Routine at all, rather than lifting the project's
 // whole routine list.
-func TestShellInAProjectDirectoryPinsNoRoutine(t *testing.T) {
+func TestShellInAProjectDirectoryLiftsNoRoutine(t *testing.T) {
 	k, checkout := paneRoutines(t)
 	baseline := routineRowIDs(buildForPane(t, k, work.PaneFacts{}))
 
@@ -97,15 +97,15 @@ func TestShellInAProjectDirectoryPinsNoRoutine(t *testing.T) {
 		t.Fatalf("rows = %v, want the untouched order %v", got, baseline)
 	}
 	for _, c := range snap.Containers {
-		if c.Pinned {
-			t.Fatalf("%s is pinned, want nothing pinned", c.ID)
+		if c.Lifted {
+			t.Fatalf("%s is lifted, want nothing lifted", c.ID)
 		}
 	}
 }
 
 // A tag naming a Routine this load did not find gets the same silence: the pane
 // outlived the Routine it was opened for.
-func TestFirePaneOfADeletedRoutinePinsNothing(t *testing.T) {
+func TestFirePaneOfADeletedRoutineLiftsNothing(t *testing.T) {
 	k, _ := paneRoutines(t)
 
 	snap := buildForPane(t, k, work.PaneFacts{PaneID: "%7", Routine: "gone-yesterday"})
