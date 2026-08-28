@@ -93,6 +93,13 @@ type dashboardRowsMsg struct {
 	// a tick rebuild that began before a write cannot land after the post-write
 	// rebuild. Zero means unstamped, and an unstamped result is always applied.
 	seq uint64
+	// kinds is the kind list this reload built its snapshot from (ADR-0242
+	// decision 4). The model swaps its adapters to these when the result applies,
+	// so the verbs, menus and artifact listings that run after a reload resolve
+	// through the same git memos the rows were built from, whose contract is one
+	// load's lifetime. Nil means "no fresh list", and the model keeps the ones it
+	// holds.
+	kinds []work.Kind
 }
 
 func (m QueueDashboard) liveCache() livePaneCache {
@@ -1494,6 +1501,12 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.err = msg.err
 		if msg.err == nil {
+			if msg.kinds != nil {
+				// Renewed before anything reads them: the columns, detail and menus
+				// re-derived below must ask the same adapters that built these rows,
+				// not the ones frozen when the dashboard opened (ADR-0242 decision 4).
+				m.kinds = newWorkKinds(msg.kinds)
+			}
 			m.allRows = msg.snap.Containers
 			m.snap = msg.snap
 			if m.live == nil {
@@ -2789,9 +2802,13 @@ func (m QueueDashboard) reload() tea.Cmd {
 	// stamp has to record the state of the world the rebuild is about to read.
 	seq := m.nextReloadSeq()
 	return func() tea.Msg {
-		snap, err := work.BuildSnapshotForPane(m.page.kinds(m.d, m.cfg), m.pane, m.d.WorkBuildOptions())
+		// One list, built here and carried back: the snapshot and the adapters the
+		// model will answer verbs through share the same git memos, so a bind or a
+		// worktree removal since open is seen by both (ADR-0242 decision 4).
+		kinds := m.page.kinds(m.d, m.cfg)
+		snap, err := work.BuildSnapshotForPane(kinds, m.pane, m.d.WorkBuildOptions())
 		live := loadLivePaneCache(m.d)
-		msg := dashboardRowsMsg{page: m.page.id, snap: snap, live: live, err: err, seq: seq}
+		msg := dashboardRowsMsg{page: m.page.id, snap: snap, live: live, err: err, seq: seq, kinds: kinds}
 		if err == nil && unfiltered {
 			msg.unfiltered = m.unfilteredRows()
 		}
