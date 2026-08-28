@@ -16,9 +16,19 @@ import (
 // There is no neighbourhood half. A Routine is bound to a directory but scoped to
 // the project that directory belongs to, so a "pane standing somewhere" rung
 // would answer with a whole project's routine list for any shell in the
-// repository — a block of rows pinned to the top of page B for a human who is not
+// repository — a block of rows lifted to the top of page B for a human who is not
 // doing routines at all. A shell that merely sits in a project directory
 // attributes to no Routine.
+//
+// There is no repository pass either, and that is a distinction rather than an
+// omission (ADR-0241 decision 7). The repository pass gave the Task-set kind and
+// the Map kind a locality they were missing because each of their containers names
+// a definite piece of work that lives in a definite repository; a Routine names a
+// schedule. It has no container-level locality to narrow the answer with, its pane
+// is short-lived, and page B has no equivalent of the preset narrowing that keeps
+// that pass to a row or two — so the objection above is not weakened by the pass,
+// it is exactly what the pass would run into. Do not wire
+// `AttributePaneRepository` here.
 
 // recordPanes indexes the Routines one Load read, keyed by the id a fire pane is
 // tagged with. It runs at Load rather than at attribution time so a pane belongs
