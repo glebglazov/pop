@@ -128,10 +128,13 @@ type dashboardUnparkMsg struct {
 }
 
 // dashboardDocumentTextMsg carries one document's text back to the Document peek.
+// refresh marks the poll's own re-read of the file already on screen, which the
+// handler applies far more carefully than the open-time load (ADR-0242 decision 6).
 type dashboardDocumentTextMsg struct {
-	path string
-	text string
-	err  error
+	path    string
+	text    string
+	err     error
+	refresh bool
 }
 type dashboardBindListMsg struct {
 	row     DashboardRow
@@ -833,12 +836,14 @@ type documentPeek struct {
 	scroll       int
 	// rendered caches the glamour rendering of text at renderedWidth in
 	// renderedAppearance, so the body is rendered once per pair rather than once
-	// per frame. Both keys change under the reader: a window resize re-wraps, and
-	// a terminal theme switch re-paints on the very next frame, which is why the
-	// peek handles no appearance message of its own (ADR-0230).
+	// per frame. Every key changes under the reader: a window resize re-wraps, a
+	// terminal theme switch re-paints on the very next frame — which is why the
+	// peek handles no appearance message of its own (ADR-0230) — and the poll's
+	// re-read of the file brings new text (ADR-0242 decision 6).
 	rendered           string
 	renderedWidth      int
 	renderedAppearance ui.Appearance
+	renderedText       string
 	hasRendered        bool
 	// flash is the peek's own transient feedback, on the same three-second
 	// lifetime as every other flash (ADR-0204).
@@ -852,10 +857,11 @@ func (p *documentPeek) body(width int, appearance ui.Appearance) string {
 	if !ui.RendersMarkdown(p.path) {
 		return p.text
 	}
-	if !p.hasRendered || p.renderedWidth != width || p.renderedAppearance != appearance {
+	if !p.hasRendered || p.renderedWidth != width || p.renderedAppearance != appearance || p.renderedText != p.text {
 		p.rendered = ui.RenderMarkdown(p.text, width, appearance)
 		p.renderedWidth = width
 		p.renderedAppearance = appearance
+		p.renderedText = p.text
 		p.hasRendered = true
 	}
 	return p.rendered
@@ -873,6 +879,7 @@ func (p *documentPeek) invalidateRender() {
 	p.rendered = ""
 	p.renderedWidth = 0
 	p.renderedAppearance = ui.AppearancePlain
+	p.renderedText = ""
 	p.hasRendered = false
 }
 
@@ -1474,7 +1481,7 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// operator switches back.
 			return m, nil
 		}
-		return m, tea.Batch(dashboardTick(m.page.id), m.reload())
+		return m, tea.Batch(dashboardTick(m.page.id), m.reload(), m.refreshDocumentPeek())
 	case ui.SpinnerTickMsg:
 		return m, nil
 	case ui.FlashExpiredMsg:
@@ -1630,6 +1637,10 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.applyBulkVerb(msg)
 	case dashboardDocumentTextMsg:
 		if m.detail == nil || m.detail.peek == nil {
+			return m, nil
+		}
+		if msg.refresh {
+			m.applyDocumentPeekRefresh(msg)
 			return m, nil
 		}
 		m.detail.peek.loading = false
@@ -3156,6 +3167,47 @@ func (m QueueDashboard) loadDocumentText(path, label string) tea.Cmd {
 		}
 		return dashboardDocumentTextMsg{path: path, text: string(data)}
 	}
+}
+
+// refreshDocumentPeek re-reads the open peek's file on the dashboard's own poll,
+// so a document edited by an agent or an editor while the human reads it follows
+// the file instead of freezing at its open-time contents (ADR-0242 decision 6).
+// It returns nil whenever there is nothing settled to re-read: no peek, no path
+// yet (the open-time load is still in flight, and it carries the first text), or
+// a peek that failed to open at all.
+func (m QueueDashboard) refreshDocumentPeek() tea.Cmd {
+	if m.detail == nil || m.detail.peek == nil {
+		return nil
+	}
+	p := m.detail.peek
+	if p.loading || p.err != nil || strings.TrimSpace(p.path) == "" {
+		return nil
+	}
+	path := p.path
+	return func() tea.Msg {
+		msg := m.loadDocumentText(path, path)().(dashboardDocumentTextMsg)
+		msg.path = path
+		msg.refresh = true
+		return msg
+	}
+}
+
+// applyDocumentPeekRefresh adopts a poll re-read of the file the peek already
+// shows. It is deliberately meek about everything the open-time load owns: a
+// read that comes back for a path the reader has since navigated away from is
+// dropped, a failed read leaves the last good text on screen rather than
+// replacing a readable document with an error (a file mid-rewrite reads as
+// missing for an instant), and unchanged text costs no re-render. New text
+// re-clamps the scroll, so a document that shrank under the reader cannot leave
+// the view scrolled past its end.
+func (m QueueDashboard) applyDocumentPeekRefresh(msg dashboardDocumentTextMsg) {
+	p := m.detail.peek
+	if p.loading || msg.path != p.path || msg.err != nil || msg.text == p.text {
+		return
+	}
+	p.text = msg.text
+	p.invalidateRender()
+	m.moveDocumentPeek(0)
 }
 
 func (m QueueDashboard) loadBindWorktrees(row DashboardRow) tea.Cmd {
