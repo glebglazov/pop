@@ -141,7 +141,13 @@ is the keying an override of "which model do I want" wants.
     beside the existing bindings instead.
 
 14. **An override takes effect at the next config load, and nothing is
-    hot-reloaded.** The supervisor already re-reads: `tick()` calls `LoadConfig`
+    hot-reloaded.**
+    > **Amended by [ADR-0242](0242-the-dashboard-reads-truth-through-one-guarded-reload.md):**
+    > the Work dashboard shell now also re-reads when a config file's mtime
+    > changes, checked each poll — the modal's post-write re-read is no longer
+    > the only hot reload.
+
+    The supervisor already re-reads: `tick()` calls `LoadConfig`
     every pass (`supervisor/supervisor.go:64`) and every drain it spawns is a
     fresh process, so implement, verify and routine pick the override up with no
     new mechanism. In-flight drains legitimately finish on the list they started
