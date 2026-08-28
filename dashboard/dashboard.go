@@ -4487,3 +4487,15 @@ func RunDashboard(d *drain.Deps, cfg *config.Config) (string, error) {
 	}
 	return "", nil
 }
+
+// IsPollTick reports whether msg is the dashboard's own poll tick. The tick is
+// the host's one clock: the entry shell hangs its per-poll config stat off this
+// rather than starting a second timer that could fire between two polls.
+func IsPollTick(msg tea.Msg) bool {
+	_, ok := msg.(dashboardTickMsg)
+	return ok
+}
+
+// PollTick returns the poll tick a page would send itself, so a host or a test
+// can drive one poll without waiting the interval out.
+func PollTick(page Page) tea.Msg { return dashboardTickMsg{page: page} }

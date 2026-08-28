@@ -41,6 +41,9 @@ type Shell struct {
 	// cfgPath is the hand-authored config this shell loaded, kept so the Config
 	// modal edits and re-reads the same file the pages were built from.
 	cfgPath string
+	// cfgWatch stats those config files each poll, so a change made outside the
+	// dashboard is re-read into the pages: see config_watch.go.
+	cfgWatch *configWatch
 	// pane is the launching pane's facts, read once at startup and kept for the
 	// page the toggle builds later — the lift is per page, the tmux read is not.
 	pane   work.PaneFacts
@@ -108,7 +111,15 @@ func newShell(start Page, d *drain.Deps, cfg *config.Config, cfgPath string) (Sh
 		return Shell{}, err
 	}
 	pages := map[Page]dashboard.QueueDashboard{start: dashboard.NewDashboardOn(d, cfg, snap, start)}
-	return Shell{active: start, pages: pages, d: d, cfg: cfg, cfgPath: cfgPath, pane: pane}, nil
+	return Shell{
+		active:   start,
+		pages:    pages,
+		d:        d,
+		cfg:      cfg,
+		cfgPath:  cfgPath,
+		cfgWatch: newConfigWatch(watchedConfigPaths(cfgPath)...),
+		pane:     pane,
+	}, nil
 }
 
 // launchPaneFacts reads the launching pane's facts, whichever page the dashboard
@@ -154,6 +165,13 @@ func (s Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return s, tea.Batch(cmds...)
+	}
+
+	// The page's poll is the shell's clock too: on every tick it stats the config
+	// files and re-reads them when one changed, through the same path a write in
+	// the Config modal takes. The tick still reaches the page below.
+	if dashboard.IsPollTick(msg) && s.cfgWatch.changed() {
+		s = s.reloadPagesConfig()
 	}
 
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {

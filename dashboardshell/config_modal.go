@@ -58,9 +58,10 @@ func (s Shell) updateConfigModal(msg tea.Msg) (Shell, tea.Cmd) {
 // result to every page that exists. Without it the shell would keep rendering
 // the value the human has just changed: it loads config once in newShell and
 // each page holds that value for its renders and for the kinds its next poll
-// builds. This is the only hot reload the design has (ADR-0202 decision 14) —
-// the supervisor already re-reads every pass, each drain it spawns is a fresh
-// process, and an in-flight drain finishes on the list it started with.
+// builds. It is also where the per-poll config stat lands a change made outside
+// the dashboard (ADR-0242 decision 5, amending ADR-0202 decision 14): both
+// re-reads reconcile through this one path, so a preset that disappeared falls
+// back the same way whichever of the two noticed it.
 func (s Shell) reloadPagesConfig() Shell {
 	cfg, err := s.reloadedConfig()
 	if err == nil {
