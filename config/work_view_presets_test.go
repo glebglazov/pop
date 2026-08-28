@@ -319,60 +319,126 @@ name = "from-parent"
 	}
 }
 
-// The pin is declared, never inherited (glossary: Work view preset): a user
-// roster keeps the Pane pin only by writing `pin = true`, and of the shipped
+// The lift is declared, never inherited (glossary: Work view preset): a user
+// roster keeps the Work lift only by writing `lift = true`, and of the shipped
 // roster only `active` does.
-func TestOnlyTheShippedActivePresetDeclaresPin(t *testing.T) {
+func TestOnlyTheShippedActivePresetDeclaresLift(t *testing.T) {
 	for _, p := range ShippedWorkViewPresets() {
-		if want := p.Name == "active"; p.Pin != want {
-			t.Errorf("shipped %q pin = %v, want %v", p.Name, p.Pin, want)
+		if want := p.Name == "active"; p.Lift != want {
+			t.Errorf("shipped %q lift = %v, want %v", p.Name, p.Lift, want)
 		}
 	}
 }
 
-func TestPresetPinDecodesAndDefaultsToFalse(t *testing.T) {
+func TestPresetLiftDecodesAndDefaultsToFalse(t *testing.T) {
 	body := `
 [[work.dashboard.tasks.presets]]
 name = "mine"
-pin = true
+lift = true
 
 [[work.dashboard.tasks.presets]]
 name = "silent"
 
 [[work.dashboard.tasks.presets]]
 name = "wrong"
-pin = "yes"
+lift = "yes"
 
 [[work.dashboard.tasks.presets]]
 name = "nested"
-hide = { pin = true }
+hide = { lift = true }
 `
 	cfg, err := Load(writeConfig(t, body))
 	if err != nil {
-		t.Fatalf("Load must not fail on a bad pin: %v", err)
+		t.Fatalf("Load must not fail on a bad lift: %v", err)
 	}
 	byName := map[string]WorkViewPreset{}
 	for _, p := range cfg.ResolveWorkViewPresets() {
 		byName[p.Name] = p
 	}
-	if p := byName["mine"]; !p.Pin {
-		t.Errorf("declared pin = %v, want true", p.Pin)
+	if p := byName["mine"]; !p.Lift {
+		t.Errorf("declared lift = %v, want true", p.Lift)
 	}
-	// An unset pin is no pin: the field is a grant, so silence withholds it.
-	if p := byName["silent"]; p.Pin {
-		t.Errorf("undeclared pin = %v, want false", p.Pin)
+	// An unset lift is no lift: the field is a grant, so silence withholds it.
+	if p := byName["silent"]; p.Lift {
+		t.Errorf("undeclared lift = %v, want false", p.Lift)
 	}
-	if p := byName["wrong"]; p.Pin {
-		t.Errorf("pin = \"yes\" resolved to %v, want the field ignored", p.Pin)
+	if p := byName["wrong"]; p.Lift {
+		t.Errorf("lift = \"yes\" resolved to %v, want the field ignored", p.Lift)
 	}
-	for _, want := range []string{`pin must be a bool`, `hide has unknown key "pin"`} {
+	for _, want := range []string{`lift must be a bool`, `hide has unknown key "lift"`} {
 		if !containsSubstring(cfg.Warnings, want) {
 			t.Errorf("Warnings missing %q; got: %v", want, cfg.Warnings)
 		}
 	}
 	// A hide clause decides which rows exist, never where they sit, so the grant
 	// has no meaning inside one.
-	if p := byName["nested"]; p.Pin {
-		t.Errorf("hide.pin granted the pin (%v), want it confined to the entry", p.Pin)
+	if p := byName["nested"]; p.Lift {
+		t.Errorf("hide.lift granted the lift (%v), want it confined to the entry", p.Lift)
+	}
+}
+
+// `pin` is the permanent, silent alias ADR-0241 decision 9 grants: a config
+// already spelling the grant that way keeps working exactly as `lift` does, with
+// no warning anywhere in the load.
+func TestPinIsASilentAliasForLift(t *testing.T) {
+	cfg, err := Load(writeConfig(t, `
+[[work.dashboard.tasks.presets]]
+name = "old-spelling"
+pin = true
+
+[[work.dashboard.tasks.presets]]
+name = "wrong-type"
+pin = "yes"
+`))
+	if err != nil {
+		t.Fatalf("Load must not fail on the pin alias: %v", err)
+	}
+	byName := map[string]WorkViewPreset{}
+	for _, p := range cfg.ResolveWorkViewPresets() {
+		byName[p.Name] = p
+	}
+	if p := byName["old-spelling"]; !p.Lift {
+		t.Errorf("pin = true resolved to Lift = %v, want true", p.Lift)
+	}
+	// presets[0] is the well-formed "old-spelling" entry: the alias must leave it
+	// with no finding at all, not merely one that avoids the word "deprecated".
+	if containsSubstring(cfg.Warnings, "presets[0]") {
+		t.Errorf("the pin alias produced a finding on a well-formed entry; got: %v", cfg.Warnings)
+	}
+	if !containsSubstring(cfg.Warnings, `pin must be a bool`) {
+		t.Errorf("Warnings missing the non-bool pin finding; got: %v", cfg.Warnings)
+	}
+	if p := byName["wrong-type"]; p.Lift {
+		t.Errorf("pin = \"yes\" resolved to Lift = %v, want the field ignored", p.Lift)
+	}
+}
+
+// When a preset spells the grant both ways, `lift` wins (ADR-0241 decision 9).
+func TestLiftWinsWhenAPresetDeclaresBothSpellings(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want bool
+	}{
+		{name: "lift true over pin false", body: "pin = false\nlift = true", want: true},
+		{name: "lift false over pin true", body: "pin = true\nlift = false", want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := Load(writeConfig(t, `
+[[work.dashboard.tasks.presets]]
+name = "both"
+`+tc.body+`
+`))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			p, ok := cfg.WorkViewPresetNamed("both")
+			if !ok {
+				t.Fatal("preset \"both\" did not resolve")
+			}
+			if p.Lift != tc.want {
+				t.Errorf("Lift = %v, want %v", p.Lift, tc.want)
+			}
+		})
 	}
 }

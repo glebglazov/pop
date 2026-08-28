@@ -42,7 +42,7 @@ var (
 	presetEntryKeys = map[string]bool{
 		"name": true, "label": true, "status": true, "unfolded": true,
 		"archived": true, "created_within": true, "sort": true, "hide": true,
-		"system": true, "muted": true, "pin": true,
+		"system": true, "muted": true, "lift": true, "pin": true,
 	}
 	presetFilterKeys = map[string]bool{
 		"status": true, "unfolded": true, "archived": true,
@@ -75,12 +75,17 @@ type WorkViewPreset struct {
 	WorkViewPresetFilter
 	Hide *WorkViewPresetFilter `toml:"hide,omitempty" desc:"Subtract rows matching this conjunction (one level only)."`
 
-	// Pin is the sole grant of the Pane pin: only under a preset declaring it do
+	// Lift is the sole grant of the Work lift: only under a preset declaring it do
 	// the rows the launching pane is attributed to lift above the sorted list,
 	// marked. It is not a filter field — it decides where admitted rows sit, not
 	// which rows exist — so it lives beside Hide rather than inside the filter,
 	// and a hide clause may not declare it. Roster position grants nothing.
-	Pin bool `toml:"pin,omitempty" desc:"Lift the rows the launching pane is attributed to above the list (default false)."`
+	//
+	// `pin` decodes into this same field as a permanent, silent alias (ADR-0241
+	// decision 9): a config already spelling it that way keeps working, with no
+	// warning and no deprecation notice. `lift` is the only spelling pop itself
+	// writes or documents, and wins when a preset declares both.
+	Lift bool `toml:"lift,omitempty" desc:"Lift the rows the launching pane is attributed to above the list (default false)."`
 
 	// Number is the 1-based position in the resolved roster. Positional: the
 	// first entry is the default, and 1–9 map to digit shortcuts.
@@ -123,9 +128,9 @@ func ShippedWorkViewPresets() []WorkViewPreset {
 	return []WorkViewPreset{
 		{
 			Name: "active",
-			// The one shipped preset that pins: the pane's own work belongs at the
+			// The one shipped preset that lifts: the pane's own work belongs at the
 			// top of the view a human lives in, and nowhere else.
-			Pin: true,
+			Lift: true,
 			WorkViewPresetFilter: WorkViewPresetFilter{
 				// Mute means the human said "not now" about this row, so the view
 				// they sit in is the one it has to leave (ADR-0200 decision 8). It
@@ -383,12 +388,22 @@ func (p *WorkViewPreset) UnmarshalTOML(v interface{}) error {
 			p.Name = strings.TrimSpace(s)
 		}
 	}
+	// `pin` decodes first so `lift` — checked next — wins when a preset
+	// declares both (ADR-0241 decision 9).
 	if raw, ok := m["pin"]; ok {
 		b, ok := raw.(bool)
 		if !ok {
 			p.problems = append(p.problems, fmt.Sprintf("pin must be a bool, got %T", raw))
 		} else {
-			p.Pin = b
+			p.Lift = b
+		}
+	}
+	if raw, ok := m["lift"]; ok {
+		b, ok := raw.(bool)
+		if !ok {
+			p.problems = append(p.problems, fmt.Sprintf("lift must be a bool, got %T", raw))
+		} else {
+			p.Lift = b
 		}
 	}
 	if raw, ok := m["label"]; ok {

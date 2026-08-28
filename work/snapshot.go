@@ -11,8 +11,8 @@ import (
 type Snapshot struct {
 	// Containers are every loaded Work container in snapshot order — whatever the
 	// build's Ordering ranked them by, with the rows the launching pane is
-	// attributed to lifted first when the build's preset granted the pin. There is
-	// no second list beside it: a dashboard row is one of these.
+	// attributed to lifted first when the build's preset granted the lift. There
+	// is no second list beside it: a dashboard row is one of these.
 	Containers []Container
 	// Summary is every kind's header phrases in kind order, already pluralised.
 	// SummaryLine joins them.
@@ -25,7 +25,7 @@ type Snapshot struct {
 	// Attribution is the containers the pane this build was launched from belongs
 	// to, nil when it belongs to none of the kinds on this page. Only a build
 	// handed pane facts can carry one; the containers it names that this page
-	// actually shows are the pinned rows at the head of Containers.
+	// actually shows are the lifted rows at the head of Containers.
 	Attribution *Attribution
 	// Pane is what the surface knows about its own pane, carried on the build it
 	// produced. A surface that rebuilds itself reads the facts once and passes
@@ -85,16 +85,16 @@ func BuildSnapshot(kinds []Kind) (Snapshot, error) {
 }
 
 // BuildOptions is what the active Work view preset grants a build: how the page
-// ranks its rows, and whether the Pane pin applies to it. Both are handed to the
+// ranks its rows, and whether the Work lift applies to it. Both are handed to the
 // builder as `work`-owned values rather than read from a preset here, so this
 // seam keeps knowing nothing about config (ADR-0210).
 type BuildOptions struct {
 	// Ordering ranks the containers against each other.
 	Ordering Ordering
-	// PinPane lifts the attributed rows above the ordered list and marks them.
-	// Only a preset declaring `pin` grants it; attribution itself is computed
-	// either way, so a build that does not pin still names the pane's containers.
-	PinPane bool
+	// LiftPane lifts the attributed rows above the ordered list and marks them.
+	// Only a preset declaring `lift` grants it; attribution itself is computed
+	// either way, so a build that does not lift still names the pane's containers.
+	LiftPane bool
 }
 
 // BuildSnapshotForPane is BuildSnapshot plus the facts of the pane the surface
@@ -105,11 +105,11 @@ type BuildOptions struct {
 // (ADR-0201 decision 3).
 //
 // Whether the answer also lifts those rows is the active preset's to grant: the
-// build pins only when opts.PinPane says the preset declares it, and computes the
-// attribution regardless, because the cursor landing and the naming that read it
-// are preset-independent.
+// build lifts only when opts.LiftPane says the preset declares it, and computes
+// the attribution regardless, because the cursor landing and the naming that
+// read it are preset-independent.
 //
-// Every build asks again, not just the first. A pin is current: the containers
+// Every build asks again, not just the first. A lift is current: the containers
 // change between builds — a drain goes live, a set becomes bound — so the answer
 // derived from the same facts changes with them (ADR-0209 decision 5).
 func BuildSnapshotForPane(kinds []Kind, facts PaneFacts, opts BuildOptions) (Snapshot, error) {
@@ -142,17 +142,17 @@ func BuildSnapshotForPane(kinds []Kind, facts PaneFacts, opts BuildOptions) (Sna
 		snap.ModelSkips = append(snap.ModelSkips, skips...)
 	}
 	snap.Containers = merge(ordered, loaded, opts.Ordering)
-	// Attribution is asked for under every preset, pinning or not: the surfaces
+	// Attribution is asked for under every preset, lifting or not: the surfaces
 	// that name the pane's container and land their first cursor on it read it
 	// here, and only the lift below is the preset's to grant.
 	snap.Attribution = AttributePane(ordered, facts)
-	if opts.PinPane {
-		snap.Containers = pinAttributed(snap.Containers, snap.Attribution)
+	if opts.LiftPane {
+		snap.Containers = liftAttributed(snap.Containers, snap.Attribution)
 	}
 	return snap, nil
 }
 
-// pinAttributed lifts the attributed rows out of the ordered list and puts them
+// liftAttributed lifts the attributed rows out of the ordered list and puts them
 // first, in the order attribution ranked them, marking each one. Everything else
 // keeps the order it already had.
 //
@@ -163,13 +163,13 @@ func BuildSnapshotForPane(kinds []Kind, facts PaneFacts, opts BuildOptions) (Sna
 // than copied — one container, one row, or the list's cursor keys and its
 // navigation counts would both lie.
 //
-// It runs only for a build whose preset declares `pin`. Under any other preset
+// It runs only for a build whose preset declares `lift`. Under any other preset
 // the attributed rows keep their sorted position, unmarked.
 //
 // A container the attribution names but this build does not hold — one the
-// active view preset dropped — pins nothing and is not mentioned: the preset is
+// active view preset dropped — lifts nothing and is not mentioned: the preset is
 // absolute, and a launch does not widen it (decisions 7 and 8).
-func pinAttributed(containers []Container, att *Attribution) []Container {
+func liftAttributed(containers []Container, att *Attribution) []Container {
 	if att == nil || len(att.Containers) == 0 {
 		return containers
 	}
@@ -177,25 +177,25 @@ func pinAttributed(containers []Container, att *Attribution) []Container {
 	for i, c := range containers {
 		byKey[c.CursorKey] = i
 	}
-	pinned := make([]Container, 0, len(att.Containers))
-	lifted := make(map[int]bool, len(att.Containers))
+	lifted := make([]Container, 0, len(att.Containers))
+	moved := make(map[int]bool, len(att.Containers))
 	for _, a := range att.Containers {
 		i, ok := byKey[a.CursorKey]
-		if !ok || a.CursorKey == "" || lifted[i] {
+		if !ok || a.CursorKey == "" || moved[i] {
 			continue
 		}
-		lifted[i] = true
+		moved[i] = true
 		c := containers[i]
-		c.Pinned = true
-		pinned = append(pinned, c)
+		c.Lifted = true
+		lifted = append(lifted, c)
 	}
-	if len(pinned) == 0 {
+	if len(lifted) == 0 {
 		return containers
 	}
 	out := make([]Container, 0, len(containers))
-	out = append(out, pinned...)
+	out = append(out, lifted...)
 	for i, c := range containers {
-		if !lifted[i] {
+		if !moved[i] {
 			out = append(out, c)
 		}
 	}

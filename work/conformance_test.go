@@ -421,18 +421,18 @@ func twoKindPage(f fixture) []work.Kind {
 	return []work.Kind{maps, sets}
 }
 
-// The pin is applied after the sort resolves, which is what lets it do something no
-// comparator could: a Map row the launching pane is attributed to sits above the
-// whole task-set block, while kind precedence and each kind's own order survive
-// underneath it, unchanged (ADR-0209 decision 1).
-func TestAnAttributedMapRowPinsAboveTheWholeTaskSetBlock(t *testing.T) {
+// The lift is applied after the sort resolves, which is what lets it do something
+// no comparator could: a Map row the launching pane is attributed to sits above
+// the whole task-set block, while kind precedence and each kind's own order
+// survive underneath it, unchanged (ADR-0209 decision 1).
+func TestAnAttributedMapRowLiftsAboveTheWholeTaskSetBlock(t *testing.T) {
 	f := newFixture(t)
 
 	snap, err := work.BuildSnapshotForPane(twoKindPage(f), work.PaneFacts{
 		PaneID:   "%3",
 		WorkKind: string(ref.KindMap),
 		WorkID:   "2026-07-01-chart",
-	}, work.BuildOptions{Ordering: work.OrderByKindPrecedence, PinPane: true})
+	}, work.BuildOptions{Ordering: work.OrderByKindPrecedence, LiftPane: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,7 +440,7 @@ func TestAnAttributedMapRowPinsAboveTheWholeTaskSetBlock(t *testing.T) {
 	var got []string
 	for _, c := range snap.Containers {
 		mark := " "
-		if c.Pinned {
+		if c.Lifted {
 			mark = "▸"
 		}
 		got = append(got, mark+string(c.Kind)+":"+c.ID)

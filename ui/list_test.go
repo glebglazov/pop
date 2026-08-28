@@ -563,17 +563,17 @@ func TestListSetScrollClampsToBoundsAndCursor(t *testing.T) {
 	}
 }
 
-// newPinnedTestList is the Work dashboard's shape: no quick-access column, so the
-// prefix's second cell is free for the pin mark (ADR-0209 decision 4).
-func newPinnedTestList(items []string, pinned ...string) *List[string] {
+// newLiftedTestList is the Work dashboard's shape: no quick-access column, so the
+// prefix's second cell is free for the lift mark (ADR-0209 decision 4).
+func newLiftedTestList(items []string, lifted ...string) *List[string] {
 	return NewList(items, Opts[string]{
 		Key:             func(s string) string { return s },
 		Cell:            func(s string, _ RowState) string { return s },
 		Anchor:          AnchorTop,
 		TopEdgeOnChrome: true,
-		Pinned: func(s string) bool {
-			for _, p := range pinned {
-				if p == s {
+		Lifted: func(s string) bool {
+			for _, l := range lifted {
+				if l == s {
 					return true
 				}
 			}
@@ -583,10 +583,10 @@ func newPinnedTestList(items []string, pinned ...string) *List[string] {
 }
 
 // The mark rides the prefix column the cursor already uses: `▸` alone, `█▸` when
-// the cursor happens to be on the pinned row. Both cells are spent either way, so
-// the cell text starts at the same offset whether anything is pinned or not.
-func TestListPinMarkSharesTheCursorPrefixColumn(t *testing.T) {
-	l := newPinnedTestList(strItems(3), "item-1")
+// the cursor happens to be on the lifted row. Both cells are spent either way, so
+// the cell text starts at the same offset whether anything is lifted or not.
+func TestListLiftMarkSharesTheCursorPrefixColumn(t *testing.T) {
+	l := newLiftedTestList(strItems(3), "item-1")
 	l.Resize(3)
 
 	rows := l.VisibleRows()
@@ -598,11 +598,11 @@ func TestListPinMarkSharesTheCursorPrefixColumn(t *testing.T) {
 
 	l.SetCursor(1)
 	if got := StripANSI(l.VisibleRows()[1]); got != "█▸item-1" {
-		t.Fatalf("cursored pinned row = %q, want %q", got, "█▸item-1")
+		t.Fatalf("cursored lifted row = %q, want %q", got, "█▸item-1")
 	}
 
-	// The same list with nothing pinned: the cell text starts in the same column,
-	// so a launch that pins and one that does not line their columns up.
+	// The same list with nothing lifted: the cell text starts in the same column,
+	// so a launch that lifts and one that does not line their columns up.
 	plain := newTestList(strItems(3), AnchorTop, false, 0, nil)
 	plain.Resize(3)
 	for i, row := range append(plain.VisibleRows(), l.VisibleRows()...) {
@@ -617,13 +617,13 @@ func TestListPinMarkSharesTheCursorPrefixColumn(t *testing.T) {
 	}
 }
 
-// A pin is a starting position, not a frame: scroll past the pinned block and it
+// A lift is a starting position, not a frame: scroll past the lifted block and it
 // leaves the viewport with everything else (decision 6).
-func TestListPinnedRowsScrollAwayLikeAnyOther(t *testing.T) {
-	l := newPinnedTestList(strItems(5), "item-0", "item-1")
+func TestListLiftedRowsScrollAwayLikeAnyOther(t *testing.T) {
+	l := newLiftedTestList(strItems(5), "item-0", "item-1")
 	l.Resize(2)
 	if got := StripANSI(l.VisibleRows()[0]); !strings.Contains(got, "item-0") {
-		t.Fatalf("first visible row = %q, want the pinned item-0", got)
+		t.Fatalf("first visible row = %q, want the lifted item-0", got)
 	}
 
 	for range 4 {
@@ -632,7 +632,7 @@ func TestListPinnedRowsScrollAwayLikeAnyOther(t *testing.T) {
 
 	for _, row := range l.VisibleRows() {
 		if plain := StripANSI(row); strings.Contains(plain, "item-0") || strings.Contains(plain, "item-1") {
-			t.Fatalf("pinned row still on screen after scrolling to the end: %q", plain)
+			t.Fatalf("lifted row still on screen after scrolling to the end: %q", plain)
 		}
 	}
 }
