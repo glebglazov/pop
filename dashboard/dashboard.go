@@ -6,6 +6,7 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -87,6 +88,11 @@ type dashboardRowsMsg struct {
 	// whether a marked row the preset hides still exists (ADR-0215 decision 2). It
 	// is nil on every other poll, and nil is read as "not asked", never as "gone".
 	unfiltered []DashboardRow
+	// seq is the stamp the reload took when it started (ADR-0242 decision 1). The
+	// model drops a result whose stamp is older than the newest it has applied, so
+	// a tick rebuild that began before a write cannot land after the post-write
+	// rebuild. Zero means unstamped, and an unstamped result is always applied.
+	seq uint64
 }
 
 func (m QueueDashboard) liveCache() livePaneCache {
@@ -948,6 +954,16 @@ type QueueDashboard struct {
 	// so the List cell closure sees updates on each poll.
 	live *livePaneCache
 
+	// reloadSeq counts reloads as they start. A pointer because reload() stamps
+	// from a value copy of the model: every copy has to count off the same
+	// counter, or two overlapping reloads would take the same stamp. Nil on a
+	// hand-built model, which leaves every result unstamped and so always applied.
+	reloadSeq *uint64
+
+	// appliedSeq is the stamp of the newest reload result this model has applied.
+	// It is what an arriving result is measured against (ADR-0242 decision 1).
+	appliedSeq uint64
+
 	// copyFunc performs the clipboard write for the `y` copy-name verb. Injected
 	// so tests can avoid touching the real tmux / /dev/tty. Defaults to
 	// ui.CopyToClipboard.
@@ -1085,7 +1101,7 @@ func newQueueDashboardOn(d *drain.Deps, cfg *config.Config, snap DashboardSnapsh
 	// Attribution has already had its say — it lifted its rows to the top of the
 	// snapshot. Nothing is printed about it, and the cursor rests where it always
 	// does, on the first row (ADR-0209 decision 8).
-	return QueueDashboard{d: d, cfg: cfg, page: page, kinds: kinds, pane: snap.Pane, snap: snap, allRows: snap.Containers, list: list, cols: cols, live: live}
+	return QueueDashboard{d: d, cfg: cfg, page: page, kinds: kinds, pane: snap.Pane, snap: snap, allRows: snap.Containers, list: list, cols: cols, live: live, reloadSeq: new(uint64)}
 }
 
 // dashboardChromeLines returns the chrome height above the List rows for the
@@ -1466,6 +1482,15 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dashboardRowsMsg:
 		if msg.page != m.page.id {
 			return m, nil
+		}
+		if msg.seq != 0 && msg.seq < m.appliedSeq {
+			// A reload that started earlier finishing later: its rows are older than
+			// what is on screen, so applying them would show pre-write state after
+			// post-write state (ADR-0242 decision 1).
+			return m, nil
+		}
+		if msg.seq > m.appliedSeq {
+			m.appliedSeq = msg.seq
 		}
 		m.err = msg.err
 		if msg.err == nil {
@@ -2748,6 +2773,16 @@ func (m QueueDashboard) confirmBindModal() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// nextReloadSeq takes the next reload stamp. It returns zero — "unstamped" — for
+// a model built without the counter, so a hand-built model in a test still sees
+// every result it is handed.
+func (m QueueDashboard) nextReloadSeq() uint64 {
+	if m.reloadSeq == nil {
+		return 0
+	}
+	return atomic.AddUint64(m.reloadSeq, 1)
+}
+
 // reload rebuilds this page's snapshot: only its own kinds, so the poll never
 // pays for the other page's scan and the header it recomputes counts only what is
 // on screen.
@@ -2763,10 +2798,13 @@ func (m QueueDashboard) confirmBindModal() (tea.Model, tea.Cmd) {
 // presets at all.
 func (m QueueDashboard) reload() tea.Cmd {
 	unfiltered := m.selection.Active() && m.page.rowFilters
+	// Stamped here, where the reload is asked for, not where it finishes: the
+	// stamp has to record the state of the world the rebuild is about to read.
+	seq := m.nextReloadSeq()
 	return func() tea.Msg {
 		snap, err := work.BuildSnapshotForPane(m.page.kinds(m.d, m.cfg), m.pane, m.d.WorkBuildOptions())
 		live := loadLivePaneCache(m.d)
-		msg := dashboardRowsMsg{page: m.page.id, snap: snap, live: live, err: err}
+		msg := dashboardRowsMsg{page: m.page.id, snap: snap, live: live, err: err, seq: seq}
 		if err == nil && unfiltered {
 			msg.unfiltered = m.unfilteredRows()
 		}
