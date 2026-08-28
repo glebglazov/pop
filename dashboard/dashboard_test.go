@@ -197,7 +197,7 @@ func TestRenderStatusTableColumnsAndIndicator(t *testing.T) {
 	}
 }
 
-func TestDashboardAutoDrainBadgeAndToggle(t *testing.T) {
+func TestDashboardAutoDrainBadgeRenders(t *testing.T) {
 	rows := []DashboardRow{
 		{Project: "pop", Worktree: "/repo/main (main)", RawStatus: tasks.StatusReady, ID: "marked", AutoDrain: true},
 		{Project: "pop", Worktree: "/repo/main (main)", RawStatus: tasks.StatusReady, ID: "plain"},
@@ -207,79 +207,88 @@ func TestDashboardAutoDrainBadgeAndToggle(t *testing.T) {
 	if !strings.Contains(rendered.String(), "AD") {
 		t.Fatalf("missing auto-drain flag:\n%s", rendered.String())
 	}
-
-	var toggledDef, toggledState, toggledSet string
-	d := &drain.Deps{
-		ToggleAutoDrain: func(defPath, statePath, setID string) (*tasks.AutoDrainResult, error) {
-			toggledDef, toggledState, toggledSet = defPath, statePath, setID
-			return &tasks.AutoDrainResult{TaskSetID: setID, AutoDrain: true}, nil
-		},
-	}
-	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{{Project: "pop", Worktree: "/repo/main (main)", CursorKey: "pop\x00plain", RawStatus: tasks.StatusReady, ID: "plain", DefPath: "/repo/tasks", StatePath: "/repo/state.json"}}})
-	// Auto-drain now lives behind the Run menu: open with `r`, toggle with `a`.
-	updated, _ := m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
-	got := updated.(QueueDashboard)
-	if got.menu == nil {
-		t.Fatal("r did not open the run menu")
-	}
-	updated, cmd := got.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	got = updated.(QueueDashboard)
-	if got.menu != nil {
-		t.Fatal("a did not close the run menu after dispatch")
-	}
-	if !got.snap.Containers[0].AutoDrain {
-		t.Fatalf("toggle did not update badge immediately: %+v", got.snap.Containers[0])
-	}
-	msg := cmd().(dashboardToggleMsg)
-	updated, _ = got.Update(msg)
-	got = updated.(QueueDashboard)
-	if toggledDef != "/repo/tasks" || toggledState != "/repo/state.json" || toggledSet != "plain" {
-		t.Fatalf("toggle target = (%q, %q, %q)", toggledDef, toggledState, toggledSet)
-	}
-	if !got.snap.Containers[0].AutoDrain || got.err != nil {
-		t.Fatalf("toggle result = row %+v err %v", got.snap.Containers[0], got.err)
-	}
 }
 
-// TestDashboardAutoDrainToggleReflectsInRowAndCount proves the render-time STATUS
-// composition (ADR-0108): a simulated auto-drain toggle updates the per-row `·
-// auto-drain` marker and the header's auto-drain count together on the very next
-// View pass — no dashboardTickMsg / dashboardRowsMsg poll is fed between the
-// toggle and the render. Before the toggle neither the row cell nor the summary
-// mentions auto-drain; after it, both do.
-func TestDashboardAutoDrainToggleReflectsInRowAndCount(t *testing.T) {
-	d := &drain.Deps{
-		ToggleAutoDrain: func(defPath, statePath, setID string) (*tasks.AutoDrainResult, error) {
-			return &tasks.AutoDrainResult{TaskSetID: setID, AutoDrain: true}, nil
-		},
+// TestDashboardAutoDrainTogglesThroughReload proves ADR-0242 decision 3: the
+// toggle carries no optimistic patch of its own. Dispatching the verb leaves
+// snap.Containers untouched, a successful dashboardToggleMsg only asks for a
+// reload, and the AUTO cell changes exclusively once that reload's rows land —
+// the same path every other write verb uses. It drives the whole path for real:
+// a fixture repo on disk, the actual ToggleSetAutoDrain write, and the actual
+// reload rebuild, so the proof is about behavior, not a stubbed dependency.
+func TestDashboardAutoDrainTogglesThroughReload(t *testing.T) {
+	repo, setID, _ := queuetest.SetupSpawnRepo(t, "2026-01-01-auto-drain-1", []queuetest.SpawnTask{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "ready"},
+	})
+	d, cfg, _, _ := dashboardLaunchFixture(t, repo, setID)
+	m := openFromPane(t, d, cfg)
+
+	var before DashboardRow
+	for _, row := range m.snap.Containers {
+		if row.ID == setID {
+			before = row
+		}
 	}
-	m := newQueueDashboard(d, &config.Config{}, DashboardSnapshot{Containers: []DashboardRow{
-		{Project: "pop", Worktree: "main", CursorKey: "pop\x00plain", RawStatus: tasks.StatusReady, ID: "plain", DefPath: "/repo/tasks", StatePath: "/repo/state.json"},
-	}})
-	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 20})
+	if before.ID == "" {
+		t.Fatal("fixture row missing from initial snapshot")
+	}
+
+	updated, cmd := m.dispatchVerb(setkind.VerbAutoDrain, before)
+	m = updated.(QueueDashboard)
+	if cmd == nil {
+		t.Fatal("dispatching the auto-drain verb returned no command")
+	}
+	for _, row := range m.snap.Containers {
+		if row.ID == setID && row.AutoDrain != before.AutoDrain {
+			t.Fatalf("dispatch mutated snap.Containers directly: %+v", row)
+		}
+	}
+
+	toggleMsg, ok := cmd().(dashboardToggleMsg)
+	if !ok {
+		t.Fatalf("dispatch command produced %T, want dashboardToggleMsg", cmd())
+	}
+	if toggleMsg.err != nil {
+		t.Fatalf("toggle: %v", toggleMsg.err)
+	}
+
+	updated, reloadCmd := m.Update(toggleMsg)
+	m = updated.(QueueDashboard)
+	if reloadCmd == nil {
+		t.Fatal("a successful toggle did not trigger a reload")
+	}
+	for _, row := range m.snap.Containers {
+		if row.ID == setID && row.AutoDrain != before.AutoDrain {
+			t.Fatalf("the success handler mutated snap.Containers directly: %+v", row)
+		}
+	}
+
+	rowsMsg, ok := reloadCmd().(dashboardRowsMsg)
+	if !ok {
+		t.Fatalf("reload command produced %T, want dashboardRowsMsg", reloadCmd())
+	}
+	if rowsMsg.err != nil {
+		t.Fatalf("reload: %v", rowsMsg.err)
+	}
+	updated, _ = m.Update(rowsMsg)
 	m = updated.(QueueDashboard)
 
-	// Baseline: the READY row carries no auto-drain marker and the summary carries
-	// no auto-drain count.
-	before := m.View().Content
-	if strings.Contains(before, "auto-drain") {
-		t.Fatalf("baseline view should not mention auto-drain:\n%s", before)
+	var after DashboardRow
+	for _, row := range m.allRows {
+		if row.ID == setID {
+			after = row
+		}
+	}
+	if after.AutoDrain == before.AutoDrain {
+		t.Fatalf("allRows AutoDrain = %v after reload, want %v", after.AutoDrain, !before.AutoDrain)
 	}
 
-	// Toggle auto-drain on via the Run menu (`r` opens, `a` dispatches).
-	updated, _ = m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
-	m = updated.(QueueDashboard)
-	updated, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	m = updated.(QueueDashboard)
-
-	// The same View pass — no poll tick — must reflect the toggle in both places.
-	after := m.View().Content
-	// The base label is bucket-colored; the auto-drain marker follows it plainly.
-	if !strings.Contains(after, "\x1b[34mREADY\x1b[m · auto-drain") {
-		t.Fatalf("row cell missing auto-drain marker after toggle:\n%s", after)
-	}
-	if !strings.Contains(after, "1 auto-drain") {
-		t.Fatalf("summary count missing auto-drain after toggle:\n%s", after)
+	// A view re-derivation must read the reloaded value, never the pre-toggle one.
+	m.applySearch("")
+	for _, row := range m.snap.Containers {
+		if row.ID == setID && row.AutoDrain != after.AutoDrain {
+			t.Fatalf("view re-derivation shows %v, want the reloaded %v", row.AutoDrain, after.AutoDrain)
+		}
 	}
 }
 

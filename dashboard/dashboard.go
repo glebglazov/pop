@@ -1528,13 +1528,7 @@ func (m QueueDashboard) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.actionErr = msg.err
 			return m, m.reload()
 		}
-		for i := range m.snap.Containers {
-			if m.snap.Containers[i].CursorKey == msg.key {
-				m.snap.Containers[i].AutoDrain = msg.autoDrain
-				break
-			}
-		}
-		m.cols.syncNatural(m.kinds, m.snap.Containers)
+		return m, m.reload()
 	case dashboardHandoffMsg:
 		m.drainPick = nil
 		if msg.err != nil {
@@ -2014,13 +2008,6 @@ func (m QueueDashboard) dispatchVerb(verb work.Verb, row DashboardRow) (tea.Mode
 		if row.Orphaned {
 			return m, nil
 		}
-		for i := range m.snap.Containers {
-			if m.snap.Containers[i].CursorKey == row.CursorKey {
-				m.snap.Containers[i].AutoDrain = !m.snap.Containers[i].AutoDrain
-				break
-			}
-		}
-		m.cols.syncNatural(m.kinds, m.snap.Containers)
 		return m, m.ToggleSetAutoDrain(row)
 	case setkind.VerbAssist:
 		m.flash.Set(dashboardHandoffPending)
