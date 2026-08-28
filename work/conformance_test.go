@@ -57,6 +57,12 @@ type conformanceCase struct {
 	// callerModal is a verb the kind hands back for the caller to dispatch, or
 	// empty when it has none.
 	callerModal work.Verb
+	// attributionPasses is which passes of Pane work attribution the kind answers,
+	// named as the ladder names them: "tags", "neighbourhood", "repository". Each
+	// pass is an optional seam obtained by type assertion, so which kind answers
+	// which is a fact about the kind and belongs in this table (ADR-0201
+	// decision 1, ADR-0241 decisions 1 and 7).
+	attributionPasses []string
 }
 
 func conformanceCases() []conformanceCase {
@@ -106,6 +112,9 @@ func conformanceCases() []conformanceCase {
 			wantSummary:     []string{"1 task set", "1 ready"},
 			wantTypeWords:   []string{"task-set", "set", "tasks"},
 			callerModal:     setkind.VerbDrain,
+			// A set is tagged onto the pane pop opened for it, bound into a checkout,
+			// and filed under a repository — every pass has something to go on.
+			attributionPasses: []string{"tags", "neighbourhood", "repository"},
 		},
 		{
 			name:        "map",
@@ -133,6 +142,9 @@ func conformanceCases() []conformanceCase {
 			wantCopyActions: []work.Verb{work.VerbCopyName, wayfinder.VerbCopyMapPath},
 			wantSummary:     []string{"1 map"},
 			wantTypeWords:   []string{"map", "wayfinder", "wayfinding"},
+			// A Map owns no checkout, so it skips the middle pass and answers the
+			// repository it is filed under directly (ADR-0241 decision 3).
+			attributionPasses: []string{"tags", "repository"},
 		},
 		{
 			name:      "routine",
@@ -169,6 +181,9 @@ func conformanceCases() []conformanceCase {
 			wantCopyActions: []work.Verb{work.VerbCopyName},
 			wantSummary:     []string{"1 routine", "1 here"},
 			wantTypeWords:   []string{"routine"},
+			// The tag pass alone, deliberately: a routine names a schedule, not work
+			// that lives in a place (ADR-0209 decision 9, ADR-0241 decision 7).
+			attributionPasses: []string{"tags"},
 		},
 	}
 }
@@ -227,6 +242,10 @@ func TestKindConformance(t *testing.T) {
 			}
 			if len(c.Items) != tc.items {
 				t.Fatalf("items = %+v, want %d", c.Items, tc.items)
+			}
+
+			if got := attributionPassesOf(k); !slices.Equal(got, tc.attributionPasses) {
+				t.Fatalf("attribution passes = %v, want %v", got, tc.attributionPasses)
 			}
 
 			// Less is asked only about its own kind's containers, and must be a strict
@@ -356,6 +375,24 @@ func TestKindConformance(t *testing.T) {
 			}
 		})
 	}
+}
+
+// attributionPassesOf reports which passes of the ladder a kind answers, in the
+// order AttributePane walks them. Each pass is a separate optional interface
+// precisely so that a checkout answer from any kind outranks a repository answer
+// from any kind, so what a kind implements is what it means.
+func attributionPassesOf(k work.Kind) []string {
+	var passes []string
+	if _, ok := k.(work.PaneAttributor); ok {
+		passes = append(passes, "tags")
+	}
+	if _, ok := k.(work.PaneNeighbourhoodAttributor); ok {
+		passes = append(passes, "neighbourhood")
+	}
+	if _, ok := k.(work.PaneRepositoryAttributor); ok {
+		passes = append(passes, "repository")
+	}
+	return passes
 }
 
 // TestSnapshotOrdersByKindPrecedenceThenKindLess pins what OrderByKindPrecedence

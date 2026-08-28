@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/glebglazov/pop/config"
 	"github.com/glebglazov/pop/internal/queuetest"
 	tmuxmod "github.com/glebglazov/pop/internal/tmux"
+	"github.com/glebglazov/pop/tasks"
 	"github.com/glebglazov/pop/tasks/binding"
 	"github.com/glebglazov/pop/tasks/drain"
 	"github.com/glebglazov/pop/work"
@@ -33,6 +35,9 @@ type repositoryFixture struct {
 	// trunk is the checkout the bindings name; sibling is the second worktree no
 	// binding mentions. Both share the repository's git common directory.
 	trunk, sibling string
+	// repo is the repository itself, which is what a Map has to be filed under to
+	// answer the same pass the sets do.
+	repo string
 }
 
 func newRepositoryFixture(t *testing.T, bind ...int) repositoryFixture {
@@ -66,7 +71,7 @@ func newRepositoryFixture(t *testing.T, bind ...int) repositoryFixture {
 	if rt.Fake.PaneCwd == nil {
 		rt.Fake.PaneCwd = map[string]string{}
 	}
-	return repositoryFixture{d: d, cfg: cfg, rt: rt, stems: stems, trunk: trunk, sibling: sibling}
+	return repositoryFixture{d: d, cfg: cfg, rt: rt, stems: stems, trunk: trunk, sibling: sibling, repo: repo}
 }
 
 // standIn puts the shell in a directory and returns the model a launch from it
@@ -82,6 +87,68 @@ func (f repositoryFixture) standIn(t *testing.T, dir string) QueueDashboard {
 func (f repositoryFixture) repoOrder(t *testing.T) []string {
 	t.Helper()
 	return inBaselineOrder(unliftedOrder(t, f.d, f.cfg), f.stems)
+}
+
+// withMap files an active Map in the repository's own Task storage — where every
+// Map of a repository lives, and the only locality a Trunk-rooted Map has.
+func (f repositoryFixture) withMap(t *testing.T, mapID string) string {
+	t.Helper()
+	id, err := tasks.ResolveRepositoryIdentity(f.d.Tasks, f.repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(id.StorageDir, "maps", mapID)
+	if err := os.MkdirAll(filepath.Join(dir, "issues"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("map.md", "Status: active\n\n## Destination\nChart it\n")
+	write(filepath.Join("issues", "01-frontier.md"), "Type: research\nStatus: open\n\n# Q\n")
+	return mapID
+}
+
+// Decision 2, which is the whole reason this pass merges: a repository holds a Task
+// set and a Map, the shell is standing in neither's checkout, and both lift from
+// the one pane — the sets ahead of the Maps, in kind precedence order. A first-hit
+// pass would have answered with the sets and silently decided this repository has
+// no Maps, which is nearly every repository pop knows.
+func TestARepositoryLiftsItsTaskSetsAndItsMapsTogether(t *testing.T) {
+	f := newRepositoryFixture(t, 1)
+	mapID := f.withMap(t, "2026-02-02-chart")
+	want := append(f.repoOrder(t), mapID)
+
+	m := f.standIn(t, f.sibling)
+
+	if got := liftedBlock(t, m); !slices.Equal(got, want) {
+		t.Fatalf("lifted %v, want the repository's sets ahead of its Map %v", got, want)
+	}
+	if !slices.Contains(rowIDs(m), mapID) {
+		t.Fatalf("rows = %v, want the Map among them — this test needs a rendered Map row", rowIDs(m))
+	}
+}
+
+// A Map alone in a repository lifts for a shell standing there: before this pass a
+// Map answered only inside its own `pop-map-<id>` session, so an editor shell in the
+// repository had the blind spot for a live Map that it had for an unbound set.
+func TestShellInARepositoryLiftsItsMapWithNoSetInvolved(t *testing.T) {
+	f := newRepositoryFixture(t, 1)
+	mapID := f.withMap(t, "2026-02-02-chart")
+	f.d.ViewPreset = config.WorkViewPreset{
+		Name:  "_maps-only",
+		Label: "maps",
+		Lift:  true,
+		Hide:  &config.WorkViewPresetFilter{Status: []string{"done"}},
+	}
+
+	m := f.standIn(t, f.sibling)
+
+	if got := liftedBlock(t, m); !slices.Equal(got, []string{mapID}) {
+		t.Fatalf("lifted %v, want the repository's Map %v", got, []string{mapID})
+	}
 }
 
 // The bug this pass exists for. A set is bound to one worktree of the repository

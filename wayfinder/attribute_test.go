@@ -2,6 +2,7 @@ package wayfinder
 
 import (
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/glebglazov/pop/config"
@@ -186,4 +187,92 @@ func TestTicketHeldByTwoMapsIsBrokenByTheSession(t *testing.T) {
 		Ticket:  "01",
 	})
 	assertAttributes(t, att, rows, "2026-07-02-second")
+}
+
+// The ladder's weakest pass (ADR-0241): a Map is Trunk-rooted, so an ordinary
+// editor shell in the repository the Map lives in used to get nothing at all. It
+// answers with every live Map of that repository, in the order the kind's own
+// comparator already puts the rows in — newest first inside a project.
+func TestShellInARepositoryLiftsItsLiveMaps(t *testing.T) {
+	k, group := mapKindFixture(t)
+
+	att, rows := attributeMap(t, k, work.PaneFacts{
+		PaneID:        "%9",
+		Session:       "editor",
+		Directory:     "/repo/some-sibling-worktree",
+		RepoCommonDir: group.RepoCommonDir,
+	})
+
+	if att == nil {
+		t.Fatal("attribution = none, want the repository's live Maps")
+	}
+	var got []string
+	for _, c := range att.Containers {
+		if c.Ref.Kind != ref.KindMap {
+			t.Fatalf("attributed %v, want Maps only", c.Ref)
+		}
+		got = append(got, c.Ref.ContainerID)
+	}
+	// The archived Map is active work and is answered for by name; the preset is
+	// what decides it renders no row (ADR-0209 decision 7).
+	want := []string{"2026-07-04-archived", "2026-07-02-arrived", "2026-07-01-active"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("attributed %v, want the repository's live Maps newest first %v", got, want)
+	}
+	// An abandoned Map and a BROKEN one are not work anyone is standing in, however
+	// close they sit.
+	for _, gone := range []string{"2026-07-03-abandoned", "2026-07-05-broken"} {
+		if slices.Contains(got, gone) {
+			t.Fatalf("attributed %q by locality, want the repository's live Maps alone: %v", gone, got)
+		}
+	}
+	// The answer is only worth anything if it names rows the page has: the two
+	// visible Maps carry the cursor keys their own rows carry.
+	for _, id := range []string{"2026-07-02-arrived", "2026-07-01-active"} {
+		row, rendered := rows[id]
+		if !rendered {
+			t.Fatalf("no row for %q; this assertion needs the visible Maps", id)
+		}
+		found := false
+		for _, c := range att.Containers {
+			if c.Ref.ContainerID == id && c.CursorKey == row.CursorKey {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("attribution carries no container keyed like the row for %q", id)
+		}
+	}
+}
+
+// A pane inside a Map's own session is answered by the stamp, whatever repository
+// the shell is standing in: the stronger pass is reached first and the weakest one
+// is never consulted (ADR-0241 decision 1).
+func TestMapSessionBeatsTheRepositoryPass(t *testing.T) {
+	k, group := mapKindFixture(t)
+
+	att, rows := attributeMap(t, k, work.PaneFacts{
+		PaneID:        "%10",
+		Session:       "some-session-name",
+		WorkKind:      string(ref.KindMap),
+		WorkID:        "2026-07-02-arrived",
+		Directory:     "/repo/some-sibling-worktree",
+		RepoCommonDir: group.RepoCommonDir,
+	})
+
+	assertAttributes(t, att, rows, "2026-07-02-arrived")
+}
+
+// A repository pop knows no Maps for is the silence it always was, and so is a
+// pane standing in no repository at all.
+func TestRepositoryWithNoMapsAttributesNothing(t *testing.T) {
+	k, _ := mapKindFixture(t)
+	for _, facts := range []work.PaneFacts{
+		{PaneID: "%11", Session: "editor", Directory: "/elsewhere", RepoCommonDir: "/other-repo/.git"},
+		{PaneID: "%11", Session: "editor", Directory: "/elsewhere"},
+	} {
+		if att, _ := attributeMap(t, k, facts); att != nil {
+			t.Fatalf("facts %+v attributed %+v, want nothing", facts, *att)
+		}
+	}
 }
