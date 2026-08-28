@@ -2586,10 +2586,6 @@ func (c *Config) ExpandProjects() ([]ExpandedPath, error) {
 
 // ExpandProjectsWith resolves all project paths using provided dependencies
 func (c *Config) ExpandProjectsWith(d *Deps) ([]ExpandedPath, error) {
-	cachePath := DefaultCachePathWith(d)
-	cache := loadGlobCache(d, cachePath)
-	cacheModified := false
-
 	var projects []ExpandedPath
 	seen := make(map[string]bool)
 
@@ -2612,10 +2608,7 @@ func (c *Config) ExpandProjectsWith(d *Deps) ([]ExpandedPath, error) {
 			continue // Skip recursive glob patterns
 		}
 		if strings.Contains(expanded, "*") {
-			matches, updated, err := expandGlobCached(d, expanded, cache)
-			if updated {
-				cacheModified = true
-			}
+			matches, err := expandGlob(d, expanded)
 			if err != nil {
 				// A malformed glob degrades to a warning rather than aborting:
 				// other entries still resolve, and the picker renders what it
@@ -2637,10 +2630,6 @@ func (c *Config) ExpandProjectsWith(d *Deps) ([]ExpandedPath, error) {
 			}
 			addProject(resolved, displayDepth, true)
 		}
-	}
-
-	if cacheModified {
-		saveGlobCache(d, cachePath, cache)
 	}
 
 	return removeSubsumedPaths(projects), nil
@@ -2685,9 +2674,8 @@ func expandHomeWith(d *Deps, path string) string {
 	return path
 }
 
-// expandGlobWithBase expands a glob pattern and returns both the matches
-// and the resolved base path (after symlink resolution).
-func expandGlobWithBase(d *Deps, pattern string) ([]string, string, error) {
+// expandGlob expands a glob pattern into absolute paths.
+func expandGlob(d *Deps, pattern string) ([]string, error) {
 	base, pat := doublestar.SplitPattern(pattern)
 
 	// Resolve symlinks in the base path once (e.g., ~/Dev -> /private/Dev)
@@ -2699,7 +2687,7 @@ func expandGlobWithBase(d *Deps, pattern string) ([]string, string, error) {
 	fsys := d.FS.DirFS(base)
 	matches, err := doublestar.Glob(fsys, pat, doublestar.WithNoHidden())
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
 	// Convert to absolute paths using the resolved base
@@ -2707,7 +2695,7 @@ func expandGlobWithBase(d *Deps, pattern string) ([]string, string, error) {
 	for _, match := range matches {
 		results = append(results, filepath.Join(resolvedBase, match))
 	}
-	return results, resolvedBase, nil
+	return results, nil
 }
 
 func isDirectoryWith(d *Deps, path string) bool {
