@@ -42,7 +42,7 @@ type Shell struct {
 	// modal edits and re-reads the same file the pages were built from.
 	cfgPath string
 	// pane is the launching pane's facts, read once at startup and kept for the
-	// page the toggle builds later — the pin is per page, the tmux read is not.
+	// page the toggle builds later — the lift is per page, the tmux read is not.
 	pane   work.PaneFacts
 	width  int
 	height int
