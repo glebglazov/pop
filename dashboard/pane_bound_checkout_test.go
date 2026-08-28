@@ -188,15 +188,20 @@ func attributedSets(t *testing.T, m QueueDashboard) []string {
 	return ids
 }
 
-// A shell somewhere no work is bound is the common case, and it is silent: a
+// A shell none of the rungs reach is the common case, and it is silent: a
 // "nothing found" line on every launch trains the human to ignore the status line.
-func TestShellInADirectoryWithNoBoundWorkIsSilent(t *testing.T) {
-	d, cfg, _, checkout := boundCheckoutFixture(t)
+// The shell stands outside any repository, so the repository pass beneath these
+// rungs has nothing to say either (ADR-0241) — inside the repository it would, and
+// that is pane_repository_test.go's business.
+func TestShellNoRungReachesIsSilent(t *testing.T) {
+	d, cfg, _, _ := boundCheckoutFixture(t)
+	outside := t.TempDir()
+	d.Tmux.(*queuetest.RecordingTmux).Fake.PaneCwd["%7"] = outside
 
 	m := openFromPane(t, d, cfg)
 
 	if m.snap.Attribution != nil {
-		t.Fatalf("attribution = %+v from %s, want none", *m.snap.Attribution, checkout)
+		t.Fatalf("attribution = %+v from %s, want none", *m.snap.Attribution, outside)
 	}
 	if got := liftedBlock(t, m); len(got) != 0 {
 		t.Fatalf("lifted %v, want nothing", got)

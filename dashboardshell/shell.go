@@ -112,16 +112,17 @@ func newShell(start Page, d *drain.Deps, cfg *config.Config, cfgPath string) (Sh
 }
 
 // launchPaneFacts reads the launching pane's facts, whichever page the dashboard
-// opened on. It is the session's one tmux round-trip for them: the shell keeps
-// them, hands them to the entry build and to the page the toggle builds later,
-// and each page model re-derives its own pins from the copy it holds.
+// opened on. It is the session's one read of them — one tmux round-trip and one
+// git fork for the pane's repository: the shell keeps them, hands them to the
+// entry build and to the page the toggle builds later, and each page model
+// re-derives its own lift from the copy it holds.
 //
 // The dashboard still opens on the page it was asked for (ADR-0201 decision 5) —
 // a pane attributed to a Routine does not drag the launch across the toggle. The
-// pin is simply computed per page, and is waiting on page B when the human gets
+// lift is simply computed per page, and is waiting on page B when the human gets
 // there.
 func launchPaneFacts(d *drain.Deps) work.PaneFacts {
-	return dashboard.LaunchPaneFacts(d.Tmux)
+	return dashboard.LaunchPaneFacts(d.Tmux, d.Tasks)
 }
 
 func runShell(s Shell) (Shell, error) {
