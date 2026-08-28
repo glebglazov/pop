@@ -31,16 +31,19 @@ func bindStemTo(t *testing.T, d *drain.Deps, repo, stem, checkout string) {
 	}
 }
 
-// A drain starting in the checkout the pane sits in lifts that set on the very
-// next poll, with no relaunch — and when the drain ends, the lift goes with it
-// and the row falls back to wherever the sort puts it.
-func TestADrainGoingLiveInThePanesCheckoutLiftsAndUnliftsAcrossRebuilds(t *testing.T) {
+// A drain starting in the checkout the pane sits in narrows the lift to that set
+// on the very next poll, with no relaunch — and when the drain ends the narrowing
+// goes with it. Nothing is bound here, so what the block falls back to is the
+// repository pass's own answer: every set the pane's repository holds (ADR-0241).
+// The rung that answers is re-decided per poll, not fixed at launch.
+func TestADrainGoingLiveInThePanesCheckoutNarrowsTheLiftAcrossRebuilds(t *testing.T) {
 	d, cfg, stems, checkout := boundCheckoutFixture(t)
 	baseline := unliftedOrder(t, d, cfg)
+	repoAnswer := inBaselineOrder(baseline, stems)
 
 	m := openFromPane(t, d, cfg)
-	if got := liftedBlock(t, m); len(got) != 0 {
-		t.Fatalf("lifted %v at launch, want nothing: no work is bound or running here yet", got)
+	if got := liftedBlock(t, m); !slices.Equal(got, repoAnswer) {
+		t.Fatalf("lifted %v at launch, want the repository's own sets %v: nothing is bound or running here", got, repoAnswer)
 	}
 
 	drained := stems[len(stems)-1]
@@ -50,7 +53,7 @@ func TestADrainGoingLiveInThePanesCheckoutLiftsAndUnliftsAcrossRebuilds(t *testi
 
 	m = rebuild(t, m)
 	if got := liftedBlock(t, m); !slices.Equal(got, []string{drained}) {
-		t.Fatalf("lifted %v after the drain went live, want %q — the lift appears the moment its cause does", got, drained)
+		t.Fatalf("lifted %v after the drain went live, want %q alone — a nearer rung answers the moment its cause appears", got, drained)
 	}
 	if got, want := rowIDs(m), wantLiftedFirst(baseline, drained); !slices.Equal(got, want) {
 		t.Fatalf("rows = %v, want %v", got, want)
@@ -62,12 +65,22 @@ func TestADrainGoingLiveInThePanesCheckoutLiftsAndUnliftsAcrossRebuilds(t *testi
 	d.LiveDrains = func() ([]tasks.RunningDrain, error) { return nil, nil }
 
 	m = rebuild(t, m)
-	if got := liftedBlock(t, m); len(got) != 0 {
-		t.Fatalf("lifted %v after the drain ended, want nothing: a lift that loses its cause un-lifts", got)
+	if got := liftedBlock(t, m); !slices.Equal(got, repoAnswer) {
+		t.Fatalf("lifted %v after the drain ended, want the repository answer back, %v: a rung that loses its cause stops answering", got, repoAnswer)
 	}
-	if got := rowIDs(m); !slices.Equal(got, baseline) {
-		t.Fatalf("rows = %v, want the sorted order the page has with no lift, %v", got, baseline)
+}
+
+// inBaselineOrder is the named ids in the order this page already puts them in,
+// which is the order the repository pass hands them back — the pass adds no order
+// of its own.
+func inBaselineOrder(baseline, ids []string) []string {
+	var want []string
+	for _, id := range baseline {
+		if slices.Contains(ids, id) {
+			want = append(want, id)
+		}
 	}
+	return want
 }
 
 // Binding a second set to the pane's checkout joins it to the block on the next

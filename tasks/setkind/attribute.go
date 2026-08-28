@@ -39,7 +39,25 @@ type boundSet struct {
 	// sortRow is the projection the last-resort tiebreak compares under the active
 	// sort. It carries only what the comparator reads, and deliberately not
 	// Orphaned: every candidate is bound to the checkout the pane is standing in,
-	// so none of them can be pointing at a missing one.
+	// so none of them can be pointing at a missing one. The repository pass builds
+	// the same projection from the same row, so the two passes cannot disagree
+	// about where a set sorts.
+	sortRow work.Container
+}
+
+// repoSet is one candidate for the ladder's weakest pass: a set in a repository's
+// Task storage, whether or not anything binds it to a checkout. Every registered
+// set is one, which is the point — the pass exists because a set's reachability by
+// locality was an accident of whether somebody had bound it (ADR-0241 decision 3).
+type repoSet struct {
+	setID string
+	// repoCommonDir is the repository the set is filed under, and the whole of the
+	// match: the pane carries the same identity, so a sibling worktree of the
+	// bound checkout resolves here by construction.
+	repoCommonDir string
+	// sortRow is the projection the pass orders its answer under, the same one the
+	// bound candidates carry — the pass adds no order of its own, it hands back the
+	// rows in the order the active sort already puts them in.
 	sortRow work.Container
 }
 
@@ -66,23 +84,30 @@ func (k *Kind) recordPanes(g repogroup.Group, refresh *tasks.RefreshResult, snap
 			Label:     "task set " + row.ID,
 		}
 		bnd, hasBinding := snap.bindingFor(g.RepoKey, row.ID)
-		if !hasBinding || strings.TrimSpace(bnd.RuntimePath) == "" {
+		bound := hasBinding && strings.TrimSpace(bnd.RuntimePath) != ""
+		sortRow := work.Container{
+			Kind:      ref.KindTaskSet,
+			ID:        row.ID,
+			Project:   g.ProjectName,
+			RawStatus: row.Status,
+			AutoDrain: row.AutoDrain,
+			Started:   row.Started,
+			Bound:     bound,
+			LiveDrain: liveDrain(snap, g.RepoKey, row.ID, bnd.RuntimePath),
+		}
+		k.inRepo = append(k.inRepo, repoSet{
+			setID:         row.ID,
+			repoCommonDir: g.RepoCommonDir,
+			sortRow:       sortRow,
+		})
+		if !bound {
 			continue
 		}
 		k.bound = append(k.bound, boundSet{
 			setID:         row.ID,
 			repoCommonDir: g.RepoCommonDir,
 			runtimePath:   bnd.RuntimePath,
-			sortRow: work.Container{
-				Kind:      ref.KindTaskSet,
-				ID:        row.ID,
-				Project:   g.ProjectName,
-				RawStatus: row.Status,
-				AutoDrain: row.AutoDrain,
-				Started:   row.Started,
-				Bound:     true,
-				LiveDrain: liveDrain(snap, g.RepoKey, row.ID, bnd.RuntimePath),
-			},
+			sortRow:       sortRow,
 		})
 	}
 }
@@ -174,6 +199,50 @@ func (k *Kind) attributeBoundCheckoutAt(dir string) (work.Attribution, bool) {
 	}
 	att := work.Attribution{}
 	for _, cand := range k.rankBoundCandidates(cands) {
+		if c, ok := k.panes[cand.setID]; ok {
+			att.Containers = append(att.Containers, c)
+		}
+	}
+	return att, len(att.Containers) > 0
+}
+
+// AttributePaneRepository answers the ladder's weakest pass: every Task set in the
+// repository the pane is standing in, bound to a checkout or not. It is reached
+// only when the passes above it are silent, so a shell in a checkout a set really
+// is bound to still gets exactly that checkout's answer, in that rung's order —
+// this pass never competes with a better one (ADR-0241 decision 1).
+//
+// The repository is matched on the git common directory alone, which is the
+// identity Task storage is keyed under: a sibling feature worktree shares it with
+// the trunk the binding names, which is the case the checkout pass is right to
+// refuse and this one exists to answer.
+func (k *Kind) AttributePaneRepository(facts work.PaneFacts) (work.Attribution, bool) {
+	repo := k.d.canonPath(facts.RepoCommonDir)
+	if repo == "" {
+		return work.Attribution{}, false
+	}
+	// One canonicalisation per repository rather than per set: a group's rows all
+	// carry the one string, and a machine has far fewer repositories than sets.
+	canon := map[string]string{}
+	var cands []repoSet
+	for _, cand := range k.inRepo {
+		resolved, seen := canon[cand.repoCommonDir]
+		if !seen {
+			resolved = k.d.canonPath(cand.repoCommonDir)
+			canon[cand.repoCommonDir] = resolved
+		}
+		if resolved == repo {
+			cands = append(cands, cand)
+		}
+	}
+	if len(cands) == 0 {
+		return work.Attribution{}, false
+	}
+	sort.SliceStable(cands, func(i, j int) bool {
+		return tasks.WorkRowLess(cands[i].sortRow, cands[j].sortRow, k.d.ViewPreset.Sort)
+	})
+	att := work.Attribution{}
+	for _, cand := range cands {
 		if c, ok := k.panes[cand.setID]; ok {
 			att.Containers = append(att.Containers, c)
 		}

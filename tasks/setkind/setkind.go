@@ -94,12 +94,17 @@ type Kind struct {
 	// every set id it read, hidden rows included. It belongs to one Load and is
 	// replaced by the next (see attribute.go).
 	panes paneIndex
-	// bound and live are the same pass's answer to the ladder's weakest rungs: the
+	// bound and live are the same pass's answer to the ladder's checkout rungs: the
 	// sets with a Worktree binding, and the live Drains holding a checkout. Both
 	// are locality, so they are matched against the pane's directory rather than
 	// looked up by id.
 	bound []boundSet
 	live  []tasks.RunningDrain
+	// inRepo is the same pass's answer to the weakest pass of all: every set it
+	// read, matched against the pane's repository rather than its directory, so a
+	// set with no binding at all is still reachable from a shell standing in the
+	// repository that holds it (ADR-0241).
+	inRepo []repoSet
 }
 
 // New returns the Task-set kind over d. A nil d resolves to DefaultDeps.
@@ -165,7 +170,7 @@ func (k *Kind) Load() ([]work.Container, error) {
 	// groups did.
 	now := d.now().UTC()
 	var containers []work.Container
-	k.panes, k.bound, k.live = nil, nil, snap.liveDrainList()
+	k.panes, k.bound, k.live, k.inRepo = nil, nil, snap.liveDrainList(), nil
 	for i, load := range loads {
 		k.recordPanes(load.group, refreshes[i], snap)
 		got, err := containersFromGroup(d, cfg, snap, delays, now, load.group, refreshes[i], load.prepared)

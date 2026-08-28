@@ -25,7 +25,7 @@ import (
 // page A through it, and construct the model that would take the first paint.
 func openFromPane(t *testing.T, d *drain.Deps, cfg *config.Config) QueueDashboard {
 	t.Helper()
-	snap, err := BuildPageSnapshot(d, cfg, PageWork, LaunchPaneFacts(d.Tmux))
+	snap, err := BuildPageSnapshot(d, cfg, PageWork, LaunchPaneFacts(d.Tmux, d.Tasks))
 	if err != nil {
 		t.Fatalf("BuildPageSnapshot: %v", err)
 	}
@@ -377,10 +377,10 @@ func rowKeyFor(t *testing.T, m QueueDashboard, id string) string {
 // Outside tmux there is no pane, and a dashboard that cannot tell where it is
 // lifts nothing rather than guessing.
 func TestLaunchPaneFactsWithoutAPaneIsEmpty(t *testing.T) {
-	if got := LaunchPaneFacts(nil); !got.Empty() {
+	if got := LaunchPaneFacts(nil, nil); !got.Empty() {
 		t.Fatalf("LaunchPaneFacts(nil) = %+v, want zero facts", got)
 	}
-	if got := LaunchPaneFacts(&tmuxtest.Fake{}); !got.Empty() {
+	if got := LaunchPaneFacts(&tmuxtest.Fake{}, nil); !got.Empty() {
 		t.Fatalf("LaunchPaneFacts(no current pane) = %+v, want zero facts", got)
 	}
 	if att := work.AttributePane(nil, work.PaneFacts{}); att != nil {
