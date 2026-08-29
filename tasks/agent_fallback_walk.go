@@ -38,11 +38,11 @@ type agentRole struct {
 	// RetryEligible reports whether an invocation that ended without the role's
 	// answer should be retried on the current preset.
 	RetryEligible func(outcome *attemptOutcome, raw string) bool
-	// ReadOnly spawns this role's agents under the read-only agent posture. Only
-	// the Refiner sets it: it reads a checkout the Verifier has already passed
-	// on, where an edit of its own would arrive unattributed in work nobody
-	// re-verifies. The Verifier runs the build and the test suite and so keeps
-	// the posture it has always had (ADR-0221).
+	// ReadOnly spawns this role's agents under the read-only agent posture
+	// (ADR-0221). No role sets it today: the Refiner was its only consumer, and
+	// a Refiner that fixes in place cannot run without its editing tools
+	// (ADR-0240). The posture stays declared on every preset for the next
+	// role that wants to look without touching.
 	ReadOnly bool
 }
 

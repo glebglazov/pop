@@ -168,16 +168,20 @@ var taskVerifyCmd = &cobra.Command{
 
 var taskRefineCmd = &cobra.Command{
 	Use:   "refine TASK_SET",
-	Short: "Run an independent Refiner agent over a task set's changeset and write the Refine report",
+	Short: "Run an independent Refiner agent over a task set's changeset, fix what the convention licenses and write the Refine report",
 	Long: `Refine how a task set's changeset is written, against this repository's standard.
 
 The resolved refine convention is the pass's whole standard: pop supplies
 the role framing and the output expectation, and the convention says what to
-weigh. A fresh Refiner reads it, the previous Refine report when one exists,
-and the changeset itself — it is given the commit range and the set's diff --stat
-and reads the changed files in the checkout on its own. It reaches no verdict,
-gates nothing and changes no status: the whole output is one report a human
-acts on or ignores.
+weigh and what may be fixed. A fresh Refiner reads it, the previous Refine
+report when one exists, and the changeset itself — it is given the commit range
+and the set's diff --stat and reads the changed files in the checkout on its own.
+
+The pass writes. What the convention licenses the Refiner fixes in place, and
+pop lands everything it left in the working tree as one commit on the branch
+you are on, carrying a Pop-Refine trailer; a pass that fixed nothing commits
+nothing. What it did not fix it reports. It still reaches no verdict and gates
+nothing: no task's status changes either way.
 
 Each pass supersedes the last. Earlier reports are kept beside it under the
 set's task storage, which is outside the repository tree, so a report can never
