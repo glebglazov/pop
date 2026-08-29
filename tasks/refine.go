@@ -75,6 +75,9 @@ type RefineResult struct {
 	WorkSHA string
 	// Path is the Refine report written (or read, under Show).
 	Path string
+	// CommitSHA is the Refine commit the pass's in-place fixes landed as, empty
+	// when the pass fixed nothing and so committed nothing.
+	CommitSHA string
 	// Body is the document itself.
 	Body string
 }
@@ -189,15 +192,26 @@ func refineResolvedSet(d *Deps, cfg *config.Config, opts refineCoreOptions) (*Re
 	if err != nil {
 		return nil, err
 	}
+	// The reply carries two things: the subject pop commits the pass under, and
+	// the report itself. Splitting here keeps the subject out of the document a
+	// human reads — it is an instruction to pop, not a finding.
+	rendered, report := splitRefinerReply(body)
 	at := d.Now().UTC()
-	doc := renderRefineDocument(at, opts.SetID, workSHA, work.Range, agent, body)
+	doc := renderRefineDocument(at, opts.SetID, workSHA, work.Range, agent, report)
 	path, err := writeRefineDocument(d, m.Dir, at, doc)
 	if err != nil {
 		return nil, err
 	}
+	// The report is written before the commit so a git failure cannot cost the
+	// only account of what the pass did; the fixes themselves are still in the
+	// tree for a human to commit by hand.
+	commitSHA, err := commitRefinePass(d, cfg, opts.RuntimePath, opts.SetID, refineCommitSubject(m, opts.SetID, rendered))
+	if err != nil {
+		return nil, err
+	}
 	recordRefineEpisode(d, opts.Output, refineEpisodeRecord(opts.Repo, opts.SetID, workSHA, refineComposition(m), path, at))
-	printRefineWritten(opts.Output, opts.SetID, path, hasPrevious)
-	return &RefineResult{SetID: opts.SetID, WorkSHA: workSHA, Path: path, Body: doc}, nil
+	printRefineWritten(opts.Output, opts.SetID, path, commitSHA, hasPrevious)
+	return &RefineResult{SetID: opts.SetID, WorkSHA: workSHA, Path: path, CommitSHA: commitSHA, Body: doc}, nil
 }
 
 // showLatestRefine prints the set's current Refine report to the output
@@ -555,13 +569,16 @@ func ensureTrailingNewline(s string) string {
 // printRefineWritten tells the operator where the report went and how to read
 // it. It says nothing about what the pass found: the report is the whole
 // output, and a summary line here would be a verdict by another name.
-func printRefineWritten(w io.Writer, setID, path string, superseded bool) {
+func printRefineWritten(w io.Writer, setID, path, commitSHA string, superseded bool) {
 	if w == nil {
 		return
 	}
 	out := outputFor(w)
 	out.line(ansiBold, "━━ Refine for %s", setID)
 	out.line(ansiDim, "   Document: %s", path)
+	if commitSHA != "" {
+		out.line(ansiDim, "   Refine commit: %s", ShortSHA(commitSHA))
+	}
 	if superseded {
 		out.line(ansiDim, "   Supersedes the previous report; earlier documents are kept.")
 	}
@@ -586,6 +603,13 @@ func buildRefinerPrompt(d *Deps, m *Manifest, work workDiffView, convention stri
 	if convention != "" {
 		view.ConventionRecorded = true
 		view.Convention = convention
+	}
+	// The set's recorded Commit convention is what the Refiner renders its own
+	// commit's subject under. A set without one is asked for no subject at all,
+	// and its pass commits under pop's default format instead (ADR-0240).
+	if commits := strings.TrimSpace(m.CommitConvention); commits != "" {
+		view.CommitConventionRecorded = true
+		view.CommitConvention = commits
 	}
 	if hasPrevious && strings.TrimSpace(previous.Body) != "" {
 		view.PreviousRecorded = true
@@ -613,6 +637,10 @@ type refinerPromptView struct {
 	Tasks              []refinerTaskRow
 	WorkRange          string
 	WorkStat           string
+	// CommitConventionRecorded and CommitConvention carry the set's recorded
+	// Commit convention, the prose the Refiner renders its commit subject under.
+	CommitConventionRecorded bool
+	CommitConvention         string
 }
 
 // refinerTaskRow is one line of what the set set out to do. The titles are what

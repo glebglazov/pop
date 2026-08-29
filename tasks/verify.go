@@ -1294,11 +1294,12 @@ func verifierTaskRows(d *Deps, m *Manifest) []verifierTaskRow {
 	return rows
 }
 
-// verifierCommitSubjectMaxLen bounds a rendered subject at the length past which
+// agentCommitSubjectMaxLen bounds a rendered subject at the length past which
 // a line has stopped being a commit subject and become prose — a signal the
-// Verifier answered the wrong question, so the spawn drops it rather than
-// committing a paragraph as a subject.
-const verifierCommitSubjectMaxLen = 120
+// agent answered the wrong question, so the caller drops it rather than
+// committing a paragraph as a subject. Both agents that render a subject — the
+// Verifier for a Remediation task, the Refiner for its own pass — are held to it.
+const agentCommitSubjectMaxLen = 120
 
 // remediationCommitSubject resolves the Planned commit subject a Remediation
 // task is spawned with (ADR-0207). A set with no Commit convention gets none —
@@ -1310,24 +1311,24 @@ func remediationCommitSubject(m *Manifest, v *store.VerifyVerdict) string {
 	if m == nil || v == nil || strings.TrimSpace(m.CommitConvention) == "" {
 		return ""
 	}
-	return sanitizeVerifierCommitSubject(v.CommitSubject)
+	return sanitizeAgentCommitSubject(v.CommitSubject)
 }
 
-// sanitizeVerifierCommitSubject normalizes the Verifier's rendered subject into
+// sanitizeAgentCommitSubject normalizes an agent's rendered subject into
 // something committable, or returns "" when it is not one. The text is untrusted
 // agent output: it is reduced to its first line with whitespace collapsed and
 // the decoration agents habitually wrap a subject in (quotes, backticks)
 // stripped. An unrendered placeholder (`<type>(scope): summary`) and an
 // over-long line are both dropped — a malformed rendering degrades to the
 // default format and never blocks the remediation.
-func sanitizeVerifierCommitSubject(raw string) string {
+func sanitizeAgentCommitSubject(raw string) string {
 	line := strings.TrimSpace(raw)
 	if i := strings.IndexAny(line, "\r\n"); i >= 0 {
 		line = line[:i]
 	}
 	line = strings.Join(strings.Fields(line), " ")
 	line = strings.Trim(line, "`\"' \t")
-	if line == "" || utf8.RuneCountInString(line) > verifierCommitSubjectMaxLen {
+	if line == "" || utf8.RuneCountInString(line) > agentCommitSubjectMaxLen {
 		return ""
 	}
 	if strings.HasPrefix(line, "<") && strings.HasSuffix(line, ">") {
@@ -1346,7 +1347,7 @@ func parseVerifierCommitSubject(raw string) string {
 			break
 		}
 		if value, ok := commitSubjectLabelValue(line); ok {
-			return sanitizeVerifierCommitSubject(value)
+			return sanitizeAgentCommitSubject(value)
 		}
 	}
 	return ""

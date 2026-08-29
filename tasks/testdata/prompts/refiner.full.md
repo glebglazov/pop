@@ -50,7 +50,15 @@ CONVENTION refine
 
 Small functions; table-driven tests.
 
+## This repository's commit convention
+tasks(<set-slug>): <task-id> — imperative, lower case, no trailing period.
+
 ## Respond with the report and nothing else
+Start with one line, before the report:
+COMMIT-SUBJECT: <the subject pop commits your fixes under>
+
+It is the final, literal subject line, written in the convention above — a real message describing what you fixed, not a template or a placeholder. Write it on one line with no surrounding quotes or backticks, and write it only when you fixed something; a pass that fixed nothing is not committed. Then leave a blank line and write the report.
+
 Write the report as Markdown, starting at a `## ` heading. No preamble, no sign-off, no verdict line. It has two parts, in this order:
 
 - **Fixed** — what you changed, one entry per fix: the file, what was wrong, what you did. When you fixed nothing, say so in a sentence.

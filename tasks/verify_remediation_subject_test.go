@@ -152,7 +152,7 @@ func TestRemediationSubjectReachesTheCommitVerbatim(t *testing.T) {
 // about what is well-formed agent output.
 func TestParseVerifierCommitSubject(t *testing.T) {
 	t.Parallel()
-	long := "fix(auth): " + strings.Repeat("x", verifierCommitSubjectMaxLen)
+	long := "fix(auth): " + strings.Repeat("x", agentCommitSubjectMaxLen)
 	for _, tc := range []struct{ name, raw, want string }{
 		{"plain label", "VERDICT: FIXABLE\nCOMMIT-SUBJECT: " + renderedSubject + "\nFINDINGS: x", renderedSubject},
 		{"spaced and bolded label", "VERDICT: FIXABLE\n**COMMIT SUBJECT:** " + renderedSubject, renderedSubject},

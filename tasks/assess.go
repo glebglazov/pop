@@ -177,6 +177,28 @@ func TaskTrailer(taskSetID, taskID string) string {
 	return fmt.Sprintf("%s: %s/%s", TaskTrailerKey, taskSetID, taskID)
 }
 
+// RefineCommitSubject returns pop's default subject for a Refine commit — the
+// refine variant of the implementation format, used when the Refiner rendered
+// no subject of its own or the set records no Commit convention to render one
+// under (ADR-0240). The set is named without its timestamp prefix for the same
+// reason a task's subject is: the commit carries its own date.
+func RefineCommitSubject(taskSetID string) string {
+	return fmt.Sprintf("tasks(%s): refine", taskSetSlug(taskSetID))
+}
+
+// RefineTrailerKey is the git trailer key naming the Task set a Refine commit
+// belongs to (ADR-0240). It is its own key rather than Pop-Task's value with the
+// task half left off: a refine pass belongs to no task, and a distinct key lets
+// history be filtered for refine work without parsing subjects.
+const RefineTrailerKey = "Pop-Refine"
+
+// RefineTrailer returns the trailer line a Refine commit ends with. Like the
+// Task trailer, the identifier keeps its timestamp prefix so a reader matches it
+// against the Work store's own directory names.
+func RefineTrailer(taskSetID string) string {
+	return fmt.Sprintf("%s: %s", RefineTrailerKey, taskSetID)
+}
+
 // DirtyCheckpointSubject returns the checkpoint commit subject for dirty runtime state.
 func DirtyCheckpointSubject(taskSetID, taskID string) string {
 	return fmt.Sprintf("tasks(%s): %s capturing dirty state", taskSetSlug(taskSetID), taskID)
