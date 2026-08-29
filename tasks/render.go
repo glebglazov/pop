@@ -777,7 +777,24 @@ func renderTaskSetDetail(d *Deps, out *output, taskSetID string, row *Row, m *Ma
 		fmt.Fprintln(out, out.styled(taskStyle(m, task), line))
 	}
 
+	renderVerifyReportPointer(d, out, m)
 	renderArtifactSummarySection(d, out, taskSetID, m)
+}
+
+// renderVerifyReportPointer puts the set's latest Verify report where a human
+// reading the set is already looking: one line naming the document and the
+// commit it was written against, in the same shape the gate preamble prints
+// (ADR-0245). It answers why verification judged as it did; whether that
+// judgment still holds at HEAD stays the Verified-at badge's question, so the
+// line says nothing about staleness. A set that has never been verified renders
+// nothing.
+func renderVerifyReportPointer(d *Deps, out *output, m *Manifest) {
+	p, ok := latestVerifyPointer(d, m)
+	if !ok {
+		return
+	}
+	fmt.Fprintln(out)
+	out.line(ansiCyan, "🔍 %s", p.Summary())
 }
 
 // renderArtifactSummarySection points terminal users to the Artifact list while

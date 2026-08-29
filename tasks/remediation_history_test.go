@@ -311,7 +311,7 @@ func TestHITLGatePrintsRemediationReviewBlock(t *testing.T) {
 
 	var out strings.Builder
 	in := strings.NewReader("0\n")
-	_, err := promptHITLGateAction(&out, in, d, nil, "/rt", newPromptReader(in), "demo", m, &m.Tasks[2], "## Acceptance criteria\n\n- [ ] ok\n", nil, false, RefinePointer{}, false)
+	_, err := promptHITLGateAction(&out, in, d, nil, "/rt", newPromptReader(in), "demo", m, &m.Tasks[2], "## Acceptance criteria\n\n- [ ] ok\n", nil, false, RefinePointer{}, false, ReportPointer{}, false)
 	if err != nil {
 		t.Fatal(err)
 	}

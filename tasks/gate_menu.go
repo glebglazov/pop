@@ -115,6 +115,18 @@ func gateRefinePreamble(p RefinePointer, ok bool) []string {
 	return []string{"📝 " + p.Summary()}
 }
 
+// gateVerifyPreamble tells the same human that a Verify report of the set
+// exists, and against which commit — the pointer only, on the same terms as the
+// refine one above it (ADR-0245). It answers why verification judged as it did,
+// never whether the judgment still stands: that stays the Verified-at badge's
+// question. Returns no lines for a set that has never been verified.
+func gateVerifyPreamble(p ReportPointer, ok bool) []string {
+	if !ok {
+		return nil
+	}
+	return []string{"🔍 " + p.Summary()}
+}
+
 func joinPreamble(parts ...[]string) []string {
 	var out []string
 	for _, p := range parts {

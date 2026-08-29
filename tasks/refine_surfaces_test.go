@@ -38,8 +38,9 @@ func hitlGateOutput(t *testing.T, d *Deps, m *Manifest, input string) (string, h
 	var out strings.Builder
 	in := strings.NewReader(input)
 	refine, hasRefine := latestRefinePointer(d, m)
+	verify, hasVerify := latestVerifyPointer(d, m)
 	action, err := promptHITLGateAction(&out, in, d, nil, "/rt", newPromptReader(in), "demo", m, &m.Tasks[1],
-		"## Acceptance criteria\n\n- [ ] ok\n", nil, false, refine, hasRefine)
+		"## Acceptance criteria\n\n- [ ] ok\n", nil, false, refine, hasRefine, verify, hasVerify)
 	if err != nil {
 		t.Fatalf("promptHITLGateAction: %v", err)
 	}
@@ -137,7 +138,7 @@ func TestHITLGateReadRefineEntryPagesAndSpawnsNoAgent(t *testing.T) {
 		t.Fatal("expected a refine pointer")
 	}
 	var out bytes.Buffer
-	pageRefineDocument(d, strings.NewReader(""), "/rt", &out, refine)
+	pageReportDocument(d, strings.NewReader(""), "/rt", &out, refine)
 
 	if runner.attendedCalls != 1 {
 		t.Fatalf("expected exactly one attended launch (the pager), got %d", runner.attendedCalls)

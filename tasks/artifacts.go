@@ -31,8 +31,9 @@ type Artifact struct {
 }
 
 // Artifacts returns the closed list of Task-set artifacts in type-tier order:
-// every refine report first, newest-first among themselves, then the spec, then the
-// progress record (ADR-0220). Recency orders only the family that grows, so a
+// every verify report first, then every refine report — a verdict outranks a
+// polish note (ADR-0245) — each newest-first among themselves, then the spec,
+// then the progress record (ADR-0220). Recency orders only the family that grows, so a
 // drain rewriting progress.txt cannot move the row under a reader's cursor.
 func Artifacts(d *Deps, setDir string) ([]Artifact, error) {
 	if d == nil {
@@ -104,6 +105,7 @@ func Artifacts(d *Deps, setDir string) ([]Artifact, error) {
 // as numbers: a second report type takes its position by being listed here,
 // with nothing to renumber by hand.
 var artifactTierOrder = []string{
+	ArtifactTypeVerify,
 	ArtifactTypeRefine,
 	ArtifactTypeSpec,
 	ArtifactTypeProgress,
@@ -111,7 +113,7 @@ var artifactTierOrder = []string{
 
 // reportArtifactKinds are the pass reports the Artifact list scans for, in no
 // particular order — artifactTierOrder is what places them.
-var reportArtifactKinds = []passReport{refineReport}
+var reportArtifactKinds = []passReport{verifyReport, refineReport}
 
 // artifactTier ranks one artifact type within the tier order. An unrecognised
 // type sorts after every known one rather than jumping the reports, since the

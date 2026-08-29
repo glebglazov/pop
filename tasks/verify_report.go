@@ -150,3 +150,16 @@ func acceptedVerdictBody(note string, overridden *store.VerifyVerdict) string {
 	}
 	return b.String()
 }
+
+// latestVerifyPointer resolves the set's current Verify report as the human
+// surfaces carry it — where the document is and which commit it was written
+// against, never a line of what it says — and false when the set has never been
+// verified (ADR-0245).
+//
+// The pointer says nothing about whether the judgment still holds at HEAD: that
+// is the Verified-at SHA badge's question, and a second answer to it here would
+// be the second derivation ADR-0245 rejected. So a report older than HEAD is
+// pointed at exactly as one written against it is.
+func latestVerifyPointer(d *Deps, m *Manifest) (ReportPointer, bool) {
+	return verifyReport.latestPointer(d, m)
+}
