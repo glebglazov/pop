@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"github.com/glebglazov/pop/config"
+	"github.com/glebglazov/pop/internal/fanout"
 	"github.com/glebglazov/pop/store"
 )
 
@@ -100,10 +101,7 @@ func ApplyVerifyVerdictsForRendered(d *Deps, result *RefreshResult, cfg *config.
 		workSHA string
 	}
 	checkoutCache := map[string]checkoutInfo{}
-	resolveCheckout := func(runtimePath string) checkoutInfo {
-		if info, ok := checkoutCache[runtimePath]; ok {
-			return info
-		}
+	forkCheckout := func(runtimePath string) checkoutInfo {
 		info := checkoutInfo{}
 		if runtimePath != "" {
 			if id, err := ResolveRepositoryIdentity(d, runtimePath); err == nil {
@@ -111,8 +109,54 @@ func ApplyVerifyVerdictsForRendered(d *Deps, result *RefreshResult, cfg *config.
 			}
 		}
 		info.workSHA = verifyWorkSHA(d, runtimePath)
+		return info
+	}
+	resolveCheckout := func(runtimePath string) checkoutInfo {
+		if info, ok := checkoutCache[runtimePath]; ok {
+			return info
+		}
+		info := forkCheckout(runtimePath)
 		checkoutCache[runtimePath] = info
 		return info
+	}
+
+	// The forks are the poll's whole cost, and they are independent of each
+	// other, so every checkout the loop below will ask for is resolved up front
+	// and at once (ADR-0243). K distinct checkouts then cost one bounded fan-out
+	// instead of K serial pairs of forks, and each resolveCheckout inside the
+	// loop is a cache hit. The store lookups and the row decoration stay serial:
+	// they share a connection and a re-order flag, and they are not what the poll
+	// waits on.
+	//
+	// Only what the loop would have resolved is pre-resolved. pendingCheckout
+	// mirrors the loop's own skip conditions exactly, so a row that does not
+	// render, is not terminal, or is unplaced forks no git here either.
+	pendingCheckout := func(row Row) (string, bool) {
+		if !renders(row) || !TerminalStatus(row.Status) {
+			return "", false
+		}
+		runtimePath := runtimeForSet(row.ID)
+		return runtimePath, runtimePath != ""
+	}
+	var pendingPaths []string
+	for _, row := range result.Rows {
+		runtimePath, ok := pendingCheckout(row)
+		if !ok {
+			continue
+		}
+		if _, seen := checkoutCache[runtimePath]; seen {
+			continue
+		}
+		// A placeholder claims the path so two rows sharing one checkout enqueue
+		// it once; the fan-out's result overwrites it below.
+		checkoutCache[runtimePath] = checkoutInfo{}
+		pendingPaths = append(pendingPaths, runtimePath)
+	}
+	resolved, _ := fanout.Map(pendingPaths, func(runtimePath string) (checkoutInfo, error) {
+		return forkCheckout(runtimePath), nil
+	})
+	for i, runtimePath := range pendingPaths {
+		checkoutCache[runtimePath] = resolved[i]
 	}
 
 	changed := false

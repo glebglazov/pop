@@ -2,7 +2,9 @@ package tasks
 
 import (
 	"io"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -518,5 +520,87 @@ func TestRenderVerifiedAtBadge(t *testing.T) {
 	}
 	if got := rowDetail(colorOut, needs); !strings.Contains(got, ansiRed+"unverified") {
 		t.Fatalf("NEEDS-VERIFY color output should wrap unverified in red: %q", got)
+	}
+}
+
+// TestApplyVerifyVerdictsResolvesCheckoutsConcurrently drives the whole rendered
+// verdict pass and locks its git cost (ADR-0243): N rows spread over K distinct
+// checkouts fork git 2K times — one repository identity and one HEAD per
+// checkout — while a hidden, a non-terminal, and an unplaced row fork nothing.
+func TestApplyVerifyVerdictsResolvesCheckoutsConcurrently(t *testing.T) {
+	t.Parallel()
+	enabled := &config.Config{Work: &config.WorkConfig{Verify: &config.VerifyConfig{Enabled: true}}}
+
+	var mu sync.Mutex
+	commonDirDirs := map[string]int{}
+	headDirs := map[string]int{}
+	git := &deps.MockGit{CommandInDirFunc: func(dir string, args ...string) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case len(args) >= 2 && args[0] == "rev-parse" && args[1] == "--git-common-dir":
+			commonDirDirs[dir]++
+			return "/repo" + dir + "/.git\n", nil
+		case len(args) >= 2 && args[0] == "rev-parse" && args[1] == "HEAD":
+			headDirs[dir]++
+			return "shaCUR\n", nil
+		}
+		return "", nil
+	}}
+	d := newTestDeps(t)
+	d.Git = git
+
+	doneM := &Manifest{Valid: true, Stem: "d", Tasks: []Task{{ID: "01", File: "01.md", Type: "AFK", Status: "done"}}}
+	readyM := &Manifest{Valid: true, Stem: "r", Tasks: []Task{{ID: "01", File: "01.md", Type: "AFK", Status: "open"}}}
+
+	// Six rows: four terminal and rendered over three distinct checkouts (a and b
+	// share one), plus a hidden terminal row, a non-terminal row, and an unplaced
+	// terminal row — none of which may cost a fork.
+	runtimes := map[string]string{
+		"a": "/wt/one", "b": "/wt/one", "c": "/wt/two", "e": "/wt/three",
+		"hidden": "/wt/hidden", "ready": "/wt/ready", "unplaced": "",
+	}
+	rows := []Row{
+		buildTaskSetRow(RegisteredTaskSet{ID: "a"}, doneM, 0),
+		buildTaskSetRow(RegisteredTaskSet{ID: "b"}, doneM, 1),
+		buildTaskSetRow(RegisteredTaskSet{ID: "c"}, doneM, 2),
+		buildTaskSetRow(RegisteredTaskSet{ID: "e"}, doneM, 3),
+		buildTaskSetRow(RegisteredTaskSet{ID: "hidden"}, doneM, 4),
+		buildTaskSetRow(RegisteredTaskSet{ID: "ready"}, readyM, 5),
+		buildTaskSetRow(RegisteredTaskSet{ID: "unplaced"}, doneM, 6),
+	}
+	manifests := map[string]*Manifest{"ready": readyM}
+	for _, id := range []string{"a", "b", "c", "e", "hidden", "unplaced"} {
+		manifests[id] = doneM
+	}
+	result := &RefreshResult{Rows: rows, Manifests: manifests}
+
+	ApplyVerifyVerdictsForRendered(d, result, enabled,
+		func(setID string) string { return runtimes[setID] },
+		func(row Row) bool { return row.ID != "hidden" },
+	)
+
+	wantDirs := map[string]int{"/wt/one": 1, "/wt/two": 1, "/wt/three": 1}
+	if !reflect.DeepEqual(commonDirDirs, wantDirs) {
+		t.Fatalf("repository identity forks = %v, want %v (2K forks over K checkouts)", commonDirDirs, wantDirs)
+	}
+	if !reflect.DeepEqual(headDirs, wantDirs) {
+		t.Fatalf("HEAD forks = %v, want %v (2K forks over K checkouts)", headDirs, wantDirs)
+	}
+
+	// No verdict is stored, so every resolved row regresses; the rows that cost no
+	// fork keep their manifest-derived status.
+	for _, id := range []string{"a", "b", "c", "e"} {
+		if got := rowStatus(result, id); got != StatusNeedsVerify {
+			t.Fatalf("set %s status = %q, want NEEDS-VERIFY", id, got)
+		}
+	}
+	for _, id := range []string{"hidden", "unplaced"} {
+		if got := rowStatus(result, id); got != StatusDone {
+			t.Fatalf("set %s status = %q, want DONE (unresolved)", id, got)
+		}
+	}
+	if got := rowStatus(result, "ready"); got != StatusReady {
+		t.Fatalf("ready status = %q, want READY (unresolved)", got)
 	}
 }
