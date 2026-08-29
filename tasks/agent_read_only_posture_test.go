@@ -127,7 +127,7 @@ func TestNoRoleSpawnsUnderTheReadOnlyPosture(t *testing.T) {
 // do fixes better than one that discovers a tool is missing.
 func TestRefinerPromptStatesItsFixLicence(t *testing.T) {
 	prompt := buildRefinerPrompt(bareDeps(), goldenBareManifest(),
-		workDiffView{Range: "root000..HEAD", Stat: " a.go | 1 +"}, "", refineDocument{}, false)
+		workDiffView{Range: "root000..HEAD", Stat: " a.go | 1 +"}, "", passDocument{}, false)
 	if strings.Contains(prompt, "Change no files") {
 		t.Fatal("the Refiner prompt no longer forbids changing files")
 	}

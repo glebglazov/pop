@@ -17,8 +17,8 @@ const refineProse = "SECRET-REFINE-PROSE"
 func seedRefineReport(t *testing.T, d *Deps, m *Manifest) string {
 	t.Helper()
 	at := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
-	body := renderRefineDocument(at, "demo", "abc123abc123", "aaa111^..HEAD", "claude", "## Naming\n\n"+refineProse)
-	path, err := writeRefineDocument(d, m.Dir, at, body)
+	body := refineReport.renderDocument(at, "demo", "abc123abc123", "aaa111^..HEAD", "claude", "## Naming\n\n"+refineProse)
+	path, err := refineReport.writeDocument(d, m.Dir, at, body)
 	if err != nil {
 		t.Fatalf("writeRefineDocument: %v", err)
 	}

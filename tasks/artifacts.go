@@ -67,22 +67,23 @@ func Artifacts(d *Deps, setDir string) ([]Artifact, error) {
 		})
 	}
 
-	refineDir := filepath.Join(setDir, RefineDirName)
-	refines, err := d.FS.ReadDir(refineDir)
-	if err != nil && !os.IsNotExist(err) {
-		return nil, err
-	}
-	for _, entry := range refines {
-		at, ok := RefineFileInstant(entry.Name())
-		if entry.IsDir() || !ok {
-			continue
+	for _, report := range reportArtifactKinds {
+		documents, err := d.FS.ReadDir(report.dir(setDir))
+		if err != nil && !os.IsNotExist(err) {
+			return nil, err
 		}
-		artifacts = append(artifacts, Artifact{
-			Type: ArtifactTypeRefine,
-			Name: entry.Name(),
-			Path: filepath.Join(refineDir, entry.Name()),
-			At:   at,
-		})
+		for _, entry := range documents {
+			at, ok := report.fileInstant(entry.Name())
+			if entry.IsDir() || !ok {
+				continue
+			}
+			artifacts = append(artifacts, Artifact{
+				Type: report.ArtifactType,
+				Name: entry.Name(),
+				Path: filepath.Join(report.dir(setDir), entry.Name()),
+				At:   at,
+			})
+		}
 	}
 
 	sort.Slice(artifacts, func(i, j int) bool {
@@ -97,19 +98,29 @@ func Artifacts(d *Deps, setDir string) ([]Artifact, error) {
 	return artifacts, nil
 }
 
+// artifactTierOrder is the tier order itself, written as the order rather than
+// as numbers: a second report type takes its position by being listed here,
+// with nothing to renumber by hand.
+var artifactTierOrder = []string{
+	ArtifactTypeRefine,
+	ArtifactTypeSpec,
+	ArtifactTypeProgress,
+}
+
+// reportArtifactKinds are the pass reports the Artifact list scans for, in no
+// particular order — artifactTierOrder is what places them.
+var reportArtifactKinds = []passReport{refineReport}
+
 // artifactTier ranks one artifact type within the tier order. An unrecognised
-// type sorts after every known one rather than jumping the refine reports, since the
+// type sorts after every known one rather than jumping the reports, since the
 // list is closed and a new member has not earned a position yet.
 func artifactTier(artifactType string) int {
-	switch artifactType {
-	case ArtifactTypeRefine:
-		return 0
-	case ArtifactTypeSpec:
-		return 1
-	case ArtifactTypeProgress:
-		return 2
+	for tier, known := range artifactTierOrder {
+		if known == artifactType {
+			return tier
+		}
 	}
-	return 3
+	return len(artifactTierOrder)
 }
 
 // ArtifactSummary gives detail surfaces enough information to show that the

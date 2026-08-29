@@ -115,7 +115,7 @@ func TestRefinerPromptWithoutConventionKeepsTheFrame(t *testing.T) {
 	t.Parallel()
 	d, _, _ := setupRefineFixture(t, time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC))
 	prompt := buildRefinerPrompt(d, goldenBareManifest(),
-		workDiffView{Range: "root000..HEAD", Stat: " a.go | 1 +"}, "", refineDocument{}, false)
+		workDiffView{Range: "root000..HEAD", Stat: " a.go | 1 +"}, "", passDocument{}, false)
 	if strings.Contains(prompt, "The standard to hold this changeset against") {
 		t.Fatalf("no convention means no body section:\n%s", prompt)
 	}

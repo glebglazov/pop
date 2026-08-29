@@ -3,7 +3,6 @@ package tasks
 import (
 	"fmt"
 	"io"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -18,20 +17,20 @@ import (
 // work, so refine defaults where verification does.
 const DefaultRefineEffort = "heavy"
 
-// refineDirName is the sub-directory of a set's folder where Refine reports
-// accumulate. It sits under the Task-set directory, which lives in pop's Work
-// store rather than in the repository, so no report can ever be staged into a
-// commit (ADR-0214).
-const refineDirName = "refine"
-
-// refineFilePrefix and refineFileTimeLayout spell a Refine report's name. The
-// instant is in the file name rather than only in the document, because "the
-// latest" is resolved by timestamp and a directory listing must be able to
-// answer that without opening every file.
-const (
-	refineFilePrefix     = "refine-"
-	refineFileTimeLayout = "20060102T150405Z"
-)
+// refineReport is Refine's report family on the shared pass-report machinery
+// (ADR-0245): documents named `refine-<instant>.md` under the set's own
+// `refine/` directory, headed by the facts a reader needs to know what was
+// refined.
+var refineReport = passReport{
+	ArtifactType: ArtifactTypeRefine,
+	DirName:      RefineDirName,
+	FilePrefix:   "refine-",
+	Title:        "Refine report",
+	WrittenLabel: "Refined",
+	AgentLabel:   "Refiner",
+	Noun:         "refine",
+	PointerLabel: "Refine",
+}
 
 // RefineConvention resolves this repository's `refine` Convention stack as
 // the prose a Refiner is handed. It is a seam rather than a direct call: the
@@ -182,7 +181,7 @@ func refineResolvedSet(d *Deps, cfg *config.Config, opts refineCoreOptions) (*Re
 	if err != nil {
 		return nil, err
 	}
-	previous, hasPrevious := latestRefineDocument(d, m.Dir)
+	previous, hasPrevious := refineReport.latestDocument(d, m.Dir)
 	convention := resolveRefineConvention(opts)
 	// The work SHA is read before the Refiner runs: it is the commit the report
 	// describes, and the Refiner that moved it would be doing something a refine
@@ -197,8 +196,8 @@ func refineResolvedSet(d *Deps, cfg *config.Config, opts refineCoreOptions) (*Re
 	// human reads — it is an instruction to pop, not a finding.
 	rendered, report := splitRefinerReply(body)
 	at := d.Now().UTC()
-	doc := renderRefineDocument(at, opts.SetID, workSHA, work.Range, agent, report)
-	path, err := writeRefineDocument(d, m.Dir, at, doc)
+	doc := refineReport.renderDocument(at, opts.SetID, workSHA, work.Range, agent, report)
+	path, err := refineReport.writeDocument(d, m.Dir, at, doc)
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +217,7 @@ func refineResolvedSet(d *Deps, cfg *config.Config, opts refineCoreOptions) (*Re
 // verbatim — no chrome, no ANSI — because the whole point of `--show` is that
 // its stdout is pasteable into a pull request.
 func showLatestRefine(d *Deps, opts refineCoreOptions, m *Manifest) (*RefineResult, error) {
-	doc, ok := latestRefineDocument(d, m.Dir)
+	doc, ok := refineReport.latestDocument(d, m.Dir)
 	if !ok {
 		return nil, exitErr(ExitSetup, "task set %q has no refine report yet; run `pop tasks refine %s` first", opts.SetID, opts.SetID)
 	}
@@ -280,7 +279,7 @@ func resolveRefineConvention(opts refineCoreOptions) string {
 
 // runRefiner builds the prompt and invokes the Refiner, returning the document
 // and the agent that wrote it.
-func runRefiner(d *Deps, cfg *config.Config, opts refineCoreOptions, m *Manifest, workSHA string, work workDiffView, convention string, previous refineDocument, hasPrevious bool) (string, string, error) {
+func runRefiner(d *Deps, cfg *config.Config, opts refineCoreOptions, m *Manifest, workSHA string, work workDiffView, convention string, previous passDocument, hasPrevious bool) (string, string, error) {
 	text := buildRefinerPrompt(d, m, work, convention, previous, hasPrevious)
 	run := opts.runRefiner
 	if run == nil {
@@ -443,120 +442,12 @@ func refineEnabled(cfg *config.Config) bool {
 	return cfg.RefineSettings() != nil && cfg.RefineSettings().Enabled
 }
 
-// refineDocument is one Refine report on disk: where it is, when it was
-// written, and what it says.
-type refineDocument struct {
-	Path string
-	At   time.Time
-	Body string
-}
-
-// latestRefineDocument returns the set's current report — the one with the
-// newest timestamp in its name — and false when the set has never been refined.
-// Every earlier document stays where it is; superseding is a matter of which one
-// the readers take, not of deleting the ones before it (ADR-0214).
-func latestRefineDocument(d *Deps, setDir string) (refineDocument, bool) {
-	dir := filepath.Join(setDir, refineDirName)
-	entries, err := d.FS.ReadDir(dir)
-	if err != nil {
-		return refineDocument{}, false
-	}
-	var found refineDocument
-	ok := false
-	for _, entry := range entries {
-		at, isRefine := RefineFileInstant(entry.Name())
-		if entry.IsDir() || !isRefine {
-			continue
-		}
-		if ok && !at.After(found.At) {
-			continue
-		}
-		found, ok = refineDocument{Path: filepath.Join(dir, entry.Name()), At: at}, true
-	}
-	if !ok {
-		return refineDocument{}, false
-	}
-	body, err := d.FS.ReadFile(found.Path)
-	if err != nil {
-		return refineDocument{}, false
-	}
-	found.Body = strings.TrimSpace(string(body))
-	return found, true
-}
-
 // RefineFileInstant reads a Refine report's name back as the instant it was
 // written, and false for anything else in the directory. It is exported so the
 // Task-set Work kind can use the report's own timestamp as its Artifact
 // ordering key instead of duplicating the filename contract.
 func RefineFileInstant(name string) (time.Time, bool) {
-	stamp, ok := strings.CutPrefix(name, refineFilePrefix)
-	if !ok {
-		return time.Time{}, false
-	}
-	stamp, ok = strings.CutSuffix(stamp, ".md")
-	if !ok {
-		return time.Time{}, false
-	}
-	at, err := time.Parse(refineFileTimeLayout, stamp)
-	if err != nil {
-		return time.Time{}, false
-	}
-	return at, true
-}
-
-// writeRefineDocument files a new Refine report under the set's refine/
-// directory and returns its path. A name already taken (two reports inside one
-// second) advances the instant rather than overwriting: retention is the whole
-// point of the directory, and the names are also the ordering.
-func writeRefineDocument(d *Deps, setDir string, at time.Time, body string) (string, error) {
-	dir := filepath.Join(setDir, refineDirName)
-	if err := d.FS.MkdirAll(dir, 0o755); err != nil {
-		return "", exitErr(ExitOperational, "create refine directory: %v", err)
-	}
-	at = at.UTC().Truncate(time.Second)
-	taken := map[string]bool{}
-	if entries, err := d.FS.ReadDir(dir); err == nil {
-		for _, entry := range entries {
-			taken[entry.Name()] = true
-		}
-	}
-	name := refineFilePrefix + at.Format(refineFileTimeLayout) + ".md"
-	for taken[name] {
-		at = at.Add(time.Second)
-		name = refineFilePrefix + at.Format(refineFileTimeLayout) + ".md"
-	}
-	path := filepath.Join(dir, name)
-	if err := d.FS.WriteFile(path, []byte(ensureTrailingNewline(body)), 0o644); err != nil {
-		return "", exitErr(ExitOperational, "write refine report: %v", err)
-	}
-	return path, nil
-}
-
-// renderRefineDocument wraps the Refiner's prose in the four facts a reader
-// needs to know what was refined: which set, at which commits, by whom and
-// when. They ride the document rather than a side-car because the document
-// leaves pop the moment a human pipes it somewhere.
-//
-// The Work SHA line is the report's own answer to which tree it describes: the
-// pass's edits sit on top of that commit, so a reader who wants the state the
-// report was written against checks out the SHA and applies nothing else. It is
-// stamped here rather than asked of the Refiner, because pop read it before the
-// pass began and the Refiner would only be copying it back.
-func renderRefineDocument(at time.Time, setID, workSHA, commitRange, agent, body string) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "# Refine report — %s\n\n", setID)
-	fmt.Fprintf(&b, "- Refined: %s\n", at.UTC().Format(time.RFC3339))
-	if commitRange != "" {
-		fmt.Fprintf(&b, "- Commit range: %s\n", commitRange)
-	}
-	if workSHA != "" {
-		fmt.Fprintf(&b, "- Work SHA: %s\n", ShortSHA(workSHA))
-	}
-	if strings.TrimSpace(agent) != "" {
-		fmt.Fprintf(&b, "- Refiner: %s\n", strings.TrimSpace(agent))
-	}
-	fmt.Fprintf(&b, "\n%s", ensureTrailingNewline(strings.TrimSpace(body)))
-	return b.String()
+	return refineReport.fileInstant(name)
 }
 
 func ensureTrailingNewline(s string) string {
@@ -593,7 +484,7 @@ func printRefineWritten(w io.Writer, setID, path, commitSHA string, superseded b
 // checkout it describes and reads the changed files itself, which is the
 // deliberate divergence from how the Verifier is prompted: naming, structure and
 // idiom cannot be judged from a file-name-and-linecount table (ADR-0214).
-func buildRefinerPrompt(d *Deps, m *Manifest, work workDiffView, convention string, previous refineDocument, hasPrevious bool) string {
+func buildRefinerPrompt(d *Deps, m *Manifest, work workDiffView, convention string, previous passDocument, hasPrevious bool) string {
 	view := refinerPromptView{
 		TaskSet:   m.Stem,
 		WorkRange: work.Range,

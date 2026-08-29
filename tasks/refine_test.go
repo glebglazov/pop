@@ -42,7 +42,7 @@ func refineOpts(defPath string, out *bytes.Buffer, run func(prompt string) (stri
 
 func listRefineFiles(t *testing.T, setDir string) []string {
 	t.Helper()
-	entries, err := os.ReadDir(filepath.Join(setDir, refineDirName))
+	entries, err := os.ReadDir(filepath.Join(setDir, RefineDirName))
 	if err != nil {
 		return nil
 	}
@@ -95,7 +95,7 @@ func TestRefineWritesReportFromAPromptCarryingEverything(t *testing.T) {
 
 	// The report is written under the set's own refine/ directory — task
 	// storage, never the checkout it describes.
-	wantPath := filepath.Join(setDir, refineDirName, "refine-20260816T120000Z.md")
+	wantPath := filepath.Join(setDir, RefineDirName, "refine-20260816T120000Z.md")
 	if res.Path != wantPath {
 		t.Fatalf("path = %q, want %q", res.Path, wantPath)
 	}
