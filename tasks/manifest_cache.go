@@ -40,20 +40,44 @@ func persistedManifestEntry(d *Deps, dir, contentKey string) (*Manifest, bool) {
 	return record.manifest(), true
 }
 
-// persistManifestEntry records m as dir's manifest under contentKey, replacing
-// dir's previous row.
+// persistManifestEntry makes the persisted tier carry m as dir's manifest under
+// contentKey, at most once per key per cache handle.
+//
+// It is called on a process-tier hit as well as on a miss, because a hit says
+// nothing about the row on disk. The **Work supervisor** is why that matters: it
+// ticks for days holding one process tier, so a set validated on its first tick
+// would otherwise be offered to the cache exactly once — and a human who deletes
+// cache.db to repair it (a supported repair) would get a fresh database that
+// every dashboard opens cold until the daemon restarts.
+//
+// The once-per-handle bookkeeping is what keeps that cheap: without it a warm
+// poll would upsert every set it walks, every two seconds, forever. A write that
+// does not land is not remembered, so the next tick offers it again.
 func persistManifestEntry(d *Deps, dir, contentKey string, m *Manifest) {
-	cache := d.CacheDB()
-	if cache == nil {
+	warmed := d.cacheDBWarmed()
+	if warmed == nil {
 		// Nothing to persist to, and the encode is worth skipping: a machine with
 		// no usable cache pays this on every set of every walk.
+		return
+	}
+	if _, written := warmed.Get(contentKey); written {
 		return
 	}
 	payload, err := json.Marshal(newPersistedManifest(m))
 	if err != nil {
 		return
 	}
-	cache.PutManifestEntry(dir, contentKey, payload)
+	if d.CacheDB().PutManifestEntry(dir, contentKey, payload) {
+		warmed.Put(contentKey, struct{}{})
+	}
+}
+
+// markManifestPersisted records that the persisted tier already carries
+// contentKey, so serving from it does not schedule a write of what was just read.
+func markManifestPersisted(d *Deps, contentKey string) {
+	if warmed := d.cacheDBWarmed(); warmed != nil {
+		warmed.Put(contentKey, struct{}{})
+	}
 }
 
 // persistedManifest is the stored shape of a manifest: a total mirror of

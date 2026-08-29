@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/glebglazov/pop/internal/deps"
 	"github.com/glebglazov/pop/store"
 )
 
@@ -48,6 +49,12 @@ type cacheDBHolder struct {
 	path   string
 	handle *store.Cache
 	failed bool
+	// warmed names the content keys this process has already written through
+	// handle. It is allocated with the handle and dropped with it, which is what
+	// makes `rm cache.db` under a running daemon a repair rather than a permanent
+	// cold cache: the fresh database is warmed again from the first tick, because
+	// nothing is remembered as written to it.
+	warmed *deps.ContentMemo[struct{}]
 }
 
 // depsCacheDBInitMu guards the lazy allocation of the holder for a Deps built
@@ -113,19 +120,38 @@ func (d *Deps) CacheDB() *store.Cache {
 	if err != nil {
 		return nil
 	}
-	c.handle, c.failed = h, false
+	c.handle, c.failed, c.warmed = h, false, deps.NewContentMemo[struct{}](manifestMemoCapacity)
 	return h
 }
 
+// cacheDBWarmed returns the keys this process has already written through the
+// current handle, opening the cache if it is not open yet. It returns nil when
+// there is no cache to warm, so a caller reads it exactly as it reads the handle
+// itself: nothing there means write, and a write that goes nowhere is a miss.
+//
+// A bounded LRU rather than a plain map, and for the memo's own reason: the
+// daemon holds this for days and a human editing task files mints a fresh key on
+// every save. Past the bound the least-recently-written key is forgotten and
+// simply offered again, which costs one upsert of a row that is already correct.
+func (d *Deps) cacheDBWarmed() *deps.ContentMemo[struct{}] {
+	if d.CacheDB() == nil {
+		return nil
+	}
+	c := d.cacheDBHolder()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.warmed
+}
+
 // CloseCacheDB closes the process-cached Cache handle and drops it, so the next
-// CacheDB call reopens. The queue daemon loop and test cleanup call it; one-shot
-// CLI runs rely on process exit, which is WAL-safe.
+// CacheDB call reopens. Test cleanup calls it; the daemon and one-shot CLI runs
+// rely on process exit, which is WAL-safe.
 func (d *Deps) CloseCacheDB() error {
 	c := d.cacheDBHolder()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	err := c.handle.Close()
-	c.handle, c.failed, c.path = nil, false, ""
+	c.handle, c.failed, c.path, c.warmed = nil, false, "", nil
 	return err
 }
 

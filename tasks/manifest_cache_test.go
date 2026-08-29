@@ -328,3 +328,60 @@ func TestPersistedManifestRoundTripsEveryDistinction(t *testing.T) {
 		t.Fatalf("an empty manifest did not round trip: %#v", got)
 	}
 }
+
+// dataVersion is how many times other connections have committed to the cache:
+// SQLite bumps it on this connection for every write another one lands. It is
+// the cheapest honest way to watch a writer that reports nothing.
+func dataVersion(t *testing.T, observer *sql.DB) int64 {
+	t.Helper()
+	var version int64
+	if err := observer.QueryRow(`PRAGMA data_version`).Scan(&version); err != nil {
+		t.Fatalf("read data_version: %v", err)
+	}
+	return version
+}
+
+// The persisted tier is offered the answer on every walk — a process-tier hit is
+// no evidence the row on disk exists — but it is written once per key, because
+// the alternative is a poll that upserts every set it walks every two seconds
+// for as long as the daemon lives.
+func TestPersistedTierIsOfferedEveryWalkAndWrittenOncePerKey(t *testing.T) {
+	withManifestMemo(t, 8)
+	root := t.TempDir()
+	setDir := filepath.Join(root, "demo")
+	setupManifest(t, root, "demo", []Task{
+		{ID: "01-a", File: "01-a.md", Title: "A", Type: "AFK", Status: "open"},
+	})
+	d, _ := countingDeps(t, root)
+	manifestPath := filepath.Join(setDir, ManifestFileName)
+
+	if !LoadManifest(d, "demo", manifestPath).Valid {
+		t.Fatal("first load invalid")
+	}
+	observer, err := sql.Open("sqlite", "file:"+CacheDBPathWith(d))
+	if err != nil {
+		t.Fatalf("open the cache database: %v", err)
+	}
+	defer func() { _ = observer.Close() }()
+	quiet := dataVersion(t, observer)
+
+	for i := 0; i < 5; i++ {
+		LoadManifest(d, "demo", manifestPath)
+	}
+	if got := dataVersion(t, observer); got != quiet {
+		t.Fatalf("a warm walk wrote to the cache (data_version %d -> %d); a poll must not upsert what it did not derive", quiet, got)
+	}
+
+	// A new key is a new answer, and it is written whether or not the process
+	// remembers writing the old one.
+	writeTaskMD(t, setDir, "01-a.md", "## Acceptance criteria\n\n- [x] ok\n")
+	if !LoadManifest(d, "demo", manifestPath).Valid {
+		t.Fatal("load after the edit invalid")
+	}
+	if got := dataVersion(t, observer); got == quiet {
+		t.Fatal("an edited set was never written to the persisted tier")
+	}
+	if rows, _ := persistedRows(t, d, setDir); rows != 1 {
+		t.Fatalf("rows for the edited set = %d, want 1", rows)
+	}
+}

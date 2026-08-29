@@ -304,10 +304,15 @@ func LoadManifest(d *Deps, stem, manifestPath string) *Manifest {
 			// The stem is the caller's name for the set, not something the directory
 			// says, so it is the one field a hit must not inherit.
 			served.Stem = stem
+			// A hit here is not evidence the row on disk exists: the supervisor holds
+			// this tier for the life of the daemon, so the tier below is offered the
+			// answer on every walk and writes it at most once (ADR-0243 decision 3).
+			persistManifestEntry(d, m.Dir, key, served)
 			return served
 		}
 		if served, hit := persistedManifestEntry(d, m.Dir, key); hit {
 			served.Stem = stem
+			markManifestPersisted(d, key)
 			// Promoted into the process tier, so the second walk of this set costs a
 			// map lookup rather than a query and a decode.
 			manifestMemo.Put(key, served.clone())

@@ -41,17 +41,22 @@ func (c *Cache) ManifestEntry(dir, contentKey string) ([]byte, bool) {
 }
 
 // PutManifestEntry records payload as dir's validated manifest under contentKey,
-// replacing whatever dir held before. Failure — a lost WAL race, a full disk, no
-// cache at all — is dropped: the next reader simply misses and re-validates,
-// which is the behaviour of having no cache and never an error a human sees
-// (ADR-0243 decision 4).
-func (c *Cache) PutManifestEntry(dir, contentKey string, payload []byte) {
+// replacing whatever dir held before, and reports whether the row landed.
+// Failure — a lost WAL race, a full disk, no cache at all — is dropped: the next
+// reader simply misses and re-validates, which is the behaviour of having no
+// cache and never an error a human sees (ADR-0243 decision 4).
+//
+// The bool is not an error in disguise: no caller may act on why a cache write
+// failed, only on whether the answer is on disk yet. A writer that skips rows it
+// has already written needs that much, so it offers a dropped one again.
+func (c *Cache) PutManifestEntry(dir, contentKey string, payload []byte) bool {
 	if c == nil || c.db == nil {
-		return
+		return false
 	}
-	_, _ = c.db.Exec(
+	_, err := c.db.Exec(
 		`INSERT INTO manifest_entries (dir, content_key, manifest) VALUES (?, ?, ?)
 		 ON CONFLICT(dir) DO UPDATE SET content_key = excluded.content_key, manifest = excluded.manifest`,
 		dir, contentKey, payload,
 	)
+	return err == nil
 }
