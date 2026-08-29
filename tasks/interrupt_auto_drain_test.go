@@ -146,9 +146,9 @@ func TestDrainInterruptedInVerifyPhaseClearsAutoDrain(t *testing.T) {
 	}
 }
 
-// TestDrainInterruptedInRefinePhaseClearsAutoDrain: the refine phase is the last
-// step before the terminal switch and the human's interrupt is the only directive
-// it hands back, so it is the drain's last uncovered interrupt exit.
+// TestDrainInterruptedInRefinePhaseClearsAutoDrain: the refine phase opens the
+// drain's quiescence branch and the human's interrupt is the only directive it
+// hands back, so it is the drain's last uncovered interrupt exit.
 func TestDrainInterruptedInRefinePhaseClearsAutoDrain(t *testing.T) {
 	t.Parallel()
 	env := setupDrainRefineFixture(t, signOffSet())

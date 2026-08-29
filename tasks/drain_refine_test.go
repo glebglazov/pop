@@ -3,6 +3,7 @@ package tasks
 import (
 	"bytes"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,8 +13,8 @@ import (
 	"github.com/glebglazov/pop/store"
 )
 
-// refineEnabledConfig switches on both drain phases the refine step sits behind:
-// refine runs after verification, so a test that pins the order needs both.
+// refineEnabledConfig switches on both drain phases the refine step sits beside:
+// refine runs before verification, so a test that pins the order needs both.
 func refineEnabledConfig() *config.Config {
 	return &config.Config{Work: &config.WorkConfig{
 		Verify: &config.VerifyConfig{Enabled: true},
@@ -48,11 +49,11 @@ func refineDocuments(t *testing.T, env *runTaskSetFixture) []string {
 	return listRefineFiles(t, filepath.Join(env.tasksDir, "demo"))
 }
 
-// TestDrainRefinesOnceAfterVerifyAndBeforeTheTerminalSwitch drives the whole
-// step: an enabled drain refines after the verify phase and before the terminal
-// switch hands the set to a human, and the second arrival at quiescence in the
-// same episode refines nothing.
-func TestDrainRefinesOnceAfterVerifyAndBeforeTheTerminalSwitch(t *testing.T) {
+// TestDrainRefinesBeforeVerifyAndOnlyOncePerEpisode drives the whole step: an
+// enabled drain refines before the verify phase, so the Verifier judges the
+// refined tree, and the second arrival at quiescence in the same episode refines
+// nothing.
+func TestDrainRefinesBeforeVerifyAndOnlyOncePerEpisode(t *testing.T) {
 	t.Parallel()
 	env := setupDrainRefineFixture(t, signOffSet())
 	var phases []string
@@ -81,27 +82,28 @@ func TestDrainRefinesOnceAfterVerifyAndBeforeTheTerminalSwitch(t *testing.T) {
 		t.Fatalf("result = %+v, want the completed sign-off to reach DONE", result)
 	}
 
-	// Ordering: the Verifier judged the set before the Refiner described it, and
-	// the second arrival at quiescence spawned neither.
-	if strings.Join(phases, ",") != "verify,refine" {
-		t.Fatalf("phases = %v, want the refine pass after exactly one verification", phases)
+	// Ordering: the Refiner fixed the set before the Verifier judged it, so the
+	// pass's edits are part of the tree the verdict covers — and the second
+	// arrival at quiescence spawned neither.
+	if strings.Join(phases, ",") != "refine,verify" {
+		t.Fatalf("phases = %v, want exactly one refine pass before one verification", phases)
 	}
 	if docs := refineDocuments(t, env); len(docs) != 1 {
 		t.Fatalf("refine documents = %v, want exactly one", docs)
 	}
 
-	// Placement: the report is written before the terminal switch opens the
-	// sign-off gate, so the human deciding is looking at a report of the tree
-	// they are approving.
+	// Placement: the report is written before the verdict, and both before the
+	// terminal switch opens the sign-off gate, so the human deciding is looking
+	// at a report of the tree they are approving.
 	out := buf.String()
 	refine := strings.Index(out, "━━ Refine for demo")
 	verdict := strings.Index(out, "━━ Verify verdict for demo")
 	gate := strings.Index(out, "Complete task")
 	if refine < 0 || verdict < 0 || gate < 0 {
-		t.Fatalf("output missing a phase (verdict=%d refine=%d gate=%d):\n%s", verdict, refine, gate, out)
+		t.Fatalf("output missing a phase (refine=%d verdict=%d gate=%d):\n%s", refine, verdict, gate, out)
 	}
-	if !(verdict < refine && refine < gate) {
-		t.Fatalf("phases out of order (verdict=%d refine=%d gate=%d):\n%s", verdict, refine, gate, out)
+	if !(refine < verdict && verdict < gate) {
+		t.Fatalf("phases out of order (refine=%d verdict=%d gate=%d):\n%s", refine, verdict, gate, out)
 	}
 
 	// Refine spawns no work, which is why its episode needs no carve-out: the
@@ -281,6 +283,12 @@ func TestRefineEpisodeArmsOnNewDoneAFKWork(t *testing.T) {
 			name: "a verify-spawned remediation task landing",
 			tasks: append(append([]Task{}, refined...),
 				Task{ID: "02-remediation", File: "02-remediation.md", Title: "Fix findings", Type: "AFK", Status: "done"}),
+			want: false,
+		},
+		{
+			name: "planned agent work finishing beside it",
+			tasks: append(append([]Task{}, refined...),
+				Task{ID: "02-b", File: "02-b.md", Title: "B", Type: "AFK", Status: "done"}),
 			want: true,
 		},
 	}
@@ -378,5 +386,153 @@ func TestRefineEpisodeStoreRoundTrip(t *testing.T) {
 	}
 	if episode.Composition != "01-a\n02-b" {
 		t.Fatalf("composition = %q, want the latest report's", episode.Composition)
+	}
+}
+
+// TestDrainRefinesOnceAcrossARemediationLap is the episode carve-out end to end:
+// refine → verify → FIXABLE → remediation → re-verify. The Remediation task
+// finishing is done-AFK work, and before the carve-out it re-armed the episode
+// and put a second heavy refine pass inside the cheapest iteration in the drain.
+// One pass, two verifications.
+func TestDrainRefinesOnceAcrossARemediationLap(t *testing.T) {
+	env := setupDrainRefineFixture(t, openAFKSet())
+	// Each task appends to a tracked file, so a completed task moves HEAD and the
+	// re-verify runs at a fresh work SHA rather than off the cached verdict.
+	agent := writeFakeAgent(t, env.root, fakeAgentConfig{changeFile: "work.txt", changeData: "x\n", checkTask: true, summary: "done"})
+	d := env.deps()
+	d.ProcessAlive = func(pid int) bool { return pid == os.Getpid() }
+
+	verifies := 0
+	refines := 0
+	var buf bytes.Buffer
+	opts := env.runTaskSetOpts(true, agent, &buf)
+	opts.TaskSetOverride = "demo"
+	opts.verifyRunner = func(string) (string, error) {
+		verifies++
+		if verifies == 1 {
+			return "VERDICT: FIXABLE\nFINDINGS: criterion 2 unmet\n", nil
+		}
+		return "VERDICT: PASS\n", nil
+	}
+	opts.refineRunner = func(string) (string, string, error) {
+		refines++
+		return "## Fixed\n\nNothing worth naming.", "claude", nil
+	}
+
+	result, err := RunTaskSetWith(d, nil, func(string) (*config.Config, error) {
+		return refineEnabledConfig(), nil
+	}, opts)
+	if err != nil {
+		t.Fatalf("RunTaskSetWith: %v", err)
+	}
+	if !result.TaskSetDone {
+		t.Fatalf("result = %+v, want DONE after remediation and a re-verify PASS", result)
+	}
+	if verifies != 2 {
+		t.Fatalf("verifier calls = %d, want 2 (initial FIXABLE, then re-verify)", verifies)
+	}
+	if refines != 1 {
+		t.Fatalf("refine passes = %d, want 1 — a remediation lap must not re-arm the episode", refines)
+	}
+	if docs := refineDocuments(t, env); len(docs) != 1 {
+		t.Fatalf("refine documents = %v, want exactly one", docs)
+	}
+
+	// The lap really happened: the carve-out is about a Remediation task that
+	// landed, not about one that was never spawned.
+	m := LoadManifest(d, "demo", filepath.Join(env.tasksDir, "demo", "index.json"))
+	if refineComposition(m) != "01-a" {
+		t.Fatalf("composition = %q, want the planned work alone", refineComposition(m))
+	}
+	var rem *Task
+	for i := range m.Tasks {
+		if m.Tasks[i].ID == "02-remediation" {
+			rem = &m.Tasks[i]
+		}
+	}
+	if rem == nil || rem.Status != "done" {
+		t.Fatalf("remediation task = %+v, want one drained to done", rem)
+	}
+}
+
+// TestHumanCompletedSetIsRefinedOnlyByHand: the drain never edits code a human
+// declared done, so the automatic phase skips a human-completed set entirely —
+// while `pop tasks refine` still refines it, because that is the human
+// re-opening the question.
+func TestHumanCompletedSetIsRefinedOnlyByHand(t *testing.T) {
+	t.Parallel()
+	env := setupRunTaskSetFixtureWithKeys(t, "demo", doneAFKSet(), nil)
+	d := env.deps()
+	d.ProcessAlive = func(pid int) bool { return pid == os.Getpid() }
+	_, runtimePath, head := runtimeHead(t, d, env.root)
+	writeManifestWithSetKeys(t, filepath.Join(env.tasksDir, "demo"), doneAFKSet(),
+		map[string]any{"base_commit": head, "human_completed": true})
+
+	handle, err := BeginDrain(d, runtimePath, "demo", io.Discard)
+	if err != nil {
+		t.Fatalf("BeginDrain: %v", err)
+	}
+	finalized := false
+	t.Cleanup(func() {
+		if !finalized {
+			finalizeDrain(handle, drainOutcome{})
+		}
+	})
+
+	var buf bytes.Buffer
+	run := &implementRun{
+		d:           d,
+		plan:        &runPlan{cfg: refineEnabledConfig()},
+		resolved:    &ResolvedPaths{DefinitionPath: env.tasksDir},
+		runtimePath: runtimePath,
+		taskSetID:   "demo",
+		confirmOut:  io.Discard,
+		out:         &buf,
+		timeout:     time.Minute,
+		drain:       handle,
+		result:      &RunTaskSetResult{TaskSetID: "demo"},
+		opts: RunTaskSetOptions{Yes: true, refineRunner: func(string) (string, string, error) {
+			t.Fatal("the drain must not refine a set a human completed")
+			return "", "", nil
+		}},
+	}
+	refresh, err := RefreshWith(d, env.tasksDir, DefaultStatePathWith(d))
+	if err != nil {
+		t.Fatalf("RefreshWith: %v", err)
+	}
+	row := findRow(refresh, "demo")
+	if row == nil || row.Status != StatusDone {
+		t.Fatalf("fixture row = %+v, want a DONE set", row)
+	}
+
+	directive, err := run.refinePhase(refresh, row)
+	if err != nil || directive != refineFallThrough {
+		t.Fatalf("refinePhase = (%d, %v), want a clean fall-through", directive, err)
+	}
+	if docs := refineDocuments(t, env); len(docs) != 0 {
+		t.Fatalf("the drain wrote %v for a human-completed set", docs)
+	}
+
+	// By hand it is a full pass: the Refiner's fixes are committed and the report
+	// is written, on the same set the drain declined to touch. The drain is over
+	// by then, so the hand pass takes the checkout for itself the way the command
+	// does.
+	finalizeDrain(handle, drainOutcome{})
+	finalized = true
+	_, _, before := runtimeHead(t, d, env.root)
+	res, err := refineResolvedSet(d, nil, refinePassOpts(env, &buf,
+		fixingRefiner(t, env.root, "refined.md",
+			"COMMIT-SUBJECT: "+refinedSubject+"\n\n## Fixed\n\n- refined.md: named it properly.")))
+	if err != nil {
+		t.Fatalf("`pop tasks refine` must run on a human-completed set: %v", err)
+	}
+	if res.CommitSHA == "" {
+		t.Fatal("a hand pass on a human-completed set must still commit what it fixed")
+	}
+	if made := commitsSince(t, env.root, before); len(made) != 1 {
+		t.Fatalf("commits made = %v, want the one refine commit", made)
+	}
+	if docs := refineDocuments(t, env); len(docs) != 1 {
+		t.Fatalf("refine documents = %v, want the hand pass's one", docs)
 	}
 }

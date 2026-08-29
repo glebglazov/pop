@@ -10,22 +10,31 @@ import (
 )
 
 // refineComposition fingerprints the done-AFK work a refine pass judges: the ids
-// of the set's finished agent tasks, sorted so the fingerprint describes which
-// work is done rather than the order the manifest happens to list it in.
+// of the set's finished agent tasks, minus its Remediation tasks, sorted so the
+// fingerprint describes which work is done rather than the order the manifest
+// happens to list it in.
 //
-// It is what a Refine episode is keyed on, and the reason the episode needs no
-// carve-outs. A commit that only moves the work SHA leaves the fingerprint
-// alone, so a re-drain at unchanged work does not re-refine; a task finishing —
-// including a Remediation task the verify phase spawned — changes it, and the
-// next quiescence refines again. An empty fingerprint means the set has no
-// finished agent work, which is nothing a refine pass could judge.
+// It is what a Refine episode is keyed on. A commit that only moves the work SHA
+// leaves the fingerprint alone, so a re-drain at unchanged work does not
+// re-refine; planned work finishing changes it, and the next quiescence refines
+// again.
+//
+// Remediation tasks are the one carve-out (ADR-0240). Refine now runs before the
+// Verifier, so a FIXABLE verdict spawns fix work whose completion would
+// otherwise re-arm the episode and put a heavy refine pass inside every
+// verify→remediate→re-verify lap — the iteration that must be cheapest. The
+// price is that a remediation diff lands unrefined until real work re-arms the
+// episode, which is the trade the ADR makes deliberately.
+//
+// An empty fingerprint means the set has no finished non-remediation agent work,
+// which is nothing an automatic refine pass claims to judge.
 func refineComposition(m *Manifest) string {
 	if m == nil {
 		return ""
 	}
 	var ids []string
 	for _, task := range m.Tasks {
-		if task.Type == "AFK" && task.Status == TaskDone {
+		if task.Type == "AFK" && task.Status == TaskDone && !remediationIDPattern.MatchString(task.ID) {
 			ids = append(ids, task.ID)
 		}
 	}

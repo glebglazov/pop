@@ -1,7 +1,7 @@
 package tasks
 
 // refineDirective is the small instruction refinePhase hands back to the drain
-// loop, the third of the loop's phase directives so the loop skeleton keeps
+// loop, the first of the loop's phase directives so the loop skeleton keeps
 // reading as orchestration. It has only the two values a step that gates nothing
 // can have: Refine cannot park a set, cannot spawn work, and cannot change a
 // terminal status, so the one thing that ends the drain here is the human who
@@ -20,26 +20,31 @@ const (
 )
 
 // refinePhase runs the drain's Refine step (ADR-0240): with [work.refine]
-// enabled and the set's Refine episode armed, it writes the set's Refine
-// report once and disarms.
+// enabled and the set's Refine episode armed, a fresh Refiner fixes in place
+// what the resolved `refine` convention licenses, the runner commits the pass,
+// and the set's Refine report records what was fixed and what was left.
 //
-// It sits after the verify phase and immediately before the terminal switch, and
-// the order is the whole point. Verification may spawn a Remediation task and
-// move the tree; a report written before that would describe a changeset that
-// no longer exists by the time a human reads it. Running last means the report
-// always describes the tree the sign-off gate is approving — and, because the
-// verify phase returns rather than falling through when it parks a set, a
-// VERIFY-FAILED set is never refined at a state nobody is being asked to accept.
+// It sits at AFK quiescence immediately *before* the verify phase, and the order
+// is the whole point. A pass's edits are code like any other, so they need
+// judging; running first means the Verifier that was going to read this
+// changeset reads the refined one instead, and the pass costs no verification of
+// its own. Placed after verify it would either leave its edits unjudged or force
+// a second heavy pass on every drain that refined anything.
 //
-// The episode rule is the Verification episode's, minus every carve-out: the
-// refine pass records the done-AFK work composition it judged, an unchanged
-// composition is not refined again, and new done-AFK work — including a
-// Remediation task the verify phase spawned and the drain then completed —
-// re-arms it. Refine needs no carve-out because it spawns no work and so cannot
-// re-arm itself.
+// The episode rule is the Verification episode's with one carve-out: the refine
+// pass records the *non-remediation* done-AFK composition it judged, so a
+// verify → FIXABLE → remediate → re-verify lap re-verifies without re-refining
+// and the heavy pass stays out of the iteration that must be cheapest. Real new
+// work re-arms it. Refine needs no carve-out for itself, because it spawns no
+// work and so cannot re-arm itself.
+//
+// A human-completed set is skipped entirely. The drain does not edit code a
+// human declared done: direct edits are a stronger intrusion than the verdict
+// dispositions the same bit already suspends. `pop tasks refine` still refines
+// one on request — that is the human re-opening the question.
 //
 // Nothing here gates. A Refiner that fails, runs out of quota or finds nothing
-// to refine leaves the episode armed and the drain's terminal status untouched:
+// to fix leaves the episode armed and the drain's terminal status untouched:
 // the next quiescence asks again, and the set reaches exactly the status it
 // would have reached with Refine switched off.
 func (r *implementRun) refinePhase(currentRefresh *RefreshResult, row *Row) (refineDirective, error) {
@@ -54,6 +59,12 @@ func (r *implementRun) refinePhase(currentRefresh *RefreshResult, row *Row) (ref
 		return refineFallThrough, nil
 	}
 	m := currentRefresh.Manifests[r.taskSetID]
+	// Human completion (ADR-0240), read from the manifest bit the transition
+	// chokepoint writes — the same source the verify phase reads before it
+	// declines to park or remediate such a set.
+	if m != nil && m.HumanCompleted {
+		return refineFallThrough, nil
+	}
 	// The per-set decline (ADR-0214), the Verifier's opt-out key for key: a set of
 	// generated or vendored code says no to Refine here rather than by switching
 	// the group off for every set in the repository.

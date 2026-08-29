@@ -173,8 +173,8 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 
 // loop drains the resolved Task set sequentially through eligible AFK tasks. It
 // runs after setup and reads as pure orchestration: each iteration re-Refreshes,
-// then dispatches to one of four methods — the pre-approval Verifier phase, the
-// Refine phase, the terminal-status switch, or the task-execution branch —
+// then dispatches to one of four methods — the Refine phase, the pre-approval
+// Verifier phase, the terminal-status switch, or the task-execution branch —
 // each of which owns its choreography and hands back a continue/return directive.
 // The methods mutate the run's Drain / prompt-reader / result state through the
 // receiver so the deferred finalize sees the latest values.
@@ -199,6 +199,17 @@ func (r *implementRun) loop() (*RunTaskSetResult, error) {
 			}
 			result.Refresh = currentRefresh
 
+			// Refine phase (ADR-0240): with [work.refine] enabled and the set's
+			// Refine episode armed, a fresh Refiner fixes what the `refine`
+			// convention licenses and the runner commits the pass — here, before
+			// the Verifier reads the tree, so a pass's edits are judged by the same
+			// verification as the work they refine rather than costing a second
+			// one. It gates nothing, so the only directive it can hand back besides
+			// falling through is the human's interrupt.
+			if directive, refineErr := r.refinePhase(currentRefresh, row); directive == refineReturn {
+				return result, refineErr
+			}
+
 			// Pre-approval Verifier phase (ADR-0086): when the set has exhausted its
 			// AFK work at DONE / AWAITING-APPROVAL, clear a SHA-gated Verify verdict
 			// before the terminal status stands. verifyPhase owns the whole choreography
@@ -210,16 +221,6 @@ func (r *implementRun) loop() (*RunTaskSetResult, error) {
 				continue
 			case verifyReturn:
 				return result, verifyErr
-			}
-
-			// Refine phase (ADR-0240): with [work.refine] enabled and the
-			// set's Refine episode armed, write the set's Refine report here —
-			// after verification has finished moving the tree, and before the
-			// terminal switch hands the set to a human. It gates nothing, so the
-			// only directive it can hand back besides falling through is the
-			// human's interrupt.
-			if directive, refineErr := r.refinePhase(currentRefresh, row); directive == refineReturn {
-				return result, refineErr
 			}
 
 			// Terminal-status dispatch (DONE / DEFERRED / BLOCKED /
