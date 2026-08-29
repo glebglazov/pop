@@ -173,7 +173,7 @@ func TestRunConfiguredVerifierSharedProbeMemoRunsOnce(t *testing.T) {
 	memo := newAgentAvailabilityProbeMemo()
 	sel := verifierSelection{Agents: []string{"cursor"}, Effort: "heavy"}
 
-	_, err := runConfiguredVerifier(d, nil, sel, t.TempDir(), "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute, memo)
+	_, _, err := runConfiguredVerifier(d, nil, sel, t.TempDir(), "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute, memo)
 	if err == nil {
 		t.Fatal("expected exhaustion error")
 	}
@@ -181,7 +181,7 @@ func TestRunConfiguredVerifierSharedProbeMemoRunsOnce(t *testing.T) {
 		t.Fatalf("first verify round probe calls = %d, want 1", runner.calls)
 	}
 
-	_, err = runConfiguredVerifier(d, nil, sel, t.TempDir(), "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute, memo)
+	_, _, err = runConfiguredVerifier(d, nil, sel, t.TempDir(), "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute, memo)
 	if err == nil {
 		t.Fatal("expected exhaustion error on second round")
 	}
@@ -203,7 +203,7 @@ func TestImplementAndVerifyShareProbeMemo(t *testing.T) {
 		t.Fatalf("implement probe calls = %d, want 1", runner.calls)
 	}
 
-	_, err := runConfiguredVerifier(d, nil, verifierSelection{
+	_, _, err := runConfiguredVerifier(d, nil, verifierSelection{
 		Agents: []string{"cursor"}, Effort: "heavy",
 	}, t.TempDir(), "demo", "sha1", "/rt", "prompt", io.Discard, io.Discard, time.Minute, memo)
 	if err == nil {

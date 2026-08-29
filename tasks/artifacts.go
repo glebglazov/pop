@@ -10,10 +10,12 @@ import (
 
 const (
 	ArtifactTypeRefine   = "refine"
+	ArtifactTypeVerify   = "verify"
 	ArtifactTypeSpec     = "spec"
 	ArtifactTypeProgress = "progress"
 	ProgressFileName     = "progress.txt"
 	RefineDirName        = "refine"
+	VerifyDirName        = "verify"
 )
 
 // ArtifactSectionTitle is shared by the CLI and dashboard detail surfaces so

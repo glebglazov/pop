@@ -521,6 +521,10 @@ func runAndStoreVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *
 	}
 	prompt := buildVerifierPrompt(d, m, workSHA, work, priorNote, resolveVerificationConvention(opts))
 
+	// The agent that answers is a fact the report carries, so it is captured
+	// where the walk resolves it. A test seam standing in for the walk names no
+	// agent, and the document then omits the line rather than crediting one.
+	agent := ""
 	run := opts.runVerifier
 	if run == nil {
 		sel, err := resolveVerifier(opts.Agents, opts.Effort, m, cfg)
@@ -528,7 +532,9 @@ func runAndStoreVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *
 			return nil, err
 		}
 		run = func(prompt string) (string, error) {
-			return runConfiguredVerifier(d, cfg, sel, m.Dir, opts.SetID, workSHA, opts.RuntimePath, prompt, opts.Output, opts.Output, opts.Timeout, opts.probeMemo)
+			raw, wrote, err := runConfiguredVerifier(d, cfg, sel, m.Dir, opts.SetID, workSHA, opts.RuntimePath, prompt, opts.Output, opts.Output, opts.Timeout, opts.probeMemo)
+			agent = wrote
+			return raw, err
 		}
 	}
 	raw, err := run(prompt)
@@ -538,6 +544,11 @@ func runAndStoreVerdict(d *Deps, cfg *config.Config, opts verifyCoreOptions, m *
 		}
 		return nil, err
 	}
+
+	// A Verifier has answered, which is the one condition a Verify report is
+	// published on: a verdict served from the cache never reaches this line, and
+	// a range pop could not determine never invoked anyone to begin with.
+	publishVerifyReport(d, opts.Output, m, opts.SetID, workSHA, work.Range, agent, raw)
 
 	verdict, findings, summary := ParseVerdict(raw)
 	v := store.VerifyVerdict{
@@ -817,21 +828,24 @@ func nonEmptyStrings(specs []string) []string {
 // under <task-set>/streams/runs/. Quota-paused fall-through attempts are
 // persisted without a verdict; the parsed invocation is persisted with its
 // verdict. Persistence is best-effort and never fails the verify command.
-func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, taskSetDir, setID, workSHA, runtimePath, prompt string, out, errOut io.Writer, timeout time.Duration, probeMemo *agentAvailabilityProbeMemo) (string, error) {
+//
+// It returns the reply beside the agent that produced it, which is what lets the
+// Verify report name its author (ADR-0245).
+func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, taskSetDir, setID, workSHA, runtimePath, prompt string, out, errOut io.Writer, timeout time.Duration, probeMemo *agentAvailabilityProbeMemo) (string, string, error) {
 	if timeout <= 0 {
 		timeout = DefaultAttemptTimeout
 	}
 	maxTries, err := resolveVerifyMaxTries(cfg)
 	if err != nil {
-		return "", exitErr(ExitSetup, "%v", err)
+		return "", "", exitErr(ExitSetup, "%v", err)
 	}
 	retryDelays, err := resolveVerifyAttemptRetryDelays(cfg)
 	if err != nil {
-		return "", exitErr(ExitSetup, "%v", err)
+		return "", "", exitErr(ExitSetup, "%v", err)
 	}
 	quotaRetryAfter, err := resolveAgentQuotaRetryAfter(cfg)
 	if err != nil {
-		return "", exitErr(ExitSetup, "%v", err)
+		return "", "", exitErr(ExitSetup, "%v", err)
 	}
 
 	walked, err := runAgentFallbackWalk(d, agentFallbackWalk{
@@ -850,9 +864,10 @@ func runConfiguredVerifier(d *Deps, cfg *config.Config, sel verifierSelection, t
 		probeMemo:       probeMemo,
 	})
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	return resolveVerifierAgentExhaustion(walked.Answer, walked.Unavailable)
+	raw, err := resolveVerifierAgentExhaustion(walked.Answer, walked.Unavailable)
+	return raw, walked.Agent, err
 }
 
 // verifierRole is what the shared fallback walk calls the Verifier: its name in

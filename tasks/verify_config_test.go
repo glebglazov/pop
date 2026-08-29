@@ -133,7 +133,7 @@ func TestVerifierBinaryAvailable(t *testing.T) {
 func TestRunConfiguredVerifierAllMissingHardErrors(t *testing.T) {
 	d := newTestDeps(t)
 	d.LookPath = func(string) (string, error) { return "", exec.ErrNotFound }
-	_, err := runConfiguredVerifier(d, nil, verifierSelection{
+	_, _, err := runConfiguredVerifier(d, nil, verifierSelection{
 		Agents: []string{"cursor", "claude"}, Effort: "heavy",
 	}, t.TempDir(), "demo", "sha1", t.TempDir(), "prompt", &bytes.Buffer{}, &bytes.Buffer{}, time.Minute, nil)
 	assertExitCode(t, err, ExitSetup)
@@ -168,7 +168,7 @@ func TestRunConfiguredVerifierFallsThroughMissingBinary(t *testing.T) {
 	// Real-subprocess smoke: verify fall-through spawns the fake claude on PATH
 	// (see realShimSmokeSet).
 	d := &Deps{FS: testFSWithDataHome(t.TempDir()), Runner: RealCommandRunner{}, LookPath: exec.LookPath}
-	out, err := runConfiguredVerifier(d, nil, verifierSelection{
+	out, _, err := runConfiguredVerifier(d, nil, verifierSelection{
 		Agents: []string{"cursor", "claude"}, Effort: "heavy",
 	}, taskSetDir, "demo", "sha1", t.TempDir(), "prompt", &bytes.Buffer{}, &bytes.Buffer{}, time.Minute, nil)
 	if err != nil {
