@@ -107,24 +107,38 @@ func TestSupportedPresetReportsThePostureItObtained(t *testing.T) {
 	}
 }
 
-// The Verifier runs the build and the test suite: a read-only sandbox would fail
-// verification for reasons that have nothing to do with the code under judgment.
-func TestOnlyTheRefinerRunsReadOnly(t *testing.T) {
-	if !refinerRole(nil, nil, "", "", "").ReadOnly {
-		t.Fatal("the Refiner runs under the read-only agent posture")
-	}
-	if verifierRole(nil, nil, "", "", "").ReadOnly {
-		t.Fatal("the Verifier's invocation is unchanged")
+// The posture is declared on every preset and spawned by no role: the Refiner
+// was its only consumer, and a Refiner that fixes in place cannot run without
+// its editing tools (ADR-0240). The capability stays for the next read-only
+// role, which is what the tests above cover.
+func TestNoRoleSpawnsUnderTheReadOnlyPosture(t *testing.T) {
+	for name, role := range map[string]agentRole{
+		"Refiner":  refinerRole(nil, nil, "", "", ""),
+		"Verifier": verifierRole(nil, nil, "", "", ""),
+	} {
+		if role.ReadOnly {
+			t.Fatalf("the %s is spawned with no read-only arguments", name)
+		}
 	}
 }
 
-// Enforcement and instruction are not alternatives: an agent told what it may do
-// writes a better report than one that discovers a tool is missing.
-func TestRefinerPromptStillForbidsChangingFiles(t *testing.T) {
+// The licence replaces the prohibition: the frame states what the pass may
+// change instead of forbidding every change, because an agent told what it may
+// do fixes better than one that discovers a tool is missing.
+func TestRefinerPromptStatesItsFixLicence(t *testing.T) {
 	prompt := buildRefinerPrompt(bareDeps(), goldenBareManifest(),
 		workDiffView{Range: "root000..HEAD", Stat: " a.go | 1 +"}, "", refineDocument{}, false)
-	if !strings.Contains(prompt, "Change no files") {
-		t.Fatal("the Refiner prompt keeps its instruction to change no files")
+	if strings.Contains(prompt, "Change no files") {
+		t.Fatal("the Refiner prompt no longer forbids changing files")
+	}
+	for _, want := range []string{
+		"fix in place what the standard below names, where the fix is safe and local",
+		"Fix nothing the standard does not name.",
+		"Do not commit",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("the Refiner prompt must state its licence (%q missing):\n%s", want, prompt)
+		}
 	}
 }
 

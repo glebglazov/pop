@@ -373,11 +373,16 @@ func runConfiguredRefiner(d *Deps, cfg *config.Config, sel verifierSelection, ta
 }
 
 // refinerRole is what the shared fallback walk calls the Refiner: its name in
-// the operator's output, the read-only agent posture it alone is spawned under
-// (ADR-0221), the Captured run pair each invocation is filed as under
+// the operator's output, the Captured run pair each invocation is filed as under
 // the `refine` phase label, and the rule for which attempts are worth retrying —
 // a refine pass has no format to parse, so any prose from a run that reached its
 // own ending is the Refiner answering.
+//
+// It carries no read-only posture. A Refiner fixes what the convention licenses
+// (ADR-0240), so it is spawned with the same argv as any other writing role, and
+// what it may change is stated in its prompt rather than withheld from its
+// tools. The posture capability stays declared on every preset for the next
+// read-only role that needs it.
 //
 // Its runs are filed exactly as the Verifier's are, and for the same reason: a
 // Refiner spends the same agent quota on the same set, so hiding it would make
@@ -398,7 +403,6 @@ func refinerRole(d *Deps, errOut io.Writer, taskSetDir, setID, workSHA string) a
 			_ = persistSkippedRefineRun(d, errOut, taskSetDir, setID, workSHA, rec, invocation.AgentPreset(), invocation.RequestedAgent, model, try, reason, exitCode)
 		},
 		RetryEligible: refineAttemptRetryEligible,
-		ReadOnly:      true,
 	}
 }
 
@@ -518,6 +522,12 @@ func writeRefineDocument(d *Deps, setDir string, at time.Time, body string) (str
 // needs to know what was refined: which set, at which commits, by whom and
 // when. They ride the document rather than a side-car because the document
 // leaves pop the moment a human pipes it somewhere.
+//
+// The Work SHA line is the report's own answer to which tree it describes: the
+// pass's edits sit on top of that commit, so a reader who wants the state the
+// report was written against checks out the SHA and applies nothing else. It is
+// stamped here rather than asked of the Refiner, because pop read it before the
+// pass began and the Refiner would only be copying it back.
 func renderRefineDocument(at time.Time, setID, workSHA, commitRange, agent, body string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Refine report — %s\n\n", setID)

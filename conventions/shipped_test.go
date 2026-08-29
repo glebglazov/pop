@@ -92,40 +92,6 @@ func TestRefineIsAKindWithAnAnswer(t *testing.T) {
 	}
 }
 
-// TestRefineShippedAnswerIsTheSmellBaseline: the baseline is the standards
-// content now, not a floor beneath a derivation method, and the two rules that
-// keep it from overriding a repository travel with it (ADR-0226 decision 2).
-func TestRefineShippedAnswerIsTheSmellBaseline(t *testing.T) {
-	answer := Shipped(KindRefine)
-	for what, want := range map[string]string{
-		"the smell baseline's source":    "Fowler",
-		"a named smell":                  "Feature Envy",
-		"the repository-overrides rule":  "The repository overrides.",
-		"the judgement-call rule":        "Always a judgement call.",
-		"the repository's own documents": "AGENTS.md",
-		"its architectural decisions":    "docs/adr/",
-		"its linter configuration":       ".golangci.yml",
-		"its formatter and build":        "pre-commit",
-		"the idiom of the code itself":   "idiom",
-	} {
-		if !strings.Contains(answer, want) {
-			t.Errorf("refine shipped answer does not carry %s (%q):\n%s", what, want, answer)
-		}
-	}
-	// All twelve smells are the standard; a baseline missing one holds a
-	// changeset against less than it says it does.
-	for _, smell := range []string{
-		"Mysterious Name", "Duplicated Code", "Feature Envy", "Data Clumps",
-		"Primitive Obsession", "Repeated Switches", "Shotgun Surgery",
-		"Divergent Change", "Speculative Generality", "Message Chains",
-		"Middle Man", "Refused Bequest",
-	} {
-		if !strings.Contains(answer, smell) {
-			t.Errorf("refine shipped answer is missing the smell %q", smell)
-		}
-	}
-}
-
 // TestIssueTrackerShippedAnswerIsPopsTrackerDoc: the kind resolves to the
 // document itself rather than to instructions for finding it, and it is the
 // same bytes integration publishes as an asset.
@@ -183,39 +149,51 @@ func TestVerificationShippedAnswerCarriesNoneOfPopsMachinery(t *testing.T) {
 	}
 }
 
-// TestRefineShippedAnswerReviewsOnTwoAxes: pop's own answer weighs how the
-// code is written and whether it does what was asked (ADR-0227 consequence). The
-// second axis knowingly overlaps the Verifier's, which is tolerable only because
-// a refine pass reaches no verdict — so the answer says the overlap is a second
-// opinion rather than claiming the last word.
-func TestRefineShippedAnswerReviewsOnTwoAxes(t *testing.T) {
+// TestRefineShippedAnswerIsShortAndRuleShaped: pop's own answer is a compact
+// list of what good code looks like and what a pass may fix (ADR-0240). The
+// length matters as much as the content — the same text rides every implement
+// prompt when upfront adherence is on, so a document that grew into an essay
+// would be paid for on every task.
+func TestRefineShippedAnswerIsShortAndRuleShaped(t *testing.T) {
 	answer := Shipped(KindRefine)
 	for what, want := range map[string]string{
-		"the standards axis":          "Axis 1 — Standards: how the code is written",
-		"the spec axis":               "Axis 2 — Spec: whether the code does what was asked",
-		"work the request never got":  "Missing",
-		"work nobody asked for":       "Extra",
-		"work that answers otherwise": "Different",
-		"the diff over the report":    "Read the diff for this axis",
-		"the overlap it admits":       "second opinion",
+		"what good code looks like":  "## What good code looks like here",
+		"the fix licence":            "## What a pass may fix",
+		"the repository's override":  "The repository overrides.",
+		"what tooling already says":  "Skip what a machine says faster.",
+		"what stays a finding":       "Report it and leave it alone",
+		"the rule for the undecided": "Between the two, report.",
 	} {
 		if !strings.Contains(answer, want) {
 			t.Errorf("refine shipped answer does not carry %s (%q):\n%s", what, want, answer)
 		}
 	}
+	// The two-axis review it replaced was more than twice this long.
+	if lines := len(strings.Split(strings.TrimSpace(answer), "\n")); lines > 70 {
+		t.Errorf("refine shipped answer is %d lines; it rides every implement prompt and must stay short", lines)
+	}
+	for what, gone := range map[string]string{
+		"the standards axis": "Axis 1",
+		"the spec axis":      "Axis 2",
+		"the two-axis frame": "two axes",
+	} {
+		if strings.Contains(answer, gone) {
+			t.Errorf("refine shipped answer still carries %s (%q):\n%s", what, gone, answer)
+		}
+	}
 }
 
-// TestRefineShippedAnswerInstructsNoWrites: the Refiner runs under a
-// read-only posture (ADR-0221), so an answer that told it to record or fix
-// anything would be an instruction it cannot obey.
-func TestRefineShippedAnswerInstructsNoWrites(t *testing.T) {
+// TestRefineShippedAnswerNeverCommits: the pass edits the checkout, so the one
+// write it may not make is the one pop makes for it — an answer that told the
+// Refiner to commit would put an agent in git history (ADR-0240).
+func TestRefineShippedAnswerNeverCommits(t *testing.T) {
 	answer := Shipped(KindRefine)
-	if !strings.Contains(answer, "Change no files") {
-		t.Errorf("refine shipped answer does not hold the reader to reading only:\n%s", answer)
+	if !strings.Contains(answer, "Fix in place, and record it as fixed") {
+		t.Errorf("refine shipped answer does not license the pass to fix in place:\n%s", answer)
 	}
-	for _, gone := range []string{"write the result", "Write the result", "commit the", "apply the fix"} {
+	for _, gone := range []string{"commit the", "git commit", "Change no files"} {
 		if strings.Contains(answer, gone) {
-			t.Errorf("refine shipped answer instructs a write (%q):\n%s", gone, answer)
+			t.Errorf("refine shipped answer carries %q, which is pop's frame's to say:\n%s", gone, answer)
 		}
 	}
 }
