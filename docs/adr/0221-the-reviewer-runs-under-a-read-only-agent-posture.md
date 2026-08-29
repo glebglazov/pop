@@ -1,5 +1,11 @@
 # The Reviewer runs under a read-only agent posture
 
+> **Amended by [ADR-0240](0240-refine-fixes-in-place-before-the-verify-phase.md):**
+> the Reviewer became the Refiner and fixes in place, so no role is currently
+> spawned under this posture. The capability itself stands as declared preset
+> metadata — the per-preset flag research below is why it is kept rather than
+> retired.
+
 Every headless role pop spawns — Implementer, Verifier, Reviewer — goes out through one `headlessPrefix` per Agent preset, and every one of those prefixes disables approval: `claude --dangerously-skip-permissions -p`, `codex exec --dangerously-bypass-approvals-and-sandbox`. That is correct for the Implementer, whose job is to write files. For the Reviewer it means the only thing standing between a reviewing agent and the tree the human is about to fold is one sentence of prose in `reviewer.tmpl.md`: *"Change no files — you are reading, not fixing."* The Reviewer runs in the set's bound checkout, after the Verifier has already passed on it, so an edit it made would arrive unattributed in work nobody re-verifies.
 
 The decision: **a preset declares a read-only agent posture as one more capability beside its attended arguments and its headless prefix, and the Reviewer — alone among the headless roles — is spawned under it.** claude contributes `--disallowedTools Edit,Write,NotebookEdit`; codex contributes `--sandbox read-only`. A preset with no such argument declares the capability blind, and pop reports the posture it actually obtained rather than the one it wanted.

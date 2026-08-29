@@ -1,4 +1,16 @@
+---
+status: superseded by ADR-0240
+---
+
 # Code review is a drain step that maintains a living document
+
+> **Superseded by [ADR-0240](0240-refine-fixes-in-place-before-the-verify-phase.md):**
+> the step is renamed Refine and becomes a writing step — it fixes in place what
+> the resolved `refine` convention licenses and runs *before* the verify phase,
+> reversing this ADR's no-write ruling and its after-verify placement. What
+> survives, restated there: the step-not-task shape, the living superseding
+> document, and the artifact remaining a Task artifact outside implementation
+> commits.
 
 Pop needed a way to judge whether a Task set's changeset adheres to the coding
 standards of the human and the repository — a different question from whether it
