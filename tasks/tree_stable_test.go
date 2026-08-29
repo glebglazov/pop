@@ -13,7 +13,7 @@ import (
 )
 
 // treeStableFixture builds a real checkout with a "demo" set whose one done AFK
-// task has a resolvable commit range, so the Verifier and the Reviewer both
+// task has a resolvable commit range, so the Verifier and the Refiner both
 // reach their agent seam rather than refusing on the range. It returns the deps
 // (wired to poll admission fast), the checkout, its repository identity and the
 // definition path.
@@ -146,10 +146,10 @@ func TestStandaloneVerifyWaitsForTheTreeToHoldStill(t *testing.T) {
 	assertLeftNoDrainBehind(t, d, commonDir, "demo")
 }
 
-// The Reviewer waits for the same reason and gives the checkout back the same
-// way: files moving underneath it would produce a review of a state that never
+// The Refiner waits for the same reason and gives the checkout back the same
+// way: files moving underneath it would produce a report of a state that never
 // existed.
-func TestStandaloneReviewWaitsForTheTreeToHoldStill(t *testing.T) {
+func TestStandaloneRefineWaitsForTheTreeToHoldStill(t *testing.T) {
 	d, repo, commonDir, defPath := treeStableFixture(t)
 
 	rival, err := BeginDrain(d, repo, "rival", io.Discard)
@@ -161,16 +161,16 @@ func TestStandaloneReviewWaitsForTheTreeToHoldStill(t *testing.T) {
 	var out bytes.Buffer
 	done := make(chan error, 1)
 	go func() {
-		_, err := reviewResolvedSet(d, nil, reviewCoreOptions{
+		_, err := refineResolvedSet(d, nil, refineCoreOptions{
 			Repo:        commonDir,
 			DefPath:     defPath,
 			RuntimePath: repo,
 			SetID:       "demo",
 			Output:      &lockedWriter{mu: &mu, w: &out},
 			admission:   AdmissionWait,
-			runReviewer: func(string) (string, string, error) {
+			runRefiner: func(string) (string, string, error) {
 				if status := ReadRuntimeLockStatus(d, repo); !status.Locked || status.Metadata.SetID != "demo" {
-					return "", "", exitErr(ExitOperational, "the Reviewer ran without holding the checkout: %#v", status)
+					return "", "", exitErr(ExitOperational, "the Refiner ran without holding the checkout: %#v", status)
 				}
 				return "## Naming\n\nfine", "claude", nil
 			},
@@ -186,10 +186,10 @@ func TestStandaloneReviewWaitsForTheTreeToHoldStill(t *testing.T) {
 	select {
 	case err := <-done:
 		if err != nil {
-			t.Fatalf("review after the wait: %v", err)
+			t.Fatalf("refine pass after the wait: %v", err)
 		}
 	case <-time.After(10 * time.Second):
-		t.Fatal("review never ran after the holder finished")
+		t.Fatal("refine pass never ran after the holder finished")
 	}
 	assertLeftNoDrainBehind(t, d, commonDir, "demo")
 }

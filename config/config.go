@@ -340,24 +340,24 @@ type VerifyConfig struct {
 	AttemptRetryDelays []string `toml:"attempt_retry_delays" include:"replace" desc:"Verify inter-attempt retry delay schedule (array of duration strings)."`
 }
 
-// ReviewConfig holds Code-review settings (ADR-0214). It carries exactly three
-// keys and no remediation depth, because a review reaches no verdict and spawns
-// no work: the whole output is a document a human may act on or ignore.
-type ReviewConfig struct {
-	// Enabled is the master opt-in switch for automatic review. Absent/false ⇒
-	// the drain never reviews; `pop tasks review <set>` still runs on demand,
+// RefineConfig holds Refine settings (ADR-0240). It carries exactly three
+// keys and no remediation depth, because a refine pass reaches no verdict and
+// spawns no work: the whole output is a report a human may act on or ignore.
+type RefineConfig struct {
+	// Enabled is the master opt-in switch for automatic Refine. Absent/false ⇒
+	// the drain never refines; `pop tasks refine <set>` still runs on demand,
 	// the way a human asking for a second opinion always may.
-	Enabled bool `toml:"enabled" include:"replace" desc:"Enable automatic Code review at AFK quiescence (default false)."`
-	// Agents is the ordered fallback list of agent presets the Reviewer walks,
+	Enabled bool `toml:"enabled" include:"replace" desc:"Enable automatic Refine at AFK quiescence (default false)."`
+	// Agents is the ordered fallback list of agent presets the Refiner walks,
 	// mirroring [work.verify].agents: it falls through to the next agent on a
 	// quota pause or a missing binary. An absent list falls back to
 	// [work.implement].agents (and, failing that, the built-in default agent);
 	// an override of `agents = []` disables that fallback (agent_list.go).
-	Agents AgentEntries `toml:"agents" include:"replace" desc:"Ordered fallback agent list for the Reviewer, falling back to [work.implement].agents when omitted (strings or {display_name, cmd} tables)."`
-	// Effort selects the Reviewer's model-strength tier (light, standard, or
+	Agents AgentEntries `toml:"agents" include:"replace" desc:"Ordered fallback agent list for the Refiner, falling back to [work.implement].agents when omitted (strings or {display_name, cmd} tables)."`
+	// Effort selects the Refiner's model-strength tier (light, standard, or
 	// heavy). Absent ⇒ heavy — judging naming, structure and idiom is the
 	// strongest tier's work.
-	Effort string `toml:"effort" include:"replace" desc:"Reviewer model-strength tier: light, standard, or heavy (default heavy)."`
+	Effort string `toml:"effort" include:"replace" desc:"Refiner model-strength tier: light, standard, or heavy (default heavy)."`
 }
 
 // TaskGitConfig holds commit-time git configuration applied to Pop's own
@@ -543,8 +543,8 @@ type WorkConfig struct {
 	Implement *ImplementConfig `toml:"implement" merge:"fields" include:"fields" desc:"Implement Work group ([work.implement] table)."`
 	// Verify is the Verifier's group (ADR-0086).
 	Verify *VerifyConfig `toml:"verify" merge:"fields" include:"fields" desc:"Agent-verification settings ([work.verify] table)."`
-	// Review is the Reviewer's group (ADR-0214).
-	Review *ReviewConfig `toml:"review" merge:"fields" include:"fields" desc:"Code-review settings ([work.review] table)."`
+	// Refine is the Refiner's group (ADR-0240).
+	Refine *RefineConfig `toml:"refine" merge:"fields" include:"fields" desc:"Refine settings ([work.refine] table)."`
 	// Routine is the recurring-Routine group. An absent list falls through to
 	// [work.implement].agents — an override of `agents = []` does not
 	// (agent_list.go); a Routine manifest's own agents still beats both.
@@ -1193,26 +1193,26 @@ func (c *Config) VerifySettings() *VerifyConfig {
 	return c.Work.Verify
 }
 
-// ReviewAgents returns the commands of the [work.review].agents list, in
+// RefineAgents returns the commands of the [work.refine].agents list, in
 // configured order, or nil.
-func (c *Config) ReviewAgents() []string {
-	return c.ReviewAgentEntries().Commands()
+func (c *Config) RefineAgents() []string {
+	return c.RefineAgentEntries().Commands()
 }
 
-// ReviewAgentEntries returns the [work.review].agents entries as declared.
-func (c *Config) ReviewAgentEntries() AgentEntries {
-	if r := c.ReviewSettings(); r != nil {
+// RefineAgentEntries returns the [work.refine].agents entries as declared.
+func (c *Config) RefineAgentEntries() AgentEntries {
+	if r := c.RefineSettings(); r != nil {
 		return r.Agents
 	}
 	return nil
 }
 
-// ReviewSettings returns the [work.review] block, or nil when undeclared.
-func (c *Config) ReviewSettings() *ReviewConfig {
+// RefineSettings returns the [work.refine] block, or nil when undeclared.
+func (c *Config) RefineSettings() *RefineConfig {
 	if c == nil || c.Work == nil {
 		return nil
 	}
-	return c.Work.Review
+	return c.Work.Refine
 }
 
 // RoutineAgents returns the commands of the [work.routine].agents list, or nil.

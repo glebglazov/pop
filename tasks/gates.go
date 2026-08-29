@@ -101,7 +101,7 @@ const (
 	hitlGateDefer
 	hitlGateShell
 	hitlGateReverify
-	hitlGateReadReview
+	hitlGateReadRefine
 )
 
 func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverifyGateContext) (bool, error) {
@@ -139,15 +139,15 @@ func handleInteractiveHITLGate(env gateEnv, m *Manifest, hitl *Task, rv *reverif
 		// human who edited the work inline can re-check it without a fresh drain.
 		showReverify := gateReverifyEnabled(rv, m)
 		// Re-resolved each time round the menu: a Re-verify may land a Remediation
-		// task and a review written since the gate opened is still the one to point at.
-		review, hasReview := latestReviewPointer(d, m)
-		action, err := promptHITLGateAction(out, in, d, env.cfg, runtimePath, reader, taskSetID, m, hitl, body, invocation, showReverify, review, hasReview)
+		// task and a report written since the gate opened is still the one to point at.
+		refine, hasRefine := latestRefinePointer(d, m)
+		action, err := promptHITLGateAction(out, in, d, env.cfg, runtimePath, reader, taskSetID, m, hitl, body, invocation, showReverify, refine, hasRefine)
 		if err != nil {
 			return true, err
 		}
 		switch action {
-		case hitlGateReadReview:
-			pageReviewDocument(d, in, runtimePath, out, review)
+		case hitlGateReadRefine:
+			pageRefineDocument(d, in, runtimePath, out, refine)
 			// A read changes nothing — loop back to the menu with the set as it was.
 		case hitlGateReverify:
 			repo := ""
@@ -283,12 +283,12 @@ func spawnRuntimeShell(d *Deps, stdin io.Reader, runtimePath string, out io.Writ
 	return err
 }
 
-// pageReviewDocument shows the set's Review artifact to the human at the gate.
+// pageRefineDocument shows the set's Refine report to the human at the gate.
 // It spawns no agent: the document is already written, and this entry is a read
-// of it, not a second opinion (ADR-0214). The human's pager runs attended in the
+// of it, not a second opinion (ADR-0240). The human's pager runs attended in the
 // runtime checkout; when none will run, the document is printed instead, because
 // the whole point of the entry is that the human sees it.
-func pageReviewDocument(d *Deps, stdin io.Reader, runtimePath string, out io.Writer, p ReviewPointer) {
+func pageRefineDocument(d *Deps, stdin io.Reader, runtimePath string, out io.Writer, p RefinePointer) {
 	if p.Path == "" {
 		return
 	}
@@ -309,7 +309,7 @@ func pageReviewDocument(d *Deps, stdin io.Reader, runtimePath string, out io.Wri
 	}
 	data, readErr := fs.ReadFile(p.Path)
 	if readErr != nil {
-		fmt.Fprintf(outputFor(out), "Could not read the review: %v\n", readErr)
+		fmt.Fprintf(outputFor(out), "Could not read the refine report: %v\n", readErr)
 		return
 	}
 	fmt.Fprintln(outputFor(out), strings.TrimRight(string(data), "\n"))
@@ -371,7 +371,7 @@ func gateReverifyEnabled(rv *reverifyGateContext, m *Manifest) bool {
 	return rv != nil && verifyEnabled(rv.cfg) && m != nil && !m.VerifyOptedOut()
 }
 
-func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, cfg *config.Config, runtimePath string, reader *promptReader, taskSetID string, m *Manifest, hitl *Task, body string, invocation *AgentAssistanceInvocation, showReverify bool, review ReviewPointer, hasReview bool) (hitlGateAction, error) {
+func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, cfg *config.Config, runtimePath string, reader *promptReader, taskSetID string, m *Manifest, hitl *Task, body string, invocation *AgentAssistanceInvocation, showReverify bool, refine RefinePointer, hasRefine bool) (hitlGateAction, error) {
 	items := []ui.GateMenuItem{
 		{Key: "1", Label: "Get agent assistance (default)", Details: gateInvocationDetails(invocation), Default: true, Assists: true},
 		{Key: "2", Label: "Complete task"},
@@ -390,8 +390,8 @@ func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, cfg *config.Conf
 	if showReverify {
 		add(hitlGateReverify, "Re-verify (re-run the Verifier against the current work)")
 	}
-	if hasReview {
-		add(hitlGateReadReview, "Read the code review (no agent runs)", review.Path)
+	if hasRefine {
+		add(hitlGateReadRefine, "Read the refine report (no agent runs)", refine.Path)
 	}
 	items = append(items, ui.GateMenuItem{Key: "0", Label: "Exit"})
 
@@ -402,7 +402,7 @@ func promptHITLGateAction(out io.Writer, in io.Reader, d *Deps, cfg *config.Conf
 			gateWaiterPreamble(d, runtimePath),
 			gateTaskBodyPreamble(hitl.File, body),
 			gateRemediationPreamble(d, taskSetID, m),
-			gateReviewPreamble(review, hasReview),
+			gateRefinePreamble(refine, hasRefine),
 		),
 		Items: items,
 	}

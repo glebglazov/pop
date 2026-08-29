@@ -8,7 +8,7 @@ import (
 )
 
 // agentGroupCfg builds a config whose implement list is the fallthrough target
-// and whose verify and review groups state no list of their own. The named keys
+// and whose verify and refine groups state no list of their own. The named keys
 // are the ones the override layer states as an empty list — the state
 // applyConfigLayerMerge records on a config loaded from disk.
 func agentGroupCfg(emptyOverrides ...string) *config.Config {
@@ -63,29 +63,29 @@ func TestResolveVerifierEmptyOverrideDisablesFallthrough(t *testing.T) {
 	}
 }
 
-// TestResolveReviewerEmptyOverrideDisablesFallthrough is the same pair for the
-// Reviewer, which reads its own key through the one shared rule.
-func TestResolveReviewerEmptyOverrideDisablesFallthrough(t *testing.T) {
-	sel, err := resolveReviewer(nil, "", nil, agentGroupCfg())
+// TestResolveRefinerEmptyOverrideDisablesFallthrough is the same pair for the
+// Refiner, which reads its own key through the one shared rule.
+func TestResolveRefinerEmptyOverrideDisablesFallthrough(t *testing.T) {
+	sel, err := resolveRefiner(nil, "", nil, agentGroupCfg())
 	if err != nil {
-		t.Fatalf("resolveReviewer with an absent list: %v", err)
+		t.Fatalf("resolveRefiner with an absent list: %v", err)
 	}
 	if got := strings.Join(sel.Agents, ","); got != "cursor,claude" {
 		t.Fatalf("agents = %v, want the implement list", sel.Agents)
 	}
 
-	_, err = resolveReviewer(nil, "", nil, agentGroupCfg(config.KeyReviewAgents))
+	_, err = resolveRefiner(nil, "", nil, agentGroupCfg(config.KeyRefineAgents))
 	if err == nil {
-		t.Fatal("resolveReviewer resolved an explicit empty override; want a refusal")
+		t.Fatal("resolveRefiner resolved an explicit empty override; want a refusal")
 	}
 	assertExitCode(t, err, ExitSetup)
-	if !strings.Contains(err.Error(), config.KeyReviewAgents) {
-		t.Fatalf("error = %q, want it to name %s", err, config.KeyReviewAgents)
+	if !strings.Contains(err.Error(), config.KeyRefineAgents) {
+		t.Fatalf("error = %q, want it to name %s", err, config.KeyRefineAgents)
 	}
 
-	sel, err = resolveReviewer([]string{"codex"}, "", nil, agentGroupCfg(config.KeyReviewAgents))
+	sel, err = resolveRefiner([]string{"codex"}, "", nil, agentGroupCfg(config.KeyRefineAgents))
 	if err != nil {
-		t.Fatalf("resolveReviewer with --agent: %v", err)
+		t.Fatalf("resolveRefiner with --agent: %v", err)
 	}
 	if got := strings.Join(sel.Agents, ","); got != "codex" {
 		t.Fatalf("agents = %v, want the CLI list", sel.Agents)
@@ -94,18 +94,18 @@ func TestResolveReviewerEmptyOverrideDisablesFallthrough(t *testing.T) {
 
 // TestEmptyOverrideOfOneGroupLeavesTheOthers pins that the refusal is keyed to
 // the group whose list a human emptied: silencing verify says nothing about
-// review, and neither touches implement's own list.
+// refine, and neither touches implement's own list.
 func TestEmptyOverrideOfOneGroupLeavesTheOthers(t *testing.T) {
 	cfg := agentGroupCfg(config.KeyVerifyAgents)
 
 	if _, err := resolveVerifier(nil, "", manifestWithVerifier(t, nil, ""), cfg); err == nil {
 		t.Fatal("verify resolved an explicit empty override")
 	}
-	sel, err := resolveReviewer(nil, "", nil, cfg)
+	sel, err := resolveRefiner(nil, "", nil, cfg)
 	if err != nil {
-		t.Fatalf("review refused on verify's override: %v", err)
+		t.Fatalf("refine refused on verify's override: %v", err)
 	}
 	if got := strings.Join(sel.Agents, ","); got != "cursor,claude" {
-		t.Fatalf("review agents = %v, want the implement list", sel.Agents)
+		t.Fatalf("refine agents = %v, want the implement list", sel.Agents)
 	}
 }

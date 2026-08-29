@@ -10,19 +10,19 @@ import (
 // and no layer numbering. A kind nobody has written an answer to is handed
 // pop's own answer, labelled an answer like any other, rather than silence.
 func TestStackProse(t *testing.T) {
-	unwritten := StackProse(Stack{Kind: KindCodeReview, Layers: []Layer{
-		{Origin: OriginRepository, Path: "/repo/docs/agents/code-review.md"},
+	unwritten := StackProse(Stack{Kind: KindRefine, Layers: []Layer{
+		{Origin: OriginRepository, Path: "/repo/docs/agents/refine.md"},
 	}})
-	for _, want := range []string{"ANSWER: SHIPPED", Shipped(KindCodeReview)} {
+	for _, want := range []string{"ANSWER: SHIPPED", Shipped(KindRefine)} {
 		if !strings.Contains(unwritten, want) {
 			t.Fatalf("prose for an unwritten kind is missing %q:\n%s", want, unwritten)
 		}
 	}
 
-	spoken := Stack{Kind: KindCodeReview, Layers: []Layer{
-		{Origin: OriginProject, Path: "/home/docs/projects/github.com-tripledot-pop/code-review.md", Present: true, Body: "prefer small functions"},
-		{Origin: OriginRepository, Path: "/repo/docs/agents/code-review.md", Present: true, Body: "table-driven tests only"},
-		{Origin: OriginOverlay, Path: "/home/docs/code-review.overlay.md", Present: true, Body: "never approve a TODO"},
+	spoken := Stack{Kind: KindRefine, Layers: []Layer{
+		{Origin: OriginProject, Path: "/home/docs/projects/github.com-tripledot-pop/refine.md", Present: true, Body: "prefer small functions"},
+		{Origin: OriginRepository, Path: "/repo/docs/agents/refine.md", Present: true, Body: "table-driven tests only"},
+		{Origin: OriginOverlay, Path: "/home/docs/refine.overlay.md", Present: true, Body: "never approve a TODO"},
 	}}
 	got := StackProse(spoken)
 	for _, want := range []string{

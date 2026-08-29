@@ -39,8 +39,8 @@ var (
 	taskImplementNoWait       bool
 	taskVerifyWait            bool
 	taskVerifyNoWait          bool
-	taskReviewWait            bool
-	taskReviewNoWait          bool
+	taskRefineWait            bool
+	taskRefineNoWait          bool
 	taskInWorktree            bool
 	taskForceRebind           bool
 	taskAllowDirty            tasks.DirtyRuntimeStrategy = tasks.DirtyRuntimeContinue
@@ -51,10 +51,10 @@ var (
 	taskVerifyEffort          string
 	taskVerifyAccept          string
 	taskVerifyRemediate       string
-	taskReviewTimeout         string
-	taskReviewAgents          []string
-	taskReviewEffort          string
-	taskReviewShow            bool
+	taskRefineTimeout         string
+	taskRefineAgents          []string
+	taskRefineEffort          string
+	taskRefineShow            bool
 	taskArtifactsShow         string
 	taskImplementVerifyAgents []string
 	taskImplementVerifyEffort string
@@ -166,29 +166,29 @@ var taskVerifyCmd = &cobra.Command{
 	RunE:  runTaskVerify,
 }
 
-var taskReviewCmd = &cobra.Command{
-	Use:   "review TASK_SET",
-	Short: "Run an independent Reviewer agent over a task set's changeset and write the review document",
-	Long: `Review how a task set's changeset is written, against this repository's standard.
+var taskRefineCmd = &cobra.Command{
+	Use:   "refine TASK_SET",
+	Short: "Run an independent Refiner agent over a task set's changeset and write the Refine report",
+	Long: `Refine how a task set's changeset is written, against this repository's standard.
 
-The resolved code-review convention is the review's whole standard: pop supplies
+The resolved refine convention is the pass's whole standard: pop supplies
 the role framing and the output expectation, and the convention says what to
-weigh. A fresh Reviewer reads it, the previous review document when one exists,
+weigh. A fresh Refiner reads it, the previous Refine report when one exists,
 and the changeset itself — it is given the commit range and the set's diff --stat
 and reads the changed files in the checkout on its own. It reaches no verdict,
-gates nothing and changes no status: the whole output is one document a human
+gates nothing and changes no status: the whole output is one report a human
 acts on or ignores.
 
-Each review supersedes the last. Earlier documents are kept beside it under the
-set's task storage, which is outside the repository tree, so a review can never
+Each pass supersedes the last. Earlier reports are kept beside it under the
+set's task storage, which is outside the repository tree, so a report can never
 be staged into a commit. Getting one into a pull request is an explicit act:
 
-  pop tasks review my-set --show | pbcopy
+  pop tasks refine my-set --show | pbcopy
 
-Any set with a done AFK task and a non-empty commit range may be reviewed, at
+Any set with a done AFK task and a non-empty commit range may be refined, at
 any time — including mid-drain, where a standards correction is worth most.`,
 	Args: cobra.ExactArgs(1),
-	RunE: runTaskReview,
+	RunE: runTaskRefine,
 }
 
 var taskArtifactsCmd = &cobra.Command{
@@ -356,7 +356,7 @@ func init() {
 	taskCmd.AddCommand(taskAutoDrainCmd)
 	taskCmd.AddCommand(taskImplementCmd)
 	taskCmd.AddCommand(taskVerifyCmd)
-	taskCmd.AddCommand(taskReviewCmd)
+	taskCmd.AddCommand(taskRefineCmd)
 	taskCmd.AddCommand(taskArtifactsCmd)
 	taskCmd.AddCommand(taskAssistCmd)
 	taskCmd.AddCommand(taskResetTaskCmd)
@@ -428,14 +428,14 @@ func init() {
 	taskVerifyCmd.MarkFlagsMutuallyExclusive("wait", "no-wait")
 	taskVerifyCmd.Flags().StringVar(&taskVerifyRemediate, "remediate", "", "Remediate a verify-failed set: spawn a Remediation task from the set's findings carrying this note (skips the Verifier), including from NEEDS-HUMAN or past the remediation depth cap; refused unless the set's verification mark is verify-failed")
 
-	taskReviewCmd.Flags().StringVar(&taskRuntimePath, "task-runtime-path", "", "Git checkout root for task execution (normalized to checkout root)")
-	taskReviewCmd.Flags().StringVar(&taskReviewTimeout, "timeout", "45m", "Maximum duration for the Reviewer attempt")
-	taskReviewCmd.Flags().StringArrayVar(&taskReviewAgents, "agent", nil, "Reviewer agent preset; repeat to define an ordered quota/missing-binary fallback list")
-	taskReviewCmd.Flags().StringVar(&taskReviewEffort, "effort", "", "Reviewer model-strength tier: light, standard, or heavy (default heavy)")
-	taskReviewCmd.Flags().BoolVar(&taskReviewWait, "wait", false, "Queue for the checkout and wait when it is held, even unattended (default: wait only at a terminal)")
-	taskReviewCmd.Flags().BoolVar(&taskReviewNoWait, "no-wait", false, "Refuse immediately when the checkout or the set is held, even at a terminal")
-	taskReviewCmd.MarkFlagsMutuallyExclusive("wait", "no-wait")
-	taskReviewCmd.Flags().BoolVar(&taskReviewShow, "show", false, "Print the set's latest review document to stdout and run no agent")
+	taskRefineCmd.Flags().StringVar(&taskRuntimePath, "task-runtime-path", "", "Git checkout root for task execution (normalized to checkout root)")
+	taskRefineCmd.Flags().StringVar(&taskRefineTimeout, "timeout", "45m", "Maximum duration for the Refiner attempt")
+	taskRefineCmd.Flags().StringArrayVar(&taskRefineAgents, "agent", nil, "Refiner agent preset; repeat to define an ordered quota/missing-binary fallback list")
+	taskRefineCmd.Flags().StringVar(&taskRefineEffort, "effort", "", "Refiner model-strength tier: light, standard, or heavy (default heavy)")
+	taskRefineCmd.Flags().BoolVar(&taskRefineWait, "wait", false, "Queue for the checkout and wait when it is held, even unattended (default: wait only at a terminal)")
+	taskRefineCmd.Flags().BoolVar(&taskRefineNoWait, "no-wait", false, "Refuse immediately when the checkout or the set is held, even at a terminal")
+	taskRefineCmd.MarkFlagsMutuallyExclusive("wait", "no-wait")
+	taskRefineCmd.Flags().BoolVar(&taskRefineShow, "show", false, "Print the set's latest refine report to stdout and run no agent")
 	taskArtifactsCmd.Flags().StringVar(&taskArtifactsShow, "show", "", "Print the named artifact verbatim")
 
 	taskAssistCmd.Flags().StringVar(&taskRuntimePath, "task-runtime-path", "", "Git checkout root for task execution (normalized to checkout root)")
@@ -1016,32 +1016,32 @@ func runTaskVerify(cmd *cobra.Command, args []string) error {
 		cmd.Flags().Changed("remediate"), taskVerifyRemediate)
 }
 
-func runTaskReview(cmd *cobra.Command, args []string) error {
-	return runTaskReviewWith(cmdLayerDeps().tasksDeps(), os.Stdout, args[0], taskReviewShow)
+func runTaskRefine(cmd *cobra.Command, args []string) error {
+	return runTaskRefineWith(cmdLayerDeps().tasksDeps(), os.Stdout, args[0], taskRefineShow)
 }
 
-func runTaskReviewWith(d *tasks.Deps, w io.Writer, taskSetID string, show bool) error {
-	timeout, err := time.ParseDuration(taskReviewTimeout)
+func runTaskRefineWith(d *tasks.Deps, w io.Writer, taskSetID string, show bool) error {
+	timeout, err := time.ParseDuration(taskRefineTimeout)
 	if err != nil {
-		return fmt.Errorf("tasks review: invalid --timeout %q: %w", taskReviewTimeout, err)
+		return fmt.Errorf("tasks refine: invalid --timeout %q: %w", taskRefineTimeout, err)
 	}
 	resolveInput, err := bindingFirstVerifyResolveInput(d, taskSetID)
 	if err != nil {
-		return fmt.Errorf("tasks review: %w", err)
+		return fmt.Errorf("tasks refine: %w", err)
 	}
-	if _, err := tasks.ReviewTaskSetWith(d, taskProjectDeps(), taskConfigLoad, tasks.ReviewOptions{
+	if _, err := tasks.RefineTaskSetWith(d, taskProjectDeps(), taskConfigLoad, tasks.RefineOptions{
 		ResolveInput: resolveInput,
 		TaskSetID:    taskSetID,
-		Agents:       append([]string(nil), taskReviewAgents...),
-		Effort:       taskReviewEffort,
+		Agents:       append([]string(nil), taskRefineAgents...),
+		Effort:       taskRefineEffort,
 		Timeout:      timeout,
 		Output:       w,
 		Show:         show,
-		Convention:   codeReviewConvention(d),
-		Wait:         admissionWaitChoice(taskReviewWait, taskReviewNoWait),
+		Convention:   refineConvention(d),
+		Wait:         admissionWaitChoice(taskRefineWait, taskRefineNoWait),
 		ConfirmIn:    os.Stdin,
 	}); err != nil {
-		return fmt.Errorf("tasks review: %w", err)
+		return fmt.Errorf("tasks refine: %w", err)
 	}
 	return nil
 }
@@ -1102,14 +1102,14 @@ func runTaskArtifactsWith(d *tasks.Deps, w io.Writer, taskSetID, show string) er
 	return nil
 }
 
-// codeReviewConvention wires the Reviewer's convention seam to the real
-// Convention stack (ADR-0227): the resolved `code-review` convention is the body
-// of the Reviewer's prompt. It lives here because the conventions package
+// refineConvention wires the Refiner's convention seam to the real
+// Convention stack (ADR-0227): the resolved `refine` convention is the body
+// of the Refiner's prompt. It lives here because the conventions package
 // resolves Repository identity through tasks, so tasks cannot reach it directly
 // and cmd is the layer that holds both.
-func codeReviewConvention(d *tasks.Deps) tasks.ReviewConvention {
+func refineConvention(d *tasks.Deps) tasks.RefineConvention {
 	return func(cwd string) (string, error) {
-		stack, err := conventions.Resolve(&conventions.Deps{Tasks: d}, conventions.KindCodeReview, cwd)
+		stack, err := conventions.Resolve(&conventions.Deps{Tasks: d}, conventions.KindRefine, cwd)
 		if err != nil {
 			return "", err
 		}
@@ -1137,7 +1137,7 @@ func commitConvention(d *tasks.Deps) tasks.CommitConventionSource {
 
 // verificationConvention wires the Verifier's mandate to the real Convention
 // stack (ADR-0227): the resolved `verification` convention is the body of the
-// Verifier's prompt. It lives beside codeReviewConvention, and for the same
+// Verifier's prompt. It lives beside refineConvention, and for the same
 // reason — cmd is the layer that holds both packages.
 func verificationConvention(d *tasks.Deps) tasks.VerificationConvention {
 	return func(cwd string) (string, error) {
@@ -1284,7 +1284,7 @@ func runTaskImplement(cmd *cobra.Command, args []string) {
 // terminal, refuse when a machine is driving (ADR-0239). The two flags are
 // mutually exclusive on every command that registers them, so their order here
 // decides nothing. Every Tree-stable operation with a CLI form — implement,
-// verify, review — reads its pair through this one resolution, so the three
+// verify, refine — reads its pair through this one resolution, so the three
 // cannot drift.
 func admissionWaitChoice(wait, noWait bool) tasks.AdmissionWaitChoice {
 	switch {
@@ -1395,7 +1395,7 @@ func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reade
 		Timeout:                timeout,
 		VerifyAgents:           append([]string(nil), taskImplementVerifyAgents...),
 		VerifyEffort:           taskImplementVerifyEffort,
-		ReviewConvention:       codeReviewConvention(d),
+		RefineConvention:       refineConvention(d),
 		VerificationConvention: verificationConvention(d),
 		Yes:                    taskRunYes,
 		Wait:                   taskImplementWaitChoice(),

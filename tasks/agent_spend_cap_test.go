@@ -95,14 +95,14 @@ func TestSpendCapCoolsForPopsOwnHour(t *testing.T) {
 }
 
 // TestSpendCapAdvancesTheWalkAndCoolsThePreset drives a spend cap through the
-// shared fallback walk verify and review both run on: the capped preset hands
+// shared fallback walk verify and refine both run on: the capped preset hands
 // the turn to the next agent instead of ending anything, is recorded as cooling
 // for pop's hour, and is skipped without invocation while it cools.
 func TestSpendCapAdvancesTheWalkAndCoolsThePreset(t *testing.T) {
 	taskSetDir := t.TempDir()
-	d, runner := reviewRunnerDeps(t,
-		scriptedReviewRun{output: codexSpendCapStream(), exitCode: 1},
-		scriptedReviewRun{output: claudeReviewStream("## Naming\\nAll good.")},
+	d, runner := refineRunnerDeps(t,
+		scriptedRefineRun{output: codexSpendCapStream(), exitCode: 1},
+		scriptedRefineRun{output: claudeRefineStream("## Naming\\nAll good.")},
 	)
 
 	var out bytes.Buffer

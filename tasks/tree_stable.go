@@ -9,9 +9,9 @@ import (
 
 // TreeStableHold is a claim on a checkout taken by an operation that needs the
 // tree to hold still for its duration but is not a drain (ADR-0238): the
-// standalone Verifier and the standalone Reviewer. The Verifier runs tests
-// another set's drain would break, and a Reviewer reading files that are moving
-// reviews a state that never existed — so both are admitted exclusively, even
+// standalone Verifier and the standalone Refiner. The Verifier runs tests
+// another set's drain would break, and a Refiner reading files that are moving
+// judges a state that never existed — so both are admitted exclusively, even
 // though only one of them writes.
 //
 // It is the same acquisition a drain makes, without the drain's lifecycle: no
@@ -71,7 +71,7 @@ func heldHere(d *Deps, runtimePath, setID string) bool {
 
 // Release gives the checkout back. The row is removed rather than closed with a
 // terminal: a Drain terminal is a statement about a drain's outcome, and this
-// operation reports its own outcome (a verdict, a review document) through its
+// operation reports its own outcome (a verdict, a refine report) through its
 // own surface. Leaving one behind would put a verify in the set's drain history.
 // A no-op hold gives nothing back — what it found still held is not its to
 // release.

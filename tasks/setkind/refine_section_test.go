@@ -12,23 +12,23 @@ import (
 	"github.com/glebglazov/pop/work"
 )
 
-// reviewSectionProse is the one string the summary may never carry.
-const reviewSectionProse = "SECRET-REVIEW-PROSE"
+// refineSectionProse is the one string the summary may never carry.
+const refineSectionProse = "SECRET-REFINE-PROSE"
 
-// seedReviewedSet files one Review artifact under a fresh set directory and
-// hands back the manifest the refresh would carry for it, plus the artifact's
+// seedRefinedSet files one Refine report under a fresh set directory and
+// hands back the manifest the refresh would carry for it, plus the report's
 // path.
-func seedReviewedSet(t *testing.T, reviewed bool) (*tasks.Manifest, string) {
+func seedRefinedSet(t *testing.T, refined bool) (*tasks.Manifest, string) {
 	t.Helper()
 	setDir := t.TempDir()
 	path := ""
-	if reviewed {
-		dir := filepath.Join(setDir, "reviews")
+	if refined {
+		dir := filepath.Join(setDir, "refine")
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		path = filepath.Join(dir, "review-20260816T120000Z.md")
-		body := "# Code review — demo\n\n- Work SHA: abc123a\n- Commit range: aaa111^..HEAD\n\n## Naming\n\n" + reviewSectionProse + "\n"
+		path = filepath.Join(dir, "refine-20260816T120000Z.md")
+		body := "# Refine report — demo\n\n- Work SHA: abc123a\n- Commit range: aaa111^..HEAD\n\n## Naming\n\n" + refineSectionProse + "\n"
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -41,9 +41,9 @@ func seedReviewedSet(t *testing.T, reviewed bool) (*tasks.Manifest, string) {
 	return m, path
 }
 
-// containerForReviewedSet builds the single container a set with this manifest
-// produces, over a filesystem that can actually list the set's reviews/.
-func containerForReviewedSet(t *testing.T, m *tasks.Manifest) work.Container {
+// containerForRefinedSet builds the single container a set with this manifest
+// produces, over a filesystem that can actually list the set's refine/.
+func containerForRefinedSet(t *testing.T, m *tasks.Manifest) work.Container {
 	t.Helper()
 	rows := []tasks.Row{{ID: "demo", Status: tasks.StatusReady}}
 	d := testDeps(t, rows)
@@ -71,25 +71,25 @@ func containerForReviewedSet(t *testing.T, m *tasks.Manifest) work.Container {
 // TestDetailSectionSummarisesArtifacts pins the dashboard consequence of
 // ADR-0217: it gives the Artifact count and newest member, but no path.
 func TestDetailSectionSummarisesArtifacts(t *testing.T) {
-	reviewedManifest, path := seedReviewedSet(t, true)
-	reviewed := containerForReviewedSet(t, reviewedManifest)
+	refinedManifest, path := seedRefinedSet(t, true)
+	refined := containerForRefinedSet(t, refinedManifest)
 
-	if len(reviewed.DetailSections) != 1 || reviewed.DetailSections[0].Title != tasks.ArtifactSectionTitle {
-		t.Fatalf("detail sections = %+v, want one titled %q", reviewed.DetailSections, tasks.ArtifactSectionTitle)
+	if len(refined.DetailSections) != 1 || refined.DetailSections[0].Title != tasks.ArtifactSectionTitle {
+		t.Fatalf("detail sections = %+v, want one titled %q", refined.DetailSections, tasks.ArtifactSectionTitle)
 	}
-	body := reviewed.DetailSections[0].Body
-	for _, want := range []string{"1 artifact", "newest: review", "2026-08-16 12:00Z"} {
+	body := refined.DetailSections[0].Body
+	for _, want := range []string{"1 artifact", "newest: refine", "2026-08-16 12:00Z"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("section body missing %q:\n%s", want, body)
 		}
 	}
-	if strings.Contains(body, path) || strings.Contains(body, "abc123a") || strings.Contains(body, reviewSectionProse) {
-		t.Fatalf("section retained the Review pointer or prose:\n%s", body)
+	if strings.Contains(body, path) || strings.Contains(body, "abc123a") || strings.Contains(body, refineSectionProse) {
+		t.Fatalf("section retained the Refine pointer or prose:\n%s", body)
 	}
 
-	unreviewedManifest, _ := seedReviewedSet(t, false)
-	unreviewed := containerForReviewedSet(t, unreviewedManifest)
-	if len(unreviewed.DetailSections) != 0 {
-		t.Fatalf("set with no artifacts authored %+v, want no section", unreviewed.DetailSections)
+	unrefinedManifest, _ := seedRefinedSet(t, false)
+	unrefined := containerForRefinedSet(t, unrefinedManifest)
+	if len(unrefined.DetailSections) != 0 {
+		t.Fatalf("set with no artifacts authored %+v, want no section", unrefined.DetailSections)
 	}
 }

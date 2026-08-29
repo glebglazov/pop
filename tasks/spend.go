@@ -175,16 +175,16 @@ type SpendSetBreakdownResult struct {
 	VerificationCost           PartialCost
 	VerificationRunCount       int
 	VerificationTokenBlindRuns int
-	// The Review bucket is the third phase a set spends agent quota in
-	// (ADR-0214). It is reported only when the set has been reviewed, so a set
-	// that never was reads exactly as it did before review existed.
-	ReviewTokens         TokenUsage
-	ReviewCost           PartialCost
-	ReviewRunCount       int
-	ReviewTokenBlindRuns int
+	// The Refine bucket is the third phase a set spends agent quota in
+	// (ADR-0240). It is reported only when the set has been refined, so a set
+	// that never was reads exactly as it did before Refine existed.
+	RefineTokens         TokenUsage
+	RefineCost           PartialCost
+	RefineRunCount       int
+	RefineTokenBlindRuns int
 	ImplementNotional    PartialCost
 	VerificationNotional PartialCost
-	ReviewNotional       PartialCost
+	RefineNotional       PartialCost
 	// RateTableDate is the fetched_at of the Rate table that priced this render.
 	RateTableDate time.Time
 }
@@ -239,13 +239,13 @@ type spendSetBreakdownJSON struct {
 	VerificationPartialCostUSD   *float64                `json:"verification_partial_cost_usd,omitempty"`
 	VerificationRunCount         int                     `json:"verification_run_count"`
 	VerificationTokenBlindRuns   int                     `json:"verification_token_blind_runs"`
-	ReviewInputTokens            int64                   `json:"review_input_tokens"`
-	ReviewOutputTokens           int64                   `json:"review_output_tokens"`
-	ReviewCacheReadTokens        int64                   `json:"review_cache_read_tokens"`
-	ReviewCacheWriteTokens       int64                   `json:"review_cache_write_tokens"`
-	ReviewPartialCostUSD         *float64                `json:"review_partial_cost_usd,omitempty"`
-	ReviewRunCount               int                     `json:"review_run_count"`
-	ReviewTokenBlindRuns         int                     `json:"review_token_blind_runs"`
+	RefineInputTokens            int64                   `json:"refine_input_tokens"`
+	RefineOutputTokens           int64                   `json:"refine_output_tokens"`
+	RefineCacheReadTokens        int64                   `json:"refine_cache_read_tokens"`
+	RefineCacheWriteTokens       int64                   `json:"refine_cache_write_tokens"`
+	RefinePartialCostUSD         *float64                `json:"refine_partial_cost_usd,omitempty"`
+	RefineRunCount               int                     `json:"refine_run_count"`
+	RefineTokenBlindRuns         int                     `json:"refine_token_blind_runs"`
 	Rows                         []spendBreakdownJSONRow `json:"rows"`
 }
 
@@ -779,14 +779,14 @@ func buildSpendSetBreakdown(d *Deps, taskSetID string, m *Manifest, table *RateT
 			addTokenUsage(&result.VerificationTokens, spend.Tokens)
 			addPartialCost(&result.VerificationCost, spend.Cost)
 			addPartialCost(&result.VerificationNotional, notional.Cost)
-		case spendReviewRowKey:
-			result.ReviewRunCount++
+		case spendRefineRowKey:
+			result.RefineRunCount++
 			if !spend.Tokens.HasUsage() {
-				result.ReviewTokenBlindRuns++
+				result.RefineTokenBlindRuns++
 			}
-			addTokenUsage(&result.ReviewTokens, spend.Tokens)
-			addPartialCost(&result.ReviewCost, spend.Cost)
-			addPartialCost(&result.ReviewNotional, notional.Cost)
+			addTokenUsage(&result.RefineTokens, spend.Tokens)
+			addPartialCost(&result.RefineCost, spend.Cost)
+			addPartialCost(&result.RefineNotional, notional.Cost)
 		default:
 			result.ImplementRunCount++
 			if !spend.Tokens.HasUsage() {
@@ -810,15 +810,15 @@ func buildSpendSetBreakdown(d *Deps, taskSetID string, m *Manifest, table *RateT
 
 const (
 	spendVerifyRowKey = "__verify__"
-	spendReviewRowKey = "__review__"
+	spendRefineRowKey = "__refine__"
 )
 
 func spendBreakdownRowKey(run capturedRun, m *Manifest) (key, taskID, title string) {
 	if run.meta.Phase == "verify" {
 		return spendVerifyRowKey, "verify", "Verify"
 	}
-	if run.meta.Phase == "review" {
-		return spendReviewRowKey, "review", "Review"
+	if run.meta.Phase == "refine" {
+		return spendRefineRowKey, "refine", "Refine"
 	}
 	key = run.meta.TaskFile
 	if task := taskByFile(m, key); task != nil {
@@ -1235,13 +1235,13 @@ func RenderSpendSetBreakdown(w io.Writer, result *SpendSetBreakdownResult) {
 		result.VerificationRunCount,
 		result.VerificationTokenBlindRuns,
 	)
-	// A set nobody reviewed says nothing about review: the line appears the moment
+	// A set nobody refined says nothing about refine: the line appears the moment
 	// there is spend behind it and never before.
-	if result.ReviewRunCount > 0 {
-		fmt.Fprintf(w, "review spend: %s  (%d runs, %d blind)\n",
-			formatSpendCell(result.ReviewTokens, result.ReviewNotional, "", ""),
-			result.ReviewRunCount,
-			result.ReviewTokenBlindRuns,
+	if result.RefineRunCount > 0 {
+		fmt.Fprintf(w, "refine spend: %s  (%d runs, %d blind)\n",
+			formatSpendCell(result.RefineTokens, result.RefineNotional, "", ""),
+			result.RefineRunCount,
+			result.RefineTokenBlindRuns,
 		)
 	}
 	fmt.Fprintln(w)
@@ -1451,13 +1451,13 @@ func RenderSpendSetBreakdownJSON(w io.Writer, result *SpendSetBreakdownResult) e
 		VerificationPartialCostUSD:   partialCostUSDPtr(result.VerificationCost),
 		VerificationRunCount:         result.VerificationRunCount,
 		VerificationTokenBlindRuns:   result.VerificationTokenBlindRuns,
-		ReviewInputTokens:            result.ReviewTokens.Input,
-		ReviewOutputTokens:           result.ReviewTokens.Output,
-		ReviewCacheReadTokens:        result.ReviewTokens.CacheRead,
-		ReviewCacheWriteTokens:       result.ReviewTokens.CacheWrite,
-		ReviewPartialCostUSD:         partialCostUSDPtr(result.ReviewCost),
-		ReviewRunCount:               result.ReviewRunCount,
-		ReviewTokenBlindRuns:         result.ReviewTokenBlindRuns,
+		RefineInputTokens:            result.RefineTokens.Input,
+		RefineOutputTokens:           result.RefineTokens.Output,
+		RefineCacheReadTokens:        result.RefineTokens.CacheRead,
+		RefineCacheWriteTokens:       result.RefineTokens.CacheWrite,
+		RefinePartialCostUSD:         partialCostUSDPtr(result.RefineCost),
+		RefineRunCount:               result.RefineRunCount,
+		RefineTokenBlindRuns:         result.RefineTokenBlindRuns,
 		Rows:                         make([]spendBreakdownJSONRow, len(result.Rows)),
 	}
 	for i, row := range result.Rows {

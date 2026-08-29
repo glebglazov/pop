@@ -13,11 +13,11 @@ type SpentRetryCap struct {
 	SetID       string
 	RuntimePath string
 	// Phase is the Work group whose cap was spent — implement, verify or
-	// review — because "the Reviewer burned three tries" and "the task burned
+	// refine — because "the Refiner burned three tries" and "the task burned
 	// three tries" are different pieces of news.
 	Phase string
 	// TaskID is the task the attempts were spent on, empty for a set-level phase
-	// (verify and review judge the set, not a task).
+	// (verify and refine judge the set, not a task).
 	TaskID string
 	// Preset is the agent that spent the cap: the one the journal names, and the
 	// one whose configuration a human looks at first.

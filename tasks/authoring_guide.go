@@ -202,17 +202,17 @@ Set-level keys:
   a task mid-drain renders a new `+"`commit_subject`"+` from, and pop projects
   it rather than trust a retyped copy. Do not supply it — a value written here
   is overwritten when the set registers.
-- `+"`verify`"+` / `+"`review`"+` — optional booleans, and opt-**out** only:
-  write `+"`false`"+` to decline the drain's Agent verification or its Code
-  review for this set alone (generated or vendored code, say). Omit them and the
+- `+"`verify`"+` / `+"`refine`"+` — optional booleans, and opt-**out** only:
+  write `+"`false`"+` to decline the drain's Agent verification or its
+  Refine for this set alone (generated or vendored code, say). Omit them and the
   set participates in whichever of the two the user has enabled globally; neither
   key can switch a globally disabled phase on, and a hand-run
-  `+"`pop tasks verify`"+` / `+"`pop tasks review`"+` runs regardless.
-- `+"`verifier`"+` / `+"`reviewer`"+` — optional
+  `+"`pop tasks verify`"+` / `+"`pop tasks refine`"+` runs regardless.
+- `+"`verifier`"+` / `+"`refiner`"+` — optional
   `+"`{\"agents\": [...], \"effort\": \"...\"}`"+` objects steering *how* this
-  set is verified or reviewed: they override the configured agent fallback list
+  set is verified or refined: they override the configured agent fallback list
   and effort for that phase, and CLI flags still win over them. They steer only —
-  participation stays the `+"`verify`"+` / `+"`review`"+` keys' business.
+  participation stays the `+"`verify`"+` / `+"`refine`"+` keys' business.
 - No `+"`worktree`"+` and no `+"`auto_drain`"+` (ADR-0115): binding and
   auto-drain are `+"`register`"+` flags and dashboard toggles, never manifest
   keys. A legacy set carrying them is not malformed; they are ignored.

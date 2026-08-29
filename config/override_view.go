@@ -60,11 +60,11 @@ type overrideFallthrough struct {
 // execution does. The editor stores that emptiness as a real value, the ladder
 // read here tells it from an absent key, and the merged config carries which
 // keys the override layer states empty (Config.EmptyAgentOverrides) so that
-// resolveVerifier, resolveReviewer and ResolveRoutineAgentPresets refuse to walk
+// resolveVerifier, resolveRefiner and ResolveRoutineAgentPresets refuse to walk
 // on from an emptiness a human wrote.
 var overrideFallthroughs = map[string]overrideFallthrough{
 	KeyVerifyAgents:  {Key: "work.implement.agents", Phrase: "the implement list"},
-	KeyReviewAgents:  {Key: "work.implement.agents", Phrase: "the implement list"},
+	KeyRefineAgents:  {Key: "work.implement.agents", Phrase: "the implement list"},
 	KeyRoutineAgents: {Key: "work.implement.agents", Phrase: "the implement list"},
 }
 

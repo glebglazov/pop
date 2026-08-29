@@ -623,6 +623,12 @@ var migrations = []string{
 		registered_at TEXT    NOT NULL
 	);
 	 CREATE INDEX admission_waiters_path ON admission_waiters (runtime_path, id);`,
+	// 38: review_episodes → refine_episodes (ADR-0240): Code review is renamed
+	// Refine, and the store follows suit. Losing the row it renames only
+	// re-arms one automatic pass, so the rename is a plain forward step rather
+	// than a data-carrying migration.
+	`ALTER TABLE review_episodes RENAME TO refine_episodes;
+	 ALTER TABLE refine_episodes RENAME COLUMN reviewed_at TO refined_at;`,
 }
 
 func (s *Store) migrate() error {

@@ -9,7 +9,7 @@ Derived status: {{.Status}}
 {{template "task-listing" .Tasks}}
 {{if .FindingsRecorded}}## Latest Verify verdict findings
 {{.Findings}}
-{{end}}{{template "latest-code-review" .Review}}
+{{end}}{{template "latest-refine-report" .Refine}}
 
 ## Recent progress
 {{if .ProgressUnavailable}}- No progress.txt is available yet.

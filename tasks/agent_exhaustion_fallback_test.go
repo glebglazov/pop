@@ -130,16 +130,16 @@ func TestEveryAgentTimingOutHandsTheTurnOn(t *testing.T) {
 	assertProgressContains(t, env.execFixture(), "FAILED", "timed out")
 }
 
-// TestSpentCapFallThroughIsReportedOnTheSharedWalk: verify and review walk their
+// TestSpentCapFallThroughIsReportedOnTheSharedWalk: verify and refine walk their
 // lists past an exhausted retry loop already, but did it silently. Every Work
 // group now reports the fall-through the same way, so the operator reads the same
-// event whichever list is advancing. Driven through the Reviewer, which is the
+// event whichever list is advancing. Driven through the Refiner, which is the
 // cheapest way into the walk both roles share.
 func TestSpentCapFallThroughIsReportedOnTheSharedWalk(t *testing.T) {
 	taskSetDir := t.TempDir()
-	d, runner := reviewRunnerDeps(t,
-		scriptedReviewRun{output: providerCrashMessage, exitCode: 1},
-		scriptedReviewRun{output: claudeReviewStream("## Naming\\nAll good.")},
+	d, runner := refineRunnerDeps(t,
+		scriptedRefineRun{output: providerCrashMessage, exitCode: 1},
+		scriptedRefineRun{output: claudeRefineStream("## Naming\\nAll good.")},
 	)
 
 	var out bytes.Buffer
@@ -153,7 +153,7 @@ func TestSpentCapFallThroughIsReportedOnTheSharedWalk(t *testing.T) {
 	if runner.calls != 2 {
 		t.Fatalf("agent invocations = %d, want the turn handed on after the first spent its cap", runner.calls)
 	}
-	if want := "Reviewer agent codex spent its only attempt without finishing"; !strings.Contains(out.String(), want) {
+	if want := "Refiner agent codex spent its only attempt without finishing"; !strings.Contains(out.String(), want) {
 		t.Fatalf("output missing %q:\n%s", want, out.String())
 	}
 }

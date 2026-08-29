@@ -10,10 +10,10 @@ import (
 	"time"
 )
 
-// scriptedReviewRun is one invocation the scripted Reviewer runner replays: the
+// scriptedRefineRun is one invocation the scripted Refiner runner replays: the
 // stream lines it prints, how the process ends, and whether it outlives the
-// attempt timeout — the three endings a Reviewer attempt is judged on.
-type scriptedReviewRun struct {
+// attempt timeout — the three endings a Refiner attempt is judged on.
+type scriptedRefineRun struct {
 	output   string
 	exitCode int
 	runErr   error
@@ -22,12 +22,12 @@ type scriptedReviewRun struct {
 	hang time.Duration
 }
 
-type scriptedReviewRunner struct {
-	runs  []scriptedReviewRun
+type scriptedRefineRunner struct {
+	runs  []scriptedRefineRun
 	calls int
 }
 
-func (r *scriptedReviewRunner) Run(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (int, error) {
+func (r *scriptedRefineRunner) Run(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (int, error) {
 	proc, err := r.Start(ctx, dir, stdout, stderr, name, args...)
 	if err != nil {
 		return 1, err
@@ -35,9 +35,9 @@ func (r *scriptedReviewRunner) Run(ctx context.Context, dir string, stdout, stde
 	return proc.Wait()
 }
 
-func (r *scriptedReviewRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
+func (r *scriptedRefineRunner) Start(ctx context.Context, dir string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
 	r.calls++
-	run := scriptedReviewRun{}
+	run := scriptedRefineRun{}
 	if r.calls <= len(r.runs) {
 		run = r.runs[r.calls-1]
 	}
@@ -62,19 +62,19 @@ func (r *scriptedReviewRunner) Start(ctx context.Context, dir string, stdout, st
 	return proc, nil
 }
 
-func (r *scriptedReviewRunner) StartWithEnv(ctx context.Context, dir string, env []string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
+func (r *scriptedRefineRunner) StartWithEnv(ctx context.Context, dir string, env []string, stdout, stderr io.Writer, name string, args ...string) (*ManagedProcess, error) {
 	return r.Start(ctx, dir, stdout, stderr, name, args...)
 }
 
-// claudeReviewStream is a claude JSON stream carrying body as the run's result.
-func claudeReviewStream(body string) string {
+// claudeRefineStream is a claude JSON stream carrying body as the run's result.
+func claudeRefineStream(body string) string {
 	return `{"type":"system","subtype":"init"}` + "\n" +
 		`{"type":"result","subtype":"success","result":"` + body + `"}`
 }
 
-func reviewRunnerDeps(t *testing.T, runs ...scriptedReviewRun) (*Deps, *scriptedReviewRunner) {
+func refineRunnerDeps(t *testing.T, runs ...scriptedRefineRun) (*Deps, *scriptedRefineRunner) {
 	t.Helper()
-	runner := &scriptedReviewRunner{runs: runs}
+	runner := &scriptedRefineRunner{runs: runs}
 	d := newTestDeps(t)
 	d.Git = stubGit("sha1\n", "", "")
 	d.LookPath = func(string) (string, error) { return "/bin/claude", nil }
@@ -82,68 +82,68 @@ func reviewRunnerDeps(t *testing.T, runs ...scriptedReviewRun) (*Deps, *scripted
 	return d, runner
 }
 
-func runScriptedReviewer(t *testing.T, d *Deps, taskSetDir string, timeout time.Duration) (string, error) {
+func runScriptedRefiner(t *testing.T, d *Deps, taskSetDir string, timeout time.Duration) (string, error) {
 	t.Helper()
 	var out bytes.Buffer
-	body, _, err := runConfiguredReviewer(d, nil, verifierSelection{
+	body, _, err := runConfiguredRefiner(d, nil, verifierSelection{
 		Agents: []string{"claude"}, Effort: "heavy",
 	}, taskSetDir, "demo", "sha1", "/rt", "prompt", &out, timeout, nil)
 	return body, err
 }
 
-// TestReviewerRetryEligibilityMatchesTheVerifiers pins the two roles' rules side
+// TestRefinerRetryEligibilityMatchesTheVerifiers pins the two roles' rules side
 // by side: they agree on every ending, and part on the one thing that is a
-// format question — prose with no verdict in it is the Reviewer's whole answer
+// format question — prose with no verdict in it is the Refiner's whole answer
 // and the Verifier's failure to answer.
-func TestReviewerRetryEligibilityMatchesTheVerifiers(t *testing.T) {
+func TestRefinerRetryEligibilityMatchesTheVerifiers(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name         string
 		outcome      *attemptOutcome
 		raw          string
-		wantReviewer bool
+		wantRefiner  bool
 		wantVerifier bool
 	}{
 		{
 			name:         "a clean run with prose",
 			outcome:      &attemptOutcome{},
 			raw:          "## Naming\nThe helper names read well.",
-			wantReviewer: false,
+			wantRefiner:  false,
 			wantVerifier: true,
 		},
 		{
 			name:         "a clean run with nothing to write down",
 			outcome:      &attemptOutcome{},
 			raw:          "   \n",
-			wantReviewer: true,
+			wantRefiner:  true,
 			wantVerifier: true,
 		},
 		{
 			name:         "a timeout that left half a document",
 			outcome:      &attemptOutcome{timedOut: true},
 			raw:          "## Naming\nThe helper na",
-			wantReviewer: true,
+			wantRefiner:  true,
 			wantVerifier: true,
 		},
 		{
 			name:         "an agent that could not run",
 			outcome:      &attemptOutcome{runErr: errors.New("agent crashed")},
 			raw:          "## Naming",
-			wantReviewer: true,
+			wantRefiner:  true,
 			wantVerifier: true,
 		},
 		{
 			name:         "a non-zero exit",
 			outcome:      &attemptOutcome{exitCode: 2},
 			raw:          "## Naming",
-			wantReviewer: true,
+			wantRefiner:  true,
 			wantVerifier: true,
 		},
 		{
 			name:         "a timeout after a parsed verdict",
 			outcome:      &attemptOutcome{timedOut: true},
 			raw:          "VERDICT: PASS\nFINDINGS:\n",
-			wantReviewer: true,
+			wantRefiner:  true,
 			wantVerifier: false,
 		},
 	}
@@ -151,8 +151,8 @@ func TestReviewerRetryEligibilityMatchesTheVerifiers(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := reviewAttemptRetryEligible(tc.outcome, tc.raw); got != tc.wantReviewer {
-				t.Fatalf("reviewAttemptRetryEligible = %v, want %v", got, tc.wantReviewer)
+			if got := refineAttemptRetryEligible(tc.outcome, tc.raw); got != tc.wantRefiner {
+				t.Fatalf("refineAttemptRetryEligible = %v, want %v", got, tc.wantRefiner)
 			}
 			if got := verifyAttemptRetryEligible(tc.outcome, tc.raw); got != tc.wantVerifier {
 				t.Fatalf("verifyAttemptRetryEligible = %v, want %v", got, tc.wantVerifier)
@@ -161,19 +161,19 @@ func TestReviewerRetryEligibilityMatchesTheVerifiers(t *testing.T) {
 	}
 }
 
-// TestReviewerRetriesATimedOutAttemptAndKeepsItsProse: a Reviewer that hangs
+// TestRefinerRetriesATimedOutAttemptAndKeepsItsProse: a Refiner that hangs
 // past the attempt timeout is retried, and the fragment it left is never handed
 // back as the set's document — the caller gets an error, so nothing supersedes
-// the review the set already had.
-func TestReviewerRetriesATimedOutAttemptAndKeepsItsProse(t *testing.T) {
+// the report the set already had.
+func TestRefinerRetriesATimedOutAttemptAndKeepsItsProse(t *testing.T) {
 	t.Parallel()
 	taskSetDir := t.TempDir()
-	hung := scriptedReviewRun{output: claudeReviewStream("## Naming\\nThe helper na"), hang: 150 * time.Millisecond}
-	d, runner := reviewRunnerDeps(t, hung, hung, hung)
+	hung := scriptedRefineRun{output: claudeRefineStream("## Naming\\nThe helper na"), hang: 150 * time.Millisecond}
+	d, runner := refineRunnerDeps(t, hung, hung, hung)
 
-	body, err := runScriptedReviewer(t, d, taskSetDir, 20*time.Millisecond)
+	body, err := runScriptedRefiner(t, d, taskSetDir, 20*time.Millisecond)
 	if err == nil {
-		t.Fatalf("a Reviewer that only ever timed out returned a document: %q", body)
+		t.Fatalf("a Refiner that only ever timed out returned a document: %q", body)
 	}
 	if body != "" {
 		t.Fatalf("body = %q, want nothing written from a timed-out attempt", body)
@@ -186,22 +186,22 @@ func TestReviewerRetriesATimedOutAttemptAndKeepsItsProse(t *testing.T) {
 	}
 }
 
-// TestReviewerRetriesAFailedRunThenTakesTheCleanDocument: a run error and a
+// TestRefinerRetriesAFailedRunThenTakesTheCleanDocument: a run error and a
 // non-zero exit are retried exactly as a timeout is, and the first run that
 // reaches its own ending with prose is the answer — "any prose is an answer"
 // still holds for a completed run.
-func TestReviewerRetriesAFailedRunThenTakesTheCleanDocument(t *testing.T) {
+func TestRefinerRetriesAFailedRunThenTakesTheCleanDocument(t *testing.T) {
 	t.Parallel()
 	taskSetDir := t.TempDir()
-	d, runner := reviewRunnerDeps(t,
-		scriptedReviewRun{output: claudeReviewStream("## Naming"), runErr: errors.New("agent crashed")},
-		scriptedReviewRun{output: claudeReviewStream("## Naming"), exitCode: 2},
-		scriptedReviewRun{output: claudeReviewStream("## Naming\\nThe helper names read well.")},
+	d, runner := refineRunnerDeps(t,
+		scriptedRefineRun{output: claudeRefineStream("## Naming"), runErr: errors.New("agent crashed")},
+		scriptedRefineRun{output: claudeRefineStream("## Naming"), exitCode: 2},
+		scriptedRefineRun{output: claudeRefineStream("## Naming\\nThe helper names read well.")},
 	)
 
-	body, err := runScriptedReviewer(t, d, taskSetDir, time.Minute)
+	body, err := runScriptedRefiner(t, d, taskSetDir, time.Minute)
 	if err != nil {
-		t.Fatalf("runConfiguredReviewer: %v", err)
+		t.Fatalf("runConfiguredRefiner: %v", err)
 	}
 	if !strings.Contains(body, "The helper names read well.") {
 		t.Fatalf("body = %q, want the completed run's document", body)
@@ -211,16 +211,16 @@ func TestReviewerRetriesAFailedRunThenTakesTheCleanDocument(t *testing.T) {
 	}
 }
 
-// TestReviewerTakesACleanRunOnTheFirstTry keeps the common path pinned: one
+// TestRefinerTakesACleanRunOnTheFirstTry keeps the common path pinned: one
 // completed run with prose spends one try and is the document.
-func TestReviewerTakesACleanRunOnTheFirstTry(t *testing.T) {
+func TestRefinerTakesACleanRunOnTheFirstTry(t *testing.T) {
 	t.Parallel()
 	taskSetDir := t.TempDir()
-	d, runner := reviewRunnerDeps(t, scriptedReviewRun{output: claudeReviewStream("## Naming\\nAll good.")})
+	d, runner := refineRunnerDeps(t, scriptedRefineRun{output: claudeRefineStream("## Naming\\nAll good.")})
 
-	body, err := runScriptedReviewer(t, d, taskSetDir, time.Minute)
+	body, err := runScriptedRefiner(t, d, taskSetDir, time.Minute)
 	if err != nil {
-		t.Fatalf("runConfiguredReviewer: %v", err)
+		t.Fatalf("runConfiguredRefiner: %v", err)
 	}
 	if !strings.Contains(body, "All good.") {
 		t.Fatalf("body = %q, want the completed run's document", body)

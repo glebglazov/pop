@@ -268,7 +268,7 @@ func BeginDrainWithAdmission(d *Deps, runtimePath, setID string, noticeOut io.Wr
 // clearSpawnIntent separates a drain from a Tree-stable operation that is not
 // one (ADR-0238). A drain consumes the supervisor's pending-spawn marker,
 // because the row it just inserted is what that marker was standing in for; a
-// standalone Verifier or Reviewer holding the same checkout is not the drain the
+// standalone Verifier or Refiner holding the same checkout is not the drain the
 // supervisor dispatched, so it leaves the marker alone rather than hiding a
 // spawn that has yet to happen.
 func admitDrainRow(d *Deps, runtimePath, setID string, noticeOut io.Writer, policy AdmissionPolicy, clearSpawnIntent bool) (*DrainHandle, bool, error) {

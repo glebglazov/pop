@@ -104,11 +104,11 @@ func gateRemediationPreamble(d *Deps, taskSetID string, m *Manifest) []string {
 	return strings.Split(text, "\n")
 }
 
-// gateReviewPreamble tells the human deciding on a set that a Code review of it
-// exists, and against which commit — a pointer, never the document, which is
-// long enough to bury the menu it would be printed above (ADR-0214). Returns no
-// lines for a set that has never been reviewed.
-func gateReviewPreamble(p ReviewPointer, ok bool) []string {
+// gateRefinePreamble tells the human deciding on a set that a Refine report of
+// it exists, and against which commit — a pointer, never the document, which is
+// long enough to bury the menu it would be printed above (ADR-0240). Returns no
+// lines for a set that has never been refined.
+func gateRefinePreamble(p RefinePointer, ok bool) []string {
 	if !ok {
 		return nil
 	}

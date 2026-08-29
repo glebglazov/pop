@@ -11,13 +11,13 @@ import "time"
 // kind's own vocabulary: `work` never interprets it.
 type Artifact struct {
 	// Type is the kind's own classification of the document (a Task set's
-	// `review`, `spec`, `progress`).
+	// `refine`, `spec`, `progress`).
 	Type string
 	// Name is what a reader sees on the row: the document's bare file name rather
 	// than a humanised label, because a family whose members differ only by instant
 	// reads better as the names that already carry those instants. A kind may use
 	// the Path and container root to make copy-name more specific, as Task sets do
-	// for reviews under their reviews/ directory.
+	// for refine reports under their refine/ directory.
 	Name string
 	// Path is the absolute path to the document. Absolute for the reason Item.File
 	// is: the surfaces that read it — the Document peek, a CLI `--show` — hold no

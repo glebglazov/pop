@@ -126,7 +126,7 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 	})
 
 	sub("every set surface offers the newest set first", func(t *testing.T) {
-		for _, verb := range []string{"status", "register", "archive", "set-priority", "auto-drain", "verify", "review", "assist", "show-path", "spend"} {
+		for _, verb := range []string{"status", "register", "archive", "set-priority", "auto-drain", "verify", "refine", "assist", "show-path", "spend"} {
 			assertShellCompOrder(t, shellCompNoDesc(t, "tasks", verb), "svc", "mix", "done")
 		}
 	})
@@ -254,8 +254,8 @@ func TestTaskShellCompletionCandidates(t *testing.T) {
 		}
 	})
 
-	sub("verify and review complete effort", func(t *testing.T) {
-		for _, verb := range []string{"verify", "review"} {
+	sub("verify and refine complete effort", func(t *testing.T) {
+		for _, verb := range []string{"verify", "refine"} {
 			out := shellCompNoDesc(t, "tasks", verb, "--effort")
 			assertShellCompContains(t, out, "light", "standard", "heavy")
 		}

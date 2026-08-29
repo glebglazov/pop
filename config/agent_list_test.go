@@ -22,7 +22,7 @@ agents = ["claude"]
 func TestAgentListEmptinessAgreesWithTheDashboard(t *testing.T) {
 	groups := []struct{ key, table string }{
 		{KeyVerifyAgents, "work.verify"},
-		{KeyReviewAgents, "work.review"},
+		{KeyRefineAgents, "work.refine"},
 		{KeyRoutineAgents, "work.routine"},
 	}
 	fallsThroughNote := fmt.Sprintf(overrideNoteFallsThrough, "the implement list")
@@ -114,7 +114,7 @@ agents = []
 [work.verify]
 agents = []
 
-[work.review]
+[work.refine]
 agents = [{ display_name = "no cmd" }]
 `)
 
@@ -124,8 +124,8 @@ agents = [{ display_name = "no cmd" }]
 	}
 	// A malformed entry yields no command, but the list is not empty: the
 	// preview shows the entry, so resolution must still walk on.
-	review := cfg.ReviewAgentList()
-	if len(review.Commands) != 0 || review.EmptyOverride || !review.FallsThrough() {
-		t.Fatalf("review list = %+v, want an empty-of-commands list that falls through", review)
+	refine := cfg.RefineAgentList()
+	if len(refine.Commands) != 0 || refine.EmptyOverride || !refine.FallsThrough() {
+		t.Fatalf("refine list = %+v, want an empty-of-commands list that falls through", refine)
 	}
 }

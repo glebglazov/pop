@@ -13,12 +13,12 @@ import (
 type Kind string
 
 const (
-	// KindCodeReview is the standard a Reviewer holds a changeset against: what
-	// good code looks like in this repository, as prose. Where the repository
-	// has stated none, pop's shipped answer is a smell baseline that the
+	// KindRefine is the standard a Refiner holds a changeset against: what good
+	// code looks like in this repository, as prose. Where the repository has
+	// stated none, pop's shipped answer is a smell baseline that the
 	// repository's own documents, linters and idiom override (ADR-0214,
-	// ADR-0226 decision 2).
-	KindCodeReview Kind = "code-review"
+	// ADR-0226 decision 2, ADR-0240).
+	KindRefine Kind = "refine"
 	// KindCommits is the commit-message grammar a repository's team writes
 	// history in — types, scopes, subject style and body style, which are one
 	// document and one git log sample rather than two kinds.
@@ -62,7 +62,7 @@ const (
 // Shape answers how this kind reaches an agent.
 func (k Kind) Shape() Shape {
 	switch k {
-	case KindCodeReview, KindVerification:
+	case KindRefine, KindVerification:
 		return ShapeRoleDriving
 	case KindCommits, KindIssueTracker:
 		return ShapeStepInforming
@@ -74,7 +74,7 @@ func (k Kind) Shape() Shape {
 // the order `get` with no kind walks, and the order an unknown kind is refused
 // with.
 func Kinds() []Kind {
-	return []Kind{KindCodeReview, KindCommits, KindIssueTracker, KindVerification}
+	return []Kind{KindRefine, KindCommits, KindIssueTracker, KindVerification}
 }
 
 // Desc is the one-line description of what a kind answers, for a surface that
@@ -83,8 +83,8 @@ func Kinds() []Kind {
 // than in that surface so two surfaces cannot describe a kind differently.
 func (k Kind) Desc() string {
 	switch k {
-	case KindCodeReview:
-		return "What good code looks like in this repository — the standard a review reads a changeset against."
+	case KindRefine:
+		return "What good code looks like in this repository — the standard a refine pass reads a changeset against."
 	case KindCommits:
 		return "How this repository writes commits — types, scopes, subject and body style."
 	case KindIssueTracker:

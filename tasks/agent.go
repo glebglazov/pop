@@ -148,7 +148,7 @@ type AgentHeadlessRequest struct {
 	// mean both (ADR-0190). An adapter that cannot be told about a cap ignores it.
 	TurnCap int
 	// ReadOnly asks the preset to run without the ability to change the checkout
-	// it is pointed at. Only the Reviewer sets it — the Verifier must run the
+	// it is pointed at. Only the Refiner sets it — the Verifier must run the
 	// build and the test suite, which a read-only sandbox would fail for reasons
 	// that have nothing to do with the code under judgment (ADR-0221). A preset
 	// declared blind on the posture is invoked exactly as it would be without it.
@@ -341,7 +341,7 @@ var agentAdapters = map[string]AgentAdapter{
 		attendedArgs:   AgentAttendedArgsCapability{Kind: CapabilitySupported, Args: []string{"--force", "--trust"}},
 		// Ask mode is cursor's own read-only execution mode: it answers in prose and
 		// refuses both edits and system-changing shell commands, which is the whole
-		// of what a Reviewer needs and none of what it must not do.
+		// of what a Refiner needs and none of what it must not do.
 		readOnly: AgentReadOnlyPostureCapability{Kind: CapabilitySupported, Args: []string{"--mode", "ask"}},
 		availability: AgentAvailabilityProbeCapability{
 			Kind:                 CapabilitySupported,
@@ -560,7 +560,7 @@ type presetAgentSpec struct {
 	assistance   AgentAssistanceCapability
 	attendedArgs AgentAttendedArgsCapability
 	// readOnly says how this preset is told, in argv, to run without the ability
-	// to change the checkout it reviews (ADR-0221).
+	// to change the checkout it is refining (ADR-0221).
 	readOnly     AgentReadOnlyPostureCapability
 	availability AgentAvailabilityProbeCapability
 	usage        AgentUsageCapability
@@ -1072,7 +1072,7 @@ func ResolveImplementAgentInvocation(preset, agentCmd, prompt, runtimePath strin
 }
 
 // ResolveReadOnlyAgentInvocation resolves the command for a role that must not be
-// able to change the checkout it was pointed at — the Reviewer, and only it
+// able to change the checkout it was pointed at — the Refiner, and only it
 // (ADR-0221). A preset declared blind on the posture resolves the same command it
 // would otherwise, and the invocation says so when asked.
 func ResolveReadOnlyAgentInvocation(preset, agentCmd, prompt, runtimePath string, mode AgentOutputMode) (*AgentInvocation, error) {

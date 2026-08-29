@@ -1349,28 +1349,28 @@ func TestImplementAgentFlagExplicitness(t *testing.T) {
 	}
 }
 
-// TestReviewerSteeringFlagsRegistered pins `pop tasks review`'s surface: the
+// TestRefinerSteeringFlagsRegistered pins `pop tasks refine`'s surface: the
 // same checkout/agent/effort steering the Verifier takes, plus --show, which is
-// how a document reaches a pull request.
-func TestReviewerSteeringFlagsRegistered(t *testing.T) {
-	if taskReviewCmd.Flags().Lookup("task-runtime-path") == nil {
-		t.Fatal("tasks review --task-runtime-path flag not registered")
+// how a report reaches a pull request.
+func TestRefinerSteeringFlagsRegistered(t *testing.T) {
+	if taskRefineCmd.Flags().Lookup("task-runtime-path") == nil {
+		t.Fatal("tasks refine --task-runtime-path flag not registered")
 	}
-	agent := taskReviewCmd.Flags().Lookup("agent")
+	agent := taskRefineCmd.Flags().Lookup("agent")
 	if agent == nil {
-		t.Fatal("tasks review --agent flag not registered")
+		t.Fatal("tasks refine --agent flag not registered")
 	}
 	if agent.Value.Type() != "stringArray" {
-		t.Fatalf("tasks review --agent type = %q, want stringArray (repeatable)", agent.Value.Type())
+		t.Fatalf("tasks refine --agent type = %q, want stringArray (repeatable)", agent.Value.Type())
 	}
-	if taskReviewCmd.Flags().Lookup("effort") == nil {
-		t.Fatal("tasks review --effort flag not registered")
+	if taskRefineCmd.Flags().Lookup("effort") == nil {
+		t.Fatal("tasks refine --effort flag not registered")
 	}
-	if taskReviewCmd.Flags().Lookup("show") == nil {
-		t.Fatal("tasks review --show flag not registered")
+	if taskRefineCmd.Flags().Lookup("show") == nil {
+		t.Fatal("tasks refine --show flag not registered")
 	}
-	if taskReviewCmd.Flags().Lookup("accept") != nil || taskReviewCmd.Flags().Lookup("remediate") != nil {
-		t.Fatal("a review reaches no verdict, so it has nothing to accept or remediate")
+	if taskRefineCmd.Flags().Lookup("accept") != nil || taskRefineCmd.Flags().Lookup("remediate") != nil {
+		t.Fatal("a refine pass reaches no verdict, so it has nothing to accept or remediate")
 	}
 }
 

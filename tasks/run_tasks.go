@@ -66,21 +66,21 @@ type RunTaskSetOptions struct {
 	// verifyCoreOptions.runVerifier. Unexported and test-only: production always
 	// resolves the real Verifier agent. Nil ⇒ the configured Verifier runs.
 	verifyRunner func(prompt string) (string, error)
-	// ReviewConvention resolves the repository's `code-review` Convention for the
-	// drain's review phase (ADR-0214). It is a seam for the same reason the
-	// on-demand review's is: the conventions package resolves Repository identity
-	// through tasks, so the caller that holds both wires it. Nil ⇒ the Reviewer is
+	// RefineConvention resolves the repository's `refine` Convention for the
+	// drain's refine phase (ADR-0240). It is a seam for the same reason the
+	// on-demand refine's is: the conventions package resolves Repository identity
+	// through tasks, so the caller that holds both wires it. Nil ⇒ the Refiner is
 	// handed no convention and is told so.
-	ReviewConvention ReviewConvention
+	RefineConvention RefineConvention
 	// VerificationConvention resolves the repository's `verification` Convention
 	// for the drain's verify phase (ADR-0227): it is the Verifier's mandate, not a
-	// section of pop's prompt. Same seam reason as ReviewConvention — the caller
+	// section of pop's prompt. Same seam reason as RefineConvention — the caller
 	// that holds both packages wires it. Nil ⇒ the Verifier runs on pop's frame
 	// alone.
 	VerificationConvention VerificationConvention
-	// reviewRunner overrides the review phase's agent spawn, mirroring
-	// reviewCoreOptions.runReviewer. Unexported and test-only.
-	reviewRunner func(prompt string) (string, string, error)
+	// refineRunner overrides the refine phase's agent spawn, mirroring
+	// refineCoreOptions.runRefiner. Unexported and test-only.
+	refineRunner func(prompt string) (string, string, error)
 }
 
 // RunTaskSetResult is the outcome of a run-tasks invocation.
@@ -165,7 +165,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 	// ends on an interrupt leaves the set without Auto-drain consent no matter
 	// which phase the interrupt landed in. Only the task-execution attempt routes
 	// through the interrupt gate, which revokes earlier and revives on Continue;
-	// a quota-recovery wait, the Verifier and the Reviewer each end the run from
+	// a quota-recovery wait, the Verifier and the Refiner each end the run from
 	// their own path and are covered here.
 	run.revokeAutoDrainOnInterruptedExit(err)
 	return result, err
@@ -174,7 +174,7 @@ func RunTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*config.
 // loop drains the resolved Task set sequentially through eligible AFK tasks. It
 // runs after setup and reads as pure orchestration: each iteration re-Refreshes,
 // then dispatches to one of four methods — the pre-approval Verifier phase, the
-// Code review phase, the terminal-status switch, or the task-execution branch —
+// Refine phase, the terminal-status switch, or the task-execution branch —
 // each of which owns its choreography and hands back a continue/return directive.
 // The methods mutate the run's Drain / prompt-reader / result state through the
 // receiver so the deferred finalize sees the latest values.
@@ -212,14 +212,14 @@ func (r *implementRun) loop() (*RunTaskSetResult, error) {
 				return result, verifyErr
 			}
 
-			// Code review phase (ADR-0214): with [work.review] enabled and the
-			// set's Review episode armed, write the set's Review artifact here —
+			// Refine phase (ADR-0240): with [work.refine] enabled and the
+			// set's Refine episode armed, write the set's Refine report here —
 			// after verification has finished moving the tree, and before the
 			// terminal switch hands the set to a human. It gates nothing, so the
 			// only directive it can hand back besides falling through is the
 			// human's interrupt.
-			if directive, reviewErr := r.reviewPhase(currentRefresh, row); directive == reviewReturn {
-				return result, reviewErr
+			if directive, refineErr := r.refinePhase(currentRefresh, row); directive == refineReturn {
+				return result, refineErr
 			}
 
 			// Terminal-status dispatch (DONE / DEFERRED / BLOCKED /

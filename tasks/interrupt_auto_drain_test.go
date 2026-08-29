@@ -122,7 +122,7 @@ func TestDrainInterruptedInQuotaRecoveryWaitClearsAutoDrain(t *testing.T) {
 // the human had just taken over.
 func TestDrainInterruptedInVerifyPhaseClearsAutoDrain(t *testing.T) {
 	t.Parallel()
-	env := setupDrainReviewFixture(t, signOffSet())
+	env := setupDrainRefineFixture(t, signOffSet())
 	d := env.deps()
 	seedSetAutoDrain(t, d, env.tasksDir, "demo")
 
@@ -146,12 +146,12 @@ func TestDrainInterruptedInVerifyPhaseClearsAutoDrain(t *testing.T) {
 	}
 }
 
-// TestDrainInterruptedInReviewPhaseClearsAutoDrain: the review phase is the last
+// TestDrainInterruptedInRefinePhaseClearsAutoDrain: the refine phase is the last
 // step before the terminal switch and the human's interrupt is the only directive
 // it hands back, so it is the drain's last uncovered interrupt exit.
-func TestDrainInterruptedInReviewPhaseClearsAutoDrain(t *testing.T) {
+func TestDrainInterruptedInRefinePhaseClearsAutoDrain(t *testing.T) {
 	t.Parallel()
-	env := setupDrainReviewFixture(t, signOffSet())
+	env := setupDrainRefineFixture(t, signOffSet())
 	d := env.deps()
 	seedSetAutoDrain(t, d, env.tasksDir, "demo")
 
@@ -159,17 +159,17 @@ func TestDrainInterruptedInReviewPhaseClearsAutoDrain(t *testing.T) {
 	opts := env.runTaskSetOpts(true, "", &buf)
 	opts.TaskSetOverride = "demo"
 	opts.verifyRunner = func(string) (string, error) { return "VERDICT: PASS\n", nil }
-	opts.reviewRunner = func(string) (string, string, error) {
+	opts.refineRunner = func(string) (string, string, error) {
 		return "", "", exitErr(ExitInterrupted, "interrupted")
 	}
 
 	_, err := RunTaskSetWith(d, nil, func(string) (*config.Config, error) {
-		return reviewEnabledConfig(), nil
+		return refineEnabledConfig(), nil
 	}, opts)
 	assertExitCode(t, err, ExitInterrupted)
 
 	if registeredAutoDrain(t, d, env.tasksDir, "demo") {
-		t.Fatal("an interrupt during the review phase must clear Auto-drain")
+		t.Fatal("an interrupt during the refine phase must clear Auto-drain")
 	}
 	if progress := readSetProgress(t, setDirManifest(env, "demo")); !strings.Contains(progress, "AUTO-DRAIN-CLEARED") {
 		t.Fatalf("the clear must leave a durable per-set trace:\n%s", progress)

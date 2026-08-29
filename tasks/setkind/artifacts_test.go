@@ -14,11 +14,11 @@ import (
 func TestArtifactsPublishesClosedListInTypeTierOrder(t *testing.T) {
 	defPath := t.TempDir()
 	setDir := filepath.Join(defPath, "demo")
-	reviewDir := filepath.Join(setDir, reviewsDirName)
+	refineDir := filepath.Join(setDir, refineDirName)
 	if err := os.MkdirAll(filepath.Join(setDir, "streams", "runs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(reviewDir, 0o755); err != nil {
+	if err := os.MkdirAll(refineDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	files := map[string]string{
@@ -27,9 +27,9 @@ func TestArtifactsPublishesClosedListInTypeTierOrder(t *testing.T) {
 		filepath.Join(setDir, tasks.ManifestFileName):                "{}",
 		filepath.Join(setDir, "01-task.md"):                          "task",
 		filepath.Join(setDir, "streams", "runs", "attempt.jsonl.gz"): "run",
-		filepath.Join(reviewDir, "review-20260817T120000Z.md"):       "new review",
-		filepath.Join(reviewDir, "review-20260815T120000Z.md"):       "old review",
-		filepath.Join(reviewDir, "notes.md"):                         "not a review",
+		filepath.Join(refineDir, "refine-20260817T120000Z.md"):       "new report",
+		filepath.Join(refineDir, "refine-20260815T120000Z.md"):       "old report",
+		filepath.Join(refineDir, "notes.md"):                         "not a report",
 	}
 	for path, body := range files {
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
@@ -37,8 +37,8 @@ func TestArtifactsPublishesClosedListInTypeTierOrder(t *testing.T) {
 		}
 	}
 	// The spec and progress mtimes are the ones a total recency order would
-	// have hoisted above every review: the progress record was just rewritten
-	// and the spec re-planned after the older review.
+	// have hoisted above every refine report: the progress record was just
+	// rewritten and the spec re-planned after the older report.
 	specAt := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
 	progressAt := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)
 	if err := os.Chtimes(filepath.Join(setDir, tasks.SpecFileName), specAt, specAt); err != nil {
@@ -61,8 +61,8 @@ func TestArtifactsPublishesClosedListInTypeTierOrder(t *testing.T) {
 		rows = append(rows, artifact.Type+":"+artifact.Name)
 	}
 	want := []string{
-		"review:review-20260817T120000Z.md",
-		"review:review-20260815T120000Z.md",
+		"refine:refine-20260817T120000Z.md",
+		"refine:refine-20260815T120000Z.md",
 		"spec:spec.md",
 		"progress:progress.txt",
 	}
@@ -104,15 +104,15 @@ func TestArtifactCopyNameIsSetRelative(t *testing.T) {
 	defPath := t.TempDir()
 	setDir := filepath.Join(defPath, "demo")
 	artifact := work.Artifact{
-		Name: "review-20260817T120000Z.md",
-		Path: filepath.Join(setDir, reviewsDirName, "review-20260817T120000Z.md"),
+		Name: "refine-20260817T120000Z.md",
+		Path: filepath.Join(setDir, refineDirName, "refine-20260817T120000Z.md"),
 	}
 	kind := New(&Deps{Tasks: tasks.DefaultDeps()})
 	outcome, err := kind.PerformArtifact(work.Container{ID: "demo", DefPath: defPath}, artifact, work.VerbCopyName)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := outcome.Clipboard, "reviews/review-20260817T120000Z.md"; got != want {
+	if got, want := outcome.Clipboard, "refine/refine-20260817T120000Z.md"; got != want {
 		t.Fatalf("copy-name payload = %q, want set-relative %q", got, want)
 	}
 }

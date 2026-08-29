@@ -642,17 +642,17 @@ func (m *Manifest) VerifyOptedOut() bool {
 	return m.optedOut("verify")
 }
 
-// ReviewOptedOut reports whether the set explicitly opted out of Code review
-// with `"review": false` in its manifest (ADR-0214). It is the Verifier rule
-// applied to the Reviewer, key for key: user config is the master gate, an
-// absent or truthy `review` key means the set is reviewed while the feature is
+// RefineOptedOut reports whether the set explicitly opted out of Refine
+// with `"refine": false` in its manifest (ADR-0240). It is the Verifier rule
+// applied to the Refiner, key for key: user config is the master gate, an
+// absent or truthy `refine` key means the set is refined while the feature is
 // globally enabled, and a malformed value is treated as participating.
 //
-// A hand-run `pop tasks review <set>` ignores it, the way a hand-run verify
+// A hand-run `pop tasks refine <set>` ignores it, the way a hand-run verify
 // ignores `"verify": false`: the key declines the automatic drain step, not a
 // human asking the question.
-func (m *Manifest) ReviewOptedOut() bool {
-	return m.optedOut("review")
+func (m *Manifest) RefineOptedOut() bool {
+	return m.optedOut("refine")
 }
 
 // optedOut reads a boolean set key as an opt-out. The key rides through
@@ -676,13 +676,13 @@ func (m *Manifest) optedOut(key string) bool {
 // AgentDirective is a set's per-set override of the agent list and effort a
 // set-level phase runs at, read from the manifest's
 // `"verifier": {"agents": [...], "effort": "..."}` object (ADR-0086) and its
-// `"reviewer"` twin (ADR-0214). One type serves both because the two phases
+// `"refiner"` twin (ADR-0240). One type serves both because the two phases
 // resolve the same two values by the same precedence.
 //
 // It overrides the phase's config default for that set, but it is opt-out only
 // for participation: user config is the master gate, so a directive can steer
-// *how* a set is verified or reviewed but never opt it *in* while the feature is
-// globally off (that stays VerifyOptedOut / ReviewOptedOut and the config switch).
+// *how* a set is verified or refined but never opt it *in* while the feature is
+// globally off (that stays VerifyOptedOut / RefineOptedOut and the config switch).
 type AgentDirective struct {
 	Agents []string `json:"agents,omitempty"`
 	Effort string   `json:"effort,omitempty"`
@@ -695,10 +695,10 @@ func (m *Manifest) VerifierOverride() *AgentDirective {
 	return m.agentDirective("verifier")
 }
 
-// ReviewerOverride returns the set's per-set Reviewer override, read from the
-// manifest's `reviewer` object, or nil when there is none.
-func (m *Manifest) ReviewerOverride() *AgentDirective {
-	return m.agentDirective("reviewer")
+// RefinerOverride returns the set's per-set Refiner override, read from the
+// manifest's `refiner` object, or nil when there is none.
+func (m *Manifest) RefinerOverride() *AgentDirective {
+	return m.agentDirective("refiner")
 }
 
 // agentDirective parses one override object out of the manifest's unread keys.

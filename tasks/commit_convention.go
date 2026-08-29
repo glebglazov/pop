@@ -12,7 +12,7 @@ const manifestCommitConventionKey = "commit_convention"
 
 // CommitConventionSource resolves this repository's Commit convention prose for
 // the checkout at cwd. It is a seam for the same reason the Verifier's and the
-// Reviewer's mandates are: the conventions package resolves Repository identity
+// Refiner's mandates are: the conventions package resolves Repository identity
 // through this one, so tasks cannot reach it and cmd is the layer that holds
 // both (see cmd.commitConvention).
 type CommitConventionSource func(cwd string) (string, error)

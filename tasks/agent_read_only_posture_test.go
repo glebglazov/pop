@@ -25,7 +25,7 @@ func argvOf(t *testing.T, preset string, readOnly bool) string {
 	return strings.Join(append([]string{invocation.Name}, invocation.Args...), " ")
 }
 
-func TestReadOnlyPostureReachesTheReviewerCommandLine(t *testing.T) {
+func TestReadOnlyPostureReachesTheRefinerCommandLine(t *testing.T) {
 	supported := map[string][]string{
 		"claude": {"--disallowedTools=Edit,Write,NotebookEdit"},
 		"codex":  {"--sandbox", "read-only"},
@@ -109,9 +109,9 @@ func TestSupportedPresetReportsThePostureItObtained(t *testing.T) {
 
 // The Verifier runs the build and the test suite: a read-only sandbox would fail
 // verification for reasons that have nothing to do with the code under judgment.
-func TestOnlyTheReviewerRunsReadOnly(t *testing.T) {
-	if !reviewerRole(nil, nil, "", "", "").ReadOnly {
-		t.Fatal("the Reviewer runs under the read-only agent posture")
+func TestOnlyTheRefinerRunsReadOnly(t *testing.T) {
+	if !refinerRole(nil, nil, "", "", "").ReadOnly {
+		t.Fatal("the Refiner runs under the read-only agent posture")
 	}
 	if verifierRole(nil, nil, "", "", "").ReadOnly {
 		t.Fatal("the Verifier's invocation is unchanged")
@@ -119,12 +119,12 @@ func TestOnlyTheReviewerRunsReadOnly(t *testing.T) {
 }
 
 // Enforcement and instruction are not alternatives: an agent told what it may do
-// writes a better review than one that discovers a tool is missing.
-func TestReviewerPromptStillForbidsChangingFiles(t *testing.T) {
-	prompt := buildReviewerPrompt(bareDeps(), goldenBareManifest(),
-		workDiffView{Range: "root000..HEAD", Stat: " a.go | 1 +"}, "", reviewDocument{}, false)
+// writes a better report than one that discovers a tool is missing.
+func TestRefinerPromptStillForbidsChangingFiles(t *testing.T) {
+	prompt := buildRefinerPrompt(bareDeps(), goldenBareManifest(),
+		workDiffView{Range: "root000..HEAD", Stat: " a.go | 1 +"}, "", refineDocument{}, false)
 	if !strings.Contains(prompt, "Change no files") {
-		t.Fatal("the Reviewer prompt keeps its instruction to change no files")
+		t.Fatal("the Refiner prompt keeps its instruction to change no files")
 	}
 }
 

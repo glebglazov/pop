@@ -9,14 +9,14 @@ import (
 	"github.com/glebglazov/pop/config"
 )
 
-// walkOverPresets runs the shared fallback walk in the Reviewer's role over the
+// walkOverPresets runs the shared fallback walk in the Refiner's role over the
 // given presets, which is the cheapest way to drive the walk itself: the role
 // only decides what is filed and what counts as an answer, and neither is what
 // these tests are about.
 func walkOverPresets(t *testing.T, d *Deps, taskSetDir string, out *bytes.Buffer, presets ...string) (agentWalkResult, error) {
 	t.Helper()
 	return runAgentFallbackWalk(d, agentFallbackWalk{
-		role:            reviewerRole(d, out, taskSetDir, "demo", "sha1"),
+		role:            refinerRole(d, out, taskSetDir, "demo", "sha1"),
 		sel:             verifierSelection{Agents: presets, Effort: "heavy"},
 		runtimePath:     "/rt",
 		prompt:          "prompt",
@@ -36,7 +36,7 @@ func walkOverPresets(t *testing.T, d *Deps, taskSetDir string, out *bytes.Buffer
 // preset in the list answers.
 func TestFallbackWalkSkipsACoolingPresetAndFallsThrough(t *testing.T) {
 	taskSetDir := t.TempDir()
-	d, runner := reviewRunnerDeps(t, scriptedReviewRun{output: claudeReviewStream("## Naming\\nAll good.")})
+	d, runner := refineRunnerDeps(t, scriptedRefineRun{output: claudeRefineStream("## Naming\\nAll good.")})
 	until := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
 	if err := updateAgentCooldown(d, "codex", until); err != nil {
 		t.Fatal(err)
@@ -79,7 +79,7 @@ func TestFallbackWalkSkipsACoolingPresetAndFallsThrough(t *testing.T) {
 // entry cannot retire an agent from verification for good.
 func TestFallbackWalkInvokesAPresetWhoseCooldownElapsed(t *testing.T) {
 	taskSetDir := t.TempDir()
-	d, runner := reviewRunnerDeps(t, scriptedReviewRun{output: claudeReviewStream("## Naming\\nAll good.")})
+	d, runner := refineRunnerDeps(t, scriptedRefineRun{output: claudeRefineStream("## Naming\\nAll good.")})
 	if err := updateAgentCooldown(d, "claude", time.Now().UTC().Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestFallbackWalkInvokesAPresetWhoseCooldownElapsed(t *testing.T) {
 // which is what lets a role turn an exhausted list into its own quota pause.
 func TestFallbackWalkReportsEveryPresetCoolingAsUnavailable(t *testing.T) {
 	taskSetDir := t.TempDir()
-	d, runner := reviewRunnerDeps(t)
+	d, runner := refineRunnerDeps(t)
 	for _, preset := range []string{"codex", "claude"} {
 		if err := updateAgentCooldown(d, preset, time.Now().UTC().Add(time.Hour)); err != nil {
 			t.Fatal(err)

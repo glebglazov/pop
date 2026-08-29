@@ -9,11 +9,11 @@ import (
 )
 
 const (
-	ArtifactTypeReview   = "review"
+	ArtifactTypeRefine   = "refine"
 	ArtifactTypeSpec     = "spec"
 	ArtifactTypeProgress = "progress"
 	ProgressFileName     = "progress.txt"
-	ReviewsDirName       = "reviews"
+	RefineDirName        = "refine"
 )
 
 // ArtifactSectionTitle is shared by the CLI and dashboard detail surfaces so
@@ -29,7 +29,7 @@ type Artifact struct {
 }
 
 // Artifacts returns the closed list of Task-set artifacts in type-tier order:
-// every review first, newest-first among themselves, then the spec, then the
+// every refine report first, newest-first among themselves, then the spec, then the
 // progress record (ADR-0220). Recency orders only the family that grows, so a
 // drain rewriting progress.txt cannot move the row under a reader's cursor.
 func Artifacts(d *Deps, setDir string) ([]Artifact, error) {
@@ -67,20 +67,20 @@ func Artifacts(d *Deps, setDir string) ([]Artifact, error) {
 		})
 	}
 
-	reviewDir := filepath.Join(setDir, ReviewsDirName)
-	reviews, err := d.FS.ReadDir(reviewDir)
+	refineDir := filepath.Join(setDir, RefineDirName)
+	refines, err := d.FS.ReadDir(refineDir)
 	if err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
-	for _, entry := range reviews {
-		at, ok := ReviewFileInstant(entry.Name())
+	for _, entry := range refines {
+		at, ok := RefineFileInstant(entry.Name())
 		if entry.IsDir() || !ok {
 			continue
 		}
 		artifacts = append(artifacts, Artifact{
-			Type: ArtifactTypeReview,
+			Type: ArtifactTypeRefine,
 			Name: entry.Name(),
-			Path: filepath.Join(reviewDir, entry.Name()),
+			Path: filepath.Join(refineDir, entry.Name()),
 			At:   at,
 		})
 	}
@@ -98,11 +98,11 @@ func Artifacts(d *Deps, setDir string) ([]Artifact, error) {
 }
 
 // artifactTier ranks one artifact type within the tier order. An unrecognised
-// type sorts after every known one rather than jumping the reviews, since the
+// type sorts after every known one rather than jumping the refine reports, since the
 // list is closed and a new member has not earned a position yet.
 func artifactTier(artifactType string) int {
 	switch artifactType {
-	case ArtifactTypeReview:
+	case ArtifactTypeRefine:
 		return 0
 	case ArtifactTypeSpec:
 		return 1

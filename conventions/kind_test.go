@@ -21,7 +21,7 @@ func TestEveryKindDeclaresAConsumptionShape(t *testing.T) {
 func TestConsumptionShapesAsDecided(t *testing.T) {
 	for kind, want := range map[Kind]Shape{
 		KindVerification: ShapeRoleDriving,
-		KindCodeReview:   ShapeRoleDriving,
+		KindRefine:       ShapeRoleDriving,
 		KindCommits:      ShapeStepInforming,
 		KindIssueTracker: ShapeStepInforming,
 	} {

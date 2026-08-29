@@ -92,7 +92,7 @@ func TestArtifactViewSwitchesListsAndKeepsDetailSections(t *testing.T) {
 	newest := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
 	older := newest.Add(-24 * time.Hour)
 	kind := &artifactDetailKind{id: ref.KindTaskSet, artifacts: []work.Artifact{
-		{Type: "review", Name: "review-20260817T120000Z.md", Path: filepath.Join(root, row.ID, "reviews", "review-20260817T120000Z.md"), At: newest},
+		{Type: "refine", Name: "refine-20260817T120000Z.md", Path: filepath.Join(root, row.ID, "refine", "refine-20260817T120000Z.md"), At: newest},
 		{Type: "spec", Name: "spec.md", Path: filepath.Join(root, row.ID, "spec.md"), At: older},
 	}}
 	m := openArtifactDetail(t, artifactDetailDashboard(kind, row))
@@ -105,12 +105,12 @@ func TestArtifactViewSwitchesListsAndKeepsDetailSections(t *testing.T) {
 	updated, _ := m.update(tea.KeyPressMsg{Code: 'v', Text: "v"})
 	m = updated.(QueueDashboard)
 	artifacts := m.View().Content
-	for _, want := range []string{"Destination", "Somewhere worth going", "TYPE", "WRITTEN", "FILENAME", "review", newest.Format(time.RFC3339), "review-20260817T120000Z.md", "spec.md", "v tasks"} {
+	for _, want := range []string{"Destination", "Somewhere worth going", "TYPE", "WRITTEN", "FILENAME", "refine", newest.Format(time.RFC3339), "refine-20260817T120000Z.md", "spec.md", "v tasks"} {
 		if !strings.Contains(artifacts, want) {
 			t.Fatalf("Artifact view missing %q:\n%s", want, artifacts)
 		}
 	}
-	if reviewAt, specAt := strings.Index(artifacts, "review-20260817T120000Z.md"), strings.Index(artifacts, "spec.md"); reviewAt < 0 || reviewAt > specAt {
+	if refineAt, specAt := strings.Index(artifacts, "refine-20260817T120000Z.md"), strings.Index(artifacts, "spec.md"); refineAt < 0 || refineAt > specAt {
 		t.Fatalf("artifacts are not in the order the kind published:\n%s", artifacts)
 	}
 	if strings.Contains(artifacts, "First") {
@@ -166,7 +166,7 @@ func TestArtifactPeekAndCopyVerbsStayOnTheirInvokingSurface(t *testing.T) {
 	root := t.TempDir()
 	row := genericDetailRow()
 	row.DefPath = root
-	path := filepath.Join(root, row.ID, "reviews", "review-20260817T120000Z.md")
+	path := filepath.Join(root, row.ID, "refine", "refine-20260817T120000Z.md")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestArtifactPeekAndCopyVerbsStayOnTheirInvokingSurface(t *testing.T) {
 		t.Fatal(err)
 	}
 	kind := &artifactDetailKind{id: ref.KindTaskSet, artifacts: []work.Artifact{{
-		Type: "review", Name: filepath.Base(path), Path: path, At: time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC),
+		Type: "refine", Name: filepath.Base(path), Path: path, At: time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC),
 	}}}
 	m := openArtifactDetail(t, artifactDetailDashboard(kind, row))
 	updated, _ := m.update(tea.KeyPressMsg{Code: 'v', Text: "v"})
@@ -199,7 +199,7 @@ func TestArtifactPeekAndCopyVerbsStayOnTheirInvokingSurface(t *testing.T) {
 
 	// Both artifact verbs run from the row itself.
 	m = run(t, m, tea.KeyPressMsg{Code: 'y', Text: "y"})
-	if copied != "reviews/"+filepath.Base(path) || !strings.Contains(m.detail.flash.Text(), copied) {
+	if copied != "refine/"+filepath.Base(path) || !strings.Contains(m.detail.flash.Text(), copied) {
 		t.Fatalf("row y copied %q with flash %q", copied, m.detail.flash.Text())
 	}
 	m = run(t, m, tea.KeyPressMsg{Code: 'p', Text: "p"})

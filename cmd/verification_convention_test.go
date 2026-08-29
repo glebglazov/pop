@@ -32,29 +32,29 @@ func TestVerificationConventionCarriesTheRepositorysOwnDocument(t *testing.T) {
 	}
 }
 
-// TestCodeReviewConventionCarriesTheRepositorysOwnDocument: the Reviewer's body
+// TestRefineConventionCarriesTheRepositorysOwnDocument: the Refiner's body
 // resolves the same way (ADR-0227 decision 1), so a repository that commits
-// `docs/agents/code-review.md` changes the standard the changeset is held
+// `docs/agents/refine.md` changes the standard the changeset is held
 // against, and pop's two-axis shipped answer is what it displaced.
-func TestCodeReviewConventionCarriesTheRepositorysOwnDocument(t *testing.T) {
+func TestRefineConventionCarriesTheRepositorysOwnDocument(t *testing.T) {
 	f := newConventionFixture(t)
-	shipped, err := codeReviewConvention(f.deps.tasksDeps())(f.repo)
+	shipped, err := refineConvention(f.deps.tasksDeps())(f.repo)
 	if err != nil {
-		t.Fatalf("resolve shipped code-review convention: %v", err)
+		t.Fatalf("resolve shipped refine convention: %v", err)
 	}
 	for _, want := range []string{"Axis 1", "Axis 2"} {
 		if !strings.Contains(shipped, want) {
-			t.Fatalf("pop's shipped answer must reach the Reviewer as a two-axis review (%q missing):\n%s", want, shipped)
+			t.Fatalf("pop's shipped answer must reach the Refiner as a two-axis review (%q missing):\n%s", want, shipped)
 		}
 	}
 
-	f.repoDoc(t, "code-review", "# Our standard\n\nEvery exported function carries a doc comment.\n")
-	prose, err := codeReviewConvention(f.deps.tasksDeps())(f.repo)
+	f.repoDoc(t, "refine", "# Our standard\n\nEvery exported function carries a doc comment.\n")
+	prose, err := refineConvention(f.deps.tasksDeps())(f.repo)
 	if err != nil {
-		t.Fatalf("resolve committed code-review convention: %v", err)
+		t.Fatalf("resolve committed refine convention: %v", err)
 	}
 	if !strings.Contains(prose, "Every exported function carries a doc comment") {
-		t.Fatalf("the repository's own document must be what the Reviewer is handed:\n%s", prose)
+		t.Fatalf("the repository's own document must be what the Refiner is handed:\n%s", prose)
 	}
 	if strings.Contains(prose, "Axis 1") {
 		t.Fatalf("the committed document displaces pop's shipped answer whole:\n%s", prose)

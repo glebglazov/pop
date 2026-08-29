@@ -12,7 +12,7 @@ import (
 )
 
 // A document shown to a human on a terminal is rendered; the same command
-// redirected is the file's bytes, so piping a review into a file or a pull request
+// redirected is the file's bytes, so piping a refine report into a file or a pull request
 // is unaffected (ADR-0222). Extension decides: progress.txt keeps its `---`
 // separators on a terminal too.
 func TestTaskArtifactsShowRendersMarkdownOnlyForATerminal(t *testing.T) {

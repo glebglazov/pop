@@ -175,13 +175,13 @@ max_remediation_depth = 2
 	}
 }
 
-// TestLoadWorkReviewSettings pins the [work.review] group (ADR-0214): three keys
+// TestLoadWorkRefineSettings pins the [work.refine] group (ADR-0240): three keys
 // and no more, disabled unless the human says otherwise, and an omitted agents
 // list left empty so resolution falls through to [work.implement].agents.
-func TestLoadWorkReviewSettings(t *testing.T) {
+func TestLoadWorkRefineSettings(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(configPath, []byte(`
-[work.review]
+[work.refine]
 enabled = true
 effort = "standard"
 agents = ["codex", "claude"]
@@ -192,21 +192,21 @@ agents = ["codex", "claude"]
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := cfg.ReviewSettings()
+	r := cfg.RefineSettings()
 	if r == nil {
-		t.Fatal("expected [work.review] section to parse")
+		t.Fatal("expected [work.refine] section to parse")
 	}
 	if !r.Enabled {
-		t.Fatal("expected [work.review] enabled = true to load as enabled")
+		t.Fatal("expected [work.refine] enabled = true to load as enabled")
 	}
 	if r.Effort != "standard" {
-		t.Fatalf("review effort = %q, want standard", r.Effort)
+		t.Fatalf("refine effort = %q, want standard", r.Effort)
 	}
-	if got := strings.Join(cfg.ReviewAgents(), ","); got != "codex,claude" {
-		t.Fatalf("review agents = %q, want codex,claude", got)
+	if got := strings.Join(cfg.RefineAgents(), ","); got != "codex,claude" {
+		t.Fatalf("refine agents = %q, want codex,claude", got)
 	}
 
-	// Undeclared everywhere: no section, review off, no agents of its own.
+	// Undeclared everywhere: no section, refine off, no agents of its own.
 	emptyPath := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(emptyPath, []byte("\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -215,11 +215,11 @@ agents = ["codex", "claude"]
 	if err != nil {
 		t.Fatal(err)
 	}
-	if empty.ReviewSettings() != nil {
-		t.Fatal("an undeclared [work.review] must resolve to nil, not an enabled group")
+	if empty.RefineSettings() != nil {
+		t.Fatal("an undeclared [work.refine] must resolve to nil, not an enabled group")
 	}
-	if len(empty.ReviewAgents()) != 0 {
-		t.Fatalf("review agents = %v, want none so resolution falls through", empty.ReviewAgents())
+	if len(empty.RefineAgents()) != 0 {
+		t.Fatalf("refine agents = %v, want none so resolution falls through", empty.RefineAgents())
 	}
 }
 
@@ -5771,7 +5771,7 @@ func TestProjectSessionOrderingZeroValues(t *testing.T) {
 
 // TestIncludeWorkGroupsMergeFieldWise pins the sibling Work groups' include
 // semantics (ADR-0037 first-wins, per field): an include may set a key of
-// [work.verify] or [work.review] that the parent left alone, and keeps it even
+// [work.verify] or [work.refine] that the parent left alone, and keeps it even
 // though the parent configures a different key of the same table. The parent
 // still wins the keys it does declare, and [work.daemon] rides the same
 // whitelist as its siblings.
@@ -5791,7 +5791,7 @@ agents = ["codex"]
 effort = "light"
 max_tries = 7
 
-[work.review]
+[work.refine]
 agents = ["codex"]
 effort = "light"
 
@@ -5805,7 +5805,7 @@ includes = ["extra.toml"]
 enabled = true
 effort = "heavy"
 
-[work.review]
+[work.refine]
 enabled = true
 effort = "heavy"
 `)
@@ -5832,18 +5832,18 @@ effort = "heavy"
 		t.Errorf("[work.verify].max_tries = %v, want the include's 7", verify.MaxTries)
 	}
 
-	review := cfg.Work.Review
-	if review == nil {
-		t.Fatal("expected [work.review] to survive the include merge")
+	refine := cfg.Work.Refine
+	if refine == nil {
+		t.Fatal("expected [work.refine] to survive the include merge")
 	}
-	if !review.Enabled {
-		t.Error("[work.review].enabled = false, want the parent's true")
+	if !refine.Enabled {
+		t.Error("[work.refine].enabled = false, want the parent's true")
 	}
-	if review.Effort != "heavy" {
-		t.Errorf("[work.review].effort = %q, want the parent's %q", review.Effort, "heavy")
+	if refine.Effort != "heavy" {
+		t.Errorf("[work.refine].effort = %q, want the parent's %q", refine.Effort, "heavy")
 	}
-	if len(review.Agents) != 1 || review.Agents[0].Cmd != "codex" {
-		t.Errorf("[work.review].agents = %#v, want the include's [codex]", review.Agents)
+	if len(refine.Agents) != 1 || refine.Agents[0].Cmd != "codex" {
+		t.Errorf("[work.refine].agents = %#v, want the include's [codex]", refine.Agents)
 	}
 
 	if cfg.Work.Daemon == nil || cfg.Work.Daemon.PollInterval != "30s" {
@@ -5853,7 +5853,7 @@ effort = "heavy"
 	joined := strings.Join(cfg.Warnings, "\n")
 	for _, want := range []string{
 		"[work.verify].effort skipped, already defined (first definition wins)",
-		"[work.review].effort skipped, already defined (first definition wins)",
+		"[work.refine].effort skipped, already defined (first definition wins)",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("warnings missing %q; got:\n%s", want, joined)

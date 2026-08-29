@@ -3,7 +3,7 @@ package tasks
 import "github.com/glebglazov/pop/config"
 
 // ResolveAgentGroupPresets answers one Work group's agent list against the
-// implement list — the one rule verify, review and routines share, so that the
+// implement list — the one rule verify, refine and routines share, so that the
 // three cannot drift into three readings of the same config. The group's own
 // entries win; a group that states none falls through to [work.implement].agents
 // and, failing that, to the built-in default preset; and an override of

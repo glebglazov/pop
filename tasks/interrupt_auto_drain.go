@@ -15,7 +15,7 @@ import (
 //     restores the pre-interrupt value.
 //   - At the drain's exit, for every run that ends interrupted. The gate covers
 //     one phase only, the task-execution attempt; an interrupt during a
-//     quota-recovery wait, during the Verifier or during the Reviewer ends the
+//     quota-recovery wait, during the Verifier or during the Refiner ends the
 //     drain from its own path and never shows a menu.
 //
 // Both go through revokeAutoDrainOnInterrupt, and the clear is idempotent: an

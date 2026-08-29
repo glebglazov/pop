@@ -28,7 +28,7 @@ The `git diff --stat` below is complete; fetch any file's diff yourself with `gi
 {{end}}
 ## Task set context
 {{template "task-listing" .Tasks}}
-{{template "latest-code-review" .Review}}
+{{template "latest-refine-report" .Refine}}
 
 Help the human decide which allowed outcome fits the findings and diff.
 

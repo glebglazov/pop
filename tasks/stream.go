@@ -132,7 +132,7 @@ func phaseOrder(phase string) int {
 		return 0
 	case "verify":
 		return 1
-	case "review":
+	case "refine":
 		return 2
 	default:
 		return 3
@@ -140,7 +140,7 @@ func phaseOrder(phase string) int {
 }
 
 // sortRunsChronologically sorts runs by start time, with the drain's phases in
-// the order the drain runs them (implement, verify, review) at equal timestamps.
+// the order the drain runs them (implement, verify, refine) at equal timestamps.
 // The sort is stable.
 func sortRunsChronologically(runs []capturedRun) {
 	sort.SliceStable(runs, func(i, j int) bool {
@@ -399,36 +399,36 @@ func persistSkippedVerifyRun(d *Deps, errOut io.Writer, taskSetDir, setID, workS
 	return metaPath
 }
 
-// persistReviewRun writes one Captured run pair for a Reviewer invocation under
-// the `review` phase label, best-effort. A nil recorder records nothing. It
-// stores no verdict, because a review reaches none — the run's product is the
-// Review artifact, and what is captured here is only what it cost and how it
+// persistRefineRun writes one Captured run pair for a Refiner invocation under
+// the `refine` phase label, best-effort. A nil recorder records nothing. It
+// stores no verdict, because a refine pass reaches none — the run's product is
+// the Refine report, and what is captured here is only what it cost and how it
 // ended. Returns the written meta file's path, or "" when nothing was persisted.
-func persistReviewRun(d *Deps, errOut io.Writer, taskSetDir, setID, workSHA string, rec *streamRecorder, agent, requestedAgent string, attempt int, outcome, reason string, exitCode int) string {
+func persistRefineRun(d *Deps, errOut io.Writer, taskSetDir, setID, workSHA string, rec *streamRecorder, agent, requestedAgent string, attempt int, outcome, reason string, exitCode int) string {
 	if rec == nil {
 		return ""
 	}
-	metaPath, _, err := writeCapturedRun(d, taskSetDir, "review", setID, "", "", rec, agent, requestedAgent, "", attempt, outcome, reason, exitCode, workSHA, "")
+	metaPath, _, err := writeCapturedRun(d, taskSetDir, "refine", setID, "", "", rec, agent, requestedAgent, "", attempt, outcome, reason, exitCode, workSHA, "")
 	if err != nil {
 		if errOut != nil {
-			fmt.Fprintf(errOut, "warning: persist review run for %s: %v\n", setID, err)
+			fmt.Fprintf(errOut, "warning: persist refine run for %s: %v\n", setID, err)
 		}
 		return ""
 	}
 	return metaPath
 }
 
-// persistSkippedReviewRun is persistSkippedVerifyRun's review-phase twin: a
-// Reviewer invocation whose model the provider refused, recorded with the model
+// persistSkippedRefineRun is persistSkippedVerifyRun's refine-phase twin: a
+// Refiner invocation whose model the provider refused, recorded with the model
 // it was walked past on (ADR-0168).
-func persistSkippedReviewRun(d *Deps, errOut io.Writer, taskSetDir, setID, workSHA string, rec *streamRecorder, agent, requestedAgent, model string, attempt int, reason string, exitCode int) string {
+func persistSkippedRefineRun(d *Deps, errOut io.Writer, taskSetDir, setID, workSHA string, rec *streamRecorder, agent, requestedAgent, model string, attempt int, reason string, exitCode int) string {
 	if rec == nil {
 		return ""
 	}
-	metaPath, _, err := writeCapturedRun(d, taskSetDir, "review", setID, "", "", rec, agent, requestedAgent, model, attempt, streamOutcomeModelSkipped, reason, exitCode, workSHA, "")
+	metaPath, _, err := writeCapturedRun(d, taskSetDir, "refine", setID, "", "", rec, agent, requestedAgent, model, attempt, streamOutcomeModelSkipped, reason, exitCode, workSHA, "")
 	if err != nil {
 		if errOut != nil {
-			fmt.Fprintf(errOut, "warning: persist review run for %s: %v\n", setID, err)
+			fmt.Fprintf(errOut, "warning: persist refine run for %s: %v\n", setID, err)
 		}
 		return ""
 	}

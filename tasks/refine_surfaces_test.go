@@ -8,19 +8,19 @@ import (
 	"time"
 )
 
-// reviewProse is the one string no surface may print: the document's body. Every
-// surface carries a pointer to it and nothing else (ADR-0214).
-const reviewProse = "SECRET-REVIEW-PROSE"
+// refineProse is the one string no surface may print: the document's body. Every
+// surface carries a pointer to it and nothing else (ADR-0240).
+const refineProse = "SECRET-REFINE-PROSE"
 
-// seedReviewArtifact files one Review artifact for the fixture set, as the
-// Reviewer would have written it, and returns its path.
-func seedReviewArtifact(t *testing.T, d *Deps, m *Manifest) string {
+// seedRefineReport files one Refine report for the fixture set, as the
+// Refiner would have written it, and returns its path.
+func seedRefineReport(t *testing.T, d *Deps, m *Manifest) string {
 	t.Helper()
 	at := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
-	body := renderReviewDocument(at, "demo", "abc123abc123", "aaa111^..HEAD", "claude", "## Naming\n\n"+reviewProse)
-	path, err := writeReviewDocument(d, m.Dir, at, body)
+	body := renderRefineDocument(at, "demo", "abc123abc123", "aaa111^..HEAD", "claude", "## Naming\n\n"+refineProse)
+	path, err := writeRefineDocument(d, m.Dir, at, body)
 	if err != nil {
-		t.Fatalf("writeReviewDocument: %v", err)
+		t.Fatalf("writeRefineDocument: %v", err)
 	}
 	return path
 }
@@ -37,22 +37,22 @@ func hitlGateOutput(t *testing.T, d *Deps, m *Manifest, input string) (string, h
 	t.Helper()
 	var out strings.Builder
 	in := strings.NewReader(input)
-	review, hasReview := latestReviewPointer(d, m)
+	refine, hasRefine := latestRefinePointer(d, m)
 	action, err := promptHITLGateAction(&out, in, d, nil, "/rt", newPromptReader(in), "demo", m, &m.Tasks[1],
-		"## Acceptance criteria\n\n- [ ] ok\n", nil, false, review, hasReview)
+		"## Acceptance criteria\n\n- [ ] ok\n", nil, false, refine, hasRefine)
 	if err != nil {
 		t.Fatalf("promptHITLGateAction: %v", err)
 	}
 	return out.String(), action
 }
 
-// TestReviewPointerReachesEverySurface drives every surface the original review
+// TestRefinePointerReachesEverySurface drives every surface the original refine
 // pointer reached. The gate and Assist prompt retain the full pointer, while the
 // CLI detail view now gives the Artifact summary and list command (ADR-0217).
-func TestReviewPointerReachesEverySurface(t *testing.T) {
+func TestRefinePointerReachesEverySurface(t *testing.T) {
 	t.Parallel()
 	d, m := hitlFixture(t)
-	path := seedReviewArtifact(t, d, m)
+	path := seedRefineReport(t, d, m)
 
 	gate, _ := hitlGateOutput(t, d, m, "0\n")
 
@@ -66,8 +66,8 @@ func TestReviewPointerReachesEverySurface(t *testing.T) {
 		text    string
 		wants   []string
 	}{
-		{"HITL gate", gate, []string{path, "abc123a", "aaa111^..HEAD", "Read the code review"}},
-		{"detail view", detail.String(), []string{"ARTIFACTS", "1 artifact", "newest: review, written 2026-08-16 12:00Z", "pop tasks artifacts demo"}},
+		{"HITL gate", gate, []string{path, "abc123a", "aaa111^..HEAD", "Read the refine report"}},
+		{"detail view", detail.String(), []string{"ARTIFACTS", "1 artifact", "newest: refine, written 2026-08-16 12:00Z", "pop tasks artifacts demo"}},
 		{"assist prompt", assist, []string{path, "abc123a", "read the file yourself"}},
 	} {
 		for _, want := range s.wants {
@@ -75,12 +75,12 @@ func TestReviewPointerReachesEverySurface(t *testing.T) {
 				t.Fatalf("%s missing %q:\n%s", s.surface, want, s.text)
 			}
 		}
-		if strings.Contains(s.text, reviewProse) {
-			t.Fatalf("%s inlined the review document:\n%s", s.surface, s.text)
+		if strings.Contains(s.text, refineProse) {
+			t.Fatalf("%s inlined the refine report:\n%s", s.surface, s.text)
 		}
 	}
 	if strings.Contains(detail.String(), path) || strings.Contains(detail.String(), "abc123a") {
-		t.Fatalf("detail view retained the review pointer:\n%s", detail.String())
+		t.Fatalf("detail view retained the refine pointer:\n%s", detail.String())
 	}
 }
 
@@ -106,7 +106,7 @@ func TestSetWithNoArtifactsShowsNothingExtra(t *testing.T) {
 		{"assist prompt", assist},
 	} {
 		lower := strings.ToLower(s.text)
-		mentionsEmptyBlock := strings.Contains(lower, "code review")
+		mentionsEmptyBlock := strings.Contains(lower, "refine report")
 		if s.surface == "detail view" {
 			mentionsEmptyBlock = strings.Contains(lower, "artifacts")
 		}
@@ -116,28 +116,28 @@ func TestSetWithNoArtifactsShowsNothingExtra(t *testing.T) {
 	}
 }
 
-// TestHITLGateReadReviewEntryPagesAndSpawnsNoAgent pins the gate's review entry:
+// TestHITLGateReadRefineEntryPagesAndSpawnsNoAgent pins the gate's refine entry:
 // it is the next free key, it resolves to the read action, and taking it runs
 // the human's pager over the document — no agent, and no change to the set.
-func TestHITLGateReadReviewEntryPagesAndSpawnsNoAgent(t *testing.T) {
+func TestHITLGateReadRefineEntryPagesAndSpawnsNoAgent(t *testing.T) {
 	d, m := hitlFixture(t)
-	path := seedReviewArtifact(t, d, m)
+	path := seedRefineReport(t, d, m)
 
-	// Re-verify is not offered here, so the review takes key 5.
+	// Re-verify is not offered here, so the refine entry takes key 5.
 	_, action := hitlGateOutput(t, d, m, "5\n")
-	if action != hitlGateReadReview {
-		t.Fatalf("expected the review entry at key 5, got action %d", action)
+	if action != hitlGateReadRefine {
+		t.Fatalf("expected the refine entry at key 5, got action %d", action)
 	}
 
 	runner := &fakeAttendedRunner{}
 	d.Runner = runner
 	t.Setenv("PAGER", "mypager -X")
-	review, ok := latestReviewPointer(d, m)
+	refine, ok := latestRefinePointer(d, m)
 	if !ok {
-		t.Fatal("expected a review pointer")
+		t.Fatal("expected a refine pointer")
 	}
 	var out bytes.Buffer
-	pageReviewDocument(d, strings.NewReader(""), "/rt", &out, review)
+	pageRefineDocument(d, strings.NewReader(""), "/rt", &out, refine)
 
 	if runner.attendedCalls != 1 {
 		t.Fatalf("expected exactly one attended launch (the pager), got %d", runner.attendedCalls)
@@ -147,16 +147,16 @@ func TestHITLGateReadReviewEntryPagesAndSpawnsNoAgent(t *testing.T) {
 	}
 }
 
-// TestReviewPointerReadsTheArtifactsOwnHeader pins where the commit facts come
-// from: the header the artifact carries, not a side-car pop keeps beside it.
-func TestReviewPointerReadsTheArtifactsOwnHeader(t *testing.T) {
+// TestRefinePointerReadsTheReportsOwnHeader pins where the commit facts come
+// from: the header the report carries, not a side-car pop keeps beside it.
+func TestRefinePointerReadsTheReportsOwnHeader(t *testing.T) {
 	t.Parallel()
 	d, m := hitlFixture(t)
-	seedReviewArtifact(t, d, m)
+	seedRefineReport(t, d, m)
 
-	p, ok := latestReviewPointer(d, m)
+	p, ok := latestRefinePointer(d, m)
 	if !ok {
-		t.Fatal("expected a review pointer")
+		t.Fatal("expected a refine pointer")
 	}
 	if p.WorkSHA != ShortSHA("abc123abc123") || p.CommitRange != "aaa111^..HEAD" {
 		t.Fatalf("pointer read the wrong header: %+v", p)
@@ -179,25 +179,25 @@ func attendedPrompts(d *Deps, m *Manifest) map[string]string {
 	}
 }
 
-// TestReviewBlockReachesEveryAttendedPrompt drives the Review pointer decision
-// end to end: every attended session is told where the review is and whether it
+// TestRefineBlockReachesEveryAttendedPrompt drives the Refine pointer decision
+// end to end: every attended session is told where the report is and whether it
 // still describes the checkout, while the unattended implementer and the Verifier
 // are told nothing about it.
-func TestReviewBlockReachesEveryAttendedPrompt(t *testing.T) {
+func TestRefineBlockReachesEveryAttendedPrompt(t *testing.T) {
 	t.Parallel()
 	d, m := hitlFixture(t)
-	path := seedReviewArtifact(t, d, m)
+	path := seedRefineReport(t, d, m)
 
-	// The fixture checkout's HEAD is sha1; the review was written against
-	// abc123abc123, so every prompt must say the review is out of date.
+	// The fixture checkout's HEAD is sha1; the report was written against
+	// abc123abc123, so every prompt must say the report is out of date.
 	for surface, text := range attendedPrompts(d, m) {
 		for _, want := range []string{path, "abc123abc123", "Out of date", "read the file yourself"} {
 			if !strings.Contains(text, want) {
 				t.Fatalf("%s missing %q:\n%s", surface, want, text)
 			}
 		}
-		if strings.Contains(text, reviewProse) {
-			t.Fatalf("%s inlined the review document:\n%s", surface, text)
+		if strings.Contains(text, refineProse) {
+			t.Fatalf("%s inlined the refine report:\n%s", surface, text)
 		}
 	}
 
@@ -207,57 +207,57 @@ func TestReviewBlockReachesEveryAttendedPrompt(t *testing.T) {
 		"verifier prompt":    buildVerifierPrompt(d, m, "sha1", workDiffView{Range: "aaa111^..HEAD", Stat: " a.go | 1 +"}, "", ""),
 	}
 	for surface, text := range unattended {
-		for _, unwanted := range []string{path, "Latest code review"} {
+		for _, unwanted := range []string{path, "Latest Refine report"} {
 			if strings.Contains(text, unwanted) {
-				t.Fatalf("%s carries the review block (%q):\n%s", surface, unwanted, text)
+				t.Fatalf("%s carries the refine block (%q):\n%s", surface, unwanted, text)
 			}
 		}
 	}
 }
 
-// TestReviewBlockIsSilentWhenCurrentOrAbsent pins the block's two quiet states:
-// a review written against the commit the checkout is on says nothing about
-// staleness, and a set with no review renders no block in any attended prompt.
-func TestReviewBlockIsSilentWhenCurrentOrAbsent(t *testing.T) {
+// TestRefineBlockIsSilentWhenCurrentOrAbsent pins the block's two quiet states:
+// a report written against the commit the checkout is on says nothing about
+// staleness, and a set with no report renders no block in any attended prompt.
+func TestRefineBlockIsSilentWhenCurrentOrAbsent(t *testing.T) {
 	t.Parallel()
 	d, m := hitlFixture(t)
-	seedReviewArtifact(t, d, m)
+	seedRefineReport(t, d, m)
 	d.Git = stubGit("abc123abc123\n", "", "")
 
 	for surface, text := range attendedPrompts(d, m) {
-		if !strings.Contains(text, "Latest code review") {
-			t.Fatalf("%s lost the review block:\n%s", surface, text)
+		if !strings.Contains(text, "Latest Refine report") {
+			t.Fatalf("%s lost the refine block:\n%s", surface, text)
 		}
 		if strings.Contains(text, "Out of date") {
-			t.Fatalf("%s called a current review out of date:\n%s", surface, text)
+			t.Fatalf("%s called a current report out of date:\n%s", surface, text)
 		}
 	}
 
-	unreviewed, um := hitlFixture(t)
-	for surface, text := range attendedPrompts(unreviewed, um) {
-		if strings.Contains(strings.ToLower(text), "code review") {
-			t.Fatalf("%s mentions a review the set does not have:\n%s", surface, text)
+	unrefined, um := hitlFixture(t)
+	for surface, text := range attendedPrompts(unrefined, um) {
+		if strings.Contains(strings.ToLower(text), "refine report") {
+			t.Fatalf("%s mentions a report the set does not have:\n%s", surface, text)
 		}
 	}
 }
 
-// TestReviewStalenessNeedsBothCommits pins that an unknown commit on either side
+// TestRefineStalenessNeedsBothCommits pins that an unknown commit on either side
 // is not staleness — a document with no work SHA, or a checkout pop cannot read,
-// says nothing about whether the review still holds.
-func TestReviewStalenessNeedsBothCommits(t *testing.T) {
+// says nothing about whether the report still holds.
+func TestRefineStalenessNeedsBothCommits(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name    string
-		pointer ReviewPointer
+		pointer RefinePointer
 		current string
 		stale   bool
 	}{
-		{name: "moved on", pointer: ReviewPointer{WorkSHA: "abc123abc123"}, current: "def456def456", stale: true},
-		{name: "same commit", pointer: ReviewPointer{WorkSHA: "abc123abc123"}, current: "abc123abc123", stale: false},
-		{name: "same commit unabbreviated", pointer: ReviewPointer{WorkSHA: "abc123abc123"}, current: "abc123abc123def789", stale: false},
-		{name: "shorter header", pointer: ReviewPointer{WorkSHA: "abc123a"}, current: "abc123abc123", stale: false},
-		{name: "document records none", pointer: ReviewPointer{}, current: "abc123abc123", stale: false},
-		{name: "checkout unreadable", pointer: ReviewPointer{WorkSHA: "abc123abc123"}, current: "", stale: false},
+		{name: "moved on", pointer: RefinePointer{WorkSHA: "abc123abc123"}, current: "def456def456", stale: true},
+		{name: "same commit", pointer: RefinePointer{WorkSHA: "abc123abc123"}, current: "abc123abc123", stale: false},
+		{name: "same commit unabbreviated", pointer: RefinePointer{WorkSHA: "abc123abc123"}, current: "abc123abc123def789", stale: false},
+		{name: "shorter header", pointer: RefinePointer{WorkSHA: "abc123a"}, current: "abc123abc123", stale: false},
+		{name: "document records none", pointer: RefinePointer{}, current: "abc123abc123", stale: false},
+		{name: "checkout unreadable", pointer: RefinePointer{WorkSHA: "abc123abc123"}, current: "", stale: false},
 	} {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {

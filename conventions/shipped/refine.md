@@ -4,7 +4,7 @@ Nobody has written down what good code looks like here, so this is pop's own
 answer: a review on two axes — how the code is written, and whether it does what
 was asked — with a named baseline of smells for the first, generic by
 construction. Any document written at a rank above this one — the team's
-`docs/agents/code-review.md`, or either of your own — displaces it whole, so a
+`docs/agents/refine.md`, or either of your own — displaces it whole, so a
 repository that has stated its taste is never reviewed against a stranger's.
 
 Two rules bind everything below.

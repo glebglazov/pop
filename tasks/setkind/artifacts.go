@@ -10,18 +10,18 @@ import (
 )
 
 const (
-	artifactTypeReview   = tasks.ArtifactTypeReview
+	artifactTypeRefine   = tasks.ArtifactTypeRefine
 	artifactTypeSpec     = tasks.ArtifactTypeSpec
 	artifactTypeProgress = tasks.ArtifactTypeProgress
 	progressFileName     = tasks.ProgressFileName
-	reviewsDirName       = tasks.ReviewsDirName
+	refineDirName        = tasks.RefineDirName
 )
 
 var _ work.ArtifactSource = (*Kind)(nil)
 
 // Artifacts publishes the readable documents held by one Task set. The root
 // listing supplies both membership and modification times for the two files
-// that do not date themselves; reviews use the instant already in each name.
+// that do not date themselves; refine reports use the instant already in each name.
 func (k *Kind) Artifacts(c work.Container) ([]work.Artifact, error) {
 	setDir := filepath.Join(c.DefPath, c.ID)
 	listed, err := tasks.Artifacts(k.d.Tasks, setDir)

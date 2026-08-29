@@ -22,7 +22,7 @@ Human-facing task path: {{.TaskPath}}
 {{end}}{{if .HasCompletedWork}}{{range .CompletedWork}}- {{.TaskID}} ({{.File}}, {{.Outcome}} at {{.Timestamp}})
 {{range .SummaryLines}}  {{.}}
 {{end}}{{end}}{{end}}
-{{template "latest-code-review" .Review}}
+{{template "latest-refine-report" .Refine}}
 
 Use the repository and task context to help the human decide which allowed outcome is correct.
 

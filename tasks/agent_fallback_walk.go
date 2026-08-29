@@ -12,7 +12,7 @@ import (
 // agentRole is what the shared fallback walk needs to know about the role it is
 // running: how the role names itself to the operator, where one invocation of it
 // is persisted, and what counts as an answer worth stopping on. Verification and
-// Code review are the two roles today, and they differ in exactly those three
+// Refine are the two roles today, and they differ in exactly those three
 // things — nothing about how an agent list is walked is theirs.
 type agentRole struct {
 	// Noun names the role inside a fall-through or skip message ("Verifier
@@ -21,7 +21,7 @@ type agentRole struct {
 	// Gerund opens the once-per-preset heading: "━━ <Gerund> with <agent>".
 	Gerund string
 	// Phase is the Work group the role's attempts are spent in, as a Captured run
-	// and a Spent retry cap both name it ("verify", "review").
+	// and a Spent retry cap both name it ("verify", "refine").
 	Phase string
 	// Persist records as a Captured run one invocation that ended without the
 	// role answering — interrupted, quota-paused, or refused — best-effort.
@@ -39,7 +39,7 @@ type agentRole struct {
 	// answer should be retried on the current preset.
 	RetryEligible func(outcome *attemptOutcome, raw string) bool
 	// ReadOnly spawns this role's agents under the read-only agent posture. Only
-	// the Reviewer sets it: it reads a checkout the Verifier has already passed
+	// the Refiner sets it: it reads a checkout the Verifier has already passed
 	// on, where an edit of its own would arrive unattributed in work nobody
 	// re-verifies. The Verifier runs the build and the test suite and so keeps
 	// the posture it has always had (ADR-0221).
@@ -102,7 +102,7 @@ type agentWalkResult struct {
 	// would have retried had a try been left — a timeout, a run error or a
 	// non-zero exit. The walk hands the text back either way, because a role that
 	// only parses it (the Verifier) reaches the same refusal on its own; a role
-	// that would otherwise persist the text verbatim (the Reviewer) reads this to
+	// that would otherwise persist the text verbatim (the Refiner) reads this to
 	// tell a finished document from the prose an attempt died halfway through.
 	AnswerRetryEligible bool
 	// Unavailable holds each preset the walk could not get an answer out of.

@@ -482,7 +482,7 @@ func (c AgentAttendedArgsCapability) validate(preset string) error {
 // sandbox on another — plus the headless-prefix flags they must displace, since
 // a prefix that bypasses the sandbox outranks a later request for one. Blind
 // carries a sentence naming why the CLI has no such argument, and a Blind preset
-// reviews exactly as it does today rather than refusing to run: the guarantee
+// runs exactly as it does today rather than refusing to run: the guarantee
 // pop reports is the one it actually obtained.
 type AgentReadOnlyPostureCapability struct {
 	Kind CapabilityKind

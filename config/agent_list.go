@@ -18,7 +18,7 @@ import (
 // about a layer rather than about a struct field.
 const (
 	KeyVerifyAgents  = "work.verify.agents"
-	KeyReviewAgents  = "work.review.agents"
+	KeyRefineAgents  = "work.refine.agents"
 	KeyRoutineAgents = "work.routine.agents"
 )
 
@@ -28,7 +28,7 @@ const (
 // whoever wrote it.
 var fallthroughAgentLists = map[string]func(*Config) AgentEntries{
 	KeyVerifyAgents:  (*Config).VerifyAgentEntries,
-	KeyReviewAgents:  (*Config).ReviewAgentEntries,
+	KeyRefineAgents:  (*Config).RefineAgentEntries,
 	KeyRoutineAgents: (*Config).RoutineAgentEntries,
 }
 
@@ -60,9 +60,9 @@ func (c *Config) VerifyAgentList() AgentList {
 	return c.agentList(KeyVerifyAgents)
 }
 
-// ReviewAgentList returns [work.review].agents beside who wrote its emptiness.
-func (c *Config) ReviewAgentList() AgentList {
-	return c.agentList(KeyReviewAgents)
+// RefineAgentList returns [work.refine].agents beside who wrote its emptiness.
+func (c *Config) RefineAgentList() AgentList {
+	return c.agentList(KeyRefineAgents)
 }
 
 // RoutineAgentList returns [work.routine].agents beside who wrote its emptiness.
