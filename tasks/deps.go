@@ -92,6 +92,10 @@ type Deps struct {
 	// handle; a Deps built from a bare literal (tests) gets its holder lazily on
 	// first store touch. See Deps.Store.
 	store *storeCache
+
+	// cacheDB is the process-cached machine-local Cache database handle holder,
+	// behind a pointer for the same copy-safety reason store is. See Deps.CacheDB.
+	cacheDB *cacheDBHolder
 }
 
 // DefaultDeps returns dependencies using real implementations.
@@ -108,6 +112,7 @@ func DefaultDeps() *Deps {
 		RecoveryPollImminentInterval: defaultRecoveryPollImminentInterval,
 		AdmissionPollInterval:        defaultAdmissionPollInterval,
 		store:                        &storeCache{},
+		cacheDB:                      &cacheDBHolder{},
 	}
 }
 

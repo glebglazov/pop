@@ -60,6 +60,7 @@ func newTestDeps(t *testing.T) *Deps {
 		store:                        &storeCache{},
 	}
 	t.Cleanup(func() { _ = d.CloseStore() })
+	t.Cleanup(func() { _ = d.CloseCacheDB() })
 	return d
 }
 
