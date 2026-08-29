@@ -52,6 +52,16 @@ enabled = false
 # max_tries = 3
 # attempt_retry_delays = ["1m", "5m", "15m"]
 
+[work.refine]
+# Arm an automatic Refine pass at AFK quiescence, before the Verifier reads the
+# tree (default false). `pop tasks refine <set>` runs on demand either way.
+enabled = false
+# Ordered fallback agent list for the Refiner (falls back to
+# [work.implement].agents when omitted).
+# agents = ["claude"]
+# Refiner model-strength tier: light, standard, or heavy (default heavy).
+# effort = "heavy"
+
 [work.routine]
 # Ordered fallback agent list for Routine runs. A Routine manifest's own
 # `agents` beats this group; an empty list falls through to

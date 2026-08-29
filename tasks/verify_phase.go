@@ -94,7 +94,7 @@ func (r *implementRun) verifyPhase(currentRefresh *RefreshResult, row *Row) (ver
 				// Waiting buys nothing here: the verdict this Verifier would have
 				// produced cannot gate the set (a non-PASS on a human-completed set is
 				// information, not a veto), so parking the drain until quota returns
-				// would hold a Runtime lock for a mark. Drop it like the Reviewer does —
+				// would hold a Runtime lock for a mark. Drop it like the Refiner does —
 				// the set keeps its terminal status, the mark stays unverified, and the
 				// Verifier is still scheduled, so a later drain records it.
 				outputFor(out).line(ansiYellow, "━━ Verifier quota paused for %s (%s) — the set is human-completed, so the drain does not wait", taskSetID, qp.Preset)

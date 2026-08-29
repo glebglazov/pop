@@ -287,9 +287,13 @@ projects = [
 # attempt 1 still starts immediately. Omitted attempt_retry_delays ⇒
 # ["1m", "5m", "15m"]; an empty list restores instant retries (useful for
 # tests/local dev). The last delay repeats when retries exceed the list length.
+# include_refine_convention inlines the resolved `refine` convention into every
+# implement prompt, so a builder adheres upfront to the rules a Refine pass
+# later enforces. It is independent of [work.refine].enabled (default false).
 # agents = ["claude", "codex"]
 # max_tries = 3
 # attempt_retry_delays = ["1m", "5m", "15m"]
+# include_refine_convention = false
 #
 # [work.verify]
 # The Verifier (ADR-0086). `enabled` is the master opt-in switch: absent/false
@@ -307,12 +311,13 @@ projects = [
 # max_tries = 3
 # attempt_retry_delays = ["1m", "5m", "15m"]
 #
-# [work.review]
-# The Reviewer (ADR-0214): a fresh agent reads the changeset against this
-# repository's code-review convention and writes a document. It reaches no
-# verdict and gates nothing. `enabled` arms automatic review at AFK quiescence;
-# `pop tasks review <set>` runs on demand either way. An omitted agents list
-# falls back to [work.implement].agents.
+# [work.refine]
+# The Refiner (ADR-0240): a fresh agent reads the changeset against this
+# repository's `refine` convention, fixes in place what the convention licenses,
+# commits the pass as one commit, and reports the smells it left. It reaches no
+# verdict and gates nothing. `enabled` arms an automatic pass at AFK quiescence,
+# before the Verifier reads the tree; `pop tasks refine <set>` runs on demand
+# either way. An omitted agents list falls back to [work.implement].agents.
 # enabled = false
 # agents = ["claude"]
 # effort = "heavy"
