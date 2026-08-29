@@ -196,10 +196,26 @@ func bareDeps() *Deps {
 	return &Deps{FS: &promptFixtureFS{files: map[string]string{}}, Git: stubGit("", "", "")}
 }
 
-func TestAgentPromptGolden(t *testing.T) {
+func TestAgentPromptGoldens(t *testing.T) {
+	// Absent side: the default, where [work.implement].include_refine_convention
+	// is off and the builder's prompt reads as it did before the toggle existed.
 	prompttest.Assert(t, goldenPath("agent.md"),
-		BuildAgentPrompt(filepath.Join(goldenSetDir, "04-afk.md"), goldenRuntimePath))
+		BuildAgentPrompt(filepath.Join(goldenSetDir, "04-afk.md"), goldenRuntimePath, ""))
+
+	prompttest.Assert(t, goldenPath("agent.refine-convention.md"),
+		BuildAgentPrompt(filepath.Join(goldenSetDir, "04-afk.md"), goldenRuntimePath, goldenRefineConvention))
 }
+
+// goldenRefineConvention stands in for what the `refine` Convention stack
+// renders: labelled blocks and a provenance line, and no Read-whole notice —
+// that notice belongs to the command paths a human reads (ADR-0230).
+const goldenRefineConvention = `----- ANSWER: SHIPPED (pop's own) -----
+conventions/shipped/refine.md
+
+Name things after what they are in this repository's language.
+Keep a function's abstraction level uniform.
+
+Rules: pop's own (shipped). No project or overlay document for this kind.`
 
 func TestHITLAssistancePromptGoldens(t *testing.T) {
 	full := goldenFullManifest()

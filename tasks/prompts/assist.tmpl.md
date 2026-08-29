@@ -21,12 +21,13 @@ Derived status: {{.Status}}
 - Each task file has "What to build" and "## Acceptance criteria" checkboxes.
 - Do not modify index.json's task list shape carelessly; run `pop tasks authoring-guide` for what must stay coherent.
 - Do not make git commits — the human owns commits and drain assessment.
-- Do not start a Drain and do not run the Verifier.
+- Do not start a Drain, do not run the Verifier, and do not run a Refine pass.
 
 ## Operations you may perform (by editing Task storage / the checkout)
 - Inspect task bodies and the runtime checkout to advise the human.
 - Edit implementation under the runtime checkout when the human asks.
-- Do not invoke `pop tasks implement` or `pop tasks verify` (those start a Drain or the Verifier).
+- Run `pop conventions get refine` when the session concerns code quality — it prints the standard this repository holds code to, which is what a Refiner judges against.
+- Do not invoke `pop tasks implement`, `pop tasks verify` or `pop tasks refine` (those start a Drain, the Verifier or a Refiner).
 
 {{template "the-human-decides"}}
 {{template "you-may-draft-what-the-human-confirms"}}

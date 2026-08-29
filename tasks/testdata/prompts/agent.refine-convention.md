@@ -1,28 +1,34 @@
-You are implementing the task at: {{.TaskPath}}
+You are implementing the task at: /pop/tasks/2026-05-01-demo/04-afk.md
 
 Read the task file in full. Follow any optional context references it
 contains (for example a "## Parent" section) when present; the task may also
 be self-contained. Implement the work described under "What to build" and
 satisfy every box under "Acceptance criteria". As you complete each
-criterion, check its box (`- [ ]` → `- [x]`) in {{.TaskPath}}.
+criterion, check its box (`- [ ]` → `- [x]`) in /pop/tasks/2026-05-01-demo/04-afk.md.
 
-Do NOT modify {{.ManifestPath}}. Do NOT modify other task files in {{.TasksDir}}.
+Do NOT modify /pop/tasks/2026-05-01-demo/index.json. Do NOT modify other task files in /pop/tasks/2026-05-01-demo.
 Do NOT make git commits — the runner handles assessment and committing.
 
-Runtime checkout: {{.RuntimePath}}
+Runtime checkout: /pop/checkouts/demo
 
 Implementation edits belong only beneath the runtime checkout. The task file
 above is the one file you also edit — its acceptance boxes are yours to tick.
 
-{{if .RefineConventionRecorded}}## This repository's refine convention
+## This repository's refine convention
 
 The rules below are this repository's standard for the code you write. Follow
 them as you build: a Refine pass checks the work against this same text, and
 what you leave short of it is fixed or reported there.
 
-{{.RefineConvention}}
+----- ANSWER: SHIPPED (pop's own) -----
+conventions/shipped/refine.md
 
-{{end}}This attempt is a single non-interactive session. There is no human and no
+Name things after what they are in this repository's language.
+Keep a function's abstraction level uniform.
+
+Rules: pop's own (shipped). No project or overlay document for this kind.
+
+This attempt is a single non-interactive session. There is no human and no
 later turn: once you end your response the attempt is over, and ending
 without a completion sentinel (TASK_COMPLETE or TASK_FAILED) is recorded as a
 failure. To wait on a long-running command, keep polling it across successive

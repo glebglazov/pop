@@ -175,6 +175,44 @@ max_remediation_depth = 2
 	}
 }
 
+// TestLoadImplementIncludeRefineConvention pins the upfront-adherence toggle
+// (ADR-0240): it lives under the implement group, it is off unless the human
+// says otherwise, and it is independent of [work.refine].enabled.
+func TestLoadImplementIncludeRefineConvention(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(configPath, []byte(`
+[work.implement]
+include_refine_convention = true
+
+[work.refine]
+enabled = false
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.ImplementIncludesRefineConvention() {
+		t.Fatal("[work.implement].include_refine_convention = true did not load as set")
+	}
+	if r := cfg.RefineSettings(); r == nil || r.Enabled {
+		t.Fatalf("refine settings = %+v, want the pass still switched off", r)
+	}
+
+	emptyPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(emptyPath, []byte("\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	empty, err := Load(emptyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if empty.ImplementIncludesRefineConvention() {
+		t.Fatal("an undeclared toggle must resolve to off")
+	}
+}
+
 // TestLoadWorkRefineSettings pins the [work.refine] group (ADR-0240): three keys
 // and no more, disabled unless the human says otherwise, and an omitted agents
 // list left empty so resolution falls through to [work.implement].agents.

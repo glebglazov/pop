@@ -296,6 +296,12 @@ type ImplementConfig struct {
 	// sits here, not at the [work] root, because the drain's commit path is the
 	// only reader.
 	Git *TaskGitConfig `toml:"git" include:"replace" desc:"Commit-time git overrides for Pop's commits ([work.implement.git] table)."`
+	// IncludeRefineConvention inlines the resolved `refine` convention into every
+	// implement prompt as a labelled block, so a builder adheres upfront to the
+	// rules the Refiner later enforces (ADR-0240). It is deliberately independent
+	// of [work.refine].enabled: adherence can be driven before the pass is ever
+	// switched on. Absent/false ⇒ the implement prompt is unchanged.
+	IncludeRefineConvention bool `toml:"include_refine_convention" include:"replace" desc:"Inline the resolved refine convention into every implement prompt (default false)."`
 }
 
 // AgentGroupConfig is a Work group whose only setting is its ordered agent
@@ -1153,6 +1159,18 @@ func (c *Config) ResolveVerifyMaxTries() int {
 		return *c.Work.Verify.MaxTries
 	}
 	return DefaultTaskMaxTries
+}
+
+// ImplementIncludesRefineConvention reports whether every implement prompt
+// carries the resolved `refine` convention (ADR-0240). It reads
+// [work.implement].include_refine_convention alone — the toggle is independent
+// of [work.refine].enabled, so upfront adherence can be driven with the pass
+// switched off.
+func (c *Config) ImplementIncludesRefineConvention() bool {
+	if c == nil || c.Work == nil || c.Work.Implement == nil {
+		return false
+	}
+	return c.Work.Implement.IncludeRefineConvention
 }
 
 // ImplementAgents returns the commands of the [work.implement].agents list, in

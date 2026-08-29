@@ -69,6 +69,11 @@ type implementRun struct {
 	// may spend, resolved once per run because it describes the repository the run
 	// drains rather than any one task (ADR-0190/ADR-0191). Zero means unbounded.
 	turnCap int
+	// refineConvention is the `refine` convention prose every implement prompt of
+	// this run carries, empty when [work.implement].include_refine_convention is
+	// off (ADR-0240). Resolved once per run, beside turnCap and for the same
+	// reason: it describes the repository the run drains, not any one task.
+	refineConvention string
 
 	// drain is the live Drain handle — nil while parked at a gate or a
 	// quota-recovery wait. parkDrain/ensureDrain mutate it and the deferred
@@ -156,23 +161,24 @@ func newImplementRun(d *Deps, pd *project.Deps, loadConfig func(string) (*config
 	}
 
 	return &implementRun{
-		d:               d,
-		loadConfig:      loadConfig,
-		opts:            opts,
-		plan:            plan,
-		resolved:        resolved,
-		runtimePath:     runtimePath,
-		statePath:       statePath,
-		taskSetID:       taskSetID,
-		hitlFallback:    hitlFallback,
-		confirmOut:      confirmOut,
-		out:             out,
-		refresh:         refresh,
-		drain:           drain,
-		admission:       admission,
-		admissionWaited: waited,
-		turnCap:         resolveRepoTurnCap(d, plan.cfg, runtimePath),
-		agentProbeMemo:  newAgentAvailabilityProbeMemo(),
+		d:                d,
+		loadConfig:       loadConfig,
+		opts:             opts,
+		plan:             plan,
+		resolved:         resolved,
+		runtimePath:      runtimePath,
+		statePath:        statePath,
+		taskSetID:        taskSetID,
+		hitlFallback:     hitlFallback,
+		confirmOut:       confirmOut,
+		out:              out,
+		refresh:          refresh,
+		drain:            drain,
+		admission:        admission,
+		admissionWaited:  waited,
+		turnCap:          resolveRepoTurnCap(d, plan.cfg, runtimePath),
+		refineConvention: implementRefineConvention(plan.cfg, opts.RefineConvention, runtimePath),
+		agentProbeMemo:   newAgentAvailabilityProbeMemo(),
 	}, nil
 }
 

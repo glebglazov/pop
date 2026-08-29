@@ -33,6 +33,10 @@ projects = [
 # ["1m", "5m", "15m"]; an empty list restores instant retries).
 # max_tries = 3
 # attempt_retry_delays = ["1m", "5m", "15m"]
+# Inline the resolved `refine` convention into every implement prompt, so a
+# builder adheres upfront to the rules a Refine pass later enforces. Independent
+# of [work.refine].enabled (default false).
+# include_refine_convention = false
 
 [work.verify]
 # Enable Agent verification as a pre-approval Done gate (default false).

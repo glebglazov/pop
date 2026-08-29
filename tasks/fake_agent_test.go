@@ -112,6 +112,10 @@ type fakeAgentBehavior struct {
 	steps    []fakeAgentStep // non-nil for the sequential agent
 	attempts []attemptScript // non-nil for the per-attempt scripted agent
 	calls    int             // advances across attempts for the scripted agents
+	// prompts records every prompt this fake was handed, in order, so a test can
+	// assert what the drain actually told the agent rather than re-rendering the
+	// template itself.
+	prompts []string
 }
 
 var (
@@ -157,10 +161,23 @@ func lookupFakeAgent(args []string) (*fakeAgentBehavior, string, bool) {
 			if len(args) > 0 {
 				prompt = readSpilledPrompt(args[len(args)-1])
 			}
+			b.prompts = append(b.prompts, prompt)
 			return b, prompt, true
 		}
 	}
 	return nil, "", false
+}
+
+// fakeAgentPrompts returns, in order, the prompts the fake behind this token was
+// handed.
+func fakeAgentPrompts(token string) []string {
+	fakeAgentMu.Lock()
+	defer fakeAgentMu.Unlock()
+	b, ok := fakeAgentRegistry[token]
+	if !ok {
+		return nil
+	}
+	return append([]string(nil), b.prompts...)
 }
 
 // fakeAwareRunner is the default CommandRunner in the tasks test fixtures. A

@@ -203,7 +203,7 @@ func TestRefineBlockReachesEveryAttendedPrompt(t *testing.T) {
 
 	// The two unattended prompts carry no pointer at all.
 	unattended := map[string]string{
-		"implementer prompt": BuildAgentPrompt(filepath.Join(m.Dir, m.Tasks[0].File), "/rt"),
+		"implementer prompt": BuildAgentPrompt(filepath.Join(m.Dir, m.Tasks[0].File), "/rt", ""),
 		"verifier prompt":    buildVerifierPrompt(d, m, "sha1", workDiffView{Range: "aaa111^..HEAD", Stat: " a.go | 1 +"}, "", ""),
 	}
 	for surface, text := range unattended {
@@ -266,5 +266,25 @@ func TestRefineStalenessNeedsBothCommits(t *testing.T) {
 				t.Fatalf("StaleAgainst(%q) = %v, want %v", tc.current, got, tc.stale)
 			}
 		})
+	}
+}
+
+// TestAssistPromptPointsAtTheRefineConvention pins the Assist hint (ADR-0240):
+// the session is told where the standard is written, and told that running the
+// pass itself is not its business — the Refiner commits, and an attended session
+// leaves committing to the human.
+func TestAssistPromptPointsAtTheRefineConvention(t *testing.T) {
+	t.Parallel()
+	m := &Manifest{Stem: "demo", Dir: t.TempDir(), Valid: true,
+		Tasks: []Task{{ID: "01-a", File: "01-a.md", Type: "AFK", Status: TaskOpen}}}
+	prompt := BuildAssistPrompt(&Deps{FS: &promptFixtureFS{files: map[string]string{}}}, "demo", m, StatusReady, "/rt", "")
+
+	for _, want := range []string{
+		"`pop conventions get refine`",
+		"Do not invoke `pop tasks implement`, `pop tasks verify` or `pop tasks refine`",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("assist prompt is missing %q:\n%s", want, prompt)
+		}
 	}
 }

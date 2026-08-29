@@ -1362,6 +1362,7 @@ func runTaskRunTaskWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reader
 		Output:           stdout,
 		BindCheckout:     taskBindCheckout(d),
 		PreSeedTopic:     taskPreSeedTopic(),
+		RefineConvention: refineConvention(d),
 	})
 	if err != nil {
 		return err

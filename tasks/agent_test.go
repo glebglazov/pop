@@ -1627,7 +1627,7 @@ func TestNormalizeStructuredOutputRawFallbackUsesCompletionContract(t *testing.T
 }
 
 func TestBuildAgentPromptAbsolutePaths(t *testing.T) {
-	prompt := BuildAgentPrompt("/abs/tasks/01-a.md", "/abs/runtime")
+	prompt := BuildAgentPrompt("/abs/tasks/01-a.md", "/abs/runtime", "")
 	for _, want := range []string{
 		"/abs/tasks/01-a.md", "/abs/runtime", "index.json", "Do NOT make git commits", "optional context references",
 		"single non-interactive session",

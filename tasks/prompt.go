@@ -120,27 +120,45 @@ func taskHeading(task Task) string {
 
 // BuildAgentPrompt generates the instruction prompt for an task attempt.
 //
+// refineConvention is the resolved `refine` convention prose, already free of
+// the Read-whole notice, or empty when the repository has not asked for it
+// ([work.implement].include_refine_convention, ADR-0240). Empty renders the
+// prompt exactly as it read before the toggle existed; non-empty adds one
+// labelled block, so a planned task and a Remediation task — which drain
+// through this same prompt — are held to the standard upfront.
+//
 // The completion sentinels the template names (SUMMARY_START, SUMMARY_END,
 // TASK_COMPLETE, TASK_FAILED) stay literal text there. They are also compiled
 // into the assessor's regexes and written again in the retry lessons; folding
 // the three sites onto a shared constant is its own change (ADR-0208).
-func BuildAgentPrompt(taskPath, runtimePath string) string {
+func BuildAgentPrompt(taskPath, runtimePath, refineConvention string) string {
 	tasksDir := filepath.Dir(taskPath)
-	return prompt.MustRender(promptTemplates, "agent.tmpl.md", agentPromptView{
+	view := agentPromptView{
 		TaskPath:     taskPath,
 		TasksDir:     tasksDir,
 		ManifestPath: filepath.Join(tasksDir, ManifestFileName),
 		RuntimePath:  runtimePath,
-	})
+	}
+	if convention := strings.TrimSpace(refineConvention); convention != "" {
+		view.RefineConventionRecorded = true
+		view.RefineConvention = convention
+	}
+	return prompt.MustRender(promptTemplates, "agent.tmpl.md", view)
 }
 
 // agentPromptView is what the AFK worker's template renders against: a long
-// instruction document with four paths in it and no conditional section.
+// instruction document with four paths in it and one conditional section, the
+// repository's refine convention.
 type agentPromptView struct {
 	TaskPath     string
 	TasksDir     string
 	ManifestPath string
 	RuntimePath  string
+	// RefineConventionRecorded guards the convention block the way every other
+	// prompt view guards an optional section: a named boolean beside the text,
+	// so the template never asks why a field is empty.
+	RefineConventionRecorded bool
+	RefineConvention         string
 }
 
 // BuildHITLAssistancePrompt generates the attended-agent prompt shown when a
