@@ -1,8 +1,11 @@
 package tasks
 
 import (
+	"fmt"
 	"io"
 	"strings"
+
+	"github.com/glebglazov/pop/store"
 )
 
 // verifyReport is verification's report family on the shared pass-report
@@ -88,4 +91,62 @@ func publishVerifyReport(d *Deps, out io.Writer, m *Manifest, setID, workSHA, co
 	if _, err := verifyReport.writeDocument(d, m.Dir, at, doc); err != nil && out != nil {
 		outputFor(out).line(ansiYellow, "   Verify report not written: %v", err)
 	}
+}
+
+// acceptedVerdictAuthorLabel heads the authorship fact of a report a human
+// wrote, where a Verifier-authored one names the agent. The two documents are
+// otherwise the same shape in the same directory, so this line is what a reader
+// scanning the set's reports reads to tell them apart.
+const acceptedVerdictAuthorLabel = "Accepted by"
+
+// publishAcceptedVerdictReport files the human's own account of an Accepted
+// verdict (ADR-0103) as the set's newest Verify report. It answers the question
+// a green set with damning findings behind it puts to a later reader: the
+// judgment that was overridden, the rationale for overriding it, and the fact
+// that no agent was involved.
+//
+// No Verifier runs on this path, so there is no reply to split — pop renders the
+// body from the row the human is about to write and the verdict it replaces.
+// The overridden verdict must be read before the Accept upsert overwrites it at
+// the same work SHA; it is nil when the set has none recorded there, which is a
+// human accepting ahead of any judgment rather than over one.
+//
+// Filing is best-effort like the Verifier's own report: the recorded PASS is
+// what the drain gates on, and an unwritable Task-set directory must not turn an
+// Accept into a failure.
+func publishAcceptedVerdictReport(d *Deps, out io.Writer, m *Manifest, setID, workSHA, commitRange, note string, overridden *store.VerifyVerdict) {
+	if d == nil || m == nil || strings.TrimSpace(m.Dir) == "" {
+		return
+	}
+	at := d.Now().UTC()
+	doc := verifyReport.renderDocumentBy(at, setID, workSHA, commitRange,
+		acceptedVerdictAuthorLabel, "human", acceptedVerdictBody(note, overridden))
+	if _, err := verifyReport.writeDocument(d, m.Dir, at, doc); err != nil && out != nil {
+		outputFor(out).line(ansiYellow, "   Verify report not written: %v", err)
+	}
+}
+
+// acceptedVerdictBody is the prose of an Accepted verdict's report: what was
+// recorded, over what, and why. The overridden verdict's own findings ride along
+// because they are the reason the reader is asking — a report that named the
+// verdict but dropped the findings would leave the disagreement it exists to
+// explain unstated.
+func acceptedVerdictBody(note string, overridden *store.VerifyVerdict) string {
+	var b strings.Builder
+	b.WriteString("A human recorded this PASS directly, overriding verification (ADR-0103). No Verifier judged this work SHA.\n")
+	if overridden != nil && overridden.Verdict != "" && overridden.Verdict != string(VerdictPass) {
+		fmt.Fprintf(&b, "\n## Overridden verdict\n\n%s\n", overridden.Verdict)
+		if findings := strings.TrimSpace(overridden.Findings); findings != "" {
+			fmt.Fprintf(&b, "\n%s\n", findings)
+		}
+	} else {
+		b.WriteString("\n## Overridden verdict\n\nNone recorded at this work SHA.\n")
+	}
+	b.WriteString("\n## Rationale\n\n")
+	if note = strings.TrimSpace(note); note != "" {
+		b.WriteString(note + "\n")
+	} else {
+		b.WriteString("The human recorded no rationale with the Accept.\n")
+	}
+	return b.String()
 }

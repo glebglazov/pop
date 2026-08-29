@@ -151,6 +151,16 @@ func (r passReport) fileName(at time.Time) string {
 // It is stamped here rather than asked of the agent, because pop read it before
 // the pass began and the agent would only be copying it back.
 func (r passReport) renderDocument(at time.Time, setID, workSHA, commitRange, agent, body string) string {
+	return r.renderDocumentBy(at, setID, workSHA, commitRange, r.AgentLabel, agent, body)
+}
+
+// renderDocumentBy is renderDocument with the authorship fact named by the
+// caller. A pass whose documents are not all written by its agent — a human
+// recording an Accepted verdict writes one of verification's (ADR-0103) — keeps
+// the same header of facts in the same order, and says in the last of them who
+// wrote it. That one label is how a reader scanning a directory of reports tells
+// the two apart.
+func (r passReport) renderDocumentBy(at time.Time, setID, workSHA, commitRange, authorLabel, author, body string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# %s — %s\n\n", r.Title, setID)
 	fmt.Fprintf(&b, "- %s: %s\n", r.WrittenLabel, at.UTC().Format(time.RFC3339))
@@ -160,8 +170,8 @@ func (r passReport) renderDocument(at time.Time, setID, workSHA, commitRange, ag
 	if workSHA != "" {
 		fmt.Fprintf(&b, "- Work SHA: %s\n", ShortSHA(workSHA))
 	}
-	if strings.TrimSpace(agent) != "" {
-		fmt.Fprintf(&b, "- %s: %s\n", r.AgentLabel, strings.TrimSpace(agent))
+	if strings.TrimSpace(author) != "" {
+		fmt.Fprintf(&b, "- %s: %s\n", authorLabel, strings.TrimSpace(author))
 	}
 	fmt.Fprintf(&b, "\n%s", ensureTrailingNewline(strings.TrimSpace(body)))
 	return b.String()

@@ -266,6 +266,9 @@ func verifyResolvedSet(d *Deps, cfg *config.Config, opts verifyCoreOptions) (*Ve
 // row and fed forward as context into later Verifier prompts.
 func acceptResolvedSet(d *Deps, opts verifyCoreOptions, m *Manifest, workSHA string) (*VerifyResult, error) {
 	note := strings.TrimSpace(opts.AcceptNote)
+	// Read before the upsert: the Accept overwrites the row at this work SHA, and
+	// the verdict it replaces is the fact the report exists to name.
+	overridden := latestVerdict(d, opts.Repo, opts.SetID, workSHA)
 	v := store.VerifyVerdict{
 		Repo:          opts.Repo,
 		SetID:         opts.SetID,
@@ -289,6 +292,10 @@ func acceptResolvedSet(d *Deps, opts verifyCoreOptions, m *Manifest, workSHA str
 	}); err != nil {
 		return nil, err
 	}
+	// The human's decision leaves the same durable record a Verifier's does, so a
+	// later reader of a green set finds why it is green (ADR-0245).
+	publishAcceptedVerdictReport(d, opts.Output, m, opts.SetID, workSHA,
+		verifyWorkDiff(d, opts.RuntimePath, opts.SetID, m).Range, note, overridden)
 	printAcceptedVerdict(opts.Output, opts.SetID, workSHA, note)
 	return &VerifyResult{SetID: opts.SetID, WorkSHA: workSHA, Verdict: VerdictPass}, nil
 }

@@ -343,3 +343,89 @@ func TestVerifierPromptCarriesNoPreviousReport(t *testing.T) {
 		}
 	}
 }
+
+// TestAcceptedVerdictPublishesTheHumansRationale: a human overriding a non-PASS
+// judgment leaves the same durable record a Verifier does (ADR-0245), so the set
+// that most puzzles a later reader — green with damning findings behind it —
+// answers the question itself.
+func TestAcceptedVerdictPublishesTheHumansRationale(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	d, defPath, setDir := verifyReportFixture(t, at)
+	seedVerdict(t, d, store.VerifyVerdict{
+		Repo: "/repo/.git", SetID: "demo", WorkSHA: "abc123abc123",
+		Verdict: "NEEDS-HUMAN", Findings: "criterion 3 rests on a timeout the Verifier could not judge",
+	})
+
+	if _, err := verifyResolvedSet(d, nil, verifyCoreOptions{
+		Repo: "/repo/.git", DefPath: defPath, RuntimePath: "/rt", SetID: "demo",
+		Output: &bytes.Buffer{}, Accept: true,
+		AcceptNote:  "the timeout is intentional; it matches the upstream deadline",
+		runVerifier: func(string) (string, error) { t.Fatal("accept must not invoke an agent"); return "", nil },
+	}); err != nil {
+		t.Fatalf("verifyResolvedSet accept: %v", err)
+	}
+
+	// Same directory, same stamp, same header of facts as a Verifier's report.
+	path := filepath.Join(setDir, VerifyDirName, "verify-20260816T120000Z.md")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read accepted verdict report: %v", err)
+	}
+	for _, want := range []string{
+		"# Verify report — demo",
+		"- Verified: 2026-08-16T12:00:00Z",
+		"- Commit range: aaa111^..HEAD",
+		"- Work SHA: ",
+		"- Accepted by: human",
+		"NEEDS-HUMAN",
+		"criterion 3 rests on a timeout the Verifier could not judge",
+		"the timeout is intentional; it matches the upstream deadline",
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("document missing %q:\n%s", want, body)
+		}
+	}
+	// A reader must be able to tell this apart from a Verifier's report without
+	// reading the prose.
+	if strings.Contains(string(body), "- Verifier:") {
+		t.Fatalf("the human's report credits a Verifier:\n%s", body)
+	}
+
+	// The latest-report readers take it like any other document.
+	m := LoadManifest(d, "demo", filepath.Join(setDir, "index.json"))
+	p, ok := verifyReport.latestPointer(d, m)
+	if !ok || p.Path != path {
+		t.Fatalf("latest pointer = %+v (ok=%v), want the accepted verdict report at %s", p, ok, path)
+	}
+	if p.CommitRange != "aaa111^..HEAD" || p.WorkSHA == "" {
+		t.Fatalf("pointer lost the header facts: %+v", p)
+	}
+}
+
+// TestAcceptedVerdictReportWithNothingToOverride: an Accept recorded ahead of any
+// judgment still leaves a document, and it says plainly that there was no verdict
+// to override rather than implying one.
+func TestAcceptedVerdictReportWithNothingToOverride(t *testing.T) {
+	t.Parallel()
+	d, defPath, setDir := verifyReportFixture(t, time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC))
+	if _, err := verifyResolvedSet(d, nil, verifyCoreOptions{
+		Repo: "/repo/.git", DefPath: defPath, RuntimePath: "/rt", SetID: "demo",
+		Output: &bytes.Buffer{}, Accept: true, AcceptNote: "reviewed by hand",
+	}); err != nil {
+		t.Fatalf("verifyResolvedSet accept: %v", err)
+	}
+	docs := listVerifyReports(t, setDir)
+	if len(docs) != 1 {
+		t.Fatalf("documents = %v, want exactly one", docs)
+	}
+	body, err := os.ReadFile(filepath.Join(setDir, VerifyDirName, docs[0]))
+	if err != nil {
+		t.Fatalf("read accepted verdict report: %v", err)
+	}
+	for _, want := range []string{"- Accepted by: human", "None recorded at this work SHA", "reviewed by hand"} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("document missing %q:\n%s", want, body)
+		}
+	}
+}
