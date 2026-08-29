@@ -206,3 +206,9 @@ latency — the row set and History recency are read once and frozen for the
 picker's lifetime, session state refreshes only per picker-loop iteration, and Map
 attribution rides tmux's mutable `#{session_path}`. Recorded here so a future
 performance pass starts by reading this line and stopping.
+
+**The trigger fired.** On an inventory of 250 sets the first paint measured
+~380ms, and [ADR-0243](0243-the-manifest-memo-persists-and-the-verdict-loop-forks-in-parallel.md)
+takes the shape pre-settled above: the **Manifest memo** persists to a separate
+**Cache database**, content key unchanged. The glossary line this amendment
+predicted would stay true no longer is, and ADR-0243 revises it.
