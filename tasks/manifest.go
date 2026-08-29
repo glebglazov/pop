@@ -263,11 +263,18 @@ type WorktreeDirective struct {
 // LoadManifest reads and validates an task manifest.
 //
 // The load is a pure function of the set directory's files — no store, no git, no
-// config, no clock — so its answer is memoized for the life of the process under
-// a key naming that content (manifestMemo, ADR-0189). Every surface that walks the
-// same definition path therefore validates it once: a poll that finds an unchanged
-// set pays a manifest read and a directory listing instead of a read, a
-// line-split and two regexes per line for every task markdown in it.
+// config, no clock — so its answer is memoized under a key naming that content
+// (manifestMemo, ADR-0189). Every surface that walks the same definition path
+// therefore validates it once: a poll that finds an unchanged set pays a manifest
+// read and a directory listing instead of a read, a line-split and two regexes
+// per line for every task markdown in it.
+//
+// The memo has two tiers and they compose here. The process tier answers first;
+// beneath it the Cache database answers across processes (ADR-0243), so a fresh
+// dashboard opens onto work an earlier process did rather than re-reading every
+// task markdown on the machine. Both tiers are consulted under the same freshly
+// computed key, and the persisted one is never asked for anything the directory
+// no longer supports.
 //
 // A read error is not memoized, only a parsed answer: an unreadable manifest is a
 // question about a moment, not about content.
@@ -299,6 +306,13 @@ func LoadManifest(d *Deps, stem, manifestPath string) *Manifest {
 			served.Stem = stem
 			return served
 		}
+		if served, hit := persistedManifestEntry(d, m.Dir, key); hit {
+			served.Stem = stem
+			// Promoted into the process tier, so the second walk of this set costs a
+			// map lookup rather than a query and a decode.
+			manifestMemo.Put(key, served.clone())
+			return served
+		}
 	}
 
 	m.Raw = append(json.RawMessage(nil), data...)
@@ -312,6 +326,7 @@ func LoadManifest(d *Deps, stem, manifestPath string) *Manifest {
 	}
 	if keyed {
 		manifestMemo.Put(key, m.clone())
+		persistManifestEntry(d, m.Dir, key, m)
 	}
 	return m
 }

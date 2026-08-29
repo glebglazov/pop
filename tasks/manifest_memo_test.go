@@ -164,7 +164,9 @@ func TestManifestMemoOrphanMarkdownFlipsSetMalformed(t *testing.T) {
 
 // TestManifestMemoBoundEvictsLeastRecentlyWalkedSet pins the bound the daemon
 // depends on. The observable is the same as everywhere else: an evicted set
-// re-reads its markdown, a resident one does not.
+// re-reads its markdown, a resident one does not — which is only visible with the
+// persisted tier out of the way, since it would otherwise catch the eviction and
+// serve the set the process just forgot.
 func TestManifestMemoBoundEvictsLeastRecentlyWalkedSet(t *testing.T) {
 	if manifestMemo.Capacity() != manifestMemoCapacity || manifestMemoCapacity <= 0 {
 		t.Fatalf("production memo capacity = %d, want the bounded %d", manifestMemo.Capacity(), manifestMemoCapacity)
@@ -178,6 +180,7 @@ func TestManifestMemoBoundEvictsLeastRecentlyWalkedSet(t *testing.T) {
 		})
 	}
 	d, counting := countingDeps(t, root)
+	withoutPersistedTier(t, d)
 	load := func(stem string) {
 		t.Helper()
 		if m := LoadManifest(d, stem, filepath.Join(root, stem, ManifestFileName)); !m.Valid {

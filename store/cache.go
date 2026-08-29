@@ -27,11 +27,13 @@ type Cache struct {
 // versioned by PRAGMA user_version exactly as the execution-state store's is.
 // The two lists are independent: separate files, separate version counters.
 //
-// It is empty until a tenant lands one. Appending is the only legal edit — a
-// database written by a newer pop carries a version past the end of this list,
-// and OpenCache then refuses it (see errCacheSchemaAhead) so an older binary
-// reads a miss instead of misreading a table it does not know.
-var cacheMigrations = []string{}
+// Appending is the only legal edit — a database written by a newer pop carries a
+// version past the end of this list, and OpenCache then refuses it (see
+// errCacheSchemaAhead) so an older binary reads a miss instead of misreading a
+// table it does not know.
+var cacheMigrations = []string{
+	cacheMigrationManifestEntries,
+}
 
 // errCacheSchemaAhead reports a cache database written by a newer pop. It is
 // returned rather than recovered from: the caller's response is to run with no

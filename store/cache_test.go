@@ -68,3 +68,52 @@ func TestNilCacheCloses(t *testing.T) {
 		t.Fatalf("Close on a nil cache: %v", err)
 	}
 }
+
+// The manifest table is keyed by set directory and serves only under the content
+// key it was written with: re-recording a directory replaces its one row rather
+// than adding a second, which is what bounds the table by the machine's inventory
+// instead of by its edit history.
+func TestManifestEntryServesOnlyUnderItsContentKey(t *testing.T) {
+	c, err := OpenCache(filepath.Join(t.TempDir(), "cache.db"))
+	if err != nil {
+		t.Fatalf("OpenCache: %v", err)
+	}
+	defer func() { _ = c.Close() }()
+
+	const dir = "/sets/demo"
+	c.PutManifestEntry(dir, "key-1", []byte("first"))
+	if payload, ok := c.ManifestEntry(dir, "key-1"); !ok || string(payload) != "first" {
+		t.Fatalf("entry under its own key = %q, %v", payload, ok)
+	}
+	if _, ok := c.ManifestEntry(dir, "key-2"); ok {
+		t.Fatal("an entry was served under a content key it was not written with")
+	}
+	if _, ok := c.ManifestEntry("/sets/other", "key-1"); ok {
+		t.Fatal("a directory with no row was served one")
+	}
+
+	c.PutManifestEntry(dir, "key-2", []byte("second"))
+	if payload, ok := c.ManifestEntry(dir, "key-2"); !ok || string(payload) != "second" {
+		t.Fatalf("entry after the directory moved on = %q, %v", payload, ok)
+	}
+	if _, ok := c.ManifestEntry(dir, "key-1"); ok {
+		t.Fatal("the superseded content state is still reachable")
+	}
+	var rows int
+	if err := c.db.QueryRow(`SELECT count(*) FROM manifest_entries`).Scan(&rows); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	if rows != 1 {
+		t.Fatalf("rows for one directory recorded twice = %d, want 1", rows)
+	}
+}
+
+// A caller that failed to open the cache goes on calling it: reads miss and
+// writes drop, and neither reaches the human as an error.
+func TestNilCacheMissesAndDropsManifestEntries(t *testing.T) {
+	var c *Cache
+	c.PutManifestEntry("/sets/demo", "key", []byte("payload"))
+	if _, ok := c.ManifestEntry("/sets/demo", "key"); ok {
+		t.Fatal("a nil cache served an entry")
+	}
+}
