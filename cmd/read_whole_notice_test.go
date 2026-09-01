@@ -22,7 +22,7 @@ type noticedBlock struct {
 // kind, and counts each block for itself. It counts rather than matching a
 // golden because the fact worth pinning is that the notice does not lie — a
 // golden would instead break on every editorial pass over a shipped answer
-// (ADR-0230).
+// (ADR-0250).
 func splitNotices(t *testing.T, out string) []noticedBlock {
 	t.Helper()
 	separator := "\n" + strings.Repeat("=", 72) + "\n\n"
@@ -45,7 +45,7 @@ func splitNotices(t *testing.T, out string) []noticedBlock {
 	return blocks
 }
 
-// TestConventionsGetPrintsANoticeThatCountsItsOwnBlock is ADR-0230's guard on
+// TestConventionsGetPrintsANoticeThatCountsItsOwnBlock is ADR-0250's guard on
 // the resolve verb: every kind is preceded by one notice, and the number in it
 // is the number of lines the reader actually received.
 func TestConventionsGetPrintsANoticeThatCountsItsOwnBlock(t *testing.T) {
@@ -112,7 +112,7 @@ func TestConventionsDefaultPrintsTheSameNotice(t *testing.T) {
 // TestNoticeStaysOnTheCommandPaths: on the two paths pop hands the prose over
 // itself the notice would tell an agent not to shorten output it never ran, so
 // it must be absent from the prompt bodies, from the manifest key pop projects,
-// and from the Config dashboard's scrolled preview (ADR-0230).
+// and from the Config dashboard's scrolled preview (ADR-0250).
 func TestNoticeStaysOnTheCommandPaths(t *testing.T) {
 	f := newConventionFixture(t)
 	td := f.deps.tasksDeps()

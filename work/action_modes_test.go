@@ -3,7 +3,7 @@ package work
 import "testing"
 
 // An action that declares nothing is singular. The default is the whole of
-// ADR-0215 decision 5's safety: a kind written before the field existed, or a
+// ADR-0246 decision 5's safety: a kind written before the field existed, or a
 // verb added without a thought about batches, targets one container — bulk is
 // only ever reached by someone writing the grant down.
 func TestActionModesDefaultToSingular(t *testing.T) {

@@ -126,7 +126,7 @@ func RefineTaskSet(opts RefineOptions) (*RefineResult, error) {
 	return RefineTaskSetWith(defaultDeps, project.DefaultDeps(), config.Load, opts)
 }
 
-// RefineTaskSetWith is `pop tasks refine <set>` (ADR-0240): it resolves the set,
+// RefineTaskSetWith is `pop tasks refine <set>` (ADR-0252): it resolves the set,
 // hands a fresh Refiner pop's refine instruction, the resolved `refine`
 // convention and the set's previous Refine report, and writes what comes back
 // as the set's current one. It reaches no verdict and writes no status, but it
@@ -337,7 +337,7 @@ func runRefiner(d *Deps, cfg *config.Config, opts refineCoreOptions, m *Manifest
 	return body, agent, nil
 }
 
-// resolveRefiner applies the Refiner precedence chain (ADR-0240), highest
+// resolveRefiner applies the Refiner precedence chain (ADR-0252), highest
 // first: CLI flags → the per-set manifest `refiner` override → [work.refine] →
 // [work.implement].agents / DefaultRefineEffort. Agents and effort resolve
 // independently, the way the Verifier's do.
@@ -428,7 +428,7 @@ func runConfiguredRefiner(d *Deps, cfg *config.Config, sel verifierSelection, ta
 // own ending is the Refiner answering.
 //
 // It carries no read-only posture. A Refiner fixes what the convention licenses
-// (ADR-0240), so it is spawned with the same argv as any other writing role, and
+// (ADR-0252), so it is spawned with the same argv as any other writing role, and
 // what it may change is stated in its prompt rather than withheld from its
 // tools. The posture capability stays declared on every preset for the next
 // read-only role that needs it.
@@ -471,7 +471,7 @@ func refineAttemptRetryEligible(outcome *attemptOutcome, raw string) bool {
 }
 
 // refineEnabled reports whether automatic Refine is enabled in user config
-// (ADR-0240). Like Agent verification's switch it defaults off, and it gates only
+// (ADR-0252). Like Agent verification's switch it defaults off, and it gates only
 // the drain's own refine phase: `pop tasks refine <set>` is a human asking, and
 // runs whatever this says.
 func refineEnabled(cfg *config.Config) bool {
@@ -538,7 +538,7 @@ func buildRefinerPrompt(d *Deps, m *Manifest, work workDiffView, convention, ove
 	}
 	// The set's recorded Commit convention is what the Refiner renders its own
 	// commit's subject under. A set without one is asked for no subject at all,
-	// and its pass commits under pop's default format instead (ADR-0240).
+	// and its pass commits under pop's default format instead (ADR-0252).
 	if commits := strings.TrimSpace(m.CommitConvention); commits != "" {
 		view.CommitConventionRecorded = true
 		view.CommitConvention = commits

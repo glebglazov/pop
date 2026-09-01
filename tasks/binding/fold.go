@@ -242,7 +242,7 @@ func foldSetRowStatus(td *tasks.Deps, cfg *config.Config, setID, runtimePath str
 // resolveFoldSetStatus is the set-addressed fold's status gate: everything outside
 // DONE and Awaiting-approval refuses here, because a set-addressed fold is the act
 // of finishing that set and an unfinished set has nothing to finish. The
-// checkout-addressed fold reads the same status and asks instead (ADR-0233).
+// checkout-addressed fold reads the same status and asks instead (ADR-0251).
 func resolveFoldSetStatus(td *tasks.Deps, cfg *config.Config, setID, runtimePath string) (foldSetStatus, error) {
 	status, m, err := foldSetRowStatus(td, cfg, setID, runtimePath)
 	if err != nil {

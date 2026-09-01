@@ -120,7 +120,7 @@ type MonitorDashboard struct {
 	// jumps to the top, and any other key disarms it.
 	pendingG bool
 
-	// selection is the human's mark on rows, keyed by pane id (ADR-0215). The
+	// selection is the human's mark on rows, keyed by pane id (ADR-0246). The
 	// dashboard's whole notion of selection mode is derived from it — the mode
 	// word, the reserved region and every verb's refusal read this one set, so
 	// there is no second flag that could disagree with the marks.
@@ -148,7 +148,7 @@ type MonitorDashboard struct {
 	// writePrompt is the y/N confirmation for a non-destructive bulk write —
 	// unmonitor or follow — which is never gated by killPromptEnabled: neither
 	// verb touches a process, so ADR-0205's standing exception for kills does
-	// not apply (ADR-0215 decision 7).
+	// not apply (ADR-0246 decision 7).
 	writePrompt *writePrompt
 
 	warnings []string
@@ -739,7 +739,7 @@ func (d *MonitorDashboard) startKillPane() tea.Cmd {
 // the set the human agreed to is the set the kill runs over even though the poll
 // keeps rebuilding underneath the prompt. The prompt setting governs here exactly
 // as it does for one pane: someone who turned it off made a standing decision
-// about this risk, and asking anyway would overrule it (ADR-0215 decision 7).
+// about this risk, and asking anyway would overrule it (ADR-0246 decision 7).
 func (d *MonitorDashboard) startKillSelected() tea.Cmd {
 	if d.killPaneFunc == nil {
 		return nil
@@ -758,7 +758,7 @@ func (d *MonitorDashboard) startKillSelected() tea.Cmd {
 
 // startUnmonitorSelected answers the unmonitor key in selection mode. It opens
 // the standard bulk y/N — never the kill prompt's config gate, since forgetting
-// a pane touches no process (ADR-0215 decision 7) — over the marked set
+// a pane touches no process (ADR-0246 decision 7) — over the marked set
 // captured now, the same staleness rule startKillSelected uses.
 func (d *MonitorDashboard) startUnmonitorSelected() tea.Cmd {
 	if d.unmonitorFunc == nil {
@@ -780,7 +780,7 @@ func (d *MonitorDashboard) startUnmonitorSelected() tea.Cmd {
 // startFollowSelected answers the follow key in selection mode. A toggle over a
 // mixed set is ambiguous, so the direction is decided once, here, rather than
 // per pane: if any marked pane is not followed, the run follows all of them;
-// otherwise it unfollows all of them (ADR-0215 decision 5). The label names
+// otherwise it unfollows all of them (ADR-0246 decision 5). The label names
 // that decision rather than a static word, since "follow" would otherwise read
 // as a promise the run might actually break.
 func (d *MonitorDashboard) startFollowSelected() tea.Cmd {
@@ -862,7 +862,7 @@ func (d *MonitorDashboard) updateWritePrompt(msg tea.KeyPressMsg) (tea.Model, te
 // killPanes kills a whole captured set in one pass. A failure does not abort the
 // run — every pane gets its turn — and the Selection afterwards is exactly the
 // panes that failed, so they stay marked at the top of the list and a retry needs
-// no re-marking (ADR-0215 decision 6). ADR-0205's narrower rules are inherited
+// no re-marking (ADR-0246 decision 6). ADR-0205's narrower rules are inherited
 // unchanged: the dashboard's own pane is skipped rather than failing the batch,
 // each kill drops the pane's monitor entry in the same breath, and a run that
 // empties the monitored set quits the dashboard.
@@ -996,7 +996,7 @@ func unmonitorOutcome(unmonitored int, reasons []string) string {
 // followPanes drives every captured pane to one following value in one pass.
 // The direction was decided once when the prompt opened, not re-decided per
 // pane — that decision is the whole point of driving a mixed set to one value
-// (ADR-0215 decision 5) — so a pane already at the target value is left alone
+// (ADR-0246 decision 5) — so a pane already at the target value is left alone
 // rather than toggled past it. Following never touches a process, so the only
 // failure is the same staleness gap unmonitorPanes and killPanes both guard: a
 // pane gone from the monitored set between the prompt and the answer.
@@ -1230,7 +1230,7 @@ func (d *MonitorDashboard) regionBottom() int {
 
 // toggleSelected answers tab: it marks or unmarks the cursored pane and lands the
 // cursor on the row that followed it, which is the outcome tab guarantees
-// whichever way the row itself moved (ADR-0215 decision 8). The view is rebuilt
+// whichever way the row itself moved (ADR-0246 decision 8). The view is rebuilt
 // from the monitored set rather than reordered in place, so an unmarked row goes
 // back to its own sorted position instead of to the head of the rest.
 func (d *MonitorDashboard) toggleSelected() {
@@ -1289,7 +1289,7 @@ func (d *MonitorDashboard) monitored(paneID string) bool {
 
 // refuseSingular answers a binding whose verb acts on one pane while rows are
 // marked: it does nothing and says so on the bottom line, because a key that goes
-// silently inert is indistinguishable from a bug (ADR-0215 decision 4). The
+// silently inert is indistinguishable from a bug (ADR-0246 decision 4). The
 // capability table decides — a binding it grants `plural` passes straight through
 // — so a handler consults it in one line and nothing else has to know the modes.
 func (d *MonitorDashboard) refuseSingular(binding *key.Binding) bool {
@@ -1369,7 +1369,7 @@ func (d *MonitorDashboard) rebuildView() {
 		for _, pane := range d.allPanes {
 			// A mark outranks the view filter: the human named this row, later
 			// than and at least as deliberately as the filter, so no pane is ever
-			// selected and invisible (ADR-0215 decision 2).
+			// selected and invisible (ADR-0246 decision 2).
 			if pane.Following || d.selection.Has(pane.PaneID) {
 				filtered = append(filtered, pane)
 			}
@@ -1780,7 +1780,7 @@ type dashboardKeyMap struct {
 	KillPane key.Binding
 	// ToggleSelect and ClearSelection are the Selection's whole grammar: tab
 	// marks the cursored pane, shift+tab drops every mark and thereby leaves
-	// selection mode (ADR-0215 decision 8).
+	// selection mode (ADR-0246 decision 8).
 	ToggleSelect   key.Binding
 	ClearSelection key.Binding
 	// KillConfirm and KillCancel are the confirmation's own grammar, matching
@@ -1857,7 +1857,7 @@ type monitorVerb struct {
 // dashboardVerbs declares, per binding, the modes that binding's verb works in.
 // It is the monitor's mirror of the capability field work.Action carries: the
 // monitor's verbs are callbacks over a pane id with no kind and no Perform to
-// hang one on, so the declaration lives beside the keymap instead (ADR-0215
+// hang one on, so the declaration lives beside the keymap instead (ADR-0246
 // decision 5).
 //
 // Silence means singular — a binding absent from this table, or present without

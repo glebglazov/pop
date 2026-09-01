@@ -185,7 +185,7 @@ func TestRefineCommitFallsBackToPopDefaultSubject(t *testing.T) {
 }
 
 // TestRefineCommitLeavesACachedPassAlone: a refine commit is an ordinary commit
-// past a PASS (ADR-0240). The verdict stands within its episode and the badge
+// past a PASS (ADR-0252). The verdict stands within its episode and the badge
 // drifts; nothing on this path invalidates it.
 func TestRefineCommitLeavesACachedPassAlone(t *testing.T) {
 	t.Parallel()

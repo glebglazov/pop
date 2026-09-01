@@ -643,7 +643,7 @@ func (m *Manifest) VerifyOptedOut() bool {
 }
 
 // RefineOptedOut reports whether the set explicitly opted out of Refine
-// with `"refine": false` in its manifest (ADR-0240). It is the Verifier rule
+// with `"refine": false` in its manifest (ADR-0252). It is the Verifier rule
 // applied to the Refiner, key for key: user config is the master gate, an
 // absent or truthy `refine` key means the set is refined while the feature is
 // globally enabled, and a malformed value is treated as participating.
@@ -676,7 +676,7 @@ func (m *Manifest) optedOut(key string) bool {
 // AgentDirective is a set's per-set override of the agent list and effort a
 // set-level phase runs at, read from the manifest's
 // `"verifier": {"agents": [...], "effort": "..."}` object (ADR-0086) and its
-// `"refiner"` twin (ADR-0240). One type serves both because the two phases
+// `"refiner"` twin (ADR-0252). One type serves both because the two phases
 // resolve the same two values by the same precedence.
 //
 // It overrides the phase's config default for that set, but it is opt-out only

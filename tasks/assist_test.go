@@ -776,7 +776,7 @@ func TestBuildAssistPromptOmitsTaskBodies(t *testing.T) {
 		"Operations you may perform",
 		"Do not start a Drain",
 		// Task-appending is granted once, via the shared authoring grant
-		// (ADR-0217), not restated in this Operations list.
+		// (ADR-0247), not restated in this Operations list.
 		"You may create a new Task set, or append a task to this one",
 		"You do not effect a disposition",
 		"an edit to the task manifest",

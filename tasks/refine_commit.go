@@ -204,7 +204,7 @@ func discardRefinePassChanges(d *Deps, runtimePath string, snap refineTreeSnapsh
 
 // commitRefinePass captures whatever the Refiner left in the working tree as one
 // commit and returns its SHA, or the empty string when the pass edited nothing
-// (ADR-0240). Agents never commit, so this is the only place a refine pass
+// (ADR-0252). Agents never commit, so this is the only place a refine pass
 // reaches git history — and it runs on both pass paths, the drain's refine phase
 // and `pop tasks refine`, because both leave the same tree behind.
 //

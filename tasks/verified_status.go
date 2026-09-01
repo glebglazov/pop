@@ -3,7 +3,7 @@ package tasks
 import "github.com/glebglazov/pop/store"
 
 // resolveSetVerifyMark returns the set's Verification mark via the read-side
-// resolution — the same answer every surface uses. Human Remediate (ADR-0217)
+// resolution — the same answer every surface uses. Human Remediate (ADR-0247)
 // asks this, not the raw verdict rows, before writing anything.
 func resolveSetVerifyMark(d *Deps, m *Manifest, repo, setID, workSHA string) VerifyMark {
 	var current, latestPass *store.VerifyVerdict

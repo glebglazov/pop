@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// TestSkillsNamingTheResolveCommandForbidTheShortenedRead pins ADR-0230's
+// TestSkillsNamingTheResolveCommandForbidTheShortenedRead pins ADR-0250's
 // second half. It walks every embedded skill body rather than checking today's
 // call sites by name: the habit it guards is tool-shaped and belongs to whoever
 // runs the command next, so a seventh skill that names the command must not be

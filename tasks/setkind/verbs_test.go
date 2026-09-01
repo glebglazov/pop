@@ -64,7 +64,7 @@ func TestUnbindOwnsUOnAMutedBoundSet(t *testing.T) {
 	}
 }
 
-// TestVerbCapabilities is the Task-set kind's half of the grant list ADR-0215
+// TestVerbCapabilities is the Task-set kind's half of the grant list ADR-0246
 // decision 5 asks to be reviewable: every verb this kind owns, with the one bit
 // that says whether a Selection may run it. The container below trips every
 // conditional verb, so a verb added without a decision about its capability

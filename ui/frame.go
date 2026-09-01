@@ -43,7 +43,7 @@ type Frame struct {
 	// Mode is the word a true mode holds at the left of the bottom line, e.g.
 	// SelectionMode. It sits ahead of the flash as well as the hints, because a
 	// mode outlives any one message and a verb's refusal is exactly the moment
-	// the human most needs to see which mode they are in (ADR-0215 decision 4).
+	// the human most needs to see which mode they are in (ADR-0246 decision 4).
 	Mode string // "" = no mode
 }
 

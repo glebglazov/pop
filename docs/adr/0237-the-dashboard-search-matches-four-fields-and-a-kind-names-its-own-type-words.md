@@ -1,6 +1,6 @@
 ---
 status: accepted
-relates: "widens the search [ADR-0213](0213-a-text-entry-mode-may-reserve-only-keys-that-produce-no-text.md) established, and keeps status vocabulary on the Work view preset side of ADR-0197 / [ADR-0229](0229-an-unanswered-filter-field-never-removes-a-row.md)"
+relates: "widens the search [ADR-0213](0213-a-text-entry-mode-may-reserve-only-keys-that-produce-no-text.md) established, and keeps status vocabulary on the Work view preset side of ADR-0197 / [ADR-0249](0249-an-unanswered-filter-field-never-removes-a-row.md)"
 ---
 
 # The dashboard search matches four fields and a kind names its own type words
@@ -32,7 +32,7 @@ what they see.
 
 2. **Status text is deliberately excluded.** Adding the status cell would have made "way"
    find Maps for free — it is where `WAYFINDING` actually lives. It was rejected because
-   status is **Work view preset** vocabulary (ADR-0197 decision 1, ADR-0229): putting the
+   status is **Work view preset** vocabulary (ADR-0197 decision 1, ADR-0249): putting the
    same question in two grammars gives the operator two answers that can disagree, and `/`
    would quietly become a worse `f`.
 

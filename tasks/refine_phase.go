@@ -19,7 +19,7 @@ const (
 	refineReturn
 )
 
-// refinePhase runs the drain's Refine step (ADR-0240): with [work.refine]
+// refinePhase runs the drain's Refine step (ADR-0252): with [work.refine]
 // enabled and the set's Refine episode armed, a fresh Refiner fixes in place
 // what the resolved `refine` convention licenses, the runner commits the pass,
 // and the set's Refine report records what was fixed and what was left.
@@ -59,7 +59,7 @@ func (r *implementRun) refinePhase(currentRefresh *RefreshResult, row *Row) (ref
 		return refineFallThrough, nil
 	}
 	m := currentRefresh.Manifests[r.taskSetID]
-	// Human completion (ADR-0240), read from the manifest bit the transition
+	// Human completion (ADR-0252), read from the manifest bit the transition
 	// chokepoint writes — the same source the verify phase reads before it
 	// declines to park or remediate such a set.
 	if m != nil && m.HumanCompleted {

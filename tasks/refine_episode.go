@@ -19,7 +19,7 @@ import (
 // re-refine; planned work finishing changes it, and the next quiescence refines
 // again.
 //
-// Remediation tasks are the one carve-out (ADR-0240). Refine now runs before the
+// Remediation tasks are the one carve-out (ADR-0252). Refine now runs before the
 // Verifier, so a FIXABLE verdict spawns fix work whose completion would
 // otherwise re-arm the episode and put a heavy refine pass inside every
 // verify→remediate→re-verify lap — the iteration that must be cheapest. The

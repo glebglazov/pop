@@ -13,7 +13,7 @@ import (
 // fold is about to land: the set holding it, the status that decides what the fold
 // owes that set, and the key its release needs. A binding is pop's own bookkeeping
 // and never a reason git cannot rebase, so none of this refuses the fold — it
-// decides what the fold says and what it settles afterwards (ADR-0233).
+// decides what the fold says and what it settles afterwards (ADR-0251).
 type boundFoldSet struct {
 	key   string
 	setID string
@@ -132,7 +132,7 @@ func (sets boundFoldSets) prompt(path string) string {
 // reportUnasked leaves in the output the record the confirmation would have been.
 // --yes is the entry ticket for every non-interactive channel rather than an
 // extra-danger opt-in, so pop obeys it and states what it landed unasked instead of
-// passing over it in silence (ADR-0233).
+// passing over it in silence (ADR-0251).
 func (sets boundFoldSets) reportUnasked(out io.Writer, path string) {
 	for _, s := range sets {
 		fmt.Fprintf(out, "--yes: folding %s without asking; bound Task set %s is %s — %s\n",

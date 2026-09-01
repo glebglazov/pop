@@ -1,6 +1,6 @@
 # The Reviewer runs under a read-only agent posture
 
-> **Amended by [ADR-0240](0240-refine-fixes-in-place-before-the-verify-phase.md):**
+> **Amended by [ADR-0252](0252-refine-fixes-in-place-before-the-verify-phase.md):**
 > the Reviewer became the Refiner and fixes in place, so no role is currently
 > spawned under this posture. The capability itself stands as declared preset
 > metadata — the per-preset flag research below is why it is kept rather than

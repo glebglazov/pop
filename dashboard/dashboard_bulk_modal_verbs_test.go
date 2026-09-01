@@ -12,7 +12,7 @@ import (
 	"github.com/glebglazov/pop/work/ref"
 )
 
-// The verbs the dashboard intercepts before they reach a kind (ADR-0215 decision
+// The verbs the dashboard intercepts before they reach a kind (ADR-0246 decision
 // 5). Mute, unmute and abandon go plural because their input is shared — one
 // duration, none at all, or a confirmation — so one answer stands for the whole
 // Selection. Everything else the surface intercepts resolves a checkout, a

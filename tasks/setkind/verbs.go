@@ -75,7 +75,7 @@ const (
 // It is called when a menu opens over one container, not per container at load
 // time, so the eligibility it reports is as fresh as the keypress.
 //
-// Capability audit (ADR-0215 decision 5). Nothing here is plural: drain, verify,
+// Capability audit (ADR-0246 decision 5). Nothing here is plural: drain, verify,
 // fold, assist, shell, bind, unbind, auto-drain and unpark each resolve a
 // checkout, a worktree, a session or a modal per set, so one answer cannot stand
 // for the batch, and the handoff verbs have no plural meaning at all. The one
@@ -116,7 +116,7 @@ func (k *Kind) Actions(c work.Container) []work.Action {
 // (ADR-0186); the keys and labels are unchanged from the hardcoded list they
 // replace, because an operator's fingers are part of the interface.
 //
-// All five are plural (ADR-0215 decision 5): a status word takes no per-set
+// All five are plural (ADR-0246 decision 5): a status word takes no per-set
 // input, each set's write is one atomic manifest write of its own, and moving a
 // batch of sets to a status is the operation the Selection was built for.
 func (k *Kind) StatusActions(c work.Container) []work.Action {
@@ -139,7 +139,7 @@ func (k *Kind) StatusActions(c work.Container) []work.Action {
 // rather than shown and erroring — while the set folder needs none, which is why
 // the new capability is the unconditional one.
 //
-// Only copy-name is plural (ADR-0215 decision 5): a name per marked set joins
+// Only copy-name is plural (ADR-0246 decision 5): a name per marked set joins
 // into one clipboard write, while two sets' folders have nowhere to go together.
 func (k *Kind) CopyActions(c work.Container) []work.Action {
 	actions := []work.Action{
@@ -158,7 +158,7 @@ func (k *Kind) CopyActions(c work.Container) []work.Action {
 // markdown also offers its absolute path. Every one of them is
 // singular: a Selection marks containers, and item-level bulk is out of scope by
 // decision — a whole-set verb already means every unlocked task, and
-// `pop tasks complete` already does per-task multi-select (ADR-0215).
+// `pop tasks complete` already does per-task multi-select (ADR-0246).
 func (k *Kind) ItemActions(c work.Container, item work.Item) []work.Action {
 	var actions []work.Action
 	status := tasks.TaskStatus(item.Status)

@@ -179,7 +179,7 @@ func (r passReport) renderDocumentBy(at time.Time, setID, workSHA, commitRange, 
 
 // ReportPointer is a set's current report of one pass as the surfaces carry it:
 // where the document is and which commit it was written against, never what it
-// says (ADR-0240, narrowed by ADR-0217; shared across passes by ADR-0245).
+// says (ADR-0252, narrowed by ADR-0217; shared across passes by ADR-0245).
 type ReportPointer struct {
 	// Label names the pass in the pointer's one-line summary.
 	Label string

@@ -72,7 +72,7 @@ func RenderStack(w io.Writer, s Stack) error {
 // two paths pop hands a convention over itself — the prose injected into a
 // prompt and the Config dashboard's preview — are defined by the notice being
 // absent from them, and a test can only assert that against the label pop
-// prints (ADR-0230).
+// prints (ADR-0250).
 const ReadWholeNoticeLabel = "READ-WHOLE NOTICE"
 
 // WithReadWholeNotice puts the Read-whole notice above a block a shell command
@@ -82,7 +82,7 @@ const ReadWholeNoticeLabel = "READ-WHOLE NOTICE"
 // A header rather than a footer, because a header is the only part of the output
 // a prefix read cannot drop, and unconditional rather than printed only above
 // some length, because a guard the shortest kind lacks reads as advisory
-// (ADR-0230). The count is of the block exactly as printed — banner, overlay and
+// (ADR-0250). The count is of the block exactly as printed — banner, overlay and
 // provenance included — so the reader can check it against what they received.
 func WithReadWholeNotice(block string) string {
 	return fmt.Sprintf("%s: %d lines follow. Read every one of them — a prefix read drops rules you are still bound by.\n%s",

@@ -109,7 +109,7 @@ func TestSupportedPresetReportsThePostureItObtained(t *testing.T) {
 
 // The posture is declared on every preset and spawned by no role: the Refiner
 // was its only consumer, and a Refiner that fixes in place cannot run without
-// its editing tools (ADR-0240). The capability stays for the next read-only
+// its editing tools (ADR-0252). The capability stays for the next read-only
 // role, which is what the tests above cover.
 func TestNoRoleSpawnsUnderTheReadOnlyPosture(t *testing.T) {
 	for name, role := range map[string]agentRole{

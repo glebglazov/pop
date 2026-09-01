@@ -15,7 +15,7 @@ func latestRefinePointer(d *Deps, m *Manifest) (RefinePointer, bool) {
 // refineBlockView is the pointer as the five attended prompts render it: the
 // document to read, the commit it was written against, and whether the checkout
 // has since moved past that commit. All five share one prompt fragment, so this
-// is the one shape it renders against (ADR-0240).
+// is the one shape it renders against (ADR-0252).
 type refineBlockView struct {
 	HasRefine bool
 	Path      string

@@ -782,7 +782,7 @@ func TestVerifyResolvedSetRemediateFromNeedsHumanSpawnsTask(t *testing.T) {
 }
 
 // TestHumanRemediateRequiresVerifyFailedMark: `pop tasks verify --remediate` is
-// refused unless the set's Verification mark is verify-failed (ADR-0217). Each
+// refused unless the set's Verification mark is verify-failed (ADR-0247). Each
 // non-failed mark is refused by name with a pointer at the authoring guide, and
 // a refused call writes nothing; a verify-failed set still remediates.
 func TestHumanRemediateRequiresVerifyFailedMark(t *testing.T) {
@@ -910,7 +910,7 @@ func TestVerifyResolvedSetRemediateOverCapSpawnsTask(t *testing.T) {
 	// The set already carries DefaultMaxRemediationDepth auto remediation tasks:
 	// the auto FIXABLE-under-cap path would spawn nothing.
 	d, defPath := setupVerifyFixtureTasks(t, stubGit("shaCap\n", "", ""), remediationSet(DefaultMaxRemediationDepth))
-	// Human --remediate requires a verify-failed mark (ADR-0217).
+	// Human --remediate requires a verify-failed mark (ADR-0247).
 	seedVerdict(t, d, store.VerifyVerdict{Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaCap", Verdict: "FIXABLE", Findings: "still one gap"})
 
 	var out bytes.Buffer

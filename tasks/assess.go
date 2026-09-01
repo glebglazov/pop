@@ -180,14 +180,14 @@ func TaskTrailer(taskSetID, taskID string) string {
 // RefineCommitSubject returns pop's default subject for a Refine commit — the
 // refine variant of the implementation format, used when the Refiner rendered
 // no subject of its own or the set records no Commit convention to render one
-// under (ADR-0240). The set is named without its timestamp prefix for the same
+// under (ADR-0252). The set is named without its timestamp prefix for the same
 // reason a task's subject is: the commit carries its own date.
 func RefineCommitSubject(taskSetID string) string {
 	return fmt.Sprintf("tasks(%s): refine", taskSetSlug(taskSetID))
 }
 
 // RefineTrailerKey is the git trailer key naming the Task set a Refine commit
-// belongs to (ADR-0240). It is its own key rather than Pop-Task's value with the
+// belongs to (ADR-0252). It is its own key rather than Pop-Task's value with the
 // task half left off: a refine pass belongs to no task, and a distinct key lets
 // history be filtered for refine work without parsing subjects.
 const RefineTrailerKey = "Pop-Refine"

@@ -243,7 +243,7 @@ func (k *MapKind) TypeWords() []string { return []string{"map", "wayfinder", "wa
 // CopyActions (ADR-0236 decision 6), and a Map is mutable on the same terms as a
 // Task set (ADR-0200 decision 7).
 //
-// Capability audit (ADR-0215 decision 5). Nothing here is plural: the four
+// Capability audit (ADR-0246 decision 5). Nothing here is plural: the four
 // frontier verbs and assist each resolve a session per Map and hand the operator
 // to a pane, which has no plural meaning, and shell is one directory. The one
 // plural verb a Map has is copy-name, which lives on the copy menu.
@@ -274,7 +274,7 @@ func (k *MapKind) Actions(c work.Container) []work.Action {
 // `n` is the name, `y` is the Map's own folder, so `y` `y` copies it.
 //
 // Only copy-name is plural: two Maps' folders have nowhere to go together, while
-// a name per marked Map joins into one clipboard write (ADR-0215 decision 5).
+// a name per marked Map joins into one clipboard write (ADR-0246 decision 5).
 func (k *MapKind) CopyActions(c work.Container) []work.Action {
 	return []work.Action{
 		{Verb: work.VerbCopyName, Key: "n", Label: "copy name", Modes: work.Plural},
@@ -294,7 +294,7 @@ func (k *MapKind) CopyActions(c work.Container) []work.Action {
 // unarchiving a Map that was never archived says so. Gating them here would mean
 // reproducing those rules on a read surface.
 //
-// All four are plural (ADR-0215 decision 5): abandoning a batch of Maps is one
+// All four are plural (ADR-0246 decision 5): abandoning a batch of Maps is one
 // confirmation answered identically for every one of them, and the other three
 // take no input at all. The intersection is what keeps a Selection holding a Map
 // and a task set from seeing either kind's words — the two vocabularies share no
@@ -320,7 +320,7 @@ func (k *MapKind) StatusActions(c work.Container) []work.Action {
 // live sessions are reachable from the dashboard only by first killing them.
 //
 // Every one of them is singular: a Selection marks containers, and item-level
-// bulk is out of scope by decision (ADR-0215).
+// bulk is out of scope by decision (ADR-0246).
 func (k *MapKind) ItemActions(c work.Container, item work.Item) []work.Action {
 	var actions []work.Action
 	switch {

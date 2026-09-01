@@ -41,7 +41,7 @@ type agentRole struct {
 	// ReadOnly spawns this role's agents under the read-only agent posture
 	// (ADR-0221). No role sets it today: the Refiner was its only consumer, and
 	// a Refiner that fixes in place cannot run without its editing tools
-	// (ADR-0240). The posture stays declared on every preset for the next
+	// (ADR-0252). The posture stays declared on every preset for the next
 	// role that wants to look without touching.
 	ReadOnly bool
 }

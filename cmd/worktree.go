@@ -131,7 +131,7 @@ func runWorktreeFoldWith(d *Deps, cfg *config.Config, cwd, name string, opts bin
 	}
 	// A binding on this checkout is not this verb's business to refuse: the fold
 	// itself names every bound set in its confirmation and settles the ones it
-	// finishes (ADR-0233).
+	// finishes (ADR-0251).
 	if _, err := binding.FoldCheckout(d.tasksDeps(), cfg, path, opts, out); err != nil {
 		return fmt.Errorf("worktree fold: %w", err)
 	}

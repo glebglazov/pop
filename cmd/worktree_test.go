@@ -108,7 +108,7 @@ func TestWorktreeFoldNamedUnboundManagedWorktreeSurvives(t *testing.T) {
 }
 
 // A live binding is pop's own bookkeeping, so the verb asks about it and folds on
-// the answer instead of sending the human to `pop tasks fold` (ADR-0233). The
+// the answer instead of sending the human to `pop tasks fold` (ADR-0251). The
 // picker's Fold action reaches this same verb through a tagged pane, which is where
 // the question is answered.
 func TestWorktreeFoldBoundCheckoutAsksThenFoldsAndKeepsBoth(t *testing.T) {

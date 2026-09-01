@@ -54,7 +54,7 @@ func TestAutoRemediationSpawnForwardFeedsAcceptedNote(t *testing.T) {
 func TestHumanRemediateForwardFeedsAcceptedNote(t *testing.T) {
 	d, defPath := setupVerifyFixture(t, stubGit("shaA\n", "", ""))
 	// A prior Accept at an older SHA carries the note; the current SHA is
-	// verify-failed so human --remediate is allowed (ADR-0217).
+	// verify-failed so human --remediate is allowed (ADR-0247).
 	seedVerifyVerdict(t, d, store.VerifyVerdict{
 		Repo: "/repo/.git", SetID: "demo", WorkSHA: "shaOld", Verdict: "PASS",
 		HumanAuthored: true, Note: "the extra allocation is deliberate",

@@ -289,7 +289,7 @@ func spawnRuntimeShell(d *Deps, stdin io.Reader, runtimePath string, out io.Writ
 
 // pageReportDocument shows one pass's report — refine's or verification's — to
 // the human at the gate. It spawns no agent: the document is already written,
-// and this entry is a read of it, not a second opinion (ADR-0240, ADR-0245). The
+// and this entry is a read of it, not a second opinion (ADR-0252, ADR-0245). The
 // human's pager runs attended in the runtime checkout; when none will run, the
 // document is printed instead, because the whole point of the entry is that the
 // human sees it.

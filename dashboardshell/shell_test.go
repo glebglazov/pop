@@ -252,7 +252,7 @@ func TestShellVIsTypedIntoASearchNotAPageToggle(t *testing.T) {
 	}
 }
 
-// TestShellPagesHoldIndependentSelections is the shell's half of ADR-0215: the
+// TestShellPagesHoldIndependentSelections is the shell's half of ADR-0246: the
 // two pages are two models, so each holds its own marks — and the toggle, which
 // keeps a page's cursor and its search, keeps its Selection too.
 func TestShellPagesHoldIndependentSelections(t *testing.T) {

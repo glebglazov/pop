@@ -12,7 +12,7 @@ import (
 	"github.com/glebglazov/pop/work"
 )
 
-// The Work dashboard's plural half (ADR-0215 decisions 5, 6 and 7): what a verb
+// The Work dashboard's plural half (ADR-0246 decisions 5, 6 and 7): what a verb
 // means when it is invoked over a Selection rather than over the cursored row.
 //
 // Three rules hold the whole of it. A verb reaches the plural menus only if its
@@ -106,7 +106,7 @@ func bulkLabel(verb work.Verb, n int) string {
 
 // singularRefusal is what a verb that acts on one row says when rows are marked.
 // A key that goes silently inert is indistinguishable from a bug, so the refusal
-// names the verb, the mode and the way out of it (ADR-0215 decision 4).
+// names the verb, the mode and the way out of it (ADR-0246 decision 4).
 func singularRefusal(verb string, marked int) string {
 	return fmt.Sprintf("%s acts on one row — shift+tab clears the %d selected", verb, marked)
 }
@@ -122,7 +122,7 @@ func singularRefusal(verb string, marked int) string {
 // cannot answer for a set, and the handoffs among them address a pane, which has
 // no plural meaning at all. Mute, unmute and abandon are absent because their
 // input is shared — one duration, or a confirmation, or nothing — which is the
-// line ADR-0215 decision 5 draws through the intercepted verbs.
+// line ADR-0246 decision 5 draws through the intercepted verbs.
 var singularModalVerbs = map[work.Verb]string{
 	setkind.VerbDrain:        "drain",
 	setkind.VerbVerify:       "verify",
@@ -345,7 +345,7 @@ func (m QueueDashboard) updateBulkPrompt(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // bulkCmd is the loop itself: every row takes its turn, a failure is recorded
 // rather than raised, and the run finishes whatever happened to any one row
-// (ADR-0215 decision 6). It runs inside a tea.Cmd for the same reason one
+// (ADR-0246 decision 6). It runs inside a tea.Cmd for the same reason one
 // Perform does — a manifest write does not belong between two keypresses.
 func (m QueueDashboard) bulkCmd(verb work.Verb, rows []DashboardRow, run func(DashboardRow) (work.Outcome, error)) tea.Cmd {
 	rows = slices.Clone(rows)
@@ -403,7 +403,7 @@ func (m QueueDashboard) bulkUnmute(rows []DashboardRow) tea.Cmd {
 // the one-line report, and what is left of the Selection. On success the marks
 // are consumed; on partial failure the Selection collapses to exactly the rows
 // that failed, so they stay in the region, a retry needs no re-marking, and each
-// reason surfaces in turn as the set shrinks (ADR-0215 decision 6).
+// reason surfaces in turn as the set shrinks (ADR-0246 decision 6).
 func (m QueueDashboard) applyBulkVerb(msg dashboardBulkVerbMsg) (tea.Model, tea.Cmd) {
 	done := 0
 	var reasons, clipboard, failed []string

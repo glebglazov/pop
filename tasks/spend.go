@@ -176,7 +176,7 @@ type SpendSetBreakdownResult struct {
 	VerificationRunCount       int
 	VerificationTokenBlindRuns int
 	// The Refine bucket is the third phase a set spends agent quota in
-	// (ADR-0240). It is reported only when the set has been refined, so a set
+	// (ADR-0252). It is reported only when the set has been refined, so a set
 	// that never was reads exactly as it did before Refine existed.
 	RefineTokens         TokenUsage
 	RefineCost           PartialCost

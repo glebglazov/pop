@@ -17,7 +17,7 @@ const SelectionMode = "-- SELECT --"
 // persists it — and keyed by whatever stable identity the surface already gives
 // a row (a pane id on the Monitor, a container's cursor key on the Work
 // dashboard), which is what carries a mark across the wholesale row rebuild both
-// surfaces perform on every poll (ADR-0215 decision 1).
+// surfaces perform on every poll (ADR-0246 decision 1).
 //
 // Selection mode is derived rather than stored: it is exactly Active, so
 // dropping the last mark leaves the mode and no second flag can desync from the
@@ -177,7 +177,7 @@ func captionRuleWithEnds(label string, width int, left, right string) string {
 // rendered for the bottom line the hints and the flash share. Both plural
 // surfaces ask it the same way, in the house accent, because the grammar is the
 // whole of what a human has to recognise: a line ending in `? y/N` means one key
-// is about to write over everything marked (ADR-0215 decision 7).
+// is about to write over everything marked (ADR-0246 decision 7).
 func ConfirmPrompt(label string) string {
 	return killPromptStyle().Render("  " + label + "? y/N")
 }

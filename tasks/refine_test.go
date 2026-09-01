@@ -315,7 +315,7 @@ func manifestWithRefiner(t *testing.T, agents []string, effort string) *Manifest
 	return &Manifest{Unknown: map[string]json.RawMessage{"refiner": raw}}
 }
 
-// TestResolveRefinerPrecedence covers the Refiner chain (ADR-0240), highest
+// TestResolveRefinerPrecedence covers the Refiner chain (ADR-0252), highest
 // first: CLI flags → the per-set `refiner` override → [work.refine] →
 // [work.implement].agents / heavy, with agents and effort resolving
 // independently of one another.

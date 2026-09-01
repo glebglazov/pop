@@ -42,7 +42,7 @@ func FoldCheckout(td *tasks.Deps, cfg *config.Config, path string, opts FoldOpti
 
 	// A binding on this checkout changes nothing about the git act, so it is read
 	// for what it makes the fold *say* and what it leaves the fold to settle
-	// afterwards, never to refuse (ADR-0233). Read inside the gate, it is re-read on
+	// afterwards, never to refuse (ADR-0251). Read inside the gate, it is re-read on
 	// every attempt of the primitive's retry loop, like the set-addressed status is.
 	var bound boundFoldSets
 	req := foldCheckoutRequest{path: path}

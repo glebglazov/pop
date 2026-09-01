@@ -55,7 +55,7 @@ func hasVerb(actions []work.Action, verb work.Verb) bool {
 	return false
 }
 
-// TestRoutineVerbCapabilities is the Routine's half of the grant list ADR-0215
+// TestRoutineVerbCapabilities is the Routine's half of the grant list ADR-0246
 // decision 5 asks to be reviewable. Copy-name is the only plural verb a Routine
 // has: firing, previewing, editing and refining each hand the operator to a
 // pane, the pause pair is one bit with no single direction over a mixed set, and

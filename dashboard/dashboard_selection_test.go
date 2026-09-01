@@ -233,7 +233,7 @@ func TestWorkSelectionJumpsStopAtTheFootRegion(t *testing.T) {
 
 // The mode is visible or it is not a mode: the word on the bottom line and the
 // counted separator above the marked rows are the whole of what says a verb
-// will refuse. Both are the shared primitive's own words (ADR-0215 decision 3).
+// will refuse. Both are the shared primitive's own words (ADR-0246 decision 3).
 func TestWorkSelectionRendersTheModeWordAndCountedSeparator(t *testing.T) {
 	m := selDashboard(selRows("set-a", "set-b", "set-c"))
 	if strings.Contains(ui.StripANSI(m.View().Content), ui.SelectionMode) {
@@ -735,7 +735,7 @@ func TestWorkSelectionKeepsNavigationLive(t *testing.T) {
 }
 
 // The detail view is one container's items, and item-level bulk is out of scope:
-// tab there is a key that does nothing at all (ADR-0215 consequences).
+// tab there is a key that does nothing at all (ADR-0246 consequences).
 func TestWorkSelectionTabIsInertInTheDetailView(t *testing.T) {
 	m := selDashboard(selRows("set-a", "set-b"))
 	m = selPress(t, m, selKeyRune('l'))

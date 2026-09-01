@@ -235,7 +235,7 @@ func TestMapCopyMenuOffersNameAndFolder(t *testing.T) {
 	}
 }
 
-// TestMapKindVerbCapabilities is the Map's half of the grant list ADR-0215
+// TestMapKindVerbCapabilities is the Map's half of the grant list ADR-0246
 // decision 5 asks to be reviewable: every verb the kind owns, with the one bit
 // that says whether a Selection may run it. The four frontier verbs and assist
 // each resolve a session per Map and hand the operator to a pane, so none of
