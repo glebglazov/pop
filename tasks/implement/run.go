@@ -38,6 +38,9 @@ type WholeSetOptions struct {
 	// Convention for the drain's refine phase and optional implement-prompt
 	// inlining (ADR-0246); forwarded verbatim to the task-set executor.
 	ImplementationConvention tasks.ImplementationConvention
+	// DocumentOverlay resolves the `refine` Overlay for the drain's refine
+	// phase (ADR-0247); forwarded verbatim to the task-set executor.
+	DocumentOverlay tasks.DocumentOverlay
 	// VerificationConvention resolves the repository's `verification` Convention
 	// for the drain's verify phase (ADR-0227); forwarded verbatim to the task-set
 	// executor, which hands it to the Verifier as its mandate.
@@ -98,6 +101,7 @@ func RunWholeSetWith(d *Deps, opts WholeSetOptions) (*tasks.RunTaskSetResult, er
 		VerifyAgents:           opts.VerifyAgents,
 		VerifyEffort:           opts.VerifyEffort,
 		ImplementationConvention:       opts.ImplementationConvention,
+		DocumentOverlay:                opts.DocumentOverlay,
 		VerificationConvention: opts.VerificationConvention,
 		Yes:                    opts.Yes,
 		Wait:                   opts.Wait,

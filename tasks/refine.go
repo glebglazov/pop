@@ -40,6 +40,12 @@ var refineReport = passReport{
 // mean the same thing here — the prompt carries no convention block.
 type ImplementationConvention func(cwd string) (string, error)
 
+// DocumentOverlay resolves the Overlay ranks for a named document in this
+// repository — keyed by name rather than by Convention kind, so `refine` can
+// carry one after it left the kind set (ADR-0247). A nil seam, an error, or an
+// empty answer all mean the same thing: the prompt carries no Overlay block.
+type DocumentOverlay func(cwd string) (string, error)
+
 // RefineOptions configures a `pop tasks refine <set>` run.
 type RefineOptions struct {
 	ResolveInput ResolveInput
@@ -61,6 +67,8 @@ type RefineOptions struct {
 	Show bool
 	// Convention resolves the `implementation` convention for the checkout.
 	Convention ImplementationConvention
+	// Overlay resolves the `refine` Overlay for the checkout (ADR-0247).
+	Overlay DocumentOverlay
 	// Wait is the `--wait` / `--no-wait` tri-state for admission to the checkout
 	// (ADR-0239). The unset default waits at a terminal and refuses elsewhere.
 	Wait AdmissionWaitChoice
@@ -99,6 +107,7 @@ type refineCoreOptions struct {
 	Output     io.Writer
 	Show       bool
 	Convention ImplementationConvention
+	Overlay    DocumentOverlay
 	// runRefiner returns the Refiner's document and the agent that wrote it.
 	runRefiner func(prompt string) (string, string, error)
 	probeMemo  *agentAvailabilityProbeMemo
@@ -148,6 +157,7 @@ func RefineTaskSetWith(d *Deps, pd *project.Deps, loadConfig func(string) (*conf
 		Output:      opts.Output,
 		Show:        opts.Show,
 		Convention:  opts.Convention,
+		Overlay:     opts.Overlay,
 		admission:   opts.Wait.Policy(opts.ConfirmIn),
 	})
 }
@@ -184,11 +194,12 @@ func refineResolvedSet(d *Deps, cfg *config.Config, opts refineCoreOptions) (*Re
 	}
 	previous, hasPrevious := refineReport.latestDocument(d, m.Dir)
 	convention := resolveImplementationConvention(opts)
+	overlay := resolveRefineOverlay(opts)
 	// The work SHA is read before the Refiner runs: it is the commit the report
 	// describes, and the Refiner that moved it would be doing something a refine
 	// pass must not do.
 	workSHA := verifyWorkSHA(d, opts.RuntimePath)
-	body, agent, err := runRefiner(d, cfg, opts, m, workSHA, work, convention, previous, hasPrevious)
+	body, agent, err := runRefiner(d, cfg, opts, m, workSHA, work, convention, overlay, previous, hasPrevious)
 	if err != nil {
 		return nil, err
 	}
@@ -278,10 +289,24 @@ func resolveImplementationConvention(opts refineCoreOptions) string {
 	return strings.TrimSpace(prose)
 }
 
+// resolveRefineOverlay asks the seam for the `refine` Overlay — constraints
+// appended to pop's own procedure (ADR-0247). Best-effort like the convention
+// seam: nothing wired or nothing on disk means the prompt carries no block.
+func resolveRefineOverlay(opts refineCoreOptions) string {
+	if opts.Overlay == nil {
+		return ""
+	}
+	prose, err := opts.Overlay(opts.RuntimePath)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(prose)
+}
+
 // runRefiner builds the prompt and invokes the Refiner, returning the document
 // and the agent that wrote it.
-func runRefiner(d *Deps, cfg *config.Config, opts refineCoreOptions, m *Manifest, workSHA string, work workDiffView, convention string, previous passDocument, hasPrevious bool) (string, string, error) {
-	text := buildRefinerPrompt(d, m, work, convention, previous, hasPrevious)
+func runRefiner(d *Deps, cfg *config.Config, opts refineCoreOptions, m *Manifest, workSHA string, work workDiffView, convention, overlay string, previous passDocument, hasPrevious bool) (string, string, error) {
+	text := buildRefinerPrompt(d, m, work, convention, overlay, previous, hasPrevious)
 	run := opts.runRefiner
 	if run == nil {
 		sel, err := resolveRefiner(opts.Agents, opts.Effort, m, cfg)
@@ -486,7 +511,7 @@ func printRefineWritten(w io.Writer, setID, path, commitSHA string, superseded b
 // is the deliberate divergence from how the Verifier is prompted: naming,
 // structure and idiom cannot be judged from a file-name-and-linecount table
 // (ADR-0214).
-func buildRefinerPrompt(d *Deps, m *Manifest, work workDiffView, convention string, previous passDocument, hasPrevious bool) string {
+func buildRefinerPrompt(d *Deps, m *Manifest, work workDiffView, convention, overlay string, previous passDocument, hasPrevious bool) string {
 	view := refinerPromptView{
 		TaskSet:   m.Stem,
 		WorkRange: work.Range,
@@ -496,6 +521,10 @@ func buildRefinerPrompt(d *Deps, m *Manifest, work workDiffView, convention stri
 	if convention != "" {
 		view.ConventionRecorded = true
 		view.Convention = convention
+	}
+	if overlay != "" {
+		view.OverlayRecorded = true
+		view.Overlay = overlay
 	}
 	// The set's recorded Commit convention is what the Refiner renders its own
 	// commit's subject under. A set without one is asked for no subject at all,
@@ -523,6 +552,8 @@ type refinerPromptView struct {
 	TaskSet            string
 	ConventionRecorded bool
 	Convention         string
+	OverlayRecorded    bool
+	Overlay            string
 	PreviousRecorded   bool
 	Previous           string
 	SpecRecorded       bool

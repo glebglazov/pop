@@ -104,9 +104,14 @@ func (f *conventionFixture) get(t *testing.T, dir string, args ...string) (strin
 	return out.String(), err
 }
 
+func (f *conventionFixture) repoOverlay(t *testing.T, kind, body string) string {
+	t.Helper()
+	return f.write(t, filepath.Join(f.repo, "docs", "agents", kind+".overlay.md"), body)
+}
+
 // TestConventionsGetResolvesToOneAnswerPlusTheOverlay is the whole point of the
 // verb: one rank answers, the ranks it stood down are nowhere in the output, and
-// the human's overlay rides along with whichever won.
+// the Overlay ranks ride along with whichever won.
 func TestConventionsGetResolvesToOneAnswerPlusTheOverlay(t *testing.T) {
 	f := newConventionFixture(t)
 
@@ -114,6 +119,7 @@ func TestConventionsGetResolvesToOneAnswerPlusTheOverlay(t *testing.T) {
 	globalPath := f.globalDoc(t, "commits", "MY-GLOBAL-DOC: conventional commits, lowercase subject.")
 	repoPath := f.repoDoc(t, "commits", "TEAM-DOC: the type set is feat, fix, chore, docs.")
 	overlayPath := f.overlay(t, "commits", "MY-OVERLAY: never mention the agent in the body.")
+	repoOverlayPath := f.repoOverlay(t, "commits", "TEAM-OVERLAY: never force-push the trunk.")
 
 	out, err := f.get(t, f.repo, "commits")
 	if err != nil {
@@ -131,19 +137,23 @@ func TestConventionsGetResolvesToOneAnswerPlusTheOverlay(t *testing.T) {
 			t.Errorf("a rank the answer stood down is still rendered (%q):\n%s", stoodDown, out)
 		}
 	}
-	// The overlay appends rather than competing, so it is there beside the winner.
-	if !strings.Contains(out, "MY-OVERLAY") {
-		t.Errorf("the overlay was not appended to the answer:\n%s", out)
+	// Both Overlay ranks append rather than competing, user before team.
+	if !strings.Contains(out, "MY-OVERLAY") || !strings.Contains(out, "TEAM-OVERLAY") {
+		t.Errorf("both overlays must be appended to the answer:\n%s", out)
 	}
 	if strings.Index(out, "MY-PROJECT-DOC") > strings.Index(out, "MY-OVERLAY") {
 		t.Errorf("the overlay is printed before the answer it rides on:\n%s", out)
+	}
+	if strings.Index(out, "MY-OVERLAY") > strings.Index(out, "TEAM-OVERLAY") {
+		t.Errorf("the repository overlay must follow the user overlay:\n%s", out)
 	}
 
 	// Each block is labelled with both its role and the path it came from, which
 	// is what lets a reader go and edit the right one.
 	for label, path := range map[string]string{
-		"ANSWER: USER PROJECT":   projectPath,
-		"APPENDED: USER OVERLAY": overlayPath,
+		"ANSWER: USER PROJECT":         projectPath,
+		"APPENDED: USER OVERLAY":       overlayPath,
+		"APPENDED: REPOSITORY OVERLAY": repoOverlayPath,
 	} {
 		if !strings.Contains(out, label) {
 			t.Errorf("output does not carry the %s block:\n%s", label, out)
@@ -168,8 +178,8 @@ func TestConventionsGetResolvesToOneAnswerPlusTheOverlay(t *testing.T) {
 	if !strings.Contains(last, "user project") || !strings.Contains(last, projectPath) {
 		t.Errorf("provenance does not name what answered: %q", last)
 	}
-	if !strings.Contains(last, overlayPath) {
-		t.Errorf("provenance does not say the overlay is appended: %q", last)
+	if !strings.Contains(last, overlayPath) || !strings.Contains(last, repoOverlayPath) {
+		t.Errorf("provenance does not say both overlays are appended: %q", last)
 	}
 }
 

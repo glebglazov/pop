@@ -1042,6 +1042,7 @@ func runTaskRefineWith(d *tasks.Deps, w io.Writer, taskSetID string, show bool) 
 		Output:       w,
 		Show:         show,
 		Convention:   implementationConvention(d),
+		Overlay:      refineOverlay(d),
 		Wait:         admissionWaitChoice(taskRefineWait, taskRefineNoWait),
 		ConfirmIn:    os.Stdin,
 	}); err != nil {
@@ -1118,6 +1119,20 @@ func implementationConvention(d *tasks.Deps) tasks.ImplementationConvention {
 			return "", err
 		}
 		return conventions.StackProse(stack), nil
+	}
+}
+
+// refineOverlay wires the Refiner's Overlay seam to the named-document Overlay
+// reader (ADR-0247): `refine` is not a Convention kind, so the key is the
+// document name rather than a Kind. Same package-boundary reason as
+// implementationConvention.
+func refineOverlay(d *tasks.Deps) tasks.DocumentOverlay {
+	return func(cwd string) (string, error) {
+		layers, err := conventions.ResolveOverlays(&conventions.Deps{FS: d.FS, Tasks: d}, "refine", cwd)
+		if err != nil {
+			return "", err
+		}
+		return conventions.OverlayProse(layers), nil
 	}
 }
 
@@ -1401,6 +1416,7 @@ func runTaskRunTasksWith(d *tasks.Deps, stdout, stderr io.Writer, stdin io.Reade
 		VerifyAgents:           append([]string(nil), taskImplementVerifyAgents...),
 		VerifyEffort:           taskImplementVerifyEffort,
 		ImplementationConvention:       implementationConvention(d),
+		DocumentOverlay:                refineOverlay(d),
 		VerificationConvention: verificationConvention(d),
 		Yes:                    taskRunYes,
 		Wait:                   taskImplementWaitChoice(),

@@ -47,11 +47,16 @@ The shipped rank is last and is always there, so a kind nobody has answered
 still hands you rules to follow: generic ones, because pop cannot know your
 project's taste, and displaced whole the moment anybody writes their own.
 
-  user overlay   ~/.agents/docs/<kind>.overlay.md  appended to whichever answered
+  user overlay              ~/.agents/docs/<name>.overlay.md     yours, appended to whichever answered
+  repository overlay        docs/agents/<name>.overlay.md        the team's, appended to whichever answered
 
 Your project document is keyed by the repository's git remote, so every clone of
 one project reads one file; a repository with no remote is keyed by pop's own
 identity for it instead.
+
+An Overlay is keyed on a named document rather than on a Convention kind, so a
+step prompt such as ` + "`refine`" + ` can carry one too. Both Overlay ranks append;
+neither replaces.
 
 Output opens with a read-whole notice: one line saying how many lines follow and
 that every one of them binds you. Read them all — do not pipe this through

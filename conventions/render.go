@@ -36,19 +36,18 @@ func RenderStacks(w io.Writer, stacks []Stack) error {
 }
 
 // inForce renders what a reader must follow, as labelled blocks: the one rank
-// that answered, then the overlay where there is one. A rank the answer
-// displaced is not printed — the question every surface here exists to answer
-// is what is in force, and a suppressed layer is not (ADR-0223).
+// that answered, then every Overlay beneath it. A rank the answer displaced is
+// not printed — the question every surface here exists to answer is what is in
+// force, and a suppressed layer is not (ADR-0223).
 func (s Stack) inForce() string {
 	var b strings.Builder
 	answer := s.Answer()
 	fmt.Fprintf(&b, "----- ANSWER: %s (%s) -----\n%s\n\n%s\n",
 		strings.ToUpper(string(answer.Origin)), answer.Origin.Scope(),
 		answer.Path, answer.Body)
-	if overlay, ok := s.Overlay(); ok {
+	for _, overlay := range s.Overlays() {
 		fmt.Fprintln(&b)
-		fmt.Fprintf(&b, "----- APPENDED: %s (%s) -----\n%s\n\n%s\n",
-			strings.ToUpper(string(overlay.Origin)), overlay.Origin.Scope(), overlay.Path, overlay.Body)
+		appendOverlayBlock(&b, overlay)
 	}
 	return b.String()
 }
@@ -133,7 +132,10 @@ func StackProse(s Stack) string { return s.inForceProse() }
 // convention does not edit one — a convention is a document rather than a
 // value, and the two writable human ranks differ in reach, so which of them a
 // keystroke meant could not be read off the row (ADR-0226) — which is exactly
-// why the reader needs the paths spelled out here.
+// why the reader needs the paths spelled out here. The repository Overlay is
+// deliberately absent: that rank is the team's, and naming it beside the
+// human's would leave a reader unsure which rank the pane was talking about
+// (ADR-0247).
 func (s Stack) writeNote() string {
 	var b strings.Builder
 	b.WriteString("read-only here. Your own documents for this kind:\n")
@@ -193,6 +195,10 @@ func rankReach(origin Origin, kind Kind) string {
 		return fmt.Sprintf("This is appended to whichever rank answers %s, in every repository,\n"+
 			"rather than displacing one — so it rides along with the team's document\n"+
 			"instead of hiding it.", kind)
+	case OriginRepositoryOverlay:
+		return fmt.Sprintf("This is appended to whichever rank answers %s, in this repository,\n"+
+			"after your own overlay — the team's constraints riding along rather than\n"+
+			"displacing the answer.", kind)
 	}
 	return ""
 }
@@ -222,21 +228,21 @@ func nowInForce(s Stack) string {
 	if answer.Origin == OriginShipped {
 		line = fmt.Sprintf("Nobody answers %s now, so it falls through to pop's own answer for the kind.", s.Kind)
 	}
-	if overlay, ok := s.Overlay(); ok {
-		line += fmt.Sprintf(" Your overlay is appended (%s).", overlay.Path)
+	for _, overlay := range s.Overlays() {
+		line += fmt.Sprintf(" %s is appended (%s).", overlay.Origin, overlay.Path)
 	}
 	return line
 }
 
 // Provenance is the ready-made one-line disclosure a reading agent surfaces:
-// which rank answered, and whether the overlay rides on it. Pop emits it rather
+// which rank answered, and whether any Overlay rides on it. Pop emits it rather
 // than leaving each skill to phrase it, so the "which source am I using" line
 // cannot drift between the skills that ask (ADR-0211).
 func (s Stack) Provenance() string {
 	answer := s.Answer()
 	line := fmt.Sprintf("Provenance: %s resolved to %s (%s).", s.Kind, answer.Origin, answer.Path)
-	if overlay, ok := s.Overlay(); ok {
-		line += fmt.Sprintf(" Your overlay is appended (%s).", overlay.Path)
+	for _, overlay := range s.Overlays() {
+		line += fmt.Sprintf(" %s is appended (%s).", overlay.Origin, overlay.Path)
 	}
 	return line
 }

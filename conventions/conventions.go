@@ -2,13 +2,13 @@
 // this repository do X" for one Convention kind, resolved for the repository
 // the current checkout belongs to.
 //
-// A kind resolves to exactly one answer plus the human's overlay: their document
-// for this project, else their document for every repository, else the
+// A kind resolves to exactly one answer plus any Overlay: their document for
+// this project, else their document for every repository, else the
 // repository's committed one, else pop's own shipped answer, with
-// ~/.agents/docs/<kind>.overlay.md appended whenever it exists. Nothing else
-// composes (ADR-0223, ADR-0226). Pop's job here is mechanical — derive the
-// paths, read what exists, decide which one answers, and label it. It never
-// merges prose.
+// ~/.agents/docs/<name>.overlay.md and docs/agents/<name>.overlay.md appended
+// whenever they exist. Nothing else composes (ADR-0223, ADR-0226, ADR-0247).
+// Pop's job here is mechanical — derive the paths, read what exists, decide
+// which one answers, and label it. It never merges prose.
 package conventions
 
 import (

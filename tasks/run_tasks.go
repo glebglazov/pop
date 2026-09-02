@@ -73,6 +73,10 @@ type RunTaskSetOptions struct {
 	// tasks, so the caller that holds both wires it. Nil ⇒ the Refiner's prompt
 	// carries no convention block.
 	ImplementationConvention ImplementationConvention
+	// DocumentOverlay resolves the `refine` Overlay for the drain's refine phase
+	// (ADR-0247). Same seam reason as ImplementationConvention. Nil ⇒ the
+	// Refiner's prompt carries no Overlay block.
+	DocumentOverlay DocumentOverlay
 	// VerificationConvention resolves the repository's `verification` Convention
 	// for the drain's verify phase (ADR-0227): it is the Verifier's mandate, not a
 	// section of pop's prompt. Same seam reason as ImplementationConvention — the caller

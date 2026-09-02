@@ -110,6 +110,49 @@ func TestRefinerPromptNeverForbidsJudgingWhatTheCodeDoes(t *testing.T) {
 	}
 }
 
+// TestRefinerPromptCarriesTheRefineOverlay: the named-document Overlay for
+// `refine` rides in the prompt when one exists, and the section is absent when
+// none does (ADR-0247).
+func TestRefinerPromptCarriesTheRefineOverlay(t *testing.T) {
+	t.Parallel()
+	d, defPath, _ := setupRefineFixture(t, time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC))
+
+	t.Run("present", func(t *testing.T) {
+		t.Parallel()
+		var prompt string
+		opts := refineOpts(defPath, &bytes.Buffer{}, func(p string) (string, string, error) {
+			prompt = p
+			return "## Naming\n\nFine.", "claude", nil
+		})
+		opts.Convention = func(string) (string, error) { return "Hold it against the request.", nil }
+		opts.Overlay = func(cwd string) (string, error) {
+			if cwd != "/rt" {
+				t.Fatalf("overlay resolved at %q, want the runtime checkout", cwd)
+			}
+			return "----- APPENDED: USER OVERLAY (yours, appended to whichever answered) -----\n/x/refine.overlay.md\n\nNever touch the generated client.\n", nil
+		}
+		if _, err := refineResolvedSet(d, nil, opts); err != nil {
+			t.Fatalf("refineResolvedSet: %v", err)
+		}
+		if !strings.Contains(prompt, "## Overlay on this step") {
+			t.Fatalf("prompt must carry the Overlay section:\n%s", prompt)
+		}
+		if !strings.Contains(prompt, "Never touch the generated client.") {
+			t.Fatalf("prompt must carry the Overlay body:\n%s", prompt)
+		}
+	})
+
+	t.Run("absent", func(t *testing.T) {
+		t.Parallel()
+		prompt := buildRefinerPrompt(d, goldenBareManifest(),
+			workDiffView{Range: "root000..HEAD", Stat: " a.go | 1 +"},
+			"Hold it against the request.", "", passDocument{}, false)
+		if strings.Contains(prompt, "## Overlay on this step") {
+			t.Fatalf("no Overlay means no section:\n%s", prompt)
+		}
+	})
+}
+
 // TestRefinerPromptWithoutConventionKeepsTheFrame: a caller that wired no seam
 // leaves the Refiner with pop's own prompt alone rather than failing the run —
 // the standard is not pop's to invent when the seam is unwired, and the frame is
@@ -118,7 +161,7 @@ func TestRefinerPromptWithoutConventionKeepsTheFrame(t *testing.T) {
 	t.Parallel()
 	d, _, _ := setupRefineFixture(t, time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC))
 	prompt := buildRefinerPrompt(d, goldenBareManifest(),
-		workDiffView{Range: "root000..HEAD", Stat: " a.go | 1 +"}, "", passDocument{}, false)
+		workDiffView{Range: "root000..HEAD", Stat: " a.go | 1 +"}, "", "", passDocument{}, false)
 	if strings.Contains(prompt, "## This repository's implementation convention") {
 		t.Fatalf("no convention means no labelled block:\n%s", prompt)
 	}

@@ -23,10 +23,14 @@ import (
 // refusal for every rank, because every rank is read by the same reader.
 var ErrEmptyConvention = errors.New("refusing to write an empty convention body")
 
-// WritableRanks are the ranks a human may write, best first. The repository's
-// document is not among them — it is version-controlled, so it lands through a
-// diff somebody reviews — and neither is the shipped rank, which is pop's own
-// and lives in the binary.
+// WritableRanks are the ranks a human may write through the convention verbs,
+// best first. The repository's answer document is not among them — it is
+// version-controlled, so it lands through a diff somebody reviews — and neither
+// is the shipped rank, which is pop's own and lives in the binary. The
+// repository Overlay is likewise committed by hand (ADR-0247): Write still
+// accepts it so a whitespace-only body is refused at both Overlay ranks, but it
+// is not a flag on `set`/`unset`, so the Config dashboard's write note naming
+// only the human's documents stays unambiguous about which rank a pane writes.
 var WritableRanks = []Origin{OriginProject, OriginGlobal, OriginOverlay}
 
 // RankName is the one word that names a rank where a human has to choose one.
@@ -44,6 +48,8 @@ func (o Origin) RankName() string {
 		return "shipped"
 	case OriginOverlay:
 		return "overlay"
+	case OriginRepositoryOverlay:
+		return "repository-overlay"
 	}
 	return ""
 }
@@ -69,6 +75,12 @@ func ParseRank(name string, kind Kind) (Origin, error) {
 			"Pop does not write it: a document a team follows should land through a diff somebody "+
 			"reviews, not a CLI write. Edit it and commit it. To state your own answer instead, "+
 			"write one of %s", filepath.Join("docs", "agents", string(kind)+".md"), rankList())
+	case OriginRepositoryOverlay.RankName():
+		return "", fmt.Errorf("the repository overlay is %s — the team's appending constraints, "+
+			"in version control. Pop does not write it: commit the file. To append your own "+
+			"constraints instead, write --%s; the ranks you can write are %s",
+			filepath.Join("docs", "agents", string(kind)+".overlay.md"),
+			OriginOverlay.RankName(), rankList())
 	case OriginShipped.RankName():
 		return "", fmt.Errorf("the shipped rank is pop's own answer, built into the binary and not writable. "+
 			"Run `pop conventions default %s` to read it, then write what you keep at one of %s", kind, rankList())
@@ -89,8 +101,9 @@ func rankList() string {
 }
 
 // WritablePath is where a write at origin lands. Each rank derives its own path
-// — the project's from the git remote, the human's two from their home directory
-// — and this is the one place that says which derivation belongs to which rank.
+// — the project's from the git remote, the human's two from their home directory,
+// the repository Overlay from the checkout — and this is the one place that says
+// which derivation belongs to which rank.
 func WritablePath(d *Deps, origin Origin, kind Kind, cwd string) (string, error) {
 	switch origin {
 	case OriginProject:
@@ -98,7 +111,9 @@ func WritablePath(d *Deps, origin Origin, kind Kind, cwd string) (string, error)
 	case OriginGlobal:
 		return GlobalPath(d, kind)
 	case OriginOverlay:
-		return OverlayPath(d, kind)
+		return OverlayPath(d, string(kind))
+	case OriginRepositoryOverlay:
+		return RepositoryOverlayPath(d, string(kind), cwd)
 	}
 	return "", fmt.Errorf("the %s rank is not written by pop; the ranks you can write are %s", origin, rankList())
 }

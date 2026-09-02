@@ -68,9 +68,25 @@ func TestWriteLandsAtTheRankItWasGiven(t *testing.T) {
 	}
 
 	// The overlay reader opens exactly what the writer wrote.
-	layer, err := Overlay(d, KindCommits)
+	layer, err := Overlay(d, string(KindCommits))
 	if err != nil || !layer.Present || layer.Body != "Second reading." {
 		t.Fatalf("Overlay() = %+v, %v, want the written prose", layer, err)
+	}
+}
+
+// A whitespace-only Overlay body is refused at both ranks — the human's and the
+// team's — before any path is derived. Accepting one would leave a file that
+// Resolve reads as an absent layer (ADR-0247).
+func TestWriteRefusesAnEmptyOverlayBodyAtBothRanks(t *testing.T) {
+	d, home := writerDeps(t)
+
+	for _, origin := range []Origin{OriginOverlay, OriginRepositoryOverlay} {
+		if _, _, err := Write(d, origin, KindCommits, home, "  \n\t\n"); !errors.Is(err, ErrEmptyConvention) {
+			t.Errorf("Write(%s) = %v, want ErrEmptyConvention", origin, err)
+		}
+	}
+	if entries, err := os.ReadDir(filepath.Join(home, ".agents", "docs")); err == nil && len(entries) > 0 {
+		t.Errorf("a refused overlay body still produced files: %v", entries)
 	}
 }
 
@@ -128,6 +144,7 @@ func TestParseRankRefusals(t *testing.T) {
 	}{
 		{"nothing named", "", []string{"name the rank"}},
 		{"the team's document", "repository", []string{filepath.Join("docs", "agents", "commits.md"), "version control", "diff"}},
+		{"the team's overlay", "repository-overlay", []string{filepath.Join("docs", "agents", "commits.overlay.md"), "version control", "commit the file"}},
 		{"pop's own answer", "shipped", []string{"built into the binary", "conventions default commits"}},
 		{"not a rank at all", "memory", []string{`"memory"`, "no rank"}},
 	} {

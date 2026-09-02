@@ -140,7 +140,8 @@ func TestResolutionPicksOneAnswer(t *testing.T) {
 			prose := StackProse(s)
 			for _, l := range tt.layers {
 				shown := strings.Contains(prose, l.Body)
-				inForce := (tt.answer != "" && l.Body == tt.answer) || l.Origin == OriginOverlay
+				inForce := (tt.answer != "" && l.Body == tt.answer) ||
+					l.Origin == OriginOverlay || l.Origin == OriginRepositoryOverlay
 				if shown != inForce {
 					t.Errorf("layer %s shown = %v, want %v:\n%s", l.Origin, shown, inForce, prose)
 				}
@@ -311,7 +312,7 @@ func TestStackPreviewOfAnUnwrittenKindShowsTheShippedRank(t *testing.T) {
 // render an empty parenthesis, and "defaults" is retired as a rank word
 // because it named two ranks at opposite ends of the stack (ADR-0226).
 func TestEveryRankStatesItsAuthorAndScope(t *testing.T) {
-	for _, origin := range append(append([]Origin{}, writtenRanks...), OriginShipped, OriginOverlay) {
+	for _, origin := range append(append([]Origin{}, writtenRanks...), OriginShipped, OriginOverlay, OriginRepositoryOverlay) {
 		scope := origin.Scope()
 		if scope == "" {
 			t.Errorf("rank %q states no scope", origin)

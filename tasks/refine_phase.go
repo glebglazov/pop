@@ -88,6 +88,7 @@ func (r *implementRun) refinePhase(currentRefresh *RefreshResult, row *Row) (ref
 		Timeout:     r.timeout,
 		Output:      r.out,
 		Convention:  r.opts.ImplementationConvention,
+		Overlay:     r.opts.DocumentOverlay,
 		runRefiner:  r.opts.refineRunner,
 		probeMemo:   r.agentProbeMemo,
 		// The drain is already holding this checkout for this set, so the refine

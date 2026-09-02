@@ -33,10 +33,15 @@ const (
 	// makes a kind always resolve to rules somebody can follow. Any written rank
 	// above it displaces it whole (ADR-0226 decision 1).
 	OriginShipped Origin = "shipped"
-	// OriginOverlay is ~/.agents/docs/<kind>.overlay.md — the human's
-	// constraints, which ride along with whichever rank answered rather than
-	// competing with it. It is the one layer that appends (ADR-0223 decision 3).
+	// OriginOverlay is ~/.agents/docs/<name>.overlay.md — the human's
+	// constraints, which ride along with whichever document answered rather
+	// than competing with it. It is one of the two Overlay ranks that append
+	// (ADR-0223 decision 3, generalised by ADR-0247 decision 3).
 	OriginOverlay Origin = "user overlay"
+	// OriginRepositoryOverlay is docs/agents/<name>.overlay.md — the team's
+	// constraints, committed beside their other documents, appended after the
+	// human's overlay. Both append; neither replaces (ADR-0247 decision 3).
+	OriginRepositoryOverlay Origin = "repository overlay"
 )
 
 // Scope is the one-phrase reminder of how far a layer reaches, printed beside
@@ -53,6 +58,8 @@ func (o Origin) Scope() string {
 		return "pop's own, displaced by any above"
 	case OriginOverlay:
 		return "yours, appended to whichever answered"
+	case OriginRepositoryOverlay:
+		return "the team's, appended to whichever answered"
 	}
 	return ""
 }
@@ -110,9 +117,22 @@ func (s Stack) Answer() Layer {
 	return shippedLayer(s.Kind)
 }
 
-// Overlay returns the human's overlay when it holds something. It is appended
-// to whichever rank answered, so it is never in competition with one.
+// Overlay returns the human's Overlay when it holds something. The Config
+// dashboard's override marker reads this and only this — the human's own
+// statement — so a repository overlay never looks like a personal override.
 func (s Stack) Overlay() (Layer, bool) { return s.speaks(OriginOverlay) }
+
+// Overlays returns every present Overlay rank in append order: the human's,
+// then the team's. Both append beneath the answer; neither replaces.
+func (s Stack) Overlays() []Layer {
+	out := make([]Layer, 0, len(overlayAppendOrder))
+	for _, origin := range overlayAppendOrder {
+		if l, ok := s.speaks(origin); ok {
+			out = append(out, l)
+		}
+	}
+	return out
+}
 
 // Contested reports that a rank below the answer also holds something, so a
 // document somebody wrote is quietly losing. Under winner-take-all that is a real
@@ -190,14 +210,17 @@ func GlobalPath(d *Deps, kind Kind) (string, error) {
 
 // layers derives kind's ranks in resolution order, reading no file. The three
 // written ranks come first, best first, then pop's own answer for when none of
-// them does, and the overlay last because it is appended rather than ranked.
+// them does, and the Overlay ranks last because they are appended rather than
+// ranked — the human's, then the team's (ADR-0247).
 func (r stackRoots) layers(kind Kind) []Layer {
+	name := string(kind)
 	return []Layer{
 		{Origin: OriginProject, Path: projectPathIn(r.projectDocs, kind)},
 		{Origin: OriginGlobal, Path: globalPathIn(r.agentsDocs, kind)},
-		{Origin: OriginRepository, Path: filepath.Join(r.topLevel, "docs", "agents", string(kind)+".md")},
+		{Origin: OriginRepository, Path: filepath.Join(r.topLevel, "docs", "agents", name+".md")},
 		shippedLayer(kind),
-		{Origin: OriginOverlay, Path: overlayPathIn(r.agentsDocs, kind)},
+		{Origin: OriginOverlay, Path: overlayPathIn(r.agentsDocs, name)},
+		{Origin: OriginRepositoryOverlay, Path: repositoryOverlayPathIn(r.topLevel, name)},
 	}
 }
 

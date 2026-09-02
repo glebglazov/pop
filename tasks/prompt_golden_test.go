@@ -304,14 +304,14 @@ func TestRefinerPromptGoldens(t *testing.T) {
 	prompttest.Assert(t, goldenPath("refiner.full.md"),
 		buildRefinerPrompt(goldenFixtureDeps(t), goldenFullManifest(),
 			workDiffView{Range: "base000..HEAD", Stat: " tasks/prompt.go | 12 ++++----\n 1 file changed"},
-			"CONVENTION refine\n\nSmall functions; table-driven tests.",
+			"CONVENTION refine\n\nSmall functions; table-driven tests.", "",
 			passDocument{Path: filepath.Join(goldenSetDir, "refine", "refine-20260501T090000Z.md"),
 				Body: "## Naming\n\n`buildThing` builds nothing."}, true))
 
 	// Absent side: no convention derived, no report before this one, no spec.
 	prompttest.Assert(t, goldenPath("refiner.bare.md"),
 		buildRefinerPrompt(bareDeps(), goldenBareManifest(),
-			workDiffView{Range: "root000..HEAD", Stat: " a.go | 1 +"}, "", passDocument{}, false))
+			workDiffView{Range: "root000..HEAD", Stat: " a.go | 1 +"}, "", "", passDocument{}, false))
 }
 
 func TestFoldConflictPromptGoldens(t *testing.T) {

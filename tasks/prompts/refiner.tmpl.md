@@ -65,6 +65,13 @@ report the rest.
 
 {{.Convention}}
 
+{{end}}{{if .OverlayRecorded}}## Overlay on this step
+
+Constraints appended to the procedure above. Both ranks append; neither
+replaces. Honour them the way you honour the standard.
+
+{{.Overlay}}
+
 {{end}}{{if .CommitConventionRecorded}}## This repository's commit convention
 {{.CommitConvention}}
 

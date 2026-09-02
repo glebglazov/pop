@@ -174,10 +174,11 @@ with its origin, and your overlay appended beneath it.
 | `esc` | Close |
 | `C-h` | Help |
 
-For a convention, the layer that is yours is the overlay —
-`~/.agents/docs/<kind>.overlay.md` — which is appended to whichever rank
-answered rather than replacing it, so `enter` opens your editor on it as
-Markdown and `C-y` says copying the answer down would state it twice.
+For a convention, the pane is read-only: it previews what is in force and names
+both of your writable documents (`--project` and `--overlay` at
+`~/.agents/docs/<kind>.overlay.md`), so there is no ambiguity about which Overlay
+rank a write would land in. The repository Overlay
+(`docs/agents/<name>.overlay.md`) is the team's and is committed by hand.
 
 For a config key, `enter` opens your editor on the whole `key = value` line in force today.
 Handing back an empty buffer cancels — `C-x` is how an override is removed —
