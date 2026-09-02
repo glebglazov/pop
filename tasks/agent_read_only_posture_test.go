@@ -124,16 +124,25 @@ func TestNoRoleSpawnsUnderTheReadOnlyPosture(t *testing.T) {
 
 // The licence replaces the prohibition: the frame states what the pass may
 // change instead of forbidding every change, because an agent told what it may
-// do fixes better than one that discovers a tool is missing.
+// do fixes better than one that discovers a tool is missing. ADR-0248 widens
+// safe-and-local to reversible.
 func TestRefinerPromptStatesItsFixLicence(t *testing.T) {
 	prompt := buildRefinerPrompt(bareDeps(), goldenBareManifest(),
 		workDiffView{Range: "root000..HEAD", Stat: " a.go | 1 +"}, "", "", passDocument{}, false)
 	if strings.Contains(prompt, "Change no files") {
 		t.Fatal("the Refiner prompt no longer forbids changing files")
 	}
+	if strings.Contains(prompt, "safe and local") {
+		t.Fatal("the Refiner prompt no longer frames the licence as safe-and-local")
+	}
+	if strings.Contains(prompt, "anything structural") {
+		t.Fatal("the Refiner prompt no longer treats anything structural as report-only")
+	}
 	for _, want := range []string{
-		"fix in place what the standard below names, where the fix is safe and local",
+		"where the fix is reversible",
+		"can this be undone by inspection, and can I see its whole effect?",
 		"Fix nothing the standard does not name.",
+		"pop conventions get verification",
 		"Do not commit",
 	} {
 		if !strings.Contains(prompt, want) {

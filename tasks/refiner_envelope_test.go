@@ -11,17 +11,22 @@ import (
 // rank of the `implementation` convention may displace (ADR-0246/0247): the
 // Role preamble — including the fix licence and its limit, which is what makes
 // Refine a writing step (ADR-0240) — and the output expectation behind it,
-// whose no-verdict rule and fixed/left split are the report's whole shape.
+// whose no-verdict rule and Fixed / Left / Revealed split are the report's
+// whole shape (ADR-0248).
 var refinerFrameHalves = []string{
 	"You are an independent Refiner",
 	"Reach no verdict.",
 	"## What you may fix",
-	"## What a pass may fix",
+	"where the fix is reversible",
 	"Fix nothing the standard does not name.",
+	"## Reading and editing",
+	"## Created and revealed",
+	"## Gates and tests",
 	"## Respond with the report and nothing else",
 	"starting at a `## ` heading",
 	"**Fixed** —",
-	"**Left** —",
+	"**Left in this changeset** —",
+	"**Revealed by this changeset** —",
 }
 
 // TestRefinerPromptCarriesTheRepositorysImplementationConvention: the resolved
