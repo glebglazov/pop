@@ -76,10 +76,19 @@ replaces. Honour them the way you honour the standard.
 {{.CommitConvention}}
 
 {{end}}## Respond with the report and nothing else
-{{if .CommitConventionRecorded}}Start with one line, before the report:
+Start with one line, before the report:
+REFINE-OUTCOME: refined | gate-blocked | abandoned
+
+- **refined** — the scoped gate was green when you finished (including a pass that fixed nothing because nothing needed fixing). pop commits your edits when there are any, and records that this composition has been refined.
+- **gate-blocked** — the scoped gate was already red before you began, so you fixed nothing. pop commits nothing and records no episode.
+- **abandoned** — the gate went red under your own edits and you could not leave it green. pop discards those edits, commits nothing, and records no episode.
+
+Write exactly one of those three values. The line is an instruction to pop, not a finding — keep it out of the report body.
+{{if .CommitConventionRecorded}}
+When the outcome is refined and you fixed something, also write, still before the report:
 COMMIT-SUBJECT: <the subject pop commits your fixes under>
 
-It is the final, literal subject line, written in the convention above — a real message describing what you fixed, not a template or a placeholder. Write it on one line with no surrounding quotes or backticks, and write it only when you fixed something; a pass that fixed nothing is not committed. Then leave a blank line and write the report.
+It is the final, literal subject line, written in the convention above — a real message describing what you fixed, not a template or a placeholder. Write it on one line with no surrounding quotes or backticks. A pass that fixed nothing is not committed and needs no subject. Then leave a blank line and write the report.
 
 {{end}}Write the report as Markdown, starting at a `## ` heading. No preamble, no sign-off, no verdict line. It has two parts, in this order:
 

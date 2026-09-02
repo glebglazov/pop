@@ -31,10 +31,11 @@ var verifyReport = passReport{
 
 // splitVerifierReply peels the machine-read verdict line off the front of the
 // Verifier's reply and returns the prose that is left as the report body, the
-// way splitRefinerReply peels the Refiner's `COMMIT-SUBJECT:` line off its
-// document. The verdict line is pop's channel — the enum a drain gates on — and
-// leaving it at the head of a document a human reads invites that human to take
-// the report for the verdict, which the badge and the cache own.
+// way splitRefinerReply peels the Refiner's `REFINE-OUTCOME:` and
+// `COMMIT-SUBJECT:` lines off its document. The verdict line is pop's channel —
+// the enum a drain gates on — and leaving it at the head of a document a human
+// reads invites that human to take the report for the verdict, which the badge
+// and the cache own.
 //
 // The rule for what counts as the verdict line is ParseVerdict's own, so the
 // document and the stored verdict can never disagree about which line was

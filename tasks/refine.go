@@ -199,28 +199,38 @@ func refineResolvedSet(d *Deps, cfg *config.Config, opts refineCoreOptions) (*Re
 	// describes, and the Refiner that moved it would be doing something a refine
 	// pass must not do.
 	workSHA := verifyWorkSHA(d, opts.RuntimePath)
+	// Capture before the Refiner so an abandoned pass can discard only what it
+	// wrote, leaving any pre-existing dirty state untouched (ADR-0248).
+	snap, err := captureRefineTree(d, opts.RuntimePath)
+	if err != nil {
+		return nil, err
+	}
 	body, agent, err := runRefiner(d, cfg, opts, m, workSHA, work, convention, overlay, previous, hasPrevious)
 	if err != nil {
 		return nil, err
 	}
-	// The reply carries two things: the subject pop commits the pass under, and
-	// the report itself. Splitting here keeps the subject out of the document a
-	// human reads — it is an instruction to pop, not a finding.
-	rendered, report := splitRefinerReply(body)
+	// The reply carries three things: the pass outcome, the subject pop commits
+	// under when the outcome is refined, and the report itself. Splitting here
+	// keeps the channel lines out of the document a human reads.
+	rendered, outcome, report := splitRefinerReply(body)
 	at := d.Now().UTC()
 	doc := refineReport.renderDocument(at, opts.SetID, workSHA, work.Range, agent, report)
 	path, err := refineReport.writeDocument(d, m.Dir, at, doc)
 	if err != nil {
 		return nil, err
 	}
-	// The report is written before the commit so a git failure cannot cost the
-	// only account of what the pass did; the fixes themselves are still in the
-	// tree for a human to commit by hand.
-	commitSHA, err := commitRefinePass(d, cfg, opts.RuntimePath, opts.SetID, refineCommitSubject(m, opts.SetID, rendered))
+	// The report is written before the commit/discard so a git failure cannot
+	// cost the only account of what the pass did.
+	commitSHA, err := commitRefinePass(d, cfg, opts.RuntimePath, opts.SetID, refineCommitSubject(m, opts.SetID, rendered), outcome, snap)
 	if err != nil {
 		return nil, err
 	}
-	recordRefineEpisode(d, opts.Output, refineEpisodeRecord(opts.Repo, opts.SetID, workSHA, refineComposition(m), path, at))
+	// gate-blocked and abandoned record no episode: an episode means the
+	// composition has been refined, and a pass that fixed nothing (or whose
+	// edits were discarded) has not (ADR-0248 decision 15).
+	if outcome == refineOutcomeRefined {
+		recordRefineEpisode(d, opts.Output, refineEpisodeRecord(opts.Repo, opts.SetID, workSHA, refineComposition(m), path, at))
+	}
 	printRefineWritten(opts.Output, opts.SetID, path, commitSHA, hasPrevious)
 	return &RefineResult{SetID: opts.SetID, WorkSHA: workSHA, Path: path, CommitSHA: commitSHA, Body: doc}, nil
 }

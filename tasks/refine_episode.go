@@ -66,9 +66,10 @@ func refineEpisodeArmed(d *Deps, repo, setID, composition string) bool {
 }
 
 // recordRefineEpisode disarms automatic Refine for the composition just judged.
-// Every refine pass records one — the drain's and the human's
+// Only a refined outcome records one — the drain's and the human's
 // `pop tasks refine` alike — because the rule is about the work having been
-// refined, not about who asked for it.
+// refined, not about who asked for it. gate-blocked and abandoned passes leave
+// the episode armed so the next quiescence retries (ADR-0248 decision 15).
 //
 // A failure to record is reported and otherwise ignored: the report is already
 // written, and the only consequence is that the next quiescence refines

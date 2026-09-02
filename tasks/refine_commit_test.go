@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -94,7 +95,7 @@ func TestRefinePassCommitsWhatTheRefinerFixed(t *testing.T) {
 	var out bytes.Buffer
 	res, err := refineResolvedSet(env.deps(), nil, refinePassOpts(env, &out,
 		fixingRefiner(t, env.root, "refined.md",
-			"COMMIT-SUBJECT: "+refinedSubject+"\n\n## Fixed\n\n- refined.md: named it properly.\n\n## Left\n\nNothing.")))
+			"REFINE-OUTCOME: refined\nCOMMIT-SUBJECT: "+refinedSubject+"\n\n## Fixed\n\n- refined.md: named it properly.\n\n## Left\n\nNothing.")))
 	if err != nil {
 		t.Fatalf("refineResolvedSet: %v", err)
 	}
@@ -119,6 +120,9 @@ func TestRefinePassCommitsWhatTheRefinerFixed(t *testing.T) {
 	// document a human reads.
 	if strings.Contains(res.Body, "COMMIT-SUBJECT") {
 		t.Fatalf("the report carries the subject line:\n%s", res.Body)
+	}
+	if strings.Contains(res.Body, "REFINE-OUTCOME") {
+		t.Fatalf("the report carries the outcome line:\n%s", res.Body)
 	}
 	if !strings.Contains(res.Body, "## Fixed") {
 		t.Fatalf("the report lost its body:\n%s", res.Body)
@@ -248,24 +252,158 @@ func TestDrainCommitsTheRefinePass(t *testing.T) {
 	}
 }
 
-// TestSplitRefinerReply pins what pop reads as the pass's subject and what it
-// leaves in the report. Everything not read as a subject falls back to pop's
-// default format rather than failing the pass.
+// TestSplitRefinerReply pins what pop reads as the pass's subject and outcome,
+// and what it leaves in the report. Missing or unrecognised outcomes fall
+// through to refined with the report kept whole; a recognised outcome line is
+// always lifted so it never lands in the document a human reads.
 func TestSplitRefinerReply(t *testing.T) {
 	t.Parallel()
 	report := "## Fixed\n\n- a.go: renamed it."
-	for _, tc := range []struct{ name, raw, subject, body string }{
-		{"first line", "COMMIT-SUBJECT: " + refinedSubject + "\n\n" + report, refinedSubject, report},
-		{"backtick wrapped", "COMMIT-SUBJECT: `" + refinedSubject + "`\n" + report, refinedSubject, report},
-		{"bolded label", "**COMMIT SUBJECT:** " + refinedSubject + "\n\n" + report, refinedSubject, report},
-		{"after a preamble", "Here is the report.\nCOMMIT-SUBJECT: " + refinedSubject + "\n\n" + report, refinedSubject, "Here is the report.\n\n" + report},
-		{"absent", report, "", report},
-		{"inside the report body", "## Fixed\n\nCOMMIT-SUBJECT: " + refinedSubject, "", "## Fixed\n\nCOMMIT-SUBJECT: " + refinedSubject},
-		{"the whole reply", "COMMIT-SUBJECT: " + refinedSubject, "", "COMMIT-SUBJECT: " + refinedSubject},
+	for _, tc := range []struct {
+		name, raw, subject, outcome, body string
+	}{
+		{"first line", "COMMIT-SUBJECT: " + refinedSubject + "\n\n" + report, refinedSubject, refineOutcomeRefined, report},
+		{"backtick wrapped", "COMMIT-SUBJECT: `" + refinedSubject + "`\n" + report, refinedSubject, refineOutcomeRefined, report},
+		{"bolded label", "**COMMIT SUBJECT:** " + refinedSubject + "\n\n" + report, refinedSubject, refineOutcomeRefined, report},
+		{"after a preamble", "Here is the report.\nCOMMIT-SUBJECT: " + refinedSubject + "\n\n" + report, refinedSubject, refineOutcomeRefined, "Here is the report.\n\n" + report},
+		{"absent", report, "", refineOutcomeRefined, report},
+		{"inside the report body", "## Fixed\n\nCOMMIT-SUBJECT: " + refinedSubject, "", refineOutcomeRefined, "## Fixed\n\nCOMMIT-SUBJECT: " + refinedSubject},
+		{"the whole reply", "COMMIT-SUBJECT: " + refinedSubject, "", refineOutcomeRefined, "COMMIT-SUBJECT: " + refinedSubject},
+		{"outcome refined", "REFINE-OUTCOME: refined\n\n" + report, "", refineOutcomeRefined, report},
+		{"outcome gate-blocked", "REFINE-OUTCOME: gate-blocked\n\n" + report, "", refineOutcomeGateBlocked, report},
+		{"outcome abandoned", "REFINE-OUTCOME: abandoned\n\n" + report, "", refineOutcomeAbandoned, report},
+		{"outcome and subject", "REFINE-OUTCOME: refined\nCOMMIT-SUBJECT: " + refinedSubject + "\n\n" + report, refinedSubject, refineOutcomeRefined, report},
+		{"bolded outcome", "**REFINE-OUTCOME:** abandoned\n\n" + report, "", refineOutcomeAbandoned, report},
+		{"unrecognised outcome kept", "REFINE-OUTCOME: maybe\n\n" + report, "", refineOutcomeRefined, "REFINE-OUTCOME: maybe\n\n" + report},
+		{"outcome inside report body", "## Fixed\n\nREFINE-OUTCOME: abandoned", "", refineOutcomeRefined, "## Fixed\n\nREFINE-OUTCOME: abandoned"},
+		{"outcome-only reply", "REFINE-OUTCOME: gate-blocked", "", refineOutcomeGateBlocked, ""},
 	} {
-		subject, body := splitRefinerReply(tc.raw)
-		if subject != tc.subject || body != tc.body {
-			t.Fatalf("%s: subject = %q / body = %q, want %q / %q", tc.name, subject, body, tc.subject, tc.body)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			subject, outcome, body := splitRefinerReply(tc.raw)
+			if subject != tc.subject || outcome != tc.outcome || body != tc.body {
+				t.Fatalf("subject = %q / outcome = %q / body = %q, want %q / %q / %q",
+					subject, outcome, body, tc.subject, tc.outcome, tc.body)
+			}
+		})
+	}
+}
+
+func readRefineEpisode(t *testing.T, d *Deps, repo, setID string) *store.RefineEpisode {
+	t.Helper()
+	s, err := openDrainStore(d)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	episode, err := s.GetRefineEpisode(repo, setID)
+	if err != nil {
+		t.Fatalf("GetRefineEpisode: %v", err)
+	}
+	return episode
+}
+
+// TestRefineGateBlockedCommitsNothingAndRecordsNoEpisode: a red gate on entry
+// means the pass fixed nothing, so pop writes the report alone — no commit, no
+// episode — and leaves the tree where it found it (ADR-0248 decision 15).
+func TestRefineGateBlockedCommitsNothingAndRecordsNoEpisode(t *testing.T) {
+	t.Parallel()
+	env := setupRefineCommitFixture(t, houseConvention)
+	d := env.deps()
+	repo, _, before := runtimeHead(t, d, env.root)
+
+	var out bytes.Buffer
+	opts := refinePassOpts(env, &out, func(string) (string, string, error) {
+		return "REFINE-OUTCOME: gate-blocked\n\n## Fixed\n\nNothing — the scoped gate was already red.\n\n## Left\n\nThe gate.", "claude", nil
+	})
+	opts.Repo = repo
+	res, err := refineResolvedSet(d, nil, opts)
+	if err != nil {
+		t.Fatalf("refineResolvedSet: %v", err)
+	}
+	if res.CommitSHA != "" {
+		t.Fatalf("result commit = %q, want none", res.CommitSHA)
+	}
+	if made := commitsSince(t, env.root, before); len(made) != 0 {
+		t.Fatalf("commits made = %v, want none", made)
+	}
+	if res.Path == "" {
+		t.Fatal("the pass wrote no report")
+	}
+	if strings.Contains(res.Body, "REFINE-OUTCOME") {
+		t.Fatalf("the report carries the outcome line:\n%s", res.Body)
+	}
+	if !strings.Contains(res.Body, "scoped gate was already red") {
+		t.Fatalf("the report lost its body:\n%s", res.Body)
+	}
+	if ep := readRefineEpisode(t, d, repo, "demo"); ep != nil {
+		t.Fatalf("episode = %+v, want none for gate-blocked", ep)
+	}
+}
+
+// TestRefineAbandonedDiscardsPassEditsAndKeepsPreexistingDirt: an abandoned
+// pass restores the pre-Refiner tree — the pass's own edits go, pre-existing
+// dirty state stays — writes the report, and records neither a commit nor an
+// episode (ADR-0248 decision 10/15).
+func TestRefineAbandonedDiscardsPassEditsAndKeepsPreexistingDirt(t *testing.T) {
+	t.Parallel()
+	env := setupRefineCommitFixture(t, houseConvention)
+	d := env.deps()
+	repo, _, _ := runtimeHead(t, d, env.root)
+
+	if err := os.WriteFile(filepath.Join(env.root, "tracked.txt"), []byte("tracked base\n"), 0o644); err != nil {
+		t.Fatalf("seed tracked file: %v", err)
+	}
+	if _, err := realGitInDir(env.root, "add", "tracked.txt"); err != nil {
+		t.Fatalf("add tracked: %v", err)
+	}
+	if _, err := realGitInDir(env.root, "commit", "-m", "seed tracked"); err != nil {
+		t.Fatalf("commit tracked: %v", err)
+	}
+	_, _, before := runtimeHead(t, d, env.root)
+
+	preexisting := filepath.Join(env.root, "preexisting.txt")
+	if err := os.WriteFile(preexisting, []byte("already dirty\n"), 0o644); err != nil {
+		t.Fatalf("seed preexisting dirt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(env.root, "tracked.txt"), []byte("tracked dirty\n"), 0o644); err != nil {
+		t.Fatalf("dirty tracked: %v", err)
+	}
+
+	var out bytes.Buffer
+	opts := refinePassOpts(env, &out, fixingRefiner(t, env.root, "refined.md",
+		"REFINE-OUTCOME: abandoned\n\n## Fixed\n\nTried a rename; the gate went red.\n\n## Left\n\nThe refactoring the tree resisted."))
+	opts.Repo = repo
+	res, err := refineResolvedSet(d, nil, opts)
+	if err != nil {
+		t.Fatalf("refineResolvedSet: %v", err)
+	}
+	if res.CommitSHA != "" {
+		t.Fatalf("result commit = %q, want none", res.CommitSHA)
+	}
+	if made := commitsSince(t, env.root, before); len(made) != 0 {
+		t.Fatalf("commits made = %v, want none", made)
+	}
+	if _, err := os.Stat(filepath.Join(env.root, "refined.md")); !os.IsNotExist(err) {
+		t.Fatalf("pass edit refined.md still present (err=%v)", err)
+	}
+	gotPre, err := os.ReadFile(preexisting)
+	if err != nil || string(gotPre) != "already dirty\n" {
+		t.Fatalf("preexisting dirt = %q (err=%v), want restored", gotPre, err)
+	}
+	gotTracked, err := os.ReadFile(filepath.Join(env.root, "tracked.txt"))
+	if err != nil || string(gotTracked) != "tracked dirty\n" {
+		t.Fatalf("tracked dirt = %q (err=%v), want restored", gotTracked, err)
+	}
+	if res.Path == "" {
+		t.Fatal("the pass wrote no report")
+	}
+	if strings.Contains(res.Body, "REFINE-OUTCOME") {
+		t.Fatalf("the report carries the outcome line:\n%s", res.Body)
+	}
+	if !strings.Contains(res.Body, "gate went red") {
+		t.Fatalf("the report lost its body:\n%s", res.Body)
+	}
+	if ep := readRefineEpisode(t, d, repo, "demo"); ep != nil {
+		t.Fatalf("episode = %+v, want none for abandoned", ep)
 	}
 }

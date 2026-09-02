@@ -49,6 +49,14 @@ Read the changed files, and read enough of the code around them to judge whether
 ## What the set set out to do
 
 ## Respond with the report and nothing else
+Start with one line, before the report:
+REFINE-OUTCOME: refined | gate-blocked | abandoned
+
+- **refined** — the scoped gate was green when you finished (including a pass that fixed nothing because nothing needed fixing). pop commits your edits when there are any, and records that this composition has been refined.
+- **gate-blocked** — the scoped gate was already red before you began, so you fixed nothing. pop commits nothing and records no episode.
+- **abandoned** — the gate went red under your own edits and you could not leave it green. pop discards those edits, commits nothing, and records no episode.
+
+Write exactly one of those three values. The line is an instruction to pop, not a finding — keep it out of the report body.
 Write the report as Markdown, starting at a `## ` heading. No preamble, no sign-off, no verdict line. It has two parts, in this order:
 
 - **Fixed** — what you changed, one entry per fix: the file, what was wrong, what you did. When you fixed nothing, say so in a sentence.
